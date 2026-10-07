@@ -38,6 +38,8 @@
 #include "version.h"
 
 namespace qol::contracts {
+struct QolSlotOperationLease;
+struct QolSlotOperationApi;
 
 struct QolAbiHeader {
     uint32_t size;
@@ -199,6 +201,10 @@ struct QolOwnerStoreApi {
                                  const QolStoreSection*, uint32_t, const char* const*, uint32_t);
     // 原版调用前登记在途引用，不需为了改变租约引用而重复写 journal。
     QolResult (*set_referenced)(QolOwnerToken, int32_t, QolOwnerStoreReservation*, uint32_t);
+    QolResult (*reserve_in_operation)(QolOwnerToken, const QolSlotOperationLease*, int32_t,
+                                      const QolOwnerStoreCandidate*, uint32_t, QolOwnerStoreReservation*);
+    QolResult (*ensure_in_operation)(QolOwnerToken, const QolSlotOperationLease*, int32_t);
+    QolResult (*reset_in_operation)(QolOwnerToken, const QolSlotOperationLease*, int32_t);
 };
 
 using QolPanelFindFn = QolResult (*)(const char* panel_id, const PanelProviderSpec** out_provider);
@@ -362,6 +368,7 @@ struct QolHostSdk {
     // 尾部扩展：以 abi.size 协商，不改变旧 SDK 前缀或存储表。
     QolOwnerVerifyTokenFn owner_verify_token;
     const QolOwnerStoreApi* owner_store;
+    const QolSlotOperationApi* slot_operation;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;

@@ -19,6 +19,7 @@ struct QolOwnerStoreReservation {
     uint32_t reserved;
     // 磁盘 generation 不变的引用/归属变更也使旧凭据失效，不以 retain 副本作为权限。
     uint64_t revision;
+    uint64_t operation; // 0 为未关联；关联操作 id 不可由 caller 改写。
 };
 struct QolOwnerStoreSlotState {
     uint32_t size;

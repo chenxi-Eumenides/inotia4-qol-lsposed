@@ -745,6 +745,71 @@ int main() {
         assert(backend.write_section(owner,0,"a",1,nullptr,0).ok == kQolOk);
     }
 
+    {
+        using namespace qol::contracts;
+        static int save_identity=0, backup_identity=0, stranger_identity=0;
+        assert(qol::host::owner_register(&save_identity));
+        assert(qol::host::owner_register(&backup_identity));
+        assert(qol::host::owner_register(&stranger_identity));
+        assert(qol::host::owner_bind_store(&save_identity,"module-saves"));
+        assert(qol::host::owner_bind_slot_operation(&save_identity));
+        assert(qol::host::owner_bind_slot_operation(&backup_identity));
+        QolOwnerToken save=0, backup=0, stranger=0; uint64_t generation=0;
+        auto& identities=qol::host::owner_identity_api();
+        assert(identities.query(&save_identity,&save,&generation).ok==kQolOk);
+        assert(identities.query(&backup_identity,&backup,&generation).ok==kQolOk);
+        assert(identities.query(&stranger_identity,&stranger,&generation).ok==kQolOk);
+        const auto& api=*sdk.slot_operation;
+        QolSlotOperationLease lease{}; lease.size=sizeof(lease);
+        assert(api.acquire(api.host_ctx,stranger,1,&lease).code==kQolErrBlocked);
+        assert(api.acquire(api.host_ctx,save,1,&lease).ok==kQolOk);
+        QolSlotOperationLease other{}; other.size=sizeof(other);
+        assert(api.acquire(api.host_ctx,save,1,&other).code==kQolErrBusy);
+        assert(sdk.store.write(0,"other",1,nullptr,0).code==kQolErrBusy);
+        assert(sdk.store.import_container(0,nullptr,0).code==kQolErrBusy);
+        assert(sdk.store.delete_slot(0).code==kQolErrBusy);
+        assert(sdk.owner_store->ensure_in_operation(save,&lease,0).ok==kQolOk);
+        QolStoreSection section{"operation.data",1,section_data,sizeof(section_data)};
+        QolOwnerStoreCandidate candidate{sizeof(candidate),1,&section,0,nullptr,nullptr};
+        QolOwnerStoreReservation reservation{}; reservation.size=sizeof(reservation);
+        assert(sdk.owner_store->reserve_in_operation(save,&lease,0,&candidate,1,&reservation).ok==kQolOk);
+        assert(reservation.operation==lease.id);
+        assert(api.release(api.host_ctx,save,&lease).code==kQolErrBusy);
+        assert(api.refresh(api.host_ctx,backup,lease.id,&other).code==kQolErrBlocked);
+        assert(api.set_referenced(api.host_ctx,save,&lease,1).ok==kQolOk);
+        qol::host::owner_suspend(&save_identity);
+        assert(sdk.store.write(0,"other",1,nullptr,0).code==kQolErrBusy);
+        assert(qol::host::owner_resume(&save_identity));
+        assert(identities.query(&save_identity,&save,&generation).ok==kQolOk);
+        assert(api.refresh(api.host_ctx,save,lease.id,&other).ok==kQolOk);
+        QolOwnerStoreSlotState state{}; state.size=sizeof(state);
+        assert(sdk.owner_store->inspect_slot(save,0,&state).ok==kQolOk);
+        assert(state.reservation.owner==save && state.reservation.operation==other.id);
+        assert(sdk.owner_store->release(save,state.reservation).ok==kQolOk);
+        assert(api.release(api.host_ctx,save,&other).ok==kQolOk);
+        assert(api.acquire(api.host_ctx,backup,1,&lease).ok==kQolOk);
+        assert(sdk.owner_store->ensure_in_operation(backup,&lease,0).code==kQolErrBlocked);
+        assert(api.set_referenced(api.host_ctx,backup,&lease,1).ok==kQolOk);
+        std::vector<uint8_t> original(4096); uint32_t count=0;
+        assert(sdk.store.read_container(0,original.data(),original.size(),&count).ok==kQolOk);
+        QolSlotOperationApply apply{sizeof(apply),99};
+        assert(::mkdir("module-saves/slot-0.module-save.last-good.tmp",0755)==0);
+        assert(api.import_container(api.host_ctx,backup,&lease,0,original.data(),count,&apply).code==kQolErrInternal);
+        assert(apply.apply==static_cast<uint32_t>(QolSlotOperationApplyState::kPrimaryApplied));
+        assert(::rmdir("module-saves/slot-0.module-save.last-good.tmp")==0);
+        assert(api.import_container(api.host_ctx,backup,&lease,0,original.data(),count,&apply).ok==kQolOk);
+        assert(apply.apply==static_cast<uint32_t>(QolSlotOperationApplyState::kFullyApplied));
+        qol::host::owner_suspend(&backup_identity);
+        assert(qol::host::owner_resume(&backup_identity));
+        assert(identities.query(&backup_identity,&backup,&generation).ok==kQolOk);
+        assert(api.refresh(api.host_ctx,backup,lease.id,&other).ok==kQolOk);
+        // delete_container 与 import 同走 lease 校验：mask 外与跨 owner 凭据拒绝。
+        assert(api.delete_container(api.host_ctx,backup,&other,1).code==kQolErrInvalidArgument);
+        assert(api.delete_container(api.host_ctx,save,&other,0).code==kQolErrInvalidArgument);
+        assert(api.delete_container(api.host_ctx,backup,&other,0).ok==kQolOk);
+        assert(api.release(api.host_ctx,backup,&other).ok==kQolOk);
+    }
+
     int32_t value = 0;
     assert(sdk.config.set_bool("adapter.test", 1).ok == kQolOk);
     assert(sdk.config.get_bool("adapter.test", 0, &value).ok == kQolOk);

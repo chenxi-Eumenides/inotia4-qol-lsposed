@@ -9,6 +9,8 @@ bool owner_register(void* identity);
 bool owner_resume(void* identity);
 void owner_suspend(void* identity);
 bool owner_bind_store(void* identity, const char* store_namespace);
+bool owner_bind_slot_operation(void* identity);
+QolResult owner_authorize_slot_operation(contracts::QolOwnerToken token);
 QolResult owner_verify_token(contracts::QolOwnerToken token);
 QolResult owner_authorize_store(contracts::QolOwnerToken token, const char* store_namespace);
 const contracts::QolOwnerIdentityApi& owner_identity_api();

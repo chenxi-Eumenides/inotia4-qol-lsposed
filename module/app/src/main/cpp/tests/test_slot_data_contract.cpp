@@ -2,6 +2,7 @@
 #include "contracts/slot_data.h"
 #include "contracts/slot_data_admin.h"
 #include "contracts/plugin.h"
+#include "contracts/slot_operation.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -39,6 +40,20 @@ POD(QolOwnerStoreApi);
 POD(QolOwnerStoreSlotState);
 POD(QolOwnerStoreCandidate);
 POD(QolOwnerStoreReservation);
+POD(QolSlotOperationLease);
+POD(QolSlotOperationApply);
+POD(QolSlotOperationApi);
+PREFIX(QolSlotOperationApi, host_ctx);
+static_assert(sizeof(QolSlotOperationLease)==40 && offsetof(QolSlotOperationLease, revision)==24);
+static_assert(sizeof(QolSlotOperationApply)==8 && offsetof(QolSlotOperationApply, apply)==4);
+VALUE(QolSlotOperationApplyState, kUnchanged, 0);
+VALUE(QolSlotOperationApplyState, kPrimaryApplied, 1);
+VALUE(QolSlotOperationApplyState, kFullyApplied, 2);
+static_assert(offsetof(QolOwnerStoreReservation, operation)==56);
+NEXT(QolHostSdk, owner_store, slot_operation);
+NEXT(QolOwnerStoreApi, set_referenced, reserve_in_operation);
+NEXT(QolOwnerStoreApi, reserve_in_operation, ensure_in_operation);
+NEXT(QolOwnerStoreApi, ensure_in_operation, reset_in_operation);
 NEXT(QolOwnerStoreApi, replace_sections, inspect_slot);
 NEXT(QolOwnerStoreApi, inspect_slot, preflight);
 NEXT(QolOwnerStoreApi, preflight, reserve);

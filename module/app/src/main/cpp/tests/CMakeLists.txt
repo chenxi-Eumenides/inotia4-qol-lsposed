@@ -93,6 +93,17 @@ set_target_properties(save_journal_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD
 add_test(NAME save_journal_tests COMMAND save_journal_tests)
 target_compile_definitions(save_journal_tests PRIVATE QOL_SAVE_EVIDENCE_TEST_SEAMS=1)
 
+add_executable(slot_operation_gate_tests
+    test_slot_operation_gate.cpp
+    ${CPP_DIR}/infra/slot_operation_gate.cpp
+    ${CPP_DIR}/infra/store.cpp
+)
+target_include_directories(slot_operation_gate_tests PRIVATE ${CPP_DIR})
+target_compile_features(slot_operation_gate_tests PRIVATE cxx_std_17)
+set_target_properties(slot_operation_gate_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(slot_operation_gate_tests PRIVATE Threads::Threads)
+add_test(NAME slot_operation_gate_tests COMMAND slot_operation_gate_tests)
+
 add_executable(craft_facts_plugin_tests
     test_craft_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.craft/plugin.cpp
@@ -702,6 +713,7 @@ add_test(NAME store_sell_rules_tests COMMAND store_sell_rules_tests)
 add_executable(infra_store_tests
     test_infra_store.cpp
     ${CPP_DIR}/infra/store.cpp
+    ${CPP_DIR}/infra/slot_operation_gate.cpp
 )
 target_include_directories(infra_store_tests PRIVATE
     ${CPP_DIR}
@@ -899,6 +911,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/infra/runtime.cpp
     ${CPP_DIR}/infra/scheduler.cpp
     ${CPP_DIR}/infra/store.cpp
+    ${CPP_DIR}/infra/slot_operation_gate.cpp
     ${CPP_DIR}/infra/panels.cpp
     ${CPP_DIR}/hooks/dispatch.cpp
     ${CPP_DIR}/hooks/popup_state.cpp

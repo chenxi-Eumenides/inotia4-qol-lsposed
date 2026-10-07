@@ -339,6 +339,7 @@ target_sources(gamebridge PRIVATE
 # B4-1：infra/store MSAV 容器层（冻结核心件；零行为改动，不切换消费者）
 target_sources(gamebridge PRIVATE
     infra/store.cpp
+    infra/slot_operation_gate.cpp
     infra/snapshot_handle.cpp
 )
 

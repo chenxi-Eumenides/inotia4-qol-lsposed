@@ -29,6 +29,7 @@
 #include "infra/scheduler.h"
 #include "infra/snapshot_handle.h"
 #include "infra/store.h"
+#include "infra/slot_operation_gate.h"
 #include "infra/text_scope.h"
 #include "game/adapter_ports/system_port.h"
 #include "game/access/ptr_slots.h"
@@ -540,12 +541,80 @@ QolResult owner_store_set_referenced(contracts::QolOwnerToken owner, int32_t slo
     return contracts::succeeded(allowed)
         ? store_result(infra::store::set_referenced(owner, slot, credential, referenced)) : allowed;
 }
+QolResult owner_store_reserve_in_operation(contracts::QolOwnerToken owner,
+    const contracts::QolSlotOperationLease* operation, int32_t slot,
+    const contracts::QolOwnerStoreCandidate* candidates, uint32_t count, contracts::QolOwnerStoreReservation* out) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(allowed)) return allowed;
+    const auto operation_allowed = owner_authorize_slot_operation(owner);
+    if (!contracts::succeeded(operation_allowed)) return operation_allowed;
+    return store_result(infra::store::reserve_in_operation(owner, operation, slot, candidates, count, out));
+}
+QolResult owner_store_ensure_in_operation(contracts::QolOwnerToken owner,
+    const contracts::QolSlotOperationLease* operation, int32_t slot) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(allowed)) return allowed;
+    return store_result(infra::store::ensure_in_operation(owner, operation, slot));
+}
+QolResult owner_store_reset_in_operation(contracts::QolOwnerToken owner,
+    const contracts::QolSlotOperationLease* operation, int32_t slot) {
+    const auto allowed = owner_authorize_store(owner, "module-saves");
+    if (!contracts::succeeded(allowed)) return allowed;
+    return store_result(infra::store::reset_in_operation(owner, operation, slot));
+}
 const contracts::QolOwnerStoreApi kOwnerStoreApi{
     {sizeof(contracts::QolOwnerStoreApi), 1, 0}, &owner_store_ensure, &owner_store_reset,
     &owner_store_read, &owner_store_write, &owner_store_remove, &owner_store_replace,
     &owner_store_inspect, &owner_store_preflight, &owner_store_reserve, &owner_store_release,
     &owner_store_write_reserved, &owner_store_remove_reserved, &owner_store_replace_reserved,
-    &owner_store_set_referenced};
+    &owner_store_set_referenced, &owner_store_reserve_in_operation,
+    &owner_store_ensure_in_operation, &owner_store_reset_in_operation};
+
+QolResult operation_acquire(void*, contracts::QolOwnerToken owner, uint32_t mask,
+                            contracts::QolSlotOperationLease* out) {
+    const auto allowed = owner_authorize_slot_operation(owner);
+    if (!contracts::succeeded(allowed)) return allowed;
+    owner_store_lifecycle_handlers(&infra::store::owner_stopped, &infra::store::owner_rebound);
+    const auto result = infra::slot_operation::acquire(owner, mask, out);
+    if (!contracts::succeeded(result)) return result;
+    const auto still_allowed = owner_authorize_slot_operation(owner);
+    if (!contracts::succeeded(still_allowed)) {
+        (void)infra::slot_operation::release(owner, out);
+        return still_allowed;
+    }
+    return result;
+}
+QolResult operation_set_referenced(void*, contracts::QolOwnerToken owner,
+    contracts::QolSlotOperationLease* lease, uint32_t referenced) {
+    const auto allowed = owner_authorize_slot_operation(owner);
+    return contracts::succeeded(allowed) ? infra::slot_operation::set_referenced(owner, lease, referenced) : allowed;
+}
+QolResult operation_refresh(void*, contracts::QolOwnerToken owner, uint64_t id,
+                            contracts::QolSlotOperationLease* out) {
+    const auto allowed = owner_authorize_slot_operation(owner);
+    return contracts::succeeded(allowed) ? infra::slot_operation::refresh(owner, id, out) : allowed;
+}
+QolResult operation_release(void*, contracts::QolOwnerToken owner, const contracts::QolSlotOperationLease* lease) {
+    const auto allowed = owner_authorize_slot_operation(owner);
+    return contracts::succeeded(allowed) ? infra::slot_operation::release(owner, lease) : allowed;
+}
+QolResult operation_import(void*, contracts::QolOwnerToken owner, const contracts::QolSlotOperationLease* lease,
+    int32_t slot, const uint8_t* bytes, uint64_t count, contracts::QolSlotOperationApply* apply) {
+    if (apply == nullptr || apply->size < sizeof(*apply)) return result_error(kQolErrInvalidArgument, kInvalidArgument);
+    apply->apply = static_cast<uint32_t>(contracts::QolSlotOperationApplyState::kUnchanged);
+    const auto allowed = owner_authorize_slot_operation(owner);
+    if (!contracts::succeeded(allowed)) return allowed;
+    if (count > 4 * 1024 * 1024) return result_error(kQolErrInvalidArgument, "container too large");
+    return store_result(infra::store::import_in_operation(owner, lease, slot, bytes, static_cast<std::size_t>(count), apply));
+}
+QolResult operation_delete(void*, contracts::QolOwnerToken owner,
+                           const contracts::QolSlotOperationLease* lease, int32_t slot) {
+    const auto allowed = owner_authorize_slot_operation(owner);
+    return contracts::succeeded(allowed) ? store_result(infra::store::delete_in_operation(owner, lease, slot)) : allowed;
+}
+const contracts::QolSlotOperationApi kSlotOperationApi{
+    {sizeof(contracts::QolSlotOperationApi), 1, 0}, nullptr, &operation_acquire,
+    &operation_set_referenced, &operation_refresh, &operation_release, &operation_import, &operation_delete};
 
 QolResult sdk_store_read_container(int32_t slot, uint8_t* out, uint32_t capacity,
                                    uint32_t* out_size) {
@@ -1078,6 +1147,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.module_version = &sdk_module_version;
     sdk.owner_verify_token = &owner_verify_token;
     sdk.owner_store = &kOwnerStoreApi;
+    sdk.slot_operation = &kSlotOperationApi;
     return sdk;
 }
 

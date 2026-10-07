@@ -14,6 +14,7 @@ struct Owner {
     uint64_t generation = 1;
     uint64_t previous_token = 0;
     std::string store_namespace;
+    bool slot_operation_allowed = false;
 };
 std::array<Owner, 32> g_owners;
 std::mutex g_mutex;
@@ -37,7 +38,8 @@ bool issue(Owner& owner) {
     if (owner.token != 0) return true;
     if (g_next_token == std::numeric_limits<uint64_t>::max()) return false;
     owner.token = g_next_token++;
-    if (owner.previous_token != 0 && g_store_rebound != nullptr && !owner.store_namespace.empty())
+    if (owner.previous_token != 0 && g_store_rebound != nullptr &&
+        (!owner.store_namespace.empty() || owner.slot_operation_allowed))
         g_store_rebound(owner.previous_token, owner.token);
     return true;
 }
@@ -99,6 +101,19 @@ bool owner_bind_store(void* identity, const char* store_namespace) {
     return true;
 }
 QolResult owner_verify_token(contracts::QolOwnerToken token) { return verify(nullptr, token); }
+bool owner_bind_slot_operation(void* identity) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto* owner = identity == nullptr ? nullptr : find_identity(identity);
+    if (owner == nullptr) return false;
+    owner->slot_operation_allowed = true;
+    return true;
+}
+QolResult owner_authorize_slot_operation(contracts::QolOwnerToken token) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto* owner = find_token(token);
+    return owner != nullptr && owner->slot_operation_allowed ? contracts::ok()
+        : fail(kQolErrBlocked, "slot operation not authorized");
+}
 QolResult owner_authorize_store(contracts::QolOwnerToken token, const char* store_namespace) {
     if (store_namespace == nullptr) return fail(kQolErrInvalidArgument, "invalid store namespace");
     std::lock_guard<std::mutex> lock(g_mutex);

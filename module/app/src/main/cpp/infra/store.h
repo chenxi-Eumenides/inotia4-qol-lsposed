@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 #include "contracts/host_sdk.h"
+#include "contracts/slot_operation.h"
 
 // 模块 sidecar 容器层（infra/store）：MSAV 容器格式的 native 权威实现，
 // 与 Kotlin ModuleSaveStore.kt 的字节格式逐字节兼容（B4-1 冻结核心件）。
@@ -97,6 +98,17 @@ void owner_stopped(uint64_t owner);
 void owner_rebound(uint64_t old_owner, uint64_t new_owner);
 Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* reservation,
                        uint32_t referenced);
+// 以下 locked 查询与 gate 共用临界区，不自行取锁。
+bool reservation_busy_locked(int slot);
+bool operation_has_reservation_locked(uint64_t operation);
+Status reserve_in_operation(uint64_t owner, const contracts::QolSlotOperationLease*, int slot,
+                            const contracts::QolOwnerStoreCandidate*, uint32_t count,
+                            contracts::QolOwnerStoreReservation*);
+Status ensure_in_operation(uint64_t owner, const contracts::QolSlotOperationLease*, int slot);
+Status reset_in_operation(uint64_t owner, const contracts::QolSlotOperationLease*, int slot);
+Status import_in_operation(uint64_t owner, const contracts::QolSlotOperationLease*, int slot,
+                           const uint8_t*, std::size_t, contracts::QolSlotOperationApply*);
+Status delete_in_operation(uint64_t owner, const contracts::QolSlotOperationLease*, int slot);
 
 #if defined(QOL_STORE_TEST_SEAMS)
 // 仅 Host 测试构建提供确定性文件错误注入；生产始终调用系统 unlink。

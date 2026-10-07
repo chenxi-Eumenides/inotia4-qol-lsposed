@@ -187,6 +187,7 @@ using RegisterSettingsFn = QolResult (*)(const contracts::QolHostSdk*);
 struct BuiltInPlugin {
     PluginDescriptorFn descriptor;
     const char* store_namespace = nullptr;
+    bool slot_operation_allowed = false;
 };
 
 // 这里只登记插件描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
@@ -195,7 +196,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
 #if !QOL_KERNEL_ONLY
     {&features::core_world::plugin_descriptor},
     {&features::core_craft::plugin_descriptor},
-    {&features::core_save::plugin_descriptor, "module-saves"},
+    {&features::core_save::plugin_descriptor, "module-saves", true},
     {&features::core_character::plugin_descriptor},
     {&features::core_data::plugin_descriptor},
     {&features::core_feature::plugin_descriptor},
@@ -214,7 +215,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_ui_state::plugin_descriptor},
     {&features::push_all::plugin_descriptor},
     {&features::core_quest::plugin_descriptor},
-    {&features::save_backup::plugin_descriptor},
+    {&features::save_backup::plugin_descriptor, nullptr, true},
     {&features::simple_mode::plugin_descriptor},
     {&features::special_equip::plugin_descriptor},
     {&features::stack_limit::plugin_descriptor},
@@ -430,6 +431,13 @@ bool assembly_init() {
             return false;
         }
         ++g_registered_plugins;
+        // 授权来自装配 sidecar；registry 以注册身份定位 owner，不解释插件提交的名称，
+        // 也不向插件提供授权入口。
+        if (plugin.slot_operation_allowed && !bind_plugin_slot_operation(descriptor)) {
+            ++g_registration_failures;
+            QOL_LOG_ERROR(QolDomain::kCore, "assembly: slot operation binding failed");
+            return false;
+        }
     }
 
     const QolResult category_result = features::core_settings::register_categories(&g_host_sdk);

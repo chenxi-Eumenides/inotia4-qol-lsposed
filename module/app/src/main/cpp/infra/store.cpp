@@ -1,4 +1,5 @@
 #include "infra/store.h"
+#include "infra/slot_operation_gate.h"
 
 #include <atomic>
 #include <chrono>
@@ -28,7 +29,7 @@ constexpr std::size_t kMaxContainerBytes = 4 * 1024 * 1024;
 constexpr int kMinContainerBytes = 4 + 2 + 1 + 8 + 2 + 4;
 constexpr int kContainerSlotOffset = 6;  // u32 magic + u16 version 之后
 
-std::mutex g_store_mtx;
+std::mutex& g_store_mtx = slot_operation::mutex();
 std::string g_dir;  // 仅 g_store_mtx 访问；<external>/module-saves
 std::atomic<bool> g_available{false};
 std::array<contracts::QolOwnerStoreReservation, kSlotCount> g_reservations{};
@@ -437,6 +438,13 @@ Status require_ready(int slot) {
     return Status::kOk;
 }
 
+Status gate_admission_locked(uint64_t owner, const contracts::QolSlotOperationLease* lease, int slot) {
+    if (lease == nullptr) return slot_operation::busy_locked(slot) ? Status::kBusy : Status::kOk;
+    const auto result = slot_operation::validate_locked(owner, lease, slot);
+    if (contracts::succeeded(result)) return Status::kOk;
+    return result.code == kQolErrBusy ? Status::kBusy : Status::kBadSlot;
+}
+
 }  // namespace
 
 const char* status_name(Status status) {
@@ -458,7 +466,8 @@ const char* status_name(Status status) {
 
 void init(const char* external_files_dir) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
-    if (std::any_of(g_reservations.begin(), g_reservations.end(), [](const auto& held) { return held.id != 0; }) &&
+    if ((std::any_of(g_reservations.begin(), g_reservations.end(), [](const auto& held) { return held.id != 0; }) ||
+         slot_operation::busy_locked(0) || slot_operation::busy_locked(1) || slot_operation::busy_locked(2)) &&
         (external_files_dir == nullptr || g_dir != std::string(external_files_dir) + "/module-saves")) return;
     g_available.store(false, std::memory_order_release);
     g_dir.clear();
@@ -473,10 +482,13 @@ bool available() {
     return g_available.load(std::memory_order_acquire);
 }
 
-Status ensure_slot(int slot) {
+namespace {
+Status ensure_common(int slot, uint64_t owner, const contracts::QolSlotOperationLease* lease) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    const auto gate = gate_admission_locked(owner, lease, slot);
+    if (gate != Status::kOk) return gate;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     const LoadResult loaded = load_slot_locked(slot);
     if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
@@ -484,10 +496,12 @@ Status ensure_slot(int slot) {
     return write_slot_locked(slot, loaded.data, /*preserve_current=*/false);
 }
 
-Status reset_slot(int slot) {
+Status reset_common(int slot, uint64_t owner, const contracts::QolSlotOperationLease* lease) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    const auto gate = gate_admission_locked(owner, lease, slot);
+    if (gate != Status::kOk) return gate;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     // 先确认旧回退文件删除，再替换主容器，避免失败时留下可复活旧槽的 last-good。
     if (!unlink_checked_locked(last_good_path_locked(slot)) ||
@@ -500,15 +514,33 @@ Status reset_slot(int slot) {
     return result;
 }
 
-Status delete_slot(int slot) {
+Status delete_common(int slot, uint64_t owner, const contracts::QolSlotOperationLease* lease) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    const auto gate = gate_admission_locked(owner, lease, slot);
+    if (gate != Status::kOk) return gate;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     if (!unlink_checked_locked(last_good_path_locked(slot)) ||
         !unlink_checked_locked(primary_path_locked(slot))) return Status::kIoError;
     if (!unlink_checked_locked(primary_path_locked(slot) + ".unresolved-corrupt")) return Status::kIoError;
     return Status::kOk;
+}
+}
+Status ensure_slot(int slot) { return ensure_common(slot, 0, nullptr); }
+Status reset_slot(int slot) { return reset_common(slot, 0, nullptr); }
+Status delete_slot(int slot) { return delete_common(slot, 0, nullptr); }
+Status ensure_in_operation(uint64_t owner, const contracts::QolSlotOperationLease* lease, int slot) {
+    if (lease == nullptr) return Status::kBadSlot;
+    return ensure_common(slot, owner, lease);
+}
+Status reset_in_operation(uint64_t owner, const contracts::QolSlotOperationLease* lease, int slot) {
+    if (lease == nullptr) return Status::kBadSlot;
+    return reset_common(slot, owner, lease);
+}
+Status delete_in_operation(uint64_t owner, const contracts::QolSlotOperationLease* lease, int slot) {
+    if (lease == nullptr) return Status::kBadSlot;
+    return delete_common(slot, owner, lease);
 }
 
 Status read_container(int slot, std::vector<uint8_t>* out) {
@@ -528,10 +560,15 @@ Status read_container(int slot, std::vector<uint8_t>* out) {
     return Status::kOk;
 }
 
-Status import_container(int slot, const uint8_t* data, std::size_t len) {
+namespace {
+Status import_common(int slot, const uint8_t* data, std::size_t len, uint64_t owner,
+                     const contracts::QolSlotOperationLease* lease, contracts::QolSlotOperationApply* apply) {
+    if (apply != nullptr) apply->apply = static_cast<uint32_t>(contracts::QolSlotOperationApplyState::kUnchanged);
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    const auto gate = gate_admission_locked(owner, lease, slot);
+    if (gate != Status::kOk) return gate;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     if (data == nullptr) return Status::kCorrupt;
     int stored_slot = -1;
@@ -548,11 +585,22 @@ Status import_container(int slot, const uint8_t* data, std::size_t len) {
     std::vector<uint8_t> encoded;
     if (!encode(slot, target, &encoded)) return Status::kTooLarge;
     if (!write_atomic(primary_path_locked(slot), encoded)) return Status::kIoError;
+    if (apply != nullptr) apply->apply = static_cast<uint32_t>(contracts::QolSlotOperationApplyState::kPrimaryApplied);
     if (!write_atomic(last_good_path_locked(slot), encoded)) {
         // primary 已提交且有效；last-good 滞后不阻塞导入（与 Kotlin 语义一致）。
         return Status::kIoError;
     }
+    if (apply != nullptr) apply->apply = static_cast<uint32_t>(contracts::QolSlotOperationApplyState::kFullyApplied);
     return Status::kOk;
+}
+}
+Status import_container(int slot, const uint8_t* bytes, std::size_t size) {
+    return import_common(slot, bytes, size, 0, nullptr, nullptr);
+}
+Status import_in_operation(uint64_t owner, const contracts::QolSlotOperationLease* lease, int slot,
+                           const uint8_t* bytes, std::size_t size, contracts::QolSlotOperationApply* apply) {
+    if (apply == nullptr || apply->size < sizeof(*apply) || lease == nullptr) return Status::kBadSlot;
+    return import_common(slot, bytes, size, owner, lease, apply);
 }
 
 Status read_section(int slot, const char* name, std::vector<uint8_t>* out, uint16_t* version) {
@@ -579,6 +627,7 @@ Status write_section(int slot, const char* name, uint16_t version, const uint8_t
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    if (slot_operation::busy_locked(slot)) return Status::kBusy;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     const auto loaded = load_slot_locked(slot);
     if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
@@ -596,6 +645,7 @@ Status remove_section(int slot, const char* name) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    if (slot_operation::busy_locked(slot)) return Status::kBusy;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     const auto loaded = load_slot_locked(slot);
     if (loaded.status != Status::kOk) return loaded.status;
@@ -619,6 +669,7 @@ Status replace_sections(int slot, const ReplaceMap& replacements, const RemoveSe
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const Status ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    if (slot_operation::busy_locked(slot)) return Status::kBusy;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     const auto loaded = load_slot_locked(slot);
     if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
@@ -639,7 +690,8 @@ bool credential_matches(const contracts::QolOwnerStoreReservation& held,
                         const contracts::QolOwnerStoreReservation& credential) {
     return held.id != 0 && held.id == credential.id && held.slot == credential.slot &&
            held.owner == credential.owner && held.generation == credential.generation &&
-           held.revision == credential.revision && held.encoded_bytes == credential.encoded_bytes;
+           held.revision == credential.revision && held.encoded_bytes == credential.encoded_bytes &&
+           held.operation == credential.operation;
 }
 Status apply_candidate(const SlotData& current, const contracts::QolOwnerStoreCandidate& candidate,
                        SlotData* target) {
@@ -719,12 +771,16 @@ Status preflight(int slot, const contracts::QolOwnerStoreCandidate* candidates,
     LoadResult current;
     return preflight_locked(slot, candidates, count, lengths, &current);
 }
-Status reserve(uint64_t owner, int slot, const contracts::QolOwnerStoreCandidate* candidates,
-               uint32_t count, contracts::QolOwnerStoreReservation* out) {
+namespace {
+Status reserve_common(uint64_t owner, int slot, const contracts::QolOwnerStoreCandidate* candidates,
+                       uint32_t count, contracts::QolOwnerStoreReservation* out,
+                       const contracts::QolSlotOperationLease* lease) {
     if (out == nullptr || out->size < sizeof(*out) || owner == 0) return Status::kBadName;
     std::lock_guard<std::mutex> lock(g_store_mtx);
     const auto ready = require_ready(slot);
     if (ready != Status::kOk) return ready;
+    const auto gate = gate_admission_locked(owner, lease, slot);
+    if (gate != Status::kOk) return gate;
     if (g_reservations[slot].id != 0) return Status::kBusy;
     uint64_t lengths[3]{};
     LoadResult loaded;
@@ -733,9 +789,19 @@ Status reserve(uint64_t owner, int slot, const contracts::QolOwnerStoreCandidate
     if (g_next_reservation == std::numeric_limits<uint64_t>::max()) return Status::kBusy;
     g_reservations[slot] = {sizeof(*out), slot, g_next_reservation++,
         static_cast<uint64_t>(loaded.data.generation), owner,
-        *std::max_element(lengths, lengths + count), 0, 0, 1};
+        *std::max_element(lengths, lengths + count), 0, 0, 1, lease == nullptr ? 0 : lease->id};
     *out = g_reservations[slot];
     return Status::kOk;
+}
+}
+Status reserve(uint64_t owner, int slot, const contracts::QolOwnerStoreCandidate* candidates,
+               uint32_t count, contracts::QolOwnerStoreReservation* out) {
+    return reserve_common(owner, slot, candidates, count, out, nullptr);
+}
+Status reserve_in_operation(uint64_t owner, const contracts::QolSlotOperationLease* lease, int slot,
+    const contracts::QolOwnerStoreCandidate* candidates, uint32_t count, contracts::QolOwnerStoreReservation* out) {
+    if (lease == nullptr) return Status::kBadSlot;
+    return reserve_common(owner, slot, candidates, count, out, lease);
 }
 Status release(uint64_t owner, const contracts::QolOwnerStoreReservation& reservation) {
     if (reservation.size < sizeof(reservation) || !valid_slot(reservation.slot) ||
@@ -744,6 +810,7 @@ Status release(uint64_t owner, const contracts::QolOwnerStoreReservation& reserv
     auto& held = g_reservations[reservation.slot];
     if (held.id == 0 || held.id != reservation.id) return Status::kNotFound;
     if (!credential_matches(held, reservation)) return Status::kBusy;
+    if (!slot_operation::reservation_admitted_locked(owner, held.operation, held.slot)) return Status::kBusy;
     held = {};
     return Status::kOk;
 }
@@ -757,6 +824,7 @@ Status replace_reserved(uint64_t owner, int slot, contracts::QolOwnerStoreReserv
     auto& held = g_reservations[slot];
     if (!credential_matches(held, *credential) || held.revision == UINT64_MAX)
         return Status::kBusy;
+    if (!slot_operation::reservation_admitted_locked(owner, held.operation, slot)) return Status::kBusy;
     const auto loaded = load_slot_locked(slot);
     if (loaded.status != Status::kOk && loaded.status != Status::kNotFound) return loaded.status;
     if (static_cast<uint64_t>(loaded.data.generation) != held.generation) return Status::kBusy;
@@ -789,7 +857,9 @@ Status replace_reserved(uint64_t owner, int slot, contracts::QolOwnerStoreReserv
 }
 void owner_stopped(uint64_t owner) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
-    for (auto& held : g_reservations) if (held.owner == owner && held.retain == 0) held = {};
+    for (auto& held : g_reservations)
+        if (held.owner == owner && held.retain == 0 && !slot_operation::referenced_locked(held.operation)) held = {};
+    slot_operation::owner_stopped_locked(owner);
 }
 Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* credential,
                       uint32_t referenced) {
@@ -800,6 +870,7 @@ Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservat
     if (ready != Status::kOk) return ready;
     auto& held = g_reservations[slot];
     if (!credential_matches(held, *credential)) return Status::kBusy;
+    if (!slot_operation::reservation_admitted_locked(owner, held.operation, slot)) return Status::kBusy;
     if (held.retain != referenced) {
         if (held.revision == UINT64_MAX) return Status::kBusy;
         held.retain = referenced;
@@ -810,11 +881,20 @@ Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservat
 }
 void owner_rebound(uint64_t old_owner, uint64_t new_owner) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
+    slot_operation::owner_rebound_locked(old_owner, new_owner);
     for (auto& held : g_reservations)
-        if (held.id != 0 && held.retain != 0 && held.owner == old_owner && held.revision != UINT64_MAX) {
+        if (held.id != 0 && (held.retain != 0 || held.operation != 0) && held.owner == old_owner && held.revision != UINT64_MAX) {
             held.owner = new_owner;
             ++held.revision;
         }
+}
+
+bool reservation_busy_locked(int slot) { return slot >= 0 && slot < 3 && g_reservations[slot].id != 0; }
+bool operation_has_reservation_locked(uint64_t operation) {
+    if (operation == 0) return false;
+    return std::any_of(g_reservations.begin(), g_reservations.end(), [operation](const auto& r) {
+        return r.id != 0 && r.operation == operation;
+    });
 }
 
 #if defined(QOL_STORE_TEST_SEAMS)
