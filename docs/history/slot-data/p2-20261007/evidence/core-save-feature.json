@@ -1,0 +1,23 @@
+{
+  "id": "core.save",
+  "version": "0.1.0",
+  "state": "enabled",
+  "enabled": true,
+  "error": null,
+  "resource_count": 0,
+  "resources": [],
+  "requires": [],
+  "provides": [
+    {
+      "id": "save.facts",
+      "major": 1,
+      "minor": 0
+    },
+    {
+      "id": "save.slot_data",
+      "major": 1,
+      "minor": 0
+    }
+  ],
+  "degraded": false
+}
