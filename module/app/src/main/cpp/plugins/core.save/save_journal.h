@@ -35,6 +35,8 @@ class SaveRecoveryState {
 public:
     LeaseAction before_original_failure(SaveFailure);
     bool original_confirmed(const SaveJournal& captured);
+    // 原版已成功但 confirmed journal 尚不可构造（如 evidence 待取）：先占住 pending 窗口。
+    void begin_pending();
     bool retry_frame(uint64_t frame);
     LeaseAction retry_result(bool committed);
     void degrade();

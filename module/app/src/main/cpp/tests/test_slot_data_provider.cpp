@@ -60,6 +60,7 @@ struct Consumer {
     uint32_t presence = 0;
     uint32_t version = 0;
     bool detach_in_capture = false;
+    bool detach_in_complete = false;
     bool reject_detach = false;
     QolSlotDataHandle handle = 0;
     QolSlotDataRequest unregister_request = 0;
@@ -114,7 +115,11 @@ QolResult capture(void* user, const QolSlotDataContext*, uint8_t* out, uint64_t 
 }
 void complete(void* user, const QolSlotDataContext*, uint32_t) {
     CHECK(is_main());
-    ++static_cast<Consumer*>(user)->completes;
+    auto& c = *static_cast<Consumer*>(user);
+    ++c.completes;
+    // complete 中注销：本次 complete 已进入，注销后不得再有后续回调。
+    if (c.detach_in_complete)
+        CHECK(succeeded(slot_data_api().unregister(c.handle, &c.unregister_request)));
 }
 QolSlotDataSpec spec(QolOwnerToken token, const char* name, Consumer* c,
                      QolSlotDataReadPolicy rp = QolSlotDataReadPolicy::kSessionBound,
@@ -245,6 +250,70 @@ int main() {
     CHECK(status(cancelled_request).state == static_cast<uint32_t>(QolSlotDataRequestState::kCancelled));
     slot_data_pump();
     CHECK(immediate.captures == captures_before_cancel);
+
+    // ---- complete 中注销：complete 恰一次、终态后零回调 ----
+    Consumer closer;
+    auto closer_spec = spec(consumer, "test.complete.closer", &closer,
+                            QolSlotDataReadPolicy::kImmediate, QolSlotDataWritePolicy::kImmediate);
+    QolSlotDataRequest closer_initial = 0;
+    CHECK(succeeded(slot_data_api().register_section(&closer_spec, &closer.handle, &closer_initial)));
+    slot_data_pump();
+    closer.detach_in_complete = true;
+    QolSlotDataRequest closer_request = 0;
+    CHECK(succeeded(slot_data_api().request_write(closer.handle, session().epoch, &closer_request)));
+    CHECK(closer.completes == 1);
+    CHECK(status(closer.unregister_request).state ==
+          static_cast<uint32_t>(QolSlotDataRequestState::kCompleted));
+    const auto closer_total = closer.loads + closer.captures + closer.completes + closer.ready;
+    slot_data_pump();
+    CHECK(closer_total == closer.loads + closer.captures + closer.completes + closer.ready);
+
+    // ---- 保存事务面：capture 恰一次；finish(committed) 按捕获 revision 清 dirty ----
+    Consumer saver;
+    auto saver_spec = spec(consumer, "test.saver", &saver,
+                           QolSlotDataReadPolicy::kSessionBound, QolSlotDataWritePolicy::kSlotBound);
+    QolSlotDataRequest saver_initial = 0;
+    CHECK(succeeded(slot_data_api().register_section(&saver_spec, &saver.handle, &saver_initial)));
+    slot_data_pump();
+    QolSlotDataRequest saver_write = 0;
+    CHECK(succeeded(slot_data_api().request_write(saver.handle, session().epoch, &saver_write)));
+    CHECK(slot_data_dirty_for_test(saver.handle));
+    const auto capture_all = [&](uint64_t transaction) {
+        int captured = 0;
+        for (;;) {
+            const char* section = nullptr;
+            uint16_t version = 0;
+            uint8_t buffer[64]{};
+            uint64_t size = 0;
+            const auto got = slot_data_save_capture_next(transaction, &section, &version, buffer,
+                                                         sizeof(buffer), &size);
+            if (got.code == kQolErrNotFound) break;
+            CHECK(succeeded(got));
+            ++captured;
+        }
+        return captured;
+    };
+    SlotDataSaveView view{};
+    CHECK(succeeded(slot_data_save_begin(777, &view)));
+    CHECK(view.transaction == 777 && view.count >= 1);
+    CHECK(capture_all(777) == static_cast<int>(view.count));
+    QolSlotDataRequest saver_write2 = 0;
+    CHECK(succeeded(slot_data_api().request_write(saver.handle, session().epoch, &saver_write2)));
+    slot_data_save_finish(777, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+    CHECK(slot_data_dirty_for_test(saver.handle));  // 捕获后新写不被误清。
+    SlotDataSaveView view2{};
+    CHECK(succeeded(slot_data_save_begin(778, &view2)));
+    CHECK(capture_all(778) == static_cast<int>(view2.count));
+    slot_data_save_finish(778, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+    CHECK(!slot_data_dirty_for_test(saver.handle));  // 捕获时已 dirty 且未再写 → 清除。
+    slot_data_save_finish(778, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+    CHECK(!slot_data_dirty_for_test(saver.handle));  // finish 幂等。
+    const char* end_section = nullptr;
+    uint16_t end_version = 0;
+    uint8_t end_buffer[8]{};
+    uint64_t end_size = 0;
+    CHECK(slot_data_save_capture_next(778, &end_section, &end_version, end_buffer,
+                                      sizeof(end_buffer), &end_size).code == kQolErrNotFound);
 
     qol::host::owner_suspend(&consumer_identity);
     CHECK(!succeeded(qol::host::owner_verify_token(consumer)));

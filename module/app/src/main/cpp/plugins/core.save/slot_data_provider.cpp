@@ -23,6 +23,11 @@ struct Participant {
     uint32_t references = 0;
     bool closing = false;
     bool dirty = false;
+    // dirty 代次：协调器 committed 只清「捕获时已 dirty 且捕获后未再写」的参与者，
+    // 捕获后的新修改不误清。
+    uint64_t dirty_seq = 0;
+    bool dirty_at_capture = false;
+    uint64_t dirty_seq_at_capture = 0;
     uint64_t notified_epoch = 0;
     QolSlotDataRequest detach_request = 0;
 };
@@ -52,6 +57,15 @@ struct Runtime {
     std::map<QolSlotDataRequest, QolSlotDataStatus> requests;
     std::map<QolSlotDataRequest, std::string> result_messages;
     std::deque<Work> work;
+    // 联合保存事务：同槽同时至多一个；begin 固定集合并持引用。
+    struct SaveCapture {
+        uint64_t transaction = 0;
+        QolSlotSession session{-1, 0, 0};
+        std::vector<std::pair<QolSlotDataHandle, std::shared_ptr<Participant>>> held;
+        uint32_t cursor = 0;
+        bool finished = false;
+    };
+    SaveCapture save_capture;
 };
 Runtime g;
 
@@ -287,6 +301,12 @@ void slot_data_set_available(bool available) {
         cancel_work(handle);
         finish_detach(handle, p);
     }
+    // 未决保存事务：释放全部引用并复位（不派发 complete——停用后不再回调）。
+    for (auto& held : g.save_capture.held) {
+        --held.second->references;
+        finish_detach(held.first, held.second);
+    }
+    g.save_capture = Runtime::SaveCapture{};
     g.session.state = value(QolSlotSessionState::kUnavailable);
     g.transitioning = false;
 }
@@ -331,6 +351,7 @@ void slot_data_pump() {
             result = load_payload(p, ctx, &presence, &stored_version);
         } else if (p->spec.write_policy == value(QolSlotDataWritePolicy::kSlotBound)) {
             p->dirty = true;
+            ++p->dirty_seq;
             durability = value(QolSlotDataDurability::kStaged);
             if (callback_admitted(p)) p->spec.complete(p->spec.user, &ctx, value(QolSlotDataOutcome::kStaged));
         } else {
@@ -360,6 +381,100 @@ void slot_data_pump() {
         }
     }
 }
+QolResult slot_data_abandon_transition() {
+    if (!main_thread()) return fail(kQolErrBlocked, "abandon requires main thread");
+    std::lock_guard<std::mutex> lock(g.mutex);
+    if (!g.transitioning) return fail(kQolErrNotFound, "no pending transition");
+    g.transitioning = false;
+    g.target = -1;
+    // 旧 session 已在 begin 时关闭，不能伪装恢复；无 session 是主菜单的合法态。
+    g.session = QolSlotSession{-1, value(QolSlotSessionState::kUnavailable), g.session.epoch};
+    return ok();
+}
+
+QolResult slot_data_save_begin(uint64_t transaction, SlotDataSaveView* out) {
+    if (out == nullptr || transaction == 0) return fail(kQolErrInvalidArgument, "invalid save begin");
+    if (!main_thread()) return fail(kQolErrBlocked, "save requires main thread");
+    std::lock_guard<std::mutex> lock(g.mutex);
+    if (!g.available || g.transitioning) return fail(kQolErrNotReady, "slot data unavailable");
+    if (g.session.state != value(QolSlotSessionState::kReady))
+        return fail(kQolErrNotReady, "session not ready");
+    if (g.save_capture.transaction != 0) return fail(kQolErrBusy, "save transaction in flight");
+    if (g.busy) return fail(kQolErrNotReady, "consumer callback in flight");
+    g.save_capture.transaction = transaction;
+    g.save_capture.session = g.session;
+    g.save_capture.cursor = 0;
+    g.save_capture.finished = false;
+    uint32_t count = 0;
+    for (auto& item : g.participants) {
+        if (item.second->closing) continue;
+        ++item.second->references;  // capture/complete 期间持引用，注销在途安全。
+        item.second->dirty_at_capture = item.second->dirty;
+        item.second->dirty_seq_at_capture = item.second->dirty_seq;
+        g.save_capture.held.emplace_back(item.first, item.second);
+        ++count;
+    }
+    *out = SlotDataSaveView{g.session, transaction, count};
+    return ok();
+}
+
+QolResult slot_data_save_capture_next(uint64_t transaction, const char** section,
+                                      uint16_t* version, uint8_t* buffer, uint64_t capacity,
+                                      uint64_t* out_size) {
+    if (section == nullptr || version == nullptr || out_size == nullptr || transaction == 0)
+        return fail(kQolErrInvalidArgument, "invalid capture request");
+    *section = nullptr;
+    *out_size = 0;
+    if (!main_thread()) return fail(kQolErrBlocked, "capture requires main thread");
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        if (g.save_capture.transaction != transaction || g.save_capture.finished)
+            return fail(kQolErrNotFound, "save transaction unknown");
+    }
+    while (g.save_capture.cursor < g.save_capture.held.size()) {
+        auto& entry = g.save_capture.held[g.save_capture.cursor];
+        const auto& p = entry.second;
+        ++g.save_capture.cursor;
+        if (p->closing) continue;  // 注销中的参与者不参与本次捕获。
+        if (!succeeded(g.verify(p->spec.owner)))
+            return fail(kQolErrBlocked, "consumer owner invalid");
+        QolSlotDataContext ctx{g.save_capture.session, value(QolSlotDataReason::kSave), transaction};
+        std::vector<uint8_t> scratch(kQolSlotDataMaxPayloadBytes);
+        const uint8_t* out = buffer != nullptr && capacity >= scratch.size() ? buffer : scratch.data();
+        const uint64_t cap = buffer != nullptr && capacity >= scratch.size() ? capacity : scratch.size();
+        const auto captured =
+            p->spec.capture(p->spec.user, &ctx, const_cast<uint8_t*>(out), cap, out_size);
+        if (!succeeded(captured)) return captured;
+        if (*out_size > cap) return fail(kQolErrInvalidArgument, "capture too large");
+        *section = p->section.c_str();
+        *version = p->spec.section_version;
+        return ok();
+    }
+    return fail(kQolErrNotFound, "capture enumeration end");
+}
+
+void slot_data_save_finish(uint64_t transaction, uint32_t outcome) {
+    if (!main_thread()) return;
+    std::lock_guard<std::mutex> lock(g.mutex);
+    if (g.save_capture.transaction != transaction || g.save_capture.finished) return;
+    g.save_capture.finished = true;
+    const QolSlotDataContext ctx{g.save_capture.session, value(QolSlotDataReason::kSave), transaction};
+    for (auto& entry : g.save_capture.held) {
+        const auto handle = entry.first;
+        auto& p = entry.second;
+        if (!p->closing) {
+            // committed 只清捕获时已 dirty 且捕获后未再写的参与者。
+            if (outcome == value(QolSlotDataOutcome::kCommitted) && p->dirty &&
+                p->dirty_at_capture && p->dirty_seq == p->dirty_seq_at_capture)
+                p->dirty = false;
+            p->spec.complete(p->spec.user, &ctx, outcome);
+        }
+        --p->references;
+        finish_detach(handle, p);
+    }
+    g.save_capture = Runtime::SaveCapture{};
+}
+
 QolResult slot_data_begin_transition(uint32_t reason, int32_t target) {
     if (!main_thread()) return fail(kQolErrBlocked, "transition requires main thread");
     if (target < 0 || target > 2 || reason > value(QolSlotDataReason::kRecovery))
@@ -430,4 +545,11 @@ QolResult slot_data_confirm_transition(int32_t current_slot) {
     if (g.available) g.session.state = value(QolSlotSessionState::kReady);
     return ok();
 }
+#if defined(QOL_SLOT_DATA_TEST_SEAMS)
+bool slot_data_dirty_for_test(contracts::QolSlotDataHandle handle) {
+    std::lock_guard<std::mutex> lock(g.mutex);
+    const auto it = g.participants.find(handle);
+    return it != g.participants.end() && it->second->dirty;
+}
+#endif
 }  // namespace qol::features::core_save

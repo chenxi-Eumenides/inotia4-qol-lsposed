@@ -1,4 +1,5 @@
 #include "plugin.h"
+#include "save_coordinator.h"
 #include "slot_data_provider.h"
 
 #include <cstdlib>
@@ -174,6 +175,29 @@ bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, cha
         (g_sdk != nullptr && g_sdk->ticket_result.current_attempt != nullptr)
             ? g_sdk->ticket_result.current_attempt()
             : 0;
+    // 协调器结算面（P3b-3，fake 驱动；生产未安装时走旧写链）：kQolSaveWriteSave 绑定
+    // 本命令自己的 tx——首次执行保存，后续 defer 只查询/推进该 tx；sidecar 正式提交
+    // 确认前票据保持 pending，耗尽/degraded 给失败终态。
+    if (p.kind == contracts::kQolSaveWriteSave && save_coordinator_installed()) {
+        // 帧源未注入 SDK 面；attempt 序列等价于帧推进（首执行 0，defer 递增）。
+        std::string body;
+        const auto settled = save_coordinator_settle(p.slot < 0 ? 0 : p.slot, attempt, attempt, &body);
+        if (settled == qol::features::core_save::SaveSettle::kPending) {
+            if (g_sdk != nullptr && g_sdk->ticket_result.defer_current_result != nullptr) {
+                (void)g_sdk->ticket_result.defer_current_result();
+                return true;
+            }
+            return false;
+        }
+        if (settled == qol::features::core_save::SaveSettle::kFailed && body.empty())
+            body = "{\"ok\":false,\"error\":\"save failed\"}";
+        if (!body.empty()) {
+            if (body.size() > capacity) return false;
+            std::memcpy(out, body.data(), body.size());
+            *out_size = static_cast<uint32_t>(body.size());
+            return settled == qol::features::core_save::SaveSettle::kCommitted;
+        }
+    }
     const QolResult result =
         g_save_write->read.write(p.kind, p.slot, p.class_idx, attempt, out, capacity, out_size);
     if (result.code == kQolErrNotReady) {

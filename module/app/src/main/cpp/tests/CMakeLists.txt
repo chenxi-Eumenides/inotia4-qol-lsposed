@@ -53,6 +53,8 @@ add_executable(save_facts_plugin_tests
     test_save_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.save/plugin.cpp
     ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
+    ${CPP_DIR}/plugins/core.save/save_coordinator.cpp
+    ${CPP_DIR}/plugins/core.save/save_journal.cpp
 )
 target_include_directories(save_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -80,7 +82,40 @@ target_include_directories(slot_data_provider_tests PRIVATE ${CPP_DIR})
 target_compile_features(slot_data_provider_tests PRIVATE cxx_std_17)
 set_target_properties(slot_data_provider_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(slot_data_provider_tests PRIVATE Threads::Threads)
+target_compile_definitions(slot_data_provider_tests PRIVATE QOL_SLOT_DATA_TEST_SEAMS=1)
 add_test(NAME slot_data_provider_tests COMMAND slot_data_provider_tests)
+
+# P3b-3：core.save 转换状态机（token 相位、lease 原子取得、确认序严格分派）。
+add_executable(save_transition_tests
+    test_save_transition.cpp
+    ${CPP_DIR}/plugins/core.save/save_transition.cpp
+    ${CPP_DIR}/plugins/core.save/save_journal.cpp
+    ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
+    ${CPP_DIR}/infra/store.cpp
+    ${CPP_DIR}/infra/slot_operation_gate.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
+)
+target_include_directories(save_transition_tests PRIVATE ${CPP_DIR})
+target_compile_features(save_transition_tests PRIVATE cxx_std_17)
+set_target_properties(save_transition_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(save_transition_tests PRIVATE Threads::Threads)
+add_test(NAME save_transition_tests COMMAND save_transition_tests)
+
+# P3b-3：联合保存协调器（线性流、三候选预算、失败路径冻结、重试与重启恢复矩阵、结算）。
+add_executable(save_coordinator_tests
+    test_save_coordinator.cpp
+    ${CPP_DIR}/plugins/core.save/save_coordinator.cpp
+    ${CPP_DIR}/plugins/core.save/save_journal.cpp
+    ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
+    ${CPP_DIR}/infra/store.cpp
+    ${CPP_DIR}/infra/slot_operation_gate.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
+)
+target_include_directories(save_coordinator_tests PRIVATE ${CPP_DIR})
+target_compile_features(save_coordinator_tests PRIVATE cxx_std_17)
+set_target_properties(save_coordinator_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(save_coordinator_tests PRIVATE Threads::Threads)
+add_test(NAME save_coordinator_tests COMMAND save_coordinator_tests)
 
 add_executable(save_journal_tests
     test_save_journal.cpp

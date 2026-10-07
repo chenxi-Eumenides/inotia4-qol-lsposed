@@ -308,6 +308,10 @@ bool SaveRecoveryState::original_confirmed(const SaveJournal& captured) {
     retries_ = 0; last_frame_ = UINT64_MAX; health_ = SlotHealth::kCommitPending;
     return true;
 }
+void SaveRecoveryState::begin_pending() {
+    if (health_ != SlotHealth::kHealthy) return;
+    retries_ = 0; last_frame_ = UINT64_MAX; health_ = SlotHealth::kCommitPending;
+}
 bool SaveRecoveryState::retry_frame(uint64_t frame) {
     if (health_ != SlotHealth::kCommitPending || retries_ >= 3 ||
         (retries_ != 0 && frame <= last_frame_)) return false;
