@@ -60,6 +60,16 @@ target_compile_features(save_facts_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(save_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME save_facts_plugin_tests COMMAND save_facts_plugin_tests)
 
+add_executable(slot_data_contract_tests
+    test_slot_data_contract.cpp
+)
+target_include_directories(slot_data_contract_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(slot_data_contract_tests PRIVATE cxx_std_17)
+set_target_properties(slot_data_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME slot_data_contract_tests COMMAND slot_data_contract_tests)
+
 add_executable(craft_facts_plugin_tests
     test_craft_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.craft/plugin.cpp
