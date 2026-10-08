@@ -53,6 +53,7 @@ uint64_t g_last_request_id = 0;
 QolSlotDataContext g_pending_context{};
 std::string g_pending_payload;
 bool g_submit_new_revision_in_request = false;
+bool g_fail_pending_during_unregister = false;
 autosell::Config g_new_revision{};
 
 QolResult failure(int code, const char* message) {
@@ -187,9 +188,14 @@ QolResult fake_unregister(QolSlotDataHandle handle, QolSlotDataRequest* out_requ
     ++g_callback_count;
     const QolResult detached = g_spec.prepare_detach(g_spec.user, &g_session, 0);
     if (!succeeded(detached)) return detached;
-    if (g_pending_request != 0)
-        settle(g_pending_request, failure(kQolErrCancelled, "cancelled by unregister"),
-               static_cast<uint32_t>(QolSlotDataRequestState::kCancelled));
+    if (g_pending_request != 0) {
+        const uint32_t terminal_state = g_fail_pending_during_unregister
+                                            ? static_cast<uint32_t>(QolSlotDataRequestState::kFailed)
+                                            : static_cast<uint32_t>(QolSlotDataRequestState::kCancelled);
+        const int error_code = g_fail_pending_during_unregister ? kQolErrInternal : kQolErrCancelled;
+        settle(g_pending_request, failure(error_code, "write ended during unregister"), terminal_state);
+        g_fail_pending_during_unregister = false;
+    }
     g_registered = false;
     g_ready = false;
     g_handle = 0;
@@ -233,6 +239,7 @@ void reset_disk_and_metrics() {
     g_pending_payload.clear();
     g_last_request_id = 0;
     g_submit_new_revision_in_request = false;
+    g_fail_pending_during_unregister = false;
 }
 
 bool invoke_load(int slot, uint64_t epoch, uint32_t presence, uint16_t version,
@@ -422,8 +429,8 @@ void test_pending_intent_slot_isolation_and_unregister(const QolSlotDataApi& api
     CHECK(autosell_store_commit_config(sample(2)));
     const auto deactivated_request = g_pending_request;
     CHECK(deactivated_request != 0);
-    fail_pending_write(deactivated_request);
     CHECK(g_disk[0].bytes == slot_zero);
+    g_fail_pending_during_unregister = true;
     autosell_store_unregister();
     register_consumer(api);
     CHECK(invoke_load(1, 32, static_cast<uint32_t>(QolSlotDataPresence::kMissing), 0, {}));
