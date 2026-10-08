@@ -62,6 +62,14 @@ void save_load_wrapper(int32_t slot) {
     // API 与按钮读档共用受控转换上下文（统一设置未就绪 transition + invocation）。
     const uint64_t bypass = qol::game::save_load_bypass_begin(
         transition, slot, static_cast<uint32_t>(qol::contracts::QolSaveCallKind::kResume));
+    if (bypass == 0) {
+        const auto& hooks_cancel = qol::contracts::qol_runtime_hooks();
+        if (hooks_cancel.save_transition_cancel_thunk != nullptr)
+            hooks_cancel.save_transition_cancel_thunk(transition);
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "save enter blocked because loading bypass scope is occupied slot=%d", slot);
+        return;
+    }
     save_enter_mark_pending();
     if (fn_game_start_resume_game != nullptr) {
         fn_game_start_resume_game(slot);

@@ -28,6 +28,7 @@ uint64_t g_next_invocation = 1;
 std::mutex g_transition_mtx;
 struct PendingTransition {
     uint64_t transition;
+    uint64_t invocation;
     int32_t target_slot;
     bool present;
     bool ready;
@@ -152,7 +153,7 @@ QolResult save_loading_bypass_admit(const contracts::QolSlotOperationLease* leas
 
 void save_set_pending_transition(uint64_t transition, int32_t target_slot, bool ready) {
     std::lock_guard<std::mutex> lock(g_transition_mtx);
-    g_pending_transition = PendingTransition{transition, target_slot, transition != 0, ready};
+    g_pending_transition = PendingTransition{transition, 0, target_slot, transition != 0, ready};
 }
 
 void save_clear_pending_transition() {
@@ -191,12 +192,38 @@ void save_transaction_set_resume_fn(int (*fn)(int32_t)) { g_resume_fn = fn; }
 void save_transaction_set_new_game_fn(void (*fn)(int32_t)) { g_new_game_fn = fn; }
 
 uint64_t save_load_bypass_begin(uint64_t transition, int32_t target_slot, uint32_t kind) {
-    save_set_pending_transition(transition, target_slot, false);
-    return save_invocation_begin(kind, target_slot);
+    if (transition == 0 || target_slot < 0 || target_slot > 2) return 0;
+    {
+        std::lock_guard<std::mutex> lock(g_transition_mtx);
+        if (g_pending_transition.present) return 0;
+        g_pending_transition = PendingTransition{transition, 0, target_slot, true, false};
+    }
+    const uint64_t invocation = save_invocation_begin(kind, target_slot);
+    if (invocation != 0) {
+        std::lock_guard<std::mutex> lock(g_transition_mtx);
+        if (g_pending_transition.transition == transition)
+            g_pending_transition.invocation = invocation;
+    }
+    if (invocation == 0) {
+        std::lock_guard<std::mutex> lock(g_transition_mtx);
+        if (g_pending_transition.transition == transition)
+            g_pending_transition = PendingTransition{};
+    }
+    return invocation;
 }
 
 void save_load_bypass_end(uint64_t invocation) {
-    save_clear_pending_transition();
+    if (invocation == 0) return;
+    {
+        std::lock_guard<std::mutex> lock(g_invocation_mtx);
+        if (g_invocation.id != invocation) return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_transition_mtx);
+        if (g_pending_transition.present && !g_pending_transition.ready &&
+            g_pending_transition.invocation == invocation)
+            g_pending_transition = PendingTransition{};
+    }
     save_invocation_end(invocation);
 }
 
@@ -257,6 +284,7 @@ QolResult save_transaction_call_transition(const contracts::QolSlotOperationLeas
         const uint64_t bypass = save_load_bypass_begin(
             call->transition, call->target_slot,
             static_cast<uint32_t>(contracts::QolSaveCallKind::kResume));
+        if (bypass == 0) return fail(kQolErrBusy, "transition invocation already active");
         const int original = g_resume_fn(call->target_slot);
         save_load_bypass_end(bypass);
         out->invoked = 1;
@@ -265,16 +293,10 @@ QolResult save_transaction_call_transition(const contracts::QolSlotOperationLeas
         return original != 0 ? contracts::ok() : fail(kQolErrInternal, "resume failed");
     }
     if (kind == contracts::QolSaveTransitionKind::kBeginNew) {
-        if (g_new_game_fn == nullptr) return fail(kQolErrNotReady, "new game entry unavailable");
-        const uint64_t bypass = save_load_bypass_begin(
-            call->transition, call->target_slot,
-            static_cast<uint32_t>(contracts::QolSaveCallKind::kBeginNew));
-        g_new_game_fn(call->target_slot);
-        save_load_bypass_end(bypass);
-        out->invoked = 1;
-        out->result_valid = 0;
-        out->original_result = 0;
-        return contracts::ok();
+        return fail(kQolErrUnsupported, "begin new transition unsupported");
+    }
+    if (kind == contracts::QolSaveTransitionKind::kConfirmNew) {
+        return fail(kQolErrUnsupported, "confirm new transition unsupported");
     }
     return fail(kQolErrUnsupported, "transition kind unsupported");
 }

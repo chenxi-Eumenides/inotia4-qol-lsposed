@@ -56,9 +56,6 @@ QolResult adapter_probe_loading_bypass(void*, const contracts::QolSlotOperationL
 int call_resume_entry(int32_t slot) {
     return fn_game_start_resume_game != nullptr ? fn_game_start_resume_game(slot) : 0;
 }
-void call_new_game_entry(int32_t /*slot*/) {
-    if (fn_select_character_start_game != nullptr) fn_select_character_start_game();
-}
 
 const contracts::QolSaveTransactionPort kPort{
     {sizeof(contracts::QolSaveTransactionPort),
@@ -114,7 +111,6 @@ void save_transaction_install() {
     }
     // 转换桥入口注入（调用时解引用；符号解析晚于此也无妨）。
     save_transaction_set_resume_fn(&call_resume_entry);
-    save_transaction_set_new_game_fn(&call_new_game_entry);
 }
 
 }  // namespace qol::game

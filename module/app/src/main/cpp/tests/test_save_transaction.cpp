@@ -154,6 +154,13 @@ int main() {
     CHECK(!save_tx::save_has_unready_load_transition(&target));
     save_tx::save_clear_pending_transition();
     CHECK(!save_tx::save_has_unready_load_transition(&target));
+    const uint64_t scoped = save_tx::save_load_bypass_begin(100, 0, 1);
+    CHECK(scoped != 0);
+    CHECK(save_tx::save_load_bypass_begin(101, 1, 1) == 0);  // R9：禁止 scope 嵌套。
+    save_tx::save_load_bypass_end(scoped + 1);
+    CHECK(save_tx::save_has_unready_load_transition(&target) && target == 0);
+    save_tx::save_load_bypass_end(scoped);
+    CHECK(!save_tx::save_has_unready_load_transition(&target));
 
     // ---- P3c 生产仲裁组装（save_loading_bypass_admit）：Game 层事实 + gate 凭据 ----
     {
@@ -252,12 +259,25 @@ int main() {
     // 作用域结束后旁路上下文已清除：无未就绪读档转换。
     int32_t leftover_target = -1;
     CHECK(!save_tx::save_has_unready_load_transition(&leftover_target));
+    const uint64_t occupied_scope = save_tx::save_load_bypass_begin(778, 0, 1);
+    CHECK(occupied_scope != 0);
+    transition.transition = 779;
+    const int resume_before_nested = g_resume_calls;
+    CHECK(save_tx::save_transaction_call_transition(&lease, &transition, &original).code ==
+          kQolErrBusy);
+    CHECK(original.invoked == 0 && g_resume_calls == resume_before_nested);
+    save_tx::save_load_bypass_end(occupied_scope);
+    transition.transition = 777;
     // 原版 resume 返回失败：invoked 保留事实、结果码为失败。
     g_resume_result = 0;
     CHECK(save_tx::save_transaction_call_transition(&lease, &transition, &original).code ==
           kQolErrInternal);
     CHECK(original.invoked == 1 && original.original_result == 0);
     save_tx::save_transaction_set_resume_fn(nullptr);
+    transition.kind = static_cast<uint32_t>(QolSaveTransitionKind::kBeginNew);
+    CHECK(save_tx::save_transaction_call_transition(&lease, &transition, &original).code ==
+          kQolErrUnsupported);  // R8：无可靠 begin_new 端口，不得谎报已调用。
+    CHECK(original.invoked == 0);
 
     // ---- 相对名校验 ----
     CHECK(save_tx::save_transaction_dat_relative_name_valid("save0.dat"));

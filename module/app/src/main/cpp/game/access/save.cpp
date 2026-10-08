@@ -288,6 +288,10 @@ std::string enter_slot_locked(int32_t slot) {
     // 与按钮读档共用受控转换上下文：统一设置未就绪 transition + invocation，作用域释放。
     const uint64_t bypass = save_load_bypass_begin(
         transition, slot, static_cast<uint32_t>(contracts::QolSaveCallKind::kResume));
+    if (bypass == 0) {
+        if (handle_transition) finish_item_handle_lifecycle_transition(false);
+        return op_err("enter slot bypass scope unavailable");
+    }
     int r = fn_game_start_resume_game(slot);
     save_load_bypass_end(bypass);
     if (handle_transition) finish_item_handle_lifecycle_transition(r != 0);
