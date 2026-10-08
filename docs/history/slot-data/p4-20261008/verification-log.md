@@ -30,7 +30,7 @@
 
 1. `RemoveFailed` 静态调用链为 `autosell/scan.cpp` → `inventory.action.sell` → `inventory_hooks` 的 `INVEN_RemoveItem`；失败会退款。测试没有证明该 EB 移除限制的完整底层原因，也没有显示它由 P4 persistence 改造引入。需单独调查 EB sale 操作路径；本卡不能因 persistence 子项通过而整体 PASS。
 2. Host 专项以 fake `QolSlotDataApi` 驱动 autosell callbacks，覆盖 revision、pending、retry、unregister与槽隔离逻辑；不等价于真实 core.save provider 的并发队列/注销 drain 集成证明。
-3. Oracle 静态复审确认直接 store IO、section v2、两策略、错误 presence 不直接覆盖运行态、错误 load 关闭扫描等主要规则；同时指出 `autosell_store_persist(-1, config)` 仍是潜在独立pending入口、request callback同步重入仅fake覆盖、非durable dirty在unregister后依赖后续同槽load catch-up。以上限制不得被写成“durable unregister drain”或“真实 Provider 并发已验证”。
+3. Oracle 静态复审确认直接 store IO、section v2、两策略、错误 presence 不直接覆盖运行态、错误 load 关闭扫描等主要规则；同时指出 `autosell_store_persist(-1, config)` 仍是潜在独立pending入口（全仓搜索只有声明/定义，当前无生产调用点）、request callback同步重入仅fake覆盖、非durable dirty在unregister后依赖后续同槽load catch-up。以上限制不得被写成“durable unregister drain”或“真实 Provider 并发已验证”。
 4. 无session pending的有效已有section优先级由代码路径支持，但缺少专用直接测试；设备未测 unload期间进程被杀、错误 presence、Provider并发/同步callback压力。
 
 ## 设备数据保护
