@@ -454,27 +454,25 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
 int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
-    const int state = virtual_bag_inventory_state_id();
-    if (state < 0) return 1;
-    if (g_lifecycle_last_state == 5 && state != 5) {
+    int world_state = -1;
+    if (!read_world_state_id(&world_state)) return 1;
+    const bool due = qol::features::extension_bag::model::main_menu_cleanup_due(
+        g_lifecycle_last_state, world_state, true,
+        g_main_menu_cleanup_dirty.load(std::memory_order_acquire));
+    if (due) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (!prepare_main_menu_locked()) {
+        if (!extension_bag_session_admitted_locked()) {
+            // An unloaded or degraded slot is not an empty inventory that may be reset.
+            g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
+        } else if (!prepare_main_menu_locked()) {
             g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
             QOL_LOG_WARN(QolDomain::kExtensionBag,
                          "lifecycle main-menu cleanup failed; retry scheduled");
         } else {
             g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
         }
-    } else if (state != 5 && g_main_menu_cleanup_dirty.load(std::memory_order_acquire)) {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (prepare_main_menu_locked()) {
-            g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
-            QOL_LOG_INFO(QolDomain::kExtensionBag, "lifecycle main-menu cleanup retry succeeded");
-        } else {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "lifecycle main-menu cleanup retry failed");
-        }
     }
-    g_lifecycle_last_state = state;
+    g_lifecycle_last_state = world_state;
     return 1;
 }
 
@@ -497,6 +495,11 @@ void remove_lifecycle_task() {
 }
 
 bool prepare_main_menu_locked() {
+    if (!extension_bag_session_admitted_locked()) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "prepare main-menu rejected: slot data session not admitted");
+        return false;
+    }
     if (!module_cache_clear_preflight_locked()) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu preflight failed");
         return false;

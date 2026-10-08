@@ -114,8 +114,7 @@ bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int t
 }
 
 int virtual_bag_inventory_state_id() {
-    // g_state_entry is the inventory PopupState entry set during acquire; world_facts.state is
-    // global and may trigger per-frame main-menu cleanup while the inventory panel is open.
+    // g_state_entry is panel-local state; world lifecycle cleanup uses world_facts separately.
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_state_entry == nullptr) return -1;
     return *reinterpret_cast<int32_t*>(g_state_entry);
@@ -540,6 +539,7 @@ bool virtual_bag_sync_projected_item_control(void* control) {
 
 bool virtual_bag_sync_projected_bag() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!extension_bag_session_admitted_locked()) return false;
     refresh_projection_if_overwritten_locked();
     return g_module_view_installed;
 }
@@ -591,7 +591,7 @@ bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
         return false;
     }
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
+    if (!extension_bag_session_admitted_locked()) return false;
     const int internal_bag = virtual_bag::extension_internal_bag(logical_bag);
     if (!virtual_bag::valid_index(internal_bag)) return false;
     *out_capacity = g_virtual_bag_state.capacities[internal_bag];
@@ -602,7 +602,7 @@ std::string data_virtual_bag_test_equip(int index, int bag_type) {
     bool updated = false;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        ensure_state_loaded_locked();
+        if (!extension_bag_session_admitted_locked()) return op_err("slot data not ready");
         updated = virtual_bag::set_test_equipped(&g_virtual_bag_state, index, bag_type);
         if (updated) extension_bag_mark_dirty_locked();
     }
@@ -614,7 +614,7 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
     bool updated = false;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        ensure_state_loaded_locked();
+        if (!extension_bag_session_admitted_locked()) return op_err("slot data not ready");
         updated = virtual_bag::set_item(&g_virtual_bag_state, index, slot, category, count);
         if (updated) extension_bag_mark_dirty_locked();
     }

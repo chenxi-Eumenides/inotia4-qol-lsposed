@@ -90,7 +90,7 @@ void store_delete_tab_buttons_locked() {
 
 void store_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时商店页签不得挂载（3 个宿主之一）。
-    if (!g_virtual_bag_enabled.load()) return;
+    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked()) return;
     if (g_sdk == nullptr) return;
     void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
     int bag_child_count = 0;
@@ -138,6 +138,7 @@ void store_install_tab_buttons_locked() {
 uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
     if (event == 0x02) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!extension_bag_session_admitted_locked()) return 1;
         const int index = store_tab_index(ctrl);
         if (index >= 0 && store_tab_generation != 0) {
             store_pending_tab = index;
@@ -153,6 +154,11 @@ void store_install_module_view_locked(int bag);
 void store_restore_module_view_locked();
 
 void store_commit_pending_tab_locked() {
+    if (!extension_bag_session_admitted_locked()) {
+        store_pending_tab = -1;
+        store_pending_tab_generation = 0;
+        return;
+    }
     if (!virtual_bag::valid_index(store_pending_tab) ||
         store_pending_tab_generation != store_tab_generation) {
         store_pending_tab = -1;
@@ -181,7 +187,7 @@ void store_refresh_projection_locked() {
 }
 
 void store_install_module_view_locked(int bag) {
-    if (!virtual_bag::valid_index(bag) ||
+    if (!extension_bag_session_admitted_locked() || !virtual_bag::valid_index(bag) ||
         g_virtual_bag_state.capacities[bag] == 0 ||
         g_game == nullptr || g_write_port->ui.refresh_store_item == nullptr) return;
     const int original_bag = original_bag_locked();
@@ -364,7 +370,8 @@ void store_draw_end_wrapper() {
         {"patch:P_EXT_STORE_DRAW_END"});
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (store_frame_active && g_virtual_bag_enabled.load()) {
+        if (store_frame_active && g_virtual_bag_enabled.load() &&
+            extension_bag_session_admitted_locked()) {
             ensure_state_loaded_locked();
             store_install_tab_buttons_locked();
             store_commit_pending_tab_locked();

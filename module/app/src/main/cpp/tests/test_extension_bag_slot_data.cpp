@@ -7,6 +7,7 @@
 #include "contracts/slot_data.h"
 #include "plugins/core.save/slot_data_provider.h"
 #include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 
 #include <cstdio>
 #include <cstring>
@@ -148,6 +149,57 @@ int main() {
     slot_data_pump();
     // load（missing）→ 默认状态 → 准入放行；session_ready 通知登记 epoch。
     CHECK(extension_bag_session_admitted_locked());
+
+    // F3: inventory popup state 4 while game world state is 5 must not reset EB memory.
+    std::string panel_open_state;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        g_state.types = {4, 4, 3, 3, 3};
+        g_state.items[0][0] = virtual_bag::Item{321, 7};
+        auto& payload = g_state.items[0][0];
+        payload.payload_size = 19;
+        payload.payload[0] = 18;
+        for (int i = 1; i < payload.payload_size; ++i)
+            payload.payload[static_cast<std::size_t>(i)] = static_cast<uint8_t>(i);
+        virtual_bag::normalize(&g_state);
+        extension_bag_mark_dirty_locked();
+        panel_open_state = virtual_bag::state_json(g_state);
+        const auto types_before_panel = g_state.types;
+        const auto capacities_before_panel = g_state.capacities;
+        const auto item_before_panel = g_state.items[0][0];
+        const int inventory_panel_state = 4;
+        const int world_state = 5;
+        (void)inventory_panel_state;
+        CHECK(!qol::features::extension_bag::model::main_menu_cleanup_due(
+            -1, world_state, true, false));
+        CHECK(g_state.types == types_before_panel &&
+              g_state.capacities == capacities_before_panel);
+        CHECK(g_state.items[0][0].category == item_before_panel.category &&
+              g_state.items[0][0].count == item_before_panel.count &&
+              g_state.items[0][0].payload_size == item_before_panel.payload_size &&
+              g_state.items[0][0].payload == item_before_panel.payload);
+        CHECK(virtual_bag::state_json(g_state) == panel_open_state);
+    }
+    {
+        SlotDataSaveView view{};
+        CHECK(succeeded(slot_data_save_begin(90, &view)));
+        const char* section = nullptr;
+        uint16_t version = 0;
+        std::vector<uint8_t> buffer(1024 * 1024);
+        uint64_t size = 0;
+        CHECK(succeeded(slot_data_save_capture_next(90, &section, &version, buffer.data(),
+                                                    buffer.size(), &size)));
+        const std::string captured(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(size));
+        CHECK(!captured.empty() && captured == panel_open_state);
+        slot_data_save_finish(90, static_cast<uint32_t>(QolSlotDataOutcome::kCancelled));
+    }
+    CHECK(qol::features::extension_bag::model::main_menu_cleanup_due(5, 4, true, false));
+    CHECK(!qol::features::extension_bag::model::main_menu_cleanup_due(4, 4, true, false));
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        g_state = {};
+        g_item_state_dirty = false;
+    }
 
     // ---- dirty 排空：admitted 时 request_write 恰一次；非 admitted 不排空 ----
     g_request_write_calls = 0;

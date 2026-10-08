@@ -444,11 +444,19 @@ bool read_item_is_usable(int category) {
         value;
 }
 
-bool read_world_in_world() {
+bool read_world_state_id(int* out_state) {
+    if (out_state == nullptr) return false;
     const auto* facts = qol::features::extension_bag::world_facts();
     if (facts == nullptr || facts->state == nullptr) return false;
     int32_t state = -1;
-    return qol::contracts::succeeded(facts->state(&state)) && state == 5;
+    if (!qol::contracts::succeeded(facts->state(&state))) return false;
+    *out_state = state;
+    return true;
+}
+
+bool read_world_in_world() {
+    int state = -1;
+    return read_world_state_id(&state) && state == 5;
 }
 
 const qol::contracts::QolItemCountApi* item_count_api();

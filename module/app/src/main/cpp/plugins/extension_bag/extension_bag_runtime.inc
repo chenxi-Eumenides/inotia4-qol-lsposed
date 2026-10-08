@@ -14,6 +14,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
     if (event == 0x02) {
         {
             std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+            if (!extension_bag_session_admitted_locked()) return finish(1);
             const int index = extension_tab_index(ctrl);
             if (index >= 0) {
                 queue_extension_tab_click_locked(index);
@@ -28,6 +29,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
         uint64_t result = 0;
         {
             std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+            if (!extension_bag_session_admitted_locked()) return finish(1);
             const int index = extension_tab_index(ctrl);
             if (index >= 0 &&
                 g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
@@ -105,7 +107,7 @@ void delete_extension_tab_buttons_locked() {
 void install_extension_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时不得挂载页签（3 个宿主之一）。启用/禁用均以
     // g_virtual_bag_enabled 为准；调用方不再各自判断。
-    if (!g_virtual_bag_enabled.load()) return;
+    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked()) return;
     void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (bag_container == nullptr) return;
     // 容器就位守卫：面板打开初期 0x50 槽位指向占位容器（无原版袋标签子控件，
@@ -286,8 +288,8 @@ void play_extension_switch_sound() {
 }
 
 void handle_extension_tab_click_locked(int extension_bag) {
-    if (!virtual_bag::valid_index(extension_bag)) return;
-    ensure_state_loaded_locked();
+    if (!virtual_bag::valid_index(extension_bag) ||
+        !extension_bag_session_admitted_locked()) return;
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal) {
         const int original_bag = original_bag_locked();
         if (original_bag == virtual_bag::kOriginalTaskBag) {

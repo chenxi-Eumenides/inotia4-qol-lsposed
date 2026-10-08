@@ -449,7 +449,8 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
 //   容量内控件 ControlItem_SetItem(借出对象) 显示扩展物品；
 //   INVEN_pItem 全程真实（API/存档/捡取读数无污染），restore 仅写回容量字 + RefreshItemArea。
 bool install_module_view_locked(int bag) {
-    if (g_game == nullptr || !virtual_bag::valid_index(bag)) return false;
+    if (g_game == nullptr || !virtual_bag::valid_index(bag) ||
+        !extension_bag_session_admitted_locked()) return false;
     if (g_virtual_bag_state.capacities[bag] == 0) return false;
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
@@ -619,7 +620,9 @@ void virtual_bag_f3_wrapper() {
     PopupNoArgFn original = nullptr;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        ensure_state_loaded_locked();
+        if (!extension_bag_session_admitted_locked()) {
+            original = g_orig_f3;
+        } else {
         const bool was_exiting_module = g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule;
         if (g_module_view_installed) restore_module_view_locked();
         if (!was_exiting_module && g_virtual_bag_state.mode != virtual_bag::Mode::kOriginal) {
@@ -636,6 +639,7 @@ void virtual_bag_f3_wrapper() {
         disable_extension_tab_buttons_locked();
         log_exit_trace_locked("f3", 0, 0, 0);
         original = g_orig_f3;
+        }
     }
     if (original != nullptr) original();
 }
@@ -645,23 +649,26 @@ void virtual_bag_inventory_enter_wrapper() {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"own:popup.inventory"});
     PopupNoArgFn original = nullptr;
+    bool session_admitted = false;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        ensure_state_loaded_locked();
-        clear_original_desc_locked();
-        restore_module_view_locked();
-        set_original_bag_locked(0);
-        virtual_bag::enter_original(&g_virtual_bag_state, 0);
-        g_inventory_frame_active = true;
-        g_extension_touch_capture = false;
-        g_extension_drag = {};
-        cancel_projected_drag_session_locked("inventory-enter");
-        disable_extension_tab_buttons_locked();
-        persist_state_locked();
         original = g_orig_enter;
+        session_admitted = extension_bag_session_admitted_locked();
+        if (session_admitted) {
+            clear_original_desc_locked();
+            restore_module_view_locked();
+            set_original_bag_locked(0);
+            virtual_bag::enter_original(&g_virtual_bag_state, 0);
+            g_inventory_frame_active = true;
+            g_extension_touch_capture = false;
+            g_extension_drag = {};
+            cancel_projected_drag_session_locked("inventory-enter");
+            disable_extension_tab_buttons_locked();
+            persist_state_locked();
+        }
     }
     if (original != nullptr) original();
-    if (!g_virtual_bag_enabled.load()) return;
+    if (!session_admitted || !g_virtual_bag_enabled.load()) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     install_extension_tab_buttons_locked();
     if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
@@ -686,27 +693,21 @@ void virtual_bag_save_panel_enter_wrapper() {
 void virtual_bag_draw_end_locked(int inventory_state) {
     static int previous_state = -1;
     const int old_state = previous_state;
-    const bool due = qol::features::extension_bag::model::main_menu_cleanup_due(
-        previous_state, inventory_state,
-        g_main_menu_cleanup_dirty.load(std::memory_order_acquire));
     if (old_state != inventory_state) {
         VIRTBAG_LOG("draw-end state edge previous=%d current=%d gen=%llu", old_state,
                     inventory_state, static_cast<unsigned long long>(g_inventory_generation));
     }
     previous_state = inventory_state;
     if (inventory_state >= 0 && inventory_state != 5) {
-        if (due) {
-            if (!prepare_main_menu_locked()) {
-                g_main_menu_cleanup_dirty.store(true, std::memory_order_release);
-                QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw-end main-menu cleanup failed; retry scheduled");
-            } else {
-                g_main_menu_cleanup_dirty.store(false, std::memory_order_release);
-            }
-        }
         if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
             (void)g_sdk->ui->end_frame();
         }
-        drain_deferred_frees_locked();
+        if (extension_bag_session_admitted_locked()) drain_deferred_frees_locked();
+        return;
+    }
+    if (!extension_bag_session_admitted_locked()) {
+        if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr)
+            (void)g_sdk->ui->end_frame();
         return;
     }
     int32_t game_state_open = 1;

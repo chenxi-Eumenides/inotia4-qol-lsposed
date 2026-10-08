@@ -103,7 +103,7 @@ void mix_delete_tab_buttons_locked() {
 
 void mix_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时合成器页签不得挂载（3 个宿主之一）。
-    if (!g_virtual_bag_enabled.load()) return;
+    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked()) return;
     if (g_sdk == nullptr) return;
     void* bag_container = mix_bag_container_locked();
     int bag_child_count = 0;
@@ -154,6 +154,7 @@ void mix_install_tab_buttons_locked() {
 uint64_t mix_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
     if (event == 0x02) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!extension_bag_session_admitted_locked()) return 1;
         const int index = mix_tab_index(ctrl);
         if (index >= 0 && mix_tab_generation != 0) {
             mix_pending_tab = index;
@@ -166,6 +167,11 @@ uint64_t mix_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
 }
 
 void mix_commit_pending_tab_locked() {
+    if (!extension_bag_session_admitted_locked()) {
+        mix_pending_tab = -1;
+        mix_pending_tab_generation = 0;
+        return;
+    }
     if (!virtual_bag::valid_index(mix_pending_tab) ||
         mix_pending_tab_generation != mix_tab_generation) {
         mix_pending_tab = -1;
@@ -194,7 +200,7 @@ void mix_refresh_projection_locked() {
 }
 
 void mix_install_module_view_locked(int bag) {
-    if (!virtual_bag::valid_index(bag) ||
+    if (!extension_bag_session_admitted_locked() || !virtual_bag::valid_index(bag) ||
         g_virtual_bag_state.capacities[bag] == 0 ||
         g_game == nullptr || g_write_port->ui.refresh_mix_item == nullptr) return;
     // UIMix 与 UIEquip 共用当前袋 GOT；落在任务袋 5/非法时回退原版袋 0。
@@ -337,7 +343,9 @@ void mix_draw_end_wrapper() {
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (mix_frame_active) {
-            const bool interactive = g_virtual_bag_enabled.load() && mix_state_locked() != 0;
+            const bool interactive = g_virtual_bag_enabled.load() &&
+                                     extension_bag_session_admitted_locked() &&
+                                     mix_state_locked() != 0;
             if (interactive) {
                 ensure_state_loaded_locked();
                 mix_install_tab_buttons_locked();
