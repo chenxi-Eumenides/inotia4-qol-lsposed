@@ -63,6 +63,10 @@ typedef struct QolRuntimeHooksApi {
     // 进入存档确认序是否已发布 ready（core.save 确认完成后才允许旧 save_enter 回调与
     // kEventSaveEnter 派发）。false = 确认未完成或失败：调用方不消费 pending、不派发。
     bool (*save_enter_ready)();
+
+    // 取消未决转换：begin 成功后、原版未启动或明确失败的出口显式释放 token/lease
+    // （已删 dat 不伪装恢复；provider 撤销 transitioning，session 回 Unavailable）。
+    void (*save_transition_cancel_thunk)(uint64_t transition);
 } QolRuntimeHooksApi;
 
 static_assert(sizeof(QolVersion) == 4, "QolVersion ABI changed");

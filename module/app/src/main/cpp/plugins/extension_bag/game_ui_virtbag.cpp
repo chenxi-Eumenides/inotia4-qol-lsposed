@@ -1281,7 +1281,10 @@ std::string extension_bag_not_ready_error_locked() {
 }
 
 bool extension_bag_ready_locked() {
-    return g_virtual_bag_enabled.load() && read_world_in_world();
+    // 操作准入与扫描同门：扩展开关 + world + 当前 epoch 已加载（未加载/降级/epoch 未登记
+    // 时拒绝物品操作，不惰性 IO 兜底）。session 状态由 provider 回调维护。
+    return g_virtual_bag_enabled.load() && read_world_in_world() &&
+           extension_bag_session_admitted_locked();
 }
 
 int extension_internal_bag(int logical_bag) {

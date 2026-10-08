@@ -31,9 +31,12 @@ bool save_coordinator_installed();
 enum class SaveSettle { kCommitted, kPending, kFailed };
 // 进档/转换确认序调用：未决 journal 的严格分派与自动恢复。stage=1 且当前 dat evidence
 // 匹配才自动重试同 tx replace；prepared/v1/未知/损坏一律 degraded 保留证据。
-void save_coordinator_on_session_enter(int32_t slot, uint64_t frame);
+void save_coordinator_on_session_enter(int32_t slot, uint64_t frame, const contracts::QolSlotOperationLease* lease = nullptr);
 // 帧驱动重试（commit-pending/recovery-retrying；不重新 capture、不重调原版）。
 SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::string* out_error);
+// 生产帧任务：推进 hook 入口发起且仍 pending 的未决事务（≤3 次后续帧、同 tx）。
+// HTTP 票据绑定的 tx 由 attempt 推进，本入口不重复推进（frame_retry 标记区分）。
+void save_coordinator_pump(uint64_t frame);
 bool save_coordinator_permits_transition(int32_t slot);
 bool save_coordinator_permits_save(int32_t slot);
 
@@ -52,7 +55,7 @@ SaveSettle save_coordinator_save_entry(int32_t slot, uint32_t attempt, uint64_t 
 
 // 转换确认序的 journal 分派（save_transition_set_journal_verdict 注入）：
 // stage=1 且当前 dat evidence 匹配 → 自动恢复并按恢复后健康放行；否则阻断留证。
-QolResult save_coordinator_journal_verdict(int32_t slot, void* ctx);
+QolResult save_coordinator_journal_verdict(int32_t slot, const contracts::QolSlotOperationLease* lease, void* ctx);
 
 void save_coordinator_reset_for_test();
 

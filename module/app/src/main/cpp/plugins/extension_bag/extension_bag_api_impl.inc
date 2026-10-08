@@ -128,6 +128,8 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to
     if (from_original && to_original) return op_err("use /api/item/inventory/move_item");
     std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
+    // 锁内复核当前 epoch 准入：readiness 与真正执行之间可能发生 detach/epoch 变化。
+    if (!extension_bag_session_admitted_locked()) return extension_bag_not_ready_error_locked();
     bool moved = false;
     if (from_original && to_extension) {
         moved = move_original_to_extension_slot_locked(lock, from_bag, from_slot, to_internal);

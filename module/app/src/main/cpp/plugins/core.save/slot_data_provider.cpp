@@ -420,7 +420,7 @@ QolResult slot_data_save_begin(uint64_t transaction, SlotDataSaveView* out) {
 
 QolResult slot_data_save_capture_next(uint64_t transaction, const char** section,
                                       uint16_t* version, uint8_t* buffer, uint64_t capacity,
-                                      uint64_t* out_size) {
+                                      uint64_t* out_size, contracts::QolOwnerToken* out_owner) {
     if (section == nullptr || version == nullptr || out_size == nullptr || transaction == 0)
         return fail(kQolErrInvalidArgument, "invalid capture request");
     *section = nullptr;
@@ -448,6 +448,7 @@ QolResult slot_data_save_capture_next(uint64_t transaction, const char** section
         if (*out_size > cap) return fail(kQolErrInvalidArgument, "capture too large");
         *section = p->section.c_str();
         *version = p->spec.section_version;
+        if (out_owner != nullptr) *out_owner = p->spec.owner;
         return ok();
     }
     return fail(kQolErrNotFound, "capture enumeration end");
@@ -521,11 +522,9 @@ QolResult slot_data_confirm_transition(int32_t current_slot) {
         if (g.session.epoch == std::numeric_limits<uint64_t>::max()) return fail(kQolErrInternal, "epoch exhausted");
         g.busy = true;
     }
-    const auto ensured = g.backend->ensure_slot(g.owner, current_slot);
     {
         std::lock_guard<std::mutex> lock(g.mutex);
         g.busy = false;
-        if (!succeeded(ensured)) return ensured;
         g.session.slot = current_slot;
         ++g.session.epoch;
         g.transitioning = false;

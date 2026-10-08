@@ -93,6 +93,16 @@ QolResult save_transaction_read_evidence(const contracts::QolSlotOperationLease*
 // 相对存档文件名校验：非空、无路径分隔、无 ".."、白名单字符集、不以 "." 开头、长度受限。
 bool save_transaction_dat_relative_name_valid(const char* name);
 
+// ---- P3c：API 与按钮读档共用的受控转换上下文（作用域释放）----
+// begin：设置未就绪读档 transition（SAVE_Save loading 旁路矩阵输入）并登记仅本次回调
+// 有效的 invocation；返回 invocation id。end：清除 pending transition 并结束 invocation。
+uint64_t save_load_bypass_begin(uint64_t transition, int32_t target_slot, uint32_t kind);
+void save_load_bypass_end(uint64_t invocation);
+
+// 原版转换函数注入（game 层装配期从 symbol 解析后注入；测试注入 fake）。
+void save_transaction_set_resume_fn(int (*fn)(int32_t));
+void save_transaction_set_new_game_fn(void (*fn)(int32_t));
+
 void save_transaction_reset_for_test();
 
 }  // namespace qol::game

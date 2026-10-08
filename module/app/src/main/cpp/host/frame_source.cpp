@@ -330,6 +330,22 @@ bool host_save_enter_ready() {
     return contracts::succeeded(result);
 }
 
+// P3c：取消未决转换。经 save_route 转接 core.save 的 kCancelTransition；无 binding 时静默
+// 返回（模块未参与，无可取消 token）。仅供 Game 层的「原版未启动/明确失败」出口调用。
+void host_save_transition_cancel_thunk(uint64_t transition) {
+    if (transition == 0) return;
+    contracts::QolSaveNativeCall call{};
+    call.size = sizeof(call);
+    call.kind = static_cast<uint32_t>(contracts::QolSaveCallKind::kCancelTransition);
+    call.target_slot = -1;
+    call.class_index = -1;
+    call.origin = static_cast<uint32_t>(contracts::QolSaveOrigin::kOrdinary);
+    call.transition = transition;
+    contracts::QolSaveDomainStatus status{};
+    status.size = sizeof(status);
+    (void)qol::host::save_route::dispatch_native_call_for_plugin("core.save", &call, &status);
+}
+
 // W31：contracts 帧点位常量必须与 infra 同值（0=渲染前、1=逻辑前）。
 static_assert(kQolRuntimeFramePointRenderPre == kFramePointRenderPre, "frame point drift");
 static_assert(kQolRuntimeFramePointLogicPre == kFramePointLogicPre, "frame point drift");
@@ -343,6 +359,7 @@ const QolRuntimeHooksApi kQolRuntimeHooksApi{
     &host_capability_require,
     &host_save_transition_begin_thunk,
     &host_save_enter_ready,
+    &host_save_transition_cancel_thunk,
 };
 
 }  // namespace

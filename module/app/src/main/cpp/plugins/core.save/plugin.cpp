@@ -112,8 +112,12 @@ uint64_t g_slot_data_frame_task = 0;
 
 // RenderPre 帧号（确认序观测与恢复重试共用同一帧源）。
 std::atomic<uint64_t> g_frame{0};
-// 确认序重试节流：上次 confirm 尝试帧。
+// LogicPre 帧号：失败等待（读档确认超时）在此持续推进，不依赖仅 world 态执行的 RenderPre。
+std::atomic<uint64_t> g_logic_frame{0};
+uint64_t g_logic_clock_task = 0;
+// 确认序重试节流：上次实际执行 confirm 的帧与 token。
 std::atomic<uint64_t> g_last_confirm_attempt{0};
+std::atomic<uint64_t> g_last_confirm_token{0};
 // 新档 selection token：GoToNewGame 入口 begin 分配，确认序按 token id 复用，取消释放。
 std::atomic<uint64_t> g_selection_token{0};
 // kResume begin 的帧号（确认超时取消用；读档失败不悬挂 pending 转换）。
@@ -158,8 +162,9 @@ QolResult cs_native_call(void* /*user*/, const contracts::QolSaveNativeCall* cal
         case contracts::QolSaveCallKind::kSave: {
             // 联合保存事务：SAVE_Save 的普通保存路径（session ready）。
             std::string body;
-            const auto settled =
-                save_coordinator_save_entry(call->target_slot, 0, g_frame.load(), nullptr, &body);
+            const auto settled = save_coordinator_save_entry(
+                call->target_slot, 0, g_frame.load(), out != nullptr ? &out->original : nullptr,
+                &body);
             if (out != nullptr) {
                 out->state = static_cast<uint32_t>(
                     settled == qol::features::core_save::SaveSettle::kCommitted
@@ -183,7 +188,7 @@ QolResult cs_native_call(void* /*user*/, const contracts::QolSaveNativeCall* cal
                 call->target_slot, &token);
             if (out != nullptr) out->transition = token;
             if (kind == contracts::QolSaveCallKind::kResume && contracts::succeeded(began)) {
-                g_resume_begin_frame.store(g_frame.load(), std::memory_order_release);
+                g_resume_begin_frame.store(g_logic_frame.load(), std::memory_order_release);
             }
             if (kind == contracts::QolSaveCallKind::kBeginNew && contracts::succeeded(began)) {
                 g_selection_token.store(token, std::memory_order_release);
@@ -195,6 +200,9 @@ QolResult cs_native_call(void* /*user*/, const contracts::QolSaveNativeCall* cal
             return save_transition_ready_for_save_enter()
                        ? contracts::ok()
                        : contracts::error(kQolErrBlocked, "save enter not ready", 18);
+        case contracts::QolSaveCallKind::kCancelTransition:
+            // 原版未启动/明确失败的出口取消未决转换（释放 token/lease，不伪装恢复已删 dat）。
+            return save_transition_cancel(call->transition);
         default:
             return contracts::error(kQolErrInvalidArgument, "unsupported save call kind", 24);
     }
@@ -224,7 +232,29 @@ QolResult cs_prepare_stop(void* /*user*/) {
 // confirm 失败（journal 阻断/ensure 失败）保留 pending 由后续帧重试，30 帧节流避免
 // 每帧 reset/ensure 的 IO 压力。
 void save_transition_observe() {
-    const uint64_t now = g_frame.load();
+    const uint64_t now = g_logic_frame.load();
+    // 当前 world 的受控 catch-up/重新激活：session 非 ready 且无未决转换、Adapter 观测到
+    // 世界就绪时，按当前槽发起 resume 转换（ensure+加载现存 sidecar，不执行新档 reset）。
+    // 覆盖「已进档时启用/停用后再启用」的当前档补加载，加载前操作门保持关闭。
+    if (g_save_tx != nullptr && g_save_tx->read_state != nullptr) {
+        contracts::QolSlotSession current{
+            -1, static_cast<uint32_t>(contracts::QolSlotSessionState::kUnavailable), 0};
+        if (contracts::succeeded(slot_data_api().session(&current)) &&
+            current.state != static_cast<uint32_t>(contracts::QolSlotSessionState::kReady)) {
+            uint64_t pending_token = 0;
+            int32_t pending_target = -1;
+            if (!save_transition_pending_observation(&pending_token, &pending_target)) {
+                contracts::QolSaveAdapterState st{};
+                st.size = sizeof(st);
+                if (contracts::succeeded(g_save_tx->read_state(g_save_tx->adapter_ctx, &st)) &&
+                    st.world_ready != 0 && st.current_slot >= 0 && st.current_slot <= 2) {
+                    uint64_t token = 0;
+                    (void)save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume),
+                                                st.current_slot, &token);
+                }
+            }
+        }
+    }
     uint64_t token = 0;
     int32_t target = -1;
     if (!save_transition_pending_observation(&token, &target)) return;
@@ -242,14 +272,28 @@ void save_transition_observe() {
         return;
     }
     g_resume_begin_frame.store(0, std::memory_order_release);
-    if (now - g_last_confirm_attempt.exchange(now, std::memory_order_acq_rel) < 30 && now != 0)
-        return;  // 节流：上次确认尝试不足 30 帧前。
+    // 节流仅在实际执行 confirm 后更新；首次尝试与新 token 独立放行，首次失败后可立即重试。
+    const uint64_t last_token = g_last_confirm_token.load(std::memory_order_acquire);
+    const uint64_t last = g_last_confirm_attempt.load(std::memory_order_acquire);
+    if (save_transition_confirm_throttled(last_token, token, last, now, 30))
+        return;  // 同一 token 上次实际执行不足 30 帧前。
+    g_last_confirm_token.store(token, std::memory_order_release);
+    g_last_confirm_attempt.store(now, std::memory_order_release);
     (void)save_transition_confirm(token, state.current_slot);
 }
 
 int32_t slot_data_frame(int64_t frame, void*) {
     g_frame.store(static_cast<uint64_t>(frame), std::memory_order_release);
     slot_data_pump();
+    save_transition_observe();
+    // 生产帧任务推进 hook 入口发起且仍 pending 的保存事务（HTTP 票据不重复推进）。
+    save_coordinator_pump(g_frame.load());
+    return 1;
+}
+
+// LogicPre 时钟：非 world 态（RenderPre 不执行）也持续运行，供确认超时等待。
+int32_t logic_clock_frame(int64_t frame, void*) {
+    g_logic_frame.store(static_cast<uint64_t>(frame), std::memory_order_release);
     save_transition_observe();
     return 1;
 }
@@ -460,6 +504,28 @@ bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, cha
     // 业务失败时端口返回错误，但 out 已携带原错误体（与迁移前响应一致），票据置 failed。
     if (!contracts::succeeded(result) || *out_size == 0) return false;
 
+    // B6：enter/create 票据绑定转换终态——仅 begin 的 token 完成确认 + 消费者加载 + ready
+    // 发布才 done；确认失败不得因 world 出现而成功。确认在途保持 pending。
+    if (p.kind == contracts::kQolSaveWriteEnterSlot ||
+        p.kind == contracts::kQolSaveWriteCreateSlot) {
+        if (!save_transition_ready_for_save_enter()) {
+            const auto prep = save_transition_prepare_stop();
+            if (prep.code == kQolErrBusy) {
+                if (g_sdk != nullptr && g_sdk->ticket_result.defer_current_result != nullptr) {
+                    (void)g_sdk->ticket_result.defer_current_result();
+                    return true;
+                }
+                return false;
+            }
+            const std::string fail =
+                "{\"ok\":false,\"error\":\"slot transition not confirmed\"}";
+            if (fail.size() > capacity) return false;
+            std::memcpy(out, fail.data(), fail.size());
+            *out_size = static_cast<uint32_t>(fail.size());
+            return false;
+        }
+    }
+
     int32_t slot = p.slot;
     if (p.kind == contracts::kQolSaveWriteSave) {
         if (g_port == nullptr || g_port->read.current_slot == nullptr ||
@@ -616,6 +682,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_backup_save_save = nullptr;
     g_backup_goto_new_game = nullptr;
     g_backup_select_back = nullptr;
+    g_logic_clock_task = 0;
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 3 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
@@ -744,10 +811,14 @@ int plugin_install(contracts::PluginContext& ctx) {
             return 1;
         }
     }
+    // LogicPre 时钟：非 world 态（RenderPre 不执行）也持续运行，供确认超时/失败等待。
+    if (ctx.sdk->scheduler.add != nullptr && g_logic_clock_task == 0) {
+        (void)ctx.sdk->scheduler.add(contracts::kQolRuntimeFramePointLogicPre, &logic_clock_frame,
+                                     nullptr, 1, 0, &g_logic_clock_task);
+    }
     log_message(ctx.sdk, "[core.save] provider install: facts + save writes + save route + hooks");
     return 0;
 }
-
 void plugin_deactivate(contracts::PluginContext& ctx) {
     // §9 停用顺序：先关准入（拒绝新请求与新转换）→ 摘 save_route 派发 → 收敛未决事务
     //（degraded + 释放凭据）→ 关转换状态机 → 摘帧任务/票据处理器。
@@ -762,6 +833,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     if (g_slot_data_frame_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
         (void)g_sdk->scheduler.remove(g_slot_data_frame_task);
         g_slot_data_frame_task = 0;
+    }
+    if (g_logic_clock_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+        (void)g_sdk->scheduler.remove(g_logic_clock_task);
+        g_logic_clock_task = 0;
     }
     // 结果处理器为自注册（不在 descriptor），必须显式注销。
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {

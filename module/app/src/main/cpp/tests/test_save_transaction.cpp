@@ -62,6 +62,13 @@ int fake_trampoline() {
     ++g_trampoline_calls;
     return g_trampoline_result;
 }
+
+int g_resume_calls = 0;
+int g_resume_result = 1;
+int fake_resume(int32_t) {
+    ++g_resume_calls;
+    return g_resume_result;
+}
 }  // namespace
 
 namespace save_tx = qol::game;
@@ -222,17 +229,35 @@ int main() {
     CHECK(g_trampoline_calls == 1);
     save_tx::save_transaction_bind_gate(&gate);
 
-    // ---- call_transition：凭据校验后 Unsupported（转换桥留 P3c）----
+    // ---- call_transition：凭据校验后按注入的原版入口执行（B7 转换桥）----
     QolSaveTransitionCall transition{};
     transition.size = sizeof(transition);
     transition.target_slot = 0;
+    // 未注入 resume 入口：NotReady，不执行原版。
     CHECK(save_tx::save_transaction_call_transition(&lease, &transition, &original).code ==
-          kQolErrUnsupported);
+          kQolErrNotReady);
     CHECK(original.invoked == 0);
     save_tx::save_transaction_bind_gate(&rejecting);
     CHECK(save_tx::save_transaction_call_transition(&lease, &transition, &original).code ==
           kQolErrBlocked);
     save_tx::save_transaction_bind_gate(&gate);
+    // 注入 resume 入口：真实执行并按作用域释放旁路上下文（pending transition + invocation）。
+    save_tx::save_transaction_set_resume_fn(&fake_resume);
+    g_resume_calls = 0;
+    g_resume_result = 1;
+    transition.transition = 777;
+    CHECK(save_tx::save_transaction_call_transition(&lease, &transition, &original).ok == kQolOk);
+    CHECK(g_resume_calls == 1 && original.invoked == 1 && original.result_valid == 1 &&
+          original.original_result == 1);
+    // 作用域结束后旁路上下文已清除：无未就绪读档转换。
+    int32_t leftover_target = -1;
+    CHECK(!save_tx::save_has_unready_load_transition(&leftover_target));
+    // 原版 resume 返回失败：invoked 保留事实、结果码为失败。
+    g_resume_result = 0;
+    CHECK(save_tx::save_transaction_call_transition(&lease, &transition, &original).code ==
+          kQolErrInternal);
+    CHECK(original.invoked == 1 && original.original_result == 0);
+    save_tx::save_transaction_set_resume_fn(nullptr);
 
     // ---- 相对名校验 ----
     CHECK(save_tx::save_transaction_dat_relative_name_valid("save0.dat"));

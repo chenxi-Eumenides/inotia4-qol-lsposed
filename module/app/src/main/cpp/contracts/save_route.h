@@ -11,6 +11,8 @@ namespace qol::contracts {
 
 enum class QolSaveCallKind : uint32_t {
     kSave = 0, kResume = 1, kBeginNew = 2, kConfirmNew = 3, kMaintenance = 4,
+    // 取消未决转换（原版未启动/明确失败的出口）：call.transition 携带待取消 token。
+    kCancelTransition = 5,
 };
 enum class QolSaveOrigin : uint32_t { kOrdinary = 0, kVerifiedLoadRewrite = 1 };
 enum class QolSaveState : uint32_t { kPending = 0, kDone = 1, kFailed = 2, kCancelled = 3 };

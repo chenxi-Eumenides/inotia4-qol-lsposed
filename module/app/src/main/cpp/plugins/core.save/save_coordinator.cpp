@@ -23,12 +23,14 @@ struct CapturedSection {
     std::string name;
     uint16_t version = 0;
     std::vector<uint8_t> payload;
+    uint64_t owner = 0;
 };
 
 enum class TxPhase : uint32_t {
     kIdle = 0,
     kAwaitingEvidence = 1,  // 原版已成功，evidence 未取得。
     kAwaitingReplace = 2,   // confirmed journal 已写，正式替换未提交。
+    kAwaitingConfirmed = 3,
 };
 
 struct SlotTx {
@@ -43,6 +45,8 @@ struct SlotTx {
     SaveJournal journal;                    // confirmed（stage1 + evidence）。
     std::vector<uint8_t> confirmed_bytes;
     QolSaveOriginalResult original{};       // 本次事务的原版真实返回（SAVE_Save 入口透传）。
+    // true：由 hook 入口发起，pending 由生产帧任务推进；HTTP 票据不重复推进该 tx。
+    bool frame_retry = false;
 };
 
 struct Runtime {
@@ -117,7 +121,7 @@ std::vector<CapturedSection> captured_from_journal(const SaveJournal& journal) {
     std::vector<CapturedSection> out;
     out.reserve(journal.entries.size());
     for (const auto& entry : journal.entries)
-        out.push_back(CapturedSection{entry.name, entry.version, entry.payload});
+        out.push_back(CapturedSection{entry.name, entry.version, entry.payload, entry.owner_id});
     return out;
 }
 
@@ -127,7 +131,8 @@ struct ExecuteResult {
 };
 
 // 线性事务主体：任何失败路径均不调用后续步骤；终态 complete 恰一次。
-ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
+// frame_retry=true 表示本事务由 SAVE_Save hook 入口发起，其 pending 阶段由生产帧任务推进。
+ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) {
     SlotTx& tx = slot_tx(slot);
     if (!tx.recovery.permits_save()) return {SaveSettle::kFailed, "slot health blocks save"};
     // 新事务从头开始：清掉上一事务残留的捕获/日志态（凭据仅由释放路径改动）。
@@ -135,6 +140,8 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
     tx.journal = SaveJournal{};
     tx.confirmed_bytes.clear();
     tx.phase = TxPhase::kIdle;
+    tx.original = {};
+    tx.frame_retry = frame_retry;
     const uint64_t transaction = g.next_tx < UINT64_MAX ? g.next_tx++ : 0;
     if (transaction == 0) return {SaveSettle::kFailed, "transaction id exhausted"};
     SlotDataSaveView view{};
@@ -147,23 +154,23 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
         uint16_t version = 0;
         std::vector<uint8_t> payload(kQolSlotDataMaxPayloadBytes);
         uint64_t size = 0;
+        QolOwnerToken owner = 0;
         const auto captured =
             slot_data_save_capture_next(transaction, &section, &version, payload.data(),
-                                        payload.size(), &size);
+                                         payload.size(), &size, &owner);
         if (captured.code == kQolErrNotFound) break;
         if (!succeeded(captured)) {
             finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
             return {SaveSettle::kFailed, "capture failed"};
         }
         payload.resize(static_cast<std::size_t>(size));
-        tx.captured.push_back(CapturedSection{section, version, std::move(payload)});
-    }
-    if (tx.captured.empty()) {
-        finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
-        return {SaveSettle::kFailed, "no participants captured"};
+        tx.captured.push_back(CapturedSection{section, version, std::move(payload), owner});
     }
     // 三候选容量预检（真实 encoder）：prepared / confirmed / final。
     SaveJournal prepared{transaction, slot, view.session.epoch, JournalStage::kPrepared, {}, {}};
+    for (const auto& item : tx.captured)
+        prepared.entries.push_back({item.owner, item.name, item.version, item.payload});
+    tx.journal = prepared;
     std::vector<uint8_t> prepared_bytes;
     if (!encode_save_journal(prepared, &prepared_bytes)) {
         finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
@@ -185,26 +192,18 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
     candidates[2].replacements = final_sections.data();
     candidates[2].removal_count = 1;
     candidates[2].removals = &journal_removal;
-    // confirmed 候选的 journal 需要 evidence；预检阶段用全零 evidence 会违反
-    // valid_evidence——confirmed 容量按 prepared + 40B evidence 预留近似上界即可，
-    // 精确长度在 evidence 取得后由 write/replace 的预算校验兜底。
-    uint64_t prepared_length = 0;
-    uint64_t final_length = 0;
-    if (!succeeded(g.backend->preflight(g.owner, slot, &candidates[0], 1, &prepared_length)) ||
-        prepared_length > kQolSlotDataMaxContainerBytes) {
+    // evidence 的字节区固定预留；非零占位摘要只用于 encoder 精确容量预检。
+    SaveJournal confirmed_candidate = prepared;
+    confirmed_candidate.stage = JournalStage::kOriginalConfirmed;
+    confirmed_candidate.evidence.sha256[0] = 1;
+    std::vector<uint8_t> candidate_bytes;
+    if (!encode_save_journal(confirmed_candidate, &candidate_bytes)) {
         finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
-        return {SaveSettle::kFailed, "prepared candidate over budget"};
+        return {SaveSettle::kFailed, "confirmed candidate encode failed"};
     }
-    if (!succeeded(g.backend->preflight(g.owner, slot, &candidates[2], 1, &final_length)) ||
-        final_length > kQolSlotDataMaxContainerBytes) {
-        finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
-        return {SaveSettle::kFailed, "final candidate over budget"};
-    }
-    // confirmed = prepared + evidence(40B) + 相同条目；预算按 prepared 上界加 40 校验。
-    if (prepared_length + 40 > kQolSlotDataMaxContainerBytes) {
-        finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
-        return {SaveSettle::kFailed, "confirmed candidate over budget"};
-    }
+    const auto confirmed_section = journal_section(candidate_bytes);
+    candidates[1].size = sizeof(QolOwnerStoreCandidate);
+    candidates[1].journal = &confirmed_section;
     // 先 acquire operation lease 再 reserve_in_operation。
     tx.lease.size = sizeof(tx.lease);
     const auto acquired = g.operation->acquire(g.operation->host_ctx, g.owner, 1u << slot, &tx.lease);
@@ -215,7 +214,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
     tx.lease_held = true;
     QolOwnerStoreReservation reservation{};
     reservation.size = sizeof(reservation);
-    const auto reserved = g.backend->reserve_in_operation(g.owner, &tx.lease, slot, &candidates[0], 1,
+    const auto reserved = g.backend->reserve_in_operation(g.owner, &tx.lease, slot, candidates, 3,
                                                           &reservation);
     if (!succeeded(reserved)) {
         finish_capture(tx, value(QolSlotDataOutcome::kCancelled));
@@ -279,8 +278,8 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
         (void)frame;
         return {SaveSettle::kPending, "evidence unavailable"};
     }
-    tx.journal = SaveJournal{transaction, slot, view.session.epoch,
-                             JournalStage::kOriginalConfirmed, evidence, {}};
+    tx.journal.stage = JournalStage::kOriginalConfirmed;
+    tx.journal.evidence = evidence;
     if (!encode_save_journal(tx.journal, &tx.confirmed_bytes)) {
         tx.recovery.degrade();
         finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
@@ -293,7 +292,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
                                   tx.confirmed_bytes.size());
     tx.reservation = write_credential;
     if (!succeeded(confirmed_written)) {
-        tx.phase = TxPhase::kAwaitingReplace;
+        tx.phase = TxPhase::kAwaitingConfirmed;
         (void)tx.recovery.original_confirmed(tx.journal);
         return {SaveSettle::kPending, "confirmed journal write deferred"};
     }
@@ -317,6 +316,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
     tx.journal = SaveJournal{};
     tx.tx_id = 0;
     tx.phase = TxPhase::kIdle;
+    tx.frame_retry = false;
     return {SaveSettle::kCommitted, {}};
 }
 
@@ -383,7 +383,7 @@ bool save_coordinator_permits_save(int32_t slot) {
     return slot >= 0 && slot <= 2 && slot_tx(slot).recovery.permits_save();
 }
 
-void save_coordinator_on_session_enter(int32_t slot, uint64_t frame) {
+void save_coordinator_on_session_enter(int32_t slot, uint64_t frame, const QolSlotOperationLease* lease) {
     if (!main_thread() || slot < 0 || slot > 2) return;
     std::vector<uint8_t> bytes(1024 * 1024);
     uint64_t size = 0;
@@ -410,13 +410,17 @@ void save_coordinator_on_session_enter(int32_t slot, uint64_t frame) {
     SlotTx& tx = slot_tx(slot);
     {
         std::lock_guard<std::mutex> lock(g.mutex);
-        tx.lease.size = sizeof(tx.lease);
-        const auto acquired = g.operation->acquire(g.operation->host_ctx, g.owner, 1u << slot, &tx.lease);
-        if (!succeeded(acquired)) {
-            tx.recovery.degrade();
-            return;
+        if (lease != nullptr) {
+            tx.lease = *lease;
+        } else {
+            tx.lease.size = sizeof(tx.lease);
+            const auto acquired = g.operation->acquire(g.operation->host_ctx, g.owner, 1u << slot, &tx.lease);
+            if (!succeeded(acquired)) {
+                tx.recovery.degrade();
+                return;
+            }
+            tx.lease_held = true;
         }
-        tx.lease_held = true;
         QolOwnerStoreCandidate candidate{};
         candidate.size = sizeof(candidate);
         QolOwnerStoreReservation reservation{};
@@ -445,6 +449,7 @@ void save_coordinator_on_session_enter(int32_t slot, uint64_t frame) {
     tx.journal = journal;
     tx.tx_id = journal.tx_id;
     tx.phase = TxPhase::kAwaitingReplace;
+    tx.frame_retry = true;  // 进档恢复：pending 由生产帧任务推进，不占 HTTP 票据。
     tx.recovery.begin_pending();  // 自动重试窗口：帧驱动推进，不重新 capture。
     (void)frame;
     std::string error_text;
@@ -467,6 +472,7 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         // 不在可重试窗口：degraded 或已耗尽。
         if (tx.phase != TxPhase::kIdle && tx.recovery.health() == SlotHealth::kDegraded) {
             finish_capture(tx, value(QolSlotDataOutcome::kDegraded));  // 收敛捕获事务（保留证据）。
+            tx.frame_retry = false;
             if (out_error != nullptr) *out_error = "recovery retries exhausted";
             return SaveSettle::kFailed;
         }
@@ -486,17 +492,22 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
             }
             return SaveSettle::kPending;
         }
-        tx.journal = SaveJournal{tx.tx_id, slot, 0, JournalStage::kOriginalConfirmed, current, {}};
+        tx.journal.stage = JournalStage::kOriginalConfirmed;
+        tx.journal.evidence = current;
         std::vector<uint8_t> confirmed;
         if (!encode_save_journal(tx.journal, &confirmed)) {
             tx.recovery.degrade();
             if (out_error != nullptr) *out_error = "confirmed journal encode failed; degraded";
             return SaveSettle::kFailed;
         }
+        tx.confirmed_bytes = std::move(confirmed);
+        tx.phase = TxPhase::kAwaitingConfirmed;
+    }
+    if (tx.phase == TxPhase::kAwaitingConfirmed) {
         auto credential = tx.reservation;
         const auto written =
             g.backend->write_reserved(g.owner, slot, &credential, kSaveJournalSection,
-                                      kSaveJournalVersion, confirmed.data(), confirmed.size());
+                                       kSaveJournalVersion, tx.confirmed_bytes.data(), tx.confirmed_bytes.size());
         tx.reservation = credential;
         if (!succeeded(written)) {
             if (tx.recovery.retry_result(false) == LeaseAction::kRelease) {
@@ -506,7 +517,6 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
             }
             return SaveSettle::kPending;
         }
-        tx.confirmed_bytes = std::move(confirmed);
         tx.phase = TxPhase::kAwaitingReplace;
     }
     if (tx.phase == TxPhase::kAwaitingReplace) {
@@ -544,6 +554,7 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         tx.confirmed_bytes.clear();
         tx.journal = SaveJournal{};
         tx.phase = TxPhase::kIdle;
+        tx.frame_retry = false;
         return SaveSettle::kCommitted;
     }
     if (out_error != nullptr) *out_error = "unexpected phase";
@@ -559,10 +570,12 @@ SaveSettle save_coordinator_settle(int32_t slot, uint32_t attempt, uint64_t fram
     }
     bool has_tx = false;
     bool healthy = true;
+    bool frame_retry = false;
     {
         std::lock_guard<std::mutex> lock(g.mutex);
         has_tx = slot_tx(slot).phase != TxPhase::kIdle;
         healthy = slot_tx(slot).recovery.permits_save();
+        frame_retry = slot_tx(slot).frame_retry;
     }
     // 同槽未决事务：后续 attempt 只查询/推进该 tx（首执行后续 defer）。
     if (has_tx) {
@@ -570,6 +583,8 @@ SaveSettle save_coordinator_settle(int32_t slot, uint32_t attempt, uint64_t fram
             if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"save in flight\"}";
             return SaveSettle::kFailed;
         }
+        // 该 tx 由生产帧任务推进：HTTP 票据只报告 pending，不重复推进。
+        if (frame_retry) return SaveSettle::kPending;
         std::string error_text;
         const auto settled = save_coordinator_retry_frame(slot, frame, &error_text);
         if (settled == SaveSettle::kCommitted) {
@@ -592,7 +607,7 @@ SaveSettle save_coordinator_settle(int32_t slot, uint32_t attempt, uint64_t fram
         if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"no bound transaction\"}";
         return SaveSettle::kFailed;
     }
-    const auto executed = save_execute_impl(slot, frame);
+    const auto executed = save_execute_impl(slot, frame, false);
     if (executed.settle == SaveSettle::kCommitted) {
         if (out_body != nullptr)
             *out_body = "{\"ok\":true,\"slot\":" + std::to_string(slot) +
@@ -608,28 +623,85 @@ SaveSettle save_coordinator_settle(int32_t slot, uint32_t attempt, uint64_t fram
 SaveSettle save_coordinator_save_entry(int32_t slot, uint32_t attempt, uint64_t frame,
                                        contracts::QolSaveOriginalResult* out_original,
                                        std::string* out_body) {
+    if (out_body != nullptr) out_body->clear();
     if (out_original != nullptr) {
         out_original->size = sizeof(*out_original);
         out_original->invoked = 0;
         out_original->result_valid = 0;
         out_original->original_result = 0;
     }
-    const auto settled = save_coordinator_settle(slot, attempt, frame, out_body);
-    if (out_original == nullptr) return settled;
-    std::lock_guard<std::mutex> lock(g.mutex);
-    if (g.backend == nullptr) return settled;
-    const SlotTx& tx = slot_tx(slot);
-    // 原版真实 int 恒透传（invoked=1 时）：包括原版成功但 sidecar 进入 pending/degraded
-    // 的路径——游戏档已写入的事实不因 sidecar 结果改写；原版未执行时保持 invoked=0。
-    if (tx.original.invoked != 0) *out_original = tx.original;
-    return settled;
+    if (slot < 0 || slot > 2) {
+        if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"bad slot\"}";
+        return SaveSettle::kFailed;
+    }
+    bool has_tx = false;
+    bool healthy = true;
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        if (g.backend == nullptr) {
+            if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"coordinator not installed\"}";
+            return SaveSettle::kFailed;
+        }
+        has_tx = slot_tx(slot).phase != TxPhase::kIdle;
+        healthy = slot_tx(slot).recovery.permits_save();
+    }
+    // 前一次 hook 保存仍 pending：本 invocation 未执行原版，不得透传上一事务的原版返回。
+    if (has_tx) {
+        if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"save in flight\"}";
+        return SaveSettle::kFailed;
+    }
+    if (attempt != 0) {
+        if (!healthy) {
+            if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"slot degraded\"}";
+            return SaveSettle::kFailed;
+        }
+        if (out_body != nullptr) *out_body = "{\"ok\":false,\"error\":\"no bound transaction\"}";
+        return SaveSettle::kFailed;
+    }
+    const auto executed = save_execute_impl(slot, frame, true);
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        // 只有本次 invocation 真正执行原版（invoked=1）才透传原版真实 int。
+        if (out_original != nullptr && slot_tx(slot).original.invoked != 0)
+            *out_original = slot_tx(slot).original;
+    }
+    if (executed.settle == SaveSettle::kCommitted) {
+        if (out_body != nullptr)
+            *out_body = "{\"ok\":true,\"slot\":" + std::to_string(slot) +
+                        ",\"sidecar\":\"ensured\"}";
+        return SaveSettle::kCommitted;
+    }
+    if (executed.settle == SaveSettle::kPending) return SaveSettle::kPending;
+    if (out_body != nullptr && !executed.error.empty())
+        *out_body = "{\"ok\":false,\"error\":\"" + executed.error + "\"}";
+    return SaveSettle::kFailed;
 }
 
-QolResult save_coordinator_journal_verdict(int32_t slot, void* ctx) {
+// 生产帧任务驱动 hook 入口发起且仍 pending 的未决事务：≤3 次后续帧、同一 tx、
+// 不重新 capture、不重调原版。HTTP 票据绑定的 tx（frame_retry=false）由 attempt 推进，
+// 此处跳过以避免重复推进。
+void save_coordinator_pump(uint64_t frame) {
+    if (!main_thread()) return;
+    for (int32_t slot = 0; slot <= 2; ++slot) {
+        bool drive = false;
+        {
+            std::lock_guard<std::mutex> lock(g.mutex);
+            if (g.backend == nullptr) return;
+            const SlotTx& tx = slot_tx(slot);
+            drive = tx.phase != TxPhase::kIdle && tx.frame_retry &&
+                    tx.recovery.health() != SlotHealth::kDegraded;
+        }
+        if (!drive) continue;
+        std::string error_text;
+        (void)save_coordinator_retry_frame(slot, frame, &error_text);
+    }
+}
+
+QolResult save_coordinator_journal_verdict(int32_t slot, const QolSlotOperationLease* lease, void* ctx) {
     (void)ctx;
     // stage=1 的自动恢复（同 tx replace 重试，不重 capture 不重调原版）；恢复后槽健康
     // 决定确认序放行或阻断（degraded 保留证据并阻断）。
-    save_coordinator_on_session_enter(slot, 0);
+    save_coordinator_on_session_enter(slot, 0, lease);
     {
         std::lock_guard<std::mutex> lock(g.mutex);
         if (g.backend == nullptr) return ok();  // 协调器未装配：交由保守阻断（上层语义）。

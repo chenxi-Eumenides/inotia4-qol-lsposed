@@ -59,12 +59,21 @@ void save_load_wrapper(int32_t slot) {
                      "save enter blocked by transition gate slot=%d", slot);
         return;  // 不消费、不执行原版转换：模块准入失败即阻断（fail-closed）。
     }
-    qol::game::save_set_pending_transition(transition, slot, false);
-    (void)qol::game::save_invocation_begin(
-        static_cast<uint32_t>(qol::contracts::QolSaveCallKind::kResume), slot);
+    // API 与按钮读档共用受控转换上下文（统一设置未就绪 transition + invocation）。
+    const uint64_t bypass = qol::game::save_load_bypass_begin(
+        transition, slot, static_cast<uint32_t>(qol::contracts::QolSaveCallKind::kResume));
     save_enter_mark_pending();
-    if (fn_game_start_resume_game != nullptr) fn_game_start_resume_game(slot);
-    qol::game::save_clear_pending_transition();
+    if (fn_game_start_resume_game != nullptr) {
+        fn_game_start_resume_game(slot);
+    } else {
+        // 原版未启动：显式取消未决转换（释放 token/lease），并结束 bypass 作用域。
+        const auto& hooks_cancel = qol::contracts::qol_runtime_hooks();
+        if (hooks_cancel.save_transition_cancel_thunk != nullptr)
+            hooks_cancel.save_transition_cancel_thunk(transition);
+        qol::game::save_load_bypass_end(bypass);
+        return;
+    }
+    qol::game::save_load_bypass_end(bypass);
 }
 
 // 新档 wrapper：selection token 已由 SaveSlot_GoToNewGame 入口 hook begin（core.save），

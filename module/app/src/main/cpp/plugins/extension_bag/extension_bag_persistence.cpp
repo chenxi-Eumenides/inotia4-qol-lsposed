@@ -46,6 +46,21 @@ std::atomic<uint64_t> g_admitted_epoch{0};
 // 未加载/epoch 不匹配/降级时扫描与物品操作明确拒绝（不再惰性 IO 兜底）。
 std::atomic<bool> g_session_blocked{true};
 
+// 捕获 revision（内容指纹）：capture 记录当前状态指纹，complete(kCommitted) 只在
+// 当前状态与捕获时一致（捕获后无新修改）时清 pending/dirty，不误清捕获后的新修改；
+// dirty staging 通知的是「有新修改」而非无版本布尔量。
+std::atomic<uint64_t> g_capture_revision{0};
+std::atomic<bool> g_capture_revision_valid{false};
+
+uint64_t fnv1a64(const std::string& text) {
+    uint64_t hash = 1469598103934665603ull;
+    for (const unsigned char c : text) {
+        hash ^= c;
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 QolResult eb_ok() { return qol::contracts::ok(); }
 
 bool occupied_item_nonempty(const virtual_bag::State& state) {
@@ -59,8 +74,11 @@ bool occupied_item_nonempty(const virtual_bag::State& state) {
 }
 
 // prepare_detach（§4）：撤投影、释放缓存、清按钮；拒绝则阻止原版转换。
+// 开始即撤销本地准入（g_session_blocked/g_admitted_epoch），detach 窗口内不再放行扫描与物品操作。
 QolResult eb_sd_prepare_detach(void* /*user*/, const QolSlotSession* /*old_session*/,
                                uint32_t /*reason*/) {
+    g_session_blocked.store(true, std::memory_order_release);
+    g_admitted_epoch.store(0, std::memory_order_release);
     return virtual_bag_prepare_save_slot_load() ? eb_ok()
         : qol::contracts::error(kQolErrBlocked, "extension bag detach failed", 24);
 }
@@ -178,6 +196,9 @@ QolResult eb_sd_capture(void* /*user*/, const QolSlotDataContext* ctx, uint8_t* 
         return qol::contracts::error(kQolErrInvalidArgument, "capture too large", 16);
     std::memcpy(out_buffer, json.data(), json.size());
     *out_size = json.size();
+    // 记录捕获 revision，供 complete 判定捕获后是否又有新修改。
+    g_capture_revision.store(fnv1a64(json), std::memory_order_release);
+    g_capture_revision_valid.store(true, std::memory_order_release);
     QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data capture slot=%d epoch=%llu bytes=%zu "
                  "nonempty=%d", ctx->session.slot,
                  static_cast<unsigned long long>(ctx->session.epoch), json.size(),
@@ -191,10 +212,22 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     switch (kind) {
         case qol::contracts::QolSlotDataOutcome::kCommitted:
-            // 正式容器已提交：清 pending 与 dirty（provider 已按捕获快照核对过写者）。
-            extension_bag_state()->pending = {};
-            g_item_state_dirty = false;
-            g_session_blocked.store(false, std::memory_order_release);
+            // 正式容器已提交：仅当当前状态与捕获 revision 一致（捕获后无新修改）才清
+            // pending 与 dirty；有新修改时保留，等待下一次保存。
+            {
+                const bool valid = g_capture_revision_valid.exchange(false, std::memory_order_acq_rel);
+                const uint64_t captured = g_capture_revision.load(std::memory_order_acquire);
+                const std::string current = virtual_bag::state_json(*extension_bag_state());
+                if (valid && fnv1a64(current) == captured) {
+                    extension_bag_state()->pending = {};
+                    g_item_state_dirty = false;
+                } else {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "slot data committed skipped clear reason=modified_after_capture slot=%d",
+                                 ctx->session.slot);
+                }
+                g_session_blocked.store(false, std::memory_order_release);
+            }
             break;
         case qol::contracts::QolSlotDataOutcome::kStaged:
             // SlotBound 写完成为 staged：等待原版保存事务，不清 dirty。

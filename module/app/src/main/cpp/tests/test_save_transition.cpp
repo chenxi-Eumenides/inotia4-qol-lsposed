@@ -63,9 +63,28 @@ QolResult backend_write_stub(QolOwnerToken, int32_t, const char*, uint16_t, cons
                              uint64_t) {
     return ok();
 }
+// 确认路径必须持 transition lease 走带凭据入口；这里计数带凭据调用，证明 ensure/reset
+// 不再走无凭据入口（B1 回归）。
+int g_ensure_in_op_calls = 0;
+int g_reset_in_op_calls = 0;
+QolResult backend_ensure_in_operation(QolOwnerToken token, const QolSlotOperationLease* lease,
+                                      int32_t slot) {
+    if (lease == nullptr || lease->size < sizeof(*lease))
+        return error(kQolErrInvalidArgument, "lease required", 12);
+    ++g_ensure_in_op_calls;
+    return backend_ensure(token, slot);
+}
+QolResult backend_reset_in_operation(QolOwnerToken token, const QolSlotOperationLease* lease,
+                                     int32_t slot) {
+    if (lease == nullptr || lease->size < sizeof(*lease))
+        return error(kQolErrInvalidArgument, "lease required", 12);
+    ++g_reset_in_op_calls;
+    return backend_reset(token, slot);
+}
 const QolOwnerStoreApi kBackend{{sizeof(QolOwnerStoreApi), 1, 0}, &backend_ensure, &backend_reset,
                                 &backend_read_section, &backend_write_stub, nullptr, nullptr, nullptr,
-                                nullptr, nullptr, nullptr};
+                                nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                nullptr, &backend_ensure_in_operation, &backend_reset_in_operation};
 
 // ---- provider 参与者 ----
 struct Consumer {
@@ -102,8 +121,10 @@ QolSlotDataSpec consumer_spec(QolOwnerToken token, Consumer* c) {
 }
 
 int g_verdict_slot = -1;
-QolResult allow_verdict(int32_t slot, void*) {
+const QolSlotOperationLease* g_verdict_lease = nullptr;
+QolResult allow_verdict(int32_t slot, const QolSlotOperationLease* lease, void*) {
     g_verdict_slot = slot;
+    g_verdict_lease = lease;
     return ok();
 }
 
@@ -171,8 +192,10 @@ int main() {
     CHECK(save_transition_prepare_stop().code == kQolErrBusy);
     CHECK(consumer_state.ready == 0);
 
-    // ---- confirm 成功（resume）：ensure 幂等、epoch 生成、session_ready、SessionBound load ----
+    // ---- confirm 成功（resume）：ensure 走带凭据入口、epoch 生成、session_ready、SessionBound load ----
+    const auto in_op_before = g_ensure_in_op_calls;
     CHECK(succeeded(save_transition_confirm(token, 1)));
+    CHECK(g_ensure_in_op_calls == in_op_before + 1);  // B1：确认序持 lease 调带凭据 ensure。
     CHECK(save_transition_ready_for_save_enter());
     CHECK(save_transition_prepare_stop().ok == kQolOk);
     CHECK(consumer_state.ready == 1 && consumer_state.loads == 1);
@@ -240,12 +263,14 @@ int main() {
     CHECK(session.state == static_cast<uint32_t>(QolSlotSessionState::kUnavailable));
     CHECK(!save_transition_ready_for_save_enter());
 
-    // ---- begin_new：confirm 走 reset（provider confirm 内部仍做幂等 ensure）----
+    // ---- begin_new：confirm 走 reset（provider confirm 内部不再重复 ensure）----
     uint64_t fresh = 0;
     const auto resets_before_new = g_reset_calls;
+    const auto reset_in_op_before = g_reset_in_op_calls;
     CHECK(succeeded(save_transition_begin(static_cast<uint32_t>(TransitionKind::kBeginNew), 2, &fresh)));
     CHECK(succeeded(save_transition_confirm(fresh, 2)));
     CHECK(g_reset_calls == resets_before_new + 1);
+    CHECK(g_reset_in_op_calls == reset_in_op_before + 1);  // B1：新档 reset 走带凭据入口。
 
     // ---- journal 严格分派：stage0 恒阻断（不消费 pending）；stage1 需协调器 verdict ----
     SaveJournal prepared{77, 0, 5, JournalStage::kPrepared, {}, {}};
@@ -267,6 +292,9 @@ int main() {
     save_transition_set_journal_verdict(&allow_verdict, nullptr);
     CHECK(succeeded(save_transition_confirm(with_journal, 0)));
     CHECK(g_verdict_slot == 0);
+    // B1：journal 分派收到未决转换的 transition lease（协调器恢复复用该 operation）。
+    CHECK(g_verdict_lease != nullptr && (g_verdict_lease->slot_mask & (1u << 0)) != 0 &&
+          g_verdict_lease->owner == provider);
 
     // ---- 协调器健康 gate：拒绝转换开始 ----
     save_transition_set_transition_gate([](int32_t, void*) { return false; }, nullptr);
@@ -277,6 +305,14 @@ int main() {
 
     // ---- 未注册 token 的 confirm 与未授权 owner ----
     CHECK(save_transition_confirm(999999, 0).code == kQolErrNotFound);
+
+    // ---- B2：确认节流只在实际执行后生效；首次失败可立即重试、新 token 独立放行 ----
+    CHECK(!save_transition_confirm_throttled(0, 5, 0, 100, 30));   // 尚未执行：放行。
+    CHECK(!save_transition_confirm_throttled(5, 5, 100, 0, 30));   // 帧号回绕：放行。
+    CHECK(save_transition_confirm_throttled(5, 5, 100, 110, 30));  // 同 token 窗口内：跳过。
+    CHECK(!save_transition_confirm_throttled(5, 5, 100, 130, 30)); // 窗口届满：放行。
+    CHECK(!save_transition_confirm_throttled(5, 6, 100, 101, 30)); // 新 token：独立放行。
+
     save_transition_reset_for_test();
     slot_data_set_available(false);
     save_transition_shutdown();

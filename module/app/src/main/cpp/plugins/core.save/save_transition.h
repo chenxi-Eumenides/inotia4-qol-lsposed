@@ -27,7 +27,7 @@ void save_transition_shutdown();
 void save_transition_set_transition_gate(bool (*allowed)(int32_t slot, void* ctx), void* ctx);
 // journal 分派缝（协调器注入）：confirm 序对未决 journal 的严格分派；返回非 ok 即阻断
 // 且不消费 pending。未注入时任何未决 journal 均阻断（保守，不抹证据）。
-void save_transition_set_journal_verdict(QolResult (*verdict)(int32_t slot, void* ctx), void* ctx);
+void save_transition_set_journal_verdict(QolResult (*verdict)(int32_t slot, const contracts::QolSlotOperationLease* lease, void* ctx), void* ctx);
 
 // requested_slot 是已校验的请求槽（API 读档/建档直接采用，不读 current_slot 代替）。
 // begin 原子取得覆盖 old+target 两槽的 operation lease；关闭旧 session 准入；
@@ -51,6 +51,10 @@ bool save_transition_bypass_lease(contracts::QolSlotOperationLease* out_lease,
                                   int32_t* out_target);
 // 宿主生命周期停用前置：存在未决转换或未决事务时 Busy。
 QolResult save_transition_prepare_stop();
+// 确认节流纯判定：仅当同一 token 且距上次实际执行不足 window 帧时跳过。last_frame==0
+//（尚未执行）或 token 变化（新转换）一律放行，保证首次失败后可继续重试。
+bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint64_t last_frame,
+                                       uint64_t now, uint64_t window);
 void save_transition_reset_for_test();
 
 }  // namespace qol::features::core_save

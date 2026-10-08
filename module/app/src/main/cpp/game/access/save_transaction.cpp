@@ -39,6 +39,8 @@ SaveTransactionGate g_gate{};
 char g_platform_dir[512] = {};
 void (*g_get_name_fn)(int32_t, char*) = nullptr;
 int (*g_current_slot_fn)() = nullptr;
+int (*g_resume_fn)(int32_t) = nullptr;
+void (*g_new_game_fn)(int32_t) = nullptr;
 
 // 已绑定的 framework trampoline；常数时间绑定，仅 resource-ready 装配回调写入。
 void* g_framework_backup = nullptr;
@@ -185,6 +187,18 @@ void save_transaction_set_platform_dir(const char* root) {
 void save_transaction_set_get_name_fn(void (*fn)(int32_t, char*)) { g_get_name_fn = fn; }
 
 void save_transaction_set_current_slot_fn(int (*fn)()) { g_current_slot_fn = fn; }
+void save_transaction_set_resume_fn(int (*fn)(int32_t)) { g_resume_fn = fn; }
+void save_transaction_set_new_game_fn(void (*fn)(int32_t)) { g_new_game_fn = fn; }
+
+uint64_t save_load_bypass_begin(uint64_t transition, int32_t target_slot, uint32_t kind) {
+    save_set_pending_transition(transition, target_slot, false);
+    return save_invocation_begin(kind, target_slot);
+}
+
+void save_load_bypass_end(uint64_t invocation) {
+    save_clear_pending_transition();
+    save_invocation_end(invocation);
+}
 
 QolResult save_transaction_bind_backup(uint32_t entry_kind, void* framework_backup) {
     (void)entry_kind;
@@ -235,11 +249,34 @@ QolResult save_transaction_call_transition(const contracts::QolSlotOperationLeas
     out->invoked = 0;
     out->result_valid = 0;
     out->original_result = 0;
-    // 进档转换桥（resume/begin_new/confirm_new 的受控原版入口）留 P3c 接线；
-    // 本批只冻结入口签名与凭据校验语义。
     if (!gate_admits(lease, call->target_slot))
         return fail(kQolErrBlocked, "operation lease does not cover slot");
-    return fail(kQolErrUnsupported, "transition bridge not wired");
+    const auto kind = static_cast<contracts::QolSaveTransitionKind>(call->kind);
+    if (kind == contracts::QolSaveTransitionKind::kResume) {
+        if (g_resume_fn == nullptr) return fail(kQolErrNotReady, "resume entry unavailable");
+        const uint64_t bypass = save_load_bypass_begin(
+            call->transition, call->target_slot,
+            static_cast<uint32_t>(contracts::QolSaveCallKind::kResume));
+        const int original = g_resume_fn(call->target_slot);
+        save_load_bypass_end(bypass);
+        out->invoked = 1;
+        out->result_valid = 1;
+        out->original_result = original;
+        return original != 0 ? contracts::ok() : fail(kQolErrInternal, "resume failed");
+    }
+    if (kind == contracts::QolSaveTransitionKind::kBeginNew) {
+        if (g_new_game_fn == nullptr) return fail(kQolErrNotReady, "new game entry unavailable");
+        const uint64_t bypass = save_load_bypass_begin(
+            call->transition, call->target_slot,
+            static_cast<uint32_t>(contracts::QolSaveCallKind::kBeginNew));
+        g_new_game_fn(call->target_slot);
+        save_load_bypass_end(bypass);
+        out->invoked = 1;
+        out->result_valid = 0;
+        out->original_result = 0;
+        return contracts::ok();
+    }
+    return fail(kQolErrUnsupported, "transition kind unsupported");
 }
 
 bool save_transaction_dat_relative_name_valid(const char* name) {
@@ -292,6 +329,8 @@ void save_transaction_reset_for_test() {
     g_platform_dir[0] = '\0';
     g_get_name_fn = nullptr;
     g_current_slot_fn = nullptr;
+    g_resume_fn = nullptr;
+    g_new_game_fn = nullptr;
     g_framework_backup = nullptr;
 }
 

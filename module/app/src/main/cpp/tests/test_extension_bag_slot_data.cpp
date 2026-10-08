@@ -174,6 +174,50 @@ int main() {
         CHECK(virtual_bag::state_json(roundtrip) == nonempty);  // 非空状态往返字节等价。
     }
 
+    // ---- B10：complete(kCommitted) 只清匹配的捕获 revision ----
+    {
+        SlotDataSaveView view{};
+        g_item_state_dirty = true;
+        CHECK(succeeded(slot_data_save_begin(100, &view)));
+        const char* section = nullptr;
+        uint16_t version = 0;
+        std::vector<uint8_t> buffer(65536);
+        uint64_t size = 0;
+        QolOwnerToken captured_owner = 0;
+        CHECK(succeeded(slot_data_save_capture_next(100, &section, &version, buffer.data(),
+                                                    buffer.size(), &size, &captured_owner)));
+        CHECK(captured_owner == 7);
+        slot_data_save_finish(100, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+        CHECK(!g_item_state_dirty);  // 捕获后无修改：清 dirty。
+    }
+    {
+        SlotDataSaveView view{};
+        g_item_state_dirty = true;
+        CHECK(succeeded(slot_data_save_begin(101, &view)));
+        const char* section = nullptr;
+        uint16_t version = 0;
+        std::vector<uint8_t> buffer(65536);
+        uint64_t size = 0;
+        QolOwnerToken captured_owner = 0;
+        CHECK(succeeded(slot_data_save_capture_next(101, &section, &version, buffer.data(),
+                                                    buffer.size(), &size, &captured_owner)));
+        // 捕获后产生新修改（state_json 变化）→ committed 不得清 dirty。
+        {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            g_state.items[1][0] = virtual_bag::Item{123, 1};
+            virtual_bag::normalize(&g_state);
+        }
+        slot_data_save_finish(101, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+        CHECK(g_item_state_dirty);  // 捕获后的新修改：保留 dirty。
+    }
+
+    // ---- B9：prepare_detach 开始即撤销本地准入（detach 窗口拒绝扫描/物品操作）----
+    CHECK(extension_bag_session_admitted_locked());
+    CHECK(succeeded(slot_data_begin_transition(
+        static_cast<uint32_t>(QolSlotDataReason::kEnter), 0)));
+    CHECK(!extension_bag_session_admitted_locked());
+    CHECK(succeeded(slot_data_abandon_transition()));
+
     // ---- 注销：先关准入（未加载/降级拒绝），注册请求由 query 收敛 ----
     const QolSlotDataRequest unregistered = extension_bag_slot_data_unregister(&slot_data_api());
     CHECK(unregistered != 0);

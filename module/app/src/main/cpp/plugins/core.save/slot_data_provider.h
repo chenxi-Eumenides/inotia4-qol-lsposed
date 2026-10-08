@@ -32,7 +32,7 @@ QolResult slot_data_save_begin(uint64_t transaction, SlotDataSaveView* out);
 // 捕获跳过已 closing 的参与者（注销在途安全：引用未释放前回调已开始者完成本轮回调）。
 QolResult slot_data_save_capture_next(uint64_t transaction, const char** section,
                                       uint16_t* version, uint8_t* buffer, uint64_t capacity,
-                                      uint64_t* out_size);
+                                      uint64_t* out_size, contracts::QolOwnerToken* out_owner = nullptr);
 // 终态：对未 closing 的参与者恰一次 complete（幂等内存记账）；outcome=kCommitted 时按
 // 各自捕获快照清 dirty——捕获后又有新写者不误清。释放全部引用。
 void slot_data_save_finish(uint64_t transaction, uint32_t outcome);

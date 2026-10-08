@@ -36,7 +36,7 @@ struct Runtime {
     int32_t (*is_main_thread)() = nullptr;
     bool (*transition_allowed)(int32_t, void*) = nullptr;
     void* gate_ctx = nullptr;
-    QolResult (*journal_verdict)(int32_t, void*) = nullptr;
+    QolResult (*journal_verdict)(int32_t, const QolSlotOperationLease*, void*) = nullptr;
     void* journal_ctx = nullptr;
     uint64_t next_token = 1;
     PendingTransition pending{};  // 同一时刻至多一个未决转换（provider transitioning 互斥）。
@@ -63,7 +63,7 @@ void release_lease(PendingTransition& pending) {
 
 // 未决 journal 的严格分派：无注入时任何可解码/无法解码的 journal 都阻断确认序，
 // 不自动提升、不重放、不删除证据；注入的协调器分派决定放行或阻断。
-QolResult journal_check(int32_t slot) {
+QolResult journal_check(int32_t slot, const QolSlotOperationLease* lease) {
     if (g.backend == nullptr) return ok();
     std::vector<uint8_t> bytes(1024 * 1024);
     uint64_t size = 0;
@@ -76,7 +76,7 @@ QolResult journal_check(int32_t slot) {
     const auto decoded = decode_save_journal(version, slot, bytes.data(), size, &journal);
     if (decoded == JournalDecode::kValid && journal.stage == JournalStage::kOriginalConfirmed &&
         g.journal_verdict != nullptr)
-        return g.journal_verdict(slot, g.journal_ctx);
+        return g.journal_verdict(slot, lease, g.journal_ctx);
     if (decoded == JournalDecode::kValid) return fail(kQolErrBlocked, "prepared journal pending");
     return fail(kQolErrBlocked, "unresolved save journal");
 }
@@ -88,7 +88,7 @@ QolResult save_transition_initialize(QolOwnerToken owner, QolOwnerVerifyTokenFn 
                                      int32_t (*is_main)()) {
     if (owner == 0 || verify == nullptr || backend == nullptr || operation == nullptr ||
         is_main == nullptr || operation->acquire == nullptr || operation->release == nullptr ||
-        backend->reset_slot == nullptr || backend->ensure_slot == nullptr)
+        backend->reset_in_operation == nullptr || backend->ensure_in_operation == nullptr)
         return fail(kQolErrInvalidArgument, "invalid transition deps");
     const auto identity = verify(owner);
     if (!succeeded(identity)) return identity;
@@ -115,7 +115,7 @@ void save_transition_set_transition_gate(bool (*allowed)(int32_t, void*), void* 
     g.gate_ctx = ctx;
 }
 
-void save_transition_set_journal_verdict(QolResult (*verdict)(int32_t, void*), void* ctx) {
+void save_transition_set_journal_verdict(QolResult (*verdict)(int32_t, const QolSlotOperationLease*, void*), void* ctx) {
     std::lock_guard<std::mutex> lock(g.mutex);
     g.journal_verdict = verdict;
     g.journal_ctx = ctx;
@@ -193,8 +193,8 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot) {
     // 确认序第 1 步：新档 reset / 读档 ensure。均用已校验的请求槽。
     const auto prepared =
         pending.kind == TransitionKind::kBeginNew
-            ? g.backend->reset_slot(g.owner, pending.target_slot)
-            : g.backend->ensure_slot(g.owner, pending.target_slot);
+            ? g.backend->reset_in_operation(g.owner, &pending.lease, pending.target_slot)
+            : g.backend->ensure_in_operation(g.owner, &pending.lease, pending.target_slot);
     if (!succeeded(prepared)) {
         std::lock_guard<std::mutex> lock(g.mutex);
         // 不消费 pending：token 与 lease 保留，可重试确认或取消。
@@ -202,7 +202,7 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot) {
         return prepared;
     }
     // 第 2 步：未决 journal 严格分派（不盲目抹证据）；阻断则保持 pending。
-    const auto verdict = journal_check(pending.target_slot);
+    const auto verdict = journal_check(pending.target_slot, &pending.lease);
     if (!succeeded(verdict)) {
         std::lock_guard<std::mutex> lock(g.mutex);
         g.pending.phase = TransitionPhase::kAwaitingWorld;
@@ -280,6 +280,13 @@ QolResult save_transition_prepare_stop() {
     // 无未决转换才放行；未决事务的健康由协调器 gate 在 begin 时表达。
     if (g.has_pending) return fail(kQolErrBusy, "transition pending");
     return ok();
+}
+
+bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint64_t last_frame,
+                                       uint64_t now, uint64_t window) {
+    if (last_frame == 0 || last_token != token) return false;  // 尚未执行或新 token：放行。
+    if (now < last_frame) return false;                        // 帧号回绕：放行。
+    return now - last_frame < window;
 }
 
 void save_transition_reset_for_test() {

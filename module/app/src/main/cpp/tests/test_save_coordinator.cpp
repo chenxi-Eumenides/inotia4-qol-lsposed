@@ -38,6 +38,7 @@ int32_t is_main() { return std::this_thread::get_id() == g_main_thread; }
 int g_write_reserved_fail = 0;
 int g_replace_reserved_fail = 0;
 int g_remove_reserved_fail = 0;
+int g_last_reserve_candidates = 0;
 std::vector<int> g_release_order;  // 0=reservation 1=operation
 bool store_authorized(QolOwnerToken token) {
     return succeeded(qol::host::owner_authorize_store(token, "module-saves"));
@@ -188,6 +189,7 @@ QolResult store_reserve_in_operation(QolOwnerToken token, const QolSlotOperation
                                      int32_t slot, const QolOwnerStoreCandidate* candidates,
                                      uint32_t count, QolOwnerStoreReservation* out) {
     if (!store_authorized(token)) return error(kQolErrBlocked, "unauthorized", 12);
+    g_last_reserve_candidates = static_cast<int>(count);
     return from_status(
         qol::infra::store::reserve_in_operation(token, lease, slot, candidates, count, out),
         "reserve in operation failed");
@@ -374,6 +376,8 @@ int main() {
           original.result_valid == 1 && original.original_result == 42);
     g_adapter.original_result = 1;
     CHECK(g_capture_calls == 1 && consumer_state.captures == 1);
+    // B5：prepared/confirmed/final 三候选基于同一容器一次预约。
+    CHECK(g_last_reserve_candidates == 3);
     // request_write（SlotBound）会先 complete(kStaged)；committed 终态追加 kCommitted。
     CHECK(consumer_state.outcomes.back() ==
           static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
@@ -454,6 +458,41 @@ int main() {
     CHECK(g_capture_calls == captures_at_pending + 1);  // 仅首次事务 capture 一次，重试不重 capture。
     CHECK(g_adapter.call_count == calls_at_pending + 1);
     CHECK(journal_on_disk_missing());
+
+    // ---- B3/B4：hook 入口透传原版真实 int；pending 由帧任务推进（同 tx，不重 capture/不重调原版）----
+    g_replace_reserved_fail = 1;  // final replace 首次失败 → hook 事务进入 pending。
+    QolSaveOriginalResult hook_original{};
+    const auto calls_hook = g_adapter.call_count;
+    const auto captures_hook = g_capture_calls;
+    CHECK(save_coordinator_save_entry(0, 0, 30, &hook_original, &body) == SaveSettle::kPending);
+    CHECK(hook_original.invoked == 1 && hook_original.result_valid == 1 &&
+          hook_original.original_result == 1);  // B3：hook 透传原版真实返回，而非 invoked=0/0。
+    CHECK(g_adapter.call_count == calls_hook + 1);
+    CHECK(g_capture_calls == captures_hook + 1);
+    // B5：confirmed journal 携带捕获条目（owner/name/version/payload），重启可恢复。
+    {
+        std::vector<uint8_t> jbytes;
+        uint16_t jver = 0;
+        CHECK(qol::infra::store::read_section(0, "module.save.journal", &jbytes, &jver) ==
+              qol::infra::store::Status::kOk);
+        SaveJournal decoded;
+        CHECK(decode_save_journal(jver, 0, jbytes.data(), jbytes.size(), &decoded) ==
+              JournalDecode::kValid);
+        CHECK(decoded.stage == JournalStage::kOriginalConfirmed);
+        CHECK(decoded.entries.size() == 1);
+        CHECK(decoded.entries[0].owner_id == consumer);
+        CHECK(decoded.entries[0].name == "coordinator.data");
+        CHECK(decoded.entries[0].payload == std::vector<uint8_t>({42, 7}));
+    }
+    // HTTP 票据不重复推进 frame_retry tx：只报告 pending，不消费重试预算。
+    CHECK(save_coordinator_settle(0, 1, 30, &body) == SaveSettle::kPending);
+    // 生产帧任务推进同一 tx：成功且不重 capture、不重调原版。
+    save_coordinator_pump(31);
+    CHECK(save_coordinator_permits_save(0));
+    CHECK(g_adapter.call_count == calls_hook + 1);
+    CHECK(g_capture_calls == captures_hook + 1);
+    CHECK(journal_on_disk_missing());
+    g_replace_reserved_fail = 0;
 
     // ---- 重试耗尽：连续 3 帧失败 → degraded 失败终态 ----
     g_replace_reserved_fail = 10;
@@ -571,6 +610,19 @@ int main() {
     save_coordinator_reset_for_test();
     CHECK(qol::infra::store::remove_section(1, "module.save.journal") ==
           qol::infra::store::Status::kOk);
+
+    // ---- B12：合法 ready session 下零参与者保存仍执行原版并提交（不因无模块数据失败）----
+    QolSlotDataRequest detach_request = 0;
+    CHECK(succeeded(slot_data_api().unregister(consumer_state.handle, &detach_request)));
+    CHECK(make_session_ready());
+    const auto calls_zero = g_adapter.call_count;
+    g_adapter.original_result = 7;
+    QolSaveOriginalResult zero_original{};
+    CHECK(save_coordinator_save_entry(2, 0, 60, &zero_original, &body) == SaveSettle::kCommitted);
+    CHECK(g_adapter.call_count == calls_zero + 1);
+    CHECK(zero_original.invoked == 1 && zero_original.result_valid == 1 &&
+          zero_original.original_result == 7);
+    g_adapter.original_result = 1;
 
     slot_data_set_available(false);
     save_coordinator_shutdown();

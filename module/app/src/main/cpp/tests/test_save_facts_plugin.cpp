@@ -372,7 +372,7 @@ int main() {
 
     const auto check_deferred_route = [&](uint32_t route, int32_t kind, int32_t slot,
                                           const char* path, const char* body,
-                                          const char* expected) {
+                                          const char* expected, bool expect_done) {
         CHECK(dispatch(route, path, body, output, sizeof(output), &output_size).code == kQolOk);
         const TestSaveWritePayload payload{kind, slot, 0};
         g_attempt = 0;
@@ -381,15 +381,18 @@ int main() {
         CHECK(g_deferred > 0);
         g_attempt = 1;
         CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&payload),
-                               sizeof(payload), output, sizeof(output), &output_size));
+                               sizeof(payload), output, sizeof(output), &output_size) ==
+              expect_done);
         CHECK(std::string(output, output_size) == expected);
     };
+    // B6：enter/create 票据绑定转换终态——本 harness 的 operation stub 不可用、确认序未 ready，
+    // 世界出现也不得报告成功；票据失败终态携带明确错误体。
     check_deferred_route(1, kQolSaveWriteEnterSlot, 2,
                          "/api/system/enter_slot", "{\"slot\":2}",
-                         "{\"ok\":true,\"slot\":2,\"entered\":true}");
+                         "{\"ok\":false,\"error\":\"slot transition not confirmed\"}", false);
     check_deferred_route(2, kQolSaveWriteCreateSlot, 0,
                          "/api/system/create_slot", "{\"slot\":0,\"class_idx\":1}",
-                         "{\"ok\":true,\"slot\":0,\"created\":true}");
+                         "{\"ok\":false,\"error\":\"slot transition not confirmed\"}", false);
 
     CHECK(dispatch(1, "/api/system/enter_slot", "{\"slot\":3}",
                    output, sizeof(output), &output_size).code == kQolErrInvalidArgument);

@@ -1,11 +1,34 @@
 #include "game/access/save.h"
 
+#include "contracts/runtime_hooks.h"
+#include "contracts/save_route.h"
+#include "game/access/save_transaction.h"
 #include "game/symbols/game_symbols.h"
 #include "game/access/game_access.h"
 #include "game/access/item_handle_registry.h"
 #include "game/state/game_state.h"
 
 namespace qol::game {
+namespace {
+
+// begin 之后、原版未启动或明确失败的出口显式取消未决转换：释放 token/lease，
+// provider 撤销 transitioning，session 回 Unavailable（不伪装恢复已删 dat）。
+void cancel_pending_save_transition(uint64_t token) {
+    if (token == 0) return;
+    const auto& hooks = contracts::qol_runtime_hooks();
+    if (hooks.save_transition_cancel_thunk != nullptr) hooks.save_transition_cancel_thunk(token);
+}
+
+// 作用域释放：成功进入确认序时 disarm；否则析构取消。
+struct PendingTransitionGuard {
+    uint64_t token = 0;
+    bool disarmed = false;
+    ~PendingTransitionGuard() {
+        if (!disarmed) cancel_pending_save_transition(token);
+    }
+};
+
+}  // namespace
 
 bool save_slot_meta_deps_ready() {
     return fn_save_get_save_slot != nullptr && fn_saveslot_get_hero != nullptr &&
@@ -242,14 +265,17 @@ std::string enter_slot_locked(int32_t slot) {
     if (slot_struct == nullptr || fn_saveslot_get_hero(slot_struct) == nullptr) return op_err("slot corrupt");
     // P3c：所有读档入口统一先进入 core.save 转换状态机（prepare_detach 拒绝时阻断原版
     // 转换；确认序由 core.save 在 RenderPre 完成）。
+    uint64_t transition = 0;
     {
         const auto& hooks = contracts::qol_runtime_hooks();
-        uint64_t transition = 0;
         if (hooks.save_transition_begin_thunk == nullptr ||
             !hooks.save_transition_begin_thunk(0, slot, &transition)) {
             return op_err("enter slot blocked by save transition gate");
         }
     }
+    // 原版未启动/明确失败的出口取消 token（作用域释放）；成功进入确认序时 disarm。
+    PendingTransitionGuard transition_guard;
+    transition_guard.token = transition;
     // 存档/UI 生命周期参与者分派：无可用参与者等同旧“能力缺失”，跳过准备放行。
     if (!qol::game::lifecycle_participant_prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; enter slot blocked");
@@ -259,10 +285,15 @@ std::string enter_slot_locked(int32_t slot) {
     if (*flag_ptr != nullptr) **flag_ptr = 0;
     contracts::qol_runtime_hooks().save_enter_mark_pending();  // 进入存档回调：标记读档发起
     const bool handle_transition = begin_item_handle_lifecycle_transition();
+    // 与按钮读档共用受控转换上下文：统一设置未就绪 transition + invocation，作用域释放。
+    const uint64_t bypass = save_load_bypass_begin(
+        transition, slot, static_cast<uint32_t>(contracts::QolSaveCallKind::kResume));
     int r = fn_game_start_resume_game(slot);
+    save_load_bypass_end(bypass);
     if (handle_transition) finish_item_handle_lifecycle_transition(r != 0);
     else if (r != 0) invalidate_all_item_handles();
     if (!r) return op_err("enter slot failed");
+    transition_guard.disarmed = true;  // 原版已启动：确认序接管 token。
 
     // v0.4.49：进档后清理残留教学暂停——obj170=6（药水教学）是持久状态，
     // 回主菜单（GAMESTATE_SetState(4)）与 GAME_StartResumeGame 均不清理，
@@ -287,14 +318,17 @@ std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     if (class_idx < 0 || class_idx > 5) return op_err("bad class");
     if (g_base == 0) return op_err("libgame not ready");
     // P3c：新档入口同样先进入 core.save 转换状态机（kBeginNew；确认序复用 selection token）。
+    uint64_t transition = 0;
     {
         const auto& hooks = contracts::qol_runtime_hooks();
-        uint64_t transition = 0;
         if (hooks.save_transition_begin_thunk == nullptr ||
             !hooks.save_transition_begin_thunk(1, slot, &transition)) {
             return op_err("create slot blocked by save transition gate");
         }
     }
+    // 原版未启动/明确失败的出口取消 token（作用域释放）；成功进入确认序时 disarm。
+    PendingTransitionGuard transition_guard;
+    transition_guard.token = transition;
     // 同 enter_slot_locked：无可用参与者等同旧“能力缺失”，跳过准备放行。
     if (!qol::game::lifecycle_participant_prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; create slot blocked");
@@ -329,6 +363,7 @@ std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     fn_select_character_start_game();
     // 新档教学初始化（SelectCharacter_ButtonStartExe：StartGame 后 TutorialStart）
     fn_tutorial_start();
+    transition_guard.disarmed = true;  // 原版已启动：确认序接管 token。
     // 状态机驱动：STATE_NextStartProcess → STATE_EnterGame → GAME_StartNewGame → 剧情 → 初始营地
     return op_ok();
 }

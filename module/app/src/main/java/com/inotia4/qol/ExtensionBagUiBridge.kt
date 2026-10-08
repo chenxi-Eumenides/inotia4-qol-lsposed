@@ -32,12 +32,14 @@ object ExtensionBagUiBridge {
     val sectionName: String get() = SECTION_NAME
 
     /**
-     * 规范化字节 → 规范化字节：解析并校验（无效 payload 隔离告警保留审计痕迹），
-     * 输出与 C++ codec 相同的规范化 JSON 文本字节。解析失败返回 null。
+     * 规范化字节 → 规范化字节：解析并校验，输出与 C++ codec 相同的规范化 JSON 文本字节。
+     * 解析失败返回 null。本函数是纯函数：不写日志、不做 IO；诊断信息经
+     * [normalizeStateBytesDetailed] 返回给调用层记录。
      */
     @JvmStatic
     fun normalizeStateBytes(bytes: ByteArray): ByteArray? {
-        return parseStateBytes(bytes, rejectPayloadlessItems = false)?.toString()?.toByteArray(Charsets.UTF_8)
+        return parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems = false).json
+            ?.toString()?.toByteArray(Charsets.UTF_8)
     }
 
     /**
@@ -46,34 +48,37 @@ object ExtensionBagUiBridge {
      */
     @JvmStatic
     fun normalizeLoadedStateBytes(bytes: ByteArray): ByteArray? {
-        return parseStateBytes(bytes, rejectPayloadlessItems = true)?.toString()?.toByteArray(Charsets.UTF_8)
+        return parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems = true).json
+            ?.toString()?.toByteArray(Charsets.UTF_8)
     }
 
-    private fun parseStateBytes(bytes: ByteArray, rejectPayloadlessItems: Boolean): JSONObject? {
-        return parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems)
+    /** 规范化结果：bytes 为规范化 JSON 字节（失败为 null）；diagnostics 供调用层记录。 */
+    data class NormalizeResult(val bytes: ByteArray?, val diagnostics: List<String>)
+
+    /**
+     * 带诊断的规范化入口：解析函数返回诊断信息，由调用层决定如何记录；
+     * codec 自身不调用 LogFile/native/logcat。
+     */
+    @JvmStatic
+    fun normalizeStateBytesDetailed(bytes: ByteArray, rejectPayloadlessItems: Boolean): NormalizeResult {
+        val parsed = parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems)
+        return NormalizeResult(parsed.json?.toString()?.toByteArray(Charsets.UTF_8), parsed.diagnostics)
     }
 
-    private fun defaultStateJson(): String = stateJson(
-        mode = "original",
-        originalSelected = 0,
-        types = IntArray(BAG_COUNT),
-        selected = -1,
-        inspected = -1,
-        items = emptyItems(),
-        pending = null,
-    ).toString()
+    private data class ParsedState(val json: JSONObject?, val diagnostics: List<String>)
 
-    private fun parseState(raw: String, rejectPayloadlessItems: Boolean): JSONObject? {
+    private fun parseState(raw: String, rejectPayloadlessItems: Boolean): ParsedState {
+        val diagnostics = ArrayList<String>()
         return try {
             val source = JSONObject(raw)
             val sourceTypes = source.getJSONArray("types")
-            if (sourceTypes.length() != BAG_COUNT) return null
+            if (sourceTypes.length() != BAG_COUNT) return ParsedState(null, diagnostics)
             val types = IntArray(BAG_COUNT) { index -> sourceTypes.getInt(index) }
-            if (types.any { it !in 0..4 }) return null
+            if (types.any { it !in 0..4 }) return ParsedState(null, diagnostics)
             val mode = source.optString("mode", "original")
-            if (mode != "original" && mode != "module") return null
+            if (mode != "original" && mode != "module") return ParsedState(null, diagnostics)
             val originalSelected = source.optInt("originalSelected", 0)
-            if (originalSelected !in 0..5) return null
+            if (originalSelected !in 0..5) return ParsedState(null, diagnostics)
             var selected = source.optInt("selected", -1)
             if (selected !in types.indices) selected = -1
             var normalizedMode = mode
@@ -84,7 +89,7 @@ object ExtensionBagUiBridge {
             var inspected = source.optInt("inspected", -1)
             if (inspected != selected) inspected = -1
             val sourceItems = source.getJSONArray("items")
-            if (sourceItems.length() != BAG_COUNT) return null
+            if (sourceItems.length() != BAG_COUNT) return ParsedState(null, diagnostics)
             val items = Array(BAG_COUNT) { bag ->
                 val sourceBag = sourceItems.getJSONArray(bag)
                 if (sourceBag.length() != SLOT_COUNT) throw IllegalArgumentException("invalid slot count")
@@ -100,18 +105,18 @@ object ExtensionBagUiBridge {
                     } else {
                         ""
                     }
-                    // P4.5：无效 payload 不得静默转 ItemData(0,0)——隔离告警保留审计痕迹
-                    //（受限原始编码入日志；落盘时机归 core.save 保存事务）。
+                    // P4.5：无效 payload 不得静默转 ItemData(0,0)——诊断信息交调用层记录，
+                    // codec 自身不写日志（受限编码预览）。
                     if (hasPayload && safePayload.isEmpty()) {
                         val preview = payload.take(64).map {
                             if (it.isWhitespace() || it == '"') '?' else it
                         }.joinToString("")
-                        LogFile.info(LogDomain.EXTENSION_BAG, "extension bag isolated reason=invalid_payload " +
+                        diagnostics.add("extension bag isolated reason=invalid_payload " +
                             "bag=${bag + 6} slot=$slot payloadLength=${payload.length} " +
                             "payloadPreview=$preview")
                     }
                     if (rejectPayloadlessItems && category > 0 && count > 0 && !hasPayload) {
-                        LogFile.info(LogDomain.EXTENSION_BAG, "extension bag isolated reason=payloadless_rejected " +
+                        diagnostics.add("extension bag isolated reason=payloadless_rejected " +
                             "bag=${bag + 6} slot=$slot category=$category count=$count")
                     }
                     when {
@@ -122,10 +127,10 @@ object ExtensionBagUiBridge {
                 }
             }
             val pending = if (source.has("pending")) source.optJSONObject("pending") else null
-            stateJson(normalizedMode, originalSelected, types, selected, inspected, items, pending)
+            ParsedState(stateJson(normalizedMode, originalSelected, types, selected, inspected, items, pending), diagnostics)
         } catch (t: Throwable) {
-            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state parse failed", t)
-            null
+            diagnostics.add("extension bag UI state parse failed: ${t.javaClass.simpleName}: ${t.message}")
+            ParsedState(null, diagnostics)
         }
     }
 
