@@ -22,6 +22,7 @@ constexpr uint16_t kSectionVersion = 2;
 constexpr int kSlotCount = 3;
 
 std::mutex g_store_mtx;
+std::mutex g_config_commit_mtx;
 std::atomic<qol::contracts::QolSlotDataHandle> g_handle{0};
 qol::contracts::QolSlotDataApi g_api{};
 qol::contracts::QolSlotDataRequest g_unregister_request = 0;
@@ -193,6 +194,9 @@ int32_t autosell_retry_frame(int64_t frame, void*) {
     return 1;
 }
 
+// retry task 句柄仅在插件生命周期（主/逻辑线程经 lifecycle_step）注册/注销；
+// 帧回调 autosell_retry_frame→store_flush 只读写 g_last_retry_frame/g_retry_due_frame
+// （已由 g_store_mtx 保护），不触碰 g_retry_task，故句柄无需额外加锁。
 bool ensure_retry_task() {
     if (g_retry_task != 0) return true;
     const auto* sdk = qol::features::autosell::host_sdk();
@@ -282,6 +286,7 @@ QolResult sd_load(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t
             return sd_error(kQolErrInternal, "invalid autosell payload");
         }
     }
+    std::unique_lock<std::mutex> commit_lock(g_config_commit_mtx);
     bool dirty = false;
     {
         std::lock_guard<std::mutex> lock(g_store_mtx);
@@ -311,6 +316,7 @@ QolResult sd_load(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t
         g_load_ready = true;
     }
     autosell_apply_config(config);
+    commit_lock.unlock();
     autosell_set_store_status(ctx->session.slot, ctx->session.slot, false);
     autosell_scan_session_loaded(ctx->session.slot, ctx->session.epoch);
     if (dirty && !request_dirty_write(ctx->session.slot, ctx->session.epoch))
@@ -580,7 +586,7 @@ bool autosell_store_persist(int slot, const autosell::Config& config) {
             autosell_set_store_status(slot, g_loaded_slot, false);
             return false;
         }
-        if (g_loaded_slot != slot || g_epoch == 0 ||
+        if (g_loaded_slot != slot || g_epoch == 0 || !g_load_ready ||
             g_handle.load(std::memory_order_acquire) == 0) return false;
         auto& state = g_slots[static_cast<size_t>(slot)];
         if (!state.has_config || !same_config(state.config, config)) {
@@ -602,19 +608,51 @@ bool autosell_store_persist(int slot, const autosell::Config& config) {
 }
 
 bool autosell_store_commit_config(const autosell::Config& config) {
-    autosell_apply_config(config);
     int slot = -1;
+    uint64_t epoch = 0;
+    bool write_needed = false;
+    std::unique_lock<std::mutex> commit_lock(g_config_commit_mtx);
     {
         std::lock_guard<std::mutex> lock(g_store_mtx);
-        if (g_loaded_slot >= 0 && g_epoch != 0) {
+        if (g_loaded_slot < 0 && g_epoch == 0) {
+            if (!g_pending_intent || !same_config(g_pending_config, config)) {
+                if (g_revision == UINT64_MAX) {
+                    AUTOSELL_LOG_WARN("config change rejected; revision exhausted without session");
+                    return false;
+                }
+                g_pending_config = config;
+                g_pending_revision = ++g_revision;
+                g_pending_intent = true;
+            }
+        } else {
             if (!g_load_ready) {
                 AUTOSELL_LOG_WARN("config write rejected while slot session is not loaded");
                 return false;
             }
             slot = g_loaded_slot;
+            epoch = g_epoch;
+            auto& state = g_slots[static_cast<size_t>(slot)];
+            if (!state.has_config || !same_config(state.config, config)) {
+                if (g_revision == UINT64_MAX) {
+                    AUTOSELL_LOG_WARN("config change rejected slot=%d; revision exhausted", slot);
+                    return false;
+                }
+                state.config = config;
+                state.has_config = true;
+                state.revision = ++g_revision;
+                state.dirty = true;
+            }
+            write_needed = state.dirty;
         }
     }
-    const bool accepted = autosell_store_persist(slot, config);
+    autosell_apply_config(config);
+    commit_lock.unlock();
+    if (slot < 0) {
+        AUTOSELL_LOG_INFO("config intent staged until a slot session loads");
+        return false;
+    }
+    const bool accepted = !write_needed || request_dirty_write(slot, epoch);
+    if (write_needed) autosell_set_store_status(slot, slot, false);
     if (!accepted)
         AUTOSELL_LOG_WARN("config revision retained for retry slot=%d", slot);
     return accepted;

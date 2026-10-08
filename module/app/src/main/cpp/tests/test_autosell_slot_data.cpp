@@ -53,6 +53,7 @@ uint64_t g_last_request_id = 0;
 QolSlotDataContext g_pending_context{};
 std::string g_pending_payload;
 bool g_submit_new_revision_in_request = false;
+bool g_submit_revision_after_sync_complete = false;
 bool g_fail_pending_during_unregister = false;
 autosell::Config g_new_revision{};
 
@@ -153,6 +154,10 @@ QolResult fake_request_write(QolSlotDataHandle handle, uint64_t epoch,
         return ok();
     }
     finish_write(request);
+    if (g_submit_revision_after_sync_complete) {
+        g_submit_revision_after_sync_complete = false;
+        CHECK(autosell_store_commit_config(g_new_revision));
+    }
     return ok();
 }
 
@@ -239,6 +244,7 @@ void reset_disk_and_metrics() {
     g_pending_payload.clear();
     g_last_request_id = 0;
     g_submit_new_revision_in_request = false;
+    g_submit_revision_after_sync_complete = false;
     g_fail_pending_during_unregister = false;
 }
 
@@ -273,10 +279,22 @@ void register_consumer(const QolSlotDataApi& api) {
     CHECK(autosell_store_register(1, &api));
 }
 
+bool invoke_session_ready(int slot, uint64_t epoch) {
+    g_session = {slot, static_cast<uint32_t>(QolSlotSessionState::kReady), epoch};
+    g_ready = true;
+    QolSlotDataContext ctx{g_session, static_cast<uint32_t>(QolSlotDataReason::kEnter), 0};
+    ++g_callback_count;
+    return succeeded(g_spec.session_ready(g_spec.user, &ctx));
+}
+
 void test_session_load_and_presence_errors(const QolSlotDataApi& api) {
     reset_disk_and_metrics();
     register_consumer(api);
     const std::string stored = autosell_config_to_json(sample(4));
+    autosell_apply_config(autosell::Config{});
+    CHECK(invoke_session_ready(0, 10));
+    CHECK(!autosell_store_commit_config(sample(5)));
+    CHECK(same(autosell_get_runtime_config(), autosell::Config{}));
     CHECK(invoke_load(0, 11, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 2, stored));
     CHECK(same(autosell_get_runtime_config(), sample(4)));
     CHECK(autosell_scan_session_active(0));
@@ -299,6 +317,25 @@ void test_session_load_and_presence_errors(const QolSlotDataApi& api) {
     CHECK(same(autosell_get_runtime_config(), sample(3)));
     CHECK(!autosell_scan_session_active(1));
     CHECK(!autosell_scan_save_enter(1));
+    autosell_store_unregister();
+}
+
+void test_config_edit_rejected_before_first_valid_load(const QolSlotDataApi& api) {
+    reset_disk_and_metrics();
+    register_consumer(api);
+    const auto runtime_before = sample(3);
+    autosell_apply_config(runtime_before);
+    CHECK(invoke_session_ready(0, 14));
+    CHECK(!autosell_store_session_matches(0));
+    CHECK(!autosell_store_commit_config(sample(5)));
+    CHECK(same(autosell_get_runtime_config(), runtime_before));
+    CHECK(!autosell_scan_session_active(0));
+    CHECK(g_request_count == 0);
+
+    CHECK(invoke_load(0, 14, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 2,
+                      autosell_config_to_json(sample(1))));
+    CHECK(same(autosell_get_runtime_config(), sample(1)));
+    CHECK(autosell_scan_session_active(0));
     autosell_store_unregister();
 }
 
@@ -378,6 +415,41 @@ void test_inflight_revision_completion_and_frame_retry(const QolSlotDataApi& api
     CHECK(g_request_count == 6);
     CHECK(g_write_count == 5);
     CHECK(g_disk[0].bytes.find("\"rarity\":7") != std::string::npos);
+    autosell_store_unregister();
+}
+
+// 生命周期唯一拥有 retry task 句柄：帧回调只驱动节流与重试，不增删任务。
+void test_retry_task_owned_by_lifecycle(const QolSlotDataApi& api) {
+    reset_disk_and_metrics();
+    CHECK(g_retry_handler == nullptr);
+    register_consumer(api);
+    CHECK(g_retry_handler != nullptr);
+    const uint64_t task_id = g_retry_task_id;
+    const QolFrameHandler handler = g_retry_handler;
+    CHECK(invoke_load(0, 41, static_cast<uint32_t>(QolSlotDataPresence::kMissing), 0, {}));
+    CHECK(autosell_store_commit_config(sample(2)));
+    run_retry_frame(0);
+    run_retry_frame(60);
+    CHECK(g_retry_task_id == task_id);
+    CHECK(g_retry_handler == handler);
+    autosell_store_unregister();
+    CHECK(g_retry_handler == nullptr);
+}
+
+void test_synchronous_complete_before_request_id(const QolSlotDataApi& api) {
+    reset_disk_and_metrics();
+    register_consumer(api);
+    CHECK(invoke_load(0, 251, static_cast<uint32_t>(QolSlotDataPresence::kMissing), 0, {}));
+    g_submit_revision_after_sync_complete = true;
+    g_new_revision = sample(3);
+    CHECK(autosell_store_commit_config(sample(2)));
+    CHECK(g_request_count == 2);
+    CHECK(g_write_count == 2);
+    CHECK(g_disk[0].bytes.find("\"rarity\":3") != std::string::npos);
+    const int writes_after_sync_completion = g_write_count;
+    CHECK(autosell_store_commit_config(sample(3)));
+    CHECK(g_write_count == writes_after_sync_completion);
+    CHECK(g_request_count == 2);
     autosell_store_unregister();
 }
 
@@ -499,8 +571,11 @@ int main() {
     g_sdk.scheduler.remove = &fake_scheduler_remove;
     const QolSlotDataApi api = fake_api();
     test_session_load_and_presence_errors(api);
+    test_config_edit_rejected_before_first_valid_load(api);
     test_immediate_write_dedupe_and_retry(api);
     test_inflight_revision_completion_and_frame_retry(api);
+    test_retry_task_owned_by_lifecycle(api);
+    test_synchronous_complete_before_request_id(api);
     test_unregistered_dirty_epoch_recovery(api);
     test_pending_intent_slot_isolation_and_unregister(api);
     std::printf("autosell_slot_data_tests: %d passed, %d failed\n", g_pass, g_fail);
