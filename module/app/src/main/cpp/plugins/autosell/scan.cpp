@@ -28,8 +28,6 @@ uint64_t g_task = 0;
 uint64_t g_save_enter_subscription = 0;
 uint64_t g_save_exit_subscription = 0;
 std::atomic<bool> g_global_enabled{false};
-std::atomic<bool> g_save_active{false};
-std::atomic<int> g_save_slot{-1};
 
 const qol::contracts::ExtensionBagApi* extension_bag_api() {
     const auto* sdk = qol::features::autosell::host_sdk();
@@ -152,6 +150,8 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
 
 int32_t autosell_tick(int64_t frame, void*) {
     if (!g_global_enabled.load(std::memory_order_acquire)) return 1;
+    const int slot = autosell_active_save_slot();
+    if (!autosell_scan_session_active(slot)) return 1;
     const autosell::Config cfg = autosell_get_runtime_config();
     if (!cfg.enabled || !scan_gates_ok()) return 1;
     std::lock_guard<std::mutex> lock(g_scan_mtx);
@@ -170,7 +170,7 @@ void remove_task_if_any() {
 
 void sync_task() {
     const bool want = g_global_enabled.load(std::memory_order_acquire) &&
-                      g_save_active.load(std::memory_order_acquire) &&
+                      autosell_scan_session_active(autosell_scan_session_slot()) &&
                       autosell_get_runtime_config().enabled;
     if (!want) {
         remove_task_if_any();
@@ -191,15 +191,17 @@ void sync_task() {
 void autosell_on_save_enter(void*, const void* payload) {
     const auto* event = static_cast<const qol::contracts::SaveEnterEvent*>(payload);
     const int slot = event == nullptr ? -1 : event->slot;
-    g_save_slot.store(slot, std::memory_order_release);
-    g_save_active.store(true, std::memory_order_release);
-    AUTOSELL_LOG_INFO("save enter slot=%d; sync task", slot);
+    if (!autosell_scan_save_enter(slot)) {
+        AUTOSELL_LOG_WARN("save enter rejected slot mismatch slot=%d", slot);
+        remove_task_if_any();
+        return;
+    }
     sync_task();
+    AUTOSELL_LOG_INFO("save enter slot=%d; sync task", slot);
 }
 
 void autosell_on_save_exit(void*, const void*) {
-    g_save_active.store(false, std::memory_order_release);
-    g_save_slot.store(-1, std::memory_order_release);
+    autosell_scan_session_closed(-1, 0);
     AUTOSELL_LOG_INFO("save exit; remove task");
     remove_task_if_any();
 }
@@ -215,10 +217,12 @@ void autosell_apply_config(const autosell::Config& config) {
     else remove_task_if_any();
 }
 
+void autosell_scan_sync_after_session_change() { sync_task(); }
+
 void autosell_set_global_enabled(bool enabled) {
     g_global_enabled.store(enabled, std::memory_order_release);
     AUTOSELL_LOG_INFO("global enabled=%d save_active=%d", enabled ? 1 : 0,
-                      g_save_active.load(std::memory_order_acquire) ? 1 : 0);
+                      autosell_scan_session_slot() >= 0 ? 1 : 0);
     if (enabled) sync_task();
     else remove_task_if_any();
 }
@@ -249,4 +253,6 @@ void autosell_unregister_save_callbacks() {
     g_save_exit_subscription = 0;
 }
 
-int autosell_active_save_slot() { return g_save_slot.load(std::memory_order_acquire); }
+int autosell_active_save_slot() {
+    return autosell_scan_session_slot();
+}

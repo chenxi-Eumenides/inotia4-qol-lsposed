@@ -4,6 +4,7 @@ add_library(qol_plugin_autosell STATIC
     read_only.cpp
     view.cpp
     scan.cpp
+    scan_session.cpp
     plugin.cpp
     settings_contribution.cpp
     store.cpp

@@ -199,3 +199,7 @@ void autosell_store_unregister();
 bool autosell_store_persist(int slot, const autosell::Config& config);
 // Panel and JNI edits share one revision and retry path.
 bool autosell_store_commit_config(const autosell::Config& config);
+bool autosell_store_session_matches(int slot);
+uint64_t autosell_store_session_epoch(int slot);
+void autosell_store_reject_session();
+void autosell_store_flush(int64_t frame);

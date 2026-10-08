@@ -275,6 +275,7 @@ add_test(NAME autosell_store_tests COMMAND autosell_store_tests)
 add_executable(autosell_slot_data_tests
     test_autosell_slot_data.cpp
     ${CPP_DIR}/plugins/autosell/config.cpp
+    ${CPP_DIR}/plugins/autosell/scan_session.cpp
     ${CPP_DIR}/plugins/autosell/store.cpp
 )
 target_include_directories(autosell_slot_data_tests PRIVATE ${CPP_DIR})

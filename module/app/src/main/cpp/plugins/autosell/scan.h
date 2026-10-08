@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 #include "rules.h"
 
 // 自动出售扫描与主线程逐帧 tick（阶段 B）。
@@ -22,12 +24,17 @@ void autosell_apply_config(const autosell::Config& config);
 // 全局开关（模块设置第 6 项 `autoSellEnabled`）：置位/清位「已武装」标志并同步扫描任务；
 // 幂等、内部加锁。
 //
-// 任务注册条件 = 全局开关已武装 **且** 已进入存档（save-enter）**且** 存档配置
-// `config.enabled` 为真；三者任一不满足即不持有任务。启动/主菜单阶段不注册，进档后由
-// slot-data session load 完成后，save-enter 回调按当前配置注册。
+// 任务注册条件 = 全局开关已武装、slot-data 当前 session 加载成功且存档配置 `enabled` 为真。
+// save-enter 事件只校验并同步扫描生命周期，不提供存档读写槽来源。
 void autosell_set_global_enabled(bool enabled);
 
 int autosell_active_save_slot();
+void autosell_scan_session_loaded(int slot, uint64_t epoch);
+void autosell_scan_session_closed(int slot, uint64_t epoch);
+bool autosell_scan_save_enter(int slot);
+bool autosell_scan_session_active(int slot);
+int autosell_scan_session_slot();
+void autosell_scan_sync_after_session_change();
 
 // 注册「进入存档」回调（插件 install 调用，幂等）：只标记 world session 活跃并同步任务；
 // 存档配置读取由 save.slot_data 的 SessionBound participant 负责。
