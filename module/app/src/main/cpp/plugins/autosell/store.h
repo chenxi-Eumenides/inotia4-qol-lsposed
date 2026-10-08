@@ -6,16 +6,14 @@
 #include <cstring>
 #include <string>
 
+#include "../../contracts/slot_data.h"
 #include "rules.h"
 
-// 自动出售按存档配置持久化（sidecar section `autosell` v2，UTF-8 JSON，直写）。
+// 自动出售按存档配置持久化（sidecar section `autosell` v2，UTF-8 JSON）。
 //
-// 隔离边界：只读写模块 sidecar 的 `autosell` section，不进 ModuleSaveCoordinator
-// 的 participant/journal，不触碰 `extensionbags.items` / `extensionbags.journal`，
-// 不持 g_virtual_bag_mtx。
+// section IO 由 save.slot_data API 执行；不触碰扩展背包状态。
 //
-// 纯序列化函数为 inline（可 host 测，零 Android/游戏依赖）；section 读写经 infra/store
-// 在 .cpp（无 JNI 桥）。
+// 纯序列化函数为 inline（可 host 测，零 Android/游戏依赖）；.cpp 经 slot-data participant 接入。
 
 namespace autosell_store_detail {
 
@@ -192,10 +190,12 @@ inline bool autosell_config_from_json(const char* json, autosell::Config* out) {
     return true;
 }
 
-// 进档时读取 `autosell` section 并应用到运行时配置；非法 slot 不读写。
-// 由 `autosell_register_save_enter` 的 save-enter 回调（游戏主线程）调用一次；任务
-// 生命周期见 autosell_scan.h（全局开关 + 已进档）。
-void autosell_store_ensure_loaded(int slot);
+// 注册/注销 `autosell` slot-data participant；注册者传入真实宿主 owner token。
+bool autosell_store_register(qol::contracts::QolOwnerToken owner,
+                             const qol::contracts::QolSlotDataApi* api);
+void autosell_store_unregister();
 
-// 序列化并写回 `autosell` section；slot 非法或 store 写失败返回 false。
+// 提交当前 session 的配置 revision；slot 不匹配或请求未受理返回 false，dirty 保留。
 bool autosell_store_persist(int slot, const autosell::Config& config);
+// Panel and JNI edits share one revision and retry path.
+bool autosell_store_commit_config(const autosell::Config& config);

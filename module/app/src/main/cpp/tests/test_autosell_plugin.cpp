@@ -15,6 +15,7 @@
 #include "contracts/plugin.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
+#include "contracts/slot_data.h"
 #include "contracts/game_ports/inventory_extras_port.h"
 #include "infra/panels.h"
 
@@ -44,6 +45,11 @@ void autosell_set_global_enabled(bool) {}
 void autosell_register_save_enter() {}
 void autosell_register_save_exit() {}
 void autosell_unregister_save_callbacks() {}
+bool autosell_store_register(qol::contracts::QolOwnerToken owner,
+                             const qol::contracts::QolSlotDataApi* api) {
+    return owner != 0 && api != nullptr;
+}
+void autosell_store_unregister() {}
 
 namespace {
 
@@ -89,6 +95,7 @@ QolResult fake_panels_unregister_owner(const char* owner) {
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
     static const qol::contracts::WorldFactsApi api{};
     static const qol::contracts::ItemFactsApi item_api{sizeof(qol::contracts::ItemFactsApi)};
+    static const qol::contracts::QolSlotDataApi slot_data_api{};
     if (id == nullptr || out_iface == nullptr) {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
@@ -96,6 +103,8 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
         *out_iface = &api;
     } else if (std::strcmp(id, qol::contracts::kItemFactsCapabilityId) == 0) {
         *out_iface = &item_api;
+    } else if (std::strcmp(id, qol::contracts::kQolSlotDataCapabilityId) == 0) {
+        *out_iface = &slot_data_api;
     } else {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
@@ -119,11 +128,12 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 4 && d.optional_count == 1 && d.provides_count == 0);
+    CHECK(d.requires_count == 5 && d.optional_count == 1 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
     CHECK(std::strcmp(d.requires[2].id, "world.facts") == 0);
     CHECK(std::strcmp(d.requires[3].id, "item.facts") == 0);
+    CHECK(std::strcmp(d.requires[4].id, "save.slot_data") == 0);
     CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
     CHECK(d.resources_count == 2);
     CHECK(d.on_resource_ready == nullptr);  // kCallPatch/kOwnership 无 backup
@@ -169,6 +179,7 @@ void test_provider_registration() {
         ports,
         1,
     };
+    ctx.owner_token = 1;
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
 

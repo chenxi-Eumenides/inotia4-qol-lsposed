@@ -11,10 +11,12 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/world_facts.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/slot_data.h"
 #include "../../contracts/game_ports/inventory_extras_port.h"
 #include "config.h"
 #include "log.h"
 #include "scan.h"
+#include "store.h"
 #include "ui/panel.h"
 
 // 自动出售插件：门禁来源为配置键 `plugin.autosell.enabled`
@@ -26,8 +28,8 @@
 //   · own:popup.autosell（kOwnership/kFailSoft）：PopupState 死条目 F_PANEL_UNK3_ENTER 占用。
 // UI（入口按钮 + 面板）为插件自有 ui/panel.*，provider 登记到 infra/panels。
 //
-// 过渡依赖：save_enter/save_exit 事件设施仍由共享基础设施提供；sidecar 读写仍经
-// infra/store；出售副作用由 inventory_hooks 提供的 inventory.action capability 承载。
+// 过渡依赖：save_enter/save_exit 事件仅维护扫描活动态；配置持久化经 save.slot_data；
+// 出售副作用由 inventory_hooks 提供的 inventory.action capability 承载。
 
 namespace qol::features::autosell {
 namespace {
@@ -45,6 +47,8 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
     {contracts::kItemFactsCapabilityId,
      {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
+    {contracts::kQolSlotDataCapabilityId,
+     {contracts::kQolSlotDataVersion.major, contracts::kQolSlotDataVersion.minor}},
 };
 
 // extension_bag 的能力只在插件进入 enabled 时注册（其资源受配置门禁），故不能作为 required：
@@ -66,6 +70,7 @@ const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
+const contracts::QolSlotDataApi* g_slot_data_api = nullptr;
 std::atomic<bool> g_gate{false};
 
 // 游戏内面板 provider：由 core.ui 容器经 ui_panels 打开/查询（panel_id="autosell"）。
@@ -181,6 +186,20 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_item_facts = nullptr;
         return 1;
     }
+    iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+        contracts::kQolSlotDataCapabilityId,
+        {contracts::kQolSlotDataVersion.major, contracts::kQolSlotDataVersion.minor}, &iface)) ||
+        iface == nullptr ||
+        !autosell_store_register(ctx.owner_token,
+            static_cast<const contracts::QolSlotDataApi*>(iface))) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_world_facts = nullptr;
+        g_item_facts = nullptr;
+        return 1;
+    }
+    g_slot_data_api = static_cast<const contracts::QolSlotDataApi*>(iface);
     // save_enter/save_exit 回调设施是共享过渡依赖（B4 迁移）；注册对同一 fn+ctx 幂等，
     // activate 重入安全。
     autosell_register_save_enter();
@@ -199,6 +218,8 @@ int plugin_install(contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    autosell_store_unregister();
+    g_slot_data_api = nullptr;
     if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
         const void* iface = nullptr;
         if (contracts::succeeded(ctx.sdk->capabilities.require(
@@ -228,12 +249,16 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 
 // 有资源（2 条常驻）但无资源 gate：启停只切业务门禁与 UI 门控；资源物理装卸由宿主负责。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    (void)ctx;
+    if (g_slot_data_api != nullptr &&
+        !autosell_store_register(ctx.owner_token, g_slot_data_api)) {
+        AUTOSELL_LOG_WARN("slot data re-register on enable failed");
+    }
     apply_gate(config_enabled());
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
+    autosell_store_unregister();
     apply_gate(false);
 }
 
@@ -245,7 +270,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    4, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts
+    5, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data
     1, kOptionalRequires,  // optional=extension_bag（门禁提供者，缺失走降级）
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）

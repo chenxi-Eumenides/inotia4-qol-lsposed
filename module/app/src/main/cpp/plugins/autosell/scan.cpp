@@ -9,7 +9,6 @@
 #include "log.h"
 #include "plugin.h"
 #include "read_only.h"
-#include "store.h"
 #include "view.h"
 
 #include <atomic>
@@ -193,7 +192,6 @@ void autosell_on_save_enter(void*, const void* payload) {
     const auto* event = static_cast<const qol::contracts::SaveEnterEvent*>(payload);
     const int slot = event == nullptr ? -1 : event->slot;
     g_save_slot.store(slot, std::memory_order_release);
-    autosell_store_ensure_loaded(slot);
     g_save_active.store(true, std::memory_order_release);
     AUTOSELL_LOG_INFO("save enter slot=%d; sync task", slot);
     sync_task();

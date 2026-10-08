@@ -10,7 +10,7 @@
 // 线程模型：入口安装、绘制、面板 enter/process/event 全部运行在游戏主线程，
 // 故状态无需加锁；安装仅由 nativeInit 在 bridge 就绪后调用一次。
 //
-// 配置面板只在关闭按钮释放时提交 draft：先写运行时，再按当前存档槽直写 sidecar。
+// 配置面板只在关闭按钮释放时提交 draft：运行时更新与 slot-data 写请求共用同一 revision 路径。
 
 #include "panel.h"
 
@@ -20,6 +20,7 @@
 #include "log.h"
 #include "plugin.h"
 #include "scan.h"
+#include "store.h"
 
 #include <atomic>
 #include <cstdint>
@@ -505,13 +506,8 @@ void autosell_draw_selector(UiRect selector, const char* value, bool active) {
 }
 
 void autosell_commit_draft() {
-    autosell_apply_config(g_draft);
     const int slot = autosell_active_save_slot();
-    if (slot < 0 || slot >= 3) {
-        AUTOSELLUI_LOG("panel close applied config; no valid save slot=%d, skip persist", slot);
-        return;
-    }
-    const bool persisted = autosell_store_persist(slot, g_draft);
+    const bool persisted = autosell_store_commit_config(g_draft);
     AUTOSELLUI_LOG("panel close applied config; persist slot=%d ok=%d", slot, persisted ? 1 : 0);
 }
 

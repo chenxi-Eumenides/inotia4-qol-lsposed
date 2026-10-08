@@ -5,9 +5,9 @@
 #include "gamebridge_internal.h"
 
 #if !QOL_KERNEL_ONLY
+#include "contracts/autosell.h"
 #include "contracts/commands.h"
 #include "plugins/autosell/config.h"
-#include "plugins/autosell/scan.h"
 #include "plugins/autosell/store.h"
 #include "infra/commands.h"
 
@@ -19,9 +19,6 @@ int clamp_range(int value, int lo, int hi) {
     if (value > hi) return hi;
     return value;
 }
-
-// 模块 sidecar 有效槽（ModuleSaveStore SLOT_COUNT=3）。
-bool valid_persist_slot(int slot) { return slot >= 0 && slot < 3; }
 
 }  // namespace
 #endif
@@ -56,13 +53,8 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
     if (special_chars != nullptr) {
         env->ReleaseStringUTFChars(specialJson, special_chars);
     }
-    // 写入运行时配置并按 enabled 注册 / 删除 60 帧周期扫描任务。
-    autosell_apply_config(cfg);
-    // 按存档持久化：仅当前存档槽合法时直写 sidecar `autosell` section（不进 journal）。
-    const int slot = current_save_slot();
-    if (valid_persist_slot(slot)) {
-        autosell_store_persist(slot, cfg);
-    }
+    // 更新运行时配置并经 autosell slot-data participant 按当前 session 即时持久化。
+    autosell_store_commit_config(cfg);
     return JNI_TRUE;
 #endif
 }

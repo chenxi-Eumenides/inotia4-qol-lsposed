@@ -271,6 +271,17 @@ target_include_directories(autosell_store_tests PRIVATE
 target_compile_features(autosell_store_tests PRIVATE cxx_std_17)
 add_test(NAME autosell_store_tests COMMAND autosell_store_tests)
 
+# autosell SessionBound/Immediate slot-data participant callbacks and request deduplication.
+add_executable(autosell_slot_data_tests
+    test_autosell_slot_data.cpp
+    ${CPP_DIR}/plugins/autosell/config.cpp
+    ${CPP_DIR}/plugins/autosell/store.cpp
+)
+target_include_directories(autosell_slot_data_tests PRIVATE ${CPP_DIR})
+target_compile_features(autosell_slot_data_tests PRIVATE cxx_std_17)
+set_target_properties(autosell_slot_data_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME autosell_slot_data_tests COMMAND autosell_slot_data_tests)
+
 # 状态转换派发纯逻辑 host 测试（末尾追加）
 add_executable(transition_dispatch_tests
     test_transition_dispatch.cpp

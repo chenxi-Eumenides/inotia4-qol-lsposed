@@ -14,9 +14,9 @@
 // 扫描间隔（帧）：作为 scheduler_add 的 interval，由统一帧调度器按帧节流。
 constexpr int kAutoSellScanIntervalFrames = 60;
 
-// 提交存档配置（UI 关闭/销毁时调用一次，面板内编辑不实时保存）：写入运行时配置快照；
+// 更新存档配置运行时快照；
 // 仅当存档总开关 `enabled` 发生切换时才同步扫描任务（关→删除、开→按条件注册），规则/
-// 阈值改动不触碰任务生命周期。由 JNI nativeSetAutoSellConfig 调用；任务回调每次现取配置。
+// 阈值改动不触碰任务生命周期。配置提交由 panel/JNI 共用 slot-data 路径；任务回调每次现取配置。
 void autosell_apply_config(const autosell::Config& config);
 
 // 全局开关（模块设置第 6 项 `autoSellEnabled`）：置位/清位「已武装」标志并同步扫描任务；
@@ -24,14 +24,13 @@ void autosell_apply_config(const autosell::Config& config);
 //
 // 任务注册条件 = 全局开关已武装 **且** 已进入存档（save-enter）**且** 存档配置
 // `config.enabled` 为真；三者任一不满足即不持有任务。启动/主菜单阶段不注册，进档后由
-// autosell_register_save_enter 的回调按当前存档配置注册。
+// slot-data session load 完成后，save-enter 回调按当前配置注册。
 void autosell_set_global_enabled(bool enabled);
 
 int autosell_active_save_slot();
 
-// 注册「进入存档」回调（插件 install 调用，幂等）：读档 / 新档加载完成进入 world 后
-// 触发一次，按事件携带的当前存档槽读取 sidecar `autosell` 配置应用到运行时，
-// 再按「全局开关 + 已进档 + 存档总开关」同步 60 帧扫描任务。回调在游戏主线程执行。
+// 注册「进入存档」回调（插件 install 调用，幂等）：只标记 world session 活跃并同步任务；
+// 存档配置读取由 save.slot_data 的 SessionBound participant 负责。
 void autosell_register_save_enter();
 
 // 注册「退出存档」回调（插件 install 调用，幂等）：world → 主菜单时触发一次，置「未进档」
