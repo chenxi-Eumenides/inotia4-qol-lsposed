@@ -289,6 +289,11 @@ bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint
     return now - last_frame < window;
 }
 
+bool save_transition_timeout_elapsed(bool timer_started, uint64_t began, uint64_t now,
+                                    uint64_t timeout) {
+    return timer_started && now >= began && now - began > timeout;
+}
+
 void save_transition_reset_for_test() {
     std::lock_guard<std::mutex> lock(g.mutex);
     release_lease(g.pending);

@@ -55,6 +55,8 @@ QolResult save_transition_prepare_stop();
 //（尚未执行）或 token 变化（新转换）一律放行，保证首次失败后可继续重试。
 bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint64_t last_frame,
                                        uint64_t now, uint64_t window);
+bool save_transition_timeout_elapsed(bool timer_started, uint64_t began, uint64_t now,
+                                    uint64_t timeout);
 void save_transition_reset_for_test();
 
 }  // namespace qol::features::core_save

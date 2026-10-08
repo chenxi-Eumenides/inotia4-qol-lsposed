@@ -312,6 +312,10 @@ int main() {
     CHECK(save_transition_confirm_throttled(5, 5, 100, 110, 30));  // 同 token 窗口内：跳过。
     CHECK(!save_transition_confirm_throttled(5, 5, 100, 130, 30)); // 窗口届满：放行。
     CHECK(!save_transition_confirm_throttled(5, 6, 100, 101, 30)); // 新 token：独立放行。
+    CHECK(!save_transition_timeout_elapsed(false, 0, 601, 600));
+    CHECK(!save_transition_timeout_elapsed(true, 0, 600, 600));
+    CHECK(save_transition_timeout_elapsed(true, 0, 601, 600)); // began=0 是合法起点。
+    CHECK(!save_transition_timeout_elapsed(true, UINT64_MAX - 2, 1, 0)); // 时钟回退。
 
     save_transition_reset_for_test();
     slot_data_set_available(false);

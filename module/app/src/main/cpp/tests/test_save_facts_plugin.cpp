@@ -84,6 +84,8 @@ uint32_t g_attempt = 0;
 int g_deferred = 0;
 QolCommandTicket g_ticket = 0;
 bool g_fail_save_write = false;
+bool g_fail_logic_scheduler = false;
+uint64_t g_next_scheduler_task = 1;
 
 QolResult save_slot_state(int32_t, int32_t* out) { *out = 0; return ok(); }
 QolResult save_slot_exists(int32_t, int32_t* out) { *out = 1; return ok(); }
@@ -130,6 +132,14 @@ QolResult unregister_result(uint32_t) {
 }
 uint32_t current_attempt() { return g_attempt; }
 QolResult defer_result() { ++g_deferred; return ok(); }
+QolResult scheduler_add(int32_t point, QolFrameHandler, void*, int32_t, int32_t,
+                        uint64_t* out_id) {
+    if (point == kQolRuntimeFramePointLogicPre && g_fail_logic_scheduler)
+        return error(kQolErrInternal, "logic scheduler failure", 23);
+    *out_id = g_next_scheduler_task++;
+    return ok();
+}
+QolResult scheduler_remove(uint64_t) { return ok(); }
 
 int32_t is_main_thread() { return 1; }
 
@@ -318,6 +328,7 @@ int main() {
     const void* ports[] = {&save_port, &save_write_port, &save_tx_port};
     QolHostSdk sdk{};
     sdk.abi = {sizeof(QolHostSdk), kHostSdkMajor, kHostSdkMinor};
+    sdk.scheduler = {&scheduler_add, &scheduler_remove};
     sdk.commands.post_typed = &post_typed;
     sdk.ticket_result.register_typed_result_handler = &register_result;
     sdk.ticket_result.unregister_typed_result_handler = &unregister_result;
@@ -350,6 +361,10 @@ int main() {
     context.game = &game;
     context.owner_token = g_owner_token;
     qol::features::g_test_core_save_owner = g_owner_token;
+    g_fail_logic_scheduler = true;
+    CHECK(descriptor.install(context) != 0);
+    CHECK(g_result_handler == nullptr);  // R4：LogicPre 缺失时完整回滚 install。
+    g_fail_logic_scheduler = false;
     CHECK(descriptor.install(context) == 0);
     CHECK(g_result_handler != nullptr);
 

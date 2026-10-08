@@ -122,6 +122,8 @@ std::atomic<uint64_t> g_last_confirm_token{0};
 std::atomic<uint64_t> g_selection_token{0};
 // kResume begin 的帧号（确认超时取消用；读档失败不悬挂 pending 转换）。
 std::atomic<uint64_t> g_resume_begin_frame{0};
+std::atomic<bool> g_resume_timer_started{false};
+std::atomic<uint64_t> g_resume_timer_token{0};
 // kResume 挂起超时：约 10 秒（30fps）；世界未就绪且超时即取消，防后续 begin Busy 死锁。
 constexpr uint64_t kResumeConfirmTimeoutFrames = 600;
 
@@ -189,6 +191,8 @@ QolResult cs_native_call(void* /*user*/, const contracts::QolSaveNativeCall* cal
             if (out != nullptr) out->transition = token;
             if (kind == contracts::QolSaveCallKind::kResume && contracts::succeeded(began)) {
                 g_resume_begin_frame.store(g_logic_frame.load(), std::memory_order_release);
+                g_resume_timer_token.store(token, std::memory_order_release);
+                g_resume_timer_started.store(true, std::memory_order_release);
             }
             if (kind == contracts::QolSaveCallKind::kBeginNew && contracts::succeeded(began)) {
                 g_selection_token.store(token, std::memory_order_release);
@@ -264,14 +268,11 @@ void save_transition_observe() {
     const auto read = g_save_tx->read_state(g_save_tx->adapter_ctx, &state);
     if (!contracts::succeeded(read) || state.world_ready == 0 || state.current_slot != target) {
         // 超时取消只对读档路径：新档 selection 可无限期等待用户操作（Back/确认结束）。
-        const uint64_t began = g_resume_begin_frame.load(std::memory_order_acquire);
-        if (began != 0 && now > began + kResumeConfirmTimeoutFrames) {
-            (void)save_transition_cancel(token);
-            g_resume_begin_frame.store(0, std::memory_order_release);
-        }
         return;
     }
     g_resume_begin_frame.store(0, std::memory_order_release);
+    g_resume_timer_started.store(false, std::memory_order_release);
+    g_resume_timer_token.store(0, std::memory_order_release);
     // 节流仅在实际执行 confirm 后更新；首次尝试与新 token 独立放行，首次失败后可立即重试。
     const uint64_t last_token = g_last_confirm_token.load(std::memory_order_acquire);
     const uint64_t last = g_last_confirm_attempt.load(std::memory_order_acquire);
@@ -280,6 +281,22 @@ void save_transition_observe() {
     g_last_confirm_token.store(token, std::memory_order_release);
     g_last_confirm_attempt.store(now, std::memory_order_release);
     (void)save_transition_confirm(token, state.current_slot);
+}
+
+void save_transition_timeout_tick(uint64_t now) {
+    if (!g_resume_timer_started.load(std::memory_order_acquire)) return;
+    uint64_t token = 0;
+    int32_t target = -1;
+    if (!save_transition_pending_observation(&token, &target) ||
+        token != g_resume_timer_token.load(std::memory_order_acquire)) return;
+    const uint64_t began = g_resume_begin_frame.load(std::memory_order_acquire);
+    // A backwards frame counter is treated as a new time base.
+    if (!save_transition_timeout_elapsed(true, began, now, kResumeConfirmTimeoutFrames)) return;
+    if (contracts::succeeded(save_transition_cancel(token))) {
+        g_resume_begin_frame.store(0, std::memory_order_release);
+        g_resume_timer_token.store(0, std::memory_order_release);
+        g_resume_timer_started.store(false, std::memory_order_release);
+    }
 }
 
 int32_t slot_data_frame(int64_t frame, void*) {
@@ -293,8 +310,9 @@ int32_t slot_data_frame(int64_t frame, void*) {
 
 // LogicPre 时钟：非 world 态（RenderPre 不执行）也持续运行，供确认超时等待。
 int32_t logic_clock_frame(int64_t frame, void*) {
-    g_logic_frame.store(static_cast<uint64_t>(frame), std::memory_order_release);
-    save_transition_observe();
+    const auto now = static_cast<uint64_t>(frame);
+    g_logic_frame.store(now, std::memory_order_release);
+    save_transition_timeout_tick(now);
     return 1;
 }
 
@@ -626,6 +644,8 @@ const contracts::HttpQueryHandlerDescriptor kSaveWriteRoutes[] = {
      const_cast<SaveWriteRoute*>(&kSaveWriteRouteKinds[2])},
 };
 
+void plugin_deactivate(contracts::PluginContext& ctx);
+
 // ---- 资源声明（P3c）：SAVE_Save 完整入口 + 新档边界 + 选角取消 ----
 
 int32_t save_on_resource_ready_trampoline(const char* resource_id, void* backup);
@@ -811,10 +831,18 @@ int plugin_install(contracts::PluginContext& ctx) {
             return 1;
         }
     }
-    // LogicPre 时钟：非 world 态（RenderPre 不执行）也持续运行，供确认超时/失败等待。
-    if (ctx.sdk->scheduler.add != nullptr && g_logic_clock_task == 0) {
-        (void)ctx.sdk->scheduler.add(contracts::kQolRuntimeFramePointLogicPre, &logic_clock_frame,
-                                     nullptr, 1, 0, &g_logic_clock_task);
+    // LogicPre is required: without it a failed load can leave a transition pending forever.
+    if (ctx.sdk->scheduler.add == nullptr || g_logic_clock_task != 0) {
+        plugin_deactivate(ctx);
+        return 1;
+    }
+    const auto logic_scheduled = ctx.sdk->scheduler.add(
+        contracts::kQolRuntimeFramePointLogicPre, &logic_clock_frame, nullptr, 1, 0,
+        &g_logic_clock_task);
+    if (!contracts::succeeded(logic_scheduled) || g_logic_clock_task == 0) {
+        g_logic_clock_task = 0;
+        plugin_deactivate(ctx);
+        return 1;
     }
     log_message(ctx.sdk, "[core.save] provider install: facts + save writes + save route + hooks");
     return 0;
