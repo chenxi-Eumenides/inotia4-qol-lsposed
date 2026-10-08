@@ -65,7 +65,7 @@ android {
 
     defaultConfig {
         applicationId = "com.inotia4.qol"
-        minSdk = 27
+        minSdk = 30
         targetSdk = 34
     versionCode = 192
     versionName = "0.7.13"
