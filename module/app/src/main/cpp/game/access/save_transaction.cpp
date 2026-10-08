@@ -9,6 +9,7 @@
 
 #include "contracts/save_route.h"
 #include "game/access/save_file_evidence.h"
+#include "game/access/qol_log_seam.h"
 
 namespace qol::game {
 namespace {
@@ -53,6 +54,30 @@ QolResult fail(int32_t code, const char* text) {
 bool gate_admits(const contracts::QolSlotOperationLease* lease, int32_t slot) {
     if (g_gate.operation_admits == nullptr || lease == nullptr) return false;
     return g_gate.operation_admits(g_gate.ctx, lease->owner, lease, slot);
+}
+
+std::size_t bounded_length(const char* value, std::size_t capacity) {
+    if (value == nullptr) return capacity;
+    std::size_t length = 0;
+    while (length < capacity && value[length] != '\0') ++length;
+    return length;
+}
+
+bool path_segments_valid(const std::string& path) {
+    if (path.empty() || path.find("//") != std::string::npos || path.back() == '/') return false;
+    std::size_t segment_start = path[0] == '/' ? 1 : 0;
+    while (segment_start < path.size()) {
+        const std::size_t slash = path.find('/', segment_start);
+        const std::size_t segment_end = slash == std::string::npos ? path.size() : slash;
+        if (segment_end == segment_start) return false;
+        const std::size_t length = segment_end - segment_start;
+        if ((length == 1 && path[segment_start] == '.') ||
+            (length == 2 && path[segment_start] == '.' && path[segment_start + 1] == '.'))
+            return false;
+        if (slash == std::string::npos) break;
+        segment_start = slash + 1;
+    }
+    return true;
 }
 
 // 联合保存事务在原版调用窗口的标记：loading 旁路矩阵据此拒绝嵌套（P3c）。
@@ -176,7 +201,7 @@ void save_transaction_bind_gate(const SaveTransactionGate* gate) {
 }
 
 void save_transaction_set_platform_dir(const char* root) {
-    if (root == nullptr) {
+    if (root == nullptr || root[0] == '\0') {
         g_platform_dir[0] = '\0';
         return;
     }
@@ -301,18 +326,32 @@ QolResult save_transaction_call_transition(const contracts::QolSlotOperationLeas
     return fail(kQolErrUnsupported, "transition kind unsupported");
 }
 
-bool save_transaction_dat_relative_name_valid(const char* name) {
-    if (name == nullptr) return false;
-    const size_t length = std::strlen(name);
-    if (length == 0 || length >= kNameBufferBytes) return false;
-    if (name[0] == '.') return false;  // 隐藏/相对导航组件
-    for (size_t i = 0; i < length; ++i) {
-        const char c = name[i];
-        const bool allowed = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                             (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
-        if (!allowed) return false;
-    }
-    return std::strstr(name, "..") == nullptr;
+bool save_transaction_resolve_dat_path(const char* platform_dir, const char* save_name,
+                                       char* out_path, uint32_t capacity,
+                                       bool* out_was_absolute) {
+    if (out_path != nullptr && capacity > 0) out_path[0] = '\0';
+    if (out_was_absolute != nullptr) *out_was_absolute = false;
+    if (platform_dir == nullptr || save_name == nullptr || out_path == nullptr ||
+        capacity == 0 || out_was_absolute == nullptr)
+        return false;
+    const std::size_t root_length = bounded_length(platform_dir, sizeof(g_platform_dir));
+    const std::size_t name_length = bounded_length(save_name, kNameBufferBytes);
+    if (root_length == 0 || root_length >= sizeof(g_platform_dir) ||
+        name_length == 0 || name_length >= kNameBufferBytes)
+        return false;
+
+    const std::string root(platform_dir, root_length);
+    const std::string name(save_name, name_length);
+    const bool was_absolute = name[0] == '/';
+    const std::string prefix = root + "/";
+    const std::string candidate = was_absolute ? name : prefix + name;
+    if (candidate.size() < prefix.size() || candidate.compare(0, prefix.size(), prefix) != 0 ||
+        !path_segments_valid(candidate) || candidate.size() >= capacity)
+        return false;
+    std::memcpy(out_path, candidate.data(), candidate.size());
+    out_path[candidate.size()] = '\0';
+    *out_was_absolute = was_absolute;
+    return true;
 }
 
 QolResult save_transaction_read_evidence(const contracts::QolSlotOperationLease* lease,
@@ -324,18 +363,24 @@ QolResult save_transaction_read_evidence(const contracts::QolSlotOperationLease*
         return fail(kQolErrNotReady, "platform path context unavailable");
     if (!gate_admits(lease, slot))
         return fail(kQolErrBlocked, "operation lease does not cover slot");
-    char name[kNameBufferBytes] = {};
+    char name[kNameBufferBytes];
+    std::memset(name, 0xff, sizeof(name));
     g_get_name_fn(slot, name);
-    name[kNameBufferBytes - 1] = '\0';
-    if (!save_transaction_dat_relative_name_valid(name))
+    if (std::memchr(name, '\0', sizeof(name)) == nullptr)
         return fail(kQolErrInvalidArgument, "unreliable save file name");
-    std::string path(g_platform_dir);
-    path += "/";
-    path += name;
+    char path[kNameBufferBytes + sizeof(g_platform_dir) + 1]{};
+    bool was_absolute = false;
+    if (!save_transaction_resolve_dat_path(g_platform_dir, name, path, sizeof(path),
+                                           &was_absolute))
+        return fail(kQolErrInvalidArgument, "unreliable save file name");
+    if (qol_seam_debug_enabled())
+        qol_seam_write(kQolLogLevelDebug, kQolLogDomainPlatform, __FILE__, __LINE__,
+                       "save evidence slot=%d path=%s source=%s", slot, path,
+                       was_absolute ? "absolute" : "relative");
     struct stat info{};
-    if (::stat(path.c_str(), &info) != 0)
+    if (::stat(path, &info) != 0)
         return fail(errno == ENOENT ? kQolErrNotFound : kQolErrInternal, "dat stat failed");
-    if (!read_save_file_evidence(path.c_str(), out)) return fail(kQolErrInternal, "evidence read failed");
+    if (!read_save_file_evidence(path, out)) return fail(kQolErrInternal, "evidence read failed");
     // 路径只在本函数内部组合与使用，不返回给插件。
     return contracts::ok();
 }

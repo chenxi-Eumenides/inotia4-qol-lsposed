@@ -5,6 +5,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <unistd.h>
 
 namespace contracts = qol::contracts;
 using namespace qol::contracts;
@@ -48,13 +49,23 @@ uint32_t bl_word(uintptr_t site, uintptr_t target) {
 int g_current_slot = 0;
 int fake_current_slot() { return g_current_slot; }
 
-char g_fake_name[64] = "save0.dat";
 void fake_get_name(int32_t slot, char* out) {
     std::snprintf(out, 64, "save%d.dat", slot);
 }
-void fake_get_name_broken(int32_t, char* out) {
-    std::snprintf(out, 64, "../escape.dat");
+void fake_get_name_directory(int32_t, char* out) {
+    std::snprintf(out, 256, "fcea920f7412b5da7be0cf42b8c93759/save0.dat");
 }
+void fake_get_name_absolute(int32_t, char* out) {
+    std::snprintf(out, 256, "/data/data/com.example/files/save0.dat");
+}
+void fake_get_name_outside_absolute(int32_t, char* out) {
+    std::snprintf(out, 256, "/data/data/other.app/save0.dat");
+}
+void fake_get_name_broken(int32_t, char* out) {
+    std::snprintf(out, 256, "fcea920f7412b5da7be0cf42b8c93759/../../etc/passwd");
+}
+void fake_get_name_empty(int32_t, char* out) { out[0] = '\0'; }
+void fake_get_name_too_long(int32_t, char* out) { std::memset(out, 'x', 256); }
 
 int g_trampoline_calls = 0;
 int g_trampoline_result = -42;
@@ -279,19 +290,38 @@ int main() {
           kQolErrUnsupported);  // R8：无可靠 begin_new 端口，不得谎报已调用。
     CHECK(original.invoked == 0);
 
-    // ---- 相对名校验 ----
-    CHECK(save_tx::save_transaction_dat_relative_name_valid("save0.dat"));
-    CHECK(save_tx::save_transaction_dat_relative_name_valid("SAVE_9.dat"));
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid(nullptr));
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid(""));
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid("../escape.dat"));
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid("a/b.dat"));
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid(".hidden"));
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid("save0.dat "));
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid("a\\b.dat"));
+    // ---- FS 返回名路径解析：相对/绝对同根允许，路径逃逸 fail-closed ----
+    const char* app_dir = "/data/data/com.example/files";
+    char resolved_path[1024]{};
+    bool was_absolute = false;
+    CHECK(save_tx::save_transaction_resolve_dat_path(
+        app_dir, "fcea920f7412b5da7be0cf42b8c93759/save0.dat", resolved_path,
+        sizeof(resolved_path), &was_absolute));
+    CHECK(!was_absolute && std::string(resolved_path) ==
+          "/data/data/com.example/files/fcea920f7412b5da7be0cf42b8c93759/save0.dat");
+    CHECK(save_tx::save_transaction_resolve_dat_path(app_dir, "save0.dat", resolved_path,
+                                                      sizeof(resolved_path), &was_absolute));
+    CHECK(!was_absolute && std::string(resolved_path) ==
+          "/data/data/com.example/files/save0.dat");
+    CHECK(save_tx::save_transaction_resolve_dat_path(
+        app_dir, "/data/data/com.example/files/save0.dat", resolved_path,
+        sizeof(resolved_path), &was_absolute) && was_absolute);
+    CHECK(!save_tx::save_transaction_resolve_dat_path(
+        app_dir, "/data/data/other.app/save0.dat", resolved_path,
+        sizeof(resolved_path), &was_absolute));
+    CHECK(!save_tx::save_transaction_resolve_dat_path(
+        app_dir, "fcea/../../etc/passwd", resolved_path, sizeof(resolved_path), &was_absolute));
+    CHECK(!save_tx::save_transaction_resolve_dat_path(
+        app_dir, "dir/../save0.dat", resolved_path, sizeof(resolved_path), &was_absolute));
+    CHECK(!save_tx::save_transaction_resolve_dat_path(
+        app_dir, "dir//save0.dat", resolved_path, sizeof(resolved_path), &was_absolute));
+    CHECK(!save_tx::save_transaction_resolve_dat_path(
+        app_dir, "dir/./save0.dat", resolved_path, sizeof(resolved_path), &was_absolute));
+    CHECK(!save_tx::save_transaction_resolve_dat_path(
+        app_dir, "", resolved_path, sizeof(resolved_path), &was_absolute));
     std::string long_name(300, 'a');
-    long_name += ".dat";
-    CHECK(!save_tx::save_transaction_dat_relative_name_valid(long_name.c_str()));
+    CHECK(!save_tx::save_transaction_resolve_dat_path(
+        app_dir, long_name.c_str(), resolved_path, sizeof(resolved_path), &was_absolute));
 
     // ---- read_evidence：路径上下文/gate/文件三重条件 ----
     QolSaveFileEvidence evidence{};
@@ -305,16 +335,34 @@ int main() {
     save_tx::save_transaction_set_get_name_fn(&fake_get_name);
     save_tx::save_transaction_bind_gate(&rejecting);
     CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrBlocked);
+    save_tx::save_transaction_set_platform_dir(app_dir);
     // 名字解析不可靠 → InvalidArgument，不扫描兜底。
     save_tx::save_transaction_set_get_name_fn(&fake_get_name_broken);
     save_tx::save_transaction_bind_gate(&gate);
     CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrInvalidArgument);
-    // 文件缺失 → NotFound。
+    save_tx::save_transaction_set_get_name_fn(&fake_get_name_empty);
+    CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrInvalidArgument);
+    save_tx::save_transaction_set_get_name_fn(&fake_get_name_too_long);
+    CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrInvalidArgument);
+    save_tx::save_transaction_set_get_name_fn(&fake_get_name_directory);
+    CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrNotFound);
+    save_tx::save_transaction_set_get_name_fn(&fake_get_name_absolute);
+    save_tx::save_transaction_set_platform_dir(app_dir);
+    CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrNotFound);
+    save_tx::save_transaction_set_get_name_fn(&fake_get_name_outside_absolute);
+    CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrInvalidArgument);
+    save_tx::save_transaction_set_get_name_fn(nullptr);
+    CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrNotReady);
     save_tx::save_transaction_set_get_name_fn(&fake_get_name);
+    save_tx::save_transaction_set_platform_dir("");
+    CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrNotReady);
+    // 文件缺失 → NotFound。
     save_tx::save_transaction_set_platform_dir("/nonexistent-root-xyz");
     CHECK(save_tx::save_transaction_read_evidence(&lease, 0, &evidence).code == kQolErrNotFound);
     // 真实文件：evidence 内容与字节一致。
-    save_tx::save_transaction_set_platform_dir(".");
+    char working_dir[512]{};
+    CHECK(::getcwd(working_dir, sizeof(working_dir)) != nullptr);
+    save_tx::save_transaction_set_platform_dir(working_dir);
     {
         FILE* file = std::fopen("save0.dat", "wb");
         CHECK(file != nullptr);

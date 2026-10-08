@@ -90,8 +90,10 @@ QolResult save_transaction_call_transition(const contracts::QolSlotOperationLeas
 QolResult save_transaction_read_evidence(const contracts::QolSlotOperationLease* lease,
                                          int32_t slot, contracts::QolSaveFileEvidence* out);
 
-// 相对存档文件名校验：非空、无路径分隔、无 ".."、白名单字符集、不以 "." 开头、长度受限。
-bool save_transaction_dat_relative_name_valid(const char* name);
+// 解析 SAVE_GetSaveFileName 返回的相对名或应用目录内绝对路径。
+bool save_transaction_resolve_dat_path(const char* platform_dir, const char* save_name,
+                                       char* out_path, uint32_t capacity,
+                                       bool* out_was_absolute);
 
 // ---- P3c：API 与按钮读档共用的受控转换上下文（作用域释放）----
 // begin：设置未就绪读档 transition（SAVE_Save loading 旁路矩阵输入）并登记仅本次回调
