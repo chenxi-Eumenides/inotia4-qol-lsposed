@@ -334,10 +334,35 @@ bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint
     return now - last_frame < window;
 }
 
-bool save_transition_timeout_elapsed(bool timer_started, uint64_t began, uint64_t now,
-                                     uint64_t timeout) {
-    // 回绕/时钟重置后悬挂转换会长期占用槽位 lease；fail-safe 是取消，而非延长等待。
-    return timer_started && (now < began || now - began > timeout);
+TransitionTimeoutTick save_transition_timeout_tick(bool timer_started, uint64_t* began,
+                                                   uint64_t* last_frame,
+                                                   uint64_t* backward_window_begin,
+                                                   uint32_t* backward_count, uint64_t now,
+                                                   uint64_t timeout, uint32_t backward_limit) {
+    if (!timer_started || began == nullptr || last_frame == nullptr ||
+        backward_window_begin == nullptr ||
+        backward_count == nullptr || backward_limit == 0)
+        return TransitionTimeoutTick::kWaiting;
+    if (now < *last_frame) {
+        if (*backward_count == 0 ||
+            (now >= *backward_window_begin && now - *backward_window_begin > timeout)) {
+            *backward_window_begin = now;
+            *backward_count = 1;
+        } else if (*backward_count < backward_limit) {
+            ++*backward_count;
+        }
+        *began = now;
+        *last_frame = now;
+        // 单次倒退可能是乱序帧；多次倒退则无法由单次抖动解释，视为异常时钟。
+        return *backward_count >= backward_limit ? TransitionTimeoutTick::kExpired
+                                                  : TransitionTimeoutTick::kRebased;
+    }
+    if (*backward_count != 0 && now >= *backward_window_begin &&
+        now - *backward_window_begin > timeout)
+        *backward_count = 0;
+    *last_frame = now;
+    if (now - *began > timeout) return TransitionTimeoutTick::kExpired;
+    return TransitionTimeoutTick::kWaiting;
 }
 
 void save_transition_reset_for_test() {

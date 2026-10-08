@@ -128,8 +128,12 @@ std::atomic<uint64_t> g_selection_token{0};
 std::atomic<uint64_t> g_resume_begin_frame{0};
 std::atomic<bool> g_resume_timer_started{false};
 std::atomic<uint64_t> g_resume_timer_token{0};
+std::atomic<uint64_t> g_resume_last_frame{0};
+std::atomic<uint64_t> g_resume_clock_backward_window_begin{0};
+std::atomic<uint32_t> g_resume_clock_backward_count{0};
 // kResume 挂起超时：约 10 秒（30fps）；世界未就绪且超时即取消，防后续 begin Busy 死锁。
 constexpr uint64_t kResumeConfirmTimeoutFrames = 600;
+constexpr uint32_t kResumeClockBackwardLimit = 3;
 
 // ---- 资源 handler 的原版 trampoline（on_resource_ready 常数时间绑定）----
 using SaveSaveFn = int (*)();
@@ -197,7 +201,10 @@ QolResult cs_native_call(void* /*user*/, const contracts::QolSaveNativeCall* cal
                 bind_transition_ticket_context(token, contracts::kQolSaveWriteEnterSlot,
                                                call->target_slot);
                 g_resume_begin_frame.store(g_logic_frame.load(), std::memory_order_release);
+                g_resume_last_frame.store(g_logic_frame.load(), std::memory_order_release);
                 g_resume_timer_token.store(token, std::memory_order_release);
+                g_resume_clock_backward_window_begin.store(0, std::memory_order_release);
+                g_resume_clock_backward_count.store(0, std::memory_order_release);
                 g_resume_timer_started.store(true, std::memory_order_release);
             }
             if (kind == contracts::QolSaveCallKind::kBeginNew && contracts::succeeded(began)) {
@@ -281,6 +288,9 @@ void save_transition_observe() {
     g_resume_begin_frame.store(0, std::memory_order_release);
     g_resume_timer_started.store(false, std::memory_order_release);
     g_resume_timer_token.store(0, std::memory_order_release);
+    g_resume_last_frame.store(0, std::memory_order_release);
+    g_resume_clock_backward_window_begin.store(0, std::memory_order_release);
+    g_resume_clock_backward_count.store(0, std::memory_order_release);
     // 节流仅在实际执行 confirm 后更新；首次尝试与新 token 独立放行，首次失败后可立即重试。
     const uint64_t last_token = g_last_confirm_token.load(std::memory_order_acquire);
     const uint64_t last = g_last_confirm_attempt.load(std::memory_order_acquire);
@@ -291,19 +301,32 @@ void save_transition_observe() {
     (void)save_transition_confirm(token, state.current_slot);
 }
 
-void save_transition_timeout_tick(uint64_t now) {
+void save_transition_timeout_frame(uint64_t now) {
     if (!g_resume_timer_started.load(std::memory_order_acquire)) return;
     uint64_t token = 0;
     int32_t target = -1;
     if (!save_transition_pending_observation(&token, &target) ||
         token != g_resume_timer_token.load(std::memory_order_acquire)) return;
-    const uint64_t began = g_resume_begin_frame.load(std::memory_order_acquire);
-    // A backwards frame counter is treated as a new time base.
-    if (!save_transition_timeout_elapsed(true, began, now, kResumeConfirmTimeoutFrames)) return;
+    uint64_t began = g_resume_begin_frame.load(std::memory_order_acquire);
+    uint64_t last_frame = g_resume_last_frame.load(std::memory_order_acquire);
+    uint64_t backward_window_begin =
+        g_resume_clock_backward_window_begin.load(std::memory_order_acquire);
+    uint32_t backward_count = g_resume_clock_backward_count.load(std::memory_order_acquire);
+    const auto timeout = save_transition_timeout_tick(
+        true, &began, &last_frame, &backward_window_begin, &backward_count, now,
+        kResumeConfirmTimeoutFrames, kResumeClockBackwardLimit);
+    g_resume_begin_frame.store(began, std::memory_order_release);
+    g_resume_last_frame.store(last_frame, std::memory_order_release);
+    g_resume_clock_backward_window_begin.store(backward_window_begin, std::memory_order_release);
+    g_resume_clock_backward_count.store(backward_count, std::memory_order_release);
+    if (timeout != TransitionTimeoutTick::kExpired) return;
     if (contracts::succeeded(save_transition_cancel(token))) {
         g_resume_begin_frame.store(0, std::memory_order_release);
         g_resume_timer_token.store(0, std::memory_order_release);
+        g_resume_last_frame.store(0, std::memory_order_release);
         g_resume_timer_started.store(false, std::memory_order_release);
+        g_resume_clock_backward_window_begin.store(0, std::memory_order_release);
+        g_resume_clock_backward_count.store(0, std::memory_order_release);
     }
 }
 
@@ -320,7 +343,7 @@ int32_t slot_data_frame(int64_t frame, void*) {
 int32_t logic_clock_frame(int64_t frame, void*) {
     const auto now = static_cast<uint64_t>(frame);
     g_logic_frame.store(now, std::memory_order_release);
-    save_transition_timeout_tick(now);
+    save_transition_timeout_frame(now);
     return 1;
 }
 
