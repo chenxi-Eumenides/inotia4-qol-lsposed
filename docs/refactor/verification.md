@@ -129,6 +129,24 @@
 - 真机原版 1.3.2/槽 0：实际已安装旧包与新集成包的签名指纹一致，install-r 成功，启动身份日志 SHA 正确；只进入已有槽，不创建或保存。正常 EB 读面包括完整 status/inventory/items、5 袋 info、80 槽，共 **88/88 完整 raw body 逐字相同**，无动态字段归一化；24 个存档目录文件与 11 个模块目录文件 SHA 不变。临时启用 EB 采集后原配置逐字恢复，最终 main_menu；新增 WARN/崩溃为 0，既有告警保留。比较与身份证据见该目录 `accepted-evidence/`，完整受影响范围见 `README.md`。
 - **不覆盖**：完整历史 VM 卡、设备损坏注入、原版 save/联合提交、创建/导入/删除/回滚、provider 生命周期级联及其它变体。双损坏只在 Host 注入。journal v2、恢复状态与 evidence 尚未接生产路径；VM-SD-01..04 仍为后续计划。API 票据待 P3b 按正式 sidecar 提交确认才 done，pending 保持 pending；不以游戏 SAVE_Save 的 int 成功提前结算。
 
+### 存档数据生命周期 P3c 真机后注（2026-10-08）
+
+**部分通过；P3c 整体仍 `NOT_ACCEPTED`。** 历史 VM-K4-04b、VM-K5-06d、VM-K5-06i 原始 PASS 行不改写；本后注只记录 P3c 当前实现的实测范围。完整执行摘要与每卡边界见 `docs/history/slot-data/p3c-20261008/verification-log.md`。
+
+- 静态修复已收敛，最后一轮 Host tests 119/119、`check_arch.py` 新增违规 0、routes 146；P3c 面板数据清空缺陷由 `26b19fb8` 修复。修复构建模块 SHA `121d4e97400c0c14391448536aa226ad8b2d259600263d229df3f5f496e85f94` 已在 monster v31 LSPatch 集成包实际加载。
+- **通过的子范围**：VM-SD-01 多槽/同槽重入与 session epoch；VM-SD-02 当前档 EB deactivate/activate 补加载；VM-SD-04 slot1 create 后 missing/default 不继承旧 EB 数据（导入与 rollback 留 P5）；VM-SD-03 正常保存下 dat/sidecar 同事务提交、journal 清除、票据成功体冻结及 EB capture；VM-B01..04 的 API 原版消耗/装备/镶嵌/袋内移动；monster `SAVE_Save` 保存 happy path；fixed build 面板打开不清 EB、EB API payload 保存/重进往返。
+- **尚未完成**：VM-SD-03 prepared/confirmed/final 三个 crash/restart 窗口；VM-SD-04 完整导入/回滚；VM-SD-01 旧 epoch 句柄的设备级直接拒绝；物理点击/拖拽交互（API 子项不替代物理 UI）；overhaul 真机按用户决定不测。故不能把上述子项汇总成完整 VM-SD/VM-B 卡 PASS。
+- monster 设备日志无 hook entry/B-target/backup 解析结构日志；SAVE_Save guard 仅有真实 dat 成功变化、无递归/崩溃、原版操作继续的行为侧证据及静态 trampoline 复审。该证据缺口仍保留，不声称设备直接观测了 guard 地址。
+- 联合保存遇到 evidence 路径缺陷时的首轮降级按设计保留 journal，随后用测试前备份恢复；路径修复后原版 save 和 EB participant 保存均正常提交。用户允许测试槽变更；数据备份与原始 logcat/APK 留本地 `.tmp/`，不入提交。
+
+### autosell P4 / VM-44 后注（2026-10-08）
+
+**P4 实现已完成，VM-44 部分通过但整体 `NOT_ACCEPTED`。** 当前提交 `63912a4e`、`07779c4d`、`6db1c866`、`3f018c7c` 保持 `autosell` section v2，SessionBound 读 + Immediate 写；Host 120/120、专项 192/192、arch 新增违规0、routes146、Debug build通过。完整范围见 `docs/history/slot-data/p4-20261008/verification-log.md`。
+
+- monster v31 当前模块 SHA `e4578153818c…` 上，slot0 rules Immediate 写后 sidecar 改变而 dat 不变；force-stop/relaunch 后 slot0 配置恢复，slot2 默认配置与 sidecar 不变，回 slot0 自定义配置仍恢复。全局 autosell 关闭时库存不变；开启后 scan 启动，关闭后 task removed。
+- 实际 scan 有 `sold=3,failed=16`；失败均观察为 EB bag6/7 `RemoveFailed`。这是 VM-44 的真实未闭合行为，不能据 persistence 子项通过写整卡 PASS；清理 rules 并等待 sidecar hash 改变后重启，确认 disabled rules 与测试前原版 dat 库存恢复。
+- 仍缺真实 Provider request 并发/注销durable drain、无session pending覆盖已有section直接测试、load错误和跨槽竞态设备证据；不宣称 fake callback 测试证明真实 Provider 并发。
+
 > **VM-D1 状态**：D1 收尾真机卡，本轮未执行设备操作，结论待填 `PASS`/`NOT_ACCEPTED`；
 > 按 §1 交付定义，D1 行为面在真机证据归档前不视为可交付（当前状态：待真机执行）。
 
@@ -172,8 +190,7 @@
 ### 5.4 待补行为证据
 
 - 待补行为证据：VM-P6-01、VM-D1、VM-D2-01..04，以及 P5 出口插件卡；VM-P1-S2 的 **EB 逻辑袋 >99 两态视图（R-48）已真机 PASS**（R2/R5），物理袋 >99 载体、999 clamp、原子组失败注入仍待补（见 §3 行）。
-- P3b-2 save_backup 前置门与路径注入为惰性接线：`a3bf0caf`（P3b-1）之后的 save_route/保存事务 Adapter/save_backup 槽操作门均只完成 Host 机制与 Host 测试（`save_route_tests`、`save_transaction_tests`、`save_backup_gate_tests`），未触及生产保存链与 hook；真机证据随 P3c 统一回归（重验范围届时与 VM-SD 各卡合并登记）。
-- P3b-3 转换状态机与协调器为 fake 驱动惰性实现：`85411189`（P3b-2）之后的 `save_transition`（SelectionToken 相位机、原子两槽 lease、确认序严格 journal 分派）与 `save_coordinator`（三候选真实编码预检、prepared/confirmed journal、commit-pending 帧重试、重启恢复矩阵、HTTP 结算）仅完成领域逻辑与 Host 测试（`save_transition_tests`、`save_coordinator_tests`、provider 保存面扩展），未装 hook、未改 `patch/save_enter.cpp` 生产接线、未切 EB/Kotlin/`core/native/module_save.cpp`；HTTP 旧写链继续服务（协调器 `save_coordinator_installed()` 为假时走旧路径）。真机证据随 P3c 统一回归。
+- **P3c 尚欠真机证据**：VM-SD-03 crash/restart 三窗口、VM-SD-04 导入/回滚、VM-SD-01 旧 epoch 句柄设备级拒绝与 monster hook 解析结构日志。正常 save/EB participant、当前档重入/启停补加载、create default reset 及 API 驱动 VM-B 操作的限定结果见本文件 P3c 后注和 `docs/history/slot-data/p3c-20261008/verification-log.md`；不得将这些子项记成整张卡通过。
 
 ### 5.5 资源豁免
 

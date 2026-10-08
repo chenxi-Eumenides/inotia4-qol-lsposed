@@ -197,8 +197,8 @@ operation 跨完整 dat/sidecar/warehouse 备份事务持有，但不是跨调�
 | P1（完成） | 契约冻结，生产不接线 | 无行为变化，不需要真机 |
 | P2（完成） | owner token / 受限 backend / provider 骨架、session 状态机、fake backend 验证注销与补加载；生产功能仍走旧路径 | VM-K5-06h 装配/名册范围；Host 身份、注销、epoch 用例 |
 | P3a（完成） | strict 共享 store、真实编码容量预检、显式 generation/revision 预约；journal v2/v1 识别、恢复状态容器、原 dat evidence；不接生产协调 | VM-K4-04b、VM-K5-06i 受影响正常读面/同槽进档范围；损坏与预约由 Host 覆盖 |
-| P3b（计划） | core.save 生产协调/journal v2、转换桥、SAVE_Save 入口资源、save Adapter、旧 module_save；EB callbacks/runtime、Kotlin/JNI 薄层及 evidence→commit 槽准入 | 重验 VM-K4-04b、VM-K5-06d、VM-K5-06i；执行相应 VM-SD 卡 |
-| P4 | autosell 接入 SessionBound 读 + Immediate 写，移除其存档事件加载与任意 section IO | 重验 VM-44 |
+| P3b/P3c（实现完成，真机部分验收） | core.save 生产协调/journal v2、转换桥、SAVE_Save 入口资源、save Adapter、旧 module_save 参与者编排退役；EB callbacks/runtime、Kotlin/JNI 薄层及 evidence→commit 槽准入。生产切换见 `730ff84d`，后续静态修复与面板状态修复见 `26b19fb8` 及后续 P3c 修复提交 | 已执行 VM-SD-01/02/04 的限定范围、VM-SD-03 happy path、VM-B01..04 API 子项及 monster 保存 happy path；崩溃恢复窗口、旧 epoch 句柄设备级拒绝、overhaul 和 hook 结构日志仍欠。详细范围见 `docs/history/slot-data/p3c-20261008/verification-log.md`；整批仍 `NOT_ACCEPTED` |
+| P4（实现完成，VM-44 部分真机验证；NOT_ACCEPTED） | autosell 接入 SessionBound 读 + Immediate 写，移除其存档事件加载与任意 section IO；修复 request revision、pending intent、失败重试与注销保留 | VM-44 已观察 `sold=3`、`failed=16`；仍欠 EB bag6/7 RemoveFailed 的独立归因及真实 Provider 并发/注销时序证据；见 `docs/history/slot-data/p4-20261008/verification-log.md` |
 | P5 | save_backup admin 接入、锁范围收窄、导入/删除/回滚；Host/JNI 旧入口权限封堵；旧注册生产链删除 | 重验 VM-K4-04b、VM-K5-06i |
 
 旧 `contracts/module_save_port.h` 协议 P1/P2 不动；P3 退役 EB 生产注册，可留兼容转发但不能保留第二套参与者顺序；P5 关闭旧入口。既有 VM 卡位置见 `docs/refactor/verification.md`。
@@ -223,12 +223,13 @@ prepare 失败不调用原版保存；原版失败不写正式 sections；原版
 
 建档 reset 在消费者加载前发生，覆盖原版建档；导入当前槽被拒绝。成功导入与完整回滚后 generation/epoch 正确失效，删除同步清 sidecar；primary 已改但 last-good 失败能够回滚并保留证据，未知 sections 保持。
 
-## 13. 取证门与约束声明
+## 13. P3c 实测边界与约束声明
 
-P3b 生产接线前必须补证，不能推断；P3a 的纯机制验收不代替该取证门：
+P3c 已把协调器与转换接入生产，但**符号存在或 hook 安装成功不等于所有游戏保存路径都已证明覆盖**。P3c 真机记录见 `docs/history/slot-data/p3c-20261008/verification-log.md`；整批仍 `NOT_ACCEPTED`，未覆盖项在 `docs/refactor/verification.md` §5 保持登记。
 
-1. 各变体原版/自动保存是否完整经过 SAVE_Save。符号已登记于 `game/symbols/symbol_registry.h`；`extension_bag_render.inc` 的 SAVE_SaveInventory hook 仅撤投影，不构成完整事务。
-2. 原版新档 wrapper（`patch/save_enter.cpp`）如何由 Adapter 提供可靠目标槽。必须由 Adapter 提供，不能插件读裸地址。
+1. original v1.3.2 与 monster v31 的 `SAVE_Save` 正常保存 happy path 已真机验证，原版返回后 sidecar 按同事务提交；monster guard 有成功写盘行为侧证据及静态 trampoline 复审。但所有自动保存/隐藏下层写盘路径未穷举，设备无入口解析/B 目标/backup 结构日志；不得据此宣称所有存档写入均被事务捕获。
+2. API enter/create 使用请求目标槽并通过 slot-data 生命周期；original v1.3.2 slot1 create 已由 API 自动 skip 剧情后 ticket `done`、EB missing/default 不继承旧槽。各变体所有新档按钮/取消选角路径仍需逐卡证据；目标槽只能由受控 Adapter 提供，不得由插件读裸地址。
+3. VM-SD-03 的 prepared/confirmed/final crash/restart 三窗口尚未真机验证；Host 故障测试不能替代设备恢复日志。VM-SD-04 的导入/完整回滚留 P5。
 
 插件间仅通过 contracts capability，core.save 不 include infra/store.h；EB/autosell/save_backup 不 include core.save 私有文件。宿主只做验证/转接，领域时序留在 core.save。不新增裸 VMA/偏移，不改模块或插件版本号，HTTP 路径/方法/成功响应与 NativeBridge external 方法名/签名冻结。
 
