@@ -36,6 +36,8 @@ int32_t is_main() { return std::this_thread::get_id() == g_main_thread; }
 // ABI 表按 QolOwnerStoreApi 字段顺序整体提供；实现经 owner_authorize_store 收口，
 // 并把 QolStoreSection 转成 infra 的 ReplaceMap/RemoveSet（与 host_sdk 同构）。
 int g_write_reserved_fail = 0;
+int g_confirmed_write_fail = 0;
+bool g_arm_confirmed_write_failure = false;
 int g_replace_reserved_fail = 0;
 int g_remove_reserved_fail = 0;
 int g_last_reserve_candidates = 0;
@@ -129,6 +131,10 @@ QolResult store_release(QolOwnerToken token, QolOwnerStoreReservation reservatio
 QolResult store_write_reserved(QolOwnerToken token, int32_t slot,
                                QolOwnerStoreReservation* credential, const char* name,
                                uint16_t version, const uint8_t* bytes, uint64_t size) {
+    if (g_confirmed_write_fail > 0) {
+        --g_confirmed_write_fail;
+        return error(kQolErrInternal, "confirmed write injected failure", 31);
+    }
     if (g_write_reserved_fail > 0) {
         --g_write_reserved_fail;
         return error(kQolErrInternal, "write reserved injected failure", 32);
@@ -247,6 +253,10 @@ struct AdapterState {
 } g_adapter;
 QolResult adapter_call(void*, const QolSlotOperationLease*, int32_t, QolSaveOriginalResult* out) {
     ++g_adapter.call_count;
+    if (g_arm_confirmed_write_failure) {
+        g_arm_confirmed_write_failure = false;
+        g_confirmed_write_fail = 1;
+    }
     out->size = sizeof(*out);
     if (g_adapter.fail_call) return error(kQolErrNotReady, "adapter not ready", 17);
     out->invoked = 1;
@@ -403,6 +413,8 @@ int main() {
     CHECK(g_adapter.call_count == calls_before);  // 不调用原版。
     CHECK(g_capture_calls == captures_before + 1);  // capture 已执行恰一次。
     CHECK(consumer_state.outcomes.back() == static_cast<uint32_t>(QolSlotDataOutcome::kCancelled));
+    CHECK(consumer_state.outcomes.back() !=
+          static_cast<uint32_t>(QolSlotDataOutcome::kPendingRecovery)); // prepare 前失败不关门。
     CHECK(journal_on_disk_missing());
     QolSlotOperationLease probe{};
     probe.size = sizeof(probe);
@@ -499,6 +511,17 @@ int main() {
     CHECK(journal_on_disk_missing());
     g_replace_reserved_fail = 0;
 
+    // F4: confirmed journal write failure must close EB admission immediately.
+    const auto outcomes_before_confirmed_fail = consumer_state.outcomes.size();
+    g_arm_confirmed_write_failure = true;
+    CHECK(save_coordinator_settle(0, 0, 71, &body) == SaveSettle::kPending);
+    CHECK(consumer_state.outcomes.size() == outcomes_before_confirmed_fail + 1);
+    CHECK(consumer_state.outcomes.back() ==
+          static_cast<uint32_t>(QolSlotDataOutcome::kPendingRecovery));
+    CHECK(!save_coordinator_permits_save(0));
+    CHECK(save_coordinator_settle(0, 1, 72, &body) == SaveSettle::kCommitted);
+    CHECK(save_coordinator_permits_save(0));
+
     // ---- 重试耗尽：连续 3 帧失败 → degraded 失败终态 ----
     g_replace_reserved_fail = 10;
     const auto captures_before_exhaust = g_capture_calls;
@@ -519,6 +542,8 @@ int main() {
     const auto calls_at_evidence = g_adapter.call_count;
     g_adapter.evidence_fail = 1;
     CHECK(save_coordinator_settle(0, 0, 11, &body) == SaveSettle::kPending);
+    CHECK(consumer_state.outcomes.back() ==
+          static_cast<uint32_t>(QolSlotDataOutcome::kPendingRecovery));
     CHECK(g_adapter.call_count == calls_at_evidence + 1);
     g_adapter.evidence_fail = 0;
     CHECK(save_coordinator_settle(0, 1, 12, &body) == SaveSettle::kCommitted);

@@ -248,6 +248,29 @@ int main() {
         CHECK(g_item_state_dirty && g_state.pending.valid); // 捕获后 revision 改变仍保留。
     }
 
+    // F5: degraded keeps the gate closed; a fresh session-bound load after re-register opens it.
+    {
+        SlotDataSaveView view{};
+        extension_bag_mark_dirty_locked();
+        CHECK(succeeded(slot_data_save_begin(103, &view)));
+        const char* section = nullptr;
+        uint16_t version = 0;
+        std::vector<uint8_t> buffer(65536);
+        uint64_t size = 0;
+        CHECK(succeeded(slot_data_save_capture_next(103, &section, &version, buffer.data(),
+                                                    buffer.size(), &size)));
+        slot_data_save_mark_pending(103);
+        CHECK(!extension_bag_session_admitted_locked());
+        slot_data_save_finish(103, static_cast<uint32_t>(QolSlotDataOutcome::kDegraded));
+        CHECK(!extension_bag_session_admitted_locked());
+    }
+    const auto degraded_unregister = extension_bag_slot_data_unregister(&slot_data_api());
+    slot_data_pump();
+    CHECK(extension_bag_slot_data_request_settled(&slot_data_api(), degraded_unregister));
+    CHECK(extension_bag_slot_data_register(7, &slot_data_api()));
+    slot_data_pump();
+    CHECK(extension_bag_session_admitted_locked());
+
     // ---- B9：prepare_detach 开始即撤销本地准入（detach 窗口拒绝扫描/物品操作）----
     CHECK(extension_bag_session_admitted_locked());
     CHECK(succeeded(slot_data_begin_transition(

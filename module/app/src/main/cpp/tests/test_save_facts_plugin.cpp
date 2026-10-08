@@ -13,10 +13,16 @@
 #include "host/save_route.h"
 #include "plugins/core.save/plugin.h"
 #include "plugins/core.save/save_transition.h"
+#include "patch/save_enter.h"
 
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
+
+namespace qol::features::core_save {
+std::size_t transition_ticket_context_count_for_test();
+}
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -95,6 +101,9 @@ uint64_t g_next_lease_id = 0;
 bool g_fail_save_write = false;
 bool g_fail_logic_scheduler = false;
 uint64_t g_next_scheduler_task = 1;
+struct ScheduledTask { int32_t point; QolFrameHandler handler; void* ctx; uint64_t id; };
+std::vector<ScheduledTask> g_scheduled_tasks;
+int32_t g_adapter_world_ready = 0;
 
 QolResult save_slot_state(int32_t, int32_t* out) { *out = 0; return ok(); }
 QolResult save_slot_exists(int32_t, int32_t* out) { *out = 1; return ok(); }
@@ -157,14 +166,23 @@ QolResult unregister_result(uint32_t) {
 }
 uint32_t current_attempt() { return g_attempt; }
 QolResult defer_result() { ++g_deferred; return ok(); }
-QolResult scheduler_add(int32_t point, QolFrameHandler, void*, int32_t, int32_t,
+QolResult scheduler_add(int32_t point, QolFrameHandler handler, void* ctx, int32_t, int32_t,
                         uint64_t* out_id) {
     if (point == kQolRuntimeFramePointLogicPre && g_fail_logic_scheduler)
         return error(kQolErrInternal, "logic scheduler failure", 23);
     *out_id = g_next_scheduler_task++;
+    g_scheduled_tasks.push_back(ScheduledTask{point, handler, ctx, *out_id});
     return ok();
 }
-QolResult scheduler_remove(uint64_t) { return ok(); }
+QolResult scheduler_remove(uint64_t id) {
+    for (auto it = g_scheduled_tasks.begin(); it != g_scheduled_tasks.end(); ++it) {
+        if (it->id == id) {
+            g_scheduled_tasks.erase(it);
+            break;
+        }
+    }
+    return ok();
+}
 
 int32_t is_main_thread() { return 1; }
 
@@ -251,7 +269,7 @@ QolResult stub_release_lease(void*, QolOwnerToken, const QolSlotOperationLease*)
 QolResult adapter_read_state(void*, QolSaveAdapterState* out) {
     out->size = sizeof(*out);
     out->current_slot = 1;
-    out->world_ready = 0;
+    out->world_ready = static_cast<uint32_t>(g_adapter_world_ready);
     out->new_game_flag = 0;
     return ok();
 }
@@ -293,6 +311,11 @@ QolResult dispatch(uint32_t route, const char* path, const char* body, char* out
 
 int main() {
     const auto& descriptor = qol::features::core_save::plugin_descriptor();
+    CHECK(std::strcmp(save_enter_detail::kNewGameConfirmBinding.callsite_symbol,
+                      "F_SELECTCHAR_BUTTON_START_EXE_VMA") == 0);
+    CHECK(std::strcmp(save_enter_detail::kNewGameConfirmBinding.target_symbol,
+                      "F_SELECT_CHARACTER_START_GAME_VMA") == 0);
+    CHECK(save_enter_detail::kNewGameConfirmBinding.original_call == 0x97ffffea);
     CHECK(std::strcmp(descriptor.id, "core.save") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 0);
@@ -401,6 +424,28 @@ int main() {
     CHECK(g_result_handler != nullptr);
     descriptor.on_enabled(context);
 
+    // F6: LogicPre advances timeout only; confirmation/readiness is RenderPre-only.
+    const auto find_task = [](int32_t point) -> const ScheduledTask* {
+        for (const auto& task : g_scheduled_tasks)
+            if (task.point == point) return &task;
+        return nullptr;
+    };
+    const ScheduledTask* logic_task = find_task(kQolRuntimeFramePointLogicPre);
+    const ScheduledTask* render_task = find_task(kQolRuntimeFramePointRenderPre);
+    CHECK(logic_task != nullptr && logic_task->handler != nullptr);
+    CHECK(render_task != nullptr && render_task->handler != nullptr);
+    const auto& transition_hooks = qol_runtime_hooks();
+    uint64_t frame_transition = 0;
+    CHECK(transition_hooks.save_transition_begin_thunk != nullptr &&
+          transition_hooks.save_transition_begin_thunk(0, 1, &frame_transition));
+    CHECK(!transition_hooks.save_enter_ready());
+    CHECK(logic_task->handler(1, logic_task->ctx) != 0);
+    CHECK(!transition_hooks.save_enter_ready()); // LogicPre cannot publish ready.
+    g_adapter_world_ready = 1;
+    CHECK(render_task->handler(2, render_task->ctx) != 0);
+    CHECK(transition_hooks.save_enter_ready()); // RenderPre performs token confirmation.
+    g_adapter_world_ready = 0;
+
     char output[4096]{};
     uint32_t output_size = 0;
     CHECK(dispatch(0, "/api/system/save", "{}", output, sizeof(output),
@@ -458,6 +503,29 @@ int main() {
     g_attempt = 2;
     CHECK(!g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&cancelled_payload),
                             sizeof(cancelled_payload), output, sizeof(output), &output_size));
+    CHECK(std::string(output, output_size) ==
+          "{\"ok\":false,\"error\":\"slot transition not confirmed\"}");
+
+    // F2: retain unpolled terminal contexts only up to the private bounded window.
+    TestSaveWritePayload oldest_payload{};
+    for (int i = 0; i < 20; ++i) {
+        const int slot = i % 3;
+        char body[64]{};
+        std::snprintf(body, sizeof(body), "{\"slot\":%d}", slot);
+        CHECK(dispatch(1, "/api/system/enter_slot", body, output, sizeof(output),
+                       &output_size).code == kQolOk);
+        const TestSaveWritePayload ticket_payload = g_posted_payload;
+        if (i == 0) oldest_payload = ticket_payload;
+        g_attempt = 0;
+        CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&ticket_payload),
+                               sizeof(ticket_payload), output, sizeof(output), &output_size));
+        CHECK(qol::features::core_save::save_transition_confirm(g_last_transition_token, slot).ok ==
+              kQolOk);
+        CHECK(qol::features::core_save::transition_ticket_context_count_for_test() <= 16);
+    }
+    g_attempt = 1;
+    CHECK(!g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&oldest_payload),
+                            sizeof(oldest_payload), output, sizeof(output), &output_size));
     CHECK(std::string(output, output_size) ==
           "{\"ok\":false,\"error\":\"slot transition not confirmed\"}");
 

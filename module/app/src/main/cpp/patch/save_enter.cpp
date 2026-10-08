@@ -32,8 +32,8 @@
 namespace {
 
 // 发起点原指令字（llvm-objdump 核对）。
-constexpr uint32_t kResumeBlWord = 0x97fecd56;    // SaveSlot_SlotButtonExe+0x88 bl GAME_StartResumeGame
-constexpr uint32_t kStartGameBlWord = 0x97ffffea; // SelectCharacter_ButtonStartExe+0x10 bl SelectCharacter_StartGame
+constexpr uint32_t kResumeBlWord = save_enter_detail::kResumeBinding.original_call;
+constexpr uint32_t kStartGameBlWord = save_enter_detail::kNewGameConfirmBinding.original_call;
 
 std::mutex g_save_enter_mtx;
 std::vector<std::pair<SaveEnterFn, void*>> g_callbacks;  // 仅持锁访问
@@ -84,11 +84,17 @@ void save_load_wrapper(int32_t slot) {
     qol::game::save_load_bypass_end(bypass);
 }
 
-// 新档 wrapper：selection token 已由 SaveSlot_GoToNewGame 入口 hook begin（core.save），
-// 确认按钮只标记 pending 并复刻原调用；确认序在 core.save RenderPre 按 token id 复用。
+// 该 patch 精确替换 SelectCharacter_ButtonStartExe+0x10 的原版 BL
+// SelectCharacter_StartGame：SaveSlot_GoToNewGame 已创建 selection token 并进入选角页后，
+// 此确认入口才启动原版新档流程。它不是带槽位的 begin_new adapter thunk；API 新档由
+// save.cpp 经受控转换路径完成，两条入口不能互换。
 void save_new_wrapper() {
+    if (fn_select_character_start_game == nullptr) {
+        QOL_LOG_WARN(QolDomain::kSave, "new game confirmation unavailable; original not invoked");
+        return;
+    }
     save_enter_mark_pending();
-    if (fn_select_character_start_game != nullptr) fn_select_character_start_game();
+    fn_select_character_start_game();
 }
 
 // 帧检测任务：core.save 确认序发布 ready 后消费一次并锁外派发回调（回调在主线程执行）。

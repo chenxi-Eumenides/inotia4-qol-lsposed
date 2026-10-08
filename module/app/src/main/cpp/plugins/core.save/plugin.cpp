@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <string>
@@ -435,7 +436,9 @@ struct SaveTransitionTicketContext {
     uint64_t token = 0;
 };
 std::mutex g_transition_ticket_mutex;
+constexpr std::size_t kTransitionTicketContextLimit = 16;
 std::map<uint64_t, SaveTransitionTicketContext> g_transition_ticket_contexts;
+std::deque<uint64_t> g_transition_ticket_context_order;
 std::atomic<uint64_t> g_next_save_request_sequence{1};
 thread_local uint64_t g_active_save_request_sequence = 0;
 
@@ -443,7 +446,13 @@ void bind_transition_ticket_context(uint64_t token, int32_t kind, int32_t slot) 
     const uint64_t sequence = g_active_save_request_sequence;
     if (token == 0 || sequence == 0) return;
     std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
-    g_transition_ticket_contexts[sequence] = SaveTransitionTicketContext{kind, slot, token};
+    if (g_transition_ticket_contexts.find(sequence) != g_transition_ticket_contexts.end()) return;
+    g_transition_ticket_contexts.emplace(sequence, SaveTransitionTicketContext{kind, slot, token});
+    g_transition_ticket_context_order.push_back(sequence);
+    while (g_transition_ticket_context_order.size() > kTransitionTicketContextLimit) {
+        g_transition_ticket_contexts.erase(g_transition_ticket_context_order.front());
+        g_transition_ticket_context_order.pop_front();
+    }
 }
 
 bool transition_ticket_context(uint64_t sequence, int32_t kind, int32_t slot,
@@ -460,12 +469,27 @@ bool transition_ticket_context(uint64_t sequence, int32_t kind, int32_t slot,
 void clear_transition_ticket_context(uint64_t sequence) {
     std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
     g_transition_ticket_contexts.erase(sequence);
+    for (auto it = g_transition_ticket_context_order.begin();
+         it != g_transition_ticket_context_order.end(); ++it) {
+        if (*it == sequence) {
+            g_transition_ticket_context_order.erase(it);
+            break;
+        }
+    }
 }
 
 void clear_all_transition_ticket_contexts() {
     std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
     g_transition_ticket_contexts.clear();
+    g_transition_ticket_context_order.clear();
 }
+
+#if defined(QOL_SAVE_FACTS_PLUGIN_TEST_SEAMS)
+std::size_t transition_ticket_context_count_for_test_impl() {
+    std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
+    return g_transition_ticket_contexts.size();
+}
+#endif
 
 const contracts::QolSaveWritePort* g_save_write = nullptr;
 
@@ -1022,6 +1046,12 @@ const contracts::PluginDescriptor kDescriptor = {
 };
 
 }  // namespace
+
+#if defined(QOL_SAVE_FACTS_PLUGIN_TEST_SEAMS)
+std::size_t transition_ticket_context_count_for_test() {
+    return transition_ticket_context_count_for_test_impl();
+}
+#endif
 
 const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
 

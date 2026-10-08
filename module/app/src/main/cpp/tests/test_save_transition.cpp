@@ -327,7 +327,17 @@ int main() {
     CHECK(!save_transition_timeout_elapsed(false, 0, 601, 600));
     CHECK(!save_transition_timeout_elapsed(true, 0, 600, 600));
     CHECK(save_transition_timeout_elapsed(true, 0, 601, 600)); // began=0 是合法起点。
-    CHECK(!save_transition_timeout_elapsed(true, UINT64_MAX - 2, 1, 0)); // 时钟回退。
+    CHECK(save_transition_timeout_elapsed(true, UINT64_MAX - 2, 1, 600)); // 回绕即超时。
+    CHECK(!save_transition_confirm_throttled(5, 5, UINT64_MAX - 2, 1, 30));
+    uint64_t wrapped_token = 0;
+    CHECK(succeeded(save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 2,
+                                          &wrapped_token)));
+    if (save_transition_timeout_elapsed(true, UINT64_MAX - 2, 1, 600))
+        CHECK(succeeded(save_transition_cancel(wrapped_token)));
+    CHECK(save_transition_query(wrapped_token, &transition_result).ok == kQolOk &&
+          transition_result.state == TransitionResultState::kCancelled);
+    CHECK(succeeded(qol::infra::slot_operation::acquire(stranger, 1u << 2, &probe)));
+    CHECK(succeeded(qol::infra::slot_operation::release(stranger, &probe)));
 
     save_transition_reset_for_test();
     slot_data_set_available(false);

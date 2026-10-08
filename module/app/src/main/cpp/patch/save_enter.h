@@ -30,6 +30,17 @@ bool save_enter_host_install_if_ready();
 
 namespace save_enter_detail {
 
+struct SaveEnterPatchBinding {
+    const char* callsite_symbol;
+    const char* target_symbol;
+    uint32_t original_call;
+};
+
+inline constexpr SaveEnterPatchBinding kResumeBinding{
+    "F_SAVESLOT_SLOT_BUTTON_EXE_VMA", "F_GAME_START_RESUME_GAME_VMA", 0x97fecd56};
+inline constexpr SaveEnterPatchBinding kNewGameConfirmBinding{
+    "F_SELECTCHAR_BUTTON_START_EXE_VMA", "F_SELECT_CHARACTER_START_GAME_VMA", 0x97ffffea};
+
 // 触发判定纯函数：pending 且已进入 world 才触发。
 constexpr bool should_fire(bool pending, bool in_world) {
     return pending && in_world;

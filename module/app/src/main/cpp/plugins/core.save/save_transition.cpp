@@ -330,13 +330,14 @@ QolResult save_transition_prepare_stop() {
 bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint64_t last_frame,
                                        uint64_t now, uint64_t window) {
     if (last_frame == 0 || last_token != token) return false;  // 尚未执行或新 token：放行。
-    if (now < last_frame) return false;                        // 帧号回绕：放行。
+    if (now < last_frame) return false;  // 回绕按窗口已届满处理，不继续节流。
     return now - last_frame < window;
 }
 
 bool save_transition_timeout_elapsed(bool timer_started, uint64_t began, uint64_t now,
-                                    uint64_t timeout) {
-    return timer_started && now >= began && now - began > timeout;
+                                     uint64_t timeout) {
+    // 回绕/时钟重置后悬挂转换会长期占用槽位 lease；fail-safe 是取消，而非延长等待。
+    return timer_started && (now < began || now - began > timeout);
 }
 
 void save_transition_reset_for_test() {

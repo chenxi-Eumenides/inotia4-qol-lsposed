@@ -64,6 +64,7 @@ target_include_directories(save_facts_plugin_tests PRIVATE
 )
 target_compile_features(save_facts_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(save_facts_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_compile_definitions(save_facts_plugin_tests PRIVATE QOL_SAVE_FACTS_PLUGIN_TEST_SEAMS=1)
 add_test(NAME save_facts_plugin_tests COMMAND save_facts_plugin_tests)
 
 add_executable(slot_data_contract_tests

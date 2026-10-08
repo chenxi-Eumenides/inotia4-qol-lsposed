@@ -55,6 +55,12 @@ struct CaptureIdentity {
 CaptureIdentity g_capture{};
 uint64_t g_staged_revision = 0;
 
+void eb_reset_loaded_revision_state_locked() {
+    g_capture = CaptureIdentity{};
+    g_staged_revision = 0;
+    g_item_state_dirty = false;
+}
+
 QolResult eb_ok() { return qol::contracts::ok(); }
 
 bool occupied_item_nonempty(const virtual_bag::State& state) {
@@ -93,6 +99,7 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
         // 默认状态：空背包、原版视图；pending 不存在。
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         *state = {};
+        eb_reset_loaded_revision_state_locked();
         g_session_blocked.store(false, std::memory_order_release);
         QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data load slot=%d presence=missing "
                      "epoch=%llu default state", ctx->session.slot,
@@ -169,6 +176,7 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
                      ctx->session.slot);
         return qol::contracts::error(kQolErrInternal, "state parse failed", 18);
     }
+    eb_reset_loaded_revision_state_locked();
     g_session_blocked.store(false, std::memory_order_release);
     QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data load slot=%d parsed=1 epoch=%llu",
                  ctx->session.slot, static_cast<unsigned long long>(ctx->session.epoch));
@@ -317,7 +325,7 @@ bool extension_bag_slot_data_request_settled(const QolSlotDataApi* api,
     qol::contracts::QolSlotDataStatus status{};
     status.size = sizeof(status);
     if (!qol::contracts::succeeded(api->query(request, &status))) return true;  // 未知即终态。
-    return status.state == static_cast<uint32_t>(qol::contracts::QolSlotDataRequestState::kPending);
+    return status.state != static_cast<uint32_t>(qol::contracts::QolSlotDataRequestState::kPending);
 }
 
 // ---- 会话准入（锁内查询；扫描与物品操作在准入失败时明确拒绝）----
