@@ -498,36 +498,9 @@ bool virtual_bag_module_save_validate_locked() {
     return true;
 }
 
-bool virtual_bag_module_save_prepare(int slot, const char* transaction_id) {
-    if (transaction_id == nullptr) return false;
-    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    if (g_module_view_installed) restore_module_view_locked();
-    recover_pending_transaction_locked(lock);
-    // 扩展背包在模块级保存 prepare 中完成自己的校验（容量归一化 + 容量外数据剔除）；
-    // 未通过则拒绝本次保存。
-    if (!virtual_bag_module_save_validate_locked()) return false;
-    return extension_bag_prepare_save_to_store(slot, transaction_id);
-}
-
-bool virtual_bag_module_save_commit(int slot, const char* transaction_id) {
-    if (transaction_id == nullptr) return false;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    const bool saved = extension_bag_commit_save_to_store(slot, transaction_id);
-    if (saved) {
-        g_virtual_bag_state.pending = {};
-        g_item_state_dirty = false;
-    }
-    VIRTBAG_LOG("extension bag participant commit slot=%d tx=%s ok=%d pending=%d", slot,
-                transaction_id, saved ? 1 : 0, g_virtual_bag_state.pending.valid ? 1 : 0);
-    return saved;
-}
-
-bool virtual_bag_module_save_abort(int slot, const char* transaction_id) {
-    if (transaction_id == nullptr) return false;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    return extension_bag_abort_known_failed_save(slot, transaction_id);
-}
+// P3c：SlotBound 写入统一经 save.slot_data 的 request_write（安全点排空），provider 在
+// 原版保存事务内捕获提交；旧 ModuleSaveCoordinator 参与者序退役，本三函数删除。
+// 扫描入口的准入拒绝见 virtual_bag_for_each_logical_item 与各写操作入口。
 
 // G-14（方案 C）：原版物品操作后 RefreshItemArea 会以 INVEN 重刷控件，窗口袋投影需重写。
 // 投影只占窗口袋；其他袋调用为 no-op。调用方（data_op_*）不持模块锁，此处安全获锁。
@@ -576,22 +549,20 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (g_virtual_bag_bridge_class != nullptr) env->DeleteGlobalRef(g_virtual_bag_bridge_class);
     g_virtual_bag_bridge_class = static_cast<jclass>(env->NewGlobalRef(bridge_class));
-    const qol::contracts::QolStoreParticipant participant{
-        "extension-bag",
-        virtual_bag_module_save_prepare,
-        virtual_bag_module_save_commit,
-        virtual_bag_module_save_abort,
-    };
-    if (g_sdk == nullptr || g_sdk->store.register_participant == nullptr ||
-        !qol::contracts::succeeded(g_sdk->store.register_participant(&participant))) {
-        VIRTBAG_LOG("module save participant registration failed");
-    }
+    // P3c：旧 module_save 参与者注册已退出——保存协调唯一走 save.slot_data + core.save
+    // 协调器；此处不得保留第二套参与者顺序。
 }
 
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     if (fn == nullptr || !g_virtual_bag_enabled.load() || !read_world_in_world()) return;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     ensure_state_loaded_locked();
+    // P3c 准入：session 未加载/epoch 未登记/降级阻断时明确拒绝扫描（不产出任何物品，
+    // 不再惰性 IO 兜底空状态）。
+    if (!extension_bag_session_admitted_locked()) {
+        VIRTBAG_LOG("logical item scan rejected: session not admitted");
+        return;
+    }
     // 输出模式视图数量（R-47 决策 b）：启用态 canonical、关闭态 b。占位判定
     // 仍按 descriptor canonical（结构性判断与模式无关）。
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {

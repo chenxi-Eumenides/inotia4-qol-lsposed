@@ -1,3 +1,4 @@
+#include "contracts/save_route.h"
 #include "game/access/save_transaction.h"
 
 #include <cstdio>
@@ -146,6 +147,39 @@ int main() {
     CHECK(!save_tx::save_has_unready_load_transition(&target));
     save_tx::save_clear_pending_transition();
     CHECK(!save_tx::save_has_unready_load_transition(&target));
+
+    // ---- P3c 生产仲裁组装（save_loading_bypass_admit）：Game 层事实 + gate 凭据 ----
+    {
+        save_tx::save_transaction_reset_for_test();
+        save_tx::SaveTransactionGate admit_gate{};
+        admit_gate.operation_admits = +[](void*, QolOwnerToken, const QolSlotOperationLease*,
+                                          int32_t) { return true; };
+        save_tx::save_transaction_bind_gate(&admit_gate);
+        save_tx::save_transaction_set_current_slot_fn(&fake_current_slot);
+        g_current_slot = 0;
+        QolSlotOperationLease lease{};
+        lease.size = sizeof(lease);
+        lease.owner = 7;
+        lease.slot_mask = 1u;
+        // 全条件满足：kResume invocation + 未就绪 transition(target==current) + gate 放行。
+        (void)save_tx::save_invocation_begin(
+            static_cast<uint32_t>(qol::contracts::QolSaveCallKind::kResume), 0);
+        save_tx::save_set_pending_transition(11, 0, false);
+        CHECK(save_tx::save_loading_bypass_admit(&lease, 0).ok == kQolOk);
+        // 无 invocation（不在读档窗口）：阻断。
+        save_tx::save_invocation_end(
+            0);  // 未知 id：不清当前 invocation；用新 invocation 覆盖为非 kResume。
+        (void)save_tx::save_invocation_begin(9, 0);
+        CHECK(save_tx::save_loading_bypass_admit(&lease, 0).code == kQolErrBlocked);
+        // 转换已 ready（无未就绪 transition）：阻断。
+        save_tx::save_invocation_end(0);
+        (void)save_tx::save_invocation_begin(
+            static_cast<uint32_t>(qol::contracts::QolSaveCallKind::kResume), 0);
+        save_tx::save_set_pending_transition(11, 0, true);
+        CHECK(save_tx::save_loading_bypass_admit(&lease, 0).code == kQolErrBlocked);
+        save_tx::save_clear_pending_transition();
+        save_tx::save_transaction_reset_for_test();
+    }
 
     // ---- call_original_save：未绑定 NotReady；绑定后 gate+槽校验+结果透传 ----
     save_tx::save_transaction_reset_for_test();

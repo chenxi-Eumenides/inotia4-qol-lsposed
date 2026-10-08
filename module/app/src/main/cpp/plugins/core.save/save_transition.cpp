@@ -244,6 +244,37 @@ bool save_transition_ready_for_save_enter() {
     return g.ready_published;
 }
 
+bool save_transition_pending_observation(uint64_t* out_token, int32_t* out_target) {
+    if (out_token != nullptr) *out_token = 0;
+    if (out_target != nullptr) *out_target = -1;
+    std::lock_guard<std::mutex> lock(g.mutex);
+    if (!g.has_pending) return false;
+    // 确认中/终态不重复确认；detached（等选角/等原版转换）→ executing/awaiting world
+    // 期间均由 RenderPre 观测驱动确认。
+    if (g.pending.phase == TransitionPhase::kConfirming ||
+        g.pending.phase == TransitionPhase::kTerminal)
+        return false;
+    if (out_token != nullptr) *out_token = g.pending.id;
+    if (out_target != nullptr) *out_target = g.pending.target_slot;
+    return true;
+}
+
+bool save_transition_bypass_lease(contracts::QolSlotOperationLease* out_lease,
+                                  int32_t* out_target) {
+    if (out_lease != nullptr) *out_lease = contracts::QolSlotOperationLease{};
+    if (out_target != nullptr) *out_target = -1;
+    std::lock_guard<std::mutex> lock(g.mutex);
+    // 只有读档转换提供 loading 旁路凭据：新档 selection 期间 SAVE_Save 无旁路语义。
+    if (!g.has_pending || g.pending.kind != TransitionKind::kResume || !g.pending.lease_held)
+        return false;
+    if (g.pending.phase == TransitionPhase::kConfirming ||
+        g.pending.phase == TransitionPhase::kTerminal)
+        return false;
+    if (out_lease != nullptr) *out_lease = g.pending.lease;
+    if (out_target != nullptr) *out_target = g.pending.target_slot;
+    return true;
+}
+
 QolResult save_transition_prepare_stop() {
     std::lock_guard<std::mutex> lock(g.mutex);
     // 无未决转换才放行；未决事务的健康由协调器 gate 在 begin 时表达。

@@ -42,6 +42,13 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot);
 QolResult save_transition_cancel(uint64_t token_id);
 // 确认序成功发布 ready 之后才允许旧 save_enter 回调与 kEventSaveEnter；新转换开始即撤销。
 bool save_transition_ready_for_save_enter();
+// 确认序观测面（RenderPre 帧驱动）：存在等待确认的转换时返回其 token 与 target 槽。
+// phase 已进入确认中/终态时返回 false（不重复确认）。
+bool save_transition_pending_observation(uint64_t* out_token, int32_t* out_target);
+// SAVE_Save loading 旁路探针的凭据：未决读档转换的 lease（覆盖 target 槽）。
+// 无未决转换返回 false（调用方对 SAVE_Save fail-closed）。
+bool save_transition_bypass_lease(contracts::QolSlotOperationLease* out_lease,
+                                  int32_t* out_target);
 // 宿主生命周期停用前置：存在未决转换或未决事务时 Busy。
 QolResult save_transition_prepare_stop();
 void save_transition_reset_for_test();

@@ -366,6 +366,9 @@ bool assembly_init() {
     qol::game::qol_seam_bind_host_sdk(&g_host_sdk);
     // save_route 的 owner 停用通知：suspend 时旧 token 的 binding 退出派发。
     qol::host::owner_save_route_stopped_handler(&qol::host::save_route::owner_stopped);
+    // P3c：runtime_hooks 的 save_transition thunk 按「core.save」插件 id 定位 owner；
+    // 查询缝由 registry 提供注册表数据，save_route 不反向依赖 registry。
+    qol::host::save_route::set_plugin_token_query(&qol::host::owner_token_of);
     // save_transaction 准入缝：Adapter 经宿主注入的 gate 校验 lease，不在 game 层依赖 infra。
     static const qol::game::SaveTransactionGate kSaveTransactionGate{
         nullptr, &save_transaction_gate_admits};

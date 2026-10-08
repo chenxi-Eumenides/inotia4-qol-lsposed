@@ -35,11 +35,13 @@
 #include "infra/status.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
+#include "host/save_route.h"
 #if !QOL_KERNEL_ONLY
 #include "game/adapter_ports/character_port.h"
 #include "game/adapter_ports/character_extras_port.h"
 #include "game/adapter_ports/character_http_port.h"
 #include "game/adapter_ports/save_write_port.h"
+#include "game/adapter_ports/save_transaction_port.h"
 #include "game/adapter_ports/world_write_port.h"
 #include "game/adapter_ports/choice_write_port.h"
 #include "game/adapter_ports/ui_write_port.h"
@@ -228,6 +230,12 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_SAVE_TRANSACTION) {
+        const auto& port = qol::game::save_transaction_port();
+        if (out != nullptr)
+            *out = AvailablePort{id, QolVersion{port.abi.major, port.abi.minor}, &port};
+        return true;
+    }
     if (id == contracts::QolPortId::QOL_PORT_WORLD_WRITE) {
         const auto& port = qol::game::world_write_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
@@ -358,6 +366,14 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         // 存档写端口为 core.save owner 私有：其他插件不得注入，避免绕过 owner 直接写档。
         if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.save") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        // 保存事务端口为 core.save owner 私有：Adapter 是受控原版转换/保存/evidence 面，
+        // 泄漏给其他插件即可绕过协调器直调原版保存。
+        if (requirement.id == contracts::QolPortId::QOL_PORT_SAVE_TRANSACTION &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "core.save") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
@@ -1991,6 +2007,20 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                 return false;
             }
             const infra::FeatureState previous = status.state;
+            // §9 冻结生命周期：存在未决转换/未决保存事务时 prepare_stop Busy，宿主
+            // 停用操作明确失败，不伪装停用成功。无 binding（NotFound）与无 save_route
+            // 授权（Blocked）都表示该 owner 没有领域回调在途，不构成停用前置。
+            {
+                const contracts::QolOwnerToken owner = owner_token_of(plugin->id);
+                if (owner != 0) {
+                    const QolResult stop_gated = save_route::prepare_stop(owner);
+                    if (stop_gated.code == kQolErrBusy) {
+                        infra::status_update(plugin->id, previous,
+                                             previous == infra::FeatureState::kEnabled, nullptr);
+                        return false;
+                    }
+                }
+            }
             infra::status_update(plugin->id, infra::FeatureState::kDeactivating, false, nullptr);
             const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kRelease);
             if (tx_id == 0) {
@@ -2259,6 +2289,19 @@ const contracts::PluginDescriptor* find_plugin(const char* id) {
         }
     }
     return nullptr;
+}
+
+contracts::QolOwnerToken owner_token_of(const char* id) {
+    if (id == nullptr) return 0;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (std::strcmp(g_plugins[i].descriptor.id, id) != 0) continue;
+        contracts::QolOwnerToken token = 0;
+        uint64_t generation = 0;
+        if (contracts::succeeded(owner_identity_api().query(&g_plugins[i], &token, &generation)))
+            return token;
+        return 0;
+    }
+    return 0;
 }
 
 uint32_t plugin_count() {

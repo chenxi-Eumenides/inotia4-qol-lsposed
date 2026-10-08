@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <string>
 
+#include "contracts/slot_data.h"
 #include "contracts/ui.h"
 #include "contracts/result.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
@@ -38,8 +39,13 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
 QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
                                             int equip_slot);
 
-bool extension_bag_load_state_from_store(int slot);
-bool extension_bag_save_state_to_store(int slot);
-bool extension_bag_prepare_save_to_store(int slot, const char* transaction_id);
-    bool extension_bag_commit_save_to_store(int slot, const char* transaction_id);
-bool extension_bag_abort_known_failed_save(int slot, const char* transaction_id);
+// P3c：容器 IO/事务面已收口到 save.slot_data（见 extension_bag_persistence.cpp）；
+// 旧 JNI prepare/commit/abort 桥已删除，EB 不再依赖 ModuleSaveStore/Coordinator。
+bool extension_bag_session_admitted_locked();
+void extension_bag_flush_dirty_staging(const qol::contracts::QolSlotDataApi* api);
+bool extension_bag_slot_data_register(qol::contracts::QolOwnerToken owner,
+                                      const qol::contracts::QolSlotDataApi* api);
+qol::contracts::QolSlotDataRequest extension_bag_slot_data_unregister(
+    const qol::contracts::QolSlotDataApi* api);
+bool extension_bag_slot_data_request_settled(const qol::contracts::QolSlotDataApi* api,
+                                             qol::contracts::QolSlotDataRequest request);

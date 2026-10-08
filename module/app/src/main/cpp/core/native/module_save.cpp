@@ -1,111 +1,18 @@
 #include "contracts/module_save_port.h"
 
-#include "infra/log/qol_log.h"
-
-#include <atomic>
-#include <mutex>
-#include <string>
-#include <vector>
-
 #include "game/access/game_access.h"
 #include "game/state/game_state.h"
 
-namespace {
-
-std::mutex g_participant_mtx;
-std::vector<ModuleSaveParticipant> g_participants;
-std::atomic<uint64_t> g_transaction_counter{0};
-thread_local bool g_module_save_active = false;
-
-struct SaveActivityGuard {
-    bool& active;
-    ~SaveActivityGuard() { active = false; }
-};
-
-std::vector<ModuleSaveParticipant> participants_snapshot() {
-    std::lock_guard<std::mutex> lock(g_participant_mtx);
-    return g_participants;
-}
-
-void abort_participants(const std::vector<ModuleSaveParticipant>& participants, int slot,
-                        const std::string& transaction_id) {
-    for (auto it = participants.rbegin(); it != participants.rend(); ++it) {
-        if (it->abort != nullptr && !it->abort(slot, transaction_id.c_str())) {
-            QOL_LOG_WARN(QolDomain::kSave,
-                         "participant abort failed name=%s slot=%d tx=%s",
-                         it->name != nullptr ? it->name : "unknown", slot,
-                         transaction_id.c_str());
-        }
-    }
-}
-
-}
-
-bool module_save_register_participant(const ModuleSaveParticipant& participant) {
-    if (participant.name == nullptr || participant.name[0] == '\0' ||
-        participant.prepare == nullptr || participant.commit == nullptr ||
-        participant.abort == nullptr) {
-        return false;
-    }
-    std::lock_guard<std::mutex> lock(g_participant_mtx);
-    for (ModuleSaveParticipant& registered : g_participants) {
-        if (std::string(registered.name) == participant.name) {
-            registered = participant;
-            return true;
-        }
-    }
-    g_participants.push_back(participant);
-    return true;
-}
-
+// P3c 退役：旧模块参与者编排（prepare/原版/commit/abort + transaction 计数）已删除。
+// 联合保存由 core.save 协调器唯一承担（capture→prepared journal→受控原版→sidecar 提交），
+// 参与者经 save.slot_data 注册；此处不得保留第二套参与者顺序。
+//
+// module_save_game() 保留兼容转发：调用方（对话 save action / JNI op_save）经被
+// hook:SAVE_Save 接管的入口消费一次完整保存事务——入口 wrapper 进入协调器，游戏可见
+// 原版真实 int 返回。fn_save 的直接符号调用只剩本兼容转发与 Adapter 受控 trampoline
+//（经 hook 后实际执行体是 wrapper，不再绕过协调器）。
 bool module_save_game() {
     if (!game_in_world()) return false;
     if (fn_save == nullptr) return false;
-    if (g_module_save_active) return true;
-    g_module_save_active = true;
-    const SaveActivityGuard activity_guard{g_module_save_active};
-    const int slot = current_save_slot();
-    if (slot < 0 || slot > 2) return false;
-
-    const std::string transaction_id =
-        "save-" + std::to_string(g_transaction_counter.fetch_add(1) + 1);
-    const std::vector<ModuleSaveParticipant> participants = participants_snapshot();
-    size_t prepared_count = 0;
-    for (const ModuleSaveParticipant& participant : participants) {
-        if (!participant.prepare(slot, transaction_id.c_str())) {
-            QOL_LOG_WARN(QolDomain::kSave,
-                         "prepare failed name=%s slot=%d tx=%s",
-                         participant.name, slot, transaction_id.c_str());
-            abort_participants(
-                std::vector<ModuleSaveParticipant>(participants.begin(),
-                                                   participants.begin() + prepared_count),
-                slot, transaction_id);
-            return false;
-        }
-        ++prepared_count;
-    }
-
-    const int result = fn_save();
-    if (result == 0) {
-        abort_participants(
-            std::vector<ModuleSaveParticipant>(participants.begin(),
-                                               participants.begin() + prepared_count),
-            slot, transaction_id);
-        QOL_LOG_WARN(QolDomain::kSave,
-                     "original save failed slot=%d tx=%s", slot, transaction_id.c_str());
-        return false;
-    }
-
-    for (const ModuleSaveParticipant& participant : participants) {
-        if (!participant.commit(slot, transaction_id.c_str())) {
-            QOL_LOG_ERROR(QolDomain::kSave,
-                          "commit failed name=%s slot=%d tx=%s",
-                          participant.name, slot, transaction_id.c_str());
-            return false;
-        }
-    }
-    QOL_LOG_INFO(QolDomain::kSave,
-                 "save complete slot=%d tx=%s participants=%zu", slot,
-                 transaction_id.c_str(), participants.size());
-    return true;
+    return fn_save() != 0;
 }

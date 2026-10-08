@@ -365,8 +365,14 @@ int main() {
     // ---- 全链 committed：冻结成功体、capture 恰一次、journal 删除、释放顺序 ----
     g_capture_calls = 0;
     std::string body;
-    CHECK(save_coordinator_settle(0, 0, 1, &body) == SaveSettle::kCommitted);
+    g_adapter.original_result = 42;
+    QolSaveOriginalResult original{};
+    CHECK(save_coordinator_save_entry(0, 0, 1, &original, &body) == SaveSettle::kCommitted);
     CHECK(body == "{\"ok\":true,\"slot\":0,\"sidecar\":\"ensured\"}");
+    // SAVE_Save 入口透传：游戏可见 int = 原版真实返回（invoked=1，result_valid=1）。
+    CHECK(original.size == sizeof(original) && original.invoked == 1 &&
+          original.result_valid == 1 && original.original_result == 42);
+    g_adapter.original_result = 1;
     CHECK(g_capture_calls == 1 && consumer_state.captures == 1);
     // request_write（SlotBound）会先 complete(kStaged)；committed 终态追加 kCommitted。
     CHECK(consumer_state.outcomes.back() ==

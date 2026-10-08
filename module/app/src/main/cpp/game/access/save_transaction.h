@@ -30,6 +30,8 @@ SaveBypassPlan save_bypass_scan_production(uintptr_t entry, uintptr_t span, uint
 // 只能由持有分配权的 Game 层 thunk 调用；HTTP/插件面无法取得，origin 因此不可自报。
 uint64_t save_invocation_begin(uint32_t kind, int32_t target_slot);
 bool save_invocation_valid(uint64_t invocation, uint32_t kind, int32_t target_slot);
+// 当前 invocation 是否匹配 kind/target（不要求调用方持有 id；loading 旁路仲裁用）。
+bool save_invocation_current_matches(uint32_t kind, int32_t target_slot);
 void save_invocation_end(uint64_t invocation);
 
 // ---- loading 旁路放行判定矩阵 ----
@@ -47,6 +49,15 @@ struct SaveLoadingBypassInput {
 // 且 target==current_slot + lease 覆盖该槽 + 无联合保存事务嵌套。任一不满足且 session
 // 非 ready：Blocked，invoked=0，不执行原版；不允许「凡 loading 一律透传」。
 QolResult save_admit_loading_bypass(const SaveLoadingBypassInput& input);
+
+// P3c 生产仲裁：Adapter 侧收集 Game 层事实（当前读档 invocation、未就绪读档转换、
+// 当前槽、gate 对 lease 的覆盖校验、联合保存嵌套），session_ready 恒按 false 执行矩阵
+//（探针只在 session 非 ready 时被调用）。主线程由调用方（core.save wrapper）前置判定。
+// lease 为 core.save 未决转换的凭据；放行 ok，拒绝 Blocked。
+QolResult save_loading_bypass_admit(const contracts::QolSlotOperationLease* lease, int32_t slot);
+
+// SAVE_Save 入口 hook 的 trampoline 绑定类别常量（kQolSaveBackupEntrySaveSave）
+// 收口在 contracts/game_ports/save_transaction_port.h；本层不另设值。
 
 // ---- 读档 transition 与联合保存事务状态（P3c 生产接线；本批由宿主/测试驱动）----
 void save_set_pending_transition(uint64_t transition, int32_t target_slot, bool ready);

@@ -724,13 +724,17 @@ std::string build_character_skills_json() {
 
 std::string build_character_mercenaries_json() { return data_mercenaries_json(); }
 
-// 存档写（save/enter_slot/create_slot）：执行游戏写；成功时同步完成模块 sidecar 槽位生命周期
-// 操作（原 Kotlin ModuleSaveStore.ensureSlot/resetSlot 随之在主线程下沉，保留"成功后"语义），
-// 并附玩家状态构成迁移前响应（{"ok":true,"state":<player>}）。失败时输出原 op 错误体。
+// 存档写（enter_slot/create_slot）：执行游戏写并附玩家状态构成迁移前响应
+//（{"ok":true,"state":<player>}）。失败时输出原 op 错误体。
+// P3c：槽位 sidecar 生命周期（ensure/reset/journal）由 core.save 转换状态机在确认序结算
+//（confirm 内 reset/ensure），此处不再保留第二套 sidecar 协调；kQolSaveWriteSave 不再
+// 在本层执行游戏写——保存事务由 core.save 联合协调器结算（prepare→原版→sidecar 提交），
+// 旧模块参与者序已退役，任何在此触发原版保存都会形成第二套协调。
 int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_idx, uint32_t attempt,
                                      char* out, uint32_t capacity, uint32_t* out_size) {
     if (out == nullptr || out_size == nullptr) return kSaveWriteFailed;
     *out_size = 0;
+    if (kind == contracts::kQolSaveWriteSave) return kSaveWriteFailed;
     // 结果写出：未就绪不写内容（由调用方请求延迟重试）。
     const auto finish = [&](const std::string& body, int32_t outcome) {
         if (body.size() > capacity) return kSaveWriteFailed;
@@ -738,22 +742,10 @@ int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_i
         *out_size = static_cast<uint32_t>(body.size());
         return outcome;
     };
-    // sidecar（模块容器）：kUnavailable = 模块容器未启用（非游戏操作失败，按不适用处理）；
-    // 其余非 kOk 视为失败并写入结果（迁移前被忽略的返回值现已核对）。
-    const auto sidecar_failed = [](infra::store::Status s) {
-        return s != infra::store::Status::kOk && s != infra::store::Status::kUnavailable;
-    };
-    const auto sidecar_error = [](infra::store::Status s) {
-        return std::string("{\"ok\":false,\"error\":\"sidecar: ") + infra::store::status_name(s) +
-               "\"}";
-    };
     // 首次执行：发起游戏侧操作（enter/create 为转场内联执行，与同步入口共用单飞门）。
     if (attempt == 0) {
         std::string op_body;
         switch (kind) {
-            case contracts::kQolSaveWriteSave:
-                op_body = qol::game::save_game().str();
-                break;
             case contracts::kQolSaveWriteEnterSlot:
                 op_body = qol::game::enter_slot_direct(slot).str();
                 break;
@@ -769,22 +761,8 @@ int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_i
     }
     // 转场后就绪等待：世界态提交完成前保持 pending，不提前报告 done（迁移前该等待由阻塞式
     // sidecar 文件 I/O 偶然提供，此处改为确定性条件）。
-    if (kind != contracts::kQolSaveWriteSave && !game_in_world()) {
+    if (!game_in_world()) {
         return kSaveWriteNotReady;
-    }
-    // sidecar 槽位生命周期与游戏操作在同一步结算。
-    if (kind == contracts::kQolSaveWriteSave) {
-        const int current = current_save_slot();
-        if (current >= 0 && current <= 2) {
-            const infra::store::Status s = infra::store::ensure_slot(current);
-            if (sidecar_failed(s)) return finish(sidecar_error(s), kSaveWriteFailed);
-        }
-    } else if (kind == contracts::kQolSaveWriteEnterSlot) {
-        const infra::store::Status s = infra::store::ensure_slot(slot);
-        if (sidecar_failed(s)) return finish(sidecar_error(s), kSaveWriteFailed);
-    } else {
-        const infra::store::Status s = infra::store::reset_slot(slot);
-        if (sidecar_failed(s)) return finish(sidecar_error(s), kSaveWriteFailed);
     }
     // 与迁移前 ActionSupport.attachPlayer 同构：仅成功时附 state（键序 ok→state）。
     // 首个 attempt 的写路径 op_ok() 已同步力刷 player 槽；重试 attempt 仅等世界就绪，

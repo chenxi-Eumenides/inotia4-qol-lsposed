@@ -34,6 +34,8 @@
 #include "hooks/registry.h"
 #include "infra/scheduler.h"
 #include "patch/instr_patch.h"
+#include "host/plugin_registry.h"
+#include "host/save_route.h"
 
 namespace qol::host {
 namespace {
@@ -284,6 +286,50 @@ const void* host_capability_require(const char* id, uint16_t major, uint16_t min
     return qol::infra::require_capability(id, QolVersionRange{major, min_minor});
 }
 
+// P3c：读档/新档发起 thunk。patch/game 层只有槽号，宿主按插件 id 定位 core.save
+// owner 后经 save_route 转接其 native_call（begin_transition），领域时序留在 core.save。
+// 准入关闭（prepare_detach 拒绝/槽健康阻断/转换在途）时 core.save 返回非 ok，
+// 此处映射为 false，调用方不得继续原版转换。
+bool host_save_transition_begin_thunk(int32_t kind, int32_t target_slot,
+                                      uint64_t* out_transition) {
+    if (out_transition != nullptr) *out_transition = 0;
+    if (target_slot < 0 || target_slot > 2 || kind < 0 || kind > 1) return false;
+    contracts::QolSaveNativeCall call{};
+    call.size = sizeof(call);
+    call.kind = static_cast<uint32_t>(kind == 0 ? contracts::QolSaveCallKind::kResume
+                                                : contracts::QolSaveCallKind::kBeginNew);
+    call.target_slot = target_slot;
+    call.class_index = -1;
+    call.origin = static_cast<uint32_t>(contracts::QolSaveOrigin::kOrdinary);
+    contracts::QolSaveDomainStatus status{};
+    status.size = sizeof(status);
+    const QolResult result =
+        qol::host::save_route::dispatch_native_call_for_plugin("core.save", &call, &status);
+    if (out_transition != nullptr) *out_transition = status.transition;
+    return contracts::succeeded(result);
+}
+
+// P3c：core.save 确认序未完成（未 ready）时旧 save_enter 回调与事件不得派发。
+// 缺省（core.save 未装/未 bind）放行，保持无模块参与时的既有 save_enter 行为。
+bool host_save_enter_ready() {
+    const contracts::QolOwnerToken token = qol::host::owner_token_of("core.save");
+    if (token == 0) return true;
+    // binding 是否存在由派发返回的 NotFound 区分：NotFound = 无 binding（未装/停用），
+    // 与确认序未完成（kMaintenance 探针返回 Blocked）语义分离。
+    contracts::QolSaveNativeCall call{};
+    call.size = sizeof(call);
+    call.kind = static_cast<uint32_t>(contracts::QolSaveCallKind::kMaintenance);
+    call.target_slot = -1;
+    call.class_index = -1;
+    call.origin = static_cast<uint32_t>(contracts::QolSaveOrigin::kOrdinary);
+    contracts::QolSaveDomainStatus status{};
+    status.size = sizeof(status);
+    const QolResult result =
+        qol::host::save_route::dispatch_native_call_for_plugin("core.save", &call, &status);
+    if (result.code == kQolErrNotFound) return true;  // 无 binding：模块面未参与。
+    return contracts::succeeded(result);
+}
+
 // W31：contracts 帧点位常量必须与 infra 同值（0=渲染前、1=逻辑前）。
 static_assert(kQolRuntimeFramePointRenderPre == kFramePointRenderPre, "frame point drift");
 static_assert(kQolRuntimeFramePointLogicPre == kFramePointLogicPre, "frame point drift");
@@ -295,6 +341,8 @@ const QolRuntimeHooksApi kQolRuntimeHooksApi{
     &host_frame_task_remove,
     &save_enter_mark_pending,
     &host_capability_require,
+    &host_save_transition_begin_thunk,
+    &host_save_enter_ready,
 };
 
 }  // namespace

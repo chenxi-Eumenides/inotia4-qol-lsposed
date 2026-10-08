@@ -1,241 +1,314 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
+#include <mutex>
+#include <string>
+#include <vector>
 
+#include "contracts/slot_data.h"
 #include "plugins/extension_bag/extension_bag_logging.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 
+// 实现坐落在全局 namespace（context.h 的声明位置）；契约名经 using 引入。
+using namespace qol::contracts;
+
+// ===========================================================================
+// P3c：扩展背包接 save.slot_data（SessionBound 读 + SlotBound 写）。
+// payload 编解码/校验/默认状态由 EB 内部 codec（virtual_bag state_json /
+// parse_state_json_at）承担；容器 IO 归 core.save provider，EB 不再触碰
+// ModuleSaveStore / ModuleSaveCoordinator（Kotlin JNI 桥随之退役）。
+// ===========================================================================
+
+// game_ui_virtbag.cpp 的共享锁与 dirty 标记（跨 TU 引用；锁边界见 rulebook §2）。
+// extern 声明在文件作用域：匿名 namespace 内的声明是内部链接，无法引用其他 TU 的定义。
+extern std::mutex g_virtual_bag_mtx;
+extern bool g_item_state_dirty;
+
+// game_ui_virtbag.cpp（public_runtime.inc）：R-66 保存前校验（容量归一化 + 容量外剔除，
+// 持 g_virtual_bag_mtx 调用；EB 唯一的保存前清理点）。
+bool virtual_bag_module_save_validate_locked();
+
 namespace {
 
-std::string occupied_item_summary(const virtual_bag::State& state) {
-    std::string summary;
+// 契约名引入：实现坐落在全局 namespace（context.h 的声明位置），
+// 匿名 namespace 内统一 qol::contracts 全限定或 using。
+using namespace qol::contracts;
+
+constexpr const char* kEbSectionName = "extensionbags.items";
+constexpr uint16_t kEbSectionVersion = 4;
+
+// ---- 会话准入状态（provider 回调维护；操作面/排空面读取）----
+std::atomic<QolSlotDataHandle> g_slot_data_handle{0};
+std::atomic<uint64_t> g_admitted_epoch{0};
+// load 不可读/版本不支持、complete degraded、session closing 等都会置位阻断：
+// 未加载/epoch 不匹配/降级时扫描与物品操作明确拒绝（不再惰性 IO 兜底）。
+std::atomic<bool> g_session_blocked{true};
+
+QolResult eb_ok() { return qol::contracts::ok(); }
+
+bool occupied_item_nonempty(const virtual_bag::State& state) {
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             const virtual_bag::Item& item = state.items[bag][slot];
-            if (item.category <= 0 || item.count <= 0) continue;
-            if (!summary.empty()) summary += ',';
-            summary += std::to_string(bag) + '/' + std::to_string(slot) + '=' +
-                       std::to_string(item.category) + 'x' + std::to_string(item.count);
+            if (item.category > 0 || item.count > 0) return true;
         }
     }
-    return summary.empty() ? "empty" : summary;
+    return false;
 }
 
-bool call_save_callback(JNIEnv* env, jclass bridge_class, const char* method_name,
-                        int slot, const char* transaction_id) {
-    if (env == nullptr || bridge_class == nullptr || transaction_id == nullptr) return false;
-    jmethodID method = env->GetStaticMethodID(
-        bridge_class, method_name, "(ILjava/lang/String;)Ljava/lang/String;");
-    if (method == nullptr) {
-        env->ExceptionClear();
-        return false;
-    }
-    jstring tx = env->NewStringUTF(transaction_id);
-    if (tx == nullptr) return false;
-    jstring result = static_cast<jstring>(
-        env->CallStaticObjectMethod(bridge_class, method, slot, tx));
-    env->DeleteLocalRef(tx);
-    if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        return false;
-    }
-    if (result == nullptr) return false;
-    const char* utf = env->GetStringUTFChars(result, nullptr);
-    const bool ok = utf != nullptr && std::strcmp(utf, "ok") == 0;
-    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
-    env->DeleteLocalRef(result);
-    return ok;
+// prepare_detach（§4）：撤投影、释放缓存、清按钮；拒绝则阻止原版转换。
+QolResult eb_sd_prepare_detach(void* /*user*/, const QolSlotSession* /*old_session*/,
+                               uint32_t /*reason*/) {
+    return virtual_bag_prepare_save_slot_load() ? eb_ok()
+        : qol::contracts::error(kQolErrBlocked, "extension bag detach failed", 24);
 }
 
+QolResult eb_sd_session_ready(void* /*user*/, const QolSlotDataContext* ctx) {
+    // SessionBound 的自动加载在本通知之后同轮执行；此处只登记已通知 epoch。
+    g_admitted_epoch.store(ctx->session.epoch, std::memory_order_release);
+    return eb_ok();
 }
 
-bool extension_bag_load_state_from_store(int slot) {
-    JNIEnv* env = extension_bag_current_env();
-    jclass bridge_class = extension_bag_bridge_class();
+// bytes 仅本次调用有效；missing 生成默认状态；不可读/版本不支持明确阻断（不伪装缺失）。
+QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t presence,
+                     uint32_t stored_version, const uint8_t* bytes, uint64_t size) {
     virtual_bag::State* state = extension_bag_state();
-    if (env == nullptr || bridge_class == nullptr || state == nullptr) return false;
-    jmethodID method = env->GetStaticMethodID(bridge_class, "loadStateJson", "(I)Ljava/lang/String;");
-    if (method == nullptr) {
-        env->ExceptionClear();
-        return false;
+    if (state == nullptr) return qol::contracts::error(kQolErrInternal, "eb state missing", 15);
+    const auto presence_kind = static_cast<qol::contracts::QolSlotDataPresence>(presence);
+    if (presence_kind == qol::contracts::QolSlotDataPresence::kMissing) {
+        // 默认状态：空背包、原版视图；pending 不存在。
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        *state = {};
+        g_session_blocked.store(false, std::memory_order_release);
+        QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data load slot=%d presence=missing "
+                     "epoch=%llu default state", ctx->session.slot,
+                     static_cast<unsigned long long>(ctx->session.epoch));
+        return eb_ok();
     }
-    jstring result = static_cast<jstring>(env->CallStaticObjectMethod(bridge_class, method, slot));
-    if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        return false;
+    if (presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported) {
+        g_session_blocked.store(true, std::memory_order_release);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=version "
+                     "stored=%u expected=%u", stored_version, kEbSectionVersion);
+        return qol::contracts::error(kQolErrUnsupported, "section version unsupported", 25);
     }
-    if (result == nullptr) return false;
-    const char* utf = env->GetStringUTFChars(result, nullptr);
-    bool parsed = false;
-    if (utf != nullptr) {
-        virtual_bag::PendingTransfer rejected_pending{};
-        const bool has_pending = std::strstr(utf, "\"pending\":") != nullptr;
-        const virtual_bag::PendingTransferParseResult pending_result =
-            has_pending ? virtual_bag::parse_pending_transfer_result(utf, &rejected_pending)
-                        : virtual_bag::PendingTransferParseResult::kOk;
+    if (presence_kind == qol::contracts::QolSlotDataPresence::kUnreadable) {
+        g_session_blocked.store(true, std::memory_order_release);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=unreadable");
+        return qol::contracts::error(kQolErrInternal, "section unreadable", 20);
+    }
+    std::string payload(reinterpret_cast<const char*>(bytes), static_cast<std::size_t>(size));
+    // 解析语义与旧 Kotlin 归一化一致：未知版本尽力解析、pending 隔离、失败回退空状态。
+    std::lock_guard<std::mutex> state_lock(g_virtual_bag_mtx);
+    virtual_bag::PendingTransfer rejected_pending{};
+    const bool has_pending = payload.find("\"pending\":") != std::string::npos;
+    const auto pending_result =
+        has_pending
+            ? virtual_bag::parse_pending_transfer_result(payload.c_str(), &rejected_pending)
+            : virtual_bag::PendingTransferParseResult::kOk;
+    if (pending_result == virtual_bag::PendingTransferParseResult::kInvalidTransactionDomain) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "pending isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
+                     static_cast<unsigned int>(rejected_pending.direction),
+                     static_cast<unsigned int>(rejected_pending.src_bag),
+                     static_cast<unsigned int>(rejected_pending.src_slot),
+                     static_cast<unsigned int>(rejected_pending.dst_bag),
+                     static_cast<unsigned int>(rejected_pending.dst_slot));
+    } else if (pending_result == virtual_bag::PendingTransferParseResult::kMalformed) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "pending isolated reason=malformed_pending_record");
+    }
+    const bool parsed = virtual_bag::parse_state_json_at(
+        payload.c_str(), state, extension_bag_isolation_now_ms(),
+        virtual_bag_category_uses_stack_count);
+    if (has_pending && pending_result != virtual_bag::PendingTransferParseResult::kOk) {
+        virtual_bag::IsolationRecord record{};
+        record.valid = true;
+        record.observed_at_ms = extension_bag_isolation_now_ms();
         if (pending_result == virtual_bag::PendingTransferParseResult::kInvalidTransactionDomain) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag,
-                                "pending isolated reason=invalid_transaction_domain direction=%u src=%u/%u dst=%u/%u",
-                                static_cast<unsigned int>(rejected_pending.direction),
-                                static_cast<unsigned int>(rejected_pending.src_bag),
-                                static_cast<unsigned int>(rejected_pending.src_slot),
-                                static_cast<unsigned int>(rejected_pending.dst_bag),
-                                static_cast<unsigned int>(rejected_pending.dst_slot));
-        } else if (pending_result == virtual_bag::PendingTransferParseResult::kMalformed) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag,
-                                "pending isolated reason=malformed_pending_record");
+            record.reason = virtual_bag::isolation_reason::kInvalidTransactionDomain;
+            record.direction = rejected_pending.direction;
+            record.src_bag = rejected_pending.src_bag;
+            record.src_slot = rejected_pending.src_slot;
+            record.dst_bag = rejected_pending.dst_bag;
+            record.dst_slot = rejected_pending.dst_slot;
+            std::strncpy(record.transaction_id, rejected_pending.transaction_id,
+                         sizeof(record.transaction_id) - 1);
+            record.payload_size = std::min<uint16_t>(
+                rejected_pending.payload_size,
+                static_cast<uint16_t>(rejected_pending.payload.size()));
+            record.payload = rejected_pending.payload;
+            record.source_payload_size = std::min<uint16_t>(
+                rejected_pending.source_payload_size,
+                static_cast<uint16_t>(rejected_pending.source_payload.size()));
+            record.source_payload = rejected_pending.source_payload;
+            record.detail = "pending_rejected_at_load";
+        } else {
+            record.reason = virtual_bag::isolation_reason::kInvalidPayload;
+            record.detail = "malformed_pending_record";
         }
-        parsed = virtual_bag::parse_state_json_at(
-            utf, state, extension_bag_isolation_now_ms(), virtual_bag_category_uses_stack_count);
-        if (has_pending && pending_result != virtual_bag::PendingTransferParseResult::kOk) {
-            virtual_bag::IsolationRecord record{};
-            record.valid = true;
-            record.observed_at_ms = extension_bag_isolation_now_ms();
-            if (pending_result == virtual_bag::PendingTransferParseResult::kInvalidTransactionDomain) {
-                record.reason = virtual_bag::isolation_reason::kInvalidTransactionDomain;
-                record.direction = rejected_pending.direction;
-                record.src_bag = rejected_pending.src_bag;
-                record.src_slot = rejected_pending.src_slot;
-                record.dst_bag = rejected_pending.dst_bag;
-                record.dst_slot = rejected_pending.dst_slot;
-                std::strncpy(record.transaction_id, rejected_pending.transaction_id,
-                             sizeof(record.transaction_id) - 1);
-                record.payload_size = std::min<uint16_t>(
-                    rejected_pending.payload_size,
-                    static_cast<uint16_t>(rejected_pending.payload.size()));
-                record.payload = rejected_pending.payload;
-                record.source_payload_size = std::min<uint16_t>(
-                    rejected_pending.source_payload_size,
-                    static_cast<uint16_t>(rejected_pending.source_payload.size()));
-                record.source_payload = rejected_pending.source_payload;
-                record.detail = "pending_rejected_at_load";
-            } else {
-                record.reason = virtual_bag::isolation_reason::kInvalidPayload;
-                record.detail = "malformed_pending_record";
-            }
-            virtual_bag::push_isolation(state, record);
-        }
+        virtual_bag::push_isolation(state, record);
     }
-    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
-    env->DeleteLocalRef(result);
-    QOL_LOG_INFO(QolDomain::kExtensionBag,
-                        "sidecar load slot=%d parsed=%d items=%s", slot,
-                        parsed ? 1 : 0,
-                        occupied_item_summary(*state).c_str());
-    return parsed;
+    if (!parsed) {
+        // 解析失败不写回调用方状态：保持 provider 的 missing 语义？不——字节存在但损坏，
+        // 属「不可用」，明确阻断扫描与物品操作（不得拿空状态继续玩）。
+        g_session_blocked.store(true, std::memory_order_release);
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=parse_failed slot=%d",
+                     ctx->session.slot);
+        return qol::contracts::error(kQolErrInternal, "state parse failed", 18);
+    }
+    g_session_blocked.store(false, std::memory_order_release);
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data load slot=%d parsed=1 epoch=%llu",
+                 ctx->session.slot, static_cast<unsigned long long>(ctx->session.epoch));
+    return eb_ok();
 }
 
-bool extension_bag_save_state_to_store(int slot) {
-    JNIEnv* env = extension_bag_current_env();
-    jclass bridge_class = extension_bag_bridge_class();
-    virtual_bag::State* state = extension_bag_state();
-    if (env == nullptr || bridge_class == nullptr || state == nullptr) return false;
-    jmethodID method = env->GetStaticMethodID(bridge_class, "saveStateJson",
-                                               "(ILjava/lang/String;)Ljava/lang/String;");
-    if (method == nullptr) {
-        env->ExceptionClear();
-        return false;
-    }
-    const std::string json = virtual_bag::state_json(*state);
-    QOL_LOG_INFO(QolDomain::kExtensionBag,
-                        "legacy sidecar save slot=%d items=%s", slot,
-                        occupied_item_summary(*state).c_str());
-    jstring payload = env->NewStringUTF(json.c_str());
-    if (payload == nullptr) return false;
-    jstring result = static_cast<jstring>(env->CallStaticObjectMethod(bridge_class, method, slot, payload));
-    env->DeleteLocalRef(payload);
-    if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        return false;
-    }
-    if (result == nullptr) return false;
-    const char* utf = env->GetStringUTFChars(result, nullptr);
-    const bool ok = utf != nullptr && std::strcmp(utf, "ok") == 0;
-    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
-    env->DeleteLocalRef(result);
-    return ok;
+// capture：单次调用完成序列化（SlotBound 写入由 provider 在原版保存事务内统一提交）。
+// R-66：扩展背包唯一的保存前清理点（容量归一化 + 容量外数据剔除）从旧 participant
+// prepare 迁入本回调——保存 prepare 已由协调器承担，校验语义不丢。
+QolResult eb_sd_capture(void* /*user*/, const QolSlotDataContext* ctx, uint8_t* out_buffer,
+                        uint64_t capacity, uint64_t* out_size) {
+    if (out_buffer == nullptr || out_size == nullptr)
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid capture buffer", 22);
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!virtual_bag_module_save_validate_locked())
+        return qol::contracts::error(kQolErrBlocked, "capacity validation rejected", 24);
+    const std::string json = virtual_bag::state_json(*extension_bag_state());
+    if (json.size() > capacity)
+        return qol::contracts::error(kQolErrInvalidArgument, "capture too large", 16);
+    std::memcpy(out_buffer, json.data(), json.size());
+    *out_size = json.size();
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data capture slot=%d epoch=%llu bytes=%zu "
+                 "nonempty=%d", ctx->session.slot,
+                 static_cast<unsigned long long>(ctx->session.epoch), json.size(),
+                 occupied_item_nonempty(*extension_bag_state()) ? 1 : 0);
+    return eb_ok();
 }
 
-bool extension_bag_prepare_save_to_store(int slot, const char* transaction_id) {
-    JNIEnv* env = extension_bag_current_env();
-    jclass bridge_class = extension_bag_bridge_class();
-    virtual_bag::State* state = extension_bag_state();
-    if (env == nullptr || bridge_class == nullptr || state == nullptr || transaction_id == nullptr) return false;
-    jmethodID method = env->GetStaticMethodID(
-        bridge_class, "prepareSave", "(ILjava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-    if (method == nullptr) {
-        env->ExceptionClear();
-        return false;
+// complete：幂等内存记账（不执行 section IO——提交由协调器完成）。
+void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outcome) {
+    const auto kind = static_cast<qol::contracts::QolSlotDataOutcome>(outcome);
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    switch (kind) {
+        case qol::contracts::QolSlotDataOutcome::kCommitted:
+            // 正式容器已提交：清 pending 与 dirty（provider 已按捕获快照核对过写者）。
+            extension_bag_state()->pending = {};
+            g_item_state_dirty = false;
+            g_session_blocked.store(false, std::memory_order_release);
+            break;
+        case qol::contracts::QolSlotDataOutcome::kStaged:
+            // SlotBound 写完成为 staged：等待原版保存事务，不清 dirty。
+            break;
+        case qol::contracts::QolSlotDataOutcome::kOriginalSaveFailed:
+        case qol::contracts::QolSlotDataOutcome::kCancelled:
+            // 未提交：保留 dirty/pending，等待下一次保存。
+            break;
+        case qol::contracts::QolSlotDataOutcome::kPendingRecovery:
+        case qol::contracts::QolSlotDataOutcome::kDegraded:
+            // pending/degraded：保留证据状态并阻断后续操作，待显式恢复。
+            g_session_blocked.store(true, std::memory_order_release);
+            QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=outcome=%u slot=%d",
+                         outcome, ctx->session.slot);
+            break;
     }
-    const std::string json = virtual_bag::state_json(*state);
-    QOL_LOG_INFO(QolDomain::kExtensionBag,
-                        "sidecar prepare slot=%d tx=%s items=%s", slot, transaction_id,
-                        occupied_item_summary(*state).c_str());
-    jstring tx = env->NewStringUTF(transaction_id);
-    jstring payload = env->NewStringUTF(json.c_str());
-    if (tx == nullptr || payload == nullptr) {
-        if (tx != nullptr) env->DeleteLocalRef(tx);
-        if (payload != nullptr) env->DeleteLocalRef(payload);
-        return false;
-    }
-    jstring result = static_cast<jstring>(
-        env->CallStaticObjectMethod(bridge_class, method, slot, tx, payload));
-    env->DeleteLocalRef(tx);
-    env->DeleteLocalRef(payload);
-    if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        return false;
-    }
-    if (result == nullptr) return false;
-    const char* utf = env->GetStringUTFChars(result, nullptr);
-    const bool ok = utf != nullptr && std::strcmp(utf, "ok") == 0;
-    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
-    env->DeleteLocalRef(result);
-    return ok;
 }
 
-bool extension_bag_commit_save_to_store(int slot, const char* transaction_id) {
-    JNIEnv* env = extension_bag_current_env();
-    jclass bridge_class = extension_bag_bridge_class();
-    virtual_bag::State* state = extension_bag_state();
-    if (env == nullptr || bridge_class == nullptr || state == nullptr || transaction_id == nullptr) {
+}  // namespace
+
+// ---- 注册 / 注销（plugin 生命周期；主线程调用）----
+
+bool extension_bag_slot_data_register(qol::contracts::QolOwnerToken owner,
+                                      const QolSlotDataApi* api) {
+    if (api == nullptr || api->register_section == nullptr) return false;
+    // 重入（owner suspend/resume 换发 token 后的重新注册）：先注销旧注册，避免旧凭据
+    // 参与者与新 owner token 在同一 section 上冲突（same_spec 要求 owner 相同）。
+    if (g_slot_data_handle.load(std::memory_order_acquire) != 0) {
+        (void)extension_bag_slot_data_unregister(api);
+    }
+    // 注册只复制规格：spec 在栈上按本次 install 注入的 owner 构造（suspend/resume 会
+    // 换发 token，不得缓存到静态存储）。
+    const QolSlotDataSpec spec{
+        sizeof(QolSlotDataSpec),
+        owner,
+        kEbSectionName,
+        kEbSectionVersion,
+        static_cast<uint32_t>(qol::contracts::QolSlotDataReadPolicy::kSessionBound),
+        static_cast<uint32_t>(qol::contracts::QolSlotDataWritePolicy::kSlotBound),
+        nullptr,
+        &eb_sd_prepare_detach,
+        &eb_sd_session_ready,
+        &eb_sd_load,
+        &eb_sd_capture,
+        &eb_sd_complete,
+    };
+    QolSlotDataHandle handle = 0;
+    QolSlotDataRequest initial = 0;
+    const auto registered = api->register_section(&spec, &handle, &initial);
+    if (!qol::contracts::succeeded(registered) || handle == 0) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data register failed code=%d",
+                     registered.code);
         return false;
     }
-    jmethodID method = env->GetStaticMethodID(
-        bridge_class, "commitSave", "(ILjava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
-    if (method == nullptr) {
-        env->ExceptionClear();
-        return false;
-    }
-    const std::string json = virtual_bag::state_json(*state);
-    QOL_LOG_INFO(QolDomain::kExtensionBag,
-                        "sidecar commit slot=%d tx=%s items=%s", slot, transaction_id,
-                        occupied_item_summary(*state).c_str());
-    jstring tx = env->NewStringUTF(transaction_id);
-    jstring payload = env->NewStringUTF(json.c_str());
-    if (tx == nullptr || payload == nullptr) {
-        if (tx != nullptr) env->DeleteLocalRef(tx);
-        if (payload != nullptr) env->DeleteLocalRef(payload);
-        return false;
-    }
-    jstring result = static_cast<jstring>(
-        env->CallStaticObjectMethod(bridge_class, method, slot, tx, payload));
-    env->DeleteLocalRef(tx);
-    env->DeleteLocalRef(payload);
-    if (env->ExceptionCheck()) {
-        env->ExceptionClear();
-        return false;
-    }
-    if (result == nullptr) return false;
-    const char* utf = env->GetStringUTFChars(result, nullptr);
-    const bool ok = utf != nullptr && std::strcmp(utf, "ok") == 0;
-    if (utf != nullptr) env->ReleaseStringUTFChars(result, utf);
-    env->DeleteLocalRef(result);
-    return ok;
+    g_slot_data_handle.store(handle, std::memory_order_release);
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data registered handle=%llu initial_req=%llu",
+                 static_cast<unsigned long long>(handle),
+                 static_cast<unsigned long long>(initial));
+    return true;
 }
 
-bool extension_bag_abort_known_failed_save(int slot, const char* transaction_id) {
-    return call_save_callback(extension_bag_current_env(), extension_bag_bridge_class(),
-                              "abortKnownFailedSave", slot, transaction_id);
+QolSlotDataRequest extension_bag_slot_data_unregister(const QolSlotDataApi* api) {
+    const QolSlotDataHandle handle = g_slot_data_handle.exchange(0, std::memory_order_acq_rel);
+    if (handle == 0 || api == nullptr || api->unregister == nullptr) return 0;
+    // 先关准入：注销在途期间扫描与物品操作拒绝（终态后零回调由 provider 保证）。
+    g_session_blocked.store(true, std::memory_order_release);
+    g_admitted_epoch.store(0, std::memory_order_release);
+    QolSlotDataRequest request = 0;
+    const auto result = api->unregister(handle, &request);
+    if (!qol::contracts::succeeded(result)) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data unregister failed code=%d", result.code);
+        return 0;
+    }
+    return request;
+}
+
+bool extension_bag_slot_data_request_settled(const QolSlotDataApi* api,
+                                             QolSlotDataRequest request) {
+    if (api == nullptr || api->query == nullptr || request == 0) return true;
+    qol::contracts::QolSlotDataStatus status{};
+    status.size = sizeof(status);
+    if (!qol::contracts::succeeded(api->query(request, &status))) return true;  // 未知即终态。
+    return status.state == static_cast<uint32_t>(qol::contracts::QolSlotDataRequestState::kPending);
+}
+
+// ---- 会话准入（锁内查询；扫描与物品操作在准入失败时明确拒绝）----
+
+bool extension_bag_session_admitted_locked() {
+    return !g_session_blocked.load(std::memory_order_acquire) &&
+           g_slot_data_handle.load(std::memory_order_acquire) != 0 &&
+           g_admitted_epoch.load(std::memory_order_acquire) != 0;
+}
+
+// ---- dirty staging 与安全点排空（P3c：43 处 persist 死桩的替代路径）----
+// 锁内：修改点置 g_item_state_dirty；排空任务在锁内序列化 staging。锁外：安全点
+// request_write 提交（provider 主线程 pump → capture 回调内重新拿锁序列化当前状态；
+// staging 与当前状态的差异由 capture 恰一次语义覆盖——每次 request_write 触发一次
+// 全量捕获，无增量协议）。
+void extension_bag_flush_dirty_staging(const QolSlotDataApi* api) {
+    if (api == nullptr || api->request_write == nullptr) return;
+    bool need = false;
+    uint64_t epoch = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!g_item_state_dirty || !extension_bag_session_admitted_locked()) return;
+        epoch = g_admitted_epoch.load(std::memory_order_acquire);
+        need = true;
+    }
+    if (!need) return;
+    QolSlotDataRequest request = 0;
+    const auto result = api->request_write(g_slot_data_handle.load(std::memory_order_acquire),
+                                           epoch, &request);
+    if (!qol::contracts::succeeded(result)) {
+        // 非主线程投递失败/epoch 不匹配：保留 dirty，下一安全点重试。
+        return;
+    }
 }

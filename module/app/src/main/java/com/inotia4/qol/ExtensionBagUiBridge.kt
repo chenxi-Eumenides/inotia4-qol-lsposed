@@ -1,103 +1,56 @@
 package com.inotia4.qol
 
-import android.content.Context
-import com.inotia4.qol.store.ModuleSaveStore
-import com.inotia4.qol.store.ModuleSaveCoordinator
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Module-owned extension backpack data. It persists stable item descriptors plus lossless native
- * serialization payloads (SAVE_SaveItem records, base64-encoded). It never persists native item
- * pointers or original inventory records.
+ * Extension backpack payload 规范化/校验纯函数（bytes ↔ EB 状态）。
+ *
+ * P3c：容器 IO 与保存协调已收口到 core.save 的 save.slot_data（C++ 侧 EB 内部 codec，
+ * 见 plugins/extension_bag/extension_bag_persistence.cpp）；本桥不再持有 section 读写、
+ * 事务 prepare/commit 或 slot 参数——只保留 payload 规范化/校验的纯函数语义
+ *（无 IO、无槽位、无 ModuleSaveStore / ModuleSaveCoordinator 依赖），供既有调用面与
+ * 等价性测试使用。
  */
 object ExtensionBagUiBridge {
 
     private const val SECTION_NAME = "extensionbags.items"
-    private const val SECTION_VERSION = 4
     private const val BAG_COUNT = 5
     private const val SLOT_COUNT = 16
     private const val MAX_PAYLOAD_CHARS = 512
 
     private val payloadPattern = Regex("^[A-Za-z0-9+/]*={0,2}$")
 
-    /** Idempotent; ApiServer restart may call it again. 无自有状态，保留入口稳定调用方。 */
+    /** 幂等；ApiServer 重启可重复调用。无自有状态，保留入口稳定调用方。 */
     @JvmStatic
     @Suppress("UNUSED_PARAMETER")
-    fun initialize(context: Context) {
-        // sidecar IO 与格式校验统一经 ModuleSaveStore；本桥不再持有上下文或游戏签名身份。
+    fun initialize(context: android.content.Context) {
+        // sidecar IO 已随 P3c 收口到 save.slot_data；本桥仅存留纯函数。
     }
 
+    /** section 名/版本常量：与 C++ 侧 EB codec（extensionbags.items v4）保持同源。 */
+    val sectionName: String get() = SECTION_NAME
+
+    /**
+     * 规范化字节 → 规范化字节：解析并校验（无效 payload 隔离告警保留审计痕迹），
+     * 输出与 C++ codec 相同的规范化 JSON 文本字节。解析失败返回 null。
+     */
     @JvmStatic
-    fun loadStateJson(slot: Int): String {
-        val section = try {
-            ModuleSaveStore.readSection(slot, SECTION_NAME)
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state load failed", t)
-            return defaultStateJson()
-        } ?: return defaultStateJson()
-        val raw = section.payload.toString(Charsets.UTF_8)
-        // v4-only：读取只认当前 section 名与 v4 布局；未知版本也按当前布局尽力解析，
-        // 解析失败（parseState 返回 null）才回退空状态；不做旧版本迁移/回写，不使用身份门禁。
-        val parsed = parseState(raw, rejectPayloadlessItems = true)
-        return parsed?.toString() ?: defaultStateJson()
+    fun normalizeStateBytes(bytes: ByteArray): ByteArray? {
+        return parseStateBytes(bytes, rejectPayloadlessItems = false)?.toString()?.toByteArray(Charsets.UTF_8)
     }
 
+    /**
+     * 读面规范化：读档侧拒绝无 payload 的非空物品（与迁移前 loadStateJson 的
+     * rejectPayloadlessItems 语义一致），供等价性测试对照 C++ load 行为。
+     */
     @JvmStatic
-    fun saveStateJson(slot: Int, stateJson: String): String {
-        val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        return try {
-            val saved = ModuleSaveStore.writeSection(
-                slot,
-                SECTION_NAME,
-                SECTION_VERSION,
-                normalized.toString().toByteArray(Charsets.UTF_8),
-            )
-            if (saved) "ok" else "error:storage"
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.EXTENSION_BAG, "extension bag UI state save failed", t)
-            "error:storage"
-        }
+    fun normalizeLoadedStateBytes(bytes: ByteArray): ByteArray? {
+        return parseStateBytes(bytes, rejectPayloadlessItems = true)?.toString()?.toByteArray(Charsets.UTF_8)
     }
 
-    /** Prepare the extension section; commit is allowed only after complete SAVE_Save success. */
-    @JvmStatic
-    fun prepareSave(slot: Int, transactionId: String, stateJson: String): String {
-        val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        val prepared = ModuleSaveCoordinator.prepare(
-            slot,
-            transactionId,
-            listOf(
-                ModuleSaveCoordinator.PreparedSection(
-                    SECTION_NAME,
-                    SECTION_VERSION,
-                    normalized.toString().toByteArray(Charsets.UTF_8),
-                ),
-            ),
-        )
-        return if (prepared) "ok" else "error:storage"
-    }
-
-    @JvmStatic
-    fun commitSave(slot: Int, transactionId: String, stateJson: String): String {
-        val normalized = parseState(stateJson) ?: return "error:invalid_state"
-        val committed = ModuleSaveCoordinator.commitAfterOriginalSave(
-            slot,
-            transactionId,
-            listOf(
-                ModuleSaveCoordinator.PreparedSection(
-                    SECTION_NAME,
-                    SECTION_VERSION,
-                    normalized.toString().toByteArray(Charsets.UTF_8),
-                ),
-            ),
-        )
-        return if (committed) "ok" else "error:storage"
-    }
-
-    @JvmStatic
-    fun abortKnownFailedSave(slot: Int, transactionId: String): String {
-        return if (ModuleSaveCoordinator.abortKnownFailedSave(slot, transactionId)) "ok" else "error:storage"
+    private fun parseStateBytes(bytes: ByteArray, rejectPayloadlessItems: Boolean): JSONObject? {
+        return parseState(String(bytes, Charsets.UTF_8), rejectPayloadlessItems)
     }
 
     private fun defaultStateJson(): String = stateJson(
@@ -110,7 +63,7 @@ object ExtensionBagUiBridge {
         pending = null,
     ).toString()
 
-    private fun parseState(raw: String, rejectPayloadlessItems: Boolean = false): JSONObject? {
+    private fun parseState(raw: String, rejectPayloadlessItems: Boolean): JSONObject? {
         return try {
             val source = JSONObject(raw)
             val sourceTypes = source.getJSONArray("types")
@@ -148,7 +101,7 @@ object ExtensionBagUiBridge {
                         ""
                     }
                     // P4.5：无效 payload 不得静默转 ItemData(0,0)——隔离告警保留审计痕迹
-                    //（受限原始编码入日志；section 写入保持净荷，落盘时机归 P7）。
+                    //（受限原始编码入日志；落盘时机归 core.save 保存事务）。
                     if (hasPayload && safePayload.isEmpty()) {
                         val preview = payload.take(64).map {
                             if (it.isWhitespace() || it == '"') '?' else it

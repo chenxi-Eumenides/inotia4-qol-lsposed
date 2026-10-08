@@ -532,33 +532,14 @@ void* load_item_payload_locked(const uint8_t* payload, int payload_size, const c
 // 唯一调用点是模块级保存 prepare 中扩展背包自己的校验
 // virtual_bag_module_save_validate_locked，其他路径不做任何丢弃。
 
+// P3c 准入化：加载由 save.slot_data provider 的 SessionBound load 承担（每次 session
+// 激活回调 EB 内部 codec），本函数不再执行惰性 IO（读档/清缓存/换槽重读全部移除）。
+// 未加载（epoch 未登记）/降级阻断时保持空状态——扫描与物品操作由调用点经
+// extension_bag_session_admitted_locked() 明确拒绝；slot 漂移由 provider 的转换
+// 回调（prepare_detach + load）处理，这里不得再读 current_save_slot 兜底。
 void ensure_state_loaded_locked() {
-    const int slot = read_current_save_slot();
-    if (slot < 0 || slot > 2 || slot == g_loaded_slot) return;
-    if (!module_cache_clear_preflight_locked()) {
-        VIRTBAG_LOG("state load blocked by active module object slot=%d", slot);
-        return;
-    }
-    if (g_module_view_installed) restore_module_view_locked();
-    if (!clear_module_cache_locked()) {
-        VIRTBAG_LOG("module cache clear incomplete; retaining loaded slot=%d", slot);
-        return;
-    }
-    g_virtual_bag_state = {};
-    const bool state_loaded = extension_bag_load_state_from_store(slot);
-    if (!state_loaded) {
-        VIRTBAG_LOG("virtual bag state slot=%d unavailable; using empty state", slot);
-    }
-    // mode/selected 是背包面板会话作用域字段：读档时世界界面必然从原版视图开始。
-    // 仅清除无 pending 的 kModule 残留（kExitingModule / pending 交给恢复流程）。
-    if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
-        !g_virtual_bag_state.pending.valid) {
-        g_virtual_bag_state.mode = virtual_bag::Mode::kOriginal;
-        g_virtual_bag_state.selected = -1;
-        g_virtual_bag_state.inspected = -1;
-        VIRTBAG_LOG("view state residue cleared on load slot=%d", slot);
-    }
-    g_loaded_slot = slot;
+    // 准入状态由 provider 回调维护（extension_bag_session_admitted_locked）；
+    // 保留函数作为全部既有调用点的稳定锚，无 IO、无游戏状态读取。
 }
 
 // ---- 跨包物品移动事务（v0.7.0）----
@@ -908,10 +889,9 @@ bool category_is_extension_backpack(int category) {
 #include "plugins/extension_bag/extension_bag_transaction.inc"
 bool persist_state_locked(bool force) {
     (void)force;
-    // Sidecar writes are owned exclusively by core module_save_game's
-    // prepare/original-save/commit coordinator. SAVE_SaveInventory can run
-    // inside the original save before its final result is known, so it must
-    // never persist the extension state directly.
+    // P3c：持久化唯一由 save.slot_data 的 capture/complete 承担（capture 在 core.save
+    // 联合保存事务内执行）。SAVE_SaveInventory 可能在原版保存结果未知前运行，
+    // 它绝不能直接持久化扩展状态（R-60 门禁只还原投影）。
     return true;
 }
 

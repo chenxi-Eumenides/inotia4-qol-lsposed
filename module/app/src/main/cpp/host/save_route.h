@@ -17,6 +17,16 @@ QolResult dispatch_render_ready(contracts::QolOwnerToken owner, uint64_t transit
                                 const contracts::QolSaveAdapterState* adapter_state,
                                 contracts::QolSaveDomainStatus* out_status);
 
+// 按插件 id 解析 owner token 后转接 dispatch_native_call；供宿主过渡缝
+//（runtime_hooks）使用——patch/game 层只有插件 id，没有 owner token。
+// token 查询经装配期注入缝（plugin_registry 提供），未注入时按未注册处理。
+// 插件未注册返回 NotFound。
+using PluginTokenQuery = contracts::QolOwnerToken (*)(const char* plugin_id);
+void set_plugin_token_query(PluginTokenQuery query);
+QolResult dispatch_native_call_for_plugin(const char* plugin_id,
+                                          const contracts::QolSaveNativeCall* call,
+                                          contracts::QolSaveDomainStatus* out_status);
+
 // 宿主生命周期停用前的转接：透传 owner 的 prepare_stop；Busy 表示存在
 // pending/unresolved 事务，宿主生命周期操作必须明确失败。
 QolResult prepare_stop(contracts::QolOwnerToken owner);

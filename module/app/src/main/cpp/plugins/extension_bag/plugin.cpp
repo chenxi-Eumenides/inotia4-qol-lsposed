@@ -9,10 +9,13 @@
 #include "contracts/http.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/move_merge.h"
+#include "contracts/runtime_hooks.h"
+#include "contracts/slot_data.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
 #include "contracts/save_facts.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
+#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/http_query.h"
 #include "plugins/extension_bag/lifecycle_registration.h"
@@ -182,6 +185,12 @@ const qol::contracts::CapabilityRequirement kRequires[] = {
     {
         qol::contracts::kCraftFactsCapabilityId,
         {qol::contracts::kCraftFactsVersionMajor, qol::contracts::kCraftFactsVersionMinor},
+    },
+    // P3c：扩展背包数据面依赖 save.slot_data（SessionBound 读 + SlotBound 写，owner=
+    // PluginContext 注入 token）；旧 ModuleSaveStore/Coordinator 生产链退役。
+    {
+        qol::contracts::kQolSlotDataCapabilityId,
+        {qol::contracts::kQolSlotDataVersion.major, qol::contracts::kQolSlotDataVersion.minor},
     },
 };
 
@@ -431,6 +440,17 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
                                         std::to_string(ticket) + "}");
 }
 
+// P3c：SlotBound dirty 的锁外安全点排空（RenderPre 每帧）；save.slot_data 的 iface
+// 在 install 时 require 后缓存（capability 与插件同生命周期，宿主 revoke 时先于本
+// 插件停用 provider——表指针由宿主 capability 表持有，此处不管理其生命周期）。
+uint64_t g_slot_data_flush_task = 0;
+const qol::contracts::QolSlotDataApi* g_slot_data_api_cache = nullptr;
+
+int32_t slot_data_flush_frame(int64_t, void*) {
+    extension_bag_flush_dirty_staging(g_slot_data_api_cache);
+    return 1;
+}
+
 bool register_extension_bag_commands(const qol::contracts::QolHostSdk* sdk) {
     if (sdk == nullptr || sdk->http_dispatch.register_command == nullptr) return false;
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
@@ -648,6 +668,31 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         }
         return 1;
     }
+    // P3c：扩展背包数据面接入 save.slot_data（owner=PluginContext 注入 token；宿主按
+    // 真实注册身份注入，插件不自报）。注册失败即 install 失败——数据面缺失时投影/事务
+    // 仍可运行，但持久化断裂比拒绝启用更危险（fail-closed）。
+    const void* slot_data_iface = nullptr;
+    if (g_sdk->capabilities.require == nullptr ||
+        !qol::contracts::succeeded(g_sdk->capabilities.require(
+            qol::contracts::kQolSlotDataCapabilityId,
+            {qol::contracts::kQolSlotDataVersion.major, qol::contracts::kQolSlotDataVersion.minor},
+            &slot_data_iface)) ||
+        slot_data_iface == nullptr) {
+        return 1;
+    }
+    const auto* slot_data_api = static_cast<const qol::contracts::QolSlotDataApi*>(slot_data_iface);
+    if (!extension_bag_slot_data_register(ctx.owner_token, slot_data_api)) {
+        return 1;
+    }
+    g_slot_data_api_cache = slot_data_api;
+    if (g_sdk->scheduler.add != nullptr && g_slot_data_flush_task == 0) {
+        uint64_t task = 0;
+        if (contracts::succeeded(g_sdk->scheduler.add(qol::contracts::kQolRuntimeFramePointRenderPre,
+                                                      &slot_data_flush_frame, nullptr, 1, 0,
+                                                      &task))) {
+            g_slot_data_flush_task = task;
+        }
+    }
     return 0;
 }
 
@@ -663,6 +708,26 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kEbResultHandlerId);
     }
     (void)ctx;
+    // P3c：先关 slot_data 准入（unregister 先拒绝新请求；终态后零回调由 provider 保证），
+    // 磁盘 section 保留（不自动删除、不隐式保存）；注册请求在 deactivate（主线程）内
+    // 经当帧 pump 收敛，返回 request 仅供诊断。
+    if (g_sdk != nullptr && g_sdk->capabilities.require != nullptr) {
+        const void* slot_data_iface = nullptr;
+        if (contracts::succeeded(g_sdk->capabilities.require(
+                qol::contracts::kQolSlotDataCapabilityId,
+                {qol::contracts::kQolSlotDataVersion.major,
+                 qol::contracts::kQolSlotDataVersion.minor},
+                &slot_data_iface)) &&
+            slot_data_iface != nullptr) {
+            (void)extension_bag_slot_data_unregister(
+                static_cast<const qol::contracts::QolSlotDataApi*>(slot_data_iface));
+        }
+    }
+    g_slot_data_api_cache = nullptr;
+    if (g_slot_data_flush_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+        (void)g_sdk->scheduler.remove(g_slot_data_flush_task);
+        g_slot_data_flush_task = 0;
+    }
     // Resources are returned by the host; this callback only closes feature gates.
     // 中立 provider 表静态驻留（不指向可释放内存）；deactivate 只撤销 active，使路由等同无 provider。
     g_provider_active.store(false, std::memory_order_release);
@@ -682,12 +747,28 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
 
 // 启停仅切门禁，资源安装/还原由宿主完成（§3.3）。
 void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
-    (void)ctx;
+    // P3c 生命周期：启停会经 owner suspend/resume 换发 token；此处以本次 ctx.owner_token
+    // 重新注册 slot_data（register 内部先注销旧凭据参与者），使 CB 回调的 owner 校验
+    // 始终对应当前有效 token（§9 双凭据迁移）。
+    if (g_slot_data_api_cache != nullptr) {
+        if (!extension_bag_slot_data_register(ctx.owner_token, g_slot_data_api_cache)) {
+            if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+                constexpr char kMessage[] =
+                    "extension bag slot_data re-register on enable failed";
+                (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+                                       static_cast<uint32_t>(sizeof(kMessage) - 1));
+            }
+        }
+    }
     g_provider_active.store(true, std::memory_order_release);
     extension_bag_set_enabled(true);
 }
 
 void plugin_on_disabled(qol::contracts::PluginContext& ctx) {
+    // 停用但保留注册句柄：注销 slot_data（先关准入；磁盘 section 保留，不隐式保存）。
+    if (g_slot_data_api_cache != nullptr) {
+        (void)extension_bag_slot_data_unregister(g_slot_data_api_cache);
+    }
     (void)ctx;
     g_provider_active.store(false, std::memory_order_release);
     extension_bag_set_enabled(false);
@@ -708,7 +789,7 @@ int32_t plugin_on_resource_ready(qol::contracts::PluginContext& ctx, const char*
 const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    4, kRequires,  // requires=world.facts + item.facts + save.facts + craft.facts
+    5, kRequires,  // requires=world.facts + item.facts + save.facts + craft.facts + save.slot_data
     2, kOptionalRequires,
     2, kProvides,  // provides (extension_bag + inventory.merge_projection)
     g_resource_count, g_resources,

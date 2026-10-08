@@ -52,6 +52,10 @@ uint32_t lifecycle_step();
 // 未注册返回 nullptr。
 const contracts::PluginDescriptor* find_plugin(const char* id);
 
+// 按插件 id 查询当前 owner token；未注册或已 suspend（token=0）返回 0。
+// 供宿主过渡缝（runtime_hooks → save_route 派发）定位领域 owner。
+contracts::QolOwnerToken owner_token_of(const char* id);
+
 uint32_t plugin_count();
 
 // 测试用：清空注册表（资源登记表另有 hooks::registry_reset_for_test）。

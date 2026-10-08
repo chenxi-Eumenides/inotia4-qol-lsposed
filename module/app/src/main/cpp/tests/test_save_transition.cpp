@@ -211,6 +211,24 @@ int main() {
     CHECK(renewed > cancelled);
     CHECK(save_transition_confirm(renewed, 1).ok == kQolOk);
 
+    // ---- bypass lease：kResume 未决期间提供读档旁路凭据；kBeginNew selection 不提供 ----
+    {
+        uint64_t resume = 0;
+        CHECK(succeeded(
+            save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 1, &resume)));
+        QolSlotOperationLease bypass{};
+        bypass.size = sizeof(bypass);
+        int32_t bypass_target = -1;
+        CHECK(save_transition_bypass_lease(&bypass, &bypass_target));
+        CHECK(bypass_target == 1 && bypass.slot_mask == (1u << 1) && bypass.owner == provider);
+        CHECK(succeeded(save_transition_cancel(resume)));
+        uint64_t selection = 0;
+        CHECK(succeeded(
+            save_transition_begin(static_cast<uint32_t>(TransitionKind::kBeginNew), 1, &selection)));
+        CHECK(!save_transition_bypass_lease(&bypass, &bypass_target));
+        CHECK(succeeded(save_transition_cancel(selection)));
+    }
+
     // ---- cancel 不触碰磁盘：reset/ensure 计数为 0 ----
     const auto resets_before = g_reset_calls;
     const auto ensures_before = g_ensure_calls;

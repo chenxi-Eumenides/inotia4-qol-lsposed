@@ -1,6 +1,7 @@
 #include "host/save_route.h"
 
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <mutex>
 
@@ -22,6 +23,8 @@ struct Binding {
 std::mutex g_mtx;
 std::array<Binding, kMaxBindings> g_bindings{};
 uint64_t g_next_id = 1;
+// 装配期注入的「插件 id → owner token」查询缝（dispatch_native_call_for_plugin 用）。
+std::atomic<PluginTokenQuery> g_plugin_token_query{nullptr};
 
 QolResult fail(int32_t code, const char* text) {
     return contracts::error(code, text, static_cast<uint32_t>(std::strlen(text)));
@@ -138,7 +141,8 @@ struct RouteStopped {
 };
 
 const contracts::QolSaveRouteApi kApi{
-    {sizeof(contracts::QolSaveRouteApi), 1, 0}, nullptr, &route_bind, &route_unbind};
+    {sizeof(contracts::QolSaveRouteApi), 1, 0}, nullptr, &route_bind, &route_unbind,
+    &route_dispatch_native};
 
 }  // namespace
 
@@ -148,6 +152,22 @@ QolResult dispatch_native_call(contracts::QolOwnerToken owner,
                                const contracts::QolSaveNativeCall* call,
                                contracts::QolSaveDomainStatus* out_status) {
     return route_dispatch_native(nullptr, owner, call, out_status);
+}
+
+QolResult dispatch_native_call_for_plugin(const char* plugin_id,
+                                          const contracts::QolSaveNativeCall* call,
+                                          contracts::QolSaveDomainStatus* out_status) {
+    // token 查询经装配期注入缝：save_route 不反向依赖 plugin_registry（测试目标
+    // 不链接 registry）。
+    const PluginTokenQuery query = g_plugin_token_query.load(std::memory_order_acquire);
+    const contracts::QolOwnerToken token =
+        query != nullptr && plugin_id != nullptr ? query(plugin_id) : 0;
+    if (token == 0) return fail(kQolErrNotFound, "plugin owner unknown");
+    return route_dispatch_native(nullptr, token, call, out_status);
+}
+
+void set_plugin_token_query(PluginTokenQuery query) {
+    g_plugin_token_query.store(query, std::memory_order_release);
 }
 
 QolResult dispatch_render_ready(contracts::QolOwnerToken owner, uint64_t transition,

@@ -42,6 +42,7 @@ struct SlotTx {
     std::vector<CapturedSection> captured;  // 捕获字节；重试不重新 capture。
     SaveJournal journal;                    // confirmed（stage1 + evidence）。
     std::vector<uint8_t> confirmed_bytes;
+    QolSaveOriginalResult original{};       // 本次事务的原版真实返回（SAVE_Save 入口透传）。
 };
 
 struct Runtime {
@@ -243,6 +244,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame) {
     original.size = sizeof(original);
     const auto invoked = g.adapter->call_original_save(g.adapter->adapter_ctx, &tx.lease, slot,
                                                        &original);
+    tx.original = original;  // SAVE_Save 入口透传原版真实 int（invoked=0 时调用方返回 0）。
     if (!succeeded(invoked) || original.invoked == 0) {
         // Adapter 未执行原版：按原版前失败处理（条件清理 + cancelled）。
         if (!cleanup_prepared_journal_if_ours(tx, slot)) {
@@ -601,5 +603,38 @@ SaveSettle save_coordinator_settle(int32_t slot, uint32_t attempt, uint64_t fram
     if (out_body != nullptr && !executed.error.empty())
         *out_body = "{\"ok\":false,\"error\":\"" + executed.error + "\"}";
     return SaveSettle::kFailed;
+}
+
+SaveSettle save_coordinator_save_entry(int32_t slot, uint32_t attempt, uint64_t frame,
+                                       contracts::QolSaveOriginalResult* out_original,
+                                       std::string* out_body) {
+    if (out_original != nullptr) {
+        out_original->size = sizeof(*out_original);
+        out_original->invoked = 0;
+        out_original->result_valid = 0;
+        out_original->original_result = 0;
+    }
+    const auto settled = save_coordinator_settle(slot, attempt, frame, out_body);
+    if (out_original == nullptr) return settled;
+    std::lock_guard<std::mutex> lock(g.mutex);
+    if (g.backend == nullptr) return settled;
+    const SlotTx& tx = slot_tx(slot);
+    // 原版真实 int 恒透传（invoked=1 时）：包括原版成功但 sidecar 进入 pending/degraded
+    // 的路径——游戏档已写入的事实不因 sidecar 结果改写；原版未执行时保持 invoked=0。
+    if (tx.original.invoked != 0) *out_original = tx.original;
+    return settled;
+}
+
+QolResult save_coordinator_journal_verdict(int32_t slot, void* ctx) {
+    (void)ctx;
+    // stage=1 的自动恢复（同 tx replace 重试，不重 capture 不重调原版）；恢复后槽健康
+    // 决定确认序放行或阻断（degraded 保留证据并阻断）。
+    save_coordinator_on_session_enter(slot, 0);
+    {
+        std::lock_guard<std::mutex> lock(g.mutex);
+        if (g.backend == nullptr) return ok();  // 协调器未装配：交由保守阻断（上层语义）。
+    }
+    if (save_coordinator_permits_transition(slot)) return ok();
+    return fail(kQolErrBlocked, "journal recovery did not complete");
 }
 }  // namespace qol::features::core_save

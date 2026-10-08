@@ -47,6 +47,11 @@ QolResult adapter_read_evidence(void*, const contracts::QolSlotOperationLease* l
     return save_transaction_read_evidence(lease, slot, out);
 }
 
+QolResult adapter_probe_loading_bypass(void*, const contracts::QolSlotOperationLease* lease,
+                                       int32_t slot) {
+    return save_loading_bypass_admit(lease, slot);
+}
+
 const contracts::QolSaveTransactionPort kPort{
     {sizeof(contracts::QolSaveTransactionPort),
      contracts::kQolPortSaveTransactionVersion.major,
@@ -57,6 +62,7 @@ const contracts::QolSaveTransactionPort kPort{
     &adapter_call_original_save,
     &adapter_call_transition,
     &adapter_read_evidence,
+    &adapter_probe_loading_bypass,
 };
 
 }  // namespace
@@ -83,8 +89,10 @@ void save_transaction_install() {
     const uintptr_t load_all = resolve_hook_entry("elf-export:SAVE_LoadCharacterAll", nullptr);
     const uintptr_t save_entry = resolve_hook_entry("elf-export:SAVE_Save", nullptr);
     if (load_all != 0 && save_entry != 0) {
-        // 本批不装 hook；callsite 由 P3c 的 thunk 消费。扫描结果不落任何全局状态，
-        // 每次安装期重算，避免持有跨进程生命周期的裸地址副本。
+        // 装配期扫描：验证 LOAD_CHARACTER_ALL 内部到 SAVE_Save 的唯一 BL 存在（变体差异
+        // 零/多命中即无合法返回点）。该 callsite 不做字节改写——SAVE_Save 入口由 core.save
+        // 的 hook:SAVE_Save 接管，读档期旁路经 probe_loading_bypass 矩阵判定。扫描结果
+        // 不落任何全局状态，每次安装期重算，避免持有跨进程生命周期的裸地址副本。
         (void)save_bypass_scan_production(load_all, F_SAVE_LOAD_CHARACTER_ALL_SPAN, save_entry);
     }
     // 相对名缝与当前槽缝：已登记 symbol_registry 的解析入口。

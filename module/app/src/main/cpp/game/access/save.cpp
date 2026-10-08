@@ -240,6 +240,16 @@ std::string enter_slot_locked(int32_t slot) {
     if (preflight.find("\"verdict\":\"valid\"") == std::string::npos) return preflight;
     void* slot_struct = fn_save_get_save_slot(slot);
     if (slot_struct == nullptr || fn_saveslot_get_hero(slot_struct) == nullptr) return op_err("slot corrupt");
+    // P3c：所有读档入口统一先进入 core.save 转换状态机（prepare_detach 拒绝时阻断原版
+    // 转换；确认序由 core.save 在 RenderPre 完成）。
+    {
+        const auto& hooks = contracts::qol_runtime_hooks();
+        uint64_t transition = 0;
+        if (hooks.save_transition_begin_thunk == nullptr ||
+            !hooks.save_transition_begin_thunk(0, slot, &transition)) {
+            return op_err("enter slot blocked by save transition gate");
+        }
+    }
     // 存档/UI 生命周期参与者分派：无可用参与者等同旧“能力缺失”，跳过准备放行。
     if (!qol::game::lifecycle_participant_prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; enter slot blocked");
@@ -276,6 +286,15 @@ std::string create_slot_locked(int32_t slot, int32_t class_idx) {
     if (slot < 0 || slot > 2) return op_err("bad slot");
     if (class_idx < 0 || class_idx > 5) return op_err("bad class");
     if (g_base == 0) return op_err("libgame not ready");
+    // P3c：新档入口同样先进入 core.save 转换状态机（kBeginNew；确认序复用 selection token）。
+    {
+        const auto& hooks = contracts::qol_runtime_hooks();
+        uint64_t transition = 0;
+        if (hooks.save_transition_begin_thunk == nullptr ||
+            !hooks.save_transition_begin_thunk(1, slot, &transition)) {
+            return op_err("create slot blocked by save transition gate");
+        }
+    }
     // 同 enter_slot_locked：无可用参与者等同旧“能力缺失”，跳过准备放行。
     if (!qol::game::lifecycle_participant_prepare_save_slot_load()) {
         return op_err("extension bag cleanup failed; create slot blocked");

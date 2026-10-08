@@ -61,6 +61,11 @@ struct QolSaveRouteApi {
     // unbind 非阻塞：NotReady = 仍在 drain（帧驱动清理），kOk = 已摘除；
     // 返回后保证不再以该 binding 调用 user。未知 id 返回 NotFound，owner 不匹配 Blocked。
     QolResult (*unbind)(void*, QolOwnerToken, uint64_t);
+    // P3c 尾部追加（按 abi.size 协商，旧实现此字段为空）：hook wrapper / Game 层 thunk
+    // 的统一派发入口。宿主只验证 owner 归属并转接到该 owner bind 的 native_call；
+    // 派发在宿主锁外执行。binding 不存在返回 NotFound，owner 未授权返回 Blocked。
+    QolResult (*dispatch)(void*, QolOwnerToken, const QolSaveNativeCall*,
+                          QolSaveDomainStatus*);
 };
 
 }  // namespace qol::contracts

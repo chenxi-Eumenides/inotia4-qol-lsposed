@@ -42,6 +42,18 @@ bool save_coordinator_permits_save(int32_t slot);
 // out_body 携带冻结成功体 {"ok":true,"slot":S,"sidecar":"ensured"} 或错误体。
 SaveSettle save_coordinator_settle(int32_t slot, uint32_t attempt, uint64_t frame,
                                    std::string* out_body);
+
+// SAVE_Save 入口路径（P3c hook wrapper / 兼容转发）：attempt 语义同 settle，另透传
+// 原版真实 int。新事务路径记录本次 call_original_save 的结果；pending 推进路径不重调
+// 原版，original 以「已成功」呈现（原版成功事实不可撤销）。out_original 可空。
+SaveSettle save_coordinator_save_entry(int32_t slot, uint32_t attempt, uint64_t frame,
+                                       contracts::QolSaveOriginalResult* out_original,
+                                       std::string* out_body);
+
+// 转换确认序的 journal 分派（save_transition_set_journal_verdict 注入）：
+// stage=1 且当前 dat evidence 匹配 → 自动恢复并按恢复后健康放行；否则阻断留证。
+QolResult save_coordinator_journal_verdict(int32_t slot, void* ctx);
+
 void save_coordinator_reset_for_test();
 
 }  // namespace qol::features::core_save

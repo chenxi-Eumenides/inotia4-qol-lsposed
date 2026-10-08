@@ -50,6 +50,19 @@ typedef struct QolRuntimeHooksApi {
     // capability 现取（过渡：game 层无法直接调 infra::require_capability）。
     // 返回 nullptr = 未注册/版本不符；调用方按既有降级语义处理。
     const void* (*capability_require)(const char* id, uint16_t major, uint16_t min_minor);
+
+    // ---- P3c 尾部追加（可空，供 patch/game 层过渡调用 core.save 转换状态机）----
+
+    // 读档/新档发起 thunk：经宿主 save_route 转接 core.save begin_transition
+    //（kind: 0=resume 读档、1=begin_new 新档；与 QolSaveTransitionKind 同值）。
+    // 准入关闭（prepare_detach 拒绝/槽健康阻断/转换在途）返回 false 且 out_transition=0，
+    // 调用方不得继续执行原版转换。out_transition 携带确认序必须复用的 token id。
+    bool (*save_transition_begin_thunk)(int32_t kind, int32_t target_slot,
+                                        uint64_t* out_transition);
+
+    // 进入存档确认序是否已发布 ready（core.save 确认完成后才允许旧 save_enter 回调与
+    // kEventSaveEnter 派发）。false = 确认未完成或失败：调用方不消费 pending、不派发。
+    bool (*save_enter_ready)();
 } QolRuntimeHooksApi;
 
 static_assert(sizeof(QolVersion) == 4, "QolVersion ABI changed");

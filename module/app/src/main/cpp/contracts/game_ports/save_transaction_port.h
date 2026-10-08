@@ -40,6 +40,10 @@ struct QolSaveTransitionCall {
     uint64_t transition;
 };
 
+// bind_backup 的 entry_kind：SAVE_Save 入口 hook 交还的原函数 trampoline。
+// Adapter 收到该绑定后 call_original_save 才可用；其余类别当前无绑定语义。
+constexpr uint32_t kQolSaveBackupEntrySaveSave = 1;
+
 // framework_backup 是 Loader 交还的代码 trampoline，不是游戏对象；只在 resource-ready
 // 装配回调接受，常数时间绑定。bind_backup 后 call 才可用；未绑定时 call 返回 NotReady
 // （当前生产态即如此，惰性）。
@@ -54,6 +58,12 @@ struct QolSaveTransactionPort {
                                  QolSaveOriginalResult*);
     QolResult (*read_evidence)(void*, const QolSlotOperationLease*, int32_t slot,
                                QolSaveFileEvidence*);
+    // P3c 尾部追加（可空，按 abi.size 协商）：SAVE_Save loading 旁路的 Adapter 侧矩阵
+    // 输入仲裁。Adapter 收集 invocation 验证、未就绪读档转换与联合保存嵌套等 Game 层
+    // 事实并执行放行判定（session ready 时 SAVE_Save 属普通保存路径，不进入本探针）；
+    // lease 由调用方（core.save 的未决转换凭据）传入，Adapter 经准入缝校验覆盖槽。
+    // 放行返回 ok；拒绝返回 Blocked，invoked=0，不执行原版。
+    QolResult (*probe_loading_bypass)(void*, const QolSlotOperationLease*, int32_t slot);
 };
 
 static_assert(sizeof(QolSaveAdapterState) == 16, "adapter state layout");

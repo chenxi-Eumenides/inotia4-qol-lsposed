@@ -319,81 +319,12 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbDescSlotsOps)),
         },
-        // ---- D2a-3b-2：C1–C8 存档 callsite ----
-        // 站点已在 a3a 登记（game/access/patches 的 P_EXT_SAVE_*）；handler 为模块存档编排
-        // 机制 owner=extension_bag；行为经 Host SDK 存档面执行。
-        {
-            "patch:P_EXT_SAVE_REVIVE", "P_EXT_SAVE_REVIVE",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
-        {
-            "patch:P_EXT_SAVE_QUEST_CLEAR_1", "P_EXT_SAVE_QUEST_CLEAR_1",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
-        {
-            "patch:P_EXT_SAVE_QUEST_CLEAR_2", "P_EXT_SAVE_QUEST_CLEAR_2",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
-        {
-            "patch:P_EXT_SAVE_QUEST_REVIEW", "P_EXT_SAVE_QUEST_REVIEW",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
-        {
-            "patch:P_EXT_SAVE_PROCESS", "P_EXT_SAVE_PROCESS",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
-        {
-            "patch:P_EXT_SAVE_NETWORK_ADD", "P_EXT_SAVE_NETWORK_ADD",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
-        {
-            "patch:P_EXT_SAVE_NETWORK_PROCESS_1", "P_EXT_SAVE_NETWORK_PROCESS_1",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
-        {
-            "patch:P_EXT_SAVE_NETWORK_PROCESS_2", "P_EXT_SAVE_NETWORK_PROCESS_2",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "存档 callsite 重定向到模块存档编排；投影安装期间必须还原投影再落盘",
-            kEbGateKey, 120, reinterpret_cast<void*>(&extension_bag_save_game_handler),
-        },
+        // ---- D2a-3b-2 → P3c：C1–C8 存档 callsite 重定向已删除 ----
+        // P3c 起 SAVE_Save 入口由 core.save 的 hook:SAVE_Save 接管（联合保存经协调器），
+        // EB 的存档数据面走 save.slot_data（capture/complete），投影还原仍由保留的
+        // hook:SAVE_SaveInventory 门禁（M1）承担——SAVE_SaveInventory 是存档直调入口，
+        // 投影安装期间必须还原投影再落盘（调用方无关）。8 条 callsite claims 与
+        // extension_bag_save_game_handler 不再保留第二套存档编排。
         // ---- C9–C14 装配/背包绘制门禁（功能型 required；站点已在 a3a 登记）----
         {
             "patch:P_EXT_INVEN_ITEM_DRAW", "P_EXT_INVEN_ITEM_DRAW",

@@ -15,6 +15,7 @@
 #include "contracts/game_ports/item_extras_port.h"
 #include "contracts/game_ports/system_port.h"
 #include "contracts/game_ports/save_write_port.h"
+#include "contracts/game_ports/save_transaction_port.h"
 #include "contracts/game_ports/world_write_port.h"
 #include "contracts/game_ports/choice_write_port.h"
 #include "contracts/game_ports/ui_write_port.h"
@@ -55,6 +56,12 @@ const contracts::QolInventoryExtrasPort kInventoryExtrasPort{{1, 0}, {}};
 const contracts::QolItemExtrasPort kItemExtrasPort{{1, 0}, {}};
 const contracts::QolSystemPort kSystemPort{{1, 0}, {}};
 const contracts::QolSaveWritePort kSaveWritePort{{1, 0}, {}};
+// P3c：save_transaction 端口 stub（未绑定 backup；registry tests 只验证私有端口守卫）。
+const contracts::QolSaveTransactionPort kSaveTransactionPort{
+    {sizeof(contracts::QolSaveTransactionPort),
+     contracts::kQolPortSaveTransactionVersion.major,
+     contracts::kQolPortSaveTransactionVersion.minor},
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 const contracts::QolWorldWritePort kWorldWritePort{{1, 0}, {}};
 const contracts::QolChoiceWritePort kChoiceWritePort{{1, 0}, {}};
 const contracts::QolUiWritePort kUiWritePort{{1, 0}, {}};
@@ -95,6 +102,7 @@ const contracts::QolInventoryExtrasPort& inventory_extras_port() {
 const contracts::QolItemExtrasPort& item_extras_port() { return kItemExtrasPort; }
 const contracts::QolSystemPort& system_port() { return kSystemPort; }
 const contracts::QolSaveWritePort& save_write_port() { return kSaveWritePort; }
+const contracts::QolSaveTransactionPort& save_transaction_port() { return kSaveTransactionPort; }
 const contracts::QolWorldWritePort& world_write_port() { return kWorldWritePort; }
 const contracts::QolChoiceWritePort& choice_write_port() { return kChoiceWritePort; }
 const contracts::QolUiWritePort& ui_write_port() { return kUiWritePort; }

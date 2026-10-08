@@ -37,6 +37,11 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
                                              int src_bag, int src_slot, int dst_bag,
                                              int dst_slot, void* material, void* target_item);
 
+// 共享锁与 dirty 标记在文件作用域（非匿名 namespace）：extension_bag_persistence.cpp
+// 经 extern 引用同一实例（save.slot_data 回调/排空面与 UI 面共享锁边界，rulebook §2）。
+std::mutex g_virtual_bag_mtx;
+bool g_item_state_dirty = false;
+
 namespace {
 
 constexpr size_t kPopupStateSize = 0x40;
@@ -71,7 +76,6 @@ using PopupNoArgFn = void (*)();
 using OriginalDrawInvenBagFn = void (*)();
 using OriginalDrawInvenItemFn = void (*)();
 
-std::mutex g_virtual_bag_mtx;
 // Extension source protection follows the extension_bag gate independently of move_merge.
 std::atomic<bool> g_extension_source_protection_requested{false};
 // 生命周期节拍帧任务（D2a-3c：原 150ms 线程体迁 infra::scheduler，主线程执行）。
@@ -146,7 +150,6 @@ int g_pending_jewel_detail_bag = -1;
 int g_pending_jewel_detail_slot = -1;
 uint8_t g_exit_display_bag = kNoOriginalBagSelected;
 bool g_inventory_frame_active = false;
-bool g_item_state_dirty = false;
 bool g_extension_touch_capture = false;
 std::array<void*, virtual_bag::kBagCount> g_extension_tab_buttons{};
 void* g_extension_tab_root = nullptr;
@@ -2145,13 +2148,8 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
 
 #include "plugins/extension_bag/extension_bag_api_impl.inc"
 
-bool extension_bag_save_game_handler() {
-    const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"patch:P_EXT_SAVE_REVIVE"});
-    return g_sdk != nullptr && g_sdk->store.save_game != nullptr &&
-           qol::contracts::succeeded(g_sdk->store.save_game());
-}
+// P3c：extension_bag_save_game_handler 与 8 条存档 callsite claims 已删除——SAVE_Save
+// 入口由 core.save 的 hook:SAVE_Save 接管（联合保存经协调器），EB 数据面走 save.slot_data。
 
 // D2c-2b-2：move_merge / source protection wrapper（X1 handler；须在 claims 之前定义）。
 #include "plugins/extension_bag/move_merge.inc"

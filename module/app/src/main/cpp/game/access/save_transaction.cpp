@@ -7,6 +7,7 @@
 #include <mutex>
 #include <string>
 
+#include "contracts/save_route.h"
 #include "game/access/save_file_evidence.h"
 
 namespace qol::game {
@@ -51,6 +52,15 @@ bool gate_admits(const contracts::QolSlotOperationLease* lease, int32_t slot) {
     return g_gate.operation_admits(g_gate.ctx, lease->owner, lease, slot);
 }
 
+// 联合保存事务在原版调用窗口的标记：loading 旁路矩阵据此拒绝嵌套（P3c）。
+struct JointSaveInFlightGuard {
+    const bool previous = g_joint_save_in_flight.load(std::memory_order_acquire);
+    JointSaveInFlightGuard() { g_joint_save_in_flight.store(true, std::memory_order_release); }
+    ~JointSaveInFlightGuard() {
+        g_joint_save_in_flight.store(previous, std::memory_order_release);
+    }
+};
+
 }  // namespace
 
 SaveBypassPlan save_bypass_scan(uintptr_t entry, uintptr_t span, uintptr_t save_entry,
@@ -93,6 +103,12 @@ bool save_invocation_valid(uint64_t invocation, uint32_t kind, int32_t target_sl
            g_invocation.target_slot == target_slot;
 }
 
+bool save_invocation_current_matches(uint32_t kind, int32_t target_slot) {
+    std::lock_guard<std::mutex> lock(g_invocation_mtx);
+    return g_invocation.id != 0 && g_invocation.kind == kind &&
+           g_invocation.target_slot == target_slot;
+}
+
 void save_invocation_end(uint64_t invocation) {
     if (invocation == 0) return;
     std::lock_guard<std::mutex> lock(g_invocation_mtx);
@@ -108,6 +124,28 @@ QolResult save_admit_loading_bypass(const SaveLoadingBypassInput& input) {
         !input.lease_covers_slot || input.joint_save_in_flight)
         return fail(kQolErrBlocked, "loading bypass not admitted");
     return contracts::ok();
+}
+
+QolResult save_loading_bypass_admit(const contracts::QolSlotOperationLease* lease, int32_t slot) {
+    if (lease == nullptr || lease->size < sizeof(*lease) || slot < 0 || slot > 2)
+        return fail(kQolErrInvalidArgument, "invalid bypass probe");
+    int32_t transition_target = -1;
+    const bool has_unready = save_has_unready_load_transition(&transition_target);
+    int32_t current = -1;
+    if (g_current_slot_fn != nullptr) current = g_current_slot_fn();
+    SaveLoadingBypassInput input{};
+    // 主线程由调用方（core.save wrapper 的 is_main 缝）前置判定；此处只对 Game 层
+    // 可观测事实执行矩阵。session_ready 恒 false：探针仅在 session 非 ready 时可达。
+    input.on_game_main_thread = true;
+    input.invocation_verified = save_invocation_current_matches(
+        static_cast<uint32_t>(contracts::QolSaveCallKind::kResume), slot);
+    input.has_unready_load_transition = has_unready;
+    input.transition_target = transition_target;
+    input.current_slot = current;
+    input.lease_covers_slot = gate_admits(lease, slot);
+    input.joint_save_in_flight = g_joint_save_in_flight.load(std::memory_order_acquire);
+    input.session_ready = false;
+    return save_admit_loading_bypass(input);
 }
 
 void save_set_pending_transition(uint64_t transition, int32_t target_slot, bool ready) {
@@ -175,6 +213,8 @@ QolResult save_transaction_call_original_save(const contracts::QolSlotOperationL
     if (g_current_slot_fn == nullptr) return fail(kQolErrNotReady, "current slot unavailable");
     const int current = g_current_slot_fn();
     if (current != expected_slot) return fail(kQolErrBusy, "current slot changed");
+    // 联合保存事务执行窗口：loading 旁路矩阵据此拒绝嵌套（P3c 生产接线）。
+    const JointSaveInFlightGuard in_flight_guard;
     // 直接调用 Loader 交还的 trampoline；跳板跟随（monster 变体 B 跳板）由交还方
     // 处理，Adapter 不从 +4 自行绕过，也不直调可能被 hook 的入口以防递归。
     using BackupFn = int (*)();

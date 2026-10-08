@@ -3,6 +3,11 @@
 // 发起点：SaveSlot_SlotButtonExe+0x88（读档）与 SelectCharacter_ButtonStartExe+0x10（新档）
 // 的 BL 经 call_patch 改指 wrapper；wrapper 先标记 pending 再复刻原调用。检测任务由
 // frame_task 注册在 kFramePointRenderPre（仅 world 态 DrawPlay 执行），world 就绪后触发一次。
+//
+// P3c 重接：读档发起先经 core.save 的转换状态机 begin（prepare_detach 拒绝时阻断原版
+// 转换），确认序（reset/ensure+journal 严格检查+新 epoch+session_ready+加载排空）由
+// core.save 在 RenderPre 完成；save_enter_tick 只在确认序发布 ready 后才消费 pending、
+// 派发旧回调与 kEventSaveEnter。确认失败不消费、不派发、保持阻断。
 
 #include "patch/save_enter.h"
 
@@ -10,8 +15,12 @@
 #include "infra/frame/frame_task.h"
 #include "infra/log/qol_log.h"
 #include "contracts/events.h"
+#include "contracts/runtime_hooks.h"
+#include "contracts/save_route.h"
+#include "contracts/game_ports/save_transaction_port.h"
 #include "game/access/game_access.h"
 #include "game/access/save.h"
+#include "game/access/save_transaction.h"
 #include "game/state/game_state.h"
 #include "infra/events.h"
 
@@ -35,24 +44,45 @@ std::atomic<bool> g_tick_registered{false};
 std::atomic<bool> g_host_installed{false};
 std::atomic<bool> g_host_installing{false};
 
-// 读档 wrapper：标记 pending 后复刻原调用。
+// 读档 wrapper：先经 core.save begin 转换（kResume；准入关闭时阻断原版转换），成功后
+// 登记 loading 旁路 invocation 与未就绪转换（SAVE_Save 的读档期旁路矩阵输入），再标记
+// pending 并复刻原调用。原版转换返回后旁路窗口关闭：SAVE_LoadCharacterAll 内部的
+// SAVE_Save 只可能发生在该窗口内，其后的 SAVE_Save 无 loading 语义（session 未 ready
+// 时将被矩阵拒绝，fail-closed）。
 void save_load_wrapper(int32_t slot) {
+    uint64_t transition = 0;
+    const auto& hooks = qol::contracts::qol_runtime_hooks();
+    const bool began = hooks.save_transition_begin_thunk != nullptr &&
+                       hooks.save_transition_begin_thunk(0, slot, &transition);
+    if (!began) {
+        QOL_LOG_WARN(QolDomain::kSave,
+                     "save enter blocked by transition gate slot=%d", slot);
+        return;  // 不消费、不执行原版转换：模块准入失败即阻断（fail-closed）。
+    }
+    qol::game::save_set_pending_transition(transition, slot, false);
+    (void)qol::game::save_invocation_begin(
+        static_cast<uint32_t>(qol::contracts::QolSaveCallKind::kResume), slot);
     save_enter_mark_pending();
     if (fn_game_start_resume_game != nullptr) fn_game_start_resume_game(slot);
+    qol::game::save_clear_pending_transition();
 }
 
-// 新档 wrapper：标记 pending 后复刻原调用。
+// 新档 wrapper：selection token 已由 SaveSlot_GoToNewGame 入口 hook begin（core.save），
+// 确认按钮只标记 pending 并复刻原调用；确认序在 core.save RenderPre 按 token id 复用。
 void save_new_wrapper() {
     save_enter_mark_pending();
     if (fn_select_character_start_game != nullptr) fn_select_character_start_game();
 }
 
-// 帧检测任务：pending 且在 world 时消费一次并锁外派发回调（回调在主线程执行）。
+// 帧检测任务：core.save 确认序发布 ready 后消费一次并锁外派发回调（回调在主线程执行）。
+// 确认未完成/失败：不消费 pending、不派发、保持阻断。
 bool save_enter_tick(int64_t /*frame*/, void* /*ctx*/) {
     if (!save_enter_detail::should_fire(g_pending.load(std::memory_order_acquire),
                                         game_in_world())) {
         return true;
     }
+    const auto& hooks = qol::contracts::qol_runtime_hooks();
+    if (hooks.save_enter_ready != nullptr && !hooks.save_enter_ready()) return true;
     if (!g_pending.exchange(false, std::memory_order_acq_rel)) return true;  // 已被并发消费
 
     std::vector<std::pair<SaveEnterFn, void*>> snapshot;

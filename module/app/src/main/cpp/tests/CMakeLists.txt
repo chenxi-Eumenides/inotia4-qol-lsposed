@@ -55,6 +55,9 @@ add_executable(save_facts_plugin_tests
     ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
     ${CPP_DIR}/plugins/core.save/save_coordinator.cpp
     ${CPP_DIR}/plugins/core.save/save_journal.cpp
+    ${CPP_DIR}/plugins/core.save/save_transition.cpp
+    ${CPP_DIR}/host/owner_identity.cpp
+    ${CPP_DIR}/host/save_route.cpp
 )
 target_include_directories(save_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -497,6 +500,7 @@ add_executable(plugin_registry_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/save_route.cpp
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
@@ -573,6 +577,7 @@ add_executable(plugin_lifecycle_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/save_route.cpp
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
@@ -613,6 +618,7 @@ add_executable(capability_lifecycle_tests
     test_stubs.cpp
     test_game_port_stubs.cpp
     ${CPP_DIR}/host/plugin_registry.cpp
+    ${CPP_DIR}/host/save_route.cpp
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
@@ -687,6 +693,22 @@ target_include_directories(extension_bag_contract_tests PRIVATE
 target_compile_features(extension_bag_contract_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_contract_tests COMMAND extension_bag_contract_tests)
+
+# P3c：EB save.slot_data 消费面（注册/load/capture/complete/准入/排空 + codec 等价）。
+# QOL_LOG_* 宏的 domain 参数被 logging.h 丢弃（extension_bag_log 不解释域），不需要
+# qol_log.cpp；Android 头经 stubs/ 覆盖不适用（本 target 无 Android 依赖）。
+add_executable(extension_bag_slot_data_tests
+    test_extension_bag_slot_data.cpp
+    ${CPP_DIR}/plugins/extension_bag/extension_bag_persistence.cpp
+    ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
+)
+target_include_directories(extension_bag_slot_data_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(extension_bag_slot_data_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_slot_data_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_slot_data_tests COMMAND extension_bag_slot_data_tests)
 
 add_executable(item_handle_custody_tests
     test_item_handle_custody.cpp
