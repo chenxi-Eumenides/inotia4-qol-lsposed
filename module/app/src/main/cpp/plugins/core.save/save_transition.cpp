@@ -334,12 +334,12 @@ bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint
     return now - last_frame < window;
 }
 
-TransitionTimeoutTick save_transition_timeout_tick(bool timer_started, uint64_t* began,
+TransitionTimeoutTick save_transition_timeout_tick(bool timer_started, uint64_t* elapsed_frames,
                                                    uint64_t* last_frame,
                                                    uint64_t* backward_window_begin,
                                                    uint32_t* backward_count, uint64_t now,
                                                    uint64_t timeout, uint32_t backward_limit) {
-    if (!timer_started || began == nullptr || last_frame == nullptr ||
+    if (!timer_started || elapsed_frames == nullptr || last_frame == nullptr ||
         backward_window_begin == nullptr ||
         backward_count == nullptr || backward_limit == 0)
         return TransitionTimeoutTick::kWaiting;
@@ -351,7 +351,6 @@ TransitionTimeoutTick save_transition_timeout_tick(bool timer_started, uint64_t*
         } else if (*backward_count < backward_limit) {
             ++*backward_count;
         }
-        *began = now;
         *last_frame = now;
         // 单次倒退可能是乱序帧；多次倒退则无法由单次抖动解释，视为异常时钟。
         return *backward_count >= backward_limit ? TransitionTimeoutTick::kExpired
@@ -360,8 +359,12 @@ TransitionTimeoutTick save_transition_timeout_tick(bool timer_started, uint64_t*
     if (*backward_count != 0 && now >= *backward_window_begin &&
         now - *backward_window_begin > timeout)
         *backward_count = 0;
+    const uint64_t forward_delta = now - *last_frame;
+    *elapsed_frames = forward_delta > UINT64_MAX - *elapsed_frames
+                          ? UINT64_MAX
+                          : *elapsed_frames + forward_delta;
     *last_frame = now;
-    if (now - *began > timeout) return TransitionTimeoutTick::kExpired;
+    if (*elapsed_frames >= timeout) return TransitionTimeoutTick::kExpired;
     return TransitionTimeoutTick::kWaiting;
 }
 

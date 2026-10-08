@@ -325,72 +325,94 @@ int main() {
     CHECK(save_transition_confirm_throttled(5, 5, 100, 110, 30));  // 同 token 窗口内：跳过。
     CHECK(!save_transition_confirm_throttled(5, 5, 100, 130, 30)); // 窗口届满：放行。
     CHECK(!save_transition_confirm_throttled(5, 6, 100, 101, 30)); // 新 token：独立放行。
-    uint64_t timeout_begin = 0;
+    uint64_t elapsed_frames = 0;
     uint64_t timeout_last_frame = 0;
     uint64_t backward_window_begin = 0;
     uint32_t backward_count = 0;
-    CHECK(save_transition_timeout_tick(false, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(false, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 601, 600, 3) ==
           TransitionTimeoutTick::kWaiting);
-    timeout_begin = 0;
+    elapsed_frames = 0;
     timeout_last_frame = 0;
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
+                                       &backward_window_begin,
+                                       &backward_count, 599, 600, 3) ==
+          TransitionTimeoutTick::kWaiting);
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 600, 600, 3) ==
-          TransitionTimeoutTick::kWaiting);
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
-                                       &backward_window_begin,
-                                       &backward_count, 601, 600, 3) ==
-          TransitionTimeoutTick::kExpired); // began=0 是合法起点。
+          TransitionTimeoutTick::kExpired); // accumulated forward frames reach timeout.
 
     // 短暂乱序帧重置基准但保留 token 与其 operation lease。
     uint64_t delayed_token = 0;
     CHECK(succeeded(save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 0,
                                           &delayed_token)));
-    timeout_begin = 100;
+    elapsed_frames = 0;
     timeout_last_frame = 100;
     backward_window_begin = 0;
     backward_count = 0;
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 99, 600, 3) ==
           TransitionTimeoutTick::kRebased);
-    CHECK(timeout_begin == 99 && backward_window_begin == 99 && backward_count == 1);
+    CHECK(elapsed_frames == 0 && timeout_last_frame == 99 &&
+          backward_window_begin == 99 && backward_count == 1);
     CHECK(succeeded(save_transition_query(delayed_token, &transition_result)) &&
           transition_result.state == TransitionResultState::kInProgress);
     CHECK(qol::infra::slot_operation::acquire(stranger, 1u << 0, &probe).code == kQolErrBusy);
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 109, 600, 3) ==
           TransitionTimeoutTick::kWaiting);
+    CHECK(elapsed_frames == 10);
     CHECK(succeeded(save_transition_confirm(delayed_token, 0)));
+
+    // Two sparse reversals stay below the anomaly threshold, but forward time still expires.
+    elapsed_frames = 0;
+    timeout_last_frame = 100;
+    backward_window_begin = 0;
+    backward_count = 0;
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
+                                       &backward_window_begin, &backward_count, 99, 600, 3) ==
+          TransitionTimeoutTick::kRebased);
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
+                                       &backward_window_begin, &backward_count, 299, 600, 3) ==
+          TransitionTimeoutTick::kWaiting);
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
+                                       &backward_window_begin, &backward_count, 298, 600, 3) ==
+          TransitionTimeoutTick::kRebased);
+    CHECK(backward_count == 2 && elapsed_frames == 200);
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
+                                       &backward_window_begin, &backward_count, 698, 600, 3) ==
+          TransitionTimeoutTick::kExpired);
+    CHECK(elapsed_frames == 600); // backward rebases cannot restart the timeout clock.
 
     // 接近 UINT64_MAX 的真实回绕先重基准；连续倒退达到阈值才走取消分支。
     uint64_t wrapped_token = 0;
     CHECK(succeeded(save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 2,
                                           &wrapped_token)));
-    timeout_begin = UINT64_MAX - 2;
+    elapsed_frames = 0;
     timeout_last_frame = UINT64_MAX - 2;
     backward_window_begin = 0;
     backward_count = 0;
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 1, 600, 3) ==
           TransitionTimeoutTick::kRebased);
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 2, 600, 3) ==
           TransitionTimeoutTick::kWaiting);
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 1, 600, 3) ==
           TransitionTimeoutTick::kRebased);
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 2, 600, 3) ==
           TransitionTimeoutTick::kWaiting);
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
                                        &backward_count, 1, 600, 3) ==
           TransitionTimeoutTick::kExpired);
@@ -402,13 +424,13 @@ int main() {
     uint64_t normal_timeout_token = 0;
     CHECK(succeeded(save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 2,
                                           &normal_timeout_token)));
-    timeout_begin = 100;
+    elapsed_frames = 0;
     timeout_last_frame = 100;
     backward_window_begin = 0;
     backward_count = 0;
-    CHECK(save_transition_timeout_tick(true, &timeout_begin, &timeout_last_frame,
+    CHECK(save_transition_timeout_tick(true, &elapsed_frames, &timeout_last_frame,
                                        &backward_window_begin,
-                                       &backward_count, 701, 600, 3) ==
+                                       &backward_count, 700, 600, 3) ==
           TransitionTimeoutTick::kExpired);
     CHECK(succeeded(save_transition_cancel(normal_timeout_token)));
     CHECK(succeeded(qol::infra::slot_operation::acquire(stranger, 1u << 2, &probe)));

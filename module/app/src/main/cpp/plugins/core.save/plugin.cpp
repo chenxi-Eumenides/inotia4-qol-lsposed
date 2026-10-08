@@ -125,7 +125,7 @@ std::atomic<uint64_t> g_last_confirm_token{0};
 // 新档 selection token：GoToNewGame 入口 begin 分配，确认序按 token id 复用，取消释放。
 std::atomic<uint64_t> g_selection_token{0};
 // kResume begin 的帧号（确认超时取消用；读档失败不悬挂 pending 转换）。
-std::atomic<uint64_t> g_resume_begin_frame{0};
+std::atomic<uint64_t> g_resume_elapsed_frames{0};
 std::atomic<bool> g_resume_timer_started{false};
 std::atomic<uint64_t> g_resume_timer_token{0};
 std::atomic<uint64_t> g_resume_last_frame{0};
@@ -200,7 +200,7 @@ QolResult cs_native_call(void* /*user*/, const contracts::QolSaveNativeCall* cal
             if (kind == contracts::QolSaveCallKind::kResume && contracts::succeeded(began)) {
                 bind_transition_ticket_context(token, contracts::kQolSaveWriteEnterSlot,
                                                call->target_slot);
-                g_resume_begin_frame.store(g_logic_frame.load(), std::memory_order_release);
+                g_resume_elapsed_frames.store(0, std::memory_order_release);
                 g_resume_last_frame.store(g_logic_frame.load(), std::memory_order_release);
                 g_resume_timer_token.store(token, std::memory_order_release);
                 g_resume_clock_backward_window_begin.store(0, std::memory_order_release);
@@ -285,7 +285,7 @@ void save_transition_observe() {
         // 超时取消只对读档路径：新档 selection 可无限期等待用户操作（Back/确认结束）。
         return;
     }
-    g_resume_begin_frame.store(0, std::memory_order_release);
+    g_resume_elapsed_frames.store(0, std::memory_order_release);
     g_resume_timer_started.store(false, std::memory_order_release);
     g_resume_timer_token.store(0, std::memory_order_release);
     g_resume_last_frame.store(0, std::memory_order_release);
@@ -307,21 +307,21 @@ void save_transition_timeout_frame(uint64_t now) {
     int32_t target = -1;
     if (!save_transition_pending_observation(&token, &target) ||
         token != g_resume_timer_token.load(std::memory_order_acquire)) return;
-    uint64_t began = g_resume_begin_frame.load(std::memory_order_acquire);
+    uint64_t elapsed_frames = g_resume_elapsed_frames.load(std::memory_order_acquire);
     uint64_t last_frame = g_resume_last_frame.load(std::memory_order_acquire);
     uint64_t backward_window_begin =
         g_resume_clock_backward_window_begin.load(std::memory_order_acquire);
     uint32_t backward_count = g_resume_clock_backward_count.load(std::memory_order_acquire);
     const auto timeout = save_transition_timeout_tick(
-        true, &began, &last_frame, &backward_window_begin, &backward_count, now,
+        true, &elapsed_frames, &last_frame, &backward_window_begin, &backward_count, now,
         kResumeConfirmTimeoutFrames, kResumeClockBackwardLimit);
-    g_resume_begin_frame.store(began, std::memory_order_release);
+    g_resume_elapsed_frames.store(elapsed_frames, std::memory_order_release);
     g_resume_last_frame.store(last_frame, std::memory_order_release);
     g_resume_clock_backward_window_begin.store(backward_window_begin, std::memory_order_release);
     g_resume_clock_backward_count.store(backward_count, std::memory_order_release);
     if (timeout != TransitionTimeoutTick::kExpired) return;
     if (contracts::succeeded(save_transition_cancel(token))) {
-        g_resume_begin_frame.store(0, std::memory_order_release);
+        g_resume_elapsed_frames.store(0, std::memory_order_release);
         g_resume_timer_token.store(0, std::memory_order_release);
         g_resume_last_frame.store(0, std::memory_order_release);
         g_resume_timer_started.store(false, std::memory_order_release);

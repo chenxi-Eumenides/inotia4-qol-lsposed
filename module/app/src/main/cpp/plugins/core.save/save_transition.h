@@ -65,7 +65,7 @@ QolResult save_transition_prepare_stop();
 //（尚未执行）或 token 变化（新转换）一律放行，保证首次失败后可继续重试。
 bool save_transition_confirm_throttled(uint64_t last_token, uint64_t token, uint64_t last_frame,
                                        uint64_t now, uint64_t window);
-TransitionTimeoutTick save_transition_timeout_tick(bool timer_started, uint64_t* began,
+TransitionTimeoutTick save_transition_timeout_tick(bool timer_started, uint64_t* elapsed_frames,
                                                    uint64_t* last_frame,
                                                    uint64_t* backward_window_begin,
                                                    uint32_t* backward_count, uint64_t now,
