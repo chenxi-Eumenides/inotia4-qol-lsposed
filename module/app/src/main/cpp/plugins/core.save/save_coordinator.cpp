@@ -134,13 +134,14 @@ struct ExecuteResult {
 // frame_retry=true 表示本事务由 SAVE_Save hook 入口发起，其 pending 阶段由生产帧任务推进。
 ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) {
     SlotTx& tx = slot_tx(slot);
+    // original belongs to this invocation, including invocations rejected by slot health.
+    tx.original = {};
     if (!tx.recovery.permits_save()) return {SaveSettle::kFailed, "slot health blocks save"};
     // 新事务从头开始：清掉上一事务残留的捕获/日志态（凭据仅由释放路径改动）。
     tx.captured.clear();
     tx.journal = SaveJournal{};
     tx.confirmed_bytes.clear();
     tx.phase = TxPhase::kIdle;
-    tx.original = {};
     tx.frame_retry = frame_retry;
     const uint64_t transaction = g.next_tx < UINT64_MAX ? g.next_tx++ : 0;
     if (transaction == 0) return {SaveSettle::kFailed, "transaction id exhausted"};
@@ -484,9 +485,12 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
         const auto evidence =
             g.adapter->read_evidence(g.adapter->adapter_ctx, &tx.lease, slot, &current);
         if (!succeeded(evidence)) {
-            if (tx.recovery.retry_result(false) == LeaseAction::kRelease) {
-                // 不可达（retry_result 成功才 release）；耗尽转 degraded 保留凭据与证据。
-                tx.recovery.degrade();
+            const auto action = tx.recovery.retry_result(false);
+            if (action == LeaseAction::kRelease ||
+                tx.recovery.health() == SlotHealth::kDegraded) {
+                // Degraded 收敛消费者引用，但保留 operation lease、reservation 与 journal。
+                if (action == LeaseAction::kRelease) tx.recovery.degrade();
+                finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
                 if (out_error != nullptr) *out_error = "evidence unavailable; degraded";
                 return SaveSettle::kFailed;
             }
@@ -510,8 +514,11 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
                                        kSaveJournalVersion, tx.confirmed_bytes.data(), tx.confirmed_bytes.size());
         tx.reservation = credential;
         if (!succeeded(written)) {
-            if (tx.recovery.retry_result(false) == LeaseAction::kRelease) {
-                tx.recovery.degrade();
+            const auto action = tx.recovery.retry_result(false);
+            if (action == LeaseAction::kRelease ||
+                tx.recovery.health() == SlotHealth::kDegraded) {
+                if (action == LeaseAction::kRelease) tx.recovery.degrade();
+                finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
                 if (out_error != nullptr) *out_error = "confirmed write failed; degraded";
                 return SaveSettle::kFailed;
             }
@@ -538,8 +545,11 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
                                                           &removal, 1);
         tx.reservation = credential;
         if (!succeeded(replaced)) {
-            if (tx.recovery.retry_result(false) == LeaseAction::kRelease) {
-                tx.recovery.degrade();
+            const auto action = tx.recovery.retry_result(false);
+            if (action == LeaseAction::kRelease ||
+                tx.recovery.health() == SlotHealth::kDegraded) {
+                if (action == LeaseAction::kRelease) tx.recovery.degrade();
+                finish_capture(tx, value(QolSlotDataOutcome::kDegraded));
                 if (out_error != nullptr) *out_error = "replace failed; degraded";
                 return SaveSettle::kFailed;
             }

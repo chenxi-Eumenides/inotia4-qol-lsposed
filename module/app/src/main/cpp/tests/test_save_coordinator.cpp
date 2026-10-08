@@ -433,6 +433,9 @@ int main() {
     CHECK(body.find("journal preserved") != std::string::npos);
     CHECK(consumer_state.outcomes.back() == static_cast<uint32_t>(QolSlotDataOutcome::kDegraded));
     CHECK(!save_coordinator_permits_save(0));  // degraded 拒绝新保存。
+    QolSaveOriginalResult rejected_original{};
+    CHECK(save_coordinator_save_entry(0, 0, 5, &rejected_original, &body) == SaveSettle::kFailed);
+    CHECK(rejected_original.invoked == 0);  // R1：健康拒绝不能泄漏上一事务的 original。
     CHECK(qol::infra::store::read_section(0, "module.save.journal", &seed_after,
                                           &seed_version) == qol::infra::store::Status::kOk);
     save_coordinator_reset_for_test();  // 先释放 degraded 保留的凭据，再清 journal 证据。
@@ -498,12 +501,15 @@ int main() {
     g_replace_reserved_fail = 10;
     const auto captures_before_exhaust = g_capture_calls;
     CHECK(save_coordinator_settle(0, 0, 8, &body) == SaveSettle::kPending);
-    for (uint64_t frame = 9; frame <= 11; ++frame)
-        CHECK(save_coordinator_settle(0, 1, frame, &body) == SaveSettle::kPending);
-    CHECK(save_coordinator_settle(0, 2, 12, &body) == SaveSettle::kFailed);
-    CHECK(body.find("exhausted") != std::string::npos);
+    CHECK(save_coordinator_settle(0, 1, 9, &body) == SaveSettle::kPending);
+    CHECK(save_coordinator_settle(0, 1, 10, &body) == SaveSettle::kPending);
+    CHECK(save_coordinator_settle(0, 1, 11, &body) == SaveSettle::kFailed);
+    CHECK(body.find("degraded") != std::string::npos);
     CHECK(g_capture_calls == captures_before_exhaust + 1);  // 首次事务 capture 一次，重试不重 capture。
     CHECK(!save_coordinator_permits_save(0) && !save_coordinator_permits_transition(0));
+    CHECK(consumer_state.outcomes.back() == static_cast<uint32_t>(QolSlotDataOutcome::kDegraded));
+    CHECK(consumer_state.completes >= 1);  // R2：degraded 同次终结捕获引用，凭据仍受保护。
+    CHECK(qol::infra::slot_operation::acquire(stranger, 1, &probe).code == kQolErrBusy);
     g_replace_reserved_fail = 0;
     save_coordinator_reset_for_test();  // 清 degraded 继续后续场景。
 
