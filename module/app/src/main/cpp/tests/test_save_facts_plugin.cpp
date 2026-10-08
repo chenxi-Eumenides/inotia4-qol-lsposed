@@ -12,6 +12,7 @@
 #include "host/owner_identity.h"
 #include "host/save_route.h"
 #include "plugins/core.save/plugin.h"
+#include "plugins/core.save/save_transition.h"
 
 #include <cstdio>
 #include <cstring>
@@ -77,12 +78,20 @@ namespace {
 
 using namespace qol::contracts;
 
-struct TestSaveWritePayload { int32_t kind; int32_t slot; int32_t class_idx; };
+struct TestSaveWritePayload {
+    int32_t kind;
+    int32_t slot;
+    int32_t class_idx;
+    uint64_t request_sequence;
+};
 
 QolTypedResultCommandHandler g_result_handler = nullptr;
 uint32_t g_attempt = 0;
 int g_deferred = 0;
 QolCommandTicket g_ticket = 0;
+TestSaveWritePayload g_posted_payload{};
+uint64_t g_last_transition_token = 0;
+uint64_t g_next_lease_id = 0;
 bool g_fail_save_write = false;
 bool g_fail_logic_scheduler = false;
 uint64_t g_next_scheduler_task = 1;
@@ -97,7 +106,7 @@ QolResult save_load_data(int32_t, void** out, int32_t* size) {
 QolResult save_is_ok(int32_t* out) { *out = 1; return ok(); }
 QolResult save_current_slot(int32_t* out) { *out = 1; return ok(); }
 
-QolResult save_write(int32_t kind, int32_t, int32_t, uint32_t attempt, char* out,
+QolResult save_write(int32_t kind, int32_t slot, int32_t, uint32_t attempt, char* out,
                      uint32_t capacity, uint32_t* out_size) {
     if (g_fail_save_write) {
         const char* body = "{\"ok\":false,\"error\":\"sidecar: io_error\"}";
@@ -107,6 +116,19 @@ QolResult save_write(int32_t kind, int32_t, int32_t, uint32_t attempt, char* out
         return error(kQolErrInternal, "write failed", 12);
     }
     if (kind != kQolSaveWriteSave && attempt == 0) {
+        const auto& hooks = qol_runtime_hooks();
+        uint64_t token = 0;
+        const int32_t transition_kind = kind == kQolSaveWriteEnterSlot ? 0 : 1;
+        if (hooks.save_transition_begin_thunk == nullptr ||
+            !hooks.save_transition_begin_thunk(transition_kind, slot, &token)) {
+            const char* body = "{\"ok\":false,\"error\":\"slot transition not confirmed\"}";
+            const uint32_t size = static_cast<uint32_t>(std::strlen(body));
+            if (capacity < size) return error(kQolErrInvalidArgument, "tiny", 4);
+            std::memcpy(out, body, size);
+            *out_size = size;
+            return error(kQolErrInternal, "transition begin failed", 23);
+        }
+        g_last_transition_token = token;
         *out_size = 0;
         return error(kQolErrNotReady, "world pending", 13);
     }
@@ -118,7 +140,10 @@ QolResult save_write(int32_t kind, int32_t, int32_t, uint32_t attempt, char* out
     return ok();
 }
 
-QolResult post_typed(uint32_t, const void*, uint32_t, QolCommandTicket* out) {
+QolResult post_typed(uint32_t, const void* payload, uint32_t size, QolCommandTicket* out) {
+    if (payload == nullptr || size != sizeof(g_posted_payload))
+        return error(kQolErrInvalidArgument, "bad typed payload", 18);
+    std::memcpy(&g_posted_payload, payload, size);
     *out = ++g_ticket;
     return ok();
 }
@@ -208,8 +233,15 @@ QolResult stub_reset_in_operation(QolOwnerToken, const QolSlotOperationLease*, i
     return ok();
 }
 
-QolResult stub_acquire(void*, QolOwnerToken, uint32_t, QolSlotOperationLease*) {
-    return error(kQolErrNotReady, "no lease", 15);
+QolResult stub_acquire(void*, QolOwnerToken owner, uint32_t mask, QolSlotOperationLease* out) {
+    if (out == nullptr || mask == 0) return error(kQolErrInvalidArgument, "bad lease", 9);
+    out->size = sizeof(*out);
+    out->slot_mask = mask;
+    out->id = ++g_next_lease_id;
+    out->owner = owner;
+    out->revision = 1;
+    out->referenced = 0;
+    return ok();
 }
 QolResult stub_set_ref(void*, QolOwnerToken, QolSlotOperationLease*, uint32_t) { return ok(); }
 QolResult stub_refresh(void*, QolOwnerToken, uint64_t, QolSlotOperationLease*) { return ok(); }
@@ -367,6 +399,7 @@ int main() {
     g_fail_logic_scheduler = false;
     CHECK(descriptor.install(context) == 0);
     CHECK(g_result_handler != nullptr);
+    descriptor.on_enabled(context);
 
     char output[4096]{};
     uint32_t output_size = 0;
@@ -385,29 +418,61 @@ int main() {
                             sizeof(save_payload), output, sizeof(output), &output_size));
     CHECK(std::string(output, output_size).find("{\"ok\":false") == 0);
 
-    const auto check_deferred_route = [&](uint32_t route, int32_t kind, int32_t slot,
-                                          const char* path, const char* body,
-                                          const char* expected, bool expect_done) {
+    const auto begin_http_transition = [&](uint32_t route, const char* path, const char* body) {
         CHECK(dispatch(route, path, body, output, sizeof(output), &output_size).code == kQolOk);
-        const TestSaveWritePayload payload{kind, slot, 0};
+        const TestSaveWritePayload payload = g_posted_payload;
+        CHECK(payload.request_sequence != 0);
         g_attempt = 0;
+        const int deferred_before = g_deferred;
         CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&payload),
                                sizeof(payload), output, sizeof(output), &output_size));
-        CHECK(g_deferred > 0);
-        g_attempt = 1;
-        CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&payload),
-                               sizeof(payload), output, sizeof(output), &output_size) ==
-              expect_done);
-        CHECK(std::string(output, output_size) == expected);
+        CHECK(g_deferred == deferred_before + 1);
+        CHECK(g_last_transition_token != 0);
+        return payload;
     };
-    // B6：enter/create 票据绑定转换终态——本 harness 的 operation stub 不可用、确认序未 ready，
-    // 世界出现也不得报告成功；票据失败终态携带明确错误体。
-    check_deferred_route(1, kQolSaveWriteEnterSlot, 2,
-                         "/api/system/enter_slot", "{\"slot\":2}",
-                         "{\"ok\":false,\"error\":\"slot transition not confirmed\"}", false);
-    check_deferred_route(2, kQolSaveWriteCreateSlot, 0,
-                         "/api/system/create_slot", "{\"slot\":0,\"class_idx\":1}",
-                         "{\"ok\":false,\"error\":\"slot transition not confirmed\"}", false);
+    // R3a: only the bound token reaching ready on its requested slot completes the ticket.
+    const auto matching_payload = begin_http_transition(
+        1, "/api/system/enter_slot", "{\"slot\":2}");
+    const uint64_t matching_token = g_last_transition_token;
+    CHECK(qol::features::core_save::save_transition_confirm(matching_token, 2).ok == kQolOk);
+    g_attempt = 1;
+    CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&matching_payload),
+                           sizeof(matching_payload), output, sizeof(output), &output_size));
+    CHECK(std::string(output, output_size) == "{\"ok\":true,\"slot\":2,\"entered\":true}");
+
+    // R3b: another completed transition cannot complete a ticket bound to a cancelled token.
+    const auto cancelled_payload = begin_http_transition(
+        1, "/api/system/enter_slot", "{\"slot\":2}");
+    const uint64_t cancelled_token = g_last_transition_token;
+    g_attempt = 1;
+    const int pending_deferred_before = g_deferred;
+    CHECK(g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&cancelled_payload),
+                           sizeof(cancelled_payload), output, sizeof(output), &output_size));
+    CHECK(g_deferred == pending_deferred_before + 1); // token 仍在进行时票据继续 pending。
+    CHECK(qol::features::core_save::save_transition_cancel(cancelled_token).ok == kQolOk);
+    uint64_t unrelated_token = 0;
+    CHECK(qol::features::core_save::save_transition_begin(
+              static_cast<uint32_t>(qol::features::core_save::TransitionKind::kResume), 0,
+              &unrelated_token).ok == kQolOk);
+    CHECK(qol::features::core_save::save_transition_confirm(unrelated_token, 0).ok == kQolOk);
+    g_attempt = 2;
+    CHECK(!g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&cancelled_payload),
+                            sizeof(cancelled_payload), output, sizeof(output), &output_size));
+    CHECK(std::string(output, output_size) ==
+          "{\"ok\":false,\"error\":\"slot transition not confirmed\"}");
+
+    // R3c: slot identity is checked against the ticket's transition token.
+    const auto mismatched_payload = begin_http_transition(
+        2, "/api/system/create_slot", "{\"slot\":1,\"class_idx\":1}");
+    const uint64_t mismatched_token = g_last_transition_token;
+    CHECK(qol::features::core_save::save_transition_confirm(mismatched_token, 1).ok == kQolOk);
+    auto wrong_slot_payload = mismatched_payload;
+    wrong_slot_payload.slot = 2;
+    g_attempt = 1;
+    CHECK(!g_result_handler(nullptr, reinterpret_cast<const uint8_t*>(&wrong_slot_payload),
+                            sizeof(wrong_slot_payload), output, sizeof(output), &output_size));
+    CHECK(std::string(output, output_size) ==
+          "{\"ok\":false,\"error\":\"slot transition not confirmed\"}");
 
     CHECK(dispatch(1, "/api/system/enter_slot", "{\"slot\":3}",
                    output, sizeof(output), &output_size).code == kQolErrInvalidArgument);
@@ -421,17 +486,17 @@ int main() {
     // 激活 provider（on_enabled → slot_data available）；无 session、无读档转换时
     // wrapper fail-closed 返回 0（invoked=0，不执行原版）。
     {
-        qol::features::core_save::plugin_descriptor().on_enabled(context);
         const auto save_save = reinterpret_cast<int (*)()>(
             qol::features::core_save::plugin_descriptor().resources[0].handler);
         CHECK(save_save() == 0);  // session 非 ready 且无旁路凭据。
-        // begin thunk（host 缝的真实现经 save_route 派发）：operation stub 不可用 →
-        // begin 拒绝；kMaintenance 探针在确认序前 Blocked（save_enter 不得派发）。
+        // begin thunk（host 缝的真实现经 save_route 派发）：成功取得 lease 后取消，
+        // 确认序前 maintenance 探针保持 Blocked。
         const auto& hooks = qol_runtime_hooks();
         if (hooks.save_transition_begin_thunk != nullptr &&
             hooks.save_enter_ready != nullptr) {
             uint64_t transition = 0;
-            CHECK(!hooks.save_transition_begin_thunk(0, 1, &transition) && transition == 0);
+            CHECK(hooks.save_transition_begin_thunk(0, 1, &transition) && transition != 0);
+            CHECK(qol::features::core_save::save_transition_cancel(transition).ok == kQolOk);
             CHECK(!hooks.save_enter_ready());  // 确认序未完成：不派发旧回调/事件。
         }
         // native_call（kSave）：经真 save_route 派发回 core.save，session 未 ready 时

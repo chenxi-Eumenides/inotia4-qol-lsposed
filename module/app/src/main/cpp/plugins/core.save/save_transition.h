@@ -16,6 +16,13 @@ enum class TransitionPhase : uint32_t {
     kConfirming = 4,     // 确认序执行中。
     kTerminal = 5,
 };
+enum class TransitionResultState : uint32_t { kInProgress = 0, kReady = 1, kFailed = 2, kCancelled = 3 };
+struct TransitionResult {
+    TransitionResultState state = TransitionResultState::kFailed;
+    int32_t target_slot = -1;
+    uint64_t begin_epoch = 0;
+    uint64_t epoch = 0;
+};
 
 QolResult save_transition_initialize(contracts::QolOwnerToken owner,
                                      contracts::QolOwnerVerifyTokenFn verify,
@@ -40,6 +47,8 @@ QolResult save_transition_begin(uint32_t kind, int32_t requested_slot, uint64_t*
 QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot);
 // 取消选角：只释放 token 与 lease，不伪装恢复已删 dat。
 QolResult save_transition_cancel(uint64_t token_id);
+// 私有结果查询：只按 token 身份查询，不依赖全局 ready 或当前槽。
+QolResult save_transition_query(uint64_t token_id, TransitionResult* out);
 // 确认序成功发布 ready 之后才允许旧 save_enter 回调与 kEventSaveEnter；新转换开始即撤销。
 bool save_transition_ready_for_save_enter();
 // 确认序观测面（RenderPre 帧驱动）：存在等待确认的转换时返回其 token 与 target 槽。

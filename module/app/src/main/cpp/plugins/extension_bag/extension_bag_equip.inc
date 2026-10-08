@@ -74,7 +74,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
             return ExtensionBagEquipResult::kReject;
         }
         g_virtual_bag_state.items[src_bag][src_slot] = {};
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         if (persist_state_locked()) {
             if (!free_module_object_locked(src_bag, src_slot)) {
                 g_virtual_bag_state.types[internal_bag] = previous_type;
@@ -117,7 +117,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     const bool state_equipped =
         virtual_bag::equip_bag(&g_virtual_bag_state, internal_bag, category);
     if (state_equipped) {
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         if (persist_state_locked()) {
             // P4.3：装备对象已被状态 payload 取代（原指针无人引用），终止保管；
             // drop 路径处于触摸窗口内 → 隔离区，API 路径窗口外 → 真释放。
@@ -276,7 +276,7 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
         g_module_object_hashes[source_bag][source_slot] = 0;
         g_module_object_handles[source_bag][source_slot] = 0;
     }
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     persist_state_locked();
     QOL_LOG_INFO(QolDomain::kExtensionBag, "extension character equip ok bag=%d slot=%d target=%d", source_bag,
                 source_slot, target);
@@ -579,7 +579,7 @@ void extension_sell_ok(void*) {
         if (current_item) {
             const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
             g_virtual_bag_state.items[bag][slot] = {};
-            g_item_state_dirty = true;
+            extension_bag_mark_dirty_locked();
             if (!free_module_object_locked(bag, slot)) {
                 g_virtual_bag_state.items[bag][slot] = previous_item;
                 persist_state_locked();
@@ -631,7 +631,7 @@ void extension_destroy_ok(void*) {
                 bag, slot, g_extension_desc_item, "extension destroy", false, nullptr)) {
             const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
             g_virtual_bag_state.items[bag][slot] = {};
-            g_item_state_dirty = true;
+            extension_bag_mark_dirty_locked();
             if (!free_module_object_locked(bag, slot)) {
                 g_virtual_bag_state.items[bag][slot] = previous_item;
                 persist_state_locked();
@@ -1233,7 +1233,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         g_module_object_categories[item_bag][item_slot] = descriptor.category;
         g_module_object_hashes[item_bag][item_slot] = virtual_bag::payload_hash(descriptor);
     }
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     reset_extension_desc_item_hooks_locked();
     QOL_LOG_INFO(QolDomain::kExtensionBag, "extension desc operation synced bag=%d slot=%d category=%d count=%d",
                 item_bag, item_slot, descriptor.category, descriptor.count);

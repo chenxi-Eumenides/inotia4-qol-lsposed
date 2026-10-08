@@ -6,6 +6,8 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <map>
+#include <mutex>
 #include <string>
 
 #include "contracts/commands.h"
@@ -109,6 +111,7 @@ const contracts::QolGameHost* g_game = nullptr;
 contracts::QolOwnerToken g_owner = 0;
 uint64_t g_save_route_binding = 0;
 uint64_t g_slot_data_frame_task = 0;
+void bind_transition_ticket_context(uint64_t token, int32_t kind, int32_t slot);
 
 // RenderPre 帧号（确认序观测与恢复重试共用同一帧源）。
 std::atomic<uint64_t> g_frame{0};
@@ -190,11 +193,15 @@ QolResult cs_native_call(void* /*user*/, const contracts::QolSaveNativeCall* cal
                 call->target_slot, &token);
             if (out != nullptr) out->transition = token;
             if (kind == contracts::QolSaveCallKind::kResume && contracts::succeeded(began)) {
+                bind_transition_ticket_context(token, contracts::kQolSaveWriteEnterSlot,
+                                               call->target_slot);
                 g_resume_begin_frame.store(g_logic_frame.load(), std::memory_order_release);
                 g_resume_timer_token.store(token, std::memory_order_release);
                 g_resume_timer_started.store(true, std::memory_order_release);
             }
             if (kind == contracts::QolSaveCallKind::kBeginNew && contracts::succeeded(began)) {
+                bind_transition_ticket_context(token, contracts::kQolSaveWriteCreateSlot,
+                                               call->target_slot);
                 g_selection_token.store(token, std::memory_order_release);
             }
             return began;
@@ -419,7 +426,46 @@ struct SaveWritePayload {
     int32_t kind = 0;  // contracts::kQolSaveWrite*
     int32_t slot = -1;
     int32_t class_idx = -1;
+    uint64_t request_sequence = 0;
 };
+
+struct SaveTransitionTicketContext {
+    int32_t kind = 0;
+    int32_t slot = -1;
+    uint64_t token = 0;
+};
+std::mutex g_transition_ticket_mutex;
+std::map<uint64_t, SaveTransitionTicketContext> g_transition_ticket_contexts;
+std::atomic<uint64_t> g_next_save_request_sequence{1};
+thread_local uint64_t g_active_save_request_sequence = 0;
+
+void bind_transition_ticket_context(uint64_t token, int32_t kind, int32_t slot) {
+    const uint64_t sequence = g_active_save_request_sequence;
+    if (token == 0 || sequence == 0) return;
+    std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
+    g_transition_ticket_contexts[sequence] = SaveTransitionTicketContext{kind, slot, token};
+}
+
+bool transition_ticket_context(uint64_t sequence, int32_t kind, int32_t slot,
+                                SaveTransitionTicketContext* out) {
+    if (sequence == 0 || out == nullptr) return false;
+    std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
+    const auto it = g_transition_ticket_contexts.find(sequence);
+    if (it == g_transition_ticket_contexts.end() || it->second.kind != kind ||
+        it->second.slot != slot) return false;
+    *out = it->second;
+    return true;
+}
+
+void clear_transition_ticket_context(uint64_t sequence) {
+    std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
+    g_transition_ticket_contexts.erase(sequence);
+}
+
+void clear_all_transition_ticket_contexts() {
+    std::lock_guard<std::mutex> lock(g_transition_ticket_mutex);
+    g_transition_ticket_contexts.clear();
+}
 
 const contracts::QolSaveWritePort* g_save_write = nullptr;
 
@@ -476,6 +522,35 @@ bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, cha
         (g_sdk != nullptr && g_sdk->ticket_result.current_attempt != nullptr)
             ? g_sdk->ticket_result.current_attempt()
             : 0;
+    const bool transition_write = p.kind == contracts::kQolSaveWriteEnterSlot ||
+                                  p.kind == contracts::kQolSaveWriteCreateSlot;
+    const auto fail_transition = [&](const char* reason) {
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") + reason + "\"}";
+        clear_transition_ticket_context(p.request_sequence);
+        if (body.size() > capacity) return false;
+        std::memcpy(out, body.data(), body.size());
+        *out_size = static_cast<uint32_t>(body.size());
+        return false;
+    };
+    const auto defer_transition = [&]() {
+        if (g_sdk == nullptr || g_sdk->ticket_result.defer_current_result == nullptr) return false;
+        (void)g_sdk->ticket_result.defer_current_result();
+        return true;
+    };
+    SaveTransitionTicketContext transition_context{};
+    if (transition_write && attempt != 0) {
+        if (!transition_ticket_context(p.request_sequence, p.kind, p.slot, &transition_context))
+            return fail_transition("slot transition not confirmed");
+        TransitionResult transition_result{};
+        (void)save_transition_query(transition_context.token, &transition_result);
+        if (transition_result.state == TransitionResultState::kInProgress) {
+            return defer_transition();
+        }
+        if (transition_result.state != TransitionResultState::kReady ||
+            transition_result.target_slot != p.slot ||
+            transition_result.epoch <= transition_result.begin_epoch)
+            return fail_transition("slot transition not confirmed");
+    }
     // 联合保存协调器（唯一结算面）：kQolSaveWriteSave 绑定本命令自己的 tx——首次执行
     // 保存，后续 defer 只查询/推进该 tx；sidecar 正式提交确认前票据保持 pending，
     // 耗尽/degraded 给失败终态。kSave 的槽取运行时当前槽（保存写入的就是当前槽）。
@@ -509,39 +584,41 @@ bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, cha
             return settled == qol::features::core_save::SaveSettle::kCommitted;
         }
     }
+    const uint64_t previous_request_sequence = g_active_save_request_sequence;
+    g_active_save_request_sequence = transition_write ? p.request_sequence : 0;
     const QolResult result =
         g_save_write->read.write(p.kind, p.slot, p.class_idx, attempt, out, capacity, out_size);
+    g_active_save_request_sequence = previous_request_sequence;
     if (result.code == kQolErrNotReady) {
         // 转场后世界态未提交：保持票据 pending，下一帧重试（不提前报告 done）。
-        if (g_sdk != nullptr && g_sdk->ticket_result.defer_current_result != nullptr) {
-            (void)g_sdk->ticket_result.defer_current_result();
+        if (transition_write && attempt == 0 &&
+            !transition_ticket_context(p.request_sequence, p.kind, p.slot, &transition_context))
+            return fail_transition("slot transition not confirmed");
+        if (defer_transition()) {
             return true;
         }
-        return false;
+        return fail_transition("slot transition not confirmed");
     }
     // 业务失败时端口返回错误，但 out 已携带原错误体（与迁移前响应一致），票据置 failed。
-    if (!contracts::succeeded(result) || *out_size == 0) return false;
+    if (!contracts::succeeded(result) || *out_size == 0) {
+        if (transition_write) clear_transition_ticket_context(p.request_sequence);
+        return false;
+    }
 
-    // B6：enter/create 票据绑定转换终态——仅 begin 的 token 完成确认 + 消费者加载 + ready
-    // 发布才 done；确认失败不得因 world 出现而成功。确认在途保持 pending。
-    if (p.kind == contracts::kQolSaveWriteEnterSlot ||
-        p.kind == contracts::kQolSaveWriteCreateSlot) {
-        if (!save_transition_ready_for_save_enter()) {
-            const auto prep = save_transition_prepare_stop();
-            if (prep.code == kQolErrBusy) {
-                if (g_sdk != nullptr && g_sdk->ticket_result.defer_current_result != nullptr) {
-                    (void)g_sdk->ticket_result.defer_current_result();
-                    return true;
-                }
-                return false;
-            }
-            const std::string fail =
-                "{\"ok\":false,\"error\":\"slot transition not confirmed\"}";
-            if (fail.size() > capacity) return false;
-            std::memcpy(out, fail.data(), fail.size());
-            *out_size = static_cast<uint32_t>(fail.size());
-            return false;
+    // The ticket may complete only from its own token, never from global ready state.
+    if (transition_write) {
+        if (!transition_ticket_context(p.request_sequence, p.kind, p.slot, &transition_context))
+            return fail_transition("slot transition not confirmed");
+        TransitionResult transition_result{};
+        (void)save_transition_query(transition_context.token, &transition_result);
+        if (transition_result.state == TransitionResultState::kInProgress) {
+            if (defer_transition()) return true;
+            return fail_transition("slot transition not confirmed");
         }
+        if (transition_result.state != TransitionResultState::kReady ||
+            transition_result.target_slot != p.slot ||
+            transition_result.epoch <= transition_result.begin_epoch)
+            return fail_transition("slot transition not confirmed");
     }
 
     int32_t slot = p.slot;
@@ -571,6 +648,7 @@ bool save_write_result_handler(void*, const uint8_t* payload, uint32_t size, cha
     if (body.size() > capacity) return false;
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
+    if (transition_write) clear_transition_ticket_context(p.request_sequence);
     return true;
 }
 
@@ -593,6 +671,11 @@ QolResult cs_save_write_command(contracts::HttpRes* response, SaveWriteRoute kin
                                                         : contracts::kQolSaveWriteCreateSlot;
     payload.slot = slot;
     payload.class_idx = class_idx;
+    if (kind != SaveWriteRoute::kSave) {
+        payload.request_sequence = g_next_save_request_sequence.fetch_add(1, std::memory_order_relaxed);
+        if (payload.request_sequence == 0)
+            return cs_http_error(response, 503, "command queue unavailable");
+    }
     contracts::QolCommandTicket ticket = 0;
     if (!contracts::succeeded(g_sdk->commands.post_typed(kSaveWriteHandlerId, &payload,
                                                          sizeof(payload), &ticket)) ||
@@ -692,6 +775,7 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
+    clear_all_transition_ticket_contexts();
     g_port = nullptr;
     g_save_write = nullptr;
     g_save_tx = nullptr;
@@ -858,6 +942,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_save_route_binding = 0;
     save_coordinator_shutdown();
     save_transition_shutdown();
+    clear_all_transition_ticket_contexts();
     if (g_slot_data_frame_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
         (void)g_sdk->scheduler.remove(g_slot_data_frame_task);
         g_slot_data_frame_task = 0;

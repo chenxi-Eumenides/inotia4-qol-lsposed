@@ -25,6 +25,7 @@ using namespace qol::contracts;
 // extern 声明在文件作用域：匿名 namespace 内的声明是内部链接，无法引用其他 TU 的定义。
 extern std::mutex g_virtual_bag_mtx;
 extern bool g_item_state_dirty;
+uint64_t extension_bag_item_revision_locked();
 
 // game_ui_virtbag.cpp（public_runtime.inc）：R-66 保存前校验（容量归一化 + 容量外剔除，
 // 持 g_virtual_bag_mtx 调用；EB 唯一的保存前清理点）。
@@ -46,20 +47,13 @@ std::atomic<uint64_t> g_admitted_epoch{0};
 // 未加载/epoch 不匹配/降级时扫描与物品操作明确拒绝（不再惰性 IO 兜底）。
 std::atomic<bool> g_session_blocked{true};
 
-// 捕获 revision（内容指纹）：capture 记录当前状态指纹，complete(kCommitted) 只在
-// 当前状态与捕获时一致（捕获后无新修改）时清 pending/dirty，不误清捕获后的新修改；
-// dirty staging 通知的是「有新修改」而非无版本布尔量。
-std::atomic<uint64_t> g_capture_revision{0};
-std::atomic<bool> g_capture_revision_valid{false};
-
-uint64_t fnv1a64(const std::string& text) {
-    uint64_t hash = 1469598103934665603ull;
-    for (const unsigned char c : text) {
-        hash ^= c;
-        hash *= 1099511628211ull;
-    }
-    return hash;
-}
+struct CaptureIdentity {
+    uint64_t transaction = 0;
+    uint64_t epoch = 0;
+    uint64_t revision = 0;
+};
+CaptureIdentity g_capture{};
+uint64_t g_staged_revision = 0;
 
 QolResult eb_ok() { return qol::contracts::ok(); }
 
@@ -196,9 +190,8 @@ QolResult eb_sd_capture(void* /*user*/, const QolSlotDataContext* ctx, uint8_t* 
         return qol::contracts::error(kQolErrInvalidArgument, "capture too large", 16);
     std::memcpy(out_buffer, json.data(), json.size());
     *out_size = json.size();
-    // 记录捕获 revision，供 complete 判定捕获后是否又有新修改。
-    g_capture_revision.store(fnv1a64(json), std::memory_order_release);
-    g_capture_revision_valid.store(true, std::memory_order_release);
+    g_capture = CaptureIdentity{ctx->transaction, ctx->session.epoch,
+                                extension_bag_item_revision_locked()};
     QOL_LOG_INFO(QolDomain::kExtensionBag, "slot data capture slot=%d epoch=%llu bytes=%zu "
                  "nonempty=%d", ctx->session.slot,
                  static_cast<unsigned long long>(ctx->session.epoch), json.size(),
@@ -212,21 +205,24 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     switch (kind) {
         case qol::contracts::QolSlotDataOutcome::kCommitted:
-            // 正式容器已提交：仅当当前状态与捕获 revision 一致（捕获后无新修改）才清
-            // pending 与 dirty；有新修改时保留，等待下一次保存。
             {
-                const bool valid = g_capture_revision_valid.exchange(false, std::memory_order_acq_rel);
-                const uint64_t captured = g_capture_revision.load(std::memory_order_acquire);
-                const std::string current = virtual_bag::state_json(*extension_bag_state());
-                if (valid && fnv1a64(current) == captured) {
+                const bool same_capture = g_capture.transaction == ctx->transaction &&
+                    g_capture.epoch == ctx->session.epoch &&
+                    g_capture.revision == extension_bag_item_revision_locked();
+                if (same_capture) {
                     extension_bag_state()->pending = {};
                     g_item_state_dirty = false;
+                    g_staged_revision = 0;
                 } else {
                     QOL_LOG_WARN(QolDomain::kExtensionBag,
-                                 "slot data committed skipped clear reason=modified_after_capture slot=%d",
+                                 "slot data committed skipped clear reason=capture_identity_changed slot=%d",
                                  ctx->session.slot);
                 }
-                g_session_blocked.store(false, std::memory_order_release);
+                if (g_capture.transaction == ctx->transaction &&
+                    g_capture.epoch == ctx->session.epoch) {
+                    g_capture = CaptureIdentity{};
+                    g_session_blocked.store(false, std::memory_order_release);
+                }
             }
             break;
         case qol::contracts::QolSlotDataOutcome::kStaged:
@@ -239,14 +235,25 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
         case qol::contracts::QolSlotDataOutcome::kPendingRecovery:
         case qol::contracts::QolSlotDataOutcome::kDegraded:
             // pending/degraded：保留证据状态并阻断后续操作，待显式恢复。
-            g_session_blocked.store(true, std::memory_order_release);
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=outcome=%u slot=%d",
-                         outcome, ctx->session.slot);
+            if (g_capture.transaction == ctx->transaction &&
+                g_capture.epoch == ctx->session.epoch) {
+                g_session_blocked.store(true, std::memory_order_release);
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "slot data blocked reason=outcome=%u slot=%d tx=%llu",
+                             outcome, ctx->session.slot,
+                             static_cast<unsigned long long>(ctx->transaction));
+            }
             break;
     }
 }
 
 }  // namespace
+
+#if defined(QOL_EXTENSION_BAG_SLOT_DATA_TEST_SEAMS)
+void extension_bag_slot_data_complete_for_test(const QolSlotDataContext* ctx, uint32_t outcome) {
+    eb_sd_complete(nullptr, ctx, outcome);
+}
+#endif
 
 // ---- 注册 / 注销（plugin 生命周期；主线程调用）----
 
@@ -322,26 +329,26 @@ bool extension_bag_session_admitted_locked() {
 }
 
 // ---- dirty staging 与安全点排空（P3c：43 处 persist 死桩的替代路径）----
-// 锁内：修改点置 g_item_state_dirty；排空任务在锁内序列化 staging。锁外：安全点
-// request_write 提交（provider 主线程 pump → capture 回调内重新拿锁序列化当前状态；
-// staging 与当前状态的差异由 capture 恰一次语义覆盖——每次 request_write 触发一次
-// 全量捕获，无增量协议）。
+// 每个 dirty revision 至多通知一次 SlotBound request_write；capture 仍序列化全量状态。
 void extension_bag_flush_dirty_staging(const QolSlotDataApi* api) {
     if (api == nullptr || api->request_write == nullptr) return;
-    bool need = false;
     uint64_t epoch = 0;
+    uint64_t revision = 0;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (!g_item_state_dirty || !extension_bag_session_admitted_locked()) return;
         epoch = g_admitted_epoch.load(std::memory_order_acquire);
-        need = true;
+        revision = extension_bag_item_revision_locked();
+        if (revision == g_staged_revision) return;
+        g_staged_revision = revision;
     }
-    if (!need) return;
     QolSlotDataRequest request = 0;
     const auto result = api->request_write(g_slot_data_handle.load(std::memory_order_acquire),
                                            epoch, &request);
     if (!qol::contracts::succeeded(result)) {
         // 非主线程投递失败/epoch 不匹配：保留 dirty，下一安全点重试。
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (g_staged_revision == revision) g_staged_revision = 0;
         return;
     }
 }

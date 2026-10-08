@@ -432,7 +432,7 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
         item, virtual_bag_canonical_from_field(old_field, static_cast<uint32_t>(descriptor.count))));
     g_module_object_categories[bag][slot] = descriptor.category;
     g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     return true;
 }
 
@@ -536,7 +536,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
             if (whole) {
                 const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
                 g_virtual_bag_state.items[bag][slot] = {};
-                g_item_state_dirty = true;
+                extension_bag_mark_dirty_locked();
                 if (!free_module_object_locked(bag, slot)) {
                     g_virtual_bag_state.items[bag][slot] = previous_item;
                     persist_state_locked();

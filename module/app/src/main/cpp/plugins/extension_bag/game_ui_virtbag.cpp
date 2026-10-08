@@ -41,6 +41,16 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
 // 经 extern 引用同一实例（save.slot_data 回调/排空面与 UI 面共享锁边界，rulebook §2）。
 std::mutex g_virtual_bag_mtx;
 bool g_item_state_dirty = false;
+std::atomic<uint64_t> g_item_state_revision{0};
+
+void extension_bag_mark_dirty_locked() {
+    g_item_state_dirty = true;
+    g_item_state_revision.fetch_add(1, std::memory_order_release);
+}
+
+uint64_t extension_bag_item_revision_locked() {
+    return g_item_state_revision.load(std::memory_order_acquire);
+}
 
 namespace {
 
@@ -1118,7 +1128,7 @@ bool virtual_bag_remove_native_item(void* item, void* raw_use_token) {
     }
     const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
     g_virtual_bag_state.items[bag][slot] = {};
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     if (!free_module_object_locked(bag, slot, use_token)) {
         g_virtual_bag_state.items[bag][slot] = previous_item;
         VIRTBAG_LOG("native remove rejected object release bag=%d slot=%d", bag, slot);
@@ -1161,7 +1171,7 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
                 bag, slot, item, before_count, observed_before, "native_consume", use_token)) {
             return false;
         }
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
         if (g_module_view_installed && g_module_view_index == bag) {
             refresh_module_item_area_locked(bag);
@@ -1245,7 +1255,7 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
             equip_descriptor.count = static_cast<int>(virtual_bag_canonical_count(equip_item, 1));
         }
         g_module_object_hashes[equip_bag][equip_slot] = virtual_bag::payload_hash(equip_descriptor);
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
     }
     return 0;
@@ -1437,7 +1447,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
         g_module_object_handles[adopt_bag][adopt_slot] = item_handle;
         const uint8_t adopted_type = g_virtual_bag_state.types[internal_bag];
         virtual_bag::unequip_bag(&g_virtual_bag_state, internal_bag);
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         if (persist_state_locked()) {
             if (g_module_view_installed && g_module_view_index == adopt_bag) {
                 refresh_module_item_area_locked(adopt_bag);
@@ -1473,7 +1483,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     virtual_bag::unequip_bag(&g_virtual_bag_state, internal_bag);
     virtual_bag::enter_original(&g_virtual_bag_state, receiving_bag);
     set_original_bag_locked(receiving_bag);
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     if (persist_state_locked()) {
         // P4.3：persist 成功 = 提交点，此刻才移交原版库存（终态）。
         handover_tracked_item_locked(item_handle, item, "unequip handover");
@@ -1665,7 +1675,7 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
                     dst_bag, dst_slot);
         return false;
     }
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     persist_state_locked();
     if (g_module_view_installed && g_module_view_index == dst_bag) {
         refresh_module_item_area_locked(dst_bag);
@@ -1748,7 +1758,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
         }
         g_virtual_bag_state.items[bag][slot] = merged;
         g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(merged);
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
         if (g_module_view_installed && g_module_view_index == bag) {
             refresh_module_item_area_locked(bag);
@@ -1795,7 +1805,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
             g_module_object_handles[bag][slot] = 0;
             VIRTBAG_LOG("native save place ledger exhausted bag=%d slot=%d", bag, slot);
         }
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
         if (g_module_view_installed && g_module_view_index == bag) {
             refresh_module_item_area_locked(bag);
@@ -1942,7 +1952,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
             }
             handover_tracked_item_locked(handle, item, "backpack fn-equip original");
         }
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
         extension_description_set_off();
         virtual_bag_call_original_refresh_item_area_with_guard();
@@ -2067,7 +2077,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     }
     if (receiving_bag >= 0) {
         (void)g_write_port->ui.set_original_bag_item(bag_index, nullptr);
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
         extension_description_set_off();
         virtual_bag_call_original_refresh_item_area_with_guard();
@@ -2134,7 +2144,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     g_module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
     g_module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
     (void)g_write_port->ui.set_original_bag_item(bag_index, nullptr);
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     persist_state_locked();
     extension_description_set_off();
     clear_original_desc_locked();

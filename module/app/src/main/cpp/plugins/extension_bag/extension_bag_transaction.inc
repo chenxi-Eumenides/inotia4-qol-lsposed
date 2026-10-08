@@ -110,7 +110,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
 
     // logical-state-updated：写扩展逻辑目标；物化失败即回滚（源保持原版实态）。
     virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     if (module_item_locked(dst_bag, dst_slot) == nullptr) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "target extension item could not be materialized; source retained");
@@ -432,7 +432,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
 
     // committed：清扩展源逻辑项、恢复投影、清 pending。已移交对象不参与模块回滚。
     g_virtual_bag_state.items[src_bag][src_slot] = {};
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     g_virtual_bag_state.pending = {};
     // 保持当前视图：仅拖放上下文（扩展视图安装中 = 当前视图即扩展袋）停留该视图；
     // API 路径（原版视图）不改写视图字段。
@@ -682,7 +682,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         }
     }
     g_virtual_bag_state.pending = {};
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     reset_drag_state_locked(nullptr);
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot,
@@ -841,7 +841,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
 
     // logical-state-updated：仅更新扩展逻辑 source/target（不调用原版库存移动，不建 journal）。
     virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
 
     // committed
     g_virtual_bag_state.pending = {};

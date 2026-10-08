@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <vector>
 
@@ -42,8 +43,20 @@ struct Runtime {
     PendingTransition pending{};  // 同一时刻至多一个未决转换（provider transitioning 互斥）。
     bool has_pending = false;
     bool ready_published = false;
+    std::map<uint64_t, TransitionResult> terminal;
+    std::vector<uint64_t> terminal_order;
 };
 Runtime g;
+
+void record_terminal(uint64_t token, const TransitionResult& result) {
+    constexpr std::size_t kTerminalWindow = 256;
+    g.terminal[token] = result;
+    g.terminal_order.push_back(token);
+    if (g.terminal_order.size() > kTerminalWindow) {
+        g.terminal.erase(g.terminal_order.front());
+        g.terminal_order.erase(g.terminal_order.begin());
+    }
+}
 
 bool main_thread() {
     int32_t (*is_main)() = nullptr;
@@ -104,6 +117,12 @@ QolResult save_transition_initialize(QolOwnerToken owner, QolOwnerVerifyTokenFn 
 void save_transition_shutdown() {
     std::lock_guard<std::mutex> lock(g.mutex);
     release_lease(g.pending);
+    if (g.has_pending) {
+        record_terminal(g.pending.id, TransitionResult{TransitionResultState::kCancelled,
+                                                       g.pending.target_slot,
+                                                       g.pending.old_epoch,
+                                                       g.pending.old_epoch});
+    }
     g.pending = PendingTransition{};
     g.has_pending = false;
     g.ready_published = false;
@@ -216,7 +235,12 @@ QolResult save_transition_confirm(uint64_t token_id, int32_t observed_slot) {
         g.pending.phase = TransitionPhase::kAwaitingWorld;
         return confirmed;
     }
+    QolSlotSession ready_session{-1, 0, 0};
+    (void)qol::features::core_save::slot_data_api().session(&ready_session);
     std::lock_guard<std::mutex> lock(g.mutex);
+    record_terminal(token_id, TransitionResult{TransitionResultState::kReady,
+                                               pending.target_slot, pending.old_epoch,
+                                               ready_session.epoch});
     release_lease(g.pending);
     g.pending.phase = TransitionPhase::kTerminal;
     g.pending = PendingTransition{};
@@ -231,11 +255,32 @@ QolResult save_transition_cancel(uint64_t token_id) {
     std::lock_guard<std::mutex> lock(g.mutex);
     if (!g.has_pending || g.pending.id != token_id)
         return fail(kQolErrNotFound, "transition token unknown");
+    const PendingTransition cancelled = g.pending;
+    record_terminal(token_id, TransitionResult{TransitionResultState::kCancelled,
+                                               cancelled.target_slot, cancelled.old_epoch,
+                                               cancelled.old_epoch});
     release_lease(g.pending);
     g.pending = PendingTransition{};
     g.has_pending = false;
     // 只释放 token/lease；已删 dat 不伪装恢复（provider 撤销 transitioning，session 回 Unavailable）。
     (void)qol::features::core_save::slot_data_abandon_transition();
+    return ok();
+}
+
+QolResult save_transition_query(uint64_t token_id, TransitionResult* out) {
+    if (out == nullptr || token_id == 0) return fail(kQolErrInvalidArgument, "invalid token query");
+    std::lock_guard<std::mutex> lock(g.mutex);
+    if (g.has_pending && g.pending.id == token_id) {
+        *out = TransitionResult{TransitionResultState::kInProgress, g.pending.target_slot,
+                                g.pending.old_epoch, g.pending.old_epoch};
+        return ok();
+    }
+    const auto terminal = g.terminal.find(token_id);
+    if (terminal != g.terminal.end()) {
+        *out = terminal->second;
+        return ok();
+    }
+    *out = TransitionResult{TransitionResultState::kFailed, -1, 0, 0};
     return ok();
 }
 
@@ -301,6 +346,8 @@ void save_transition_reset_for_test() {
     g.has_pending = false;
     g.ready_published = false;
     g.next_token = 1;
+    g.terminal.clear();
+    g.terminal_order.clear();
     g.transition_allowed = nullptr;
     g.gate_ctx = nullptr;
     g.journal_verdict = nullptr;

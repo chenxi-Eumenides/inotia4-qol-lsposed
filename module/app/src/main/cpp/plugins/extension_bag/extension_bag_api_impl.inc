@@ -370,7 +370,7 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
                 return extension_put_jewel_error("extension jewel state update failed");
             }
         }
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         refresh_extension_item_operation_locked(bag);
     }
     if (release_plan.pending) {

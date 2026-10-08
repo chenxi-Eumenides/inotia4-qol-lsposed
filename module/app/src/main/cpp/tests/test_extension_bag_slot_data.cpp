@@ -17,6 +17,13 @@
 // ---- 测试提供的 EB 环境（persistence.cpp 的 extern / context 依赖）----
 std::mutex g_virtual_bag_mtx;
 bool g_item_state_dirty = false;
+uint64_t g_item_revision = 0;
+void extension_bag_mark_dirty_locked() {
+    g_item_state_dirty = true;
+    ++g_item_revision;
+}
+uint64_t extension_bag_item_revision_locked() { return g_item_revision; }
+void extension_bag_slot_data_complete_for_test(const qol::contracts::QolSlotDataContext*, uint32_t);
 
 namespace qol::features::extension_bag {
 const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return nullptr; }
@@ -144,9 +151,12 @@ int main() {
 
     // ---- dirty 排空：admitted 时 request_write 恰一次；非 admitted 不排空 ----
     g_request_write_calls = 0;
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     extension_bag_flush_dirty_staging(&flush_api);
     CHECK(g_request_write_calls == 1);
+    extension_bag_flush_dirty_staging(&flush_api);
+    extension_bag_flush_dirty_staging(&flush_api);
+    CHECK(g_request_write_calls == 1);  // 多帧无新 revision 只通知一次。
     g_item_state_dirty = false;
     extension_bag_flush_dirty_staging(&flush_api);
     CHECK(g_request_write_calls == 1);  // 非 dirty：不排空。
@@ -177,7 +187,7 @@ int main() {
     // ---- B10：complete(kCommitted) 只清匹配的捕获 revision ----
     {
         SlotDataSaveView view{};
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         CHECK(succeeded(slot_data_save_begin(100, &view)));
         const char* section = nullptr;
         uint16_t version = 0;
@@ -195,7 +205,7 @@ int main() {
     }
     {
         SlotDataSaveView view{};
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         CHECK(succeeded(slot_data_save_begin(101, &view)));
         const char* section = nullptr;
         uint16_t version = 0;
@@ -209,9 +219,33 @@ int main() {
             std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
             g_state.items[1][0] = virtual_bag::Item{123, 1};
             virtual_bag::normalize(&g_state);
+            extension_bag_mark_dirty_locked();
         }
         slot_data_save_finish(101, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
         CHECK(g_item_state_dirty);  // 捕获后的新修改：保留 dirty。
+    }
+    {
+        SlotDataSaveView view{};
+        extension_bag_mark_dirty_locked();
+        CHECK(succeeded(slot_data_save_begin(102, &view)));
+        const char* section = nullptr;
+        uint16_t version = 0;
+        std::vector<uint8_t> buffer(65536);
+        uint64_t size = 0;
+        CHECK(succeeded(slot_data_save_capture_next(102, &section, &version, buffer.data(),
+                                                    buffer.size(), &size)));
+        {
+            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            g_state.pending.valid = true;
+            extension_bag_mark_dirty_locked();
+        }
+        QolSlotDataContext wrong_context{session, static_cast<uint32_t>(QolSlotDataReason::kSave),
+                                         999};
+        extension_bag_slot_data_complete_for_test(
+            &wrong_context, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+        CHECK(g_item_state_dirty && g_state.pending.valid); // 不匹配 tx 不清 pending/dirty。
+        slot_data_save_finish(102, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+        CHECK(g_item_state_dirty && g_state.pending.valid); // 捕获后 revision 改变仍保留。
     }
 
     // ---- B9：prepare_detach 开始即撤销本地准入（detach 窗口拒绝扫描/物品操作）----

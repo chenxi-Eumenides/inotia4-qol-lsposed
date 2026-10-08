@@ -636,7 +636,7 @@ bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
         return false;
     }
     g_virtual_bag_state.pending = txn->pending;
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     VIRTBAG_LOG("txn stage=pending-recorded durable=false id=%s direction=%u src=%u/%u dst=%u/%u",
                 txn->transaction_id, static_cast<unsigned int>(txn->direction),
                 static_cast<unsigned int>(txn->src_bag),
@@ -703,7 +703,7 @@ void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
 void txn_abort_locked(const virtual_bag::TransactionContext& txn,
                       virtual_bag::TxnStage failed_at, const char* reason) {
     virtual_bag::txn_rollback_logical(&g_virtual_bag_state, txn, failed_at);
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     VIRTBAG_LOG("txn abort stage=%d id=%s reason=%s direction=%u src=%u/%u dst=%u/%u",
                 static_cast<int>(failed_at), txn.transaction_id, reason,
                 static_cast<unsigned int>(txn.direction),
@@ -726,6 +726,7 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                     static_cast<unsigned int>(pending.dst_bag),
                     static_cast<unsigned int>(pending.dst_slot));
         g_virtual_bag_state.pending = {};
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
         return;
     }
@@ -752,6 +753,7 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                     static_cast<unsigned int>(pending.dst_bag),
                     static_cast<unsigned int>(pending.dst_slot));
         g_virtual_bag_state.pending = {};
+        extension_bag_mark_dirty_locked();
         persist_state_locked();
         return;
     }
@@ -846,6 +848,7 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
     }
     if (clear_pending) {
         g_virtual_bag_state.pending = {};
+        extension_bag_mark_dirty_locked();
     }
     persist_state_locked();
     (void)restore_module;

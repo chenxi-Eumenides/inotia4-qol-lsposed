@@ -177,6 +177,10 @@ int main() {
     uint64_t token = 0;
     CHECK(succeeded(save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 1, &token)));
     CHECK(token != 0);
+    TransitionResult transition_result{};
+    CHECK(succeeded(save_transition_query(token, &transition_result)));
+    CHECK(transition_result.state == TransitionResultState::kInProgress &&
+          transition_result.target_slot == 1);
     CHECK(save_transition_prepare_stop().code == kQolErrBusy);
     uint64_t second = 0;
     CHECK(save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 1, &second).code ==
@@ -195,6 +199,10 @@ int main() {
     // ---- confirm 成功（resume）：ensure 走带凭据入口、epoch 生成、session_ready、SessionBound load ----
     const auto in_op_before = g_ensure_in_op_calls;
     CHECK(succeeded(save_transition_confirm(token, 1)));
+    CHECK(succeeded(save_transition_query(token, &transition_result)));
+    CHECK(transition_result.state == TransitionResultState::kReady &&
+          transition_result.target_slot == 1 &&
+          transition_result.epoch > transition_result.begin_epoch);
     CHECK(g_ensure_in_op_calls == in_op_before + 1);  // B1：确认序持 lease 调带凭据 ensure。
     CHECK(save_transition_ready_for_save_enter());
     CHECK(save_transition_prepare_stop().ok == kQolOk);
@@ -227,6 +235,8 @@ int main() {
     uint64_t cancelled = 0;
     CHECK(succeeded(save_transition_begin(static_cast<uint32_t>(TransitionKind::kResume), 1, &cancelled)));
     CHECK(succeeded(save_transition_cancel(cancelled)));
+    CHECK(succeeded(save_transition_query(cancelled, &transition_result)));
+    CHECK(transition_result.state == TransitionResultState::kCancelled);
     CHECK(save_transition_prepare_stop().ok == kQolOk);
     CHECK(save_transition_confirm(cancelled, 1).code == kQolErrNotFound);
     uint64_t renewed = 0;
@@ -305,6 +315,8 @@ int main() {
 
     // ---- 未注册 token 的 confirm 与未授权 owner ----
     CHECK(save_transition_confirm(999999, 0).code == kQolErrNotFound);
+    CHECK(succeeded(save_transition_query(999999, &transition_result)));
+    CHECK(transition_result.state == TransitionResultState::kFailed);
 
     // ---- B2：确认节流只在实际执行后生效；首次失败可立即重试、新 token 独立放行 ----
     CHECK(!save_transition_confirm_throttled(0, 5, 0, 100, 30));   // 尚未执行：放行。

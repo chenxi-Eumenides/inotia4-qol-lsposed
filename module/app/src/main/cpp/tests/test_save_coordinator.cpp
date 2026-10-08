@@ -449,6 +449,8 @@ int main() {
     g_replace_reserved_fail = 1;  // 仅 final replace 失败一次；prepared/confirmed 写正常。
     CHECK(save_coordinator_settle(0, 0, 5, &body) == SaveSettle::kPending);
     CHECK(body.empty());
+    CHECK(consumer_state.outcomes.back() ==
+          static_cast<uint32_t>(QolSlotDataOutcome::kPendingRecovery));
     CHECK(g_adapter.call_count == calls_at_pending + 1);  // 原版只调一次。
     // 凭据保持：lease 被协调器持有，他人 acquire Busy。
     CHECK(qol::infra::slot_operation::acquire(stranger, 1, &probe).code == kQolErrBusy);

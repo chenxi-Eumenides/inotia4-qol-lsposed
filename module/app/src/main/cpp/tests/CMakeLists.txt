@@ -708,6 +708,7 @@ target_include_directories(extension_bag_slot_data_tests PRIVATE
 )
 target_compile_features(extension_bag_slot_data_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_slot_data_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_compile_definitions(extension_bag_slot_data_tests PRIVATE QOL_EXTENSION_BAG_SLOT_DATA_TEST_SEAMS=1)
 add_test(NAME extension_bag_slot_data_tests COMMAND extension_bag_slot_data_tests)
 
 add_executable(item_handle_custody_tests

@@ -232,7 +232,7 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
         target_descriptor.count = static_cast<int>(virtual_bag_canonical_count(target_item, 1));
     }
     g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
-    g_item_state_dirty = true;
+    extension_bag_mark_dirty_locked();
     persist_state_locked();
     refresh_projected_module_view_after_move_locked();
     if (g_extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
@@ -491,7 +491,7 @@ bool virtual_bag_module_save_validate_locked() {
     }
     if (discarded > 0) {
         virtual_bag::discard_over_capacity(&g_virtual_bag_state);
-        g_item_state_dirty = true;
+        extension_bag_mark_dirty_locked();
         QOL_LOG_WARN(QolDomain::kExtensionBag,
                      "save validation discarded %d over-capacity item(s)", discarded);
     }
@@ -604,7 +604,7 @@ std::string data_virtual_bag_test_equip(int index, int bag_type) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         updated = virtual_bag::set_test_equipped(&g_virtual_bag_state, index, bag_type);
-        if (updated) g_item_state_dirty = true;
+        if (updated) extension_bag_mark_dirty_locked();
     }
     if (!updated) return op_err("bad virtual bag index or bag type");
     return op_ok();
@@ -616,7 +616,7 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         ensure_state_loaded_locked();
         updated = virtual_bag::set_item(&g_virtual_bag_state, index, slot, category, count);
-        if (updated) g_item_state_dirty = true;
+        if (updated) extension_bag_mark_dirty_locked();
     }
     if (!updated) return op_err("bad virtual bag item");
     return op_ok();
