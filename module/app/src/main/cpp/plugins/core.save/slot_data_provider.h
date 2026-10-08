@@ -33,6 +33,8 @@ QolResult slot_data_save_begin(uint64_t transaction, SlotDataSaveView* out);
 QolResult slot_data_save_capture_next(uint64_t transaction, const char** section,
                                       uint16_t* version, uint8_t* buffer, uint64_t capacity,
                                       uint64_t* out_size, contracts::QolOwnerToken* out_owner = nullptr);
+// 在 commit-pending 首次出现时立即关停依赖保存数据的操作准入；不释放 capture 引用。
+void slot_data_save_mark_pending(uint64_t transaction);
 // 终态：对未 closing 的参与者恰一次 complete（幂等内存记账）；outcome=kCommitted 时按
 // 各自捕获快照清 dirty——捕获后又有新写者不误清。释放全部引用。
 void slot_data_save_finish(uint64_t transaction, uint32_t outcome);

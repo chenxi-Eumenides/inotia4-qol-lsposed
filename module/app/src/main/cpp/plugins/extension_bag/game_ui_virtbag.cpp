@@ -1561,7 +1561,7 @@ bool virtual_bag_equip_projected_item(void* character, void* item, int source_ba
                                       int equip_slot) {
     if (character == nullptr || item == nullptr) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
+    if (!extension_bag_session_admitted_locked()) return false;
     if (!g_module_view_installed || g_module_view_index != source_bag) return false;
     if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.find_equip_slot == nullptr) return false;
     int found = -1;
@@ -1597,7 +1597,7 @@ bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
 bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     if (character == nullptr || equip_slot < 0 || equip_slot >= kEquipSlotCount) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
+    if (!extension_bag_session_admitted_locked()) return false;
     if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.equipped_item == nullptr) return false;
     void* item = nullptr;
     if (!qol::contracts::succeeded(
@@ -1704,7 +1704,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
         return VirtualBagPlaceOutcome::kNotApplicable;
     }
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
+    if (!extension_bag_session_admitted_locked()) return VirtualBagPlaceOutcome::kNotApplicable;
     int holder_bag = -1;
     int holder_slot = -1;
     if (module_slot_of_item_locked(req.item, &holder_bag, &holder_slot)) {

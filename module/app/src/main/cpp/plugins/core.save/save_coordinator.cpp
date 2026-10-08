@@ -276,6 +276,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     if (!succeeded(evidence_read)) {
         tx.phase = TxPhase::kAwaitingEvidence;
         tx.recovery.begin_pending();  // 原版已成功：占住 pending 窗口，重试帧重新读取 evidence。
+        slot_data_save_mark_pending(tx.tx_id);
         (void)frame;
         return {SaveSettle::kPending, "evidence unavailable"};
     }
@@ -295,6 +296,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     if (!succeeded(confirmed_written)) {
         tx.phase = TxPhase::kAwaitingConfirmed;
         (void)tx.recovery.original_confirmed(tx.journal);
+        slot_data_save_mark_pending(tx.tx_id);
         return {SaveSettle::kPending, "confirmed journal write deferred"};
     }
     auto replace_credential = tx.reservation;
@@ -305,6 +307,7 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     if (!succeeded(replaced)) {
         tx.phase = TxPhase::kAwaitingReplace;
         (void)tx.recovery.original_confirmed(tx.journal);
+        slot_data_save_mark_pending(tx.tx_id);
         return {SaveSettle::kPending, "final replace deferred"};
     }
     // 确认提交完成：清 pending 状态 → complete(committed)（按捕获快照清 dirty）→
@@ -494,6 +497,7 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
                 if (out_error != nullptr) *out_error = "evidence unavailable; degraded";
                 return SaveSettle::kFailed;
             }
+            slot_data_save_mark_pending(tx.tx_id);
             return SaveSettle::kPending;
         }
         tx.journal.stage = JournalStage::kOriginalConfirmed;
@@ -522,6 +526,7 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
                 if (out_error != nullptr) *out_error = "confirmed write failed; degraded";
                 return SaveSettle::kFailed;
             }
+            slot_data_save_mark_pending(tx.tx_id);
             return SaveSettle::kPending;
         }
         tx.phase = TxPhase::kAwaitingReplace;
@@ -553,6 +558,7 @@ SaveSettle save_coordinator_retry_frame(int32_t slot, uint64_t frame, std::strin
                 if (out_error != nullptr) *out_error = "replace failed; degraded";
                 return SaveSettle::kFailed;
             }
+            slot_data_save_mark_pending(tx.tx_id);
             return SaveSettle::kPending;
         }
         // 确认提交完成：清 pending 状态 → complete(committed) 清 dirty（按捕获快照），

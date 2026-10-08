@@ -187,7 +187,10 @@ int main() {
         CHECK(succeeded(slot_data_save_capture_next(100, &section, &version, buffer.data(),
                                                     buffer.size(), &size, &captured_owner)));
         CHECK(captured_owner == 7);
+        slot_data_save_mark_pending(100);
+        CHECK(!extension_bag_session_admitted_locked()); // pending 立即关闭依赖该槽的操作门。
         slot_data_save_finish(100, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+        CHECK(extension_bag_session_admitted_locked());
         CHECK(!g_item_state_dirty);  // 捕获后无修改：清 dirty。
     }
     {

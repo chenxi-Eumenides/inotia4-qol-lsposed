@@ -64,6 +64,7 @@ struct Runtime {
         std::vector<std::pair<QolSlotDataHandle, std::shared_ptr<Participant>>> held;
         uint32_t cursor = 0;
         bool finished = false;
+        bool pending_notified = false;
     };
     SaveCapture save_capture;
 };
@@ -452,6 +453,21 @@ QolResult slot_data_save_capture_next(uint64_t transaction, const char** section
         return ok();
     }
     return fail(kQolErrNotFound, "capture enumeration end");
+}
+
+void slot_data_save_mark_pending(uint64_t transaction) {
+    if (!main_thread()) return;
+    std::lock_guard<std::mutex> lock(g.mutex);
+    auto& capture = g.save_capture;
+    if (capture.transaction != transaction || capture.finished || capture.pending_notified) return;
+    capture.pending_notified = true;
+    const QolSlotDataContext ctx{capture.session, value(QolSlotDataReason::kSave), transaction};
+    for (const auto& entry : capture.held) {
+        const auto& participant = entry.second;
+        if (g.available && !participant->closing)
+            participant->spec.complete(participant->spec.user, &ctx,
+                                       value(QolSlotDataOutcome::kPendingRecovery));
+    }
 }
 
 void slot_data_save_finish(uint64_t transaction, uint32_t outcome) {
