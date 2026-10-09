@@ -215,11 +215,10 @@ curl -s http://<设备IP>:8088/api/ui/screen
 
    无输出即进程已死，转 tombstone 采集，不走本节后续步骤。
 
-2. 抓全部线程原生栈（真机已 root；输出追加到任务临时目录）：
+2. 抓全部线程原生栈（真机已 root；输出追加到任务工作目录）：
 
    ```bash
-   mkdir -p .tmp/<task-name>
-   adb -s <设备序列号> shell su -c 'debuggerd -b <pid>' > .tmp/<task-name>/backtrace.txt
+   adb -s <设备序列号> shell su -c 'debuggerd -b <pid>' > <任务目录>/backtrace.txt
    ```
 
 3. 定位等待线程：在 `backtrace.txt` 中搜 `std::mutex::lock`、`__pthread_mutex_lock`、
@@ -231,13 +230,12 @@ curl -s http://<设备IP>:8088/api/ui/screen
 4. 配套 logcat 采集（同一时间窗，用于对齐模块日志锚）：
 
    ```bash
-   adb -s <设备序列号> logcat -d -v time > .tmp/<task-name>/logcat.txt
+   adb -s <设备序列号> logcat -d -v time > <任务目录>/logcat.txt
    ```
 
-   结合 `extension_bag` domain 日志锚（`txn committed ...`、`release_cleanup ...` 等，格式见 `archive/docs/development/logging.md`）判断停滞点；
+   结合 `extension_bag` domain 日志锚（`txn committed ...`、`release_cleanup ...` 等，格式见 `docs/archive/development/logging.md`）判断停滞点；
    取证后恢复：`adb shell am force-stop <包名>` 并按 §3.1 ③ 重启。
-5. 取证文件只写 `.tmp/<task-name>/`，任务结束后清理；结论回填对应验收卡的日志锚，
-   不得只写「已卡死」而无线程栈证据。
+5. 结论回填对应验收卡的日志锚，不得只写「已卡死」而无线程栈证据。
 
 ### 3.4 脚本速查（Python 脚本均须 `uv run`）
 
@@ -257,13 +255,13 @@ curl -s http://<设备IP>:8088/api/ui/screen
 | 脚本 | 用途（含用法） | 运行时机 |
 |---|---|---|
 | `scripts/maintenance/check_symbols.py` | 校验 `game_symbols.h`/`symbol_registry.h` 常量与目标 `libgame.so` 符号 VMA 是否一致；默认比对 `apk/decoded/overhaul/lib/arm64-v8a/libgame.so` 的 120+ 符号 | **改 `game_symbols.h`/`symbol_registry.h`、新增 VMA 或换游戏版本/so 后必跑**；新增符号须登记 `SYMBOL_TO_MACRO` 映射 |
-| `scripts/verification/check_log_policy.py` | 按 `archive/docs/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only` |
+| `scripts/verification/check_log_policy.py` | 按 `docs/archive/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only` |
 | `scripts/verification/smoke_all.py` | 从 controller 注解提取全部路由做全量 smoke 探测，产出与 `smoke_baseline_v0.5.43.json` 可对比的基线报告 | 重构或端点变更后、真机 API 可达时 |
 | `scripts/verification/api_poll.py` | 连续轮询 `/api/system/game`、party、inventory，标记字段变化 | 单点联调、确认某字段是否按预期变化时（默认 2.0s × 30 次） |
 | `scripts/verification/live_session.py` | 全自动联调会话：等待 API 就绪 → 等待世界就绪 → 连续采样 → 检测失败/超时 → 输出报告 | 需要长时间观察稳定性时（默认上限 5 分钟） |
 | `scripts/verification/hp_watch_session.py` | 三开关（扩展背包/堆叠上限/拖拽合并）开启态挂机，检测任意角色 HP 下降/死亡并留取证快照 | 三开关、堆叠、拖拽合并相关改动后的真机回归取证 |
 
-> **文档自检脚本当前不存在**：文档锚点保鲜校验（测试名与 `文件:行` 可 grep 性）登记在 `archive/docs/development/planning/backlog.md`，脚本 `scripts/maintenance/check_docs.py` 尚未实现。
+> **文档自检脚本当前不存在**：文档锚点保鲜校验（测试名与 `文件:行` 可 grep 性）登记在 `docs/archive/development/planning/backlog.md`，脚本 `scripts/maintenance/check_docs.py` 尚未实现。
 > 非脚本检查同样必须执行：`git diff --check`，以及 host 单测（`cd module/app/src/main/cpp/tests && cmake -B build && cmake --build build && ctest --test-dir build`）。
 
 #### 3.4.3 静态数据（导出/生成/打包）
@@ -284,7 +282,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
 |---|---|---|
 | `scripts/device/touch_automation.py` | adb 触摸注入（执行模式）与实时触摸检测（无参数） | 仅用于启动弹窗前置；其余流程一律走 HTTP API |
 | `scripts/maintenance/strip-conflicting-permission.py` | 从二进制 `AndroidManifest.xml` 移除指定自定义权限 | 由 `patch-apk.sh` 在指定新包名时自动调用，不单独运行 |
-| `scripts/web/build_map_arranger.py` | 由静态地图数据生成 `web/map-arranger.html` | 地图静态数据更新后、需重新生成地图排版页时 |
+| `scripts/web/build_map_arranger.py` | 由静态地图数据生成 `tools/web/map-arranger.html` | 地图静态数据更新后、需重新生成地图排版页时 |
 | `scripts/analysis/frida/save0-repair-patch.js` | 一次性存档修复 patch（含 opcode 校验，保存成功后必须重启进程） | 仅在处理对应存档损坏时使用；执行前须按当前 `libgame.so` 反汇编核对 opcode |
 
 ### 3.5 设备连接方式
@@ -301,7 +299,7 @@ curl -s http://<设备IP>:8088/api/ui/screen
 # 符号查询（workdir: 项目根，libgame.so 符号表）
 grep " INVEN_GetMoney" apk/decompiled/libgame-symbols.txt
 
-# 抓模块日志（单一 tag；文件日志在手机 sdcard/Android/data/<游戏包>/files/，格式见 archive/docs/development/logging.md）
+# 抓模块日志（单一 tag；文件日志在手机 sdcard/Android/data/<游戏包>/files/，格式见 docs/archive/development/logging.md）
 adb logcat -s Inotia4Qol:V
 
 # 反汇编定位（改 game_symbols.h 时用）
@@ -310,13 +308,6 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 
 > 构建注意：Gradle 中间产物在 `module/**/build/`，最终 APK 复制到 `output/` 后验收交付；
 > `GRADLE_USER_HOME=$PWD/.gradle` 为可选构建缓存隔离（非强制）。
-
-### 3.7 临时文件规则
-
-- 每个任务开始前创建独立目录：`.tmp/<task-name>/`；任务名使用小写英文、数字和短横线，避免直接写入 `.tmp/` 根目录。
-- `.tmp/<task-name>/` 只保存本次任务可重建的日志、截图、反汇编、探针输出和临时输入；源码、可复用脚本、第三方工具、APK 交付物和长期证据不得写入。
-- 任务完成后立即清理对应任务目录；长期需要保留的证据移入 `docs/history/` 或 `archive/`，不得依赖 `.tmp/` 作为长期存储。
-- `.tmp/` 已加入 Git 忽略规则，不得使用 `git add -f` 将其提交；清理时只能删除 `.tmp/` 内容，不得以清理临时文件为由删除 `apk/`、`output/` 或 `archive/`。
 
 ## 4. 环境验证记录（2026-08-05）
 
@@ -336,7 +327,7 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 
 ## 5. 环境相关已知待办
 
-> 环境/部署相关待办已统一收录至 `archive/docs/development/planning/backlog.md`（部署/环境表），本节不再维护。
+> 环境/部署相关待办已统一收录至 `docs/archive/development/planning/backlog.md`（部署/环境表），本节不再维护。
 
 已完结（历史记录）：
 - [x] **y7000 模拟器环境**（2026-08-05 实测完结：TCG ARM VM boot 25+ 分钟未完成；x86_64 转译路线 frida 不可用 + LSPatch native 高风险）→ 模拟器路线冻结，转向真机
@@ -366,8 +357,8 @@ tools/ndk/.../llvm-objdump -d --start-address=0x... --stop-address=0x... apk/dec
 ## 6. 关联文档
 
 - 项目总览：`README.md`；目录规范与代理规则：根目录 `AGENTS.md`
-- 代码结构（NDK/CMake/依赖配置说明）：`archive/docs/development/architecture.md`
-- 开发待办：`archive/docs/development/planning/backlog.md`
+- 代码结构（NDK/CMake/依赖配置说明）：`docs/archive/development/architecture.md`
+- 开发待办：`docs/archive/development/planning/backlog.md`
 
 ## 附录：测试机上的模块加载形态（2026-09-21 事故记录）
 

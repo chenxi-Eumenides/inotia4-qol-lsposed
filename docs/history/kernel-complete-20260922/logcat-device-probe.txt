@@ -1,5 +1,0 @@
-09-22 01:41:43.767 I/Inotia4Qol( 2934): 2026-09-22 01:41:43.767 f=0 I core device_probe_provider [device_probe] provider install
-09-22 01:41:43.767 I/Inotia4Qol( 2934): 2026-09-22 01:41:43.767 f=0 I core device_probe_provider [device_probe] provider on_enabled: capability published
-09-22 01:41:43.768 I/Inotia4Qol( 2934): 2026-09-22 01:41:43.767 f=0 I core device_probe_consumer [device_probe] consumer install: capability injected
-09-22 01:41:43.768 I/Inotia4Qol( 2934): 2026-09-22 01:41:43.768 f=0 I core device_probe_consumer [device_probe] consumer on_enabled: dependency resolved
-09-22 01:41:43.768 I/Inotia4Qol( 2934): 2026-09-22 01:41:43.768 f=0 I core assembly.cpp:272 assembly: registered=2 install_failed=0 kernel_only=true

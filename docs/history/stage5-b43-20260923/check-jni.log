@@ -1,4 +1,0 @@
-  Kotlin external=149，native 导出=149，类名分布=[NativeBridge=149]
-== Kotlin external ↔ native JNI 导出 ==
-  违规 0 条（基线 45 条 / 豁免 0 条 / 新增 0 条）
-[check_jni] 通过

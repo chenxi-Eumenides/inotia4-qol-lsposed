@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """新架构实现地图的生成统计区维护脚本。
 
-只重写 `docs/history/refactor-closure/map.md`（已归档，生成器保留可再生统计区）的 markers 区间：
+只重写 `docs/refactor/map.md`（当前结构地图，生成器保留可再生统计区）的 markers 区间：
 
     <!-- BEGIN GENERATED:stats --> … <!-- END GENERATED:stats -->
 
@@ -37,7 +37,7 @@ if str(HERE) not in sys.path:
 import arch_common as ac  # noqa: E402
 
 SCRIPT_NAME = Path(__file__).name
-DEFAULT_OUTPUT = ac.ROOT / "docs" / "history" / "refactor-closure" / "map.md"
+DEFAULT_OUTPUT = ac.ROOT / "docs" / "refactor" / "map.md"
 TESTS_CMAKE = ac.CPP_ROOT / "tests" / "CMakeLists.txt"
 PLUGINS_DIR = ac.CPP_ROOT / "plugins"
 
@@ -83,6 +83,9 @@ MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
     "test_push_all_rules",
     "test_attribute_quality",
     "test_module_text",
+    "test_character_panel_i18n",
+    "test_core_custom_ui_host",
+    "test_core_data_plugin",
     "test_special_equip_rules",
     "test_autosell_rules",
     "test_autosell_store",
@@ -90,7 +93,6 @@ MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
     "test_custom_recipe",
     "test_native_choice",
     "test_autosell_plugin",
-    "test_text_layer_plugin",
     "test_quest_lifecycle",
     "test_attribute_range_display",
 )

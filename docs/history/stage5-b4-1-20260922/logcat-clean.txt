@@ -1,7 +1,0 @@
---------- beginning of main
-09-23 00:49:46.062 W/Binder:952_4(  952): type=1400 audit(0.0:19845568): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
-09-23 00:49:46.080 I/hwcomposer(  916): [HWCDisplay] [Display_0 (type:1)] fps:20.671944,dur:1064.24,max:80.53,min:28.55  
-09-23 00:49:46.082 W/Binder:952_4(  952): type=1400 audit(0.0:19845569): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
-09-23 00:49:46.122 W/Binder:952_4(  952): type=1400 audit(0.0:19845570): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
-09-23 00:49:46.174 W/Binder:952_4(  952): type=1400 audit(0.0:19845571): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0
-09-23 00:49:46.214 W/Binder:952_4(  952): type=1400 audit(0.0:19845572): avc: denied { getattr } for scontext=u:r:surfaceflinger:s0 tcontext=u:r:untrusted_app_29:s0:c187,c256,c512,c768 tclass=process permissive=0

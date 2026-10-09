@@ -241,4 +241,4 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 - 符号表：`apk/decompiled/libgame-symbols.txt`（8297 符号）
 - 既有 UI 域：`module/app/src/main/cpp/game_ui.cpp` / `game_dialog.cpp` / `game_patch.cpp`（按钮注入）/ `game_symbols.h`（CO_/CB_/UIMIX_ 偏移）/ `symbol_registry.h`
 - API 规格：`../api-reference.md` 第六章 /api/ui
-- 实验记录：`../../history/experiments/ui-experiments.md`（实验完成后更新）
+- 实验记录：`../../archive/experiments/ui-experiments.md`（实验完成后更新）

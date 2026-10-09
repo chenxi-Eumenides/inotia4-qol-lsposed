@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MAP_INFO_PATH = PROJECT_ROOT / "apk/static-data/json/tables/MAPINFOBASE.json"
 TILES_PATH = PROJECT_ROOT / "apk/static-data/json/maps/tiles.json"
 EXITS_PATH = PROJECT_ROOT / "apk/static-data/json/maps/exits.json"
-OUTPUT_PATH = PROJECT_ROOT / "web/map-arranger.html"
+OUTPUT_PATH = PROJECT_ROOT / "tools/web/map-arranger.html"
 
 
 HTML_TEMPLATE = r'''<!doctype html>

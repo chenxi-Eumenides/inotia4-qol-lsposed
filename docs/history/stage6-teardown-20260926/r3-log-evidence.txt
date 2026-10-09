@@ -1,7 +1,0 @@
-14:2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=attribute_range_display capability=attribute.quality
-15:2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=autosell capability=extension_bag
-16:2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=custom_recipe consumer=craft_ui capability=craft_result
-17:2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=custom_recipe capability=attribute.quality
-18:2026-09-26 19:05:27.615 f=0 W core plugin_registry.cpp:496 optional edge downgraded to avoid cycle: provider=extension_bag consumer=core.item capability=extension_bag
-106:2026-09-26 19:05:29.900 f=2 W core plugin_registry.cpp:698 plugin core.item degraded on optional: missing optional capability: stack_limit.item_count
-120:2026-09-26 19:05:49.084 f=199 W core core.item extension inventory slot skipped: bag=9 slot=4 category=35 count=0

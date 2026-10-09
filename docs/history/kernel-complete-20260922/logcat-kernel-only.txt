@@ -1,4 +1,0 @@
-09-22 01:40:54.465 I/Inotia4Qol( 2157): 2026-09-22 01:40:54.464 f=-1 I platform HookMain.kt:44 kernel-only mode: business hooks skipped
-09-22 01:40:55.189 I/Inotia4Qol( 2157): 2026-09-22 01:40:55.189 f=0 I core assembly.cpp:272 assembly: registered=0 install_failed=0 kernel_only=true
-09-22 01:40:55.196 I/Inotia4Qol( 2157): 2026-09-22 01:40:55.196 f=0 I platform HookMain.kt:44 kernel-only mode: business hooks skipped
-09-22 01:40:55.384 I/Inotia4Qol( 2157): 2026-09-22 01:40:55.383 f=0 I http ApiServer.kt:45 kernel-only mode: bootstrap loader configuration and health server

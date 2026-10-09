@@ -1,69 +1,64 @@
 # 文档导航
 
-> 重构期内：**目标架构以根目录 `ARCHITECTURE.md` 为唯一权威**；旧开发文档已归档至
-> `archive/docs/development/`，仅供历史参考与迁移取证，**不得作为落地依据**。
+本文说明 `docs/` 内文档的目录、职责和阅读入口。目标架构见根目录 `ARCHITECTURE.md`。
 
-## 阅读入口
+## 按任务查找
 
-| 任务 | 首先阅读 | 继续阅读 |
+| 任务 | 首选文档 | 相关文档 |
 |---|---|---|
-| 了解项目和交付物 | 根目录 `README.md` | 本索引、`guides/` |
-| 使用已构建模块 | `guides/game-guide.md` | `reference/api-reference.md` |
-| 从源码构建和部署 | `guides/build-and-deploy.md` | 根目录 `AGENTS.md` |
-| 修改 Kotlin/Native 代码 | 根目录 `ARCHITECTURE.md` | `AGENTS.md`、`docs/refactor/` |
-| 继续重构工作 | `ARCHITECTURE.md`、`refactor/verification.md` | `refactor/baseline.md`、`refactor/api-route-map.md`、`refactor/plugin-audit-playbook.md`、`refactor/issues.md`、归档 `history/refactor-closure/` |
-| 理解 API 契约 | `reference/api-reference.md` | `guides/game-guide.md` |
-| 理解原版游戏机制 | `reference/game/` | 归档的 `archive/docs/development/features/` |
-| 查静态分析产物（解码 / 反编译 / 静态表） | `apk/decoded/`、`apk/decompiled/`、`apk/static-data/` | `guides/build-and-deploy.md` §1 |
-| 查看历史过程 | `history/`、`archive/docs/development/` | 仅用于追溯，不作为当前实现依据 |
+| 了解模块、安装和基本使用 | 根目录 `README.md` | `guides/game-guide.md` |
+| 使用 HTTP API | `reference/api-reference.md` | `guides/game-guide.md` |
+| 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时） |
+| 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
+| 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
+| 查询验证标准和当前欠账 | `refactor/verification.md` | `refactor/verification/`、`refactor/slot-data-contract.md` |
+| 理解原版游戏机制 | `reference/game/` | `archive/` 中相关历史记录仅用于追溯 |
 
 ## 目录职责
 
-### `refactor/`：重构执行文档
+### `reference/`：稳定参考资料
 
-面向重构参与者与代理，只记录执行状态与证据，不重复架构理由（理由以 `ARCHITECTURE.md` 为准）。
+保存当前可复用的事实和契约。
 
-- `baseline.md`：现状基线清单，**由脚本生成**（`uv run python scripts/maintenance/gen_baseline_doc.py`），禁止手工编辑。
-- `verification.md`：验证矩阵与验收卡（PASS / NOT_ACCEPTED 定义与证据位置）；§5「活跃债务与待补证据」为活跃债务唯一登记处。
-- `api-route-map.md`：路由迁移核对材料，记录路由过程状态。
-- `issues.md`：问题台账（插件审计与真机事件调查确认的缺陷问题，含归属/证据/状态）；只记录问题，证据欠账仍以 `verification.md` §5 为唯一登记处。
-- `plugin-audit-playbook.md`：插件审计-修复-测试闭环手册（阶段分工、裁决类别、事故分支流程、多插件并行约束）。
-- 以下三份**已归档**（2026-09-26，`docs/history/refactor-closure/`，**仅供参考，不得作为落地依据**）；活跃内容已迁 `verification.md` §5：
-  - 原 `ledger.md`（迁移台账）
-  - 原 `current-optimization-review.md`（当前优化记录）
-  - 原 `map.md`（目录与现状映射材料）
+- `api-reference.md`：HTTP API 路径、方法、参数、响应和状态码的唯一权威。
+- `game/`：原版游戏系统与逆向结论。
+- `game/equipment.md`：群友推荐的可获得与不可获得装备清单。
+- `plugins/`：官方插件当前职责与实现参考。
 
-### `guides/`：使用指南
+插件参考：[`core.world`](reference/plugins/core.world.md)、[`core.item`](reference/plugins/core.item.md)、[`core.character`](reference/plugins/core.character.md)、[`core.quest`](reference/plugins/core.quest.md)、[`core.system`](reference/plugins/core.system.md)、[`core.craft`](reference/plugins/core.craft.md)、[`core.settings`](reference/plugins/core.settings.md)、[`core.ui_state`](reference/plugins/core.ui_state.md)。
 
-面向模块使用者、源码构建者和设备操作者，描述如何完成任务，不描述内部实现细节。
+### `guides/`：操作指南
 
-- `game-guide.md`：游戏与模块 API 的使用流程。
-- `build-and-deploy.md`：环境、构建、设备连接、安装和验收。
+说明读者如何完成一项任务，重点是步骤和操作结果。
 
-### `reference/`：共享参考
+- `game-guide.md`：游戏及模块 API 的使用流程。
+- `build-and-deploy.md`：开发环境、构建、设备部署和验收流程。
 
-面向使用者、开发者和 AI 代理，保存稳定、可复用的公共事实。
+### `refactor/`：当前重构、审计与验证材料
 
-- `api-reference.md`：HTTP API 路由、参数、响应和状态码的唯一权威。
-- `game/`：原版游戏系统和逆向结论。
+这里是仍在使用和维护的执行材料，新审计记录和验证证据写入此目录，不写入 `archive/`。
 
-### `history/`：历史归档
+- `verification.md`：验证规则、验收矩阵与活跃债务唯一登记处。
+- `verification/`：具体阶段或验收批次的验证记录及证据。
+- `audits/`：插件审计记录与对应证据；后续审计沿用此目录。
+- `issues.md`：已确认问题台账。
+- `plugin-audit-playbook.md`：审计、修复、测试闭环流程。
+- `baseline.md`：脚本生成的结构基线。
+- `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
+- `api-route-map.md`：API 路由核对材料。
+- `slot-data-contract.md`：Slot data 当前契约与状态。
+- `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
+- `adr/`：架构决策记录。
 
-已结束的方案、交接、实验和旧版本记录；内容不得替代当前规则与状态。原 `development/` 全部内容已迁至 `archive/docs/development/`（含原 `architecture.md`、`logging.md`、`planning/`、功能设计文档与扩展背包七册）。
+### `archive/`：只读历史归档
 
-## 权威关系
+保存已退役的开发资料、阶段记录、实验、交接、日志和证据。归档材料用于追溯，不作为当前规则或状态依据；**不得在此新建审计、验证或执行记录**。
 
-- 项目总览：根目录 `README.md`
-- **目标架构（重构期唯一权威）**：根目录 `ARCHITECTURE.md`
-- **重构期差距与优化记录（已归档，仅供参考）**：`history/refactor-closure/current-optimization-review.md`
-- 代理规则：根目录及各源码目录的 `AGENTS.md`
-- 重构执行材料：`refactor/verification.md`、`refactor/baseline.md`、`refactor/api-route-map.md`、`refactor/issues.md`（问题台账）；重构期过程材料已归档 `history/refactor-closure/`（`ledger.md`、`current-optimization-review.md`、`map.md`）
-- API 契约：`reference/api-reference.md`
-- 原版游戏事实：`reference/game/`
-- 历史资料（仅供参考）：`history/`、`archive/docs/development/`
+## 文档权威关系
 
-## 临时文件约定
-
-当前任务的日志、截图和可重建中间文件统一写入 `.tmp/<task-name>/`，任务完成后清理；需要长期保留的证据必须迁移到 `docs/history/` 或 `archive/`。正式文档一律不得引用 `.tmp/...` 路径。
-
-普通 Markdown 文档默认面向人类，同时保证 AI 可读取；`AGENTS.md` 只用于代理执行规则，不复制普通文档内容。
+- 项目介绍与玩家入口：根目录 `README.md`。
+- 目标架构及依赖边界：根目录 `ARCHITECTURE.md`。
+- API 契约：`reference/api-reference.md`。
+- 原版游戏机制事实：`reference/game/`。
+- 当前问题、审计和验收状态：`refactor/`。
+- 已结束的过程与历史证据：`archive/`，不覆盖当前文档。

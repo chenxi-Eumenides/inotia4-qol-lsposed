@@ -1,1 +1,0 @@
-OFF capacities [16, 16, 12, 12, 12] bag0 slot14 {'category': 5, 'count': 223, 'payload': 'EvyCSggAAAAASAEAZEC+AAAAAA=='}

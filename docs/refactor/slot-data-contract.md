@@ -197,8 +197,8 @@ operation 跨完整 dat/sidecar/warehouse 备份事务持有，但不是跨调�
 | P1（完成） | 契约冻结，生产不接线 | 无行为变化，不需要真机 |
 | P2（完成） | owner token / 受限 backend / provider 骨架、session 状态机、fake backend 验证注销与补加载；生产功能仍走旧路径 | VM-K5-06h 装配/名册范围；Host 身份、注销、epoch 用例 |
 | P3a（完成） | strict 共享 store、真实编码容量预检、显式 generation/revision 预约；journal v2/v1 识别、恢复状态容器、原 dat evidence；不接生产协调 | VM-K4-04b、VM-K5-06i 受影响正常读面/同槽进档范围；损坏与预约由 Host 覆盖 |
-| P3b/P3c（实现完成，真机部分验收） | core.save 生产协调/journal v2、转换桥、SAVE_Save 入口资源、save Adapter、旧 module_save 参与者编排退役；EB callbacks/runtime、Kotlin/JNI 薄层及 evidence→commit 槽准入。生产切换见 `730ff84d`，后续静态修复与面板状态修复见 `26b19fb8` 及后续 P3c 修复提交 | 已执行 VM-SD-01/02/04 的限定范围、VM-SD-03 happy path、VM-B01..04 API 子项及 monster 保存 happy path；崩溃恢复窗口、旧 epoch 句柄设备级拒绝、overhaul 和 hook 结构日志仍欠。详细范围见 `docs/history/slot-data/p3c-20261008/verification-log.md`；整批仍 `NOT_ACCEPTED` |
-| P4（实现完成，VM-44 部分真机验证；NOT_ACCEPTED） | autosell 接入 SessionBound 读 + Immediate 写，移除其存档事件加载与任意 section IO；修复 request revision、pending intent、失败重试与注销保留 | VM-44 已观察 `sold=3`、`failed=16`；仍欠 EB bag6/7 RemoveFailed 的独立归因及真实 Provider 并发/注销时序证据；见 `docs/history/slot-data/p4-20261008/verification-log.md` |
+| P3b/P3c（实现完成，真机部分验收） | core.save 生产协调/journal v2、转换桥、SAVE_Save 入口资源、save Adapter、旧 module_save 参与者编排退役；EB callbacks/runtime、Kotlin/JNI 薄层及 evidence→commit 槽准入。生产切换见 `730ff84d`，后续静态修复与面板状态修复见 `26b19fb8` 及后续 P3c 修复提交 | 已执行 VM-SD-01/02/04 的限定范围、VM-SD-03 happy path、VM-B01..04 API 子项及 monster 保存 happy path；崩溃恢复窗口、旧 epoch 句柄设备级拒绝、overhaul 和 hook 结构日志仍欠。详细范围见 `docs/refactor/verification/slot-data/p3c-20261008/verification-log.md`；整批仍 `NOT_ACCEPTED` |
+| P4（实现完成，VM-44 部分真机验证；NOT_ACCEPTED） | autosell 接入 SessionBound 读 + Immediate 写，移除其存档事件加载与任意 section IO；修复 request revision、pending intent、失败重试与注销保留 | VM-44 已观察 `sold=3`、`failed=16`；仍欠 EB bag6/7 RemoveFailed 的独立归因及真实 Provider 并发/注销时序证据；见 `docs/refactor/verification/slot-data/p4-20261008/verification-log.md` |
 | P5 | save_backup admin 接入、锁范围收窄、导入/删除/回滚；Host/JNI 旧入口权限封堵；旧注册生产链删除 | 重验 VM-K4-04b、VM-K5-06i |
 
 旧 `contracts/module_save_port.h` 协议 P1/P2 不动；P3 退役 EB 生产注册，可留兼容转发但不能保留第二套参与者顺序；P5 关闭旧入口。既有 VM 卡位置见 `docs/refactor/verification.md`。
@@ -225,7 +225,7 @@ prepare 失败不调用原版保存；原版失败不写正式 sections；原版
 
 ## 13. P3c 实测边界与约束声明
 
-P3c 已把协调器与转换接入生产，但**符号存在或 hook 安装成功不等于所有游戏保存路径都已证明覆盖**。P3c 真机记录见 `docs/history/slot-data/p3c-20261008/verification-log.md`；整批仍 `NOT_ACCEPTED`，未覆盖项在 `docs/refactor/verification.md` §5 保持登记。
+P3c 已把协调器与转换接入生产，但**符号存在或 hook 安装成功不等于所有游戏保存路径都已证明覆盖**。P3c 真机记录见 `docs/refactor/verification/slot-data/p3c-20261008/verification-log.md`；整批仍 `NOT_ACCEPTED`，未覆盖项在 `docs/refactor/verification.md` §5 保持登记。
 
 1. original v1.3.2 与 monster v31 的 `SAVE_Save` 正常保存 happy path 已真机验证，原版返回后 sidecar 按同事务提交；monster guard 有成功写盘行为侧证据及静态 trampoline 复审。但所有自动保存/隐藏下层写盘路径未穷举，设备无入口解析/B 目标/backup 结构日志；不得据此宣称所有存档写入均被事务捕获。
 2. API enter/create 使用请求目标槽并通过 slot-data 生命周期；original v1.3.2 slot1 create 已由 API 自动 skip 剧情后 ticket `done`、EB missing/default 不继承旧槽。各变体所有新档按钮/取消选角路径仍需逐卡证据；目标槽只能由受控 Adapter 提供，不得由插件读裸地址。
@@ -241,4 +241,4 @@ P3a 已完成 Host 机制、编解码及相应测试，oracle 三项阻断复审
 
 有效最终 Debug 模块 SHA-256：`466f895b62089ca0c81918bee8ccb529c5a397c496194b3f1affc415d32ebe90`。真机仅原版 1.3.2/槽 0：同签名 LSPatch install-r 后实际加载该 SHA；正常 world 下 5 个扩展袋、33 件物品的 88 份完整 raw body 前后相同，无归一化；24 个存档目录文件与 11 个模块目录文件 SHA 不变，原配置逐字恢复、最终 main_menu。新增 WARN 与崩溃匹配均 0；既有 optional-cycle 与 P_EXT_SAVE_REVIVE 延迟安装告警不计作消失。
 
-此证据只补 VM-K4-04b、VM-K5-06i 的**受影响正常读面及同槽进档**，不是完整旧卡重验。不覆盖设备双损坏注入、原版 save、创建/导入/删除/回滚、provider 级联或 journal v2 生产联合提交。SAV-01 已修复；新机制、纯状态动作与生产协调之间的接线仍留 P3b。可提交证据与复现说明见 `docs/history/slot-data/p3a-20261007/README.md`；保护备份和完整采集缓存仅本地保留，不入源码提交。
+此证据只补 VM-K4-04b、VM-K5-06i 的**受影响正常读面及同槽进档**，不是完整旧卡重验。不覆盖设备双损坏注入、原版 save、创建/导入/删除/回滚、provider 级联或 journal v2 生产联合提交。SAV-01 已修复；新机制、纯状态动作与生产协调之间的接线仍留 P3b。可提交证据与复现说明见 `docs/refactor/verification/slot-data/p3a-20261007/README.md`；保护备份和完整采集缓存仅本地保留，不入源码提交。

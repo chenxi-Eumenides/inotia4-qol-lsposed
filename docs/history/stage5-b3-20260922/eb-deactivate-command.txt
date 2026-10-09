@@ -1,2 +1,0 @@
-{"ok":true,"ticket":7}
-HTTP 200

@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import arch_common as ac  # noqa: E402
 
-# Kotlin 侧唯一 JNI 声明文件（external fun 只在此声明，见 archive/docs/development/architecture.md）。
+# Kotlin 侧唯一 JNI 声明文件（external fun 只在此声明，见 docs/archive/development/architecture.md）。
 KOTLIN_BRIDGE = (
     ac.ROOT / "module" / "app" / "src" / "main" / "java" / "com" / "inotia4" / "qol"
     / "NativeBridge.kt"

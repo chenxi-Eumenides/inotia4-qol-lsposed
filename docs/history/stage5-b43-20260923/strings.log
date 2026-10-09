@@ -1,7 +1,0 @@
-/api/system/snapshot     full=1 kernel=0
-/api/system/game         full=2 kernel=0
-/api/system/info         full=1 kernel=0
-/api/system/game_frame   full=1 kernel=0
-system_facts             full=7 kernel=0
-[system_facts]           full=5 kernel=0
-kernel_only              full=2 kernel=3

@@ -1,9 +1,0 @@
-controller unique: 143
-api-reference unique: 143
-native frozen: 143 (unique 143)
-owner distribution: {'api.character': 42, 'api.item': 15, 'api.quest': 4, 'api.save': 7, 'api.system': 1, 'api.ui': 9, 'api.world': 5, 'autosell': 2, 'core.api': 6, 'core.ui': 5, 'custom_recipe': 1, 'extension_bag': 8, 'item_facts': 6, 'legacy.debug': 3, 'module.config': 2, 'quest': 4, 'static.data': 12, 'system_facts': 4, 'world_facts': 7}
-duplicates: 0
-controller -> native missing: 0
-native -> controller extra: 0
-api-reference -> native missing: 0
-native -> api-reference extra: 0

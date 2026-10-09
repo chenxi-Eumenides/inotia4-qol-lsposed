@@ -1,7 +1,7 @@
 # API 参考手册
 
 > **本文档 = API 规格（面向调用方）**：每个 API 的路径、用途、请求格式、返回格式与注意事项。
-> 技术实现细节（VMA/函数签名/调用链/游戏内机制）：目标架构见根目录 `ARCHITECTURE.md`；历史实现细节见 `archive/docs/development/`（已归档，仅供参考，不得作为落地依据）。
+> 技术实现细节（VMA/函数签名/调用链/游戏内机制）：目标架构见根目录 `ARCHITECTURE.md`；历史实现细节见 `docs/archive/development/`（已归档，仅供参考，不得作为落地依据）。
 > 状态：**v0.5.13**。全部域（character/world/item/quest/ui/system/op/debug/health）端点已与 controller 真实路由对齐：v0.5.13 完成端点重构（36 处路径按本文档修正、废弃端点删除、缺失端点补齐或占位），本文档为唯一权威路由来源。
 > 架构重构不改变既有路径与 HTTP 方法；已迁移的写端点按 §7.10 返回票据，操作结果由 §7.9 回取。内置插件 id 不映射为 URL 前缀。外部插件路由另限定在 `/api/ext/<插件id>/...`，不得占用本文档命名空间。
 >
@@ -116,8 +116,8 @@
 | `class_idx` | 职业索引 0-5（`[ch+0x0D]` int8，CHARCLASSBASE 记录下标；`type==2` 装饰物该字段存 type 值非职业索引） |
 | `class_name` | 职业名（service 层注入，`class_idx` → CHARCLASSBASE 联查：黑暗骑士/忍者/黑魔导/祭司/暗影猎手/狂战士；仅 `class_idx∈[0,5]` 时注入） |
 | `level` | 等级 |
-| `hp`/`max_hp`/`mp`/`max_mp` | 当前血量魔力 + 最大血量魔力。`max_hp`/`max_mp` **直读属性缓存字段 `[ch+0x9c]`/`[ch+0xa0]`**（`char_max_hp`/`char_max_mp`），不调用 `CHAR_GetAttr(0x1e/0x1f)`——其 0x1e 分支在 HP>上限时会写回 HP，离线程调用会与游戏主线程属性重算竞争钳低 HP（见 `docs/history/hp-clamp-offthread-incident.md`）；缓存值 ≤0 时回退当前 `hp`/`mp` |
-| `exp`/`exp_next` | 当前经验/升级所需经验。`exp` 直读 `[ch+0x318]`（等价 `CHAR_GetExperience` 纯读）；`exp_next` 取自**游戏线程帧缓存**（`char_next_exp_cached`，`kFramePointLogicPre` 每帧对 3 名队员缓存 `CHAR_GetNextExperience` 结果，见 `archive/docs/development/features/frame-dispatch-host.md`），未命中缓存时回退直读游戏自身惰性缓存 `[ch+0x320]` |
+| `hp`/`max_hp`/`mp`/`max_mp` | 当前血量魔力 + 最大血量魔力。`max_hp`/`max_mp` **直读属性缓存字段 `[ch+0x9c]`/`[ch+0xa0]`**（`char_max_hp`/`char_max_mp`），不调用 `CHAR_GetAttr(0x1e/0x1f)`——其 0x1e 分支在 HP>上限时会写回 HP，离线程调用会与游戏主线程属性重算竞争钳低 HP（见 `docs/archive/hp-clamp-offthread-incident.md`）；缓存值 ≤0 时回退当前 `hp`/`mp` |
+| `exp`/`exp_next` | 当前经验/升级所需经验。`exp` 直读 `[ch+0x318]`（等价 `CHAR_GetExperience` 纯读）；`exp_next` 取自**游戏线程帧缓存**（`char_next_exp_cached`，`kFramePointLogicPre` 每帧对 3 名队员缓存 `CHAR_GetNextExperience` 结果，见 `docs/archive/development/features/frame-dispatch-host.md`），未命中缓存时回退直读游戏自身惰性缓存 `[ch+0x320]` |
 | `main_stats` | 主属性列表（0-4=力量/敏捷/体力/智力/精力），每项 `{stat_name, base_stat, additional_stat}`；`base_stat`=基础属性（[ch+0x250+i] s8），`additional_stat`=总属性-基础（含分配/加成/动态）。总属性由 `char_stat_total` **直读 `C_STAT_BASE/MAIN/BONUS/SUB` 求和**（= `CHAR_GetStat` 的 Base+Main+Bonus+Sub，无 clamp），不调用 `CHAR_GetStat`（经 `CHAR_GetStatSub` 在动态派生脏位置位时会重算写回角色对象） |
 | `status_point` | 剩余能力点 |
 | `equipment` | 10 装备槽数组（每件为物品统一结构：`slot`/`name`/`category`/`item_type`/`need_level`/`rarity`/`rarity_tier`/`base`/`bonus`/`gem`/`chaos`/`enchant`，见 Inventory 段物品字段表），空槽为 `null`；位置映射见第二章 |
@@ -704,7 +704,7 @@
 
 #### 运行时逆向缺口
 
-> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机，证据见 `archive/docs/development/planning/backlog.md` 对应条目）。
+> ✅ **v0.5.1 实机 frida 验证已全部闭环**（2026-08-13 真机，证据见 `docs/archive/development/planning/backlog.md` 对应条目）。
 
 | # | 缺口 | 状态与结论 |
 |---|---|---|
@@ -1666,13 +1666,13 @@
 > - 外部文件不存在/损坏 → 使用默认值，并**立即写入外部 config.json**
 > - 每次 `POST /api/config/set` 修改立即持久化到该文件；删除外部文件即恢复出厂默认
 > - `stackLimitIncrease` 变化时通知 native 生效（切换运行时操作视图与 99/999 clamp），无需重启；sidecar 数量位解码永远按 S2 布局、与该开关无关；sidecar 读档按绝对 `0..999` 校验，不改写、不因当前配置截断已有数量；可堆叠 payload 仅在与 descriptor 不一致时同步
-> - **数量编码 S2（当前实现，无版本标识）**：sidecar `extensionbags.items` 状态 JSON 不携带编码版本字段；数量位只有 S2 布局（高位段 `a`=bits22-24、低位段 `b`=bits25-31，`count=128a+b`，业务上限 999）一种，持久化与 descriptor 读写统一 `s2_read_count`/`s2_write_count`，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`（R-47 决策 b）；历史 sidecar 若携带 `encodingVersion` 字段，解析时宽容忽略（不报错、不迁移）；无 S1→S2 迁移代码，原版袋 `+0x10` 无迁移扫描；非可堆叠类别（宝石选项/袋容量/装备 marker）不参与数量位段改写。`/api/item/*` 的 `count` 字段为当前模式的运行时视图：启用态 S2 全量 `0..999`、关闭态低 7 位 `b`（`count mod 128`，`a` 保留、重开恢复完整值）；API 结构不变。详见 `archive/docs/development/features/extension-bag/module-save-store.md` §6.4 与规则册 R-45..R-49
+> - **数量编码 S2（当前实现，无版本标识）**：sidecar `extensionbags.items` 状态 JSON 不携带编码版本字段；数量位只有 S2 布局（高位段 `a`=bits22-24、低位段 `b`=bits25-31，`count=128a+b`，业务上限 999）一种，持久化与 descriptor 读写统一 `s2_read_count`/`s2_write_count`，运行时操作面统一经模式感知层 `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`（R-47 决策 b）；历史 sidecar 若携带 `encodingVersion` 字段，解析时宽容忽略（不报错、不迁移）；无 S1→S2 迁移代码，原版袋 `+0x10` 无迁移扫描；非可堆叠类别（宝石选项/袋容量/装备 marker）不参与数量位段改写。`/api/item/*` 的 `count` 字段为当前模式的运行时视图：启用态 S2 全量 `0..999`、关闭态低 7 位 `b`（`count mod 128`，`a` 保留、重开恢复完整值）；API 结构不变。详见 `docs/archive/development/features/extension-bag/module-save-store.md` §6.4 与规则册 R-45..R-49
 > - `moveMergeEnabled` 控制背包内拖拽同类可堆叠物品时的自动合并，默认 `false`；变化即时安装或还原 native GOT hook，无需重启
 > - `autoSellEnabled` 自动出售全局开关，默认 `false`；变化即通知 native（进档后由存档内总开关共同决定扫描任务）
 > - `apiEnabled` API 全局开关，默认 `true`；`false` 时不启动 HTTP 服务与 native 缓存预取线程（`nativeSetApiEnabled(false)` → `frame_cache_stop()`），`GET/POST /api/config/*` 随之不可达。**`apiEnabled=false` 不影响 feature 初始化**——`ApiServer.bootstrap` 已把 feature 初始化（设置页/扩展背包/存档/自动出售等）与 HTTP 启动拆开，关闭仅停 HTTP 与预取线程。关闭后唯一恢复通道为**游戏内设置页第一项「API服务」开关**（走 `ModuleConfigUiBridge` JNI，不依赖 HTTP；false→true 经 `ApiServer.startFromConfig` 重启 HTTP）；由 HTTP 置 `false` 时延迟约 500ms 停止以先送回本响应
-> - `debugLogEnabled` 统一日志 debug 级别运行时开关，默认 `false`；变化即时经 `nativeQolLogSetDebugEnabled` 下发 native 门控，无需重启。info/warn/error 不受该开关影响（常开）。接入游戏内**设置页第 8 行「调试日志」**；日志格式与规则见 `archive/docs/development/logging.md`
-> - `simpleModeEnabled` 简单模式，默认 `false`；开启后怪物最大生命减半、玩家侧打敌人的伤害 ×1.5、玩家侧受到的伤害 ×0.5。变化即时经 `nativeSetSimpleModeEnabled` 下发 native（热路径只读一个 C++ 原子量），无需重启。接入游戏内**设置页「简单模式」**；落点、阵营判定与真机验收数据见 `archive/docs/development/features/simple-mode.md`
-> - `pushAllEnabled` 推怪（推动增强）全局开关，默认 `false`；开启后 patch 游戏 `CHAR_Move` 推动分支的两个 blocker 资格闸门（`CHAR_Move+0x168` 的 `bl CHAR_GetPartyIndex` 重定向到模块 wrapper → 怪物与召唤物可推；`CHAR_Move+0x180` 的站立检查 `cbz` 置 NOP → 战斗/行动中的单位也可推），使主控/队友移动可推开**怪物/队友/召唤物**，场景设施（NPC/商人）保持不可推。变化即时经 `nativeSetPushAllEnabled` 下发 native（安装/还原均做运行前指令字校验，fail-closed；开启时第二条闸门失败会回滚第一条），无需重启。接入游戏内**设置页第 2 页「推怪」**；闸门落点、回滚语义与验收状态见 `archive/docs/development/features/push-all.md`
+> - `debugLogEnabled` 统一日志 debug 级别运行时开关，默认 `false`；变化即时经 `nativeQolLogSetDebugEnabled` 下发 native 门控，无需重启。info/warn/error 不受该开关影响（常开）。接入游戏内**设置页第 8 行「调试日志」**；日志格式与规则见 `docs/archive/development/logging.md`
+> - `simpleModeEnabled` 简单模式，默认 `false`；开启后怪物最大生命减半、玩家侧打敌人的伤害 ×1.5、玩家侧受到的伤害 ×0.5。变化即时经 `nativeSetSimpleModeEnabled` 下发 native（热路径只读一个 C++ 原子量），无需重启。接入游戏内**设置页「简单模式」**；落点、阵营判定与真机验收数据见 `docs/archive/development/features/simple-mode.md`
+> - `pushAllEnabled` 推怪（推动增强）全局开关，默认 `false`；开启后 patch 游戏 `CHAR_Move` 推动分支的两个 blocker 资格闸门（`CHAR_Move+0x168` 的 `bl CHAR_GetPartyIndex` 重定向到模块 wrapper → 怪物与召唤物可推；`CHAR_Move+0x180` 的站立检查 `cbz` 置 NOP → 战斗/行动中的单位也可推），使主控/队友移动可推开**怪物/队友/召唤物**，场景设施（NPC/商人）保持不可推。变化即时经 `nativeSetPushAllEnabled` 下发 native（安装/还原均做运行前指令字校验，fail-closed；开启时第二条闸门失败会回滚第一条），无需重启。接入游戏内**设置页第 2 页「推怪」**；闸门落点、回滚语义与验收状态见 `docs/archive/development/features/push-all.md`
 
 #### 读取配置
 

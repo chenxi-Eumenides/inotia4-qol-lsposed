@@ -1,2 +1,0 @@
-{"enabled":false,"rarity":1,"enhance":1,"socket":1,"gemTier":0,"gemRange":0,"special":[],"sold":0,"failed":0,"lastScanFrame":-1,"slot":0,"loadedSlot":0,"persisted":false,"hostInstalled":true}
-HTTP 200

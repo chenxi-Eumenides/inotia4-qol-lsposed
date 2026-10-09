@@ -20,7 +20,7 @@
 ## 阶段 0：准备
 
 1. 必读：`ARCHITECTURE.md`（§2.2 依赖矩阵、§5 领域/能力、§7 HTTP 契约）、`docs/reference/api-reference.md` 相关节、`docs/refactor/verification.md` 该插件的 VM 卡、`docs/guides/build-and-deploy.md` §3.1。
-2. 建 `.tmp/<plugin>-audit/` 任务目录（证据、脚本、runbook 都放这里，收口前迁 `docs/history/`）。
+2. 建立任务隔离目录保存证据、脚本和 runbook；收口后将审计记录迁入 `docs/refactor/audits/`，验证证据迁入 `docs/refactor/verification/`。目录约定见代理规则。
 3. 设备与模块形态：`logcat -d -s Inotia4Qol:V | head` 取 `module identity` 行的 sha256，与 `output/` 最新 debug APK 比对。**集成包形态下单独 install 模块 APK 不生效**，需 `scripts/patch-apk.sh <模块apk>` 重打（build-and-deploy 附录）。
 4. 确认设备无遗留弹窗/死亡态（`/api/ui/screen` = world 或 main_menu）。
 
@@ -100,7 +100,7 @@
 ## 阶段 7：收口清单（ACCEPTED 前逐项核对）
 
 - [ ] 全部 commit 在链（host 批 / 迁移批 / 事故修复批）。
-- [ ] **验收登记文档**：`docs/history/plugin-audit/<plugin>-<YYYYMMDD>/verification-log.md`，章节顺序固定＝ §1 本批登记问题（指针到 issues.md）→ **§2 无法验证项** → §3 已完成验收登记（表：验收项|结果|证据）。证据副本入同目录 `evidence/`（长期证据必须在 docs/history，不得依赖 `.tmp/`）。
+- [ ] **验收登记文档**：`docs/refactor/audits/<plugin>-<YYYYMMDD>/verification-log.md`，章节顺序固定＝ §1 本批登记问题（指针到 issues.md）→ **§2 无法验证项** → §3 已完成验收登记（表：验收项|结果|证据）。证据副本入同目录 `evidence/`；当前验收证据不得写入 `docs/archive/`。
 - [ ] **无法验证项**：环境/存档缺失等无法验证的项，经**用户确认后**登记于验收登记文档 §2（倒数第二部分，已完成之前、问题之后），并同步 `issues.md` §10「无法验证项」；此后**不再主动验收**。用户确认"已完成"的项按用户口径登记，但如实注明确认覆盖范围（哪些是专项实测、哪些是总体确认）。
 - [ ] `verification.md`：受影响 VM 卡行末追加一行「插件审计批 <日期>」后注，指向验收登记文档；新欠账登记 §5。
 - [ ] `issues.md`：新发现缺陷全部入账（含归属），已修条目在文末附录；§10 无法验证项同步。

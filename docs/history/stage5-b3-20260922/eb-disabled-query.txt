@@ -1,2 +1,0 @@
-{"enabled":false,"injected":false,"extension_tab_button":false,"inventory_frame_active":false,"recovery_action":"none","state":{}}
-HTTP 200

@@ -1,18 +1,8 @@
 # 架构设计书：Loader、Game Adapter 与插件生态
 
-> **目标架构唯一权威：本文。版本：v0.4.1。**
+> **目标架构唯一权威：本文。版本：v0.4.2。**
 >
-> 本文规定最终职责、依赖方向、边界和不可破坏的兼容红线；不把当前代码状态写成目标许可。重构序列已收口，插件级工作以本文 + `docs/refactor/verification.md` 为准。重构期过程材料（原 `current-optimization-review.md`、`ledger.md`、`map.md`）已归档 `docs/history/refactor-closure/`，**仅供参考，不得作为落地依据**；`docs/refactor/verification.md`、`baseline.md`、`api-route-map.md` 只记录验证证据、生成基线与路由核对结果，不得定义目标架构。
-
-## 版本记录
-
-| 版本 | 摘要 |
-|---|---|
-| v0.1 | 建立分层、资源仲裁、线程和生命周期原则。 |
-| v0.3 | 收敛插件边界、Host SDK、Game Host、能力契约、快照、命令和 Kotlin HTTP 传输边界。 |
-| v0.4.0 | 明确 Loader 零业务副作用；Game Adapter/Game Host 只做低层受控适配；领域语义由可分类的官方 provider 插件提供；功能插件可直接声明 hook/patch；取消固定 core 插件数量和插件总数约束。 |
-| v0.4.1 | 明确 provider/功能插件可并行开发、Loader 机制按真实消费者需求窄化补充；定义“内核能力完整”边界和两级测试插件 fixture，测试插件不进入产品与 release。 |
-| v0.4.2 | 澄清 EntryHook 可声明 ELF 导出符号目标及其解析、安装前预检和失败归属；不扩展其他资源目标或外部插件轨契约。 |
+> 本文定义系统目标架构、职责边界、依赖方向及兼容红线，是目标架构的唯一权威。HTTP 契约见 `docs/reference/api-reference.md`；当前源码结构统计见 `docs/refactor/map.md`；验证矩阵与活跃验收状态见 `docs/refactor/verification.md`。
 
 ## 1. 目标与生态模型
 
@@ -69,17 +59,15 @@ Loader（机制运行时）
 | 内容 | 唯一依据 |
 |---|---|
 | 最终目标架构、职责和依赖方向 | 根目录 `ARCHITECTURE.md`（本文） |
-| 当前差距、改进顺序和现状判断（重构期记录，已归档） | `docs/history/refactor-closure/current-optimization-review.md` |
 | HTTP 路径、方法、参数、成功响应和状态码 | `docs/reference/api-reference.md` |
-| 迁移台账（重构期记录，已归档） | `docs/history/refactor-closure/ledger.md` |
 | 验证矩阵、验收卡和活跃债务 | `docs/refactor/verification.md` |
-| 生成的基线、路由映射（目录映射已归档） | `docs/refactor/baseline.md`、`docs/refactor/api-route-map.md`、`docs/history/refactor-closure/map.md` |
+| 当前生成的结构地图、基线与路由映射 | `docs/refactor/map.md`、`docs/refactor/baseline.md`、`docs/refactor/api-route-map.md` |
 
 上述材料不能反向放宽本文目标；脚本通过只表示当前检查结果，不表示目标边界已经满足。普通历史和归档材料不参与目标解释。
 
 ### 2.2 不可破坏的项目红线
 
-- 既有 API 路径、HTTP 方法保持不变；query 路由的成功响应保持冻结。带游戏内存写入的写路由按 §7.1 的票据契约迁移：POST 立即返回 `{"ok":true,"ticket":N}`，原操作结果在票据终态尽力保留、可回取；受影响路由以 `docs/reference/api-reference.md` 的显式枚举为准，属刻意的调用方契约变更，不得静默替换。
+- 既有 API 路径、HTTP 方法保持不变；query 路由的成功响应保持冻结。带游戏内存写入的写路由按 §7.1 的票据契约执行：POST 立即返回 `{"ok":true,"ticket":N}`，原操作结果在票据终态尽力保留、可回取；受影响路由以 `docs/reference/api-reference.md` 的显式枚举为准，属刻意的调用方契约变更，不得静默替换。
 - 既有 `NativeBridge` external 方法名与签名保持冻结；新增接口必须另行设计兼容面，不借迁移删除或改写既有签名。
 - `game_symbols.h` 是内置适配所用游戏版本常量、VMA、偏移和 ABI 签名的唯一来源；域插件不得持有裸地址或 include 该头。插件可为 `EntryHook` 声明纯导出符号名（`ResourceClaim.symbol = "elf-export:<ELF导出名>"`）作为目标身份；它不是版本耦合裸地址，也不取代 `game_symbols.h` 对内置 VMA/ABI 常量的权威性。
 - 游戏写入和有副作用调用只能在游戏主线程的 owner 命令处理器中执行；HTTP、初始化和后台线程不直接调用游戏函数，也不阻塞等待游戏结果。
@@ -183,7 +171,7 @@ provider → Game Host 低层适配
 Game Host → Game Adapter → 游戏
 ```
 
-当前源码中若存在过宽的 `QolGameHost` 或跨域 `Extra` 面，它属于当前差距，必须按当前差距文档收窄，不能被本文解释为目标许可。
+Game Host 不提供跨域聚合的 `QolGameHost` 或 `Extra` 面；高阶领域语义由对应 provider 或功能插件拥有，并通过窄领域接口使用低层受控适配。
 
 ## 5. 插件分类与领域归属
 
@@ -213,7 +201,7 @@ Game Host → Game Adapter → 游戏
 
 - 只读事实通过 capability 或快照提供，接口不暴露游戏内存指针；
 - 有副作用的动作由 provider/实际 owner 通过命令端口在主线程执行；
-- provider 不把呈现决策、HTTP JSON 形状或全部领域聚合塞进语义接口；唯一例外：owner 自组装、固定 kind、版本化 buffer 的只读状态 JSON 投影属所有者契约面，跨域消费者仅可筛选与重组、不得按他域字段重拼装（ADR 0002 裁决）；
+- provider 不把呈现决策、HTTP JSON 形状或全部领域聚合塞进语义接口；owner 自组装、固定 kind、版本化 buffer 的只读状态 JSON 投影属于所有者契约面；跨域消费者仅可筛选与重组，不得按他域字段重拼装；
 - provider 停用只级联真实依赖者，不能让整个模块因一个领域失效。
 
 provider 的数量和命名随领域边界演进，不受固定插件数量或固定 `core.*` 数量约束。
@@ -297,7 +285,7 @@ HTTP 传输边界固定为：
 - native owner 提供按领域定义的 typed snapshot、typed result 和 typed command；Kotlin bridge 调用对应的既有或新增窄入口，再保持既有 JSON 响应兼容；
 - query 只读取快照、不可变配置和登记数据；command 只解析为 owner 命令并立即返回票据（`{"ok":true,"ticket":N}`），操作在主线程执行、结果写回票据；HTTP 线程不等待主线程。
 
-既有 URL、HTTP 方法、`NativeBridge` external 方法/签名冻结。query 路由与未迁移写路由的成功响应保持冻结；已迁移的带游戏写入的写路由遵循上条票据契约，其成功响应变更必须在 `docs/reference/api-reference.md` 逐条公布（含票据终态的结果回取方式、保留窗口与超限语义）。路由 owner 可以迁移。诊断端点也不能借机加入游戏语义聚合。**调试端点例外**：`/api/debug/*` 属开发调试用途，不构成对外调用方契约，其响应可随内部机制调整（如票据化），但须在 api-reference 中标注为调试端点；release 隔离与 smoke 可按既有口径对其单独处理。
+既有 URL、HTTP 方法、`NativeBridge` external 方法/签名冻结。query 路由与同步响应写路由的成功响应保持冻结；使用票据契约的带游戏写入路由，其响应行为必须在 `docs/reference/api-reference.md` 逐条公布（含票据终态的结果回取方式、保留窗口与超限语义）。路由 owner 由领域职责决定。诊断端点也不能加入游戏语义聚合。**调试端点例外**：`/api/debug/*` 属开发调试用途，不构成对外调用方契约，其响应可随内部机制调整（如票据化），但须在 api-reference 中标注为调试端点；release 隔离与 smoke 可按既有口径对其单独处理。
 
 ### 7.2 `core.custom_ui`、`core.ui_state` 与 `core.settings`
 
@@ -328,7 +316,7 @@ provider 在描述符中静态声明 `provides`，消费者声明 `requires`/`op
 
 只读 capability 不能直接修改游戏；副作用统一进入 owner command。命令使用固定宽度 POD payload、票据和明确错误；空指针表示不可用，不能用默认值伪装未就绪。
 
-票据除执行状态外，在终态可回取 owner 命令产生的操作结果（即该 API 迁移前的成功/失败结果 JSON）。结果保留是**明确尽力语义**：单结果上限与总字节预算有界、超出按最旧优先淘汰（保留状态、淘汰结果），超限以显式字段标记省略；票据状态区分 `unknown`（不存在）、`expired`（已淘汰）与 `failed`（命令执行失败）。具体窗口、上限与回取端点（`GET /api/system/tickets/{id}`）在 `docs/reference/api-reference.md` 公布。
+票据除执行状态外，在终态可回取 owner 命令产生的原操作结果 JSON。结果保留是**明确尽力语义**：单结果上限与总字节预算有界、超出按最旧优先淘汰（保留状态、淘汰结果），超限以显式字段标记省略；票据状态区分 `unknown`（不存在）、`expired`（已淘汰）与 `failed`（命令执行失败）。具体窗口、上限与回取端点（`GET /api/system/tickets/{id}`）在 `docs/reference/api-reference.md` 公布。
 
 结果处理器当帧无法确定结果时（如转场类写需等游戏世界态提交）可请求**有界延迟结算**：票据保持 `pending`，帧排空于后续帧重新执行该命令，直到自行结算或达到宿主上限；超限以显式失败结算，不得以默认值或提前 `done` 伪装成功。延迟窗口内的票据仍保持单飞与可取消语义。
 
@@ -352,7 +340,7 @@ provider 在描述符中静态声明 `provides`，消费者声明 `requires`/`op
 - 变体识别、符号解析、原字校验和目标能力在资源安装前完成；所有 required 且 fail-closed 的入口 hook 必须在插件 `install()`/hook 写入前完成目标预检，目标不匹配的插件进入 `unsupported`，不得半安装。Loader 负责预检校验、资源仲裁及失败回滚，且在机制运行时重新预检；机制运行失败进入 `failed`。预检仅证明目标存在且满足低层地址约束，不证明 ABI 或行为兼容。
 - Game Adapter 只返回低层受控结果；业务层把它转换为自己的 provider snapshot/result/command，不把游戏结构指针传播到 HTTP 或跨线程。
 
-该符号声明只定义内置插件资源目标边界，不冻结第三方外部轨；外部轨的容器、信任、ABI 与加载契约仍按 §9 留待另行设计。此澄清不改变 §10.2–§10.3 的测试与验收条件，也不新增当前重构阶段的职责或完成条件。
+该符号声明仅定义内置插件资源目标边界，不冻结第三方外部轨；外部轨的容器、信任、ABI 与加载契约仍按 §9 另行设计。
 
 ### 10.2 测试插件与 fixture
 
