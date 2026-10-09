@@ -141,10 +141,11 @@
 
 ### autosell P4 / VM-44 后注（2026-10-08）
 
-**P4 实现已完成，VM-44 部分通过但整体 `NOT_ACCEPTED`。** 当前提交 `63912a4e`、`07779c4d`、`6db1c866`、`3f018c7c` 保持 `autosell` section v2，SessionBound 读 + Immediate 写；Host 120/120、专项 192/192、arch 新增违规0、routes146、Debug build通过。完整范围见 `docs/history/slot-data/p4-20261008/verification-log.md`。
+**P4 persistence 实现已完成，ITM-16 sale 修复仍在当前工作区未提交；VM-44/EB UI 验收整体 `NOT_ACCEPTED`。** P4 提交 `63912a4e`、`07779c4d`、`6db1c866`、`3f018c7c` 保持 `autosell` section v2，SessionBound 读 + Immediate 写；Host 120/120、专项 192/192。ITM-16 当前工作区另有 EB sale callback/neutral direct API 分流与内部袋索引修复（Host 124/124、arch新增0、routes146、Debug build通过），待扩展背包专项审阅后再提交/补验。完整范围见 `docs/history/slot-data/p4-20261008/verification-log.md`。
 
 - monster v31 当前模块 SHA `e4578153818c…` 上，slot0 rules Immediate 写后 sidecar 改变而 dat 不变；force-stop/relaunch 后 slot0 配置恢复，slot2 默认配置与 sidecar 不变，回 slot0 自定义配置仍恢复。全局 autosell 关闭时库存不变；开启后 scan 启动，关闭后 task removed。
-- 实际 scan 有 `sold=3,failed=16`；失败均观察为 EB bag6/7 `RemoveFailed`。这是 VM-44 的真实未闭合行为，不能据 persistence 子项通过写整卡 PASS；清理 rules 并等待 sidecar hash 改变后重启，确认 disabled rules 与测试前原版 dat 库存恢复。
+- ITM-16 mapping-fixed build 的真机子项：direct API bag6 slot2 price2229、bag7 slot0 price11 均 done，保存/重进后EB槽为空；原版 bag0对照 price14 done；autosell特殊背包规则命中 bag6 slot9，诊断 `decision=match`、`sell_status=ok`，`sold+1/failed+0`，保存/重进后槽为空。autosell config immediate per-slot 写、进程重启恢复、slot2隔离也通过。
+- **EB UI 卡中止/延期**：用户报告无法进入扩展袋；进入商店页时 SIGSEGV。tombstone 符号化栈为 `LINKEDLISTITEM_getData`→`UIEquip_DrawInvenBag`→EB `store_draw_inven_bag_group_wrapper`→`Scene_Draw_POPUP_SC_STORE`，登记 `EB-01`。用户明确要求等扩展背包专项审阅后整体检查修复；VM-17/18及所有EB UI真机测试停止，P4/VM-44整体维持 `NOT_ACCEPTED`，P5不启动。
 - 仍缺真实 Provider request 并发/注销durable drain、无session pending覆盖已有section直接测试、load错误和跨槽竞态设备证据；不宣称 fake callback 测试证明真实 Provider 并发。
 
 > **VM-D1 状态**：D1 收尾真机卡，本轮未执行设备操作，结论待填 `PASS`/`NOT_ACCEPTED`；
