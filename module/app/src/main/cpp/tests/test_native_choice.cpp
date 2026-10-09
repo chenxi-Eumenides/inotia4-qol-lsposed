@@ -6,8 +6,10 @@
 #include "plugins/core.custom_ui/plugin.h"
 
 #include <cstdint>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <type_traits>
 
 #include "contracts/ui_choice.h"
 #include "contracts/game_ports/choice_port.h"
@@ -21,6 +23,7 @@ using qol::contracts::ResourceRequirement;
 using qol::contracts::UiChoiceApi;
 using qol::contracts::UiChoiceSpec;
 using qol::contracts::QolChoicePort;
+using qol::contracts::kUiChoiceVersionMinor;
 using qol::features::core_ui::native_choice_detail::address_in_range;
 using qol::features::core_ui::native_choice_detail::can_open;
 using qol::features::core_ui::native_choice_detail::is_close_index;
@@ -36,11 +39,63 @@ int g_close_calls = 0;
 int32_t g_state_id = 1;
 char g_written_title[64]{};
 const char* g_title_pointer = nullptr;
+bool g_state_api_available = true;
+int g_dialog_publish_calls = 0;
+int g_dialog_clear_calls = 0;
+int g_select_calls = 0;
+int32_t g_selected_index = 0;
+uint64_t g_dialog_generation = 0;
+char g_dialog_type[128]{};
+char g_dialog_title[64]{};
+char g_dialog_labels[6][64]{};
+uint32_t g_dialog_option_count = 0;
 
 QolChoicePort g_choice_port{};
+qol::contracts::QolHostSdk g_sdk{};
+
+QolResult state_publish_panels(const qol::contracts::UiCustomPanelsSnapshot*) {
+    return qol::contracts::ok();
+}
+QolResult state_publish_dialog(const qol::contracts::UiCustomDialogSnapshot* snapshot) {
+    ++g_dialog_publish_calls;
+    g_dialog_generation = snapshot->generation;
+    std::snprintf(g_dialog_type, sizeof(g_dialog_type), "%s", snapshot->type_id);
+    std::snprintf(g_dialog_title, sizeof(g_dialog_title), "%s",
+                  snapshot->title == nullptr ? "" : snapshot->title);
+    g_dialog_option_count = snapshot->option_count;
+    for (uint32_t i = 0; i < snapshot->option_count; ++i) {
+        std::snprintf(g_dialog_labels[i], sizeof(g_dialog_labels[i]), "%s",
+                      snapshot->option_labels[i]);
+    }
+    return qol::contracts::ok();
+}
+QolResult state_clear_dialog(uint64_t generation, uint64_t) {
+    ++g_dialog_clear_calls;
+    g_dialog_generation = generation;
+    return qol::contracts::ok();
+}
+const qol::contracts::UiStateApi kUiStateApi{
+    &state_publish_panels, &state_publish_dialog, &state_clear_dialog};
+
+QolResult capability_require(const char* id, QolVersionRange, const void** out_iface) {
+    if (id == nullptr || out_iface == nullptr || !g_state_api_available ||
+        std::strcmp(id, qol::contracts::kUiStateCapabilityId) != 0) {
+        return qol::contracts::error(kQolErrNotFound, "not found", 9);
+    }
+    *out_iface = &kUiStateApi;
+    return qol::contracts::ok();
+}
 
 QolResult choice_state_id(int32_t* out_state_id) {
     *out_state_id = g_state_id;
+    return qol::contracts::ok();
+}
+QolResult choice_selected_index(int32_t* out_index) {
+    *out_index = g_selected_index;
+    return qol::contracts::ok();
+}
+QolResult choice_text_owns(const char* const*, uint32_t, int32_t* out_owned) {
+    *out_owned = 1;
     return qol::contracts::ok();
 }
 
@@ -71,14 +126,14 @@ QolResult choice_close_popup() {
 
 bool setup_choice_feature() {
     static qol::contracts::QolUiAdapter ui{};
-    static qol::contracts::QolHostSdk sdk{};
     static const void* ports[] = {&g_choice_port};
     ui.size = sizeof(ui);
     ui.major = qol::contracts::kUiContractMajor;
     ui.minor = qol::contracts::kUiAdapterMinor;
-    sdk.ui = &ui;
+    g_sdk.ui = &ui;
+    g_sdk.capabilities.require = &capability_require;
     qol::contracts::PluginContext context{};
-    context.sdk = &sdk;
+    context.sdk = &g_sdk;
     context.ports = ports;
     context.port_count = 1;
     const bool installed = qol::features::core_ui::plugin_descriptor().install(context) == 0;
@@ -89,6 +144,8 @@ bool setup_choice_feature() {
 void reset_fake_choice() {
     g_choice_port = {};
     g_choice_port.read.state_id = &choice_state_id;
+    g_choice_port.read.selected_index = &choice_selected_index;
+    g_choice_port.read.text_owns = &choice_text_owns;
     g_choice_port.write.write_items = &choice_write_items;
     g_choice_port.write.write_title = &choice_write_title;
     g_choice_port.write.write_focus = &choice_write_focus;
@@ -101,6 +158,16 @@ void reset_fake_choice() {
     g_close_calls = 0;
     g_written_title[0] = '\0';
     g_title_pointer = nullptr;
+    g_state_api_available = true;
+    g_dialog_publish_calls = 0;
+    g_dialog_clear_calls = 0;
+    g_select_calls = 0;
+    g_selected_index = 0;
+    g_dialog_generation = 0;
+    g_dialog_type[0] = '\0';
+    g_dialog_title[0] = '\0';
+    g_dialog_option_count = 0;
+    for (auto& label : g_dialog_labels) label[0] = '\0';
 }
 
 #define CHECK(condition) do { \
@@ -108,12 +175,25 @@ void reset_fake_choice() {
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #condition); } \
 } while (0)
 
-void on_select(int, void*) {}
+void on_select(int, void*) { ++g_select_calls; }
 
 UiChoiceSpec valid_spec_of(int count = 2, int close_index = 1) {
     static const char* const items[] = {"one", "two", "three", "four", "five", "six"};
-    return {items, count, "title", close_index, &on_select, nullptr};
+    return {items, count, "title", close_index, &on_select, nullptr, "test.choice"};
 }
+
+static_assert(offsetof(UiChoiceSpec, dialog_type_id) ==
+                  offsetof(UiChoiceSpec, user) + sizeof(UiChoiceSpec::user),
+              "dialog_type_id must be appended after the frozen UiChoiceSpec prefix");
+static_assert(offsetof(UiChoiceSpec, items) == 0 &&
+                  offsetof(UiChoiceSpec, items) < offsetof(UiChoiceSpec, count) &&
+                  offsetof(UiChoiceSpec, count) < offsetof(UiChoiceSpec, title) &&
+                  offsetof(UiChoiceSpec, title) < offsetof(UiChoiceSpec, close_index) &&
+                  offsetof(UiChoiceSpec, close_index) < offsetof(UiChoiceSpec, on_select) &&
+                  offsetof(UiChoiceSpec, on_select) < offsetof(UiChoiceSpec, user),
+              "v1.0 UiChoiceSpec field prefix must retain order");
+static_assert(std::is_standard_layout<UiChoiceSpec>::value &&
+                  std::is_trivially_copyable<UiChoiceSpec>::value);
 
 void test_spec_bounds() {
     CHECK(!valid_spec(valid_spec_of(0)));
@@ -121,6 +201,12 @@ void test_spec_bounds() {
     CHECK(valid_spec(valid_spec_of(6, 5)));
     CHECK(!valid_spec(valid_spec_of(7)));
     CHECK(!valid_spec(valid_spec_of(2, 2)));
+    UiChoiceSpec missing_id = valid_spec_of();
+    missing_id.dialog_type_id = nullptr;
+    CHECK(!qol::features::core_ui::native_choice_open(missing_id));
+    UiChoiceSpec unstable_id = valid_spec_of();
+    unstable_id.dialog_type_id = "world teleport";
+    CHECK(!qol::features::core_ui::native_choice_open(unstable_id));
 }
 
 void test_repeated_open() {
@@ -150,11 +236,15 @@ void test_plugin_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::core_ui::plugin_descriptor();
     CHECK(std::strcmp(d.id, "core.custom_ui") == 0);
-    CHECK(d.requires_count == 0 && d.optional_count == 0);  // 工具插件无 requires
+    CHECK(d.requires_count == 0 && d.optional_count == 1);  // ui.state 为单向可选依赖
+    CHECK(std::strcmp(d.optional_requires[0].id, qol::contracts::kUiStateCapabilityId) == 0);
+    CHECK(d.optional_requires[0].range.major == qol::contracts::kUiStateVersionMajor &&
+          d.optional_requires[0].range.min_minor == qol::contracts::kUiStateVersionMinor);
     CHECK(d.provides_count == 4);  // ui_components + ui_panels + ui_choice + text_layer
     CHECK(std::strcmp(d.provides[2].id, qol::contracts::kUiChoiceCapabilityId) == 0);
     CHECK(d.provides[2].version.major == qol::contracts::kUiChoiceVersionMajor);
     CHECK(d.provides[2].version.minor == qol::contracts::kUiChoiceVersionMinor);
+    CHECK(kUiChoiceVersionMinor == 1);
     CHECK(d.provides[2].iface != nullptr);
     CHECK(d.port_count == 1 && d.ports != nullptr);  // 仅 QOL_PORT_CHOICE
     CHECK(d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHOICE);
@@ -198,16 +288,46 @@ void test_synchronous_push_initialization() {
     CHECK(g_title_pointer != spec.title);  // 模块缓冲独立于调用方标题。
     CHECK(std::strcmp(g_title_pointer, "title") == 0);
     CHECK(qol::features::core_ui::native_choice_active());
+    CHECK(g_dialog_publish_calls == 1 && g_dialog_option_count == 2);
+    CHECK(std::strcmp(g_dialog_type, "test.choice") == 0);
+    CHECK(std::strcmp(g_dialog_title, "title") == 0);
+    CHECK(std::strcmp(g_dialog_labels[0], "one") == 0 &&
+          std::strcmp(g_dialog_labels[1], "two") == 0);
     CHECK(!qol::features::core_ui::native_choice_open(spec));
     qol::features::core_ui::native_choice_close();
     CHECK(!qol::features::core_ui::native_choice_active());
     CHECK(g_close_calls == 1);
+    CHECK(g_dialog_clear_calls == 1 && g_dialog_generation != 0);
+}
+
+void test_optional_registry_failure_keeps_native_choice() {
+    g_state_api_available = false;
+    const int published_before = g_dialog_publish_calls;
+    CHECK(qol::features::core_ui::native_choice_open(valid_spec_of()));
+    CHECK(g_dialog_publish_calls == published_before);
+    CHECK(qol::features::core_ui::native_choice_active());
+    qol::features::core_ui::native_choice_close();
+    g_state_api_available = true;
+}
+
+void test_select_clears_matching_dialog() {
+    const int clears_before = g_dialog_clear_calls;
+    CHECK(qol::features::core_ui::native_choice_open(valid_spec_of()));
+    const uint64_t generation = g_dialog_generation;
+    CHECK(generation != 0);
+    qol::features::core_ui::choice_button_execute(nullptr);
+    CHECK(g_select_calls == 1);
+    CHECK(!qol::features::core_ui::native_choice_active());
+    CHECK(g_dialog_clear_calls == clears_before + 1);
+    CHECK(g_dialog_generation == generation);
 }
 
 void test_push_failure_rolls_back() {
+    const int publish_count_before = g_dialog_publish_calls;
     g_push_succeeds = false;
     CHECK(!qol::features::core_ui::native_choice_open(valid_spec_of()));
     CHECK(!qol::features::core_ui::native_choice_active());
+    CHECK(g_dialog_publish_calls == publish_count_before);
     g_push_succeeds = true;
     CHECK(qol::features::core_ui::native_choice_open(valid_spec_of()));
     CHECK(qol::features::core_ui::native_choice_active());
@@ -221,8 +341,10 @@ void test_close_and_reopen_gate() {
     CHECK(!qol::features::core_ui::native_choice_active());
     CHECK(qol::features::core_ui::native_choice_open(spec));
     CHECK(qol::features::core_ui::native_choice_active());
+    const int clears_before_deactivate = g_dialog_clear_calls;
     qol::features::core_ui::native_choice_set_installed(false);
     CHECK(!qol::features::core_ui::native_choice_active());
+    CHECK(g_dialog_clear_calls == clears_before_deactivate + 1);
     CHECK(!qol::features::core_ui::native_choice_open(spec));
     qol::features::core_ui::native_choice_set_installed(true);
 }
@@ -248,6 +370,8 @@ int main() {
     test_address_ownership_range();
     test_plugin_manifest();
     test_synchronous_push_initialization();
+    test_optional_registry_failure_keeps_native_choice();
+    test_select_clears_matching_dialog();
     test_push_failure_rolls_back();
     test_close_and_reopen_gate();
     test_close_during_prepare_releases_open_gate();

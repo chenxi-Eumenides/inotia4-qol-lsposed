@@ -86,13 +86,9 @@ class InfoApiServiceCore : InfoApiService {
 
     override fun ui(): String = gamestateJson()
 
-    override fun uiScreen(): String = JsonUtil.wrap("screen", screenName())
+    override fun uiScreen(): String = InfoSystemQueries.uiScreen()
 
-    override fun uiPanel(): String {
-        val s = screenName()
-        val panel = if (s in PANELS) s else null
-        return JsonUtil.wrap("panel", panel)
-    }
+    override fun uiPanel(): String = InfoSystemQueries.uiPanel()
 
     override fun uiDialog(): String {
         // v0.5.42：native 完整检测（popup/story/npc/wipeout/npc_quest/面板态），与 gamestate 的
@@ -111,7 +107,7 @@ class InfoApiServiceCore : InfoApiService {
                 )
                 .toString()
         }
-        val json = NativeBridge.nativeDialogContent()
+        val json = InfoSystemQueries.uiDialog()
         if (isNativeError(json)) return json
         return try {
             val obj = JSONObject(json)
@@ -224,19 +220,5 @@ class InfoApiServiceCore : InfoApiService {
     }
 
     private fun screenName(): String =
-        JsonUtil.parseObj(gamestateJson())?.optString("screen", "loading") ?: "loading"
-
-    companion object {
-        // v0.5.42：screen 枚举体系（与 data_ui_screen 完全对齐）——面板类 panel_* 前缀、
-        // 主菜单面板类 main_menu_* 前缀；对话框类（dialog_*）不属于面板
-        private val PANELS = setOf(
-            "panel_character_info", "panel_inventory", "panel_skills", "panel_mercenary",
-            "panel_quests", "panel_settings", "panel_shop", "panel_craft",
-            "panel_npc_rest", "panel_npc_revive", "panel_save_slot", "panel_character_select",
-            "panel_options", "panel_shortcut", "panel_world_map",
-            "panel_daily_reward", "panel_in_app", "panel_ui_panel",
-            "main_menu_save_slot", "main_menu_character_select", "main_menu_daily_reward",
-            "main_menu_options", "main_menu_settings"
-        )
-    }
+        JsonUtil.parseObj(InfoSystemQueries.uiScreen())?.optString("screen", "loading") ?: "loading"
 }

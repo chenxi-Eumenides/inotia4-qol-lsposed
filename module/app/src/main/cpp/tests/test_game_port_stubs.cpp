@@ -28,6 +28,7 @@
 #include "game/ops/game_ops_common.h"
 #include "game/state/game_state.h"
 
+#include <cstring>
 #include <string>
 #include "host/character_state_port.h"
 
@@ -66,6 +67,26 @@ const contracts::QolSaveTransactionPort kSaveTransactionPort{
 const contracts::QolWorldWritePort kWorldWritePort{{1, 0}, {}};
 const contracts::QolChoiceWritePort kChoiceWritePort{{1, 0}, {}};
 const contracts::QolUiWritePort kUiWritePort{{1, 0}, {}};
+QolResult fake_ui_state_snapshot(char* screen, uint32_t screen_capacity,
+                                 uint32_t* screen_size, char* panel,
+                                 uint32_t panel_capacity, uint32_t* panel_size,
+                                 char* dialog, uint32_t dialog_capacity,
+                                 uint32_t* dialog_size) {
+    const char* values[] = {"loading", "", "{\"type\":\"none\",\"options\":[]}"};
+    char* outputs[] = {screen, panel, dialog};
+    const uint32_t capacities[] = {screen_capacity, panel_capacity, dialog_capacity};
+    uint32_t* sizes[] = {screen_size, panel_size, dialog_size};
+    for (size_t i = 0; i < 3; ++i) {
+        if (outputs[i] == nullptr || sizes[i] == nullptr || capacities[i] <= std::strlen(values[i])) {
+            return contracts::error(kQolErrInvalidArgument, "bad snapshot output", 19);
+        }
+        *sizes[i] = static_cast<uint32_t>(std::strlen(values[i]));
+        std::memcpy(outputs[i], values[i], *sizes[i] + 1);
+    }
+    return contracts::ok();
+}
+const contracts::QolUiStateReadPort kUiStateReadPort{
+    contracts::kQolPortUiStateReadVersion, {&fake_ui_state_snapshot}};
 const contracts::QolItemMoneyWritePort kItemMoneyWritePort{{1, 0}, nullptr};
 const contracts::QolItemDiceWritePort kItemDiceWritePort{{1, 1}, nullptr, nullptr};
 const contracts::QolCharacterWriteOpsPort kCharacterWriteOpsPort{
@@ -107,6 +128,7 @@ const contracts::QolSaveTransactionPort& save_transaction_port() { return kSaveT
 const contracts::QolWorldWritePort& world_write_port() { return kWorldWritePort; }
 const contracts::QolChoiceWritePort& choice_write_port() { return kChoiceWritePort; }
 const contracts::QolUiWritePort& ui_write_port() { return kUiWritePort; }
+const contracts::QolUiStateReadPort& ui_state_read_port() { return kUiStateReadPort; }
 const contracts::QolItemMoneyWritePort& item_money_write_port() { return kItemMoneyWritePort; }
 const contracts::QolItemDiceWritePort& item_dice_write_port() { return kItemDiceWritePort; }
 const contracts::QolCharacterWriteOpsPort& character_write_ops_port() {

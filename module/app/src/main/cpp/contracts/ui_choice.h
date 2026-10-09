@@ -20,9 +20,9 @@ namespace qol::contracts {
 
 constexpr const char* kUiChoiceCapabilityId = "ui_choice";
 constexpr int32_t kUiChoiceVersionMajor = 1;
-constexpr int32_t kUiChoiceVersionMinor = 0;
+constexpr int32_t kUiChoiceVersionMinor = 1;
 
-// 选择框规格（与迁移前 NativeChoiceSpec 同字段/同顺序/同语义）。
+// 选择框规格保留 v1.0 字段前缀；v1.1 只在尾部追加稳定的 dialog_type_id。
 struct UiChoiceSpec {
     const char* const* items;                  // 选项文本（count 项）
     int count;                                 // 1..6
@@ -30,6 +30,7 @@ struct UiChoiceSpec {
     int close_index;                           // -1 = 无关闭项
     void (*on_select)(int index, void* user);  // 命中非关闭项时回调（主线程）
     void* user;
+    const char* dialog_type_id;  // 稳定 ASCII DialogContent.type；只在调用期间借用
 };
 
 struct UiChoiceApi {  // POD：只读查询 + 打开/关闭（§3.4）

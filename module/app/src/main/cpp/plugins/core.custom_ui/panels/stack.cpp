@@ -1,5 +1,6 @@
 #include "stack.h"
 
+#include <cstdio>
 #include <cstring>
 #include <memory>
 
@@ -14,6 +15,7 @@ std::unique_ptr<PopupHost> g_popup_host;
 const char* g_stack[kPanelStackDepth] = {};
 int g_depth = 0;
 uint64_t g_pump_task = 0;
+uint64_t g_panel_snapshot_sequence = 0;
 bool g_unbind_pending = false;
 bool g_back_requested = false;
 
@@ -50,12 +52,42 @@ int stack_index_of(const char* panel_id) {
     return -1;
 }
 
-void push(const char* panel_id) {
-    if (g_depth < kPanelStackDepth) g_stack[g_depth++] = panel_id;
+void publish_stack_snapshot() {
+    if (g_depth < 0 || g_depth > kPanelStackDepth) return;
+    char copied_ids[kPanelStackDepth][contracts::kUiStateMaxPanelIdBytes]{};
+    const char* panel_ids[kPanelStackDepth]{};
+    for (int i = 0; i < g_depth; ++i) {
+        if (g_stack[i] == nullptr ||
+            std::strlen(g_stack[i]) >= contracts::kUiStateMaxPanelIdBytes) return;
+        std::snprintf(copied_ids[i], sizeof(copied_ids[i]), "%s", g_stack[i]);
+        panel_ids[i] = copied_ids[i];
+    }
+    const uint64_t sequence = ++g_panel_snapshot_sequence;
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kUiStateCapabilityId,
+            {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}, &iface)) ||
+        iface == nullptr) return;
+    const auto* api = static_cast<const contracts::UiStateApi*>(iface);
+    if (api->publish_custom_panels == nullptr) return;
+    const contracts::UiCustomPanelsSnapshot snapshot{
+        sequence, static_cast<uint32_t>(g_depth), g_depth > 0 ? panel_ids : nullptr};
+    (void)api->publish_custom_panels(&snapshot);
+}
+
+bool push(const char* panel_id) {
+    if (g_depth >= kPanelStackDepth) return false;
+    g_stack[g_depth++] = panel_id;
+    publish_stack_snapshot();
+    return true;
 }
 
 void drop_top() {
-    if (g_depth > 0) g_stack[--g_depth] = nullptr;
+    if (g_depth > 0) {
+        g_stack[--g_depth] = nullptr;
+        publish_stack_snapshot();
+    }
 }
 
 // 关闭栈顶：调 provider.close（幂等）后弹栈。
@@ -72,10 +104,13 @@ bool close_top() {
             if (closed && g_popup_host->top_is(provider->panel_id)) return false;
         } else {
             provider->close();
-            closed = true;
+            closed = provider->active == nullptr || !provider->active();
         }
     }
-    if (!closed) return false;
+    if (!closed) {
+        g_back_requested = true;
+        return false;
+    }
     drop_top();
     return true;
 }
@@ -94,6 +129,7 @@ void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
     g_depth = 0;
     g_back_requested = false;
     for (const char*& panel_id : g_stack) panel_id = nullptr;
+    if (g_sdk != nullptr) publish_stack_snapshot();
     if (g_popup_host != nullptr) {
         g_popup_host->deactivate(true);
         (void)g_popup_host->pump(true);
@@ -111,6 +147,7 @@ void ui_panels_bind_sdk(const contracts::QolHostSdk* sdk) {
         if (sdk->scheduler.add != nullptr && g_pump_task == 0) {
             (void)sdk->scheduler.add(1, &ui_panels_frame_pump, nullptr, 1, 0, &g_pump_task);
         }
+        publish_stack_snapshot();
     } else {
         g_unbind_pending = false;
     }
@@ -147,16 +184,14 @@ bool ui_panels_open(const char* panel_id) {
     }
     // provider 已 active 但未在本栈（例如更早直接打开）：补记栈。
     if (provider->active != nullptr && provider->active()) {
-        push(panel_id);
-        return true;
+        return push(panel_id);
     }
     if (g_depth >= kPanelStackDepth && !close_top()) return false;
     const bool opened = g_popup_host != nullptr && g_popup_host->owns_callbacks(*provider)
         ? g_popup_host->open(*provider, main_thread_now())
         : provider->open();
     if (opened) {
-        push(panel_id);
-        return true;
+        return push(panel_id);
     }
     // 失败兜底：关栈顶再开。嵌套 push 在游戏 popup 栈满时失败，关掉上层后重试。
     if (g_depth > 0) {
@@ -165,8 +200,7 @@ bool ui_panels_open(const char* panel_id) {
             ? g_popup_host->open(*provider, main_thread_now())
             : provider->open();
         if (retry_opened) {
-            push(panel_id);
-            return true;
+            return push(panel_id);
         }
     }
     return false;
@@ -206,6 +240,8 @@ bool ui_panels_deactivate_owner(const char* owner) {
         return host_complete;
     }
 
+    bool changed = false;
+    bool pending_close = false;
     for (int i = 0; i < g_depth;) {
         const contracts::PanelProviderSpec* provider = provider_of(g_stack[i]);
         if (provider != nullptr && provider->owner != nullptr &&
@@ -213,14 +249,21 @@ bool ui_panels_deactivate_owner(const char* owner) {
             if (provider->active != nullptr && provider->active() && provider->close != nullptr &&
                 (g_popup_host == nullptr || !g_popup_host->owns_callbacks(*provider))) {
                 provider->close();
+                if (provider->active()) {
+                    pending_close = true;
+                    ++i;
+                    continue;
+                }
             }
             for (int j = i; j + 1 < g_depth; ++j) g_stack[j] = g_stack[j + 1];
             g_stack[--g_depth] = nullptr;
+            changed = true;
         } else {
             ++i;
         }
     }
-    return host_complete;
+    if (changed) publish_stack_snapshot();
+    return host_complete && !pending_close;
 }
 
 bool ui_panels_active(const char* panel_id) {
@@ -243,6 +286,8 @@ const char* ui_panels_block_reason() {
 
 void ui_panels_reset_for_test() {
     g_depth = 0;
+    for (const char*& panel_id : g_stack) panel_id = nullptr;
+    publish_stack_snapshot();
 }
 
 int ui_panels_depth_for_test() {

@@ -1,4 +1,5 @@
 #include "contracts/host_sdk.h"
+#include "contracts/ui.h"
 #include "host/settings_catalog_adapter.h"
 #include "infra/settings_catalog.h"
 #include "infra/status.h"
@@ -109,6 +110,10 @@ bool stack_open(const char* id) {
 UiPanelsApi g_panels{&stack_open, nullptr, nullptr, nullptr, nullptr, nullptr};
 QolResult require(const char* id, QolVersionRange range, const void** out) {
     ++g_require_calls;
+    if (std::strcmp(id, kUiStateCapabilityId) == 0) {
+        *out = nullptr;
+        return error(kQolErrNotReady, "ui.state unavailable", 20);
+    }
     assert(std::strcmp(id, kUiPanelsCapabilityId) == 0);
     assert(range.major == kUiPanelsVersionMajor && range.min_minor == kUiPanelsVersionMinor);
     *out = nullptr;

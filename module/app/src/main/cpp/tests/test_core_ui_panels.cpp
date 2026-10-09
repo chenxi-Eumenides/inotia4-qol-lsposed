@@ -52,10 +52,49 @@ struct Fake {
     int open_calls = 0;
     int close_calls = 0;
     int fail_open_times = 0;
+    bool delay_close = false;
     const char* reason = nullptr;
 };
 
 Fake g_f[5];
+uint64_t g_panel_snapshot_sequence = 0;
+uint32_t g_panel_snapshot_count = 0;
+bool g_ui_state_capability_available = true;
+char g_panel_snapshot_ids[qol::contracts::kUiStateMaxCustomPanels]
+                         [qol::contracts::kUiStateMaxPanelIdBytes]{};
+
+QolResult publish_panel_snapshot(const qol::contracts::UiCustomPanelsSnapshot* snapshot) {
+    if (snapshot == nullptr || snapshot->count > qol::contracts::kUiStateMaxCustomPanels ||
+        (snapshot->count > 0 && snapshot->panel_ids == nullptr)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad snapshot", 12);
+    }
+    g_panel_snapshot_sequence = snapshot->sequence;
+    g_panel_snapshot_count = snapshot->count;
+    for (uint32_t i = 0; i < snapshot->count; ++i) {
+        std::snprintf(g_panel_snapshot_ids[i], sizeof(g_panel_snapshot_ids[i]), "%s",
+                      snapshot->panel_ids[i]);
+    }
+    return qol::contracts::ok();
+}
+
+QolResult publish_dialog_snapshot(const qol::contracts::UiCustomDialogSnapshot*) {
+    return qol::contracts::ok();
+}
+
+QolResult clear_dialog_snapshot(uint64_t, uint64_t) { return qol::contracts::ok(); }
+
+const qol::contracts::UiStateApi kUiStateApi{
+    &publish_panel_snapshot, &publish_dialog_snapshot, &clear_dialog_snapshot};
+
+QolResult fake_capability_require(const char* id, QolVersionRange,
+                                  const void** out_iface) {
+    if (!g_ui_state_capability_available || id == nullptr || out_iface == nullptr ||
+        std::strcmp(id, qol::contracts::kUiStateCapabilityId) != 0) {
+        return qol::contracts::error(kQolErrNotFound, "not found", 9);
+    }
+    *out_iface = &kUiStateApi;
+    return qol::contracts::ok();
+}
 
 bool f_open(int i) {
     Fake& f = g_f[i];
@@ -71,7 +110,7 @@ bool f_open(int i) {
 
 void f_close(int i) {
     ++g_f[i].close_calls;
-    g_f[i].active = false;
+    if (!g_f[i].delay_close) g_f[i].active = false;
 }
 
 bool f_active(int i) { return g_f[i].active; }
@@ -220,6 +259,8 @@ void test_stack_open_idempotent() {
     CHECK(ui_panels_open("pa"));
     CHECK(g_f[0].open_calls == 1 && g_f[0].active);
     CHECK(ui_panels_depth_for_test() == 1);
+    CHECK(g_panel_snapshot_count == 1 &&
+          std::strcmp(g_panel_snapshot_ids[0], "pa") == 0);
     // 已在栈顶且 active → 幂等，不再调 provider.open。
     CHECK(ui_panels_open("pa"));
     CHECK(g_f[0].open_calls == 1);
@@ -264,8 +305,13 @@ void test_stack_nested_back_order() {
     CHECK(ui_panels_open("pb"));
     CHECK(ui_panels_open("pc"));
     CHECK(ui_panels_depth_for_test() == 3);
+    CHECK(g_panel_snapshot_count == 3 &&
+          std::strcmp(g_panel_snapshot_ids[0], "pa") == 0 &&
+          std::strcmp(g_panel_snapshot_ids[1], "pb") == 0 &&
+          std::strcmp(g_panel_snapshot_ids[2], "pc") == 0);
     CHECK(ui_panels_back());
     CHECK(ui_panels_depth_for_test() == 2 && !g_f[2].active && g_f[0].active && g_f[1].active);
+    CHECK(g_panel_snapshot_count == 2 && std::strcmp(g_panel_snapshot_ids[1], "pb") == 0);
     CHECK(ui_panels_back());
     CHECK(ui_panels_depth_for_test() == 1 && !g_f[1].active && g_f[0].active);
     ui_panels_close("pa");
@@ -321,9 +367,57 @@ void test_provider_deactivate_removes_owned_panel() {
     CHECK(!g_f[0].active && g_f[1].active);
     CHECK(g_f[0].close_calls == 1 && g_f[1].close_calls == 0);
     CHECK(ui_panels_depth_for_test() == 1);
+    CHECK(g_panel_snapshot_count == 1 && std::strcmp(g_panel_snapshot_ids[0], "pb") == 0);
     CHECK(ui_panels_deactivate_owner("core.settings"));
     CHECK(g_f[0].close_calls == 1);
     CHECK(!ui_panels_deactivate_owner(nullptr));
+}
+
+void test_failed_open_does_not_publish() {
+    reset_fakes();
+    const uint64_t empty_sequence = g_panel_snapshot_sequence;
+    g_f[0].fail_open_times = 1;
+    CHECK(!ui_panels_open("pa"));
+    CHECK(ui_panels_depth_for_test() == 0 && g_panel_snapshot_count == 0);
+    CHECK(g_panel_snapshot_sequence == empty_sequence);
+}
+
+void test_optional_state_registry_does_not_block_native_panel() {
+    reset_fakes();
+    const uint64_t sequence_before = g_panel_snapshot_sequence;
+    g_ui_state_capability_available = false;
+    CHECK(ui_panels_open("pa"));
+    CHECK(g_f[0].active && ui_panels_depth_for_test() == 1);
+    CHECK(g_panel_snapshot_sequence == sequence_before);
+    CHECK(g_panel_snapshot_count == 0);  // missing optional owner receives no invented state
+    g_ui_state_capability_available = true;
+}
+
+void test_pending_provider_close_keeps_published_panel() {
+    reset_fakes();
+    g_f[0].delay_close = true;
+    CHECK(ui_panels_open("pa"));
+    const uint64_t open_sequence = g_panel_snapshot_sequence;
+    CHECK(!ui_panels_back());
+    CHECK(ui_panels_depth_for_test() == 1 && g_panel_snapshot_count == 1);
+    CHECK(std::strcmp(g_panel_snapshot_ids[0], "pa") == 0);
+    CHECK(g_panel_snapshot_sequence == open_sequence);
+    g_f[0].active = false;
+    CHECK(ui_panels_frame_pump(1, nullptr) == 1);
+    CHECK(ui_panels_depth_for_test() == 0 && g_panel_snapshot_count == 0);
+}
+
+void test_owner_unregistration_waits_for_close() {
+    reset_fakes();
+    g_f[0].delay_close = true;
+    CHECK(ui_panels_open("pa"));
+    const uint64_t open_sequence = g_panel_snapshot_sequence;
+    CHECK(!ui_panels_deactivate_owner("core.settings"));
+    CHECK(ui_panels_depth_for_test() == 1 && g_panel_snapshot_count == 1);
+    CHECK(g_panel_snapshot_sequence == open_sequence);
+    g_f[0].active = false;
+    CHECK(ui_panels_deactivate_owner("core.settings"));
+    CHECK(ui_panels_depth_for_test() == 0 && g_panel_snapshot_count == 0);
 }
 
 // P2 栈深语义：provider 自关（存档备份返回键自调 set_process_info(3,0)，不经本栈）后
@@ -362,6 +456,7 @@ void test_deferred_close_keeps_depth_until_done() {
     ui_panels_request_back();
     CHECK(ui_panels_frame_pump(1, nullptr) == 1);
     CHECK(ui_panels_depth_for_test() == 1);  // 栈记录不提前弹出（缺陷 α 修复点）
+    CHECK(g_panel_snapshot_count == 1 && std::strcmp(g_panel_snapshot_ids[0], "pf") == 0);
     CHECK(g_pf_close_calls == 0);
     CHECK(g_pf_pops == 0);
 
@@ -380,6 +475,7 @@ void test_deferred_close_keeps_depth_until_done() {
     CHECK(g_pf_restores == 1);
     // 关闭完成后 provider inactive → 帧泵剔除记录，深度归 0（游戏回 main_menu）。
     CHECK(ui_panels_depth_for_test() == 0);
+    CHECK(g_panel_snapshot_count == 0);
     // 之后点击：栈空，干净 no-op（不崩溃、不再发 pop）。
     CHECK(!ui_panels_back());
     CHECK(g_pf_pops == 1);
@@ -433,6 +529,7 @@ int main() {
     sdk.hooks.popup_acquire = &pf_acquire;
     sdk.hooks.popup_restore = &pf_restore;
     sdk.log.write = &pf_log;
+    sdk.capabilities.require = &fake_capability_require;
     qol::features::core_ui::ui_panels_bind_sdk(&sdk);
 
     test_stack_open_idempotent();
@@ -442,6 +539,10 @@ int main() {
     test_stack_prune_stale_top();
     test_stack_depth_limit_and_close();
     test_provider_deactivate_removes_owned_panel();
+    test_failed_open_does_not_publish();
+    test_optional_state_registry_does_not_block_native_panel();
+    test_pending_provider_close_keeps_published_panel();
+    test_owner_unregistration_waits_for_close();
     test_frame_pump_prunes_stale_top();
     test_deferred_close_keeps_depth_until_done();
     test_close_stall_escape_forces_completion();

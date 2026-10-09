@@ -6,6 +6,7 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/text_layer.h"
 #include "../../contracts/ui_choice.h"
+#include "../../contracts/ui.h"
 #include "feature.h"
 #include "panels/debug_components.h"
 #include "panels/debug_scroll.h"
@@ -63,6 +64,11 @@ const contracts::CapabilityProvisionRef kProvides[] = {
         {contracts::kTextLayerVersionMajor, contracts::kTextLayerVersionMinor},
         &kTextLayerApi,
     },
+};
+
+const contracts::CapabilityRequirement kOptionalRequires[] = {
+    {contracts::kUiStateCapabilityId,
+     {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}},
 };
 
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
@@ -219,8 +225,8 @@ const contracts::PluginDescriptor kDescriptor = {
 #else
     0, nullptr,      // requires
 #endif
-    0, nullptr,      // optional_requires
-    4, kProvides,    // provides（ui_components / ui_panels / ui_choice / text_layer v1.0）
+    1, kOptionalRequires,  // optional_requires=ui.state; custom UI remains native without it
+    4, kProvides,    // provides（ui_components / ui_panels / text_layer v1.0，ui_choice v1.1）
     3, kResources,   // resources（选择控件 2 条 + 文本 GetText 共享资源）
     0, nullptr,      // jni
     &plugin_install,

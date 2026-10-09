@@ -165,7 +165,8 @@ void open_choice_panel() {
 
     const qol::contracts::UiChoiceSpec spec{
         items.data(), static_cast<int>(kChoiceCount), title.data(),
-        static_cast<int>(kCloseChoiceIndex), &teleport_on_select, nullptr};
+        static_cast<int>(kCloseChoiceIndex), &teleport_on_select, nullptr,
+        "world_teleport.confirm"};
     const qol::contracts::UiChoiceApi* api = ui_choice_api();
     if (api == nullptr || api->open == nullptr) {
         log_message(3, "world teleport: ui_choice capability unavailable");

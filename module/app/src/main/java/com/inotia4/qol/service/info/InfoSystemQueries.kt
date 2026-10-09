@@ -11,6 +11,9 @@ internal object InfoSystemQueries {
     fun game(): String = NativeHttpQuery.get("/api/system/game")
     fun gameInfo(): String = NativeHttpQuery.get("/api/system/info")
     fun gameFrame(): String = NativeHttpQuery.get("/api/system/game_frame")
+    fun uiScreen(): String = NativeHttpQuery.get("/api/ui/screen")
+    fun uiPanel(): String = NativeHttpQuery.get("/api/ui/panel")
+    fun uiDialog(): String = NativeHttpQuery.get("/api/ui/dialog")
 
     fun debugUi(): String = NativeBridge.nativeGetDebugUiJson()
     fun debugPath(tx: Int, ty: Int): String = NativeBridge.nativeDebugPathJson(tx, ty)

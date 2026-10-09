@@ -15,6 +15,33 @@ namespace qol::contracts {
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 11;
 constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 17;
+constexpr const char* kUiStateCapabilityId = "ui.state";
+constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 0;
+constexpr uint32_t kUiStateMaxCustomPanels = 4;
+constexpr uint32_t kUiStateMaxPanelIdBytes = 128;
+constexpr uint32_t kUiStateMaxDialogOptions = 6;
+constexpr uint32_t kUiStateMaxDialogTextBytes = 256;
+
+struct UiCustomPanelsSnapshot {
+    uint64_t sequence;
+    uint32_t count;
+    const char* const* panel_ids;
+};
+
+struct UiCustomDialogSnapshot {
+    uint64_t sequence;
+    uint64_t generation;
+    const char* type_id;
+    const char* title;
+    const char* const* option_labels;
+    uint32_t option_count;
+};
+
+struct UiStateApi {
+    QolResult (*publish_custom_panels)(const UiCustomPanelsSnapshot* snapshot);
+    QolResult (*publish_custom_dialog)(const UiCustomDialogSnapshot* snapshot);
+    QolResult (*clear_custom_dialog)(uint64_t generation, uint64_t sequence);
+};
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;

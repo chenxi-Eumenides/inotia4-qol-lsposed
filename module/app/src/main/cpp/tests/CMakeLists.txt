@@ -1691,6 +1691,33 @@ set_target_properties(extension_bag_move_merge_shim_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_move_merge_shim_tests COMMAND extension_bag_move_merge_shim_tests)
 
+# core.ui_state native fallback JSON, custom-state merge, and sequence/generation acceptance.
+add_executable(core_ui_state_tests
+    test_core_ui_state.cpp
+    ${CPP_DIR}/plugins/core.ui_state/plugin.cpp
+)
+target_include_directories(core_ui_state_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_ui_state_tests PRIVATE cxx_std_17)
+set_target_properties(core_ui_state_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(core_ui_state_tests PRIVATE Threads::Threads)
+add_test(NAME core_ui_state_tests COMMAND core_ui_state_tests)
+
+# UI state Game Adapter snapshot stays on the main thread and preserves native JSON payloads.
+add_executable(ui_state_port_tests
+    test_ui_state_port.cpp
+    ${CPP_DIR}/game/adapter_ports/ui_write_port.cpp
+)
+target_include_directories(ui_state_port_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(ui_state_port_tests PRIVATE cxx_std_17)
+set_target_properties(ui_state_port_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME ui_state_port_tests COMMAND ui_state_port_tests)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)

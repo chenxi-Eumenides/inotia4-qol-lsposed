@@ -28,9 +28,28 @@ struct QolUiWritePort {
     QolUiWritePortReadApi read;
 };
 
+using QolUiStateReadSnapshotFn = QolResult (*)(char* screen, uint32_t screen_capacity,
+                                                uint32_t* screen_size, char* panel,
+                                                uint32_t panel_capacity, uint32_t* panel_size,
+                                                char* dialog, uint32_t dialog_capacity,
+                                                uint32_t* dialog_size);
+
+struct QolUiStateReadApi {
+    QolUiStateReadSnapshotFn read_snapshot;
+};
+
+struct QolUiStateReadPort {
+    QolVersion abi_version;
+    QolUiStateReadApi read;
+};
+
 static_assert(std::is_standard_layout<QolUiWritePort>::value,
               "QolUiWritePort must remain standard layout");
 static_assert(std::is_trivially_copyable<QolUiWritePort>::value,
               "QolUiWritePort must remain trivially copyable");
+static_assert(std::is_standard_layout<QolUiStateReadPort>::value,
+              "QolUiStateReadPort must remain standard layout");
+static_assert(std::is_trivially_copyable<QolUiStateReadPort>::value,
+              "QolUiStateReadPort must remain trivially copyable");
 
 }  // namespace qol::contracts

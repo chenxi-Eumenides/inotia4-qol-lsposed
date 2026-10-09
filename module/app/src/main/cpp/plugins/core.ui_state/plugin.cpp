@@ -4,12 +4,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 #include "contracts/commands.h"
 #include "contracts/game_ports/choice_write_port.h"
 #include "contracts/game_ports/ui_write_port.h"
 #include "contracts/http.h"
+#include "contracts/ui.h"
 
 namespace qol::features::core_ui_state {
 namespace {
@@ -18,6 +20,35 @@ constexpr const char* kPluginId = "core.ui_state";
 constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolUiStateReadPort* g_ui_state_read = nullptr;
+uint64_t g_snapshot_task = 0;
+
+constexpr uint32_t kScreenCapacity = 64;
+constexpr uint32_t kPanelCapacity = 128;
+constexpr uint32_t kDialogCapacity = 8192;
+constexpr uint32_t kCustomOptionCount = contracts::kUiStateMaxDialogOptions;
+
+struct UiSnapshotState {
+    char screen[kScreenCapacity] = "loading";
+    char native_panel[kPanelCapacity] = {};
+    char native_dialog[kDialogCapacity] = "{\"error\":\"not in game\"}";
+    uint32_t custom_panel_count = 0;
+    char custom_panel_ids[contracts::kUiStateMaxCustomPanels]
+                         [contracts::kUiStateMaxPanelIdBytes]{};
+    uint64_t custom_panel_sequence = 0;
+    bool custom_dialog_active = false;
+    bool custom_dialog_has_title = false;
+    char custom_dialog_type[contracts::kUiStateMaxDialogTextBytes]{};
+    char custom_dialog_title[contracts::kUiStateMaxDialogTextBytes]{};
+    char custom_dialog_options[kCustomOptionCount][contracts::kUiStateMaxDialogTextBytes]{};
+    uint32_t custom_dialog_option_count = 0;
+    uint64_t custom_dialog_generation = 0;
+    uint64_t custom_dialog_last_generation = 0;
+    uint64_t custom_dialog_sequence = 0;
+};
+
+std::mutex g_snapshot_mutex;
+UiSnapshotState g_snapshot{};
 
 const contracts::CapabilityRequirement kRequires[] = {
     {
@@ -30,14 +61,291 @@ const contracts::CapabilityRequirement kRequires[] = {
     },
 };
 
-// 选择控件（能力 + 2 条资源 + QOL_PORT_CHOICE）已按 ADR 0001 迁入 core.custom_ui；
-// 本插件只保留 UI 写面的两条端口。
+// 选择控件（能力 + 2 条资源 + QOL_PORT_CHOICE）归 core.custom_ui；本 owner 保留 UI 写端口
+// 与主线程 UI 状态读端口。
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHOICE_WRITE,
      {contracts::kQolPortChoiceWriteVersion.major, contracts::kQolPortChoiceWriteVersion.minor}},
     {contracts::QolPortId::QOL_PORT_UI_WRITE,
      {contracts::kQolPortUiWriteVersion.major, contracts::kQolPortUiWriteVersion.minor}},
+    {contracts::QolPortId::QOL_PORT_UI_STATE_READ,
+     {contracts::kQolPortUiStateReadVersion.major,
+      contracts::kQolPortUiStateReadVersion.minor}},
 };
+
+bool main_thread_now() {
+    if (g_sdk == nullptr || g_sdk->ui == nullptr || g_sdk->ui->is_main_thread == nullptr) {
+        return false;
+    }
+    return g_sdk->ui->is_main_thread() != 0;
+}
+
+QolResult state_error(int32_t code, const char* message) {
+    return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
+}
+
+bool copy_string(char* out, uint32_t capacity, const char* value) {
+    if (out == nullptr || capacity == 0 || value == nullptr) return false;
+    const size_t length = std::strlen(value);
+    if (length >= capacity) return false;
+    if (length > 0) std::memcpy(out, value, length);
+    out[length] = '\0';
+    return true;
+}
+
+bool valid_type_id(const char* value) {
+    if (value == nullptr || value[0] == '\0') return false;
+    for (const unsigned char* p = reinterpret_cast<const unsigned char*>(value); *p != 0; ++p) {
+        const unsigned char c = *p;
+        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+              (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-')) return false;
+    }
+    return true;
+}
+
+QolResult publish_custom_panels(const contracts::UiCustomPanelsSnapshot* snapshot) {
+    if (snapshot == nullptr || snapshot->sequence == 0 ||
+        snapshot->count > contracts::kUiStateMaxCustomPanels ||
+        (snapshot->count > 0 && snapshot->panel_ids == nullptr)) {
+        return state_error(kQolErrInvalidArgument, "invalid custom panel snapshot");
+    }
+    if (!main_thread_now()) return state_error(kQolErrBlocked, "wrong thread");
+
+    char copied[contracts::kUiStateMaxCustomPanels][contracts::kUiStateMaxPanelIdBytes]{};
+    for (uint32_t i = 0; i < snapshot->count; ++i) {
+        if (!copy_string(copied[i], sizeof(copied[i]), snapshot->panel_ids[i]) ||
+            copied[i][0] == '\0') {
+            return state_error(kQolErrInvalidArgument, "invalid custom panel id");
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+    if (snapshot->sequence <= g_snapshot.custom_panel_sequence) {
+        return state_error(kQolErrConflict, "stale custom panel snapshot");
+    }
+    g_snapshot.custom_panel_sequence = snapshot->sequence;
+    g_snapshot.custom_panel_count = snapshot->count;
+    for (uint32_t i = 0; i < snapshot->count; ++i) {
+        std::memcpy(g_snapshot.custom_panel_ids[i], copied[i], sizeof(copied[i]));
+    }
+    for (uint32_t i = snapshot->count; i < contracts::kUiStateMaxCustomPanels; ++i) {
+        g_snapshot.custom_panel_ids[i][0] = '\0';
+    }
+    return contracts::ok();
+}
+
+QolResult publish_custom_dialog(const contracts::UiCustomDialogSnapshot* snapshot) {
+    if (snapshot == nullptr || snapshot->sequence == 0 || snapshot->generation == 0 ||
+        !valid_type_id(snapshot->type_id) ||
+        snapshot->option_count > kCustomOptionCount ||
+        (snapshot->option_count > 0 && snapshot->option_labels == nullptr)) {
+        return state_error(kQolErrInvalidArgument, "invalid custom dialog snapshot");
+    }
+    if (!main_thread_now()) return state_error(kQolErrBlocked, "wrong thread");
+
+    char type_id[contracts::kUiStateMaxDialogTextBytes]{};
+    char title[contracts::kUiStateMaxDialogTextBytes]{};
+    char options[kCustomOptionCount][contracts::kUiStateMaxDialogTextBytes]{};
+    if (!copy_string(type_id, sizeof(type_id), snapshot->type_id)) {
+        return state_error(kQolErrInvalidArgument, "custom dialog type too long");
+    }
+    const bool has_title = snapshot->title != nullptr;
+    if (has_title && !copy_string(title, sizeof(title), snapshot->title)) {
+        return state_error(kQolErrInvalidArgument, "custom dialog title too long");
+    }
+    for (uint32_t i = 0; i < snapshot->option_count; ++i) {
+        if (!copy_string(options[i], sizeof(options[i]), snapshot->option_labels[i])) {
+            return state_error(kQolErrInvalidArgument, "custom dialog option too long");
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+    if (snapshot->sequence <= g_snapshot.custom_dialog_sequence ||
+        snapshot->generation <= g_snapshot.custom_dialog_last_generation) {
+        return state_error(kQolErrConflict, "stale custom dialog snapshot");
+    }
+    g_snapshot.custom_dialog_sequence = snapshot->sequence;
+    g_snapshot.custom_dialog_last_generation = snapshot->generation;
+    g_snapshot.custom_dialog_generation = snapshot->generation;
+    g_snapshot.custom_dialog_active = true;
+    g_snapshot.custom_dialog_has_title = has_title;
+    g_snapshot.custom_dialog_option_count = snapshot->option_count;
+    std::memcpy(g_snapshot.custom_dialog_type, type_id, sizeof(type_id));
+    std::memcpy(g_snapshot.custom_dialog_title, title, sizeof(title));
+    for (uint32_t i = 0; i < kCustomOptionCount; ++i) {
+        if (i < snapshot->option_count) {
+            std::memcpy(g_snapshot.custom_dialog_options[i], options[i], sizeof(options[i]));
+        } else {
+            g_snapshot.custom_dialog_options[i][0] = '\0';
+        }
+    }
+    return contracts::ok();
+}
+
+QolResult clear_custom_dialog(uint64_t generation, uint64_t sequence) {
+    if (generation == 0 || sequence == 0) {
+        return state_error(kQolErrInvalidArgument, "invalid custom dialog generation");
+    }
+    if (!main_thread_now()) return state_error(kQolErrBlocked, "wrong thread");
+    std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+    if (sequence <= g_snapshot.custom_dialog_sequence) {
+        return state_error(kQolErrConflict, "stale custom dialog clear");
+    }
+    g_snapshot.custom_dialog_sequence = sequence;
+    if (generation > g_snapshot.custom_dialog_last_generation) {
+        g_snapshot.custom_dialog_last_generation = generation;
+    }
+    if (g_snapshot.custom_dialog_active && g_snapshot.custom_dialog_generation == generation) {
+        g_snapshot.custom_dialog_active = false;
+        g_snapshot.custom_dialog_has_title = false;
+        g_snapshot.custom_dialog_option_count = 0;
+    }
+    return contracts::ok();
+}
+
+const contracts::UiStateApi kUiStateApi{
+    &publish_custom_panels,
+    &publish_custom_dialog,
+    &clear_custom_dialog,
+};
+
+const contracts::CapabilityProvisionRef kProvides[] = {
+    {contracts::kUiStateCapabilityId,
+     {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}, &kUiStateApi},
+};
+
+int32_t native_snapshot_tick(int64_t, void*) {
+    if (g_ui_state_read == nullptr || g_ui_state_read->read.read_snapshot == nullptr) return 1;
+    char screen[kScreenCapacity]{};
+    char panel[kPanelCapacity]{};
+    char dialog[kDialogCapacity]{};
+    uint32_t screen_size = 0;
+    uint32_t panel_size = 0;
+    uint32_t dialog_size = 0;
+    const QolResult result = g_ui_state_read->read.read_snapshot(
+        screen, sizeof(screen), &screen_size, panel, sizeof(panel), &panel_size,
+        dialog, sizeof(dialog), &dialog_size);
+    if (!contracts::succeeded(result) || screen_size >= sizeof(screen) ||
+        panel_size >= sizeof(panel) || dialog_size >= sizeof(dialog) ||
+        screen[screen_size] != '\0' || panel[panel_size] != '\0' || dialog[dialog_size] != '\0') {
+        return 1;
+    }
+    std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+    std::memcpy(g_snapshot.screen, screen, screen_size + 1);
+    std::memcpy(g_snapshot.native_panel, panel, panel_size + 1);
+    std::memcpy(g_snapshot.native_dialog, dialog, dialog_size + 1);
+    return 1;
+}
+
+struct UiSnapshotCopy {
+    char screen[kScreenCapacity]{};
+    char native_panel[kPanelCapacity]{};
+    char native_dialog[kDialogCapacity]{};
+    uint32_t custom_panel_count = 0;
+    char custom_panel_ids[contracts::kUiStateMaxCustomPanels]
+                         [contracts::kUiStateMaxPanelIdBytes]{};
+    bool custom_dialog_active = false;
+    bool custom_dialog_has_title = false;
+    char custom_dialog_type[contracts::kUiStateMaxDialogTextBytes]{};
+    char custom_dialog_title[contracts::kUiStateMaxDialogTextBytes]{};
+    char custom_dialog_options[kCustomOptionCount][contracts::kUiStateMaxDialogTextBytes]{};
+    uint32_t custom_dialog_option_count = 0;
+};
+
+UiSnapshotCopy copy_ui_snapshot() {
+    UiSnapshotCopy copy{};
+    std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+    std::memcpy(copy.screen, g_snapshot.screen, sizeof(copy.screen));
+    std::memcpy(copy.native_panel, g_snapshot.native_panel, sizeof(copy.native_panel));
+    std::memcpy(copy.native_dialog, g_snapshot.native_dialog, sizeof(copy.native_dialog));
+    copy.custom_panel_count = g_snapshot.custom_panel_count;
+    std::memcpy(copy.custom_panel_ids, g_snapshot.custom_panel_ids,
+                sizeof(copy.custom_panel_ids));
+    copy.custom_dialog_active = g_snapshot.custom_dialog_active;
+    copy.custom_dialog_has_title = g_snapshot.custom_dialog_has_title;
+    std::memcpy(copy.custom_dialog_type, g_snapshot.custom_dialog_type,
+                sizeof(copy.custom_dialog_type));
+    std::memcpy(copy.custom_dialog_title, g_snapshot.custom_dialog_title,
+                sizeof(copy.custom_dialog_title));
+    std::memcpy(copy.custom_dialog_options, g_snapshot.custom_dialog_options,
+                sizeof(copy.custom_dialog_options));
+    copy.custom_dialog_option_count = g_snapshot.custom_dialog_option_count;
+    return copy;
+}
+
+std::string json_quote(const char* value) {
+    std::string out = "\"";
+    if (value != nullptr) {
+        static constexpr char hex[] = "0123456789abcdef";
+        for (const unsigned char c : std::string(value)) {
+            switch (c) {
+                case '"': out += "\\\""; break;
+                case '\\': out += "\\\\"; break;
+                case '\b': out += "\\b"; break;
+                case '\f': out += "\\f"; break;
+                case '\n': out += "\\n"; break;
+                case '\r': out += "\\r"; break;
+                case '\t': out += "\\t"; break;
+                default:
+                    if (c < 0x20) {
+                        out += "\\u00";
+                        out += hex[c >> 4];
+                        out += hex[c & 0x0f];
+                    } else {
+                        out += static_cast<char>(c);
+                    }
+            }
+        }
+    }
+    out += '"';
+    return out;
+}
+
+QolResult choice_http_error(contracts::HttpRes* response, uint16_t status, const char* message);
+
+QolResult query_response(contracts::HttpRes* response, const std::string& body) {
+    if (response == nullptr || response->body == nullptr || response->body_capacity < body.size()) {
+        return choice_http_error(response, 500, "http response buffer too small");
+    }
+    std::memcpy(response->body, body.data(), body.size());
+    response->body_size = static_cast<uint32_t>(body.size());
+    response->status = 200;
+    return contracts::ok();
+}
+
+QolResult screen_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
+    const UiSnapshotCopy snapshot = copy_ui_snapshot();
+    return query_response(response, "{\"screen\":" + json_quote(snapshot.screen) + "}");
+}
+
+QolResult panel_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
+    const UiSnapshotCopy snapshot = copy_ui_snapshot();
+    if (snapshot.custom_panel_count > 0) {
+        const std::string panel = std::string("panel_") +
+                                  snapshot.custom_panel_ids[snapshot.custom_panel_count - 1];
+        return query_response(response, "{\"panel\":" + json_quote(panel.c_str()) + "}");
+    }
+    const std::string panel = snapshot.native_panel[0] == '\0'
+                                  ? "null"
+                                  : json_quote(snapshot.native_panel);
+    return query_response(response, "{\"panel\":" + panel + "}");
+}
+
+QolResult dialog_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
+    const UiSnapshotCopy snapshot = copy_ui_snapshot();
+    if (!snapshot.custom_dialog_active) return query_response(response, snapshot.native_dialog);
+    std::string body = "{\"type\":" + json_quote(snapshot.custom_dialog_type) +
+                       ",\"title\":";
+    body += snapshot.custom_dialog_has_title ? json_quote(snapshot.custom_dialog_title) : "null";
+    body += ",\"options\":[";
+    for (uint32_t i = 0; i < snapshot.custom_dialog_option_count; ++i) {
+        if (i > 0) body += ',';
+        body += "{\"id\":" + json_quote(std::to_string(i).c_str()) +
+                ",\"label\":" + json_quote(snapshot.custom_dialog_options[i]) + "}";
+    }
+    body += "],\"active\":true}";
+    return query_response(response, body);
+}
 
 // 对话写（HTTP 写路由）的票据结果处理器 id（全局 typed handler id 空间；core.ui_state 前缀）。
 constexpr uint32_t kChoiceWriteHandlerId = 0x4E430001;
@@ -214,8 +522,11 @@ bool ui_write_result(void*, const uint8_t* payload, uint32_t size, char* out, ui
     return contracts::succeeded(result);
 }
 
-// 声明式写路由：对话写 + 面板写共用一个数组（descriptor 只有一组 http_queries）。
-const contracts::HttpQueryHandlerDescriptor kWriteRoutes[] = {
+// 查询与写入继续由同一 descriptor 提供，GET 路由已在 core.api/routes.inc 固定归属。
+const contracts::HttpQueryHandlerDescriptor kRoutes[] = {
+    {contracts::HttpMethod::kGet, "/api/ui/screen", kPluginId, &screen_query, nullptr},
+    {contracts::HttpMethod::kGet, "/api/ui/panel", kPluginId, &panel_query, nullptr},
+    {contracts::HttpMethod::kGet, "/api/ui/dialog", kPluginId, &dialog_query, nullptr},
     {contracts::HttpMethod::kPost, "/api/ui/dialog/select", kPluginId, &choice_write_command,
      const_cast<int32_t*>(&kDialogSelectKind)},
     {contracts::HttpMethod::kPost, "/api/ui/start_interact", kPluginId, &choice_write_command,
@@ -232,17 +543,22 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_choice_write = nullptr;
     g_ui_write = nullptr;
-    if (g_sdk == nullptr || ctx.ports == nullptr || ctx.port_count < 2 ||
-        ctx.ports[0] == nullptr || ctx.ports[1] == nullptr) {
+    g_ui_state_read = nullptr;
+    if (g_sdk == nullptr || ctx.ports == nullptr || ctx.port_count < 3 ||
+        ctx.ports[0] == nullptr || ctx.ports[1] == nullptr || ctx.ports[2] == nullptr) {
         g_sdk = nullptr;
         return 1;
     }
     g_choice_write = static_cast<const contracts::QolChoiceWritePort*>(ctx.ports[0]);
     g_ui_write = static_cast<const contracts::QolUiWritePort*>(ctx.ports[1]);
-    if (g_choice_write->read.write == nullptr || g_ui_write->read.write == nullptr) {
+    g_ui_state_read = static_cast<const contracts::QolUiStateReadPort*>(ctx.ports[2]);
+    if (g_choice_write->read.write == nullptr || g_ui_write->read.write == nullptr ||
+        g_ui_state_read->read.read_snapshot == nullptr ||
+        g_sdk->scheduler.add == nullptr || g_sdk->scheduler.remove == nullptr) {
         g_sdk = nullptr;
         g_choice_write = nullptr;
         g_ui_write = nullptr;
+        g_ui_state_read = nullptr;
         return 1;
     }
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
@@ -253,6 +569,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_choice_write = nullptr;
         g_ui_write = nullptr;
+        g_ui_state_read = nullptr;
         return 1;
     }
     if (!contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
@@ -261,9 +578,20 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_choice_write = nullptr;
         g_ui_write = nullptr;
+        g_ui_state_read = nullptr;
         return 1;
     }
-    // 自身初始化无额外动作：资源由宿主声明式安装，backup 经 on_resource_ready 交还。
+    if (!contracts::succeeded(g_sdk->scheduler.add(1, &native_snapshot_tick, nullptr,
+                                                   1, 0, &g_snapshot_task))) {
+        (void)g_sdk->ticket_result.unregister_typed_result_handler(kChoiceWriteHandlerId);
+        (void)g_sdk->ticket_result.unregister_typed_result_handler(kUiWriteHandlerId);
+        g_sdk = nullptr;
+        g_choice_write = nullptr;
+        g_ui_write = nullptr;
+        g_ui_state_read = nullptr;
+        g_snapshot_task = 0;
+        return 1;
+    }
     return 0;
 }
 
@@ -273,9 +601,18 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kChoiceWriteHandlerId);
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kUiWriteHandlerId);
     }
+    if (g_sdk != nullptr && g_sdk->scheduler.remove != nullptr && g_snapshot_task != 0) {
+        (void)g_sdk->scheduler.remove(g_snapshot_task);
+    }
+    g_snapshot_task = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+        g_snapshot = UiSnapshotState{};
+    }
     g_sdk = nullptr;
     g_choice_write = nullptr;
     g_ui_write = nullptr;
+    g_ui_state_read = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -296,8 +633,8 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     2, kRequires, // requires=http.registry + http.dispatch（声明式写路由）
     0, nullptr,   // optional_requires
-    0, nullptr,   // provides（ui_choice 已于 ADR 0001 迁入 core.custom_ui）
-    0, nullptr,   // resources（选择控件的 2 条资源随控件迁走）
+    1, kProvides, // provides=ui.state v1.0
+    0, nullptr,   // resources（选择控件资源由 core.custom_ui 持有）
     0, nullptr,   // jni
     &plugin_install,
     &plugin_deactivate,
@@ -306,9 +643,9 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     nullptr,      // on_resource_ready（本插件已无资源）
     kPorts,
-    2,
-    kWriteRoutes,
-    static_cast<uint32_t>(sizeof(kWriteRoutes) / sizeof(kWriteRoutes[0])),
+    3,
+    kRoutes,
+    static_cast<uint32_t>(sizeof(kRoutes) / sizeof(kRoutes[0])),
 };
 
 }  // namespace

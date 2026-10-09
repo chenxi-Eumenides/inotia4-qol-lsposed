@@ -219,9 +219,9 @@
 
 | 字段 | 说明 |
 |---|---|
-| `screen` | 当前界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 同值）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`）/ `"agreement"`（Android Java 层同意页 `AgreementUIActivity`，独立于 native dialog_*/panel_*；仅主菜单前触发，`POST /api/ui/dialog/select` `{"action":"ok"}` 关闭）。 |
+| `screen` | 当前原生游戏界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 返回底层 screen）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`）。Android Agreement 是独立 Java UI；Kotlin 在 `/api/ui` 复合状态与 `/api/ui/dialog` 优先检测并返回 `agreement`，不改写此原生 screen。自定义 PanelProvider/Dialog 同样不改写此底层 screen。 |
 | `story` | 仅 screen=dialog_story：`active`/`speaker`/`text`/`index`/`count` |
-| `dialog` | 仅 UI 被占据时存在：`<DialogContent 模型>`（type/title/text/options）。注意：type 残留时 `displayed` 字段为 false（数据残留，非实际 UI），以 `screen` 为准 |
+| `dialog` | 仅 UI 被占据时存在：`<DialogContent 模型>`（type/title/text/options）。`core.custom_ui` 的自定义选择框以其 `UiChoiceSpec.dialog_type_id` 稳定 ID 输出既有 `type` 字段（当前调用方如 `world_teleport.confirm`）；自定义 PanelProvider 不改变该字段。注意：以底层 `screen` 判断游戏原生 UI。 |
 
 > **v0.5.42 变更**：`dialog_active` 字段已移除——`screen` 精确表达 UI 占据状态（`dialog_*`/`panel_*`/`main_menu_*` 前缀即 UI 占据）。不再有数据残留导致的误报（旧版：关闭 NPC 对话框后 dialog_active 残留 true）。
 >
@@ -263,7 +263,7 @@
 
 | 字段 | 说明 |
 |---|---|
-| `type` | 弹窗/对话种类：`save`/`sell`/`quest`/`npc`/`story`/`popup`/`wipeout`/`agreement`/`none`（随逆向扩展；`agreement` 为 Java 层同意页，非 native 对话） |
+| `type` | 弹窗/对话种类：`save`/`sell`/`quest`/`npc`/`story`/`popup`/`wipeout`/`agreement`/`none`，或 `UiChoiceSpec.dialog_type_id` 指定的稳定 ASCII ID（如 `world_teleport.confirm`）；`agreement` 为 Java 层同意页，非 native 对话 |
 | `active` | 是否有对话/弹窗 |
 | `title` | 标题（任务对话框/出售弹窗等有标题的类型；无标题为 null） |
 | `text` | 内容文本 |
@@ -1264,7 +1264,7 @@
 
 `GET /api/ui/panel`
 
-**用途**：获取当前面板（screen 为 `panel_*` 或 `main_menu_*` 时，返回带前缀值）。
+**用途**：获取当前面板。自定义面板栈非空时返回栈顶 `panel_<PanelProviderSpec.panel_id>`；否则原样按游戏原生 screen 映射，screen 为 `panel_*` 或 `main_menu_*` 时返回带前缀值。
 
 **返回格式**：`{ "panel": "panel_inventory" }` 或 `{ "panel": null }`
 
@@ -1274,7 +1274,7 @@
 
 `GET /api/ui/dialog`
 
-**用途**：统一检测当前对话/弹窗状态（**一个函数覆盖多种类型**），返回类型、标题、内容与可选动作。
+**用途**：统一检测当前对话/弹窗状态（**一个函数覆盖多种类型**），返回类型、标题、内容与可选动作。自定义选择框使用稳定 `dialog_type_id`、标题及按选项索引生成的既有 `options[].id`/`label`；其 `active` 为 true。没有自定义状态时使用原生 DialogContent；Android Agreement 仍由 Kotlin `UiActivityTracker` 优先返回 `agreement`。
 
 **返回格式**：`<DialogContent 模型>`（`type` + `title`/`text` + `options`）
 

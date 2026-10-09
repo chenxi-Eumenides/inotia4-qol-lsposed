@@ -66,6 +66,12 @@
 #include "game/adapter_ports/world_port.h"
 #endif
 
+#if !QOL_KERNEL_ONLY
+namespace qol::game {
+const contracts::QolUiStateReadPort& ui_state_read_port();
+}
+#endif
+
 namespace qol::host {
 
 extern const contracts::QolHostSdk g_host_sdk;
@@ -251,6 +257,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_UI_STATE_READ) {
+        const auto& port = qol::game::ui_state_read_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
     if (id == contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE) {
         const auto& port = item_inventory_state_write_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
@@ -395,6 +406,12 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         // 面板写端口为 core.ui_state owner 私有：避免绕过 owner 直接改游戏面板栈。
         if (requirement.id == contracts::QolPortId::QOL_PORT_UI_WRITE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.ui_state") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_UI_STATE_READ &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "core.ui_state") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
