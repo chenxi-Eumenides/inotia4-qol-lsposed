@@ -19,6 +19,7 @@ using namespace qol::contracts;
 QolFrameHandler g_frame_handler = nullptr;
 uint64_t g_frame_task = 0;
 uint32_t g_native_reads = 0;
+bool g_native_read_fails = false;
 const char* g_native_screen = "world";
 const char* g_native_panel = "";
 const char* g_native_dialog = "{\"type\":\"none\",\"options\":[]}";
@@ -36,6 +37,7 @@ QolResult read_snapshot(char* screen, uint32_t screen_capacity, uint32_t* screen
                         char* panel, uint32_t panel_capacity, uint32_t* panel_size,
                         char* dialog, uint32_t dialog_capacity, uint32_t* dialog_size) {
     ++g_native_reads;
+    if (g_native_read_fails) return error(kQolErrNotReady, "simulated snapshot failure", 26);
     const QolResult screen_result =
         copy_field(screen, screen_capacity, screen_size, g_native_screen);
     if (!succeeded(screen_result)) return screen_result;
@@ -79,21 +81,24 @@ const HttpQueryHandlerDescriptor* route(HttpMethod method, const char* path) {
     return nullptr;
 }
 
-std::string query(HttpMethod method, const char* path) {
+std::string query(HttpMethod method, const char* path, uint16_t* out_status = nullptr) {
     const HttpQueryHandlerDescriptor* handler = route(method, path);
     assert(handler != nullptr && handler->handler != nullptr);
     uint8_t output[16384]{};
     HttpReq request{};
     HttpRes response{output, sizeof(output), 0, 0};
-    assert(succeeded(handler->handler(&request, &response, handler->ctx)));
-    assert(response.status == 200);
+    const QolResult result = handler->handler(&request, &response, handler->ctx);
+    if (out_status != nullptr) *out_status = response.status;
+    if (response.status == 200) assert(succeeded(result));
+    else assert(response.status == 503 && !succeeded(result));
     return std::string(reinterpret_cast<const char*>(output), response.body_size);
 }
 
 void test_native_fallback_and_keysets(const UiStateApi* api) {
     g_native_screen = "panel_inventory";
     g_native_panel = "panel_inventory";
-    g_native_dialog = "{\"type\":\"inventory\",\"options\":[{\"id\":\"close\",\"label\":\"关闭\"}]}";
+    g_native_dialog =
+        "{\"type\":\"npc\",\"text\":\"say \\\"type\\\" and \\\\ path\",\"speaker\":\"merchant\",\"displayed\":true,\"options\":[{\"id\":\"0\",\"label\":\"Open\",\"meta\":{\"type\":\"nested\"}}]}";
     assert(g_frame_handler != nullptr);
     g_frame_handler(1, nullptr);
     const uint32_t reads_after_snapshot = g_native_reads;
@@ -151,15 +156,64 @@ void test_custom_dialog_generation_and_mapping(const UiStateApi* api) {
     std::memset(title2, 'z', sizeof(title2) - 1);
     std::memset(option_c, 'z', sizeof(option_c) - 1);
     assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
-           "{\"type\":\"save_backup.confirm\",\"title\":\"Backup\",\"options\":[{\"id\":\"0\",\"label\":\"Save\"}],\"active\":true}");
+           "{\"type\":\"save_backup.confirm\",\"text\":\"say \\\"type\\\" and \\\\ path\",\"speaker\":\"merchant\",\"displayed\":true,\"options\":[{\"id\":\"0\",\"label\":\"Open\",\"meta\":{\"type\":\"nested\"}}]}");
     assert(api->clear_custom_dialog(1, 3).ok == kQolOk);  // Old generation cannot clear new.
     assert(query(HttpMethod::kGet, "/api/ui/dialog").find("save_backup.confirm") !=
            std::string::npos);
     const UiCustomDialogSnapshot late_old{4, 1, "world_teleport.confirm", "Old", labels1, 2};
     assert(api->publish_custom_dialog(&late_old).code == kQolErrConflict);
-    assert(succeeded(api->clear_custom_dialog(2, 4)));
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") == g_native_dialog);
+
+    g_native_dialog = "{\"t\\u0079pe\":\"native\",\"text\":\"escaped value\\\" here\"}";
+    g_frame_handler(3, nullptr);
+    assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
+           "{\"t\\u0079pe\":\"save_backup.confirm\",\"text\":\"escaped value\\\" here\"}");
+
+    g_native_dialog = "{\"text\":\"no top-level type\"}";
+    g_frame_handler(4, nullptr);
+    uint16_t status = 0;
+    assert(query(HttpMethod::kGet, "/api/ui/dialog", &status) ==
+           "{\"ok\":false,\"error\":\"snapshot not ready\"}");
+    assert(status == 503);
+
+    const char* malformed_native = g_native_dialog;
+    assert(succeeded(api->clear_custom_dialog(2, 5)));
+    assert(query(HttpMethod::kGet, "/api/ui/dialog") == malformed_native);
     assert(api->publish_custom_dialog(&dialog2).code == kQolErrConflict);
+}
+
+void test_native_snapshot_failure_invalidates_all_queries(const UiStateApi* api) {
+    g_native_screen = "world";
+    g_native_panel = "";
+    g_native_dialog = "{\"type\":\"native\",\"text\":\"fresh\"}";
+    g_native_read_fails = false;
+    g_frame_handler(5, nullptr);
+    assert(query(HttpMethod::kGet, "/api/ui/screen") == "{\"screen\":\"world\"}");
+
+    const char* panel_ids[] = {"pending.panel"};
+    const UiCustomPanelsSnapshot panels{6, 1, panel_ids};
+    assert(succeeded(api->publish_custom_panels(&panels)));
+    const char* dialog_labels[] = {"Choose"};
+    const UiCustomDialogSnapshot dialog{6, 3, "custom.confirm", "Title", dialog_labels, 1};
+    assert(succeeded(api->publish_custom_dialog(&dialog)));
+
+    g_native_read_fails = true;
+    g_frame_handler(6, nullptr);
+    for (const char* path : {"/api/ui/screen", "/api/ui/panel", "/api/ui/dialog"}) {
+        uint16_t status = 0;
+        assert(query(HttpMethod::kGet, path, &status) ==
+               "{\"ok\":false,\"error\":\"snapshot not ready\"}");
+        assert(status == 503);
+    }
+
+    g_native_read_fails = false;
+    g_native_screen = "main_menu";
+    g_native_panel = "";
+    g_native_dialog = "{\"type\":\"fresh\",\"text\":\"new sample\"}";
+    g_frame_handler(7, nullptr);
+    assert(query(HttpMethod::kGet, "/api/ui/screen") == "{\"screen\":\"main_menu\"}");
+    assert(query(HttpMethod::kGet, "/api/ui/panel") == "{\"panel\":\"panel_pending.panel\"}");
+    assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
+           "{\"type\":\"custom.confirm\",\"text\":\"new sample\"}");
 }
 
 }  // namespace
@@ -197,6 +251,7 @@ int main() {
 
     test_native_fallback_and_keysets(api);
     test_custom_dialog_generation_and_mapping(api);
+    test_native_snapshot_failure_invalidates_all_queries(api);
 
     descriptor.deactivate(context);
     assert(g_frame_handler == nullptr);

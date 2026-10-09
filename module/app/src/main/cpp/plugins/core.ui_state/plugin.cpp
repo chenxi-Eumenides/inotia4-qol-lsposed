@@ -32,6 +32,8 @@ struct UiSnapshotState {
     char screen[kScreenCapacity] = "loading";
     char native_panel[kPanelCapacity] = {};
     char native_dialog[kDialogCapacity] = "{\"error\":\"not in game\"}";
+    bool native_snapshot_valid = false;
+    uint64_t native_snapshot_epoch = 0;
     uint32_t custom_panel_count = 0;
     char custom_panel_ids[contracts::kUiStateMaxCustomPanels]
                          [contracts::kUiStateMaxPanelIdBytes]{};
@@ -215,7 +217,15 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 };
 
 int32_t native_snapshot_tick(int64_t, void*) {
-    if (g_ui_state_read == nullptr || g_ui_state_read->read.read_snapshot == nullptr) return 1;
+    auto invalidate_snapshot = [] {
+        std::lock_guard<std::mutex> lock(g_snapshot_mutex);
+        g_snapshot.native_snapshot_valid = false;
+        ++g_snapshot.native_snapshot_epoch;
+    };
+    if (g_ui_state_read == nullptr || g_ui_state_read->read.read_snapshot == nullptr) {
+        invalidate_snapshot();
+        return 1;
+    }
     char screen[kScreenCapacity]{};
     char panel[kPanelCapacity]{};
     char dialog[kDialogCapacity]{};
@@ -228,12 +238,15 @@ int32_t native_snapshot_tick(int64_t, void*) {
     if (!contracts::succeeded(result) || screen_size >= sizeof(screen) ||
         panel_size >= sizeof(panel) || dialog_size >= sizeof(dialog) ||
         screen[screen_size] != '\0' || panel[panel_size] != '\0' || dialog[dialog_size] != '\0') {
+        invalidate_snapshot();
         return 1;
     }
     std::lock_guard<std::mutex> lock(g_snapshot_mutex);
     std::memcpy(g_snapshot.screen, screen, screen_size + 1);
     std::memcpy(g_snapshot.native_panel, panel, panel_size + 1);
     std::memcpy(g_snapshot.native_dialog, dialog, dialog_size + 1);
+    g_snapshot.native_snapshot_valid = true;
+    ++g_snapshot.native_snapshot_epoch;
     return 1;
 }
 
@@ -241,6 +254,7 @@ struct UiSnapshotCopy {
     char screen[kScreenCapacity]{};
     char native_panel[kPanelCapacity]{};
     char native_dialog[kDialogCapacity]{};
+    bool native_snapshot_valid = false;
     uint32_t custom_panel_count = 0;
     char custom_panel_ids[contracts::kUiStateMaxCustomPanels]
                          [contracts::kUiStateMaxPanelIdBytes]{};
@@ -258,6 +272,7 @@ UiSnapshotCopy copy_ui_snapshot() {
     std::memcpy(copy.screen, g_snapshot.screen, sizeof(copy.screen));
     std::memcpy(copy.native_panel, g_snapshot.native_panel, sizeof(copy.native_panel));
     std::memcpy(copy.native_dialog, g_snapshot.native_dialog, sizeof(copy.native_dialog));
+    copy.native_snapshot_valid = g_snapshot.native_snapshot_valid;
     copy.custom_panel_count = g_snapshot.custom_panel_count;
     std::memcpy(copy.custom_panel_ids, g_snapshot.custom_panel_ids,
                 sizeof(copy.custom_panel_ids));
@@ -301,6 +316,205 @@ std::string json_quote(const char* value) {
     return out;
 }
 
+class JsonScanner {
+public:
+    explicit JsonScanner(const std::string& input) : input_(input) {}
+
+    bool replace_top_level_type(const char* replacement, std::string* output) {
+        if (replacement == nullptr || output == nullptr) return false;
+        skip_whitespace();
+        if (!consume('{')) return false;
+        skip_whitespace();
+        bool found_type = false;
+        size_t type_begin = 0;
+        size_t type_end = 0;
+        if (consume('}')) return false;
+        for (;;) {
+            std::string key;
+            if (!parse_string(&key)) return false;
+            skip_whitespace();
+            if (!consume(':')) return false;
+            skip_whitespace();
+            if (key == "type") {
+                if (found_type || position_ >= input_.size() || input_[position_] != '"') {
+                    return false;
+                }
+                found_type = true;
+                type_begin = position_;
+                if (!parse_string(nullptr)) return false;
+                type_end = position_;
+            } else if (!parse_value(1)) {
+                return false;
+            }
+            skip_whitespace();
+            if (consume('}')) break;
+            if (!consume(',')) return false;
+            skip_whitespace();
+        }
+        skip_whitespace();
+        if (!found_type || position_ != input_.size()) return false;
+        *output = input_.substr(0, type_begin) + json_quote(replacement) +
+                  input_.substr(type_end);
+        return true;
+    }
+
+private:
+    static constexpr unsigned int kMaxDepth = 64;
+
+    void skip_whitespace() {
+        while (position_ < input_.size()) {
+            const char c = input_[position_];
+            if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+            ++position_;
+        }
+    }
+
+    bool consume(char expected) {
+        if (position_ >= input_.size() || input_[position_] != expected) return false;
+        ++position_;
+        return true;
+    }
+
+    bool parse_string(std::string* decoded) {
+        if (!consume('"')) return false;
+        if (decoded != nullptr) decoded->clear();
+        while (position_ < input_.size()) {
+            const unsigned char c = static_cast<unsigned char>(input_[position_++]);
+            if (c == '"') return true;
+            if (c < 0x20) return false;
+            if (c != '\\') {
+                if (decoded != nullptr) decoded->push_back(static_cast<char>(c));
+                continue;
+            }
+            if (position_ >= input_.size()) return false;
+            const char escaped = input_[position_++];
+            if (escaped == 'u') {
+                if (input_.size() - position_ < 4) return false;
+                unsigned int codepoint = 0;
+                for (int i = 0; i < 4; ++i) {
+                    const char digit = input_[position_++];
+                    codepoint <<= 4;
+                    if (digit >= '0' && digit <= '9') codepoint |= digit - '0';
+                    else if (digit >= 'a' && digit <= 'f') codepoint |= digit - 'a' + 10;
+                    else if (digit >= 'A' && digit <= 'F') codepoint |= digit - 'A' + 10;
+                    else return false;
+                }
+                if (decoded != nullptr) {
+                    decoded->push_back(codepoint <= 0x7f ? static_cast<char>(codepoint) : '\x7f');
+                }
+                continue;
+            }
+            char value = '\0';
+            switch (escaped) {
+                case '"': value = '"'; break;
+                case '\\': value = '\\'; break;
+                case '/': value = '/'; break;
+                case 'b': value = '\b'; break;
+                case 'f': value = '\f'; break;
+                case 'n': value = '\n'; break;
+                case 'r': value = '\r'; break;
+                case 't': value = '\t'; break;
+                default: return false;
+            }
+            if (decoded != nullptr) decoded->push_back(value);
+        }
+        return false;
+    }
+
+    bool parse_value(unsigned int depth) {
+        if (depth > kMaxDepth) return false;
+        skip_whitespace();
+        if (position_ >= input_.size()) return false;
+        const char c = input_[position_];
+        if (c == '"') return parse_string(nullptr);
+        if (c == '{') return parse_object(depth + 1);
+        if (c == '[') return parse_array(depth + 1);
+        if (c == 't') return parse_literal("true");
+        if (c == 'f') return parse_literal("false");
+        if (c == 'n') return parse_literal("null");
+        return parse_number();
+    }
+
+    bool parse_object(unsigned int depth) {
+        if (depth > kMaxDepth || !consume('{')) return false;
+        skip_whitespace();
+        if (consume('}')) return true;
+        for (;;) {
+            if (!parse_string(nullptr)) return false;
+            skip_whitespace();
+            if (!consume(':') || !parse_value(depth + 1)) return false;
+            skip_whitespace();
+            if (consume('}')) return true;
+            if (!consume(',')) return false;
+            skip_whitespace();
+        }
+    }
+
+    bool parse_array(unsigned int depth) {
+        if (depth > kMaxDepth || !consume('[')) return false;
+        skip_whitespace();
+        if (consume(']')) return true;
+        for (;;) {
+            if (!parse_value(depth + 1)) return false;
+            skip_whitespace();
+            if (consume(']')) return true;
+            if (!consume(',')) return false;
+            skip_whitespace();
+        }
+    }
+
+    bool parse_literal(const char* value) {
+        const size_t length = std::strlen(value);
+        if (input_.compare(position_, length, value) != 0) return false;
+        position_ += length;
+        return true;
+    }
+
+    bool parse_number() {
+        const size_t begin = position_;
+        consume('-');
+        if (position_ >= input_.size()) return false;
+        if (input_[position_] == '0') {
+            ++position_;
+            if (position_ < input_.size() && input_[position_] >= '0' && input_[position_] <= '9') {
+                return false;
+            }
+        } else {
+            if (input_[position_] < '1' || input_[position_] > '9') return false;
+            while (position_ < input_.size() && input_[position_] >= '0' && input_[position_] <= '9') {
+                ++position_;
+            }
+        }
+        if (consume('.')) {
+            const size_t fraction_begin = position_;
+            while (position_ < input_.size() && input_[position_] >= '0' && input_[position_] <= '9') {
+                ++position_;
+            }
+            if (position_ == fraction_begin) return false;
+        }
+        if (position_ < input_.size() && (input_[position_] == 'e' || input_[position_] == 'E')) {
+            ++position_;
+            if (position_ < input_.size() && (input_[position_] == '+' || input_[position_] == '-')) {
+                ++position_;
+            }
+            const size_t exponent_begin = position_;
+            while (position_ < input_.size() && input_[position_] >= '0' && input_[position_] <= '9') {
+                ++position_;
+            }
+            if (position_ == exponent_begin) return false;
+        }
+        return position_ > begin;
+    }
+
+    const std::string& input_;
+    size_t position_ = 0;
+};
+
+bool replace_dialog_type(const char* native_json, const char* custom_type, std::string* output) {
+    if (native_json == nullptr || custom_type == nullptr || output == nullptr) return false;
+    return JsonScanner(native_json).replace_top_level_type(custom_type, output);
+}
+
 QolResult choice_http_error(contracts::HttpRes* response, uint16_t status, const char* message);
 
 QolResult query_response(contracts::HttpRes* response, const std::string& body) {
@@ -315,11 +529,17 @@ QolResult query_response(contracts::HttpRes* response, const std::string& body) 
 
 QolResult screen_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
     const UiSnapshotCopy snapshot = copy_ui_snapshot();
+    if (!snapshot.native_snapshot_valid) {
+        return choice_http_error(response, 503, "snapshot not ready");
+    }
     return query_response(response, "{\"screen\":" + json_quote(snapshot.screen) + "}");
 }
 
 QolResult panel_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
     const UiSnapshotCopy snapshot = copy_ui_snapshot();
+    if (!snapshot.native_snapshot_valid) {
+        return choice_http_error(response, 503, "snapshot not ready");
+    }
     if (snapshot.custom_panel_count > 0) {
         const std::string panel = std::string("panel_") +
                                   snapshot.custom_panel_ids[snapshot.custom_panel_count - 1];
@@ -333,18 +553,15 @@ QolResult panel_query(const contracts::HttpReq*, contracts::HttpRes* response, v
 
 QolResult dialog_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
     const UiSnapshotCopy snapshot = copy_ui_snapshot();
-    if (!snapshot.custom_dialog_active) return query_response(response, snapshot.native_dialog);
-    std::string body = "{\"type\":" + json_quote(snapshot.custom_dialog_type) +
-                       ",\"title\":";
-    body += snapshot.custom_dialog_has_title ? json_quote(snapshot.custom_dialog_title) : "null";
-    body += ",\"options\":[";
-    for (uint32_t i = 0; i < snapshot.custom_dialog_option_count; ++i) {
-        if (i > 0) body += ',';
-        body += "{\"id\":" + json_quote(std::to_string(i).c_str()) +
-                ",\"label\":" + json_quote(snapshot.custom_dialog_options[i]) + "}";
+    if (!snapshot.native_snapshot_valid) {
+        return choice_http_error(response, 503, "snapshot not ready");
     }
-    body += "],\"active\":true}";
-    return query_response(response, body);
+    if (!snapshot.custom_dialog_active) return query_response(response, snapshot.native_dialog);
+    std::string replaced;
+    if (!replace_dialog_type(snapshot.native_dialog, snapshot.custom_dialog_type, &replaced)) {
+        return choice_http_error(response, 503, "snapshot not ready");
+    }
+    return query_response(response, replaced);
 }
 
 // 对话写（HTTP 写路由）的票据结果处理器 id（全局 typed handler id 空间；core.ui_state 前缀）。
@@ -370,8 +587,10 @@ QolResult choice_http_error(contracts::HttpRes* response, uint16_t status, const
     std::memcpy(response->body, body.data(), body.size());
     response->body_size = static_cast<uint32_t>(body.size());
     response->status = status;
-    return contracts::error(status == 400 ? kQolErrInvalidArgument : kQolErrInternal, message,
-                            static_cast<uint32_t>(std::strlen(message)));
+    const int32_t code = status == 400 ? kQolErrInvalidArgument
+                         : status == 503 ? kQolErrNotReady
+                                          : kQolErrInternal;
+    return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
 }
 
 QolResult choice_http_body(contracts::HttpRes* response, const std::string& body) {
