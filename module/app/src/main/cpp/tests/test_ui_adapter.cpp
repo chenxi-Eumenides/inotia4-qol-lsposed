@@ -266,6 +266,15 @@ namespace qol::game {
 bool g_attr_insert_value_color_ok = true;
 bool attr_insert_value_color(char*, char*, char) { return g_attr_insert_value_color_ok; }
 bool game_host_is_main_thread() { return g_game_main_thread; }
+QolResult craft_stuff_slot_index(void* transient_control, int32_t* out_index) {
+    if (out_index == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    *out_index = -1;
+    if (transient_control != reinterpret_cast<void*>(0x55)) {
+        return contracts::error(kQolErrNotFound, "not found", 9);
+    }
+    *out_index = 2;
+    return contracts::ok();
+}
 bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
     ++g_popup_snapshot_reads;
     if (!g_popup_snapshot_ok || out_count == nullptr || out_top_enter_vma == nullptr) return false;
@@ -390,6 +399,12 @@ int main() {
     CHECK(adapter->set_button_enabled != nullptr);
     CHECK(adapter->draw_native_text_button_label != nullptr);
     CHECK(adapter->draw_native_close_button != nullptr);
+    CHECK(adapter->craft_stuff_slot_index != nullptr);
+    int32_t craft_slot = -1;
+    CHECK(adapter->craft_stuff_slot_index(reinterpret_cast<void*>(0x55), &craft_slot).ok == kQolOk &&
+          craft_slot == 2);
+    CHECK(adapter->craft_stuff_slot_index(reinterpret_cast<void*>(0x56), &craft_slot).code ==
+          kQolErrNotFound);
 
     // control_pressed 必须读原版 CB_STATE（game_symbols.h），而非内联文本区 0x08：
     // 仅 0x08 置位不算按下。
@@ -422,8 +437,12 @@ int main() {
                   "ui adapter label helper must remain a tail append");
     static_assert(offsetof(qol::contracts::QolUiAdapter, draw_native_text_button_label) +
                       sizeof(adapter->draw_native_text_button_label) ==
-                  offsetof(qol::contracts::QolUiAdapter, draw_native_close_button),
-                  "ui adapter close draw must append the table");
+                   offsetof(qol::contracts::QolUiAdapter, draw_native_close_button),
+                   "ui adapter close draw must append the table");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, draw_native_close_button) +
+                      sizeof(adapter->draw_native_close_button) ==
+                   offsetof(qol::contracts::QolUiAdapter, craft_stuff_slot_index),
+                   "craft slot identity must append the UI adapter table");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
@@ -515,7 +534,7 @@ int main() {
           g_border_rect[3] == 140);
     CHECK(adapter->draw_border_rect(0, 0, 47, 140).code == kQolErrInvalidArgument);
 
-    CHECK(adapter->minor == 16);
+    CHECK(adapter->minor == 17);
     CHECK(adapter->set_clip != nullptr && adapter->reset_clip != nullptr);
     CHECK(adapter->set_clip(-12, 34, 320, 140).ok == kQolOk);
     CHECK(g_set_clip_calls == 1);

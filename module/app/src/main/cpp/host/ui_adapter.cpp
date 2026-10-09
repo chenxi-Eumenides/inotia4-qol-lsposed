@@ -20,6 +20,7 @@
 #include "game/access/popup_state.h"
 #include "game/access/ui_state.h"
 #include "game/adapter_ports/game_host_port.h"
+#include "game/adapter_ports/craft_port.h"
 #include "game/state/game_state.h"
 
 namespace qol::host {
@@ -490,6 +491,10 @@ QolResult draw_native_close_button(UiRect rect, uint8_t pressed) {
     return qol::game::ui_draw_native_close_button(game_rect(rect), pressed)
                ? contracts::ok()
                : not_ready();
+}
+
+QolResult craft_stuff_slot_index(void* transient_control, int32_t* out_index) {
+    return qol::game::craft_stuff_slot_index(transient_control, out_index);
 }
 
 QolResult control_item_identity(QolUiHandle control, contracts::QolItemHandle* out_item) {
@@ -995,7 +1000,8 @@ const QolUiAdapter g_ui_adapter{
         &draw_native_text_button_background,
         &set_button_enabled,
         &draw_native_text_button_label,
-        &draw_native_close_button,
+         &draw_native_close_button,
+         &craft_stuff_slot_index,
 };
 
 }  // namespace

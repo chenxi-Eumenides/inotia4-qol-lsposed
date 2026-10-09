@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "item_handle.h"
+
 // 自定义合成「结果层」能力契约（ARCHITECTURE.md §3.4；C2 Step 2）。
 //
 // 定位：把 plugins/custom_recipe 的合成结果层（3 格隐式配方 + 宝石升阶）暴露为只读/纯决策
@@ -19,7 +21,7 @@ namespace qol::contracts {
 
 constexpr const char* kCraftResultCapabilityId = "craft_result";
 constexpr int32_t kCraftResultVersionMajor = 1;
-constexpr int32_t kCraftResultVersionMinor = 0;
+constexpr int32_t kCraftResultVersionMinor = 1;
 
 // 放料（3 格隐式配方）结果（与 plugins/custom_recipe 现枚举同名同值）。
 enum class PlaceOutcome : uint8_t {
@@ -66,7 +68,7 @@ enum class CraftGate : uint8_t {
 // 放料：调用方读好的选中物品与库存状态。
 struct CraftPlaceInput {
     int64_t slot_index;          // 目标填入格 0..2
-    void* item;                  // 选中的库存物品（nullptr = 无事发生）
+    QolItemHandle item;           // 选中的库存物品（无效 handle = 无事发生）
     bool item_stackable;         // 是否可堆叠
     uint16_t item_category;      // item 的类别（item+I_TYPE bits6-15）
     int placed_same_object;      // 该对象已在其它格出现的次数
@@ -82,7 +84,7 @@ struct CraftPrepareInput {
 // 执行：确认回调时刻重读的三格内容（provider 不读控件）。
 struct CraftExecuteInput {
     uint16_t slot_categories[3];  // 三格类别（0 = 空）
-    void* items[3];               // 三格物品指针（nullptr = 空）
+    QolItemHandle items[3];        // 三格物品身份（无效 handle = 空）
     int held_counts[3];           // 与 items 各格类别对应的持有总数（可堆叠复核用）
 };
 
@@ -101,7 +103,7 @@ struct CraftMaterialNeedOutput {
 // 产物（宝石升阶）：mix_type 命中时原地改写 item。
 struct CraftMakeItemInput {
     uint32_t mix_type;
-    void* item;                            // 目标宝石物品（原地读改写数值位）
+    QolItemHandle item;                    // 目标宝石物品（原地读改写数值位）
     int64_t (*rand_inclusive)(int, int);   // 闭区间随机源（生产用 MATH_GetRandom）
 };
 
@@ -116,8 +118,8 @@ struct CraftResultApi {
     // mix_type 借用的原版 UI type（0..4）；-1 = 非模块配方。
     int64_t (*form_ui_type_for_mix_type)(uint32_t mix_type);
     // kJewelTierUp 合成键前置判定；target_item 为当前目标槽物品（调用方读好后传入）。
-    CraftGate (*craft_gate)(void* target_item);
-    bool (*is_jewel_item)(void* item);
+    CraftGate (*craft_gate)(QolItemHandle target_item);
+    bool (*is_jewel_item)(QolItemHandle item);
     PlaceOutcome (*place)(const CraftPlaceInput* input);
     PrepareOutcome (*prepare)(const CraftPrepareInput* input);
     CraftExecuteResult (*execute)(const CraftExecuteInput* input);

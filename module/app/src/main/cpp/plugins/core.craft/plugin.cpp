@@ -26,8 +26,8 @@ QOL_CRAFT_FACT_READ(ui_type, (uint32_t* out), (out))
 QOL_CRAFT_FACT_READ(panel_state, (int32_t* out), (out))
 QOL_CRAFT_FACT_READ(mix_type, (uint32_t* out), (out))
 QOL_CRAFT_FACT_READ(selected_stuff_index, (int64_t* out), (out))
-QOL_CRAFT_FACT_READ(selected_stuff_item, (void** out), (out))
-QOL_CRAFT_FACT_READ(stuff_item, (uint32_t index, void** out), (index, out))
+QOL_CRAFT_FACT_READ(selected_stuff_item, (contracts::QolItemHandle* out), (out))
+QOL_CRAFT_FACT_READ(stuff_item, (uint32_t index, contracts::QolItemHandle* out), (index, out))
 QOL_CRAFT_FACT_READ(category_held_count, (int32_t category, int32_t* out), (category, out))
 QOL_CRAFT_FACT_READ(character_level, (int32_t* out), (out))
 
@@ -58,12 +58,12 @@ QolResult read_only_selected_stuff_index(int64_t* out) {
     return g_port->read_only.selected_stuff_index(out);
 }
 
-QolResult read_only_selected_stuff_item(void** out) {
+QolResult read_only_selected_stuff_item(contracts::QolItemHandle* out) {
     if (g_port == nullptr || g_port->read_only.selected_stuff_item == nullptr) return not_ready();
     return g_port->read_only.selected_stuff_item(out);
 }
 
-QolResult read_only_stuff_item(uint32_t index, void** out) {
+QolResult read_only_stuff_item(uint32_t index, contracts::QolItemHandle* out) {
     if (g_port == nullptr || g_port->read_only.stuff_item == nullptr) return not_ready();
     return g_port->read_only.stuff_item(index, out);
 }
@@ -78,17 +78,17 @@ QolResult read_only_character_level(int32_t* out) {
     return g_port->read_only.character_level(out);
 }
 
-QolResult read_only_stuff_slot_control(uint32_t index, void** out) {
-    if (g_port == nullptr || g_port->read_only.stuff_slot_control == nullptr) return not_ready();
-    return g_port->read_only.stuff_slot_control(index, out);
+QolResult read_only_stuff_slot_available(uint32_t index, int32_t* out_available) {
+    if (g_port == nullptr || g_port->read_only.stuff_slot_available == nullptr) return not_ready();
+    return g_port->read_only.stuff_slot_available(index, out_available);
 }
 
-QolResult read_only_target_slot_item(void** out) {
+QolResult read_only_target_slot_item(contracts::QolItemHandle* out) {
     if (g_port == nullptr || g_port->read_only.target_slot_item == nullptr) return not_ready();
     return g_port->read_only.target_slot_item(out);
 }
 
-QolResult read_only_selected_inventory_item(void** out) {
+QolResult read_only_selected_inventory_item(contracts::QolItemHandle* out) {
     if (g_port == nullptr || g_port->read_only.selected_inventory_item == nullptr) return not_ready();
     return g_port->read_only.selected_inventory_item(out);
 }
@@ -108,7 +108,7 @@ const contracts::CraftFactsApi kCraftFactsApi{
      &stuff_item, &category_held_count, &character_level},
     {&read_only_ui_type, &read_only_get_ui_type, &read_only_panel_state, &read_only_mix_type,
      &read_only_selected_stuff_index, &read_only_selected_stuff_item, &read_only_stuff_item,
-     &read_only_category_held_count, &read_only_character_level, &read_only_stuff_slot_control,
+      &read_only_category_held_count, &read_only_character_level, &read_only_stuff_slot_available,
      &read_only_target_slot_item, &read_only_selected_inventory_item, &read_only_selected_recipe,
      &read_only_stuff_slot_count},
 };
@@ -141,7 +141,8 @@ int plugin_install(contracts::PluginContext& ctx) {
                               {contracts::kQolPortCraftVersion.major,
                                contracts::kQolPortCraftVersion.minor}) ||
         g_port->read.ui_type == nullptr || g_port->read.stuff_item == nullptr ||
-        g_port->read_only.panel_state == nullptr || g_port->read_only.stuff_slot_control == nullptr) {
+        g_port->read_only.panel_state == nullptr ||
+        g_port->read_only.stuff_slot_available == nullptr) {
         g_port = nullptr;
         return 1;
     }

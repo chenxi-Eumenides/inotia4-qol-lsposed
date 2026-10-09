@@ -99,9 +99,13 @@ int plugin_install(contracts::PluginContext& ctx) {
     const auto* write_port = static_cast<const contracts::QolCustomRecipeWritePort*>(ctx.ports[0]);
     if (!contracts::satisfies(write_port->abi_version,
                               {contracts::kQolPortCustomRecipeWriteVersion.major,
-                               contracts::kQolPortCustomRecipeWriteVersion.minor}) ||
+                                contracts::kQolPortCustomRecipeWriteVersion.minor}) ||
         write_port->write_stuff_need == nullptr || write_port->set_stuff_item == nullptr ||
         write_port->description_set_off == nullptr ||
+        (write_port->create_perfect_item == nullptr && write_port->create_item == nullptr) ||
+        write_port->save_item == nullptr || write_port->free_item == nullptr ||
+        write_port->read_jewel_word == nullptr || write_port->write_jewel_word == nullptr ||
+        write_port->set_max_socket_enchant == nullptr ||
         ctx.sdk->commands.register_typed_handler == nullptr ||
         ctx.sdk->commands.unregister_typed_handler == nullptr ||
         ctx.sdk->commands.register_typed_handler(contracts::kCraftWriteStuffNeedHandlerId,
@@ -216,7 +220,7 @@ bool set_stuff_item_handler(void*, const uint8_t* payload, uint32_t size) {
     return handle_set_stuff_item_command(payload, size);
 }
 
-// provides=craft_result v1.0（结果层能力，消费者=craft_ui）。
+// provides=craft_result v1.1（结果层能力，消费者=craft_ui）。
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kCraftResultCapabilityId,
      QolVersion{static_cast<uint16_t>(contracts::kCraftResultVersionMajor),

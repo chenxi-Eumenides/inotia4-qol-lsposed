@@ -4,6 +4,7 @@
 #include <type_traits>
 
 #include "commands.h"
+#include "item_handle.h"
 
 namespace qol::contracts {
 
@@ -18,7 +19,7 @@ struct CraftWriteStuffNeedPayload {
 
 struct CraftSetStuffItemPayload {
     uint32_t index;
-    void* item;
+    QolItemHandle item;
 };
 
 static_assert(sizeof(CraftWriteStuffNeedPayload) <= kTypedCommandPayloadCapacity,

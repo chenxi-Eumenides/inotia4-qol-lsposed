@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 11;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 16;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 17;
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
 using QolUiHandle = void*;
@@ -400,6 +400,9 @@ struct QolUiAdapter {
     // 仅绘制原生 X 关闭贴图（unit 0x0f loc 0x3a，pressed 叠加 loc 0x34 中心对齐）；
     // 不管理命中、事件或业务状态。图集由游戏拥有，只确保加载，不卸载。
     QolResult (*draw_native_close_button)(UiRect rect, uint8_t pressed);
+    // Synchronous craft hook identity check. The native pointer is the current hook argument only;
+    // the adapter compares it with the live UIMix slot children and never retains it.
+    QolResult (*craft_stuff_slot_index)(void* transient_control, int32_t* out_index);
 };
 
 }  // namespace qol::contracts

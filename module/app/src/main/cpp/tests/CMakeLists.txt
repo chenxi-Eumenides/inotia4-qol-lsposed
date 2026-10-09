@@ -240,6 +240,19 @@ target_include_directories(custom_recipe_tests PRIVATE
 target_compile_features(custom_recipe_tests PRIVATE cxx_std_17)
 add_test(NAME custom_recipe_tests COMMAND custom_recipe_tests)
 
+# Exercise the production custom_recipe provider through typed craft item handles and ports.
+add_executable(custom_recipe_handle_chain_tests
+    test_custom_recipe_handle_chain.cpp
+    ${CPP_DIR}/plugins/custom_recipe/feature.cpp
+    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
+)
+target_include_directories(custom_recipe_handle_chain_tests PRIVATE ${CPP_DIR})
+target_compile_features(custom_recipe_handle_chain_tests PRIVATE cxx_std_17)
+set_target_properties(custom_recipe_handle_chain_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME custom_recipe_handle_chain_tests COMMAND custom_recipe_handle_chain_tests)
+
 add_executable(autosell_rules_tests
     test_autosell_rules.cpp
     ${CPP_DIR}/plugins/autosell/rules.cpp
@@ -982,6 +995,16 @@ target_include_directories(craft_ui_guard_tests PRIVATE
 )
 target_compile_features(craft_ui_guard_tests PRIVATE cxx_std_17)
 add_test(NAME craft_ui_guard_tests COMMAND craft_ui_guard_tests)
+
+add_executable(craft_ui_handle_identity_tests
+    test_craft_ui_handle_identity.cpp
+    ${CPP_DIR}/plugins/craft_ui/feature.cpp
+)
+target_include_directories(craft_ui_handle_identity_tests PRIVATE ${CPP_DIR})
+target_compile_features(craft_ui_handle_identity_tests PRIVATE cxx_std_17)
+set_target_properties(craft_ui_handle_identity_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME craft_ui_handle_identity_tests COMMAND craft_ui_handle_identity_tests)
 
 # L2：Host SDK adapter 表转发与生命周期句柄 host 测试。
 add_executable(host_adapter_tests

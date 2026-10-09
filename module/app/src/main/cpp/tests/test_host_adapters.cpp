@@ -25,6 +25,8 @@
 #include "game/state/game_state.h"
 #include "game/adapter_ports/character_extras_port.h"
 #include "game/adapter_ports/craft_port.h"
+#include "game/adapter_ports/craft_ui_write_port.h"
+#include "game/adapter_ports/custom_recipe_write_port.h"
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
@@ -46,6 +48,7 @@
 #include "infra/scheduler.h"
 #include "infra/store.h"
 #include "host/owner_identity.h"
+#include "host/ui_adapter.h"
 #include <sys/stat.h>
 #include <unistd.h>
 #include "infra/text_scope.h"
@@ -68,6 +71,17 @@ void* g_inven = reinterpret_cast<void*>(1);
 std::array<uint8_t, 0x200> g_inventory_physical_item{};
 std::array<uint8_t, 0x200> g_inventory_new_item{};
 void* g_raw_inventory_item = reinterpret_cast<void*>(0x9);
+int g_craft_stuff_item_object = 0;
+int g_craft_target_item_object = 0;
+int g_craft_selected_inventory_object = 0;
+std::array<int, 3> g_craft_control_objects{};
+uint8_t g_craft_panel_state = 1;
+void* g_craft_set_target_item = nullptr;
+std::array<void*, 3> g_craft_set_stuff_items{};
+void* g_craft_created_item = nullptr;
+void* g_craft_saved_item = nullptr;
+void* g_craft_freed_item = nullptr;
+bool g_craft_handle_was_stale_at_free = false;
 
 std::string op_ok() { return "{\"ok\":true}"; }
 std::string op_err(const char* message) {
@@ -112,6 +126,19 @@ int32_t fake_move_item(void* source, int32_t count, int32_t bag, int32_t slot) {
     g_move_item_slot = slot;
     return g_move_item_return;
 }
+void* fake_craft_create_perfect_item(int32_t) {
+    g_craft_created_item = g_move_merge_fake_memory.data() + 0x100;
+    return g_craft_created_item;
+}
+int fake_craft_save_item(void* item, void* param) {
+    g_craft_saved_item = item;
+    return item == g_craft_created_item && param == nullptr ? 1 : 0;
+}
+void fake_craft_free_item(void* item) {
+    g_craft_freed_item = item;
+    g_craft_handle_was_stale_at_free = qol::game::lookup_item(item).slot == 0;
+}
+void fake_control_item_set_item(void*, void*) {}
 decltype(fn_equip_item_from_inven_to_slot) fn_equip_item_from_inven_to_slot = nullptr;
 decltype(fn_ui_equip_apply_stuff) fn_ui_equip_apply_stuff = nullptr;
 decltype(fn_char_use_item_ex) fn_char_use_item_ex = nullptr;
@@ -303,21 +330,25 @@ bool item_class_no_equip_bit(const void*) { return false; }
 int equip_desc_role_type() { return 0; }
 int64_t craft_ui_type() { return 1; }
 int64_t craft_get_ui_type() { return 1; }
-uint8_t craft_panel_state() { return 2; }
+uint8_t craft_panel_state() { return g_craft_panel_state; }
 uint32_t craft_mix_type() { return 3; }
 int64_t craft_selected_stuff_index() { return 0; }
-void* craft_stuff_item(size_t) { return reinterpret_cast<void*>(0x1); }
-void* craft_stuff_slot_control(size_t) { return reinterpret_cast<void*>(0x3); }
+void* craft_stuff_item(size_t) { return &g_craft_stuff_item_object; }
+void* craft_stuff_slot_control(size_t index) {
+    return index < g_craft_control_objects.size() ? &g_craft_control_objects[index] : nullptr;
+}
 void* craft_target_slot_control() { return reinterpret_cast<void*>(0x4); }
-void* craft_target_slot_item() { return reinterpret_cast<void*>(0x4); }
-void* craft_selected_inven_item() { return reinterpret_cast<void*>(0x7); }
+void* craft_target_slot_item() { return &g_craft_target_item_object; }
+void* craft_selected_inven_item() { return &g_craft_selected_inventory_object; }
 int64_t craft_selected_recipe_at(int64_t) { return 0; }
 uint32_t craft_stuff_slot_count() { return 3; }
 int craft_category_held_count(uint16_t) { return 5; }
 int craft_character_level() { return 10; }
 void craft_write_stuff_need(size_t, uint16_t) {}
-void craft_set_stuff_item(size_t, void*) {}
-void craft_set_target_slot_item(void*) {}
+void craft_set_stuff_item(size_t index, void* item) {
+    if (index < g_craft_set_stuff_items.size()) g_craft_set_stuff_items[index] = item;
+}
+void craft_set_target_slot_item(void* item) { g_craft_set_target_item = item; }
 void craft_set_cost_zero() {}
 void craft_set_selected_recipe_at(int64_t, int64_t) {}
 void craft_init_mixing_state() {}
@@ -1285,18 +1316,125 @@ int main() {
 
     uint32_t u32_value = 0;
     int64_t i64_value = 0;
+    const void* previous_raw_inventory = g_raw_inventory_item;
+    g_inventory_mode = FakeInventoryMode::kReady;
+    g_inven = reinterpret_cast<void*>(1);
+    g_raw_inventory_item = &g_craft_selected_inventory_object;
+    const qol::contracts::QolItemHandle craft_material_handle = qol::game::register_item(
+        &g_craft_stuff_item_object, qol::contracts::kQolItemHandleOwnerProvider);
+    const qol::contracts::QolItemHandle craft_target_handle = qol::game::register_item(
+        &g_craft_target_item_object, qol::contracts::kQolItemHandleOwnerGame);
+    assert(craft_material_handle.slot != 0 && craft_target_handle.slot != 0);
     assert(craft_port_api.read.ui_type(&u32_value).ok == kQolOk && u32_value == 1);
-    assert(craft_port_api.read.panel_state(&value).ok == kQolOk && value == 2);
+    assert(craft_port_api.read.panel_state(&value).ok == kQolOk && value == 1);
     assert(craft_port_api.read.mix_type(&u32_value).ok == kQolOk && u32_value == 3);
     assert(craft_port_api.read.selected_stuff_index(&i64_value).ok == kQolOk && i64_value == 0);
-    assert(craft_port_api.read.selected_stuff_item(&pointer_value).ok == kQolOk);
-    assert(craft_port_api.read.stuff_item(0, &pointer_value).ok == kQolOk);
+    qol::contracts::QolItemHandle craft_handle{};
+    assert(craft_port_api.read.selected_stuff_item(&craft_handle).ok == kQolOk);
+    assert(craft_handle.slot == craft_material_handle.slot &&
+           craft_handle.generation == craft_material_handle.generation);
+    assert(craft_port_api.read.stuff_item(0, &craft_handle).ok == kQolOk);
+    assert(craft_handle.slot == craft_material_handle.slot &&
+           craft_handle.generation == craft_material_handle.generation);
+    int32_t craft_wrong_thread_code = kQolOk;
+    std::thread craft_wrong_thread([&] {
+        qol::contracts::QolItemHandle thread_handle{};
+        craft_wrong_thread_code = craft_port_api.read.stuff_item(0, &thread_handle).code;
+    });
+    craft_wrong_thread.join();
+    assert(craft_wrong_thread_code == kQolErrBlocked);
     assert(craft_port_api.read.category_held_count(4, &value).ok == kQolOk && value == 5);
     assert(craft_port_api.read.character_level(&value).ok == kQolOk && value == 10);
     assert(craft_port_api.read_only.get_ui_type(&u32_value).ok == kQolOk && u32_value == 1);
-    assert(craft_port_api.read_only.stuff_slot_control(0, &pointer_value).ok == kQolOk);
-    assert(craft_port_api.read_only.target_slot_item(&pointer_value).ok == kQolOk);
-    assert(craft_port_api.read_only.selected_inventory_item(&pointer_value).ok == kQolOk);
+    assert(craft_port_api.read_only.stuff_slot_available(0, &value).ok == kQolOk && value == 1);
+    assert(craft_port_api.read_only.target_slot_item(&craft_handle).ok == kQolOk);
+    assert(craft_handle.slot == craft_target_handle.slot &&
+           craft_handle.generation == craft_target_handle.generation);
+    assert(craft_port_api.read_only.selected_inventory_item(&craft_handle).ok == kQolOk);
+    assert(craft_handle.slot != 0 && craft_handle.generation != 0);
+    uint32_t owner = qol::contracts::kQolItemHandleOwnerAny;
+    const auto selected_inventory_handle = qol::game::lookup_item(
+        &g_craft_selected_inventory_object, &owner);
+    assert(selected_inventory_handle.slot == craft_handle.slot &&
+           selected_inventory_handle.generation == craft_handle.generation &&
+           owner == qol::contracts::kQolItemHandleOwnerGame);
+
+    fn_control_item_set_item = &fake_control_item_set_item;
+    fn_itempool_free = &fake_craft_free_item;
+    const auto& craft_ui_write = qol::game::craft_ui_write_port();
+    assert(craft_ui_write.set_target_slot_item(craft_material_handle).ok == kQolOk);
+    assert(g_craft_set_target_item == &g_craft_stuff_item_object);
+    assert(craft_ui_write.set_target_slot_item({0xFFFFFFFEu, 1}).code == kQolErrNotFound);
+    assert(g_craft_set_target_item == &g_craft_stuff_item_object);
+    assert(craft_ui_write.set_target_slot_item(qol::contracts::kInvalidItemHandle).ok == kQolOk);
+    assert(g_craft_set_target_item == nullptr);
+    const auto& custom_recipe_write = qol::game::custom_recipe_write_port();
+    assert(custom_recipe_write.set_stuff_item(0, craft_material_handle).ok == kQolOk);
+    assert(g_craft_set_stuff_items[0] == &g_craft_stuff_item_object);
+    assert(custom_recipe_write.set_stuff_item(0, {0xFFFFFFFEu, 1}).code == kQolErrNotFound);
+    assert(g_craft_set_stuff_items[0] == &g_craft_stuff_item_object);
+    assert(custom_recipe_write.set_stuff_item(0, qol::contracts::kInvalidItemHandle).ok == kQolOk);
+    assert(g_craft_set_stuff_items[0] == nullptr);
+    assert(custom_recipe_write.save_item(craft_material_handle, &value).code == kQolErrConflict);
+    assert(custom_recipe_write.free_item(craft_material_handle).code == kQolErrConflict);
+    assert(qol::game::lookup_item(&g_craft_stuff_item_object).slot == craft_material_handle.slot);
+
+    int32_t craft_control_slot = -1;
+    assert(qol::game::craft_stuff_slot_index(&g_craft_control_objects[1],
+                                              &craft_control_slot).ok ==
+           kQolOk && craft_control_slot == 1);
+    g_craft_panel_state = 0;
+    assert(qol::game::craft_stuff_slot_index(&g_craft_control_objects[1],
+                                              &craft_control_slot).code ==
+           kQolErrNotFound);
+    assert(item_port_api.read.category(selected_inventory_handle, &value).ok == kQolOk &&
+           value == 4);
+    g_craft_panel_state = 1;
+
+    g_move_merge_fake_memory_enabled = true;
+    fn_item_create_perfect_item = &fake_craft_create_perfect_item;
+    fn_inven_save_item = &fake_craft_save_item;
+    fn_itempool_free = &fake_craft_free_item;
+    uint32_t* product_count = reinterpret_cast<uint32_t*>(g_move_merge_fake_memory.data() + 0x100 + I_COUNT);
+    uint8_t* product_socket = g_move_merge_fake_memory.data() + 0x100 + I_SOCKET;
+    uint16_t* product_enchant = reinterpret_cast<uint16_t*>(
+        g_move_merge_fake_memory.data() + 0x100 + I_ENCHANT);
+    *product_count = 0x12345678u;
+    *product_socket = 0x03;
+    *product_enchant = 0x0002;
+    qol::contracts::QolItemHandle product_handle{};
+    assert(custom_recipe_write.create_perfect_item(4, &product_handle).ok == kQolOk);
+    assert(product_handle.slot != 0 && product_handle.generation != 0);
+    int32_t off_thread_result = kQolOk;
+    std::thread craft_off_thread([&] {
+        uint32_t ignored_word = 0;
+        off_thread_result = custom_recipe_write.read_jewel_word(product_handle, &ignored_word).code;
+    });
+    craft_off_thread.join();
+    assert(off_thread_result == kQolErrBlocked);
+    assert(custom_recipe_write.read_jewel_word(product_handle, &u32_value).ok == kQolOk &&
+           u32_value == 0x12345678u);
+    assert(custom_recipe_write.write_jewel_word(product_handle, 0x87654321u).ok == kQolOk &&
+           *product_count == 0x87654321u);
+    assert(custom_recipe_write.set_max_socket_enchant(product_handle).ok == kQolOk);
+    assert(*product_socket == 0xF3 && *product_enchant == 0x003Eu);
+    int32_t saved = 0;
+    assert(custom_recipe_write.save_item(product_handle, &saved).ok == kQolOk && saved == 1);
+    assert(g_craft_saved_item == g_craft_created_item);
+    assert(custom_recipe_write.free_item(product_handle).ok == kQolOk);
+    assert(g_craft_freed_item == g_craft_created_item && g_craft_handle_was_stale_at_free);
+    assert(custom_recipe_write.read_jewel_word(product_handle, &u32_value).code == kQolErrNotFound);
+    fn_item_create_perfect_item = nullptr;
+    fn_inven_save_item = nullptr;
+    fn_itempool_free = nullptr;
+    g_move_merge_fake_memory_enabled = false;
+
+    const qol::contracts::QolItemHandle saved_material_handle = craft_material_handle;
+    assert(qol::game::invalidate_item(saved_material_handle));
+    assert(craft_port_api.read.stuff_item(0, &craft_handle).code == kQolErrNotReady);
+    assert(craft_handle.slot == 0 && craft_handle.generation == 0);
+    assert(qol::game::lookup_item(&g_craft_stuff_item_object).slot == 0);
+    g_raw_inventory_item = const_cast<void*>(previous_raw_inventory);
     assert(craft_port_api.read_only.selected_recipe(0, &i64_value).ok == kQolOk);
     assert(craft_port_api.read_only.stuff_slot_count(&u32_value).ok == kQolOk && u32_value == 3);
 

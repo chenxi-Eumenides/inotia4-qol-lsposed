@@ -5,8 +5,11 @@
 
 #include "../result.h"
 #include "../version.h"
+#include "../item_handle.h"
 
 namespace qol::contracts {
+
+using QolCraftPopupCallback = void (*)();
 
 struct QolCraftUiWritePort {
     QolVersion abi_version;
@@ -18,8 +21,9 @@ struct QolCraftUiWritePort {
     QolResult (*set_selected_recipe)(int32_t type, int64_t recipe);
     QolResult (*play_sound)(int32_t sound_id);
     QolResult (*show_text)(uint32_t text_id);
-    QolResult (*show_yesno_from_text)(uint32_t text_id, void* ok, void* cancel);
-    QolResult (*set_target_slot_item)(void* item);
+    QolResult (*show_yesno_from_text)(uint32_t text_id, QolCraftPopupCallback ok,
+                                      QolCraftPopupCallback cancel);
+    QolResult (*set_target_slot_item)(QolItemHandle item);
     QolResult (*set_cost_zero)();
 };
 

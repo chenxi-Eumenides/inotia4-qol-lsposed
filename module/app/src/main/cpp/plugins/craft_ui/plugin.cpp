@@ -71,24 +71,25 @@ const contracts::CraftResultApi* craft_api() {
 }
 
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；对用到的类别而言 == itemId。
-bool item_handle(void* item, contracts::QolItemHandle* out) {
+bool new_game_item_handle(void* item, contracts::QolItemHandle* out) {
     const auto* sdk = host_sdk();
     if (item == nullptr || out == nullptr || sdk == nullptr) return false;
     uint32_t owner = 0;
     if (sdk->item_handle.lookup_item != nullptr &&
         sdk->item_handle.lookup_item(item, out, &owner) == contracts::kQolItemHandleStatusOk) {
-        return true;
+        return owner == contracts::kQolItemHandleOwnerGame && out->slot != 0 &&
+               out->generation != 0;
     }
     return sdk->item_handle.register_item != nullptr &&
            sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, out) ==
                contracts::kQolItemHandleStatusOk && out->slot != 0 && out->generation != 0;
 }
 
-uint16_t item_category(void* item) {
+uint16_t item_category(contracts::QolItemHandle handle) {
     int32_t category = 0;
-    contracts::QolItemHandle handle{};
     const auto* facts = item_facts();
-    if (!item_handle(item, &handle) || facts == nullptr || facts->category == nullptr ||
+    if (handle.slot == 0 || handle.generation == 0 || facts == nullptr ||
+        facts->category == nullptr ||
         facts->category(handle, &category).ok != kQolOk || category < 0) {
         return 0;
     }
@@ -102,11 +103,11 @@ int jewel_grade(uint16_t category) {
     return static_cast<int>(category) - 27;
 }
 
-bool item_is_stackable(void* item) {
+bool item_is_stackable(contracts::QolItemHandle handle) {
     int32_t is_real_equip = 0;
-    contracts::QolItemHandle handle{};
     const auto* facts = item_facts();
-    if (!item_handle(item, &handle) || facts == nullptr || facts->is_real_equip == nullptr ||
+    if (handle.slot == 0 || handle.generation == 0 || facts == nullptr ||
+        facts->is_real_equip == nullptr ||
         facts->is_real_equip(handle, &is_real_equip).ok != kQolOk) {
         return false;
     }
@@ -127,7 +128,7 @@ void on_confirm_three_slot() {
     craft_read_stuff_categories(in.slot_categories);
     for (size_t i = 0; i < kStuffSlotCount; ++i) {
         in.items[i] = craft_stuff_item(i);
-        if (in.items[i] != nullptr) {
+        if (in.items[i].slot != 0 && in.items[i].generation != 0) {
             in.held_counts[i] =
                 craft_category_held_count(item_category(in.items[i]));
         }
@@ -170,20 +171,21 @@ void place_execute(void* ctrl) {
     const uint32_t mix_type = craft_mix_type();
     // 3 格隐式配方（type 1「合成」入口）：任意物品可填入 ⇒ 原版三道校验不可用，整段自实现。
     if (api->three_slot_mode_active(mix_type)) {
-        refresh_stuff_ctrls();  // 面板必然打开：刷新填入格控件缓存（绘制层只比较、不解引用）
         const int64_t index = craft_selected_stuff_index();
-        void* item = craft_selected_inventory_item();
+        const contracts::QolItemHandle item = craft_selected_inventory_item();
         contracts::CraftPlaceInput in{};
         in.slot_index = index;
         in.item = item;
-        if (item != nullptr) {
+        if (item.slot != 0 && item.generation != 0) {
             in.item_category = item_category(item);
             in.item_stackable = item_is_stackable(item);
             for (size_t i = 0; i < kStuffSlotCount; ++i) {
                 if (static_cast<int64_t>(i) == index) continue;
-                void* other = craft_stuff_item(i);
-                if (other == item) ++in.placed_same_object;
-                if (other != nullptr && item_category(other) == in.item_category) {
+                const contracts::QolItemHandle other = craft_stuff_item(i);
+                const bool other_valid = other.slot != 0 && other.generation != 0;
+                if (other_valid && other.slot == item.slot &&
+                    other.generation == item.generation) ++in.placed_same_object;
+                if (other_valid && item_category(other) == in.item_category) {
                     ++in.same_category_placed;
                 }
             }
@@ -215,15 +217,15 @@ void place_execute(void* ctrl) {
         // 停用后残留的旧面板仍可能指向注入配方：原版会照常写入目标槽并算费用，
         // 且合成时会走原版通用路径白扣材料 —— 故转调后立即撤销放置。
         g_backup_place(ctrl);
-        craft_set_target_slot_item(nullptr);
+        craft_set_target_slot_item(contracts::kInvalidItemHandle);
         return;
     }
     g_backup_place(ctrl);  // 原版：CheckMixture（注入 mixType 恒返回 0）→ SetItem → 写费用
 
-    void* item = craft_target_slot_item();
-    if (item == nullptr) return;  // 本次未放入任何物品
+    const contracts::QolItemHandle item = craft_target_slot_item();
+    if (item.slot == 0 || item.generation == 0) return;  // 本次未放入任何物品
     if (!api->is_jewel_item(item)) {
-        craft_set_target_slot_item(nullptr);  // 撤销放置
+        craft_set_target_slot_item(contracts::kInvalidItemHandle);  // 撤销放置
         craft_show_text(kTextOnlyJewel);
         return;
     }
@@ -264,7 +266,6 @@ void craft_execute(void* ctrl) {
     // 3 格隐式配方：合成前先按 3 格内容查表。命中 → 弹原版 YesNo、回调走模块产出流程；
     // 未命中 → 弹 94 + 清空重来。两条路径都**不**转调原函数。
     if (api->three_slot_mode_active(mix_type)) {
-        refresh_stuff_ctrls();
         contracts::CraftPrepareInput in{};
         craft_read_stuff_categories(in.slot_categories);
         switch (api->prepare(&in)) {
@@ -277,9 +278,7 @@ void craft_execute(void* ctrl) {
                 reset_stuff_and_refresh();
                 return;
             case contracts::PrepareOutcome::kConfirmPending:
-                if (!craft_show_yesno(
-                        kTextConfirmCraft, reinterpret_cast<void*>(&on_confirm_three_slot),
-                        nullptr)) {
+                if (!craft_show_yesno(kTextConfirmCraft, &on_confirm_three_slot, nullptr)) {
                     log_message(kLogWarn, "three slot confirm skipped reason=no_popup");
                 }
                 return;
@@ -325,10 +324,10 @@ int make_item_execute(int32_t mix_type, void** out_item) {
         log_message(kLogWarn, "make item blocked reason=craft_result unavailable");
         return 1;
     }
-    if (api != nullptr && out_item != nullptr) {
+    if (api != nullptr && out_item != nullptr && *out_item != nullptr) {
         contracts::CraftMakeItemInput in{};
         in.mix_type = static_cast<uint32_t>(mix_type);
-        in.item = *out_item;
+        if (!new_game_item_handle(*out_item, &in.item)) return 1;
         in.rand_inclusive = &craft_rand64_adapter;
         result = api->make_item(&in);
     }
@@ -543,7 +542,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     const auto* write_port = static_cast<const contracts::QolCraftUiWritePort*>(ctx.ports[0]);
     if (!contracts::satisfies(write_port->abi_version,
                               {contracts::kQolPortCraftUiWriteVersion.major,
-                               contracts::kQolPortCraftUiWriteVersion.minor})) {
+                                contracts::kQolPortCraftUiWriteVersion.minor}) ||
+        write_port->set_target_slot_item == nullptr) {
         set_item_facts(nullptr);
         set_craft_facts(nullptr);
         return 1;

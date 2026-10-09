@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "../../contracts/plugin.h"
+#include "../../contracts/ui.h"
 
 namespace qol::features::craft_ui {
 
@@ -16,9 +17,6 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 const contracts::QolCraftUiWritePort* g_write_port = nullptr;
-
-// 填入格控件缓存（绘制层只做指针比较，见 feature.h 注释）。
-void* g_stuff_ctrl[kStuffSlotCount] = {nullptr, nullptr, nullptr};
 
 }  // namespace
 
@@ -65,17 +63,6 @@ uint32_t craft_mix_type() {
     return value;
 }
 
-bool item_handle_for_craft_object(void* item, contracts::QolItemHandle* out) {
-    if (item == nullptr || out == nullptr || g_sdk == nullptr) return false;
-    uint32_t owner = 0;
-    if (g_sdk->item_handle.lookup_item != nullptr &&
-        g_sdk->item_handle.lookup_item(item, out, &owner) ==
-            contracts::kQolItemHandleStatusOk) return true;
-    return g_sdk->item_handle.register_item != nullptr &&
-           g_sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, out) ==
-               contracts::kQolItemHandleStatusOk && out->slot != 0 && out->generation != 0;
-}
-
 int64_t craft_ui_type() {
     uint32_t value = 0;
     if (g_craft_facts == nullptr || g_craft_facts->read.ui_type == nullptr ||
@@ -109,23 +96,23 @@ int64_t craft_selected_stuff_index() {
     return value;
 }
 
-void* craft_selected_inventory_item() {
-    void* item = nullptr;
+contracts::QolItemHandle craft_selected_inventory_item() {
+    contracts::QolItemHandle item = contracts::kInvalidItemHandle;
     if (g_craft_facts != nullptr && g_craft_facts->read_only.selected_inventory_item != nullptr) {
         (void)g_craft_facts->read_only.selected_inventory_item(&item);
     }
     return item;
 }
 
-void* craft_target_slot_item() {
-    void* item = nullptr;
+contracts::QolItemHandle craft_target_slot_item() {
+    contracts::QolItemHandle item = contracts::kInvalidItemHandle;
     if (g_craft_facts != nullptr && g_craft_facts->read_only.target_slot_item != nullptr) {
         (void)g_craft_facts->read_only.target_slot_item(&item);
     }
     return item;
 }
 
-void craft_set_target_slot_item(void* item) {
+void craft_set_target_slot_item(contracts::QolItemHandle item) {
     if (g_write_port != nullptr && g_write_port->set_target_slot_item != nullptr) {
         (void)g_write_port->set_target_slot_item(item);
     }
@@ -137,8 +124,8 @@ void craft_set_cost_zero() {
     }
 }
 
-void* craft_stuff_item(size_t index) {
-    void* item = nullptr;
+contracts::QolItemHandle craft_stuff_item(size_t index) {
+    contracts::QolItemHandle item = contracts::kInvalidItemHandle;
     if (g_craft_facts != nullptr && g_craft_facts->read.stuff_item != nullptr &&
         index < kStuffSlotCount) {
         (void)g_craft_facts->read.stuff_item(static_cast<uint32_t>(index), &item);
@@ -146,13 +133,14 @@ void* craft_stuff_item(size_t index) {
     return item;
 }
 
-void* craft_stuff_slot_control(size_t index) {
-    void* control = nullptr;
-    if (g_craft_facts != nullptr && g_craft_facts->read_only.stuff_slot_control != nullptr &&
+bool craft_stuff_slot_available(size_t index) {
+    int32_t available = 0;
+    if (g_craft_facts != nullptr && g_craft_facts->read_only.stuff_slot_available != nullptr &&
         index < kStuffSlotCount) {
-        (void)g_craft_facts->read_only.stuff_slot_control(static_cast<uint32_t>(index), &control);
+        return g_craft_facts->read_only.stuff_slot_available(
+                   static_cast<uint32_t>(index), &available).ok == kQolOk && available != 0;
     }
-    return control;
+    return false;
 }
 
 int craft_category_held_count(uint16_t category) {
@@ -177,10 +165,9 @@ void craft_read_stuff_categories(uint16_t out[kStuffSlotCount]) {
     if (out == nullptr) return;
     for (size_t i = 0; i < kStuffSlotCount; ++i) {
         out[i] = 0;
-        void* item = craft_stuff_item(i);
+        const contracts::QolItemHandle handle = craft_stuff_item(i);
         int32_t category = 0;
-        contracts::QolItemHandle handle{};
-        if (item_handle_for_craft_object(item, &handle) && g_item_facts != nullptr &&
+        if (handle.slot != 0 && handle.generation != 0 && g_item_facts != nullptr &&
             g_item_facts->category != nullptr &&
             g_item_facts->category(handle, &category).ok == kQolOk && category >= 0) {
             out[i] = static_cast<uint16_t>(category);
@@ -197,7 +184,7 @@ void craft_write_stuff_need(size_t index, uint16_t category, uint16_t count) {
                                      sizeof(payload), &ticket);
 }
 
-void craft_set_stuff_item(size_t index, void* item) {
+void craft_set_stuff_item(size_t index, contracts::QolItemHandle item) {
     if (g_sdk == nullptr || g_sdk->commands.post_typed == nullptr) return;
     contracts::CraftSetStuffItemPayload payload{static_cast<uint32_t>(index), item};
     contracts::QolCommandTicket ticket = 0;
@@ -248,7 +235,8 @@ void craft_show_text(uint32_t text_id) {
     }
 }
 
-bool craft_show_yesno(uint32_t text_id, void* ok, void* cancel) {
+bool craft_show_yesno(uint32_t text_id, contracts::QolCraftPopupCallback ok,
+                      contracts::QolCraftPopupCallback cancel) {
     if (g_write_port == nullptr || g_write_port->show_yesno_from_text == nullptr) return false;
     return g_write_port->show_yesno_from_text(text_id, ok, cancel).ok == kQolOk;
 }
@@ -299,18 +287,16 @@ void reset_stuff_and_refresh() {
     craft_refresh_inventory_items();
 }
 
-void refresh_stuff_ctrls() {
-    for (size_t i = 0; i < kStuffSlotCount; ++i) {
-        g_stuff_ctrl[i] = craft_stuff_slot_control(i);
-    }
-}
-
 bool is_stuff_ctrl(void* ctrl) {
-    if (ctrl == nullptr) return false;
-    for (size_t i = 0; i < kStuffSlotCount; ++i) {
-        if (g_stuff_ctrl[i] == ctrl) return true;
-    }
-    return false;
+    if (ctrl == nullptr || g_sdk == nullptr || g_sdk->ui == nullptr) return false;
+    constexpr size_t required_size = offsetof(contracts::QolUiAdapter, craft_stuff_slot_index) +
+                                     sizeof(contracts::QolUiAdapter::craft_stuff_slot_index);
+    if (g_sdk->ui->size < required_size || g_sdk->ui->major != contracts::kUiAdapterMajor ||
+        g_sdk->ui->minor < contracts::kUiAdapterMinor ||
+        g_sdk->ui->craft_stuff_slot_index == nullptr) return false;
+    int32_t slot = -1;
+    return g_sdk->ui->craft_stuff_slot_index(ctrl, &slot).ok == kQolOk &&
+           slot >= 0 && slot < static_cast<int32_t>(kStuffSlotCount);
 }
 
 }  // namespace qol::features::craft_ui

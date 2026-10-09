@@ -13,7 +13,7 @@ namespace qol::contracts {
 struct PluginContext;
 }
 
-// 合成器界面层 feature（C2 Step 3）：界面动作、文案与填入格控件缓存。
+// 合成器界面层 feature（C2 Step 3）：界面动作、文案与填入格状态。
 //
 // 分层（「界面归界面，结果归结果」）：
 //   · 本层只管**界面**——填入了什么、选中哪一格、清空后恢复到哪个格、弹什么提示；
@@ -58,17 +58,17 @@ int64_t craft_ui_type();
 int64_t craft_selected_recipe_at(int64_t type);
 void craft_set_selected_recipe_at(int64_t type, int64_t value);
 int64_t craft_selected_stuff_index();
-void* craft_selected_inventory_item();
-void* craft_target_slot_item();
-void craft_set_target_slot_item(void* item);
+contracts::QolItemHandle craft_selected_inventory_item();
+contracts::QolItemHandle craft_target_slot_item();
+void craft_set_target_slot_item(contracts::QolItemHandle item);
 void craft_set_cost_zero();
-void* craft_stuff_item(size_t index);
-void* craft_stuff_slot_control(size_t index);
+contracts::QolItemHandle craft_stuff_item(size_t index);
+bool craft_stuff_slot_available(size_t index);
 int craft_category_held_count(uint16_t category);
 int craft_character_level();
 void craft_read_stuff_categories(uint16_t out[kStuffSlotCount]);
 void craft_write_stuff_need(size_t index, uint16_t category, uint16_t count);
-void craft_set_stuff_item(size_t index, void* item);
+void craft_set_stuff_item(size_t index, contracts::QolItemHandle item);
 void craft_select_first_empty_stuff_slot();
 void craft_reset_stuff_item_control();
 void craft_refresh_inventory_items();
@@ -76,7 +76,8 @@ void craft_init_mixing_state();
 void craft_set_ui_type(int64_t type);
 void craft_play_sound(int16_t sound_id);
 void craft_show_text(uint32_t text_id);
-bool craft_show_yesno(uint32_t text_id, void* ok, void* cancel);
+bool craft_show_yesno(uint32_t text_id, contracts::QolCraftPopupCallback ok,
+                      contracts::QolCraftPopupCallback cancel);
 int craft_panel_state();
 
 // 配置仍开启但结果能力缺失时，hook 仍处于模块上下文，必须拒绝原版回落；配置关闭时
@@ -113,9 +114,7 @@ void select_on_view_enter();
 // 合成失败后的统一收尾，让玩家立刻重试。
 void reset_stuff_and_refresh();
 
-// 填入格控件指针缓存（在放料/合成 hook 内刷新——那些时机面板必然打开）。绘制层只做**指针
-// 比较**、不再解引用 `[+0xc8]`：面板关闭后缓存可能悬空，但仅比较不会崩，最坏是漏/误隐藏一次数量。
-void refresh_stuff_ctrls();
+// Native draw callback pointer is consumed synchronously by the UI adapter; no control pointer is retained.
 bool is_stuff_ctrl(void* ctrl);
 
 class TextScopeGuard {

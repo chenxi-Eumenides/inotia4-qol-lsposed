@@ -31,7 +31,7 @@ const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
 void log_message(int32_t level, const char* format, ...);
 
-// CraftResultApi 实例（provides `craft_result` v1.0）。
+// CraftResultApi 实例（provides `craft_result` v1.1）。
 const qol::contracts::CraftResultApi& craft_result_api();
 
 // RECIPEBASE/MIXTUREBASE 表注入的行为所有权 ops。

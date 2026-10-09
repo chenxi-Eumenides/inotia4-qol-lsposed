@@ -30,9 +30,6 @@ namespace qol::features::custom_recipe {
 
 namespace {
 
-constexpr size_t kJewelWordOffset = 16;
-constexpr size_t kSocketOffset = 25;
-constexpr size_t kEnchantOffset = 26;
 constexpr uint32_t kJewelValueMask = 2047;
 constexpr uint32_t kJewelTypeShift = 18;
 constexpr uint32_t kJewelTypeMask = 63;
@@ -43,7 +40,15 @@ const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 const contracts::QolCustomRecipeWritePort* g_write_port = nullptr;
 uint64_t g_save_enter_subscription = 0;
-bool item_handle_for_recipe_object(void* item, qol::contracts::QolItemHandle* out);
+bool valid_craft_item(qol::contracts::QolItemHandle item) {
+    return item.slot != 0 && item.generation != 0;
+}
+
+bool read_jewel_word(qol::contracts::QolItemHandle item, uint32_t* out_word) {
+    return valid_craft_item(item) && g_write_port != nullptr &&
+           g_write_port->read_jewel_word != nullptr &&
+           g_write_port->read_jewel_word(item, out_word).ok == kQolOk;
+}
 
 }  // namespace
 
@@ -110,24 +115,30 @@ const ::custom_recipe::Def* module_recipe_for_mix_type(uint32_t mix_type) {
 }
 
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；空物品返回 0 = 「该槽为空」的匹配键。
-uint16_t item_category(void* item) {
+uint16_t item_category(qol::contracts::QolItemHandle item) {
     int32_t category = 0;
-    qol::contracts::QolItemHandle handle{};
-    if (!item_handle_for_recipe_object(item, &handle) || g_item_facts == nullptr ||
+    if (!valid_craft_item(item) || g_item_facts == nullptr ||
         g_item_facts->category == nullptr ||
-        g_item_facts->category(handle, &category).ok != kQolOk || category < 0) {
+        g_item_facts->category(item, &category).ok != kQolOk || category < 0) {
         return 0;
     }
     return static_cast<uint16_t>(category);
 }
 
+bool item_category_matches(qol::contracts::QolItemHandle item, uint16_t expected) {
+    int32_t category = 0;
+    return valid_craft_item(item) && g_item_facts != nullptr &&
+           g_item_facts->category != nullptr &&
+           g_item_facts->category(item, &category).ok == kQolOk && category > 0 &&
+           category == expected;
+}
+
 // 是否可堆叠（ITEMCLASSBASE[category*stride+6] bit0；口径与 game/read/item_class.h 一致）。
-bool item_is_stackable(void* item) {
+bool item_is_stackable(qol::contracts::QolItemHandle item) {
     int32_t is_real_equip = 0;
-    qol::contracts::QolItemHandle handle{};
-    if (!item_handle_for_recipe_object(item, &handle) || g_item_facts == nullptr ||
+    if (!valid_craft_item(item) || g_item_facts == nullptr ||
         g_item_facts->is_real_equip == nullptr ||
-        g_item_facts->is_real_equip(handle, &is_real_equip).ok != kQolOk) {
+        g_item_facts->is_real_equip(item, &is_real_equip).ok != kQolOk) {
         return false;
     }
     return is_real_equip == 0;
@@ -143,8 +154,9 @@ int category_held_count(uint16_t category) {
     return count;
 }
 
-bool item_is_jewel(void* item) {
-    if (item == nullptr || g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr) {
+bool item_is_jewel(qol::contracts::QolItemHandle item) {
+    if (!valid_craft_item(item) || g_item_facts == nullptr ||
+        g_item_facts->is_jewel_category == nullptr) {
         return false;
     }
     int32_t is_jewel = 0;
@@ -166,17 +178,6 @@ const qol::contracts::AttributeQualityApi* attribute_quality_api() {
                : nullptr;
 }
 
-bool item_handle_for_recipe_object(void* item, qol::contracts::QolItemHandle* out) {
-    if (item == nullptr || out == nullptr || g_sdk == nullptr) return false;
-    uint32_t owner = 0;
-    if (g_sdk->item_handle.lookup_item != nullptr &&
-        g_sdk->item_handle.lookup_item(item, out, &owner) ==
-            qol::contracts::kQolItemHandleStatusOk) return true;
-    return g_sdk->item_handle.register_item != nullptr &&
-           g_sdk->item_handle.register_item(item, qol::contracts::kQolItemHandleOwnerGame, out) ==
-               qol::contracts::kQolItemHandleStatusOk && out->slot != 0 && out->generation != 0;
-}
-
 ::custom_recipe::Tier classify_with_attribute_quality(int value, int minimum, int maximum) {
     const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
     if (api == nullptr || api->classify == nullptr) return ::custom_recipe::Tier::Grey;
@@ -188,19 +189,17 @@ bool item_handle_for_recipe_object(void* item, qol::contracts::QolItemHandle* ou
 }
 
 // 读宝石数值位域并按 attribute.quality classify 判定当前档；能力不可用/探测失败返回 false。
-bool jewel_tier(void* item, ::custom_recipe::Tier* out_tier, int* out_value, int* out_min,
+bool jewel_tier(qol::contracts::QolItemHandle item, ::custom_recipe::Tier* out_tier, int* out_value, int* out_min,
                 int* out_max) {
-    if (item == nullptr || out_tier == nullptr) return false;
+    if (!valid_craft_item(item) || out_tier == nullptr) return false;
     const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
     if (api == nullptr || api->probe_jewel == nullptr || api->classify == nullptr) return false;
-    const uint32_t word =
-        *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(item) + kJewelWordOffset);
+    uint32_t word = 0;
+    if (!read_jewel_word(item, &word)) return false;
     const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
     const int value = static_cast<int>(word & kJewelValueMask);
     qol::contracts::AttributeQualityResult quality{};
-    qol::contracts::QolItemHandle handle{};
-    if (!item_handle_for_recipe_object(item, &handle) ||
-        api->probe_jewel(handle, type, value, &quality).ok != kQolOk) return false;
+    if (api->probe_jewel(item, type, value, &quality).ok != kQolOk) return false;
     if (api->classify(value, quality.min, quality.max, out_tier).ok != kQolOk) return false;
     if (out_value != nullptr) *out_value = value;
     if (out_min != nullptr) *out_min = quality.min;
@@ -220,11 +219,13 @@ int64_t form_borrowed_type(::custom_recipe::Form form) {
 
 // 按 Def::count_rule 重算材料需求数并写回 stuffList 条目 +6（u16）。
 // 该字段是扣料（UseStuff 读 +6）与显示（UIMix_Draw 每帧读 +6）的唯一真源（§3.9）。
-void apply_material_count(const ::custom_recipe::Def* def, void* jewel) {
-    if (def == nullptr || jewel == nullptr) return;
+void apply_material_count(const ::custom_recipe::Def* def,
+                          qol::contracts::QolItemHandle jewel) {
+    if (def == nullptr || !valid_craft_item(jewel)) return;
     if (def->count_rule != ::custom_recipe::CountRule::kJewelGradeAndLevel) return;
     if (def->material_count == 0) return;
-    const int grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(item_category(jewel)));
+    const int grade = ::custom_recipe::jewel_grade_from_category(
+        static_cast<int>(item_category(jewel)));
     if (grade < 1) return;
     int32_t level = 0;
     if (g_craft_facts == nullptr || g_craft_facts->read.character_level == nullptr ||
@@ -335,9 +336,11 @@ int64_t api_form_ui_type_for_mix_type(uint32_t mix_type) {
     return form_borrowed_type(def->form);
 }
 
-qol::contracts::CraftGate api_craft_gate(void* target_item) {
+qol::contracts::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
     using qol::contracts::CraftGate;
-    if (target_item == nullptr || !item_is_jewel(target_item)) return CraftGate::kNotJewel;
+    if (!valid_craft_item(target_item) || !item_is_jewel(target_item)) {
+        return CraftGate::kNotJewel;
+    }
     ::custom_recipe::Tier tier = ::custom_recipe::Tier::Grey;
     if (jewel_tier(target_item, &tier, nullptr, nullptr, nullptr) &&
         tier == ::custom_recipe::Tier::Gold) {
@@ -346,15 +349,16 @@ qol::contracts::CraftGate api_craft_gate(void* target_item) {
     return CraftGate::kPass;
 }
 
-bool api_is_jewel_item(void* item) { return item_is_jewel(item); }
+bool api_is_jewel_item(qol::contracts::QolItemHandle item) { return item_is_jewel(item); }
 
 qol::contracts::PlaceOutcome api_place(const qol::contracts::CraftPlaceInput* in) {
     using qol::contracts::PlaceOutcome;
     if (in == nullptr || !enabled()) return PlaceOutcome::kNotMine;
-    void* item = in->item;
+    const qol::contracts::QolItemHandle item = in->item;
     const bool valid_slot =
         in->slot_index >= 0 && in->slot_index < static_cast<int64_t>(kThreeSlotStuffCount);
-    if (item == nullptr || !valid_slot) return PlaceOutcome::kPlaced;  // 无事发生
+    if (!valid_craft_item(item) || !valid_slot) return PlaceOutcome::kPlaced;  // 无事发生
+    if (!item_category_matches(item, in->item_category)) return PlaceOutcome::kNotMine;
 
     //   · 不可堆叠物品 = 1 个对象：同一对象不得占两格 → kAlreadyPlaced；
     //   · 可堆叠物品 = 1 个单位：同一堆可占多格，但受类别持有总数约束 → kNotEnoughHeld。
@@ -364,12 +368,11 @@ qol::contracts::PlaceOutcome api_place(const qol::contracts::CraftPlaceInput* in
             return PlaceOutcome::kNotEnoughHeld;
         }
     }
-    void* slot = nullptr;
-    if (g_craft_facts != nullptr && g_craft_facts->read_only.stuff_slot_control != nullptr) {
-        (void)g_craft_facts->read_only.stuff_slot_control(static_cast<uint32_t>(in->slot_index),
-                                                          &slot);
-    }
-    if (slot == nullptr) return PlaceOutcome::kPlaced;
+    int32_t slot_available = 0;
+    if (g_craft_facts == nullptr || g_craft_facts->read_only.stuff_slot_available == nullptr ||
+        g_craft_facts->read_only.stuff_slot_available(
+            static_cast<uint32_t>(in->slot_index), &slot_available).ok != kQolOk ||
+        slot_available == 0) return PlaceOutcome::kPlaced;
     if (g_write_port != nullptr && g_write_port->description_set_off != nullptr) {
         (void)g_write_port->description_set_off();
     }
@@ -417,33 +420,45 @@ qol::contracts::CraftExecuteResult api_execute(const qol::contracts::CraftExecut
     }
     if (recipe == nullptr) return CraftExecuteResult::kAborted;  // 重复回调/已被消费
 
+    if (::custom_recipe::match_three_slot(in->slot_categories, &is_special_equip_category) !=
+        recipe) {
+        return CraftExecuteResult::kStaleSlots;
+    }
+    for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
+        if (in->slot_categories[i] == 0) {
+            if (valid_craft_item(in->items[i])) return CraftExecuteResult::kStaleSlots;
+        } else if (!item_category_matches(in->items[i], in->slot_categories[i])) {
+            return CraftExecuteResult::kStaleSlots;
+        }
+    }
+
     // 回调前重新读格（调用方携带）：确认框停留期间用户可能改动填入格。
-    void* items[kThreeSlotStuffCount] = {in->items[0], in->items[1], in->items[2]};
+    qol::contracts::QolItemHandle items[kThreeSlotStuffCount] = {
+        in->items[0], in->items[1], in->items[2]};
 
     // 产物 = 第 1 格物品自身时，必须在**扣料前**抓取源物品的宝石字与类别（扣料会销毁对象）。
     uint16_t product_category = recipe->product;
     uint32_t source_jewel_word = 0;
     bool has_source_jewel = false;
     if (recipe->product_mode == ProductMode::kScaleFirstItem) {
-        if (items[0] == nullptr || !item_is_jewel(items[0])) {
+        if (!valid_craft_item(items[0]) || !item_is_jewel(items[0]) ||
+            !read_jewel_word(items[0], &source_jewel_word)) {
             return CraftExecuteResult::kStaleSlots;
         }
         product_category = item_category(items[0]);
-        source_jewel_word = *reinterpret_cast<const uint32_t*>(
-            static_cast<const uint8_t*>(items[0]) + kJewelWordOffset);
         has_source_jewel = true;
     } else if (recipe->product_mode == ProductMode::kMaxSocketEnchantFirstItem) {
-        if (items[0] == nullptr) return CraftExecuteResult::kStaleSlots;
+        if (!valid_craft_item(items[0])) return CraftExecuteResult::kStaleSlots;
         product_category = item_category(items[0]);
     }
     // **扣料前必须复核库存（fail-closed）**：同一堆要扣的单位数大于其当前数量 → 中止。
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
-        void* it = items[i];
-        if (it == nullptr || !item_is_stackable(it)) continue;
+        const auto it = items[i];
+        if (!valid_craft_item(it) || !item_is_stackable(it)) continue;
         const uint16_t category = item_category(it);
         int units = 0;
         for (size_t j = 0; j < kThreeSlotStuffCount; ++j) {
-            if (items[j] != nullptr && item_category(items[j]) == category) ++units;
+            if (valid_craft_item(items[j]) && item_category(items[j]) == category) ++units;
         }
         const int held = in->held_counts[i] != 0 ? in->held_counts[i]
                                                  : category_held_count(category);
@@ -453,41 +468,41 @@ qol::contracts::CraftExecuteResult api_execute(const qol::contracts::CraftExecut
     }
     // 扣料分两类：不可堆叠槽 → INVEN_RemoveItem；可堆叠槽 → INVEN_RemoveItemData(category,1)。
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
-        void* it = items[i];
-        if (it == nullptr) continue;
+        const auto it = items[i];
+        if (!valid_craft_item(it)) continue;
         if (item_is_stackable(it)) {
             if (g_game != nullptr && g_game->inventory_write.remove_item_data != nullptr) {
                 (void)g_game->inventory_write.remove_item_data(
                     static_cast<int32_t>(item_category(it)), 1);
             }
         } else if (g_game != nullptr && g_game->inventory_write.remove_item != nullptr) {
-            qol::contracts::QolItemHandle handle{};
-            if (!item_handle_for_recipe_object(it, &handle)) {
-                return CraftExecuteResult::kAborted;
-            }
-            (void)g_game->inventory_write.remove_item(handle);
+            (void)g_game->inventory_write.remove_item(it);
         }
     }
     // 产物创建走按类别分派的统一入口 ITEMSYSTEM_CreatePerfectItem；未就绪退回 CreateItem。
-    void* product = nullptr;
-    if (g_game != nullptr && g_game->inventory_write.create_perfect_item != nullptr) {
-        (void)g_game->inventory_write.create_perfect_item(
-            static_cast<int32_t>(product_category), &product);
-    } else if (g_game != nullptr && g_game->inventory_write.create_item != nullptr) {
+    qol::contracts::QolItemHandle product = qol::contracts::kInvalidItemHandle;
+    if (g_write_port != nullptr && g_write_port->create_perfect_item != nullptr) {
+        (void)g_write_port->create_perfect_item(static_cast<int32_t>(product_category), &product);
+    } else if (g_write_port != nullptr && g_write_port->create_item != nullptr) {
         log_message(2, "three slot craft fallback reason=no_perfect_item");
-        (void)g_game->inventory_write.create_item(static_cast<int32_t>(product_category), 0,
-                                                         0, 0, &product);
+        (void)g_write_port->create_item(static_cast<int32_t>(product_category), 0, 0, 0,
+                                        &product);
     }
-    if (product == nullptr) return CraftExecuteResult::kNoBagSpace;
+    if (!valid_craft_item(product)) return CraftExecuteResult::kNoBagSpace;
 
     // 数值缩放写回：只改数值位，保留源宝石的随机等级与属性类型。
     if (has_source_jewel) {
         const int new_value = scaled_jewel_value(
             static_cast<int>(source_jewel_word & kJewelValueMask), recipe->scale_permille);
-        uint32_t* word_ptr =
-            reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(product) + kJewelWordOffset);
-        *word_ptr = (source_jewel_word & ~kJewelValueMask) |
-                    (static_cast<uint32_t>(new_value) & kJewelValueMask);
+        const uint32_t product_word = (source_jewel_word & ~kJewelValueMask) |
+                                      (static_cast<uint32_t>(new_value) & kJewelValueMask);
+        if (g_write_port == nullptr || g_write_port->write_jewel_word == nullptr ||
+            g_write_port->write_jewel_word(product, product_word).ok != kQolOk) {
+            if (g_write_port != nullptr && g_write_port->free_item != nullptr) {
+                (void)g_write_port->free_item(product);
+            }
+            return CraftExecuteResult::kNoBagSpace;
+        }
         if (g_verify_log_budget.fetch_sub(1) > 0) {
             log_message(0, "three slot scale category=%u value=%u->%d permille=%u",
                         static_cast<uint32_t>(product_category),
@@ -497,37 +512,40 @@ qol::contracts::CraftExecuteResult api_execute(const qol::contracts::CraftExecut
     }
     // 孔位/强化拉满：只写两段，其余位保持产物原值。
     if (recipe->product_mode == ProductMode::kMaxSocketEnchantFirstItem) {
-        uint8_t* p_socket = static_cast<uint8_t*>(product) + kSocketOffset;
-        *p_socket = static_cast<uint8_t>((*p_socket & 0x0Fu) | (0x0Fu << 4));
-        uint16_t* p_enchant =
-            reinterpret_cast<uint16_t*>(static_cast<uint8_t*>(product) + kEnchantOffset);
-        *p_enchant = static_cast<uint16_t>((*p_enchant & ~(0x0Fu << 2)) | (0x0Fu << 2));
+        if (g_write_port == nullptr || g_write_port->set_max_socket_enchant == nullptr ||
+            g_write_port->set_max_socket_enchant(product).ok != kQolOk) {
+            if (g_write_port != nullptr && g_write_port->free_item != nullptr) {
+                (void)g_write_port->free_item(product);
+            }
+            return CraftExecuteResult::kNoBagSpace;
+        }
         if (g_verify_log_budget.fetch_sub(1) > 0) {
-            log_message(0, "three slot max socket/enchant category=%u socket=0x%02x enchant=0x%04x",
-                        static_cast<uint32_t>(product_category), *p_socket, *p_enchant);
+            log_message(0, "three slot max socket/enchant category=%u",
+                        static_cast<uint32_t>(product_category));
         }
     }
-    if (g_game == nullptr || g_game->inventory_write.save_item == nullptr) {
+    if (g_write_port == nullptr || g_write_port->save_item == nullptr) {
         log_message(2, "three slot craft abort reason=no_save_item");
-        if (g_game != nullptr && g_game->inventory_write.free_item != nullptr) {
-            (void)g_game->inventory_write.free_item(product);
+        if (g_write_port != nullptr && g_write_port->free_item != nullptr) {
+            (void)g_write_port->free_item(product);
         }
         return CraftExecuteResult::kNoBagSpace;
     }
     int32_t saved = 0;
-    if (g_game->inventory_write.save_item(product, nullptr, &saved).ok != kQolOk) {
+    if (g_write_port->save_item(product, &saved).ok != kQolOk) {
         saved = 0;
     }
     if ((static_cast<uint32_t>(saved) & 0xffu) == 0) {
-        if (g_game->inventory_write.free_item != nullptr) {
-            (void)g_game->inventory_write.free_item(product);
+        if (g_write_port->free_item != nullptr) {
+            (void)g_write_port->free_item(product);
         }
         return CraftExecuteResult::kNoBagSpace;
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "three slot crafted product=%u consumed=%d",
                     static_cast<uint32_t>(product_category),
-                    (items[0] != nullptr) + (items[1] != nullptr) + (items[2] != nullptr));
+                    valid_craft_item(items[0]) + valid_craft_item(items[1]) +
+                        valid_craft_item(items[2]));
     }
     return CraftExecuteResult::kOk;
 }
@@ -557,13 +575,11 @@ int32_t api_make_item(const qol::contracts::CraftMakeItemInput* in) {
     if (def == nullptr) return -1;  // 非本层配方：界面转调原版
     // fail-closed：停用期间绝不回落到原版（注入记录号对原表是越界下标）。
     if (!enabled()) return 1;
-    if (in->item == nullptr || in->rand_inclusive == nullptr) return 1;
-    void* item = in->item;
+    if (!valid_craft_item(in->item) || in->rand_inclusive == nullptr) return 1;
     // 扣料数量定稿：StartMix 在 MakeItem 返回 0 之后紧接着调 UseStuff 读 stuffList。
-    apply_material_count(def, item);
-    uint32_t* word_ptr =
-        reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(item) + kJewelWordOffset);
-    const uint32_t word = *word_ptr;
+    apply_material_count(def, in->item);
+    uint32_t word = 0;
+    if (!read_jewel_word(in->item, &word)) return 1;
     const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
     const int value = static_cast<int>(word & kJewelValueMask);
     int min = 0;
@@ -573,9 +589,7 @@ int32_t api_make_item(const qol::contracts::CraftMakeItemInput* in) {
         return 1;  // 降级：不扣料不生成
     }
     qol::contracts::AttributeQualityResult quality{};
-    qol::contracts::QolItemHandle handle{};
-    if (!item_handle_for_recipe_object(item, &handle) ||
-        api->probe_jewel(handle, type, value, &quality).ok != kQolOk) return 1;
+    if (api->probe_jewel(in->item, type, value, &quality).ok != kQolOk) return 1;
     min = quality.min;
     max = quality.max;
     ::custom_recipe::Tier target = ::custom_recipe::Tier::Grey;
@@ -589,7 +603,10 @@ int32_t api_make_item(const qol::contracts::CraftMakeItemInput* in) {
         return 1;  // 金档 / 退化 → 失败兜底（与合成键前置拦截互为双保险）
     }
     // read-modify-write：仅改 bits0-10，保留 bits11-17（等级）与 bits18-23（属性类型）。
-    *word_ptr = (word & ~kJewelValueMask) | (static_cast<uint32_t>(new_value) & kJewelValueMask);
+    const uint32_t updated_word =
+        (word & ~kJewelValueMask) | (static_cast<uint32_t>(new_value) & kJewelValueMask);
+    if (g_write_port == nullptr || g_write_port->write_jewel_word == nullptr ||
+        g_write_port->write_jewel_word(in->item, updated_word).ok != kQolOk) return 1;
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "make item tier-up type=%d value=%d->%d range=[%d,%d] target=%d", type,
                     value, new_value, min, max, tier_ordinal(target));

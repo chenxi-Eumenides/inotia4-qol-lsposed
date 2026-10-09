@@ -44,12 +44,13 @@ const contracts::QolChoicePort kChoicePort{{1, 0}, {}, {}};
 const contracts::QolExtensionBagWritePort kExtensionBagWritePort{};
 const contracts::QolSavePort kSavePort{{1, 0}, {}};
 const contracts::QolSaveCallPort kSaveCallPort{{1, 0}, {}};
-const contracts::QolCraftPort kCraftPort{{1, 0}, {}, {}};
-const contracts::QolCraftUiWritePort kCraftUiWritePort{{1, 0}, nullptr, nullptr, nullptr,
-                                                       nullptr, nullptr, nullptr, nullptr, nullptr,
-                                                       nullptr, nullptr, nullptr};
-const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{{1, 0}, nullptr, nullptr,
-                                                                  nullptr};
+const contracts::QolCraftPort kCraftPort{contracts::kQolPortCraftVersion, {}, {}};
+const contracts::QolCraftUiWritePort kCraftUiWritePort{contracts::kQolPortCraftUiWriteVersion,
+                                                        nullptr, nullptr, nullptr,
+                                                        nullptr, nullptr, nullptr, nullptr, nullptr,
+                                                        nullptr, nullptr, nullptr};
+const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
+    contracts::kQolPortCustomRecipeWriteVersion};
 
 const contracts::QolCharacterExtrasPort kCharacterExtrasPort{{1, 0}, {}};
 const contracts::QolInventoryExtrasPort kInventoryExtrasPort{{1, 0}, {}};

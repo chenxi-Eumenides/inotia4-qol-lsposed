@@ -5,6 +5,9 @@
 #include "game/access/attr_range_ui.h"
 #include "game/access/craft.h"
 #include "game/access/game_access.h"
+#include "game/access/inventory.h"
+#include "game/access/item_handle_registry.h"
+#include "game/adapter_ports/game_host_port.h"
 
 namespace qol::game {
 namespace {
@@ -16,6 +19,82 @@ QolResult invalid_argument() {
 }
 
 QolResult not_ready() { return contracts::error(kQolErrNotReady, "not ready", 9); }
+
+QolResult not_found() { return contracts::error(kQolErrNotFound, "not found", 9); }
+
+QolResult wrong_thread() { return contracts::error(kQolErrBlocked, "wrong thread", 12); }
+
+QolResult handle_for_craft_item(void* item, contracts::QolItemHandle* out_handle) {
+    if (item == nullptr || out_handle == nullptr) return invalid_argument();
+    *out_handle = contracts::kInvalidItemHandle;
+    if (!game_host_is_main_thread()) return wrong_thread();
+    uint32_t owner = contracts::kQolItemHandleOwnerAny;
+    const contracts::QolItemHandle registered = lookup_item(item, &owner);
+    if (registered.slot != 0 && registered.generation != 0) {
+        if (owner != contracts::kQolItemHandleOwnerGame &&
+            owner != contracts::kQolItemHandleOwnerProvider) {
+            return contracts::error(kQolErrConflict, "craft item owner unavailable", 29);
+        }
+        *out_handle = registered;
+        return contracts::ok();
+    }
+
+    // An unregistered control item is registered as Game-owned only after a physical slot match.
+    for (int32_t bag = 0; bag < 6; ++bag) {
+        for (int32_t slot = 0; slot < 16; ++slot) {
+            void* physical_item = nullptr;
+            if (!contracts::succeeded(physical_item_at(bag, slot, &physical_item)) ||
+                physical_item != item) continue;
+            ItemHandleError error = ItemHandleError::kNone;
+            const contracts::QolItemHandle handle = register_item(
+                item, contracts::kQolItemHandleOwnerGame, &error);
+            if (handle.slot == 0 || handle.generation == 0) return not_ready();
+            *out_handle = handle;
+            return contracts::ok();
+        }
+    }
+    return not_ready();
+}
+
+QolResult resolve_craft_item(contracts::QolItemHandle handle, void** out_item) {
+    if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
+        return invalid_argument();
+    }
+    *out_item = nullptr;
+    const ItemHandleResolution resolved = item_handle_registry().resolve_item(
+        handle, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error == ItemHandleError::kWrongThread) {
+        return contracts::error(kQolErrBlocked, "wrong thread", 12);
+    }
+    if (resolved.error == ItemHandleError::kType) {
+        return contracts::error(kQolErrConflict, "craft item owner mismatch", 25);
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) return not_found();
+    *out_item = resolved.item;
+    return contracts::ok();
+}
+
+QolResult created_item_handle(void* item, contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) return invalid_argument();
+    *out_item = contracts::kInvalidItemHandle;
+    if (item == nullptr) return not_ready();
+    ItemHandleError error = ItemHandleError::kNone;
+    const contracts::QolItemHandle handle = register_item(
+        item, contracts::kQolItemHandleOwnerGame, &error);
+    if (handle.slot == 0 || handle.generation == 0) {
+        if (fn_itempool_free != nullptr) fn_itempool_free(item);
+        return not_ready();
+    }
+    *out_item = handle;
+    return contracts::ok();
+}
+
+QolResult read_item_handle(void* item, contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) return invalid_argument();
+    *out_item = contracts::kInvalidItemHandle;
+    if (item == nullptr) return not_ready();
+    return handle_for_craft_item(item, out_item);
+}
 
 QolResult read_ui_type(uint32_t* out) {
     if (out == nullptr) return invalid_argument();
@@ -51,19 +130,18 @@ QolResult read_selected_stuff_index(int64_t* out) {
     return contracts::ok();
 }
 
-QolResult read_selected_stuff_item(void** out) {
+QolResult read_selected_stuff_item(contracts::QolItemHandle* out) {
     if (out == nullptr) return invalid_argument();
+    *out = contracts::kInvalidItemHandle;
     const int64_t index = craft_selected_stuff_index();
-    *out = index >= 0 && index < static_cast<int64_t>(kCraftStuffSlotCount)
-               ? craft_stuff_item(static_cast<size_t>(index))
-               : nullptr;
-    return *out == nullptr ? not_ready() : contracts::ok();
+    if (index < 0 || index >= static_cast<int64_t>(kCraftStuffSlotCount)) return not_ready();
+    return read_item_handle(craft_stuff_item(static_cast<size_t>(index)), out);
 }
 
-QolResult read_stuff_item(uint32_t index, void** out) {
-    if (out == nullptr) return invalid_argument();
-    *out = craft_stuff_item(index);
-    return *out == nullptr ? not_ready() : contracts::ok();
+QolResult read_stuff_item(uint32_t index, contracts::QolItemHandle* out) {
+    if (out == nullptr || index >= kCraftStuffSlotCount) return invalid_argument();
+    *out = contracts::kInvalidItemHandle;
+    return read_item_handle(craft_stuff_item(index), out);
 }
 
 QolResult read_category_held_count(int32_t category, int32_t* out) {
@@ -78,22 +156,23 @@ QolResult read_character_level(int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_stuff_slot_control(uint32_t index, void** out) {
-    if (out == nullptr || index >= kCraftStuffSlotCount) return invalid_argument();
-    *out = craft_stuff_slot_control(index);
-    return *out == nullptr ? not_ready() : contracts::ok();
+QolResult read_stuff_slot_available(uint32_t index, int32_t* out_available) {
+    if (out_available == nullptr || index >= kCraftStuffSlotCount) return invalid_argument();
+    if (!game_host_is_main_thread()) return wrong_thread();
+    *out_available = craft_stuff_slot_control(index) != nullptr ? 1 : 0;
+    return *out_available != 0 ? contracts::ok() : not_ready();
 }
 
-QolResult read_target_slot_item(void** out) {
+QolResult read_target_slot_item(contracts::QolItemHandle* out) {
     if (out == nullptr) return invalid_argument();
-    *out = craft_target_slot_item();
-    return *out == nullptr ? not_ready() : contracts::ok();
+    *out = contracts::kInvalidItemHandle;
+    return read_item_handle(craft_target_slot_item(), out);
 }
 
-QolResult read_selected_inventory_item(void** out) {
+QolResult read_selected_inventory_item(contracts::QolItemHandle* out) {
     if (out == nullptr) return invalid_argument();
-    *out = craft_selected_inven_item();
-    return *out == nullptr ? not_ready() : contracts::ok();
+    *out = contracts::kInvalidItemHandle;
+    return read_item_handle(craft_selected_inven_item(), out);
 }
 
 QolResult read_selected_recipe(int32_t type, int64_t* out) {
@@ -159,14 +238,23 @@ QolResult call_show_text(uint32_t text_id) {
     return contracts::ok();
 }
 
-QolResult call_show_yesno_from_text(uint32_t text_id, void* ok, void* cancel) {
+QolResult call_show_yesno_from_text(uint32_t text_id, contracts::QolCraftPopupCallback ok,
+                                    contracts::QolCraftPopupCallback cancel) {
     if (ok == nullptr || cancel == nullptr) return invalid_argument();
-    return craft_show_yesno_from_textdata(text_id, ok, cancel) ? contracts::ok() : not_ready();
+    return craft_show_yesno_from_textdata(text_id, reinterpret_cast<void*>(ok),
+                                          reinterpret_cast<void*>(cancel))
+               ? contracts::ok()
+               : not_ready();
 }
 
-QolResult call_set_target_slot_item(void* item) {
+QolResult call_set_target_slot_item(contracts::QolItemHandle handle) {
     if (craft_target_slot_control() == nullptr || fn_control_item_set_item == nullptr) {
         return not_ready();
+    }
+    void* item = nullptr;
+    if (handle.slot != 0 || handle.generation != 0) {
+        const QolResult resolved = resolve_craft_item(handle, &item);
+        if (!contracts::succeeded(resolved)) return resolved;
     }
     craft_set_target_slot_item(item);
     return contracts::ok();
@@ -174,6 +262,91 @@ QolResult call_set_target_slot_item(void* item) {
 
 QolResult call_set_cost_zero() {
     craft_set_cost_zero();
+    return contracts::ok();
+}
+
+QolResult call_create_perfect_item(int32_t category, contracts::QolItemHandle* out_item) {
+    if (category < 0 || out_item == nullptr) return invalid_argument();
+    *out_item = contracts::kInvalidItemHandle;
+    if (!game_host_is_main_thread()) return wrong_thread();
+    if (fn_item_create_perfect_item == nullptr) return not_ready();
+    return created_item_handle(fn_item_create_perfect_item(category), out_item);
+}
+
+QolResult call_create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
+                           contracts::QolItemHandle* out_item) {
+    if (category < 0 || out_item == nullptr) return invalid_argument();
+    *out_item = contracts::kInvalidItemHandle;
+    if (!game_host_is_main_thread()) return wrong_thread();
+    if (fn_create_item == nullptr) return not_ready();
+    return created_item_handle(fn_create_item(category, arg1, arg2, arg3), out_item);
+}
+
+QolResult call_save_item(contracts::QolItemHandle handle, int32_t* out_saved) {
+    if (out_saved == nullptr) return invalid_argument();
+    void* item = nullptr;
+    const QolResult resolved = resolve_craft_item(handle, &item);
+    if (!contracts::succeeded(resolved)) return resolved;
+    uint32_t owner = contracts::kQolItemHandleOwnerAny;
+    if (lookup_item(item, &owner).slot == 0 || owner != contracts::kQolItemHandleOwnerGame) {
+        return contracts::error(kQolErrConflict, "craft product is not game-owned", 32);
+    }
+    if (fn_inven_save_item == nullptr) return not_ready();
+    *out_saved = fn_inven_save_item(item, nullptr);
+    return contracts::ok();
+}
+
+QolResult call_free_item(contracts::QolItemHandle handle) {
+    if (fn_itempool_free == nullptr) return not_ready();
+    void* item = nullptr;
+    const QolResult resolved = resolve_craft_item(handle, &item);
+    if (!contracts::succeeded(resolved)) return resolved;
+    uint32_t owner = contracts::kQolItemHandleOwnerAny;
+    if (lookup_item(item, &owner).slot == 0 || owner != contracts::kQolItemHandleOwnerGame) {
+        return contracts::error(kQolErrConflict, "craft product is not game-owned", 32);
+    }
+    if (!invalidate_item(handle)) return not_ready();
+    fn_itempool_free(item);
+    return contracts::ok();
+}
+
+QolResult call_read_jewel_word(contracts::QolItemHandle handle, uint32_t* out_word) {
+    if (out_word == nullptr) return invalid_argument();
+    void* item = nullptr;
+    const QolResult resolved = resolve_craft_item(handle, &item);
+    if (!contracts::succeeded(resolved)) return resolved;
+    auto* word = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(item) + I_COUNT);
+    if (!game_memory_accessible(word, sizeof(*word), 'r')) return not_ready();
+    *out_word = *word;
+    return contracts::ok();
+}
+
+QolResult call_write_jewel_word(contracts::QolItemHandle handle, uint32_t value) {
+    void* item = nullptr;
+    const QolResult resolved = resolve_craft_item(handle, &item);
+    if (!contracts::succeeded(resolved)) return resolved;
+    auto* word = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(item) + I_COUNT);
+    if (!game_memory_accessible(word, sizeof(*word), 'w')) return not_ready();
+    *word = value;
+    return contracts::ok();
+}
+
+QolResult call_set_max_socket_enchant(contracts::QolItemHandle handle) {
+    void* item = nullptr;
+    const QolResult resolved = resolve_craft_item(handle, &item);
+    if (!contracts::succeeded(resolved)) return resolved;
+    auto* bytes = static_cast<uint8_t*>(item);
+    uint8_t* socket = bytes + I_SOCKET;
+    uint16_t* enchant = reinterpret_cast<uint16_t*>(bytes + I_ENCHANT);
+    if (!game_memory_accessible(socket, sizeof(*socket), 'r') ||
+        !game_memory_accessible(enchant, sizeof(*enchant), 'r')) return not_ready();
+    const uint8_t socket_value = static_cast<uint8_t>((*socket & 0x0Fu) | (0x0Fu << 4));
+    const uint16_t enchant_value = static_cast<uint16_t>((*enchant & ~(0x0Fu << 2)) |
+                                                         (0x0Fu << 2));
+    if (!game_memory_accessible(socket, sizeof(*socket), 'w') ||
+        !game_memory_accessible(enchant, sizeof(*enchant), 'w')) return not_ready();
+    *socket = socket_value;
+    *enchant = enchant_value;
     return contracts::ok();
 }
 
@@ -187,8 +360,16 @@ QolResult call_write_stuff_need(uint32_t index, int32_t category, int32_t count)
     return contracts::ok();
 }
 
-QolResult call_set_stuff_item(uint32_t index, void* item) {
+QolResult call_set_stuff_item(uint32_t index, contracts::QolItemHandle handle) {
     if (index >= kCraftStuffSlotCount) return invalid_argument();
+    if (craft_stuff_slot_control(index) == nullptr || fn_control_item_set_item == nullptr) {
+        return not_ready();
+    }
+    void* item = nullptr;
+    if (handle.slot != 0 || handle.generation != 0) {
+        const QolResult resolved = resolve_craft_item(handle, &item);
+        if (!contracts::succeeded(resolved)) return resolved;
+    }
     craft_set_stuff_item(index, item);
     return contracts::ok();
 }
@@ -203,10 +384,10 @@ const contracts::QolCraftPort kCraftPort{
     contracts::kQolPortCraftVersion,
     {&read_ui_type, &read_panel_state, &read_mix_type, &read_selected_stuff_index,
      &read_selected_stuff_item, &read_stuff_item, &read_category_held_count, &read_character_level},
-    {&read_ui_type, &read_get_ui_type, &read_panel_state, &read_mix_type,
-     &read_selected_stuff_index, &read_selected_stuff_item, &read_stuff_item,
-     &read_category_held_count, &read_character_level, &read_stuff_slot_control,
-     &read_target_slot_item, &read_selected_inventory_item, &read_selected_recipe,
+     {&read_ui_type, &read_get_ui_type, &read_panel_state, &read_mix_type,
+      &read_selected_stuff_index, &read_selected_stuff_item, &read_stuff_item,
+      &read_category_held_count, &read_character_level, &read_stuff_slot_available,
+      &read_target_slot_item, &read_selected_inventory_item, &read_selected_recipe,
      &read_stuff_slot_count},
 };
 
@@ -230,7 +411,30 @@ const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     &call_write_stuff_need,
     &call_set_stuff_item,
     &call_description_set_off,
+    &call_create_perfect_item,
+    &call_create_item,
+    &call_save_item,
+    &call_free_item,
+    &call_read_jewel_word,
+    &call_write_jewel_word,
+    &call_set_max_socket_enchant,
 };
+
+QolResult craft_stuff_slot_index_impl(void* transient_control, int32_t* out_index) {
+    if (transient_control == nullptr || out_index == nullptr) return invalid_argument();
+    *out_index = -1;
+    if (!game_host_is_main_thread()) return wrong_thread();
+    // Compare against the current panel children on every call; no native control address is cached.
+    if (craft_panel_state() != 1) return not_found();
+    for (uint32_t index = 0; index < kCraftStuffSlotCount; ++index) {
+        const void* current = craft_stuff_slot_control(index);
+        if (current != nullptr && current == transient_control) {
+            *out_index = static_cast<int32_t>(index);
+            return contracts::ok();
+        }
+    }
+    return not_found();
+}
 
 }  // namespace
 
@@ -240,6 +444,10 @@ const contracts::QolCraftUiWritePort& craft_ui_write_port() { return kCraftUiWri
 
 const contracts::QolCustomRecipeWritePort& custom_recipe_write_port() {
     return kCustomRecipeWritePort;
+}
+
+QolResult craft_stuff_slot_index(void* transient_control, int32_t* out_index) {
+    return craft_stuff_slot_index_impl(transient_control, out_index);
 }
 
 }  // namespace qol::game
