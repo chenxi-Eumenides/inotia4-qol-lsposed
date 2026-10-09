@@ -33,6 +33,8 @@ int g_stuff_need_calls = 0;
 QolItemHandle g_placed_item{};
 bool g_stuff_available = true;
 bool g_make_item_owner_valid = true;
+int32_t g_stuff_write_result = kQolOk;
+int g_stuff_write_calls = 0;
 
 QolResult ok() { return qol::contracts::ok(); }
 QolResult fail(int32_t code) { return qol::contracts::error(code, "test failure", 12); }
@@ -90,6 +92,8 @@ QolResult write_stuff_need(uint32_t, int32_t, int32_t) {
 }
 
 QolResult set_stuff_item(uint32_t, QolItemHandle item) {
+    ++g_stuff_write_calls;
+    if (g_stuff_write_result != kQolOk) return fail(g_stuff_write_result);
     g_placed_item = item;
     return ok();
 }
@@ -229,6 +233,15 @@ int main() {
     const CraftPlaceInput place{0, kMaterialA, false, 35, 0, 0, 0};
     assert(api.place(&place) == PlaceOutcome::kPlaced);
     assert(g_placed_item.slot == kMaterialA.slot && g_placed_item.generation == kMaterialA.generation);
+    g_stuff_write_result = kQolErrNotReady;
+    const int writes_before_failure = g_stuff_write_calls;
+    assert(api.place(&place) == PlaceOutcome::kWriteFailed);
+    assert(g_stuff_write_calls == writes_before_failure + 1);
+    assert(g_placed_item.slot == kMaterialA.slot && g_placed_item.generation == kMaterialA.generation);
+    g_stuff_write_result = kQolErrBlocked;
+    assert(api.place(&place) == PlaceOutcome::kWriteFailed);
+    assert(g_placed_item.slot == kMaterialA.slot && g_placed_item.generation == kMaterialA.generation);
+    g_stuff_write_result = kQolOk;
 
     const CraftPrepareInput prepare{{35, 0, 41}};
     assert(api.prepare(&prepare) == PrepareOutcome::kConfirmPending);

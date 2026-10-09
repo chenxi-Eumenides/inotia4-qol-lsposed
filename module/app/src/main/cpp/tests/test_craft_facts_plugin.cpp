@@ -9,6 +9,7 @@
 
 #include <cstdio>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <type_traits>
 
@@ -45,6 +46,12 @@ static_assert(std::is_same<decltype(qol::contracts::CraftMakeItemInput::item),
 static_assert(qol::contracts::kCraftFactsVersionMajor == 1 &&
                   qol::contracts::kCraftFactsVersionMinor == 0,
               "craft.facts remains v1.0");
+static_assert(static_cast<uint8_t>(qol::contracts::PlaceOutcome::kNotMine) == 0 &&
+                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kPlaced) == 1 &&
+                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kAlreadyPlaced) == 2 &&
+                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kNotEnoughHeld) == 3 &&
+                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kWriteFailed) == 4,
+              "PlaceOutcome appends write failure without changing existing values");
 static_assert(qol::contracts::kCraftResultVersionMajor == 1 &&
                   qol::contracts::kCraftResultVersionMinor == 1,
               "typed CraftResultApi parameters are v1.1");

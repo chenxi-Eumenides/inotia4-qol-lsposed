@@ -1418,6 +1418,29 @@ int main() {
            *product_count == 0x87654321u);
     assert(custom_recipe_write.set_max_socket_enchant(product_handle).ok == kQolOk);
     assert(*product_socket == 0xF3 && *product_enchant == 0x003Eu);
+    uint8_t* provider_item = g_move_merge_fake_memory.data() + 0x300;
+    uint32_t* provider_count = reinterpret_cast<uint32_t*>(provider_item + I_COUNT);
+    uint8_t* provider_socket = provider_item + I_SOCKET;
+    uint16_t* provider_enchant = reinterpret_cast<uint16_t*>(provider_item + I_ENCHANT);
+    *provider_count = 0xA1B2C3D4u;
+    *provider_socket = 0x05;
+    *provider_enchant = 0x1234;
+    const auto provider_item_handle = qol::game::register_item(
+        provider_item, qol::contracts::kQolItemHandleOwnerProvider);
+    assert(provider_item_handle.slot != 0 && provider_item_handle.generation != 0);
+    assert(custom_recipe_write.write_jewel_word(provider_item_handle, 0x01020304u).code ==
+           kQolErrConflict);
+    assert(custom_recipe_write.set_max_socket_enchant(provider_item_handle).code ==
+           kQolErrConflict);
+    assert(*provider_count == 0xA1B2C3D4u && *provider_socket == 0x05 &&
+           *provider_enchant == 0x1234);
+    assert(qol::game::invalidate_item(provider_item_handle));
+    assert(custom_recipe_write.write_jewel_word(provider_item_handle, 0x01020304u).code ==
+           kQolErrNotFound);
+    assert(custom_recipe_write.set_max_socket_enchant(provider_item_handle).code ==
+           kQolErrNotFound);
+    assert(*provider_count == 0xA1B2C3D4u && *provider_socket == 0x05 &&
+           *provider_enchant == 0x1234);
     int32_t saved = 0;
     assert(custom_recipe_write.save_item(product_handle, &saved).ok == kQolOk && saved == 1);
     assert(g_craft_saved_item == g_craft_created_item);

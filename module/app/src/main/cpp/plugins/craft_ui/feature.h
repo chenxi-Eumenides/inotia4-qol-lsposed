@@ -5,6 +5,7 @@
 
 #include "../../contracts/craft_commands.h"
 #include "../../contracts/craft_facts.h"
+#include "../../contracts/craft_result.h"
 #include "../../contracts/game_ports/craft_ui_write_port.h"
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/item_facts.h"
@@ -23,6 +24,30 @@ struct PluginContext;
 // 线程模型：全部函数只在游戏主线程（UI 回调 / wrapper）调用；只读写游戏内存，不加锁。
 
 namespace qol::features::craft_ui {
+
+enum class CraftPlaceDisposition : uint8_t {
+    kStop,
+    kAdvance,
+    kAlreadyPlaced,
+    kNotEnoughHeld,
+    kWriteFailed,
+};
+
+constexpr CraftPlaceDisposition craft_place_disposition(contracts::PlaceOutcome outcome) {
+    switch (outcome) {
+        case contracts::PlaceOutcome::kPlaced:
+            return CraftPlaceDisposition::kAdvance;
+        case contracts::PlaceOutcome::kAlreadyPlaced:
+            return CraftPlaceDisposition::kAlreadyPlaced;
+        case contracts::PlaceOutcome::kNotEnoughHeld:
+            return CraftPlaceDisposition::kNotEnoughHeld;
+        case contracts::PlaceOutcome::kWriteFailed:
+            return CraftPlaceDisposition::kWriteFailed;
+        case contracts::PlaceOutcome::kNotMine:
+        default:
+            return CraftPlaceDisposition::kStop;
+    }
+}
 
 using UIMixButtonInvenItemSelectExeFn = void (*)(void*);
 using UIMixButtonMixingExeFn = void (*)(void*);

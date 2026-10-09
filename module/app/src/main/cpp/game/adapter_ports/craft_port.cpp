@@ -74,6 +74,22 @@ QolResult resolve_craft_item(contracts::QolItemHandle handle, void** out_item) {
     return contracts::ok();
 }
 
+QolResult resolve_craft_game_item(contracts::QolItemHandle handle, void** out_item) {
+    if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
+        return invalid_argument();
+    }
+    *out_item = nullptr;
+    const ItemHandleResolution resolved = item_handle_registry().resolve_item(
+        handle, contracts::kQolItemHandleOwnerGame);
+    if (resolved.error == ItemHandleError::kWrongThread) return wrong_thread();
+    if (resolved.error == ItemHandleError::kType) {
+        return contracts::error(kQolErrConflict, "craft item is not game-owned", 29);
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) return not_found();
+    *out_item = resolved.item;
+    return contracts::ok();
+}
+
 QolResult created_item_handle(void* item, contracts::QolItemHandle* out_item) {
     if (out_item == nullptr) return invalid_argument();
     *out_item = contracts::kInvalidItemHandle;
@@ -323,7 +339,7 @@ QolResult call_read_jewel_word(contracts::QolItemHandle handle, uint32_t* out_wo
 
 QolResult call_write_jewel_word(contracts::QolItemHandle handle, uint32_t value) {
     void* item = nullptr;
-    const QolResult resolved = resolve_craft_item(handle, &item);
+    const QolResult resolved = resolve_craft_game_item(handle, &item);
     if (!contracts::succeeded(resolved)) return resolved;
     auto* word = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(item) + I_COUNT);
     if (!game_memory_accessible(word, sizeof(*word), 'w')) return not_ready();
@@ -333,7 +349,7 @@ QolResult call_write_jewel_word(contracts::QolItemHandle handle, uint32_t value)
 
 QolResult call_set_max_socket_enchant(contracts::QolItemHandle handle) {
     void* item = nullptr;
-    const QolResult resolved = resolve_craft_item(handle, &item);
+    const QolResult resolved = resolve_craft_game_item(handle, &item);
     if (!contracts::succeeded(resolved)) return resolved;
     auto* bytes = static_cast<uint8_t*>(item);
     uint8_t* socket = bytes + I_SOCKET;

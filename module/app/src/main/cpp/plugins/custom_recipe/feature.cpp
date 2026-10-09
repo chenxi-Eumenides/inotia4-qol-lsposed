@@ -373,11 +373,12 @@ qol::contracts::PlaceOutcome api_place(const qol::contracts::CraftPlaceInput* in
         g_craft_facts->read_only.stuff_slot_available(
             static_cast<uint32_t>(in->slot_index), &slot_available).ok != kQolOk ||
         slot_available == 0) return PlaceOutcome::kPlaced;
-    if (g_write_port != nullptr && g_write_port->description_set_off != nullptr) {
-        (void)g_write_port->description_set_off();
+    if (g_write_port == nullptr || g_write_port->set_stuff_item == nullptr ||
+        g_write_port->set_stuff_item(static_cast<uint32_t>(in->slot_index), item).ok != kQolOk) {
+        return PlaceOutcome::kWriteFailed;
     }
-    if (g_write_port != nullptr && g_write_port->set_stuff_item != nullptr) {
-        (void)g_write_port->set_stuff_item(static_cast<uint32_t>(in->slot_index), item);
+    if (g_write_port->description_set_off != nullptr) {
+        (void)g_write_port->description_set_off();
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "three slot place idx=%lld category=%u",

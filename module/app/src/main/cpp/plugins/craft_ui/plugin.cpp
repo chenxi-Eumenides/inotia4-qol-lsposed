@@ -191,18 +191,21 @@ void place_execute(void* ctrl) {
             }
             in.category_held_count = craft_category_held_count(in.item_category);
         }
-        switch (api->place(&in)) {
-            case contracts::PlaceOutcome::kAlreadyPlaced:
+        switch (craft_place_disposition(api->place(&in))) {
+            case CraftPlaceDisposition::kAlreadyPlaced:
                 craft_show_text(kTextAlreadyPlaced);  // 99：不可堆叠物品不能重复放置
                 return;
-            case contracts::PlaceOutcome::kNotEnoughHeld:
+            case CraftPlaceDisposition::kNotEnoughHeld:
                 // 94：持有总数不足，无法再占一格。放料失败**不清空**已填格。
                 craft_show_text(kTextInsufficientMaterial);
                 return;
-            case contracts::PlaceOutcome::kPlaced:
+            case CraftPlaceDisposition::kWriteFailed:
+                log_message(kLogWarn, "three slot place blocked reason=stuff write failed");
+                return;
+            case CraftPlaceDisposition::kAdvance:
                 craft_select_first_empty_stuff_slot();  // 放料后自动选中下一空格
                 return;
-            case contracts::PlaceOutcome::kNotMine:
+            case CraftPlaceDisposition::kStop:
                 return;  // 不可能：上面已判定处于 3 格模式
         }
         return;

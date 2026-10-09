@@ -29,6 +29,7 @@ enum class PlaceOutcome : uint8_t {
     kPlaced = 1,         // 已放入；调用方随即选中下一空格
     kAlreadyPlaced = 2,  // 不可堆叠物品重复放置 → 调用方弹 99
     kNotEnoughHeld = 3,  // 可堆叠：类别持有总数不足 → 调用方弹 94（不清空已填格）
+    kWriteFailed = 4,    // 写入填入格失败；调用方 fail-closed，不转调原版或推进选格
 };
 
 // 合成键前置（3 格隐式配方）结果。
