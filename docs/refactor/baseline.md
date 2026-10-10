@@ -21,18 +21,18 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 80 |
-| `game` | 155 |
+| `contracts` | 85 |
+| `game` | 160 |
 | `hooks` | 10 |
-| `host` | 61 |
-| `infra` | 39 |
+| `host` | 83 |
+| `infra` | 41 |
 | `legacy/inventory` | 2 |
 | `legacy/save` | 1 |
 | `legacy/system` | 2 |
 | `patch` | 13 |
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
-| `plugins/autosell` | 19 |
+| `plugins/autosell` | 20 |
 | `plugins/character_panel_i18n` | 6 |
 | `plugins/core.api` | 5 |
 | `plugins/core.character` | 5 |
@@ -42,8 +42,8 @@
 | `plugins/core.feature` | 2 |
 | `plugins/core.item` | 7 |
 | `plugins/core.quest` | 5 |
-| `plugins/core.save` | 6 |
-| `plugins/core.settings` | 12 |
+| `plugins/core.save` | 10 |
+| `plugins/core.settings` | 13 |
 | `plugins/core.system` | 3 |
 | `plugins/core.ui_state` | 2 |
 | `plugins/core.world` | 3 |
@@ -52,16 +52,16 @@
 | `plugins/device_probe_consumer` | 2 |
 | `plugins/device_probe_export_failure` | 2 |
 | `plugins/device_probe_provider` | 2 |
-| `plugins/extension_bag` | 50 |
-| `plugins/inventory_hooks` | 11 |
+| `plugins/extension_bag` | 51 |
+| `plugins/inventory_hooks` | 12 |
 | `plugins/move_merge` | 4 |
 | `plugins/push_all` | 8 |
 | `plugins/save_backup` | 15 |
 | `plugins/simple_mode` | 8 |
 | `plugins/special_equip` | 6 |
-| `plugins/stack_limit` | 5 |
+| `plugins/stack_limit` | 4 |
 | `plugins/world_teleport` | 6 |
-| **合计** | **610** |
+| **合计** | **651** |
 
 ### 1.2 迁移期映射摘要
 
@@ -99,25 +99,25 @@
 
 ### 2.1 跨层依赖对 Top 15
 
-跨层依赖对共 86 个；下表按计数降序、同计数按层名升序取前 15 个。
+跨层依赖对共 85 个；下表按计数降序、同计数按层名升序取前 15 个。
 
 | 源层 | 目标层 | 计数 |
 | --- | --- | --- |
-| `host` | `game` | 107 |
-| `game` | `contracts` | 74 |
-| `host` | `contracts` | 58 |
-| `host` | `infra` | 48 |
-| `plugins/extension_bag` | `contracts` | 44 |
-| `plugins/autosell` | `contracts` | 24 |
-| `plugins/core.custom_ui` | `contracts` | 24 |
-| `plugins/custom_recipe` | `contracts` | 22 |
+| `host` | `game` | 113 |
+| `game` | `contracts` | 82 |
+| `host` | `contracts` | 67 |
+| `host` | `infra` | 55 |
+| `plugins/extension_bag` | `contracts` | 49 |
+| `plugins/autosell` | `contracts` | 26 |
+| `plugins/core.custom_ui` | `contracts` | 26 |
+| `plugins/custom_recipe` | `contracts` | 21 |
 | `legacy/system` | `game` | 18 |
-| `plugins/inventory_hooks` | `contracts` | 17 |
+| `plugins/inventory_hooks` | `contracts` | 18 |
+| `plugins/core.save` | `contracts` | 17 |
+| `plugins/save_backup` | `contracts` | 17 |
 | `plugins/core.settings` | `contracts` | 16 |
-| `plugins/save_backup` | `contracts` | 16 |
 | `plugins/core.item` | `contracts` | 14 |
 | `host` | `patch` | 13 |
-| `plugins/core.character` | `contracts` | 12 |
 
 ### 2.2 include 环
 
@@ -149,8 +149,8 @@
 
 ## 5. JNI 面
 
-- Kotlin `external fun`：149 个
-- native 导出：149 个
+- Kotlin `external fun`：152 个
+- native 导出：152 个
 - 差异条数：0 条
 
 差异样例（前 0 条，共 0 条）：
@@ -172,7 +172,7 @@
 | --- | --- | --- |
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
-| `autosell` | `plugins/autosell` | 19 |
+| `autosell` | `plugins/autosell` | 20 |
 | `character_panel_i18n` | `plugins/character_panel_i18n` | 6 |
 | `core.api` | `plugins/core.api` | 5 |
 | `core.character` | `plugins/core.character` | 5 |
@@ -182,8 +182,8 @@
 | `core.feature` | `plugins/core.feature` | 2 |
 | `core.item` | `plugins/core.item` | 7 |
 | `core.quest` | `plugins/core.quest` | 5 |
-| `core.save` | `plugins/core.save` | 6 |
-| `core.settings` | `plugins/core.settings` | 12 |
+| `core.save` | `plugins/core.save` | 10 |
+| `core.settings` | `plugins/core.settings` | 13 |
 | `core.system` | `plugins/core.system` | 3 |
 | `core.ui_state` | `plugins/core.ui_state` | 2 |
 | `core.world` | `plugins/core.world` | 3 |
@@ -192,14 +192,14 @@
 | `device_probe_consumer` | `plugins/device_probe_consumer` | 2 |
 | `device_probe_export_failure` | `plugins/device_probe_export_failure` | 2 |
 | `device_probe_provider` | `plugins/device_probe_provider` | 2 |
-| `extension_bag` | `plugins/extension_bag` | 50 |
-| `inventory_hooks` | `plugins/inventory_hooks` | 11 |
+| `extension_bag` | `plugins/extension_bag` | 51 |
+| `inventory_hooks` | `plugins/inventory_hooks` | 12 |
 | `move_merge` | `plugins/move_merge` | 4 |
 | `push_all` | `plugins/push_all` | 8 |
 | `save_backup` | `plugins/save_backup` | 15 |
 | `simple_mode` | `plugins/simple_mode` | 8 |
 | `special_equip` | `plugins/special_equip` | 6 |
-| `stack_limit` | `plugins/stack_limit` | 5 |
+| `stack_limit` | `plugins/stack_limit` | 4 |
 | `world_teleport` | `plugins/world_teleport` | 6 |
 
 ## 校验入口

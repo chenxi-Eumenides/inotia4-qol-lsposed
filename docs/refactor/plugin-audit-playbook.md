@@ -9,6 +9,7 @@
 |---|---|---|---|
 | 0 准备 | 主代理 | 现场基线 | 设备/模块形态核实 |
 | 0.5 插件讲解 | 主代理 | 六维讲解文档（对话输出） | 用户确认理解无误后才进入审计 |
+| 0.75 插件参考说明 | 主代理 | `docs/reference/plugins/<plugin-id>.md` 事实说明 | 已按当前源码生成/核对；不是验收结论 |
 | 1 静态审计 | @oracle（只读） | findings 表 + 裁决项/可修项分组 | P0/P1 全部有 file:行证据 |
 | 2 用户裁决 | 用户 | 逐项决定 | 契约/归属/容量类问题不猜 |
 | 3 静态修复批 | @fixer | 代码+host 测试 | host 全绿+构建+一功能一提交 |
@@ -19,7 +20,7 @@
 
 ## 阶段 0：准备
 
-1. 必读：`ARCHITECTURE.md`（§2.2 依赖矩阵、§5 领域/能力、§7 HTTP 契约）、`docs/reference/api-reference.md` 相关节、`docs/refactor/verification.md` 该插件的 VM 卡、`docs/guides/build-and-deploy.md` §3.1。
+1. 必读：`ARCHITECTURE.md`（§2.2 依赖矩阵、§5 领域/能力、§7 HTTP 契约）、`docs/INDEX.md`、`docs/reference/api-reference.md` 相关节、`docs/refactor/verification.md` 该插件的 VM 卡、`docs/guides/build-and-deploy.md` §3.1。
 2. 建立任务隔离目录保存证据、脚本和 runbook；收口后将审计记录迁入 `docs/refactor/audits/`，验证证据迁入 `docs/refactor/verification/`。目录约定见代理规则。
 3. 设备与模块形态：`logcat -d -s Inotia4Qol:V | head` 取 `module identity` 行的 sha256，与 `output/` 最新 debug APK 比对。**集成包形态下单独 install 模块 APK 不生效**，需 `scripts/patch-apk.sh <模块apk>` 重打（build-and-deploy 附录）。
 4. 确认设备无遗留弹窗/死亡态（`/api/ui/screen` = world 或 main_menu）。
@@ -35,6 +36,16 @@
 6. **实现机制**：读路径（快照/节拍/锁）、写路径（HTTP 校验→票据→主线程执行）、生命周期行为。
 
 用户就讲解提问或对某维度要求深挖后，才进入阶段 1。阶段 2 裁决、阶段 3 修复/优化（功能修改、优化诉求也在此受理）依此展开。
+
+## 阶段 0.75：插件参考说明生成/更新（审阅基线）
+
+此阶段与 0.5 的对话讲解、阶段 1 的缺陷审计、阶段 7 的验收登记分开管理。**每个插件审阅都必须先确认一份当前参考说明**；缺失时生成，已有时核对并修正事实漂移。
+
+1. **路径与权威源**：文档放在 `docs/reference/plugins/<plugin-id>.md`；先按 `docs/INDEX.md` 确认目录职责。架构/公共契约以 `ARCHITECTURE.md` 与 `docs/reference/api-reference.md` 为准；当前实现以 descriptor、`routes.inc`、contracts/ports、插件实现和 Kotlin controller/service 源码为准；`archive/` 仅作历史追溯，不作当前事实源。
+2. **生成方法**：主代理逐项核对源码后撰写，不从插件名、旧 audit 或测试输出推断行为。至少覆盖：职责/owner、路由与公开能力、requires/ports/消费者、职责边界、关键读写/线程/生命周期机制、文件地图；关键事实标 `path:line`。无法确认的事实标为未知，不猜测。
+3. **已有文档处理**：若文档已存在，逐节对照当前实现，只修正过时或缺失的事实；公共 HTTP 契约仍只维护在 API 参考，不在插件说明中复制完整 schema。新建插件说明时同步更新 `docs/INDEX.md` 插件参考链接。
+4. **与审计/验收的边界**：插件说明记录稳定实现事实，不登记 findings、用户裁决来源、运行状态结论或“已验收”标记；问题记入 `issues.md`，设备/Host 验收与跳过项记入审计 `verification-log.md` 和 `verification.md`。文档生成不能替代阶段 1 的独立审计，也不能把未完成 VM 卡写成通过。
+5. **出口检查**：确认文中路径/符号/能力/owner 与源码及 API 契约一致；`git diff --check` 通过。阶段 3 仍遵守 fixer 只改代码与测试；代码修复后由主代理回到本阶段的核对清单更新参考说明，再进入阶段 4/5。
 
 ## 阶段 1：静态审计（@oracle，只读）
 
@@ -104,7 +115,8 @@
 - [ ] **无法验证项**：环境/存档缺失等无法验证的项，经**用户确认后**登记于验收登记文档 §2（倒数第二部分，已完成之前、问题之后），并同步 `issues.md` §10「无法验证项」；此后**不再主动验收**。用户确认"已完成"的项按用户口径登记，但如实注明确认覆盖范围（哪些是专项实测、哪些是总体确认）。
 - [ ] `verification.md`：受影响 VM 卡行末追加一行「插件审计批 <日期>」后注，指向验收登记文档；新欠账登记 §5。
 - [ ] `issues.md`：新发现缺陷全部入账（含归属），已修条目在文末附录；§10 无法验证项同步。
-- [ ] 文档统一更新（api-reference 漂移清单等）——按用户指令在插件完全验收后进行。
+- [ ] `docs/reference/plugins/<plugin-id>.md` 已按阶段 0.75 与最终实现同步；新文档已加入 `docs/INDEX.md`。该文档只写事实，不暗示未完成的 VM 验收已通过。
+- [ ] API 契约文档仅在公共 API 契约实际变化时更新；验收状态、缺陷与跳过原因分别登记在 audit log、`verification.md`、`issues.md`，不混入插件事实说明。
 - [ ] 设备恢复默认功能集（隔离测试期间的 deactivate/config 改动逐项还原并验证）。
 
 ## 多插件并行

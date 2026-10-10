@@ -230,9 +230,9 @@ MainActivity（壳，com.com2us.inotia4 仅剩壳类）
 
 | 能力 | 端点/函数 | 实现 |
 |---|---|---|
-| 界面状态 | `GET /api/ui`、`/api/ui/screen`、`/api/ui/panel` | game_ui.cpp `data_ui_screen`/`data_top_panel_name` |
-| 对话框 | `GET /api/ui/dialog` | game_dialog.cpp `data_dialog_content_json` |
-| 操作 | `POST /api/ui/dialog/select`、`start_interact`、`go_main_menu`、`open_panel`、`close_panel` | game_ui.cpp/game_dialog.cpp `data_op_*` |
+| 界面状态 | `GET /api/ui`、`/api/ui/screen`、`/api/ui/panel` | `/api/ui` 为 Kotlin `gamestateJson()` legacy composite；screen/panel 由 `core.ui_state` 经 UI state read port 读取原生状态并汇入 custom panel stack |
+| 对话框 | `GET /api/ui/dialog` | `core.ui_state` 保留原生 `DialogContent`；custom choice 只映射既有 `type`，Agreement 仍由 Kotlin 处理 |
+| 操作 | `POST /api/ui/dialog/select`、`start_interact`、`go_main_menu`、`open_panel`、`close_panel` | owner `core.ui_state`，经声明式 UI/choice ports 在主线程执行 |
 | 调试 | `GET /api/debug/ui` | game_ui.cpp `data_debug_ui_json` |
 
 ## 8. 关联
