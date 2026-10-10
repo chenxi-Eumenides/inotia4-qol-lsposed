@@ -47,7 +47,10 @@ Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
-    if (!qol::host::config_store_bootstrapped()) {
+    // Path-only bootstrap records the config directory before this call; Store init/seed runs in
+    // assembly after all descriptors are registered (production_feature_bootstrap). Gate on the
+    // recorded request rather than completion, otherwise init and assembly would wait on each other.
+    if (!qol::host::config_store_bootstrap_requested()) {
         return JNI_FALSE;
     }
     // T2n-2：日志 sink/帧 provider 初始化搬至宿主装配（原 game/access 的 bridge_init 内，

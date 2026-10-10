@@ -8,6 +8,7 @@ bool config_platform_bind_namespace_store();
 int config_store_bootstrap(const std::string& external_files_directory);
 const std::string& config_store_path();
 bool config_store_bootstrapped();
+bool config_store_bootstrap_requested();
 void config_store_mark_bootstrapped(bool completed);
 void config_apply_safe_native_state(const ModuleConfig& config);
 void config_apply_api_enabled(bool enabled);

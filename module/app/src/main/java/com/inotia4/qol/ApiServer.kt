@@ -271,7 +271,10 @@ object ApiServer {
         when {
             wasEnabled && !effectiveEnabled -> stopDelayed()
             !wasEnabled && effectiveEnabled -> startFromConfig()
-            effectiveEnabled && changedListener -> restartDelayed()
+            // Only a server that already exists needs a rebind. The initial snapshot merely sets
+            // the values that bootstrap's first start uses; restarting here would race that first
+            // bind and can leave both sockets failing with EADDRINUSE on the configured port.
+            effectiveEnabled && changedListener && server != null -> restartDelayed()
         }
     }
 }

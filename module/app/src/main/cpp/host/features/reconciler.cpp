@@ -61,7 +61,9 @@ bool FeatureReconciler::bind(const HostDeps& deps) {
     }
     if (ordinary != plugin_count()) return false;
     if (!feature_registry_prepare(deps)) return false;
-    main_thread_ = std::this_thread::get_id();
+    // bind() runs on the bridge-init thread (assembly), not the game thread; the main-thread
+    // reference is captured lazily by the first step() so frame-driven work is only accepted
+    // from the game's logical thread.
     bound_ = true;
     feature_registry_bind_desired_request(&request_desired, this);
     controller_.bind_entry_admission(&entry_admission, this);
@@ -147,7 +149,9 @@ void FeatureReconciler::notify_toggles() {
 }
 
 uint32_t FeatureReconciler::step() {
-    if (!bound_ || std::this_thread::get_id() != main_thread_) return 0;
+    if (!bound_) return 0;
+    if (main_thread_ == std::thread::id{}) main_thread_ = std::this_thread::get_id();
+    if (std::this_thread::get_id() != main_thread_) return 0;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (pending_revision_ > revision_) {

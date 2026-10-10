@@ -49,11 +49,11 @@
 | GET | `/api/debug/ui` | legacy.debug | 0 | 1 | DebugController.ui | `InfoApiServiceCore.debugUi` → `InfoSystemQueries.debugUi` | `nativeGetDebugUiJson` | `host/legacy_json_builders.h`（host 内联） | — |
 | GET | `/api/debug/path` | legacy.debug | 0 | 1 | DebugController.path | `InfoApiServiceCore.debugPath` → `InfoSystemQueries.debugPath` | `nativeDebugPathJson` | `game/access/world_read.cpp` | — |
 | GET | `/api/debug/item/raw` | legacy.debug | 0 | 1 | DebugController.itemRaw | `InfoApiServiceCore.debugItemRaw` → `InfoSystemQueries.debugItemRaw` | `nativeDebugItemRawJson` | `game/read/item_class.cpp`（bridge kernel 门） | — |
-| POST | `/api/debug/settings-ui/inject` | core.settings | 0 | 1 | DebugController.settingsUiInject | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
-| GET | `/api/debug/settings-ui/status` | core.settings | 0 | 1 | DebugController.settingsUiStatus | `InfoApiServiceCore.settingsUiStatus` → `InfoSystemQueries.settingsUiStatus` | `nativeSettingsUiStatus` | Kotlin/JNI settings-ui status handler | — |
-| POST | `/api/debug/settings-ui/restore` | core.settings | 0 | 1 | DebugController.settingsUiRestore | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
-| POST | `/api/debug/settings-ui/open-option` | core.settings | 0 | 1 | DebugController.settingsUiOpenOption | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
-| POST | `/api/debug/settings-ui/open-panel` | core.settings | 0 | 1 | DebugController.settingsUiOpenPanel | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
+| POST | `/api/debug/settings-ui/inject` | settings | 0 | 1 | DebugController.settingsUiInject | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
+| GET | `/api/debug/settings-ui/status` | settings | 0 | 1 | DebugController.settingsUiStatus | `InfoApiServiceCore.settingsUiStatus` → `InfoSystemQueries.settingsUiStatus` | `nativeSettingsUiStatus` | Kotlin/JNI settings-ui status handler | — |
+| POST | `/api/debug/settings-ui/restore` | settings | 0 | 1 | DebugController.settingsUiRestore | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
+| POST | `/api/debug/settings-ui/open-option` | settings | 0 | 1 | DebugController.settingsUiOpenOption | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
+| POST | `/api/debug/settings-ui/open-panel` | settings | 0 | 1 | DebugController.settingsUiOpenPanel | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.settings/*` | — |
 | POST | `/api/debug/custom-ui/components` | core.custom_ui | 0 | 1 | DebugController.customUiComponents | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.custom_ui/panels/debug_components.cpp`（debug-only handler） | — |
 | POST | `/api/debug/custom-ui/scroll` | core.custom_ui | 0 | 1 | DebugController.customUiScroll | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.custom_ui/panels/debug_scroll.cpp`（debug-only handler） | — |
 | POST | `/api/debug/custom-ui/help` | core.custom_ui | 0 | 1 | DebugController.customUiHelp | `NativeHttpCommand.post` | `nativeHttpDispatch` | `plugins/core.custom_ui/panels/debug_help.cpp`（debug-only handler） | — |
@@ -163,7 +163,7 @@
 ## 汇总
 
 - 路由总数：**147**（当前验证基线）。
-- 配置路由 owner：`core.settings=8`（含 3 条 config 路由 list/set/receipt 及 5 条 settings-ui 调试路由）；`module.config=0`。全局 owner 数量以当前 `routes.inc` 和 scoped 验证输出为准；此表中其他历史路由计数不随本配置迁移重算。settings-ui 调试路由仍由插件 lifecycle 自注册/注销。`/api/config/*` 与 `/api/op/features/lifecycle` 的 owner 列（`core.settings`/`core.api`）是 `routes.inc` 的路由登记元数据，实现为 Host 常驻 resident 派发（`host/features/http_control.cpp`），不进入普通插件进程内执行；settings 插件停用不影响这些端点。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
+- 配置路由 owner：3 条 config 路由（list/set/receipt）登记为 `core.settings` 元数据、实现为 Host 常驻 resident 派发（`host/features/http_control.cpp`），不进入普通插件进程内执行，settings 插件停用不影响这些端点；5 条 settings-ui 调试路由 owner 为 `settings`（descriptor.id），仍由插件 lifecycle 自注册/注销（HTTP registry 要求注册 owner 与 `routes.inc` 行 owner 逐字一致）；`module.config=0`。全局 owner 数量以当前 `routes.inc` 和 scoped 验证输出为准；此表中其他历史路由计数不随本配置迁移重算。OP 门控以 `op_gated` 列为准；票据化写端点的调用方契约见 `docs/reference/api-reference.md` §7.9/§7.10。
 - 含加工响应：本表历史统计未按 147 路由重算。
 - 无 native 实现（纯 Kotlin）：本表历史统计未按 147 路由重算；`/api/config/set` 不再由 Kotlin 处理配置语义或写配置文件。
 

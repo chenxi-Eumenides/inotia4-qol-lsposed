@@ -250,6 +250,14 @@ bool config_store_bootstrapped() {
     return g_bootstrap_completed;
 }
 
+// Path-only bootstrap records the directory before nativeInit; Store init/seed happens later in
+// assembly (production_feature_bootstrap), so init consumers must gate on "requested", not on
+// "completed", to avoid a bootstrap/assembly circular wait.
+bool config_store_bootstrap_requested() {
+    std::lock_guard<std::mutex> lock(g_bootstrap_mutex);
+    return g_bootstrap_attempted;
+}
+
 void config_store_mark_bootstrapped(bool completed) {
     std::lock_guard<std::mutex> lock(g_bootstrap_mutex);
     g_bootstrap_completed = completed;
