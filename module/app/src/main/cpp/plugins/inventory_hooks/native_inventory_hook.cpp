@@ -306,16 +306,18 @@ ItemCountWriteResult item_count_write_effective(void* item, uint32_t count) {
                                              : ItemCountWriteResult::kFailed;
 }
 
-bool stack_limit_gate_enabled() {
-    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr) return false;
-    int32_t enabled = 0;
-    const QolResult result = g_sdk->config.get_bool("plugin.stack_limit.enabled", 0, &enabled);
-    return qol::contracts::succeeded(result) && enabled != 0;
+// 999 扩展模式是否已实际应用（Host-owned policy）：OK1 才视为生效；NotReady（请求已开但
+// 资源组未落地）与 OK0（明确关闭）都按未启用处理，不回退、不跨 owner 读配置键。
+bool item_count_extended_applied() {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api == nullptr || api->read_extended_mode == nullptr) return false;
+    uint8_t extended = 0;
+    return qol::contracts::succeeded(api->read_extended_mode(&extended)) && extended != 0;
 }
 
 bool item_count_feature_enabled(void* item) {
     uint32_t effective = 0;
-    return stack_limit_gate_enabled() && item_count_effective(item, &effective);
+    return item_count_extended_applied() && item_count_effective(item, &effective);
 }
 
 // ---------------------------------------------------------------------------
@@ -1227,7 +1229,7 @@ uint64_t ok_destroy_item_wrapper() {
         return g_backup_ok_destroy_item == nullptr ? 0 : g_backup_ok_destroy_item();
     };
     const VanillaSellRoute route =
-        vanilla_sell_route(stack_limit_gate_enabled(), g_in_equip_destroy_button);
+        vanilla_sell_route(item_count_extended_applied(), g_in_equip_destroy_button);
     if (route == VanillaSellRoute::kBackup) {
         g_has_vanilla_sell_preview_context = false;
         return call_backup();

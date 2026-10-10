@@ -56,6 +56,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"device_probe_consumer.dependency_probe", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "能力依赖探针", "验证设备探针能力消费与依赖生命周期接线。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -75,6 +82,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     nullptr,
+    nullptr, 0, nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

@@ -1052,7 +1052,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   install 函数本身不判；关闭时只清 `*_tab_buttons` 引用而不删除已挂载控件
   （残留控件仍可能被绘制/命中）；关闭时只 restore 投影不处理页签。
 - **验证锚**：真机：启用态背包页签 `extension_tab_button=true`；
-  `POST /api/config/set {"extensionBagEnabled":false}` 后 `extension_tab_button=false`，
+  `POST /api/config/set {"plugin_id":"extension_bag","key":"enable","value":false}` 后 `extension_tab_button=false`，
   再启用恢复 `true`（本轮已取证）；商店/合成器页签走同一 install 门控与 disabled
   分支（`VM-42`，待取证）。Host 无（UI 挂载依赖游戏控件树）。
 

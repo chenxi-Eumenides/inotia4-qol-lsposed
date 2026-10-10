@@ -2,11 +2,20 @@
 
 #include <cstdint>
 
+#include "contracts/game_host.h"
+
 // 游戏层：指令 patch 点登记（ARCHITECTURE.md §4.3）。机制实现不得在本层出现；
 // 本层只把「登记名 → 运行期地址 + 原指令字 + 替换字」交给 patch 层，
 // 使 VMA/偏移常量保持 game_symbols.h 单一来源。
 
 namespace qol::game {
+
+// 数量字段布局原语（Game Adapter 内部）：item+I_TYPE 的类别编码判定与 item+I_COUNT
+// 字段读写。偏移属 Game Adapter，插件只经 QolItemCountApi 读写不透明字段值。
+// g_base==0 或 item==nullptr 时 fail-closed 返回 kUnknown/false。
+contracts::QolItemCountEncoding item_count_encoding(const void* item);
+bool read_item_count_field(const void* item, uint32_t* out_value);
+bool write_item_count_field(void* item, uint32_t value);
 
 enum class PatchKind : uint8_t {
     kBlRedirect = 0,          // BL 重定向到 claim.handler（wrapper 地址）

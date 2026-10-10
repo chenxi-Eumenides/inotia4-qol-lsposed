@@ -26,6 +26,14 @@
 - 必需 capability：`world.facts`、`http.registry`、`http.dispatch`。
 - 必需 port：`QOL_PORT_QUEST`（descriptor 要求 1.1）。
 
+### 注册 feature
+
+| feature id | 默认 | 分类 | 类型 |
+|---|---:|---|---|
+| `core.quest.completion_check` | 1 | Gameplay | toggle |
+
+任务完成检查由该 feature 驱动；feature=false 时插件自动完整 deactivate（Host 不改 `enable`），feature 重新开启且 `enable=true` 时尝试 activate。`enable` 由 Host 独占管理，插件不读写。
+
 ## 3. 依赖前置与消费者
 
 - install 还要求 `PluginContext` 的 Game Host 与 Host SDK 可用；quest port 提供任务读取/片段、静态数据就绪状态及写入接口。
@@ -42,14 +50,14 @@
 
 - **读/快照**：每 15 帧经 `world.facts` 确认 state，再从 quest port 读取活动槽 ID/状态与完成任务 ID；静态片段未就绪时跳过发布。快照只保留任务 ID/状态数组。HTTP 查询按 endpoint 获取任务 JSON fragment 并在请求响应阶段组合，避免缓存重复静态文本。
 - **写/命令/票据**：`quit_quest` 在 HTTP 线程严格解析 JSON 中唯一的非负整数 `quest_id`，提交 typed command 并立即回 ticket；主线程 result handler 调 quest write port，写入操作结果至 ticket，业务错误按失败终态处理。内部 `post_set_state` 通过 registered typed handler 将设置状态命令投递到主线程。
-- **生命周期**：install 校验 quest port、world facts capability、快照及 command/ticket handlers，开启 gate 并启动 resync/snapshot 任务；enable 重启 gate 与任务；disable/deactivate 关闭 gate、取消任务、撤销 handler、销毁快照并清除引用。
+- **生命周期**：install 校验 quest port、world facts capability、快照及 command/ticket handlers，并按 `core.quest.completion_check` feature 状态准备/启动 resync 与 snapshot 任务；feature/`enable` 变化经 Host lifecycle 生效时启用或停用任务、撤销 handler、销毁快照并清除引用。
 
 ## 6. 文件地图
 
 | 子职责 | 文件 | 职责 |
 |---|---|---|
 | owner 实现 | `module/app/src/main/cpp/plugins/core.quest/plugin.cpp` | descriptor、查询快照、HTTP handler、命令票据及生命周期 |
-| 任务 feature 状态 | `module/app/src/main/cpp/plugins/core.quest/feature.h`、`feature.cpp` | gate/resync 与任务 feature 辅助状态 |
+| 任务 feature 状态 | `module/app/src/main/cpp/plugins/core.quest/feature.h`、`feature.cpp` | feature/resync 与任务 feature 辅助状态 |
 | 快照声明 | `module/app/src/main/cpp/plugins/core.quest/snapshot_sdk.h` | Host SDK snapshot 包装 |
 | Game Host 契约 | `module/app/src/main/cpp/contracts/game_ports/quest_port.h` | 任务事实、JSON fragment 与写操作端口 |
 | World 依赖契约 | `module/app/src/main/cpp/contracts/world_facts.h` | 被消费的 world facts capability |

@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 
 #include "plugins/move_merge/plugin.cpp"
 
@@ -27,9 +28,6 @@ int sync_bag_calls = 0;
 int cursor_calls = 0;
 int moved_result = 1;
 int facts_available = 1;
-int configured_gate = 0;
-int subscriptions = 0;
-int unsubscriptions = 0;
 int projection_available = 1;
 int refresh_available = 1;
 int extension_source_item = 1;
@@ -53,16 +51,6 @@ int64_t source_control_value = 0;
 int64_t destination_control_value = 0;
 
 QolResult ok() { return contracts::ok(); }
-QolResult config_get(const char*, int32_t fallback, int32_t* out) {
-    *out = configured_gate != 0 ? configured_gate : fallback;
-    return ok();
-}
-QolResult subscribe(uint32_t, QolEventHandler, void*, uint64_t* out) {
-    ++subscriptions;
-    *out = 1;
-    return ok();
-}
-QolResult unsubscribe(uint64_t) { ++unsubscriptions; return ok(); }
 QolResult require(const char* id, QolVersionRange, const void** out) {
     *out = nullptr;
     if (std::strcmp(id, kItemFactsCapabilityId) == 0 && facts_available) *out = &facts;
@@ -161,7 +149,6 @@ void reset() {
     original_calls = move_calls = refresh_calls = sync_slot_calls = sync_bag_calls = cursor_calls = 0;
     moved_result = 1;
     facts_available = projection_available = refresh_available = 1;
-    configured_gate = 0;
     destination_count_value = 20;
     count_limit_value = 99;
     apply_allowed_value = 0;
@@ -182,9 +169,6 @@ void setup() {
     sdk.abi = {sizeof(QolHostSdk), kHostSdkMajor, kHostSdkMinor};
     sdk.hooks.call_original_control_proc = &call_original;
     sdk.capabilities.require = &require;
-    sdk.config.get_bool = &config_get;
-    sdk.events.subscribe = &subscribe;
-    sdk.events.unsubscribe = &unsubscribe;
     sdk.ui = &ui;
     sdk.in_flight = {&in_flight_enter, &in_flight_leave};
     ui = {};
@@ -212,8 +196,8 @@ void setup() {
     g_sdk = &sdk;
     g_move_port = &move_port;
     g_character_port = &character_port;
-    g_active.store(true);
-    g_gate_enabled.store(false);
+    // 门禁等价插件活跃态：默认不活跃，需要合并语义的用例显式置 true。
+    g_active.store(false);
     inflight = 0;
 }
 
@@ -224,7 +208,7 @@ void test_backup_once_and_projection_sync() {
                                                          &source_control_value);
     assert(result == 77 && original_calls == 1 && move_calls == 0);
     assert(sync_bag_calls == 1 && inflight == 0);
-    g_gate_enabled.store(true);
+    g_active.store(true);
     reset();
     const auto merged = ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                                          &source_control_value);
@@ -264,7 +248,7 @@ void test_drop_tristate_and_protection() {
 void test_foreign_failure_and_missing_facts_fallthrough() {
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     moved_result = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
@@ -277,21 +261,21 @@ void test_foreign_failure_and_missing_facts_fallthrough() {
     assert(move_calls == 0 && original_calls == 1);
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     count_supported_value = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 0 && original_calls == 1);
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     destination_slot_value = 16;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 0 && original_calls == 1);
 }
 
-void test_single_owner_and_gate_lifecycle() {
+void test_single_owner_and_feature_lifecycle() {
     reset();
     setup();
     const auto& descriptor = plugin_descriptor();
@@ -302,37 +286,35 @@ void test_single_owner_and_gate_lifecycle() {
     assert(descriptor.resources[0].gate == nullptr);
     assert(descriptor.provides_count == 1);
     assert(std::strcmp(descriptor.provides[0].id, kMoveMergeControlCapabilityId) == 0);
+    // 单一 feature、无配置/事件订阅：门禁即插件活跃态，由宿主 lifecycle 驱动。
+    assert(descriptor.feature_count == 1);
+    assert(std::strcmp(descriptor.features[0].id, "move_merge.drag_merge") == 0);
+    assert(descriptor.features[0].default_enabled == 0);
 
-    configured_gate = 0;
     const void* ports[] = {&move_port, &character_port};
     PluginContext ctx{sizeof(PluginContext), kHostSdkMajor, kHostSdkMinor, &sdk, nullptr,
                       "move_merge", ports, 2};
     assert(plugin_install(ctx) == 0);
-    assert(subscriptions == 1);
-    assert(!control_enabled());
-    configured_gate = 1;
-    ConfigChangedEvent event{kConfigKey, 1};
-    on_config_changed(nullptr, &event);
     assert(control_enabled());
     plugin_on_disabled(ctx);
     assert(!control_enabled());
     plugin_on_enabled(ctx);
     assert(control_enabled());
     plugin_deactivate(ctx);
-    assert(unsubscriptions == 1 && !control_enabled());
+    assert(!control_enabled());
 }
 
 void test_full_limit_apply_and_optional_refresh() {
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     destination_count_value = 99;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 0 && original_calls == 1);
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     count_limit_value = 999;
     destination_count_value = 998;
     refresh_available = 0;
@@ -341,7 +323,7 @@ void test_full_limit_apply_and_optional_refresh() {
     assert(move_calls == 0 && original_calls == 1 && refresh_calls == 0);
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     apply_allowed_value = 1;
     extension_source_item = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
@@ -352,7 +334,7 @@ void test_full_limit_apply_and_optional_refresh() {
 void test_foreign_source_protected_without_projection_or_gate() {
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     extension_source_item = 1;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 0);
@@ -434,7 +416,7 @@ void test_native_fallback_and_count_encoding_gate() {
 
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     source_encoding_value = QolItemCountEncoding::kNotEncoded;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
@@ -442,7 +424,7 @@ void test_native_fallback_and_count_encoding_gate() {
 
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     destination_encoding_value = QolItemCountEncoding::kUnknown;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
@@ -450,7 +432,7 @@ void test_native_fallback_and_count_encoding_gate() {
 
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     count_limit_value = 99;
     destination_count_value = 89;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
@@ -459,7 +441,7 @@ void test_native_fallback_and_count_encoding_gate() {
 
     reset();
     setup();
-    g_gate_enabled.store(true);
+    g_active.store(true);
     count_limit_value = 999;
     destination_count_value = 989;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
@@ -474,7 +456,7 @@ int main() {
     qol::features::move_merge::test_backup_once_and_projection_sync();
     qol::features::move_merge::test_drop_tristate_and_protection();
     qol::features::move_merge::test_foreign_failure_and_missing_facts_fallthrough();
-    qol::features::move_merge::test_single_owner_and_gate_lifecycle();
+    qol::features::move_merge::test_single_owner_and_feature_lifecycle();
     qol::features::move_merge::test_full_limit_apply_and_optional_refresh();
     qol::features::move_merge::test_foreign_source_protected_without_projection_or_gate();
     qol::features::move_merge::test_event2_native_and_ordinary_fallback();

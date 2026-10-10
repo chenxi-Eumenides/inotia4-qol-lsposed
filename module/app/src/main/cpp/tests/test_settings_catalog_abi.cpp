@@ -8,7 +8,7 @@
 
 using namespace qol::contracts;
 static_assert(kSettingsCatalogMajor == 1 && kSettingsCatalogMinor == 3);
-static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 19);
+static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 22);
 
 // Frozen v1.15 prefix; no embedded function table may grow to add settings contributions.
 struct HostSdkV15 {
@@ -63,7 +63,17 @@ static_assert(offsetof(QolHostSdk, owner_verify_token) == 768);
 static_assert(offsetof(QolHostSdk, owner_store) == 776);
 static_assert(offsetof(QolHostSdk, slot_operation) == 784);
 static_assert(offsetof(QolHostSdk, save_route) == 792);
-static_assert(sizeof(QolHostSdk) == 800);
+static_assert(offsetof(QolHostSdk, config_namespace) == 800);
+static_assert(offsetof(QolHostSdk, feature) == 808);
+static_assert(offsetof(QolHostSdk, feature_control) == 816);
+static_assert(sizeof(QolHostSdk) == 824);
+static_assert(offsetof(QolConfigNamespaceApi, read_json) == 8);
+static_assert(offsetof(QolConfigNamespaceApi, replace_json) == 16);
+static_assert(offsetof(QolConfigNamespaceApi, clear) == 24);
+static_assert(offsetof(QolConfigNamespaceApi, update_value) == 32);
+static_assert(offsetof(QolConfigNamespaceApi, read_registered) == 40);
+static_assert(offsetof(QolConfigNamespaceApi, update_http_request) == 48);
+static_assert(sizeof(QolConfigNamespaceApi) == 56);
 static_assert(std::is_standard_layout_v<QolSettingsCatalogApi>);
 static_assert(offsetof(QolSettingsCatalogApi, query_item_availability) == 48);
 static_assert(offsetof(QolSettingsCatalogApi, register_items) == 56);
@@ -156,7 +166,8 @@ int main() {
     assert(settings_config_if_available(&sdk) == nullptr);
     sdk.settings_config = &config_api;
     config_api.size = sizeof(QolSettingsConfigApi) - 1;
-    assert(settings_config_if_available(&sdk) == nullptr);
+    assert(settings_config_if_available(&sdk) == &config_api);
+    assert(settings_config_owner_if_available(&sdk) == nullptr);
     config_api.size = sizeof(QolSettingsConfigApi);
     config_api.major = kSettingsConfigMajor + 1;  // minor 0 是合法首版；只拒非法 major
     assert(settings_config_if_available(&sdk) == nullptr);
@@ -178,6 +189,36 @@ int main() {
     assert(host_sdk_module_version(&sdk) == nullptr);
     sdk.module_version = &test_module_version;
     assert(host_sdk_module_version(nullptr) == nullptr);
+    const QolConfigNamespaceApi namespace_v10{32, kConfigNamespaceMajor,
+        kConfigNamespaceLegacyMinor,
+        +[](QolOwnerToken, char*, uint32_t, uint32_t*) { return ok(); },
+        +[](QolOwnerToken, const char*, uint32_t) { return ok(); },
+        +[](QolOwnerToken) { return ok(); }, nullptr, nullptr};
+    const QolConfigNamespaceApi namespace_api{sizeof(QolConfigNamespaceApi),
+        kConfigNamespaceMajor, kConfigNamespaceMinor,
+        +[](QolOwnerToken, char*, uint32_t, uint32_t*) { return ok(); },
+        +[](QolOwnerToken, const char*, uint32_t) { return ok(); },
+        +[](QolOwnerToken) { return ok(); },
+        +[](QolOwnerToken, const char*, const char*, const char*, uint32_t) { return ok(); },
+        +[](QolOwnerToken, char*, uint32_t, uint32_t*) { return ok(); }};
+    assert(config_namespace_if_available(nullptr) == nullptr);
+    assert(config_namespace_update_if_available(&namespace_v10) == nullptr);
+    assert(config_namespace_registered_if_available(&namespace_v10) == nullptr);
+    assert(config_namespace_update_if_available(&namespace_api) == &namespace_api);
+    assert(config_namespace_registered_if_available(&namespace_api) == &namespace_api);
+    sdk.config_namespace = &namespace_v10;
+    sdk.abi.minor = 19;
+    sdk.abi.size = sizeof(QolHostSdk);
+    assert(config_namespace_if_available(&sdk) == nullptr);
+    sdk.abi.minor = 20;
+    assert(config_namespace_if_available(&sdk) == &namespace_v10);
+    assert(config_namespace_v11_if_available(&sdk) == nullptr);
+    sdk.config_namespace = &namespace_api;
+    assert(config_namespace_if_available(&sdk) == &namespace_api);
+    sdk.abi.minor = 21;
+    assert(config_namespace_v11_if_available(&sdk) == &namespace_api);
+    sdk.abi.size = offsetof(QolHostSdk, config_namespace);
+    assert(config_namespace_if_available(&sdk) == nullptr);
     std::printf("SDK v1.15 prefix bytes=%zu, panels offset=%zu, snapshot_release offset=%zu\n",
                 sizeof(HostSdkV15), offsetof(HostSdkV15, panels), offsetof(HostSdkV15, snapshot_release));
     std::printf("Settings catalog v1.3: legacy v1.2 size=%zu, new size=%zu, metadata tail offset=%zu\n",

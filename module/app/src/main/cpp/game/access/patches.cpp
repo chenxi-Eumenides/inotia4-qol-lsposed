@@ -234,7 +234,7 @@ void patch_site_clear_overrides_for_test() {
 
 }  // namespace qol::game
 
-namespace qol::features::stack_limit::impl {
+namespace qol::game {
 
 contracts::QolItemCountEncoding item_count_encoding(const void* item) {
     if (g_base == 0 || item == nullptr) {
@@ -262,4 +262,4 @@ bool write_item_count_field(void* item, uint32_t value) {
     return true;
 }
 
-}  // namespace qol::features::stack_limit::impl
+}  // namespace qol::game

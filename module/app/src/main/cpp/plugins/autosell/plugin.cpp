@@ -1,9 +1,7 @@
 #include "plugin.h"
 
 #include <atomic>
-#include <cstring>
 
-#include "../../contracts/events.h"
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/extension_bag.h"
 #include "../../contracts/inventory_action.h"
@@ -19,9 +17,9 @@
 #include "store.h"
 #include "ui/panel.h"
 
-// 自动出售插件：门禁来源为配置键 `plugin.autosell.enabled`
-// （nativeSetAutoSellEnabled → kCommandSetConfigBool）。门禁经 kEventConfigChanged 订阅驱动；
-// install/on_enabled 时按配置初值应用一次。
+// 自动出售插件：唯一开关为 descriptor feature `autosell.auto_sell`；插件仅在
+// feature 开启（want_run）时安装，install/on_enabled 应用启用态、on_disabled/deactivate
+// 收回。per-save-slot 筛选配置仍走 save.slot_data，不进 module config。
 //
 // 资源（2 条，均常驻 gate=nullptr）：
 //   · patch:SCENE_DRAW_EQUIP+0x1cc（kCallPatch/kFailClosed）：背包页入口按钮绘制宿主；
@@ -36,7 +34,6 @@ namespace {
 
 constexpr const char* kPluginId = "autosell";
 constexpr const char* kPluginVersion = "0.1.0";
-constexpr const char* kGateKey = "plugin.autosell.enabled";
 
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kAttributeQualityCapabilityId,
@@ -64,7 +61,6 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortInventoryExtrasVersion.minor}},
 };
 
-uint64_t g_config_subscription = 0;
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
@@ -128,21 +124,6 @@ void apply_gate(bool enabled) {
     autosell_ui_set_enabled(enabled);
 }
 
-void on_config_changed(void* ctx, const void* payload) {
-    (void)ctx;
-    if (payload == nullptr) return;
-    const auto* event = static_cast<const contracts::ConfigChangedEvent*>(payload);
-    if (event->key == nullptr || std::strcmp(event->key, kGateKey) != 0) return;
-    apply_gate(event->int_value != 0);
-}
-
-bool config_enabled() {
-    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr) return false;
-    int32_t value = 0;
-    if (g_sdk->config.get_bool(kGateKey, 0, &value).ok != kQolOk) return false;
-    return value != 0;
-}
-
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
@@ -151,9 +132,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_item_facts = nullptr;
     if (ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) return 1;
     g_inventory_extras = static_cast<const contracts::QolInventoryExtrasPort*>(ctx.ports[0]);
-    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr ||
-        g_sdk->events.subscribe == nullptr || g_sdk->events.unsubscribe == nullptr ||
-        g_sdk->panels.register_provider == nullptr ||
+    if (g_sdk == nullptr || g_sdk->panels.register_provider == nullptr ||
         g_sdk->panels.unregister_owner == nullptr) {
         return 1;
     }
@@ -204,14 +183,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     // activate 重入安全。
     autosell_register_save_enter();
     autosell_register_save_exit();
-    // 门禁初值取配置；订阅配置变更（重复订阅会留孤儿订阅，已订阅则跳过）。
-    apply_gate(config_enabled());
-    if (g_config_subscription == 0) {
-        const QolResult result = g_sdk->events.subscribe(contracts::kEventConfigChanged,
-                                                         &on_config_changed, nullptr,
-                                                         &g_config_subscription);
-        if (result.ok != kQolOk) return 1;
-    }
+    // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。
+    apply_gate(true);
     // 自身初始化：资源由宿主声明式安装；本面板登记 provider 供 core.ui 容器打开。
     if (g_sdk->panels.register_provider(&kPanelProvider).ok != kQolOk) return 1;
     return 0;
@@ -230,12 +203,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
             if (panels->deactivate_owner != nullptr) (void)panels->deactivate_owner(kPluginId);
         }
     }
-    if (g_config_subscription != 0) {
-        if (g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
-            (void)g_sdk->events.unsubscribe(g_config_subscription);
-        }
-        g_config_subscription = 0;
-    }
     autosell_unregister_save_callbacks();
     g_game = nullptr;
     g_inventory_extras = nullptr;
@@ -253,7 +220,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
         !autosell_store_register(ctx.owner_token, g_slot_data_api)) {
         AUTOSELL_LOG_WARN("slot data re-register on enable failed");
     }
-    apply_gate(config_enabled());
+    apply_gate(true);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
@@ -266,6 +233,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.enabled = g_gate.load(std::memory_order_acquire);
     out.error = nullptr;
 }
+
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"autosell.auto_sell", 0, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "自动出售", "自动出售符合当前存档筛选规则的物品。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
 
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
@@ -283,6 +257,8 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,      // on_resource_ready（kCallPatch/kOwnership 无 backup）
     kPorts,
     1,
+    nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

@@ -185,38 +185,9 @@ int fake_item_rarity(void*) { return 9; }
 int fake_item_no_sell(int32_t) { return 0; }
 int fake_item_dice(int32_t) { return 0; }
 int fake_item_cumulate_count(void*) { return 6; }
-bool g_item_count_probe = false;
-int32_t g_adapter_encoding_error = kQolOk;
-qol::contracts::QolItemCountEncoding g_adapter_encoding =
-    qol::contracts::QolItemCountEncoding::kEncoded;
-uint32_t g_adapter_canonical_count = 0;
-int32_t g_adapter_canonical_error = kQolOk;
-bool adapter_item_count_probe() { return g_item_count_probe; }
 bool overflow_result(void*, char*, uint32_t capacity, uint32_t* out_size) {
     *out_size = capacity + 1;
     return false;
-}
-QolResult adapter_item_count_canonical(const void*, uint32_t* out_count) {
-    if (g_adapter_canonical_error != kQolOk) {
-        return qol::contracts::error(g_adapter_canonical_error, "provider error", 14);
-    }
-    *out_count = g_adapter_canonical_count;
-    return qol::contracts::ok();
-}
-QolResult adapter_item_count_effective(const void*, uint32_t* out_count) {
-    *out_count = 88;
-    return qol::contracts::ok();
-}
-QolResult adapter_item_count_encoding(const void*, qol::contracts::QolItemCountEncoding* out) {
-    if (g_adapter_encoding_error != kQolOk) {
-        return qol::contracts::error(g_adapter_encoding_error, "encoding error", 14);
-    }
-    *out = g_adapter_encoding;
-    return qol::contracts::ok();
-}
-QolResult adapter_item_count_view_limit(int32_t extended, uint32_t* out_limit) {
-    *out_limit = extended != 0 ? 999u : 99u;
-    return qol::contracts::ok();
 }
 int fake_can_equip(void*, void*) { return 1; }
 int fake_find_equip_slot(void*, void*) { return 2; }
@@ -577,8 +548,8 @@ int main() {
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
-    assert(sdk.abi.minor == 19);
-    assert(qol::contracts::kHostSdkMinor == 19);
+    assert(sdk.abi.minor == qol::contracts::kHostSdkMinor);
+    assert(qol::contracts::kHostSdkMinor == 22);
     assert(sdk.module_version != nullptr);
     assert(qol::contracts::settings_catalog_if_available(&sdk) == sdk.settings_catalog);
     assert(sdk.settings_catalog != nullptr);
@@ -842,9 +813,9 @@ int main() {
     }
 
     int32_t value = 0;
-    assert(sdk.config.set_bool("adapter.test", 1).ok == kQolOk);
+    assert(sdk.config.set_bool("adapter.test", 1).code == kQolErrUnsupported);
     assert(sdk.config.get_bool("adapter.test", 0, &value).ok == kQolOk);
-    assert(value == 1);
+    assert(value == 0);
 
     uint64_t subscription = 0;
     assert(sdk.events.subscribe(1, &event_handler, nullptr, &subscription).ok == kQolOk);
@@ -1221,65 +1192,62 @@ int main() {
     assert(item_port_api.read.is_no_sell(4, &value).ok == kQolOk);
     assert(game.read_only.item.is_dice(4, &value).ok == kQolOk);
     assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
-    static qol::contracts::QolItemCountApi item_count_provider{};
-    item_count_provider.canonical = &adapter_item_count_canonical;
-    item_count_provider.effective = &adapter_item_count_effective;
-    item_count_provider.is_encoded = &adapter_item_count_encoding;
-    item_count_provider.view_limit = &adapter_item_count_view_limit;
-    qol::game::item_count_set_provider(&item_count_provider);
-    qol::game::item_count_set_active_probe(&adapter_item_count_probe);
-    g_item_count_probe = false;
+    // Host 常驻 item_count facade：用带类别表的假 g_base 驱动真实 S2 codec 与模式策略。
+    static std::array<uint8_t, 23 * 16> g_fake_class_table{};
+    static uint8_t g_fake_class_stride = 23;
+    static std::array<uint8_t, 0x40> g_count_item{};
+    const uintptr_t saved_count_base = g_base;
+    g_base = reinterpret_cast<uintptr_t>(g_move_merge_fake_memory.data());
+    *reinterpret_cast<uint8_t**>(g_move_merge_fake_memory.data() + G_ITEMCLASS_DATA_GOT_VMA) =
+        g_fake_class_table.data();
+    *reinterpret_cast<uint8_t**>(g_move_merge_fake_memory.data() + G_ITEMCLASS_SIZE_GOT_VMA) =
+        &g_fake_class_stride;
+    g_fake_class_table[12 * 23 + 6] = 1;  // category 12 = count-encoded
+    *reinterpret_cast<uint16_t*>(g_count_item.data() + I_TYPE) = static_cast<uint16_t>(12 << 6);
+    // S2 a=2、b=44 → canonical 300。
+    *reinterpret_cast<uint32_t*>(g_count_item.data() + I_COUNT) = (2u << 22) | (44u << 25);
+    const qol::contracts::QolItemHandle count_handle = qol::game::register_item(
+        g_count_item.data(), qol::contracts::kQolItemHandleOwnerGame);
+    assert(count_handle.slot != 0 && count_handle.generation != 0);
+
+    qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
     value = -1;
-    assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
-    assert(value == 6);
-    g_item_count_probe = true;
-    g_adapter_canonical_count = 1023;
+    assert(item_port_api.read.cumulate_count(count_handle, &value).ok == kQolOk);
+    assert(value == 6);  // 关闭态：原版 getter
     value = -1;
-    assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
-    assert(value == 1023);
-    g_adapter_canonical_error = kQolErrUnsupported;
-    assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).code ==
-           kQolErrUnsupported);
-    g_adapter_canonical_error = kQolOk;
-    value = -1;
-    assert(item_port_api.read.effective_cumulate_count(g_inventory_item_handle, &value).ok ==
-           kQolOk);
-    assert(value == 88);
+    assert(item_port_api.read.effective_cumulate_count(count_handle, &value).ok == kQolOk);
+    assert(value == 44);  // 关闭态：b 段视图 clamp 99
     qol::contracts::QolItemCountEncoding queried_encoding =
         qol::contracts::QolItemCountEncoding::kUnknown;
-    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kEncoded;
-    g_adapter_encoding_error = kQolOk;
-    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).ok ==
-           kQolOk);
+    assert(item_port_api.read.count_encoding(count_handle, &queried_encoding).ok == kQolOk);
     assert(queried_encoding == qol::contracts::QolItemCountEncoding::kEncoded);
-    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kNotEncoded;
-    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).ok ==
-           kQolOk);
-    assert(queried_encoding == qol::contracts::QolItemCountEncoding::kNotEncoded);
-    queried_encoding = qol::contracts::QolItemCountEncoding::kEncoded;
-    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kUnknown;
-    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).code !=
-           kQolOk);
-    assert(queried_encoding == qol::contracts::QolItemCountEncoding::kEncoded);
-    g_adapter_encoding = qol::contracts::QolItemCountEncoding::kEncoded;
-    g_adapter_encoding_error = kQolErrNotReady;
-    assert(item_port_api.read.count_encoding(g_inventory_item_handle, &queried_encoding).code ==
-           kQolErrNotReady);
-    assert(queried_encoding == qol::contracts::QolItemCountEncoding::kEncoded);
-    g_adapter_encoding_error = kQolOk;
     uint32_t count_limit = 0;
-    g_item_count_probe = false;
-    assert(item_port_api.read.count_limit(g_inventory_item_handle, &count_limit).ok == kQolOk);
+    assert(item_port_api.read.count_limit(count_handle, &count_limit).ok == kQolOk);
     assert(count_limit == 99);
-    g_item_count_probe = true;
-    assert(item_port_api.read.count_limit(g_inventory_item_handle, &count_limit).ok == kQolOk);
+
+    qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kApplied);
+    value = -1;
+    assert(item_port_api.read.cumulate_count(count_handle, &value).ok == kQolOk);
+    assert(value == 300);  // 应用态：canonical 128a+b
+    value = -1;
+    assert(item_port_api.read.effective_cumulate_count(count_handle, &value).ok == kQolOk);
+    assert(value == 300);
+    assert(item_port_api.read.count_limit(count_handle, &count_limit).ok == kQolOk);
     assert(count_limit == 999);
+
+    // NotReady = 请求已开但资源组未落地：读侧 NotReady，unmask 后的视图仍按关闭态上限。
+    qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kNotReady);
+    value = -1;
+    assert(item_port_api.read.effective_cumulate_count(count_handle, &value).code ==
+           kQolErrNotReady);
+    assert(item_port_api.read.count_limit(count_handle, &count_limit).ok == kQolOk);
+    assert(count_limit == 99);
     count_limit = 777;
     assert(item_port_api.read.count_limit(qol::contracts::kInvalidItemHandle, &count_limit).code !=
            kQolOk);
     assert(count_limit == 777);
-    qol::game::item_count_set_provider(nullptr);
-    g_item_count_probe = false;
+    qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
+    g_base = saved_count_base;
     assert(game.read_only.item.class_no_equip_bit(4, &value).ok == kQolOk);
     assert(game.read_only.item.equip_desc_role_type(&value).ok == kQolOk);
     assert(game.read_only.item.enchant_remaining(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);

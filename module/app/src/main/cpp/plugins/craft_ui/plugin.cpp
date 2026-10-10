@@ -37,7 +37,6 @@ namespace {
 constexpr const char* kPluginId = "craft_ui";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kOwner = "craft_ui";
-constexpr const char* kGateKey = "customRecipeEnabled";
 
 // ---- hook 跳板（由宿主经 on_resource_ready 交还写入）----
 UIMixButtonInvenItemSelectExeFn g_backup_place = nullptr;
@@ -161,11 +160,9 @@ void place_execute(void* ctrl) {
     if (g_backup_place == nullptr) return;
     const contracts::CraftResultApi* api = craft_api();
     if (api == nullptr) {
-        if (craft_result_unavailable_is_fail_closed(config_enabled(kGateKey))) {
-            log_message(kLogWarn, "place blocked reason=craft_result unavailable");
-            return;
-        }
-        g_backup_place(ctrl);
+        // 本插件经 required 依赖 craft_result：活跃期 provider 必在场；撤销窗口内一律
+        // fail-closed，不回落原版路径（原版通用路径会白扣材料）。
+        log_message(kLogWarn, "place blocked reason=craft_result unavailable");
         return;
     }
     const uint32_t mix_type = craft_mix_type();
@@ -258,11 +255,7 @@ void craft_execute(void* ctrl) {
     if (g_backup_mixing == nullptr) return;
     const contracts::CraftResultApi* api = craft_api();
     if (api == nullptr) {
-        if (craft_result_unavailable_is_fail_closed(config_enabled(kGateKey))) {
-            log_message(kLogWarn, "craft blocked reason=craft_result unavailable");
-            return;
-        }
-        g_backup_mixing(ctrl);
+        log_message(kLogWarn, "craft blocked reason=craft_result unavailable");
         return;
     }
     const uint32_t mix_type = craft_mix_type();
@@ -322,8 +315,7 @@ int64_t craft_rand64_adapter(int lo, int hi) {
 int make_item_execute(int32_t mix_type, void** out_item) {
     int32_t result = -1;
     const contracts::CraftResultApi* api = craft_api();
-    if (api == nullptr &&
-        craft_result_unavailable_is_fail_closed(config_enabled(kGateKey))) {
+    if (api == nullptr) {
         log_message(kLogWarn, "make item blocked reason=craft_result unavailable");
         return 1;
     }
@@ -446,71 +438,70 @@ void reset_stuff_execute() {
 // ---------------------------------------------------------------------------
 // 12 条资源声明（5 核心 required/fail-closed + 7 装饰 optional/fail-soft）
 // ---------------------------------------------------------------------------
-#define CRAFT_CLAIM(ID, SYM, HANDLER, GATE, REQ, FAIL)                                   \
+// gate=nullptr：资源跟随插件 lifecycle。插件经 required 依赖 craft_result 级联，
+// 仅在 custom_recipe 活跃（自有 feature 开启）时装hook，关闭时整体还原。
+#define CRAFT_CLAIM(ID, SYM, HANDLER, REQ, FAIL)                                         \
     {                                                                                     \
         ID, SYM, contracts::ResourceMechanism::kEntryHook, contracts::ResourcePolicy::kPrivate, \
             REQ, FAIL, true, kOwner,                                                      \
             "UIMix 合成器界面 hook；wrapper 只做界面判断/呈现，配方判定经 craft_result 能力", \
-            GATE, 120, reinterpret_cast<void*>(HANDLER)                                   \
+            nullptr, 120, reinterpret_cast<void*>(HANDLER)                                \
     }
 
 const contracts::ResourceClaim kClaims[] = {
     // 5 核心：任一失败即整体回滚（required/fail-closed）。
     CRAFT_CLAIM("hook:UIMix_ButtonInvenItemSelectExe", "F_UIMIX_BUTTON_INVEN_ITEM_SELECT_EXE_VMA",
-                &place_execute, kGateKey, contracts::ResourceRequirement::kRequired,
+                &place_execute, contracts::ResourceRequirement::kRequired,
                 contracts::ResourceFailure::kFailClosed),
     CRAFT_CLAIM("hook:UIMix_ButtonMixingExe", "F_UIMIX_BUTTON_MIXING_EXE_VMA", &craft_execute,
-                kGateKey, contracts::ResourceRequirement::kRequired,
+                contracts::ResourceRequirement::kRequired,
                 contracts::ResourceFailure::kFailClosed),
-    CRAFT_CLAIM("hook:MIXSYSTEM_MakeItem", "F_MAKE_MIX_VMA", &make_item_execute, kGateKey,
+    CRAFT_CLAIM("hook:MIXSYSTEM_MakeItem", "F_MAKE_MIX_VMA", &make_item_execute,
                 contracts::ResourceRequirement::kRequired,
                 contracts::ResourceFailure::kFailClosed),
     CRAFT_CLAIM("hook:UIMix_ButtonMenuListExe", "F_UIMIX_BUTTON_MENU_LIST_EXE_VMA", &menu_execute,
-                kGateKey, contracts::ResourceRequirement::kRequired,
+                contracts::ResourceRequirement::kRequired,
                 contracts::ResourceFailure::kFailClosed),
     CRAFT_CLAIM("hook:UIMix_ButtonRecipeExe", "F_UIMIX_BUTTON_RECIPE_EXE_VMA", &recipe_execute,
-                kGateKey, contracts::ResourceRequirement::kRequired,
+                contracts::ResourceRequirement::kRequired,
                 contracts::ResourceFailure::kFailClosed),
-    // 6 装饰（门控）：失败只 degraded、不拖垮核心链。
+    // 6 装饰：失败只 degraded、不拖垮核心链。
     CRAFT_CLAIM("hook:X_TEXTCTRL_SetTextControl", "F_XTEXTCTRL_SET_TEXT_CONTROL_VMA",
-                &set_desc_text_execute, kGateKey, contracts::ResourceRequirement::kOptional,
+                &set_desc_text_execute, contracts::ResourceRequirement::kOptional,
                 contracts::ResourceFailure::kFailSoft),
     CRAFT_CLAIM("hook:ControlItem_Draw", "F_CONTROL_ITEM_DRAW_VMA", &control_item_draw_execute,
-                kGateKey, contracts::ResourceRequirement::kOptional,
+                contracts::ResourceRequirement::kOptional,
                 contracts::ResourceFailure::kFailSoft),
     CRAFT_CLAIM("hook:ITEM_DrawPorting", "F_ITEM_DRAW_PORTING_VMA", &item_draw_porting_execute,
-                kGateKey, contracts::ResourceRequirement::kOptional,
+                contracts::ResourceRequirement::kOptional,
                 contracts::ResourceFailure::kFailSoft),
     CRAFT_CLAIM("hook:UIMix_ButtonRecipeDraw", "F_UIMIX_BUTTON_RECIPE_DRAW_VMA",
-                &button_recipe_draw_execute, kGateKey, contracts::ResourceRequirement::kOptional,
+                &button_recipe_draw_execute, contracts::ResourceRequirement::kOptional,
                 contracts::ResourceFailure::kFailSoft),
-    CRAFT_CLAIM("hook:UIMix_Draw", "F_UIMIX_DRAW_VMA", &uimix_draw_execute, kGateKey,
+    CRAFT_CLAIM("hook:UIMix_Draw", "F_UIMIX_DRAW_VMA", &uimix_draw_execute,
                 contracts::ResourceRequirement::kOptional, contracts::ResourceFailure::kFailSoft),
     CRAFT_CLAIM("hook:UIMix_ButtonMenuListDraw", "F_UIMIX_BUTTON_MENU_LIST_DRAW_VMA",
-                &menu_list_draw_execute, kGateKey, contracts::ResourceRequirement::kOptional,
+                &menu_list_draw_execute, contracts::ResourceRequirement::kOptional,
                 contracts::ResourceFailure::kFailSoft),
-    // 常驻（gate=nullptr）：清空可能来自原版成功链，不该被别的开关左右。
     CRAFT_CLAIM("hook:UIMix_ResetStuffItemControl", "F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA",
-                &reset_stuff_execute, nullptr, contracts::ResourceRequirement::kOptional,
+                &reset_stuff_execute, contracts::ResourceRequirement::kOptional,
                 contracts::ResourceFailure::kFailSoft),
 };
 #undef CRAFT_CLAIM
 
 constexpr uint32_t kClaimCount = sizeof(kClaims) / sizeof(kClaims[0]);
 
-// optional_requires：能力缺失只置 degraded、不级联停用（保证 reset hook 仍工作）。
-const contracts::CapabilityRequirement kOptionalRequires[] = {
-    {contracts::kCraftResultCapabilityId,
-     QolVersionRange{static_cast<uint16_t>(contracts::kCraftResultVersionMajor),
-                     static_cast<uint16_t>(contracts::kCraftResultVersionMinor)}},
-};
-
+// craft_result 为 required：单开关语义经依赖级联表达——语义 owner（custom_recipe）
+// 的 feature 关闭时撤销 craft_result，本插件随之 blocked/deactivate，desired 保留。
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kItemFactsCapabilityId,
      QolVersionRange{static_cast<uint16_t>(contracts::kItemFactsVersionMajor),
                       static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
     {contracts::kCraftFactsCapabilityId,
      QolVersionRange{contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}},
+    {contracts::kCraftResultCapabilityId,
+     QolVersionRange{static_cast<uint16_t>(contracts::kCraftResultVersionMajor),
+                     static_cast<uint16_t>(contracts::kCraftResultVersionMinor)}},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -609,11 +600,19 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
+    // Feature callback does not replace the existing lifecycle or business controls.
+    // hidden + default true：界面层随 required 依赖 craft_result 级联，不单独暴露开关；
+    // 用户唯一的可见开关在语义 owner custom_recipe（custom_recipe.recipes）。
+    static constexpr contracts::FeatureDefinition kFeatures[] = {
+        {"craft_ui.custom_crafting", 1, contracts::FeatureCategory::kHidden,
+         contracts::FeatureType::kToggle, "自定义合成界面", "呈现自定义配方并处理合成器交互。",
+         [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+    };
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        2, kRequires,  // requires=item.facts + craft.facts
-        1, kOptionalRequires,  // optional_requires=[craft_result]
+        3, kRequires,  // requires=item.facts + craft.facts + craft_result
+        0, nullptr,    // optional_requires
         0, nullptr,  // provides
         kClaimCount, kClaims,
         0, nullptr,  // jni
@@ -625,6 +624,8 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         &on_resource_ready,
         kPorts,
         1,
+        nullptr, 0,
+        kFeatures, 1,
     };
     return descriptor;
 }

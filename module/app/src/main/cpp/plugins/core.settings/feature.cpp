@@ -29,7 +29,7 @@ int32_t frame_tick(int64_t frame, void* ctx) {
 // 设置页容器 provider（panel_id="settings"）。
 const contracts::PanelProviderSpec kSettingsProvider = {
     "settings",
-    "core.settings",
+    "settings",
     &settings_provider_open,
     &settings_provider_close,
     &settings_provider_active,
@@ -37,23 +37,11 @@ const contracts::PanelProviderSpec kSettingsProvider = {
     settings_panel_callbacks(),
 };
 
-// 设置页「存档备份」动作项：owner=core.ui（页面归属），目标 panel 归 save_backup 插件。
-// 当前设置页仍用静态 11 项表渲染；本项为面板注册表的前向兼容登记（数据化留 D1-b4）。
-const contracts::PanelItemSpec kSaveBackupItem = {
-    "core.ui.item.save_backup",
-    "core.settings",
-    "存档备份",
-    contracts::PanelItemKind::kAction,
-    nullptr,        // config_key（动作项）
-    "save_backup",  // panel_id
-    nullptr,        // page_hint
-};
-
 }  // namespace
 
-void panels_bind_sdk(const contracts::QolHostSdk* sdk) {
+void panels_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToken owner_token) {
     g_sdk = sdk;
-    settings_bind_sdk(sdk);
+    settings_bind_sdk(sdk, owner_token);
     // 依赖一律经能力取得（ADR 0001 D2）：能力 ID 与版本保持原样，改的只是提供者。
     g_panels_api = nullptr;
     if (sdk != nullptr && sdk->capabilities.require != nullptr) {
@@ -98,9 +86,8 @@ void plugin_set_enabled(bool enabled) {
 
 bool panels_register() {
     if (g_sdk == nullptr || g_sdk->panels.register_provider == nullptr ||
-        g_sdk->panels.register_item == nullptr) return false;
+        contracts::feature_control_if_available(g_sdk) == nullptr) return false;
     if (!contracts::succeeded(g_sdk->panels.register_provider(&kSettingsProvider))) return false;
-    if (!contracts::succeeded(g_sdk->panels.register_item(&kSaveBackupItem))) return false;
     if (g_frame_task == 0 && g_sdk->scheduler.add != nullptr) {
         // 每帧（interval=1）：游戏 STATE_EnterMainMenu 会重填「更多游戏」ExecuteProc 槽为
         // 原版 GotoShowMoreGames，重绑间隔大于 1 帧时存在点击落回原版 gemshop 的窗口；
@@ -121,11 +108,15 @@ void panels_unregister() {
         }
         g_frame_task = 0;
     }
+    settings_ui_close_panel();
     settings_release_more_games();
     g_enabled.store(false, std::memory_order_release);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
-        (void)g_sdk->panels.unregister_owner("core.settings");
+        (void)g_sdk->panels.unregister_owner("settings");
     }
+    g_panels_api = nullptr;
+    settings_bind_sdk(nullptr, contracts::kQolOwnerTokenInvalid);
+    g_sdk = nullptr;
 }
 
 }  // namespace qol::features::core_ui

@@ -1,6 +1,5 @@
 #include "plugin.h"
 
-#include <cstring>
 #include <cstdint>
 
 #include "../../contracts/attribute_quality.h"
@@ -8,7 +7,6 @@
 #include "../../contracts/craft_facts.h"
 #include "../../contracts/craft_result.h"
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
-#include "../../contracts/events.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/text_layer.h"
 #include "feature.h"
@@ -17,17 +15,17 @@
 
 // 自定义合成配方插件：结果层能力提供者 + 表注入行为所有权（C2 Step 4）。
 //
-// 门禁：配置键 `customRecipeEnabled`（Kotlin JNI 写配置、宿主 gate 同步）。
-//   · 门禁开 → kOwnership acquire 注入 RECIPEBASE/MIXTUREBASE；craft_ui 的界面 hook 生效。
-//   · 门禁关 → release 收回注入记录数；provider enabled=false，残留面板 fail-closed。
+// 门禁：descriptor feature `custom_recipe.recipes`（默认 false，用户可见唯一开关）。
+//   · feature 开 → 插件活跃，kOwnership acquire 注入 RECIPEBASE/MIXTUREBASE；
+//     craft_ui 经 required 依赖 craft_result 级联活跃。
+//   · feature 关 → on_toggle 先置 enabled=false（残留面板 fail-closed），随后插件停用，
+//     release 收回注入记录数；craft_ui 因依赖撤销级联停用。两插件 desired 保留。
 
 namespace qol::features::custom_recipe {
 namespace {
 
 constexpr const char* kPluginId = "custom_recipe";
 constexpr const char* kPluginVersion = "0.1.0";
-constexpr const char* kGateKey = "customRecipeEnabled";
-uint64_t g_config_subscription = 0;
 
 // ---- 「宝石强化」呈现文案（ADR 0001 D3：合成域的配方呈现文案归本插件）----
 //
@@ -43,13 +41,6 @@ const char* recipe_text_modify(uint32_t text_id, const char* current, void* ctx)
     (void)current;
     (void)ctx;
     return recipe_owner_lookup(text_id);
-}
-
-void on_config_changed(void* /*ctx*/, const void* payload) {
-    if (payload == nullptr) return;
-    const auto* event = static_cast<const contracts::ConfigChangedEvent*>(payload);
-    if (event->key == nullptr || std::strcmp(event->key, kGateKey) != 0) return;
-    set_enabled(event->int_value != 0);
 }
 
 bool write_stuff_need_handler(void*, const uint8_t* payload, uint32_t size);
@@ -125,18 +116,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     set_context(ctx);
     // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
     register_dynamic_recipes();
-    // 门禁初值取配置；订阅配置变更（重复订阅会留孤儿订阅，已订阅则跳过）。
-    int32_t enabled_value = 0;
-    if (host_sdk()->config.get_bool != nullptr) {
-        (void)host_sdk()->config.get_bool(kGateKey, 0, &enabled_value);
-    }
-    set_enabled(enabled_value != 0);
-    if (g_config_subscription == 0) {
-        if (host_sdk()->events.subscribe != nullptr) {
-            (void)host_sdk()->events.subscribe(contracts::kEventConfigChanged, &on_config_changed,
-                                                nullptr, &g_config_subscription);
-        }
-    }
+    // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。
+    set_enabled(true);
     return 0;
 }
 
@@ -147,12 +128,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     g_text_consumer = 0;
     g_text_api = nullptr;
-    if (g_config_subscription != 0) {
-        if (host_sdk()->events.unsubscribe != nullptr) {
-            (void)host_sdk()->events.unsubscribe(g_config_subscription);
-        }
-        g_config_subscription = 0;
-    }
     if (host_sdk() != nullptr && host_sdk()->commands.unregister_typed_handler != nullptr) {
         (void)host_sdk()->commands.unregister_typed_handler(contracts::kCraftWriteStuffNeedHandlerId);
         (void)host_sdk()->commands.unregister_typed_handler(contracts::kCraftSetStuffItemHandlerId);
@@ -168,11 +143,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.game == nullptr) return;
     set_context(ctx);
-    int32_t enabled_value = 0;
-    if (host_sdk()->config.get_bool != nullptr) {
-        (void)host_sdk()->config.get_bool(kGateKey, 0, &enabled_value);
-    }
-    set_enabled(enabled_value != 0);
+    set_enabled(true);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
@@ -239,8 +210,8 @@ const contracts::ResourceClaim kClaims[] = {
      contracts::ResourceFailure::kFailSoft,
      true,
      kPluginId,
-     "RECIPEBASE/MIXTUREBASE 注入记录的占有：门禁关时收回记录数、残留面板不命中注入记录",
-     kGateKey,
+     "RECIPEBASE/MIXTUREBASE 注入记录的占有：插件停用时收回记录数、残留面板不命中注入记录",
+     nullptr,
      120,
      const_cast<contracts::OwnershipOps*>(&ownership_ops())},
 };
@@ -248,6 +219,17 @@ const contracts::ResourceClaim kClaims[] = {
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
+    // 唯一可见开关。on_toggle 在停用前同步镜像到内部 enabled，使 craft_ui 在级联撤销
+    // 窗口对残留面板 fail-closed（停用顺序由宿主逆拓扑保证：消费方先停）。
+    static constexpr contracts::FeatureDefinition kFeatures[] = {
+        {"custom_recipe.recipes", 0, contracts::FeatureCategory::kGameplay,
+         contracts::FeatureType::kToggle, "自定义合成", "提供自定义配方与合成结果。",
+         [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
+             set_enabled(enabled != 0);
+             return contracts::ok();
+         },
+         nullptr},
+    };
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
@@ -263,6 +245,8 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         &plugin_fill_status,
         nullptr,                 // on_resource_ready（ownership 无 backup）
         kPorts, 1,
+        nullptr, 0,
+        kFeatures, 1,
     };
     return descriptor;
 }

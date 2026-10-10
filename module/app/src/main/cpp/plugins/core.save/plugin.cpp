@@ -1055,6 +1055,13 @@ int32_t save_on_resource_ready_trampoline(contracts::PluginContext& /*ctx*/,
     return save_on_resource_ready_impl(resource_id, backup);
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.save.provider", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "存档领域服务", "提供存档事实、槽数据持久化与进退档协调。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId, kPluginVersion,
     0, nullptr,
@@ -1066,6 +1073,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status, &save_on_resource_ready_trampoline,
     kPorts, 3,
     kSaveWriteRoutes, 3,
+    kFeatures, 1,
 };
 
 }  // namespace

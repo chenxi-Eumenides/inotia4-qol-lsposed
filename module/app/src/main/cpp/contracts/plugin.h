@@ -17,6 +17,7 @@
 #include "host_sdk.h"
 #include "owner_token.h"
 #include "version.h"
+#include "feature.h"
 
 namespace qol::contracts {
 
@@ -165,6 +166,8 @@ struct PluginDescriptor {
     // HTTP query handler 声明追加在端口字段之后；宿主按插件生命周期注册/撤销。
     const HttpQueryHandlerDescriptor* http_queries = nullptr;
     uint32_t http_query_count = 0;
+    const FeatureDefinition* features = nullptr;
+    uint32_t feature_count = 0;
 };
 
 }  // namespace qol::contracts

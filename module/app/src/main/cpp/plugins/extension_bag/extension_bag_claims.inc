@@ -22,7 +22,6 @@ constexpr const char* kEbP2SavePopup = "own:popup.save_panel";
 constexpr const char* kEbP3StorePopup = "own:popup.store";
 constexpr const char* kEbP4MixPopup = "own:popup.mix";
 constexpr const char* kEbS1DescSlots = "own:desc_button_execute_slots";
-constexpr const char* kEbGateKey = "extensionBagEnabled";
 
 // PopupState 占用条目：资源事务 acquire 写入、release 写回（主线程）。
 ::qol::contracts::QolPopupStateEntry g_inventory_popup_entry{};
@@ -218,8 +217,9 @@ namespace extension_bag {
 
 const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count) {
     // M1/M2 校正（D2a-3b-1）：ADR-0007 表记录 required × failClosed；按晚就绪语义
-    // 校正为 required × failSoft —— 装配期失败保持 free + degraded，gate 开且 free
+    // 校正为 required × failSoft —— 装配期失败保持 free + degraded，插件活跃且 free
     // 时宿主每逻辑帧重试到成功，语义等价旧 300ms 重试线程。
+    // gate=nullptr：资源跟随插件 lifecycle，单一 feature 关闭即整体还原。
     static const ::qol::contracts::ResourceClaim kClaims[] = {
         {
             kEbM1SaveInventory,
@@ -231,7 +231,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             true,
             "extension_bag",
             "SAVE_SaveInventory 是存档直调入口，投影安装期间必须还原投影再落盘（调用方无关）",
-            kEbGateKey,
+            nullptr,
             120,
             reinterpret_cast<void*>(&save_inventory_wrapper),
         },
@@ -245,7 +245,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             true,
             "extension_bag",
             "商店出售入口按弹窗载荷反推数量后接管整堆/部分出售；原版物品经 backup 透传",
-            kEbGateKey,
+            nullptr,
             120,
             reinterpret_cast<void*>(&store_sell_item_wrapper),
         },
@@ -259,7 +259,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             true,
             "extension_bag",
             "背包 PopupState 条目需换模块 enter/f3/event（部分 wrap），投影/拖拽接管依赖此三回调",
-            kEbGateKey,
+            nullptr,
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbInventoryPopupOps)),
         },
@@ -273,7 +273,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             true,
             "extension_bag",
             "存档槽 PopupState 条目 enter 需换模块 wrapper（世界内直接存档路径）",
-            kEbGateKey,
+            nullptr,
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbSavePopupOps)),
         },
@@ -287,7 +287,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             true,
             "extension_bag",
             "商店 PopupState 条目需换模块 enter/f3/event（部分 wrap），商店投影与袋列遮蔽依赖此三回调",
-            kEbGateKey,
+            nullptr,
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbStorePopupOps)),
         },
@@ -301,7 +301,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             true,
             "extension_bag",
             "合成 PopupState 条目需换模块 enter/f3（部分 wrap），合成投影与袋列遮蔽依赖此两回调",
-            kEbGateKey,
+            nullptr,
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbMixPopupOps)),
         },
@@ -315,7 +315,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             true,
             "extension_bag",
             "11 个动态 desc 实例槽命名空间占位；per-item 安装由 Host SDK 动态绑定器管理",
-            kEbGateKey,
+            nullptr,
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbDescSlotsOps)),
         },
@@ -333,7 +333,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "扩展视图物品绘制 wrapper（投影物品/门禁复用原版渲染）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&virtual_bag_draw_inven_item_wrapper),
+            nullptr, 120, reinterpret_cast<void*>(&virtual_bag_draw_inven_item_wrapper),
         },
         {
             "patch:P_EXT_INVEN_BAG_DRAW", "P_EXT_INVEN_BAG_DRAW",
@@ -342,7 +342,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "原版袋绘制 wrapper：扩展视图下遮蔽原版袋高亮/内容",
-            kEbGateKey, 120, reinterpret_cast<void*>(&virtual_bag_draw_original_bag_wrapper),
+            nullptr, 120, reinterpret_cast<void*>(&virtual_bag_draw_original_bag_wrapper),
         },
         {
             "patch:P_EXT_INVEN_DRAW_END", "P_EXT_INVEN_DRAW_END",
@@ -351,7 +351,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "装备页绘制收尾 wrapper（页签/投影收尾与主菜单清理）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&virtual_bag_draw_end_wrapper),
+            nullptr, 120, reinterpret_cast<void*>(&virtual_bag_draw_end_wrapper),
         },
         {
             "patch:P_EXT_DROP_GATE", "P_EXT_DROP_GATE",
@@ -360,7 +360,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "落空槽 drop 门禁 wrapper（投影期间路由扩展事务，抑制原版写入）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&save_item_on_empty_gate),
+            nullptr, 120, reinterpret_cast<void*>(&save_item_on_empty_gate),
         },
         {
             "patch:P_EXT_DRAW_GATE", "P_EXT_DRAW_GATE",
@@ -369,7 +369,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "ITEM_DrawPorting 绘制门禁 wrapper（悬空指针/未知物品拦截，防崩）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&item_draw_porting_gate),
+            nullptr, 120, reinterpret_cast<void*>(&item_draw_porting_gate),
         },
         {
             "patch:P_EXT_DESC_OPEN_GATE", "P_EXT_DESC_OPEN_GATE",
@@ -378,7 +378,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "物品 desc 打开入口 wrapper（desc 菜单装备按钮 hook 安装点）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&make_desc_equip_gate),
+            nullptr, 120, reinterpret_cast<void*>(&make_desc_equip_gate),
         },
         // ---- C15–C19 商店宿主（装饰型 optional：缺省不终态化插件）----
         {
@@ -388,7 +388,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kOptional,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "商店 desc 打开门禁 wrapper（扩展物品详情接管）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&store_make_desc_gate),
+            nullptr, 120, reinterpret_cast<void*>(&store_make_desc_gate),
         },
         {
             "patch:P_EXT_STORE_DRAW_END", "P_EXT_STORE_DRAW_END",
@@ -397,7 +397,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "商店绘制收尾 wrapper（页签/投影收尾）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&store_draw_end_wrapper),
+            nullptr, 120, reinterpret_cast<void*>(&store_draw_end_wrapper),
         },
         {
             "patch:P_EXT_STORE_BAG_DRAW", "P_EXT_STORE_BAG_DRAW",
@@ -406,7 +406,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kOptional,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "商店袋列 B 尾调用 wrapper（R-57 原版袋列高亮遮蔽；站点 kind=kBranchRedirect）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&store_draw_inven_bag_group_wrapper),
+            nullptr, 120, reinterpret_cast<void*>(&store_draw_inven_bag_group_wrapper),
         },
         {
             "patch:P_EXT_STORE_BUY_GATE_1", "P_EXT_STORE_BUY_GATE_1",
@@ -415,7 +415,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "买入预检门禁 wrapper：原版袋无空位但扩展袋有空位时放行收编",
-            kEbGateKey, 120, reinterpret_cast<void*>(&store_buy_find_slot_gate),
+            nullptr, 120, reinterpret_cast<void*>(&store_buy_find_slot_gate),
         },
         {
             "patch:P_EXT_STORE_BUY_GATE_2", "P_EXT_STORE_BUY_GATE_2",
@@ -424,7 +424,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "买入预检门禁 wrapper：原版袋无空位但扩展袋有空位时放行收编",
-            kEbGateKey, 120, reinterpret_cast<void*>(&store_buy_find_slot_gate),
+            nullptr, 120, reinterpret_cast<void*>(&store_buy_find_slot_gate),
         },
         // ---- C20–C21 合成宿主（C21 装饰型 optional）----
         {
@@ -434,7 +434,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kRequired,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "合成绘制收尾 wrapper（页签/投影收尾）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&mix_draw_end_wrapper),
+            nullptr, 120, reinterpret_cast<void*>(&mix_draw_end_wrapper),
         },
         {
             "patch:P_EXT_MIX_BAG_DRAW", "P_EXT_MIX_BAG_DRAW",
@@ -443,7 +443,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceRequirement::kOptional,
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "合成袋列 wrapper（R-57 原版袋列高亮遮蔽）",
-            kEbGateKey, 120, reinterpret_cast<void*>(&mix_draw_inven_bag_group_wrapper),
+            nullptr, 120, reinterpret_cast<void*>(&mix_draw_inven_bag_group_wrapper),
         },
     };
     if (out_count != nullptr) {

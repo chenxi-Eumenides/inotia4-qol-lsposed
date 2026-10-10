@@ -96,6 +96,8 @@ Status replace_reserved(uint64_t owner, int slot, contracts::QolOwnerStoreReserv
 // owner 生命周期转接；pending 租约保留，恢复授权在 Host 重新签发时迁移。
 void owner_stopped(uint64_t owner);
 void owner_rebound(uint64_t old_owner, uint64_t new_owner);
+bool owner_stopped_try(uint64_t owner);
+bool owner_rebound_try(uint64_t old_owner, uint64_t new_owner);
 Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* reservation,
                        uint32_t referenced);
 // 以下 locked 查询与 gate 共用临界区，不自行取锁。
@@ -113,6 +115,7 @@ Status delete_in_operation(uint64_t owner, const contracts::QolSlotOperationLeas
 #if defined(QOL_STORE_TEST_SEAMS)
 // 仅 Host 测试构建提供确定性文件错误注入；生产始终调用系统 unlink。
 void set_unlink_for_test(int (*unlink_fn)(const char*));
+void with_store_lock_for_test(void (*held)(void*), void* context);
 #endif
 
 }  // namespace qol::infra::store

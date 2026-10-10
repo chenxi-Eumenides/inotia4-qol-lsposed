@@ -1,6 +1,8 @@
 # 验证矩阵与验收卡
 
-> 定位：定义「什么算通过」与「证据放哪里」。架构规则见根目录 `ARCHITECTURE.md`；活跃债务与待补证据见本文件 §5；重构期过程材料（含原 `ledger.md`）已归档 `docs/archive/refactor-closure/`。
+> 定位：定义「什么算通过」与「证据放哪里」。架构规则见根目录 `ARCHITECTURE.md`；活跃债务与待补证据见本文件 §5；已结束的重构过程材料（含原 `ledger.md`）位于 `docs/archive/refactor-closure/`。
+
+历史 VM 卡内的 `/api/config/set` flat-body 命令属于旧版本证据，不是当前调用语法；当前复跑一律按 `docs/reference/api-reference.md` §7.6 使用 plugin-object single-key body。历史验证结果与输出保持原样。
 
 ## 1. 交付定义
 
@@ -12,9 +14,9 @@
 | **BLOCKED** | 设备/环境不可用导致无法取证；必须写明待补项与复现命令 |
 
 证据定义：**证据 = 命令 + 该命令的实际输出**；短输出内联在卡片内，长输出给出项目内可复现位置
-（如 `docs/archive/` 或 `archive/`）。仅有过程摘要、无命令或无输出者**不算证据**。
+（如 `docs/refactor/verification/`）。仅有过程摘要、无命令或无输出者**不算证据**。
 
-证据位置约定：真机证据写入 `.tmp/<task>/` 后迁 `docs/archive/` 或 `archive/`；脚本证据以命令与输出为准（可复跑）。
+证据位置约定：当前真机证据与长期验收记录位于 `docs/refactor/verification/`；已结束的阶段材料归入 `docs/archive/`；脚本证据以命令与输出为准（可复跑）。
 
 ## 2. 测试分层
 
@@ -191,6 +193,9 @@
 ### 5.4 待补行为证据
 
 - 待补行为证据：VM-P6-01、VM-D1、VM-D2-01..04，以及 P5 出口插件卡；VM-P1-S2 的 **EB 逻辑袋 >99 两态视图（R-48）已真机 PASS**（R2/R5），物理袋 >99 载体、999 clamp、原子组失败注入仍待补（见 §3 行）。
+- **core.ui_state / UIS-02 非 EB 子项**：`039c4043` + `41c2f473` 后，monster v31 模块 SHA `51dae2d00e61…` 真机观察 settings provider 映射 `panel_settings`、screen 保持底层 `panel_in_app`，关闭后恢复 world；用户打开的 `world_teleport.confirm` dialog type 映射正确，原生 `displayed/speaker/options` 保留。记录 `docs/refactor/verification/ui-state/20261009-custom-panel-dialog.md`。不覆盖 EB panel、nested/pending close真机场景，也不等同于完整VM-D1。
+- **core.settings / Phase2B**：SET-01/SET-02 历史镜像/双通道问题由本轮 Host 三层配置契约（`enable`/`features`/`config`）收口；代码与 Gate 证据、范围边界见 §5.9 与 `docs/refactor/audits/core.settings-20261010/verification-log.md`。本文件中旧 VM 卡内的平铺 POST body 与旧 `*.enable` namespace key 是当时验收记录，复跑必须改用 API §7.6 的 `{plugin_id,field,key,value}` 请求；不得把旧 `ModuleConfig`/平铺 schema/旧 runtime gate 当作当前契约。
+- **core.craft / VM-46 当前轮次（NOT_ACCEPTED）**：重启后 Debug monster v31 模块 SHA `6da1ab10d5cb…` 的 `core.save`/`core.craft` 正常 enabled，`craft_ui` 与 `custom_recipe` 可由 `customRecipeEnabled` 开关启停。经 API 进入已验证 slot0、API 走 Fusionator 交互后进入 `panel_craft`；界面显示“合成/宝石升阶”，宝石升阶页把普通背包 bag0/slot5/category65 短剑拒绝并显示“只有宝石道具才可以”，API 回读该槽仍为 count=1。空槽点击“组合”只提示“材料不足。无法进行合成”，不等同于 94 未命中。用户要求因扩展背包错误导致已有宝石不可用而跳过完整 VM-46；未验证 94/105、未成功合成、未消耗材料；`customRecipeEnabled` 已恢复 `false`。不涉及扩展背包接口或测试。
 - **P3c 尚欠真机证据**：VM-SD-03 crash/restart 三窗口、VM-SD-04 导入/回滚、VM-SD-01 旧 epoch 句柄设备级拒绝与 monster hook 解析结构日志。正常 save/EB participant、当前档重入/启停补加载、create default reset 及 API 驱动 VM-B 操作的限定结果见本文件 P3c 后注和 `docs/refactor/verification/slot-data/p3c-20261008/verification-log.md`；不得将这些子项记成整张卡通过。
 
 ### 5.5 资源豁免
@@ -221,6 +226,24 @@
 |---|---|---|
 | FIX-10 EB 面板重建风暴（VM-23/VM-24/VM-29，`NOT_ACCEPTED`） | `extension_bag_render.inc` 的 draw-end 清理分支对持续非 5 状态每帧执行 `prepare_main_menu_locked()`，重置加载态并递增页签 generation，下一帧绘制 wrapper 重载 sidecar、重装页签，最终原生 `ControlButton_Create` 空控件 → `ControlObject_SetUserType` 空指针（真机 API 打开面板 15s 内 generation 2→227）。已修：恢复 `virtual_bag_inventory_state_id()` 读 `g_state_entry` + 新增 `model/main_menu_cleanup_edge.h` 边沿/幂等清理（提交 `1088967b`）。Host `extension_bag_draw_lock_tests` 19 passed、全量 83/83；真机 API `open_panel inventory` sidecar 仅加载 1 次、8 轮开关无崩溃、FATAL/SIGSEGV=0（`.tmp/fix10-verify-r2/`） | 物理触摸打开背包 + 扩展袋页签点击 + 拖拽/详情 ≥10 轮无冻结无崩溃（人工卡见 `.tmp/real-device-261001/manual-runbook.md`） ；在此之前 VM-23/VM-24/VM-29 维持 `NOT_ACCEPTED` |
 | FIX-11 character 数值守卫（VM-K5-08h，`NOT_ACCEPTED`） | `add_stat` 的 `attrs` / `set_attr` 的 `stats` 经 `char_opt_int`（复刻 `JSONObject.optInt`）静默截断小数（`1.5`→`1` 并加点）。已修：`char_parse_points` 拒绝含小数部分数值为 400 `bad value for $k (must be integer)`，整数值 double 仍接受（提交 `31de93f9`）；host `character_facts_dispatch_tests` 先红后绿 | VM-K5-08h 真机写面复核非整数 400 与整数值成功路径 |
+
+### 5.9 core.settings plugin-object 配置收口（2026-10-10）
+
+| 项 | 当前证据/结果 | 范围与未完成项 |
+|---|---|---|
+| Phase1A/1B Store/API gate | **PASS（Host Gate）**；Store 与 owner API Gate 通过 | 不等同于设备安装或完整业务验收 |
+| Phase2A batch seed | **PASS（Host Gate）**；默认 seed/旧平铺字段迁移 Gate 通过 | unknown root/未注册 namespace 保留及 active registered-set 投影规则见 ARCHITECTURE §8.2/API §7.6 |
+| Phase2B final Oracle Gate attempt 3 | **PASS（代码 Gate）**；前两次 findings 已修复 | 不代表完整真机行为验收 |
+| 定向 Host 验证 | **PASS**：早期配置迁移批 17 个定向非 EB Host CTest；`config_platform_service_tests` 另重复 5/5 | 未运行全量 CTest；EB/扩展背包测试未运行 |
+| Stage1 feature/Store/API 定向 CTest | **PASS**：6/6（`host_feature_controller`、`config_namespace_api`、`core_settings_config_store`、`config_service`、`config_service_writeback`、`config_service_effect_failures`） | `.tmp/module-settings-features/targeted-tests.log` |
+| Stage2 lifecycle/reconciler 定向 CTest | **PASS**：14/14（含 `feature_reconciler`、`plugin_registry`、`plugin_lifecycle`、`capability_lifecycle`、`infra_store`、sidecar/save_route 锁竞争） | `.tmp/module-settings-features/stage2-remediation-tests.log` |
+| Stage3 Host 生产接线定向 CTest | **PASS**：4/4（`host_feature_controller`、`production_feature_facade`、`settings_catalog_abi`、`hooks_popup_state`） | `.tmp/module-settings-features/stage3/tests.log`、`ui-bindings-removal/tests.log` |
+| 产品插件 descriptor/旧 gate 清理定向 CTest | **PASS**：非 EB 17/17 产品 focused targets | fix-3 交付（`.slim/deepwork/module-settings-features.md`） |
+| 静态/路由/JNI 校验 | **PASS**：`check_arch.py` 零违规；JNI 152/152；`check_http_routes.py` 146/146；tracked/untracked scoped `git diff --check` 通过 | 只证明对应静态契约/校验范围 |
+| Debug 构建 | **PASS**：`scripts/build-debug.sh` 成功；配置迁移批 APK SHA-256 `013ff709eef42f7275bbeb6f9eea8c7c8a4ff9700f957a645ab765cea23ae198`；feature/lifecycle 批 SHA `af1f045f…`（Stage1）/`6dab3d19…`（Stage2）/`7c0185e9…`（Stage2 修复后） | 未安装这些 APK；构建成功不替代运行验收 |
+| 设备/整体行为 | **NOT_ACCEPTED（未执行）** | 未安装 Debug APK；未做设备/EB/扩展背包/全量 CTest 验收。`/api/config/list`、`set`/`lifecycle`/`receipt` 写权限与 receipt 异步语义、`module.platform` 的 `api.enabled=false` 后 UI 恢复、settings 撤页重建以及 runtime revision effects 没有本轮真机证据。 |
+
+详细登记见 `docs/refactor/audits/core.settings-20261010/verification-log.md`（§3 配置迁移批、§4 feature/lifecycle Stage1–3）。该批 Host/静态/Debug Gate 通过与整体设备验收状态分开记录；整体设备验收不得标为 PASS。
 
 **插件审计批 2026-10-02 指针**：VM-K5-04e（core.character）、VM-K5-06c（core.quest）、VM-K5-04d（core.system）相关验收登记分别见 `docs/refactor/audits/plugin-audit/core-character-20261002/verification-log.md`、`docs/refactor/audits/plugin-audit/core-quest-20261002/verification-log.md`、`docs/refactor/audits/plugin-audit/core-system-20261002/verification-log.md`。本注仅链接专项验收，不覆盖 §2/§5 登记的开放项与 NOT_ACCEPTED 项。
 

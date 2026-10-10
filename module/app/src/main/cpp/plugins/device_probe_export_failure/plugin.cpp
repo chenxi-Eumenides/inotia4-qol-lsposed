@@ -42,6 +42,13 @@ const contracts::ResourceClaim kResources[] = {
     },
 };
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"device_probe_export_failure.preflight_probe", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "导出预检失败探针", "验证缺失 ELF 导出在插件安装前被预检拒绝。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -61,6 +68,8 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     &plugin_fill_status,
     nullptr,
+    nullptr, 0, nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

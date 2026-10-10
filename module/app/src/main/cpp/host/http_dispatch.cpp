@@ -2,6 +2,7 @@
 
 #include <array>
 #include <algorithm>
+#include <atomic>
 #include <condition_variable>
 #include <cstring>
 #include <mutex>
@@ -13,6 +14,8 @@
 
 namespace qol::host {
 namespace {
+std::atomic<ResidentHttpRoute> g_resident_route{nullptr};
+std::atomic<ResidentHttpDispatch> g_resident_dispatch{nullptr};
 
 constexpr uint32_t kMaxHandlers = 128;
 constexpr uint32_t kMaxPathParams = 16;
@@ -178,7 +181,7 @@ QolResult register_handler(contracts::HttpMethod required_method, bool command_s
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
     for (HandlerSlot& slot : g_handlers) {
         if (slot.used && slot.method == method && slot.path == path) {
-            if (slot.unregister_pending && slot.owner == owner) {
+            if (slot.unregister_pending && slot.owner == owner && slot.inflight == 0) {
                 slot = HandlerSlot{};
                 break;
             }
@@ -266,6 +269,9 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
     }
     response->body_size = 0;
     response->status = 0;
+    const auto resident_route = g_resident_route.load(std::memory_order_acquire);
+    const auto resident_dispatch = g_resident_dispatch.load(std::memory_order_acquire);
+    if (resident_route && resident_dispatch && resident_route(*request)) return resident_dispatch(*request, *response);
     if (!host_http_registry_accepting()) {
         write_error(response, 503, "http registry inactive");
         return http_error(kQolErrNotReady, "http registry inactive");
@@ -351,8 +357,36 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
 
 }  // namespace
 
+void http_dispatch_begin_unregister_owner(const char* owner) {
+    if (!owner) return;
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    for (auto& slot : g_handlers) {
+        if (slot.used && slot.owner == owner) slot.unregister_pending = true;
+    }
+}
+
+bool http_dispatch_poll_unregister_owner(const char* owner) {
+    if (!owner) return false;
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    for (const auto& slot : g_handlers) {
+        if (slot.used && slot.owner == owner && slot.inflight != 0) return false;
+    }
+    for (auto& slot : g_handlers) {
+        if (!slot.used || slot.owner != owner) continue;
+        slot.query = nullptr;
+        slot.command = nullptr;
+        slot.ctx = nullptr;
+        slot.unregister_pending = true;
+    }
+    return true;
+}
+
 contracts::QolHttpDispatchApi http_dispatch_api() {
     return {&register_query, &register_command, &unregister_owner, &dispatch};
+}
+void http_dispatch_bind_resident_control(ResidentHttpRoute route, ResidentHttpDispatch dispatch) {
+    g_resident_dispatch.store(dispatch, std::memory_order_release);
+    g_resident_route.store(route, std::memory_order_release);
 }
 
 QolResult http_dispatch_dynamic(const contracts::HttpReq* request,

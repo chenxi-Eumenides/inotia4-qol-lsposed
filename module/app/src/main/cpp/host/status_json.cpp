@@ -12,9 +12,6 @@
 #include "infra/command_queue.h"
 #include "infra/commands.h"
 #include "infra/status.h"
-#if !QOL_KERNEL_ONLY
-#include "plugins/stack_limit/plugin.h"
-#endif
 
 namespace qol::host {
 
@@ -160,14 +157,6 @@ std::string host_feature_status_json() {
         out += qol::infra::feature_state_name(feature.state);
         out += "\",\"enabled\":";
         out += feature.enabled ? "true" : "false";
-#if !QOL_KERNEL_ONLY
-        if (std::strcmp(feature.id, "stack_limit") == 0) {
-            out += ",\"residency\":\"";
-            out += qol::features::stack_limit::provider_resident() ? "resident" : "not_resident";
-            out += "\",\"feature_enabled\":";
-            out += qol::features::stack_limit::feature_enabled() ? "true" : "false";
-        }
-#endif
         out += ",\"error\":";
         if (feature.error == nullptr) {
             out += "null";

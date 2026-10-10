@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <mutex>
+#include <string>
+#include <vector>
 
 #include "patch/call_patch.h"
 #include "infra/log/qol_log.h"
@@ -19,6 +21,11 @@
 #include "host/owner_cache_builder.h"
 #include "host/owner_identity.h"
 #include "host/save_route.h"
+#include "host/config_platform_bridge.h"
+#include "host/features/production.h"
+#include "host/features/platform.h"
+#include "host/features/http_control.h"
+#include "host/http_dispatch.h"
 #include "infra/slot_operation_gate.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
 #if !QOL_KERNEL_ONLY
@@ -76,6 +83,7 @@
 #include "game/clock.h"
 #include "hooks/transaction.h"
 #include "host/adapters.h"
+#include "host/core_settings_config_service.h"
 #include "host/frame_source.h"
 #include "host/item_count_facade.h"
 #include "host/inventory_extension_facade.h"
@@ -342,8 +350,8 @@ bool drain_commands_task(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
     infra::commands_drain();
-    lifecycle_step();
-    sync_gates();
+    // New-model reconciler is the sole lifecycle/frame driver (no legacy lifecycle_step/sync_gates).
+    production_feature_frame_step();
     // save_route unbind 的 drain 在帧点完成，不自旋。
     save_route::step();
     return true;
@@ -373,7 +381,7 @@ bool assembly_init() {
     static const qol::game::SaveTransactionGate kSaveTransactionGate{
         nullptr, &save_transaction_gate_admits};
     qol::game::save_transaction_bind_gate(&kSaveTransactionGate);
-    // item_count facade 是宿主稳定表；P1-B 注册 provider 前保持 not_ready。
+    // item_count facade 是宿主装配的常驻实现，始终可查；扩展模式由生命周期策略驱动。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
     host_inventory_extension_bind();
     qol::game::lifecycle_participant_bind_host(host_lifecycle_dispatch());
@@ -461,6 +469,16 @@ bool assembly_init() {
             return false;
         }
         ++g_registered_plugins;
+        // Explicit feature metadata only; a descriptor without features is a migration gap.
+        const auto feature_result = production_feature_register(descriptor);
+        if (!feature_result.ok()) {
+            ++g_registration_failures;
+            QOL_LOG_ERROR(QolDomain::kCore,
+                          "assembly: feature metadata missing for %s reason=%.*s",
+                          descriptor.id, static_cast<int>(feature_result.message.size()),
+                          feature_result.message.c_str());
+            return false;
+        }
         // 授权来自装配 sidecar；registry 以注册身份定位 owner，不解释插件提交的名称，
         // 也不向插件提供授权入口。
         if (plugin.slot_operation_allowed && !bind_plugin_slot_operation(descriptor)) {
@@ -475,60 +493,45 @@ bool assembly_init() {
         }
     }
 
-    const QolResult category_result = features::core_settings::register_categories(&g_host_sdk);
-    if (!contracts::succeeded(category_result)) {
-        QOL_LOG_WARN(QolDomain::kCore,
-                     "assembly: settings categories %s code=%d reason=%.*s",
-                     category_result.code == kQolErrUnsupported ? "skipped" : "rejected",
-                     category_result.code, static_cast<int>(category_result.message_len),
-                     category_result.message != nullptr ? category_result.message : "");
+    // Host-owned platform/module config owner: enables /api/config/list, /api/config/set and the
+    // resident lifecycle channel independent of core.settings. No module.platform enable gate.
+    if (!production_feature_register_host_owner(platform_config_descriptor()).ok()) {
+        ++g_registration_failures;
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: platform config owner registration failed");
+        return false;
     }
-    const QolResult debug_category_result = features::core_ui::register_settings_category(&g_host_sdk);
-    if (!contracts::succeeded(debug_category_result) &&
-        debug_category_result.code != kQolErrUnsupported) {
-        QOL_LOG_WARN(QolDomain::kCore,
-                     "assembly: debug settings category rejected code=%d reason=%.*s",
-                     debug_category_result.code,
-                     static_cast<int>(debug_category_result.message_len),
-                     debug_category_result.message != nullptr ? debug_category_result.message : "");
+
+    // New-model Store: init + seed from the path saved by the path-only JNI bootstrap, then bind
+    // the reconciler. The single frame task below drives all lifecycle/resource reconciliation.
+    const auto feature_bootstrap = production_feature_bootstrap(config_store_path());
+    if (!feature_bootstrap.ok()) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "assembly: feature bootstrap failed reason=%.*s",
+                      static_cast<int>(feature_bootstrap.message.size()),
+                      feature_bootstrap.message.c_str());
+    } else {
+        config_store_mark_bootstrapped(true);
+    }
+    if (!production_feature_bind_frame(deps)) {
+        ++g_registration_failures;
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "assembly: feature reconciler bind failed (registry/catalog mismatch or store unavailable)");
+        return false;
+    }
+    http_dispatch_bind_resident_control(&feature_control_http_route, &feature_control_http_dispatch);
+    // Host-owned management channel. No permission ACL is applied (per approved design);
+    // ordinary plugins interact only through the owner-scoped feature API. The ordinary
+    // g_host_sdk keeps feature_control=nullptr; only the settings context receives this copy.
+    contracts::QolHostSdk management_sdk = g_host_sdk;
+    if (!production_feature_bind_management_sdk(management_sdk)) {
+        QOL_LOG_WARN(QolDomain::kCore, "assembly: management SDK injection unavailable");
+    } else {
+        bind_management_sdk(management_sdk);
     }
 #if QOL_ENABLE_DEVICE_PROBE
     // bridge_init attaches the ELF resolver before nativeInit enters assembly_init.
     probe_entry_export_resolution();
 #endif
-
-    // 启动期同步安装：此刻尚无帧源与在途回调，直接装完即就绪；运行期生命周期一律走事务。
-    const int failed = install_all(deps);
-    g_install_failures = failed > 0 ? static_cast<uint32_t>(failed) : 0;
-    if (failed != 0) {
-        QOL_LOG_WARN(QolDomain::kCore,
-                     "assembly: registered=%u install_failed=%u kernel_only=%s",
-                     g_registered_plugins, g_install_failures,
-                     QOL_KERNEL_ONLY ? "true" : "false");
-    }
-    // 插件状态由 install_all 登记，register_items 会校验 owner 状态；贡献因此必须在其后，
-    // 否则全部被判为 owner 未登记而丢弃。
-    // Catalog item ordering is contribution first-success order within these categories.
-    constexpr RegisterSettingsFn kSettingsContributions[]{
-        &features::save_backup::register_settings,
-        &features::core_settings::register_settings,
-        &features::extension_bag::register_settings,
-        &features::autosell::register_settings,
-        &features::custom_recipe::register_settings,
-        &features::stack_limit::register_settings,
-        &features::push_all::register_settings,
-        &features::move_merge::register_settings,
-        &features::simple_mode::register_settings,
-        &features::core_ui::register_settings,
-    };
-    for (const RegisterSettingsFn contribution : kSettingsContributions) {
-        const QolResult result = contribution(&g_host_sdk);
-        if (contracts::succeeded(result)) continue;
-        QOL_LOG_WARN(QolDomain::kCore,
-                     "assembly: settings contribution %s code=%d reason=%.*s",
-                     result.code == kQolErrUnsupported ? "skipped" : "rejected", result.code,
-                     static_cast<int>(result.message_len), result.message != nullptr ? result.message : "");
-    }
 #if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
     infra::FeatureStatus export_probe_status{};
     if (infra::status_get("device_probe_export_failure", &export_probe_status)) {

@@ -40,6 +40,14 @@
 - 提供 `item.state`：按 kind 输出 raw 或 enriched inventory JSON 投影。
 - Descriptor 必需 `http.registry`、`http.dispatch`；可选依赖 `character.state`，用于角色状态投影相关写操作。
 
+### 注册 feature
+
+| feature id | 默认 | 分类 | 类型 |
+|---|---:|---|---|
+| `core.item.provider` | 1 | Hidden | toggle |
+
+provider 为常驻需求，用 default true 的 hidden feature 表达；`enable`（Host 独占 lifecycle 期望）与 feature 由 Host 管理，插件不读写。
+
 ## 3. 依赖前置与消费者
 
 - 必需 ports：`QOL_PORT_ITEM`、`QOL_PORT_ITEM_MONEY_WRITE`、`QOL_PORT_ITEM_DICE_WRITE`、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE`。

@@ -1,9 +1,7 @@
 #include "plugin.h"
 
 #include <cstdint>
-#include <cstring>
 
-#include "events.h"
 #include "../../contracts/character_facts.h"
 #include "../../contracts/game_ports/character_extras_port.h"
 #include "feature.h"
@@ -13,13 +11,10 @@ namespace {
 
 constexpr const char* kPluginId = "simple_mode";
 constexpr const char* kPluginVersion = "0.1.0";
-constexpr const char* kGateKey = "plugin.simple_mode.enabled";
 
-// 配置变更订阅句柄；deactivate 时成对注销。
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
-uint64_t g_config_subscription = 0;
 
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kCharacterFactsCapabilityId,
@@ -32,15 +27,8 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortCharacterExtrasVersion.minor}},
 };
 
-void on_config_changed(void* ctx, const void* payload) {
-    (void)ctx;
-    if (payload == nullptr) return;
-    const auto* event = static_cast<const contracts::ConfigChangedEvent*>(payload);
-    if (event->key == nullptr || std::strcmp(event->key, kGateKey) != 0) return;
-    set_gate(event->int_value != 0);
-}
-
 // 资源声明（ARCHITECTURE.md §4.3 字段顺序）：两个入口 hook 均为私有、必需、fail-closed。
+// gate=nullptr：资源跟随插件 lifecycle，插件仅在自有 feature 开启时安装。
 const contracts::ResourceClaim kResources[] = {
     {
         kResourceIdAddDamage,       // id
@@ -52,7 +40,7 @@ const contracts::ResourceClaim kResources[] = {
         true,                       // resumable
         kPluginId,                  // owner
         "无函数指针槽，15 个静态调用点经此单点汇合",  // reason
-        kGateKey,                   // gate
+        nullptr,                    // gate（生命周期持有）
         120,                        // step_budget
         reinterpret_cast<void*>(&char_add_damage_wrapper),  // handler
     },
@@ -66,7 +54,7 @@ const contracts::ResourceClaim kResources[] = {
         true,
         kPluginId,
         "最大生命重算唯一入口",
-        kGateKey,
+        nullptr,
         120,
         reinterpret_cast<void*>(&char_update_attr_from_monster_wrapper),
     },
@@ -107,26 +95,13 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
-    // inactive → resolving 是幂等重入（§3.2）：门禁读取可重复执行，订阅已有则不重复订阅
-    // （重复订阅会在 deactivate 退订后留下孤儿订阅）。
-    int32_t enabled = 0;
-    if (g_sdk->config.get_bool != nullptr) {
-        (void)g_sdk->config.get_bool(kGateKey, 0, &enabled);
-    }
-    set_gate(enabled != 0);
-    if (g_config_subscription == 0 && g_sdk->events.subscribe != nullptr) {
-        (void)g_sdk->events.subscribe(contracts::kEventConfigChanged, &on_config_changed, nullptr,
-                                       &g_config_subscription);
-    }
+    // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。
+    set_gate(true);
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    // 幂等：退订后置 0，便于再次 install 重新订阅；重复调用安全。
-    if (g_config_subscription != 0 && g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
-        (void)g_sdk->events.unsubscribe(g_config_subscription);
-        g_config_subscription = 0;
-    }
+    (void)ctx;
     set_gate(false);
     set_character_facts(nullptr);
     g_character_extras = nullptr;
@@ -148,6 +123,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"simple_mode.combat", 0, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "简单模式", "降低怪物生命并增强玩家伤害与承伤。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -164,6 +146,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &on_resource_ready,
     kPorts,
     1,
+    nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

@@ -2,9 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
-#include <cstring>
 
-#include "contracts/events.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/move_merge_port.h"
 #include "contracts/host_sdk.h"
@@ -17,7 +15,6 @@ namespace qol::features::move_merge {
 namespace {
 
 constexpr const char* kPluginId = "move_merge";
-constexpr const char* kConfigKey = "moveMergeEnabled";
 constexpr const char* kX1Resource = "ptrslot:MOVE_MERGE_GOT";
 constexpr const char* kReason = "Owns the UIEquip item-proc wrapper and native merge gate";
 
@@ -25,8 +22,6 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolMoveMergePort* g_move_port = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_port = nullptr;
 std::atomic<bool> g_active{false};
-std::atomic<bool> g_gate_enabled{false};
-uint64_t g_config_subscription = 0;
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param);
 
@@ -65,16 +60,10 @@ const contracts::QolPortRequirement kPorts[] = {{
      contracts::kQolPortCharacterExtrasVersion.minor},
 }};
 
+// feature 为插件唯一开关：want_run 成立才会 install；wrapper 只在插件活跃时安装，
+// 故合并门禁等价于插件活跃态。
 bool gate_enabled() {
-    return g_active.load(std::memory_order_acquire) &&
-           g_gate_enabled.load(std::memory_order_acquire);
-}
-
-void on_config_changed(void*, const void* payload) {
-    if (payload == nullptr || !g_active.load(std::memory_order_acquire)) return;
-    const auto* event = static_cast<const contracts::ConfigChangedEvent*>(payload);
-    if (event->key == nullptr || std::strcmp(event->key, kConfigKey) != 0) return;
-    g_gate_enabled.store(event->int_value != 0, std::memory_order_release);
+    return g_active.load(std::memory_order_acquire);
 }
 
 const contracts::InventoryMergeProjectionApi* projection_api() {
@@ -389,8 +378,7 @@ const contracts::CapabilityProvisionRef kProvides[] = {{
 
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.struct_size < sizeof(contracts::PluginContext) || ctx.sdk == nullptr ||
-        ctx.sdk->config.get_bool == nullptr || ctx.sdk->events.subscribe == nullptr ||
-        ctx.sdk->events.unsubscribe == nullptr || ctx.ports == nullptr || ctx.port_count != 2 ||
+        ctx.ports == nullptr || ctx.port_count != 2 ||
         ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
         ctx.sdk->capabilities.require == nullptr) return 1;
     const auto* port = static_cast<const contracts::QolMoveMergePort*>(ctx.ports[0]);
@@ -417,32 +405,12 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_move_port = port;
     g_character_port = character;
-    int32_t configured = 0;
-    if (!contracts::succeeded(g_sdk->config.get_bool(kConfigKey, 0, &configured))) {
-        g_sdk = nullptr;
-        g_move_port = nullptr;
-        g_character_port = nullptr;
-        return 1;
-    }
-    g_gate_enabled.store(configured != 0, std::memory_order_release);
-    if (g_config_subscription == 0 && !contracts::succeeded(ctx.sdk->events.subscribe(
-            contracts::kEventConfigChanged, &on_config_changed, nullptr, &g_config_subscription))) {
-        g_sdk = nullptr;
-        g_move_port = nullptr;
-        g_character_port = nullptr;
-        return 1;
-    }
     g_active.store(true, std::memory_order_release);
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     g_active.store(false, std::memory_order_release);
-    g_gate_enabled.store(false, std::memory_order_release);
-    if (g_config_subscription != 0 && g_sdk != nullptr && g_sdk->events.unsubscribe != nullptr) {
-        (void)g_sdk->events.unsubscribe(g_config_subscription);
-        g_config_subscription = 0;
-    }
     (void)ctx;
     g_character_port = nullptr;
     g_move_port = nullptr;
@@ -464,10 +432,19 @@ const contracts::QolPortRequirement kPortRequirements[] = {{
     {contracts::kQolPortCharacterExtrasVersion.major,
      contracts::kQolPortCharacterExtrasVersion.minor},
 }};
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"move_merge.drag_merge", 0, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "拖拽合并", "拖拽同类物品时自动合并。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor{
     kPluginId, "0.1.0", 1, kRequires, 2, kOptionalRequires, 1, kProvides,
     1, kResources, 0, nullptr, &plugin_install, &plugin_deactivate, &plugin_on_enabled,
     &plugin_on_disabled, &plugin_fill_status, nullptr, kPortRequirements, 2,
+    nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

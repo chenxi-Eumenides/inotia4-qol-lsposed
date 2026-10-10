@@ -10,6 +10,7 @@
 #include "host/assembly.h"
 #include "host/core_patches.h"
 #include "host/frame_source.h"
+#include "host/config_platform_bridge.h"
 
 namespace {
 JavaVM* g_cached_jvm = nullptr;
@@ -46,6 +47,9 @@ Java_com_inotia4_qol_NativeBridge_nativeRegisterExtensionBagUiBridge(JNIEnv* env
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
+    if (!qol::host::config_store_bootstrapped()) {
+        return JNI_FALSE;
+    }
     // T2n-2：日志 sink/帧 provider 初始化搬至宿主装配（原 game/access 的 bridge_init 内，
     // 时序逐字保持：先初始化，再 bridge_init 内变体识别等日志）。帧号经 game/clock 同源。
     qol_log_set_frame_provider(&qol::game::frame_count);
@@ -83,7 +87,7 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 扫描任务生命周期由插件 install/on_enabled 管理。
         // 任务完成度进档重算已迁移为 quest 插件（plugin.cpp install 注册 save_enter 回调），
         // 由 assembly_init 统一装配。
-        // 帧缓存预取不再无条件启动：由 Kotlin 侧按 apiEnabled 调 nativeSetApiEnabled 决定
+        // 帧缓存预取按 Store 的 apiEnabled 在 assembly/install 完成后启停，避免早于 builder 与 frame source。
         // 设置页/备份面板/自动出售面板注入已迁移为插件：core.ui 的 own:popup.settings、
         // save_backup 的 own:popup.savebackup 与 autosell 的 own:popup.autosell 及入口
         // call patch 均由 assembly_init 经资源事务声明式安装（无 nativeInit 直调）。
@@ -91,21 +95,22 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 选择框组件为独立插件 native_choice（provides `ui_choice`），消费者经能力契约获取。
         // 合成器界面层已迁移为 craft_ui 插件（assembly 注册，声明式安装 12 条 UIMix hook）；
         // 结果层 custom_recipe 插件 provides `craft_result`，动态配方重建在插件 install 内注册。
-        qol::host::assembly_init();  // 插件装配：注册内置静态插件 + 声明式安装资源 + 命令帧排空
+        if (!qol::host::assembly_init()) {
+            QOL_LOG_ERROR(QolDomain::kCore,
+                          "nativeInit: assembly failed; native bootstrap remains unavailable");
+            return JNI_FALSE;
+        }
         // 特殊装备解锁已迁移为 special_equip 插件（assembly 注册，宿主声明式安装两个入口 hook）。
     }
     return ok ? JNI_TRUE : JNI_FALSE;
 }
 
-// API 全局开关：启用时启动帧缓存预取线程，关闭时停止线程并 join（可再次启用）。
+// Frozen compatibility setter. Global config writes must use core.settings' native single-key
+// owner-token path; runtime changes are applied only after that Store commit.
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetApiEnabled(JNIEnv*, jclass, jboolean enabled) {
-    if (enabled == JNI_TRUE) {
-        frame_cache_start();
-    } else {
-        frame_cache_stop();
-    }
-    return JNI_TRUE;
+    (void)enabled;
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jlong JNICALL

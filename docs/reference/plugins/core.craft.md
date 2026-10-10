@@ -19,6 +19,14 @@
 - Port ABI `QOL_PORT_CRAFT` 为内部 v1.1；`craft.facts` capability 版本仍为 v1.0。`QOL_PORT_CRAFT_UI_WRITE` 与 `QOL_PORT_CUSTOM_RECIPE_WRITE` 为内部 v1.1，物品写操作接收 typed handle；无效 handle 表示清槽，非零 stale handle fail-closed。
 - `craft_result` v1.1 的 Place/Execute/MakeItem 输入同样使用 `QolItemHandle`。`custom_recipe` 通过窄的 typed write port 请求产物创建、保存/释放及宝石字段操作；Game Adapter 在同步调用内部解析 handle，插件侧没有 handle→native pointer resolver。物品 handle 保留 registry 的 owner/generation/主线程校验，unknown owner 不按 Game owner 补登记。
 
+### 注册 feature
+
+| feature id | 默认 | 分类 | 类型 |
+|---|---:|---|---|
+| `core.craft.provider` | 1 | Hidden | toggle |
+
+provider 为常驻需求，用 default true 的 hidden feature 表达；`enable`（Host 独占 lifecycle 期望）与 feature 由 Host 管理，插件不读写。
+
 ## 3. 依赖前置与消费者
 
 - descriptor 不声明 capability requires/optional_requires；安装要求 Host SDK 与一个 `QOL_PORT_CRAFT`。

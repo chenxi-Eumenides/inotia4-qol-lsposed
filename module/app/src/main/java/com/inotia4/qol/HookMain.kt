@@ -128,6 +128,16 @@ class HookMain : XposedModule() {
                     handler.postDelayed(this, 500)
                     return
                 }
+                try {
+                    when (NativeBridge.nativeConfigStoreBootstrap(ctx.getExternalFilesDir(null)?.absolutePath.orEmpty())) {
+                        0 -> Unit
+                        1 -> LogFile.warn(LogDomain.CONFIG, "native config store ready without persistence")
+                        2 -> LogFile.warn(LogDomain.CONFIG, "native config store degraded read-only defaults")
+                        else -> LogFile.warn(LogDomain.CONFIG, "native config store returned unknown status")
+                    }
+                } catch (t: Throwable) {
+                    LogFile.error(LogDomain.CONFIG, "native config store bootstrap failed", t)
+                }
                 if (!NativeBridge.init()) {
                     LogFile.info(LogDomain.PLATFORM, "NativeBridge init failed: ${NativeBridge.nativeGetInitReport()}, retrying in 1s")
                     handler.postDelayed(this, 1000)
@@ -135,10 +145,14 @@ class HookMain : XposedModule() {
                 }
                 LogFile.onNativeReady()
                 LogFile.info(LogDomain.PLATFORM, "NativeBridge init OK: ${NativeBridge.nativeGetInitReport()}")
+                if (!ConfigPlatformEffects.subscribeAndAwaitInitialSnapshot()) {
+                    LogFile.warn(LogDomain.CONFIG, "initial native platform config snapshot unavailable")
+                    handler.postDelayed(this, 1000)
+                    return
+                }
                 val moduleApk = getModuleApplicationInfo().sourceDir
                 LogFile.logModuleIdentity(File(moduleApk))
-                // feature 初始化无条件执行；HTTP 服务器按 apiEnabled 决定是否启动，
-                // native 预取线程由 feature 初始化内的 applyToNative（nativeSetApiEnabled）控制。
+                // feature 初始化无条件执行；HTTP 服务器按最新 native platform effect 决定是否启动。
                 ApiServer.bootstrap(ctx, moduleApk)
             }
         })

@@ -33,6 +33,10 @@ bool bind_plugin_slot_operation(const contracts::PluginDescriptor& plugin);
 // 宿主装配 sidecar 授权；绑定后该注册身份的 token 可向 save_route 注册领域回调。
 bool bind_plugin_save_route(const contracts::PluginDescriptor& plugin);
 
+// 宿主选定的管理 SDK 副本（feature_control 非空）。只有 settings 插件 context 获得该副本；
+// 其余插件 context 保持普通 SDK（feature_control=nullptr），不得访问管理通道。
+void bind_management_sdk(const contracts::QolHostSdk& sdk);
+
 // 安装全部已注册插件；返回失败插件数（0 = 全部按要求就绪）。
 int install_all(const HostDeps& deps);
 
@@ -48,6 +52,23 @@ bool lifecycle_apply(const char* plugin_id, int32_t action);
 
 // 帧驱动：推进在途生命周期事务并同步状态/回调；返回本轮推进数（0 = 无事可做）。
 uint32_t lifecycle_step();
+
+// Explicit new-model seam. All registered descriptors must have validated features and
+// no legacy resource gates. Preparation registers status/DAG only, not product resources.
+bool feature_registry_prepare(const HostDeps& deps);
+using FeatureDesiredRequest = bool (*)(void*, const char*, bool);
+void feature_registry_bind_desired_request(FeatureDesiredRequest, void* context);
+uint32_t feature_registry_order(const char** ids, uint32_t capacity);
+using FeatureWants = bool (*)(void*, const char*);
+bool feature_registry_dependencies_wanted(const char*, FeatureWants, void*);
+bool feature_registry_dependencies_ready(const char*);
+bool feature_registry_busy(const char*);
+bool feature_registry_active(const char*);
+bool feature_registry_transition(const char*, bool activate);
+bool feature_registry_context(const char*, contracts::PluginContext*);
+void feature_registry_set_wanted(const char*, bool);
+uint32_t feature_registry_step();
+bool feature_registry_owner_ready(const char*);
 
 // 未注册返回 nullptr。
 const contracts::PluginDescriptor* find_plugin(const char* id);

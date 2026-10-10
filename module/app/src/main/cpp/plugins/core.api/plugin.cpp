@@ -98,6 +98,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.api.http_registry", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "HTTP 共享出口", "提供 HTTP 路由登记、分派与生命周期诊断出口。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -117,6 +124,8 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     &plugin_fill_status,
     nullptr,
+    nullptr, 0, nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

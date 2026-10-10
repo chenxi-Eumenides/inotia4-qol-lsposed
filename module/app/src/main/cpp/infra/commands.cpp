@@ -130,8 +130,8 @@ void reap_terminal_slots_locked() {
     }
 }
 
-QolResult commands_post(contracts::QolCommandTicket* out,
-                        const contracts::QolCommand* cmd) {
+QolResult commands_post_common(contracts::QolCommandTicket* out,
+                               const contracts::QolCommand* cmd, bool host_config_writer) {
     if (out != nullptr) {
         *out = 0;
     }
@@ -141,6 +141,8 @@ QolResult commands_post(contracts::QolCommandTicket* out,
     if (cmd->key == nullptr) {
         return error_result(kQolErrInvalidArgument, "null key");
     }
+    if (cmd->kind == contracts::kCommandSetConfigBool && !host_config_writer)
+        return error_result(kQolErrUnsupported, "config writes require native config owner");
 
     std::lock_guard<std::mutex> lock(g_slots_mtx);
     Slot* slot = nullptr;
@@ -169,6 +171,19 @@ QolResult commands_post(contracts::QolCommandTicket* out,
 
     *out = ticket;
     return contracts::ok();
+}
+
+QolResult commands_post(contracts::QolCommandTicket* out,
+                        const contracts::QolCommand* cmd) {
+    return commands_post_common(out, cmd, false);
+}
+
+QolResult commands_post_config_bool_internal(const char* key, bool value,
+                                             contracts::QolCommandTicket* out_ticket) {
+    if (key == nullptr || out_ticket == nullptr)
+        return error_result(kQolErrInvalidArgument, "invalid config projection command");
+    const contracts::QolCommand command{contracts::kCommandSetConfigBool, key, value ? 1 : 0};
+    return commands_post_common(out_ticket, &command, true);
 }
 
 int32_t commands_state(contracts::QolCommandTicket ticket) {
@@ -291,6 +306,11 @@ QolResult post_typed_impl(uint32_t handler_id, const void* payload, uint32_t siz
 }
 
 }  // namespace
+
+QolResult commands_post_config_bool(const char* key, bool value,
+                                    contracts::QolCommandTicket* out_ticket) {
+    return commands_post_config_bool_internal(key, value, out_ticket);
+}
 
 QolResult commands_register_typed_handler(uint32_t handler_id,
                                           contracts::QolTypedCommandHandler handler, void* ctx) {

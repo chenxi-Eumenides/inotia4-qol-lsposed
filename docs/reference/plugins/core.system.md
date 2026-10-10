@@ -26,6 +26,14 @@ routes.inc 与 descriptor 均将以下五个 GET handler 归于 `core.system`：
 - 必需 capability：`http.registry`、`http.dispatch`。
 - 必需 `QOL_PORT_SYSTEM`（descriptor 要求 ABI 1.1）。
 
+### 注册 feature
+
+| feature id | 默认 | 分类 | 类型 |
+|---|---:|---|---|
+| `core.system.snapshots` | 1 | Hidden | toggle |
+
+快照服务为常驻需求，用 default true 的 hidden feature 表达；`enable`（Host 独占 lifecycle 期望）与 feature 由 Host 管理，插件不读写。
+
 ## 3. 依赖前置与消费者
 
 - Game Host 注入 system port，其 `body_json` 读取 snapshot/game/info/frame 类型的只读投影，`events_json` 提供事件查询体。

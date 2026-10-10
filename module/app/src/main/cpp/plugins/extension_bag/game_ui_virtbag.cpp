@@ -684,21 +684,6 @@ uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);
 }
 
-bool original_count_write(void* item, uint32_t count) {
-    const qol::contracts::QolItemCountApi* api = item_count_api();
-    if (api == nullptr || api->field_from_canonical == nullptr || item == nullptr) return false;
-    uint32_t field = 0;
-    if (api->read_encoded_field == nullptr ||
-        !qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
-        return false;
-    }
-    uint32_t updated = field;
-    const QolResult result = api->field_from_canonical(field, count, 0, &updated);
-    if (!qol::contracts::succeeded(result)) return false;
-    return api->write_encoded_field != nullptr &&
-           qol::contracts::succeeded(api->write_encoded_field(item, updated));
-}
-
 }  // namespace
 
 namespace qol::features::extension_bag {
@@ -858,13 +843,14 @@ uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonic
 }
 
 bool virtual_bag_extended_mode(const void* item) {
-    if (item == nullptr || g_sdk == nullptr || g_sdk->config.get_bool == nullptr) return false;
-    int32_t enabled = 0;
-    const QolResult gate_result =
-        g_sdk->config.get_bool("plugin.stack_limit.enabled", 0, &enabled);
-    if (!qol::contracts::succeeded(gate_result) || enabled == 0) return false;
     const qol::contracts::QolItemCountApi* api = item_count_api();
-    if (api == nullptr || api->effective == nullptr) return false;
+    if (item == nullptr || api == nullptr || api->read_extended_mode == nullptr) return false;
+    // OK1 表示 999 请求运行且整组资源已实际应用；NotReady（请求未落实）与 OK0（明确关闭）
+    // 都不进入扩展视图，避免把未落地的模式当作关闭而回退原版语义。
+    uint8_t extended = 0;
+    const QolResult mode_result = api->read_extended_mode(&extended);
+    if (!qol::contracts::succeeded(mode_result) || extended == 0) return false;
+    if (api->effective == nullptr) return false;
     uint32_t effective = 0;
     const QolResult effective_result = api->effective(item, &effective);
     return qol::contracts::succeeded(effective_result);
@@ -878,11 +864,13 @@ bool virtual_bag_write_effective(void* item, uint32_t count) {
     }
     int32_t needed = 0;
     const QolResult needed_result = api->writeback_needed(item, count, &needed);
-    if (needed_result.code == kQolErrNotReady) return original_count_write(item, count);
+    // NotReady 表示 999 请求已开但资源组/适配尚未落地。原版写法对 canonical 的安全性未
+    // 证明，故不回退 original_count_write；直接使该写请求失败并保留原错误语义。
+    if (needed_result.code == kQolErrNotReady) return false;
     if (!qol::contracts::succeeded(needed_result)) return false;
     if (needed == 0) return true;
     const QolResult write_result = api->write_effective(item, count);
-    if (write_result.code == kQolErrNotReady) return original_count_write(item, count);
+    if (write_result.code == kQolErrNotReady) return false;
     return qol::contracts::succeeded(write_result);
 }
 

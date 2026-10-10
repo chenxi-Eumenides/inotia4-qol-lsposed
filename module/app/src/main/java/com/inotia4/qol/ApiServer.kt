@@ -31,11 +31,14 @@ object ApiServer {
     @Volatile
     private var assetsInjected = false
 
+    @Volatile private var platformRevision = 0L
+    @Volatile private var listenAddress = "0.0.0.0"
+    @Volatile private var listenPort = 32123
+    @Volatile private var apiEnabled = true
+
     /**
      * 启动入口（HookMain 无条件调用）：**先执行 feature 初始化（仅一次）**，再按
-     * `ModuleConfig.apiEnabled` 决定是否启动 HTTP 服务器。
-     * `apiEnabled=false` 时 feature 照常初始化（native 预取线程由 applyToNative 内的
-     * nativeSetApiEnabled 置为停止），仅不启动 HTTP。
+     * Native platform effects decide whether the HTTP server starts.
      */
     @Synchronized
     fun bootstrap(context: Context, moduleApkPath: String?) {
@@ -43,15 +46,16 @@ object ApiServer {
         startModuleApkPath = moduleApkPath
         if (BuildConfig.KERNEL_ONLY) {
             LogFile.info(LogDomain.HTTP, "kernel-only mode: bootstrap loader configuration and health server")
-            ModuleConfig.load(context)
-            // native ready 后注册持久配置桥并发布初始镜像（read_bool 依赖 revision>0）。
-            ModuleConfigUiBridge.initSettingsConfigBridge()
+            bootstrapped = true
             ensureAssetsInjected(context, moduleApkPath)
+            // Preserve the kernel-only health endpoint: it is a loader diagnostic surface,
+            // independent of the normal module API gate.
+            apiEnabled = true
             start(context, moduleApkPath)
             return
         }
         initFeatures(context, moduleApkPath)
-        if (!ModuleConfig.apiEnabled) {
+        if (!apiEnabled) {
             LogFile.info(LogDomain.HTTP, "ApiServer HTTP disabled by config (apiEnabled=false); features initialized")
             return
         }
@@ -59,8 +63,8 @@ object ApiServer {
     }
 
     /**
-     * feature 初始化（仅执行一次，幂等）：静态数据、模块 assets 注入、配置加载、sidecar 存储、
-     * 存档备份 native/UI、扩展背包 UI，以及功能开关下发 native（含 nativeSetApiEnabled）。
+     * feature 初始化（仅执行一次，幂等）：静态数据、模块 assets 注入、sidecar 存储、
+     * 存档备份 native/UI、扩展背包 UI 和静态数据初始化。
      * 与 HTTP 服务器无关，`apiEnabled=false` 时同样执行。仅在 [bootstrap] 的同步块内调用。
      */
     private fun initFeatures(context: Context, moduleApkPath: String?) {
@@ -73,10 +77,6 @@ object ApiServer {
         } catch (t: Throwable) {
             LogFile.error(LogDomain.HTTP, "core.data static asset ingress failed", t)
         }
-        // 模块配置组件：外部 config.json 为唯一来源（v0.5.21 起不再读 assets；缺失用默认值并写入外部存储）
-        ModuleConfig.load(context)
-        // native ready 后注册持久配置桥并发布初始镜像（read_bool 依赖 revision>0）。
-        ModuleConfigUiBridge.initSettingsConfigBridge()
         ModuleSaveStore.initialize(context)
         // 存档管理器备份底层（bundle 导出/导入/列表/删除）收口 native feature/save_backup
         NativeBridge.nativeSaveBackupInit(
@@ -124,8 +124,7 @@ object ApiServer {
             LogFile.error(LogDomain.HTTP, "savebackup ui init failed", t)
         }
         ExtensionBagUiBridge.initialize(context)
-        // 功能开关通知 native 生效（含 nativeSetApiEnabled：控制缓存预取线程启停）+ 静态瓦片矩阵加载
-        ApiServices.config.applyToNative()
+        ApiServices.config.applyTiles()
     }
 
     /**
@@ -165,23 +164,20 @@ object ApiServer {
 
     /** 启动 server；端口被占用等失败时回退默认端口重建（v0.5.22） */
     private fun startServerWithFallback(context: Context) {
-        if (startServer(context)) return
-        if (ModuleConfig.listenPort != ModuleConfig.DEFAULT_LISTEN_PORT) {
-            LogFile.info(LogDomain.HTTP, "listenPort=${ModuleConfig.listenPort} start failed, fallback to default ${ModuleConfig.DEFAULT_LISTEN_PORT}")
-            ModuleConfig.fallbackListenPortToDefault()
-            startServer(context)
+        if (!startServer(context)) {
+            NativeBridge.nativeConfigPlatformReportBindFailure(platformRevision, listenPort)
         }
     }
 
-    /** 按当前 ModuleConfig 配置构建并启动 AndServer；返回是否启动成功 */
+    /** Build and start AndServer from the latest native platform projection. */
     private fun startServer(context: Context): Boolean = try {
         val builder = AndServer.webServer(context)
-            .port(ModuleConfig.listenPort)
+            .port(listenPort)
             .timeout(10, TimeUnit.SECONDS)
             .serverSocketFactory(GracefulCloseServerSocketFactory)
             .listener(object : Server.ServerListener {
                 override fun onStarted() {
-                    LogFile.info(LogDomain.HTTP, "AndServer started on ${ModuleConfig.listenAddress}:${ModuleConfig.listenPort}")
+                    LogFile.info(LogDomain.HTTP, "AndServer started on $listenAddress:$listenPort")
                 }
 
                 override fun onStopped() {
@@ -190,13 +186,14 @@ object ApiServer {
 
                 override fun onException(e: Exception) {
                     LogFile.error(LogDomain.HTTP, "AndServer error", e)
+                    NativeBridge.nativeConfigPlatformReportBindFailure(platformRevision, listenPort)
                 }
             })
         // 按配置绑定监听地址；非法地址回退默认绑定（0.0.0.0 通配）
         try {
-            builder.inetAddress(InetAddress.getByName(ModuleConfig.listenAddress))
+            builder.inetAddress(InetAddress.getByName(listenAddress))
         } catch (e: Exception) {
-            LogFile.error(LogDomain.HTTP, "invalid listenAddress=${ModuleConfig.listenAddress}, fallback to wildcard bind", e)
+            LogFile.error(LogDomain.HTTP, "invalid listenAddress=$listenAddress, fallback to wildcard bind", e)
         }
         server = builder.build()
         server?.startup()
@@ -220,7 +217,7 @@ object ApiServer {
             LogFile.info(LogDomain.HTTP, "ApiServer startFromConfig skipped: features not bootstrapped")
             return
         }
-        if (!ModuleConfig.apiEnabled) return
+        if (!apiEnabled) return
         if (server?.isRunning == true) return
         val ctx = startContext
         if (ctx == null) {
@@ -230,7 +227,7 @@ object ApiServer {
         start(ctx, startModuleApkPath)
     }
 
-    /** 按当前 ModuleConfig 监听配置重启服务（配置端点修改监听地址/端口后调用） */
+    /** Restart AndServer after a native listener configuration update. */
     @Synchronized
     fun restart() {
         val ctx = startContext ?: return
@@ -260,6 +257,22 @@ object ApiServer {
             }
             stop()
         }.start()
+    }
+
+    fun applyPlatformUpdate(revision: Long, address: String, port: Int, enabled: Boolean) {
+        if (revision <= platformRevision) return
+        val changedListener = address != listenAddress || port != listenPort
+        val wasEnabled = apiEnabled
+        val effectiveEnabled = if (BuildConfig.KERNEL_ONLY) true else enabled
+        platformRevision = revision
+        listenAddress = address
+        listenPort = port
+        apiEnabled = effectiveEnabled
+        when {
+            wasEnabled && !effectiveEnabled -> stopDelayed()
+            !wasEnabled && effectiveEnabled -> startFromConfig()
+            effectiveEnabled && changedListener -> restartDelayed()
+        }
     }
 }
 

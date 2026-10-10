@@ -6,8 +6,9 @@
 #include "../../contracts/item_facts.h"
 #include "../../contracts/game_ports/inventory_extras_port.h"
 
-// 自动出售插件清单入口（ARCHITECTURE.md §3.3）：零资源常驻插件。
-// 门禁经配置事件 `plugin.autosell.enabled` 驱动扫描任务与 UI 入口（见 plugin.cpp）。
+// 自动出售插件清单入口（ARCHITECTURE.md §3.3）：资源常驻（gate=nullptr）。
+// 开关为 descriptor feature `autosell.auto_sell`；生命周期驱动扫描任务与 UI 入口
+// （见 plugin.cpp）。
 
 namespace qol::features::autosell {
 

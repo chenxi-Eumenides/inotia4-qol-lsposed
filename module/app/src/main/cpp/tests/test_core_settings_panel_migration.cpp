@@ -112,6 +112,33 @@ QolResult popup_stack_snapshot(uint32_t* count, uintptr_t* top_enter_vma) {
     return qol::contracts::ok();
 }
 
+// The settings plugin now installs only when the Host-selected management SDK exposes the
+// resident feature-control channel; this stub satisfies the structural availability check.
+QolResult control_read_catalog(void*, const qol::contracts::QolFeatureCatalogPlugin**, uint32_t*) {
+    return qol::contracts::ok();
+}
+QolResult control_read_desired(void*, const char*, uint8_t*, uint8_t*) {
+    return qol::contracts::ok();
+}
+QolResult control_read_feature(void*, const char*, const char*, uint8_t*) {
+    return qol::contracts::ok();
+}
+QolResult control_request_set_feature(void*, const char*, const char*, uint8_t,
+                                      qol::contracts::FeatureReceipt*) {
+    return qol::contracts::ok();
+}
+QolResult control_request_desired(void*, const char*, uint8_t, qol::contracts::FeatureReceipt*) {
+    return qol::contracts::ok();
+}
+QolResult control_receipt(void*, uint64_t, qol::contracts::FeatureReceipt*) {
+    return qol::contracts::ok();
+}
+QolResult control_invoke_entry(void*, const char*, const char*) { return qol::contracts::ok(); }
+const qol::contracts::QolFeatureControlApi kFeatureControl{
+    sizeof(qol::contracts::QolFeatureControlApi), nullptr, &control_read_catalog,
+    &control_read_desired, &control_read_feature, &control_request_set_feature,
+    &control_request_desired, &control_receipt, &control_invoke_entry};
+
 // 「更多游戏」绑定 tick 决策的记录用 fake 操作（settings_binding 纯逻辑的注入面）。
 class RecordingMoreGamesOps : public qol::features::core_ui::MoreGamesBindOps {
 public:
@@ -146,7 +173,8 @@ public:
 }  // namespace
 
 namespace qol::features::core_ui {
-void settings_bind_sdk(const contracts::QolHostSdk*) {}
+void settings_bind_sdk(const contracts::QolHostSdk*, contracts::QolOwnerToken) {}
+void settings_ui_close_panel() {}
 const contracts::PanelCallbacks* settings_panel_callbacks() { return &kSettingsCallbacks; }
 bool settings_provider_open() { return true; }
 void settings_provider_close() { g_panel_active = false; }
@@ -166,6 +194,15 @@ int main() {
     using namespace qol;
     const contracts::PluginDescriptor& descriptor = features::core_settings::plugin_descriptor();
     assert(descriptor.resources_count == 0 && descriptor.resources == nullptr);
+    // Ordinary `settings` plugin: no legacy bool map, no config HTTP route, one real entry feature.
+    assert(std::strcmp(descriptor.id, "settings") == 0);
+    assert(descriptor.requires_count == 2);
+    assert(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    assert(descriptor.feature_count == 1 && descriptor.features != nullptr);
+    assert(std::strcmp(descriptor.features[0].id, "page") == 0);
+    assert(descriptor.features[0].default_enabled == 1);
+    assert(descriptor.features[0].type == contracts::FeatureType::kEntry);
+    assert(descriptor.features[0].category == contracts::FeatureCategory::kTools);
 
     contracts::QolUiAdapter ui{};
     ui.set_popup_process_info = &set_popup_process_info;
@@ -182,10 +219,12 @@ int main() {
     sdk.ui = &ui;
     sdk.http_dispatch.register_command = &register_command;
     sdk.scheduler = {&scheduler_add, &scheduler_remove};
+    sdk.feature_control = &kFeatureControl;
 
     features::core_ui::ui_panels_bind_sdk(&sdk);
     contracts::PluginContext context{};
     context.sdk = &sdk;
+    context.owner_token = 73;
     assert(descriptor.install != nullptr && descriptor.install(context) == 0);
     assert(g_provider != nullptr && std::strcmp(g_provider->panel_id, "settings") == 0);
     assert(g_provider->callbacks != nullptr);

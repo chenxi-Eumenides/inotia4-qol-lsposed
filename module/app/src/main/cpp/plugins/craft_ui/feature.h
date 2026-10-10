@@ -76,7 +76,6 @@ void set_write_port(const contracts::QolCraftUiWritePort* port);
 const contracts::ItemFactsApi* item_facts();
 const contracts::QolHostSdk* host_sdk();
 void log_message(int32_t level, const char* format, ...);
-bool config_enabled(const char* key);
 
 uint32_t craft_mix_type();
 int64_t craft_ui_type();
@@ -104,12 +103,6 @@ void craft_show_text(uint32_t text_id);
 bool craft_show_yesno(uint32_t text_id, contracts::QolCraftPopupCallback ok,
                       contracts::QolCraftPopupCallback cancel);
 int craft_panel_state();
-
-// 配置仍开启但结果能力缺失时，hook 仍处于模块上下文，必须拒绝原版回落；配置关闭时
-// 旧面板撤销窗口仍允许透传原版路径。
-constexpr bool craft_result_unavailable_is_fail_closed(bool module_gate_enabled) {
-    return module_gate_enabled;
-}
 
 // ---- 文案与音效：界面层的知识（出什么结果该说什么话）----
 constexpr uint32_t kTextNoBagSpace = 5;             // 「背包空间不足，无法进行操作。」

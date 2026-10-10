@@ -313,6 +313,34 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+QolResult open_manager_feature(contracts::PluginContext& ctx) {
+    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) {
+        constexpr char message[] = "panel capability lookup unavailable";
+        return contracts::error(kQolErrNotReady, message, sizeof(message) - 1);
+    }
+    const void* iface = nullptr;
+    const auto result = ctx.sdk->capabilities.require(
+        contracts::kUiPanelsCapabilityId,
+        {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}, &iface);
+    if (!contracts::succeeded(result)) return result;
+    if (iface == nullptr || static_cast<const contracts::UiPanelsApi*>(iface)->open == nullptr) {
+        constexpr char message[] = "panel navigation unavailable";
+        return contracts::error(kQolErrNotReady, message, sizeof(message) - 1);
+    }
+    // Shared navigation preserves the backup page's nested push/back behavior.
+    if (static_cast<const contracts::UiPanelsApi*>(iface)->open("save_backup")) {
+        return contracts::ok();
+    }
+    constexpr char message[] = "save backup manager is not ready or navigation was rejected";
+    return contracts::error(kQolErrBlocked, message, sizeof(message) - 1);
+}
+
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"save_backup.open_manager", 1, contracts::FeatureCategory::kTools,
+     contracts::FeatureType::kEntry, "存档备份导出", "打开存档备份管理器。",
+     nullptr, &open_manager_feature},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -331,6 +359,7 @@ const contracts::PluginDescriptor kDescriptor = {
     1,
     kSbHttpRoutes,
     static_cast<uint32_t>(sizeof(kSbHttpRoutes) / sizeof(kSbHttpRoutes[0])),
+    kFeatures, 1,
 };
 
 }  // namespace

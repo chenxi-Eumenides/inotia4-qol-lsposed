@@ -24,7 +24,7 @@ Loader（机制运行时）
   ├─ Game Adapter / Game Host（版本与低层受控适配）
   ├─ core.api（HTTP 共享出口）
   ├─ core.custom_ui（UI 共享工具：组件、面板框架、游戏原生控件、文本机制）
-  ├─ core.settings（成品页面：模块设置页；后续成品页同族）
+  ├─ core.settings（普通成品页插件：模块设置页，仅渲染 Host feature catalog）
   ├─ core.<domain>（领域 owner：读写一体，如 core.world / core.character / core.item / core.save / core.quest / core.craft / core.system / core.ui_state）
   └─ 功能插件 / 依赖插件（特殊修改与组合）
 ```
@@ -69,6 +69,8 @@ Loader（机制运行时）
 
 - 既有 API 路径、HTTP 方法保持不变；query 路由的成功响应保持冻结。带游戏内存写入的写路由按 §7.1 的票据契约执行：POST 立即返回 `{"ok":true,"ticket":N}`，原操作结果在票据终态尽力保留、可回取；受影响路由以 `docs/reference/api-reference.md` 的显式枚举为准，属刻意的调用方契约变更，不得静默替换。
 - 既有 `NativeBridge` external 方法名与签名保持冻结；新增接口必须另行设计兼容面，不借迁移删除或改写既有签名。
+- 配置唯一持久化来源为 native Host 常驻管理设施持有的外部 `config.json`。每个已注册 `plugin_id` 持久化为一个对象 `{"enable":bool,"features":{feature_id:bool},"config":{自定义key:任意JSON}}` 三层模型；schema、Store、读写与管理 API 全部由 Host 常驻模块设施持有，与任何插件（含设置页）生命周期分离。Kotlin 只传输 raw HTTP body，不读取、解析、缓存或写入配置。
+- `enable` 是 Host 独占的 lifecycle 期望状态，普通插件不可读写；`features` 只含当前注册 feature 的布尔值（注册元数据 default 缺失时补齐，已有值优先）；`config` 是插件业务自由键值。插件可读自己的完整 namespace（不含 `enable`），settings 获 Host 管理授权。单 key 更新在同一 Store 事务内完成 durable write 与内存提交；旧整 namespace replace/clear 槽返回 Unsupported。
 - `game_symbols.h` 是内置适配所用游戏版本常量、VMA、偏移和 ABI 签名的唯一来源；域插件不得持有裸地址或 include 该头。插件可为 `EntryHook` 声明纯导出符号名（`ResourceClaim.symbol = "elf-export:<ELF导出名>"`）作为目标身份；它不是版本耦合裸地址，也不取代 `game_symbols.h` 对内置 VMA/ABI 常量的权威性。
 - 游戏写入和有副作用调用只能在游戏主线程的 owner 命令处理器中执行；HTTP、初始化和后台线程不直接调用游戏函数，也不阻塞等待游戏结果。
 - 同进程 native 代码无法获得崩溃隔离。受控 API 只提供目标校验、线程纪律和错误返回，不构成安全沙箱。
@@ -228,7 +230,7 @@ provider 的数量和命名随领域边界演进，不受固定插件数量或�
 |---|---|---|
 | `core.api` | HTTP 共享出口、路由/能力登记协作、通用门控和状态出口 | 游戏语义、领域 live 读取、业务规则、万能 native HTTP router |
 | `core.custom_ui` | 可复用 UI 组件、面板注册/导航框架、**游戏原生控件**（如原生选择框）与**文本机制**（独占文本钩子 + 注册接口） | 具体功能页面、游戏业务语义、替其他插件承载文案内容、底层资源细节 |
-| `core.settings` | 模块设置页这一**成品页**的内容/行为/资源与选项管理 | 通用组件框架、通用文本机制、游戏语义 |
+| `core.settings` | 模块设置页这一**成品页**的内容/行为/资源；只渲染 Host feature catalog 并调用 Host 常驻管理 API | 通用组件框架、通用文本机制、游戏语义、schema/Store/配置与 lifecycle 管理 API 所有权 |
 | 领域 owner `core.<domain>` | 一个窄领域的事实与 owner 行为（读写一体） | 聚合全部游戏对象、替代 Loader/Game Host、承担所有 API/UI |
 | `core.feature` | 迁移期临时接管已证实未实现 HTTP 端点的兼容占位响应 | 最终发布插件、已实现功能、任意新业务或领域职责 |
 
@@ -264,7 +266,7 @@ provider 的数量和命名随领域边界演进，不受固定插件数量或�
 
 | 调用方 | 允许 | 禁止 |
 |---|---|---|
-| HTTP/Kotlin 线程 | 读取 typed snapshot、不可变配置，提交命令并查询票据 | live 游戏读取、直接读内存、同步等待 |
+| HTTP/Kotlin 线程 | 读取 typed snapshot、经 owner API 读取配置投影，提交命令并查询票据；Kotlin 仅传输配置 raw body | live 游戏读取、直接读内存、同步等待、Kotlin 解析/缓存/写配置 |
 | 游戏主线程 | live 读取、命令执行、资源步进、事件派发、快照发布 | 睡眠、自旋、阻塞等待 |
 | 初始化线程 | 读取配置、注册插件、投递任务 | 访问游戏状态、执行游戏函数 |
 | 插件主线程回调 | 读 capability、更新私有状态、投递命令、登记消费者 | 申请/释放资源、持锁跨插件调用 |
@@ -283,6 +285,7 @@ HTTP 传输边界固定为：
 - Kotlin `host/` 保留 AndServer/socket 监听、HTTP 解析、请求生命周期、响应写回和兼容 JSON 处理；
 - native 不建立通用 HTTP router，不接管 socket，不把任意 JSON 请求当作万能调用入口；
 - native owner 提供按领域定义的 typed snapshot、typed result 和 typed command；Kotlin bridge 调用对应的既有或新增窄入口，再保持既有 JSON 响应兼容；
+- 配置与 lifecycle 控制由 Host 常驻管理设施提供（`host/features/http_control.cpp`，装配期绑定为 resident route，先于 registry 接受态与 op 门控）：`GET /api/config/list` 投影当前已注册 plugin 对象，`POST /api/config/set` 提交 typed 单 key feature/config/desired 请求，`POST /api/op/features/lifecycle` 提交 desired activate/deactivate，`GET /api/config/receipt/{id}` 回取异步 receipt。它们不经任何普通插件（含设置页）的生命周期，写入最终都走 Host 单一 Store transaction，不形成第二套 writer。
 - query 只读取快照、不可变配置和登记数据；command 只解析为 owner 命令并立即返回票据（`{"ok":true,"ticket":N}`），操作在主线程执行、结果写回票据；HTTP 线程不等待主线程。
 
 既有 URL、HTTP 方法、`NativeBridge` external 方法/签名冻结。query 路由与同步响应写路由的成功响应保持冻结；使用票据契约的带游戏写入路由，其响应行为必须在 `docs/reference/api-reference.md` 逐条公布（含票据终态的结果回取方式、保留窗口与超限语义）。路由 owner 由领域职责决定。诊断端点也不能加入游戏语义聚合。**调试端点例外**：`/api/debug/*` 属开发调试用途，不构成对外调用方契约，其响应可随内部机制调整（如票据化），但须在 api-reference 中标注为调试端点；release 隔离与 smoke 可按既有口径对其单独处理。
@@ -293,7 +296,7 @@ HTTP 传输边界固定为：
 
 - **`core.custom_ui`（共享工具）**：通过稳定契约提供通用组件、容器、面板注册与导航，以及**游戏原生控件**（如原生选择框：弹框、等待选择、取回结果）与**文本机制**（独占文本钩子 + 文本注册/添加接口）。普通插件的 `ui/` 组合这些组件实现自己的页面；功能页面不归 `core.custom_ui`。文本**内容**也不归它——各插件经注册接口贡献自己的文案。
 - **`core.ui_state`（UI 领域 owner）**：拥有游戏界面状态的读写——当前画面、游戏自身面板、对话与选择框状态，以及对应操作（打开/关闭游戏面板、选择对话项、开始交互）。它不提供可复用组件，也不承载功能插件的页面。
-- **`core.settings`（成品页）**：模块设置页独立成插件，内容/行为/资源自持，消费 `core.custom_ui` 的组件与文本注册接口；配置的存储与门禁仍在内核（见 §8.2），本插件只是呈现者与选项管理者。
+- **`core.settings`（普通成品页插件，无配置所有权）**：模块设置页独立成插件（id=`settings`，page entry 默认 true），只渲染 Host feature catalog 并调用 Host 常驻管理 API；消费 `core.custom_ui` 的组件与文本注册接口。它不拥有 schema、Store 或配置 HTTP adapter：配置与 lifecycle 控制由 Host 常驻设施提供，不随该页插件生命周期停止。settings 停用时整个设置页/控件/回调撤销，重新 activate 后从注册元数据与当前持久状态重建，不复用旧控件或 token；settings 自停后不通过自身页面恢复。
 
 组件只在确有多个真实消费者且契约稳定时提升为通用组件；不要预先构造覆盖全部业务的 UI 框架。
 
@@ -302,7 +305,7 @@ HTTP 传输边界固定为：
 | 能力 | Kotlin | native/插件 owner |
 |---|---|---|
 | HTTP | 监听、传输、解析、响应写回 | 不实现通用 router |
-| JSON | 兼容旧响应形状、传输层序列化 | 不以通用 JSON blob 代替类型契约 |
+| JSON | 非配置 API 的传输职责；配置 HTTP 仅传 raw body/response bytes | 不读取、解析、缓存或写配置；配置 JSON validation、plugin 对象 projection 与 durable commit 由 native Host 常驻管理设施承担 |
 | 游戏读取 | 调用窄 bridge、消费结果 | provider 发布 typed snapshot/Result |
 | 游戏写入 | 发起请求、展示票据/结果 | owner command 在主线程执行 |
 | 业务语义 | 不聚合游戏 live 状态 | provider/功能插件拥有 |
@@ -323,7 +326,12 @@ provider 在描述符中静态声明 `provides`，消费者声明 `requires`/`op
 ### 8.2 Loader 自举
 
 - 最后观测手段是独立日志：native 日志就绪前允许 Kotlin 启动早期写者，交接后由 native 单写者接管。
-- 最后恢复手段是外部 `config.json` 加重启；配置由 native Loader 在早期自读，不依赖插件注册或 Kotlin 初始化顺序。
+- 最后恢复手段是外部 `config.json` 加重启；该文件由 native Host 常驻管理设施早期读取并写入，Kotlin 不持有配置副本。Store 在 Host lifetime 内管理所有 plugin 对象；设置页插件未安装或停用不影响配置读取、持久化和 lifecycle 控制。
+- 配置文件顶层为 `plugin_id → JSON object`，每个对象含 `enable`/`features`/`config` 三层。旧 12 个平铺字段、旧 runtime gate 映射与旧 settings `bool` 桥已退出，不作为当前 schema 或迁移输入。未知 root 与未注册 plugin 原样保留。`GET /api/config/list` 投影按 Host 当前实际注册 plugin 集合过滤，不会暴露或删除未注册数据。
+- 注册元数据（`feature_id`、`default`、`category`、`type`(toggle/entry)、`name`、`description`、`callback`）由插件 descriptor 静态提供、不持久化；禁止零 feature 插件；`entry` 同样有布尔状态并参与运行判定。`enable` 是 Host 独占的 lifecycle 期望状态：普通插件不可读写，显式 deactivate 写 `false`。运行判定为 `want_run = enable && any(当前注册 feature=true)`；`enable=false` 优先；全部 feature=false 时自动完整 deactivate 且不改 `enable`；feature 由 false→true 且 `enable=true` 时尝试 activate；依赖级联/激活失败不改 `enable`；常驻需求用 default true 的 hidden feature 表达。desired（`enable`/feature 期望）与 actual（受依赖、版本、安装结果约束的实际状态）分开报告。`custom_recipe.recipes`（唯一可见开关，default false）与 `craft_ui.custom_crafting`（hidden default true，`craft_result` 升为 requires）级联启停，级联不改 desired。
+- `item_count` 的数量解释归 Host 常驻 Adapter；`stack_limit` 只拥有 999 数量策略（`stack_limit.limit_999`，default false）及对应资源 lifecycle，不在本文件展开其扩展读取接口。
+- durable commit 后，Host 按 revision 串行更新 runtime projection/effects；需要游戏资源 gate 的效果仍经主线程命令，HTTP server/watermark 等由 revision 通知处理。`module.platform` 的 `api.enabled=false` 不阻断游戏内 settings UI 的配置写入与恢复路径。
+- Store 的 hard-I/O degraded 采用 Host Store 定义的默认读写语义并通过状态/错误字段诊断；插件不得回退到 infra、Kotlin 镜像或旁路写文件。`ReadyUnpersisted` 表示当前进程可用但 durable persistence 尚未确认，必须与 hard failure 区分，不能报告为已 durable commit。
 - 日志、配置自举、Loader、资源仲裁和 Game Adapter 属宿主设施，不参与普通插件生命周期，也不以 `core.*` 名义暴露。
 
 ## 9. 内置静态轨与未来外部轨
@@ -368,10 +376,14 @@ release 验收必须证明测试插件未被链接、未被注册、未被打入
 | 问题 | 归属 |
 |---|---|
 | hook/patch 如何安装、冲突、回滚、还原 | Loader 的 `hooks/` / `patch/` |
-| 日志、配置、帧任务、生命周期、资源仲裁 | Loader/Host SDK |
+| 日志、帧任务、资源仲裁 | Loader/Host SDK |
+| 配置 schema/Store/持久化与管理 API（`enable`/`features`/`config` 三层） | Host 常驻模块管理设施 |
+| 插件 lifecycle 期望（`enable`）与实际运行状态 | Host 常驻 lifecycle 控制设施（desired/actual 分离） |
 | 游戏版本、符号、线程、低层受控读写调用 | Game Adapter/Game Host |
 | 当前地图、角色/队伍、物品/背包、存档/任务 | 按领域拆分的官方 provider 插件 |
-| 数量读写、扩展背包、新物品、新合成、自动出售、传送 | 功能插件或其依赖插件 |
+| 数量解释与读写（`item_count`） | Host 常驻 Adapter |
+| 999 数量策略及其资源 lifecycle | `stack_limit` 插件 |
+| 扩展背包、新物品、新合成、自动出售、传送 | 功能插件或其依赖插件 |
 | HTTP 传输、解析、兼容 JSON | Kotlin host 与 `core.api` 出口协作 |
 | typed snapshot/result/command | 对应 provider/功能插件 owner |
 | 通用 UI 组件、面板框架与文本机制 | `core.custom_ui` |

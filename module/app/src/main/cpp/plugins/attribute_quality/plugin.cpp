@@ -85,6 +85,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"attribute_quality.provider", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "属性品质服务", "提供装备属性范围与品质判定能力。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -99,6 +106,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &on_resource_ready,
+    nullptr, 0, nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

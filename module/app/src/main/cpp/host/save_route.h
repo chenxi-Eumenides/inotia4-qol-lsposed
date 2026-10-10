@@ -30,6 +30,8 @@ QolResult dispatch_native_call_for_plugin(const char* plugin_id,
 // 宿主生命周期停用前的转接：透传 owner 的 prepare_stop；Busy 表示存在
 // pending/unresolved 事务，宿主生命周期操作必须明确失败。
 QolResult prepare_stop(contracts::QolOwnerToken owner);
+QolResult prepare_stop_poll(contracts::QolOwnerToken owner);
+bool owner_stopped_poll(uint64_t token);
 
 // Host SDK 面（QolHostSdk.save_route 指向的表）；bind 授权在 route 内经 owner 身份校验。
 const contracts::QolSaveRouteApi& save_route_api();

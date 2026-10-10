@@ -31,6 +31,14 @@ native `core.ui_state` descriptor 登记三条 GET 查询和五条 POST 写 hand
 - 必需 ports：`QOL_PORT_CHOICE_WRITE`、`QOL_PORT_UI_WRITE`、私有的 `QOL_PORT_UI_STATE_READ`。
 - `core.custom_ui` 仅 optional-requires `ui.state`；`core.ui_state` 不依赖或引用 `core.custom_ui`。
 
+### 注册 feature
+
+| feature id | 默认 | 分类 | 类型 |
+|---|---:|---|---|
+| `core.ui_state.provider` | 1 | Hidden | toggle |
+
+provider 为常驻需求，用 default true 的 hidden feature 表达；`enable`（Host 独占 lifecycle 期望）与 feature 由 Host 管理，插件不读写。
+
 ## 3. 依赖前置与消费者
 
 - Host SDK 提供 typed commands、ticket result handler、HTTP 路由注册/dispatch、调度与日志面；Game Adapter 注入 choice/UI write 及 UI state read ports。
@@ -41,7 +49,7 @@ native `core.ui_state` descriptor 登记三条 GET 查询和五条 POST 写 hand
 
 - 拥有游戏原生 UI 当前态及相应 owner 操作；Game Adapter 在游戏主线程读取原生 screen/panel/dialog，插件把读取结果保存为 HTTP 查询快照。
 - 接收 `core.custom_ui` 完整有序 PanelProvider 栈快照；栈顶映射为 `panel_<panel_id>`，仅影响 `/api/ui/panel`，不覆盖原生 `/api/ui/screen`。
-- 接收带 generation 的自定义 dialog 快照；稳定 `UiChoiceSpec.dialog_type_id` 映射到既有 `type`，title/options/active 映射到既有字段；迟到的旧序列或旧 generation 不会清除新状态。
+- 接收带 generation 的自定义 dialog 快照；稳定 `UiChoiceSpec.dialog_type_id` 只替换原生 `DialogContent.type`，原生 `text/speaker/displayed/options` 等字段保持原 JSON；迟到的旧序列或旧 generation 不会清除新状态。没有合法顶层 `type` 时 fail-closed，不重建响应。
 - `core.custom_ui` 负责可复用组件、面板 provider stack 和文本机制；Kotlin 负责 HTTP transport/JVM 同意页分支；Game Adapter/Host 负责低层 PopupState 与 UI 原语适配。
 
 ## 5. 核心实现链

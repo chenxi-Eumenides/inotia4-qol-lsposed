@@ -55,6 +55,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.feature.compatibility_routes", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "迁移占位路由", "提供尚未实现端点的既有兼容占位响应。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -74,6 +81,8 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     &plugin_fill_status,
     nullptr,
+    nullptr, 0, nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

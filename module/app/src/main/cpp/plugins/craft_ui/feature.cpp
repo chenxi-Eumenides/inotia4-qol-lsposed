@@ -34,13 +34,6 @@ void set_write_port(const contracts::QolCraftUiWritePort* port) { g_write_port =
 
 const contracts::ItemFactsApi* item_facts() { return g_item_facts; }
 
-bool config_enabled(const char* key) {
-    int32_t value = 0;
-    if (g_sdk == nullptr || g_sdk->config.get_bool == nullptr || key == nullptr) return false;
-    (void)g_sdk->config.get_bool(key, 0, &value);
-    return value != 0;
-}
-
 void log_message(int32_t level, const char* format, ...) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
     char message[contracts::kMessageCap + 1]{};

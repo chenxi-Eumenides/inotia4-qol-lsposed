@@ -2,6 +2,7 @@
 //
 // 仅做 JNI 参数转换；格式化与发射逻辑在 infra/log/qol_log.*。
 // Kotlin 侧方法名已冻结：nativeQolLogInit / nativeQolLogWrite / nativeQolLogSetDebugEnabled。
+// Debug gating is controlled by the native core.settings Store commit; its old JNI setter is inert.
 
 #include <jni.h>
 
@@ -52,6 +53,6 @@ Java_com_inotia4_qol_NativeBridge_nativeQolLogWrite(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeQolLogSetDebugEnabled(JNIEnv*, jclass, jboolean enabled) {
-    qol_log_set_debug_enabled(enabled == JNI_TRUE);
+Java_com_inotia4_qol_NativeBridge_nativeQolLogSetDebugEnabled(JNIEnv*, jclass, jboolean) {
+    // Frozen compatibility stub; only the native core.settings runtime commit may change the gate.
 }

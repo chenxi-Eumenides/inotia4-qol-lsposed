@@ -17,8 +17,7 @@ object NativeBridge {
     fun init(): Boolean {
         if (ready) return true
         ready = try {
-            nativeRegisterConfigBridge(ModuleConfigUiBridge::class.java)
-        nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
+            nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
             nativeInit()
         } catch (t: Throwable) {
             LogFile.error(LogDomain.PLATFORM, "nativeInit failed", t)
@@ -26,6 +25,10 @@ object NativeBridge {
         }
         return ready
     }
+
+    external fun nativeConfigStoreBootstrap(externalFilesDirectory: String): Int
+    external fun nativeConfigPlatformSubscribe(callbacks: Class<*>): Boolean
+    external fun nativeConfigPlatformReportBindFailure(revision: Long, failedPort: Int): Boolean
 
     external fun nativeInit(): Boolean
 

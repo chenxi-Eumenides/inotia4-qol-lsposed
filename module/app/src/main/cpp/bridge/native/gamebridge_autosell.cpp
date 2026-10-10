@@ -61,22 +61,10 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellEnabled(JNIEnv*, jclass, jboolean enabled) {
-#if QOL_KERNEL_ONLY
+    // Frozen global-config compatibility stub; writes belong to core.settings' native
+    // single-key owner-token path. nativeSetAutoSellConfig remains per-save-slot rule data.
     (void)enabled;
     return JNI_FALSE;
-#else
-    // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
-    // 写配置；autosell 插件的 on_enabled/on_disabled 与配置事件据此同步扫描任务与 UI 门控。
-    // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetSimpleModeEnabled 同构）。
-    const qol::contracts::QolCommand command{
-        qol::contracts::kCommandSetConfigBool,
-        "plugin.autosell.enabled",
-        enabled == JNI_TRUE ? 1 : 0,
-    };
-    qol::contracts::QolCommandTicket ticket = 0;
-    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
-    return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
-#endif
 }
 
 extern "C" JNIEXPORT jboolean JNICALL

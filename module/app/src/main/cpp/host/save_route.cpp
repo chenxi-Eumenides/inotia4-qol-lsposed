@@ -55,7 +55,13 @@ QolResult invoke_active_locked(std::mutex& mtx, contracts::QolOwnerToken owner, 
     void* user = callbacks.user;
     ++binding->in_flight;
     mtx.unlock();
-    const QolResult result = invoke(callbacks, user);
+    QolResult result;
+    try { result = invoke(callbacks, user); }
+    catch (...) {
+        mtx.lock();
+        --binding->in_flight;
+        throw;
+    }
     mtx.lock();
     --binding->in_flight;
     return result;
@@ -178,6 +184,27 @@ QolResult dispatch_render_ready(contracts::QolOwnerToken owner, uint64_t transit
 
 QolResult prepare_stop(contracts::QolOwnerToken owner) {
     return route_prepare_stop(nullptr, owner);
+}
+
+QolResult prepare_stop_poll(contracts::QolOwnerToken owner) {
+    std::unique_lock<std::mutex> lock(g_mtx, std::try_to_lock);
+    if (!lock.owns_lock()) return fail(kQolErrBusy, "save route lock busy");
+    return invoke_active_locked(g_mtx, owner, [&](const contracts::QolSaveOwnerCallbacks& cb, void* user) {
+        return cb.prepare_stop ? cb.prepare_stop(user) : fail(kQolErrUnsupported, "prepare_stop missing");
+    });
+}
+
+bool owner_stopped_poll(uint64_t token) {
+    std::unique_lock<std::mutex> lock(g_mtx, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    bool completed = true;
+    for (auto& binding : g_bindings) {
+        if (!binding.id || binding.owner != token) continue;
+        binding.draining = true;
+        if (binding.in_flight) completed = false;
+        else binding = Binding{};
+    }
+    return completed;
 }
 
 void step() {

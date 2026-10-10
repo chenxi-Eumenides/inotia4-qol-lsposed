@@ -855,11 +855,20 @@ Status replace_reserved(uint64_t owner, int slot, contracts::QolOwnerStoreReserv
     }
     return status;
 }
-void owner_stopped(uint64_t owner) {
-    std::lock_guard<std::mutex> lock(g_store_mtx);
+static void notify_owner_stopped_locked(uint64_t owner) {
     for (auto& held : g_reservations)
         if (held.owner == owner && held.retain == 0 && !slot_operation::referenced_locked(held.operation)) held = {};
     slot_operation::owner_stopped_locked(owner);
+}
+void owner_stopped(uint64_t owner) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    notify_owner_stopped_locked(owner);
+}
+bool owner_stopped_try(uint64_t owner) {
+    std::unique_lock<std::mutex> lock(g_store_mtx, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    notify_owner_stopped_locked(owner);
+    return true;
 }
 Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservation* credential,
                       uint32_t referenced) {
@@ -879,14 +888,23 @@ Status set_referenced(uint64_t owner, int slot, contracts::QolOwnerStoreReservat
     *credential = held;
     return Status::kOk;
 }
-void owner_rebound(uint64_t old_owner, uint64_t new_owner) {
-    std::lock_guard<std::mutex> lock(g_store_mtx);
+static void notify_owner_rebound_locked(uint64_t old_owner, uint64_t new_owner) {
     slot_operation::owner_rebound_locked(old_owner, new_owner);
     for (auto& held : g_reservations)
         if (held.id != 0 && (held.retain != 0 || held.operation != 0) && held.owner == old_owner && held.revision != UINT64_MAX) {
             held.owner = new_owner;
             ++held.revision;
         }
+}
+void owner_rebound(uint64_t old_owner, uint64_t new_owner) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    notify_owner_rebound_locked(old_owner, new_owner);
+}
+bool owner_rebound_try(uint64_t old_owner, uint64_t new_owner) {
+    std::unique_lock<std::mutex> lock(g_store_mtx, std::try_to_lock);
+    if (!lock.owns_lock()) return false;
+    notify_owner_rebound_locked(old_owner, new_owner);
+    return true;
 }
 
 bool reservation_busy_locked(int slot) { return slot >= 0 && slot < 3 && g_reservations[slot].id != 0; }
@@ -898,6 +916,10 @@ bool operation_has_reservation_locked(uint64_t operation) {
 }
 
 #if defined(QOL_STORE_TEST_SEAMS)
+void with_store_lock_for_test(void (*held)(void*), void* context) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    held(context);
+}
 void set_unlink_for_test(int (*unlink_fn)(const char*)) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     g_unlink_for_test = unlink_fn;

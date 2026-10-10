@@ -4,12 +4,8 @@
 
 namespace qol::host {
 
-void host_item_count_set_provider(const contracts::QolItemCountApi* api) {
-    qol::game::item_count_set_provider(api);
-}
-
-void host_item_count_set_active_probe(bool (*probe)()) {
-    qol::game::item_count_set_active_probe(probe);
+void host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode mode) {
+    qol::game::item_count_set_extended_mode(mode);
 }
 
 const contracts::QolItemCountApi& host_item_count_api() {

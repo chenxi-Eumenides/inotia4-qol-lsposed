@@ -11,6 +11,7 @@
 | 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时） |
 | 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
 | 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
+| 配置 `enable` 与插件生命周期方案评审 | `refactor/config-enable-lifecycle-proposal.md` | `ARCHITECTURE.md` §7.2/§8.2、`reference/api-reference.md` §7.6 |
 | 查询验证标准和当前欠账 | `refactor/verification.md` | `refactor/verification/`、`refactor/slot-data-contract.md` |
 | 理解原版游戏机制 | `reference/game/` | `archive/` 中相关历史记录仅用于追溯 |
 
@@ -43,6 +44,7 @@
 - `audits/`：插件审计记录与对应证据；后续审计沿用此目录。
 - `issues.md`：已确认问题台账。
 - `plugin-audit-playbook.md`：审计、修复、测试闭环流程。
+- `config-enable-lifecycle-proposal.md`：已被实现模型取代（superseded）；现行契约见 ARCHITECTURE §8.2 与 API 参考 §7.6。
 - `baseline.md`：脚本生成的结构基线。
 - `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
 - `api-route-map.md`：API 路由核对材料。

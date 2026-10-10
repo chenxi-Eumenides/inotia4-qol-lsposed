@@ -25,6 +25,8 @@
 #include <cstdint>
 
 #include "commands.h"
+#include "config_namespace.h"
+#include "feature.h"
 #include "http.h"
 #include "in_flight.h"
 #include "item_handle.h"
@@ -330,6 +332,43 @@ using QolSnapshotToken = void*;
 // 未下发时返回 nullptr；返回的字符串为静态存储，进程内有效。
 using QolModuleVersionFn = const char* (*)();
 
+// Immutable catalog view. Host owns the arrays/strings for its lifetime after bootstrap.
+// Equivalent JSON: {plugin_id: [{id,name,description,type,category,default}, ...]}.
+// Category numbers are FeatureCategory; JSON type strings are "toggle" and "entry".
+// Catalogs contain metadata only, never callable business pointers.
+struct QolFeatureCatalogItem {
+    const char* id;
+    uint8_t default_enabled;
+    FeatureCategory category;
+    FeatureType type;
+    const char* name;
+    const char* description;
+};
+
+struct QolFeatureCatalogPlugin {
+    const char* plugin_id;
+    const QolFeatureCatalogItem* features;
+    uint32_t feature_count;
+    uint8_t host_owned;
+};
+
+// Host explicitly supplies this resident management channel, not an inactive owner token.
+// Entry invocation is admission only; business callbacks run at the guarded frame seam.
+struct QolFeatureControlApi {
+    uint32_t struct_size;
+    void* context;
+    QolResult (*read_catalog)(void*, const QolFeatureCatalogPlugin**, uint32_t*);
+    QolResult (*read_desired)(void*, const char*, uint8_t*, uint8_t*);
+    QolResult (*read_feature)(void*, const char*, const char*, uint8_t*);
+    QolResult (*request_set_feature)(void*, const char*, const char*, uint8_t, FeatureReceipt*);
+    QolResult (*request_desired)(void*, const char*, uint8_t, FeatureReceipt*);
+    QolResult (*receipt)(void*, uint64_t, FeatureReceipt*);
+    QolResult (*invoke_entry)(void*, const char*, const char*);
+    QolResult (*read_config)(void*, const char*, const char*, char*, uint32_t, uint32_t*);
+    QolResult (*request_set_config)(void*, const char*, const char*, const char*, uint32_t, FeatureReceipt*);
+    QolResult (*read_actual)(void*, const char*, int32_t*, uint8_t*);
+};
+
 struct QolHostSdk {
     QolAbiHeader abi;
     QolLogApi log;
@@ -371,11 +410,82 @@ struct QolHostSdk {
     const QolOwnerStoreApi* owner_store;
     const QolSlotOperationApi* slot_operation;
     const QolSaveRouteApi* save_route;
+    // Owner-token scoped free JSON config namespace (v1.20 tail extension).
+    const QolConfigNamespaceApi* config_namespace;
+    // v1.22 owner feature/config API; preserves the complete v1.21 prefix.
+    const QolFeatureApi* feature;
+    // Null in ordinary SDKs. Only Host-selected management SDKs expose this channel.
+    const QolFeatureControlApi* feature_control;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 19：在 slot_operation 之后尾追加 save_route（core.save 领域回调路由）。
-constexpr uint16_t kHostSdkMinor = 19;
+// minor 22 adds owner feature/config and explicitly supplied resident management tails.
+constexpr uint16_t kHostSdkMinor = 22;
+
+inline const QolFeatureApi* feature_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, feature) + sizeof(const QolFeatureApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 22 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->feature;
+    constexpr std::size_t required = offsetof(QolFeatureApi, invoke_entry) +
+                                     sizeof(QolFeatureApi::invoke_entry);
+    if (api == nullptr || api->struct_size < required || api->read_namespace == nullptr ||
+        api->read_feature == nullptr || api->request_set_feature == nullptr ||
+        api->read_config == nullptr || api->request_set_config == nullptr ||
+        api->receipt == nullptr || api->read_catalog == nullptr || api->read_desired == nullptr ||
+        api->request_desired == nullptr || api->invoke_entry == nullptr) return nullptr;
+    return api;
+}
+
+inline const QolFeatureControlApi* feature_control_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, feature_control) +
+                                sizeof(const QolFeatureControlApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 22 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->feature_control;
+    constexpr std::size_t required = offsetof(QolFeatureControlApi, invoke_entry) +
+                                     sizeof(QolFeatureControlApi::invoke_entry);
+    if (api == nullptr || api->struct_size < required || api->read_catalog == nullptr ||
+        api->read_desired == nullptr || api->read_feature == nullptr ||
+        api->request_set_feature == nullptr || api->request_desired == nullptr ||
+        api->receipt == nullptr || api->invoke_entry == nullptr) return nullptr;
+    return api;
+}
+
+inline const QolConfigNamespaceApi* config_namespace_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, config_namespace) +
+                                sizeof(const QolConfigNamespaceApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 20 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->config_namespace;
+    constexpr std::size_t legacy_size = offsetof(QolConfigNamespaceApi, update_value);
+    if (api == nullptr || api->size < legacy_size ||
+        api->major != kConfigNamespaceMajor || api->minor < kConfigNamespaceLegacyMinor ||
+        api->read_json == nullptr || api->replace_json == nullptr || api->clear == nullptr)
+        return nullptr;
+    return api;
+}
+
+inline const QolConfigNamespaceApi* config_namespace_v11_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, config_namespace) +
+                                sizeof(const QolConfigNamespaceApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 21 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = config_namespace_if_available(sdk);
+    return config_namespace_registered_if_available(api) != nullptr &&
+                   config_namespace_update_if_available(api) != nullptr
+               ? api
+               : nullptr;
+}
+
+inline const QolConfigNamespaceApi* config_namespace_http_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, config_namespace) +
+                                sizeof(const QolConfigNamespaceApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 21 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = config_namespace_if_available(sdk);
+    return config_namespace_http_if_available(api) != nullptr ? api : nullptr;
+}
 
 inline const QolSettingsConfigApi* settings_config_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, settings_config) +
@@ -383,10 +493,22 @@ inline const QolSettingsConfigApi* settings_config_if_available(const QolHostSdk
     if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 17 ||
         sdk->abi.size < end) return nullptr;
     const auto* api = sdk->settings_config;
-    if (api == nullptr || api->size < sizeof(QolSettingsConfigApi) ||
-        api->major != kSettingsConfigMajor || api->minor < kSettingsConfigMinor ||
+    constexpr std::size_t legacy_api_size = offsetof(QolSettingsConfigApi, read_bool_for_owner);
+    if (api == nullptr || api->size < legacy_api_size ||
+        api->major != kSettingsConfigMajor || api->minor < kSettingsConfigLegacyMinor ||
         api->read_bool == nullptr || api->request_set_bool == nullptr ||
         api->query_request == nullptr) return nullptr;
+    return api;
+}
+
+inline const QolSettingsConfigApi* settings_config_owner_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolSettingsConfigApi, query_request_for_owner) +
+                                sizeof(QolSettingsConfigApi::query_request_for_owner);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 21) return nullptr;
+    const auto* api = settings_config_if_available(sdk);
+    if (api == nullptr || api->minor < kSettingsConfigMinor || api->size < end ||
+        api->read_bool_for_owner == nullptr || api->request_set_bool_for_owner == nullptr ||
+        api->query_request_for_owner == nullptr) return nullptr;
     return api;
 }
 

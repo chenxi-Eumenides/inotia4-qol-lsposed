@@ -37,7 +37,8 @@ const qol::contracts::CraftResultApi& craft_result_api();
 // RECIPEBASE/MIXTUREBASE 表注入的行为所有权 ops。
 const qol::contracts::OwnershipOps& ownership_ops();
 
-// 门禁（配置 customRecipeEnabled 的镜像；由插件配置事件与生命周期驱动）。
+// 门禁：镜像 descriptor feature `custom_recipe.recipes` 的运行态；由生命周期与
+// feature on_toggle 驱动。
 bool enabled();
 bool set_enabled(bool enabled);
 

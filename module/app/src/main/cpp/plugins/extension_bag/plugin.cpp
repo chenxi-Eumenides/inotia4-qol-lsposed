@@ -493,8 +493,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     extension_bag_bind_inventory_extras(nullptr);
     if (ctx.struct_size < sizeof(qol::contracts::PluginContext) ||
         ctx.sdk_major != qol::contracts::kHostSdkMajor ||
-        ctx.sdk == nullptr || ctx.game == nullptr ||
-        ctx.sdk->config.get_bool == nullptr) {
+        ctx.sdk == nullptr || ctx.game == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_write_port = nullptr;
@@ -628,7 +627,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         return 1;
     }
     extension_bag_bind_port_sdk(g_sdk);
-    // The separate move_merge plugin owns moveMergeEnabled and the X1 resource.
+    // The separate move_merge plugin owns the X1 resource.
     // HTTP command 注册在全部绑定就绪后执行；失败即 install 失败（宿主不启用、资源不装）。
     if (!register_extension_bag_commands(g_sdk)) {
         extension_bag_bind_port_sdk(nullptr);
@@ -786,6 +785,19 @@ int32_t plugin_on_resource_ready(qol::contracts::PluginContext& ctx, const char*
     return extension_bag_bind_backup(resource_id, backup);
 }
 
+// 单一 feature：默认 true（保持旧默认启用行为），用户可见开关。插件仅在 feature
+// 开启（want_run）时安装；资源 gate=nullptr 跟随 lifecycle。
+QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
+    extension_bag_set_enabled(enabled != 0);
+    return contracts::ok();
+}
+
+constexpr qol::contracts::FeatureDefinition kFeatures[] = {
+    {"extension_bag.extended_bag", 1, qol::contracts::FeatureCategory::kGameplay,
+     qol::contracts::FeatureType::kToggle, "扩展背包", "增加五个扩展背包。",
+     &extension_bag_toggle, nullptr},
+};
+
 const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -804,6 +816,7 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     3,
     kHttpQueries,
     static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    kFeatures, 1,
 };
 
 }  // namespace

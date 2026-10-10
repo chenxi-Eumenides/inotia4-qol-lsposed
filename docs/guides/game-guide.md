@@ -120,7 +120,7 @@ curl http://<手机IP>:8088/api/health
 ### 2.3 安全提示
 
 - **无鉴权**：局域网内任何设备可访问全部**合法**端点。仅在可信局域网使用。
-- **OP 越权端点受 `opEnabled` 全局开关门禁**（默认关闭，未开启返回 403）——见第 8 章；开启后同样无额外鉴权。
+- **OP 越权端点受 `module.platform` 的 `op.enabled` feature 门禁**（默认关闭，未开启返回 403）——见第 8 章；开启后同样无额外鉴权。
 - **明文 HTTP**，勿在公共网络使用。
 
 ---
@@ -790,27 +790,46 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 ### 6.7 config（模块配置）
 
-> 模块级配置的读取与修改（v0.5.22 新增）。**纯 Kotlin 层能力，不走 ControllerGuard**——native 未就绪时配置端点同样可用（如改端口解决冲突）。
-> 配置持久化于外部文件 `/sdcard/Android/data/<游戏包>/files/config.json`（用户可见可编辑）；`POST /api/config/set` 修改立即持久化；删除该文件即恢复出厂默认。
+> 配置以外部 `config.json` 顶层 `plugin_id → JSON object` 结构保存，每个对象是 `{"enable":bool,"features":{feature_id:bool},"config":{自定义key:任意JSON}}` 三层模型，由 native Host 常驻管理设施读写；设置页/HTTP 插件停用不停止 Store。Kotlin 只透传 HTTP raw body，不读取、解析、缓存或写配置。旧 12 个平铺字段与旧 runtime gate 已退出；未知 root 和未注册 plugin 保留。详见 [API 参考 §7.6](../reference/api-reference.md)。
+> 配置文件位于 `/sdcard/Android/data/<游戏包>/files/config.json`（用户可见可编辑）；删除后下次启动按默认值初始化。
 
 | 方法 | 路径 | 用途 | 请求 | 返回 |
 |---|---|---|---|---|
-| GET | `/api/config/list` | 查看当前配置 | — | `{"listenAddress":"0.0.0.0","listenPort":8088,"stackLimitIncrease":false,"moveMergeEnabled":false,"opEnabled":false}` |
-| POST | `/api/config/set` | 修改配置（**只更新请求中出现的字段**） | `{"opEnabled":true}` 等 | `{"ok":true,"restart":false}` 或 `{"ok":true,"restart":true}` |
+| GET | `/api/config/list` | 查看当前已注册插件对象投影 | — | `{"module.platform":{"features":{"api.enabled":true,"op.enabled":false,"debug.logging":false},"config":{"listen_address":"0.0.0.0","listen_port":8088},"enable":true},"extension_bag":{"features":{"extension_bag.extended_bag":true},"config":{},"enable":true}}`（示例，仅展示注册项） |
+| POST | `/api/config/set` | 提交单 key feature/config/desired 请求 | `{"plugin_id":"module.platform","field":"feature","key":"op.enabled","value":true}` | receipt `{"ok":true,"request_id":N,"revision":R,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}` |
+| POST | `/api/op/features/lifecycle` | 提交 desired activate/deactivate | `{"id":"world_teleport","action":"deactivate"}` | receipt（结构同上） |
+| GET | `/api/config/receipt/{id}` | 回取异步 receipt | — | receipt 对象；轮询至 `persistence` 为 `persisted`/`failed` |
 
-**可配置项**：
+写入是异步的：`POST` 立即返回 receipt，按其 `request_id` 轮询 `GET /api/config/receipt/{id}` 直到 `persistence` 不再是 `pending`。`field` 取值：`feature`（`value` 为布尔，写已注册 feature）、`config`（`value` 为任意 JSON，写自由键值）、`desired`（`key` 必须为 `enable`，写 Host lifecycle 期望）。请求体必须有且仅有 `plugin_id`/`field`/`key`/`value` 四个成员；错误返回 `{"ok":false,"error_code":N}`。`enable` 是 Host 独占的 lifecycle 期望状态，普通插件不可读写。
 
-| 配置项 | 类型 | 默认 | 说明 |
-|---|---|---|---|
-| `listenAddress` | string | `0.0.0.0` | HTTP 监听地址 |
-| `listenPort` | int | 8088 | HTTP 监听端口（1-65535；越界报 `listenPort must be 1-65535`） |
-| `stackLimitIncrease` | bool | `false` | 堆叠上限提升（变化即时通知 native，无需重启） |
-| `moveMergeEnabled` | bool | `false` | 背包内拖拽同类可堆叠物品时自动合并（变化即时安装或还原 native hook，无需重启） |
-| `pushAllEnabled` | bool | `false` | 推怪（推动增强）：patch `CHAR_Move` 推动分支的两个 blocker 资格闸门，可推开怪物/队友/召唤物；场景设施（NPC/商人）保持不可推（变化即时下发 native，无需重启） |
-| `opEnabled` | bool | `false` | **OP 越权操作全局开关（v0.5.47）**——开启后 `/api/op/*` 可用；关闭时全部 OP 端点返回 403 `op disabled` |
+**Host 平台配置**（plugin id 固定为 `module.platform`）：
 
-> ⚠️ 修改 `listenAddress`/`listenPort` 后返回 `restart:true` 并**自动重启 HTTP 服务**（延迟约 500ms 先让响应送达）；重启后旧地址/端口连接断开，需按新配置访问。**新端口被占用时自动回退默认端口 8088** 并同步修正配置。
-> `opEnabled` 开启示例：`curl -X POST .../api/config/set -d '{"opEnabled":true}'`（见第 8 章）。
+| 键 | 类型 | 默认 | 说明 |
+|---|---|---:|---|
+| `features["api.enabled"]` | bool | `true` | HTTP 服务与 native 缓存预取；关闭后可由游戏内设置页恢复 |
+| `features["op.enabled"]` | bool | `false` | **OP 越权操作全局开关**——开启后 `/api/op/*` 可用；关闭时返回 403 `op disabled` |
+| `features["debug.logging"]` | bool | `false` | native logger 的 debug 级别门控 |
+| `config["listen_address"]` | string | `"0.0.0.0"` | HTTP 监听地址 |
+| `config["listen_port"]` | number | `8088` | HTTP 监听端口（1-65535） |
+
+**插件功能开关**（写入各插件 `features`，完整 catalog 见 [`settings` 参考](../reference/plugins/core.settings.md)）：
+
+| feature id | 默认 | 说明 |
+|---|---:|---|
+| `autosell.auto_sell` | `false` | 自动出售符合当前存档筛选规则的物品 |
+| `move_merge.drag_merge` | `false` | 拖拽同类物品自动合并 |
+| `push_all.push` | `false` | 移动时推动怪物/队友/召唤物 |
+| `simple_mode.combat` | `false` | 简单模式（降低怪物生命、增强伤害与承伤） |
+| `custom_recipe.recipes` | `false` | 自定义合成（唯一可见开关） |
+| `craft_ui.custom_crafting` | `true` | 自定义合成界面（hidden，随 `custom_recipe.recipes` 级联） |
+| `extension_bag.extended_bag` | `true` | 扩展背包 |
+| `save_backup.open_manager` | `true` | 存档备份管理器（entry） |
+| `stack_limit.limit_999` | `false` | 将可堆叠物品上限提高到 999 |
+| `world_teleport.map_jump` | `true` | 地图边界传送点跳转 |
+
+插件整体 lifecycle 由各 plugin 对象的 `enable`（Host desired）控制，经 `POST /api/op/features/lifecycle` 或 `field="desired"` 写入；`want_run = enable && 任一 feature 开启`。运行态状态仍通过 `/api/system/features` 查询。
+
+修改监听地址/端口会触发 Host runtime projection/effects；`op.enabled` 开启示例见第 8 章。
 
 ### 6.8 debug（调试）
 
@@ -983,16 +1002,18 @@ curl -X POST http://<手机IP>:8088/api/system/save
 
 ### 8.0 全局开关（重要！）
 
-**OP 端点受全局开关 `opEnabled` 门禁**（v0.5.47，默认 `false`）：
+**OP 端点受 `module.platform` 的 `op.enabled` feature 门禁**（默认 `false`）：
 
 - **开关关闭（默认）**：所有 `/api/op/*` 端点返回 **403 + `{"ok":false,"error":"op disabled"}`**
-- **开启方式**：`POST /api/config/set` 传 `{"opEnabled":true}`，或编辑外部配置 `config.json` 置 `opEnabled:true`
+- **开启方式**：`POST /api/config/set` 传 `{"plugin_id":"module.platform","field":"feature","key":"op.enabled","value":true}`，或编辑外部配置 `config.json` 中 `module.platform.features["op.enabled"]`。
 - 门禁在 OpApiService 统一入口（controller 无法绕过）；开启后无额外鉴权，仍仅限可信局域网
 
 ```bash
-# 开启 OP（一次即可，持久化到 config.json）
-curl -X POST http://<手机IP>:8088/api/config/set -d '{"opEnabled":true}'
-# {"ok":true,"restart":false,"opEnabled":true,...}
+# 开启 OP（持久化到 config.json 的 module.platform features）
+curl -X POST http://<手机IP>:8088/api/config/set -H 'Content-Type: application/json' \
+  -d '{"plugin_id":"module.platform","field":"feature","key":"op.enabled","value":true}'
+# {"ok":true,"request_id":1,"revision":1,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}
+# 轮询 GET /api/config/receipt/1 至 persistence 为 persisted
 ```
 
 ### 8.1 可用（10 个）
@@ -1273,7 +1294,7 @@ loop:
 
 **安全与风险**：
 - **无鉴权**：合法端点局域网内可访问，勿暴露公网
-- **OP 门禁**：OP 端点默认关闭（`opEnabled=false` → 403）；开启后无额外鉴权，且破坏性大，用前先存档
+- **OP 门禁**：OP 端点默认关闭（`op.enabled=false` → 403）；开启后无额外鉴权，且破坏性大，用前先存档
 - **OP 破坏性**：直改等级/属性/物品可能损坏存档，用前先存档
 - **死亡处理**：全灭 → `screen=dialog_wipeout`；面板仅提供 `game_over`（回主菜单，可 `enter_slot` 重进档）；`revive`/`special_revive` 走网络链、离线无作用，已不再提供
 - **教学状态**：新档可能触发 `tutorial_pause`（药水教学），游戏暂停移动，需使用药水后恢复
@@ -1357,4 +1378,4 @@ loop:
 | `POST /api/character/combat/{role}/set_skill_usage` | ⏳ 未开放 |
 | `GET /api/system/tables/{table}/download`、`/api/system/help`、`/api/system/download` | ⏳ 未开放 |
 | `GET /api/quest/{id}` 单任务详情 | ⏳ 恒 not found |
-| OP 越权端点 | 🔒 默认关闭（`opEnabled=false` → 403）；开启后 ✅ 10 个可用 / ⏳ 11 个未开放 |
+| OP 越权端点 | 🔒 默认关闭（`op.enabled=false` → 403）；开启后 ✅ 10 个可用 / ⏳ 11 个未开放 |

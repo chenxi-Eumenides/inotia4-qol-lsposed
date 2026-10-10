@@ -745,6 +745,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.world.provider", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "世界领域服务", "提供地图与世界事实、快照及移动操作。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -768,6 +775,7 @@ const contracts::PluginDescriptor kDescriptor = {
     2,
     kHttpQueries,
     static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    kFeatures, 1,
 };
 
 }  // namespace

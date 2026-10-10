@@ -252,6 +252,15 @@ target_sources(gamebridge PRIVATE
 # L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
+    host/config_namespace.cpp
+    host/config_platform_bridge.cpp
+    host/core_settings_config_store.cpp
+    host/core_settings_config_service.cpp
+    host/features/controller.cpp
+    host/features/reconciler.cpp
+    host/features/production.cpp
+    host/features/platform.cpp
+    host/features/http_control.cpp
     host/owner_identity.cpp
     host/save_route.cpp
     game/access/save_file_evidence.cpp
@@ -271,6 +280,8 @@ target_sources(gamebridge PRIVATE
 # P1 最小诊断接口：功能状态 JSON（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     host/status_json.cpp
+    bridge/native/gamebridge_config_store.cpp
+    bridge/native/gamebridge_config_platform.cpp
     bridge/native/gamebridge_status.cpp
     bridge/native/gamebridge_dispatch.cpp
     bridge/native/gamebridge_static_data.cpp

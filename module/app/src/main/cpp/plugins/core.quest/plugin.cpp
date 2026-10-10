@@ -603,6 +603,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.quest.completion_check", 1, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "任务完成检查", "检查任务完成状态并在进档后重同步任务状态。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -621,6 +628,7 @@ const contracts::PluginDescriptor kDescriptor = {
     1,
     kHttpQueries,
     static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    kFeatures, 1,
 };
 
 }  // namespace

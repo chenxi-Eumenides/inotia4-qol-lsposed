@@ -217,6 +217,30 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+QolResult open_debug_components_feature(contracts::PluginContext& ctx) {
+    if (ctx.sdk == nullptr) {
+        constexpr char message[] = "debug panel navigation unavailable";
+        return contracts::error(kQolErrNotReady, message, sizeof(message) - 1);
+    }
+    if (ui_panels_open("debug_components")) return contracts::ok();
+    constexpr char message[] = "debug panel navigation failed";
+    return contracts::error(kQolErrBlocked, message, sizeof(message) - 1);
+}
+#endif
+
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.custom_ui.ui_tools", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "共享界面工具", "提供组件、面板导航、原生选择控件与文本机制。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    {"core.custom_ui.open_debug_components", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kEntry, "打开调试面板", "查看和测试 UI 组件。",
+     nullptr, &open_debug_components_feature},
+#endif
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -239,6 +263,8 @@ const contracts::PluginDescriptor kDescriptor = {
     1,
     nullptr,         // http_queries（本插件不注册路由）
     0,
+    kFeatures,
+    static_cast<uint32_t>(sizeof(kFeatures) / sizeof(kFeatures[0])),
 };
 
 }  // namespace

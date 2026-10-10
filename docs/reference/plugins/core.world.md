@@ -32,6 +32,14 @@
 - 提供 `world.facts`（版本由 `contracts/world_facts.h` 定义），包含 state、game-state gate、地图记录数、当前地图 ID/名称、玩家朝向和 tutorial state 读取接口。
 - 无可选 capability 提供；不另行提供静态地图数据。
 
+### 注册 feature
+
+| feature id | 默认 | 分类 | 类型 |
+|---|---:|---|---|
+| `core.world.provider` | 1 | Hidden | toggle |
+
+provider 为常驻需求，用 default true 的 hidden feature 表达；`enable`（Host 独占 lifecycle 期望）与 feature 由 Host 管理，插件不读写。
+
 ## 3. 依赖前置与消费者
 
 - 必需 capability：`http.registry`、`http.dispatch`。

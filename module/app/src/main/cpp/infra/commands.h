@@ -14,6 +14,10 @@ namespace qol::infra {
 // 进程级单例端口（函数指针表，静态存储）。
 const contracts::QolCommands& commands_port();
 
+// Host-private projection path: admits config commands that public QolCommands.post rejects.
+QolResult commands_post_config_bool(const char* key, bool value,
+                                    contracts::QolCommandTicket* out_ticket);
+
 // 主线程调用：执行本轮 pending 命令并回收已终态槽位，返回本轮执行条数。
 uint32_t commands_drain();
 

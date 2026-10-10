@@ -434,6 +434,35 @@ set(INFRA_TEST_SOURCES
     ${CPP_DIR}/infra/test_reset.cpp
 )
 find_package(Threads REQUIRED)
+
+add_executable(host_feature_controller_tests
+    test_host_feature_controller.cpp
+    ${CPP_DIR}/host/features/controller.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_service.cpp
+    ${CPP_DIR}/host/owner_identity.cpp)
+target_include_directories(host_feature_controller_tests PRIVATE ${CPP_DIR})
+target_compile_features(host_feature_controller_tests PRIVATE cxx_std_17)
+set_target_properties(host_feature_controller_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(host_feature_controller_tests PRIVATE Threads::Threads)
+add_test(NAME host_feature_controller_tests
+    COMMAND host_feature_controller_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_executable(production_feature_facade_tests
+    test_production_feature_facade.cpp
+    ${CPP_DIR}/host/features/production.cpp
+    ${CPP_DIR}/host/features/platform.cpp
+    ${CPP_DIR}/host/features/http_control.cpp
+    ${CPP_DIR}/host/features/controller.cpp
+    ${CPP_DIR}/host/features/reconciler.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_service.cpp
+    ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/host/owner_identity.cpp)
+target_include_directories(production_feature_facade_tests PRIVATE ${CPP_DIR})
+set_target_properties(production_feature_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(production_feature_facade_tests PRIVATE Threads::Threads)
+add_test(NAME production_feature_facade_tests
+    COMMAND production_feature_facade_tests ${CMAKE_CURRENT_BINARY_DIR})
 add_executable(command_queue_overflow_tests
     test_command_queue_overflow.cpp
     ${CPP_DIR}/infra/command_queue.cpp
@@ -476,6 +505,16 @@ add_executable(settings_catalog_abi_tests test_settings_catalog_abi.cpp)
 target_include_directories(settings_catalog_abi_tests PRIVATE ${CPP_DIR})
 set_target_properties(settings_catalog_abi_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME settings_catalog_abi_tests COMMAND settings_catalog_abi_tests)
+
+# Retired: config_namespace_api_tests drove the legacy full-bootstrap path
+# (config_store_bootstrap initializing the service, then seed_registered_plugins). That path is
+# replaced by the production feature controller and covered by production_feature_facade_tests.
+
+# Retired: config_platform_service_tests / config_platform_degraded_bootstrap_tests /
+# config_platform_bootstrap_conflict_tests asserted the removed legacy full-bootstrap path
+# (service state projection, degraded return codes, duplicate-path conflict). The production
+# feature controller now owns Store init/seed after descriptor registration; path-only
+# bootstrap and the new-model flow are covered by production_feature_facade_tests.
 
 add_executable(infra_snapshot_handle_tests
     test_infra_snapshot_handle.cpp
@@ -636,6 +675,25 @@ target_compile_features(plugin_lifecycle_tests PRIVATE cxx_std_17)
 set_target_properties(plugin_lifecycle_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(plugin_lifecycle_tests PRIVATE Threads::Threads)
 add_test(NAME plugin_lifecycle_tests COMMAND plugin_lifecycle_tests)
+
+# New-model fake fixtures reuse the existing registry/resource transaction test backends.
+get_target_property(FEATURE_REGISTRY_TEST_SOURCES plugin_lifecycle_tests SOURCES)
+list(REMOVE_ITEM FEATURE_REGISTRY_TEST_SOURCES test_plugin_lifecycle.cpp)
+add_executable(feature_reconciler_tests
+    test_feature_reconciler.cpp
+    ${FEATURE_REGISTRY_TEST_SOURCES}
+    ${CPP_DIR}/host/features/controller.cpp
+    ${CPP_DIR}/host/features/reconciler.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_service.cpp)
+target_include_directories(feature_reconciler_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs ${CPP_DIR} ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols ${JNI_INCLUDE_DIRS})
+set_target_properties(feature_reconciler_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(feature_reconciler_tests PRIVATE Threads::Threads)
+target_sources(feature_reconciler_tests PRIVATE ${CPP_DIR}/infra/store.cpp ${CPP_DIR}/infra/slot_operation_gate.cpp)
+target_compile_definitions(feature_reconciler_tests PRIVATE QOL_STORE_TEST_SEAMS=1)
+add_test(NAME feature_reconciler_tests COMMAND feature_reconciler_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 # P4 阶段 A3：能力时序与撤销级联 host 测试（真实 registry/capabilities/status/config，末尾追加）
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。
@@ -1011,6 +1069,14 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/host/features/production.cpp
+    ${CPP_DIR}/host/features/platform.cpp
+    ${CPP_DIR}/host/features/http_control.cpp
+    ${CPP_DIR}/host/features/controller.cpp
+    ${CPP_DIR}/host/features/reconciler.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_service.cpp
+    ${CPP_DIR}/host/config_namespace.cpp
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/save_route.cpp
     ${CPP_DIR}/host/settings_catalog_adapter.cpp
@@ -1038,6 +1104,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/inventory_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
+    ${CPP_DIR}/game/access/patches.cpp
     ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
     ${CPP_DIR}/game/adapter_ports/save_port.cpp
     ${CPP_DIR}/game/adapter_ports/save_call_port.cpp
@@ -1292,13 +1359,26 @@ add_executable(item_count_facade_tests
     test_item_count_facade.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
+    ${CPP_DIR}/game/access/patches.cpp
 )
 target_include_directories(item_count_facade_tests PRIVATE
     ${CPP_DIR}
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
 )
 target_compile_features(item_count_facade_tests PRIVATE cxx_std_17)
 set_target_properties(item_count_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_count_facade_tests COMMAND item_count_facade_tests)
+
+# Game Adapter 私有 S2 codec 纯函数：段拆分/合并、关闭态读写保 a 段、extended 视图转换。
+add_executable(item_count_codec_tests
+    test_item_count_codec.cpp
+)
+target_include_directories(item_count_codec_tests PRIVATE ${CPP_DIR})
+target_compile_features(item_count_codec_tests PRIVATE cxx_std_17)
+set_target_properties(item_count_codec_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME item_count_codec_tests COMMAND item_count_codec_tests)
 
 # ITM-13：同步存档/UI 生命周期参与者注册与有序分派。
 add_executable(lifecycle_participant_tests
@@ -1585,6 +1665,56 @@ target_include_directories(core_settings_config_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_settings_config_tests PRIVATE cxx_std_17)
 set_target_properties(core_settings_config_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_settings_config_tests COMMAND core_settings_config_tests)
+
+# Native config.json storage/parser core; independent of plugin and Kotlin lifecycles.
+add_executable(core_settings_config_store_tests
+    test_core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+)
+target_include_directories(core_settings_config_store_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_settings_config_store_tests PRIVATE cxx_std_17)
+set_target_properties(core_settings_config_store_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(core_settings_config_store_tests PRIVATE Threads::Threads)
+add_test(NAME core_settings_config_store_tests
+    COMMAND core_settings_config_store_tests ${CMAKE_CURRENT_BINARY_DIR}/config-native-owner)
+
+add_executable(core_settings_config_service_tests
+    test_core_settings_config_service.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_service.cpp
+)
+target_include_directories(core_settings_config_service_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_settings_config_service_tests PRIVATE cxx_std_17)
+set_target_properties(core_settings_config_service_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(core_settings_config_service_tests PRIVATE Threads::Threads)
+add_test(NAME core_settings_config_service_tests
+    COMMAND core_settings_config_service_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(core_settings_config_service_writeback_tests
+    test_core_settings_config_service_writeback.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_service.cpp
+)
+target_include_directories(core_settings_config_service_writeback_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_settings_config_service_writeback_tests PRIVATE cxx_std_17)
+set_target_properties(core_settings_config_service_writeback_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(core_settings_config_service_writeback_tests PRIVATE Threads::Threads)
+add_test(NAME core_settings_config_service_writeback_tests
+    COMMAND core_settings_config_service_writeback_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+add_executable(core_settings_config_service_effect_failures_tests
+    test_core_settings_config_service_effect_failures.cpp
+    ${CPP_DIR}/host/core_settings_config_store.cpp
+    ${CPP_DIR}/host/core_settings_config_service.cpp
+)
+target_include_directories(core_settings_config_service_effect_failures_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_settings_config_service_effect_failures_tests PRIVATE cxx_std_17)
+set_target_properties(core_settings_config_service_effect_failures_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(core_settings_config_service_effect_failures_tests PRIVATE Threads::Threads)
+add_test(NAME core_settings_config_service_effect_failures_tests
+    COMMAND core_settings_config_service_effect_failures_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 # settings provider callback registration and host-owned PopupState push/pop integration.
 add_executable(core_settings_panel_migration_tests

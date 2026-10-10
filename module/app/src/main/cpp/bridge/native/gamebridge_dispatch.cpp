@@ -60,30 +60,27 @@ std::string dispatch_result_json(const qol::contracts::HttpRes& response) {
 
 }  // namespace
 
-// OP 门禁状态同步：Kotlin 配置加载/变更时下发。host dispatch 的 op_gated 路由据此放行，
-// 默认关闭与 ModuleConfig.DEFAULT_OP_ENABLED=false 的安全基线一致。
+// Frozen compatibility config setters. Global config writes must use core.settings' native
+// single-key owner-token path; these exports cannot mutate configuration.
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeSetOpEnabled(JNIEnv*, jclass, jboolean enabled) {
-    qol::host::http_dispatch_set_op_enabled(enabled == JNI_TRUE);
-    return JNI_TRUE;
+Java_com_inotia4_qol_NativeBridge_nativeSetOpEnabled(JNIEnv*, jclass, jboolean) {
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeConfigSetString(JNIEnv* env, jclass, jstring key,
                                                        jstring value) {
-    bool input_ok = true;
-    const std::string key_value = read_string(env, key, true, &input_ok);
-    const std::string string_value = read_string(env, value, true, &input_ok);
-    return input_ok && qol::infra::config_set_string(key_value.c_str(), string_value.c_str())
-               ? JNI_TRUE
-               : JNI_FALSE;
+    (void)env;
+    (void)key;
+    (void)value;
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_inotia4_qol_NativeBridge_nativeConfigSetInt(JNIEnv* env, jclass, jstring key, jint value) {
-    bool input_ok = true;
-    const std::string key_value = read_string(env, key, true, &input_ok);
-    return input_ok && qol::infra::config_set_int(key_value.c_str(), value) ? JNI_TRUE : JNI_FALSE;
+Java_com_inotia4_qol_NativeBridge_nativeConfigSetInt(JNIEnv* env, jclass, jstring key, jint) {
+    (void)env;
+    (void)key;
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jstring JNICALL

@@ -847,6 +847,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.ui_state.provider", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "界面状态服务", "提供游戏界面状态与原生界面操作命令。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -865,6 +872,7 @@ const contracts::PluginDescriptor kDescriptor = {
     3,
     kRoutes,
     static_cast<uint32_t>(sizeof(kRoutes) / sizeof(kRoutes[0])),
+    kFeatures, 1,
 };
 
 }  // namespace

@@ -1,50 +1,100 @@
-# `core.settings` 插件
+# `settings` 插件
 
 ## 1. 作用与 owner 定位
 
-`core.settings` 是模块设置整页的 owner，承载类别/设置项呈现、用户输入与配置桥接，并经共享 UI 组件和面板能力运行。它是成品页面插件，不是通用 UI 组件库，也不拥有 Loader 配置存储。
+`settings` 是模块设置整页的普通成品页插件，只负责页面呈现：它渲染 Host 的 feature catalog，并经 Host 常驻管理 API 读/写 feature、desired enable 与 config。它**不拥有**配置 schema、Store、持久化或配置 HTTP adapter——这些由 Host 常驻模块管理设施持有，与设置页生命周期分离。
+
+配置文件与 Store 由 native Host 常驻设施管理，生命周期长于设置页插件。`GET /api/config/list`、`POST /api/config/set`、`POST /api/op/features/lifecycle`、`GET /api/config/receipt/{id}` 由 Host 常驻 resident route 直接处理，不经设置页插件；完整请求/响应契约见 [API 参考 §7.6](../api-reference.md)。
+
+插件 id 为 `settings`（不是 `core.settings`）；目录名仍为 `plugins/core.settings/`。
 
 ## 2. 功能
 
-### 路由与配置项
+### 页面入口 feature
 
-`core.settings` 自身不在 descriptor 中声明 API HTTP handler。全局 API 的 `/api/config/list` owner 为 `core.settings`，由 settings API/controller 路径提供；`POST /api/config/set` 的 owner 是 `module.config`。相关规格见 [API 参考](../api-reference.md)。
+descriptor 只注册一个 `page` entry feature：
 
-设置 catalog contribution 注册基础设置类别和 API 服务、OP 操作、调试日志等 toggle 项。另有 `PanelItemSpec` action：owner=`core.settings`、`panel_id="save_backup"`，通过标准 `kAction` 注册接口加入 panel registry。源码同时注明，设置页当前仍由静态 11 项表渲染；该 action 登记用于前向兼容，当前并非静态页面列表的数据驱动项。
+| feature id | 默认 | 分类 | 类型 | 说明 |
+|---|---:|---|---|---|
+| `page` | 1 | Tools | entry | 在主菜单打开模块设置页；关闭后页面入口不可用。 |
 
-### Capability、ports 与注册面
+`page` 与其他 feature 一样有布尔状态并参与 `want_run` 判定；它是 `kEntry`，不是无状态动作。
 
-- 面板 provider：`panel_id="settings"`，登记到 Host SDK panels registry。
-- 消费 `ui_panels`（面板 open/close），并使用 `ui_components`、UI adapter、settings catalog 与 settings config 接口。
-- settings category/item catalog 通过 Host SDK 的 settings catalog 面登记；插件 descriptor 不声明领域 capability provides/ports。
-- 配置值读写经 `settings_config` bridge 发起；底层配置文件持久化由 Kotlin/Loader 负责，不归设置页插件所有。
+### Host catalog 渲染
 
-## 3. 依赖前置与消费者
+- 页面通过 Host 管理面 `read_catalog` 读取 feature catalog，本地构建行模型；catalog 元数据（id/name/description/type/category/default）来自各插件 descriptor，不持久化。
+- 分类标签为 General/Gameplay/Tools/Hidden。**Debug** 构建显示 Hidden 分类且可修改；**Release** 构建仅隐藏 Hidden 显示，不增加来源判别，也不额外用 API 拒绝用户来源（无来源 ACL）。
+- 每个 toggle 行先 `read_desired` 取 desired enable（entry 行沿用）并 `read_feature` 取 feature 当前值；改动经 `request_set_feature`（普通 feature）或 `request_desired`（enable）提交，按 receipt 轮询确认后更新已确认 UI 状态。
+- entry 行动作经 `invoke_entry` 触发对应插件回调；inactive/停用插件的业务回调不执行。
 
-- Host SDK 提供 `ui`、`panels`、scheduler、settings catalog/config 与日志接口；通过 capability lookup 获取 `ui_panels` 和 `ui_components`。
-- `save_backup` 插件提供目标面板 provider；设置 action 通过 catalog action invocation / panel registry 打开 `save_backup`。共享组件由 `core.custom_ui` 提供。
-- 设置项由配置 catalog contributors 提供；用户通过页面操作，配置请求交给 config bridge 处理。
+### 调试端点
 
-## 4. 职责边界
+插件自注册四条 `/api/debug/settings-ui/*` POST 命令（inject/restore/open-option/open-panel），属调试端点，随插件 deactivate 显式注销 owner（置墓碑），不经 Host 常驻控制面。（`/api/debug/settings-ui/status` 为 GET，走 Kotlin/JNI status handler，不由插件命令注册。）
 
-- 拥有模块设置页自身页面内容、类别/项目呈现、设置控件状态以及页面内的配置/action 请求编排。
-- 不拥有设置值的配置文件持久化（Kotlin/Loader 配置设施）、共享组件和通用 panel registry（`core.custom_ui`/Host SDK）、备份功能本身（`save_backup`），或被打开的任意业务 panel 内容。
-- `save_backup` action 是设置页注册的导航动作，目标 panel 内容仍由 `save_backup` 提供。
+## 3. 依赖与消费面
 
-## 5. 核心实现链
+- 必需 capability：`ui_panels`（面板 open/close）与 `ui_components`（原生控件与文本）。
+- Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_desired`、`read_feature`、`request_set_feature`、`request_desired`、`invoke_entry`、`receipt`。
+- 不再注册旧 settings catalog contribution：`settings_contribution.cpp` 的 `register_settings`/`register_categories` 为 no-op；feature 元数据只来自 descriptor。
+- 不消费 `save_backup` panel action，也不登记任何面板项；备份页入口由 `save_backup` 自己的 entry feature 承担。
 
-- **目录读取/缓存**：页面打开时获取 settings catalog snapshot，将类别和项目拷贝到本地有界数组后释放 token；按周期刷新配置值与 capability availability。状态摘要在互斥锁保护下供状态查询读取。
-- **配置写入**：toggle 回调先记录期望值，在主线程帧安全点向 settings config bridge 提交异步 set 请求；后续轮询 request status 并同步确认值/状态。action button 也先排队，在帧安全点通过 catalog `invoke_action` 调用注册 action。
-- **线程边界**：面板打开、处理、输入与控件创建要求 UI 主线程；事件回调只记录待执行状态，页面处理阶段再推进配置请求、action 和列表更新。配置落盘不由页面插件实现。
-- **生命周期**：注册阶段安装 `settings` PanelProvider、`save_backup` PanelItem 并启动每帧「更多游戏」按钮绑定维护任务；页面 open/close 创建/销毁原生控件树；插件卸载撤销 owner 注册、移除任务并释放绑定。
+## 4. 生命周期与撤页重建
+
+- 注册阶段安装 `panel_id="settings"` 的 `PanelProvider`，并启动每帧「更多游戏」按钮绑定维护帧任务（主菜单多次重建需重新绑定）。
+- 停用时整个设置页/控件/回调撤销：移除帧任务、释放控件槽绑定、关闭页面、注销面板 owner；重新 activate 后从注册元数据与当前持久状态重建，不复用旧控件或旧 token。
+- 设置页自停后不通过自身页面恢复（用户已确认）；其他普通插件停用时，active 设置页可经 Host 管理 API 修改 feature 恢复。
+- 停用设置页不影响 Host 常驻 Store、配置读取或 `GET /api/config/list` 等控制端点。
+
+## 5. 职责边界
+
+- 拥有设置页自身页面内容、分类/项目呈现、控件状态与页面内的管理请求编排。
+- 不拥有 Store/`config.json` I/O、配置 schema、配置/lifecycle HTTP adapter（Host 常驻设施）、共享组件与 panel registry（`core.custom_ui`）或被打开的业务面板内容。
 
 ## 6. 文件地图
 
 | 子职责 | 文件 | 职责 |
 |---|---|---|
-| 插件生命周期 | `module/app/src/main/cpp/plugins/core.settings/plugin.cpp`、`feature.cpp` | descriptor、SDK 绑定、provider/action 注册和运行时任务 |
-| 设置页实现 | `module/app/src/main/cpp/plugins/core.settings/panels/settings.cpp`、`settings.h` | catalog snapshot、页面事件、toggle/action 与配置桥接 |
+| 插件生命周期 | `module/app/src/main/cpp/plugins/core.settings/plugin.cpp`、`feature.cpp` | descriptor、SDK 绑定、panel provider 注册、调试端点与帧任务 |
+| 设置页实现 | `module/app/src/main/cpp/plugins/core.settings/panels/settings.cpp`、`settings.h` | catalog snapshot、页面事件、toggle/entry 与管理请求 |
 | 页面模型/绑定 | `module/app/src/main/cpp/plugins/core.settings/panels/settings_model.h`、`settings_binding.cpp`、`settings_binding.h` | 行模型及更多游戏入口绑定逻辑 |
-| 设置贡献 | `module/app/src/main/cpp/plugins/core.settings/settings_contribution.cpp`、`settings_contribution.h` | 类别与内置 toggle 项 catalog registration |
-| 契约与 UI 工具 | `module/app/src/main/cpp/contracts/panels.h`、`settings.h`、`settings_config.h` | PanelItem/Provider、设置 catalog 与 config bridge 类型 |
-| Kotlin 配置边界 | `module/app/src/main/java/com/inotia4/qol/api/controller/ConfigController.kt` | 配置 API 请求入口；持久化由 Kotlin/Loader 路径处理 |
+| feature 注册 | `module/app/src/main/cpp/plugins/core.settings/feature.cpp`、`feature.h` | `page` entry 回调与面板 provider |
+| 旧贡献占位 | `module/app/src/main/cpp/plugins/core.settings/settings_contribution.cpp` | 保留兼容入口，`register_*` 为 no-op |
+| 管理面契约 | `module/app/src/main/cpp/contracts/feature.h` | `QolFeatureApi`（catalog/desired/feature/config/receipt/entry） |
+
+## 7. 注册 feature 目录（Host catalog 全量）
+
+设置页渲染的 Host feature catalog 覆盖全部注册插件。产品 feature（不含 Debug device probe 插件）如下，`id` / 默认 / 分类 / 类型以各 `plugins/*/plugin.cpp` descriptor 为准：
+
+| feature id | 默认 | 分类 | 类型 |
+|---|---:|---|---|
+| `autosell.auto_sell` | 0 | Gameplay | toggle |
+| `move_merge.drag_merge` | 0 | Gameplay | toggle |
+| `push_all.push` | 0 | Gameplay | toggle |
+| `simple_mode.combat` | 0 | Gameplay | toggle |
+| `custom_recipe.recipes` | 0 | Gameplay | toggle |
+| `craft_ui.custom_crafting` | 1 | Hidden | toggle |
+| `extension_bag.extended_bag` | 1 | Gameplay | toggle |
+| `save_backup.open_manager` | 1 | Tools | entry |
+| `stack_limit.limit_999` | 0 | Gameplay | toggle |
+| `world_teleport.map_jump` | 1 | Gameplay | toggle |
+| `attribute_range_display.ranges` | 1 | Gameplay | toggle |
+| `special_equip.equipment_rules` | 1 | Gameplay | toggle |
+| `character_panel_i18n.translation` | 1 | Gameplay | toggle |
+| `core.quest.completion_check` | 1 | Gameplay | toggle |
+| `core.custom_ui.ui_tools` | 1 | Hidden | toggle |
+| `core.custom_ui.open_debug_components` | 1 | Hidden | entry |
+| `page`（`settings` 插件） | 1 | Tools | entry |
+| `core.api.http_registry` | 1 | Hidden | toggle |
+| `core.character.provider` | 1 | Hidden | toggle |
+| `core.craft.provider` | 1 | Hidden | toggle |
+| `core.data.catalog` | 1 | Hidden | toggle |
+| `core.item.provider` | 1 | Hidden | toggle |
+| `core.save.provider` | 1 | Hidden | toggle |
+| `core.system.snapshots` | 1 | Hidden | toggle |
+| `core.ui_state.provider` | 1 | Hidden | toggle |
+| `core.world.provider` | 1 | Hidden | toggle |
+| `attribute_quality.provider` | 1 | Hidden | toggle |
+| `inventory_hooks.inventory_support` | 1 | Hidden | toggle |
+| `core.feature.compatibility_routes` | 1 | Hidden | toggle |
+
+另有三个 Debug device probe 插件 feature（`device_probe_provider.capability_probe`、`device_probe_consumer.dependency_probe`、`device_probe_export_failure.preflight_probe`，均 Hidden/toggle），不进 release。

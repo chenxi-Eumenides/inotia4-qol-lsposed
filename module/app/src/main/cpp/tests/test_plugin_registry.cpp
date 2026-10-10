@@ -1470,9 +1470,11 @@ void test_atomic_partial_install_publishes_no_capability_or_facade_provider() {
     CHECK(qol::infra::require_capability("cap:test.atomic", QolVersionRange{1, 0}) ==
           nullptr);
     uint32_t count = 41;
+    // Host 常驻 facade 始终可查，但无目标内存时 fail-closed；原子组半装不得使扩展模式生效。
     CHECK(qol::host::host_item_count_api().canonical(reinterpret_cast<void*>(1), &count).code ==
-          kQolErrNotReady);
+          kQolErrUnsupported);
     CHECK(count == 41);
+    CHECK(!qol::game::item_count_active());
 }
 
 void test_atomic_gate_closed_does_not_call_on_enabled() {

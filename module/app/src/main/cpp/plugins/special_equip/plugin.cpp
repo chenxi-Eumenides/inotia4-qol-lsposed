@@ -158,6 +158,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"special_equip.equipment_rules", 1, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "特殊装备规则", "支持普通队友穿脱专属装备并保留特殊 NPC 装备限制。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -174,6 +181,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &on_resource_ready,
     kPorts,
     1,
+    nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

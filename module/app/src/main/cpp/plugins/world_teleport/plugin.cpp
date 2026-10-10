@@ -138,6 +138,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = g_install_error;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"world_teleport.map_jump", 1, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "地图传送", "在地图边界传送点提供地图跳转选择与费用确认。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -161,6 +168,7 @@ const contracts::PluginDescriptor kDescriptor = {
     1,
     nullptr,
     0,
+    kFeatures, 1,
 };
 
 }  // namespace

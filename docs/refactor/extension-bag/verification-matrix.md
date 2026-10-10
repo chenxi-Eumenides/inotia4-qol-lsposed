@@ -606,7 +606,7 @@
 
 ### VM-42 三个 UI 宿主页签随扩展背包开关挂载/卸载（R-58）
 
-- **操作**：启用扩展背包，分别打开背包页/商店页/合成器页，确认扩展页签挂载；运行期 `POST /api/config/set {"extensionBagEnabled":false}`，确认三处页签全部卸载；再启用确认恢复挂载。
+- **操作**：启用扩展背包，分别打开背包页/商店页/合成器页，确认扩展页签挂载；运行期 `POST /api/config/set {"plugin_id":"extension_bag","key":"enable","value":false}`，确认三处页签全部卸载；再启用确认恢复挂载。
 - **设备/APK/快照前置**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`；操作前后读 `/api/debug/extension_bag/status` 的 `extension_tab_button` 与 `enabled`。
 - **原版链(VMA)**：`UIEquip_CreateInvenControl@0xb6688`（`ldr x3,[0x2f5410]` 取 item proc）；`UIStore`/`UIMix` 袋容器（见 `extension_bag_store.inc`/`extension_bag_mix.inc` 挂载点）。
 - **扩展接管点(文件:函数)**：`extension_bag_runtime.inc:install_extension_tab_buttons_locked`、`extension_bag_store.inc:store_install_tab_buttons_locked`、`extension_bag_mix.inc:mix_install_tab_buttons_locked`（三处入口 `g_virtual_bag_enabled` 门控）；`extension_bag_render.inc:draw_tab_buttons_in_frame_locked`、`extension_bag_store.inc:store_draw_end_wrapper`、`extension_bag_mix.inc:mix_draw_end_wrapper` 的 disabled 分支清除。
@@ -614,7 +614,7 @@
 - **必须保持的不变式(引 R-xx)**：三 install 函数入口判 `!g_virtual_bag_enabled.load()` 即返回；关闭时删除已挂载控件并递增 generation（R-19/R-58）；调用方不重复判断。
 - **失败语义**：`fn_touch_handle_delete_control` 为空时仅清引用，不崩溃。
 - **Host 测试名(现有或「缺口」)**：无（UI 挂载依赖游戏控件树）；缺口 `test_tab_mount_gate`（纯逻辑可补，当前未建）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-42`：①启用态开背包页，`status.extension_tab_button=true`；②`POST /api/config/set {"extensionBagEnabled":false}` 后 `extension_tab_button=false`；③再启用恢复 `true`；④商店页/合成器页分别重复，页签挂载随开关；⑤`logcat` 无 patch 报错。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-42`：①启用态开背包页，`status.extension_tab_button=true`；②`POST /api/config/set {"plugin_id":"extension_bag","key":"enable","value":false}` 后 `extension_tab_button=false`；③再以 `{"plugin_id":"extension_bag","key":"enable","value":true}` 启用恢复；④商店页/合成器页分别重复，页签挂载随开关；⑤`logcat` 无 patch 报错。
 - **证据锚类型**：真机 + 源码；行为断言待人工商店/合成器页签确认。
 
 ### VM-43 monster 版物品数量上界兼容（R-59）

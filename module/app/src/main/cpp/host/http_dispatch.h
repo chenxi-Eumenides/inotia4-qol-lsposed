@@ -6,9 +6,15 @@
 #include "contracts/http.h"
 
 namespace qol::host {
+using ResidentHttpRoute = bool (*)(const contracts::HttpReq&);
+using ResidentHttpDispatch = QolResult (*)(const contracts::HttpReq&, contracts::HttpRes&);
+void http_dispatch_bind_resident_control(ResidentHttpRoute, ResidentHttpDispatch);
 
 // Host SDK 注入插件的 HTTP handler 接缝。
 contracts::QolHttpDispatchApi http_dispatch_api();
+// Frame lifecycle uses begin/poll, not the blocking plugin compatibility API.
+void http_dispatch_begin_unregister_owner(const char* owner);
+bool http_dispatch_poll_unregister_owner(const char* owner);
 QolResult http_dispatch_dynamic(const contracts::HttpReq* request,
                                 std::vector<uint8_t>* response_body, uint32_t max_capacity,
                                 uint16_t* out_status, uint32_t* out_body_size);

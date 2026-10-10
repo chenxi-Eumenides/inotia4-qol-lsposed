@@ -440,57 +440,28 @@ Java_com_inotia4_qol_NativeBridge_nativeOpAddItem(JNIEnv* env, jclass, jint cate
 #endif
 }
 
+// Frozen compatibility setters. Global config writes must use core.settings' native
+// single-key owner-token path.
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetStackLimitEnabled(JNIEnv*, jclass, jboolean enabled) {
-    // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
-    // 写配置，stack_limit 插件的门禁随 sync_gates 安装/还原 clamp 并更新有效态。
-    // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetSimpleModeEnabled 同构）。
-    const qol::contracts::QolCommand command{
-        qol::contracts::kCommandSetConfigBool,
-        "plugin.stack_limit.enabled",
-        enabled == JNI_TRUE ? 1 : 0,
-    };
-    qol::contracts::QolCommandTicket ticket = 0;
-    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
-    return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
+    (void)enabled;
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetMoveMergeEnabled(JNIEnv*, jclass, jboolean enabled) {
-    // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
-    // 写配置键 moveMergeEnabled；extension_bag 插件订阅 kEventConfigChanged 应用
-    // set_move_merge_enabled（extension source protection 联动逐字保持）。
-    // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetExtensionBagEnabled 同构）。
-    const qol::contracts::QolCommand command{
-        qol::contracts::kCommandSetConfigBool,
-        "moveMergeEnabled",
-        enabled == JNI_TRUE ? 1 : 0,
-    };
-    qol::contracts::QolCommandTicket ticket = 0;
-    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
-    return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
+    (void)enabled;
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetExtensionBagEnabled(JNIEnv*, jclass, jboolean enabled) {
-    // 只做参数转换：开关下发为一条命令（kCommandSetConfigBool），由主线程在下一逻辑帧
-    // 写配置键 extensionBagEnabled；extension_bag 插件门禁随宿主 sync_gates 安装/还原
-    // 资源并驱动 on_enabled/on_disabled。
-    // 返回值表示「本次下发是否成功入队」，不是开关状态（与 nativeSetSimpleModeEnabled 同构）。
-    const qol::contracts::QolCommand command{
-        qol::contracts::kCommandSetConfigBool,
-        "extensionBagEnabled",
-        enabled == JNI_TRUE ? 1 : 0,
-    };
-    qol::contracts::QolCommandTicket ticket = 0;
-    const QolResult result = qol::infra::commands_port().post(&ticket, &command);
-    return qol::contracts::succeeded(result) ? JNI_TRUE : JNI_FALSE;
+    (void)enabled;
+    return JNI_FALSE;
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetCustomRecipeEnabled(JNIEnv*, jclass, jboolean enabled) {
-    // 迁移为配置门禁单一写者（名称/签名冻结）：写 customRecipeEnabled + 广播；宿主帧步进
-    // sync_gates 据此安装/还原 craft_ui 的 UIMix hook 与 custom_recipe 的表注入所有权。
-    return qol::infra::config_set_bool("customRecipeEnabled", enabled == JNI_TRUE) ? JNI_TRUE
-                                                                                   : JNI_FALSE;
+    (void)enabled;
+    return JNI_FALSE;
 }

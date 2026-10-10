@@ -6,6 +6,7 @@
 #include "game/access/world.h"
 #include "game/nav/game_nav.h"
 #include "game/symbols/game_symbols.h"
+#include "host/plugin_registry.h"
 #include "patch/ptr_slot.h"
 
 #include <string>
@@ -226,3 +227,22 @@ std::string build_enemies_json() { return "{\"enemies\":[]}"; }
 std::string build_interactives_json() { return "{\"interactives\":[]}"; }
 std::string build_drops_json() { return "{\"drops\":[]}"; }
 }  // namespace qol::game
+
+// host_adapter_tests exercises adapter forwarding only; the production feature registry
+// (host/plugin_registry.cpp) is not linked here, so the new-model reconciler seam is stubbed.
+namespace qol::host {
+uint32_t plugin_count() { return 0; }
+const contracts::PluginDescriptor* find_plugin(const char*) { return nullptr; }
+bool feature_registry_prepare(const HostDeps&) { return true; }
+void feature_registry_bind_desired_request(FeatureDesiredRequest, void*) {}
+uint32_t feature_registry_order(const char**, uint32_t) { return 0; }
+bool feature_registry_dependencies_wanted(const char*, FeatureWants, void*) { return true; }
+bool feature_registry_dependencies_ready(const char*) { return true; }
+bool feature_registry_busy(const char*) { return false; }
+bool feature_registry_active(const char*) { return false; }
+bool feature_registry_transition(const char*, bool) { return false; }
+bool feature_registry_context(const char*, contracts::PluginContext*) { return false; }
+void feature_registry_set_wanted(const char*, bool) {}
+uint32_t feature_registry_step() { return 0; }
+bool feature_registry_owner_ready(const char*) { return true; }
+}  // namespace qol::host

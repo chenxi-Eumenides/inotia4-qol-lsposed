@@ -1,5 +1,7 @@
 #include "settings_binding.h"
 
+#include <cstring>
+
 namespace qol::features::core_ui {
 
 void more_games_bind_tick(bool on_main_menu, MoreGamesBindOps& ops) {

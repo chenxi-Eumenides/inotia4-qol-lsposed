@@ -251,6 +251,12 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
+    // Feature callback does not replace the existing lifecycle or business controls.
+    static constexpr contracts::FeatureDefinition kFeatures[] = {
+        {"inventory_hooks.inventory_support", 1, contracts::FeatureCategory::kHidden,
+         contracts::FeatureType::kToggle, "库存适配支持", "提供库存拦截、刷新与物品操作能力。",
+         [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+    };
     // claims 表本体在 native_inventory_hook.cpp（handler 取址限制），本插件同层直接引用；
     // 函数内静态保证描述符生命周期 ≥ 进程。
     static const contracts::PluginDescriptor descriptor = [] {
@@ -270,6 +276,8 @@ const contracts::PluginDescriptor& plugin_descriptor() {
             &plugin_on_disabled,
             &plugin_fill_status,
             &on_resource_ready,
+            nullptr, 0, nullptr, 0,
+            kFeatures, 1,
         };
     }();
     return descriptor;

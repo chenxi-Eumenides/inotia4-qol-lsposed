@@ -20,7 +20,7 @@ import java.util.concurrent.ArrayBlockingQueue
  * - **早期 backlog**：[onNativeReady] 之前日志进入有界队列（上限 512，溢出丢最旧），
  *   同时用 logcat 兜底；[onNativeReady] 调 `nativeQolLogInit()` 后按序重放 backlog，再置就绪直写。
  *   native 永不就绪则只走 logcat。
- * - **debug 门控**：`debug()` 在构造消息前检查 [ModuleConfig.debugLogEnabled]，关闭时直接返回。
+ * - debug 日志始终交给 native logger，由 native 配置执行门控。
  * - **error 单行化**：message 与压缩栈合并为单行，非 debug 不产生多行。
  */
 object LogFile {
@@ -70,7 +70,6 @@ object LogFile {
         synchronized(lock) {
             if (nativeReady) return
             NativeBridge.nativeQolLogInit()
-            NativeBridge.nativeQolLogSetDebugEnabled(ModuleConfig.debugLogEnabled)
             while (true) {
                 val pending = backlog.poll() ?: break
                 NativeBridge.nativeQolLogWrite(
@@ -81,15 +80,13 @@ object LogFile {
         }
     }
 
-    /** debug 日志是否开启（由 [ModuleConfig.debugLogEnabled] 决定）。 */
-    fun isDebugEnabled(): Boolean = ModuleConfig.debugLogEnabled
+    fun isDebugEnabled(): Boolean = true
 
     /** 统一日志文件路径（native 实际写入路径）。 */
     fun path(): String = TargetPackages.externalFilesPath(FILE_NAME)
 
-    /** debug 日志：门控开启时才在调用线程构造消息（惰性 lambda）。 */
+    /** Debug 日志门控由 native logger 执行。 */
     fun debug(domain: LogDomain, message: () -> String) {
-        if (!ModuleConfig.debugLogEnabled) return
         emit(LEVEL_DEBUG, domain, message())
     }
 

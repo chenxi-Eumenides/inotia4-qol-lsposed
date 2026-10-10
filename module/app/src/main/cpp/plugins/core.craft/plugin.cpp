@@ -168,6 +168,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.craft.provider", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "合成领域服务", "提供合成界面与配方的只读事实。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId, kPluginVersion,
     0, nullptr,
@@ -178,6 +185,8 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_install, &plugin_deactivate, &plugin_on_enabled, &plugin_on_disabled,
     &plugin_fill_status, nullptr,
     kPorts, 1,
+    nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

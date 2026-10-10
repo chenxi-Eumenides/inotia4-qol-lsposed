@@ -489,6 +489,13 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
+// Feature callback does not replace the existing lifecycle or business controls.
+constexpr contracts::FeatureDefinition kFeatures[] = {
+    {"core.data.catalog", 1, contracts::FeatureCategory::kHidden,
+     contracts::FeatureType::kToggle, "静态数据服务", "提供游戏静态数据目录与查询。",
+     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId, kPluginVersion,
     2, kRequires,
@@ -497,6 +504,8 @@ const contracts::PluginDescriptor kDescriptor = {
     0, nullptr,
     0, nullptr,
     &plugin_install, &plugin_deactivate, nullptr, nullptr, &plugin_fill_status, nullptr,
+    nullptr, 0, nullptr, 0,
+    kFeatures, 1,
 };
 
 }  // namespace

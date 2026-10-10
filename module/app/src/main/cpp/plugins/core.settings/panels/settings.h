@@ -18,7 +18,7 @@
 
 namespace qol::features::core_ui {
 
-void settings_bind_sdk(const contracts::QolHostSdk* sdk);
+void settings_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToken owner_token);
 
 // 打开面板的本地薄入口：经必需能力 `ui_panels` 调用（ADR 0001 D2：能力 ID/版本不变，
 // 只迁提供者），设置页因此不直接依赖框架实现。实现见 feature.cpp。

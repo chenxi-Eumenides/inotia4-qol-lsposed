@@ -59,6 +59,7 @@ ReleaseOutcome release_claim_entry_hook(const contracts::ResourceClaim& claim,
     if (resolved_entry == 0 || unhook_fn == nullptr) {
         return release_failure("not ready");
     }
+    if (in_flight_count(claim.id) != 0) return release_failure("resource still in flight");
 
     // unhook 原语以原函数入口为句柄（LSPosed unhook 语义）；失败不改登记表。
     const int rc = unhook_fn(reinterpret_cast<void*>(resolved_entry));

@@ -68,9 +68,12 @@ struct QolItemCountApi {
     QolResult (*canonical_from_field)(uint32_t field, uint32_t* out_canonical);
     QolResult (*view_from_canonical)(uint32_t canonical, int32_t extended, uint32_t* out_view);
     QolResult (*view_limit)(int32_t extended, uint32_t* out_limit);
-    // provider 持有编码字段布局；插件只读写不透明字段值，不接触偏移。
+    // Game Adapter 持有编码字段布局；插件只读写不透明字段值，不接触偏移。
     QolResult (*read_encoded_field)(const void* item, uint32_t* out_field);
     QolResult (*write_encoded_field)(void* item, uint32_t field);
+    // 999 扩展模式策略（Host-owned，尾追加）：OK0=请求明确关闭；OK1=请求运行且整组资源
+    // 已实际应用；NotReady=请求开启但安装/适配未满足，不伪装关闭。模式写权仅 Host 内部。
+    QolResult (*read_extended_mode)(uint8_t* out_extended);
 };
 
 static_assert(std::is_standard_layout<QolItemCountApi>::value,
@@ -104,7 +107,10 @@ static_assert(offsetof(QolItemCountApi, read_encoded_field) ==
 static_assert(offsetof(QolItemCountApi, write_encoded_field) ==
                   sizeof(QolItemCountApi::canonical) * 10,
               "QolItemCountApi ABI layout changed");
-static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 11,
+static_assert(offsetof(QolItemCountApi, read_extended_mode) ==
+                  sizeof(QolItemCountApi::canonical) * 11,
+              "QolItemCountApi ABI layout changed");
+static_assert(sizeof(QolItemCountApi) == sizeof(QolItemCountApi::canonical) * 12,
               "QolItemCountApi ABI size changed");
 
 // 宿主只暴露按操作语义命名的写原语；实现负责目标校验、线程纪律和失败返回。
@@ -208,6 +214,6 @@ static_assert(sizeof(QolGameHost) ==
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 2;
-constexpr uint16_t kGameHostMinor = 1;
+constexpr uint16_t kGameHostMinor = 2;
 
 }  // namespace qol::contracts

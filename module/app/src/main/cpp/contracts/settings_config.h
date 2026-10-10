@@ -2,11 +2,13 @@
 
 #include <cstdint>
 #include "result.h"
+#include "owner_token.h"
 
 namespace qol::contracts {
 
 constexpr uint16_t kSettingsConfigMajor = 1;
-constexpr uint16_t kSettingsConfigMinor = 0;
+constexpr uint16_t kSettingsConfigMinor = 1;
+constexpr uint16_t kSettingsConfigLegacyMinor = 0;
 constexpr uint32_t kSettingsConfigBoolCount = 10;
 constexpr uint32_t kSettingsConfigRequestCapacity = 128;
 constexpr uint32_t kSettingsConfigMessageCapacity = 256;
@@ -45,6 +47,12 @@ struct QolSettingsConfigApi {
     // Last 128 receipts, never evict queued requests. Unknown=NotFound; evicted=Cancelled.
     // succeeded confirms persistence + setter acceptance, NOT gameplay/listener readiness.
     QolResult (*query_request)(uint64_t id, SettingsConfigRequestStatus* out_status);
+    // v1.1 owner-token UI adapter. Writes still route through config_namespace.update_value.
+    QolResult (*read_bool_for_owner)(QolOwnerToken owner, const char* key, int32_t* out_value);
+    QolResult (*request_set_bool_for_owner)(QolOwnerToken owner, const char* key, int32_t desired,
+                                            uint64_t* out_request);
+    QolResult (*query_request_for_owner)(QolOwnerToken owner, uint64_t id,
+                                         SettingsConfigRequestStatus* out_status);
 };
 
 }  // namespace qol::contracts

@@ -13,7 +13,7 @@
 //   ② 玩家侧对怪物造成的伤害 +50%（×1.5）；
 //   ③ 玩家侧受到的伤害 −50%（×0.5）。
 //
-// 机制（经深反汇编论证后采用入口 hook 单点包裹，见 archive/docs/development/plugins/simple-mode.md）：
+// 机制（经深反汇编论证后采用入口 hook 单点包裹，见 docs/archive/development/features/simple-mode.md）：
 //   - 伤害倍率：包裹 CHAR_AddDamage 入口。该函数是全部 15 条伤害路径的唯一汇合点，函数体第 3 条
 //     语句即 CHAR_AddLife(受害者, -伤害)，故入口即「生效前最后一刻」；只改 w2 一个入参，
 //     扣血/承伤记录/仇恨/飘字/音效全部一致缩放。

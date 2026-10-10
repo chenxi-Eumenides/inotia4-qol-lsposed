@@ -6,6 +6,8 @@
 #include "host/save_route.h"
 #include "host/settings_catalog_adapter.h"
 #include "host/settings_config_bridge.h"
+#include "host/config_namespace.h"
+#include "host/features/production.h"
 
 #include <algorithm>
 #include <array>
@@ -167,14 +169,12 @@ QolResult sdk_config_get_string(const char* key, const char* default_value, char
     return contracts::ok();
 }
 
-QolResult sdk_config_set_bool(const char* key, int32_t value) {
-    if (key == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
-    return result_from_bool(infra::config_set_bool(key, value != 0), kQolErrBlocked, kCapacity);
+QolResult sdk_config_set_bool(const char*, int32_t) {
+    return result_error(kQolErrUnsupported, "config writes require native config owner");
 }
 
-QolResult sdk_config_set_i32(const char* key, int32_t value) {
-    if (key == nullptr) return result_error(kQolErrInvalidArgument, kNullArgument);
-    return result_from_bool(infra::config_set_int(key, value), kQolErrBlocked, kCapacity);
+QolResult sdk_config_set_i32(const char*, int32_t) {
+    return result_error(kQolErrUnsupported, "config writes require native config owner");
 }
 
 struct SchedulerLease {
@@ -486,6 +486,7 @@ QolResult owner_store_reserve(contracts::QolOwnerToken owner, int32_t slot,
     const auto allowed = owner_authorize_store(owner, "module-saves");
     if (!contracts::succeeded(allowed)) return allowed;
     owner_store_lifecycle_handlers(&infra::store::owner_stopped, &infra::store::owner_rebound);
+    owner_store_lifecycle_try_handlers(&infra::store::owner_stopped_try, &infra::store::owner_rebound_try);
     const auto status = infra::store::reserve(owner, slot, candidates, count, out);
     if (status != infra::store::Status::kOk) return store_result(status);
     const auto still_allowed = owner_authorize_store(owner, "module-saves");
@@ -576,6 +577,7 @@ QolResult operation_acquire(void*, contracts::QolOwnerToken owner, uint32_t mask
     const auto allowed = owner_authorize_slot_operation(owner);
     if (!contracts::succeeded(allowed)) return allowed;
     owner_store_lifecycle_handlers(&infra::store::owner_stopped, &infra::store::owner_rebound);
+    owner_store_lifecycle_try_handlers(&infra::store::owner_stopped_try, &infra::store::owner_rebound_try);
     const auto result = infra::slot_operation::acquire(owner, mask, out);
     if (!contracts::succeeded(result)) return result;
     const auto still_allowed = owner_authorize_slot_operation(owner);
@@ -1153,6 +1155,9 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.owner_store = &kOwnerStoreApi;
     sdk.slot_operation = &kSlotOperationApi;
     sdk.save_route = &kSaveRouteApi;
+    sdk.config_namespace = &config_namespace_api();
+    sdk.feature = &production_feature_api();
+    sdk.feature_control = nullptr;
     return sdk;
 }
 

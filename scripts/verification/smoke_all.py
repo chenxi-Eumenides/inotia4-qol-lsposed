@@ -76,7 +76,7 @@ ROUTES = [
     {"m": "POST", "p": "/api/character/combat/{role}/stop_combat", "body": None, "note": "运行时:停止战斗"},
     # ---- ConfigController (2) ----
     {"m": "GET", "p": "/api/config/list", "note": "读配置"},
-    {"m": "POST", "p": "/api/config/set", "body": "{}", "note": "空对象不更新字段,返回当前配置"},
+    {"m": "POST", "p": "/api/config/set", "body": '{"plugin_id":"smoke.unknown","field":"feature","key":"smoke.unknown.probe","value":true}', "note": "未注册插件目标预期400拒绝,不写配置"},
     # ---- CurrentMapController (7) ----
     {"m": "GET", "p": "/api/world/map/id"},
     {"m": "GET", "p": "/api/world/map/exits"},

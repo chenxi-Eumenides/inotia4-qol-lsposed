@@ -1,14 +1,25 @@
 #include "game/adapter_ports/item_count_facade.h"
 
+#include <atomic>
 #include <cstring>
 
 #include "contracts/result.h"
+#include "game/access/patches.h"
+#include "game/adapter_ports/item_count_codec.h"
 
 namespace qol::game {
 namespace {
 
-const contracts::QolItemCountApi* g_provider = nullptr;
-ItemCountActiveProbe g_active_probe = nullptr;
+namespace codec = qol::game::item_count_codec;
+
+std::atomic<uint8_t> g_extended_mode{static_cast<uint8_t>(ItemCountExtendedMode::kOff)};
+
+ItemCountExtendedMode extended_mode() {
+    return static_cast<ItemCountExtendedMode>(g_extended_mode.load(std::memory_order_acquire));
+}
+
+bool extended_applied() { return extended_mode() == ItemCountExtendedMode::kApplied; }
+bool extended_not_ready() { return extended_mode() == ItemCountExtendedMode::kNotReady; }
 
 QolResult not_ready() {
     static constexpr char kMessage[] = "not ready";
@@ -21,85 +32,134 @@ QolResult invalid_argument() {
                             static_cast<uint32_t>(std::strlen(kMessage)));
 }
 
+QolResult unsupported() {
+    static constexpr char kMessage[] = "unsupported";
+    return contracts::error(kQolErrUnsupported, kMessage,
+                            static_cast<uint32_t>(std::strlen(kMessage)));
+}
+
+// 与旧 provider 语义一致：非编码类别原版 getter 恒为 1。
+QolResult canonical_impl(const void* item, uint32_t* out_count) {
+    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
+    if (encoding == contracts::QolItemCountEncoding::kUnknown) return unsupported();
+    if (encoding == contracts::QolItemCountEncoding::kEncoded) {
+        uint32_t raw = 0;
+        if (!read_item_count_field(item, &raw)) return not_ready();
+        *out_count = codec::s2_read_count(raw);
+        return contracts::ok();
+    }
+    *out_count = 1;
+    return contracts::ok();
+}
+
 QolResult canonical(const void* item, uint32_t* out_count) {
     if (item == nullptr || out_count == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->canonical == nullptr ? not_ready() : g_provider->canonical(item, out_count);
+    return canonical_impl(item, out_count);
 }
 
 QolResult effective(const void* item, uint32_t* out_count) {
     if (item == nullptr || out_count == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->effective == nullptr ? not_ready() : g_provider->effective(item, out_count);
+    if (extended_not_ready()) return not_ready();
+    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
+    if (encoding == contracts::QolItemCountEncoding::kUnknown) return unsupported();
+    if (encoding != contracts::QolItemCountEncoding::kEncoded) {
+        return canonical_impl(item, out_count);
+    }
+    uint32_t raw = 0;
+    if (!read_item_count_field(item, &raw)) return not_ready();
+    const uint32_t canonical_count = codec::s2_read_count(raw);
+    const bool usable = extended_applied();
+    *out_count = codec::effective_clamp(codec::effective_view_count(canonical_count, usable), usable);
+    return contracts::ok();
 }
 
 QolResult is_encoded(const void* item, contracts::QolItemCountEncoding* out_encoding) {
     if (item == nullptr || out_encoding == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->is_encoded == nullptr ? not_ready()
-                                               : g_provider->is_encoded(item, out_encoding);
+    *out_encoding = item_count_encoding(item);
+    return contracts::ok();
 }
 
 QolResult write_effective(void* item, uint32_t count) {
     if (item == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->write_effective == nullptr ? not_ready()
-                                                    : g_provider->write_effective(item, count);
+    if (extended_not_ready()) return not_ready();
+    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
+    if (encoding == contracts::QolItemCountEncoding::kUnknown) return unsupported();
+    if (encoding != contracts::QolItemCountEncoding::kEncoded) return unsupported();
+    const bool usable = extended_applied();
+    uint32_t raw = 0;
+    if (!read_item_count_field(item, &raw)) return not_ready();
+    const uint32_t clamped = codec::effective_clamp(count, usable);
+    const uint32_t written = codec::field_from_canonical(raw, clamped, usable);
+    return write_item_count_field(item, written) ? contracts::ok() : not_ready();
 }
 
 QolResult writeback_needed(const void* item, uint32_t count, int32_t* out_needed) {
     if (item == nullptr || out_needed == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->writeback_needed == nullptr
-               ? not_ready()
-               : g_provider->writeback_needed(item, count, out_needed);
+    if (extended_not_ready()) return not_ready();
+    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
+    if (encoding == contracts::QolItemCountEncoding::kUnknown) return unsupported();
+    if (encoding != contracts::QolItemCountEncoding::kEncoded) {
+        *out_needed = 0;
+        return contracts::ok();
+    }
+    const bool usable = extended_applied();
+    uint32_t raw = 0;
+    if (!read_item_count_field(item, &raw)) return not_ready();
+    const uint32_t canonical_count = codec::s2_read_count(raw);
+    const uint32_t current =
+        codec::effective_clamp(codec::effective_view_count(canonical_count, usable), usable);
+    *out_needed = current != codec::effective_clamp(count, usable) ? 1 : 0;
+    return contracts::ok();
 }
 
 QolResult field_from_canonical(uint32_t field, uint32_t canonical_count, int32_t extended,
                                uint32_t* out_field) {
     if (out_field == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->field_from_canonical == nullptr
-               ? not_ready()
-               : g_provider->field_from_canonical(field, canonical_count, extended, out_field);
+    *out_field = codec::field_from_canonical(field, canonical_count, extended != 0);
+    return contracts::ok();
 }
 
 QolResult canonical_from_field(uint32_t field, uint32_t* out_canonical) {
     if (out_canonical == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->canonical_from_field == nullptr
-               ? not_ready()
-               : g_provider->canonical_from_field(field, out_canonical);
+    *out_canonical = codec::canonical_from_field(field);
+    return contracts::ok();
 }
 
 QolResult view_from_canonical(uint32_t canonical_count, int32_t extended, uint32_t* out_view) {
     if (out_view == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->view_from_canonical == nullptr
-               ? not_ready()
-               : g_provider->view_from_canonical(canonical_count, extended, out_view);
+    *out_view = codec::view_from_canonical(canonical_count, extended != 0);
+    return contracts::ok();
 }
 
 QolResult view_limit(int32_t extended, uint32_t* out_limit) {
     if (out_limit == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->view_limit == nullptr ? not_ready()
-                                              : g_provider->view_limit(extended, out_limit);
+    *out_limit = codec::view_limit(extended != 0);
+    return contracts::ok();
 }
 
 QolResult read_encoded_field(const void* item, uint32_t* out_field) {
     if (item == nullptr || out_field == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->read_encoded_field == nullptr ? not_ready()
-                                                       : g_provider->read_encoded_field(item, out_field);
+    return read_item_count_field(item, out_field) ? contracts::ok() : not_ready();
 }
 
 QolResult write_encoded_field(void* item, uint32_t field) {
     if (item == nullptr) return invalid_argument();
-    if (g_provider == nullptr) return not_ready();
-    return g_provider->write_encoded_field == nullptr
-               ? not_ready()
-               : g_provider->write_encoded_field(item, field);
+    return write_item_count_field(item, field) ? contracts::ok() : not_ready();
+}
+
+QolResult read_extended_mode(uint8_t* out_extended) {
+    if (out_extended == nullptr) return invalid_argument();
+    switch (extended_mode()) {
+        case ItemCountExtendedMode::kOff:
+            *out_extended = 0;
+            return contracts::ok();
+        case ItemCountExtendedMode::kApplied:
+            *out_extended = 1;
+            return contracts::ok();
+        case ItemCountExtendedMode::kNotReady:
+            return not_ready();
+    }
+    return not_ready();
 }
 
 const contracts::QolItemCountApi kFacade = {
@@ -114,24 +174,21 @@ const contracts::QolItemCountApi kFacade = {
     &view_limit,
     &read_encoded_field,
     &write_encoded_field,
+    &read_extended_mode,
 };
 
 }  // namespace
 
-void item_count_set_provider(const contracts::QolItemCountApi* api) { g_provider = api; }
-
-void item_count_set_active_probe(ItemCountActiveProbe probe) {
-    if (g_active_probe == nullptr && probe != nullptr) g_active_probe = probe;
+void item_count_set_extended_mode(ItemCountExtendedMode mode) {
+    g_extended_mode.store(static_cast<uint8_t>(mode), std::memory_order_release);
 }
 
-bool item_count_active() {
-    return g_provider != nullptr && g_active_probe != nullptr && g_active_probe() != 0;
-}
+ItemCountExtendedMode item_count_extended_mode() { return extended_mode(); }
+
+bool item_count_active() { return extended_applied(); }
 
 const contracts::QolItemCountApi& item_count_api() { return kFacade; }
 
-const contracts::QolItemCountApi* item_count_api_if_resident() {
-    return g_provider == nullptr ? nullptr : &kFacade;
-}
+const contracts::QolItemCountApi* item_count_api_if_resident() { return &kFacade; }
 
 }  // namespace qol::game

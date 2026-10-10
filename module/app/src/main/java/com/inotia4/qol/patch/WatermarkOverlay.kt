@@ -9,7 +9,6 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
-import com.inotia4.qol.ModuleConfig
 import io.github.libxposed.api.XposedModuleInterface
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
@@ -25,8 +24,8 @@ import java.lang.reflect.Method
  * 表中每一行是完整的 ARGB（色相与不透明度一起定义），所以不同情况可以有不同的显眼程度：
  * 当前一行「简单模式」开启 → 亮绿 + 80% 不透明度（作为开关状态指示，需明显可见），
  * 默认态仍是 15% 的半透明白（仅作痕迹）。
- * 新增其它情况只需往表里加一行；开关变更由 ConfigApiService.applyOnChange 调
- * refreshColor() 实时刷新（UI 开关与 HTTP API 都经该点）。
+ * 新增其它情况只需往表里加一行；开关变更通过 native platform effect 调用
+ * refreshColor() 实时刷新（设置页与 HTTP API 均由同一 native 配置 owner 通知）。
  */
 object WatermarkOverlay {
 
@@ -48,7 +47,7 @@ object WatermarkOverlay {
 
     /**
      * 配色表一行的形状：一条配置条件 + 条件成立时水印用的颜色。
-     * [enabled] 只读 ModuleConfig（@Volatile），可被任意线程安全调用。
+     * [enabled] 是 revisioned native platform effect 的 Kotlin 投影。
      */
     private class WatermarkColorRule(
         /** 规则名，仅用于日志定位命中项。 */
@@ -68,9 +67,18 @@ object WatermarkOverlay {
      * 新增情况（其它配置开关 → 其它颜色）：只需在表里加一行，
      * 不必改注入、刷新、取色或日志逻辑。
      */
+    @Volatile private var configRevision = 0L
+    @Volatile private var simpleModeEnabled = false
     private val COLOR_RULES: List<WatermarkColorRule> = listOf(
-        WatermarkColorRule("简单模式", WATERMARK_COLOR_SIMPLE_MODE) { ModuleConfig.simpleModeEnabled },
+        WatermarkColorRule("简单模式", WATERMARK_COLOR_SIMPLE_MODE) { simpleModeEnabled },
     )
+
+    fun updateSimpleMode(revision: Long, enabled: Boolean) {
+        if (revision <= configRevision) return
+        configRevision = revision
+        simpleModeEnabled = enabled
+        refreshColor()
+    }
 
     private const val MARGIN_DP = 12f
 

@@ -29,6 +29,7 @@ using qol::infra::command_queue_reset_for_test;
 using qol::infra::command_state_name;
 using qol::infra::CommandState;
 using qol::infra::commands_drain;
+using qol::infra::commands_post_config_bool;
 using qol::infra::commands_port;
 using qol::infra::commands_reset_for_test;
 using qol::infra::config_get_bool;
@@ -150,7 +151,9 @@ void test_commands_post_drain() {
 
     QolCommand cmd{kCommandSetConfigBool, "flag", 1};
     QolCommandTicket ticket = 0;
-    CHECK(port.post(&ticket, &cmd).ok == 0);
+    CHECK(port.post(&ticket, &cmd).code == kQolErrUnsupported);
+    CHECK(ticket == 0);
+    CHECK(commands_post_config_bool("flag", true, &ticket).ok == 0);
     CHECK(ticket != 0);
     CHECK(port.state(ticket) == static_cast<int32_t>(CommandState::kPending));
     CHECK(config_get_bool("flag", false) == false); // 未 drain 不执行
@@ -165,9 +168,8 @@ void test_commands_config_event() {
     subscribe_config_changed();
     const qol::contracts::QolCommands& port = commands_port();
 
-    QolCommand cmd{kCommandSetConfigBool, "auto", 0};
     QolCommandTicket ticket = 0;
-    CHECK(port.post(&ticket, &cmd).ok == 0);
+    CHECK(commands_post_config_bool("auto", false, &ticket).ok == 0);
     CHECK(g_event_count == 0);
     CHECK(commands_drain() == 1);
     CHECK(g_event_count == 1);
@@ -179,9 +181,8 @@ void test_commands_cancel() {
     reset_all();
     const qol::contracts::QolCommands& port = commands_port();
 
-    QolCommand cmd{kCommandSetConfigBool, "cancelme", 1};
     QolCommandTicket ticket = 0;
-    CHECK(port.post(&ticket, &cmd).ok == 0);
+    CHECK(commands_post_config_bool("cancelme", true, &ticket).ok == 0);
     CHECK(port.cancel(ticket).ok == 0);
     CHECK(port.state(ticket) == static_cast<int32_t>(CommandState::kCancelled));
     CHECK(commands_drain() == 0); // 已取消命令不执行
@@ -206,19 +207,18 @@ void test_commands_slot_capacity_and_reclaim() {
     reset_all();
     const qol::contracts::QolCommands& port = commands_port();
 
-    QolCommand cmd{kCommandSetConfigBool, "k", 1};
     QolCommandTicket tickets[64];
     for (int i = 0; i < 64; ++i) {
-        CHECK(port.post(&tickets[i], &cmd).ok == 0);
+        CHECK(commands_post_config_bool("k", true, &tickets[i]).ok == 0);
     }
     QolCommandTicket over = 0;
-    CHECK(port.post(&over, &cmd).ok != 0); // 槽位满
+    CHECK(commands_post_config_bool("k", true, &over).ok != 0); // 槽位满
     CHECK(over == 0);
 
     CHECK(commands_drain() == 64);
     // drain 回收已终态槽位后可再次投递。
     QolCommandTicket reused = 0;
-    CHECK(port.post(&reused, &cmd).ok == 0);
+    CHECK(commands_post_config_bool("k", true, &reused).ok == 0);
     CHECK(reused != 0);
     CHECK(commands_drain() == 1);
 }
@@ -329,7 +329,7 @@ void test_typed_result_commands() {
     CHECK(qol::infra::commands_read_result(ticket, out, sizeof(out), &size).ok == 0);
     CHECK(std::strcmp(out, "{\"ok\":true,\"state\":{\"money\":1}}") == 0);
     // 无结果的普通命令：回取失败（明确尽力语义下与“已淘汰”同为不可得）。
-    QolCommand cmd{kCommandSetConfigBool, "k", 1};
+    QolCommand cmd{999, "k", 1};
     QolCommandTicket plain = 0;
     CHECK(port.post(&plain, &cmd).ok == 0);
     commands_drain();

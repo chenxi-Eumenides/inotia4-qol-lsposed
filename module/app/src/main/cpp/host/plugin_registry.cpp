@@ -29,6 +29,7 @@
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
 #include "host/http_dispatch.h"
+#include "host/item_count_facade.h"
 #include "host/owner_identity.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
@@ -90,9 +91,18 @@ struct PluginEntry {
 
 PluginEntry g_plugins[kMaxPlugins];
 uint32_t g_plugin_count = 0;
+bool g_feature_mode = false;
+bool g_feature_wanted[kMaxPlugins]{};
+FeatureDesiredRequest g_desired_request = nullptr;
+void* g_desired_request_context = nullptr;
 const void* g_plugin_ports[kMaxPlugins][kMaxPortsPerPlugin] = {};
 uint32_t g_plugin_port_count[kMaxPlugins] = {};
 bool g_port_invalid[kMaxPlugins] = {};
+
+// 宿主装配期选定的管理 SDK 副本。普通 g_host_sdk 的 feature_control 恒为 nullptr；
+// 只有 settings 插件 context 使用该副本，管理通道不泄漏给其他插件。
+contracts::QolHostSdk g_management_sdk{};
+bool g_management_sdk_bound = false;
 
 contracts::PluginContext make_plugin_context(const char* plugin_id) {
     uint32_t index = kMaxPlugins;
@@ -110,10 +120,16 @@ contracts::PluginContext make_plugin_context(const char* plugin_id) {
     if (index != kMaxPlugins) {
         (void)owner_identity_api().query(&g_plugins[index], &token, &generation);
     }
+    // The settings plugin is the only context the Host grants management authority; every
+    // other context keeps the ordinary SDK whose feature_control is nullptr.
+    const contracts::QolHostSdk* sdk = &g_host_sdk;
+    if (plugin_id != nullptr && std::strcmp(plugin_id, "settings") == 0 && g_management_sdk_bound) {
+        sdk = &g_management_sdk;
+    }
     return contracts::PluginContext{sizeof(contracts::PluginContext),
                                     g_host_sdk.abi.major,
                                     g_host_sdk.abi.minor,
-                                    &g_host_sdk,
+                                    sdk,
                                     &g_game_host,
                                     plugin_id,
                                     ports,
@@ -890,7 +906,8 @@ void revoke_resource(const char* resource_id, const HostDeps& deps) {
         hooks::ResourceRuntime runtime{};
         const uintptr_t entry =
             hooks::runtime_of(resource_id, &runtime) ? runtime.resolved_entry : 0;
-        released = hooks::release_claim_entry_hook(*claim, entry, deps.unhook_fn).ok == 0;
+        released = claim->resumable &&
+                   hooks::release_claim_entry_hook(*claim, entry, deps.unhook_fn).ok == 0;
     } else {
         released = claim->resumable && release_non_entry_claim(*claim);
     }
@@ -1342,6 +1359,12 @@ struct LifecycleTx {
     uint64_t tx_id = 0;
     uint32_t plugin_index = 0;
     hooks::TxKind kind = hooks::TxKind::kInstall;
+    bool owner_drain_pending = false;
+    bool was_enabled = false;
+    bool failed_cleanup = false;
+    bool quarantine_pending = false;
+    contracts::QolOwnerToken stopped_token = 0;
+    bool stop_preparing = false;
 };
 
 // 槽位与插件同容量：事务引擎保证每插件至多一个未终态事务。
@@ -1364,11 +1387,59 @@ bool plugin_has_active_tx(const char* plugin_id) {
     return false;
 }
 
+// 数量扩展模式策略（Host-owned）：仅当 stack_limit 资源组整组 live 且插件 enabled 时
+// 才视为已应用。请求开启但未落地时保持 NotReady，不伪装关闭；策略不读 feature bool
+// 直接当已应用。由 feature 模式的生命周期步进/转换点驱动。
+void sync_item_count_policy() {
+    if (!g_feature_mode) return;
+    static constexpr char kItemCountOwner[] = "stack_limit";
+    const uint32_t index = plugin_index_of(kItemCountOwner);
+    if (index == kNoPlugin) {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
+        return;
+    }
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    infra::FeatureStatus status{};
+    // 整组真正应用：插件 enabled、组内全部 atomic 成员 live，且没有在途安装/撤销事务
+    // （撤销开始时事务已存在，立即退出 applied，满足 revoke 起点取消）。
+    const bool applied = !plugin_has_active_tx(plugin.id) && infra::status_get(plugin.id, &status) &&
+                         status.state == infra::FeatureState::kEnabled && status.enabled &&
+                         atomic_group_satisfied(plugin);
+    if (applied) {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kApplied);
+    } else if (g_feature_wanted[index]) {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kNotReady);
+    } else {
+        host_item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
+    }
+}
+
 bool plugin_isolated(const contracts::PluginDescriptor& plugin) {
     for (uint32_t i = 0; i < plugin.resources_count; ++i) {
         if (hooks::isolated_get(plugin.resources[i].id)) return true;
     }
     return false;
+}
+
+bool feature_stop(uint32_t index, bool failed_cleanup) {
+    if (index >= g_plugin_count) return false;
+    const auto& plugin = g_plugins[index].descriptor;
+    if (plugin_has_active_tx(plugin.id)) return false;
+    const auto stopped_token = owner_token_of(plugin.id);
+    LifecycleTx* slot = nullptr;
+    for (auto& candidate : g_lifecycle_txs) if (!candidate.in_use) { slot = &candidate; break; }
+    if (!slot) return false;
+    infra::FeatureStatus status{};
+    infra::status_get(plugin.id, &status);
+    *slot = LifecycleTx{};
+    slot->in_use = true;
+    slot->plugin_index = index;
+    slot->kind = hooks::TxKind::kRelease;
+    slot->stop_preparing = true;
+    slot->was_enabled = status.enabled;
+    slot->failed_cleanup = failed_cleanup;
+    slot->stopped_token = stopped_token;
+    return true;
 }
 
 // 全部带 gate 资源是否都开启；无 gate 资源视为开（与 install 路径一致）。
@@ -1750,7 +1821,13 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
 
 }  // namespace
 
+void bind_management_sdk(const contracts::QolHostSdk& sdk) {
+    g_management_sdk = sdk;
+    g_management_sdk_bound = true;
+}
+
 bool register_plugin(const contracts::PluginDescriptor& plugin) {
+    if (g_feature_mode) return false;
     if (!descriptor_valid(plugin)) return false;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         if (std::strcmp(g_plugins[i].descriptor.id, plugin.id) == 0) return false;
@@ -1763,7 +1840,7 @@ bool register_plugin(const contracts::PluginDescriptor& plugin) {
     }
 
     g_plugins[g_plugin_count].descriptor = plugin;
-    if (!owner_register(&g_plugins[g_plugin_count])) return false;
+    if (!owner_register(&g_plugins[g_plugin_count], plugin.id)) return false;
     ++g_plugin_count;
     return true;
 }
@@ -1799,6 +1876,7 @@ bool bind_plugin_save_route(const contracts::PluginDescriptor& plugin) {
 }
 
 int install_all(const HostDeps& deps) {
+    if (g_feature_mode) return -1;
     g_install_deps = deps;
     int failed_plugins = 0;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
@@ -1850,6 +1928,7 @@ int install_all(const HostDeps& deps) {
 }
 
 uint32_t sync_gates() {
+    if (g_feature_mode) return 0;
     uint32_t changed = 0;
     bool processed[kMaxPlugins] = {};
     for (uint32_t order_pos = 0; order_pos < g_install_order_count + g_plugin_count;
@@ -2001,12 +2080,13 @@ uint32_t sync_gates() {
     return changed;
 }
 
-bool lifecycle_apply(const char* plugin_id, int32_t action) {
+static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
     const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
     if (plugin == nullptr) return false;
     // 前置拒绝：同插件在途事务 / 任一资源已隔离（隔离后禁止重试，直到进程重启）。
     if (plugin_has_active_tx(plugin->id)) return false;
-    if (plugin_isolated(*plugin)) return false;
+    if (plugin_isolated(*plugin) &&
+        !(g_feature_mode && action == contracts::kFeatureLifecycleDeactivate)) return false;
 
     infra::FeatureStatus status{};
     if (!infra::status_get(plugin->id, &status)) return false;
@@ -2019,6 +2099,13 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
             return false;
 
         case contracts::kFeatureLifecycleDeactivate: {
+            if (g_feature_mode) {
+                if (status.state != infra::FeatureState::kEnabled &&
+                    status.state != infra::FeatureState::kInstalledDisabled) return false;
+                const uint32_t index = plugin_index_of(plugin->id);
+                if (!feature_stop(index, false)) return false;
+                return true;
+            }
             if (status.state != infra::FeatureState::kEnabled &&
                 status.state != infra::FeatureState::kInstalledDisabled) {
                 return false;
@@ -2073,6 +2160,7 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
         }
 
         case contracts::kFeatureLifecycleActivate: {
+            if (g_feature_mode && g_dependency_invalid[plugin_index_of(plugin->id)]) return false;
             // §3.2：inactive → resolving 为幂等重入；blocked/failed → resolving 为重试
             // （隔离态已在函数前置拒绝中拦截，未隔离的失败可安全重装）。
             // 级联停用复用 installed_disabled，但由 cascade_stopped 标记区分门禁关闭态；
@@ -2083,7 +2171,8 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                 std::strcmp(status.error, "cascade_stopped") == 0;
             if (status.state != infra::FeatureState::kInactive &&
                 status.state != infra::FeatureState::kBlocked &&
-                status.state != infra::FeatureState::kFailed && !cascade_stopped) {
+                status.state != infra::FeatureState::kFailed && !cascade_stopped &&
+                !(g_feature_mode && status.state == infra::FeatureState::kUnsupported)) {
                 return false;
             }
             infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
@@ -2097,19 +2186,24 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
             const char* preflight_error = preflight_plugin_resources(*plugin, g_install_deps);
             if (preflight_error != nullptr) {
                 infra::status_update(plugin->id, infra::FeatureState::kUnsupported, false,
-                                     preflight_error);
+                                      preflight_error);
+                if (g_feature_mode) {
+                    owner_suspend_begin(&g_plugins[index]);
+                    (void)owner_suspend_poll(&g_plugins[index]);
+                }
                 return false;
             }
             // §3.3：install 只做插件自身初始化（幂等重入）；失败即 failed，不启动事务。
-            if (!owner_resume(&g_plugins[index])) return false;
+            if (!(g_feature_mode ? owner_resume_poll(&g_plugins[index]) : owner_resume(&g_plugins[index]))) return false;
             ctx = make_plugin_context(plugin->id);
             if (plugin->install != nullptr && plugin->install(ctx) != 0) {
                 infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
-                                     "plugin install failed");
+                                      "plugin install failed");
+                if (g_feature_mode) feature_stop(index, true);
                 return false;
             }
             if (plugin->resources_count == 0) {
-                const bool enabled = plugin_all_gates_want(*plugin);
+                const bool enabled = g_feature_mode || plugin_all_gates_want(*plugin);
                 infra::status_update(
                     plugin->id,
                     enabled ? infra::FeatureState::kEnabled
@@ -2117,7 +2211,10 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
                     enabled, nullptr);
                 if (enabled) {
                     if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
-                    (void)register_http_queries(*plugin);
+                    if (!register_http_queries(*plugin) && g_feature_mode) {
+                        feature_stop(index, true);
+                        return false;
+                    }
                     register_provided_capabilities(plugin_index_of(plugin->id));
                 } else {
                     owner_suspend(&g_plugins[index]);
@@ -2129,6 +2226,7 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
             const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kInstall);
             if (tx_id == 0) {
                 infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
+                if (g_feature_mode) feature_stop(index, true);
                 return false;
             }
             for (LifecycleTx& slot : g_lifecycle_txs) {
@@ -2149,11 +2247,189 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
     }
 }
 
-uint32_t lifecycle_step() {
+bool lifecycle_apply(const char* plugin_id, int32_t action) {
+    if (!g_feature_mode) return lifecycle_apply_actual(plugin_id, action);
+    if (!find_plugin(plugin_id) || !g_desired_request) return false;
+    if (action != contracts::kFeatureLifecycleActivate &&
+        action != contracts::kFeatureLifecycleDeactivate) return false;
+    return g_desired_request(g_desired_request_context, plugin_id,
+                            action == contracts::kFeatureLifecycleActivate);
+}
+
+bool feature_registry_prepare(const HostDeps& deps) {
+    if (g_feature_mode) return false;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const auto& plugin = g_plugins[i].descriptor;
+        if (!plugin.features || !plugin.feature_count || plugin_has_active_tx(plugin.id)) return false;
+        for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+            // A migrated descriptor has no second gate truth or preinstalled resources.
+            if (plugin.resources[r].gate || hooks::state_of(plugin.resources[r].id) !=
+                                             contracts::ResourceState::kFree) return false;
+        }
+        infra::FeatureStatus status{};
+        if (infra::status_get(plugin.id, &status) && status.state != infra::FeatureState::kRegistered) return false;
+    }
+    g_install_deps = deps;
+    owner_save_route_stopped_try_handler(&save_route::owner_stopped_poll);
+    std::memset(g_port_invalid, 0, sizeof(g_port_invalid));
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        infra::status_register(g_plugins[i].descriptor.id, g_plugins[i].descriptor.version);
+        if (!resolve_plugin_ports(i)) g_port_invalid[i] = true;
+    }
+    (void)dependency_order_build();
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        owner_suspend_begin(&g_plugins[i]);
+        (void)owner_suspend_poll(&g_plugins[i]);
+        infra::status_update(g_plugins[i].descriptor.id,
+                             g_dependency_invalid[i] ? infra::FeatureState::kBlocked
+                                                     : infra::FeatureState::kInactive,
+                             false, g_dependency_invalid[i] ? g_error_text[i] : nullptr);
+    }
+    g_feature_mode = true;
+    sync_item_count_policy();
+    return true;
+}
+
+void feature_registry_bind_desired_request(FeatureDesiredRequest request, void* context) {
+    g_desired_request = request;
+    g_desired_request_context = context;
+}
+
+uint32_t feature_registry_order(const char** ids, uint32_t capacity) {
+    if (!ids || capacity < g_plugin_count) return 0;
+    uint32_t count = 0;
+    bool emitted[kMaxPlugins]{};
+    for (uint32_t i = 0; i < g_install_order_count; ++i) {
+        const auto index = g_install_order[i];
+        emitted[index] = true;
+        ids[count++] = g_plugins[index].descriptor.id;
+    }
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (!emitted[i]) ids[count++] = g_plugins[i].descriptor.id;
+    }
+    return count;
+}
+
+bool feature_registry_dependencies_wanted(const char* id, FeatureWants wants, void* context) {
+    const auto index = plugin_index_of(id);
+    if (!g_feature_mode || index == kNoPlugin || g_dependency_invalid[index] || !wants) return false;
+    const auto& plugin = g_plugins[index].descriptor;
+    for (uint32_t r = 0; r < plugin.requires_count; ++r) {
+        const auto provider = provider_for_requirement(plugin.requires[r], nullptr);
+        if (provider == kNoPlugin || !wants(context, g_plugins[provider].descriptor.id)) return false;
+    }
+    return true;
+}
+
+bool feature_registry_dependencies_ready(const char* id) {
+    const auto index = plugin_index_of(id);
+    return g_feature_mode && index != kNoPlugin && !g_dependency_invalid[index] &&
+           check_requires(g_plugins[index].descriptor, index) == nullptr;
+}
+bool feature_registry_busy(const char* id) { return plugin_has_active_tx(id); }
+bool feature_registry_active(const char* id) {
+    infra::FeatureStatus status{};
+    bool blocking_tx = false;
+    for (const auto& slot : g_lifecycle_txs) {
+        if (slot.in_use && id && std::strcmp(g_plugins[slot.plugin_index].descriptor.id, id) == 0 &&
+            !slot.stop_preparing) blocking_tx = true;
+    }
+    return id && infra::status_get(id, &status) && status.state == infra::FeatureState::kEnabled &&
+           status.enabled && owner_token_of(id) != 0 && !blocking_tx;
+}
+bool feature_registry_transition(const char* id, bool activate) {
+    if (!g_feature_mode) return false;
+    const auto index = plugin_index_of(id);
+    if (index == kNoPlugin || (activate && !g_feature_wanted[index])) return false;
+    const bool result = lifecycle_apply_actual(id, activate ? contracts::kFeatureLifecycleActivate
+                                                            : contracts::kFeatureLifecycleDeactivate);
+    sync_item_count_policy();
+    return result;
+}
+bool feature_registry_context(const char* id, contracts::PluginContext* out) {
+    if (!out || !feature_registry_active(id)) return false;
+    *out = make_plugin_context(id);
+    return true;
+}
+bool feature_registry_owner_ready(const char* id) {
+    const auto index = plugin_index_of(id);
+    if (!g_feature_mode || index == kNoPlugin) return false;
+    if (owner_token_of(id)) return true;
+    if (!owner_suspend_poll(&g_plugins[index])) return false;
+    return owner_resume_poll(&g_plugins[index]);
+}
+void feature_registry_set_wanted(const char* id, bool wanted) {
+    const auto index = plugin_index_of(id);
+    if (index != kNoPlugin) g_feature_wanted[index] = wanted;
+}
+
+static uint32_t lifecycle_step_engine() {
     uint32_t advanced = 0;
     for (LifecycleTx& slot : g_lifecycle_txs) {
         if (!slot.in_use) continue;
         const contracts::PluginDescriptor& plugin = g_plugins[slot.plugin_index].descriptor;
+
+        if (g_feature_mode && slot.stop_preparing) {
+            if (slot.stopped_token && save_route::prepare_stop_poll(slot.stopped_token).code == kQolErrBusy)
+                continue;
+            slot.stop_preparing = false;
+            slot.owner_drain_pending = true;
+            owner_suspend_begin(&g_plugins[slot.plugin_index]);
+            http_dispatch_begin_unregister_owner(plugin.id);
+            unregister_provided_capabilities(slot.plugin_index);
+            for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+                if (hooks::state_of(plugin.resources[r].id) == contracts::ResourceState::kLive)
+                    hooks::set_state(plugin.resources[r].id, contracts::ResourceState::kDisabled);
+            }
+            infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
+        }
+
+        if (g_feature_mode && slot.quarantine_pending) {
+            bool drained = true;
+            for (uint32_t r = 0; r < plugin.resources_count; ++r)
+                if (hooks::in_flight_count(plugin.resources[r].id)) drained = false;
+            if (!drained) continue;
+            auto ctx = make_plugin_context(plugin.id);
+            if (plugin.deactivate) plugin.deactivate(ctx);
+            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                 "resource release failed; remaining resources released or isolated");
+            slot = LifecycleTx{};
+            ++advanced;
+            continue;
+        }
+
+        if (g_feature_mode && slot.owner_drain_pending) {
+            // No callback, resource operation, or wait occurs until both admission domains drain.
+            if (!owner_suspend_poll(&g_plugins[slot.plugin_index]) ||
+                !http_dispatch_poll_unregister_owner(plugin.id)) continue;
+            if (slot.stopped_token && !save_route::owner_stopped_poll(slot.stopped_token)) continue;
+            bool resources_drained = true;
+            for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+                if (hooks::in_flight_count(plugin.resources[r].id) != 0) resources_drained = false;
+            }
+            if (!resources_drained) continue;
+            auto ctx = make_plugin_context(plugin.id);
+            if (slot.was_enabled && plugin.on_disabled) plugin.on_disabled(ctx);
+            slot.owner_drain_pending = false;
+            if (plugin.resources_count == 0) {
+                if (plugin.deactivate) plugin.deactivate(ctx);
+                infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
+                                                                   : infra::FeatureState::kInactive,
+                                     false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
+                slot = LifecycleTx{};
+                ++advanced;
+                continue;
+            }
+            slot.tx_id = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+            if (!slot.tx_id) {
+                revoke_installed_resources(plugin, g_install_deps);
+                if (plugin.deactivate) plugin.deactivate(ctx);
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "release unavailable");
+                slot = LifecycleTx{};
+                ++advanced;
+                continue;
+            }
+        }
 
         hooks::TxStep out{};
         hooks::tx_step(slot.tx_id, &out);
@@ -2162,7 +2438,7 @@ uint32_t lifecycle_step() {
         // 生命周期事务跨帧推进时，原子成员即使已物理安装也先保持非 live 登记；
         // 下一成员失败或事务仍在途时，能力与 wrapper 不得观察到部分组。
         if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr && out.ok == 0 &&
-            atomic_claim_by_id(plugin, out.resource_id) != nullptr) {
+            (g_feature_mode || atomic_claim_by_id(plugin, out.resource_id) != nullptr)) {
             hooks::set_state(out.resource_id, contracts::ResourceState::kDisabled);
         }
 
@@ -2202,6 +2478,12 @@ uint32_t lifecycle_step() {
 
         if (slot.ready_failed) {
             // 已因受限回调置 failed：保留 failed 态，不执行终态状态/回调覆盖。
+            if (g_feature_mode) {
+                const auto index = slot.plugin_index;
+                slot = LifecycleTx{};
+                feature_stop(index, true);
+                continue;
+            }
             slot.in_use = false;
             slot.ready_failed = false;
             slot.cascade = false;
@@ -2215,16 +2497,23 @@ uint32_t lifecycle_step() {
         contracts::PluginContext ctx = make_plugin_context(plugin.id);
         if (succeeded) {
             if (slot.kind == hooks::TxKind::kInstall) {
+                if (g_feature_mode && (!g_feature_wanted[slot.plugin_index] ||
+                                      check_requires(plugin, slot.plugin_index) != nullptr)) {
+                    const auto index = slot.plugin_index;
+                    slot = LifecycleTx{};
+                    feature_stop(index, false);
+                    continue;
+                }
                 if (plugin_all_gates_want(plugin)) {
                     for (uint32_t i = 0; i < plugin.resources_count; ++i) {
                         const contracts::ResourceClaim& claim = plugin.resources[i];
-                        if (claim.atomic &&
+                        if ((g_feature_mode || claim.atomic) &&
                             hooks::state_of(claim.id) == contracts::ResourceState::kDisabled) {
                             hooks::set_state(claim.id, contracts::ResourceState::kLive);
                         }
                     }
                 }
-                const bool enabled = plugin_all_gates_want(plugin) && atomic_group_satisfied(plugin);
+                const bool enabled = (g_feature_mode || plugin_all_gates_want(plugin)) && atomic_group_satisfied(plugin);
                 const uint32_t plugin_index = slot.plugin_index;
                 if (enabled && g_gate_degraded[plugin_index]) {
                     g_gate_degraded[plugin_index] = false;
@@ -2237,7 +2526,12 @@ uint32_t lifecycle_step() {
                     enabled, nullptr);
                 if (enabled) {
                     if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-                    (void)register_http_queries(plugin);
+                    if (!register_http_queries(plugin) && g_feature_mode) {
+                        const auto index = slot.plugin_index;
+                        slot = LifecycleTx{};
+                        feature_stop(index, true);
+                        continue;
+                    }
                     // §3.4.4：install 成功后进入 enabled 时注册能力。
                     register_provided_capabilities(slot.plugin_index);
                 } else {
@@ -2245,17 +2539,36 @@ uint32_t lifecycle_step() {
                     unregister_http_queries(plugin);
                     if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
                 }
-            } else if (slot.cascade) {
+            } else if (slot.cascade && !g_feature_mode) {
                 infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
                                      "cascade_stopped");
             } else {
                 // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
                 // kRelease 事务路径与零资源快速路径一致：先置路由墓碑再清理，停用态错误语义唯一。
-                unregister_http_queries(plugin);
+                if (!g_feature_mode) unregister_http_queries(plugin);
                 if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
-                infra::status_update(plugin.id, infra::FeatureState::kInactive, false, nullptr);
+                infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
+                                                                   : infra::FeatureState::kInactive,
+                                     false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
             }
         } else {
+            if (g_feature_mode) {
+                const auto index = slot.plugin_index;
+                const auto kind = slot.kind;
+                slot = LifecycleTx{};
+                if (kind == hooks::TxKind::kInstall) feature_stop(index, true);
+                else {
+                    // The transaction terminates on its first failed inverse step. Sweep
+                    // every remaining installed claim with the existing release/quarantine
+                    // primitive before retiring the plugin's business state.
+                    revoke_installed_resources(plugin, g_install_deps);
+                    slot.in_use = true;
+                    slot.plugin_index = index;
+                    slot.kind = hooks::TxKind::kRelease;
+                    slot.quarantine_pending = true;
+                }
+                continue;
+            }
             // 失败原因取事务记录；两者均无则用固定静态文本。
             const char* error =
                 have_status && status.error != nullptr
@@ -2298,6 +2611,14 @@ uint32_t lifecycle_step() {
     return advanced;
 }
 
+uint32_t lifecycle_step() { return g_feature_mode ? 0 : lifecycle_step_engine(); }
+uint32_t feature_registry_step() {
+    if (!g_feature_mode) return 0;
+    const uint32_t advanced = lifecycle_step_engine();
+    sync_item_count_policy();
+    return advanced;
+}
+
 const contracts::PluginDescriptor* find_plugin(const char* id) {
     if (id == nullptr) return nullptr;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
@@ -2329,6 +2650,13 @@ void plugin_registry_reset_for_test() {
     owner_identity_reset_for_test();
     g_plugin_count = 0;
     g_install_deps = HostDeps{};
+    g_feature_mode = false;
+    g_management_sdk = contracts::QolHostSdk{};
+    g_management_sdk_bound = false;
+    std::memset(g_feature_wanted, 0, sizeof(g_feature_wanted));
+    g_desired_request = nullptr;
+    g_desired_request_context = nullptr;
+    qol::game::item_count_set_extended_mode(qol::game::ItemCountExtendedMode::kOff);
     for (LifecycleTx& slot : g_lifecycle_txs) {
         slot = LifecycleTx{};
     }

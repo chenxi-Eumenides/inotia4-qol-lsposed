@@ -2,12 +2,12 @@
 
 #include <cstdint>
 
-#include "../../contracts/game_host.h"
+// S2 数量编码（a 段 bits22–24、b 段 bits25–31，数量 = 128a+b）与 99/999 有效视图的纯
+// 转换。adapter 私有实现：S2 的编解码语义属于 Game Adapter 常驻数量 seam，插件不得
+// include 本头，也不持有编码布局。所有函数为 constexpr，不读游戏对象、不依赖 mode。
 
-// S2 编解码、99/999 策略与有效视图只属于 stack_limit 插件。调用方通过
-// QolItemCountApi 访问这些语义，不得依赖本头。
-
-namespace qol::features::stack_limit::impl {
+namespace qol::game {
+namespace item_count_codec {
 
 constexpr uint32_t kLegacyMax = 99;
 constexpr uint32_t kExtendedMax = 999;
@@ -16,7 +16,6 @@ constexpr uint32_t max_count(bool extended) {
     return extended ? kExtendedMax : kLegacyMax;
 }
 
-// S2 编码：a 段占 bits22–24，b 段占 bits25–31，数量为 128a+b。
 constexpr uint32_t kS2ShiftA = 22;
 constexpr uint32_t kS2BitsA = 3;
 constexpr uint32_t kS2MaskA = ((1u << kS2BitsA) - 1u) << kS2ShiftA;
@@ -78,12 +77,6 @@ constexpr uint32_t effective_view_count(uint32_t canonical_count, bool enabled) 
     return enabled ? canonical_count : (canonical_count & ((1u << kS2BitsB) - 1u));
 }
 
-// 扩展背包或 999 功能启用时，写侧必须保留完整数量语义。
-constexpr bool writeback_needed(bool extension_bag_enabled, bool extended_feature_enabled) {
-    return extension_bag_enabled || extended_feature_enabled;
-}
-
-// 纯转换不读取游戏对象，也不受 999 原子组门控；驻留后即可提供给消费者。
 constexpr uint32_t field_from_canonical(uint32_t field, uint32_t canonical, bool extended) {
     const uint32_t view = extended ? effective_clamp(canonical, true)
                                    : effective_clamp(canonical & ((1u << kS2BitsB) - 1u), false);
@@ -94,21 +87,10 @@ constexpr uint32_t canonical_from_field(uint32_t field) { return s2_read_count(f
 
 constexpr uint32_t view_from_canonical(uint32_t canonical, bool extended) {
     return extended ? effective_clamp(canonical, true)
-                     : effective_clamp(canonical & ((1u << kS2BitsB) - 1u), false);
+                    : effective_clamp(canonical & ((1u << kS2BitsB) - 1u), false);
 }
 
 constexpr uint32_t view_limit(bool extended) { return max_count(extended); }
 
-// 这些原语由 game/access 的过渡 adapter 提供；插件不直接 include game_symbols.h。
-contracts::QolItemCountEncoding item_count_encoding(const void* item);
-bool read_item_count_field(const void* item, uint32_t* out_value);
-bool write_item_count_field(void* item, uint32_t value);
-
-}  // namespace qol::features::stack_limit::impl
-
-namespace qol::host {
-
-void host_item_count_set_provider(const contracts::QolItemCountApi* api);
-void host_item_count_set_active_probe(bool (*probe)());
-
-}  // namespace qol::host
+}  // namespace item_count_codec
+}  // namespace qol::game
