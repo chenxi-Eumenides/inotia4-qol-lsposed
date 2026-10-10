@@ -161,6 +161,11 @@ if [[ ${#game_apks[@]} -eq 0 ]]; then
     exit 1
 fi
 
+if ! mkdir -p "$repo_root/output"; then
+    printf '无法创建输出目录：%s\n' "$repo_root/output" >&2
+    exit 1
+fi
+
 shopt -s nullglob
 old_outputs=("$repo_root/output/"*lspatch*.apk)
 if [[ ${#old_outputs[@]} -gt 0 ]]; then
