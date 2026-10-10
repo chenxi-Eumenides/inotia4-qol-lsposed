@@ -139,6 +139,35 @@ bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle handle,
     return true;
 }
 
+bool extension_bag_sale_item_matches(qol::contracts::QolItemHandle expected, void* item,
+                                     qol::contracts::QolItemHandle* out_current) {
+    if (item == nullptr || out_current == nullptr || expected.slot == 0 ||
+        expected.generation == 0) return false;
+    void* custody_item = nullptr;
+    if (!g_private_item_custody.lookup(expected, &custody_item) || custody_item != item)
+        return false;
+    const auto* api = item_handle_api();
+    qol::contracts::QolItemHandle current{};
+    uint32_t owner = 0;
+    if (api == nullptr || api->lookup_item == nullptr ||
+        api->lookup_item(item, &current, &owner) != qol::contracts::kQolItemHandleStatusOk ||
+        owner != qol::contracts::kQolItemHandleOwnerProvider ||
+        current.slot != expected.slot || current.generation != expected.generation) return false;
+    *out_current = current;
+    return true;
+}
+
+bool extension_bag_sale_item_begin_release(qol::contracts::QolItemHandle expected, void* item) {
+    qol::contracts::QolItemHandle current{};
+    return extension_bag_sale_item_matches(expected, item, &current) &&
+           g_private_item_custody.begin_release(expected);
+}
+
+bool extension_bag_sale_item_finish_release(qol::contracts::QolItemHandle expected,
+                                            bool committed) {
+    return g_private_item_custody.finish_release(expected, committed);
+}
+
 bool extension_bag_item_handle_for_pointer(
     void* item, qol::contracts::QolItemHandle* out_handle) {
     const auto* api = item_handle_api();
@@ -312,6 +341,11 @@ int64_t provider_sell_price(qol::contracts::QolItemHandle handle, int count,
     return final_price;
 }
 
+QolResult provider_remove_for_sale(int32_t logical_bag, int32_t slot,
+                                   qol::contracts::QolItemHandle expected_item) {
+    return virtual_bag_remove_for_sale(logical_bag, slot, expected_item);
+}
+
 bool provider_equip_projected_item(void* character, qol::contracts::QolItemHandle handle,
                                     int source_bag, int source_slot,
                                     int equip_slot) {
@@ -405,7 +439,7 @@ void extension_bag_begin_internal_equip() { provider_begin_internal_equip(); }
 void extension_bag_end_internal_equip() { provider_end_internal_equip(); }
 
 // ===========================================================================
-// D2a-3c：capability provider —— ExtensionBagApi v2.2 接口表
+// capability provider —— ExtensionBagApi v3.1 接口表
 // ===========================================================================
 //
 // 契约限制（contracts/extension_bag.h）：POD + 固定宽度 C 类型 + 函数指针；
@@ -557,9 +591,11 @@ const qol::contracts::ExtensionBagApi kExtensionBagApi{
     // 8 移动写面
     &provider_move_item,
     // 9 typed inventory view support
-    &provider_logical_bag_capacity,
-    // 10 typed jewel transaction
-    &api_put_jewel,
+     &provider_logical_bag_capacity,
+     // 10 typed jewel transaction
+     &api_put_jewel,
+     // v3.1 sale removal operation
+     &provider_remove_for_sale,
 };
 
 }  // namespace
@@ -740,6 +776,7 @@ const qol::contracts::QolInventoryExtensionProvider kInventoryExtensionProvider{
     &neutral_remove_native_item,
     &neutral_put_jewel,
     &neutral_use_item,
+    &provider_remove_for_sale,
 };
 
 }  // namespace

@@ -94,6 +94,8 @@ bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int t
                                                VirtualBagMoveItemObservation* out);
 void* virtual_bag_find_native_item(int category);
 bool virtual_bag_remove_native_item(void* item, void* use_token);
+QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
+                                      qol::contracts::QolItemHandle expected_item);
 bool virtual_bag_equip_projected_item(void* character, void* item, int source_bag,
                                       int source_slot, int equip_slot);
 bool virtual_bag_consume_native_item(void* item, void* use_token);

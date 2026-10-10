@@ -75,31 +75,35 @@ bool special_rule_hit(const ItemView& item, const Config& cfg) {
 }  // namespace
 
 bool should_sell(const ItemView& item, const Config& cfg) {
+    return should_sell_with_reason(item, cfg) == DecisionReason::kRuleMatch;
+}
+
+DecisionReason should_sell_with_reason(const ItemView& item, const Config& cfg) {
     // 总开关关闭：任何规则均不生效。
     if (!cfg.enabled) {
-        return false;
+        return DecisionReason::kDisabled;
     }
 
     // 硬保护：已强化或已镶嵌的装备永不出售。
     // 已强化 = I_ENCHANT bits6-10 > 0；已镶嵌 = I_SOCKET bits0-3 > 0。
     // 无条件、不受配置影响，在一切规则判定（含宝石/特殊类型）之前先行排除。
     if (item.enhance_level > 0 || item.socket_filled > 0) {
-        return false;
+        return DecisionReason::kHardProtected;
     }
 
     // 装备规则只作用于装备；宝石规则只作用于宝石；两类相互独立。
     if (item.is_equip && equip_rule_hit(item, cfg)) {
-        return true;
+        return DecisionReason::kRuleMatch;
     }
     if (item.is_jewel && jewel_rule_hit(item, cfg)) {
-        return true;
+        return DecisionReason::kRuleMatch;
     }
     if (special_rule_hit(item, cfg)) {
-        return true;
+        return DecisionReason::kRuleMatch;
     }
 
     // 未启用任何规则（或均未命中）时不出售。
-    return false;
+    return DecisionReason::kNoRuleMatch;
 }
 
 }  // namespace autosell

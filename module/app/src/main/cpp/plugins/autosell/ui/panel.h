@@ -13,8 +13,9 @@
 //   （kOwnership/kFailSoft）占用，`hooks/popup_state` 整段快照/写回；
 //   UI_SetPopupProcessInfo(1, id) 打开、(3, 0) 关闭；面板自绘并编辑配置草稿。
 //
-// 开关门控：入口按钮与面板均由全局开关（配置键 `plugin.autosell.enabled`）门控，
-// 默认关闭；开启后下一次背包页绘制时安装按钮，关闭时移除入口引用、请求关闭面板。
+// 开关门控：入口按钮与面板均由插件启用态（descriptor feature `autosell.auto_sell` 的
+// 运行态）门控，默认关闭；开启后下一次背包页绘制时安装按钮，关闭时移除入口引用、请求
+// 关闭面板。
 //
 // 线程模型：入口安装/绘制、面板 enter/process/event 均在游戏主线程；开关位由 JVM/主线程
 // 共享（atomic）。

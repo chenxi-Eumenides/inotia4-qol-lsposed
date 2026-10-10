@@ -9,7 +9,7 @@
 // 配置类型（autosell::Config / SpecialType）在 contracts/autosell.h（稳定端口，
 // UI 消费者经该头访问，避免 feature→feature）。
 //
-// 语义依据 docs/development/plugins/auto-sell.md §4.3、§4.4、§9：
+// 语义依据 docs/archive/development/plugins/auto-sell.md §4.3、§4.4、§9：
 //   - 总开关关闭恒不出售。
 //   - 规则组取消各自开关：**用「值」当开关**——0 = 关闭；从 1 开始的整数为 1-based 档位，
 //     出售阈值 = 值 - 1，比较方向统一 `<=`。
@@ -43,7 +43,15 @@ struct ItemView {
     uint32_t special_types = 0;
 };
 
+enum class DecisionReason : uint8_t {
+    kRuleMatch,
+    kDisabled,
+    kHardProtected,
+    kNoRuleMatch,
+};
+
 // 判定单件物品是否应出售。纯函数，无副作用。
 bool should_sell(const ItemView& item, const Config& cfg);
+DecisionReason should_sell_with_reason(const ItemView& item, const Config& cfg);
 
 }  // namespace autosell

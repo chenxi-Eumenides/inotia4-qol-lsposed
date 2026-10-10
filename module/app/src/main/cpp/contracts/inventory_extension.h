@@ -10,7 +10,7 @@
 
 namespace qol::contracts {
 
-constexpr QolVersion kQolInventoryExtensionVersion{2, 0};
+constexpr QolVersion kQolInventoryExtensionVersion{2, 1};
 
 struct QolInventoryExtensionItemRef {
     int32_t kind;
@@ -46,6 +46,7 @@ struct QolInventoryExtensionProvider {
     // 调用方按“无扩展可用”分支回退 typed 路径；本成员内部沿用插件启用门控。
     int32_t (*use_item)(int32_t bag, int32_t slot, char* out, uint32_t capacity,
                         uint32_t* out_size);
+    QolResult (*remove_for_sale)(int32_t bag, int32_t slot, QolItemHandle expected_item);
 };
 
 struct QolInventoryExtensionAccess {

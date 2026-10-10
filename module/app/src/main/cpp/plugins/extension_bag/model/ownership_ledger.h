@@ -25,6 +25,7 @@ enum class State : uint8_t {
     kBorrowedForView = 2,
     kInventoryOwned = 3,
     kReleased = 4,
+    kReservedForRelease = 5,
 };
 
 enum class Outcome : uint8_t {
@@ -124,6 +125,32 @@ inline Outcome release(Ledger* ledger, uint32_t handle) {
     return Outcome::kOk;
 }
 
+inline Outcome reserve_release(Ledger* ledger, uint32_t handle) {
+    if (ledger == nullptr) return Outcome::kRejectInvalidState;
+    if (!live_state(*ledger, handle, State::kModuleOwned)) return Outcome::kRejectUnknownHandle;
+    ledger->slots[handle_slot(handle)].state = State::kReservedForRelease;
+    return Outcome::kOk;
+}
+
+inline Outcome cancel_reserved_release(Ledger* ledger, uint32_t handle) {
+    if (ledger == nullptr) return Outcome::kRejectInvalidState;
+    if (!live_state(*ledger, handle, State::kReservedForRelease))
+        return Outcome::kRejectUnknownHandle;
+    ledger->slots[handle_slot(handle)].state = State::kModuleOwned;
+    return Outcome::kOk;
+}
+
+inline Outcome commit_reserved_release(Ledger* ledger, uint32_t handle) {
+    if (ledger == nullptr) return Outcome::kRejectInvalidState;
+    if (!live_state(*ledger, handle, State::kReservedForRelease))
+        return Outcome::kRejectUnknownHandle;
+    Slot& slot = ledger->slots[handle_slot(handle)];
+    slot.state = State::kNone;
+    slot.generation += 1;
+    ledger->total_released += 1;
+    return Outcome::kOk;
+}
+
 // 计数审计：allocated == released + handed_over + 在持对象数；借出必须为 0。
 inline Audit audit(const Ledger& ledger) {
     Audit report{};
@@ -131,6 +158,7 @@ inline Audit audit(const Ledger& ledger) {
         const Slot& slot = ledger.slots[i];
         switch (slot.state) {
             case State::kModuleOwned:
+            case State::kReservedForRelease:
                 report.outstanding_objects += 1;
                 report.live_handles += 1;
                 break;

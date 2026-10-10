@@ -61,7 +61,9 @@ bool ui_choice_button_slot_target(void** /*out_slot*/, uintptr_t* /*out_expected
 
 // ---- 契约头：可编译 + POD + sizeof + 枚举值 ----
     static_assert(qol::contracts::kExtensionBagVersionMajor == 3, "major");
-    static_assert(qol::contracts::kExtensionBagVersionMinor == 0, "minor");
+static_assert(qol::contracts::kExtensionBagVersionMinor == 0, "minor");
+static_assert(qol::contracts::kExtensionBagSaleRemoveVersionMinor == 1, "sale minor");
+static_assert(qol::contracts::kExtensionBagPublishedVersionMinor == 1, "published minor");
 static_assert(std::strcmp(qol::contracts::kExtensionBagCapabilityId, "extension_bag") == 0,
               "capability id 必须为 extension_bag");
 static_assert(std::strcmp(qol::contracts::kInventoryMergeProjectionCapabilityId,
@@ -113,10 +115,12 @@ static_assert(std::is_standard_layout<qol::contracts::ExtensionBagMoveObservatio
               "MoveObservation POD");
 static_assert(std::is_trivially_copyable<qol::contracts::ExtensionBagMoveObservation>::value,
               "MoveObservation trivially copyable");
-// 40 个函数指针成员。
-static_assert(sizeof(qol::contracts::ExtensionBagApi) == 40 * sizeof(void*), "Api 成员数/尺寸");
+// 现有 40 个函数指针前缀保持位置，v3.1 sale operation 只尾追加。
+static_assert(sizeof(qol::contracts::ExtensionBagApi) == 41 * sizeof(void*), "Api 成员数/尺寸");
 static_assert(offsetof(qol::contracts::ExtensionBagApi, put_jewel) == 39 * sizeof(void*),
               "v2.2 jewel callback must append without moving prior members");
+static_assert(offsetof(qol::contracts::ExtensionBagApi, remove_for_sale) == 40 * sizeof(void*),
+              "v3.1 sale callback must append without moving prior members");
 static_assert(sizeof(qol::contracts::ExtensionBagMoveObservation) == 72, "MoveObservation 尺寸");
 
 namespace {
@@ -179,8 +183,8 @@ constexpr SiteExpect kSites[] = {
 };
 
 void test_contract_field_counts() {
-    // 10 组函数指针计数：包含 v2.2 typed jewel operation。
-    CHECK(sizeof(ExtensionBagApi) == 40 * sizeof(void*));
+    // v3.1 sale callback is an ABI tail; ExtensionBagApi intentionally has no size prefix.
+    CHECK(sizeof(ExtensionBagApi) == 41 * sizeof(void*));
     CHECK(qol::contracts::satisfies({2, 2}, {2, 1}));
     CHECK(!qol::contracts::satisfies({2, 1}, {2, 2}));
     CHECK(static_cast<uint8_t>(ExtensionBagDropResult::kRejected) == 2);

@@ -18,6 +18,12 @@ void extension_bag_invalidate_item_handle(void* item);
 bool extension_bag_rebind_item_handle(void* item);
 bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle handle, void** out_item);
 bool extension_bag_item_handle_for_pointer(void* item, qol::contracts::QolItemHandle* out_handle);
+// Sale-only, non-mutating identity check and reversible custody release. Caller holds the EB lock.
+bool extension_bag_sale_item_matches(qol::contracts::QolItemHandle expected, void* item,
+                                     qol::contracts::QolItemHandle* out_current);
+bool extension_bag_sale_item_begin_release(qol::contracts::QolItemHandle expected, void* item);
+bool extension_bag_sale_item_finish_release(qol::contracts::QolItemHandle expected,
+                                            bool committed);
 
 namespace qol::features::extension_bag {
 

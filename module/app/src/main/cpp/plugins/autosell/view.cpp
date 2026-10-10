@@ -18,19 +18,29 @@ constexpr int kNormalSealLast = 47;
 
 }  // namespace
 
-bool autosell_build_view(
-    const qol::features::autosell::read_only::InventoryItemRef& ref, autosell::ItemView* out) {
-    if (out == nullptr) return false;
+AutosellViewBuildReason autosell_build_view(
+    const qol::features::autosell::read_only::InventoryItemRef& ref, autosell::ItemView* out,
+    AutosellViewDiagnostics* diagnostics) {
+    if (diagnostics != nullptr) *diagnostics = {};
+    if (out == nullptr) return AutosellViewBuildReason::kNullOutput;
     *out = autosell::ItemView{};
-    if (ref.item.slot == 0 || ref.item.generation == 0) return false;
-    if (ref.category <= 0) return false;
+    if (ref.item.slot == 0 || ref.item.generation == 0)
+        return AutosellViewBuildReason::kInvalidHandle;
+    if (ref.category <= 0) return AutosellViewBuildReason::kInvalidCategory;
     const int category = ref.category;
 
     qol::contracts::QolItemInventoryView facts{};
-    if (!qol::features::autosell::read_only::item_inventory_view(ref.item, &facts) ||
-        (facts.fields & qol::contracts::kQolItemInventoryHasRarity) == 0 ||
+    if (!qol::features::autosell::read_only::item_inventory_view(ref.item, &facts))
+        return AutosellViewBuildReason::kFactsUnavailable;
+    if (diagnostics != nullptr) {
+        diagnostics->fields = facts.fields;
+        diagnostics->rarity = facts.rarity;
+        diagnostics->equip = facts.equip;
+    }
+    if ((facts.fields & qol::contracts::kQolItemInventoryHasRarity) == 0 ||
         (facts.fields & qol::contracts::kQolItemInventoryHasJewelValue) == 0 ||
-        (facts.fields & qol::contracts::kQolItemInventoryHasJewelAttributeType) == 0) return false;
+        (facts.fields & qol::contracts::kQolItemInventoryHasJewelAttributeType) == 0)
+        return AutosellViewBuildReason::kMissingRequiredFields;
     out->is_equip = facts.equip != 0;
     out->rarity = facts.rarity;
     out->enhance_remaining = facts.enchant_remaining;
@@ -40,13 +50,15 @@ bool autosell_build_view(
     int32_t value = 0;
 
     if (!qol::features::autosell::read_only::item_is_jewel(category, &value)) {
-        return false;
+        return AutosellViewBuildReason::kJewelPredicateUnavailable;
     }
     out->is_jewel = value != 0;
+    if (diagnostics != nullptr) diagnostics->jewel = value;
     if (out->is_jewel) {
         // M-4：IsJewel 命中却 category < 28（闭区间 28..32）属异常，跳过，
         // 避免负 tier 落入宝石阈值命中区间。
-        if (category < kJewelCategoryFirst) return false;
+        if (category < kJewelCategoryFirst)
+            return AutosellViewBuildReason::kInvalidJewelCategory;
         out->jewel_tier = category - kJewelCategoryFirst;
 
         // 宝石属性范围：独立宝石自身位域 item+I_COUNT 的 bits0-10=属性值、
@@ -87,5 +99,6 @@ bool autosell_build_view(
         specials |= autosell::kSpecialDice;
     }
     out->special_types = specials;
-    return true;
+    if (diagnostics != nullptr) diagnostics->special_types = specials;
+    return AutosellViewBuildReason::kBuilt;
 }

@@ -21,8 +21,8 @@ constexpr int kAutoSellScanIntervalFrames = 60;
 // 阈值改动不触碰任务生命周期。配置提交由 panel/JNI 共用 slot-data 路径；任务回调每次现取配置。
 void autosell_apply_config(const autosell::Config& config);
 
-// 全局开关（模块设置第 6 项 `autoSellEnabled`）：置位/清位「已武装」标志并同步扫描任务；
-// 幂等、内部加锁。
+// 插件开关（descriptor feature `autosell.auto_sell`）：置位/清位「已武装」标志并同步扫描
+// 任务；幂等、内部加锁。
 //
 // 任务注册条件 = 全局开关已武装、slot-data 当前 session 加载成功且存档配置 `enabled` 为真。
 // save-enter 事件只校验并同步扫描生命周期，不提供存档读写槽来源。

@@ -25,6 +25,8 @@ enum class InventorySellStatus : int32_t {
     kPriceInvalid = 8,
     kCreditFailed = 9,
     kRemoveFailed = 10,
+    kRollbackFailed = 11,
+    kExtensionSaleUnavailable = 12,
 };
 
 struct InventorySellResult {

@@ -7,7 +7,7 @@
 // save-backup 纯逻辑层：.qol_save bundle 编解码、摘要/校验原语、极简 metaJson 字段提取。
 // 零游戏/Android 依赖（纯 STL，编入 host 单测）；文件 IO 与游戏函数调用在 feature.cpp。
 //
-// bundle 布局（大端，与 docs/development/plugins/save-backup.md §3 一致）：
+// bundle 布局（大端，与 docs/archive/development/plugins/save-backup.md §3 一致）：
 // v1：
 //   u32 magic=0x51534231 | u16 ver=1 | u8 sourceSlot | u8[3] rsvd |
 //   u64 exportTimeMs | u32 origLen | origPlain | u32 moduleLen | module |

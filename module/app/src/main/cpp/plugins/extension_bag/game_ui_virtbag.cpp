@@ -11,6 +11,7 @@
 #include "plugins/extension_bag/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
+#include "plugins/extension_bag/model/sale_transaction.h"
 #include "plugins/extension_bag/model/draw_state_lock.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
@@ -1139,6 +1140,39 @@ bool virtual_bag_remove_native_item(void* item, void* raw_use_token) {
     return true;
 }
 
+struct SaleReleaseContext {
+    qol::contracts::QolItemHandle expected;
+};
+
+bool sale_clear_projection(void*, void* control, void* item) {
+    if (control == nullptr || extension_bag_ui_item(control) != item) return false;
+    return extension_bag_ui_set_control_item(control, nullptr);
+}
+
+bool sale_restore_projection(void*, void* control, void* item) {
+    if (control == nullptr || item == nullptr) return false;
+    const void* current = extension_bag_ui_item(control);
+    if (current != nullptr && current != item) return false;
+    return extension_bag_ui_set_control_item(control, item);
+}
+
+bool sale_release_object(void* raw, void* item, qol::contracts::QolItemHandle expected) {
+    auto* context = static_cast<SaleReleaseContext*>(raw);
+    if (context == nullptr || item == nullptr || expected.slot != context->expected.slot ||
+        expected.generation != context->expected.generation ||
+        !extension_bag_sale_item_begin_release(expected, item)) return false;
+    const bool freed = extension_free_item(item);
+    if (!extension_bag_sale_item_finish_release(expected, freed)) {
+        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                      "ERROR sale custody finalize failed slot=%u generation=%u freed=%d",
+                      expected.slot, expected.generation, freed ? 1 : 0);
+        // A successful pool free is irreversible; report it as committed and leave an
+        // ownership diagnostic rather than refunding against a removed object.
+        return freed;
+    }
+    return freed;
+}
+
 bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
     if (item == nullptr) return false;
     void* detail_control = nullptr;
@@ -1541,6 +1575,110 @@ void show_extension_bag_no_space_popup() {
 #include "plugins/extension_bag/extension_bag_mix.inc"
 
 }  // namespace
+
+QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
+                                      qol::contracts::QolItemHandle expected_item) {
+    const int bag = virtual_bag::extension_internal_bag(logical_bag);
+    if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid extension sale slot", 27);
+    }
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!g_virtual_bag_enabled.load(std::memory_order_acquire) ||
+        !extension_bag_session_admitted_locked()) {
+        return qol::contracts::error(kQolErrNotReady, "extension sale session unavailable", 34);
+    }
+    if (object_touch_window_active_locked()) {
+        return qol::contracts::error(kQolErrBusy, "extension sale during touch window", 34);
+    }
+
+    virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+    void* const item = g_module_objects[bag][slot];
+    int item_bag = -1;
+    int item_slot = -1;
+    qol::contracts::QolItemHandle current_item{};
+    const bool located = item != nullptr && module_slot_of_item_locked(item, &item_bag, &item_slot) &&
+                         item_bag == bag && item_slot == slot;
+    const bool custody_matches = located &&
+        extension_bag_sale_item_matches(expected_item, item, &current_item);
+    const bool descriptor_match = located && descriptor.category > 0 && descriptor.count > 0 &&
+                                  g_module_object_categories[bag][slot] == descriptor.category;
+    const bool hash_matches = descriptor_match &&
+        g_module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
+    const bool release_allowed = located &&
+        module_object_release_allowed_locked(bag, slot, item, "inventory sale", false, nullptr);
+    if (!descriptor_match || !hash_matches || !custody_matches || !release_allowed) {
+        return qol::contracts::error(kQolErrConflict, "extension sale identity stale", 29);
+    }
+    void* projection_control = nullptr;
+    if (g_module_view_installed && g_module_view_index == bag) {
+        if (g_projected_item_root == nullptr ||
+            (projection_control = valid_child_locked(g_projected_item_root, slot)) == nullptr ||
+            extension_bag_ui_item(projection_control) != item) {
+            return qol::contracts::error(kQolErrConflict, "extension sale projection stale", 31);
+        }
+    }
+
+    ModuleUseState& use = g_module_object_use[bag][slot];
+    const int capacity = g_virtual_bag_state.capacities[bag];
+    qol::features::extension_bag::model::SaleSlotState state{};
+    state.logical_bag = logical_bag;
+    state.slot = slot;
+    state.capacity = capacity;
+    state.session_admitted = extension_bag_session_admitted_locked();
+    state.descriptor_matches_object = located && g_module_objects[bag][slot] == item;
+    state.descriptor_hash_matches = hash_matches;
+    state.handle_custody_matches = custody_matches;
+    state.expected_item = expected_item;
+    state.current_item = current_item;
+    state.descriptor = &descriptor;
+    state.object = &g_module_objects[bag][slot];
+    state.object_category = &g_module_object_categories[bag][slot];
+    state.object_hash = &g_module_object_hashes[bag][slot];
+    state.object_handle = &g_module_object_handles[bag][slot];
+    state.ledger_handle = g_module_object_handles[bag][slot];
+    state.ledger = &g_ownership_ledger;
+    state.use_active = &use.active;
+    state.use_consumed = &use.consumed;
+    state.use_pending_release = &use.pending_release;
+    state.use_item = &use.item;
+    state.use_generation = &use.generation;
+    state.use_owner = &use.owner;
+    state.dirty = &g_item_state_dirty;
+    state.revision = &g_item_state_revision;
+    state.projection_control = projection_control;
+    SaleReleaseContext release_context{expected_item};
+    const qol::features::extension_bag::model::SaleRemovalOps ops{
+        &release_context, &sale_clear_projection,
+        &sale_restore_projection, &sale_release_object};
+    const auto removed = qol::features::extension_bag::model::remove_for_sale(state, ops);
+    if (removed != qol::features::extension_bag::model::SaleRemovalResult::kRemoved &&
+        removed != qol::features::extension_bag::model::SaleRemovalResult::kRemovedLedgerDiagnostic) {
+        const int error = removed == qol::features::extension_bag::model::SaleRemovalResult::kNotAdmitted
+                              ? kQolErrNotReady
+                          : removed == qol::features::extension_bag::model::SaleRemovalResult::kActiveUse
+                              ? kQolErrBusy
+                              : kQolErrConflict;
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "extension sale removal rejected logical_bag=%d slot=%d result=%u",
+                     logical_bag, slot, static_cast<unsigned>(removed));
+        return qol::contracts::error(error, "extension sale removal rejected", 31);
+    }
+    if (removed == qol::features::extension_bag::model::SaleRemovalResult::kRemovedLedgerDiagnostic) {
+        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                      "ERROR sale removed with ownership ledger diagnostic logical_bag=%d slot=%d",
+                      logical_bag, slot);
+    }
+    if (g_extension_desc_item == item) {
+        reset_extension_desc_item_hooks_locked();
+        g_extension_desc_item = nullptr;
+        g_extension_desc_item_bag = -1;
+        g_extension_desc_item_slot = -1;
+        clear_original_desc_locked();
+    }
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "extension sale removed logical_bag=%d slot=%d",
+                 logical_bag, slot);
+    return qol::contracts::ok();
+}
 
 bool virtual_bag_handle_confirm_use_item(void* item) {
     return extension_confirm_use_item(item);

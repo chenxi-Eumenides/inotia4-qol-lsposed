@@ -32,7 +32,7 @@
 // 与 C1–C21 call patch 全部声明式化；wrapper 业务体逐字留在 plugins/extension_bag
 // （D2c-2b-2 后 feature/patch 已删除），本文件只做声明与门禁接线。
 //
-// 能力面（a3c）：provides `extension_bag` v2.0（contracts/extension_bag.h 的 ExtensionBagApi），
+// 能力面（a3c）：provides `extension_bag` v3.1（ExtensionBagApi 保留 v3.0 前缀并尾追加卖出删除），
 // iface 由 extension_bag_api_table() 提供（EB TU 逐条转发既有 port）。宿主在 enabled 时注册、
 // revoking 时注销（§3.4.4 既有路径）；本文件不新增 JNI / 资源。
 //
@@ -152,13 +152,13 @@ const qol::contracts::InventoryMergeProjectionApi kMergeProjectionApi{
 uint32_t g_resource_count = 0;
 const qol::contracts::ResourceClaim* g_resources = extension_bag_claims(&g_resource_count);
 
-// 能力提供声明：extension_bag v2.2，iface = EB TU 的 ExtensionBagApi 静态表。
+// 能力提供声明：extension_bag v3.1，iface = EB TU 的 ExtensionBagApi 静态表。
 // 注册失败（iface 空/容量满/重复）由宿主只记录不阻断（plugin_registry 既有口径）。
 const qol::contracts::CapabilityProvisionRef kProvides[] = {
     {
         qol::contracts::kExtensionBagCapabilityId,
         {static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMajor),
-         static_cast<uint16_t>(qol::contracts::kExtensionBagVersionMinor)},
+         qol::contracts::kExtensionBagPublishedVersionMinor},
         extension_bag_api_table(),
     },
     {

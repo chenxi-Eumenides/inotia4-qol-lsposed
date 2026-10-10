@@ -216,6 +216,17 @@ target_include_directories(stage4_hook_tests PRIVATE
 target_compile_features(stage4_hook_tests PRIVATE cxx_std_17)
 add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 
+# ITM-16: exercise the production inventory.action.sell entry, its capability-version
+# negotiation, physical-original route, and money/remove/refund ordering.
+add_executable(inventory_action_sell_tests
+    test_inventory_action_sell.cpp
+    ${CPP_DIR}/plugins/inventory_hooks/plugin.cpp
+)
+target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
+target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
+set_target_properties(inventory_action_sell_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME inventory_action_sell_tests COMMAND inventory_action_sell_tests)
+
 add_executable(attribute_quality_tests
     test_attribute_quality.cpp
     ${CPP_DIR}/plugins/attribute_quality/rules.cpp
@@ -262,6 +273,17 @@ target_include_directories(autosell_rules_tests PRIVATE
 )
 target_compile_features(autosell_rules_tests PRIVATE cxx_std_17)
 add_test(NAME autosell_rules_tests COMMAND autosell_rules_tests)
+
+add_executable(autosell_view_diagnostic_tests
+    test_autosell_view_diagnostic.cpp
+    ${CPP_DIR}/plugins/autosell/view.cpp
+    ${CPP_DIR}/plugins/autosell/rules.cpp
+)
+target_include_directories(autosell_view_diagnostic_tests PRIVATE ${CPP_DIR})
+target_compile_features(autosell_view_diagnostic_tests PRIVATE cxx_std_17)
+set_target_properties(autosell_view_diagnostic_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME autosell_view_diagnostic_tests COMMAND autosell_view_diagnostic_tests)
 
 # 自动出售阶段 A 纯逻辑 host 测试（按帧去重 + 物品编码分支）
 add_executable(infra_data_tests
@@ -777,6 +799,31 @@ target_include_directories(extension_bag_contract_tests PRIVATE
 target_compile_features(extension_bag_contract_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_contract_tests COMMAND extension_bag_contract_tests)
+
+# ITM-16: production EB sale-removal transaction core with descriptor/ownership/projection state.
+add_executable(extension_bag_sale_transaction_tests test_extension_bag_sale_transaction.cpp)
+target_include_directories(extension_bag_sale_transaction_tests PRIVATE ${CPP_DIR})
+target_compile_features(extension_bag_sale_transaction_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_sale_transaction_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_sale_transaction_tests COMMAND extension_bag_sale_transaction_tests)
+
+# ITM-16: exercise inventory_trade::sell with neutral provider item removal and the original route.
+add_executable(inventory_trade_provider_sell_tests
+    test_inventory_trade_provider_sell.cpp
+    ${CPP_DIR}/core/native/inventory_trade.cpp
+    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
+    ${CPP_DIR}/infra/log/qol_log.cpp
+)
+target_include_directories(inventory_trade_provider_sell_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(inventory_trade_provider_sell_tests PRIVATE cxx_std_17)
+set_target_properties(inventory_trade_provider_sell_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME inventory_trade_provider_sell_tests COMMAND inventory_trade_provider_sell_tests)
 
 # P3c：EB save.slot_data 消费面（注册/load/capture/complete/准入/排空 + codec 等价）。
 # QOL_LOG_* 宏的 domain 参数被 logging.h 丢弃（extension_bag_log 不解释域），不需要

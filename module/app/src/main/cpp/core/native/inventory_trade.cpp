@@ -82,8 +82,8 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kTaskBagExcluded;
         return result;
     }
-    if (fn_remove_item == nullptr || fn_add_money == nullptr ||
-        fn_minus_money == nullptr || fn_item_get_sell_price == nullptr ||
+    if (fn_add_money == nullptr || fn_minus_money == nullptr ||
+        fn_item_get_sell_price == nullptr ||
         fn_item_is_no_sell == nullptr || fn_get_bit == nullptr) {
         result.status = Status::kSymbolsUnresolved;
         return result;
@@ -103,6 +103,12 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         return result;
     }
     void* item = item_ref.native_item;
+    const bool provider_item = item_ref.kind == InventoryItemKind::kProvider;
+    const qol::contracts::QolInventoryExtensionProvider* provider = extension_provider();
+    if (!provider_item && fn_remove_item == nullptr) {
+        result.status = Status::kSymbolsUnresolved;
+        return result;
+    }
     const uint16_t flags = *reinterpret_cast<uint16_t*>(
         reinterpret_cast<uint8_t*>(item) + I_TYPE);
     const int category = fn_get_bit(flags, 15, 6);
@@ -125,7 +131,6 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         ? fn_get_cumulate_count(item) : 1;
     result.count = count;
     const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const qol::contracts::QolInventoryExtensionProvider* provider = extension_provider();
     const int64_t price = sell_price_with_fallback(provider, item, count);  // 默认变体折扣 70%
     if (price < 0) {
         QOL_LOG_WARN(QolDomain::kInventory,
@@ -161,20 +166,41 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kCreditFailed;
         return result;
     }
-    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
-    // 删除失败回退金币，保持扩展物品原有退款路径语义。
-    qol::contracts::QolItemHandle checkpoint{};
-    const bool suspended = qol::game::begin_item_invalidation(
-        item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
-    const int removed = fn_remove_item(item);
-    if (suspended) qol::game::finish_item_invalidation(checkpoint, removed != 0);
-    if (removed == 0) {
+    // 扩展物品必须走中立 provider 的专用 sale callback；原版物品沿用
+    // INVEN_RemoveItem 与其句柄失效路径。两种删除失败均回退本次已加金币。
+    bool removed = false;
+    if (provider_item) {
+        uint32_t owner = qol::contracts::kQolItemHandleOwnerAny;
+        const qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &owner);
+        if (provider == nullptr || provider->remove_for_sale == nullptr ||
+            owner != qol::contracts::kQolItemHandleOwnerProvider || handle.slot == 0 ||
+            handle.generation == 0) {
+            fn_minus_money(price);
+            result.status = Status::kRemoveFailed;
+            return result;
+        }
+        removed = qol::contracts::succeeded(
+            provider->remove_for_sale(bag, slot, handle));
+    } else {
+        if (fn_remove_item == nullptr) {
+            fn_minus_money(price);
+            result.status = Status::kRemoveFailed;
+            return result;
+        }
+        qol::contracts::QolItemHandle checkpoint{};
+        const bool suspended = qol::game::begin_item_invalidation(
+            item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
+        const int remove_result = fn_remove_item(item);
+        if (suspended) qol::game::finish_item_invalidation(checkpoint, remove_result != 0);
+        removed = remove_result != 0;
+        if (removed && !suspended) qol::game::invalidate_item(item);
+    }
+    if (!removed) {
         fn_minus_money(price);
         result.status = Status::kRemoveFailed;
         return result;
     }
-    if (!suspended) qol::game::invalidate_item(item);
-    sync_projected_slot_if_available(provider, bag, slot);
+    if (!provider_item) sync_projected_slot_if_available(provider, bag, slot);
     result.status = Status::kOk;
     return result;
 }

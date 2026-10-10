@@ -1,5 +1,6 @@
 #include "plugin.h"
 #include "claims.h"
+#include "inventory_logging.h"
 #include "native_inventory_hook.h"
 
 #include <cstdint>
@@ -10,6 +11,7 @@
 #include "../../contracts/sell_price.h"
 #include "../../contracts/world_facts.h"
 #include "../../contracts/item_facts.h"
+#include "sell_transaction.h"
 
 // D2c-2a：native_inventory_hook / inventory_hook_stage4 已迁入本插件目录（原
 // feature/patch）。claims 表与 backup 交还入口同层，经 claims.h 直接引用；原为避免
@@ -44,10 +46,62 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
 };
 
+const contracts::CapabilityRequirement kOptionalRequires[] = {
+    // EB also requires inventory.action, so the host may downgrade this soft edge to break the cycle.
+    {contracts::kExtensionBagCapabilityId,
+     {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+      contracts::kExtensionBagSaleRemoveVersionMinor}},
+};
+
 // 能力接口实例：函数地址编译期常量；宿主在 enabled 时注册、revoking 时注销。
 constexpr contracts::InventoryRefreshApi kInventoryRefreshApi{
     &inventory_native_hook_call_refresh_item_area_original,
 };
+
+struct SellTransactionContext {
+    const contracts::QolGameHost* game = nullptr;
+    const contracts::ExtensionBagApi* extension_prefix = nullptr;
+    const contracts::ExtensionBagApi* extension_sale = nullptr;
+    contracts::QolItemHandle item{};
+    int32_t bag = -1;
+    int32_t slot = -1;
+    bool extension_item = false;
+    int32_t refund_code = kQolOk;
+};
+
+QolResult sell_credit(void* raw, int64_t price) {
+    auto* context = static_cast<SellTransactionContext*>(raw);
+    if (context == nullptr || context->game == nullptr ||
+        context->game->world_action.add_money == nullptr)
+        return contracts::error(kQolErrNotReady, "sell credit unavailable", 23);
+    return context->game->world_action.add_money(price);
+}
+
+QolResult sell_remove(void* raw) {
+    auto* context = static_cast<SellTransactionContext*>(raw);
+    if (context == nullptr || context->game == nullptr)
+        return contracts::error(kQolErrInvalidArgument, "sell context unavailable", 24);
+    if (context->extension_item) {
+        if (context->extension_sale == nullptr ||
+            context->extension_sale->remove_for_sale == nullptr)
+            return contracts::error(kQolErrUnsupported, "extension sale unavailable", 26);
+        return context->extension_sale->remove_for_sale(context->bag, context->slot,
+                                                        context->item);
+    }
+    if (context->game->inventory_write.remove_item == nullptr)
+        return contracts::error(kQolErrNotReady, "physical removal unavailable", 27);
+    return context->game->inventory_write.remove_item(context->item);
+}
+
+QolResult sell_refund(void* raw, int64_t price) {
+    auto* context = static_cast<SellTransactionContext*>(raw);
+    if (context == nullptr || context->game == nullptr ||
+        context->game->world_action.minus_money == nullptr)
+        return contracts::error(kQolErrNotReady, "sell refund unavailable", 22);
+    const QolResult result = context->game->world_action.minus_money(price);
+    context->refund_code = result.code;
+    return result;
+}
 
 contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
                                                      contracts::QolItemHandle expected_item,
@@ -85,6 +139,71 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
     }
     result.category = item_ref.category;
     result.count = item_ref.count;
+    const auto kind = static_cast<contracts::QolInventoryItemKind>(item_ref.kind);
+    if (kind != contracts::QolInventoryItemKind::kOriginal &&
+        kind != contracts::QolInventoryItemKind::kProvider) {
+        result.status = contracts::InventorySellStatus::kStale;
+        return result;
+    }
+    const contracts::ExtensionBagApi* eb_prefix = nullptr;
+    if (g_action_sdk != nullptr && g_action_sdk->capabilities.require != nullptr) {
+        const void* iface = nullptr;
+        const QolResult required = g_action_sdk->capabilities.require(
+            contracts::kExtensionBagCapabilityId,
+            {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+             static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
+            &iface);
+        if (contracts::succeeded(required) && iface != nullptr)
+            eb_prefix = static_cast<const contracts::ExtensionBagApi*>(iface);
+    }
+    const bool logical_bag = eb_prefix != nullptr && eb_prefix->is_logical_bag != nullptr &&
+                             eb_prefix->is_logical_bag(bag);
+    const bool extension_item = kind == contracts::QolInventoryItemKind::kProvider;
+    if (extension_item != logical_bag) {
+        result.status = extension_item ? contracts::InventorySellStatus::kExtensionSaleUnavailable
+                                       : contracts::InventorySellStatus::kStale;
+        return result;
+    }
+    const contracts::ExtensionBagApi* eb_sale = nullptr;
+    if (extension_item) {
+        int32_t identified_bag = -1;
+        int32_t identified_slot = -1;
+        if (eb_prefix == nullptr || eb_prefix->internal_index == nullptr ||
+            eb_prefix->identify_native_item == nullptr) {
+            result.status = contracts::InventorySellStatus::kStale;
+            return result;
+        }
+        const int32_t internal_bag = eb_prefix->internal_index(bag);
+        if (internal_bag < 0 ||
+            !eb_prefix->identify_native_item(item_ref.item, &identified_bag, &identified_slot) ||
+            identified_bag != internal_bag || identified_slot != slot) {
+            result.status = contracts::InventorySellStatus::kStale;
+            return result;
+        }
+        if (g_action_sdk == nullptr || g_action_sdk->capabilities.require == nullptr) {
+            result.status = contracts::InventorySellStatus::kExtensionSaleUnavailable;
+            return result;
+        }
+        // This separate negotiation is the only point at which the v3.1 tail is read.
+        const void* sale_iface = nullptr;
+        const QolResult negotiated = g_action_sdk->capabilities.require(
+            contracts::kExtensionBagCapabilityId,
+            {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+             contracts::kExtensionBagSaleRemoveVersionMinor},
+            &sale_iface);
+        if (!contracts::succeeded(negotiated) || sale_iface == nullptr) {
+            result.status = contracts::InventorySellStatus::kExtensionSaleUnavailable;
+            return result;
+        }
+        eb_sale = static_cast<const contracts::ExtensionBagApi*>(sale_iface);
+        if (eb_sale->remove_for_sale == nullptr) {
+            result.status = contracts::InventorySellStatus::kExtensionSaleUnavailable;
+            return result;
+        }
+    } else if (bag < 0 || bag > 4) {
+        result.status = contracts::InventorySellStatus::kStale;
+        return result;
+    }
     if (g_item_facts == nullptr || g_item_facts->is_no_sell == nullptr ||
         g_item_facts->cumulate_count == nullptr || g_item_facts->sell_price == nullptr) {
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
@@ -114,46 +233,43 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         return result;
     }
     int64_t price = 0;
-    const contracts::ExtensionBagApi* eb = nullptr;
-    if (g_action_sdk != nullptr && g_action_sdk->capabilities.require != nullptr) {
-        const void* iface = nullptr;
-        const QolResult capability_result = g_action_sdk->capabilities.require(
-            contracts::kExtensionBagCapabilityId,
-            QolVersionRange{static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
-                            static_cast<uint16_t>(contracts::kExtensionBagVersionMinor)},
-            &iface);
-        if (contracts::succeeded(capability_result)) {
-            eb = static_cast<const contracts::ExtensionBagApi*>(iface);
+    if (extension_item) {
+        if (eb_prefix->sell_price == nullptr) {
+            result.status = contracts::InventorySellStatus::kExtensionSaleUnavailable;
+            return result;
         }
-    }
-    if (eb != nullptr && eb->sell_price != nullptr) {
-        price = eb->sell_price(item_ref.item, count, true);
+        price = eb_prefix->sell_price(item_ref.item, count, true);
     } else if (!contracts::sell_price::calculate(unit_price, static_cast<uint32_t>(count), true,
-                                                 &price)) {
+                                                  &price)) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
     if (price < 0 || g_action_game->world_action.add_money == nullptr ||
         g_action_game->world_action.minus_money == nullptr ||
-        g_action_game->inventory_write.remove_item == nullptr) {
+        (!extension_item && g_action_game->inventory_write.remove_item == nullptr)) {
         result.status = contracts::InventorySellStatus::kPriceInvalid;
         return result;
     }
     result.price = price;
     result.count = count;
-    if (!contracts::succeeded(g_action_game->world_action.add_money(price))) {
-        result.status = contracts::InventorySellStatus::kCreditFailed;
-        return result;
+    SellTransactionContext transaction{g_action_game, eb_prefix, eb_sale, item_ref.item,
+                                        bag, slot, extension_item, kQolOk};
+    result.status = run_sale_transaction(
+        price, SaleTransactionOps{&transaction, &sell_credit, &sell_remove, &sell_refund});
+    if (result.status == contracts::InventorySellStatus::kRollbackFailed) {
+        QOL_LOG_ERROR(QolDomain::kInventory,
+                      "inventory sell rollback failed source=%s bag=%d slot=%d price=%lld remove=%s refund_code=%d",
+                      source != nullptr ? source : "unknown", bag, slot,
+                      static_cast<long long>(price), extension_item ? "extension" : "original",
+                      transaction.refund_code);
+    } else if (result.status == contracts::InventorySellStatus::kRemoveFailed) {
+        QOL_LOG_WARN(QolDomain::kInventory,
+                     "inventory sell removal failed; refund succeeded source=%s bag=%d slot=%d",
+                     source != nullptr ? source : "unknown", bag, slot);
     }
-    if (!contracts::succeeded(
-            g_action_game->inventory_write.remove_item(item_ref.item))) {
-        (void)g_action_game->world_action.minus_money(price);
-        result.status = contracts::InventorySellStatus::kRemoveFailed;
-        return result;
-    }
-    if (eb != nullptr && eb->sync_projected_slot != nullptr) eb->sync_projected_slot(bag, slot);
-    (void)source;
-    result.status = contracts::InventorySellStatus::kOk;
+    if (result.status == contracts::InventorySellStatus::kOk && !extension_item &&
+        eb_prefix != nullptr && eb_prefix->sync_projected_slot != nullptr)
+        (void)eb_prefix->sync_projected_slot(bag, slot);
     return result;
 }
 
@@ -266,7 +382,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
             kPluginId,
             kPluginVersion,
             2, kRequires,  // requires=world.facts + item.facts
-            0, nullptr,   // optional_requires
+            1, kOptionalRequires,  // optional extension_bag v3.1 sale-removal operation
             2, kProvides,  // provides（inventory_refresh + inventory.action v1.0）
             count, claims,
             0, nullptr,   // jni
