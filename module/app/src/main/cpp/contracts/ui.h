@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 11;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 17;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 13;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 20;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 0;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -70,6 +70,13 @@ enum UiTextButtonStyle : uint32_t {
 
 struct UiButtonDesc {
     UiRect rect;
+    const char* text;
+    uint32_t style;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+struct UiMainMenuTextButtonDesc {
     const char* text;
     uint32_t style;
     QolUiClickFn on_click;
@@ -260,6 +267,14 @@ struct QolUiComponents {
                                    QolUiHandle* out);
     QolResult (*nav_button_set_enabled)(QolUiHandle, uint8_t enabled);
     QolResult (*nav_button_draw)(QolUiHandle);
+    // Creates a managed text button at the current More Games control's exact rect and parent.
+    // The custom UI component owns the replacement; the game owns the borrowed menu parent.
+    QolResult (*main_menu_text_button_create)(const UiMainMenuTextButtonDesc*,
+                                              QolUiHandle* out_original,
+                                              QolUiHandle* out_replacement);
+    // Reports live only for a replacement whose native owner is still verified by the adapter.
+    // NotReady means unknown; callers must retain its component and callback context.
+    QolResult (*main_menu_text_button_is_live)(QolUiHandle, uint8_t* out_live);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -354,7 +369,7 @@ struct QolUiAdapter {
     QolResult (*control_pressed)(QolUiHandle, int32_t*);
     QolResult (*touch_coordinates)(uint64_t, int64_t*, int64_t*);
 
-    // 运行时控件实例面：宿主负责定位、校验、绑定和还原动态 ExecuteProc 槽。
+    // ABI compatibility slots. Dynamic ExecuteProc binding is unsupported; use managed components.
     QolResult (*find_main_menu_more_games)(QolUiHandle*);
     QolResult (*bind_main_menu_more_games)(QolUiClickFn, uint64_t*);
     QolResult (*unbind_main_menu_more_games)(uint64_t);
@@ -430,6 +445,23 @@ struct QolUiAdapter {
     // Synchronous craft hook identity check. The native pointer is the current hook argument only;
     // the adapter compares it with the live UIMix slot children and never retains it.
     QolResult (*craft_stuff_slot_index)(void* transient_control, int32_t* out_index);
+    // Main-menu replacement only: show state is changed through the native ControlObject API.
+    QolResult (*set_control_show)(QolUiHandle, uint8_t show);
+    // Snapshot returns NotReady unless the current menu tree proves the native control is live.
+    // It reads rect/parent only after that proof and is main-thread only.
+    QolResult (*main_menu_more_games_snapshot)(QolUiHandle* out_button,
+                                               QolUiHandle* out_parent, UiRect* out_rect);
+    // Returns NotReady if replacement ownership cannot be established. out_live=0 is conclusive
+    // only when the current tree or callback binding proves this is no longer our button.
+    QolResult (*main_menu_text_button_is_live)(QolUiHandle original, QolUiHandle replacement,
+                                               QolUiClickFn expected_execute, void* owner,
+                                               int32_t* out_live);
+    // Idempotently removes this owner's binding by handle without dereferencing native memory.
+    // On success this owner can no longer be called; a different or absent owner is left untouched.
+    QolResult (*main_menu_text_button_invalidate_binding)(QolUiHandle replacement, void* owner);
+    // Only updates the current More Games slot after the adapter proves it is the live original.
+    // active accepts 0/1; disabled maps to the native non-dispatchable Active value.
+    QolResult (*main_menu_more_games_set_active)(QolUiHandle original, int32_t active);
 };
 
 }  // namespace qol::contracts

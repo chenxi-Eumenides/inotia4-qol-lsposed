@@ -1,4 +1,5 @@
 #include "platform.h"
+#include "host/http_dispatch.h"
 #include <algorithm>
 #include <charconv>
 #include <cstring>
@@ -12,9 +13,7 @@ std::vector<std::pair<FeaturePlatformObserver, void*>> observers;
 QolResult noop(contracts::PluginContext&, uint8_t) { return contracts::ok(); }
 constexpr contracts::FeatureDefinition definitions[] = {
     {"api.enabled", 1, contracts::FeatureCategory::kGeneral, contracts::FeatureType::kToggle,
-     "HTTP API", "控制 Host HTTP 服务，不依赖设置页生命周期。", &noop, nullptr},
-    {"op.enabled", 0, contracts::FeatureCategory::kGeneral, contracts::FeatureType::kToggle,
-     "操作 API", "允许游戏写入操作 API。", &noop, nullptr},
+     "API服务", "控制 Host HTTP 服务及操作 API。", &noop, nullptr},
     {"debug.logging", 0, contracts::FeatureCategory::kGeneral, contracts::FeatureType::kToggle,
      "调试日志", "启用 Host 调试日志。", &noop, nullptr},
 };
@@ -33,7 +32,7 @@ const contracts::PluginDescriptor& platform_config_descriptor() {
         value.id = kPlatformConfigOwner;
         value.version = "1.0.0";
         value.features = definitions;
-        value.feature_count = 3;
+        value.feature_count = 2;
         return value;
     }();
     return descriptor;
@@ -77,7 +76,8 @@ void feature_platform_publish(void*, const FeatureControlSnapshot& snapshot) {
         const auto* features = member(owner.second, "features");
         if (owner.first == kPlatformConfigOwner) {
             state.api_enabled = boolean(features, "api.enabled", true);
-            state.op_enabled = boolean(features, "op.enabled", false);
+            // The API service is the sole runtime gate for op_gated routes. Legacy
+            // features.op.enabled values remain inert in persisted config.
             state.debug_logging = boolean(features, "debug.logging", false);
             const auto* config = member(owner.second, "config");
             if (config) for (const auto& item : config->object) {
@@ -100,6 +100,7 @@ void feature_platform_publish(void*, const FeatureControlSnapshot& snapshot) {
         latest = state;
         callbacks = observers;
     }
+    http_dispatch_set_api_enabled(state.api_enabled);
     for (const auto& callback : callbacks) callback.first(callback.second, state);
 }
 }  // namespace qol::host

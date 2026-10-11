@@ -212,7 +212,7 @@ void test_immutable_reentry(const std::string& root) {
         const auto& event = state.events[index];
         assert(event.revision == receipt.revision + index - 1);
         const bool expected = index == 2;
-        assert(event.desired.size() == 1 && event.desired[0].desired_enable);
+        assert(event.desired.size() == 1 && event.desired[0].desired_enable == (index != 3));
         assert(event.desired[0].any_feature == expected);
         const auto json = serialize_json_value(event.namespaces[0].second);
         assert(event.namespaces[0].first == "plugin.alpha");
@@ -255,11 +255,120 @@ void test_registered_projection(const std::string& root) {
     controller.shutdown();
     std::puts("registered_projection: pass (enable,features,config order; boolean/array types; quote/backslash/control/non-ASCII escaping)");
 }
+
+void test_feature_writes_derive_enable_atomically(const std::string& root) {
+    const auto path = root + "/feature-derived-enable";
+    assert(::mkdir(path.c_str(), 0700) == 0);
+    {
+        std::ofstream file(path + "/config.json");
+        // Bootstrap and explicit desired writes retain their own value; only a feature
+        // submission derives enable from the registered post-edit feature set.
+        file << R"({"plugin.alpha":{"enable":true,"features":{"toggle":false,"entry":false},"config":{}}})";
+    }
+
+    FeatureDirectory directory;
+    assert(directory.add(descriptor("plugin.alpha")).ok());
+    CoreSettingsConfigService service;
+    FeatureController controller(service);
+    Pending state;
+    state.service = &service;
+    assert(controller.initialize(directory, path, &pending, &state).ok());
+
+    auto expect_desired = [&](bool enabled, bool any_feature) {
+        std::vector<PluginDesiredSnapshot> snapshots;
+        assert(controller.desired(&snapshots).ok());
+        assert(snapshots.size() == 1);
+        assert(snapshots[0].desired_enable == enabled);
+        assert(snapshots[0].any_feature == any_feature);
+    };
+    auto submit_feature = [&](const char* key, uint8_t value) {
+        FeatureReceipt receipt{};
+        assert(succeeded(controller.request_set_feature("plugin.alpha", key, value, &receipt)));
+        receipt = await(controller, receipt);
+        assert(receipt.persistence == FeaturePersistence::kPersisted);
+        return receipt;
+    };
+    auto submit_desired = [&](uint8_t value) {
+        FeatureReceipt receipt{};
+        assert(succeeded(controller.request_desired("plugin.alpha", value, &receipt)));
+        receipt = await(controller, receipt);
+        assert(receipt.persistence == FeaturePersistence::kPersisted);
+    };
+
+    expect_desired(true, false); // Startup does not normalize persisted desired state.
+    const auto initial_revision = service.revision();
+    assert(controller.invoke_entry("plugin.alpha", "entry").code == kQolErrBlocked);
+    expect_desired(true, false); // A rejected entry invocation changes neither feature nor enable.
+    assert(service.revision() == initial_revision);
+
+    submit_desired(0);
+    expect_desired(false, false);
+    submit_feature("toggle", 1); // A feature can turn on while enable was false.
+    expect_desired(true, true);
+    submit_feature("entry", 1); // Entry booleans participate in the aggregate.
+    expect_desired(true, true);
+    submit_feature("toggle", 0);
+    expect_desired(true, true); // One remaining enabled feature keeps enable true.
+    submit_feature("entry", 0);
+    expect_desired(false, false); // Turning the last feature off derives enable=false.
+
+    submit_desired(1);
+    expect_desired(true, false);
+    submit_feature("entry", 0); // Repeated false repairs a stale true desired value.
+    expect_desired(false, false);
+    submit_feature("toggle", 1);
+    expect_desired(true, true);
+    submit_desired(0);
+    expect_desired(false, true);
+    submit_feature("toggle", 1); // Repeated true repairs a stale false desired value.
+    expect_desired(true, true);
+
+    submit_feature("entry", 1);
+    submit_desired(0);
+    int entry_requests = 0;
+    controller.bind_entry_admission(&entry_admission, &entry_requests);
+    const auto before_invocation_revision = service.revision();
+    assert(succeeded(controller.invoke_entry("plugin.alpha", "entry")));
+    assert(entry_requests == 1 && business_calls == 0);
+    assert(service.revision() == before_invocation_revision);
+    expect_desired(false, true); // Invoking an entry does not derive or repair enable.
+
+    submit_feature("entry", 0); // Keep toggle on so the following write would turn all off.
+    expect_desired(true, true);
+    const std::string durable_before_failure = bytes(path + "/config.json");
+    const auto revision_before_failure = service.revision();
+    size_t effects_before_failure;
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        effects_before_failure = state.revisions.size();
+    }
+    assert(::rename((path + "/config.json").c_str(), (path + "/saved.json").c_str()) == 0);
+    assert(::mkdir((path + "/config.json").c_str(), 0700) == 0);
+    FeatureReceipt failed{};
+    assert(succeeded(controller.request_set_feature("plugin.alpha", "toggle", 0, &failed)));
+    failed = await(controller, failed);
+    assert(failed.persistence == FeaturePersistence::kFailed &&
+           failed.actual == FeatureActual::kNotSubmitted);
+    assert(service.revision() == revision_before_failure);
+    assert(bytes(path + "/saved.json") == durable_before_failure);
+    uint8_t toggle_value = 0, entry_value = 1;
+    assert(succeeded(controller.read_feature("plugin.alpha", "toggle", &toggle_value)) && toggle_value);
+    assert(succeeded(controller.read_feature("plugin.alpha", "entry", &entry_value)) && !entry_value);
+    expect_desired(true, true); // Feature and derived enable did not partially commit.
+    {
+        std::lock_guard<std::mutex> lock(state.mutex);
+        assert(state.revisions.size() == effects_before_failure);
+    }
+    assert(business_calls == 0);
+    controller.shutdown();
+    std::puts("feature_write_derived_enable: pass (multi-feature/entry aggregation, last-off, on-from-disabled, repeated same-value repair, entry invocation guard, atomic persistence failure)");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
     assert(argc == 2);
-    static_assert(std::is_standard_layout_v<FeatureDefinition> && std::is_trivial_v<FeatureDefinition>);
+    static_assert(std::is_standard_layout_v<FeatureDefinition> &&
+                  std::is_trivially_copyable_v<FeatureDefinition>);
     static_assert(std::is_standard_layout_v<QolFeatureApi> && std::is_trivial_v<QolFeatureApi>);
     FeatureDirectory directory;
     auto invalid = descriptor("invalid");
@@ -289,6 +398,7 @@ int main(int argc, char** argv) {
     test_seed_type_validation(path, directory);
     test_immutable_reentry(path);
     test_registered_projection(path);
+    test_feature_writes_derive_enable_atomically(path);
     {
         std::ofstream file(path + "/config.json");
         file << R"({"plugin.alpha":{"enable":true,"features":{"toggle":false,"obsolete":true},"config":{"unknown":{"array":[1,null,"x"]}}},"unregistered":{"config":{"keep":true}}})";
@@ -388,7 +498,7 @@ int main(int argc, char** argv) {
     await(controller, receipt);
     assert(succeeded(controller.request_set_feature("plugin.alpha", "entry", 0, &receipt)));
     await(controller, receipt);
-    assert(controller.desired(&snapshots).ok() && !snapshots[0].any_feature && snapshots[0].desired_enable);
+    assert(controller.desired(&snapshots).ok() && !snapshots[0].any_feature && !snapshots[0].desired_enable);
     assert(controller.invoke_entry("plugin.alpha", "entry").code == kQolErrBlocked);
 
     // A callback exception is distinct from durable failure; later events still drain in order.
@@ -415,16 +525,21 @@ int main(int argc, char** argv) {
     assert(succeeded(controller.read_config("plugin.alpha", "arbitrary", buffer, sizeof(buffer), &size)));
     assert(std::string(buffer, size) == "[false,{}]");
 
+    assert(succeeded(controller.request_set_feature("plugin.alpha", "entry", 0, &receipt)));
+    await(controller, receipt);
     const auto revision = service.revision();
     size_t effects;
     { std::lock_guard<std::mutex> lock(state.mutex); effects = state.revisions.size(); }
     assert(::rename((path + "/config.json").c_str(), (path + "/saved.json").c_str()) == 0);
     assert(::mkdir((path + "/config.json").c_str(), 0700) == 0);
-    assert(succeeded(controller.request_desired("plugin.alpha", 0, &receipt)));
+    assert(succeeded(controller.request_set_feature("plugin.alpha", "toggle", 0, &receipt)));
     receipt = await(controller, receipt);
     assert(receipt.persistence == FeaturePersistence::kFailed && receipt.actual == FeatureActual::kNotSubmitted);
     assert(service.revision() == revision);
-    assert(controller.desired(&snapshots).ok() && snapshots[0].desired_enable);
+    uint8_t toggle_value = 0, entry_value = 1;
+    assert(succeeded(controller.read_feature("plugin.alpha", "toggle", &toggle_value)) && toggle_value);
+    assert(succeeded(controller.read_feature("plugin.alpha", "entry", &entry_value)) && !entry_value);
+    assert(controller.desired(&snapshots).ok() && snapshots[0].desired_enable && snapshots[0].any_feature);
     { std::lock_guard<std::mutex> lock(state.mutex); assert(state.revisions.size() == effects); }
     assert(business_calls == 0);
     std::puts("host_feature_controller_tests: pass (schema/defaults/existing/metadata, enable isolation, own/admin leases, async receipts/failure/revisions/reentry, entry boolean, zero-feature invalid)");

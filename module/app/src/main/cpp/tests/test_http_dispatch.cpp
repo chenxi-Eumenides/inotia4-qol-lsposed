@@ -254,7 +254,7 @@ void test_command_tombstone_and_restore() {
     CHECK(output.status == 200);
 }
 
-void test_op_gate() {
+void test_api_service_gates_operation_routes() {
     reset();
     setup_post_route("/api/op/features/lifecycle", "owner", 1);
     const auto dispatch = qol::host::http_dispatch_api();
@@ -264,22 +264,26 @@ void test_op_gate() {
     uint8_t storage[128]{};
     HttpRes output = response(storage, sizeof(storage));
     HttpReq input = post_request("/api/op/features/lifecycle", "{\"id\":\"simple_mode\"}");
-    // 默认关闭：op_gated 路由在 handler 前拒绝，信封与 Kotlin 403 一致。
+    // 默认关闭：op_gated routes fail closed before handler dispatch.
     CHECK(dispatch.dispatch(&input, &output).code == kQolErrBlocked);
     CHECK(output.status == 403);
     CHECK(std::string(reinterpret_cast<char*>(storage), output.body_size) ==
           "{\"ok\":false,\"error\":\"op disabled\"}");
 
-    qol::host::http_dispatch_set_op_enabled(true);
+    qol::host::http_dispatch_set_api_enabled(true);
     output = response(storage, sizeof(storage));
     CHECK(dispatch.dispatch(&input, &output).ok == 0);
     CHECK(output.status == 200);
 
-    // 非 gated 路由不受 op 状态影响。
+    qol::host::http_dispatch_set_api_enabled(false);
+    output = response(storage, sizeof(storage));
+    CHECK(dispatch.dispatch(&input, &output).code == kQolErrBlocked);
+    CHECK(output.status == 403);
+
+    // Non-operation routes remain available to direct dispatch independently of this gate.
     setup_post_route("/api/quest/quit_quest", "core.quest", 0);
     CHECK(dispatch.register_command(HttpMethod::kPost, "/api/quest/quit_quest", "core.quest",
                                     &command_handler, nullptr).ok == 0);
-    qol::host::http_dispatch_set_op_enabled(false);
     output = response(storage, sizeof(storage));
     input = post_request("/api/quest/quit_quest", "{}");
     CHECK(dispatch.dispatch(&input, &output).ok == 0);
@@ -294,7 +298,7 @@ int main() {
     test_inactive_and_missing_handler();
     test_command_registration_and_dispatch();
     test_command_tombstone_and_restore();
-    test_op_gate();
+    test_api_service_gates_operation_routes();
     std::printf("http_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -1058,7 +1058,7 @@ int32_t save_on_resource_ready_trampoline(contracts::PluginContext& /*ctx*/,
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"core.save.provider", 1, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kToggle, "存档领域服务", "提供存档事实、槽数据持久化与进退档协调。",
+     contracts::FeatureType::kToggle, "存档领域服务", "",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

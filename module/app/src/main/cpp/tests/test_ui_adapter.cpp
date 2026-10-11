@@ -1,4 +1,5 @@
 #include <cassert>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,7 @@ struct FakeControl {
     UiRect rect{};
     alignas(int64_t) uint8_t data[CS_SIZE]{};
     std::vector<FakeControl*> children;
+    UiClickProc execute_proc = nullptr;
 };
 
 enum class NativeCall { kCreate, kRect, kOption, kThreshold, kBar, kBarType, kTarget,
@@ -41,6 +43,20 @@ void* g_native_parent = nullptr;
 void* g_target = nullptr;
 NativeScrollDrawProc g_scroll_draw_proc = nullptr;
 uint64_t g_event_args[3]{};
+bool g_menu_tree_known = false;
+void* g_menu_original = nullptr;
+void* g_menu_parent = nullptr;
+std::vector<void*> g_menu_children;
+int g_menu_tree_reads = 0;
+int g_menu_screen_observations = 0;
+const char* g_last_menu_screen_observation = nullptr;
+int g_execute_proc_reads = 0;
+int g_control_parent_reads = 0;
+int g_memory_accessible_reads = 0;
+int g_active_calls = 0;
+void* g_active_control = nullptr;
+uint32_t g_active_argument = UINT32_MAX;
+uint32_t g_active_value = UINT32_MAX;
 
 void set_data(FakeControl& control, size_t field, int64_t value) {
     std::memcpy(control.data + field, &value, sizeof(value));
@@ -176,6 +192,12 @@ int image_unit_unload_calls(int32_t unit) {
 int protected_unload_calls() { return static_cast<int>(g_atlases.protected_unloads()); }
 void fake_imgsys_unit_load(int32_t unit) { g_atlases.load(unit); }
 void fake_imgsys_unit_unload(int32_t unit) { g_atlases.unload(unit); }
+void fake_control_set_active(void* control, uint32_t active) {
+    ++g_active_calls;
+    g_active_control = control;
+    g_active_argument = active;
+    g_active_value = active == 0 ? 0x21u : 0x20u;
+}
 
 }  // namespace
 
@@ -203,6 +225,7 @@ decltype(fn_ui_create_group_base_control) fn_ui_create_group_base_control = &fak
 decltype(fn_touch_handle_event) fn_touch_handle_event = &fake_tree_event;
 decltype(fn_touch_handle_delete_control) fn_touch_handle_delete_control = &fake_tree_delete;
 decltype(fn_ctrl_get_data) fn_ctrl_get_data = &fake_control_data;
+decltype(fn_ctrl_set_active) fn_ctrl_set_active = &fake_control_set_active;
 
 decltype(fn_ui_set_popup_process_info) fn_ui_set_popup_process_info = nullptr;
 decltype(fn_ctrl_get_count) fn_ctrl_get_count = &fake_child_count;
@@ -230,8 +253,31 @@ void* ui_create_button(void*, UiRect, const char*, UiClickProc, UiDrawProc) { re
 void* ui_create_label(void*, UiRect, const char*, UiDrawProc) { return nullptr; }
 void* ui_find_child_in_area(void*, UiRect) { return nullptr; }
 void* ui_main_menu_more_games_button() { return nullptr; }
-bool ui_bind_main_menu_more_games(UiClickProc, uint64_t*) { return false; }
-bool ui_unbind_main_menu_more_games(uint64_t) { return false; }
+bool ui_set_control_show(void*, bool) { return false; }
+void ui_main_menu_observe_screen(const char* screen) {
+    ++g_menu_screen_observations;
+    g_last_menu_screen_observation = screen;
+}
+bool ui_main_menu_live_tree_snapshot(void* probe, void** out_original, void** out_parent,
+                                     int32_t* out_original_in_tree,
+                                     int32_t* out_probe_in_tree) {
+    ++g_menu_tree_reads;
+    if (out_original == nullptr || out_parent == nullptr || out_original_in_tree == nullptr ||
+        out_probe_in_tree == nullptr) return false;
+    *out_original = nullptr;
+    *out_parent = nullptr;
+    *out_original_in_tree = 0;
+    *out_probe_in_tree = 0;
+    if (!g_menu_tree_known) return false;
+    *out_original = g_menu_original;
+    *out_parent = g_menu_parent;
+    *out_original_in_tree = std::find(g_menu_children.begin(), g_menu_children.end(),
+        g_menu_original) != g_menu_children.end() ? 1 : 0;
+    *out_probe_in_tree = probe != nullptr &&
+        std::find(g_menu_children.begin(), g_menu_children.end(), probe) != g_menu_children.end()
+        ? 1 : 0;
+    return true;
+}
 bool ui_popup_stack_top_matches(void (*)()) { return false; }
 void ui_clear_control_proc(void*) {}
 bool ui_delete_control(void* control) {
@@ -239,6 +285,7 @@ bool ui_delete_control(void* control) {
     return true;
 }
 bool game_memory_accessible(const void* address, size_t, char) {
+    ++g_memory_accessible_reads;
     return address != nullptr && g_memory_accessible;
 }
 bool ui_set_control_item(void*, void*) { return false; }
@@ -301,6 +348,7 @@ bool ui_get_rect(void* ctrl, UiRect* rect) {
 bool ui_clone_button_style(void* target, void* source, UiClickProc on_click) {
     if (target == nullptr || source == nullptr || on_click == nullptr) return false;
     g_click_proc = on_click;
+    static_cast<FakeControl*>(target)->execute_proc = on_click;
     return true;
 }
 
@@ -333,8 +381,12 @@ bool ui_item_proc_source_control(void* destination, uint64_t event, const void* 
     *out_source = field->source;
     return true;
 }
-void* ui_control_parent(void*) { return nullptr; }
-bool ui_execute_proc_matches(void*, UiClickProc) { return false; }
+void* ui_control_parent(void*) { ++g_control_parent_reads; return nullptr; }
+bool ui_execute_proc_matches(void* control, UiClickProc expected) {
+    ++g_execute_proc_reads;
+    return control != nullptr && expected != nullptr &&
+        static_cast<FakeControl*>(control)->execute_proc == expected;
+}
 bool ui_control_absolute_origin(void*, int64_t*, int64_t*) { return false; }
 bool ui_touch_state(void**, void**, int64_t*, int64_t*) { return false; }
 
@@ -392,6 +444,12 @@ int main() {
     g_game_main_thread = false;
     CHECK(adapter->is_main_thread() == 0);
     g_game_main_thread = true;
+    const char* current_screen = nullptr;
+    const int screen_observations_before = g_menu_screen_observations;
+    CHECK(adapter->screen_name(&current_screen).ok == kQolOk);
+    CHECK(current_screen != nullptr && std::strcmp(current_screen, "test") == 0 &&
+          g_menu_screen_observations == screen_observations_before + 1 &&
+          g_last_menu_screen_observation == current_screen);
     CHECK(adapter->draw_native_toggle != nullptr);
     CHECK(adapter->control_item_identity != nullptr);
     CHECK(adapter->item_proc_source_control != nullptr);
@@ -400,6 +458,16 @@ int main() {
     CHECK(adapter->draw_native_text_button_label != nullptr);
     CHECK(adapter->draw_native_close_button != nullptr);
     CHECK(adapter->craft_stuff_slot_index != nullptr);
+    CHECK(adapter->set_control_show != nullptr);
+    CHECK(adapter->main_menu_more_games_set_active != nullptr);
+    CHECK(adapter->main_menu_more_games_snapshot != nullptr);
+    CHECK(adapter->main_menu_text_button_is_live != nullptr);
+    CHECK(adapter->main_menu_text_button_invalidate_binding != nullptr);
+    uint64_t retired_menu_binding_token = 99;
+    CHECK(adapter->bind_main_menu_more_games(+[](void*) {}, &retired_menu_binding_token).code ==
+          kQolErrUnsupported);
+    CHECK(retired_menu_binding_token == 0);
+    CHECK(adapter->unbind_main_menu_more_games(1).code == kQolErrUnsupported);
     int32_t craft_slot = -1;
     CHECK(adapter->craft_stuff_slot_index(reinterpret_cast<void*>(0x55), &craft_slot).ok == kQolOk &&
           craft_slot == 2);
@@ -440,9 +508,30 @@ int main() {
                    offsetof(qol::contracts::QolUiAdapter, draw_native_close_button),
                    "ui adapter close draw must append the table");
     static_assert(offsetof(qol::contracts::QolUiAdapter, draw_native_close_button) +
-                      sizeof(adapter->draw_native_close_button) ==
-                   offsetof(qol::contracts::QolUiAdapter, craft_stuff_slot_index),
-                   "craft slot identity must append the UI adapter table");
+                       sizeof(adapter->draw_native_close_button) ==
+                    offsetof(qol::contracts::QolUiAdapter, craft_stuff_slot_index),
+                    "craft slot identity must append the UI adapter table");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, craft_stuff_slot_index) +
+                       sizeof(adapter->craft_stuff_slot_index) ==
+                    offsetof(qol::contracts::QolUiAdapter, set_control_show),
+                    "menu visibility helper must append the UI adapter table");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, set_control_show) +
+                       sizeof(adapter->set_control_show) ==
+                    offsetof(qol::contracts::QolUiAdapter, main_menu_more_games_snapshot),
+                    "live menu snapshot must append the UI adapter table");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, main_menu_more_games_snapshot) +
+                       sizeof(adapter->main_menu_more_games_snapshot) ==
+                    offsetof(qol::contracts::QolUiAdapter, main_menu_text_button_is_live),
+                    "menu owner identity check must follow the live tree snapshot");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, main_menu_text_button_is_live) +
+                       sizeof(adapter->main_menu_text_button_is_live) ==
+                    offsetof(qol::contracts::QolUiAdapter, main_menu_text_button_invalidate_binding),
+                    "menu binding invalidation must append the UI adapter tail");
+    static_assert(offsetof(qol::contracts::QolUiAdapter,
+                           main_menu_text_button_invalidate_binding) +
+                       sizeof(adapter->main_menu_text_button_invalidate_binding) ==
+                    offsetof(qol::contracts::QolUiAdapter, main_menu_more_games_set_active),
+                    "native More Games active setter must append the adapter tail");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
@@ -511,7 +600,7 @@ int main() {
     components.major = qol::contracts::kUiContractMajor;
     components.minor = qol::contracts::kUiContractMinor;
     CHECK(components.size == sizeof(qol::contracts::QolUiComponents));
-    CHECK(components.major == 1 && components.minor == 11);
+    CHECK(components.major == 1 && components.minor == 13);
 
     const qol::contracts::UiRect rect{10, 20, 30, 40};
     FakeControl control{};
@@ -534,7 +623,7 @@ int main() {
           g_border_rect[3] == 140);
     CHECK(adapter->draw_border_rect(0, 0, 47, 140).code == kQolErrInvalidArgument);
 
-    CHECK(adapter->minor == 17);
+    CHECK(adapter->minor == 20);
     CHECK(adapter->set_clip != nullptr && adapter->reset_clip != nullptr);
     CHECK(adapter->set_clip(-12, 34, 320, 140).ok == kQolOk);
     CHECK(g_set_clip_calls == 1);
@@ -599,6 +688,170 @@ int main() {
     CHECK(g_click_proc != nullptr);
     g_click_proc(&control);
     CHECK(g_click_user == &click_marker);
+
+    // A non-main-menu screen is unknown, not proof that a retained menu component is dead.
+    FakeControl menu_parent{}, original_menu_button{}, replacement_menu_button{};
+    original_menu_button.rect = UiRect{612, 488, 220, 52};
+    int menu_owner = 1;
+    qol::contracts::QolUiHandle menu_button = &control;
+    qol::contracts::QolUiHandle menu_parent_out = &control;
+    qol::contracts::UiRect menu_rect{9, 8, 7, 6};
+    const int rect_reads_before_unknown = g_get_rect_calls;
+    const int execute_reads_before_unknown = g_execute_proc_reads;
+    g_menu_tree_known = false;
+    CHECK(adapter->main_menu_more_games_snapshot(&menu_button, &menu_parent_out, &menu_rect).code ==
+          kQolErrNotReady);
+    CHECK(menu_button == nullptr && menu_parent_out == nullptr && menu_rect.x == 0 &&
+          menu_rect.y == 0 && menu_rect.w == 0 && menu_rect.h == 0);
+    int32_t menu_live = 1;
+    CHECK(adapter->main_menu_text_button_is_live(&original_menu_button, &replacement_menu_button,
+          &click_proc, &menu_owner, &menu_live).code == kQolErrNotReady);
+    CHECK(menu_live == 0 && g_get_rect_calls == rect_reads_before_unknown &&
+          g_execute_proc_reads == execute_reads_before_unknown && g_control_parent_reads == 0);
+
+    // A stale slot address is returned as opaque data by the fake tree reader; because it is not
+    // present among the trusted root's children, neither snapshot nor live checking reads its fields.
+    const auto stale_slot = reinterpret_cast<void*>(static_cast<uintptr_t>(0xdead));
+    g_menu_tree_known = true;
+    g_menu_original = stale_slot;
+    g_menu_parent = &menu_parent;
+    g_menu_children = {&replacement_menu_button};
+    const int rect_reads_before_stale = g_get_rect_calls;
+    const int execute_reads_before_stale = g_execute_proc_reads;
+    CHECK(adapter->main_menu_more_games_snapshot(&menu_button, &menu_parent_out, &menu_rect).code ==
+          kQolErrNotReady);
+    CHECK(menu_button == nullptr && menu_parent_out == nullptr &&
+          g_get_rect_calls == rect_reads_before_stale);
+    CHECK(adapter->main_menu_text_button_is_live(stale_slot, &replacement_menu_button,
+          &click_proc, &menu_owner, &menu_live).ok == kQolOk);
+    CHECK(menu_live == 0 && g_execute_proc_reads == execute_reads_before_stale &&
+          g_control_parent_reads == 0);
+
+    // Only a tree-proven original may be inspected for its rectangle. A replacement is live only
+    // when it is also a current child and its host binding matches both callback and owner.
+    g_menu_original = &original_menu_button;
+    g_menu_children = {&original_menu_button, &replacement_menu_button};
+    const int rect_reads_before_live = g_get_rect_calls;
+    CHECK(adapter->main_menu_more_games_snapshot(&menu_button, &menu_parent_out, &menu_rect).ok ==
+          kQolOk);
+    CHECK(menu_button == &original_menu_button && menu_parent_out == &menu_parent &&
+          menu_rect.x == 612 && menu_rect.y == 488 && menu_rect.w == 220 && menu_rect.h == 52 &&
+          g_get_rect_calls == rect_reads_before_live + 1);
+
+    // The adapter passes bool-semantic values; the native setter maps them to Active states.
+    int active_calls_before = g_active_calls;
+    int tree_reads_before_invalid_active = g_menu_tree_reads;
+    int memory_reads_before_invalid_active = g_memory_accessible_reads;
+    CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 2).code ==
+          kQolErrInvalidArgument);
+    CHECK(g_active_calls == active_calls_before && g_menu_tree_reads == tree_reads_before_invalid_active &&
+          g_memory_accessible_reads == memory_reads_before_invalid_active);
+    CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 0).ok == kQolOk);
+    CHECK(g_active_calls == active_calls_before + 1 && g_active_control == &original_menu_button &&
+          g_active_argument == 0 && g_active_value == 0x21);
+    CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 1).ok == kQolOk);
+    CHECK(g_active_calls == active_calls_before + 2 && g_active_control == &original_menu_button &&
+          g_active_argument == 1 && g_active_value == 0x20);
+
+    // Reject before any native memory access when the caller is off-thread, the menu is unknown,
+    // the slot is stale, or a live but different button is supplied.
+    active_calls_before = g_active_calls;
+    int memory_reads_before_rejects = g_memory_accessible_reads;
+    tree_reads_before_invalid_active = g_menu_tree_reads;
+    g_game_main_thread = false;
+    CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 0).code ==
+          kQolErrNotReady);
+    CHECK(g_menu_tree_reads == tree_reads_before_invalid_active &&
+          g_memory_accessible_reads == memory_reads_before_rejects &&
+          g_active_calls == active_calls_before);
+    g_game_main_thread = true;
+
+    g_menu_tree_known = false;
+    CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 0).code ==
+          kQolErrNotReady);
+    CHECK(g_memory_accessible_reads == memory_reads_before_rejects &&
+          g_active_calls == active_calls_before);
+
+    g_menu_tree_known = true;
+    g_menu_original = stale_slot;
+    g_menu_children = {&replacement_menu_button};
+    CHECK(adapter->main_menu_more_games_set_active(stale_slot, 0).code == kQolErrNotReady);
+    CHECK(g_memory_accessible_reads == memory_reads_before_rejects &&
+          g_active_calls == active_calls_before);
+
+    g_menu_original = &original_menu_button;
+    g_menu_children = {&original_menu_button, &replacement_menu_button};
+    CHECK(adapter->main_menu_more_games_set_active(&replacement_menu_button, 0).code ==
+          kQolErrNotFound);
+    CHECK(g_memory_accessible_reads == memory_reads_before_rejects &&
+          g_active_calls == active_calls_before);
+    g_memory_accessible = false;
+    CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 0).code ==
+          kQolErrNotReady);
+    CHECK(g_active_calls == active_calls_before);
+    g_memory_accessible = true;
+
+    int old_menu_owner = 2;
+    int reused_menu_owner = 3;
+    CHECK(adapter->set_click_proc(&replacement_menu_button, &click_proc, &old_menu_owner).ok ==
+          kQolOk);
+    CHECK(adapter->main_menu_text_button_is_live(&original_menu_button,
+          &replacement_menu_button, &click_proc, &old_menu_owner, &menu_live).ok == kQolOk);
+    CHECK(menu_live == 1);
+    const int execute_reads_before_wrong_owner = g_execute_proc_reads;
+    CHECK(adapter->main_menu_text_button_is_live(&original_menu_button,
+          &replacement_menu_button, &click_proc, &menu_owner, &menu_live).ok == kQolOk);
+    CHECK(menu_live == 0 && g_execute_proc_reads == execute_reads_before_wrong_owner);
+    CHECK(adapter->main_menu_text_button_is_live(&original_menu_button,
+          &replacement_menu_button, &draw_proc, &old_menu_owner, &menu_live).ok == kQolOk);
+    CHECK(menu_live == 0 && g_execute_proc_reads == execute_reads_before_wrong_owner);
+
+    // The original slot may change while our replacement remains in the current root. It must
+    // still report live so the component layer can safely delete this owned native child.
+    g_menu_original = stale_slot;
+    g_menu_children = {&replacement_menu_button};
+    CHECK(adapter->main_menu_text_button_is_live(&original_menu_button,
+          &replacement_menu_button, &click_proc, &old_menu_owner, &menu_live).ok == kQolOk);
+    CHECK(menu_live == 1);
+    g_native_calls.clear();
+    CHECK(adapter->delete_control(&replacement_menu_button).ok == kQolOk);
+    CHECK(g_native_calls.size() == 1 && g_native_calls[0].kind == NativeCall::kDelete &&
+          g_native_calls[0].control == &replacement_menu_button);
+    g_click_user = &menu_owner;
+    g_click_proc(&replacement_menu_button);
+    CHECK(g_click_user == &menu_owner);  // deletion removed the old owner's trampoline binding
+
+    // Reusing the native address for a different component cannot inherit the old owner's live
+    // identity, and invalidating the stale owner must leave the new registry binding intact.
+    g_menu_original = &original_menu_button;
+    g_menu_children = {&original_menu_button, &replacement_menu_button};
+    CHECK(adapter->set_click_proc(&replacement_menu_button, &click_proc, &reused_menu_owner).ok ==
+          kQolOk);
+    CHECK(adapter->main_menu_text_button_is_live(&original_menu_button,
+          &replacement_menu_button, &click_proc, &old_menu_owner, &menu_live).ok == kQolOk);
+    CHECK(menu_live == 0);
+    const int tree_reads_before_invalidate = g_menu_tree_reads;
+    const int rect_reads_before_invalidate = g_get_rect_calls;
+    const int execute_reads_before_invalidate = g_execute_proc_reads;
+    const int screen_observations_before_invalidate = g_menu_screen_observations;
+    g_menu_tree_known = false;
+    CHECK(adapter->main_menu_text_button_invalidate_binding(&replacement_menu_button,
+          &old_menu_owner).ok == kQolOk);
+    CHECK(g_menu_tree_reads == tree_reads_before_invalidate &&
+          g_get_rect_calls == rect_reads_before_invalidate &&
+          g_execute_proc_reads == execute_reads_before_invalidate &&
+          g_menu_screen_observations == screen_observations_before_invalidate + 1 &&
+          g_last_menu_screen_observation == nullptr);
+    g_click_user = nullptr;
+    g_click_proc(&replacement_menu_button);
+    CHECK(g_click_user == &reused_menu_owner);
+    CHECK(adapter->main_menu_text_button_invalidate_binding(&replacement_menu_button,
+          &reused_menu_owner).ok == kQolOk);
+    g_click_user = &menu_owner;
+    g_click_proc(&replacement_menu_button);
+    CHECK(g_click_user == &menu_owner);
+    g_menu_tree_known = false;
+
     CHECK(adapter->draw_control(&control).ok == kQolOk);
     CHECK(g_draw_control_calls == 1);
     char bounded_text[] = "value";

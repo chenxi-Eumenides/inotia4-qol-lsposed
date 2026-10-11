@@ -134,11 +134,31 @@ ConfigStoreResult production_feature_bootstrap(const std::string& directory) {
     self.catalog_items.reserve(self.directory.definitions().size());
     self.catalog.reserve(self.directory.definitions().size());
     for (const auto& plugin : self.directory.definitions()) {
+        const bool core_plugin = plugin.plugin_id.compare(0, 5, "core.") == 0;
+        const bool core_custom_ui = plugin.plugin_id == "core.custom_ui";
+        // Core residency remains outside the player catalog except for the debug-only entry.
+        // The settings page belongs to core.settings but its registered id is "settings".
+        if ((core_plugin && !core_custom_ui) || plugin.plugin_id == "settings") continue;
+        const auto include_feature = [core_custom_ui](const contracts::FeatureDefinition& feature) {
+            if (!core_custom_ui) return true;
+            return feature.id != nullptr &&
+                std::strcmp(feature.id, "core.custom_ui.open_debug_components") == 0 &&
+                feature.type == contracts::FeatureType::kEntry &&
+                feature.category == contracts::FeatureCategory::kHidden &&
+                feature.on_entry != nullptr;
+        };
+        const auto visible_count = static_cast<size_t>(std::count_if(
+            plugin.features.begin(), plugin.features.end(), include_feature));
+        if (visible_count == 0) continue;
+
         self.catalog_items.emplace_back();
         auto& items = self.catalog_items.back();
+        items.reserve(visible_count);
         for (const auto& feature : plugin.features) {
+            if (!include_feature(feature)) continue;
             items.push_back({feature.id, feature.default_enabled, feature.category,
-                             feature.type, feature.name, feature.description});
+                             feature.type, feature.name, feature.description,
+                             feature.action_label});
         }
         self.catalog.push_back({plugin.plugin_id.c_str(), items.data(),
                                 static_cast<uint32_t>(items.size()),

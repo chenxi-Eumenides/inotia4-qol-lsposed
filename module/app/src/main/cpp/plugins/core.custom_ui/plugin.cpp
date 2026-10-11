@@ -232,12 +232,12 @@ QolResult open_debug_components_feature(contracts::PluginContext& ctx) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"core.custom_ui.ui_tools", 1, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kToggle, "共享界面工具", "提供组件、面板导航、原生选择控件与文本机制。",
+     contracts::FeatureType::kToggle, "共享界面工具", "",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     {"core.custom_ui.open_debug_components", 1, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kEntry, "打开调试面板", "查看和测试 UI 组件。",
-     nullptr, &open_debug_components_feature},
+      contracts::FeatureType::kEntry, "打开调试面板", "",
+      nullptr, &open_debug_components_feature, "打开"},
 #endif
 };
 

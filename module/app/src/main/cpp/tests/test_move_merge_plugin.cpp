@@ -289,7 +289,8 @@ void test_single_owner_and_feature_lifecycle() {
     // 单一 feature、无配置/事件订阅：门禁即插件活跃态，由宿主 lifecycle 驱动。
     assert(descriptor.feature_count == 1);
     assert(std::strcmp(descriptor.features[0].id, "move_merge.drag_merge") == 0);
-    assert(descriptor.features[0].default_enabled == 0);
+    assert(descriptor.features[0].default_enabled == 1);
+    assert(descriptor.features[0].category == FeatureCategory::kBasicOptimization);
 
     const void* ports[] = {&move_port, &character_port};
     PluginContext ctx{sizeof(PluginContext), kHostSdkMajor, kHostSdkMinor, &sdk, nullptr,

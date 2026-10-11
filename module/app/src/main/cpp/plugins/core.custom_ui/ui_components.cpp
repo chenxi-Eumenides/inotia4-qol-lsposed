@@ -40,6 +40,7 @@ struct ScrollRow {
 
 struct Component {
     contracts::QolUiHandle native = nullptr;
+    contracts::QolUiHandle original_menu_button = nullptr;
     ComponentKind kind = ComponentKind::kPanel;
     UiRect rect{};
     std::string text;
@@ -65,6 +66,7 @@ struct Component {
     QolResult draw_result = contracts::ok();
     bool pending_destroy = false;
     bool native_deleted = false;
+    bool main_menu_text_button = false;
     bool enabled = true;
     bool selection_enabled = true;
 };
@@ -73,6 +75,7 @@ const contracts::QolUiAdapter* g_adapter = nullptr;
 std::unordered_map<contracts::QolUiHandle, Component*> g_components;
 std::vector<std::unique_ptr<Component>> g_roots;
 uint32_t g_callback_depth = 0;
+bool g_unbind_pending = false;
 
 struct CallbackScope {
     CallbackScope() { ++g_callback_depth; }
@@ -80,9 +83,12 @@ struct CallbackScope {
 };
 
 QolResult destroy(contracts::QolUiHandle handle);
+QolResult text_button_draw(contracts::QolUiHandle handle);
+void text_button_execute(void* user);
 bool native_list_ready();
 bool rect_within_int32(UiRect rect);
 bool valid_utf8(const char* text);
+bool main_menu_adapter_ready();
 QolResult require_list(contracts::QolUiHandle handle, Component** out);
 void request_host_back();
 
@@ -105,6 +111,10 @@ QolResult not_ready() {
 
 QolResult not_found() {
     return contracts::error(kQolErrNotFound, kNotFound, 20);
+}
+
+void main_menu_text_button_draw_proc(void* handle) {
+    if (handle != nullptr) (void)text_button_draw(handle);
 }
 
 QolResult unsupported() {
@@ -140,8 +150,9 @@ QolResult create_component(ComponentKind kind, uint32_t native_kind, UiRect rect
                            bool allow_foreign_native_parent = false) {
     if (out == nullptr) return invalid_argument();
     *out = nullptr;
-    if (g_callback_depth != 0) return not_ready();
-    if (!adapter_ready() || g_adapter->create_control == nullptr || g_adapter->set_rect == nullptr) {
+    if (g_callback_depth != 0 || g_unbind_pending) return not_ready();
+    if (!adapter_ready() || g_adapter->create_control == nullptr || g_adapter->set_rect == nullptr ||
+        g_adapter->delete_control == nullptr) {
         return not_ready();
     }
     if ((kind == ComponentKind::kPanel && parent != nullptr) ||
@@ -165,9 +176,14 @@ QolResult create_component(ComponentKind kind, uint32_t native_kind, UiRect rect
 
     contracts::QolUiHandle native = nullptr;
     const QolResult create_result = g_adapter->create_control(native_kind, parent, &native);
-    if (!contracts::succeeded(create_result)) return create_result;
+    if (!contracts::succeeded(create_result)) {
+        if (native != nullptr && g_adapter->delete_control != nullptr) {
+            const QolResult cleanup = g_adapter->delete_control(native);
+            return contracts::succeeded(cleanup) ? create_result : cleanup;
+        }
+        return create_result;
+    }
     if (native == nullptr) return not_ready();
-
     std::unique_ptr<Component> component(new Component());
     component->native = native;
     component->kind = kind;
@@ -176,23 +192,29 @@ QolResult create_component(ComponentKind kind, uint32_t native_kind, UiRect rect
     component->style = style;
     component->on_click = on_click;
     component->user = click_user;
+    const auto cleanup_native = [native, &component, parent_component](QolResult failure) {
+        if (g_adapter->delete_control == nullptr) return not_ready();
+        const QolResult cleanup = g_adapter->delete_control(native);
+        if (contracts::succeeded(cleanup)) return failure;
+        return cleanup;
+    };
     Component* component_ptr = component.get();
 
     QolResult result = g_adapter->set_rect(native, rect);
-    if (!contracts::succeeded(result)) return result;
+    if (!contracts::succeeded(result)) return cleanup_native(result);
     if (g_adapter->set_text != nullptr && text != nullptr) {
         result = g_adapter->set_text(native, component->text.c_str());
-        if (!contracts::succeeded(result)) return result;
+        if (!contracts::succeeded(result)) return cleanup_native(result);
     }
     if (draw_proc != nullptr) {
-        if (g_adapter->set_draw_proc == nullptr) return not_ready();
+        if (g_adapter->set_draw_proc == nullptr) return cleanup_native(not_ready());
         result = g_adapter->set_draw_proc(native, draw_proc);
-        if (!contracts::succeeded(result)) return result;
+        if (!contracts::succeeded(result)) return cleanup_native(result);
     }
     if (on_click != nullptr) {
-        if (g_adapter->set_click_proc == nullptr) return not_ready();
+        if (g_adapter->set_click_proc == nullptr) return cleanup_native(not_ready());
         result = g_adapter->set_click_proc(native, on_click, click_user);
-        if (!contracts::succeeded(result)) return result;
+        if (!contracts::succeeded(result)) return cleanup_native(result);
     }
 
     if (parent_component != nullptr) {
@@ -418,10 +440,43 @@ void erase_component(Component* component) {
     for (auto& child : component->children) erase_component(child.get());
 }
 
+QolResult discard_new_component(Component* component) {
+    if (component == nullptr || g_adapter == nullptr || g_adapter->delete_control == nullptr) {
+        return not_ready();
+    }
+    if (component->main_menu_text_button) {
+        if (!main_menu_adapter_ready() ||
+            !contracts::succeeded(g_adapter->main_menu_text_button_invalidate_binding(
+                component->native, component))) return not_ready();
+    }
+    const QolResult deleted = g_adapter->delete_control(component->native);
+    if (!contracts::succeeded(deleted)) return deleted;
+    Component* parent = component->parent;
+    erase_component(component);
+    if (parent == nullptr) {
+        const auto it = std::find_if(g_roots.begin(), g_roots.end(),
+            [component](const std::unique_ptr<Component>& root) { return root.get() == component; });
+        if (it != g_roots.end()) g_roots.erase(it);
+        return contracts::ok();
+    }
+    const auto it = std::find_if(parent->children.begin(), parent->children.end(),
+        [component](const std::unique_ptr<Component>& child) { return child.get() == component; });
+    if (it != parent->children.end()) parent->children.erase(it);
+    return contracts::ok();
+}
+
 bool native_list_ready() {
     return g_adapter != nullptr && g_adapter->major == contracts::kUiAdapterMajor &&
         g_adapter->minor >= kUiAdapterBaseMinor && g_adapter->is_main_thread != nullptr &&
         g_adapter->is_main_thread() != 0 && g_adapter->delete_control != nullptr;
+}
+
+bool main_menu_adapter_ready() {
+    constexpr size_t kMenuAdapterSize =
+        offsetof(contracts::QolUiAdapter, main_menu_text_button_invalidate_binding) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->main_menu_text_button_invalidate_binding);
+    return g_adapter != nullptr && g_adapter->major == contracts::kUiAdapterMajor &&
+        g_adapter->minor >= contracts::kUiAdapterMinor && g_adapter->size >= kMenuAdapterSize;
 }
 
 QolResult delete_owned_lists(Component* component) {
@@ -430,6 +485,25 @@ QolResult delete_owned_lists(Component* component) {
         component->kind == ComponentKind::kNavButton) {
         if (component->native_deleted) return contracts::ok();
         if (!native_list_ready()) return not_ready();
+        if (component->main_menu_text_button) {
+            if (!main_menu_adapter_ready()) return not_ready();
+            int32_t is_live = 0;
+            const QolResult identity = g_adapter->main_menu_text_button_is_live == nullptr
+                ? not_ready() : g_adapter->main_menu_text_button_is_live(
+                    component->original_menu_button, component->native, &text_button_execute,
+                    component, &is_live);
+            if (!contracts::succeeded(identity)) return identity;
+            if (is_live == 0) {
+                // Only a conclusive absence permits dropping the owner without native deletion.
+                if (g_adapter->main_menu_text_button_invalidate_binding == nullptr ||
+                    !contracts::succeeded(g_adapter->main_menu_text_button_invalidate_binding(
+                        component->native, component))) return not_ready();
+                component->native_deleted = true;
+                return contracts::ok();
+            }
+            if (is_live != 1) return not_ready();
+            // The adapter proved both current native liveness and this component's click owner.
+        }
         const QolResult result = g_adapter->delete_control(component->native);
         if (contracts::succeeded(result)) component->native_deleted = true;
         return result;
@@ -557,8 +631,10 @@ bool valid_utf8(const char* text) {
     return true;
 }
 
-QolResult text_button_create(const contracts::UiButtonDesc* desc,
-                             contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+QolResult text_button_create_impl(const contracts::UiButtonDesc* desc,
+                                  contracts::QolUiHandle parent,
+                                  contracts::QolUiHandle* out,
+                                  bool allow_native_parent, bool draw_from_native_tree) {
     if (out == nullptr) return invalid_argument();
     *out = nullptr;
     if (desc == nullptr || !valid_utf8(desc->text) || desc->on_click == nullptr ||
@@ -591,19 +667,24 @@ QolResult text_button_create(const contracts::UiButtonDesc* desc,
         }
     }
     const QolResult created = create_component(ComponentKind::kTextButton, 1, desc->rect,
-                                                parent, nullptr, desc->style, nullptr, nullptr,
-                                                nullptr, out, borrowed_row_owner);
+        parent, nullptr, desc->style, nullptr, nullptr,
+        draw_from_native_tree ? &main_menu_text_button_draw_proc : nullptr,
+        out, borrowed_row_owner, allow_native_parent);
     if (!contracts::succeeded(created)) return created;
     Component* button = find_component(*out);
     if (button == nullptr || g_adapter->set_click_proc == nullptr) {
         if (button != nullptr) {
-            const QolResult cleanup = destroy(*out);
+            const QolResult cleanup = discard_new_component(button);
+            if (!contracts::succeeded(cleanup)) return cleanup;
+        } else if (g_adapter->delete_control != nullptr) {
+            const QolResult cleanup = g_adapter->delete_control(*out);
             if (!contracts::succeeded(cleanup)) return cleanup;
         }
         *out = nullptr;
         return not_ready();
     }
     button->text = desc->text;
+    button->main_menu_text_button = draw_from_native_tree;
     button->on_click = desc->on_click;
     button->user = desc->user;
     QolResult bound = contracts::ok();
@@ -616,11 +697,76 @@ QolResult text_button_create(const contracts::UiButtonDesc* desc,
         else bound = g_adapter->set_click_proc(button->native, &text_button_execute, button);
     }
     if (!contracts::succeeded(bound)) {
-        const QolResult cleanup = destroy(button->native);
+        const QolResult cleanup = discard_new_component(button);
         *out = nullptr;
         return contracts::succeeded(cleanup) ? bound : cleanup;
     }
     return contracts::ok();
+}
+
+QolResult text_button_create(const contracts::UiButtonDesc* desc,
+                             contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    return text_button_create_impl(desc, parent, out, false, false);
+}
+
+QolResult main_menu_text_button_create(const contracts::UiMainMenuTextButtonDesc* desc,
+                                      contracts::QolUiHandle* out_original,
+                                      contracts::QolUiHandle* out_replacement) {
+    if (out_original == nullptr || out_replacement == nullptr || out_original == out_replacement) {
+        return invalid_argument();
+    }
+    *out_original = nullptr;
+    *out_replacement = nullptr;
+    if (desc == nullptr || desc->on_click == nullptr || !valid_utf8(desc->text) ||
+        (desc->style != contracts::kUiTextButtonFontDefault &&
+         desc->style != contracts::kUiTextButtonFontLarger)) return invalid_argument();
+    if (!on_main_thread() || !main_menu_adapter_ready() ||
+        g_adapter->main_menu_more_games_snapshot == nullptr ||
+        g_adapter->main_menu_text_button_is_live == nullptr ||
+        g_adapter->main_menu_text_button_invalidate_binding == nullptr) return not_ready();
+
+    contracts::QolUiHandle parent = nullptr;
+    UiRect rect{};
+    QolResult result = g_adapter->main_menu_more_games_snapshot(out_original, &parent, &rect);
+    if (!contracts::succeeded(result)) return result;
+    if (*out_original == nullptr || parent == nullptr) {
+        *out_original = nullptr;
+        return not_ready();
+    }
+
+    const contracts::UiButtonDesc button_desc{rect, desc->text, desc->style,
+                                               desc->on_click, desc->user};
+    result = text_button_create_impl(&button_desc, parent, out_replacement, true, true);
+    if (!contracts::succeeded(result)) {
+        *out_original = nullptr;
+        return result;
+    }
+    Component* button = find_component(*out_replacement);
+    if (button == nullptr) {
+        (void)destroy(*out_replacement);
+        *out_original = nullptr;
+        *out_replacement = nullptr;
+        return not_ready();
+    }
+    button->original_menu_button = *out_original;
+    return result;
+}
+
+QolResult main_menu_text_button_is_live(contracts::QolUiHandle handle, uint8_t* out_live) {
+    if (out_live == nullptr) return invalid_argument();
+    *out_live = 0;
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (!button->main_menu_text_button) return unsupported();
+    if (!main_menu_adapter_ready() || g_adapter->main_menu_text_button_is_live == nullptr) {
+        return not_ready();
+    }
+    int32_t live = 0;
+    const QolResult result = g_adapter->main_menu_text_button_is_live(
+        button->original_menu_button, button->native, &text_button_execute, button, &live);
+    if (contracts::succeeded(result)) *out_live = live != 0 ? 1 : 0;
+    return result;
 }
 
 QolResult text_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
@@ -1531,6 +1677,8 @@ const contracts::QolUiComponents kUiComponents{
     &nav_button_create,
     &nav_button_set_enabled,
     &nav_button_draw,
+    &main_menu_text_button_create,
+    &main_menu_text_button_is_live,
 };
 
 }  // namespace
@@ -1542,19 +1690,32 @@ bool ui_components_bind(const contracts::QolUiAdapter* adapter) {
         adapter->major != contracts::kUiAdapterMajor || adapter->minor < kUiAdapterBaseMinor) {
         return false;
     }
+    if (g_unbind_pending) {
+        ui_components_unbind();
+        if (g_unbind_pending) return false;
+    }
     g_adapter = adapter;
     return true;
 }
 
 void ui_components_unbind() {
     // owned 列表必须先归还 native 控件，再清空回调上下文。
-    if (g_callback_depth != 0) return;
+    if (g_callback_depth != 0) {
+        g_unbind_pending = true;
+        return;
+    }
     for (const auto& root : g_roots) {
-        if (!contracts::succeeded(delete_owned_lists(root.get()))) return;
+        if (!contracts::succeeded(delete_owned_lists(root.get()))) {
+            // Keep the adapter and every callback owner alive; the next bind retries cleanup and
+            // fails closed if the native tree is still unknown.
+            g_unbind_pending = true;
+            return;
+        }
     }
     g_adapter = nullptr;
     g_components.clear();
     g_roots.clear();
+    g_unbind_pending = false;
 }
 
 const contracts::QolUiComponents* ui_components_api() { return &kUiComponents; }

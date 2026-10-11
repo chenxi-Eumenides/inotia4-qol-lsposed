@@ -159,6 +159,14 @@ bool ui_control_active(void* ctrl, int32_t* out_active) {
     return true;
 }
 
+bool ui_set_control_show(void* ctrl, bool show) {
+    if (ctrl == nullptr || !qol::game::game_host_is_main_thread() ||
+        fn_control_object_set_show == nullptr ||
+        !game_memory_accessible(ctrl, CO_SIZE, 'w')) return false;
+    fn_control_object_set_show(ctrl, show ? 1u : 0u);
+    return true;
+}
+
 bool ui_control_user_type(void* ctrl, int32_t* out_type) {
     if (ctrl == nullptr || out_type == nullptr || fn_control_object_get_user_type == nullptr) {
         return false;

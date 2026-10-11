@@ -79,7 +79,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
-    {"attribute_range_display.ranges", 1, contracts::FeatureCategory::kGameplay,
+    {"attribute_range_display.ranges", 1, contracts::FeatureCategory::kBasicOptimization,
      contracts::FeatureType::kToggle, "属性范围显示", "在物品描述中显示装备属性范围。",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };

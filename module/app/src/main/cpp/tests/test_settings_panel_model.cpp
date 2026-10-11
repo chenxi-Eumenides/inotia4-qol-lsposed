@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "plugins/core.settings/panels/settings_model.h"
+#include "plugins/core.settings/panels/feature_model.h"
 
 static int g_checks = 0;
 static int g_failures = 0;
@@ -43,6 +44,7 @@ using qol::features::core_ui::settings_model::right_control_left;
 using qol::features::core_ui::settings_model::row_to_item_index;
 using qol::features::core_ui::settings_model::use_item_description;
 using qol::features::core_ui::settings_model::toggle_enabled;
+using qol::features::core_ui::feature_model::entry_enabled;
 
 SettingsItemView item(const char* id, const char* category, SettingsItemType type) {
     SettingsItemView view{};
@@ -140,6 +142,18 @@ void test_toggle_enable_state_machine() {
     CHECK(!toggle_enabled(false, confirmed_valid, availability_valid, available,
                           gesture_requested, request_id, request_queued));
     CHECK(create_count == 1 && destroy_count == 0);
+}
+
+void test_entry_enable_state() {
+    qol::features::core_ui::feature_model::Item entry{};
+    entry.type = qol::contracts::FeatureType::kEntry;
+    CHECK(entry_enabled(entry, true, false, false));
+    CHECK(!entry_enabled(entry, false, false, false));
+    CHECK(!entry_enabled(entry, true, true, false));
+    CHECK(!entry_enabled(entry, true, false, true));
+
+    entry.type = qol::contracts::FeatureType::kToggle;
+    CHECK(!entry_enabled(entry, true, false, false));
 }
 
 void test_error_text() {
@@ -258,6 +272,7 @@ int main() {
     test_category_mapping();
     test_toggle_target();
     test_toggle_enable_state_machine();
+    test_entry_enable_state();
     test_error_text();
     test_row_paint_geometry();
     test_stable_row_text_layout();

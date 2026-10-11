@@ -171,7 +171,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"core.craft.provider", 1, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kToggle, "合成领域服务", "提供合成界面与配方的只读事实。",
+     contracts::FeatureType::kToggle, "合成领域服务", "",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

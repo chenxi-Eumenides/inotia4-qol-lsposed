@@ -492,7 +492,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"core.data.catalog", 1, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kToggle, "静态数据服务", "提供游戏静态数据目录与查询。",
+     contracts::FeatureType::kToggle, "静态数据服务", "",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

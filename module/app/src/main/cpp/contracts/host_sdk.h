@@ -343,6 +343,7 @@ struct QolFeatureCatalogItem {
     FeatureType type;
     const char* name;
     const char* description;
+    const char* action_label = nullptr;
 };
 
 struct QolFeatureCatalogPlugin {

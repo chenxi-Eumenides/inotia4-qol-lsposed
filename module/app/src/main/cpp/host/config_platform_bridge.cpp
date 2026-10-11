@@ -264,11 +264,12 @@ void config_store_mark_bootstrapped(bool completed) {
 }
 
 void config_apply_safe_native_state(const ModuleConfig& config) {
-    http_dispatch_set_op_enabled(config.op_enabled);
+    http_dispatch_set_op_enabled(config.api_enabled);
     qol_log_set_debug_enabled(config.debug_log_enabled);
 }
 
 void config_apply_api_enabled(bool enabled) {
+    http_dispatch_set_op_enabled(enabled);
 #if !QOL_KERNEL_ONLY
     if (enabled) {
         frame_cache_start();

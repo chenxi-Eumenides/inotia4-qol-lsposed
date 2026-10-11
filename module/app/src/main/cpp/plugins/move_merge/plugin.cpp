@@ -434,7 +434,7 @@ const contracts::QolPortRequirement kPortRequirements[] = {{
 }};
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
-    {"move_merge.drag_merge", 0, contracts::FeatureCategory::kGameplay,
+    {"move_merge.drag_merge", 1, contracts::FeatureCategory::kBasicOptimization,
      contracts::FeatureType::kToggle, "拖拽合并", "拖拽同类物品时自动合并。",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };

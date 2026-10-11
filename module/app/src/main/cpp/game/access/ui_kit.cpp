@@ -4,11 +4,16 @@
 #include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/game_host_port.h"
+#include "game/clock.h"
+#include "game/state/game_state.h"
 #include "game/symbols/game_symbols.h"
 
+#include <array>
 #include <cstring>
 
 namespace {
+
+int64_t g_main_menu_first_seen_frame = -1;
 
 void set_control_proc(void* ctrl, uintptr_t proc) {
     *reinterpret_cast<uintptr_t*>(static_cast<uint8_t*>(ctrl) + CO_CONTROL_PROC) = proc;
@@ -21,11 +26,6 @@ void set_execute_proc(void* ctrl, UiClickProc proc) {
         *reinterpret_cast<void**>(data + CB_EXECUTE_PROC) = reinterpret_cast<void*>(proc);
     }
 }
-
-void** g_more_games_slot = nullptr;
-void* g_more_games_original = nullptr;
-void* g_more_games_replacement = nullptr;
-uint64_t g_more_games_token = 0;
 
 }  // namespace
 
@@ -49,47 +49,67 @@ void* ui_main_menu_more_games_button() {
     return *slot;
 }
 
-bool ui_bind_main_menu_more_games(UiClickProc replacement, uint64_t* out_token) {
-    if (out_token != nullptr) *out_token = 0;
-    if (replacement == nullptr || out_token == nullptr) return false;
-    void* button = ui_main_menu_more_games_button();
-    if (button == nullptr) return false;
-    auto* data = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(button) + CO_DATA);
-    if (data == nullptr) return false;
-    auto** slot = reinterpret_cast<void**>(data + CB_EXECUTE_PROC);
-    if (!game_memory_accessible(slot, sizeof(void*), 'w')) return false;
-    if (g_more_games_slot == slot && *slot == reinterpret_cast<void*>(replacement)) {
-        *out_token = g_more_games_token;
-        return true;
+void ui_main_menu_observe_screen(const char* screen) {
+    if (!qol::game::game_host_is_main_thread()) return;
+    if (screen == nullptr || std::strcmp(screen, "main_menu") != 0) {
+        g_main_menu_first_seen_frame = -1;
+        return;
     }
-    if (g_more_games_slot != nullptr && game_memory_accessible(g_more_games_slot, sizeof(void*), 'w') &&
-        *g_more_games_slot == reinterpret_cast<void*>(replacement)) {
-        *g_more_games_slot = g_more_games_original;
+    if (g_main_menu_first_seen_frame < 0) {
+        g_main_menu_first_seen_frame = qol::game::frame_count();
     }
-    g_more_games_slot = slot;
-    g_more_games_original = *slot;
-    if (g_more_games_original == nullptr) {
-        g_more_games_slot = nullptr;
-        return false;
-    }
-    *slot = reinterpret_cast<void*>(replacement);
-    g_more_games_replacement = reinterpret_cast<void*>(replacement);
-    g_more_games_token = 1;
-    *out_token = g_more_games_token;
-    return true;
 }
 
-bool ui_unbind_main_menu_more_games(uint64_t token) {
-    if (token == 0 || token != g_more_games_token) return false;
-    if (g_more_games_slot != nullptr &&
-        game_memory_accessible(g_more_games_slot, sizeof(void*), 'w') &&
-        *g_more_games_slot == g_more_games_replacement) {
-        *g_more_games_slot = g_more_games_original;
+bool ui_main_menu_live_tree_snapshot(void* probe, void** out_original, void** out_parent,
+                                     int32_t* out_original_in_tree,
+                                     int32_t* out_probe_in_tree) {
+    if (out_original == nullptr || out_parent == nullptr || out_original_in_tree == nullptr ||
+        out_probe_in_tree == nullptr) return false;
+    *out_original = nullptr;
+    *out_parent = nullptr;
+    *out_original_in_tree = 0;
+    *out_probe_in_tree = 0;
+    if (!qol::game::game_host_is_main_thread() || g_base == 0 ||
+        fn_ctrl_get_count == nullptr || fn_ctrl_get_child == nullptr) return false;
+
+    const char* screen = ui_screen();
+    ui_main_menu_observe_screen(screen);
+    if (screen == nullptr || std::strcmp(screen, "main_menu") != 0) return false;
+    // GAMESTATE_SetState publishes state 4 before its synchronous STATE_EnterMainMenu callback
+    // creates the tree; wait for the next observed frame before touching the retained root slot.
+    const int64_t frame = qol::game::frame_count();
+    if (frame < 0 || g_main_menu_first_seen_frame < 0 ||
+        frame <= g_main_menu_first_seen_frame) return false;
+
+    // STATE_EnterMainMenu creates this group at +0x08 and passes it to ControlButton_Create
+    // for the More Games slot at +0x20. STATE_ExitMainMenu deletes it but leaves the static slot
+    // (.tmp/main-menu-adapter-followup/evidence.md §1).
+    auto** root_slot = reinterpret_cast<void**>(g_base + G_MAINMENU_BASE_VMA + G_MAINMENU_ROOT_SLOT);
+    if (!game_memory_accessible(root_slot, sizeof(*root_slot), 'r')) return false;
+    void* root = *root_slot;
+    if (root == nullptr || !game_memory_accessible(root, CO_SIZE, 'r')) return false;
+
+    // Enumerate the engine-owned live root before examining the original slot's object.
+    constexpr uint32_t kMaxMainMenuChildren = 128;
+    const uint32_t count = fn_ctrl_get_count(root);
+    if (count == 0 || count > kMaxMainMenuChildren) return false;
+    std::array<void*, kMaxMainMenuChildren> children{};
+    for (uint32_t index = 0; index < count; ++index) {
+        void* child = fn_ctrl_get_child(root, index);
+        if (child == nullptr) return false;
+        children[index] = child;
     }
-    g_more_games_slot = nullptr;
-    g_more_games_original = nullptr;
-    g_more_games_replacement = nullptr;
-    g_more_games_token = 0;
+
+    auto** original_slot = reinterpret_cast<void**>(
+        g_base + G_MAINMENU_BASE_VMA + G_MAINMENU_MOREGAMES_SLOT);
+    if (!game_memory_accessible(original_slot, sizeof(*original_slot), 'r')) return false;
+    void* original = *original_slot;
+    *out_original = original;
+    *out_parent = root;
+    for (uint32_t index = 0; index < count; ++index) {
+        if (children[index] == original) *out_original_in_tree = 1;
+        if (probe != nullptr && children[index] == probe) *out_probe_in_tree = 1;
+    }
     return true;
 }
 

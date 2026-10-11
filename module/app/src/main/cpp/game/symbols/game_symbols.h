@@ -161,6 +161,7 @@ constexpr uintptr_t G_POPUP_DISPTYPE_VMA = 0x712510; // 弹窗显示类型 (i32)
 constexpr uintptr_t G_MAINMENU_DRAW_VMA = 0x72a0f8;  // UIMainMenu_bDrawFull (u8) 主菜单是否完整绘制（readelf 符号表）
 constexpr uintptr_t G_MAINMENU_BASE_VMA = 0x3099d8;  // 主菜单组控件实例基址（STATE_EnterMainMenu 0x151fac 反汇编：x19=0x309000+0x9d8，按钮控件指针存 +0x10~+0x30）
 constexpr uintptr_t G_MAINMENU_MOREGAMES_SLOT = 0x20; // 「更多游戏」按钮控件槽偏移（base+0x20=0x3099f8；ExecuteProc=0x151e38→GotoShowMoreGames 0x8f0d8）
+constexpr uintptr_t G_MAINMENU_ROOT_SLOT = 0x08; // STATE_EnterMainMenu stores root at base+0x08 (0x152014); STATE_ExitMainMenu deletes it without clearing the slot (0x15226c-0x152270; .tmp/main-menu-adapter-followup/evidence.md §1)
 constexpr uintptr_t G_POPUP_STACK_VMA = 0x728fd8;    // g_arrPopupStack (32B) UI 弹窗栈（readelf 符号表）
 constexpr uintptr_t G_POPUP_STATE_LIST_GOT_VMA = 0x2f3000 + 0x4f0;  // GOT 槽：*(此地址) = popup state list 基址（g_sPopupStateList，27 条 × 64B：id@+0, enter@+0x10, process@+0x18, f3@+0x28, f4@+0x30, event@+0x38；POPUPSTATE_Push 0x122464 以 id×0x40 索引）
 constexpr uintptr_t G_PLAYER_ACTIVE_VMA = 0x728fc0;  // PLAYER_pActivePlayer (8B 指针) 游戏主控角色对象（PLAYER_SetActivePlayer 0x121a7c 写入；GAMEPLAY_DrawFocus 0x9d3ec / CHAR_Process 0xf1c04 读取；CHAR_MoveAsPath 驱动移动的真实对象，区别于 PARTY_GetMember 队伍槽——v0.4.38 移动修复）
@@ -515,6 +516,11 @@ constexpr uintptr_t F_SAVE_LOAD_CHARACTER_ALL_VMA = 0x129c98;  // void () 读档
 constexpr size_t F_SAVE_LOAD_CHARACTER_ALL_SPAN = 0x32c;       // SAVE_LoadCharacterAll 函数字节长度（静态反汇编）；loading 旁路 BL 扫描窗口，窗口内命中不唯一即拒绝建立
 constexpr uintptr_t F_SAVESLOT_GET_HERO_VMA = 0x14cda4;       // void* (void*) 取主控角色指针（[slot+0x1c] 索引 → [slot+0x4+idx*8]）
 constexpr uintptr_t F_STATE_HIDE_MODULE_MAIN_MENU_VMA = 0x152ff4;  // void () 主菜单模块隐藏桩（空实现）；同段 +0x30 = 主菜单「开始游戏」按钮 ExecuteProc（未导出局部函数，STATE_EnterMainMenu 0x151fac 经 ControlButton_Create 传入），+0x48 = 其 isAuthUser() 判定分支（cbz w0 → Hive 登录询问弹窗）
+#if !defined(__ANDROID__) || defined(__aarch64__)
+constexpr uintptr_t F_STATE_DRAW_MAIN_MENU_VMA = 0x152430; // void STATE_DrawMainMenu（monster v31 arm64）
+constexpr size_t STATE_DRAW_MAIN_MENU_MORE_GAMES_DRAW_CALL_OFF = 0xa70; // +0xa6c 是 mov w1,w22；BL GRPX_DrawPart 位于 +0xa70
+constexpr uint32_t STATE_DRAW_MAIN_MENU_MORE_GAMES_DRAW_CALL_WORD = 0x97fcf132u; // monster v31 arm64 原始 BL 指令字
+#endif
 constexpr uintptr_t F_STATE_SET_VMA = 0xd46a8;                // void (int32_t) 写状态机 state（*[0x2f5000+0xf8] = state；STATE_NextStartProcess 驱动 enter 回调）
 // ---- 逻辑相位帧锚点：MainProcess 内 bl STATE_NextStartProcess（frame-dispatch-host 阶段 2）----
 // MainProcess@0xd4984（.dynsym 导出）内 +0x40 的 `bl STATE_NextStartProcess`（原字 0x97ffff3d）。

@@ -6,6 +6,7 @@
 // real rendering/toggle/entry paths are exercised, not a copy.
 #include "../plugins/core.settings/panels/settings.cpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -27,7 +28,7 @@ using ::QolResult;
 
 const contracts::QolFeatureCatalogItem kSettingsFeatures[]{
     {"page", 1, FeatureCategory::kTools, FeatureType::kEntry, "模块设置",
-     "在主菜单打开模块设置页。"},
+     "在主菜单打开模块设置页。", "打开设置"},
     {"console", 0, FeatureCategory::kHidden, FeatureType::kToggle, "调试控制台",
      "隐藏功能。"},
 };
@@ -37,9 +38,20 @@ const contracts::QolFeatureCatalogItem kSellFeatures[]{
     {"diag", 0, FeatureCategory::kHidden, FeatureType::kToggle, "诊断日志",
      "隐藏诊断。"},
 };
+const contracts::QolFeatureCatalogItem kBasicOptimizationFeatures[]{
+    {"ranges", 1, FeatureCategory::kBasicOptimization, FeatureType::kToggle,
+     "属性范围显示", "显示属性作用范围。"},
+    {"translation", 1, FeatureCategory::kBasicOptimization, FeatureType::kToggle,
+     "角色属性汉化", "角色属性中文文案。"},
+    {"map_jump", 1, FeatureCategory::kBasicOptimization, FeatureType::kToggle,
+     "更好的地图传送对话框", "改善地图传送选择。"},
+    {"drag_merge", 1, FeatureCategory::kBasicOptimization, FeatureType::kToggle,
+     "拖拽合并", "拖拽同类物品时自动合并。"},
+};
 const contracts::QolFeatureCatalogPlugin kPlugins[]{
     {"settings", kSettingsFeatures, 2},
     {"autosell", kSellFeatures, 2},
+    {"basic", kBasicOptimizationFeatures, 4},
 };
 
 struct CallLog {
@@ -47,46 +59,58 @@ struct CallLog {
     std::string feature;
     int set_feature_calls = 0;
     int desired_calls = 0;
+    int read_desired_calls = 0;
     int value = -1;
     int entry_calls = 0;
     uint64_t next_request = 1;
     uint64_t last_request = 0;
     FeatureReceipt receipt{};
+    int receipt_calls = 0;
+    int read_actual_calls = 0;
 };
 
 CallLog g_log;
-bool g_read_feature_fails = false;
 bool g_request_fails = false;
-uint8_t g_feature_values[4]{1, 0, 1, 0};
+bool g_read_feature_fails = false;
+bool g_read_actual_fails = false;
+int g_actual_not_ready_remaining = 0;
+uint8_t g_actual_enabled = 1;
+uint8_t g_feature_values[8]{1, 0, 1, 0, 1, 1, 1, 1};
 uint8_t g_desired_values[2]{1, 1};
 
 int plugin_index(const char* id) { return std::strcmp(id, "settings") == 0 ? 0 : 1; }
 int feature_index(const char* plugin, const char* feature) {
     if (std::strcmp(plugin, "settings") == 0) return std::strcmp(feature, "page") == 0 ? 0 : 1;
+    if (std::strcmp(plugin, "basic") == 0) {
+        if (std::strcmp(feature, "ranges") == 0) return 4;
+        if (std::strcmp(feature, "translation") == 0) return 5;
+        if (std::strcmp(feature, "map_jump") == 0) return 6;
+        return 7;
+    }
     return std::strcmp(feature, "sell") == 0 ? 2 : 3;
 }
 
 void reset_log() {
     g_log = {};
-    g_read_feature_fails = false;
     g_request_fails = false;
     g_feature_values[0] = 1; g_feature_values[1] = 0;
     g_feature_values[2] = 1; g_feature_values[3] = 0;
+    g_feature_values[4] = g_feature_values[5] = g_feature_values[6] = g_feature_values[7] = 1;
     g_desired_values[0] = 1; g_desired_values[1] = 1;
 }
 
 QolResult fake_read_catalog(void*, const contracts::QolFeatureCatalogPlugin** out, uint32_t* count) {
     *out = kPlugins;
-    *count = 2;
+    *count = 3;
     return contracts::ok();
 }
 QolResult fake_read_feature(void*, const char* plugin, const char* feature, uint8_t* out) {
-    if (g_read_feature_fails && std::strcmp(plugin, "autosell") == 0)
-        return contracts::error(kQolErrNotReady, "plugin inactive", 16);
+    if (g_read_feature_fails) return contracts::error(kQolErrNotReady, "feature unavailable", 19);
     *out = g_feature_values[feature_index(plugin, feature)];
     return contracts::ok();
 }
 QolResult fake_read_desired(void*, const char* plugin, uint8_t* enable, uint8_t* any) {
+    ++g_log.read_desired_calls;
     const int i = plugin_index(plugin);
     *enable = g_desired_values[i];
     *any = g_desired_values[i];
@@ -120,7 +144,20 @@ QolResult fake_request_desired(void*, const char* plugin, uint8_t value, Feature
     return contracts::ok();
 }
 QolResult fake_receipt(void*, uint64_t, FeatureReceipt* out) {
+    ++g_log.receipt_calls;
     *out = g_log.receipt;
+    return contracts::ok();
+}
+QolResult fake_read_actual(void*, const char*, int32_t* state, uint8_t* enabled) {
+    ++g_log.read_actual_calls;
+    if (g_actual_not_ready_remaining > 0) {
+        --g_actual_not_ready_remaining;
+        return contracts::error(kQolErrNotReady, "actual not ready", 16);
+    }
+    if (g_read_actual_fails)
+        return contracts::error(kQolErrInternal, "actual failed", 13);
+    *state = 0x6f6f;  // The settings page must use only the explicit enabled result.
+    *enabled = g_actual_enabled;
     return contracts::ok();
 }
 QolResult fake_invoke_entry(void*, const char* plugin, const char* feature) {
@@ -139,6 +176,8 @@ int g_widget_destroys = 0;
 int g_button_creates = 0;
 int g_button_destroys = 0;
 int g_list_destroys = 0;
+int g_button_enabled_calls = 0;
+uint8_t g_button_enabled = 0;
 contracts::QolUiHandle g_fake_root = reinterpret_cast<void*>(0x1000);
 contracts::QolUiHandle g_list_handle = reinterpret_cast<void*>(0x2000);
 contracts::QolUiHandle g_row_handle = reinterpret_cast<void*>(0x3000);
@@ -183,7 +222,11 @@ QolResult fake_button_create(const contracts::UiButtonDesc* desc, contracts::Qol
     *out = g_button_handle;
     return contracts::ok();
 }
-QolResult fake_button_set_enabled(contracts::QolUiHandle, uint8_t) { return contracts::ok(); }
+QolResult fake_button_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
+    ++g_button_enabled_calls;
+    g_button_enabled = enabled;
+    return contracts::ok();
+}
 QolResult fake_require(const char* id, QolVersionRange, const void** out) {
     if (std::strcmp(id, contracts::kUiComponentsCapabilityId) != 0)
         return contracts::error(kQolErrNotFound, "no such capability", 18);
@@ -204,6 +247,7 @@ void bind_production() {
     g_fake_control.request_desired = &fake_request_desired;
     g_fake_control.receipt = &fake_receipt;
     g_fake_control.invoke_entry = &fake_invoke_entry;
+    g_fake_control.read_actual = &fake_read_actual;
 
     g_components_api = {};
     g_components_api.size = sizeof(g_components_api);
@@ -237,42 +281,78 @@ void bind_production() {
 
 void setup() {
     reset_log();
+    g_read_feature_fails = false;
+    g_read_actual_fails = false;
+    g_actual_not_ready_remaining = 0;
+    g_actual_enabled = 1;
     g_widget_creates = g_widget_destroys = g_button_creates = g_button_destroys = 0;
     g_list_destroys = 0;
+    g_button_enabled_calls = 0;
+    g_button_enabled = 0;
     bind_production();
 }
 
-int find_desired(const char* plugin) {
-    for (uint32_t i = 0; i < g_items.size(); ++i)
-        if (g_items[i].desired && std::strcmp(g_items[i].plugin_id, plugin) == 0)
-            return static_cast<int>(i);
-    return -1;
-}
 int find_feature(const char* plugin, const char* feature) {
     for (uint32_t i = 0; i < g_items.size(); ++i)
-        if (!g_items[i].desired && g_items[i].feature_id != nullptr &&
+        if (g_items[i].feature_id != nullptr &&
             std::strcmp(g_items[i].plugin_id, plugin) == 0 && std::strcmp(g_items[i].feature_id, feature) == 0)
             return static_cast<int>(i);
     return -1;
+}
+
+int prepare_entry_page() {
+    assert(load_catalog());
+    refresh_all_values();
+    const int page = find_feature("settings", "page");
+    assert(page >= 0 && g_items[page].type == FeatureType::kEntry);
+    assert(build_right_list(2));
+    assert(g_button_creates == 1 && g_last_button.on_click != nullptr);
+    g_panel_active = true;
+    return page;
+}
+
+void click_entry_button() {
+    assert(g_last_button.on_click != nullptr);
+    g_last_button.on_click(g_last_button.user);
 }
 
 // ---- pure model checks (small UI model test) ----
 
 void test_feature_model_filters_and_orders() {
     std::vector<feature_model::Item> items;
-    assert(feature_model::build(kPlugins, 2, false, items));
-    int hidden = 0, entry = 0, desired = 0;
+    assert(feature_model::build(kPlugins, 3, false, items));
+    int hidden = 0, entry = 0;
     for (const auto& item : items) {
         if (item.category == FeatureCategory::kHidden) ++hidden;
         if (item.type == FeatureType::kEntry) ++entry;
-        if (item.desired) ++desired;
     }
-    assert(hidden == 0 && entry == 1 && desired == 2);  // hidden excluded when not debug
+    assert(hidden == 0 && entry == 1 && items.size() == 6);
+    assert(std::strcmp(feature_model::category_title(FeatureCategory::kGeneral), "基础设置") == 0);
+    assert(std::strcmp(feature_model::category_title(FeatureCategory::kBasicOptimization), "基础优化设置") == 0);
+    assert(std::strcmp(feature_model::category_title(FeatureCategory::kGameplay), "更多优化功能") == 0);
+    assert(std::strcmp(feature_model::category_title(FeatureCategory::kTools), "更多工具") == 0);
+    assert(std::strcmp(feature_model::category_title(FeatureCategory::kHidden), "调试开关") == 0);
+    const char* expected_basic_labels[]{"属性范围显示", "角色属性汉化",
+        "更好的地图传送对话框", "拖拽合并"};
+    uint32_t basic_index = 0;
+    for (const auto& item : items) {
+        if (item.category != FeatureCategory::kBasicOptimization) continue;
+        assert(basic_index < 4 && std::strcmp(item.label, expected_basic_labels[basic_index]) == 0);
+        ++basic_index;
+    }
+    assert(basic_index == 4);
+    const auto entry_item = std::find_if(items.begin(), items.end(), [](const auto& item) {
+        return item.type == FeatureType::kEntry;
+    });
+    assert(entry_item != items.end() && std::strcmp(entry_item->action_label, "打开设置") == 0);
+    assert(kRightRowH == 96);
+    const auto no_description = settings_model::row_text_layout(false, kRightRowH);
+    assert(no_description.title_y == (kRightRowH - settings_model::kTextGlyphHeight) / 2);
 
-    assert(feature_model::build(kPlugins, 2, true, items));
+    assert(feature_model::build(kPlugins, 3, true, items));
     hidden = 0;
     for (const auto& item : items) if (item.category == FeatureCategory::kHidden) ++hidden;
-    assert(hidden == 2);
+    assert(hidden == 2 && items.size() == 8);  // feature rows only; no plugin-level rows
     assert(!feature_model::build(nullptr, 1, true, items));  // malformed catalog rejected
 }
 
@@ -282,11 +362,11 @@ void test_catalog_categories_and_debug_visibility() {
     setup();
     assert(load_catalog());
     assert(g_categories.size() == 4);
-    assert(g_categories[0] == FeatureCategory::kGeneral);
+    assert(g_categories[0] == FeatureCategory::kBasicOptimization);
     assert(g_categories[1] == FeatureCategory::kGameplay);
     assert(g_categories[2] == FeatureCategory::kTools);
     assert(g_categories[3] == FeatureCategory::kHidden);
-    assert(g_items.size() == 6);
+    assert(g_items.size() == 8);
     assert(find_feature("autosell", "sell") >= 0);
 }
 
@@ -310,51 +390,221 @@ void test_toggle_routes_to_host_request_set_feature() {
     assert(toggle_enabled(static_cast<uint32_t>(index)));
 }
 
-void test_desired_toggle_writes_even_when_plugin_inactive() {
+void test_feature_toggle_writes_when_plugin_desired_disabled() {
     setup();
     assert(load_catalog());
-    g_read_feature_fails = true;
+    g_desired_values[1] = 0;
     refresh_all_values();
-    const int index = find_desired("autosell");
+    const int index = find_feature("autosell", "sell");
     assert(index >= 0 && g_states[index].valid);
     assert(toggle_enabled(static_cast<uint32_t>(index)));
 
     g_states[index].gesture = true;
     g_states[index].desired = 0;
     process_pending_toggles();
-    assert(g_log.desired_calls == 1 && g_log.plugin == "autosell" && g_log.value == 0);
+    assert(g_log.set_feature_calls == 1 && g_log.desired_calls == 0 &&
+           g_log.read_desired_calls == 0 && g_log.plugin == "autosell" &&
+           g_log.feature == "sell" && g_log.value == 0);
 }
 
-void test_entry_button_requires_own_toggle_and_invokes_entry() {
+void test_entry_button_respects_validity_and_direct_invocation() {
     setup();
-    assert(load_catalog());
-    refresh_all_values();
-    const int page = find_feature("settings", "page");
-    assert(page >= 0);
-    assert(g_items[page].type == FeatureType::kEntry);
-
-    assert(build_right_list(2));  // Tools holds only the entry item
-    assert(g_button_creates == 1);
-    assert(std::strcmp(g_last_button.text, "打开") == 0 && g_last_button.on_click != nullptr);
-
+    const int page = prepare_entry_page();
+    assert(g_widget_creates == 0);
+    assert(std::strcmp(g_last_button.text, "打开设置") == 0);
     g_feature_values[0] = 0;
     refresh_item_value(static_cast<uint32_t>(page));
-    assert(!action_enabled(static_cast<uint32_t>(page)));
-
+    assert(action_enabled(static_cast<uint32_t>(page)));
     g_feature_values[0] = 1;
     refresh_item_value(static_cast<uint32_t>(page));
     assert(action_enabled(static_cast<uint32_t>(page)));
 
-    g_pending_action_item = page;
+    g_actual_enabled = 0;
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.entry_calls == 0 && g_log.set_feature_calls == 0 &&
+           g_log.read_actual_calls == 1 && g_status[0] != '\0');
+
+    g_actual_enabled = 1;
+    g_actual_not_ready_remaining = 1;
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.entry_calls == 0 && g_log.set_feature_calls == 0 &&
+           g_log.read_actual_calls == 2 && !g_entry_continuation.active &&
+           g_status[0] != '\0');
+
+    click_entry_button();
     process_pending_action();
     assert(g_log.entry_calls == 1 && g_log.plugin == "settings" && g_log.feature == "page");
+    assert(g_log.set_feature_calls == 0 && g_log.desired_calls == 0 &&
+           g_log.read_actual_calls == 3 && g_status[0] == '\0');
+}
+
+void test_entry_false_enables_and_waits_for_persistence_and_actual() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    assert(action_enabled(static_cast<uint32_t>(page)));
+
+    click_entry_button();
+    click_entry_button();  // A queued click cannot enqueue a second write.
+    assert(g_pending_action_item == page && g_log.set_feature_calls == 0);
+    process_pending_action();
+    assert(g_log.set_feature_calls == 1 && g_log.value == 1 &&
+           g_log.plugin == "settings" && g_log.feature == "page");
+    assert(g_log.entry_calls == 0 && g_feature_values[0] == 0);
+    assert(g_entry_continuation.active && g_entry_continuation.request_id == g_log.last_request);
+    assert(!action_enabled(static_cast<uint32_t>(page)) && g_button_enabled == 0);
+    click_entry_button();  // The admitted continuation also blocks duplicate clicks.
+    assert(g_pending_action_item == -1 && g_log.set_feature_calls == 1);
+
+    const int receipts_before = g_log.receipt_calls;
+    poll_entry_continuation();
+    assert(g_entry_continuation.active && g_log.receipt_calls == receipts_before + 1 &&
+           g_log.entry_calls == 0);
+    poll_entry_continuation();
+    assert(g_entry_continuation.active && g_log.receipt_calls == receipts_before + 2 &&
+           g_log.entry_calls == 0);
+
+    g_log.receipt.persistence = FeaturePersistence::kPersisted;
+    g_feature_values[0] = 1;
+    g_actual_not_ready_remaining = 1;
+    g_actual_enabled = 0;
+    poll_entry_continuation();
+    assert(g_entry_continuation.active && g_entry_continuation.persisted &&
+           g_log.receipt_calls == receipts_before + 3 && g_log.entry_calls == 0);
+
+    const int persisted_receipts = g_log.receipt_calls;
+    poll_entry_continuation();  // Host actual state is readable but not enabled yet.
+    assert(g_entry_continuation.active && g_log.receipt_calls == persisted_receipts &&
+           g_log.entry_calls == 0);
+    g_actual_enabled = 1;
+    poll_entry_continuation();
+    assert(!g_entry_continuation.active && g_log.receipt_calls == persisted_receipts &&
+           g_log.entry_calls == 1 && g_log.set_feature_calls == 1);
+    poll_entry_continuation();
+    assert(g_log.entry_calls == 1);
+}
+
+void test_entry_persistence_failure_stops_without_invoking() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    click_entry_button();
+    process_pending_action();
+    g_log.receipt.persistence = FeaturePersistence::kFailed;
+    g_log.receipt.error_code = kQolErrInternal;
+    poll_entry_continuation();
+    assert(!g_entry_continuation.active && g_log.entry_calls == 0 &&
+           g_log.set_feature_calls == 1 && g_feature_values[0] == 0 && g_status[0] != '\0');
+}
+
+void test_entry_read_error_stops_without_invoking() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    click_entry_button();
+    process_pending_action();
+    g_log.receipt.persistence = FeaturePersistence::kPersisted;
+    g_feature_values[0] = 1;
+    g_read_feature_fails = true;
+    poll_entry_continuation();
+    assert(!g_entry_continuation.active && g_log.entry_calls == 0 && g_status[0] != '\0');
+}
+
+void test_entry_wait_timeout_stops_without_rollback_or_invoke() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    click_entry_button();
+    process_pending_action();
+    g_log.receipt.persistence = FeaturePersistence::kPersisted;
+    g_feature_values[0] = 1;
+    g_actual_enabled = 0;
+    for (uint32_t tick = 0; tick < kEntryWaitMaxProcessTicks; ++tick)
+        poll_entry_continuation();
+    assert(!g_entry_continuation.active && g_entry_continuation.process_ticks == 0 &&
+           g_log.entry_calls == 0 && g_log.set_feature_calls == 1 &&
+           g_feature_values[0] == 1 && g_status[0] != '\0');
+    assert(g_log.receipt_calls == 1 &&
+           g_log.read_actual_calls == static_cast<int>(kEntryWaitMaxProcessTicks));
+}
+
+void test_entry_close_cancels_continuation_without_rollback() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    click_entry_button();
+    process_pending_action();
+    g_log.receipt.persistence = FeaturePersistence::kPersisted;
+    g_feature_values[0] = 1;
+    g_actual_enabled = 0;
+    poll_entry_continuation();
+    assert(g_entry_continuation.active && g_log.entry_calls == 0);
+
+    destroy_page();
+    g_actual_enabled = 1;
+    poll_entry_continuation();
+    assert(!g_entry_continuation.active && g_log.entry_calls == 0 &&
+           g_log.set_feature_calls == 1 && g_feature_values[0] == 1);
+}
+
+void test_entry_requires_read_actual_tail_before_enabling_write() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    g_fake_control.struct_size = static_cast<uint32_t>(
+        offsetof(contracts::QolFeatureControlApi, read_actual) +
+        sizeof(g_fake_control.read_actual) - 1);
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.set_feature_calls == 0 && g_log.read_actual_calls == 0 &&
+           g_log.entry_calls == 0 && !g_entry_continuation.active && g_status[0] != '\0');
+}
+
+void test_entry_requires_read_actual_function_before_enabling_write() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    g_fake_control.read_actual = nullptr;
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.set_feature_calls == 0 && g_log.read_actual_calls == 0 &&
+           g_log.entry_calls == 0 && !g_entry_continuation.active && g_status[0] != '\0');
+}
+
+void test_true_entry_requires_read_actual_abi_before_invoking() {
+    setup();
+    prepare_entry_page();
+    g_fake_control.struct_size = static_cast<uint32_t>(
+        offsetof(contracts::QolFeatureControlApi, read_actual) +
+        sizeof(g_fake_control.read_actual) - 1);
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.read_actual_calls == 0 && g_log.entry_calls == 0 &&
+           g_log.set_feature_calls == 0 && g_status[0] != '\0');
+
+    setup();
+    prepare_entry_page();
+    g_fake_control.read_actual = nullptr;
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.read_actual_calls == 0 && g_log.entry_calls == 0 &&
+           g_log.set_feature_calls == 0 && g_status[0] != '\0');
 }
 
 void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     setup();
     assert(load_catalog());
-    assert(build_right_list(1));  // Gameplay creates a toggle child
-    assert(g_widget_creates == 1);
+    assert(build_right_list(0));  // Basic optimization creates four toggle children
+    assert(g_widget_creates == 4);
     g_panel_active = true;
     const uint64_t generation_before = g_generation;
 
@@ -372,7 +622,7 @@ void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     g_widget_creates = 0;
     bind_production();
     assert(load_catalog());
-    assert(g_items.size() == 6);
+    assert(g_items.size() == 8);
     assert(g_generation != generation_before);  // new instance generation
     refresh_all_values();
     assert(g_states[static_cast<uint32_t>(find_feature("settings", "console"))].confirmed == 1);
@@ -386,14 +636,25 @@ bool plugin_enabled() { return true; }
 bool settings_panels_open(const char*) { return true; }
 void settings_panels_close(const char*) {}
 void more_games_bind_tick(bool, MoreGamesBindOps&) {}
+bool more_games_disable_original(MoreGamesOriginalStateOps&, bool) { return false; }
+bool more_games_restore_original(bool, bool, MoreGamesOriginalStateOps&) { return false; }
+bool more_games_draw(bool, MoreGamesDrawOps&) { return false; }
 }  // namespace qol::features::core_ui
 
 int main() {
     test_feature_model_filters_and_orders();
     test_catalog_categories_and_debug_visibility();
     test_toggle_routes_to_host_request_set_feature();
-    test_desired_toggle_writes_even_when_plugin_inactive();
-    test_entry_button_requires_own_toggle_and_invokes_entry();
+    test_feature_toggle_writes_when_plugin_desired_disabled();
+    test_entry_button_respects_validity_and_direct_invocation();
+    test_entry_false_enables_and_waits_for_persistence_and_actual();
+    test_entry_persistence_failure_stops_without_invoking();
+    test_entry_read_error_stops_without_invoking();
+    test_entry_wait_timeout_stops_without_rollback_or_invoke();
+    test_entry_close_cancels_continuation_without_rollback();
+    test_entry_requires_read_actual_tail_before_enabling_write();
+    test_entry_requires_read_actual_function_before_enabling_write();
+    test_true_entry_requires_read_actual_abi_before_invoking();
     test_deactivate_tears_down_page_and_reinstate_rebuilds();
     std::puts("settings_panel_widget_tests: feature-control UI path passed");
     return 0;

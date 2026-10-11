@@ -72,8 +72,8 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
-    {"character_panel_i18n.translation", 1, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "角色面板中文", "在角色面板绘制作用域内提供中文文案。",
+    {"character_panel_i18n.translation", 1, contracts::FeatureCategory::kBasicOptimization,
+     contracts::FeatureType::kToggle, "角色属性汉化", "在角色面板绘制作用域内提供中文文案。",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

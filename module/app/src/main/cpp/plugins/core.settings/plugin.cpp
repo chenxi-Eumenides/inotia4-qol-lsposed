@@ -37,6 +37,25 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kUiContractMajor, contracts::kUiContractMinor}},
 };
 
+// DrawMainMenu makes a direct GRPX_DrawPart call for More Games; ControlObject::Show and
+// the child DrawProc do not replace this explicit sprite draw.
+const contracts::ResourceClaim kResources[] = {
+    {
+        "patch:settings.main_menu.more_games.draw",
+        "settings.main_menu.more_games.draw",
+        contracts::ResourceMechanism::kCallPatch,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,
+        kPluginId,
+        "替换主菜单更多游戏按钮的显式 GRPX_DrawPart 绘制",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&core_ui::settings_main_menu_more_games_draw),
+    },
+};
+
 // ---- HTTP command handlers（/api/debug/settings-ui/* POST）----
 // 四条端点均无请求体：插件内业务函数直调，返回体逐字与迁移前一致。
 // 自注册模式（core.api lifecycle 先例）：停用由 deactivate 显式 unregister_owner 摘除置墓碑。
@@ -212,8 +231,8 @@ QolResult open_settings_entry(contracts::PluginContext&) {
         ? contracts::ok() : contracts::error(kQolErrNotReady, "settings unavailable", 20);
 }
 const contracts::FeatureDefinition kFeatures[]{
-    {"page", 1, contracts::FeatureCategory::kTools, contracts::FeatureType::kEntry,
-     "模块设置", "在主菜单打开模块设置页；关闭后页面入口不可用。", nullptr, &open_settings_entry},
+    {"page", 1, contracts::FeatureCategory::kHidden, contracts::FeatureType::kEntry,
+     "模块设置", "", nullptr, &open_settings_entry},
 };
 
 const contracts::PluginDescriptor kDescriptor = {
@@ -222,7 +241,7 @@ const contracts::PluginDescriptor kDescriptor = {
     2, kRequires,    // ui_panels + ui_components
     0, nullptr,      // optional_requires
     0, nullptr,      // provides（页面不提供能力）
-    0, nullptr,      // resources（PopupState 由 core.custom_ui 面板宿主持有）
+    1, kResources,   // resources（PopupState 由 core.custom_ui 面板宿主持有）
     0, nullptr,      // jni（JNI 入口由 bridge/native/gamebridge_settings.cpp 保留）
     &plugin_install,
     &plugin_deactivate,

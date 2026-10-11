@@ -29,6 +29,7 @@ void* ui_original_bag_container();
 void* ui_find_root(uint32_t kind);
 bool ui_control_type(void* ctrl, int32_t* out_type);
 bool ui_control_active(void* ctrl, int32_t* out_active);
+bool ui_set_control_show(void* ctrl, bool show);
 bool ui_control_user_type(void* ctrl, int32_t* out_type);
 void* ui_control_data(void* ctrl);
 void* ui_control_item(void* ctrl);
@@ -56,8 +57,10 @@ bool ui_clear_touch_state();
 bool ui_set_touch_release_input(int64_t x, int64_t y, uint64_t param);
 bool ui_clear_touch_drop_event();
 void* ui_main_menu_more_games_button();
-bool ui_bind_main_menu_more_games(UiClickProc replacement, uint64_t* out_token);
-bool ui_unbind_main_menu_more_games(uint64_t token);
+void ui_main_menu_observe_screen(const char* screen);
+bool ui_main_menu_live_tree_snapshot(void* probe, void** out_original, void** out_parent,
+                                    int32_t* out_original_in_tree,
+                                    int32_t* out_probe_in_tree);
 bool ui_popup_stack_top_matches(void (*enter)());
 void ui_clear_control_proc(void* ctrl);
 

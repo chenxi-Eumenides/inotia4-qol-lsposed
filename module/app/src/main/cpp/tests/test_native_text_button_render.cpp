@@ -322,6 +322,63 @@ int main() {
     assert(std::abs(g_text_x - text_button_center_x) <= 1);
     assert(std::abs(g_text_y + g_font_height / 2 - toggle_center_y) <= 1);
 
+    // 300x92 is the MoreGames rect. The cap+70px-center model has no even-percent fit within
+    // the 1 px tolerance (best even percent 82 is off by 1.2), so the renderer must fall back
+    // to a contiguous narrower center crop while keeping the original 100 px rounded caps,
+    // the requested rect size/style/position, and half-open seams.
+    for (uint8_t pressed = 0; pressed <= 1; ++pressed) {
+        setup();
+        const UiRect more_games_rect{0, 0, 300, 92};
+        assert(ui_draw_native_text_button_background(more_games_rect, pressed));
+        assert(g_draws.size() == 3);
+        const int32_t percent = g_draws[0].args[10];
+        assert(percent >= 1 && percent <= 400);
+        assert(g_draws[1].args[10] == percent && g_draws[2].args[10] == percent);
+        // Caps keep their full 100 px source; center is a contiguous crop at the cap edge.
+        assert(g_draws[0].args[2] == 35 && g_draws[0].args[4] == 100);
+        assert(g_draws[1].args[2] == 135 && g_draws[1].args[4] >= 1 && g_draws[1].args[4] <= 70);
+        assert(g_draws[2].args[2] == 340 && g_draws[2].args[4] == 100);
+        for (size_t i = 0; i < g_draws.size(); ++i) {
+            assert(g_draws[i].args[3] == 146 && g_draws[i].args[5] == 77);
+            assert(g_draws[i].args[8] == 1 && g_draws[i].args[9] == 0 && g_draws[i].args[11] == 0);
+        }
+        // Half-open destination seams: each slice starts exactly where the previous ends.
+        assert(g_draws[0].args[0] + g_draws[0].args[4] * percent / 100 == g_draws[1].args[0]);
+        assert(g_draws[1].args[0] + g_draws[1].args[4] * percent / 100 == g_draws[2].args[0]);
+        const int32_t drawn_width =
+            g_draws[2].args[0] + g_draws[2].args[4] * percent / 100 - g_draws[0].args[0];
+        // Drawn width is exactly the sum of the floored slice widths: no width+1 extent.
+        assert(drawn_width == g_draws[0].args[4] * percent / 100 +
+            g_draws[1].args[4] * percent / 100 + g_draws[2].args[4] * percent / 100);
+        // Everything stays inside the requested rect.
+        assert(g_draws[0].args[0] >= more_games_rect.x);
+        assert(g_draws[0].args[0] + drawn_width <= more_games_rect.x + more_games_rect.w);
+        for (size_t i = 0; i < g_draws.size(); ++i) {
+            const int32_t dest_right = g_draws[i].args[0] + g_draws[i].args[4] * percent / 100;
+            const int32_t dest_bottom = g_draws[i].args[1] + g_draws[i].args[5] * percent / 100;
+            assert(dest_right <= more_games_rect.x + more_games_rect.w);
+            assert(dest_bottom <= more_games_rect.y + more_games_rect.h);
+        }
+        // The capsule stays centered in the requested rect within a couple logical px.
+        const int32_t left_margin = g_draws[0].args[0] - more_games_rect.x;
+        const int32_t right_margin =
+            more_games_rect.x + more_games_rect.w - (g_draws[0].args[0] + drawn_width);
+        assert(std::abs(left_margin - right_margin) <= 2);
+        // Label at font 1 must still fit and center on the drawn capsule.
+        assert(ui_draw_native_text_button_label(more_games_rect, "打开", 0, 1));
+        assert(g_text_font == 1 && g_font_height == 26);
+        const int32_t capsule_center_x = g_draws[0].args[0] + drawn_width / 2;
+        assert(std::abs(g_text_x - capsule_center_x) <= 2);
+        const int32_t image_height = g_draws[0].args[5] * percent / 100;
+        assert(g_draws[0].args[1] + image_height <= more_games_rect.y + more_games_rect.h);
+    }
+
+    // Degenerate tiny rects stay rejected instead of drawing a sliver.
+    setup();
+    assert(!ui_draw_native_text_button_background({0, 0, 2, 2}, 0));
+    assert(!ui_draw_native_text_button_background({0, 0, 4, 3}, 0));
+    assert(g_draws.empty());
+
     setup();
     assert(!ui_draw_native_text_button_label(full_button, "\xf0\x28\x8c\x28", 0, 0));
     assert(g_clip_calls == 0 && g_drawn_label.empty());

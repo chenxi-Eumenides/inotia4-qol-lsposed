@@ -338,7 +338,7 @@ QolResult open_manager_feature(contracts::PluginContext& ctx) {
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"save_backup.open_manager", 1, contracts::FeatureCategory::kTools,
      contracts::FeatureType::kEntry, "存档备份导出", "打开存档备份管理器。",
-     nullptr, &open_manager_feature},
+     nullptr, &open_manager_feature, "打开"},
 };
 
 const contracts::PluginDescriptor kDescriptor = {

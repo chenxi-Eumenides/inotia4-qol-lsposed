@@ -12,9 +12,9 @@ struct Item {
     const char* feature_id;
     const char* label;
     const char* description;
+    const char* action_label;
     FeatureCategory category;
     FeatureType type;
-    bool desired;
 };
 
 inline bool visible(FeatureCategory category, bool debug) {
@@ -24,9 +24,10 @@ inline bool visible(FeatureCategory category, bool debug) {
 inline const char* category_title(FeatureCategory category) {
     switch (category) {
         case FeatureCategory::kGeneral: return "基础设置";
-        case FeatureCategory::kGameplay: return "优化功能";
-        case FeatureCategory::kTools: return "工具入口";
-        case FeatureCategory::kHidden: return "隐藏功能（调试）";
+        case FeatureCategory::kBasicOptimization: return "基础优化设置";
+        case FeatureCategory::kGameplay: return "更多优化功能";
+        case FeatureCategory::kTools: return "更多工具";
+        case FeatureCategory::kHidden: return "调试开关";
     }
     return "其他功能";
 }
@@ -43,9 +44,6 @@ inline bool build(const contracts::QolFeatureCatalogPlugin* plugins, uint32_t co
             out.clear();
             return false;
         }
-        out.push_back({plugin.plugin_id, nullptr, plugin.plugin_id,
-                       "控制插件整体启用状态；实际运行状态由宿主决定。",
-                       FeatureCategory::kGeneral, FeatureType::kToggle, true});
         for (uint32_t f = 0; f < plugin.feature_count; ++f) {
             const auto& feature = plugin.features[f];
             if (feature.id == nullptr || feature.name == nullptr) {
@@ -55,7 +53,8 @@ inline bool build(const contracts::QolFeatureCatalogPlugin* plugins, uint32_t co
             if (!visible(feature.category, debug)) continue;
             out.push_back({plugin.plugin_id, feature.id, feature.name,
                            feature.description == nullptr ? "" : feature.description,
-                           feature.category, feature.type, false});
+                           feature.action_label == nullptr ? "" : feature.action_label,
+                           feature.category, feature.type});
         }
     }
     return true;
@@ -65,9 +64,7 @@ inline bool toggle_enabled(bool valid, uint64_t request, bool gesture) {
     // Actual inactivity never blocks management writes that can restore a plugin.
     return valid && request == 0 && !gesture;
 }
-inline bool entry_enabled(const Item& item, bool valid, bool enabled,
-                          uint64_t request, bool gesture) {
-    return !item.desired && item.type == FeatureType::kEntry && valid && enabled &&
-           request == 0 && !gesture;
+inline bool entry_enabled(const Item& item, bool valid, bool request, bool gesture) {
+    return item.type == FeatureType::kEntry && valid && !request && !gesture;
 }
 }  // namespace qol::features::core_ui::feature_model

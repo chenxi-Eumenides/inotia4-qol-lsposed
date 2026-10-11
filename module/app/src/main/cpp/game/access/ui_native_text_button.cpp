@@ -37,8 +37,8 @@ constexpr int32_t kTextButtonBodyOffsetY = 22;
 constexpr int32_t kTextButtonBodyWidth = 405;
 constexpr int32_t kTextButtonBodyHeight = 77;
 constexpr int32_t kTextButtonBodyCapWidth = 100;
-// Plain-fill patch between the rounded caps. Must stay a multiple of 10 so its dest
-// width stays integer at the percent values the search can select (70%).
+// Preferred plain-fill patch between the rounded caps. It is kept intact whenever its
+// scale fits; a narrower centered crop is considered only when the native target needs it.
 constexpr int32_t kTextButtonBodyCenterWidth = 70;
 constexpr int32_t kMaxScalePercent = 400;
 constexpr int32_t kNativeDrawMode = 1;
@@ -197,6 +197,7 @@ bool load_text_button_geometry(UiRect rect, ButtonGeometry* out) {
     geometry.layer.height = kTextButtonBodyHeight;
     double best_error = std::numeric_limits<double>::max();
     int32_t body_percent = 0;
+    int32_t body_center_width = kTextButtonBodyCenterWidth;
     for (int32_t candidate = 2; candidate <= kMaxScalePercent; candidate += 2) {
         const double candidate_width =
             static_cast<double>(kTextButtonBodyCapWidth * 2 + kTextButtonBodyCenterWidth) *
@@ -211,11 +212,38 @@ bool load_text_button_geometry(UiRect rect, ButtonGeometry* out) {
             body_percent = candidate;
         }
     }
+    if (best_error > 1.0 || body_percent == 0) {
+        // Retain full-size rounded caps and search narrower crops of the known plain center.
+        // Every crop starts at the cap edge, so the three source slices stay a contiguous
+        // half-open run and no column is dropped or double-drawn. This handles target sizes
+        // whose cap+center model cannot fit within the existing 1 px tolerance at 70 px fill;
+        // the tolerance itself is unchanged.
+        best_error = std::numeric_limits<double>::max();
+        body_percent = 0;
+        for (int32_t candidate = 1; candidate <= kMaxScalePercent; ++candidate) {
+            const double candidate_height =
+                static_cast<double>(geometry.layer.height) * candidate / 100.0;
+            const double height_error = std::abs(candidate_height - target_height_exact);
+            for (int32_t center_width = 1;
+                 center_width <= kTextButtonBodyCenterWidth; ++center_width) {
+                const double candidate_width =
+                    static_cast<double>(kTextButtonBodyCapWidth * 2 + center_width) *
+                    candidate / 100.0;
+                const double width_error = std::abs(candidate_width - target_width_exact);
+                const double error = width_error > height_error ? width_error : height_error;
+                if (error < best_error) {
+                    best_error = error;
+                    body_percent = candidate;
+                    body_center_width = center_width;
+                }
+            }
+        }
+    }
     if (best_error > 1.0 || body_percent == 0) return false;
     geometry.percent = body_percent;
     geometry.cap_width = kTextButtonBodyCapWidth;
     geometry.cap_draw_width = geometry.cap_width * geometry.percent / 100;
-    geometry.center_source_width = kTextButtonBodyCenterWidth;
+    geometry.center_source_width = body_center_width;
     geometry.center_source_x = geometry.cap_width;
     geometry.center_draw_width = geometry.center_source_width * geometry.percent / 100;
     geometry.draw_width = geometry.cap_draw_width * 2 + geometry.center_draw_width;

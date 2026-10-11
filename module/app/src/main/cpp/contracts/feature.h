@@ -6,7 +6,7 @@
 
 namespace qol::contracts {
 struct PluginContext;
-enum class FeatureCategory : uint8_t { kGeneral, kGameplay, kTools, kHidden };
+enum class FeatureCategory : uint8_t { kGeneral, kGameplay, kTools, kHidden, kBasicOptimization };
 enum class FeatureType : uint8_t { kToggle, kEntry };
 using FeatureToggleCallback = QolResult (*)(PluginContext&, uint8_t enabled);
 using FeatureEntryCallback = QolResult (*)(PluginContext&);
@@ -21,6 +21,7 @@ struct FeatureDefinition {
     const char* description;
     FeatureToggleCallback on_toggle;
     FeatureEntryCallback on_entry;
+    const char* action_label = nullptr;
 };
 
 enum class FeatureAdmission : uint8_t { kRejected, kAdmitted };

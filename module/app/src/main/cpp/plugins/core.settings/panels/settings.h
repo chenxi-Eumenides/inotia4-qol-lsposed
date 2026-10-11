@@ -49,4 +49,8 @@ void settings_more_games_tick();            // 主线程帧任务调用
 void settings_release_more_games();         // 停用 / 反注册时释放绑定
 const char* settings_more_games_bind_state(); // waiting / live / stale / error
 
+// GRPX_DrawPart ABI at the MainMenu More Games draw callsite (final argument is native unknown).
+void settings_main_menu_more_games_draw(void* group, int32_t x, int32_t y, void* loc,
+                                        int32_t type, int32_t flip, int32_t unknown);
+
 }  // namespace qol::features::core_ui

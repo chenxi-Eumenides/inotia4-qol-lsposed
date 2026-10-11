@@ -9,7 +9,6 @@ struct FeaturePlatformState {
     std::string listen_address = "0.0.0.0";
     int32_t listen_port = 8088;
     bool api_enabled = true;
-    bool op_enabled = false;
     bool debug_logging = false;
     bool simple_mode = false;
 };

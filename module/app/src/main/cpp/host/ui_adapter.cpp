@@ -186,7 +186,11 @@ QolResult set_click_proc(QolUiHandle control, contracts::QolUiClickFn click_proc
     }
     if (!ui_clone_button_style(control, control, &click_proc_trampoline)) {
         std::lock_guard<std::mutex> lock(g_click_mtx);
-        g_click_bindings.erase(control);
+        const auto it = g_click_bindings.find(control);
+        if (it != g_click_bindings.end() && it->second.callback == click_proc &&
+            it->second.user == user) {
+            g_click_bindings.erase(it);
+        }
         return not_ready();
     }
     return contracts::ok();
@@ -847,14 +851,127 @@ QolResult find_main_menu_more_games(QolUiHandle* out) {
     return *out == nullptr ? not_ready() : contracts::ok();
 }
 
+QolResult set_control_show(QolUiHandle control, uint8_t show) {
+    if (control == nullptr || show > 1) return invalid_argument();
+    return ui_set_control_show(control, show != 0) ? contracts::ok() : not_ready();
+}
+
+QolResult main_menu_more_games_snapshot(QolUiHandle* out_button, QolUiHandle* out_parent,
+                                       UiRect* out_rect) {
+    if (out_button == nullptr || out_parent == nullptr || out_rect == nullptr) {
+        return invalid_argument();
+    }
+    *out_button = nullptr;
+    *out_parent = nullptr;
+    *out_rect = UiRect{};
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+
+    QolUiHandle original = nullptr;
+    QolUiHandle parent = nullptr;
+    int32_t original_in_tree = 0;
+    int32_t ignored_probe_in_tree = 0;
+    if (!ui_main_menu_live_tree_snapshot(nullptr, &original, &parent, &original_in_tree,
+                                         &ignored_probe_in_tree) ||
+        original == nullptr || parent == nullptr || original_in_tree == 0) {
+        return not_ready();
+    }
+    if (!game_memory_accessible(original, CO_SIZE, 'r')) return not_ready();
+    ::UiRect rect{};
+    if (!ui_get_rect(original, &rect)) return not_ready();
+    *out_button = original;
+    *out_parent = parent;
+    *out_rect = contract_rect(rect);
+    return contracts::ok();
+}
+
+QolResult main_menu_text_button_is_live(QolUiHandle original, QolUiHandle replacement,
+                                        contracts::QolUiClickFn expected_execute, void* owner,
+                                        int32_t* out_live) {
+    if (original == nullptr || replacement == nullptr || expected_execute == nullptr ||
+        owner == nullptr || out_live == nullptr) return invalid_argument();
+    *out_live = 0;
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+
+    QolUiHandle current_original = nullptr;
+    QolUiHandle parent = nullptr;
+    int32_t original_in_tree = 0;
+    int32_t replacement_in_tree = 0;
+    if (!ui_main_menu_live_tree_snapshot(replacement, &current_original, &parent,
+                                         &original_in_tree, &replacement_in_tree)) {
+        return not_ready();
+    }
+    // The slot can already name a rebuilt original while this owned replacement still needs
+    // deletion. Settings separately compares the snapshot's original handle when deciding to rebind.
+    (void)current_original;
+    (void)original_in_tree;
+    if (replacement_in_tree == 0) return contracts::ok();
+
+    // Native handles can be recycled. The current tree proves these nodes are readable; the
+    // registry tuple proves this replacement still belongs to this component and callback.
+    {
+        std::lock_guard<std::mutex> lock(g_click_mtx);
+        const auto binding = g_click_bindings.find(replacement);
+        if (binding == g_click_bindings.end() || binding->second.callback != expected_execute ||
+            binding->second.user != owner) return contracts::ok();
+    }
+    if (!game_memory_accessible(replacement, CO_DATA + sizeof(void*), 'r')) return not_ready();
+    void* control_data = ui_control_data(replacement);
+    if (control_data == nullptr ||
+        !game_memory_accessible(control_data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
+        return not_ready();
+    }
+    if (!ui_execute_proc_matches(replacement, &click_proc_trampoline)) return contracts::ok();
+    *out_live = 1;
+    return contracts::ok();
+}
+
+QolResult main_menu_text_button_invalidate_binding(QolUiHandle replacement, void* owner) {
+    if (replacement == nullptr || owner == nullptr) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    ui_main_menu_observe_screen(nullptr);
+    std::lock_guard<std::mutex> lock(g_click_mtx);
+    const auto binding = g_click_bindings.find(replacement);
+    if (binding != g_click_bindings.end() && binding->second.user == owner) {
+        g_click_bindings.erase(binding);
+    }
+    return contracts::ok();
+}
+
+QolResult main_menu_more_games_set_active(QolUiHandle original, int32_t active) {
+    if (original == nullptr || (active != 0 && active != 1)) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+
+    QolUiHandle current_original = nullptr;
+    QolUiHandle parent = nullptr;
+    int32_t original_in_tree = 0;
+    int32_t ignored_probe_in_tree = 0;
+    if (!ui_main_menu_live_tree_snapshot(nullptr, &current_original, &parent,
+                                         &original_in_tree, &ignored_probe_in_tree) ||
+        current_original == nullptr || parent == nullptr || original_in_tree == 0) {
+        return not_ready();
+    }
+    if (original != current_original) {
+        static constexpr char message[] = "not the current More Games control";
+        return contracts::error(kQolErrNotFound, message, sizeof(message) - 1);
+    }
+    if (fn_ctrl_set_active == nullptr || !game_memory_accessible(original, CO_SIZE, 'w')) {
+        return not_ready();
+    }
+
+    // ControlObject_EventProc dispatches buttons only while Active == 0x20.
+    fn_ctrl_set_active(original, active != 0 ? 1u : 0u);
+    return contracts::ok();
+}
+
 QolResult bind_main_menu_more_games(contracts::QolUiClickFn replacement, uint64_t* out_token) {
     if (replacement == nullptr || out_token == nullptr) return invalid_argument();
-    return ui_bind_main_menu_more_games(replacement, out_token) ? contracts::ok() : not_ready();
+    *out_token = 0;
+    return unsupported();
 }
 
 QolResult unbind_main_menu_more_games(uint64_t token) {
     if (token == 0) return invalid_argument();
-    return ui_unbind_main_menu_more_games(token) ? contracts::ok() : not_ready();
+    return unsupported();
 }
 
 QolResult popup_stack_top_matches(contracts::QolUiPopupEnterFn enter, int32_t* out_matches) {
@@ -872,6 +989,7 @@ QolResult clear_control_proc(QolUiHandle control) {
 QolResult screen_name(const char** out) {
     if (out == nullptr) return invalid_argument();
     *out = ui_screen();
+    ui_main_menu_observe_screen(*out);
     return *out == nullptr ? not_ready() : contracts::ok();
 }
 
@@ -1001,7 +1119,12 @@ const QolUiAdapter g_ui_adapter{
         &set_button_enabled,
         &draw_native_text_button_label,
          &draw_native_close_button,
-         &craft_stuff_slot_index,
+          &craft_stuff_slot_index,
+          &set_control_show,
+          &main_menu_more_games_snapshot,
+          &main_menu_text_button_is_live,
+          &main_menu_text_button_invalidate_binding,
+          &main_menu_more_games_set_active,
 };
 
 }  // namespace

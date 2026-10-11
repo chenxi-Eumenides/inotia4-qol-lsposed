@@ -1684,17 +1684,19 @@
 ```
 
 - `enable`（bool）：Host 独占的 lifecycle 期望状态。普通插件不可读写；显式 deactivate 写 `false`。
-- `features`（object）：只含该插件当前注册的 feature 布尔值。注册元数据 default 缺失时补齐，已有值优先。
+- `features`（object）：当前注册 feature 的布尔值由注册元数据 default 补齐，已有值优先；历史或其他未注册 feature 键可继续保留在存储投影中，但不成为可写 feature 或 lifecycle 聚合成员。
 - `config`（object）：插件业务自由键值，值可为任意合法 JSON。
 
-注册元数据（`feature_id`、`default`、`category`(General|Gameplay|Tools|Hidden)、`type`(toggle|entry)、`name`、`description`、`callback`）由插件 descriptor 静态提供、**不持久化**；禁止零 feature 插件；`entry` 与 toggle 同样有布尔状态并参与运行判定。旧 12 个平铺字段、旧 runtime gate 映射与旧 settings `bool` 桥已退出，不再作为 schema 或迁移输入。未知 root 与未注册 plugin 原样保留在磁盘。
+注册元数据（`feature_id`、`default`、`category`(`kGeneral`|`kGameplay`|`kTools`|`kHidden`|`kBasicOptimization`，后者数值为 4)、`type`(`kToggle`|`kEntry`)、`name`、`description`、`callback`、可选 `action_label`）由插件 descriptor 静态提供、**不持久化**；禁止零 feature 插件；`entry` 与 toggle 同样有布尔状态并参与运行判定。`FeatureDefinition` 在 `on_entry` 后追加 `const char* action_label = nullptr`；`QolFeatureCatalogItem` 在 `description` 后有同样的可选尾随字段，Host 将注册值复制到该 native catalog view。非空时该文案用于 entry 按钮，空值表示未提供显式文案。此字段不属于配置 schema，不写入 `config.json`，也不出现在 `GET /api/config/list` 的 JSON 投影中。旧 12 个平铺字段、旧 runtime gate 映射与旧 settings `bool` 桥已退出，不再作为 schema 或迁移输入。未知 root 与未注册 plugin 原样保留在磁盘。
 
 #### lifecycle 语义
 
 - `want_run = enable && any(当前注册 feature=true)`；`enable=false` 优先。
-- 全部 feature=false 时自动完整 deactivate，但**不改** `enable`。
-- feature 由 false→true 且 `enable=true` 时尝试 activate。
-- 依赖级联与激活失败**不改** `enable`；常驻需求用 default true 的 hidden feature 表达。
+- 每次 feature 值写入成功持久化后（包括重复提交同一布尔值），Host 都根据更新后的全部已注册 feature 布尔值重算 `enable`：任一为 true 则写 `true`，全为 false 则写 `false`；toggle 与 entry 均计入。feature 与派生 `enable` 在同一 Store 事务内持久化。
+- 持久化失败时 feature 与派生 `enable` 都不进入内存投影、不增加 Host revision，也不派发运行时 effects；receipt 为 `persistence="failed"`。因此失败不会产生 feature/enable 部分成功的状态。
+- 对普通插件，全部 feature=false 时 `want_run=false`，Host reconciler 会推进完整 deactivate；在 feature 写入路径上 `enable` 同时派生为 false。启动 seed 和显式 `desired`/lifecycle 写入不做归一化，故其后可能存在 `enable` 与 feature 聚合不一致，直到下一次 feature 值提交。
+- `enable=false` 时 feature 置 true、重复写入相同值均会按 feature 集合修复 `enable=true`；反之，全 false 时重复写入 false 会修复为 `enable=false`。依赖级联与激活失败不改 desired；常驻需求用 default true 的 hidden feature 表达。
+- entry invocation 不是 feature 值修改，不会改写 feature 或 `enable`。`module.platform` 注册 `api.enabled` 与 `debug.logging`；`api.enabled` 是唯一 API 服务门禁，同时控制 HTTP listener 与 `op_gated` 操作路由。旧 `features.op.enabled` 值保留在既有配置投影中，但不再注册、不显示为独立开关、不参与聚合，也不能通过 feature 写接口更新。仅有旧 `op.enabled=false` 时，新缺省 `api.enabled=true` 仍会启用 API；显式持久化的 `api.enabled` 值优先。该 Host owner 的 `enable` 不控制常驻 Host 服务或管理路由。
 - 实际状态（actual）受依赖、版本、安装结果约束，与 desired（`enable`/feature 期望）分开报告。
 - `custom_recipe.recipes`（唯一可见开关，default `false`）与 `craft_ui.custom_crafting`（hidden default `true`，并将 `craft_result` 升为 requires）级联启停；级联不改 desired。
 - `item_count` 的数量解释归 Host 常驻 Adapter；`stack_limit` 的 999 数量策略通过其 `stack_limit.limit_999`（default `false`）feature 与资源 lifecycle 表达。本文不展开扩展数量读取接口。
@@ -1719,12 +1721,12 @@ native 未就绪时返回 HTTP 503 `{"ok":false,"error_code":3}`。
 { "plugin_id": "autosell", "field": "feature", "key": "autosell.auto_sell", "value": true }
 ```
 
-- `field="feature"`：`value` 必须为布尔，写入 `features[key]`；`key` 必须是该 plugin 已注册的 feature id，否则 404。
+- `field="feature"`：`value` 必须为布尔，写入 `features[key]`；`key` 必须是该 plugin 已注册的 feature id，否则 404。成功持久化时，在同一 Store 事务内根据全部更新后注册 feature 值派生该 plugin 的 `enable`（任一 true→true，全 false→false；entry 也计入，重复值提交也重算）。
 - `field="config"`：`value` 为任意合法 JSON，写入 `config[key]`；`key` 为非空字符串。
 - `field="desired"` 且 `key="enable"`：`value` 必须为布尔，写入 desired `enable`。
 - 其他 `field`/类型组合（如 `field="enable"`）一律 400。
 
-成功返回 admission receipt（见下）；写入在 Host 单一 Store transaction 中完成 durable write 与内存提交，不形成第二套 writer。
+成功返回 admission receipt（见下）；feature 值及其派生 `enable` 在 Host 单一 Store transaction 中完成 durable write 与内存提交，不形成第二套 writer。任一持久化失败时事务不提交 feature、`enable`、revision 或运行时 effects。
 
 #### 提交 desired lifecycle
 
@@ -1750,7 +1752,7 @@ native 未就绪时返回 HTTP 503 `{"ok":false,"error_code":3}`。
 ```
 
 - `admission`：`admitted`（请求已入队）；若 admission 阶段即失败，`POST` 直接返回错误状态与错误体，不产生 receipt。
-- `persistence`：`pending`（worker 未完成）→ `persisted` 或 `failed`；`failed` 时 `error_code` 为 Store 错误码、`revision` 保持 0。
+- `persistence`：`pending`（worker 未完成）→ `persisted` 或 `failed`；`failed` 时 `error_code` 为 Store 错误码，且不会产生新的 Host revision（`revision` 保留当前已提交 revision）。
 - `actual`：仅表达命令提交态 `not_submitted`/`pending`，不表示 lifecycle 实际运行结果；实际状态查 `/api/system/features`（§7.7）。
 - `id` 非法（非十进制）→ 400；未知/已淘汰 receipt → 404。
 
@@ -1766,7 +1768,7 @@ native 未就绪时返回 HTTP 503 `{"ok":false,"error_code":3}`。
 
 `error_code` 取 `kQolErr*` 数值（`1` invalid argument、`2` not found、`3` not ready、`9` blocked、`10` busy）。成功响应体不含 `plugin_id`/`key`/`value` 回显，只有 receipt 对象。
 
-durable persistence 确认后的 runtime projection/effects 按 Host revision 串行处理。游戏资源 gate 仍经主线程命令；server 与 watermark 类效果由 revision 通知。`module.platform` 的 `api.enabled=false` 会关闭 HTTP 路由，但不关闭游戏内 settings UI 的配置写入/恢复通道。hard-I/O degraded 遵循 Host Store 默认读写语义并由状态/错误字段诊断；`ReadyUnpersisted` 表示当前进程可用但 durable persistence 尚未确认，不是 hard failure，也不能描述为已持久提交。
+durable persistence 确认后的 runtime projection/effects 按 Host revision 串行处理。游戏资源 gate 仍经主线程命令；server 与 watermark 类效果由 revision 通知。`module.platform.api.enabled=false` 会停止 HTTP 服务并关闭 `op_gated` 原生操作路由；设为 `true` 时操作路由可用，不受旧 `op.enabled` 值影响。该开关不关闭游戏内 settings UI 的配置写入/恢复通道，路由 owner 的 lease 与操作自身校验保持不变。hard-I/O degraded 遵循 Host Store 默认读写语义并由状态/错误字段诊断；`ReadyUnpersisted` 表示当前进程可用但 durable persistence 尚未确认，不是 hard failure，也不能描述为已持久提交。
 
 ### 7.7a 路由登记诊断 routes（P5）
 
@@ -1929,7 +1931,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 ## 八、op（越权操作）— POST /api/op/*
 
-游戏内做不到的操作（改数据/强行操作）。**OP 全局开关**：默认关闭；将 `module.platform` 的 `op.enabled` feature 写为 `true`（`POST /api/config/set`，`field="feature"`）后，§8.1 各端点才可用；开关关闭时带 `op_gated=1` 的端点返回 **403 + `{"ok":false,"error":"op disabled"}`**。门禁由 `core.api` dispatch 根据 route 元数据执行，Controller 校验仍在投递前完成。OP 端点与合法操作物理隔离。
+游戏内做不到的操作（改数据/强行操作）。**API 服务门禁**：由 `module.platform.api.enabled` 统一控制（配置写法见 §7.6），默认开启；关闭时 HTTP 服务停止，且直接进入 Host dispatcher 的 `op_gated=1` 路由返回 **403 + `{"ok":false,"error":"op disabled"}`**。旧 `module.platform.features.op.enabled` 持久值不再控制路由。门禁由 `core.api` dispatch 根据 route 元数据执行，Controller 校验仍在投递前完成；API 服务开启不会绕过路由 lease、owner 权限或操作自身校验。OP 端点与合法操作物理隔离。
 
 ### 8.1 已实现
 
@@ -2058,7 +2060,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 按 `GET /api/config/receipt/{id}` 轮询至 `persistence` 为 `persisted`/`failed`。成员数/字段非法 → 400 `{"ok":false,"error_code":1}`；native 未就绪 → 503；队列满 → 429；内部失败 → 500。
 
-**注意**：`action` 写入 Host 独占的 desired `enable`（`activate`→`true`，`deactivate`→`false`），实际 lifecycle 由 Host reconciler 在主线程帧步进推进；`op.enabled` 门控不作用于该 resident 端点。**desired 与实际分离**：`want_run = enable && any(当前注册 feature=true)`，全部 feature 关闭时自动完整 deactivate 但保留 `enable`；依赖级联/激活失败不改 `enable`。状态查询走 `GET /api/system/features`，资源占用/在途/隔离走 `GET /api/system/resources`。状态机（ARCHITECTURE.md §6.2）：
+**注意**：`action` 写入 Host 独占的 desired `enable`（`activate`→`true`，`deactivate`→`false`），此显式写入不根据 feature 值归一化；实际 lifecycle 由 Host reconciler 在主线程帧步进推进，`api.enabled` 门禁不作用于该 resident 端点。**desired 与实际分离**：普通插件的 `want_run = enable && any(当前注册 feature=true)`；全 feature=false 时 `want_run=false` 并推进完整 deactivate，但只有一次 feature 值提交会同时派生 `enable=false`。启动 seed 与显式 lifecycle 写入可保留 `enable=true` 且全 feature=false 的状态，直到下一次 feature 提交。依赖级联/激活失败不改 `enable`。状态查询走 `GET /api/system/features`，资源占用/在途/隔离走 `GET /api/system/resources`。状态机（ARCHITECTURE.md §6.2）：
 
 - `deactivate`：`enabled`/`installed_disabled → deactivating`，调用插件自身 `deactivate` 清理、逆序还原资源（含物理 unhook、在途归零）→ `inactive`；资源状态可在 `GET /api/system/resources` 观察为 `free`；还原失败 → `failed` + 资源 `tombstone`/隔离；
 - `activate`：`inactive → resolving`，调用插件自身 `install` 初始化后按声明顺序安装资源 → 终态按 feature/desired 门禁 `enabled`/`installed_disabled`；安装失败 → `failed`（插件初始化失败不启动事务；安装中途失败逆序回滚已装子集）。

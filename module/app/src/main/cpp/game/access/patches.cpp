@@ -101,6 +101,12 @@ constexpr SiteEntry kSites[] = {
     // 主菜单跳过 Com2uS Hive 登录询问 ×1（原 hub_login.inc:19-21）：cbz 分支目标改写。
     {"P_HUB_LOGIN_SKIP", F_STATE_HIDE_MODULE_MAIN_MENU_VMA, 0x48, 0x34000100, 0x34000360,
      PatchKind::kWordReplace},
+#if !defined(__ANDROID__) || defined(__aarch64__)
+    // The actual BL is at +0xa70; +0xa6c only prepares its x1 argument.
+    {"settings.main_menu.more_games.draw", F_STATE_DRAW_MAIN_MENU_VMA,
+     STATE_DRAW_MAIN_MENU_MORE_GAMES_DRAW_CALL_OFF,
+     STATE_DRAW_MAIN_MENU_MORE_GAMES_DRAW_CALL_WORD, 0, PatchKind::kBlRedirect},
+#endif
 
     // ---- D2a-3a：extension_bag 声明式站点（owner=plugins/extension_bag；地址/原字与
     // 原 raw 实现逐一核对一致）----

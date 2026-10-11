@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <type_traits>
 
 namespace {
 
@@ -139,16 +140,19 @@ const qol::contracts::QolFeatureControlApi kFeatureControl{
     &control_read_desired, &control_read_feature, &control_request_set_feature,
     &control_request_desired, &control_receipt, &control_invoke_entry};
 
-// 「更多游戏」绑定 tick 决策的记录用 fake 操作（settings_binding 纯逻辑的注入面）。
-class RecordingMoreGamesOps : public qol::features::core_ui::MoreGamesBindOps {
+// 「更多游戏」替换 tick 决策的 fake 操作。
+class RecordingMoreGamesOps final : public qol::features::core_ui::MoreGamesBindOps {
 public:
-    bool proc_matches_result = false;
+    qol::features::core_ui::MoreGamesBindingState binding_state_result =
+        qol::features::core_ui::MoreGamesBindingState::kNeedsReplace;
     bool bind_result = true;
+    bool release_result = true;
     bool btn_resolvable_result = false;
     int release_calls = 0;
     int bind_calls = 0;
     int live_calls = 0;
     int failed_calls = 0;
+    int waiting_calls = 0;
     bool last_failed_resolvable = false;
 
     void reset() {
@@ -156,17 +160,64 @@ public:
         bind_calls = 0;
         live_calls = 0;
         failed_calls = 0;
+        waiting_calls = 0;
         last_failed_resolvable = false;
     }
 
-    bool proc_matches() override { return proc_matches_result; }
-    void release() override { ++release_calls; }
+    qol::features::core_ui::MoreGamesBindingState binding_state() override {
+        return binding_state_result;
+    }
+    bool release() override { ++release_calls; return release_result; }
     bool bind() override { ++bind_calls; return bind_result; }
     bool btn_resolvable() override { return btn_resolvable_result; }
     void mark_live() override { ++live_calls; }
     void mark_failed(bool btn_resolvable) override {
         ++failed_calls;
         last_failed_resolvable = btn_resolvable;
+    }
+    void mark_waiting() override { ++waiting_calls; }
+};
+
+class RecordingMoreGamesDrawOps final : public qol::features::core_ui::MoreGamesDrawOps {
+public:
+    bool replacement_is_live = false;
+    bool replacement_draw_succeeds = false;
+    int live_checks = 0;
+    int replacement_draws = 0;
+    int original_draws = 0;
+
+    bool replacement_live() override { ++live_checks; return replacement_is_live; }
+    bool draw_replacement() override { ++replacement_draws; return replacement_draw_succeeds; }
+    void draw_original() override { ++original_draws; }
+};
+
+// Records the show/enabled/active write order so the transactional hide/deactivate rollback and
+// the current-identity-only restore can be asserted without native memory.
+class RecordingOriginalStateOps final : public qol::features::core_ui::MoreGamesOriginalStateOps {
+public:
+    // Bit i disables the i-th write in sequence; writes past the end still succeed.
+    uint32_t fail_writes = 0;
+    int show_calls = 0;
+    int enabled_calls = 0;
+    int active_calls = 0;
+    bool last_show = false;
+    bool last_enabled = false;
+    bool last_active = false;
+
+    bool set_show(bool shown) override {
+        ++show_calls;
+        last_show = shown;
+        return (fail_writes & (1u << 0)) == 0;
+    }
+    bool set_enabled(bool enabled) override {
+        ++enabled_calls;
+        last_enabled = enabled;
+        return (fail_writes & (1u << 1)) == 0;
+    }
+    bool set_active(bool active) override {
+        ++active_calls;
+        last_active = active;
+        return (fail_writes & (1u << 2)) == 0;
     }
 };
 
@@ -183,6 +234,7 @@ const char* settings_provider_block_reason() { return nullptr; }
 void settings_more_games_tick() {}
 void settings_release_more_games() {}
 const char* settings_more_games_bind_state() { return "waiting"; }
+void settings_main_menu_more_games_draw(void*, int32_t, int32_t, void*, int32_t, int32_t, int32_t) {}
 std::string data_settings_ui_inject() { return "{}"; }
 std::string data_settings_ui_status_json() { return "{}"; }
 std::string data_settings_ui_restore() { return "{}"; }
@@ -192,8 +244,19 @@ std::string data_settings_ui_open_option() { return "{}"; }
 
 int main() {
     using namespace qol;
+    using MainMenuDrawProc = void (*)(void*, int32_t, int32_t, void*, int32_t, int32_t, int32_t);
+    static_assert(std::is_same<decltype(&features::core_ui::settings_main_menu_more_games_draw),
+                               MainMenuDrawProc>::value,
+                  "MainMenu GRPX_DrawPart wrapper must preserve the full seven-argument ABI");
     const contracts::PluginDescriptor& descriptor = features::core_settings::plugin_descriptor();
-    assert(descriptor.resources_count == 0 && descriptor.resources == nullptr);
+    assert(descriptor.resources_count == 1 && descriptor.resources != nullptr);
+    const auto& draw_claim = descriptor.resources[0];
+    assert(std::strcmp(draw_claim.id, "patch:settings.main_menu.more_games.draw") == 0);
+    assert(std::strcmp(draw_claim.symbol, "settings.main_menu.more_games.draw") == 0);
+    assert(draw_claim.mechanism == contracts::ResourceMechanism::kCallPatch);
+    assert(draw_claim.requirement == contracts::ResourceRequirement::kRequired);
+    assert(draw_claim.failure == contracts::ResourceFailure::kFailClosed);
+    assert(draw_claim.handler != nullptr);
     // Ordinary `settings` plugin: no legacy bool map, no config HTTP route, one real entry feature.
     assert(std::strcmp(descriptor.id, "settings") == 0);
     assert(descriptor.requires_count == 2);
@@ -202,7 +265,7 @@ int main() {
     assert(std::strcmp(descriptor.features[0].id, "page") == 0);
     assert(descriptor.features[0].default_enabled == 1);
     assert(descriptor.features[0].type == contracts::FeatureType::kEntry);
-    assert(descriptor.features[0].category == contracts::FeatureCategory::kTools);
+    assert(descriptor.features[0].category == contracts::FeatureCategory::kHidden);
 
     contracts::QolUiAdapter ui{};
     ui.set_popup_process_info = &set_popup_process_info;
@@ -256,44 +319,137 @@ int main() {
     features::core_ui::ui_panels_bind_sdk(nullptr);
     descriptor.deactivate(context);
 
-    // ---- 「更多游戏」绑定每帧决策（more_games_bind_tick 纯逻辑）----
+    // ---- 「更多游戏」替换每帧决策（more_games_bind_tick 纯逻辑）----
     {
         using qol::features::core_ui::more_games_bind_tick;
         RecordingMoreGamesOps ops;
 
-        // 非 main_menu：只释放、不标记 live——status 回 waiting，不再展示过时的 live 快照。
+        // 非 main_menu：不碰游戏控件，status 回 waiting。
         more_games_bind_tick(false, ops);
-        assert(ops.release_calls == 1 && ops.bind_calls == 0 && ops.live_calls == 0 &&
-               ops.failed_calls == 0);
+        assert(ops.release_calls == 0 && ops.bind_calls == 0 && ops.live_calls == 0 &&
+               ops.failed_calls == 0 && ops.waiting_calls == 1);
 
-        // 槽被游戏改写（STATE_EnterMainMenu 重填）→ 下一帧 tick：释放既有记录后重绑 → live。
+        // Main-menu identity unknown: retain the component and its native callback owner.
         ops.reset();
-        ops.proc_matches_result = false;
+        ops.binding_state_result = qol::features::core_ui::MoreGamesBindingState::kUnknown;
+        more_games_bind_tick(true, ops);
+        assert(ops.release_calls == 0 && ops.bind_calls == 0 && ops.live_calls == 0 &&
+               ops.failed_calls == 0 && ops.waiting_calls == 1);
+
+        // 主菜单控件被重建 → 下一帧释放旧组件后按新矩形替换 → live。
+        ops.reset();
+        ops.binding_state_result = qol::features::core_ui::MoreGamesBindingState::kNeedsReplace;
         ops.bind_result = true;
         more_games_bind_tick(true, ops);
         assert(ops.release_calls == 1 && ops.bind_calls == 1 && ops.live_calls == 1 &&
                ops.failed_calls == 0);
 
-        // 校验一致（main_menu 常态）：仅确认 live，无释放/重装写操作。
+        // 校验一致（main_menu 常态）：仅确认 live，不重新创建。
         ops.reset();
-        ops.proc_matches_result = true;
+        ops.binding_state_result = qol::features::core_ui::MoreGamesBindingState::kLive;
         more_games_bind_tick(true, ops);
         assert(ops.release_calls == 0 && ops.bind_calls == 0 && ops.live_calls == 1);
 
-        // main_menu 绑定失败：控件不可解析 → waiting（resolvable=false）；
-        // 控件可解析但写槽失败 → error（resolvable=true）。
+        // Repeated off-menu/on-menu frames keep unknown ownership intact, then reuse a proven live bind.
         ops.reset();
-        ops.proc_matches_result = false;
+        more_games_bind_tick(false, ops);
+        assert(ops.release_calls == 0 && ops.waiting_calls == 1);
+        ops.reset();
+        ops.binding_state_result = qol::features::core_ui::MoreGamesBindingState::kLive;
+        more_games_bind_tick(true, ops);
+        assert(ops.release_calls == 0 && ops.bind_calls == 0 && ops.live_calls == 1);
+
+        // main_menu 替换失败：原控件不可解析 → waiting；原控件存在但替换创建失败 → error。
+        ops.reset();
+        ops.binding_state_result = qol::features::core_ui::MoreGamesBindingState::kNeedsReplace;
         ops.bind_result = false;
         ops.btn_resolvable_result = false;
         more_games_bind_tick(true, ops);
         assert(ops.release_calls == 1 && ops.bind_calls == 1 && ops.live_calls == 0 &&
                ops.failed_calls == 1 && ops.last_failed_resolvable == false);
         ops.reset();
-        ops.proc_matches_result = false;
+        ops.binding_state_result = qol::features::core_ui::MoreGamesBindingState::kNeedsReplace;
         ops.btn_resolvable_result = true;
         more_games_bind_tick(true, ops);
         assert(ops.release_calls == 1 && ops.bind_calls == 1 && ops.live_calls == 0 &&
                ops.failed_calls == 1 && ops.last_failed_resolvable == true);
+
+        // If prior component cleanup is uncertain, never install a second button.
+        ops.reset();
+        ops.binding_state_result = qol::features::core_ui::MoreGamesBindingState::kNeedsReplace;
+        ops.release_result = false;
+        more_games_bind_tick(true, ops);
+        assert(ops.release_calls == 1 && ops.bind_calls == 0 && ops.live_calls == 0 &&
+               ops.waiting_calls == 1);
+    }
+
+    // Explicit MainMenu draw site: native draw is suppressed only after the live custom component
+    // completes successfully; all other paths replay the original draw exactly once.
+    {
+        using qol::features::core_ui::more_games_draw;
+        RecordingMoreGamesDrawOps ops;
+        ops.replacement_is_live = true;
+        ops.replacement_draw_succeeds = true;
+        assert(more_games_draw(true, ops));
+        assert(ops.live_checks == 1 && ops.replacement_draws == 1 && ops.original_draws == 0);
+
+        ops = RecordingMoreGamesDrawOps{};
+        ops.replacement_is_live = true;
+        ops.replacement_draw_succeeds = true;
+        assert(!more_games_draw(false, ops));
+        assert(ops.live_checks == 0 && ops.replacement_draws == 0 && ops.original_draws == 1);
+
+        ops = RecordingMoreGamesDrawOps{};  // unbound/unknown is not live
+        assert(!more_games_draw(true, ops));
+        assert(ops.live_checks == 1 && ops.replacement_draws == 0 && ops.original_draws == 1);
+
+        ops = RecordingMoreGamesDrawOps{};
+        ops.replacement_is_live = true;
+        ops.replacement_draw_succeeds = false;
+        assert(!more_games_draw(true, ops));
+        assert(ops.live_checks == 1 && ops.replacement_draws == 1 && ops.original_draws == 1);
+    }
+
+    // Transactional hide/deactivate: order is show=false, enabled=false, active=false, and a
+    // failed step restores the original boolean Active before the replacement is discarded.
+    {
+        using qol::features::core_ui::more_games_disable_original;
+        RecordingOriginalStateOps state;
+        assert(more_games_disable_original(state, true));
+        assert(state.show_calls == 1 && state.enabled_calls == 1 && state.active_calls == 1 &&
+               !state.last_show && !state.last_enabled && !state.last_active);
+
+        // Active setter fails mid-transaction: show/enabled roll back to true and Active is
+        // restored to the originally observed boolean, so the binding must not advertise live.
+        state = RecordingOriginalStateOps{};
+        state.fail_writes = 1u << 2;
+        assert(!more_games_disable_original(state, true));
+        assert(state.show_calls == 2 && state.enabled_calls == 2 && state.active_calls == 2 &&
+               state.last_show && state.last_enabled && state.last_active);
+
+        // Original was inactive before binding: rollback must restore the exact false meaning.
+        state = RecordingOriginalStateOps{};
+        state.fail_writes = 1u << 1;
+        assert(!more_games_disable_original(state, false));
+        assert(state.last_show && state.last_enabled && !state.last_active);
+    }
+
+    // Restore only writes when the original is verified current; an unknown/non-current identity
+    // performs no native writes and reports success so ownership can be released safely.
+    {
+        using qol::features::core_ui::more_games_restore_original;
+        RecordingOriginalStateOps state;
+        assert(more_games_restore_original(false, true, state));
+        assert(state.show_calls == 0 && state.enabled_calls == 0 && state.active_calls == 0);
+
+        state = RecordingOriginalStateOps{};
+        assert(more_games_restore_original(true, false, state));
+        assert(state.show_calls == 1 && state.enabled_calls == 1 && state.active_calls == 1 &&
+               state.last_show && state.last_enabled && !state.last_active);
+
+        state = RecordingOriginalStateOps{};
+        state.fail_writes = 1u << 2;
+        assert(!more_games_restore_original(true, true, state));
+        assert(state.active_calls == 1);
     }
 }

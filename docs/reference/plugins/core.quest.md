@@ -30,7 +30,7 @@
 
 | feature id | 默认 | 分类 | 类型 |
 |---|---:|---|---|
-| `core.quest.completion_check` | 1 | Gameplay | toggle |
+| `core.quest.completion_check` | 1 | Hidden | toggle |
 
 任务完成检查由该 feature 驱动；feature=false 时插件自动完整 deactivate（Host 不改 `enable`），feature 重新开启且 `enable=true` 时尝试 activate。`enable` 由 Host 独占管理，插件不读写。
 

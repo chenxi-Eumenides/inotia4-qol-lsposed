@@ -435,6 +435,46 @@ void test_install_bl_success() {
     CHECK(std::strcmp(point_owner(addr), "patch:a") == 0);
 }
 
+void test_settings_main_menu_more_games_draw_site() {
+    reset_all();
+    constexpr const char* kSiteName = "settings.main_menu.more_games.draw";
+#if defined(__ANDROID__) && !defined(__aarch64__)
+    PatchSite unsupported{};
+    CHECK(!qol::game::patch_site(kSiteName, &unsupported));
+    CHECK(g_prims.install_bl_calls == 0 && g_prims.revert_bl_calls == 0);
+#else
+    PatchSite site{};
+    CHECK(qol::game::patch_site(kSiteName, &site));
+    const uintptr_t addr = g_base + F_STATE_DRAW_MAIN_MENU_VMA +
+                           STATE_DRAW_MAIN_MENU_MORE_GAMES_DRAW_CALL_OFF;
+    CHECK(site.addr == addr);
+    CHECK(site.kind == qol::game::PatchKind::kBlRedirect);
+    CHECK(site.expected_word == 0x97fcf132u);
+
+    const ResourceClaim claim = make_patch_claim(
+        "patch:settings.main_menu.more_games.draw", kSiteName, &g_dummy_handler);
+
+    // +0xa6c is argument setup, not the BL callsite; reject before any patch or restore.
+    CHECK(error_is(install_claim(claim, addr - 4), "site address mismatch"));
+    CHECK(g_prims.install_bl_calls == 0 && g_prims.revert_bl_calls == 0);
+    CHECK(point_owner(addr) == nullptr && claimed_count() == 0);
+
+    // A primitive instruction mismatch must release the claim without attempting a restore.
+    g_prims.install_bl_ok = false;
+    CHECK(error_is(install_claim(claim, addr), "primitive rejected"));
+    CHECK(g_prims.install_bl_calls == 1 && g_prims.last_expected == 0x97fcf132u);
+    CHECK(g_prims.revert_bl_calls == 0 && point_owner(addr) == nullptr && claimed_count() == 0);
+
+    reset_all();
+    CHECK(qol::game::patch_site(kSiteName, &site));
+    CHECK(install_claim(claim, addr).ok == 0);
+    CHECK(g_prims.last_expected == 0x97fcf132u && point_owner(addr) != nullptr);
+    CHECK(release_claim(claim, addr).ok == 0);
+    CHECK(g_prims.revert_bl_calls == 1 && g_prims.last_expected == 0x97fcf132u);
+    CHECK(point_owner(addr) == nullptr && claimed_count() == 0);
+#endif
+}
+
 void test_install_word_success() {
     reset_all();
     const ResourceClaim claim = make_patch_claim("patch:b", "P_CHAR_MOVE_PUSH_STAND", nullptr);
@@ -852,6 +892,7 @@ int main() {
     test_claims_arbitration();
     test_claims_capacity();
     test_install_bl_success();
+    test_settings_main_menu_more_games_draw_site();
     test_install_word_success();
     test_bl_redirect_to_symbol_success();
     test_bl_redirect_to_symbol_mismatch();

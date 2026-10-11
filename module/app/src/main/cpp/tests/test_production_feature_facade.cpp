@@ -23,13 +23,30 @@ using namespace qol::features::core_settings;
 namespace {
 int business_calls = 0;
 int prepare_calls = 0;
+bool g_api_dispatch_enabled = false;
 QolResult toggle(PluginContext&, uint8_t) { ++business_calls; return ok(); }
 QolResult entry(PluginContext&) { ++business_calls; return ok(); }
 constexpr FeatureDefinition definitions[] = {
-    {"switch", 0, FeatureCategory::kHidden, FeatureType::kToggle,
+    {"switch", 0, FeatureCategory::kBasicOptimization, FeatureType::kToggle,
      "switch-name", "switch-description", &toggle, nullptr},
     {"open", 1, FeatureCategory::kTools, FeatureType::kEntry,
-     "entry-name", "entry-description", nullptr, &entry},
+     "entry-name", "entry-description", nullptr, &entry, "metadata-action"},
+};
+constexpr FeatureDefinition core_custom_ui_features[] = {
+    {"core.custom_ui.open_debug_components", 1, FeatureCategory::kHidden,
+     FeatureType::kEntry, "打开调试面板", "", nullptr, &entry, "打开"},
+    {"core.custom_ui.ui_tools", 1, FeatureCategory::kHidden,
+     FeatureType::kToggle, "共享界面工具", "", &toggle, nullptr},
+    {"core.custom_ui.other_entry", 1, FeatureCategory::kHidden,
+     FeatureType::kEntry, "其他调试入口", "", nullptr, &entry, "打开"},
+    {"core.custom_ui.tools_entry", 1, FeatureCategory::kTools,
+     FeatureType::kEntry, "非隐藏入口", "", nullptr, &entry, "打开"},
+    {"core.custom_ui.debug_toggle", 1, FeatureCategory::kHidden,
+     FeatureType::kToggle, "调试开关", "", &toggle, nullptr},
+};
+constexpr FeatureDefinition missing_entry_callback[] = {
+    {"core.invalid.debug_entry", 1, FeatureCategory::kHidden,
+     FeatureType::kEntry, "无回调入口", "", nullptr, nullptr, "打开"},
 };
 PluginDescriptor descriptor(const char* id) {
     PluginDescriptor out{};
@@ -40,6 +57,21 @@ PluginDescriptor descriptor(const char* id) {
 }
 const PluginDescriptor alpha_descriptor = descriptor("plugin.alpha");
 const PluginDescriptor beta_descriptor = descriptor("plugin.beta");
+const PluginDescriptor core_descriptor = descriptor("core.test");
+const PluginDescriptor settings_descriptor = descriptor("settings");
+PluginDescriptor make_debug_custom_ui_descriptor() {
+    auto out = descriptor("core.custom_ui");
+    out.features = core_custom_ui_features;
+    out.feature_count = sizeof(core_custom_ui_features) / sizeof(core_custom_ui_features[0]);
+    return out;
+}
+const PluginDescriptor core_custom_ui_descriptor = make_debug_custom_ui_descriptor();
+PluginDescriptor missing_callback_descriptor() {
+    auto out = descriptor("core.invalid_callback");
+    out.features = missing_entry_callback;
+    out.feature_count = 1;
+    return out;
+}
 
 QolOwnerToken owner(void* identity, const char* id) {
     assert(owner_register(identity, id));
@@ -64,14 +96,15 @@ void test_abi() {
     static_assert(std::is_standard_layout_v<QolFeatureControlApi> &&
                   std::is_trivial_v<QolFeatureControlApi>);
     static_assert(std::is_standard_layout_v<QolFeatureCatalogItem> &&
-                  std::is_trivial_v<QolFeatureCatalogItem>);
+                  std::is_trivially_copyable_v<QolFeatureCatalogItem>);
     static_assert(offsetof(QolHostSdk, config_namespace) == 800);
     static_assert(offsetof(QolHostSdk, feature) == 808);
     static_assert(offsetof(QolHostSdk, feature_control) == 816);
     static_assert(static_cast<uint8_t>(FeatureCategory::kGeneral) == 0 &&
                   static_cast<uint8_t>(FeatureCategory::kGameplay) == 1 &&
                   static_cast<uint8_t>(FeatureCategory::kTools) == 2 &&
-                  static_cast<uint8_t>(FeatureCategory::kHidden) == 3);
+                  static_cast<uint8_t>(FeatureCategory::kHidden) == 3 &&
+                  static_cast<uint8_t>(FeatureCategory::kBasicOptimization) == 4);
     auto feature = production_feature_api();
     auto control = production_feature_control_api();
     QolHostSdk sdk{};
@@ -124,10 +157,14 @@ void test_abi() {
 // Focused registry seam: no resource engine or product callbacks are installed.
 // Inactive contexts never become business-ready; only admission/queue behavior is tested.
 namespace qol::host {
-uint32_t plugin_count() { return 2; }
+void http_dispatch_set_api_enabled(bool enabled) { g_api_dispatch_enabled = enabled; }
+uint32_t plugin_count() { return 5; }
 const contracts::PluginDescriptor* find_plugin(const char* id) {
     if (id && std::strcmp(id, "plugin.alpha") == 0) return &alpha_descriptor;
     if (id && std::strcmp(id, "plugin.beta") == 0) return &beta_descriptor;
+    if (id && std::strcmp(id, "core.test") == 0) return &core_descriptor;
+    if (id && std::strcmp(id, "settings") == 0) return &settings_descriptor;
+    if (id && std::strcmp(id, "core.custom_ui") == 0) return &core_custom_ui_descriptor;
     return nullptr;
 }
 bool feature_registry_prepare(const HostDeps&) { ++prepare_calls; return true; }
@@ -172,12 +209,31 @@ int main(int argc, char** argv) {
     assert(production_feature_register(beta_descriptor).ok());
     assert(!production_feature_register(alpha_descriptor).ok());
     assert(production_feature_register_host_owner(platform_config_descriptor()).ok());
+    assert(production_feature_register(core_descriptor).ok());
+    assert(production_feature_register(settings_descriptor).ok());
+    const auto missing_callback = missing_callback_descriptor();
+    const size_t definitions_before_invalid = production_feature_directory().definitions().size();
+    assert(!production_feature_register(missing_callback).ok());
+    assert(production_feature_directory().definitions().size() == definitions_before_invalid);
+    assert(production_feature_register(core_custom_ui_descriptor).ok());
+    {
+        std::ofstream file(file_path);
+        file << R"({"module.platform":{"enable":true,"features":{"op.enabled":false,"debug.logging":false},"config":{}}})";
+    }
     assert(production_feature_bootstrap(path).ok());
     assert(!production_feature_register(descriptor("late")).ok());
     assert(!production_feature_register_host_owner(platform_config_descriptor()).ok());
     assert(!production_feature_bootstrap(path).ok());
-    assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 3);
+    assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 4);
     assert(std::strcmp(catalog[2].plugin_id, kPlatformConfigOwner) == 0 && catalog[2].host_owned == 1);
+    assert(catalog[2].feature_count == 2);
+    assert(std::strcmp(catalog[2].features[0].id, "api.enabled") == 0 &&
+           std::strcmp(catalog[2].features[0].name, "API服务") == 0);
+    assert(std::strcmp(catalog[2].features[1].id, "debug.logging") == 0);
+    uint8_t api_enabled = 0;
+    assert(succeeded(control.read_feature(control.context, kPlatformConfigOwner, "api.enabled", &api_enabled)) && api_enabled);
+    assert(control.read_feature(control.context, kPlatformConfigOwner, "op.enabled", &api_enabled).code == kQolErrNotFound);
+    assert(g_api_dispatch_enabled); // Legacy op.enabled=false does not close operation APIs.
     assert(catalog[0].host_owned == 0);
     assert(std::strcmp(catalog[0].plugin_id, "plugin.alpha") == 0);
     assert(catalog[0].feature_count == 2);
@@ -187,6 +243,36 @@ int main(int argc, char** argv) {
     assert(catalog[0].features[1].default_enabled == 1);
     assert(production_feature_directory().definitions()[0].features[1].on_entry == &entry);
     assert(std::strcmp(catalog[0].features[1].description, "entry-description") == 0);
+    assert(std::strcmp(production_feature_directory().definitions()[0].features[1].action_label,
+                       "metadata-action") == 0);
+    assert(std::strcmp(production_feature_controller().catalog()[0].features[1].action_label,
+                       "metadata-action") == 0);
+    assert(std::strcmp(catalog[0].features[1].action_label, "metadata-action") == 0);
+    assert(production_feature_directory().definitions()[0].features[0].action_label == nullptr);
+    assert(catalog[0].features[0].action_label == nullptr);
+    // Core plugins stay registered for lifecycle/config management. Only the exact hidden
+    // debug entry from core.custom_ui is projected; its other valid features stay excluded.
+    assert(production_feature_directory().definitions().size() == 6);
+    uint8_t core_enabled = 0;
+    assert(succeeded(control.read_feature(control.context, "core.test", "open", &core_enabled)) && core_enabled == 1);
+    assert(succeeded(control.read_feature(control.context, "settings", "open", &core_enabled)) && core_enabled == 1);
+    assert(catalog[3].host_owned == 0 &&
+           std::strcmp(catalog[3].plugin_id, "core.custom_ui") == 0);
+    assert(catalog[3].feature_count == 1);
+    const auto& debug_entry = catalog[3].features[0];
+    assert(std::strcmp(debug_entry.id, "core.custom_ui.open_debug_components") == 0);
+    assert(debug_entry.type == FeatureType::kEntry &&
+           debug_entry.category == FeatureCategory::kHidden && debug_entry.default_enabled == 1);
+    assert(std::strcmp(debug_entry.action_label, "打开") == 0 &&
+           std::strcmp(debug_entry.description, "") == 0);
+    const auto& registered_custom_ui = production_feature_directory().definitions()[5];
+    assert(std::strcmp(registered_custom_ui.plugin_id.c_str(), "core.custom_ui") == 0);
+    assert(registered_custom_ui.features[0].on_entry == &entry);
+    for (uint32_t i = 0; i < count; ++i) {
+        if (std::strcmp(catalog[i].plugin_id, "core.custom_ui") == 0) continue;
+        assert(std::strncmp(catalog[i].plugin_id, "core.", 5) != 0);
+        assert(std::strcmp(catalog[i].plugin_id, "settings") != 0);
+    }
 
     int alpha_identity = 0, manager_identity = 0;
     const auto alpha = owner(&alpha_identity, "plugin.alpha");
@@ -205,11 +291,12 @@ int main(int argc, char** argv) {
     assert(api.read_catalog(api.context, manager, buffer, sizeof(buffer), &size).code == kQolErrBlocked);
     assert(succeeded(production_feature_controller().grant_admin(manager)));
     assert(succeeded(api.read_catalog(api.context, manager, buffer, sizeof(buffer), &size)));
-    const std::string expected_plugin = R"([{"id":"switch","name":"switch-name","description":"switch-description","type":"toggle","category":3,"default":false},{"id":"open","name":"entry-name","description":"entry-description","type":"entry","category":2,"default":true}])";
+    const std::string expected_plugin = R"([{"id":"switch","name":"switch-name","description":"switch-description","type":"toggle","category":4,"default":false},{"id":"open","name":"entry-name","description":"entry-description","type":"entry","category":2,"default":true}])";
     const std::string catalog_json(buffer, size);
     assert(catalog_json.rfind("{\"plugin.alpha\":" + expected_plugin + ",\"plugin.beta\":" + expected_plugin + ",\"module.platform\":[", 0) == 0);
     assert(catalog_json.find("\"api.enabled\"") != std::string::npos &&
-           catalog_json.find("\"op.enabled\"") != std::string::npos);
+           catalog_json.find("\"op.enabled\"") == std::string::npos &&
+           catalog_json.find("\"debug.logging\"") != std::string::npos);
 
     assert(api.invoke_entry(api.context, alpha, "plugin.alpha", "open").code == kQolErrNotReady);
     assert(production_feature_bind_frame({}) && prepare_calls == 1);
@@ -221,19 +308,19 @@ int main(int argc, char** argv) {
     owner_suspend(&manager_identity);
     assert(api.read_feature(api.context, alpha, "plugin.alpha", "open", &enabled).code != kQolOk);
     assert(api.read_catalog(api.context, manager, buffer, sizeof(buffer), &size).code != kQolOk);
-    assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 3);
+    assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 4);
     assert(succeeded(control.read_desired(control.context, "plugin.alpha", &enabled, &any)) && enabled && any);
     assert(succeeded(control.request_set_feature(control.context, "plugin.alpha", "open", 0, &receipt)));
     const auto host_receipt = receipt.request_id;
     receipt = await(control, receipt);
     assert(receipt.persistence == FeaturePersistence::kPersisted);
-    assert(succeeded(control.read_desired(control.context, "plugin.alpha", &enabled, &any)) && enabled && !any);
+    assert(succeeded(control.read_desired(control.context, "plugin.alpha", &enabled, &any)) && !enabled && !any);
     assert(control.invoke_entry(control.context, "plugin.alpha", "open").code == kQolErrBlocked);
     assert(succeeded(control.request_desired(control.context, "plugin.alpha", 0, &receipt)));
     assert(await(control, receipt).persistence == FeaturePersistence::kPersisted);
     assert(succeeded(control.request_set_feature(control.context, "plugin.alpha", "open", 1, &receipt)));
     assert(await(control, receipt).persistence == FeaturePersistence::kPersisted);
-    assert(succeeded(control.read_desired(control.context, "plugin.alpha", &enabled, &any)) && !enabled && any);
+    assert(succeeded(control.read_desired(control.context, "plugin.alpha", &enabled, &any)) && enabled && any);
     assert(succeeded(control.request_desired(control.context, "plugin.alpha", 1, &receipt)));
     assert(await(control, receipt).persistence == FeaturePersistence::kPersisted);
     assert(succeeded(control.receipt(control.context, host_receipt, &receipt)));
@@ -256,6 +343,21 @@ int main(int argc, char** argv) {
     assert(actual_state == static_cast<int32_t>(qol::infra::FeatureState::kEnabled) && actual_enabled == 1);
     assert(control.read_actual(control.context, kPlatformConfigOwner, &actual_state, &actual_enabled).code == kQolOk);
     assert(control.request_desired(control.context, kPlatformConfigOwner, 0, &receipt).code == kQolErrUnsupported);
+
+    // API service is the sole API gate; its value also reaches the native operation route gate.
+    assert(succeeded(control.read_desired(control.context, kPlatformConfigOwner, &enabled, &any)) && enabled && any);
+    assert(succeeded(control.request_set_feature(control.context, kPlatformConfigOwner, "api.enabled", 0, &receipt)));
+    assert(await(control, receipt).persistence == FeaturePersistence::kPersisted);
+    assert(succeeded(control.read_desired(control.context, kPlatformConfigOwner, &enabled, &any)) && !enabled && !any);
+    assert(!g_api_dispatch_enabled);
+    assert(succeeded(control.read_actual(control.context, kPlatformConfigOwner, &actual_state, &actual_enabled)) &&
+           actual_state == static_cast<int32_t>(qol::infra::FeatureState::kEnabled) && actual_enabled == 1);
+    assert(control.request_set_feature(control.context, kPlatformConfigOwner, "op.enabled", 1, &receipt).code == kQolErrNotFound);
+    assert(succeeded(control.read_desired(control.context, kPlatformConfigOwner, &enabled, &any)) && !enabled && !any);
+    assert(succeeded(control.request_set_feature(control.context, kPlatformConfigOwner, "api.enabled", 1, &receipt)));
+    assert(await(control, receipt).persistence == FeaturePersistence::kPersisted);
+    assert(succeeded(control.read_desired(control.context, kPlatformConfigOwner, &enabled, &any)) && enabled && any);
+    assert(g_api_dispatch_enabled); // API=true overrides the preserved legacy op.enabled=false.
 
     // Platform config validation is enforced by the single worker writer.
     const char* bad_port = "{\"kind\":\"number\"}";
@@ -292,6 +394,7 @@ int main(int argc, char** argv) {
     {
         const auto list = invoke(HttpMethod::kGet, "/api/config/list", "");
         assert(list.first == 200 && list.second.find("\"enable\"") != std::string::npos && list.second.find("plugin.alpha") != std::string::npos);
+        assert(list.second.find("\"op.enabled\":false") != std::string::npos);
         // Projection object key order matches the on-disk schema: enable, features, config.
         const auto alpha_object = list.second.find("\"plugin.alpha\":{");
         assert(alpha_object != std::string::npos);

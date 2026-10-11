@@ -46,6 +46,16 @@ int g_native_label_draws = 0;
 qol::contracts::UiRect g_native_label_rect{};
 std::string g_native_label_text;
 int32_t g_native_label_font = -1;
+qol::contracts::QolUiHandle g_main_menu_button = nullptr;
+qol::contracts::QolUiHandle g_main_menu_replacement = nullptr;
+void* g_main_menu_click_owner = nullptr;
+bool g_main_menu_parent_is_current = true;
+bool g_main_menu_identity_known = true;
+bool g_main_menu_invalidation_allowed = true;
+bool g_fail_next_rect = false;
+bool g_fail_next_text = false;
+bool g_fail_next_draw_proc = false;
+bool g_fail_next_click_proc = false;
 constexpr int32_t kPartWidths[] = {39, 43, 41, 45};
 constexpr int32_t kPartHeights[] = {40, 42, 44, 46};
 
@@ -80,6 +90,10 @@ QolResult create_control(uint32_t kind, qol::contracts::QolUiHandle parent,
 
 QolResult set_rect(qol::contracts::QolUiHandle handle, qol::contracts::UiRect rect) {
     if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    if (g_fail_next_rect) {
+        g_fail_next_rect = false;
+        return qol::contracts::error(kQolErrNotReady, "rect failure", 13);
+    }
     static_cast<FakeControl*>(handle)->rect = rect;
     return ok();
 }
@@ -87,6 +101,10 @@ QolResult set_rect(qol::contracts::QolUiHandle handle, qol::contracts::UiRect re
 QolResult set_text(qol::contracts::QolUiHandle handle, const char* text) {
     if (handle == nullptr || text == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    if (g_fail_next_text) {
+        g_fail_next_text = false;
+        return qol::contracts::error(kQolErrNotReady, "text failure", 13);
     }
     std::snprintf(static_cast<FakeControl*>(handle)->text,
                   sizeof(static_cast<FakeControl*>(handle)->text), "%s", text);
@@ -97,6 +115,10 @@ QolResult set_draw_proc(qol::contracts::QolUiHandle handle, qol::contracts::QolU
     if (handle == nullptr || draw == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     }
+    if (g_fail_next_draw_proc) {
+        g_fail_next_draw_proc = false;
+        return qol::contracts::error(kQolErrNotReady, "draw failure", 13);
+    }
     static_cast<FakeControl*>(handle)->draw = draw;
     return ok();
 }
@@ -106,9 +128,15 @@ QolResult set_click_proc(qol::contracts::QolUiHandle handle, qol::contracts::Qol
     if (handle == nullptr || click == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     }
+    if (g_fail_next_click_proc) {
+        g_fail_next_click_proc = false;
+        return qol::contracts::error(kQolErrNotReady, "click failure", 13);
+    }
     auto* control = static_cast<FakeControl*>(handle);
     control->click = click;
     control->click_user = user;
+    if (g_main_menu_button != nullptr && control->parent ==
+        static_cast<FakeControl*>(g_main_menu_button)->parent) g_main_menu_click_owner = user;
     return ok();
 }
 
@@ -140,6 +168,10 @@ QolResult draw_native_text_button_label(qol::contracts::UiRect rect, const char*
 QolResult delete_control(qol::contracts::QolUiHandle handle) {
     if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     ++g_native_button_deletes;
+    if (handle == g_main_menu_replacement) {
+        g_main_menu_replacement = nullptr;
+        g_main_menu_click_owner = nullptr;
+    }
     return ok();
 }
 
@@ -192,6 +224,49 @@ QolResult get_rect(qol::contracts::QolUiHandle handle, qol::contracts::UiRect* o
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     }
     *out = static_cast<FakeControl*>(handle)->rect;
+    return ok();
+}
+
+QolResult main_menu_more_games_snapshot(qol::contracts::QolUiHandle* out_button,
+                                        qol::contracts::QolUiHandle* out_parent,
+                                        qol::contracts::UiRect* out_rect) {
+    if (out_button == nullptr || out_parent == nullptr || out_rect == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out_button = nullptr;
+    *out_parent = nullptr;
+    if (!g_main_menu_identity_known || g_main_menu_button == nullptr) {
+        return qol::contracts::error(kQolErrNotReady, "unknown", 7);
+    }
+    auto* button = static_cast<FakeControl*>(g_main_menu_button);
+    *out_button = button;
+    *out_parent = button->parent;
+    *out_rect = button->rect;
+    return ok();
+}
+
+QolResult main_menu_text_button_is_live(qol::contracts::QolUiHandle original,
+                                        qol::contracts::QolUiHandle child,
+                                        qol::contracts::QolUiClickFn expected_execute,
+                                        void* owner, int32_t* out_live) {
+    if (original == nullptr || child == nullptr || expected_execute == nullptr ||
+        owner == nullptr || out_live == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    if (!g_main_menu_identity_known) return qol::contracts::error(kQolErrNotReady, "unknown", 7);
+    *out_live = g_main_menu_parent_is_current && original == g_main_menu_button &&
+        child == g_main_menu_replacement && owner == g_main_menu_click_owner ? 1 : 0;
+    return ok();
+}
+
+QolResult invalidate_main_menu_binding(qol::contracts::QolUiHandle child, void* owner) {
+    if (child == nullptr || owner == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    if (!g_main_menu_identity_known || !g_main_menu_invalidation_allowed) {
+        return qol::contracts::error(kQolErrNotReady, "unknown", 7);
+    }
+    if (owner == g_main_menu_click_owner) g_main_menu_click_owner = nullptr;
     return ok();
 }
 
@@ -342,6 +417,9 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.is_main_thread = &is_main_thread;
     adapter.minor = qol::contracts::kUiAdapterMinor;
     adapter.set_button_enabled = &set_button_enabled;
+    adapter.main_menu_more_games_snapshot = &main_menu_more_games_snapshot;
+    adapter.main_menu_text_button_is_live = &main_menu_text_button_is_live;
+    adapter.main_menu_text_button_invalidate_binding = &invalidate_main_menu_binding;
     adapter.draw_native_text_button_background = &draw_native_text_button_background;
     adapter.draw_native_text_button_label = &draw_native_text_button_label;
     adapter.delete_control = &delete_control;
@@ -374,6 +452,14 @@ int main() {
     char button_text[] = "button";
     qol::contracts::UiButtonDesc button_desc{{2, 3, 20, 10}, button_text, 7, &on_click, root};
     qol::contracts::QolUiHandle button = nullptr;
+    const int deletes_before_text_failure = g_native_button_deletes;
+    qol::contracts::UiButtonDesc failed_text_desc{{2, 3, 20, 10}, "failed", 7, &on_click, root};
+    qol::contracts::QolUiHandle failed_text_button = nullptr;
+    g_fail_next_text = true;
+    CHECK(components->button_create(&failed_text_desc, root, &failed_text_button).code ==
+          kQolErrNotReady);
+    CHECK(failed_text_button == nullptr &&
+          g_native_button_deletes == deletes_before_text_failure + 1);
     CHECK(components->button_create(&button_desc, root, &button).ok == kQolOk);
     button_text[0] = 'X';
     CHECK(std::strcmp(static_cast<FakeControl*>(button)->text, "button") == 0);
@@ -503,6 +589,10 @@ int main() {
     qol::contracts::UiButtonDesc text_desc{{10, 12, 220, 48}, long_text.c_str(), 0,
                                             &on_click, &g_clicks};
     qol::contracts::QolUiHandle text_button = nullptr;
+    const int deletes_before_rect_failure = g_native_button_deletes;
+    g_fail_next_rect = true;
+    CHECK(components->text_button_create(&text_desc, text_root, &text_button).code == kQolErrNotReady);
+    CHECK(text_button == nullptr && g_native_button_deletes == deletes_before_rect_failure + 1);
     CHECK(components->text_button_create(nullptr, text_root, &text_button).code ==
           kQolErrInvalidArgument);
     CHECK(text_button == nullptr);
@@ -567,9 +657,111 @@ int main() {
         reinterpret_cast<uintptr_t>(touch_inside), 0, &consumed).ok == kQolOk);
     CHECK(g_clicks == 3);
     CHECK(components->destroy(text_button).ok == kQolOk);
-    CHECK(g_native_button_deletes == 2);
+    CHECK(g_native_button_deletes == 4);
     CHECK(components->destroy(text_button).code == kQolErrNotFound);
     CHECK(components->destroy(text_root).ok == kQolOk);
+    qol::features::core_ui::ui_components_unbind();
+
+    CHECK(qol::features::core_ui::ui_components_bind(&kFakeAdapter));
+    FakeControl menu_parent{};
+    menu_parent.rect = {0, 0, 960, 640};
+    FakeControl menu_button{};
+    menu_button.parent = &menu_parent;
+    menu_button.rect = {612, 488, 220, 52};
+    g_main_menu_button = &menu_button;
+    g_main_menu_parent_is_current = true;
+    g_main_menu_identity_known = true;
+    g_main_menu_invalidation_allowed = true;
+    const qol::contracts::UiMainMenuTextButtonDesc menu_desc{
+        "模块设置", qol::contracts::kUiTextButtonFontDefault, &on_click, &g_clicks};
+    qol::contracts::QolUiHandle original_menu_button = nullptr;
+    qol::contracts::QolUiHandle replacement_menu_button = nullptr;
+    const int deletes_before_draw_failure = g_native_button_deletes;
+    g_fail_next_draw_proc = true;
+    CHECK(components->main_menu_text_button_create(&menu_desc, &original_menu_button,
+        &replacement_menu_button).code == kQolErrNotReady);
+    CHECK(original_menu_button == nullptr && replacement_menu_button == nullptr &&
+          g_native_button_deletes == deletes_before_draw_failure + 1);
+    const int deletes_before_click_failure = g_native_button_deletes;
+    g_fail_next_click_proc = true;
+    CHECK(components->main_menu_text_button_create(&menu_desc, &original_menu_button,
+        &replacement_menu_button).code == kQolErrNotReady);
+    CHECK(original_menu_button == nullptr && replacement_menu_button == nullptr &&
+          g_native_button_deletes == deletes_before_click_failure + 1);
+    CHECK(components->main_menu_text_button_create(&menu_desc, &original_menu_button,
+        &replacement_menu_button).ok == kQolOk);
+    CHECK(original_menu_button == &menu_button && replacement_menu_button != nullptr);
+    g_main_menu_replacement = replacement_menu_button;
+    auto* replacement_control = static_cast<FakeControl*>(replacement_menu_button);
+    CHECK(replacement_control->parent == &menu_parent);
+    CHECK(replacement_control->rect.x == menu_button.rect.x &&
+          replacement_control->rect.y == menu_button.rect.y &&
+          replacement_control->rect.w == menu_button.rect.w &&
+          replacement_control->rect.h == menu_button.rect.h);
+    CHECK(replacement_control->draw != nullptr && replacement_control->click != nullptr);
+    uint8_t replacement_live = 0;
+    CHECK(components->main_menu_text_button_is_live(replacement_menu_button,
+        &replacement_live).ok == kQolOk && replacement_live == 1);
+    replacement_control->draw(replacement_control);
+    CHECK(g_native_button_draws == 5);
+    CHECK(g_native_label_text == "模块设置");
+    replacement_control->click(replacement_control->click_user);
+    CHECK(g_clicks == 4);
+
+    const int deletions_before_unknown_state = g_native_button_deletes;
+    g_main_menu_identity_known = false;
+    CHECK(components->main_menu_text_button_is_live(replacement_menu_button,
+        &replacement_live).code == kQolErrNotReady);
+    CHECK(components->destroy(replacement_menu_button).code == kQolErrNotReady);
+    CHECK(g_native_button_deletes == deletions_before_unknown_state);
+    CHECK(g_main_menu_click_owner == replacement_control->click_user);
+    replacement_control->click(replacement_control->click_user);
+    CHECK(g_clicks == 5);
+
+    int unrelated_owner = 0;
+    g_main_menu_identity_known = true;
+    g_main_menu_click_owner = &unrelated_owner;
+    CHECK(components->destroy(replacement_menu_button).ok == kQolOk);
+    CHECK(g_native_button_deletes == deletions_before_unknown_state);
+    CHECK(g_main_menu_click_owner == &unrelated_owner);
+
+    g_main_menu_click_owner = nullptr;
+    qol::contracts::QolUiHandle second_original = nullptr;
+    qol::contracts::QolUiHandle second_replacement = nullptr;
+    CHECK(components->main_menu_text_button_create(&menu_desc, &second_original,
+        &second_replacement).ok == kQolOk);
+    CHECK(second_original == &menu_button && second_replacement != nullptr);
+    g_main_menu_replacement = second_replacement;
+    auto* second_control = static_cast<FakeControl*>(second_replacement);
+    CHECK(g_main_menu_click_owner == second_control->click_user);
+    g_main_menu_replacement = nullptr;
+    const int deletions_before_parent_rebuild = g_native_button_deletes;
+    CHECK(components->destroy(second_replacement).ok == kQolOk);
+    CHECK(g_native_button_deletes == deletions_before_parent_rebuild);
+    CHECK(g_main_menu_click_owner == nullptr);
+
+    qol::contracts::QolUiHandle third_original = nullptr;
+    qol::contracts::QolUiHandle third_replacement = nullptr;
+    CHECK(components->main_menu_text_button_create(&menu_desc, &third_original,
+        &third_replacement).ok == kQolOk);
+    CHECK(third_original == &menu_button && third_replacement != nullptr);
+    g_main_menu_replacement = third_replacement;
+    auto* third_control = static_cast<FakeControl*>(third_replacement);
+    g_main_menu_identity_known = false;
+    g_main_menu_invalidation_allowed = false;
+    const int deletions_before_unbind_retry = g_native_button_deletes;
+    qol::features::core_ui::ui_components_unbind();
+    CHECK(!qol::features::core_ui::ui_components_bind(&kFakeAdapter));
+    CHECK(g_native_button_deletes == deletions_before_unbind_retry);
+    CHECK(g_main_menu_click_owner == third_control->click_user);
+    third_control->click(third_control->click_user);
+    CHECK(g_clicks == 6);
+    g_main_menu_identity_known = true;
+    g_main_menu_invalidation_allowed = true;
+    CHECK(qol::features::core_ui::ui_components_bind(&kFakeAdapter));
+    CHECK(g_native_button_deletes == deletions_before_unbind_retry + 1);
+    CHECK(g_main_menu_click_owner == nullptr);
+    g_main_menu_button = nullptr;
     qol::features::core_ui::ui_components_unbind();
 
     auto older_adapter = make_fake_adapter();

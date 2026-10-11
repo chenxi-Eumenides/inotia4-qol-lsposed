@@ -2140,7 +2140,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"core.character.provider", 1, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kToggle, "角色领域服务", "提供角色与队伍事实、快照及操作命令。",
+     contracts::FeatureType::kToggle, "角色领域服务", "",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

@@ -738,7 +738,7 @@ ConfigStoreResult ConfigStore::prepare_features(const std::vector<PluginFeatureS
                 feature.default_enabled > 1 || feature.name == nullptr ||
                 feature.description == nullptr || !valid_utf8(feature.name) ||
                 !valid_utf8(feature.description) ||
-                static_cast<uint8_t>(feature.category) > static_cast<uint8_t>(contracts::FeatureCategory::kHidden) ||
+                static_cast<uint8_t>(feature.category) > static_cast<uint8_t>(contracts::FeatureCategory::kBasicOptimization) ||
                 (feature.type != contracts::FeatureType::kToggle && feature.type != contracts::FeatureType::kEntry) ||
                 (feature.type == contracts::FeatureType::kToggle && (feature.on_toggle == nullptr || feature.on_entry != nullptr)) ||
                 (feature.type == contracts::FeatureType::kEntry && (feature.on_entry == nullptr || feature.on_toggle != nullptr)) ||
@@ -898,6 +898,17 @@ ConfigStoreResult ConfigStore::update_feature_model(const std::string& id, Featu
         JsonValue updated = *current;
         set_member(&updated, key, std::move(value));
         set_member(object, section, std::move(updated));
+        if (field == FeatureConfigField::kFeature) {
+            const auto* features = member(*object, "features");
+            bool any_enabled = false;
+            for (const auto& feature : plugin->features) {
+                const auto* enabled = features ? member(*features, feature.id) : nullptr;
+                if (!enabled || enabled->kind != JsonValue::Kind::kBoolean)
+                    return fail(ConfigStoreError::kValidation, "registered feature must be boolean");
+                any_enabled = any_enabled || enabled->boolean;
+            }
+            set_member(object, "enable", boolean_value(any_enabled));
+        }
     }
     if (!write_atomic(path_, serialize(next, unknown_root_))) return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
     namespaces_ = std::move(next);

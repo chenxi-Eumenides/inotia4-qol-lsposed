@@ -43,9 +43,9 @@ struct HandlerSlot {
 HandlerSlot g_handlers[kMaxHandlers];
 std::mutex g_dispatch_mutex;
 std::condition_variable g_dispatch_cv;
-// OP 门禁状态：默认关闭（安全基线，与 Kotlin ModuleConfig.DEFAULT_OP_ENABLED 一致），
-// 由 JNI nativeSetOpEnabled 在配置加载/变更时同步；只在 g_dispatch_mutex 下读写。
-bool g_op_enabled = false;
+// API service gate fails closed until the Host publishes module.platform.api.enabled.
+// It is read and written only under g_dispatch_mutex.
+bool g_api_enabled = false;
 
 bool valid_method(contracts::HttpMethod method) {
     return method == contracts::HttpMethod::kGet || method == contracts::HttpMethod::kPost;
@@ -278,11 +278,11 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
     }
 
     HandlerSlot* selected = nullptr;
-    bool op_enabled = false;
+    bool api_enabled = false;
     std::array<contracts::HttpPathParam, kMaxPathParams> params{};
     {
         std::lock_guard<std::mutex> lock(g_dispatch_mutex);
-        op_enabled = g_op_enabled;
+        api_enabled = g_api_enabled;
         for (HandlerSlot& slot : g_handlers) {
             if (slot.used && slot.method == request->method &&
                 match_template(slot, *request, &params)) {
@@ -301,9 +301,9 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
         return http_error(kQolErrNotFound, "http handler not found");
     }
 
-    // OP 门禁：op_gated 路由在 handler（含 body 解析）之前统一拒绝，与 Kotlin
-    // OpApiService.checkOpEnabled 的 403 信封逐字节一致（{"ok":false,"error":"op disabled"}）。
-    if (selected->op_gated != 0 && !op_enabled) {
+    // Operation routes remain route-gated, but the sole toggle is API service availability.
+    // Keep the established 403 envelope for direct dispatch while the HTTP server stops.
+    if (selected->op_gated != 0 && !api_enabled) {
         {
             std::lock_guard<std::mutex> lock(g_dispatch_mutex);
             --selected->inflight;
@@ -488,15 +488,17 @@ QolResult http_dispatch_register_builtin_query(contracts::HttpMethod method, con
     return register_query(method, path, owner, handler, ctx);
 }
 
-void http_dispatch_set_op_enabled(bool enabled) {
+void http_dispatch_set_api_enabled(bool enabled) {
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
-    g_op_enabled = enabled;
+    g_api_enabled = enabled;
 }
+
+void http_dispatch_set_op_enabled(bool enabled) { http_dispatch_set_api_enabled(enabled); }
 
 void http_dispatch_reset_for_test() {
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
     for (HandlerSlot& slot : g_handlers) slot = HandlerSlot{};
-    g_op_enabled = false;
+    g_api_enabled = false;
 }
 
 }  // namespace qol::host
