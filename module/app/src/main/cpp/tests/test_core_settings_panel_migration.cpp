@@ -2,9 +2,9 @@
 #include "contracts/plugin.h"
 #include "contracts/ui.h"
 #include "plugins/core.custom_ui/panels/stack.h"
-#include "plugins/core.settings/plugin.h"
-#include "plugins/core.settings/panels/settings.h"
-#include "plugins/core.settings/panels/settings_binding.h"
+#include "plugins/settings/plugin.h"
+#include "plugins/settings/panels/settings.h"
+#include "plugins/settings/panels/settings_binding.h"
 
 #include <cassert>
 #include <cstdint>
@@ -64,10 +64,6 @@ QolResult find_provider(const char* panel_id, const PanelProviderSpec** out) {
         return qol::contracts::error(kQolErrNotFound, "missing", 7);
     }
     *out = g_provider;
-    return qol::contracts::ok();
-}
-QolResult register_command(qol::contracts::HttpMethod, const char*, const char*,
-                           qol::contracts::HttpCommandHandlerFn, void*) {
     return qol::contracts::ok();
 }
 QolResult resolve_popup(const char* symbol, QolPopupStateEntry* out) {
@@ -135,10 +131,17 @@ QolResult control_receipt(void*, uint64_t, qol::contracts::FeatureReceipt*) {
     return qol::contracts::ok();
 }
 QolResult control_invoke_entry(void*, const char*, const char*) { return qol::contracts::ok(); }
+QolResult control_read_categories(void*, const qol::contracts::FeatureCategoryDefinition** out,
+                                  uint32_t* count) {
+    *out = nullptr;
+    *count = 0;
+    return qol::contracts::ok();
+}
 const qol::contracts::QolFeatureControlApi kFeatureControl{
     sizeof(qol::contracts::QolFeatureControlApi), nullptr, &control_read_catalog,
     &control_read_desired, &control_read_feature, &control_request_set_feature,
-    &control_request_desired, &control_receipt, &control_invoke_entry};
+    &control_request_desired, &control_receipt, &control_invoke_entry,
+    nullptr, nullptr, nullptr, &control_read_categories};
 
 // 「更多游戏」替换 tick 决策的 fake 操作。
 class RecordingMoreGamesOps final : public qol::features::core_ui::MoreGamesBindOps {
@@ -261,6 +264,10 @@ int main() {
     assert(std::strcmp(descriptor.id, "settings") == 0);
     assert(descriptor.requires_count == 2);
     assert(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    assert(descriptor.optional_count == 2 && descriptor.optional_requires != nullptr);
+    assert(descriptor.http_endpoint_count == 4 && descriptor.http_endpoints != nullptr);
+    assert(descriptor.http_route_metadata_count == 1 &&
+           descriptor.http_route_metadata != nullptr);
     assert(descriptor.feature_count == 1 && descriptor.features != nullptr);
     assert(std::strcmp(descriptor.features[0].id, "page") == 0);
     assert(descriptor.features[0].default_enabled == 1);
@@ -280,7 +287,6 @@ int main() {
     sdk.hooks.popup_acquire = &acquire_popup;
     sdk.hooks.popup_restore = &restore_popup;
     sdk.ui = &ui;
-    sdk.http_dispatch.register_command = &register_command;
     sdk.scheduler = {&scheduler_add, &scheduler_remove};
     sdk.feature_control = &kFeatureControl;
 

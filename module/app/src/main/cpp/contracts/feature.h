@@ -8,6 +8,8 @@ namespace qol::contracts {
 struct PluginContext;
 enum class FeatureCategory : uint8_t { kGeneral, kGameplay, kTools, kHidden, kBasicOptimization };
 enum class FeatureType : uint8_t { kToggle, kEntry };
+constexpr int8_t kMinFeatureDisplayPriority = -10;
+constexpr int8_t kMaxFeatureDisplayPriority = 10;
 using FeatureToggleCallback = QolResult (*)(PluginContext&, uint8_t enabled);
 using FeatureEntryCallback = QolResult (*)(PluginContext&);
 
@@ -22,6 +24,14 @@ struct FeatureDefinition {
     FeatureToggleCallback on_toggle;
     FeatureEntryCallback on_entry;
     const char* action_label = nullptr;
+    int8_t display_priority = 0;
+};
+
+// Category labels and ordering are Host-owned registration metadata, not UI literals.
+struct FeatureCategoryDefinition {
+    FeatureCategory category;
+    const char* name;
+    int8_t display_priority = 0;
 };
 
 enum class FeatureAdmission : uint8_t { kRejected, kAdmitted };

@@ -4,7 +4,7 @@
 // Host-owned typed feature catalog through QolFeatureControlApi and drives management
 // writes with its own active callbacks. This file includes the production body so the
 // real rendering/toggle/entry paths are exercised, not a copy.
-#include "../plugins/core.settings/panels/settings.cpp"
+#include "../plugins/settings/panels/settings.cpp"
 
 #include <algorithm>
 #include <cassert>
@@ -52,6 +52,13 @@ const contracts::QolFeatureCatalogPlugin kPlugins[]{
     {"settings", kSettingsFeatures, 2},
     {"autosell", kSellFeatures, 2},
     {"basic", kBasicOptimizationFeatures, 4},
+};
+const contracts::FeatureCategoryDefinition kCategories[]{
+    {FeatureCategory::kGeneral, "基础设置", -9},
+    {FeatureCategory::kBasicOptimization, "基础优化设置", -8},
+    {FeatureCategory::kGameplay, "更多优化功能", -5},
+    {FeatureCategory::kTools, "更多工具", -3},
+    {FeatureCategory::kHidden, "调试开关", -10},
 };
 
 struct CallLog {
@@ -102,6 +109,12 @@ void reset_log() {
 QolResult fake_read_catalog(void*, const contracts::QolFeatureCatalogPlugin** out, uint32_t* count) {
     *out = kPlugins;
     *count = 3;
+    return contracts::ok();
+}
+QolResult fake_read_categories(void*, const contracts::FeatureCategoryDefinition** out,
+                                uint32_t* count) {
+    *out = kCategories;
+    *count = 5;
     return contracts::ok();
 }
 QolResult fake_read_feature(void*, const char* plugin, const char* feature, uint8_t* out) {
@@ -248,6 +261,7 @@ void bind_production() {
     g_fake_control.receipt = &fake_receipt;
     g_fake_control.invoke_entry = &fake_invoke_entry;
     g_fake_control.read_actual = &fake_read_actual;
+    g_fake_control.read_categories = &fake_read_categories;
 
     g_components_api = {};
     g_components_api.size = sizeof(g_components_api);
@@ -305,7 +319,11 @@ int prepare_entry_page() {
     refresh_all_values();
     const int page = find_feature("settings", "page");
     assert(page >= 0 && g_items[page].type == FeatureType::kEntry);
-    assert(build_right_list(2));
+    const auto category = std::find_if(g_categories.begin(), g_categories.end(), [](const auto& c) {
+        return c.category == FeatureCategory::kTools;
+    });
+    assert(category != g_categories.end());
+    assert(build_right_list(static_cast<int>(category - g_categories.begin())));
     assert(g_button_creates == 1 && g_last_button.on_click != nullptr);
     g_panel_active = true;
     return page;
@@ -327,11 +345,13 @@ void test_feature_model_filters_and_orders() {
         if (item.type == FeatureType::kEntry) ++entry;
     }
     assert(hidden == 0 && entry == 1 && items.size() == 6);
-    assert(std::strcmp(feature_model::category_title(FeatureCategory::kGeneral), "基础设置") == 0);
-    assert(std::strcmp(feature_model::category_title(FeatureCategory::kBasicOptimization), "基础优化设置") == 0);
-    assert(std::strcmp(feature_model::category_title(FeatureCategory::kGameplay), "更多优化功能") == 0);
-    assert(std::strcmp(feature_model::category_title(FeatureCategory::kTools), "更多工具") == 0);
-    assert(std::strcmp(feature_model::category_title(FeatureCategory::kHidden), "调试开关") == 0);
+    std::vector<contracts::FeatureCategoryDefinition> categories;
+    assert(feature_model::build_categories(kCategories, 5, false, items, categories));
+    assert(categories.size() == 3);
+    assert(categories[0].category == FeatureCategory::kBasicOptimization);
+    assert(categories[1].category == FeatureCategory::kGameplay);
+    assert(categories[2].category == FeatureCategory::kTools);
+    assert(std::strcmp(categories[0].name, "基础优化设置") == 0);
     const char* expected_basic_labels[]{"属性范围显示", "角色属性汉化",
         "更好的地图传送对话框", "拖拽合并"};
     uint32_t basic_index = 0;
@@ -358,16 +378,72 @@ void test_feature_model_filters_and_orders() {
 
 // ---- production page behavior ----
 
+void test_catalog_abi_rejected_before_read() {
+    setup();
+    g_sdk.abi.minor = 25;
+    settings_bind_sdk(&g_sdk, contracts::kQolOwnerTokenInvalid);
+    assert(g_control == nullptr && !load_catalog());
+    g_sdk.abi.minor = contracts::kHostSdkMinor;
+    g_fake_control.struct_size = offsetof(contracts::QolFeatureControlApi, read_categories);
+    settings_bind_sdk(&g_sdk, contracts::kQolOwnerTokenInvalid);
+    assert(g_control == nullptr && !load_catalog());
+    g_fake_control.struct_size = sizeof(g_fake_control);
+    g_fake_control.read_categories = nullptr;
+    settings_bind_sdk(&g_sdk, contracts::kQolOwnerTokenInvalid);
+    assert(g_control == nullptr && !load_catalog());
+    bind_production();
+    assert(load_catalog());
+}
+
 void test_catalog_categories_and_debug_visibility() {
     setup();
     assert(load_catalog());
     assert(g_categories.size() == 4);
-    assert(g_categories[0] == FeatureCategory::kBasicOptimization);
-    assert(g_categories[1] == FeatureCategory::kGameplay);
-    assert(g_categories[2] == FeatureCategory::kTools);
-    assert(g_categories[3] == FeatureCategory::kHidden);
+    assert(g_categories[0].category == FeatureCategory::kHidden);
+    assert(g_categories[1].category == FeatureCategory::kBasicOptimization);
+    assert(g_categories[2].category == FeatureCategory::kGameplay);
+    assert(g_categories[3].category == FeatureCategory::kTools);
     assert(g_items.size() == 8);
     assert(find_feature("autosell", "sell") >= 0);
+}
+
+void test_page_consumes_host_priorities_and_titles() {
+    setup();
+    static const contracts::QolFeatureCatalogItem first[]{
+        {"late", 1, FeatureCategory::kGeneral, FeatureType::kToggle, "Late", "", nullptr, 9},
+        {"same.first", 1, FeatureCategory::kGeneral, FeatureType::kToggle, "First", "", nullptr, -2},
+        {"tools", 1, FeatureCategory::kTools, FeatureType::kToggle, "Tools", ""},
+    };
+    static const contracts::QolFeatureCatalogItem second[]{
+        {"early", 1, FeatureCategory::kGeneral, FeatureType::kToggle, "Early", "", nullptr, -3},
+        {"same.second", 1, FeatureCategory::kGeneral, FeatureType::kToggle, "Second", "", nullptr, -2},
+    };
+    static const contracts::QolFeatureCatalogPlugin plugins[]{
+        {"first", first, 3}, {"second", second, 2},
+    };
+    static const contracts::FeatureCategoryDefinition categories[]{
+        {FeatureCategory::kGeneral, "Host renamed general", 8},
+        {FeatureCategory::kTools, "Host tools first", -8},
+        {FeatureCategory::kGameplay, "Empty category", -10},
+    };
+    g_fake_control.read_catalog = [](void*, const contracts::QolFeatureCatalogPlugin** out,
+                                     uint32_t* count) {
+        *out = plugins; *count = 2; return contracts::ok();
+    };
+    g_fake_control.read_categories = [](void*, const contracts::FeatureCategoryDefinition** out,
+                                        uint32_t* count) {
+        *out = categories; *count = 3; return contracts::ok();
+    };
+    assert(load_catalog());
+    assert(g_categories.size() == 2);
+    assert(g_categories[0].category == FeatureCategory::kTools);
+    assert(std::strcmp(g_categories[1].name, "Host renamed general") == 0);
+    assert(build_right_list(1));
+    const char* expected[]{"early", "same.first", "same.second", "late"};
+    assert(g_right_indices.size() == 4);
+    for (size_t i = 0; i < g_right_indices.size(); ++i)
+        assert(std::strcmp(g_items[g_right_indices[i]].feature_id, expected[i]) == 0);
+    destroy_page();
 }
 
 void test_toggle_routes_to_host_request_set_feature() {
@@ -603,7 +679,7 @@ void test_true_entry_requires_read_actual_abi_before_invoking() {
 void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     setup();
     assert(load_catalog());
-    assert(build_right_list(0));  // Basic optimization creates four toggle children
+    assert(build_right_list(1));  // Basic optimization creates four toggle children
     assert(g_widget_creates == 4);
     g_panel_active = true;
     const uint64_t generation_before = g_generation;
@@ -642,6 +718,8 @@ bool more_games_draw(bool, MoreGamesDrawOps&) { return false; }
 }  // namespace qol::features::core_ui
 
 int main() {
+    test_catalog_abi_rejected_before_read();
+    test_page_consumes_host_priorities_and_titles();
     test_feature_model_filters_and_orders();
     test_catalog_categories_and_debug_visibility();
     test_toggle_routes_to_host_request_set_feature();

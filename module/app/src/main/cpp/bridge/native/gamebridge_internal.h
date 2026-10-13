@@ -13,7 +13,7 @@
 #include "game/read/game_tiles.h"
 #include "game/access/hive_iap.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
-#include "plugins/core.settings/panels/settings.h"
+#include "plugins/settings/panels/settings.h"
 #include "plugins/save_backup/ui/panel.h"
 
 #include "infra/log/qol_log.h"

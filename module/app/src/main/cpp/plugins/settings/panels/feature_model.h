@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../../contracts/host_sdk.h"
+#include <algorithm>
 #include <vector>
 
 namespace qol::features::core_ui::feature_model {
@@ -15,21 +16,11 @@ struct Item {
     const char* action_label;
     FeatureCategory category;
     FeatureType type;
+    int8_t display_priority = 0;
 };
 
 inline bool visible(FeatureCategory category, bool debug) {
     return category != FeatureCategory::kHidden || debug;
-}
-
-inline const char* category_title(FeatureCategory category) {
-    switch (category) {
-        case FeatureCategory::kGeneral: return "基础设置";
-        case FeatureCategory::kBasicOptimization: return "基础优化设置";
-        case FeatureCategory::kGameplay: return "更多优化功能";
-        case FeatureCategory::kTools: return "更多工具";
-        case FeatureCategory::kHidden: return "调试开关";
-    }
-    return "其他功能";
 }
 
 // Catalog contains static Host-owned metadata only. No business pointer or default is copied.
@@ -54,9 +45,31 @@ inline bool build(const contracts::QolFeatureCatalogPlugin* plugins, uint32_t co
             out.push_back({plugin.plugin_id, feature.id, feature.name,
                            feature.description == nullptr ? "" : feature.description,
                            feature.action_label == nullptr ? "" : feature.action_label,
-                           feature.category, feature.type});
+                            feature.category, feature.type, feature.display_priority});
         }
     }
+    std::stable_sort(out.begin(), out.end(), [](const Item& a, const Item& b) {
+        return a.display_priority < b.display_priority;
+    });
+    return true;
+}
+
+inline bool build_categories(const contracts::FeatureCategoryDefinition* categories,
+                             uint32_t count, bool debug, const std::vector<Item>& items,
+                             std::vector<contracts::FeatureCategoryDefinition>& out) {
+    out.clear();
+    if (count != 0 && categories == nullptr) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto& category = categories[i];
+        if (category.name == nullptr) { out.clear(); return false; }
+        if (!visible(category.category, debug)) continue;
+        if (std::any_of(items.begin(), items.end(), [&](const Item& item) {
+                return item.category == category.category;
+            })) out.push_back(category);
+    }
+    std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
+        return a.display_priority < b.display_priority;
+    });
     return true;
 }
 

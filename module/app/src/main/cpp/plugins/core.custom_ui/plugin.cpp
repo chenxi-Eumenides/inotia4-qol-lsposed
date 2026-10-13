@@ -4,6 +4,7 @@
 #include <cstring>
 
 #include "../../contracts/panels.h"
+#include "../../contracts/http.h"
 #include "../../contracts/text_layer.h"
 #include "../../contracts/ui_choice.h"
 #include "../../contracts/ui.h"
@@ -69,14 +70,13 @@ const contracts::CapabilityProvisionRef kProvides[] = {
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kUiStateCapabilityId,
      {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}},
-};
-
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
-const contracts::CapabilityRequirement kDebugRequires[] = {
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId,
      {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
-};
 #endif
+};
 
 // 原生选择控件的两条私有资源（ADR 0001：控件本体归工具插件，随 ui_choice 一起从
 // core.ui_state 迁入）。2 条资源均常驻（gate=nullptr）、私有、必需、fail-closed、
@@ -135,6 +135,20 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CHOICE,
      {contracts::kQolPortChoiceVersion.major, contracts::kQolPortChoiceVersion.minor}},
 };
+
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {contracts::HttpMethod::kPost, "/api/debug/custom-ui/components", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr,
+     &debug_components_http_command, nullptr},
+    {contracts::HttpMethod::kPost, "/api/debug/custom-ui/scroll", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr,
+     &debug_scroll_http_command, nullptr},
+    {contracts::HttpMethod::kPost, "/api/debug/custom-ui/help", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr,
+     &debug_help_http_command, nullptr},
+};
+#endif
 
 // 界面工具/框架插件（ADR 0001 D1 的 A 档）：可复用组件、面板注册/导航、原生选择控件
 // 与文本机制。具体页面（设置页等）由各自插件拥有；Debug 构建额外注册组件探针。
@@ -236,20 +250,17 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     {"core.custom_ui.open_debug_components", 1, contracts::FeatureCategory::kHidden,
-      contracts::FeatureType::kEntry, "打开调试面板", "",
-      nullptr, &open_debug_components_feature, "打开"},
+       contracts::FeatureType::kEntry, "打开调试面板", "",
+       nullptr, &open_debug_components_feature, "打开", -5},
 #endif
 };
 
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
-    1, kDebugRequires, // debug panel command dispatch
-#else
     0, nullptr,      // requires
-#endif
-    1, kOptionalRequires,  // optional_requires=ui.state; custom UI remains native without it
+    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+    kOptionalRequires, // ui.state and optional Debug HTTP capabilities
     4, kProvides,    // provides（ui_components / ui_panels / text_layer v1.0，ui_choice v1.1）
     3, kResources,   // resources（选择控件 2 条 + 文本 GetText 共享资源）
     0, nullptr,      // jni
@@ -261,10 +272,17 @@ const contracts::PluginDescriptor kDescriptor = {
     &custom_ui_resource_ready,
     kPorts,
     1,
-    nullptr,         // http_queries（本插件不注册路由）
+    nullptr,         // deprecated http_queries（Debug commands are typed endpoints below）
     0,
     kFeatures,
     static_cast<uint32_t>(sizeof(kFeatures) / sizeof(kFeatures[0])),
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    kHttpEndpoints, static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+#else
+    nullptr, 0,
+#endif
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

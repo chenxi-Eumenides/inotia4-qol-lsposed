@@ -57,7 +57,6 @@ int g_fill_draws = 0;
 // 记录开关胶囊绘制 rect（屏幕绝对），验证右栏内容不与文本行重叠、不越 viewport。
 std::vector<UiRect> g_toggle_rects;
 const PanelProviderSpec* g_provider = nullptr;
-HttpCommandHandlerFn g_command = nullptr;
 // fake 原生 TouchHandle：按下置态、移出取消、松开仍落于导航按钮内才 ExecuteProc。
 Control* g_nav_control = nullptr;
 bool g_nav_pressed = false;
@@ -295,12 +294,6 @@ QolResult register_provider(const PanelProviderSpec* provider) {
     g_provider = provider;
     return ok();
 }
-QolResult register_command(HttpMethod, const char*, const char* owner,
-                           HttpCommandHandlerFn command, void*) {
-    assert(std::strcmp(owner, "core.custom_ui") == 0);
-    g_command = command;
-    return ok();
-}
 QolResult unregister_owner(const char*) { return ok(); }
 QolResult add_task(int32_t, QolFrameHandler, void*, int32_t, int32_t, uint64_t* out) {
     *out = 7;
@@ -377,8 +370,6 @@ int main() {
     sdk.ui = &ui;
     sdk.panels.register_provider = &register_provider;
     sdk.panels.unregister_owner = &unregister_owner;
-    sdk.http_dispatch.register_command = &register_command;
-    sdk.http_dispatch.unregister_owner = &unregister_owner;
     sdk.scheduler.add = &add_task;
     sdk.scheduler.remove = &remove_task;
     CHECK(debug_components_register(&sdk));

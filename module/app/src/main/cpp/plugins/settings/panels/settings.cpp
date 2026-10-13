@@ -56,7 +56,7 @@ std::mutex g_mtx;
 bool g_panel_active = false;
 uint64_t g_generation = 0, g_frame = 0;
 int g_selected_category = 0, g_pending_category = -1, g_pending_action_item = -1;
-std::vector<FeatureCategory> g_categories;
+std::vector<contracts::FeatureCategoryDefinition> g_categories;
 std::vector<feature_model::Item> g_items;
 std::vector<uint32_t> g_right_indices;
 struct ItemState {
@@ -152,16 +152,15 @@ bool load_catalog() {
     g_pending_action_item = -1;
     const contracts::QolFeatureCatalogPlugin* plugins = nullptr;
     uint32_t count = 0;
+    const contracts::FeatureCategoryDefinition* categories = nullptr;
+    uint32_t category_count = 0;
     if (g_control == nullptr || !contracts::succeeded(
         g_control->read_catalog(g_control->context, &plugins, &count)) ||
-        !feature_model::build(plugins, count, kShowHidden, g_items)) return false;
-    for (const auto category : {FeatureCategory::kGeneral, FeatureCategory::kBasicOptimization,
-                                FeatureCategory::kGameplay, FeatureCategory::kTools,
-                                FeatureCategory::kHidden}) {
-        for (const auto& item : g_items) {
-            if (item.category == category) { g_categories.push_back(category); break; }
-        }
-    }
+        !contracts::succeeded(g_control->read_categories(
+            g_control->context, &categories, &category_count)) ||
+        !feature_model::build(plugins, count, kShowHidden, g_items) ||
+        !feature_model::build_categories(categories, category_count, kShowHidden,
+                                         g_items, g_categories)) return false;
     g_states.resize(g_items.size());
     for (uint32_t i = 0; i < g_items.size(); ++i) g_contexts.push_back({i, g_generation});
     std::lock_guard<std::mutex> lock(g_mtx);
@@ -178,7 +177,7 @@ void draw_row_background(QolUiHandle row, int32_t width, int32_t height, uint8_t
 void draw_left_row(void*, uint32_t index, QolUiHandle row, uint8_t selected) {
     if (index >= g_categories.size()) return;
     draw_row_background(row, kLeftW, kLeftRowH, selected);
-    (void)g_components->draw_control_text(row, feature_model::category_title(g_categories[index]),
+    (void)g_components->draw_control_text(row, g_categories[index].name,
         16, 18, contracts::ui_theme::kTextGold, 0, 1);
 }
 void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected) {
@@ -231,7 +230,7 @@ bool build_right_list(int category) {
     destroy_right_list();
     if (category < 0 || static_cast<size_t>(category) >= g_categories.size()) return false;
     for (uint32_t i = 0; i < g_items.size(); ++i)
-        if (g_items[i].category == g_categories[category]) g_right_indices.push_back(i);
+        if (g_items[i].category == g_categories[category].category) g_right_indices.push_back(i);
     const contracts::UiScrollListDesc list{{kRightX, kRightY, kRightW, kRightH}, kRightRowH,
         static_cast<uint32_t>(g_right_indices.size()), -1, &draw_right_row, nullptr, nullptr};
     if (!contracts::succeeded(g_components->scroll_list_create(&list, g_root, &g_right))) return false;

@@ -37,6 +37,13 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kUiContractMajor, contracts::kUiContractMinor}},
 };
 
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
+};
+
 // DrawMainMenu makes a direct GRPX_DrawPart call for More Games; ControlObject::Show and
 // the child DrawProc do not replace this explicit sprite draw.
 const contracts::ResourceClaim kResources[] = {
@@ -57,8 +64,7 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 // ---- HTTP command handlers（/api/debug/settings-ui/* POST）----
-// 四条端点均无请求体：插件内业务函数直调，返回体逐字与迁移前一致。
-// 自注册模式（core.api lifecycle 先例）：停用由 deactivate 显式 unregister_owner 摘除置墓碑。
+// 四条 typed endpoints 均无请求体；Host 依据 descriptor 管理绑定和生命周期撤销。
 
 QolResult settings_ui_command_body(contracts::HttpRes* response, const std::string& body) {
     if (response == nullptr || response->body == nullptr ||
@@ -122,33 +128,20 @@ QolResult settings_ui_open_panel_command(const contracts::HttpReq*, contracts::H
     return queue_settings_ui_action(kOpenPanelUi, response);
 }
 
-struct SettingsCommandRoute {
-    const char* path;
-    QolResult (*handler)(const contracts::HttpReq*, contracts::HttpRes*, void*);
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {contracts::HttpMethod::kPost, "/api/debug/settings-ui/inject", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &settings_ui_inject_command, nullptr},
+    {contracts::HttpMethod::kPost, "/api/debug/settings-ui/restore", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &settings_ui_restore_command, nullptr},
+    {contracts::HttpMethod::kPost, "/api/debug/settings-ui/open-option", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &settings_ui_open_option_command, nullptr},
+    {contracts::HttpMethod::kPost, "/api/debug/settings-ui/open-panel", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &settings_ui_open_panel_command, nullptr},
 };
 
-constexpr SettingsCommandRoute kSettingsCommandRoutes[] = {
-    {"/api/debug/settings-ui/inject", &settings_ui_inject_command},
-    {"/api/debug/settings-ui/restore", &settings_ui_restore_command},
-    {"/api/debug/settings-ui/open-option", &settings_ui_open_option_command},
-    {"/api/debug/settings-ui/open-panel", &settings_ui_open_panel_command},
+constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
+    {contracts::HttpMethod::kGet, "/api/debug/settings-ui/status", kPluginId, 0, 1},
 };
-
-bool register_settings_ui_commands(const contracts::QolHostSdk* sdk) {
-    if (sdk == nullptr || sdk->http_dispatch.register_command == nullptr) return false;
-    for (const SettingsCommandRoute& route : kSettingsCommandRoutes) {
-        const QolResult result =
-            sdk->http_dispatch.register_command(contracts::HttpMethod::kPost, route.path,
-                                                kPluginId, route.handler, nullptr);
-        if (!contracts::succeeded(result)) {
-            if (sdk->http_dispatch.unregister_owner != nullptr) {
-                (void)sdk->http_dispatch.unregister_owner(kPluginId);
-            }
-            return false;
-        }
-    }
-    return true;
-}
 
 int plugin_install(contracts::PluginContext& ctx) {
     if (contracts::feature_control_if_available(ctx.sdk) == nullptr) return 1;
@@ -156,13 +149,10 @@ int plugin_install(contracts::PluginContext& ctx) {
     core_ui::panels_bind_sdk(ctx.sdk, ctx.owner_token);
     // install 只做自身初始化：注册设置页 provider + 存档备份动作项 + 按钮绑定帧任务。
     if (!core_ui::panels_register()) return 1;
-    if (!register_settings_ui_commands(ctx.sdk)) return 1;
     if (ctx.sdk->scheduler.add == nullptr ||
         !contracts::succeeded(ctx.sdk->scheduler.add(1, &apply_settings_ui_action, nullptr,
                                                        1, 0, &g_ui_action_task)) ||
         g_ui_action_task == 0) {
-        if (ctx.sdk->http_dispatch.unregister_owner != nullptr)
-            (void)ctx.sdk->http_dispatch.unregister_owner(kPluginId);
         return 1;
     }
     CORE_UI_LOG_INFO("ui action scheduler task=%llu",
@@ -176,11 +166,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         (void)ctx.sdk->scheduler.remove(g_ui_action_task);
     }
     g_ui_action_task = 0;
-    // 自注册的 command handler 不在 descriptor（http_query_count=0），宿主的
-    // unregister_http_queries 会早退；deactivate 必须显式摘除（幂等，core.api 同款）。
-    if (ctx.sdk != nullptr && ctx.sdk->http_dispatch.unregister_owner != nullptr) {
-        (void)ctx.sdk->http_dispatch.unregister_owner(kPluginId);
-    }
     if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
         const void* iface = nullptr;
         const QolResult require_result = ctx.sdk->capabilities.require(
@@ -239,7 +224,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
     2, kRequires,    // ui_panels + ui_components
-    0, nullptr,      // optional_requires
+    2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     0, nullptr,      // provides（页面不提供能力）
     1, kResources,   // resources（PopupState 由 core.custom_ui 面板宿主持有）
     0, nullptr,      // jni（JNI 入口由 bridge/native/gamebridge_settings.cpp 保留）
@@ -253,6 +238,9 @@ const contracts::PluginDescriptor kDescriptor = {
     0,               // port_count
     nullptr, 0,
     kFeatures, static_cast<uint32_t>(sizeof(kFeatures) / sizeof(kFeatures[0])),
+    kHttpEndpoints, static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    kHttpRouteMetadata, static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
 };
 
 }  // namespace

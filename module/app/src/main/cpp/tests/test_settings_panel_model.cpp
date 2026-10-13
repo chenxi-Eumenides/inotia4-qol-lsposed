@@ -7,8 +7,8 @@
 #include <cstdio>
 #include <cstring>
 
-#include "plugins/core.settings/panels/settings_model.h"
-#include "plugins/core.settings/panels/feature_model.h"
+#include "plugins/settings/panels/settings_model.h"
+#include "plugins/settings/panels/feature_model.h"
 
 static int g_checks = 0;
 static int g_failures = 0;
@@ -82,6 +82,114 @@ void test_category_mapping() {
     CHECK(row_to_item_index(items, count, "missing", 0) == -1);
     CHECK(row_to_item_index(items, count, nullptr, 0) == -1);
     CHECK(row_to_item_index(nullptr, count, "a", 0) == -1);
+}
+
+void test_hidden_catalog_items_follow_build_visibility() {
+    using qol::contracts::FeatureCategory;
+    using qol::contracts::FeatureType;
+    using qol::contracts::QolFeatureCatalogItem;
+    using qol::contracts::QolFeatureCatalogPlugin;
+
+    const QolFeatureCatalogItem core_items[] = {
+        {"api.enabled", 1, FeatureCategory::kGeneral, FeatureType::kToggle,
+         "API服务", "", nullptr},
+        {"core.custom_ui.open_debug_components", 1, FeatureCategory::kHidden,
+         FeatureType::kEntry, "打开调试面板", "", "打开"},
+    };
+    const QolFeatureCatalogItem regular_items[] = {
+        {"save_backup.open_manager", 1, FeatureCategory::kTools,
+         FeatureType::kEntry, "存档备份导出", "打开存档备份管理器。", "打开"},
+    };
+    const QolFeatureCatalogItem op_items[] = {
+        {"op.enabled", 0, FeatureCategory::kGeneral, FeatureType::kToggle,
+         "开启OP功能", "", nullptr},
+    };
+    const QolFeatureCatalogPlugin catalog[] = {
+        {"core.api", core_items, 1, 0},
+        {"core.custom_ui", core_items + 1, 1, 0},
+        {"save_backup", regular_items, 1, 0},
+        {"module.security", op_items, 1, 1},
+    };
+    std::vector<qol::features::core_ui::feature_model::Item> items;
+
+    CHECK(qol::features::core_ui::feature_model::build(catalog, 4, false, items));
+    CHECK(items.size() == 3);
+    CHECK(std::strcmp(items[0].feature_id, "api.enabled") == 0);
+    CHECK(std::strcmp(items[1].feature_id, "save_backup.open_manager") == 0);
+    CHECK(std::strcmp(items[2].feature_id, "op.enabled") == 0 &&
+          items[2].category == FeatureCategory::kGeneral);
+
+    CHECK(qol::features::core_ui::feature_model::build(catalog, 4, true, items));
+    CHECK(items.size() == 4);
+    CHECK(std::strcmp(items[0].feature_id, "api.enabled") == 0 &&
+          items[0].category == FeatureCategory::kGeneral);
+    CHECK(std::strcmp(items[1].feature_id, "core.custom_ui.open_debug_components") == 0 &&
+          items[1].type == FeatureType::kEntry && items[1].category == FeatureCategory::kHidden);
+    CHECK(std::strcmp(items[2].feature_id, "save_backup.open_manager") == 0 &&
+          items[2].category == FeatureCategory::kTools);
+}
+
+void test_display_priority_and_registered_categories() {
+    using namespace qol::contracts;
+    namespace model = qol::features::core_ui::feature_model;
+    const QolFeatureCatalogItem first[]{
+        {"zero.first", 1, FeatureCategory::kGeneral, FeatureType::kToggle, "First", ""},
+        {"early.first", 1, FeatureCategory::kGeneral, FeatureType::kToggle, "Early", "", nullptr, -128},
+        {"hidden", 1, FeatureCategory::kHidden, FeatureType::kToggle, "Hidden", "", nullptr, -10},
+        {"late", 1, FeatureCategory::kTools, FeatureType::kEntry, "Late", "", "Open", 127},
+    };
+    const QolFeatureCatalogItem second[]{
+        {"early.second", 1, FeatureCategory::kGeneral, FeatureType::kToggle, "Second", "", nullptr, -128},
+        {"zero.second", 1, FeatureCategory::kGameplay, FeatureType::kToggle, "Zero", ""},
+    };
+    const QolFeatureCatalogPlugin plugins[]{
+        {"first", first, 4, 0}, {"second", second, 2, 0},
+    };
+    const FeatureCategoryDefinition registry[]{
+        {FeatureCategory::kTools, "Host tools", -3},
+        {FeatureCategory::kGameplay, "Host gameplay", -5},
+        {FeatureCategory::kGeneral, "Host general", -9},
+        {FeatureCategory::kBasicOptimization, "Empty", -8},
+        {FeatureCategory::kHidden, "Host hidden", -10},
+    };
+    std::vector<model::Item> debug_items, release_items;
+    std::vector<FeatureCategoryDefinition> categories;
+    CHECK(model::build(plugins, 2, true, debug_items));
+    const char* expected[]{"early.first", "early.second", "hidden", "zero.first", "zero.second", "late"};
+    CHECK(debug_items.size() == 6);
+    for (size_t i = 0; i < debug_items.size(); ++i)
+        CHECK(std::strcmp(debug_items[i].feature_id, expected[i]) == 0);
+    CHECK(model::build(plugins, 2, false, release_items));
+    CHECK(release_items.size() == 5);
+    size_t release_index = 0;
+    for (const auto& item : debug_items) {
+        if (item.category == FeatureCategory::kHidden) continue;
+        CHECK(std::strcmp(item.feature_id, release_items[release_index++].feature_id) == 0);
+    }
+    CHECK(model::build_categories(registry, 5, true, debug_items, categories));
+    CHECK(categories.size() == 4);
+    CHECK(categories[0].category == FeatureCategory::kHidden);
+    CHECK(categories[1].category == FeatureCategory::kGeneral);
+    CHECK(categories[2].category == FeatureCategory::kGameplay);
+    CHECK(categories[3].category == FeatureCategory::kTools);
+    CHECK(std::strcmp(categories[1].name, "Host general") == 0);
+    CHECK(model::build_categories(registry, 5, false, release_items, categories));
+    CHECK(categories.size() == 3 && categories[0].category == FeatureCategory::kGeneral);
+    const FeatureCategoryDefinition tied[]{
+        {FeatureCategory::kTools, "Tools first", 0},
+        {FeatureCategory::kGeneral, "General second", 0},
+        {FeatureCategory::kGameplay, "Gameplay third", 0},
+    };
+    CHECK(model::build_categories(tied, 3, true, debug_items, categories));
+    CHECK(categories.size() == 3 && categories[0].category == FeatureCategory::kTools &&
+          categories[1].category == FeatureCategory::kGeneral &&
+          categories[2].category == FeatureCategory::kGameplay);
+    CHECK(!model::build_categories(nullptr, 1, true, debug_items, categories));
+    CHECK(categories.empty());
+    CHECK(model::build_categories(nullptr, 0, true, debug_items, categories));
+    const FeatureCategoryDefinition malformed[]{ {FeatureCategory::kGeneral, nullptr, 0} };
+    CHECK(!model::build_categories(malformed, 1, true, debug_items, categories));
+    CHECK(categories.empty());
 }
 
 void test_toggle_target() {
@@ -270,6 +378,8 @@ void test_description_geometry_and_utf8_truncation() {
 
 int main() {
     test_category_mapping();
+    test_hidden_catalog_items_follow_build_visibility();
+    test_display_priority_and_registered_categories();
     test_toggle_target();
     test_toggle_enable_state_machine();
     test_entry_enable_state();

@@ -6,7 +6,6 @@
 
 #include <atomic>
 #include <algorithm>
-#include <cstring>
 #include <condition_variable>
 #include <deque>
 #include <iterator>
@@ -16,6 +15,14 @@
 
 namespace qol::host {
 namespace {
+
+constexpr contracts::FeatureCategoryDefinition kFeatureCategories[] = {
+    {contracts::FeatureCategory::kGeneral, "基础设置", -9},
+    {contracts::FeatureCategory::kBasicOptimization, "基础优化设置", -8},
+    {contracts::FeatureCategory::kGameplay, "更多优化功能", -5},
+    {contracts::FeatureCategory::kTools, "更多工具", -3},
+    {contracts::FeatureCategory::kHidden, "调试开关", -10},
+};
 
 struct RuntimeState {
     std::string plugin_id;
@@ -367,6 +374,16 @@ QolResult read_catalog(void* context, const contracts::QolFeatureCatalogPlugin**
     return contracts::ok();
 }
 
+QolResult read_categories(void*, const contracts::FeatureCategoryDefinition** out,
+                          uint32_t* count) {
+    if (out != nullptr) *out = nullptr;
+    if (count != nullptr) *count = 0;
+    if (out == nullptr || count == nullptr) return error(kQolErrInvalidArgument);
+    *out = kFeatureCategories;
+    *count = static_cast<uint32_t>(std::size(kFeatureCategories));
+    return contracts::ok();
+}
+
 QolResult read_desired(void* context, const char* id, uint8_t* enable, uint8_t* any) {
     if (!id || !enable || !any) return error(kQolErrInvalidArgument);
     *enable = 0;
@@ -430,7 +447,7 @@ const contracts::QolFeatureControlApi& production_feature_control_api() {
     static const contracts::QolFeatureControlApi api{
         sizeof(contracts::QolFeatureControlApi), &production(), &read_catalog, &read_desired,
         &read_feature, &set_feature, &set_desired, &receipt, &entry,
-        &read_config, &set_config, &read_actual};
+        &read_config, &set_config, &read_actual, &read_categories};
     return api;
 }
 
@@ -459,31 +476,15 @@ ConfigStoreResult production_feature_bootstrap(const std::string& directory) {
     self.catalog_items.reserve(self.directory.definitions().size());
     self.catalog.reserve(self.directory.definitions().size());
     for (const auto& plugin : self.directory.definitions()) {
-        const bool core_plugin = plugin.plugin_id.compare(0, 5, "core.") == 0;
-        const bool core_custom_ui = plugin.plugin_id == "core.custom_ui";
-        // Core residency remains outside the player catalog except for the debug-only entry.
-        // The settings page belongs to core.settings but its registered id is "settings".
-        if ((core_plugin && !core_custom_ui) || plugin.plugin_id == "settings") continue;
-        const auto include_feature = [core_custom_ui](const contracts::FeatureDefinition& feature) {
-            if (!core_custom_ui) return true;
-            return feature.id != nullptr &&
-                std::strcmp(feature.id, "core.custom_ui.open_debug_components") == 0 &&
-                feature.type == contracts::FeatureType::kEntry &&
-                feature.category == contracts::FeatureCategory::kHidden &&
-                feature.on_entry != nullptr;
-        };
-        const auto visible_count = static_cast<size_t>(std::count_if(
-            plugin.features.begin(), plugin.features.end(), include_feature));
-        if (visible_count == 0) continue;
+        if (plugin.plugin_id == "settings") continue;
 
         self.catalog_items.emplace_back();
         auto& items = self.catalog_items.back();
-        items.reserve(visible_count);
+        items.reserve(plugin.features.size());
         for (const auto& feature : plugin.features) {
-            if (!include_feature(feature)) continue;
             items.push_back({feature.id, feature.default_enabled, feature.category,
                              feature.type, feature.name, feature.description,
-                             feature.action_label});
+                             feature.action_label, feature.display_priority});
         }
         self.catalog.push_back({plugin.plugin_id.c_str(), items.data(),
                                 static_cast<uint32_t>(items.size()),
@@ -503,11 +504,12 @@ bool production_feature_bind_frame(const HostDeps& deps) {
 uint32_t production_feature_frame_step() { return production().reconciler.step(); }
 
 bool production_feature_bind_management_sdk(contracts::QolHostSdk& sdk) {
-    if (contracts::feature_if_available(&sdk) == nullptr ||
+    if (sdk.abi.major != contracts::kHostSdkMajor || sdk.abi.minor < 26 ||
+        contracts::feature_if_available(&sdk) == nullptr ||
         sdk.abi.size < offsetof(contracts::QolHostSdk, feature_control) +
                        sizeof(sdk.feature_control)) return false;
     sdk.feature_control = &production_feature_control_api();
-    return true;
+    return contracts::feature_control_if_available(&sdk) == &production_feature_control_api();
 }
 
 const contracts::QolRuntimeEffectsApi& production_runtime_effects_api() {

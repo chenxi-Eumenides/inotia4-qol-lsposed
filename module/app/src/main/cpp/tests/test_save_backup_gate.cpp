@@ -2,6 +2,7 @@
 // 覆盖：首次写前拒绝（gate 被占时 import/delete 失败且文件不变）、acquire 后放行、
 // sidecar 写失败回滚完整后 release、parsed.module 非空经 lease 显式入口。
 #include "plugins/save_backup/feature.h"
+#include "contracts/http.h"
 
 #include <dirent.h>
 #include <sys/stat.h>
@@ -30,6 +31,13 @@ int g_pass = 0, g_fail = 0;
     } while (0)
 namespace contracts = qol::contracts;
 using namespace qol::contracts;
+
+#define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
+    {contracts::HttpMethod::method, path, owner, op_gated, lease_required},
+constexpr contracts::HttpRoute kSaveBackupRouteFacts[] = {
+#include "plugins/save_backup/routes.inc"
+};
+#undef QOL_HTTP_ROUTE
 
 int identity = 0, occupier = 0;
 QolOwnerToken g_owner = 0, g_occupier = 0;
@@ -232,6 +240,22 @@ std::string make_bundle(const std::string& external_root, const std::string& che
 }  // namespace
 
 int main() {
+    static_assert(sizeof(kSaveBackupRouteFacts) / sizeof(kSaveBackupRouteFacts[0]) == 4);
+    const char* const route_paths[] = {
+        "/api/system/backup/export", "/api/system/backup/list",
+        "/api/system/backup/import", "/api/system/backup/delete",
+    };
+    for (uint32_t index = 0; index < 4; ++index) {
+        CHECK(std::strcmp(kSaveBackupRouteFacts[index].path, route_paths[index]) == 0);
+        CHECK(std::strcmp(kSaveBackupRouteFacts[index].owner, "save_backup") == 0);
+        CHECK(kSaveBackupRouteFacts[index].op_gated == 0);
+        CHECK(kSaveBackupRouteFacts[index].lease_required == 1);
+    }
+    CHECK(kSaveBackupRouteFacts[0].method == HttpMethod::kPost);
+    CHECK(kSaveBackupRouteFacts[1].method == HttpMethod::kGet);
+    CHECK(kSaveBackupRouteFacts[2].method == HttpMethod::kPost);
+    CHECK(kSaveBackupRouteFacts[3].method == HttpMethod::kPost);
+
     char dir[] = "save_backup_gate_XXXXXX";
     CHECK(::mkdtemp(dir) != nullptr);
     const std::string root = dir;

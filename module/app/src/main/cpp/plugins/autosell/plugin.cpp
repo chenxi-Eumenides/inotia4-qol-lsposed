@@ -53,7 +53,16 @@ const contracts::CapabilityRequirement kRequires[] = {
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kExtensionBagCapabilityId,
      {contracts::kExtensionBagVersionMajor, contracts::kExtensionBagVersionMinor}},
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
 };
+
+#define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
+    {contracts::HttpMethod::method, path, owner, op_gated, lease_required},
+const contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
+#include "routes.inc"
+};
+#undef QOL_HTTP_ROUTE
 
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS,
@@ -237,15 +246,17 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"autosell.auto_sell", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "自动出售", "自动出售符合当前存档筛选规则的物品。",
-     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+      contracts::FeatureType::kToggle, "自动出售", "自动出售符合当前存档筛选规则的物品。",
+      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr,
+      nullptr, -1},
 };
 
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
     5, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data
-    1, kOptionalRequires,  // optional=extension_bag（门禁提供者，缺失走降级）
+    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+    kOptionalRequires,  // optional=extension_bag + http.registry
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_autosell.cpp 保留）
@@ -259,6 +270,10 @@ const contracts::PluginDescriptor kDescriptor = {
     1,
     nullptr, 0,
     kFeatures, 1,
+    nullptr, 0,
+    nullptr,
+    kHttpRouteMetadata,
+    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
 };
 
 }  // namespace

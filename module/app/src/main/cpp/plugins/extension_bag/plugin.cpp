@@ -201,6 +201,10 @@ const qol::contracts::CapabilityRequirement kOptionalRequires[] = {
     {qol::contracts::kMoveMergeControlCapabilityId,
      {qol::contracts::kMoveMergeControlVersionMajor,
       qol::contracts::kMoveMergeControlVersionMinor}},
+    {qol::contracts::kHttpRegistryCapabilityId,
+     {qol::contracts::kHttpRegistryVersion.major, qol::contracts::kHttpRegistryVersion.minor}},
+    {qol::contracts::kHttpDispatchCapabilityId,
+     {qol::contracts::kHttpDispatchVersion.major, qol::contracts::kHttpDispatchVersion.minor}},
 };
 
 const qol::contracts::QolPortRequirement kPorts[] = {
@@ -215,9 +219,8 @@ const qol::contracts::QolPortRequirement kPorts[] = {
       qol::contracts::kQolPortInventoryExtrasVersion.minor}},
 };
 
-// ---- HTTP command handlers（/api/debug/extension_bag/* POST，owner=extension_bag）----
-// 自注册模式（core.api lifecycle 先例）：plugin_install 成功尾部逐条 register_command，
-// 停用由宿主 unregister_http_queries 摘除置墓碑（503 http owner inactive）。
+// ---- HTTP command handlers（/api/debug/extension_bag/*，owner=extension_bag）----
+// Host 从 descriptor 绑定及撤销 HTTP handlers；票据结果处理器仍由插件生命周期管理。
 // body 校验逐字对齐迁移前 Kotlin DebugController 的 ApiException 文本与状态码。
 
 enum class EbCommand : uint8_t {
@@ -235,7 +238,7 @@ struct EbCommandRoute {
     EbCommand kind;
 };
 
-constexpr EbCommandRoute kEbCommandRoutes[] = {
+EbCommandRoute kEbCommandRoutes[] = {
     {"/api/debug/extension_bag/enter_view", EbCommand::kEnterView},
     {"/api/debug/extension_bag/exit_view", EbCommand::kExitView},
     {"/api/debug/extension_bag/unequip", EbCommand::kUnequip},
@@ -245,9 +248,33 @@ constexpr EbCommandRoute kEbCommandRoutes[] = {
     {"/api/debug/extension_bag/item", EbCommand::kItem},
 };
 
-const qol::contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
+QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
+                             void* ctx);
+
+const qol::contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
     {qol::contracts::HttpMethod::kGet, "/api/debug/extension_bag/status", kPluginId,
-     &status_query_handler, nullptr},
+     qol::contracts::HttpHandlerKind::kQuery, 0, 1, &status_query_handler, nullptr, nullptr},
+    {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/enter_view", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[0].kind},
+    {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/exit_view", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[1].kind},
+    {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/unequip", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[2].kind},
+    {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/select_bag", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[3].kind},
+    {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/click_item", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[4].kind},
+    {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/equip", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[5].kind},
+    {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/item", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[6].kind},
 };
 
 // 从 JSON 对象文本提取整数字段。客户端 body 可能带空白：冒号后跳过空白再读
@@ -451,8 +478,8 @@ int32_t slot_data_flush_frame(int64_t, void*) {
     return 1;
 }
 
-bool register_extension_bag_commands(const qol::contracts::QolHostSdk* sdk) {
-    if (sdk == nullptr || sdk->http_dispatch.register_command == nullptr) return false;
+bool register_extension_bag_result_handler(const qol::contracts::QolHostSdk* sdk) {
+    if (sdk == nullptr) return false;
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
     if (sdk->abi.size < sizeof(qol::contracts::QolHostSdk) || sdk->abi.minor < 8 ||
         sdk->ticket_result.register_typed_result_handler == nullptr) {
@@ -461,20 +488,6 @@ bool register_extension_bag_commands(const qol::contracts::QolHostSdk* sdk) {
     if (!contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
             kEbResultHandlerId, &eb_result_handler, nullptr))) {
         return false;
-    }
-    for (const EbCommandRoute& route : kEbCommandRoutes) {
-        const QolResult result = sdk->http_dispatch.register_command(
-            contracts::HttpMethod::kPost, route.path, kPluginId, &eb_command_handler,
-            const_cast<EbCommand*>(&route.kind));
-        if (!contracts::succeeded(result)) {
-            if (sdk->ticket_result.unregister_typed_result_handler != nullptr) {
-                (void)sdk->ticket_result.unregister_typed_result_handler(kEbResultHandlerId);
-            }
-            if (sdk->http_dispatch.unregister_owner != nullptr) {
-                (void)sdk->http_dispatch.unregister_owner(kPluginId);
-            }
-            return false;
-        }
     }
     return true;
 }
@@ -628,8 +641,8 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     }
     extension_bag_bind_port_sdk(g_sdk);
     // The separate move_merge plugin owns the X1 resource.
-    // HTTP command 注册在全部绑定就绪后执行；失败即 install 失败（宿主不启用、资源不装）。
-    if (!register_extension_bag_commands(g_sdk)) {
+    // Owner command result handler 注册在全部绑定就绪后执行；失败即 install 失败。
+    if (!register_extension_bag_result_handler(g_sdk)) {
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         extension_bag_bind_craft_facts(nullptr);
@@ -696,12 +709,6 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(qol::contracts::PluginContext& ctx) {
-    // 自注册的 command handler 不在 descriptor（http_query_count=0），宿主的
-    // unregister_http_queries 会早退；deactivate 必须显式摘除，否则 activate 的
-    // 重注册走 duplicate 回滚会把整组槽置墓碑。幂等：宿主摘除后再调返回 not found。
-    if (g_sdk != nullptr && g_sdk->http_dispatch.unregister_owner != nullptr) {
-        (void)g_sdk->http_dispatch.unregister_owner(kPluginId);
-    }
     // 结果处理器同样需要显式注销（同一自注册理由）。
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kEbResultHandlerId);
@@ -794,15 +801,16 @@ QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
 
 constexpr qol::contracts::FeatureDefinition kFeatures[] = {
     {"extension_bag.extended_bag", 1, qol::contracts::FeatureCategory::kGameplay,
-     qol::contracts::FeatureType::kToggle, "扩展背包", "增加五个扩展背包。",
-     &extension_bag_toggle, nullptr},
+      qol::contracts::FeatureType::kToggle, "扩展背包", "增加五个扩展背包。",
+      &extension_bag_toggle, nullptr, nullptr, -2},
 };
 
 const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
     5, kRequires,  // requires=world.facts + item.facts + save.facts + craft.facts + save.slot_data
-    2, kOptionalRequires,
+    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+    kOptionalRequires,
     2, kProvides,  // provides (extension_bag + inventory.merge_projection)
     g_resource_count, g_resources,
     0, nullptr,   // jni（JNI 入口由 bridge/native 保留，名/签名冻结）
@@ -814,9 +822,12 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     &plugin_on_resource_ready,
     kPorts,
     3,
-    kHttpQueries,
-    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    nullptr, 0,
     kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

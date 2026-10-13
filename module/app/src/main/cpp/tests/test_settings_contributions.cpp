@@ -6,7 +6,7 @@
 #include "infra/settings_catalog.h"
 #include "plugins/autosell/settings_contribution.h"
 #include "plugins/core.custom_ui/settings_contribution.h"
-#include "plugins/core.settings/settings_contribution.h"
+#include "plugins/settings/settings_contribution.h"
 #include "plugins/custom_recipe/settings_contribution.h"
 #include "plugins/extension_bag/settings_contribution.h"
 #include "plugins/move_merge/settings_contribution.h"

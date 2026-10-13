@@ -227,8 +227,8 @@ const contracts::PluginDescriptor& plugin_descriptor() {
          [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
              set_enabled(enabled != 0);
              return contracts::ok();
-         },
-         nullptr},
+          },
+          nullptr, nullptr, -1},
     };
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,

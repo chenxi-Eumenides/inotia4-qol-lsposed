@@ -8,6 +8,7 @@
 |---|---|---|
 | 了解模块、安装和基本使用 | 根目录 `README.md` | `guides/game-guide.md` |
 | 使用 HTTP API | `reference/api-reference.md` | `guides/game-guide.md` |
+| 理解 API 服务开关与 OP 权限边界 | `refactor/api-optional-op-design.md` | `reference/api-reference.md` §7.6/§8、`reference/plugins/core.api.md` |
 | 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时） |
 | 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
 | 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
@@ -26,7 +27,7 @@
 - `game/equipment.md`：群友推荐的可获得与不可获得装备清单。
 - `plugins/`：官方插件当前职责与实现参考。
 
-插件参考：[`core.world`](reference/plugins/core.world.md)、[`core.item`](reference/plugins/core.item.md)、[`core.character`](reference/plugins/core.character.md)、[`core.quest`](reference/plugins/core.quest.md)、[`core.system`](reference/plugins/core.system.md)、[`core.craft`](reference/plugins/core.craft.md)、[`core.settings`](reference/plugins/core.settings.md)、[`core.ui_state`](reference/plugins/core.ui_state.md)。
+插件参考：[`core.world`](reference/plugins/core.world.md)、[`core.item`](reference/plugins/core.item.md)、[`core.character`](reference/plugins/core.character.md)、[`core.quest`](reference/plugins/core.quest.md)、[`core.system`](reference/plugins/core.system.md)、[`core.craft`](reference/plugins/core.craft.md)、[`core.save`](reference/plugins/core.save.md)、[`settings`](reference/plugins/settings.md)、[`core.api`](reference/plugins/core.api.md)、[`core.custom_ui`](reference/plugins/core.custom_ui.md)、[`core.data`](reference/plugins/core.data.md)、[`core.ui_state`](reference/plugins/core.ui_state.md)、[`module_health`](reference/plugins/module_health.md)、[`attribute_quality`](reference/plugins/attribute_quality.md)。
 
 ### `guides/`：操作指南
 
@@ -48,6 +49,8 @@
 - `baseline.md`：脚本生成的结构基线。
 - `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
 - `api-route-map.md`：API 路由核对材料。
+- `api-optional-op-design.md`：API 服务归属、可选 HTTP 接线和通用 OP 授权合同。
+- `audits/infrastructure-20261013/inspection.md`：近址 thunk mmap 检查与验证证据状态。
 - `slot-data-contract.md`：Slot data 当前契约与状态。
 - `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
 - `adr/`：架构决策记录。

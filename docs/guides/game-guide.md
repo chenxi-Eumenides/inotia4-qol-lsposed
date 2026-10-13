@@ -120,7 +120,7 @@ curl http://<手机IP>:8088/api/health
 ### 2.3 安全提示
 
 - **无鉴权**：局域网内任何设备可访问全部**合法**端点。仅在可信局域网使用。
-- **OP 越权端点受 `module.platform` 的 `op.enabled` feature 门禁**（默认关闭，未开启返回 403）——见第 8 章；开启后同样无额外鉴权。
+- **API 服务与 OP 权限独立**：服务由 `core.api/api.enabled` 控制（默认开启、General、priority -5；Debug/Release 设置页均显示），需要 OP 的端点由 `module.security/op.enabled` 单独授权（默认关闭、General、priority -4；Debug/Release 均显示，未授权返回 403）——见第 8 章。分类与 priority 不影响服务与权限运行语义。
 - **明文 HTTP**，勿在公共网络使用。
 
 ---
@@ -795,24 +795,26 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 | 方法 | 路径 | 用途 | 请求 | 返回 |
 |---|---|---|---|---|
-| GET | `/api/config/list` | 查看当前已注册插件对象投影 | — | `{"module.platform":{"features":{"api.enabled":true,"op.enabled":false,"debug.logging":false},"config":{"listen_address":"0.0.0.0","listen_port":8088},"enable":true},"extension_bag":{"features":{"extension_bag.extended_bag":true},"config":{},"enable":true}}`（示例，仅展示注册项） |
-| POST | `/api/config/set` | 提交单 key feature/config/desired 请求 | `{"plugin_id":"module.platform","field":"feature","key":"op.enabled","value":true}` | receipt `{"ok":true,"request_id":N,"revision":R,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}` |
+| GET | `/api/config/list` | 查看当前已注册插件对象投影 | — | `{"core.api":{"features":{"api.enabled":true},"config":{"listen_address":"0.0.0.0","listen_port":8088},"enable":true},"module.security":{"features":{"op.enabled":false},"config":{},"enable":true},"module.platform":{"features":{"debug.logging":false},"config":{},"enable":true}}`（示例，仅展示注册项） |
+| POST | `/api/config/set` | 提交单 key feature/config/desired 请求 | `{"plugin_id":"module.security","field":"feature","key":"op.enabled","value":true}` | receipt `{"ok":true,"request_id":N,"revision":R,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}` |
 | POST | `/api/op/features/lifecycle` | 提交 desired activate/deactivate | `{"id":"world_teleport","action":"deactivate"}` | receipt（结构同上） |
 | GET | `/api/config/receipt/{id}` | 回取异步 receipt | — | receipt 对象；轮询至 `persistence` 为 `persisted`/`failed` |
 
 写入是异步的：`POST` 立即返回 receipt，按其 `request_id` 轮询 `GET /api/config/receipt/{id}` 直到 `persistence` 不再是 `pending`。`field` 取值：`feature`（`value` 为布尔，写已注册 feature）、`config`（`value` 为任意 JSON，写自由键值）、`desired`（`key` 必须为 `enable`，写 Host lifecycle 期望）。请求体必须有且仅有 `plugin_id`/`field`/`key`/`value` 四个成员；错误返回 `{"ok":false,"error_code":N}`。`enable` 是 Host 独占的 lifecycle 期望状态，普通插件不可读写。
 
-**Host 平台配置**（plugin id 固定为 `module.platform`）：
+**Host 配置**按服务与权限 owner 分开保存：
 
-| 键 | 类型 | 默认 | 说明 |
+| owner / 键 | 类型 | 默认 | 说明 |
 |---|---|---:|---|
-| `features["api.enabled"]` | bool | `true` | HTTP 服务与 native 缓存预取；关闭后可由游戏内设置页恢复 |
-| `features["op.enabled"]` | bool | `false` | **OP 越权操作全局开关**——开启后 `/api/op/*` 可用；关闭时返回 403 `op disabled` |
-| `features["debug.logging"]` | bool | `false` | native logger 的 debug 级别门控 |
-| `config["listen_address"]` | string | `"0.0.0.0"` | HTTP 监听地址 |
-| `config["listen_port"]` | number | `8088` | HTTP 监听端口（1-65535） |
+| `core.api` / `features["api.enabled"]` | bool | `true` | General API service 开关；priority -5；Debug/Release 设置页均显示；关闭或恢复 HTTP 服务 |
+| `core.api` / `config["listen_address"]` | string | `"0.0.0.0"` | HTTP 监听地址 |
+| `core.api` / `config["listen_port"]` | number | `8088` | HTTP 监听端口（1-65535） |
+| `module.security` / `features["op.enabled"]` | bool | `false` | General 权限开关；priority -4；Debug/Release 均显示；只授权 endpoint metadata 明确标记需要 OP 的操作 |
+| `module.platform` / `features["debug.logging"]` | bool | `false` | General、priority -3；名称「debug日志」；native logger 的 debug 级别门控 |
 
-**插件功能开关**（写入各插件 `features`，完整 catalog 见 [`settings` 参考](../reference/plugins/core.settings.md)）：
+`core.api/api.enabled` 与 `module.security/op.enabled` 相互独立：关闭 API 服务不会改写 OP 权限，开启 API 服务也不会授予 OP。两项属于 General，Debug/Release 设置页均显示；Release 只隐藏 Hidden 分类。
+
+**插件功能开关**（写入各插件 `features`，完整 catalog 见 [`settings` 参考](../reference/plugins/settings.md)）：
 
 | feature id | 默认 | 说明 |
 |---|---:|---|
@@ -829,7 +831,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 插件整体 lifecycle 由各 plugin 对象的 `enable`（Host desired）控制，经 `POST /api/op/features/lifecycle` 或 `field="desired"` 写入；`want_run = enable && 任一 feature 开启`。运行态状态仍通过 `/api/system/features` 查询。
 
-修改监听地址/端口会触发 Host runtime projection/effects；`op.enabled` 开启示例见第 8 章。
+修改监听地址/端口会触发 Host runtime projection/effects；`module.security/op.enabled` 开启示例见第 8 章。
 
 ### 6.8 debug（调试）
 
@@ -1002,16 +1004,16 @@ curl -X POST http://<手机IP>:8088/api/system/save
 
 ### 8.0 全局开关（重要！）
 
-**OP 端点受 `module.platform` 的 `op.enabled` feature 门禁**（默认 `false`）：
+**需要 OP 的端点受 `module.security/op.enabled` 门禁**（Hidden、默认 `false`）。API service 由 `core.api/api.enabled` 独立控制；两者不会互相写入或推导。
 
-- **开关关闭（默认）**：所有 `/api/op/*` 端点返回 **403 + `{"ok":false,"error":"op disabled"}`**
-- **开启方式**：`POST /api/config/set` 传 `{"plugin_id":"module.platform","field":"feature","key":"op.enabled","value":true}`，或编辑外部配置 `config.json` 中 `module.platform.features["op.enabled"]`。
-- 门禁在 OpApiService 统一入口（controller 无法绕过）；开启后无额外鉴权，仍仅限可信局域网
+- **开关关闭（默认）**：声明需要 OP 的请求返回 **403 + `{"ok":false,"error":"op disabled"}`**；按路由声明判定，不按 `/api/op/` 路径前缀推断。
+- **开启方式**：API 服务运行时，`POST /api/config/set` 传 `{"plugin_id":"module.security","field":"feature","key":"op.enabled","value":true}`，或编辑外部配置 `config.json` 中 `module.security.features["op.enabled"]`。
+- `op.enabled` 与 `api.enabled` 均为 Hidden：Debug 设置页显示，Release 设置页过滤。OP 开启后仍无额外鉴权，仅限可信局域网。
 
 ```bash
-# 开启 OP（持久化到 config.json 的 module.platform features）
+# 开启 OP（持久化到 config.json 的 module.security features；API 服务需运行）
 curl -X POST http://<手机IP>:8088/api/config/set -H 'Content-Type: application/json' \
-  -d '{"plugin_id":"module.platform","field":"feature","key":"op.enabled","value":true}'
+  -d '{"plugin_id":"module.security","field":"feature","key":"op.enabled","value":true}'
 # {"ok":true,"request_id":1,"revision":1,"admission":"admitted","persistence":"pending","actual":"not_submitted","error_code":0}
 # 轮询 GET /api/config/receipt/1 至 persistence 为 persisted
 ```
@@ -1294,7 +1296,7 @@ loop:
 
 **安全与风险**：
 - **无鉴权**：合法端点局域网内可访问，勿暴露公网
-- **OP 门禁**：OP 端点默认关闭（`op.enabled=false` → 403）；开启后无额外鉴权，且破坏性大，用前先存档
+- **OP 门禁**：需要 OP 的端点默认受 `module.security/op.enabled=false` 拒绝（403）；开启后无额外鉴权，且破坏性大，用前先存档
 - **OP 破坏性**：直改等级/属性/物品可能损坏存档，用前先存档
 - **死亡处理**：全灭 → `screen=dialog_wipeout`；面板仅提供 `game_over`（回主菜单，可 `enter_slot` 重进档）；`revive`/`special_revive` 走网络链、离线无作用，已不再提供
 - **教学状态**：新档可能触发 `tutorial_pause`（药水教学），游戏暂停移动，需使用药水后恢复
@@ -1378,4 +1380,4 @@ loop:
 | `POST /api/character/combat/{role}/set_skill_usage` | ⏳ 未开放 |
 | `GET /api/system/tables/{table}/download`、`/api/system/help`、`/api/system/download` | ⏳ 未开放 |
 | `GET /api/quest/{id}` 单任务详情 | ⏳ 恒 not found |
-| OP 越权端点 | 🔒 默认关闭（`op.enabled=false` → 403）；开启后 ✅ 10 个可用 / ⏳ 11 个未开放 |
+| OP 越权端点 | 🔒 需要 OP 的操作默认受 `module.security/op.enabled=false` 拒绝（403）；开启后 ✅ 10 个可用 / ⏳ 11 个未开放 |

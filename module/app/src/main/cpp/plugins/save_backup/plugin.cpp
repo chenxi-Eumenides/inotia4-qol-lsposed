@@ -37,14 +37,13 @@ const contracts::CapabilityRequirement kRequires[] = {
         contracts::kSaveFactsCapabilityId,
         {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
     },
-    {
-        contracts::kHttpRegistryCapabilityId,
-        {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor},
-    },
-    {
-        contracts::kHttpDispatchCapabilityId,
-        {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor},
-    },
+};
+
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -217,22 +216,26 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
     return sb_http_error(response, 400, "bad request");
 }
 
-const SbHttpRoute kSbHttpRouteKinds[] = {
+SbHttpRoute kSbHttpRouteKinds[] = {
     SbHttpRoute::kList,
     SbHttpRoute::kExport,
     SbHttpRoute::kImport,
     SbHttpRoute::kDelete,
 };
 
-const contracts::HttpQueryHandlerDescriptor kSbHttpRoutes[] = {
-    {contracts::HttpMethod::kGet, "/api/system/backup/list", kPluginId, &sb_http_handler,
-     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[0])},
-    {contracts::HttpMethod::kPost, "/api/system/backup/export", kPluginId, &sb_http_handler,
-     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[1])},
-    {contracts::HttpMethod::kPost, "/api/system/backup/import", kPluginId, &sb_http_handler,
-     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[2])},
-    {contracts::HttpMethod::kPost, "/api/system/backup/delete", kPluginId, &sb_http_handler,
-     const_cast<SbHttpRoute*>(&kSbHttpRouteKinds[3])},
+const contracts::HttpEndpointDescriptor kSbHttpEndpoints[] = {
+    {contracts::HttpMethod::kGet, "/api/system/backup/list", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &sb_http_handler, nullptr,
+     &kSbHttpRouteKinds[0]},
+    {contracts::HttpMethod::kPost, "/api/system/backup/export", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &sb_http_handler,
+     &kSbHttpRouteKinds[1]},
+    {contracts::HttpMethod::kPost, "/api/system/backup/import", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &sb_http_handler,
+     &kSbHttpRouteKinds[2]},
+    {contracts::HttpMethod::kPost, "/api/system/backup/delete", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &sb_http_handler,
+     &kSbHttpRouteKinds[3]},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
@@ -337,15 +340,15 @@ QolResult open_manager_feature(contracts::PluginContext& ctx) {
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"save_backup.open_manager", 1, contracts::FeatureCategory::kTools,
-     contracts::FeatureType::kEntry, "存档备份导出", "打开存档备份管理器。",
-     nullptr, &open_manager_feature, "打开"},
+      contracts::FeatureType::kEntry, "存档备份导出", "打开存档备份管理器。",
+      nullptr, &open_manager_feature, "打开", -2},
 };
 
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    4, kRequires,  // requires=ui_panels + save.facts + http.registry + http.dispatch
-    0, nullptr,   // optional_requires
+    2, kRequires,  // requires=ui_panels + save.facts
+    2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_operations.cpp 保留）
@@ -357,9 +360,12 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_resource_ready,
     kPorts,
     1,
-    kSbHttpRoutes,
-    static_cast<uint32_t>(sizeof(kSbHttpRoutes) / sizeof(kSbHttpRoutes[0])),
+    nullptr, 0,
     kFeatures, 1,
+    kSbHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kSbHttpEndpoints) / sizeof(kSbHttpEndpoints[0])),
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

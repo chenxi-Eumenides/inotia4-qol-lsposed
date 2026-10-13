@@ -345,6 +345,7 @@ struct QolFeatureCatalogItem {
     const char* name;
     const char* description;
     const char* action_label = nullptr;
+    int8_t display_priority = 0;
 };
 
 struct QolFeatureCatalogPlugin {
@@ -369,6 +370,8 @@ struct QolFeatureControlApi {
     QolResult (*read_config)(void*, const char*, const char*, char*, uint32_t, uint32_t*);
     QolResult (*request_set_config)(void*, const char*, const char*, const char*, uint32_t, FeatureReceipt*);
     QolResult (*read_actual)(void*, const char*, int32_t*, uint8_t*);
+    // v1.26 tail: immutable Host-lifetime category definitions.
+    QolResult (*read_categories)(void*, const FeatureCategoryDefinition**, uint32_t*);
 };
 
 // 当前插件的 Host runtime 投影事件。Host 在 observer 回调期间借出字符串；调用方若异步
@@ -462,8 +465,9 @@ struct QolHostSdk {
 
 constexpr uint16_t kHostSdkMajor = 1;
 // minor 22 adds owner feature/config and resident management; minor 23 adds runtime/security APIs;
-// minor 24 appends desired lifecycle state to runtime effects; minor 25 adds module-health facts.
-constexpr uint16_t kHostSdkMinor = 25;
+// minor 24 appends desired lifecycle state to runtime effects; minor 25 adds module-health facts;
+// minor 26 appends feature display priority and category metadata to the settings catalog.
+constexpr uint16_t kHostSdkMinor = 26;
 
 inline const QolHostModuleHealthFactsApi* module_health_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, module_health) +
@@ -496,15 +500,16 @@ inline const QolFeatureApi* feature_if_available(const QolHostSdk* sdk) {
 inline const QolFeatureControlApi* feature_control_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, feature_control) +
                                 sizeof(const QolFeatureControlApi*);
-    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 22 ||
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 26 ||
         sdk->abi.size < end) return nullptr;
     const auto* api = sdk->feature_control;
-    constexpr std::size_t required = offsetof(QolFeatureControlApi, read_actual) +
-                                     sizeof(QolFeatureControlApi::read_actual);
+    constexpr std::size_t required = offsetof(QolFeatureControlApi, read_categories) +
+                                     sizeof(QolFeatureControlApi::read_categories);
     if (api == nullptr || api->struct_size < required || api->read_catalog == nullptr ||
         api->read_desired == nullptr || api->read_feature == nullptr ||
         api->request_set_feature == nullptr || api->request_desired == nullptr ||
-        api->receipt == nullptr || api->invoke_entry == nullptr) return nullptr;
+        api->receipt == nullptr || api->invoke_entry == nullptr || api->read_categories == nullptr)
+        return nullptr;
     return api;
 }
 

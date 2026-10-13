@@ -8,7 +8,7 @@ FeaturePlatformState latest;
 QolResult noop(contracts::PluginContext&, uint8_t) { return contracts::ok(); }
 constexpr contracts::FeatureDefinition definitions[] = {
     {"debug.logging", 0, contracts::FeatureCategory::kGeneral, contracts::FeatureType::kToggle,
-     "debug日志", "启用 Host 调试日志。", &noop, nullptr, nullptr},
+     "debug日志", "启用 Host 调试日志。", &noop, nullptr, nullptr, -3},
 };
 const JsonValue* member(const JsonValue& object, const char* key) {
     for (const auto& item : object.object) if (item.first == key) return &item.second;
@@ -34,7 +34,7 @@ const contracts::PluginDescriptor& security_config_descriptor() {
     static constexpr contracts::FeatureDefinition security_features[] = {
         {"op.enabled", 0, contracts::FeatureCategory::kGeneral,
          contracts::FeatureType::kToggle, "操作权限", "允许声明需要 OP 的操作。", &noop, nullptr,
-         nullptr},
+         nullptr, -4},
     };
     static const contracts::PluginDescriptor descriptor = [] {
         contracts::PluginDescriptor value{};

@@ -1413,7 +1413,7 @@ add_executable(settings_panel_widget_tests test_settings_panel_widget.cpp)
 target_include_directories(settings_panel_widget_tests PRIVATE
     ${CPP_DIR}
     ${CPP_DIR}/plugins/settings
-    ${CPP_DIR}/plugins/core.settings/panels
+    ${CPP_DIR}/plugins/settings/panels
 )
 target_compile_features(settings_panel_widget_tests PRIVATE cxx_std_17)
 set_target_properties(settings_panel_widget_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
@@ -1746,7 +1746,7 @@ add_test(NAME system_port_identity_tests COMMAND system_port_identity_tests)
 # T4': core.settings config/list 序列化字段顺序、类型与 JSON 字符串转义。
 add_executable(core_settings_config_tests
     test_core_settings_config.cpp
-    ${CPP_DIR}/plugins/core.settings/plugin.cpp
+    ${CPP_DIR}/plugins/settings/plugin.cpp
     ${CPP_DIR}/infra/config.cpp
     ${CPP_DIR}/infra/events.cpp
 )
@@ -1808,9 +1808,9 @@ add_test(NAME core_settings_config_service_effect_failures_tests
 # settings provider callback registration and host-owned PopupState push/pop integration.
 add_executable(core_settings_panel_migration_tests
     test_core_settings_panel_migration.cpp
-    ${CPP_DIR}/plugins/core.settings/plugin.cpp
-    ${CPP_DIR}/plugins/core.settings/feature.cpp
-    ${CPP_DIR}/plugins/core.settings/panels/settings_binding.cpp
+    ${CPP_DIR}/plugins/settings/plugin.cpp
+    ${CPP_DIR}/plugins/settings/feature.cpp
+    ${CPP_DIR}/plugins/settings/panels/settings_binding.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
 )
@@ -1861,7 +1861,7 @@ add_executable(settings_contributions_tests
     ${CPP_DIR}/infra/settings_catalog.cpp
     ${CPP_DIR}/infra/status.cpp
     ${CPP_DIR}/host/settings_catalog_adapter.cpp
-    ${CPP_DIR}/plugins/core.settings/settings_contribution.cpp
+    ${CPP_DIR}/plugins/settings/settings_contribution.cpp
     ${CPP_DIR}/plugins/core.custom_ui/settings_contribution.cpp
     ${CPP_DIR}/plugins/extension_bag/settings_contribution.cpp
     ${CPP_DIR}/plugins/stack_limit/settings_contribution.cpp

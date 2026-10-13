@@ -3,6 +3,7 @@
 #include "host/owner_identity.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "host/http_endpoint_binder.h"
 #include "host/save_route.h"
 #include "infra/store.h"
 #include "contracts/commands.h"
@@ -27,6 +28,32 @@ using namespace qol;
 using namespace qol::contracts;
 using namespace qol::host;
 using namespace qol::features::core_settings;
+
+namespace qol::host {
+std::map<std::string, bool> test_runtime_actual_state;
+std::vector<std::pair<std::string, bool>> test_runtime_actual_events;
+std::vector<std::string> test_runtime_lifecycle_order;
+std::vector<bool> test_runtime_reentrant_results;
+uint32_t test_runtime_reentrant_queries = 0;
+
+void runtime_effects_publish_actual(const char* plugin_id, bool enabled) {
+    if (plugin_id == nullptr) return;
+    auto inserted = test_runtime_actual_state.emplace(plugin_id, false);
+    if (inserted.second && !enabled) return;
+    if (inserted.first->second == enabled) return;
+    inserted.first->second = enabled;
+    test_runtime_actual_events.emplace_back(plugin_id, enabled);
+    test_runtime_lifecycle_order.emplace_back(std::string("actual:") + plugin_id +
+                                               (enabled ? ":true" : ":false"));
+    test_runtime_reentrant_results.push_back(feature_registry_active(plugin_id) == enabled);
+    ++test_runtime_reentrant_queries;
+}
+
+void runtime_effects_unsubscribe_plugin(const char* plugin_id) {
+    if (plugin_id != nullptr)
+        test_runtime_lifecycle_order.emplace_back(std::string("clear:") + plugin_id);
+}
+}  // namespace qol::host
 
 namespace {
 struct Probe {
@@ -89,10 +116,20 @@ QolResult mgmt_request_set_config(void*, const char*, const char*, const char*, 
 QolResult mgmt_read_actual(void*, const char*, int32_t*, uint8_t*) {
     return error(kQolErrNotReady, nullptr, 0);
 }
+QolResult mgmt_read_categories(void*, const FeatureCategoryDefinition** out, uint32_t* count) {
+    static constexpr FeatureCategoryDefinition categories[] = {
+        {FeatureCategory::kGeneral, "基础设置", -9},
+    };
+    if (out == nullptr || count == nullptr) return error(kQolErrInvalidArgument, nullptr, 0);
+    *out = categories;
+    *count = 1;
+    return ok();
+}
 const QolFeatureControlApi kManagementControl{
     sizeof(QolFeatureControlApi), nullptr, &mgmt_read_catalog, &mgmt_read_desired,
     &mgmt_read_feature, &mgmt_request_set_feature, &mgmt_request_desired, &mgmt_receipt,
-    &mgmt_invoke_entry, &mgmt_read_config, &mgmt_request_set_config, &mgmt_read_actual};
+    &mgmt_invoke_entry, &mgmt_read_config, &mgmt_request_set_config, &mgmt_read_actual,
+    &mgmt_read_categories};
 
 void assert_main() { assert(std::this_thread::get_id() == main_thread); }
 FeatureReceipt await(FeatureReceipt receipt) {
@@ -144,6 +181,7 @@ void cleanup(PluginContext& ctx) {
     assert(probe.subscriptions == 1);
     --probe.subscriptions;
     trace.emplace_back(std::string("cleanup:") + ctx.plugin_id);
+    test_runtime_lifecycle_order.emplace_back(std::string("cleanup:") + ctx.plugin_id);
 }
 void enabled(PluginContext& ctx) { assert_main(); ++probes[ctx.plugin_id].enabled; }
 void disabled(PluginContext& ctx) { assert_main(); ++probes[ctx.plugin_id].disabled; }
@@ -412,6 +450,11 @@ void test_save_busy_and_inflight() {
 int main(int argc, char** argv) {
     assert(argc == 2);
     main_thread = std::this_thread::get_id();
+    test_runtime_actual_state.clear();
+    test_runtime_actual_events.clear();
+    test_runtime_lifecycle_order.clear();
+    test_runtime_reentrant_results.clear();
+    test_runtime_reentrant_queries = 0;
     test_owner_poll();
     plugin_registry_reset_for_test();
     hooks::registry_reset_for_test();
@@ -480,6 +523,14 @@ int main(int argc, char** argv) {
     frames();
     assert(feature_registry_active("test.provider") && feature_registry_active("test.consumer"));
     assert(feature_registry_active("test.solo"));
+    assert(test_runtime_actual_state["test.provider"] &&
+           test_runtime_actual_state["test.consumer"] && test_runtime_actual_state["test.solo"]);
+    assert(!test_runtime_actual_state["test.failure"] && test_runtime_reentrant_queries > 0);
+    assert(std::all_of(test_runtime_reentrant_results.begin(),
+                       test_runtime_reentrant_results.end(), [](bool matched) { return matched; }));
+    assert(std::find(test_runtime_actual_events.begin(), test_runtime_actual_events.end(),
+                     std::make_pair(std::string("test.provider"), true)) !=
+           test_runtime_actual_events.end());
     assert(probes["test.provider"].installs == 1 && probes["test.consumer"].installs == 1);
 
     // F1: only settings receives the management SDK copy; ordinary contexts keep it null.
@@ -523,13 +574,45 @@ int main(int argc, char** argv) {
     frames();
     assert(feature_registry_active("test.failure") && feature_registry_active("test.resource_failure"));
     assert(feature_registry_active("test.unsupported") && probes["test.unsupported"].installs == 1);
+    assert(test_runtime_actual_state["test.failure"]);
+
+    // Actual state does not follow desired=true until install and on_enabled complete.
+    set_desired("test.failure", 0);
+    frames();
+    assert(actual("test.failure") == infra::FeatureState::kInactive &&
+           !test_runtime_actual_state["test.failure"]);
+    auto first_failure_clear = std::find(test_runtime_lifecycle_order.begin(),
+        test_runtime_lifecycle_order.end(), "clear:test.failure");
+    auto first_failure_cleanup = std::find(test_runtime_lifecycle_order.begin(),
+        test_runtime_lifecycle_order.end(), "cleanup:test.failure");
+    assert(first_failure_clear < first_failure_cleanup);
+    frames(12);
+    assert(actual("test.failure") == infra::FeatureState::kInactive &&
+           !test_runtime_actual_state["test.failure"]);
+    fail_install = true;
+    set_desired("test.failure", 1);
+    frames();
+    assert(actual("test.failure") == infra::FeatureState::kFailed &&
+           !test_runtime_actual_state["test.failure"]);
+    fail_install = false;
+    reconcile.notify_dependency_changed();
+    frames();
+    assert(feature_registry_active("test.failure") && test_runtime_actual_state["test.failure"]);
+    std::vector<bool> failure_actual_transitions;
+    for (const auto& event : test_runtime_actual_events) {
+        if (event.first == "test.failure") failure_actual_transitions.push_back(event.second);
+    }
+    assert((failure_actual_transitions == std::vector<bool>{true, false, true}));
 
     // Provider all-false tears down the zero-resource consumer first, without rewriting desired.
     const auto old_consumer = owner_token_of("test.consumer");
     const auto provider_disabled_before = probes["test.provider"].disabled;
     assert(hooks::in_flight_enter("feature:provider"));
     trace.clear();
+    test_runtime_lifecycle_order.clear();
     set_feature("test.provider", "toggle", 0);
+    std::vector<PluginDesiredSnapshot> desired_before_provider_stop;
+    assert(control.desired(&desired_before_provider_stop).ok());
     frames();
     assert(actual("test.provider") == infra::FeatureState::kDeactivating);
     assert(hooks::state_of("feature:provider") == ResourceState::kDisabled);
@@ -543,9 +626,21 @@ int main(int argc, char** argv) {
     assert(probes["test.consumer"].subscriptions == 0 && probes["test.provider"].subscriptions == 0);
     assert(std::find(trace.begin(), trace.end(), "cleanup:test.consumer") <
            std::find(trace.begin(), trace.end(), "cleanup:test.provider"));
+    const auto actual_false = std::find(test_runtime_lifecycle_order.begin(),
+        test_runtime_lifecycle_order.end(), "actual:test.provider:false");
+    const auto subscriptions_cleared = std::find(test_runtime_lifecycle_order.begin(),
+        test_runtime_lifecycle_order.end(), "clear:test.provider");
+    const auto provider_cleaned = std::find(test_runtime_lifecycle_order.begin(),
+        test_runtime_lifecycle_order.end(), "cleanup:test.provider");
+    assert(actual_false < subscriptions_cleared && subscriptions_cleared < provider_cleaned);
     std::vector<PluginDesiredSnapshot> desired;
     assert(control.desired(&desired).ok());
-    for (const auto& snapshot : desired) assert(snapshot.desired_enable);
+    assert(desired.size() == desired_before_provider_stop.size());
+    for (std::size_t index = 0; index < desired.size(); ++index) {
+        assert(desired[index].plugin_id == desired_before_provider_stop[index].plugin_id);
+        assert(desired[index].desired_enable == desired_before_provider_stop[index].desired_enable);
+        assert(desired[index].any_feature == desired_before_provider_stop[index].any_feature);
+    }
     set_feature("test.provider", "toggle", 1);
     frames();
     assert(feature_registry_active("test.provider") && feature_registry_active("test.consumer"));
@@ -582,7 +677,8 @@ int main(int argc, char** argv) {
     set_feature("test.solo", "entry", 0);
     set_feature("test.solo", "toggle", 1);
     frames();
-    assert(actual("test.solo") == infra::FeatureState::kInactive); // desired=false stays off.
+    assert(feature_registry_active("test.solo") && test_runtime_actual_state["test.solo"]);
+    // A feature write derives enable from the registered features; the last true feature resumes it.
     set_feature("test.solo", "toggle", 0);
     set_desired("test.solo", 1);
     frames();
@@ -653,6 +749,8 @@ int main(int argc, char** argv) {
     std::puts("nonresumable_failure_sweep: pass (unhook skipped; physical hook retained and isolated)");
 
     // HTTP admission is revoked immediately, but frame teardown polls the existing lease.
+    // This fixture injects the resident core.api HTTP provider absent from its plugin set.
+    http_endpoint_binder_set_provider_available(true);
     const HttpRoute route{HttpMethod::kGet, "/api/test/drain", "test.solo", 0, 1};
     assert(succeeded(http_registry_api().register_route(&route)));
     const auto dispatch = http_dispatch_api();
@@ -662,7 +760,13 @@ int main(int argc, char** argv) {
     std::thread http_thread([&] {
         uint8_t buffer[128]{};
         HttpRes response{buffer, sizeof(buffer), 0, 0};
-        assert(succeeded(dispatch.dispatch(&request, &response)) && response.status == 200);
+        const QolResult result = dispatch.dispatch(&request, &response);
+        if (!succeeded(result) || response.status != 200) {
+            std::fprintf(stderr, "HTTP drain request failed: code=%d status=%u accepting=%d body=%.*s\n",
+                         result.code, response.status, host_http_registry_accepting() ? 1 : 0,
+                         static_cast<int>(response.body_size), reinterpret_cast<const char*>(buffer));
+        }
+        assert(succeeded(result) && response.status == 200);
     });
     {
         std::unique_lock<std::mutex> lock(http_hold.mutex);

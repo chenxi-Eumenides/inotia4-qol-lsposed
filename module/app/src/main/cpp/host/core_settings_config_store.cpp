@@ -1028,6 +1028,10 @@ ConfigStoreResult ConfigStore::prepare_features(const std::vector<PluginFeatureS
         ids.push_back(plugin.plugin_id);
         std::vector<std::string> feature_ids;
         for (const auto& feature : plugin.features) {
+            if (feature.display_priority < contracts::kMinFeatureDisplayPriority ||
+                feature.display_priority > contracts::kMaxFeatureDisplayPriority)
+                return fail(ConfigStoreError::kValidation,
+                            "feature display priority out of range");
             if (feature.id == nullptr || feature.id[0] == '\0' ||
                 std::strlen(feature.id) > 128 || !valid_utf8(feature.id) ||
                 feature.default_enabled > 1 || feature.name == nullptr ||
