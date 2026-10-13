@@ -8,10 +8,14 @@
 // 被测代码依赖的 Android 头由 stubs/android/log.h 覆盖；游戏内存符号由 test_stubs.cpp 提供。
 
 #include <array>
+#include <cerrno>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <sys/mman.h>
+#include <sys/types.h>
 #include <vector>
 
 #include "game/json/game_json.h"
@@ -150,6 +154,246 @@ static void test_call_patch_thunk_reuse_and_capacity() {
     CHECK(final.slots_in_use == before.slots_in_use);
 
     CHECK(munmap(words, 4096) == 0);
+}
+
+constexpr int kTestMapFixedNoReplace = 0x100000;
+constexpr size_t kTestPageSize = 4096;
+
+struct FakeMmapResponse {
+    bool fail = true;
+    int error = EEXIST;
+    void* returned = nullptr;
+    bool return_requested = false;
+};
+
+struct FakeMmapState {
+    std::array<FakeMmapResponse, 8> responses{};
+    std::array<void*, 8> requested{};
+    std::array<int, 8> flags{};
+    size_t response_count = 0;
+    size_t calls = 0;
+    std::array<void*, 8> unmapped{};
+    size_t unmap_calls = 0;
+};
+
+static FakeMmapState g_fake_mmap_state;
+static uintptr_t g_call_patch_test_arena = 0;
+
+static void reset_fake_mmap_state() {
+    g_fake_mmap_state = FakeMmapState{};
+}
+
+static void add_fake_mmap_success(void* returned, bool return_requested = false) {
+    auto& response = g_fake_mmap_state.responses[g_fake_mmap_state.response_count++];
+    response.fail = false;
+    response.returned = returned;
+    response.return_requested = return_requested;
+}
+
+static void add_fake_mmap_failure(int error) {
+    auto& response = g_fake_mmap_state.responses[g_fake_mmap_state.response_count++];
+    response.fail = true;
+    response.error = error;
+}
+
+static void* fake_call_patch_mmap(void* address, size_t, int, int flags, int, off_t) noexcept {
+    const size_t call_index = g_fake_mmap_state.calls++;
+    if (call_index < g_fake_mmap_state.requested.size()) {
+        g_fake_mmap_state.requested[call_index] = address;
+        g_fake_mmap_state.flags[call_index] = flags;
+    }
+    if (call_index >= g_fake_mmap_state.response_count) {
+        errno = EEXIST;
+        return MAP_FAILED;
+    }
+    const FakeMmapResponse& response = g_fake_mmap_state.responses[call_index];
+    if (response.fail) {
+        errno = response.error;
+        return MAP_FAILED;
+    }
+    return response.return_requested ? address : response.returned;
+}
+
+static int fake_call_patch_munmap(void* address, size_t) noexcept {
+    if (g_fake_mmap_state.unmap_calls < g_fake_mmap_state.unmapped.size()) {
+        g_fake_mmap_state.unmapped[g_fake_mmap_state.unmap_calls] = address;
+    }
+    ++g_fake_mmap_state.unmap_calls;
+    return 0;
+}
+
+static void configure_fake_call_patch_mapping() {
+    call_patch_test_set_mapping_functions(fake_call_patch_mmap, fake_call_patch_munmap);
+}
+
+static uintptr_t call_patch_test_site() {
+    return g_call_patch_test_arena + 256;
+}
+
+static void test_call_patch_noreplace_ignored_address_is_rejected() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 2u);
+    CHECK(g_fake_mmap_state.requested[0] != reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK(g_fake_mmap_state.requested[0] == g_fake_mmap_state.requested[1]);
+    CHECK(g_fake_mmap_state.flags[0] == (MAP_PRIVATE | MAP_ANONYMOUS | kTestMapFixedNoReplace));
+    CHECK(g_fake_mmap_state.flags[1] == (MAP_PRIVATE | MAP_ANONYMOUS));
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 1u);
+    CHECK(g_fake_mmap_state.unmapped[0] == reinterpret_cast<void*>(g_call_patch_test_arena));
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 1u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_einval_uses_same_candidate_hint() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 2u);
+    CHECK(g_fake_mmap_state.requested[0] == g_fake_mmap_state.requested[1]);
+    CHECK(g_fake_mmap_state.flags[0] == (MAP_PRIVATE | MAP_ANONYMOUS | kTestMapFixedNoReplace));
+    CHECK(g_fake_mmap_state.flags[1] == (MAP_PRIVATE | MAP_ANONYMOUS));
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 0u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_eexist_advances_candidate() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_failure(EEXIST);
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 3u);
+    CHECK(g_fake_mmap_state.requested[0] != g_fake_mmap_state.requested[1]);
+    CHECK(g_fake_mmap_state.requested[1] == g_fake_mmap_state.requested[2]);
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 0u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_far_hint_is_unmapped_without_pool_poison() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    const uintptr_t far_address = g_call_patch_test_arena + 0x10000000u;
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(far_address));
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    CHECK_EQ(g_fake_mmap_state.calls, 3u);
+    CHECK(g_fake_mmap_state.requested[1] != g_fake_mmap_state.requested[2]);
+    CHECK_EQ(g_fake_mmap_state.unmap_calls, 1u);
+    CHECK(g_fake_mmap_state.unmapped[0] == reinterpret_cast<void*>(far_address));
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 1u);
+    CHECK_EQ(stats.free_slots, 0u);
+    call_patch_test_release_thunk_slot(slot);
+}
+
+static void test_call_patch_branch_range_and_candidate_arithmetic() {
+    constexpr uintptr_t from = 0x20000000u;
+    uint32_t instruction = 0;
+    CHECK(call_patch_test_encode_branch(from, from - 0x08000000u, &instruction));
+    CHECK_EQ(instruction, 0x16000000u);
+    CHECK(call_patch_test_encode_branch(from, from + 0x07fffffcu, &instruction));
+    CHECK_EQ(instruction, 0x15ffffffu);
+    CHECK(!call_patch_test_encode_branch(from, from + 0x08000000u, &instruction));
+    CHECK(!call_patch_test_encode_branch(from, from - 0x08000004u, &instruction));
+    CHECK(!call_patch_test_encode_branch(from, from + 0x1002u, &instruction));
+
+    uintptr_t candidate = 0;
+    const uintptr_t max_page = std::numeric_limits<uintptr_t>::max() &
+                               ~(static_cast<uintptr_t>(kTestPageSize) - 1);
+    CHECK(!call_patch_test_candidate_address(max_page, kTestPageSize, true, &candidate));
+    CHECK(call_patch_test_candidate_address(max_page, kTestPageSize, false, &candidate));
+    CHECK_EQ(candidate, max_page - kTestPageSize);
+    CHECK(!call_patch_test_candidate_address(kTestPageSize, kTestPageSize, false, &candidate));
+}
+
+static void test_call_patch_unreachable_reused_slot_stays_free() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    void* slot = call_patch_test_acquire_thunk_slot(call_patch_test_site());
+    CHECK(slot == reinterpret_cast<void*>(g_call_patch_test_arena));
+    call_patch_test_release_thunk_slot(slot);
+    CHECK_EQ(call_patch_stats().free_slots, 1u);
+    CHECK(call_patch_test_acquire_existing_thunk_slot(
+              g_call_patch_test_arena + 0x10000000u) == nullptr);
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 0u);
+    CHECK_EQ(stats.free_slots, 1u);
+}
+
+static void test_call_patch_branch_return_checks_both_edges_before_emit() {
+    call_patch_test_reset_state();
+    reset_fake_mmap_state();
+    configure_fake_call_patch_mapping();
+    add_fake_mmap_failure(EINVAL);
+    add_fake_mmap_success(reinterpret_cast<void*>(g_call_patch_test_arena));
+
+    auto* arena = reinterpret_cast<uint8_t*>(g_call_patch_test_arena);
+    std::memset(arena, 0xa5, 32);
+    constexpr uint32_t kOriginal = 0x14000000u;
+    auto* site = reinterpret_cast<uint32_t*>(call_patch_test_site());
+    *site = kOriginal;
+    CHECK(!call_patch_install_branch_with_return(
+        reinterpret_cast<uintptr_t>(site), kOriginal, 0,
+        reinterpret_cast<void*>(&patch_test_handler), g_call_patch_test_arena + 0x10000000u,
+        0xd2800020u));
+    CHECK_EQ(*site, kOriginal);
+    for (size_t i = 0; i < 32; ++i) CHECK_EQ(arena[i], 0xa5u);
+    const CallPatchStats stats = call_patch_stats();
+    CHECK_EQ(stats.page_count, 1u);
+    CHECK_EQ(stats.slots_allocated, 1u);
+    CHECK_EQ(stats.slots_in_use, 0u);
+    CHECK_EQ(stats.free_slots, 1u);
+    CHECK_EQ(stats.patched_calls, 0u);
+}
+
+static void test_call_patch_old_kernel_mapping_seams() {
+    void* arena = mmap(nullptr, kTestPageSize, PROT_READ | PROT_WRITE | PROT_EXEC,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(arena != MAP_FAILED);
+    if (arena == MAP_FAILED) return;
+    g_call_patch_test_arena = reinterpret_cast<uintptr_t>(arena);
+
+    test_call_patch_noreplace_ignored_address_is_rejected();
+    test_call_patch_einval_uses_same_candidate_hint();
+    test_call_patch_eexist_advances_candidate();
+    test_call_patch_far_hint_is_unmapped_without_pool_poison();
+    test_call_patch_branch_range_and_candidate_arithmetic();
+    test_call_patch_unreachable_reused_slot_stays_free();
+    test_call_patch_branch_return_checks_both_edges_before_emit();
+
+    call_patch_test_reset_state();
+    CHECK(munmap(arena, kTestPageSize) == 0);
+    g_call_patch_test_arena = 0;
 }
 
 static void test_p7_stage4_find_item_poc() {    bool recursive_guard = false;
@@ -2939,6 +3183,7 @@ int main() {
     virtual_bag::set_count_policy(&kHostModelCountPolicy);
     test_call_patch_word();
     test_call_patch_thunk_reuse_and_capacity();
+    test_call_patch_old_kernel_mapping_seams();
     test_p7_stage4_find_item_poc();
     test_world_teleport_target_map_id();
     test_json_escape();

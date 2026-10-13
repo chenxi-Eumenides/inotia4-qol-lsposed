@@ -2,6 +2,21 @@
 
 #include <cstdint>
 
+#if defined(QOL_CALL_PATCH_TEST_SEAMS)
+#include <sys/mman.h>
+using CallPatchTestMmapFunction = decltype(&::mmap);
+using CallPatchTestMunmapFunction = decltype(&::munmap);
+void call_patch_test_set_mapping_functions(CallPatchTestMmapFunction mmap_function,
+                                           CallPatchTestMunmapFunction munmap_function);
+void call_patch_test_reset_state();
+bool call_patch_test_encode_branch(uintptr_t from, uintptr_t to, uint32_t* out);
+bool call_patch_test_candidate_address(uintptr_t base, uint64_t distance, bool positive,
+                                       uintptr_t* out_candidate);
+void* call_patch_test_acquire_thunk_slot(uintptr_t call_addr);
+void* call_patch_test_acquire_existing_thunk_slot(uintptr_t call_addr);
+void call_patch_test_release_thunk_slot(void* slot);
+#endif
+
 // 通用 BL 调用点 patch（自动出售阶段 A 基础设施）。
 //
 // 语义：把 call_addr 处的原指令改写为 `bl <wrapper>`；当 wrapper 不在
