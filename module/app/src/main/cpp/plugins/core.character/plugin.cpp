@@ -108,7 +108,7 @@ CharacterRoute kRoutes[] = {
     {contracts::HttpMethod::kPost, "/api/character/party/discharge", contracts::QolCharacterWriteKind::kPartyDischarge},
     {contracts::HttpMethod::kPost, "/api/character/party/withdraw", contracts::QolCharacterWriteKind::kPartyWithdraw},
 };
-contracts::HttpQueryHandlerDescriptor kHttpQueries[sizeof(kRoutes) / sizeof(kRoutes[0])];
+contracts::HttpEndpointDescriptor kHttpEndpoints[sizeof(kRoutes) / sizeof(kRoutes[0])];
 bool g_http_routes_initialized = false;
 
 enum class SnapshotState : uint8_t { kUnavailable, kNotInGame, kReady };
@@ -146,16 +146,29 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortCharacterStateVersion.minor}},
 };
 
-const contracts::CapabilityRequirement kRequires[] = {
-    {contracts::kHttpRegistryCapabilityId, {contracts::kHttpRegistryVersion.major,
-                                             contracts::kHttpRegistryVersion.minor}},
-    {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
-                                             contracts::kHttpDispatchVersion.minor}},
-};
-
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kItemStateCapabilityId,
      {contracts::kItemStateVersion.major, contracts::kItemStateVersion.minor}},
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
+};
+
+#define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
+    {contracts::HttpMethod::method, path, owner, op_gated, lease_required},
+const contracts::HttpRoute kRouteFacts[] = {
+#include "routes.inc"
+};
+#undef QOL_HTTP_ROUTE
+
+constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/skill-point", kPluginId, 1, 1},
+    {contracts::HttpMethod::kPost, "/api/op/character/{role}/skill-level", kPluginId, 1, 1},
+    {contracts::HttpMethod::kPost, "/api/op/combat/{role}/heal", kPluginId, 1, 1},
+    {contracts::HttpMethod::kPost, "/api/op/combat/{role}/rest", kPluginId, 1, 1},
+    {contracts::HttpMethod::kPost, "/api/op/combat/{role}/revive", kPluginId, 1, 1},
+    {contracts::HttpMethod::kPost, "/api/op/combat/{role}/hate", kPluginId, 1, 1},
 };
 
 QolResult not_ready() {
@@ -1993,11 +2006,26 @@ void initialize_http_routes() {
     if (g_http_routes_initialized) return;
     for (size_t i = 0; i < sizeof(kRoutes) / sizeof(kRoutes[0]); ++i) {
         CharacterRoute& route = kRoutes[i];
-        kHttpQueries[i] = contracts::HttpQueryHandlerDescriptor{
-            route.method, route.path, kPluginId,
-            route.query ? &query_handler : &char_write_command,
-            route.query ? static_cast<void*>(&route.query_id)
-                        : static_cast<void*>(&route.write_kind)};
+        const contracts::HttpRoute* facts = nullptr;
+        for (const contracts::HttpRoute& candidate : kRouteFacts) {
+            if (candidate.method == route.method &&
+                std::strcmp(candidate.path, route.path) == 0) {
+                facts = &candidate;
+                break;
+            }
+        }
+        if (facts == nullptr) continue;
+        if (route.query) {
+            kHttpEndpoints[i] = contracts::HttpEndpointDescriptor{
+                route.method, route.path, kPluginId, contracts::HttpHandlerKind::kQuery,
+                facts->op_gated, facts->lease_required, &query_handler, nullptr,
+                &route.query_id};
+        } else {
+            kHttpEndpoints[i] = contracts::HttpEndpointDescriptor{
+                route.method, route.path, kPluginId, contracts::HttpHandlerKind::kCommand,
+                facts->op_gated, facts->lease_required, nullptr, &char_write_command,
+                &route.write_kind};
+        }
     }
     g_http_routes_initialized = true;
 }
@@ -2147,8 +2175,8 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2,
-    kRequires,
+    0,
+    nullptr,
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,
     2,
@@ -2165,9 +2193,14 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     kPorts,
     4,
-    kHttpQueries,
-    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    nullptr,
+    0,
     kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    kHttpRouteMetadata,
+    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
 };
 
 }  // namespace

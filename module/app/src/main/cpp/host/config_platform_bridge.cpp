@@ -2,7 +2,6 @@
 
 #include "host/config_namespace.h"
 #include "host/settings_config_bridge.h"
-#include "host/http_dispatch.h"
 #include "contracts/commands.h"
 #include "infra/config.h"
 #include "infra/commands.h"
@@ -264,21 +263,7 @@ void config_store_mark_bootstrapped(bool completed) {
 }
 
 void config_apply_safe_native_state(const ModuleConfig& config) {
-    http_dispatch_set_op_enabled(config.api_enabled);
     qol_log_set_debug_enabled(config.debug_log_enabled);
-}
-
-void config_apply_api_enabled(bool enabled) {
-    http_dispatch_set_op_enabled(enabled);
-#if !QOL_KERNEL_ONLY
-    if (enabled) {
-        frame_cache_start();
-    } else {
-        frame_cache_stop();
-    }
-#else
-    (void)enabled;
-#endif
 }
 
 CoreSettingsRuntimeApplyResult config_platform_last_runtime_apply_result() {

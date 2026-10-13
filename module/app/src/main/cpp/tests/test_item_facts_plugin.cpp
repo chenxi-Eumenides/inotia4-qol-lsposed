@@ -127,17 +127,51 @@ int main() {
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
+    CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
     // ITM-13：core.item 不再声明扩展袋可选依赖（中立 provider 经 Item Port 提供）。
-    CHECK(descriptor.optional_count == 1 && descriptor.optional_requires != nullptr);
+    CHECK(descriptor.optional_count == 3 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
     CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
     CHECK(descriptor.optional_requires[0].range.min_minor ==
           qol::contracts::kCharacterStateVersion.minor);
-    CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
-    CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
-    CHECK(descriptor.http_query_count == 19 && descriptor.http_queries != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[2].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
+    for (uint32_t i = 1; i < 3; ++i) {
+        CHECK(descriptor.optional_requires[i].range.major == 1);
+        CHECK(descriptor.optional_requires[i].range.min_minor == 1);
+    }
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 19 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 2 &&
+          descriptor.http_route_metadata != nullptr);
+    uint32_t native_op_count = 0;
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const auto& endpoint = descriptor.http_endpoints[i];
+        CHECK(endpoint.route_owner != nullptr &&
+              std::strcmp(endpoint.route_owner, "core.item") == 0);
+        CHECK(endpoint.lease_required == 1);
+        if (endpoint.op_required != 0) ++native_op_count;
+        if (endpoint.method == qol::contracts::HttpMethod::kGet) {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
+            CHECK(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
+        } else {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kCommand);
+            CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
+        }
+    }
+    CHECK(native_op_count == 2);
+    CHECK(std::strcmp(descriptor.http_route_metadata[0].path,
+                      "/api/op/inventory/set-slot") == 0);
+    CHECK(std::strcmp(descriptor.http_route_metadata[1].path,
+                      "/api/op/inventory/set-equip") == 0);
+    for (uint32_t i = 0; i < descriptor.http_route_metadata_count; ++i) {
+        CHECK(descriptor.http_route_metadata[i].method == qol::contracts::HttpMethod::kPost);
+        CHECK(descriptor.http_route_metadata[i].op_required == 1);
+        CHECK(descriptor.http_route_metadata[i].lease_required == 1);
+    }
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 2);

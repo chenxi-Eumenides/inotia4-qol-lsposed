@@ -14,6 +14,7 @@
 #include "contracts/result.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "http_endpoint_test_support.h"
 #include "plugins/core.system/plugin.h"
 #include "test_snapshot_sdk.h"
 
@@ -127,19 +128,9 @@ qol::contracts::QolHostSdk make_sdk() {
                qol::contracts::kHostSdkMinor};
     sdk.log = {&fake_log_write, nullptr};
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
-    sdk.http = qol::host::http_registry_api();
-    sdk.http_dispatch = qol::host::http_dispatch_api();
     test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
-
-const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/system/snapshot", "core.system", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/system/game", "core.system", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/system/info", "core.system", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/system/game_frame", "core.system", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/system/events", "core.system", 0, 1},
-};
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
     qol::contracts::PluginContext ctx{};
@@ -152,12 +143,6 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.ports = kPortArray;
     ctx.port_count = 1;
     return ctx;
-}
-
-void register_frozen_routes() {
-    for (const auto& route : kRoutes) {
-        CHECK(qol::host::http_registry_api().register_route(&route).ok == kQolOk);
-    }
 }
 
 std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
@@ -188,16 +173,33 @@ void test_lifecycle_and_responses() {
     g_fail_snapshot_read = false;
     g_snapshot_too_large = false;
     g_events_too_large = false;
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_system::plugin_descriptor();
 
+    CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 2);
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 5 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 0 && descriptor.http_route_metadata == nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
+    for (uint32_t i = 0; i < 2; ++i) {
+        CHECK(descriptor.optional_requires[i].range.major == 1);
+        CHECK(descriptor.optional_requires[i].range.min_minor == 1);
+    }
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const auto& endpoint = descriptor.http_endpoints[i];
+        CHECK(endpoint.method == qol::contracts::HttpMethod::kGet);
+        CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
+        CHECK(endpoint.op_required == 0 && endpoint.lease_required == 1);
+        CHECK(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
+        CHECK(std::strcmp(endpoint.route_owner, "core.system") == 0);
+    }
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     CHECK(g_scheduler.interval > 1);  // 快照节流，不逐帧重建
 
@@ -261,8 +263,7 @@ void test_lifecycle_and_responses() {
 
     // core.api 的路由元数据保留：owner 恢复后 handler 可以重新绑定，首轮快照仍 not ready。
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     (void)dispatch_get("/api/system/snapshot", &status);
     CHECK(status == 503);
@@ -272,21 +273,21 @@ void test_lifecycle_and_responses() {
     descriptor.deactivate(ctx);
 }
 
-void test_missing_route_rejected() {
+void test_missing_http_provider_keeps_business_installed() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
     g_scheduler = FakeScheduler{};
     g_identity_ready = true;
 
-    // 冻结路由表缺失：宿主声明注册失败，不得留下 handler。
-    const qol::contracts::QolHostSdk sdk = make_sdk();
+    // HTTP provider 缺失时，插件业务保持可安装，只省略 native endpoint binding。
+    auto sdk = make_sdk();
+    sdk.http = {};
+    sdk.http_dispatch = {};
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_system::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).code ==
-          kQolErrNotFound);
+    CHECK(g_scheduler.handler != nullptr);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
     descriptor.deactivate(ctx);
@@ -296,7 +297,7 @@ void test_missing_route_rejected() {
 
 int main() {
     test_lifecycle_and_responses();
-    test_missing_route_rejected();
+    test_missing_http_provider_keeps_business_installed();
     std::printf("system_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

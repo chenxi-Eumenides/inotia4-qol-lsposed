@@ -14,7 +14,6 @@ namespace qol::features::core_ui {
 namespace {
 constexpr const char* kPanelId = "debug_help";
 constexpr const char* kOwner = "core.custom_ui";
-constexpr const char* kRoute = "/api/debug/custom-ui/help";
 constexpr contracts::UiRect kBackRect{878, 554, 74, 81};
 constexpr int32_t kRowHeight = 64;
 constexpr const char* kTitleText = "两栏帮助页 / Help page";
@@ -262,16 +261,18 @@ int32_t apply_request(int64_t, void*) {
 }
 }  // namespace
 
+QolResult debug_help_http_command(const contracts::HttpReq* request,
+                                  contracts::HttpRes* response, void* ctx) {
+    return command(request, response, ctx);
+}
+
 bool debug_help_register(const contracts::QolHostSdk* sdk) {
     if (sdk == nullptr || sdk->panels.register_provider == nullptr ||
-        sdk->http_dispatch.register_command == nullptr || sdk->scheduler.add == nullptr ||
-        sdk->scheduler.remove == nullptr) return false;
+        sdk->scheduler.add == nullptr || sdk->scheduler.remove == nullptr) return false;
     g_sdk = sdk;
     if (!contracts::succeeded(sdk->scheduler.add(1, &apply_request, nullptr, 1, 0, &g_task)) ||
         g_task == 0) { g_sdk = nullptr; return false; }
-    if (!contracts::succeeded(sdk->panels.register_provider(&kProvider)) ||
-        !contracts::succeeded(sdk->http_dispatch.register_command(contracts::HttpMethod::kPost,
-            kRoute, kOwner, &command, nullptr))) {
+    if (!contracts::succeeded(sdk->panels.register_provider(&kProvider))) {
         (void)sdk->scheduler.remove(g_task);
         g_task = 0; g_sdk = nullptr; return false;
     }

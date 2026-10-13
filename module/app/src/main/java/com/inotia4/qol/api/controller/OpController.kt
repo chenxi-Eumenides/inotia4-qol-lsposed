@@ -6,25 +6,35 @@ import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.JsonUtil
+import com.inotia4.qol.util.withNativeRouteLease
 import com.yanzhenjie.andserver.annotation.PathVariable
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.HttpRequest
 import com.yanzhenjie.andserver.http.StatusCode
 
 // controller: 路由层，业务走 ApiServices。路径首段必须静态（AndServer 处理器约束，architecture §3）
 // OP 定稿端点（api-reference §8）：10 个已实现端点（6 个 v0.5.46 迁移自 CharacterController + 4 个 v0.5.47 接线）
 // + 11 个占位端点（结构已定稿，待权限机制与底层实现，占位返回 not implemented）
+//
+// 已实现端点经 NativeHttpCommand.post 由 native owner 处理，op 门禁在 Host dispatch 内完成，
+// 不在 Kotlin 层重复包 lease；11 个占位端点无 native handler，由 Kotlin 直接返回 501，
+// 故在返回 501 之前按 direct 路由获取 native route lease（OP 未开启 -> 403；OP 开启 -> 保留 501）。
 @RestController
 class OpController {
 
     private fun notImpl(): Nothing = throw ApiException(StatusCode.SC_NOT_IMPLEMENTED, "not implemented")
 
     @PostMapping("/api/op/quest/accept")
-    fun questAccept(): String = LogFile.op(LogDomain.OP, "POST /api/op/quest/accept", emptyMap<String, String>()) { notImpl() }
+    fun questAccept(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/quest/accept", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/quest/complete")
-    fun questComplete(): String = LogFile.op(LogDomain.OP, "POST /api/op/quest/complete", emptyMap<String, String>()) { notImpl() }
+    fun questComplete(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/quest/complete", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/character/{role}/status-point")
     fun statusPoint(@PathVariable("role") role: Int, @RequestBody body: String): String {
@@ -35,12 +45,14 @@ class OpController {
     }
 
     @PostMapping("/api/op/character/{role}/skill-point")
-    fun skillPoint(@PathVariable("role") role: Int): String =
+    fun skillPoint(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/skill-point", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/character/{role}/skill-level")
-    fun skillLevel(@PathVariable("role") role: Int): String =
+    fun skillLevel(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/character/{role}/skill-level", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/party/swap")
     fun partySwap(@RequestBody body: String): String {
@@ -53,10 +65,14 @@ class OpController {
     }
 
     @PostMapping("/api/op/inventory/set-slot")
-    fun setSlot(): String = LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-slot", emptyMap<String, String>()) { notImpl() }
+    fun setSlot(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-slot", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/inventory/set-equip")
-    fun setEquip(): String = LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-equip", emptyMap<String, String>()) { notImpl() }
+    fun setEquip(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/inventory/set-equip", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/inventory/money")
     fun money(@RequestBody body: String): String {
@@ -67,23 +83,29 @@ class OpController {
     }
 
     @PostMapping("/api/op/craft/mix-direct")
-    fun mixDirect(): String = LogFile.op(LogDomain.OP, "POST /api/op/craft/mix-direct", emptyMap<String, String>()) { notImpl() }
+    fun mixDirect(request: HttpRequest): String = withNativeRouteLease(request) {
+        LogFile.op(LogDomain.OP, "POST /api/op/craft/mix-direct", emptyMap<String, String>()) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/heal")
-    fun heal(@PathVariable("role") role: Int): String =
+    fun heal(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/heal", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/rest")
-    fun rest(@PathVariable("role") role: Int): String =
+    fun rest(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/rest", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/revive")
-    fun revive(@PathVariable("role") role: Int): String =
+    fun revive(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/revive", mapOf("role" to "$role")) { notImpl() }
+    }
 
     @PostMapping("/api/op/combat/{role}/hate")
-    fun hate(@PathVariable("role") role: Int): String =
+    fun hate(@PathVariable("role") role: Int, request: HttpRequest): String = withNativeRouteLease(request) {
         LogFile.op(LogDomain.OP, "POST /api/op/combat/{role}/hate", mapOf("role" to "$role")) { notImpl() }
+    }
 
     // owner：world_teleport（票据契约）；op 门禁由 dispatch 层按 op_gated 统一处理（403 信封同旧）。
     // Kotlin 只做 body 语法校验与透传，map_id/x/y/force 的字段范围校验在 owner。

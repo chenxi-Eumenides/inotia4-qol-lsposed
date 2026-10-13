@@ -27,6 +27,13 @@ constexpr const char* kPluginId = "core.save";
 constexpr const char* kPluginVersion = "0.1.0";
 [[gnu::used]] constexpr char kSaveFactsBuildMarker[] = "save.facts:v1";
 
+constexpr contracts::CapabilityRequirement kOptionalHttpRequires[] = {
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
+};
+
 const contracts::QolSavePort* g_port = nullptr;
 
 QolResult not_ready() {
@@ -759,19 +766,22 @@ QolResult cs_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
     return cs_http_error(response, 400, "bad request");
 }
 
-const SaveWriteRoute kSaveWriteRouteKinds[] = {
+SaveWriteRoute kSaveWriteRouteKinds[] = {
     SaveWriteRoute::kSave,
     SaveWriteRoute::kEnterSlot,
     SaveWriteRoute::kCreateSlot,
 };
 
-const contracts::HttpQueryHandlerDescriptor kSaveWriteRoutes[] = {
-    {contracts::HttpMethod::kPost, "/api/system/save", kPluginId, &cs_http_handler,
-     const_cast<SaveWriteRoute*>(&kSaveWriteRouteKinds[0])},
-    {contracts::HttpMethod::kPost, "/api/system/enter_slot", kPluginId, &cs_http_handler,
-     const_cast<SaveWriteRoute*>(&kSaveWriteRouteKinds[1])},
-    {contracts::HttpMethod::kPost, "/api/system/create_slot", kPluginId, &cs_http_handler,
-     const_cast<SaveWriteRoute*>(&kSaveWriteRouteKinds[2])},
+const contracts::HttpEndpointDescriptor kSaveWriteEndpoints[] = {
+    {contracts::HttpMethod::kPost, "/api/system/save", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &cs_http_handler,
+     &kSaveWriteRouteKinds[0]},
+    {contracts::HttpMethod::kPost, "/api/system/enter_slot", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &cs_http_handler,
+     &kSaveWriteRouteKinds[1]},
+    {contracts::HttpMethod::kPost, "/api/system/create_slot", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &cs_http_handler,
+     &kSaveWriteRouteKinds[2]},
 };
 
 void plugin_deactivate(contracts::PluginContext& ctx);
@@ -1065,15 +1075,19 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId, kPluginVersion,
     0, nullptr,
-    0, nullptr,
+    static_cast<uint32_t>(sizeof(kOptionalHttpRequires) / sizeof(kOptionalHttpRequires[0])),
+    kOptionalHttpRequires,
     2, kProvides,
     static_cast<uint32_t>(sizeof(kResources) / sizeof(kResources[0])), kResources,
     0, nullptr,
     &plugin_install, &plugin_deactivate, &plugin_on_enabled, &plugin_on_disabled,
     &plugin_fill_status, &save_on_resource_ready_trampoline,
     kPorts, 3,
-    kSaveWriteRoutes, 3,
+    nullptr, 0,
     kFeatures, 1,
+    kSaveWriteEndpoints, 3,
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

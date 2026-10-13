@@ -64,7 +64,14 @@ constexpr contracts::HttpRoute kRoutes[] = {
     {contracts::HttpMethod::kGet, "/api/item/shop/items", kPluginId, 0, 1},
 };
 
-constexpr Query kQueries[] = {
+#define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
+    {contracts::HttpMethod::method, path, owner, op_gated, lease_required},
+const contracts::HttpRoute kRouteFacts[] = {
+#include "routes.inc"
+};
+#undef QOL_HTTP_ROUTE
+
+Query kQueries[] = {
     Query::kInventory, Query::kMoney,        Query::kItems,
     Query::kBagInfo,   Query::kBagSlot,      Query::kShopItems,
 };
@@ -215,16 +222,13 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortItemInventoryStateWriteVersion.minor}},
 };
 
-const contracts::CapabilityRequirement kRequires[] = {
-    {contracts::kHttpRegistryCapabilityId, {contracts::kHttpRegistryVersion.major,
-                                             contracts::kHttpRegistryVersion.minor}},
-    {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
-                                             contracts::kHttpDispatchVersion.minor}},
-};
-
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kCharacterStateCapabilityId,
      {contracts::kCharacterStateVersion.major, contracts::kCharacterStateVersion.minor}},
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
 };
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
@@ -1235,7 +1239,7 @@ struct ItemWriteRoute {
     contracts::QolItemWriteKind kind;
 };
 
-constexpr ItemWriteRoute kItemWriteRoutes[] = {
+ItemWriteRoute kItemWriteRoutes[] = {
     {"/api/item/inventory/use_item", contracts::QolItemWriteKind::kUseItem},
     {"/api/item/inventory/sell_item", contracts::QolItemWriteKind::kSellItem},
     {"/api/item/inventory/move_item", contracts::QolItemWriteKind::kMoveItem},
@@ -1913,39 +1917,45 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     return false;
 }
 
-const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
-    {kRoutes[0].method, kRoutes[0].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[0])},
-    {kRoutes[1].method, kRoutes[1].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[1])},
-    {kRoutes[2].method, kRoutes[2].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[2])},
-    {kRoutes[3].method, kRoutes[3].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[3])},
-    {kRoutes[4].method, kRoutes[4].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[4])},
-    {kRoutes[5].method, kRoutes[5].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[5])},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[0].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[0].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[1].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[1].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[2].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[2].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[3].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[3].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[4].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[4].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[5].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[5].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[6].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[6].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[7].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[7].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[8].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[8].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[9].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[9].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[10].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[10].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[11].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[11].kind)},
-    {contracts::HttpMethod::kPost, kItemWriteRoutes[12].path, kPluginId, &item_write_command,
-     const_cast<contracts::QolItemWriteKind*>(&kItemWriteRoutes[12].kind)},
+contracts::HttpEndpointDescriptor kHttpEndpoints[
+    sizeof(kRoutes) / sizeof(kRoutes[0]) +
+    sizeof(kItemWriteRoutes) / sizeof(kItemWriteRoutes[0])];
+bool g_http_endpoints_initialized = false;
+
+const contracts::HttpRoute* route_facts(contracts::HttpMethod method, const char* path) {
+    for (const contracts::HttpRoute& route : kRouteFacts) {
+        if (route.method == method && std::strcmp(route.path, path) == 0) return &route;
+    }
+    return nullptr;
+}
+
+void initialize_http_endpoints() {
+    if (g_http_endpoints_initialized) return;
+    for (size_t index = 0; index < sizeof(kRoutes) / sizeof(kRoutes[0]); ++index) {
+        const contracts::HttpRoute& route = kRoutes[index];
+        const contracts::HttpRoute* facts = route_facts(route.method, route.path);
+        if (facts == nullptr) continue;
+        kHttpEndpoints[index] = contracts::HttpEndpointDescriptor{
+            route.method, route.path, route.owner, contracts::HttpHandlerKind::kQuery,
+            facts->op_gated, facts->lease_required, &query_handler, nullptr, &kQueries[index]};
+    }
+    constexpr size_t kQueryCount = sizeof(kRoutes) / sizeof(kRoutes[0]);
+    for (size_t index = 0; index < sizeof(kItemWriteRoutes) / sizeof(kItemWriteRoutes[0]);
+         ++index) {
+        ItemWriteRoute& route = kItemWriteRoutes[index];
+        const contracts::HttpRoute* facts = route_facts(contracts::HttpMethod::kPost, route.path);
+        if (facts == nullptr) continue;
+        kHttpEndpoints[kQueryCount + index] = contracts::HttpEndpointDescriptor{
+            contracts::HttpMethod::kPost, route.path, kPluginId,
+            contracts::HttpHandlerKind::kCommand, facts->op_gated, facts->lease_required,
+            nullptr, &item_write_command, &route.kind};
+    }
+    g_http_endpoints_initialized = true;
+}
+
+constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
+    {contracts::HttpMethod::kPost, "/api/op/inventory/set-slot", kPluginId, 1, 1},
+    {contracts::HttpMethod::kPost, "/api/op/inventory/set-equip", kPluginId, 1, 1},
 };
 
 void stop_frame_task(const contracts::QolHostSdk* sdk) {
@@ -2105,8 +2115,8 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2,
-    kRequires,
+    0,
+    nullptr,
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,
     2,
@@ -2123,14 +2133,20 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     kPorts,
     4,
-    kHttpQueries,
-    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    nullptr,
+    0,
     kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    kHttpRouteMetadata,
+    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
 };
 
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
+    initialize_http_endpoints();
     return kDescriptor;
 }
 

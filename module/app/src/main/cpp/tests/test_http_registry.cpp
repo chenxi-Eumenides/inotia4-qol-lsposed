@@ -1,5 +1,6 @@
 #include "host/http_registry.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -82,12 +83,47 @@ void test_lease_and_deactivation() {
     CHECK(api.find(HttpMethod::kPost, "/api/b", &found).ok != 0);
 }
 
+void test_lease_capacity_is_busy_and_recovers() {
+    constexpr uint32_t kLeaseCapacity = 256;
+    http_registry_reset_for_test();
+    const auto api = http_registry_api();
+    const HttpRoute route_a = route(HttpMethod::kGet, "/api/capacity", "owner", 0, 1);
+    CHECK(api.register_route(&route_a).ok == 0);
+
+    std::array<uint64_t, kLeaseCapacity> leases{};
+    for (uint64_t& lease : leases) {
+        const QolResult result = api.lease_enter(HttpMethod::kGet, "/api/capacity", &lease);
+        CHECK(result.ok == 0 && lease != 0);
+    }
+
+    for (int attempt = 0; attempt < 3; ++attempt) {
+        uint64_t rejected_lease = 1;
+        const QolResult result = api.lease_enter(HttpMethod::kGet, "/api/capacity",
+                                                 &rejected_lease);
+        CHECK(result.code == kQolErrBusy);
+        CHECK(result.message != nullptr &&
+              std::strcmp(result.message, "http route lease capacity") == 0);
+        CHECK(rejected_lease == 0);
+    }
+
+    CHECK(api.lease_leave(leases[0]).ok == 0);
+    uint64_t replacement = 0;
+    CHECK(api.lease_enter(HttpMethod::kGet, "/api/capacity", &replacement).ok == 0);
+    CHECK(replacement != 0);
+    CHECK(api.lease_leave(replacement).ok == 0);
+    for (uint64_t lease : leases) {
+        if (lease != leases[0]) CHECK(api.lease_leave(lease).ok == 0);
+    }
+    CHECK(api.unregister_owner("owner").ok == 0);
+}
+
 }  // namespace
 
 int main() {
     test_registration_and_lookup();
     test_list_and_validation();
     test_lease_and_deactivation();
+    test_lease_capacity_is_busy_and_recovers();
     std::printf("http_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

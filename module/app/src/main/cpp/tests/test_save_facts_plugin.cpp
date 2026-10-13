@@ -301,8 +301,8 @@ QolResult dispatch(uint32_t route, const char* path, const char* body, char* out
                     static_cast<uint32_t>(std::strlen(body)), nullptr, 0, nullptr, 0};
     HttpRes response{reinterpret_cast<uint8_t*>(output), capacity, 0, 0};
     const auto& descriptor = qol::features::core_save::plugin_descriptor();
-    const QolResult result = descriptor.http_queries[route].handler(
-        &request, &response, descriptor.http_queries[route].ctx);
+    const QolResult result = descriptor.http_endpoints[route].command_handler(
+        &request, &response, descriptor.http_endpoints[route].ctx);
     *output_size = response.body_size;
     return result;
 }
@@ -318,7 +318,12 @@ int main() {
     CHECK(save_enter_detail::kNewGameConfirmBinding.original_call == 0x97ffffea);
     CHECK(std::strcmp(descriptor.id, "core.save") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 0);
+    CHECK(descriptor.requires_count == 0 && descriptor.optional_count == 2);
+    CHECK(descriptor.optional_requires != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kSaveFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
@@ -344,7 +349,16 @@ int main() {
     CHECK(std::strcmp(descriptor.resources[1].id, "hook:SaveSlot_GoToNewGame") == 0);
     CHECK(std::strcmp(descriptor.resources[2].id, "hook:SelectCharacter_ButtonBackExe") == 0);
     // 写面（阶段 5 票据契约）由同域 owner 声明式提供 3 条 POST。
-    CHECK(descriptor.http_query_count == 3 && descriptor.http_queries != nullptr);
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 3 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 0 && descriptor.http_route_metadata == nullptr);
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const auto& endpoint = descriptor.http_endpoints[i];
+        CHECK(endpoint.method == qol::contracts::HttpMethod::kPost);
+        CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kCommand);
+        CHECK(endpoint.op_required == 0 && endpoint.lease_required == 1);
+        CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
+    }
 
     const auto* api = static_cast<const qol::contracts::SaveFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->slot_state != nullptr);

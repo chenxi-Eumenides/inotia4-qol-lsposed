@@ -1,5 +1,6 @@
 #include "http_control.h"
 #include "production.h"
+#include "host/features/receipt_formatter.h"
 #include <charconv>
 #include <cstring>
 
@@ -21,15 +22,6 @@ QolResult rejected(contracts::HttpRes& response, QolResult error) {
         error.code == kQolErrNotFound ? 404 : error.code == kQolErrBusy ? 429 :
         error.code == kQolErrInternal ? 500 : 400;
     return body(response, status, "{\"ok\":false,\"error_code\":" + std::to_string(error.code) + "}");
-}
-std::string receipt_json(const contracts::FeatureReceipt& receipt) {
-    return "{\"ok\":true,\"request_id\":" + std::to_string(receipt.request_id) +
-        ",\"revision\":" + std::to_string(receipt.revision) +
-        ",\"admission\":\"" + (receipt.admission == contracts::FeatureAdmission::kAdmitted ? "admitted" : "rejected") +
-        "\",\"persistence\":\"" + (receipt.persistence == contracts::FeaturePersistence::kPending ? "pending" :
-         receipt.persistence == contracts::FeaturePersistence::kPersisted ? "persisted" : "failed") +
-        "\",\"actual\":\"" + (receipt.actual == contracts::FeatureActual::kPending ? "pending" : "not_submitted") +
-        "\",\"error_code\":" + std::to_string(receipt.error_code) + "}";
 }
 }
 bool feature_control_http_route(const contracts::HttpReq& request) {
@@ -56,7 +48,7 @@ QolResult feature_control_http_dispatch(const contracts::HttpReq& request, contr
             return rejected(response, contracts::error(kQolErrInvalidArgument, nullptr, 0));
         contracts::FeatureReceipt receipt{};
         const auto result = controller.receipt(id, &receipt);
-        return contracts::succeeded(result) ? body(response, 200, receipt_json(receipt)) : rejected(response, result);
+        return contracts::succeeded(result) ? body(response, 200, feature_receipt_json(receipt)) : rejected(response, result);
     }
     if (request.method != contracts::HttpMethod::kPost || (!request.body && request.body_len))
         return body(response, 405, "{\"ok\":false,\"error\":\"method not allowed\"}");
@@ -90,6 +82,6 @@ QolResult feature_control_http_dispatch(const contracts::HttpReq& request, contr
             if (field->scalar == "desired" && key->scalar == "enable") result = controller.request_desired(id->scalar.c_str(), value->boolean, &receipt);
         }
     }
-    return contracts::succeeded(result) ? body(response, 200, receipt_json(receipt)) : rejected(response, result);
+    return contracts::succeeded(result) ? body(response, 200, feature_receipt_json(receipt)) : rejected(response, result);
 }
 }  // namespace qol::host

@@ -13,6 +13,7 @@
 #include "contracts/result.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "http_endpoint_test_support.h"
 #include "plugins/core.world/plugin.h"
 #include "test_snapshot_sdk.h"
 
@@ -203,28 +204,11 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.log = {&fake_log_write, nullptr};
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
     sdk.commands.post_typed = &fake_post_typed;
-    sdk.http = qol::host::http_registry_api();
-    sdk.http_dispatch = qol::host::http_dispatch_api();
     sdk.ticket_result = qol::contracts::QolTicketResultApi{
         &fake_register_result, &fake_unregister_result, nullptr, nullptr};
     test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
-
-const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/id", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/exits", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/units", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/enemies", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/interactives", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/drops", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/world/map/distance", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/world/movement/move_to", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/world/movement/walk_dir", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/world/movement/stop_move", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/world/movement/interact_with", "core.world", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/movement/teleport", "core.world", 1, 1},
-};
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
     qol::contracts::PluginContext ctx{};
@@ -237,12 +221,6 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.ports = kPortArray;
     ctx.port_count = 2;
     return ctx;
-}
-
-void register_frozen_routes() {
-    for (const auto& route : kRoutes) {
-        CHECK(qol::host::http_registry_api().register_route(&route).ok == kQolOk);
-    }
 }
 
 std::string dispatch_get(const char* path, const char* query = nullptr, uint16_t* status = nullptr) {
@@ -299,16 +277,13 @@ void test_lifecycle_and_responses() {
     g_navigation.player_x = 16;
     g_navigation.player_y = 16;
     g_navigation.valid = 1;
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_world::plugin_descriptor();
 
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     CHECK(g_scheduler.interval > 1);  // 快照节流，不逐帧重建
 
@@ -439,8 +414,7 @@ void test_lifecycle_and_responses() {
 
     // core.api 的路由元数据保留：owner 恢复后 handler 可以重新绑定，首轮快照仍 not ready。
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     (void)dispatch_get("/api/world/map/units", nullptr, &status);
     CHECK(status == 503);
@@ -457,21 +431,21 @@ void test_lifecycle_and_responses() {
     descriptor.deactivate(ctx);
 }
 
-void test_missing_route_rejected() {
+void test_missing_http_provider_keeps_business_installed() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
     g_scheduler = FakeScheduler{};
     g_in_world = true;
 
-    // 冻结路由表缺失：宿主声明注册失败，不得留下 handler。
-    const qol::contracts::QolHostSdk sdk = make_sdk();
+    // HTTP provider 缺失时，只省略 endpoint binding，不阻止 world business install。
+    auto sdk = make_sdk();
+    sdk.http = {};
+    sdk.http_dispatch = {};
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_world::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).code ==
-          kQolErrNotFound);
+    CHECK(g_scheduler.handler != nullptr);
     CHECK(qol::host::http_dispatch_api().dispatch != nullptr);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
@@ -482,7 +456,7 @@ void test_missing_route_rejected() {
 
 int main() {
     test_lifecycle_and_responses();
-    test_missing_route_rejected();
+    test_missing_http_provider_keeps_business_installed();
     std::printf("world_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

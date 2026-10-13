@@ -26,6 +26,7 @@
 #include "hooks/popup_state.h"
 #include "infra/capabilities.h"
 #include "infra/commands.h"
+#include "infra/request_policy.h"
 #include "infra/config.h"
 #include "infra/events.h"
 #include "infra/panels.h"
@@ -175,6 +176,28 @@ QolResult sdk_config_set_bool(const char*, int32_t) {
 
 QolResult sdk_config_set_i32(const char*, int32_t) {
     return result_error(kQolErrUnsupported, "config writes require native config owner");
+}
+
+// SDK 边界显式快照当前策略；infra post 同时读取 ambient scope，覆盖内部直调。
+QolResult sdk_commands_post(contracts::QolCommandTicket* out,
+                            const contracts::QolCommand* command) {
+    const infra::RequestPolicy policy = infra::current_request_policy();
+    const infra::ScopedRequestPolicy captured_policy(policy);
+    return infra::commands_port().post(out, command);
+}
+
+QolResult sdk_commands_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
+                                  contracts::QolCommandTicket* out) {
+    const infra::RequestPolicy policy = infra::current_request_policy();
+    const infra::ScopedRequestPolicy captured_policy(policy);
+    return infra::commands_port().post_typed(handler_id, payload, size, out);
+}
+
+contracts::QolCommands sdk_commands_api() {
+    const contracts::QolCommands& commands = infra::commands_port();
+    return {&sdk_commands_post, commands.state, commands.cancel,
+            commands.register_typed_handler, commands.unregister_typed_handler,
+            &sdk_commands_post_typed};
 }
 
 struct SchedulerLease {
@@ -1103,7 +1126,7 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.config = {&sdk_config_get_bool, &sdk_config_get_i32, &sdk_config_set_bool,
                   &sdk_config_set_i32, &sdk_config_get_string};
     sdk.scheduler = {&sdk_scheduler_add, &sdk_scheduler_remove};
-    sdk.commands = infra::commands_port();
+    sdk.commands = sdk_commands_api();
     sdk.events = {&sdk_events_subscribe, &sdk_events_unsubscribe};
     sdk.capabilities = {&sdk_capability_require, &sdk_capability_lease_enter,
                         &sdk_capability_lease_leave, &sdk_capability_set_available};
@@ -1158,6 +1181,12 @@ contracts::QolHostSdk make_host_sdk() {
     sdk.config_namespace = &config_namespace_api();
     sdk.feature = &production_feature_api();
     sdk.feature_control = nullptr;
+    // Runtime effects and generic OP permission are shared through the production Host APIs.
+    // A size/minor mismatch leaves both optional tails unavailable.
+    if (!production_feature_bind_runtime_sdk(sdk)) {
+        sdk.runtime_effects = nullptr;
+        sdk.security = nullptr;
+    }
     return sdk;
 }
 

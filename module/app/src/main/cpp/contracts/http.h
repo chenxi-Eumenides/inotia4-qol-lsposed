@@ -94,8 +94,8 @@ struct QolHttpDispatchApi {
 };
 
 constexpr const char* kHttpRegistryCapabilityId = "http.registry";
-constexpr QolVersion kHttpRegistryVersion{1, 0};
+constexpr QolVersion kHttpRegistryVersion{1, 1};
 constexpr const char* kHttpDispatchCapabilityId = "http.dispatch";
-constexpr QolVersion kHttpDispatchVersion{1, 0};
+constexpr QolVersion kHttpDispatchVersion{1, 1};
 
 }  // namespace qol::contracts

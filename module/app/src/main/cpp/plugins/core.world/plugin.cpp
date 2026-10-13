@@ -28,17 +28,7 @@ constexpr char kNotInGameBody[] = "{\"error\":\"not in game\"}";
 
 enum class Query : uint8_t { kId, kExits, kUnits, kEnemies, kInteractives, kDrops, kDistance };
 
-constexpr contracts::HttpRoute kRoutes[] = {
-    {contracts::HttpMethod::kGet, "/api/world/map/id", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/world/map/exits", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/world/map/units", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/world/map/enemies", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/world/map/interactives", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/world/map/drops", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/world/map/distance", kPluginId, 0, 1},
-};
-
-constexpr Query kQueries[] = {
+Query kQueries[] = {
     Query::kId, Query::kExits, Query::kUnits, Query::kEnemies,
     Query::kInteractives, Query::kDrops, Query::kDistance,
 };
@@ -132,11 +122,11 @@ const contracts::QolPortRequirement kPorts[] = {
      {contracts::kQolPortWorldWriteVersion.major, contracts::kQolPortWorldWriteVersion.minor}},
 };
 
-const contracts::CapabilityRequirement kRequires[] = {
-    {contracts::kHttpRegistryCapabilityId, {contracts::kHttpRegistryVersion.major,
-                                            contracts::kHttpRegistryVersion.minor}},
-    {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
-                                             contracts::kHttpDispatchVersion.minor}},
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kHttpDispatchCapabilityId,
+     {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
 };
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
@@ -427,6 +417,11 @@ constexpr int32_t kRouteWalkDir = 1;
 constexpr int32_t kRouteStopMove = 2;
 constexpr int32_t kRouteInteract = 3;
 constexpr int32_t kRouteTeleport = 4;
+int32_t kRouteMoveToContext = kRouteMoveTo;
+int32_t kRouteWalkDirContext = kRouteWalkDir;
+int32_t kRouteStopMoveContext = kRouteStopMove;
+int32_t kRouteInteractContext = kRouteInteract;
+int32_t kRouteTeleportContext = kRouteTeleport;
 
 struct WorldWritePayload {
     int32_t kind = 0;
@@ -610,31 +605,36 @@ bool world_write_result(void*, const uint8_t* payload, uint32_t size, char* out,
     return true;
 }
 
-const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
-    {kRoutes[0].method, kRoutes[0].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[0])},
-    {kRoutes[1].method, kRoutes[1].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[1])},
-    {kRoutes[2].method, kRoutes[2].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[2])},
-    {kRoutes[3].method, kRoutes[3].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[3])},
-    {kRoutes[4].method, kRoutes[4].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[4])},
-    {kRoutes[5].method, kRoutes[5].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[5])},
-    {kRoutes[6].method, kRoutes[6].path, kPluginId, &query_handler,
-     const_cast<Query*>(&kQueries[6])},
-    {contracts::HttpMethod::kPost, "/api/world/movement/move_to", kPluginId, &world_write_command,
-     const_cast<int32_t*>(&kRouteMoveTo)},
-    {contracts::HttpMethod::kPost, "/api/world/movement/walk_dir", kPluginId, &world_write_command,
-     const_cast<int32_t*>(&kRouteWalkDir)},
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {contracts::HttpMethod::kGet, "/api/world/map/id", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &query_handler, nullptr, &kQueries[0]},
+    {contracts::HttpMethod::kGet, "/api/world/map/exits", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &query_handler, nullptr, &kQueries[1]},
+    {contracts::HttpMethod::kGet, "/api/world/map/units", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &query_handler, nullptr, &kQueries[2]},
+    {contracts::HttpMethod::kGet, "/api/world/map/enemies", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &query_handler, nullptr, &kQueries[3]},
+    {contracts::HttpMethod::kGet, "/api/world/map/interactives", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &query_handler, nullptr, &kQueries[4]},
+    {contracts::HttpMethod::kGet, "/api/world/map/drops", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &query_handler, nullptr, &kQueries[5]},
+    {contracts::HttpMethod::kGet, "/api/world/map/distance", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &query_handler, nullptr, &kQueries[6]},
+    {contracts::HttpMethod::kPost, "/api/world/movement/move_to", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &world_write_command,
+     &kRouteMoveToContext},
+    {contracts::HttpMethod::kPost, "/api/world/movement/walk_dir", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &world_write_command,
+     &kRouteWalkDirContext},
     {contracts::HttpMethod::kPost, "/api/world/movement/stop_move", kPluginId,
-     &world_write_command, const_cast<int32_t*>(&kRouteStopMove)},
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &world_write_command,
+     &kRouteStopMoveContext},
     {contracts::HttpMethod::kPost, "/api/world/movement/interact_with", kPluginId,
-     &world_write_command, const_cast<int32_t*>(&kRouteInteract)},
-    {contracts::HttpMethod::kPost, "/api/op/movement/teleport", kPluginId, &world_write_command,
-     const_cast<int32_t*>(&kRouteTeleport)},
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &world_write_command,
+     &kRouteInteractContext},
+    {contracts::HttpMethod::kPost, "/api/op/movement/teleport", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 1, 1, nullptr, &world_write_command,
+     &kRouteTeleportContext},
 };
 
 void stop_frame_task(const contracts::QolHostSdk* sdk) {
@@ -755,10 +755,10 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2,
-    kRequires,
     0,
     nullptr,
+    2,
+    kOptionalHttpRequires,
     1,
     kProvides,
     0,
@@ -773,9 +773,13 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     kPorts,
     2,
-    kHttpQueries,
-    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    nullptr,
+    0,
     kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

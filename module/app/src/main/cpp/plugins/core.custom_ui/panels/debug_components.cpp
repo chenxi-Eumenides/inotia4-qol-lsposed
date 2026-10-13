@@ -21,7 +21,6 @@ namespace {
 
 constexpr const char* kPanelId = "debug_components";
 constexpr const char* kOwner = "core.custom_ui";
-constexpr const char* kRoute = "/api/debug/custom-ui/components";
 
 // 双栏页：面板撑满 960×640；左右 viewport 相对 panel，扩框/裁剪由 help_page 处理。
 // viewport 顶从 y=16 下移到 y=100（参照设置页 kLeftY=100）：nav 标准盒占据左上
@@ -617,24 +616,20 @@ int32_t apply_request(int64_t, void*) {
 
 }  // namespace
 
+QolResult debug_components_http_command(const contracts::HttpReq* request,
+                                        contracts::HttpRes* response, void* ctx) {
+    return command_handler(request, response, ctx);
+}
+
 bool debug_components_register(const contracts::QolHostSdk* sdk) {
     if (sdk == nullptr || sdk->panels.register_provider == nullptr ||
-        sdk->http_dispatch.register_command == nullptr || sdk->scheduler.add == nullptr) {
+        sdk->scheduler.add == nullptr) {
         return false;
     }
     g_sdk = sdk;
     if (!contracts::succeeded(sdk->panels.register_provider(&kProvider))) return false;
-    if (!contracts::succeeded(sdk->http_dispatch.register_command(
-            contracts::HttpMethod::kPost, kRoute, kOwner, &command_handler, nullptr))) {
-        if (sdk->panels.unregister_owner != nullptr) {
-            (void)sdk->panels.unregister_owner(kOwner);
-        }
-        g_sdk = nullptr;
-        return false;
-    }
     if (!contracts::succeeded(sdk->scheduler.add(1, &apply_request, nullptr, 1, 0,
                                                  &g_apply_task)) || g_apply_task == 0) {
-        (void)sdk->http_dispatch.unregister_owner(kOwner);
         if (sdk->panels.unregister_owner != nullptr) (void)sdk->panels.unregister_owner(kOwner);
         g_sdk = nullptr;
         return false;
@@ -647,9 +642,6 @@ void debug_components_unregister(const contracts::QolHostSdk* sdk) {
     if (sdk != nullptr) {
         if (g_apply_task != 0 && sdk->scheduler.remove != nullptr) {
             (void)sdk->scheduler.remove(g_apply_task);
-        }
-        if (sdk->http_dispatch.unregister_owner != nullptr) {
-            (void)sdk->http_dispatch.unregister_owner(kOwner);
         }
         if (sdk->panels.unregister_owner != nullptr) (void)sdk->panels.unregister_owner(kOwner);
     }

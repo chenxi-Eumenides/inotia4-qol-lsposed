@@ -1,0 +1,5 @@
+QOL_HTTP_ROUTE(kGet, "/api/system/events", "core.system", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/system/game", "core.system", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/system/snapshot", "core.system", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/system/info", "core.system", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/system/game_frame", "core.system", 0, 1)

@@ -20,6 +20,11 @@
 #include "infra/events.h"
 #include "infra/status.h"
 
+namespace qol::host {
+void runtime_effects_publish_actual(const char*, bool) {}
+void runtime_effects_unsubscribe_plugin(const char*) {}
+}  // namespace qol::host
+
 static int g_pass = 0;
 static int g_fail = 0;
 
@@ -388,6 +393,7 @@ void test_disable_revokes_and_cascades() {
     // 关闭 provider 门禁：下一轮 sync_gates 走撤销路径（先 revoking，再级联，再注销）。
     qol::infra::config_set_bool("cap.provider.on", false);
     CHECK(sync_gates() >= 1);
+    CHECK(lifecycle_step() > 0);  // HTTP route/handler drain precedes capability revoke.
 
     CHECK(qol::infra::capability_count() == 0);
     CHECK(require_attribute_quality() == nullptr);

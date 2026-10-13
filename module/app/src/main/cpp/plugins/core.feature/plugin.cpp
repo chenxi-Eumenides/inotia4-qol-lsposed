@@ -13,7 +13,7 @@ constexpr const char* kPluginId = "core.feature";
 constexpr const char* kPluginVersion = "0.1.0";
 constexpr const char* kSkillUsagePath = "/api/character/combat/{role}/set_skill_usage";
 constexpr char kNotImplementedBody[] = "{\"ok\":false,\"error\":\"not implemented\"}";
-constexpr contracts::CapabilityRequirement kRequires[] = {
+constexpr contracts::CapabilityRequirement kOptionalHttpRequires[] = {
     {contracts::kHttpRegistryCapabilityId,
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId,
@@ -33,20 +33,19 @@ QolResult skill_usage_command(const contracts::HttpReq*, contracts::HttpRes* res
     return contracts::ok();
 }
 
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {contracts::HttpMethod::kPost, kSkillUsagePath, kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &skill_usage_command, nullptr},
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.sdk->http_dispatch.register_command == nullptr) return 1;
-    const QolResult result = ctx.sdk->http_dispatch.register_command(
-        contracts::HttpMethod::kPost, kSkillUsagePath, kPluginId, &skill_usage_command, nullptr);
-    if (!contracts::succeeded(result)) return 1;
+    if (ctx.sdk == nullptr) return 1;
     g_sdk = ctx.sdk;
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    const contracts::QolHostSdk* sdk = ctx.sdk != nullptr ? ctx.sdk : g_sdk;
-    if (sdk != nullptr && sdk->http_dispatch.unregister_owner != nullptr) {
-        (void)sdk->http_dispatch.unregister_owner(kPluginId);
-    }
+    (void)ctx;
     g_sdk = nullptr;
 }
 
@@ -65,10 +64,10 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2,
-    kRequires,
     0,
     nullptr,
+    2,
+    kOptionalHttpRequires,
     0,
     nullptr,
     0,
@@ -83,6 +82,9 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     nullptr, 0, nullptr, 0,
     kFeatures, 1,
+    kHttpEndpoints, 1,
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

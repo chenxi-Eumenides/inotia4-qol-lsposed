@@ -31,6 +31,7 @@
 #include "game/access/inventory_legacy_read.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "http_endpoint_test_support.h"
 #include "host/owner_cache_builder.h"
 #include "infra/command_queue.h"
 #include "plugins/core.item/plugin.h"
@@ -894,36 +895,12 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.log = {&fake_log_write, nullptr};
     sdk.capabilities.require = &fake_capability_require;
     sdk.scheduler = {&fake_scheduler_add, &fake_scheduler_remove};
-    sdk.http = qol::host::http_registry_api();
-    sdk.http_dispatch = qol::host::http_dispatch_api();
     sdk.commands.post_typed = &fake_post_typed;
     sdk.ticket_result.register_typed_result_handler = &fake_register_result;
     sdk.ticket_result.unregister_typed_result_handler = &fake_unregister_result;
     test_snapshot_sdk::attach(&sdk);
     return sdk;
 }
-
-const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/money", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/items", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/info", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/{slot}", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/item/shop/items", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/use_item", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/sell_item", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/move_item", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/discard_item", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/accept_dice", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/reject_dice", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/equip_item", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/unequip_item", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/put_jewel", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/inventory/{role}/enchant", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/item/shop/buy_item", "core.item", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/inventory/add", "core.item", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/inventory/money", "core.item", 1, 1},
-};
 
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
     qol::contracts::PluginContext ctx{};
@@ -994,7 +971,10 @@ void test_write_routes() {
                         "{\"bag\":8,\"bag\":\"0\",\"slot\":0,\"slot\":\"1\"}", nullptr,
                         0, &status) == "{\"ok\":true,\"ticket\":72}");
     CHECK(status == 200 && g_post_payload_size > 0 && g_result_handler != nullptr);
-    CHECK(descriptor.http_query_count == 19);
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 19 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 2 &&
+          descriptor.http_route_metadata != nullptr);
     char result[8192]{};
     uint32_t result_size = 0;
 
@@ -1616,12 +1596,6 @@ void test_write_routes() {
     qol::host::http_dispatch_set_op_enabled(false);
 }
 
-void register_frozen_routes() {
-    for (const auto& route : kRoutes) {
-        CHECK(qol::host::http_registry_api().register_route(&route).ok == kQolOk);
-    }
-}
-
 std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
     const std::string path_value(path);
     char storage[8192]{};
@@ -1672,8 +1646,6 @@ void test_lifecycle_and_responses() {
     g_static_ready = 1;
     text_table(static_cast<int32_t>(QolItemStaticTextKind::kItemName))[10] = "再生药水（小）";
     text_table(static_cast<int32_t>(QolItemStaticTextKind::kItemType))[10] = "potion";
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
@@ -1699,8 +1671,7 @@ void test_lifecycle_and_responses() {
     g_override_enabled = false;
     g_canonical_count = 3;
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     CHECK(g_scheduler.interval > 1);
     test_write_routes();
@@ -1840,15 +1811,12 @@ void test_static_not_ready_holds_snapshot() {
     g_scheduler = FakeScheduler{};
     g_in_world = true;
     g_static_ready = 0;
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     // 静态名称表未下发：快照不发布，HTTP 侧保持 not ready。
     CHECK(run_scheduler(1));
     uint16_t status = 0;
@@ -2375,8 +2343,7 @@ void test_inventory_owner_vs_legacy_golden() {
     ctx.port_count = 4;
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                    descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     g_golden_require_active = true;
 
@@ -2535,8 +2502,7 @@ bool install_core_item_golden(GoldenHarness* out) {
     ctx.port_count = 4;
     if (descriptor.install(ctx) != 0) return false;
     descriptor.on_enabled(ctx);
-    if (qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                  descriptor.http_query_count).ok != kQolOk) {
+    if (!qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor))) {
         return false;
     }
     g_golden_require_active = true;

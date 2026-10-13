@@ -3,6 +3,7 @@
 #include "contracts/plugin.h"
 #include "host/core_settings_config_service.h"
 #include <map>
+#include <memory>
 
 namespace qol::host {
 
@@ -22,6 +23,7 @@ private:
 // The registry implementation must admit a main-thread command and guard actual active
 // state/owner lease there. It must not execute the metadata callback on the caller thread.
 using FeatureEntryAdmission = QolResult (*)(void*, const char* plugin, const char* feature);
+using FeatureReceiptObserver = void (*)(void*, const contracts::FeatureReceipt&) noexcept;
 
 // Immutable durable projection, published by the worker after Store effects admission.
 // Frame readers never acquire the Store mutex held by atomic file persistence.
@@ -41,8 +43,6 @@ public:
     void bind_state_observer(FeatureControlObserver, void* context);
     void add_state_observer(FeatureControlObserver, void* context);
     bool host_owned(const char*) const;
-    using ConfigValidator = QolResult (*)(const char*, const char*, const JsonValue&);
-    void bind_config_validator(ConfigValidator validator) { config_validator_ = validator; }
     QolResult read_registered(char*, uint32_t, uint32_t*) const;
     const contracts::QolFeatureApi& api() const { return api_; }
     const std::vector<PluginFeatureSeed>& catalog() const { return definitions_; }
@@ -52,8 +52,13 @@ public:
 
     QolResult request_set_feature(const char*, const char*, uint8_t, contracts::FeatureReceipt*);
     QolResult request_set_config(const char*, const char*, const char*, uint32_t, contracts::FeatureReceipt*);
+    QolResult request_set_config_if_revision(const char*, const char*, const char*, uint32_t,
+                                             uint64_t, contracts::FeatureReceipt*);
     QolResult request_desired(const char*, uint8_t, contracts::FeatureReceipt*);
     QolResult receipt(uint64_t, contracts::FeatureReceipt*) const;
+    // Host-private one-shot notification. A terminal receipt replays inline with no live token.
+    QolResult subscribe_receipt(uint64_t request_id, FeatureReceiptObserver, void*, uint64_t*);
+    QolResult unsubscribe_receipt(uint64_t subscription_id);
     QolResult invoke_entry(const char*, const char*);
     // Loader shutdown only, not a frame/lifecycle callback. Drains the worker before
     // destroying its pending observer context; no inactive plugin token is involved.
@@ -66,16 +71,27 @@ private:
         std::string key;
         std::string json;
         uint64_t id;
+        bool has_expected_revision = false;
+        uint64_t expected_revision = 0;
     };
     struct ReceiptRecord {
         contracts::FeatureReceipt value{};
         uint64_t owner = 0;
     };
+    struct ReceiptObserverRecord {
+        uint64_t id = 0;
+        uint64_t request_id = 0;
+        FeatureReceiptObserver observer = nullptr;
+        void* context = nullptr;
+        uint32_t in_flight = 0;
+        bool cancelled = false;
+    };
     // Authority is captured under an owner lease at admission. Durable config requests
     // already admitted remain valid after stop; worker notifications hold no owner lease.
     QolResult authorize(contracts::QolOwnerToken, const char* target, bool admin_only = false) const;
     QolResult enqueue(const char*, FeatureConfigField, const char*, const std::string&,
-                      uint64_t owner, contracts::FeatureReceipt*);
+                      uint64_t owner, contracts::FeatureReceipt*,
+                      bool has_expected_revision = false, uint64_t expected_revision = 0);
     QolResult read_namespace(const char*, char*, uint32_t, uint32_t*) const;
     QolResult read_value(const char*, const char*, const char*, JsonValue*) const;
     const PluginFeatureSeed* find_plugin(const char*) const;
@@ -85,11 +101,12 @@ private:
     CoreSettingsConfigService& service_;
     std::vector<PluginFeatureSeed> definitions_;
     std::vector<std::string> host_owners_;
-    ConfigValidator config_validator_ = nullptr;
     mutable std::mutex mutex_;
     std::condition_variable changed_;
     std::deque<Request> queue_;
     std::map<uint64_t, ReceiptRecord> receipts_;
+    std::map<uint64_t, std::shared_ptr<ReceiptObserverRecord>> receipt_observers_;
+    uint64_t next_receipt_observer_id_ = 1;
     std::vector<uint64_t> admin_tokens_;
     std::thread worker_;
     bool running_ = false;
@@ -103,6 +120,7 @@ private:
     void* state_context_ = nullptr;
     std::vector<std::pair<FeatureControlObserver, void*>> state_observers_;
     FeatureControlSnapshot published_;
+    static thread_local FeatureController* active_receipt_dispatcher_;
 
     static QolResult api_namespace(void*, contracts::QolOwnerToken, const char*, char*, uint32_t, uint32_t*);
     static QolResult api_feature(void*, contracts::QolOwnerToken, const char*, const char*, uint8_t*);

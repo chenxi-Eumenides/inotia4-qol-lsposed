@@ -46,8 +46,8 @@ constexpr uint32_t kQuitRouteIndex = 4;
 // 结果处理器 id（全局 typed handler id 空间，quest 前缀，见 kSetStateHandlerId）。
 constexpr uint32_t kQuitResultHandlerId = 0x51535402;
 
-constexpr Query kQueries[] = {Query::kComposite, Query::kActive, Query::kDetails,
-                              Query::kCompleted};
+Query kQueries[] = {Query::kComposite, Query::kActive, Query::kDetails,
+                    Query::kCompleted};
 
 enum class SnapshotState : uint8_t { kUnavailable, kNotInGame, kReady };
 
@@ -70,6 +70,9 @@ Snapshot<QuestSnapshot> g_snapshot;
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kWorldFactsCapabilityId,
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+};
+
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
     {contracts::kHttpRegistryCapabilityId, {contracts::kHttpRegistryVersion.major,
                                              contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
@@ -461,13 +464,23 @@ bool quit_result_handler(void*, const uint8_t* payload, uint32_t size, char* out
     return std::string(out, *out_size).find("\"ok\":false") == std::string::npos;
 }
 
-const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
-    {kRoutes[0].method, kRoutes[0].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[0])},
-    {kRoutes[1].method, kRoutes[1].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[1])},
-    {kRoutes[2].method, kRoutes[2].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[2])},
-    {kRoutes[3].method, kRoutes[3].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[3])},
-    {kRoutes[kQuitRouteIndex].method, kRoutes[kQuitRouteIndex].path, kPluginId, &quit_command_handler,
-     nullptr},
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {kRoutes[0].method, kRoutes[0].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[0]},
+    {kRoutes[1].method, kRoutes[1].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[1]},
+    {kRoutes[2].method, kRoutes[2].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[2]},
+    {kRoutes[3].method, kRoutes[3].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[3]},
+    {kRoutes[kQuitRouteIndex].method, kRoutes[kQuitRouteIndex].path, kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &quit_command_handler, nullptr},
+};
+
+constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
+    {contracts::HttpMethod::kPost, "/api/op/quest/accept", kPluginId, 1, 1},
+    {contracts::HttpMethod::kPost, "/api/op/quest/complete", kPluginId, 1, 1},
+    {contracts::HttpMethod::kGet, "/api/quest/{id}", kPluginId, 0, 1},
 };
 
 void stop_snapshot_task(const contracts::QolHostSdk* sdk) {
@@ -613,8 +626,8 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    3, kRequires,  // requires=world.facts + http.registry + http.dispatch
-    0, nullptr,   // optional_requires
+    1, kRequires,  // requires=world.facts
+    2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     0, nullptr,   // provides
     0, nullptr,   // resources（零资源）
     0, nullptr,   // jni
@@ -626,9 +639,14 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,      // on_resource_ready（无资源）
     kPorts,
     1,
-    kHttpQueries,
-    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    nullptr,
+    0,
     kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    kHttpRouteMetadata,
+    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
 };
 
 }  // namespace

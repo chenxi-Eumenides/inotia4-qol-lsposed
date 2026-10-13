@@ -42,6 +42,7 @@ struct CoreSettingsConfigCommit {
     ModuleConfig after;
     uint64_t revision = 0;
     bool committed = false;
+    bool conflict = false;
     contracts::SettingsConfigApplyState apply_state = contracts::SettingsConfigApplyState::kNotSubmitted;
     int32_t apply_error_code = 0;
     std::string apply_message;
@@ -68,7 +69,9 @@ public:
     ConfigStoreResult read_feature_namespace(const std::string&, JsonValue*) const;
     ConfigStoreResult desired_snapshots(std::vector<PluginDesiredSnapshot>*) const;
     CoreSettingsConfigCommit commit_feature_model(const std::string&, FeatureConfigField,
-                                                 const std::string&, const std::string&);
+                                                  const std::string&, const std::string&);
+    CoreSettingsConfigCommit commit_feature_model_if_revision(
+        const std::string&, const std::string&, const std::string&, uint64_t expected_revision);
     // Internal transition wrappers for the not-yet-switched product assembly. The new
     // feature model disables their legacy projection/writers; they are not a compatibility API.
     ConfigStoreResult initialize(const std::string& external_files_directory);
@@ -83,7 +86,6 @@ public:
                                                          const std::string& key,
                                                          const std::string& json_value);
     ConfigStoreResult subscribe_platform(CoreSettingsPlatformObserver observer, void* context);
-    bool report_bind_failure(uint64_t revision, int failed_port);
     uint64_t revision() const;
     ConfigStoreResult read_namespace(const std::string& plugin_id, JsonValue* out);
     ConfigStoreResult read_registered_json(char* out_json, uint32_t capacity,

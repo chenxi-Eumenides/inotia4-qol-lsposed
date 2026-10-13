@@ -2,6 +2,7 @@
 
 #include "contracts/craft_facts.h"
 #include "contracts/game_ports/craft_port.h"
+#include "contracts/http.h"
 
 namespace qol::features::core_craft {
 namespace {
@@ -122,6 +123,18 @@ const contracts::QolPortRequirement kPorts[] = {
      {contracts::kQolPortCraftVersion.major, contracts::kQolPortCraftVersion.minor}},
 };
 
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
+    {contracts::kHttpRegistryCapabilityId,
+     {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+};
+
+#define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
+    {contracts::HttpMethod::method, path, owner, op_gated, lease_required},
+const contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
+#include "routes.inc"
+};
+#undef QOL_HTTP_ROUTE
+
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
     uint32_t length = 0;
@@ -178,7 +191,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId, kPluginVersion,
     0, nullptr,
-    0, nullptr,
+    1, kOptionalHttpRequires,
     1, kProvides,
     0, nullptr,
     0, nullptr,
@@ -187,6 +200,10 @@ const contracts::PluginDescriptor kDescriptor = {
     kPorts, 1,
     nullptr, 0,
     kFeatures, 1,
+    nullptr, 0,
+    nullptr,
+    kHttpRouteMetadata,
+    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
 };
 
 }  // namespace

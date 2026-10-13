@@ -3,10 +3,12 @@ package com.inotia4.qol.api.controller
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.JsonUtil
+import com.inotia4.qol.util.withNativeRouteLease
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.HttpRequest
 import com.yanzhenjie.andserver.http.StatusCode
 
 /**
@@ -19,28 +21,32 @@ import com.yanzhenjie.andserver.http.StatusCode
  * （rarity 1..5 / enhance 1..32 / socket 1..16 / gemTier 1..5 / gemRange 1..5）。
  * special 为特殊类型名数组（合法名 backpack / normalSeal / dice；缺省或坏值按空集）。
  * 请求体示例：{"enabled":true,"rarity":1,"enhance":0,"socket":0,"gemTier":0,"special":["dice"],"gemRange":0}
+ *
+ * 两条路由由 Kotlin 直接处理（无 native handler），按 direct 路由获取 native route lease。
  */
 @RestController
 class AutoSellFeatureController {
 
     @GetMapping("/api/feature/autosell/config")
-    fun getConfig(): String = NativeBridge.nativeAutoSellStatusJson()
+    fun getConfig(request: HttpRequest): String =
+        withNativeRouteLease(request) { NativeBridge.nativeAutoSellStatusJson() }
 
     @PostMapping("/api/feature/autosell/config")
-    fun setConfig(@RequestBody body: String): String {
-        val json = JsonUtil.parseObj(body)
-            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        // special：JSON 数组文本原样传给 native（缺省/非数组按空集 []），名字->位换算在 native 唯一表完成。
-        val special = json.optJSONArray("special")?.toString() ?: "[]"
-        NativeBridge.nativeSetAutoSellConfig(
-            json.optBoolean("enabled", false),
-            json.optInt("rarity", 0),
-            json.optInt("enhance", 0),
-            json.optInt("socket", 0),
-            json.optInt("gemTier", 0),
-            special,
-            json.optInt("gemRange", 0)
-        )
-        return NativeBridge.nativeAutoSellStatusJson()
-    }
+    fun setConfig(@RequestBody body: String, request: HttpRequest): String =
+        withNativeRouteLease(request) {
+            val json = JsonUtil.parseObj(body)
+                ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
+            // special：JSON 数组文本原样传给 native（缺省/非数组按空集 []），名字->位换算在 native 唯一表完成。
+            val special = json.optJSONArray("special")?.toString() ?: "[]"
+            NativeBridge.nativeSetAutoSellConfig(
+                json.optBoolean("enabled", false),
+                json.optInt("rarity", 0),
+                json.optInt("enhance", 0),
+                json.optInt("socket", 0),
+                json.optInt("gemTier", 0),
+                special,
+                json.optInt("gemRange", 0)
+            )
+            NativeBridge.nativeAutoSellStatusJson()
+        }
 }

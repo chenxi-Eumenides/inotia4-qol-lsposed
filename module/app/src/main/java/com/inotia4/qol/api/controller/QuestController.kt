@@ -3,11 +3,13 @@ package com.inotia4.qol.api.controller
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.util.ControllerGuard
+import com.inotia4.qol.util.withNativeRouteLease
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PathVariable
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.HttpRequest
 
 /**
  * 任务：/api/quest（api-reference §0.2）。复合 + active/list/{id}/completed。
@@ -31,9 +33,11 @@ class QuestController {
     fun quit(@RequestBody body: String): String =
         ControllerGuard.guard { NativeHttpCommand.post("/api/quest/quit_quest", body) }
 
+    // 占位读取（route metadata owner core.quest）：由 Kotlin 直接返回 not found，
+    // 按 direct 路由获取 native route lease。
     @GetMapping("/api/quest/{id}")
-    fun questId(@PathVariable("id") id: Int): String =
-        ControllerGuard.guard { ApiServices.info.questListId(id) }
+    fun questId(@PathVariable("id") id: Int, request: HttpRequest): String =
+        withNativeRouteLease(request) { ControllerGuard.guard { ApiServices.info.questListId(id) } }
 
     @GetMapping("/api/quest/completed")
     fun completed(): String = ControllerGuard.guard(ApiServices.info::questCompleted)

@@ -13,6 +13,7 @@
 #include "contracts/world_facts.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "http_endpoint_test_support.h"
 #include "infra/commands.h"
 #include "plugins/core.quest/plugin.h"
 #include "test_snapshot_sdk.h"
@@ -217,8 +218,6 @@ qol::contracts::QolHostSdk make_sdk() {
     sdk.commands.register_typed_handler = &fake_register_typed_handler;
     sdk.commands.unregister_typed_handler = &fake_unregister_typed_handler;
     sdk.commands.post_typed = &fake_post_typed;
-    sdk.http = qol::host::http_registry_api();
-    sdk.http_dispatch = qol::host::http_dispatch_api();
     sdk.ticket_result = {&fake_register_typed_result_handler,
                          &fake_unregister_typed_result_handler, &fake_read_result,
                          &fake_ticket_state};
@@ -231,20 +230,6 @@ qol::contracts::QolGameHost fake_game() {
     game.abi = {sizeof(qol::contracts::QolGameHost), qol::contracts::kGameHostMajor,
                 qol::contracts::kGameHostMinor};
     return game;
-}
-
-const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/quest", "core.quest", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/quest/active", "core.quest", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/quest/details", "core.quest", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/quest/completed", "core.quest", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/quest/quit_quest", "core.quest", 0, 1},
-};
-
-void register_frozen_routes() {
-    for (const auto& route : kRoutes) {
-        CHECK(qol::host::http_registry_api().register_route(&route).ok == kQolOk);
-    }
 }
 
 std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
@@ -296,8 +281,6 @@ void test_quit_command_validation_and_result_failure() {
     g_posted_quest_id = -1;
     g_result_handler = nullptr;
     g_quit_result_mode = 0;
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::QolGameHost game = fake_game();
     qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
@@ -305,9 +288,36 @@ void test_quit_command_validation_and_result_failure() {
                                       qol::contracts::kHostSdkMinor, &sdk, &game, "core.quest",
                                       kPortArray, 1};
     const auto& descriptor = qol::features::core_quest::plugin_descriptor();
+    CHECK(descriptor.requires_count == 1 && descriptor.optional_count == 2);
+    CHECK(std::strcmp(descriptor.requires[0].id,
+                      qol::contracts::kWorldFactsCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
+    for (uint32_t i = 0; i < 2; ++i) {
+        CHECK(descriptor.optional_requires[i].range.major == 1);
+        CHECK(descriptor.optional_requires[i].range.min_minor == 1);
+    }
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 5 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 3 && descriptor.http_route_metadata != nullptr);
+    CHECK(descriptor.http_endpoints[4].method == qol::contracts::HttpMethod::kPost);
+    CHECK(descriptor.http_endpoints[4].kind == qol::contracts::HttpHandlerKind::kCommand);
+    CHECK(descriptor.http_endpoints[4].op_required == 0 &&
+          descriptor.http_endpoints[4].lease_required == 1);
+    const char* const metadata_paths[] = {
+        "/api/op/quest/accept", "/api/op/quest/complete", "/api/quest/{id}",
+    };
+    for (uint32_t i = 0; i < descriptor.http_route_metadata_count; ++i) {
+        const auto& metadata = descriptor.http_route_metadata[i];
+        CHECK(std::strcmp(metadata.path, metadata_paths[i]) == 0);
+        CHECK(std::strcmp(metadata.route_owner, "core.quest") == 0);
+        CHECK(metadata.op_required == (i < 2 ? 1 : 0));
+        CHECK(metadata.lease_required == 1);
+    }
     CHECK(descriptor.install(ctx) == 0);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
 
     const char* const invalid_bodies[] = {
         "{\"quest_id\":5", "{\"quest_id\":2147483648}", "{\"quest_id\":5.0}",
@@ -360,8 +370,6 @@ void test_lifecycle_and_responses() {
         "\"group_id\":4,\"name\":\"Q5\"";
     fragments(qol::contracts::kQuestFragmentCompleted)[2] = "\"name\":\"Q2\"";
     fragments(qol::contracts::kQuestFragmentCompleted)[7] = "\"name\":\"Q7\"";
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::QolGameHost game = fake_game();
     qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
@@ -373,8 +381,7 @@ void test_lifecycle_and_responses() {
     CHECK(descriptor.install(ctx) == 0);
     CHECK(g_scheduler.handler != nullptr);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.interval > 1);
 
     uint16_t status = 0;
@@ -424,8 +431,6 @@ void test_static_not_ready_holds_snapshot() {
     g_scheduler = FakeScheduler{};
     g_in_world = true;
     g_static_ready = 0;
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::QolGameHost game = fake_game();
     qol::contracts::PluginContext ctx{sizeof(qol::contracts::PluginContext),
@@ -435,8 +440,7 @@ void test_static_not_ready_holds_snapshot() {
     const auto& descriptor = qol::features::core_quest::plugin_descriptor();
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler(1, g_scheduler.ctx) != 0);
     uint16_t status = 0;
     (void)dispatch_get("/api/quest/active", &status);

@@ -1940,14 +1940,53 @@ int main() {
     const auto& descriptor = qol::features::core_character::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.character") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 2 && descriptor.optional_count == 1 &&
+    CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr &&
+          descriptor.optional_count == 3 &&
           descriptor.optional_requires != nullptr);
-    CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
-    CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
                       qol::contracts::kItemStateCapabilityId) == 0);
     CHECK(descriptor.optional_requires[0].range.major == 1 &&
           descriptor.optional_requires[0].range.min_minor == 1);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[2].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
+    for (uint32_t i = 1; i < 3; ++i) {
+        CHECK(descriptor.optional_requires[i].range.major == 1);
+        CHECK(descriptor.optional_requires[i].range.min_minor == 1);
+    }
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 35 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 6 &&
+          descriptor.http_route_metadata != nullptr);
+    uint32_t op_endpoint_count = 0;
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const auto& endpoint = descriptor.http_endpoints[i];
+        CHECK(endpoint.route_owner != nullptr &&
+              std::strcmp(endpoint.route_owner, "core.character") == 0);
+        CHECK(endpoint.lease_required == 1);
+        if (endpoint.op_required != 0) ++op_endpoint_count;
+        if (endpoint.method == qol::contracts::HttpMethod::kGet) {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
+            CHECK(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
+        } else {
+            CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kCommand);
+            CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
+        }
+    }
+    CHECK(op_endpoint_count == 7);
+    const char* const metadata_paths[] = {
+        "/api/op/character/{role}/skill-point", "/api/op/character/{role}/skill-level",
+        "/api/op/combat/{role}/heal", "/api/op/combat/{role}/rest",
+        "/api/op/combat/{role}/revive", "/api/op/combat/{role}/hate",
+    };
+    for (uint32_t i = 0; i < descriptor.http_route_metadata_count; ++i) {
+        const auto& metadata = descriptor.http_route_metadata[i];
+        CHECK(metadata.method == qol::contracts::HttpMethod::kPost);
+        CHECK(std::strcmp(metadata.path, metadata_paths[i]) == 0);
+        CHECK(std::strcmp(metadata.route_owner, "core.character") == 0);
+        CHECK(metadata.op_required == 1 && metadata.lease_required == 1);
+    }
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id,
                       qol::contracts::kCharacterFactsCapabilityId) == 0);
@@ -2186,15 +2225,15 @@ int main() {
     char response_storage[256]{};
     qol::contracts::HttpRes response{reinterpret_cast<uint8_t*>(response_storage),
                                      sizeof(response_storage), 0, 0};
-    const qol::contracts::HttpQueryHandlerDescriptor* route = nullptr;
-    for (uint32_t i = 15; i < descriptor.http_query_count; ++i) {
-        if (std::strcmp(descriptor.http_queries[i].path, kAddSkillPath) == 0) {
-            route = &descriptor.http_queries[i];
+    const qol::contracts::HttpEndpointDescriptor* route = nullptr;
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        if (std::strcmp(descriptor.http_endpoints[i].path, kAddSkillPath) == 0) {
+            route = &descriptor.http_endpoints[i];
             break;
         }
     }
     CHECK(route != nullptr);
-    CHECK(route != nullptr && route->handler(&request, &response, route->ctx).ok == kQolOk);
+    CHECK(route != nullptr && route->command_handler(&request, &response, route->ctx).ok == kQolOk);
     CHECK(std::string(response_storage, response.body_size) == "{\"ok\":true,\"ticket\":41}");
     CHECK(g_post_handler_id != 0 && g_post_payload_size > 0);
     int32_t posted_fields[4]{};

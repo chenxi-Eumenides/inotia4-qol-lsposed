@@ -91,6 +91,7 @@
 #include "host/plugin_registry.h"
 #include "host/ui_adapter.h"
 #include "infra/commands.h"
+#include "infra/request_policy.h"
 #include "infra/config.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
@@ -390,6 +391,7 @@ bool assembly_init() {
 
     // 帧时钟注入：infra 不依赖 game，游戏事实由 host 装配时提供（见 infra/runtime.h）。
     infra::runtime_init(infra::Clock{&qol::game::frame_count});
+    infra::set_request_op_authorizer(&security_op_enabled);
 
     // 保存事务 Adapter 装配期解析：SAVE_LoadCharacterAll→SAVE_Save 唯一 BL 扫描与
     // SAVE_GetSaveFileName 注入；bridge_init 已 attach ELF resolver（此处 g_base 可用）。
@@ -500,11 +502,17 @@ bool assembly_init() {
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: platform config owner registration failed");
         return false;
     }
+    if (!production_feature_register_host_owner(security_config_descriptor()).ok()) {
+        ++g_registration_failures;
+        QOL_LOG_ERROR(QolDomain::kCore, "assembly: security config owner registration failed");
+        return false;
+    }
 
     // New-model Store: init + seed from the path saved by the path-only JNI bootstrap, then bind
     // the reconciler. The single frame task below drives all lifecycle/resource reconciliation.
     const auto feature_bootstrap = production_feature_bootstrap(config_store_path());
     if (!feature_bootstrap.ok()) {
+        config_store_mark_bootstrapped(false);
         QOL_LOG_ERROR(QolDomain::kCore,
                       "assembly: feature bootstrap failed reason=%.*s",
                       static_cast<int>(feature_bootstrap.message.size()),

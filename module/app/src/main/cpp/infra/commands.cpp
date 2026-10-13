@@ -18,6 +18,7 @@
 
 #include "infra/command_queue.h"
 #include "infra/config.h"
+#include "infra/request_policy.h"
 
 namespace qol::infra {
 namespace {
@@ -36,6 +37,7 @@ struct Slot {
     // 而命令要到下次 drain 才执行；因此入队时按值拷贝键，command.key 指向本缓冲。
     char key[kMaxKeyLength + 1] = {};
     contracts::QolCommandTicket ticket = 0;
+    bool requires_op = false;
 };
 
 std::mutex g_slots_mtx;
@@ -91,22 +93,38 @@ bool command_run(void* ctx) {
 bool command_run_with_result(void* ctx, char* out, uint32_t capacity, uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
     const Slot* slot = static_cast<const Slot*>(ctx);
-    if (!slot->typed) return command_run(ctx);
+    contracts::QolTypedCommandHandler handler = nullptr;
     contracts::QolTypedResultCommandHandler result_handler = nullptr;
     void* handler_ctx = nullptr;
-    {
+    if (slot->typed) {
         std::lock_guard<std::mutex> lock(g_slots_mtx);
         for (const TypedHandlerSlot& candidate : g_typed_handlers) {
             if (candidate.handler_id == slot->typed_header.handler_id) {
+                handler = candidate.handler;
                 result_handler = candidate.result_handler;
                 handler_ctx = candidate.ctx;
                 break;
             }
         }
     }
-    if (result_handler == nullptr) return command_run(ctx);
-    return result_handler(handler_ctx, slot->typed_payload, slot->typed_header.payload_bytes, out,
-                          capacity, out_size);
+
+    if (slot->typed && handler == nullptr && result_handler == nullptr) return false;
+    if (!request_policy_authorized(RequestPolicy{slot->requires_op})) {
+        static constexpr char kOpDisabled[] = "{\"ok\":false,\"error\":\"op disabled\"}";
+        if (out != nullptr && out_size != nullptr && capacity >= sizeof(kOpDisabled) - 1) {
+            std::memcpy(out, kOpDisabled, sizeof(kOpDisabled) - 1);
+            *out_size = sizeof(kOpDisabled) - 1;
+        }
+        return false;
+    }
+
+    const ScopedRequestPolicy inherited_policy(RequestPolicy{slot->requires_op});
+    if (!slot->typed) return command_run(ctx);
+    if (result_handler != nullptr) {
+        return result_handler(handler_ctx, slot->typed_payload, slot->typed_header.payload_bytes,
+                              out, capacity, out_size);
+    }
+    return handler(handler_ctx, slot->typed_payload, slot->typed_header.payload_bytes);
 }
 
 QolResult error_result(int32_t code, const char* message) {
@@ -126,12 +144,14 @@ void reap_terminal_slots_locked() {
             slot.in_use = false;
             slot.typed = false;
             slot.ticket = 0;
+            slot.requires_op = false;
         }
     }
 }
 
 QolResult commands_post_common(contracts::QolCommandTicket* out,
                                const contracts::QolCommand* cmd, bool host_config_writer) {
+    const bool requires_op = current_request_policy().requires_op;
     if (out != nullptr) {
         *out = 0;
     }
@@ -157,14 +177,18 @@ QolResult commands_post_common(contracts::QolCommandTicket* out,
     }
 
     slot->command = *cmd;
+    slot->typed = false;
+    slot->requires_op = requires_op;
     // 拷贝键到槽位自有缓冲（见 Slot.key 注释）；超长截断，配置/插件查找按截断串失败而非越界。
     std::snprintf(slot->key, sizeof(slot->key), "%s", cmd->key);
     slot->command.key = slot->key;
     slot->in_use = true;
-    const Command queued{"qol.command", command_run, slot, true};
+    const Command queued{"qol.command", requires_op ? nullptr : command_run, slot, true,
+                         requires_op ? command_run_with_result : nullptr};
     const CommandTicket ticket = post(queued);
     if (ticket == 0) {
         slot->in_use = false; // 入队失败，槽位立即归还
+        slot->requires_op = false;
         return error_result(kQolErrBlocked, "command queue full");
     }
     slot->ticket = ticket;
@@ -253,6 +277,7 @@ QolResult unregister_typed_handler_impl(uint32_t handler_id) {
 
 QolResult post_typed_impl(uint32_t handler_id, const void* payload, uint32_t size,
                           contracts::QolCommandTicket* out) {
+    const bool requires_op = current_request_policy().requires_op;
     if (out != nullptr) *out = 0;
     if (out == nullptr || handler_id == 0 || (payload == nullptr && size != 0)) {
         return error_result(kQolErrInvalidArgument, "invalid typed command");
@@ -281,6 +306,7 @@ QolResult post_typed_impl(uint32_t handler_id, const void* payload, uint32_t siz
     if (slot == nullptr) return error_result(kQolErrBlocked, "command slots full");
 
     slot->typed = true;
+    slot->requires_op = requires_op;
     slot->typed_header = {handler_id, size};
     if (size != 0) std::memcpy(slot->typed_payload, payload, size);
     // 可写结果的处理器允许延迟结算（受 kDefaultDeferFrames 约束）：转场类写在世界态就绪前
@@ -297,6 +323,7 @@ QolResult post_typed_impl(uint32_t handler_id, const void* payload, uint32_t siz
     const CommandTicket ticket = post(queued);
     if (ticket == 0) {
         slot->typed = false;
+        slot->requires_op = false;
         return error_result(kQolErrBlocked, "command queue full");
     }
     slot->in_use = true;
@@ -387,6 +414,7 @@ void commands_reset_for_test() {
         g_slots[i].in_use = false;
         g_slots[i].typed = false;
         g_slots[i].ticket = 0;
+        g_slots[i].requires_op = false;
     }
     for (TypedHandlerSlot& handler : g_typed_handlers) handler = TypedHandlerSlot{};
 }

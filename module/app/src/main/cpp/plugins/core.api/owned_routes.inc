@@ -1,0 +1,5 @@
+QOL_HTTP_ROUTE(kGet, "/api/health", "core.api", 0, 0)
+QOL_HTTP_ROUTE(kGet, "/api/system/features", "core.api", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/system/resources", "core.api", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/system/tickets/{id}", "core.api", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/system/routes", "core.api", 0, 0)

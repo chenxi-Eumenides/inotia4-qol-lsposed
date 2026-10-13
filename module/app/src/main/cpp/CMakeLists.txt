@@ -269,6 +269,7 @@ target_sources(gamebridge PRIVATE
     host/settings_catalog_adapter.cpp
     infra/settings_catalog.cpp
     host/lifecycle_participants.cpp
+    host/http_endpoint_binder.cpp
     host/http_registry.cpp
     host/http_dispatch.cpp
     host/game_host.cpp

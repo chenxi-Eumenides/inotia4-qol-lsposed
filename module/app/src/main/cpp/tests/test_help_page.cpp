@@ -41,7 +41,6 @@ bool g_destroy_in_detail = false;
 UiHelpPageDesc g_recreate_desc{};
 const QolUiComponents* g_api = nullptr;
 const PanelProviderSpec* g_provider = nullptr;
-HttpCommandHandlerFn g_command = nullptr;
 QolFrameHandler g_frame = nullptr;
 QolResult fail() { return error(kQolErrNotReady, "injected", 8); }
 QolResult step() { return ++g_calls == g_fail_at ? fail() : ok(); }
@@ -218,11 +217,6 @@ UiHelpPageDesc desc(UiHelpOption* options) {
             options, 8, 2, &draw_item, &g_live};
 }
 QolResult register_provider(const PanelProviderSpec* spec) { g_provider = spec; return ok(); }
-QolResult register_command(HttpMethod method, const char* path, const char* owner,
-                           HttpCommandHandlerFn fn, void*) {
-    assert(method == HttpMethod::kPost && std::strcmp(path, "/api/debug/custom-ui/help") == 0);
-    assert(std::strcmp(owner, "core.custom_ui") == 0); g_command = fn; return ok();
-}
 QolResult add_task(int32_t point, QolFrameHandler fn, void*, int32_t interval, int32_t count, uint64_t* out) {
     assert(point == 1 && interval == 1 && count == 0); g_frame = fn; *out = 42; return ok();
 }
@@ -231,7 +225,8 @@ int send(const char* body) {
     uint8_t buffer[256]{};
     HttpReq req{}; req.body = reinterpret_cast<const uint8_t*>(body); req.body_len = std::strlen(body);
     HttpRes res{}; res.body = buffer; res.body_capacity = sizeof(buffer);
-    assert(succeeded(g_command(&req, &res, nullptr))); return res.status;
+    assert(succeeded(qol::features::core_ui::debug_help_http_command(&req, &res, nullptr)));
+    return res.status;
 }
 Control* row(QolUiHandle page, uint32_t index) {
     return static_cast<Control*>(page)->children[0]->children[0]->children[index].get();
@@ -269,7 +264,7 @@ int main() {
         offsetof(QolUiComponents, dispatch_native_event) + sizeof(void*));
     auto ui = adapter();
     CHECK(ui_components_bind(&ui)); g_api = ui_components_api();
-    CHECK(g_api->minor == 13 && kUiAdapterMinor == 19);
+    CHECK(g_api->minor == 13 && kUiAdapterMinor == 20);
     UiHelpOption options[8]{};
     for (int i = 0; i < 8; ++i) options[i] = {&g_users[i], &detail};
     auto page_desc = desc(options);
@@ -379,7 +374,6 @@ int main() {
     CHECK(succeeded(remove_control(borrowed)) && g_live == 0);
 
     QolHostSdk sdk{}; sdk.ui = &ui; sdk.panels.register_provider = &register_provider;
-    sdk.http_dispatch.register_command = &register_command;
     sdk.scheduler.add = &add_task; sdk.scheduler.remove = &remove_task;
     CHECK(debug_help_register(&sdk));
     CHECK(std::strcmp(g_provider->panel_id, "debug_help") == 0);

@@ -1,6 +1,6 @@
-// 冻结 HTTP 路由表。字段顺序：method, path, API owner, op gate, route lease。
-// 该文件同时被 core.api 编译单元和 check_http_routes.py 读取；不要在 Kotlin
-// controller 中复制一份 owner/门控事实。
+// 由 scripts/maintenance/sync_http_routes.py 从 plugin owner 与 Host resident route facts 生成。
+// 不要直接编辑；事实源位于各 owner 的 routes.inc / core.api/owned_routes.inc 与
+// host/http_resident_routes.inc。字段顺序：method, path, owner label, op gate, route lease。
 
 QOL_HTTP_ROUTE(kGet, "/api/feature/autosell/config", "autosell", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/feature/autosell/config", "autosell", 0, 1)
@@ -14,9 +14,9 @@ QOL_HTTP_ROUTE(kPost, "/api/character/combat/switch_player", "core.character", 0
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/cast_skill", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/attack_target", "core.character", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/character/combat/{role}/stop_combat", "core.character", 0, 1)
-QOL_HTTP_ROUTE(kGet, "/api/config/list", "core.settings", 0, 1)
-QOL_HTTP_ROUTE(kPost, "/api/config/set", "core.settings", 0, 1)
-QOL_HTTP_ROUTE(kGet, "/api/config/receipt/{id}", "core.settings", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/config/list", "settings", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/config/set", "settings", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/config/receipt/{id}", "settings", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/world/map/id", "core.world", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/world/map/exits", "core.world", 0, 1)
 QOL_HTTP_ROUTE(kGet, "/api/world/map/units", "core.world", 0, 1)

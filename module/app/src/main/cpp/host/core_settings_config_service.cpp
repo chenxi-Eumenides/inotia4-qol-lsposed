@@ -1,8 +1,6 @@
 #include "core_settings_config_service.h"
-#include "host/features/platform.h"
 
 #include <algorithm>
-#include <charconv>
 #include <stdexcept>
 
 namespace qol::host {
@@ -26,11 +24,6 @@ thread_local CoreSettingsRuntimeApplyResult g_last_runtime_apply_result{};
 ConfigStoreResult not_ready() {
     return {qol::features::core_settings::ConfigStoreError::kNotReady,
             "configuration service not initialized", false};
-}
-
-const JsonValue* object_member(const JsonValue& object, const char* key) {
-    for (const auto& item : object.object) if (item.first == key) return &item.second;
-    return nullptr;
 }
 
 }  // namespace
@@ -57,7 +50,8 @@ ConfigStoreSeedResult CoreSettingsConfigService::seed_features() {
         if (state_ == CoreSettingsConfigServiceState::kUninitialized) return {not_ready()};
         result = store_.seed_features();
         if (store_.degraded_read_only()) state_ = CoreSettingsConfigServiceState::kDegradedReadOnly;
-        else state_ = result.result.ok() ? CoreSettingsConfigServiceState::kReady : CoreSettingsConfigServiceState::kReadyUnpersisted;
+        else if (result.result.ok()) state_ = CoreSettingsConfigServiceState::kReady;
+        else if (result.memory_committed) state_ = CoreSettingsConfigServiceState::kReadyUnpersisted;
         if (result.result.ok() && result.durable_commit) {
             std::vector<PluginDesiredSnapshot> desired;
             store_.desired_snapshots(&desired);
@@ -96,6 +90,47 @@ CoreSettingsConfigCommit CoreSettingsConfigService::commit_feature_model(
             event = enqueue_effect_locked(result.revision, {}, {}, nullptr, {},
                                           desired_observer_, desired_context_, std::move(desired));
         }
+    }
+    if (event) {
+        const auto outcome = dispatch_effects(event);
+        result.apply_state = outcome == EffectDispatchOutcome::kQueued
+            ? contracts::SettingsConfigApplyState::kPendingFrame : event->apply_result.state;
+        if (outcome == EffectDispatchOutcome::kCompleted) {
+            result.apply_error_code = event->apply_result.error_code;
+            result.apply_message = event->apply_result.message;
+        }
+    }
+    return result;
+}
+
+CoreSettingsConfigCommit CoreSettingsConfigService::commit_feature_model_if_revision(
+    const std::string& id, const std::string& key, const std::string& json,
+    uint64_t expected_revision) {
+    CoreSettingsConfigCommit result;
+    std::shared_ptr<EffectEvent> event;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        result.revision = revision_;
+        if (state_ == CoreSettingsConfigServiceState::kUninitialized) {
+            result.result = not_ready();
+            return result;
+        }
+        if (expected_revision != revision_) {
+            result.conflict = true;
+            result.result = {qol::features::core_settings::ConfigStoreError::kNone,
+                             "configuration revision conflict", false};
+            return result;
+        }
+        result.result = store_.update_feature_model(id, FeatureConfigField::kConfig, key, json);
+        if (!result.result.ok() || !result.result.persisted) return result;
+        result.committed = true;
+        if (state_ == CoreSettingsConfigServiceState::kReadyUnpersisted)
+            state_ = CoreSettingsConfigServiceState::kReady;
+        result.revision = ++revision_;
+        std::vector<PluginDesiredSnapshot> desired;
+        (void)store_.desired_snapshots(&desired);
+        event = enqueue_effect_locked(result.revision, {}, {}, nullptr, {},
+                                      desired_observer_, desired_context_, std::move(desired));
     }
     if (event) {
         const auto outcome = dispatch_effects(event);
@@ -398,58 +433,6 @@ ConfigStoreResult CoreSettingsConfigService::subscribe_platform(
     }
     if (event != nullptr) (void)dispatch_effects(event);
     return {};
-}
-
-bool CoreSettingsConfigService::report_bind_failure(uint64_t observed_revision, int failed_port) {
-    std::shared_ptr<EffectEvent> event;
-    ModuleConfig before;
-    ModuleConfig committed_config;
-    uint64_t committed_revision = 0;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (state_ == CoreSettingsConfigServiceState::kUninitialized ||
-            observed_revision != revision_ || failed_port == 8088) return false;
-        if (feature_model_) {
-            // The current owner projection still uses the reported port; otherwise this is a
-            // stale report and the default-port fallback must not loop.
-            JsonValue current;
-            if (!store_.read_feature_namespace(kPlatformConfigOwner, &current).ok()) return false;
-            const JsonValue* config = object_member(current, "config");
-            const JsonValue* port = config ? object_member(*config, "listen_port") : nullptr;
-            int32_t owner_port = 0;
-            if (!port || port->kind != JsonValue::Kind::kNumber) return false;
-            const auto parsed = std::from_chars(port->scalar.data(),
-                                                port->scalar.data() + port->scalar.size(), owner_port);
-            if (parsed.ec != std::errc{} ||
-                parsed.ptr != port->scalar.data() + port->scalar.size()) return false;
-            if (owner_port != failed_port) return false;
-            const ConfigStoreResult result = store_.update_feature_model(
-                kPlatformConfigOwner, FeatureConfigField::kConfig, "listen_port", "8088");
-            if (!result.ok() || !result.persisted) return false;
-            state_ = CoreSettingsConfigServiceState::kReady;
-            committed_revision = ++revision_;
-            std::vector<PluginDesiredSnapshot> desired;
-            store_.desired_snapshots(&desired);
-            event = enqueue_effect_locked(committed_revision, {}, {}, nullptr, {},
-                                          desired_observer_, desired_context_, std::move(desired));
-        } else {
-            const ModuleConfig current = store_.snapshot();
-            if (current.listen_port != failed_port) return false;
-            before = current;
-            ModuleConfigPatch fallback;
-            fallback.listen_port = 8088;
-            const ConfigStoreResult result = store_.update(fallback);
-            if (!result.ok() || !result.persisted) return false;
-            committed_config = store_.snapshot();
-            if (state_ == CoreSettingsConfigServiceState::kReadyUnpersisted)
-                state_ = CoreSettingsConfigServiceState::kReady;
-            committed_revision = ++revision_;
-            event = enqueue_effect_locked(committed_revision, before, committed_config,
-                                          runtime_apply_, observers_);
-        }
-    }
-    if (event != nullptr) (void)dispatch_effects(event);
-    return true;
 }
 
 uint64_t CoreSettingsConfigService::revision() const {

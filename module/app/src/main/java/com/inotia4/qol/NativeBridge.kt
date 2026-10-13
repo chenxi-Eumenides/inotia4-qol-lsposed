@@ -1,6 +1,14 @@
 package com.inotia4.qol
 
+import java.util.concurrent.locks.ReentrantLock
+
 object NativeBridge {
+
+    private val initializationLock = ReentrantLock()
+
+    @Volatile
+    var libraryLoaded: Boolean = false
+        private set
 
     @Volatile
     var ready: Boolean = false
@@ -9,26 +17,45 @@ object NativeBridge {
     init {
         try {
             System.loadLibrary("gamebridge")
+            libraryLoaded = true
         } catch (t: Throwable) {
+            libraryLoaded = false
             LogFile.error(LogDomain.PLATFORM, "loadLibrary(gamebridge) failed", t)
         }
     }
 
     fun init(): Boolean {
         if (ready) return true
-        ready = try {
-            nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
-            nativeInit()
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.PLATFORM, "nativeInit failed", t)
-            false
+        if (!libraryLoaded || !initializationLock.tryLock()) return false
+        return try {
+            if (ready) return true
+            ready = try {
+                nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
+                nativeInit()
+            } catch (t: Throwable) {
+                LogFile.error(LogDomain.PLATFORM, "nativeInit failed", t)
+                false
+            }
+            ready
+        } finally {
+            initializationLock.unlock()
         }
-        return ready
     }
 
     external fun nativeConfigStoreBootstrap(externalFilesDirectory: String): Int
     external fun nativeConfigPlatformSubscribe(callbacks: Class<*>): Boolean
     external fun nativeConfigPlatformReportBindFailure(revision: Long, failedPort: Int): Boolean
+    external fun nativeRuntimeEffectSubscribe(pluginId: String, callbacks: Class<*>): Long
+    external fun nativeRuntimeEffectUnsubscribe(subscriptionId: Long): Boolean
+    external fun nativePluginConfigRequestIfRevision(
+        pluginId: String,
+        key: String,
+        valueJson: String,
+        expectedConfigRevision: Long,
+    ): String
+    external fun nativePluginConfigReceipt(requestId: Long): String
+    external fun nativePluginConfigSubscribeReceipt(requestId: Long, callbacks: Class<*>): Long
+    external fun nativePluginConfigUnsubscribeReceipt(subscriptionId: Long): Boolean
 
     external fun nativeInit(): Boolean
 
@@ -45,6 +72,12 @@ object NativeBridge {
     external fun nativeGetBaseAddr(): Long
     external fun nativeGetFrameCount(): Long
     external fun nativeHttpDispatch(method: Int, path: String, query: String?, body: String?): String
+
+    // ---- direct-Kotlin 路由 lease（Host route metadata 匹配 + OP/owner 门禁）----
+    // 仅 Kotlin 直接处理、无 native handler 的路由使用；native handler 路由已在 dispatch 内持 lease。
+    // 返回 0 成功；lease_required=false 时 leaseOut[0]=0（无需 Leave）。错误码见 util/NativeRouteLease。
+    external fun nativeHttpRouteEnter(method: Int, path: String, leaseOut: LongArray): Int
+    external fun nativeHttpRouteLeave(lease: Long): Int
     external fun nativeCoreDataBegin(fileCount: Int, totalBytes: Int): Boolean
     external fun nativeCoreDataAsset(path: String, bytes: ByteArray): Boolean
     external fun nativeCoreDataFinish(): Boolean

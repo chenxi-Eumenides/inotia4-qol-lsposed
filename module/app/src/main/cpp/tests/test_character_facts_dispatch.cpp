@@ -18,6 +18,7 @@
 #include "contracts/result.h"
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
+#include "http_endpoint_test_support.h"
 #include "plugins/core.character/plugin.h"
 #include "test_snapshot_sdk.h"
 
@@ -463,47 +464,6 @@ qol::contracts::QolHostSdk make_sdk() {
     return sdk;
 }
 
-const qol::contracts::HttpRoute kRoutes[] = {
-    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary/list", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/mercenary/{slot}", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/count", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/leader", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/id", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/name", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/level", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/status", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/stats", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment", "core.character", 0,
-     1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/equipment/{equip_slot}",
-     "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kGet, "/api/character/party/{slot}/skills", "core.character", 0,
-     1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/experience", "core.character", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/hp", "core.character", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/level", "core.character", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/mp", "core.character", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/set_attr", "core.character", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/character/{role}/status-point", "core.character", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/op/party/swap", "core.character", 1, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/attack_target", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/cast_skill", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/set_auto_attack", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/combat/{role}/stop_combat", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/combat/switch_player", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/grow/add_skill", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/grow/reset_skill", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/grow/reset_stat", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/grow/{role}/add_stat", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/party/include", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/party/exclude", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/party/discharge", "core.character", 0, 1},
-    {qol::contracts::HttpMethod::kPost, "/api/character/party/withdraw", "core.character", 0, 1},
-};
-
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
     qol::contracts::PluginContext ctx{};
     ctx.struct_size = sizeof(qol::contracts::PluginContext);
@@ -515,12 +475,6 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.ports = kPortArray;
     ctx.port_count = 4;
     return ctx;
-}
-
-void register_frozen_routes() {
-    for (const auto& route : kRoutes) {
-        CHECK(qol::host::http_registry_api().register_route(&route).ok == kQolOk);
-    }
 }
 
 std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
@@ -1084,16 +1038,13 @@ void test_lifecycle_and_responses() {
     g_not_in_game = false;
     g_failed_http_kind = -1;
     g_snapshot_warn_count = 0;
-    register_frozen_routes();
-
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_character::plugin_descriptor();
 
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     CHECK(g_scheduler.interval > 1);
 
@@ -1181,8 +1132,7 @@ void test_lifecycle_and_responses() {
     // 恢复：路由元数据保留，重新绑定后需等待首轮快照。
     g_not_in_game = false;
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).ok == kQolOk);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
     CHECK(g_scheduler.handler != nullptr);
     (void)dispatch_get("/api/character/party", &status);
     CHECK(status == 503);
@@ -1192,7 +1142,7 @@ void test_lifecycle_and_responses() {
     descriptor.deactivate(ctx);
 }
 
-void test_missing_route_rejected() {
+void test_missing_http_provider_keeps_business_installed() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
     g_scheduler = FakeScheduler{};
@@ -1201,11 +1151,13 @@ void test_missing_route_rejected() {
     const qol::contracts::QolHostSdk sdk = make_sdk();
     qol::contracts::PluginContext ctx = make_context(&sdk);
     const auto& descriptor = qol::features::core_character::plugin_descriptor();
+    auto unavailable_http_sdk = sdk;
+    unavailable_http_sdk.http = {};
+    unavailable_http_sdk.http_dispatch = {};
+    ctx.sdk = &unavailable_http_sdk;
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
-    CHECK(qol::host::http_dispatch_register_queries(descriptor.http_queries,
-                                                     descriptor.http_query_count).code ==
-          kQolErrNotFound);
+    CHECK(g_scheduler.handler != nullptr);
     descriptor.on_disabled(ctx);
     CHECK(g_scheduler.handler == nullptr);
     descriptor.deactivate(ctx);
@@ -1215,7 +1167,7 @@ void test_missing_route_rejected() {
 
 int main() {
     test_lifecycle_and_responses();
-    test_missing_route_rejected();
+    test_missing_http_provider_keeps_business_installed();
     std::printf("character_facts_dispatch: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

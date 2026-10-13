@@ -1,0 +1,8 @@
+QOL_HTTP_ROUTE(kPost, "/api/op/quest/accept", "core.quest", 1, 1)
+QOL_HTTP_ROUTE(kPost, "/api/op/quest/complete", "core.quest", 1, 1)
+QOL_HTTP_ROUTE(kPost, "/api/quest/quit_quest", "core.quest", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/quest", "core.quest", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/quest/active", "core.quest", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/quest/details", "core.quest", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/quest/{id}", "core.quest", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/quest/completed", "core.quest", 0, 1)

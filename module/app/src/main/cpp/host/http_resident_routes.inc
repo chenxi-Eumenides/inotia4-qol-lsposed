@@ -1,0 +1,7 @@
+QOL_HTTP_RESIDENT_ROUTE(kGet, "/api/config/list", "settings", 0, 1)
+QOL_HTTP_RESIDENT_ROUTE(kPost, "/api/config/set", "settings", 0, 1)
+QOL_HTTP_RESIDENT_ROUTE(kGet, "/api/config/receipt/{id}", "settings", 0, 1)
+QOL_HTTP_RESIDENT_ROUTE(kPost, "/api/op/features/lifecycle", "core.api", 0, 1)
+QOL_HTTP_RESIDENT_ROUTE(kGet, "/api/debug/ui", "legacy.debug", 0, 1)
+QOL_HTTP_RESIDENT_ROUTE(kGet, "/api/debug/path", "legacy.debug", 0, 1)
+QOL_HTTP_RESIDENT_ROUTE(kGet, "/api/debug/item/raw", "legacy.debug", 0, 1)

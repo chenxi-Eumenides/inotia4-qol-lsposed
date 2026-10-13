@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "contracts/ownership.h"
+#include "contracts/http.h"
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
 #include "contracts/world_facts.h"
@@ -128,13 +129,24 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 5 && d.optional_count == 1 && d.provides_count == 0);
+    CHECK(d.requires_count == 5 && d.optional_count == 2 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
     CHECK(std::strcmp(d.requires[2].id, "world.facts") == 0);
     CHECK(std::strcmp(d.requires[3].id, "item.facts") == 0);
     CHECK(std::strcmp(d.requires[4].id, "save.slot_data") == 0);
     CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
+    CHECK(std::strcmp(d.optional_requires[1].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(d.http_query_count == 0 && d.http_queries == nullptr);
+    CHECK(d.http_endpoint_count == 0 && d.http_endpoints == nullptr);
+    CHECK(d.http_route_metadata_count == 2 && d.http_route_metadata != nullptr);
+    CHECK(d.http_route_metadata[0].method == qol::contracts::HttpMethod::kGet);
+    CHECK(std::strcmp(d.http_route_metadata[0].path, "/api/feature/autosell/config") == 0);
+    CHECK(d.http_route_metadata[1].method == qol::contracts::HttpMethod::kPost);
+    CHECK(std::strcmp(d.http_route_metadata[1].path, "/api/feature/autosell/config") == 0);
+    CHECK(std::strcmp(d.http_route_metadata[0].route_owner, "autosell") == 0);
+    CHECK(d.http_route_metadata[0].op_required == 0 && d.http_route_metadata[0].lease_required == 1);
+    CHECK(d.http_route_metadata[1].op_required == 0 && d.http_route_metadata[1].lease_required == 1);
     CHECK(d.resources_count == 2);
     CHECK(d.on_resource_ready == nullptr);  // kCallPatch/kOwnership 无 backup
     CHECK(d.port_count == 1 &&

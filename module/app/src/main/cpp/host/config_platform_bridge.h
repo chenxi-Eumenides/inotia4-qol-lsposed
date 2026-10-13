@@ -11,8 +11,6 @@ bool config_store_bootstrapped();
 bool config_store_bootstrap_requested();
 void config_store_mark_bootstrapped(bool completed);
 void config_apply_safe_native_state(const ModuleConfig& config);
-void config_apply_api_enabled(bool enabled);
-CoreSettingsRuntimeApplyResult config_platform_last_runtime_apply_result();
 CoreSettingsRuntimeApplyResult config_platform_last_runtime_apply_result();
 
 }  // namespace qol::host

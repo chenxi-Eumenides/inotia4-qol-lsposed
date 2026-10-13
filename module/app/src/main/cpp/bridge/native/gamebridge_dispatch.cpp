@@ -6,6 +6,8 @@
 #include <vector>
 
 #include "host/http_dispatch.h"
+#include "host/http_endpoint_binder.h"
+#include "host/features/production.h"
 #include "infra/config.h"
 
 namespace {
@@ -130,4 +132,41 @@ Java_com_inotia4_qol_NativeBridge_nativeHttpDispatch(JNIEnv* env, jclass, jint m
         return env->NewStringUTF("{\"status\":500,\"body\":\"{\\\"ok\\\":false,\\\"error\\\":\\\"oom\\\"}\"}");
     }
     return env->NewStringUTF("{\"status\":500,\"body\":\"{\\\"ok\\\":false,\\\"error\\\":\\\"oom\\\"}\"}");
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeHttpRouteEnter(JNIEnv* env, jclass, jint method,
+                                                       jstring path, jlongArray lease_out) {
+    if (lease_out == nullptr || env->GetArrayLength(lease_out) < 1) return kQolErrInvalidArgument;
+    const jlong empty_lease = 0;
+    env->SetLongArrayRegion(lease_out, 0, 1, &empty_lease);
+    if (env->ExceptionCheck()) return kQolErrInvalidArgument;
+    if (method != static_cast<jint>(qol::contracts::HttpMethod::kGet) &&
+        method != static_cast<jint>(qol::contracts::HttpMethod::kPost))
+        return kQolErrInvalidArgument;
+    bool input_ok = true;
+    const std::string path_value = read_string(env, path, true, &input_ok);
+    if (!input_ok || path_value.empty()) return kQolErrInvalidArgument;
+
+    uint64_t lease = 0;
+    const QolResult result = qol::host::http_endpoint_binder_route_enter(
+        static_cast<qol::contracts::HttpMethod>(method), path_value.c_str(),
+        static_cast<uint32_t>(path_value.size()), &qol::host::security_op_enabled, &lease);
+    if (!qol::contracts::succeeded(result)) return result.code;
+    const jlong value = static_cast<jlong>(lease);
+    env->SetLongArrayRegion(lease_out, 0, 1, &value);
+    if (env->ExceptionCheck()) {
+        if (lease != 0) (void)qol::host::http_endpoint_binder_route_leave(lease);
+        return kQolErrInvalidArgument;
+    }
+    return kQolOk;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_inotia4_qol_NativeBridge_nativeHttpRouteLeave(JNIEnv*, jclass, jlong lease) {
+    if (lease == 0) return kQolOk;
+    if (lease < 0) return kQolErrInvalidArgument;
+    const QolResult result = qol::host::http_endpoint_binder_route_leave(
+        static_cast<uint64_t>(lease));
+    return result.code;
 }

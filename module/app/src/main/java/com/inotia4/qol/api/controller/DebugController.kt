@@ -6,11 +6,13 @@ import com.inotia4.qol.service.info.NativeHttpQuery
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
 import com.inotia4.qol.util.JsonUtil
+import com.inotia4.qol.util.withNativeRouteLease
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PostMapping
 import com.yanzhenjie.andserver.annotation.RequestBody
 import com.yanzhenjie.andserver.annotation.RequestParam
 import com.yanzhenjie.andserver.annotation.RestController
+import com.yanzhenjie.andserver.http.HttpRequest
 import com.yanzhenjie.andserver.http.StatusCode
 
 /**
@@ -23,26 +25,29 @@ import com.yanzhenjie.andserver.http.StatusCode
 class DebugController {
 
     @GetMapping("/api/debug/ui")
-    fun ui(): String = ControllerGuard.guard { ApiServices.info.debugUi() }
+    fun ui(request: HttpRequest): String =
+        withNativeRouteLease(request) { ControllerGuard.guard { ApiServices.info.debugUi() } }
 
     @GetMapping("/api/debug/path")
-    fun path(@RequestParam("tx") tx: Int, @RequestParam("ty") ty: Int): String =
-        ControllerGuard.guard { ApiServices.info.debugPath(tx, ty) }
+    fun path(@RequestParam("tx") tx: Int, @RequestParam("ty") ty: Int, request: HttpRequest): String =
+        withNativeRouteLease(request) { ControllerGuard.guard { ApiServices.info.debugPath(tx, ty) } }
 
     /** 仅测试/调试：读槽位物品原始字节 + 位分解（纯读取，bag 0..10 含扩展袋） */
     @GetMapping("/api/debug/item/raw")
-    fun itemRaw(@RequestParam("bag") bag: Int, @RequestParam("slot") slot: Int): String {
-        if (bag < 0 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (0-10)")
-        if (slot < 0 || slot > 15) throw ApiException(StatusCode.SC_BAD_REQUEST, "slot required (0-15)")
-        return ControllerGuard.guard { ApiServices.info.debugItemRaw(bag, slot) }
-    }
+    fun itemRaw(@RequestParam("bag") bag: Int, @RequestParam("slot") slot: Int, request: HttpRequest): String =
+        withNativeRouteLease(request) {
+            if (bag < 0 || bag > 10) throw ApiException(StatusCode.SC_BAD_REQUEST, "bag required (0-10)")
+            if (slot < 0 || slot > 15) throw ApiException(StatusCode.SC_BAD_REQUEST, "slot required (0-15)")
+            ControllerGuard.guard { ApiServices.info.debugItemRaw(bag, slot) }
+        }
 
     @PostMapping("/api/debug/settings-ui/inject")
     fun settingsUiInject(): String =
         ControllerGuard.guard { NativeHttpCommand.post("/api/debug/settings-ui/inject", null) }
 
     @GetMapping("/api/debug/settings-ui/status")
-    fun settingsUiStatus(): String = ControllerGuard.guard { ApiServices.info.settingsUiStatus() }
+    fun settingsUiStatus(request: HttpRequest): String =
+        withNativeRouteLease(request) { ControllerGuard.guard { ApiServices.info.settingsUiStatus() } }
 
     @PostMapping("/api/debug/settings-ui/restore")
     fun settingsUiRestore(): String =

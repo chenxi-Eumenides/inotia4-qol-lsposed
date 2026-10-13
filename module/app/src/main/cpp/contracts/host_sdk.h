@@ -370,6 +370,40 @@ struct QolFeatureControlApi {
     QolResult (*read_actual)(void*, const char*, int32_t*, uint8_t*);
 };
 
+// 当前插件的 Host runtime 投影事件。Host 在 observer 回调期间借出字符串；调用方若异步
+// 保存事件内容，必须在回调返回前复制这些字符串。
+struct QolPluginRuntimeEffect {
+    uint32_t struct_size;
+    uint64_t event_revision;
+    uint64_t config_revision;
+    const char* plugin_id;
+    uint8_t actual_enabled;
+    const char* config_json;
+    uint32_t config_json_size;
+    uint8_t desired_enabled;
+};
+
+using QolPluginRuntimeObserver = void (*)(void* context,
+                                          const QolPluginRuntimeEffect* effect);
+
+struct QolRuntimeEffectsApi {
+    uint32_t struct_size;
+    void* context;
+    // Host validates owner and scopes this subscription to that plugin. Success synchronously
+    // replays current actual/desired/config state; later callbacks carry monotonically increasing events.
+    QolResult (*subscribe_self)(void*, QolOwnerToken, QolPluginRuntimeObserver, void*,
+                                uint64_t* out_id);
+    // Callback delivery is outside the Host hub lock. Unsubscribe removes this owner's subscription.
+    QolResult (*unsubscribe)(void*, QolOwnerToken, uint64_t id);
+};
+
+// Host-owned operation permission query. It is independent of API service availability.
+struct QolSecurityApi {
+    uint32_t struct_size;
+    void* context;
+    QolResult (*op_enabled)(void*, uint8_t* out_enabled);
+};
+
 struct QolHostSdk {
     QolAbiHeader abi;
     QolLogApi log;
@@ -417,11 +451,16 @@ struct QolHostSdk {
     const QolFeatureApi* feature;
     // Null in ordinary SDKs. Only Host-selected management SDKs expose this channel.
     const QolFeatureControlApi* feature_control;
+    // v1.23 tail: per-plugin runtime projection observer; null when unavailable.
+    const QolRuntimeEffectsApi* runtime_effects;
+    // v1.23 tail: generic OP permission query; null when unavailable.
+    const QolSecurityApi* security;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
-// minor 22 adds owner feature/config and explicitly supplied resident management tails.
-constexpr uint16_t kHostSdkMinor = 22;
+// minor 22 adds owner feature/config and resident management; minor 23 adds runtime/security APIs;
+// minor 24 appends desired lifecycle state to runtime effects.
+constexpr uint16_t kHostSdkMinor = 24;
 
 inline const QolFeatureApi* feature_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, feature) + sizeof(const QolFeatureApi*);
@@ -444,8 +483,8 @@ inline const QolFeatureControlApi* feature_control_if_available(const QolHostSdk
     if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 22 ||
         sdk->abi.size < end) return nullptr;
     const auto* api = sdk->feature_control;
-    constexpr std::size_t required = offsetof(QolFeatureControlApi, invoke_entry) +
-                                     sizeof(QolFeatureControlApi::invoke_entry);
+    constexpr std::size_t required = offsetof(QolFeatureControlApi, read_actual) +
+                                     sizeof(QolFeatureControlApi::read_actual);
     if (api == nullptr || api->struct_size < required || api->read_catalog == nullptr ||
         api->read_desired == nullptr || api->read_feature == nullptr ||
         api->request_set_feature == nullptr || api->request_desired == nullptr ||

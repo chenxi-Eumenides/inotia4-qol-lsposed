@@ -14,6 +14,7 @@
 
 #include "game_host.h"
 #include "game_ports/ports.h"
+#include "http.h"
 #include "host_sdk.h"
 #include "owner_token.h"
 #include "version.h"
@@ -133,6 +134,41 @@ struct PluginContext {
     QolOwnerToken owner_token;  // 宿主按真实注册身份注入，插件不得自报。
 };
 
+enum class HttpHandlerKind : uint8_t {
+    kQuery = 0,
+    kCommand = 1,
+};
+
+// HTTP route label is independent of the lifecycle owner, which is PluginDescriptor::id.
+// Endpoint storage, strings, handlers and ctx must remain valid while the descriptor is registered.
+// GET endpoints use query_handler; POST endpoints use command_handler; exactly the selected
+// handler is non-null. The function pointer types are the existing Http*HandlerFn ABI.
+struct HttpEndpointDescriptor {
+    HttpMethod method;
+    const char* path;
+    const char* route_owner;
+    HttpHandlerKind kind;
+    uint8_t op_required;
+    uint8_t lease_required;
+    HttpQueryHandlerFn query_handler;
+    HttpCommandHandlerFn command_handler;
+    void* ctx;
+};
+
+// HTTP route metadata for transports whose handler is owned outside the native endpoint registry.
+// This descriptor carries no handler or context and does not imply a native dispatch stub.
+struct HttpRouteMetadataDescriptor {
+    HttpMethod method;
+    const char* path;
+    const char* route_owner;
+    uint8_t op_required;
+    uint8_t lease_required;
+};
+
+// json/json_size is a borrowed raw JSON value span for one config key.
+using PluginConfigValidateFn = QolResult (*)(const char* key, const char* json,
+                                             uint32_t json_size);
+
 constexpr size_t PLUGIN_CONTEXT_STRUCT_SIZE = sizeof(PluginContext);
 constexpr size_t PLUGIN_CONTEXT_PORTS_STRUCT_SIZE =
     offsetof(PluginContext, ports) + sizeof(const void* const*) + sizeof(uint32_t);
@@ -163,11 +199,19 @@ struct PluginDescriptor {
     // 端口需求追加在描述符尾部，旧宿主只读取此前字段。
     const QolPortRequirement* ports = nullptr;
     uint32_t port_count = 0;
-    // HTTP query handler 声明追加在端口字段之后；宿主按插件生命周期注册/撤销。
+    // Deprecated compatibility declarations retained for intermediate descriptors.
+    // New declarations use http_endpoints; existing fields and offsets remain unchanged.
     const HttpQueryHandlerDescriptor* http_queries = nullptr;
     uint32_t http_query_count = 0;
     const FeatureDefinition* features = nullptr;
     uint32_t feature_count = 0;
+    // New typed endpoint declarations are appended after the complete compatibility prefix.
+    const HttpEndpointDescriptor* http_endpoints = nullptr;
+    uint32_t http_endpoint_count = 0;
+    PluginConfigValidateFn validate_config = nullptr;
+    // Metadata-only HTTP routes are a distinct tail from handler-bearing http_endpoints.
+    const HttpRouteMetadataDescriptor* http_route_metadata = nullptr;
+    uint32_t http_route_metadata_count = 0;
 };
 
 }  // namespace qol::contracts

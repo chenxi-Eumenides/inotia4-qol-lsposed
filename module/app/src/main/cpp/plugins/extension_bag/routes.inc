@@ -1,0 +1,8 @@
+QOL_HTTP_ROUTE(kGet, "/api/debug/extension_bag/status", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/enter_view", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/exit_view", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/unequip", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/select_bag", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/click_item", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/equip", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/item", "extension_bag", 0, 1)

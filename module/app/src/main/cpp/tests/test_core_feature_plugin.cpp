@@ -23,17 +23,34 @@ int main() {
     const auto& descriptor = features::core_feature::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.feature") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
-    CHECK(std::strcmp(descriptor.requires[0].id, contracts::kHttpRegistryCapabilityId) == 0);
-    CHECK(std::strcmp(descriptor.requires[1].id, contracts::kHttpDispatchCapabilityId) == 0);
+    CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
+    CHECK(descriptor.optional_count == 2 && descriptor.optional_requires != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      contracts::kHttpDispatchCapabilityId) == 0);
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 1 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 0 && descriptor.http_route_metadata == nullptr);
     CHECK(descriptor.provides_count == 0 && descriptor.port_count == 0);
 
-    const contracts::HttpRoute route{contracts::HttpMethod::kPost, kPath, "core.feature", 0, 1};
+    const auto& endpoint = descriptor.http_endpoints[0];
+    CHECK(endpoint.method == contracts::HttpMethod::kPost);
+    CHECK(std::strcmp(endpoint.path, kPath) == 0);
+    CHECK(std::strcmp(endpoint.route_owner, "core.feature") == 0);
+    CHECK(endpoint.kind == contracts::HttpHandlerKind::kCommand);
+    CHECK(endpoint.op_required == 0 && endpoint.lease_required == 1);
+    CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
+    const contracts::HttpRoute route{endpoint.method, endpoint.path, endpoint.route_owner,
+                                     endpoint.op_required, endpoint.lease_required};
     CHECK(host::http_registry_api().register_route(&route).ok == kQolOk);
     contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(sdk), contracts::kHostSdkMajor, contracts::kHostSdkMinor};
     sdk.http = host::http_registry_api();
     sdk.http_dispatch = host::http_dispatch_api();
+    CHECK(host::http_dispatch_api().register_command(
+              endpoint.method, endpoint.path, endpoint.route_owner,
+              endpoint.command_handler, endpoint.ctx).ok == kQolOk);
     contracts::PluginContext context{};
     context.struct_size = sizeof(context);
     context.sdk_major = contracts::kHostSdkMajor;
@@ -56,6 +73,7 @@ int main() {
     CHECK(std::string(storage, response.body_size) == kExpectedBody);
 
     descriptor.deactivate(context);
+    CHECK(host::http_dispatch_api().unregister_owner("core.feature").ok == kQolOk);
     response = {reinterpret_cast<uint8_t*>(storage), sizeof(storage), 0, 0};
     CHECK(!contracts::succeeded(host::http_dispatch_api().dispatch(&request, &response)));
     CHECK(response.status == 503);

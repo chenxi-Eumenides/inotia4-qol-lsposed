@@ -32,8 +32,8 @@ constexpr contracts::HttpRoute kRoutes[] = {
     {contracts::HttpMethod::kGet, "/api/system/events", kPluginId, 0, 1},
 };
 
-constexpr Query kQueries[] = {Query::kSnapshot, Query::kGame, Query::kInfo, Query::kFrame,
-                              Query::kEvents};
+Query kQueries[] = {Query::kSnapshot, Query::kGame, Query::kInfo, Query::kFrame,
+                    Query::kEvents};
 
 enum class SnapshotState : uint8_t { kUnavailable, kReady };
 
@@ -59,7 +59,7 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_SYSTEM, {1, 1}},
 };
 
-const contracts::CapabilityRequirement kRequires[] = {
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
     {contracts::kHttpRegistryCapabilityId, {contracts::kHttpRegistryVersion.major,
                                             contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId, {contracts::kHttpDispatchVersion.major,
@@ -197,12 +197,17 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
     return response_error(response, 500, "unknown system query");
 }
 
-const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
-    {kRoutes[0].method, kRoutes[0].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[0])},
-    {kRoutes[1].method, kRoutes[1].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[1])},
-    {kRoutes[2].method, kRoutes[2].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[2])},
-    {kRoutes[3].method, kRoutes[3].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[3])},
-    {kRoutes[4].method, kRoutes[4].path, kPluginId, &query_handler, const_cast<Query*>(&kQueries[4])},
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {kRoutes[0].method, kRoutes[0].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[0]},
+    {kRoutes[1].method, kRoutes[1].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[1]},
+    {kRoutes[2].method, kRoutes[2].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[2]},
+    {kRoutes[3].method, kRoutes[3].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[3]},
+    {kRoutes[4].method, kRoutes[4].path, kPluginId, contracts::HttpHandlerKind::kQuery,
+     0, 1, &query_handler, nullptr, &kQueries[4]},
 };
 
 void stop_frame_task(const contracts::QolHostSdk* sdk) {
@@ -290,10 +295,10 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2,
-    kRequires,
     0,
     nullptr,
+    2,
+    kOptionalHttpRequires,
     0,
     nullptr,
     0,
@@ -308,9 +313,13 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     kPorts,
     1,
-    kHttpQueries,
-    static_cast<uint32_t>(sizeof(kHttpQueries) / sizeof(kHttpQueries[0])),
+    nullptr,
+    0,
     kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

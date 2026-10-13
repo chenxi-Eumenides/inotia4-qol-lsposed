@@ -26,6 +26,11 @@ void test_set_item_port_version(::QolVersion version);
 #include "patch/claims.h"
 #include "patch/instr_patch.h"
 
+namespace qol::host {
+void runtime_effects_publish_actual(const char*, bool) {}
+void runtime_effects_unsubscribe_plugin(const char*) {}
+}  // namespace qol::host
+
 // game/access/ptr_slots.cpp 经 save_slot_delete_hook_target 解析槽站点；test_stubs.cpp 提供
 // 可控实现，测试经这三个全局量构造站点（host 不依赖真实游戏 GOT）。
 namespace qol::game {

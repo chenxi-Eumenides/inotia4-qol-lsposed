@@ -21,6 +21,10 @@ find_package(JNI REQUIRED)
 
 set(CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+# Test builds inject the generic Host security authorizer instead of linking the production feature facade.
+set_source_files_properties(${CPP_DIR}/host/http_dispatch.cpp PROPERTIES
+    COMPILE_DEFINITIONS QOL_HTTP_DISPATCH_TEST_SEAMS=1)
+
 # 注：game_tiles.cpp 不在此列表——test_host.cpp 直接 #include 它，
 # 以访问匿名命名空间的 base64_decode/parse_int_field（内部纯函数）。
 add_executable(host_tests
@@ -203,6 +207,7 @@ target_include_directories(host_tests PRIVATE
 )
 
 target_compile_features(host_tests PRIVATE cxx_std_17)
+target_compile_definitions(host_tests PRIVATE QOL_CALL_PATCH_TEST_SEAMS=1)
 
 add_test(NAME host_tests COMMAND host_tests)
 
@@ -485,6 +490,7 @@ set_target_properties(production_feature_facade_tests PROPERTIES CXX_STANDARD 17
 target_link_libraries(production_feature_facade_tests PRIVATE Threads::Threads)
 add_test(NAME production_feature_facade_tests
     COMMAND production_feature_facade_tests ${CMAKE_CURRENT_BINARY_DIR})
+
 add_executable(command_queue_overflow_tests
     test_command_queue_overflow.cpp
     ${CPP_DIR}/infra/command_queue.cpp
@@ -591,6 +597,7 @@ add_executable(plugin_registry_tests
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
+    ${CPP_DIR}/host/http_endpoint_binder.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
     ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/hooks/registry.cpp
@@ -668,6 +675,7 @@ add_executable(plugin_lifecycle_tests
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
+    ${CPP_DIR}/host/http_endpoint_binder.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
@@ -728,6 +736,7 @@ add_executable(capability_lifecycle_tests
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
+    ${CPP_DIR}/host/http_endpoint_binder.cpp
     ${CPP_DIR}/hooks/registry.cpp
     ${CPP_DIR}/hooks/install.cpp
     ${CPP_DIR}/hooks/transaction.cpp
@@ -1206,7 +1215,12 @@ add_executable(http_dispatch_tests
     test_http_dispatch.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
+    ${CPP_DIR}/infra/commands.cpp
+    ${CPP_DIR}/infra/command_queue.cpp
+    ${CPP_DIR}/infra/config.cpp
+    ${CPP_DIR}/infra/events.cpp
 )
+target_compile_definitions(http_dispatch_tests PRIVATE QOL_HTTP_DISPATCH_TEST_SEAMS=1)
 target_include_directories(http_dispatch_tests PRIVATE
     ${CPP_DIR}
 )
@@ -1214,6 +1228,19 @@ target_compile_features(http_dispatch_tests PRIVATE cxx_std_17)
 set_target_properties(http_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(http_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME http_dispatch_tests COMMAND http_dispatch_tests)
+
+# Phase 2 endpoint binder: optional-provider lifecycle, owner labels, metadata-only routes and leases.
+add_executable(http_endpoint_binder_tests
+    test_http_endpoint_binder.cpp
+    ${CPP_DIR}/host/http_endpoint_binder.cpp
+    ${CPP_DIR}/host/http_registry.cpp
+    ${CPP_DIR}/host/http_dispatch.cpp)
+target_include_directories(http_endpoint_binder_tests PRIVATE ${CPP_DIR})
+target_compile_features(http_endpoint_binder_tests PRIVATE cxx_std_17)
+set_target_properties(http_endpoint_binder_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(http_endpoint_binder_tests PRIVATE Threads::Threads)
+add_test(NAME http_endpoint_binder_tests COMMAND http_endpoint_binder_tests)
 
 # 批 5-0：/api/op/features/lifecycle owner command handler 响应形状（成功/失败/未知动作/投递失败）。
 add_executable(core_api_lifecycle_tests
@@ -1373,7 +1400,7 @@ add_test(NAME native_scroll_list_tests COMMAND native_scroll_list_tests)
 add_executable(settings_panel_widget_tests test_settings_panel_widget.cpp)
 target_include_directories(settings_panel_widget_tests PRIVATE
     ${CPP_DIR}
-    ${CPP_DIR}/plugins/core.settings
+    ${CPP_DIR}/plugins/settings
     ${CPP_DIR}/plugins/core.settings/panels
 )
 target_compile_features(settings_panel_widget_tests PRIVATE cxx_std_17)
@@ -1476,6 +1503,7 @@ add_executable(world_facts_dispatch_tests
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
 )
+target_compile_definitions(world_facts_dispatch_tests PRIVATE QOL_HTTP_DISPATCH_TEST_SEAMS=1)
 target_include_directories(world_facts_dispatch_tests PRIVATE
     ${CPP_DIR}
 )
@@ -1578,6 +1606,7 @@ add_executable(item_facts_dispatch_tests
     # T2h-B3#2：debug raw 整函数搬迁后的新落点
     ${CPP_DIR}/game/read/item_class.cpp
 )
+target_compile_definitions(item_facts_dispatch_tests PRIVATE QOL_HTTP_DISPATCH_TEST_SEAMS=1)
 target_include_directories(item_facts_dispatch_tests PRIVATE
     ${CPP_DIR}
     ${CPP_DIR}/game/symbols
@@ -1613,6 +1642,7 @@ add_executable(character_facts_dispatch_tests
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
 )
+target_compile_definitions(character_facts_dispatch_tests PRIVATE QOL_HTTP_DISPATCH_TEST_SEAMS=1)
 target_include_directories(character_facts_dispatch_tests PRIVATE
     ${CPP_DIR}
 )

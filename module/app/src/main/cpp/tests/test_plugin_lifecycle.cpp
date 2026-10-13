@@ -18,6 +18,11 @@
 #include "infra/events.h"
 #include "infra/status.h"
 
+namespace qol::host {
+void runtime_effects_publish_actual(const char*, bool) {}
+void runtime_effects_unsubscribe_plugin(const char*) {}
+}  // namespace qol::host
+
 static int g_pass = 0;
 static int g_fail = 0;
 
@@ -358,8 +363,10 @@ void test_zero_resource_lifecycle_is_explicit_noop() {
     CHECK(g_probe.install_calls == 1);
     CHECK(g_probe.enabled_calls == 1);
 
-    // 无资源插件仍需执行 deactivate 回调并直接进入 inactive，不启动事务。
+    // 无资源插件的 deactivate 也先走非阻塞 HTTP/owner drain 帧点。
     CHECK(lifecycle_apply("test_zero_lifecycle", qol::contracts::kFeatureLifecycleDeactivate));
+    CHECK(feature_state_is("test_zero_lifecycle", FeatureState::kDeactivating));
+    CHECK(lifecycle_step() > 0);
     CHECK(feature_state_is("test_zero_lifecycle", FeatureState::kInactive));
     CHECK(g_probe.deactivate_calls == 1);
     CHECK(lifecycle_step() == 0);

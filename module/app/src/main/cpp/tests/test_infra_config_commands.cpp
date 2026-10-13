@@ -9,6 +9,7 @@
 #include "infra/commands.h"
 #include "infra/config.h"
 #include "infra/events.h"
+#include "infra/request_policy.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -47,6 +48,87 @@ const char* g_last_key = nullptr;
 int32_t g_last_value = 0;
 uint32_t g_typed_calls = 0;
 uint32_t g_typed_value = 0;
+bool g_request_op_allowed = false;
+uint32_t g_request_op_checks = 0;
+uint32_t g_lifecycle_calls = 0;
+
+bool test_lifecycle_handler(const char* plugin_id, int32_t action) {
+    ++g_lifecycle_calls;
+    return plugin_id != nullptr && std::strcmp(plugin_id, "policy.owner") == 0 &&
+           action == qol::contracts::kFeatureLifecycleEnable;
+}
+
+bool request_op_authorizer() {
+    ++g_request_op_checks;
+    return g_request_op_allowed;
+}
+
+bool write_command_result(char* out, uint32_t capacity, uint32_t* out_size,
+                          const char* body) {
+    const uint32_t size = static_cast<uint32_t>(std::strlen(body));
+    if (out == nullptr || out_size == nullptr || size > capacity) return false;
+    std::memcpy(out, body, size);
+    *out_size = size;
+    return true;
+}
+
+struct RequestPolicyContext {
+    uint32_t calls = 0;
+};
+
+bool request_policy_handler(void* raw, const uint8_t*, uint32_t, char* out, uint32_t capacity,
+                            uint32_t* out_size) {
+    auto* context = static_cast<RequestPolicyContext*>(raw);
+    ++context->calls;
+    return write_command_result(out, capacity, out_size, "{\"ok\":true}");
+}
+
+struct NestedRequestContext {
+    uint32_t calls = 0;
+    QolCommandTicket child_ticket = 0;
+};
+
+bool nested_child_handler(void* raw, const uint8_t*, uint32_t, char* out, uint32_t capacity,
+                          uint32_t* out_size) {
+    auto* context = static_cast<RequestPolicyContext*>(raw);
+    ++context->calls;
+    return write_command_result(out, capacity, out_size, "{\"ok\":true}");
+}
+
+bool nested_parent_handler(void* raw, const uint8_t*, uint32_t, char* out, uint32_t capacity,
+                           uint32_t* out_size) {
+    auto* context = static_cast<NestedRequestContext*>(raw);
+    ++context->calls;
+    constexpr uint32_t kChildHandlerId = 42;
+    const uint8_t payload = 1;
+    const qol::infra::ScopedRequestPolicy child_scope(qol::infra::RequestPolicy{false});
+    const QolResult posted = commands_port().post_typed(kChildHandlerId, &payload,
+                                                        sizeof(payload), &context->child_ticket);
+    if (!qol::contracts::succeeded(posted)) return false;
+    return write_command_result(out, capacity, out_size, "{\"ok\":true}");
+}
+
+struct DeferredRequestContext {
+    uint32_t calls = 0;
+};
+
+bool deferred_request_handler(void* raw, const uint8_t*, uint32_t, char* out, uint32_t capacity,
+                              uint32_t* out_size) {
+    auto* context = static_cast<DeferredRequestContext*>(raw);
+    ++context->calls;
+    if (context->calls == 1 &&
+        !qol::contracts::succeeded(qol::infra::commands_defer_current_result())) return false;
+    return write_command_result(out, capacity, out_size, "{\"ok\":true}");
+}
+
+bool command_result_is(QolCommandTicket ticket, const char* expected) {
+    char result[128]{};
+    uint32_t result_size = 0;
+    if (!qol::contracts::succeeded(qol::infra::commands_read_result(
+            ticket, result, sizeof(result) - 1, &result_size))) return false;
+    result[result_size] = '\0';
+    return std::strcmp(result, expected) == 0;
+}
 
 void on_config_changed(void* ctx, const void* payload) {
     (void)ctx;
@@ -59,6 +141,8 @@ void on_config_changed(void* ctx, const void* payload) {
 void reset_all() {
     commands_reset_for_test();
     command_queue_reset_for_test();
+    qol::infra::commands_set_lifecycle_handler(nullptr);
+    qol::infra::set_request_op_authorizer(nullptr);
     config_reset_for_test();
     events_reset_for_test();
     g_event_count = 0;
@@ -66,6 +150,9 @@ void reset_all() {
     g_last_value = 0;
     g_typed_calls = 0;
     g_typed_value = 0;
+    g_request_op_allowed = false;
+    g_request_op_checks = 0;
+    g_lifecycle_calls = 0;
 }
 
 void subscribe_config_changed() {
@@ -349,6 +436,122 @@ void test_typed_result_commands() {
     CHECK(qol::infra::commands_unregister_typed_result_handler(kResultId).ok == 0);
 }
 
+void test_request_policy_authorizes_at_execution_and_inherits() {
+    reset_all();
+    qol::infra::set_request_op_authorizer(&request_op_authorizer);
+    constexpr uint32_t kGuardedHandlerId = 41;
+    constexpr uint32_t kChildHandlerId = 42;
+    constexpr uint32_t kParentHandlerId = 43;
+    constexpr uint32_t kDeferredHandlerId = 44;
+    RequestPolicyContext guarded_context{};
+    RequestPolicyContext child_context{};
+    NestedRequestContext parent_context{};
+    DeferredRequestContext deferred_context{};
+    CHECK(qol::infra::commands_register_typed_result_handler(
+              kGuardedHandlerId, &request_policy_handler, &guarded_context).ok == 0);
+    CHECK(qol::infra::commands_register_typed_result_handler(
+              kChildHandlerId, &nested_child_handler, &child_context).ok == 0);
+    CHECK(qol::infra::commands_register_typed_result_handler(
+              kParentHandlerId, &nested_parent_handler, &parent_context).ok == 0);
+    CHECK(qol::infra::commands_register_typed_result_handler(
+              kDeferredHandlerId, &deferred_request_handler, &deferred_context).ok == 0);
+    const auto& port = commands_port();
+    const uint8_t payload = 7;
+
+    QolCommandTicket denied_ticket = 0;
+    {
+        const qol::infra::ScopedRequestPolicy request_scope(qol::infra::RequestPolicy{true});
+        CHECK(port.post_typed(kGuardedHandlerId, &payload, sizeof(payload), &denied_ticket).ok == 0);
+    }
+    CHECK(denied_ticket != 0);
+    g_request_op_allowed = false;
+    CHECK(commands_drain() == 1);
+    CHECK(port.state(denied_ticket) == static_cast<int32_t>(CommandState::kFailed));
+    CHECK(guarded_context.calls == 0 && g_request_op_checks == 1);
+    CHECK(command_result_is(denied_ticket, "{\"ok\":false,\"error\":\"op disabled\"}"));
+
+    g_request_op_allowed = true;
+    QolCommandTicket allowed_ticket = 0;
+    {
+        const qol::infra::ScopedRequestPolicy request_scope(qol::infra::RequestPolicy{true});
+        CHECK(port.post_typed(kGuardedHandlerId, &payload, sizeof(payload), &allowed_ticket).ok == 0);
+    }
+    CHECK(commands_drain() == 1);
+    CHECK(port.state(allowed_ticket) == static_cast<int32_t>(CommandState::kDone));
+    CHECK(guarded_context.calls == 1 && g_request_op_checks == 2);
+    CHECK(command_result_is(allowed_ticket, "{\"ok\":true}"));
+
+    g_request_op_allowed = true;
+    QolCommandTicket parent_ticket = 0;
+    {
+        const qol::infra::ScopedRequestPolicy request_scope(qol::infra::RequestPolicy{true});
+        CHECK(port.post_typed(kParentHandlerId, &payload, sizeof(payload), &parent_ticket).ok == 0);
+    }
+    CHECK(commands_drain() == 1);
+    CHECK(parent_context.calls == 1 && parent_context.child_ticket != 0);
+    CHECK(port.state(parent_ticket) == static_cast<int32_t>(CommandState::kDone));
+    CHECK(port.state(parent_context.child_ticket) == static_cast<int32_t>(CommandState::kPending));
+    g_request_op_allowed = false;
+    CHECK(commands_drain() == 1);
+    CHECK(child_context.calls == 0);
+    CHECK(port.state(parent_context.child_ticket) == static_cast<int32_t>(CommandState::kFailed));
+    CHECK(command_result_is(parent_context.child_ticket,
+                            "{\"ok\":false,\"error\":\"op disabled\"}"));
+
+    g_request_op_allowed = true;
+    QolCommandTicket deferred_ticket = 0;
+    {
+        const qol::infra::ScopedRequestPolicy request_scope(qol::infra::RequestPolicy{true});
+        CHECK(port.post_typed(kDeferredHandlerId, &payload, sizeof(payload), &deferred_ticket).ok == 0);
+    }
+    CHECK(commands_drain() == 1);
+    CHECK(deferred_context.calls == 1);
+    CHECK(port.state(deferred_ticket) == static_cast<int32_t>(CommandState::kPending));
+    g_request_op_allowed = false;
+    CHECK(commands_drain() == 1);
+    CHECK(deferred_context.calls == 1);
+    CHECK(port.state(deferred_ticket) == static_cast<int32_t>(CommandState::kFailed));
+    CHECK(command_result_is(deferred_ticket, "{\"ok\":false,\"error\":\"op disabled\"}"));
+
+    const uint32_t checks_before_unrestricted = g_request_op_checks;
+    QolCommandTicket unrestricted_ticket = 0;
+    CHECK(port.post_typed(kGuardedHandlerId, &payload, sizeof(payload), &unrestricted_ticket).ok == 0);
+    CHECK(commands_drain() == 1);
+    CHECK(guarded_context.calls == 2);
+    CHECK(g_request_op_checks == checks_before_unrestricted);
+    CHECK(port.state(unrestricted_ticket) == static_cast<int32_t>(CommandState::kDone));
+}
+
+void test_request_policy_covers_non_typed_sdk_commands() {
+    reset_all();
+    qol::infra::set_request_op_authorizer(&request_op_authorizer);
+    qol::infra::commands_set_lifecycle_handler(&test_lifecycle_handler);
+    const auto& port = commands_port();
+    const QolCommand command{qol::contracts::kCommandFeatureLifecycle, "policy.owner",
+                             qol::contracts::kFeatureLifecycleEnable};
+
+    QolCommandTicket denied_ticket = 0;
+    {
+        const qol::infra::ScopedRequestPolicy request_scope(qol::infra::RequestPolicy{true});
+        CHECK(port.post(&denied_ticket, &command).ok == 0);
+    }
+    g_request_op_allowed = false;
+    CHECK(commands_drain() == 1);
+    CHECK(port.state(denied_ticket) == static_cast<int32_t>(CommandState::kFailed));
+    CHECK(g_lifecycle_calls == 0);
+    CHECK(command_result_is(denied_ticket, "{\"ok\":false,\"error\":\"op disabled\"}"));
+
+    QolCommandTicket allowed_ticket = 0;
+    {
+        const qol::infra::ScopedRequestPolicy request_scope(qol::infra::RequestPolicy{true});
+        CHECK(port.post(&allowed_ticket, &command).ok == 0);
+    }
+    g_request_op_allowed = true;
+    CHECK(commands_drain() == 1);
+    CHECK(port.state(allowed_ticket) == static_cast<int32_t>(CommandState::kDone));
+    CHECK(g_lifecycle_calls == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -365,6 +568,8 @@ int main() {
     test_commands_invalid();
     test_typed_commands();
     test_typed_result_commands();
+    test_request_policy_authorizes_at_execution_and_inherits();
+    test_request_policy_covers_non_typed_sdk_commands();
     std::printf("infra_config_commands: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

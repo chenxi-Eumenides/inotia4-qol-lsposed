@@ -38,21 +38,6 @@ constexpr char kEmptyTable[] = "{\"records\":[]}";
 constexpr char kExits[] =
     "{\"m0\":{\"exits\":[{\"x\":1,\"y\":2,\"targetMapId\":3,\"targetX\":4,\"targetY\":5}]}}";
 
-const qol::contracts::HttpRoute kRoutes[] = {
-    {HttpMethod::kGet, "/api/world/maps/list", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/world/maps/{map_id}", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/world/maps/{map_id}/tiles", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/world/maps/{map_id}/exits", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/tables", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/tables/{table}", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/tables/{table}/search", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/tables/{table}/download", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/tables/story-events", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/tables/text", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/help", "core.data", 0, 1},
-    {HttpMethod::kGet, "/api/system/download", "core.data", 0, 1},
-};
-
 qol::contracts::QolHostSdk make_sdk() {
     qol::contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(sdk), qol::contracts::kHostSdkMajor, qol::contracts::kHostSdkMinor};
@@ -131,21 +116,38 @@ DispatchResult dispatch(const char* path, const char* query = nullptr,
     return {status, std::string(reinterpret_cast<const char*>(storage.data()), size), result.ok};
 }
 
-void register_routes() {
-    for (const auto& route : kRoutes)
+void register_routes(const qol::contracts::PluginDescriptor& descriptor) {
+    for (uint32_t index = 0; index < descriptor.http_endpoint_count; ++index) {
+        const auto& endpoint = descriptor.http_endpoints[index];
+        const qol::contracts::HttpRoute route{endpoint.method, endpoint.path, endpoint.route_owner,
+                                               endpoint.op_required, endpoint.lease_required};
         CHECK(qol::host::http_registry_api().register_route(&route).ok == kQolOk);
+        const QolResult registered = endpoint.kind == qol::contracts::HttpHandlerKind::kQuery
+            ? qol::host::http_dispatch_api().register_query(
+                  endpoint.method, endpoint.path, endpoint.route_owner,
+                  endpoint.query_handler, endpoint.ctx)
+            : qol::host::http_dispatch_api().register_command(
+                  endpoint.method, endpoint.path, endpoint.route_owner,
+                  endpoint.command_handler, endpoint.ctx);
+        CHECK(registered.ok == kQolOk);
+    }
 }
 
 void test_descriptor_and_basic_responses(const qol::contracts::PluginDescriptor& descriptor,
                                          qol::contracts::PluginContext& context) {
     CHECK(std::strcmp(descriptor.id, "core.data") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
-    CHECK(descriptor.requires_count == 2 && descriptor.requires != nullptr);
-    CHECK(std::strcmp(descriptor.requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
-    CHECK(std::strcmp(descriptor.requires[1].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
+    CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
+    CHECK(descriptor.optional_count == 2 && descriptor.optional_requires != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[0].id,
+                      qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(descriptor.optional_requires[1].id,
+                      qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kStaticDataCapabilityId) == 0);
-    CHECK(descriptor.http_query_count == 0);
+    CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    CHECK(descriptor.http_endpoint_count == 12 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 0 && descriptor.http_route_metadata == nullptr);
     CHECK(!qol::contracts::succeeded(qol::features::core_data::begin_asset_import(129, 0)));
     CHECK(!qol::contracts::succeeded(qol::features::core_data::begin_asset_import(
         1, 32 * 1024 * 1024 + 1)));
@@ -301,8 +303,8 @@ void test_dynamic_response_sizes() {
 int main() {
     qol::host::http_registry_reset_for_test();
     qol::host::http_dispatch_reset_for_test();
-    register_routes();
     const auto& descriptor = qol::features::core_data::plugin_descriptor();
+    register_routes(descriptor);
     const auto sdk = make_sdk();
     auto context = make_context(&sdk);
     test_descriptor_and_basic_responses(descriptor, context);

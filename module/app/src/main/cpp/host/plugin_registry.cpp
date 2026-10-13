@@ -29,6 +29,10 @@
 #include "hooks/registry.h"
 #include "hooks/transaction.h"
 #include "host/http_dispatch.h"
+#include "host/http_endpoint_binder.h"
+#include "host/http_registry.h"
+#include "host/http_endpoint_binder.h"
+#include "host/features/production.h"
 #include "host/item_count_facade.h"
 #include "host/owner_identity.h"
 #include "infra/capabilities.h"
@@ -91,6 +95,7 @@ struct PluginEntry {
 
 PluginEntry g_plugins[kMaxPlugins];
 uint32_t g_plugin_count = 0;
+bool g_http_degraded[kMaxPlugins]{};
 bool g_feature_mode = false;
 bool g_feature_wanted[kMaxPlugins]{};
 FeatureDesiredRequest g_desired_request = nullptr;
@@ -98,6 +103,14 @@ void* g_desired_request_context = nullptr;
 const void* g_plugin_ports[kMaxPlugins][kMaxPortsPerPlugin] = {};
 uint32_t g_plugin_port_count[kMaxPlugins] = {};
 bool g_port_invalid[kMaxPlugins] = {};
+
+void publish_runtime_actual(const char* plugin_id, bool enabled) {
+    if (g_feature_mode) runtime_effects_publish_actual(plugin_id, enabled);
+}
+
+void retire_runtime_observers(const char* plugin_id) {
+    if (g_feature_mode) runtime_effects_unsubscribe_plugin(plugin_id);
+}
 
 // 宿主装配期选定的管理 SDK 副本。普通 g_host_sdk 的 feature_control 恒为 nullptr；
 // 只有 settings 插件 context 使用该副本，管理通道不泄漏给其他插件。
@@ -137,15 +150,18 @@ contracts::PluginContext make_plugin_context(const char* plugin_id) {
                                     token};
 }
 
-bool register_http_queries(const contracts::PluginDescriptor& plugin) {
-    if (plugin.http_query_count == 0) return true;
-    return contracts::succeeded(http_dispatch_register_queries(plugin.http_queries,
-                                                               plugin.http_query_count));
+void refresh_http_degraded_status(const char* owner);
+void refresh_all_http_degraded_status();
+void set_http_provider_available(bool available);
+
+void bind_http_endpoints(const contracts::PluginDescriptor& plugin) {
+    // HTTP is an optional capability: binder failure changes only the owner's HTTP health.
+    (void)http_endpoint_binder_owner_enabled(plugin);
+    refresh_http_degraded_status(plugin.id);
 }
 
-void unregister_http_queries(const contracts::PluginDescriptor& plugin) {
-    if (plugin.http_query_count == 0 || plugin.id == nullptr) return;
-    (void)http_dispatch_api().unregister_owner(plugin.id);
+void begin_http_endpoint_stop(const contracts::PluginDescriptor& plugin) {
+    if (plugin.id != nullptr) http_endpoint_binder_owner_stop_begin(plugin.id);
 }
 
 constexpr uint32_t kMaxResourcesPerPlugin = 32;
@@ -470,7 +486,32 @@ uint8_t g_optional_pending[kMaxPlugins] = {};
 void refresh_degraded_status(uint32_t index) {
     if (index >= g_plugin_count) return;
     infra::status_set_degraded(g_plugins[index].descriptor.id,
-                               g_gate_degraded[index] || g_cascade_degraded[index]);
+                               g_gate_degraded[index] || g_cascade_degraded[index] ||
+                                   g_http_degraded[index]);
+}
+
+void refresh_http_degraded_status(const char* owner) {
+    if (owner == nullptr) return;
+    for (uint32_t index = 0; index < g_plugin_count; ++index) {
+        if (std::strcmp(g_plugins[index].descriptor.id, owner) != 0) continue;
+        g_http_degraded[index] = http_endpoint_binder_owner_http_degraded(owner);
+        refresh_degraded_status(index);
+        return;
+    }
+}
+
+void refresh_all_http_degraded_status() {
+    for (uint32_t index = 0; index < g_plugin_count; ++index)
+        refresh_http_degraded_status(g_plugins[index].descriptor.id);
+}
+
+void set_http_provider_available(bool available) {
+    http_endpoint_binder_set_provider_available(available);
+    for (uint32_t index = 0; index < g_plugin_count; ++index) {
+        const char* owner = g_plugins[index].descriptor.id;
+        g_http_degraded[index] = http_endpoint_binder_owner_http_degraded(owner);
+        refresh_degraded_status(index);
+    }
 }
 
 void clear_cascade_degraded_for_capability(const char* capability_id) {
@@ -673,6 +714,7 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
     if (plugin.jni_count > 0 && plugin.jni == nullptr) return false;
     if (plugin.port_count > kMaxPortsPerPlugin) return false;
     if (plugin.port_count > 0 && plugin.ports == nullptr) return false;
+    if (!http_endpoint_binder_validate_descriptor(plugin)) return false;
     return true;
 }
 
@@ -1365,6 +1407,8 @@ struct LifecycleTx {
     bool quarantine_pending = false;
     contracts::QolOwnerToken stopped_token = 0;
     bool stop_preparing = false;
+    bool capabilities_revoke_pending = false;
+    bool provider_drain_pending = false;
 };
 
 // 槽位与插件同容量：事务引擎保证每插件至多一个未终态事务。
@@ -1456,6 +1500,11 @@ bool plugin_all_gates_want(const contracts::PluginDescriptor& plugin) {
 
 enum class CapRegistration : uint8_t { kNone = 0, kRegistered = 1, kRevoking = 2 };
 CapRegistration g_cap_registration[kMaxPlugins];
+bool g_http_stop_pending[kMaxPlugins]{};
+bool g_http_disabled_pending[kMaxPlugins]{};
+bool g_http_caps_pending[kMaxPlugins]{};
+bool g_http_provider_drain_pending[kMaxPlugins]{};
+bool g_cascade_release_pending[kMaxPlugins]{};
 
 struct CascadeContext {
     bool visited[kMaxPlugins] = {};
@@ -1463,6 +1512,31 @@ struct CascadeContext {
 
 bool plugin_provides_capability(const contracts::PluginDescriptor& plugin) {
     return plugin.provides_count > 0 && plugin.provides != nullptr;
+}
+
+bool plugin_provides_http_transport(const contracts::PluginDescriptor& plugin) {
+    if (!plugin_provides_capability(plugin)) return false;
+    bool registry = false;
+    bool dispatch = false;
+    for (uint32_t index = 0; index < plugin.provides_count; ++index) {
+        const char* id = plugin.provides[index].id;
+        if (id == nullptr) continue;
+        registry = registry || std::strcmp(id, contracts::kHttpRegistryCapabilityId) == 0;
+        dispatch = dispatch || std::strcmp(id, contracts::kHttpDispatchCapabilityId) == 0;
+    }
+    return registry && dispatch;
+}
+
+void refresh_http_provider_availability() {
+    const bool registry = infra::require_capability(
+        contracts::kHttpRegistryCapabilityId,
+        QolVersionRange{contracts::kHttpRegistryVersion.major,
+                        contracts::kHttpRegistryVersion.minor}) != nullptr;
+    const bool dispatch = infra::require_capability(
+        contracts::kHttpDispatchCapabilityId,
+        QolVersionRange{contracts::kHttpDispatchVersion.major,
+                        contracts::kHttpDispatchVersion.minor}) != nullptr;
+    set_http_provider_available(registry && dispatch);
 }
 
 // 进入 enabled 时注册（§3.4.4；幂等：已注册跳过）。
@@ -1478,11 +1552,14 @@ void register_provided_capabilities(uint32_t index) {
         clear_cascade_degraded_for_capability(ref.id);
     }
     g_cap_registration[index] = CapRegistration::kRegistered;
+    refresh_http_provider_availability();
 }
 
 void unregister_provided_capabilities(uint32_t index) {
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     if (!plugin_provides_capability(plugin)) return;
+    if (plugin_provides_http_transport(plugin))
+        set_http_provider_available(false);
     for (uint32_t i = 0; i < plugin.provides_count; ++i) {
         if (plugin.provides[i].id != nullptr) {
             infra::unregister_capability(plugin.provides[i].id);
@@ -1515,6 +1592,56 @@ bool schedule_release(uint32_t index, bool cascade) {
     return true;
 }
 
+void defer_http_stop(uint32_t index, bool call_on_disabled, bool revoke_capabilities,
+                     bool provider_revoke, bool cascade_release) {
+    if (index >= g_plugin_count) return;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    if (provider_revoke) set_http_provider_available(false);
+    http_endpoint_binder_owner_stop_begin(plugin.id);
+    g_http_stop_pending[index] = true;
+    g_http_disabled_pending[index] = g_http_disabled_pending[index] || call_on_disabled;
+    g_http_caps_pending[index] = g_http_caps_pending[index] || revoke_capabilities;
+    g_http_provider_drain_pending[index] =
+        g_http_provider_drain_pending[index] || provider_revoke;
+    g_cascade_release_pending[index] = g_cascade_release_pending[index] || cascade_release;
+}
+
+uint32_t poll_http_stops() {
+    uint32_t completed = 0;
+    const bool provider_drained = http_endpoint_binder_provider_drain_poll();
+    for (uint32_t index = 0; index < g_plugin_count; ++index) {
+        if (!g_http_stop_pending[index]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+        if (!http_endpoint_binder_owner_stop_poll(plugin.id)) continue;
+        if (g_http_provider_drain_pending[index] && !provider_drained) continue;
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
+        if (g_http_disabled_pending[index] && plugin.on_disabled != nullptr)
+            plugin.on_disabled(ctx);
+        g_http_disabled_pending[index] = false;
+        g_http_stop_pending[index] = false;
+        if (g_cascade_release_pending[index]) {
+            g_cascade_release_pending[index] = false;
+            if (!schedule_release(index, true)) {
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "cascade release unavailable");
+            }
+        }
+        ++completed;
+    }
+    if (http_endpoint_binder_all_stops_drained()) {
+        for (uint32_t index = 0; index < g_plugin_count; ++index) {
+            if (!g_http_caps_pending[index] ||
+                (g_http_provider_drain_pending[index] && !provider_drained)) continue;
+            unregister_provided_capabilities(index);
+            g_http_caps_pending[index] = false;
+            g_http_provider_drain_pending[index] = false;
+            ++completed;
+        }
+    }
+    refresh_all_http_degraded_status();
+    return completed;
+}
+
 // 级联停用 required 消费者（§3.4.1 第 3 条）：关消费者门禁 → 释放资源 →
 // 递归撤销其自身提供的能力 → 置 installed_disabled + reason=cascade_stopped。
 void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
@@ -1522,28 +1649,24 @@ void cascade_stop_plugin(uint32_t index, CascadeContext& context) {
     context.visited[index] = true;
     owner_suspend(&g_plugins[index]);
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
-    unregister_http_queries(plugin);
-    if (plugin.on_disabled != nullptr) {
-        contracts::PluginContext ctx = make_plugin_context(plugin.id);
-        plugin.on_disabled(ctx);
-    }
-    // 释放消费者资源：走与 deactivate 相同的帧步进还原事务，等待在途归零。
+    const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered;
+    const bool provider_revoke = revoke_caps && plugin_provides_http_transport(plugin);
+    defer_http_stop(index, plugin.on_disabled != nullptr, revoke_caps, provider_revoke,
+                    plugin.resources_count != 0);
+    // Route admission and callbacks are drained by the frame poll before release starts.
     if (plugin.resources_count == 0) {
         infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
                              "cascade_stopped");
-    } else if (schedule_release(index, true)) {
-        infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
     } else {
-        infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                             "cascade release unavailable");
+        infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
     }
+    publish_runtime_actual(plugin.id, false);
     // 消费者自身提供的能力：注销并继续级联（递归即逆拓扑序）。
-    if (g_cap_registration[index] == CapRegistration::kRegistered) {
+    if (revoke_caps) {
         g_cap_registration[index] = CapRegistration::kRevoking;
         for (uint32_t i = 0; i < plugin.provides_count; ++i) {
             cascade_dependents(plugin.provides[i].id, context);
         }
-        unregister_provided_capabilities(index);
     }
 }
 
@@ -1587,19 +1710,17 @@ void begin_revoke_provider(uint32_t index) {
     owner_suspend(&g_plugins[index]);
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     if (!plugin_provides_capability(plugin)) return;
-    unregister_http_queries(plugin);
-    if (plugin.on_disabled != nullptr) {
-        contracts::PluginContext ctx = make_plugin_context(plugin.id);
-        plugin.on_disabled(ctx);
-    }
-    if (g_cap_registration[index] != CapRegistration::kRegistered) return;
+    const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered;
+    defer_http_stop(index, plugin.on_disabled != nullptr, revoke_caps,
+                    revoke_caps && plugin_provides_http_transport(plugin), false);
+    publish_runtime_actual(plugin.id, false);
+    if (!revoke_caps) return;
     g_cap_registration[index] = CapRegistration::kRevoking;
     CascadeContext context{};
     context.visited[index] = true;
     for (uint32_t i = 0; i < plugin.provides_count; ++i) {
         cascade_dependents(plugin.provides[i].id, context);
     }
-    unregister_provided_capabilities(index);
 }
 
 // 同步完成一个已通过 required 校验的插件安装。装配期与 blocked 重评估共用这条路径，
@@ -1613,11 +1734,13 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     if (preflight_error != nullptr) {
         infra::status_update(plugin.id, infra::FeatureState::kUnsupported, false,
                              preflight_error);
+        publish_runtime_actual(plugin.id, false);
         return false;
     }
 
     if (plugin.install(ctx) != 0) {
         infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed");
+        publish_runtime_actual(plugin.id, false);
         return false;
     }
 
@@ -1705,6 +1828,7 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
                 rollback_installed(installed_claims, installed_count, deps);
                 infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
                                      "resource_ready_failed");
+                publish_runtime_actual(plugin.id, false);
                 QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
                              plugin.id, claim.id);
                 plugin_aborted = true;
@@ -1744,6 +1868,7 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
             rollback_installed(installed_claims, installed_count, deps);
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
                                  "resource_ready_failed");
+            publish_runtime_actual(plugin.id, false);
             QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
                          claim.id);
             plugin_aborted = true;
@@ -1759,7 +1884,8 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     if (resource_failed && failed_claim_id == nullptr && installed_count == 0) {
         // 原子组物理回滚失败时已完成状态落盘，直接保持 failed。
         infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                             "atomic group rollback failed");
+                              "atomic group rollback failed");
+        publish_runtime_actual(plugin.id, false);
         return false;
     }
 
@@ -1769,6 +1895,7 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
                       failed_claim_id != nullptr ? failed_claim_id : "?",
                       resource_error != nullptr ? resource_error : "failed");
         infra::status_update(plugin.id, infra::FeatureState::kFailed, false, g_error_text[index]);
+        publish_runtime_actual(plugin.id, false);
         QOL_LOG_WARN(QolDomain::kCore, "plugin %s install failed: %s", plugin.id,
                      g_error_text[index]);
         return false;
@@ -1805,16 +1932,14 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
                          enabled, status_error);
     if (enabled) {
         if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-        if (!register_http_queries(plugin)) {
-            if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
-            infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                 "http handler registration failed");
-            return false;
-        }
+        bind_http_endpoints(plugin);
         register_provided_capabilities(index);
+        publish_runtime_actual(plugin.id, true);
     } else {
         owner_suspend(&g_plugins[index]);
-        if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
+        defer_http_stop(index, plugin.on_disabled != nullptr, false, false, false);
+        (void)poll_http_stops();
+        publish_runtime_actual(plugin.id, false);
     }
     return true;
 }
@@ -1841,6 +1966,7 @@ bool register_plugin(const contracts::PluginDescriptor& plugin) {
 
     g_plugins[g_plugin_count].descriptor = plugin;
     if (!owner_register(&g_plugins[g_plugin_count], plugin.id)) return false;
+    if (!http_endpoint_binder_register_owner(g_plugins[g_plugin_count].descriptor)) return false;
     ++g_plugin_count;
     return true;
 }
@@ -1998,6 +2124,7 @@ uint32_t sync_gates() {
             g_gate_degraded[i] = false;
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
                                  "mechanism gate apply failed");
+            publish_runtime_actual(plugin.id, false);
             refresh_degraded_status(i);
             ++changed;
             continue;
@@ -2032,15 +2159,20 @@ uint32_t sync_gates() {
             if (status.state != target_state) {
                 infra::status_update(plugin.id, target_state, target_enabled, g_gate_error_text[i]);
                 if (target_enabled) {
-                    if (!owner_resume(&g_plugins[i])) continue;
+                    if (!owner_resume(&g_plugins[i])) {
+                        publish_runtime_actual(plugin.id, false);
+                        continue;
+                    }
                     ctx = make_plugin_context(plugin.id);
                     if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-                    (void)register_http_queries(plugin);
+                    bind_http_endpoints(plugin);
                     register_provided_capabilities(i);
+                    publish_runtime_actual(plugin.id, true);
                 } else if (!plugin_provides_capability(plugin)) {
                     owner_suspend(&g_plugins[i]);
-                    unregister_http_queries(plugin);
-                    if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
+                    defer_http_stop(i, plugin.on_disabled != nullptr, false, false, false);
+                    (void)poll_http_stops();
+                    publish_runtime_actual(plugin.id, false);
                 }
                 ++changed;
             } else {
@@ -2061,16 +2193,20 @@ uint32_t sync_gates() {
         contracts::PluginContext ctx = make_plugin_context(plugin.id);
         infra::status_update(plugin.id, target_state, target_enabled, nullptr);
         if (target_enabled) {
-            if (!owner_resume(&g_plugins[i])) continue;
+            if (!owner_resume(&g_plugins[i])) {
+                publish_runtime_actual(plugin.id, false);
+                continue;
+            }
             ctx = make_plugin_context(plugin.id);
             if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-            (void)register_http_queries(plugin);
+            bind_http_endpoints(plugin);
             register_provided_capabilities(i);
+            publish_runtime_actual(plugin.id, true);
         } else if (!plugin_provides_capability(plugin)) {
             owner_suspend(&g_plugins[i]);
-            // provider 的 on_disabled 已由 begin_revoke_provider 调用（避免重复）。
-            unregister_http_queries(plugin);
-            if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
+            defer_http_stop(i, plugin.on_disabled != nullptr, false, false, false);
+            (void)poll_http_stops();
+            publish_runtime_actual(plugin.id, false);
         }
         ++changed;
     }
@@ -2126,37 +2262,37 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
                 }
             }
             infra::status_update(plugin->id, infra::FeatureState::kDeactivating, false, nullptr);
-            const uint64_t tx_id = hooks::tx_begin(plugin->id, hooks::TxKind::kRelease);
-            if (tx_id == 0) {
-                if (plugin->resources_count == 0) {
-                    const uint32_t index = plugin_index_of(plugin->id);
-                    begin_revoke_provider(index);
-                    // 无 provides 的 owner 走不到 begin_revoke_provider 的摘除分支；
-                    // deactivate 必须置路由墓碑，保证停用态错误语义唯一（http owner inactive）。
-                    unregister_http_queries(*plugin);
-                    if (plugin->deactivate != nullptr) plugin->deactivate(ctx);
-                    infra::status_update(plugin->id, infra::FeatureState::kInactive, false, nullptr);
-                    return true;
+            LifecycleTx* slot = nullptr;
+            for (LifecycleTx& candidate : g_lifecycle_txs) {
+                if (!candidate.in_use) {
+                    slot = &candidate;
+                    break;
                 }
-                // 进入 deactivating 失败：回滚为原状态。
+            }
+            if (slot == nullptr) {
                 infra::status_update(plugin->id, previous,
                                      previous == infra::FeatureState::kEnabled, nullptr);
                 return false;
             }
             const uint32_t index = plugin_index_of(plugin->id);
-            // §3.4.4：deactivate 走 disable 撤销路径——关提供者门禁 → 级联 → 注销。
-            begin_revoke_provider(index);
-            for (LifecycleTx& slot : g_lifecycle_txs) {
-                if (slot.in_use) continue;
-                slot.in_use = true;
-                slot.ready_failed = false;
-                slot.cascade = false;
-                slot.tx_id = tx_id;
-                slot.plugin_index = index;
-                slot.kind = hooks::TxKind::kRelease;
-                return true;
+            *slot = LifecycleTx{};
+            slot->in_use = true;
+            slot->plugin_index = index;
+            slot->kind = hooks::TxKind::kRelease;
+            slot->owner_drain_pending = true;
+            slot->stopped_token = owner_token_of(plugin->id);
+            const bool revoke_caps = g_cap_registration[index] == CapRegistration::kRegistered &&
+                                     plugin_provides_capability(*plugin);
+            if (revoke_caps) {
+                begin_revoke_provider(index);
+                slot->was_enabled = false;  // deferred provider revoke owns on_disabled/cap revoke
+                slot->provider_drain_pending = plugin_provides_http_transport(*plugin);
+            } else {
+                slot->was_enabled = previous == infra::FeatureState::kEnabled;
+                owner_suspend_begin(&g_plugins[index]);
+                http_endpoint_binder_owner_stop_begin(plugin->id);
             }
-            return false;  // 槽位与插件同容量，正常不可达
+            return true;
         }
 
         case contracts::kFeatureLifecycleActivate: {
@@ -2181,12 +2317,14 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             if (blocked_error != nullptr) {
                 infra::status_update(plugin->id, infra::FeatureState::kBlocked, false,
                                      blocked_error);
+                publish_runtime_actual(plugin->id, false);
                 return false;
             }
             const char* preflight_error = preflight_plugin_resources(*plugin, g_install_deps);
             if (preflight_error != nullptr) {
                 infra::status_update(plugin->id, infra::FeatureState::kUnsupported, false,
-                                      preflight_error);
+                                       preflight_error);
+                publish_runtime_actual(plugin->id, false);
                 if (g_feature_mode) {
                     owner_suspend_begin(&g_plugins[index]);
                     (void)owner_suspend_poll(&g_plugins[index]);
@@ -2194,11 +2332,15 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
                 return false;
             }
             // §3.3：install 只做插件自身初始化（幂等重入）；失败即 failed，不启动事务。
-            if (!(g_feature_mode ? owner_resume_poll(&g_plugins[index]) : owner_resume(&g_plugins[index]))) return false;
+            if (!(g_feature_mode ? owner_resume_poll(&g_plugins[index]) : owner_resume(&g_plugins[index]))) {
+                publish_runtime_actual(plugin->id, false);
+                return false;
+            }
             ctx = make_plugin_context(plugin->id);
             if (plugin->install != nullptr && plugin->install(ctx) != 0) {
                 infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
                                       "plugin install failed");
+                publish_runtime_actual(plugin->id, false);
                 if (g_feature_mode) feature_stop(index, true);
                 return false;
             }
@@ -2211,15 +2353,14 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
                     enabled, nullptr);
                 if (enabled) {
                     if (plugin->on_enabled != nullptr) plugin->on_enabled(ctx);
-                    if (!register_http_queries(*plugin) && g_feature_mode) {
-                        feature_stop(index, true);
-                        return false;
-                    }
+                    bind_http_endpoints(*plugin);
                     register_provided_capabilities(plugin_index_of(plugin->id));
+                    publish_runtime_actual(plugin->id, true);
                 } else {
                     owner_suspend(&g_plugins[index]);
-                    unregister_http_queries(*plugin);
-                    if (plugin->on_disabled != nullptr) plugin->on_disabled(ctx);
+                    defer_http_stop(index, plugin->on_disabled != nullptr, false, false, false);
+                    (void)poll_http_stops();
+                    publish_runtime_actual(plugin->id, false);
                 }
                 return true;
             }
@@ -2364,10 +2505,11 @@ void feature_registry_set_wanted(const char* id, bool wanted) {
 }
 
 static uint32_t lifecycle_step_engine() {
-    uint32_t advanced = 0;
+    uint32_t advanced = poll_http_stops();
     for (LifecycleTx& slot : g_lifecycle_txs) {
         if (!slot.in_use) continue;
         const contracts::PluginDescriptor& plugin = g_plugins[slot.plugin_index].descriptor;
+        bool publish_enabled_actual = false;
 
         if (g_feature_mode && slot.stop_preparing) {
             if (slot.stopped_token && save_route::prepare_stop_poll(slot.stopped_token).code == kQolErrBusy)
@@ -2375,13 +2517,18 @@ static uint32_t lifecycle_step_engine() {
             slot.stop_preparing = false;
             slot.owner_drain_pending = true;
             owner_suspend_begin(&g_plugins[slot.plugin_index]);
-            http_dispatch_begin_unregister_owner(plugin.id);
-            unregister_provided_capabilities(slot.plugin_index);
+            slot.capabilities_revoke_pending =
+                g_cap_registration[slot.plugin_index] == CapRegistration::kRegistered;
+            slot.provider_drain_pending = slot.capabilities_revoke_pending &&
+                plugin_provides_http_transport(plugin);
+            if (slot.provider_drain_pending) set_http_provider_available(false);
+            http_endpoint_binder_owner_stop_begin(plugin.id);
             for (uint32_t r = 0; r < plugin.resources_count; ++r) {
                 if (hooks::state_of(plugin.resources[r].id) == contracts::ResourceState::kLive)
                     hooks::set_state(plugin.resources[r].id, contracts::ResourceState::kDisabled);
             }
             infra::status_update(plugin.id, infra::FeatureState::kDeactivating, false, nullptr);
+            publish_runtime_actual(plugin.id, false);
         }
 
         if (g_feature_mode && slot.quarantine_pending) {
@@ -2390,18 +2537,29 @@ static uint32_t lifecycle_step_engine() {
                 if (hooks::in_flight_count(plugin.resources[r].id)) drained = false;
             if (!drained) continue;
             auto ctx = make_plugin_context(plugin.id);
+            retire_runtime_observers(plugin.id);
             if (plugin.deactivate) plugin.deactivate(ctx);
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                 "resource release failed; remaining resources released or isolated");
+                                  "resource release failed; remaining resources released or isolated");
+            publish_runtime_actual(plugin.id, false);
             slot = LifecycleTx{};
             ++advanced;
             continue;
         }
 
-        if (g_feature_mode && slot.owner_drain_pending) {
+        if (slot.owner_drain_pending) {
             // No callback, resource operation, or wait occurs until both admission domains drain.
             if (!owner_suspend_poll(&g_plugins[slot.plugin_index]) ||
-                !http_dispatch_poll_unregister_owner(plugin.id)) continue;
+                !http_endpoint_binder_owner_stop_poll(plugin.id)) continue;
+            refresh_http_degraded_status(plugin.id);
+            if (slot.provider_drain_pending &&
+                !http_endpoint_binder_provider_drain_poll()) continue;
+            if (slot.capabilities_revoke_pending &&
+                !http_endpoint_binder_all_stops_drained()) continue;
+            if (slot.capabilities_revoke_pending) {
+                unregister_provided_capabilities(slot.plugin_index);
+                slot.capabilities_revoke_pending = false;
+            }
             if (slot.stopped_token && !save_route::owner_stopped_poll(slot.stopped_token)) continue;
             bool resources_drained = true;
             for (uint32_t r = 0; r < plugin.resources_count; ++r) {
@@ -2412,10 +2570,12 @@ static uint32_t lifecycle_step_engine() {
             if (slot.was_enabled && plugin.on_disabled) plugin.on_disabled(ctx);
             slot.owner_drain_pending = false;
             if (plugin.resources_count == 0) {
+                retire_runtime_observers(plugin.id);
                 if (plugin.deactivate) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
-                                                                   : infra::FeatureState::kInactive,
-                                     false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
+                                                                    : infra::FeatureState::kInactive,
+                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
+                publish_runtime_actual(plugin.id, false);
                 slot = LifecycleTx{};
                 ++advanced;
                 continue;
@@ -2423,8 +2583,10 @@ static uint32_t lifecycle_step_engine() {
             slot.tx_id = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
             if (!slot.tx_id) {
                 revoke_installed_resources(plugin, g_install_deps);
+                retire_runtime_observers(plugin.id);
                 if (plugin.deactivate) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "release unavailable");
+                publish_runtime_actual(plugin.id, false);
                 slot = LifecycleTx{};
                 ++advanced;
                 continue;
@@ -2526,18 +2688,16 @@ static uint32_t lifecycle_step_engine() {
                     enabled, nullptr);
                 if (enabled) {
                     if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
-                    if (!register_http_queries(plugin) && g_feature_mode) {
-                        const auto index = slot.plugin_index;
-                        slot = LifecycleTx{};
-                        feature_stop(index, true);
-                        continue;
-                    }
+                    bind_http_endpoints(plugin);
                     // §3.4.4：install 成功后进入 enabled 时注册能力。
                     register_provided_capabilities(slot.plugin_index);
+                    publish_enabled_actual = true;
                 } else {
                     owner_suspend(&g_plugins[slot.plugin_index]);
-                    unregister_http_queries(plugin);
-                    if (plugin.on_disabled != nullptr) plugin.on_disabled(ctx);
+                    defer_http_stop(slot.plugin_index, plugin.on_disabled != nullptr,
+                                    false, false, false);
+                    (void)poll_http_stops();
+                    publish_runtime_actual(plugin.id, false);
                 }
             } else if (slot.cascade && !g_feature_mode) {
                 infra::status_update(plugin.id, infra::FeatureState::kInstalledDisabled, false,
@@ -2545,11 +2705,13 @@ static uint32_t lifecycle_step_engine() {
             } else {
                 // §3.3：deactivate 只做插件自身清理（幂等）；资源已逆序还原，随后置 inactive。
                 // kRelease 事务路径与零资源快速路径一致：先置路由墓碑再清理，停用态错误语义唯一。
-                if (!g_feature_mode) unregister_http_queries(plugin);
+                if (!g_feature_mode) begin_http_endpoint_stop(plugin);
+                retire_runtime_observers(plugin.id);
                 if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
-                                                                   : infra::FeatureState::kInactive,
-                                     false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
+                                                                    : infra::FeatureState::kInactive,
+                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
+                publish_runtime_actual(plugin.id, false);
             }
         } else {
             if (g_feature_mode) {
@@ -2595,11 +2757,13 @@ static uint32_t lifecycle_step_engine() {
                                  g_error_text[slot.plugin_index]);
                 } else {
                     infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
+                    publish_runtime_actual(plugin.id, false);
                     QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
                                  error);
                 }
             } else {
                 infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
+                publish_runtime_actual(plugin.id, false);
                 QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
                              error);
             }
@@ -2607,6 +2771,7 @@ static uint32_t lifecycle_step_engine() {
         slot.in_use = false;
         slot.cascade = false;
         slot.tx_id = 0;
+        if (publish_enabled_actual) publish_runtime_actual(plugin.id, true);
     }
     return advanced;
 }
@@ -2648,6 +2813,9 @@ uint32_t plugin_count() {
 
 void plugin_registry_reset_for_test() {
     owner_identity_reset_for_test();
+    http_dispatch_reset_for_test();
+    http_registry_reset_for_test();
+    http_endpoint_binder_reset_for_test();
     g_plugin_count = 0;
     g_install_deps = HostDeps{};
     g_feature_mode = false;
@@ -2662,8 +2830,19 @@ void plugin_registry_reset_for_test() {
     }
     for (uint32_t i = 0; i < kMaxPlugins; ++i) {
         g_cap_registration[i] = CapRegistration::kNone;
+        g_http_stop_pending[i] = false;
+        g_http_disabled_pending[i] = false;
+        g_http_caps_pending[i] = false;
+        g_http_provider_drain_pending[i] = false;
+        g_cascade_release_pending[i] = false;
+        g_http_stop_pending[i] = false;
+        g_http_disabled_pending[i] = false;
+        g_http_caps_pending[i] = false;
+        g_http_provider_drain_pending[i] = false;
+        g_cascade_release_pending[i] = false;
         g_gate_degraded[i] = false;
         g_cascade_degraded[i] = false;
+        g_http_degraded[i] = false;
         g_optional_pending[i] = 0;
     }
 }

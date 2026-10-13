@@ -3,14 +3,17 @@
 #include <array>
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
 #include <cstring>
 #include <mutex>
 #include <new>
 #include <string>
 #include <string_view>
 
+#if !defined(QOL_HTTP_DISPATCH_TEST_SEAMS)
+#include "host/features/production.h"
+#endif
 #include "host/http_registry.h"
+#include "infra/request_policy.h"
 
 namespace qol::host {
 namespace {
@@ -27,9 +30,12 @@ QolResult http_error(int32_t code, const char* message) {
 struct HandlerSlot {
     bool used = false;
     bool unregister_pending = false;
+    bool binder_managed = false;
+    bool binder_committed = false;
     contracts::HttpMethod method = contracts::HttpMethod::kGet;
     std::string path;
-    std::string owner;
+    std::string route_owner;
+    std::string lifecycle_owner;
     std::array<std::string, kMaxPathParams> param_names{};
     uint32_t param_count = 0;
     // 注册时从路由表快照；dispatch 据此在进入 handler 前做 OP 门禁，运行期不再查路由表。
@@ -42,10 +48,14 @@ struct HandlerSlot {
 
 HandlerSlot g_handlers[kMaxHandlers];
 std::mutex g_dispatch_mutex;
-std::condition_variable g_dispatch_cv;
-// API service gate fails closed until the Host publishes module.platform.api.enabled.
-// It is read and written only under g_dispatch_mutex.
-bool g_api_enabled = false;
+
+#if defined(QOL_HTTP_DISPATCH_TEST_SEAMS)
+using OpAuthorizer = bool (*)();
+OpAuthorizer g_test_op_authorizer = nullptr;
+
+bool allow_op_for_test() { return true; }
+bool deny_op_for_test() { return false; }
+#endif
 
 bool valid_method(contracts::HttpMethod method) {
     return method == contracts::HttpMethod::kGet || method == contracts::HttpMethod::kPost;
@@ -157,9 +167,11 @@ void write_error(contracts::HttpRes* response, uint16_t status, const char* mess
 // 决定写入哪个槽，避免把命令注册进只读 query 槽。
 QolResult register_handler(contracts::HttpMethod required_method, bool command_slot,
                            const char* invalid_message, contracts::HttpMethod method,
-                           const char* path, const char* owner,
+                           const char* path, const char* route_owner,
+                           const char* lifecycle_owner, bool pending,
                            contracts::HttpQueryHandlerFn handler, void* ctx) {
-    if (method != required_method || path == nullptr || owner == nullptr || owner[0] == '\0' ||
+    if (method != required_method || path == nullptr || route_owner == nullptr ||
+        route_owner[0] == '\0' || lifecycle_owner == nullptr || lifecycle_owner[0] == '\0' ||
         handler == nullptr) {
         return http_error(kQolErrInvalidArgument, invalid_message);
     }
@@ -174,14 +186,15 @@ QolResult register_handler(contracts::HttpMethod required_method, bool command_s
     if (!contracts::succeeded(lookup) || route == nullptr) {
         return http_error(kQolErrNotFound, "route not found");
     }
-    if (route->owner == nullptr || std::strcmp(route->owner, owner) != 0) {
+    if (route->owner == nullptr || std::strcmp(route->owner, route_owner) != 0) {
         return http_error(kQolErrConflict, "route owner mismatch");
     }
 
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
     for (HandlerSlot& slot : g_handlers) {
         if (slot.used && slot.method == method && slot.path == path) {
-            if (slot.unregister_pending && slot.owner == owner && slot.inflight == 0) {
+            if (slot.unregister_pending && slot.lifecycle_owner == lifecycle_owner &&
+                slot.inflight == 0) {
                 slot = HandlerSlot{};
                 break;
             }
@@ -194,10 +207,12 @@ QolResult register_handler(contracts::HttpMethod required_method, bool command_s
             slot.unregister_pending = false;
             slot.method = method;
             slot.path = path;
-            slot.owner = owner;
+            slot.route_owner = route_owner;
+            slot.lifecycle_owner = lifecycle_owner;
             slot.param_names = names;
             slot.param_count = param_count;
             slot.op_gated = route->op_gated;
+            slot.unregister_pending = pending;
             if (command_slot) {
                 slot.query = nullptr;
                 slot.command = handler;
@@ -207,6 +222,8 @@ QolResult register_handler(contracts::HttpMethod required_method, bool command_s
             }
             slot.ctx = ctx;
             slot.inflight = 0;
+            slot.binder_managed = pending;
+            slot.binder_committed = !pending;
             return contracts::ok();
         }
     }
@@ -216,48 +233,36 @@ QolResult register_handler(contracts::HttpMethod required_method, bool command_s
 QolResult register_query(contracts::HttpMethod method, const char* path, const char* owner,
                          contracts::HttpQueryHandlerFn handler, void* ctx) {
     return register_handler(contracts::HttpMethod::kGet, false, "invalid query handler", method,
-                            path, owner, handler, ctx);
+                            path, owner, owner, false, handler, ctx);
 }
 
 QolResult register_command(contracts::HttpMethod method, const char* path, const char* owner,
                            contracts::HttpCommandHandlerFn handler, void* ctx) {
     return register_handler(contracts::HttpMethod::kPost, true, "invalid command handler", method,
-                            path, owner, handler, ctx);
+                            path, owner, owner, false, handler, ctx);
 }
 
 QolResult unregister_owner(const char* owner) {
     if (owner == nullptr || owner[0] == '\0') {
         return http_error(kQolErrInvalidArgument, "invalid handler owner");
     }
-    {
-        std::lock_guard<std::mutex> lock(g_dispatch_mutex);
-        bool found = false;
-        for (HandlerSlot& slot : g_handlers) {
-            if (slot.used && slot.owner == owner) {
-                slot.unregister_pending = true;
-                found = true;
-            }
-        }
-        if (!found) return http_error(kQolErrNotFound, "handler owner not found");
-    }
-
-    std::unique_lock<std::mutex> lock(g_dispatch_mutex);
-    g_dispatch_cv.wait(lock, [owner] {
-        for (const HandlerSlot& slot : g_handlers) {
-            if (slot.used && slot.owner == owner && slot.inflight != 0) return false;
-        }
-        return true;
-    });
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    bool found = false;
+    bool inflight = false;
     for (HandlerSlot& slot : g_handlers) {
-        if (slot.used && slot.owner == owner) {
-            // 保留 owner 路由墓碑，使停用态请求得到明确 503，而不是静默落到空响应。
-            slot.query = nullptr;
-            slot.command = nullptr;
-            slot.ctx = nullptr;
-            slot.unregister_pending = true;
-        }
+        if (!slot.used || slot.route_owner != owner) continue;
+        slot.unregister_pending = true;
+        found = true;
+        inflight = inflight || slot.inflight != 0;
     }
-    // 路由元数据属于 core.api，owner 停用只撤销 handler；保留路由才能在 owner 恢复时重新绑定。
+    if (!found) return http_error(kQolErrNotFound, "handler owner not found");
+    if (inflight) return http_error(kQolErrBusy, "http handlers still active");
+    for (HandlerSlot& slot : g_handlers) {
+        if (!slot.used || slot.route_owner != owner) continue;
+        slot.query = nullptr;
+        slot.command = nullptr;
+        slot.ctx = nullptr;
+    }
     return contracts::ok();
 }
 
@@ -272,17 +277,28 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
     const auto resident_route = g_resident_route.load(std::memory_order_acquire);
     const auto resident_dispatch = g_resident_dispatch.load(std::memory_order_acquire);
     if (resident_route && resident_dispatch && resident_route(*request)) return resident_dispatch(*request, *response);
+    HttpRouteMatch route_match{};
+    const QolResult route_match_result = http_registry_find_match(
+        request->method, request->path, request->path_len, &route_match);
+    if (contracts::succeeded(route_match_result) && route_match.resident) {
+        write_error(response, 501, "not implemented");
+        return http_error(kQolErrUnsupported, "resident route has no native handler");
+    }
     if (!host_http_registry_accepting()) {
         write_error(response, 503, "http registry inactive");
         return http_error(kQolErrNotReady, "http registry inactive");
     }
 
     HandlerSlot* selected = nullptr;
-    bool api_enabled = false;
+#if defined(QOL_HTTP_DISPATCH_TEST_SEAMS)
+    OpAuthorizer op_authorizer = nullptr;
+#endif
     std::array<contracts::HttpPathParam, kMaxPathParams> params{};
     {
         std::lock_guard<std::mutex> lock(g_dispatch_mutex);
-        api_enabled = g_api_enabled;
+#if defined(QOL_HTTP_DISPATCH_TEST_SEAMS)
+        op_authorizer = g_test_op_authorizer;
+#endif
         for (HandlerSlot& slot : g_handlers) {
             if (slot.used && slot.method == request->method &&
                 match_template(slot, *request, &params)) {
@@ -297,17 +313,40 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
         }
     }
     if (selected == nullptr) {
+        route_match = {};
+        const QolResult route_result = http_registry_find_match(
+            request->method, request->path, request->path_len, &route_match);
+        if (!contracts::succeeded(route_result)) {
+            write_error(response, 404, "http handler not found");
+            return http_error(kQolErrNotFound, "http handler not found");
+        }
+        if (route_match.unregister_pending ||
+            (!route_match.resident && !host_http_registry_accepting())) {
+            write_error(response, 503, "http owner inactive");
+            return http_error(kQolErrNotReady, "http owner inactive");
+        }
+        if (route_match.binder_managed || route_match.resident) {
+            write_error(response, 501, "not implemented");
+            return http_error(kQolErrUnsupported, "http handler not implemented");
+        }
         write_error(response, 404, "http handler not found");
         return http_error(kQolErrNotFound, "http handler not found");
     }
 
-    // Operation routes remain route-gated, but the sole toggle is API service availability.
-    // Keep the established 403 envelope for direct dispatch while the HTTP server stops.
-    if (selected->op_gated != 0 && !api_enabled) {
+    // API listener state controls transport only. OP authorization is queried independently
+    // and outside g_dispatch_mutex; an unavailable Host security query fails closed.
+    bool op_enabled = false;
+    if (selected->op_gated != 0) {
+#if defined(QOL_HTTP_DISPATCH_TEST_SEAMS)
+        op_enabled = op_authorizer != nullptr && op_authorizer();
+#else
+        op_enabled = security_op_enabled();
+#endif
+    }
+    if (selected->op_gated != 0 && !op_enabled) {
         {
             std::lock_guard<std::mutex> lock(g_dispatch_mutex);
             --selected->inflight;
-            g_dispatch_cv.notify_all();
         }
         write_error(response, 403, "op disabled");
         return http_error(kQolErrBlocked, "op disabled");
@@ -320,12 +359,18 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
         {
             std::lock_guard<std::mutex> lock(g_dispatch_mutex);
             --selected->inflight;
-            g_dispatch_cv.notify_all();
         }
         if (lease_result.code == kQolErrNotReady) {
             write_error(response, 503, "http registry inactive");
-        } else {
+        } else if (lease_result.code == kQolErrBusy) {
+            write_error(response, 503, lease_result.message != nullptr
+                                           ? lease_result.message
+                                           : "http route lease capacity");
+        } else if (lease_result.code == kQolErrNotFound) {
             write_error(response, 404, "http route not found");
+        } else {
+            // A blocked operation is rejected by the independent OP authorization check above.
+            write_error(response, 500, "http route lease failed");
         }
         return lease_result;
     }
@@ -334,15 +379,18 @@ QolResult dispatch(const contracts::HttpReq* request, contracts::HttpRes* respon
     request_copy.path_params = params.data();
     request_copy.path_param_count = selected->param_count;
     // GET 走只读 query 槽，POST 走 command 槽；两槽由是否墓碑分别置空，选中即非空。
-    const QolResult handler_result =
-        selected->method == contracts::HttpMethod::kPost
-            ? selected->command(&request_copy, response, selected->ctx)
-            : selected->query(&request_copy, response, selected->ctx);
+    QolResult handler_result = contracts::ok();
+    {
+        const infra::ScopedRequestPolicy request_policy(infra::RequestPolicy{
+            selected->method == contracts::HttpMethod::kPost && selected->op_gated != 0});
+        handler_result = selected->method == contracts::HttpMethod::kPost
+                             ? selected->command(&request_copy, response, selected->ctx)
+                             : selected->query(&request_copy, response, selected->ctx);
+    }
     (void)http_registry_api().lease_leave(lease);
     {
         std::lock_guard<std::mutex> lock(g_dispatch_mutex);
         --selected->inflight;
-        g_dispatch_cv.notify_all();
     }
     if (!contracts::succeeded(handler_result)) {
         if (response->body_size == 0) write_error(response, 500, "http handler failed");
@@ -361,7 +409,7 @@ void http_dispatch_begin_unregister_owner(const char* owner) {
     if (!owner) return;
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
     for (auto& slot : g_handlers) {
-        if (slot.used && slot.owner == owner) slot.unregister_pending = true;
+        if (slot.used && slot.lifecycle_owner == owner) slot.unregister_pending = true;
     }
 }
 
@@ -369,14 +417,47 @@ bool http_dispatch_poll_unregister_owner(const char* owner) {
     if (!owner) return false;
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
     for (const auto& slot : g_handlers) {
-        if (slot.used && slot.owner == owner && slot.inflight != 0) return false;
+        if (slot.used && slot.lifecycle_owner == owner && slot.inflight != 0) return false;
     }
     for (auto& slot : g_handlers) {
-        if (!slot.used || slot.owner != owner) continue;
+        if (!slot.used || slot.lifecycle_owner != owner) continue;
         slot.query = nullptr;
         slot.command = nullptr;
         slot.ctx = nullptr;
         slot.unregister_pending = true;
+    }
+    return true;
+}
+
+bool http_dispatch_poll_all_inflight() {
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    for (const HandlerSlot& slot : g_handlers) {
+        if (slot.used && slot.inflight != 0) return false;
+    }
+    return true;
+}
+
+void http_dispatch_set_owner_ready(const char* owner) {
+    if (owner == nullptr || owner[0] == '\0') return;
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    for (HandlerSlot& slot : g_handlers) {
+        if (slot.used && slot.lifecycle_owner == owner && slot.binder_managed) {
+            slot.unregister_pending = false;
+            slot.binder_committed = true;
+        }
+    }
+}
+
+bool http_dispatch_rollback_uncommitted_owner(const char* owner) {
+    if (owner == nullptr || owner[0] == '\0') return false;
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    for (const HandlerSlot& slot : g_handlers) {
+        if (slot.used && slot.lifecycle_owner == owner && slot.binder_managed &&
+            !slot.binder_committed && slot.inflight != 0) return false;
+    }
+    for (HandlerSlot& slot : g_handlers) {
+        if (slot.used && slot.lifecycle_owner == owner && slot.binder_managed &&
+            !slot.binder_committed) slot = HandlerSlot{};
     }
     return true;
 }
@@ -482,6 +563,20 @@ QolResult http_dispatch_register_queries(const contracts::HttpQueryHandlerDescri
     return contracts::ok();
 }
 
+QolResult http_dispatch_register_query_for_owner(
+    const char* lifecycle_owner, contracts::HttpMethod method, const char* path,
+    const char* route_owner, contracts::HttpQueryHandlerFn handler, void* ctx) {
+    return register_handler(contracts::HttpMethod::kGet, false, "invalid query handler", method,
+                            path, route_owner, lifecycle_owner, true, handler, ctx);
+}
+
+QolResult http_dispatch_register_command_for_owner(
+    const char* lifecycle_owner, contracts::HttpMethod method, const char* path,
+    const char* route_owner, contracts::HttpCommandHandlerFn handler, void* ctx) {
+    return register_handler(contracts::HttpMethod::kPost, true, "invalid command handler", method,
+                            path, route_owner, lifecycle_owner, true, handler, ctx);
+}
+
 QolResult http_dispatch_register_builtin_query(contracts::HttpMethod method, const char* path,
                                                const char* owner,
                                                contracts::HttpQueryHandlerFn handler, void* ctx) {
@@ -489,16 +584,27 @@ QolResult http_dispatch_register_builtin_query(contracts::HttpMethod method, con
 }
 
 void http_dispatch_set_api_enabled(bool enabled) {
-    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
-    g_api_enabled = enabled;
+    // Retained for API/listener compatibility. Dispatch permission is not an API transport gate.
+    (void)enabled;
 }
 
-void http_dispatch_set_op_enabled(bool enabled) { http_dispatch_set_api_enabled(enabled); }
+#if defined(QOL_HTTP_DISPATCH_TEST_SEAMS)
+void http_dispatch_set_op_authorizer_for_test(bool (*authorizer)()) {
+    std::lock_guard<std::mutex> lock(g_dispatch_mutex);
+    g_test_op_authorizer = authorizer;
+}
+
+void http_dispatch_set_op_enabled(bool enabled) {
+    http_dispatch_set_op_authorizer_for_test(enabled ? &allow_op_for_test : &deny_op_for_test);
+}
+#endif
 
 void http_dispatch_reset_for_test() {
     std::lock_guard<std::mutex> lock(g_dispatch_mutex);
     for (HandlerSlot& slot : g_handlers) slot = HandlerSlot{};
-    g_api_enabled = false;
+#if defined(QOL_HTTP_DISPATCH_TEST_SEAMS)
+    g_test_op_authorizer = nullptr;
+#endif
 }
 
 }  // namespace qol::host

@@ -11,6 +11,8 @@ FeatureController& production_feature_controller();
 FeatureReconciler& production_feature_reconciler();
 const contracts::QolFeatureApi& production_feature_api();
 const contracts::QolFeatureControlApi& production_feature_control_api();
+const contracts::QolRuntimeEffectsApi& production_runtime_effects_api();
+const contracts::QolSecurityApi& production_security_api();
 
 // Bootstrap thread only, before exposing management readers. Explicit metadata only;
 // registration is sealed by bootstrap even if initialization fails.
@@ -26,5 +28,14 @@ uint32_t production_feature_frame_step();
 // Host assembly explicitly selects which SDK copy receives management authority.
 // The table remains valid after that UI owner stops; it never consults its old token.
 bool production_feature_bind_management_sdk(contracts::QolHostSdk&);
+bool production_feature_bind_runtime_sdk(contracts::QolHostSdk&);
+// Trusted host observers are topic-scoped and survive plugin lifecycle-owner drains.
+QolResult runtime_effects_subscribe_trusted(const char*, contracts::QolPluginRuntimeObserver,
+                                            void*, uint64_t*);
+QolResult runtime_effects_unsubscribe_trusted(uint64_t);
+void runtime_effects_publish_actual(const char*, bool);
+void runtime_effects_unsubscribe_plugin(const char*);
+void runtime_effects_publish_config_internal(const FeatureControlSnapshot&);
+bool security_op_enabled();
 
 }  // namespace qol::host

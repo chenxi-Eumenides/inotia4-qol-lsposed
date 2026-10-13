@@ -24,7 +24,7 @@ constexpr uint32_t kMaxAssetCount = 128;
 constexpr char kNotFound[] = "{\"ok\":false,\"error\":\"not found\"}";
 constexpr char kNotImplemented[] = "{\"ok\":false,\"error\":\"not implemented\"}";
 
-const contracts::CapabilityRequirement kRequires[] = {
+const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kHttpRegistryCapabilityId,
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId,
@@ -369,39 +369,49 @@ QolResult download_all(const contracts::HttpReq*, contracts::HttpRes* response, 
     return error_response(response, 501, kNotImplemented);
 }
 
-const contracts::HttpQueryHandlerDescriptor kHttpQueries[] = {
-    {contracts::HttpMethod::kGet, "/api/world/maps/list", kPluginId, &map_list, nullptr},
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {contracts::HttpMethod::kGet, "/api/world/maps/list", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &map_list, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/world/maps/{map_id}", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1,
      [](const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
-         return request == nullptr ? invalid_argument("null request") : map_detail(*request, response);
-     }, nullptr},
+          return request == nullptr ? invalid_argument("null request") : map_detail(*request, response);
+      }, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/world/maps/{map_id}/tiles", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1,
      [](const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
-         return request == nullptr ? invalid_argument("null request") : map_tiles(*request, response);
-     }, nullptr},
+          return request == nullptr ? invalid_argument("null request") : map_tiles(*request, response);
+      }, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/world/maps/{map_id}/exits", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1,
      [](const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
-         return request == nullptr ? invalid_argument("null request") : map_exits(*request, response);
-     }, nullptr},
-    {contracts::HttpMethod::kGet, "/api/system/tables", kPluginId, &table_list, nullptr},
+          return request == nullptr ? invalid_argument("null request") : map_exits(*request, response);
+      }, nullptr, nullptr},
+    {contracts::HttpMethod::kGet, "/api/system/tables", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &table_list, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/system/tables/story-events", kPluginId,
-     &events_get, nullptr},
+     contracts::HttpHandlerKind::kQuery, 0, 1, &events_get, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/system/tables/text", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1,
      [](const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
-         return request == nullptr ? invalid_argument("null request") : text_get(*request, response);
-     }, nullptr},
+          return request == nullptr ? invalid_argument("null request") : text_get(*request, response);
+      }, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/system/tables/{table}", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1,
      [](const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
-         return request == nullptr ? invalid_argument("null request") : table_get(*request, response);
-     }, nullptr},
+          return request == nullptr ? invalid_argument("null request") : table_get(*request, response);
+      }, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/system/tables/{table}/search", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1,
      [](const contracts::HttpReq* request, contracts::HttpRes* response, void*) {
-         return request == nullptr ? invalid_argument("null request") : table_search(*request, response);
-     }, nullptr},
+          return request == nullptr ? invalid_argument("null request") : table_search(*request, response);
+      }, nullptr, nullptr},
     {contracts::HttpMethod::kGet, "/api/system/tables/{table}/download", kPluginId,
-     &table_download, nullptr},
-    {contracts::HttpMethod::kGet, "/api/system/help", kPluginId, &help_get, nullptr},
-    {contracts::HttpMethod::kGet, "/api/system/download", kPluginId, &download_all, nullptr},
+     contracts::HttpHandlerKind::kQuery, 0, 1, &table_download, nullptr, nullptr},
+    {contracts::HttpMethod::kGet, "/api/system/help", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &help_get, nullptr, nullptr},
+    {contracts::HttpMethod::kGet, "/api/system/download", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &download_all, nullptr, nullptr},
 };
 
 QolResult static_map_name(int32_t map_id, char* out, uint32_t capacity, uint32_t* out_size) {
@@ -461,26 +471,14 @@ contracts::CapabilityProvisionRef kProvides[] = {
 };
 
 int plugin_install(contracts::PluginContext& context) {
-    if (context.sdk == nullptr || context.sdk->http_dispatch.register_query == nullptr) return 1;
+    if (context.sdk == nullptr) return 1;
     g_static_data_api = {&static_map_name, &static_map_exits};
     g_sdk = context.sdk;
-    for (const auto& route : kHttpQueries) {
-        const QolResult registered = g_sdk->http_dispatch.register_query(
-            route.method, route.path, route.owner, route.handler, route.ctx);
-        if (!contracts::succeeded(registered)) {
-            if (g_sdk->http_dispatch.unregister_owner != nullptr)
-                (void)g_sdk->http_dispatch.unregister_owner(kPluginId);
-            g_sdk = nullptr;
-            return 1;
-        }
-    }
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& context) {
-    const contracts::QolHostSdk* sdk = context.sdk != nullptr ? context.sdk : g_sdk;
-    if (sdk != nullptr && sdk->http_dispatch.unregister_owner != nullptr)
-        (void)sdk->http_dispatch.unregister_owner(kPluginId);
+    (void)context;
     g_sdk = nullptr;
 }
 
@@ -498,14 +496,18 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId, kPluginVersion,
-    2, kRequires,
     0, nullptr,
+    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+    kOptionalRequires,
     1, kProvides,
     0, nullptr,
     0, nullptr,
     &plugin_install, &plugin_deactivate, nullptr, nullptr, &plugin_fill_status, nullptr,
     nullptr, 0, nullptr, 0,
     kFeatures, 1,
+    kHttpEndpoints, static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    nullptr, 0,
 };
 
 }  // namespace

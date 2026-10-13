@@ -70,6 +70,7 @@ std::string serialize_json_value(const JsonValue& value);
 struct PluginFeatureSeed {
     std::string plugin_id;
     std::vector<contracts::FeatureDefinition> features;
+    QolResult (*validate_config)(const char*, const char*, uint32_t) = nullptr;
 };
 struct PluginDesiredSnapshot {
     std::string plugin_id;

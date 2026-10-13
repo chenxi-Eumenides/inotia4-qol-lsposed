@@ -1,11 +1,15 @@
 #include "controller.h"
 #include "host/owner_identity.h"
+#include <array>
 #include <algorithm>
 #include <cstring>
+#include <new>
 #include <stdexcept>
 
 namespace qol::host {
+thread_local FeatureController* FeatureController::active_receipt_dispatcher_ = nullptr;
 namespace {
+constexpr std::size_t kMaxReceiptObservers = 256;
 QolResult error(int32_t code) { return contracts::error(code, nullptr, 0); }
 QolResult admission(QolResult status, contracts::FeatureReceipt* out) {
     if (!contracts::succeeded(status) && out) {
@@ -53,8 +57,41 @@ JsonValue string(const char* text) {
 ConfigStoreResult FeatureDirectory::add(const contracts::PluginDescriptor& descriptor) {
     if (!descriptor.id || !descriptor.features || !descriptor.feature_count || descriptor.feature_count > 1024)
         return {features::core_settings::ConfigStoreError::kValidation, "missing/nonzero feature definitions required", false};
+    if ((descriptor.http_endpoint_count != 0 && descriptor.http_endpoints == nullptr) ||
+        descriptor.http_endpoint_count > 4096) {
+        return {features::core_settings::ConfigStoreError::kValidation,
+                "invalid descriptor tail", false};
+    }
+    for (uint32_t index = 0; index < descriptor.http_endpoint_count; ++index) {
+        const auto& endpoint = descriptor.http_endpoints[index];
+        if (endpoint.path == nullptr || endpoint.path[0] != '/' || endpoint.route_owner == nullptr ||
+            endpoint.route_owner[0] == '\0' || endpoint.op_required > 1 ||
+            endpoint.lease_required > 1) {
+            return {features::core_settings::ConfigStoreError::kValidation,
+                    "invalid HTTP endpoint descriptor", false};
+        }
+        const bool get = endpoint.method == contracts::HttpMethod::kGet;
+        const bool post = endpoint.method == contracts::HttpMethod::kPost;
+        if ((!get && !post) ||
+            (get && (endpoint.kind != contracts::HttpHandlerKind::kQuery ||
+                     endpoint.query_handler == nullptr || endpoint.command_handler != nullptr)) ||
+            (post && (endpoint.kind != contracts::HttpHandlerKind::kCommand ||
+                      endpoint.command_handler == nullptr || endpoint.query_handler != nullptr))) {
+            return {features::core_settings::ConfigStoreError::kValidation,
+                    "HTTP method, kind and handler mismatch", false};
+        }
+        for (uint32_t previous = 0; previous < index; ++previous) {
+            const auto& other = descriptor.http_endpoints[previous];
+            if (other.method == endpoint.method && std::strcmp(other.path, endpoint.path) == 0) {
+                return {features::core_settings::ConfigStoreError::kValidation,
+                        "duplicate HTTP endpoint", false};
+            }
+        }
+    }
     auto candidate = definitions_;
-    candidate.push_back({descriptor.id, {descriptor.features, descriptor.features + descriptor.feature_count}});
+    candidate.push_back({descriptor.id,
+                         {descriptor.features, descriptor.features + descriptor.feature_count},
+                         descriptor.validate_config});
     features::core_settings::ConfigStore validation;
     auto checked = validation.prepare_features(candidate);
     if (checked.ok()) definitions_ = std::move(candidate);
@@ -231,7 +268,8 @@ QolResult FeatureController::read_value(const char* id, const char* section, con
 }
 
 QolResult FeatureController::enqueue(const char* id, FeatureConfigField field, const char* key,
-    const std::string& json, uint64_t owner, contracts::FeatureReceipt* out) {
+    const std::string& json, uint64_t owner, contracts::FeatureReceipt* out,
+    bool has_expected_revision, uint64_t expected_revision) {
     using namespace contracts;
     if (out) *out = {};
     auto* plugin = find_plugin(id);
@@ -241,8 +279,9 @@ QolResult FeatureController::enqueue(const char* id, FeatureConfigField field, c
     if (!parsed.ok()) return result(parsed);
     if (field != FeatureConfigField::kConfig && value.kind != JsonValue::Kind::kBoolean) return error(kQolErrInvalidArgument);
     if (field == FeatureConfigField::kDesiredEnable && host_owned(id)) return error(kQolErrUnsupported);
-    if (field == FeatureConfigField::kConfig && config_validator_) {
-        const auto validated = config_validator_(id, key, value);
+    if (field == FeatureConfigField::kConfig && plugin->validate_config != nullptr) {
+        const auto validated = plugin->validate_config(key, json.data(),
+                                                       static_cast<uint32_t>(json.size()));
         if (!contracts::succeeded(validated)) return validated;
     }
     if (field == FeatureConfigField::kFeature && std::none_of(plugin->features.begin(), plugin->features.end(), [&](const auto& f) { return std::strcmp(f.id, key) == 0; })) return error(kQolErrNotFound);
@@ -256,7 +295,8 @@ QolResult FeatureController::enqueue(const char* id, FeatureConfigField field, c
     }
     *out = {next_id_++, 0, FeatureAdmission::kAdmitted, FeaturePersistence::kPending, FeatureActual::kNotSubmitted, 0};
     receipts_.emplace(out->request_id, ReceiptRecord{*out, owner});
-    queue_.push_back({id, field, key, json, out->request_id});
+    queue_.push_back({id, field, key, json, out->request_id,
+                      has_expected_revision, expected_revision});
     changed_.notify_one();
     return ok();
 }
@@ -269,6 +309,14 @@ QolResult FeatureController::request_set_config(const char* id, const char* key,
     if (!json && size) return admission(error(kQolErrInvalidArgument), out);
     return admission(enqueue(id, FeatureConfigField::kConfig, key, std::string(json ? json : "", size), 0, out), out);
 }
+QolResult FeatureController::request_set_config_if_revision(
+    const char* id, const char* key, const char* json, uint32_t size,
+    uint64_t expected_revision, contracts::FeatureReceipt* out) {
+    if (!json && size) return admission(error(kQolErrInvalidArgument), out);
+    return admission(enqueue(id, FeatureConfigField::kConfig, key,
+                             std::string(json ? json : "", size), 0, out, true,
+                             expected_revision), out);
+}
 QolResult FeatureController::request_desired(const char* id, uint8_t value, contracts::FeatureReceipt* out) {
     if (value > 1) return admission(error(kQolErrInvalidArgument), out);
     return admission(enqueue(id, FeatureConfigField::kDesiredEnable, "", value ? "true" : "false", 0, out), out);
@@ -279,6 +327,78 @@ QolResult FeatureController::receipt(uint64_t id, contracts::FeatureReceipt* out
     auto found = receipts_.find(id);
     if (found == receipts_.end()) return error(kQolErrNotFound);
     *out = found->second.value;
+    return contracts::ok();
+}
+
+QolResult FeatureController::subscribe_receipt(uint64_t request_id,
+                                               FeatureReceiptObserver observer,
+                                               void* context, uint64_t* out_subscription) {
+    if (out_subscription != nullptr) *out_subscription = 0;
+    if (request_id == 0 || observer == nullptr || out_subscription == nullptr)
+        return error(kQolErrInvalidArgument);
+
+    contracts::FeatureReceipt terminal{};
+    bool replay_terminal = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!running_ || stopping_) return error(kQolErrNotReady);
+        const auto receipt = receipts_.find(request_id);
+        if (receipt == receipts_.end()) return error(kQolErrNotFound);
+        if (receipt->second.value.persistence != contracts::FeaturePersistence::kPending) {
+            terminal = receipt->second.value;
+            replay_terminal = true;
+        } else {
+            if (receipt_observers_.size() >= kMaxReceiptObservers)
+                return error(kQolErrBusy);
+            uint64_t id = next_receipt_observer_id_;
+            while (id == 0 || receipt_observers_.find(id) != receipt_observers_.end()) {
+                ++id;
+                if (id == 0) id = 1;
+            }
+            next_receipt_observer_id_ = id + 1;
+            if (next_receipt_observer_id_ == 0) next_receipt_observer_id_ = 1;
+
+            std::shared_ptr<ReceiptObserverRecord> subscription;
+            try {
+                subscription = std::make_shared<ReceiptObserverRecord>();
+                subscription->id = id;
+                subscription->request_id = request_id;
+                subscription->observer = observer;
+                subscription->context = context;
+                receipt_observers_.emplace(id, subscription);
+            } catch (const std::bad_alloc&) {
+                return error(kQolErrInternal);
+            }
+            *out_subscription = id;
+            return contracts::ok();
+        }
+    }
+
+    // A terminal replay has no live subscription token; the callback owns this receipt snapshot
+    // for its full duration and runs without the controller mutex.
+    if (replay_terminal) observer(context, terminal);
+    return contracts::ok();
+}
+
+QolResult FeatureController::unsubscribe_receipt(uint64_t subscription_id) {
+    if (subscription_id == 0) return error(kQolErrInvalidArgument);
+    std::unique_lock<std::mutex> lock(mutex_);
+    auto found = receipt_observers_.find(subscription_id);
+    if (found == receipt_observers_.end()) return error(kQolErrNotFound);
+    const auto subscription = found->second;
+    subscription->cancelled = true;
+    if (active_receipt_dispatcher_ == this) {
+        if (subscription->in_flight == 0) receipt_observers_.erase(found);
+        return contracts::ok();
+    }
+    if (subscription->in_flight != 0) {
+        changed_.wait(lock, [&] { return subscription->in_flight == 0; });
+        found = receipt_observers_.find(subscription_id);
+        if (found != receipt_observers_.end() && found->second == subscription)
+            receipt_observers_.erase(found);
+    } else {
+        receipt_observers_.erase(found);
+    }
     return contracts::ok();
 }
 
@@ -321,9 +441,13 @@ void FeatureController::run() {
         }
         FeatureReceipt completed{request.id, 0, FeatureAdmission::kAdmitted, FeaturePersistence::kFailed, FeatureActual::kNotSubmitted, kQolErrInternal};
         try {
-            const auto committed = service_.commit_feature_model(request.plugin, request.field, request.key, request.json);
+            const auto committed = request.has_expected_revision
+                ? service_.commit_feature_model_if_revision(request.plugin, request.key,
+                                                            request.json, request.expected_revision)
+                : service_.commit_feature_model(request.plugin, request.field,
+                                                request.key, request.json);
             completed.revision = committed.revision;
-            completed.error_code = result(committed.result).code;
+            completed.error_code = committed.conflict ? kQolErrConflict : result(committed.result).code;
             if (committed.committed) {
                 completed.persistence = FeaturePersistence::kPersisted;
                 completed.actual = FeatureActual::kPending;
@@ -333,8 +457,40 @@ void FeatureController::run() {
             // Receipt exposes failure and the worker continues servicing later admissions.
             completed.error_code = kQolErrInternal;
         }
-        std::lock_guard<std::mutex> lock(mutex_);
-        receipts_.at(request.id).value = completed;
+        std::array<std::shared_ptr<ReceiptObserverRecord>, kMaxReceiptObservers> observers{};
+        std::size_t observer_count = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            receipts_.at(request.id).value = completed;
+            for (const auto& item : receipt_observers_) {
+                const auto& subscription = item.second;
+                if (subscription->request_id != request.id || subscription->cancelled) continue;
+                ++subscription->in_flight;
+                observers[observer_count++] = subscription;
+            }
+        }
+        for (std::size_t index = 0; index < observer_count; ++index) {
+            const auto& subscription = observers[index];
+            bool invoke = false;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                invoke = !subscription->cancelled;
+            }
+            if (invoke) {
+                FeatureController* previous = active_receipt_dispatcher_;
+                active_receipt_dispatcher_ = this;
+                subscription->observer(subscription->context, completed);
+                active_receipt_dispatcher_ = previous;
+            }
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                --subscription->in_flight;
+                const auto found = receipt_observers_.find(subscription->id);
+                if (found != receipt_observers_.end() && found->second == subscription)
+                    receipt_observers_.erase(found);
+            }
+            changed_.notify_all();
+        }
     }
 }
 void FeatureController::stop() {

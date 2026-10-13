@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""阶段 5 验收基建：143 路由全量 smoke 探测，产出基线报告（重构前后行为对比）。
+"""阶段 5 验收基建：147 路由全量 smoke 探测，产出基线报告（重构前后行为对比）。
 
 用法：
 python3 scripts/verification/smoke_all.py [base_url] [output_json]
 python3 scripts/verification/smoke_all.py                      # 默认 http://127.0.0.1:8088
 python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 smoke_local.json
 
-路由探测清单与 native routes.inc 的 143 条冻结路由保持一致；路径模板参数
+路由探测清单与 native routes.inc 的 147 条冻结路由保持一致；路径模板参数
 {role} {id} {slot} 等按各 controller 参数语义写死合理默认值。
 
 断言（每条路由）：
@@ -51,7 +51,7 @@ PATH_VARS = {
 MISSING = "{}"  # 对象字面量，用于危险写端点
 BAD_JSON = "{bad"  # 让带 body 的调试/备份端点停在参数解析，避免产生副作用
 
-# 143 条路由清单：method / path 模板 / query / body / 备注
+# 147 条路由清单：method / path 模板 / query / body / 备注
 ROUTES = [
     # ---- AutoSellFeatureController (2) ----
     {"m": "GET", "p": "/api/feature/autosell/config", "note": "读自动出售配置"},
@@ -74,9 +74,10 @@ ROUTES = [
     {"m": "POST", "p": "/api/character/combat/{role}/cast_skill", "body": BAD_JSON, "note": "参数校验:避免释放技能"},
     {"m": "POST", "p": "/api/character/combat/{role}/attack_target", "body": BAD_JSON, "note": "参数校验:避免攻击目标"},
     {"m": "POST", "p": "/api/character/combat/{role}/stop_combat", "body": None, "note": "运行时:停止战斗"},
-    # ---- ConfigController (2) ----
+    # ---- ConfigController (3) ----
     {"m": "GET", "p": "/api/config/list", "note": "读配置"},
     {"m": "POST", "p": "/api/config/set", "body": '{"plugin_id":"smoke.unknown","field":"feature","key":"smoke.unknown.probe","value":true}', "note": "未注册插件目标预期400拒绝,不写配置"},
+    {"m": "GET", "p": "/api/config/receipt/{id}", "note": "读配置提交 receipt"},
     # ---- CurrentMapController (7) ----
     {"m": "GET", "p": "/api/world/map/id"},
     {"m": "GET", "p": "/api/world/map/exits"},
@@ -102,6 +103,10 @@ ROUTES = [
     {"m": "GET", "p": "/api/debug/ui"},
     {"m": "GET", "p": "/api/debug/path", "query": {"tx": 0, "ty": 0}},
     {"m": "GET", "p": "/api/debug/item/raw", "query": {"bag": 0, "slot": 0}},
+    # ---- core.custom_ui debug endpoints (3); invalid body keeps the probe side-effect free ----
+    {"m": "POST", "p": "/api/debug/custom-ui/components", "body": BAD_JSON, "note": "参数校验:避免切换调试面板"},
+    {"m": "POST", "p": "/api/debug/custom-ui/scroll", "body": BAD_JSON, "note": "参数校验:避免切换调试面板"},
+    {"m": "POST", "p": "/api/debug/custom-ui/help", "body": BAD_JSON, "note": "参数校验:避免切换调试面板"},
     {"m": "GET", "p": "/api/debug/extension_bag/status", "note": "扩展背包调试状态"},
     {"m": "POST", "p": "/api/debug/extension_bag/enter_view", "body": BAD_JSON, "note": "参数校验:避免改变视图"},
     {"m": "POST", "p": "/api/debug/extension_bag/exit_view", "note": "扩展背包退出视图"},
@@ -153,7 +158,7 @@ ROUTES = [
     # ---- NpcController (2) ----
     {"m": "POST", "p": "/api/ui/start_interact", "note": "运行时:开始交互"},
     {"m": "POST", "p": "/api/ui/dialog/select", "body": '{"action":"ok"}', "note": "运行时:对话框选 ok"},
-    # ---- OpController (15, 全部占位 not implemented) ----
+    # ---- OpController (15 OP routes plus resident feature lifecycle) ----
     {"m": "POST", "p": "/api/op/quest/accept", "note": "占位"},
     {"m": "POST", "p": "/api/op/quest/complete", "note": "占位"},
     {"m": "POST", "p": "/api/op/character/{role}/status-point", "note": "占位"},
