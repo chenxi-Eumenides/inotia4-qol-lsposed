@@ -3,13 +3,23 @@
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/access/item_class.h"
 #include "game/access/game_access.h"
+#include "game/access/ui_state.h"
 #include "game/access/world.h"
+#include "game/json/game_json.h"
+#include "contracts/game_ports/ui_write_port.h"
 #include "game/nav/game_nav.h"
 #include "game/symbols/game_symbols.h"
 #include "host/plugin_registry.h"
 #include "patch/ptr_slot.h"
 
 #include <string>
+#include <cstring>
+
+int g_host_ui_step_calls = 0;
+int g_host_ui_cancel_calls = 0;
+int g_host_ui_snapshot_reads = 0;
+int g_host_ui_not_ready_reads = 0;
+std::string g_host_ui_snapshot = "{\"screen\":\"world\"}";
 
 uint8_t* g_snd_fx = nullptr;
 UiEquipMakeDescFn fn_ui_equip_make_desc = nullptr;
@@ -191,6 +201,53 @@ int32_t craft_is_apply_stuff(void*, void*) { return g_test_craft_apply_stuff_res
 
 // legacy 聚合 TU 的写路由拼装接缝（真实实现位于 game_system.cpp，测试目标不编译它）。
 std::string build_quest_quit_result_json(int32_t) { return "{\"ok\":false,\"error\":\"stub\"}"; }
+
+int32_t build_ui_write_result_json(int32_t, const char*, char* out, uint32_t capacity,
+                                   uint32_t* out_size) {
+    constexpr char kSuccess[] = "{\"ok\":true}";
+    if (out == nullptr || out_size == nullptr || capacity < sizeof(kSuccess) - 1) return 1;
+    std::memcpy(out, kSuccess, sizeof(kSuccess) - 1);
+    *out_size = sizeof(kSuccess) - 1;
+    return 0;
+}
+
+QolResult ui_state_write_step(uint64_t, uint32_t, int32_t, const char*, char* out,
+                              uint32_t capacity, uint32_t* out_size) {
+    ++g_host_ui_step_calls;
+    constexpr char kSuccess[] = "{\"ok\":true}";
+    if (out == nullptr || out_size == nullptr || capacity < sizeof(kSuccess) - 1) {
+        return contracts::error(kQolErrInternal, "UI result buffer unavailable", 28);
+    }
+    std::memcpy(out, kSuccess, sizeof(kSuccess) - 1);
+    *out_size = sizeof(kSuccess) - 1;
+    return contracts::ok();
+}
+
+QolResult ui_state_write_cancel_pending(uint64_t) {
+    ++g_host_ui_cancel_calls;
+    return contracts::ok();
+}
+
+QolResult ui_write_result_state_json(int32_t kind, std::string* out_json) {
+    if (out_json == nullptr) return contracts::error(kQolErrInvalidArgument, "output required", 15);
+    if (kind == contracts::kQolUiWriteMainMenu) {
+        *out_json = "{\"player\":true}";
+        return contracts::ok();
+    }
+    if (kind != contracts::kQolUiWritePanelOpen && kind != contracts::kQolUiWritePanelClose) {
+        return contracts::error(kQolErrInvalidArgument, "invalid UI write kind", 21);
+    }
+    ++g_host_ui_snapshot_reads;
+    if (g_host_ui_not_ready_reads > 0) {
+        --g_host_ui_not_ready_reads;
+        out_json->clear();
+        return contracts::error(kQolErrNotReady, "UI result state not ready", 25);
+    }
+    *out_json = g_host_ui_snapshot;
+    return qol::game::json::is_ready_state_snapshot(*out_json)
+               ? contracts::ok()
+               : contracts::error(kQolErrNotReady, "UI result state not ready", 25);
+}
 
 }  // namespace qol::game
 

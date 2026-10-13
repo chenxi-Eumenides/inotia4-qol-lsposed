@@ -30,6 +30,7 @@ class HookMain : XposedModule() {
             LogFile.error(LogDomain.PLATFORM, "uncaught exception on ${thread.name}", throwable)
         }
 
+        ModuleHealthMonitor.start()
     }
 
     override fun onPackageLoaded(param: XposedModuleInterface.PackageLoadedParam) {
@@ -51,6 +52,27 @@ class HookMain : XposedModule() {
             installWatermarkHook(param, moduleApkPath)
             LogFile.info(LogDomain.PLATFORM, "kernel-only mode: business hooks skipped")
             return
+        }
+        AgreementPopup.installOpeningAnimationHook(param.getDefaultClassLoader()) { method ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val result = chain.proceed()
+                    AgreementPopup.onOpeningAnimationEnded(chain.thisObject)
+                    result
+                }
+        }
+        AgreementPopup.installActivityDestroyHook(param.getDefaultClassLoader()) { method ->
+            hook(method)
+                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
+                .intercept { chain ->
+                    val activity = chain.thisObject as? Activity
+                    try {
+                        chain.proceed()
+                    } finally {
+                        activity?.let { AgreementPopup.onActivityDestroyed(it) }
+                    }
+                }
         }
         ResourceNamespaceBridge.install(param) { method ->
             hook(method)
@@ -114,13 +136,14 @@ class HookMain : XposedModule() {
     }
 
     private fun installWatermarkHook(param: XposedModuleInterface.PackageLoadedParam, moduleApkPath: String) {
-        // The regular watermark shares the existing MainActivity focus seam.
+        // Health overlay and the regular watermark share the existing MainActivity focus seam.
         WatermarkOverlay.install(param) { method ->
             hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                 .intercept { chain ->
                     val focused = chain.getArg(0) as? Boolean ?: false
                     val result = chain.proceed()
+                    ModuleHealthMonitor.onMainActivityVisibility(focused)
                     (chain.thisObject as? Activity)?.let { activity ->
                         if (focused) MainActivityStartupHook.onActivityFocused(activity, moduleApkPath)
                         WatermarkOverlay.attachWatermark(activity)

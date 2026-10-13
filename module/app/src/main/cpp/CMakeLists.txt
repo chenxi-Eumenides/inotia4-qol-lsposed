@@ -252,6 +252,7 @@ target_sources(gamebridge PRIVATE
 # L2：插件 ABI 表的 host/game adapter（固定宽度契约转发至内部实现）。
 target_sources(gamebridge PRIVATE
     host/host_sdk.cpp
+    host/module_health.cpp
     host/config_namespace.cpp
     host/config_platform_bridge.cpp
     host/core_settings_config_store.cpp

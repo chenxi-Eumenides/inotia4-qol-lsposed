@@ -14,6 +14,14 @@ object NativeBridge {
     var ready: Boolean = false
         private set
 
+    @Volatile
+    var initializationAttempted: Boolean = false
+        private set
+
+    @Volatile
+    var initializationInProgress: Boolean = false
+        private set
+
     init {
         try {
             System.loadLibrary("gamebridge")
@@ -29,6 +37,8 @@ object NativeBridge {
         if (!libraryLoaded || !initializationLock.tryLock()) return false
         return try {
             if (ready) return true
+            initializationAttempted = true
+            initializationInProgress = true
             ready = try {
                 nativeRegisterExtensionBagUiBridge(ExtensionBagUiBridge::class.java)
                 nativeInit()
@@ -37,6 +47,21 @@ object NativeBridge {
                 false
             }
             ready
+        } finally {
+            initializationInProgress = false
+            initializationLock.unlock()
+        }
+    }
+
+    external fun nativeReadModuleHealth(): String
+
+    external fun nativeModuleHealthSubscribe(callbacks: Class<*>): Long
+    external fun nativeModuleHealthUnsubscribe(subscriptionId: Long): Boolean
+
+    fun readModuleHealthIfIdle(): String? {
+        if (!libraryLoaded || !initializationLock.tryLock()) return null
+        return try {
+            if (initializationInProgress) null else nativeReadModuleHealth()
         } finally {
             initializationLock.unlock()
         }

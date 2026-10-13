@@ -4,28 +4,39 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
-#include <cstdio>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "game_cache.h"
+#include "infra/frame/frame_task.h"
+#include "infra/scheduler.h"
 
 // system 槽（gamestate/snapshot）builder 仍由 game_system 提供（T2l-integ 口径，system 槽留 game_system）；
 // 此处仅前向声明，避免 infra include legacy/system 头（include 边消除，链接语义不变）。
 std::string build_gamestate_json();
 std::string build_snapshot_json();
 
+namespace {
+
 struct CacheSlot {
     const char* name;             // 端点名（日志用）
-    int interval;                 // 刷新间隔：0=惰性（请求驱动）；n>0=每 n 帧预取
-    uint64_t last_frame;          // 上次刷新帧号
-    std::string json;             // 缓存内容（world 时有效）
-    std::string (*build)();       // 构造器：读游戏内存拼 JSON
-    bool world_only;              // v0.5.16：非 world 态下是否报错（gamestate/snapshot=false 全状态可用）
-    std::atomic<bool> refreshing{false};  // v0.4.58：有线程正在构造（并发请求直接返回旧缓存）
+    int interval;                 // 刷新间隔：0=请求驱动；n>0=请求后的每 n 帧刷新
+    uint64_t last_frame;          // 上次成功发布的帧号
+    std::string json;             // 最近发布的不可变 JSON 快照
+    std::string (*build)();       // 构造器：仅由逻辑帧主线程调用
+    bool world_only;              // 非 world 时是否返回 not in game
+    bool requested = false;       // 只有被读取过的槽才参与后续调度
+    bool dirty = false;           // 等待逻辑帧构造
+    bool published = false;
+    bool building = false;
+    std::thread::id building_thread{};
+    uint64_t building_generation = 0;
+    uint64_t change_version = 0;
+    uint64_t publish_version = 0;
 };
 
 CacheSlot g_cache_slots[] = {
@@ -34,167 +45,362 @@ CacheSlot g_cache_slots[] = {
     // 读侧降级为 not in game。
     {"player",      1, 0, "", nullptr,                  true},
     {"party",       1, 0, "", nullptr,                  true},
-    {"map",         0, 0, "", nullptr,                  true},  // v0.4.61：瓦片矩阵静态数据（同图不变），惰性获取（切图才变，请求驱动）
+    {"map",         0, 0, "", nullptr,                  true},
     {"units",       1, 0, "", nullptr,                  true},
     {"gamestate",   1, 0, "", build_gamestate_json,   false},
     {"snapshot",    1, 0, "", build_snapshot_json,    false},
-    {"inventory",   0, 0, "", nullptr,                  true},  // 惰性：偶发查看，请求驱动
-    {"skills",      0, 0, "", nullptr,                  true},  // 惰性
-    {"mercenaries", 0, 0, "", nullptr,                  true},  // 惰性
+    {"inventory",   0, 0, "", nullptr,                  true},
+    {"skills",      0, 0, "", nullptr,                  true},
+    {"mercenaries", 0, 0, "", nullptr,                  true},
     {"drops",       1, 0, "", nullptr,                  true},
-    {"enemies",     0, 0, "", nullptr,                  true},  // 惰性：units 子集（type==1），请求驱动
-    {"interactives",0, 0, "", nullptr,                  true},  // 惰性：units 子集（type==2 且可交互），请求驱动
+    {"enemies",     0, 0, "", nullptr,                  true},
+    {"interactives",0, 0, "", nullptr,                  true},
 };
 constexpr int CACHE_SLOT_COUNT = sizeof(g_cache_slots) / sizeof(g_cache_slots[0]);
+constexpr auto kReaderWait = std::chrono::milliseconds(100);
+constexpr auto kBuilderTimeBudget = std::chrono::milliseconds(3);
+constexpr size_t kBuilderCountBudget = 3;
+constexpr char kNotReadyJson[] = "{\"error\":\"not ready\"}";
+constexpr char kNotInGameJson[] = "{\"error\":\"not in game\"}";
 
-// 未注入 builder 的槽降级体：与现状非 world 输出一致，不引入新文案；生产由 host 装配期注入，
-// 此分支仅防御。
-std::string run_slot_builder(const CacheSlot& slot) {
-    return slot.build != nullptr ? slot.build() : std::string("{\"error\":\"not in game\"}");
-}
-
+std::mutex g_cache_mtx;
+std::condition_variable g_cache_cv;
+std::atomic<bool> g_cache_ready{false};
+std::atomic<bool> g_cache_enabled{true};
+std::atomic<bool> g_cache_world{false};
 std::atomic<bool (*)()> g_world_gate{nullptr};
+std::atomic<bool (*)()> g_main_thread_gate{nullptr};
+uint64_t g_cache_generation = 1;  // 受 g_cache_mtx 保护；stop/start 使在途结果失效
+FrameTaskId g_cache_task = 0;    // 受 g_cache_mtx 保护
+bool g_world_state_known = false;
+bool g_last_world_state = false;
 
-void frame_cache_set_world_gate(bool (*fn)()) { g_world_gate.store(fn); }
-
-// 现取 gate：未注入=false（未 world）→ 与现状 g_base 未就绪分支同体。
-bool cache_in_world() {
-    bool (*fn)() = g_world_gate.load();
+bool on_game_main_thread() {
+    bool (*fn)() = g_main_thread_gate.load(std::memory_order_acquire);
     return fn != nullptr && fn();
 }
 
-std::mutex g_cache_mtx;                    // 保护缓存读写
-std::atomic<bool> g_cache_ready{false};    // 已成功构造过至少一个槽
-std::thread g_cache_thread;                // v0.4.59：预取线程（仅驱动 interval>0 槽）
-std::atomic<bool> g_cache_stop{false};
+bool cached_world_state() { return g_cache_world.load(std::memory_order_acquire); }
+
+void mark_dirty_locked(CacheSlot& slot) {
+    slot.dirty = true;
+    ++slot.change_version;
+}
+
+bool cache_logic_task(int64_t frame, void* /*ctx*/);
+
+bool has_requested_builder_locked() {
+    for (const CacheSlot& slot : g_cache_slots) {
+        if (slot.requested && slot.build != nullptr) return true;
+    }
+    return false;
+}
+
+void schedule_cache_task_locked() {
+    if (!g_cache_enabled.load(std::memory_order_acquire) || g_cache_task != 0 ||
+        !has_requested_builder_locked()) {
+        return;
+    }
+    // 任务只在有消费者请求缓存后注册；真正的 builder 仍由 frame_source 的逻辑帧派发。
+    g_cache_task = frame_task_add(kFramePointLogicPre, &cache_logic_task, nullptr, 1, 0);
+}
+
+std::string fallback_locked(const CacheSlot& slot) {
+    if (slot.published) return slot.json;
+    if (slot.build == nullptr || (slot.world_only && !cached_world_state())) {
+        return kNotInGameJson;
+    }
+    return kNotReadyJson;
+}
+
+bool builder_result_ready(const std::string& json) {
+    return !json.empty() && json != kNotReadyJson && json != kNotInGameJson;
+}
+
+bool sample_logic_world_state() {
+    bool (*world_gate)() = g_world_gate.load(std::memory_order_acquire);
+    const bool in_world = world_gate != nullptr && world_gate();
+    g_cache_world.store(in_world, std::memory_order_release);
+
+    bool changed_world = false;
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mtx);
+        changed_world = !g_world_state_known || in_world != g_last_world_state;
+        g_world_state_known = true;
+        g_last_world_state = in_world;
+        if (changed_world) {
+            for (CacheSlot& slot : g_cache_slots) {
+                if (!slot.requested || slot.build == nullptr) continue;
+                if (!in_world && slot.world_only) {
+                    if (slot.published || !slot.json.empty()) {
+                        slot.json.clear();
+                        slot.published = false;
+                        slot.last_frame = 0;
+                        ++slot.publish_version;
+                    }
+                    slot.dirty = false;
+                } else {
+                    mark_dirty_locked(slot);
+                }
+            }
+        }
+    }
+    if (changed_world) g_cache_cv.notify_all();
+    return in_world;
+}
+
+// The caller owns the logic-frame safety check. This common pipeline is shared by scheduled
+// refresh and a one-slot read made from a verified logic-phase owner result callback.
+bool build_slot(int index, int64_t frame) {
+    std::string (*builder)() = nullptr;
+    uint64_t generation = 0;
+    uint64_t change_version = 0;
+    const std::thread::id current_thread = std::this_thread::get_id();
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mtx);
+        CacheSlot& slot = g_cache_slots[index];
+        if (!g_cache_enabled.load(std::memory_order_relaxed) || !slot.dirty ||
+            slot.build == nullptr || slot.building) {
+            return false;
+        }
+        generation = g_cache_generation;
+        change_version = slot.change_version;
+        builder = slot.build;
+        slot.building = true;
+        slot.building_thread = current_thread;
+        slot.building_generation = generation;
+    }
+
+    std::string json = builder();
+    const bool ready = builder_result_ready(json);
+    bool published = false;
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mtx);
+        CacheSlot& slot = g_cache_slots[index];
+        const bool owns_build = slot.building && slot.building_thread == current_thread &&
+                                slot.building_generation == generation;
+        if (owns_build) {
+            slot.building = false;
+            slot.building_thread = std::thread::id{};
+            if (g_cache_enabled.load(std::memory_order_relaxed) &&
+                g_cache_generation == generation && slot.build == builder && ready &&
+                slot.change_version == change_version) {
+                slot.json = std::move(json);
+                slot.last_frame = frame > 0 ? static_cast<uint64_t>(frame) : 0;
+                slot.published = true;
+                slot.dirty = false;
+                ++slot.publish_version;
+                g_cache_ready.store(true, std::memory_order_release);
+                published = true;
+            } else if (g_cache_enabled.load(std::memory_order_relaxed) &&
+                       g_cache_generation == generation && slot.build == builder) {
+                // Keep the invalidation pending after a failed build or a concurrent write.
+                slot.dirty = true;
+            }
+        }
+    }
+    g_cache_cv.notify_all();
+    return published;
+}
+
+bool build_dirty_slot_inline(int index, int64_t frame) {
+    if (!on_game_main_thread() ||
+        !qol::infra::scheduler_is_dispatching(qol::infra::FramePoint::kLogicPre)) {
+        return false;
+    }
+    return build_slot(index, frame);
+}
+
+bool cache_logic_task(int64_t frame, void* /*ctx*/) {
+    if (!g_cache_enabled.load(std::memory_order_acquire)) return false;
+    if (!on_game_main_thread()) return true;
+
+    bool (*world_gate)() = g_world_gate.load(std::memory_order_acquire);
+    const bool in_world = world_gate != nullptr && world_gate();
+    g_cache_world.store(in_world, std::memory_order_release);
+
+    struct PendingBuild {
+        int index;
+    };
+    std::vector<PendingBuild> pending;
+    uint64_t generation = 0;
+    bool changed_world = false;
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mtx);
+        if (!g_cache_enabled.load(std::memory_order_relaxed)) return false;
+        generation = g_cache_generation;
+        changed_world = !g_world_state_known || in_world != g_last_world_state;
+        g_world_state_known = true;
+        g_last_world_state = in_world;
+
+        for (int i = 0; i < CACHE_SLOT_COUNT; ++i) {
+            CacheSlot& slot = g_cache_slots[i];
+            if (slot.world_only && !in_world) {
+                if (slot.published || !slot.json.empty()) {
+                    slot.json.clear();
+                    slot.published = false;
+                    slot.last_frame = 0;
+                    ++slot.publish_version;
+                }
+                slot.dirty = false;
+                continue;
+            }
+            if (!slot.requested || slot.build == nullptr) continue;
+            const bool periodic_refresh =
+                slot.interval > 0 &&
+                (!slot.published || frame <= 0 || slot.last_frame == 0 ||
+                 (static_cast<uint64_t>(frame) >= slot.last_frame &&
+                  static_cast<uint64_t>(frame) - slot.last_frame >=
+                      static_cast<uint64_t>(slot.interval)));
+            if (changed_world || (periodic_refresh && !slot.dirty)) {
+                mark_dirty_locked(slot);
+            }
+            if (slot.dirty && !slot.building) pending.push_back(PendingBuild{i});
+        }
+    }
+    if (changed_world) g_cache_cv.notify_all();
+
+    const auto started = std::chrono::steady_clock::now();
+    size_t attempted = 0;
+    for (const PendingBuild& item : pending) {
+        if (attempted >= kBuilderCountBudget ||
+            std::chrono::steady_clock::now() - started >= kBuilderTimeBudget) {
+            break;
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_cache_mtx);
+            if (!g_cache_enabled.load(std::memory_order_relaxed) ||
+                g_cache_generation != generation) {
+                return false;
+            }
+        }
+        ++attempted;
+        (void)build_slot(item.index, frame);
+    }
+
+    return true;
+}
+
+std::string data_slot_json(int idx) {
+    const int64_t frame = qol::infra::frame_count();
+    const bool is_main_thread = on_game_main_thread();
+    const bool in_logic_frame =
+        is_main_thread && qol::infra::scheduler_is_dispatching(qol::infra::FramePoint::kLogicPre);
+    if (in_logic_frame) (void)sample_logic_world_state();
+    std::unique_lock<std::mutex> lock(g_cache_mtx);
+    CacheSlot& slot = g_cache_slots[idx];
+    slot.requested = true;
+    schedule_cache_task_locked();
+
+    // A builder may read its own slot as a dependency. Only that recursive read may observe the
+    // last published body; external readers never turn an in-progress refresh into success.
+    if (slot.building && slot.building_thread == std::this_thread::get_id()) {
+        return fallback_locked(slot);
+    }
+
+    if (slot.build == nullptr) return fallback_locked(slot);
+    const bool in_world = cached_world_state();
+    if (slot.world_only && !in_world) {
+        return g_world_state_known ? kNotInGameJson : kNotReadyJson;
+    }
+
+    if (slot.interval == 0) {
+        if (!slot.dirty &&
+            (!slot.published || (frame > 0 && slot.last_frame != static_cast<uint64_t>(frame)))) {
+            mark_dirty_locked(slot);
+        }
+    } else if (!slot.dirty &&
+               (!slot.published ||
+                (frame > 0 && slot.last_frame != 0 &&
+                 static_cast<uint64_t>(frame) >= slot.last_frame &&
+                 static_cast<uint64_t>(frame) - slot.last_frame >=
+                     static_cast<uint64_t>(slot.interval)))) {
+        mark_dirty_locked(slot);
+    }
+
+    if (!slot.dirty) return fallback_locked(slot);
+    const uint64_t observed_publish = slot.publish_version;
+    if (slot.building && is_main_thread) return kNotReadyJson;
+
+    if (is_main_thread) {
+        lock.unlock();
+        (void)build_dirty_slot_inline(idx, frame);
+        lock.lock();
+        if (!slot.dirty && slot.published) return slot.json;
+        return kNotReadyJson;
+    }
+
+    g_cache_cv.wait_for(lock, kReaderWait, [&slot, observed_publish]() {
+        return slot.publish_version != observed_publish ||
+               !g_cache_enabled.load(std::memory_order_acquire);
+    });
+    if (!slot.dirty && slot.published) return slot.json;
+    return kNotReadyJson;
+}
+
+}  // namespace
 
 void frame_cache_set_json_builder(int32_t slot, std::string (*fn)()) {
     if (slot < 0 || slot >= CACHE_SLOT_COUNT) return;
     std::lock_guard<std::mutex> lock(g_cache_mtx);
-    g_cache_slots[slot].build = fn;
+    CacheSlot& cache_slot = g_cache_slots[slot];
+    if (cache_slot.build == fn) return;
+    cache_slot.build = fn;
+    cache_slot.json.clear();
+    cache_slot.last_frame = 0;
+    cache_slot.published = false;
+    if (cache_slot.requested && fn != nullptr) mark_dirty_locked(cache_slot);
+    schedule_cache_task_locked();
 }
 
-// 等待帧边界：帧号变化（= 本帧 Draw 完成，数据稳定）即返回；超时兜底（游戏暂停/主菜单）
-uint64_t wait_frame_boundary(uint64_t since) {
-    for (int i = 0; i < 100; ++i) {
-        int64_t f = qol::infra::frame_count();
-        if (f > 0 && static_cast<uint64_t>(f) != since) return static_cast<uint64_t>(f);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
-    int64_t f = qol::infra::frame_count();
-    return f > 0 ? static_cast<uint64_t>(f) : since;
-}
-
-// 构造单槽（调用方持锁）并更新帧号；非 world 清空缓存
-void rebuild_slot_locked(CacheSlot& s, uint64_t frame) {
-    if (cache_in_world()) {
-        s.json = run_slot_builder(s);
-        s.last_frame = frame;
-        g_cache_ready.store(true);
-    } else {
-        s.json.clear();
-    }
-}
-
-// 惰性刷新（interval=0 槽）：同帧复用（本帧已构造 → 返回缓存），跨帧 → 单飞等帧边界构造；
-// 构造期间并发请求返回旧缓存（不等帧，避免请求率>帧率时全部排队等帧）
-std::string data_slot_lazy(int idx) {
-    CacheSlot& s = g_cache_slots[idx];
-    uint64_t f = qol::infra::frame_count();
-    if (s.last_frame != 0 && f == s.last_frame) {
-        std::lock_guard<std::mutex> lock(g_cache_mtx);
-        return s.json.empty() ? run_slot_builder(s) : s.json;
-    }
-    if (s.refreshing.exchange(true)) {
-        std::lock_guard<std::mutex> lock(g_cache_mtx);
-        return s.json.empty() ? run_slot_builder(s) : s.json;
-    }
-    uint64_t boundary = wait_frame_boundary(f);
+void frame_cache_set_world_gate(bool (*fn)()) {
+    g_world_gate.store(fn, std::memory_order_release);
     std::lock_guard<std::mutex> lock(g_cache_mtx);
-    if (s.last_frame != boundary) {
-        rebuild_slot_locked(s, boundary);
+    g_world_state_known = false;
+    for (CacheSlot& slot : g_cache_slots) {
+        if (slot.requested && slot.build != nullptr) mark_dirty_locked(slot);
     }
-    s.refreshing.store(false);
-    return s.json.empty() ? run_slot_builder(s) : s.json;
+    schedule_cache_task_locked();
 }
 
-// 统一入口：interval>0 → 预取槽直接读缓存（预取线程保证新鲜）；interval=0 → 惰性
-std::string data_slot_json(int idx) {
-    // v0.5.16：非 world 态下 world 专属槽应诚实报错而非返回陈旧缓存
-    //（预取线程在退出 world 后停止构造但不清缓存，此前会返回上一帧的 world 数据）。
-    // gamestate/snapshot（world_only=false）全状态可用，直接现构。
-    if (!cache_in_world()) {
-        CacheSlot& s = g_cache_slots[idx];
-        if (s.world_only) {
-            std::lock_guard<std::mutex> lock(g_cache_mtx);
-            s.json.clear();   // 清陈旧缓存，回 world 后首帧重取，避免短暂脏数据
-            return "{\"error\":\"not in game\"}";
-        }
-        return run_slot_builder(s);
-    }
-    if (g_cache_slots[idx].interval > 0) {
-        std::lock_guard<std::mutex> lock(g_cache_mtx);
-        if (!g_cache_slots[idx].json.empty()) return g_cache_slots[idx].json;
-    }
-    return data_slot_lazy(idx);   // 缓存未就绪/惰性槽：走惰性路径（锁外等帧构造）
+void frame_cache_set_main_thread_gate(bool (*fn)()) {
+    g_main_thread_gate.store(fn, std::memory_order_release);
 }
 
-// 预取线程：帧计数驱动，仅构造 interval>0 槽（每 n 帧一次）
-void cache_prefetch_thread_fn() {
-    uint64_t last_frame = 0;
-    while (!g_cache_stop.load()) {
-        int64_t f = qol::infra::frame_count();
-        if (f > 0 && static_cast<uint64_t>(f) != last_frame) {
-            last_frame = f;
-            if (!cache_in_world()) continue;
-            for (int i = 0; i < CACHE_SLOT_COUNT; ++i) {
-                CacheSlot& s = g_cache_slots[i];
-                if (s.interval <= 0) continue;
-                if (f >= s.last_frame &&
-                    f - s.last_frame < static_cast<uint64_t>(s.interval)) continue;
-                std::string j = run_slot_builder(s);   // 锁外构造（units BFS 等耗时操作不持锁）
-                std::lock_guard<std::mutex> lock(g_cache_mtx);
-                s.json = std::move(j);       // 锁内仅 move 交换（µs 级），不阻塞请求读
-                s.last_frame = f;
-                g_cache_ready.store(true);
-            }
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(2));
-    }
-}
-
+// 兼容旧入口：只切换帧任务门禁，不创建预取线程。
 void frame_cache_start() {
-    if (g_cache_thread.joinable()) return;
-    bool need_thread = false;
-    for (int i = 0; i < CACHE_SLOT_COUNT; ++i) {
-        if (g_cache_slots[i].interval > 0) { need_thread = true; break; }
+    std::lock_guard<std::mutex> lock(g_cache_mtx);
+    ++g_cache_generation;
+    g_cache_enabled.store(true, std::memory_order_release);
+    for (CacheSlot& slot : g_cache_slots) {
+        if (slot.requested && slot.build != nullptr && !slot.published) mark_dirty_locked(slot);
     }
-    if (!need_thread) return;
-    g_cache_stop.store(false);
-    g_cache_thread = std::thread(cache_prefetch_thread_fn);
+    schedule_cache_task_locked();
 }
 
-// 停止预取线程（API 全局开关关闭时调用）：置停止标志并 join，join 后可再次 frame_cache_start()。
 void frame_cache_stop() {
-    g_cache_stop.store(true);
-    if (g_cache_thread.joinable()) {
-        g_cache_thread.join();
+    FrameTaskId task = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_cache_mtx);
+        ++g_cache_generation;
+        g_cache_enabled.store(false, std::memory_order_release);
+        task = g_cache_task;
+        g_cache_task = 0;
+        for (CacheSlot& slot : g_cache_slots) slot.dirty = false;
     }
+    if (task != 0) frame_task_remove(task);
+    g_cache_cv.notify_all();
 }
 
 void frame_cache_force_refresh() {
-    if (!cache_in_world()) return;
     std::lock_guard<std::mutex> lock(g_cache_mtx);
-    uint64_t f = static_cast<uint64_t>(qol::infra::frame_count());
-    for (int i = 0; i < CACHE_SLOT_COUNT; ++i) {
-        CacheSlot& s = g_cache_slots[i];
-        s.json = run_slot_builder(s);
-        s.last_frame = f;
+    for (CacheSlot& slot : g_cache_slots) {
+        if (slot.requested && slot.build != nullptr) mark_dirty_locked(slot);
     }
-    g_cache_ready.store(true);
+    schedule_cache_task_locked();
 }
 
-bool frame_cache_ready() { return g_cache_ready.load(); }
+bool frame_cache_ready() { return g_cache_ready.load(std::memory_order_acquire); }
 
 std::string data_player_json() { return data_slot_json(0); }
 

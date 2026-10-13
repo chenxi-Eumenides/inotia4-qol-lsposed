@@ -1,9 +1,14 @@
 #include "game/adapter_ports/game_host_port.h"
 
+#include "contracts/game_ports/ui_write_port.h"
+#include "contracts/game_ports/ports.h"
+
 #include <atomic>
 #include <cstring>
 #include <pthread.h>
+#include <string>
 
+#include "game/access/ui_state.h"
 #include "game/access/game_access.h"
 #include "game/access/item_handle_registry.h"
 #include "game/access/attr_range_ui.h"
@@ -16,6 +21,7 @@
 #include "game/access/world.h"
 #include "game/clock.h"
 #include "game/state/game_state.h"
+#include "game/state/ui_http.h"
 #include "game/feature/game_feature.h"
 #include "game/variants/game_variant.h"
 
@@ -27,6 +33,16 @@ using QolResult = ::QolResult;
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotReady = "not ready";
 constexpr const char* kUnsupported = "unsupported";
+constexpr uint32_t kUiResultStateMaxAttempts = 60;
+
+struct PendingUiResult {
+    uint64_t operation_id = 0;
+    int32_t kind = -1;
+    std::string panel;
+    std::string operation_json;
+};
+
+PendingUiResult g_pending_ui_result;
 
 pthread_t g_main_thread{};
 std::atomic<bool> g_main_thread_set{false};
@@ -37,6 +53,117 @@ QolResult error_result(int32_t code, const char* message) {
 
 QolResult not_ready() { return error_result(kQolErrNotReady, kNotReady); }
 QolResult unsupported() { return error_result(kQolErrUnsupported, kUnsupported); }
+
+QolResult ui_write_legacy(int32_t kind, const char* panel, char* out, uint32_t capacity,
+                          uint32_t* out_size) {
+    if (!game_host_is_main_thread()) return error_result(kQolErrBlocked, "wrong thread");
+    if (out == nullptr || out_size == nullptr || capacity == 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (build_ui_write_result_json(kind, panel, out, capacity, out_size) == kUiWriteFailed) {
+        constexpr char kPendingBody[] = "{\"ok\":false,\"error\":\"panel close pending\"}";
+        if (*out_size == sizeof(kPendingBody) - 1 &&
+            std::memcmp(out, kPendingBody, sizeof(kPendingBody) - 1) == 0) {
+            return error_result(kQolErrNotReady, "panel close pending");
+        }
+        return error_result(kQolErrInternal, "ui write failed");
+    }
+    return contracts::ok();
+}
+
+QolResult ui_write_step(uint64_t operation_id, uint32_t attempt, int32_t kind,
+                        const char* panel, char* out, uint32_t capacity,
+                        uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (operation_id == 0 || out == nullptr || out_size == nullptr || capacity == 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (!game_host_is_main_thread()) return error_result(kQolErrBlocked, "wrong thread");
+
+    const std::string requested_panel = panel != nullptr ? panel : "";
+    if (g_pending_ui_result.operation_id != 0 &&
+        g_pending_ui_result.operation_id != operation_id) {
+        return error_result(kQolErrNotReady, "another UI result is pending");
+    }
+
+    if (g_pending_ui_result.operation_id == operation_id) {
+        if (g_pending_ui_result.kind != kind || g_pending_ui_result.panel != requested_panel) {
+            g_pending_ui_result = PendingUiResult{};
+            return error_result(kQolErrInvalidArgument, "invalid UI write operation");
+        }
+    } else {
+        const QolResult stepped = ui_state_write_step(operation_id, attempt, kind, panel, out,
+                                                      capacity, out_size);
+        if (!contracts::succeeded(stepped)) return stepped;
+        if (out == nullptr || out_size == nullptr || *out_size == 0 || *out_size > capacity) {
+            return error_result(kQolErrInternal, "invalid UI write result");
+        }
+        // Presence of this record means the UI action is applied; retries only fetch its state.
+        g_pending_ui_result.operation_id = operation_id;
+        g_pending_ui_result.kind = kind;
+        g_pending_ui_result.panel = requested_panel;
+        g_pending_ui_result.operation_json.assign(out, *out_size);
+    }
+
+    const std::string& operation = g_pending_ui_result.operation_json;
+    if (operation.empty() || operation.back() != '}' ||
+        operation.find("\"ok\":false") != std::string::npos) {
+        if (operation.size() > capacity) {
+            g_pending_ui_result = PendingUiResult{};
+            return error_result(kQolErrInternal, "UI write result too large");
+        }
+        std::memcpy(out, operation.data(), operation.size());
+        *out_size = static_cast<uint32_t>(operation.size());
+        g_pending_ui_result = PendingUiResult{};
+        return contracts::ok();
+    }
+
+    const bool player_state = kind == contracts::kQolUiWriteMainMenu;
+    std::string state;
+    const QolResult state_result = ui_write_result_state_json(kind, &state);
+    if (state_result.code == kQolErrNotReady) {
+        if (attempt < kUiResultStateMaxAttempts - 1) {
+            *out_size = 0;
+            return error_result(kQolErrNotReady, "UI result state not ready");
+        }
+        constexpr char kStateFailure[] = "{\"ok\":false,\"error\":\"not ready\"}";
+        if (capacity < sizeof(kStateFailure) - 1) {
+            g_pending_ui_result = PendingUiResult{};
+            return error_result(kQolErrInternal, "UI result state unavailable");
+        }
+        std::memcpy(out, kStateFailure, sizeof(kStateFailure) - 1);
+        *out_size = sizeof(kStateFailure) - 1;
+        g_pending_ui_result = PendingUiResult{};
+        return error_result(kQolErrInternal, "UI result state unavailable");
+    }
+    if (!contracts::succeeded(state_result)) {
+        g_pending_ui_result = PendingUiResult{};
+        return error_result(kQolErrInternal, "UI result state unavailable");
+    }
+
+    const std::string body =
+        operation.substr(0, operation.size() - 1) + ",\"state\":" + state + "}";
+    if (body.size() > capacity) {
+        g_pending_ui_result = PendingUiResult{};
+        return error_result(kQolErrInternal, "UI write result too large");
+    }
+    std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    g_pending_ui_result = PendingUiResult{};
+    return contracts::ok();
+}
+
+QolResult ui_write_cancel_pending(uint64_t operation_id) {
+    if (operation_id == 0 || g_pending_ui_result.operation_id == operation_id) {
+        g_pending_ui_result = PendingUiResult{};
+    }
+    return ui_state_write_cancel_pending(operation_id);
+}
+
+const contracts::QolUiWritePort kUiWritePort{
+    contracts::kQolPortUiWriteVersion,
+    {&ui_write_legacy, &ui_write_step, &ui_write_cancel_pending},
+};
 
 QolResult game_query_variant(contracts::QolTargetVariant* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -648,6 +775,8 @@ void game_host_mark_main_thread() {
 }
 
 bool game_host_is_main_thread() { return game_is_main_thread() != 0; }
+
+const contracts::QolUiWritePort& ui_write_port() { return kUiWritePort; }
 
 const contracts::QolGameHost& game_host_adapter() {
     static const contracts::QolGameHost host = make_game_host();

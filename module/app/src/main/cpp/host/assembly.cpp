@@ -28,6 +28,7 @@
 #include "host/http_dispatch.h"
 #include "infra/slot_operation_gate.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
+#include "plugins/module_health/plugin.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"
 #include "plugins/attribute_range_display/plugin.h"
@@ -68,10 +69,6 @@
 #include "plugins/core.world/plugin.h"
 #include "plugins/core.save/plugin.h"
 #endif
-#if QOL_ENABLE_DEVICE_PROBE
-#include "plugins/device_probe_consumer/plugin.h"
-#include "plugins/device_probe_provider/plugin.h"
-#endif
 #if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
 #include "plugins/device_probe_export_failure/plugin.h"
 #endif
@@ -88,6 +85,7 @@
 #include "host/item_count_facade.h"
 #include "host/inventory_extension_facade.h"
 #include "host/lifecycle_participants.h"
+#include "host/module_health.h"
 #include "host/plugin_registry.h"
 #include "host/ui_adapter.h"
 #include "infra/commands.h"
@@ -209,6 +207,7 @@ struct BuiltInPlugin {
 // 这里只登记插件描述符，不表达 provider/consumer 业务顺序；plugin_registry 根据
 // requires/provides 构建 capability DAG 并决定 install/publish 顺序。
 constexpr BuiltInPlugin kBuiltInPlugins[] = {
+    {&features::module_health::plugin_descriptor},
 #if !QOL_KERNEL_ONLY
     {&features::core_world::plugin_descriptor},
     {&features::core_craft::plugin_descriptor},
@@ -238,10 +237,6 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_system::plugin_descriptor},
     {&features::character_panel_i18n::plugin_descriptor},
     {&features::world_teleport::plugin_descriptor},
-#endif
-#if QOL_ENABLE_DEVICE_PROBE
-    {&features::device_probe_provider::plugin_descriptor},
-    {&features::device_probe_consumer::plugin_descriptor},
 #endif
 #if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
     {&features::device_probe_export_failure::plugin_descriptor},
@@ -388,6 +383,8 @@ bool assembly_init() {
     qol::game::lifecycle_participant_bind_host(host_lifecycle_dispatch());
     // 仅在完整成功后置位：失败可重试，成功则幂等。
     if (g_assembly_done) return true;
+    module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, false, false);
+    bool module_engine_failure = false;
 
     // 帧时钟注入：infra 不依赖 game，游戏事实由 host 装配时提供（见 infra/runtime.h）。
     infra::runtime_init(infra::Clock{&qol::game::frame_count});
@@ -404,7 +401,10 @@ bool assembly_init() {
     }
 
     // 命令通道每逻辑帧排空一次；命令体在主线程执行（§6.1）。
-    infra::scheduler_add(infra::FramePoint::kLogicPre, &drain_commands_task, nullptr, 1, 0);
+    if (infra::scheduler_add(infra::FramePoint::kLogicPre, &drain_commands_task, nullptr, 1, 0) == 0) {
+        module_engine_failure = true;
+        module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
+    }
 
     // hook/unhook 原语过渡期取自 plugins/inventory_hooks；P5 迁往 patch/ 后改引 patch 层。
     // 本处只把机制原语注入宿主，不构成某个游戏符号的安装点。
@@ -500,16 +500,19 @@ bool assembly_init() {
     if (!production_feature_register_host_owner(platform_config_descriptor()).ok()) {
         ++g_registration_failures;
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: platform config owner registration failed");
+        module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
         return false;
     }
     if (!production_feature_register_host_owner(security_config_descriptor()).ok()) {
         ++g_registration_failures;
         QOL_LOG_ERROR(QolDomain::kCore, "assembly: security config owner registration failed");
+        module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
         return false;
     }
 
     // New-model Store: init + seed from the path saved by the path-only JNI bootstrap, then bind
     // the reconciler. The single frame task below drives all lifecycle/resource reconciliation.
+    module_health_config_bootstrap_started();
     const auto feature_bootstrap = production_feature_bootstrap(config_store_path());
     if (!feature_bootstrap.ok()) {
         config_store_mark_bootstrapped(false);
@@ -520,10 +523,14 @@ bool assembly_init() {
     } else {
         config_store_mark_bootstrapped(true);
     }
+    const bool durable_config_ready = config_store_bootstrapped() &&
+        core_settings_config_service().state() == CoreSettingsConfigServiceState::kReady;
+    module_health_config_bootstrap_finished(durable_config_ready);
     if (!production_feature_bind_frame(deps)) {
         ++g_registration_failures;
         QOL_LOG_ERROR(QolDomain::kCore,
                       "assembly: feature reconciler bind failed (registry/catalog mismatch or store unavailable)");
+        module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
         return false;
     }
     http_dispatch_bind_resident_control(&feature_control_http_route, &feature_control_http_dispatch);
@@ -551,6 +558,8 @@ bool assembly_init() {
     }
 #endif
     g_assembly_done = true;
+    module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true,
+                           module_engine_failure);
     QOL_LOG_INFO(QolDomain::kCore,
                  "assembly: initialized=true registered=%u install_failed=%u kernel_only=%s",
                  g_registered_plugins, g_install_failures,

@@ -166,6 +166,7 @@ internal object MainActivityStartupHook {
             }
 
             val nativeReady = NativeBridge.init()
+            ModuleHealthMonitor.onNativeInitializationAttemptCompleted()
             if (!nativeReady) {
                 val report = if (!NativeBridge.libraryLoaded) {
                     "native library unavailable"

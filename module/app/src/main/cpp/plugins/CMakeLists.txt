@@ -16,8 +16,7 @@ foreach(plugin_cmake IN LISTS QOL_PLUGIN_CMAKE_FILES)
     if(plugin_id MATCHES "^device_probe_" AND NOT QOL_ENABLE_DEVICE_PROBE)
         continue()
     endif()
-    if(QOL_KERNEL_ONLY AND NOT plugin_id STREQUAL "device_probe_provider" AND
-       NOT plugin_id STREQUAL "device_probe_consumer")
+    if(QOL_KERNEL_ONLY AND NOT plugin_id STREQUAL "module_health")
         continue()
     endif()
 

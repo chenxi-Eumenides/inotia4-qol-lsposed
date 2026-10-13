@@ -5,6 +5,7 @@
 
 #include "contracts/popup_enter_alias.h"
 #include "contracts/runtime_hooks.h"
+#include "contracts/game_ports/ui_write_port.h"
 #include "game/adapter_ports/lifecycle_participant_facade.h"
 #include "game/access/save.h"
 #include "game/json/game_json.h"
@@ -12,16 +13,32 @@
 #include "game/ops/game_ops_common.h"
 #include "game/state/game_state.h"
 
-#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <string>
-#include <thread>
 
 namespace qol::game {
 namespace {
 
 thread_local char g_popup_snapshot_failure[256]{};
+
+enum class UiWriteStage : uint8_t {
+    kIdle,
+    kWaitingForPopupEmpty,
+};
+
+struct ActiveUiWrite {
+    uint64_t operation_id = 0;
+    int32_t kind = -1;
+    UiWriteStage stage = UiWriteStage::kIdle;
+    int32_t state_id = -1;
+    uintptr_t target_vma = 0;
+    char panel[64]{};
+};
+
+ActiveUiWrite g_active_ui_write{};
+
+constexpr uint32_t kUiWriteMaxAttempts = 60;
 
 // 栈顶 enter VMA 是否为「模块可安全 Pop 的面板」（栏位与 ui_panel_close 一致）。
 bool popup_vma_is_panel(uintptr_t vma) {
@@ -45,21 +62,126 @@ uint32_t popup_stack_count() {
     return *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(g_popup_stack) + 8);
 }
 
-bool wait_for_popup_stack_empty() {
-    constexpr int kMaxWaitMs = 1000;
-    for (int waited = 0; waited < kMaxWaitMs; waited += 16) {
-        if (popup_stack_count() == 0) return true;
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
-    }
-    return popup_stack_count() == 0;
-}
-
 UiWriteResult pack_result(const std::string& body) {
     UiWriteResult out{};
     const size_t size = body.size() < sizeof(out.text) ? body.size() : sizeof(out.text);
     if (size > 0) std::memcpy(out.text, body.data(), size);
     out.size = static_cast<uint32_t>(size);
     return out;
+}
+
+bool is_switchable_panel_vma(uintptr_t vma) {
+    switch (vma) {
+        case F_PANEL_CHARACTER_INFO_ENTER: case F_PANEL_INVENTORY_ENTER:
+        case F_PANEL_MERCENARY_ENTER: case F_PANEL_QUESTS_ENTER:
+        case F_PANEL_CRAFT_ENTER: case F_PANEL_NPC_REST_ENTER:
+        case F_PANEL_NPC_REVIVE_ENTER: case F_PANEL_OPTIONS_ENTER:
+        case F_PANEL_SAVE_SLOT_ENTER: case F_PANEL_CHAR_SELECT_ENTER:
+        case F_PANEL_SHORTCUT_ENTER: case F_PANEL_SKILLS_ENTER:
+        case F_PANEL_SHOP_ENTER: case F_PANEL_SETTINGS_ENTER:
+        case F_PANEL_WORLD_MAP_ENTER: case F_PANEL_IN_APP_ENTER:
+        case F_PANEL_DAILY_REWARD_ENTER:
+        case F_PANEL_UNK1_ENTER: case F_PANEL_UNK2_ENTER:
+        case F_PANEL_UNK3_ENTER: case F_PANEL_UNK4_ENTER:
+        case F_PANEL_UNK5_ENTER:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void restore_hud_after_pop() {
+    if (g_base == 0) return;
+    uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
+    if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
+}
+
+QolResult write_body(const std::string& body, int32_t result_code, char* out,
+                     uint32_t capacity, uint32_t* out_size) {
+    if (out == nullptr || out_size == nullptr || body.size() > capacity) {
+        return contracts::error(kQolErrInternal, "UI write result buffer too small", 32);
+    }
+    if (!body.empty()) std::memcpy(out, body.data(), body.size());
+    *out_size = static_cast<uint32_t>(body.size());
+    if (result_code == kQolOk) return contracts::ok();
+    const char* message = result_code == kQolErrTimeout ? "panel close pending" : "ui write failed";
+    return contracts::error(result_code, message, static_cast<uint32_t>(std::strlen(message)));
+}
+
+QolResult finish_ui_write(uint64_t operation_id, const UiWriteResult& result, char* out,
+                          uint32_t capacity, uint32_t* out_size) {
+    const std::string body = result.str();
+    const bool succeeded = body.find("\"ok\":false") == std::string::npos;
+    if (g_active_ui_write.operation_id == operation_id) g_active_ui_write = ActiveUiWrite{};
+    return write_body(body, succeeded ? kQolOk : kQolErrInternal, out, capacity, out_size);
+}
+
+QolResult wait_for_popup_step(uint64_t operation_id, uint32_t attempt, char* out,
+                              uint32_t capacity, uint32_t* out_size) {
+    if (popup_stack_count() == 0) return contracts::ok();
+    if (attempt < kUiWriteMaxAttempts - 1) {
+        return contracts::error(kQolErrNotReady, "panel close pending", 19);
+    }
+    if (g_active_ui_write.operation_id == operation_id) g_active_ui_write = ActiveUiWrite{};
+    return write_body(op_err("panel close pending"), kQolErrTimeout, out, capacity, out_size);
+}
+
+const char* resolve_open_panel(const std::string& panel, int32_t* out_state_id,
+                               uintptr_t* out_target) {
+    if (!game_in_world()) return "not in game";
+    if (fn_ui_set_popup_process_info == nullptr) return "symbol not resolved";
+    if (g_base == 0) return "libgame not ready";
+    if (out_state_id == nullptr || out_target == nullptr) return "invalid output";
+    std::string name = panel;
+    // Accept both bare names and the panel_ form returned by the screen query.
+    if (name.rfind("panel_", 0) == 0) name = name.substr(6);
+    uintptr_t target = 0;
+    if (name == "character_info") target = F_PANEL_CHARACTER_INFO_ENTER;
+    else if (name == "choice") target = F_PANEL_CHOICE_ENTER;
+    else if (name == "inventory") target = F_PANEL_INVENTORY_ENTER;
+    else if (name == "input_count") target = F_PANEL_INPUT_COUNT_ENTER;
+    else if (name == "mercenary") target = F_PANEL_MERCENARY_ENTER;
+    else if (name == "craft") target = F_PANEL_CRAFT_ENTER;
+    else if (name == "npc") target = F_PANEL_NPC_ENTER;
+    else if (name == "npc_quest") target = F_PANEL_NPC_QUEST_ENTER;
+    else if (name == "npc_rest") target = F_PANEL_NPC_REST_ENTER;
+    else if (name == "npc_revive") target = F_PANEL_NPC_REVIVE_ENTER;
+    else if (name == "options") target = F_PANEL_OPTIONS_ENTER;
+    else if (name == "quests") target = F_PANEL_QUESTS_ENTER;
+    else if (name == "save_slot") target = F_PANEL_SAVE_SLOT_ENTER;
+    else if (name == "character_select") target = F_PANEL_CHAR_SELECT_ENTER;
+    else if (name == "shortcut") target = F_PANEL_SHORTCUT_ENTER;
+    else if (name == "skills") target = F_PANEL_SKILLS_ENTER;
+    else if (name == "shop") target = F_PANEL_SHOP_ENTER;
+    else if (name == "settings") target = F_PANEL_SETTINGS_ENTER;
+    else if (name == "wipeout") target = F_PANEL_WIPEOUT_ENTER;
+    else if (name == "world_map") target = F_PANEL_WORLD_MAP_ENTER;
+    else if (name == "in_app") target = F_PANEL_IN_APP_ENTER;
+    else if (name == "daily_reward") target = F_PANEL_DAILY_REWARD_ENTER;
+    else return "unknown panel";
+
+    // Direct Push is limited to panels independent of other game context. Other panels can
+    // dereference missing NPC, item, or main-menu state; event-owned dialogs/maps stay closed.
+    const bool openable = name == "character_info" || name == "inventory" ||
+                          name == "mercenary" || name == "quests" || name == "settings" ||
+                          name == "skills";
+    if (!openable) return "panel requires in-game context";
+    uint8_t* list = *reinterpret_cast<uint8_t**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
+    if (list == nullptr) return "state list not ready";
+    int32_t state_id = -1;
+    if (name == "inventory") state_id = lifecycle_participant_inventory_state_id();
+    for (int i = 0; state_id < 0 && i < 27; ++i) {
+        const uintptr_t enter = *reinterpret_cast<uintptr_t*>(
+            list + i * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER);
+        if (enter == g_base + target) {
+            state_id = i;
+            break;
+        }
+    }
+    if (state_id < 0) return "panel state not found";
+    *out_state_id = state_id;
+    *out_target = target;
+    return nullptr;
 }
 
 // 转场结果渲染：executed=true 时 out 为完整 op JSON；false 时为 busy/超时纯文本
@@ -214,16 +336,17 @@ UiWriteResult ui_main_menu(bool direct) {
     }
     if (g_base == 0 || g_popup_stack == nullptr) return pack_result(op_err("libgame not ready"));
     // 面板守卫：带着面板切 GAME_Exit 会触发游戏「terminate 面板后又画一帧」的空指针崩溃
-    // （ControlItem_Draw(NULL) ← UIEquip_DrawEquip）。栈顶是面板则先走官方 Pop 并等栈清空；
+    // （ControlItem_Draw(NULL) ← UIEquip_DrawEquip）。栈顶是面板则先走官方 Pop；
     // 非面板弹窗（对话/剧情/数量输入等脚本态）fail-closed，不由模块代关。
     const uintptr_t top = popup_top_vma();
     if (top != 0) {
         if (!popup_vma_is_panel(top)) return pack_result(op_err("ui occupied: close current dialog first"));
         fn_ui_set_popup_process_info(3, 0);
-        uint8_t** hud_gate = reinterpret_cast<uint8_t**>(g_base + G_HUD_GATE_GOT_VMA);
-        if (hud_gate != nullptr && *hud_gate != nullptr) **hud_gate = 1;
-        if (!wait_for_popup_stack_empty()) return pack_result(op_err("panel close pending"));
+        restore_hud_after_pop();
+        if (popup_stack_count() != 0) return pack_result(op_err("panel close pending"));
     }
+    // 旧同步入口无法安全等待逻辑帧；owner 票据路径使用 direct=true 的帧内联转换。
+    if (!direct) return pack_result(op_err("panel close pending"));
     // 扩展背包清理保持原调用时机（切换前）；游戏状态机切换走逻辑帧点。
     // 无可用参与者等同旧“能力缺失”，跳过清理放行。
     if (!lifecycle_participant_prepare_main_menu()) {
@@ -233,13 +356,8 @@ UiWriteResult ui_main_menu(bool direct) {
     // HTTP worker 线程直调会与渲染线程并发破坏游戏内存分配器（见 transition_dispatch.h）。
     char body[256]{};
     uint32_t size = 0;
-    if (direct) {
-        const QolResult result = contracts::qol_runtime_hooks().transition_run_inline(
-            &main_menu_body, nullptr, body, sizeof(body), &size);
-        return pack_result(render_transition(result, body, size));
-    }
-    const QolResult result = contracts::qol_runtime_hooks().transition_run(
-        &main_menu_body, nullptr, 5000, body, sizeof(body), &size);
+    const QolResult result = contracts::qol_runtime_hooks().transition_run_inline(
+        &main_menu_body, nullptr, body, sizeof(body), &size);
     return pack_result(render_transition(result, body, size));
 }
 
@@ -271,94 +389,146 @@ UiWriteResult ui_panel_close() {
 }
 
 UiWriteResult ui_panel_open(const std::string& panel) {
-    if (!game_in_world()) return pack_result(op_err("not in game"));
-    if (fn_ui_set_popup_process_info == nullptr) return pack_result(op_err("symbol not resolved"));
-    if (g_base == 0) return pack_result(op_err("libgame not ready"));
-    // v0.5.42：兼容裸名与 panel_ 前缀（screen 输出 panel_inventory，输入可两者皆可）
-    std::string p = panel;
-    if (p.rfind("panel_", 0) == 0) p = p.substr(6);
-    // 面板名 → enter VMA（与 ui_screen 的 PANELS 映射一致）
-    uintptr_t target = 0;
-    if (p == "character_info") target = F_PANEL_CHARACTER_INFO_ENTER;
-    else if (p == "choice") target = F_PANEL_CHOICE_ENTER;
-    else if (p == "inventory") target = F_PANEL_INVENTORY_ENTER;
-    else if (p == "input_count") target = F_PANEL_INPUT_COUNT_ENTER;
-    else if (p == "mercenary") target = F_PANEL_MERCENARY_ENTER;
-    else if (p == "craft") target = F_PANEL_CRAFT_ENTER;
-    else if (p == "npc") target = F_PANEL_NPC_ENTER;
-    else if (p == "npc_quest") target = F_PANEL_NPC_QUEST_ENTER;
-    else if (p == "npc_rest") target = F_PANEL_NPC_REST_ENTER;
-    else if (p == "npc_revive") target = F_PANEL_NPC_REVIVE_ENTER;
-    else if (p == "options") target = F_PANEL_OPTIONS_ENTER;
-    else if (p == "quests") target = F_PANEL_QUESTS_ENTER;
-    else if (p == "save_slot") target = F_PANEL_SAVE_SLOT_ENTER;
-    else if (p == "character_select") target = F_PANEL_CHAR_SELECT_ENTER;
-    else if (p == "shortcut") target = F_PANEL_SHORTCUT_ENTER;
-    else if (p == "skills") target = F_PANEL_SKILLS_ENTER;
-    else if (p == "shop") target = F_PANEL_SHOP_ENTER;
-    else if (p == "settings") target = F_PANEL_SETTINGS_ENTER;
-    else if (p == "wipeout") target = F_PANEL_WIPEOUT_ENTER;
-    else if (p == "world_map") target = F_PANEL_WORLD_MAP_ENTER;
-    else if (p == "in_app") target = F_PANEL_IN_APP_ENTER;
-    else if (p == "daily_reward") target = F_PANEL_DAILY_REWARD_ENTER;
-    else return pack_result(op_err("unknown panel"));
-    // 面板可开白名单（v0.4.34 真机实测收紧）：仅允许不依赖外部上下文的独立面板。
-    // 崩溃记录（全部 SIGSEGV，tombstone 已验证）：
-    //   options      → GAMELOADER_DrawBackGround→GRPX_DrawPart（主菜单/GAMELOADER 场景专属）
-    //   craft/shop   → CHAR_GetName 空指针（需 NPC 交互对象 [0x2f6000+0xc20]→[x0] 就绪）
-    //   input_count  → ControlObject_GetActive 空控件（需 inventory 物品数量输入上下文）
-    // 语义不正确的面板（v0.4.34 移除）：
-    //   choice       → 游戏内由事件/剧情驱动的选择框，API 打开语义不符
-    //   world_map    → 由游戏内事件（如保存点）驱动的世界地图，API 打开语义不符
-    //   wipeout      → 角色死亡时游戏自动打开，非用户可操作面板
-    // 其余未实证面板（npc 系列/shortcut/in_app 等）同样拒绝，避免 API 直接 Push 崩溃。
-    bool openable = (p == "character_info" || p == "inventory" ||
-                     p == "mercenary" || p == "quests" || p == "settings" ||
-                     p == "skills");
-    if (!openable) return pack_result(op_err("panel requires in-game context"));
-    // 扫描 state list 找 enter == g_base+target 的 state id
-    uint8_t* list = *reinterpret_cast<uint8_t**>(g_base + G_POPUP_STATE_LIST_GOT_VMA);
-    if (list == nullptr) return pack_result(op_err("state list not ready"));
     int state_id = -1;
-    if (p == "inventory") {
-        // 无可用参与者返回 -1，继续原有 27 项扫描。
-        state_id = lifecycle_participant_inventory_state_id();
-    }
-    for (int i = 0; state_id < 0 && i < 27; ++i) {
-        uintptr_t enter = *reinterpret_cast<uintptr_t*>(list + i * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER);
-        if (enter == g_base + target) { state_id = i; break; }
-    }
-    if (state_id < 0) return pack_result(op_err("panel state not found"));
+    uintptr_t target = 0;
+    const char* resolve_error = resolve_open_panel(panel, &state_id, &target);
+    if (resolve_error != nullptr) return pack_result(op_err(resolve_error));
 
     // UI_SetPopupProcessInfo(1, id) 是 Push，不会替换已有栈顶。相同面板直接幂等返回；
-    // 切换面板先走官方 Pop，并等待主循环真正清空栈，避免 Pop/Open 同帧再次叠加。
+    // 切换面板先走官方 Pop；异步 owner 命令会逐帧等栈清空，旧同步入口只检查一次。
     uintptr_t top = popup_top_vma();
     if (top != 0) {
         if (top == target) return pack_result(op_ok());
-        bool top_is_panel = false;
-        switch (top) {
-            case F_PANEL_CHARACTER_INFO_ENTER: case F_PANEL_INVENTORY_ENTER:
-            case F_PANEL_MERCENARY_ENTER: case F_PANEL_QUESTS_ENTER:
-            case F_PANEL_CRAFT_ENTER: case F_PANEL_NPC_REST_ENTER:
-            case F_PANEL_NPC_REVIVE_ENTER: case F_PANEL_OPTIONS_ENTER:
-            case F_PANEL_SAVE_SLOT_ENTER: case F_PANEL_CHAR_SELECT_ENTER:
-            case F_PANEL_SHORTCUT_ENTER: case F_PANEL_SKILLS_ENTER:
-            case F_PANEL_SHOP_ENTER: case F_PANEL_SETTINGS_ENTER:
-            case F_PANEL_WORLD_MAP_ENTER: case F_PANEL_IN_APP_ENTER:
-            case F_PANEL_DAILY_REWARD_ENTER:
-            case F_PANEL_UNK1_ENTER: case F_PANEL_UNK2_ENTER:
-            case F_PANEL_UNK3_ENTER: case F_PANEL_UNK4_ENTER:
-            case F_PANEL_UNK5_ENTER:
-                top_is_panel = true;
-                break;
-            default: break;
-        }
-        if (!top_is_panel) return pack_result(op_err("top of stack is not a panel"));
+        if (!is_switchable_panel_vma(top)) return pack_result(op_err("top of stack is not a panel"));
         fn_ui_set_popup_process_info(3, 0);
-        if (!wait_for_popup_stack_empty()) return pack_result(op_err("panel close pending"));
+        restore_hud_after_pop();
+        if (popup_stack_count() != 0) return pack_result(op_err("panel close pending"));
     }
     fn_ui_set_popup_process_info(1, state_id);
     return pack_result(op_ok());
+}
+
+QolResult ui_state_write_step(uint64_t operation_id, uint32_t attempt, int32_t kind,
+                              const char* panel, char* out, uint32_t capacity,
+                              uint32_t* out_size) {
+    if (out_size != nullptr) *out_size = 0;
+    if (operation_id == 0 || out == nullptr || out_size == nullptr || capacity == 0) {
+        return contracts::error(kQolErrInvalidArgument, "invalid UI write request", 25);
+    }
+    if (g_active_ui_write.operation_id != 0 &&
+        g_active_ui_write.operation_id != operation_id) {
+        if (attempt >= kUiWriteMaxAttempts - 1) {
+            return write_body(op_err("panel close pending"), kQolErrTimeout, out, capacity,
+                              out_size);
+        }
+        return contracts::error(kQolErrNotReady, "another UI write is pending", 27);
+    }
+
+    if (g_active_ui_write.operation_id == 0) {
+        g_active_ui_write = ActiveUiWrite{};
+        g_active_ui_write.operation_id = operation_id;
+        g_active_ui_write.kind = kind;
+        if (panel != nullptr) {
+            const size_t panel_size = std::strlen(panel);
+            if (panel_size >= sizeof(g_active_ui_write.panel)) {
+                g_active_ui_write = ActiveUiWrite{};
+                return write_body(op_err("panel required"), kQolErrInvalidArgument, out,
+                                  capacity, out_size);
+            }
+            std::memcpy(g_active_ui_write.panel, panel, panel_size + 1);
+        }
+    } else if (g_active_ui_write.kind != kind ||
+               std::strcmp(g_active_ui_write.panel, panel != nullptr ? panel : "") != 0) {
+        g_active_ui_write = ActiveUiWrite{};
+        return write_body(op_err("invalid UI write operation"), kQolErrInvalidArgument, out,
+                          capacity, out_size);
+    }
+
+    if (kind == contracts::kQolUiWriteMainMenu) {
+        if (g_active_ui_write.stage == UiWriteStage::kIdle) {
+            if (!game_in_world()) {
+                return finish_ui_write(operation_id, pack_result(op_err("not in game")), out,
+                                       capacity, out_size);
+            }
+            if (fn_gamestate_set_state == nullptr || fn_ui_set_popup_process_info == nullptr) {
+                return finish_ui_write(operation_id, pack_result(op_err("symbol not resolved")),
+                                       out, capacity, out_size);
+            }
+            if (g_base == 0 || g_popup_stack == nullptr) {
+                return finish_ui_write(operation_id, pack_result(op_err("libgame not ready")),
+                                       out, capacity, out_size);
+            }
+            const uintptr_t top = popup_top_vma();
+            if (top != 0) {
+                if (!popup_vma_is_panel(top)) {
+                    return finish_ui_write(
+                        operation_id,
+                        pack_result(op_err("ui occupied: close current dialog first")), out,
+                        capacity, out_size);
+                }
+                fn_ui_set_popup_process_info(3, 0);
+                restore_hud_after_pop();
+                g_active_ui_write.stage = UiWriteStage::kWaitingForPopupEmpty;
+            }
+        }
+        if (g_active_ui_write.stage == UiWriteStage::kWaitingForPopupEmpty) {
+            const QolResult waiting = wait_for_popup_step(operation_id, attempt, out, capacity,
+                                                          out_size);
+            if (!contracts::succeeded(waiting)) return waiting;
+            g_active_ui_write.stage = UiWriteStage::kIdle;
+        }
+        return finish_ui_write(operation_id, ui_main_menu(true), out, capacity, out_size);
+    }
+
+    if (kind == contracts::kQolUiWritePanelOpen) {
+        int32_t state_id = g_active_ui_write.state_id;
+        uintptr_t target = g_active_ui_write.target_vma;
+        if (g_active_ui_write.stage == UiWriteStage::kIdle) {
+            const char* resolve_error = resolve_open_panel(g_active_ui_write.panel, &state_id,
+                                                           &target);
+            if (resolve_error != nullptr) {
+                return finish_ui_write(operation_id, pack_result(op_err(resolve_error)), out,
+                                       capacity, out_size);
+            }
+            g_active_ui_write.state_id = state_id;
+            g_active_ui_write.target_vma = target;
+            const uintptr_t top = popup_top_vma();
+            if (top == target) {
+                return finish_ui_write(operation_id, pack_result(op_ok()), out, capacity,
+                                       out_size);
+            }
+            if (top != 0) {
+                if (!is_switchable_panel_vma(top)) {
+                    return finish_ui_write(operation_id,
+                                           pack_result(op_err("top of stack is not a panel")),
+                                           out, capacity, out_size);
+                }
+                fn_ui_set_popup_process_info(3, 0);
+                restore_hud_after_pop();
+                g_active_ui_write.stage = UiWriteStage::kWaitingForPopupEmpty;
+            }
+        }
+        if (g_active_ui_write.stage == UiWriteStage::kWaitingForPopupEmpty) {
+            const QolResult waiting = wait_for_popup_step(operation_id, attempt, out, capacity,
+                                                          out_size);
+            if (!contracts::succeeded(waiting)) return waiting;
+        }
+        fn_ui_set_popup_process_info(1, g_active_ui_write.state_id);
+        return finish_ui_write(operation_id, pack_result(op_ok()), out, capacity, out_size);
+    }
+
+    if (kind == contracts::kQolUiWritePanelClose) {
+        return finish_ui_write(operation_id, ui_panel_close(), out, capacity, out_size);
+    }
+    return finish_ui_write(operation_id, pack_result(op_err("unsupported UI write kind")), out,
+                           capacity, out_size);
+}
+
+QolResult ui_state_write_cancel_pending(uint64_t operation_id) {
+    if (operation_id == 0 || g_active_ui_write.operation_id == operation_id) {
+        g_active_ui_write = ActiveUiWrite{};
+    }
+    return contracts::ok();
 }
 
 

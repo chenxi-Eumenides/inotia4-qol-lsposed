@@ -59,7 +59,6 @@ std::vector<uint32_t> g_draw_order;
 std::vector<uint8_t> g_draw_selected;
 uint32_t g_selected = 0;
 const PanelProviderSpec* g_provider = nullptr;
-HttpCommandHandlerFn g_command = nullptr;
 QolFrameHandler g_frame = nullptr;
 int g_open_calls = 0, g_close_calls = 0, g_removed_tasks = 0;
 bool g_back_requested = false;
@@ -322,13 +321,6 @@ QolUiAdapter make_adapter() {
     return ui;
 }
 QolResult register_provider(const PanelProviderSpec* provider) { g_provider = provider; return ok(); }
-QolResult register_command(HttpMethod method, const char* path, const char* owner,
-                          HttpCommandHandlerFn command, void*) {
-    assert(method == HttpMethod::kPost && std::strcmp(path, "/api/debug/custom-ui/scroll") == 0);
-    assert(std::strcmp(owner, "core.custom_ui") == 0);
-    g_command = command;
-    return ok();
-}
 QolResult add_task(int32_t point, QolFrameHandler fn, void*, int32_t interval,
                    int32_t count, uint64_t* out) {
     assert(point == 1 && interval == 1 && count == 0);
@@ -340,7 +332,7 @@ HttpRes send(const char* body) {
     HttpReq req{}; req.body = reinterpret_cast<const uint8_t*>(body);
     req.body_len = static_cast<uint32_t>(std::strlen(body));
     HttpRes res{}; res.body = buffer; res.body_capacity = sizeof(buffer);
-    assert(succeeded(g_command(&req, &res, nullptr)));
+    assert(succeeded(qol::features::core_ui::debug_scroll_http_command(&req, &res, nullptr)));
     return res;
 }
 }  // namespace
@@ -647,7 +639,6 @@ int main() {
 
     QolHostSdk sdk{}; sdk.ui = &ui;
     sdk.panels.register_provider = &register_provider;
-    sdk.http_dispatch.register_command = &register_command;
     sdk.scheduler.add = &add_task; sdk.scheduler.remove = &remove_task;
     CHECK(debug_scroll_register(&sdk));
     CHECK(g_provider != nullptr && g_provider->callbacks->enter != nullptr &&

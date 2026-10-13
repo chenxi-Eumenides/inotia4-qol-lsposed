@@ -1,5 +1,6 @@
 #include "plugin.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -52,7 +53,7 @@ struct UiSnapshotState {
 std::mutex g_snapshot_mutex;
 UiSnapshotState g_snapshot{};
 
-const contracts::CapabilityRequirement kRequires[] = {
+const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
     {
         contracts::kHttpRegistryCapabilityId,
         {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor},
@@ -573,9 +574,9 @@ struct ChoiceWritePayload {
     char action[48] = {};
 };
 
-// 路由 ctx：需为可取址的具名常量（HttpQueryHandlerDescriptor 存 void*）。
-constexpr int32_t kDialogSelectKind = contracts::kQolChoiceWriteDialogSelect;
-constexpr int32_t kNpcInteractKind = contracts::kQolChoiceWriteNpcInteract;
+// Route contexts are mutable static objects because typed endpoint ctx is a void pointer.
+int32_t kDialogSelectKind = contracts::kQolChoiceWriteDialogSelect;
+int32_t kNpcInteractKind = contracts::kQolChoiceWriteNpcInteract;
 
 const contracts::QolChoiceWritePort* g_choice_write = nullptr;
 
@@ -684,13 +685,31 @@ bool choice_write_result(void*, const uint8_t* payload, uint32_t size, char* out
 constexpr uint32_t kUiWriteHandlerId = 0x55490001;
 
 struct UiWritePayload {
+    uint64_t operation_id = 0;
     int32_t kind = 0;
     char panel[64] = {};
 };
 
-constexpr int32_t kPanelOpenKind = contracts::kQolUiWritePanelOpen;
-constexpr int32_t kPanelCloseKind = contracts::kQolUiWritePanelClose;
-constexpr int32_t kMainMenuKind = contracts::kQolUiWriteMainMenu;
+static_assert(sizeof(UiWritePayload) <= contracts::kTypedCommandPayloadCapacity,
+              "UI write payload exceeds typed command capacity");
+
+std::atomic<uint64_t> g_next_ui_operation_id{1};
+
+uint64_t next_ui_operation_id() {
+    uint64_t candidate = g_next_ui_operation_id.load(std::memory_order_relaxed);
+    while (candidate != 0 && candidate != UINT64_MAX) {
+        if (g_next_ui_operation_id.compare_exchange_weak(candidate, candidate + 1,
+                                                         std::memory_order_relaxed,
+                                                         std::memory_order_relaxed)) {
+            return candidate;
+        }
+    }
+    return 0;
+}
+
+int32_t kPanelOpenKind = contracts::kQolUiWritePanelOpen;
+int32_t kPanelCloseKind = contracts::kQolUiWritePanelClose;
+int32_t kMainMenuKind = contracts::kQolUiWriteMainMenu;
 
 const contracts::QolUiWritePort* g_ui_write = nullptr;
 
@@ -706,6 +725,10 @@ QolResult ui_write_command(const contracts::HttpReq* request, contracts::HttpRes
                                     : "",
                                 request->body_len);
     UiWritePayload payload{};
+    payload.operation_id = next_ui_operation_id();
+    if (payload.operation_id == 0) {
+        return choice_http_error(response, 503, "command queue unavailable");
+    }
     payload.kind = kind;
     if (kind == contracts::kQolUiWritePanelOpen) {
         choice_string_field(body_text.c_str(), "panel", payload.panel,
@@ -732,30 +755,63 @@ bool ui_write_result(void*, const uint8_t* payload, uint32_t size, char* out, ui
                      uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
     if (payload == nullptr || size != sizeof(UiWritePayload) || out == nullptr ||
-        out_size == nullptr || g_ui_write == nullptr || g_ui_write->read.write == nullptr) {
+        out_size == nullptr || g_ui_write == nullptr || g_ui_write->read.step == nullptr) {
         return false;
     }
     UiWritePayload p{};
     std::memcpy(&p, payload, size);
-    const QolResult result = g_ui_write->read.write(p.kind, p.panel, out, capacity, out_size);
+    const uint32_t attempt =
+        (g_sdk != nullptr && g_sdk->ticket_result.current_attempt != nullptr)
+            ? g_sdk->ticket_result.current_attempt()
+            : 0;
+    const QolResult result = g_ui_write->read.step(p.operation_id, attempt, p.kind, p.panel, out,
+                                                  capacity, out_size);
+    if (result.code == kQolErrNotReady) {
+        const QolResult deferred =
+            (g_sdk != nullptr && g_sdk->ticket_result.defer_current_result != nullptr)
+                ? g_sdk->ticket_result.defer_current_result()
+                : state_error(kQolErrNotReady, "UI write retry unavailable");
+        if (contracts::succeeded(deferred)) return false;
+        if (g_ui_write->read.cancel_pending != nullptr) {
+            (void)g_ui_write->read.cancel_pending(p.operation_id);
+        }
+        constexpr char kPendingBody[] = "{\"ok\":false,\"error\":\"panel close pending\"}";
+        if (sizeof(kPendingBody) - 1 <= capacity) {
+            std::memcpy(out, kPendingBody, sizeof(kPendingBody) - 1);
+            *out_size = static_cast<uint32_t>(sizeof(kPendingBody) - 1);
+        }
+        return false;
+    }
     return contracts::succeeded(result);
 }
 
-// 查询与写入继续由同一 descriptor 提供，GET 路由已在 core.api/routes.inc 固定归属。
-const contracts::HttpQueryHandlerDescriptor kRoutes[] = {
-    {contracts::HttpMethod::kGet, "/api/ui/screen", kPluginId, &screen_query, nullptr},
-    {contracts::HttpMethod::kGet, "/api/ui/panel", kPluginId, &panel_query, nullptr},
-    {contracts::HttpMethod::kGet, "/api/ui/dialog", kPluginId, &dialog_query, nullptr},
-    {contracts::HttpMethod::kPost, "/api/ui/dialog/select", kPluginId, &choice_write_command,
-     const_cast<int32_t*>(&kDialogSelectKind)},
-    {contracts::HttpMethod::kPost, "/api/ui/start_interact", kPluginId, &choice_write_command,
-     const_cast<int32_t*>(&kNpcInteractKind)},
-    {contracts::HttpMethod::kPost, "/api/ui/open_panel", kPluginId, &ui_write_command,
-     const_cast<int32_t*>(&kPanelOpenKind)},
-    {contracts::HttpMethod::kPost, "/api/ui/close_panel", kPluginId, &ui_write_command,
-     const_cast<int32_t*>(&kPanelCloseKind)},
-    {contracts::HttpMethod::kPost, "/api/ui/go_main_menu", kPluginId, &ui_write_command,
-     const_cast<int32_t*>(&kMainMenuKind)},
+// `/api/ui` remains Kotlin's gamestateJson composite; native endpoints cover the other eight routes.
+const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
+    {contracts::HttpMethod::kGet, "/api/ui/screen", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &screen_query, nullptr, nullptr},
+    {contracts::HttpMethod::kGet, "/api/ui/panel", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &panel_query, nullptr, nullptr},
+    {contracts::HttpMethod::kGet, "/api/ui/dialog", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &dialog_query, nullptr, nullptr},
+    {contracts::HttpMethod::kPost, "/api/ui/dialog/select", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &choice_write_command,
+     &kDialogSelectKind},
+    {contracts::HttpMethod::kPost, "/api/ui/start_interact", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &choice_write_command,
+     &kNpcInteractKind},
+    {contracts::HttpMethod::kPost, "/api/ui/open_panel", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &ui_write_command,
+     &kPanelOpenKind},
+    {contracts::HttpMethod::kPost, "/api/ui/close_panel", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &ui_write_command,
+     &kPanelCloseKind},
+    {contracts::HttpMethod::kPost, "/api/ui/go_main_menu", kPluginId,
+     contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &ui_write_command,
+     &kMainMenuKind},
+};
+
+constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
+    {contracts::HttpMethod::kGet, "/api/ui", kPluginId, 0, 1},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
@@ -771,7 +827,11 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_choice_write = static_cast<const contracts::QolChoiceWritePort*>(ctx.ports[0]);
     g_ui_write = static_cast<const contracts::QolUiWritePort*>(ctx.ports[1]);
     g_ui_state_read = static_cast<const contracts::QolUiStateReadPort*>(ctx.ports[2]);
-    if (g_choice_write->read.write == nullptr || g_ui_write->read.write == nullptr ||
+    if (!contracts::satisfies(g_ui_write->abi_version,
+                              {contracts::kQolPortUiWriteVersion.major,
+                               contracts::kQolPortUiWriteVersion.minor}) ||
+        g_choice_write->read.write == nullptr || g_ui_write->read.write == nullptr ||
+        g_ui_write->read.step == nullptr ||
         g_ui_state_read->read.read_snapshot == nullptr ||
         g_sdk->scheduler.add == nullptr || g_sdk->scheduler.remove == nullptr) {
         g_sdk = nullptr;
@@ -783,6 +843,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
     if (g_sdk->abi.size < sizeof(contracts::QolHostSdk) || g_sdk->abi.minor < 9 ||
         g_sdk->ticket_result.register_typed_result_handler == nullptr ||
+        g_sdk->ticket_result.defer_current_result == nullptr ||
+        g_sdk->ticket_result.current_attempt == nullptr ||
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kChoiceWriteHandlerId, &choice_write_result, nullptr))) {
         g_sdk = nullptr;
@@ -816,6 +878,9 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    if (g_ui_write != nullptr && g_ui_write->read.cancel_pending != nullptr) {
+        (void)g_ui_write->read.cancel_pending(0);
+    }
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kChoiceWriteHandlerId);
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kUiWriteHandlerId);
@@ -857,8 +922,8 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2, kRequires, // requires=http.registry + http.dispatch（声明式写路由）
-    0, nullptr,   // optional_requires
+    0, nullptr, // no mandatory HTTP dependency
+    2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     1, kProvides, // provides=ui.state v1.0
     0, nullptr,   // resources（选择控件资源由 core.custom_ui 持有）
     0, nullptr,   // jni
@@ -870,9 +935,14 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,      // on_resource_ready（本插件已无资源）
     kPorts,
     3,
-    kRoutes,
-    static_cast<uint32_t>(sizeof(kRoutes) / sizeof(kRoutes[0])),
+    nullptr,
+    0,
     kFeatures, 1,
+    kHttpEndpoints,
+    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+    nullptr,
+    kHttpRouteMetadata,
+    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
 };
 
 }  // namespace

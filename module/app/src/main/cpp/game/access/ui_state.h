@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+#include "contracts/result.h"
+
 // 游戏层：UI 读/写原语（T2l-u，迁自 api/native/game_ui_read.inc / game_ui_operations.inc）。
 // 栈顶面板判定、screen 细分与面板开关游戏语义收口在本层；转场/别名反查/扩展清理分别经
 // contracts/runtime_hooks.h、contracts/popup_enter_alias.h 与 game/adapter_ports 生命周期 facade。
@@ -33,6 +35,12 @@ UiWriteResult ui_main_menu(bool direct);
 UiWriteResult ui_panel_close();
 // 打开白名单面板：名→state id 扫描 → 栈顶守卫 → Pop/等待 → Push。
 UiWriteResult ui_panel_open(const std::string& panel);
+
+// owner 命令使用的逐帧 UI 写状态机。NotReady 表示本帧只观察/推进等待态，不能重复发起 Pop。
+QolResult ui_state_write_step(uint64_t operation_id, uint32_t attempt, int32_t kind,
+                              const char* panel, char* out, uint32_t capacity,
+                              uint32_t* out_size);
+QolResult ui_state_write_cancel_pending(uint64_t operation_id);
 
 
 // ---- 对话读面（T2l-d 迁自 game_dialog_content.inc，逐字）----

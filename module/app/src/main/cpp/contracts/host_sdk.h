@@ -33,6 +33,7 @@
 #include "owner_token.h"
 #include "owner_store.h"
 #include "lifecycle_participant.h"
+#include "module_health.h"
 #include "panels.h"
 #include "result.h"
 #include "settings.h"
@@ -455,12 +456,27 @@ struct QolHostSdk {
     const QolRuntimeEffectsApi* runtime_effects;
     // v1.23 tail: generic OP permission query; null when unavailable.
     const QolSecurityApi* security;
+    // v1.25 tail: read-only Host module-health facts, stable for the Host lifetime.
+    const QolHostModuleHealthFactsApi* module_health;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
 // minor 22 adds owner feature/config and resident management; minor 23 adds runtime/security APIs;
-// minor 24 appends desired lifecycle state to runtime effects.
-constexpr uint16_t kHostSdkMinor = 24;
+// minor 24 appends desired lifecycle state to runtime effects; minor 25 adds module-health facts.
+constexpr uint16_t kHostSdkMinor = 25;
+
+inline const QolHostModuleHealthFactsApi* module_health_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, module_health) +
+                                sizeof(const QolHostModuleHealthFactsApi*);
+    constexpr std::size_t required = offsetof(QolHostModuleHealthFactsApi, read) +
+                                     sizeof(QolHostModuleHealthFactsApi::read);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 25 ||
+        sdk->abi.size < end || sdk->module_health == nullptr ||
+        sdk->module_health->struct_size < required || sdk->module_health->read == nullptr) {
+        return nullptr;
+    }
+    return sdk->module_health;
+}
 
 inline const QolFeatureApi* feature_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, feature) + sizeof(const QolFeatureApi*);

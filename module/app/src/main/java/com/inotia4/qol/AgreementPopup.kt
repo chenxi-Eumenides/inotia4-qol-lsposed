@@ -3,116 +3,181 @@ package com.inotia4.qol
 import android.app.Activity
 import android.os.Handler
 import android.os.Looper
+import android.view.animation.Animation
 import java.lang.reflect.Field
 import java.lang.reflect.Method
+import java.util.WeakHashMap
 
-/**
- * 关闭 Java 层同意页（AgreementUIActivity），且不结束游戏。
- *
- * SDK 把「关页」与「退出游戏」解耦在 `AgreementUIActivity.destroyParentActivity`（默认 true）上：
- * 该字段为 true 时同意页 `onDestroy` 会 `finish()` 掉游戏主 Activity。系统返回键路径从不把它置
- * false，所以按返回必然带走游戏本体（真机实测：连按两次返回 → 同意页正常关闭 → 游戏退回桌面，
- * 并在退出收尾时触发游戏侧 `CWrapperData_nativeFinalize` 的 Scudo abort）。
- *
- * 这里复刻 SDK 自身的「pass Agreement UI」分支（本地协议数据缺失且版本属性已存在时的自动放行，
- * 见 AgreementUIActivity.java:344-345）：反射置 `destroyParentActivity = false`，再调
- * `UserAgreeAnimation.closeAgreementUI(1000)` → 播关闭动画 → `UserAgreeManager.onUserAgreeResult(1000)`
- * → `ActiveUser.executeModules()` → 同意页 finish，游戏继续停在主菜单。不注入触摸、不依赖 DOM 与 payload。
- *
- * `closeAgreementUI` 自带 `!isOpened || isAnimation` 守卫，同意页开场动画期间调用会被静默吞掉，
- * 而调用方是在页面刚可见时立刻发请求，因此这里在主线程上自己等就绪（最多约 3s）后再关，
- * 不把时序问题丢给调用方。
- *
- * 已知代价：该分支不写 `AGREEMENT_VERSION_PROPERTY`（那是 H5 回调
- * `c2s://activeuser?agreement=…` 分支写的），所以下次冷启动同意页仍会照常弹出，由本接口再关一次。
- */
+/** Closes the agreement activity after its opening animation without finishing the game Activity. */
 object AgreementPopup {
+    private const val AGREEMENT_ACTIVITY = "com.com2us.module.activeuser.useragree.AgreementUIActivity"
+    private const val OPENING_LISTENER = "com.com2us.module.activeuser.useragree.UserAgreeAnimation\$2"
     private const val FIELD_DESTROY_PARENT = "destroyParentActivity"
     private const val FIELD_ANIMATION = "userAgreeAnimation"
     private const val FIELD_OPENED = "isOpened"
     private const val FIELD_ANIMATING = "isAnimation"
+    private const val FIELD_ANIMATION_OWNER = "this\$0"
+    private const val FIELD_ACTIVITY_OWNER = "thiz"
     private const val METHOD_CLOSE = "closeAgreementUI"
+    private const val METHOD_ANIMATION_END = "onAnimationEnd"
+    private const val METHOD_ACTIVITY_DESTROY = "onDestroy"
 
-    /** `closeAgreementUI` 参数：-1 = 拒绝并退出、0 = 跳过放行、1000 = SDK 自身的「已放行」值。 */
+    /** `closeAgreementUI` parameter: 1000 = SDK's accepted-agreement result. */
     private const val RESULT_PASSED = 1000
 
-    private const val READY_RETRY_INTERVAL_MS = 150L
-    private const val READY_RETRY_MAX = 20
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val pendingCloseActivities = WeakHashMap<Activity, Unit>()
+    @Volatile private var openingAnimationHookInstalled = false
+    @Volatile private var activityDestroyHookInstalled = false
 
-    /** 关闭同意页且保留游戏主 Activity；同意页结构不可用时返回 false。关闭异步生效，
-     *  调用方随后轮询 `/api/ui/screen` 直到 `main_menu`。 */
+    private data class CloseTarget(
+        val animation: Any,
+        val closeMethod: Method,
+        val keepParentField: Field,
+    )
+
+    fun installOpeningAnimationHook(classLoader: ClassLoader, hooker: (Method) -> Unit) {
+        try {
+            val listenerClass = classLoader.loadClass(OPENING_LISTENER)
+            val method = listenerClass.getDeclaredMethod(METHOD_ANIMATION_END, Animation::class.java)
+            hooker(method)
+            openingAnimationHookInstalled = true
+            LogFile.info(LogDomain.PLATFORM, "agreement opening-animation readiness hook installed")
+        } catch (t: Throwable) {
+            openingAnimationHookInstalled = false
+            LogFile.error(LogDomain.PLATFORM, "agreement opening-animation readiness hook failed", t)
+        }
+    }
+
+    fun installActivityDestroyHook(classLoader: ClassLoader, hooker: (Method) -> Unit) {
+        try {
+            val activityClass = classLoader.loadClass(AGREEMENT_ACTIVITY)
+            val method = activityClass.getDeclaredMethod(METHOD_ACTIVITY_DESTROY)
+            hooker(method)
+            activityDestroyHookInstalled = true
+            LogFile.info(LogDomain.PLATFORM, "agreement Activity teardown hook installed")
+        } catch (t: Throwable) {
+            activityDestroyHookInstalled = false
+            LogFile.error(LogDomain.PLATFORM, "agreement Activity teardown hook failed", t)
+        }
+    }
+
+    /** Called after the decompiled opening listener's `$2.onAnimationEnd` has proceeded. */
+    fun onOpeningAnimationEnded(listener: Any) {
+        val animation = readOwner(listener, FIELD_ANIMATION_OWNER, "agreement opening listener owner") ?: return
+        val activity = readOwner(animation, FIELD_ACTIVITY_OWNER, "agreement animation Activity owner") as? Activity
+            ?: return
+        val shouldClose = synchronized(pendingCloseActivities) {
+            pendingCloseActivities.remove(activity) != null
+        }
+        if (shouldClose) close(activity)
+    }
+
+    fun onActivityDestroyed(activity: Activity) {
+        synchronized(pendingCloseActivities) {
+            pendingCloseActivities.remove(activity)
+        }
+    }
+
+    /** Returns true once a close is dispatched or accepted for the opening-animation event. */
     fun dismiss(activity: Activity): Boolean {
         if (activity.isFinishing || activity.isDestroyed) return false
-        val animation = userAgreeAnimation(activity) ?: return false
-        val closeMethod = closeMethod(animation) ?: return false
-        val keepParent = parentField(activity) ?: return false
-
-        val handler = Handler(Looper.getMainLooper())
-        handler.post(object : Runnable {
-            private var attempts = 0
-
-            override fun run() {
-                if (activity.isFinishing || activity.isDestroyed) return
-                if (!animationReady(animation)) {
-                    if (attempts < READY_RETRY_MAX) {
-                        attempts++
-                        handler.postDelayed(this, READY_RETRY_INTERVAL_MS)
-                    } else {
-                        LogFile.warn(LogDomain.PLATFORM, "agreement never finished opening, close skipped")
-                    }
-                    return
+        val target = closeTarget(activity) ?: return false
+        if (!animationReady(target.animation) && !canWaitForOpeningEvent()) {
+            LogFile.warn(LogDomain.PLATFORM, "agreement opening animation is not ready and readiness hook is unavailable")
+            return false
+        }
+        if (!mainHandler.post {
+                if (activity.isFinishing || activity.isDestroyed) {
+                    onActivityDestroyed(activity)
+                } else {
+                    dispatchOrWait(activity)
                 }
-                try {
-                    keepParent.setBoolean(activity, false)
-                    closeMethod.invoke(animation, RESULT_PASSED)
-                    LogFile.info(LogDomain.PLATFORM, "agreement close dispatched, parent kept")
-                } catch (t: Throwable) {
-                    LogFile.error(LogDomain.PLATFORM, "agreement close dispatch failed", t)
-                }
-            }
-        })
+            }) {
+            LogFile.error(LogDomain.PLATFORM, "agreement close dispatch could not reach the main thread")
+            return false
+        }
         return true
     }
 
-    private fun userAgreeAnimation(activity: Activity): Any? {
-        return try {
-            val field = activity.javaClass.getDeclaredField(FIELD_ANIMATION)
-            field.isAccessible = true
-            field.get(activity)
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.PLATFORM, "agreement animation lookup failed", t)
-            null
+    private fun dispatchOrWait(activity: Activity) {
+        val target = closeTarget(activity) ?: return
+        if (animationReady(target.animation)) {
+            close(activity, target)
+            return
+        }
+        if (!canWaitForOpeningEvent()) {
+            LogFile.warn(LogDomain.PLATFORM, "agreement opening animation is not ready; close skipped")
+            return
+        }
+        synchronized(pendingCloseActivities) {
+            pendingCloseActivities[activity] = Unit
         }
     }
 
-    private fun closeMethod(animation: Any): Method? {
-        return try {
-            animation.javaClass.getMethod(METHOD_CLOSE, Int::class.javaPrimitiveType)
+    private fun canWaitForOpeningEvent(): Boolean = openingAnimationHookInstalled && activityDestroyHookInstalled
+
+    private fun close(activity: Activity) {
+        val target = closeTarget(activity) ?: return
+        if (!animationReady(target.animation)) {
+            LogFile.warn(LogDomain.PLATFORM, "agreement readiness event arrived before animation became idle; close skipped")
+            return
+        }
+        close(activity, target)
+    }
+
+    private fun close(activity: Activity, target: CloseTarget) {
+        if (activity.isFinishing || activity.isDestroyed) {
+            onActivityDestroyed(activity)
+            return
+        }
+        try {
+            target.keepParentField.setBoolean(activity, false)
+            target.closeMethod.invoke(target.animation, RESULT_PASSED)
+            LogFile.info(LogDomain.PLATFORM, "agreement close dispatched, parent kept")
         } catch (t: Throwable) {
-            LogFile.error(LogDomain.PLATFORM, "agreement close method lookup failed", t)
-            null
+            LogFile.error(LogDomain.PLATFORM, "agreement close dispatch failed", t)
         }
     }
 
-    private fun parentField(activity: Activity): Field? {
-        return try {
+    private fun closeTarget(activity: Activity): CloseTarget? {
+        val animation = readField(activity, FIELD_ANIMATION, "agreement animation lookup") ?: return null
+        val keepParentField = try {
             activity.javaClass.getDeclaredField(FIELD_DESTROY_PARENT).apply { isAccessible = true }
         } catch (t: Throwable) {
             LogFile.error(LogDomain.PLATFORM, "agreement parent-flag field lookup failed", t)
-            null
+            return null
         }
+        val closeMethod = try {
+            animation.javaClass.getMethod(METHOD_CLOSE, Int::class.javaPrimitiveType)
+        } catch (t: Throwable) {
+            LogFile.error(LogDomain.PLATFORM, "agreement close method lookup failed", t)
+            return null
+        }
+        return CloseTarget(animation, closeMethod, keepParentField)
     }
 
-    /** `closeAgreementUI` 的守卫条件：未开场完成或动画进行中调它都是空操作。 */
-    private fun animationReady(animation: Any): Boolean {
-        return try {
-            val cls = animation.javaClass
-            val opened = cls.getDeclaredField(FIELD_OPENED).apply { isAccessible = true }.getBoolean(animation)
-            val animating = cls.getDeclaredField(FIELD_ANIMATING).apply { isAccessible = true }.getBoolean(animation)
-            opened && !animating
-        } catch (t: Throwable) {
-            LogFile.error(LogDomain.PLATFORM, "agreement animation state read failed", t)
-            false
-        }
+    private fun animationReady(animation: Any): Boolean = try {
+        val cls = animation.javaClass
+        val opened = cls.getDeclaredField(FIELD_OPENED).apply { isAccessible = true }.getBoolean(animation)
+        val animating = cls.getDeclaredField(FIELD_ANIMATING).apply { isAccessible = true }.getBoolean(animation)
+        opened && !animating
+    } catch (t: Throwable) {
+        LogFile.error(LogDomain.PLATFORM, "agreement animation state read failed", t)
+        false
+    }
+
+    private fun readOwner(owner: Any, fieldName: String, label: String): Any? = try {
+        owner.javaClass.getDeclaredField(fieldName).apply { isAccessible = true }.get(owner)
+    } catch (t: Throwable) {
+        LogFile.error(LogDomain.PLATFORM, "$label lookup failed", t)
+        null
+    }
+
+    private fun readField(owner: Any, fieldName: String, label: String): Any? = try {
+        owner.javaClass.getDeclaredField(fieldName).apply { isAccessible = true }.get(owner)
+    } catch (t: Throwable) {
+        LogFile.error(LogDomain.PLATFORM, "$label failed", t)
+        null
     }
 }

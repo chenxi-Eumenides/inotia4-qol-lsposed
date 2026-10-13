@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+
+#include "contracts/result.h"
 
 namespace qol::game {
 
@@ -14,5 +17,8 @@ enum : int32_t {
 //（成功 {"ok":true,"state":<gamestate JSON>}，失败原错误体）。必须在游戏主线程调用。
 int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, uint32_t capacity,
                                   uint32_t* out_size);
+
+// Returns the post-write player or gamestate snapshot through the existing UI owner seam.
+QolResult ui_write_result_state_json(int32_t kind, std::string* out_json);
 
 }  // namespace qol::game

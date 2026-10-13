@@ -236,10 +236,34 @@ void test_plugin_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::core_ui::plugin_descriptor();
     CHECK(std::strcmp(d.id, "core.custom_ui") == 0);
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    CHECK(d.requires_count == 0 && d.optional_count == 3);
+#else
     CHECK(d.requires_count == 0 && d.optional_count == 1);  // ui.state 为单向可选依赖
+#endif
     CHECK(std::strcmp(d.optional_requires[0].id, qol::contracts::kUiStateCapabilityId) == 0);
     CHECK(d.optional_requires[0].range.major == qol::contracts::kUiStateVersionMajor &&
           d.optional_requires[0].range.min_minor == qol::contracts::kUiStateVersionMinor);
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    CHECK(std::strcmp(d.optional_requires[1].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(d.optional_requires[2].id, qol::contracts::kHttpDispatchCapabilityId) == 0);
+    CHECK(d.http_endpoint_count == 3 && d.http_endpoints != nullptr);
+    const char* const debug_paths[] = {
+        "/api/debug/custom-ui/components", "/api/debug/custom-ui/scroll",
+        "/api/debug/custom-ui/help",
+    };
+    for (uint32_t index = 0; index < d.http_endpoint_count; ++index) {
+        CHECK(d.http_endpoints[index].method == qol::contracts::HttpMethod::kPost);
+        CHECK(std::strcmp(d.http_endpoints[index].path, debug_paths[index]) == 0);
+        CHECK(std::strcmp(d.http_endpoints[index].route_owner, "core.custom_ui") == 0);
+        CHECK(d.http_endpoints[index].kind == qol::contracts::HttpHandlerKind::kCommand);
+        CHECK(d.http_endpoints[index].command_handler != nullptr);
+    }
+#else
+    CHECK(d.http_endpoint_count == 0 && d.http_endpoints == nullptr);
+#endif
+    CHECK(d.http_query_count == 0 && d.http_queries == nullptr);
+    CHECK(d.http_route_metadata_count == 0 && d.http_route_metadata == nullptr);
     CHECK(d.provides_count == 4);  // ui_components + ui_panels + ui_choice + text_layer
     CHECK(std::strcmp(d.provides[2].id, qol::contracts::kUiChoiceCapabilityId) == 0);
     CHECK(d.provides[2].version.major == qol::contracts::kUiChoiceVersionMajor);

@@ -11,6 +11,7 @@
 #include "host/core_patches.h"
 #include "host/frame_source.h"
 #include "host/config_platform_bridge.h"
+#include "host/module_health.h"
 #include "host/features/production.h"
 #include "host/features/receipt_formatter.h"
 
@@ -248,6 +249,13 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
     // 启动期常驻 patch 入口注入：必须在 bridge_init() 之前（bridge_init 内调用）。
     bridge_set_boot_patch_hook(&qol::host::core_patches_install);
     bool ok = bridge_init();
+    if (ok) {
+        qol::host::module_health_set_fact(qol::contracts::QolModuleHealthBit::kNative, true, false);
+    } else if (g_dl_error == "libgame.so not loaded yet") {
+        qol::host::module_health_set_fact(qol::contracts::QolModuleHealthBit::kNative, false, false);
+    } else {
+        qol::host::module_health_set_fact(qol::contracts::QolModuleHealthBit::kNative, true, true);
+    }
     if (ok) {
         // T2h-B'：向 infra game_cache 注入 legacy JSON builder（K1），必须在任何
         // data_*_json 读取/frame_cache_start 之前，行为/线程与现状逐字一致。

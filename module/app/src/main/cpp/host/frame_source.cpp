@@ -21,6 +21,7 @@
 
 #include "contracts/plugin.h"
 #include "contracts/runtime_hooks.h"
+#include "core/native/game_cache.h"
 #include "infra/capabilities.h"
 #include "infra/frame/transition_dispatch.h"
 #include "patch/save_enter.h"
@@ -36,6 +37,8 @@
 #include "patch/instr_patch.h"
 #include "host/plugin_registry.h"
 #include "host/save_route.h"
+#include "host/module_health.h"
+#include "game/state/game_state.h"
 
 namespace qol::host {
 namespace {
@@ -46,6 +49,8 @@ constexpr const char* kLogicClaimId = "patch:MainProcess+0x40";
 
 std::atomic<bool> g_frame_source_installed{false};
 std::atomic<bool> g_frame_source_installing{false};
+
+bool cache_reader_is_game_main_thread() { return qol::game::game_host_is_main_thread(); }
 
 // 替换原 BL MAP_DrawBase：先派发调度器与 legacy 帧任务，再复刻原调用。
 void frame_render_pre_wrapper() {
@@ -59,6 +64,7 @@ void frame_render_pre_wrapper() {
 void frame_logic_pre_wrapper() {
     // The logic hook runs on the game's logic thread; bootstrap may run on Android's app thread.
     qol::game::game_host_mark_main_thread();
+    module_health_observe_main_menu(qol::game::ui_main_menu_state_observed());
     qol::infra::scheduler_dispatch(qol::infra::FramePoint::kLogicPre);
     frame_task_dispatch(kFramePointLogicPre);
     if (fn_state_next_start_process != nullptr) fn_state_next_start_process();
@@ -118,7 +124,11 @@ bool install_frame_claim(const contracts::ResourceClaim& claim) {
 }  // namespace
 
 bool frame_source_install() {
-    if (g_frame_source_installed.load(std::memory_order_acquire)) return true;
+    frame_cache_set_main_thread_gate(&cache_reader_is_game_main_thread);
+    if (g_frame_source_installed.load(std::memory_order_acquire)) {
+        module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, false);
+        return true;
+    }
     // exchange 抢占安装权：并发重复调用时后到者直接返回当前状态（幂等）。
     if (g_frame_source_installing.exchange(true, std::memory_order_acq_rel)) {
         return g_frame_source_installed.load(std::memory_order_acquire);
@@ -133,16 +143,24 @@ bool frame_source_install() {
         &call_patch_revert_word,
     });
 
-    if (!bridge_ready() || g_base == 0 || fn_map_drawbase == nullptr ||
-        fn_state_next_start_process == nullptr) {
+    if (!bridge_ready() || g_base == 0) {
         g_frame_source_installing.store(false, std::memory_order_release);
+        module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, false, false);
         return false;  // 未就绪：不改写字节，允许后续重试
+    }
+
+    module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, false, false);
+    if (fn_map_drawbase == nullptr || fn_state_next_start_process == nullptr) {
+        g_frame_source_installing.store(false, std::memory_order_release);
+        module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, true);
+        return false;
     }
 
     for (const contracts::ResourceClaim& claim : kClaims) {
         if (!hooks::register_claim(claim)) {
             QOL_LOG_ERROR(QolDomain::kCore, "frame_source: claim registration failed %s", claim.id);
             g_frame_source_installing.store(false, std::memory_order_release);
+            module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, true);
             return false;
         }
     }
@@ -150,6 +168,7 @@ bool frame_source_install() {
     // 全成或全退：第二条失败时回滚第一条（fail-closed，禁止半装）。
     if (!install_frame_claim(kClaims[0])) {
         g_frame_source_installing.store(false, std::memory_order_release);
+        module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, true);
         return false;
     }
     if (!install_frame_claim(kClaims[1])) {
@@ -161,11 +180,13 @@ bool frame_source_install() {
             hooks::runtime_clear(first.id);
         }
         g_frame_source_installing.store(false, std::memory_order_release);
+        module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, true);
         return false;
     }
 
     g_frame_source_installed.store(true, std::memory_order_release);
     g_frame_source_installing.store(false, std::memory_order_release);
+    module_health_set_fact(contracts::QolModuleHealthBit::kFrameHooks, true, false);
     QOL_LOG_INFO(QolDomain::kCore, "frame_source installed (render + logic anchors)");
     return true;
 }

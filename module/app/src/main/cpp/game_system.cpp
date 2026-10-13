@@ -63,6 +63,10 @@ std::string data_init_report() {
 
 namespace {
 
+bool state_snapshot_available(const std::string& json) {
+    return qol::game::json::is_ready_state_snapshot(json);
+}
+
 Snapshot take_snapshot() {
     Snapshot s{};
     s.money = (fn_get_money != nullptr) ? fn_get_money() : -1;
@@ -354,7 +358,9 @@ std::string build_quest_quit_result_json(int32_t quest_id) {
     // 成功路径 op_ok() 已同步力刷 player 槽（与迁移前 quest quit 全局的副作用一致），
     // 此处读 cache 即写后即时字节（cache[player] 的 owner 适配器与 legacy 现构逐字节同源）。
     (void)::op_ok();
-    return "{\"ok\":true,\"state\":" + data_player_json() + "}";
+    const std::string state = data_player_json();
+    if (!state_snapshot_available(state)) return ::op_err("not ready");
+    return "{\"ok\":true,\"state\":" + state + "}";
 }
 
 // ---- core.character owner 响应体拼装（批 4-4）----
@@ -767,7 +773,12 @@ int32_t build_save_write_result_json(int32_t kind, int32_t slot, int32_t class_i
     // 与迁移前 ActionSupport.attachPlayer 同构：仅成功时附 state（键序 ok→state）。
     // 首个 attempt 的写路径 op_ok() 已同步力刷 player 槽；重试 attempt 仅等世界就绪，
     // 期间预取按帧维持 cache 新鲜，故读 cache 仍是写后即时字节。
-    return finish("{\"ok\":true,\"state\":" + data_player_json() + "}", kSaveWriteOk);
+    const std::string state = data_player_json();
+    if (!state_snapshot_available(state)) {
+        // The write has already run; settle it as a failure instead of retrying the command.
+        return finish(::op_err("not ready"), kSaveWriteFailed);
+    }
+    return finish("{\"ok\":true,\"state\":" + state + "}", kSaveWriteOk);
 }
 
 // world_teleport owner 的世界写结果拼装：move_to/walk_dir/interact_with 迁移前经
@@ -798,13 +809,17 @@ int32_t build_world_write_result_json(int32_t kind, int32_t a, int32_t b, int32_
         default:
             return kWorldWriteFailed;
     }
-    const bool ok = body.find("\"ok\":false") == std::string::npos;
+    bool ok = body.find("\"ok\":false") == std::string::npos;
     if (attach_state && ok && !body.empty() && body.back() == '}') {
         body.pop_back();
-        body += ",\"state\":";
         // 写路径 op_ok() 已同步力刷 player 槽，读 cache 即写后即时字节。
-        body += data_player_json();
-        body += "}";
+        const std::string state = data_player_json();
+        if (!state_snapshot_available(state)) {
+            body = ::op_err("not ready");
+            ok = false;
+        } else {
+            body += ",\"state\":" + state + "}";
+        }
     }
     if (out_size != nullptr) *out_size = 0;
     if (out == nullptr || out_size == nullptr || body.size() > capacity) return kWorldWriteFailed;
@@ -862,17 +877,45 @@ int32_t build_ui_write_result_json(int32_t kind, const char* panel, char* out, u
         default:
             return kUiWriteFailed;
     }
-    const bool ok = op.find("\"ok\":false") == std::string::npos;
+    bool ok = op.find("\"ok\":false") == std::string::npos;
     std::string body = op;
     if (ok && !op.empty() && op.back() == '}') {
         // 写路径 op_ok() 已同步力刷 player 槽，读 cache 即写后即时字节。
-        body = op.substr(0, op.size() - 1) + ",\"state\":" +
-               (state_is_player ? data_player_json() : data_gamestate_json()) + "}";
+        const std::string state = state_is_player ? data_player_json() : data_gamestate_json();
+        if (!state_snapshot_available(state)) {
+            body = ::op_err("not ready");
+            ok = false;
+        } else {
+            body = op.substr(0, op.size() - 1) + ",\"state\":" + state + "}";
+        }
     }
     if (body.size() > capacity) return kUiWriteFailed;
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
     return ok ? kUiWriteOk : kUiWriteFailed;
+}
+
+QolResult ui_write_result_state_json(int32_t kind, std::string* out_json) {
+    if (out_json == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "UI state output required", 24);
+    }
+    out_json->clear();
+    switch (kind) {
+        case contracts::kQolUiWriteMainMenu:
+            *out_json = data_player_json();
+            break;
+        case contracts::kQolUiWritePanelOpen:
+        case contracts::kQolUiWritePanelClose:
+            *out_json = data_gamestate_json();
+            break;
+        default:
+            return contracts::error(kQolErrInvalidArgument, "invalid UI write kind", 21);
+    }
+    if (!state_snapshot_available(*out_json)) {
+        out_json->clear();
+        return contracts::error(kQolErrNotReady, "UI result state not ready", 25);
+    }
+    return contracts::ok();
 }
 
 }  // namespace qol::game

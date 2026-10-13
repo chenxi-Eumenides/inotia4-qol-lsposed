@@ -10,8 +10,30 @@ import android.widget.TextView
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import io.github.libxposed.api.XposedModuleInterface
+import java.util.ArrayList
+import java.util.Collections
 import java.lang.ref.WeakReference
 import java.lang.reflect.Method
+
+internal const val MODULE_HEALTH_WATERMARK_COLOR = 0xCCFF0000.toInt()
+
+internal fun copyModuleHealthNames(unavailableNames: List<String>): List<String> {
+    val copied = unavailableNames.filter { it.isNotBlank() }.distinct()
+    return Collections.unmodifiableList(ArrayList(copied))
+}
+
+internal fun moduleHealthRuleActive(visible: Boolean, unavailableNames: List<String>): Boolean =
+    visible && unavailableNames.isNotEmpty()
+
+internal fun firstActiveWatermarkRuleIndex(enabledRules: List<Boolean>): Int =
+    enabledRules.indexOfFirst { it }
+
+internal fun moduleHealthWatermarkText(visible: Boolean, unavailableNames: List<String>): String =
+    if (moduleHealthRuleActive(visible, unavailableNames)) {
+        "qol · ${unavailableNames.joinToString("、")}"
+    } else {
+        "qol"
+    }
 
 /**
  * 常驻水印（qol 三字母）：hook MainActivity.onWindowFocusChanged，在获焦回调后
@@ -21,11 +43,8 @@ import java.lang.reflect.Method
  * 不消费触摸，任何失败只记日志、绝不影响游戏进程。
  *
  * 颜色策略：由静态配色表 [COLOR_RULES] 决定 —— 按序取第一条命中的规则，全不命中用默认色。
- * 表中每一行是完整的 ARGB（色相与不透明度一起定义），所以不同情况可以有不同的显眼程度：
- * 当前一行「简单模式」开启 → 亮绿 + 80% 不透明度（作为开关状态指示，需明显可见），
- * 默认态仍是 15% 的半透明白（仅作痕迹）。
- * 新增其它情况只需往表里加一行；开关变更通过 native platform effect 调用
- * refreshColor() 实时刷新（设置页与 HTTP API 均由同一 native 配置 owner 通知）。
+ * 模块健康异常优先显示红色；简单模式启用时显示绿色；无活动状态时保留默认半透明白色。
+ * 配置和模块健康更新均经 refreshColor() 在现有视图上刷新。
  */
 object WatermarkOverlay {
 
@@ -47,7 +66,7 @@ object WatermarkOverlay {
 
     /**
      * 配色表一行的形状：一条配置条件 + 条件成立时水印用的颜色。
-     * [enabled] 是 revisioned native platform effect 的 Kotlin 投影。
+     * [enabled] 表示当前规则是否命中。
      */
     private class WatermarkColorRule(
         /** 规则名，仅用于日志定位命中项。 */
@@ -69,7 +88,14 @@ object WatermarkOverlay {
      */
     @Volatile private var configRevision = 0L
     @Volatile private var simpleModeEnabled = false
+    @Volatile private var moduleHealthNames: List<String> = emptyList()
+    @Volatile private var moduleHealthVisible = false
+    private val moduleHealthLock = Any()
+    private var moduleHealthRevision = Long.MIN_VALUE
     private val COLOR_RULES: List<WatermarkColorRule> = listOf(
+        WatermarkColorRule("模块异常", MODULE_HEALTH_WATERMARK_COLOR) {
+            moduleHealthRuleActive(moduleHealthVisible, moduleHealthNames)
+        },
         WatermarkColorRule("简单模式", WATERMARK_COLOR_SIMPLE_MODE) { simpleModeEnabled },
     )
 
@@ -80,13 +106,27 @@ object WatermarkOverlay {
         refreshColor()
     }
 
+    fun updateModuleHealth(revision: Long, unavailableNames: List<String>, visible: Boolean) {
+        synchronized(moduleHealthLock) {
+            if (revision <= moduleHealthRevision) return
+            moduleHealthRevision = revision
+            val copiedNames = copyModuleHealthNames(unavailableNames)
+            moduleHealthNames = copiedNames
+            moduleHealthVisible = visible && copiedNames.isNotEmpty()
+        }
+        refreshColor()
+    }
+
     private const val MARGIN_DP = 12f
 
     /** 已注入的水印视图。弱引用：水印随 Activity 生命周期存在，模块不得持有 Activity。 */
-    private var watermarkView: WeakReference<TextView>? = null
+    @Volatile private var watermarkView: WeakReference<TextView>? = null
 
     /** 配色表中第一条命中的规则；无命中返回 null（调用方回退默认色）。 */
-    private fun currentRule(): WatermarkColorRule? = COLOR_RULES.firstOrNull { it.enabled() }
+    private fun currentRule(): WatermarkColorRule? =
+        COLOR_RULES.getOrNull(firstActiveWatermarkRuleIndex(COLOR_RULES.map { it.enabled() }))
+
+    private fun currentLabel(): String = moduleHealthWatermarkText(moduleHealthVisible, moduleHealthNames)
 
     /** 当前水印色：命中规则取规则色，否则默认半透明白。 */
     private fun currentColor(): Int = currentRule()?.color ?: WATERMARK_COLOR
@@ -118,13 +158,17 @@ object WatermarkOverlay {
             if (existing != null) {
                 // 已存在：置顶保持最上层即可，不重复打日志（获焦回调会多次到达）。
                 existing.bringToFront()
-                // 顺带同步颜色：获焦回调是「配置可能已变」的自然刷新点（与 refreshColor 双保险）。
-                (existing as? TextView)?.setTextColor(currentColor())
+                // Activity recreation can leave the tagged view without the current weak reference.
+                (existing as? TextView)?.let { textView ->
+                    watermarkView = WeakReference(textView)
+                    textView.text = currentLabel()
+                    textView.setTextColor(currentColor())
+                }
                 return
             }
 
             val label = TextView(activity).apply {
-                text = "qol"
+                text = currentLabel()
                 setTextColor(currentColor())
                 setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
                 background = null
@@ -156,7 +200,7 @@ object WatermarkOverlay {
     }
 
     /**
-     * 配置变更后实时刷新水印颜色（简单模式开关 → 亮绿色）。
+     * 配置或模块健康状态变更后刷新水印文字与颜色。
      * 可从任意线程调用：视图更新经 post 回到 UI 线程；视图尚未注入或已随 Activity
      * 销毁时静默跳过（下一次 onWindowFocusChanged 注入时会用新色）。
      */
@@ -164,6 +208,7 @@ object WatermarkOverlay {
         val view = watermarkView?.get() ?: return
         view.post {
             try {
+                view.text = currentLabel()
                 view.setTextColor(currentColor())
                 LogFile.info(LogDomain.PLATFORM, "watermark color refreshed color=${Integer.toHexString(currentColor())} rule=${currentRuleName()}")
             } catch (t: Throwable) {

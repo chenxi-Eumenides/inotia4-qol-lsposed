@@ -6,11 +6,13 @@
 #include "contracts/popup_enter_alias.h"
 #include "contracts/lifecycle_participant.h"
 #include "contracts/runtime_hooks.h"
+#include "contracts/game_ports/ui_write_port.h"
 #include "game/adapter_ports/lifecycle_participant_facade.h"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <sys/mman.h>
 
 uintptr_t g_base = 0;
@@ -30,6 +32,14 @@ int g_fail = 0;
 int g_game_over_calls = 0;
 int g_in_world = 1;
 int g_story = 0;
+int g_popup_pop_calls = 0;
+int g_popup_push_calls = 0;
+int g_main_menu_transition_calls = 0;
+int g_game_state_set_calls = 0;
+int32_t g_last_game_state = -1;
+uint32_t* g_fake_popup_count = nullptr;
+uintptr_t* g_fake_popup_enter = nullptr;
+uint8_t* g_fake_state_list = nullptr;
 
 #define CHECK(cond) do { \
     if (cond) ++g_pass; \
@@ -40,8 +50,34 @@ int game_over() { ++g_game_over_calls; return 0; }
 
 int g_enter_match = 0;
 int g_prepare_mm_ok = 1;
-void dummy_set_state(int32_t) {}
-int dummy_popup_info(int32_t, int32_t) { return 0; }
+void dummy_set_state(int32_t state) {
+    ++g_game_state_set_calls;
+    g_last_game_state = state;
+}
+int dummy_popup_info(int32_t action, int32_t state_id) {
+    if (action == 3) {
+        ++g_popup_pop_calls;
+        return 0;
+    }
+    if (action == 1) {
+        ++g_popup_push_calls;
+        if (g_fake_popup_count != nullptr) *g_fake_popup_count = 1;
+        if (g_fake_popup_enter != nullptr && g_fake_state_list != nullptr && state_id >= 0) {
+            *g_fake_popup_enter = *reinterpret_cast<uintptr_t*>(
+                g_fake_state_list + state_id * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER);
+        }
+    }
+    return 0;
+}
+QolResult run_transition_inline(qol::contracts::QolRuntimeTransitionBodyFn body, void* ctx,
+                                char* out, uint32_t capacity, uint32_t* out_size) {
+    ++g_main_menu_transition_calls;
+    if (body == nullptr || out == nullptr || out_size == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad transition", 14);
+    }
+    body(ctx, out, capacity, out_size);
+    return qol::contracts::ok();
+}
 int32_t dispatch_prepare_save() { return 1; }
 int32_t dispatch_is_enter(uintptr_t enter) { return enter == 0x1234 && g_enter_match ? 1 : 0; }
 int32_t dispatch_prepare_mm() { return g_prepare_mm_ok; }
@@ -63,10 +99,104 @@ uintptr_t popup_enter_alias_resolve(uintptr_t) { return kPopupEnterAliasNone; }
 
 namespace qol::contracts {
 const QolRuntimeHooksApi& qol_runtime_hooks() {
-    static const QolRuntimeHooksApi kHooks{};
+    static const QolRuntimeHooksApi kHooks = [] {
+        QolRuntimeHooksApi hooks{};
+        hooks.abi_version = {1, 0};
+        hooks.transition_run_inline = &run_transition_inline;
+        return hooks;
+    }();
     return kHooks;
 }
 }  // namespace qol::contracts
+
+void test_ui_write_frame_steps(uint32_t* stack_count, uintptr_t* top_enter,
+                               uint8_t* state_list) {
+    using namespace qol::contracts;
+    using namespace qol::game;
+    g_fake_popup_count = stack_count;
+    g_fake_popup_enter = top_enter;
+    g_fake_state_list = state_list;
+    fn_ui_set_popup_process_info = &dummy_popup_info;
+    fn_gamestate_set_state = &dummy_set_state;
+    g_popup_pop_calls = 0;
+    g_popup_push_calls = 0;
+    g_main_menu_transition_calls = 0;
+    g_game_state_set_calls = 0;
+
+    char out[256]{};
+    uint32_t out_size = 0;
+    *stack_count = 1;
+    *top_enter = g_base + F_PANEL_CHARACTER_INFO_ENTER;
+    QolResult result = ui_state_write_step(100, 0, kQolUiWritePanelOpen, "inventory", out,
+                                           sizeof(out), &out_size);
+    CHECK(result.code == kQolErrNotReady && out_size == 0);
+    CHECK(g_popup_pop_calls == 1 && g_popup_push_calls == 0);
+
+    result = ui_state_write_step(101, 0, kQolUiWritePanelClose, "", out, sizeof(out), &out_size);
+    CHECK(result.code == kQolErrNotReady && g_popup_pop_calls == 1);
+
+    *stack_count = 0;
+    result = ui_state_write_step(100, 1, kQolUiWritePanelOpen, "inventory", out, sizeof(out),
+                                 &out_size);
+    CHECK(succeeded(result) && std::string(out, out_size) == "{\"ok\":true}");
+    CHECK(g_popup_pop_calls == 1 && g_popup_push_calls == 1 && *stack_count == 1);
+
+    result = ui_state_write_step(101, 1, kQolUiWritePanelClose, "", out, sizeof(out), &out_size);
+    CHECK(succeeded(result) && g_popup_pop_calls == 2);
+
+    // A pending panel switch pops once, defers through 59 further attempts, then keeps the old error.
+    *stack_count = 1;
+    *top_enter = g_base + F_PANEL_INVENTORY_ENTER;
+    const int pop_calls_before_timeout = g_popup_pop_calls;
+    result = ui_state_write_step(200, 0, kQolUiWritePanelOpen, "skills", out, sizeof(out),
+                                 &out_size);
+    CHECK(result.code == kQolErrNotReady && g_popup_pop_calls == pop_calls_before_timeout + 1);
+    for (uint32_t attempt = 1; attempt < 59; ++attempt) {
+        result = ui_state_write_step(200, attempt, kQolUiWritePanelOpen, "skills", out,
+                                     sizeof(out), &out_size);
+        CHECK(result.code == kQolErrNotReady);
+    }
+    result = ui_state_write_step(200, 59, kQolUiWritePanelOpen, "skills", out, sizeof(out),
+                                 &out_size);
+    CHECK(result.code == kQolErrTimeout &&
+          std::string(out, out_size) ==
+              "{\"ok\":false,\"error\":\"panel close pending\"}");
+    CHECK(g_popup_pop_calls == pop_calls_before_timeout + 1);
+
+    // The timeout releases the operation; a later owner command can complete.
+    *stack_count = 0;
+    result = ui_state_write_step(201, 0, kQolUiWritePanelOpen, "skills", out, sizeof(out),
+                                 &out_size);
+    CHECK(succeeded(result) && g_popup_push_calls == 2);
+
+    // Main-menu transition waits for the stack to clear, then invokes transition exactly once.
+    *stack_count = 1;
+    *top_enter = g_base + F_PANEL_INVENTORY_ENTER;
+    result = ui_state_write_step(300, 0, kQolUiWriteMainMenu, "", out, sizeof(out), &out_size);
+    CHECK(result.code == kQolErrNotReady && g_popup_pop_calls == pop_calls_before_timeout + 2);
+    *stack_count = 0;
+    result = ui_state_write_step(300, 1, kQolUiWriteMainMenu, "", out, sizeof(out), &out_size);
+    CHECK(succeeded(result) && g_main_menu_transition_calls == 1);
+    CHECK(g_game_state_set_calls == 1 && g_last_game_state == 4);
+    *stack_count = 0;
+    CHECK(ui_main_menu(false).str() ==
+          "{\"ok\":false,\"error\":\"panel close pending\"}");
+    CHECK(g_main_menu_transition_calls == 1 && g_game_state_set_calls == 1);
+
+    *stack_count = 1;
+    *top_enter = g_base + F_PANEL_INVENTORY_ENTER;
+    result = ui_state_write_step(400, 0, kQolUiWriteMainMenu, "", out, sizeof(out), &out_size);
+    CHECK(result.code == kQolErrNotReady);
+    CHECK(succeeded(ui_state_write_cancel_pending(400)));
+    result = ui_state_write_step(401, 0, kQolUiWritePanelClose, "", out, sizeof(out), &out_size);
+    CHECK(succeeded(result));
+
+    // Legacy synchronous callers do one frame's work and retain the pending error body.
+    const int pop_calls_before_legacy = g_popup_pop_calls;
+    CHECK(ui_panel_open("skills").str() ==
+          "{\"ok\":false,\"error\":\"panel close pending\"}");
+    CHECK(g_popup_pop_calls == pop_calls_before_legacy + 1);
+}
 
 int main() {
     using namespace qol::game;
@@ -127,6 +257,16 @@ int main() {
     CHECK(ui_main_menu(true).str() ==
           "{\"ok\":false,\"error\":\"extension bag cleanup failed; main menu transition blocked\"}");
     g_prepare_mm_ok = 1;
+
+    uint8_t state_list[27 * POPUP_ENTRY_SIZE]{};
+    const uintptr_t inventory_enter = g_base + F_PANEL_INVENTORY_ENTER;
+    const uintptr_t skills_enter = g_base + F_PANEL_SKILLS_ENTER;
+    std::memcpy(state_list + 7 * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER, &inventory_enter,
+                sizeof(inventory_enter));
+    std::memcpy(state_list + 6 * POPUP_ENTRY_SIZE + POPUP_ENTRY_ENTER, &skills_enter,
+                sizeof(skills_enter));
+    *reinterpret_cast<uint8_t**>(g_base + G_POPUP_STATE_LIST_GOT_VMA) = state_list;
+    test_ui_write_frame_steps(&stack.count, &entry.enter, state_list);
 
     munmap(base, 0x400000);
     std::printf("ui_state_dialog: pass=%d fail=%d\n", g_pass, g_fail);

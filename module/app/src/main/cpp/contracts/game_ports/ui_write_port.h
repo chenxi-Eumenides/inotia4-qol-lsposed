@@ -19,8 +19,18 @@ constexpr int32_t kQolUiWriteMainMenu = 2;    // POST /api/ui/go_main_menu（无
 using QolUiWriteFn = QolResult (*)(int32_t kind, const char* panel, char* out, uint32_t capacity,
                                    uint32_t* out_size);
 
+// 推进一次 owner UI 写操作。NotReady 表示当前帧尚未完成；调用方可将 owner 命令延迟到下一帧。
+using QolUiWriteStepFn = QolResult (*)(uint64_t operation_id, uint32_t attempt, int32_t kind,
+                                       const char* panel, char* out, uint32_t capacity,
+                                       uint32_t* out_size);
+
+// 取消指定操作的 Game Adapter 等待状态；operation_id=0 清除本 owner 的全部等待状态。
+using QolUiWriteCancelPendingFn = QolResult (*)(uint64_t operation_id);
+
 struct QolUiWritePortReadApi {
     QolUiWriteFn write;
+    QolUiWriteStepFn step;
+    QolUiWriteCancelPendingFn cancel_pending;
 };
 
 struct QolUiWritePort {

@@ -66,7 +66,17 @@ const contracts::QolSaveTransactionPort kSaveTransactionPort{
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 const contracts::QolWorldWritePort kWorldWritePort{{1, 0}, {}};
 const contracts::QolChoiceWritePort kChoiceWritePort{{1, 0}, {}};
-const contracts::QolUiWritePort kUiWritePort{{1, 0}, {}};
+QolResult fake_ui_write(int32_t, const char*, char*, uint32_t, uint32_t*) {
+    return contracts::error(kQolErrUnsupported, "fake UI write", 14);
+}
+QolResult fake_ui_write_step(uint64_t, uint32_t, int32_t, const char*, char*, uint32_t,
+                             uint32_t*) {
+    return contracts::error(kQolErrUnsupported, "fake UI write", 14);
+}
+QolResult fake_ui_write_cancel_pending(uint64_t) { return contracts::ok(); }
+const contracts::QolUiWritePort kUiWritePort{
+    contracts::kQolPortUiWriteVersion,
+    {&fake_ui_write, &fake_ui_write_step, &fake_ui_write_cancel_pending}};
 QolResult fake_ui_state_snapshot(char* screen, uint32_t screen_capacity,
                                  uint32_t* screen_size, char* panel,
                                  uint32_t panel_capacity, uint32_t* panel_size,

@@ -38,6 +38,9 @@ bool scheduler_remove(FrameTaskId id);
 // （未注入 → -1，跳过派发）。
 void scheduler_dispatch(FramePoint point);
 
+// True only while this thread is executing a callback from the requested frame-point dispatch.
+bool scheduler_is_dispatching(FramePoint point);
+
 uint32_t scheduler_task_count(FramePoint point);
 
 void scheduler_reset_for_test();

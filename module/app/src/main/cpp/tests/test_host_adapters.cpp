@@ -28,6 +28,8 @@
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
 #include "game/adapter_ports/choice_port.h"
+#include "game/adapter_ports/game_host_port.h"
+#include "game/adapter_ports/ui_write_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/move_merge_port.h"
@@ -52,6 +54,11 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "infra/text_scope.h"
+
+extern int g_host_ui_step_calls;
+extern int g_host_ui_cancel_calls;
+extern int g_host_ui_not_ready_reads;
+extern std::string g_host_ui_snapshot;
 
 static_assert(offsetof(qol::contracts::QolMoveMergePort, move_item) ==
               ((sizeof(QolVersion) + alignof(void*) - 1) / alignof(void*)) * alignof(void*));
@@ -519,9 +526,38 @@ QolResult find_item_provider_for_each(qol::contracts::QolInventoryExtensionItemF
 
 bool find_item_provider_available() { return true; }
 
+void test_ui_result_snapshot_retry_does_not_repeat_write() {
+    qol::game::game_host_mark_main_thread();
+    const auto& port = qol::game::ui_write_port();
+    char out[512]{};
+    uint32_t out_size = 0;
+    const int writes_before = g_host_ui_step_calls;
+    g_host_ui_not_ready_reads = 1;
+    QolResult result = port.read.step(900, 0, qol::contracts::kQolUiWritePanelOpen, "inventory",
+                                      out, sizeof(out), &out_size);
+    assert(result.code == kQolErrNotReady && out_size == 0);
+    assert(g_host_ui_step_calls == writes_before + 1);
+
+    g_host_ui_snapshot = "{\"screen\":\"world\",\"version\":2}";
+    result = port.read.step(900, 1, qol::contracts::kQolUiWritePanelOpen, "inventory", out,
+                            sizeof(out), &out_size);
+    assert(qol::contracts::succeeded(result));
+    assert(std::string(out, out_size) ==
+           "{\"ok\":true,\"state\":{\"screen\":\"world\",\"version\":2}}");
+    assert(g_host_ui_step_calls == writes_before + 1);
+
+    g_host_ui_not_ready_reads = 1;
+    result = port.read.step(901, 0, qol::contracts::kQolUiWritePanelOpen, "inventory", out,
+                            sizeof(out), &out_size);
+    assert(result.code == kQolErrNotReady);
+    assert(qol::contracts::succeeded(port.read.cancel_pending(901)));
+    assert(g_host_ui_cancel_calls == 1);
+}
+
 }  // namespace
 
 int main() {
+    test_ui_result_snapshot_retry_does_not_repeat_write();
     fn_get_rarity = &fake_item_rarity;
     fn_item_is_no_sell = &fake_item_no_sell;
     fn_is_dice = &fake_item_dice;
@@ -549,7 +585,12 @@ int main() {
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
     assert(sdk.abi.minor == qol::contracts::kHostSdkMinor);
-    assert(qol::contracts::kHostSdkMinor == 22);
+    assert(qol::contracts::kHostSdkMinor == 26);
+    assert(sdk.runtime_effects != nullptr);
+    assert(sdk.security != nullptr);
+    assert(qol::contracts::module_health_if_available(&sdk) == sdk.module_health);
+    assert(sdk.module_health->struct_size == sizeof(qol::contracts::QolHostModuleHealthFactsApi));
+    assert(sdk.module_health->read != nullptr);
     assert(sdk.module_version != nullptr);
     assert(qol::contracts::settings_catalog_if_available(&sdk) == sdk.settings_catalog);
     assert(sdk.settings_catalog != nullptr);
@@ -1194,12 +1235,15 @@ int main() {
     assert(item_port_api.read.cumulate_count(g_inventory_item_handle, &value).ok == kQolOk);
     // Host 常驻 item_count facade：用带类别表的假 g_base 驱动真实 S2 codec 与模式策略。
     static std::array<uint8_t, 23 * 16> g_fake_class_table{};
+    static uint8_t* g_fake_class_table_slot = nullptr;
     static uint8_t g_fake_class_stride = 23;
     static std::array<uint8_t, 0x40> g_count_item{};
     const uintptr_t saved_count_base = g_base;
     g_base = reinterpret_cast<uintptr_t>(g_move_merge_fake_memory.data());
-    *reinterpret_cast<uint8_t**>(g_move_merge_fake_memory.data() + G_ITEMCLASS_DATA_GOT_VMA) =
-        g_fake_class_table.data();
+    // Production follows the GOT pointer slot once more to reach ITEMCLASSBASE data.
+    g_fake_class_table_slot = g_fake_class_table.data();
+    *reinterpret_cast<void**>(g_move_merge_fake_memory.data() + G_ITEMCLASS_DATA_GOT_VMA) =
+        &g_fake_class_table_slot;
     *reinterpret_cast<uint8_t**>(g_move_merge_fake_memory.data() + G_ITEMCLASS_SIZE_GOT_VMA) =
         &g_fake_class_stride;
     g_fake_class_table[12 * 23 + 6] = 1;  // category 12 = count-encoded

@@ -23,6 +23,23 @@ bool g_native_read_fails = false;
 const char* g_native_screen = "world";
 const char* g_native_panel = "";
 const char* g_native_dialog = "{\"type\":\"none\",\"options\":[]}";
+QolTypedResultCommandHandler g_ui_write_result = nullptr;
+void* g_ui_write_result_ctx = nullptr;
+uint8_t g_posted_ui_payload[kTypedCommandPayloadCapacity]{};
+uint32_t g_posted_ui_payload_size = 0;
+QolCommandTicket g_next_ticket = 100;
+uint32_t g_result_attempt = 0;
+uint32_t g_defer_calls = 0;
+uint32_t g_ui_step_calls = 0;
+uint64_t g_step_operation_id = 0;
+uint32_t g_step_attempt = 0;
+int32_t g_step_kind = -1;
+std::string g_step_panel;
+uint64_t g_cancel_operation_id = UINT64_MAX;
+uint32_t g_cancel_order = 0;
+uint32_t g_ui_unregister_order = 0;
+uint32_t g_order = 0;
+bool g_step_pending_first_attempt = true;
 
 QolResult copy_field(char* out, uint32_t capacity, uint32_t* size, const char* value) {
     if (out == nullptr || size == nullptr || value == nullptr || capacity <= std::strlen(value)) {
@@ -47,8 +64,37 @@ QolResult read_snapshot(char* screen, uint32_t screen_capacity, uint32_t* screen
 }
 
 QolResult ui_write(int32_t, const char*, char*, uint32_t, uint32_t*) { return ok(); }
+QolResult ui_write_step(uint64_t operation_id, uint32_t attempt, int32_t kind,
+                        const char* panel, char* out, uint32_t capacity, uint32_t* out_size) {
+    ++g_ui_step_calls;
+    g_step_operation_id = operation_id;
+    g_step_attempt = attempt;
+    g_step_kind = kind;
+    g_step_panel = panel != nullptr ? panel : "";
+    if (g_step_pending_first_attempt && attempt == 0) {
+        if (out_size != nullptr) *out_size = 0;
+        return error(kQolErrNotReady, "panel close pending", 19);
+    }
+    constexpr char kResult[] = "{\"ok\":true,\"state\":{}}";
+    if (out == nullptr || out_size == nullptr || sizeof(kResult) - 1 > capacity) {
+        return error(kQolErrInvalidArgument, "bad fake result output", 22);
+    }
+    std::memcpy(out, kResult, sizeof(kResult) - 1);
+    *out_size = static_cast<uint32_t>(sizeof(kResult) - 1);
+    return ok();
+}
+QolResult ui_write_cancel_pending(uint64_t operation_id) {
+    g_cancel_operation_id = operation_id;
+    g_cancel_order = ++g_order;
+    return ok();
+}
 QolResult choice_write(int32_t, const char*, int32_t, char*, uint32_t, uint32_t*) { return ok(); }
 int32_t is_main_thread() { return 1; }
+QolResult defer_current_result() {
+    ++g_defer_calls;
+    return ok();
+}
+uint32_t current_attempt() { return g_result_attempt; }
 
 QolResult scheduler_add(int32_t, QolFrameHandler handler, void*, int32_t interval,
                         int32_t, uint64_t* out_id) {
@@ -66,14 +112,34 @@ QolResult scheduler_remove(uint64_t id) {
     return ok();
 }
 
-QolResult register_result(uint32_t, QolTypedResultCommandHandler, void*) { return ok(); }
-QolResult unregister_result(uint32_t) { return ok(); }
+QolResult register_result(uint32_t id, QolTypedResultCommandHandler handler, void* ctx) {
+    if (id == 0x55490001) {
+        g_ui_write_result = handler;
+        g_ui_write_result_ctx = ctx;
+    }
+    return ok();
+}
+QolResult unregister_result(uint32_t id) {
+    if (id == 0x55490001) g_ui_unregister_order = ++g_order;
+    return ok();
+}
+QolResult post_typed(uint32_t handler_id, const void* payload, uint32_t size,
+                     QolCommandTicket* out_ticket) {
+    if (handler_id != 0x55490001 || payload == nullptr || out_ticket == nullptr ||
+        size > sizeof(g_posted_ui_payload)) {
+        return error(kQolErrInvalidArgument, "invalid UI command", 20);
+    }
+    std::memcpy(g_posted_ui_payload, payload, size);
+    g_posted_ui_payload_size = size;
+    *out_ticket = ++g_next_ticket;
+    return ok();
+}
 
-const HttpQueryHandlerDescriptor* route(HttpMethod method, const char* path) {
+const HttpEndpointDescriptor* route(HttpMethod method, const char* path) {
     const PluginDescriptor& descriptor = qol::features::core_ui_state::plugin_descriptor();
-    assert(descriptor.requires_count == 2 && descriptor.optional_count == 0);
-    for (uint32_t i = 0; i < descriptor.http_query_count; ++i) {
-        const HttpQueryHandlerDescriptor& candidate = descriptor.http_queries[i];
+    assert(descriptor.requires_count == 0 && descriptor.optional_count == 2);
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const HttpEndpointDescriptor& candidate = descriptor.http_endpoints[i];
         if (candidate.method == method && std::strcmp(candidate.path, path) == 0) {
             return &candidate;
         }
@@ -82,16 +148,77 @@ const HttpQueryHandlerDescriptor* route(HttpMethod method, const char* path) {
 }
 
 std::string query(HttpMethod method, const char* path, uint16_t* out_status = nullptr) {
-    const HttpQueryHandlerDescriptor* handler = route(method, path);
-    assert(handler != nullptr && handler->handler != nullptr);
+    const HttpEndpointDescriptor* endpoint = route(method, path);
+    assert(endpoint != nullptr && endpoint->kind == HttpHandlerKind::kQuery &&
+           endpoint->query_handler != nullptr && endpoint->command_handler == nullptr);
     uint8_t output[16384]{};
     HttpReq request{};
     HttpRes response{output, sizeof(output), 0, 0};
-    const QolResult result = handler->handler(&request, &response, handler->ctx);
+    const QolResult result = endpoint->query_handler(&request, &response, endpoint->ctx);
     if (out_status != nullptr) *out_status = response.status;
     if (response.status == 200) assert(succeeded(result));
     else assert(response.status == 503 && !succeeded(result));
     return std::string(reinterpret_cast<const char*>(output), response.body_size);
+}
+
+void test_ui_write_ticket_retry() {
+    const HttpEndpointDescriptor* open_endpoint = route(HttpMethod::kPost, "/api/ui/open_panel");
+    const HttpEndpointDescriptor* close_endpoint = route(HttpMethod::kPost, "/api/ui/close_panel");
+    assert(open_endpoint != nullptr && open_endpoint->kind == HttpHandlerKind::kCommand &&
+           open_endpoint->command_handler != nullptr);
+    assert(close_endpoint != nullptr && close_endpoint->kind == HttpHandlerKind::kCommand &&
+           close_endpoint->command_handler != nullptr);
+
+    const std::string open_body = "{\"panel\":\"inventory\"}";
+    uint8_t response_bytes[1024]{};
+    HttpReq request{};
+    request.body = reinterpret_cast<const uint8_t*>(open_body.data());
+    request.body_len = static_cast<uint32_t>(open_body.size());
+    HttpRes response{response_bytes, sizeof(response_bytes), 0, 0};
+    assert(succeeded(open_endpoint->command_handler(&request, &response, open_endpoint->ctx)));
+    assert(response.status == 200 &&
+           std::string(reinterpret_cast<const char*>(response_bytes), response.body_size) ==
+               "{\"ok\":true,\"ticket\":101}");
+    const uint32_t first_payload_size = g_posted_ui_payload_size;
+    uint8_t first_payload[kTypedCommandPayloadCapacity]{};
+    std::memcpy(first_payload, g_posted_ui_payload, first_payload_size);
+
+    request.body = nullptr;
+    request.body_len = 0;
+    response = HttpRes{response_bytes, sizeof(response_bytes), 0, 0};
+    assert(succeeded(close_endpoint->command_handler(&request, &response, close_endpoint->ctx)));
+    assert(g_posted_ui_payload_size == first_payload_size && first_payload_size <=
+               kTypedCommandPayloadCapacity);
+    struct UiWritePayloadFixture {
+        uint64_t operation_id;
+        int32_t kind;
+        char panel[64];
+    } first{}, second{};
+    static_assert(sizeof(UiWritePayloadFixture) <= kTypedCommandPayloadCapacity,
+                  "test UI payload must fit typed command");
+    std::memcpy(&first, first_payload, first_payload_size);
+    std::memcpy(&second, g_posted_ui_payload, g_posted_ui_payload_size);
+    assert(first.operation_id != 0 && second.operation_id != 0 &&
+           first.operation_id != second.operation_id);
+    assert(first.kind == kQolUiWritePanelOpen && std::strcmp(first.panel, "inventory") == 0);
+    assert(second.kind == kQolUiWritePanelClose && second.panel[0] == '\0');
+
+    assert(g_ui_write_result != nullptr);
+    char result_bytes[256]{};
+    uint32_t result_size = 0;
+    g_step_pending_first_attempt = true;
+    g_result_attempt = 0;
+    assert(!g_ui_write_result(g_ui_write_result_ctx, first_payload, first_payload_size,
+                              result_bytes, sizeof(result_bytes), &result_size));
+    assert(result_size == 0 && g_defer_calls == 1 && g_step_operation_id == first.operation_id &&
+           g_step_attempt == 0 && g_step_kind == kQolUiWritePanelOpen &&
+           g_step_panel == "inventory");
+
+    g_result_attempt = 1;
+    assert(g_ui_write_result(g_ui_write_result_ctx, first_payload, first_payload_size,
+                             result_bytes, sizeof(result_bytes), &result_size));
+    assert(g_step_attempt == 1 &&
+           std::string(result_bytes, result_size) == "{\"ok\":true,\"state\":{}}");
 }
 
 void test_native_fallback_and_keysets(const UiStateApi* api) {
@@ -231,9 +358,13 @@ int main() {
     sdk.scheduler.remove = &scheduler_remove;
     sdk.ticket_result.register_typed_result_handler = &register_result;
     sdk.ticket_result.unregister_typed_result_handler = &unregister_result;
+    sdk.ticket_result.defer_current_result = &defer_current_result;
+    sdk.ticket_result.current_attempt = &current_attempt;
+    sdk.commands.post_typed = &post_typed;
 
     const QolChoiceWritePort choice_port{{1, 0}, {&choice_write}};
-    const QolUiWritePort ui_write_port{{1, 0}, {&ui_write}};
+    const QolUiWritePort ui_write_port{{1, 1},
+                                       {&ui_write, &ui_write_step, &ui_write_cancel_pending}};
     const QolUiStateReadPort ui_read_port{{1, 0}, {&read_snapshot}};
     const void* ports[] = {&choice_port, &ui_write_port, &ui_read_port};
     PluginContext context{};
@@ -244,7 +375,23 @@ int main() {
     assert(descriptor.provides_count == 1);
     assert(std::strcmp(descriptor.provides[0].id, kUiStateCapabilityId) == 0);
     assert(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
-    assert(descriptor.http_query_count == 8);
+    assert(std::strcmp(descriptor.optional_requires[0].id, kHttpRegistryCapabilityId) == 0);
+    assert(std::strcmp(descriptor.optional_requires[1].id, kHttpDispatchCapabilityId) == 0);
+    assert(descriptor.optional_requires[0].range.major == 1 &&
+           descriptor.optional_requires[0].range.min_minor == 1);
+    assert(descriptor.optional_requires[1].range.major == 1 &&
+           descriptor.optional_requires[1].range.min_minor == 1);
+    assert(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    assert(descriptor.http_endpoint_count == 8 && descriptor.http_endpoints != nullptr);
+    assert(descriptor.http_route_metadata_count == 1 &&
+           descriptor.http_route_metadata != nullptr);
+    assert(descriptor.http_route_metadata[0].method == HttpMethod::kGet);
+    assert(std::strcmp(descriptor.http_route_metadata[0].path, "/api/ui") == 0);
+    assert(std::strcmp(descriptor.http_route_metadata[0].route_owner, "core.ui_state") == 0);
+    assert(descriptor.http_route_metadata[0].op_required == 0 &&
+           descriptor.http_route_metadata[0].lease_required == 1);
+    assert(descriptor.ports[1].id == QolPortId::QOL_PORT_UI_WRITE &&
+           descriptor.ports[1].range.major == 1 && descriptor.ports[1].range.min_minor == 1);
     assert(route(HttpMethod::kGet, "/api/ui") == nullptr);
     assert(descriptor.install(context) == 0);
     const auto* api = static_cast<const UiStateApi*>(descriptor.provides[0].iface);
@@ -252,9 +399,12 @@ int main() {
     test_native_fallback_and_keysets(api);
     test_custom_dialog_generation_and_mapping(api);
     test_native_snapshot_failure_invalidates_all_queries(api);
+    test_ui_write_ticket_retry();
 
     descriptor.deactivate(context);
     assert(g_frame_handler == nullptr);
+    assert(g_cancel_operation_id == 0 && g_cancel_order != 0 &&
+           g_ui_unregister_order > g_cancel_order);
     std::puts("core_ui_state_tests: passed");
     return 0;
 }

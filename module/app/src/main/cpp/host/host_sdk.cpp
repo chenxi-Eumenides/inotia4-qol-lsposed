@@ -2,6 +2,7 @@
 #include "host/http_dispatch.h"
 #include "host/http_registry.h"
 #include "host/lifecycle_participants.h"
+#include "host/module_health.h"
 #include "host/owner_identity.h"
 #include "host/save_route.h"
 #include "host/settings_catalog_adapter.h"
@@ -1187,6 +1188,7 @@ contracts::QolHostSdk make_host_sdk() {
         sdk.runtime_effects = nullptr;
         sdk.security = nullptr;
     }
+    sdk.module_health = &module_health_facts_api();
     return sdk;
 }
 

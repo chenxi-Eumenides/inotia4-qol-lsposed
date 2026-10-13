@@ -38,6 +38,28 @@ int64_t g_last_frame[kPointCount] = {-1, -1};
 
 // 重入门禁：dispatch 期间同步再入（如回调内再次 dispatch）直接返回。
 thread_local int g_dispatch_depth = 0;
+thread_local int g_dispatch_point = -1;
+
+class DispatchScope {
+  public:
+    explicit DispatchScope(FramePoint point)
+        : previous_point_(g_dispatch_point), previous_depth_(g_dispatch_depth) {
+        g_dispatch_point = static_cast<int>(point);
+        g_dispatch_depth = previous_depth_ + 1;
+    }
+
+    ~DispatchScope() {
+        g_dispatch_point = previous_point_;
+        g_dispatch_depth = previous_depth_;
+    }
+
+    DispatchScope(const DispatchScope&) = delete;
+    DispatchScope& operator=(const DispatchScope&) = delete;
+
+  private:
+    int previous_point_;
+    int previous_depth_;
+};
 
 struct SnapshotCall {
     FrameTaskId id;
@@ -146,7 +168,7 @@ void scheduler_dispatch(FramePoint point) {
         }
     }
 
-    g_dispatch_depth++;
+    const DispatchScope dispatch_scope(point);
     for (uint32_t i = 0; i < call_count; ++i) {
         const SnapshotCall& call = calls[i];
         bool exists = false;
@@ -167,7 +189,10 @@ void scheduler_dispatch(FramePoint point) {
         }
         if (remove) scheduler_remove(call.id);
     }
-    g_dispatch_depth--;
+}
+
+bool scheduler_is_dispatching(FramePoint point) {
+    return g_dispatch_depth > 0 && g_dispatch_point == static_cast<int>(point);
 }
 
 uint32_t scheduler_task_count(FramePoint point) {

@@ -2,6 +2,19 @@
 
 #include <cstdint>
 
+namespace qol::game {
+
+constexpr uint16_t kMainMenuGameState = 4;
+
+constexpr bool is_main_menu_state(uint16_t observed_state) noexcept {
+    return observed_state == kMainMenuGameState;
+}
+
+// Reads the already-resolved game state word without querying or mutating UI/game state.
+bool ui_main_menu_state_observed();
+
+}  // namespace qol::game
+
 // 游戏状态层：全局状态检测 + 跨域查询原语 + 跨域遍历原语（无构建/导航依赖）。
 
 bool game_in_world();

@@ -24,6 +24,15 @@ bool game_in_world() {
     return g_state != nullptr && *reinterpret_cast<uint16_t*>(g_state) == 5;
 }
 
+namespace qol::game {
+
+bool ui_main_menu_state_observed() {
+    return g_state != nullptr &&
+           is_main_menu_state(*reinterpret_cast<const uint16_t*>(g_state));
+}
+
+}  // namespace qol::game
+
 // HP/MP 上限缓存读取（数据层原语）：直接读 [ch+C_MAX_HP]/[ch+C_MAX_MP]（属性数组 attr 0x1e/0x1f
 // 的缓存槽），不调用 CHAR_GetAttr——其 attr=0x1e 分支在 HP>maxHP 时会写回 HP（str w0,[x20,#0x1f0]），
 // 在 HTTP/缓存预取线程调用会与游戏主线程属性重算竞争并永久钳低角色 HP。

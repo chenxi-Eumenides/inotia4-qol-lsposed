@@ -491,6 +491,17 @@ target_link_libraries(production_feature_facade_tests PRIVATE Threads::Threads)
 add_test(NAME production_feature_facade_tests
     COMMAND production_feature_facade_tests ${CMAKE_CURRENT_BINARY_DIR})
 
+# Host-only module health facts, SDK tail adapter, and read-only provider capability.
+add_executable(module_health_tests
+    test_module_health.cpp
+    ${CPP_DIR}/host/module_health.cpp
+    ${CPP_DIR}/plugins/module_health/plugin.cpp)
+target_include_directories(module_health_tests PRIVATE ${CPP_DIR})
+target_compile_features(module_health_tests PRIVATE cxx_std_17)
+set_target_properties(module_health_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(module_health_tests PRIVATE Threads::Threads)
+add_test(NAME module_health_tests COMMAND module_health_tests)
+
 add_executable(command_queue_overflow_tests
     test_command_queue_overflow.cpp
     ${CPP_DIR}/infra/command_queue.cpp
@@ -1125,6 +1136,7 @@ add_executable(host_adapter_tests
     test_host_adapters.cpp
     test_game_host_stubs.cpp
     ${CPP_DIR}/host/host_sdk.cpp
+    ${CPP_DIR}/host/module_health.cpp
     ${CPP_DIR}/host/features/production.cpp
     ${CPP_DIR}/host/features/platform.cpp
     ${CPP_DIR}/host/features/http_control.cpp
@@ -1925,6 +1937,18 @@ target_compile_features(ui_state_port_tests PRIVATE cxx_std_17)
 set_target_properties(ui_state_port_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME ui_state_port_tests COMMAND ui_state_port_tests)
 
+# Lazy game JSON cache host test: real cache/frame task/runtime with test-provided fake host gates.
+add_executable(game_cache_tests
+    test_game_cache.cpp
+    ${CPP_DIR}/core/native/game_cache.cpp
+    ${CPP_DIR}/infra/frame/frame_task.cpp
+    ${CPP_DIR}/infra/runtime.cpp
+)
+target_include_directories(game_cache_tests PRIVATE ${CPP_DIR})
+set_target_properties(game_cache_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(game_cache_tests PRIVATE Threads::Threads)
+add_test(NAME game_cache_tests COMMAND game_cache_tests)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)
@@ -1933,4 +1957,3 @@ foreach(test_target IN LISTS HOST_TEST_TARGETS)
         target_compile_options(${test_target} PRIVATE -UNDEBUG)
     endif()
 endforeach()
-target_compile_definitions(host_tests PRIVATE QOL_CALL_PATCH_TEST_SEAMS=1)

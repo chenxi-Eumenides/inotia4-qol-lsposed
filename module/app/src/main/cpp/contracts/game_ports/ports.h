@@ -57,7 +57,7 @@ constexpr QolVersion kQolPortSystemVersion{1, 1};
 constexpr QolVersion kQolPortCharacterHttpVersion{1, 0};
 constexpr QolVersion kQolPortSaveWriteVersion{1, 0};
 constexpr QolVersion kQolPortWorldWriteVersion{1, 0};
-constexpr QolVersion kQolPortUiWriteVersion{1, 0};
+constexpr QolVersion kQolPortUiWriteVersion{1, 1};
 constexpr QolVersion kQolPortUiStateReadVersion{1, 0};
 constexpr QolVersion kQolPortChoiceWriteVersion{1, 0};
 constexpr QolVersion kQolPortCharacterStateVersion{1, 0};
