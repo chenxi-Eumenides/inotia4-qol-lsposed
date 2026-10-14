@@ -800,14 +800,22 @@ QolResult text_button_draw(contracts::QolUiHandle handle) {
     if (!contracts::succeeded(result)) return result;
     result = g_adapter->control_absolute_origin(handle, &x, &y);
     if (!contracts::succeeded(result)) return result;
+    UiRect draw_rect{x, y, button->rect.w, button->rect.h};
+    if (button->main_menu_text_button) {
+        // Use the decorated compact-button aspect for painting only. The native
+        // menu rect and its touch bounds remain unchanged.
+        const int64_t height = std::min(draw_rect.h, draw_rect.w * 48 / 220);
+        draw_rect.y += (draw_rect.h - height) / 2;
+        draw_rect.h = height;
+    }
     result = g_adapter->draw_native_text_button_background(
-        {x, y, button->rect.w, button->rect.h}, pressed != 0 ? 1 : 0);
+        draw_rect, pressed != 0 ? 1 : 0);
     if (!contracts::succeeded(result)) return result;
 
     const uint32_t color = !button->enabled ? contracts::ui_theme::kTextDisabled
         : pressed != 0 ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextGold;
     return g_adapter->draw_native_text_button_label(
-        {x, y, button->rect.w, button->rect.h}, button->text.c_str(), color,
+        draw_rect, button->text.c_str(), color,
         static_cast<int32_t>(button->style));
 }
 
@@ -1488,7 +1496,7 @@ QolResult help_page_draw(contracts::QolUiHandle handle) {
     if (!contracts::succeeded(result)) return result;
     result = draw_container_ornamented(absolute(help_column_frame(page->left_viewport, true)));
     if (!contracts::succeeded(result)) return result;
-    result = draw_container(absolute(help_column_frame(page->right_viewport, false)));
+    result = draw_container_ornamented(absolute(help_column_frame(page->right_viewport, true)));
     if (!contracts::succeeded(result)) return result;
     result = scroll_list_draw(page->help_list);
     if (!contracts::succeeded(result)) return result;

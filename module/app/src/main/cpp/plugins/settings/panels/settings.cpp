@@ -515,7 +515,7 @@ bool components_complete() {
         g_components->native_toggle_set_enabled && g_components->native_toggle_draw &&
         g_components->text_button_create && g_components->text_button_set_enabled &&
         g_components->text_button_draw && g_components->destroy &&
-        g_components->draw_control_text && g_components->draw_container &&
+        g_components->draw_control_text && g_components->draw_container_ornamented &&
         g_components->dispatch_native_event;
 }
 void settings_panel_enter() {
@@ -573,7 +573,7 @@ void settings_panel_process() {
         for (const auto& rect : {UiRect{x + kLeftX - 8, y + kLeftY - 8, kLeftW + 32, kLeftH + 16},
              UiRect{x + kRightX - 8, y + kRightY - 8, kRightW + 32, kRightH + 16}}) {
             (void)g_ui->fill_rect(rect, contracts::ui_theme::kPanelBg);
-            (void)g_components->draw_container(rect);
+            (void)g_components->draw_container_ornamented(rect);
         }
     }
     char title[128]{};

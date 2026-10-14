@@ -25,6 +25,20 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 
 `PluginDescriptor` 通过 `http_endpoints` 声明这三个 Debug command routes（`plugin.cpp` 中的 `kHttpEndpoints` 与 descriptor 尾部）；各 Debug panel 注册函数只登记 UI panel provider 和 scheduler task，不另行向 `http_dispatch` 动态注册 HTTP route。
 
+### 原生控件与面板绘制事实（2026-10-15）
+
+以下为当前实现事实，供复核参考；本批已有 Host 定向测试与 Debug 构建证据，但**尚未部署、无手动/真机视觉验证，不能据此报告视觉 PASS**。
+
+**Toggle（`game/access/ui_native_toggle.cpp:52-111`）**：按层绘制，每层源画布在基础 rect 内**居中**——`layer_x = x + (base.w − layer.w) * percent / 200`，纵向同理；`percent` 为统一缩放。按压层 `loc 7` 画布比基础画布每边多 8 px halo（262×103 对 246×87），若不按源画布居中而沿用 atlas 锚点，按压态会整体偏移。所有层统一使用基础层 `offset_x/offset_y`，不再取各层自身 offset。
+
+**原生文本按钮（`game/access/ui_native_text_button.cpp:157-200,291-395`）**：按压态在同一源上叠加按压层——标题图 `loc 7` 的橙底白边胶囊，左右 cap 直接取两端，中段只平铺均匀橙色带；中段采样起点为 `sx = 30`（源空间 `26..46,40..60` 仍含白边像素，`30..50,40..60` 为单一纯橙色），避开的白色 dash 真实 bbox 为 `x[53,209) / y[48,55)`；Host 用例按 `sx 578 + 30 = 608` 实际断言。不使用新填充色，也不调用全局 clip；按压层读取失败时按压绘制整体失败，正常态仍可绘制。同一 textbutton 类型的**两侧饰裁切由 rect 比例决定**（`height_percent <= width_percent` 或 rect 不小于源 405×77 时等比整体缩放含两侧饰，否则水平切片只压缩中间填充、保留圆角端），不是按 fontstyle 枚举分支。设置页 entry 动作按钮沿用 capsule 样式 `kUiTextButtonFontLarger` 原样（`plugins/settings/panels/settings.cpp:248-254`）。
+
+**主菜单替换按钮（`plugins/core.custom_ui/ui_components.cpp:785-812`）**：`text_button_draw` 只在绘制上使用 decorated 紧凑比例——`height = min(rect.h, rect.w × 48 / 220)` 并垂直居中，背景与标签共用该绘制 rect；原生菜单控件 rect、命中范围与 identity 判定不变（绑定/存活校验仍走 `main_menu_text_button_*` 原路径）。
+
+**面板四角装饰**：`help_page` 左右两栏均改为 `draw_container_ornamented`（四角 ornament，`plugins/core.custom_ui/ui_components.cpp:1484-1499`）；`draw_container` 仍保留给无装饰容器。Debug 双栏对照示例（`plugins/core.custom_ui/panels/debug_components.cpp:302-303`）本就用 ornamented，本次不改；外壳/Frames 对照示例同样不改。设置页两侧 pane 的同类改动见 [`settings.md`](settings.md) §4。
+
+证据范围：Host 定向 7/7（`core_custom_ui_host_tests`、`ui_adapter_tests`、`native_toggle_render_tests`、`native_text_button_render_tests`、`core_ui_components_tests`、`settings_panel_widget_tests`、`settings_panel_model_tests`，日志 `.tmp/custom-ui-polish-20261015/final-ctest.log`）；`scripts/build-debug.sh --offline` 构建成功，产物 `output/inotia4_qol_lsposed_debug_2610150537_3cc7410c87df.apk`（SHA-256 `3cc7410c87df6871ac07c7b4626b5cec497e4689ef027108ba5de65c52255670`，`.tmp/custom-ui-polish-20261015/final-build-debug.log`、`final-apk.json`）。本题材为 **monster v31 简中**：`monster-atlas-evidence.json` 与 `monster-center-strip-evidence.json` 确认 `loc 7/9/f/10` metadata 与标题 atlas、`UI_006` 与 overhaul 对应一致（每项 sha 相同）；不据此扩到其他 variant。构建成功与素材核对**不等于真机或像素验收**，视觉结论仍为 **NOT_ACCEPTED**。（输出目录内其他 release 产物为既有文件，本批未重建、未改动，也未做 Release 运行。）
+
 ## 3. 使用的模块功能、依赖与消费者
 
 - **Requires / optional**：`ui.state` 1.0 为可选依赖；Debug 构建对 `http.registry`/`http.dispatch` v1.1 的依赖也为可选，非 Debug descriptor 不声明 HTTP 依赖（`plugin.cpp:70-79,247-253`；版本见 `contracts/http.h:96-99`）。provider 缺失只使 Debug HTTP 探针无法接线，不影响共享 UI 功能；provider 恢复后按可选依赖生命周期重新接线。选择框向 `ui.state` 发布自定义 dialog snapshot；缺少该 capability 时 native choice 本身仍按本插件路径工作（`feature.cpp:70-99`）。
@@ -56,7 +70,9 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 | 子职责 | 文件 | 关键事实 |
 |---|---|---|
 | descriptor、provides/requires/port、资源与生命周期 | `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp` | ID/version/capabilities：21-79；resources/port：81-137；install/lifecycle：141-202；Debug entry：220-267 |
-| 组件接口实现 | `module/app/src/main/cpp/plugins/core.custom_ui/ui_components.cpp`、`ui_components.h` | 组件对象/原生 adapter 绑定：`ui_components.cpp:20-78,124-130`；接口：`ui_components.h:13-45` |
+| 组件接口实现 | `module/app/src/main/cpp/plugins/core.custom_ui/ui_components.cpp`、`ui_components.h` | 组件对象/原生 adapter 绑定：`ui_components.cpp:20-78,124-130`；接口：`ui_components.h:13-45`；文本按钮/主菜单绘制 rect：`785-812`；help 双栏 ornament：`1484-1499` |
+| 原生 toggle 绘制 | `module/app/src/main/cpp/game/access/ui_native_toggle.cpp` | 分层源画布居中与 halo：`52-111` |
+| 原生文本按钮绘制 | `module/app/src/main/cpp/game/access/ui_native_text_button.cpp` | 比例裁切/切片判定：`157-200`；按压层避开烘焙 dash：`291-395` |
 | 原生选择框 | `module/app/src/main/cpp/plugins/core.custom_ui/feature.cpp`、`feature.h` | 锁状态、port 读写、dialog publish：`feature.cpp:23-46,70-99,130-221,223-334` |
 | 文本共享机制 | `module/app/src/main/cpp/plugins/core.custom_ui/text_mechanism.cpp`、`text_mechanism.h` | subscribe/unsubscribe 与原文 fallback dispatch：`text_mechanism.cpp:27-64` |
 | Debug panels/endpoints | `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`、`panels/debug_components.cpp`、`debug_scroll.cpp`、`debug_help.cpp` | descriptor endpoint facts/handlers 位于 plugin.cpp；各面板源码实现 command callback 与 scheduler task |

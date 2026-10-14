@@ -89,11 +89,24 @@ bool ui_draw_native_toggle(UiRect rect, int32_t value, uint8_t pressed) {
         return false;
     }
 
+    std::array<int32_t, 3> layer_xs{};
+    std::array<int32_t, 3> layer_ys{};
     for (size_t i = 0; i < layer_count; ++i) {
         const ToggleLayer& layer = layers[i];
-        fn_sgl_draw_texture_part_ex(group, static_cast<int32_t>(x), static_cast<int32_t>(y),
+        // Loc 7 includes an 8-source-pixel halo on each edge (262x103 versus
+        // 246x87). Center each source canvas, not its unrelated atlas anchor.
+        const int64_t layer_x = x + (static_cast<int64_t>(base.width) - layer.width) * percent / 200;
+        const int64_t layer_y = y + (static_cast<int64_t>(base.height) - layer.height) * percent / 200;
+        if (layer_x < INT32_MIN || layer_x > INT32_MAX || layer_y < INT32_MIN ||
+            layer_y > INT32_MAX) return false;
+        layer_xs[i] = static_cast<int32_t>(layer_x);
+        layer_ys[i] = static_cast<int32_t>(layer_y);
+    }
+    for (size_t i = 0; i < layer_count; ++i) {
+        const ToggleLayer& layer = layers[i];
+        fn_sgl_draw_texture_part_ex(group, layer_xs[i], layer_ys[i],
                                     layer.source_x, layer.source_y, layer.width, layer.height,
-                                    layer.offset_x, layer.offset_y, kNativeDrawMode, 0,
+                                    base.offset_x, base.offset_y, kNativeDrawMode, 0,
                                     static_cast<int32_t>(percent), 0);
     }
     return true;

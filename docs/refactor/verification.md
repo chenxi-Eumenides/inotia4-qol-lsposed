@@ -270,6 +270,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 
 历史 VM-46 / VM-K4-04c（craft_ui 12 资源 + custom_recipe provides `craft_result`）等卡描述的是**合并前分离双插件**形态，不作为本轮合并验收证据；历史 PASS 行不改写。`core.craft` 的 `craft.facts` 与 `/api/op/craft/mix-direct` 501 owner 面本轮未改，其既有卡口径继续有效。
 
+### 5.12 UI 原生控件/面板绘制细化（Host + Debug 证据；VM 待验收）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现（toggle / 文本按钮 / 主菜单入口 / 面板 ornament） | **已实现（代码事实）**：toggle 每层源画布在基础 rect 内居中并统一取基础 offset（loc 7 每边 8 px halo）；文本按钮按压叠加同源橙色胶囊层，中段采样 `sx=30` 避开烘焙白色 dash（dash bbox `x[53,209)/y[48,55)`），且无新填充色/全局 clip；同一 textbutton 两侧饰裁切由 rect 比例决定（非 fontstyle 枚举）；主菜单替换按钮只用 decorated 紧凑比例绘制，原生控件 rect/hitbox/identity 不变；help 双栏与设置页两 pane 改用 `draw_container_ornamented`，外壳/Frames 对照示例与 Debug 双栏示例不改。 | `game/access/ui_native_toggle.cpp:52-111`、`game/access/ui_native_text_button.cpp:157-200,291-395`、`plugins/core.custom_ui/ui_components.cpp:785-812,1484-1499`、`plugins/settings/panels/settings.cpp:248-254,515-519,576`；说明见 `docs/reference/plugins/core.custom_ui.md` §2 与 `docs/reference/plugins/settings.md` §4。 |
+| Host 定向测试 | **7/7 PASS**：`core_custom_ui_host_tests`、`ui_adapter_tests`、`native_toggle_render_tests`、`native_text_button_render_tests`、`core_ui_components_tests`、`settings_panel_widget_tests`、`settings_panel_model_tests`。 | `.tmp/custom-ui-polish-20261015/final-ctest.log`（构建/配置日志同目录）。Host 断言覆盖居中偏移、避开 dash 的采样矩形（`sx 578+30=608`）、绘制 rect 比例与无 clip 调用；不证明真机逐像素。 |
+| Debug 构建与素材核对 | **构建成功**：`scripts/build-debug.sh --offline` 产出 `output/inotia4_qol_lsposed_debug_2610150537_3cc7410c87df.apk`，SHA-256 `3cc7410c87df6871ac07c7b4626b5cec497e4689ef027108ba5de65c52255670`。**素材（monster v31 简中）**：`monster-atlas-evidence.json` / `monster-center-strip-evidence.json` 确认 `loc 7/9/f/10` metadata 与标题 atlas、`UI_006` 与 overhaul 对应一致。 | `.tmp/custom-ui-polish-20261015/final-build-debug.log`、`final-apk.json`、`monster-atlas-evidence.json`、`monster-center-strip-evidence.json`。构建/静态素材证据不替代设备行为；输出目录内其他 release 产物为既有文件，本批未重建、未改动，也未做 Release 运行。 |
+| 视觉/真机结论 | **NOT_ACCEPTED**：未部署新构建、无手动/真机视觉验证与截图；素材证据仅覆盖 monster v31 简中，不扩到其他 variant。 | 不改 VM-D1 既有门禁/生命周期口径，也不表示插件 A–G 全量审计完成。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

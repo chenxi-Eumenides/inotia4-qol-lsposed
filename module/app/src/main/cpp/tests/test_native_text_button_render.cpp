@@ -21,6 +21,8 @@ struct DrawCall {
 
 alignas(8) std::array<uint8_t, 0x18> g_location{};
 alignas(8) std::array<uint8_t, 0x18> g_toggle_location{};
+alignas(8) std::array<int32_t, 6> g_press_location{578, 192, 262, 103, 0, 0};
+bool g_press_available = true;
 uint8_t g_group{};
 uint8_t g_toggle_group{};
 std::vector<DrawCall> g_draws;
@@ -50,6 +52,7 @@ void* fake_loc(int32_t unit, int32_t loc) {
         return g_location_available ? g_location.data() : nullptr;
     }
     if (unit == 0x54 && loc == 0x0f) return g_toggle_location.data();
+    if (unit == 0x54 && loc == 0x7) return g_press_available ? g_press_location.data() : nullptr;
     assert(false);
     return nullptr;
 }
@@ -112,6 +115,7 @@ void setup() {
     g_main_thread = true;
     g_group_available = true;
     g_location_available = true;
+    g_press_available = true;
     set_field(IMAGE_LOC_SOURCE_X, 2);
     set_field(IMAGE_LOC_SOURCE_Y, 124);
     set_field(IMAGE_LOC_SOURCE_WIDTH, 470);
@@ -166,7 +170,7 @@ int main() {
 
     setup();
     assert(ui_draw_native_text_button_background({10, 20, 940, 224}, 1));
-    assert(g_draws.size() == 1 && g_draws[0].args[10] == 200);
+    assert(g_draws.size() > 1 && g_draws[0].args[10] == 200);
     assert(g_draws[0].args[8] == 1 && g_draws[0].args[9] == 0 && g_draws[0].args[11] == 0);
 
     setup();
@@ -330,7 +334,9 @@ int main() {
         setup();
         const UiRect more_games_rect{0, 0, 300, 92};
         assert(ui_draw_native_text_button_background(more_games_rect, pressed));
-        assert(g_draws.size() == 3);
+        assert(pressed ? g_draws.size() > 3 : g_draws.size() == 3);
+        const std::vector<DrawCall> overlays(g_draws.begin() + 3, g_draws.end());
+        g_draws.resize(3);
         const int32_t percent = g_draws[0].args[10];
         assert(percent >= 1 && percent <= 400);
         assert(g_draws[1].args[10] == percent && g_draws[2].args[10] == percent);
@@ -371,9 +377,54 @@ int main() {
         assert(std::abs(g_text_x - capsule_center_x) <= 2);
         const int32_t image_height = g_draws[0].args[5] * percent / 100;
         assert(g_draws[0].args[1] + image_height <= more_games_rect.y + more_games_rect.h);
+        size_t middle_band_slices = 0;
+        for (const auto& overlay : overlays) {
+            const auto& a = overlay.args;
+            assert(overlay.group == &g_toggle_group);
+            assert(a[0] >= more_games_rect.x && a[1] >= more_games_rect.y);
+            assert(a[0] + a[4] * a[10] / 100 <= more_games_rect.x + more_games_rect.w);
+            assert(a[1] + a[5] * a[10] / 100 <= more_games_rect.y + more_games_rect.h);
+            // No sampled source rectangle may intersect the baked white dash.
+            assert(a[2] + a[4] <= 578 + 53 || a[2] >= 578 + 209 ||
+                   a[3] + a[5] <= 192 + 48 || a[3] >= 192 + 55);
+            if (a[3] == 192 + 40 && a[5] == 20) {
+                // Monster v31: [30,50)x[40,60) is uniform orange; x=26
+                // includes white rim pixels that would repeat across the fill.
+                assert(a[2] == 578 + 30 && a[4] > 0 && a[4] <= 20);
+                ++middle_band_slices;
+            }
+            assert(a[6] == 0 && a[7] == 0 && a[8] == 1 && a[9] == 0);
+        }
+        assert(pressed ? middle_band_slices > 0 : middle_band_slices == 0);
     }
 
     // Degenerate tiny rects stay rejected instead of drawing a sliver.
+    for (const UiRect rect : {full_button, settings_toggle_rect, UiRect{0, 13, 300, 65}}) {
+        setup();
+        assert(ui_draw_native_text_button_background(rect, 0));
+        const auto normal = g_draws;
+        g_draws.clear();
+        assert(ui_draw_native_text_button_background(rect, 1));
+        assert(g_draws.size() > normal.size());
+        for (size_t i = 0; i < normal.size(); ++i) {
+            assert(g_draws[i].args == normal[i].args && g_draws[i].group == normal[i].group);
+        }
+        const auto& left = g_draws[normal.size()].args;
+        const auto& right = g_draws[normal.size() + 1].args;
+        const int32_t overlay_right = right[0] + right[4] * right[10] / 100;
+        assert(std::abs(left[0] + overlay_right - (2 * rect.x + rect.w)) <= 2);
+        assert(g_clip_calls == 0 && g_reset_clip_calls == 0);
+        assert(g_draws.back().group == &g_toggle_group);
+        setup();
+        g_press_available = false;
+        assert(!ui_draw_native_text_button_background(rect, 1) && g_draws.empty());
+        assert(ui_draw_native_text_button_background(rect, 0));
+    }
+    setup();
+    assert(ui_draw_native_text_button_background({0, 13, 300, 65}, 0));
+    // Decorated compact aspect keeps the entire original loc, not the capsule crop.
+    assert(g_draws.size() == 1 && g_draws[0].args[2] == 2 && g_draws[0].args[4] == 470);
+
     setup();
     assert(!ui_draw_native_text_button_background({0, 0, 2, 2}, 0));
     assert(!ui_draw_native_text_button_background({0, 0, 4, 3}, 0));

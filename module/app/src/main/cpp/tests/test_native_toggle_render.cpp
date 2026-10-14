@@ -1,6 +1,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -104,9 +105,26 @@ int main() {
     assert(g_draws[1].args[2] == 51 && g_draws[2].args[2] == 61);
     for (const auto& draw : g_draws) {
         assert(draw.args[0] == 0 && draw.args[1] == 0);
+        assert(draw.args[6] == 5 && draw.args[7] == -4);
         assert(draw.args[10] == 200 && draw.args[8] == 1 && draw.args[9] == 0 && draw.args[11] == 0);
     }
-    assert(g_draws[1].args[6] == 7 && g_draws[1].args[7] == -6);
+    // Real title atlas metadata: pressed canvas adds an 8 px halo per side.
+    for (const UiRect rect : {UiRect{10, 20, 220, 80}, UiRect{30, 40, 492, 174}}) {
+        setup();
+        set_loc(0x0f, 2, 491, 246, 87, 0, 0);
+        set_loc(0x7, 578, 192, 262, 103, 0, 0);
+        assert(ui_draw_native_toggle(rect, 1, 1));
+        assert(g_draws.size() == 2);
+        const auto& base = g_draws[0].args;
+        const auto& press = g_draws[1].args;
+        const int32_t percent = base[10];
+        assert(press[0] == base[0] - 8 * percent / 100);
+        assert(press[1] == base[1] - 8 * percent / 100);
+        assert(std::abs(2 * press[0] + press[4] * percent / 100 -
+                        (2 * base[0] + base[4] * percent / 100)) <= 1);
+        assert(std::abs(2 * press[1] + press[5] * percent / 100 -
+                        (2 * base[1] + base[5] * percent / 100)) <= 1);
+    }
 
     setup();
     assert(ui_draw_native_toggle(UiRect{10, 20, 100, 40}, 1, 0));

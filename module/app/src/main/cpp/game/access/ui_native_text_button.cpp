@@ -1,5 +1,6 @@
 #include "game/access/ui_native_text_button.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -65,6 +66,15 @@ struct ButtonGeometry {
     int32_t center_source_width = 0;
     int32_t center_draw_width = 0;
     bool horizontal_slice = false;
+};
+
+struct PressGeometry {
+    void* group = nullptr;
+    ImageLayer layer{};
+    int32_t percent = 0;
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t width = 0;
 };
 
 bool read_layer(void* location, ImageLayer* out) {
@@ -278,6 +288,62 @@ bool valid_utf8(const char* text) {
     return true;
 }
 
+bool load_press_geometry(const ButtonGeometry& button, PressGeometry* out) {
+    if (fn_get_group_title_img_type == nullptr) return false;
+    const int32_t unit = fn_get_group_title_img_type();
+    if (unit <= 0) return false;
+    fn_imgsys_unit_load(unit);
+    out->group = fn_imgsys_get_group(unit);
+    if (out->group == nullptr || !game_memory_accessible(out->group, sizeof(void*), 'r') ||
+        !read_layer(fn_imgsys_get_loc(unit, 0x7), &out->layer)) return false;
+    // Title loc 7 is the orange capsule with an inset white rim and a baked dash.
+    // These source splits preserve its contour but omit the dash under arbitrary labels.
+    if (out->layer.width != 262 || out->layer.height != 103) return false;
+    const int32_t body_height = button.horizontal_slice ? button.layer.height : kTextButtonBodyHeight;
+    out->percent = body_height * button.percent / out->layer.height / 10 * 10;
+    if (out->percent < 10 || out->percent > kMaxScalePercent) return false;
+    out->width = button.horizontal_slice ? button.draw_width :
+        kTextButtonBodyWidth * button.percent / 100;
+    const int32_t step = out->percent / 10;
+    out->width = out->width / step * step;
+    const int32_t height = out->layer.height * out->percent / 100;
+    const int32_t button_height = button.layer.height * button.percent / 100;
+    out->x = button.image_x + (button.draw_width - out->width) / 2;
+    out->y = button.image_y + (button_height - height) / 2;
+    return out->width > 2 * (50 * out->percent / 100);
+}
+
+void draw_press_geometry(const PressGeometry& press) {
+    const auto draw = [&press](int32_t x, int32_t y, int32_t sx, int32_t sy,
+                               int32_t width, int32_t height) {
+        fn_sgl_draw_texture_part_ex(press.group, x, y, press.layer.source_x + sx,
+            press.layer.source_y + sy, width, height, 0, 0, kNativeDrawMode, 0,
+            press.percent, 0);
+    };
+    const int32_t cap = 50 * press.percent / 100;
+    draw(press.x, press.y, 0, 0, 50, 103);
+    draw(press.x + press.width - cap, press.y, 212, 0, 50, 103);
+    // Tile only the uniform orange strip in the dash band. Top/bottom strips
+    // retain the uninterrupted white rim. No new fill color or global clip is used.
+    for (int32_t band = 0; band < 3; ++band) {
+        const int32_t sy = band == 0 ? 0 : band == 1 ? 40 : 60;
+        const int32_t height = band == 0 ? 40 : band == 1 ? 20 : 43;
+        const int32_t sx = band == 1 ? 30 : 50;
+        const int32_t available = band == 1 ? 20 : 160;
+        const int32_t y = press.y + sy * press.percent / 100;
+        int32_t x = press.x + cap;
+        const int32_t end = press.x + press.width - cap;
+        while (x < end) {
+            const int32_t source_width = std::min(available,
+                ((end - x) * 100 + press.percent - 1) / press.percent);
+            const int32_t drawn_width = source_width * press.percent / 100;
+            if (drawn_width == 0) break;
+            draw(x, y, sx, sy, source_width, height);
+            x += drawn_width;
+        }
+    }
+}
+
 bool button_label_within_width(const char* text, int64_t max_width, int32_t font_height,
                                std::string* out) {
     if (text == nullptr || out == nullptr || max_width < font_height || font_height <= 0) {
@@ -310,6 +376,8 @@ bool ui_draw_native_text_button_background(UiRect rect, uint8_t pressed) {
     if (pressed > 1) return false;
     ButtonGeometry geometry{};
     if (!load_text_button_geometry(rect, &geometry)) return false;
+    PressGeometry press{};
+    if (pressed != 0 && !load_press_geometry(geometry, &press)) return false;
     const auto draw_slice = [&geometry](int32_t x, int32_t source_x, int32_t source_width) {
         fn_sgl_draw_texture_part_ex(geometry.group, x, geometry.image_y,
             geometry.layer.source_x + source_x, geometry.layer.source_y, source_width,
@@ -318,6 +386,7 @@ bool ui_draw_native_text_button_background(UiRect rect, uint8_t pressed) {
     };
     if (!geometry.horizontal_slice) {
         draw_slice(geometry.image_x, 0, geometry.layer.width);
+        if (pressed != 0) draw_press_geometry(press);
         return true;
     }
     const int32_t left_width = geometry.cap_draw_width;
@@ -326,7 +395,8 @@ bool ui_draw_native_text_button_background(UiRect rect, uint8_t pressed) {
     draw_slice(geometry.image_x + left_width, geometry.center_source_x,
                geometry.center_source_width);
     draw_slice(geometry.image_x + left_width + center_width,
-               geometry.layer.width - geometry.cap_width, geometry.cap_width);
+                geometry.layer.width - geometry.cap_width, geometry.cap_width);
+    if (pressed != 0) draw_press_geometry(press);
     return true;
 }
 

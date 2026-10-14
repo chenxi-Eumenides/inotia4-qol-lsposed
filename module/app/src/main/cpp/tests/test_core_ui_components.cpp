@@ -705,6 +705,12 @@ int main() {
     replacement_control->draw(replacement_control);
     CHECK(g_native_button_draws == 5);
     CHECK(g_native_label_text == "模块设置");
+    CHECK(g_native_button_rect.w == replacement_control->rect.w);
+    CHECK(g_native_button_rect.h == replacement_control->rect.w * 48 / 220);
+    CHECK(g_native_label_rect.x == g_native_button_rect.x &&
+          g_native_label_rect.y == g_native_button_rect.y &&
+          g_native_label_rect.h == g_native_button_rect.h);
+    CHECK(replacement_control->rect.h == menu_button.rect.h);
     replacement_control->click(replacement_control->click_user);
     CHECK(g_clicks == 4);
 
