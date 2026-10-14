@@ -124,7 +124,7 @@ QolResult next_tier_interval(Tier current_tier, AttributeRange range, ClassifyFn
 
 QolResult compute_tier_up_value(Tier current_tier, AttributeRange range,
                                 ClassifyFn classify_fn, void* context,
-                                int (*rand_inclusive)(int, int), UpgradeResult* out_result,
+                                RandomInclusiveFn rand_inclusive, UpgradeResult* out_result,
                                 Tier* out_target, int32_t* out_new_value) {
     if (out_result == nullptr || !valid_tier(current_tier)) {
         return rule_error(kQolErrInvalidArgument, "invalid tier upgrade input");
@@ -154,9 +154,12 @@ QolResult compute_tier_up_value(Tier current_tier, AttributeRange range,
         return qol::contracts::ok();
     }
 
-    int value = rand_inclusive(lo, hi);
-    if (value < lo) value = lo;
-    if (value > hi) value = hi;
+    int32_t value = 0;
+    const QolResult random_result = rand_inclusive(lo, hi, &value);
+    if (random_result.ok != kQolOk) return random_result;
+    if (value < lo || value > hi) {
+        return rule_error(kQolErrInternal, "random source returned value outside interval");
+    }
     if (out_target != nullptr) *out_target = target;
     if (out_new_value != nullptr) *out_new_value = value;
     *out_result = UpgradeResult::kOk;

@@ -22,6 +22,7 @@ struct QolCustomRecipeWritePort {
     QolResult (*read_jewel_word)(QolItemHandle item, uint32_t* out_word);
     QolResult (*write_jewel_word)(QolItemHandle item, uint32_t word);
     QolResult (*set_max_socket_enchant)(QolItemHandle item);
+    QolResult (*random_inclusive)(int32_t lo, int32_t hi, int32_t* out);
 };
 
 static_assert(std::is_standard_layout<QolCustomRecipeWritePort>::value,

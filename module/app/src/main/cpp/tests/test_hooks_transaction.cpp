@@ -37,6 +37,7 @@ using qol::hooks::isolated_set;
 using qol::contracts::resource_state_name;
 using qol::hooks::register_claim;
 using qol::hooks::registry_reset_for_test;
+using qol::hooks::runtime_clear;
 using qol::hooks::runtime_set;
 using qol::hooks::release_claim_entry_hook;
 using qol::hooks::ReleaseOutcome;
@@ -48,6 +49,7 @@ using qol::hooks::TxKind;
 using qol::hooks::TxState;
 using qol::hooks::TxStatus;
 using qol::hooks::TxStep;
+using qol::hooks::tx_abort_install;
 using qol::hooks::tx_begin;
 using qol::hooks::tx_query;
 using qol::hooks::tx_reset_for_test;
@@ -897,6 +899,231 @@ void test_isolated_tombstone_keeps_alias_target_reserved() {
     CHECK(state_of(second.id) == ResourceState::kFree);
 }
 
+// FailSoft 入口 hook 安装失败：保持该资源 Free、不写入 runtime/backup，报告本步失败原因
+// 并继续后续资源；已成功的资源不回滚，事务最终 Succeeded。
+void test_fail_soft_middle_failure_continues() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:soft:A", "soft_plugin");
+    ResourceClaim b = make_claim("hook:soft:B", "soft_plugin");
+    ResourceClaim c = make_claim("hook:soft:C", "soft_plugin");
+    b.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(a));
+    CHECK(register_claim(b));
+    CHECK(register_claim(c));
+
+    g_hook_fail_at = 2;
+    const uint64_t tx = tx_begin("soft_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));  // A 成功
+    CHECK(step.ok == 0 && step.error == nullptr);
+    CHECK(tx_step(tx, &step));  // B 软失败
+    CHECK(step.resource_id != nullptr && std::strcmp(step.resource_id, "hook:soft:B") == 0);
+    CHECK(step.ok != 0);
+    CHECK(step.error != nullptr && std::strcmp(step.error, "native hook failed") == 0);
+    CHECK(step.backup == nullptr);
+    CHECK(!step.finished);
+    CHECK(state_of("hook:soft:B") == ResourceState::kFree);
+    ResourceRuntime runtime{};
+    CHECK(!runtime_of("hook:soft:B", &runtime));
+    CHECK(!tx_step(tx, &step));  // C 成功（终态）
+    CHECK(step.finished && step.ok == 0);
+
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kSucceeded);
+    CHECK(g_unhook_calls == 0);  // 已装成功资源不回滚
+    CHECK(state_of("hook:soft:A") == ResourceState::kLive);
+    CHECK(state_of("hook:soft:C") == ResourceState::kLive);
+}
+
+// 软失败发生在最后一条：事务仍 Succeeded，末步保留失败原因，资源保持 Free。
+void test_fail_soft_last_failure_still_succeeds() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:softlast:A", "soft_last");
+    ResourceClaim b = make_claim("hook:softlast:B", "soft_last");
+    b.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(a));
+    CHECK(register_claim(b));
+
+    g_hook_fail_at = 2;
+    const uint64_t tx = tx_begin("soft_last", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));
+    CHECK(!tx_step(tx, &step));  // 末条软失败即终态
+    CHECK(step.finished && step.ok != 0);
+    CHECK(step.error != nullptr && std::strcmp(step.error, "native hook failed") == 0);
+    CHECK(state_of("hook:softlast:B") == ResourceState::kFree);
+
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kSucceeded);
+}
+
+// 软失败后仍遇 FailClosed 硬失败：事务按逆序回滚真实安装子集并 Failed；
+// 软失败资源保持 Free，不被伪造成已安装回滚。
+void test_fail_soft_then_hard_failure_rolls_back() {
+    reset_all();
+    set_deps();
+    ResourceClaim soft = make_claim("hook:softhard:soft", "soft_hard");
+    ResourceClaim hard = make_claim("hook:softhard:hard", "soft_hard");
+    soft.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(soft));
+    CHECK(register_claim(hard));
+
+    g_hook_fail_at = 1;  // 第一条软失败
+    const uint64_t tx = tx_begin("soft_hard", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));
+    CHECK(step.ok != 0 && !step.finished);
+    CHECK(state_of("hook:softhard:soft") == ResourceState::kFree);
+
+    // 第二条改为硬失败。
+    g_hook_fail_at = 2;
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished && step.ok != 0 && step.resource_id != nullptr &&
+          std::strcmp(step.resource_id, "hook:softhard:hard") == 0);
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kFailed);
+    CHECK(g_unhook_calls == 0);
+    CHECK(state_of("hook:softhard:soft") == ResourceState::kFree);
+    CHECK(state_of("hook:softhard:hard") == ResourceState::kFree);
+}
+
+// 非入口机制（kCallPatch）软失败：保持 Free 并继续，事务 Succeeded。
+void test_fail_soft_non_entry_mechanism() {
+    reset_all();
+    set_deps();
+    ResourceClaim claim = make_claim("patch:soft:A", "patch_soft", "gateOn");
+    claim.mechanism = ResourceMechanism::kCallPatch;
+    claim.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(claim));
+
+    g_other_install_rc = 1;
+    const uint64_t tx = tx_begin("patch_soft", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished && step.ok != 0);
+    CHECK(step.error != nullptr && std::strcmp(step.error, "primitive rejected") == 0);
+    CHECK(state_of("patch:soft:A") == ResourceState::kFree);
+
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kSucceeded);
+}
+
+// 同事务内已被安全撤回（Free + runtime 已清）的条目不得二次释放：否则会把已归还资源
+// 错误标记 tombstone/isolated。Free 但仍保留 runtime 的不安全状态继续走释放路径。
+void test_rollback_skips_safely_revoked_entry() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:rb:A", "rb_plugin");
+    ResourceClaim b = make_claim("hook:rb:B", "rb_plugin");
+    CHECK(register_claim(a));
+    CHECK(register_claim(b));
+
+    const uint64_t tx = tx_begin("rb_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));  // A 安装成功
+    CHECK(state_of("hook:rb:A") == ResourceState::kLive);
+
+    // 模拟宿主软 ready 失败后的安全撤回。
+    set_state("hook:rb:A", ResourceState::kFree);
+    runtime_clear("hook:rb:A");
+    const int unhooks_before = g_unhook_calls;
+
+    g_hook_fail_at = 2;  // B 硬失败
+    CHECK(!tx_step(tx, &step));
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kFailed);
+    CHECK(g_unhook_calls == unhooks_before);  // 不对已撤回的 A 二次 unhook
+    CHECK(state_of("hook:rb:A") == ResourceState::kFree);
+    CHECK(!isolated_get("hook:rb:A"));
+    CHECK(state_of("hook:rb:B") == ResourceState::kFree);
+}
+
+// Free 但 runtime 记录仍在（不安全状态）：回滚仍执行释放，不跳过、不谎报已归还。
+void test_rollback_releases_free_entry_with_runtime() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:rb2:A", "rb2_plugin");
+    ResourceClaim b = make_claim("hook:rb2:B", "rb2_plugin");
+    CHECK(register_claim(a));
+    CHECK(register_claim(b));
+
+    const uint64_t tx = tx_begin("rb2_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));
+
+    // Free 但保留 runtime（未清）：回滚必须真实释放。
+    set_state("hook:rb2:A", ResourceState::kFree);
+    const int unhooks_before = g_unhook_calls;
+    g_hook_fail_at = 2;
+    CHECK(!tx_step(tx, &step));
+    CHECK(g_unhook_calls == unhooks_before + 1);
+    CHECK(state_of("hook:rb2:A") == ResourceState::kFree);
+}
+
+// tx_abort_install：仅 Running 安装事务可中止；中止即回滚并终态化，禁止后续步继续安装。
+void test_tx_abort_install_stops_running_install() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:ab:A", "ab_plugin");
+    ResourceClaim b = make_claim("hook:ab:B", "ab_plugin");
+    CHECK(register_claim(a));
+    CHECK(register_claim(b));
+
+    const uint64_t tx = tx_begin("ab_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));  // A 安装成功，事务仍在途
+    CHECK(state_of("hook:ab:A") == ResourceState::kLive);
+
+    CHECK(tx_abort_install(tx, "hook:ab:B", "resource_ready_failed"));
+    CHECK(state_of("hook:ab:A") == ResourceState::kFree);  // 已装子集逆序回滚
+    CHECK(g_unhook_calls == 1);
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kFailed);
+    CHECK(status.error != nullptr &&
+          std::strcmp(status.error, "resource_ready_failed") == 0);
+    CHECK(status.failed_resource_id != nullptr &&
+          std::strcmp(status.failed_resource_id, "hook:ab:B") == 0);
+
+    // 已终态：再次中止返回 false，且不继续安装剩余资源。
+    CHECK(!tx_abort_install(tx, "hook:ab:B", "again"));
+    CHECK(!tx_step(tx, &step));
+    CHECK(g_hook_calls == 1);  // B 从未安装
+    CHECK(state_of("hook:ab:B") == ResourceState::kFree);
+}
+
+// 非安装事务/未知 id 不可中止。
+void test_tx_abort_install_rejects_non_install() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:abn:A", "abn_plugin");
+    CHECK(register_claim(a));
+    CHECK(install_one("abn_plugin") != 0);
+
+    const uint64_t release = tx_begin("abn_plugin", TxKind::kRelease);
+    CHECK(release != 0);
+    CHECK(!tx_abort_install(release, "hook:abn:A", "x"));  // 还原事务不可中止
+    CHECK(!tx_abort_install(0, "hook:abn:A", "x"));
+    CHECK(!tx_abort_install(999999, "hook:abn:A", "x"));
+    TxStep step{};
+    CHECK(!tx_step(release, &step));  // 还原仍正常完成
+    CHECK(state_of("hook:abn:A") == ResourceState::kFree);
+}
+
 }  // namespace
 
 int main() {
@@ -918,6 +1145,14 @@ int main() {
     test_required_alias_group_preflight_prevents_first_hook_write();
     test_alias_can_be_reused_after_successful_physical_release();
     test_isolated_tombstone_keeps_alias_target_reserved();
+    test_fail_soft_middle_failure_continues();
+    test_fail_soft_last_failure_still_succeeds();
+    test_fail_soft_then_hard_failure_rolls_back();
+    test_fail_soft_non_entry_mechanism();
+    test_rollback_skips_safely_revoked_entry();
+    test_rollback_releases_free_entry_with_runtime();
+    test_tx_abort_install_stops_running_install();
+    test_tx_abort_install_rejects_non_install();
     std::printf("hooks_transaction: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

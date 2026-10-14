@@ -3,27 +3,27 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "../../contracts/craft_commands.h"
-#include "../../contracts/craft_facts.h"
-#include "../../contracts/craft_result.h"
-#include "../../contracts/game_ports/craft_ui_write_port.h"
-#include "../../contracts/host_sdk.h"
-#include "../../contracts/item_facts.h"
+#include "../../../contracts/craft_commands.h"
+#include "../../../contracts/craft_facts.h"
+#include "../../../contracts/game_ports/craft_ui_write_port.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/item_facts.h"
+#include "../result.h"
 
 namespace qol::contracts {
 struct PluginContext;
 }
 
-// 合成器界面层 feature（C2 Step 3）：界面动作、文案与填入格状态。
+// 合成器界面子层：界面动作、文案与填入格状态。
 //
 // 分层（「界面归界面，结果归结果」）：
 //   · 本层只管**界面**——填入了什么、选中哪一格、清空后恢复到哪个格、弹什么提示；
-//     配方判定与扣料/产物决策一律经能力契约 `craft_result` 问结果层（provider=plugins/custom_recipe）。
-//   · 本层不反向依赖任何 feature；不 include 符号头、不出现裸偏移。
+//     配方判定与扣料/产物决策调用父插件内部结果 API。
+//   · 不 include 符号头、不出现裸偏移。
 //
 // 线程模型：全部函数只在游戏主线程（UI 回调 / wrapper）调用；只读写游戏内存，不加锁。
 
-namespace qol::features::craft_ui {
+namespace qol::features::custom_recipe::ui {
 
 enum class CraftPlaceDisposition : uint8_t {
     kStop,
@@ -33,17 +33,17 @@ enum class CraftPlaceDisposition : uint8_t {
     kWriteFailed,
 };
 
-constexpr CraftPlaceDisposition craft_place_disposition(contracts::PlaceOutcome outcome) {
+constexpr CraftPlaceDisposition craft_place_disposition(result::PlaceOutcome outcome) {
     switch (outcome) {
-        case contracts::PlaceOutcome::kPlaced:
+        case result::PlaceOutcome::kPlaced:
             return CraftPlaceDisposition::kAdvance;
-        case contracts::PlaceOutcome::kAlreadyPlaced:
+        case result::PlaceOutcome::kAlreadyPlaced:
             return CraftPlaceDisposition::kAlreadyPlaced;
-        case contracts::PlaceOutcome::kNotEnoughHeld:
+        case result::PlaceOutcome::kNotEnoughHeld:
             return CraftPlaceDisposition::kNotEnoughHeld;
-        case contracts::PlaceOutcome::kWriteFailed:
+        case result::PlaceOutcome::kWriteFailed:
             return CraftPlaceDisposition::kWriteFailed;
-        case contracts::PlaceOutcome::kNotMine:
+        case result::PlaceOutcome::kNotMine:
         default:
             return CraftPlaceDisposition::kStop;
     }
@@ -144,7 +144,11 @@ public:
 
 private:
     const contracts::QolHostSdk* sdk_;
+    int32_t previous_scope_;
     bool pushed_;
 };
 
-}  // namespace qol::features::craft_ui
+// 本地 TextScope 值；绘制范围 2/3/4 与 Host SDK scope 对齐，弹窗专用范围不进入 Host。
+int32_t current_text_scope();
+
+}  // namespace qol::features::custom_recipe::ui

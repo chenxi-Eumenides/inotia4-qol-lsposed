@@ -49,11 +49,12 @@ static void test_table_integrity() {
     size_t cn = 0;
     const TextEntry* c = cr::text_entries(&cn);
     CHECK(c != nullptr);
-    CHECK(cn == 2);
+    CHECK(cn == 5);  // 按钮 / 面板标题 / 质量不可用 / 材料可能已扣 / 产物准备失败（材料未扣）
     for (size_t i = 0; i < cn; ++i) {
         CHECK(c[i].key != nullptr && c[i].key[0] != '\0');
         CHECK(c[i].text != nullptr);
-        CHECK(std::strlen(c[i].text) == 12);  // 「宝石升阶」= 四字
+        CHECK(std::strlen(c[i].text) > 0);
+        CHECK(c[i].scope != cr::kTextScopePageTab);  // 页签保持原文（不登记）
         for (size_t j = i + 1; j < cn; ++j) CHECK(std::strcmp(c[i].key, c[j].key) != 0);
     }
 }
@@ -98,12 +99,11 @@ static void test_lookup_scope_gating() {
     CHECK(i18n::lookup(35291, TextScope::kCharacterPanel) == nullptr);
 
     // 配方文案：按钮与面板标题都要显示「宝石升阶」；**页签必须保持原文**（三处同 id）。
-    CHECK(std::strcmp(cr::text_lookup(35291, TextScope::kUimixRecipeButton), "宝石升阶") == 0);
-    CHECK(std::strcmp(cr::text_lookup(35291, TextScope::kUimixPanelTitle), "宝石升阶") == 0);
-    CHECK(cr::text_lookup(35291, TextScope::kUimixPageTab) == nullptr);  // 页签名不得被改名
-    CHECK(cr::text_lookup(35291, TextScope::kCharacterPanel) == nullptr);
-    CHECK(cr::text_lookup(35291, TextScope::kNone) == nullptr);
-    CHECK(cr::text_lookup(0, TextScope::kUimixRecipeButton) == nullptr);
+    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
+    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopePanelTitle, 35291), "宝石升阶") == 0);
+    CHECK(cr::text_lookup(cr::kTextScopePageTab, 35291) == nullptr);  // 页签名不得被改名
+    CHECK(cr::text_lookup(0, 35291) == nullptr);
+    CHECK(cr::text_lookup(cr::kTextScopeRecipeButton, 0) == nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -113,7 +113,7 @@ static void test_key_lookup_and_id_sync() {
     const TextEntry* e = cr::text_entry_by_key("recipe.jewel_tier_up");
     CHECK(e != nullptr);
     if (e != nullptr) {
-        CHECK(e->scope == TextScope::kUimixRecipeButton);
+        CHECK(e->scope == cr::kTextScopeRecipeButton);
         CHECK(std::strcmp(e->text, "宝石升阶") == 0);
         CHECK(e->text_id == custom_recipe::kJewelTierUpLabelWordId);
     }
@@ -121,16 +121,36 @@ static void test_key_lookup_and_id_sync() {
     const TextEntry* t = cr::text_entry_by_key("recipe.jewel_tier_up.title");
     CHECK(t != nullptr);
     if (t != nullptr) {
-        CHECK(t->scope == TextScope::kUimixPanelTitle);
+        CHECK(t->scope == cr::kTextScopePanelTitle);
         CHECK(std::strcmp(t->text, "宝石升阶") == 0);
         CHECK(t->text_id == custom_recipe::kJewelTierUpLabelWordId);
+    }
+    // CR02/F2：模块自有失败提示各自独立 scope（与 id 相同但 scope 不同，提示互不串味）。
+    const TextEntry* unavailable = cr::text_entry_by_key("quality.unavailable");
+    CHECK(unavailable != nullptr);
+    if (unavailable != nullptr) {
+        CHECK(unavailable->scope == cr::kTextScopeQualityUnavailable);
+        CHECK(unavailable->text_id == cr::kQualityUnavailablePopupId);
+    }
+    const TextEntry* consumed = cr::text_entry_by_key("craft.material_may_have_been_consumed");
+    CHECK(consumed != nullptr);
+    if (consumed != nullptr) {
+        CHECK(consumed->scope == cr::kTextScopeMaterialMayHaveBeenConsumed);
+        CHECK(consumed->text_id == cr::kMaterialMayHaveBeenConsumedPopupId);
+    }
+    const TextEntry* prepare_failed = cr::text_entry_by_key("craft.product_prepare_failed");
+    CHECK(prepare_failed != nullptr);
+    if (prepare_failed != nullptr) {
+        CHECK(prepare_failed->scope == cr::kTextScopeProductPrepareFailed);
+        CHECK(prepare_failed->text_id == cr::kProductPrepareFailedPopupId);
+        CHECK(prepare_failed->scope != cr::kTextScopeMaterialMayHaveBeenConsumed);
     }
     // 页签作用域只用于「显式不替换」，两表都不得有该作用域条目。
     size_t n = 0;
     const Entry* all = i18n::entries(&n);
     for (size_t i = 0; i < n; ++i) CHECK(all[i].scope != TextScope::kUimixPageTab);
     const TextEntry* call = cr::text_entries(&n);
-    for (size_t i = 0; i < n; ++i) CHECK(call[i].scope != TextScope::kUimixPageTab);
+    for (size_t i = 0; i < n; ++i) CHECK(call[i].scope != cr::kTextScopePageTab);
     CHECK(cr::text_entry_by_key("nope") == nullptr);
     CHECK(cr::text_entry_by_key(nullptr) == nullptr);
     CHECK(i18n::entry_by_key("charinfo.dmg") != nullptr);
@@ -176,15 +196,10 @@ static void test_owner_table_after_modify_body() {
         CHECK(i18n::owner_table_lookup(35291) == nullptr);  // 配方 id 不归本表
     }
     CHECK(i18n::owner_table_lookup(35185) == nullptr);  // 非窗口（kNone）
-    {
-        qol::infra::TextScopeGuard scope(TextScope::kUimixRecipeButton);
-        CHECK(std::strcmp(cr::recipe_owner_lookup(35291), "宝石升阶") == 0);
-    }
-    {
-        qol::infra::TextScopeGuard scope(TextScope::kUimixPageTab);
-        CHECK(cr::recipe_owner_lookup(35291) == nullptr);  // 页签保持原文
-    }
-    CHECK(cr::recipe_owner_lookup(35291) == nullptr);  // kNone
+    // custom_recipe 侧同语义：本地 scope 命中才替换；页签 scope 永不登记。
+    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
+    CHECK(cr::text_lookup(cr::kTextScopePageTab, 35291) == nullptr);  // 页签保持原文
+    CHECK(cr::text_lookup(0, 35291) == nullptr);                      // 非窗口
 }
 
 int main() {

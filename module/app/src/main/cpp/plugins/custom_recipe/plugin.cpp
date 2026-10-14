@@ -5,21 +5,27 @@
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/craft_commands.h"
 #include "../../contracts/craft_facts.h"
-#include "../../contracts/craft_result.h"
+#include "../../contracts/game_ports/craft_ui_write_port.h"
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/text_layer.h"
+#include "../../contracts/version.h"
 #include "feature.h"
 #include "table.h"
 #include "text_table.h"
+#include "ui/feature.h"
+#include "ui/runtime.h"
 
-// 自定义合成配方插件：结果层能力提供者 + 表注入行为所有权（C2 Step 4）。
+// 自定义合成配方插件：结果层 + 表注入行为所有权 + UIMix 界面子层（单一 owner）。
 //
 // 门禁：descriptor feature `custom_recipe.recipes`（默认 false，用户可见唯一开关）。
-//   · feature 开 → 插件活跃，kOwnership acquire 注入 RECIPEBASE/MIXTUREBASE；
-//     craft_ui 经 required 依赖 craft_result 级联活跃。
-//   · feature 关 → on_toggle 先置 enabled=false（残留面板 fail-closed），随后插件停用，
-//     release 收回注入记录数；craft_ui 因依赖撤销级联停用。两插件 desired 保留。
+//   · feature 开 → 插件活跃：required 依赖/端口校验 → 内部注册（文本消费者、typed handlers、
+//     UI 本地备份）→ 资源事务（5 核心 required fail-closed + 7 装饰 optional fail-soft）→
+//     ownership（RECIPEBASE/MIXTUREBASE 注入）→ on_enabled 在 ownership 就绪且核心 hook 备齐时
+//     打开业务门禁。
+//   · feature 关 → on_toggle 立即 set_enabled(false)（残留面板 fail-closed、在途确认作废）；
+//     宿主 drain 后按资源逆序释放：ownership 先 release 恢复表记录，再释放 hooks。
+// craft_result 不再经 capability registry 对外提供；UI 子层直接调用父命名空间结果 API。
 
 namespace qol::features::custom_recipe {
 namespace {
@@ -28,134 +34,225 @@ constexpr const char* kPluginId = "custom_recipe";
 constexpr const char* kPluginVersion = "0.1.0";
 
 // ---- 「宝石强化」呈现文案（ADR 0001 D3：合成域的配方呈现文案归本插件）----
-//
-// 表与查表纯逻辑在 text_table.h（host 可测）；此处只保留分派消费者回调与能力句柄。
 constexpr int32_t kTextPhaseAfter = 1;
 constexpr int32_t kTextKindModify = 1;
 
 const contracts::TextLayerApi* g_text_api = nullptr;
 uint64_t g_text_consumer = 0;
 
-// after 阶段消费者：仅当当前线程处于对应作用域且 id 命中时返回模块文案。
+// after 阶段消费者：仅当 UI 子层当前 scope 与 id 同时命中时返回模块文案。
 const char* recipe_text_modify(uint32_t text_id, const char* current, void* ctx) {
     (void)current;
     (void)ctx;
-    return recipe_owner_lookup(text_id);
+    return text_lookup(ui::current_text_scope(), text_id);
 }
 
 bool write_stuff_need_handler(void*, const uint8_t* payload, uint32_t size);
 bool set_stuff_item_handler(void*, const uint8_t* payload, uint32_t size);
 
+// 资源声明：runtime 的 12 条 UI hook（5 required + 7 optional）在前，表 ownership 最后。
+// 宿主停用时逆序释放 → ownership 先 release（恢复表记录），UI hooks 后释放。
+const contracts::ResourceClaim& ownership_claim() {
+    static const contracts::ResourceClaim kClaim = {
+        "own:RECIPEBASE_MIXTUREBASE",
+        "RECIPEBASE_MIXTUREBASE",
+        contracts::ResourceMechanism::kOwnership,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailSoft,
+        true,
+        kPluginId,
+        "RECIPEBASE/MIXTUREBASE 注入记录的占有：插件停用时收回记录数、残留面板不命中注入记录",
+        nullptr,
+        120,
+        const_cast<contracts::OwnershipOps*>(&ownership_ops()),
+    };
+    return kClaim;
+}
+
+struct ResourceClaimTable {
+    contracts::ResourceClaim items[16];
+    uint32_t count = 0;
+};
+
+const ResourceClaimTable& resource_claim_table() {
+    static const ResourceClaimTable table = [] {
+        ResourceClaimTable combined{};
+        uint32_t ui_count = 0;
+        const contracts::ResourceClaim* ui_claims = ui::claims(&ui_count);
+        for (uint32_t i = 0; i < ui_count && combined.count < 16; ++i) {
+            combined.items[combined.count++] = ui_claims[i];
+        }
+        if (combined.count < 16) combined.items[combined.count++] = ownership_claim();
+        return combined;
+    }();
+    return table;
+}
+
+bool ui_write_port_ready(const contracts::QolCraftUiWritePort* port) {
+    if (port == nullptr ||
+        !contracts::satisfies(port->abi_version,
+                              {contracts::kQolPortCraftUiWriteVersion.major,
+                               contracts::kQolPortCraftUiWriteVersion.minor})) {
+        return false;
+    }
+    return port->init_mixing_state != nullptr && port->reset_stuff_item_control != nullptr &&
+           port->refresh_inventory_items != nullptr &&
+           port->select_first_empty_stuff_slot != nullptr && port->set_ui_type != nullptr &&
+           port->set_selected_recipe != nullptr && port->play_sound != nullptr &&
+           port->show_text != nullptr && port->show_yesno_from_text != nullptr &&
+           port->set_target_slot_item != nullptr && port->set_cost_zero != nullptr;
+}
+
+bool recipe_write_port_ready(const contracts::QolCustomRecipeWritePort* port) {
+    if (port == nullptr ||
+        !contracts::satisfies(port->abi_version,
+                              {contracts::kQolPortCustomRecipeWriteVersion.major,
+                               contracts::kQolPortCustomRecipeWriteVersion.minor})) {
+        return false;
+    }
+    return port->write_stuff_need != nullptr && port->set_stuff_item != nullptr &&
+           port->description_set_off != nullptr &&
+           (port->create_perfect_item != nullptr || port->create_item != nullptr) &&
+           port->save_item != nullptr && port->free_item != nullptr &&
+           port->read_jewel_word != nullptr && port->write_jewel_word != nullptr &&
+           port->set_max_socket_enchant != nullptr && port->random_inclusive != nullptr;
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr) {
         return 1;
     }
-    // 文本层能力（配方呈现文案）：先取能力并订阅；失败即 install 失败，此时尚无副作用。
-    const void* text_iface = nullptr;
-    if (!contracts::succeeded(ctx.sdk->capabilities.require(
-            contracts::kTextLayerCapabilityId,
-            {contracts::kTextLayerVersionMajor, contracts::kTextLayerVersionMinor}, &text_iface)) ||
-        text_iface == nullptr) {
+    if (ctx.ports == nullptr || ctx.port_count != 2 || ctx.ports[0] == nullptr ||
+        ctx.ports[1] == nullptr) {
         return 1;
     }
-    const auto* text_api = static_cast<const contracts::TextLayerApi*>(text_iface);
-    if (text_api->subscribe == nullptr) return 1;
-    g_text_consumer = text_api->subscribe(kTextPhaseAfter, kTextKindModify, &recipe_text_modify,
-                                          nullptr);
-    if (g_text_consumer == 0) return 1;
-    g_text_api = text_api;
+    const auto* recipe_write_port =
+        static_cast<const contracts::QolCustomRecipeWritePort*>(ctx.ports[0]);
+    const auto* ui_write_port =
+        static_cast<const contracts::QolCraftUiWritePort*>(ctx.ports[1]);
+    if (!recipe_write_port_ready(recipe_write_port) || !ui_write_port_ready(ui_write_port)) {
+        return 1;
+    }
+    if (ctx.sdk->commands.register_typed_handler == nullptr ||
+        ctx.sdk->commands.unregister_typed_handler == nullptr) {
+        return 1;
+    }
+
     const void* iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kTextLayerCapabilityId,
+            {contracts::kTextLayerVersionMajor, contracts::kTextLayerVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return 1;
+    }
+    const auto* text_api = static_cast<const contracts::TextLayerApi*>(iface);
+    if (text_api->subscribe == nullptr || text_api->unsubscribe == nullptr) return 1;
+
+    iface = nullptr;
     if (!contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kItemFactsCapabilityId,
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
-        iface == nullptr || !contracts::item_facts_api_size_valid(
-                                static_cast<const contracts::ItemFactsApi*>(iface))) {
+        iface == nullptr ||
+        !contracts::item_facts_api_size_valid(static_cast<const contracts::ItemFactsApi*>(iface))) {
         return 1;
     }
-    set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
+    const auto* item_facts = static_cast<const contracts::ItemFactsApi*>(iface);
+
     iface = nullptr;
     if (!contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kCraftFactsCapabilityId,
             {contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}, &iface)) ||
         iface == nullptr) {
-        set_item_facts(nullptr);
         return 1;
     }
-    set_craft_facts(static_cast<const contracts::CraftFactsApi*>(iface));
-    if (ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
-        set_item_facts(nullptr);
-        set_craft_facts(nullptr);
+    const auto* craft_facts = static_cast<const contracts::CraftFactsApi*>(iface);
+
+    // 通过校验后开始登记；任何中途失败立即幂等清理本次注册，不依赖 Host 后帧清理。
+    const uint64_t text_consumer =
+        text_api->subscribe(kTextPhaseAfter, kTextKindModify, &recipe_text_modify, nullptr);
+    if (text_consumer == 0) return 1;
+    if (ctx.sdk->commands
+            .register_typed_handler(contracts::kCraftWriteStuffNeedHandlerId,
+                                    &write_stuff_need_handler, nullptr)
+            .ok != kQolOk) {
+        text_api->unsubscribe(text_consumer);
         return 1;
     }
-    const auto* write_port = static_cast<const contracts::QolCustomRecipeWritePort*>(ctx.ports[0]);
-    if (!contracts::satisfies(write_port->abi_version,
-                              {contracts::kQolPortCustomRecipeWriteVersion.major,
-                                contracts::kQolPortCustomRecipeWriteVersion.minor}) ||
-        write_port->write_stuff_need == nullptr || write_port->set_stuff_item == nullptr ||
-        write_port->description_set_off == nullptr ||
-        (write_port->create_perfect_item == nullptr && write_port->create_item == nullptr) ||
-        write_port->save_item == nullptr || write_port->free_item == nullptr ||
-        write_port->read_jewel_word == nullptr || write_port->write_jewel_word == nullptr ||
-        write_port->set_max_socket_enchant == nullptr ||
-        ctx.sdk->commands.register_typed_handler == nullptr ||
-        ctx.sdk->commands.unregister_typed_handler == nullptr ||
-        ctx.sdk->commands.register_typed_handler(contracts::kCraftWriteStuffNeedHandlerId,
-                                                  &write_stuff_need_handler, nullptr).ok != kQolOk) {
-        set_item_facts(nullptr);
-        set_craft_facts(nullptr);
+    if (ctx.sdk->commands
+            .register_typed_handler(contracts::kCraftSetStuffItemHandlerId,
+                                    &set_stuff_item_handler, nullptr)
+            .ok != kQolOk) {
+        (void)ctx.sdk->commands.unregister_typed_handler(
+            contracts::kCraftWriteStuffNeedHandlerId);
+        text_api->unsubscribe(text_consumer);
         return 1;
     }
-    if (ctx.sdk->commands.register_typed_handler(contracts::kCraftSetStuffItemHandlerId,
-                                                  &set_stuff_item_handler, nullptr).ok != kQolOk) {
-        (void)ctx.sdk->commands.unregister_typed_handler(contracts::kCraftWriteStuffNeedHandlerId);
-        set_item_facts(nullptr);
-        set_craft_facts(nullptr);
+    if (!ui::bind(ctx, item_facts, craft_facts, recipe_write_port, ui_write_port, text_api)) {
+        (void)ctx.sdk->commands.unregister_typed_handler(
+            contracts::kCraftSetStuffItemHandlerId);
+        (void)ctx.sdk->commands.unregister_typed_handler(
+            contracts::kCraftWriteStuffNeedHandlerId);
+        text_api->unsubscribe(text_consumer);
         return 1;
     }
-    set_write_port(write_port);
+
+    g_text_api = text_api;
+    g_text_consumer = text_consumer;
+    set_item_facts(item_facts);
+    set_craft_facts(craft_facts);
+    set_write_port(recipe_write_port);
     set_context(ctx);
     // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
     register_dynamic_recipes();
-    // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。
-    set_enabled(true);
+    // 门禁由 on_enabled 打开：ownership 就绪且核心 hook 备齐前不得执行业务。
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    set_enabled(false);
     if (g_text_api != nullptr && g_text_api->unsubscribe != nullptr && g_text_consumer != 0) {
         g_text_api->unsubscribe(g_text_consumer);
     }
     g_text_consumer = 0;
     g_text_api = nullptr;
     if (host_sdk() != nullptr && host_sdk()->commands.unregister_typed_handler != nullptr) {
-        (void)host_sdk()->commands.unregister_typed_handler(contracts::kCraftWriteStuffNeedHandlerId);
+        (void)host_sdk()->commands.unregister_typed_handler(
+            contracts::kCraftWriteStuffNeedHandlerId);
         (void)host_sdk()->commands.unregister_typed_handler(contracts::kCraftSetStuffItemHandlerId);
     }
     unregister_dynamic_recipes();
+    ui::clear();
     set_item_facts(nullptr);
     set_craft_facts(nullptr);
     set_write_port(nullptr);
-    set_enabled(false);
     ::custom_recipe::custom_recipe_table_deactivate();
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.game == nullptr) return;
     set_context(ctx);
-    set_enabled(true);
+    // 仅当表 ownership 就绪且 5 条核心 hook 备份齐备时才打开业务门禁。
+    if (ownership_ready() && ui::core_backups_ready()) {
+        set_enabled(true);
+    }
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
+    // 先关业务门禁并作废在途确认；随后宿主 drain 并按资源逆序释放（ownership 先 release）。
     set_enabled(false);
-    // 先于 capability 注销撤回表注入，避免撤销窗口出现「表仍在、craft_result 已缺失」。
     ::custom_recipe::custom_recipe_table_deactivate();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.enabled = enabled();
     out.error = nullptr;
+}
+
+int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
+    return ui::on_resource_ready(ctx, resource_id, backup);
 }
 
 // optional_requires=[attribute.quality]：可选依赖缺失/失效只置 degraded，不级联停用。
@@ -177,10 +274,14 @@ const contracts::CapabilityRequirement kRequires[] = {
       static_cast<uint16_t>(contracts::kTextLayerVersionMinor)}},
 };
 
+// 两个写端口：custom recipe 结果/材料写面 + UIMix 控件写面（合并前分属两个 descriptor）。
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE,
      {contracts::kQolPortCustomRecipeWriteVersion.major,
       contracts::kQolPortCustomRecipeWriteVersion.minor}},
+    {contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE,
+     {contracts::kQolPortCraftUiWriteVersion.major,
+      contracts::kQolPortCraftUiWriteVersion.minor}},
 };
 
 bool write_stuff_need_handler(void*, const uint8_t* payload, uint32_t size) {
@@ -191,41 +292,17 @@ bool set_stuff_item_handler(void*, const uint8_t* payload, uint32_t size) {
     return handle_set_stuff_item_command(payload, size);
 }
 
-// provides=craft_result v1.1（结果层能力，消费者=craft_ui）。
-const contracts::CapabilityProvisionRef kProvides[] = {
-    {contracts::kCraftResultCapabilityId,
-     QolVersion{static_cast<uint16_t>(contracts::kCraftResultVersionMajor),
-                static_cast<uint16_t>(contracts::kCraftResultVersionMinor)},
-     &craft_result_api()},
-};
-
-// 行为所有权：RECIPEBASE/MIXTUREBASE 表注入（非 hook/patch 的互斥槽占有）。
-// acquire=table_ensure（失败→非 0，fail-soft → degraded）、release=table_deactivate（total）。
-const contracts::ResourceClaim kClaims[] = {
-    {"own:RECIPEBASE_MIXTUREBASE",
-     "RECIPEBASE_MIXTUREBASE",
-     contracts::ResourceMechanism::kOwnership,
-     contracts::ResourcePolicy::kPrivate,
-     contracts::ResourceRequirement::kRequired,
-     contracts::ResourceFailure::kFailSoft,
-     true,
-     kPluginId,
-     "RECIPEBASE/MIXTUREBASE 注入记录的占有：插件停用时收回记录数、残留面板不命中注入记录",
-     nullptr,
-     120,
-     const_cast<contracts::OwnershipOps*>(&ownership_ops())},
-};
-
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
-    // 唯一可见开关。on_toggle 在停用前同步镜像到内部 enabled，使 craft_ui 在级联撤销
-    // 窗口对残留面板 fail-closed（停用顺序由宿主逆拓扑保证：消费方先停）。
+    const ResourceClaimTable& claim_table = resource_claim_table();
+    // 唯一可见开关。on_toggle 关闭时同步镜像到内部 enabled（残留面板 fail-closed）；
+    // 打开时不提前开门禁，由 on_enabled 在资源就绪后处理。
     static constexpr contracts::FeatureDefinition kFeatures[] = {
         {"custom_recipe.recipes", 0, contracts::FeatureCategory::kGameplay,
          contracts::FeatureType::kToggle, "自定义合成", "提供自定义配方与合成结果。",
          [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
-             set_enabled(enabled != 0);
+             if (enabled == 0) set_enabled(false);
              return contracts::ok();
           },
           nullptr, nullptr, -1},
@@ -235,16 +312,16 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         kPluginVersion,
         3, kRequires,            // requires=item.facts + craft.facts + text_layer
         1, kOptionalRequires,    // optional_requires=[attribute.quality]
-        1, kProvides,            // provides=craft_result
-        1, kClaims,              // resources=ownership
+        0, nullptr,              // provides=无（craft_result 内部化）
+        claim_table.count, claim_table.items,  // resources=12 UI hooks + ownership
         0, nullptr,              // jni
         &plugin_install,
         &plugin_deactivate,
         &plugin_on_enabled,
         &plugin_on_disabled,
         &plugin_fill_status,
-        nullptr,                 // on_resource_ready（ownership 无 backup）
-        kPorts, 1,
+        &on_resource_ready,
+        kPorts, 2,
         nullptr, 0,
         kFeatures, 1,
     };

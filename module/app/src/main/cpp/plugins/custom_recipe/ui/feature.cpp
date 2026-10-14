@@ -5,10 +5,10 @@
 #include <cstdio>
 #include <cstring>
 
-#include "../../contracts/plugin.h"
-#include "../../contracts/ui.h"
+#include "../../../contracts/plugin.h"
+#include "../../../contracts/ui.h"
 
-namespace qol::features::craft_ui {
+namespace qol::features::custom_recipe::ui {
 
 namespace {
 
@@ -17,6 +17,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 const contracts::QolCraftUiWritePort* g_write_port = nullptr;
+thread_local int32_t t_current_text_scope = 0;
 
 }  // namespace
 
@@ -45,7 +46,7 @@ void log_message(int32_t level, const char* format, ...) {
     const uint32_t size = static_cast<uint32_t>(length) >= contracts::kMessageCap
                               ? contracts::kMessageCap
                               : static_cast<uint32_t>(length);
-    (void)g_sdk->log.write(level, 15, "plugins/craft_ui", message, size);
+    (void)g_sdk->log.write(level, 15, "plugins/custom_recipe/ui", message, size);
 }
 
 uint32_t craft_mix_type() {
@@ -242,16 +243,21 @@ int craft_panel_state() {
     return value;
 }
 
-TextScopeGuard::TextScopeGuard(int32_t scope) : sdk_(g_sdk), pushed_(false) {
-    if (sdk_ != nullptr && sdk_->text_scope.push != nullptr) {
-        pushed_ = sdk_->text_scope.push(scope).ok == kQolOk;
+TextScopeGuard::TextScopeGuard(int32_t scope)
+    : sdk_(g_sdk), previous_scope_(t_current_text_scope), pushed_(false) {
+    if (sdk_ == nullptr || sdk_->text_scope.push == nullptr || sdk_->text_scope.pop == nullptr) {
+        return;
     }
+    const int32_t host_scope = scope >= 0 && scope <= 4 ? scope : 0;
+    pushed_ = sdk_->text_scope.push(host_scope).ok == kQolOk;
+    if (pushed_) t_current_text_scope = scope;
 }
 
 TextScopeGuard::~TextScopeGuard() {
     if (pushed_ && sdk_ != nullptr && sdk_->text_scope.pop != nullptr) {
         (void)sdk_->text_scope.pop();
     }
+    t_current_text_scope = previous_scope_;
 }
 
 bool log_budget_take() {
@@ -292,4 +298,6 @@ bool is_stuff_ctrl(void* ctrl) {
            slot >= 0 && slot < static_cast<int32_t>(kStuffSlotCount);
 }
 
-}  // namespace qol::features::craft_ui
+int32_t current_text_scope() { return t_current_text_scope; }
+
+}  // namespace qol::features::custom_recipe::ui

@@ -43,8 +43,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/custom_recipe/table.cpp
     plugins/custom_recipe/feature.cpp
     plugins/custom_recipe/plugin.cpp
-    plugins/craft_ui/feature.cpp
-    plugins/craft_ui/plugin.cpp
     plugins/core.craft/plugin.cpp
     plugins/push_all/rules.cpp
     plugins/push_all/feature.cpp
@@ -192,8 +190,8 @@ target_sources(gamebridge PRIVATE
     hooks/dispatch.cpp
 )
 
-# 合成器界面层（craft_ui 插件）：UIMix 控件写入收口 game/access/craft + 12 条入口 hook 声明。
-# 宝石合成与自定义配方共用；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
+# 合成器界面子层（并入 custom_recipe 单 owner）：UIMix 控件写入收口 game/access/craft +
+# 12 条入口 hook 声明；「界面归界面、结果归结果」（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     game/access/craft.cpp
 )

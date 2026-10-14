@@ -130,6 +130,16 @@ void rollback_install(Tx& tx) {
             continue;
         }
         const contracts::ResourceClaim& claim = *entry.claim;
+        // 本事务内已被安全撤回（Free 且运行期记录已清）的条目不得二次释放：
+        // 二次 unhook 会把已归还的资源错误标记 tombstone/isolated。
+        // Free 但仍保留 runtime 记录属不安全状态，继续走原释放路径。
+        if (state_of(claim.id) == contracts::ResourceState::kFree) {
+            ResourceRuntime cleared{};
+            if (!runtime_of(claim.id, &cleared)) {
+                entry.installed = false;
+                continue;
+            }
+        }
         if (!claim.resumable) {
             set_state(claim.id, contracts::ResourceState::kTombstone);
             isolated_set(claim.id, true);
@@ -165,6 +175,7 @@ bool fail_install(Tx& tx, const char* resource_id, const char* error, TxStep* ou
     out->ok = 1;
     out->backup = nullptr;
     out->finished = true;
+    out->error = error;
     finalize_terminal(tx);
     return false;
 }
@@ -177,8 +188,35 @@ bool fail_restore(Tx& tx, const char* resource_id, const char* error, TxStep* ou
     out->ok = 1;
     out->backup = nullptr;
     out->finished = true;
+    out->error = error;
     finalize_terminal(tx);
     return false;
+}
+
+bool fail_install_soft_step(Tx& tx, const contracts::ResourceClaim& claim,
+                            const char* error, TxStep* out) {
+    const char* reason = error != nullptr ? error : "mechanism install failed";
+    set_state(claim.id, contracts::ResourceState::kFree);
+    runtime_clear(claim.id);
+    ++tx.step;
+    out->resource_id = claim.id;
+    out->ok = 1;
+    out->backup = nullptr;
+    out->error = reason;
+    out->finished = tx.step >= tx.total;
+    if (out->finished) {
+        tx.state = TxState::kSucceeded;
+        finalize_terminal(tx);
+    }
+    return !out->finished;
+}
+
+bool fail_install_resource(Tx& tx, const contracts::ResourceClaim& claim,
+                           const char* error, TxStep* out) {
+    if (claim.failure == contracts::ResourceFailure::kFailSoft) {
+        return fail_install_soft_step(tx, claim, error, out);
+    }
+    return fail_install(tx, claim.id, error, out);
 }
 
 // 非入口机制安装步：call patch 不支持空转（§4.2 规则 6），gate 关不安装、登记保持 free。
@@ -200,13 +238,14 @@ bool install_other_step(Tx& tx, const contracts::ResourceClaim& claim, uint32_t 
         return !out->finished;
     }
     if (g_deps.install_other == nullptr) {
-        return fail_install(tx, claim.id, "mechanism unsupported", out);
+        return fail_install_resource(tx, claim, "mechanism unsupported", out);
     }
     const TxDeps::MechanismOutcome outcome = g_deps.install_other(claim, 0);
     if (outcome.ok != 0) {
-        return fail_install(tx, claim.id,
-                            outcome.error != nullptr ? outcome.error : "mechanism install failed",
-                            out);
+        return fail_install_resource(tx, claim,
+                                     outcome.error != nullptr ? outcome.error
+                                                              : "mechanism install failed",
+                                     out);
     }
     set_state(claim.id, contracts::ResourceState::kLive);
     runtime_set(claim.id, 0, nullptr);
@@ -215,6 +254,7 @@ bool install_other_step(Tx& tx, const contracts::ResourceClaim& claim, uint32_t 
     out->resource_id = claim.id;
     out->ok = 0;
     out->backup = nullptr;
+    out->error = nullptr;
     out->finished = tx.step >= tx.total;
     if (out->finished) {
         tx.state = TxState::kSucceeded;
@@ -284,10 +324,10 @@ bool install_step(Tx& tx, TxStep* out) {
     bool followed = false;
     const uintptr_t entry = g_deps.resolve_entry(claim.symbol, &followed);
     if (entry == 0) {
-        return fail_install(tx, claim.id, "symbol not resolved", out);
+        return fail_install_resource(tx, claim, "symbol not resolved", out);
     }
     if (entry_target_conflicts(entry, claim.id)) {
-        return fail_install(tx, claim.id, "entry target already occupied", out);
+        return fail_install_resource(tx, claim, "entry target already occupied", out);
     }
 
     // gate 为 nullptr 视为开；gate_on 未注入时一切 gate 视为开。
@@ -299,7 +339,7 @@ bool install_step(Tx& tx, TxStep* out) {
     void* backup = nullptr;
     const int rc = g_deps.hook_fn(reinterpret_cast<void*>(entry), claim.handler, &backup);
     if (rc != 0) {
-        return fail_install(tx, claim.id, "native hook failed", out);
+        return fail_install_resource(tx, claim, "native hook failed", out);
     }
 
     runtime_set(claim.id, entry, backup);
@@ -310,6 +350,7 @@ bool install_step(Tx& tx, TxStep* out) {
     out->resource_id = claim.id;
     out->ok = 0;
     out->backup = backup;
+    out->error = nullptr;
     out->finished = tx.step >= tx.total;
     if (out->finished) {
         tx.state = TxState::kSucceeded;
@@ -363,6 +404,7 @@ bool restore_step(Tx& tx, TxStep* out) {
         out->resource_id = nullptr;  // 等待帧
         out->ok = 0;
         out->finished = false;
+        out->error = nullptr;
         return true;
     }
 
@@ -384,6 +426,7 @@ bool restore_step(Tx& tx, TxStep* out) {
     ++tx.step;
     out->resource_id = claim.id;
     out->ok = 0;
+    out->error = nullptr;
     out->finished = tx.step >= tx.total;
     if (out->finished) {
         tx.state = TxState::kSucceeded;
@@ -525,6 +568,7 @@ bool tx_step(uint64_t tx_id, TxStep* out) {
     out->ok = 0;
     out->backup = nullptr;
     out->finished = false;
+    out->error = nullptr;
 
     // 每次调用消耗 1 帧，等待帧同样计入。
     ++tx->frames;
@@ -537,6 +581,21 @@ bool tx_step(uint64_t tx_id, TxStep* out) {
         return install_step(*tx, out);
     }
     return restore_step(*tx, out);
+}
+
+bool tx_abort_install(uint64_t tx_id, const char* resource_id, const char* error) {
+    Tx* tx = find_active(tx_id);
+    if (tx == nullptr || tx->kind != TxKind::kInstall || tx->state != TxState::kRunning) {
+        return false;
+    }
+    static constexpr char kAbortDefault[] = "install aborted";
+    static constexpr char kAbortUnnamed[] = "resource";
+    tx->failed_resource_id = resource_id != nullptr ? resource_id : kAbortUnnamed;
+    tx->error = error != nullptr ? error : kAbortDefault;
+    rollback_install(*tx);
+    tx->state = TxState::kFailed;
+    finalize_terminal(*tx);
+    return true;
 }
 
 bool tx_query(uint64_t tx_id, TxStatus* out) {

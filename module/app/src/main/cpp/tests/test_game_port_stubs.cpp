@@ -45,6 +45,10 @@ const contracts::QolChoicePort kChoicePort{{1, 0}, {}, {}};
 const contracts::QolExtensionBagWritePort kExtensionBagWritePort{};
 const contracts::QolSavePort kSavePort{{1, 0}, {}};
 const contracts::QolSaveCallPort kSaveCallPort{{1, 0}, {}};
+// 单 owner 生产装配 fixture 需要「就绪」的写端口；默认仍是空桩（其它 target 语义不变）。
+const contracts::QolCraftUiWritePort* craft_ui_write_port_override = nullptr;
+const contracts::QolCustomRecipeWritePort* custom_recipe_write_port_override = nullptr;
+
 const contracts::QolCraftPort kCraftPort{contracts::kQolPortCraftVersion, {}, {}};
 const contracts::QolCraftUiWritePort kCraftUiWritePort{contracts::kQolPortCraftUiWriteVersion,
                                                         nullptr, nullptr, nullptr,
@@ -121,9 +125,13 @@ const contracts::QolExtensionBagWritePort& extension_bag_write_port() {
 const contracts::QolSavePort& save_port() { return kSavePort; }
 const contracts::QolSaveCallPort& save_call_port() { return kSaveCallPort; }
 const contracts::QolCraftPort& craft_port() { return kCraftPort; }
-const contracts::QolCraftUiWritePort& craft_ui_write_port() { return kCraftUiWritePort; }
+const contracts::QolCraftUiWritePort& craft_ui_write_port() {
+    return craft_ui_write_port_override != nullptr ? *craft_ui_write_port_override
+                                                   : kCraftUiWritePort;
+}
 const contracts::QolCustomRecipeWritePort& custom_recipe_write_port() {
-    return kCustomRecipeWritePort;
+    return custom_recipe_write_port_override != nullptr ? *custom_recipe_write_port_override
+                                                        : kCustomRecipeWritePort;
 }
 const contracts::QolCharacterExtrasPort& character_extras_port() {
     return kCharacterExtrasPort;
@@ -147,6 +155,19 @@ const contracts::QolCharacterWriteOpsPort& character_write_ops_port() {
 const contracts::QolMoveMergePort& move_merge_port() { return kMoveMergePort; }
 
 }  // namespace qol::game
+
+// 单 owner 生产装配 fixture 的端口注入点：默认空桩不变，只有显式调用的 target 生效。
+namespace qol::gametest {
+
+void set_craft_ui_write_port_for_test(const qol::contracts::QolCraftUiWritePort* port) {
+    qol::game::craft_ui_write_port_override = port;
+}
+
+void set_custom_recipe_write_port_for_test(const qol::contracts::QolCustomRecipeWritePort* port) {
+    qol::game::custom_recipe_write_port_override = port;
+}
+
+}  // namespace qol::gametest
 
 namespace qol::host {
 namespace {

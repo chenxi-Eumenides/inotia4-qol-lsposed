@@ -39,7 +39,6 @@
 #include "plugins/core.custom_ui/settings_contribution.h"
 #include "plugins/core.custom_ui/plugin.h"
 #include "plugins/core.api/plugin.h"
-#include "plugins/craft_ui/plugin.h"
 #include "plugins/core.craft/plugin.h"
 #include "plugins/core.character/plugin.h"
 #include "plugins/core.data/plugin.h"
@@ -221,7 +220,6 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_api::plugin_descriptor},
     {&features::core_settings::plugin_descriptor},
     {&features::core_ui::plugin_descriptor},
-    {&features::craft_ui::plugin_descriptor},
     {&features::custom_recipe::plugin_descriptor},
     {&features::extension_bag::plugin_descriptor},
     {&features::move_merge::plugin_descriptor},

@@ -1700,7 +1700,7 @@
 - `enable=false` 时 feature 置 true、重复写入相同值均会按 feature 集合修复 `enable=true`；反之，全 false 时重复写入 false 会修复为 `enable=false`。依赖级联与激活失败不改 desired；常驻需求用 default true 的 hidden feature 表达。
 - entry invocation 不是 feature 值修改，不会改写 feature 或 `enable`。`core.api` 注册 Hidden、默认开启的 `api.enabled` feature（Debug 设置页显示，Release 设置页过滤）；Kotlin listener adapter 仅在 runtime effect 的 actual、desired 均启用且配置有效时启动 listener，desired 关闭时立即停止 listener。category 与描述只影响设置页显示，不改变 listener/API 服务行为。`module.platform` 只注册 `debug.logging`；`module.security` 注册 Hidden、默认关闭的 `op.enabled`，Hidden 项在 Debug 显示、Release 过滤。OP feature 独立控制 endpoint 声明的 OP 授权；API 服务关闭不会改写 OP 值，API 服务开启也不会自动授权 OP。旧 `module.platform.features.api.enabled`、`core.api.features.core.api.http_registry` 与平铺 root `apiEnabled` 按 Host Store 的 API 迁移规则归一为 `core.api.features.api.enabled`；两个旧 namespace feature 同时存在时采用 AND，缺失按 true，root 字段仅在旧 `module.platform` feature 缺失时作为 fallback。已有新目标值（包括 false）优先。OP 只导入明确保存的旧 `module.platform.features.op.enabled`、root `opEnabled` 或 `core.settings.config.opEnabled` 值（false 保留），不从 API 状态推导。该 Host owner 的 `enable` 不控制常驻 Host 服务或管理路由。
 - 实际状态（actual）受依赖、版本、安装结果约束，与 desired（`enable`/feature 期望）分开报告。
-- `custom_recipe.recipes`（唯一可见开关，default `false`）与 `craft_ui.custom_crafting`（hidden default `true`，并将 `craft_result` 升为 requires）级联启停；级联不改 desired。
+- `custom_recipe.recipes`（唯一可见开关，default `false`）级联启停该 owner 的 UIMix UI 子层与资源；级联不改 desired。原独立 `craft_ui` 插件与 hidden `craft_ui.custom_crafting` 已删除：UI 子层并入 `custom_recipe`，`craft_result` 内化为 owner 内部调用面（不再作为 capability 提供或被依赖）。Store 中旧 key 残留不参与注册投影或运行。
 - `item_count` 的数量解释归 Host 常驻 Adapter；`stack_limit` 的 999 数量策略通过其 `stack_limit.limit_999`（default `false`）feature 与资源 lifecycle 表达。本文不展开扩展数量读取接口。
 
 #### 读取配置投影

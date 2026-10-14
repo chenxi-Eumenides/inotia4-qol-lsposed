@@ -19,6 +19,7 @@ void test_set_item_port_version(::QolVersion version);
 #include "contracts/item_state.h"
 #include "contracts/ownership.h"
 #include "hooks/registry.h"
+#include "hooks/transaction.h"
 #include "infra/capabilities.h"
 #include "infra/config.h"
 #include "infra/events.h"
@@ -184,6 +185,8 @@ struct PluginProbe {
     int disabled_calls = 0;
     int ready_calls = 0;
     int install_rc = 0;
+    int ready_rc = 0;         // 非 0 = on_resource_ready 恒失败
+    int ready_fail_call = 0;  // 第 N 次 on_resource_ready（1 起）失败；0 = 不用按次数失败
     char last_ready_id[64] = {};
     void* ready_backups[4] = {};
 };
@@ -205,7 +208,10 @@ int32_t probe_ready(PluginContext&, const char* resource_id, void* backup) {
     if (g_probe.ready_calls <= 4) {
         g_probe.ready_backups[g_probe.ready_calls - 1] = backup;
     }
-    return 0;
+    if (g_probe.ready_fail_call != 0 && g_probe.ready_calls == g_probe.ready_fail_call) {
+        return 1;
+    }
+    return g_probe.ready_rc;
 }
 void probe_fill_status(PluginStatusOut& out) {
     out.enabled = false;
@@ -569,6 +575,7 @@ PluginDescriptor make_dep_descriptor(const char* id, const CapabilityRequirement
 void reset_all() {
     plugin_registry_reset_for_test();
     qol::hooks::registry_reset_for_test();
+    qol::hooks::tx_reset_for_test();
     qol::infra::status_reset_for_test();
     qol::infra::capabilities_reset_for_test();
     qol::infra::config_reset_for_test();
@@ -1822,6 +1829,318 @@ void test_optional_degrade_timing_after_enable() {
     CHECK(!feature_degraded("consumer"));
 }
 
+// ---------------------------------------------------------------------------
+// 生产 feature-mode 生命周期（真实 registry + 真实 hooks/transaction）
+// ---------------------------------------------------------------------------
+
+const qol::contracts::FeatureDefinition g_fm_features[] = {
+    {"fm.test", 0, qol::contracts::FeatureCategory::kHidden,
+     qol::contracts::FeatureType::kToggle, "fm", "frame-mode test", nullptr, nullptr},
+};
+
+PluginDescriptor make_feature_descriptor(const char* id, const ResourceClaim* resources,
+                                         uint32_t resource_count) {
+    PluginDescriptor d = make_descriptor(id, resources, resource_count, nullptr, 0);
+    d.features = g_fm_features;
+    d.feature_count = 1;
+    return d;
+}
+
+qol::hooks::TxDeps::MechanismOutcome tx_install_other(const ResourceClaim& claim, uintptr_t) {
+    if (claim.mechanism == ResourceMechanism::kOwnership) {
+        const auto* ops = qol::contracts::ownership_ops(claim.handler);
+        const int32_t rc = qol::contracts::ownership_acquire(ops, claim.id);
+        return {rc, rc == 0 ? nullptr : "ownership acquire rejected"};
+    }
+    return {1, "mechanism unsupported"};
+}
+
+qol::hooks::TxDeps::MechanismOutcome tx_release_other(const ResourceClaim& claim, uintptr_t) {
+    if (claim.mechanism == ResourceMechanism::kOwnership) {
+        qol::contracts::ownership_release(qol::contracts::ownership_ops(claim.handler), claim.id);
+    }
+    return {0, nullptr};
+}
+
+void arm_tx_deps() {
+    qol::hooks::tx_set_deps(
+        qol::hooks::TxDeps{&fake_resolve, &fake_hook, &fake_unhook, nullptr, &tx_install_other,
+                           &tx_release_other});
+}
+
+void reset_feature_mode(const char* id, const ResourceClaim* resources, uint32_t count) {
+    reset_all();
+    arm_tx_deps();
+    CHECK(register_plugin(make_feature_descriptor(id, resources, count)));
+    CHECK(qol::host::feature_registry_prepare(make_deps()));
+    qol::host::feature_registry_set_wanted(id, true);
+}
+
+void drive_feature_steps() {
+    for (int i = 0; i < 400; ++i) {
+        if (qol::host::feature_registry_step() == 0) break;
+    }
+}
+
+ResourceClaim soft_claim(const char* id, const char* owner) {
+    ResourceClaim c = claim(id, owner, nullptr);
+    c.failure = ResourceFailure::kFailSoft;
+    return c;
+}
+
+ResourceClaim fm_core_hooks[] = {
+    claim("hook:fm:core:a", "fm_core", nullptr),
+    claim("hook:fm:core:b", "fm_core", nullptr),
+    claim("hook:fm:core:c", "fm_core", nullptr),
+};
+
+// 生产 feature-mode：核心 hook 逐条安装，任一 FailClosed 失败 → 逆序回滚已装子集 + Failed。
+void test_feature_mode_core_hook_failure_rolls_back() {
+    reset_feature_mode("fm_core", fm_core_hooks, 3);
+    g_backend.fail_hook_call = 2;
+    CHECK(qol::host::feature_registry_transition("fm_core", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_core", FeatureState::kFailed));
+    CHECK(qol::hooks::state_of("hook:fm:core:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:fm:core:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:fm:core:c") == ResourceState::kFree);
+    CHECK(g_backend.unhook_calls == 1);  // 逆序回滚第 1 条
+    CHECK(g_probe.enabled_calls == 0);
+    CHECK(!feature_degraded("fm_core"));  // 失败态不得误报 partial degraded
+}
+
+ResourceClaim fm_soft_hooks[] = {
+    soft_claim("hook:fm:soft:a", "fm_soft"),
+    soft_claim("hook:fm:soft:b", "fm_soft"),
+    soft_claim("hook:fm:soft:c", "fm_soft"),
+};
+
+// 生产 feature-mode：FailSoft 中段失败 → 该资源 Free、继续后续、事务成功 → enabled + degraded。
+void test_feature_mode_soft_middle_keeps_degraded_reason() {
+    reset_feature_mode("fm_soft", fm_soft_hooks, 3);
+    g_backend.fail_hook_call = 2;
+    CHECK(qol::host::feature_registry_transition("fm_soft", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_soft", FeatureState::kEnabled));
+    CHECK(feature_degraded("fm_soft"));
+    CHECK(qol::hooks::state_of("hook:fm:soft:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:fm:soft:b") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:fm:soft:c") == ResourceState::kLive);
+    {
+        const char* error = nullptr;
+        CHECK(feature_of("fm_soft", nullptr, nullptr, &error));
+        CHECK(error != nullptr && std::strstr(error, "hook:fm:soft:b") != nullptr);
+    }
+    // 成功终态不得清除软失败原因（g_gate_degraded 会被终态清掉，此项单独保留）。
+    drive_feature_steps();
+    CHECK(feature_degraded("fm_soft"));
+    {
+        const char* error = nullptr;
+        CHECK(feature_of("fm_soft", nullptr, nullptr, &error));
+        CHECK(error != nullptr && std::strstr(error, "hook:fm:soft:b") != nullptr);
+    }
+}
+
+ResourceClaim fm_soft_last[] = {
+    soft_claim("hook:fm:softlast:a", "fm_soft_last"),
+    soft_claim("hook:fm:softlast:b", "fm_soft_last"),
+};
+
+// 生产 feature-mode：软失败发生在最后一条仍成功终态，末资源 Free + degraded。
+void test_feature_mode_soft_last_keeps_degraded_reason() {
+    reset_feature_mode("fm_soft_last", fm_soft_last, 2);
+    g_backend.fail_hook_call = 2;
+    CHECK(qol::host::feature_registry_transition("fm_soft_last", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_soft_last", FeatureState::kEnabled));
+    CHECK(feature_degraded("fm_soft_last"));
+    CHECK(qol::hooks::state_of("hook:fm:softlast:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:fm:softlast:b") == ResourceState::kFree);
+    const char* error = nullptr;
+    CHECK(feature_of("fm_soft_last", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "hook:fm:softlast:b") != nullptr);
+}
+
+ResourceClaim fm_soft_then_hard[] = {
+    soft_claim("hook:fm:sh:soft", "fm_soft_hard"),
+    claim("hook:fm:sh:hard", "fm_soft_hard", nullptr),
+};
+
+// 生产 feature-mode：软失败之后遇硬失败 → Failed；软失败资源保持 Free，未被伪装回滚。
+void test_feature_mode_soft_then_hard_failure() {
+    reset_feature_mode("fm_soft_hard", fm_soft_then_hard, 2);
+    g_backend.unresolved_symbol = "hook:fm:sh:soft";
+    g_backend.fail_hook_call = 1;
+    CHECK(qol::host::feature_registry_transition("fm_soft_hard", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_soft_hard", FeatureState::kFailed));
+    CHECK(qol::hooks::state_of("hook:fm:sh:soft") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("hook:fm:sh:hard") == ResourceState::kFree);
+    CHECK(g_backend.unhook_calls == 0);
+    CHECK(g_probe.enabled_calls == 0);
+}
+
+ResourceClaim fm_ready_soft[] = {soft_claim("hook:fm:ready:soft", "fm_ready_soft")};
+
+// 生产 feature-mode：on_resource_ready 失败且 claim 为 FailSoft → 安全撤回该资源为 Free，
+// 仍 enabled + degraded，不置 Failed。
+void test_feature_mode_ready_callback_soft_failure_degrades() {
+    reset_feature_mode("fm_ready_soft", fm_ready_soft, 1);
+    g_probe.ready_rc = 1;
+    CHECK(qol::host::feature_registry_transition("fm_ready_soft", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_ready_soft", FeatureState::kEnabled));
+    CHECK(feature_degraded("fm_ready_soft"));
+    CHECK(qol::hooks::state_of("hook:fm:ready:soft") == ResourceState::kFree);
+    CHECK(g_backend.unhook_calls == 1);  // 安全撤回
+    CHECK(!qol::hooks::isolated_get("hook:fm:ready:soft"));
+    const char* error = nullptr;
+    CHECK(feature_of("fm_ready_soft", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "hook:fm:ready:soft") != nullptr);
+}
+
+ResourceClaim fm_ready_hard[] = {claim("hook:fm:ready:hard", "fm_ready_hard", nullptr)};
+
+// 生产 feature-mode：FailClosed + ready 失败 → Failed（默认策略不变）。
+// 末步 ready 失败时安装事务已终态：沿既有还原事务清理，资源回 Free 且最终 cleanup。
+void test_feature_mode_ready_callback_hard_failure_fails() {
+    reset_feature_mode("fm_ready_hard", fm_ready_hard, 1);
+    g_probe.ready_rc = 1;
+    CHECK(qol::host::feature_registry_transition("fm_ready_hard", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_ready_hard", FeatureState::kFailed));
+    CHECK(g_probe.enabled_calls == 0);
+    CHECK(qol::hooks::state_of("hook:fm:ready:hard") == ResourceState::kFree);
+    CHECK(g_backend.unhook_calls == 1);  // 终态路径经还原事务释放
+    CHECK(g_probe.deactivate_calls == 1);  // registrations 最终 cleanup
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+}
+
+ResourceClaim fm_ownership_last[] = {
+    claim("hook:fm:own:a", "fm_own_soft", nullptr),
+    ownership_claim("own:fm:last", "fm_own_soft"),
+};
+
+// 生产 feature-mode：ownership 末条软失败 → 事务成功但 degraded、ownership Free。
+void test_feature_mode_ownership_last_soft_failure() {
+    fm_ownership_last[1].failure = ResourceFailure::kFailSoft;
+    reset_feature_mode("fm_own_soft", fm_ownership_last, 2);
+    g_ownership.fail_acquire_at = 1;
+    CHECK(qol::host::feature_registry_transition("fm_own_soft", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_own_soft", FeatureState::kEnabled));
+    CHECK(feature_degraded("fm_own_soft"));
+    CHECK(qol::hooks::state_of("hook:fm:own:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("own:fm:last") == ResourceState::kFree);
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+    const char* error = nullptr;
+    CHECK(feature_of("fm_own_soft", nullptr, nullptr, &error));
+    CHECK(error != nullptr && std::strstr(error, "own:fm:last") != nullptr);
+}
+
+ResourceClaim fm_ready_abort[] = {
+    claim("hook:fm:ra:a", "fm_ready_abort", nullptr),
+    ownership_claim("own:fm:ra:b", "fm_ready_abort"),
+};
+
+// 生产 feature-mode：required 资源 ready 失败时安装事务仍在途 → 先中止安装，
+// 禁止继续执行后续步（尤其末尾 ownership acquire），已装资源逆序释放并最终 cleanup。
+void test_feature_mode_required_ready_failure_aborts_inflight_install() {
+    fm_ready_abort[1].failure = ResourceFailure::kFailClosed;
+    reset_feature_mode("fm_ready_abort", fm_ready_abort, 2);
+    g_probe.ready_rc = 1;  // 第一步 ready 失败
+    CHECK(qol::host::feature_registry_transition("fm_ready_abort", true));
+    drive_feature_steps();
+
+    CHECK(feature_state_is("fm_ready_abort", FeatureState::kFailed));
+    CHECK(g_ownership.acquire_calls == 0);  // 末尾 ownership 从未被尝试
+    CHECK(qol::hooks::state_of("hook:fm:ra:a") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("own:fm:ra:b") == ResourceState::kFree);
+    CHECK(g_backend.unhook_calls == 1);  // 已装 A 逆序释放一次
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+    CHECK(g_probe.enabled_calls == 0);
+    CHECK(g_probe.deactivate_calls == 1);  // 最终 failed cleanup
+}
+
+ResourceClaim fm_soft_ready_then_hard[] = {
+    soft_claim("hook:fm:srh:a", "fm_srh"),
+    claim("hook:fm:srh:b", "fm_srh", nullptr),
+};
+
+// 生产 feature-mode：软 ready 失败安全撤回后，后续 required 安装硬失败 →
+// 已撤回资源保持 Free、不 isolated、不二次 unhook；后续实际安装的资源仍逆序释放。
+void test_feature_mode_soft_ready_revoke_then_hard_failure() {
+    reset_feature_mode("fm_srh", fm_soft_ready_then_hard, 2);
+    g_probe.ready_fail_call = 1;  // 第一条（软）ready 失败
+    g_backend.fail_hook_call = 2;  // 第二条安装失败
+    CHECK(qol::host::feature_registry_transition("fm_srh", true));
+    drive_feature_steps();
+
+    CHECK(feature_state_is("fm_srh", FeatureState::kFailed));
+    CHECK(qol::hooks::state_of("hook:fm:srh:a") == ResourceState::kFree);
+    CHECK(!qol::hooks::isolated_get("hook:fm:srh:a"));
+    CHECK(qol::hooks::state_of("hook:fm:srh:b") == ResourceState::kFree);
+    CHECK(g_backend.unhook_calls == 1);  // 仅安全撤回一次，无二次 unhook
+    CHECK(g_probe.enabled_calls == 0);
+}
+
+ResourceClaim fm_release_inflight[] = {claim("hook:fm:rel:a", "fm_release", nullptr)};
+
+// 生产 feature-mode：撤销等待在途归零；在途未清前不得进入 inactive。
+void test_feature_mode_release_waits_for_in_flight() {
+    reset_feature_mode("fm_release", fm_release_inflight, 1);
+    CHECK(qol::host::feature_registry_transition("fm_release", true));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_release", FeatureState::kEnabled));
+    CHECK(qol::hooks::state_of("hook:fm:rel:a") == ResourceState::kLive);
+
+    CHECK(qol::hooks::in_flight_enter("hook:fm:rel:a"));
+    CHECK(qol::host::feature_registry_transition("fm_release", false));
+    drive_feature_steps();
+    CHECK(!feature_state_is("fm_release", FeatureState::kInactive));
+    // 在途未归零：资源仍物理安装（live 或 stop 预备后的 disabled），不得提前 kFree。
+    const ResourceState held = qol::hooks::state_of("hook:fm:rel:a");
+    CHECK(held == ResourceState::kLive || held == ResourceState::kDisabled);
+
+    qol::hooks::in_flight_leave("hook:fm:rel:a");
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_release", FeatureState::kInactive));
+}
+
+// craft_ui write port 的私有 owner 收敛到合并后的 custom_recipe；旧 craft_ui 被拒。
+void test_craft_ui_write_port_owner_is_custom_recipe() {
+    reset_all();
+    const qol::contracts::QolPortRequirement craft_ui_requirement{
+        qol::contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE,
+        {qol::contracts::kQolPortCraftUiWriteVersion.major,
+         qol::contracts::kQolPortCraftUiWriteVersion.minor}};
+    PluginDescriptor legacy = make_descriptor("craft_ui", nullptr, 0, nullptr, 0);
+    legacy.ports = &craft_ui_requirement;
+    legacy.port_count = 1;
+    CHECK(register_plugin(legacy));
+    CHECK(install_all(make_deps()) == 1);
+    {
+        const char* error = nullptr;
+        CHECK(feature_of("craft_ui", nullptr, nullptr, &error));
+        CHECK(error != nullptr && std::strstr(error, "private port") != nullptr);
+    }
+
+    reset_all();
+    const qol::contracts::QolPortRequirement merged[] = {
+        {qol::contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE,
+         {qol::contracts::kQolPortCraftUiWriteVersion.major,
+          qol::contracts::kQolPortCraftUiWriteVersion.minor}},
+        {qol::contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE,
+         {qol::contracts::kQolPortCustomRecipeWriteVersion.major,
+          qol::contracts::kQolPortCustomRecipeWriteVersion.minor}},
+    };
+    PluginDescriptor merged_owner = make_descriptor("custom_recipe", nullptr, 0, nullptr, 0);
+    merged_owner.ports = merged;
+    merged_owner.port_count = 2;
+    CHECK(register_plugin(merged_owner));
+    CHECK(install_all(make_deps()) == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -1877,6 +2196,17 @@ int main() {
     test_optional_pending_degrade_after_provider_failure();
     test_optional_acyclic_order_preserved();
     test_optional_degrade_timing_after_enable();
+    test_feature_mode_core_hook_failure_rolls_back();
+    test_feature_mode_soft_middle_keeps_degraded_reason();
+    test_feature_mode_soft_last_keeps_degraded_reason();
+    test_feature_mode_soft_then_hard_failure();
+    test_feature_mode_ready_callback_soft_failure_degrades();
+    test_feature_mode_ready_callback_hard_failure_fails();
+    test_feature_mode_required_ready_failure_aborts_inflight_install();
+    test_feature_mode_soft_ready_revoke_then_hard_failure();
+    test_feature_mode_ownership_last_soft_failure();
+    test_feature_mode_release_waits_for_in_flight();
+    test_craft_ui_write_port_owner_is_custom_recipe();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

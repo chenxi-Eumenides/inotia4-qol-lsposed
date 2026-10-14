@@ -396,7 +396,7 @@ bool resolve_plugin_ports(uint32_t index) {
             return false;
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "craft_ui") != 0)) {
+            (plugin.id == nullptr || std::strcmp(plugin.id, "custom_recipe") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
@@ -480,6 +480,27 @@ char g_error_text[kMaxPlugins][kMaxErrorText];
 char g_gate_error_text[kMaxPlugins][kMaxErrorText];
 bool g_gate_degraded[kMaxPlugins];
 bool g_cascade_degraded[kMaxPlugins];
+// Feature-mode 逐资源安装失败记录。与 g_gate_degraded 分开：安装事务成功终态会清
+// g_gate_degraded，但软失败的资源仍未安装，原因必须保留到此资源重装成功或重新转换。
+char g_resource_error_text[kMaxPlugins][kMaxErrorText];
+bool g_resource_install_failed[kMaxPlugins];
+bool g_resource_error_present[kMaxPlugins];
+
+void clear_resource_install_error(uint32_t index) {
+    if (index >= kMaxPlugins) return;
+    g_resource_install_failed[index] = false;
+    g_resource_error_present[index] = false;
+    g_resource_error_text[index][0] = '\0';
+}
+
+void record_resource_install_error(uint32_t index, const char* resource_id, const char* reason) {
+    if (index >= kMaxPlugins) return;
+    g_resource_install_failed[index] = true;
+    g_resource_error_present[index] = true;
+    std::snprintf(g_resource_error_text[index], sizeof(g_resource_error_text[index]),
+                  "resource %s: %s", resource_id != nullptr ? resource_id : "?",
+                  reason != nullptr ? reason : "install failed");
+}
 // optional 依赖暂缓标记：段 1 时图中存在有效 provider 但尚未注册 → 暂缓到 install 循环后复查。
 uint8_t g_optional_pending[kMaxPlugins] = {};
 
@@ -487,7 +508,8 @@ void refresh_degraded_status(uint32_t index) {
     if (index >= g_plugin_count) return;
     infra::status_set_degraded(g_plugins[index].descriptor.id,
                                g_gate_degraded[index] || g_cascade_degraded[index] ||
-                                   g_http_degraded[index]);
+                                   g_http_degraded[index] ||
+                                   g_resource_install_failed[index]);
 }
 
 void refresh_http_degraded_status(const char* owner) {
@@ -940,9 +962,9 @@ void rollback_resources(const contracts::ResourceClaim* const* claims,
 
 // 撤回单条已安装资源（§3.3 受限回调失败路径）：成功 → kFree + runtime 清除；
 // 失败 → kTombstone + 隔离（保留占用，禁止重试直到进程重启）。
-void revoke_resource(const char* resource_id, const HostDeps& deps) {
+bool revoke_resource(const char* resource_id, const HostDeps& deps) {
     const contracts::ResourceClaim* claim = hooks::find_claim(resource_id);
-    if (claim == nullptr) return;
+    if (claim == nullptr) return false;
     bool released = false;
     if (claim->mechanism == contracts::ResourceMechanism::kEntryHook) {
         hooks::ResourceRuntime runtime{};
@@ -960,6 +982,7 @@ void revoke_resource(const char* resource_id, const HostDeps& deps) {
         hooks::set_state(resource_id, contracts::ResourceState::kTombstone);
         hooks::isolated_set(resource_id, true);
     }
+    return released;
 }
 
 // 逆序撤回一组已记录资源（§3.2 语义 5：禁止半装对外可见）。
@@ -1483,6 +1506,18 @@ bool feature_stop(uint32_t index, bool failed_cleanup) {
     slot->was_enabled = status.enabled;
     slot->failed_cleanup = failed_cleanup;
     slot->stopped_token = stopped_token;
+    return true;
+}
+
+// 全部声明资源是否都已物理安装（kLive/kDisabled）；软失败保持 kFree 时返回 false。
+bool plugin_resources_all_installed(const contracts::PluginDescriptor& plugin) {
+    for (uint32_t i = 0; i < plugin.resources_count; ++i) {
+        const contracts::ResourceState state = hooks::state_of(plugin.resources[i].id);
+        if (state != contracts::ResourceState::kLive &&
+            state != contracts::ResourceState::kDisabled) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -2313,6 +2348,11 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             }
             infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
             const uint32_t index = plugin_index_of(plugin->id);
+            // 新一次转换重新开始逐资源安装：清上一轮的 resource-install 失败记录。
+            if (g_feature_mode) {
+                clear_resource_install_error(index);
+                refresh_degraded_status(index);
+            }
             const char* blocked_error = check_requires(*plugin, index);
             if (blocked_error != nullptr) {
                 infra::status_update(plugin->id, infra::FeatureState::kBlocked, false,
@@ -2414,6 +2454,7 @@ bool feature_registry_prepare(const HostDeps& deps) {
     owner_save_route_stopped_try_handler(&save_route::owner_stopped_poll);
     std::memset(g_port_invalid, 0, sizeof(g_port_invalid));
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        clear_resource_install_error(i);
         infra::status_register(g_plugins[i].descriptor.id, g_plugins[i].descriptor.version);
         if (!resolve_plugin_ports(i)) g_port_invalid[i] = true;
     }
@@ -2599,9 +2640,16 @@ static uint32_t lifecycle_step_engine() {
 
         // 生命周期事务跨帧推进时，原子成员即使已物理安装也先保持非 live 登记；
         // 下一成员失败或事务仍在途时，能力与 wrapper 不得观察到部分组。
+        // 只对真实安装成功的资源（kLive）转 kDisabled：软失败步保持 kFree，不得伪装已装。
         if (slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr && out.ok == 0 &&
-            (g_feature_mode || atomic_claim_by_id(plugin, out.resource_id) != nullptr)) {
+            (g_feature_mode || atomic_claim_by_id(plugin, out.resource_id) != nullptr) &&
+            hooks::state_of(out.resource_id) == contracts::ResourceState::kLive) {
             hooks::set_state(out.resource_id, contracts::ResourceState::kDisabled);
+        }
+        // 软失败步（事务继续、资源保持自由）不伪造安装；单独记录原因供终态状态使用。
+        if (g_feature_mode && slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
+            out.ok != 0) {
+            record_resource_install_error(slot.plugin_index, out.resource_id, out.error);
         }
 
         // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
@@ -2616,21 +2664,54 @@ static uint32_t lifecycle_step_engine() {
             } else if (plugin.on_resource_ready != nullptr) {
                 contracts::PluginContext ctx = make_plugin_context(plugin.id);
                 if (plugin.on_resource_ready(ctx, out.resource_id, out.backup) != 0) {
-                    // 受限回调失败：置 failed，并启动还原事务回滚全部已装资源（§3.2 语义 5）。
-                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                         "resource_ready_failed");
-                    QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
-                                 plugin.id, out.resource_id);
-                    slot.ready_failed = true;
-                    const uint64_t release = hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
-                    if (release != 0) {
-                        // 安装事务已终态：改为驱动还原事务。
-                        slot.tx_id = release;
-                        slot.kind = hooks::TxKind::kRelease;
-                        switched_to_release = true;
+                    const contracts::ResourceClaim* ready_claim =
+                        hooks::find_claim(out.resource_id);
+                    const bool soft_ready =
+                        ready_claim != nullptr &&
+                        ready_claim->failure == contracts::ResourceFailure::kFailSoft;
+                    if (soft_ready && revoke_resource(out.resource_id, g_install_deps)) {
+                        // 软失败：资源安全撤回为 kFree，不置 failed，记录原因后继续其余资源。
+                        record_resource_install_error(slot.plugin_index, out.resource_id,
+                                                      "resource_ready_failed");
+                        QOL_LOG_WARN(QolDomain::kCore,
+                                     "plugin %s resource_ready_failed (soft) on %s", plugin.id,
+                                     out.resource_id);
                     } else {
-                        // 安装事务仍在途：退化为逐条同步撤回兜底（后续步新装资源亦即时撤回）。
-                        revoke_installed_resources(plugin, g_install_deps);
+                        // 受限回调失败：置 failed。若安装事务仍在途，先中止它（禁止后续步继续
+                        // 安装，尤其末尾 ownership acquire 造成 table 短暂发布），再走清理。
+                        infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                             "resource_ready_failed");
+                        QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
+                                     plugin.id, out.resource_id);
+                        slot.ready_failed = true;
+                        if (hooks::tx_abort_install(slot.tx_id, out.resource_id,
+                                                    "resource_ready_failed")) {
+                            // 安装事务已中止并回滚（Failed + 终态）：直接进入 failed cleanup，
+                            // 不启动还原事务、不重复回滚。
+                            if (g_feature_mode) {
+                                const auto index = slot.plugin_index;
+                                clear_resource_install_error(index);
+                                refresh_degraded_status(index);
+                                slot = LifecycleTx{};
+                                feature_stop(index, true);
+                            } else {
+                                slot.in_use = false;
+                                slot.ready_failed = false;
+                                slot.cascade = false;
+                                slot.tx_id = 0;
+                            }
+                            continue;
+                        }
+                        // 事务已终态：沿用既有还原事务 / 同步兜底清理路径。
+                        const uint64_t release =
+                            hooks::tx_begin(plugin.id, hooks::TxKind::kRelease);
+                        if (release != 0) {
+                            slot.tx_id = release;
+                            slot.kind = hooks::TxKind::kRelease;
+                            switched_to_release = true;
+                        } else {
+                            revoke_installed_resources(plugin, g_install_deps);
+                        }
                     }
                 }
             }
@@ -2642,6 +2723,9 @@ static uint32_t lifecycle_step_engine() {
             // 已因受限回调置 failed：保留 failed 态，不执行终态状态/回调覆盖。
             if (g_feature_mode) {
                 const auto index = slot.plugin_index;
+                // Failed 插件不保留逐资源 degraded 标记，避免把失败态误报成 partial degraded。
+                clear_resource_install_error(index);
+                refresh_degraded_status(index);
                 slot = LifecycleTx{};
                 feature_stop(index, true);
                 continue;
@@ -2681,11 +2765,27 @@ static uint32_t lifecycle_step_engine() {
                     g_gate_degraded[plugin_index] = false;
                     refresh_degraded_status(plugin_index);
                 }
+                // feature-mode：事务成功不等于全部资源已安装。软失败保持 kFree；此时保留
+                // 单独记录的 resource-install 原因（不用会被成功终态清除的 g_gate_degraded）。
+                bool resource_degraded = false;
+                if (g_feature_mode) {
+                    if (plugin_resources_all_installed(plugin)) {
+                        clear_resource_install_error(plugin_index);
+                    } else {
+                        resource_degraded = true;
+                    }
+                    refresh_degraded_status(plugin_index);
+                }
+                const char* terminal_error =
+                    resource_degraded
+                        ? (g_resource_error_present[plugin_index] ? g_resource_error_text[plugin_index]
+                                                                  : "resource install degraded")
+                        : nullptr;
                 infra::status_update(
                     plugin.id,
                     enabled ? infra::FeatureState::kEnabled
                             : infra::FeatureState::kInstalledDisabled,
-                    enabled, nullptr);
+                    enabled, terminal_error);
                 if (enabled) {
                     if (plugin.on_enabled != nullptr) plugin.on_enabled(ctx);
                     bind_http_endpoints(plugin);
@@ -2717,6 +2817,11 @@ static uint32_t lifecycle_step_engine() {
             if (g_feature_mode) {
                 const auto index = slot.plugin_index;
                 const auto kind = slot.kind;
+                if (kind == hooks::TxKind::kInstall) {
+                    // 安装事务失败：插件置 Failed，清逐资源 degraded 记录避免残留误报。
+                    clear_resource_install_error(index);
+                    refresh_degraded_status(index);
+                }
                 slot = LifecycleTx{};
                 if (kind == hooks::TxKind::kInstall) feature_stop(index, true);
                 else {
@@ -2844,6 +2949,7 @@ void plugin_registry_reset_for_test() {
         g_cascade_degraded[i] = false;
         g_http_degraded[i] = false;
         g_optional_pending[i] = 0;
+        clear_resource_install_error(i);
     }
 }
 

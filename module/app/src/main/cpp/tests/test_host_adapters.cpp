@@ -319,8 +319,15 @@ int64_t craft_get_ui_type() { return 1; }
 uint8_t craft_panel_state() { return g_craft_panel_state; }
 uint32_t craft_mix_type() { return 3; }
 int64_t craft_selected_stuff_index() { return 0; }
-void* craft_stuff_item(size_t) { return &g_craft_stuff_item_object; }
+// F1 夹具：可控「控件存在但槽内无物品」（正常空槽）与「控件缺失」。
+int g_craft_empty_stuff_slot = -1;
+int g_craft_missing_control_slot = -1;
+void* craft_stuff_item(size_t index) {
+    if (static_cast<int>(index) == g_craft_empty_stuff_slot) return nullptr;
+    return &g_craft_stuff_item_object;
+}
 void* craft_stuff_slot_control(size_t index) {
+    if (static_cast<int>(index) == g_craft_missing_control_slot) return nullptr;
     return index < g_craft_control_objects.size() ? &g_craft_control_objects[index] : nullptr;
 }
 void* craft_target_slot_control() { return reinterpret_cast<void*>(0x4); }
@@ -1530,6 +1537,30 @@ int main() {
     g_raw_inventory_item = const_cast<void*>(previous_raw_inventory);
     assert(craft_port_api.read_only.selected_recipe(0, &i64_value).ok == kQolOk);
     assert(craft_port_api.read_only.stuff_slot_count(&u32_value).ok == kQolOk && u32_value == 3);
+
+    // F1：真实 adapter 的空槽身份语义。
+    // 控件存在但槽内无物品 = 正常空槽 → OK + 无效 handle（界面据此判定「该格为空」）；
+    // 控件缺失 → NotReady；非空但 handle 失效 → 明确失败，绝不返回伪造 identity。
+    {
+        qol::contracts::QolItemHandle slot_handle{};
+        qol::game::g_craft_empty_stuff_slot = 1;
+        assert(craft_port_api.read.stuff_item(1, &slot_handle).ok == kQolOk);
+        assert(slot_handle.slot == 0 && slot_handle.generation == 0);
+        assert(craft_port_api.read_only.stuff_slot_available(1, &value).ok == kQolOk && value == 1);
+        qol::game::g_craft_empty_stuff_slot = -1;
+
+        qol::game::g_craft_missing_control_slot = 2;
+        assert(craft_port_api.read.stuff_item(2, &slot_handle).code == kQolErrNotReady);
+        assert(slot_handle.slot == 0 && slot_handle.generation == 0);
+        int32_t availability = 1;
+        assert(craft_port_api.read_only.stuff_slot_available(2, &availability).code ==
+               kQolErrNotReady);
+        qol::game::g_craft_missing_control_slot = -1;
+
+        // index 0 的非空对象在 1526 行已被 invalidate：读取必须失败且 handle 保持无效。
+        assert(craft_port_api.read.stuff_item(0, &slot_handle).code != kQolOk);
+        assert(slot_handle.slot == 0 && slot_handle.generation == 0);
+    }
 
     assert(save_port_api.read.slot_state(0, &value).ok == kQolOk && value == 1);
     assert(save_port_api.read.slot_exists(0, &value).ok == kQolOk && value == 1);

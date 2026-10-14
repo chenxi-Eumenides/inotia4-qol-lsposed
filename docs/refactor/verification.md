@@ -257,6 +257,19 @@
 
 Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增阻断；contract/feature comment/success-code 观察为非阻断。静态整改已实现，最终 Host/Debug 证据成立，但 VM-AQ-01 仍为 `NOT_ACCEPTED`。历史 VM-K2-02 PASS 行不改写，且不作为当前 `attribute.quality` v2.0 的验收证据。
 
+### 5.11 `custom_recipe` 单 owner 合并（实现已落地；VM 待验收）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 合并实现（契约/结果层/UI 子层/Host 装配） | **已实现（代码事实）**：单一 `custom_recipe` descriptor（UI 子层并入、原 `craft_ui` 源删除）、`craft_result` 内部化无 public provides、13 条资源（5 required fail-closed + 7 optional fail-soft + ownership）、两条写端口（custom recipe v1.2 + craft UI v1.1）、CR01 分阶段执行与 CR10 need/jewel 顺序落地。 | 只记录实现位置；边界与阶段语义见 `docs/refactor/audits/plugin-audit/custom-recipe-20261014/design-card.md`。 |
+| L0–L3 lane 证据 | **定向证据存在**：L0 头/adapter 语法与 CMake 配置通过；L1 `rules`/`catalog` 机械检查通过；L2 `plugin.cpp`/`ui/*` 语法检查通过；L3 Host 资源/装配手工构建目标通过（`hooks_transaction` 439、`plugin_registry` 635、`plugin_lifecycle` 162、`capability_lifecycle` 191、`feature_reconciler` 全节）。 | 登记见同目录 `verification-log.md` §3 与 `.tmp/custom-recipe-implementation/{l0,l1,l2,l3}/`。L3 为手工构建、不改仓库。 |
+| F1–F3 独立复核修复 | **已实施**：F1 `read_stuff_item` 就绪/身份语义；F2 三格失败提示分阶段（扣料后统一「材料可能已扣」，产物准备失败独立「材料未扣」）；F3 安全撤回 + `tx_abort_install` 阻止 trailing ownership acquire。手工构建 `hooks_transaction` 484 / `plugin_registry` 659 等通过。 | `.tmp/custom-recipe-implementation/review-fixes/validation.txt`。F1–F3 为新增复核编号，不覆盖 CR01–CR11。 |
+| L4 集成/受影响 CTest/Debug 构建 | **PASS（Host/构建范围）**：仓库 CMake 增量构建 PASS；受影响 CTest **17/17 PASS**（含 `custom_recipe_owner_fixture_tests` 覆盖 5 core/7 optional/ownership/gate/无 public cap/2 ports/off-on）；`check_arch` 与 `check_http_routes`（147 routes 无漂移）通过；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL（APK `inotia4_qol_lsposed_debug_2610142037_ff39e1c3502f.apk`，SHA-256 `ff39e1c3502f5e4402cfd26ede3e21767fcfb695cdc8c355367ade667802dd68`）。 | `.tmp/custom-recipe-implementation/final-host-build.log`、`final-affected-ctest.log`、`final-check-arch.log`、`final-check-http-routes.log`、`final-build-debug.log`、`final-apk.json`。构建成功与 Host 通过不替代设备行为验收。 |
+| 全量 Host CTest 残余 | **141/142**：唯一失败 `core_api_lifecycle_tests` 为与本合并无关的旧 `kHidden` 断言（测试源与 `core.api` 实现与 HEAD 一致）。 | `.tmp/custom-recipe-implementation/final-full-ctest.log`、`unrelated-test-baseline.txt`；不声称「142 全绿」，也不修改无关源码。 |
+| VM-CR-MERGE-01：合并后单 owner 行为 | **NOT_ACCEPTED（部署身份已建立；功能行为未验）**。 | 集成包已安装且运行身份与构建一致（APK SHA-256 `52a5b613…`，内嵌 module `ff39e1c3502f…`，`versionCode=192`/`0.7.13`）；`/api/health` `ready=true`/`monster v31`；projection 仅 `custom_recipe`、无 `craft_ui`；package 不变。但启动停在协议页 `AgreementUIActivity`，须用户手动确认，未 `enter_slot`、未发材料、未执行配方；`recipe table not ready … count=0` 为启动态观察。`deployment identity established ≠ functional VM`。证据 `device-api/{install.log,launch.log,running-module.log:33,after-health.json,after-config-list.json,startup-ui.json}`；验收卡见 `docs/refactor/audits/plugin-audit/custom-recipe-20261014/design-card.md` §6。 |
+
+历史 VM-46 / VM-K4-04c（craft_ui 12 资源 + custom_recipe provides `craft_result`）等卡描述的是**合并前分离双插件**形态，不作为本轮合并验收证据；历史 PASS 行不改写。`core.craft` 的 `craft.facts` 与 `/api/op/craft/mix-direct` 501 owner 面本轮未改，其既有卡口径继续有效。
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

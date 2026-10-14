@@ -3,6 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../contracts/result.h"
+
 // 自定义合成配方目录（custom-craft-recipe §4.2）——唯一真源。
 //
 // 表注入、下标映射、行为分派全部由本目录派生；新增配方只需向 catalog() 追加一项，
@@ -46,7 +48,7 @@ struct Def {
     uint8_t group;                 // 页签组位索引（注入记录 b11 = (1 << group) | kRbRecipeBookBit；须 < 8）
 };
 
-// 模块配方注入的描述文案（模块自有 UTF-8 字面量：36 字节 + NUL = 37，host 测试断言）。
+// 模块配方注入的描述文案（模块自有 UTF-8 字面量：19 字节 + NUL = 20）。
 // 取代原版拼装链对「注入记录结果占位 b2-3=0（ITEMDATABASE 记录 0=金币）」拼出的错误文案；
 // 仅在 UIDesc_MakeItemByID 汇聚点写入游戏共享描述缓冲，**不写任何游戏文本数据**。
 constexpr char kModuleRecipeDesc[] = "用3个材料合成";
@@ -149,14 +151,15 @@ inline constexpr size_t kSpecialEquipCategoryCount =
     sizeof(kSpecialEquipCategories) / sizeof(kSpecialEquipCategories[0]);
 
 // 纯逻辑：为 equip_categories 的每件装备各抽 3 个**互不相同**的材料，写入 out。
-// rand_inclusive(lo, hi) 须在闭区间内均匀返回整数（生产用 MATH_GetRandom）。
+// rand_inclusive(lo, hi, out) 须成功返回闭区间内的整数；失败原样传播且不发布半成品表。
 // 每条的 slots = 抽出的 3 个材料（**抽取次序即槽位次序**）、ordered = true、
 // product = 该装备、product_mode = kFixedCategory、scale_permille = 0。
-// 返回实际写入条数；pool_size < 3、rand_inclusive 为空、out 为空 → 返回 0（fail-closed）。
-size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
-                             const uint16_t* material_pool, size_t pool_size,
-                             int (*rand_inclusive)(int, int), ThreeSlotRecipe* out,
-                             size_t out_capacity);
+// pool_size < 3、随机函数、out 或 out_count 为空时返回 QolResult 错误。
+QolResult build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
+                                const uint16_t* material_pool, size_t pool_size,
+                                QolResult (*rand_inclusive)(int32_t, int32_t, int32_t*),
+                                ThreeSlotRecipe* out, size_t out_capacity,
+                                size_t* out_count);
 
 // 注入/清空动态配方表（进档时调用；游戏主线程）。recipes 为空或 count 为 0 → 清空。
 // count 超 kMaxDynamicRecipes → 截断。
@@ -164,6 +167,9 @@ void set_dynamic_three_slot_recipes(const ThreeSlotRecipe* recipes, size_t count
 
 // 当前动态配方条数。
 size_t dynamic_three_slot_recipe_count();
+
+// 动态配方表每次替换（含清空）递增；用于让未决确认在 SaveEnter 重建后失效。
+uint64_t dynamic_recipe_generation();
 
 // 静态配方目录；out_count 回传条目数 N。**目录顺序即注入记录的 mixType 升序，也是
 // MakeRecipeList 按记录下标写数组后的配方按钮顺序**（原版按 b11 命中记录的遍历序 = 下标序）。

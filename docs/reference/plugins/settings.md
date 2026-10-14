@@ -80,7 +80,6 @@ descriptor 只注册一个 `page` entry feature：
 | `push_all.push` | 0 | Gameplay | toggle | 0 |
 | `simple_mode.combat` | 0 | Gameplay | toggle | 0 |
 | `custom_recipe.recipes` | 0 | Gameplay | toggle | -1 |
-| `craft_ui.custom_crafting` | 1 | Hidden | toggle | 0 |
 | `extension_bag.extended_bag` | 1 | Gameplay | toggle | -2 |
 | `save_backup.open_manager` | 1 | Tools | entry | -2 |
 | `stack_limit.limit_999` | 0 | Gameplay | toggle | 0 |

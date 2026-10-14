@@ -1,5 +1,7 @@
 #include "catalog.h"
 
+#include <cstring>
+
 #include "rules.h"
 
 namespace custom_recipe {
@@ -134,6 +136,16 @@ bool g_bound = false;
 // 动态配方表（进档时由 set_dynamic_three_slot_recipes 重建；只在游戏主线程读写）。
 ThreeSlotRecipe g_dynamic_recipes[kMaxDynamicRecipes];
 size_t g_dynamic_recipe_count = 0;
+uint64_t g_dynamic_recipe_generation = 0;
+
+void advance_dynamic_recipe_generation() {
+    ++g_dynamic_recipe_generation;
+    if (g_dynamic_recipe_generation == 0) ++g_dynamic_recipe_generation;
+}
+
+QolResult catalog_error(int32_t code, const char* message) {
+    return qol::contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
+}
 
 }  // namespace
 
@@ -204,13 +216,19 @@ const ThreeSlotRecipe* match_in_table(const ThreeSlotRecipe* table, size_t count
 
 }  // namespace
 
-size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
-                             const uint16_t* material_pool, size_t pool_size,
-                             int (*rand_inclusive)(int, int), ThreeSlotRecipe* out,
-                             size_t out_capacity) {
+QolResult build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
+                                const uint16_t* material_pool, size_t pool_size,
+                                QolResult (*rand_inclusive)(int32_t, int32_t, int32_t*),
+                                ThreeSlotRecipe* out, size_t out_capacity,
+                                size_t* out_count) {
+    if (out_count == nullptr) {
+        return catalog_error(kQolErrInvalidArgument, "null dynamic recipe count output");
+    }
+    *out_count = 0;
     if (equip_categories == nullptr || material_pool == nullptr || rand_inclusive == nullptr ||
-        out == nullptr || pool_size < kThreeSlotCount || out_capacity == 0) {
-        return 0;
+        out == nullptr || pool_size < kThreeSlotCount ||
+        (equip_count > 0 && out_capacity == 0)) {
+        return catalog_error(kQolErrInvalidArgument, "invalid dynamic recipe input");
     }
     size_t written = 0;
     for (size_t e = 0; e < equip_count && written < out_capacity; ++e) {
@@ -224,8 +242,12 @@ size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_coun
         int guard = 0;
         while (got < kThreeSlotCount && guard < 256) {
             ++guard;
-            const int idx = rand_inclusive(0, static_cast<int>(pool_total) - 1);
-            if (idx < 0 || static_cast<size_t>(idx) >= pool_total) continue;
+            int32_t idx = -1;
+            const QolResult random = rand_inclusive(0, static_cast<int32_t>(pool_total) - 1, &idx);
+            if (random.ok != kQolOk) return random;
+            if (idx < 0 || static_cast<size_t>(idx) >= pool_total) {
+                return catalog_error(kQolErrInternal, "random source returned invalid recipe index");
+            }
             bool dup = false;
             for (size_t k = 0; k < got; ++k) {
                 if (picked[k] == static_cast<size_t>(idx)) {
@@ -236,7 +258,9 @@ size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_coun
             if (dup) continue;
             picked[got++] = static_cast<size_t>(idx);
         }
-        if (got < kThreeSlotCount) continue;  // 随机源异常：跳过该件（fail-closed）
+        if (got < kThreeSlotCount) {
+            return catalog_error(kQolErrInternal, "random source did not produce distinct slots");
+        }
         ThreeSlotRecipe& r = out[written];
         for (size_t s = 0; s < kThreeSlotCount; ++s) {
             r.slots[s] =
@@ -249,20 +273,25 @@ size_t build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_coun
         r.same_first_last = false;
         ++written;
     }
-    return written;
+    *out_count = written;
+    return qol::contracts::ok();
 }
 
 void set_dynamic_three_slot_recipes(const ThreeSlotRecipe* recipes, size_t count) {
     if (recipes == nullptr || count == 0) {
         g_dynamic_recipe_count = 0;
+        advance_dynamic_recipe_generation();
         return;
     }
     if (count > kMaxDynamicRecipes) count = kMaxDynamicRecipes;
     for (size_t i = 0; i < count; ++i) g_dynamic_recipes[i] = recipes[i];
     g_dynamic_recipe_count = count;
+    advance_dynamic_recipe_generation();
 }
 
 size_t dynamic_three_slot_recipe_count() { return g_dynamic_recipe_count; }
+
+uint64_t dynamic_recipe_generation() { return g_dynamic_recipe_generation; }
 
 const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
                                         bool (*is_special_equip)(uint16_t category)) {

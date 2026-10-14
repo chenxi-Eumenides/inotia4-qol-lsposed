@@ -1111,7 +1111,7 @@ target_include_directories(save_backup_rollback_tests PRIVATE
 target_compile_features(save_backup_rollback_tests PRIVATE cxx_std_17)
 add_test(NAME save_backup_rollback_tests COMMAND save_backup_rollback_tests)
 
-# craft_ui 能力缺失时的 fail-closed 门禁纯逻辑 host 测试。
+# custom_recipe UI 子层：放料处置门禁纯逻辑 host 测试（合并后内部结果枚举，无外部 craft_result 依赖）。
 add_executable(craft_ui_guard_tests
     test_craft_ui_guard.cpp
 )
@@ -1119,11 +1119,13 @@ target_include_directories(craft_ui_guard_tests PRIVATE
     ${CPP_DIR}
 )
 target_compile_features(craft_ui_guard_tests PRIVATE cxx_std_17)
+set_target_properties(craft_ui_guard_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME craft_ui_guard_tests COMMAND craft_ui_guard_tests)
 
+# custom_recipe UI 子层：控件身份判定与 typed command 入队（source 已并入单一 owner）。
 add_executable(craft_ui_handle_identity_tests
     test_craft_ui_handle_identity.cpp
-    ${CPP_DIR}/plugins/craft_ui/feature.cpp
+    ${CPP_DIR}/plugins/custom_recipe/ui/feature.cpp
 )
 target_include_directories(craft_ui_handle_identity_tests PRIVATE ${CPP_DIR})
 target_compile_features(craft_ui_handle_identity_tests PRIVATE cxx_std_17)
@@ -1977,6 +1979,37 @@ target_include_directories(game_cache_tests PRIVATE ${CPP_DIR})
 set_target_properties(game_cache_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(game_cache_tests PRIVATE Threads::Threads)
 add_test(NAME game_cache_tests COMMAND game_cache_tests)
+
+# L4：真实 merged owner（custom_recipe 单 descriptor）production feature-mode fixture。
+# 复用 feature_reconciler 的真实 registry/事务/帧装配 harness，但绑定产品描述符与产品插件源，
+# 且不链接 test_stubs.cpp（改用自带、提供可用 Host SDK 面的 fixture 桩）。
+get_target_property(CUSTOM_RECIPE_FIXTURE_HARNESS feature_reconciler_tests SOURCES)
+list(REMOVE_ITEM CUSTOM_RECIPE_FIXTURE_HARNESS test_feature_reconciler.cpp)
+list(REMOVE_ITEM CUSTOM_RECIPE_FIXTURE_HARNESS test_stubs.cpp)
+add_executable(custom_recipe_owner_fixture_tests
+    test_custom_recipe_owner_fixture.cpp
+    test_custom_recipe_owner_fixture_stubs.cpp
+    ${CUSTOM_RECIPE_FIXTURE_HARNESS}
+    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table.cpp
+    ${CPP_DIR}/plugins/custom_recipe/feature.cpp
+    ${CPP_DIR}/plugins/custom_recipe/plugin.cpp
+    ${CPP_DIR}/plugins/custom_recipe/ui/feature.cpp
+    ${CPP_DIR}/plugins/custom_recipe/ui/runtime.cpp
+)
+target_include_directories(custom_recipe_owner_fixture_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs ${CPP_DIR} ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols ${JNI_INCLUDE_DIRS})
+set_target_properties(custom_recipe_owner_fixture_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(custom_recipe_owner_fixture_tests PRIVATE Threads::Threads)
+target_sources(custom_recipe_owner_fixture_tests PRIVATE
+    ${CPP_DIR}/infra/store.cpp ${CPP_DIR}/infra/slot_operation_gate.cpp)
+target_compile_definitions(custom_recipe_owner_fixture_tests PRIVATE QOL_STORE_TEST_SEAMS=1)
+add_test(NAME custom_recipe_owner_fixture_tests
+    COMMAND custom_recipe_owner_fixture_tests ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(custom_recipe_owner_fixture_tests PROPERTIES TIMEOUT 60)
 
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)

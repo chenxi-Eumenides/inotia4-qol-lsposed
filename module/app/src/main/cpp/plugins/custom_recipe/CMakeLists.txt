@@ -5,4 +5,6 @@ add_library(qol_plugin_custom_recipe STATIC
     feature.cpp
     plugin.cpp
     settings_contribution.cpp
+    ui/feature.cpp
+    ui/runtime.cpp
 )

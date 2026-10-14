@@ -69,20 +69,42 @@ static uint16_t rd_u16(const uint8_t* p) {
 }
 
 // 固定返回下界的随机源（可预测）。
-static int rand_lo(int lo, int hi) { (void)hi; return lo; }
+static QolResult rand_lo(int32_t lo, int32_t hi, int32_t* out) {
+    (void)hi;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = lo;
+    return qol::contracts::ok();
+}
 // 固定返回上界的随机源。
-static int rand_hi(int lo, int hi) { (void)lo; return hi; }
+static QolResult rand_hi(int32_t lo, int32_t hi, int32_t* out) {
+    (void)lo;
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = hi;
+    return qol::contracts::ok();
+}
 // 覆盖式：每次调用返回区间内递增位置（由外部游标驱动）。
 static int g_rand_cursor = 0;
-static int rand_sweep(int lo, int hi) {
-    const int span = hi - lo;
-    const int idx = g_rand_cursor % (span + 1);
-    return lo + idx;
+static QolResult rand_sweep(int32_t lo, int32_t hi, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    const int32_t span = hi - lo;
+    const int32_t idx = g_rand_cursor % (span + 1);
+    *out = lo + idx;
+    return qol::contracts::ok();
+}
+// 恒定失败的随机源：错误必须传播，不得 clamp、不得返 lo 伪成功（CR03）。
+static QolResult rand_failing(int32_t, int32_t, int32_t* out) {
+    if (out != nullptr) *out = 0;
+    return qol::contracts::error(kQolErrBlocked, "rand blocked", 12);
+}
+// 越界随机值：显式报错，不静默钳制。
+static QolResult rand_out_of_range(int32_t, int32_t hi, int32_t* out) {
+    if (out != nullptr) *out = hi + 1;
+    return qol::contracts::ok();
 }
 
 static QolResult compute_upgrade(Tier current, cr::AttributeRange range,
                                  ClassifierContext* context,
-                                 int (*random)(int, int), cr::UpgradeResult* result,
+                                 cr::RandomInclusiveFn random, cr::UpgradeResult* result,
                                  cr::Tier* target, int32_t* value) {
     return cr::compute_tier_up_value(current, range, &classify_candidate, context, random,
                                      result, target, value);
@@ -166,7 +188,11 @@ static void test_interval_inverse_boundaries() {
 }
 
 static int g_failure_random_calls = 0;
-static int fail_random(int lo, int) { ++g_failure_random_calls; return lo; }
+static QolResult fail_random(int32_t lo, int32_t, int32_t* out) {
+    ++g_failure_random_calls;
+    if (out != nullptr) *out = lo;
+    return qol::contracts::ok();
+}
 
 static void test_candidate_errors_propagate() {
     ClassifierContext context{};
@@ -188,6 +214,30 @@ static void test_candidate_errors_propagate() {
     CHECK(compute_upgrade(Tier::Grey, {0, 100}, &context, &fail_random,
                           &result, nullptr, &out_value).code == kQolErrBlocked);
     CHECK(g_failure_random_calls == 0);
+
+    // CR03：随机源错误/越界/缺失都必须显式失败，且不写 target/new_value（不 clamp、不返 lo）。
+    Tier target = Tier::Grey;
+    int32_t new_value = -1;
+    cr::UpgradeResult upgrade = cr::UpgradeResult::kOk;
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_failing, &upgrade, &target,
+                          &new_value).code == kQolErrBlocked);
+    CHECK(target == Tier::Grey && new_value == -1);
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_out_of_range, &upgrade, &target,
+                          &new_value).ok != kQolOk);
+    CHECK(target == Tier::Grey && new_value == -1);
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, nullptr, &upgrade, &target,
+                          &new_value).code == kQolErrInvalidArgument);
+    CHECK(target == Tier::Grey && new_value == -1);
+    // 闭区间两端都可能被取到（不恒 lo）：rand_hi 结果严格大于 rand_lo 结果。
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_lo, &upgrade, &target,
+                          &new_value).ok == kQolOk);
+    const int32_t lower_value = new_value;
+    const Tier lower_target = target;
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, nullptr, &rand_hi, &upgrade, &target,
+                          &new_value).ok == kQolOk);
+    CHECK(new_value > lower_value);
+    CHECK(target == lower_target);
+    CHECK(classify(new_value, 0, 100) == target);
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +252,7 @@ static void test_random_matches_target() {
     for (const Case& c : cases) {
         const Tier cur = classify(c.value, c.min, c.max);
         if (cur == Tier::Gold) continue;
-        for (int (*rand)(int, int) : {rand_lo, rand_hi}) {
+        for (cr::RandomInclusiveFn rand : {rand_lo, rand_hi}) {
             Tier target = Tier::Grey;
             int32_t out = 0;
             cr::UpgradeResult result = cr::UpgradeResult::kDegenerate;
@@ -619,18 +669,49 @@ static const int* g_rand_seq = nullptr;
 static size_t g_rand_len = 0;
 static size_t g_rand_pos = 0;
 
-// 可编程随机序列：取值 = lo + (seq[i] mod span)。测试用它同时驱动「是否为空」与「选哪个材料」。
+// 可编程随机序列（typed 输出型）：取值 = lo + (seq[i] mod span)。
 static void set_rand_seq(const int* seq, size_t len) {
     g_rand_seq = seq;
     g_rand_len = len;
     g_rand_pos = 0;
 }
 
-static int fake_rand(int lo, int hi) {
-    const int span = hi - lo + 1;
-    if (span <= 0 || g_rand_seq == nullptr || g_rand_len == 0) return lo;
+static QolResult fake_rand(int32_t lo, int32_t hi, int32_t* out) {
+    if (out == nullptr || lo > hi) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad rand interval", 17);
+    }
+    if (g_rand_seq == nullptr || g_rand_len == 0) {
+        return qol::contracts::error(kQolErrNotReady, "no rand sequence", 17);
+    }
+    const int32_t span = hi - lo + 1;
     const int v = g_rand_seq[g_rand_pos++ % g_rand_len];
-    return lo + (v % span);
+    *out = lo + (v % span);
+    return qol::contracts::ok();
+}
+
+// 恒定失败随机源：错误必须原样传播，不得返回半成品表。
+static QolResult failing_rand(int32_t, int32_t, int32_t* out) {
+    if (out != nullptr) *out = 0;
+    return qol::contracts::error(kQolErrBlocked, "rand blocked", 12);
+}
+
+// 越界随机值：必须显式报错，不静默钳制。
+static QolResult out_of_range_rand(int32_t, int32_t hi, int32_t* out) {
+    if (out != nullptr) *out = hi + 1;
+    return qol::contracts::ok();
+}
+
+static size_t build_dynamic(const uint16_t* equips, size_t equip_count, const uint16_t* pool,
+                            size_t pool_size, QolResult (*rand_fn)(int32_t, int32_t, int32_t*),
+                            cr::ThreeSlotRecipe* out, size_t capacity, bool* ok,
+                            QolResult* result = nullptr) {
+    size_t count = 0;
+    const QolResult value =
+        cr::build_dynamic_recipes(equips, equip_count, pool, pool_size, rand_fn, out, capacity,
+                                  &count);
+    if (ok != nullptr) *ok = value.ok == kQolOk;
+    if (result != nullptr) *result = value;
+    return count;
 }
 
 static void test_dynamic_special_recipes() {
@@ -645,7 +726,9 @@ static void test_dynamic_special_recipes() {
     {
         const int seq[] = {0, 1, 2};
         set_rand_seq(seq, 3);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        bool ok = false;
+        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
+        CHECK(ok);
         CHECK(n == 1);
         CHECK(out[0].ordered);
         CHECK(out[0].product == 485);
@@ -659,7 +742,9 @@ static void test_dynamic_special_recipes() {
     {
         const int seq[] = {0, 1, static_cast<int>(kEmptyIdx)};
         set_rand_seq(seq, 3);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        bool ok = false;
+        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
+        CHECK(ok);
         CHECK(n == 1);
         CHECK(out[0].slots[0] == 33);
         CHECK(out[0].slots[1] == 35);
@@ -670,7 +755,9 @@ static void test_dynamic_special_recipes() {
     {
         const int seq[] = {static_cast<int>(kEmptyIdx), 1, 2};
         set_rand_seq(seq, 3);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        bool ok = false;
+        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
+        CHECK(ok);
         CHECK(n == 1);
         CHECK(out[0].slots[0] == 0);
         CHECK(out[0].slots[1] == 35);
@@ -681,7 +768,9 @@ static void test_dynamic_special_recipes() {
     {
         const int seq[] = {static_cast<int>(kEmptyIdx), static_cast<int>(kEmptyIdx), 2, 3};
         set_rand_seq(seq, 4);
-        const size_t n = cr::build_dynamic_recipes(equips, 1, pool, 4, &fake_rand, out, 8);
+        bool ok = false;
+        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
+        CHECK(ok);
         CHECK(n == 1);
         const int zeros = (out[0].slots[0] == 0) + (out[0].slots[1] == 0) + (out[0].slots[2] == 0);
         CHECK(zeros <= 1);
@@ -691,7 +780,9 @@ static void test_dynamic_special_recipes() {
     {
         const int seq[] = {0, 1, 2, static_cast<int>(kEmptyIdx), 3, 0};
         set_rand_seq(seq, 6);
-        const size_t n = cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 8);
+        bool ok = false;
+        const size_t n = build_dynamic(equips, 2, pool, 4, &fake_rand, out, 8, &ok);
+        CHECK(ok);
         CHECK(n == 2);
         CHECK(out[0].product == 485);
         CHECK(out[1].product == 493);
@@ -712,13 +803,40 @@ static void test_dynamic_special_recipes() {
         }
     }
 
-    // FAIL-CLOSED：池不足 3 条 / 随机源为空 / 容量为 0。
-    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 2, &fake_rand, out, 8) == 0);
-    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, nullptr, out, 8) == 0);
-    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 0) == 0);
+    // FAIL-CLOSED：池不足 3 条 / 随机源为空 / 容量为 0 / 输出计数为空 → 显式错误。
+    set_rand_seq(nullptr, 0);
+    QolResult result = qol::contracts::ok();
+    CHECK(build_dynamic(equips, 2, pool, 2, &fake_rand, out, 8, nullptr, &result) == 0 &&
+          result.ok != kQolOk);
+    CHECK(build_dynamic(equips, 2, pool, 4, nullptr, out, 8, nullptr, &result) == 0 &&
+          result.ok != kQolOk);
+    CHECK(build_dynamic(equips, 2, pool, 4, &fake_rand, out, 0, nullptr, &result) == 0 &&
+          result.ok != kQolOk);
+    size_t ignored = 0;
+    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 8, nullptr).ok != kQolOk);
+    CHECK(cr::build_dynamic_recipes(nullptr, 1, pool, 4, &fake_rand, out, 8, &ignored).ok !=
+          kQolOk);
+
+    // CR03：随机源失败/越界必须原样传播（不返回半成品表、不钳制）。
+    const int seq[] = {0, 1, 2};
+    set_rand_seq(seq, 3);
+    CHECK(build_dynamic(equips, 1, pool, 4, &failing_rand, out, 8, nullptr, &result) == 0 &&
+          result.code == kQolErrBlocked);
+    CHECK(build_dynamic(equips, 1, pool, 4, &out_of_range_rand, out, 8, nullptr, &result) == 0 &&
+          result.ok != kQolOk);
+
+    // 动态表代际：每次替换（含清空）递增，供 SaveEnter/disable 作废在途确认（CR08）。
+    set_rand_seq(seq, 3);
+    const uint64_t before_generation = cr::dynamic_recipe_generation();
+    bool ok = false;
+    CHECK(build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok) == 1 && ok);
+    cr::set_dynamic_three_slot_recipes(out, 1);
+    const uint64_t after_generation = cr::dynamic_recipe_generation();
+    CHECK(after_generation != before_generation);
+    cr::set_dynamic_three_slot_recipes(nullptr, 0);
+    CHECK(cr::dynamic_recipe_generation() != after_generation);
 
     // 清空后动态配方立即失效。
-    cr::set_dynamic_three_slot_recipes(nullptr, 0);
     CHECK(cr::dynamic_three_slot_recipe_count() == 0);
 }
 

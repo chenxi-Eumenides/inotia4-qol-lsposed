@@ -12,6 +12,7 @@ namespace custom_recipe {
 using Tier = qol::contracts::AttributeQualityTier;
 using AttributeRange = qol::contracts::AttributeRange;
 using ClassifyFn = QolResult (*)(int32_t value, AttributeRange range, void* context, Tier* out);
+using RandomInclusiveFn = QolResult (*)(int32_t lo, int32_t hi, int32_t* out);
 
 // 「提升一档」结果状态。
 enum class UpgradeResult : uint8_t {
@@ -38,7 +39,7 @@ QolResult next_tier_interval(Tier current_tier, AttributeRange range, ClassifyFn
 
 // 在目标档区间内随机取值；UpgradeResult 仅表示既有业务状态，分类错误由 QolResult 返回。
 QolResult compute_tier_up_value(Tier current_tier, AttributeRange range, ClassifyFn classify_fn,
-                                void* context, int (*rand_inclusive)(int, int),
+                                void* context, RandomInclusiveFn rand_inclusive,
                                 UpgradeResult* out_result, Tier* out_target,
                                 int32_t* out_new_value);
 

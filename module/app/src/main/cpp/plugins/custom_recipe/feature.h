@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../../contracts/craft_result.h"
 #include "../../contracts/craft_commands.h"
 #include "../../contracts/craft_facts.h"
 #include "../../contracts/game_host.h"
@@ -8,6 +7,7 @@
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/ownership.h"
 #include "../../contracts/item_facts.h"
+#include "result.h"
 
 namespace qol::contracts {
 struct PluginContext;
@@ -18,7 +18,7 @@ struct PluginContext;
 //
 // 边界（「界面归界面，结果归结果」，ADR-0005）：
 //   · provider 不读 UIMix/控件：界面状态（选中物品、三格内容、持有数）由调用方经
-//     contracts/craft_result.h 的 Input 结构体携带；provider 只做判定与结果计算。
+//     result/ 的 Input 结构体携带；provider 只做判定与结果计算。
 //   · 扣料/产物/入包与 stuffList 需求写回属「写入执行」，同步留在本 feature。
 
 namespace qol::features::custom_recipe {
@@ -31,8 +31,12 @@ const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
 void log_message(int32_t level, const char* format, ...);
 
-// CraftResultApi 实例（provides `craft_result` v1.1）。
-const qol::contracts::CraftResultApi& craft_result_api();
+// 内部 UI 子层使用的结果 API，不对外通过 capability 注册。
+const result::CraftResultApi& craft_result_api();
+
+// Game Adapter 的 typed 随机端口与表 ownership readiness。
+QolResult random_inclusive(int32_t lo, int32_t hi, int32_t* out);
+bool ownership_ready();
 
 // RECIPEBASE/MIXTUREBASE 表注入的行为所有权 ops。
 const qol::contracts::OwnershipOps& ownership_ops();

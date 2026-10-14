@@ -2,6 +2,8 @@
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
 
+#include <climits>
+
 #include "game/access/attr_range_ui.h"
 #include "game/access/craft.h"
 #include "game/access/game_access.h"
@@ -154,10 +156,17 @@ QolResult read_selected_stuff_item(contracts::QolItemHandle* out) {
     return read_item_handle(craft_stuff_item(static_cast<size_t>(index)), out);
 }
 
+// 严格身份语义：控件存在但槽内无物品是正常空槽 → OK + 无效 handle；控件缺失 → NotReady；
+// 非空对象仍走登记/resolve，保留原错误。不得把 read_item_handle(nullptr) 整体改成 OK：
+// selected/target 等调用点的 null 表示未就绪。
 QolResult read_stuff_item(uint32_t index, contracts::QolItemHandle* out) {
     if (out == nullptr || index >= kCraftStuffSlotCount) return invalid_argument();
     *out = contracts::kInvalidItemHandle;
-    return read_item_handle(craft_stuff_item(index), out);
+    if (!game_host_is_main_thread()) return wrong_thread();
+    if (craft_stuff_slot_control(index) == nullptr) return not_ready();
+    void* item = craft_stuff_item(index);
+    if (item == nullptr) return contracts::ok();
+    return handle_for_craft_item(item, out);
 }
 
 QolResult read_category_held_count(int32_t category, int32_t* out) {
@@ -366,6 +375,29 @@ QolResult call_set_max_socket_enchant(contracts::QolItemHandle handle) {
     return contracts::ok();
 }
 
+QolResult call_random_inclusive(int32_t lo, int32_t hi, int32_t* out) {
+    if (out == nullptr) return invalid_argument();
+    *out = 0;
+    if (!game_host_is_main_thread()) return wrong_thread();
+    if (lo > hi) return invalid_argument();
+    if (fn_math_get_random == nullptr) return not_ready();
+
+    const int64_t span = static_cast<int64_t>(hi) - lo;
+    if (span > INT_MAX) {
+        static constexpr char kSpanTooWide[] = "random range span exceeds INT_MAX";
+        return contracts::error(kQolErrInvalidArgument, kSpanTooWide,
+                                sizeof(kSpanTooWide) - 1);
+    }
+    const int value = fn_math_get_random(static_cast<int>(lo), static_cast<int>(hi));
+    if (value < lo || value > hi) {
+        static constexpr char kRandomOutOfRange[] = "random result out of range";
+        return contracts::error(kQolErrInternal, kRandomOutOfRange,
+                                sizeof(kRandomOutOfRange) - 1);
+    }
+    *out = static_cast<int32_t>(value);
+    return contracts::ok();
+}
+
 QolResult call_write_stuff_need(uint32_t index, int32_t category, int32_t count) {
     if (category < 0 || count < 0 || count > UINT16_MAX) return invalid_argument();
     void* item = craft_stuff_item(index);
@@ -434,6 +466,7 @@ const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     &call_read_jewel_word,
     &call_write_jewel_word,
     &call_set_max_socket_enchant,
+    &call_random_inclusive,
 };
 
 QolResult craft_stuff_slot_index_impl(void* transient_control, int32_t* out_index) {

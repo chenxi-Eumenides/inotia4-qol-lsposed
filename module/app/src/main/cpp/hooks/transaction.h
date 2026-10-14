@@ -44,12 +44,18 @@ uint64_t tx_begin(const char* plugin_id, TxKind kind);
 
 struct TxStep {
     const char* resource_id = nullptr;  // 本步处理的资源（等待帧为 nullptr）
-    int32_t ok = 0;                     // 本步结果（0=成功；等待帧为 0）
+    int32_t ok = 0;                     // 本步结果（0=成功；非 0=本步失败；等待帧为 0）
     void* backup = nullptr;             // 安装成功时的原函数入口
     bool finished = false;              // 本次调用后事务是否终态（成功或失败）
+    const char* error = nullptr;         // 本步失败原因；软失败也会保留在本字段
 };
 // 帧步进：推进至多一个资源步骤；返回 true = 仍需继续调用（含在途等待帧）。
 bool tx_step(uint64_t tx_id, TxStep* out);
+
+// 中止仍在途的安装事务：仅 Running 的 kInstall 可用；逆序回滚已装子集后置 Failed 并终态化。
+// 用于「受限回调失败」路径——必须先终止安装，禁止后续步（尤其末尾 ownership acquire）继续。
+// 返回 true = 本次确实中止；false = 事务不存在/非安装/已终态（调用方沿既有路径处理）。
+bool tx_abort_install(uint64_t tx_id, const char* resource_id, const char* error);
 
 struct TxStatus {
     TxKind kind = TxKind::kInstall;

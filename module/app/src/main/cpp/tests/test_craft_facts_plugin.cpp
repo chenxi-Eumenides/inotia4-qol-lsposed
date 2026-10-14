@@ -1,11 +1,11 @@
 #include "contracts/craft_facts.h"
-#include "contracts/craft_result.h"
 #include "contracts/craft_commands.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
 #include "plugins/core.craft/plugin.h"
+#include "plugins/custom_recipe/result.h"
 
 #include <cstdio>
 #include <cstddef>
@@ -42,11 +42,13 @@ QolResult fake_craft_slot_available(uint32_t, int32_t* out) {
 using CraftItemOutFn = QolResult (*)(qol::contracts::QolItemHandle*);
 using CraftIndexedItemOutFn = QolResult (*)(uint32_t, qol::contracts::QolItemHandle*);
 using CraftSlotAvailabilityFn = QolResult (*)(uint32_t, int32_t*);
-using CraftTargetGateFn = qol::contracts::CraftGate (*)(qol::contracts::QolItemHandle);
+using CraftTargetGateFn =
+    qol::features::custom_recipe::result::CraftGate (*)(qol::contracts::QolItemHandle);
 using CraftJewelPredicateFn = bool (*)(qol::contracts::QolItemHandle);
 using CraftSetStuffFn = QolResult (*)(uint32_t, qol::contracts::QolItemHandle);
 using CraftTargetWriteFn = QolResult (*)(qol::contracts::QolItemHandle);
 using CraftReadJewelWordFn = QolResult (*)(qol::contracts::QolItemHandle, uint32_t*);
+using CraftPortRandomFn = QolResult (*)(int32_t, int32_t, int32_t*);
 
 static_assert(std::is_same<decltype(qol::contracts::QolCraftReadApi::selected_stuff_item),
                            CraftItemOutFn>::value,
@@ -61,24 +63,44 @@ static_assert(std::is_same<decltype(qol::contracts::QolCraftReadOnlyApi::target_
                            CraftItemOutFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::QolCraftReadOnlyApi::selected_inventory_item),
                            CraftItemOutFn>::value);
-static_assert(std::is_same<decltype(qol::contracts::CraftPlaceInput::item),
+static_assert(std::is_same<decltype(qol::features::custom_recipe::result::CraftPlaceInput::item),
                            qol::contracts::QolItemHandle>::value);
-static_assert(std::is_same<decltype(qol::contracts::CraftExecuteInput::items),
+static_assert(std::is_same<decltype(qol::features::custom_recipe::result::CraftExecuteInput::items),
                            qol::contracts::QolItemHandle[3]>::value);
-static_assert(std::is_same<decltype(qol::contracts::CraftMakeItemInput::item),
+static_assert(std::is_same<decltype(qol::features::custom_recipe::result::CraftMakeItemInput::item),
                            qol::contracts::QolItemHandle>::value);
+static_assert(std::is_same<
+                  decltype(qol::features::custom_recipe::result::CraftMakeItemInput::rand_inclusive),
+                  CraftPortRandomFn>::value,
+              "typed random source must propagate QolResult (no silent clamp)");
 static_assert(qol::contracts::kCraftFactsVersionMajor == 1 &&
                   qol::contracts::kCraftFactsVersionMinor == 0,
               "craft.facts remains v1.0");
-static_assert(static_cast<uint8_t>(qol::contracts::PlaceOutcome::kNotMine) == 0 &&
-                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kPlaced) == 1 &&
-                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kAlreadyPlaced) == 2 &&
-                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kNotEnoughHeld) == 3 &&
-                  static_cast<uint8_t>(qol::contracts::PlaceOutcome::kWriteFailed) == 4,
+// 结果枚举已内部化到 custom_recipe::result；失败阶段追加，既有值保持稳定。
+using ExplodeResult = qol::features::custom_recipe::result::CraftExecuteResult;
+using ExplodeOutcome = qol::features::custom_recipe::result::PlaceOutcome;
+static_assert(static_cast<uint8_t>(ExplodeOutcome::kNotMine) == 0 &&
+                  static_cast<uint8_t>(ExplodeOutcome::kPlaced) == 1 &&
+                  static_cast<uint8_t>(ExplodeOutcome::kAlreadyPlaced) == 2 &&
+                  static_cast<uint8_t>(ExplodeOutcome::kNotEnoughHeld) == 3 &&
+                  static_cast<uint8_t>(ExplodeOutcome::kWriteFailed) == 4,
               "PlaceOutcome appends write failure without changing existing values");
-static_assert(qol::contracts::kCraftResultVersionMajor == 1 &&
-                  qol::contracts::kCraftResultVersionMinor == 1,
-              "typed CraftResultApi parameters are v1.1");
+static_assert(static_cast<uint8_t>(ExplodeResult::kOk) == 0 &&
+                  static_cast<uint8_t>(ExplodeResult::kStaleSlots) == 1 &&
+                  static_cast<uint8_t>(ExplodeResult::kNotEnoughHeld) == 2 &&
+                  static_cast<uint8_t>(ExplodeResult::kNoBagSpace) == 3 &&
+                  static_cast<uint8_t>(ExplodeResult::kAborted) == 4 &&
+                  static_cast<uint8_t>(ExplodeResult::kPrecheckFailed) == 5 &&
+                  static_cast<uint8_t>(ExplodeResult::kProductPrepareFailed) == 6 &&
+                  static_cast<uint8_t>(ExplodeResult::kMaterialRemoveFailed) == 7 &&
+                  static_cast<uint8_t>(ExplodeResult::kMaterialObservationFailed) == 8 &&
+                  static_cast<uint8_t>(ExplodeResult::kProductSaveFailed) == 9,
+              "CraftExecuteResult appends staged failure results without changing existing values");
+static_assert(static_cast<uint8_t>(qol::features::custom_recipe::result::CraftGate::kPass) == 0 &&
+                  static_cast<uint8_t>(qol::features::custom_recipe::result::CraftGate::kNotJewel) == 1 &&
+                  static_cast<uint8_t>(qol::features::custom_recipe::result::CraftGate::kAlreadyGold) == 2 &&
+                  static_cast<uint8_t>(qol::features::custom_recipe::result::CraftGate::kUnavailable) == 3,
+              "CraftGate appends quality-unavailable without changing existing values");
 static_assert(std::is_standard_layout<qol::contracts::CraftFactsApi>::value &&
                   std::is_trivially_copyable<qol::contracts::CraftFactsApi>::value);
 static_assert(std::is_standard_layout<qol::contracts::QolCraftPort>::value &&
@@ -90,15 +112,16 @@ static_assert(std::is_standard_layout<qol::contracts::QolCustomRecipeWritePort>:
 static_assert(qol::contracts::kQolPortCraftVersion.major == 1 &&
                   qol::contracts::kQolPortCraftVersion.minor == 1 &&
                   qol::contracts::kQolPortCraftUiWriteVersion.minor == 1 &&
-                  qol::contracts::kQolPortCustomRecipeWriteVersion.minor == 1);
+                  qol::contracts::kQolPortCustomRecipeWriteVersion.minor == 2,
+              "custom recipe write port is v1.2 (typed random tail)");
 static_assert(offsetof(qol::contracts::CraftFactsApi, read_only) ==
                   sizeof(qol::contracts::QolCraftReadApi),
               "CraftFactsApi layout changed");
-static_assert(std::is_standard_layout<qol::contracts::CraftResultApi>::value &&
-                  std::is_trivially_copyable<qol::contracts::CraftResultApi>::value);
-static_assert(std::is_same<decltype(qol::contracts::CraftResultApi::craft_gate),
+static_assert(std::is_standard_layout<qol::features::custom_recipe::result::CraftResultApi>::value &&
+                  std::is_trivially_copyable<qol::features::custom_recipe::result::CraftResultApi>::value);
+static_assert(std::is_same<decltype(qol::features::custom_recipe::result::CraftResultApi::craft_gate),
                            CraftTargetGateFn>::value);
-static_assert(std::is_same<decltype(qol::contracts::CraftResultApi::is_jewel_item),
+static_assert(std::is_same<decltype(qol::features::custom_recipe::result::CraftResultApi::is_jewel_item),
                            CraftJewelPredicateFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::set_stuff_item),
                            CraftSetStuffFn>::value);
@@ -106,6 +129,8 @@ static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::re
                            CraftReadJewelWordFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::free_item),
                            CraftTargetWriteFn>::value);
+static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::random_inclusive),
+                           CraftPortRandomFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::QolCraftUiWritePort::set_target_slot_item),
                            CraftTargetWriteFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::CraftSetStuffItemPayload::item),

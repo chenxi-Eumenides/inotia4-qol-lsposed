@@ -1,23 +1,22 @@
-#include "plugin.h"
+#include "runtime.h"
 
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 
-#include "../../contracts/craft_result.h"
-#include "../../contracts/craft_facts.h"
-#include "../../contracts/game_ports/craft_ui_write_port.h"
+#include "../feature.h"
+#include "../result.h"
+#include "../text_table.h"
 #include "feature.h"
 
 // ===========================================================================
-// 合成器界面层插件：全部 UIMix hook 的唯一挂载处（C2 Step 3）
+// 合成器界面子层运行时：全部 UIMix hook 的唯一挂载处（原 craft_ui 并入 custom_recipe）
 // ===========================================================================
 //
 // 分层（界面归界面，结果归结果）：
-//   本文件 = **界面**。配方判定与扣料/产物决策一律经能力契约 `craft_result` 问 provider
-//   （plugins/custom_recipe），并按回传枚举决定弹什么文案、要不要清空填入格。
-//   反向依赖已消除：本层不 include 任何 custom_recipe 头。
+//   本文件 = **界面**。配方判定与扣料/产物决策调用同插件父命名空间的结果 API
+//   （custom_recipe::craft_result_api()），不再经 capability registry。
 //
 // 挂钩清单（同一 UIMix 函数只挂一次，声明的 12 条资源由宿主安装）：
 //   · UIMix_ButtonInvenItemSelectExe  放料
@@ -31,12 +30,24 @@
 //   · UIMix_ResetStuffItemControl     清空填入格 → 补选中第一个空格（装饰性，但**不随开关门控**：
 //     清空可能来自模块 3 格配方，也可能来自原版成功链，两者都需要它）
 
-namespace qol::features::craft_ui {
+namespace qol::features::custom_recipe::ui {
 namespace {
 
-constexpr const char* kPluginId = "craft_ui";
-constexpr const char* kPluginVersion = "0.1.0";
-constexpr const char* kOwner = "craft_ui";
+constexpr const char* kOwner = "custom_recipe";
+
+// ---- hook 资源 id（与声明一一对应；on_resource_ready 只接受这些）----
+constexpr const char* kResourcePlace = "hook:UIMix_ButtonInvenItemSelectExe";
+constexpr const char* kResourceMixing = "hook:UIMix_ButtonMixingExe";
+constexpr const char* kResourceMakeItem = "hook:MIXSYSTEM_MakeItem";
+constexpr const char* kResourceMenu = "hook:UIMix_ButtonMenuListExe";
+constexpr const char* kResourceRecipe = "hook:UIMix_ButtonRecipeExe";
+constexpr const char* kResourceSetDescText = "hook:X_TEXTCTRL_SetTextControl";
+constexpr const char* kResourceControlItemDraw = "hook:ControlItem_Draw";
+constexpr const char* kResourceItemDrawPorting = "hook:ITEM_DrawPorting";
+constexpr const char* kResourceButtonRecipeDraw = "hook:UIMix_ButtonRecipeDraw";
+constexpr const char* kResourceUimixDraw = "hook:UIMix_Draw";
+constexpr const char* kResourceMenuListDraw = "hook:UIMix_ButtonMenuListDraw";
+constexpr const char* kResourceResetStuff = "hook:UIMix_ResetStuffItemControl";
 
 // ---- hook 跳板（由宿主经 on_resource_ready 交还写入）----
 UIMixButtonInvenItemSelectExeFn g_backup_place = nullptr;
@@ -56,17 +67,13 @@ UIMixResetStuffItemControlFn g_backup_reset_stuff = nullptr;
 // 把 show_count 压成 0（只影响本模式填入格；背包等其它界面数量照常）。
 std::atomic<bool> g_drawing_three_slot_slot{false};
 
-// 消费方式：每次调用现取能力、不缓存跨帧指针（provider 撤销期 require 返回 nullptr → 降级）。
-const contracts::CraftResultApi* craft_api() {
-    const contracts::QolHostSdk* sdk = host_sdk();
-    if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const QolResult result = sdk->capabilities.require(
-        contracts::kCraftResultCapabilityId,
-        {static_cast<uint16_t>(contracts::kCraftResultVersionMajor),
-         static_cast<uint16_t>(contracts::kCraftResultVersionMinor)},
-        &iface);
-    return result.ok == kQolOk ? static_cast<const contracts::CraftResultApi*>(iface) : nullptr;
+// 结果 API 在父命名空间；同进程直接调用，不做能力查找。
+const result::CraftResultApi* craft_api() { return &craft_result_api(); }
+
+bool core_backups_ready_impl() {
+    return g_backup_place != nullptr && g_backup_mixing != nullptr &&
+           g_backup_make_item != nullptr && g_backup_menu != nullptr &&
+           g_backup_recipe != nullptr;
 }
 
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；对用到的类别而言 == itemId。
@@ -95,8 +102,7 @@ uint16_t item_category(contracts::QolItemHandle handle) {
     return static_cast<uint16_t>(category);
 }
 
-// 宝石档位（28..32 → 1..5；其它返回 0）——与 plugins/custom_recipe/rules.h 的纯规则同式，
-// 界面层只需此单一映射即可构造 material_needs 入参。
+// 宝石档位（28..32 → 1..5；其它返回 0）。
 int jewel_grade(uint16_t category) {
     if (category < 28 || category > 32) return 0;
     return static_cast<int>(category) - 27;
@@ -113,40 +119,68 @@ bool item_is_stackable(contracts::QolItemHandle handle) {
     return is_real_equip == 0;
 }
 
+// 失败提示：本插件自有文案经本地 scope 生效，不改动共享文本表内容。
+void craft_show_quality_unavailable() {
+    TextScopeGuard scope(kTextScopeQualityUnavailable);
+    craft_show_text(kQualityUnavailablePopupId);
+}
+
+void craft_show_material_consumed() {
+    TextScopeGuard scope(kTextScopeMaterialMayHaveBeenConsumed);
+    craft_show_text(kMaterialMayHaveBeenConsumedPopupId);
+}
+
+void craft_show_product_prepare_failed() {
+    TextScopeGuard scope(kTextScopeProductPrepareFailed);
+    craft_show_text(kProductPrepareFailedPopupId);
+}
+
 // 3 格合成的 YesNo 确认回调（经 x3 传入，void() 形态；原版该槽位是 UIMix_StartMix@0xc0870）。
-// 上下文只能用模块自有全局（x6/param 会被原版当钱数渲染）。结果由能力层回传，界面按枚举收尾。
+// 上下文只能用模块自有全局（x6/param 会被原版当钱数渲染）。结果由结果层回传，界面按枚举收尾。
 void on_confirm_three_slot() {
-    const contracts::CraftResultApi* api = craft_api();
-    if (api == nullptr) {
-        // provider 撤销期间：按「材料不足」保守收尾（不消耗、不产出）。
-        craft_show_text(kTextInsufficientMaterial);
-        reset_stuff_and_refresh();
-        return;
-    }
-    contracts::CraftExecuteInput in{};
+    const result::CraftResultApi* api = craft_api();
+    result::CraftExecuteInput in{};
     craft_read_stuff_categories(in.slot_categories);
     for (size_t i = 0; i < kStuffSlotCount; ++i) {
         in.items[i] = craft_stuff_item(i);
         if (in.items[i].slot != 0 && in.items[i].generation != 0) {
-            in.held_counts[i] =
-                craft_category_held_count(item_category(in.items[i]));
+            in.held_counts[i] = craft_category_held_count(item_category(in.items[i]));
         }
     }
     switch (api->execute(&in)) {
-        case contracts::CraftExecuteResult::kOk:
+        case result::CraftExecuteResult::kOk:
             finish_three_slot_craft();
             return;
-        case contracts::CraftExecuteResult::kStaleSlots:
-        case contracts::CraftExecuteResult::kAborted:
+        case result::CraftExecuteResult::kStaleSlots:
+        case result::CraftExecuteResult::kAborted:
             // 确认框停留期间格被换掉 / 停用 / 无待确认：不消耗、不产出 → 提示 + 清空重来。
             craft_show_text(kTextInsufficientMaterial);
             reset_stuff_and_refresh();
             return;
-        case contracts::CraftExecuteResult::kNotEnoughHeld:
+        case result::CraftExecuteResult::kNotEnoughHeld:
             // 扣料前库存复核失败：不消耗、不产出（保留已填格，便于玩家补材料后重试）。
             craft_show_text(kTextInsufficientMaterial);
             return;
-        case contracts::CraftExecuteResult::kNoBagSpace:
+        case result::CraftExecuteResult::kPrecheckFailed:
+            // 扣料前的前置校验失败：不消耗、不产出（保留已填格）。
+            craft_show_text(kTextInsufficientMaterial);
+            return;
+        case result::CraftExecuteResult::kMaterialRemoveFailed:
+        case result::CraftExecuteResult::kMaterialObservationFailed:
+        case result::CraftExecuteResult::kProductSaveFailed:
+            // 扣料后阶段：材料可能已扣，且 save 后产物所有权未知；不得提示空间不足，
+            // 也不得断言「无产物入包」，只报告材料可能已扣。
+            craft_show_material_consumed();
+            reset_stuff_and_refresh();
+            return;
+        case result::CraftExecuteResult::kProductPrepareFailed:
+            // 产物准备在扣料前失败：材料未扣，不宣称空间不足或无产物入包。
+            craft_show_product_prepare_failed();
+            reset_stuff_and_refresh();
+            return;
+        case result::CraftExecuteResult::kNoBagSpace:
+        default:
+            // 遗留/未知结果：只提示空间不足 + 清空重来。
             craft_show_text(kTextNoBagSpace);
             reset_stuff_and_refresh();
             return;
@@ -158,19 +192,13 @@ void on_confirm_three_slot() {
 // ---------------------------------------------------------------------------
 void place_execute(void* ctrl) {
     if (g_backup_place == nullptr) return;
-    const contracts::CraftResultApi* api = craft_api();
-    if (api == nullptr) {
-        // 本插件经 required 依赖 craft_result：活跃期 provider 必在场；撤销窗口内一律
-        // fail-closed，不回落原版路径（原版通用路径会白扣材料）。
-        log_message(kLogWarn, "place blocked reason=craft_result unavailable");
-        return;
-    }
+    const result::CraftResultApi* api = craft_api();
     const uint32_t mix_type = craft_mix_type();
     // 3 格隐式配方（type 1「合成」入口）：任意物品可填入 ⇒ 原版三道校验不可用，整段自实现。
     if (api->three_slot_mode_active(mix_type)) {
         const int64_t index = craft_selected_stuff_index();
         const contracts::QolItemHandle item = craft_selected_inventory_item();
-        contracts::CraftPlaceInput in{};
+        result::CraftPlaceInput in{};
         in.slot_index = index;
         in.item = item;
         if (item.slot != 0 && item.generation != 0) {
@@ -231,11 +259,11 @@ void place_execute(void* ctrl) {
     }
     // 宝石：按宝石档位 + 角色等级写入材料需求数（下一帧绘制即显示），再强制费用 0。
     const uint16_t category = item_category(item);
-    contracts::CraftMaterialNeedInput ni{};
+    result::CraftMaterialNeedInput ni{};
     ni.mix_type = mix_type;
     ni.jewel_grade = jewel_grade(category);
     ni.character_level = craft_character_level();
-    contracts::CraftMaterialNeedOutput no{};
+    result::CraftMaterialNeedOutput no{};
     api->material_needs(&ni, &no);
     for (int i = 0; i < no.count; ++i) {
         craft_write_stuff_need(static_cast<size_t>(i),
@@ -253,19 +281,15 @@ void place_execute(void* ctrl) {
 // ---------------------------------------------------------------------------
 void craft_execute(void* ctrl) {
     if (g_backup_mixing == nullptr) return;
-    const contracts::CraftResultApi* api = craft_api();
-    if (api == nullptr) {
-        log_message(kLogWarn, "craft blocked reason=craft_result unavailable");
-        return;
-    }
+    const result::CraftResultApi* api = craft_api();
     const uint32_t mix_type = craft_mix_type();
     // 3 格隐式配方：合成前先按 3 格内容查表。命中 → 弹原版 YesNo、回调走模块产出流程；
     // 未命中 → 弹 94 + 清空重来。两条路径都**不**转调原函数。
     if (api->three_slot_mode_active(mix_type)) {
-        contracts::CraftPrepareInput in{};
+        result::CraftPrepareInput in{};
         craft_read_stuff_categories(in.slot_categories);
         switch (api->prepare(&in)) {
-            case contracts::PrepareOutcome::kNoMatch:
+            case result::PrepareOutcome::kNoMatch:
                 if (log_budget_take()) {
                     log_message(kLogDebug, "three slot miss slots=%u,%u,%u", in.slot_categories[0],
                                   in.slot_categories[1], in.slot_categories[2]);
@@ -273,12 +297,12 @@ void craft_execute(void* ctrl) {
                 craft_show_text(kTextInsufficientMaterial);
                 reset_stuff_and_refresh();
                 return;
-            case contracts::PrepareOutcome::kConfirmPending:
+            case result::PrepareOutcome::kConfirmPending:
                 if (!craft_show_yesno(kTextConfirmCraft, &on_confirm_three_slot, nullptr)) {
                     log_message(kLogWarn, "three slot confirm skipped reason=no_popup");
                 }
                 return;
-            case contracts::PrepareOutcome::kNotMine:
+            case result::PrepareOutcome::kNotMine:
                 return;  // 不可能：上面已判定处于 3 格模式
         }
         return;
@@ -293,13 +317,18 @@ void craft_execute(void* ctrl) {
         return;
     }
     switch (api->craft_gate(craft_target_slot_item())) {
-        case contracts::CraftGate::kNotJewel:
+        case result::CraftGate::kNotJewel:
             craft_show_text(kTextOnlyJewel);
             return;
-        case contracts::CraftGate::kAlreadyGold:
+        case result::CraftGate::kAlreadyGold:
             craft_show_text(kTextMaxCrafted);
             return;
-        case contracts::CraftGate::kPass:
+        case result::CraftGate::kUnavailable:
+            // 质量服务不可用：与「真正非宝石」区分提示，只阻断宝石升阶。
+            craft_show_quality_unavailable();
+            return;
+        case result::CraftGate::kPass:
+        default:
             break;
     }
     g_backup_mixing(ctrl);  // 费用 0 时原版自动跳过金币校验并弹确认框 → StartMix
@@ -308,22 +337,18 @@ void craft_execute(void* ctrl) {
 // ---------------------------------------------------------------------------
 // wrapper：产物（MIXSYSTEM_MakeItem）
 // ---------------------------------------------------------------------------
-int64_t craft_rand64_adapter(int lo, int hi) {
-    return lo <= hi ? lo : hi;
+QolResult craft_rand_inclusive(int32_t lo, int32_t hi, int32_t* out) {
+    return random_inclusive(lo, hi, out);  // 父命名空间的游戏闭区间随机端口
 }
 
 int make_item_execute(int32_t mix_type, void** out_item) {
     int32_t result = -1;
-    const contracts::CraftResultApi* api = craft_api();
-    if (api == nullptr) {
-        log_message(kLogWarn, "make item blocked reason=craft_result unavailable");
-        return 1;
-    }
-    if (api != nullptr && out_item != nullptr && *out_item != nullptr) {
-        contracts::CraftMakeItemInput in{};
+    const result::CraftResultApi* api = craft_api();
+    if (out_item != nullptr && *out_item != nullptr) {
+        result::CraftMakeItemInput in{};
         in.mix_type = static_cast<uint32_t>(mix_type);
         if (!new_game_item_handle(*out_item, &in.item)) return 1;
-        in.rand_inclusive = &craft_rand64_adapter;
+        in.rand_inclusive = &craft_rand_inclusive;
         result = api->make_item(&in);
     }
     if (result >= 0) return result;
@@ -347,19 +372,17 @@ void recipe_execute(void* ctrl) {
     const int64_t prev_selected = craft_selected_recipe_at(clicked_type);
     g_backup_recipe(ctrl);
 
-    const contracts::CraftResultApi* api = craft_api();
-    if (api != nullptr) {
-        const uint32_t mix_type = craft_mix_type();
-        const int64_t form_type = api->form_ui_type_for_mix_type(mix_type);
-        if (form_type >= 0 && form_type != craft_ui_type()) {
-            craft_set_ui_type(form_type);
-            craft_init_mixing_state();
-            craft_reset_stuff_item_control();
-            craft_set_selected_recipe_at(clicked_type, prev_selected);
-            if (log_budget_take()) {
-                log_message(kLogDebug, "custom recipe picked mixType=%u type=%lld", mix_type,
-                              static_cast<long long>(form_type));
-            }
+    const result::CraftResultApi* api = craft_api();
+    const uint32_t mix_type = craft_mix_type();
+    const int64_t form_type = api->form_ui_type_for_mix_type(mix_type);
+    if (form_type >= 0 && form_type != craft_ui_type()) {
+        craft_set_ui_type(form_type);
+        craft_init_mixing_state();
+        craft_reset_stuff_item_control();
+        craft_set_selected_recipe_at(clicked_type, prev_selected);
+        if (log_budget_take()) {
+            log_message(kLogDebug, "custom recipe picked mixType=%u type=%lld", mix_type,
+                          static_cast<long long>(form_type));
         }
     }
     select_on_view_enter();
@@ -372,8 +395,8 @@ void recipe_execute(void* ctrl) {
 void set_desc_text_execute(void* ctrl, const char* text, uint32_t width, uint32_t f1, uint32_t f2,
                            int32_t f3) {
     if (g_backup_set_desc_text == nullptr) return;
-    const contracts::CraftResultApi* api = craft_api();
-    if (api != nullptr && api->desc_should_replace(craft_mix_type(), text)) {
+    const result::CraftResultApi* api = craft_api();
+    if (api->desc_should_replace(craft_mix_type(), text)) {
         constexpr size_t kLen = sizeof(kModuleRecipeDesc) - 1;
         auto* buf = const_cast<char*>(text);
         for (size_t n = 0; n < kLen; ++n) buf[n] = kModuleRecipeDesc[n];
@@ -388,9 +411,8 @@ void set_desc_text_execute(void* ctrl, const char* text, uint32_t width, uint32_
 void control_item_draw_execute(void* ctrl) {
     if (g_backup_control_item_draw == nullptr) return;
     bool is_three_slot = false;
-    const contracts::CraftResultApi* api = craft_api();
-    if (api != nullptr && api->three_slot_mode_active(craft_mix_type()) &&
-        is_stuff_ctrl(ctrl)) {
+    const result::CraftResultApi* api = craft_api();
+    if (api->three_slot_mode_active(craft_mix_type()) && is_stuff_ctrl(ctrl)) {
         is_three_slot = true;
     }
     if (!is_three_slot) {
@@ -412,17 +434,17 @@ void item_draw_porting_execute(void* item, int32_t x, int32_t y, int32_t type, i
 // wrapper：模块配方文案（「宝石升阶」）的三个绘制窗口
 // ---------------------------------------------------------------------------
 void button_recipe_draw_execute(void* ctrl) {
-    TextScopeGuard scope(2);
+    TextScopeGuard scope(kTextScopeRecipeButton);
     if (g_backup_button_recipe_draw != nullptr) g_backup_button_recipe_draw(ctrl);
 }
 
 void uimix_draw_execute() {
-    TextScopeGuard scope(3);
+    TextScopeGuard scope(kTextScopePanelTitle);
     if (g_backup_uimix_draw != nullptr) g_backup_uimix_draw();
 }
 
 void menu_list_draw_execute(void* ctrl) {
-    TextScopeGuard scope(4);
+    TextScopeGuard scope(kTextScopePageTab);
     if (g_backup_menu_list_draw != nullptr) g_backup_menu_list_draw(ctrl);
 }
 
@@ -438,13 +460,12 @@ void reset_stuff_execute() {
 // ---------------------------------------------------------------------------
 // 12 条资源声明（5 核心 required/fail-closed + 7 装饰 optional/fail-soft）
 // ---------------------------------------------------------------------------
-// gate=nullptr：资源跟随插件 lifecycle。插件经 required 依赖 craft_result 级联，
-// 仅在 custom_recipe 活跃（自有 feature 开启）时装hook，关闭时整体还原。
+// gate=nullptr：资源跟随插件 lifecycle（唯一开关 custom_recipe.recipes）。
 #define CRAFT_CLAIM(ID, SYM, HANDLER, REQ, FAIL)                                         \
     {                                                                                     \
         ID, SYM, contracts::ResourceMechanism::kEntryHook, contracts::ResourcePolicy::kPrivate, \
             REQ, FAIL, true, kOwner,                                                      \
-            "UIMix 合成器界面 hook；wrapper 只做界面判断/呈现，配方判定经 craft_result 能力", \
+            "UIMix 合成器界面 hook；wrapper 只做界面判断/呈现，配方判定经内部结果 API", \
             nullptr, 120, reinterpret_cast<void*>(HANDLER)                                \
     }
 
@@ -465,7 +486,7 @@ const contracts::ResourceClaim kClaims[] = {
     CRAFT_CLAIM("hook:UIMix_ButtonRecipeExe", "F_UIMIX_BUTTON_RECIPE_EXE_VMA", &recipe_execute,
                 contracts::ResourceRequirement::kRequired,
                 contracts::ResourceFailure::kFailClosed),
-    // 6 装饰：失败只 degraded、不拖垮核心链。
+    // 7 装饰：失败只 degraded、不拖垮核心链。
     CRAFT_CLAIM("hook:X_TEXTCTRL_SetTextControl", "F_XTEXTCTRL_SET_TEXT_CONTROL_VMA",
                 &set_desc_text_execute, contracts::ResourceRequirement::kOptional,
                 contracts::ResourceFailure::kFailSoft),
@@ -491,105 +512,46 @@ const contracts::ResourceClaim kClaims[] = {
 
 constexpr uint32_t kClaimCount = sizeof(kClaims) / sizeof(kClaims[0]);
 
-// craft_result 为 required：单开关语义经依赖级联表达——语义 owner（custom_recipe）
-// 的 feature 关闭时撤销 craft_result，本插件随之 blocked/deactivate，desired 保留。
-const contracts::CapabilityRequirement kRequires[] = {
-    {contracts::kItemFactsCapabilityId,
-     QolVersionRange{static_cast<uint16_t>(contracts::kItemFactsVersionMajor),
-                      static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
-    {contracts::kCraftFactsCapabilityId,
-     QolVersionRange{contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}},
-    {contracts::kCraftResultCapabilityId,
-     QolVersionRange{static_cast<uint16_t>(contracts::kCraftResultVersionMajor),
-                     static_cast<uint16_t>(contracts::kCraftResultVersionMinor)}},
-};
-
-const contracts::QolPortRequirement kPorts[] = {
-    {contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE,
-     {contracts::kQolPortCraftUiWriteVersion.major,
-      contracts::kQolPortCraftUiWriteVersion.minor}},
-};
-
-int plugin_install(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr || ctx.ports == nullptr ||
-        ctx.port_count != 1 || ctx.ports[0] == nullptr) {
-        return 1;
-    }
-    const void* iface = nullptr;
-    if (!contracts::succeeded(ctx.sdk->capabilities.require(
-            contracts::kItemFactsCapabilityId,
-            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
-        iface == nullptr || !contracts::item_facts_api_size_valid(
-                                static_cast<const contracts::ItemFactsApi*>(iface))) {
-        return 1;
-    }
-    set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
-    iface = nullptr;
-    if (!contracts::succeeded(ctx.sdk->capabilities.require(
-            contracts::kCraftFactsCapabilityId,
-            {contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}, &iface)) ||
-        iface == nullptr) {
-        set_item_facts(nullptr);
-        return 1;
-    }
-    set_craft_facts(static_cast<const contracts::CraftFactsApi*>(iface));
-    const auto* write_port = static_cast<const contracts::QolCraftUiWritePort*>(ctx.ports[0]);
-    if (!contracts::satisfies(write_port->abi_version,
-                              {contracts::kQolPortCraftUiWriteVersion.major,
-                                contracts::kQolPortCraftUiWriteVersion.minor}) ||
-        write_port->set_target_slot_item == nullptr) {
-        set_item_facts(nullptr);
-        set_craft_facts(nullptr);
-        return 1;
-    }
-    set_write_port(write_port);
-    set_context(ctx);
-    // 自身初始化无额外动作：资源由宿主声明式安装，backup 经 on_resource_ready 交还。
-    return 0;
+void clear_backups() {
+    g_backup_place = nullptr;
+    g_backup_mixing = nullptr;
+    g_backup_make_item = nullptr;
+    g_backup_menu = nullptr;
+    g_backup_recipe = nullptr;
+    g_backup_set_desc_text = nullptr;
+    g_backup_control_item_draw = nullptr;
+    g_backup_item_draw_porting = nullptr;
+    g_backup_button_recipe_draw = nullptr;
+    g_backup_uimix_draw = nullptr;
+    g_backup_menu_list_draw = nullptr;
+    g_backup_reset_stuff = nullptr;
 }
 
-// 空操作幂等：资源物理释放由宿主逆序执行，本插件无额外状态需要清理。
-void plugin_deactivate(contracts::PluginContext& ctx) {
-    (void)ctx;
-    set_item_facts(nullptr);
-    set_craft_facts(nullptr);
-    set_write_port(nullptr);
-}
-void plugin_on_enabled(contracts::PluginContext& ctx) { (void)ctx; }
-void plugin_on_disabled(contracts::PluginContext& ctx) { (void)ctx; }
-
-void plugin_fill_status(contracts::PluginStatusOut& out) {
-    out.enabled = true;
-    out.error = nullptr;
-}
-
-int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
-    if (ctx.sdk == nullptr) return 1;
-    set_context(ctx);
+int32_t on_resource_ready_impl(const char* resource_id, void* backup) {
     if (resource_id == nullptr) return 1;
-    if (std::strcmp(resource_id, "hook:UIMix_ButtonInvenItemSelectExe") == 0) {
+    if (std::strcmp(resource_id, kResourcePlace) == 0) {
         g_backup_place = reinterpret_cast<UIMixButtonInvenItemSelectExeFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:UIMix_ButtonMixingExe") == 0) {
+    } else if (std::strcmp(resource_id, kResourceMixing) == 0) {
         g_backup_mixing = reinterpret_cast<UIMixButtonMixingExeFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:MIXSYSTEM_MakeItem") == 0) {
+    } else if (std::strcmp(resource_id, kResourceMakeItem) == 0) {
         g_backup_make_item = reinterpret_cast<MakeMixFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:UIMix_ButtonMenuListExe") == 0) {
+    } else if (std::strcmp(resource_id, kResourceMenu) == 0) {
         g_backup_menu = reinterpret_cast<UIMixButtonMenuListExeFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:UIMix_ButtonRecipeExe") == 0) {
+    } else if (std::strcmp(resource_id, kResourceRecipe) == 0) {
         g_backup_recipe = reinterpret_cast<UIMixButtonRecipeExeFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:X_TEXTCTRL_SetTextControl") == 0) {
+    } else if (std::strcmp(resource_id, kResourceSetDescText) == 0) {
         g_backup_set_desc_text = reinterpret_cast<XTextCtrlSetTextControlFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:ControlItem_Draw") == 0) {
+    } else if (std::strcmp(resource_id, kResourceControlItemDraw) == 0) {
         g_backup_control_item_draw = reinterpret_cast<ControlItemDrawFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:ITEM_DrawPorting") == 0) {
+    } else if (std::strcmp(resource_id, kResourceItemDrawPorting) == 0) {
         g_backup_item_draw_porting = reinterpret_cast<ItemDrawPortingFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:UIMix_ButtonRecipeDraw") == 0) {
+    } else if (std::strcmp(resource_id, kResourceButtonRecipeDraw) == 0) {
         g_backup_button_recipe_draw = reinterpret_cast<UIMixButtonRecipeDrawFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:UIMix_Draw") == 0) {
+    } else if (std::strcmp(resource_id, kResourceUimixDraw) == 0) {
         g_backup_uimix_draw = reinterpret_cast<UIMixDrawFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:UIMix_ButtonMenuListDraw") == 0) {
+    } else if (std::strcmp(resource_id, kResourceMenuListDraw) == 0) {
         g_backup_menu_list_draw = reinterpret_cast<UIMixButtonMenuListDrawFn>(backup);
-    } else if (std::strcmp(resource_id, "hook:UIMix_ResetStuffItemControl") == 0) {
+    } else if (std::strcmp(resource_id, kResourceResetStuff) == 0) {
         g_backup_reset_stuff = reinterpret_cast<UIMixResetStuffItemControlFn>(backup);
     } else {
         return 1;  // 未知资源：fail-closed（宿主按 resource_ready_failed 回滚）
@@ -599,35 +561,44 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 
 }  // namespace
 
-const contracts::PluginDescriptor& plugin_descriptor() {
-    // Feature callback does not replace the existing lifecycle or business controls.
-    // hidden + default true：界面层随 required 依赖 craft_result 级联，不单独暴露开关；
-    // 用户唯一的可见开关在语义 owner custom_recipe（custom_recipe.recipes）。
-    static constexpr contracts::FeatureDefinition kFeatures[] = {
-        {"craft_ui.custom_crafting", 1, contracts::FeatureCategory::kHidden,
-         contracts::FeatureType::kToggle, "自定义合成界面", "呈现自定义配方并处理合成器交互。",
-         [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
-    };
-    static const contracts::PluginDescriptor descriptor = {
-        kPluginId,
-        kPluginVersion,
-        3, kRequires,  // requires=item.facts + craft.facts + craft_result
-        0, nullptr,    // optional_requires
-        0, nullptr,  // provides
-        kClaimCount, kClaims,
-        0, nullptr,  // jni
-        &plugin_install,
-        &plugin_deactivate,
-        &plugin_on_enabled,
-        &plugin_on_disabled,
-        &plugin_fill_status,
-        &on_resource_ready,
-        kPorts,
-        1,
-        nullptr, 0,
-        kFeatures, 1,
-    };
-    return descriptor;
+const contracts::ResourceClaim* claims(uint32_t* out_count) {
+    if (out_count != nullptr) *out_count = kClaimCount;
+    return kClaims;
 }
 
-}  // namespace qol::features::craft_ui
+bool core_backups_ready() { return core_backups_ready_impl(); }
+
+int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
+    if (ctx.sdk == nullptr) return 1;
+    set_context(ctx);
+    return on_resource_ready_impl(resource_id, backup);
+}
+
+bool bind(contracts::PluginContext& ctx, const contracts::ItemFactsApi* item_facts,
+          const contracts::CraftFactsApi* craft_facts,
+          const contracts::QolCustomRecipeWritePort* recipe_write_port,
+          const contracts::QolCraftUiWritePort* ui_write_port,
+          const contracts::TextLayerApi* text_api) {
+    (void)recipe_write_port;
+    (void)text_api;
+    if (ctx.sdk == nullptr || item_facts == nullptr || craft_facts == nullptr ||
+        ui_write_port == nullptr) {
+        clear();
+        return false;
+    }
+    set_item_facts(item_facts);
+    set_craft_facts(craft_facts);
+    set_write_port(ui_write_port);
+    set_context(ctx);
+    return true;
+}
+
+void clear() {
+    set_item_facts(nullptr);
+    set_craft_facts(nullptr);
+    set_write_port(nullptr);
+    g_drawing_three_slot_slot.store(false, std::memory_order_release);
+    clear_backups();
+}
+
+}  // namespace qol::features::custom_recipe::ui

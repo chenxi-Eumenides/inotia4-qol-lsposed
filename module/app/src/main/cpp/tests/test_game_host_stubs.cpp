@@ -285,6 +285,10 @@ std::string build_interactives_json() { return "{\"interactives\":[]}"; }
 std::string build_drops_json() { return "{\"drops\":[]}"; }
 }  // namespace qol::game
 
+// The craft write adapter forwards its typed random op to the resolved MATH_GetRandom symbol;
+// host tests never resolve it (the fake port answers), so the link-time symbol is provided here.
+int (*fn_math_get_random)(int, int) = nullptr;
+
 // host_adapter_tests exercises adapter forwarding only; the production feature registry
 // (host/plugin_registry.cpp) is not linked here, so the new-model reconciler seam is stubbed.
 namespace qol::host {
