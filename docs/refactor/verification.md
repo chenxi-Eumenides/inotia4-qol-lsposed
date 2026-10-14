@@ -279,6 +279,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Debug 构建与素材核对 | **构建成功**：`scripts/build-debug.sh --offline` 产出 `output/inotia4_qol_lsposed_debug_2610150537_3cc7410c87df.apk`，SHA-256 `3cc7410c87df6871ac07c7b4626b5cec497e4689ef027108ba5de65c52255670`。**素材（monster v31 简中）**：`monster-atlas-evidence.json` / `monster-center-strip-evidence.json` 确认 `loc 7/9/f/10` metadata 与标题 atlas、`UI_006` 与 overhaul 对应一致。 | `.tmp/custom-ui-polish-20261015/final-build-debug.log`、`final-apk.json`、`monster-atlas-evidence.json`、`monster-center-strip-evidence.json`。构建/静态素材证据不替代设备行为；输出目录内其他 release 产物为既有文件，本批未重建、未改动，也未做 Release 运行。 |
 | 视觉/真机结论 | **NOT_ACCEPTED**：未部署新构建、无手动/真机视觉验证与截图；素材证据仅覆盖 monster v31 简中，不扩到其他 variant。 | 不改 VM-D1 既有门禁/生命周期口径，也不表示插件 A–G 全量审计完成。 |
 
+### 5.13 `custom_recipe` 确认/不可用分类回归（Host 证据；VM 待验收）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现（确认/取消与错误分类） | **已实现（代码事实）**：YesNo 确认提供非空 `ok`+`cancel`；取消只作废内部 pending/token（不写物品/随机/扣料/保存/清格）；`api_prepare` 区分 `kNoMatch` 与尾追加 `PrepareOutcome::kUnavailable = 3`，槽位/类别读取错误经 `QolResult` 上浮、不伪装空槽（合法空槽要求 slot 与 generation 同时为 0，半无效 handle → `kQolErrInvalidArgument`）；弹窗创建失败明确提示而非静默；提示文案新增 scope 8–11（94/94/94/99），真正库存不足仍用材料不足原文。 | `plugins/custom_recipe/result.h:20-26`、`feature.cpp:637-693,1152`、`ui/feature.cpp:158-203,265-284`、`ui/runtime.cpp:138-163,343-351`、`text_table.h:14-33`；12 成员结果 API 表与 Host ABI 未变，无新增 provider。 |
+| Host 定向测试 | **7/7 PASS**：`custom_recipe_tests`、`custom_recipe_handle_chain_tests`、`custom_recipe_owner_fixture_tests`、`host_adapter_tests`、`craft_ui_guard_tests`、`craft_ui_handle_identity_tests`、`module_text_tests`（717 断言）；7 个 target 全部重新构建后运行，确保最终 `ui/feature.cpp` 畸形 handle 分支进入二进制。 | `.tmp/custom-recipe-fix-20261015/final-ctest.log`。owner fixture 以真实 wrapper 验证确认链（stub Host 写端口缺失 → ok 路径止于前置失败，不冒充产出成功）；handle_chain `wrapper_equivalent` 为构造输入覆盖结果层成功路径（3 次扣料 / create 1 / save 1 / random 0），属交叉覆盖非真机。 |
+| Debug 构建 / 集成打包 / 静态校验 | **构建成功**：`scripts/build-debug.sh --offline` → 模块 APK `output/inotia4_qol_lsposed_debug_2610150549_6ef35a38129e.apk`（SHA-256 `6ef35a38129e2c8b0971a6c7629c578bcd278a0098a331b2931eb081523baa77`）。集成包 `output/custom_recipe_fix_261015/Inotia4_v1.3.2_monster_v31_custom_recipe_fix_6ef35a38129e_lspatched.apk`（SHA-256 `8d590f6e47da80578a681fe9c875a672573d97ac95e77eadaa0449b4768bd34a`）：内嵌 module 与源模块 sha 一致、`origin.apk` 与输入 sha 一致、`apksigner verify` 通过；`check_arch` 通过、`check_http_routes` 147/147。 | `.tmp/custom-recipe-fix-20261015/{final-build-debug.log,final-apk.json,check-arch.log,check-http-routes.log}`、`deploy/receipt.json`。**未安装、未启动、无 ADB/HTTP 交互**；SHA 为构建/打包身份，不是设备运行证据。 |
+| 现场观察与根因 | **用户观察（非项目内设备证据）**：无效配方误报材料不足、正确配方无响应、2 药占 3 格正确报不足；GET readonly 显示 13 claims live / `degraded=false`。根因：弹窗 cancel 传 `nullptr` 被 adapter 拒绝 → 未创建弹窗。 | 本登记不制造设备日志或进程 SHA 证据；新包尚未安装，**VM-CR-MERGE-01 仍 NOT_ACCEPTED**，待用户确认后安装复测。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

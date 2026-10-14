@@ -10,11 +10,11 @@
 - **M2 hidden feature 清理（已实现）**：原 `craft_ui.custom_crafting` descriptor/feature 与其运行时持久化接线已删除，不再参与注册投影或运行。Store 既有残留保持原样：不迁移、不改写、不删除旧 key/配置文件。
 - **M3 `craft_result` 内部化（已实现）**：`result::CraftResultApi` 改为 owner 内部 UI→结果调用面（`result.h:10-104`、`feature.h:34-35`）。descriptor `provides` 为 0（`plugin.cpp:297-331`），不再对外提供该 capability，外部消费者不再依赖它。
 - **M4 write ports（已实现）**：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2 与 `QOL_PORT_CRAFT_UI_WRITE` v1.1 由同一 descriptor 声明并校验（`plugin.cpp:278-285,92-120`），保持具体函数语义与 item handle 类型；未新增 wildcard/catch-all port。
-- **M6 resource transaction（已实现）**：13 条声明——5 核心 required/fail-closed + 7 装饰 optional/fail-soft + ownership（required/fail-soft）置于末尾（`ui/runtime.cpp:472-510`、`plugin.cpp:55-90`）。核心失败由 Host 事务逆序回滚；optional 失败只 degraded。
-- **M7 typed command/帧时序（已实现）**：保留 `commands.post_typed` 入队与 Host 主线程 drain（`ui/feature.cpp:172-186`、`plugin.cpp:289-295`），未改成同步写；handler 先检查 `enabled()`，停用后 drain 中的命令失败（`feature.cpp:1182,1193`）。关闭时先关业务 gate 并作废 pending token，再按 Host drain/资源逆序释放。
+- **M6 resource transaction（已实现）**：13 条声明——5 核心 required/fail-closed + 7 装饰 optional/fail-soft + ownership（required/fail-soft）置于末尾（`ui/runtime.cpp:526-566`、`plugin.cpp:55-90`）。核心失败由 Host 事务逆序回滚；optional 失败只 degraded。
+- **M7 typed command/帧时序（已实现）**：保留 `commands.post_typed` 入队与 Host 主线程 drain（`ui/feature.cpp:205-222`、`plugin.cpp:289-295`），未改成同步写；handler 先检查 `enabled()`，停用后 drain 中的命令失败（`feature.cpp:1195,1193`）。关闭时先关业务 gate 并作废 pending token，再按 Host drain/资源逆序释放。
 - **M8 fixtures/CMake（已完成）**：owner fixtures 与 CMake 已由 L4 落地，新增 `custom_recipe_owner_fixture_tests`，受影响 17 目标 CTest 全部通过；全量 141/142，唯一失败为无关旧断言（见 `verification-log.md` §3）。
 - **M9 文档（已实现）**：参考说明只记录当前代码事实（`docs/reference/plugins/custom_recipe.md`）；合并验收与边界登记在本目录与 `docs/refactor/verification.md`。
-- **CR04（已实现）**：text scope 改由 UI 子层本地 TLS + RAII 守卫持有（`ui/feature.cpp:20,246-261`），查表为显式 `text_lookup(scope, id)`（`text_table.h:54-61`）；继续用既有 `text_scope.push/pop`，未新增 Host SDK getter。
+- **CR04（已实现）**：text scope 改由 UI 子层本地 TLS + RAII 守卫持有（`ui/feature.cpp:20,246-261`），查表为显式 `text_lookup(scope, id)`（`text_table.h:71-78`）；继续用既有 `text_scope.push/pop`，未新增 Host SDK getter。
 
 ## 2. 保留的依赖与行为等级
 
@@ -26,12 +26,12 @@
 ## 3. 不迁移的 API 与遗留语义
 
 - **API 例外（未变）**：`POST /api/op/craft/mix-direct` 继续由 `core.craft` 标记 owner，并保持 Kotlin `OpController` 501 `not implemented`；路径、method、响应与 NativeBridge external 集合不变；未新增 JNI。
-- **CR09（已实现，保持原语义）**：`UIMix_ResetStuffItemControl` 保持 optional，且 wrapper 不受 feature gate（`ui/runtime.cpp:454-458`）。
+- **CR09（已实现，保持原语义）**：`UIMix_ResetStuffItemControl` 保持 optional，且 wrapper 不受 feature gate（`ui/runtime.cpp:508-512`）。
 - **`craft_ui.custom_crafting` 旧 key**：仅移除 runtime 接线；Store 残留不迁移/不改写/不删除，不参与运行。
 
 ### 3.1 CR01 已实现的分阶段合成失败处理
 
-实现位于 `feature.cpp:687-997`，阶段结果见 `result.h:33-44`：
+实现位于 `feature.cpp:695-1005`，阶段结果见 `result.h:35-46`：
 
 1. **precheck（扣料前）**：pending/token 有效性、动态表 generation、输入 typed identity、live handle/类别/可堆叠性/类别持有数、扣料入口就绪、重复对象身份。阶段 1 冲突 → `kStaleSlots`，阶段 2 就绪失败 → `kPrecheckFailed`；持有数不足 → `kNotEnoughHeld`。该检查只是前置校验，不是 reservation/锁定/强原子保证。
 2. **产物准备（未入包）**：扣料前完成产物创建与必要改写；此阶段失败即丢弃未提交产物并返回 `kProductPrepareFailed`（尚未扣料）。
@@ -43,7 +43,16 @@
 
 ### 3.2 CR10 材料写回顺序（已实现）
 
-宝石升阶 `api_make_item`（`feature.cpp:1018-1093`）顺序为：quality 查询 → item word 交叉核对 → 材料需求前置校验 → 计算升阶候选（随机）→ 提交 need 写入 → 最后写 jewel word；need 写入失败即返回失败且不写 jewel。失败时已写入的展示值允许残留；该顺序不等价于 full atomic。
+宝石升阶 `api_make_item`（`feature.cpp:1026-1101`）顺序为：quality 查询 → item word 交叉核对 → 材料需求前置校验 → 计算升阶候选（随机）→ 提交 need 写入 → 最后写 jewel word；need 写入失败即返回失败且不写 jewel。失败时已写入的展示值允许残留；该顺序不等价于 full atomic。
+
+### 3.3 确认/取消与错误分类（2026-10-15 回归修复；不改变原 CR finding）
+
+- **确认必须双回调**：`kConfirmPending` 时 UI 必须提供非空 `ok` 与 `cancel`（adapter 契约拒绝任一为空）。历史实现传 `nullptr` cancel，导致弹窗未创建、正确配方无反应；本轮补齐取消回调。
+- **取消只作废**：`cancel_pending_confirmation()` 仅丢弃 pending recipe/identity 并递增 token，不写物品、不随机、不扣料、不保存、不清空已填格（`feature.cpp:1152`、`feature.h:51`、`ui/runtime.cpp:160-163`）。
+- **失败分类**：`api_prepare` 的「未命中」与「已匹配但槽位身份/类别上下文不可用」分开——前者 `PrepareOutcome::kNoMatch`，后者尾追加 `PrepareOutcome::kUnavailable = 3`（`result.h:20-26`、`feature.cpp:637-693`）。槽位/类别读取错误经 `QolResult` 上浮，**不进入配方判定**，不伪装空槽（`ui/feature.cpp:158-203`）；合法空槽要求 handle 的 `slot` 与 `generation` **同时为 0**，半无效 handle（任一为 0、另一非 0）返回 `kQolErrInvalidArgument`("malformed item handle")。
+- **提示分类**：本地 scope 由 5/6/7 扩为 5–11（新增配方不匹配、合成暂不可用、状态已变化、放料写入失败），popup id 94/94/94/99；真正库存不足仍用材料不足原文（`text_table.h:14-33`、`ui/runtime.cpp:138-163`）。弹窗创建失败明确提示「合成暂不可用，材料未扣。」而非静默（`ui/runtime.cpp:343-351`）。
+- **边界不变**：CR01 的阶段划分、`save` 失败后不承诺清理 handle、扣料后允许不回滚、12 成员结果 API 表、无新 provider / Host ABI 均保持。
+- **本轮证据与状态**：受影响 7 target 重新构建后 **7/7 PASS**（`.tmp/custom-recipe-fix-20261015/final-ctest.log`，确保畸形 handle 分支进入二进制）；`check_arch` 通过、`check_http_routes` 147/147；`scripts/build-debug.sh --offline` 成功（模块 `…6ef35a38129e.apk`，SHA-256 `6ef35a38…baa77`），LSPatch 集成包 `output/custom_recipe_fix_261015/…6ef35a38129e_lspatched.apk`（SHA-256 `8d590f6e…8bd34a`，内嵌 module/origin sha 一致、`apksigner verify` 通过）**未安装**。以上 SHA 为构建/打包身份，不是设备运行 SHA；**VM 仍 NOT_ACCEPTED**，待用户确认后安装复测。
 
 ## 4. 启动、失败回滚与停用顺序（已实现事实）
 

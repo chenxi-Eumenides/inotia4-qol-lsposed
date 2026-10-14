@@ -42,6 +42,7 @@
 #include "plugins/custom_recipe/feature.h"
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/custom_recipe/table.h"
+#include "plugins/custom_recipe/text_table.h"
 #include "plugins/custom_recipe/ui/runtime.h"
 
 namespace qol::host {
@@ -85,6 +86,62 @@ int g_table_deactivate_calls = 0;
 bool g_table_published = false;
 
 // ===========================================================================
+// UI 交互 / 槽位事实 fixture 状态（真实 wrapper 经 hook 记录替换指针后由测试调用）
+// ===========================================================================
+int32_t g_ui_show_text_id = -1;
+int g_ui_show_text_calls = 0;
+int g_ui_reset_calls = 0;
+int g_ui_refresh_calls = 0;
+int g_ui_select_calls = 0;
+int g_ui_init_mixing_calls = 0;
+int g_ui_play_sound_calls = 0;
+int g_popup_calls = 0;
+bool g_popup_fail = false;
+// 写入/读取失败注入与产物写计数（供 UI 失败路径断言）。
+bool g_set_stuff_item_fail = false;
+int g_stuff_item_fail_index = -1;
+int g_category_calls = 0;
+int g_category_override_after = -1;  // >0：该次数之后返回不一致类别（模拟 facts 变化）
+int g_category_fail_after = -1;      // >0：该次数之后类别读取报错
+int g_create_calls = 0;
+int g_save_calls = 0;
+int g_random_calls = 0;
+int g_word_write_calls = 0;
+QolCraftPopupCallback g_popup_ok = nullptr;
+QolCraftPopupCallback g_popup_cancel = nullptr;
+
+// 记录每个已安装 entry hook 的 wrapper 替换指针（模拟游戏侧按目标调用 wrapper）。
+void* g_wrapper_by_target[0x2010] = {};
+
+struct FixtureItemFact {
+    QolItemHandle handle;
+    int32_t category;
+    bool stackable;
+};
+constexpr FixtureItemFact kFixtureItems[] = {
+    {{11, 11}, 35, true},
+    {{12, 12}, 41, true},
+    {{13, 13}, 5, true},
+    {{14, 14}, 5, true},
+    {{15, 15}, 16, true},
+};
+
+QolItemHandle g_slot_items[3] = {kInvalidItemHandle, kInvalidItemHandle, kInvalidItemHandle};
+QolItemHandle g_selected_inventory_item = kInvalidItemHandle;
+int64_t g_selected_stuff_index = 0;
+int32_t g_craft_mix_type = 69;  // 目录第 0 条（kThreeSlotCraft）的 mixType
+int32_t g_slot_category_held[8] = {5, 5, 5, 5, 5, 5, 5, 5};
+
+const FixtureItemFact* find_fixture_item(QolItemHandle handle) {
+    for (const FixtureItemFact& fact : kFixtureItems) {
+        if (fact.handle.slot == handle.slot && fact.handle.generation == handle.generation) {
+            return &fact;
+        }
+    }
+    return nullptr;
+}
+
+// ===========================================================================
 // 能力替身（provider 插件的 provides 目标）
 // ===========================================================================
 int g_text_subscribe_calls = 0;
@@ -102,14 +159,26 @@ uint64_t fake_text_subscribe(int32_t, int32_t, const char* (*fn)(uint32_t, const
 void fake_text_unsubscribe(uint64_t) { ++g_text_unsubscribe_calls; }
 const TextLayerApi kTextLayerApi{&fake_text_subscribe, &fake_text_unsubscribe};
 
-QolResult fake_category(QolItemHandle, int32_t* out) {
+QolResult fake_category(QolItemHandle handle, int32_t* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
-    *out = 0;
+    ++g_category_calls;
+    const FixtureItemFact* fact = find_fixture_item(handle);
+    if (fact == nullptr) return qol::contracts::error(kQolErrNotFound, nullptr, 0);
+    if (g_category_fail_after >= 0 && g_category_calls > g_category_fail_after) {
+        return qol::contracts::error(kQolErrNotReady, "category unavailable", 20);
+    }
+    if (g_category_override_after >= 0 && g_category_calls > g_category_override_after) {
+        *out = 999;  // 与调用方上下文不一致
+        return qol::contracts::ok();
+    }
+    *out = fact->category;
     return qol::contracts::ok();
 }
-QolResult fake_is_real_equip(QolItemHandle, int32_t* out) {
+QolResult fake_is_real_equip(QolItemHandle handle, int32_t* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
-    *out = 1;
+    const FixtureItemFact* fact = find_fixture_item(handle);
+    if (fact == nullptr) return qol::contracts::error(kQolErrNotFound, nullptr, 0);
+    *out = fact->stackable ? 0 : 1;
     return qol::contracts::ok();
 }
 QolResult fake_is_jewel_category(int32_t, int32_t* out) {
@@ -121,7 +190,71 @@ const ItemFactsApi kItemFactsApi{sizeof(ItemFactsApi), &fake_category, &fake_is_
                                  &fake_is_jewel_category, nullptr, nullptr, nullptr, nullptr,
                                  nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
-const CraftFactsApi kCraftFactsApi{};
+QolResult fake_mix_type(uint32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = static_cast<uint32_t>(g_craft_mix_type);
+    return qol::contracts::ok();
+}
+QolResult fake_stuff_item(uint32_t index, QolItemHandle* out) {
+    if (out == nullptr || index >= 3) return qol::contracts::error(kQolErrInvalidArgument,
+                                                                   nullptr, 0);
+    if (g_stuff_item_fail_index >= 0 && static_cast<int>(index) == g_stuff_item_fail_index) {
+        return qol::contracts::error(kQolErrNotReady, "stuff read unavailable", 22);
+    }
+    // 控件存在但槽内无物品 = 正常空槽 → OK + 无效 handle（与生产 adapter 一致）。
+    *out = g_slot_items[index];
+    return qol::contracts::ok();
+}
+QolResult fake_category_held_count(int32_t category, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = (category >= 0 && category < 8) ? g_slot_category_held[category] : 0;
+    return qol::contracts::ok();
+}
+QolResult fake_character_level(int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = 50;
+    return qol::contracts::ok();
+}
+QolResult fake_selected_index(int64_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = g_selected_stuff_index;
+    return qol::contracts::ok();
+}
+QolResult fake_selected_inventory_item(QolItemHandle* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = g_selected_inventory_item;
+    return qol::contracts::ok();
+}
+QolResult fake_selected_stuff_item(QolItemHandle* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = g_slot_items[0];
+    return qol::contracts::ok();
+}
+QolResult fake_stuff_slot_available(uint32_t, int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = 1;
+    return qol::contracts::ok();
+}
+
+CraftFactsApi make_craft_facts() {
+    CraftFactsApi api{};
+    api.read.mix_type = &fake_mix_type;
+    api.read.selected_stuff_index = &fake_selected_index;
+    api.read.selected_stuff_item = &fake_selected_stuff_item;
+    api.read.stuff_item = &fake_stuff_item;
+    api.read.category_held_count = &fake_category_held_count;
+    api.read.character_level = &fake_character_level;
+    api.read_only.mix_type = &fake_mix_type;
+    api.read_only.selected_stuff_index = &fake_selected_index;
+    api.read_only.selected_stuff_item = &fake_selected_stuff_item;
+    api.read_only.stuff_item = &fake_stuff_item;
+    api.read_only.category_held_count = &fake_category_held_count;
+    api.read_only.character_level = &fake_character_level;
+    api.read_only.stuff_slot_available = &fake_stuff_slot_available;
+    api.read_only.selected_inventory_item = &fake_selected_inventory_item;
+    return api;
+}
+const CraftFactsApi kCraftFactsApi = make_craft_facts();
 
 QolResult fake_query_item(QolItemHandle, const AttributeQualityOptions*,
                           AttributeQualityItemResult*) {
@@ -147,8 +280,46 @@ QolResult stub_ok_i32(int32_t*) { return qol::contracts::ok(); }
 QolResult stub_ok_int64(int64_t) { return qol::contracts::ok(); }
 QolResult stub_ok_pair(int32_t, int64_t) { return qol::contracts::ok(); }
 QolResult stub_ok_handle(QolItemHandle) { return qol::contracts::ok(); }
-QolResult stub_ok_text(uint32_t) { return qol::contracts::ok(); }
-QolResult stub_ok_yesno(uint32_t, QolCraftPopupCallback, QolCraftPopupCallback) {
+// 在本地 scope 仍生效时，经生产文本消费者解析出实际展示文案（用于精确断言提示原因）。
+const char* g_last_shown_text = nullptr;
+QolResult stub_ok_text(uint32_t text_id) {
+    ++g_ui_show_text_calls;
+    g_ui_show_text_id = static_cast<int32_t>(text_id);
+    g_last_shown_text = g_last_text_callback != nullptr
+                            ? g_last_text_callback(text_id, "orig", nullptr)
+                            : nullptr;
+    return qol::contracts::ok();
+}
+// 忠实契约：adapter 要求 ok/cancel 都非空，否则 InvalidArgument（弹窗不会创建）。
+QolResult stub_ok_yesno(uint32_t, QolCraftPopupCallback ok, QolCraftPopupCallback cancel) {
+    ++g_popup_calls;
+    if (ok == nullptr || cancel == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "null popup callback", 19);
+    }
+    if (g_popup_fail) return qol::contracts::error(kQolErrNotReady, "popup unavailable", 17);
+    g_popup_ok = ok;
+    g_popup_cancel = cancel;
+    return qol::contracts::ok();
+}
+QolResult stub_reset_stuff() {
+    ++g_ui_reset_calls;
+    return qol::contracts::ok();
+}
+QolResult stub_refresh_inventory() {
+    ++g_ui_refresh_calls;
+    return qol::contracts::ok();
+}
+QolResult stub_select_empty(int32_t* out) {
+    ++g_ui_select_calls;
+    if (out != nullptr) *out = 0;
+    return qol::contracts::ok();
+}
+QolResult stub_init_mixing() {
+    ++g_ui_init_mixing_calls;
+    return qol::contracts::ok();
+}
+QolResult stub_play_sound(int32_t) {
+    ++g_ui_play_sound_calls;
     return qol::contracts::ok();
 }
 int g_fixture_needs_writes = 0;
@@ -157,18 +328,39 @@ QolResult stub_needs(uint32_t, int32_t, int32_t) {
     ++g_fixture_needs_writes;
     return qol::contracts::ok();
 }
-QolResult stub_set_item(uint32_t, QolItemHandle) {
+QolResult stub_set_item(uint32_t index, QolItemHandle) {
     ++g_fixture_set_item_writes;
+    if (g_set_stuff_item_fail && static_cast<int>(index) >= 0) {
+        return qol::contracts::error(kQolErrBlocked, "stuff write blocked", 19);
+    }
     return qol::contracts::ok();
 }
-QolResult stub_create(int32_t, QolItemHandle*) { return qol::contracts::ok(); }
-QolResult stub_create4(int32_t, int32_t, int32_t, int32_t, QolItemHandle*) {
+QolResult stub_create(int32_t, QolItemHandle* out) {
+    ++g_create_calls;
+    if (out != nullptr) *out = qol::contracts::kInvalidItemHandle;
     return qol::contracts::ok();
 }
-QolResult stub_save(QolItemHandle, int32_t*) { return qol::contracts::ok(); }
-QolResult stub_word_read(QolItemHandle, uint32_t*) { return qol::contracts::ok(); }
-QolResult stub_word_write(QolItemHandle, uint32_t) { return qol::contracts::ok(); }
+QolResult stub_create4(int32_t, int32_t, int32_t, int32_t, QolItemHandle* out) {
+    ++g_create_calls;
+    if (out != nullptr) *out = qol::contracts::kInvalidItemHandle;
+    return qol::contracts::ok();
+}
+QolResult stub_save(QolItemHandle, int32_t* out_saved) {
+    ++g_save_calls;
+    if (out_saved != nullptr) *out_saved = 1;
+    return qol::contracts::ok();
+}
+QolResult stub_word_read(QolItemHandle, uint32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = 0;
+    return qol::contracts::ok();
+}
+QolResult stub_word_write(QolItemHandle, uint32_t) {
+    ++g_word_write_calls;
+    return qol::contracts::ok();
+}
 QolResult stub_random(int32_t lo, int32_t, int32_t* out) {
+    ++g_random_calls;
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
     *out = lo;
     return qol::contracts::ok();
@@ -177,12 +369,13 @@ QolResult stub_random(int32_t lo, int32_t, int32_t* out) {
 QolCraftUiWritePort make_ui_write_port() {
     QolCraftUiWritePort port{};
     port.abi_version = kQolPortCraftUiWriteVersion;
-    port.init_mixing_state = &stub_ok;
-    port.reset_stuff_item_control = &stub_ok;
-    port.refresh_inventory_items = &stub_ok;
-    port.select_first_empty_stuff_slot = &stub_ok_i32;
+    port.init_mixing_state = &stub_init_mixing;
+    port.reset_stuff_item_control = &stub_reset_stuff;
+    port.refresh_inventory_items = &stub_refresh_inventory;
+    port.select_first_empty_stuff_slot = &stub_select_empty;
     port.set_ui_type = &stub_ok_int64;
     port.set_selected_recipe = &stub_ok_pair;
+    port.play_sound = &stub_play_sound;
     port.show_text = &stub_ok_text;
     port.show_yesno_from_text = &stub_ok_yesno;
     port.set_target_slot_item = &stub_ok_handle;
@@ -190,7 +383,7 @@ QolCraftUiWritePort make_ui_write_port() {
     return port;
 }
 
-QolResult stub_sound(int32_t) { return qol::contracts::ok(); }
+
 
 QolCustomRecipeWritePort g_recipe_port{};
 QolCraftUiWritePort g_ui_port{};
@@ -211,7 +404,6 @@ void install_ready_ports() {
     g_recipe_port.random_inclusive = &stub_random;
 
     g_ui_port = make_ui_write_port();
-    g_ui_port.play_sound = &stub_sound;
     qol::gametest::set_custom_recipe_write_port_for_test(&g_recipe_port);
     qol::gametest::set_craft_ui_write_port_for_test(&g_ui_port);
 }
@@ -281,7 +473,10 @@ uintptr_t resolve_symbol(const char* symbol, bool* out_followed) {
 }
 
 int hook_symbol(void* target, void* replacement, void** backup) {
-    (void)replacement;
+    const uintptr_t address = reinterpret_cast<uintptr_t>(target);
+    if (address > 0 && address < 0x2010) {
+        g_wrapper_by_target[address] = replacement;
+    }
     ++g_hook_calls;
     for (int i = 0; i < kCoreSymbolCount; ++i) {
         if (reinterpret_cast<uintptr_t>(target) == 0x1000 + static_cast<uintptr_t>(i) &&
@@ -436,6 +631,208 @@ void assert_registrations_net_zero() {
     assert(qol::host::fixture_typed_registrations() == qol::host::fixture_typed_unregistrations());
     assert(qol::host::fixture_event_registrations() == qol::host::fixture_event_unregistrations());
     assert(g_text_subscribe_calls == g_text_unsubscribe_calls);
+}
+
+// ---------------------------------------------------------------------------
+// UI 确认链路（真实 wrapper 经 hook 记录后由测试调用；根因回归）
+// ---------------------------------------------------------------------------
+void seed_fixed_recipe_slots() {
+    // 静态配方 {35, 0, 41}：皮革 + 空 + 魔法衣料 → 背包（大）。
+    g_slot_items[0] = QolItemHandle{11, 11};
+    g_slot_items[1] = qol::contracts::kInvalidItemHandle;
+    g_slot_items[2] = QolItemHandle{12, 12};
+    g_slot_category_held[35] = 5;
+    g_slot_category_held[41] = 5;
+    g_craft_mix_type = 69;
+    g_popup_ok = nullptr;
+    g_popup_cancel = nullptr;
+    g_popup_fail = false;
+    g_popup_calls = 0;
+    g_ui_show_text_calls = 0;
+    g_ui_show_text_id = -1;
+    g_last_shown_text = nullptr;
+    g_ui_reset_calls = 0;
+    g_ui_refresh_calls = 0;
+    g_ui_select_calls = 0;
+    g_fixture_needs_writes = 0;
+    g_fixture_set_item_writes = 0;
+    g_create_calls = 0;
+    g_save_calls = 0;
+    g_random_calls = 0;
+    g_word_write_calls = 0;
+    g_set_stuff_item_fail = false;
+    g_stuff_item_fail_index = -1;
+    g_category_calls = 0;
+    g_category_override_after = -1;
+    g_category_fail_after = -1;
+    g_selected_inventory_item = QolItemHandle{13, 13};  // 类别 5（可堆叠）
+    g_selected_stuff_index = 0;
+}
+
+constexpr const char* kMsgRecipeMismatch = "配方不匹配，请检查材料组合。";
+constexpr const char* kMsgCraftUnavailable = "合成暂不可用，材料未扣。";
+constexpr const char* kMsgStateChanged = "合成状态已变化，请重新填入材料。";
+constexpr const char* kMsgPlaceWriteFailed = "放入失败，请重试。";
+
+// 提示 94 时断言实际文案（nullptr = 未被本地 scope 替换，保留原「材料不足」原文）。
+void expect_prompt_94(const char* expected) {
+    assert(g_ui_show_text_calls == 1);
+    assert(g_ui_show_text_id == 94);
+    if (expected == nullptr) {
+        assert(g_last_shown_text == nullptr);
+    } else {
+        assert(g_last_shown_text != nullptr && std::strcmp(g_last_shown_text, expected) == 0);
+    }
+}
+
+void test_ui_confirm_paths() {
+    assert(qol::features::custom_recipe::enabled());
+    void* const mixing = g_wrapper_by_target[0x1001];
+    void* const place = g_wrapper_by_target[0x1000];
+    assert(mixing != nullptr && place != nullptr);
+
+    // 1) 有效配方：prepare 命中 → 弹窗必须收到两个非空回调（原根因：cancel=nullptr 被 adapter 拒绝）。
+    seed_fixed_recipe_slots();
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 1);
+    assert(g_popup_ok != nullptr && g_popup_cancel != nullptr);
+    assert(g_ui_show_text_calls == 0 && g_ui_reset_calls == 0);
+
+    // 2) 取消：零扣料/零产物/零随机/零保存，且不清理已填格。
+    g_popup_cancel();
+    assert(g_ui_reset_calls == 0 && g_ui_refresh_calls == 0);
+    assert(g_fixture_needs_writes == 0 && g_fixture_set_item_writes == 0);
+    assert(g_create_calls == 0 && g_save_calls == 0 && g_random_calls == 0);
+
+    // 取消后旧确认已作废：再触发旧 ok 不得进入产出（提示状态已变化 + 现有清格行为）。
+    g_popup_ok();
+    assert(g_create_calls == 0 && g_save_calls == 0 && g_random_calls == 0);
+    expect_prompt_94(kMsgStateChanged);
+    assert(g_ui_reset_calls == 1);
+
+    // 3) 重新点击 → 新 token 的弹窗；ok 到达结果层（fixture 无 remove 端口 → 前置失败），
+    //    不静默、不伪成功、零材料/产物写、保留已填格。
+    seed_fixed_recipe_slots();
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 1 && g_popup_ok != nullptr && g_popup_cancel != nullptr);
+    g_popup_ok();
+    assert(g_create_calls == 0 && g_save_calls == 0 && g_random_calls == 0);
+    assert(g_fixture_needs_writes == 0 && g_fixture_set_item_writes == 0);
+    expect_prompt_94(kMsgCraftUnavailable);  // 合成暂不可用（材料未扣）
+    assert(g_ui_reset_calls == 0);
+
+    // 4) 弹窗创建失败：明确提示 + 作废 pending + 不清理已有材料（不再只有日志）。
+    seed_fixed_recipe_slots();
+    g_popup_fail = true;
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 1 && g_popup_ok == nullptr && g_popup_cancel == nullptr);
+    expect_prompt_94(kMsgCraftUnavailable);
+    assert(g_ui_reset_calls == 0 && g_ui_refresh_calls == 0);
+    assert(g_fixture_needs_writes == 0 && g_create_calls == 0 && g_save_calls == 0 &&
+           g_random_calls == 0);
+
+    // 5) 真正未命中配方 → 「配方不匹配」提示（不是材料不足）。
+    seed_fixed_recipe_slots();
+    g_slot_items[1] = QolItemHandle{13, 13};  // {35, 5, 41} 不在任何配方
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 0);
+    expect_prompt_94(kMsgRecipeMismatch);
+    assert(g_ui_reset_calls == 1);
+    // 与「材料不足」「暂不可用」文案必须不同（各自独立 scope 覆盖同一 popup id）。
+    {
+        using qol::features::custom_recipe::kTextScopeCraftUnavailable;
+        using qol::features::custom_recipe::kTextScopeMaterialMayHaveBeenConsumed;
+        using qol::features::custom_recipe::kTextScopeRecipeMismatch;
+        using qol::features::custom_recipe::kTextScopeStateChanged;
+        using qol::features::custom_recipe::text_lookup;
+        const char* const mismatch = text_lookup(kTextScopeRecipeMismatch, 94);
+        const char* const unavailable = text_lookup(kTextScopeCraftUnavailable, 94);
+        const char* const consumed = text_lookup(kTextScopeMaterialMayHaveBeenConsumed, 94);
+        const char* const changed = text_lookup(kTextScopeStateChanged, 94);
+        assert(mismatch != nullptr && unavailable != nullptr && consumed != nullptr &&
+               changed != nullptr);
+        assert(std::strcmp(mismatch, unavailable) != 0 && std::strcmp(mismatch, consumed) != 0 &&
+               std::strcmp(unavailable, consumed) != 0 && std::strcmp(changed, consumed) != 0);
+    }
+
+    // 6a) 槽位读取失败：UI 读取即失败 → 不进入配方判定 → 「合成暂不可用，材料未扣」，
+    //     不弹窗、不清格（不得把读取失败伪装成空槽 → 配方不匹配）。
+    seed_fixed_recipe_slots();
+    g_stuff_item_fail_index = 2;
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 0);
+    expect_prompt_94(kMsgCraftUnavailable);
+    assert(g_ui_reset_calls == 0 && g_ui_refresh_calls == 0);
+
+    // 6b) 类别读取失败（facts 缺失/报错）同样 → 「合成暂不可用」，不伪装空槽、不清格。
+    seed_fixed_recipe_slots();
+    g_category_fail_after = 2;  // UI 读到第 3 次（prepare 复核）时失败
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 0);
+    expect_prompt_94(kMsgCraftUnavailable);
+    assert(g_ui_reset_calls == 0);
+
+    // 6b2) 半无效 handle（slot=0/generation!=0 或 slot!=0/generation=0）→ 畸形身份，
+    //      明确「合成暂不可用」，不得当作空槽。
+    seed_fixed_recipe_slots();
+    g_slot_items[1] = QolItemHandle{0, 7};
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 0);
+    expect_prompt_94(kMsgCraftUnavailable);
+    assert(g_ui_reset_calls == 0);
+
+    seed_fixed_recipe_slots();
+    g_slot_items[2] = QolItemHandle{7, 0};
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 0);
+    expect_prompt_94(kMsgCraftUnavailable);
+    assert(g_ui_reset_calls == 0);
+
+    // 6c) 真空槽保护：合法空槽 + 未命中配方 → 仍为「配方不匹配」并清格重来。
+    seed_fixed_recipe_slots();
+    g_slot_items[2] = qol::contracts::kInvalidItemHandle;  // {35, 0, 0} 合法空槽但未命中
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 0);
+    expect_prompt_94(kMsgRecipeMismatch);
+    assert(g_ui_reset_calls == 1);
+
+    // 6d) 确认回调读取失败：不 execute（零扣料/产物），提示「材料未扣」，作废 pending。
+    seed_fixed_recipe_slots();
+    reinterpret_cast<void (*)(void*)>(mixing)(nullptr);
+    assert(g_popup_calls == 1 && g_popup_ok != nullptr);
+    g_stuff_item_fail_index = 0;  // 确认回调里读取失败
+    g_ui_show_text_calls = 0;
+    g_last_shown_text = nullptr;
+    g_popup_ok();
+    assert(g_create_calls == 0 && g_save_calls == 0 && g_random_calls == 0);
+    assert(g_fixture_needs_writes == 0 && g_fixture_set_item_writes == 0);
+    expect_prompt_94(kMsgCraftUnavailable);
+    assert(g_ui_reset_calls == 0);
+
+    // 7) 放料写入失败 → 准确写入失败提示（popup id 99），保留已填格。
+    seed_fixed_recipe_slots();
+    g_set_stuff_item_fail = true;
+    reinterpret_cast<void (*)(void*)>(place)(nullptr);
+    assert(g_fixture_set_item_writes == 1);
+    assert(g_ui_show_text_calls == 1 && g_ui_show_text_id == 99);
+    assert(g_last_shown_text != nullptr && std::strcmp(g_last_shown_text, kMsgPlaceWriteFailed) == 0);
+    assert(g_ui_reset_calls == 0);
+
+    // 8) 仅 2 药占 3 格（同类可堆叠）→ 真实「材料不足」（94），不是配方不匹配。
+    seed_fixed_recipe_slots();
+    g_craft_mix_type = 69;
+    g_selected_inventory_item = QolItemHandle{13, 13};  // 类别 5
+    g_slot_items[0] = QolItemHandle{13, 13};
+    g_slot_items[1] = QolItemHandle{13, 13};
+    g_slot_items[2] = qol::contracts::kInvalidItemHandle;
+    g_selected_stuff_index = 2;   // 目标格 = 第 3 格（0/1 已各占一格）
+    g_slot_category_held[5] = 2;  // 持有 2 个，已占 2 格 → 第三次放料必须被拒
+    g_fixture_set_item_writes = 0;
+    g_ui_show_text_calls = 0;
+    reinterpret_cast<void (*)(void*)>(place)(nullptr);
+    expect_prompt_94(nullptr);  // 未被本地 scope 替换 → 保留原「材料不足」原文
+    assert(g_fixture_set_item_writes == 0);
+    g_slot_category_held[5] = 5;
 }
 
 }  // namespace
@@ -681,6 +1078,9 @@ int main(int argc, char** argv) {
     assert(qol::features::custom_recipe::enabled());
     assert(qol::features::custom_recipe::ownership_ready());
     assert_core_resources_live();
+
+    test_ui_confirm_paths();
+    std::puts("owner_fixture: ui confirm/cancel/popup-failure/prompt paths verified");
 
     std::puts("custom_recipe_owner_fixture_tests: pass (single descriptor, per-hook rollback/degrade, ownership gate, off/on cleanup)");
     return 0;

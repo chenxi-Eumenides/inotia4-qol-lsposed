@@ -651,7 +651,7 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
     }
     if (g_craft_facts == nullptr || g_craft_facts->read.stuff_item == nullptr) {
         log_message(2, "three slot prepare failed stage=identity result=%d", kQolErrNotReady);
-        return PrepareOutcome::kNoMatch;
+        return PrepareOutcome::kUnavailable;
     }
     qol::contracts::QolItemHandle items[kThreeSlotStuffCount] = {
         qol::contracts::kInvalidItemHandle,
@@ -663,21 +663,29 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
         if (read.ok != kQolOk) {
             log_message(2, "three slot prepare failed stage=identity index=%u result=%d",
                         static_cast<uint32_t>(i), read.code);
-            return PrepareOutcome::kNoMatch;
+            return PrepareOutcome::kUnavailable;
         }
         if (categories[i] == 0) {
             if (items[i].slot != 0 || items[i].generation != 0) {
-                return PrepareOutcome::kNoMatch;
+                // 调用方声称该格为空但槽内有对象：上下文与配方判定不一致。
+                log_message(2, "three slot prepare failed stage=empty_identity index=%u result=%d",
+                            static_cast<uint32_t>(i), kQolErrConflict);
+                return PrepareOutcome::kUnavailable;
             }
             continue;
         }
         uint16_t actual_category = 0;
         const QolResult category_result = read_live_item_category(items[i], &actual_category);
-        if (category_result.ok != kQolOk || actual_category != categories[i]) {
+        if (category_result.ok != kQolOk) {
             log_message(2, "three slot prepare failed stage=identity_category index=%u result=%d",
-                        static_cast<uint32_t>(i),
-                        category_result.ok == kQolOk ? kQolErrConflict : category_result.code);
-            return PrepareOutcome::kNoMatch;
+                        static_cast<uint32_t>(i), category_result.code);
+            return PrepareOutcome::kUnavailable;
+        }
+        if (actual_category != categories[i]) {
+            // 传入类别与槽内实际类别不一致：上下文错误，不是「配方不匹配」。
+            log_message(2, "three slot prepare failed stage=identity_category index=%u result=%d",
+                        static_cast<uint32_t>(i), kQolErrConflict);
+            return PrepareOutcome::kUnavailable;
         }
     }
     three_slot_refresh_pending(*recipe, items, categories);  // YesNo 前保存完整 recipe 与 identity。
@@ -1140,6 +1148,12 @@ const qol::contracts::OwnershipOps kOwnershipOps = {&own_acquire, &own_release};
 }  // namespace
 
 bool enabled() { return g_custom_recipe_enabled.load(std::memory_order_acquire); }
+
+void cancel_pending_confirmation() {
+    // 与停用同一条作废路径：丢弃 pending recipe/identity 并递增 token，
+    // 使任何已排队的旧确认无法再执行；不触碰已填格材料或产物。
+    three_slot_invalidate_pending();
+}
 
 QolResult random_inclusive(int32_t lo, int32_t hi, int32_t* out) {
     return port_random_inclusive(lo, hi, out);

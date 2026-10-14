@@ -6,7 +6,7 @@
 
 本批不使用 AQ 编号；静态 findings 使用 CR01–CR11，含义与编号见 [`static-audit.md`](static-audit.md)，本轮实施对应位置亦在该文件的「本轮实施对应」列。CR09 为策略观察（ResetStuff optional 且不受 gate）、CR11 为条件性生命周期观察；二者不写成已确认的运行时事故。注册顺序不另立 finding：当前 Host registry 在安装前构建完整 capability DAG 并按拓扑顺序安装。
 
-CR01 已裁决为分阶段、尽量保持原子且允许扣料后不回退的目标，并已在 `feature.cpp:687-997` 落地；CR02/CR03/CR04/CR10 的实现位置见 `design-card.md` §1/§3.1/§3.2。以上均为**实现事实**，不等于验收通过。
+CR01 已裁决为分阶段、尽量保持原子且允许扣料后不回退的目标，并已在 `feature.cpp:695-1005` 落地；CR02/CR03/CR04/CR10 的实现位置见 `design-card.md` §1/§3.1/§3.2。以上均为**实现事实**，不等于验收通过。
 
 独立源码复核另提出 **F1–F3** 三项修复，按新编号登记（见 `static-audit.md` 的「独立复核修复项 F1–F3」），不覆盖、不重编号 CR01–CR11。
 
@@ -46,5 +46,8 @@ CR01 已裁决为分阶段、尽量保持原子且允许扣料后不回退的目
 | 设备部署与运行身份（deployment identity，非功能验收） | 集成包安装 `Success`（APK SHA-256 `52a5b61363a92f10d706fb161838e43339d8717d2b7aa697c8752e53898fb828`，内嵌 module 与 Debug 构建一致）；启动后运行身份核对一致（`versionCode=192`、`versionName=0.7.13`、`sha256=ff39e1c3502f…`）；`/api/health` `ready=true`/`monster v31`；config projection 仅 `custom_recipe`，无 `craft_ui`；package 不变，未卸载/未清 data。 | `device-api/install.log`、`launch.log`、`running-module.log:33`、`after-health.json`、`after-config-list.json`。仍**不是**功能验收。 |
 | 设备阻断与未执行项 | 启动停在 Android 协议页 `AgreementUIActivity`（`id=ok`/`同意`），须用户手动确认；未点击、未 `enter_slot`、未发材料、未执行配方。`startup-system-info.json` 的 `save_slots=false` 为启动未完成观察，不能断言存档删除。观察：`running-module.log:17` optional `attribute.quality` 边降级防循环；`:59` `recipe table not ready … count=0` 为协议页启动态，无 loaded-world 表资源证据。 | `device-api/startup-ui.json`、`startup-ui-dialog.json`、`startup-system-info.json`、`running-module.log:17,59`。安装前 slot 0 备份 `c97d845ba2b1` 已导出并保留（`pre-deploy-backup.json`）。 |
 | 合并验收 `VM-CR-MERGE-01` | **NOT_ACCEPTED（部署身份已建立；功能行为未验）**：`deployment identity established ≠ functional VM`；无截图/现象输出。 | `docs/refactor/verification.md` §5.11 与 design-card §6。 |
+| 2026-10-15 确认/不可用分类回归（Host 证据） | 受影响 7 target **重新构建后 7/7 PASS**（`custom_recipe_tests`、`custom_recipe_handle_chain_tests`、`custom_recipe_owner_fixture_tests`、`host_adapter_tests`、`craft_ui_guard_tests`、`craft_ui_handle_identity_tests`、`module_text_tests` 717 断言），确保畸形 handle 分支进入二进制。修复：确认双回调（cancel 非空）、取消只作废、`PrepareOutcome::kUnavailable` 与 `kNoMatch` 分离、槽位/类别读取失败不伪装空槽（半无效 handle → 错误）、弹窗失败明确提示、提示 scope 5–11。 | `.tmp/custom-recipe-fix-20261015/final-ctest.log`。owner fixture 用真实 wrapper 验证确认链（stub Host 写端口缺失，ok 路径止于前置失败，不冒充产出成功）；handle_chain 的 `wrapper_equivalent` 为构造输入的交叉覆盖，非真机。 |
+| 2026-10-15 构建/打包与静态校验 | `scripts/build-debug.sh --offline` 成功（模块 APK `output/inotia4_qol_lsposed_debug_2610150549_6ef35a38129e.apk`，SHA-256 `6ef35a38129e2c8b0971a6c7629c578bcd278a0098a331b2931eb081523baa77`）；LSPatch 集成包 `output/custom_recipe_fix_261015/Inotia4_v1.3.2_monster_v31_custom_recipe_fix_6ef35a38129e_lspatched.apk`（SHA-256 `8d590f6e47da80578a681fe9c875a672573d97ac95e77eadaa0449b4768bd34a`），内嵌 module 与原 input sha 一致、`apksigner verify` 通过；`check_arch` 通过、`check_http_routes` 147/147。 | `.tmp/custom-recipe-fix-20261015/{final-build-debug.log,final-apk.json,check-arch.log,check-http-routes.log}`、`deploy/receipt.json`。**未安装、未启动**：以上为构建/打包身份，不是设备运行 SHA。 |
+| 本轮用户观察与根因（无项目内设备证据） | 用户报告：无效配方误报材料不足、正确配方无反应、2 药占 3 格正确报不足；GET readonly 显示 13 claims live / `degraded=false`。根因定位为弹窗 cancel 传 `nullptr` 被 adapter 拒绝（未创建弹窗）。 | 属用户现场陈述与源码/GET 面定位，**本登记不制造设备日志或进程 SHA 证据**；VM-CR-MERGE-01 仍需用户确认后安装新包复测。 |
 | 历史 PASS 复用 | **禁止**：VM-46 等历史卡为合并前分离双插件形态的证据，不作为本轮合并证据；历史 PASS 行不改写。 | 本登记不引用其作为合并验收。 |
 | 整体状态 | **NOT_ACCEPTED（合并目标已实现；Host/静态/Debug 证据成立；部署身份已建立，设备功能行为未验）**。 | 待用户确认协议页并进入世界态后的适用 VM 验证。 |

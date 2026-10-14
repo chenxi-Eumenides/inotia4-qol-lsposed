@@ -135,12 +135,45 @@ void craft_show_product_prepare_failed() {
     craft_show_text(kProductPrepareFailedPopupId);
 }
 
+void craft_show_recipe_mismatch() {
+    TextScopeGuard scope(kTextScopeRecipeMismatch);
+    craft_show_text(kRecipeMismatchPopupId);
+}
+
+void craft_show_craft_unavailable() {
+    TextScopeGuard scope(kTextScopeCraftUnavailable);
+    craft_show_text(kCraftUnavailablePopupId);
+}
+
+void craft_show_state_changed() {
+    TextScopeGuard scope(kTextScopeStateChanged);
+    craft_show_text(kStateChangedPopupId);
+}
+
+void craft_show_place_write_failed() {
+    TextScopeGuard scope(kTextScopePlaceWriteFailed);
+    craft_show_text(kPlaceWriteFailedPopupId);
+}
+
+// YesNo 取消回调（void() 形态，**必须有效**：adapter 要求 ok/cancel 都非空，否则拒绝创建弹窗）。
+// 只作废待确认：不写物品、不随机、不扣料、不保存，也不清空已填格。
+void on_cancel_three_slot() {
+    cancel_pending_confirmation();
+    log_message(kLogDebug, "three slot confirm cancelled");
+}
+
 // 3 格合成的 YesNo 确认回调（经 x3 传入，void() 形态；原版该槽位是 UIMix_StartMix@0xc0870）。
 // 上下文只能用模块自有全局（x6/param 会被原版当钱数渲染）。结果由结果层回传，界面按枚举收尾。
 void on_confirm_three_slot() {
     const result::CraftResultApi* api = craft_api();
     result::CraftExecuteInput in{};
-    craft_read_stuff_categories(in.slot_categories);
+    if (craft_read_stuff_categories(in.slot_categories).ok != kQolOk) {
+        // 槽位读取失败：绝不执行（不扣料、不产出），作废本次确认并明确「材料未扣」。
+        cancel_pending_confirmation();
+        craft_show_craft_unavailable();
+        log_message(kLogWarn, "three slot confirm aborted reason=stuff read failed");
+        return;
+    }
     for (size_t i = 0; i < kStuffSlotCount; ++i) {
         in.items[i] = craft_stuff_item(i);
         if (in.items[i].slot != 0 && in.items[i].generation != 0) {
@@ -153,17 +186,17 @@ void on_confirm_three_slot() {
             return;
         case result::CraftExecuteResult::kStaleSlots:
         case result::CraftExecuteResult::kAborted:
-            // 确认框停留期间格被换掉 / 停用 / 无待确认：不消耗、不产出 → 提示 + 清空重来。
-            craft_show_text(kTextInsufficientMaterial);
+            // 确认框停留期间格被换掉 / 停用 / 无待确认：不消耗、不产出 → 清空重来（行为不变）。
+            craft_show_state_changed();
             reset_stuff_and_refresh();
             return;
         case result::CraftExecuteResult::kNotEnoughHeld:
-            // 扣料前库存复核失败：不消耗、不产出（保留已填格，便于玩家补材料后重试）。
+            // 扣料前库存复核失败：材料确实不足，保留已填格便于补料后重试。
             craft_show_text(kTextInsufficientMaterial);
             return;
         case result::CraftExecuteResult::kPrecheckFailed:
-            // 扣料前的前置校验失败：不消耗、不产出（保留已填格）。
-            craft_show_text(kTextInsufficientMaterial);
+            // 扣料前的前置校验失败（上下文/所需函数不可用）：不是材料不足，保留已填格。
+            craft_show_craft_unavailable();
             return;
         case result::CraftExecuteResult::kMaterialRemoveFailed:
         case result::CraftExecuteResult::kMaterialObservationFailed:
@@ -225,7 +258,9 @@ void place_execute(void* ctrl) {
                 craft_show_text(kTextInsufficientMaterial);
                 return;
             case CraftPlaceDisposition::kWriteFailed:
+                // 写入失败与「材料不足」无关：给出准确提示，保留已填格。
                 log_message(kLogWarn, "three slot place blocked reason=stuff write failed");
+                craft_show_place_write_failed();
                 return;
             case CraftPlaceDisposition::kAdvance:
                 craft_select_first_empty_stuff_slot();  // 放料后自动选中下一空格
@@ -287,20 +322,39 @@ void craft_execute(void* ctrl) {
     // 未命中 → 弹 94 + 清空重来。两条路径都**不**转调原函数。
     if (api->three_slot_mode_active(mix_type)) {
         result::CraftPrepareInput in{};
-        craft_read_stuff_categories(in.slot_categories);
+        if (craft_read_stuff_categories(in.slot_categories).ok != kQolOk) {
+            // 读取失败：不进入配方判定（不误报「配方不匹配」），作废 pending 并明确不可用；
+            // 不清理已填格。
+            cancel_pending_confirmation();
+            craft_show_craft_unavailable();
+            log_message(kLogWarn, "three slot prepare skipped reason=stuff read failed");
+            return;
+        }
         switch (api->prepare(&in)) {
             case result::PrepareOutcome::kNoMatch:
+                // 真正未命中配方：提示「配方不匹配」，不是材料不足。
                 if (log_budget_take()) {
                     log_message(kLogDebug, "three slot miss slots=%u,%u,%u", in.slot_categories[0],
                                   in.slot_categories[1], in.slot_categories[2]);
                 }
-                craft_show_text(kTextInsufficientMaterial);
+                craft_show_recipe_mismatch();
                 reset_stuff_and_refresh();
                 return;
             case result::PrepareOutcome::kConfirmPending:
-                if (!craft_show_yesno(kTextConfirmCraft, &on_confirm_three_slot, nullptr)) {
-                    log_message(kLogWarn, "three slot confirm skipped reason=no_popup");
+                if (!craft_show_yesno(kTextConfirmCraft, &on_confirm_three_slot,
+                                      &on_cancel_three_slot)) {
+                    // 弹窗未创建：作废这次待确认（防止遗留确认被执行），并明确提示；
+                    // 不扣料、不清理已有材料。
+                    cancel_pending_confirmation();
+                    craft_show_craft_unavailable();
+                    log_message(kLogWarn, "three slot confirm unavailable reason=no_popup");
                 }
+                return;
+            case result::PrepareOutcome::kUnavailable:
+                // 配方已匹配但槽位身份/类别等上下文不可用：不是配方错，也不是材料不足。
+                log_message(kLogWarn, "three slot prepare unavailable slots=%u,%u,%u",
+                            in.slot_categories[0], in.slot_categories[1], in.slot_categories[2]);
+                craft_show_craft_unavailable();
                 return;
             case result::PrepareOutcome::kNotMine:
                 return;  // 不可能：上面已判定处于 3 格模式

@@ -49,13 +49,22 @@ static void test_table_integrity() {
     size_t cn = 0;
     const TextEntry* c = cr::text_entries(&cn);
     CHECK(c != nullptr);
-    CHECK(cn == 5);  // 按钮 / 面板标题 / 质量不可用 / 材料可能已扣 / 产物准备失败（材料未扣）
+    // 9 条：按钮 / 面板标题 / 质量不可用 / 材料可能已扣 / 产物准备失败 /
+    //       配方不匹配 / 合成暂不可用 / 状态已变化 / 放入失败。
+    CHECK(cn == 9);
     for (size_t i = 0; i < cn; ++i) {
         CHECK(c[i].key != nullptr && c[i].key[0] != '\0');
         CHECK(c[i].text != nullptr);
         CHECK(std::strlen(c[i].text) > 0);
         CHECK(c[i].scope != cr::kTextScopePageTab);  // 页签保持原文（不登记）
+        for (size_t k = 0; k < std::strlen(c[i].text); ++k) {
+            CHECK(static_cast<unsigned char>(c[i].text[k]) >= 0x80);  // 普通中文直述，无 ASCII 混入
+        }
         for (size_t j = i + 1; j < cn; ++j) CHECK(std::strcmp(c[i].key, c[j].key) != 0);
+        for (size_t j = i + 1; j < cn; ++j) {
+            // scope 唯一（同一 id 的多种提示不得共用 scope，避免互相串味）。
+            CHECK(c[i].scope != c[j].scope);
+        }
     }
 }
 
@@ -145,6 +154,58 @@ static void test_key_lookup_and_id_sync() {
         CHECK(prepare_failed->text_id == cr::kProductPrepareFailedPopupId);
         CHECK(prepare_failed->scope != cr::kTextScopeMaterialMayHaveBeenConsumed);
     }
+    // 本轮新增的 4 条提示：key / scope / popup id / 文案逐一固定（错误信息必须符合实际原因）。
+    const TextEntry* mismatch = cr::text_entry_by_key("craft.recipe_mismatch");
+    CHECK(mismatch != nullptr);
+    if (mismatch != nullptr) {
+        CHECK(mismatch->scope == cr::kTextScopeRecipeMismatch);
+        CHECK(mismatch->text_id == cr::kRecipeMismatchPopupId);
+        CHECK(std::strcmp(mismatch->text, "配方不匹配，请检查材料组合。") == 0);
+    }
+    const TextEntry* craft_unavailable = cr::text_entry_by_key("craft.unavailable");
+    CHECK(craft_unavailable != nullptr);
+    if (craft_unavailable != nullptr) {
+        CHECK(craft_unavailable->scope == cr::kTextScopeCraftUnavailable);
+        CHECK(craft_unavailable->text_id == cr::kCraftUnavailablePopupId);
+        CHECK(std::strcmp(craft_unavailable->text, "合成暂不可用，材料未扣。") == 0);
+    }
+    const TextEntry* state_changed = cr::text_entry_by_key("craft.state_changed");
+    CHECK(state_changed != nullptr);
+    if (state_changed != nullptr) {
+        CHECK(state_changed->scope == cr::kTextScopeStateChanged);
+        CHECK(state_changed->text_id == cr::kStateChangedPopupId);
+        CHECK(std::strcmp(state_changed->text, "合成状态已变化，请重新填入材料。") == 0);
+    }
+    const TextEntry* place_write_failed = cr::text_entry_by_key("craft.place_write_failed");
+    CHECK(place_write_failed != nullptr);
+    if (place_write_failed != nullptr) {
+        CHECK(place_write_failed->scope == cr::kTextScopePlaceWriteFailed);
+        CHECK(place_write_failed->text_id == cr::kPlaceWriteFailedPopupId);
+        CHECK(std::strcmp(place_write_failed->text, "放入失败，请重试。") == 0);
+    }
+
+    // 同一 popup id 94 承载 4 条互不相同的提示：各自 scope 命中各自的文案，
+    // 未登记 scope 必须返回原文（保持原「材料不足」语义不被污染）。
+    {
+        const char* const m94_a = cr::text_lookup(cr::kTextScopeRecipeMismatch, 94);
+        const char* const m94_b = cr::text_lookup(cr::kTextScopeCraftUnavailable, 94);
+        const char* const m94_c = cr::text_lookup(cr::kTextScopeStateChanged, 94);
+        const char* const m94_d = cr::text_lookup(cr::kTextScopeMaterialMayHaveBeenConsumed, 94);
+        CHECK(m94_a != nullptr && m94_b != nullptr && m94_c != nullptr && m94_d != nullptr);
+        CHECK(std::strcmp(m94_a, m94_b) != 0 && std::strcmp(m94_a, m94_c) != 0 &&
+              std::strcmp(m94_a, m94_d) != 0 && std::strcmp(m94_b, m94_c) != 0 &&
+              std::strcmp(m94_b, m94_d) != 0 && std::strcmp(m94_c, m94_d) != 0);
+        // 未登记 scope（0 / 页签 4 / 其它）→ 原文保持不变。
+        CHECK(cr::text_lookup(0, 94) == nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopePageTab, 94) == nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopeRecipeButton, 94) == nullptr);
+        // 放入失败用 99（与 94 组互不影响）。
+        CHECK(std::strcmp(cr::text_lookup(cr::kTextScopePlaceWriteFailed, 99),
+                          "放入失败，请重试。") == 0);
+        CHECK(cr::text_lookup(cr::kTextScopePlaceWriteFailed, 94) == nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopeRecipeMismatch, 99) == nullptr);
+    }
+
     // 页签作用域只用于「显式不替换」，两表都不得有该作用域条目。
     size_t n = 0;
     const Entry* all = i18n::entries(&n);

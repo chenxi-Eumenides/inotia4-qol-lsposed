@@ -21,6 +21,8 @@ enum class PrepareOutcome : uint8_t {
     kNotMine = 0,
     kNoMatch = 1,
     kConfirmPending = 2,
+    // 尾追加：配方已匹配，但读取槽位身份/类别等上下文失败（非「配方不匹配」）。
+    kUnavailable = 3,
 };
 
 enum class CraftOutcome : uint8_t {

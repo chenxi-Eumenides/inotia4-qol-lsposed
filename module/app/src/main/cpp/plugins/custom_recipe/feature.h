@@ -46,6 +46,10 @@ const qol::contracts::OwnershipOps& ownership_ops();
 bool enabled();
 bool set_enabled(bool enabled);
 
+// 作废在途的三格合成待确认（弹窗取消 / 弹窗创建失败 / 需要放弃确认时）。
+// 仅插件内部使用：不写物品、不随机、不扣料、不保存，也不清空已填格。
+void cancel_pending_confirmation();
+
 // 注册「进档重建动态特殊装备配方」回调（幂等）。
 void register_dynamic_recipes();
 void unregister_dynamic_recipes();

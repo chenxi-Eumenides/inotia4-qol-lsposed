@@ -155,18 +155,51 @@ int craft_character_level() {
     return 0;
 }
 
-void craft_read_stuff_categories(uint16_t out[kStuffSlotCount]) {
-    if (out == nullptr) return;
-    for (size_t i = 0; i < kStuffSlotCount; ++i) {
-        out[i] = 0;
-        const contracts::QolItemHandle handle = craft_stuff_item(i);
-        int32_t category = 0;
-        if (handle.slot != 0 && handle.generation != 0 && g_item_facts != nullptr &&
-            g_item_facts->category != nullptr &&
-            g_item_facts->category(handle, &category).ok == kQolOk && category >= 0) {
-            out[i] = static_cast<uint16_t>(category);
-        }
+QolResult craft_read_stuff_categories(uint16_t out[kStuffSlotCount]) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "null output", 11);
+    for (size_t i = 0; i < kStuffSlotCount; ++i) out[i] = 0;
+    if (g_craft_facts == nullptr || g_craft_facts->read.stuff_item == nullptr) {
+        return qol::contracts::error(kQolErrNotReady, "craft stuff facts unavailable", 29);
     }
+    for (size_t i = 0; i < kStuffSlotCount; ++i) {
+        contracts::QolItemHandle handle = contracts::kInvalidItemHandle;
+        const QolResult read =
+            g_craft_facts->read.stuff_item(static_cast<uint32_t>(i), &handle);
+        if (read.ok != kQolOk) {
+            log_message(kLogWarn, "craft stuff read failed index=%zu result=%d", i, read.code);
+            return read;
+        }
+        // 合法空槽：控件存在但槽内无物品 → handle 的 slot 与 generation 必须**同时**为 0。
+        if (handle.slot == 0 && handle.generation == 0) {
+            out[i] = 0;
+            continue;
+        }
+        if (handle.slot == 0 || handle.generation == 0) {
+            // 半无效 handle（任一为 0 另一非 0）属畸形身份：绝不当作空槽。
+            log_message(kLogWarn, "craft stuff malformed handle index=%zu slot=%u generation=%u", i,
+                        handle.slot, handle.generation);
+            return qol::contracts::error(kQolErrInvalidArgument, "malformed item handle", 21);
+        }
+        if (g_item_facts == nullptr || g_item_facts->category == nullptr) {
+            log_message(kLogWarn, "craft item category facts unavailable index=%zu", i);
+            return qol::contracts::error(kQolErrNotReady, "item category facts unavailable", 31);
+        }
+        int32_t category = 0;
+        const QolResult category_result = g_item_facts->category(handle, &category);
+        if (category_result.ok != kQolOk) {
+            log_message(kLogWarn, "craft item category read failed index=%zu result=%d", i,
+                        category_result.code);
+            return category_result;
+        }
+        if (category <= 0 || category > 0xFFFF) {
+            // 非空对象但类别不可知：绝不当作空槽 0。
+            log_message(kLogWarn, "craft item category out of range index=%zu category=%d", i,
+                        category);
+            return qol::contracts::error(kQolErrInternal, "item category out of range", 26);
+        }
+        out[i] = static_cast<uint16_t>(category);
+    }
+    return qol::contracts::ok();
 }
 
 void craft_write_stuff_need(size_t index, uint16_t category, uint16_t count) {
@@ -231,8 +264,23 @@ void craft_show_text(uint32_t text_id) {
 
 bool craft_show_yesno(uint32_t text_id, contracts::QolCraftPopupCallback ok,
                       contracts::QolCraftPopupCallback cancel) {
-    if (g_write_port == nullptr || g_write_port->show_yesno_from_text == nullptr) return false;
-    return g_write_port->show_yesno_from_text(text_id, ok, cancel).ok == kQolOk;
+    // 两个回调都必须有效（adapter 契约：任一为空即 InvalidArgument，弹窗不会创建）；
+    // 失败时补一条事实日志（保留原始错误码），由调用方决定提示与 pending 收尾。
+    if (g_write_port == nullptr || g_write_port->show_yesno_from_text == nullptr) {
+        log_message(kLogWarn, "craft yesno unavailable text=%u reason=no_write_port", text_id);
+        return false;
+    }
+    if (ok == nullptr || cancel == nullptr) {
+        log_message(kLogWarn, "craft yesno rejected text=%u reason=null_callback ok=%d cancel=%d",
+                    text_id, ok != nullptr ? 1 : 0, cancel != nullptr ? 1 : 0);
+        return false;
+    }
+    const QolResult result = g_write_port->show_yesno_from_text(text_id, ok, cancel);
+    if (result.ok != kQolOk) {
+        log_message(kLogWarn, "craft yesno failed text=%u result=%d", text_id, result.code);
+        return false;
+    }
+    return true;
 }
 
 int craft_panel_state() {

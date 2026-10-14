@@ -90,7 +90,9 @@ contracts::QolItemHandle craft_stuff_item(size_t index);
 bool craft_stuff_slot_available(size_t index);
 int craft_category_held_count(uint16_t category);
 int craft_character_level();
-void craft_read_stuff_categories(uint16_t out[kStuffSlotCount]);
+// 读取三格类别（0 = 真空槽）。任一槽读取/映射失败经 QolResult 明确返回：
+// 不得把「读取失败」或「非空对象但类别不可知」伪装成空槽 0。
+QolResult craft_read_stuff_categories(uint16_t out[kStuffSlotCount]);
 void craft_write_stuff_need(size_t index, uint16_t category, uint16_t count);
 void craft_set_stuff_item(size_t index, contracts::QolItemHandle item);
 void craft_select_first_empty_stuff_slot();

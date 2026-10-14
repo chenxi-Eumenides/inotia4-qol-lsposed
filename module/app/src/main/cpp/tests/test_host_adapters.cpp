@@ -351,7 +351,11 @@ int craft_select_first_empty_stuff_slot() { return 1; }
 void craft_set_ui_type(int64_t) {}
 void craft_play_sound(int16_t) {}
 void craft_show_text(uint32_t) {}
-bool craft_show_yesno_from_textdata(uint32_t, void*, void*) { return true; }
+// 忠实 yesno 夹具：可注入创建失败；成功路径仍由 adapter 保证两个回调非空。
+bool g_popup_create_result = true;
+void fake_popup_ok() {}
+void fake_popup_cancel() {}
+bool craft_show_yesno_from_textdata(uint32_t, void*, void*) { return g_popup_create_result; }
 void craft_desc_set_off() {}
 void* save_slot_struct(int32_t) { return reinterpret_cast<void*>(0x1); }
 bool save_slot_exists(const void*) { return true; }
@@ -1452,6 +1456,21 @@ int main() {
     assert(g_craft_set_stuff_items[0] == &g_craft_stuff_item_object);
     assert(custom_recipe_write.set_stuff_item(0, qol::contracts::kInvalidItemHandle).ok == kQolOk);
     assert(g_craft_set_stuff_items[0] == nullptr);
+
+    // yesno 契约（真实 adapter）：任一回调为空 → InvalidArgument（弹窗不会创建）；
+    // 两个有效回调 → 交给 UI 端口；底层创建失败 → NotReady（调用方据此提示并作废确认）。
+    assert(craft_ui_write.show_yesno_from_text(0x12, nullptr, &qol::game::fake_popup_cancel).code ==
+           kQolErrInvalidArgument);
+    assert(craft_ui_write.show_yesno_from_text(0x12, &qol::game::fake_popup_ok, nullptr).code ==
+           kQolErrInvalidArgument);
+    assert(craft_ui_write.show_yesno_from_text(0x12, nullptr, nullptr).code ==
+           kQolErrInvalidArgument);
+    assert(craft_ui_write.show_yesno_from_text(0x12, &qol::game::fake_popup_ok, &qol::game::fake_popup_cancel).ok ==
+           kQolOk);
+    qol::game::g_popup_create_result = false;
+    assert(craft_ui_write.show_yesno_from_text(0x12, &qol::game::fake_popup_ok, &qol::game::fake_popup_cancel).code ==
+           kQolErrNotReady);
+    qol::game::g_popup_create_result = true;
     assert(custom_recipe_write.save_item(craft_material_handle, &value).code == kQolErrConflict);
     assert(custom_recipe_write.free_item(craft_material_handle).code == kQolErrConflict);
     assert(qol::game::lookup_item(&g_craft_stuff_item_object).slot == craft_material_handle.slot);

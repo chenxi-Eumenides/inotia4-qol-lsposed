@@ -877,6 +877,117 @@ void test_random_port_and_tier_up_ordering() {
 }
 
 // ---------------------------------------------------------------------------
+// wrapper 等价成功路径（覆盖边界说明）：
+// UI 子层 on_confirm_three_slot 的输入构造 = 逐格读 stuff_item + 类别 + 持有数，
+// 然后调 api_execute。本目标用同一构造路径验证真实产出与材料状态；
+// owner fixture 只管到 UI 提示/取消/失败（其写入端口为空），不作为「真机成功合成」证据。
+// ---------------------------------------------------------------------------
+void test_wrapper_equivalent_execute_success() {
+    init_fixture();
+    // 缩放配方（宝石 + 两张混沌卷轴）→ 产物 = 首格宝石自身。
+    assert(prepare_three_slots(kScaleRecipe));
+
+    CraftExecuteInput in{};
+    for (size_t i = 0; i < 3; ++i) {
+        in.items[i] = g_slots[i];                               // 同 wrapper：读槽位身份
+        const ItemFact* fact = find_fact(in.items[i]);
+        in.slot_categories[i] = fact != nullptr ? static_cast<uint16_t>(fact->category) : 0;
+        if (fact != nullptr) in.held_counts[i] = held_of(fact->category);
+    }
+    const int32_t held_28 = held_of(28);
+    assert(api().execute(&in) == CraftExecuteResult::kOk);
+    assert(g_remove_item_data_calls == 3);   // 三格各扣 1（真实扣料）
+    assert(g_create_calls == 1 && g_save_calls == 1);
+    assert(g_free_calls == 0);               // 成功后不释放产物
+    assert(g_random_calls == 0);             // 三格配方不需要随机
+    assert(held_of(28) == held_28 - 1);
+}
+
+// ---------------------------------------------------------------------------
+// CR 修复：PrepareOutcome 区分「真未命中」与「上下文不可用」
+//   · match_three_slot 返回 nullptr            → kNoMatch（提示：配方不匹配）
+//   · 已匹配但槽位身份/类别读取或一致性失败    → kUnavailable（提示：合成暂不可用，材料未扣）
+// ---------------------------------------------------------------------------
+void test_prepare_outcome_distinction() {
+    // 枚举值稳定性（尾追加不改变既有数值）。
+    assert(static_cast<uint8_t>(PrepareOutcome::kNotMine) == 0);
+    assert(static_cast<uint8_t>(PrepareOutcome::kNoMatch) == 1);
+    assert(static_cast<uint8_t>(PrepareOutcome::kConfirmPending) == 2);
+    assert(static_cast<uint8_t>(PrepareOutcome::kUnavailable) == 3);
+
+    init_fixture();
+    // 真未命中：{35, 41, 28} 不属于任何配方 → kNoMatch。
+    {
+        g_slots[0] = kMaterialA;
+        g_slots[1] = kMaterialB;
+        g_slots[2] = kJewel;
+        CraftPrepareInput in{{35, 41, 28}};
+        assert(api().prepare(&in) == PrepareOutcome::kNoMatch);
+    }
+
+    // 已匹配但 live 身份读取失败 → kUnavailable（不是 NoMatch）。
+    init_fixture();
+    {
+        g_slots[0] = kMaterialA;
+        g_slots[1] = kInvalidItemHandle;
+        g_slots[2] = kMaterialB;
+        g_read_stuff_fail_index = 2;
+        CraftPrepareInput in{{35, 0, 41}};
+        assert(api().prepare(&in) == PrepareOutcome::kUnavailable);
+        g_read_stuff_fail_index = -1;
+    }
+
+    // 已匹配（调用方类别 {35,0,41}）但槽内实际类别不一致 → kUnavailable。
+    init_fixture();
+    {
+        g_slots[0] = kMaterialA;      // 实际 35（与调用方一致）
+        g_slots[1] = kInvalidItemHandle;
+        g_slots[2] = kJewel;          // 实际 28，但调用方声称 41
+        CraftPrepareInput in{{35, 0, 41}};
+        assert(api().prepare(&in) == PrepareOutcome::kUnavailable);
+    }
+
+    // 已匹配但空格声称有对象 → kUnavailable（上下文不一致，不是配方错）。
+    init_fixture();
+    {
+        g_slots[0] = kMaterialA;
+        g_slots[1] = kMaterialB;  // 空格却有对象
+        g_slots[2] = kMaterialB;
+        CraftPrepareInput in{{35, 0, 41}};
+        assert(api().prepare(&in) == PrepareOutcome::kUnavailable);
+    }
+
+    // 真命中仍为 kConfirmPending。
+    init_fixture();
+    {
+        g_slots[0] = kMaterialA;
+        g_slots[1] = kInvalidItemHandle;
+        g_slots[2] = kMaterialB;
+        CraftPrepareInput in{{35, 0, 41}};
+        assert(api().prepare(&in) == PrepareOutcome::kConfirmPending);
+    }
+
+    // 放料：同类可堆叠「2 个物品不能添加 3 次」→ 真实 kNotEnoughHeld（保留 94 语义）。
+    init_fixture();
+    {
+        add_held(5, -held_of(5));
+        add_held(5, 2);  // 只有 2 个恢复药水
+        g_slots[0] = kPotion;
+        g_slots[1] = kPotion;
+        g_slots[2] = kInvalidItemHandle;
+        CraftPlaceInput place{};
+        place.slot_index = 2;
+        place.item = kPotion;
+        place.item_stackable = true;
+        place.item_category = 14;  // find_fact(kPotion).category = 14
+        place.placed_same_object = 1;
+        place.same_category_placed = 2;
+        place.category_held_count = 2;
+        assert(api().place(&place) == PlaceOutcome::kNotEnoughHeld);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // typed handler 门禁：gate 关闭（停用 / ownership 未就绪 → !enabled()）时，
 // 旧队列里残留的写命令一律不得写回；合法 enabled payload 仍写入。
 // ---------------------------------------------------------------------------
@@ -1001,6 +1112,8 @@ int main() {
     test_pending_invalidation();
     test_craft_gate_unavailable_vs_not_jewel();
     test_random_port_and_tier_up_ordering();
+    test_wrapper_equivalent_execute_success();
+    test_prepare_outcome_distinction();
     test_typed_handler_gate();
     test_failure_stage_material_state();
     test_ownership_ready_flag();
