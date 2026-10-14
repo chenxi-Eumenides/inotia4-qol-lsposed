@@ -53,6 +53,8 @@ enum QolItemInventoryViewField : uint32_t {
     kQolItemInventoryHasNeedLevel = 1u << 4,
     kQolItemInventoryHasJewelValue = 1u << 5,
     kQolItemInventoryHasJewelAttributeType = 1u << 6,
+    kQolItemInventoryHasOptionCompleteness = 1u << 7,
+    kQolItemInventoryOptionsTruncated = 1u << 8,
 };
 
 struct QolItemInventoryOptionView {

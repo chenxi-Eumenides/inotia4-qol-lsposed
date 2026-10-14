@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 
 #include "contracts/attribute_quality.h"
 #include "contracts/plugin.h"
@@ -32,9 +33,26 @@ uint32_t g_word_written = 0;
 int g_stuff_need_calls = 0;
 QolItemHandle g_placed_item{};
 bool g_stuff_available = true;
-bool g_make_item_owner_valid = true;
 int32_t g_stuff_write_result = kQolOk;
 int g_stuff_write_calls = 0;
+int g_random_calls = 0;
+int g_jewel_write_calls = 0;
+int g_operation_sequence = 0;
+int g_jewel_write_sequence = 0;
+int g_stuff_need_sequence = 0;
+int32_t g_jewel_write_result = kQolOk;
+bool g_quality_capability_available = true;
+bool g_quality_query_ok = true;
+bool g_quality_query_complete = true;
+uint32_t g_quality_query_count = 1;
+AttributeKind g_quality_kind = AttributeKind::Jewel;
+int32_t g_quality_status = kQolOk;
+int32_t g_quality_level_override = -1;
+int32_t g_quality_eval_fail_value = std::numeric_limits<int32_t>::min();
+int g_quality_require_calls = 0;
+int g_quality_query_calls = 0;
+int g_quality_evaluate_calls = 0;
+bool g_quality_options_were_null = true;
 
 QolResult ok() { return qol::contracts::ok(); }
 QolResult fail(int32_t code) { return qol::contracts::error(code, "test failure", 12); }
@@ -88,6 +106,7 @@ QolResult remove_item_data(int32_t, int32_t) { return ok(); }
 
 QolResult write_stuff_need(uint32_t, int32_t, int32_t) {
     ++g_stuff_need_calls;
+    g_stuff_need_sequence = ++g_operation_sequence;
     return ok();
 }
 
@@ -134,6 +153,9 @@ QolResult read_jewel_word(QolItemHandle item, uint32_t* out) {
 QolResult write_jewel_word(QolItemHandle item, uint32_t word) {
     if (item.slot != kJewel.slot || item.generation != kJewel.generation)
         return fail(kQolErrNotFound);
+    ++g_jewel_write_calls;
+    g_jewel_write_sequence = ++g_operation_sequence;
+    if (g_jewel_write_result != kQolOk) return fail(g_jewel_write_result);
     g_word_write_item = item;
     g_word_written = word;
     g_jewel_word = word;
@@ -142,34 +164,84 @@ QolResult write_jewel_word(QolItemHandle item, uint32_t word) {
 
 QolResult set_max_socket_enchant(QolItemHandle) { return ok(); }
 QolResult description_set_off() { return ok(); }
-int64_t random_inclusive(int lo, int) { return lo; }
+int64_t random_inclusive(int lo, int) {
+    ++g_random_calls;
+    return lo;
+}
 int math_random(int lo, int) { return lo; }
 
-QolResult probe_jewel(QolItemHandle item, int32_t, int32_t, AttributeQualityResult* out) {
-    if (!g_make_item_owner_valid || item.slot != kJewel.slot || item.generation != kJewel.generation ||
-        out == nullptr) return fail(kQolErrNotFound);
-    out->min = 0;
-    out->max = 100;
+int32_t quality_level(int32_t value, int32_t minimum, int32_t maximum) {
+    if (maximum <= minimum || value >= maximum) return kAttributeQualityHighestLevel;
+    const int64_t percentile =
+        (static_cast<int64_t>(value) - minimum) * 100 /
+        (static_cast<int64_t>(maximum) - minimum);
+    return percentile >= 90 ? 4
+         : percentile >= 75 ? 3
+         : percentile >= 60 ? 2
+         : percentile >= 30 ? 1
+                            : 0;
+}
+
+QolResult query_item(QolItemHandle item, const AttributeQualityOptions* options,
+                     AttributeQualityItemResult* out) {
+    ++g_quality_query_calls;
+    g_quality_options_were_null = g_quality_options_were_null && options == nullptr;
+    if (!g_quality_query_ok || item.slot != kJewel.slot ||
+        item.generation != kJewel.generation || out == nullptr) {
+        return fail(kQolErrNotReady);
+    }
+    const int32_t value = static_cast<int32_t>(g_jewel_word & 0x7ffu);
+    const int32_t type = static_cast<int32_t>((g_jewel_word >> 18) & 0x3fu);
+    out->complete = g_quality_query_complete ? 1 : 0;
+    out->count = g_quality_query_count;
+    out->attrs[0] = AttributeQualityItem{
+        g_quality_kind, 0, type, 0, value, {0, 100},
+        {value, g_quality_level_override >= 0
+                    ? g_quality_level_override
+                    : quality_level(value, 0, 100)},
+        g_quality_status};
     return ok();
 }
 
-QolResult classify_value(int32_t value, int32_t, int32_t, AttributeQualityTier* out) {
+QolResult query_option_context(QolItemHandle, int32_t, int32_t,
+                               const AttributeQualityOptions*, AttributeQualityItem*) {
+    return fail(kQolErrUnsupported);
+}
+
+QolResult evaluate_quality(int32_t value, AttributeRange range,
+                           const AttributeQualityOptions* options, AttributeQuality* out) {
+    ++g_quality_evaluate_calls;
+    g_quality_options_were_null = g_quality_options_were_null && options == nullptr;
+    if (value == g_quality_eval_fail_value) return fail(kQolErrBlocked);
     if (out == nullptr) return fail(kQolErrInvalidArgument);
-    *out = value >= 90 ? AttributeQualityTier::Gold
-          : value >= 70 ? AttributeQualityTier::Purple
-          : value >= 60 ? AttributeQualityTier::Blue
-          : value >= 40 ? AttributeQualityTier::Green
-          : value >= 30 ? AttributeQualityTier::White
-                        : AttributeQualityTier::Grey;
+    out->percentile = range.max <= range.min || value >= range.max
+                          ? 100
+                          : value < range.min
+                                ? 0
+                                : static_cast<int32_t>(
+                                      (static_cast<int64_t>(value) - range.min) * 100 /
+                                      (static_cast<int64_t>(range.max) - range.min));
+    out->level = g_quality_level_override >= 0
+                     ? g_quality_level_override
+                     : quality_level(value, range.min, range.max);
     return ok();
 }
 
-QolResult capability_require(const char* id, QolVersionRange, const void** out) {
+AttributeQualityApi g_attribute_quality_api{
+    static_cast<uint32_t>(sizeof(AttributeQualityApi)), &query_item,
+    &query_option_context, &evaluate_quality};
+
+QolResult capability_require(const char* id, QolVersionRange range, const void** out) {
+    ++g_quality_require_calls;
     if (id == nullptr || out == nullptr) return fail(kQolErrInvalidArgument);
     *out = nullptr;
     if (std::strcmp(id, kAttributeQualityCapabilityId) == 0) {
-        static const AttributeQualityApi api{&probe_jewel, nullptr, &classify_value, nullptr};
-        *out = &api;
+        if (range.major != kAttributeQualityVersionMajor ||
+            range.min_minor != kAttributeQualityVersionMinor) {
+            return fail(kQolErrUnsupported);
+        }
+        if (!g_quality_capability_available) return fail(kQolErrNotReady);
+        *out = &g_attribute_quality_api;
         return ok();
     }
     return fail(kQolErrNotFound);
@@ -262,6 +334,71 @@ int main() {
     assert((g_word_written & 0x7FFu) > value_before);
     assert(g_stuff_need_calls == 1);
 
+    assert(g_quality_require_calls == 1 && g_quality_query_calls == 1);
+    assert(g_quality_evaluate_calls > 0 && g_random_calls == 1);
+    assert(g_quality_options_were_null);
+    assert(g_jewel_write_sequence > 0 && g_jewel_write_sequence < g_stuff_need_sequence);
+
+    const auto assert_quality_failure_has_no_writes = [&]() {
+        const int random_before = g_random_calls;
+        const int writes_before = g_jewel_write_calls;
+        const int needs_before = g_stuff_need_calls;
+        const uint32_t word_before = g_jewel_word;
+        assert(api.make_item(&make_item) != 0);
+        assert(g_random_calls == random_before);
+        assert(g_jewel_write_calls == writes_before);
+        assert(g_stuff_need_calls == needs_before);
+        assert(g_jewel_word == word_before);
+    };
+
+    // 每次制作重新 require；能力撤销时不复用上一调用的 API 指针。
+    g_quality_capability_available = false;
+    const int requires_before_revoke = g_quality_require_calls;
+    assert_quality_failure_has_no_writes();
+    assert(g_quality_require_calls == requires_before_revoke + 1);
+    g_quality_capability_available = true;
+
+    // v2 API 的完整尺寸和三个非空函数指针都是消费前置条件。
+    g_attribute_quality_api.struct_size = static_cast<uint32_t>(sizeof(AttributeQualityApi) - 1);
+    assert_quality_failure_has_no_writes();
+    g_attribute_quality_api.struct_size = static_cast<uint32_t>(sizeof(AttributeQualityApi));
+
+    // 当前物品查询必须完整且唯一，kind/status/level 不可伪装成 Grey。
+    g_quality_query_complete = false;
+    assert_quality_failure_has_no_writes();
+    g_quality_query_complete = true;
+    g_quality_query_count = 2;
+    assert_quality_failure_has_no_writes();
+    g_quality_query_count = 1;
+    g_quality_kind = AttributeKind::StoredOption;
+    assert_quality_failure_has_no_writes();
+    g_quality_kind = AttributeKind::Jewel;
+    g_quality_status = kQolErrNotReady;
+    assert_quality_failure_has_no_writes();
+    g_quality_status = kQolOk;
+    g_quality_level_override = kAttributeQualityHighestLevel + 1;
+    assert_quality_failure_has_no_writes();
+    g_quality_level_override = -1;
+    g_quality_query_ok = false;
+    assert_quality_failure_has_no_writes();
+    g_quality_query_ok = true;
+
+    // evaluate 的候选失败透传，且发生在随机、宝石写入和材料数组更新之前。
+    g_quality_eval_fail_value = 50;
+    assert_quality_failure_has_no_writes();
+    g_quality_eval_fail_value = std::numeric_limits<int32_t>::min();
+
+    // 成功计算后宝石写失败仍不得先改 stuffList。
+    const int random_before_write_failure = g_random_calls;
+    const int needs_before_write_failure = g_stuff_need_calls;
+    const uint32_t word_before_write_failure = g_jewel_word;
+    g_jewel_write_result = kQolErrBlocked;
+    assert(api.make_item(&make_item) != 0);
+    assert(g_random_calls == random_before_write_failure + 1);
+    assert(g_stuff_need_calls == needs_before_write_failure);
+    assert(g_jewel_word == word_before_write_failure);
+    g_jewel_write_result = kQolOk;
+
     const CraftPlaceInput stale_place{0, {999, 999}, false, 35, 0, 0, 0};
     assert(api.place(&stale_place) == PlaceOutcome::kNotMine);
     assert(g_placed_item.slot == kMaterialA.slot);
@@ -270,8 +407,6 @@ int main() {
                                                          kMaterialB}, {0, 0, 0}};
     assert(api.execute(&stale_execute) == CraftExecuteResult::kStaleSlots);
     assert(g_remove_item_calls == 2);
-    g_make_item_owner_valid = false;
-    assert(api.make_item(&make_item) != 0);
-    assert(g_word_write_item.slot == kJewel.slot);
+    assert(g_jewel_write_calls == 2);
     return 0;
 }

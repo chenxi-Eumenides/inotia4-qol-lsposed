@@ -164,47 +164,88 @@ bool item_is_jewel(qol::contracts::QolItemHandle item) {
            is_jewel != 0;
 }
 
-// 每次调用按能力查找 attribute.quality 提供者，不缓存指针跨帧使用。
-const qol::contracts::AttributeQualityApi* attribute_quality_api() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+QolResult quality_error(int32_t code, const char* message) {
+    return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
+}
+
+// 每次制作同步期查找一次 v2 API；借用指针只在当前调用内使用。
+QolResult require_attribute_quality_api(const contracts::AttributeQualityApi** out_api) {
+    if (out_api == nullptr) {
+        return quality_error(kQolErrInvalidArgument, "null attribute quality output");
+    }
+    *out_api = nullptr;
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) {
+        return quality_error(kQolErrNotReady, "attribute quality capability unavailable");
+    }
     const void* iface = nullptr;
     const QolResult result = g_sdk->capabilities.require(
         qol::contracts::kAttributeQualityCapabilityId,
         {qol::contracts::kAttributeQualityVersionMajor,
          qol::contracts::kAttributeQualityVersionMinor},
         &iface);
-    return result.ok == kQolOk
-               ? static_cast<const qol::contracts::AttributeQualityApi*>(iface)
-               : nullptr;
-}
-
-::custom_recipe::Tier classify_with_attribute_quality(int value, int minimum, int maximum) {
-    const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
-    if (api == nullptr || api->classify == nullptr) return ::custom_recipe::Tier::Grey;
-    ::custom_recipe::Tier tier = ::custom_recipe::Tier::Grey;
-    if (api->classify(value, minimum, maximum, &tier).ok != kQolOk) {
-        return ::custom_recipe::Tier::Grey;
+    if (result.ok != kQolOk) return result;
+    if (iface == nullptr) {
+        return quality_error(kQolErrNotReady, "attribute quality capability returned no API");
     }
-    return tier;
+    const auto* api = static_cast<const contracts::AttributeQualityApi*>(iface);
+    if (!contracts::attribute_quality_api_size_valid(api)) {
+        return quality_error(kQolErrUnsupported, "invalid attribute quality v2 API");
+    }
+    *out_api = api;
+    return contracts::ok();
 }
 
-// 读宝石数值位域并按 attribute.quality classify 判定当前档；能力不可用/探测失败返回 false。
-bool jewel_tier(qol::contracts::QolItemHandle item, ::custom_recipe::Tier* out_tier, int* out_value, int* out_min,
-                int* out_max) {
-    if (!valid_craft_item(item) || out_tier == nullptr) return false;
-    const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
-    if (api == nullptr || api->probe_jewel == nullptr || api->classify == nullptr) return false;
-    uint32_t word = 0;
-    if (!read_jewel_word(item, &word)) return false;
-    const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
-    const int value = static_cast<int>(word & kJewelValueMask);
-    qol::contracts::AttributeQualityResult quality{};
-    if (api->probe_jewel(item, type, value, &quality).ok != kQolOk) return false;
-    if (api->classify(value, quality.min, quality.max, out_tier).ok != kQolOk) return false;
-    if (out_value != nullptr) *out_value = value;
-    if (out_min != nullptr) *out_min = quality.min;
-    if (out_max != nullptr) *out_max = quality.max;
-    return true;
+QolResult query_jewel_quality(qol::contracts::QolItemHandle item,
+                              const contracts::AttributeQualityApi** out_api,
+                              contracts::AttributeQualityItem* out_item) {
+    if (!valid_craft_item(item) || out_api == nullptr || out_item == nullptr) {
+        return quality_error(kQolErrInvalidArgument, "invalid jewel quality query input");
+    }
+    const QolResult required = require_attribute_quality_api(out_api);
+    if (required.ok != kQolOk) return required;
+
+    contracts::AttributeQualityItemResult result{};
+    const QolResult queried = (*out_api)->query_item(item, nullptr, &result);
+    if (queried.ok != kQolOk) return queried;
+    if (result.complete == 0 || result.count != 1) {
+        return quality_error(kQolErrNotReady, "incomplete jewel quality result");
+    }
+    const contracts::AttributeQualityItem& attribute = result.attrs[0];
+    if (attribute.kind != contracts::AttributeKind::Jewel) {
+        return quality_error(kQolErrInvalidArgument, "quality result is not a jewel");
+    }
+    if (attribute.status != kQolOk) {
+        return quality_error(attribute.status, "jewel quality query status failed");
+    }
+    if (attribute.quality.level < 0 ||
+        attribute.quality.level > contracts::kAttributeQualityHighestLevel) {
+        return quality_error(kQolErrInternal, "invalid jewel quality level");
+    }
+    *out_item = attribute;
+    return contracts::ok();
+}
+
+struct QualityEvaluationContext {
+    const contracts::AttributeQualityApi* api;
+};
+
+QolResult evaluate_candidate_quality(int32_t value, contracts::AttributeRange range,
+                                     void* context, ::custom_recipe::Tier* out_tier) {
+    if (context == nullptr || out_tier == nullptr) {
+        return quality_error(kQolErrInvalidArgument, "invalid candidate quality input");
+    }
+    const auto* evaluation = static_cast<const QualityEvaluationContext*>(context);
+    if (evaluation->api == nullptr) {
+        return quality_error(kQolErrNotReady, "attribute quality API expired");
+    }
+    contracts::AttributeQuality quality{};
+    const QolResult result = evaluation->api->evaluate(value, range, nullptr, &quality);
+    if (result.ok != kQolOk) return result;
+    if (quality.level < 0 || quality.level > contracts::kAttributeQualityHighestLevel) {
+        return quality_error(kQolErrInternal, "invalid candidate quality level");
+    }
+    *out_tier = static_cast<::custom_recipe::Tier>(quality.level);
+    return contracts::ok();
 }
 
 // Form → 借用的原版 type（0..4）。三枚举全覆盖，末行仅防御。
@@ -338,12 +379,12 @@ int64_t api_form_ui_type_for_mix_type(uint32_t mix_type) {
 
 qol::contracts::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
     using qol::contracts::CraftGate;
-    if (!valid_craft_item(target_item) || !item_is_jewel(target_item)) {
+    const qol::contracts::AttributeQualityApi* api = nullptr;
+    qol::contracts::AttributeQualityItem quality{};
+    if (query_jewel_quality(target_item, &api, &quality).ok != kQolOk) {
         return CraftGate::kNotJewel;
     }
-    ::custom_recipe::Tier tier = ::custom_recipe::Tier::Grey;
-    if (jewel_tier(target_item, &tier, nullptr, nullptr, nullptr) &&
-        tier == ::custom_recipe::Tier::Gold) {
+    if (quality.quality.level == qol::contracts::kAttributeQualityHighestLevel) {
         return CraftGate::kAlreadyGold;
     }
     return CraftGate::kPass;
@@ -577,30 +618,41 @@ int32_t api_make_item(const qol::contracts::CraftMakeItemInput* in) {
     // fail-closed：停用期间绝不回落到原版（注入记录号对原表是越界下标）。
     if (!enabled()) return 1;
     if (!valid_craft_item(in->item) || in->rand_inclusive == nullptr) return 1;
-    // 扣料数量定稿：StartMix 在 MakeItem 返回 0 之后紧接着调 UseStuff 读 stuffList。
-    apply_material_count(def, in->item);
+
+    const qol::contracts::AttributeQualityApi* api = nullptr;
+    qol::contracts::AttributeQualityItem current{};
+    const QolResult quality_result = query_jewel_quality(in->item, &api, &current);
+    if (quality_result.ok != kQolOk) {
+        log_message(2, "make item aborted: attribute quality query failed code=%d",
+                    quality_result.code);
+        return 1;
+    }
+
     uint32_t word = 0;
     if (!read_jewel_word(in->item, &word)) return 1;
     const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
     const int value = static_cast<int>(word & kJewelValueMask);
-    int min = 0;
-    int max = 0;
-    const qol::contracts::AttributeQualityApi* api = attribute_quality_api();
-    if (api == nullptr || api->probe_jewel == nullptr || api->classify == nullptr) {
-        return 1;  // 降级：不扣料不生成
+    if (current.attribute_id != type || current.value != value) {
+        log_message(2, "make item aborted: jewel quality facts do not match item word");
+        return 1;
     }
-    qol::contracts::AttributeQualityResult quality{};
-    if (api->probe_jewel(in->item, type, value, &quality).ok != kQolOk) return 1;
-    min = quality.min;
-    max = quality.max;
+
+    const qol::contracts::AttributeRange range = current.range;
+    const auto current_tier = static_cast<::custom_recipe::Tier>(current.quality.level);
     ::custom_recipe::Tier target = ::custom_recipe::Tier::Grey;
-    int new_value = 0;
+    int32_t new_value = 0;
+    UpgradeResult upgrade_result = UpgradeResult::kDegenerate;
+    QualityEvaluationContext evaluation{api};
     g_make_item_input = in;
-    const UpgradeResult result =
-        compute_tier_up_value(value, min, max, &classify_with_attribute_quality,
-                              &make_item_rand_bridge, &target, &new_value);
+    const QolResult computed = compute_tier_up_value(
+        current_tier, range, &evaluate_candidate_quality, &evaluation,
+        &make_item_rand_bridge, &upgrade_result, &target, &new_value);
     g_make_item_input = nullptr;
-    if (result != UpgradeResult::kOk) {
+    if (computed.ok != kQolOk) {
+        log_message(2, "make item aborted: tier evaluation failed code=%d", computed.code);
+        return 1;
+    }
+    if (upgrade_result != UpgradeResult::kOk) {
         return 1;  // 金档 / 退化 → 失败兜底（与合成键前置拦截互为双保险）
     }
     // read-modify-write：仅改 bits0-10，保留 bits11-17（等级）与 bits18-23（属性类型）。
@@ -608,9 +660,11 @@ int32_t api_make_item(const qol::contracts::CraftMakeItemInput* in) {
         (word & ~kJewelValueMask) | (static_cast<uint32_t>(new_value) & kJewelValueMask);
     if (g_write_port == nullptr || g_write_port->write_jewel_word == nullptr ||
         g_write_port->write_jewel_word(in->item, updated_word).ok != kQolOk) return 1;
+    // UseStuff 在 MakeItem 返回 0 后读取 stuffList；只有宝石写入成功才提交需求数。
+    apply_material_count(def, in->item);
     if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "make item tier-up type=%d value=%d->%d range=[%d,%d] target=%d", type,
-                    value, new_value, min, max, tier_ordinal(target));
+                    value, new_value, range.min, range.max, tier_ordinal(target));
     }
     return 0;
 }

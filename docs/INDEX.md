@@ -51,6 +51,7 @@
 - `api-route-map.md`：API 路由核对材料。
 - `api-optional-op-design.md`：API 服务归属、可选 HTTP 接线和通用 OP 授权合同。
 - `audits/infrastructure-20261013/inspection.md`：近址 thunk mmap 检查与验证证据状态。
+- `audits/plugin-audit/attribute-quality-20261014/verification-log.md`、`audits/plugin-audit/attribute-quality-20261014/design-card.md`：attribute_quality v2.0 审计登记与 VM-AQ-01 验收卡。
 - `slot-data-contract.md`：Slot data 当前契约与状态。
 - `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
 - `adr/`：架构决策记录。

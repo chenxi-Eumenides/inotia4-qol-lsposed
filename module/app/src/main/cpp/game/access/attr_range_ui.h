@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "contracts/result.h"
+
 // 游戏层：属性范围详情渲染所需的符号/GOT 原语（ARCHITECTURE.md §5「版本耦合唯一收口」）。
 // provider 通过 Game Host 调用这些原语；符号常量与 fn_* 指针收口在 game/。
 //
@@ -13,10 +15,11 @@ namespace qol::game {
 int attr_item_category(const void* item);
 
 // 类别是否走 ITEMSTATICOPTBASE 固定词缀表（ITEMDATABASE[cat].+6 bit1）。
-bool attr_item_uses_fixed_option_table(int category);
+QolResult attr_item_uses_fixed_option_table(int32_t category, int32_t* out_uses);
 
-// 固定词缀表查询 (类别, 词缀索引) -> (p1, p2) s8 百分比；未命中/未就绪返回 false。
-bool attr_fixed_option_percent_pair(int category, int option_index, int* out_p1, int* out_p2);
+// 固定词缀表查询 (类别, 词缀 ID) -> (p1, p2) s8 百分比。
+QolResult attr_fixed_option_percent_pair(int32_t category, int32_t option_id,
+                                          int32_t* out_p1, int32_t* out_p2);
 
 // 物品能力等级（fn_item_get_ability_level）；未解析返回 0。
 int attr_ability_level(const void* item);

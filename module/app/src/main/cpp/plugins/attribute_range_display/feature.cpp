@@ -16,7 +16,6 @@ using MakeItemFn = uintptr_t (*)(void* item, void* character, void* arg2);
 std::atomic<bool> g_active{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
-const contracts::QolItemExtrasPort* g_item_extras = nullptr;
 void* g_backup_add_option = nullptr;
 void* g_backup_make_item = nullptr;
 
@@ -30,7 +29,8 @@ const contracts::AttributeQualityApi* quality_api() {
         {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor},
         &iface);
     if (result.ok != kQolOk || iface == nullptr) return nullptr;
-    return static_cast<const contracts::AttributeQualityApi*>(iface);
+    const auto* api = static_cast<const contracts::AttributeQualityApi*>(iface);
+    return contracts::attribute_quality_api_size_valid(api) ? api : nullptr;
 }
 
 char tier_color(contracts::AttributeQualityTier tier) {
@@ -56,9 +56,6 @@ char tier_color(contracts::AttributeQualityTier tier) {
 void set_context(const contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
-    g_item_extras = ctx.ports != nullptr && ctx.port_count == 1 && ctx.ports[0] != nullptr
-                        ? static_cast<const contracts::QolItemExtrasPort*>(ctx.ports[0])
-                        : nullptr;
 }
 
 void set_active(bool active_value) {
@@ -78,32 +75,40 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     return 0;
 }
 
-void uid_desc_add_option_wrapper(void* builder, int type, int option_index, int value) {
+void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int value) {
     const auto backup = reinterpret_cast<AddOptionFn>(g_backup_add_option);
-    if (backup != nullptr) backup(builder, type, option_index, value);
+    if (backup != nullptr) backup(builder, type, option_id, value);
     if (!active() || builder == nullptr || t_current_item == nullptr) return;
 
     const auto api = quality_api();
-    if (g_game == nullptr || g_item_extras == nullptr ||
-        g_item_extras->read.ability_level == nullptr || g_sdk == nullptr ||
-        g_sdk->ui == nullptr || g_sdk->ui->insert_inline_color == nullptr || api == nullptr ||
-        api->probe_option == nullptr || api->classify == nullptr) {
+    if (g_game == nullptr || g_sdk == nullptr || g_sdk->ui == nullptr ||
+        g_sdk->ui->insert_inline_color == nullptr || api == nullptr ||
+        g_sdk->item_handle.register_item == nullptr) {
         return;
     }
 
-    contracts::AttributeQualityResult quality{};
-    int32_t level = 0;
-    if (g_item_extras->read.ability_level(t_current_item, &level).ok != kQolOk) return;
     contracts::QolItemHandle handle{};
-    if (g_sdk->item_handle.register_item == nullptr ||
-        g_sdk->item_handle.register_item(t_current_item, contracts::kQolItemHandleOwnerGame,
+    if (g_sdk->item_handle.register_item(t_current_item, contracts::kQolItemHandleOwnerGame,
                                         &handle) != contracts::kQolItemHandleStatusOk ||
-        handle.slot == 0 || handle.generation == 0 ||
-        api->probe_option(handle, option_index, level, 1, value, &quality).ok != kQolOk) {
+        handle.slot == 0 || handle.generation == 0) {
         return;
     }
+
+    contracts::AttributeQualityOptions options{};
+    contracts::AttributeQualityItem option_context{};
+    if (api->query_option_context(handle, option_id, value, &options, &option_context).ok !=
+            kQolOk ||
+        option_context.kind != contracts::AttributeKind::OptionContext ||
+        option_context.status != kQolOk ||
+        option_context.quality.level < 0 ||
+        option_context.quality.level > contracts::kAttributeQualityHighestLevel) {
+        return;
+    }
+
     (void)g_sdk->ui->insert_inline_color(builder, 4096,
-                                         static_cast<uint8_t>(tier_color(quality.tier)));
+                                         static_cast<uint8_t>(tier_color(
+                                             static_cast<contracts::AttributeQualityTier>(
+                                                 option_context.quality.level))));
 }
 
 uintptr_t uid_desc_make_item_wrapper(void* item, void* character, void* arg2) {

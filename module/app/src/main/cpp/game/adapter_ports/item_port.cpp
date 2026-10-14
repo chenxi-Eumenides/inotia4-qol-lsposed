@@ -300,12 +300,20 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
     out->fields |= contracts::kQolItemInventoryHasJewelValue |
                    contracts::kQolItemInventoryHasJewelAttributeType;
     const auto* option = *reinterpret_cast<const uint8_t* const*>(bytes + I_OPTION_LIST);
+    out->fields |= contracts::kQolItemInventoryHasOptionCompleteness;
     while (option != nullptr && out->option_count < contracts::kQolItemInventoryOptionCapacity) {
         const uint16_t index = *reinterpret_cast<const uint16_t*>(option + O_INDEX);
         out->options[out->option_count++] = contracts::QolItemInventoryOptionView{
             *reinterpret_cast<const int16_t*>(option + O_VALUE), index & 0x7F,
             (index >> 13) & 0x7};
-        option = *reinterpret_cast<const uint8_t* const*>(option + O_NEXT);
+        const auto* next = *reinterpret_cast<const uint8_t* const*>(option + O_NEXT);
+        if (out->option_count == contracts::kQolItemInventoryOptionCapacity) {
+            if (next != nullptr) {
+                out->fields |= contracts::kQolItemInventoryOptionsTruncated;
+            }
+            break;
+        }
+        option = next;
     }
     return contracts::ok();
 }

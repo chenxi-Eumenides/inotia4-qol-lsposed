@@ -9,7 +9,7 @@
 namespace qol::contracts {
 
 constexpr const char* kItemFactsCapabilityId = "item.facts";
-constexpr QolVersion kItemFactsVersion{3, 2};
+constexpr QolVersion kItemFactsVersion{3, 3};
 constexpr uint16_t kItemFactsVersionMajor = kItemFactsVersion.major;
 constexpr uint16_t kItemFactsVersionMinor = kItemFactsVersion.minor;
 

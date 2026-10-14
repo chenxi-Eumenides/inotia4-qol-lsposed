@@ -21,18 +21,23 @@ void set_item_facts(const contracts::ItemFactsApi* facts);
 void set_active(bool active);
 bool active();
 
-// 宿主在资源安装成功后交还 backup（原函数入口）；未知 id 忽略，恒返回 0。
+// 宿主在资源安装成功后交还 backup（原函数入口）；未知 id 忽略，空 backup 拒绝资源。
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
 
-// 能力接口实现：只读探测；撤销期 / hook 未就绪返回错误（消费者降级）。
-QolResult api_probe_jewel(contracts::QolItemHandle item, int32_t attribute_type, int32_t value,
-                          contracts::AttributeQualityResult* out);
-QolResult api_probe_option(contracts::QolItemHandle item, int32_t option, int32_t level, int32_t flag,
-                           int32_t value,
-                           contracts::AttributeQualityResult* out);
-QolResult api_classify(int32_t value, int32_t min, int32_t max,
-                       contracts::AttributeQualityTier* out_tier);
-QolResult api_percentile(int32_t value, int32_t min, int32_t max, int32_t* out_percentile);
+// 能力接口实现：只读属性批量查询与纯质量计算。
+QolResult api_query_item(contracts::QolItemHandle item,
+                         const contracts::AttributeQualityOptions* options,
+                         contracts::AttributeQualityItemResult* out);
+QolResult api_query_option_context(contracts::QolItemHandle item, int32_t option_id,
+                                   int32_t display_value,
+                                   const contracts::AttributeQualityOptions* options,
+                                   contracts::AttributeQualityItem* out);
+QolResult api_evaluate(int32_t value, contracts::AttributeRange range,
+                       const contracts::AttributeQualityOptions* options,
+                       contracts::AttributeQuality* out);
+
+// Lifecycle teardown clears all borrowed Host and capability pointers.
+void clear_runtime();
 
 // MATH_GetRandom wrapper：由 provider 的 ResourceClaim.handler 声明，宿主安装。
 int math_get_random_wrapper(int min, int max);

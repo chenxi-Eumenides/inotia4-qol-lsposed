@@ -18,44 +18,88 @@ int attr_item_category(const void* item) {
     return static_cast<int>((flags >> 6) & 0x3FF);
 }
 
-bool attr_item_uses_fixed_option_table(int category) {
-    if (g_base == 0 || category < 0) return false;
-    uint8_t* base = *reinterpret_cast<uint8_t**>(
-        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+QolResult attr_item_uses_fixed_option_table(int32_t category, int32_t* out_uses) {
+    if (category < 0 || out_uses == nullptr) {
+        static constexpr char kInvalidArgument[] = "invalid argument";
+        return contracts::error(kQolErrInvalidArgument, kInvalidArgument,
+                                sizeof(kInvalidArgument) - 1);
+    }
+    if (g_base == 0) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
+    void* base_ref = *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA);
+    if (base_ref == nullptr) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
+    uint8_t* base = *reinterpret_cast<uint8_t**>(base_ref);
     uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
-    if (base == nullptr || size_ptr == nullptr) return false;
+    if (base == nullptr || size_ptr == nullptr) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
     const uint8_t stride = *size_ptr;
-    if (stride <= 6) return false;
-    return (base[static_cast<size_t>(category) * stride + 6] & 0x02) != 0;
+    if (stride <= 6) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
+    *out_uses = (base[static_cast<size_t>(category) * stride + 6] & 0x02) != 0 ? 1 : 0;
+    return contracts::ok();
 }
 
-bool attr_fixed_option_percent_pair(int category, int option_index, int* out_p1, int* out_p2) {
-    if (g_base == 0 || category < 0 || option_index < 0 || out_p1 == nullptr || out_p2 == nullptr) {
-        return false;
+QolResult attr_fixed_option_percent_pair(int32_t category, int32_t option_id,
+                                          int32_t* out_p1, int32_t* out_p2) {
+    if (category < 0 || option_id < 0 || out_p1 == nullptr || out_p2 == nullptr) {
+        static constexpr char kInvalidArgument[] = "invalid argument";
+        return contracts::error(kQolErrInvalidArgument, kInvalidArgument,
+                                sizeof(kInvalidArgument) - 1);
     }
-    uint8_t* base = *reinterpret_cast<uint8_t**>(
-        *reinterpret_cast<void**>(g_base + G_ITEMSTATICOPT_TABLE_DATA_GOT_VMA));
+    if (g_base == 0) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
+    void* base_ref = *reinterpret_cast<void**>(g_base + G_ITEMSTATICOPT_TABLE_DATA_GOT_VMA);
+    if (base_ref == nullptr) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
+    uint8_t* base = *reinterpret_cast<uint8_t**>(base_ref);
     uint8_t* size_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMSTATICOPT_TABLE_SIZE_GOT_VMA);
     uint8_t* count_ptr = *reinterpret_cast<uint8_t**>(g_base + G_ITEMSTATICOPT_TABLE_COUNT_GOT_VMA);
-    if (base == nullptr || size_ptr == nullptr || count_ptr == nullptr) return false;
+    if (base == nullptr || size_ptr == nullptr || count_ptr == nullptr) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
     const uint8_t stride = *size_ptr;
-    if (stride < 5) return false;
+    if (stride < 5) {
+        static constexpr char kNotReady[] = "not ready";
+        return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+    }
     const uint16_t count = static_cast<uint16_t>(count_ptr[0] | (count_ptr[1] << 8));
     bool found = false;
+    int32_t matched_p1 = 0;
+    int32_t matched_p2 = 0;
     for (uint16_t i = 0; i < count; ++i) {
         const uint8_t* record = base + static_cast<size_t>(i) * stride;
         const uint16_t record_category = static_cast<uint16_t>(record[0] | (record[1] << 8));
         if (record_category != static_cast<uint16_t>(category)) continue;
-        if (static_cast<int>(static_cast<int8_t>(record[2])) != option_index) continue;
-        *out_p1 = static_cast<int>(static_cast<int8_t>(record[3]));
-        *out_p2 = static_cast<int>(static_cast<int8_t>(record[4]));
+        if (static_cast<int32_t>(static_cast<int8_t>(record[2])) != option_id) continue;
+        matched_p1 = static_cast<int32_t>(static_cast<int8_t>(record[3]));
+        matched_p2 = static_cast<int32_t>(static_cast<int8_t>(record[4]));
         found = true;  // 同索引重复出现时最后一条生效（游戏覆盖语义）
     }
-    return found;
+    if (!found) {
+        static constexpr char kNotFound[] = "fixed option not found";
+        return contracts::error(kQolErrNotFound, kNotFound, sizeof(kNotFound) - 1);
+    }
+    *out_p1 = matched_p1;
+    *out_p2 = matched_p2;
+    return contracts::ok();
 }
 
 int attr_ability_level(const void* item) {
-    if (fn_item_get_ability_level == nullptr || item == nullptr) return 0;
+    if (fn_item_get_ability_level == nullptr || item == nullptr) return -1;
     return fn_item_get_ability_level(const_cast<void*>(item));
 }
 

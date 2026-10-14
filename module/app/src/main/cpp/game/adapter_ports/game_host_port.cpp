@@ -710,19 +710,17 @@ QolResult read_attr_uses_fixed_option_table(int32_t category, int32_t* out_value
     if (category < 0 || out_value == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    *out_value = qol::game::attr_item_uses_fixed_option_table(category) ? 1 : 0;
-    return contracts::ok();
+    if (!game_host_is_main_thread()) return error_result(kQolErrBlocked, "wrong thread");
+    return qol::game::attr_item_uses_fixed_option_table(category, out_value);
 }
 
-QolResult read_attr_fixed_option_percent_pair(int32_t category, int32_t option_index,
+QolResult read_attr_fixed_option_percent_pair(int32_t category, int32_t option_id,
                                               int32_t* out_p1, int32_t* out_p2) {
-    if (category < 0 || option_index < 0 || out_p1 == nullptr || out_p2 == nullptr) {
+    if (category < 0 || option_id < 0 || out_p1 == nullptr || out_p2 == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    if (!qol::game::attr_fixed_option_percent_pair(category, option_index, out_p1, out_p2)) {
-        return not_ready();
-    }
-    return contracts::ok();
+    if (!game_host_is_main_thread()) return error_result(kQolErrBlocked, "wrong thread");
+    return qol::game::attr_fixed_option_percent_pair(category, option_id, out_p1, out_p2);
 }
 
 contracts::QolGameHost make_game_host() {

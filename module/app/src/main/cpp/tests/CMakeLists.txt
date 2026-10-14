@@ -1210,6 +1210,35 @@ set_target_properties(host_adapter_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD
 target_link_libraries(host_adapter_tests PRIVATE Threads::Threads)
 add_test(NAME host_adapter_tests COMMAND host_adapter_tests)
 
+# L4 adapter evidence: production item-view traversal and low-level fixed-option/ability adapters.
+add_executable(attribute_quality_adapter_tests
+    test_attribute_quality_adapter.cpp
+    ${CPP_DIR}/game/access/attr_range_ui.cpp
+    ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp
+)
+target_include_directories(attribute_quality_adapter_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(attribute_quality_adapter_tests PRIVATE cxx_std_17)
+set_target_properties(attribute_quality_adapter_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME attribute_quality_adapter_tests COMMAND attribute_quality_adapter_tests)
+
+# Link the production provider implementation; the focused test source supplies its own host fixture.
+add_executable(attribute_quality_provider_tests
+    test_attribute_quality_provider.cpp
+    ${CPP_DIR}/plugins/attribute_quality/plugin.cpp
+    ${CPP_DIR}/plugins/attribute_quality/feature.cpp
+    ${CPP_DIR}/plugins/attribute_quality/rules.cpp
+)
+target_include_directories(attribute_quality_provider_tests PRIVATE ${CPP_DIR})
+target_compile_features(attribute_quality_provider_tests PRIVATE cxx_std_17)
+set_target_properties(attribute_quality_provider_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(attribute_quality_provider_tests PRIVATE Threads::Threads)
+add_test(NAME attribute_quality_provider_tests COMMAND attribute_quality_provider_tests)
+
 # P5-1：core.api HTTP 路由登记、重复拒绝、caller-owned list 与 lease 归零检查。
 add_executable(http_registry_tests
     test_http_registry.cpp

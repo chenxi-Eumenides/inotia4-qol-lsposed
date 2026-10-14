@@ -1,6 +1,8 @@
 #include "plugins/attribute_quality/rules.h"
 
 #include <cstdio>
+#include <cstdint>
+#include <cstring>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -11,9 +13,13 @@ static int g_fail = 0;
 } while (0)
 
 using attribute_quality::classify;
+using attribute_quality::evaluate_quality;
 using attribute_quality::fixed_option_range;
 using attribute_quality::percentile;
 using attribute_quality::Tier;
+using qol::contracts::AttributeQuality;
+using qol::contracts::AttributeQualityOptions;
+using qol::contracts::AttributeRange;
 
 static void test_bounds() {
     // value == max -> Gold；value > max -> Gold。
@@ -121,55 +127,106 @@ static void test_no_int_overflow() {
     CHECK(classify(80000000, 50000000, 100000000) == Tier::Green);
 }
 
+static void test_quality_api_evaluation() {
+    AttributeQuality result{99, 99};
+    CHECK(evaluate_quality(1, AttributeRange{0, 3}, nullptr, &result).ok == kQolOk);
+    CHECK(result.percentile == 33 && result.level == 1);
+
+    CHECK(evaluate_quality(-1, AttributeRange{0, 3}, nullptr, &result).ok == kQolOk);
+    CHECK(result.percentile == 0 && result.level == 0);
+    CHECK(evaluate_quality(4, AttributeRange{0, 3}, nullptr, &result).ok == kQolOk);
+    CHECK(result.percentile == 100 && result.level == 5);
+
+    const AttributeQualityOptions allow_outside{1, {0, 0, 0}};
+    CHECK(evaluate_quality(-1, AttributeRange{0, 3}, &allow_outside, &result).ok == kQolOk);
+    CHECK(result.percentile == -33 && result.level == 0);
+    CHECK(evaluate_quality(1, AttributeRange{0, 3}, &allow_outside, &result).ok == kQolOk);
+    CHECK(result.percentile == 33 && result.level == 1);
+
+    CHECK(evaluate_quality(0, AttributeRange{9, 9}, nullptr, &result).ok == kQolOk);
+    CHECK(result.percentile == 100 && result.level == 5);
+    CHECK(evaluate_quality(0, AttributeRange{INT32_MIN, INT32_MAX}, nullptr, &result).ok ==
+          kQolOk);
+    CHECK(result.percentile == 50 && result.level == 1);
+
+    AttributeQualityOptions invalid_options{2, {0, 0, 0}};
+    result = {77, 77};
+    CHECK(evaluate_quality(1, AttributeRange{0, 3}, &invalid_options, &result).code ==
+          kQolErrInvalidArgument);
+    CHECK(result.percentile == 0 && result.level == 0);
+    invalid_options = {0, {0, 1, 0}};
+    CHECK(evaluate_quality(1, AttributeRange{0, 3}, &invalid_options, &result).code ==
+          kQolErrInvalidArgument);
+    CHECK(result.percentile == 0 && result.level == 0);
+
+    result = {77, 77};
+    const QolResult overflow = evaluate_quality(
+        INT32_MAX, AttributeRange{INT32_MIN, INT32_MIN + 1}, &allow_outside, &result);
+    CHECK(overflow.code == kQolErrInvalidArgument);
+    CHECK(overflow.message != nullptr &&
+          std::strcmp(overflow.message, "percentile overflow") == 0);
+    CHECK(result.percentile == 0 && result.level == 0);
+    CHECK(evaluate_quality(1, AttributeRange{0, 1}, nullptr, nullptr).code ==
+          kQolErrInvalidArgument);
+}
+
 static void test_fixed_option_range() {
     int lo = 0;
     int hi = 0;
 
     // 战争斗篷（cat456，能力等级 74）实测：p 对为 (-50, 50)。
     // 力量公式 a16*100/1+ -> base=12；回避率公式 a5/10+ -> base=24。
-    fixed_option_range(12, -50, 50, &lo, &hi);
+    CHECK(fixed_option_range(12, -50, 50, &lo, &hi).ok == kQolOk);
     CHECK(lo == 6 && hi == 18);
-    fixed_option_range(24, -50, 50, &lo, &hi);
+    CHECK(fixed_option_range(24, -50, 50, &lo, &hi).ok == kQolOk);
     CHECK(lo == 12 && hi == 36);
 
     // 负百分比对 100 取整向零截断：97*-50/100 = -48（非 -49）。
-    fixed_option_range(97, -50, 50, &lo, &hi);
+    CHECK(fixed_option_range(97, -50, 50, &lo, &hi).ok == kQolOk);
     CHECK(lo == 49 && hi == 145);
 
     // 战神斗篷（cat874，能力等级 1）p1==p2：退化为单值区间。
-    fixed_option_range(10, 100, 100, &lo, &hi);
+    CHECK(fixed_option_range(10, 100, 100, &lo, &hi).ok == kQolOk);
     CHECK(lo == 20 && hi == 20);
-    fixed_option_range(60, 30, 30, &lo, &hi);
+    CHECK(fixed_option_range(60, 30, 30, &lo, &hi).ok == kQolOk);
     CHECK(lo == 78 && hi == 78);
-    fixed_option_range(300, 60, 60, &lo, &hi);
+    CHECK(fixed_option_range(300, 60, 60, &lo, &hi).ok == kQolOk);
     CHECK(lo == 480 && hi == 480);
-    fixed_option_range(12, 0, 0, &lo, &hi);
+    CHECK(fixed_option_range(12, 0, 0, &lo, &hi).ok == kQolOk);
     CHECK(lo == 12 && hi == 12);
 
     // base <= 0 时游戏取 1（CreateItem csinc）。
-    fixed_option_range(0, -50, 50, &lo, &hi);
+    CHECK(fixed_option_range(0, -50, 50, &lo, &hi).ok == kQolOk);
     CHECK(lo == 1 && hi == 1);
-    fixed_option_range(-5, -70, 0, &lo, &hi);
+    CHECK(fixed_option_range(-5, -70, 0, &lo, &hi).ok == kQolOk);
     CHECK(lo == 1 && hi == 1);
 
     // 全负区间的边界：(0, 70) 下界等于 base，( -70, 0) 上界等于 base。
-    fixed_option_range(100, 0, 70, &lo, &hi);
+    CHECK(fixed_option_range(100, 0, 70, &lo, &hi).ok == kQolOk);
     CHECK(lo == 100 && hi == 170);
-    fixed_option_range(100, -70, 0, &lo, &hi);
+    CHECK(fixed_option_range(100, -70, 0, &lo, &hi).ok == kQolOk);
     CHECK(lo == 30 && hi == 100);
 
     // 实测值在固定词缀范围内的分档（修正前的验收目标）：
     // 力量 17 -> 91% 紫、14 -> 66% 绿；回避率 33 -> 87% 蓝、30 -> 75% 蓝。
-    fixed_option_range(12, -50, 50, &lo, &hi);
+    CHECK(fixed_option_range(12, -50, 50, &lo, &hi).ok == kQolOk);
     CHECK(classify(17, lo, hi) == Tier::Purple);
     CHECK(classify(14, lo, hi) == Tier::Green);
-    fixed_option_range(24, -50, 50, &lo, &hi);
+    CHECK(fixed_option_range(24, -50, 50, &lo, &hi).ok == kQolOk);
     CHECK(classify(33, lo, hi) == Tier::Blue);
     CHECK(classify(30, lo, hi) == Tier::Blue);
 
     // 单值区间仍按满值处理（固定值约定不变）。
-    fixed_option_range(60, 30, 30, &lo, &hi);
+    CHECK(fixed_option_range(60, 30, 30, &lo, &hi).ok == kQolOk);
     CHECK(classify(78, lo, hi) == Tier::Gold);
+
+    lo = 123;
+    hi = 456;
+    const QolResult overflow = fixed_option_range(INT32_MAX, 127, 127, &lo, &hi);
+    CHECK(overflow.code == kQolErrInvalidArgument);
+    CHECK(overflow.message != nullptr &&
+          std::strcmp(overflow.message, "fixed option range overflow") == 0);
+    CHECK(lo == 123 && hi == 456);
 }
 
 int main() {
@@ -179,6 +236,7 @@ int main() {
     test_percentile_values();
     test_nonzero_min();
     test_no_int_overflow();
+    test_quality_api_evaluation();
     test_fixed_option_range();
     std::printf("attribute_quality_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

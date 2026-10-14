@@ -295,8 +295,16 @@ bool attr_call_jewel_value(int, void*, int* out_value) {
     *out_value = 4;
     return true;
 }
-bool attr_item_uses_fixed_option_table(int) { return false; }
-bool attr_fixed_option_percent_pair(int, int, int*, int*) { return false; }
+QolResult attr_item_uses_fixed_option_table(int32_t, int32_t* out_uses) {
+    if (out_uses == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid argument", 16);
+    }
+    *out_uses = 0;
+    return contracts::ok();
+}
+QolResult attr_fixed_option_percent_pair(int32_t, int32_t, int32_t*, int32_t*) {
+    return contracts::error(kQolErrNotReady, "not ready", 9);
+}
 bool attr_insert_value_color(char*, char*, char) { return true; }
 bool item_equip_primitives_ready() { return true; }
 bool item_is_real_equip_resolved() { return true; }
@@ -525,6 +533,55 @@ QolResult find_item_provider_for_each(qol::contracts::QolInventoryExtensionItemF
 }
 
 bool find_item_provider_available() { return true; }
+
+struct FakeInventoryOptionNode {
+    uint16_t index;
+    int16_t value;
+    uint32_t reserved;
+    FakeInventoryOptionNode* next;
+};
+
+static_assert(offsetof(FakeInventoryOptionNode, next) == O_NEXT,
+              "fake option-node next pointer must match the game layout");
+
+void test_inventory_option_view_completeness(
+    const qol::contracts::QolItemPort& port, qol::contracts::QolItemHandle handle,
+    std::array<uint8_t, 0x200>& item) {
+    std::array<FakeInventoryOptionNode,
+               qol::contracts::kQolItemInventoryOptionCapacity + 1> nodes{};
+    constexpr uint32_t kOptionType = 3;
+    const uint32_t lengths[] = {0, 31, 32, 33};
+    for (const uint32_t length : lengths) {
+        for (uint32_t i = 0; i < length; ++i) {
+            nodes[i].index = static_cast<uint16_t>((kOptionType << 13) | (i & 0x7Fu));
+            nodes[i].value = static_cast<int16_t>(500 + i);
+            nodes[i].next = i + 1 < length ? &nodes[i + 1] : nullptr;
+        }
+        const auto* head = length == 0 ? nullptr : &nodes[0];
+        std::memcpy(item.data() + I_OPTION_LIST, &head, sizeof(head));
+
+        qol::contracts::QolItemInventoryView view{};
+        assert(port.read.inventory_item_view(handle, &view).ok == kQolOk);
+        const uint32_t expected_count = std::min(
+            length, qol::contracts::kQolItemInventoryOptionCapacity);
+        assert(view.option_count == expected_count);
+        assert((view.fields & qol::contracts::kQolItemInventoryHasOptionCompleteness) != 0);
+        const bool truncated =
+            (view.fields & qol::contracts::kQolItemInventoryOptionsTruncated) != 0;
+        assert(truncated == (length > qol::contracts::kQolItemInventoryOptionCapacity));
+        if (expected_count != 0) {
+            assert(view.options[0].id == 0);
+            assert(view.options[0].type == static_cast<int32_t>(kOptionType));
+            assert(view.options[0].value == 500);
+            const uint32_t last = expected_count - 1;
+            assert(view.options[last].id == static_cast<int32_t>(last & 0x7Fu));
+            assert(view.options[last].type == static_cast<int32_t>(kOptionType));
+            assert(view.options[last].value == 500 + static_cast<int32_t>(last));
+        }
+    }
+    const FakeInventoryOptionNode* empty = nullptr;
+    std::memcpy(item.data() + I_OPTION_LIST, &empty, sizeof(empty));
+}
 
 void test_ui_result_snapshot_retry_does_not_repeat_write() {
     qol::game::game_host_mark_main_thread();
@@ -923,6 +980,7 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 3);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");
     static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==
@@ -1516,6 +1574,8 @@ int main() {
     qol::contracts::QolItemInventoryView physical_view{};
     assert(item_port_api.read.inventory_item_view(newly_registered_ref.item, &physical_view).ok ==
            kQolOk);
+    test_inventory_option_view_completeness(item_port_api, newly_registered_ref.item,
+                                            g_inventory_new_item);
     g_raw_inventory_item = g_inventory_physical_item.data();
     QolResult off_thread_ref_result{};
     std::thread off_thread_reader([&]() {

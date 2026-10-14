@@ -13,7 +13,24 @@ constexpr const char* kPluginId = "attribute_quality";
 constexpr const char* kPluginVersion = "0.1.0";
 
 constexpr contracts::AttributeQualityApi kAttributeQualityApi{
-    &api_probe_jewel, &api_probe_option, &api_classify, &api_percentile};
+    sizeof(contracts::AttributeQualityApi), &api_query_item, &api_query_option_context,
+    &api_evaluate};
+
+bool game_host_api_valid(const contracts::QolGameHost* game) {
+    return game != nullptr && game->abi.size >= sizeof(contracts::QolGameHost) &&
+           game->abi.major == contracts::kGameHostMajor &&
+           game->abi.minor >= contracts::kGameHostMinor &&
+           game->read.attr_range.option_value != nullptr &&
+           game->read.attr_range.jewel_value != nullptr &&
+           game->read.attr_range.uses_fixed_option_table != nullptr &&
+           game->read.attr_range.fixed_option_percent_pair != nullptr;
+}
+
+bool item_facts_api_valid(const contracts::ItemFactsApi* facts) {
+    return contracts::item_facts_api_size_valid(facts) && facts->category != nullptr &&
+           facts->is_jewel_category != nullptr && facts->is_real_equip != nullptr &&
+           facts->view != nullptr;
+}
 
 // MATH_GetRandom 是范围探测的唯一捕获窗口；UIDesc_* 属 display 消费者。
 const contracts::ResourceClaim kResources[] = {
@@ -48,12 +65,16 @@ const contracts::CapabilityRequirement kRequires[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
-    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) return 1;
+    clear_runtime();
+    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr ||
+        !game_host_api_valid(ctx.game)) {
+        return 1;
+    }
     const void* iface = nullptr;
     if (!contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kItemFactsCapabilityId,
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
-        iface == nullptr || !contracts::item_facts_api_size_valid(
+        iface == nullptr || !item_facts_api_valid(
                                 static_cast<const contracts::ItemFactsApi*>(iface))) {
         return 1;
     }
@@ -65,8 +86,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
-    set_item_facts(nullptr);
-    set_active(false);
+    clear_runtime();
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -97,7 +117,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     1, kRequires, // requires
     0, nullptr,   // optional_requires
-    1, kProvides, // provides（attribute.quality v1.0）
+    1, kProvides, // provides（attribute.quality v2.0）
     1, kResources,
     0, nullptr,   // jni
     &plugin_install,

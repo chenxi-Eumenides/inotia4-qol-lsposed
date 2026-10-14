@@ -214,6 +214,6 @@ static_assert(sizeof(QolGameHost) ==
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 2;
-constexpr uint16_t kGameHostMinor = 2;
+constexpr uint16_t kGameHostMinor = 3;
 
 }  // namespace qol::contracts

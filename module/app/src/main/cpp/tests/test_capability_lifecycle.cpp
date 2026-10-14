@@ -34,7 +34,11 @@ static int g_fail = 0;
 } while (0)
 
 using qol::contracts::AttributeQualityApi;
-using qol::contracts::AttributeQualityResult;
+using qol::contracts::AttributeQuality;
+using qol::contracts::AttributeQualityItem;
+using qol::contracts::AttributeQualityItemResult;
+using qol::contracts::AttributeQualityOptions;
+using qol::contracts::AttributeRange;
 using qol::contracts::AttributeQualityTier;
 using qol::contracts::CapabilityProvisionRef;
 using qol::contracts::CapabilityRequirement;
@@ -119,23 +123,20 @@ int g_provider_deactivate_calls = 0;
 int g_provider_enabled_calls = 0;
 int g_provider_disabled_calls = 0;
 
-QolResult fake_probe_jewel(qol::contracts::QolItemHandle, int32_t, int32_t,
-                            AttributeQualityResult*) {
+QolResult fake_query_item(qol::contracts::QolItemHandle, const AttributeQualityOptions*,
+                          AttributeQualityItemResult*) {
     return g_provider_revoking ? qol::contracts::error(kQolErrNotReady, "revoking", 8)
                                 : qol::contracts::ok();
 }
-QolResult fake_probe_option(qol::contracts::QolItemHandle, int32_t, int32_t, int32_t, int32_t,
-                            AttributeQualityResult*) {
+QolResult fake_query_option_context(qol::contracts::QolItemHandle, int32_t, int32_t,
+                                    const AttributeQualityOptions*, AttributeQualityItem*) {
     return qol::contracts::ok();
 }
-QolResult fake_classify(int32_t, int32_t, int32_t, AttributeQualityTier*) {
+QolResult fake_evaluate(int32_t, AttributeRange, const AttributeQualityOptions*, AttributeQuality*) {
     return qol::contracts::ok();
 }
-QolResult fake_percentile(int32_t, int32_t, int32_t, int32_t*) {
-    return qol::contracts::ok();
-}
-const AttributeQualityApi g_provider_api{&fake_probe_jewel, &fake_probe_option, &fake_classify,
-                                        &fake_percentile};
+const AttributeQualityApi g_provider_api{sizeof(AttributeQualityApi), &fake_query_item,
+                                         &fake_query_option_context, &fake_evaluate};
 
 int provider_install(PluginContext&) { ++g_provider_install_calls; return 0; }
 void provider_deactivate(PluginContext&) { ++g_provider_deactivate_calls; }
@@ -204,13 +205,20 @@ ResourceClaim g_opt_gate_resources[] = {
 };
 
 CapabilityProvisionRef g_provides[] = {
-    {qol::contracts::kAttributeQualityCapabilityId, {1, 0}, &g_provider_api},
+    {qol::contracts::kAttributeQualityCapabilityId,
+     {qol::contracts::kAttributeQualityVersionMajor,
+      qol::contracts::kAttributeQualityVersionMinor},
+     &g_provider_api},
 };
 CapabilityRequirement g_requires[] = {
-    {qol::contracts::kAttributeQualityCapabilityId, {1, 0}},
+    {qol::contracts::kAttributeQualityCapabilityId,
+     {qol::contracts::kAttributeQualityVersionMajor,
+      qol::contracts::kAttributeQualityVersionMinor}},
 };
 CapabilityRequirement g_optional[] = {
-    {qol::contracts::kAttributeQualityCapabilityId, {1, 0}},
+    {qol::contracts::kAttributeQualityCapabilityId,
+     {qol::contracts::kAttributeQualityVersionMajor,
+      qol::contracts::kAttributeQualityVersionMinor}},
 };
 
 PluginDescriptor make_provider() {
@@ -334,6 +342,7 @@ int drive_lifecycle() {
 
 void test_enabled_registers_capability() {
     reset_all();
+    CHECK(qol::contracts::attribute_quality_api_size_valid(&g_provider_api));
     qol::infra::config_set_bool("cap.provider.on", true);
     CHECK(register_plugin(make_provider()));
     CHECK(install_all(make_host_deps()) == 0);
@@ -400,7 +409,7 @@ void test_disable_revokes_and_cascades() {
     CHECK(g_provider_disabled_calls == 1);  // 提供者门禁已关
     CHECK(g_provider_revoking);
     // 撤销期新调用被提供者拒绝（能力仍在撤销事务内，指针尚未失效）。
-    CHECK(saved->probe_jewel(qol::contracts::QolItemHandle{0, 0}, 0, 0, nullptr).ok != kQolOk);
+    CHECK(saved->query_item(qol::contracts::QolItemHandle{0, 0}, nullptr, nullptr).ok != kQolOk);
 
     // required 消费者先进入 release 事务：在途未归零时保持 live/deactivating。
     FeatureStatus req{};
@@ -633,7 +642,9 @@ void test_blocked_lifecycle_activate_rechecks_required() {
     // 能力就绪后，blocked 的显式 activate 继续既有异步安装路径。
     CHECK(qol::infra::register_capability(
         qol::infra::CapabilityProvision{qol::contracts::kAttributeQualityCapabilityId,
-                                        {1, 0}, &g_provider_api}));
+                                        {qol::contracts::kAttributeQualityVersionMajor,
+                                         qol::contracts::kAttributeQualityVersionMinor},
+                                        &g_provider_api}));
     CHECK(lifecycle_apply("cap_consumer_req", qol::contracts::kFeatureLifecycleActivate));
     CHECK(feature_state_is("cap_consumer_req", FeatureState::kResolving));
     drive_lifecycle();

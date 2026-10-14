@@ -1,6 +1,43 @@
 #include "rules.h"
 
+#include <cstring>
+#include <limits>
+
 namespace custom_recipe {
+
+namespace {
+
+QolResult rule_error(int32_t code, const char* message) {
+    return qol::contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
+}
+
+bool valid_tier(Tier tier) {
+    switch (tier) {
+        case Tier::Grey:
+        case Tier::White:
+        case Tier::Green:
+        case Tier::Blue:
+        case Tier::Purple:
+        case Tier::Gold:
+            return true;
+    }
+    return false;
+}
+
+QolResult classify_value(ClassifyFn classify_fn, int32_t value, AttributeRange range,
+                         void* context, Tier* out_tier) {
+    if (classify_fn == nullptr || out_tier == nullptr) {
+        return rule_error(kQolErrInvalidArgument, "missing quality classifier");
+    }
+    Tier tier = Tier::Grey;
+    const QolResult result = classify_fn(value, range, context, &tier);
+    if (result.ok != kQolOk) return result;
+    if (!valid_tier(tier)) return rule_error(kQolErrInternal, "invalid quality tier");
+    *out_tier = tier;
+    return qol::contracts::ok();
+}
+
+}  // namespace
 
 int tier_ordinal(Tier tier) {
     switch (tier) {
@@ -20,69 +57,110 @@ Tier tier_from_ordinal(int ordinal) {
     return static_cast<Tier>(ordinal);
 }
 
-int tier_lower_bound(Tier target, int min, int max, ClassifyFn classify_fn) {
-    if (classify_fn == nullptr) return max;
-    // classify(v,min,max) 对 v 单调不减（v<min→Grey，[min,max)→按百分位升档，>=max→Gold），
-    // 故二分查找首个 ordinal(classify(v)) >= 目标序数 的 v。
+QolResult tier_lower_bound(Tier target, AttributeRange range, ClassifyFn classify_fn,
+                           void* context, int32_t* out_value) {
+    if (out_value == nullptr || classify_fn == nullptr || !valid_tier(target) ||
+        range.max <= range.min) {
+        return rule_error(kQolErrInvalidArgument, "invalid tier search input");
+    }
     const int t = tier_ordinal(target);
-    int lo = min;
-    int hi = max;
+    int64_t lo = range.min;
+    int64_t hi = range.max;
     while (lo < hi) {
-        const int mid = lo + (hi - lo) / 2;
-        if (tier_ordinal(classify_fn(mid, min, max)) >= t) {
+        const int64_t mid = lo + (hi - lo) / 2;
+        Tier tier = Tier::Grey;
+        const QolResult classified = classify_value(
+            classify_fn, static_cast<int32_t>(mid), range, context, &tier);
+        if (classified.ok != kQolOk) return classified;
+        if (tier_ordinal(tier) >= t) {
             hi = mid;
         } else {
             lo = mid + 1;
         }
     }
-    return lo;
+    if (lo < std::numeric_limits<int32_t>::min() || lo > std::numeric_limits<int32_t>::max()) {
+        return rule_error(kQolErrInternal, "tier bound out of range");
+    }
+    *out_value = static_cast<int32_t>(lo);
+    return qol::contracts::ok();
 }
 
-bool next_tier_interval(int current_value, int min, int max, Tier* out_target,
-                        int* out_lo, int* out_hi, ClassifyFn classify_fn) {
-    if (max <= min || classify_fn == nullptr || out_lo == nullptr || out_hi == nullptr) return false;
-    const int current_ordinal = tier_ordinal(classify_fn(current_value, min, max));
-    if (current_value >= max && current_ordinal == tier_ordinal(Tier::Gold)) {
-        return false;  // 已金档（含金值 >= max）
+QolResult next_tier_interval(Tier current_tier, AttributeRange range, ClassifyFn classify_fn,
+                             void* context, Tier* out_target, int32_t* out_lo,
+                             int32_t* out_hi, bool* out_found) {
+    if (out_lo == nullptr || out_hi == nullptr || out_found == nullptr ||
+        classify_fn == nullptr || !valid_tier(current_tier) || range.max <= range.min) {
+        return rule_error(kQolErrInvalidArgument, "invalid tier interval input");
     }
-    // 紧邻上一档若在 [min,max] 内无整数代表值（区间过窄），继续向上找有代表值的档；
-    // 金档 [max,max] 恒有代表值，故循环必在 ord<=5 内命中。
+    *out_found = false;
+    const int current_ordinal = tier_ordinal(current_tier);
+    if (current_ordinal == tier_ordinal(Tier::Gold)) return qol::contracts::ok();
+
+    // 金档恒有代表值 range.max；较窄范围中的空整数档会自然跳过。
     for (int ord = current_ordinal + 1; ord <= tier_ordinal(Tier::Gold); ++ord) {
         const Tier target = tier_from_ordinal(ord);
-        const int lo = tier_lower_bound(target, min, max, classify_fn);
-        const int hi = (ord == tier_ordinal(Tier::Gold))
-                           ? max
-                           : tier_lower_bound(tier_from_ordinal(ord + 1), min, max, classify_fn) - 1;
-        if (lo <= hi) {
+        int32_t lo = 0;
+        QolResult result = tier_lower_bound(target, range, classify_fn, context, &lo);
+        if (result.ok != kQolOk) return result;
+
+        int64_t hi = range.max;
+        if (ord != tier_ordinal(Tier::Gold)) {
+            int32_t next_bound = 0;
+            result = tier_lower_bound(tier_from_ordinal(ord + 1), range, classify_fn,
+                                      context, &next_bound);
+            if (result.ok != kQolOk) return result;
+            hi = static_cast<int64_t>(next_bound) - 1;
+        }
+        if (static_cast<int64_t>(lo) <= hi) {
             if (out_target != nullptr) *out_target = target;
             *out_lo = lo;
-            *out_hi = hi;
-            return true;
+            *out_hi = static_cast<int32_t>(hi);
+            *out_found = true;
+            return qol::contracts::ok();
         }
     }
-    return false;
+    return qol::contracts::ok();
 }
 
-UpgradeResult compute_tier_up_value(int current_value, int min, int max,
-                                     ClassifyFn classify_fn, int (*rand_inclusive)(int, int), Tier* out_target,
-                                     int* out_new_value) {
-    if (max <= min || classify_fn == nullptr) return UpgradeResult::kDegenerate;
-    if (tier_ordinal(classify_fn(current_value, min, max)) == tier_ordinal(Tier::Gold)) {
-        return UpgradeResult::kAlreadyGold;
+QolResult compute_tier_up_value(Tier current_tier, AttributeRange range,
+                                ClassifyFn classify_fn, void* context,
+                                int (*rand_inclusive)(int, int), UpgradeResult* out_result,
+                                Tier* out_target, int32_t* out_new_value) {
+    if (out_result == nullptr || !valid_tier(current_tier)) {
+        return rule_error(kQolErrInvalidArgument, "invalid tier upgrade input");
     }
+    *out_result = UpgradeResult::kDegenerate;
+    if (range.max <= range.min) return qol::contracts::ok();
+    if (classify_fn == nullptr) {
+        return rule_error(kQolErrInvalidArgument, "missing quality classifier");
+    }
+    if (current_tier == Tier::Gold) {
+        *out_result = UpgradeResult::kAlreadyGold;
+        return qol::contracts::ok();
+    }
+    if (rand_inclusive == nullptr) {
+        return rule_error(kQolErrInvalidArgument, "missing random source");
+    }
+
     Tier target = Tier::Grey;
-    int lo = 0;
-    int hi = 0;
-    if (!next_tier_interval(current_value, min, max, &target, &lo, &hi, classify_fn)) {
-        return UpgradeResult::kAlreadyGold;
+    int32_t lo = 0;
+    int32_t hi = 0;
+    bool found = false;
+    const QolResult interval_result = next_tier_interval(
+        current_tier, range, classify_fn, context, &target, &lo, &hi, &found);
+    if (interval_result.ok != kQolOk) return interval_result;
+    if (!found) {
+        *out_result = UpgradeResult::kAlreadyGold;
+        return qol::contracts::ok();
     }
-    if (rand_inclusive == nullptr) return UpgradeResult::kDegenerate;
+
     int value = rand_inclusive(lo, hi);
     if (value < lo) value = lo;
     if (value > hi) value = hi;
     if (out_target != nullptr) *out_target = target;
     if (out_new_value != nullptr) *out_new_value = value;
-    return UpgradeResult::kOk;
+    *out_result = UpgradeResult::kOk;
+    return qol::contracts::ok();
 }
 
 int jewel_grade_from_category(int category) {

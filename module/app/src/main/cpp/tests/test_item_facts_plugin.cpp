@@ -7,6 +7,8 @@
 #include "contracts/extension_bag.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/character_extras_port.h"
+#include "contracts/game_host.h"
+#include "contracts/attribute_quality.h"
 #include "plugins/core.item/plugin.h"
 
 #include <cstdio>
@@ -69,8 +71,22 @@ static_assert(std::is_same<qol::contracts::ItemFactsDetailItemContextFn,
                            QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
               "item.facts detail context must be an atomic handle snapshot");
 static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::detail_item_context),
-                           QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
-              "Item Port detail context must be an atomic handle snapshot");
+                            QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
+               "Item Port detail context must be an atomic handle snapshot");
+static_assert(qol::contracts::kQolItemInventoryOptionCapacity == 32,
+              "inventory option capacity is an ABI constant");
+static_assert(offsetof(qol::contracts::QolItemInventoryView, options) == 100,
+              "option completeness flags must not change the inventory view layout");
+static_assert(sizeof(qol::contracts::QolItemInventoryView) == 484,
+              "option completeness flags must not append inventory view storage");
+static_assert(qol::contracts::kQolItemInventoryHasOptionCompleteness == (1u << 7) &&
+                  qol::contracts::kQolItemInventoryOptionsTruncated == (1u << 8),
+              "option completeness flags must occupy the appended bits");
+static_assert(qol::contracts::kAttributeQualityVersionMajor == 2 &&
+                  qol::contracts::kAttributeQualityVersionMinor == 0,
+              "attribute.quality contract must be v2.0");
+static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 3,
+              "Game Host contract must be v2.3");
 static_assert(std::is_same<qol::contracts::InventorySellFn,
                            qol::contracts::InventorySellResult (*)(
                                int32_t, int32_t, qol::contracts::QolItemHandle,
@@ -91,9 +107,9 @@ static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
 
 int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 3 &&
-          qol::contracts::kItemFactsVersion.minor == 2);
+          qol::contracts::kItemFactsVersion.minor == 3);
     CHECK(qol::contracts::kQolPortItemVersion.major == 3 &&
-          qol::contracts::kQolPortItemVersion.minor == 2);
+          qol::contracts::kQolPortItemVersion.minor == 3);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 1);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -174,7 +190,7 @@ int main() {
     }
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 2);
+    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 3);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -186,7 +202,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 2);
+    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 3);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==

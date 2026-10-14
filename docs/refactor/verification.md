@@ -247,6 +247,16 @@
 
 **插件审计批 2026-10-02 指针**：VM-K5-04e（core.character）、VM-K5-06c（core.quest）、VM-K5-04d（core.system）相关验收登记分别见 `docs/refactor/audits/plugin-audit/core-character-20261002/verification-log.md`、`docs/refactor/audits/plugin-audit/core-quest-20261002/verification-log.md`、`docs/refactor/audits/plugin-audit/core-system-20261002/verification-log.md`。本注仅链接专项验收，不覆盖 §2/§5 登记的开放项与 NOT_ACCEPTED 项。
 
+### 5.10 `attribute_quality` v2.0（静态整改已实现；VM 待验收）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| AQ Host / adapter 集成 | **14/14 Host CTest 通过**，包括 quality rules/provider/adapter、ItemFacts、Host adapter、recipe、autosell/display、registry/lifecycle/capability/reconciler/module_health。R01 与 R02 修复后的最终日志为 `.tmp/attribute-quality-implementation/final-ctest.log`。 | Host 证据验证代码与 fixture，不替代设备游戏行为。AQ01–AQ08 映射、R01/R02 与 G01–G04 边界见 `docs/refactor/audits/plugin-audit/attribute-quality-20261014/verification-log.md`。 |
+| Debug build | **BUILD SUCCESSFUL**：`output/inotia4_qol_lsposed_debug_2610141000_10092b3392bd.apk`，SHA-256 `10092b3392bdbc6319144f0095698a32990e72da7b386d1bc9820bf93be4ad4d`。 | 构建成功不表示 APK 已部署；设备 serial、模块 identity SHA 与嵌入 APK 身份尚未现场核对。构建记录 `.tmp/attribute-quality-implementation/final-build-debug.log`。 |
+| VM-AQ-01：provider v2.0 与三消费者行为 | **NOT_ACCEPTED（待真机）**。 | 未执行设备部署/属性展示、autosell gemRange、recipe tier-up 或 provider lifecycle 行为验收。独立验收卡及预期观测见 `docs/refactor/audits/plugin-audit/attribute-quality-20261014/design-card.md`。 |
+
+Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增阻断；contract/feature comment/success-code 观察为非阻断。静态整改已实现，最终 Host/Debug 证据成立，但 VM-AQ-01 仍为 `NOT_ACCEPTED`。历史 VM-K2-02 PASS 行不改写，且不作为当前 `attribute.quality` v2.0 的验收证据。
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

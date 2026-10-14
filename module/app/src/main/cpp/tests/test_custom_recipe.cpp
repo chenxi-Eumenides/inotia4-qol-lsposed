@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -21,61 +22,50 @@ using attribute_quality::classify;
 using attribute_quality::Tier;
 namespace cr = custom_recipe;
 
-static uint16_t rd_u16(const uint8_t* p) {
-    return static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
+struct ClassifierContext {
+    int calls = 0;
+    int fail_value = std::numeric_limits<int>::min();
+    int fail_code = kQolErrNotReady;
+    bool fail = false;
+    bool classify_extreme_range = false;
+    bool all_values_gold = false;
+};
+
+static QolResult classify_candidate(int32_t value, cr::AttributeRange range, void* context,
+                                    cr::Tier* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "null tier", 9);
+    auto* state = static_cast<ClassifierContext*>(context);
+    if (state != nullptr) {
+        ++state->calls;
+        if (state->fail && value == state->fail_value) {
+            return qol::contracts::error(state->fail_code, "candidate failed", 16);
+        }
+        if (state->all_values_gold) {
+            *out = cr::Tier::Gold;
+            return qol::contracts::ok();
+        }
+    }
+    if (range.max <= range.min || value >= range.max) {
+        *out = cr::Tier::Gold;
+        return qol::contracts::ok();
+    }
+    if (state != nullptr && state->classify_extreme_range) {
+        const int64_t percentile =
+            (static_cast<int64_t>(value) - range.min) * 100 /
+            (static_cast<int64_t>(range.max) - range.min);
+        *out = percentile >= 90 ? cr::Tier::Purple
+              : percentile >= 75 ? cr::Tier::Blue
+              : percentile >= 60 ? cr::Tier::Green
+              : percentile >= 30 ? cr::Tier::White
+                                 : cr::Tier::Grey;
+        return qol::contracts::ok();
+    }
+    *out = classify(value, range.min, range.max);
+    return qol::contracts::ok();
 }
 
-// ---------------------------------------------------------------------------
-// §5.1(1) 档位区间边界 + 严格互逆：对每个 (min,max) 与每档，区间端点归属正确。
-// ---------------------------------------------------------------------------
-static void test_interval_inverse_boundaries() {
-    // 退化（max<=min）恒金档、不可升。
-    CHECK(cr::compute_tier_up_value(5, 10, 10, &classify, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kDegenerate);
-    CHECK(cr::compute_tier_up_value(0, 0, 0, &classify, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kDegenerate);
-
-    // 穷举小范围：对每个非金档 value，next_tier_interval 得到的 [lo,hi] 内所有值
-    // classify 恒等于目标档，且端点外侧不属于目标档（严格互逆，无浮点漂移）。
-    const int min = 0;
-    const int max = 100;  // R=100，六档均有整数代表值
-    int seen_tiers = 0;
-    for (int v = min; v < max; ++v) {
-        const Tier cur = classify(v, min, max);
-        if (cur == Tier::Gold) continue;
-        Tier target = Tier::Grey;
-        int lo = 0;
-        int hi = 0;
-        if (!cr::next_tier_interval(v, min, max, &target, &lo, &hi, &classify)) {
-            ++g_fail;
-            std::printf("FAIL interval missing for v=%d\n", v);
-            continue;
-        }
-        ++seen_tiers;
-        // 目标档严格高于当前档。
-        CHECK(cr::tier_ordinal(target) == cr::tier_ordinal(cur) + 1);
-        // 区间内每个值都判为目标档（与 classify 互逆）。
-        CHECK(classify(lo, min, max) == target);
-        CHECK(classify(hi, min, max) == target);
-        for (int x = lo; x <= hi; ++x) {
-            if (classify(x, min, max) != target) {
-                ++g_fail;
-                std::printf("FAIL interval leak x=%d target=%d got=%d\n", x,
-                            cr::tier_ordinal(target), cr::tier_ordinal(classify(x, min, max)));
-                break;
-            }
-        }
-        // 端点外侧（在 [min,max] 内）不得属于目标档。
-        if (lo > min) CHECK(classify(lo - 1, min, max) != target);
-        if (hi < max) CHECK(classify(hi + 1, min, max) != target);
-    }
-    CHECK(seen_tiers > 0);
-
-    // 金档不可升（v>=max）。
-    CHECK(cr::compute_tier_up_value(100, 0, 100, &classify, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kAlreadyGold);
-    CHECK(cr::compute_tier_up_value(150, 0, 100, &classify, nullptr, nullptr, nullptr) ==
-          cr::UpgradeResult::kAlreadyGold);
+static uint16_t rd_u16(const uint8_t* p) {
+    return static_cast<uint16_t>(p[0] | (static_cast<uint16_t>(p[1]) << 8));
 }
 
 // 固定返回下界的随机源（可预测）。
@@ -88,6 +78,116 @@ static int rand_sweep(int lo, int hi) {
     const int span = hi - lo;
     const int idx = g_rand_cursor % (span + 1);
     return lo + idx;
+}
+
+static QolResult compute_upgrade(Tier current, cr::AttributeRange range,
+                                 ClassifierContext* context,
+                                 int (*random)(int, int), cr::UpgradeResult* result,
+                                 cr::Tier* target, int32_t* value) {
+    return cr::compute_tier_up_value(current, range, &classify_candidate, context, random,
+                                     result, target, value);
+}
+
+// ---------------------------------------------------------------------------
+// 档位区间逆运算、Gold/退化、空档跳过与失败传播。
+// ---------------------------------------------------------------------------
+static void test_interval_inverse_boundaries() {
+    cr::UpgradeResult result = cr::UpgradeResult::kOk;
+    CHECK(compute_upgrade(Tier::Grey, {10, 10}, nullptr, nullptr, &result, nullptr, nullptr).ok ==
+          kQolOk);
+    CHECK(result == cr::UpgradeResult::kDegenerate);
+    CHECK(compute_upgrade(Tier::Grey, {0, 0}, nullptr, nullptr, &result, nullptr, nullptr).ok ==
+          kQolOk);
+    CHECK(result == cr::UpgradeResult::kDegenerate);
+
+    const int min = 0;
+    const int max = 100;
+    int seen_tiers = 0;
+    Tier target = Tier::Grey;
+    int32_t lo = 0;
+    int32_t hi = 0;
+    bool found = false;
+    for (int v = min; v < max; ++v) {
+        const Tier current = classify(v, min, max);
+        if (current == Tier::Gold) continue;
+        const QolResult interval = cr::next_tier_interval(
+            current, {min, max}, &classify_candidate, nullptr, &target, &lo, &hi, &found);
+        if (interval.ok != kQolOk || !found) {
+            ++g_fail;
+            std::printf("FAIL interval missing for v=%d\n", v);
+            continue;
+        }
+        ++seen_tiers;
+        CHECK(cr::tier_ordinal(target) == cr::tier_ordinal(current) + 1);
+        CHECK(classify(lo, min, max) == target);
+        CHECK(classify(hi, min, max) == target);
+        for (int x = lo; x <= hi; ++x) {
+            if (classify(x, min, max) != target) {
+                ++g_fail;
+                std::printf("FAIL interval leak x=%d target=%d got=%d\n", x,
+                            cr::tier_ordinal(target), cr::tier_ordinal(classify(x, min, max)));
+                break;
+            }
+        }
+        if (lo > min) CHECK(classify(lo - 1, min, max) != target);
+        if (hi < max) CHECK(classify(hi + 1, min, max) != target);
+    }
+    CHECK(seen_tiers > 0);
+
+    // Current tier is authoritative and Gold never evaluates a candidate.
+    ClassifierContext untouched{};
+    CHECK(compute_upgrade(Tier::Gold, {0, 100}, &untouched, nullptr,
+                          &result, nullptr, nullptr).ok == kQolOk);
+    CHECK(result == cr::UpgradeResult::kAlreadyGold);
+    CHECK(untouched.calls == 0);
+    int32_t upgraded = 0;
+    CHECK(compute_upgrade(Tier::Purple, {0, 100}, nullptr, rand_lo,
+                          &result, &target, &upgraded).ok == kQolOk);
+    CHECK(result == cr::UpgradeResult::kOk && target == Tier::Gold && upgraded == 100);
+
+    // 区间过窄时跳过没有整数代表值的 White/Green/Blue/Purple，继续到 Gold。
+    CHECK(cr::next_tier_interval(Tier::White, {1, 3}, &classify_candidate, nullptr,
+                                 &target, &lo, &hi, &found).ok == kQolOk);
+    CHECK(found && target == Tier::Gold && lo == 3 && hi == 3);
+
+    // 二分跨度覆盖 int32 全域；bound-1 在 INT_MIN 处以 int64 计算而不回绕。
+    ClassifierContext extreme{};
+    extreme.classify_extreme_range = true;
+    const cr::AttributeRange full_range{std::numeric_limits<int32_t>::min(),
+                                        std::numeric_limits<int32_t>::max()};
+    int32_t white_bound = 0;
+    CHECK(cr::tier_lower_bound(Tier::White, full_range, &classify_candidate,
+                               &extreme, &white_bound).ok == kQolOk);
+    CHECK(white_bound > full_range.min && white_bound < full_range.max);
+    extreme.all_values_gold = true;
+    CHECK(cr::next_tier_interval(Tier::Grey, full_range, &classify_candidate,
+                                 &extreme, &target, &lo, &hi, &found).ok == kQolOk);
+    CHECK(found && target == Tier::Gold && lo == full_range.min && hi == full_range.max);
+}
+
+static int g_failure_random_calls = 0;
+static int fail_random(int lo, int) { ++g_failure_random_calls; return lo; }
+
+static void test_candidate_errors_propagate() {
+    ClassifierContext context{};
+    context.fail = true;
+    context.fail_value = 50;
+    context.fail_code = kQolErrBlocked;
+    int32_t out_value = -1;
+    CHECK(cr::tier_lower_bound(Tier::White, {0, 100}, &classify_candidate,
+                               &context, &out_value).code == kQolErrBlocked);
+    CHECK(cr::next_tier_interval(Tier::Grey, {0, 100}, &classify_candidate,
+                                 &context, nullptr, &out_value, &out_value, nullptr).code ==
+          kQolErrInvalidArgument);
+    bool found = false;
+    CHECK(cr::next_tier_interval(Tier::Grey, {0, 100}, &classify_candidate,
+                                 &context, nullptr, &out_value, &out_value, &found).code ==
+          kQolErrBlocked);
+    g_failure_random_calls = 0;
+    cr::UpgradeResult result = cr::UpgradeResult::kOk;
+    CHECK(compute_upgrade(Tier::Grey, {0, 100}, &context, &fail_random,
+                          &result, nullptr, &out_value).code == kQolErrBlocked);
+    CHECK(g_failure_random_calls == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,24 +204,30 @@ static void test_random_matches_target() {
         if (cur == Tier::Gold) continue;
         for (int (*rand)(int, int) : {rand_lo, rand_hi}) {
             Tier target = Tier::Grey;
-            int out = 0;
-            const auto r = cr::compute_tier_up_value(c.value, c.min, c.max, &classify, rand,
-                                                     &target, &out);
-            CHECK(r == cr::UpgradeResult::kOk);
+            int32_t out = 0;
+            cr::UpgradeResult result = cr::UpgradeResult::kDegenerate;
+            const auto r = compute_upgrade(cur, {c.min, c.max}, nullptr, rand,
+                                           &result, &target, &out);
+            CHECK(r.ok == kQolOk);
+            CHECK(result == cr::UpgradeResult::kOk);
             CHECK(classify(out, c.min, c.max) == target);
             CHECK(cr::tier_ordinal(target) == cr::tier_ordinal(cur) + 1);
         }
         // 扫掠区间内每个可能取值都必须判为目标档。
         Tier target = Tier::Grey;
-        int lo = 0;
-        int hi = 0;
-        CHECK(cr::next_tier_interval(c.value, c.min, c.max, &target, &lo, &hi, &classify));
+        int32_t lo = 0;
+        int32_t hi = 0;
+        bool found = false;
+        CHECK(cr::next_tier_interval(cur, {c.min, c.max}, &classify_candidate, nullptr,
+                                     &target, &lo, &hi, &found).ok == kQolOk && found);
         for (int i = 0; i <= hi - lo; ++i) {
             g_rand_cursor = i;
-            int out = 0;
+            int32_t out = 0;
             Tier t2 = Tier::Grey;
-            CHECK(cr::compute_tier_up_value(c.value, c.min, c.max, &classify, rand_sweep, &t2, &out) ==
-                  cr::UpgradeResult::kOk);
+            cr::UpgradeResult result = cr::UpgradeResult::kDegenerate;
+            CHECK(compute_upgrade(cur, {c.min, c.max}, nullptr, rand_sweep,
+                                  &result, &t2, &out).ok == kQolOk);
+            CHECK(result == cr::UpgradeResult::kOk);
             CHECK(out >= lo && out <= hi);
             CHECK(t2 == target);
             CHECK(classify(out, c.min, c.max) == target);
@@ -755,6 +861,7 @@ static void test_table_group_bits_restore() {
 
 int main() {
     test_interval_inverse_boundaries();
+    test_candidate_errors_propagate();
     test_random_matches_target();
     test_catalog_mapping();
     test_inject_bytes();

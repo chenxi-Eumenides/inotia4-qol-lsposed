@@ -677,13 +677,13 @@ void test_choice_port_version_gate() {
     CHECK(error != nullptr && std::strstr(error, "unsupported port version") != nullptr);
 }
 
-// ITM-13：Item Port 1.3 尾追加中立扩展查询成员；旧 1.1/1.2 适配器必须 fail-closed 拒绝。
-void test_item_port_v13_rejects_legacy_adapters() {
+// Item Port 3.3 ABI 要求拒绝 3.2 及更早适配器。
+void test_item_port_v33_rejects_legacy_adapters() {
     reset_all();
     qol::contracts::QolPortRequirement requirement{
         qol::contracts::QolPortId::QOL_PORT_ITEM,
         {qol::contracts::kQolPortItemVersion.major, qol::contracts::kQolPortItemVersion.minor}};
-    const ::QolVersion legacy_versions[] = {{1, 1}, {1, 2}};
+    const ::QolVersion legacy_versions[] = {{1, 1}, {1, 2}, {3, 2}};
     for (const auto legacy : legacy_versions) {
         reset_all();
         PluginDescriptor descriptor = make_descriptor("core.item", nullptr, 0, nullptr, 0);
@@ -1827,7 +1827,7 @@ void test_optional_degrade_timing_after_enable() {
 int main() {
     test_success_path();
     test_choice_port_version_gate();
-    test_item_port_v13_rejects_legacy_adapters();
+    test_item_port_v33_rejects_legacy_adapters();
     test_save_port_version_and_private_gate();
     test_craft_port_version_and_private_gate();
     test_character_http_port_is_owner_private();

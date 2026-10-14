@@ -61,29 +61,27 @@ AutosellViewBuildReason autosell_build_view(
             return AutosellViewBuildReason::kInvalidJewelCategory;
         out->jewel_tier = category - kJewelCategoryFirst;
 
-        // 宝石属性范围：独立宝石自身位域 item+I_COUNT 的 bits0-10=属性值、
-        // bits18-23=属性类型。经 attribute.quality 能力探测该属性值的随机区间 [X, 2X]。
-        // 过渡期消费方式：每次调用按能力查找（不缓存指针跨帧）；不可用/撤销中/探测失败
-        // 时保持 -1（fail-closed，gemRange 规则不命中，不得默认 0 触发误售）。
-        const int jewel_value = facts.jewel_value;
-        const int jewel_attr_type = facts.jewel_attribute_type;
+        // 不可用、撤销中或质量查询失败时保留 -1；gemRange 规则不命中，避免默认 0 误售。
         const auto* sdk = qol::features::autosell::host_sdk();
         const void* iface = nullptr;
+        bool quality_available = false;
         if (sdk != nullptr && sdk->capabilities.require != nullptr) {
-            (void)sdk->capabilities.require(
+            const QolResult require_result = sdk->capabilities.require(
                 qol::contracts::kAttributeQualityCapabilityId,
                 QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMajor),
-                                static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMinor)},
+                                 static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMinor)},
                 &iface);
+            quality_available = require_result.ok == kQolOk;
         }
         const auto* attr_api = static_cast<const qol::contracts::AttributeQualityApi*>(iface);
-        if (attr_api != nullptr && attr_api->probe_jewel != nullptr &&
-            attr_api->percentile != nullptr) {
-            qol::contracts::AttributeQualityResult quality{};
-            if (attr_api->probe_jewel(ref.item, jewel_attr_type, jewel_value, &quality).ok ==
-                    kQolOk &&
-                attr_api->percentile(jewel_value, quality.min, quality.max,
-                                     &out->jewel_percentile).ok == kQolOk) {
+        if (quality_available && qol::contracts::attribute_quality_api_size_valid(attr_api)) {
+            qol::contracts::AttributeQualityOptions options{};
+            qol::contracts::AttributeQualityItemResult result{};
+            if (attr_api->query_item(ref.item, &options, &result).ok == kQolOk &&
+                result.count == 1 && result.complete != 0 &&
+                result.attrs[0].kind == qol::contracts::AttributeKind::Jewel &&
+                result.attrs[0].status == kQolOk) {
+                out->jewel_percentile = result.attrs[0].quality.percentile;
             }
         }
     }
