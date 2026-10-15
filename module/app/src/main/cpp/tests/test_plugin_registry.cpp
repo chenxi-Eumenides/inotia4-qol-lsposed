@@ -222,7 +222,8 @@ void probe_fill_status(PluginStatusOut& out) {
 struct OwnershipProbe {
     int acquire_calls = 0;
     int release_calls = 0;
-    int fail_acquire_at = 0;  // 1-based；0 = 不失败
+    int fail_acquire_at = 0;      // 1-based；0 = 不失败
+    int fail_acquire_code = -1;   // 失败时返回的原始码（默认 -1；NotReady 用例设 3）
     char acquire_order[8][32] = {};
     char release_order[8][32] = {};
 };
@@ -235,7 +236,9 @@ int32_t ownership_acquire_probe(const char* id) {
         std::snprintf(g_ownership.acquire_order[call - 1], sizeof(g_ownership.acquire_order[0]),
                       "%s", id);
     }
-    if (g_ownership.fail_acquire_at != 0 && call == g_ownership.fail_acquire_at) return -1;
+    if (g_ownership.fail_acquire_at != 0 && call == g_ownership.fail_acquire_at) {
+        return g_ownership.fail_acquire_code;
+    }
     return 0;
 }
 
@@ -2141,6 +2144,257 @@ void test_craft_ui_write_port_owner_is_custom_recipe() {
     CHECK(install_all(make_deps()) == 0);
 }
 
+// ---------------------------------------------------------------------------
+// 启动期 ownership（表注入）NotReady 的 SaveEnter 定向恢复
+// ---------------------------------------------------------------------------
+
+ResourceClaim fm_startup_res[] = {
+    claim("hook:fm:su:a", "fm_startup", nullptr),
+    ownership_claim("own:fm:su:b", "fm_startup"),
+};
+ResourceClaim fm_startup_other[] = {claim("hook:fm:su:other", "fm_startup_other", nullptr)};
+
+// 安装一条 hook + 一条 ownership（fail-soft），并让 ownership 以 NotReady 失败。
+// 返回时安装已终态：hook live、ownership free + 武装。
+void setup_startup_ownership_notready(const char* owner, int32_t code = kQolErrNotReady) {
+    reset_all();
+    arm_tx_deps();
+    CHECK(register_plugin(make_feature_descriptor(owner, fm_startup_res, 2)));
+    CHECK(qol::host::feature_registry_prepare(make_deps()));
+    qol::host::feature_registry_set_wanted(owner, true);
+    g_ownership.fail_acquire_at = 1;
+    g_ownership.fail_acquire_code = code;
+    CHECK(qol::host::feature_registry_transition(owner, true));
+    drive_feature_steps();
+}
+
+// 终态：ownership 保持 Free（不伪装 Live）、其余资源正常安装、武装一次恢复。
+void test_startup_ownership_notready_free_and_other_owner_continues() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    reset_all();
+    arm_tx_deps();
+    CHECK(register_plugin(make_feature_descriptor("fm_startup", fm_startup_res, 2)));
+    CHECK(register_plugin(make_feature_descriptor("fm_startup_other", fm_startup_other, 1)));
+    CHECK(qol::host::feature_registry_prepare(make_deps()));
+    qol::host::feature_registry_set_wanted("fm_startup", true);
+    qol::host::feature_registry_set_wanted("fm_startup_other", true);
+    g_ownership.fail_acquire_at = 1;
+    g_ownership.fail_acquire_code = kQolErrNotReady;
+    CHECK(qol::host::feature_registry_transition("fm_startup", true));
+    CHECK(qol::host::feature_registry_transition("fm_startup_other", true));
+    drive_feature_steps();
+
+    CHECK(feature_state_is("fm_startup", FeatureState::kEnabled));
+    CHECK(feature_state_is("fm_startup_other", FeatureState::kEnabled));  // 其他 owner 继续装配
+    CHECK(qol::hooks::state_of("hook:fm:su:a") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("own:fm:su:b"));
+    CHECK(feature_degraded("fm_startup"));
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+    {
+        const char* error = nullptr;
+        CHECK(feature_of("fm_startup", nullptr, nullptr, &error));
+        CHECK(error != nullptr && std::strstr(error, "own:fm:su:b") != nullptr);
+    }
+}
+
+// 无 SaveEnter 信号：不重试（不逐帧、不定时）。
+void test_startup_ownership_no_signal_no_retry() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    setup_startup_ownership_notready("fm_startup");
+    const int acquires = g_ownership.acquire_calls;
+    for (int i = 0; i < 5; ++i) drive_feature_steps();
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 0);
+    CHECK(g_ownership.acquire_calls == acquires);
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("own:fm:su:b"));
+}
+
+// SaveEnter 后单 claim 恢复成功：仅 ownership 变化，12 hooks 不重装；degraded/error 清除。
+void test_startup_ownership_save_enter_restores_single_claim() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    setup_startup_ownership_notready("fm_startup");
+    const int hook_calls = g_backend.hook_calls;
+    const int acquires = g_ownership.acquire_calls;
+    const int ready_calls = g_probe.ready_calls;
+
+    g_ownership.fail_acquire_at = 0;  // 表已就绪
+    qol::host::feature_registry_notify_save_ready();
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 1);
+
+    CHECK(g_ownership.acquire_calls == acquires + 1);
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kLive);
+    CHECK(!qol::hooks::retry_pending_get("own:fm:su:b"));
+    CHECK(g_backend.hook_calls == hook_calls);  // 不重装 hooks
+    CHECK(g_probe.ready_calls == ready_calls + 1);
+    CHECK(std::strcmp(g_probe.last_ready_id, "own:fm:su:b") == 0);
+    CHECK(!feature_degraded("fm_startup"));
+    {
+        const char* error = nullptr;
+        CHECK(feature_of("fm_startup", nullptr, nullptr, &error));
+        CHECK(error == nullptr);
+    }
+}
+
+// 生产帧序模拟：每帧先推进生命周期事务，再消费 SaveEnter 信号（同 assembly
+// drain_commands_task: production_feature_frame_step → feature_registry_retry_pending_ownership）。
+// 返回各帧实际恢复尝试次数之和。
+int run_production_frames(int frames) {
+    int attempts = 0;
+    for (int f = 0; f < frames; ++f) {
+        qol::host::feature_registry_step();
+        attempts += static_cast<int>(qol::host::feature_registry_retry_pending_ownership());
+    }
+    return attempts;
+}
+
+// 信号在 ownership 末步之前（安装事务进行中）到达：按生产帧序不得被提前消费，
+// 终态后的那一帧恰好恢复一次；hooks 不重装；无新信号时后续帧不再尝试。
+void test_startup_ownership_signal_before_final_step_restores_once() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    reset_all();
+    arm_tx_deps();
+    CHECK(register_plugin(make_feature_descriptor("fm_startup", fm_startup_res, 2)));
+    CHECK(qol::host::feature_registry_prepare(make_deps()));
+    qol::host::feature_registry_set_wanted("fm_startup", true);
+    g_ownership.fail_acquire_at = 1;
+    g_ownership.fail_acquire_code = kQolErrNotReady;
+    CHECK(qol::host::feature_registry_transition("fm_startup", true));
+
+    // SaveEnter 在安装事务仍在途（ownership 末步尚未失败）时锁存。
+    qol::host::feature_registry_notify_save_ready();
+    CHECK(run_production_frames(1) == 0);  // 在途帧：保留信号、不尝试
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kFree);
+    CHECK(feature_state_is("fm_startup", FeatureState::kResolving));
+    const int hook_calls_during_install = g_backend.hook_calls;
+
+    // 后续帧：ownership NotReady 武装后消费该信号 → 恰好恢复一次。
+    CHECK(run_production_frames(3) == 1);
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kLive);
+    CHECK(!qol::hooks::retry_pending_get("own:fm:su:b"));
+    CHECK(g_ownership.acquire_calls == 2);  // 初始 NotReady 1 次 + 恢复 1 次
+    CHECK(g_backend.hook_calls == hook_calls_during_install);  // 不重装 hooks
+    CHECK(feature_state_is("fm_startup", FeatureState::kEnabled));
+
+    // 无新信号：后续帧不再尝试（不逐帧重试）。
+    CHECK(run_production_frames(3) == 0);
+    CHECK(g_ownership.acquire_calls == 2);
+}
+
+// 每信号仅一次：同帧重复/重复帧不再尝试；claim 已 Live 后新信号无目标。
+void test_startup_ownership_signal_consumed_once() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    setup_startup_ownership_notready("fm_startup");
+    g_ownership.fail_acquire_at = 0;
+    const int acquires = g_ownership.acquire_calls;
+    qol::host::feature_registry_notify_save_ready();
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 1);
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 0);  // 重复帧
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 0);
+    CHECK(g_ownership.acquire_calls == acquires + 1);
+    qol::host::feature_registry_notify_save_ready();  // 新信号但已 Live → 无目标
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 0);
+    CHECK(g_ownership.acquire_calls == acquires + 1);
+}
+
+// 永久错误（非 NotReady）不武装；即使收到 SaveEnter 也不尝试。
+void test_startup_ownership_permanent_error_not_armed() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    setup_startup_ownership_notready("fm_startup", kQolErrUnsupported);
+    CHECK(!qol::hooks::retry_pending_get("own:fm:su:b"));
+    const int acquires = g_ownership.acquire_calls;
+    qol::host::feature_registry_notify_save_ready();
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 0);
+    CHECK(g_ownership.acquire_calls == acquires);
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kFree);
+}
+
+// 关闭/撤销清信号与 pending；旧 token 被拒；重新激活按新 token 重新武装。
+void test_startup_ownership_stop_clears_and_old_token_rejected() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    setup_startup_ownership_notready("fm_startup");
+    CHECK(qol::host::feature_registry_transition("fm_startup", false));
+    drive_feature_steps();
+    CHECK(feature_state_is("fm_startup", FeatureState::kInactive));
+    CHECK(!qol::hooks::retry_pending_get("own:fm:su:b"));
+
+    const int acquires = g_ownership.acquire_calls;
+    qol::host::feature_registry_notify_save_ready();  // 旧 token 已失效
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 0);
+    CHECK(g_ownership.acquire_calls == acquires);
+
+    // desired 关闭时也拒绝恢复。
+    g_ownership.fail_acquire_at = g_ownership.acquire_calls + 1;
+    g_ownership.fail_acquire_code = kQolErrNotReady;
+    CHECK(qol::host::feature_registry_transition("fm_startup", true));
+    drive_feature_steps();
+    CHECK(qol::hooks::retry_pending_get("own:fm:su:b"));
+    qol::host::feature_registry_set_wanted("fm_startup", false);
+    qol::host::feature_registry_notify_save_ready();
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 0);
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kFree);
+}
+
+// ready 通知失败：按事实撤回到 Free（或隔离），不留下 Live 假象。
+void test_startup_ownership_ready_notify_failure_revokes() {
+    fm_startup_res[1].failure = ResourceFailure::kFailSoft;
+    setup_startup_ownership_notready("fm_startup");
+    g_ownership.fail_acquire_at = 0;
+    g_probe.ready_rc = 1;  // 恢复通知失败
+    qol::host::feature_registry_notify_save_ready();
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 1);
+    CHECK(qol::hooks::state_of("own:fm:su:b") == ResourceState::kFree);
+    CHECK(!qol::hooks::isolated_get("own:fm:su:b"));
+    CHECK(qol::hooks::count_by_state(ResourceState::kTombstone) == 0);
+    CHECK(feature_degraded("fm_startup"));
+    // error 必须指向事实失败资源并带原因（HTTP 不得出现 degraded 无原因）。
+    {
+        const char* error = nullptr;
+        CHECK(feature_of("fm_startup", nullptr, nullptr, &error));
+        CHECK(error != nullptr && std::strstr(error, "own:fm:su:b") != nullptr);
+        CHECK(error != nullptr && std::strstr(error, "resource_ready_failed") != nullptr);
+    }
+}
+
+ResourceClaim fm_startup_opt_res[] = {
+    optional_claim("hook:fm:su:opt", "fm_startup_opt"),
+    ownership_claim("own:fm:su:opt", "fm_startup_opt"),
+};
+
+// 其他 optional 仍失败（保持 Free）时，ownership 恢复成功不得清掉 degraded。
+void test_startup_ownership_restore_keeps_other_optional_degraded() {
+    fm_startup_opt_res[0].requirement = ResourceRequirement::kOptional;
+    fm_startup_opt_res[0].failure = ResourceFailure::kFailSoft;
+    fm_startup_opt_res[1].failure = ResourceFailure::kFailSoft;
+    reset_all();
+    arm_tx_deps();
+    CHECK(register_plugin(make_feature_descriptor("fm_startup_opt", fm_startup_opt_res, 2)));
+    CHECK(qol::host::feature_registry_prepare(make_deps()));
+    qol::host::feature_registry_set_wanted("fm_startup_opt", true);
+    g_backend.fail_hook_call = 1;  // optional hook 安装失败
+    g_ownership.fail_acquire_at = 1;
+    g_ownership.fail_acquire_code = kQolErrNotReady;
+    CHECK(qol::host::feature_registry_transition("fm_startup_opt", true));
+    drive_feature_steps();
+    CHECK(qol::hooks::state_of("hook:fm:su:opt") == ResourceState::kFree);
+    CHECK(qol::hooks::state_of("own:fm:su:opt") == ResourceState::kFree);
+    CHECK(feature_degraded("fm_startup_opt"));
+
+    g_ownership.fail_acquire_at = 0;
+    qol::host::feature_registry_notify_save_ready();
+    CHECK(qol::host::feature_registry_retry_pending_ownership() == 1);
+    CHECK(qol::hooks::state_of("own:fm:su:opt") == ResourceState::kLive);
+    CHECK(qol::hooks::state_of("hook:fm:su:opt") == ResourceState::kFree);
+    CHECK(feature_degraded("fm_startup_opt"));  // 其他 optional 失败仍保持 degraded
+    // error 必须改指实际仍未安装的 optional 资源，而不是已 Live 的 ownership。
+    {
+        const char* error = nullptr;
+        CHECK(feature_of("fm_startup_opt", nullptr, nullptr, &error));
+        CHECK(error != nullptr && std::strstr(error, "hook:fm:su:opt") != nullptr);
+        CHECK(error != nullptr && std::strstr(error, "own:fm:su:opt") == nullptr);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -2207,6 +2461,15 @@ int main() {
     test_feature_mode_ownership_last_soft_failure();
     test_feature_mode_release_waits_for_in_flight();
     test_craft_ui_write_port_owner_is_custom_recipe();
+    test_startup_ownership_notready_free_and_other_owner_continues();
+    test_startup_ownership_no_signal_no_retry();
+    test_startup_ownership_save_enter_restores_single_claim();
+    test_startup_ownership_signal_before_final_step_restores_once();
+    test_startup_ownership_signal_consumed_once();
+    test_startup_ownership_permanent_error_not_armed();
+    test_startup_ownership_stop_clears_and_old_token_rejected();
+    test_startup_ownership_ready_notify_failure_revokes();
+    test_startup_ownership_restore_keeps_other_optional_degraded();
     std::printf("plugin_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

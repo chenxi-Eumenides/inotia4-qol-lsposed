@@ -1,8 +1,8 @@
 #include "table.h"
 
-#include <cstring>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 
 #include "rules.h"
 
@@ -148,11 +148,273 @@ void clear_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint
 }  // namespace custom_recipe
 
 // ---------------------------------------------------------------------------
-// Android 专属：读 .bss 表指针全局 → 分配模块自有缓冲 → 注入 → 写回字段全局。
-// host 单测不编译本段（仅覆盖上方纯构造器），故不产生 game_access 链接依赖。
+// acquire / deactivate 便携核心（Android 入口与 host 测试共用同一实现）
+// ---------------------------------------------------------------------------
+namespace custom_recipe {
+
+namespace {
+
+// 定长格式化后交给 log_fn；log_fn 为 nullptr 时不记录。
+void core_log(TableLogFn log_fn, int32_t level, const char* format, ...) {
+    if (log_fn == nullptr || format == nullptr) return;
+    char message[qol::contracts::kMessageCap + 1]{};
+    va_list args;
+    va_start(args, format);
+    const int length = std::vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    if (length <= 0) return;
+    log_fn(level, message);
+}
+
+void reset_log_dedupe(TableLogDedupe* dedupe) {
+    if (dedupe == nullptr) return;
+    dedupe->last_recipe_size = 0xFF;
+    dedupe->last_mixture_size = 0xFF;
+    dedupe->last_count = 0xFFFF;
+}
+
+// 注入前抓原版段 b11 快照；分配失败时清空快照状态（调用方按 Internal 处理本次注入）。
+bool capture_original_group_bits(TableState* state, const uint8_t* orig_recipe,
+                                 uint16_t base_count, uint8_t recipe_size, TableAllocFn alloc,
+                                 TableFreeFn release) {
+    if (state == nullptr || orig_recipe == nullptr || recipe_size <= kRbGroup || base_count == 0) {
+        return true;
+    }
+    if (state->original_group_bits == nullptr || state->original_group_count < base_count ||
+        state->original_group_recipe_size != recipe_size) {
+        if (release != nullptr) release(state->original_group_bits);
+        state->original_group_bits =
+            alloc != nullptr ? static_cast<uint8_t*>(alloc(base_count)) : nullptr;
+        if (state->original_group_bits == nullptr) {
+            state->original_group_count = 0;
+            state->original_group_recipe_size = 0;
+            return false;
+        }
+        state->original_group_count = base_count;
+        state->original_group_recipe_size = recipe_size;
+    }
+    for (uint16_t r = 0; r < base_count; ++r) {
+        state->original_group_bits[r] =
+            orig_recipe[static_cast<size_t>(r) * recipe_size + kRbGroup];
+    }
+    return true;
+}
+
+}  // namespace
+
+QolResult table_status_result(TableAcquireStatus status) {
+    // 消息为 TU 内静态字面量，长度用 sizeof-1 精确取得（不写死、不猜）。
+    static constexpr char kNotReadyMessage[] = "table not loaded";
+    static constexpr char kUnsupportedMessage[] = "table layout unsupported";
+    static constexpr char kInternalMessage[] = "table internal error";
+    static constexpr char kBusyMessage[] = "table acquire busy";
+    switch (status) {
+        case TableAcquireStatus::kOk:
+            return qol::contracts::ok();
+        case TableAcquireStatus::kNotReady:
+            return qol::contracts::error(kQolErrNotReady, kNotReadyMessage,
+                                         sizeof(kNotReadyMessage) - 1);
+        case TableAcquireStatus::kUnsupported:
+            return qol::contracts::error(kQolErrUnsupported, kUnsupportedMessage,
+                                         sizeof(kUnsupportedMessage) - 1);
+        case TableAcquireStatus::kInternal:
+            return qol::contracts::error(kQolErrInternal, kInternalMessage,
+                                         sizeof(kInternalMessage) - 1);
+        case TableAcquireStatus::kBusy:
+            return qol::contracts::error(kQolErrBusy, kBusyMessage, sizeof(kBusyMessage) - 1);
+    }
+    return qol::contracts::error(kQolErrInternal, kInternalMessage,
+                                 sizeof(kInternalMessage) - 1);
+}
+
+TableAcquireStatus classify_table_probe(const TableProbe& probe) {
+    // ① 非零但越界的布局优先判永久错误：不得因另一字段为 0 被当作「等待加载」。
+    if (probe.recipe_size > kMaxRecipeRecordSize || probe.mixture_size > kMaxMixtureRecordSize ||
+        probe.record_count > kMaxTableRecordCount) {
+        return TableAcquireStatus::kUnsupported;
+    }
+    // ② 未加载：base / 指针 / count 缺失，或尺寸为 0。
+    if (!probe.base_ready || !probe.recipe_ptr_present || !probe.mixture_ptr_present ||
+        probe.record_count == 0 || probe.recipe_size == 0 || probe.mixture_size == 0) {
+        return TableAcquireStatus::kNotReady;
+    }
+    // ③ 目录不可用：配置/目录错误，不是等着游戏加载表。
+    if (!probe.catalog_available) return TableAcquireStatus::kUnsupported;
+    return TableAcquireStatus::kOk;
+}
+
+TableAcquireStatus table_acquire_core(const TableAccess& access, TableState* state,
+                                      const Def* catalog, size_t catalog_len,
+                                      TableAllocFn alloc, TableFreeFn release, TableLogFn log_fn,
+                                      TableLogDedupe* dedupe) {
+    if (state == nullptr || access.recipe_ptr_slot == nullptr ||
+        access.mixture_ptr_slot == nullptr || access.recipe_size_slot == nullptr ||
+        access.mixture_size_slot == nullptr || access.recipe_count_slot == nullptr ||
+        alloc == nullptr) {
+        return TableAcquireStatus::kInternal;
+    }
+    // 重入判定与置位/复位都在核心内完成（RAII guard）：调用方不得提前置位，
+    // 否则真实入口会自我拒绝；注入的 alloc/log 回调内重入也会正确得到 Busy。
+    if (state->busy) return TableAcquireStatus::kBusy;
+    struct BusyGuard {
+        TableState* state;
+        ~BusyGuard() { state->busy = false; }
+    } busy_guard{state};
+    state->busy = true;
+
+    // 1) 先分类探测值：缺失字段 → NotReady、永久非法布局/目录 → Unsupported。
+    //    **分类在任何模块状态改动之前**：不得让非法 probe 通过「已有 buffer」捷径判 OK，
+    //    也不得在拒绝路径上清空/改写模块状态。
+    TableProbe probe{};
+    probe.base_ready = access.base != 0;
+    probe.recipe_ptr_present = *access.recipe_ptr_slot != nullptr;
+    probe.mixture_ptr_present = *access.mixture_ptr_slot != nullptr;
+    probe.recipe_size = *access.recipe_size_slot;
+    probe.mixture_size = *access.mixture_size_slot;
+    probe.record_count = *access.recipe_count_slot;
+    probe.catalog_available = catalog != nullptr && catalog_len > 0;
+
+    const TableAcquireStatus verdict = classify_table_probe(probe);
+    if (verdict != TableAcquireStatus::kOk) {
+        if (verdict == TableAcquireStatus::kNotReady && dedupe != nullptr &&
+            table_invalid_log_needed(probe.recipe_size, probe.mixture_size, probe.record_count,
+                                     dedupe->last_recipe_size, dedupe->last_mixture_size,
+                                     dedupe->last_count)) {
+            dedupe->last_recipe_size = probe.recipe_size;
+            dedupe->last_mixture_size = probe.mixture_size;
+            dedupe->last_count = probe.record_count;
+            core_log(log_fn, 2, "recipe table not ready recipe_size=%u mixture_size=%u count=%u",
+                     probe.recipe_size, probe.mixture_size, probe.record_count);
+        }
+        return verdict;
+    }
+
+    // 2) 合法重新激活：已注入且游戏侧指针仍指向模块缓冲 → 记录数归位 + 重新清除原版段组位。
+    if (state->recipe_buffer != nullptr && *access.recipe_ptr_slot == state->recipe_buffer) {
+        const uint16_t want =
+            static_cast<uint16_t>(state->base_record_count_cache + catalog_len);
+        if (*access.recipe_count_slot != want) {
+            *access.recipe_count_slot = want;
+            core_log(log_fn, 1, "recipe table reactivated records=%u", want);
+        }
+        if (state->original_group_recipe_size == *access.recipe_size_slot &&
+            state->original_group_bits != nullptr) {
+            clear_original_group_bits(state->recipe_buffer, state->base_record_count_cache,
+                                      *access.recipe_size_slot, state->original_group_bits,
+                                      module_group_bits(catalog, catalog_len));
+        }
+        if (!catalog_ready()) bind_base_record_count(state->base_record_count_cache);
+        reset_log_dedupe(dedupe);
+        return catalog_ready() ? TableAcquireStatus::kOk : TableAcquireStatus::kInternal;
+    }
+
+    // 3) 游戏重新装载了静态表（指针被改写回原表）→ 用新原表重新注入。
+    //    刻意不释放旧缓冲：游戏可能仍持有指向模块缓冲内部的局部指针，泄漏一份远优于悬空访问。
+    if (state->recipe_buffer != nullptr) {
+        core_log(log_fn, 2, "recipe table replaced by game, re-inject count=%u",
+                 *access.recipe_count_slot);
+        state->recipe_buffer = nullptr;
+        state->mixture_buffer = nullptr;
+    }
+
+    const uint8_t* recipe_data = static_cast<const uint8_t*>(*access.recipe_ptr_slot);
+    const uint8_t* mixture_data = static_cast<const uint8_t*>(*access.mixture_ptr_slot);
+    const uint8_t recipe_size = probe.recipe_size;
+    const uint8_t mixture_size = probe.mixture_size;
+    const uint16_t base_record_count = probe.record_count;
+
+    // 书名册大小不变式：注入 N 条后 (count5+7)/8 必须不变，否则永久拒绝注入
+    // （书名册缓冲按注入前大小分配、存档位图长度按它动态）。
+    // 先做永久性校验再改动任何模块状态，避免拒绝路径留下未被注入对应的快照副作用。
+    const uint32_t book_count =
+        count_recipe_book_records(recipe_data, base_record_count, recipe_size);
+    const uint32_t book_bytes_before = recipe_book_bytes(book_count);
+    const uint32_t book_bytes_after =
+        recipe_book_bytes(book_count + static_cast<uint32_t>(catalog_len));
+    if (book_bytes_before != book_bytes_after) {
+        core_log(log_fn, 3,
+                 "recipe book byte size would change (%u -> %u, bit5=%u n=%u); injection refused",
+                 book_bytes_before, book_bytes_after, book_count,
+                 static_cast<unsigned>(catalog_len));
+        return TableAcquireStatus::kUnsupported;
+    }
+
+    // 校验通过后才抓原版段 b11 快照（停用时逐字节还原）。
+    if (!capture_original_group_bits(state, recipe_data, base_record_count, recipe_size, alloc,
+                                     release)) {
+        return TableAcquireStatus::kInternal;
+    }
+
+    const uint32_t base_material_count =
+        derive_material_count(recipe_data, base_record_count, recipe_size);
+    const uint32_t material_total_count = material_total(catalog, catalog_len);
+    const size_t new_recipe_bytes = static_cast<size_t>(base_record_count + catalog_len) * recipe_size;
+    const size_t new_mixture_bytes =
+        static_cast<size_t>(base_material_count + material_total_count) * mixture_size;
+
+    uint8_t* new_recipe = static_cast<uint8_t*>(alloc(new_recipe_bytes));
+    // 第一块失败时不再申请第二块（不浪费分配，也不留下半注入状态）。
+    uint8_t* new_mixture =
+        new_recipe != nullptr ? static_cast<uint8_t*>(alloc(new_mixture_bytes)) : nullptr;
+    if (new_recipe == nullptr || new_mixture == nullptr) {
+        if (release != nullptr) {
+            if (new_recipe != nullptr) release(new_recipe);
+            if (new_mixture != nullptr) release(new_mixture);
+        }
+        core_log(log_fn, 3, "table alloc failed bytes=%zu/%zu", new_recipe_bytes,
+                 new_mixture_bytes);
+        return TableAcquireStatus::kInternal;
+    }
+
+    inject_into_buffers(recipe_data, base_record_count, recipe_size, mixture_data, mixture_size,
+                        catalog, catalog_len, new_recipe, new_mixture);
+
+    *access.recipe_ptr_slot = new_recipe;
+    *access.mixture_ptr_slot = new_mixture;
+    *access.recipe_count_slot = static_cast<uint16_t>(base_record_count + catalog_len);
+
+    state->recipe_buffer = new_recipe;
+    state->mixture_buffer = new_mixture;
+    state->base_record_count_cache = base_record_count;
+    bind_base_record_count(base_record_count);
+    core_log(log_fn, 1, "recipe table injected base=%u records=%u materials=%u book_bytes=%u",
+             base_record_count, static_cast<unsigned>(base_record_count + catalog_len),
+             static_cast<unsigned>(base_material_count + material_total_count),
+             book_bytes_after);
+    reset_log_dedupe(dedupe);
+    return TableAcquireStatus::kOk;
+}
+
+TableAcquireStatus table_deactivate_core(const TableAccess& access, TableState* state) {
+    if (state == nullptr || access.recipe_ptr_slot == nullptr ||
+        access.recipe_size_slot == nullptr || access.recipe_count_slot == nullptr) {
+        return TableAcquireStatus::kInternal;
+    }
+    if (access.base == 0 || state->recipe_buffer == nullptr) return TableAcquireStatus::kOk;
+    // 指针已被游戏改写 → 注入本就失效：只清模块状态，绝不把（可能陈旧的）原表指针写回。
+    if (*access.recipe_ptr_slot != state->recipe_buffer) {
+        state->recipe_buffer = nullptr;
+        state->mixture_buffer = nullptr;
+        return TableAcquireStatus::kOk;
+    }
+    // 还原原版段组位（撤销 inject 的清位）→ 各页面回到原版配方列表。
+    if (state->original_group_recipe_size == *access.recipe_size_slot &&
+        state->original_group_bits != nullptr) {
+        restore_original_group_bits(state->recipe_buffer, state->base_record_count_cache,
+                                    *access.recipe_size_slot, state->original_group_bits);
+    }
+    // 只收记录数，指向模块缓冲的指针保持不变：所有下标仍在缓冲界内（面板残留数组安全）。
+    *access.recipe_count_slot = state->base_record_count_cache;
+    return TableAcquireStatus::kOk;
+}
+
+}  // namespace custom_recipe
+
+// ---------------------------------------------------------------------------
+// Android 专属入口：把真实 .bss 槽位装配成 TableAccess 后调用便携核心。
+// host 单测不编译本段（仅使用上面的核心与纯构造器），故不产生 game_access 链接依赖。
 // ---------------------------------------------------------------------------
 #ifdef __ANDROID__
-#include <atomic>
 #include <cstdlib>
 
 extern uintptr_t g_base;
@@ -170,228 +432,61 @@ constexpr uintptr_t kMixtureSizeSlot = 3152296;
 const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 
-void table_log(int32_t level, const char* format, ...) {
-    if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
-    char message[qol::contracts::kMessageCap + 1]{};
-    va_list args;
-    va_start(args, format);
-    const int length = std::vsnprintf(message, sizeof(message), format, args);
-    va_end(args);
-    if (length <= 0) return;
-    const uint32_t size = static_cast<uint32_t>(length) >= qol::contracts::kMessageCap
+// 模块侧状态与日志去重（本 TU 单一实例；核心按状态机处理重入与快照）。
+TableState g_state;
+TableLogDedupe g_dedupe;
+
+void table_log_line(int32_t level, const char* message) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
+    const size_t length = std::strlen(message);
+    if (length == 0) return;
+    const uint32_t size = length >= qol::contracts::kMessageCap
                               ? qol::contracts::kMessageCap
                               : static_cast<uint32_t>(length);
     (void)g_sdk->log.write(level, 15, "plugins/custom_recipe/table", message, size);
 }
 
-// 模块自有表缓冲。游戏若重新装载静态表会把指针全局改回原表，ensure_impl 会据此重新注入。
-uint8_t* g_recipe_buffer = nullptr;
-uint8_t* g_mixture_buffer = nullptr;
-uint16_t g_base_record_count_cache = 0;
-std::atomic<bool> g_busy{false};
-
-// 原版 base 段 b11 快照（注入前逐记录值）：停用时逐字节还原、重激活时按模块组位重清。
-// 停用若不还原，模块页（如宝石强化 group 3）的原版记录组位已被 inject 清掉 → 页面配方列表为空
-// → 标签页执行链空指针（真机 SIGSEGV）。见 table.h restore_original_group_bits 注释。
-uint8_t* g_original_group_bits = nullptr;
-uint16_t g_original_group_count = 0;
-uint8_t g_original_group_recipe_size = 0;
-
-void capture_original_group_bits(const uint8_t* orig_recipe, uint16_t base_count,
-                                 uint8_t recipe_size) {
-    if (orig_recipe == nullptr || recipe_size <= kRbGroup || base_count == 0) return;
-    if (g_original_group_bits == nullptr || g_original_group_count < base_count ||
-        g_original_group_recipe_size != recipe_size) {
-        std::free(g_original_group_bits);
-        g_original_group_bits = static_cast<uint8_t*>(std::malloc(base_count));
-        if (g_original_group_bits == nullptr) {
-            g_original_group_count = 0;
-            g_original_group_recipe_size = 0;
-            return;
-        }
-        g_original_group_count = base_count;
-        g_original_group_recipe_size = recipe_size;
-    }
-    for (uint16_t r = 0; r < base_count; ++r) {
-        g_original_group_bits[r] = orig_recipe[static_cast<size_t>(r) * recipe_size + kRbGroup];
-    }
-}
-
-// 「全局未就绪」日志去重：只在与上次不同的尺寸/计数时记录，避免门禁逐帧重试刷屏。
-constexpr uint8_t kInvalidLogSentinelU8 = 0xFF;
-constexpr uint16_t kInvalidLogSentinelU16 = 0xFFFF;
-uint8_t g_last_invalid_recipe_size = kInvalidLogSentinelU8;
-uint8_t g_last_invalid_mixture_size = kInvalidLogSentinelU8;
-uint16_t g_last_invalid_count = kInvalidLogSentinelU16;
-
-void reset_invalid_log_dedupe() {
-    g_last_invalid_recipe_size = kInvalidLogSentinelU8;
-    g_last_invalid_mixture_size = kInvalidLogSentinelU8;
-    g_last_invalid_count = kInvalidLogSentinelU16;
-}
-
 // 读 .bss 全局。
 inline uintptr_t bss(uintptr_t vma) { return ::g_base + vma; }
 
-bool ensure_impl() {
-    if (::g_base == 0) return false;
-
-    auto* recipe_ptr_global = reinterpret_cast<void**>(bss(kRecipeDataSlot));
-    auto* recipe_size_global = reinterpret_cast<uint8_t*>(bss(kRecipeSizeSlot));
-    auto* recipe_count_global = reinterpret_cast<uint16_t*>(bss(kRecipeCountSlot));
-    auto* mixture_ptr_global = reinterpret_cast<void**>(bss(kMixtureDataSlot));
-    auto* mixture_size_global = reinterpret_cast<uint8_t*>(bss(kMixtureSizeSlot));
-
-    // 1) 已注入且游戏侧指针仍指向模块缓冲 → 记录数归位 + 重新清除原版段组位（可能被 deactivate 还原过）。
-    if (g_recipe_buffer != nullptr && *recipe_ptr_global == g_recipe_buffer) {
-        size_t n = 0;
-        const Def* cat = catalog(&n);
-        const uint16_t want = static_cast<uint16_t>(g_base_record_count_cache + n);
-        if (*recipe_count_global != want) {
-            *recipe_count_global = want;
-            table_log(1, "recipe table reactivated records=%u", want);
-        }
-        // 与首次注入一致：注入态下原版记录不得占用模块页（否则与原版记录重复出现在同一页）。
-        if (g_original_group_recipe_size == *recipe_size_global) {
-            clear_original_group_bits(g_recipe_buffer, g_base_record_count_cache,
-                                      *recipe_size_global, g_original_group_bits,
-                                      module_group_bits(cat, n));
-        }
-        if (!catalog_ready()) bind_base_record_count(g_base_record_count_cache);
-        reset_invalid_log_dedupe();  // 就绪后允许未来新一轮失败重新记录
-        return catalog_ready();
-    }
-    // 2) 游戏重新装载了静态表（指针被改写回原表）→ 用新原表重新注入。
-    //    刻意不释放旧缓冲：游戏可能仍持有指向模块缓冲内部的局部指针，泄漏一份远优于悬空访问。
-    if (g_recipe_buffer != nullptr) {
-        table_log(2, "recipe table replaced by game, re-inject count=%u", *recipe_count_global);
-        g_recipe_buffer = nullptr;
-        g_mixture_buffer = nullptr;
-    }
-
-    uint8_t* recipe_data = static_cast<uint8_t*>(*recipe_ptr_global);
-    const uint8_t recipe_size = *recipe_size_global;
-    uint8_t* mixture_data = static_cast<uint8_t*>(*mixture_ptr_global);
-    const uint8_t mixture_size = *mixture_size_global;
-    const uint16_t cur_count = *recipe_count_global;
-    // fail-closed：这 5 个全局只能走 VMA 兜底（无名 .bss），跨版本可能错位。
-    // 先用窄域校验挡住明显非法值——宁可跳过注入，也不要带着垃圾指针 memcpy 让游戏崩溃。
-    constexpr uint8_t kMaxRecipeSize = 64;
-    constexpr uint8_t kMaxMixtureSize = 16;
-    constexpr uint16_t kMaxRecordCount = 4096;
-    if (recipe_data == nullptr || mixture_data == nullptr || recipe_size == 0 ||
-        recipe_size > kMaxRecipeSize || mixture_size == 0 || mixture_size > kMaxMixtureSize ||
-        cur_count == 0 || cur_count > kMaxRecordCount) {
-        // 门禁每逻辑帧重试期间，同因只记一条（WARN，含尺寸/计数），避免刷屏。
-        if (table_invalid_log_needed(recipe_size, mixture_size, cur_count,
-                                     g_last_invalid_recipe_size, g_last_invalid_mixture_size,
-                                     g_last_invalid_count)) {
-            g_last_invalid_recipe_size = recipe_size;
-            g_last_invalid_mixture_size = mixture_size;
-            g_last_invalid_count = cur_count;
-            table_log(2, "recipe table not ready recipe_size=%u mixture_size=%u count=%u",
-                      recipe_size, mixture_size, cur_count);
-        }
-        return false;
-    }
-
-    size_t n = 0;
-    const Def* cat = catalog(&n);
-    if (cat == nullptr || n == 0) return false;
-
-    const uint16_t base_record_count = cur_count;
-    // 注入前抓原版段 b11 快照：停用时逐字节还原（页面回到原版配方列表）。
-    capture_original_group_bits(recipe_data, base_record_count, recipe_size);
-    // 书名册大小不变式：注入 N 条后 GetRecipeCount(5) 增加 N（每条注入记录都带 kRbRecipeBookBit），
-    // 而书名册缓冲是游戏按**注入前**的 (count5+7)/8 分配的、存档位图长度也按它决定 → 必须相等。
-    // 不相等时 fail-closed 拒绝注入：宁可模块配方不出现，也不要越界读写书名册或改存档格式长度。
-    const uint32_t book_count = count_recipe_book_records(recipe_data, base_record_count, recipe_size);
-    const uint32_t book_bytes_before = recipe_book_bytes(book_count);
-    const uint32_t book_bytes_after = recipe_book_bytes(book_count + static_cast<uint32_t>(n));
-    if (book_bytes_before != book_bytes_after) {
-        table_log(3,
-                  "recipe book byte size would change (%u -> %u, bit5=%u n=%u); injection "
-                  "refused to avoid out-of-bounds book access and save-format length change",
-                  book_bytes_before, book_bytes_after, book_count, static_cast<unsigned>(n));
-        return false;
-    }
-    const uint32_t base_material_count =
-        derive_material_count(recipe_data, base_record_count, recipe_size);
-    const uint32_t material_total_count = material_total(cat, n);
-
-    const size_t new_recipe_bytes =
-        static_cast<size_t>(base_record_count + n) * recipe_size;
-    const size_t new_mixture_bytes =
-        static_cast<size_t>(base_material_count + material_total_count) * mixture_size;
-
-    uint8_t* new_recipe = static_cast<uint8_t*>(std::malloc(new_recipe_bytes));
-    uint8_t* new_mixture = static_cast<uint8_t*>(std::malloc(new_mixture_bytes));
-    if (new_recipe == nullptr || new_mixture == nullptr) {
-        std::free(new_recipe);
-        std::free(new_mixture);
-        table_log(3, "table alloc failed bytes=%zu/%zu", new_recipe_bytes, new_mixture_bytes);
-        return false;
-    }
-
-    inject_into_buffers(recipe_data, base_record_count, recipe_size, mixture_data, mixture_size,
-                        cat, n, new_recipe, new_mixture);
-
-    // 写回可写 .bss（§3.8：无需 mprotect）。
-    *recipe_ptr_global = new_recipe;
-    *mixture_ptr_global = new_mixture;
-    *recipe_count_global = static_cast<uint16_t>(base_record_count + n);
-
-    g_recipe_buffer = new_recipe;
-    g_mixture_buffer = new_mixture;
-    g_base_record_count_cache = base_record_count;
-    bind_base_record_count(base_record_count);
-    table_log(1, "recipe table injected base=%u records=%u materials=%u book_bytes=%u",
-              base_record_count, static_cast<unsigned>(base_record_count + n),
-              static_cast<unsigned>(base_material_count + material_total_count), book_bytes_after);
-    reset_invalid_log_dedupe();  // 就绪后允许未来新一轮失败重新记录
-    return true;
+TableAccess android_table_access() {
+    TableAccess access{};
+    access.base = ::g_base;
+    access.recipe_ptr_slot = reinterpret_cast<void**>(bss(kRecipeDataSlot));
+    access.mixture_ptr_slot = reinterpret_cast<void**>(bss(kMixtureDataSlot));
+    access.recipe_size_slot = reinterpret_cast<uint8_t*>(bss(kRecipeSizeSlot));
+    access.mixture_size_slot = reinterpret_cast<uint8_t*>(bss(kMixtureSizeSlot));
+    access.recipe_count_slot = reinterpret_cast<uint16_t*>(bss(kRecipeCountSlot));
+    return access;
 }
 
 }  // namespace
 
-void set_context(const qol::contracts::QolGameHost* game,
-                 const qol::contracts::QolHostSdk* sdk) {
+// 表日志绑定：宿主在 install/激活期经 PluginContext 注入（feature.cpp set_context 转发）。
+// 表状态日志经 table_log_line 使用此绑定；未绑定时静默。
+void set_context(const qol::contracts::QolGameHost* game, const qol::contracts::QolHostSdk* sdk) {
     g_game = game;
     g_sdk = sdk;
 }
 
-bool custom_recipe_table_ensure() {
-    // 只做互斥，不缓存「已尝试」状态：表未装载 / 被游戏重装都必须允许后续重试。
-    bool expected = false;
-    if (!g_busy.compare_exchange_strong(expected, true)) {
-        return g_recipe_buffer != nullptr;
-    }
-    const bool ok = ensure_impl();
-    g_busy.store(false, std::memory_order_release);
-    return ok;
+QolResult custom_recipe_table_acquire() {
+    // g_base 未就绪时槽位地址本身无意义，必须先判（不得带着垃圾指针读取）。
+    if (::g_base == 0) return table_status_result(TableAcquireStatus::kNotReady);
+    size_t catalog_len = 0;
+    const Def* catalog_ptr = catalog(&catalog_len);
+    const TableAccess access = android_table_access();
+    // busy 检测/置位/复位全部在 core 内（RAII），本入口不重复管理，避免自我拒绝。
+    return table_status_result(table_acquire_core(access, &g_state, catalog_ptr, catalog_len,
+                                                  &std::malloc, &std::free, &table_log_line,
+                                                  &g_dedupe));
 }
 
+bool custom_recipe_table_ensure() { return custom_recipe_table_acquire().ok == kQolOk; }
+
 void custom_recipe_table_deactivate() {
-    if (::g_base == 0 || g_recipe_buffer == nullptr) return;
-    auto* recipe_ptr_global = reinterpret_cast<void**>(bss(kRecipeDataSlot));
-    auto* recipe_size_global = reinterpret_cast<uint8_t*>(bss(kRecipeSizeSlot));
-    auto* recipe_count_global = reinterpret_cast<uint16_t*>(bss(kRecipeCountSlot));
-    // 指针已被游戏改写 → 注入本就已失效，清模块状态即可，绝不把原表指针写回（可能已陈旧）。
-    if (*recipe_ptr_global != g_recipe_buffer) {
-        g_recipe_buffer = nullptr;
-        g_mixture_buffer = nullptr;
-        return;
-    }
-    // 还原原版段组位（撤销 inject 的清位）→ 各页面回到原版配方列表；否则模块页原版记录组位
-    // 已被清空，停用后点该页标签会在空配方列表上崩溃（真机 SIGSEGV）。
-    if (g_original_group_recipe_size == *recipe_size_global) {
-        restore_original_group_bits(g_recipe_buffer, g_base_record_count_cache, *recipe_size_global,
-                                    g_original_group_bits);
-    }
-    // 只收记录数，指向模块缓冲的指针保持不变：所有下标都仍在缓冲界内，
-    // 面板残留数组里的注入下标不会造成越界读；查询不会再命中注入记录。
-    *recipe_count_global = g_base_record_count_cache;
-    table_log(1, "recipe table deactivated records=%u", g_base_record_count_cache);
+    if (::g_base == 0) return;
+    const TableAccess access = android_table_access();
+    (void)table_deactivate_core(access, &g_state);
 }
 
 }  // namespace custom_recipe

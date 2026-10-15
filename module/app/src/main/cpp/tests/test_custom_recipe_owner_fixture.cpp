@@ -43,6 +43,7 @@
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/custom_recipe/table.h"
 #include "plugins/custom_recipe/text_table.h"
+#include "plugins/custom_recipe/ui/feature.h"
 #include "plugins/custom_recipe/ui/runtime.h"
 
 namespace qol::host {
@@ -80,7 +81,10 @@ using qol::host::HostDeps;
 // ===========================================================================
 // 表注入替身（host 上 table.cpp 只编译纯构造器）
 // ===========================================================================
-bool g_table_ensure_result = true;
+// typed acquire 替身状态（真实 descriptor/ownership 路径消费；不再折叠为 bool）。
+// g_table_acquire_status 用 QolResult.ok 的数值表达：0=OK，否则为错误码。
+int32_t g_table_acquire_ok = 0;                 // 0 = OK；其它 = 原样返回的错误码
+bool g_table_ensure_result = true;              // 兼容旧断言：false 时返回 NotReady
 int g_table_ensure_calls = 0;
 int g_table_deactivate_calls = 0;
 bool g_table_published = false;
@@ -280,13 +284,38 @@ QolResult stub_ok_i32(int32_t*) { return qol::contracts::ok(); }
 QolResult stub_ok_int64(int64_t) { return qol::contracts::ok(); }
 QolResult stub_ok_pair(int32_t, int64_t) { return qol::contracts::ok(); }
 QolResult stub_ok_handle(QolItemHandle) { return qol::contracts::ok(); }
-// 在本地 scope 仍生效时，经生产文本消费者解析出实际展示文案（用于精确断言提示原因）。
+// 独立 TEXTDATABASE 摘录（不引用 text_table.h 常量，避免自证）：
+// 数字直接取自 TEXTDATABASE（表 index 73，record_size 2）：row = 弹窗索引，行内 u16 = MEMORYTEXT id。
+// 工程 raw 与三份 supported 输入 APK 在 row 94/97/99 上一致（见本轮 .tmp 证据）。
+struct FixtureTextDatabaseRow {
+    uint32_t popup_index;
+    uint32_t memory_text_id;
+};
+constexpr FixtureTextDatabaseRow kFixtureTextDatabase[] = {
+    {94, 35410},
+    {97, 35413},
+    {99, 35415},
+};
+
+uint32_t fixture_memory_text_id(uint32_t popup_index) {
+    for (const FixtureTextDatabaseRow& row : kFixtureTextDatabase) {
+        if (row.popup_index == popup_index) return row.memory_text_id;
+    }
+    return 0;  // 未摘录的弹窗索引：不猜测
+}
+
+// 原生弹窗桩：模拟 UIPopupMsg_CreateOKFromTextData(index) 的两步链 ——
+//   索引 → TEXTDATABASE 行内 u16 → MEMORYTEXT_GetText(id) → 生产文本消费者（本地 scope 内同步）。
+// 因此捕获到的文案来自真实 dispatch/consumer 路径，而不是直接用消费者常量自证。
+int32_t g_ui_show_memory_text_id = -1;
 const char* g_last_shown_text = nullptr;
-QolResult stub_ok_text(uint32_t text_id) {
+QolResult stub_ok_text(uint32_t popup_index) {
     ++g_ui_show_text_calls;
-    g_ui_show_text_id = static_cast<int32_t>(text_id);
-    g_last_shown_text = g_last_text_callback != nullptr
-                            ? g_last_text_callback(text_id, "orig", nullptr)
+    g_ui_show_text_id = static_cast<int32_t>(popup_index);
+    g_ui_show_memory_text_id = static_cast<int32_t>(fixture_memory_text_id(popup_index));
+    g_last_shown_text = (g_ui_show_memory_text_id != 0 && g_last_text_callback != nullptr)
+                            ? g_last_text_callback(static_cast<uint32_t>(g_ui_show_memory_text_id),
+                                                   "orig", nullptr)
                             : nullptr;
     return qol::contracts::ok();
 }
@@ -443,7 +472,9 @@ qol::hooks::TxDeps::MechanismOutcome fixture_install_other(const ResourceClaim& 
     }
     const OwnershipOps* ops = ownership_ops(claim.handler);
     if (ops == nullptr || ops->acquire == nullptr) return {1, "ownership ops missing"};
-    if (ownership_acquire(ops, claim.id) != 0) return {1, "ownership acquire rejected"};
+    // 与 Host 一致：保留 acquire 的原始失败码（tx 软失败步据此区分 NotReady 与永久错误）。
+    const int32_t code = ownership_acquire(ops, claim.id);
+    if (code != 0) return {code, "ownership acquire failed"};
     return {0, nullptr};
 }
 
@@ -607,6 +638,7 @@ constexpr const char* kResourceIds[] = {
 
 void reset_gate_and_table() {
     g_table_ensure_result = true;
+    g_table_acquire_ok = 0;
     g_table_published = false;
     g_fail_symbol = nullptr;
 }
@@ -650,6 +682,7 @@ void seed_fixed_recipe_slots() {
     g_popup_calls = 0;
     g_ui_show_text_calls = 0;
     g_ui_show_text_id = -1;
+    g_ui_show_memory_text_id = -1;
     g_last_shown_text = nullptr;
     g_ui_reset_calls = 0;
     g_ui_refresh_calls = 0;
@@ -677,12 +710,44 @@ constexpr const char* kMsgPlaceWriteFailed = "放入失败，请重试。";
 // 提示 94 时断言实际文案（nullptr = 未被本地 scope 替换，保留原「材料不足」原文）。
 void expect_prompt_94(const char* expected) {
     assert(g_ui_show_text_calls == 1);
-    assert(g_ui_show_text_id == 94);
+    assert(g_ui_show_text_id == 94);                                  // 弹窗索引域
+    assert(g_ui_show_memory_text_id == 35410);                        // 经 TEXTDATABASE row 94 解析
     if (expected == nullptr) {
-        assert(g_last_shown_text == nullptr);
+        assert(g_last_shown_text == nullptr);                          // 未登记 scope → 保留原文
     } else {
         assert(g_last_shown_text != nullptr && std::strcmp(g_last_shown_text, expected) == 0);
     }
+}
+
+// ---------------------------------------------------------------------------
+// 弹窗索引域 vs MEMORYTEXT 域：域分工与「不匹配」负测（本轮根因回归）
+// ---------------------------------------------------------------------------
+void test_popup_text_id_domain() {
+    using qol::features::custom_recipe::kMemoryTextAlreadyPlaced;
+    using qol::features::custom_recipe::kMemoryTextMaterialInsufficient;
+    using qol::features::custom_recipe::kMemoryTextOnlyJewel;
+    using qol::features::custom_recipe::kPopupIndexMaterialInsufficient;
+    using qol::features::custom_recipe::kTextScopeRecipeMismatch;
+    using qol::features::custom_recipe::ui::TextScopeGuard;
+
+    // 独立摘录（fixture 内字面量）与生产表常量交叉核对：两处独立来源必须一致。
+    assert(fixture_memory_text_id(94) == kMemoryTextMaterialInsufficient);
+    assert(fixture_memory_text_id(97) == kMemoryTextOnlyJewel);
+    assert(fixture_memory_text_id(99) == kMemoryTextAlreadyPlaced);
+    assert(fixture_memory_text_id(98) == 0);  // 未摘录索引不猜测
+
+    assert(g_last_text_callback != nullptr);
+    {
+        TextScopeGuard scope(kTextScopeRecipeMismatch);
+        // 弹窗索引不是消费者匹配键：索引 94 在 scope 8 内必须落空（修前会误改其它弹窗）。
+        assert(g_last_text_callback(kPopupIndexMaterialInsufficient, "orig", nullptr) == nullptr);
+        // MEMORYTEXT 域才命中同一 scope 的替换文案。
+        const char* const resolved =
+            g_last_text_callback(kMemoryTextMaterialInsufficient, "orig", nullptr);
+        assert(resolved != nullptr && std::strcmp(resolved, kMsgRecipeMismatch) == 0);
+    }
+    // scope 退出后恢复原文（本地 scope 守卫语义）。
+    assert(g_last_text_callback(kMemoryTextMaterialInsufficient, "orig", nullptr) == nullptr);
 }
 
 void test_ui_confirm_paths() {
@@ -745,10 +810,12 @@ void test_ui_confirm_paths() {
         using qol::features::custom_recipe::kTextScopeRecipeMismatch;
         using qol::features::custom_recipe::kTextScopeStateChanged;
         using qol::features::custom_recipe::text_lookup;
-        const char* const mismatch = text_lookup(kTextScopeRecipeMismatch, 94);
-        const char* const unavailable = text_lookup(kTextScopeCraftUnavailable, 94);
-        const char* const consumed = text_lookup(kTextScopeMaterialMayHaveBeenConsumed, 94);
-        const char* const changed = text_lookup(kTextScopeStateChanged, 94);
+        // 消费者匹配键 = MEMORYTEXT id（35410，TEXTDATABASE row 94），不是弹窗索引 94。
+        constexpr uint32_t kMemText = qol::features::custom_recipe::kMemoryTextMaterialInsufficient;
+        const char* const mismatch = text_lookup(kTextScopeRecipeMismatch, kMemText);
+        const char* const unavailable = text_lookup(kTextScopeCraftUnavailable, kMemText);
+        const char* const consumed = text_lookup(kTextScopeMaterialMayHaveBeenConsumed, kMemText);
+        const char* const changed = text_lookup(kTextScopeStateChanged, kMemText);
         assert(mismatch != nullptr && unavailable != nullptr && consumed != nullptr &&
                changed != nullptr);
         assert(std::strcmp(mismatch, unavailable) != 0 && std::strcmp(mismatch, consumed) != 0 &&
@@ -815,6 +882,7 @@ void test_ui_confirm_paths() {
     reinterpret_cast<void (*)(void*)>(place)(nullptr);
     assert(g_fixture_set_item_writes == 1);
     assert(g_ui_show_text_calls == 1 && g_ui_show_text_id == 99);
+    assert(g_ui_show_memory_text_id == 35415);  // TEXTDATABASE row 99
     assert(g_last_shown_text != nullptr && std::strcmp(g_last_shown_text, kMsgPlaceWriteFailed) == 0);
     assert(g_ui_reset_calls == 0);
 
@@ -835,6 +903,192 @@ void test_ui_confirm_paths() {
     g_slot_category_held[5] = 5;
 }
 
+// ---------------------------------------------------------------------------
+// 跨 lane：真实 feature-mode 冷启动 → ownership NotReady 终态 → SaveEnter 主帧单 claim 恢复
+// 生产链（registry 状态机 + 真实 descriptor + 真实 plugin.on_resource_ready + typed table 替身）。
+// 不用 stub 计数替代 registry 状态：同时核对 hooks 资源态、registry active 与 infra status。
+// ---------------------------------------------------------------------------
+const char* kOwnershipClaimId = "own:RECIPEBASE_MIXTUREBASE";
+
+bool registry_state(const char* id, qol::infra::FeatureStatus* out) {
+    return qol::infra::status_get(id, out);
+}
+
+// 以「table 先 NotReady」重新激活，得到冷启动等价终态：owner Active、ownership Free、门禁关。
+void arm_startup_retry_terminal() {
+    set_recipes(false);
+    frames();
+    g_table_acquire_ok = kQolErrNotReady;
+    set_recipes(true);
+    frames();
+}
+
+void test_cross_lane_startup_retry() {
+    const qol::contracts::PluginDescriptor& descriptor =
+        qol::features::custom_recipe::plugin_descriptor();
+    assert(descriptor.resources_count == 13);
+
+    // ---- 1) 冷启动等价：ownership acquire 返回 NotReady → owner Active 但 ownership Free。----
+    set_recipes(false);
+    frames();
+    g_table_acquire_ok = kQolErrNotReady;
+    const int acquire_before = g_table_ensure_calls;
+
+    set_recipes(true);
+    frames();
+    // 装配完成后的基线（12 hook 已装、text/handler 已注册）：恢复期不得再动这些。
+    const int hooks_after_install = g_hook_calls;
+    const int typed_reg_after_install = qol::host::fixture_typed_registrations();
+    const int typed_unreg_after_install = qol::host::fixture_typed_unregistrations();
+    const int text_sub_after_install = g_text_subscribe_calls;
+    const int event_reg_after_install = qol::host::fixture_event_registrations();
+
+    assert(qol::host::feature_registry_active("custom_recipe"));       // registry：owner Active
+    qol::infra::FeatureStatus status{};
+    assert(registry_state("custom_recipe", &status));
+    assert(status.state == qol::infra::FeatureState::kEnabled && status.enabled);
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kFree);  // 真实资源态
+    for (int i = 0; i < kCoreSymbolCount; ++i) assert(resource_live(kResourceIds[i]));
+    assert(!qol::features::custom_recipe::ownership_ready());
+    assert(!qol::features::custom_recipe::enabled());                 // 业务门禁保持关闭
+    assert(g_table_ensure_calls == acquire_before + 1);              // 只尝试一次
+    assert(g_hook_calls == hooks_after_install);                     // 12 hook 安装次数不增
+    assert(qol::host::fixture_typed_registrations() == typed_reg_after_install);  // 未二次 install
+    assert(qol::host::fixture_typed_unregistrations() == typed_unreg_after_install);
+    assert(g_text_subscribe_calls == text_sub_after_install);        // text consumer 未重复注册
+    assert(qol::host::fixture_event_registrations() == event_reg_after_install);
+
+    // ---- 2) 多帧无 Save 信号：不重复 acquire。----
+    const int armed_acquires = g_table_ensure_calls;
+    frames(30);
+    assert(g_table_ensure_calls == armed_acquires);
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kFree);
+
+    // ---- 3) 表可用 + SaveEnter 信号 → registry 帧推进后单 claim 恢复。----
+    g_table_acquire_ok = 0;
+    qol::host::feature_registry_notify_save_ready();
+    frames();                                                    // feature registry 帧推进
+    assert(qol::host::feature_registry_retry_pending_ownership() == 1);
+    assert(g_table_ensure_calls == armed_acquires + 1);           // 真实 own_acquire 恰好一次
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kLive);
+    assert(registry_state("custom_recipe", &status));
+    assert(status.state == qol::infra::FeatureState::kEnabled && status.enabled);
+    assert(qol::features::custom_recipe::ownership_ready());
+    assert(qol::features::custom_recipe::enabled());              // 真实 on_resource_ready 开门禁
+    assert(g_hook_calls == hooks_after_install);                  // 12 hook 安装次数不增
+    assert(qol::host::fixture_typed_registrations() == typed_reg_after_install);  // 不重复注册
+    assert(g_text_subscribe_calls == text_sub_after_install);
+    assert(qol::host::fixture_event_registrations() == event_reg_after_install);
+    assert(qol::features::custom_recipe::ui::core_backups_ready());
+
+    // ---- 4) 每信号一次：重复帧 / 重复调用不再 acquire。----
+    const int after_recovery = g_table_ensure_calls;
+    frames(20);
+    assert(qol::host::feature_registry_retry_pending_ownership() == 0);
+    qol::host::feature_registry_notify_save_ready();
+    frames();
+    assert(qol::host::feature_registry_retry_pending_ownership() == 0);  // claim 已 Live → 0
+    assert(g_table_ensure_calls == after_recovery);
+
+    // ---- 5) 真实 owner 拒绝恢复：desired 关闭。----
+    arm_startup_retry_terminal();
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kFree);
+    g_table_acquire_ok = 0;
+    const int acquire_armed_closed = g_table_ensure_calls;
+    set_recipes(false);                                          // desired 关闭
+    frames();
+    qol::host::feature_registry_notify_save_ready();
+    frames();
+    assert(qol::host::feature_registry_retry_pending_ownership() == 0);   // 已关闭 → 不恢复
+    assert(g_table_ensure_calls == acquire_armed_closed);
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kFree);
+    assert(!qol::features::custom_recipe::enabled());
+
+    // ---- 6) 真实 owner 拒绝恢复：永久错误（Unsupported）不武装。----
+    set_recipes(false);
+    frames();
+    g_table_acquire_ok = kQolErrUnsupported;
+    const int acquire_before_permanent = g_table_ensure_calls;
+    set_recipes(true);
+    frames();
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kFree);
+    assert(!qol::features::custom_recipe::enabled());
+    assert(g_table_ensure_calls == acquire_before_permanent + 1);
+    g_table_acquire_ok = 0;
+    qol::host::feature_registry_notify_save_ready();
+    frames();
+    assert(qol::host::feature_registry_retry_pending_ownership() == 0);   // 永久错误不武装
+    assert(g_table_ensure_calls == acquire_before_permanent + 1);
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kFree);
+
+    // ---- 7) 恢复现场：再做一次正常激活（后续用例依赖 enabled 状态）。----
+    set_recipes(false);
+    frames();
+    g_table_acquire_ok = 0;
+    set_recipes(true);
+    frames();
+    assert(qol::features::custom_recipe::enabled());
+    assert(qol::hooks::state_of(kOwnershipClaimId) == ResourceState::kLive);
+}
+
+// ---------------------------------------------------------------------------
+// 启动/定向 ownership 恢复：typed acquire 错误域 + on_resource_ready 只更新门禁
+// ---------------------------------------------------------------------------
+void test_startup_ready_notification() {
+    const auto& ops = qol::features::custom_recipe::ownership_ops();
+    const qol::contracts::PluginDescriptor& descriptor =
+        qol::features::custom_recipe::plugin_descriptor();
+    qol::contracts::PluginContext ctx{};
+    assert(qol::host::feature_registry_context("custom_recipe", &ctx));
+
+    // a) 未就绪时的定向通知不得开门禁（只基于 ownership_ready() && core hook 备份）。
+    //    先归一化：release 清 ready 并 total deactivate（前面装配周期已 acquire 过）。
+    ops.release("own:RECIPEBASE_MIXTUREBASE");
+    qol::features::custom_recipe::set_enabled(false);
+    assert(!qol::features::custom_recipe::ownership_ready());
+    assert(descriptor.on_resource_ready(ctx, "own:RECIPEBASE_MIXTUREBASE", nullptr) == 0);
+    assert(!qol::features::custom_recipe::enabled());
+
+    // b) NotReady：原码返回 + total 清理 + ready false；通知仍不开门禁。
+    g_table_acquire_ok = kQolErrNotReady;
+    const int deactivate_before = g_table_deactivate_calls;
+    const int acquire_before = g_table_ensure_calls;
+    assert(ops.acquire("own:RECIPEBASE_MIXTUREBASE") == kQolErrNotReady);
+    assert(!qol::features::custom_recipe::ownership_ready());
+    assert(!g_table_published);
+    assert(g_table_deactivate_calls == deactivate_before + 1);  // 失败即 total 清理
+    assert(g_table_ensure_calls == acquire_before + 1);         // 只走一次 typed acquire
+    assert(descriptor.on_resource_ready(ctx, "own:RECIPEBASE_MIXTUREBASE", nullptr) == 0);
+    assert(!qol::features::custom_recipe::enabled());
+
+    // c) 永久错误（Unsupported）与重入（Busy）原码透传，不折叠成 NotReady。
+    g_table_acquire_ok = kQolErrUnsupported;
+    assert(ops.acquire("own:RECIPEBASE_MIXTUREBASE") == kQolErrUnsupported);
+    assert(!qol::features::custom_recipe::ownership_ready());
+    g_table_acquire_ok = kQolErrBusy;
+    assert(ops.acquire("own:RECIPEBASE_MIXTUREBASE") == kQolErrBusy);
+    assert(!qol::features::custom_recipe::ownership_ready());
+
+    // d) 成功：ready true / 表已发布；定向通知（backup=nullptr）只更新门禁。
+    g_table_acquire_ok = 0;
+    const int events_before = qol::host::fixture_event_registrations();
+    assert(ops.acquire("own:RECIPEBASE_MIXTUREBASE") == 0);
+    assert(qol::features::custom_recipe::ownership_ready() && g_table_published);
+    const int acquire_after_ok = g_table_ensure_calls;
+    assert(!qol::features::custom_recipe::enabled());  // 通知前门禁保持关闭
+    assert(descriptor.on_resource_ready(ctx, "own:RECIPEBASE_MIXTUREBASE", nullptr) == 0);
+    assert(qol::features::custom_recipe::enabled());
+    assert(g_table_ensure_calls == acquire_after_ok);                  // 不重复 table acquire
+    assert(qol::host::fixture_event_registrations() == events_before);  // 不重复注册
+
+    // e) 其他 hook id 仍走 UI 现有 backup 路径（未知 id → 拒绝，不误判为 ownership）。
+    assert(descriptor.on_resource_ready(ctx, "own:NOT_OURS", nullptr) != 0);
+
+    // f) release：清 ready 并 total deactivate。
+    ops.release("own:RECIPEBASE_MIXTUREBASE");
+    assert(!qol::features::custom_recipe::ownership_ready());
+}
+
 }  // namespace
 
 // host 上 table.cpp 只编译纯构造器；表注入行为由 fixture 替身提供（可注入失败）。
@@ -842,13 +1096,24 @@ namespace custom_recipe {
 
 void set_context(const qol::contracts::QolGameHost*, const qol::contracts::QolHostSdk*) {}
 
-bool custom_recipe_table_ensure() {
+QolResult custom_recipe_table_acquire() {
     ++g_table_ensure_calls;
-    if (!g_table_ensure_result) return false;
+    const int32_t code = g_table_acquire_ok != 0
+                             ? g_table_acquire_ok
+                             : (g_table_ensure_result ? 0 : kQolErrNotReady);
+    if (code != 0) {
+        g_table_published = false;
+        static constexpr char kAcquireFailedMessage[] = "fixture table acquire failed";
+        return qol::contracts::error(code, kAcquireFailedMessage,
+                                     sizeof(kAcquireFailedMessage) - 1);
+    }
     g_table_published = true;
     ::custom_recipe::bind_base_record_count(69);
-    return true;
+    return qol::contracts::ok();
 }
+
+// bool 薄包装（与生产 table.cpp 的薄包装同语义）。
+bool custom_recipe_table_ensure() { return custom_recipe_table_acquire().ok == kQolOk; }
 
 void custom_recipe_table_deactivate() {
     ++g_table_deactivate_calls;
@@ -1080,7 +1345,13 @@ int main(int argc, char** argv) {
     assert_core_resources_live();
 
     test_ui_confirm_paths();
+    test_popup_text_id_domain();
     std::puts("owner_fixture: ui confirm/cancel/popup-failure/prompt paths verified");
+    std::puts("owner_fixture: popup-index vs MEMORYTEXT text id domains verified");
+    test_startup_ready_notification();
+    std::puts("owner_fixture: typed table acquire error domains + ownership ready notification verified");
+    test_cross_lane_startup_retry();
+    std::puts("owner_fixture: cross-lane startup retry (registry + real descriptor + SaveEnter signal) verified");
 
     std::puts("custom_recipe_owner_fixture_tests: pass (single descriptor, per-hook rollback/degrade, ownership gate, off/on cleanup)");
     return 0;

@@ -1,6 +1,7 @@
 #include "plugin.h"
 
 #include <cstdint>
+#include <cstring>
 
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/craft_commands.h"
@@ -33,6 +34,9 @@ namespace {
 constexpr const char* kPluginId = "custom_recipe";
 constexpr const char* kPluginVersion = "0.1.0";
 
+// RECIPEBASE/MIXTUREBASE 注入所有权的资源 id：claim 声明与 on_resource_ready 识别共用同一常量。
+constexpr const char* kOwnershipResourceId = "own:RECIPEBASE_MIXTUREBASE";
+
 // ---- 「宝石强化」呈现文案（ADR 0001 D3：合成域的配方呈现文案归本插件）----
 constexpr int32_t kTextPhaseAfter = 1;
 constexpr int32_t kTextKindModify = 1;
@@ -54,7 +58,7 @@ bool set_stuff_item_handler(void*, const uint8_t* payload, uint32_t size);
 // 宿主停用时逆序释放 → ownership 先 release（恢复表记录），UI hooks 后释放。
 const contracts::ResourceClaim& ownership_claim() {
     static const contracts::ResourceClaim kClaim = {
-        "own:RECIPEBASE_MIXTUREBASE",
+        kOwnershipResourceId,
         "RECIPEBASE_MIXTUREBASE",
         contracts::ResourceMechanism::kOwnership,
         contracts::ResourcePolicy::kPrivate,
@@ -252,6 +256,16 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 }
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
+    // 定向 ownership 恢复：Host 仅在单 claim 恢复成功时以 backup=nullptr 回调本条。
+    // 这里只基于 ownership_ready() 与 UI 核心 hook 备份就绪重算业务门禁：不注册资源、
+    // 不读写游戏内存、不重复 on_enabled 的其它动作（其他插件未承诺 on_enabled 可重复调用）。
+    if (resource_id != nullptr && std::strcmp(resource_id, kOwnershipResourceId) == 0) {
+        set_context(ctx);
+        if (ownership_ready() && ui::core_backups_ready()) {
+            set_enabled(true);
+        }
+        return 0;
+    }
     return ui::on_resource_ready(ctx, resource_id, backup);
 }
 

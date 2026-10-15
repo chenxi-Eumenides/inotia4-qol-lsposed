@@ -1130,12 +1130,19 @@ const result::CraftResultApi kCraftResultApi = {
 
 int32_t own_acquire(const char* /*id*/) {
     g_ownership_ready = false;
-    if (::custom_recipe::custom_recipe_table_ensure()) {
+    // 表注入只有一个入口：宿主资源的 ownership acquire。typed 结果保留错误域
+    // （NotReady/Busy 可重试；Unsupported 永久；Internal 内部错误），不再折叠为 bool。
+    const QolResult result = ::custom_recipe::custom_recipe_table_acquire();
+    if (result.ok == kQolOk) {
         g_ownership_ready = true;
         return 0;
     }
+    // 失败即 total 清理（收回记录数、清模块状态与快照），并按**原码**返回，便于宿主区分
+    // 是否可以定向重试（NotReady）或应视为永久错误（Unsupported/Internal）。
     ::custom_recipe::custom_recipe_table_deactivate();
-    return 1;
+    log_message(2, "custom_recipe table acquire failed code=%d",
+                result.code != 0 ? result.code : result.ok);
+    return result.code != 0 ? result.code : result.ok;
 }
 
 void own_release(const char* /*id*/) {

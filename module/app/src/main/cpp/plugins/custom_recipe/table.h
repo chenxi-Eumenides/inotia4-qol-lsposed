@@ -5,6 +5,7 @@
 
 #include "catalog.h"
 #include "../../contracts/game_host.h"
+#include "../../contracts/result.h"
 #include "../../contracts/host_sdk.h"
 
 // 自定义合成配方的 RECIPEBASE / MIXTUREBASE 表注入（custom-craft-recipe §4.3）。
@@ -98,16 +99,102 @@ void restore_original_group_bits(uint8_t* buffer, uint16_t base_record_count, ui
 void clear_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint8_t recipe_size,
                                const uint8_t* original_group_bits, uint8_t module_bits);
 
-// Android：校验并（重新）注入；幂等、可重复调用。
-// - 已注入且游戏侧指针仍指向模块缓冲 → 只把记录数归位到 base + N 并返回 true；
-// - 游戏重新装载静态表导致指针被改写 → 用新原表重新注入；
-// - bridge 未就绪 / 表指针非法 → 返回 false（fail-closed，绝不带着垃圾指针 memcpy）。
+// ---------------------------------------------------------------------------
+// acquire / deactivate 的便携核心（Android 与 host 测试共用同一实现）
+// ---------------------------------------------------------------------------
+// Android 入口把真实 .bss 槽位装配成 TableAccess 后调用本核心；host 测试用可控内存装配
+// 同一核心。分类、注入、分配、重入与 deactivate 语义因此只有一套实现，不存在第二份算法。
+
+enum class TableAcquireStatus : uint8_t {
+    kOk = 0,           // 注入完成，或对已注入表的合法重新激活
+    kNotReady = 1,     // 尚未加载：base 未就绪 / 表指针缺失 / 尺寸或记录数为 0
+    kUnsupported = 2,  // 永久不可用：非零但超上界的布局、目录不可用、书名册长度不变式不满足
+    kInternal = 3,     // 内部错误（分配失败等）
+    kBusy = 4,         // 重入：进行中的 acquire 未结束（不得因已有 buffer 报告成功）
+};
+
+// 与 Host 的约定：**只有 kNotReady 是「可自动恢复」信号**（宿主可在 SaveEnter 后做一次
+// 定向 ownership 重试）；kBusy 本轮不作为自动恢复条件（重入只表示本次调用未开始），
+// kUnsupported/kInternal 视为固定错误，不参与自动重试。
+
+// 状态 → QolResult；调用方据此区分可重试（NotReady/Busy）与永久错误（Unsupported/Internal）。
+QolResult table_status_result(TableAcquireStatus status);
+
+using TableAllocFn = void* (*)(size_t);
+using TableFreeFn = void (*)(void*);
+using TableLogFn = void (*)(int32_t level, const char* message);
+
+// 游戏侧表槽位：Android 指向可写 .bss 全局；host 测试指向任意内存。
+struct TableAccess {
+    uintptr_t base = 0;
+    void** recipe_ptr_slot = nullptr;
+    void** mixture_ptr_slot = nullptr;
+    uint8_t* recipe_size_slot = nullptr;
+    uint8_t* mixture_size_slot = nullptr;
+    uint16_t* recipe_count_slot = nullptr;
+};
+
+// 模块侧状态：注入缓冲、原版段 b11 快照、base 缓存与重入标志。
+// 不实现「已 Live 后游戏替换整张表」的监控：指针被改写时按既有语义只在下次 acquire 重新注入。
+struct TableState {
+    uint8_t* recipe_buffer = nullptr;
+    uint8_t* mixture_buffer = nullptr;
+    uint8_t* original_group_bits = nullptr;
+    uint16_t original_group_count = 0;
+    uint8_t original_group_recipe_size = 0;
+    uint16_t base_record_count_cache = 0;
+    bool busy = false;
+};
+
+// 「全局未就绪」日志去重状态（调用方可传 nullptr 表示不记录）。
+struct TableLogDedupe {
+    uint8_t last_recipe_size = 0xFF;
+    uint8_t last_mixture_size = 0xFF;
+    uint16_t last_count = 0xFFFF;
+};
+
+// 观测到的表状态（由 TableAccess 读出）。
+struct TableProbe {
+    bool base_ready = false;
+    bool recipe_ptr_present = false;
+    bool mixture_ptr_present = false;
+    uint8_t recipe_size = 0;
+    uint8_t mixture_size = 0;
+    uint16_t record_count = 0;
+    bool catalog_available = false;
+};
+
+// 分类：**先判非零非法上界**（避免「异常尺寸 + 另一字段为 0」被伪装成等待加载），
+// 再判缺失字段，最后判目录可用性。
+TableAcquireStatus classify_table_probe(const TableProbe& probe);
+
+// 既有格式上界（与 table.cpp 原本的窄域校验一致）。
+constexpr uint8_t kMaxRecipeRecordSize = 64;
+constexpr uint8_t kMaxMixtureRecordSize = 16;
+constexpr uint16_t kMaxTableRecordCount = 4096;
+
+// acquire：busy → kBusy；否则按 classify_table_probe 分类并注入 / 合法重新激活。
+// 成功时写回槽位与 state；失败不留下半注入状态（分配失败释放已分配部分）。
+TableAcquireStatus table_acquire_core(const TableAccess& access, TableState* state,
+                                      const Def* catalog, size_t catalog_len,
+                                      TableAllocFn alloc, TableFreeFn release, TableLogFn log_fn,
+                                      TableLogDedupe* dedupe);
+
+// deactivate：**保留模块缓冲作为表体**（原表超集，越界读变界内读），只把 RECIPEBASE 记录数
+// 改回原值，并在快照可用且记录尺寸一致时逐字节还原原版段组位。
+// 指针已被游戏改写时只清模块状态，**绝不把（可能陈旧的）原表指针写回**。
+TableAcquireStatus table_deactivate_core(const TableAccess& access, TableState* state);
+
+// Android：读 .bss 槽位后调用核心；typed 结果供 ownership 路径区分错误域。
+// - g_base==0 / 表指针缺失 / 尺寸或 count 为 0 → NotReady；
+// - 非零非法上界、目录不可用、书名册不变式不满足 → Unsupported（永久）；
+// - 分配失败 → Internal；重入 → Busy；其余 → OK。
+QolResult custom_recipe_table_acquire();
+
+// Android：`custom_recipe_table_acquire()` 的 bool 薄包装（保留给按 bool 判断的调用者）。
 bool custom_recipe_table_ensure();
 
-// Android：停用注入配方。**保留模块缓冲作为表体**（它是原表的超集，越界读因此变成界内读），
-// 只把 RECIPEBASE 记录数改回原值，使任何配方查询都不会再命中注入记录。
-// 这样面板残留的配方数组即便仍持有注入下标，绘制读也在缓冲界内，不会越界。
-// 仅在注入仍生效（指针仍指向模块缓冲）时执行；下次 ensure() 会把记录数归位回来。
+// Android：停用注入配方（见 table_deactivate_core 语义）。
 void custom_recipe_table_deactivate();
 
 }  // namespace custom_recipe

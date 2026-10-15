@@ -134,24 +134,24 @@ static void test_key_lookup_and_id_sync() {
         CHECK(std::strcmp(t->text, "宝石升阶") == 0);
         CHECK(t->text_id == custom_recipe::kJewelTierUpLabelWordId);
     }
-    // CR02/F2：模块自有失败提示各自独立 scope（与 id 相同但 scope 不同，提示互不串味）。
+    // 模块自有失败提示各自独立 scope；text_id 必须落在 MEMORYTEXT 域（不是弹窗索引域）。
     const TextEntry* unavailable = cr::text_entry_by_key("quality.unavailable");
     CHECK(unavailable != nullptr);
     if (unavailable != nullptr) {
         CHECK(unavailable->scope == cr::kTextScopeQualityUnavailable);
-        CHECK(unavailable->text_id == cr::kQualityUnavailablePopupId);
+        CHECK(unavailable->text_id == cr::kMemoryTextOnlyJewel);
     }
     const TextEntry* consumed = cr::text_entry_by_key("craft.material_may_have_been_consumed");
     CHECK(consumed != nullptr);
     if (consumed != nullptr) {
         CHECK(consumed->scope == cr::kTextScopeMaterialMayHaveBeenConsumed);
-        CHECK(consumed->text_id == cr::kMaterialMayHaveBeenConsumedPopupId);
+        CHECK(consumed->text_id == cr::kMemoryTextMaterialInsufficient);
     }
     const TextEntry* prepare_failed = cr::text_entry_by_key("craft.product_prepare_failed");
     CHECK(prepare_failed != nullptr);
     if (prepare_failed != nullptr) {
         CHECK(prepare_failed->scope == cr::kTextScopeProductPrepareFailed);
-        CHECK(prepare_failed->text_id == cr::kProductPrepareFailedPopupId);
+        CHECK(prepare_failed->text_id == cr::kMemoryTextMaterialInsufficient);
         CHECK(prepare_failed->scope != cr::kTextScopeMaterialMayHaveBeenConsumed);
     }
     // 本轮新增的 4 条提示：key / scope / popup id / 文案逐一固定（错误信息必须符合实际原因）。
@@ -159,52 +159,91 @@ static void test_key_lookup_and_id_sync() {
     CHECK(mismatch != nullptr);
     if (mismatch != nullptr) {
         CHECK(mismatch->scope == cr::kTextScopeRecipeMismatch);
-        CHECK(mismatch->text_id == cr::kRecipeMismatchPopupId);
+        CHECK(mismatch->text_id == cr::kMemoryTextMaterialInsufficient);
         CHECK(std::strcmp(mismatch->text, "配方不匹配，请检查材料组合。") == 0);
     }
     const TextEntry* craft_unavailable = cr::text_entry_by_key("craft.unavailable");
     CHECK(craft_unavailable != nullptr);
     if (craft_unavailable != nullptr) {
         CHECK(craft_unavailable->scope == cr::kTextScopeCraftUnavailable);
-        CHECK(craft_unavailable->text_id == cr::kCraftUnavailablePopupId);
+        CHECK(craft_unavailable->text_id == cr::kMemoryTextMaterialInsufficient);
         CHECK(std::strcmp(craft_unavailable->text, "合成暂不可用，材料未扣。") == 0);
     }
     const TextEntry* state_changed = cr::text_entry_by_key("craft.state_changed");
     CHECK(state_changed != nullptr);
     if (state_changed != nullptr) {
         CHECK(state_changed->scope == cr::kTextScopeStateChanged);
-        CHECK(state_changed->text_id == cr::kStateChangedPopupId);
+        CHECK(state_changed->text_id == cr::kMemoryTextMaterialInsufficient);
         CHECK(std::strcmp(state_changed->text, "合成状态已变化，请重新填入材料。") == 0);
     }
     const TextEntry* place_write_failed = cr::text_entry_by_key("craft.place_write_failed");
     CHECK(place_write_failed != nullptr);
     if (place_write_failed != nullptr) {
         CHECK(place_write_failed->scope == cr::kTextScopePlaceWriteFailed);
-        CHECK(place_write_failed->text_id == cr::kPlaceWriteFailedPopupId);
+        CHECK(place_write_failed->text_id == cr::kMemoryTextAlreadyPlaced);
         CHECK(std::strcmp(place_write_failed->text, "放入失败，请重试。") == 0);
     }
 
-    // 同一 popup id 94 承载 4 条互不相同的提示：各自 scope 命中各自的文案，
-    // 未登记 scope 必须返回原文（保持原「材料不足」语义不被污染）。
+    // 同一 MEMORYTEXT id 35410 承载 5 条互不相同的提示：各自 scope 命中各自的文案，
+    // 未登记 scope 必须返回原文（保持原『材料不足』语义不被污染）。
     {
-        const char* const m94_a = cr::text_lookup(cr::kTextScopeRecipeMismatch, 94);
-        const char* const m94_b = cr::text_lookup(cr::kTextScopeCraftUnavailable, 94);
-        const char* const m94_c = cr::text_lookup(cr::kTextScopeStateChanged, 94);
-        const char* const m94_d = cr::text_lookup(cr::kTextScopeMaterialMayHaveBeenConsumed, 94);
-        CHECK(m94_a != nullptr && m94_b != nullptr && m94_c != nullptr && m94_d != nullptr);
-        CHECK(std::strcmp(m94_a, m94_b) != 0 && std::strcmp(m94_a, m94_c) != 0 &&
-              std::strcmp(m94_a, m94_d) != 0 && std::strcmp(m94_b, m94_c) != 0 &&
-              std::strcmp(m94_b, m94_d) != 0 && std::strcmp(m94_c, m94_d) != 0);
-        // 未登记 scope（0 / 页签 4 / 其它）→ 原文保持不变。
-        CHECK(cr::text_lookup(0, 94) == nullptr);
-        CHECK(cr::text_lookup(cr::kTextScopePageTab, 94) == nullptr);
-        CHECK(cr::text_lookup(cr::kTextScopeRecipeButton, 94) == nullptr);
-        // 放入失败用 99（与 94 组互不影响）。
-        CHECK(std::strcmp(cr::text_lookup(cr::kTextScopePlaceWriteFailed, 99),
+        constexpr uint32_t kMem = cr::kMemoryTextMaterialInsufficient;  // 35410（TEXTDATABASE row 94）
+        const char* const m_a = cr::text_lookup(cr::kTextScopeRecipeMismatch, kMem);
+        const char* const m_b = cr::text_lookup(cr::kTextScopeCraftUnavailable, kMem);
+        const char* const m_c = cr::text_lookup(cr::kTextScopeStateChanged, kMem);
+        const char* const m_d = cr::text_lookup(cr::kTextScopeMaterialMayHaveBeenConsumed, kMem);
+        const char* const m_e = cr::text_lookup(cr::kTextScopeProductPrepareFailed, kMem);
+        CHECK(m_a != nullptr && m_b != nullptr && m_c != nullptr && m_d != nullptr && m_e != nullptr);
+        CHECK(std::strcmp(m_a, m_b) != 0 && std::strcmp(m_a, m_c) != 0 &&
+              std::strcmp(m_a, m_d) != 0 && std::strcmp(m_a, m_e) != 0 &&
+              std::strcmp(m_b, m_c) != 0 && std::strcmp(m_b, m_d) != 0 &&
+              std::strcmp(m_b, m_e) != 0 && std::strcmp(m_c, m_d) != 0 &&
+              std::strcmp(m_c, m_e) != 0 && std::strcmp(m_d, m_e) != 0);
+        // 未登记 scope（0 / 页签 4 / 按钮 2）→ 原文保持不变（真「材料不足」不被替换）。
+        CHECK(cr::text_lookup(0, kMem) == nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopePageTab, kMem) == nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopeRecipeButton, kMem) == nullptr);
+        // 放入失败用 MEMORYTEXT 35415（TEXTDATABASE row 99），与 35410 组互不影响。
+        CHECK(std::strcmp(cr::text_lookup(cr::kTextScopePlaceWriteFailed,
+                                          cr::kMemoryTextAlreadyPlaced),
                           "放入失败，请重试。") == 0);
-        CHECK(cr::text_lookup(cr::kTextScopePlaceWriteFailed, 94) == nullptr);
-        CHECK(cr::text_lookup(cr::kTextScopeRecipeMismatch, 99) == nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopePlaceWriteFailed, kMem) == nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopeRecipeMismatch, cr::kMemoryTextAlreadyPlaced) == nullptr);
     }
+
+    // 域分离负测：弹窗索引（94/97/99）不是消费者的匹配键，必须全部落空。
+    // 否则本地 scope 会误改其它弹窗文本（本轮根因：消费者曾按弹窗索引匹配）。
+    {
+        constexpr uint32_t kPopupIndexes[] = {cr::kPopupIndexMaterialInsufficient,
+                                              cr::kPopupIndexOnlyJewel,
+                                              cr::kPopupIndexAlreadyPlaced};
+        constexpr int32_t kScopes[] = {cr::kTextScopeQualityUnavailable,
+                                       cr::kTextScopeMaterialMayHaveBeenConsumed,
+                                       cr::kTextScopeProductPrepareFailed,
+                                       cr::kTextScopeRecipeMismatch,
+                                       cr::kTextScopeCraftUnavailable,
+                                       cr::kTextScopeStateChanged,
+                                       cr::kTextScopePlaceWriteFailed};
+        for (uint32_t index : kPopupIndexes) {
+            for (int32_t scope : kScopes) {
+                CHECK(cr::text_lookup(scope, index) == nullptr);
+            }
+        }
+        // 反向：MEMORYTEXT id 在这些 scope 下必须命中（域分工成立）。
+        CHECK(cr::text_lookup(cr::kTextScopeQualityUnavailable, cr::kMemoryTextOnlyJewel) != nullptr);
+        CHECK(cr::text_lookup(cr::kTextScopePlaceWriteFailed, cr::kMemoryTextAlreadyPlaced) != nullptr);
+    }
+
+    // 弹窗索引→MEMORYTEXT id 的显式映射（评分证据来自 TEXTDATABASE row = index）。
+    CHECK(cr::kPopupIndexMaterialInsufficient == 94 && cr::kMemoryTextMaterialInsufficient == 35410);
+    CHECK(cr::kPopupIndexOnlyJewel == 97 && cr::kMemoryTextOnlyJewel == 35413);
+    CHECK(cr::kPopupIndexAlreadyPlaced == 99 && cr::kMemoryTextAlreadyPlaced == 35415);
+    CHECK(cr::popup_memory_text_id(cr::kPopupIndexMaterialInsufficient) ==
+          cr::kMemoryTextMaterialInsufficient);
+    CHECK(cr::popup_memory_text_id(cr::kPopupIndexOnlyJewel) == cr::kMemoryTextOnlyJewel);
+    CHECK(cr::popup_memory_text_id(cr::kPopupIndexAlreadyPlaced) == cr::kMemoryTextAlreadyPlaced);
+    CHECK(cr::popup_memory_text_id(98) == 0);  // 未知索引不猜测
+    CHECK(cr::kPopupTextIdCount == 3);
 
     // 页签作用域只用于「显式不替换」，两表都不得有该作用域条目。
     size_t n = 0;

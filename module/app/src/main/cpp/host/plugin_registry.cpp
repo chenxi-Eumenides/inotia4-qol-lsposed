@@ -501,6 +501,28 @@ void record_resource_install_error(uint32_t index, const char* resource_id, cons
                   "resource %s: %s", resource_id != nullptr ? resource_id : "?",
                   reason != nullptr ? reason : "install failed");
 }
+
+// 启动期 ownership（RECIPEBASE/MIXTUREBASE 注入）NotReady 的定向恢复状态。
+// deferred：产生 NotReady 的 activation owner token（旧 activation 的隔离凭据）；
+// save_ready：最近一次 SaveEnter 锁存的当前 owner token（0 = 未武装/已消费）。
+// 仅这两个字段；不新增 generation 计数、不新增事务类型。
+contracts::QolOwnerToken g_deferred_ownership_token[kMaxPlugins] = {};
+contracts::QolOwnerToken g_save_ready_token[kMaxPlugins] = {};
+
+// 清 owner 的恢复信号与 pending：新 activation、stop/cleanup、reset 均调用。
+// 旧 token 因此失效——后续 SaveEnter 锁存的新 token 与 deferred 不再一致即被拒绝。
+void clear_ownership_retry_state(uint32_t index) {
+    if (index >= kMaxPlugins) return;
+    g_deferred_ownership_token[index] = 0;
+    g_save_ready_token[index] = 0;
+    if (index >= g_plugin_count) return;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        if (claim.mechanism != contracts::ResourceMechanism::kOwnership) continue;
+        hooks::retry_pending_set(claim.id, false);
+    }
+}
 // optional 依赖暂缓标记：段 1 时图中存在有效 provider 但尚未注册 → 暂缓到 install 循环后复查。
 uint8_t g_optional_pending[kMaxPlugins] = {};
 
@@ -865,15 +887,24 @@ void verify_optional_after_install() {
 // out_backup 为非 nullptr 时回填「原函数入口」：kPtrSlot 为其槽期望值（供 §3.3 backup 交还），
 // 其余机制为 nullptr。返回 nullptr 成功，否则静态错误文本。
 const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintptr_t* out_target,
-                                    void** out_backup) {
+                                    void** out_backup, int32_t* out_code = nullptr) {
     if (out_backup != nullptr) {
         *out_backup = nullptr;
+    }
+    if (out_code != nullptr) {
+        *out_code = 1;
     }
     // kOwnership：claim.handler 指向 OwnershipOps，不经 patch 站点。
     if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
         const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
         if (ops == nullptr || ops->acquire == nullptr) return "ownership ops missing";
-        if (contracts::ownership_acquire(ops, claim.id) != 0) return "ownership acquire rejected";
+        const int32_t acquire_code = contracts::ownership_acquire(ops, claim.id);
+        if (acquire_code != 0) {
+            // 保留 acquire 原始码：host 只对 NotReady 做定向恢复，不靠错误文本推断。
+            if (out_code != nullptr) *out_code = acquire_code;
+            return "ownership acquire rejected";
+        }
+        if (out_code != nullptr) *out_code = 0;
         if (out_target != nullptr) {
             *out_target = 0;
         }
@@ -896,6 +927,7 @@ const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintp
         if (out_backup != nullptr) {
             *out_backup = site.expected_value;
         }
+        if (out_code != nullptr) *out_code = 0;
         return nullptr;
     }
     qol::game::PatchSite site{};
@@ -910,6 +942,7 @@ const char* install_non_entry_claim(const contracts::ResourceClaim& claim, uintp
     if (out_target != nullptr) {
         *out_target = site.addr;
     }
+    if (out_code != nullptr) *out_code = 0;
     return nullptr;
 }
 
@@ -1189,7 +1222,11 @@ bool install_atomic_group(const contracts::PluginDescriptor& plugin,
 // 受限回调失败：物理安装已成立但 backup 未交还，wrapper 不可用，故撤回本条并保持待重试。
 const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
                                  contracts::PluginContext& ctx,
-                                 const contracts::ResourceClaim& claim, const HostDeps& deps) {
+                                 const contracts::ResourceClaim& claim, const HostDeps& deps,
+                                 int32_t* out_code = nullptr) {
+    if (out_code != nullptr) {
+        *out_code = 1;
+    }
     if (claim.mechanism == contracts::ResourceMechanism::kEntryHook) {
         bool followed = false;
         const uintptr_t entry =
@@ -1214,11 +1251,17 @@ const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
     }
     uintptr_t target = 0;
     void* backup = nullptr;
-    const char* error = install_non_entry_claim(claim, &target, &backup);
-    if (error != nullptr) return error;
+    int32_t code = 1;
+    const char* error = install_non_entry_claim(claim, &target, &backup, &code);
+    if (error != nullptr) {
+        // 保留 acquire 原始码：调用方据此区分 NotReady（可等待下一次信号）与永久错误。
+        if (out_code != nullptr) *out_code = code;
+        return error;
+    }
     // 非入口机制成功：与 install_all 一致置 live；kOwnership 无运行期记录，标记显式清除。
     hooks::set_state(claim.id, contracts::ResourceState::kLive);
     hooks::retry_pending_set(claim.id, false);
+    if (out_code != nullptr) *out_code = 0;
     if (backup != nullptr && plugin.on_resource_ready != nullptr &&
         plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
         revoke_resource(claim.id, deps);
@@ -1492,6 +1535,8 @@ bool feature_stop(uint32_t index, bool failed_cleanup) {
     if (index >= g_plugin_count) return false;
     const auto& plugin = g_plugins[index].descriptor;
     if (plugin_has_active_tx(plugin.id)) return false;
+    // 停止/撤销：作废待恢复信号与 pending，后续 SaveEnter 的旧 token 不再被接受。
+    clear_ownership_retry_state(index);
     const auto stopped_token = owner_token_of(plugin.id);
     LifecycleTx* slot = nullptr;
     for (auto& candidate : g_lifecycle_txs) if (!candidate.in_use) { slot = &candidate; break; }
@@ -2348,9 +2393,11 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             }
             infra::status_update(plugin->id, infra::FeatureState::kResolving, false, nullptr);
             const uint32_t index = plugin_index_of(plugin->id);
-            // 新一次转换重新开始逐资源安装：清上一轮的 resource-install 失败记录。
+            // 新一次转换重新开始逐资源安装：清上一轮的 resource-install 失败记录，
+            // 并使上一次 activation 的 ownership 恢复信号失效（旧 token 不再匹配）。
             if (g_feature_mode) {
                 clear_resource_install_error(index);
+                clear_ownership_retry_state(index);
                 refresh_degraded_status(index);
             }
             const char* blocked_error = check_requires(*plugin, index);
@@ -2455,6 +2502,7 @@ bool feature_registry_prepare(const HostDeps& deps) {
     std::memset(g_port_invalid, 0, sizeof(g_port_invalid));
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         clear_resource_install_error(i);
+        clear_ownership_retry_state(i);
         infra::status_register(g_plugins[i].descriptor.id, g_plugins[i].descriptor.version);
         if (!resolve_plugin_ports(i)) g_port_invalid[i] = true;
     }
@@ -2650,6 +2698,20 @@ static uint32_t lifecycle_step_engine() {
         if (g_feature_mode && slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
             out.ok != 0) {
             record_resource_install_error(slot.plugin_index, out.resource_id, out.error);
+            // 启动期 ownership 注入只在 SaveEnter（world 就绪）后成功：NotReady 时保持 Free
+            // 并武装一次性恢复，等下一次 SaveEnter 信号在既有主帧点定向重试。
+            // 只武装 ownership × fail-soft × 明确 NotReady；其他资源/错误不自动武装。
+            if (out.ok == kQolErrNotReady) {
+                const contracts::ResourceClaim* failed_claim = hooks::find_claim(out.resource_id);
+                if (failed_claim != nullptr &&
+                    failed_claim->mechanism == contracts::ResourceMechanism::kOwnership &&
+                    failed_claim->failure == contracts::ResourceFailure::kFailSoft &&
+                    hooks::state_of(out.resource_id) == contracts::ResourceState::kFree) {
+                    hooks::retry_pending_set(out.resource_id, true);
+                    const uint32_t pindex = slot.plugin_index;
+                    g_deferred_ownership_token[pindex] = owner_token_of(plugin.id);
+                }
+            }
         }
 
         // 安装步成功：宿主把原函数入口交还所有者（§3.3 backup 交还）。
@@ -2889,6 +2951,176 @@ uint32_t feature_registry_step() {
     return advanced;
 }
 
+// SaveEnter 信号锁存：只记录当前有效 activation owner token（installing 期间 token 已存在，
+// 因此信号早于安装末步失败到达也不会丢）。不安装资源、不调用插件、不做任何游戏访问。
+void feature_registry_notify_save_ready() {
+    if (!g_feature_mode) return;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        const contracts::QolOwnerToken token = owner_token_of(g_plugins[i].descriptor.id);
+        if (token != 0) g_save_ready_token[i] = token;
+    }
+}
+
+// 资源是否已处于「已安装」终态（live/disabled）。
+bool resource_installed(contracts::ResourceState state) {
+    return state == contracts::ResourceState::kLive ||
+           state == contracts::ResourceState::kDisabled;
+}
+
+// 第一条仍未安装（free/tombstone）的资源；全部安装时返回 nullptr。
+const contracts::ResourceClaim* first_uninstalled_claim(
+    const contracts::PluginDescriptor& plugin) {
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        if (!resource_installed(hooks::state_of(claim.id))) return &claim;
+    }
+    return nullptr;
+}
+
+// 现有 error 记录是否已指向某条未安装资源（按既有 "resource <id>: ..." 文案前缀判定）。
+bool record_names_uninstalled(uint32_t index, const contracts::PluginDescriptor& plugin) {
+    if (index >= kMaxPlugins || !g_resource_error_present[index]) return false;
+    char needle[160];
+    for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+        const contracts::ResourceClaim& claim = plugin.resources[r];
+        if (resource_installed(hooks::state_of(claim.id))) continue;
+        std::snprintf(needle, sizeof(needle), "resource %s:", claim.id);
+        if (std::strstr(g_resource_error_text[index], needle) != nullptr) return true;
+    }
+    return false;
+}
+
+// 恢复结果确定后统一 status error 口径（复用既有 infra::status 与错误文本缓冲，不新增框架）：
+//   · 记录已指向实际未装资源 → 保留该原文（含 resource_ready_failed / 隔离原因）；
+//   · 否则重写为实际第一条未装资源；
+//   · 全部已装 → 清除本路径写过的 error，且不抹其他来源（依赖/级联）的文案。
+void sync_restore_resource_error(uint32_t index) {
+    if (index >= g_plugin_count) return;
+    const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
+    infra::FeatureStatus status{};
+    if (!infra::status_get(plugin.id, &status)) return;
+    if (record_names_uninstalled(index, plugin)) {
+        infra::status_update(plugin.id, status.state, status.enabled, g_resource_error_text[index]);
+        return;
+    }
+    const contracts::ResourceClaim* uninstalled = first_uninstalled_claim(plugin);
+    if (uninstalled != nullptr) {
+        record_resource_install_error(index, uninstalled->id, "install failed");
+        infra::status_update(plugin.id, status.state, status.enabled, g_resource_error_text[index]);
+        return;
+    }
+    clear_resource_install_error(index);
+    // 仅清本路径写过的指针（指向本缓冲或为空），不覆盖其他 owner 设置的 error 文案。
+    if (status.error != nullptr && status.error != g_resource_error_text[index]) return;
+    infra::status_update(plugin.id, status.state, status.enabled, nullptr);
+}
+
+// 定向 ownership 恢复：每个 SaveEnter 信号对每个 owner 最多尝试一次。
+// 消费时机遵循生产帧序（frame_step → 本函数）：信号在安装事务仍在途（同 token）时保留，
+// 只有事务终态、准入通过且确实选出待恢复 claim 才消费；停止/旧 token/永久不适用即清除。
+// 失败不逐帧重试：NotReady 保持武装等下一次自然 SaveEnter；其他码视为永久错误并解除武装。
+uint32_t feature_registry_retry_pending_ownership() {
+    if (!g_feature_mode) return 0;
+    uint32_t attempts = 0;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_save_ready_token[i] == 0) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
+        const contracts::QolOwnerToken signal_token = g_save_ready_token[i];
+        const contracts::QolOwnerToken current = owner_token_of(plugin.id);
+
+        // (1) 信号已无意义：desired 关闭 / owner 失活 / 旧 activation token / 已隔离 → 清除。
+        if (!g_feature_wanted[i] || current == 0 || current != signal_token ||
+            plugin_isolated(plugin)) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        // (2) 同 token 的初始安装仍在途：保留信号，等安装终态后再消费（不丢本次进档信号）。
+        if (plugin_has_active_tx(plugin.id)) continue;
+        // (3) 终态准入。
+        if (g_deferred_ownership_token[i] != current) {
+            // 无待恢复 ownership（未武装或属旧 activation）：信号无目标，清除。
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        if (check_requires(plugin, i) != nullptr) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        infra::FeatureStatus status{};
+        if (!infra::status_get(plugin.id, &status) || !status.enabled ||
+            status.state != infra::FeatureState::kEnabled) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        // (4) 选出仍待恢复的那一条 ownership claim；选不到说明无需恢复 → 清除信号。
+        const contracts::ResourceClaim* target = nullptr;
+        for (uint32_t r = 0; r < plugin.resources_count; ++r) {
+            const contracts::ResourceClaim& claim = plugin.resources[r];
+            if (claim.mechanism != contracts::ResourceMechanism::kOwnership) continue;
+            if (claim.failure != contracts::ResourceFailure::kFailSoft) continue;
+            if (!hooks::retry_pending_get(claim.id)) continue;
+            if (hooks::state_of(claim.id) != contracts::ResourceState::kFree) continue;
+            target = &claim;
+            break;
+        }
+        if (target == nullptr) {
+            g_save_ready_token[i] = 0;
+            continue;
+        }
+        // (5) 消费信号并尝试一次。
+        g_save_ready_token[i] = 0;
+        ++attempts;
+        contracts::PluginContext ctx = make_plugin_context(plugin.id);
+        int32_t code = 1;
+        const char* error = retry_resident_claim(plugin, ctx, *target, g_install_deps, &code);
+        if (error != nullptr) {
+            record_resource_install_error(i, target->id, error);
+            if (code == kQolErrNotReady) {
+                // 表仍未就绪：保持 Free 与武装，等下一次自然 SaveEnter。
+                hooks::retry_pending_set(target->id, true);
+                QOL_LOG_WARN(QolDomain::kCore,
+                             "plugin %s ownership retry deferred (not ready) on %s", plugin.id,
+                             target->id);
+            } else {
+                // 永久错误：解除武装，不再等待后续信号，状态与错误如实上报。
+                hooks::retry_pending_set(target->id, false);
+                g_deferred_ownership_token[i] = 0;
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s ownership retry failed on %s: %s",
+                             plugin.id, target->id, error);
+            }
+            sync_restore_resource_error(i);
+            refresh_degraded_status(i);
+            continue;
+        }
+        // 成功：acquire→Live→清 pending 已由 helper 完成；先通知 owner，再统一写 status。
+        g_deferred_ownership_token[i] = 0;
+        if (plugin.on_resource_ready != nullptr &&
+            plugin.on_resource_ready(ctx, target->id, nullptr) != 0) {
+            // 通知失败：撤回到事实状态（free 或隔离），不留下 Live 假象。
+            const bool revoked = revoke_resource(target->id, g_install_deps);
+            const contracts::ResourceState after = hooks::state_of(target->id);
+            if (after == contracts::ResourceState::kFree) {
+                hooks::retry_pending_set(target->id, true);
+                record_resource_install_error(i, target->id, "resource_ready_failed");
+            } else {
+                // 撤回失败 → 按事实写隔离（不谎报 free/可重试）。
+                (void)revoked;
+                record_resource_install_error(i, target->id, "resource isolated after ready failure");
+            }
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s ownership ready notify failed on %s",
+                         plugin.id, target->id);
+        } else {
+            QOL_LOG_INFO(QolDomain::kCore, "plugin %s ownership restored on %s", plugin.id,
+                         target->id);
+        }
+        // 先按恢复结果统一写 status error（可能清除本路径记录），再复评 degraded，
+        // 避免用已清除的 resource-install 标记把 degraded 留在 true。
+        sync_restore_resource_error(i);
+        refresh_degraded_status(i);
+    }
+    return attempts;
+}
+
 const contracts::PluginDescriptor* find_plugin(const char* id) {
     if (id == nullptr) return nullptr;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
@@ -2949,6 +3181,8 @@ void plugin_registry_reset_for_test() {
         g_cascade_degraded[i] = false;
         g_http_degraded[i] = false;
         g_optional_pending[i] = 0;
+        g_deferred_ownership_token[i] = 0;
+        g_save_ready_token[i] = 0;
         clear_resource_install_error(i);
     }
 }

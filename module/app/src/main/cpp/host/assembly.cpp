@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "patch/call_patch.h"
+#include "patch/save_enter.h"
 #include "infra/log/qol_log.h"
 #include "infra/capabilities.h"
 #include "contracts/character_state.h"
@@ -346,10 +347,16 @@ bool drain_commands_task(int64_t frame, void* ctx) {
     infra::commands_drain();
     // New-model reconciler is the sole lifecycle/frame driver (no legacy lifecycle_step/sync_gates).
     production_feature_frame_step();
+    // 启动期 ownership 恢复：SaveEnter 信号驱动的单次定向重试（非逐帧/非定时）。
+    // 位置固定在 reconciler 之后：desired 关闭、依赖撤销与 stop 已先经 reconciler 处理。
+    feature_registry_retry_pending_ownership();
     // save_route unbind 的 drain 在帧点完成，不自旋。
     save_route::step();
     return true;
 }
+
+// SaveEnter 锁存回调：只记录当前有效 activation token，不做资源安装/插件调用/游戏访问。
+void on_save_enter_ready(void* /*ctx*/) { feature_registry_notify_save_ready(); }
 
 // save_transaction 的 gate 准入缝：gate 与 store 共用一把锁，取锁后按凭据校验，
 // 消除 query→write TOCTOU。
@@ -375,6 +382,8 @@ bool assembly_init() {
     static const qol::game::SaveTransactionGate kSaveTransactionGate{
         nullptr, &save_transaction_gate_admits};
     qol::game::save_transaction_bind_gate(&kSaveTransactionGate);
+    // 启动期 ownership 恢复信号源：一次注册（幂等），回调只锁存 owner token。
+    (void)save_enter_register(&on_save_enter_ready, nullptr);
     // item_count facade 是宿主装配的常驻实现，始终可查；扩展模式由生命周期策略驱动。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
     host_inventory_extension_bind();

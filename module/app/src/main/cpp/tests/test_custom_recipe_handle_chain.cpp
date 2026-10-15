@@ -1092,9 +1092,13 @@ namespace custom_recipe {
 
 void set_context(const qol::contracts::QolGameHost*, const qol::contracts::QolHostSdk*) {}
 
-bool custom_recipe_table_ensure() {
+// production 的 ownership 路径使用 typed 入口；替身保留同样的状态开关与原错误码语义。
+QolResult custom_recipe_table_acquire() {
     ++g_table_ensure_calls;
-    return g_table_ensure_result;
+    if (g_table_ensure_result) return qol::contracts::ok();
+    static constexpr char kNotReadyMessage[] = "fixture table not ready";
+    return qol::contracts::error(kQolErrNotReady, kNotReadyMessage,
+                                 sizeof(kNotReadyMessage) - 1);
 }
 
 void custom_recipe_table_deactivate() {

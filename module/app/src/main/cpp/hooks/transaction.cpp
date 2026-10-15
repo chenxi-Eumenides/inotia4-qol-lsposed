@@ -193,14 +193,15 @@ bool fail_restore(Tx& tx, const char* resource_id, const char* error, TxStep* ou
     return false;
 }
 
-bool fail_install_soft_step(Tx& tx, const contracts::ResourceClaim& claim,
+bool fail_install_soft_step(Tx& tx, const contracts::ResourceClaim& claim, int32_t code,
                             const char* error, TxStep* out) {
     const char* reason = error != nullptr ? error : "mechanism install failed";
     set_state(claim.id, contracts::ResourceState::kFree);
     runtime_clear(claim.id);
     ++tx.step;
     out->resource_id = claim.id;
-    out->ok = 1;
+    // 保留原始 mechanism 失败码（host 依赖 NotReady 等具体码做定向恢复）；非 0 即失败。
+    out->ok = code != 0 ? code : 1;
     out->backup = nullptr;
     out->error = reason;
     out->finished = tx.step >= tx.total;
@@ -211,10 +212,10 @@ bool fail_install_soft_step(Tx& tx, const contracts::ResourceClaim& claim,
     return !out->finished;
 }
 
-bool fail_install_resource(Tx& tx, const contracts::ResourceClaim& claim,
+bool fail_install_resource(Tx& tx, const contracts::ResourceClaim& claim, int32_t code,
                            const char* error, TxStep* out) {
     if (claim.failure == contracts::ResourceFailure::kFailSoft) {
-        return fail_install_soft_step(tx, claim, error, out);
+        return fail_install_soft_step(tx, claim, code, error, out);
     }
     return fail_install(tx, claim.id, error, out);
 }
@@ -238,11 +239,11 @@ bool install_other_step(Tx& tx, const contracts::ResourceClaim& claim, uint32_t 
         return !out->finished;
     }
     if (g_deps.install_other == nullptr) {
-        return fail_install_resource(tx, claim, "mechanism unsupported", out);
+        return fail_install_resource(tx, claim, 1, "mechanism unsupported", out);
     }
     const TxDeps::MechanismOutcome outcome = g_deps.install_other(claim, 0);
     if (outcome.ok != 0) {
-        return fail_install_resource(tx, claim,
+        return fail_install_resource(tx, claim, outcome.ok,
                                      outcome.error != nullptr ? outcome.error
                                                               : "mechanism install failed",
                                      out);
@@ -324,10 +325,10 @@ bool install_step(Tx& tx, TxStep* out) {
     bool followed = false;
     const uintptr_t entry = g_deps.resolve_entry(claim.symbol, &followed);
     if (entry == 0) {
-        return fail_install_resource(tx, claim, "symbol not resolved", out);
+        return fail_install_resource(tx, claim, 1, "symbol not resolved", out);
     }
     if (entry_target_conflicts(entry, claim.id)) {
-        return fail_install_resource(tx, claim, "entry target already occupied", out);
+        return fail_install_resource(tx, claim, 1, "entry target already occupied", out);
     }
 
     // gate 为 nullptr 视为开；gate_on 未注入时一切 gate 视为开。
@@ -339,7 +340,7 @@ bool install_step(Tx& tx, TxStep* out) {
     void* backup = nullptr;
     const int rc = g_deps.hook_fn(reinterpret_cast<void*>(entry), claim.handler, &backup);
     if (rc != 0) {
-        return fail_install_resource(tx, claim, "native hook failed", out);
+        return fail_install_resource(tx, claim, 1, "native hook failed", out);
     }
 
     runtime_set(claim.id, entry, backup);

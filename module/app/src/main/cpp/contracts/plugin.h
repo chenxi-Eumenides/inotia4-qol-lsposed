@@ -195,6 +195,9 @@ struct PluginDescriptor {
     // 可选；受限生命周期回调（§3.3）：资源安装成功后宿主交还 backup（原函数入口）。
     // 只允许缓存 backup/更新门禁等常数时间操作，禁止资源操作、游戏内存读写与跨线程等待。
     // 返回非 0 → 宿主把该资源按还原释放撤回，并把插件置 failed（reason=resource_ready_failed）。
+    // 启动期 ownership 定向恢复也复用本回调：此类调用 backup 为 nullptr，插件须按 ownership
+    // 资源 id 识别并只更新自身门禁（不得调用 table_ensure、注册资源或写游戏内存）；
+    // 恢复成功不重复调用 on_enabled。结构、ABI 与插件发布版本不变。
     int32_t (*on_resource_ready)(PluginContext&, const char* resource_id, void* backup);
     // 端口需求追加在描述符尾部，旧宿主只读取此前字段。
     const QolPortRequirement* ports = nullptr;

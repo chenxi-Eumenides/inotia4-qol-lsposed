@@ -269,6 +269,23 @@ set_target_properties(custom_recipe_handle_chain_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME custom_recipe_handle_chain_tests COMMAND custom_recipe_handle_chain_tests)
 
+# 表 acquire/deactivate 便携核心：就绪分类（NotReady/永久错误）、分配失败、busy 与 deactivate 保留缓冲。
+# 链接 production table.cpp（核心与 Android 入口共用），因此走真实分类/注入路径而非替身。
+add_executable(custom_recipe_table_readiness_tests
+    test_custom_recipe_table_readiness.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table.cpp
+    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
+)
+target_include_directories(custom_recipe_table_readiness_tests PRIVATE ${CPP_DIR})
+# 该 target 以 __ANDROID__ 编译 production table.cpp 的 Android 入口分支：测试自带 g_base 与
+# 槽位 VMA 覆盖的可控内存，直接驱动 custom_recipe_table_acquire()/deactivate()（真实 bridge 证据）。
+target_compile_definitions(custom_recipe_table_readiness_tests PRIVATE __ANDROID__)
+target_compile_features(custom_recipe_table_readiness_tests PRIVATE cxx_std_17)
+set_target_properties(custom_recipe_table_readiness_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME custom_recipe_table_readiness_tests COMMAND custom_recipe_table_readiness_tests)
+
 add_executable(autosell_rules_tests
     test_autosell_rules.cpp
     ${CPP_DIR}/plugins/autosell/rules.cpp

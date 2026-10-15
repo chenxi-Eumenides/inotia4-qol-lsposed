@@ -142,6 +142,11 @@ int main() {
     assert(qol::features::custom_recipe::ui::current_text_scope() == 0);
 
     // 文案查表：scope 与 id 同时命中才返回；页签 scope 不登记（不得改页签名）。
+    using qol::features::custom_recipe::kMemoryTextAlreadyPlaced;
+    using qol::features::custom_recipe::kMemoryTextMaterialInsufficient;
+    using qol::features::custom_recipe::kMemoryTextOnlyJewel;
+    using qol::features::custom_recipe::kPopupIndexMaterialInsufficient;
+    using qol::features::custom_recipe::kPopupIndexOnlyJewel;
     using qol::features::custom_recipe::kTextScopeMaterialMayHaveBeenConsumed;
     using qol::features::custom_recipe::kTextScopePageTab;
     using qol::features::custom_recipe::kTextScopeQualityUnavailable;
@@ -149,9 +154,16 @@ int main() {
     using qol::features::custom_recipe::text_lookup;
     assert(std::strcmp(text_lookup(kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
     assert(text_lookup(kTextScopePageTab, 35291) == nullptr);
-    assert(text_lookup(kTextScopeQualityUnavailable, 97) != nullptr);
-    assert(text_lookup(kTextScopeRecipeButton, 97) == nullptr);
-    assert(text_lookup(kTextScopeMaterialMayHaveBeenConsumed, 94) != nullptr);
+    // 消费者匹配键是 MEMORYTEXT id（35413/35410），不是弹窗索引（97/94）。
+    assert(text_lookup(kTextScopeQualityUnavailable, kMemoryTextOnlyJewel) != nullptr);
+    assert(text_lookup(kTextScopeRecipeButton, kMemoryTextOnlyJewel) == nullptr);
+    assert(text_lookup(kTextScopeMaterialMayHaveBeenConsumed, kMemoryTextMaterialInsufficient) !=
+           nullptr);
+    // 弹窗索引域负测：索引不得在任一私有 scope 命中（否则会误改其它弹窗文本）。
+    assert(text_lookup(kTextScopeQualityUnavailable, kPopupIndexOnlyJewel) == nullptr);
+    assert(text_lookup(kTextScopeMaterialMayHaveBeenConsumed, kPopupIndexMaterialInsufficient) ==
+           nullptr);
+    assert(text_lookup(kTextScopeMaterialMayHaveBeenConsumed, kMemoryTextAlreadyPlaced) == nullptr);
 
     // 内部结果契约：11 个既有操作 + 追加的失败阶段枚举保持非零语义。
     using qol::features::custom_recipe::result::CraftExecuteResult;

@@ -54,6 +54,19 @@
 - **边界不变**：CR01 的阶段划分、`save` 失败后不承诺清理 handle、扣料后允许不回滚、12 成员结果 API 表、无新 provider / Host ABI 均保持。
 - **本轮证据与状态**：受影响 7 target 重新构建后 **7/7 PASS**（`.tmp/custom-recipe-fix-20261015/final-ctest.log`，确保畸形 handle 分支进入二进制）；`check_arch` 通过、`check_http_routes` 147/147；`scripts/build-debug.sh --offline` 成功、`scripts/patch-apk.sh` 成功 3/失败 0，canonical 交付入口 `output/Inotia4_v1.3.2_monster_v31_lspatched.apk`（SHA-256 `00dcbd36b16b27efe517dc99a374b6ccd1e797669d3683b04ca3b2921def84c2`，内嵌模块 `6ef35a38129e…baa77`）。已 `install -r` 并重启：`/api/health` ready / monster v31、`screen=main_menu`、运行身份 `192/0.7.13`/`sha256=6ef35a38129e…` 与模块严格一致、`registered=28 install_failed=0`。本轮未执行合成/视觉手测；部署身份≠业务验收，**VM 仍 NOT_ACCEPTED**。
 
+### 3.4 子集 A：启动恢复与表状态域（2026-10-15；实现核对新增 P1-A/P1-B）
+
+> P1-A/P1-B 是**更早实现核对新发现**的缺陷项（非 CR01–CR11 重定义或重编号），也不改变 static-audit 的既有 finding。
+> Gate 1A 另列 **G1A-01/G1A-02**（attempt1 阻断项）与 P3（诊断口径）；两组编号互不覆盖。
+
+- **P1-A（Android bridge 自置 busy）**：修前 bridge 先置 `g_state.busy = true` 再调核心，被 core 首行 `busy → kBusy` 自我拒绝，真实 Android acquire 恒失败；旧「纯 core」8/8 未覆盖 bridge。修法：busy 判定/置位/复位收敛到 core 内 RAII `BusyGuard`（任何 return 都复位），bridge 只装配槽位后调用 core（`table.cpp:246-261,465-477`）。
+- **P1-B（缺表/元数据分类须先于状态变更）**：修前「合法重激活」与「游戏换表清状态」排在分类之前，非法 probe 可经「已有 buffer」捷径被判 OK 且拒绝路径会改写模块状态。修法（实际顺序，`table.cpp:246-343`）：读取 probe → 分类（NotReady/Unsupported 直接返回、不改模块状态）→ 合法重激活 → 换表清理（旧缓冲不 free）→ 抓组位快照 → **书名册字节不变式（在新注入前校验）** → 分配 → 注入。不得读成「所有永久错误发生前没有任何模块状态/RAII 变化」——快照式校验位于快照之后。
+- **启动期 ownership 定向恢复（含 G1A-02 修法）**：仅 `ownership × fail-soft × 明确 kNotReady × Free` 武装一次；SaveEnter 只锁存 token，Host 主帧在 reconciler 之后单 claim 恢复 → Live → `on_resource_ready(ownership, nullptr)` 只重算业务门禁；不重装 12 hook、不改 desired/Store、不重复 install/on_enabled（`host/plugin_registry.{h,cpp}`、`host/assembly.cpp:349-352,359,386`、`contracts/plugin.h:198`、`plugin.cpp:258-270`）。信号只在**事务终态、准入通过、已选出目标 claim**后消费；同 token 初始安装在途时保留信号（`host/plugin_registry.cpp:3022-3122`），逐帧 `step → retry` 测试覆盖「末步前到达不丢、恢复恰好一次、hooks 不重装」。
+- **本批范围**：MEMORYTEXT 域分离、文本按压轮廓校准、合成启动恢复、表 typed 状态域为**可交付子集 A**；无关项仍未实现：双 TEXT 工厂与 Debug 并列展示、mainmenu 精确字号 20→30、高度 ×1.5、容器 clip。
+- **证据与状态（`validation/status-r2.txt`）**：跨 lane 生产链 10 目标 CTest **10/10**；整树 **143 目标全部编译通过**、全量 CTest **141/143**（红项仍是 `core_api_lifecycle_tests` 旧 `kHidden` 断言与未改动的 `help_page_tests` 布局断言，源/测试相对 HEAD 未改；先前 `config-native-owner` mkdtemp 失败已消除）；`check_http_routes` 147 条、缺失/额外 0 无漂移；`check_arch` **全部通过**。原 13 条 `resource_unknown_symbol` 是扫描器把 `recipe_ptr_slot`/`mixture_ptr_slot` 业务字段名当机制标识，已按机制完整标识符/调用形态边界修扫描器（非改名/豁免/freeze），12 正反例单测通过。
+- **Gate 1A**：attempt1 暂不通过（G1A-01 P1 production `set_context` 遗漏、G1A-02 P2 installing 期信号提前消费），两项已修并补证据；**attempt2 已正式 PASS**（G1A-01/02/P3 关闭、无新材料阻断），**VM 仍 NOT_ACCEPTED**。
+- **状态**：本批 Debug 构建成功（`output/inotia4_qol_lsposed_debug_2610151556_ed9081c4c54e.apk`，SHA-256 `ed9081c4c54e4bd5e0829ae8749d58d6a70e5101a0428f131cb299e953d29fd2`，`.tmp/ui-craft-regression-20261015/validation/build-debug.log:272-276`）；**未集成打包/未安装、无新运行 SHA** → **NOT_ACCEPTED**。
+
 ## 4. 启动、失败回滚与停用顺序（已实现事实）
 
 `plugin_install`（`plugin.cpp:122-210`）在启用业务门禁前完成：`sdk`/`game`、两条 port 的 ABI/函数、commands 句柄、required capabilities（`item.facts` 含 size 校验）、text 订阅、两个 typed handler、`ui::bind`。任一步失败按逆序幂等清理本次注册（退订文本、注销 handler、`ui::clear()`），不依赖 Host 后帧清理。install 不打开业务门禁；`plugin_on_enabled` 只在 `ownership_ready()` 且 `ui::core_backups_ready()` 时开门禁。

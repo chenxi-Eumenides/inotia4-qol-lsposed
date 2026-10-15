@@ -70,6 +70,15 @@ void feature_registry_set_wanted(const char*, bool);
 uint32_t feature_registry_step();
 bool feature_registry_owner_ready(const char*);
 
+// Host 私有：SaveEnter 信号锁存。只记录当前有效 activation owner token（installing 期间
+// token 已存在，故信号早于安装末步失败到达也不会丢）；不安装资源、不调用插件、无游戏访问。
+void feature_registry_notify_save_ready();
+// Host 私有：对「启动期 ownership NotReady 且仍为 Free」的 claim 做一次定向恢复。
+// 每 SaveEnter 信号每 owner 至多尝试一次（非逐帧/非定时）；返回本次实际尝试次数。
+// 仅在 feature-mode、wanted、依赖就绪、owner Enabled、无在途事务、未停止/隔离、
+// 当前 token 与 deferred/save-ready 一致时准入；不向插件 SDK 暴露。
+uint32_t feature_registry_retry_pending_ownership();
+
 // 未注册返回 nullptr。
 const contracts::PluginDescriptor* find_plugin(const char* id);
 

@@ -120,39 +120,43 @@ bool item_is_stackable(contracts::QolItemHandle handle) {
 }
 
 // 失败提示：本插件自有文案经本地 scope 生效，不改动共享文本表内容。
+// 弹窗走「弹窗索引域」（游戏按 index 读 TEXTDATABASE 行选出 MEMORYTEXT id），
+// 文案替换走「MEMORYTEXT 域」（消费者匹配该 id）：两域映射见 text_table.h 的 kPopupTextIds。
+void craft_show_popup(uint32_t popup_index, int32_t scope) {
+    TextScopeGuard scope_guard(scope);
+    if (log_budget_take()) {
+        log_message(kLogDebug, "craft popup index=%u memoryTextId=%u", popup_index,
+                    popup_memory_text_id(popup_index));
+    }
+    craft_show_text(popup_index);
+}
+
 void craft_show_quality_unavailable() {
-    TextScopeGuard scope(kTextScopeQualityUnavailable);
-    craft_show_text(kQualityUnavailablePopupId);
+    craft_show_popup(kPopupIndexOnlyJewel, kTextScopeQualityUnavailable);
 }
 
 void craft_show_material_consumed() {
-    TextScopeGuard scope(kTextScopeMaterialMayHaveBeenConsumed);
-    craft_show_text(kMaterialMayHaveBeenConsumedPopupId);
+    craft_show_popup(kPopupIndexMaterialInsufficient, kTextScopeMaterialMayHaveBeenConsumed);
 }
 
 void craft_show_product_prepare_failed() {
-    TextScopeGuard scope(kTextScopeProductPrepareFailed);
-    craft_show_text(kProductPrepareFailedPopupId);
+    craft_show_popup(kPopupIndexMaterialInsufficient, kTextScopeProductPrepareFailed);
 }
 
 void craft_show_recipe_mismatch() {
-    TextScopeGuard scope(kTextScopeRecipeMismatch);
-    craft_show_text(kRecipeMismatchPopupId);
+    craft_show_popup(kPopupIndexMaterialInsufficient, kTextScopeRecipeMismatch);
 }
 
 void craft_show_craft_unavailable() {
-    TextScopeGuard scope(kTextScopeCraftUnavailable);
-    craft_show_text(kCraftUnavailablePopupId);
+    craft_show_popup(kPopupIndexMaterialInsufficient, kTextScopeCraftUnavailable);
 }
 
 void craft_show_state_changed() {
-    TextScopeGuard scope(kTextScopeStateChanged);
-    craft_show_text(kStateChangedPopupId);
+    craft_show_popup(kPopupIndexMaterialInsufficient, kTextScopeStateChanged);
 }
 
 void craft_show_place_write_failed() {
-    TextScopeGuard scope(kTextScopePlaceWriteFailed);
-    craft_show_text(kPlaceWriteFailedPopupId);
+    craft_show_popup(kPopupIndexAlreadyPlaced, kTextScopePlaceWriteFailed);
 }
 
 // YesNo 取消回调（void() 形态，**必须有效**：adapter 要求 ok/cancel 都非空，否则拒绝创建弹窗）。

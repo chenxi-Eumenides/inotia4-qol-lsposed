@@ -146,7 +146,8 @@ MechanismOutcome fake_install_other(const ResourceClaim& claim, uintptr_t target
     g_other_last_claim = &claim;
     g_other_last_target = target;
     if (g_other_install_rc != 0) {
-        return MechanismOutcome{1, "primitive rejected"};
+        // 原始机制码原样返回（host 依赖 NotReady 等具体码做定向恢复）。
+        return MechanismOutcome{g_other_install_rc, "primitive rejected"};
     }
     return MechanismOutcome{0, nullptr};
 }
@@ -1073,6 +1074,48 @@ void test_rollback_releases_free_entry_with_runtime() {
     CHECK(state_of("hook:rb2:A") == ResourceState::kFree);
 }
 
+// FailSoft 软失败步必须保留原始 mechanism 失败码（host 据此区分 NotReady 与永久错误）；
+// 事务仍继续并成功终态，资源保持 Free。
+void test_fail_soft_preserves_mechanism_code() {
+    reset_all();
+    set_deps();
+    ResourceClaim claim = make_claim("patch:soft:code", "patch_soft_code", "gateOn");
+    claim.mechanism = ResourceMechanism::kCallPatch;
+    claim.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(claim));
+
+    g_other_install_rc = 3;  // kQolErrNotReady
+    const uint64_t tx = tx_begin("patch_soft_code", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished);
+    CHECK(step.ok == 3);  // 原码保留，不再统一写成 1
+    CHECK(step.error != nullptr && std::strcmp(step.error, "primitive rejected") == 0);
+    CHECK(state_of("patch:soft:code") == ResourceState::kFree);
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kSucceeded);
+}
+
+// FailSoft 入口 hook 软失败保持既有 1（无 mechanism 码可保留），语义不变。
+void test_fail_soft_entry_hook_keeps_generic_code() {
+    reset_all();
+    set_deps();
+    ResourceClaim claim = make_claim("hook:soft:code", "hook_soft_code");
+    claim.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(claim));
+
+    g_hook_fail_at = 1;
+    const uint64_t tx = tx_begin("hook_soft_code", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.finished && step.ok == 1);
+    CHECK(step.error != nullptr && std::strcmp(step.error, "native hook failed") == 0);
+    CHECK(state_of("hook:soft:code") == ResourceState::kFree);
+}
+
 // tx_abort_install：仅 Running 安装事务可中止；中止即回滚并终态化，禁止后续步继续安装。
 void test_tx_abort_install_stops_running_install() {
     reset_all();
@@ -1151,6 +1194,8 @@ int main() {
     test_fail_soft_non_entry_mechanism();
     test_rollback_skips_safely_revoked_entry();
     test_rollback_releases_free_entry_with_runtime();
+    test_fail_soft_preserves_mechanism_code();
+    test_fail_soft_entry_hook_keeps_generic_code();
     test_tx_abort_install_stops_running_install();
     test_tx_abort_install_rejects_non_install();
     std::printf("hooks_transaction: pass=%d fail=%d\n", g_pass, g_fail);
