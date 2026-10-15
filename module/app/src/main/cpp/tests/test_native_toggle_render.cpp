@@ -123,7 +123,42 @@ int main() {
         assert(std::abs(2 * press[0] + press[4] * percent / 100 -
                         (2 * base[0] + base[4] * percent / 100)) <= 1);
         assert(std::abs(2 * press[1] + press[5] * percent / 100 -
-                        (2 * base[1] + base[5] * percent / 100)) <= 1);
+                         (2 * base[1] + base[5] * percent / 100)) <= 1);
+    }
+    for (int32_t value = 0; value <= 1; ++value) {
+        setup();
+        set_loc(0x0f, 2, 491, 246, 87, 0, 0);
+        set_loc(0x10, 251, 491, 246, 87, 0, 0);
+        set_loc(0x9, 578, 298, 246, 87, 0, 0);
+        set_loc(0x7, 578, 192, 262, 103, 0, 0);
+        const UiRect rect{-100, -80, 220, 80};
+        assert(ui_draw_native_toggle(rect, value, 0));
+        const auto normal = g_draws;
+        g_draws.clear();
+        assert(ui_draw_native_toggle(rect, value, 1));
+        assert(g_draws.size() == normal.size() + 1);
+        for (size_t i = 0; i < normal.size(); ++i) assert(g_draws[i].args == normal[i].args);
+        const auto& base = normal.front().args;
+        const auto& press = g_draws.back().args;
+        assert(base[10] == 89 && press[10] == 89);
+        // Independently measured source alpha bounds, transformed at 89%.
+        // A 262x103 canvas refit into rect would fail these visible-edge checks.
+        const int32_t normal_left = base[0] + 13 * 89 / 100;
+        const int32_t normal_right = base[0] + 233 * 89 / 100;
+        const int32_t normal_top = base[1] + 13 * 89 / 100;
+        const int32_t normal_bottom = base[1] + 74 * 89 / 100;
+        const int32_t pressed_left = press[0] + 21 * 89 / 100;
+        const int32_t pressed_right = press[0] + 241 * 89 / 100;
+        const int32_t pressed_top = press[1] + 21 * 89 / 100;
+        const int32_t pressed_bottom = press[1] + 82 * 89 / 100;
+        assert(normal_right - normal_left == 196 && normal_bottom - normal_top == 54);
+        assert(pressed_left == normal_left && pressed_right == normal_right);
+        assert(pressed_top == normal_top && pressed_bottom == normal_bottom);
+        // Release/move-out uses the same normal geometry, without a stale overlay.
+        g_draws.clear();
+        assert(ui_draw_native_toggle(rect, value, 0));
+        assert(g_draws.size() == normal.size());
+        for (size_t i = 0; i < normal.size(); ++i) assert(g_draws[i].args == normal[i].args);
     }
 
     setup();

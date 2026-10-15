@@ -299,17 +299,34 @@ bool load_press_geometry(const ButtonGeometry& button, PressGeometry* out) {
     // Title loc 7 is the orange capsule with an inset white rim and a baked dash.
     // These source splits preserve its contour but omit the dash under arbitrary labels.
     if (out->layer.width != 262 || out->layer.height != 103) return false;
-    const int32_t body_height = button.horizontal_slice ? button.layer.height : kTextButtonBodyHeight;
-    out->percent = body_height * button.percent / out->layer.height / 10 * 10;
-    if (out->percent < 10 || out->percent > kMaxScalePercent) return false;
-    out->width = button.horizontal_slice ? button.draw_width :
-        kTextButtonBodyWidth * button.percent / 100;
-    const int32_t step = out->percent / 10;
-    out->width = out->width / step * step;
-    const int32_t height = out->layer.height * out->percent / 100;
-    const int32_t button_height = button.layer.height * button.percent / 100;
-    out->x = button.image_x + (button.draw_width - out->width) / 2;
-    out->y = button.image_y + (button_height - height) / 2;
+    // Monster v31 alpha > 128: the normal capsule is 75 px tall inside its
+    // 77 px guarded crop; loc 7's visible body is [21,241)x[21,82), 220x61.
+    // Match body to body, leaving the pressed halo outside that visible contour.
+    // Rounding the canvas scale down to tens shrinks both contour and halo.
+    constexpr int32_t kNormalVisibleHeight = 75;
+    constexpr int32_t kPressedBodyHeight = 61;
+    constexpr int32_t kPressedBodyInset = 21;
+    out->percent = (kNormalVisibleHeight * button.percent + kPressedBodyHeight / 2) /
+        kPressedBodyHeight;
+    constexpr int32_t kMaxPressedScalePercent =
+        (kNormalVisibleHeight * kMaxScalePercent + kPressedBodyHeight / 2) / kPressedBodyHeight;
+    if (out->percent < 2 || out->percent > kMaxPressedScalePercent) return false;
+    const int64_t body_width = button.horizontal_slice ? button.draw_width :
+        scale_round(kTextButtonBodyWidth, button.percent);
+    const int64_t body_height = scale_round(kNormalVisibleHeight, button.percent);
+    const int64_t body_x = button.image_x + (button.horizontal_slice ? 0 :
+        scale_round(kTextButtonBodyOffsetX, button.percent));
+    const int64_t body_y = button.image_y + (button.horizontal_slice ? 0 :
+        scale_round(kTextButtonBodyOffsetY, button.percent));
+    const int64_t width = body_width + 2 * scale_round(kPressedBodyInset, out->percent);
+    const int64_t height = scale_round(out->layer.height, out->percent);
+    const int64_t x = body_x + (body_width - width) / 2;
+    const int64_t y = body_y + (body_height - height) / 2;
+    if (width > INT32_MAX || x < INT32_MIN || y < INT32_MIN ||
+        x > INT32_MAX - width || y > INT32_MAX - height) return false;
+    out->width = static_cast<int32_t>(width);
+    out->x = static_cast<int32_t>(x);
+    out->y = static_cast<int32_t>(y);
     return out->width > 2 * (50 * out->percent / 100);
 }
 
@@ -330,7 +347,11 @@ void draw_press_geometry(const PressGeometry& press) {
         const int32_t height = band == 0 ? 40 : band == 1 ? 20 : 43;
         const int32_t sx = band == 1 ? 30 : 50;
         const int32_t available = band == 1 ? 20 : 160;
-        const int32_t y = press.y + sy * press.percent / 100;
+        // Join destination bands using their actual integer extents. Independent
+        // floors of 40%, 20%, and 60% could otherwise leave a one-pixel gap.
+        const int32_t y = press.y + (band == 2 ?
+            40 * press.percent / 100 + 20 * press.percent / 100 :
+            sy * press.percent / 100);
         int32_t x = press.x + cap;
         const int32_t end = press.x + press.width - cap;
         while (x < end) {

@@ -93,8 +93,9 @@ bool ui_draw_native_toggle(UiRect rect, int32_t value, uint8_t pressed) {
     std::array<int32_t, 3> layer_ys{};
     for (size_t i = 0; i < layer_count; ++i) {
         const ToggleLayer& layer = layers[i];
-        // Loc 7 includes an 8-source-pixel halo on each edge (262x103 versus
-        // 246x87). Center each source canvas, not its unrelated atlas anchor.
+        // Monster v31 alpha>128 bodies are both 220x61: base [13,233)x[13,74),
+        // loc 7 [21,241)x[21,82). Its extra 8 px per canvas edge is halo, not
+        // a larger body to fit back into rect. Keep base scale and center only.
         const int64_t layer_x = x + (static_cast<int64_t>(base.width) - layer.width) * percent / 200;
         const int64_t layer_y = y + (static_cast<int64_t>(base.height) - layer.height) * percent / 200;
         if (layer_x < INT32_MIN || layer_x > INT32_MAX || layer_y < INT32_MIN ||

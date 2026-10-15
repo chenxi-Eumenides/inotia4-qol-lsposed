@@ -139,6 +139,50 @@ void setup() {
     std::memcpy(g_toggle_location.data() + IMAGE_LOC_OFFSET_Y, &zero, sizeof(zero));
 }
 
+void assert_visible_press_contour(const std::vector<DrawCall>& normal,
+                                  const std::vector<DrawCall>& overlays) {
+    assert(!normal.empty() && overlays.size() >= 2);
+    const auto& base = normal.front().args;
+    const int32_t scale = base[10];
+    // Independent artwork measurements, not the renderer's halo canvas:
+    // normal UI_006 capsule alpha>128: x[33,438), y[22,97) relative to loc 1;
+    // pressed title loc 7 alpha>128: x[21,241), y[21,82).
+    const bool sliced = normal.size() == 3;
+    const int32_t normal_left = base[0] + (sliced ? 0 : 33 * scale / 100);
+    const int32_t normal_top = base[1] + (sliced ? 0 : 22 * scale / 100);
+    int32_t normal_width = 405 * scale / 100;
+    if (sliced) {
+        normal_width = 0;
+        for (const auto& slice : normal) normal_width += slice.args[4] * scale / 100;
+    }
+    const int32_t normal_height = 75 * scale / 100;
+    const auto& left = overlays[0].args;
+    const auto& right = overlays[1].args;
+    const int32_t pressed_left = left[0] + 21 * left[10] / 100;
+    const int32_t pressed_right = right[0] + 29 * right[10] / 100;
+    const int32_t pressed_top = left[1] + 21 * left[10] / 100;
+    const int32_t pressed_bottom = left[1] + 82 * left[10] / 100;
+    assert(std::abs(pressed_left - normal_left) <= 2);
+    assert(std::abs(pressed_right - normal_left - normal_width) <= 2);
+    assert(std::abs(pressed_top - normal_top) <= 2);
+    assert(std::abs(pressed_bottom - normal_top - normal_height) <= 2);
+    assert(std::abs((pressed_right - pressed_left) - normal_width) <= 2);
+    assert(std::abs((pressed_bottom - pressed_top) - normal_height) <= 2);
+    // Caps must not change contour between the three central vertical bands.
+    // Middle fill repeats the proven orange strip, never the baked dash.
+    size_t middle_slices = 0;
+    for (const auto& overlay : overlays) {
+        const auto& a = overlay.args;
+        assert(a[2] + a[4] <= 578 + 53 || a[2] >= 578 + 209 ||
+               a[3] + a[5] <= 192 + 48 || a[3] >= 192 + 55);
+        if (a[3] == 192 + 40 && a[5] == 20) {
+            assert(a[2] == 578 + 30 && a[4] > 0 && a[4] <= 20);
+            ++middle_slices;
+        }
+    }
+    assert(middle_slices > 0);
+}
+
 }  // namespace
 
 decltype(fn_imgsys_unit_load) fn_imgsys_unit_load = &fake_load;
@@ -381,9 +425,8 @@ int main() {
         for (const auto& overlay : overlays) {
             const auto& a = overlay.args;
             assert(overlay.group == &g_toggle_group);
-            assert(a[0] >= more_games_rect.x && a[1] >= more_games_rect.y);
-            assert(a[0] + a[4] * a[10] / 100 <= more_games_rect.x + more_games_rect.w);
-            assert(a[1] + a[5] * a[10] / 100 <= more_games_rect.y + more_games_rect.h);
+            // Halo is allowed outside the hit rect; opaque contour, not the
+            // full low-alpha source canvas, must match the normal capsule.
             // No sampled source rectangle may intersect the baked white dash.
             assert(a[2] + a[4] <= 578 + 53 || a[2] >= 578 + 209 ||
                    a[3] + a[5] <= 192 + 48 || a[3] >= 192 + 55);
@@ -396,10 +439,13 @@ int main() {
             assert(a[6] == 0 && a[7] == 0 && a[8] == 1 && a[9] == 0);
         }
         assert(pressed ? middle_band_slices > 0 : middle_band_slices == 0);
+        if (pressed) assert_visible_press_contour(g_draws, overlays);
     }
 
     // Degenerate tiny rects stay rejected instead of drawing a sliver.
-    for (const UiRect rect : {full_button, settings_toggle_rect, UiRect{0, 13, 300, 65}}) {
+    for (const UiRect rect : {full_button, settings_toggle_rect, UiRect{0, 13, 300, 65},
+                             UiRect{-100, -80, 220, 48}, UiRect{53, 71, 440, 160},
+                             UiRect{0, 0, 1880, 448}}) {
         setup();
         assert(ui_draw_native_text_button_background(rect, 0));
         const auto normal = g_draws;
@@ -409,12 +455,15 @@ int main() {
         for (size_t i = 0; i < normal.size(); ++i) {
             assert(g_draws[i].args == normal[i].args && g_draws[i].group == normal[i].group);
         }
-        const auto& left = g_draws[normal.size()].args;
-        const auto& right = g_draws[normal.size() + 1].args;
-        const int32_t overlay_right = right[0] + right[4] * right[10] / 100;
-        assert(std::abs(left[0] + overlay_right - (2 * rect.x + rect.w)) <= 2);
+        assert_visible_press_contour(normal, {g_draws.begin() + normal.size(), g_draws.end()});
         assert(g_clip_calls == 0 && g_reset_clip_calls == 0);
         assert(g_draws.back().group == &g_toggle_group);
+        g_draws.clear();
+        // Pressed=false is also the engine move-out/release draw input. Both
+        // existing appearances must restore the identical normal background.
+        assert(ui_draw_native_text_button_background(rect, 0));
+        assert(g_draws.size() == normal.size());
+        for (size_t i = 0; i < normal.size(); ++i) assert(g_draws[i].args == normal[i].args);
         setup();
         g_press_available = false;
         assert(!ui_draw_native_text_button_background(rect, 1) && g_draws.empty());
