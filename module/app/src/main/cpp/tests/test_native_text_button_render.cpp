@@ -19,6 +19,69 @@ struct DrawCall {
     void* group;
 };
 
+#include "fixtures/native_text_button_pressed_rgba.inc"
+
+PressedRgba fixture_pixel(int32_t x, int32_t y) {
+    if (x >= 99 && x <= 120 && y >= 39 && y <= 60) {
+        const char* row = kPressedRgbaGuardRows[static_cast<size_t>(y - 39)];
+        assert(std::strlen(row) == 22);
+        const int32_t index = row[x - 99] - '0';
+        assert(index >= 0 && index < static_cast<int32_t>(kPressedRgbaPalette.size()));
+        return kPressedRgbaPalette[static_cast<size_t>(index)];
+    }
+    assert(y == 51 && x >= 29 && x <= 50);
+    return kPressedEdgeGuardRow[static_cast<size_t>(x - 29)];
+}
+
+bool horizontally_uniform_rgba_with_guard(int32_t x, int32_t width, int32_t y) {
+    const PressedRgba first = fixture_pixel(x - 1, y);
+    for (int32_t sample_x = x; sample_x <= x + width; ++sample_x) {
+        if (fixture_pixel(sample_x, y) != first) return false;
+    }
+    return true;
+}
+
+void test_pressed_rgba_fixture() {
+    assert(std::strlen(kPressedRgbaPngSha256) == 64);
+    for (int32_t y = 39; y <= 60; ++y) {
+        assert(horizontally_uniform_rgba_with_guard(100, 20, y));
+    }
+    // A strip can have uniform RGB while repeating an unwanted alpha ramp.
+    for (const auto& pixel : kPressedEdgeGuardRow) {
+        assert(pixel[0] == 255 && pixel[1] == 157 && pixel[2] == 0);
+    }
+    assert(!horizontally_uniform_rgba_with_guard(30, 20, 51));
+    assert(fixture_pixel(30, 51)[3] - fixture_pixel(49, 51)[3] == 69);
+    const PressedRgba transparent_white{255, 255, 255, 0};
+    assert(fixture_pixel(100, 51) == transparent_white);
+    int32_t alpha_sum = 0;
+    uint8_t min_alpha = 255;
+    uint8_t max_alpha = 0;
+    for (int32_t y = 40; y < 60; ++y) {
+        for (int32_t x = 100; x < 120; ++x) {
+            const auto pixel = fixture_pixel(x, y);
+            min_alpha = std::min(min_alpha, pixel[3]);
+            max_alpha = std::max(max_alpha, pixel[3]);
+            alpha_sum += pixel[3];
+            if (pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 255) assert(pixel[3] == 0);
+        }
+    }
+    assert(min_alpha == 0 && max_alpha == 10 && alpha_sum == 920);
+}
+
+void assert_middle_strip_rgba(const DrawCall& draw) {
+    const auto& a = draw.args;
+    assert(a[2] == 678 && a[3] == 232 && a[4] > 0 && a[4] <= 20 && a[5] == 20);
+    // Check the actual selected source rectangle, including bilinear neighbors,
+    // against independent PNG samples rather than the production source constant.
+    for (int32_t y = a[3] - 192 - 1; y <= a[3] - 192 + a[5]; ++y) {
+        assert(horizontally_uniform_rgba_with_guard(a[2] - 578, a[4], y));
+        const auto pixel = fixture_pixel(a[2] - 578, y);
+        assert(pixel[3] <= 13);
+        if (pixel[0] == 255 && pixel[1] == 255 && pixel[2] == 255) assert(pixel[3] == 0);
+    }
+}
+
 alignas(8) std::array<uint8_t, 0x18> g_location{};
 alignas(8) std::array<uint8_t, 0x18> g_toggle_location{};
 alignas(8) std::array<int32_t, 6> g_press_location{578, 192, 262, 103, 0, 0};
@@ -168,16 +231,18 @@ void assert_visible_press_contour(const std::vector<DrawCall>& normal,
     assert(std::abs(pressed_bottom - normal_top - normal_height) <= 2);
     assert(std::abs((pressed_right - pressed_left) - normal_width) <= 2);
     assert(std::abs((pressed_bottom - pressed_top) - normal_height) <= 2);
-    // Caps must not change contour between the three central vertical bands.
-    // Middle fill repeats the proven orange strip, never the baked dash.
+    // Preserve caps/top/bottom source slices; only the middle strip changes.
     size_t middle_slices = 0;
     for (const auto& overlay : overlays) {
         const auto& a = overlay.args;
-        assert(a[2] + a[4] <= 578 + 53 || a[2] >= 578 + 209 ||
-               a[3] + a[5] <= 192 + 48 || a[3] >= 192 + 55);
         if (a[3] == 192 + 40 && a[5] == 20) {
-            assert(a[2] == 578 + 30 && a[4] > 0 && a[4] <= 20);
+            assert_middle_strip_rgba(overlay);
             ++middle_slices;
+        } else if (a[5] == 103) {
+            assert((a[2] == 578 || a[2] == 790) && a[3] == 192 && a[4] == 50);
+        } else {
+            assert(a[2] == 628 && a[4] > 0 && a[4] <= 160);
+            assert((a[3] == 192 && a[5] == 40) || (a[3] == 252 && a[5] == 43));
         }
     }
     assert(middle_slices > 0);
@@ -205,6 +270,7 @@ bool game_host_is_main_thread() { return g_main_thread; }
 int main() {
     using qol::game::ui_draw_native_text_button_background;
     using qol::game::ui_draw_native_text_button_label;
+    test_pressed_rgba_fixture();
     setup();
     assert(ui_draw_native_text_button_background({0, 0, 470, 112}, 0));
     assert(g_draws.size() == 1 && g_loads == 1);
@@ -336,8 +402,8 @@ int main() {
             assert(next.args[0] == slice.args[0] + slice.args[4] * slice.args[10] / 100);
         }
     }
-    // UI_006.png.jpg has RGB (not alpha) pixels. Its gray capsule spans x=35..438, y=146..220;
-    // x=439 and y=221..222 are black sampling guards within loc 0x01's source bounds.
+    // UI_006.png.jpg is RGBA. The crop includes the capsule contour and neighboring
+    // sampling guards; transparent RGB values alone do not identify visible pixels.
     // Compare drawn capsule pixels to the toggle bounds while ensuring those outer pixels are
     // sampled. The capsule targets its own 212-logical body model (drawn 189 wide at 70%,
     // shifted +3 to stay centered) rather than the native toggle's 220 model, because integer
@@ -427,13 +493,8 @@ int main() {
             assert(overlay.group == &g_toggle_group);
             // Halo is allowed outside the hit rect; opaque contour, not the
             // full low-alpha source canvas, must match the normal capsule.
-            // No sampled source rectangle may intersect the baked white dash.
-            assert(a[2] + a[4] <= 578 + 53 || a[2] >= 578 + 209 ||
-                   a[3] + a[5] <= 192 + 48 || a[3] >= 192 + 55);
             if (a[3] == 192 + 40 && a[5] == 20) {
-                // Monster v31: [30,50)x[40,60) is uniform orange; x=26
-                // includes white rim pixels that would repeat across the fill.
-                assert(a[2] == 578 + 30 && a[4] > 0 && a[4] <= 20);
+                assert_middle_strip_rgba(overlay);
                 ++middle_band_slices;
             }
             assert(a[6] == 0 && a[7] == 0 && a[8] == 1 && a[9] == 0);
@@ -443,15 +504,19 @@ int main() {
     }
 
     // Degenerate tiny rects stay rejected instead of drawing a sliver.
-    for (const UiRect rect : {full_button, settings_toggle_rect, UiRect{0, 13, 300, 65},
-                             UiRect{-100, -80, 220, 48}, UiRect{53, 71, 440, 160},
-                             UiRect{0, 0, 1880, 448}}) {
+    struct RenderCase { UiRect rect; int32_t pressed_scale; };
+    const RenderCase render_cases[] = {
+        {full_button, 52}, {settings_toggle_rect, 86}, {{0, 13, 300, 65}, 71},
+        {{-100, -80, 220, 48}, 52}, {{53, 71, 440, 160}, 172}, {{0, 0, 1880, 448}, 492}};
+    for (const auto& render_case : render_cases) {
+        const UiRect rect = render_case.rect;
         setup();
         assert(ui_draw_native_text_button_background(rect, 0));
         const auto normal = g_draws;
         g_draws.clear();
         assert(ui_draw_native_text_button_background(rect, 1));
         assert(g_draws.size() > normal.size());
+        assert(g_draws[normal.size()].args[10] == render_case.pressed_scale);
         for (size_t i = 0; i < normal.size(); ++i) {
             assert(g_draws[i].args == normal[i].args && g_draws[i].group == normal[i].group);
         }

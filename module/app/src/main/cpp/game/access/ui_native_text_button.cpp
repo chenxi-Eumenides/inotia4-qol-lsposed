@@ -296,8 +296,8 @@ bool load_press_geometry(const ButtonGeometry& button, PressGeometry* out) {
     out->group = fn_imgsys_get_group(unit);
     if (out->group == nullptr || !game_memory_accessible(out->group, sizeof(void*), 'r') ||
         !read_layer(fn_imgsys_get_loc(unit, 0x7), &out->layer)) return false;
-    // Title loc 7 is the orange capsule with an inset white rim and a baked dash.
-    // These source splits preserve its contour but omit the dash under arbitrary labels.
+    // Title loc 7 has an orange halo and an inset white rim. White RGB pixels
+    // in its center have zero alpha; they are transparent, not a visible dash.
     if (out->layer.width != 262 || out->layer.height != 103) return false;
     // Monster v31 alpha > 128: the normal capsule is 75 px tall inside its
     // 77 px guarded crop; loc 7's visible body is [21,241)x[21,82), 220x61.
@@ -340,12 +340,12 @@ void draw_press_geometry(const PressGeometry& press) {
     const int32_t cap = 50 * press.percent / 100;
     draw(press.x, press.y, 0, 0, 50, 103);
     draw(press.x + press.width - cap, press.y, 212, 0, 50, 103);
-    // Tile only the uniform orange strip in the dash band. Top/bottom strips
-    // retain the uninterrupted white rim. No new fill color or global clip is used.
+    // Tile the center's horizontally uniform RGBA rows, not the edge's alpha
+    // ramp. Top/bottom retain the white rim; no new fill color or clip is used.
     for (int32_t band = 0; band < 3; ++band) {
         const int32_t sy = band == 0 ? 0 : band == 1 ? 40 : 60;
         const int32_t height = band == 0 ? 40 : band == 1 ? 20 : 43;
-        const int32_t sx = band == 1 ? 30 : 50;
+        const int32_t sx = band == 1 ? 100 : 50;
         const int32_t available = band == 1 ? 20 : 160;
         // Join destination bands using their actual integer extents. Independent
         // floors of 40%, 20%, and 60% could otherwise leave a one-pixel gap.
