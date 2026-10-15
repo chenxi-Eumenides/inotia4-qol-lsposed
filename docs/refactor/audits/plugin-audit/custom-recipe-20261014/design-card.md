@@ -52,7 +52,7 @@
 - **失败分类**：`api_prepare` 的「未命中」与「已匹配但槽位身份/类别上下文不可用」分开——前者 `PrepareOutcome::kNoMatch`，后者尾追加 `PrepareOutcome::kUnavailable = 3`（`result.h:20-26`、`feature.cpp:637-693`）。槽位/类别读取错误经 `QolResult` 上浮，**不进入配方判定**，不伪装空槽（`ui/feature.cpp:158-203`）；合法空槽要求 handle 的 `slot` 与 `generation` **同时为 0**，半无效 handle（任一为 0、另一非 0）返回 `kQolErrInvalidArgument`("malformed item handle")。
 - **提示分类**：本地 scope 由 5/6/7 扩为 5–11（新增配方不匹配、合成暂不可用、状态已变化、放料写入失败），popup id 94/94/94/99；真正库存不足仍用材料不足原文（`text_table.h:14-33`、`ui/runtime.cpp:138-163`）。弹窗创建失败明确提示「合成暂不可用，材料未扣。」而非静默（`ui/runtime.cpp:343-351`）。
 - **边界不变**：CR01 的阶段划分、`save` 失败后不承诺清理 handle、扣料后允许不回滚、12 成员结果 API 表、无新 provider / Host ABI 均保持。
-- **本轮证据与状态**：受影响 7 target 重新构建后 **7/7 PASS**（`.tmp/custom-recipe-fix-20261015/final-ctest.log`，确保畸形 handle 分支进入二进制）；`check_arch` 通过、`check_http_routes` 147/147；`scripts/build-debug.sh --offline` 成功（模块 `…6ef35a38129e.apk`，SHA-256 `6ef35a38…baa77`），LSPatch 集成包 `output/custom_recipe_fix_261015/…6ef35a38129e_lspatched.apk`（SHA-256 `8d590f6e…8bd34a`，内嵌 module/origin sha 一致、`apksigner verify` 通过）**未安装**。以上 SHA 为构建/打包身份，不是设备运行 SHA；**VM 仍 NOT_ACCEPTED**，待用户确认后安装复测。
+- **本轮证据与状态**：受影响 7 target 重新构建后 **7/7 PASS**（`.tmp/custom-recipe-fix-20261015/final-ctest.log`，确保畸形 handle 分支进入二进制）；`check_arch` 通过、`check_http_routes` 147/147；`scripts/build-debug.sh --offline` 成功、`scripts/patch-apk.sh` 成功 3/失败 0，canonical 交付入口 `output/Inotia4_v1.3.2_monster_v31_lspatched.apk`（SHA-256 `00dcbd36b16b27efe517dc99a374b6ccd1e797669d3683b04ca3b2921def84c2`，内嵌模块 `6ef35a38129e…baa77`）。已 `install -r` 并重启：`/api/health` ready / monster v31、`screen=main_menu`、运行身份 `192/0.7.13`/`sha256=6ef35a38129e…` 与模块严格一致、`registered=28 install_failed=0`。本轮未执行合成/视觉手测；部署身份≠业务验收，**VM 仍 NOT_ACCEPTED**。
 
 ## 4. 启动、失败回滚与停用顺序（已实现事实）
 
@@ -88,11 +88,11 @@
 
 ## 6. VM-CR-MERGE-01（候选卡）
 
-**状态：NOT_ACCEPTED（部署身份已建立；功能行为未验）**。`deployment identity established ≠ functional VM`。
+**状态：NOT_ACCEPTED（部署身份已建立；功能行为未验）**。`deployment identity established ≠ functional VM`。本节记录 2026-10-14 集成包与协议页阻断过程；更晚（2026-10-15）的 canonical 部署与运行身份见 §3.3 与 `verification-log.md` §3，本节不覆盖上述历史过程。
 
 已完成（部署/身份口径）：
 
-- 安装集成包 `output/custom_recipe_261014/Inotia4_v1.3.2_monster_v31_custom_recipe_ff39e1c3502f_lspatched.apk` → `Success`（APK SHA-256 `52a5b61363a92f10d706fb161838e43339d8717d2b7aa697c8752e53898fb828`）；内嵌 module `ff39e1c3502f5e4402cfd26ede3e21767fcfb695cdc8c355367ade667802dd68`，与 Debug 构建产物一致；package `com.com2us.inotia4…common` 不变，未卸载、未清 data。
+- 安装集成包 `output/custom_recipe_261014/Inotia4_v1.3.2_monster_v31_custom_recipe_ff39e1c3502f_lspatched.apk` → `Success`（APK SHA-256 `52a5b61363a92f10d706fb161838e43339d8717d2b7aa697c8752e53898fb828`；该路径为历史记录，包与目录已按清理要求删除，不作为当前交付入口）；内嵌 module `ff39e1c3502f5e4402cfd26ede3e21767fcfb695cdc8c355367ade667802dd68`，与 Debug 构建产物一致；package `com.com2us.inotia4…common` 不变，未卸载、未清 data。
 - 游戏启动后运行身份核对一致：`versionCode=192`、`versionName=0.7.13`、`sha256=ff39e1c3502f…`（`device-api/running-module.log:33`）。
 - `/api/health` `ready=true`、`monster/v31`（`after-health.json`）；config projection 仅注册 `custom_recipe`（`custom_recipe.recipes`），`craft_ui` 不在 projection（`after-config-list.json`）。
 - 安装前已导出 slot 0 备份 `20261014-203427_s0_c97d845ba2b1.qol_save`（checksum `c97d845ba2b1`）并保留。
