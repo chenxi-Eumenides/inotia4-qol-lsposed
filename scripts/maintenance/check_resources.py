@@ -9,7 +9,9 @@
 - 对 `module/app/src/main/cpp` 下每个 `.cpp/.h/.inc` 逐行扫描三类安装机制：
     entry hook：`native_hook_func(` 或 `hook_func(`
     call patch：`call_patch`、`patch_apply(`、`patch_revert(`、`instr_patch`
-    ptr slot  ：`PtrHook`、`ptr_hook`、`game_ptr_hook`、`ptr_slot`
+    ptr slot  ：机制标识 `PtrHook`/`GamePtrHook`（含 snake_case `ptr_hook`/`game_ptr_hook`）与独立
+                `ptr_slot` token、`ptr_slot_write_raw(...)`/`ptr_slot_restore_raw(...)` 调用形态；
+                按标识边界匹配，`recipe_ptr_slot` 一类更长业务字段名不算机制安装点。
 - 每个命中行在前后各 25 行内按「由近及远」抽取目标符号：优先 `fn_resolve("F_XXX_VMA")`
   的字符串实参，其次裸 `F_[A-Z0-9_]+_VMA` 标识符；取不到记为 `<unknown>`。
 - `resource_duplicate_owner`：同一 `机制|符号` 出现在两个不同文件中（同文件内重复不算）。
@@ -48,7 +50,18 @@ import arch_common as ac  # noqa: E402
 _MECHANISMS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("entry hook", re.compile(r"native_hook_func\(|hook_func\(")),
     ("call patch", re.compile(r"call_patch|patch_apply\(|patch_revert\(|instr_patch")),
-    ("ptr slot", re.compile(r"PtrHook|ptr_hook|game_ptr_hook|ptr_slot")),
+    # ptr slot：只认机制标识/调用形态，不做子串匹配——否则 `recipe_ptr_slot` 等业务字段名
+    # 会被误判为 kPtrSlot 安装点（真实机制安装点是声明式 ResourceClaim，文本扫描识别不到）。
+    # `GamePtrHook` 是必须保留的旧真实标识，不能只写 `\bPtrHook\b`（那样会漏掉它）。
+    (
+        "ptr slot",
+        re.compile(
+            r"\b(?:Game)?PtrHook\b"
+            r"|\b(?:game_)?ptr_hook\b"
+            r"|\bptr_slot\b"
+            r"|\bptr_slot_(?:write|restore)_raw\b"
+        ),
+    ),
 )
 
 # 机制原语自身的实现/声明文件：其中的命中是机制定义而非资源安装点。
