@@ -10,8 +10,9 @@ usage() {
 行为：
   对 apk/game-apk/ 下的每个游戏 APK 生成一个集成 APK，输出到
   output/<发布前缀>_lspatched[_v<模块版本>].apk。
-  发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<子版本或日期>]。
-  中文名（艾诺迪亚4_monster_v31 / _原版_v1.3.2 / _盗版大修_v0810）自动映射到上述前缀；
+  发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<子版本或日期>] / _c18[_<子版本>]。
+  中文名（艾诺迪亚4_monster_v31 / _原版_v1.3.2 / _盗版大修_v0810 / _C18_v0.2）自动映射到上述前缀；
+  C18 变体的带小数点版本号是 C18 自身版本（v0.2），作为子版本后缀，游戏版本取默认 v1.3.2。
   无法映射到 ASCII 的命名会直接失败（发布附件名禁止中文）。
   模块版本从 release 模块 APK 文件名 `..._vX.Y.Z.apk` 提取；debug 包无版本则不追加。
   - LSPatch 不支持新包名；传入第二位置参数会明确报错。
@@ -177,27 +178,49 @@ shopt -u nullglob
 #   艾诺迪亚4_monster_v31.apk         -> Inotia4_v1.3.2_monster_v31
 #   艾诺迪亚4_原版_v1.3.2.apk          -> Inotia4_v1.3.2_original
 #   艾诺迪亚4_盗版大修_v0810.apk       -> Inotia4_v1.3.2_overhaul_v0810
+#   艾诺迪亚4_C18_v0.2.apk            -> Inotia4_v1.3.2_c18_v0.2
 #   Inotia4_v1.3.2_monster_v25.apk     -> Inotia4_v1.3.2_monster_v25（旧 ASCII 名沿用）
 release_stem() {
-    local stem=$1 game_version= sub=
-    if [[ "$stem" =~ (v[0-9]+(\.[0-9]+)+) ]]; then
+    local stem=$1 variant= game_version= sub=
+    # 先判变体：尾部版本号在不同变体里语义不同（原版尾部是游戏版本，其余变体尾部是子版本），
+    # 必须先知道变体才能决定带小数点的版本号归游戏版本还是子版本。
+    case "$stem" in
+        *[Mm][Oo][Nn][Ss][Tt][Ee][Rr]*)
+            variant=monster ;;
+        *原版*)
+            variant=original ;;
+        *盗版大修*)
+            variant=overhaul ;;
+        *C18*)
+            variant=c18 ;;
+        *)
+            printf '%s' "$stem"
+            return
+            ;;
+    esac
+    # 游戏版本：文件名中带小数点的 vX.Y[.Z]。C18 变体的带小数点版本号是 C18 自身版本
+    # （艾诺迪亚4_C18_v0.2 的 v0.2），不是游戏版本，故 C18 不取，走默认 v1.3.2。
+    if [[ "$variant" != c18 && "$stem" =~ (v[0-9]+(\.[0-9]+)+) ]]; then
         game_version=${BASH_REMATCH[1]}
     fi
-    # 子版本/日期标签：尾部无小数点的 vNN（v31/v0810）优先，其次 8 位日期。
+    # 子版本/日期标签：尾部无小数点的 vNN（v31/v0810）优先，其次尾部带小数点的
+    # vN.N（C18 v0.2），最后 8 位日期。
     if [[ "$stem" =~ (v[0-9]{1,4})$ ]]; then
+        sub=${BASH_REMATCH[1]}
+    elif [[ "$stem" =~ (v[0-9]+(\.[0-9]+)+)$ ]]; then
         sub=${BASH_REMATCH[1]}
     elif [[ "$stem" =~ (20[0-9]{6}) ]]; then
         sub=${BASH_REMATCH[1]}
     fi
-    case "$stem" in
-        *[Mm][Oo][Nn][Ss][Tt][Ee][Rr]*)
+    case "$variant" in
+        monster)
             printf 'Inotia4_%s_monster%s' "${game_version:-v1.3.2}" "${sub:+_$sub}" ;;
-        *原版*)
+        original)
             printf 'Inotia4_%s_original' "${game_version:-v1.3.2}" ;;
-        *盗版大修*)
+        overhaul)
             printf 'Inotia4_%s_overhaul%s' "${game_version:-v1.3.2}" "${sub:+_$sub}" ;;
-        *)
-            printf '%s' "$stem" ;;
+        c18)
+            printf 'Inotia4_%s_c18%s' "${game_version:-v1.3.2}" "${sub:+_$sub}" ;;
     esac
 }
 
