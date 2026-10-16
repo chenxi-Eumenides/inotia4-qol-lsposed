@@ -26,7 +26,7 @@ object ModuleRuntimeBootstrap {
         ModuleSaveStore.initialize(context)
         NativeBridge.nativeSaveBackupInit(
             context.applicationInfo.dataDir,
-            context.getExternalFilesDir(null)?.absolutePath ?: "",
+            QolPaths.root(context)?.absolutePath ?: "",
         )
         try {
             NativeBridge.nativeSaveBackupSetMapNames(StaticData.buildMapNamesJson())

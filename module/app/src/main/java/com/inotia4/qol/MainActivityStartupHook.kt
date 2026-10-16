@@ -143,6 +143,8 @@ internal object MainActivityStartupHook {
     }
 
     private fun initializeFromActivity(context: Context, moduleApkPath: String): Boolean {
+        QolPaths.ensureLayout(context)
+        QolPaths.migrateLegacy(context)
         if (BuildConfig.KERNEL_ONLY) {
             if (!kernelServerBootstrapped) {
                 ApiServer.bootstrap(context, moduleApkPath)
@@ -154,7 +156,7 @@ internal object MainActivityStartupHook {
         if (!NativeBridge.ready) {
             try {
                 when (NativeBridge.nativeConfigStoreBootstrap(
-                    context.getExternalFilesDir(null)?.absolutePath.orEmpty(),
+                    QolPaths.root(context)?.absolutePath.orEmpty(),
                 )) {
                     0 -> Unit
                     1 -> LogFile.warn(LogDomain.CONFIG, "native config store ready without persistence")

@@ -13,9 +13,9 @@ import java.io.File
  * section 名注册各自不透明的 payload，更新单个 section 时会保留其余未知 section。
  *
  * 本对象是 JNI 委托壳：MSAV 编解码、原子写、last-good 回退与坏容器 quarantine 的
- * 唯一实现在 native `infra/store`（单一全局锁，module-saves/ 唯一文件读写者）；
+ * 唯一实现在 native `infra/store`（单一全局锁，qol/saves/ 唯一文件读写者）；
  * 此处只做参数/返回值转换并保持原公开 API 与语义。进程内只允许 native 侧读写
- * `module-saves/`，Kotlin 侧不再持有任何存储实现。
+ * `qol/saves/`，Kotlin 侧不再持有任何存储实现。
  */
 object ModuleSaveStore {
 
@@ -24,8 +24,8 @@ object ModuleSaveStore {
     private const val SLOT_COUNT = 3
     private const val MAX_SECTION_NAME_BYTES = 64
     private const val MAX_SECTION_PAYLOAD_BYTES = 1024 * 1024
-    private const val DIRECTORY_NAME = "module-saves"
-    private const val FILE_SUFFIX = ".module-save"
+    private const val DIRECTORY_NAME = "qol/saves"
+    private const val FILE_SUFFIX = ".qol-save"
 
     // native infra/store::Status 的稳定取值（见 infra/store.h）；只用到 ok / not_found。
     private const val STORE_OK = 0
@@ -45,7 +45,7 @@ object ModuleSaveStore {
         appContext = context.applicationContext
     }
 
-    /** 是否已初始化且 native store 可用（module-saves 目录就绪）。桥在启动早期可据此判定存储尚不可用。 */
+    /** 是否已初始化且 native store 可用（qol/saves 目录就绪）。桥在启动早期可据此判定存储尚不可用。 */
     fun isInitialized(): Boolean = appContext != null && nativeStoreAvailable()
 
     /** 确保指定槽的 sidecar 存在且可读取。 */

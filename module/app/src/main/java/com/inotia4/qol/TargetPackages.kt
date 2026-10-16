@@ -21,4 +21,7 @@ object TargetPackages {
 
     fun externalFilesPath(fileName: String): String =
         "/sdcard/Android/data/${current()}/files/$fileName"
+
+    fun qolFilesPath(fileName: String): String =
+        "/sdcard/Android/data/${current()}/files/qol/$fileName"
 }
