@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "contracts/text_layer.h"
+
 // 共享资源分派协议（ARCHITECTURE.md §4.5）。L2 机制层：不依赖 patch/game。
 //
 // 共享资源（如 MEMORYTEXT_GetText 文本热点）由唯一 owner 持 wrapper；消费者不挂 hook，
@@ -13,6 +15,18 @@ namespace qol::hooks {
 
 enum class ConsumerKind : int32_t { kObserve = 0, kModify = 1, kIntercept = 2 };
 enum class DispatchPhase : int32_t { kBefore = 0, kAfter = 1 };
+
+// 枚举数值是跨边界契约（contracts/text_layer.h），此处断言两处不漂移。
+static_assert(static_cast<int32_t>(DispatchPhase::kBefore) == contracts::kTextPhaseBefore,
+              "DispatchPhase::kBefore 必须等于 contracts::kTextPhaseBefore");
+static_assert(static_cast<int32_t>(DispatchPhase::kAfter) == contracts::kTextPhaseAfter,
+              "DispatchPhase::kAfter 必须等于 contracts::kTextPhaseAfter");
+static_assert(static_cast<int32_t>(ConsumerKind::kObserve) == contracts::kTextConsumerObserve,
+              "ConsumerKind::kObserve 必须等于 contracts::kTextConsumerObserve");
+static_assert(static_cast<int32_t>(ConsumerKind::kModify) == contracts::kTextConsumerModify,
+              "ConsumerKind::kModify 必须等于 contracts::kTextConsumerModify");
+static_assert(static_cast<int32_t>(ConsumerKind::kIntercept) == contracts::kTextConsumerIntercept,
+              "ConsumerKind::kIntercept 必须等于 contracts::kTextConsumerIntercept");
 
 using DispatchId = uint64_t;  // 0 = 无效
 

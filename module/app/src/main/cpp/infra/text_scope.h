@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "contracts/text_layer.h"
+
 // 文本替换作用域（纯基础设施，无游戏/机制依赖）。
 //
 // 文本层（plugins/text_layer）只在「当前线程正处于某窗口」时替换文本；窗口标记由绘制侧
@@ -18,6 +20,16 @@ enum class TextScope : uint8_t {
     kUimixPanelTitle,    // UIMix 面板标题绘制
     kUimixPageTab,       // UIMix 页签按钮绘制（显式不替换：与配方按钮同 id）
 };
+
+static_assert(static_cast<int32_t>(TextScope::kNone) == contracts::kTextScopeNone);
+static_assert(static_cast<int32_t>(TextScope::kCharacterPanel) ==
+              contracts::kTextScopeCharacterPanel);
+static_assert(static_cast<int32_t>(TextScope::kUimixRecipeButton) ==
+              contracts::kTextScopeUimixRecipeButton);
+static_assert(static_cast<int32_t>(TextScope::kUimixPanelTitle) ==
+              contracts::kTextScopeUimixPanelTitle);
+static_assert(static_cast<int32_t>(TextScope::kUimixPageTab) ==
+              contracts::kTextScopeUimixPageTab);
 
 inline const char* text_scope_token(TextScope scope) {
     switch (scope) {
