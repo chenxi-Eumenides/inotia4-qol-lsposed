@@ -850,9 +850,9 @@ int main() {
         // prepared IO 失败且无在途引用，释放预约，不阻塞后续请求。
         reservation.size=sizeof(reservation);
         assert(backend.reserve(owner,0,&candidate,1,&reservation).ok == kQolOk);
-        assert(::mkdir("module-saves/slot-0.module-save.tmp",0755)==0);
+        assert(::mkdir("saves/slot-0.qol-save.tmp",0755)==0);
         assert(backend.write_reserved(owner,0,&reservation,journal.name,2,journal.data,journal.size).code == kQolErrInternal);
-        assert(::rmdir("module-saves/slot-0.module-save.tmp")==0);
+        assert(::rmdir("saves/slot-0.qol-save.tmp")==0);
         assert(backend.write_section(owner,0,"a",1,nullptr,0).ok == kQolOk);
     }
 
@@ -904,10 +904,10 @@ int main() {
         std::vector<uint8_t> original(4096); uint32_t count=0;
         assert(sdk.store.read_container(0,original.data(),original.size(),&count).ok==kQolOk);
         QolSlotOperationApply apply{sizeof(apply),99};
-        assert(::mkdir("module-saves/slot-0.module-save.last-good.tmp",0755)==0);
+        assert(::mkdir("saves/slot-0.qol-save.last-good.tmp",0755)==0);
         assert(api.import_container(api.host_ctx,backup,&lease,0,original.data(),count,&apply).code==kQolErrInternal);
         assert(apply.apply==static_cast<uint32_t>(QolSlotOperationApplyState::kPrimaryApplied));
-        assert(::rmdir("module-saves/slot-0.module-save.last-good.tmp")==0);
+        assert(::rmdir("saves/slot-0.qol-save.last-good.tmp")==0);
         assert(api.import_container(api.host_ctx,backup,&lease,0,original.data(),count,&apply).ok==kQolOk);
         assert(apply.apply==static_cast<uint32_t>(QolSlotOperationApplyState::kFullyApplied));
         qol::host::owner_suspend(&backup_identity);

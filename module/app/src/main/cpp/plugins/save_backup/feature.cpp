@@ -686,7 +686,7 @@ save_backup::RollbackResult restore_from_rollback(
                                     result.evidence_preserved;
     }
     if (sidecar_touched && !result.sidecar_restored) {
-        const std::string sidecar_record = rb_dat + ".module-save";
+        const std::string sidecar_record = rb_dat + ".qol-save";
         if (prev_container_exists) {
             result.evidence_preserved =
                 preserve_rollback_record(sidecar_record, prev_container.data(), prev_container.size()) &&

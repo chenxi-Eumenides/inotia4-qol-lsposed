@@ -93,7 +93,7 @@ int main() {
     std::vector<uint8_t> imported;
     CHECK(store::read_container(1,&imported)==store::Status::kOk);
     a=lease(); CHECK(succeeded(op::acquire(7,1,&a)) && succeeded(op::set_referenced(7,&a,1)));
-    const auto blocked_tmp=std::string(dir)+"/module-saves/slot-0.module-save.last-good.tmp";
+    const auto blocked_tmp=std::string(dir)+"/saves/slot-0.qol-save.last-good.tmp";
     CHECK(::mkdir(blocked_tmp.c_str(),0755)==0);
     QolSlotOperationApply apply{sizeof(apply),99};
     CHECK(store::import_in_operation(7,&a,0,imported.data(),imported.size(),&apply)==store::Status::kIoError);
@@ -120,7 +120,7 @@ int main() {
     CHECK(!succeeded(op::refresh(7,a.id,&c)));
     CHECK(store::delete_slot(0)==store::Status::kOk);
     CHECK(store::delete_slot(1)==store::Status::kOk);
-    CHECK(::rmdir((std::string(dir)+"/module-saves").c_str())==0);
+    CHECK(::rmdir((std::string(dir)+"/saves").c_str())==0);
     CHECK(::rmdir(dir)==0);
     std::printf("slot_operation_gate: pass=%d fail=%d\n",g_pass,g_fail);
     return g_fail==0?0:1;

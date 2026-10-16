@@ -6,7 +6,7 @@
   R1 唯一出口    native 中除 `infra/log/qol_log.cpp` 与 host 桩外不得出现 __android_log_print；
                  Kotlin 中除 `LogFile.kt` 外不得出现 android.util.Log
   R2 旧 tag 清零  字符串字面量中不得出现已废弃 logcat tag（含 Inotia4Export/ApiServer/
-                 OpApiService/OpController）；`inotia4-export.log` 文件名允许保留
+                 OpApiService/OpController）；`qol.log` 文件名允许保留
   R3 domain 词表  Kotlin `LogDomain` token 集合 == native `qol_domain_token` token 集合
   R4 逐帧无高级别 `*_tick|*_process|*_draw*|*_render*`（含 frame_host 的
                  `render_pre_wrapper`/`logic_pre_wrapper`）函数体、`frame_task_add(` 回调与
@@ -15,7 +15,7 @@
 
 R2 只在字符串字面量中匹配 “整串等于 tag” 或 “以 `tag:` 开头” 两种旧用法，避免把
 `ApiServer`/`OpController` 等同名 Kotlin 类/标识符误判为废弃 tag；`Inotia4Export` 与文件名
-常量 `inotia4-export.log` 大小写不同，不会互相命中。
+常量 `qol.log` 大小写不同，不会互相命中。
 
 输出：每条给出 `文件:行: 规则号: 说明`，末尾汇总计数。
 退出码：默认为 0；存在 R1/R2/R3 违规时非 0；`--warn-only` 恒返回 0。
@@ -44,7 +44,7 @@ JAVA_SUFFIXES = {".kt", ".java"}
 # R1：Kotlin 侧唯一允许使用 android.util.Log 的兜底通道。
 KOTLIN_LOG_FILE_NAME = "LogFile.kt"
 
-# R2：已废弃的 logcat tag（Inotia4Qol / inotia4-export.log 不在其列，允许保留）。
+# R2：已废弃的 logcat tag（Inotia4Qol / qol.log 不在其列，允许保留）。
 BANNED_TAGS = (
     "Inotia4Move",
     "Inotia4Tiles",

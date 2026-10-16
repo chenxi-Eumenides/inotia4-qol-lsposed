@@ -222,7 +222,7 @@ bool write_file(const std::string& path, const std::string& bytes) {
 }
 
 // 构造 bundle：orig_plain 满足块表布局（block0=8+rel），module 为给定容器；
-// 写入 external 根的 save_backup/ 目录（feature 的 backup_dir 扫描位置）。
+// 写入 external 根的 backups/ 目录（feature 的 backup_dir 扫描位置）。
 std::string make_bundle(const std::string& external_root, const std::string& checksum,
                         const std::vector<uint8_t>& module) {
     std::vector<uint8_t> plain(16, 0);
@@ -231,7 +231,7 @@ std::string make_bundle(const std::string& external_root, const std::string& che
     std::vector<uint8_t> bundle;
     save_backup::build_bundle(0, 12345, plain, module, {},
                               "{\"checksum\":\"" + checksum + "\"}", bundle);
-    const std::string dir = external_root + "/save_backup";
+    const std::string dir = external_root + "/backups";
     if (::mkdir(dir.c_str(), 0755) != 0 && errno != EEXIST) return std::string();
     const std::string path = dir + "/backup_s0_" + checksum + ".qol_save";
     if (!write_file(path, std::string(bundle.begin(), bundle.end()))) return std::string();
@@ -320,10 +320,10 @@ int main() {
     CHECK(::access(dat_path.c_str(), F_OK) != 0);
 
     // ---- sidecar 回滚完整 → lease 释放：primary 写入被占位目录阻断（store 面未变更）----
-    const std::string module_saves = data_dir + "/module-saves";
+    const std::string module_saves = data_dir + "/saves";
     CHECK(::mkdir(module_saves.c_str(), 0755) == 0 || errno == EEXIST);
-    // store 的 primary 路径为 slot-0.module-save，write_atomic 的临时文件为同名 + .tmp。
-    const std::string blocked_primary_tmp = module_saves + "/slot-0.module-save.tmp";
+    // store 的 primary 路径为 slot-0.qol-save，write_atomic 的临时文件为同名 + .tmp。
+    const std::string blocked_primary_tmp = module_saves + "/slot-0.qol-save.tmp";
     CHECK(write_file(dat_path, original_dat));
     // 删槽段已清掉 sidecar：重建（generation 会推进，比较基线用重建后的快照）。
     CHECK(qol::infra::store::write_section(0, "m", 1, &payload, 1) ==
@@ -348,7 +348,7 @@ int main() {
 
     // ---- primary 已提交而 last-good 失败：恢复被阻断 → 回滚失败保留 referenced lease
     // 与证据，不伪装收尾成功 ----
-    const std::string blocked_last_good_tmp = module_saves + "/slot-0.module-save.last-good.tmp";
+    const std::string blocked_last_good_tmp = module_saves + "/slot-0.qol-save.last-good.tmp";
     CHECK(write_file(dat_path, original_dat));
     const std::string checksum3 = make_bundle(root, "cccccccccccc", rebuilt_container);
     CHECK(::mkdir(blocked_last_good_tmp.c_str(), 0755) == 0);
@@ -359,7 +359,7 @@ int main() {
     std::vector<uint8_t> degraded_container;
     CHECK(qol::infra::store::read_container(0, &degraded_container) ==
           qol::infra::store::Status::kOk);
-    CHECK(::access((root + "/save_backup/.rollback/save0.dat.module-save").c_str(), F_OK) == 0);
+    CHECK(::access((root + "/backups/.rollback/save0.dat.qol-save").c_str(), F_OK) == 0);
     // referenced lease 保留：新 gate 申请被拒（occupier 不能接管）。
     CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &verify).code == kQolErrBusy);
     CHECK(::rmdir(blocked_last_good_tmp.c_str()) == 0);
