@@ -301,6 +301,16 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Gate 1A（源码 Gate，非交付验收） | attempt2 **正式 PASS**（G1A-01/02/P3 关闭，无新材料阻断；VM 仍 NOT_ACCEPTED）。attempt1 曾暂不通过：G1A-01（P1，提取 table 核心时漏掉 production Android `set_context` 定义）与 G1A-02（P2，installing 期 SaveEnter 被下一帧提前消费）已由 provider/Host lane 修复并补 production setter + 真实 bridge 日志/静态 message + `nm` 核对、逐帧 `step → retry` 安装中保信号测试；P3（error 指向实际未 Live 资源/ready 失败原因）亦修。 | G1A 编号与更早的 P1-A/P1-B 互不覆盖。 |
 | 不在本批 | 双 TEXT 工厂与 Debug 并列展示、mainmenu 精确字号 20→30、高度 ×1.5、容器 clip，以及 X 底板/返回外框效果。 | 记为后续 UI 范围，不在本批声明已实现。 |
 
+### 5.15 `device_probe_export_failure` 探针删除（2026-10-16；Host/Debug Gate 通过，真机未复验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现（删除） | **已实现（代码事实）**：`plugins/device_probe_export_failure/` 与两个空目录 `device_probe_provider` / `device_probe_consumer` 已删除；`host/assembly.cpp` 清理 include、descriptor 注册项与 `infra::status_get` WARN 块（含已无引用的 `#include "infra/status.h"`）。保留 `QOL_ENABLE_DEVICE_PROBE` 开关、`probe_entry_export_resolution()` 及其调用点、`plugins/CMakeLists.txt` 的 `^device_probe_` 跳过规则与 `core.custom_ui` 的 probe 条件分支。 | 提交 `09695c93`；台账 `docs/refactor/issues.md` 附录 PRB-01。 |
+| 负例断言的替代覆盖 | **PASS（Host Gate）**：`tests/test_plugin_registry.cpp:1514-1530` `test_required_entries_preflight_before_plugin_install` 断言 `install_calls==0`、`hook_calls==0`、资源 `kFree`、状态 `kUnsupported`；`:1532-1559` 覆盖失败隔离性。删除的插件无独占断言覆盖面，无能力缺口。 | Host 证据不替代真机。 |
+| Host/静态 Gate | `check_arch` 全部通过（layers/offsets/JNI/resources）；`check_http_routes` 147 条、缺失/额外 0、owner 分布无 probe（该插件零路由）；`git diff --check` 无诊断。全量 CTest **140/143**，红项为 TL-06 既有欠账（`core_api_lifecycle_tests` 早在 §5.14 即为红项），测试构建不编译 `host/assembly.cpp`，与本批结构上无关。 | 记录如实，不得表述为全量 CTest 全绿。 |
+| 构建 | **PASS（Debug 构建）**：`output/inotia4_qol_lsposed_debug_2610161056_2cf5f19dee6b.apk`，SHA-256 `2cf5f19dee6b695efe907491518f456d1d5d400e3c8b461bc18b89b0c19fec7e`。**该 APK 未安装。** | 本批为纯删除，不改变 Release 与正常 Debug 的运行时行为。 |
+| **待补真机证据（NOT_ACCEPTED）** | ① **probe 构建真机行为未复验**：本批未执行 `./scripts/build-debug.sh --offline -PqolDeviceProbe=true`、未安装集成包、未取 logcat；`probe_entry_export_resolution()` 的正例 `GRPX_Start=hit` 与负例缺失符号 `missing` 输出**未在真机复验**，其历史证据仍为 VM-EXPORT-01。② **真机负例状态产出来源变更**：过去由该插件在真机上产出的 `unsupported` + `required entry unresolved` 状态串，删除后真机不再产出；负例断言改由 Host CTest 与 host 侧探针承担，真机不再有该证据。 | 清除条件：按 VM-EXPORT-01 命令重建 probe 包并安装到 monster v29，取 logcat 确认 `GRPX_Start=hit`、缺失导出 `missing`、无 `device_probe: plugin=` WARN；或明确接受「真机负例不再单独取证、由 Host Gate 承担」并在此条注记裁决。**在此之前不得声称真机 probe 行为已验收。** |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

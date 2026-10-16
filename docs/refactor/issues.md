@@ -111,7 +111,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | TL-03 | P3 | `check_arch.py` 不覆盖运行时 `capabilities.require` 依赖边（ITM-02 类错漏静态不可见） | `scripts/maintenance/check_arch.py` + 审计 char-G-04 | 开放（descriptor 静态可解析部分可校验） |
 | TL-04 | P3 | `arch_exemptions.json` 存量条目指向已不存在路径 `plugins/core.ui/panels/settings.cpp:*`，陈旧豁免可能未来误匹配 | 审计 world-G-06 | 开放（清理；未随 FIX 批做因属工具独立小改） |
 | TL-05 | P3 | 设备环境漂移：文档记录 frida-server 17.16.4 已部署，实测设备 `/data/local/tmp/frida-server` 缺失（本会话重推恢复）；frida 直写/采样是 HP 缺陷定位的唯一手段，环境项需固化 | 真机操作记录 | 开放（文档或开机脚本固化） |
-| TL-06 | P2 | 工作树既有欠账导致三项 host 测试失败：`core_api_lifecycle_tests`（`test_core_api_lifecycle.cpp:141,166` 断言 `features[0].category == kHidden` 与实现不符）、`debug_two_column_tests`（`test_debug_two_column.cpp:381` 断言 `g_provider->active()`）、`core_settings_config_store_tests`（`test_core_settings_config_store.cpp:424` `mkdtemp` 返回空，属环境项） | 2026-10-16 device_probe 审阅批实测；测试构建不编译 `host/assembly.cpp`，与该批删除无关 | 开放（归属 config platform service / UI 字体在途批次，随该批收口） |
+| TL-06 | P2 | 工作树既有欠账导致三项 host 测试失败：`core_api_lifecycle_tests`（`test_core_api_lifecycle.cpp:141,166` 断言 `features[0].category == kHidden` 与实现不符）、`debug_two_column_tests`（`test_debug_two_column.cpp:381` 断言 `g_provider->active()`）、`core_settings_config_store_tests`（`test_core_settings_config_store.cpp:424` `mkdtemp` 返回空，属环境项） | 2026-10-16 device_probe 审阅批实测；测试构建不编译 `host/assembly.cpp`，与该批删除无关；`core_api_lifecycle_tests` 已于 `docs/refactor/verification.md` §5.14（2026-10-15）记为红项（当时全量 141/143，红项含该测试） | 开放（归属 config platform service / UI 字体在途批次，随该批收口） |
 | TL-07 | P3 | `docs/refactor/baseline.md` 与 `docs/refactor/map.md` 的 `--check` 已不一致：两文件为脚本生成（禁止手工编辑），统计漂移来自工作树在途批次 | 2026-10-16 实测 `gen_baseline_doc.py --check` 与 `gen_map_doc.py --check` 均报不一致 | 开放（在途批次提交后统一重跑两个生成脚本；重生成前不得手工编辑） |
 
 ## 9. 文档漂移（各插件验收后统一更新）
