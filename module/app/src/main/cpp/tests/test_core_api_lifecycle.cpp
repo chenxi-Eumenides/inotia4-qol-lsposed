@@ -138,7 +138,7 @@ void test_api_feature_and_listener_config() {
     CHECK(std::strcmp(descriptor.id, "core.api") == 0);
     CHECK(descriptor.feature_count == 1);
     CHECK(descriptor.features[0].default_enabled == 1);
-    CHECK(descriptor.features[0].category == qol::contracts::FeatureCategory::kHidden);
+    CHECK(descriptor.features[0].category == qol::contracts::FeatureCategory::kGeneral);
     CHECK(descriptor.features[0].type == qol::contracts::FeatureType::kToggle);
     CHECK(std::strcmp(descriptor.features[0].id, "api.enabled") == 0);
     CHECK(std::strcmp(descriptor.features[0].description, "") == 0);
@@ -163,7 +163,7 @@ void test_api_feature_and_listener_config() {
         const auto& feature = descriptor.features[0];
         CHECK(std::strcmp(feature.id, "api.enabled") == 0);
         CHECK(feature.default_enabled == 1);
-        CHECK(feature.category == qol::contracts::FeatureCategory::kHidden);
+        CHECK(feature.category == qol::contracts::FeatureCategory::kGeneral);
         CHECK(feature.type == qol::contracts::FeatureType::kToggle);
         CHECK(std::strcmp(feature.name, "API服务") == 0);
         CHECK(std::strcmp(feature.description, "") == 0);

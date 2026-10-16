@@ -64,7 +64,7 @@ provider 不可用时，Host binder 阻止新的非 resident 请求并摘除相�
 
 ### Feature 与 OP 授权
 
-`api.enabled` 是默认开启的 Hidden toggle：Debug 设置页显示，Release 设置页过滤。分类与空描述只影响显示元数据。feature callback 为 no-op，但 feature 值仍参与 Host 生命周期判定与 listener runtime effects，不代表开关无效。
+`api.enabled` 是默认开启的 General toggle：Debug/Release 设置页均显示（Release 只过滤 Hidden 分类）。分类与空描述只影响显示元数据。feature callback 为 no-op，但 feature 值仍参与 Host 生命周期判定与 listener runtime effects，不代表开关无效。
 
 API listener 与 `module.security.features.op.enabled` 授权独立：关闭 API 不改变 OP 值，开启 API 也不自动授权 OP。listener 状态不是 native dispatch 的权限开关；普通请求仍按 endpoint 元数据独立执行 OP 门控。游戏内设置 UI 的配置写入/恢复路径不因 API listener 停止而关闭。
 

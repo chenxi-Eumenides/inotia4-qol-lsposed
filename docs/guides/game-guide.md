@@ -1008,7 +1008,7 @@ curl -X POST http://<手机IP>:8088/api/system/save
 
 - **开关关闭（默认）**：声明需要 OP 的请求返回 **403 + `{"ok":false,"error":"op disabled"}`**；按路由声明判定，不按 `/api/op/` 路径前缀推断。
 - **开启方式**：API 服务运行时，`POST /api/config/set` 传 `{"plugin_id":"module.security","field":"feature","key":"op.enabled","value":true}`，或编辑外部配置 `config.json` 中 `module.security.features["op.enabled"]`。
-- `op.enabled` 与 `api.enabled` 均为 Hidden：Debug 设置页显示，Release 设置页过滤。OP 开启后仍无额外鉴权，仅限可信局域网。
+- `api.enabled` 与 `module.platform.debug.logging` 均为 General，Debug/Release 设置页均显示；`op.enabled` 为 Hidden，只在 Debug 设置页显示（Release 过滤 Hidden 分类）。OP 开启后仍无额外鉴权，仅限可信局域网。
 
 ```bash
 # 开启 OP（持久化到 config.json 的 module.security features；API 服务需运行）
