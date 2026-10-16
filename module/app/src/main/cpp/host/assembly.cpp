@@ -69,9 +69,6 @@
 #include "plugins/core.world/plugin.h"
 #include "plugins/core.save/plugin.h"
 #endif
-#if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
-#include "plugins/device_probe_export_failure/plugin.h"
-#endif
 #include "game/access/patches.h"
 #include "game/access/qol_log_seam.h"
 #include "game/state/game_state.h"
@@ -93,7 +90,6 @@
 #include "infra/config.h"
 #include "infra/runtime.h"
 #include "infra/scheduler.h"
-#include "infra/status.h"
 #include "patch/instr_patch.h"
 #include "patch/ptr_slot.h"
 #include "host/adapters.h"
@@ -236,9 +232,6 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_system::plugin_descriptor},
     {&features::character_panel_i18n::plugin_descriptor},
     {&features::world_teleport::plugin_descriptor},
-#endif
-#if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
-    {&features::device_probe_export_failure::plugin_descriptor},
 #endif
     {nullptr},
 };
@@ -553,16 +546,6 @@ bool assembly_init() {
 #if QOL_ENABLE_DEVICE_PROBE
     // bridge_init attaches the ELF resolver before nativeInit enters assembly_init.
     probe_entry_export_resolution();
-#endif
-#if QOL_ENABLE_DEVICE_PROBE && !QOL_KERNEL_ONLY
-    infra::FeatureStatus export_probe_status{};
-    if (infra::status_get("device_probe_export_failure", &export_probe_status)) {
-        QOL_LOG_WARN(QolDomain::kCore,
-                     "device_probe: plugin=%s state=%s error=%s",
-                     export_probe_status.id,
-                     infra::feature_state_name(export_probe_status.state),
-                     export_probe_status.error != nullptr ? export_probe_status.error : "none");
-    }
 #endif
     g_assembly_done = true;
     module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true,

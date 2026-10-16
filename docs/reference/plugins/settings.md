@@ -105,8 +105,6 @@ descriptor 只注册一个 `page` entry feature：
 | `inventory_hooks.inventory_support` | 1 | Hidden | toggle | 0 |
 | `core.feature.compatibility_routes` | 1 | Hidden | toggle | 0 |
 
-另有一个 Debug device probe 插件 feature：`device_probe_export_failure.preflight_probe`（Hidden/toggle），不进 release。`device_probe_provider` 与 `device_probe_consumer` 组合已退役。
-
 Host-owned feature（不属于玩家 core/plugin feature 表）：
 
 | owner / feature id | 默认 | 分类 | 类型 | display priority | 说明 |
