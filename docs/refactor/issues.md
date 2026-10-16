@@ -103,6 +103,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | INF-09 | P3 | result handler 自注册模式（core.feature 等）与声明式 `http_queries` 并存无统一约定；部分注册失败的 `unregister_owner` 回滚影响面大于失败项 | `host/http_dispatch.cpp:431-449`；审计 char-G-08/G-09 | 开放（约定文档化） |
 | INF-10 | P3 | optional-cycle 降级日志用「全图未发射」的两端筛选，环的下游节点亦未发射 → 日志会把「依赖环下游」的边误报为「该边参与环」；诊断不可靠 | `host/plugin_registry.cpp:669-685`；attribute_range_display 审计批 G-01 | 开放（改用 SCC 精确识别或收紧文案） |
 | INF-11 | P3 | `ui_adapter` 的 `insert_inline_color` 以调用方 `max_text_bytes` 为 `strnlen` 上界，插件传 4096，而 UIDesc 文本缓冲实为 `0x200`；无 512 字节内 NUL 时会越过真实缓冲搜索，越界读风险在 Adapter 边界 | `host/ui_adapter.cpp:74-91`、`game/symbols/game_symbols.h:606-607`；attribute_range_display 审计批 G-02 | **已缓解/部分关闭**（`7f5c06e8`）：新增 `ui_desc_text_cursor`/`insert_inline_color_span` 按 `0x200` 边界与游标一致校验，插件改用新槽；旧 `insert_inline_color` 已标注 deprecated、无消费者。旧槽本身的上界缺陷保留（仅 ABI 兼容，未删除） |
+| INF-12 | P3 | 启动同意页（Java 层）：`POST /api/ui/dialog/select {"action":"ok"}` 返回 `close_dispatched` 后同意页仍占用，`POST /api/system/enter_slot` 持续 `ui occupied: agreement`（本次两批各约 20 次轮询未解除），需时间异步生效（用户观测）；期间 `GET /api/ui/screen` 返回 `main_menu`，与实际占用不一致，调用方无法据此判断解除时机 | 2026-10-17 attribute_range_display 部署批 1/2（`.tmp/attribute-range-display-deploy2/`、`.tmp/attribute-range-display-phase4/`）；api-reference §7.10 同意页分支 | 开放（提供同意页关闭完成信号或让 screen 反映 agreement） |
 
 ## 8. 工具链 / 验证设施（开放）
 
