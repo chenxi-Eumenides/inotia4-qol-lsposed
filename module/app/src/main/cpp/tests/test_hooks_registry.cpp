@@ -36,6 +36,9 @@ using qol::hooks::runtime_set;
 using qol::hooks::set_state;
 using qol::hooks::state_of;
 using qol::hooks::entry_target_conflicts;
+using qol::hooks::isolated_get;
+using qol::hooks::ResourceRuntime;
+using qol::hooks::runtime_of;
 
 namespace {
 
@@ -83,6 +86,25 @@ int hook_fail(void* target, void* replacement, void** backup) {
     (void)replacement;
     (void)backup;
     g_hook.calls += 1;
+    return -1;
+}
+
+// 成功返回 0 但不写出 backup：hook 已物理安装却无原函数入口。
+int hook_no_backup(void* target, void* replacement, void** backup) {
+    g_hook = HookRecord{target, replacement, backup, g_hook.calls + 1};
+    (void)backup;
+    return 0;
+}
+
+int g_unhook_calls = 0;
+int unhook_ok(void* func) {
+    (void)func;
+    ++g_unhook_calls;
+    return 0;
+}
+int unhook_fail(void* func) {
+    (void)func;
+    ++g_unhook_calls;
     return -1;
 }
 
@@ -209,7 +231,7 @@ void test_install_success() {
     const ResourceClaim claim = make_claim("hook:A", "plugin_a");
     CHECK(register_claim(claim));
 
-    const InstallOutcome live = install_claim_entry_hook(claim, 0x1000, hook_ok, true);
+    const InstallOutcome live = install_claim_entry_hook(claim, 0x1000, hook_ok, unhook_ok, true);
     CHECK(live.ok == 0);
     CHECK(live.error == nullptr);
     CHECK(live.backup == reinterpret_cast<void*>(0x1234));
@@ -218,7 +240,7 @@ void test_install_success() {
     CHECK(g_hook.replacement == claim.handler);
     CHECK(state_of("hook:A") == ResourceState::kLive);
 
-    const InstallOutcome disabled = install_claim_entry_hook(claim, 0x1000, hook_ok, false);
+    const InstallOutcome disabled = install_claim_entry_hook(claim, 0x1000, hook_ok, unhook_ok, false);
     CHECK(disabled.ok == 0);
     CHECK(state_of("hook:A") == ResourceState::kDisabled);
 }
@@ -227,7 +249,7 @@ void test_install_not_registered() {
     registry_reset_for_test();
     g_hook = HookRecord{};
     const ResourceClaim claim = make_claim("hook:A", "plugin_a");
-    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_ok, true);
+    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_ok, unhook_ok, true);
     CHECK(error_is(outcome, "claim not registered"));
     CHECK(g_hook.calls == 0);
     CHECK(outcome.backup == nullptr);
@@ -239,7 +261,7 @@ void test_install_mechanism_mismatch() {
     const ResourceClaim claim =
         make_claim("hook:A", "plugin_a", ResourceMechanism::kCallPatch);
     CHECK(register_claim(claim));
-    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_ok, true);
+    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_ok, unhook_ok, true);
     CHECK(error_is(outcome, "mechanism mismatch"));
     CHECK(g_hook.calls == 0);
     CHECK(state_of("hook:A") == ResourceState::kFree);
@@ -251,7 +273,7 @@ void test_install_handler_missing() {
     const ResourceClaim claim =
         make_claim("hook:A", "plugin_a", ResourceMechanism::kEntryHook, nullptr);
     CHECK(register_claim(claim));
-    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_ok, true);
+    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_ok, unhook_ok, true);
     CHECK(error_is(outcome, "handler missing"));
     CHECK(g_hook.calls == 0);
 }
@@ -262,9 +284,9 @@ void test_install_not_ready() {
     const ResourceClaim claim = make_claim("hook:A", "plugin_a");
     CHECK(register_claim(claim));
 
-    const InstallOutcome zero_entry = install_claim_entry_hook(claim, 0, hook_ok, true);
+    const InstallOutcome zero_entry = install_claim_entry_hook(claim, 0, hook_ok, unhook_ok, true);
     CHECK(error_is(zero_entry, "not ready"));
-    const InstallOutcome null_fn = install_claim_entry_hook(claim, 0x1000, nullptr, true);
+    const InstallOutcome null_fn = install_claim_entry_hook(claim, 0x1000, nullptr, unhook_ok, true);
     CHECK(error_is(null_fn, "not ready"));
     CHECK(g_hook.calls == 0);
 }
@@ -276,11 +298,47 @@ void test_install_native_failure_keeps_state() {
     CHECK(register_claim(claim));
     CHECK(set_state("hook:A", ResourceState::kDisabled)); // 安装前状态
 
-    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_fail, true);
+    const InstallOutcome outcome = install_claim_entry_hook(claim, 0x1000, hook_fail, unhook_ok, true);
     CHECK(error_is(outcome, "native hook failed"));
     CHECK(outcome.backup == nullptr);
     CHECK(g_hook.calls == 1);
     CHECK(state_of("hook:A") == ResourceState::kDisabled); // 失败不改登记表状态
+}
+
+// 成功但 backup 为空：hook 已安装却无原函数入口，撤销成功后按失败返回，资源保持 free。
+void test_install_null_backup_unhooks() {
+    registry_reset_for_test();
+    g_hook = HookRecord{};
+    g_unhook_calls = 0;
+    const ResourceClaim claim = make_claim("hook:A", "plugin_a");
+    CHECK(register_claim(claim));
+    const InstallOutcome outcome =
+        install_claim_entry_hook(claim, 0x1000, hook_no_backup, unhook_ok, true);
+    CHECK(error_is(outcome, "resource_ready_failed"));
+    CHECK(outcome.backup == nullptr);
+    CHECK(g_unhook_calls == 1);
+    CHECK(state_of("hook:A") == ResourceState::kFree);  // 撤销成功：状态不变
+    CHECK(!isolated_get("hook:A"));
+}
+
+// 成功但 backup 为空且撤销失败：物理 hook 仍在，登记 tombstone + isolated 并返回失败。
+void test_install_null_backup_unhook_fail_isolates() {
+    registry_reset_for_test();
+    g_hook = HookRecord{};
+    g_unhook_calls = 0;
+    const ResourceClaim claim = make_claim("hook:A", "plugin_a");
+    CHECK(register_claim(claim));
+    const InstallOutcome outcome =
+        install_claim_entry_hook(claim, 0x1000, hook_no_backup, unhook_fail, true);
+    CHECK(error_is(outcome, "native unhook failed"));
+    CHECK(g_unhook_calls == 1);
+    CHECK(state_of("hook:A") == ResourceState::kTombstone);
+    CHECK(isolated_get("hook:A"));
+    ResourceRuntime rt{};
+    CHECK(runtime_of("hook:A", &rt));
+    CHECK(rt.resolved_entry == 0x1000);
+    CHECK(rt.backup == nullptr);
+    CHECK(rt.isolated);
 }
 
 void test_resource_state_name() {
@@ -308,6 +366,8 @@ int main() {
     test_install_handler_missing();
     test_install_not_ready();
     test_install_native_failure_keeps_state();
+    test_install_null_backup_unhooks();
+    test_install_null_backup_unhook_fail_isolates();
     test_resource_state_name();
     std::printf("hooks_registry: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

@@ -72,6 +72,7 @@ const char* g_resolved_symbols[128] = {};
 uint32_t g_resolved_symbol_count = 0;
 int g_hook_calls = 0;
 int g_hook_fail_at = -1;  // 1-based；-1 = 永不失败
+int g_hook_no_backup_at = -1;  // 1-based；该次成功返回 0 但不写 backup
 void* g_hook_targets[16] = {};
 void* g_hook_replacements[16] = {};
 int g_unhook_calls = 0;
@@ -110,6 +111,9 @@ int fake_hook(void* target, void* replacement, void** backup) {
     }
     if (g_hook_fail_at > 0 && call == g_hook_fail_at) {
         return -1;
+    }
+    if (g_hook_no_backup_at > 0 && call == g_hook_no_backup_at) {
+        return 0;  // 成功但不写 backup
     }
     if (backup != nullptr) {
         *backup = reinterpret_cast<void*>(0x2000 + call);
@@ -215,6 +219,7 @@ void reset_all() {
     g_resolved_symbol_count = 0;
     g_hook_calls = 0;
     g_hook_fail_at = -1;
+    g_hook_no_backup_at = -1;
     g_unhook_calls = 0;
     g_unhook_fail_at = -1;
     g_last_unhook_arg = nullptr;
@@ -533,7 +538,7 @@ void test_install_live_is_idempotent_skip() {
     set_deps();
     const ResourceClaim claim = make_claim("hook:A", "plugin_a");
     CHECK(register_claim(claim));
-    const InstallOutcome installed = install_claim_entry_hook(claim, 0x1000, fake_hook, true);
+    const InstallOutcome installed = install_claim_entry_hook(claim, 0x1000, fake_hook, fake_unhook, true);
     CHECK(installed.ok == 0);
     CHECK(state_of("hook:A") == ResourceState::kLive);
     CHECK(g_hook_calls == 1);
@@ -635,7 +640,7 @@ void test_release_anchors() {
     CHECK(g_unhook_calls == 0);
 
     // unhook 失败：状态不变，运行期记录保留。
-    CHECK(install_claim_entry_hook(claim, 0x1000, fake_hook, true).ok == 0);
+    CHECK(install_claim_entry_hook(claim, 0x1000, fake_hook, fake_unhook, true).ok == 0);
     CHECK(state_of("hook:A") == ResourceState::kLive);
     CHECK(runtime_set("hook:A", 0x1000, reinterpret_cast<void*>(0x2000)));
     g_unhook_fail_at = 1;
@@ -661,7 +666,7 @@ void test_terminal_retention_evicts_oldest() {
     const ResourceClaim claim = make_claim("hook:A", "plugin_a");
     CHECK(register_claim(claim));
     // 直接装到 kLive：后续安装事务都走幂等跳过路径，每步即终态。
-    CHECK(install_claim_entry_hook(claim, 0x1000, fake_hook, true).ok == 0);
+    CHECK(install_claim_entry_hook(claim, 0x1000, fake_hook, fake_unhook, true).ok == 0);
 
     uint64_t first_id = 0;
     uint64_t last_id = 0;
@@ -1270,6 +1275,57 @@ void test_tx_abort_install_rejects_non_install() {
     CHECK(state_of("hook:abn:A") == ResourceState::kFree);
 }
 
+// 真实 EntryHook 成功但 backup 为空：撤销成功 → 按资源失败策略处理（fail-soft 保持 free）。
+void test_install_null_backup_unhook_success_soft_fail() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:A", "plugin_a");
+    a.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(a));
+    g_hook_no_backup_at = 1;
+
+    const uint64_t tx = tx_begin("plugin_a", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    const bool more = tx_step(tx, &step);
+    CHECK(!more);
+    CHECK(step.finished);
+    CHECK(step.ok != 0);
+    CHECK(std::strcmp(step.error, "resource_ready_failed") == 0);
+    CHECK(g_unhook_calls == 1);
+    CHECK(state_of("hook:A") == ResourceState::kFree);
+    CHECK(!isolated_get("hook:A"));
+    ResourceRuntime rt{};
+    CHECK(!runtime_of("hook:A", &rt));
+}
+
+// 真实 EntryHook 成功但 backup 为空且撤销失败：硬失败、tombstone + isolated；即使 fail-soft
+// 也不得清回 free 或留下可重试状态。
+void test_install_null_backup_unhook_fail_hard_even_fail_soft() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:A", "plugin_a");
+    a.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(a));
+    g_hook_no_backup_at = 1;
+    g_unhook_fail_at = 1;
+
+    const uint64_t tx = tx_begin("plugin_a", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    const bool more = tx_step(tx, &step);
+    CHECK(!more);
+    CHECK(step.finished);
+    CHECK(step.ok != 0);
+    CHECK(std::strcmp(step.error, "native unhook failed") == 0);
+    CHECK(state_of("hook:A") == ResourceState::kTombstone);
+    CHECK(isolated_get("hook:A"));
+    ResourceRuntime rt{};
+    CHECK(runtime_of("hook:A", &rt));
+    CHECK(rt.resolved_entry == 0x1000);
+    CHECK(rt.backup == nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -1282,6 +1338,8 @@ int main() {
     test_isolated_blocks_begin();
     test_same_plugin_concurrent_rejected();
     test_install_live_is_idempotent_skip();
+    test_install_null_backup_unhook_success_soft_fail();
+    test_install_null_backup_unhook_fail_hard_even_fail_soft();
     test_query_terminal_and_reset();
     test_install_anchor_failures();
     test_release_anchors();

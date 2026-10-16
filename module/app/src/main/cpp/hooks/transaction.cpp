@@ -343,6 +343,19 @@ bool install_step(Tx& tx, TxStep* out) {
     if (rc != 0) {
         return fail_install_resource(tx, claim, 1, "native hook failed", out);
     }
+    if (backup == nullptr) {
+        // 成功但未交还原函数入口：hook 已物理安装，无 backup 的 wrapper 会跳过原调用，
+        // 必须先撤销。撤销成功按资源失败策略处理；撤销失败则登记 tombstone + isolated 并硬失败。
+        const bool unhooked = g_deps.unhook_fn != nullptr &&
+                              g_deps.unhook_fn(reinterpret_cast<void*>(entry)) == 0;
+        if (unhooked) {
+            return fail_install_resource(tx, claim, 1, "resource_ready_failed", out);
+        }
+        runtime_set(claim.id, entry, nullptr);
+        set_state(claim.id, contracts::ResourceState::kTombstone);
+        isolated_set(claim.id, true);
+        return fail_install(tx, claim.id, "native unhook failed", out);
+    }
 
     runtime_set(claim.id, entry, backup);
     set_state(claim.id, want ? contracts::ResourceState::kLive

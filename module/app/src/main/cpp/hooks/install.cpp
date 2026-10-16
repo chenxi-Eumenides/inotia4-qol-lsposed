@@ -20,6 +20,7 @@ ReleaseOutcome release_failure(const char* error) {
 InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
                                         uintptr_t resolved_entry,
                                         NativeHookFn hook_fn,
+                                        NativeUnhookFn unhook_fn,
                                         bool gate_on) {
     if (find_claim(claim.id) == nullptr) {
         return failure("claim not registered");
@@ -40,6 +41,18 @@ InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
     if (rc != 0) {
         // 安装失败不改登记表：占用状态保持安装前的值，交上层按 §8 决定回滚/降级。
         return failure("native hook failed");
+    }
+    if (backup == nullptr) {
+        // 成功但未交还原函数入口：hook 已物理安装，wrapper 无法转发原调用，必须撤销后才算失败。
+        if (unhook_fn != nullptr &&
+            unhook_fn(reinterpret_cast<void*>(resolved_entry)) == 0) {
+            return failure("resource_ready_failed");
+        }
+        // 撤销不可用或失败：物理 hook 仍在，登记 tombstone + isolated，交上层按硬失败处理。
+        runtime_set(claim.id, resolved_entry, nullptr);
+        set_state(claim.id, contracts::ResourceState::kTombstone);
+        isolated_set(claim.id, true);
+        return failure("native unhook failed");
     }
 
     set_state(claim.id, gate_on ? contracts::ResourceState::kLive

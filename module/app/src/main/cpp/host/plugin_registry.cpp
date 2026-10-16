@@ -1149,7 +1149,7 @@ bool install_atomic_group(const contracts::PluginDescriptor& plugin,
                 break;
             }
             const hooks::InstallOutcome outcome = hooks::install_claim_entry_hook(
-                claim, entry, deps.hook_fn, false);
+                claim, entry, deps.hook_fn, deps.unhook_fn, false);
             if (outcome.ok != 0) {
                 failed = true;
                 failed_id = claim.id;
@@ -1234,7 +1234,7 @@ const char* retry_resident_claim(const contracts::PluginDescriptor& plugin,
         if (entry == 0) return "symbol unresolved";
         if (hooks::entry_target_conflicts(entry, claim.id)) return "entry target already occupied";
         const hooks::InstallOutcome outcome =
-            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, true);
+            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, deps.unhook_fn, true);
         if (outcome.ok != 0) {
             return outcome.error != nullptr ? outcome.error : "install failed";
         }
@@ -1370,7 +1370,8 @@ void sync_plugin_resources(const contracts::PluginDescriptor& plugin, const Host
                     error_reason = "entry target already occupied";
                 } else {
                     const hooks::InstallOutcome outcome =
-                        hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, true);
+                        hooks::install_claim_entry_hook(claim, entry, deps.hook_fn,
+                                                        deps.unhook_fn, true);
                     if (outcome.ok != 0) {
                         degraded = true;
                         error_claim = claim.id;
@@ -1850,7 +1851,9 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
         }
         // 常驻（gate==nullptr）fail-soft/optional 失败：资源保持 free，置 retry_pending
         // 供 sync_gates 每逻辑帧重试（带 gate 资源由门禁路径自行重试，无需标记）。
-        if (claim.gate == nullptr) {
+        // 资源已被登记为非 free（如空 backup 撤销失败留下的 tombstone）时不得武装重试。
+        if (claim.gate == nullptr &&
+            hooks::state_of(claim.id) == contracts::ResourceState::kFree) {
             hooks::retry_pending_set(claim.id, true);
         }
         degraded = true;
@@ -1930,7 +1933,7 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
         }
 
         const hooks::InstallOutcome outcome =
-            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, gate_on);
+            hooks::install_claim_entry_hook(claim, entry, deps.hook_fn, deps.unhook_fn, gate_on);
         if (outcome.ok != 0) {
             if (handle_claim_failure(
                     claim, outcome.error != nullptr ? outcome.error : "install failed")) {

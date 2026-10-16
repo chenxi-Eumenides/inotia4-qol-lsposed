@@ -25,20 +25,24 @@ struct InstallOutcome {
     void* backup;
 };
 
+// 宿主注入的 unhook 原语：func 为原函数入口（resolved_entry），成功返回 0。
+using NativeUnhookFn = int (*)(void* func);
+
 // 声明式安装一个入口 hook 资源：
 // - claim 未登记 → "claim not registered"；
 // - mechanism != kEntryHook → "mechanism mismatch"；
 // - handler == nullptr → "handler missing"；
 // - resolved_entry == 0 或 hook_fn == nullptr → "not ready"；
 // - hook_fn 非 0 → "native hook failed"（不改登记表状态）；
+// - hook_fn 成功但 backup == nullptr：hook 已物理安装却无原函数入口，wrapper 无法转发原调用，
+//   先尝试用 unhook_fn 撤销：撤销成功 → "resource_ready_failed"（登记表状态不变）；
+//   撤销不可用或失败 → 登记 tombstone + isolated，返回 "native unhook failed"；
 // - 成功 → 状态置 gate_on ? kLive : kDisabled，返回 backup。
 InstallOutcome install_claim_entry_hook(const contracts::ResourceClaim& claim,
                                         uintptr_t resolved_entry,
                                         NativeHookFn hook_fn,
+                                        NativeUnhookFn unhook_fn,
                                         bool gate_on);
-
-// 宿主注入的 unhook 原语：func 为原函数入口（resolved_entry），成功返回 0。
-using NativeUnhookFn = int (*)(void* func);
 
 // ok 非 0 = 失败；error 为静态字符串（成功时为 nullptr）。
 struct ReleaseOutcome {
