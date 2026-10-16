@@ -1,0 +1,17 @@
+$ adb -s 192.168.3.56:5555 logcat -d -s Inotia4Qol:V > .tmp/attribute-range-display-deploy2/readonly-logcat-full.txt
+exit_code=0
+Logcat lines captured: 942
+
+$ python3: 从最后一次 module identity 起截取并统计 FATAL / SIGSEGV、目标环警告及同意页时序日志
+last_module_identity_line=10-17 04:23:28.177  2566  2682 I Inotia4Qol: 2026-10-17 04:23:28.177 f=0 I platform MainActivityStartupHook.kt:186 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/538354339.apk sha256=be9690ae68dc5d83eb3d601d6fecc346127d4bfbf0e3a42e0dfb0904c527e725
+slice_start_line=880; slice_lines=63
+FATAL_occurrences=0
+SIGSEGV_occurrences=0
+attribute_quality_to_attribute_range_display_downgrade_warning=ABSENT
+agreement_or_dialog_related_log_lines=4
+agreement_or_dialog_related_lines:
+10-17 04:24:00.076  2566  3284 I Inotia4Qol: 2026-10-17 04:24:00.076 f=128 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=ok,index=-1} result={ok:true} dur=26ms
+10-17 04:24:00.077  2566  2566 I Inotia4Qol: 2026-10-17 04:24:00.077 f=128 I platform AgreementPopup.kt:137 agreement close dispatched, parent kept
+10-17 04:24:00.110  2566  3284 I Inotia4Qol: 2026-10-17 04:24:00.110 f=128 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=ok,index=-1} result={ok:true} dur=1ms
+10-17 04:24:00.158  2566  3284 I Inotia4Qol: 2026-10-17 04:24:00.157 f=128 I save SaveActions.kt:31 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:false,error=ui occupied: agreement} dur=20ms
+exit_code=0

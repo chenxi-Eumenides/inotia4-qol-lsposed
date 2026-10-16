@@ -54,6 +54,32 @@ Findings（阶段 1 @oracle 只读静态审计，A–G 七维）：
 | D2 required 依赖（装配，阶段 4） | **PASS**：`attribute_range_display` `requires=['attribute.quality']`、`enabled`、`degraded=false`、2 资源 `live` | `evidence/main-07-features.json` |
 | D2 required 级联（阶段 4） | **PASS**：provider `attribute_quality` deactivate → provider `inactive`（`MATH_GetRandom` `free`）且 **display `inactive`、两 hook `free`（required 级联停用，非 degraded）**；provider activate + display activate → 两者恢复 `enabled`、资源 `live` | `evidence/main-08a-deactivate.json`～`main-08e-final.json` |
 | 日志（阶段 4） | **PASS**：当前会话不再出现 `downgraded … provider=attribute_quality consumer=attribute_range_display`（0 次）；其他 optional 环警告保留（`custom_recipe→attribute.quality`、`core.item↔core.character` 等）；FATAL/SIGSEGV = 0 | `evidence/main-09-session.txt` |
-| VM-ARD-01：视觉（六档颜色目视） | **待用户目视（阶段 5）** | runbook 见本目录 `manual-runbook.md` |
+| VM-ARD-01：视觉（六档颜色目视） | **PASS（用户真机确认，2026-10-17）**：用户实际查看物品详情，属性数值**颜色已有且正确**，行结构正常。 | 用户目视确认；本轮不加截图 |
+
+## §1b 阶段 6 事故分支：着色静默失效（已修复）
+
+首次目视复验发现**数值保持原版默认色**，插件静默无效。按阶段 6 处置：
+
+| 编号 | 文件:行 | 根因 | 处置 |
+|---|---|---|---|
+| R1 | `host/ui_adapter.cpp:74-91`（旧）、`plugins/attribute_range_display/feature.cpp`、旧实现 `attribute_range/feature.cpp:77-91` | 游戏 `UIDesc` builder 首字段是**行尾写游标**，AddOption 写入后指向本行末尾；旧 `insert_inline_color` 把它当**行首**，`strnlen` 取不到本行 span → `NotReady` → 插件静默不插色。该失效自 `80070952`（p2-b34 重构用 adapter 接口替换旧 game 层 `attr_insert_value_color(before, after, code)`）引入 | 方案 A（用户裁决）：`QOL_PORT` 无关；在 `QolUiAdapter` **尾部追加** `ui_desc_text_cursor` / `insert_inline_color_span` 两槽（minor 21→22，offset 相对 UIDesc 文本缓冲、不暴露游戏地址），旧槽标注 deprecated；插件改为 backup 前后快照游标后按 span 插入；`game/access` 新增只读缓冲基址访问器；`host/ui_adapter` 做 0x200 边界与游标/span 一致性校验，失败不写、成功后游标 +4。修复提交 `7f5c06e8` |
+
+取证与判定（阶段 6）：
+
+- **确证**（frida 只读探针，`libgame.so` base `0x795c40a000`）：`F_UIDESC_ADD_OPTION`（`+0xb343c`）**在渲染路径**（13 次调用），`F_UIDESC_MAKE_ITEM` 4 次；`*(void**)builder` 在每次调用后**推进本行长度**（13/13/25/25…），证实为首字段=行尾写游标。
+- 排除项：wrapper 未被调用（已证 AddOption 被调用）、`register_item`/`query`/`level` 门禁（静态与 host 用例覆盖）。
+- 用户裁决：先问「能否让游戏写入时直接带颜色码」，确认**不可**（游戏按行固定原色码、不接收参数），遂选方案 A。
+- 二次目视（部署 `be9690ae…`）**PASS**。
+
+## §1c 收尾证据（最终构建 `be9690ae…`）
+
+| 验收项 | 结果 | 证据 |
+|---|---|---|
+| 运行模块身份 | **PASS**：`sha256=be9690ae68dc5d83eb3d601d6fecc346127d4bfbf0e3a42e0dfb0904c527e725` = 本批修复构建 | `evidence/readonly-01-module-identity.txt` |
+| 装配 | **PASS**：`attribute_range_display` `enabled`/`degraded=false`/`requires=[attribute.quality]`、两 hook `live`；`attribute_quality` `enabled`、`MATH_GetRandom` `live` | `evidence/readonly-02-features.txt`、`evidence/readonly-features.json` |
+| 日志 | **PASS**：最新 identity 后 `FATAL=0`、`SIGSEGV=0`；`downgraded … attribute_quality→attribute_range_display` **ABSENT** | `evidence/readonly-04-logcat-analysis.txt`、`evidence/readonly-logcat-analysis.txt` |
+| 视觉（六档颜色） | **PASS（用户真机确认）** | 见 §3 末行 |
+
+> 同意页说明：`enter_slot` 曾被 `ui occupied: agreement` 阻断，`dialog/select` 返回 `close_dispatched` 后需时间异步生效（用户观测确认）；属启动同意页时序，非本插件缺陷。
 
 > 进入游戏过程说明（阶段 4 记录）：安装后首次 `enter_slot` 被 `ui occupied: agreement` 阻断，`dialog/select {"action":"ok"}` 返回 `close_dispatched` 后仍未解除；随后重试 `dialog/select` 走 native 分支返回票据、`enter_slot` 成功、`screen=world`。属启动同意页异步关闭的时序问题，非本插件缺陷。

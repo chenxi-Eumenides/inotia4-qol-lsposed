@@ -1,0 +1,5 @@
+$ grep -i -E "agreement|close dispatched|enter_slot|save enter fired|save_enter fired" .tmp/attribute-range-display-deploy2/readonly-logcat-since-last-identity.txt
+10-17 04:24:00.077  2566  2566 I Inotia4Qol: 2026-10-17 04:24:00.077 f=128 I platform AgreementPopup.kt:137 agreement close dispatched, parent kept
+10-17 04:24:00.158  2566  3284 I Inotia4Qol: 2026-10-17 04:24:00.157 f=128 I save SaveActions.kt:31 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:false,error=ui occupied: agreement} dur=20ms
+10-17 04:32:48.716  2566  2700 I Inotia4Qol: 2026-10-17 04:32:48.716 f=5578 I save save_enter.cpp:122 save enter fired callbacks=1
+exit_code=0
