@@ -45,7 +45,7 @@
 - required 依赖 `attribute.quality`：provider 缺失时本插件 `blocked`；provider 撤销时作为 required consumer 被级联停用（`cascade_stop`），provider 恢复后按 Host 生命周期重新激活。
 - 本插件停用不影响任何其他插件（叶子）。
 
-边界归其他 owner：属性范围与质量计算归 `attribute_quality` provider（见 `docs/reference/plugins/attribute_quality.md`）；本行 span 与内联颜色串的物理插入归 Game Adapter（`host/ui_adapter.cpp:93-160`、`game/access/attr_range_ui.cpp:128-166`）；item 句柄注册归 infra item-handle registry。
+边界归其他 owner：属性范围与质量计算归 `attribute_quality` provider（见 `docs/reference/plugins/attribute_quality.md`）；本行 span 与内联颜色串的物理插入归 Game Adapter（`host/ui_adapter.cpp:93-161`、`game/access/attr_range_ui.cpp:136-171`）；item 句柄注册归 infra item-handle registry。
 
 ## 失败语义（fail-closed）
 
@@ -77,7 +77,7 @@
 | `plugins/attribute_range_display/feature.cpp:65-83,86-134,136-144` | resource ready（含空 backup 拒绝）、AddOption wrapper（游标快照 + span 插入）、MakeItem wrapper。 |
 | `contracts/ui.h:17,435-437,529-535` | adapter minor 22、deprecated `insert_inline_color`、游标/span 槽。 |
 | `contracts/attribute_quality.h:14-19,31-104` | 质量能力 id/版本、结果结构与 API 尺寸校验。 |
-| `game/access/attr_range_ui.h:44-46`、`attr_range_ui.cpp:128-136` | 文本缓冲基址只读访问器。 |
-| `game/access/attr_range_ui.cpp:138-166`、`host/ui_adapter.cpp:93-160` | 本行 span 插入与 0x200 边界/游标一致性校验。 |
+| `game/access/attr_range_ui.h:45-46`、`attr_range_ui.cpp:128-135` | 文本缓冲基址只读访问器。 |
+| `game/access/attr_range_ui.cpp:136-171`、`host/ui_adapter.cpp:93-161` | 本行 span 插入与 0x200 边界/游标一致性校验。 |
 | `game/symbols/game_symbols.h:604-607` | 两个入口 hook 的 VMA、UIDesc 文本缓冲 VMA/容量。 |
 | `tests/test_attribute_range_display.cpp`、`tests/test_ui_adapter.cpp` | host 侧 descriptor/wrapper/颜色/失败门禁与行尾游标 fixture。 |
