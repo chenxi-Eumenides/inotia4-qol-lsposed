@@ -1,0 +1,73 @@
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=core.item consumer=core.character capability=item.state
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=extension_bag consumer=autosell capability=extension_bag
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=attribute_quality consumer=custom_recipe capability=attribute.quality
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=inventory_hooks consumer=extension_bag capability=inventory_refresh
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=move_merge consumer=extension_bag capability=move_merge.control
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=extension_bag consumer=move_merge capability=inventory.merge_projection
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=inventory_hooks consumer=move_merge capability=inventory_refresh
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=extension_bag consumer=inventory_hooks capability=extension_bag
+10-17 03:16:27.242   504   631 W Inotia4Qol: 2026-10-17 03:16:27.242 f=0 W core plugin_registry.cpp:684 optional edge downgraded to avoid cycle: provider=core.character consumer=core.item capability=character.state
+10-17 03:16:27.242   504   631 I Inotia4Qol: 2026-10-17 03:16:27.242 f=0 I core assembly.cpp:560 assembly: initialized=true registered=28 install_failed=0 kernel_only=false
+10-17 03:16:27.243   504   631 I Inotia4Qol: 2026-10-17 03:16:27.243 f=0 I platform HookMain.kt:26 module loaded in process: com.com2us.inotia4.normal.freefull.google.global.android.common
+10-17 03:16:27.243   504   631 I Inotia4Qol: 2026-10-17 03:16:27.243 f=0 I platform MainActivityStartupHook.kt:77 MainActivity startup hook installed on onCreate
+10-17 03:16:27.243   504   631 I Inotia4Qol: 2026-10-17 03:16:27.243 f=0 I platform AgreementPopup.kt:45 agreement opening-animation readiness hook installed
+10-17 03:16:27.243   504   631 I Inotia4Qol: 2026-10-17 03:16:27.243 f=0 I platform AgreementPopup.kt:58 agreement Activity teardown hook installed
+10-17 03:16:27.243   504   631 I Inotia4Qol: 2026-10-17 03:16:27.243 f=0 I platform ImmersiveMode.kt:29 ImmersiveMode hook installed on MainActivity.onWindowFocusChanged
+10-17 03:16:27.243   504   631 I Inotia4Qol: 2026-10-17 03:16:27.243 f=0 I platform WatermarkOverlay.kt:143 WatermarkOverlay hook installed on MainActivity.onWindowFocusChanged
+10-17 03:16:27.243   504   631 I Inotia4Qol: 2026-10-17 03:16:27.243 f=0 I platform WatermarkOverlay.kt:196 watermark overlay attached color=26ffffff rule=默认
+10-17 03:16:27.244   504   631 I Inotia4Qol: 2026-10-17 03:16:27.244 f=0 I platform MainActivityStartupHook.kt:185 NativeBridge init OK: {"G_MONEY_VMA":true,"G_MAP_ID_VMA":true,"G_PARTY_VMA":true,"G_ACTIVE_QUEST_VMA":true,"G_INVEN_VMA":true,"G_MAIN_MERC_SLOT_VMA":true,"G_PREV_STATE_VMA":true,"G_STATE_VMA":true,"G_GAMESTATE_VMA":true,"G_INITSTATE_VMA":true,"G_POPUP_ON_VMA":true,"G_MAINMENU_DRAW_VMA":true,"G_POPUP_STACK_VMA":true,"G_PLAYER_ACTIVE_VMA":true,"G_PLAYER_ACTIVE_GOT_VMA":true,"G_MAPINFOBASE_PDATA_GOT_VMA":true,"G_MAPINFOBASE_RECORD_SIZE_VMA":true,"G_MAPINFOBASE_RECORD_COUNT_VMA":true,"G_UICHOICE_ITEMTEXT_VMA":true,"G_UICHOICE_COUNT_VMA":true,"G_UICHOICE_FOCUS_VMA":true,"G_UICHOICE_MAIN_TEXT_VMA":true,"G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA":true,"G_UICHOICE_CONTROL_GOT_VMA":true,"G_UIMIX_VMA":true,"F_GET_MONEY_VMA":true,"F_GET_MEMBER_VMA":true,"F_GET_PARTY_SIZE_VMA":true,"F_GET_ATTR_VMA":true,"F_GET_EQUIP_VMA":true,"F_GET_EXP_VMA":true,"F_GET_NEXT_EXP_VMA":true,"F_GET_RARITY_VMA":true,"F_GET_BAG_SIZE_VMA":true,"F_INVEN_GET_EMPTY_BAG_SLOT_VMA":true
+10-17 03:16:27.284   504   631 I Inotia4Qol: 2026-10-17 03:16:27.283 f=0 I platform MainActivityStartupHook.kt:186 module identity: package=com.inotia4.qol versionCode=192 versionName=0.7.13 apk=/data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/3147678684.apk sha256=02f8fa02377ab8e3d48cddd2bf782bafb027cb59eb187cb1e698be6347a19f13
+10-17 03:16:27.295   504   631 I Inotia4Qol: 2026-10-17 03:16:27.295 f=0 I http ModuleRuntimeBootstrap.kt:81 module assets added: /data/user/0/com.com2us.inotia4.normal.freefull.google.global.android.common/cache/lspatch/com.inotia4.qol/3147678684.apk
+10-17 03:16:28.210   504   631 I Inotia4Qol: 2026-10-17 03:16:28.210 f=0 I http ModuleRuntimeBootstrap.kt:58 savebackup ui inject: {"ok":false,"error":"result unavailable"}
+10-17 03:16:28.377   504   631 I Inotia4Qol: 2026-10-17 03:16:28.377 f=0 I http ModuleRuntimeBootstrap.kt:60 savebackup self check: {"ok":true,"backup_count":42,"total_pages":9,"page_index":0}
+10-17 03:16:28.628   504   654 I Inotia4Qol: 2026-10-17 03:16:28.628 f=1 I core core.character [core.character] provider install
+10-17 03:16:28.651   504   654 I Inotia4Qol: 2026-10-17 03:16:28.651 f=1 I core core.character [core.character] provider enabled: capability + http queries
+10-17 03:16:28.653   504   654 I Inotia4Qol: 2026-10-17 03:16:28.653 f=1 I core core.craft [core.craft] provider install
+10-17 03:16:28.653   504   654 I Inotia4Qol: 2026-10-17 03:16:28.653 f=1 I core core.craft [core.craft] provider enabled: capability published
+10-17 03:16:28.665   504   631 I Inotia4Qol: 2026-10-17 03:16:28.665 f=1 I catalog /home/chenxi-zqs/Code/Agent/projects/inotia4-qol-lsposed/module/app/src/main/cpp/game/read/game static tiles loaded: 416 maps, ready=1
+10-17 03:16:28.668   504   631 I Inotia4Qol: 2026-10-17 03:16:28.668 f=1 I config ConfigApiService.kt:18 static tiles loaded: true
+10-17 03:16:28.696   504   504 I Inotia4Qol: 2026-10-17 03:16:28.696 f=1 I platform WatermarkOverlay.kt:213 watermark color refreshed color=26ffffff rule=默认
+10-17 03:16:28.713   504   654 I Inotia4Qol: 2026-10-17 03:16:28.713 f=1 I core core.item [core.item] provider install
+10-17 03:16:28.758   504   654 I Inotia4Qol: 2026-10-17 03:16:28.757 f=1 I core core.item [core.item] provider enabled: capability + http queries
+10-17 03:16:28.803   504   654 I Inotia4Qol: 2026-10-17 03:16:28.802 f=1 I core core.save [core.save] provider install: facts + save writes + save route + hooks
+10-17 03:16:28.856   504   654 I Inotia4Qol: 2026-10-17 03:16:28.854 f=1 I core core.system [core.system] provider install
+10-17 03:16:28.863   504   654 I Inotia4Qol: 2026-10-17 03:16:28.863 f=1 I core core.system [core.system] provider enabled: http queries
+10-17 03:16:28.878   504   654 I Inotia4Qol: 2026-10-17 03:16:28.878 f=1 I core core.world [core.world] provider install
+10-17 03:16:28.896   504   654 I Inotia4Qol: 2026-10-17 03:16:28.896 f=1 I core core.world [core.world] provider enabled: capability published
+10-17 03:16:28.897   504   654 I Inotia4Qol: 2026-10-17 03:16:28.897 f=1 I core core.quest [core.quest] owner installed: http queries registered
+10-17 03:16:29.032   504   504 I Inotia4Qol: 2026-10-17 03:16:29.032 f=1 I http ApiServer.kt:154 AndServer started on 0.0.0.0:8088
+10-17 03:16:29.173   504   654 I Inotia4Qol: 2026-10-17 03:16:29.172 f=1 I special_equip plugins/special_equip/feature.cpp enabled=1
+10-17 03:16:29.322   504   654 I Inotia4Qol: 2026-10-17 03:16:29.322 f=3 I special_equip plugins/special_equip/feature.cpp enabled=1
+10-17 03:16:29.356   504   654 I Inotia4Qol: 2026-10-17 03:16:29.356 f=4 I core core.save [core.save] provider enabled: capability published
+10-17 03:16:29.410   504   654 I Inotia4Qol: 2026-10-17 03:16:29.410 f=4 I ui plugin.cpp:159 ui action scheduler task=17
+10-17 03:16:29.432   504   654 I Inotia4Qol: 2026-10-17 03:16:29.432 f=5 I save_backup plugin.cpp:309 slot delete hook: backup handover orig=0x795c5564e8
+10-17 03:16:29.437   504   654 I Inotia4Qol: 2026-10-17 03:16:29.437 f=5 I platform call_patch.cpp:500 patched call=0x795c55cea0 replacement=0x9462a888
+10-17 03:16:29.462   504   654 I Inotia4Qol: 2026-10-17 03:16:29.462 f=6 I save_backup panel.cpp:683 popup.savebackup acquired: state id=22
+10-17 03:16:29.926   504   654 W Inotia4Qol: 2026-10-17 03:16:29.926 f=17 W custom_recipe plugins/custom_recipe/table recipe table not ready recipe_size=0 mixture_size=0 count=0
+10-17 03:16:29.927   504   654 W Inotia4Qol: 2026-10-17 03:16:29.927 f=17 W custom_recipe plugins/custom_recipe custom_recipe table acquire failed code=3
+10-17 03:16:38.888   504   654 I Inotia4Qol: 2026-10-17 03:16:38.888 f=114 I platform HookMain.kt:120 blocked ActivityIndicatorOpen (Connecting.. progress dialog)
+10-17 03:16:39.143   504   654 I Inotia4Qol: 2026-10-17 03:16:39.143 f=116 I ui settings.cpp:686 more-games stage=consumer-ui a=21 b=936 c=0 d=0
+10-17 03:16:39.143   504   654 I Inotia4Qol: 2026-10-17 03:16:39.143 f=116 I ui settings.cpp:686 more-games stage=consumer-components a=14 b=424 c=14 d=424
+10-17 03:16:39.144   504   654 I Inotia4Qol: 2026-10-17 03:16:39.144 f=116 I ui settings.cpp:686 more-games stage=reject-snapshot a=3 b=0 c=0 d=0
+10-17 03:16:39.251   504   654 W Inotia4Qol: 2026-10-17 03:16:39.251 f=117 W ui ui_adapter.cpp:1010 menu replacement check stage=original-rect a=869 b=470 c=300 d=92 int=int64
+10-17 03:16:39.263   504   654 W Inotia4Qol: 2026-10-17 03:16:39.263 f=117 W ui ui_adapter.cpp:1010 menu replacement check stage=sibling-overlap-existing a=869 b=492 c=27 d=70 int=int64
+10-17 03:16:39.274   504   654 W Inotia4Qol: 2026-10-17 03:16:39.274 f=117 W ui ui_adapter.cpp:1010 menu replacement check stage=accepted a=869 b=470 c=300 d=92 int=int64
+10-17 03:16:39.313   504   654 I Inotia4Qol: 2026-10-17 03:16:39.313 f=117 I ui settings.cpp:686 more-games stage=bound a=1 b=32 c=0 d=0
+10-17 03:17:05.563   504  1663 I Inotia4Qol: 2026-10-17 03:17:05.563 f=123 I save SaveActions.kt:31 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:false,error=ui occupied: agreement} dur=45ms
+10-17 03:18:31.647   504  1703 I Inotia4Qol: 2026-10-17 03:18:31.647 f=123 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=ok,index=-1} result={ok:true} dur=2ms
+10-17 03:18:31.648   504   504 I Inotia4Qol: 2026-10-17 03:18:31.648 f=123 I platform AgreementPopup.kt:137 agreement close dispatched, parent kept
+10-17 03:18:31.675   504  1703 I Inotia4Qol: 2026-10-17 03:18:31.675 f=123 I save SaveActions.kt:31 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:false,error=ui occupied: agreement} dur=1ms
+10-17 03:21:14.162   504  1769 I Inotia4Qol: 2026-10-17 03:21:14.162 f=2115 I api UiActions.kt:22 endpoint=POST /api/ui/dialog/select params={action=ok,index=-1} result={ok:true} dur=24ms
+10-17 03:21:16.215   504  1770 I Inotia4Qol: 2026-10-17 03:21:16.215 f=2140 I save SaveActions.kt:31 endpoint=POST /api/system/enter_slot params={slot=0} result={ok:true} dur=24ms
+10-17 03:21:16.291   504   654 I Inotia4Qol: 2026-10-17 03:21:16.291 f=2141 I platform plugins/core.quest/feature.cpp quest resync: fixed=0
+10-17 03:21:16.625   504   654 I Inotia4Qol: 2026-10-17 03:21:16.625 f=2144 I custom_recipe plugins/custom_recipe dynamic special recipes rebuilt count=26 equip=26 materialPool=14
+10-17 03:21:16.625   504   654 I Inotia4Qol: 2026-10-17 03:21:16.625 f=2144 I save save_enter.cpp:122 save enter fired callbacks=1
+10-17 03:21:16.661   504   654 I Inotia4Qol: 2026-10-17 03:21:16.661 f=2145 I custom_recipe plugins/custom_recipe/table recipe table injected base=69 records=71 materials=191 book_bytes=7
+10-17 03:21:16.661   504   654 I Inotia4Qol: 2026-10-17 03:21:16.661 f=2145 I core plugin_registry.cpp:3114 plugin custom_recipe ownership restored on own:RECIPEBASE_MIXTUREBASE
+10-17 03:21:16.766   504   654 W Inotia4Qol: 2026-10-17 03:21:16.766 f=2147 W core core.item extension inventory omitted: provider unavailable
+10-17 03:21:17.003   504   654 I Inotia4Qol: 2026-10-17 03:21:17.002 f=2151 I platform HookMain.kt:94 blocked Hive SelectTarget.iapSelectTarget (payment dialog)
+10-17 03:21:17.003   504   654 I Inotia4Qol: 2026-10-17 03:21:17.003 f=2151 I platform IapBlocker.kt:35 hive recovery: {"ok":true}
+10-17 03:22:42.221   504   504 I Inotia4Qol: 2026-10-17 03:22:42.221 f=3875 I platform WatermarkOverlay.kt:213 watermark color refreshed color=26ffffff rule=默认
+10-17 03:22:50.328   504   504 I Inotia4Qol: 2026-10-17 03:22:50.328 f=4043 I platform WatermarkOverlay.kt:213 watermark color refreshed color=26ffffff rule=默认
+10-17 03:22:53.403   504   504 I Inotia4Qol: 2026-10-17 03:22:53.403 f=4108 I platform WatermarkOverlay.kt:213 watermark color refreshed color=26ffffff rule=默认
+10-17 03:24:59.171   504   654 W Inotia4Qol: 2026-10-17 03:24:59.171 f=6647 W core core.item extension inventory omitted: provider unavailable

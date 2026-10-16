@@ -1,0 +1,76 @@
+$ curl -s http://192.168.3.56:8088/api/health (attempt 1)
+{"ok":true,"ready":true,"variant":{"series":"monster","version":"v29","known":true,"capabilities":3}}
+exit_code=0
+health_ready=true
+
+$ curl -s http://192.168.3.56:8088/api/ui/screen
+{"screen":"main_menu"}
+exit_code=0
+
+Agreement screen not detected; consent POST skipped.
+
+$ curl -s -X POST http://192.168.3.56:8088/api/system/enter_slot -d '{"slot":0}'
+{"ok":false,"error":"ui occupied: agreement"}
+exit_code=0
+
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 1)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 2)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 3)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 4)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 5)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 6)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 7)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 8)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 9)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 10)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 11)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 12)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 13)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 14)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 15)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 16)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 17)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 18)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 19)
+{"screen":"main_menu"}
+exit_code=0
+$ curl -s http://192.168.3.56:8088/api/ui/screen (world poll 20)
+{"screen":"main_menu"}
+exit_code=0
+STOP: screen did not reach world within 60 seconds.

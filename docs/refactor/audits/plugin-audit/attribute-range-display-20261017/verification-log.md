@@ -50,4 +50,10 @@ Findings（阶段 1 @oracle 只读静态审计，A–G 七维）：
 | 路由漂移 | **PASS**：native frozen 147、baseline 147、duplicates 0、missing/extra 0 | `uv run python scripts/maintenance/check_http_routes.py` |
 | Debug 构建 | **PASS**：`BUILD SUCCESSFUL`，APK `output/inotia4_qol_lsposed_debug_2610170253_02f8fa02377a.apk`，SHA-256 `02f8fa02377ab8e3d48cddd2bf782bafb027cb59eb187cb1e698be6347a19f13` | `scripts/build-debug.sh`；构建成功不等于运行身份 |
 | `git diff --check` | **PASS**（无输出） | `git diff --check` |
-| VM-ARD-01：真机行为（着色目视、required 级联撤销/恢复、空 backup 守卫下正常渲染） | **NOT_ACCEPTED（未执行）** | 待阶段 4/5；不安装、不重启、不碰设备 |
+| 部署与运行身份（阶段 4） | **PASS**：集成包 `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`（SHA-256 `4f4a298e91b6…`）安装成功；运行模块 sha256 `02f8fa02377ab8e3…` = 本次 Debug 构建模块 | `evidence/step-02-*.txt`、`evidence/step-03-install.txt`、`evidence/main-06-identity.txt` |
+| D2 required 依赖（装配，阶段 4） | **PASS**：`attribute_range_display` `requires=['attribute.quality']`、`enabled`、`degraded=false`、2 资源 `live` | `evidence/main-07-features.json` |
+| D2 required 级联（阶段 4） | **PASS**：provider `attribute_quality` deactivate → provider `inactive`（`MATH_GetRandom` `free`）且 **display `inactive`、两 hook `free`（required 级联停用，非 degraded）**；provider activate + display activate → 两者恢复 `enabled`、资源 `live` | `evidence/main-08a-deactivate.json`～`main-08e-final.json` |
+| 日志（阶段 4） | **PASS**：当前会话不再出现 `downgraded … provider=attribute_quality consumer=attribute_range_display`（0 次）；其他 optional 环警告保留（`custom_recipe→attribute.quality`、`core.item↔core.character` 等）；FATAL/SIGSEGV = 0 | `evidence/main-09-session.txt` |
+| VM-ARD-01：视觉（六档颜色目视） | **待用户目视（阶段 5）** | runbook 见本目录 `manual-runbook.md` |
+
+> 进入游戏过程说明（阶段 4 记录）：安装后首次 `enter_slot` 被 `ui occupied: agreement` 阻断，`dialog/select {"action":"ok"}` 返回 `close_dispatched` 后仍未解除；随后重试 `dialog/select` 走 native 分支返回票据、`enter_slot` 成功、`screen=world`。属启动同意页异步关闭的时序问题，非本插件缺陷。
