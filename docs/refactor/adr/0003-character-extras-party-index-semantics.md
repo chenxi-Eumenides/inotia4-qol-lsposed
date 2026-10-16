@@ -42,6 +42,14 @@
 - **D4 同型重复登记**：`game_host_port.cpp:202 read_char_party`（死代码、旧语义）本次不改，登记为后续清理候选，避免遗留漂移。
 - **D5 不改插件**：本次不修改 `plugins/push_all` 代码；生效路径为端口语义修正 + 既有 `party_decision`。
 
+## 验证与状态
+
+- 代码提交：`0cabd5fc`（适配器 + 端口 minor + host 用例；不含插件改动）。
+- Host 门（全绿）：`ctest` 143/143；`check_arch.py`；`check_http_routes.py`（147，不漂移）；`scripts/build-debug.sh`；`git diff --check`。
+- 真机（2026-10-17，设备 `192.168.3.56`，monster v29）：模块 sha256 `10b218e703f9…`、集成包 sha256 `4d834442…`；`push_all` = `enabled`、`degraded=false`、`patch:CHAR_Move+0x168`/`+0x180` 均 `live`；**用户真机确认：推怪恢复正常 → PASS**（VM-P4-01 / VM-K2-03 真机行为回归已补）。
+- D4（`game_host_port.cpp:202 read_char_party` 死代码清理）：仍待办。
+- D3（后续新调用方）：当前无；若出现按本 ADR 另行决策。
+
 ## 关联
 
 - 缺陷定位与设备佐证：push_all 插件审阅（`docs/refactor/audits/plugin-audit/`，2026-10-17）；静态审计（@oracle）无 P0/P1，本缺陷由主代理定位。
