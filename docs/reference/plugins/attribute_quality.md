@@ -79,7 +79,7 @@
 | 消费者 | 依赖 | 当前调用与失败行为 |
 |---|---|---|
 | `autosell` | required `attribute.quality` | 查询宝石 `query_item`，只接受完整的单项 Jewel 且 status=0；不可用或探测失败保持 `jewel_percentile=-1`，不以默认 0 命中误售规则。见 `plugins/autosell/plugin.cpp:38-43,254-262`、`plugins/autosell/view.cpp:64-85`。 |
-| `attribute_range_display` | optional `attribute.quality`；另需 Item Extras port | 以 option id + 当前 display value 调 `query_option_context`，由本消费者将 `level` 映射成内联颜色；能力/事实错误时不插入颜色。见 `plugins/attribute_range_display/plugin.cpp:13-21,87-109`、`plugins/attribute_range_display/feature.cpp:24-34,78-111`。 |
+| `attribute_range_display` | required `attribute.quality`（插件审计批 2026-10-17 由 optional 改硬依赖） | 以 option id + 当前 display value 调 `query_option_context`，由本消费者将 `level` 映射成内联颜色；能力/事实错误时不插入颜色。见 `plugins/attribute_range_display/plugin.cpp:13-16`、`plugins/attribute_range_display/feature.cpp:24-34,78-112`。 |
 | `custom_recipe` | optional `attribute.quality` | `query_item` 取宝石现态，`evaluate` 纯计算候选档位；能力或质量查询失败会在候选随机、宝石写入、材料数写回之前退出。成功的策略、随机候选、宝石位写入及材料列表更新由 custom_recipe 自己负责。见 `plugins/custom_recipe/plugin.cpp:233-250`、`plugins/custom_recipe/feature.cpp:171-249,614-669`。 |
 
 provider 只提供范围事实与质量计算；不做整件装备聚合、UI 颜色/文本写入、物品写入、craft 候选策略、自动出售策略或材料策略。Game Host 读取原语只同步调用；provider 不创建后台任务，不保证后台调用 `capabilities.require` 或能力撤销期间借用指针的 lease 并发安全。消费者应按调用重新 require，并且不得缓存能力指针跨撤销。Game Host item-handle 和 fixed-table adapter 的 wrong-thread 路径返回 Blocked，见 `game/access/attr_range_ui.h:7-10`、`game/adapter_ports/game_host_port.cpp:672-724`。
