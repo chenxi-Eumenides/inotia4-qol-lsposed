@@ -1,6 +1,5 @@
 #include <cassert>
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -14,6 +13,7 @@
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"
 #include "host/ui_adapter.h"
+#include "infra/log/qol_log.h"
 
 namespace {
 
@@ -58,8 +58,8 @@ int g_control_parent_reads = 0;
 int g_memory_accessible_reads = 0;
 int g_active_calls = 0;
 void* g_active_control = nullptr;
-uint32_t g_active_argument = UINT32_MAX;
-uint32_t g_active_value = UINT32_MAX;
+uint32_t g_last_set_active_argument = UINT32_MAX;  // callee 收到的入参（原生为 bool 0/1）
+uint32_t g_active_value = UINT32_MAX;              // 编码后的存储值（0x20 激活 / 0x21 非激活）
 
 void set_data(FakeControl& control, size_t field, int64_t value) {
     std::memcpy(control.data + field, &value, sizeof(value));
@@ -154,17 +154,6 @@ int32_t g_border_rect[4]{};
 int32_t g_clip_rect[4]{};
 int g_set_clip_calls = 0;
 int g_reset_clip_calls = 0;
-// 记录每次 set 的四元组，用于断言 content→bar→恢复 的顺序与 (x,y,w,h) 语义。
-std::vector<std::array<int32_t, 4>> g_clip_sets;
-// UI_DrawScrollBar 8 参记录（寄存器顺序）。
-struct BarCall {
-    int64_t a0, a1, a2, a3, a4, a5, a6, a7;
-};
-std::vector<BarCall> g_bar_calls;
-int g_scroll_content_cb_calls = 0;
-int64_t g_scroll_content_cb_current = -1;
-int g_screen_w = 1280;
-int g_screen_h = 720;
 UiClickProc g_click_proc = nullptr;
 void* g_click_user = nullptr;
 
@@ -186,22 +175,8 @@ void fake_set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
     g_clip_rect[1] = y1;
     g_clip_rect[2] = x2;
     g_clip_rect[3] = y2;
-    g_clip_sets.push_back({x1, y1, x2, y2});
 }
-void fake_reset_clip() {
-    ++g_reset_clip_calls;
-    g_clip_sets.push_back({INT32_MIN, INT32_MIN, INT32_MIN, INT32_MIN});  // reset 标记
-}
-void fake_draw_scrollbar(int64_t a0, int64_t a1, int64_t a2, int64_t a3, int64_t a4, int64_t a5,
-                         int64_t a6, int64_t a7) {
-    g_bar_calls.push_back({a0, a1, a2, a3, a4, a5, a6, a7});
-}
-void fake_scroll_content_cb(void*, int64_t current) {
-    ++g_scroll_content_cb_calls;
-    g_scroll_content_cb_current = current;
-}
-int32_t fake_resolution_width() { return g_screen_w; }
-int32_t fake_resolution_height() { return g_screen_h; }
+void fake_reset_clip() { ++g_reset_clip_calls; }
 
 // 游戏 IMGSYS fake：UnitLoad 幂等（已加载不重载、不增引用），UnitUnload 无引用计数、
 // 直接置失效并记录物理卸载次数。0x0f 边框、0x59 option/返回、0x4f/0x50 标题背景由
@@ -223,13 +198,22 @@ void fake_imgsys_unit_unload(int32_t unit) { g_atlases.unload(unit); }
 void fake_control_set_active(void* control, uint32_t active) {
     ++g_active_calls;
     g_active_control = control;
-    g_active_argument = active;
-    g_active_value = active == 0 ? 0x21u : 0x20u;
+    // 模拟原生 ControlObject_SetActive：入参是 bool，内部编码为 Active 字段 0x20（true）/
+    // 0x21（false）。分开记录 callee 入参与编码后的存储值，避免把两者混为一谈。
+    g_last_set_active_argument = active;
+    g_active_value = active != 0 ? 0x20u : 0x21u;
 }
 
 }  // namespace
 
 uintptr_t g_base = 0;
+
+// host/ui_adapter.cpp 的菜单几何/绑定诊断走统一日志面（infra/log/qol_log.h）。本 target 与
+// 其它被替身的生产依赖一致，不链接 infra/log/qol_log.cpp，这里提供只计数的替身。
+int g_qol_log_calls = 0;
+void qol_log_write(QolLogLevel, QolDomain, const char*, int, const char*, ...) {
+    ++g_qol_log_calls;
+}
 
 ControlButtonSetTextFn fn_ctrl_btn_set_text = &fake_set_text;
 ControlButtonSetDrawProcFn fn_ctrl_btn_set_draw_proc = &fake_set_draw_proc;
@@ -258,9 +242,8 @@ decltype(fn_ctrl_set_active) fn_ctrl_set_active = &fake_control_set_active;
 decltype(fn_ui_set_popup_process_info) fn_ui_set_popup_process_info = nullptr;
 decltype(fn_ctrl_get_count) fn_ctrl_get_count = &fake_child_count;
 decltype(fn_ctrl_get_child) fn_ctrl_get_child = &fake_child_at;
-decltype(fn_calc_res_width) fn_calc_res_width = &fake_resolution_width;
-decltype(fn_calc_res_height) fn_calc_res_height = &fake_resolution_height;
-UiDrawScrollBarFn fn_ui_draw_scrollbar = &fake_draw_scrollbar;
+decltype(fn_calc_res_width) fn_calc_res_width = nullptr;
+decltype(fn_calc_res_height) fn_calc_res_height = nullptr;
 decltype(fn_touch_handle_unuse_control_event_move) fn_touch_handle_unuse_control_event_move = nullptr;
 decltype(fn_popupstate_push) fn_popupstate_push = nullptr;
 decltype(fn_uidesc_draw) fn_uidesc_draw = nullptr;
@@ -436,16 +419,7 @@ bool ui_control_absolute_origin(void* control, int64_t* out_x, int64_t* out_y) {
     *out_y = y;
     return true;
 }
-// native clip 快照 fake：内容由测试控制，读取失败通过 g_clip_snapshot_ok 注入。
-bool g_clip_snapshot_ok = true;
-UiRect g_clip_snapshot_value{};
-bool ui_clip_snapshot(UiRect* out) {
-    if (out == nullptr || !g_clip_snapshot_ok) return false;
-    *out = g_clip_snapshot_value;
-    return true;
-}
 bool ui_touch_state(void**, void**, int64_t*, int64_t*) { return false; }
-
 void ui_begin_frame() {}
 void ui_fill_rect_alpha(UiRect, uint32_t, uint32_t) { ++g_fill_rect_calls; }
 void ui_fill_rect(UiRect, uint32_t) { ++g_fill_rect_calls; }
@@ -518,7 +492,6 @@ int main() {
     CHECK(adapter->main_menu_more_games_set_active != nullptr);
     CHECK(adapter->layout_native_text_button != nullptr);
     CHECK(adapter->draw_native_text_button != nullptr);
-    CHECK(adapter->get_clip_rect != nullptr);
     CHECK(adapter->main_menu_replacement_rect_available != nullptr);
     CHECK(adapter->main_menu_more_games_snapshot != nullptr);
     CHECK(adapter->main_menu_text_button_is_live != nullptr);
@@ -800,7 +773,10 @@ int main() {
           menu_rect.x == 612 && menu_rect.y == 488 && menu_rect.w == 220 && menu_rect.h == 52 &&
           g_get_rect_calls == rect_reads_before_live + 1);
 
-    // The adapter passes bool-semantic values; the native setter maps them to Active states.
+    // Native ControlObject_SetActive takes a bool and encodes it internally into the Active
+    // field (0x20 active / 0x21 inactive); the adapter must pass the bool, not the encoded
+    // value. The settings reader guard only accepts the encoded 0x20/0x21, and EventProc
+    // dispatches only when the stored value is exactly 0x20.
     int active_calls_before = g_active_calls;
     int tree_reads_before_invalid_active = g_menu_tree_reads;
     int memory_reads_before_invalid_active = g_memory_accessible_reads;
@@ -810,10 +786,12 @@ int main() {
           g_memory_accessible_reads == memory_reads_before_invalid_active);
     CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 0).ok == kQolOk);
     CHECK(g_active_calls == active_calls_before + 1 && g_active_control == &original_menu_button &&
-          g_active_argument == 0 && g_active_value == 0x21);
+          g_last_set_active_argument == 0 && g_active_value == 0x21);
+    CHECK(g_active_value != 0x20);  // 停用后读回不满足 ==0x20 激活门
     CHECK(adapter->main_menu_more_games_set_active(&original_menu_button, 1).ok == kQolOk);
     CHECK(g_active_calls == active_calls_before + 2 && g_active_control == &original_menu_button &&
-          g_active_argument == 1 && g_active_value == 0x20);
+          g_last_set_active_argument == 1 && g_active_value == 0x20);
+    CHECK(g_last_set_active_argument != 0x20);  // callee 收 bool，不是存储编码值
 
     // Reject before any native memory access when the caller is off-thread, the menu is unknown,
     // the slot is stale, or a live but different button is supplied.
@@ -914,57 +892,26 @@ int main() {
     CHECK(g_click_user == &menu_owner);
     g_menu_tree_known = false;
 
-    // ---- Minor 21 尾槽：clip 快照 / 菜单替换几何 / 显式文本按钮参数与线程门 ----
-
-    // clip 快照：x<0 是 native 无父裁剪哨兵（成功），不是读取失败；错误必须清输出。
-    {
-        qol::contracts::UiRect clip{-7, -7, -7, -7};
-        g_clip_snapshot_ok = false;
-        CHECK(adapter->get_clip_rect(&clip).code == kQolErrNotReady);
-        CHECK(clip.x == 0 && clip.y == 0 && clip.w == 0 && clip.h == 0);
-        g_clip_snapshot_ok = true;
-        g_clip_snapshot_value = UiRect{-1, -1, -1, -1};
-        CHECK(adapter->get_clip_rect(&clip).ok == kQolOk && clip.x == -1 && clip.w == -1);
-        g_clip_snapshot_value = UiRect{4, 6, 320, 240};
-        CHECK(adapter->get_clip_rect(&clip).ok == kQolOk && clip.x == 4 && clip.y == 6 &&
-              clip.w == 320 && clip.h == 240);
-        // 越界 int64 不得被截断/钳制，也不得被当成合法哨兵。
-        g_clip_snapshot_value = UiRect{INT64_MIN, 0, 10, 10};
-        CHECK(adapter->get_clip_rect(&clip).code == kQolErrNotReady);
-        CHECK(clip.x == 0 && clip.w == 0);
-        g_clip_snapshot_value = UiRect{0, 0, INT64_MAX, 10};
-        CHECK(adapter->get_clip_rect(&clip).code == kQolErrNotReady);
-        // 非哨兵却没有有效尺寸：保守 fail-closed，不把负值/空矩形交给 set_clip。
-        g_clip_snapshot_value = UiRect{0, 0, 0, 10};
-        CHECK(adapter->get_clip_rect(&clip).code == kQolErrNotReady);
-        // 合同唯 x<0 表示无裁剪：合法负 y（父 clip 上沿在屏幕外）原样快照，由调用方与
-        // screen 求交后变非负；既不当失败，也不当作解除裁切的宽松路径。
-        g_clip_snapshot_value = UiRect{0, -3, 10, 10};
-        CHECK(adapter->get_clip_rect(&clip).ok == kQolOk);
-        CHECK(clip.x == 0 && clip.y == -3 && clip.w == 10 && clip.h == 10);
-        g_clip_snapshot_value = UiRect{-3, -3, 10, 10};
-        CHECK(adapter->get_clip_rect(&clip).ok == kQolOk && clip.x == -3 && clip.y == -3);
-        CHECK(adapter->get_clip_rect(nullptr).code == kQolErrInvalidArgument);
-        g_game_main_thread = false;
-        g_clip_snapshot_value = UiRect{0, 0, 10, 10};
-        CHECK(adapter->get_clip_rect(&clip).code == kQolErrNotReady);
-        g_game_main_thread = true;
-    }
+    // ---- Minor 21 尾槽：菜单替换几何 / 显式文本按钮参数与线程门 ----
 
     // 菜单替换几何：身份未知 → NotReady；越父界/兄弟碰撞 → 明确拒绝(out 0)；安全才 1.
     {
         FakeControl geom_parent{}, geom_original{}, geom_sibling{}, geom_self{};
+        FakeControl geom_neighbor{};
         geom_parent.rect = UiRect{0, 0, 300, 400};
         geom_original.rect = UiRect{10, 10, 100, 50};
         geom_sibling.rect = UiRect{10, 100, 100, 50};
         geom_sibling.type = 3;
         geom_self.rect = UiRect{10, 200, 100, 50};
         geom_self.type = 3;
-        geom_parent.children = {&geom_original, &geom_sibling, &geom_self};
+        // 相邻条目：其 rect 与原控件命中区本身就相交，属原生主菜单既有布局。
+        geom_neighbor.rect = UiRect{95, 20, 100, 40};
+        geom_neighbor.type = 3;
+        geom_parent.children = {&geom_original, &geom_sibling, &geom_self, &geom_neighbor};
         g_menu_tree_known = true;
         g_menu_original = &geom_original;
         g_menu_parent = &geom_parent;
-        g_menu_children = {&geom_original, &geom_sibling, &geom_self};
+        g_menu_children = {&geom_original, &geom_sibling, &geom_self, &geom_neighbor};
 
         uint8_t available = 9;
         // 自己绑定的控件不算兄弟碰撞（ExecuteProc == 自有 trampoline）。
@@ -977,6 +924,16 @@ int main() {
         CHECK(adapter->main_menu_replacement_rect_available(&geom_original,
               qol::contracts::UiRect{10, 100, 100, 50}, &available).ok == kQolOk);
         CHECK(available == 0);
+        // 候选与原控件命中区之外新增的重叠 → 仍拒绝（重叠右沿 195 超出原控件右沿 110）。
+        available = 9;
+        CHECK(adapter->main_menu_replacement_rect_available(&geom_original,
+              qol::contracts::UiRect{5, 5, 200, 60}, &available).ok == kQolOk);
+        CHECK(available == 0);
+        // 候选整体落在原控件命中区内时，与相邻条目的重叠属既有布局 → 放行。
+        available = 9;
+        CHECK(adapter->main_menu_replacement_rect_available(&geom_original,
+              qol::contracts::UiRect{12, 12, 96, 46}, &available).ok == kQolOk);
+        CHECK(available == 1);
         // 越出父范围 → 明确拒绝。
         available = 9;
         CHECK(adapter->main_menu_replacement_rect_available(&geom_original,
@@ -1012,187 +969,6 @@ int main() {
         g_menu_children.clear();
     }
 
-    // ---- scroll 局部 draw plumbing（A′）：内容回调 / bar 一次 / clip 顺序与恢复 ----
-    //
-    // 生产 helper 是 ui_native_scroll.h 的 inline `native_scroll_draw_clipped`：本 target
-    // 用同一份生产代码，native 侧由本文件既有 fake（fn_*/memory/clip/scroll data）提供接缝。
-    // helper 的 g_base!=0 门（游戏基址未解析就不动作）在本 target 用非 0 假基址满足。
-    g_base = 0x1000;
-    {
-        const auto prepare_scroll = [&]() {
-            g_scroll = FakeControl{};
-            g_scroll.rect = UiRect{10, 20, 200, 120};
-            g_scroll.parent = nullptr;
-            g_scroll.data[CS_TYPE] = 1;
-            set_data(g_scroll, CS_START, 20);
-            set_data(g_scroll, CS_CURRENT, 5);
-            set_data(g_scroll, CS_CONTENT_EXTENT, 500);
-            set_data(g_scroll, CS_VIEW_EXTENT, 120);
-            set_data(g_scroll, CS_BAR_VISIBLE, 1);
-            set_data(g_scroll, CS_BAR_X, 206);
-            set_data(g_scroll, CS_BAR_Y, 2);
-            set_data(g_scroll, CS_BAR_LENGTH, 116);
-            set_data(g_scroll, CS_BAR_DRAW_TYPE, 0);
-            set_data(g_scroll, CS_BAR_ARG, 0);
-            const auto cb = &fake_scroll_content_cb;
-            std::memcpy(g_scroll.data + CS_CALLBACK, &cb, sizeof(cb));
-            g_clip_sets.clear();
-            g_bar_calls.clear();
-            g_scroll_content_cb_calls = 0;
-            g_scroll_content_cb_current = -1;
-            g_native_calls.clear();
-            g_set_clip_calls = 0;
-            g_reset_clip_calls = 0;
-            g_clip_snapshot_ok = true;
-            g_screen_w = 1280;
-            g_screen_h = 720;
-        };
-
-        prepare_scroll();
-        g_clip_snapshot_value = UiRect{100, 50, 400, 300};  // 非哨兵父 clip
-        CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
-        CHECK(g_scroll_content_cb_calls == 1 && g_scroll_content_cb_current == 5);
-        CHECK(g_bar_calls.size() == 1);
-        // 8 参顺序：x,y = 绝对原点 + bar 相对偏移；第 3 是长度；第 4 是 |current-start|。
-        CHECK(g_bar_calls[0].a0 == 216 && g_bar_calls[0].a1 == 22);
-        CHECK(g_bar_calls[0].a2 == 116);
-        CHECK(g_bar_calls[0].a3 == 15);
-        CHECK(g_bar_calls[0].a4 == 500 && g_bar_calls[0].a5 == 120);
-        CHECK(g_bar_calls[0].a6 == 0 && g_bar_calls[0].a7 == 0);
-        // content = viewport(10,20,200,120) ∩ parent(100,50,400,300) ∩ screen(1280x720)
-        //         = (100,50,110,90)；bar = parent ∩ screen = (100,50,400,300)；退出写回父快照。
-        CHECK(g_clip_sets.size() == 3);
-        CHECK(g_clip_sets[0][0] == 100 && g_clip_sets[0][1] == 50 && g_clip_sets[0][2] == 110 &&
-              g_clip_sets[0][3] == 90);
-        CHECK(g_clip_sets[1][0] == 100 && g_clip_sets[1][1] == 50 && g_clip_sets[1][2] == 400 &&
-              g_clip_sets[1][3] == 300);
-        CHECK(g_clip_sets[2][0] == 100 && g_clip_sets[2][2] == 400);
-        CHECK(g_reset_clip_calls == 0);
-        CHECK(g_native_calls.empty());  // 不回退 fn_ctrl_scroll_draw（无 kDraw）
-
-        // 父 clip 为哨兵：content/bar 退化为 screen 约束，退出用 reset 保持哨兵语义。
-        prepare_scroll();
-        g_clip_snapshot_value = UiRect{-1, -1, -1, -1};
-        CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
-        CHECK(g_clip_sets.size() == 3);
-        CHECK(g_clip_sets[0][0] == 10 && g_clip_sets[0][2] == 200 && g_clip_sets[0][3] == 120);
-        CHECK(g_clip_sets[1][0] == 0 && g_clip_sets[1][2] == 1280 && g_clip_sets[1][3] == 720);
-        CHECK(g_clip_sets[2][0] == INT32_MIN);  // reset 标记
-        CHECK(g_reset_clip_calls == 1);
-
-        // 合法负 y 父 clip：按原值参与求交（与 screen 相交后变非负），不是提前失败。
-        prepare_scroll();
-        g_clip_snapshot_value = UiRect{0, -40, 640, 300};
-        CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
-        CHECK(g_clip_sets[0][1] == 20 && g_clip_sets[0][3] == 120);
-        // bar = parent ∩ screen：负 y 被 screen 下沿夹到 0，上沿取父下沿 260。
-        CHECK(g_clip_sets[1][0] == 0 && g_clip_sets[1][1] == 0 && g_clip_sets[1][2] == 640 &&
-              g_clip_sets[1][3] == 260);
-
-        // 父链绝对原点：逐级累加；bar 坐标 = 链路绝对原点 + bar 相对偏移。
-        prepare_scroll();
-        g_group = FakeControl{};
-        g_group.rect = UiRect{1000, 500, 300, 200};
-        g_scroll.parent = &g_group;
-        g_clip_snapshot_value = UiRect{-1, -1, -1, -1};
-        CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
-        CHECK(g_bar_calls.size() == 1);
-        CHECK(g_bar_calls[0].a0 == 1000 + 10 + 206 && g_bar_calls[0].a1 == 500 + 20 + 2);
-        CHECK(g_clip_sets.size() == 3 && g_clip_sets[0][0] == 1010 && g_clip_sets[0][1] == 520);
-
-        // 空 content 交集：内容与 bar 都不画、不写 clip，也不泄漏。
-        prepare_scroll();
-        g_clip_snapshot_value = UiRect{1000, 1000, 10, 10};
-        CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
-        CHECK(g_scroll_content_cb_calls == 0 && g_bar_calls.empty() && g_clip_sets.empty());
-        CHECK(g_set_clip_calls == 0 && g_reset_clip_calls == 0);
-
-        g_group = FakeControl{};
-
-        // 无 bar：只有 content 一段 clip，随后恢复。
-        prepare_scroll();
-        set_data(g_scroll, CS_BAR_VISIBLE, 0);
-        g_clip_snapshot_value = UiRect{100, 50, 400, 300};
-        CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
-        CHECK(g_bar_calls.empty() && g_scroll_content_cb_calls == 1);
-        CHECK(g_clip_sets.size() == 2 && g_clip_sets[1][2] == 400);
-
-        // flag 字节为 0 但 flag 之后的 padding 脏：原生只 ldrb [data+0xa8]，不得据此当作有 bar。
-        prepare_scroll();
-        set_data(g_scroll, CS_BAR_VISIBLE, 0);
-        for (size_t off = CS_BAR_VISIBLE + 1; off < CS_BAR_X; ++off) {
-            g_scroll.data[off] = 0x7f;
-        }
-        g_clip_snapshot_value = UiRect{100, 50, 400, 300};
-        CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
-        CHECK(g_scroll_content_cb_calls == 1 && g_bar_calls.empty());
-        CHECK(g_clip_sets.size() == 2 && g_clip_sets[1][2] == 400);
-
-        // preflight 失败：NotReady 且未发生任何 clip 写 / 回调 / bar。
-        const auto expect_rejected = [&]() {
-            g_clip_sets.clear();
-            g_bar_calls.clear();
-            g_scroll_content_cb_calls = 0;
-            CHECK(adapter->scroll_draw(&g_scroll).code == kQolErrNotReady);
-            CHECK(g_clip_sets.empty() && g_bar_calls.empty() && g_scroll_content_cb_calls == 0);
-        };
-        prepare_scroll();
-        g_clip_snapshot_value = UiRect{0, 0, 640, 480};
-        g_clip_snapshot_ok = false;      // clip 读取失败
-        expect_rejected();
-        prepare_scroll();
-        g_clip_snapshot_value = UiRect{-1, -1, -1, INT64_MAX};  // 哨兵但含超 int32 垃圾值
-        expect_rejected();
-        prepare_scroll();
-        g_scroll.data[CS_TYPE] = 0;      // 非我方 vertical scroll
-        expect_rejected();
-        prepare_scroll();
-        g_scroll.data[CS_TYPE] = 1;
-        set_data(g_scroll, CS_VIEW_EXTENT, 0);
-        expect_rejected();
-        prepare_scroll();
-        set_data(g_scroll, CS_CONTENT_EXTENT, -1);
-        expect_rejected();
-        prepare_scroll();
-        g_scroll.data[CS_BAR_DRAW_TYPE] = 1;  // 原生 ldrb [data+0xc8]：该字节非 0 即拒绝
-        expect_rejected();
-        prepare_scroll();
-        g_scroll.data[CS_BAR_DRAW_TYPE] = 0xff;  // 1 字节全宽非 0，同样拒绝（不做高位截断）
-        expect_rejected();
-        prepare_scroll();
-        set_data(g_scroll, CS_BAR_LENGTH, -1);
-        expect_rejected();
-        prepare_scroll();
-        set_data(g_scroll, CS_START, INT64_MIN);
-        set_data(g_scroll, CS_CURRENT, INT64_MAX);  // |current-start| 溢出
-        expect_rejected();
-        prepare_scroll();
-        g_group = FakeControl{};
-        g_group.rect = UiRect{INT64_MAX, 0, 10, 10};
-        g_scroll.parent = &g_group;  // 父链累加溢出
-        expect_rejected();
-        g_group = FakeControl{};
-        prepare_scroll();
-        g_scroll.rect = UiRect{0, 0, 0, 0};          // 自身 rect 无效
-        expect_rejected();
-        prepare_scroll();
-        g_screen_w = 0;                              // 屏幕口径不可用
-        expect_rejected();
-        prepare_scroll();
-        fn_ui_draw_scrollbar = nullptr;              // 原函数未就绪
-        expect_rejected();
-        fn_ui_draw_scrollbar = &fake_draw_scrollbar;
-        prepare_scroll();
-        g_memory_accessible = false;                 // data 不可读
-        expect_rejected();
-        g_memory_accessible = true;
-        prepare_scroll();
-        g_game_main_thread = false;                  // 线程门
-        expect_rejected();
-        g_game_main_thread = true;
-        CHECK(adapter->scroll_draw(nullptr).code == kQolErrInvalidArgument);
-    }
-    g_base = 0;
 
     // 显式文本按钮两个新槽：参数与线程门先于任何渲染调用；输出布局先归零。
     {
@@ -1334,10 +1110,8 @@ int main() {
     CHECK(g_target == &g_scroll && g_native_calls.back().control == &control);
     const int button_draw_calls = g_draw_control_calls;
     CHECK(adapter->scroll_process(&g_scroll).ok == kQolOk);
-    // scroll_draw 改为局部 clipping plumbing：前置未准备（CS_VIEW_EXTENT=0）→ NotReady，
-    // 且不回退原 fn_ctrl_scroll_draw（不再出现 kDraw 原生调用）。
-    CHECK(adapter->scroll_draw(&g_scroll).code == kQolErrNotReady);
-    CHECK(g_native_calls.size() == 3 && g_native_calls[2].kind == NativeCall::kProcess);
+    CHECK(adapter->scroll_draw(&g_scroll).ok == kQolOk);
+    CHECK(g_native_calls[2].kind == NativeCall::kProcess && g_native_calls[3].kind == NativeCall::kDraw);
     CHECK(g_draw_control_calls == button_draw_calls);
     uint32_t consumed = 0;
     CHECK(adapter->control_tree_event(&control, UINT64_MAX, UINT64_MAX - 1, UINT64_MAX - 2, &consumed).ok == kQolOk);

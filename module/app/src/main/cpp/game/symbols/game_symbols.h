@@ -172,10 +172,6 @@ constexpr int MAPINFOBASE_STATIC_MAX_MAP_ID = 414; // 原版/改版共同的静�
 constexpr uintptr_t G_PLAYER_ACTIVE_GOT_VMA = 0x3f6000 + 0xa50; // 主控玩家指针 GOT 槽（双层解引用后为角色对象）
 constexpr uintptr_t G_UICHOICE_BUTTON_LIST_EXE_GOT_VMA = 0x2f44d8; // UIChoice_ButtonListExe 函数指针 GOT 槽
 constexpr uintptr_t G_UICHOICE_CONTROL_GOT_VMA = 0x302550; // UICHOICE 主控件指针槽（ButtonListExe 读取）
-// SGL 全局裁剪矩形 GOT 槽：*(此地址) → 4×int64 (x,y,w,h)，由 GRPX_SetClip 0x8f350 写入、
-// GRPX_ReSetClip 0x8f354 写 (-1,-1,-1,-1) 表示「无父裁剪」。字段是 (x,y,w,h) 不是右下端点；
-// 任一负 x 即无裁剪哨兵，不是读取失败。所有绘制原语（纹理/填充/字符串）在引擎内按它逐边裁剪。
-constexpr uintptr_t G_SGL_CLIP_RECT_GOT_VMA = 0x2f6000 + 0x2e8;
 constexpr uintptr_t G_QUEST_SLOT_COUNT_VMA = 0x2f6000 + 0x270;  // GOT 双层解引用 u8 任务槽数量（QUESTSYSTEM_Find 0x12291c ldrb）
 constexpr uintptr_t G_QUEST_SLOTS_GOT_VMA = 0x2f4000 + 0x3d0;  // GOT 双层解引用 任务槽数组基址（12B/槽：+0 questId u16；QUESTSYSTEM_Find 0x12292c / QUESTSYSTEM_CopySlot 0x122994）
 constexpr uintptr_t G_MERC_SLOTLIST_GOT_VMA = 0x2f6000 + 0x10; // 佣兵槽数组指针（双层解引用 *(*(base+0x2f6000+0x10))，20B/槽；MERCENARYSYSTEM_IsEmptyManagerSlot 0x118b54 反汇编确认）
@@ -868,10 +864,6 @@ constexpr uintptr_t F_CONTROL_SCROLL_SET_KEY_STEP_VARIATION_VMA = 0xab214;
 constexpr uintptr_t F_CONTROL_SCROLL_SCROLL_VMA = 0xab9fc;
 constexpr uintptr_t F_CONTROL_SCROLL_PROCESS_VMA = 0xab79c;
 constexpr uintptr_t F_CONTROL_SCROLL_DRAW_VMA = 0xabb20;
-// ControlScroll_Draw 0xabb20 尾部 `b UI_DrawScrollBar` 的目标（.dynsym 全局导出）。
-// 8 参寄存器顺序 = x, y, bar_length, offset, content_extent, view_extent, draw_type, aux；
-// type0 分支为 GRPX_FillRect(x, y, w=2, h=bar_length)。只做绑定，不 hook。
-constexpr uintptr_t F_UI_DRAW_SCROLLBAR_VMA = 0xaedd0;
 constexpr uintptr_t F_CONTROL_SCROLL_RESET_RESULT_POINT_VMA = 0xab464;
 constexpr uintptr_t F_CONTROL_BUTTON_SET_SCROLL_CONTROL_VMA = 0xaabb8;
 constexpr uintptr_t F_TOUCH_HANDLE_EVENT_VMA = 0xa380c;
@@ -883,14 +875,6 @@ constexpr size_t CS_VIEW_EXTENT = 0x10;
 constexpr size_t CS_CONTENT_EXTENT = 0x18;
 constexpr size_t CS_CURRENT = 0x50;
 constexpr size_t CS_KEY_STEP = 0x78;
-// ControlScroll_Draw 尾部所用字段（同为受控只读；我方自建 scroll 恒 type0 bar）。
-constexpr size_t CS_CALLBACK = 0xa0;      // fn ptr：内容绘制回调，调用时第二参传 CS_CURRENT
-constexpr size_t CS_BAR_VISIBLE = 0xa8;   // 单字节标志，非 0 = 绘制 bar
-constexpr size_t CS_BAR_X = 0xb0;         // i64 bar 相对 x（= SetBarData 的 viewport.w+6）
-constexpr size_t CS_BAR_Y = 0xb8;         // i64 bar 相对 y（= 2）
-constexpr size_t CS_BAR_LENGTH = 0xc0;    // i64 bar 长度（第 3 参，不是 offset）
-constexpr size_t CS_BAR_DRAW_TYPE = 0xc8; // 单字节 bar 绘制类型
-constexpr size_t CS_BAR_ARG = 0xd0;       // i64 bar aux（第 8 参）
 constexpr size_t CS_SIZE = 0xf0;
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_VMA = 0xca54c;        // void (char* text, u32 len, u32 dispType, u32 type) 建弹窗：清旧 + 拷贝文本 + 建文本控件 + SetLayout + 置 bOn（type 0/1/2/3）
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_NONE_VMA = 0xca950;   // void (char* text, u32 len, u32 dispType, u32 type) 无按钮弹窗（内部 type=2）
@@ -988,10 +972,6 @@ constexpr uintptr_t F_WIPEOUT_BUTTON_GAMEOVER_VMA = 0x1502ac;       // int () �
 // ---- 函数签名 ----
 using GetMoneyFn = int64_t (*)();
 using UiDrawBorderRectFn = void (*)(int32_t, int32_t, int32_t, int32_t);
-// UI_DrawScrollBar 8 参按寄存器顺序：x, y, bar_length, offset, content, view, draw_type, aux。
-// 全 64 位形参：调用点直接传 x 寄存器里的 64 位值，不在本层提前窄化。
-using UiDrawScrollBarFn = void (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t,
-                                   int64_t);
 using GetMemberFn = void* (*)(int);
 using GetMenuCharacterFn = void* (*)();
 using GetPartySizeFn = int (*)();

@@ -22,6 +22,7 @@
 #include "game/adapter_ports/game_host_port.h"
 #include "game/adapter_ports/craft_port.h"
 #include "game/state/game_state.h"
+#include "infra/log/qol_log.h"
 
 namespace qol::host {
 namespace {
@@ -610,13 +611,11 @@ QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
     return contracts::ok();
 }
 
-// 参数是 native 真实 (x,y,w,h)，不是右下端点；负 x 是「无父裁剪」哨兵，不能用来表达空交集。
-// 函数类型与旧 ABI 不变，只修正误导性参数名。
-QolResult set_clip(int32_t x, int32_t y, int32_t w, int32_t h) {
+QolResult set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
     if (!qol::game::game_host_is_main_thread() || fn_grpx_set_clip == nullptr) {
         return not_ready();
     }
-    fn_grpx_set_clip(x, y, w, h);
+    fn_grpx_set_clip(x1, y1, x2, y2);
     return contracts::ok();
 }
 
@@ -684,10 +683,8 @@ QolResult scroll_process(QolUiHandle scroll) {
 
 QolResult scroll_draw(QolUiHandle scroll) {
     if (scroll == nullptr) return invalid_argument();
-    // 只对我方自建 vertical/type0 scroll 生效：走 Game 层局部 draw plumbing（内容与 bar 都在
-    // 父∩screen 内绘制）。preflight 失败 → NotReady，且不回退原 fn_ctrl_scroll_draw
-    // （原生整段 Draw 会在末尾 reset clip 后画 bar，父裁切下会泄漏）。原符号保留不删。
-    if (!qol::game::native_scroll_draw_clipped(scroll)) return not_ready();
+    if (!qol::game::game_host_is_main_thread() || fn_ctrl_scroll_draw == nullptr) return not_ready();
+    fn_ctrl_scroll_draw(scroll);
     return contracts::ok();
 }
 
@@ -962,7 +959,9 @@ QolResult main_menu_more_games_set_active(QolUiHandle original, int32_t active) 
         return not_ready();
     }
 
-    // ControlObject_EventProc dispatches buttons only while Active == 0x20.
+    // ControlObject_SetActive 的入参是 bool：原生内部把它编码为 Active 字段的 0x20（true）
+    // / 0x21（false）并返回旧编码状态；EventProc 只在 Active == 0x20 时派发。因此这里直接传
+    // bool 1/0，不传存储编码值（非 0 会被原生当成 true 而重新启用原按钮）。
     fn_ctrl_set_active(original, active != 0 ? 1u : 0u);
     return contracts::ok();
 }
@@ -973,15 +972,45 @@ bool rects_overlap(int64_t ax, int64_t ay, int64_t aw, int64_t ah, int64_t bx, i
     return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
 }
 
-// clip 快照的四个 int64 必须各自可表示为 int32：越界 fail-closed，不截断、不钳制。
-bool rect_fits_int32(const ::UiRect& rect) {
-    constexpr int64_t kMin = std::numeric_limits<int32_t>::min();
-    constexpr int64_t kMax = std::numeric_limits<int32_t>::max();
-    return rect.x >= kMin && rect.x <= kMax && rect.y >= kMin && rect.y <= kMax &&
-           rect.w >= kMin && rect.w <= kMax && rect.h >= kMin && rect.h <= kMax;
+// 菜单替换几何诊断：每个 stage 在固定 32 槽静态表里各存一份四值，只有该 stage 的数值变化
+// 时才输出（不同 stage 交替调用不会互相顶掉）。表满后不再登记新 stage（不循环覆盖）。
+// 只记录原因与矩形数值，不记录控件地址或用户文本；stage 均为内部字面量。
+void log_menu_rect_stage(const char* stage, int64_t a, int64_t b, int64_t c, int64_t d) {
+    struct Slot {
+        const char* stage;
+        int64_t v[4];
+    };
+    constexpr size_t kSlots = 32;
+    static Slot slots[kSlots] = {};
+    Slot* slot = nullptr;
+    for (size_t i = 0; i < kSlots; ++i) {
+        if (slots[i].stage == stage) {
+            slot = &slots[i];
+            break;
+        }
+    }
+    if (slot == nullptr) {
+        for (size_t i = 0; i < kSlots; ++i) {
+            if (slots[i].stage == nullptr) {
+                slots[i].stage = stage;
+                slot = &slots[i];
+                break;
+            }
+        }
+    }
+    if (slot == nullptr) return;  // 表满：只丢弃新 stage，不覆盖已有记录
+    if (slot->v[0] == a && slot->v[1] == b && slot->v[2] == c && slot->v[3] == d) return;
+    slot->v[0] = a;
+    slot->v[1] = b;
+    slot->v[2] = c;
+    slot->v[3] = d;
+    QOL_LOG_WARN(QolDomain::kUi,
+                 "menu replacement check stage=%s a=%lld b=%lld c=%lld d=%lld int=int64", stage,
+                 static_cast<long long>(a), static_cast<long long>(b),
+                 static_cast<long long>(c), static_cast<long long>(d));
 }
 
-// ---- Minor 21 尾槽（additive）：显式外观布局/绘制、native clip 快照、菜单替换几何检查 ----
+// ---- Minor 21 尾槽（additive）：显式外观布局/绘制、菜单替换几何检查 ----
 
 // 只读布局预检：不绘制、不分配私有字体、不改全局渲染状态。渲染由 game 层实现持有。
 QolResult layout_native_text_button(const contracts::UiTextButtonPaintDesc* desc,
@@ -997,30 +1026,6 @@ QolResult draw_native_text_button(const contracts::UiTextButtonPaintDesc* desc, 
     if (desc == nullptr || text == nullptr || pressed > 1) return invalid_argument();
     if (!qol::game::game_host_is_main_thread()) return not_ready();
     return qol::game::ui_draw_native_text_button(*desc, text, text_color, pressed);
-}
-
-QolResult get_clip_rect(UiRect* out_raw_clip) {
-    if (out_raw_clip == nullptr) return invalid_argument();
-    *out_raw_clip = UiRect{};  // 失败先清输出（fail-closed，消费者不得用半成品）
-    if (!qol::game::game_host_is_main_thread()) return not_ready();
-
-    ::UiRect raw{};
-    if (!ui_clip_snapshot(&raw)) return not_ready();
-    // 先做 int32 可表示性检查再解释哨兵：越界垃圾值不得被当成合法「无裁剪」。
-    if (!rect_fits_int32(raw)) return not_ready();
-    if (raw.x < 0) {
-        // native「无父裁剪」哨兵（ReSetClip 写全 -1）：成功返回，调用方不得参与普通求交。
-        *out_raw_clip = contract_rect(raw);
-        return contracts::ok();
-    }
-    // 合同唯 x<0 表示无裁剪：合法负 y（父 clip 上沿在屏幕外）按原值快照，由调用方在与
-    // screen 求交后变非负；不得把负 y 当失败，也不得当成解除裁切的宽松路径。
-    if (raw.w <= 0 || raw.h <= 0) {
-        // 非哨兵却没有有效尺寸：语义未知，保守 fail-closed，不传负值/空矩形给 set_clip。
-        return not_ready();
-    }
-    *out_raw_clip = contract_rect(raw);
-    return contracts::ok();
 }
 
 QolResult main_menu_replacement_rect_available(QolUiHandle original,
@@ -1040,21 +1045,34 @@ QolResult main_menu_replacement_rect_available(QolUiHandle original,
     if (!ui_main_menu_live_tree_snapshot(nullptr, &current_original, &parent, &original_in_tree,
                                          &ignored_probe_in_tree) ||
         current_original == nullptr || parent == nullptr || original_in_tree == 0) {
+        log_menu_rect_stage("tree-unknown", original_in_tree, current_original != nullptr,
+                            parent != nullptr, 0);
         return not_ready();
     }
     // 身份未知（不是当前 More Games 原控件）→ NotReady，不改动任何控件。
-    if (original != current_original) return not_ready();
+    if (original != current_original) {
+        log_menu_rect_stage("identity-unknown", 0, 0, 0, 0);
+        return not_ready();
+    }
     if (fn_ctrl_get_count == nullptr || fn_ctrl_get_child == nullptr) return not_ready();
-    if (!game_memory_accessible(parent, CO_SIZE, 'r')) return not_ready();
+    if (!game_memory_accessible(parent, CO_SIZE, 'r')) {
+        log_menu_rect_stage("parent-unreadable", 0, 0, 0, 0);
+        return not_ready();
+    }
 
     ::UiRect parent_rect{};
     int64_t parent_abs_x = 0;
     int64_t parent_abs_y = 0;
     if (!ui_get_rect(parent, &parent_rect) ||
         !ui_control_absolute_origin(parent, &parent_abs_x, &parent_abs_y)) {
+        log_menu_rect_stage("parent-invalid", parent_rect.w, parent_rect.h, parent_abs_x,
+                            parent_abs_y);
         return not_ready();
     }
-    if (parent_rect.w <= 0 || parent_rect.h <= 0) return not_ready();
+    if (parent_rect.w <= 0 || parent_rect.h <= 0) {
+        log_menu_rect_stage("parent-invalid-size", parent_rect.w, parent_rect.h, 0, 0);
+        return not_ready();
+    }
 
     const int64_t cand_x = parent_abs_x + parent_relative_hit_rect.x;
     const int64_t cand_y = parent_abs_y + parent_relative_hit_rect.y;
@@ -1064,8 +1082,25 @@ QolResult main_menu_replacement_rect_available(QolUiHandle original,
     if (cand_x < parent_abs_x || cand_y < parent_abs_y ||
         cand_x + cand_w > parent_abs_x + parent_rect.w ||
         cand_y + cand_h > parent_abs_y + parent_rect.h) {
+        log_menu_rect_stage("outside-parent-cand", cand_x, cand_y, cand_w, cand_h);
+        log_menu_rect_stage("outside-parent-ref", parent_abs_x, parent_abs_y, parent_rect.w,
+                            parent_rect.h);
         return contracts::ok();
     }
+
+    // 原控件自身命中区：候选 rect 与该区域的重叠属原生主菜单既有布局，不是本次替换
+    // 新增的冲突；只有候选在原命中区之外新占用的区域才算新碰撞。同一层内存解释。
+    ::UiRect original_rect{};
+    int64_t original_abs_x = 0;
+    int64_t original_abs_y = 0;
+    if (!ui_get_rect(original, &original_rect) ||
+        !ui_control_absolute_origin(original, &original_abs_x, &original_abs_y) ||
+        original_rect.w <= 0 || original_rect.h <= 0) {
+        log_menu_rect_stage("original-rect-invalid", original_rect.w, original_rect.h, 0, 0);
+        return not_ready();
+    }
+    log_menu_rect_stage("original-rect", original_abs_x, original_abs_y, original_rect.w,
+                        original_rect.h);
 
     // 兄弟交互碰撞：只考虑 native 按钮（CO_TYPE==3 且有 data）；排除将被替换的原控件
     // 与本模块自身绑定控件（ExecuteProc 是自有 trampoline）。内存解释只在本层。
@@ -1073,7 +1108,10 @@ QolResult main_menu_replacement_rect_available(QolUiHandle original,
     for (uint32_t i = 0; i < count; ++i) {
         QolUiHandle child = fn_ctrl_get_child(parent, i);
         if (child == nullptr || child == original) continue;
-        if (!game_memory_accessible(child, CO_SIZE, 'r')) return not_ready();
+        if (!game_memory_accessible(child, CO_SIZE, 'r')) {
+            log_menu_rect_stage("child-unreadable", i, 0, 0, 0);
+            return not_ready();
+        }
         int32_t child_type = 0;
         if (!ui_control_type(child, &child_type) || child_type != 3) continue;
         if (ui_control_data(child) == nullptr) continue;
@@ -1083,14 +1121,42 @@ QolResult main_menu_replacement_rect_available(QolUiHandle original,
         int64_t child_abs_y = 0;
         if (!ui_get_rect(child, &child_rect) ||
             !ui_control_absolute_origin(child, &child_abs_x, &child_abs_y)) {
+            log_menu_rect_stage("child-invalid", i, child_rect.w, child_rect.h, 0);
             return not_ready();
         }
         if (child_rect.w <= 0 || child_rect.h <= 0) continue;
-        if (rects_overlap(cand_x, cand_y, cand_w, cand_h, child_abs_x, child_abs_y, child_rect.w,
-                          child_rect.h)) {
-            return contracts::ok();  // 已证明碰撞 → out_available=0，不隐藏/不改动原控件
+        if (!rects_overlap(cand_x, cand_y, cand_w, cand_h, child_abs_x, child_abs_y, child_rect.w,
+                           child_rect.h)) {
+            continue;
         }
+        const int64_t overlap_x = cand_x > child_abs_x ? cand_x : child_abs_x;
+        const int64_t overlap_y = cand_y > child_abs_y ? cand_y : child_abs_y;
+        const int64_t cand_right = cand_x + cand_w;
+        const int64_t child_right = child_abs_x + child_rect.w;
+        const int64_t cand_bottom = cand_y + cand_h;
+        const int64_t child_bottom = child_abs_y + child_rect.h;
+        const int64_t overlap_right = cand_right < child_right ? cand_right : child_right;
+        const int64_t overlap_bottom = cand_bottom < child_bottom ? cand_bottom : child_bottom;
+        // 重叠完全落在原控件命中区内 → 原生既有布局（相邻按钮透明边距矩形可互叠），
+        // 非本次替换新增，放行；否则为新增冲突，保持 fail-closed。
+        const bool within_original =
+            overlap_x >= original_abs_x && overlap_y >= original_abs_y &&
+            overlap_right <= original_abs_x + original_rect.w &&
+            overlap_bottom <= original_abs_y + original_rect.h;
+        if (within_original) {
+            log_menu_rect_stage("sibling-overlap-existing", overlap_x, overlap_y,
+                                overlap_right - overlap_x, overlap_bottom - overlap_y);
+            continue;
+        }
+        // 已证明新增碰撞 → out_available=0，不隐藏/不改动原控件。
+        log_menu_rect_stage("sibling-overlap-new", overlap_x, overlap_y,
+                            overlap_right - overlap_x, overlap_bottom - overlap_y);
+        log_menu_rect_stage("sibling-overlap-cand", cand_x, cand_y, cand_w, cand_h);
+        log_menu_rect_stage("sibling-overlap-child", child_abs_x, child_abs_y, child_rect.w,
+                            child_rect.h);
+        return contracts::ok();
     }
+    log_menu_rect_stage("accepted", cand_x, cand_y, cand_w, cand_h);
     *out_available = 1;
     return contracts::ok();
 }
@@ -1257,11 +1323,10 @@ const QolUiAdapter g_ui_adapter{
           &main_menu_text_button_is_live,
           &main_menu_text_button_invalidate_binding,
           &main_menu_more_games_set_active,
-          // Minor 21 additive tail: explicit text-button layout/draw, clip snapshot,
-          // and menu replacement geometry check.
+          // Minor 21 additive tail: explicit text-button layout/draw and the menu
+          // replacement geometry check.
           &layout_native_text_button,
           &draw_native_text_button,
-          &get_clip_rect,
           &main_menu_replacement_rect_available,
 };
 

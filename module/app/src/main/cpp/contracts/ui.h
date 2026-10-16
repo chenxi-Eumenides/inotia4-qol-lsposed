@@ -108,22 +108,13 @@ struct UiMainMenuDecoratedButtonDesc {
     const char* text;
     uint32_t font_style;
     uint32_t font_size;          // Same explicit-size rules as UiTextButtonPaintDesc.
-    // Positive percentage of the previous actual painted height, not the native hit rect.
-    // Width and visual center are retained; hit bounds must cover both paint states safely.
-    uint32_t height_percent;
+    // 期望的可见绘制尺寸（逻辑单位），以原生控件中心为锚点；必须为正。
+    // 命中区仍等于原生 snapshot rect，不随可见尺寸变化。
+    uint32_t width;
+    uint32_t height;
     QolUiClickFn on_click;
     void* user;
 };
-
-struct UiContainerContentDesc {
-    UiRect frame;               // Absolute logical frame; its native corner design is retained.
-    uint32_t background_color; // ABGR8888, painted only in the safe content area.
-    uint8_t ornamented;         // 0 = plain native frame, 1 = four native corner ornaments.
-};
-
-// Synchronous draw-only callback. Receives the stable 24-unit inset content rect,
-// not a parent-clipped layout rect; no control-tree creation/deletion is permitted.
-using QolUiContentDrawFn = QolResult (*)(void* user, UiRect content_rect);
 
 struct UiPanelDesc {
     UiRect rect, mask_rect;
@@ -330,13 +321,6 @@ struct QolUiComponents {
     QolResult (*main_menu_decorated_button_create)(const UiMainMenuDecoratedButtonDesc*,
                                                    QolUiHandle* out_original,
                                                    QolUiHandle* out_replacement);
-    QolResult (*container_content_rect)(UiRect frame, UiRect* out_content);
-    // Preserve native frame/ornaments. Background and all callback drawing use
-    // content intersect parent clip intersect screen, even if the parent has no clip.
-    // Snapshot/error => no unprotected painting or callback; empty content => skip content.
-    // Restore the entry native clip on every return, including callback errors and scroll reset.
-    QolResult (*container_draw_content)(const UiContainerContentDesc*, QolUiContentDrawFn,
-                                         void* user);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -474,9 +458,8 @@ struct QolUiAdapter {
     QolResult (*draw_border_rect)(int32_t x, int32_t y, int32_t w, int32_t h);
     QolResult (*image_loc_size)(int32_t unit, int32_t loc, int32_t* out_width,
                                 int32_t* out_height);
-    // 原始裁剪参数是 (x,y,w,h)，不是右下端点；负 x 是 native 无裁剪哨兵。
-    // reset_clip 复原无裁剪状态，不恢复父层；受保护内容须先快照并在退出时恢复。
-    QolResult (*set_clip)(int32_t x, int32_t y, int32_t w, int32_t h);
+    // 裁剪不支持嵌套；绘制后 reset_clip 复原整屏，不恢复上一层。
+    QolResult (*set_clip)(int32_t x1, int32_t y1, int32_t x2, int32_t y2);
     QolResult (*reset_clip)();
     // 原生纵向 scroll：挂树不自动 process/draw；裁剪不可嵌套。
     QolResult (*scroll_create)(QolUiHandle parent, const UiNativeScrollDesc*,
@@ -534,15 +517,9 @@ struct QolUiAdapter {
     // appearance/layout backend, native alpha sampling, and caller's active clip.
     QolResult (*draw_native_text_button)(const UiTextButtonPaintDesc*, const char* text,
                                          uint32_t text_color, uint8_t pressed);
-    // Main-thread native snapshot (x,y,w,h), four int64 values checked for int32
-    // representability before success. x<0 means no parent clip, never snapshot failure.
-    // An error is fail-closed: skip protected drawing, not "draw without a clip".
-    // Consumers still clip content to screen when the parent snapshot is a sentinel;
-    // empty intersections are skipped, never passed to set_clip as a negative x/size.
-    QolResult (*get_clip_rect)(UiRect* out_raw_clip);
-    // Verify original's current menu-tree identity, parent bounds, and non-overlap
-    // with other interactive menu entries. out_available=0 is conclusive rejection;
-    // unknown identity/layout returns NotReady, without mutating any control.
+    // Main-thread native snapshot of the original control's live menu identity, parent
+    // bounds, and non-overlap with other interactive menu entries. out_available=0 is
+    // conclusive rejection; unknown identity/layout returns NotReady, without mutating.
     QolResult (*main_menu_replacement_rect_available)(QolUiHandle original,
                                                       UiRect parent_relative_hit_rect,
                                                       uint8_t* out_available);

@@ -144,23 +144,27 @@ void panel_enter() {
     if (!contracts::succeeded(result)) (void)ui_components_api()->back_request();
 }
 
-QolResult draw_scroll_list(void*, contracts::UiRect) {
-    return ui_components_api()->scroll_list_draw(g_list);
-}
-
-QolResult draw_scroll_content(void*, contracts::UiRect) {
+void panel_process() {
+    if (!main_thread() || !g_active) return;
+    if (g_list == nullptr || g_root == nullptr) return;
     const auto* ui = adapter();
     const auto* components = ui_components_api();
+    QolResult result = components->scroll_list_process(g_list);
+    if (!contracts::succeeded(result)) { log_result("process", result); return; }
+    result = ui->begin_frame();
+    if (!contracts::succeeded(result)) { log_result("begin frame", result); return; }
+    (void)ui->draw_custom_button(g_root, {0, 0, 960, 640}, 0xFF171512u, 0xFFB89B62u, 3,
+        nullptr, 0, 0, 0);
     (void)components->draw_control_text(g_labels[0], kTitleText, 0, 0, 0xFFFFE9B4u, 0, 1);
     (void)components->draw_control_text(g_labels[1], kHintText, 0, 0, 0xFFC9BDABu, 0, 1);
     contracts::UiRect root_rect{};
-    auto result = ui->get_rect(g_root, &root_rect);
-    if (!contracts::succeeded(result)) return result;
-    const contracts::UiContainerContentDesc frame{{root_rect.x + kViewport.x - 24,
-        root_rect.y + kViewport.y - 24, kViewport.w + 64, kViewport.h + 48},
-        0xFF171512u, 0};
-    result = components->container_draw_content(&frame, &draw_scroll_list, nullptr);
-    if (!contracts::succeeded(result)) return result;
+    if (contracts::succeeded(ui->get_rect(g_root, &root_rect))) {
+        result = components->draw_container({root_rect.x + kViewport.x - 8,
+            root_rect.y + kViewport.y - 8, kViewport.w + 32, kViewport.h + 16});
+        if (!contracts::succeeded(result)) log_result("container", result);
+    }
+    result = components->scroll_list_draw(g_list);
+    if (!contracts::succeeded(result)) log_result("draw list", result);
     int64_t offset = 0;
     result = components->scroll_list_get_offset(g_list, &offset);
     if (contracts::succeeded(result)) {
@@ -171,23 +175,7 @@ QolResult draw_scroll_content(void*, contracts::UiRect) {
         std::snprintf(g_status_text, sizeof(g_status_text), "原生 offset 读取失败 (%d)", result.code);
     }
     result = components->draw_control_text(g_labels[2], g_status_text, 0, 8, 0xFFE6C989u, 0, 1);
-    return result;
-}
-
-void panel_process() {
-    if (!main_thread() || !g_active || !g_list || !g_root) return;
-    const auto* ui = adapter();
-    const auto* components = ui_components_api();
-    auto result = components->scroll_list_process(g_list);
-    if (!contracts::succeeded(result)) { log_result("process", result); return; }
-    result = ui->begin_frame();
-    if (!contracts::succeeded(result)) return;
-    contracts::UiRect rect{};
-    if (contracts::succeeded(ui->get_rect(g_root, &rect))) {
-        const contracts::UiContainerContentDesc root{rect, 0xFF171512u, 0};
-        result = components->container_draw_content(&root, &draw_scroll_content, nullptr);
-        if (!contracts::succeeded(result)) log_result("draw content", result);
-    }
+    if (!contracts::succeeded(result)) log_result("draw status text", result);
     result = components->back_button_draw(g_back);
     if (!contracts::succeeded(result)) log_result("draw back", result);
     result = ui->end_frame();

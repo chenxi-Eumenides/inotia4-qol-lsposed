@@ -72,25 +72,17 @@ struct Component {
     uint32_t appearance = 0;
     uint32_t font_size = 0;
     UiRect paint_local{};
-    UiRect draw_parent_clip{};
-    bool has_draw_parent_clip = false;
 };
 
 const contracts::QolUiAdapter* g_adapter = nullptr;
 std::unordered_map<contracts::QolUiHandle, Component*> g_components;
 std::vector<std::unique_ptr<Component>> g_roots;
 uint32_t g_callback_depth = 0;
-uint32_t g_content_draw_depth = 0;
 bool g_unbind_pending = false;
 
 struct CallbackScope {
     CallbackScope() { ++g_callback_depth; }
     ~CallbackScope() { --g_callback_depth; }
-};
-
-struct ContentDrawScope {
-    ContentDrawScope() { ++g_content_draw_depth; }
-    ~ContentDrawScope() { --g_content_draw_depth; }
 };
 
 QolResult destroy(contracts::QolUiHandle handle);
@@ -150,65 +142,6 @@ bool paint_adapter_ready() {
         g_adapter->layout_native_text_button && g_adapter->draw_native_text_button;
 }
 
-bool clip_adapter_ready() {
-    constexpr size_t end = offsetof(contracts::QolUiAdapter, get_clip_rect) +
-        sizeof(((contracts::QolUiAdapter*)nullptr)->get_clip_rect);
-    return adapter_ready() && g_adapter->minor >= 21 && g_adapter->size >= end &&
-        g_adapter->get_clip_rect && g_adapter->set_clip && g_adapter->reset_clip &&
-        g_adapter->screen_inset_width && g_adapter->screen_inset_height;
-}
-
-UiRect intersect_rect(UiRect a, UiRect b) {
-    const int64_t x = std::max(a.x, b.x), y = std::max(a.y, b.y);
-    return {x, y, std::max<int64_t>(0, std::min(a.x + a.w, b.x + b.w) - x),
-        std::max<int64_t>(0, std::min(a.y + a.h, b.y + b.h) - y)};
-}
-
-class ClipScope {
-public:
-    QolResult open(UiRect requested) {
-        if (!clip_adapter_ready() || !on_main_thread()) return not_ready();
-        auto result = g_adapter->get_clip_rect(&original_);
-        if (!contracts::succeeded(result)) return result;
-        for (const int64_t value : {original_.x, original_.y, original_.w, original_.h}) {
-            if (value < INT32_MIN || value > INT32_MAX) return not_ready();
-        }
-        if (original_.x >= 0 && original_.y < 0) return not_ready();
-        int32_t ix = 0, iy = 0;
-        result = g_adapter->screen_inset_width(&ix);
-        if (!contracts::succeeded(result)) return result;
-        result = g_adapter->screen_inset_height(&iy);
-        if (!contracts::succeeded(result)) return result;
-        if (ix < 0 || iy < 0 || ix > (INT32_MAX - 960) / 2 ||
-            iy > (INT32_MAX - 640) / 2 || !rect_within_int32(requested)) return invalid_argument();
-        effective = intersect_rect(requested, {0, 0, 960 + int64_t{2} * ix, 640 + int64_t{2} * iy});
-        if (original_.x >= 0) {
-            if (original_.w <= 0 || original_.h <= 0) { effective.w = effective.h = 0; return contracts::ok(); }
-            effective = intersect_rect(effective, original_);
-        }
-        if (effective.w <= 0 || effective.h <= 0) return contracts::ok();
-        result = g_adapter->set_clip(static_cast<int32_t>(effective.x),
-            static_cast<int32_t>(effective.y), static_cast<int32_t>(effective.w),
-            static_cast<int32_t>(effective.h));
-        active_ = contracts::succeeded(result);
-        return result;
-    }
-    bool drawable() const { return active_; }
-    QolResult finish(QolResult result) {
-        if (!active_) return result;
-        active_ = false;
-        const auto restored = original_.x < 0 ? g_adapter->reset_clip() :
-            g_adapter->set_clip(static_cast<int32_t>(original_.x), static_cast<int32_t>(original_.y),
-                static_cast<int32_t>(original_.w), static_cast<int32_t>(original_.h));
-        return contracts::succeeded(result) ? restored : result;
-    }
-    ~ClipScope() { if (active_) (void)finish(contracts::ok()); }
-    UiRect effective{};
-private:
-    UiRect original_{};
-    bool active_ = false;
-};
-
 bool on_main_thread() {
     return adapter_ready() && g_adapter->is_main_thread != nullptr &&
         g_adapter->is_main_thread() != 0;
@@ -228,7 +161,7 @@ QolResult create_component(ComponentKind kind, uint32_t native_kind, UiRect rect
                            bool allow_foreign_native_parent = false) {
     if (out == nullptr) return invalid_argument();
     *out = nullptr;
-    if (g_callback_depth != 0 || g_content_draw_depth != 0 || g_unbind_pending) return not_ready();
+    if (g_callback_depth != 0 || g_unbind_pending) return not_ready();
     if (!adapter_ready() || g_adapter->create_control == nullptr || g_adapter->set_rect == nullptr ||
         g_adapter->delete_control == nullptr) {
         return not_ready();
@@ -606,7 +539,7 @@ QolResult destroy(contracts::QolUiHandle handle) {
     Component* component = nullptr;
     const QolResult lookup = require_component(handle, &component);
     if (!contracts::succeeded(lookup)) return lookup;
-    if (g_callback_depth != 0 || g_content_draw_depth != 0) {
+    if (g_callback_depth != 0) {
         component->pending_destroy = true;
         return contracts::ok();
     }
@@ -942,7 +875,7 @@ QolResult main_menu_decorated_button_create(const contracts::UiMainMenuDecorated
     if (!original || !replacement || original == replacement) return invalid_argument();
     *original = *replacement = nullptr;
     if (!desc || !valid_utf8(desc->text) || !desc->on_click || desc->font_style > 1 ||
-        desc->height_percent == 0 || desc->height_percent > 400) return invalid_argument();
+        desc->width == 0 || desc->height == 0) return invalid_argument();
     constexpr size_t end = offsetof(contracts::QolUiAdapter, main_menu_replacement_rect_available) +
         sizeof(((contracts::QolUiAdapter*)nullptr)->main_menu_replacement_rect_available);
     if (!paint_adapter_ready() || !main_menu_adapter_ready() || g_adapter->size < end ||
@@ -956,41 +889,36 @@ QolResult main_menu_decorated_button_create(const contracts::UiMainMenuDecorated
     int64_t px = 0, py = 0;
     result = g_adapter->control_absolute_origin(parent, &px, &py);
     if (!contracts::succeeded(result)) return result;
-    const int64_t base_height = std::min(rect.h, rect.w * 48 / 220);
-    contracts::UiTextButtonPaintDesc paint{{px + rect.x, py + rect.y + (rect.h - base_height) / 2,
-        rect.w, base_height}, contracts::kUiTextButtonDecorated, desc->font_style, 0};
-    contracts::UiTextButtonPaintLayout baseline{}, layout{};
-    result = g_adapter->layout_native_text_button(&paint, &baseline);
-    if (!contracts::succeeded(result)) return result;
-    if (!rect_within_int32(baseline.normal_bounds)) return not_ready();
-    paint.visual_rect = baseline.normal_bounds;
-    const int64_t target_height = (paint.visual_rect.h * desc->height_percent + 50) / 100;
-    paint.visual_rect.y -= (target_height - paint.visual_rect.h) / 2;
-    paint.visual_rect.h = target_height;
-    paint.font_size = desc->font_size;
+    const int64_t width = static_cast<int64_t>(desc->width);
+    const int64_t height = static_cast<int64_t>(desc->height);
+    if (width > INT32_MAX || height > INT32_MAX) return invalid_argument();
+    contracts::UiTextButtonPaintDesc paint{
+        {px + rect.x + (rect.w - width) / 2, py + rect.y + (rect.h - height) / 2, width, height},
+        contracts::kUiTextButtonDecorated, desc->font_style, desc->font_size};
+    if (!rect_within_int32(paint.visual_rect)) return invalid_argument();
+    contracts::UiTextButtonPaintLayout layout{};
     result = g_adapter->layout_native_text_button(&paint, &layout);
     if (!contracts::succeeded(result)) return result;
-    if (!rect_within_int32(layout.normal_bounds) || !rect_within_int32(layout.pressed_bounds)) return not_ready();
-    const int64_t x = std::min(layout.normal_bounds.x, layout.pressed_bounds.x);
-    const int64_t y = std::min(layout.normal_bounds.y, layout.pressed_bounds.y);
-    const UiRect hit{x - px, y - py,
-        std::max(layout.normal_bounds.x + layout.normal_bounds.w,
-                 layout.pressed_bounds.x + layout.pressed_bounds.w) - x,
-        std::max(layout.normal_bounds.y + layout.normal_bounds.h,
-                 layout.pressed_bounds.y + layout.pressed_bounds.h) - y};
+    // 绘制几何仍须可用；命中区仍等于原生 snapshot rect——按压 halo 会越出可见主体，属绘制，
+    // 不参与点击与碰撞判定。
+    if (!rect_within_int32(layout.normal_bounds) || !rect_within_int32(layout.pressed_bounds)) {
+        return not_ready();
+    }
     uint8_t available = 0;
-    result = g_adapter->main_menu_replacement_rect_available(source, hit, &available);
+    result = g_adapter->main_menu_replacement_rect_available(source, rect, &available);
     if (!contracts::succeeded(result)) return result;
     if (!available) return not_ready();
-    const contracts::UiButtonDesc button{hit, desc->text, desc->font_style, desc->on_click, desc->user};
+    const contracts::UiButtonDesc button{rect, desc->text, desc->font_style, desc->on_click, desc->user};
     result = text_button_create_impl(&button, parent, replacement, true, true);
     if (!contracts::succeeded(result)) return result;
     Component* created = find_component(*replacement);
     created->original_menu_button = source;
     created->appearance = contracts::kUiTextButtonDecorated;
     created->font_size = desc->font_size;
-    created->paint_local = {paint.visual_rect.x - x, paint.visual_rect.y - y,
-        paint.visual_rect.w, paint.visual_rect.h};
+    // 绘制范围独立于控件 rect：paint_local 以控件绝对原点为基准，负 y 合法（放大的
+    // 可见框从原生 rect 上沿之上开始），绘制不因命中区恢复而截断。
+    created->paint_local = {paint.visual_rect.x - (px + rect.x),
+        paint.visual_rect.y - (py + rect.y), paint.visual_rect.w, paint.visual_rect.h};
     *original = source;
     return contracts::ok();
 }
@@ -1251,19 +1179,13 @@ void scroll_content_draw(contracts::QolUiHandle handle, int64_t) {
     Component* list = find_component(handle);
     if (list == nullptr || list->pending_destroy || list->draw_item == nullptr) return;
     CallbackScope scope;
-    ClipScope clip;
-    if (list->has_draw_parent_clip) {
-        list->draw_result = clip.open(list->draw_parent_clip);
-        if (!contracts::succeeded(list->draw_result) || !clip.drawable()) return;
-    }
     // 原生已完成内容平移及 clip；直接回调消费者自绘每一行，不经原生 draw_control，
     // 以免原生按钮绘制读取/写入内联文本缓冲。
     for (const auto& row : list->rows) {
         if (list->pending_destroy) break;
         list->draw_item(list->user, row.index, row.native,
-                         list->selected == static_cast<int32_t>(row.index) ? 1 : 0);
+                        list->selected == static_cast<int32_t>(row.index) ? 1 : 0);
     }
-    list->draw_result = clip.finish(list->draw_result);
 }
 
 QolResult scroll_list_create(const contracts::UiScrollListDesc* desc,
@@ -1280,7 +1202,7 @@ QolResult scroll_list_create(const contracts::UiScrollListDesc* desc,
         desc->viewport.w > INT32_MAX || desc->viewport.h > INT32_MAX ||
         desc->viewport.x > INT32_MAX - desc->viewport.w ||
         desc->viewport.y > INT32_MAX - desc->viewport.h) return invalid_argument();
-    if (g_callback_depth != 0 || g_content_draw_depth != 0 || !native_list_ready() || g_adapter->scroll_create == nullptr ||
+    if (g_callback_depth != 0 || !native_list_ready() || g_adapter->scroll_create == nullptr ||
         g_adapter->scroll_set_target == nullptr || g_adapter->button_set_scroll == nullptr ||
         g_adapter->create_control == nullptr || g_adapter->set_rect == nullptr ||
         g_adapter->set_click_proc == nullptr) return not_ready();
@@ -1365,18 +1287,9 @@ QolResult scroll_list_draw(contracts::QolUiHandle handle) {
     if (!contracts::succeeded(lookup)) return lookup;
     if (g_callback_depth != 0 || g_adapter->scroll_draw == nullptr) return not_ready();
     list->draw_result = contracts::ok();
-    ClipScope clip;
-    list->has_draw_parent_clip = false;
-    if (g_adapter->minor >= 21) {
-        const auto opened = clip.open({0, 0, INT32_MAX, INT32_MAX});
-        if (!contracts::succeeded(opened) || !clip.drawable()) return opened;
-        list->draw_parent_clip = clip.effective;
-        list->has_draw_parent_clip = true;
-    }
     CallbackScope scope;
     const QolResult result = g_adapter->scroll_draw(handle);
-    list->has_draw_parent_clip = false;
-    return clip.finish(contracts::succeeded(result) ? list->draw_result : result);
+    return contracts::succeeded(result) ? list->draw_result : result;
 }
 
 QolResult scroll_list_get_offset(contracts::QolUiHandle handle, int64_t* out) {
@@ -1486,38 +1399,6 @@ QolResult draw_container_ornamented(UiRect rect) {
     return contracts::ok();
 }
 
-QolResult container_content_rect(UiRect frame, UiRect* out) {
-    if (!out) return invalid_argument();
-    *out = {};
-    if (!rect_within_int32(frame) || frame.w < 48 || frame.h < 48) return invalid_argument();
-    *out = {frame.x + 24, frame.y + 24, frame.w - 48, frame.h - 48};
-    return contracts::ok();
-}
-
-QolResult container_draw_content(const contracts::UiContainerContentDesc* desc,
-                                 contracts::QolUiContentDrawFn draw, void* user) {
-    if (!desc || desc->ornamented > 1) return invalid_argument();
-    UiRect content{};
-    auto result = container_content_rect(desc->frame, &content);
-    if (!contracts::succeeded(result)) return result;
-    if (!clip_adapter_ready() || !g_adapter->fill_rect) return not_ready();
-    ClipScope parent;
-    result = parent.open({0, 0, INT32_MAX, INT32_MAX});
-    if (!contracts::succeeded(result) || !parent.drawable()) return result;
-    result = desc->ornamented ? draw_container_ornamented(desc->frame) : draw_container(desc->frame);
-    if (!contracts::succeeded(result) || content.w <= 0 || content.h <= 0) return parent.finish(result);
-    ClipScope clip;
-    result = clip.open(content);
-    if (contracts::succeeded(result) && clip.drawable()) {
-        result = g_adapter->fill_rect(content, desc->background_color);
-        if (contracts::succeeded(result) && draw) {
-            ContentDrawScope scope;
-            result = draw(user, content);
-        }
-    }
-    return parent.finish(clip.finish(result));
-}
-
 // 不经控件 data 的文本绘制原语：按控件绝对原点绘制传入字符串，颜色沿用控件文本口径。
 QolResult draw_control_text(contracts::QolUiHandle control, const char* text, int32_t x_offset,
                             int32_t y_offset, uint32_t color, int32_t align, int32_t font) {
@@ -1597,16 +1478,16 @@ QolResult switch_touch(UiRect rect, uint32_t phase, int64_t x, int64_t y, int32_
 }
 
 UiRect help_column_frame(UiRect viewport, bool left) {
-    return {viewport.x - 24, viewport.y - 24, viewport.w + (left ? 64 : 48), viewport.h + 48};
+    return {viewport.x - 8, viewport.y - 8, viewport.w + (left ? 32 : 16), viewport.h + 16};
 }
 
 bool help_viewport_valid(UiRect viewport, UiRect panel, bool left) {
     // 先限范围，避免 int64 极值在扩框/加坐标时溢出。
-    if (viewport.x < 50 || viewport.y < 50 || viewport.w < (left ? 16 : 32) ||
+    if (viewport.x < 8 || viewport.y < 8 || viewport.w < (left ? 16 : 32) ||
         viewport.h < 32 || viewport.x > panel.w || viewport.y > panel.h ||
         viewport.w > panel.w || viewport.h > panel.h) return false;
     const UiRect frame = help_column_frame(viewport, left);
-    return frame.x + frame.w <= panel.w - 24 && frame.y + frame.h <= panel.h - 24;
+    return frame.x + frame.w <= panel.w && frame.y + frame.h <= panel.h;
 }
 
 void help_item_draw(void* user, uint32_t index, contracts::QolUiHandle row, uint8_t selected) {
@@ -1704,33 +1585,6 @@ QolResult help_page_process(contracts::QolUiHandle handle) {
     return scroll_list_process(page->help_list);
 }
 
-struct HelpDrawContext { Component* page; int64_t x; int64_t y; };
-
-QolResult help_left_content(void* user, UiRect) {
-    return scroll_list_draw(static_cast<HelpDrawContext*>(user)->page->help_list);
-}
-
-QolResult help_right_content(void* user, UiRect content) {
-    auto* page = static_cast<HelpDrawContext*>(user)->page;
-    if (!page->pending_destroy && page->selected >= 0) {
-        const auto option = page->help_options[static_cast<size_t>(page->selected)];
-        CallbackScope scope;
-        option.draw_detail(option.user, content);
-    }
-    return contracts::ok();
-}
-
-QolResult help_columns_content(void* user, UiRect) {
-    auto* context = static_cast<HelpDrawContext*>(user);
-    auto absolute = [context](UiRect r) { r.x += context->x; r.y += context->y; return r; };
-    const contracts::UiContainerContentDesc left{
-        absolute(help_column_frame(context->page->left_viewport, true)), contracts::ui_theme::kPanelBg, 1};
-    const contracts::UiContainerContentDesc right{
-        absolute(help_column_frame(context->page->right_viewport, false)), contracts::ui_theme::kPanelBg, 1};
-    auto result = container_draw_content(&left, &help_left_content, user);
-    return contracts::succeeded(result) ? container_draw_content(&right, &help_right_content, user) : result;
-}
-
 QolResult help_page_draw(contracts::QolUiHandle handle) {
     Component* page = nullptr;
     QolResult result = require_help_page(handle, &page);
@@ -1741,10 +1595,22 @@ QolResult help_page_draw(contracts::QolUiHandle handle) {
     if (!contracts::succeeded(result)) return result;
     if (x < static_cast<int64_t>(INT32_MIN) + 2 || y < static_cast<int64_t>(INT32_MIN) + 2 ||
         x > INT32_MAX - page->rect.w || y > INT32_MAX - page->rect.h) return invalid_argument();
-    HelpDrawContext context{page, x, y};
-    const contracts::UiContainerContentDesc desc{{x, y, page->rect.w, page->rect.h},
-        contracts::ui_theme::kPanelBg, 0};
-    return container_draw_content(&desc, &help_columns_content, &context);
+    auto absolute = [x, y](UiRect rect) { rect.x += x; rect.y += y; return rect; };
+    result = draw_container(absolute({0, 0, page->rect.w, page->rect.h}));
+    if (!contracts::succeeded(result)) return result;
+    result = draw_container_ornamented(absolute(help_column_frame(page->left_viewport, true)));
+    if (!contracts::succeeded(result)) return result;
+    result = draw_container_ornamented(absolute(help_column_frame(page->right_viewport, false)));
+    if (!contracts::succeeded(result)) return result;
+    result = scroll_list_draw(page->help_list);
+    if (!contracts::succeeded(result)) return result;
+    // ControlScroll_Draw 已复原整屏裁剪，右栏不处于左列表 clip 内。
+    if (!page->pending_destroy && page->selected >= 0) {
+        const auto option = page->help_options[static_cast<size_t>(page->selected)];
+        CallbackScope scope;
+        option.draw_detail(option.user, absolute(page->right_viewport));
+    }
+    return contracts::ok();
 }
 
 QolResult help_page_set_selected(contracts::QolUiHandle handle, int32_t index) {
@@ -1928,8 +1794,6 @@ const contracts::QolUiComponents kUiComponents{
     &capsule_text_button_create,
     &decorated_text_button_create,
     &main_menu_decorated_button_create,
-    &container_content_rect,
-    &container_draw_content,
 };
 
 }  // namespace
@@ -1951,7 +1815,7 @@ bool ui_components_bind(const contracts::QolUiAdapter* adapter) {
 
 void ui_components_unbind() {
     // owned 列表必须先归还 native 控件，再清空回调上下文。
-    if (g_callback_depth != 0 || g_content_draw_depth != 0) {
+    if (g_callback_depth != 0) {
         g_unbind_pending = true;
         return;
     }

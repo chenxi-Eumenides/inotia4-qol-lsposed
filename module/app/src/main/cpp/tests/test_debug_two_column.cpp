@@ -209,6 +209,20 @@ QolResult draw_native_toggle(UiRect rect, int32_t, uint8_t) {
 }
 QolResult draw_native_text_button_background(UiRect, uint8_t) { ++g_text_button_draws; return ok(); }
 QolResult draw_native_text_button_label(UiRect, const char*, uint32_t, int32_t) { return ok(); }
+// 显式外观文本按钮的绘画接口：布局原样返回 visual_rect，绘画只计数。
+QolResult layout_native_text_button(const UiTextButtonPaintDesc* desc,
+                                    UiTextButtonPaintLayout* out) {
+    if (desc != nullptr && out != nullptr) {
+        out->normal_bounds = desc->visual_rect;
+        out->pressed_bounds = desc->visual_rect;
+        out->label_bounds = desc->visual_rect;
+    }
+    return ok();
+}
+QolResult paint_native_text_button(const UiTextButtonPaintDesc*, const char*, uint32_t, uint8_t) {
+    ++g_text_button_draws;
+    return ok();
+}
 QolResult draw_native_close_button(UiRect, uint8_t) { ++g_close_draws; return ok(); }
 QolResult draw_back_button(QolUiHandle, uint8_t) { ++g_back_draws; return ok(); }
 QolResult load_image_unit(int32_t) { return ok(); }
@@ -279,6 +293,8 @@ QolUiAdapter make_adapter() {
     ui.draw_native_toggle = &draw_native_toggle;
     ui.draw_native_text_button_background = &draw_native_text_button_background;
     ui.draw_native_text_button_label = &draw_native_text_button_label;
+    ui.layout_native_text_button = &layout_native_text_button;
+    ui.draw_native_text_button = &paint_native_text_button;
     ui.set_button_enabled = &set_button_enabled;
     ui.draw_native_close_button = &draw_native_close_button;
     ui.draw_back_button = &draw_back_button;
@@ -328,8 +344,9 @@ int main() {
                          qol::contracts::ui_theme::kNavBoxW, qol::contracts::ui_theme::kNavBoxH};
     // 文本按钮/导航演示盒 rect = 右 viewport 原点 + 局部偏移（与实现同基准）：
     // 文本按钮两行排在说明行 y+84 之下、脚注 y+242 之上；导航盒在标题带与标签行之间。
-    const UiRect text_button_rects[3] = {{280, 220, 220, 48}, {504, 220, 220, 48},
-                                         {280, 276, 220, 48}};
+    const UiRect text_button_rects[6] = {{280, 220, 220, 48}, {524, 220, 220, 48},
+                                         {280, 276, 220, 48}, {524, 276, 220, 48},
+                                         {280, 332, 220, 48}, {524, 332, 220, 48}};
     // 导航演示盒取原生 X/返回尺寸 78×86（与设置页共用同款金属框），间距 88 不重叠。
     const UiRect nav_demo_rects[3] = {{280, 212, 78, 86}, {368, 212, 78, 86},
                                       {456, 212, 78, 86}};
@@ -345,7 +362,7 @@ int main() {
     const auto text_band = [&right](int32_t local_y) {
         return UiRect{right.x, right.y + local_y, right.w, 20};
     };
-    const UiRect text_button_bands[3] = {text_band(32), text_band(84), text_band(242)};
+    const UiRect text_button_bands[3] = {text_band(32), text_band(84), text_band(296)};
     const auto within = [](UiRect rect, UiRect viewport) {
         return rect.x >= viewport.x && rect.y >= viewport.y &&
                rect.x + rect.w <= viewport.x + viewport.w &&
@@ -380,9 +397,9 @@ int main() {
     g_provider->callbacks->enter();
     CHECK(g_provider->active());
 
-    // 结构：root = [双栏页, 面板导航按钮, 分类0 三枚文本按钮]。
+    // 结构：root = [双栏页, 面板导航按钮, 分类0 六枚文本按钮（胶囊/装饰各三态）]。
     Control* root = root_control();
-    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 5);
+    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 8);
     Control* columns = root->children[0].get();
     Control* panel_nav_control = root->children[1].get();
     g_nav_control = panel_nav_control;
@@ -391,7 +408,7 @@ int main() {
     CHECK(panel_nav_control->rect.x == panel_nav.x &&
           panel_nav_control->rect.y == panel_nav.y &&
           panel_nav_control->rect.w == panel_nav.w && panel_nav_control->rect.h == panel_nav.h);
-    for (size_t i = 0; i < 3; ++i) {
+    for (size_t i = 0; i < 6; ++i) {
         Control* text_button = root->children[2 + i].get();
         CHECK(text_button->kind == 1 && text_button->rect.x == text_button_rects[i].x &&
               text_button->rect.y == text_button_rects[i].y &&

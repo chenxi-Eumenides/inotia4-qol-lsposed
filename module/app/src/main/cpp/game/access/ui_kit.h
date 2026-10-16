@@ -86,12 +86,6 @@ void ui_draw_button_border(void* ctrl, UiRect size, uint32_t color, int thicknes
 void ui_draw_control_alpha_overlay(void* ctrl, UiRect size, uint32_t color, uint32_t alpha);
 bool ui_draw_item_porting(void* item, int32_t x, int32_t y, int32_t a, int32_t b);
 
-// 读取 native 全局裁剪矩形快照 (x,y,w,h)，供同一帧内的「快照→设交集→绘制→恢复」使用。
-// x<0 是 native「无父裁剪」哨兵（GRPX_ReSetClip 写全 -1），是成功读取而非读取失败；调用方
-// 不得把它当普通矩形求交。GOT 或槽指针不可读、未就绪时返回 false（fail-closed），
-// 调用方跳过受保护内容而不是「无裁剪照画」。只在游戏主线程调用，不跨帧持有。
-bool ui_clip_snapshot(UiRect* out);
-
 // 原版单按钮文本弹窗（word_id 文案）。内部按 game_symbols 解析创建入口；基址未就绪
 // 或符号未解析时静默返回。调用方须在释放扩展锁后调用（锁内零 UI）。
 void ui_show_text_popup(int32_t text_id);
