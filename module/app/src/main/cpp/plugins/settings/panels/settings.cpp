@@ -799,7 +799,7 @@ public:
         }
         const bool original_active = raw_active == kNativeControlActive;
         const contracts::UiMainMenuDecoratedButtonDesc desc{
-            "模块设置", contracts::kUiTextButtonFontDefault, 28, 290, 72, &more_games_clicked, nullptr};
+            "模块设置", contracts::kUiTextButtonFontDefault, 28, 290, 78, &more_games_clicked, nullptr};
         QolUiHandle original = nullptr;
         QolUiHandle replacement = nullptr;
         const QolResult created = g_components->main_menu_decorated_button_create(
