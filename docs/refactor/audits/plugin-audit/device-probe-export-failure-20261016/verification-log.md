@@ -25,7 +25,8 @@
 |---|---|---|
 | 插件目录删除 | **PASS** | `plugins/device_probe_export_failure/`（3 文件）、`plugins/device_probe_provider/`、`plugins/device_probe_consumer/`（均空目录）已删除；`find` 确认源码树无残留 `device_probe*` 目录。 |
 | 宿主接线清理 | **PASS** | `host/assembly.cpp` 删除三处：include 块、`{&features::device_probe_export_failure::plugin_descriptor},` 注册项、`infra::status_get("device_probe_export_failure", ...)` 的 WARN 日志块；连带删除已无引用的 `#include "infra/status.h"`。 |
-| 探针能力保留 | **PASS** | `probe_entry_export_resolution()`（正例 `elf-export:GRPX_Start`、负例 `elf-export:QOL_Preflight_Missing_Export`）与其 `assembly_init` 调用点、`QOL_ENABLE_DEVICE_PROBE` option/Release 禁、`plugins/CMakeLists.txt` 的 `^device_probe_` 跳过规则、`core.custom_ui` 的 probe 条件分支均**未改动**。 |
+| 探针能力保留 | **PASS** | `probe_entry_export_resolution()`（正例 `elf-export:GRPX_Start`、负例 `elf-export:QOL_Preflight_Missing_Export`）与其 `assembly_init` 调用点、`QOL_ENABLE_DEVICE_PROBE` option/Release 禁、`core.custom_ui` 的 probe 条件分支均**未改动**。 |
+| 死代码清理 | **PASS** | `plugins/CMakeLists.txt` 的 `^device_probe_` 跳过规则在探针插件归零后条件恒假、`continue()` 不可达，已删除并在该处留下恢复条件注释；`core.custom_ui/CMakeLists.txt` 指向 `feature.cpp` 的过时注释更正为 `plugin.cpp`（分支实际在 `plugin.cpp:87`，`feature.cpp` 无 probe 分支）。 |
 | 源码零残留引用 | **PASS** | 全仓 grep（排除 `module/app/build/` 与 `.tmp/` 等 git-ignored 产物）无任何源码命中。 |
 | 引擎契约覆盖（替代依据） | **PASS（Host Gate）** | `tests/test_plugin_registry.cpp:1514-1530` `test_required_entries_preflight_before_plugin_install` 断言 `install_calls==0`、`hook_calls==0`、两资源 `kFree`、状态 `kUnsupported`；`:1532-1559` 另覆盖 preflight 失败对独立插件与消费者的隔离性。 |
 | `check_arch.py` | **PASS** | 输出：`check_layers` / `check_offsets` / `check_jni` / `check_resources` 全部通过，零违规。 |

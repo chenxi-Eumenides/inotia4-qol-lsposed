@@ -13,9 +13,9 @@ foreach(plugin_cmake IN LISTS QOL_PLUGIN_CMAKE_FILES)
     get_filename_component(plugin_id "${plugin_dir}" NAME)
     set(plugin_target "qol_plugin_${plugin_id}")
 
-    if(plugin_id MATCHES "^device_probe_" AND NOT QOL_ENABLE_DEVICE_PROBE)
-        continue()
-    endif()
+    # 探针插件曾按 ^device_probe_ 前缀在未启用 QOL_ENABLE_DEVICE_PROBE 时跳过；
+    # 当前探针插件为零，该条件恒假故不保留。QOL_ENABLE_DEVICE_PROBE 的 Release 禁令
+    # 只在 option 被置 ON 时触发，default OFF 兜不住日后新增的 probe 目录，届时须恢复前缀跳过。
     if(QOL_KERNEL_ONLY AND NOT plugin_id STREQUAL "module_health")
         continue()
     endif()
