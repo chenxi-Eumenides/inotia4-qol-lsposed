@@ -3,7 +3,6 @@
 #include <cstdint>
 
 #include "../../contracts/plugin.h"
-#include "../../contracts/game_ports/item_extras_port.h"
 
 namespace qol::features::attribute_range_display {
 

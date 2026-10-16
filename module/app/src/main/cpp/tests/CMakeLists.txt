@@ -1087,6 +1087,7 @@ add_test(NAME quest_lifecycle_tests COMMAND quest_lifecycle_tests)
 add_executable(attribute_range_display_tests
     test_attribute_range_display.cpp
     ${CPP_DIR}/plugins/attribute_range_display/feature.cpp
+    ${CPP_DIR}/plugins/attribute_range_display/plugin.cpp
     ${CPP_DIR}/plugins/attribute_quality/rules.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )

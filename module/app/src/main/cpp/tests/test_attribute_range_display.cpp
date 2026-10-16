@@ -1,11 +1,13 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include "contracts/attribute_quality.h"
-#include "contracts/game_host.h"
+#include "contracts/plugin.h"
 #include "contracts/ui.h"
 #include "plugins/attribute_range_display/feature.h"
+#include "plugins/attribute_range_display/plugin.h"
 
 namespace {
 
@@ -18,6 +20,8 @@ int g_query_calls = 0;
 int g_insert_calls = 0;
 bool g_emit_add_from_make = false;
 bool g_quality_available = true;
+bool g_use_explicit_quality_level = false;
+int32_t g_explicit_quality_level = 0;
 int32_t g_register_status = qol::contracts::kQolItemHandleStatusOk;
 QueryMode g_query_mode = QueryMode::Success;
 const qol::contracts::AttributeQualityApi* g_quality_api = nullptr;
@@ -31,8 +35,8 @@ uint32_t g_last_max_text_bytes = 0;
 void* g_last_builder = nullptr;
 
 qol::contracts::QolHostSdk g_sdk{};
-qol::contracts::QolGameHost g_game{};
 qol::contracts::QolUiAdapter g_ui{};
+qol::contracts::PluginContext g_context{};
 
 QolResult query_item(qol::contracts::QolItemHandle,
                      const qol::contracts::AttributeQualityOptions*,
@@ -61,6 +65,8 @@ QolResult query_option_context(
                       : qol::contracts::kQolItemHandleStatusOk;
     if (g_query_mode == QueryMode::InvalidLevel) {
         out->quality.level = qol::contracts::kAttributeQualityHighestLevel + 1;
+    } else if (g_use_explicit_quality_level) {
+        out->quality.level = g_explicit_quality_level;
     } else {
         // Current display value determines the result; no cached option-list lookup is used.
         out->quality.level = display_value == 88 ? 5 : 2;
@@ -118,6 +124,8 @@ uintptr_t original_make(void* item, void*, void*) {
 
 void reset_quality_state() {
     g_quality_available = true;
+    g_use_explicit_quality_level = false;
+    g_explicit_quality_level = 0;
     g_quality_api = &g_default_quality_api;
     g_register_status = qol::contracts::kQolItemHandleStatusOk;
     g_query_mode = QueryMode::Success;
@@ -218,6 +226,82 @@ void test_query_and_game_handle_errors_fail_closed() {
     assert(g_query_calls == 1 && g_insert_calls == 0);
 }
 
+void test_descriptor_contract() {
+    const auto& descriptor = qol::features::attribute_range_display::plugin_descriptor();
+    assert(std::strcmp(descriptor.id, "attribute_range_display") == 0);
+    assert(std::strcmp(descriptor.version, "0.1.0") == 0);
+    assert(descriptor.requires_count == 1 && descriptor.requires != nullptr);
+    assert(std::strcmp(descriptor.requires[0].id, "attribute.quality") == 0);
+    assert(descriptor.requires[0].range.major ==
+           qol::contracts::kAttributeQualityVersionMajor);
+    assert(descriptor.requires[0].range.min_minor ==
+           qol::contracts::kAttributeQualityVersionMinor);
+    assert(descriptor.optional_count == 0 && descriptor.optional_requires == nullptr);
+    assert(descriptor.port_count == 0 && descriptor.ports == nullptr);
+    assert(descriptor.provides_count == 0 && descriptor.provides == nullptr);
+    assert(descriptor.resources_count == 2 && descriptor.resources != nullptr);
+    assert(descriptor.feature_count == 1 && descriptor.features != nullptr);
+    assert(std::strcmp(descriptor.features[0].id, "attribute_range_display.ranges") == 0);
+    assert(descriptor.features[0].default_enabled == 1);
+    assert(descriptor.features[0].category == qol::contracts::FeatureCategory::kBasicOptimization);
+    assert(descriptor.features[0].type == qol::contracts::FeatureType::kToggle);
+}
+
+void test_negative_level_does_not_insert_color() {
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_use_explicit_quality_level = true;
+    g_explicit_quality_level = -1;
+
+    add_with_context(reinterpret_cast<void*>(0x5000), 6, 51);
+    assert(g_query_calls == 1 && g_insert_calls == 0);
+}
+
+void test_all_quality_tiers_map_to_inline_colors() {
+    constexpr int32_t kLevels[] = {0, 1, 2, 3, 4, 5};
+    constexpr uint8_t kColors[] = {'G', 'W', 'C', 'L', 'V', 'Y'};
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_use_explicit_quality_level = true;
+
+    for (size_t i = 0; i < sizeof(kLevels) / sizeof(kLevels[0]); ++i) {
+        g_explicit_quality_level = kLevels[i];
+        add_with_context(reinterpret_cast<void*>(0x6000), static_cast<int>(i), 61);
+        assert(g_last_color == kColors[i]);
+        assert(g_insert_calls == static_cast<int>(i + 1));
+    }
+}
+
+void test_unmatched_resource_id_keeps_plugin_active() {
+    qol::features::attribute_range_display::set_active(true);
+    assert(qol::features::attribute_range_display::on_resource_ready(
+               g_context, "hook:Unrecognized", nullptr) == 0);
+    assert(qol::features::attribute_range_display::active());
+}
+
+void test_empty_backups_fail_closed_and_clear_callbacks() {
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    assert(qol::features::attribute_range_display::on_resource_ready(
+               g_context, qol::features::attribute_range_display::kResourceIdAddOption,
+               nullptr) != 0);
+    assert(!qol::features::attribute_range_display::active());
+    const int add_calls = g_add_calls;
+    char builder{};
+    qol::features::attribute_range_display::uid_desc_add_option_wrapper(&builder, 0, 1, 3);
+    assert(g_add_calls == add_calls);
+
+    qol::features::attribute_range_display::set_active(true);
+    assert(qol::features::attribute_range_display::on_resource_ready(
+               g_context, qol::features::attribute_range_display::kResourceIdMakeItem,
+               nullptr) != 0);
+    assert(!qol::features::attribute_range_display::active());
+    const int make_calls = g_make_calls;
+    assert(qol::features::attribute_range_display::uid_desc_make_item_wrapper(
+               reinterpret_cast<void*>(0x7000), nullptr, nullptr) == 0);
+    assert(g_make_calls == make_calls);
+}
+
 }  // namespace
 
 int main() {
@@ -228,21 +312,25 @@ int main() {
     g_ui.insert_inline_color = insert_inline_color;
     g_sdk.ui = &g_ui;
 
-    qol::contracts::PluginContext context{};
-    context.sdk = &g_sdk;
-    context.game = &g_game;
-    qol::features::attribute_range_display::set_context(context);
-    qol::features::attribute_range_display::on_resource_ready(
-        context, qol::features::attribute_range_display::kResourceIdAddOption,
-        reinterpret_cast<void*>(&original_add));
-    qol::features::attribute_range_display::on_resource_ready(
-        context, qol::features::attribute_range_display::kResourceIdMakeItem,
-        reinterpret_cast<void*>(&original_make));
+    g_context.sdk = &g_sdk;
+    g_context.game = nullptr;
+    qol::features::attribute_range_display::set_context(g_context);
+    assert(qol::features::attribute_range_display::on_resource_ready(
+               g_context, qol::features::attribute_range_display::kResourceIdAddOption,
+               reinterpret_cast<void*>(&original_add)) == 0);
+    assert(qol::features::attribute_range_display::on_resource_ready(
+               g_context, qol::features::attribute_range_display::kResourceIdMakeItem,
+               reinterpret_cast<void*>(&original_make)) == 0);
 
+    test_descriptor_contract();
     test_disabled_wrappers_pass_through();
     test_active_context_uses_provider_level_color();
     test_current_value_disambiguates_repeated_option_id();
     test_unavailable_or_invalid_quality_fails_closed();
     test_query_and_game_handle_errors_fail_closed();
+    test_negative_level_does_not_insert_color();
+    test_all_quality_tiers_map_to_inline_colors();
+    test_unmatched_resource_id_keeps_plugin_active();
+    test_empty_backups_fail_closed_and_clear_callbacks();
     return 0;
 }

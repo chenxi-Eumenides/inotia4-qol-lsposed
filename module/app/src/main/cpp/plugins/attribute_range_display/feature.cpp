@@ -15,7 +15,6 @@ using MakeItemFn = uintptr_t (*)(void* item, void* character, void* arg2);
 
 std::atomic<bool> g_active{false};
 const contracts::QolHostSdk* g_sdk = nullptr;
-const contracts::QolGameHost* g_game = nullptr;
 void* g_backup_add_option = nullptr;
 void* g_backup_make_item = nullptr;
 
@@ -55,7 +54,6 @@ char tier_color(contracts::AttributeQualityTier tier) {
 
 void set_context(const contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
-    g_game = ctx.game;
 }
 
 void set_active(bool active_value) {
@@ -68,8 +66,18 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     set_context(ctx);
     if (resource_id == nullptr) return 0;
     if (std::strcmp(resource_id, kResourceIdAddOption) == 0) {
+        if (backup == nullptr) {
+            g_backup_add_option = nullptr;
+            set_active(false);
+            return 1;
+        }
         g_backup_add_option = backup;
     } else if (std::strcmp(resource_id, kResourceIdMakeItem) == 0) {
+        if (backup == nullptr) {
+            g_backup_make_item = nullptr;
+            set_active(false);
+            return 1;
+        }
         g_backup_make_item = backup;
     }
     return 0;
@@ -81,7 +89,7 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int val
     if (!active() || builder == nullptr || t_current_item == nullptr) return;
 
     const auto api = quality_api();
-    if (g_game == nullptr || g_sdk == nullptr || g_sdk->ui == nullptr ||
+    if (g_sdk == nullptr || g_sdk->ui == nullptr ||
         g_sdk->ui->insert_inline_color == nullptr || api == nullptr ||
         g_sdk->item_handle.register_item == nullptr) {
         return;
