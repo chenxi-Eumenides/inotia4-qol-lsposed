@@ -254,7 +254,8 @@ bool install_other_step(Tx& tx, const contracts::ResourceClaim& claim, uint32_t 
     ++tx.step;
     out->resource_id = claim.id;
     out->ok = 0;
-    out->backup = nullptr;
+    // 仅成功路径交还机制层确证的原函数入口（kPtrSlot 的原值）；失败/软失败/门禁关保持 null。
+    out->backup = outcome.backup;
     out->error = nullptr;
     out->finished = tx.step >= tx.total;
     if (out->finished) {

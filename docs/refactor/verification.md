@@ -320,6 +320,19 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 当前证据（2026-10-16） | 主代理在标准 CMake 目录一次请求六个目标编译 **rc0**（10 条增量构建）；`ui_adapter_tests` 最新单项 **1/1 PASS**；其余五项（`native_text_button_render_tests`、`core_ui_components_tests`、`native_scroll_list_tests`、`settings_panel_widget_tests`、`help_page_tests`）复用 designer 已运行的同源证据，未重跑。`scripts/build-debug.sh --offline` **10s 成功** → `output/inotia4_qol_lsposed_debug_2610161405_6ed91ecf4980.apk`（SHA-256 `6ed91ecf4980303f97db1e4fd54ba2216c446c619d503eb0e6f07b596e5177d1`）。直接调用 `scripts/patch-apk.sh` **成功 4 / 失败 0** → `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`（SHA-256 `198ea9ff64572641ff199ee1c0ba6da6074f2a2d07c63fc5d198565f3313a2b8`）。`check_arch` 四项 0、`git diff --check` 0、用户 `AGENTS.patch` 逐字 cmp 0；未跑全 143、未跑 craft/checker/routes/Toggle。**未安装，包身份不是运行身份**；fixer 手工 438 仅属旧时点、不作当前证据。 | `.slim/deepwork/ui-craft-regression-20261015/phase-1c-validation.md`；日志 `.tmp/ui-craft-regression-20261015/phase-1c-validation/`。 |
 | 未验边界 | 视觉与输入真机（28 号字观感、两种外观、96 高度、菜单 hit 是否遮邻项、角部内容/滚动条不泄漏）**NOT_ACCEPTED**；**Gate 1C 未执行且不再安排**（用户禁止追加静态复核/测试），不写 Gate PASS。A′ 父链绝对原点等价性已由主代理同 v29 ELF 窄读（`GetAbsoluteRect 0x9e748`→`GetAbsolutePoint 0x9e6b4`→根 `GetRelativePoint 0x9ddd8`）闭合为良构无溢出树同义，**不再是未证假设**；helper 另含逐节点可读性、64 层 parent 与 checked-add 保护。bar 字段按实际 ABI：`bar_visible`/`bar_type` 均 **1 字节 `ldrb`**（旧 32 位假设撤回）；父 raw 四值一律 int32 域检查（None 也检查）、合法负 y 保留、负 x 为唯一无 clip、写前检查、栈 RAII 恢复；fix-1 末收口已 terminal，旧手工 438 仅历史。 | 用户追加的**选项对话框问题仍排在本阶段之后**，未开始、未声称本批已修。 |
 
+### 5.17 原生选择框（选项/地图传送）触屏无结果修复（2026-10-16；只接管模块自有选项，用户真机待验）
+
+> 用户政策：**原版选项对话框不改动、绕过去；只接管模块插件自己的选项对话框**——原生路径保持原语义。
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 用户现象 | 原生选项框与**地图传送目的地**点击均有 pressed 特效但无结果（同一报告覆盖两处）。 | 现场为**只读** GET/adb pull：设备 `192.168.3.56:5555` PID 6913 仍运行旧包（module `ed9081c4…`），地图 choice active、core UI 3 claims Live；未点屏、未 POST 选择、未关框、未备份、未重启/安装。 |
+| 修复 A（Host，保留） | **已实现**：feature-mode `kPtrSlot` 安装的 `MechanismOutcome`/`TxStep` 原值传递断链修复（尾追加 `backup`；PtrSlot 成功回填 `site.expected_value`；引擎成功步透传），使 registry 能调 `on_resource_ready`、旁路能取到真实原函数。**其目的仅是让原生旁路真实调用原函数**，不改变 Native 业务语义或调用协议；不改 registry 生产 gate、公共 header 或其它机制语义。 | `hooks/transaction.{h,cpp}`、`host/assembly.cpp`、`tests/test_hooks_transaction.cpp`；报告 `choice-backup-fix.md`（`hooks_transaction: pass=543 fail=0`）。**`world_teleport` 模块 active 成功分支不依赖 backup**，其目的地问题见修复 B，不照抄同一原因。 |
+| 修复 B（模块，v2 边界） | **已实现**（`plugins/core.custom_ui/feature.cpp` + `tests/test_native_choice.cpp`）：**原生只在 `inactive` 或明确 `foreign`（`text_owns=0`）时透传**；**ownership 未知/读取失败保持 module 路径、不写原生**（不声明任何情况下必定 native 透传）。`choice_init_wrapper` 在 `original(control)` 之后按**同 generation** 重查后恢复模块自有 items/count/focus 与可选 title（**有/无 title 均恢复**，限 wrapper 前已存在的 pending）。**module owned** 时成功/关闭/读取错误/索引错误/focus 错误**都不运行原版剧情回调**；**关闭由模块 close popup、不 `on_select`**；失败只记原因并保活。无新 hook/resource/port/公共 ABI/调度器，回调保持 `void`；上一版 Init 窗口成果保留。 |
+| 日志与不记内容 | 模块 blocked：`choice button module blocked reason=owner_unavailable/owner_read_failed/missing_module_fn/selected_index/index/focus`；foreign 旁路：`choice button foreign passthrough text_owns=0 …`；成功：`choice button module <select\|close> index=N`。旧 `fallback reason` 关键词已删除，`original=null` 警告仍在。 | **不记录玩家文本**。 |
+| 证据 | `native_choice_tests` **200 passed / 0 failed**（`.tmp/choice-dialog-fix-20261016/module-only/01-run.log`）；`hooks_transaction_tests` **543 checks 通过**（同源有效）。`scripts/build-debug.sh --offline` 成功（7 秒），模块 `output/inotia4_qol_lsposed_debug_2610161506_a149d8807dd7.apk`，SHA-256 `a149d8807dd762d102ee362c7c394582a83ad8e2a32a033f3ab0c7cae64a81ab`；直接 `scripts/patch-apk.sh` **成功 4 / 失败 0**，候选 `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`，SHA-256 `c06a849123edfd5f43023cd0f83bf1b3e2a8315c1200181a7c02e42ad19e41db`。 | `.tmp/choice-dialog-fix-20261016/{build-debug.log,patch-apk.log}`；未追加独立复核、全量或无关测试；未安装或重启、未执行选项操作，构建身份不等于运行身份。 |
+| 用户真机 | **NOT_ACCEPTED**：功能验收由用户亲自真机进行。 | 不触发设备操作/安装/存档备份。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

@@ -247,6 +247,9 @@ bool gate_on(const char* key) {
 // kCallPatch 的站点由 game/access/patches 解析后交给 patch/instr_patch；
 // kPtrSlot 的槽站点由 game/access/ptr_slots 解析后交给 patch/ptr_slot；
 // kOwnership 直接调 claim.handler 指向的 OwnershipOps（不经 patch 站点）。
+// 成功时回填机制层已确证的原函数入口（outcome.backup）：kPtrSlot 为 site.expected_value
+// ——install_claim 只在「槽当前值 == expected」校验通过后才写入，故该值就是被替换的原值
+// （插件 wrapper 依赖它重放原逻辑）；其余机制没有原值，保持 nullptr。
 MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr_t target) {
     (void)target;  // call patch 的站点由本层解析，引擎无需预解析
     if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
@@ -263,7 +266,8 @@ MechanismOutcome dispatch_install(const contracts::ResourceClaim& claim, uintptr
             return MechanismOutcome{1, "slot not found"};
         }
         const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site);
-        return MechanismOutcome{outcome.ok, outcome.error};
+        return MechanismOutcome{outcome.ok, outcome.error,
+                                outcome.ok == 0 ? site.expected_value : nullptr};
     }
     if (claim.mechanism != contracts::ResourceMechanism::kCallPatch) {
         return MechanismOutcome{1, "mechanism unsupported"};

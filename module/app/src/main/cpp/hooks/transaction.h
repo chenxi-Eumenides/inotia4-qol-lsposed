@@ -29,6 +29,9 @@ struct TxDeps {
     struct MechanismOutcome {
         int32_t ok;
         const char* error;
+        // 安装成功时交还的原函数入口；只由机制层填写其确证过的原值（kPtrSlot 为槽期望值），
+        // 其余机制/失败路径保持 nullptr。handler 是替换目标，不是原值，不得据此回填。
+        void* backup = nullptr;
     };
     MechanismOutcome (*install_other)(const contracts::ResourceClaim& claim, uintptr_t target) =
         nullptr;

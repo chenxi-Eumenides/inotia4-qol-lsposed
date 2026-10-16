@@ -32,7 +32,9 @@ std::array<std::array<char, kTextBufferSize>, native_choice_detail::kMaxItems> g
 std::array<const char*, native_choice_detail::kMaxItems> g_item_ptrs{};
 std::array<char, kTextBufferSize> g_title{};
 std::array<char, kDialogTypeIdBufferSize> g_dialog_type_id{};
-bool g_pending_title = false;
+// Init 之后还需把模块已持有的 items/count(+标题) 重写回游戏态；open 为**所有** spec 置位
+// （无标题 spec 同样必须恢复 items），clear/消费后复位，不逐帧重试。
+bool g_pending_init = false;
 uint64_t g_dialog_sequence = 0;
 
 const contracts::QolChoicePort* choice() { return choice_port(); }
@@ -41,7 +43,7 @@ uint64_t clear_active_locked() {
     const uint64_t generation = g_generation;
     g_active = false;
     g_active_spec = {};
-    g_pending_title = false;
+    g_pending_init = false;
     ++g_generation;
     return generation;
 }
@@ -63,8 +65,52 @@ bool valid_dialog_type_id(const char* id) {
     return true;
 }
 
+// 轻量 SDK 日志：只为失败分支可观测，不新建公共诊断 API 或日志框架。
+// 只记录枚举化原因与必要计数（code/index/count/owned/backup），不记录玩家文本或指针内容。
+void log_line(int32_t level, const char* message) {
+    const contracts::QolHostSdk* sdk = host_sdk();
+    if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
+    const size_t length = std::strlen(message);
+    if (length == 0) return;
+    (void)sdk->log.write(level, 1, "plugins/core.custom_ui/feature.cpp", message,
+                         static_cast<uint32_t>(length));
+}
+
+// module owned 但本轮无法完成：只记录原因并保留模块状态，绝不回落原生（区别于 foreign 旁路）。
+void log_blocked(const char* reason, int32_t code, int32_t index, int32_t owned, int count,
+                 bool backup_ready) {
+    char message[192]{};
+    std::snprintf(message, sizeof(message),
+                  "choice button module blocked reason=%s index=%d count=%d owned=%d code=%d "
+                  "backup=%d",
+                  reason, index, count, owned, code, backup_ready ? 1 : 0);
+    log_line(2, message);
+}
+
+// 文本不属于本模块选择框：清本地状态后透传原函数（不写 items/focus、不关原生 popup、不调模块回调）。
+void log_foreign_passthrough(bool backup_ready) {
+    char message[128]{};
+    std::snprintf(message, sizeof(message),
+                  "choice button foreign passthrough text_owns=0 backup=%d (native original)",
+                  backup_ready ? 1 : 0);
+    log_line(2, message);
+}
+
+void log_module_select(int32_t index, bool is_close) {
+    char message[96]{};
+    std::snprintf(message, sizeof(message), "choice button module %s index=%d",
+                  is_close ? "close" : "select", index);
+    log_line(0, message);
+}
+
 void call_original(ChoiceButtonExecuteFn original, void* control) {
-    if (original != nullptr) original(control);
+    if (original == nullptr) {
+        // backup 缺失 → 原 ExecuteProc 不会被调用（触屏将无任何结果）：记一条 warn，
+        // 便于区分「PtrSlot backup 断链」与「模块自身拒绝/关闭」。不记录控件指针内容。
+        log_line(2, "choice button original=null (button ptr slot backup missing)");
+        return;
+    }
+    original(control);
 }
 
 const contracts::UiStateApi* ui_state_api() {
@@ -129,27 +175,81 @@ void copy_active_dialog_locked(uint64_t generation, ChoiceDialogSnapshotCopy* ou
 
 void choice_init_wrapper(void* control) {
     UiChoiceInitFn original = nullptr;
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        original = g_init_original;
-    }
-    if (original != nullptr) original(control);
+    // 只对**进入本包装前已存在**的 pending module generation 恢复数据；原 Init 执行期间才产生的
+    // 新请求不属于本次 Init，由 original 后的同 generation 重查挡掉，避免错写别的选择框。
+    contracts::UiChoiceSpec spec{};
     const char* title = nullptr;
     uint64_t generation = 0;
+    bool pending = false;
     const contracts::QolChoicePort* port = choice();
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        if (!g_active || !g_pending_title || g_active_spec.title == nullptr || port == nullptr ||
-            port->write.write_title == nullptr) {
-            return;
+        original = g_init_original;
+        if (g_active && g_pending_init && port != nullptr &&
+            port->write.write_items != nullptr && port->write.write_focus != nullptr) {
+            spec = g_active_spec;
+            generation = g_generation;
+            // 游戏保存标题指针；地址必须在选择框存活期间保持有效。
+            if (spec.title != nullptr) title = g_title.data();
+            pending = true;
         }
-        // 游戏保存标题指针；地址必须在选择框存活期间保持有效。
-        title = g_title.data();
-        generation = g_generation;
     }
-    (void)port->write.write_title(title);
+    // 非 module（无 pending）：仅透传原 Init，零 module 写。
+    if (original != nullptr) original(control);
+    if (!pending) return;
+
+    // 原版 Scene_Init_POPUP_SC_CHOICE 顺序：先 UIChoice_Init（重置 pItemText[]/count/focus），
+    // 再 UIChoice_CreateControl（只消费 items/count/title）。本包装正处于两者之间的窗口：
+    // 用模块自有静态缓冲重写 open 时已持有的 items/count 与 focus(0)（无标题 spec 也一样），
+    // 使随后的 CreateControl 拿到正确数据。port 调用一律在锁外，缓冲为静态（非栈字符串）。
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_active || !g_pending_init || g_generation != generation) return;
+    }
+
+    QolResult items_result = contracts::ok();
+    QolResult focus_result = contracts::ok();
+    QolResult title_result = contracts::ok();
+    if (spec.count > 0) {
+        items_result = port->write.write_items(g_item_ptrs.data(),
+                                              static_cast<uint32_t>(spec.count));
+    }
+    if (contracts::succeeded(items_result)) focus_result = port->write.write_focus(0);
+    if (title != nullptr && port->write.write_title != nullptr) {
+        title_result = port->write.write_title(title);
+    }
+    const bool reassert_ok = contracts::succeeded(items_result) &&
+                             contracts::succeeded(focus_result) &&
+                             (title == nullptr || contracts::succeeded(title_result));
+    if (!reassert_ok) {
+        // 重写失败 → 本次打开不可用：不假报模块 ready，按同 generation 清 active + 发布 clear，
+        // 并用现成的 close_popup 结束这次失败打开（不新增回滚事务/调度器）。
+        int32_t fail_code = contracts::succeeded(items_result)
+                                ? (contracts::succeeded(focus_result) ? title_result.code
+                                                                    : focus_result.code)
+                                : items_result.code;
+        char message[160]{};
+        std::snprintf(message, sizeof(message),
+                      "choice init reassert failed stage=%s code=%d count=%d backup=%d",
+                      contracts::succeeded(items_result)
+                          ? (contracts::succeeded(focus_result) ? "title" : "focus")
+                          : "items",
+                      fail_code, spec.count, port->write.close_popup != nullptr ? 1 : 0);
+        log_line(2, message);
+        uint64_t cleared_generation = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (g_active && g_generation == generation) {
+                cleared_generation = clear_active_locked();
+            }
+        }
+        if (cleared_generation != 0) publish_dialog_clear(cleared_generation);
+        if (port->write.close_popup != nullptr) (void)port->write.close_popup();
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_active && g_generation == generation) g_pending_title = false;
+    if (g_active && g_generation == generation) g_pending_init = false;
 }
 
 void choice_button_execute(void* control) {
@@ -166,58 +266,76 @@ void choice_button_execute(void* control) {
             handle_module_choice = true;
         }
     }
-    if (!handle_module_choice || choice() == nullptr || choice()->read.selected_index == nullptr ||
-        choice()->read.text_owns == nullptr || choice()->write.write_focus == nullptr ||
-        choice()->write.close_popup == nullptr) {
+    if (!handle_module_choice) {
+        // 无 module active：直接原样透传原函数，不触碰 choice port（读/写/关闭）也不调模块回调。
         call_original(original, control);
         return;
     }
 
-    int32_t index = -1;
+    const contracts::QolChoicePort* port = choice();
+    // ownership 读面不可用：不猜 owner、不写/关 Game、不调任何 callback，保留模块状态。
+    if (port == nullptr || port->read.text_owns == nullptr) {
+        log_blocked("owner_unavailable", kQolOk, -1, 0, spec.count, original != nullptr);
+        return;
+    }
     int32_t owned = 0;
-    if (!contracts::succeeded(choice()->read.selected_index(&index)) ||
-        !contracts::succeeded(choice()->read.text_owns(
-            spec.items, static_cast<uint32_t>(spec.count), &owned)) ||
-        owned == 0 || index < 0 || index >= spec.count ||
-        !contracts::succeeded(choice()->write.write_focus(index))) {
+    const QolResult owns =
+        port->read.text_owns(spec.items, static_cast<uint32_t>(spec.count), &owned);
+    if (!contracts::succeeded(owns)) {
+        log_blocked("owner_read_failed", owns.code, -1, owned, spec.count, original != nullptr);
+        return;
+    }
+    if (owned == 0) {
+        // 文本不属于本模块选择框：清本地模块状态/快照后透传原函数；
+        // 不写原生 items/focus、不关原生 popup、不调模块回调。
         uint64_t cleared_generation = 0;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
-            if (g_active && g_generation == generation) {
-                cleared_generation = clear_active_locked();
-            }
+            if (g_active && g_generation == generation) cleared_generation = clear_active_locked();
         }
         if (cleared_generation != 0) publish_dialog_clear(cleared_generation);
+        log_foreign_passthrough(original != nullptr);
         call_original(original, control);
         return;
     }
 
-    if (native_choice_detail::is_close_index(index, spec.close_index)) {
-        uint64_t cleared_generation = 0;
-        {
-            std::lock_guard<std::mutex> lock(g_mutex);
-            if (g_active && g_generation == generation) {
-                cleared_generation = clear_active_locked();
-            }
-        }
-        if (cleared_generation != 0) publish_dialog_clear(cleared_generation);
-        call_original(original, control);
+    // 已确认 module owned：以下全部走模块路径，任何失败都不调用原版
+    // UIChoice_ButtonListExe / EVTSYSTEM 剧情结果，只记录原因并保留模块状态供下一次点击。
+    if (port->read.selected_index == nullptr || port->write.write_focus == nullptr ||
+        port->write.close_popup == nullptr) {
+        log_blocked("missing_module_fn", kQolOk, -1, owned, spec.count, original != nullptr);
+        return;
+    }
+    int32_t index = -1;
+    const QolResult selected = port->read.selected_index(&index);
+    if (!contracts::succeeded(selected)) {
+        log_blocked("selected_index", selected.code, index, owned, spec.count, original != nullptr);
+        return;
+    }
+    if (index < 0 || index >= spec.count) {
+        log_blocked("index", kQolOk, index, owned, spec.count, original != nullptr);
+        return;
+    }
+    const QolResult focused = port->write.write_focus(index);
+    if (!contracts::succeeded(focused)) {
+        log_blocked("focus", focused.code, index, owned, spec.count, original != nullptr);
         return;
     }
 
+    const bool is_close = native_choice_detail::is_close_index(index, spec.close_index);
     uint64_t cleared_generation = 0;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        if (g_active && g_generation == generation) {
-            cleared_generation = clear_active_locked();
-        }
+        if (g_active && g_generation == generation) cleared_generation = clear_active_locked();
     }
     if (cleared_generation != 0) publish_dialog_clear(cleared_generation);
-    if (choice()->write.play_sound != nullptr) {
-        (void)choice()->write.play_sound(2);
+    log_module_select(index, is_close);  // debug：确认该次点击走了模块路径（每次点击至多一行）
+    if (port->write.play_sound != nullptr) {
+        (void)port->write.play_sound(2);
     }
-    (void)choice()->write.close_popup();
-    if (spec.on_select != nullptr) spec.on_select(index, spec.user);
+    (void)port->write.close_popup();
+    // 模块 close：只清自身状态 + sound/close，不 on_select、不调用原生原函数。
+    if (!is_close && spec.on_select != nullptr) spec.on_select(index, spec.user);
 }
 
 bool native_choice_open(const contracts::UiChoiceSpec& spec) {
@@ -247,7 +365,7 @@ bool native_choice_open(const contracts::UiChoiceSpec& spec) {
         g_active_spec.dialog_type_id = g_dialog_type_id.data();
         g_active = true;
         g_open_inflight = true;
-        g_pending_title = g_active_spec.title != nullptr;
+        g_pending_init = true;
         generation = ++g_generation;
     }
 

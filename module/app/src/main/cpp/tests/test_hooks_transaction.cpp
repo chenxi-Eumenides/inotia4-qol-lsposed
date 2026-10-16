@@ -140,6 +140,8 @@ int g_other_install_rc = 0;
 int g_other_release_rc = 0;
 uintptr_t g_other_last_target = 0;
 const ResourceClaim* g_other_last_claim = nullptr;
+// 机制层交还的原函数入口（kPtrSlot 语义）；默认 null = 无原值的机制。
+void* g_other_install_backup = nullptr;
 
 MechanismOutcome fake_install_other(const ResourceClaim& claim, uintptr_t target) {
     ++g_other_install_calls;
@@ -149,7 +151,7 @@ MechanismOutcome fake_install_other(const ResourceClaim& claim, uintptr_t target
         // 原始机制码原样返回（host 依赖 NotReady 等具体码做定向恢复）。
         return MechanismOutcome{g_other_install_rc, "primitive rejected"};
     }
-    return MechanismOutcome{0, nullptr};
+    return MechanismOutcome{0, nullptr, g_other_install_backup};
 }
 
 MechanismOutcome fake_release_other(const ResourceClaim& claim, uintptr_t target) {
@@ -223,6 +225,7 @@ void reset_all() {
     g_other_release_rc = 0;
     g_other_last_target = 0;
     g_other_last_claim = nullptr;
+    g_other_install_backup = nullptr;
     g_own_acquire_calls = 0;
     g_own_release_calls = 0;
     std::memset(g_own_acquire_order, 0, sizeof(g_own_acquire_order));
@@ -749,6 +752,106 @@ void test_call_patch_mechanism_transaction() {
     CHECK(state_of("patch:C") == ResourceState::kFree);
 }
 
+// 非入口机制安装成功必须把机制层确证的原函数入口原样交还（kPtrSlot 的原值）；
+// 失败/软失败/门禁关/回滚不得泄漏 handler，也不得复用上一步的 backup——
+// feature-mode 以 out.backup != null 作为「本步真实安装」判据并据此调 on_resource_ready。
+void test_non_entry_backup_handover_transaction() {
+    void* const sentinel = reinterpret_cast<void*>(0x5000);
+
+    // 聚合初始化的默认 backup 必须为 null：kCallPatch/kOwnership 靠该默认值。
+    CHECK((MechanismOutcome{0, nullptr}.backup) == nullptr);
+    CHECK((MechanismOutcome{1, "x"}.backup) == nullptr);
+
+    reset_all();
+    set_deps();
+    g_other_install_backup = sentinel;
+
+    ResourceClaim slot_a = make_claim("slot:A", "slot_plugin", "gateOn");
+    slot_a.mechanism = ResourceMechanism::kPtrSlot;
+    ResourceClaim slot_b = make_claim("slot:B", "slot_plugin", "gateOn");
+    slot_b.mechanism = ResourceMechanism::kPtrSlot;
+    CHECK(register_claim(slot_a));
+    CHECK(register_claim(slot_b));
+
+    // 成功步：backup 原样交还（不是 handler，也不是空）。
+    uint64_t tx = tx_begin("slot_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));  // A 成功、事务仍在途
+    CHECK(step.ok == 0);
+    CHECK(std::strcmp(step.resource_id, "slot:A") == 0);
+    CHECK(step.backup == sentinel);
+    CHECK(step.backup != &g_handler_a);
+    CHECK(state_of("slot:A") == ResourceState::kLive);
+
+    // 失败步：不带任何 backup（既不泄漏 handler，也不带上一步的 sentinel），并逆序回滚已装子集。
+    g_other_install_rc = 2;
+    CHECK(!tx_step(tx, &step));  // B 失败 → 终态
+    CHECK(step.finished);
+    CHECK(step.ok != 0);  // FailClosed 走通用失败码
+    CHECK(step.backup == nullptr);
+    CHECK(step.backup != sentinel && step.backup != &g_handler_a);
+    CHECK(state_of("slot:A") == ResourceState::kFree);
+    CHECK(state_of("slot:B") == ResourceState::kFree);
+    CHECK(g_other_release_calls == 1);  // 回滚释放已装子集
+
+    // 软失败：机制带 sentinel 但本步失败 → 仍为 null（软失败不冒充成功交还）。
+    reset_all();
+    set_deps();
+    g_other_install_backup = sentinel;
+    ResourceClaim soft = make_claim("slot:soft", "slot_plugin", "gateOn");
+    soft.mechanism = ResourceMechanism::kPtrSlot;
+    soft.failure = ResourceFailure::kFailSoft;
+    CHECK(register_claim(soft));
+    g_other_install_rc = 7;
+    tx = tx_begin("slot_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    CHECK(!tx_step(tx, &step));  // 唯一资源软失败即终态成功
+    CHECK(step.ok == 7);
+    CHECK(step.backup == nullptr);
+    CHECK(step.backup != sentinel);
+    CHECK(state_of("slot:soft") == ResourceState::kFree);
+
+    // 门禁关：非入口机制不安装（无空转），backup 保持 null。
+    reset_all();
+    set_deps();
+    g_other_install_backup = sentinel;
+    ResourceClaim off = make_claim("slot:off", "slot_plugin", "gateOff");
+    off.mechanism = ResourceMechanism::kPtrSlot;
+    CHECK(register_claim(off));
+    tx = tx_begin("slot_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.ok == 0 && step.backup == nullptr);
+    CHECK(g_other_install_calls == 0);
+    CHECK(state_of("slot:off") == ResourceState::kFree);
+
+    // 中止安装：已成功步交还过 sentinel 之后 tx_abort_install 回滚；终态查询不带 backup。
+    reset_all();
+    set_deps();
+    g_other_install_backup = sentinel;
+    ResourceClaim ab = make_claim("slot:abort", "slot_plugin", "gateOn");
+    ab.mechanism = ResourceMechanism::kPtrSlot;
+    ResourceClaim ab2 = make_claim("slot:abort2", "slot_plugin", "gateOn");
+    ab2.mechanism = ResourceMechanism::kPtrSlot;
+    CHECK(register_claim(ab));
+    CHECK(register_claim(ab2));
+    tx = tx_begin("slot_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    CHECK(tx_step(tx, &step));
+    CHECK(step.backup == sentinel);
+    CHECK(tx_abort_install(tx, "slot:abort", "restricted callback failed"));
+    CHECK(state_of("slot:abort") == ResourceState::kFree);
+    CHECK(state_of("slot:abort2") == ResourceState::kFree);
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kFailed);
+    // 终态后再次步进不产生新步骤，也不复活 backup。
+    step = TxStep{};
+    CHECK(!tx_step(tx, &step));
+    CHECK(step.backup == nullptr);
+}
+
 // kOwnership 资源经事务引擎：acquire 按声明序、release 逆序；不触入口 hook 原语。
 void test_ownership_mechanism_transaction() {
     reset_all();
@@ -1183,6 +1286,7 @@ int main() {
     test_install_anchor_failures();
     test_release_anchors();
     test_call_patch_mechanism_transaction();
+    test_non_entry_backup_handover_transaction();
     test_ownership_mechanism_transaction();
     test_terminal_retention_evicts_oldest();
     test_required_alias_group_preflight_prevents_first_hook_write();
