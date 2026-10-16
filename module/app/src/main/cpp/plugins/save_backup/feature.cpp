@@ -2,7 +2,7 @@
 //
 // 职责：.qol_save bundle（原版存档明文 + 模块 sidecar + 元信息）的导出/导入/列表/删除；
 // 导出按 checksum 去重；导入为「原版 .dat 重加密 + sidecar 重定槽」两段事务，
-// 任一步失败从 save_backup/.rollback/ 还原。错误信封沿用 op_err（格式 A），
+// 任一步失败从 backups/.rollback/ 还原。错误信封沿用 op_err（格式 A），
 // 错误串与迁移前 HTTP 契约逐字一致。
 //
 // 明文容器结构（overhaul v1.3.2 逆向，SAVE_LoadData 解密产物）：
@@ -38,7 +38,7 @@ namespace {
 #define SB_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
 #define SB_LOG_WARN(...) SAVE_BACKUP_LOG_WARN(__VA_ARGS__)
 
-constexpr const char* kBackupDirName = "save_backup";
+constexpr const char* kBackupDirName = "backups";
 constexpr const char* kRollbackDirName = ".rollback";
 constexpr const char* kBundleSuffix = ".qol_save";
 
@@ -373,7 +373,7 @@ bool ends_with(const std::string& s, const char* suffix) {
 
 // ---- 路径与目录 ----
 
-// 备份目录 <external>/save_backup/（不存在则建）；未初始化/建目录失败返回 false。
+// 备份目录 <external>/backups/（不存在则建）；未初始化/建目录失败返回 false。
 bool backup_dir(std::string& out) {
     if (g_sb_external_dir.empty()) {
         SB_LOG("save backup unavailable: store not initialized");
@@ -388,7 +388,7 @@ bool backup_dir(std::string& out) {
 }
 
 // sidecar 容器操作（读 primary/校验/回退、重定槽双写、删除）统一经 infra/store；
-// 本文件不再自行拼接 module-saves/ 路径或直接读写 sidecar 文件。
+// 本文件不再自行拼接 saves/ 路径或直接读写 sidecar 文件。
 
 // 文件名全匹配 `save\d*\.dat`（与迁移前 Kotlin Regex 一致）。
 bool is_save_dat_name(const std::string& n) {
@@ -736,7 +736,7 @@ void save_backup_init(const char* data_dir, const char* external_files_dir) {
 }
 
 // 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的同步体：游戏内存档面板删档确认后，
-// 同步删除该槽模块 sidecar（slot-{n}.module-save + .last-good）。
+// 同步删除该槽模块 sidecar（slot-{n}.qol-save + .last-good）。
 // 执行上下文：游戏主线程（UIPopupMsg_ButtonOKExe → blr），slot 由 wrapper 传入。约束：
 //  - 不取 g_virtual_bag_mtx、不走 JNI/Kotlin（避免跨层锁序与主线程阻塞）；
 //  - 不在本函数内再调 SAVE_CreateSaveSlot（原函数已调）；

@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -18,6 +19,7 @@
 
 #if defined(__ANDROID__)
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
@@ -234,9 +236,13 @@ void qol_log_init() {
             cmdline[n] = '\0';
             package = cmdline;
         }
-        const std::string path =
-            "/sdcard/Android/data/" + std::string(package) + "/files/inotia4-export.log";
-        const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        const std::string log_dir =
+            "/sdcard/Android/data/" + std::string(package) + "/files/qol";
+        const bool directory_ready = ::mkdir(log_dir.c_str(), 0755) == 0 || errno == EEXIST;
+        const std::string path = log_dir + "/qol.log";
+        const int fd = directory_ready
+                           ? open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)
+                           : -1;
         if (fd < 0) return;
         g_sink_fd.store(fd, std::memory_order_release);
 

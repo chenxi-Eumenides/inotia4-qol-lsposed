@@ -11,7 +11,7 @@
 // 模块 sidecar 容器层（infra/store）：MSAV 容器格式的 native 权威实现，
 // 与 Kotlin ModuleSaveStore.kt 的字节格式逐字节兼容（B4-1 冻结核心件）。
 //
-// 职责：按槽（0..2）读写 module-saves/slot-<n>.module-save（primary）与 .last-good；
+// 职责：按槽（0..2）读写 saves/slot-<n>.qol-save（primary）与 .last-good；
 // 原子写（tmp + rename）、primary 无效时 last-good 回退、坏容器 quarantine 保留。
 // 不解释 section 业务语义，不读写原版存档字节。
 //
@@ -51,10 +51,10 @@ using ReplaceMap = std::vector<std::pair<std::string, Section>>;
 // replace_sections 的删除集合。
 using RemoveSet = std::vector<std::string>;
 
-// 幂等初始化：external_files_dir 下创建/使用 module-saves/；空指针或目录不可建 → unavailable。
+// 幂等初始化：external_files_dir 下创建/使用 saves/；空指针或目录不可建 → unavailable。
 void init(const char* external_files_dir);
 
-// 是否已初始化且 module-saves 目录可用。
+// 是否已初始化且 saves 目录可用。
 bool available();
 
 // 确保槽容器存在且可读；primary 无效时按 last-good 回退写回 primary（generation 保持）。

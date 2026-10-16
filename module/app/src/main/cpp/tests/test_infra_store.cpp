@@ -69,7 +69,7 @@ void remove_tree(const std::string& dir) {
 }
 
 std::string primary_path(const std::string& dir, int slot) {
-    return dir + "/module-saves/slot-" + std::to_string(slot) + ".module-save";
+    return dir + "/saves/slot-" + std::to_string(slot) + ".qol-save";
 }
 std::string last_good_path(const std::string& dir, int slot) {
     return primary_path(dir, slot) + ".last-good";
@@ -94,7 +94,7 @@ bool dir_has_corrupt(const std::string& dir) {
     bool found = false;
     while (dirent* e = ::readdir(d)) {
         const std::string name = e->d_name;
-        if (name.find("slot-0.module-save.corrupt.") == 0) found = true;
+        if (name.find("slot-0.qol-save.corrupt.") == 0) found = true;
     }
     ::closedir(d);
     return found;
@@ -196,7 +196,7 @@ void test_last_good_and_quarantine(const std::string& dir) {
     CHECK(qol::infra::store::read_section(0, "a", &payload, &version) == Status::kOk);
     CHECK(version == 1 && payload == bytes({1}));
     CHECK(!file_exists(primary_path(dir, 0)));       // quarantine 是 rename，不保留原文件
-    CHECK(dir_has_corrupt(dir + "/module-saves"));   // 不删除，改名保留
+    CHECK(dir_has_corrupt(dir + "/saves"));   // 不删除，改名保留
 
     // 下一次写入把恢复数据写回 primary（preserve_current：last-good 更新）。
     CHECK(qol::infra::store::write_section(0, "a", 3, bytes({3}).data(), 1) == Status::kOk);
@@ -254,7 +254,7 @@ void test_replace_atomic(const std::string& dir) {
     CHECK(qol::infra::store::write_section(0, "b", 1, bytes({2}).data(), 1) == Status::kOk);
 
     // 只读目录注入 IO 失败：原子写第一步失败，primary 保持原状。
-    const std::string module_dir = dir + "/module-saves";
+    const std::string module_dir = dir + "/saves";
     CHECK(::chmod(module_dir.c_str(), 0555) == 0);
     ReplaceMap repl;
     Section c;
@@ -370,7 +370,7 @@ void test_strict_states(const std::string& dir) {
     { std::ofstream bad(primary_path(dir, 0), std::ios::binary | std::ios::trunc); bad << "bad"; }
     CHECK(inspect_slot(0, &state) == Status::kOk);
     CHECK(state.state == static_cast<uint32_t>(QolOwnerStoreState::kFallbackUsed));
-    CHECK(dir_has_corrupt(dir + "/module-saves"));
+    CHECK(dir_has_corrupt(dir + "/saves"));
     { std::ofstream bad(last_good_path(dir, 0), std::ios::binary | std::ios::trunc); bad << "bad"; }
     CHECK(inspect_slot(0, &state) == Status::kOk);
     CHECK(state.state == static_cast<uint32_t>(QolOwnerStoreState::kCorrupt));
@@ -383,7 +383,7 @@ void test_strict_states(const std::string& dir) {
     CHECK(ensure_slot(0) == Status::kCorrupt);
     CHECK(write_section(0, "a", 1, nullptr, 0) == Status::kCorrupt);
     CHECK(reset_slot(0) == Status::kOk);
-    CHECK(dir_has_corrupt(dir + "/module-saves"));
+    CHECK(dir_has_corrupt(dir + "/saves"));
     CHECK(inspect_slot(0, &state) == Status::kOk && state.state == static_cast<uint32_t>(QolOwnerStoreState::kPrimaryValid));
     CHECK(::mkdir(primary_path(dir, 1).c_str(), 0755) == 0);
     CHECK(inspect_slot(1, &state) == Status::kOk && state.state == static_cast<uint32_t>(QolOwnerStoreState::kIoFailed));

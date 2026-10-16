@@ -30,7 +30,7 @@ constexpr int kMinContainerBytes = 4 + 2 + 1 + 8 + 2 + 4;
 constexpr int kContainerSlotOffset = 6;  // u32 magic + u16 version 之后
 
 std::mutex& g_store_mtx = slot_operation::mutex();
-std::string g_dir;  // 仅 g_store_mtx 访问；<external>/module-saves
+std::string g_dir;  // 仅 g_store_mtx 访问；<external>/saves
 std::atomic<bool> g_available{false};
 std::array<contracts::QolOwnerStoreReservation, kSlotCount> g_reservations{};
 uint64_t g_next_reservation = 1;
@@ -326,7 +326,7 @@ bool read_atomic(const std::string& path, std::vector<uint8_t>* out) {
 }
 
 std::string primary_path_locked(int slot) {
-    return g_dir + "/slot-" + std::to_string(slot) + ".module-save";
+    return g_dir + "/slot-" + std::to_string(slot) + ".qol-save";
 }
 
 std::string last_good_path_locked(int slot) {
@@ -468,11 +468,11 @@ void init(const char* external_files_dir) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     if ((std::any_of(g_reservations.begin(), g_reservations.end(), [](const auto& held) { return held.id != 0; }) ||
          slot_operation::busy_locked(0) || slot_operation::busy_locked(1) || slot_operation::busy_locked(2)) &&
-        (external_files_dir == nullptr || g_dir != std::string(external_files_dir) + "/module-saves")) return;
+        (external_files_dir == nullptr || g_dir != std::string(external_files_dir) + "/saves")) return;
     g_available.store(false, std::memory_order_release);
     g_dir.clear();
     if (external_files_dir == nullptr || external_files_dir[0] == '\0') return;
-    const std::string dir = std::string(external_files_dir) + "/module-saves";
+    const std::string dir = std::string(external_files_dir) + "/saves";
     if (!ensure_dir(dir)) return;
     g_dir = dir;
     g_available.store(true, std::memory_order_release);

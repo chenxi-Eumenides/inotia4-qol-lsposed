@@ -59,11 +59,11 @@ std::string save_backup_import_json(const char* checksum, int slot);
 std::string save_backup_delete_json(const char* checksum);
 
 // 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的 sidecar 同步体：
-// 游戏内存档面板删档确认后，按槽删除模块 sidecar（slot-{n}.module-save + .last-good）并标记槽区 stale。
+// 游戏内存档面板删档确认后，按槽删除模块 sidecar（slot-{n}.qol-save + .last-good）并标记槽区 stale。
 // 由插件删档 PtrHook wrapper 在原函数返回后调用（锁序 g_sb_mtx → store）；slot 越界直接返回。
 void save_backup_slot_deleted_sync(int32_t slot);
 
-// 删除指定槽的游戏存档（原版 save{slot}.dat + 模块 sidecar slot-{slot}.module-save/.last-good）。
+// 删除指定槽的游戏存档（原版 save{slot}.dat + 模块 sidecar slot-{slot}.qol-save/.last-good）。
 // 只作用于该 slot 的精确文件名，不触碰其它槽；未找到任何目标文件返回结构化错误。
 // 与 save_backup_delete_json 同风格（HTTP 风格 {"ok":true,...}/{"ok":false,"error":"..."}）。
 std::string save_backup_delete_slot_json(int slot);
