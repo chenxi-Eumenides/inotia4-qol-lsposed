@@ -53,6 +53,7 @@
 - `audits/infrastructure-20261013/inspection.md`：近址 thunk mmap 检查与验证证据状态。
 - `audits/plugin-audit/attribute-quality-20261014/verification-log.md`、`audits/plugin-audit/attribute-quality-20261014/design-card.md`：attribute_quality v2.0 审计登记与 VM-AQ-01 验收卡。
 - `audits/plugin-audit/custom-recipe-20261014/`：custom_recipe 单 owner 合并的设计/实施记录（`design-card.md`）、静态 finding（`static-audit.md`）与审阅登记（`verification-log.md`）；合并验收卡 VM-CR-MERGE-01 仍 `NOT_ACCEPTED`。
+- `audits/plugin-audit/device-probe-export-failure-20261016/verification-log.md`：Debug-only 探针 `device_probe_export_failure` 审阅与删除登记（零消费者、无独占断言覆盖面；探针能力保留在 host 侧 `probe_entry_export_resolution()`）；真机 probe 行为 `NOT_ACCEPTED`。
 - `slot-data-contract.md`：Slot data 当前契约与状态。
 - `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
 - `adr/`：架构决策记录。
