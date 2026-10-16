@@ -3,7 +3,7 @@
 > 本文件**只记录缺陷问题**：插件审计与真机事件调查中确认的问题条目。每条记录归属（所属插件/模块组件）、证据与状态。
 > 分工：验收证据欠账（待补真机日志的 VM 卡）唯一登记处是 `verification.md` §5，本文件不重复；本文件登记的是**缺陷本身**。
 > 维护纪律：新问题按所属组件追加条目，编号不复用、不重排；修复后更新状态并把条目移入文末「已修复」附录（正文只留确实存在的问题）。
-> 排序：正文 §1–§9 全部为开放/挂账问题；已修复条目在文末附录存证。
+> 排序：正文 §1–§8、§11 为开放/挂账问题（§9 文档漂移、§10 无法验证项）；已修复条目在文末附录存证。
 > 严重度：P1 行为错误或契约破坏；P2 风险/缺陷；P3 质量/演进项。
 > 范围记录：插件逐个审计（core.world → core.item → core.character → …）与真机验证中产生的问题均入此账。
 
@@ -141,6 +141,20 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 
 > QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
 
+## 11. 功能插件（push_all / world_teleport）（开放）
+
+| ID | 级 | 问题 | 证据 | 状态 |
+|---|---|---|---|---|
+| PSH-02 | P2 | `push_all` install 早期失败分支未清理全局：`capabilities.require == nullptr` 时（`plugins/push_all/plugin.cpp:86`）直接返回，残留 `g_sdk`/`g_game`；相邻失败分支均清空，语义不一致 | `plugins/push_all/plugin.cpp:73-96`；push_all 审计批 2026-10-17 | 开放（统一失败分支清理 + Host 负例） |
+| PSH-03 | P2 | `push_all` 测试缺口：仅覆盖 `party_decision` 结果矩阵，未覆盖 wrapper 空指针/函数表缺失/查询失败/门禁透传与 descriptor↔站点绑定 | `tests/CMakeLists.txt:935-945`、`tests/test_push_all_rules.cpp`；push_all 审计批 2026-10-17 | 开放（本批仅补 `read.party_index` 取值用例） |
+| WT-01 | P2 | `world_teleport` 直接调用聚合 `QolGameHost::world_action`（确认框/扣钱/切图/弹窗），与 `ARCHITECTURE.md` §4.3 排除跨域聚合不一致，公开面过宽 | `plugins/world_teleport/feature.cpp:194-265`、`contracts/game_host.h:150-157,192-217`；world_teleport 审计批 2026-10-17 | 开放（待裁决：迁移期低层接口是否保留；新增能力不得再扩此表） |
+| WT-02 | P2 | `world_teleport` install 只校验 `g_game != nullptr`，未校验 `g_game->abi`（size/major/minor），ABI 不匹配时可能按错误布局调用 | `plugins/world_teleport/plugin.cpp:72-75` | 开放（fail-closed ABI 校验 + 错配 Host 用例） |
+| WT-03 | P2 | `world_teleport` 忽略 `request_map_change` 与 `create_yesno` 的 `QolResult`；部分初始化或动作失败时可能「扣款不传送」，且日志仍记「confirmation opened」 | `plugins/world_teleport/feature.cpp:194-202,245-254` | 开放（动作结果检查 + 失败补偿语义裁决） |
+| WT-04 | P2 | `world_teleport` `schedule` 任务 ID 不保存、`on_disabled` 不清业务回调有效性 → 停用后已排队任务仍可能打开 UI/扣费/切图 | `plugins/world_teleport/feature.cpp:97-103,226-255,258-290,295-319`、`plugins/world_teleport/plugin.cpp:131-134` | 开放（保存/移除任务 ID 或操作代次失效） |
+| WT-05 | P2 | `world_teleport` `target_map_id` 对 `int` 直接 `current_id + delta`，未限制输入范围，极值有符号溢出风险（正常状态未证实可达） | `plugins/world_teleport/rules.cpp:12-17`、`contracts/world_facts.h:18` | 开放（宽整数计算 + 范围 fail-closed + 极值用例） |
+| WT-06 | P2 | `world_teleport` 必需端口 `QOL_PORT_CHOICE` 唯一用途是读 `state_id` 写日志且忽略结果；诊断依赖却阻断 install | `plugins/world_teleport/plugin.cpp:59-62,72-81`、`plugins/world_teleport/feature.cpp:179-183` | 开放（待裁决：保留/移除/降为不阻断） |
+| WT-07 | P2 | `world_teleport` 测试缺口：状态 target 只测未被真实插件调用的 `InstallDisposition` helper；install 后 `on_enabled/fill_status`、余额不足、无效 target、切图失败、负 count 未覆盖；host target 未编译 `feature.cpp` | `tests/test_world_teleport_status.cpp:6-19`、`tests/test_world_teleport_install.cpp:36-65`、`tests/CMakeLists.txt:1103-1120` | 开放（驱动真实 descriptor 回调 + 补业务失败用例） |
+
 ## 附录：已修复问题（存证）
 
 | ID | 归属 | 问题 | 修复与复验 |
@@ -174,3 +188,5 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | ARD-06 | host/ui_adapter × attribute_range_display | 游戏 `UIDesc` builder 首字段是**行尾写游标**，旧 `insert_inline_color(builder, max_text_bytes, code)` 把它当**行首**取 span，`strnlen` 得不到本行区间 → 返回 `NotReady` → 插件**静默不插色**；自 `80070952` 重构起该功能未工作。 | **已修复**（`7f5c06e8`）：`QolUiAdapter` 尾部追加 `ui_desc_text_cursor` / `insert_inline_color_span`（minor 21→22，offset 相对 UIDesc 文本缓冲、不暴露游戏地址），旧槽标注 deprecated；`host/ui_adapter.cpp` 做 `0x200` 边界与游标/span 一致性校验，失败不写、成功游标 +4；插件改为 backup 前后快照游标后按 span 插入；`game/access` 增只读缓冲基址访问器。host 5/5、`check_arch` 全绿、路由 147 零漂移、`build-debug` 成功；真机部署 `be9690ae…` 后用户目视 **PASS（颜色正确）**。根因取证（frida）与设计见 `docs/refactor/audits/plugin-audit/attribute-range-display-20261017/verification-log.md` §1b。关联 INF-11。 |
 | I18N-02（宿主侧） | hooks × character_panel_i18n | EntryHook 原语返回 0 但未交还原函数入口时，宿主仍判安装成功 → 无 backup 的 wrapper 会跳过原调用（绘制/调用缺失）且资源记为 live | `hooks/install.cpp:37-47`、`hooks/transaction.cpp:341-360`；character_panel_i18n 审计批 | **已修复**（`d051a1d7`）：先撤销再失败——撤销成功 `resource_ready_failed`、撤销失败登记 tombstone + isolated 返回 `native unhook failed`；事务路径同语义；宿主 4 处调用点传入 `unhook_fn`；插件侧同步拒绝空 backup（`c909a476`）；补 registry/transaction host 用例。详见 `docs/refactor/audits/plugin-audit/character-panel-i18n-20261017/verification-log.md` |
 | PRB-01 | device_probe_export_failure（Debug-only 探针） | 该探针声明一条永远解析不到的 required+fail-closed entry hook（`elf-export:QOL_Preflight_Missing_Export`），意图作为 preflight 回归哨兵；但 `provides_count=0`、全仓无消费者、无消费者 stub、无专属 host 测试 target，且其断言的行为已被两处现有覆盖：`tests/test_plugin_registry.cpp:1514-1530` 的 `test_required_entries_preflight_before_plugin_install`（断言 `install_calls==0`、`hook_calls==0`、资源 `kFree`、状态 `kUnsupported`）与 host 侧 `probe_entry_export_resolution()`（真实 ELF 解析器正例 `GRPX_Start` / 负例缺失符号）。作为「插件」的存在依据不成立，只在 probe 构建增加 `registered`/`install_failed` 计数、一条常驻 WARN 与一个 Hidden 空开关。文档已记为退役的 `device_probe_provider` / `device_probe_consumer` 两个空目录亦在源码树残留。 | **已删除**（`09695c93`）：删除插件目录与两个空目录；`host/assembly.cpp` 清理 include、descriptor 注册项与 `infra::status_get` WARN 块（含已无引用的 `#include "infra/status.h"`）。保留 `QOL_ENABLE_DEVICE_PROBE` 开关、`probe_entry_export_resolution()` 函数与其调用点、`core.custom_ui` 的 probe 条件分支——开关仍被探针函数与该分支依赖并承担 Release 禁令，探针函数是防止「解析器整体失效」被误读为通过的阳性对照，`core.custom_ui` 分支是 `elf-export:` 真实业务导出路径的真机证据来源（本插件全仓零依赖，探针开关对该分支的影响是只换一个 symbol 常量、不改任何钩子与状态机）。`plugins/CMakeLists.txt` 的 `^device_probe_` 跳过规则在探针插件归零后条件恒假，已作为死代码删除；该处留注释记明约束：`QOL_ENABLE_DEVICE_PROBE` 的 Release 禁令只在 option 置 ON 时触发，default OFF 兜不住日后新增的 probe 目录，届时须恢复前缀跳过。同批更正 `core.custom_ui/CMakeLists.txt` 指向 `feature.cpp` 的过时注释（分支实际在 `plugin.cpp`）。无能力缺口。host CTest 140/143（3 项为 TL-06 既有欠账，测试构建不编译 `host/assembly.cpp`）、`check_arch.py` 全部通过、`check_http_routes.py` 147 零漂移、`build-debug.sh` BUILD SUCCESSFUL、`git diff --check` 通过。真机 probe 行为 NOT_ACCEPTED（未构建 probe 包、未安装）。证据见 `docs/refactor/audits/plugin-audit/device-probe-export-failure-20261016/verification-log.md`。 |
+| PSH-04 | push_all × character_extras 端口 | `read.party_index` 把「不在队伍」（`CHAR_GetPartyIndex == -1`）判成 `not_ready`；push_all 的 fail-closed 查询据此 `return -1` → 怪物恒不可推，推怪功能失效（回归引入 `9cdc3d27`，`b9ef63cc` 迁至 extras 端口后保持；2026-09-17 的 VM-P4-01 真机确认早于该回归） | **已修复**（`0cabd5fc`，方案 A）：`-1` 作为合法值以 `ok` 返回、`not_ready` 仅表未解析；`kQolPortCharacterExtrasVersion` 1.1→1.2；决策与影响面见 `docs/refactor/adr/0003-character-extras-party-index-semantics.md`。host 143/143、`check_arch`/`check_http_routes`(147)/`build-debug`/`diff --check` 全绿；真机（monster v29，模块 `10b218e703f9…`）用户确认**推怪正常 PASS**。登记见 `docs/refactor/audits/plugin-audit/push-all-20261017/verification-log.md` |
+| PSH-01 | push_all × JNI 兼容面 / 文档 | `nativeSetPushAllEnabled` 为冻结兼容空实现（恒 `JNI_FALSE`、不写配置、Kotlin 无调用点）；参考说明曾把它描述为有效开关通道 | **已修复**（文档）：`docs/reference/plugins/push_all.md` 改正为「遗留兼容空实现」并指向 `POST /api/config/set` 的 `field=feature, key=push_all.push` 契约 |
