@@ -9,7 +9,7 @@ namespace qol::features::character_panel_i18n {
 namespace {
 
 const contracts::QolHostSdk* g_sdk = nullptr;
-thread_local uint8_t g_active_scope = 0;
+thread_local int32_t g_active_scope = contracts::kTextScopeNone;
 const contracts::TextLayerApi* g_text_layer = nullptr;
 // 表消费者句柄（install 注册；0 = 未注册）。
 uint64_t g_consumer = 0;
@@ -20,16 +20,16 @@ void bind_sdk(const contracts::QolHostSdk* sdk) { g_sdk = sdk; }
 
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 
-uint8_t active_scope_value() { return g_active_scope; }
+int32_t active_scope_value() { return g_active_scope; }
 
-void set_active_scope_value(uint8_t value) { g_active_scope = value; }
+void set_active_scope_value(int32_t value) { g_active_scope = value; }
 
 const char* owner_table_modify(uint32_t text_id, const char* current, void* ctx) {
     (void)current;
     (void)ctx;
+    if (text_id > 0xFFFFu) return nullptr;
     // 命中返回模块字面量；未命中/占位 nullptr 返回 nullptr（不改）。
-    return lookup(static_cast<uint16_t>(text_id),
-                  static_cast<qol::infra::TextScope>(g_active_scope));
+    return lookup(static_cast<uint16_t>(text_id), g_active_scope);
 }
 
 bool register_consumers() {

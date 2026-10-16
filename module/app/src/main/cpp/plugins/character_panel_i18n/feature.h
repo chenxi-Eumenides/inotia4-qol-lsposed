@@ -7,32 +7,21 @@
 #include "../../contracts/plugin.h"
 #include "../../contracts/text_layer.h"
 
-namespace qol::hooks {
-enum class DispatchPhase : int32_t { kBefore = 0, kAfter = 1 };
-enum class ConsumerKind : int32_t { kObserve = 0, kModify = 1, kIntercept = 2 };
-}  // namespace qol::hooks
-
-namespace qol::infra {
-enum class TextScope : uint8_t;
-TextScope active_text_scope();
-}  // namespace qol::infra
-
 // 角色面板汉化（character_panel_i18n，ADR 0001 D3/D4）：本插件是**内容贡献者**，
-// 不再自己挂全局文本钩子——`MEMORYTEXT_GetText` 的唯一 owner 是 core.custom_ui 的文本机制，
-// 本插件经保留 ID 的 `text_layer` 能力注册自己的标签表。
+// 文案表由本插件持有；`core.custom_ui` 通过保留 ID 的 `text_layer` 能力提供文本机制。
 //
 // 本插件同时持有角色面板绘制窗口 hook（`hook:Scene_Draw_Popup_SC_CharacterInfo`，见
 // charinfo_scope.*），把该绘制窗口标记为 kCharacterPanel 作用域；文本机制只在当前线程
 // 处于该作用域时替换 35185..35196 的返回值，其它界面一律原样。
 //
-// 设计依据：ARCHITECTURE.md §3.3/§4.3/§4.5、ADR 0001。
+// `MEMORYTEXT_GetText` 由 core.custom_ui 持有唯一 hook，避免同一地址重复挂载。
 
 namespace qol::features::character_panel_i18n {
 
 struct Entry {
     const char* key;              // 语义键（唯一）
     uint16_t text_id;             // 被替换的游戏 text id
-    qol::infra::TextScope scope;  // 生效窗口（与 Host SDK scope 数值一致）
+    int32_t scope;                // 生效窗口（与 Host SDK scope 数值一致）
     // nullptr = 明确保持游戏原文（占位用，维持连续 id 区间不被打破），不做替换。
     const char* text;
 };
@@ -44,18 +33,18 @@ struct Entry {
 // 文案不超过四个汉字：物攻 / 法攻 / 防御力 / 暴击率 / 命中率 / 爆伤 /
 // 物抗 / 法抗 / 闪避率 / 武器格挡 / 盾牌格挡。35192 的含义为 P.RES = 物理抗性。
 inline constexpr Entry kEntries[] = {
-    {"charinfo.dmg", 35185, static_cast<qol::infra::TextScope>(1), "物攻"},        // DMG
-    {"charinfo.magic_dmg", 35186, static_cast<qol::infra::TextScope>(1), "法攻"},  // M. DMG
-    {"charinfo.def", 35187, static_cast<qol::infra::TextScope>(1), "防御力"},      // DEF
-    {"charinfo.magic_def", 35188, static_cast<qol::infra::TextScope>(1), nullptr},  // 面板未显示
-    {"charinfo.crit_rate", 35189, static_cast<qol::infra::TextScope>(1), "暴击率"},
-    {"charinfo.hit_rate", 35190, static_cast<qol::infra::TextScope>(1), "命中率"},
-    {"charinfo.crit_dmg", 35191, static_cast<qol::infra::TextScope>(1), "爆伤"},
-    {"charinfo.phys_res", 35192, static_cast<qol::infra::TextScope>(1), "物抗"},
-    {"charinfo.magic_res", 35193, static_cast<qol::infra::TextScope>(1), "法抗"},
-    {"charinfo.evade", 35194, static_cast<qol::infra::TextScope>(1), "闪避率"},
-    {"charinfo.weapon_block", 35195, static_cast<qol::infra::TextScope>(1), "武器格挡"},
-    {"charinfo.shield_block", 35196, static_cast<qol::infra::TextScope>(1), "盾牌格挡"},
+    {"charinfo.dmg", 35185, contracts::kTextScopeCharacterPanel, "物攻"},        // DMG
+    {"charinfo.magic_dmg", 35186, contracts::kTextScopeCharacterPanel, "法攻"},  // M. DMG
+    {"charinfo.def", 35187, contracts::kTextScopeCharacterPanel, "防御力"},      // DEF
+    {"charinfo.magic_def", 35188, contracts::kTextScopeCharacterPanel, nullptr},  // 面板未显示
+    {"charinfo.crit_rate", 35189, contracts::kTextScopeCharacterPanel, "暴击率"},
+    {"charinfo.hit_rate", 35190, contracts::kTextScopeCharacterPanel, "命中率"},
+    {"charinfo.crit_dmg", 35191, contracts::kTextScopeCharacterPanel, "爆伤"},
+    {"charinfo.phys_res", 35192, contracts::kTextScopeCharacterPanel, "物抗"},
+    {"charinfo.magic_res", 35193, contracts::kTextScopeCharacterPanel, "法抗"},
+    {"charinfo.evade", 35194, contracts::kTextScopeCharacterPanel, "闪避率"},
+    {"charinfo.weapon_block", 35195, contracts::kTextScopeCharacterPanel, "武器格挡"},
+    {"charinfo.shield_block", 35196, contracts::kTextScopeCharacterPanel, "盾牌格挡"},
 };
 
 inline constexpr size_t kEntryCount = sizeof(kEntries) / sizeof(kEntries[0]);
@@ -68,7 +57,7 @@ inline constexpr size_t kCharinfoIdCount =
 constexpr bool charinfo_block_ok() {
     if (kEntryCount != kCharinfoIdCount) return false;
     for (size_t i = 0; i < kCharinfoIdCount; ++i) {
-        if (static_cast<uint8_t>(kEntries[i].scope) != 1) return false;
+        if (kEntries[i].scope != contracts::kTextScopeCharacterPanel) return false;
         if (kEntries[i].text_id != static_cast<uint16_t>(kCharinfoIdMin + i)) return false;
     }
     return true;
@@ -82,8 +71,8 @@ inline const Entry* entries(size_t* out_count) {
 }
 
 // 查表：text_id 命中、scope == active、且 text != nullptr 时返回字面量；否则 nullptr。
-inline const char* lookup(uint16_t text_id, qol::infra::TextScope active) {
-    if (static_cast<uint8_t>(active) == 0) return nullptr;
+inline const char* lookup(uint16_t text_id, int32_t active) {
+    if (active == contracts::kTextScopeNone) return nullptr;
     for (size_t i = 0; i < kEntryCount; ++i) {
         if (kEntries[i].text_id != text_id) continue;
         if (kEntries[i].scope != active) continue;
@@ -107,24 +96,17 @@ void bind_sdk(const contracts::QolHostSdk* sdk);
 const contracts::QolHostSdk* host_sdk();
 
 // 当前线程作用域镜像（由 charinfo_scope 的绘制窗口 wrapper 维护）。
-uint8_t active_scope_value();
-void set_active_scope_value(uint8_t value);
+int32_t active_scope_value();
+void set_active_scope_value(int32_t value);
 
 // 表查找消费者（after 阶段 Modify）：按当前线程作用域查表；命中返回字面量，未命中 nullptr。
 const char* owner_table_modify(uint32_t text_id, const char* current, void* ctx);
-
-// 消费者回调体的纯逻辑部分（host 可测；owner_table_modify 委托它）。
-inline const char* owner_table_lookup(uint32_t text_id) {
-    return lookup(static_cast<uint16_t>(text_id), qol::infra::active_text_scope());
-}
 
 // 经 `text_layer` 能力注册/注销本插件的表消费者（install/deactivate；幂等）。
 bool register_consumers();
 void unregister_consumers();
 
-inline constexpr qol::hooks::DispatchPhase kOwnerTablePhase =
-    static_cast<qol::hooks::DispatchPhase>(1);
-inline constexpr qol::hooks::ConsumerKind kOwnerTableKind =
-    static_cast<qol::hooks::ConsumerKind>(1);
+inline constexpr int32_t kOwnerTablePhase = contracts::kTextPhaseAfter;
+inline constexpr int32_t kOwnerTableKind = contracts::kTextConsumerModify;
 
 }  // namespace qol::features::character_panel_i18n

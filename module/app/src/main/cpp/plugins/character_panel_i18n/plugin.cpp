@@ -10,6 +10,8 @@ namespace {
 
 constexpr const char* kPluginId = "character_panel_i18n";
 constexpr const char* kPluginVersion = "0.1.0";
+constexpr char kRegistrationFailureMessage[] = "text consumer registration failed";
+bool g_register_failed = true;
 
 // 角色面板绘制窗口入口 hook（私有资源，owner=本插件）：把该绘制窗口标记为 kCharacterPanel
 // 作用域。fail-soft：安装失败记为 degraded，不整体失败（文本机制与其它内容贡献者继续）。
@@ -37,10 +39,14 @@ const contracts::CapabilityRequirement kRequires[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     bind_sdk(ctx.sdk);
-    if (ctx.sdk == nullptr) return 1;
+    if (ctx.sdk == nullptr) {
+        g_register_failed = true;
+        return 1;
+    }
     // 表消费者经 text_layer 能力注册；失败即 install 失败（宿主回滚并把插件置 failed）。
-    if (!register_consumers()) return 1;
-    return 0;
+    const bool registered = register_consumers();
+    g_register_failed = !registered;
+    return registered ? 0 : 1;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
@@ -51,7 +57,12 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
-    (void)register_consumers();  // 幂等（activate 重入）
+    g_register_failed = !register_consumers();  // 幂等（activate 重入）
+    const contracts::QolHostSdk* sdk = host_sdk();
+    if (g_register_failed && sdk != nullptr && sdk->log.write != nullptr) {
+        (void)sdk->log.write(2, 1, kPluginId, kRegistrationFailureMessage,
+                             sizeof(kRegistrationFailureMessage) - 1);
+    }
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
@@ -66,8 +77,8 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
-    out.enabled = true;
-    out.error = nullptr;
+    out.enabled = !g_register_failed && host_sdk() != nullptr;
+    out.error = out.enabled ? nullptr : kRegistrationFailureMessage;
 }
 
 // Feature callback does not replace the existing lifecycle or business controls.

@@ -76,7 +76,7 @@ static void test_charinfo_block_contiguous() {
     const Entry* e = i18n::entries(&n);
     CHECK(n == i18n::kCharinfoIdCount);
     for (size_t i = 0; i < i18n::kCharinfoIdCount; ++i) {
-        CHECK(e[i].scope == TextScope::kCharacterPanel);
+        CHECK(e[i].scope == static_cast<int32_t>(TextScope::kCharacterPanel));
         CHECK(e[i].text_id == static_cast<uint16_t>(i18n::kCharinfoIdMin + i));
     }
 }
@@ -87,25 +87,25 @@ static void test_charinfo_block_contiguous() {
 // ---------------------------------------------------------------------------
 static void test_lookup_scope_gating() {
     // 角色面板段：仅 kCharacterPanel 下命中。
-    CHECK(std::strcmp(i18n::lookup(35185, TextScope::kCharacterPanel), "物攻") == 0);
-    CHECK(std::strcmp(i18n::lookup(35186, TextScope::kCharacterPanel), "法攻") == 0);
-    CHECK(std::strcmp(i18n::lookup(35187, TextScope::kCharacterPanel), "防御力") == 0);
-    CHECK(std::strcmp(i18n::lookup(35189, TextScope::kCharacterPanel), "暴击率") == 0);
-    CHECK(std::strcmp(i18n::lookup(35190, TextScope::kCharacterPanel), "命中率") == 0);
-    CHECK(std::strcmp(i18n::lookup(35191, TextScope::kCharacterPanel), "爆伤") == 0);
-    CHECK(std::strcmp(i18n::lookup(35192, TextScope::kCharacterPanel), "物抗") == 0);
-    CHECK(std::strcmp(i18n::lookup(35193, TextScope::kCharacterPanel), "法抗") == 0);
-    CHECK(std::strcmp(i18n::lookup(35194, TextScope::kCharacterPanel), "闪避率") == 0);
-    CHECK(std::strcmp(i18n::lookup(35195, TextScope::kCharacterPanel), "武器格挡") == 0);
-    CHECK(std::strcmp(i18n::lookup(35196, TextScope::kCharacterPanel), "盾牌格挡") == 0);
+    CHECK(std::strcmp(i18n::lookup(35185, static_cast<int32_t>(TextScope::kCharacterPanel)), "物攻") == 0);
+    CHECK(std::strcmp(i18n::lookup(35186, static_cast<int32_t>(TextScope::kCharacterPanel)), "法攻") == 0);
+    CHECK(std::strcmp(i18n::lookup(35187, static_cast<int32_t>(TextScope::kCharacterPanel)), "防御力") == 0);
+    CHECK(std::strcmp(i18n::lookup(35189, static_cast<int32_t>(TextScope::kCharacterPanel)), "暴击率") == 0);
+    CHECK(std::strcmp(i18n::lookup(35190, static_cast<int32_t>(TextScope::kCharacterPanel)), "命中率") == 0);
+    CHECK(std::strcmp(i18n::lookup(35191, static_cast<int32_t>(TextScope::kCharacterPanel)), "爆伤") == 0);
+    CHECK(std::strcmp(i18n::lookup(35192, static_cast<int32_t>(TextScope::kCharacterPanel)), "物抗") == 0);
+    CHECK(std::strcmp(i18n::lookup(35193, static_cast<int32_t>(TextScope::kCharacterPanel)), "法抗") == 0);
+    CHECK(std::strcmp(i18n::lookup(35194, static_cast<int32_t>(TextScope::kCharacterPanel)), "闪避率") == 0);
+    CHECK(std::strcmp(i18n::lookup(35195, static_cast<int32_t>(TextScope::kCharacterPanel)), "武器格挡") == 0);
+    CHECK(std::strcmp(i18n::lookup(35196, static_cast<int32_t>(TextScope::kCharacterPanel)), "盾牌格挡") == 0);
     // 35188 显式登记为保持原文；35181..35184（LV/EXP/HP/MP）保持原文且不在表内。
-    CHECK(i18n::lookup(35188, TextScope::kCharacterPanel) == nullptr);
-    CHECK(i18n::lookup(35184, TextScope::kCharacterPanel) == nullptr);
-    CHECK(i18n::lookup(35197, TextScope::kCharacterPanel) == nullptr);
+    CHECK(i18n::lookup(35188, static_cast<int32_t>(TextScope::kCharacterPanel)) == nullptr);
+    CHECK(i18n::lookup(35184, static_cast<int32_t>(TextScope::kCharacterPanel)) == nullptr);
+    CHECK(i18n::lookup(35197, static_cast<int32_t>(TextScope::kCharacterPanel)) == nullptr);
     // 作用域不匹配 / 角色面板表不含配方 id。
-    CHECK(i18n::lookup(35185, TextScope::kUimixRecipeButton) == nullptr);
-    CHECK(i18n::lookup(35185, TextScope::kNone) == nullptr);
-    CHECK(i18n::lookup(35291, TextScope::kCharacterPanel) == nullptr);
+    CHECK(i18n::lookup(35185, static_cast<int32_t>(TextScope::kUimixRecipeButton)) == nullptr);
+    CHECK(i18n::lookup(35185, static_cast<int32_t>(TextScope::kNone)) == nullptr);
+    CHECK(i18n::lookup(35291, static_cast<int32_t>(TextScope::kCharacterPanel)) == nullptr);
 
     // 配方文案：按钮与面板标题都要显示「宝石升阶」；**页签必须保持原文**（三处同 id）。
     CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
@@ -248,7 +248,7 @@ static void test_key_lookup_and_id_sync() {
     // 页签作用域只用于「显式不替换」，两表都不得有该作用域条目。
     size_t n = 0;
     const Entry* all = i18n::entries(&n);
-    for (size_t i = 0; i < n; ++i) CHECK(all[i].scope != TextScope::kUimixPageTab);
+    for (size_t i = 0; i < n; ++i) CHECK(all[i].scope != static_cast<int32_t>(TextScope::kUimixPageTab));
     const TextEntry* call = cr::text_entries(&n);
     for (size_t i = 0; i < n; ++i) CHECK(call[i].scope != cr::kTextScopePageTab);
     CHECK(cr::text_entry_by_key("nope") == nullptr);
@@ -284,18 +284,7 @@ static void test_scope_guard_restore() {
 // 消费者回调体的纯逻辑（after 阶段 Modify）：按当前作用域查表；命中返回字面量、占位/未命中
 // 返回 nullptr。分派级顺序断言见 tests/test_hooks_dispatch.cpp（本目标不链接 hooks/dispatch）。
 // ---------------------------------------------------------------------------
-static void test_owner_table_after_modify_body() {
-    CHECK(i18n::kOwnerTablePhase == qol::hooks::DispatchPhase::kAfter);
-    CHECK(i18n::kOwnerTableKind == qol::hooks::ConsumerKind::kModify);
-
-    {
-        qol::infra::TextScopeGuard scope(TextScope::kCharacterPanel);
-        CHECK(std::strcmp(i18n::owner_table_lookup(35185), "物攻") == 0);
-        CHECK(i18n::owner_table_lookup(35188) == nullptr);  // 显式占位（保持原文）
-        CHECK(i18n::owner_table_lookup(35184) == nullptr);  // 不在表内
-        CHECK(i18n::owner_table_lookup(35291) == nullptr);  // 配方 id 不归本表
-    }
-    CHECK(i18n::owner_table_lookup(35185) == nullptr);  // 非窗口（kNone）
+static void test_custom_recipe_scope_lookups() {
     // custom_recipe 侧同语义：本地 scope 命中才替换；页签 scope 永不登记。
     CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
     CHECK(cr::text_lookup(cr::kTextScopePageTab, 35291) == nullptr);  // 页签保持原文
@@ -308,7 +297,7 @@ int main() {
     test_lookup_scope_gating();
     test_key_lookup_and_id_sync();
     test_scope_guard_restore();
-    test_owner_table_after_modify_body();
+    test_custom_recipe_scope_lookups();
     std::printf("module_text_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
