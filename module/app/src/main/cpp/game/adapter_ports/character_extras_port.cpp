@@ -22,9 +22,11 @@ QolResult read_party_index(const void* character, int32_t* out) {
     if (character == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
+    // CHAR_GetPartyIndex returns 0/1/2 for party members and -1 otherwise. The -1 value is
+    // valid: push_all uses it to identify non-party characters and allow pushing. Only an
+    // unresolved symbol is not_ready.
     if (!char_party_index_resolved()) return not_ready();
     const int value = char_party_index(character);
-    if (value < 0) return not_ready();
     *out = value;
     return contracts::ok();
 }

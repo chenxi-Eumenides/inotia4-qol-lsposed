@@ -74,6 +74,7 @@ std::array<uint8_t, 0x304a80> g_move_merge_fake_memory{};
 bool g_move_merge_fake_memory_enabled = false;
 void* g_active_quest = nullptr;
 qol::contracts::QolItemHandle g_inventory_item_handle{};
+static int32_t g_test_char_party_index = 0;
 void* g_inven = reinterpret_cast<void*>(1);
 std::array<uint8_t, 0x200> g_inventory_physical_item{};
 std::array<uint8_t, 0x200> g_inventory_new_item{};
@@ -243,7 +244,7 @@ bool char_summoner_resolved() { return true; }
 bool char_is_active_player_group(void*) { return true; }
 bool char_is_party_member(void*) { return true; }
 void* char_get_summoner(void*) { return nullptr; }
-int char_party_index(const void*) { return 0; }
+int char_party_index(const void*) { return ::g_test_char_party_index; }
 int char_level(const void*) { return 10; }
 int char_merc_slot(const void*) { return 0; }
 bool char_can_change_equip_resolved() { return true; }
@@ -1236,6 +1237,10 @@ int main() {
     assert(value == 1);
     assert(character_extras_api.read.party_index(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 0);
+    g_test_char_party_index = -1;
+    assert(character_extras_api.read.party_index(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
+    assert(value == -1);
+    g_test_char_party_index = 0;
     assert(character_extras_api.read.is_party_member(reinterpret_cast<void*>(0x1), &value).ok ==
            kQolOk);
     assert(value == 1);
