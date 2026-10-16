@@ -10,7 +10,7 @@
 
 | 面 | 版本 | 当前提供内容 |
 |---|---:|---|
-| `ui_components` | 1.13 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现 |
+| `ui_components` | 1.14 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 5 槽：双显式文本工厂、菜单 decorated 工厂、容器 content rect/content draw） |
 | `ui_panels` | 1.3 | 面板 provider 注册后的打开、关闭、状态/返回协作接口 |
 | `ui_choice` | 1.1 | 原生选择框 open/active/close API |
 | `text_layer` | 1.0 | `MEMORYTEXT_GetText` hook 上的文本订阅/分派接口 |
@@ -35,9 +35,10 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 
 **按压轮廓校准（2026-10-15 子集 A；脚本交付与用户安装已核对，视觉仍待验收）**：按压主体按**可见主体**对齐，而非整张带 halo 的画布。三层实际主体：**Title `loc 7` pressed** = 220×61；**Toggle normal / pressed** 均为 220×61；**UI_006 文本按钮 normal 裁剪主体** = 405×75。`75/61` 校准的是 **UI_006 normal 裁剪主体（75）与 Title `loc 7` pressed 主体（61）** 这两层，**Toggle 不参与 75 校准**（其两态已同为 61，见下条）（`ui_native_text_button.cpp:302-322`）。旧实现 `floor(floor(77*p/103)/10)*10` 把 103 画布压进 normal 守卫并向下量化到 10%，得到小一圈的轮廓；现改为 `round(75*p/61)`、不做 10% 量化，整按压画布宽度为 `normal_visible_width + 2*round(21*scale/100)`，中心取正常胶囊真实 body center，主菜单绘制 rect 分支不进入该算法；按压源画布最大 scale 由 75/61 比例导出为 492%，避免原本合法的大按钮按住时不可绘制。
 **Toggle 本轮不改执行几何（用户已反馈开关表现正确；本轮无执行几何变化）**：`loc 7` 按压与 normal 的 alpha 主体均为 220×61，现有代码只用基底 scale 并把按压画布移 (-8,-8) 居中即已 body-to-body 重合；本轮只补准确注释与真实 alpha 边界回归测试，若按 262/246 或 103/87 放大反而会制造新的真实变大（`game/access/ui_native_toggle.cpp`；`tests/test_native_toggle_render.cpp`）。
-未纳入本批：双 TEXT 工厂与 Debug 并列展示、mainmenu 精确字号 20→30、高度 ×1.5、容器 clip；`ui_native_close_button.cpp` 的 X 底板/整金属框按压与 `draw_back_button` 外框效果亦为独立后续范围，本轮未改。
+**Phase 1C（源码已合流；标准 CMake 编译与 Debug 构建通过，Gate 1C 未执行）**：双显式外观工厂 `capsule_text_button_create` / `decorated_text_button_create`（外观显式，不由 rect 比例推断；旧 `text_button_create` 比例自动分支与 `UiButtonDesc.style` 字体档语义保留）、`main_menu_decorated_button_create`（真实菜单消费者仍是 settings）、`container_content_rect` / `container_draw_content`（24 单位内接安全 content，非 GPU rounded mask）；Adapter 尾部 4 槽：`layout_native_text_button`、`draw_native_text_button`、`get_clip_rect`、`main_menu_replacement_rect_available`。Settings 全部 feature entry 统一走 capsule（保留 220×80 与 `kUiTextButtonFontLarger`）；Debug 文本按钮 6 枚（胶囊/装饰 × 可用/禁用/长文本）；主菜单真实绘制基线 272×64 → 272×96（`height_percent=150`），字号由用户定为 **28**（该字体行高 30、真实 1.4 倍，不再承诺精确 30 或 1.5）；hit 为 normal/pressed 两态包围并集、碰撞拒绝时保留原按钮；背景与子 UI/rows/scrollbar 以 clip∩screen 保护，退出恢复真实入口状态。scrollbar 防泄漏由下层 Game A′ plumbing 承担（不整体调用原 `ControlScroll_Draw`、type0 bar 各一次、无新 hook/owner/tail/CMake）；bar 参数按最终寄存器序（第 3 项长度、第 4 项 offset），`bar_visible`/`bar_type` 按 v29 实际 **1 字节 `ldrb`**（旧 32 位假设已撤回），父 raw 四值一律 int32 检查、合法负 y 保留、负 x 为唯一无 clip；A′ 父链绝对原点等价性已由同 v29 ELF 窄读（`GetAbsoluteRect→GetAbsolutePoint→根 GetRelativePoint`）闭合为良构无溢出树同义。Gate 1C 未执行，用户真机视觉待验。
+历史注：本条在「子集 A」时曾写作『未纳入本批（双工厂/Debug 并列/menu 字号高度/容器 clip）』；Phase 1C 已通过上述必要编译与定向检查，视觉仍 NOT_ACCEPTED。`ui_native_close_button.cpp` 的 X 底板/整金属框按压与 `draw_back_button` 外框效果仍不在本阶段。
 
-**主菜单替换按钮（`plugins/core.custom_ui/ui_components.cpp:785-812`）**：`text_button_draw` 只在绘制上使用 decorated 紧凑比例——`height = min(rect.h, rect.w × 48 / 220)` 并垂直居中，背景与标签共用该绘制 rect；原生菜单控件 rect、命中范围与 identity 判定不变（绑定/存活校验仍走 `main_menu_text_button_*` 原路径）。
+**旧主菜单替换入口（兼容路径）**：`text_button_draw` 只在绘制上使用 decorated 紧凑比例——`height = min(rect.h, rect.w × 48 / 220)` 并垂直居中，背景与标签共用该绘制 rect；原生菜单控件 rect、命中范围与 identity 判定不变（绑定/存活校验仍走 `main_menu_text_button_*` 原路径）。Settings 当前入口已迁移到上述显式 decorated 工厂。
 
 **面板四角装饰**：`help_page` 左右两栏均改为 `draw_container_ornamented`（四角 ornament，`plugins/core.custom_ui/ui_components.cpp:1484-1499`）；`draw_container` 仍保留给无装饰容器。Debug 双栏对照示例（`plugins/core.custom_ui/panels/debug_components.cpp:302-303`）本就用 ornamented，本次不改；外壳/Frames 对照示例同样不改。设置页两侧 pane 的同类改动见 [`settings.md`](settings.md) §4。
 
@@ -48,7 +49,7 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 
 - **Requires / optional**：`ui.state` 1.0 为可选依赖；Debug 构建对 `http.registry`/`http.dispatch` v1.1 的依赖也为可选，非 Debug descriptor 不声明 HTTP 依赖（`plugin.cpp:70-79,247-253`；版本见 `contracts/http.h:96-99`）。provider 缺失只使 Debug HTTP 探针无法接线，不影响共享 UI 功能；provider 恢复后按可选依赖生命周期重新接线。选择框向 `ui.state` 发布自定义 dialog snapshot；缺少该 capability 时 native choice 本身仍按本插件路径工作（`feature.cpp:70-99`）。
 - **Required port**：`QOL_PORT_CHOICE` 1.0，提供原生选择框状态/选项/标题/焦点/弹出等受控操作（`plugin.cpp:134-137`；版本见 `contracts/game_ports/ports.h:17,47`；接口见 `contracts/game_ports/choice_port.h:11-30`）。
-- **Host SDK**：使用 Host 注入的 `sdk->ui` Adapter（契约版本 1.20；它不是本插件提供的 capability），以及 `panels`、`hooks.text_subscribe/run_text`、descriptor endpoint handlers、scheduler/log（`contracts/ui.h:3-6,15-19`；`plugin.cpp` 中的 `kHttpEndpoints`；`text_mechanism.cpp:27-46`）。
+- **Host SDK**：使用 Host 注入的 `sdk->ui` Adapter（契约版本 1.21，尾部 4 槽：`layout_native_text_button`、`draw_native_text_button`、`get_clip_rect`、`main_menu_replacement_rect_available`；它不是本插件提供的 capability），以及 `panels`、`hooks.text_subscribe/run_text`、descriptor endpoint handlers、scheduler/log（`contracts/ui.h:3-6,15-19`；`plugin.cpp` 中的 `kHttpEndpoints`；`text_mechanism.cpp:27-46`）。
 - **已核实消费者**：`ui_components` 与 `ui_panels` 由当前 `plugins/settings/` 设置页消费；`ui_panels` 还由 `save_backup`、`autosell` 使用；`ui_choice` 被 `world_teleport` 作为可选能力消费；`text_layer` 被 `custom_recipe`、`character_panel_i18n` 要求（`plugins/settings/plugin.cpp:32-38`、`settings/panels/settings.cpp:816-821`、`save_backup/plugin.cpp:31-35`、`autosell/plugin.cpp:196-204`、`world_teleport/plugin.cpp:46-61`、`custom_recipe/plugin.cpp:168-178`、`character_panel_i18n/plugin.cpp:33-36`）。
 - **真实设置页边界**：页面实现位于 `plugins/settings/`，descriptor ID 为 `settings`，只要求 `ui_panels` 与 `ui_components`；`core.custom_ui/settings_contribution.cpp` 当前不注册设置项（`plugins/settings/plugin.cpp:19-20,32-38,238-255`；`core.custom_ui/settings_contribution.cpp:4-8`）。
 

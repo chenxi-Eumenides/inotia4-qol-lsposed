@@ -134,8 +134,9 @@ void fake_draw(void* group, int32_t x, int32_t y, int32_t sx, int32_t sy, int32_
 }
 
 uint64_t fake_font_height(uint32_t font) {
-    assert(font <= 1);
-    g_font_height = font == 0 ? 22 : 26;
+    constexpr int heights[] = {22, 26, 40, 30, 16};
+    assert(font < 5);
+    g_font_height = heights[font];
     return static_cast<uint64_t>(g_font_height);
 }
 
@@ -565,6 +566,51 @@ int main() {
     assert(!ui_draw_native_text_button_background({0, 0, 0, 112}, 0));
     assert(!ui_draw_native_text_button_background({std::numeric_limits<int32_t>::max(), 0, 1, 112}, 0));
     assert(!ui_draw_native_text_button_background({0, 0, 470, 112}, 2));
+    assert(g_draws.empty());
+    // Explicit appearance is independent of aspect ratio; legacy cases above
+    // continue to verify the original ratio-driven geometry and RGBA strip.
+    for (const uint32_t appearance : {qol::contracts::kUiTextButtonCapsule,
+                                       qol::contracts::kUiTextButtonDecorated}) {
+        setup();
+        const qol::contracts::UiTextButtonPaintDesc desc{{0, 0, 220, 80}, appearance, 0, 0};
+        qol::contracts::UiTextButtonPaintLayout layout{};
+        assert(qol::contracts::succeeded(qol::game::ui_layout_native_text_button(desc, &layout)));
+        assert(qol::contracts::succeeded(qol::game::ui_draw_native_text_button(desc, "打开", 0, 0)));
+        assert(g_drawn_label == "打开" && g_text_font == 0);
+        const auto normal = g_draws;
+        g_draws.clear();
+        assert(qol::contracts::succeeded(qol::game::ui_draw_native_text_button(desc, "打开", 0, 1)));
+        assert(g_draws.size() > normal.size());
+        for (size_t i = 0; i < normal.size(); ++i) assert(normal[i].args == g_draws[i].args);
+        for (size_t i = normal.size(); i < g_draws.size(); ++i) {
+            if (g_draws[i].args[5] == 20) assert_middle_strip_rgba(g_draws[i]);
+        }
+        if (appearance == qol::contracts::kUiTextButtonCapsule) {
+            assert(normal.size() == 3 && normal.front().args[2] == 35);
+            assert(layout.normal_bounds.w == 189);
+        } else {
+            assert(normal.front().args[2] == 2 && normal.front().args[4] == 33);
+            assert(layout.normal_bounds.h == 80);
+        }
+    }
+    setup();
+    qol::contracts::UiTextButtonPaintDesc menu{{0, 0, 300, 65},
+        qol::contracts::kUiTextButtonDecorated, 0, 0};
+    qol::contracts::UiTextButtonPaintLayout old_menu{}, enlarged{};
+    assert(qol::contracts::succeeded(qol::game::ui_layout_native_text_button(menu, &old_menu)));
+    assert(old_menu.normal_bounds.w == 272 && old_menu.normal_bounds.h == 64);
+    menu.visual_rect = old_menu.normal_bounds;
+    menu.visual_rect.y -= 16;
+    menu.visual_rect.h = 96;
+    menu.font_size = 28;
+    assert(qol::contracts::succeeded(qol::game::ui_layout_native_text_button(menu, &enlarged)));
+    assert(enlarged.normal_bounds.w == 272 && enlarged.normal_bounds.h == 96);
+    assert(2 * old_menu.normal_bounds.y + 64 == 2 * enlarged.normal_bounds.y + 96);
+    assert(qol::contracts::succeeded(qol::game::ui_draw_native_text_button(menu, "模块设置", 0, 1)));
+    assert(g_text_font == 3 && g_font_height == 30 && g_drawn_label == "模块设置");
+    g_draws.clear();
+    menu.font_size = 30;
+    assert(qol::game::ui_draw_native_text_button(menu, "模块设置", 0, 1).code == kQolErrUnsupported);
     assert(g_draws.empty());
     return 0;
 }

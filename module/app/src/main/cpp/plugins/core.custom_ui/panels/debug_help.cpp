@@ -87,7 +87,8 @@ void draw_detail(void* user, contracts::UiRect viewport) {
     record(ui->set_font_color(0xFFF2E8D5u));
     record(ui->draw_string_with_font(sample.body, x + 20, y + 80, 0, 0));
     for (uint32_t i = 0; i < sample.blocks; ++i) {
-        record(ui->fill_rect({x + 20 + i * 62, y + 146, 48, 64 + i * 8}, sample.color));
+        // 8 块须落在 24 内接 content 内（约 434 宽）：步长 52、宽 48。
+        record(ui->fill_rect({x + 20 + i * 52, y + 146, 48, 64 + i * 8}, sample.color));
     }
     record(ui->set_font_color(0xFFC9BDABu));
     record(ui->draw_string_with_font("内容绘制在左栏裁剪结束之后。", x + 20, y + 290, 0, 0));
@@ -140,8 +141,8 @@ QolResult create_controls() {
     if (!contracts::succeeded(result)) return result;
     contracts::UiHelpOption options[kCount]{};
     for (uint32_t i = 0; i < kCount; ++i) options[i] = {&g_samples[i], &draw_detail};
-    const contracts::UiHelpPageDesc desc{{24, 104, 912, 408}, {20, 24, 244, 352},
-        {320, 24, 568, 352}, kRowHeight, options, kCount, 0, &draw_row, nullptr};
+    const contracts::UiHelpPageDesc desc{{24, 104, 912, 408}, {50, 50, 244, 310},
+        {382, 50, 482, 310}, kRowHeight, options, kCount, 0, &draw_row, nullptr};
     result = ui_components_api()->help_page_create(&desc, g_root, &g_page);
     if (!contracts::succeeded(result)) return result;
     const contracts::UiRect rects[] = {{24, 26, 850, 32}, {24, 64, 850, 32}, {32, 532, 780, 40}};

@@ -198,6 +198,8 @@ contracts::QolUiHandle g_widget_handle = reinterpret_cast<void*>(0x4000);
 contracts::QolUiHandle g_button_handle = reinterpret_cast<void*>(0x5000);
 contracts::UiNativeToggleDesc g_last_toggle{};
 contracts::UiButtonDesc g_last_button{};
+int g_container_draws = 0;
+contracts::UiRect g_container_frame{};
 contracts::QolUiComponents g_components_api{};
 contracts::QolUiAdapter g_ui_api{};
 contracts::QolHostSdk g_sdk{};
@@ -240,6 +242,34 @@ QolResult fake_button_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
     g_button_enabled = enabled;
     return contracts::ok();
 }
+// 菜单工厂：测试只关心调用面与入参，替换控件仍由 fake 返回句柄。
+QolResult fake_menu_button_create(const contracts::UiMainMenuDecoratedButtonDesc* desc,
+                                  contracts::QolUiHandle* out_original,
+                                  contracts::QolUiHandle* out_replacement) {
+    if (desc == nullptr || out_original == nullptr || out_replacement == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out_original = g_fake_root;
+    *out_replacement = g_button_handle;
+    return contracts::ok();
+}
+QolResult fake_container_content_rect(contracts::UiRect frame, contracts::UiRect* out) {
+    if (out == nullptr || frame.w < 48 || frame.h < 48) {
+        return contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out = {frame.x + 24, frame.y + 24, frame.w - 48, frame.h - 48};
+    return contracts::ok();
+}
+QolResult fake_container_draw_content(const contracts::UiContainerContentDesc* desc,
+                                      contracts::QolUiContentDrawFn draw, void* user) {
+    if (desc == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    contracts::UiRect content{};
+    const auto result = fake_container_content_rect(desc->frame, &content);
+    if (!contracts::succeeded(result)) return result;
+    ++g_container_draws;
+    g_container_frame = desc->frame;
+    return draw != nullptr ? draw(user, content) : contracts::ok();
+}
 QolResult fake_require(const char* id, QolVersionRange, const void** out) {
     if (std::strcmp(id, contracts::kUiComponentsCapabilityId) != 0)
         return contracts::error(kQolErrNotFound, "no such capability", 18);
@@ -265,6 +295,12 @@ void bind_production() {
 
     g_components_api = {};
     g_components_api.size = sizeof(g_components_api);
+    g_components_api.major = contracts::kUiContractMajor;
+    g_components_api.minor = contracts::kUiContractMinor;
+    g_components_api.capsule_text_button_create = &fake_button_create;
+    g_components_api.main_menu_decorated_button_create = &fake_menu_button_create;
+    g_components_api.container_content_rect = &fake_container_content_rect;
+    g_components_api.container_draw_content = &fake_container_draw_content;
     g_components_api.destroy = &fake_components_destroy;
     g_components_api.scroll_list_create = &fake_list_create;
     g_components_api.scroll_list_get_row = &fake_list_get_row;
@@ -272,7 +308,6 @@ void bind_production() {
     g_components_api.native_toggle_create = &fake_toggle_create;
     g_components_api.native_toggle_set_value = &fake_toggle_set_value;
     g_components_api.native_toggle_set_enabled = &fake_toggle_set_enabled;
-    g_components_api.text_button_create = &fake_button_create;
     g_components_api.text_button_set_enabled = &fake_button_set_enabled;
 
     g_ui_api = {};

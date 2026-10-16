@@ -341,6 +341,8 @@ bool bridge_init() {
         g_base + fn_resolve("F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA));
     fn_ui_draw_border_rect = reinterpret_cast<UiDrawBorderRectFn>(
         g_base + fn_resolve("F_UI_DRAW_BORDER_RECT_VMA", F_UI_DRAW_BORDER_RECT_VMA));
+    fn_ui_draw_scrollbar = reinterpret_cast<UiDrawScrollBarFn>(
+        g_base + fn_resolve("F_UI_DRAW_SCROLLBAR_VMA", F_UI_DRAW_SCROLLBAR_VMA));
     fn_move_as_path = reinterpret_cast<MoveAsPathFn>(g_base + fn_resolve("F_MOVE_AS_PATH_VMA", F_MOVE_AS_PATH_VMA));
     fn_char_move = reinterpret_cast<CharMoveFn>(g_base + fn_resolve("F_CHAR_MOVE_VMA", F_CHAR_MOVE_VMA));
     fn_char_pick_item_all = reinterpret_cast<CharPickItemAllFn>(g_base + fn_resolve("F_CHAR_PICK_ITEM_ALL_VMA", F_CHAR_PICK_ITEM_ALL_VMA));

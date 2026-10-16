@@ -239,3 +239,16 @@ bool ui_draw_item_porting(void* item, int32_t x, int32_t y, int32_t a, int32_t b
     fn_item_draw_porting(item, x, y, a, b);
     return true;
 }
+
+bool ui_clip_snapshot(UiRect* out) {
+    if (out == nullptr || g_base == 0) return false;
+    void* const* got_slot = reinterpret_cast<void* const*>(g_base + G_SGL_CLIP_RECT_GOT_VMA);
+    if (!game_memory_accessible(got_slot, sizeof(void*), 'r')) return false;
+    const int64_t* clip = static_cast<const int64_t*>(*got_slot);
+    if (clip == nullptr || !game_memory_accessible(clip, sizeof(int64_t) * 4, 'r')) return false;
+    out->x = clip[0];
+    out->y = clip[1];
+    out->w = clip[2];
+    out->h = clip[3];
+    return true;
+}

@@ -610,11 +610,13 @@ QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
     return contracts::ok();
 }
 
-QolResult set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
+// 参数是 native 真实 (x,y,w,h)，不是右下端点；负 x 是「无父裁剪」哨兵，不能用来表达空交集。
+// 函数类型与旧 ABI 不变，只修正误导性参数名。
+QolResult set_clip(int32_t x, int32_t y, int32_t w, int32_t h) {
     if (!qol::game::game_host_is_main_thread() || fn_grpx_set_clip == nullptr) {
         return not_ready();
     }
-    fn_grpx_set_clip(x1, y1, x2, y2);
+    fn_grpx_set_clip(x, y, w, h);
     return contracts::ok();
 }
 
@@ -682,8 +684,10 @@ QolResult scroll_process(QolUiHandle scroll) {
 
 QolResult scroll_draw(QolUiHandle scroll) {
     if (scroll == nullptr) return invalid_argument();
-    if (!qol::game::game_host_is_main_thread() || fn_ctrl_scroll_draw == nullptr) return not_ready();
-    fn_ctrl_scroll_draw(scroll);
+    // 只对我方自建 vertical/type0 scroll 生效：走 Game 层局部 draw plumbing（内容与 bar 都在
+    // 父∩screen 内绘制）。preflight 失败 → NotReady，且不回退原 fn_ctrl_scroll_draw
+    // （原生整段 Draw 会在末尾 reset clip 后画 bar，父裁切下会泄漏）。原符号保留不删。
+    if (!qol::game::native_scroll_draw_clipped(scroll)) return not_ready();
     return contracts::ok();
 }
 
@@ -963,6 +967,134 @@ QolResult main_menu_more_games_set_active(QolUiHandle original, int32_t active) 
     return contracts::ok();
 }
 
+// 候选 hit rect 与兄弟条目的碰撞：坐标一律用绝对逻辑坐标做 int64 交集判定。
+bool rects_overlap(int64_t ax, int64_t ay, int64_t aw, int64_t ah, int64_t bx, int64_t by,
+                   int64_t bw, int64_t bh) {
+    return ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah;
+}
+
+// clip 快照的四个 int64 必须各自可表示为 int32：越界 fail-closed，不截断、不钳制。
+bool rect_fits_int32(const ::UiRect& rect) {
+    constexpr int64_t kMin = std::numeric_limits<int32_t>::min();
+    constexpr int64_t kMax = std::numeric_limits<int32_t>::max();
+    return rect.x >= kMin && rect.x <= kMax && rect.y >= kMin && rect.y <= kMax &&
+           rect.w >= kMin && rect.w <= kMax && rect.h >= kMin && rect.h <= kMax;
+}
+
+// ---- Minor 21 尾槽（additive）：显式外观布局/绘制、native clip 快照、菜单替换几何检查 ----
+
+// 只读布局预检：不绘制、不分配私有字体、不改全局渲染状态。渲染由 game 层实现持有。
+QolResult layout_native_text_button(const contracts::UiTextButtonPaintDesc* desc,
+                                    contracts::UiTextButtonPaintLayout* out) {
+    if (desc == nullptr || out == nullptr) return invalid_argument();
+    *out = contracts::UiTextButtonPaintLayout{};
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_layout_native_text_button(*desc, out);
+}
+
+QolResult draw_native_text_button(const contracts::UiTextButtonPaintDesc* desc, const char* text,
+                                  uint32_t text_color, uint8_t pressed) {
+    if (desc == nullptr || text == nullptr || pressed > 1) return invalid_argument();
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_draw_native_text_button(*desc, text, text_color, pressed);
+}
+
+QolResult get_clip_rect(UiRect* out_raw_clip) {
+    if (out_raw_clip == nullptr) return invalid_argument();
+    *out_raw_clip = UiRect{};  // 失败先清输出（fail-closed，消费者不得用半成品）
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+
+    ::UiRect raw{};
+    if (!ui_clip_snapshot(&raw)) return not_ready();
+    // 先做 int32 可表示性检查再解释哨兵：越界垃圾值不得被当成合法「无裁剪」。
+    if (!rect_fits_int32(raw)) return not_ready();
+    if (raw.x < 0) {
+        // native「无父裁剪」哨兵（ReSetClip 写全 -1）：成功返回，调用方不得参与普通求交。
+        *out_raw_clip = contract_rect(raw);
+        return contracts::ok();
+    }
+    // 合同唯 x<0 表示无裁剪：合法负 y（父 clip 上沿在屏幕外）按原值快照，由调用方在与
+    // screen 求交后变非负；不得把负 y 当失败，也不得当成解除裁切的宽松路径。
+    if (raw.w <= 0 || raw.h <= 0) {
+        // 非哨兵却没有有效尺寸：语义未知，保守 fail-closed，不传负值/空矩形给 set_clip。
+        return not_ready();
+    }
+    *out_raw_clip = contract_rect(raw);
+    return contracts::ok();
+}
+
+QolResult main_menu_replacement_rect_available(QolUiHandle original,
+                                               UiRect parent_relative_hit_rect,
+                                               uint8_t* out_available) {
+    if (original == nullptr || out_available == nullptr) return invalid_argument();
+    *out_available = 0;
+    if (parent_relative_hit_rect.w <= 0 || parent_relative_hit_rect.h <= 0) {
+        return invalid_argument();
+    }
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+
+    QolUiHandle current_original = nullptr;
+    QolUiHandle parent = nullptr;
+    int32_t original_in_tree = 0;
+    int32_t ignored_probe_in_tree = 0;
+    if (!ui_main_menu_live_tree_snapshot(nullptr, &current_original, &parent, &original_in_tree,
+                                         &ignored_probe_in_tree) ||
+        current_original == nullptr || parent == nullptr || original_in_tree == 0) {
+        return not_ready();
+    }
+    // 身份未知（不是当前 More Games 原控件）→ NotReady，不改动任何控件。
+    if (original != current_original) return not_ready();
+    if (fn_ctrl_get_count == nullptr || fn_ctrl_get_child == nullptr) return not_ready();
+    if (!game_memory_accessible(parent, CO_SIZE, 'r')) return not_ready();
+
+    ::UiRect parent_rect{};
+    int64_t parent_abs_x = 0;
+    int64_t parent_abs_y = 0;
+    if (!ui_get_rect(parent, &parent_rect) ||
+        !ui_control_absolute_origin(parent, &parent_abs_x, &parent_abs_y)) {
+        return not_ready();
+    }
+    if (parent_rect.w <= 0 || parent_rect.h <= 0) return not_ready();
+
+    const int64_t cand_x = parent_abs_x + parent_relative_hit_rect.x;
+    const int64_t cand_y = parent_abs_y + parent_relative_hit_rect.y;
+    const int64_t cand_w = parent_relative_hit_rect.w;
+    const int64_t cand_h = parent_relative_hit_rect.h;
+    // 候选必须完全落在父范围内；越出父界是已证明不安全的布局 → out_available=0。
+    if (cand_x < parent_abs_x || cand_y < parent_abs_y ||
+        cand_x + cand_w > parent_abs_x + parent_rect.w ||
+        cand_y + cand_h > parent_abs_y + parent_rect.h) {
+        return contracts::ok();
+    }
+
+    // 兄弟交互碰撞：只考虑 native 按钮（CO_TYPE==3 且有 data）；排除将被替换的原控件
+    // 与本模块自身绑定控件（ExecuteProc 是自有 trampoline）。内存解释只在本层。
+    const uint32_t count = fn_ctrl_get_count(parent);
+    for (uint32_t i = 0; i < count; ++i) {
+        QolUiHandle child = fn_ctrl_get_child(parent, i);
+        if (child == nullptr || child == original) continue;
+        if (!game_memory_accessible(child, CO_SIZE, 'r')) return not_ready();
+        int32_t child_type = 0;
+        if (!ui_control_type(child, &child_type) || child_type != 3) continue;
+        if (ui_control_data(child) == nullptr) continue;
+        if (ui_execute_proc_matches(child, &click_proc_trampoline)) continue;
+        ::UiRect child_rect{};
+        int64_t child_abs_x = 0;
+        int64_t child_abs_y = 0;
+        if (!ui_get_rect(child, &child_rect) ||
+            !ui_control_absolute_origin(child, &child_abs_x, &child_abs_y)) {
+            return not_ready();
+        }
+        if (child_rect.w <= 0 || child_rect.h <= 0) continue;
+        if (rects_overlap(cand_x, cand_y, cand_w, cand_h, child_abs_x, child_abs_y, child_rect.w,
+                          child_rect.h)) {
+            return contracts::ok();  // 已证明碰撞 → out_available=0，不隐藏/不改动原控件
+        }
+    }
+    *out_available = 1;
+    return contracts::ok();
+}
+
 QolResult bind_main_menu_more_games(contracts::QolUiClickFn replacement, uint64_t* out_token) {
     if (replacement == nullptr || out_token == nullptr) return invalid_argument();
     *out_token = 0;
@@ -1125,6 +1257,12 @@ const QolUiAdapter g_ui_adapter{
           &main_menu_text_button_is_live,
           &main_menu_text_button_invalidate_binding,
           &main_menu_more_games_set_active,
+          // Minor 21 additive tail: explicit text-button layout/draw, clip snapshot,
+          // and menu replacement geometry check.
+          &layout_native_text_button,
+          &draw_native_text_button,
+          &get_clip_rect,
+          &main_menu_replacement_rect_available,
 };
 
 }  // namespace

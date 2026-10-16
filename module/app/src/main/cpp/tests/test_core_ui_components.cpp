@@ -328,6 +328,34 @@ QolResult load_option_images() {
     return ok();
 }
 
+qol::contracts::UiRect g_clip{-1, -1, -1, -1}, g_seen_clip{};
+bool g_clip_failure = false, g_menu_available = true;
+int g_content_calls = 0, g_pressed = 0;
+qol::contracts::UiTextButtonPaintDesc g_paint{};
+uint8_t g_paint_pressed = 0;
+QolResult clip_get(qol::contracts::UiRect* out) {
+    if (g_clip_failure) return qol::contracts::error(kQolErrNotReady, "clip", 4);
+    *out = g_clip; return ok();
+}
+QolResult clip_set(int32_t x, int32_t y, int32_t w, int32_t h) { g_clip = {x,y,w,h}; return ok(); }
+QolResult clip_reset() { g_clip = {-1,-1,-1,-1}; return ok(); }
+QolResult inset_zero(int32_t* out) { *out = 0; return ok(); }
+QolResult paint_layout(const qol::contracts::UiTextButtonPaintDesc* desc,
+                        qol::contracts::UiTextButtonPaintLayout* out) {
+    if (desc->font_size == 30) return qol::contracts::error(kQolErrUnsupported, "font", 4);
+    auto r = desc->visual_rect;
+    if (r.w == 300 && r.h == 65) r = {r.x + 14, r.y, 272, 64};
+    *out = {r, {r.x - 2, r.y - 2, r.w + 4, r.h + 4}, r}; return ok();
+}
+QolResult paint_draw(const qol::contracts::UiTextButtonPaintDesc* desc, const char*, uint32_t,
+                     uint8_t pressed) { g_paint = *desc; g_paint_pressed = pressed; return ok(); }
+QolResult menu_rect_available(qol::contracts::QolUiHandle, qol::contracts::UiRect,
+                               uint8_t* out) { *out = g_menu_available; return ok(); }
+QolResult content_failure(void*, qol::contracts::UiRect) {
+    ++g_content_calls; g_seen_clip = g_clip;
+    return qol::contracts::error(kQolErrBlocked, "callback", 8);
+}
+
 int g_fill_count = 0;
 QolResult fill_rect(qol::contracts::UiRect, uint32_t) {
     ++g_fill_count;
@@ -424,6 +452,14 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.draw_native_text_button_label = &draw_native_text_button_label;
     adapter.delete_control = &delete_control;
     adapter.control_tree_event = &control_tree_event;
+    adapter.layout_native_text_button = &paint_layout;
+    adapter.draw_native_text_button = &paint_draw;
+    adapter.get_clip_rect = &clip_get;
+    adapter.set_clip = &clip_set;
+    adapter.reset_clip = &clip_reset;
+    adapter.screen_inset_width = &inset_zero;
+    adapter.screen_inset_height = &inset_zero;
+    adapter.main_menu_replacement_rect_available = &menu_rect_available;
     return adapter;
 }
 
@@ -784,6 +820,53 @@ int main() {
     CHECK(components->destroy(old_root).ok == kQolOk);
     qol::features::core_ui::ui_components_unbind();
 
+    CHECK(qol::features::core_ui::ui_components_bind(&kFakeAdapter));
+    qol::contracts::QolUiHandle explicit_root = nullptr, explicit_button = nullptr;
+    CHECK(components->panel_create(&panel_desc, nullptr, &explicit_root).ok == kQolOk);
+    CHECK(components->capsule_text_button_create(&text_desc, explicit_root, &explicit_button).ok == kQolOk);
+    CHECK(components->text_button_draw(explicit_button).ok == kQolOk);
+    CHECK(g_paint.appearance == qol::contracts::kUiTextButtonCapsule);
+    CHECK(components->text_button_set_enabled(explicit_button, 0).ok == kQolOk);
+    CHECK(components->text_button_draw(explicit_button).ok == kQolOk && g_paint_pressed == 0);
+    CHECK(components->destroy(explicit_button).ok == kQolOk);
+    CHECK(components->decorated_text_button_create(&text_desc, explicit_root, &explicit_button).ok == kQolOk);
+    CHECK(components->text_button_draw(explicit_button).ok == kQolOk);
+    CHECK(g_paint.appearance == qol::contracts::kUiTextButtonDecorated);
+    CHECK(components->destroy(explicit_root).ok == kQolOk);
+    g_clip = {120, 110, 100, 80};
+    const qol::contracts::UiContainerContentDesc surface{{100, 100, 200, 150}, 0xff24201c, 0};
+    CHECK(components->container_draw_content(&surface, &content_failure, nullptr).code == kQolErrBlocked);
+    CHECK(g_seen_clip.x == 124 && g_seen_clip.y == 124 && g_seen_clip.w == 96 && g_seen_clip.h == 66);
+    CHECK(g_clip.x == 120 && g_clip.y == 110 && g_clip.w == 100 && g_clip.h == 80);
+    const int callbacks = g_content_calls, fills = g_fill_count;
+    g_clip_failure = true;
+    CHECK(components->container_draw_content(&surface, &content_failure, nullptr).code == kQolErrNotReady);
+    CHECK(g_content_calls == callbacks && g_fill_count == fills);
+    g_clip_failure = false;
+    g_clip = {900, 600, 10, 10};
+    CHECK(components->container_draw_content(&surface, &content_failure, nullptr).ok == kQolOk);
+    CHECK(g_content_calls == callbacks && g_fill_count == fills);
+    g_clip = {-1,-1,-1,-1};
+    const qol::contracts::UiContainerContentDesc edge{{-30,-30,200,150}, 0, 0};
+    CHECK(components->container_draw_content(&edge, &content_failure, nullptr).code == kQolErrBlocked);
+    CHECK(g_seen_clip.x == 0 && g_seen_clip.y == 0 && g_clip.x == -1);
+    g_main_menu_button = &menu_button;
+    menu_button.rect = {612, 488, 300, 92};
+    const qol::contracts::UiMainMenuDecoratedButtonDesc new_menu{"模块设置",0,28,150,
+        menu_desc.on_click,menu_desc.user};
+    qol::contracts::QolUiHandle new_original = nullptr, new_replacement = nullptr;
+    g_menu_available = false;
+    CHECK(components->main_menu_decorated_button_create(&new_menu, &new_original,
+        &new_replacement).code == kQolErrNotReady && !new_replacement && !new_original);
+    g_menu_available = true;
+    CHECK(components->main_menu_decorated_button_create(&new_menu, &new_original,
+        &new_replacement).ok == kQolOk);
+    g_main_menu_replacement = new_replacement;
+    CHECK(components->text_button_draw(new_replacement).ok == kQolOk);
+    CHECK(g_paint.font_size == 28 && g_paint.visual_rect.w == 272 && g_paint.visual_rect.h == 96);
+    CHECK(static_cast<FakeControl*>(new_replacement)->rect.h >= 96);
+    CHECK(components->destroy(new_replacement).ok == kQolOk);
+    qol::features::core_ui::ui_components_unbind();
     std::printf("core_ui_components assertions: %d\n", assertions);
     return 0;
 #undef CHECK

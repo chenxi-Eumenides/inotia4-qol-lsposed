@@ -195,6 +195,8 @@ extern SceneEventPopupScChoiceFn fn_scene_event_popup_sc_choice;
 extern MapchangeSetFn fn_mapchange_set;
 extern MemorytextGetTextFn fn_memorytext_get_text;
 extern UiDrawBorderRectFn fn_ui_draw_border_rect;
+// UI_DrawScrollBar：仅原函数指针绑定，不 hook；只由我方自建 type0 scroll 的局部 draw 复用。
+extern UiDrawScrollBarFn fn_ui_draw_scrollbar;
 
 extern MoveAsPathFn fn_move_as_path;
 extern CharMoveFn fn_char_move;

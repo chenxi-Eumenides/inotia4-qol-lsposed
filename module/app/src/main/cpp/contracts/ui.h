@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 13;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 20;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 14;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 21;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 0;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -82,6 +82,49 @@ struct UiMainMenuTextButtonDesc {
     QolUiClickFn on_click;
     void* user;
 };
+
+// Explicit appearances do not change UiButtonDesc.style's native-font meaning.
+enum UiTextButtonAppearance : uint32_t {
+    kUiTextButtonCapsule = 1,
+    kUiTextButtonDecorated = 2,
+};
+
+struct UiTextButtonPaintDesc {
+    UiRect visual_rect;          // Absolute logical paint range, independent of hit bounds.
+    uint32_t appearance;         // UiTextButtonAppearance; never inferred from the rect ratio.
+    uint32_t font_style;         // UiTextButtonStyle, unchanged from the legacy font choices.
+    // 0 preserves font_style's size; explicit sizes select game-managed 14/20/24/28/38.
+    // Size is not line height. Other sizes are Unsupported; no private fonts are created.
+    uint32_t font_size;
+};
+
+struct UiTextButtonPaintLayout {
+    UiRect normal_bounds;        // Absolute conservative bounds, including halo/filter guard.
+    UiRect pressed_bounds;
+    UiRect label_bounds;
+};
+
+struct UiMainMenuDecoratedButtonDesc {
+    const char* text;
+    uint32_t font_style;
+    uint32_t font_size;          // Same explicit-size rules as UiTextButtonPaintDesc.
+    // Positive percentage of the previous actual painted height, not the native hit rect.
+    // Width and visual center are retained; hit bounds must cover both paint states safely.
+    uint32_t height_percent;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+struct UiContainerContentDesc {
+    UiRect frame;               // Absolute logical frame; its native corner design is retained.
+    uint32_t background_color; // ABGR8888, painted only in the safe content area.
+    uint8_t ornamented;         // 0 = plain native frame, 1 = four native corner ornaments.
+};
+
+// Synchronous draw-only callback. Receives the stable 24-unit inset content rect,
+// not a parent-clipped layout rect; no control-tree creation/deletion is permitted.
+using QolUiContentDrawFn = QolResult (*)(void* user, UiRect content_rect);
+
 struct UiPanelDesc {
     UiRect rect, mask_rect;
     uint32_t panel_color, flags;
@@ -275,6 +318,25 @@ struct QolUiComponents {
     // Reports live only for a replacement whose native owner is still verified by the adapter.
     // NotReady means unknown; callers must retain its component and callback context.
     QolResult (*main_menu_text_button_is_live)(QolUiHandle, uint8_t* out_live);
+
+    // Minor 14 append-only slots. Legacy text_button_create retains ratio-driven appearance.
+    // Both explicit factories share text/Enabled/draw/destroy and native event ownership.
+    QolResult (*capsule_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                            QolUiHandle* out);
+    QolResult (*decorated_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                              QolUiHandle* out);
+    // Uses the verified menu parent/identity path. Reject unsafe hit geometry without
+    // hiding the original button; old main_menu_text_button_create keeps its own contract.
+    QolResult (*main_menu_decorated_button_create)(const UiMainMenuDecoratedButtonDesc*,
+                                                   QolUiHandle* out_original,
+                                                   QolUiHandle* out_replacement);
+    QolResult (*container_content_rect)(UiRect frame, UiRect* out_content);
+    // Preserve native frame/ornaments. Background and all callback drawing use
+    // content intersect parent clip intersect screen, even if the parent has no clip.
+    // Snapshot/error => no unprotected painting or callback; empty content => skip content.
+    // Restore the entry native clip on every return, including callback errors and scroll reset.
+    QolResult (*container_draw_content)(const UiContainerContentDesc*, QolUiContentDrawFn,
+                                         void* user);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -412,8 +474,9 @@ struct QolUiAdapter {
     QolResult (*draw_border_rect)(int32_t x, int32_t y, int32_t w, int32_t h);
     QolResult (*image_loc_size)(int32_t unit, int32_t loc, int32_t* out_width,
                                 int32_t* out_height);
-    // 裁剪不支持嵌套；绘制后 reset_clip 复原整屏，不恢复上一层。
-    QolResult (*set_clip)(int32_t x1, int32_t y1, int32_t x2, int32_t y2);
+    // 原始裁剪参数是 (x,y,w,h)，不是右下端点；负 x 是 native 无裁剪哨兵。
+    // reset_clip 复原无裁剪状态，不恢复父层；受保护内容须先快照并在退出时恢复。
+    QolResult (*set_clip)(int32_t x, int32_t y, int32_t w, int32_t h);
     QolResult (*reset_clip)();
     // 原生纵向 scroll：挂树不自动 process/draw；裁剪不可嵌套。
     QolResult (*scroll_create)(QolUiHandle parent, const UiNativeScrollDesc*,
@@ -462,6 +525,27 @@ struct QolUiAdapter {
     // Only updates the current More Games slot after the adapter proves it is the live original.
     // active accepts 0/1; disabled maps to the native non-dispatchable Active value.
     QolResult (*main_menu_more_games_set_active)(QolUiHandle original, int32_t active);
+
+    // Minor 21 append-only slots. Layout is read-only and preflights resources/font
+    // availability; it does not allocate private fonts or modify global rendering state.
+    QolResult (*layout_native_text_button)(const UiTextButtonPaintDesc*,
+                                           UiTextButtonPaintLayout* out);
+    // Preflight background and label before drawing either. Uses the same explicit
+    // appearance/layout backend, native alpha sampling, and caller's active clip.
+    QolResult (*draw_native_text_button)(const UiTextButtonPaintDesc*, const char* text,
+                                         uint32_t text_color, uint8_t pressed);
+    // Main-thread native snapshot (x,y,w,h), four int64 values checked for int32
+    // representability before success. x<0 means no parent clip, never snapshot failure.
+    // An error is fail-closed: skip protected drawing, not "draw without a clip".
+    // Consumers still clip content to screen when the parent snapshot is a sentinel;
+    // empty intersections are skipped, never passed to set_clip as a negative x/size.
+    QolResult (*get_clip_rect)(UiRect* out_raw_clip);
+    // Verify original's current menu-tree identity, parent bounds, and non-overlap
+    // with other interactive menu entries. out_available=0 is conclusive rejection;
+    // unknown identity/layout returns NotReady, without mutating any control.
+    QolResult (*main_menu_replacement_rect_available)(QolUiHandle original,
+                                                      UiRect parent_relative_hit_rect,
+                                                      uint8_t* out_available);
 };
 
 }  // namespace qol::contracts

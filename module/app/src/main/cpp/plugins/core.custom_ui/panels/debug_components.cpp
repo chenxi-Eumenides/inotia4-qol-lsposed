@@ -32,8 +32,8 @@ constexpr const char* kOwner = "core.custom_ui";
 // 坐标基准；控件不能用旧 viewport 下的固定 panel 绝对 y——viewport 下移后文字
 // 跟着右移下移而控件不动，说明行与按钮就会重叠。
 constexpr contracts::UiRect kPanelRect{0, 0, 960, 640};
-constexpr contracts::UiRect kLeftViewport{16, 100, 204, 524};
-constexpr contracts::UiRect kRightViewport{260, 100, 684, 524};
+constexpr contracts::UiRect kLeftViewport{50, 124, 204, 468};
+constexpr contracts::UiRect kRightViewport{342, 124, 570, 468};
 constexpr int32_t kRowHeight = 56;
 // 面板关闭入口：自适应导航按钮，X/返回共用原生金属框盒（与设置页同款）。
 // 三页统一放在屏幕左上 (8,8)（绝对逻辑坐标，ui_theme::kNavBox*）；
@@ -96,15 +96,8 @@ void log_result(const char* action, QolResult result) {
 
 // 首枚文本按钮演示点击计数；仅第 0 枚写入文本，其余按钮点击忽略。
 void demo_button_clicked(void* user) {
-    if (reinterpret_cast<uintptr_t>(user) != 0) return;
+    if (reinterpret_cast<uintptr_t>(user) > 1) return;
     ++g_demo_click_count;
-    char text[32]{};
-    std::snprintf(text, sizeof(text), "点击 %u", g_demo_click_count);
-    const contracts::QolUiComponents* components = ui_components_api();
-    if (components != nullptr && components->button_set_text != nullptr &&
-        g_category_control_count > 0 && g_category_controls[0].handle != nullptr) {
-        (void)components->button_set_text(g_category_controls[0].handle, text);
-    }
 }
 
 // —— 左栏分类列表行：背景/边框走绘制原语，文本经 draw_control_text 不写内联缓冲。 ——
@@ -124,26 +117,26 @@ void draw_category_row(void*, uint32_t index, contracts::QolUiHandle row, uint8_
 // —— 分类 0：文本按钮（交互）。三枚按钮：点击计数 / 禁用 / 长文本。 ——
 bool build_text_buttons(const contracts::QolUiComponents* components,
                         contracts::QolUiHandle parent, CategoryControl* out, uint32_t* out_count) {
-    if (components->text_button_create == nullptr || components->text_button_set_enabled == nullptr) {
+    if (components->minor < 14 || components->size < sizeof(contracts::QolUiComponents) ||
+        !components->capsule_text_button_create || !components->decorated_text_button_create ||
+        !components->text_button_set_enabled) {
         return false;
     }
-    // 局部偏移相对右 viewport：标题 y+32、说明 y+84 之下排第一行，脚注 y+242 之上收第二行。
-    const contracts::UiRect rects[3] = {
-        {kRightViewport.x + 20, kRightViewport.y + 120, 220, 48},
-        {kRightViewport.x + 244, kRightViewport.y + 120, 220, 48},
-        {kRightViewport.x + 20, kRightViewport.y + 176, 220, 48}};
-    const char* labels[3] = {"打开", "不可用", "较长的 UTF-8 按钮文字示例"};
-    for (uint32_t i = 0; i < 3; ++i) {
-        const contracts::UiButtonDesc desc{rects[i], labels[i], 0, &demo_button_clicked,
+    for (uint32_t i = 0; i < 6; ++i) {
+        const contracts::UiRect rect{kRightViewport.x + 20 + (i % 2) * 244,
+            kRightViewport.y + 116 + (i / 2) * 96, 220, 80};
+        const contracts::UiButtonDesc desc{rect, i < 4 ? "打开" : "较长的 UTF-8 按钮文字示例",
+            contracts::kUiTextButtonFontDefault, &demo_button_clicked,
             reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
         contracts::QolUiHandle handle = nullptr;
-        const QolResult result = components->text_button_create(&desc, parent, &handle);
+        const QolResult result = i % 2 ? components->decorated_text_button_create(&desc, parent, &handle) :
+            components->capsule_text_button_create(&desc, parent, &handle);
         if (!contracts::succeeded(result) || handle == nullptr) return false;
         out[i] = {handle, 0};
         *out_count = i + 1;
     }
-    // 第二枚演示禁用态：仍绘制，但点击不再触发。
-    (void)components->text_button_set_enabled(out[1].handle, 0);
+    (void)components->text_button_set_enabled(out[2].handle, 0);
+    (void)components->text_button_set_enabled(out[3].handle, 0);
     return true;
 }
 
@@ -219,9 +212,9 @@ void draw_switches_detail(const contracts::QolUiAdapter* adapter, contracts::UiR
     constexpr uint32_t kSwitchDemoCount = 6;
     // 行距 68：说明文字从 y+262 下移到 y+296，避开最后一排胶囊底边（y+204+66=y+270）。
     const contracts::UiRect local[kSwitchDemoCount] = {
-        {380, 76, 116, 50}, {512, 76, 116, 50},
-        {380, 144, 94, 42}, {512, 144, 94, 42},
-        {380, 204, 150, 66}, {512, 204, 150, 66},
+        {20, 76, 116, 50}, {168, 76, 116, 50},
+        {20, 144, 94, 42}, {168, 144, 94, 42},
+        {20, 204, 150, 66}, {204, 204, 150, 66},
     };
     for (uint32_t i = 0; i < kSwitchDemoCount; ++i) {
         (void)adapter->draw_native_toggle(
@@ -303,7 +296,7 @@ void draw_frames_detail(const contracts::QolUiAdapter* adapter,
         (void)components->draw_container_ornamented({right.x + 280, right.y + 120, 220, 100});
     }
     if (adapter->draw_native_close_button != nullptr) {
-        (void)adapter->draw_native_close_button({right.x + 540, right.y + 120, 56, 56}, 0);
+        (void)adapter->draw_native_close_button({right.x + 484, right.y + 120, 78, 86}, 0);
     }
     if (adapter->draw_string_with_font != nullptr) {
         (void)adapter->draw_string_with_font("label / button / toggle / select / scroll_view",
@@ -326,11 +319,13 @@ void draw_category_detail(void* user, contracts::UiRect right) {
                     static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
                 set_text_color(adapter, contracts::ui_theme::kTextNormal);
                 (void)adapter->draw_string_with_font(
-                    "按钮文本经原生标签绘制，不写控件内联缓冲。",
+                    "胶囊按钮                 装饰按钮",
                     static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 84), 0, 0);
+                char count[96]{};
+                std::snprintf(count, sizeof(count), "点击次数：%u · 第二行为禁用态", g_demo_click_count);
                 (void)adapter->draw_string_with_font(
-                    "点击经原生事件树派发，不混用手工命中。",
-                    static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 242), 0, 0);
+                    count, static_cast<int32_t>(right.x + 20),
+                    static_cast<int32_t>(right.y + 420), 0, 0);
             }
             break;
         case 1:
@@ -347,6 +342,12 @@ void draw_category_detail(void* user, contracts::UiRect right) {
             break;
         default:
             break;
+    }
+    for (uint32_t i = 0; i < g_category_control_count; ++i) {
+        const auto& control = g_category_controls[i];
+        if (!control.handle) continue;
+        if (control.is_nav) (void)components->nav_button_draw(control.handle);
+        else (void)components->text_button_draw(control.handle);
     }
 }
 
@@ -474,30 +475,7 @@ void panel_process() {
 
     if (!contracts::succeeded(adapter->begin_frame())) return;
 
-    contracts::UiRect root_rect{};
-    if (adapter->get_rect != nullptr && adapter->fill_rect_alpha != nullptr &&
-        contracts::succeeded(adapter->get_rect(g_root, &root_rect))) {
-        (void)adapter->fill_rect_alpha(root_rect, contracts::ui_theme::kPanelBgRgb565, 94u);
-    }
-    if (adapter->draw_custom_button != nullptr) {
-        (void)adapter->draw_custom_button(g_root, {0, 0, kPanelRect.w, kPanelRect.h},
-            0xFF101820u, 0xFFB89B62u, 3, nullptr, 0, 0, 0);
-    }
-
     (void)components->help_page_draw(g_page);
-
-    // 当前分类交互控件：nav 走自适应绘制，text_button 走原生文本按钮绘制。
-    for (uint32_t i = 0; i < g_category_control_count; ++i) {
-        const CategoryControl& control = g_category_controls[i];
-        if (control.handle == nullptr) continue;
-        if (control.is_nav != 0) {
-            if (components->nav_button_draw != nullptr) {
-                (void)components->nav_button_draw(control.handle);
-            }
-        } else if (components->text_button_draw != nullptr) {
-            (void)components->text_button_draw(control.handle);
-        }
-    }
 
     if (g_panel_nav != nullptr && components->nav_button_draw != nullptr) {
         (void)components->nav_button_draw(g_panel_nav);
@@ -520,6 +498,17 @@ uint32_t panel_event(uint64_t event, uint64_t param, uint64_t param2) {
     // 到达，不参与手势，只消费且不得改变本地状态（模块不持有按下态）。
     if (event != 0x17 && event != 0x18 && event != 0x19) return 1;
     if (event == 0x17) {
+        const auto* adapter = ui_adapter();
+        int64_t x = 0, y = 0, ox = 0, oy = 0;
+        if (!adapter || !adapter->touch_coordinates || !adapter->control_absolute_origin ||
+            !contracts::succeeded(adapter->touch_coordinates(param, &x, &y)) ||
+            !contracts::succeeded(adapter->control_absolute_origin(g_root, &ox, &oy))) return 1;
+        const auto inside = [x, y, ox, oy](contracts::UiRect r) {
+            return x >= ox + r.x && y >= oy + r.y && x < ox + r.x + r.w && y < oy + r.y + r.h;
+        };
+        const bool nav = g_panel_nav && adapter->hit_test && adapter->hit_test(g_panel_nav,
+            x, y, {0, 0, contracts::ui_theme::kNavBoxW, contracts::ui_theme::kNavBoxH}) > 0;
+        if (!nav && !inside(kLeftViewport) && !inside(kRightViewport)) return 1;
         // 双栏页交互控件全部挂在 g_root 下，统一以 g_root 为手势根，交游戏原生 TouchHandle
         // 状态机处理按下置态/移出取消/松开命中才 ExecuteProc（nav_button_execute → request_host_back）。
         g_touch_root = g_root;

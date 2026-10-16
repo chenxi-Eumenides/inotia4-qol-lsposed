@@ -25,8 +25,8 @@ using contracts::UiRect;
 using contracts::FeatureCategory;
 using contracts::FeatureType;
 constexpr int64_t kPanelW = 960, kPanelH = 640;
-constexpr int64_t kLeftX = 24, kLeftY = 100, kLeftW = 300, kLeftH = 444;
-constexpr int64_t kRightX = 364, kRightY = 100, kRightW = 572, kRightH = 444;
+constexpr int64_t kLeftX = 50, kLeftY = 124, kLeftW = 252, kLeftH = 404;
+constexpr int64_t kRightX = 390, kRightY = 124, kRightW = 506, kRightH = 404;
 constexpr int32_t kLeftRowH = 73;
 constexpr int32_t kRightRowH = settings_model::kMinimumRightRowHeight;
 constexpr int64_t kBackAbsX = contracts::ui_theme::kNavBoxAbsX;
@@ -250,7 +250,7 @@ bool build_right_list(int category) {
                 settings_model::kToggleWidth, settings_model::kToggleHeight},
                 g_items[i].action_label, contracts::kUiTextButtonFontLarger,
                 &action_button_clicked, &g_contexts[i]};
-            if (!contracts::succeeded(g_components->text_button_create(&button, handle,
+            if (!contracts::succeeded(g_components->capsule_text_button_create(&button, handle,
                 &g_states[i].action))) { destroy_right_list(); return false; }
         } else {
             const contracts::UiNativeToggleDesc toggle{{control_left, control_top,
@@ -508,12 +508,16 @@ void poll_entry_continuation() {
     if (contracts::succeeded(invoke_result)) set_status("");
 }
 bool components_complete() {
-    return g_components != nullptr && g_components->scroll_list_create &&
+    constexpr size_t end = offsetof(contracts::QolUiComponents, container_draw_content) +
+        sizeof(((contracts::QolUiComponents*)nullptr)->container_draw_content);
+    return g_components != nullptr && g_components->major == 1 && g_components->minor >= 14 &&
+        g_components->size >= end && g_components->container_draw_content &&
+        g_components->capsule_text_button_create && g_components->scroll_list_create &&
         g_components->scroll_list_get_row && g_components->scroll_list_set_selection_enabled &&
         g_components->scroll_list_process && g_components->scroll_list_draw &&
         g_components->native_toggle_create && g_components->native_toggle_set_value &&
         g_components->native_toggle_set_enabled && g_components->native_toggle_draw &&
-        g_components->text_button_create && g_components->text_button_set_enabled &&
+        g_components->text_button_set_enabled &&
         g_components->text_button_draw && g_components->destroy &&
         g_components->draw_control_text && g_components->draw_container_ornamented &&
         g_components->dispatch_native_event;
@@ -550,6 +554,37 @@ void settings_panel_enter() {
     }
     std::lock_guard<std::mutex> lock(g_mtx); g_panel_active = true;
 }
+QolResult draw_settings_list(void* list, UiRect) {
+    return list ? g_components->scroll_list_draw(list) : contracts::ok();
+}
+
+QolResult draw_settings_content(void*, UiRect) {
+    int64_t x = 0, y = 0;
+    auto result = g_ui->control_absolute_origin(g_root, &x, &y);
+    if (!contracts::succeeded(result)) return result;
+    if (g_ui->draw_image_part) {
+        (void)g_ui->draw_image_part(0x4f, 0, x + kPanelW / 2 - 300, y + kPanelH / 2, 2, 1);
+        (void)g_ui->draw_image_part(0x50, 0, x + kPanelW / 2 + 300, y + kPanelH / 2, 2, 1);
+    }
+    const contracts::UiContainerContentDesc left{{x + kLeftX - 24, y + kLeftY - 24,
+        kLeftW + 64, kLeftH + 48}, contracts::ui_theme::kPanelBg, 1};
+    const contracts::UiContainerContentDesc right{{x + kRightX - 24, y + kRightY - 24,
+        kRightW + 64, kRightH + 48}, contracts::ui_theme::kPanelBg, 1};
+    result = g_components->container_draw_content(&left, &draw_settings_list, g_left);
+    if (!contracts::succeeded(result)) return result;
+    result = g_components->container_draw_content(&right, &draw_settings_list, g_right);
+    if (!contracts::succeeded(result)) return result;
+    char title[128]{};
+    if (g_module_version[0]) std::snprintf(title, sizeof(title), "QoL 模块设置 v%s", g_module_version);
+    else std::snprintf(title, sizeof(title), "QoL 模块设置");
+    (void)g_components->draw_control_text(g_root, title, kPanelW / 2, 24,
+        contracts::ui_theme::kTextGold, 2, 1);
+    const auto status = settings_model::truncate_text(g_status, kPanelW - 48);
+    if (!status.lines.empty()) (void)g_components->draw_control_text(g_root, status.lines[0].c_str(),
+        24, kPanelH - 72, contracts::ui_theme::kError, 0, 1);
+    return contracts::ok();
+}
+
 void settings_panel_process() {
     if (!main_thread() || !g_panel_active || g_root == nullptr) return;
     ++g_frame;
@@ -566,26 +601,10 @@ void settings_panel_process() {
     if (!contracts::succeeded(g_ui->begin_frame())) return;
     int64_t x = 0, y = 0;
     if (contracts::succeeded(g_ui->control_absolute_origin(g_root, &x, &y))) {
-        if (g_ui->draw_image_part) {
-            (void)g_ui->draw_image_part(0x4f, 0, x + kPanelW / 2 - 300, y + kPanelH / 2, 2, 1);
-            (void)g_ui->draw_image_part(0x50, 0, x + kPanelW / 2 + 300, y + kPanelH / 2, 2, 1);
-        }
-        for (const auto& rect : {UiRect{x + kLeftX - 8, y + kLeftY - 8, kLeftW + 32, kLeftH + 16},
-             UiRect{x + kRightX - 8, y + kRightY - 8, kRightW + 32, kRightH + 16}}) {
-            (void)g_ui->fill_rect(rect, contracts::ui_theme::kPanelBg);
-            (void)g_components->draw_container_ornamented(rect);
-        }
+        const contracts::UiContainerContentDesc root{{x, y, kPanelW, kPanelH},
+            contracts::ui_theme::kPanelBg, 0};
+        (void)g_components->container_draw_content(&root, &draw_settings_content, nullptr);
     }
-    char title[128]{};
-    if (g_module_version[0]) std::snprintf(title, sizeof(title), "QoL 模块设置 v%s", g_module_version);
-    else std::snprintf(title, sizeof(title), "QoL 模块设置");
-    (void)g_components->draw_control_text(g_root, title, kPanelW / 2, 24,
-        contracts::ui_theme::kTextGold, 2, 1);
-    if (g_left) (void)g_components->scroll_list_draw(g_left);
-    if (g_right) (void)g_components->scroll_list_draw(g_right);
-    const auto status = settings_model::truncate_text(g_status, kPanelW - 48);
-    if (!status.lines.empty()) (void)g_components->draw_control_text(g_root, status.lines[0].c_str(),
-        24, kPanelH - 72, contracts::ui_theme::kError, 0, 1);
     if (g_back && g_components->nav_button_draw) (void)g_components->nav_button_draw(g_back);
     (void)g_ui->end_frame();
 }
@@ -693,7 +712,10 @@ public:
     }
     bool release() override { return release_more_games_runtime(); }
     bool bind() override {
-        if (g_components == nullptr || g_components->main_menu_text_button_create == nullptr) {
+        constexpr size_t end = offsetof(contracts::QolUiComponents, main_menu_decorated_button_create) +
+            sizeof(((contracts::QolUiComponents*)nullptr)->main_menu_decorated_button_create);
+        if (g_components == nullptr || g_components->minor < 14 || g_components->size < end ||
+            g_components->main_menu_decorated_button_create == nullptr) {
             return false;
         }
         // Gate on the adapter ABI before touching any tail member or native control.
@@ -720,11 +742,11 @@ public:
             return false;
         }
         const bool original_active = raw_active == kNativeControlActive;
-        const contracts::UiMainMenuTextButtonDesc desc{
-            "模块设置", contracts::kUiTextButtonFontDefault, &more_games_clicked, nullptr};
+        const contracts::UiMainMenuDecoratedButtonDesc desc{
+            "模块设置", contracts::kUiTextButtonFontDefault, 28, 150, &more_games_clicked, nullptr};
         QolUiHandle original = nullptr;
         QolUiHandle replacement = nullptr;
-        const QolResult created = g_components->main_menu_text_button_create(
+        const QolResult created = g_components->main_menu_decorated_button_create(
             &desc, &original, &replacement);
         if (!contracts::succeeded(created) || original == nullptr || replacement == nullptr) {
             return false;

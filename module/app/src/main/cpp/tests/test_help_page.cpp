@@ -27,6 +27,18 @@ struct Control {
 };
 std::vector<std::unique_ptr<Control>> g_roots;
 bool g_main = true, g_fail_delete = false, g_clip = false, g_back_requested = false;
+// 受保护绘制模型：帧在父(screen) clip 内绘制，内容/子 UI 在 content clip 内绘制。
+UiRect g_clip_rect{-1, -1, -1, -1};
+UiRect g_frame_rect{};
+QolResult clip_get(UiRect* out) { *out = g_clip_rect; return ok(); }
+QolResult clip_set(int32_t x, int32_t y, int32_t w, int32_t h) {
+    g_clip_rect = {x, y, w, h}; return ok();
+}
+QolResult clip_reset() { g_clip_rect = {-1, -1, -1, -1}; return ok(); }
+bool inside(const UiRect& outer, const UiRect& inner) {
+    return inner.x >= outer.x && inner.y >= outer.y &&
+        inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+}
 int g_live = 0, g_deletes = 0, g_calls = 0, g_fail_at = -1, g_processes = 0, g_details = 0;
 int g_opens = 0, g_removed = 0;
 int32_t g_detail_index = -1;
@@ -115,14 +127,18 @@ QolResult connect(QolUiHandle, QolUiHandle) { return step(); }
 QolResult process(QolUiHandle) { assert(g_main); ++g_processes; return ok(); }
 QolResult draw_control(QolUiHandle handle) {
     auto* node = static_cast<Control*>(handle);
-    assert(node->kind == 1 && node->draw != nullptr && g_clip);
+    assert(node->kind == 1 && node->draw != nullptr);
+    assert(g_clip_rect.x >= 0 && inside(g_clip_rect, {node->rect.x, node->rect.y,
+        node->rect.w, node->rect.h}));
     node->draw(handle); return ok();
 }
 QolResult draw_scroll(QolUiHandle handle) {
-    assert(!g_clip);
+    auto* scroll = static_cast<Control*>(handle);
+    assert(g_clip_rect.x >= 0);
     g_draw_order.emplace_back("scroll"); g_clip = true;
-    static_cast<Control*>(handle)->content(handle, 0);
-    g_clip = false; return ok();
+    g_clip_rect = {scroll->rect.x, scroll->rect.y, scroll->rect.w, scroll->rect.h};
+    scroll->content(handle, 0);
+    clip_reset(); g_clip = false; return ok();
 }
 QolResult event(QolUiHandle, uint64_t evt, uint64_t param, uint64_t param2, uint32_t* consumed) {
     assert(g_main && evt == 0x18 && param == 10 && param2 == 20);
@@ -130,7 +146,9 @@ QolResult event(QolUiHandle, uint64_t evt, uint64_t param, uint64_t param2, uint
     *consumed = 7; return ok();
 }
 QolResult container(int32_t x, int32_t y, int32_t w, int32_t h) {
-    assert(!g_clip); g_frames.push_back({x, y, w, h}); g_draw_order.emplace_back("container"); return ok();
+    // 帧在父(screen) clip 内绘制；content clip 由 container_draw_content 另行进入。
+    assert(g_clip_rect.x >= 0);
+    g_frames.push_back({x, y, w, h}); g_draw_order.emplace_back("container"); return ok();
 }
 // 游戏 IMGSYS fake：UnitLoad 幂等（已加载不重载、不增引用），UnitUnload 无引用计数、
 // 直接置失效并记录物理卸载次数。0x0f 边框图集由游戏共享，人物信息页等原生消费者在
@@ -169,7 +187,11 @@ QolResult string(const char* text, int32_t, int32_t, int32_t, int32_t) {
     // 行文本经 draw_control_text 在左栏 clip 内绘制；详情文本在 clip 外绘制（detail 另行校验）。
     assert(text != nullptr); return ok();
 }
-QolResult fill(UiRect, uint32_t) { assert(!g_clip); return ok(); }
+QolResult fill(UiRect rect, uint32_t) {
+    // 安全背景必须在 content clip 内，且不得越出 frame。
+    assert(g_clip_rect.x >= 0 && inside(g_clip_rect, rect));
+    return ok();
+}
 QolResult button(QolUiHandle handle, UiRect, uint32_t, uint32_t, int32_t, const char* text,
                  uint32_t, int32_t, int32_t) {
     if (text != nullptr) assert(std::strcmp(static_cast<Control*>(handle)->text, text) == 0);
@@ -191,6 +213,7 @@ QolUiAdapter adapter() {
     ui.draw_text = &draw_text; ui.set_font_color = &color; ui.set_font_color_rgb = &color_rgb;
     ui.draw_string_with_font = &string;
     ui.fill_rect = &fill; ui.draw_custom_button = &button;
+    ui.get_clip_rect = &clip_get; ui.set_clip = &clip_set; ui.reset_clip = &clip_reset;
     ui.image_unit_load = &load; ui.image_unit_unload = &unload;
     return ui;
 }
@@ -202,7 +225,10 @@ void draw_item(void* user, uint32_t, QolUiHandle, uint8_t selected) {
     }
 }
 void detail(void* user, UiRect rect) {
-    assert(!g_clip); ++g_details; g_detail_index = *static_cast<int*>(user); g_detail_rect = rect;
+    assert(g_clip_rect.x >= 0); ++g_details;
+    g_detail_index = *static_cast<int*>(user); g_detail_rect = rect;
+    // 详情现在收到稳定 content rect；绘制仍受同一 content clip 约束。
+    assert(rect.x >= g_frames[2].x + 24 && rect.y >= g_frames[2].y + 24);
     g_draw_order.emplace_back("detail");
     if (g_destroy_on_draw != nullptr && g_destroy_in_detail) {
         const int deletes = g_deletes;
@@ -213,7 +239,7 @@ void detail(void* user, UiRect rect) {
     }
 }
 UiHelpPageDesc desc(UiHelpOption* options) {
-    return {{24, 100, 912, 408}, {20, 24, 244, 352}, {320, 24, 568, 352}, 64,
+    return {{24, 100, 912, 408}, {50, 50, 244, 280}, {382, 50, 482, 280}, 64,
             options, 8, 2, &draw_item, &g_live};
 }
 QolResult register_provider(const PanelProviderSpec* spec) { g_provider = spec; return ok(); }
@@ -264,7 +290,7 @@ int main() {
         offsetof(QolUiComponents, dispatch_native_event) + sizeof(void*));
     auto ui = adapter();
     CHECK(ui_components_bind(&ui)); g_api = ui_components_api();
-    CHECK(g_api->minor == 13 && kUiAdapterMinor == 20);
+    CHECK(g_api->minor == 14 && kUiAdapterMinor == 21);
     UiHelpOption options[8]{};
     for (int i = 0; i < 8; ++i) options[i] = {&g_users[i], &detail};
     auto page_desc = desc(options);
@@ -281,10 +307,13 @@ int main() {
     options[2] = {nullptr, nullptr};
     CHECK(succeeded(g_api->help_page_draw(g_page)) && g_detail_index == 2);
     CHECK(g_frames.size() == 3 && g_frames[0].x == 34 && g_frames[0].y == 112);
-    CHECK(g_frames[1].x == 46 && g_frames[1].y == 128 && g_frames[1].w == 276);
-    CHECK(g_frames[2].x == 346 && g_frames[2].w == 584);
-    CHECK(g_detail_rect.x == 354 && g_detail_rect.y == 136 && g_detail_rect.w == 568);
-    CHECK(g_draw_order[g_draw_order.size() - 2] == "scroll" && g_draw_order.back() == "detail");
+    CHECK(g_frames[1].x == 60 && g_frames[1].y == 138 && g_frames[1].w == 308);
+    CHECK(g_frames[2].x == 392 && g_frames[2].w == 530);
+    CHECK(g_detail_rect.x == 416 && g_detail_rect.y == 162 && g_detail_rect.w == 482);
+    // 顺序：root frame → 左 frame → 左列表内容 → 右 frame → 右 detail。
+    CHECK(g_draw_order.size() == 5 && g_draw_order[0] == "container" &&
+          g_draw_order[1] == "container" && g_draw_order[2] == "scroll" &&
+          g_draw_order[3] == "container" && g_draw_order.back() == "detail");
     CHECK(g_highlights.size() == 8 && g_highlights[2] == 1);
     CHECK(succeeded(g_api->help_page_set_selected(g_page, 6)));
     g_highlights.clear(); CHECK(succeeded(g_api->help_page_draw(g_page)));

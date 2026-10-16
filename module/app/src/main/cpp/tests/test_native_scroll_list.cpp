@@ -35,6 +35,11 @@ struct Control {
 };
 std::vector<std::unique_ptr<Control>> g_native_roots;
 bool g_main_thread = true;
+// Native scroll driver: the entry clip is the guest viewport and the real
+// driver resets clip after the content callback. Row content must therefore
+// intersect the saved parent instead of relying on the driver's reset.
+UiRect g_clip{-1, -1, -1, -1};
+std::vector<UiRect> g_row_clips;
 int g_calls = 0, g_fail_at = -1, g_deletes = 0, g_live = 0, g_processes = 0, g_scroll_draws = 0;
 int g_events = 0, g_row_draws = 0, g_selections = 0;
 int g_child_button_clicks = 0;
@@ -159,6 +164,8 @@ QolResult button_scroll(QolUiHandle row, QolUiHandle scroll) {
     if (succeeded(result)) static_cast<Control*>(row)->scroll = static_cast<Control*>(scroll);
     return result;
 }
+QolResult clip_get(UiRect* out);
+QolResult clip_reset();
 QolResult process(QolUiHandle) { assert(g_main_thread); ++g_processes; return ok(); }
 QolResult draw_control(QolUiHandle handle) {
     auto* node = static_cast<Control*>(handle);
@@ -170,7 +177,9 @@ QolResult draw_control(QolUiHandle handle) {
 QolResult draw_scroll(QolUiHandle handle) {
     ++g_scroll_draws;
     auto* scroll = static_cast<Control*>(handle);
+    g_clip = scroll->rect;
     scroll->content_draw(handle, -scroll->offset);
+    clip_reset();
     return ok();
 }
 QolResult get_offset(QolUiHandle handle, int64_t* out) {
@@ -203,6 +212,7 @@ void draw_item(void* user, uint32_t index, QolUiHandle row, uint8_t selected) {
     assert(user == &g_selected && row != nullptr);
     g_draw_order.push_back(index);
     g_draw_selected.push_back(selected);
+    g_row_clips.push_back(g_clip);
     if (g_destroy_on_draw != nullptr) {
         const int deletes = g_deletes;
         assert(succeeded(g_api->destroy(g_destroy_on_draw)));
@@ -226,6 +236,10 @@ void child_button_click(void*) { ++g_child_button_clicks; }
 void text_button_click(void*) { ++g_text_button_clicks; }
 QolResult no_op() { return ok(); }
 QolResult inset(int32_t* out) { *out = 0; return ok(); }
+
+QolResult clip_get(UiRect* out) { *out = g_clip; return ok(); }
+QolResult clip_set(int32_t x, int32_t y, int32_t w, int32_t h) { g_clip = {x, y, w, h}; return ok(); }
+QolResult clip_reset() { g_clip = {-1, -1, -1, -1}; return ok(); }
 
 // 游戏 IMGSYS fake：option 图集（0x59）UnitLoad 幂等（已加载不重载、不增引用）；
 // UnitUnload 无引用计数、直接置失效并记录物理卸载次数。0x59 由游戏共享（设置页返回
@@ -272,6 +286,7 @@ QolResult set_button_enabled(QolUiHandle button, uint8_t enabled) {
     return ok();
 }
 QolResult container(int32_t, int32_t, int32_t, int32_t) { return ok(); }
+QolResult container_fill(UiRect, uint32_t) { return ok(); }
 QolResult origin(QolUiHandle handle, int64_t* x, int64_t* y) {
     *x = 0;
     *y = 0;
@@ -309,6 +324,7 @@ QolUiAdapter make_adapter() {
     ui.control_tree_event = &event; ui.begin_frame = &no_op; ui.end_frame = &no_op;
     ui.screen_inset_width = &inset; ui.screen_inset_height = &inset;
     ui.draw_border_rect = &container; ui.draw_custom_button = &custom_button;
+    ui.fill_rect = &container_fill;
     ui.control_pressed = &pressed; ui.draw_back_button = &back;
     ui.control_absolute_origin = &origin; ui.set_font_color_rgb = &font_color_rgb;
     ui.draw_string_with_font = &string_with_font;
@@ -318,6 +334,9 @@ QolUiAdapter make_adapter() {
     ui.draw_native_text_button_background = &draw_native_text_button_background;
     ui.draw_native_text_button_label = &draw_native_text_button_label;
     ui.set_button_enabled = &set_button_enabled;
+    ui.get_clip_rect = &clip_get;
+    ui.set_clip = &clip_set;
+    ui.reset_clip = &clip_reset;
     return ui;
 }
 QolResult register_provider(const PanelProviderSpec* provider) { g_provider = provider; return ok(); }
@@ -373,7 +392,7 @@ int main() {
     auto ui = make_adapter();
     CHECK(ui_components_bind(&ui));
     g_api = ui_components_api();
-    CHECK(g_api->major == 1 && g_api->minor == 13);
+    CHECK(g_api->major == 1 && g_api->minor == 14);
     QolUiHandle root = nullptr, list = nullptr;
     CHECK(succeeded(create(0, nullptr, &root)));
     UiScrollListDesc desc{{12, 20, 200, 140}, 56, 24, 2, &draw_item, &select, &g_selected};
@@ -433,7 +452,26 @@ int main() {
     g_selections = 0;
     CHECK(succeeded(g_api->scroll_list_process(list)) && g_processes == 1);
     // 内容绘制直接回调 draw_item；不再经原生 draw_control（g_row_draws 保持 0）。
+    // Row content must intersect the saved parent clip, not rely on the driver's
+    // post-content reset. A real parent rect proves the intersection.
+    g_clip = {0, 0, 120, 100};
+    g_row_clips.clear();
     CHECK(succeeded(g_api->scroll_list_draw(list)) && g_scroll_draws == 1 && g_row_draws == 0);
+    CHECK(g_row_clips.size() == 24 && g_row_clips.front().x == 12 && g_row_clips.front().y == 20 &&
+          g_row_clips.front().w == 108 && g_row_clips.front().h == 80);
+    CHECK(g_clip.x == 0 && g_clip.y == 0 && g_clip.w == 120 && g_clip.h == 100);
+    // A parent sentinel still bounds content to the screen, then restores no-clip.
+    g_clip = {-1, -1, -1, -1};
+    g_row_clips.clear();
+    CHECK(succeeded(g_api->scroll_list_draw(list)));
+    CHECK(g_row_clips.front().x == 12 && g_row_clips.front().y == 20 &&
+          g_row_clips.front().w == 200 && g_row_clips.front().h == 140);
+    CHECK(g_clip.x == -1 && g_clip.y == -1 && g_clip.w == -1 && g_clip.h == -1);
+    g_row_clips.clear();
+    g_draw_order.clear();
+    g_draw_selected.clear();
+    CHECK(succeeded(g_api->scroll_list_draw(list)));
+    g_scroll_draws = 1;
     CHECK(g_draw_order.size() == 24 && g_draw_order[23] == 23);
     CHECK(g_draw_selected[2] == 1 && g_draw_selected[0] == 0);
     for (uint32_t i = 0; i < 24; ++i) {

@@ -166,6 +166,7 @@ SceneEventPopupScChoiceFn fn_scene_event_popup_sc_choice = nullptr;
 MapchangeSetFn fn_mapchange_set = nullptr;
 MemorytextGetTextFn fn_memorytext_get_text = nullptr;
 UiDrawBorderRectFn fn_ui_draw_border_rect = nullptr;
+UiDrawScrollBarFn fn_ui_draw_scrollbar = nullptr;
 
 MoveAsPathFn fn_move_as_path = nullptr;
 CharMoveFn fn_char_move = nullptr;
