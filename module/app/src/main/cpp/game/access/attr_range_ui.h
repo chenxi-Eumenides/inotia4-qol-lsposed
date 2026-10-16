@@ -42,6 +42,9 @@ bool attr_call_jewel_value(int type, void* item, int* out_value);
 
 // MATH_GetRandom wrapper 主体：捕获窗口命中则返回上界（不消耗 RNG），否则调原函数。
 
+// Host-only read access to the UIDesc text buffer; the address is not part of a plugin contract.
+bool attr_uidesc_text_buffer_base(char** out_buffer);
+
 // 在详情文本 insert 位置插入 "$B$<code>"；越界/找不到数值锚点返回 false。
 bool attr_insert_value_color(char* before, char* after, char code);
 

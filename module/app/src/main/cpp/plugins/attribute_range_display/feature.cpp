@@ -85,15 +85,29 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 
 void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int value) {
     const auto backup = reinterpret_cast<AddOptionFn>(g_backup_add_option);
-    if (backup != nullptr) backup(builder, type, option_id, value);
-    if (!active() || builder == nullptr || t_current_item == nullptr) return;
-
-    const auto api = quality_api();
-    if (g_sdk == nullptr || g_sdk->ui == nullptr ||
-        g_sdk->ui->insert_inline_color == nullptr || api == nullptr ||
-        g_sdk->item_handle.register_item == nullptr) {
+    if (backup == nullptr) return;
+    if (!active()) {
+        backup(builder, type, option_id, value);
         return;
     }
+
+    const contracts::QolUiAdapter* ui = g_sdk == nullptr ? nullptr : g_sdk->ui;
+    const bool span_api_available = builder != nullptr && ui != nullptr &&
+        ui->minor >= contracts::kUiAdapterMinor && ui->ui_desc_text_cursor != nullptr &&
+        ui->insert_inline_color_span != nullptr;
+    uint32_t before_offset = 0;
+    const bool before_ready = span_api_available &&
+        ui->ui_desc_text_cursor(builder, &before_offset).ok == kQolOk;
+
+    backup(builder, type, option_id, value);
+    if (!before_ready) return;
+
+    uint32_t after_offset = 0;
+    if (ui->ui_desc_text_cursor(builder, &after_offset).ok != kQolOk) return;
+    if (t_current_item == nullptr) return;
+
+    const auto api = quality_api();
+    if (g_sdk == nullptr || g_sdk->item_handle.register_item == nullptr || api == nullptr) return;
 
     contracts::QolItemHandle handle{};
     if (g_sdk->item_handle.register_item(t_current_item, contracts::kQolItemHandleOwnerGame,
@@ -113,10 +127,10 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int val
         return;
     }
 
-    (void)g_sdk->ui->insert_inline_color(builder, 4096,
-                                         static_cast<uint8_t>(tier_color(
-                                             static_cast<contracts::AttributeQualityTier>(
-                                                 option_context.quality.level))));
+    (void)ui->insert_inline_color_span(
+        builder, before_offset, after_offset,
+        static_cast<uint8_t>(tier_color(static_cast<contracts::AttributeQualityTier>(
+            option_context.quality.level))));
 }
 
 uintptr_t uid_desc_make_item_wrapper(void* item, void* character, void* arg2) {

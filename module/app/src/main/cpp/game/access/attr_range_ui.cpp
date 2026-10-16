@@ -125,6 +125,14 @@ bool attr_call_jewel_value(int type, void* item, int* out_value) {
     return true;
 }
 
+bool attr_uidesc_text_buffer_base(char** out_buffer) {
+    if (out_buffer == nullptr) return false;
+    *out_buffer = nullptr;
+    if (g_base == 0 || g_base > UINTPTR_MAX - G_UIDESC_TEXT_BUF_VMA) return false;
+    *out_buffer = reinterpret_cast<char*>(g_base + G_UIDESC_TEXT_BUF_VMA);
+    return true;
+}
+
 bool attr_insert_value_color(char* before, char* after, char code) {
     if (before == nullptr || after == nullptr || after <= before || g_base == 0) return false;
 

@@ -18,6 +18,7 @@ int g_make_calls = 0;
 int g_register_calls = 0;
 int g_query_calls = 0;
 int g_insert_calls = 0;
+int g_fail_cursor_call = 0;
 bool g_emit_add_from_make = false;
 bool g_quality_available = true;
 bool g_use_explicit_quality_level = false;
@@ -31,8 +32,14 @@ int g_display_value = 0;
 int g_last_query_option_id = -1;
 int g_last_query_value = -1;
 uint8_t g_last_color = 0;
-uint32_t g_last_max_text_bytes = 0;
+uint32_t g_last_before_offset = 0;
+uint32_t g_last_after_offset = 0;
+int g_cursor_calls = 0;
 void* g_last_builder = nullptr;
+
+struct FakeBuilder {
+    uint32_t cursor;
+};
 
 qol::contracts::QolHostSdk g_sdk{};
 qol::contracts::QolUiAdapter g_ui{};
@@ -102,20 +109,38 @@ int32_t register_item(void* item, uint32_t owner, qol::contracts::QolItemHandle*
     return qol::contracts::kQolItemHandleStatusOk;
 }
 
-QolResult insert_inline_color(void* builder, uint32_t max_text_bytes, uint8_t color) {
-    ++g_insert_calls;
-    g_last_builder = builder;
-    g_last_max_text_bytes = max_text_bytes;
-    g_last_color = color;
+QolResult ui_desc_text_cursor(void* builder, uint32_t* out_offset) {
+    ++g_cursor_calls;
+    if (g_cursor_calls == g_fail_cursor_call) {
+        return qol::contracts::error(kQolErrNotReady, "cursor unavailable", 18);
+    }
+    if (builder == nullptr || out_offset == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid cursor", 14);
+    }
+    *out_offset = static_cast<FakeBuilder*>(builder)->cursor;
     return qol::contracts::ok();
 }
 
-void original_add(void*, int, int, int) { ++g_add_calls; }
+QolResult insert_inline_color_span(void* builder, uint32_t before, uint32_t after,
+                                   uint8_t color) {
+    ++g_insert_calls;
+    g_last_builder = builder;
+    g_last_before_offset = before;
+    g_last_after_offset = after;
+    g_last_color = color;
+    static_cast<FakeBuilder*>(builder)->cursor += 4;
+    return qol::contracts::ok();
+}
+
+void original_add(void* builder, int, int, int) {
+    ++g_add_calls;
+    static_cast<FakeBuilder*>(builder)->cursor += 8;
+}
 
 uintptr_t original_make(void* item, void*, void*) {
     ++g_make_calls;
     if (g_emit_add_from_make) {
-        char builder{};
+        FakeBuilder builder{20};
         qol::features::attribute_range_display::uid_desc_add_option_wrapper(
             &builder, g_option_type, g_option_id, g_display_value);
     }
@@ -132,9 +157,13 @@ void reset_quality_state() {
     g_query_calls = 0;
     g_register_calls = 0;
     g_insert_calls = 0;
+    g_cursor_calls = 0;
+    g_fail_cursor_call = 0;
     g_last_query_option_id = -1;
     g_last_query_value = -1;
     g_last_color = 0;
+    g_last_before_offset = 0;
+    g_last_after_offset = 0;
 }
 
 void add_with_context(void* item, int option_id, int display_value) {
@@ -151,7 +180,7 @@ void test_disabled_wrappers_pass_through() {
     reset_quality_state();
     qol::features::attribute_range_display::set_active(false);
 
-    char builder{};
+    FakeBuilder builder{20};
     qol::features::attribute_range_display::uid_desc_add_option_wrapper(&builder, 0, 1, 3);
     assert(g_add_calls == 1);
     assert(g_register_calls == 0 && g_query_calls == 0 && g_insert_calls == 0);
@@ -171,9 +200,10 @@ void test_active_context_uses_provider_level_color() {
     assert(g_add_calls == 2);
     assert(g_make_calls == 2);
     assert(g_register_calls == 1 && g_query_calls == 1 && g_insert_calls == 1);
+    assert(g_cursor_calls == 2);
     assert(g_last_query_option_id == 12 && g_last_query_value == 41);
     assert(g_last_color == static_cast<uint8_t>('C'));
-    assert(g_last_max_text_bytes == 4096);
+    assert(g_last_before_offset == 20 && g_last_after_offset == 28);
     assert(g_last_builder != nullptr);
 }
 
@@ -187,6 +217,47 @@ void test_current_value_disambiguates_repeated_option_id() {
     assert(g_query_calls == 2 && g_insert_calls == 2);
     assert(g_last_query_option_id == 12 && g_last_query_value == 88);
     assert(g_last_color == static_cast<uint8_t>('Y'));
+    assert(g_last_before_offset == 20 && g_last_after_offset == 28);
+}
+
+void test_cursor_snapshots_bracket_backup_and_unsupported_adapter_fails_closed() {
+    void* item = reinterpret_cast<void*>(0x2800);
+    qol::features::attribute_range_display::set_active(true);
+
+    reset_quality_state();
+    const int add_calls_before = g_add_calls;
+    g_fail_cursor_call = 1;
+    add_with_context(item, 12, 41);
+    assert(g_add_calls == add_calls_before + 1);
+    assert(g_cursor_calls == 1 && g_register_calls == 0 && g_query_calls == 0 &&
+           g_insert_calls == 0);
+
+    reset_quality_state();
+    const int add_calls_before_after_failure = g_add_calls;
+    g_fail_cursor_call = 2;
+    add_with_context(item, 12, 41);
+    assert(g_add_calls == add_calls_before_after_failure + 1);
+    assert(g_cursor_calls == 2 && g_register_calls == 0 && g_query_calls == 0 &&
+           g_insert_calls == 0);
+
+    reset_quality_state();
+    const uint16_t current_minor = g_ui.minor;
+    g_ui.minor = qol::contracts::kUiAdapterMinor - 1;
+    const int add_calls_before_old_adapter = g_add_calls;
+    add_with_context(item, 12, 41);
+    assert(g_add_calls == add_calls_before_old_adapter + 1);
+    assert(g_cursor_calls == 0 && g_register_calls == 0 && g_query_calls == 0 &&
+           g_insert_calls == 0);
+    g_ui.minor = current_minor;
+
+    reset_quality_state();
+    g_ui.insert_inline_color_span = nullptr;
+    const int add_calls_before_missing_slot = g_add_calls;
+    add_with_context(item, 12, 41);
+    assert(g_add_calls == add_calls_before_missing_slot + 1);
+    assert(g_cursor_calls == 0 && g_register_calls == 0 && g_query_calls == 0 &&
+           g_insert_calls == 0);
+    g_ui.insert_inline_color_span = insert_inline_color_span;
 }
 
 void test_unavailable_or_invalid_quality_fails_closed() {
@@ -287,7 +358,7 @@ void test_empty_backups_fail_closed_and_clear_callbacks() {
                nullptr) != 0);
     assert(!qol::features::attribute_range_display::active());
     const int add_calls = g_add_calls;
-    char builder{};
+    FakeBuilder builder{20};
     qol::features::attribute_range_display::uid_desc_add_option_wrapper(&builder, 0, 1, 3);
     assert(g_add_calls == add_calls);
 
@@ -309,7 +380,11 @@ int main() {
     g_sdk.capabilities.require = require_quality;
     g_sdk.item_handle.register_item = register_item;
     g_ui = {};
-    g_ui.insert_inline_color = insert_inline_color;
+    g_ui.size = sizeof(g_ui);
+    g_ui.major = qol::contracts::kUiAdapterMajor;
+    g_ui.minor = qol::contracts::kUiAdapterMinor;
+    g_ui.ui_desc_text_cursor = ui_desc_text_cursor;
+    g_ui.insert_inline_color_span = insert_inline_color_span;
     g_sdk.ui = &g_ui;
 
     g_context.sdk = &g_sdk;
@@ -326,6 +401,7 @@ int main() {
     test_disabled_wrappers_pass_through();
     test_active_context_uses_provider_level_color();
     test_current_value_disambiguates_repeated_option_id();
+    test_cursor_snapshots_bracket_backup_and_unsupported_adapter_fails_closed();
     test_unavailable_or_invalid_quality_fails_closed();
     test_query_and_game_handle_errors_fail_closed();
     test_negative_level_does_not_insert_color();

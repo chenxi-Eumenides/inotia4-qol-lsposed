@@ -9,6 +9,7 @@
 
 #include "contracts/ui.h"
 #include "fake_shared_atlases.h"
+#include "game/access/attr_range_ui.h"
 #include "game/access/game_access.h"
 #include "game/access/ui_kit.h"
 #include "game/access/ui_components.h"
@@ -150,6 +151,8 @@ int g_draw_control_calls = 0;
 bool g_popup_snapshot_ok = true;
 int g_popup_snapshot_reads = 0;
 bool g_game_main_thread = true;
+alignas(16) char g_uidesc_test_buffer[G_UIDESC_TEXT_BUF_SIZE + 8]{};
+bool g_uidesc_buffer_available = true;
 int32_t g_border_rect[4]{};
 int32_t g_clip_rect[4]{};
 int g_set_clip_calls = 0;
@@ -323,7 +326,45 @@ bool ui_clear_touch_drop_event() { return true; }
 
 namespace qol::game {
 bool g_attr_insert_value_color_ok = true;
-bool attr_insert_value_color(char*, char*, char) { return g_attr_insert_value_color_ok; }
+bool attr_uidesc_text_buffer_base(char** out_buffer) {
+    if (out_buffer == nullptr) return false;
+    *out_buffer = nullptr;
+    if (!g_uidesc_buffer_available) return false;
+    *out_buffer = g_uidesc_test_buffer;
+    return true;
+}
+bool attr_insert_value_color(char* before, char* after, char code) {
+    if (!g_attr_insert_value_color_ok || before == nullptr || after <= before || code == 0 ||
+        reinterpret_cast<uintptr_t>(after) + 4 >
+            reinterpret_cast<uintptr_t>(g_uidesc_test_buffer) + G_UIDESC_TEXT_BUF_SIZE) {
+        return false;
+    }
+
+    char* insert_at = nullptr;
+    for (char* p = before; p < after; ++p) {
+        if (*p == ':') {
+            insert_at = p + 1;
+            while (insert_at < after && *insert_at == ' ') ++insert_at;
+            break;
+        }
+    }
+    if (insert_at == nullptr) {
+        for (char* p = before; p < after; ++p) {
+            if (*p >= '0' && *p <= '9') {
+                insert_at = p;
+                break;
+            }
+        }
+    }
+    if (insert_at == nullptr) return false;
+    if (insert_at > before && (insert_at[-1] == '-' || insert_at[-1] == '+')) --insert_at;
+    std::memmove(insert_at + 4, insert_at, static_cast<size_t>(after - insert_at));
+    insert_at[0] = '$';
+    insert_at[1] = 'B';
+    insert_at[2] = '$';
+    insert_at[3] = code;
+    return true;
+}
 bool game_host_is_main_thread() { return g_game_main_thread; }
 QolResult craft_stuff_slot_index(void* transient_control, int32_t* out_index) {
     if (out_index == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid", 7);
@@ -562,9 +603,17 @@ int main() {
                     "menu binding invalidation must append the UI adapter tail");
     static_assert(offsetof(qol::contracts::QolUiAdapter,
                            main_menu_text_button_invalidate_binding) +
-                       sizeof(adapter->main_menu_text_button_invalidate_binding) ==
-                    offsetof(qol::contracts::QolUiAdapter, main_menu_more_games_set_active),
-                    "native More Games active setter must append the adapter tail");
+                        sizeof(adapter->main_menu_text_button_invalidate_binding) ==
+                     offsetof(qol::contracts::QolUiAdapter, main_menu_more_games_set_active),
+                     "native More Games active setter must append the adapter tail");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, main_menu_replacement_rect_available) +
+                      sizeof(adapter->main_menu_replacement_rect_available) ==
+                   offsetof(qol::contracts::QolUiAdapter, ui_desc_text_cursor),
+                   "UIDesc cursor operation must append the UI adapter table");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, ui_desc_text_cursor) +
+                      sizeof(adapter->ui_desc_text_cursor) ==
+                   offsetof(qol::contracts::QolUiAdapter, insert_inline_color_span),
+                   "UIDesc span operation must append the UI adapter tail");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
@@ -614,6 +663,17 @@ int main() {
     CHECK(adapter->control_parent != nullptr);
     CHECK(adapter->find_root != nullptr);
     CHECK(adapter->insert_inline_color != nullptr);
+    CHECK(adapter->ui_desc_text_cursor != nullptr);
+    CHECK(adapter->insert_inline_color_span != nullptr);
+    qol::contracts::QolUiAdapter adapter_before_minor_22{};
+    adapter_before_minor_22.size = offsetof(qol::contracts::QolUiAdapter, ui_desc_text_cursor);
+    adapter_before_minor_22.major = qol::contracts::kUiAdapterMajor;
+    adapter_before_minor_22.minor = qol::contracts::kUiAdapterMinor - 1;
+    const bool old_adapter_has_span_api =
+        adapter_before_minor_22.minor >= qol::contracts::kUiAdapterMinor &&
+        adapter_before_minor_22.ui_desc_text_cursor != nullptr &&
+        adapter_before_minor_22.insert_inline_color_span != nullptr;
+    CHECK(!old_adapter_has_span_api);
 
     uint32_t popup_count = 42;
     uintptr_t popup_top = 0x42;
@@ -657,8 +717,8 @@ int main() {
           g_border_rect[3] == 140);
     CHECK(adapter->draw_border_rect(0, 0, 47, 140).code == kQolErrInvalidArgument);
 
-    // Phase1C L0：adapter minor 20→21（additive 尾槽）；旧 prefix 与 base minor13 门槛不变。
-    CHECK(adapter->minor == 21);
+    // Minor 21 slots remain in place; minor 22 appends the UIDesc cursor and span operations.
+    CHECK(adapter->minor == 22);
     CHECK(adapter->set_clip != nullptr && adapter->reset_clip != nullptr);
     CHECK(adapter->set_clip(-12, 34, 320, 140).ok == kQolOk);
     CHECK(g_set_clip_calls == 1);
@@ -1011,6 +1071,85 @@ int main() {
     CHECK(not_ready.code == kQolErrNotReady);
     CHECK(not_ready.message != nullptr);
     CHECK(not_ready.message_len == std::strlen(not_ready.message));
+
+    // Minor 22 exposes builder cursors as offsets into the bounded UIDesc text buffer.
+    {
+        constexpr size_t kCanarySize = 8;
+        std::memset(g_uidesc_test_buffer, 0, sizeof(g_uidesc_test_buffer));
+        std::memset(g_uidesc_test_buffer + G_UIDESC_TEXT_BUF_SIZE, 0xA5, kCanarySize);
+        const char prefix[] = "$WPrevious: 77$B";
+        const char row[] = "$GCurrent: -42$B";
+        const uint32_t before_offset = static_cast<uint32_t>(sizeof(prefix) - 1);
+        std::memcpy(g_uidesc_test_buffer, prefix, sizeof(prefix) - 1);
+        char* cursor = g_uidesc_test_buffer + before_offset;
+        uint32_t observed_offset = UINT32_MAX;
+        CHECK(adapter->ui_desc_text_cursor(&cursor, &observed_offset).ok == kQolOk);
+        CHECK(observed_offset == before_offset);
+
+        std::memcpy(cursor, row, sizeof(row) - 1);
+        cursor += sizeof(row) - 1;
+        const uint32_t after_offset = static_cast<uint32_t>(cursor - g_uidesc_test_buffer);
+        CHECK(adapter->ui_desc_text_cursor(&cursor, &observed_offset).ok == kQolOk);
+        CHECK(observed_offset == after_offset);
+        CHECK(adapter->insert_inline_color_span(&cursor, before_offset, after_offset, 'Y').ok ==
+              kQolOk);
+        CHECK(cursor == g_uidesc_test_buffer + after_offset + 4);
+        CHECK(std::strcmp(g_uidesc_test_buffer,
+                          "$WPrevious: 77$B$GCurrent: $B$Y-42$B") == 0);
+        for (size_t i = 0; i < kCanarySize; ++i) {
+            CHECK(static_cast<uint8_t>(g_uidesc_test_buffer[G_UIDESC_TEXT_BUF_SIZE + i]) == 0xA5);
+        }
+
+        char snapshot[sizeof(g_uidesc_test_buffer)];
+        std::memcpy(snapshot, g_uidesc_test_buffer, sizeof(snapshot));
+        char* saved_cursor = cursor;
+        CHECK(adapter->insert_inline_color_span(&cursor, after_offset, after_offset, 'Y').code ==
+              kQolErrInvalidArgument);
+        CHECK(std::memcmp(snapshot, g_uidesc_test_buffer, sizeof(snapshot)) == 0 &&
+              cursor == saved_cursor);
+        CHECK(adapter->insert_inline_color_span(&cursor, after_offset + 1, after_offset, 'Y').code ==
+              kQolErrInvalidArgument);
+        CHECK(std::memcmp(snapshot, g_uidesc_test_buffer, sizeof(snapshot)) == 0 &&
+              cursor == saved_cursor);
+        CHECK(adapter->insert_inline_color_span(&cursor, before_offset, after_offset, 0).code ==
+              kQolErrInvalidArgument);
+        CHECK(std::memcmp(snapshot, g_uidesc_test_buffer, sizeof(snapshot)) == 0 &&
+              cursor == saved_cursor);
+
+        cursor = g_uidesc_test_buffer + G_UIDESC_TEXT_BUF_SIZE - 2;
+        CHECK(adapter->insert_inline_color_span(&cursor, G_UIDESC_TEXT_BUF_SIZE - 12,
+                                                G_UIDESC_TEXT_BUF_SIZE - 2, 'Y').code ==
+              kQolErrBlocked);
+        CHECK(cursor == g_uidesc_test_buffer + G_UIDESC_TEXT_BUF_SIZE - 2);
+        CHECK(std::memcmp(snapshot, g_uidesc_test_buffer, sizeof(snapshot)) == 0);
+
+        cursor = g_uidesc_test_buffer + G_UIDESC_TEXT_BUF_SIZE + 1;
+        observed_offset = UINT32_MAX;
+        CHECK(adapter->ui_desc_text_cursor(&cursor, &observed_offset).code == kQolErrBlocked);
+        CHECK(observed_offset == 0);
+        CHECK(adapter->insert_inline_color_span(&cursor, 1,
+                                                G_UIDESC_TEXT_BUF_SIZE + 1, 'Y').code ==
+              kQolErrBlocked);
+        CHECK(std::memcmp(snapshot, g_uidesc_test_buffer, sizeof(snapshot)) == 0);
+
+        char* empty_cursor = nullptr;
+        CHECK(adapter->ui_desc_text_cursor(&empty_cursor, &observed_offset).code ==
+              kQolErrNotReady);
+        CHECK(adapter->insert_inline_color_span(&empty_cursor, 1, 2, 'Y').code ==
+              kQolErrBlocked);
+        CHECK(adapter->ui_desc_text_cursor(nullptr, &observed_offset).code ==
+              kQolErrInvalidArgument);
+        CHECK(adapter->ui_desc_text_cursor(&cursor, nullptr).code == kQolErrInvalidArgument);
+        CHECK(std::memcmp(snapshot, g_uidesc_test_buffer, sizeof(snapshot)) == 0);
+
+        g_uidesc_buffer_available = false;
+        CHECK(adapter->ui_desc_text_cursor(&saved_cursor, &observed_offset).code ==
+              kQolErrNotReady);
+        g_uidesc_buffer_available = true;
+        for (size_t i = 0; i < kCanarySize; ++i) {
+            CHECK(static_cast<uint8_t>(g_uidesc_test_buffer[G_UIDESC_TEXT_BUF_SIZE + i]) == 0xA5);
+        }
+    }
 
     // 共享图集保护门：模拟游戏已加载共享图集（原生消费者存活），模块侧三种卸载入口
     // 对受保护 unit 必须拒绝执行、不触达底层物理卸载；加载保持幂等。

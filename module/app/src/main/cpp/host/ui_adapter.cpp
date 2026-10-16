@@ -90,6 +90,76 @@ QolResult insert_inline_color(void* builder, uint32_t max_text_bytes, uint8_t co
     return contracts::ok();
 }
 
+QolResult ui_desc_text_cursor(void* builder, uint32_t* out_offset) {
+    if (builder == nullptr || out_offset == nullptr) return invalid_argument();
+    *out_offset = 0;
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+
+    char* buffer = nullptr;
+    if (!qol::game::attr_uidesc_text_buffer_base(&buffer) || buffer == nullptr) return not_ready();
+    const uintptr_t buffer_address = reinterpret_cast<uintptr_t>(buffer);
+    if (buffer_address > std::numeric_limits<uintptr_t>::max() - G_UIDESC_TEXT_BUF_SIZE) {
+        return not_ready();
+    }
+    const uintptr_t buffer_end = buffer_address + G_UIDESC_TEXT_BUF_SIZE;
+
+    if (!game_memory_accessible(builder, sizeof(char*), 'r')) return not_ready();
+    auto** text_slot = reinterpret_cast<char**>(builder);
+    const char* cursor = *text_slot;
+    if (cursor == nullptr) return not_ready();
+    const uintptr_t cursor_address = reinterpret_cast<uintptr_t>(cursor);
+    if (cursor_address < buffer_address || cursor_address > buffer_end) {
+        static constexpr char kCursorOutsideBuffer[] = "UIDesc cursor outside text buffer";
+        return contracts::error(kQolErrBlocked, kCursorOutsideBuffer,
+                                sizeof(kCursorOutsideBuffer) - 1);
+    }
+    *out_offset = static_cast<uint32_t>(cursor_address - buffer_address);
+    return contracts::ok();
+}
+
+QolResult insert_inline_color_span(void* builder, uint32_t before_offset,
+                                   uint32_t after_offset, uint8_t color_code) {
+    if (builder == nullptr || color_code == 0 || before_offset >= after_offset) {
+        return invalid_argument();
+    }
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+
+    char* buffer = nullptr;
+    if (!qol::game::attr_uidesc_text_buffer_base(&buffer) || buffer == nullptr) return not_ready();
+    if (G_UIDESC_TEXT_BUF_SIZE > std::numeric_limits<uintptr_t>::max() -
+                                     reinterpret_cast<uintptr_t>(buffer)) {
+        return not_ready();
+    }
+    if (after_offset > G_UIDESC_TEXT_BUF_SIZE || before_offset > G_UIDESC_TEXT_BUF_SIZE ||
+        after_offset > G_UIDESC_TEXT_BUF_SIZE - 4) {
+        static constexpr char kSpanOutsideBuffer[] = "UIDesc text span outside buffer";
+        return contracts::error(kQolErrBlocked, kSpanOutsideBuffer,
+                                sizeof(kSpanOutsideBuffer) - 1);
+    }
+    if (!game_memory_accessible(builder, sizeof(char*), 'r') ||
+        !game_memory_accessible(builder, sizeof(char*), 'w') ||
+        !game_memory_accessible(buffer, G_UIDESC_TEXT_BUF_SIZE, 'r') ||
+        !game_memory_accessible(buffer, G_UIDESC_TEXT_BUF_SIZE, 'w')) {
+        return not_ready();
+    }
+
+    auto** text_slot = reinterpret_cast<char**>(builder);
+    const uintptr_t buffer_address = reinterpret_cast<uintptr_t>(buffer);
+    const uintptr_t expected_cursor = buffer_address + after_offset;
+    if (reinterpret_cast<uintptr_t>(*text_slot) != expected_cursor) {
+        static constexpr char kCursorSpanMismatch[] = "UIDesc cursor does not match span";
+        return contracts::error(kQolErrBlocked, kCursorSpanMismatch,
+                                sizeof(kCursorSpanMismatch) - 1);
+    }
+
+    if (!qol::game::attr_insert_value_color(buffer + before_offset, buffer + after_offset,
+                                             static_cast<char>(color_code))) {
+        return not_ready();
+    }
+    *text_slot = buffer + after_offset + 4;
+    return contracts::ok();
+}
+
 ::UiRect game_rect(UiRect rect) {
     return ::UiRect{rect.x, rect.y, rect.w, rect.h};
 }
@@ -1326,9 +1396,11 @@ const QolUiAdapter g_ui_adapter{
           // Minor 21 additive tail: explicit text-button layout/draw and the menu
           // replacement geometry check.
           &layout_native_text_button,
-          &draw_native_text_button,
-          &main_menu_replacement_rect_available,
-};
+           &draw_native_text_button,
+           &main_menu_replacement_rect_available,
+           &ui_desc_text_cursor,
+           &insert_inline_color_span,
+ };
 
 }  // namespace
 

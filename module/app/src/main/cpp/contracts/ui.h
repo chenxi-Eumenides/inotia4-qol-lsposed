@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 14;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 21;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 22;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 0;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -432,6 +432,8 @@ struct QolUiAdapter {
     QolResult (*draw_item_porting)(QolUiHandle, int32_t, int32_t, int32_t, int32_t);
     QolResult (*control_parent)(QolUiHandle, QolUiHandle*);
     QolResult (*find_root)(QolUiRootKind, QolUiHandle*);
+    // Deprecated: without the current row span this cannot color inline text; retained for ABI
+    // compatibility.
     QolResult (*insert_inline_color)(void* builder, uint32_t max_text_bytes, uint8_t color_code);
 
     // 扩展背包运行时控件操作；宿主负责定位游戏控件函数和游戏内存分配器。
@@ -523,6 +525,14 @@ struct QolUiAdapter {
     QolResult (*main_menu_replacement_rect_available)(QolUiHandle original,
                                                       UiRect parent_relative_hit_rect,
                                                       uint8_t* out_available);
+
+    // Minor 22 append-only slots. Offsets are relative to the UIDesc text buffer, never raw addresses.
+    // The [before, after) span must come from backup before/after cursor snapshots of the same
+    // builder. Failed validation leaves the buffer and builder unchanged; successful insertion
+    // advances the cursor by 4 bytes.
+    QolResult (*ui_desc_text_cursor)(void* builder, uint32_t* out_offset);
+    QolResult (*insert_inline_color_span)(void* builder, uint32_t before_offset,
+                                          uint32_t after_offset, uint8_t color_code);
 };
 
 }  // namespace qol::contracts
