@@ -6,6 +6,8 @@ import java.io.IOException
 
 object QolPaths {
     const val DIR_NAME = "qol"
+    private const val LEGACY_SIDECAR_SUFFIX = ".module-save"
+    private const val SIDECAR_SUFFIX = ".qol-save"
     private val layoutPlaceholders = mutableSetOf<String>()
 
     fun root(context: Context): File? =
@@ -50,6 +52,8 @@ object QolPaths {
         migratePath(File(externalFiles, "config.json"), File(root, "config.json"), isDirectory = false)
         migratePath(File(externalFiles, "module-saves"), File(root, "saves"), isDirectory = true)
         migratePath(File(externalFiles, "save_backup"), File(root, "backups"), isDirectory = true)
+        // sidecar 后缀已改为 .qol-save；对（无论本次还是更早搬迁的）saves/ 内旧后缀文件重命名，幂等。
+        renameLegacySidecars(File(root, "saves"))
         removeLegacyFile(File(externalFiles, "skip_hive_block.flag"))
         removeLegacyFile(File(externalFiles, "inotia4-export.log"))
     }
@@ -129,6 +133,27 @@ object QolPaths {
         }
         source.inputStream().use { input ->
             destination.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
+    /**
+     * 把 saves/ 内旧后缀 `.module-save`（含 `.last-good`、`.corrupt.<ms>` 等派生名）改为
+     * `.qol-save`，使旧 sidecar 在新命名下仍可被 native store 读取。目标已存在时不覆盖。
+     */
+    private fun renameLegacySidecars(savesDir: File) {
+        if (!savesDir.isDirectory) return
+        for (file in savesDir.listFiles() ?: return) {
+            if (!file.isFile || !file.name.contains(LEGACY_SIDECAR_SUFFIX)) continue
+            val target = File(savesDir, file.name.replace(LEGACY_SIDECAR_SUFFIX, SIDECAR_SUFFIX))
+            if (target.exists()) {
+                LogFile.info(LogDomain.PLATFORM, "legacy sidecar rename skipped: ${target.name} already exists")
+                continue
+            }
+            if (file.renameTo(target)) {
+                LogFile.info(LogDomain.PLATFORM, "legacy sidecar renamed ${file.name} -> ${target.name}")
+            } else {
+                LogFile.error(LogDomain.PLATFORM, "legacy sidecar rename failed: ${file.path}")
+            }
         }
     }
 
