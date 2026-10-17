@@ -16,7 +16,7 @@ constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 14;
 constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 22;
 constexpr const char* kUiStateCapabilityId = "ui.state";
-constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 0;
+constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
 constexpr uint32_t kUiStateMaxPanelIdBytes = 128;
 constexpr uint32_t kUiStateMaxDialogOptions = 6;
@@ -37,10 +37,28 @@ struct UiCustomDialogSnapshot {
     uint32_t option_count;
 };
 
+// UI 层类型：对话框 / 面板 / 其他（原生 screen 等）。
+enum class UiLayerType : uint32_t {
+    kOther = 0,
+    kPanel = 1,
+    kDialog = 2,
+};
+
+// 单层信息：id 由 provider 持有，仅在 visit 调用期间有效。
+struct UiLayerInfo {
+    const char* id;
+    uint32_t type;  // UiLayerType
+};
+
+using QolUiLayerVisitFn = void (*)(const UiLayerInfo* layer, void* user);
+
 struct UiStateApi {
     QolResult (*publish_custom_panels)(const UiCustomPanelsSnapshot* snapshot);
     QolResult (*publish_custom_dialog)(const UiCustomDialogSnapshot* snapshot);
     QolResult (*clear_custom_dialog)(uint64_t generation, uint64_t sequence);
+    // v1.1 尾部追加：按栈顶→栈底枚举当前 UI 层。回调在调用线程同步执行，
+    // layer->id 仅在本次回调内有效，消费者需自行复制。
+    QolResult (*read_layers)(QolUiLayerVisitFn visit, void* user);
 };
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };

@@ -4,6 +4,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/item_facts.h"
 #include "contracts/plugin.h"
+#include "contracts/ui.h"
 #include "contracts/ui_choice.h"
 #include "contracts/world_facts.h"
 #include "plugins/world_teleport/feature.h"
@@ -36,6 +37,7 @@ int g_add_money_calls = 0;
 int64_t g_add_money_amount = 0;
 bool g_map_change_fail = false;
 std::string g_banner;
+std::string g_last_log;
 std::vector<ScheduledTask> g_tasks;
 std::vector<std::string> g_choice_items;
 void (*g_choice_select)(int, void*) = nullptr;
@@ -74,7 +76,8 @@ QolResult money(int64_t* out) {
     return qol::contracts::ok();
 }
 
-QolResult fake_log_write(int32_t, int32_t, const char*, const char*, uint32_t) {
+QolResult fake_log_write(int32_t, int32_t, const char*, const char* message, uint32_t) {
+    if (message != nullptr) g_last_log = message;
     return qol::contracts::ok();
 }
 
@@ -111,6 +114,19 @@ void ui_choice_close() { ++g_choice_close_calls; }
 const qol::contracts::UiChoiceApi kUiChoice{&ui_choice_open, &ui_choice_active,
                                             &ui_choice_close};
 
+QolResult read_layers(qol::contracts::QolUiLayerVisitFn visit, void* user) {
+    if (visit == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid visitor", 15);
+    }
+    const qol::contracts::UiLayerInfo dialog{
+        "world_teleport.confirm",
+        static_cast<uint32_t>(qol::contracts::UiLayerType::kDialog)};
+    visit(&dialog, user);
+    return qol::contracts::ok();
+}
+
+const qol::contracts::UiStateApi kUiState{nullptr, nullptr, nullptr, &read_layers};
+
 QolResult require_capability(const char* id, QolVersionRange, const void** out_iface) {
     if (std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) == 0) {
         *out_iface = &kWorldFacts;
@@ -118,6 +134,8 @@ QolResult require_capability(const char* id, QolVersionRange, const void** out_i
         *out_iface = &kItemFacts;
     } else if (std::strcmp(id, qol::contracts::kUiChoiceCapabilityId) == 0) {
         *out_iface = &kUiChoice;
+    } else if (std::strcmp(id, qol::contracts::kUiStateCapabilityId) == 0) {
+        *out_iface = &kUiState;
     } else {
         *out_iface = nullptr;
         return qol::contracts::error(kQolErrNotFound, "missing capability", 18);
@@ -178,6 +196,7 @@ void reset_observations() {
     g_add_money_amount = 0;
     g_map_change_fail = false;
     g_banner.clear();
+    g_last_log.clear();
     g_tasks.clear();
     g_choice_items.clear();
     g_choice_select = nullptr;
@@ -205,15 +224,14 @@ int main() {
     actions.actions.show_banner = &show_banner;
     actions.actions.add_money = &add_money;
 
-    qol::contracts::QolChoicePort choice{};
-    const void* ports[] = {&choice, &actions};
+    const void* ports[] = {&actions};
     qol::contracts::PluginContext context{};
     context.struct_size = sizeof(context);
     context.sdk_major = qol::contracts::kHostSdkMajor;
     context.sdk = &sdk;
     context.game = nullptr;  // 私有端口迁移后插件不再依赖聚合 Game Host
     context.ports = ports;
-    context.port_count = 2;
+    context.port_count = 1;
 
     const auto& descriptor = qol::features::world_teleport::plugin_descriptor();
     assert(descriptor.install(context) == 0);
@@ -224,6 +242,7 @@ int main() {
     g_money = 0;
     qol::features::world_teleport::world_teleport_call_map_name();
     assert(g_choice_open_calls == 1);
+    assert(g_last_log.find("top=world_teleport.confirm") != std::string::npos);
     assert(g_choice_items.size() == 5);
     assert(g_choice_select != nullptr);
     g_choice_select(0, g_choice_user);

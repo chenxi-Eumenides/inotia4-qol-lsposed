@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../../contracts/ui.h"
 #include "../../contracts/ui_choice.h"
 #include "plugin.h"
 #include "rules.h"
@@ -139,6 +140,48 @@ const char* map_name(int map_id) {
     return text != nullptr ? text : kUnknownMapName;
 }
 
+struct LayerLogContext {
+    char id[qol::contracts::kUiStateMaxPanelIdBytes]{};
+    uint32_t type = 0;
+    bool found = false;
+};
+
+void collect_top_layer(const qol::contracts::UiLayerInfo* layer, void* user) {
+    auto* out = static_cast<LayerLogContext*>(user);
+    if (out == nullptr || out->found || layer == nullptr || layer->id == nullptr) return;
+    std::snprintf(out->id, sizeof(out->id), "%s", layer->id);
+    out->type = layer->type;
+    out->found = true;
+}
+
+// 诊断：记录当前 UI 栈顶层的 id 与类型；能力缺失或失败只降级为 top=-，不影响传送流程。
+void log_ui_top_layer(int current_id) {
+    const auto* sdk = qol::features::world_teleport::host_sdk();
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) {
+        log_message(1, "world teleport: choice opened current=%d top=-", current_id);
+        return;
+    }
+    const void* iface = nullptr;
+    if (!qol::contracts::succeeded(sdk->capabilities.require(
+            qol::contracts::kUiStateCapabilityId,
+            QolVersionRange{static_cast<uint16_t>(qol::contracts::kUiStateVersionMajor),
+                            static_cast<uint16_t>(qol::contracts::kUiStateVersionMinor)},
+            &iface)) ||
+        iface == nullptr) {
+        log_message(1, "world teleport: choice opened current=%d top=-", current_id);
+        return;
+    }
+    const auto* api = static_cast<const qol::contracts::UiStateApi*>(iface);
+    if (api->read_layers == nullptr) {
+        log_message(1, "world teleport: choice opened current=%d top=-", current_id);
+        return;
+    }
+    LayerLogContext top{};
+    (void)api->read_layers(&collect_top_layer, &top);
+    log_message(1, "world teleport: choice opened current=%d top=%s type=%u",
+                current_id, top.found ? top.id : "-", top.type);
+}
+
 void open_choice_panel() {
     int current_id = 0;
     int record_count = 0;
@@ -187,12 +230,7 @@ void open_choice_panel() {
         log_message(3, "world teleport: choice open failed");
         return;
     }
-    int state_id = -1;
-    if (qol::features::world_teleport::choice_port() != nullptr &&
-        qol::features::world_teleport::choice_port()->read.state_id != nullptr) {
-        (void)qol::features::world_teleport::choice_port()->read.state_id(&state_id);
-    }
-    log_message(1, "world teleport: choice opened current=%d state=%d", current_id, state_id);
+    log_ui_top_layer(current_id);
 }
 
 int32_t delayed_open_choice(int64_t, void*) {

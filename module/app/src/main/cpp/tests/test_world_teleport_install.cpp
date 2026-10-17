@@ -48,7 +48,6 @@ void check_failure(const qol::contracts::PluginDescriptor& descriptor,
     assert(std::strcmp(status.error, expected_error) == 0);
     assert(qol::features::world_teleport::host_sdk() == nullptr);
     assert(qol::features::world_teleport::world_action_port() == nullptr);
-    assert(qol::features::world_teleport::choice_port() == nullptr);
     assert(qol::features::world_teleport::world_facts() == nullptr);
     assert(qol::features::world_teleport::item_facts() == nullptr);
 }
@@ -60,30 +59,28 @@ int main() {
     sdk.capabilities.require = &require_capability;
     qol::contracts::QolWorldActionPort actions{};
     actions.abi_version = qol::contracts::kQolPortWorldActionVersion;
-    qol::contracts::QolChoicePort choice{};
-    const void* ports[] = {&choice, &actions};
+    const void* ports[] = {&actions};
     qol::contracts::PluginContext context{};
     context.struct_size = sizeof(context);
     context.sdk_major = qol::contracts::kHostSdkMajor;
     context.sdk = &sdk;
     context.game = nullptr;  // 私有端口迁移后插件不再依赖聚合 Game Host
     context.ports = ports;
-    context.port_count = 2;
+    context.port_count = 1;
 
     const auto& descriptor = qol::features::world_teleport::plugin_descriptor();
     assert(descriptor.requires_count == 2);
     assert(std::strcmp(descriptor.requires[0].id, qol::contracts::kWorldFactsCapabilityId) == 0);
     assert(std::strcmp(descriptor.requires[1].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    assert(descriptor.port_count == 2);
-    assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHOICE);
-    assert(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_WORLD_ACTION);
+    assert(descriptor.port_count == 1);
+    assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_WORLD_ACTION);
 
     // 端口数量不符/缺失 → fail-closed
-    context.port_count = 1;
+    context.port_count = 0;
     check_failure(descriptor, context,
                   "install failed: world teleport dependencies not ready");
-    context.port_count = 2;
-    const void* missing_action_port[] = {&choice, nullptr};
+    context.port_count = 1;
+    const void* missing_action_port[] = {nullptr};
     context.ports = missing_action_port;
     check_failure(descriptor, context,
                   "install failed: world teleport dependencies not ready");
@@ -125,7 +122,6 @@ int main() {
     assert(status.error == nullptr);
     assert(qol::features::world_teleport::host_sdk() == nullptr);
     assert(qol::features::world_teleport::world_action_port() == nullptr);
-    assert(qol::features::world_teleport::choice_port() == nullptr);
     assert(qol::features::world_teleport::world_facts() == nullptr);
     assert(qol::features::world_teleport::item_facts() == nullptr);
     return 0;

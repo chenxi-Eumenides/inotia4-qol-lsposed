@@ -206,10 +206,13 @@ QolResult clear_custom_dialog(uint64_t generation, uint64_t sequence) {
     return contracts::ok();
 }
 
+QolResult read_layers(contracts::QolUiLayerVisitFn visit, void* user);
+
 const contracts::UiStateApi kUiStateApi{
     &publish_custom_panels,
     &publish_custom_dialog,
     &clear_custom_dialog,
+    &read_layers,
 };
 
 const contracts::CapabilityProvisionRef kProvides[] = {
@@ -287,6 +290,48 @@ UiSnapshotCopy copy_ui_snapshot() {
                 sizeof(copy.custom_dialog_options));
     copy.custom_dialog_option_count = g_snapshot.custom_dialog_option_count;
     return copy;
+}
+
+// 从 dialog JSON 取顶层 "type" 字段；找不到或过长返回 false。
+bool json_type_field(const char* json, char* out, uint32_t capacity) {
+    if (json == nullptr || out == nullptr || capacity == 0) return false;
+    static constexpr char kKey[] = "\"type\":\"";
+    const char* key = std::strstr(json, kKey);
+    if (key == nullptr) return false;
+    key += sizeof(kKey) - 1;
+    const char* end = std::strchr(key, '"');
+    if (end == nullptr) return false;
+    const size_t length = static_cast<size_t>(end - key);
+    if (length == 0 || length >= capacity) return false;
+    std::memcpy(out, key, length);
+    out[length] = '\0';
+    return true;
+}
+
+QolResult read_layers(contracts::QolUiLayerVisitFn visit, void* user) {
+    if (visit == nullptr) return state_error(kQolErrInvalidArgument, "invalid layer visitor");
+    const UiSnapshotCopy snapshot = copy_ui_snapshot();
+    auto emit = [visit, user](const char* id, contracts::UiLayerType type) {
+        if (id == nullptr || id[0] == '\0') return;
+        const contracts::UiLayerInfo layer{id, static_cast<uint32_t>(type)};
+        visit(&layer, user);
+    };
+    // 栈顶 → 栈底：自定义对话框 → 自定义面板（后压入者在上）→ 原生对话框 → 原生面板 → screen。
+    if (snapshot.custom_dialog_active) {
+        emit(snapshot.custom_dialog_type, contracts::UiLayerType::kDialog);
+    }
+    for (uint32_t i = snapshot.custom_panel_count; i > 0; --i) {
+        emit(snapshot.custom_panel_ids[i - 1], contracts::UiLayerType::kPanel);
+    }
+    char dialog_type[contracts::kUiStateMaxDialogTextBytes]{};
+    if (snapshot.native_snapshot_valid &&
+        json_type_field(snapshot.native_dialog, dialog_type, sizeof(dialog_type)) &&
+        std::strcmp(dialog_type, "none") != 0) {
+        emit(dialog_type, contracts::UiLayerType::kDialog);
+    }
+    emit(snapshot.native_panel, contracts::UiLayerType::kPanel);
+    emit(snapshot.screen, contracts::UiLayerType::kOther);
+    return contracts::ok();
 }
 
 std::string json_quote(const char* value) {

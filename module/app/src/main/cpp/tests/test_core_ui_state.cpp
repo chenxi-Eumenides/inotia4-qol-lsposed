@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <vector>
 
 #include "contracts/game_ports/choice_write_port.h"
 #include "contracts/game_ports/ui_write_port.h"
@@ -308,6 +309,66 @@ void test_custom_dialog_generation_and_mapping(const UiStateApi* api) {
     assert(api->publish_custom_dialog(&dialog2).code == kQolErrConflict);
 }
 
+struct LayerCapture {
+    std::vector<std::string> ids;
+    std::vector<uint32_t> types;
+};
+
+void capture_layer(const UiLayerInfo* layer, void* user) {
+    auto* out = static_cast<LayerCapture*>(user);
+    assert(layer != nullptr && layer->id != nullptr);
+    out->ids.emplace_back(layer->id);
+    out->types.push_back(layer->type);
+}
+
+void test_read_layers(const UiStateApi* api) {
+    assert(api != nullptr && api->read_layers != nullptr);
+    const UiCustomPanelsSnapshot clear{100, 0, nullptr};
+    assert(succeeded(api->publish_custom_panels(&clear)));
+    char panel_a[] = "custom.a";
+    char panel_b[] = "custom.b";
+    const char* ids[] = {panel_a, panel_b};
+    const UiCustomPanelsSnapshot panels{101, 2, ids};
+    assert(succeeded(api->publish_custom_panels(&panels)));
+    char type[] = "world_teleport.confirm";
+    char title[] = "t";
+    char option[] = "ok";
+    const char* labels[] = {option};
+    const UiCustomDialogSnapshot dialog{102, 7, type, title, labels, 1};
+    assert(succeeded(api->publish_custom_dialog(&dialog)));
+
+    g_native_screen = "panel_inventory";
+    g_native_panel = "panel_inventory";
+    g_native_dialog = "{\"type\":\"npc\",\"options\":[]}";
+    g_frame_handler(3, nullptr);
+
+    LayerCapture layers{};
+    assert(succeeded(api->read_layers(&capture_layer, &layers)));
+    assert(layers.ids.size() == 6);
+    assert(layers.ids[0] == "world_teleport.confirm" &&
+           layers.types[0] == static_cast<uint32_t>(UiLayerType::kDialog));
+    assert(layers.ids[1] == "custom.b" &&
+           layers.types[1] == static_cast<uint32_t>(UiLayerType::kPanel));
+    assert(layers.ids[2] == "custom.a" &&
+           layers.types[2] == static_cast<uint32_t>(UiLayerType::kPanel));
+    assert(layers.ids[3] == "npc" &&
+           layers.types[3] == static_cast<uint32_t>(UiLayerType::kDialog));
+    assert(layers.ids[4] == "panel_inventory" &&
+           layers.types[4] == static_cast<uint32_t>(UiLayerType::kPanel));
+    assert(layers.ids[5] == "panel_inventory" &&
+           layers.types[5] == static_cast<uint32_t>(UiLayerType::kOther));
+
+    const UiCustomPanelsSnapshot clear_panels{103, 0, nullptr};
+    assert(succeeded(api->publish_custom_panels(&clear_panels)));
+    assert(succeeded(api->clear_custom_dialog(7, 104)));
+    LayerCapture native{};
+    assert(succeeded(api->read_layers(&capture_layer, &native)));
+    assert(native.ids.size() == 3);
+    assert(native.ids[0] == "npc");
+    assert(native.ids[1] == "panel_inventory");
+    assert(native.ids[2] == "panel_inventory");
+}
+
 void test_native_snapshot_failure_invalidates_all_queries(const UiStateApi* api) {
     g_native_screen = "world";
     g_native_panel = "";
@@ -374,7 +435,7 @@ int main() {
     const PluginDescriptor& descriptor = qol::features::core_ui_state::plugin_descriptor();
     assert(descriptor.provides_count == 1);
     assert(std::strcmp(descriptor.provides[0].id, kUiStateCapabilityId) == 0);
-    assert(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
+    assert(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 1);
     assert(std::strcmp(descriptor.optional_requires[0].id, kHttpRegistryCapabilityId) == 0);
     assert(std::strcmp(descriptor.optional_requires[1].id, kHttpDispatchCapabilityId) == 0);
     assert(descriptor.optional_requires[0].range.major == 1 &&
@@ -400,6 +461,7 @@ int main() {
     test_custom_dialog_generation_and_mapping(api);
     test_native_snapshot_failure_invalidates_all_queries(api);
     test_ui_write_ticket_retry();
+    test_read_layers(api);
 
     descriptor.deactivate(context);
     assert(g_frame_handler == nullptr);

@@ -40,15 +40,14 @@ int main() {
     sdk.capabilities.require = &require_capability;
     qol::contracts::QolWorldActionPort actions{};
     actions.abi_version = qol::contracts::kQolPortWorldActionVersion;
-    qol::contracts::QolChoicePort choice{};
-    const void* ports[] = {&choice, &actions};
+    const void* ports[] = {&actions};
     qol::contracts::PluginContext context{};
     context.struct_size = sizeof(context);
     context.sdk_major = qol::contracts::kHostSdkMajor;
     context.sdk = &sdk;
     context.game = nullptr;  // 私有端口迁移后插件不再依赖聚合 Game Host
     context.ports = ports;
-    context.port_count = 2;
+    context.port_count = 1;
 
     const auto& descriptor = qol::features::world_teleport::plugin_descriptor();
     assert(descriptor.install(context) == 0);

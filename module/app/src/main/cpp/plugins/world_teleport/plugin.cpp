@@ -1,7 +1,7 @@
 #include "plugin.h"
 
+#include "../../contracts/ui.h"
 #include "../../contracts/ui_choice.h"
-#include "../../contracts/game_ports/choice_port.h"
 #include "../../contracts/game_ports/ports.h"
 #include "../../contracts/game_ports/world_action_port.h"
 #include "../../contracts/http.h"
@@ -18,7 +18,6 @@ constexpr const char* kPluginId = "world_teleport";
 constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
-const contracts::QolChoicePort* g_choice_port = nullptr;
 const contracts::QolWorldActionPort* g_world_action_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
@@ -48,6 +47,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kUiChoiceCapabilityId,
      QolVersionRange{static_cast<uint16_t>(contracts::kUiChoiceVersionMajor),
                      static_cast<uint16_t>(contracts::kUiChoiceVersionMinor)}},
+    {contracts::kUiStateCapabilityId,
+     QolVersionRange{contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}},
 };
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -58,15 +59,12 @@ const contracts::CapabilityRequirement kRequires[] = {
 };
 
 const contracts::QolPortRequirement kPorts[] = {
-    {contracts::QolPortId::QOL_PORT_CHOICE,
-     {contracts::kQolPortChoiceVersion.major, contracts::kQolPortChoiceVersion.minor}},
     {contracts::QolPortId::QOL_PORT_WORLD_ACTION,
      {contracts::kQolPortWorldActionVersion.major, contracts::kQolPortWorldActionVersion.minor}},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
-    g_choice_port = nullptr;
     g_world_action_port = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
@@ -74,19 +72,15 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_install_error = nullptr;
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr ||
-        ctx.ports == nullptr || ctx.port_count != 2 || ctx.ports[0] == nullptr ||
-        ctx.ports[1] == nullptr) {
+        ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         g_sdk = nullptr;
-        g_choice_port = nullptr;
         g_world_action_port = nullptr;
         g_world_facts = nullptr;
         g_item_facts = nullptr;
         g_install_error = "install failed: world teleport dependencies not ready";
         return 1;
     }
-    // 端口按 kPorts 声明顺序注入：0=CHOICE，1=WORLD_ACTION。
-    g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
-    g_world_action_port = static_cast<const contracts::QolWorldActionPort*>(ctx.ports[1]);
+    g_world_action_port = static_cast<const contracts::QolWorldActionPort*>(ctx.ports[0]);
     const void* world_facts_iface = nullptr;
     if (g_sdk->capabilities.require == nullptr ||
         !contracts::succeeded(g_sdk->capabilities.require(
@@ -95,7 +89,6 @@ int plugin_install(contracts::PluginContext& ctx) {
             &world_facts_iface)) ||
         world_facts_iface == nullptr) {
         g_sdk = nullptr;
-        g_choice_port = nullptr;
         g_world_action_port = nullptr;
         g_install_error = "install failed: world facts unavailable";
         return 1;
@@ -109,7 +102,6 @@ int plugin_install(contracts::PluginContext& ctx) {
         item_facts_iface == nullptr || !contracts::item_facts_api_size_valid(
                                            static_cast<const contracts::ItemFactsApi*>(item_facts_iface))) {
         g_sdk = nullptr;
-        g_choice_port = nullptr;
         g_world_action_port = nullptr;
         g_world_facts = nullptr;
         g_item_facts = nullptr;
@@ -126,7 +118,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_world_facts = nullptr;
     g_item_facts = nullptr;
     g_world_action_port = nullptr;
-    g_choice_port = nullptr;
     g_sdk = nullptr;
     invalidate_operations();
 }
@@ -175,7 +166,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     nullptr,
     kPorts,
-    2,
+    1,
     nullptr,
     0,
     kFeatures, 1,
@@ -195,9 +186,6 @@ const contracts::QolWorldActionPort* world_action_port() {
     return g_world_action_port;
 }
 
-const contracts::QolChoicePort* choice_port() {
-    return g_choice_port;
-}
 
 const contracts::WorldFactsApi* world_facts() {
     return g_world_facts;
