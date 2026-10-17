@@ -3,7 +3,7 @@
 > 本文件**只记录缺陷问题**：插件审计与真机事件调查中确认的问题条目。每条记录归属（所属插件/模块组件）、证据与状态。
 > 分工：验收证据欠账（待补真机日志的 VM 卡）唯一登记处是 `verification.md` §5，本文件不重复；本文件登记的是**缺陷本身**。
 > 维护纪律：新问题按所属组件追加条目，编号不复用、不重排；修复后更新状态并把条目移入文末「已修复」附录（正文只留确实存在的问题）。
-> 排序：正文 §1–§8、§11 为开放/挂账问题（§9 文档漂移、§10 无法验证项）；已修复条目在文末附录存证。
+> 排序：正文 §1–§8、§11–§12 为开放/挂账问题（§9 文档漂移、§10 无法验证项）；已修复条目在文末附录存证。
 > 严重度：P1 行为错误或契约破坏；P2 风险/缺陷；P3 质量/演进项。
 > 范围记录：插件逐个审计（core.world → core.item → core.character → …）与真机验证中产生的问题均入此账。
 
@@ -93,10 +93,10 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 
 | ID | 级 | 问题 | 证据 | 状态 |
 |---|---|---|---|---|
-| INF-01 | P1 | stack_limit 驻留（residency）无保护：开启期间存档写入 >99 堆叠后，关闭开关（config 或 lifecycle）使 enter_slot 预检判 `slot corrupt` 无法进档（stage load_data）；真机复现：SET-01 的门禁翻转致 slot0 不可进，重开门禁+重启进程后恢复。回滚通道=门禁开或存档回档，两者均未在开关语义中提示 | 真机（tickets 18/23/26 failed vs 28 done）；VM-P6-01 驻留证据欠账 | 开放（策略待裁决：关闭前 clamp/禁止关/关闭态预检豁免并声明） |
+| INF-01 | P1 | stack_limit 驻留（residency）风险：开启期间存档写入 >99 堆叠后关闭开关，观察到 enter_slot `slot corrupt` / 无法进档（stage load_data）；SET-01 门禁翻转时 slot0 无法进入，重开门禁+重启进程后恢复。**关闭后 slot corrupt 的具体触发链尚未证实**；回滚通道=门禁开或存档回档，两者均未在开关语义中提示。 | 真机（tickets 18/23/26 failed vs 28 done）；VM-P6-01；stack_limit 审计 `verification-log.md` §2 | 开放（触发链待确认；策略待裁决：关闭前 clamp/禁止关/关闭态预检豁免并声明） |
 | INF-02 | P2 | `game_cache` 惰性槽在**请求线程持 `g_cache_mtx` 调 builder**，builder 内 `wait_frame_boundary` 以 1ms sleep 轮询：HTTP 线程可被长时间阻塞；若任何持 `g_virtual_bag_mtx` 的路径触达缓存刷新即重入 `for_each_logical_item` 死锁——现靠「EB 的 op_ok 全在锁外」约定维持，无机制校验 | `core/native/game_cache.cpp:101-119,143-164`；审计 item-G-03；AGENTS 锁规则 | 开放（校验手段：断言/测试或锁序文档化） |
 | INF-03 | P2 | `frame_cache_force_refresh` 每次 op_ok/卖店/丢弃全量重建 12 个缓存槽（含地图/玩家/队伍），且写结果已即时序列化一次，重复成本高 | `game_cache.cpp:185-195`；审计 item-G-05 | 开放（性能项） |
-| INF-05 | P3 | `item_count_facade` 裸指针 `g_provider` set-once 无原子、deactivate 不清除（stack_limit 刻意常驻）；契约未记录该约束 | `game/adapter_ports/item_count_facade.cpp`；审计 item-G-06 | 开放（注释/断言固定） |
+| INF-05 | P3 | `item_count_facade` 裸指针 `g_provider` set-once 无原子、deactivate 不清除（stack_limit 刻意常驻）；契约未记录该约束 | `game/adapter_ports/item_count_facade.cpp`；审计 item-G-06；stack_limit 审计 `SL-08` | 源码已变更，旧风险不再适用；待用户确认销账 |
 | INF-06 | P3 | `capabilities.require` 无锁：注册/撤销在主线程，契约未禁止 HTTP 线程 require（数据竞争窗口） | `infra/capabilities.cpp:68-81`；审计 char-G-05 | 开放（契约声明线程约束+断言） |
 | INF-07 | P3 | 注册容量 `kMaxHandlers=128`、`kMaxPending=1024` 无余量诊断，冲突/超限错误仅落装配日志 | `http_dispatch.cpp:17`、`command_queue.cpp:22`；审计 char-G-06 | 开放 |
 | INF-08 | P3 | handler 全局唯一 id（如 `0x57540001`）依赖前缀约定，无中央登记表，新增 owner 有碰撞风险 | `plugins/core.world/plugin.cpp` kWorldWriteHandlerId；审计 I-08 | 开放（contracts 集中登记） |
@@ -145,6 +145,16 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 
 （无开放项）
 
+## 12. stack_limit（审计开放项与裁决）
+
+| ID | 级 | 问题/裁决 | 证据 | 状态 |
+|---|---|---|---|---|
+| SL-01/SL-02 | P2 | `item_count` 维持 Host 常驻窄适配面；架构文字已由同批文档任务修订。记录的是归属裁决，不是行为验收结论。 | `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md` §1 | 已裁决；不表示验收通过 |
+| SL-04 | P2 | 关闭时 `kOff` 先于资源物理撤销，存在过渡窗口，需真机验证。 | 同上 §2；VM-P4-08/VM-P6-01 | 开放，NOT_ACCEPTED |
+| SL-05 | P3 | 停用期 `g_enabled` 与 Host status 可能分叉。 | 同上 §1；ENG-04 | 并入 ENG-04 处置，开放 |
+| SL-07 | P2 | 验收卡/规则册曾使用旧口径：6 条资源、插件拥有 S2、`stack_codec_impl.h`、重定向“常驻”。 | 同上 §1；`docs/refactor/verification.md` VM-P4-08/VM-P1-S2；`docs/refactor/extension-bag/rulebook.md` R-51 | 当前文档口径已由同批任务修订；不改写历史验收结论 |
+| SL-08 | P3 | 旧审计描述的 `g_provider` 裸指针已不存在，当前为静态 `const kFacade`。 | 同上 §1；INF-05 | 源码已变更，旧风险不再适用；待用户确认销账 |
+
 ## 附录：已修复问题（存证）
 
 | ID | 归属 | 问题 | 修复与复验 |
@@ -185,3 +195,6 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | WT-03/WT-04 | world_teleport | 扣费后切图失败无退款、`create_yesno` 结果被忽略；停用后已排队任务仍可执行 | **已修复**（`a26a97a7`，WT-03 选 B）：切图失败 `add_money(cost)` 退款并提示（退款失败单独提示）；`create_yesno` 失败不记已打开；`invalidate_operations()` 停用代次使帧任务与游戏回调失效 |
 | WT-05/WT-07 | world_teleport | `target_map_id` 溢出；状态/业务测试缺口 | **已修复**（`a26a97a7`）：`int64_t` 计算 + 越界 fail-closed；状态测试驱动真实 descriptor，补退款/停用/余额不足/无效目标用例，删除未接入的 `InstallDisposition`。host 145/145；真机点击小地图传送 PASS。登记见 `docs/refactor/audits/plugin-audit/world-teleport-20261017/verification-log.md` |
 | WT-06 | `core.ui_state` / `world_teleport` | 诊断依赖 `QOL_PORT_CHOICE` 会阻断 `world_teleport` install | **已修复**（`2140e9d3`）：`ui.state` 升至 v1.1 并新增 `read_layers`，按栈顶至栈底回调 UI 层 id/type；`world_teleport` 移除必需的 `QOL_PORT_CHOICE`，改用可选 `ui.state` 记录顶层诊断。Host 145/145；真机 PASS（用户确认，2026-10-17，模块 `36baf50ae8ea…`）。验收记录见 `docs/refactor/audits/plugin-audit/world-teleport-20261017/verification-log.md`。 |
+| SL-03 | Host 常驻 `item_count` facade | facade 每次操作曾读取两次模式快照 | **已修复**（`e307fdce`）：每次操作只读一次模式快照；Host 用例覆盖，真机不适用。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+| SL-06 | `stack_limit` descriptor / codec tests | 测试未覆盖真实 16 条 descriptor 与 codec 边界矩阵 | **已修复**：`6d05cddf`/`644d27f6` 补入对应测试；真机行为验收仍欠账，不能据 Host 用例宣告通过。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+| SL-BITEND | Host 常驻 bitend claims | 两条存档 bitend 曾随 `stack_limit` 999 原子组撤销，且归属/掩码范围表述过宽 | **已修复**（`644d27f6`）：bitend ×2 迁为 Host 常驻；机制是袋槽容量掩码 `GetBitValue(24→21)`，不涵盖全部物品子项。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
