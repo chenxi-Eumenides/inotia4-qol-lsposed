@@ -652,11 +652,6 @@ void settings_panel_process() {
             (void)g_components->draw_container_ornamented(rect);
         }
     }
-    char title[128]{};
-    if (g_module_version[0]) std::snprintf(title, sizeof(title), "QoL 模块设置 v%s", g_module_version);
-    else std::snprintf(title, sizeof(title), "QoL 模块设置");
-    (void)g_components->draw_control_text(g_root, title, kPanelW / 2, 24,
-        contracts::ui_theme::kTextGold, 2, 1);
     if (g_left) (void)g_components->scroll_list_draw(g_left);
     if (g_selected_is_game_info) {
         constexpr int64_t center_x = kRightX + kRightW / 2;
