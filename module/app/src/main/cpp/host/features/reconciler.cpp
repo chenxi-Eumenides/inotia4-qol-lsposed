@@ -210,6 +210,9 @@ uint32_t FeatureReconciler::step() {
         if (feature_registry_busy(id) && !wanted(this, id)) return advanced;
         if (feature_registry_active(id) &&
             (!wanted(this, id) || !feature_registry_dependencies_ready(id))) {
+            // Permanent policy rejection: keep the plugin active instead of retrying every step.
+            const auto* descriptor = find_plugin(id);
+            if (descriptor != nullptr && !descriptor->deactivate_allowed) continue;
             if (feature_registry_transition(id, false)) ++advanced;
             return advanced;
         }

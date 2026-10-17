@@ -2499,6 +2499,14 @@ bool lifecycle_apply(const char* plugin_id, int32_t action) {
     if (!find_plugin(plugin_id) || !g_desired_request) return false;
     if (action != contracts::kFeatureLifecycleActivate &&
         action != contracts::kFeatureLifecycleDeactivate) return false;
+    const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
+    if (action == contracts::kFeatureLifecycleDeactivate &&
+        plugin != nullptr && !plugin->deactivate_allowed) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "lifecycle: deactivate rejected id=%s reason=legacy consumers",
+                      plugin->id);
+        return false;
+    }
     return g_desired_request(g_desired_request_context, plugin_id,
                             action == contracts::kFeatureLifecycleActivate);
 }

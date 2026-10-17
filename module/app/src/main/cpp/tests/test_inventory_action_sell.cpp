@@ -269,6 +269,7 @@ void install_fixture() {
     CHECK(descriptor.optional_requires[0].range.major == 3 &&
           descriptor.optional_requires[0].range.min_minor == 1);
     CHECK(descriptor.feature_count == 1);
+    CHECK(!descriptor.deactivate_allowed);
     g_items = {};
     g_items.struct_size = sizeof(g_items);
     g_items.item_ref_at = &fake_item_ref_at;
