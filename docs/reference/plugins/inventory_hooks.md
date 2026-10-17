@@ -58,7 +58,8 @@ UI 接管边界：仅当物品为 count-encoded 且实际使用 S2 编码（`can
 - `on_resource_ready` 按资源 id 交还 backup；未知 id 或空 backup 返回非零，宿主按 fail-closed 回滚整插件资源（`plugin.cpp:359-366`）。
 - `plugin_deactivate` 清空 SDK/Game Host/item.facts 缓存并解绑 slot provider（`plugin.cpp:334-341`）。
 - **deactivate 约束**：`extension_bag`、`autosell` 等消费者仍直接依赖 24 条 wrapper 语义；当前约束只写在代码注释与流程中，代码不拦截（`plugin.cpp:25-30`）。
-- 无 FeatureDefinition；`fill_status` 保持既有全局 status 语义（ENG-04 统一处置）。
+- FeatureDefinition：`inventory_hooks.inventory_support`（`kHidden` toggle，默认开启）是调试门禁；关闭时 23 条插件内 wrapper 透传原版（`FindItem` 由 Game Host handler 替换，不在开关范围）。合并进 `core.item` 后删除该开关。
+- `fill_status` 保持既有全局 status 语义（ENG-04 统一处置）。
 
 ## 文件地图
 

@@ -21,7 +21,7 @@
 | IH-09 | P2 | `native_inventory_hook.cpp:1131,1174` | 两个 UI wrapper 直接调用 backup，缺空指针守卫 | 本批修复 |
 | IH-10 | P2 | `native_inventory_hook.cpp:1256-1260`、`plugin.cpp:122-124` | UI 接受 bag 5，API/autosell 拒绝，语义不一致 | 本批按裁决：模块一律不接管；UI 透传原版 |
 | IH-11 | P3 | `native_inventory_hook.cpp:988-1007`、`inventory_logging.cpp:21-30` | `caller` 恒 `libgame+0x0`；节流按调用次数冒充帧数 | 本批修复 |
-| IH-12 | P3 | `plugin.cpp:354-358,371-375` | `inventory_support` 为 no-op toggle；status 恒 enabled | 本批删除 no-op toggle；status 并入 ENG-04 |
+| IH-12 | P3 | `plugin.cpp:354-358,371-375` | `inventory_support` 为 no-op toggle；status 恒 enabled | 本批改为真实 hidden 调试门禁（关闭时 wrapper 透传原版）；合并进 `core.item` 后删除；status 并入 ENG-04 |
 | G-2 | — | `game/access/inventory.cpp:86-115` | 替换后的 FindItem handler 未登记 in-flight，release 等待可能漏计 | 基础设施观察，下批 host 边界补登记 |
 
 审阅决议（阶段 2，用户裁决）：
@@ -34,11 +34,22 @@
 - **D6 验收范围**：真机仅 monster v29；c18/overhaul 用静态金标；unknown 变体 0%。
 - **D7 分批**：本批 = D1/D2/D3 + IH-01/02/03/04/05/09/10/11/12；下批 = IH-06/07/08 + G-2。
 
+## §1b 阶段 4 装配事故与修复
+
+| 编号 | 现象 | 根因 | 处置 |
+|---|---|---|---|
+| R1 | 部署后 `assembly: feature metadata missing for inventory_hooks reason=missing/nonzero feature definitions required`，native bootstrap 不启动、API 不可用 | 宿主强制每个插件至少一条 `FeatureDefinition`（`host/assembly.cpp:480-489`）；IH-12 删除 no-op feature 后 `inventory_hooks` 为零 feature | 用户裁决：恢复为**真实调试门禁** `inventory_hooks.inventory_support`（`kHidden`，默认开启）；关闭时 23 条插件内 wrapper 全部透传原版，`FindItem` 由 Game Host handler 替换、不在开关范围；合并进 `core.item` 后删除该开关 |
+
+补充：`host/assembly.cpp` 的注册失败日志已追加插件 id，便于定位同类装配问题。
+
 ## §2 无法验证项
 
 - c18 `85%`、overhaul `70%` 价格倍率：仅 `sell_multiplier` 静态金标与 host 用例，未在对应变体真机验证（用户确认按静态金标验收，monster 真机只覆盖 70%）。
 - unknown 变体 `0%`：仅 host 用例覆盖，无真机变体。
 - UI 详情页接管/退款失败的运行时日志：host 覆盖分流与状态机，真机待阶段 4 取证。
+- `inventory.slot` 1.0 暂无生产消费者，仅 host 用例覆盖 resolve/view/remove。
+- 调试门禁关闭后的 23 条 wrapper 透传分支仅静态实现与 toggle 状态测试覆盖，未在真机逐条触发。
+- UI 详情页出售（预览/确认两态）与退款失败日志未在本轮真机执行，留阶段 5 人工目视。
 
 ## §3 已完成验收登记
 
@@ -50,6 +61,12 @@
 | 路由漂移 | **PASS**：native 147 / baseline 147 / duplicates 0 / missing 0 / extra 0 | `uv run python scripts/maintenance/check_http_routes.py` |
 | JNI | **PASS**：Kotlin 163 / native 163，违规 0 | `uv run python scripts/maintenance/check_jni.py` |
 | `git diff --check` | **PASS** | `git diff --check` |
-| Android Debug 构建 | 执行中/待登记 | `scripts/build-debug.sh` |
-| 真机（阶段 4） | 待执行 | 待登记 |
+| Android Debug 构建 | **PASS**：`BUILD SUCCESSFUL`，APK `output/inotia4_qol_lsposed_debug_2610180235_23d8baaf1065.apk`，SHA-256 `23d8baaf106518b513d921946741310c0a5b31d27af8ebe2bc6359bc552f265f` | `scripts/build-debug.sh` |
+| 集成包 | **PASS**：`output/Inotia4_v1.3.2_monster_v29_lspatched.apk`，内嵌模块 sha256 = `23d8baaf…` | `scripts/patch-apk.sh`；解包比对 |
+| 部署身份（阶段 4） | **PASS**：运行 `module identity` sha256 = `23d8baaf1065…`，与本批 Debug 构建一致 | `logcat --pid=22045`；`.tmp/inventory-hooks-audit/logcat-after.txt` |
+| 装配（阶段 4） | **PASS**：`assembly: initialized=true registered=28 install_failed=0 kernel_only=false` | 同上 |
+| 能力面（阶段 4） | **PASS**：`inventory_hooks` enabled、`degraded=false`、provides `inventory_refresh 1.0` / `inventory.action 2.0` / `inventory.slot 1.0`、24/24 资源 `live` | `/api/system/features` → `.tmp/inventory-hooks-audit/features-after.json` |
+| 任务袋守卫（阶段 4） | **PASS**：`POST /sell_item {"bag":5,"slot":0}` → 票据 `failed` / `{"ok":false,"error":"task bag excluded"}` | 票据 2 |
+| API 出售报价（阶段 4） | **PASS**：monster v29，category=10 count=3 unit=4，`multiplier=7/10 final=8`；money 28550→28558，槽位清空 | 票据 3；`inventory_trade.cpp:148` 日志 |
+| 日志 | **PASS**：当前进程 FATAL/SIGSEGV = 0；无 `assembly: plugin descriptor registration failed` | `logcat --pid=22045` |
 
