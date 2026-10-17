@@ -505,7 +505,7 @@
 - **操作**：启用态构造 canonical 数量（重点 199）的可堆叠物品 → 关闭堆叠上限 → 核对所有读写/操作按低 7 位视图（读 71、上限 99、`a` 位段不变）→ 关闭态执行消耗/合并 → 重新启用 → 核对重开读回完整 canonical 值。
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`stackLimitEnabled`；操作前记录目标物品 `+0x10` 原始值与 sidecar JSON 副本。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（读侧模式视图解码）、`INVEN_ConsumeItem@0x1047bc+0x104818/0x104844/0x104858`（b 递减）、`INVEN_MoveItem@0x104934`（合并写 b）。
-- **扩展接管点(文件:函数)**：`inventory_hook_stage4.cpp:stage4_get_cumulate_count`（`effective_read_count` 模式视图）、`plugins/stack_limit/stack_codec_impl.h:effective_read_count/effective_write_count/effective_clamp/effective_view_count`、`native_inventory_hook.cpp:consume_item_wrapper`（借位预置仅启用态）、`extension_bag_transaction.inc:move_extension_to_extension_locked`（合并按视图、descriptor 回写 canonical）、`extension_bag_equip.inc:consume_extension_item_after_native_locked`。
+- **扩展接管点(文件:函数)**：`inventory_hook_stage4.cpp:stage4_get_cumulate_count`（`effective_read_count` 模式视图）、`game/adapter_ports/item_count_codec.h:effective_read_count/effective_write_count/effective_clamp/effective_view_count`、`native_inventory_hook.cpp:consume_item_wrapper`（借位预置仅启用态）、`extension_bag_transaction.inc:move_extension_to_extension_locked`（合并按视图、descriptor 回写 canonical）、`extension_bag_equip.inc:consume_extension_item_after_native_locked`。
 - **共享状态读写**：关闭态模块侧写点只改 payload b 位；descriptor `count` 与 sidecar 恒为 canonical；读档路径不参与本卡（见 VM-35）。
 - **必须保持的不变式(引 R-xx)**：关闭态有效数量 = `b` = `count mod 128`、上限 99（R-47/决策 b）；关闭态任何写点不得改写 `a`（bits22–24）与 bits0–21（R-45/R-47）；重新开启后经 S2 解码读回完整 canonical（R-45/R-47）；canonical 199 关闭态读 71、关闭态消耗 1 后重开读 198、关闭态写 99 后重开读 227（128a+99）；非可堆叠类别位段不受影响（R-46）。
 - **失败语义**：关闭态 b≤1 的堆消耗到空按原版删除（有效数量 0，不预置借位）；关闭态合并超 99 按上限拒绝/分堆，不得出现视图 >99；模式切换瞬间不得出现反向同步或 `a` 清零。
@@ -518,7 +518,7 @@
 - **操作**：验证 `ITEM_GetCumulateCount@0x106094` 读侧 hook 对可堆叠类别按 `128a+b` 解码、对非可堆叠类别直通原版，覆盖 S2 边界数量在背包显示、API `count` 与原版 UI 三处一致。
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`；**前置：S2-P3 写侧已落地**（数量写入经 `s2_write_count`），否则数量值非 S2 布局、本卡预期不成立。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（原版只见 bits25–31，即 b 段；可堆叠返回 `b`，装备返回 `1`，空指针返回 `0`）。
-- **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:get_cumulate_count_wrapper`（门控 `item_count_encoding` == kEncoded 时返回 `stack_codec::s2_read_count(*(+I_COUNT))`，否则直通 backup）；安装链 `install_locked` 第 17 个 hook（`GetCumulateCount`）。
+- **扩展接管点(文件:函数)**：`native_inventory_hook.cpp:get_cumulate_count_wrapper`（门控 `item_count_encoding` == kEncoded 时返回 `item_count_codec::s2_read_count(*(+I_COUNT))`，否则直通 backup）；安装链 `install_locked` 第 17 个 hook（`GetCumulateCount`）。
 - **共享状态读写**：纯读物品 `+0x10` 与 ITEMCLASSBASE 类别表；不取 `g_virtual_bag_mtx`，不写任何状态。
 - **必须保持的不变式(引 R-xx)**：类别判定 fail-closed（表不可用→backup）；非可堆叠（装备 marker bits25–31、宝石 bits18–23、袋容量 bits0–24）不解释 bits22–24（R-45、R-46、R-49、R-40）。
 - **失败语义**：`item=nullptr` 返回 `0`；非可堆叠/未知类别返回原版语义（装备 `1`）；hook 安装失败时回滚整链并阻塞重试，不得半安装。
@@ -531,7 +531,7 @@
 - **操作**：驱动模块写路径（创建、扩展袋内合并、消耗扣减）产生跨 127 边界的数量变化，核对 `+0x10` 位段的 S2 拆段写入、非可堆叠类别 bits22–24 不变与 fail-closed 拒绝。
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`moveMergeEnabled`；操作前记录原版袋 `0..5×16` 物理快照 digest、目标物品原始 `+0x10` 与宝石/装备/袋对象位段摘要。
 - **原版链(VMA)**：写侧 clamp 点 `INVEN_FindSaveSlot@0x103960+0x238`、`INVEN_SaveItemDirect@0x103bf0+0xdc/0xf0`、`INVEN_MoveItem@0x104934+0x150/0x158`（完整数量判定 999）；`INVEN_CheckSaveInNotEmptySlot+0xa4`、`INVEN_GetCumulateSaveSlotEx+0x164/0x17c` 保持原版 b 满判定（不进 clamp 表）。
-- **扩展接管点(文件:函数)**：`model/virtual_bag_transaction_rules.inc:patch_payload_count/merge_count`、`api/native/game_inventory_basic.inc:data_op_add_item`、`extension_bag_equip.inc:consume_extension_item_after_native_locked`；统一 `stack_codec::s2_write_count/s2_clamp`（进位/借位内建）。
+- **扩展接管点(文件:函数)**：`model/virtual_bag_transaction_rules.inc:patch_payload_count/merge_count`、`api/native/game_inventory_basic.inc:data_op_add_item`、`extension_bag_equip.inc:consume_extension_item_after_native_locked`；统一 `item_count_codec::s2_write_count/s2_clamp`（进位/借位内建）。
 - **共享状态读写**：写点持 `g_virtual_bag_mtx` 修改 payload 数量位与 descriptor；类别判定走 `item_count_encoding`（不持锁读 ITEMCLASSBASE）。
 - **必须保持的不变式(引 R-xx)**：仅 count-encoded 类别可写数量位（R-46）；创建/合并/消耗后 `raw == ((count>>7&7)<<22)|((count&127)<<25)`，`127→128` 写 `a=1,b=0`、`128→127` 写 `a=0,b=127`（R-45）；宝石 bits18–23、袋容量 bits0–24、装备 marker bits25–31 逐字节不变（R-46）；袋对象 marker 写仅 bit25。
 - **失败语义**：非可堆叠/类别不可用时写点拒绝并记 `patch_payload_count ignored ... not_count_encoded`，不得按可堆叠处理；合并超上限走分堆/拒绝，不产生 >999 数量。
@@ -545,7 +545,7 @@
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、堆叠上限开关；操作前记录目标物品原始 `+0x10`（含 a/b 拆段）与 `count=128a+b`。
 - **原版链(VMA)**：`UIStore_ButtonSellExe@0xd1818+0xb8/0xd0`（b≤1 整堆判定 + `UIInputItemCount_Create` 上限）、`UIStore_SellItem@0xd25f0+0xc8`（b≤1 判定 + `ITEMSYSTEM_Divide@0x1083f8+0x60/0x94` 拆堆守卫/remain）、`UIStore_SellOKInputItemCount@0xd1948`（金额=单价×输入数量）。
 - **扩展接管点(文件:函数)**：`game_patch_core.inc:g_stack_getter_redirect_patches` + `apply_s2_getter_redirects`（5 条 `mov x0,xN; bl ITEM_GetCumulateCount`）；被调用 getter 为 H-17 `native_inventory_hook.cpp:get_cumulate_count_wrapper`。
-- **共享状态读写**：重定向为纯指令 patch（常驻、不随开关 revert）；getter 内部不取 `g_virtual_bag_mtx`（R-44）；拆堆源堆 a+b 回写由 `item_system_divide_wrapper` 确认后完成（R-49）。
+- **共享状态读写**：重定向为纯指令 patch，随 `stack_limit.limit_999` 资源组安装/撤销（10 条，组内共 16 条）；bitend ×2 由 Host 常驻安装；getter 内部不取 `g_virtual_bag_mtx`（R-44）；拆堆源堆 a+b 回写由 `item_system_divide_wrapper` 确认后完成（R-49）。
 - **必须保持的不变式(引 R-xx)**：重定向读值等于 `effective_read_count(field, stack_limit_enabled())`（R-51）；关闭态与原版 `GetBitValue(31,25)` 逐位一致（R-47）；装备 marker/宝石选项等非数量位段不被解释为全量（R-43/R-46）。
 - **失败语义**：patch 原指令不匹配（版本差异）时 `redirect mismatch` 并拒绝安装，保持原版 b 读；getter 未安装时退回原版 getter（b 读）。
 - **Host 测试名(现有或「缺口」)**：`test_sell_divide_s2_read_window`（getter 两态解码等价、十位窗口伪修复反例、200=a1b72）。
@@ -883,7 +883,7 @@
 | R-62 | VM-46 | `kLedgerCapacity` 32→128、`handover_to_inventory` 交接即回收槽位（`kNone` + generation 递增）、`Audit.inventory_owned` 改为累计 `total_handed_over`；Host `test_ownership_ledger` 覆盖。真机归 VM-46（无 `ownership ledger exhausted`、ext→orig 后仍可拖动）。 |
 | R-63 | VM-47 / VM-48 | H-24 函数级 Hook `UIEquip_ButtonUseMercenarySealExe@0xb8144` → `extension_use_mercenary_seal`（原版顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary，消耗经 H-04）；API `data_op_use_item`/`extension_bag_api_use_item_impl` 对 `IsMercenarySeal` 豁免 `fn_is_use` 并走 `MakeMercenary`。Host 缺口 `test_mercenary_seal_takeover_token`；真机归 VM-47（UI）/VM-48（API）。 |
 | R-64 | 取证任务（无 VM 卡） | 详情按钮观察 hook 的面板偏移/去重漂移取证（真机 dump 11 偏移 button/data/orig + 物品 category）；独立任务，不阻塞 R-63。 |
-| R-65 | VM-49 | `s2_writeback_gate` 改经 `stack_codec::writeback_needed(ext, stack)`，写侧门控与读侧 `stack_limit_enabled()` 同源；Host `stage4_hook_tests::test_s2_writeback_gate` 断言四组合真值表；真机 VM-49（堆叠开+扩展关 99+99→198）。 |
+| R-65 | VM-49 | `s2_writeback_gate` 改经 `item_count_codec::writeback_needed(ext, stack)`，写侧门控与读侧 `stack_limit_enabled()` 同源；Host `stage4_hook_tests::test_s2_writeback_gate` 断言四组合真值表；真机 VM-49（堆叠开+扩展关 99+99→198）。 |
 | R-66 | VM-02、VM-50 | 容量上界统一取 `capacities[bag]`：`module_slot_is_assignable_locked` 加容量判定、`place_plan` 空槽扫描与 3 处收编选槽改容量上界、`set_item`/`set_test_equipped`/`equip_bag` 拒绝越容、API 占用统计只计容量内、保存 prepare 由 `virtual_bag_module_save_validate_locked` 统一剔除容量外槽（唯一清理点）。Host `test_virtual_bag_capacity_bounds`；真机归 VM-50（进档保留 + `save validation discarded 15 over-capacity item(s)` + sidecar 干净）。 |
 
 ### 3.1 16 条原无专门锚规则的定锚方案

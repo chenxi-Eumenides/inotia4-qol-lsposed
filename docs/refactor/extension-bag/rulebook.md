@@ -270,7 +270,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
    `inventory_hook_stage4.cpp:3-23`。
    1.1. H-17 `ITEM_GetCumulateCount` 是唯一例外：count-encoded 类别不先调 backup——
    backup 体内的数量位段仍按原版/S1 布局读取，会与 S2 解码冲突；因此对 kEncoded 直接
-   返回模式视图解码值（启用态 `stack_codec::effective_read_count` 全量、关闭态只读 b，
+   返回模式视图解码值（启用态 `item_count_codec::effective_read_count` 全量、关闭态只读 b，
    R-47 决策 b），其余类别保持 original-first backup
    （`inventory_hook_stage4.cpp:35-48`）。
 2. `ConsumeItem`、`RemoveItem`、装备和镶嵌必须按对象身份分流；扩展对象不能先落入
@@ -622,7 +622,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 ### R-37 卖出价格必须先收敛堆叠和数值边界
 
-- **规则一句话**：卖出取价先按 `stack_codec::max_count(stack_limit_enabled())` 收敛
+- **规则一句话**：卖出取价先按 `item_count_codec::max_count(stack_limit_enabled())` 收敛
   `count`（99/999），再校验单位价和最终价均不超过 `INT32_MAX`；任一价格非法时
   不创建确认弹窗、不写入弹窗参数、不加钱或删除物品，API 以失败返回。
 - **为什么**：`ITEM_GetSellPrice` 的特殊类别/能力/payload 分支和异常堆叠数量都可能
@@ -646,8 +646,8 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   的 payload 必须逐字节保留。99/999 clamp 只作用于新建、合并、消费和派生操作。
 - **为什么**：`game_symbols.h:58` 规定物品对象 `+0x10` 的 bit22..31 中 `100` 是装备
   语义，而 `1..999` 才是可堆叠数量；序列化头部将同一字段落在
-  `virtual_bag_state.h` 的 payload `+11`。`stack_codec::s2_write_count` 会保留其余
-   位（`plugins/stack_limit/stack_codec_impl.h`），但不能改变这些位在非堆叠物品中的业务语义。
+  `virtual_bag_state.h` 的 payload `+11`。`item_count_codec::s2_write_count` 会保留其余
+   位（`game/adapter_ports/item_count_codec.h`），但不能改变这些位在非堆叠物品中的业务语义。
   `stack_limit_enabled()` 是运行时操作配置，不是 sidecar 数量语义的组成部分。
 - **判据单源**：`item_is_equip`、`category_is_equip` 与载入/扩展合并适配均使用
   `ITEMCLASSBASE +6 bit0` 语义；载入路径通过 `virtual_bag_category_uses_stack_count`
@@ -668,8 +668,8 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 ### R-39 原生袋对象 marker 不得覆盖容量
 
 - **规则一句话**：原生袋对象 `+0x10` 只允许改 bit25..31 的 marker，bit0..24 容量必须保留；
-  三个袋对象创建/刷新路径统一调用 `stack_codec::write_native_bag_object_marker`，禁止
-  使用普通物品的 `stack_codec::write_count`。
+  三个袋对象创建/刷新路径统一调用 `item_count_codec::write_native_bag_object_marker`，禁止
+  使用普通物品的 `item_count_codec::write_count`。
 - **为什么**：`INVEN_GetBagSize` 读取 bit0..24；普通数量位从 bit22 起，与容量重叠，误写会
   造成容量越界和后续 UI/库存访问风险。
 - **验证锚**：`test_stack_codec` 的位段保留断言；真机 `VM-09`/`VM-31` 核对袋容量和切换后
@@ -771,8 +771,8 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   造成的 `128a+b` 变化是决策 b 的既定语义，不按数据损坏处理，也不得引入关闭期的
   反向同步或 `a` 清零。
 - **实现锚（模式感知 helper，唯一模式入口）**：
-  `stack_codec::effective_read_count / effective_write_count / effective_clamp /
-  effective_view_count`（`plugins/stack_limit/stack_codec_impl.h`）；读侧 getter 分流
+  `item_count_codec::effective_read_count / effective_write_count / effective_clamp /
+  effective_view_count`（`game/adapter_ports/item_count_codec.h`）；读侧 getter 分流
   `stage4_get_cumulate_count`（`inventory_hook_stage4.cpp`）；模块合并按视图相加且
   descriptor 回写 canonical（`extension_bag_transaction.inc`）；H-04 消耗借位预置仅在
   启用态生效（`native_inventory_hook.cpp` `consume_item_wrapper`——关闭态 b≤1 消耗到
@@ -887,8 +887,9 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   不能推广）；直接读 b 会让整堆出售判定、出售数量输入框上限与拆堆守卫按 b 残量
   （真机实证：200 个中药水按 b=72 结算，实得 546 而非 1540）。重定向到已 hook 的
   `ITEM_GetCumulateCount` 复用 R-46/R-47/R-49 的门控与解码，且同属 libgame.so
-  （bl 无需 thunk）；getter 关闭态返回 b，与原版逐位一致，故重定向常驻、不随上限
-  开关 revert。
+  （bl 无需 thunk）；getter 关闭态返回 b，与原版逐位一致。重定向属于
+  `stack_limit.limit_999` 资源组，随该组启停安装和物理撤销；关闭态读取语义与原版逐位一致，
+  不代表重定向资源本身常驻。
 - **典型破坏方式**：用单指令窗口 patch 伪造全量；在 `UTIL_GetBitValue` 通用位工具上
   hook（无物品指针，无法判类别，R-46）；把 `SetBitValue` 写点 start 22 化（`v<<22`
   会把 v 低 3 位写进 a、高 7 位写进 b，反序布局）。
@@ -1174,7 +1175,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 - **规则一句话**：S2 写侧回写总门控 `s2_writeback_gate` 必须与读侧 getter 门控同源——
   `stack_limit_enabled()` 一开即需写侧进位；扩展背包开关不得作为 S2 数量写侧的必要条件。
-  模式统一经纯函数 `stack_codec::writeback_needed(extension_bag_enabled, stack_limit_enabled)`
+  模式统一经纯函数 `item_count_codec::writeback_needed(extension_bag_enabled, stack_limit_enabled)`
   进入，禁止在写点单用 `extension_bag_enabled()` 判定。
 - **为什么**：读侧 H-17 `get_cumulate_count_wrapper` 按 `stack_limit_enabled()` 解码 S2
   全量（`stage4_get_cumulate_count(..., stack_limit_enabled())`），写侧若以
