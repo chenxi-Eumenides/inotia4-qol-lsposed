@@ -8,7 +8,7 @@
 
 ## 定位与版本
 
-`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:16-17`）。descriptor（`plugin.cpp:148-172`）：2 项 required 依赖 `world.facts` v2.0 与 `item.facts` v3.3（`plugin.cpp:52-57`）；1 项 optional 依赖 `ui_choice` v1.1（`plugin.cpp:46-50`）；`provides_count=0`；1 条资源；`jni_count=0`；1 个端口 `QOL_PORT_CHOICE` v1.0（`plugin.cpp:59-62`，`contracts/game_ports/ports.h:17,47`）；1 个 feature；`on_resource_ready=nullptr`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
+`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:16-17`）。descriptor（`plugin.cpp:158-181`）：2 项 required 依赖 `world.facts` v2.0 与 `item.facts` v3.3（`plugin.cpp:52-57`）；1 项 optional 依赖 `ui_choice` v1.1（`plugin.cpp:46-50`）；`provides_count=0`；1 条资源；`jni_count=0`；2 个端口：`QOL_PORT_CHOICE` v1.0 与私有 `QOL_PORT_WORLD_ACTION` v1.0（`plugin.cpp:60-65`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`）；1 个 feature；`on_resource_ready=nullptr`。插件不保存 `ctx.game`：世界动作经私有端口注入（`plugin.cpp:67-91`）。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
 
 ## 公开能力与路由
 
@@ -18,7 +18,9 @@
 
 ## 游戏内行为
 
-入口为 `UIPlay_CallMapName` 尾部的声明式入口 patch（`plugin.cpp:29-44`），声明为 `private / required / fail_closed`，`resumable=true`，`step_budget=120`：
+输入来源是**点击小地图**（地图名横幅入口 `UIPlay_CallMapName`），不是走到地图边界的传送点。该传送入口在原版游戏中不可触发，只有大修（overhaul）及后续改版提供；因此本插件效果只在可触发该入口的变体上可见。
+
+入口为 `UIPlay_CallMapName` 尾部的声明式入口 patch（`plugin.cpp:30-44`），声明为 `private / required / fail_closed`，`resumable=true`，`step_budget=120`：
 
 | 资源 id | 符号（site） | 机制 | 职责 |
 |---|---|---|---|
@@ -41,7 +43,7 @@
 - `ctx.sdk->capabilities.require`：install 期 require `world.facts` / `item.facts`（`plugin.cpp:83-111`）；运行期每次现取 `ui_choice`（`feature.cpp:105-115`），不缓存。
 - `ctx.sdk->scheduler.add`（帧任务，interval=1）：`delayed_open_choice`/`delayed_open_confirmation`/`delayed_close_choice`/`delayed_transfer` 的延迟调度（`feature.cpp:97-103`）。
 - `ctx.sdk->log.write`：业务日志（`feature.cpp:44-56`）。
-- `QolWorldActionApi`（`contracts/game_host.h:150-157`）：`create_yesno`、`minus_money`、`request_map_change`、`close_popup`、`restore_hud`、`show_banner`。
+- 私有端口 `QolWorldActionPort::actions`（`contracts/game_ports/world_action_port.h`，v1.0）：`create_yesno`、`minus_money`、`request_map_change`、`close_popup`、`restore_hud`、`show_banner`、`add_money`。实现为 `game/adapter_ports/world_action_port.cpp` + `game_host_port.cpp` 的 `game_world_action_api()`（单一实现）。`QolGameHost::world_action` 仍保留给 `extension_bag` 的 `cancel_tutorial`。
 - `WorldFactsApi`（`contracts/world_facts.h:10-11,23-31`，v2.0）：`state`、`map_record_count`、`current_map_id`、`map_name`、`active_player_direction`。
 - `ItemFactsApi`（`contracts/item_facts.h:10-14`，v3.3）：`money`（FIX-05 起金钱归 `item.facts`，`docs/refactor/issues.md`）。
 - `UiChoiceApi`（`contracts/ui_choice.h:21-22,36`，v1.1，optional）：`open`/`close`。
@@ -63,15 +65,17 @@
 - `plugin_install`（`plugin.cpp:64-113`）：校验 `struct_size`/`sdk_major`/`g_sdk`/`g_game`/`ports` 与两 required 能力（`item.facts` 额外做 `item_facts_api_size_valid`），失败清空全局、写 `g_install_error` 文案并返回 1。
 - 各业务函数在 `game()==nullptr` 或所需 `world_action` 槽为空时记录日志并返回（`feature.cpp:194,218,230-234,259-261,274`）。
 - `feature.h:11-31` 定义 `InstallDisposition`（`kInstalled/kUnsupported/kFailed`）与 `install_error()` 文案，供安装结果语义核对（`tests/test_world_teleport_install.cpp`）。
-- 资源声明 `kFailClosed`：入口 patch 安装失败即按还原释放并把插件置 failed。注意 `on_resource_ready=nullptr`（`plugin.cpp:166`），资源备份无插件侧缓存。
+- 资源声明 `kFailClosed`：入口 patch 安装失败即按还原释放并把插件置 failed。注意 `on_resource_ready=nullptr`（`plugin.cpp:176`），资源备份无插件侧缓存。
+- 扣费后切图失败：`request_map_change` 非成功时调用 `actions.add_money(cost)` 退款；退款成功横幅「传送失败，已退还金币」，退款失败「传送失败，退款异常」（`feature.cpp:279-287`）。`create_yesno` 返回值也检查，失败不记「confirmation opened」（`feature.cpp:212-220`）。
 
 ## 生命周期
 
-- `install`（`plugin.cpp:64-113`）：装配检查与能力裁决；**成功返回 0 但不置 `g_installed`**。
-- `on_enabled`（`plugin.cpp:125-129`）：`g_installed=true`、清 `g_install_error`。
-- `on_disabled`（`plugin.cpp:131-134`）：`g_installed=false`。
-- `deactivate`（`plugin.cpp:115-123`）：清 `g_installed` 与全部接口指针。
-- `fill_status`（`plugin.cpp:136-139`）：`enabled=g_installed`、`error=g_install_error`。
+- `install`（`plugin.cpp:67-121`）：装配检查与能力裁决；**成功返回 0 但不置 `g_installed`**。端口按 `kPorts` 声明顺序注入：0=CHOICE，1=WORLD_ACTION。
+- `on_enabled`（`plugin.cpp:134-138`）：`g_installed=true`、清 `g_install_error`。
+- `on_disabled`（`plugin.cpp:140-144`）：`g_installed=false` + `invalidate_operations()`。
+- `deactivate`（`plugin.cpp:123-132`）：清 `g_installed` 与全部接口指针 + `invalidate_operations()`。
+- `fill_status`（`plugin.cpp:146-149`）：`enabled=g_installed`、`error=g_install_error`。
+- 停用代次：`invalidate_operations()` 递增 `g_op_generation`（`feature.cpp:48-52`）；所有帧任务与游戏回调入口先校验代次（`feature.cpp:199,205,247,293,309,327,335`），停用后不再开面板、扣费或切图。
 
 业务全局状态 `g_targets`/`g_pending_target`/`g_confirm_text` 为文件内 `std::array`/POD（`feature.cpp:35-38`）；面板与确认流程均经 `QolHostSdk::scheduler` 帧任务与游戏主线程回调推进。
 
@@ -91,4 +95,6 @@
 | `game/access/patches.cpp:46-55` | `P_UI_PLAY_CALL_MAP_NAME` 站点（branch-return、原版 `mov x0,#1`、epilogue）。 |
 | `game/symbols/game_symbols.h:826` | `UIPlay_CallMapName` VMA。 |
 | `contracts/game_host.h:150-157` | `QolWorldActionApi` 成员。 |
-| `tests/test_world_teleport_status.cpp`、`tests/test_world_teleport_install.cpp`、`tests/CMakeLists.txt:1103-1120` | 安装/状态语义 host target。 |
+| `contracts/game_ports/world_action_port.h`、`game/adapter_ports/world_action_port.{h,cpp}` | 私有世界动作端口契约与 provider。 |
+| `game/adapter_ports/game_host_port.cpp`（`game_world_action_api()`） | 世界动作 thunk 的唯一实现，`QolGameHost` 与新端口共用。 |
+| `tests/test_world_teleport_status.cpp`、`test_world_teleport_install.cpp`、`test_world_teleport_feature.cpp`、`tests/CMakeLists.txt` | 安装/状态语义与业务失败路径（退款、停用失效）host target。 |
