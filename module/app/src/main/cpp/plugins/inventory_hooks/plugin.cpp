@@ -391,7 +391,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = [] {
         uint32_t count = 0;
         const contracts::ResourceClaim* claims = inventory_hooks_claims(&count);
-        return contracts::PluginDescriptor{
+        contracts::PluginDescriptor descriptor{
             kPluginId,
             kPluginVersion,
             2, kRequires,  // requires=world.facts + item.facts
@@ -408,6 +408,10 @@ const contracts::PluginDescriptor& plugin_descriptor() {
             nullptr, 0, nullptr, 0,
              kFeatures, 1,
         };
+        // Legacy consumers (extension_bag/autosell/craft) still call the 24 wrappers directly;
+        // the host must reject deactivate until they migrate to capabilities.
+        descriptor.deactivate_allowed = false;
+        return descriptor;
     }();
     return descriptor;
 }

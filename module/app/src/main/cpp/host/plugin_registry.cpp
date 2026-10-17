@@ -2312,6 +2312,12 @@ uint32_t sync_gates() {
 static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
     const contracts::PluginDescriptor* plugin = find_plugin(plugin_id);
     if (plugin == nullptr) return false;
+    if (action == contracts::kFeatureLifecycleDeactivate && !plugin->deactivate_allowed) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "lifecycle: deactivate rejected id=%s reason=legacy consumers",
+                      plugin->id);
+        return false;
+    }
     // 前置拒绝：同插件在途事务 / 任一资源已隔离（隔离后禁止重试，直到进程重启）。
     if (plugin_has_active_tx(plugin->id)) return false;
     if (plugin_isolated(*plugin) &&

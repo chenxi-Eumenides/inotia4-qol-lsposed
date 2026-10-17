@@ -709,6 +709,20 @@ void test_dependency_cycle_is_diagnostic() {
           std::strstr(b.error, "dependency cycle") != nullptr);
 }
 
+void test_deactivate_disallowed_is_rejected() {
+    reset_all();
+    qol::infra::config_set_bool("cap.provider.on", true);
+    PluginDescriptor descriptor = make_provider();
+    descriptor.deactivate_allowed = false;
+    CHECK(register_plugin(descriptor));
+    CHECK(install_all(make_host_deps()) == 0);
+
+    CHECK(!lifecycle_apply("cap_provider", qol::contracts::kFeatureLifecycleDeactivate));
+    CHECK(feature_state_is("cap_provider", FeatureState::kEnabled));
+    CHECK(g_provider_deactivate_calls == 0);
+    CHECK(qol::hooks::state_of("hook:cap:prov") == ResourceState::kLive);
+}
+
 void test_deactivate_revokes_capability() {
     reset_all();
     qol::infra::config_set_bool("cap.provider.on", true);
@@ -743,6 +757,7 @@ int main() {
     test_blocked_lifecycle_activate_rechecks_required();
     test_missing_required_capability_is_diagnostic();
     test_dependency_cycle_is_diagnostic();
+    test_deactivate_disallowed_is_rejected();
     test_deactivate_revokes_capability();
     std::printf("capability_lifecycle: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

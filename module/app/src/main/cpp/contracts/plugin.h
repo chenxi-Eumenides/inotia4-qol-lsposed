@@ -215,6 +215,9 @@ struct PluginDescriptor {
     // Metadata-only HTTP routes are a distinct tail from handler-bearing http_endpoints.
     const HttpRouteMetadataDescriptor* http_route_metadata = nullptr;
     uint32_t http_route_metadata_count = 0;
+    // Legacy consumers still call this plugin's hook wrappers directly; while they remain,
+    // the host rejects deactivate instead of releasing the wrappers under them.
+    bool deactivate_allowed = true;
 };
 
 }  // namespace qol::contracts

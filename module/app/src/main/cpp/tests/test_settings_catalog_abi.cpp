@@ -191,6 +191,7 @@ static_assert(offsetof(PluginDescriptor, http_endpoint_count) == 200);
 static_assert(offsetof(PluginDescriptor, validate_config) == 208);
 static_assert(offsetof(PluginDescriptor, http_route_metadata) == 216);
 static_assert(offsetof(PluginDescriptor, http_route_metadata_count) == 224);
+static_assert(offsetof(PluginDescriptor, deactivate_allowed) == 228);
 static_assert(sizeof(PluginDescriptor) == 232);
 static_assert(offsetof(QolConfigNamespaceApi, read_json) == 8);
 static_assert(offsetof(QolConfigNamespaceApi, replace_json) == 16);
