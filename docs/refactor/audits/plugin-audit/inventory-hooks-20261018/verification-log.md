@@ -40,6 +40,7 @@
 | 编号 | 现象 | 根因 | 处置 |
 |---|---|---|---|
 | R1 | 部署后 `assembly: feature metadata missing for inventory_hooks reason=missing/nonzero feature definitions required`，native bootstrap 不启动、API 不可用 | 宿主强制每个插件至少一条 `FeatureDefinition`（`host/assembly.cpp:480-489`）；IH-12 删除 no-op feature 后 `inventory_hooks` 为零 feature | 用户裁决：恢复为**真实调试门禁** `inventory_hooks.inventory_support`（`kHidden`，默认开启）；关闭时 23 条插件内 wrapper 全部透传原版，`FindItem` 由 Game Host handler 替换、不在开关范围；合并进 `core.item` 后删除该开关 |
+| R2 | 拒绝 deactivate 后 reconciler 每步重试，4s 产生 168 条 `deactivate rejected` | 拒绝只返回 false，reconciler 未把该插件视为永久不可停 | `host/features/reconciler.cpp` 对 `deactivate_allowed=false` 的插件直接跳过；实际状态保持 enabled、24/24 live，日志不再刷屏 |
 
 补充：`host/assembly.cpp` 的注册失败日志已追加插件 id，便于定位同类装配问题。
 
@@ -69,12 +70,13 @@
 | 集成包 | **PASS**：`output/Inotia4_v1.3.2_monster_v29_lspatched.apk`，内嵌模块 sha256 = `23d8baaf…` | `scripts/patch-apk.sh`；解包比对 |
 | 部署身份（阶段 4） | **PASS**：运行 `module identity` sha256 = `23d8baaf1065…`，与本批 Debug 构建一致 | `logcat --pid=22045`；`.tmp/inventory-hooks-audit/logcat-after.txt` |
 | 装配（阶段 4） | **PASS**：`assembly: initialized=true registered=28 install_failed=0 kernel_only=false` | 同上 |
-| 能力面（阶段 4） | **PASS**：`inventory_hooks` enabled、`degraded=false`、provides `inventory_refresh 1.0` / `inventory.action 2.0` / `inventory.slot 1.0`、24/24 资源 `live` | `/api/system/features` → `.tmp/inventory-hooks-audit/features-after.json` |
-| 任务袋守卫（阶段 4） | **PASS**：`POST /sell_item {"bag":5,"slot":0}` → 票据 `failed` / `{"ok":false,"error":"task bag excluded"}` | 票据 2 |
-| API 出售报价（阶段 4） | **PASS**：monster v29，category=10 count=3 unit=4，`multiplier=7/10 final=8`；money 28550→28558，槽位清空 | 票据 3；`inventory_trade.cpp:148` 日志 |
-| 日志 | **PASS**：当前进程 FATAL/SIGSEGV = 0；无 `assembly: plugin descriptor registration failed` | `logcat --pid=22045` |
+| 能力面（阶段 4） | **PASS**：`inventory_hooks` enabled、`degraded=false`、provides `inventory_refresh 1.0` / `inventory.action 2.0` / `inventory.slot 1.0`、24/24 资源 `live` | `evidence/features-final.json` |
+| 任务袋守卫（阶段 4） | **PASS**：`POST /sell_item {"bag":5,"slot":0}` → 票据 `failed` / `{"ok":false,"error":"task bag excluded"}` | 票据 2（构建 `23d8baaf`） |
+| API 出售报价（阶段 4） | **PASS**：monster v29，category=10 count=3 unit=4，`multiplier=7/10 final=8`；money 28550→28558，槽位清空 | 票据 3；`inventory_trade.cpp:148` 日志（构建 `23d8baaf`） |
+| 日志 | **PASS**：当前进程 FATAL/SIGSEGV = 0；无 `assembly: plugin descriptor registration failed` | `evidence/stage4-logcat.txt` |
 | IH-08 逐变体符号矩阵 | **PASS**：24 条 hook 符号 × original/overhaul/monster/c18 全部可解析且 VMA 一致 | `evidence/symbol-matrix.md`；`.tmp/inventory-hooks-audit/libs/<variant>/check.txt` |
-| IH-07 deactivate 拒绝 | **PASS（host）**：`capability_lifecycle` 断言 deactivate 返回 false、状态仍 enabled、资源仍 live | `tests/test_capability_lifecycle.cpp`；`.tmp/inventory-hooks-audit/host` |
+| IH-07 deactivate 拒绝（host） | **PASS**：`capability_lifecycle` 断言 deactivate 返回 false、状态仍 enabled、资源仍 live | `tests/test_capability_lifecycle.cpp`；`.tmp/inventory-hooks-audit/host` |
+| IH-07 deactivate 拒绝（设备） | **PASS**：最终构建 `2efcaf74`，请求后仍 `enabled`、24/24 `live`；4s 内 `deactivate rejected` 重试日志 0 条 | `evidence/stage4-logcat.txt`、`evidence/features-final.json` |
 | 阶段 5 卡 1：详情页出售预览/结算 | **PASS（用户真机确认，2026-10-18）** | 用户操作；弹窗金额与结算正常 |
 | 阶段 5 卡 2：任务袋透传 | **UNVER**：当前存档任务袋无物品，无法触发 | 用户确认无法测试；代码层面 bag 5 已在分流前强制 backup |
 | 阶段 5 卡 3：调试门禁关闭 | **SKIP（用户）** | kHidden 开关不便操作，跳过 |
