@@ -1,6 +1,7 @@
 # `inventory_hooks` 插件审阅登记（2026-10-18）
 
 - 审阅对象：功能插件 `inventory_hooks`（`module/app/src/main/cpp/plugins/inventory_hooks/`，12 文件 2761 行）。
+- 本批提交：`db923a56`（报价基础层）、`a362621f`（行为批 + `inventory.slot`）、`6f5c9825`（参考说明/登记）、`2d9a1389`（hidden 调试门禁 + 装配诊断）、`d0033430`（阶段 4 登记）。
 - 基线参考说明（阶段 0.75）：`docs/reference/plugins/inventory_hooks.md`（本批新建）。
 - 静态审计：阶段 1 @oracle 只读，A–G 七维，findings IH-01…IH-12 + 基础设施观察 G-2。
 - 现场基线（阶段 0）：设备 `192.168.3.56:5555`，`/api/health` = ready、variant `monster v29`、`/api/ui/screen` = `world`；运行模块 sha256 `a044632a…` = `output/Inotia4_v1.3.2_monster_v29_lspatched.apk` 内嵌模块；`inventory_hooks` enabled、`degraded=false`、24 资源 `live`。

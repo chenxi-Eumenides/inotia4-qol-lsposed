@@ -138,6 +138,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 |---|---|---|---|
 | UNVER-01 | core.world（写执行链 game/access/world.cpp 的 `tutorial_block_error` 分支） | 教学态拦截：药水教学激活时 world 写面被拒绝、读面暂态语义 | 无教学存档可进入教学态（用户 2026-09-28 确认）；不再主动验收，代码保持现状 |
 | UNVER-02 | core.item / extension_bag | 掷骰；镶嵌；强化；商店购买；ITM-01 bag5 任务袋读取；`bag6 slot11` 写入前态 | 无 pending dice、背包无宝石、无原版强化卷轴且 EB 关闭、商店为空、任务袋为空；EB 关闭无法读取 `bag6 slot11` 写前态。用户确认留到后续其它插件审阅时再测，此后不再主动验收 |
+| UNVER-03 | inventory_hooks | c18 `85%` / overhaul `70%` 倍率仅静态金标；UI 详情页出售与调试门禁关闭分支未真机 | 设备仅有 monster v29；用户 2026-10-18 确认按静态金标验收，monster 真机覆盖 70% 路径 |
 
 > QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
 
@@ -155,6 +156,32 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | SL-07 | P2 | 验收卡/规则册曾使用旧口径：6 条资源、插件拥有 S2、`stack_codec_impl.h`、重定向“常驻”。 | 同上 §1；`docs/refactor/verification.md` VM-P4-08/VM-P1-S2；`docs/refactor/extension-bag/rulebook.md` R-51 | 当前文档口径已由同批任务修订；不改写历史验收结论 |
 | SL-08 | P3 | 旧审计描述的 `g_provider` 裸指针已不存在，当前为静态 `const kFacade`。 | 同上 §1；INF-05 | 源码已变更，旧风险不再适用；待用户确认销账 |
 | SL-09 | P2 | 关闭态 `effective`/`view_from_canonical` 曾夹 99，导致 107 显示为 99。裁决 A3：关闭态读取 b（0–127）不夹 99；写回交还原版，`s2_writeback_gate` 要求 999 已应用。 | `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md` §1/§3 | 已由 `5013aba6` 修复；SL-09 专项真机 PASS，VM-P4-08/VM-P1-S2/VM-P6-01 整卡仍 NOT_ACCEPTED |
+
+## 13. inventory_hooks（审阅批 2026-10-18）
+
+审阅登记：`audits/plugin-audit/inventory-hooks-20261018/verification-log.md`；参考说明：`reference/plugins/inventory_hooks.md`。
+
+本批已修复（提交 `db923a56`、`a362621f`、`2d9a1389`）：
+
+- IH-01 UI 出售分流改为按物品实际编码（`canonical ≤ 127` 走原生，S2 才接管）。
+- IH-02 变体倍率模型（original/unknown 0%、overhaul/monster 70%、c18 85%）。
+- IH-03/04 三入口统一 `item.facts.quote`，API/autosell 跟随详情出售倍率；商店手动 100%。
+- IH-05 退款失败状态透传（`kRollbackFailed`）与真实日志。
+- IH-09 wrapper 空 backup 守卫。
+- IH-10 任务袋一律不由模块接管（UI 透传，API/autosell/slot 拒绝）。
+- IH-11 `caller` 伪地址与节流语义修正。
+- IH-12 保留为 `kHidden` 真实调试门禁（关闭时 wrapper 透传；合并 `core.item` 后删除）。
+
+开放项：
+
+| ID | 级 | 问题 | 状态 |
+|---|---|---|---|
+| IH-06 | P2 | `MoveItem`/`RemoveItemData`/`Divide` 原版失败或半写后仍可能回写 | 开放；需先冻结原版返回值语义，再补失败注入 |
+| IH-07 | P1 | 「禁止 deactivate」仅注释，代码不拦截；EB refresh 为 optional，停用后静默 no-op | 开放；合并 `core.item` 前由宿主实际拒绝 |
+| IH-08 | P2 | 24 条全 required fail-closed，变体缺一符号整插件不可用 | 开放；补逐变体 24 符号矩阵，不改成 fail-soft |
+| G-2 | P2 | 替换后的 FindItem handler 未登记 in-flight | 开放；host/dispatch 边界补登记并做 release 等待测试 |
+
+无法验证：c18/overhaul 倍率仅静态金标；UI 详情页出售与退款失败日志未真机；`inventory.slot` 暂无生产消费者；调试门禁关闭分支未真机逐条触发。
 
 ## 附录：已修复问题（存证）
 
