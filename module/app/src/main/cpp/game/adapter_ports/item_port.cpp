@@ -7,17 +7,20 @@
 #include <unordered_map>
 
 #include "contracts/game_ports/ports.h"
+#include "contracts/item_facts.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
 #include "game/access/item_handle_registry.h"
+#include "game/access/item_sell_quote.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/access/shop.h"
 #include "game/access/world.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
+#include "game/variants/game_variant.h"
 
 // JSON 构造器仍供未迁移的 game-system write/cache 路径使用；core.item owner 不用此入口。
 std::string build_inventory_json();
@@ -104,6 +107,19 @@ QolResult read_sell_price(contracts::QolItemHandle handle, int64_t* out) {
     const int value = item_sell_price(item);
     if (value < 0) return not_ready();
     *out = value;
+    return contracts::ok();
+}
+
+QolResult read_quote(contracts::QolItemHandle handle, uint32_t sale_path,
+                     contracts::QolSaleQuote* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid quote output");
+    *out = {};
+    void* item = nullptr;
+    const QolResult resolution = resolve_item_handle(handle, &item);
+    if (!contracts::succeeded(resolution)) return resolution;
+    if (!item_sell_quote::quote(item, sale_path, qol::game_variant().series, out)) {
+        return error_result(kQolErrNotReady, "item quote unavailable");
+    }
     return contracts::ok();
 }
 
@@ -367,8 +383,8 @@ const contracts::QolItemPort kItemPort{
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_item_context,
       &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
        &read_static_text, &read_static_ready, &read_inventory_item_view,
-        &read_effective_cumulate_count, &read_inventory_extension_access, &read_count_limit,
-        &read_count_encoding},
+         &read_effective_cumulate_count, &read_inventory_extension_access, &read_count_limit,
+         &read_count_encoding, &read_quote},
 };
 
 }  // namespace

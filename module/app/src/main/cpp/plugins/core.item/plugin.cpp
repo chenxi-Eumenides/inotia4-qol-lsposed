@@ -133,6 +133,12 @@ QolResult sell_price(contracts::QolItemHandle item, int64_t* out_price) {
     return g_port->read.sell_price(item, out_price);
 }
 
+QolResult quote(contracts::QolItemHandle item, uint32_t sale_path,
+                contracts::QolSaleQuote* out) {
+    if (g_port == nullptr || g_port->read.quote == nullptr) return not_ready();
+    return g_port->read.quote(item, sale_path, out);
+}
+
 QolResult cumulate_count(contracts::QolItemHandle item, int32_t* out_count) {
     if (g_port == nullptr || g_port->read.cumulate_count == nullptr) return not_ready();
     return g_port->read.cumulate_count(item, out_count);
@@ -197,6 +203,7 @@ constexpr contracts::ItemFactsApi kItemFactsApi{
     &effective_count,
     &count_limit,
     &count_encoding,
+    &quote,
 };
 
 // T2h-B2：item.state 发布面——唯一实现复用既有 serialize_inventory_json（禁止第二实现）。

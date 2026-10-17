@@ -651,14 +651,31 @@ static void test_native_bag_marker() {
 
 static void test_sell_price_bounds() {
     int64_t price = 0;
-    CHECK(qol::contracts::sell_price::calculate(100, 99, false, &price));
+    CHECK(qol::contracts::sell_price::calculate(100, 99, 10, 10, &price));
     CHECK_EQ(price, 9900);
-    CHECK(qol::contracts::sell_price::calculate(100, 999, true, &price));
+    CHECK(qol::contracts::sell_price::calculate(100, 999, 7, 10, &price));
     CHECK_EQ(price, 69930);
-    CHECK(!qol::contracts::sell_price::calculate(-1, 1, false, &price));
-    CHECK(!qol::contracts::sell_price::calculate(qol::contracts::sell_price::kMaxValue + 1, 1, false, &price));
-    CHECK(!qol::contracts::sell_price::calculate(qol::contracts::sell_price::kMaxValue, 2, false, &price));
-    CHECK(!qol::contracts::sell_price::calculate(1, 0, false, &price));
+    constexpr uint32_t kTestCounts[] = {1, 99, 127, 128, 999};
+    for (uint32_t count : kTestCounts) {
+        CHECK(qol::contracts::sell_price::calculate(100, count, 7, 10, &price));
+        CHECK_EQ(price, static_cast<int64_t>(count) * 70);
+    }
+    CHECK(!qol::contracts::sell_price::calculate(-1, 1, 10, 10, &price));
+    CHECK(!qol::contracts::sell_price::calculate(1, 1, 1, 0, &price));
+    CHECK(!qol::contracts::sell_price::calculate(1, 1, 11, 10, &price));
+    CHECK(qol::contracts::sell_price::calculate(INT32_MAX, 1, 10, 10, &price));
+    CHECK_EQ(price, INT32_MAX);
+    CHECK(!qol::contracts::sell_price::calculate(INT32_MAX, 2, 10, 10, &price));
+    CHECK(qol::contracts::sell_price::calculate(1, 1, 0, 10, &price));
+    CHECK_EQ(price, 0);
+    CHECK(!qol::contracts::sell_price::calculate(1, 0, 7, 10, &price));
+    int64_t legacy_price = 0;
+    CHECK(qol::contracts::sell_price::calculate(100, 99, true, &legacy_price));
+    CHECK(qol::contracts::sell_price::calculate(100, 99, 7, 10, &price));
+    CHECK_EQ(legacy_price, price);
+    CHECK(qol::contracts::sell_price::calculate(100, 99, false, &legacy_price));
+    CHECK(qol::contracts::sell_price::calculate(100, 99, 10, 10, &price));
+    CHECK_EQ(legacy_price, price);
     CHECK_EQ(virtual_bag::merge_view_counts(1000u, 0u, 99u), 99u);
     CHECK_EQ(virtual_bag::merge_view_counts(1000u, 0u, 999u), 999u);
 }

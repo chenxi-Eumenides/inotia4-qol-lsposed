@@ -6,6 +6,8 @@
 
 #include <cstdint>
 
+#include "contracts/sell_price.h"
+
 namespace qol {
 
 enum class GameSeries : uint8_t {
@@ -36,6 +38,7 @@ bool game_variant_init();
 const GameVariant& game_variant();
 // "unknown" / "original" / "overhaul" / "monster" / "c18"
 const char* game_series_name(GameSeries s);
+bool sell_multiplier(GameSeries series, uint32_t sale_path, uint32_t* num, uint32_t* den);
 
 namespace game_variant_detail {
 // md5[16] 是否等于 32 位小写十六进制串。

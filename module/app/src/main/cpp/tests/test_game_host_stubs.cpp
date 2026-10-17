@@ -2,6 +2,7 @@
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/access/item_class.h"
+#include "game/access/item_sell_quote.h"
 #include "game/access/game_access.h"
 #include "game/access/ui_state.h"
 #include "game/access/world.h"
@@ -30,6 +31,14 @@ namespace qol::game {
 
 int item_sell_price(const void*) { return -1; }
 int item_class_category(const void*) { return 28; }
+
+namespace item_sell_quote {
+bool quote(void* item, uint32_t sale_path, GameSeries, contracts::QolSaleQuote* out) {
+    if (item == nullptr || out == nullptr || sale_path > contracts::kStoreSell) return false;
+    *out = {sizeof(*out), 10, 99, 990, 10, 10};
+    return true;
+}
+}  // namespace item_sell_quote
 
 // host_adapter_tests 不链接真实 game/adapter_ports/system_port.cpp；启动期身份按未下发处理。
 const char* system_port_version() { return nullptr; }

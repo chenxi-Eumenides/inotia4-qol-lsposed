@@ -304,6 +304,34 @@ const char* game_series_name(GameSeries s) {
     return "unknown";
 }
 
+bool sell_multiplier(GameSeries series, uint32_t sale_path, uint32_t* num, uint32_t* den) {
+    if (num == nullptr || den == nullptr) return false;
+    if (sale_path == contracts::kStoreSell) {
+        *num = 10;
+        *den = 10;
+        return true;
+    }
+    if (sale_path != contracts::kDetailSell) return false;
+
+    *den = 10;
+    switch (series) {
+        case GameSeries::kOriginal:
+        case GameSeries::kUnknown:
+            *num = 0;
+            return true;
+        case GameSeries::kOverhaul:
+        case GameSeries::kMonster:
+            *num = 7;
+            return true;
+        case GameSeries::kC18:
+            *num = 17;
+            *den = 20;
+            return true;
+    }
+    *num = 0;
+    return true;
+}
+
 bool game_variant_init() {
     std::lock_guard<std::mutex> lock(g_variant_mutex);
     if (g_variant_initialized) return true;

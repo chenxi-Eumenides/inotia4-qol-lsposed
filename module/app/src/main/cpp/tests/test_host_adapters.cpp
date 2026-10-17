@@ -1026,6 +1026,13 @@ int main() {
     g_find_item_handle = qol::game::register_item(
         &g_find_item_item, qol::contracts::kQolItemHandleOwnerProvider);
     assert(g_find_item_handle.slot != 0 && g_find_item_handle.generation != 0);
+    assert(item_port_api.read.quote != nullptr);
+    qol::contracts::QolSaleQuote provider_quote{};
+    assert(item_port_api.read.quote(g_find_item_handle, qol::contracts::kDetailSell,
+                                   &provider_quote).ok == kQolOk);
+    assert(provider_quote.struct_size == sizeof(provider_quote));
+    assert(provider_quote.unit_price == 10 && provider_quote.count == 99 &&
+           provider_quote.price == 990);
     g_find_item_mode = 1;
     g_find_item_backup_calls = 0;
     assert(game.item_abi.find_item_wrapper(g_find_item_category) == &g_find_item_item);

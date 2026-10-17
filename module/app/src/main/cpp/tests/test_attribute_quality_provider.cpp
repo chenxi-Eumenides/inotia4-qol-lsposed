@@ -317,7 +317,7 @@ void test_descriptor_and_install_gates() {
     incomplete_api.evaluate = nullptr;
     CHECK(!contracts::attribute_quality_api_size_valid(&incomplete_api));
     CHECK(descriptor.requires_count == 1 && descriptor.requires != nullptr);
-    CHECK(descriptor.requires[0].range.major == 3 && descriptor.requires[0].range.min_minor == 3);
+    CHECK(descriptor.requires[0].range.major == 3 && descriptor.requires[0].range.min_minor == 4);
 
     contracts::QolHostSdk sdk{};
     sdk.capabilities.require = &fake_require_facts;
@@ -327,7 +327,7 @@ void test_descriptor_and_install_gates() {
     ctx.game = &g_game;
     CHECK(descriptor.install(ctx) == 0);
     CHECK(g_require_calls == 1);
-    CHECK(g_requested_facts_range.major == 3 && g_requested_facts_range.min_minor == 3);
+    CHECK(g_requested_facts_range.major == 3 && g_requested_facts_range.min_minor == 4);
     CHECK(feature::active());
     CHECK(descriptor.on_resource_ready(ctx, feature::kResourceIdMathGetRandom,
                                        reinterpret_cast<void*>(&fake_backup_math_get_random)) == 0);

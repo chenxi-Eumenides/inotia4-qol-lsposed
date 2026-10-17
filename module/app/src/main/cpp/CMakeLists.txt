@@ -14,6 +14,7 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/inventory_hooks/native_inventory_hook.cpp
     plugins/inventory_hooks/inventory_find_item_poc.cpp
     plugins/inventory_hooks/inventory_hook_stage4.cpp
+    plugins/inventory_hooks/inventory_slot.cpp
     plugins/extension_bag/game_ui_virtbag.cpp
     plugins/extension_bag/extension_bag_port.cpp
     plugins/extension_bag/extension_bag_persistence.cpp
@@ -224,6 +225,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/choice_port.cpp
     game/adapter_ports/world_action_port.cpp
     game/adapter_ports/item_port.cpp
+    game/access/item_sell_quote.cpp
     game/adapter_ports/quest_port.cpp
     game/adapter_ports/save_port.cpp
     game/adapter_ports/save_call_port.cpp

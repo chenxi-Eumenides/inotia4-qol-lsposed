@@ -112,6 +112,34 @@ static void test_series_names() {
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kC18), "c18") == 0);
 }
 
+static void test_sell_multipliers() {
+    struct Expected {
+        qol::GameSeries series;
+        uint32_t num;
+        uint32_t den;
+    };
+    constexpr Expected kDetail[] = {
+        {qol::GameSeries::kOriginal, 0, 10},
+        {qol::GameSeries::kOverhaul, 7, 10},
+        {qol::GameSeries::kMonster, 7, 10},
+        {qol::GameSeries::kC18, 17, 20},
+        {qol::GameSeries::kUnknown, 0, 10},
+    };
+    for (const Expected& expected : kDetail) {
+        uint32_t num = 0;
+        uint32_t den = 0;
+        CHECK(qol::sell_multiplier(expected.series, qol::contracts::kDetailSell, &num, &den));
+        CHECK(num == expected.num && den == expected.den);
+        CHECK(qol::sell_multiplier(expected.series, qol::contracts::kStoreSell, &num, &den));
+        CHECK(num == 10 && den == 10);
+    }
+    uint32_t num = 0;
+    uint32_t den = 0;
+    CHECK(!qol::sell_multiplier(qol::GameSeries::kMonster, 2, &num, &den));
+    CHECK(!qol::sell_multiplier(qol::GameSeries::kMonster, qol::contracts::kDetailSell,
+                                nullptr, &den));
+}
+
 static void test_uninitialized_default() {
     const qol::GameVariant& v = qol::game_variant();
     CHECK(v.series == qol::GameSeries::kUnknown);
@@ -128,6 +156,7 @@ int main() {
     test_lookup_miss();
     test_classify_fallback();
     test_series_names();
+    test_sell_multipliers();
     test_uninitialized_default();
     std::printf("game_variant_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

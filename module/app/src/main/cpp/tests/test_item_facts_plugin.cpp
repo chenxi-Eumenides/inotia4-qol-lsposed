@@ -1,4 +1,5 @@
 #include "contracts/item_facts.h"
+#include "contracts/inventory_slot.h"
 #include "contracts/inventory_action.h"
 #include "contracts/inventory_extension.h"
 #include "contracts/extension_bag.h"
@@ -43,10 +44,30 @@ static_assert(offsetof(qol::contracts::QolItemPortReadApi, count_encoding) ==
                   offsetof(qol::contracts::QolItemPortReadApi, count_limit) +
                       sizeof(decltype(qol::contracts::QolItemPortReadApi::count_limit)),
               "Item Port count_encoding must be tail-appended");
+static_assert(offsetof(qol::contracts::ItemFactsApi, quote) ==
+                  offsetof(qol::contracts::ItemFactsApi, count_encoding) +
+                      sizeof(qol::contracts::ItemFactsCountEncodingFn),
+              "ItemFacts quote must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, quote) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, count_encoding) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::count_encoding)),
+              "Item Port quote must be tail-appended");
 static_assert(std::is_same<qol::contracts::ItemFactsCountEncodingFn,
                            QolResult (*)(qol::contracts::QolItemHandle,
                                          qol::contracts::QolItemCountEncoding*)>::value,
-              "item.facts count encoding must be handle-keyed");
+               "item.facts count encoding must be handle-keyed");
+static_assert(std::is_same<qol::contracts::ItemFactsQuoteFn,
+                           QolResult (*)(qol::contracts::QolItemHandle, uint32_t,
+                                         qol::contracts::QolSaleQuote*)>::value,
+              "item.facts quote must be handle-keyed");
+static_assert(std::is_same<qol::contracts::QolItemPortQuoteFn,
+                           QolResult (*)(qol::contracts::QolItemHandle, uint32_t,
+                                         qol::contracts::QolSaleQuote*)>::value,
+              "Item Port quote must be handle-keyed");
+static_assert(std::is_same<decltype(qol::contracts::QolInventorySlotApi::remove),
+                           QolResult (*)(int32_t, int32_t, qol::contracts::QolItemHandle,
+                                         uint32_t)>::value,
+              "inventory.slot remove must carry the expected handle");
 static_assert(offsetof(qol::contracts::QolCharacterExtrasReadApi, can_apply_stuff_items) ==
                   offsetof(qol::contracts::QolCharacterExtrasReadApi, party_member) +
                       sizeof(decltype(qol::contracts::QolCharacterExtrasReadApi::party_member)),
@@ -107,9 +128,9 @@ static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
 
 int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 3 &&
-          qol::contracts::kItemFactsVersion.minor == 3);
+          qol::contracts::kItemFactsVersion.minor == 4);
     CHECK(qol::contracts::kQolPortItemVersion.major == 3 &&
-          qol::contracts::kQolPortItemVersion.minor == 3);
+          qol::contracts::kQolPortItemVersion.minor == 4);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -117,18 +138,22 @@ int main() {
         offsetof(qol::contracts::ItemFactsApi, count_encoding));
     CHECK(qol::contracts::item_facts_api_size_valid(&old_size_api));
     CHECK(!qol::contracts::item_facts_api_count_encoding_size_valid(&old_size_api));
+    CHECK(!qol::contracts::item_facts_api_quote_size_valid(&old_size_api));
     old_size_api.struct_size = sizeof(old_size_api);
     CHECK(qol::contracts::item_facts_api_size_valid(&old_size_api));
     CHECK(qol::contracts::item_facts_api_count_encoding_size_valid(&old_size_api));
+    CHECK(qol::contracts::item_facts_api_quote_size_valid(&old_size_api));
     qol::contracts::QolItemPort old_item_port{};
     old_item_port.struct_size = static_cast<uint32_t>(
         offsetof(qol::contracts::QolItemPort, read) +
         offsetof(qol::contracts::QolItemPortReadApi, count_encoding));
     CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
     CHECK(!qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
+    CHECK(!qol::contracts::qol_item_port_quote_size_valid(&old_item_port));
     old_item_port.struct_size = sizeof(old_item_port);
     CHECK(qol::contracts::qol_item_port_size_valid(&old_item_port));
     CHECK(qol::contracts::qol_item_port_count_encoding_size_valid(&old_item_port));
+    CHECK(qol::contracts::qol_item_port_quote_size_valid(&old_item_port));
     CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {1, 1}));
     CHECK(!qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {1, 4}));
     CHECK(!qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {2, 0}));
@@ -190,7 +215,7 @@ int main() {
     }
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 3);
+    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 4);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -202,7 +227,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 3);
+    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 4);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
@@ -223,6 +248,7 @@ int main() {
     CHECK(api->effective_count != nullptr);
     CHECK(api->count_limit != nullptr);
     CHECK(api->count_encoding != nullptr);
+    CHECK(api->quote != nullptr);
     CHECK(g_fail == 0);
     std::printf("item_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

@@ -4,12 +4,13 @@
 
 #include "game_ports/item_port.h"
 #include "result.h"
+#include "sell_price.h"
 #include "version.h"
 
 namespace qol::contracts {
 
 constexpr const char* kItemFactsCapabilityId = "item.facts";
-constexpr QolVersion kItemFactsVersion{3, 3};
+constexpr QolVersion kItemFactsVersion{3, 4};
 constexpr uint16_t kItemFactsVersionMajor = kItemFactsVersion.major;
 constexpr uint16_t kItemFactsVersionMinor = kItemFactsVersion.minor;
 
@@ -23,7 +24,9 @@ using ItemFactsViewFn = QolResult (*)(QolItemHandle item, QolItemInventoryView* 
 using ItemFactsEffectiveCountFn = QolResult (*)(QolItemHandle item, int32_t* out_count);
 using ItemFactsCountLimitFn = QolResult (*)(QolItemHandle item, uint32_t* out_limit);
 using ItemFactsCountEncodingFn = QolResult (*)(QolItemHandle item,
-                                               QolItemCountEncoding* out_encoding);
+                                                QolItemCountEncoding* out_encoding);
+using ItemFactsQuoteFn = QolResult (*)(QolItemHandle item, uint32_t sale_path,
+                                       struct QolSaleQuote* out);
 
 using ItemFactsItemRefAtFn = QolResult (*)(int32_t bag, int32_t slot,
                                            QolInventoryItemRef* out);
@@ -48,6 +51,7 @@ struct ItemFactsApi {
     ItemFactsEffectiveCountFn effective_count;
     ItemFactsCountLimitFn count_limit;
     ItemFactsCountEncodingFn count_encoding;
+    ItemFactsQuoteFn quote;
 };
 
 inline bool item_facts_api_size_valid(const ItemFactsApi* api) {
@@ -59,6 +63,12 @@ inline bool item_facts_api_size_valid(const ItemFactsApi* api) {
 inline bool item_facts_api_count_encoding_size_valid(const ItemFactsApi* api) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(ItemFactsApi, count_encoding) + sizeof(ItemFactsCountEncodingFn));
+    return api != nullptr && api->struct_size >= kRequiredSize;
+}
+
+inline bool item_facts_api_quote_size_valid(const ItemFactsApi* api) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(ItemFactsApi, quote) + sizeof(ItemFactsQuoteFn));
     return api != nullptr && api->struct_size >= kRequiredSize;
 }
 

@@ -8,6 +8,7 @@
 #include "../version.h"
 #include "../item_handle.h"
 #include "../item_count.h"
+#include "../sell_price.h"
 
 namespace qol::contracts {
 
@@ -37,6 +38,8 @@ struct QolItemDetailContext {
 
 using QolInventoryBagSlotFn = int32_t (*)(const QolInventoryItemRef* item, void* ctx);
 using QolItemJsonFn = QolResult (*)(char* out, uint32_t capacity, uint32_t* out_size);
+using QolItemPortQuoteFn = QolResult (*)(QolItemHandle item, uint32_t sale_path,
+                                         QolSaleQuote* out);
 
 constexpr uint32_t kQolItemInventoryOptionCapacity = 32;
 // Autosell view consumer table (plugins/autosell/view.cpp): real-equip→equip; rarity→rarity;
@@ -134,6 +137,7 @@ struct QolItemPortReadApi {
     QolResult (*inventory_extension_access)(QolInventoryExtensionAccess* out_access);
     QolResult (*count_limit)(QolItemHandle item, uint32_t* out_limit);
     QolResult (*count_encoding)(QolItemHandle item, QolItemCountEncoding* out_encoding);
+    QolItemPortQuoteFn quote;
 };
 
 struct QolItemPort {
@@ -152,6 +156,13 @@ inline bool qol_item_port_count_encoding_size_valid(const QolItemPort* port) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, count_encoding) +
         sizeof(QolItemPortReadApi::count_encoding));
+    return port != nullptr && port->struct_size >= kRequiredSize;
+}
+
+inline bool qol_item_port_quote_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, quote) +
+        sizeof(QolItemPortQuoteFn));
     return port != nullptr && port->struct_size >= kRequiredSize;
 }
 
