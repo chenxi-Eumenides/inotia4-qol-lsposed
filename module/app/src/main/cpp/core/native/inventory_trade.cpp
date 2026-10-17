@@ -6,13 +6,12 @@
 
 #include "inventory_trade.h"
 
-#include "contracts/item_count.h"
+#include "contracts/item_facts.h"
 #include "infra/log/qol_log.h"
-#include "contracts/sell_price.h"
+#include "infra/capabilities.h"
 #include "game/access/game_access.h"
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
-#include "game/adapter_ports/item_count_facade.h"
 #include "game/state/game_state.h"
 
 #include <cstdint>
@@ -32,36 +31,19 @@ const qol::contracts::QolInventoryExtensionProvider* extension_provider() {
                : nullptr;
 }
 
-// provider 可用时取 provider 的价格；否则按 provider 同一算法复现（sell_price::calculate）。
-// 原因：provider 的 sell_price 是纯价格计算（变体折扣 R-23、堆叠收敛与边界 R-37），
-// provider 不可用（停用）时物理袋出售/自动出售仍需结算；直接降级为 -1 会破坏行为中性。
-int64_t sell_price_with_fallback(const qol::contracts::QolInventoryExtensionProvider* provider,
-                                 void* item, int count) {
-    if (provider != nullptr && provider->sell_price != nullptr) {
-        int64_t price = -1;
-        uint32_t provider_id = qol::contracts::kQolItemHandleOwnerGame;
-        qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &provider_id);
-        if (handle.slot == 0) {
-            handle = qol::game::register_item(item, qol::contracts::kQolItemHandleOwnerGame);
-        }
-        if (handle.slot != 0 &&
-            qol::contracts::succeeded(provider->sell_price(handle, count, 1, &price))) return price;
-        return -1;
+const qol::contracts::ItemFactsApi* item_facts_api() {
+    const void* iface = qol::infra::require_capability(
+        qol::contracts::kItemFactsCapabilityId,
+        {qol::contracts::kItemFactsVersionMajor, qol::contracts::kItemFactsVersionMinor});
+    const auto* facts = static_cast<const qol::contracts::ItemFactsApi*>(iface);
+    if (!qol::contracts::item_facts_api_quote_size_valid(facts) || facts->quote == nullptr) {
+        return nullptr;
     }
-    if (item == nullptr || count <= 0 || fn_item_get_sell_price == nullptr) return -1;
-    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    uint32_t legal_count = static_cast<uint32_t>(count);
-    const qol::contracts::QolItemCountApi* item_count = qol::game::item_count_api_if_resident();
-    if (item_count != nullptr && item_count->effective != nullptr) {
-        uint32_t effective = 0;
-        const QolResult result = item_count->effective(item, &effective);
-        if (qol::contracts::succeeded(result)) legal_count = effective;
-    }
-    int64_t final_price = 0;
-    if (!qol::contracts::sell_price::calculate(unit_price, legal_count, true, &final_price)) {
-        return -1;
-    }
-    return final_price;
+    return facts;
+}
+
+bool rollback_money(int64_t price) {
+    return fn_minus_money != nullptr && fn_minus_money(price) != 0;
 }
 
 // 投影同步：provider 门禁关闭时为 no-op（无模块视图）；provider 不可用时跳过等价。
@@ -83,7 +65,6 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         return result;
     }
     if (fn_add_money == nullptr || fn_minus_money == nullptr ||
-        fn_item_get_sell_price == nullptr ||
         fn_item_is_no_sell == nullptr || fn_get_bit == nullptr) {
         result.status = Status::kSymbolsUnresolved;
         return result;
@@ -127,33 +108,44 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kNoSell;
         return result;
     }
-    const int count = fn_get_cumulate_count != nullptr
-        ? fn_get_cumulate_count(item) : 1;
-    result.count = count;
-    const int64_t unit_price = static_cast<int64_t>(fn_item_get_sell_price(item));
-    const int64_t price = sell_price_with_fallback(provider, item, count);  // 默认变体折扣 70%
-    if (price < 0) {
+    const auto* facts = item_facts_api();
+    if (facts == nullptr) {
+        result.status = Status::kSymbolsUnresolved;
+        return result;
+    }
+    uint32_t owner = provider_item ? qol::contracts::kQolItemHandleOwnerProvider
+                                   : qol::contracts::kQolItemHandleOwnerGame;
+    qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &owner);
+    if (handle.slot == 0 || handle.generation == 0) {
+        handle = qol::game::register_item(item, owner);
+    }
+    if (handle.slot == 0 || handle.generation == 0) {
+        result.status = Status::kSymbolsUnresolved;
+        return result;
+    }
+    qol::contracts::QolSaleQuote quote{};
+    quote.struct_size = sizeof(quote);
+    if (!qol::contracts::succeeded(facts->quote(handle, qol::contracts::kDetailSell, &quote)) ||
+        quote.struct_size < sizeof(quote) || quote.count <= 0 || quote.price < 0 ||
+        quote.multiplier_den == 0 || quote.multiplier_num > quote.multiplier_den) {
         QOL_LOG_WARN(QolDomain::kInventory,
                      "sell price reject reason=price_bounds source=%s category=%d count=%d "
-                     "unit=%lld variant=100 payload=0 gen=0",
-                     source, category, count, static_cast<long long>(unit_price));
+                     "unit=%lld multiplier=%u/%u payload=0 gen=0",
+                     source, category, quote.count, static_cast<long long>(quote.unit_price),
+                     quote.multiplier_num, quote.multiplier_den);
         result.status = Status::kPriceInvalid;
         return result;
     }
-    uint32_t log_count = static_cast<uint32_t>(count > 0 ? count : 0);
-    const qol::contracts::QolItemCountApi* log_item_count = qol::game::item_count_api_if_resident();
-    if (log_item_count != nullptr && log_item_count->effective != nullptr) {
-        uint32_t effective = 0;
-        const QolResult effective_result = log_item_count->effective(item, &effective);
-        if (qol::contracts::succeeded(effective_result)) log_count = effective;
-    }
+    const int64_t price = quote.price;
+    result.count = quote.count;
     QOL_LOG_INFO(QolDomain::kInventory,
-                 "sell price source=%s category=%d count=%d unit=%lld variant=100 "
+                 "sell price source=%s category=%d count=%d unit=%lld multiplier=%u/%u "
                  "final=%lld payload=0 gen=0",
                  source,
                  category,
-                 static_cast<int>(log_count),
-                 static_cast<long long>(unit_price), static_cast<long long>(price));
+                 quote.count,
+                 static_cast<long long>(quote.unit_price), quote.multiplier_num,
+                 quote.multiplier_den, static_cast<long long>(price));
     result.price = price;
     // 与原版 UIStore_SellItem(0xd25f0) 的对照：
     //   原版链 = INVEN_RemoveItem(item) 成功后 INVEN_AddMoney(价格)，无回购列表（普通
@@ -175,16 +167,16 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         if (provider == nullptr || provider->remove_for_sale == nullptr ||
             owner != qol::contracts::kQolItemHandleOwnerProvider || handle.slot == 0 ||
             handle.generation == 0) {
-            fn_minus_money(price);
-            result.status = Status::kRemoveFailed;
+            result.status = rollback_money(price) ? Status::kRemoveFailed
+                                                  : Status::kRollbackFailed;
             return result;
         }
         removed = qol::contracts::succeeded(
             provider->remove_for_sale(bag, slot, handle));
     } else {
         if (fn_remove_item == nullptr) {
-            fn_minus_money(price);
-            result.status = Status::kRemoveFailed;
+            result.status = rollback_money(price) ? Status::kRemoveFailed
+                                                  : Status::kRollbackFailed;
             return result;
         }
         qol::contracts::QolItemHandle checkpoint{};
@@ -196,8 +188,8 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         if (removed && !suspended) qol::game::invalidate_item(item);
     }
     if (!removed) {
-        fn_minus_money(price);
-        result.status = Status::kRemoveFailed;
+        result.status = rollback_money(price) ? Status::kRemoveFailed
+                                              : Status::kRollbackFailed;
         return result;
     }
     if (!provider_item) sync_projected_slot_if_available(provider, bag, slot);

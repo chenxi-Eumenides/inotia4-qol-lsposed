@@ -2,8 +2,6 @@
 
 #include <cassert>
 
-#include "../../contracts/sell_price.h"
-
 int stage4_have_item(int32_t category, Stage4HaveBackup backup,
                      Stage4CountExtension extension_count, bool& recursive_guard) {
     if (recursive_guard) return backup == nullptr ? 0 : backup(category);
@@ -61,10 +59,13 @@ uint32_t native_equip_sell_count(uint32_t field,
     return (b >= 1u && b <= 99u) ? b : 1u;
 }
 
-VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run) {
-    // 关闭态一律 backup：原版逐指令不变（R-55 决策 a）。
-    if (!limit_enabled) return VanillaSellRoute::kBackup;
-    // 启用态：按钮预演只回填展示金额，绝不结算（取消不可回滚）；弹窗 OK 真实接管。
+VanillaSellRoute vanilla_sell_route(int32_t bag, bool count_encoded,
+                                    uint32_t canonical_count, bool button_dry_run) {
+    // 只有实际使用 S2 数量表示的物品由模块接管；原版可表示物品与任务袋透传。
+    if (bag == 5 || !count_encoded || canonical_count <= 127u) {
+        return VanillaSellRoute::kBackup;
+    }
+    // 按钮预演只回填展示金额，绝不结算；弹窗 OK 才真实接管。
     return button_dry_run ? VanillaSellRoute::kPreview : VanillaSellRoute::kTakeover;
 }
 
@@ -76,21 +77,6 @@ bool vanilla_sell_detail_context_matches(
            preview.item.slot != 0 && preview.item.generation != 0 &&
            preview.item.slot == confirmation.item.slot &&
            preview.item.generation == confirmation.item.generation;
-}
-
-bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price,
-                        const qol::contracts::QolItemCountApi* item_count) {
-    if (out_price == nullptr || canonical_count == 0) return false;
-    // 启用态上限 999；canonical 已是完整数量，越界按 facade 视图上限收敛。
-    if (item_count == nullptr || item_count->view_from_canonical == nullptr) return false;
-    uint32_t legal_count = 0;
-    if (!qol::contracts::succeeded(
-            item_count->view_from_canonical(canonical_count, 1, &legal_count))) {
-        return false;
-    }
-    if (legal_count == 0) return false;
-    return qol::contracts::sell_price::calculate(unit_price, legal_count,
-                                                 /*apply_variant_discount=*/true, out_price);
 }
 
 uint32_t stage4_make_item_writeback_count(int32_t category, int32_t arg2, int32_t flag) {

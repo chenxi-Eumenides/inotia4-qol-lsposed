@@ -6,11 +6,13 @@
 #include <cstring>
 
 #include "contracts/inventory_extension.h"
+#include "contracts/item_facts.h"
 #include "game/access/game_access.h"
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/state/game_state.h"
+#include "infra/capabilities.h"
 
 namespace {
 
@@ -24,10 +26,14 @@ int g_generic_remove_calls = 0;
 int g_finish_invalidation_calls = 0;
 int g_invalidate_calls = 0;
 int g_sell_price_calls = 0;
+int g_quote_calls = 0;
+uint32_t g_quote_num = 7;
+uint32_t g_quote_den = 10;
 int g_sync_calls = 0;
 int g_remove_for_sale_calls = 0;
 int g_callback_mode = 0;
 bool g_available = true;
+bool g_refund_fail = false;
 bool g_provider_item_live = true;
 uint32_t g_owner = qol::contracts::kQolItemHandleOwnerProvider;
 const qol::contracts::QolItemHandle g_handle{17, 23};
@@ -43,6 +49,24 @@ QolResult provider_sell_price(qol::contracts::QolItemHandle, int32_t count,
     *out_price = 14 * count;
     return qol::contracts::ok();
 }
+
+QolResult item_facts_quote(qol::contracts::QolItemHandle, uint32_t sale_path,
+                           qol::contracts::QolSaleQuote* out) {
+    ++g_quote_calls;
+    assert(sale_path == qol::contracts::kDetailSell);
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    out->struct_size = sizeof(*out);
+    out->unit_price = 14;
+    out->count = g_count;
+    out->multiplier_num = g_quote_num;
+    out->multiplier_den = g_quote_den;
+    out->price = (14 * g_count * g_quote_num) / g_quote_den;
+    return qol::contracts::ok();
+}
+
+qol::contracts::ItemFactsApi kItemFacts{
+    sizeof(qol::contracts::ItemFactsApi), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &item_facts_quote};
 
 QolResult remove_for_sale(int32_t bag, int32_t slot,
                           qol::contracts::QolItemHandle handle) {
@@ -94,9 +118,13 @@ void reset(InventoryItemKind kind, int callback_mode = 0) {
     g_finish_invalidation_calls = 0;
     g_invalidate_calls = 0;
     g_sell_price_calls = 0;
+    g_quote_calls = 0;
+    g_quote_num = 7;
+    g_quote_den = 10;
     g_sync_calls = 0;
     g_remove_for_sale_calls = 0;
     g_callback_mode = callback_mode;
+    g_refund_fail = false;
     g_available = true;
     g_provider_item_live = true;
     g_owner = kind == InventoryItemKind::kProvider
@@ -166,6 +194,7 @@ int add_money(int64_t amount) {
 }
 int minus_money(int64_t amount) {
     ++g_refund_calls;
+    if (g_refund_fail) return 0;
     g_money -= amount;
     return 1;
 }
@@ -177,9 +206,10 @@ int generic_remove(void*) {
 void test_provider_success_uses_only_neutral_sale_callback() {
     reset(InventoryItemKind::kProvider);
     const auto result = inventory_trade::sell(6, 2, g_item, "api");
-    assert(result.status == inventory_trade::Status::kOk && result.price == 14);
-    assert(g_add_calls == 1 && g_refund_calls == 0 && g_money == 14);
+    assert(result.status == inventory_trade::Status::kOk && result.price == 9);
+    assert(result.count == 1 && g_add_calls == 1 && g_refund_calls == 0 && g_money == 9);
     assert(g_remove_for_sale_calls == 1 && g_generic_remove_calls == 0);
+    assert(g_quote_calls == 1 && g_sell_price_calls == 0);
     assert(!g_provider_item_live);
     assert(g_finish_invalidation_calls == 0 && g_invalidate_calls == 0 && g_sync_calls == 0);
 }
@@ -222,10 +252,24 @@ void test_original_bag_keeps_generic_remove_path() {
     reset(InventoryItemKind::kOriginal);
     g_count = 3;
     const auto result = inventory_trade::sell(0, 6, g_item, "api");
-    assert(result.status == inventory_trade::Status::kOk && result.price == 42);
-    assert(g_add_calls == 1 && g_refund_calls == 0 && g_money == 42);
+    assert(result.status == inventory_trade::Status::kOk && result.price == 29);
+    assert(g_add_calls == 1 && g_refund_calls == 0 && g_money == 29);
+    assert(g_quote_calls == 1 && g_sell_price_calls == 0);
     assert(g_generic_remove_calls == 1 && g_remove_for_sale_calls == 0);
     assert(g_finish_invalidation_calls == 1 && g_invalidate_calls == 0 && g_sync_calls == 1);
+}
+
+void test_refund_failure_status_and_task_bag_exclusion() {
+    reset(InventoryItemKind::kProvider, 2);
+    g_refund_fail = true;
+    const auto failed = inventory_trade::sell(6, 2, g_item, "api");
+    assert(failed.status == inventory_trade::Status::kRollbackFailed);
+    assert(g_add_calls == 1 && g_refund_calls == 1 && g_money == 9);
+
+    reset(InventoryItemKind::kOriginal);
+    const auto excluded = inventory_trade::sell(5, 2, g_item, "api");
+    assert(excluded.status == inventory_trade::Status::kTaskBagExcluded);
+    assert(g_add_calls == 0 && g_refund_calls == 0 && g_generic_remove_calls == 0);
 }
 
 }  // namespace
@@ -240,10 +284,15 @@ int main() {
     fn_minus_money = &minus_money;
     qol::game::inventory_extension_bind_host();
     assert(qol::game::inventory_extension_set_provider(&kProvider, &provider_available));
+    assert(qol::infra::register_capability({
+        qol::contracts::kItemFactsCapabilityId,
+        {qol::contracts::kItemFactsVersionMajor, qol::contracts::kItemFactsVersionMinor},
+        &kItemFacts}));
 
     test_provider_success_uses_only_neutral_sale_callback();
     test_provider_failure_refunds_without_mutating_slot();
     test_provider_missing_or_unavailable_callback_fails_closed();
     test_original_bag_keeps_generic_remove_path();
+    test_refund_failure_status_and_task_bag_exclusion();
     return 0;
 }

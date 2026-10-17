@@ -57,15 +57,11 @@ uint32_t native_equip_sell_count(uint32_t field,
 enum class VanillaSellRoute : uint8_t { kBackup, kPreview, kTakeover };
 constexpr int32_t kVanillaBagDetailType = 2;
 
-VanillaSellRoute vanilla_sell_route(bool limit_enabled, bool button_dry_run);
+VanillaSellRoute vanilla_sell_route(int32_t bag, bool count_encoded,
+                                    uint32_t canonical_count, bool button_dry_run);
 bool vanilla_sell_detail_context_matches(
     const qol::contracts::QolItemDetailContext& preview,
     const qol::contracts::QolItemDetailContext& confirmation);
-// 0.7 结算金额（canonical 模式视图）：unit_price × min(canonical,999) × 7 / 10，
-// 沿用 sell_price 边界与溢出校验；canonical==0 / unit_price 越界 / 结果越界 → false。
-bool vanilla_sell_money(int64_t unit_price, uint32_t canonical_count, int64_t* out_price,
-                        const qol::contracts::QolItemCountApi* item_count);
-
 // ITEMSYSTEM_MakeItem 数量回写计划（VM-38 缺陷修复，纯函数供 Host 断言）。
 // 反汇编证明（0x10c6c8，基线 .tmp/dualmode-full.asm）：arg2（w1）是与静态表
 // +0x2 域匹配的查找/品质参数（CHARSYSTEM_DropItem 传 2..5、DEALSYSTEM_MakeSale

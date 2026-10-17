@@ -357,17 +357,6 @@ static void test_get_cumulate_count_facade() {
     g_effective_result_mode = EffectiveResultMode::kOk;
 }
 
-static QolResult fake_conversion_view(uint32_t canonical, int32_t extended,
-                                      uint32_t* out_view) {
-    if (out_view == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
-    if (extended != 0) {
-        *out_view = canonical > 999u ? 999u : canonical;
-    } else {
-        *out_view = canonical % 128u;
-    }
-    return qol::contracts::ok();
-}
-
 static QolResult fake_conversion_limit(int32_t extended, uint32_t* out_limit) {
     if (out_limit == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     *out_limit = extended != 0 ? 999u : 99u;
@@ -375,8 +364,8 @@ static QolResult fake_conversion_limit(int32_t extended, uint32_t* out_limit) {
 }
 
 static const qol::contracts::QolItemCountApi kStage4ConversionApi = {
-    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    &fake_conversion_view, &fake_conversion_limit};
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+    &fake_conversion_limit};
 
 // H-21 INVEN_RemoveItemData 修正计划（R-45/R-49）：部分删堆 remain 修正、
 // 整删消失堆求和、count<=0 / 无缩减 / 多缩减 / 越域 / 已正确各分支 fail-closed。
@@ -510,19 +499,28 @@ static void test_make_item_writeback_count() {
 
 // VM-41：原版背包详情出售接管判定 + 金额（R-55）。调用点常量与 game_symbols.h
 // 同源；启用/关闭两态、canonical 0/1/99/100/199/999、越界拒绝全覆盖。
-static void test_vanilla_sell_takeover() {
+static void test_vanilla_sell_routing() {
     // 结算点常量与反汇编证据一致（0xb83d0 回调 / desc_type==2 背包详情）。
     CHECK(F_UIEQUIP_OK_DESTROY_ITEM_VMA == 0xb83d0u);
     CHECK(F_UIEQUIP_BUTTON_DESTROY_EXE_VMA == 0xb6240u);
     CHECK(kUIEquipBagDescType == 2u);
 
-    // 关闭态：预演与真实结算都 backup（原版逐指令不变）。
-    CHECK(vanilla_sell_route(false, true) == VanillaSellRoute::kBackup);
-    CHECK(vanilla_sell_route(false, false) == VanillaSellRoute::kBackup);
-
-    // 启用态：按钮预演只回填展示金额；弹窗 OK 真实接管。
-    CHECK(vanilla_sell_route(true, true) == VanillaSellRoute::kPreview);
-    CHECK(vanilla_sell_route(true, false) == VanillaSellRoute::kTakeover);
+    // 原版可表示数量、非 count-encoded 物品与任务袋均透传；S2 编码才接管。
+    const uint32_t canonical_counts[]{1u, 99u, 100u, 127u, 128u, 199u, 999u};
+    for (size_t index = 0; index < 4; ++index) {
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], true) ==
+              VanillaSellRoute::kBackup);
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], false) ==
+              VanillaSellRoute::kBackup);
+    }
+    for (size_t index = 4; index < 7; ++index) {
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], true) ==
+              VanillaSellRoute::kPreview);
+        CHECK(vanilla_sell_route(0, true, canonical_counts[index], false) ==
+              VanillaSellRoute::kTakeover);
+    }
+    CHECK(vanilla_sell_route(0, false, 199u, true) == VanillaSellRoute::kBackup);
+    CHECK(vanilla_sell_route(5, true, 199u, true) == VanillaSellRoute::kBackup);
 
     qol::contracts::QolItemDetailContext preview{2, 1, 4, {17, 3}};
     auto confirmation = preview;
@@ -539,25 +537,6 @@ static void test_vanilla_sell_takeover() {
     confirmation.item.slot = 0;
     CHECK(!vanilla_sell_detail_context_matches(preview, confirmation));
 
-    // 金额：unit × canonical × 7 / 10。
-    int64_t price = -1;
-    CHECK(vanilla_sell_money(10, 1u, &price, &kStage4ConversionApi) && price == 7);
-    CHECK(vanilla_sell_money(10, 99u, &price, &kStage4ConversionApi) && price == 693);
-    CHECK(vanilla_sell_money(10, 100u, &price, &kStage4ConversionApi) && price == 700);
-    CHECK(vanilla_sell_money(10, 127u, &price, &kStage4ConversionApi) && price == 889);
-    CHECK(vanilla_sell_money(10, 128u, &price, &kStage4ConversionApi) && price == 896);
-    CHECK(vanilla_sell_money(10, 199u, &price, &kStage4ConversionApi) && price == 1393);
-    CHECK(vanilla_sell_money(10, 999u, &price, &kStage4ConversionApi) && price == 6993);
-    // canonical 0 拒绝；越界 canonical 按启用态上限 999 收敛。
-    CHECK(!vanilla_sell_money(10, 0u, &price, &kStage4ConversionApi));
-    CHECK(vanilla_sell_money(10, 1023u, &price, &kStage4ConversionApi) && price == 6993);
-    CHECK(vanilla_sell_money(10, 1000u, &price, &kStage4ConversionApi) && price == 6993);
-    // 越界拒绝：负单价 / 结果超出 int32 / 空出参。
-    CHECK(!vanilla_sell_money(-1, 10u, &price, &kStage4ConversionApi));
-    CHECK(!vanilla_sell_money(INT32_MAX, 999u, &price, &kStage4ConversionApi));
-    CHECK(!vanilla_sell_money(10, 10u, nullptr, &kStage4ConversionApi));
-    // 单价 0 合法（金额 0），不得因结果 0 被误拒。
-    CHECK(vanilla_sell_money(0, 10u, &price, &kStage4ConversionApi) && price == 0);
 }
 
 int main() {
@@ -568,7 +547,7 @@ int main() {
     test_remove_item_data_plan();
     test_remove_data_extension_shortfall();
     test_make_item_writeback_count();
-    test_vanilla_sell_takeover();
+    test_vanilla_sell_routing();
     test_object_operations();
     test_unequip_to_inven();
     test_install_transaction();

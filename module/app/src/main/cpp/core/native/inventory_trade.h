@@ -25,6 +25,7 @@ enum class Status {
     kPriceInvalid,
     kCreditFailed,
     kRemoveFailed,
+    kRollbackFailed,
 };
 
 struct Result {

@@ -221,11 +221,28 @@ target_include_directories(stage4_hook_tests PRIVATE
 target_compile_features(stage4_hook_tests PRIVATE cxx_std_17)
 add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 
+# Compile the production inventory hook translation unit independently. It is intentionally not
+# linked into stage4_hook_tests, whose scope remains the pure stage-4 logic.
+add_library(inventory_hook_native_compile OBJECT
+    ${CPP_DIR}/plugins/inventory_hooks/native_inventory_hook.cpp
+)
+target_include_directories(inventory_hook_native_compile PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(inventory_hook_native_compile PRIVATE cxx_std_17)
+set_target_properties(inventory_hook_native_compile PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
 # ITM-16: exercise the production inventory.action.sell entry, its capability-version
 # negotiation, physical-original route, and money/remove/refund ordering.
 add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
     ${CPP_DIR}/plugins/inventory_hooks/plugin.cpp
+    ${CPP_DIR}/plugins/inventory_hooks/inventory_slot.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
@@ -849,6 +866,7 @@ add_executable(inventory_trade_provider_sell_tests
     test_inventory_trade_provider_sell.cpp
     ${CPP_DIR}/core/native/inventory_trade.cpp
     ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )
 target_include_directories(inventory_trade_provider_sell_tests PRIVATE

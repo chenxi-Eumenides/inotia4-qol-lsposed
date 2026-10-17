@@ -35,6 +35,7 @@ const char* sell_error(inventory_trade::Status status) {
         case inventory_trade::Status::kPriceInvalid: return "invalid sell price";
         case inventory_trade::Status::kCreditFailed: return "sell money update failed";
         case inventory_trade::Status::kRemoveFailed: return "sell failed";
+        case inventory_trade::Status::kRollbackFailed: return "sell rollback failed";
         case inventory_trade::Status::kOk: return "";
         default: return "sell failed";
     }
