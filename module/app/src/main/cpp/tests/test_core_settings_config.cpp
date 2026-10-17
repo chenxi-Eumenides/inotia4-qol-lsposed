@@ -30,6 +30,7 @@ int g_open_panel_calls = 0;
 }  // namespace
 
 namespace qol::features::core_ui {
+void settings_bind_game(const contracts::QolGameHost*) {}
 void panels_bind_sdk(const contracts::QolHostSdk*, contracts::QolOwnerToken) { ++g_bind_sdk_calls; }
 bool panels_register() { ++g_panels_register_calls; return true; }
 void panels_unregister() { ++g_panels_unregister_calls; }

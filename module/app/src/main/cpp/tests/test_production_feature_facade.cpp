@@ -199,7 +199,8 @@ void test_abi() {
                   static_cast<uint8_t>(FeatureCategory::kGameplay) == 1 &&
                   static_cast<uint8_t>(FeatureCategory::kTools) == 2 &&
                   static_cast<uint8_t>(FeatureCategory::kHidden) == 3 &&
-                  static_cast<uint8_t>(FeatureCategory::kBasicOptimization) == 4);
+                  static_cast<uint8_t>(FeatureCategory::kBasicOptimization) == 4 &&
+                  static_cast<uint8_t>(FeatureCategory::kGameInfo) == 5);
     auto feature = production_feature_api();
     auto control = production_feature_control_api();
     uint8_t op_enabled = 1;
@@ -639,13 +640,14 @@ int main(int argc, char** argv) {
     const FeatureCategoryDefinition* categories = nullptr;
     uint32_t category_count = 0;
     assert(succeeded(control.read_categories(control.context, &categories, &category_count)));
-    assert(category_count == 5 && categories != nullptr);
+    assert(category_count == 6 && categories != nullptr);
     const FeatureCategoryDefinition expected_categories[] = {
-        {FeatureCategory::kGeneral, "基础设置", -9},
-        {FeatureCategory::kBasicOptimization, "基础优化设置", -8},
+        {FeatureCategory::kGeneral, "基础设置", -8},
+        {FeatureCategory::kBasicOptimization, "基础优化设置", -7},
         {FeatureCategory::kGameplay, "更多优化功能", -5},
         {FeatureCategory::kTools, "更多工具", -3},
         {FeatureCategory::kHidden, "调试开关", -10},
+        {FeatureCategory::kGameInfo, "游戏信息", -9},
     };
     for (uint32_t index = 0; index < category_count; ++index) {
         assert(categories[index].category == expected_categories[index].category);

@@ -354,6 +354,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | VM-ARD-01：真机部署/装配/级联 | **PASS（2026-10-17）**：部署与运行身份一致（模块 `02f8fa02377a…`）；`requires=['attribute.quality']`；provider deactivate → display 级联 `inactive`、两 hook `free`（非 degraded），provider+display activate → 均 `enabled`、资源 `live`；当前会话无 `attribute_quality→attribute_range_display` 降级警告；FATAL/SIGSEGV=0。 | 证据入 `docs/refactor/audits/plugin-audit/attribute-range-display-20261017/evidence/`。 |
 | VM-ARD-01：视觉（六档颜色目视） | **PASS（用户真机确认，2026-10-17）**：首轮目视发现着色静默失效，阶段 6 定位为 adapter 把 UIDesc 行尾写游标当行首取 span（自 `80070952` 起失效），修复 `7f5c06e8`（adapter minor 21→22 追加游标/span 槽）；二次部署 `be9690ae…` 后用户目视**颜色已有且正确**、行结构正常。 | 首轮 runbook 见 `docs/refactor/audits/plugin-audit/attribute-range-display-20261017/manual-runbook.md`；根因与修复登记见同目录 `verification-log.md` §1b/§1c。 |
 
+### 5.20 设置页「游戏信息」分类（2026-10-17；Host/静态/Debug 通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现 | **代码事实**：Host 分类注册表新增 `GameInfo`「游戏信息」priority -9，General/BasicOptimization 顺延为 -8/-7；设置页在「调试开关」之后、「基础设置」之前显示该分类，右栏渲染五行只读信息（游戏名称/版本系列/游戏版本/模块版本/目标包名），不创建 toggle/entry 子控件。 | 分类与绘制见 `host/features/production.cpp`、`plugins/settings/panels/settings.cpp`；只读信息不写 Store，不改变 feature 生命周期。 |
+| 数据来源 | **代码事实**：`GameVariant` 的 `game_series_name()`/`version_label`/`known` 经 Game Host v2.4 尾接口 `game_identity.read` 读取，与 `/api/health` 的 `variant` 同源；包名复用启动期 `nativeSetSystemIdentity` 下发的 `system_port` 身份，模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4 或读取失败时显示「不可用」/「未下发」。 | `contracts/game_host.h`、`game/adapter_ports/game_host_port.cpp`、`game/adapter_ports/system_port.{h,cpp}`；未新增 HTTP 端点。 |
+| Host/静态/Debug Gate | **PASS**：Host 全量 CTest `145/145` 通过（`.tmp/settings-game-info/ctest5.log`）；`check_arch.py` 四类检查全绿（`.tmp/settings-game-info/check-arch2.log`）；`git diff --check` 干净；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2610172109_85eb73019179.apk`（SHA-256 `85eb73019179…`）。 | 构建成功与 Host 通过不替代设备行为；`core_settings_config_store_tests` 复跑前需存在 `config-native-owner` 目录（既有测试夹具前提）。 |
+| VM-GAMEINFO-01：真机分类与读数 | **NOT_ACCEPTED（未执行）**：未安装候选、未重启游戏、未打开设置页。 | 待核验：Debug 顺序为调试开关→游戏信息→基础设置，Release 游戏信息居首；monster v29 显示 `monster 版`/`v29`；包名与模块版本非空；不可用时显示降级文案且页面可操作。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

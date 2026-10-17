@@ -227,6 +227,7 @@ public:
 }  // namespace
 
 namespace qol::features::core_ui {
+void settings_bind_game(const contracts::QolGameHost*) {}
 void settings_bind_sdk(const contracts::QolHostSdk*, contracts::QolOwnerToken) {}
 void settings_ui_close_panel() {}
 const contracts::PanelCallbacks* settings_panel_callbacks() { return &kSettingsCallbacks; }

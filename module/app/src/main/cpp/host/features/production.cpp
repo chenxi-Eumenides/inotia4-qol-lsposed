@@ -17,11 +17,12 @@ namespace qol::host {
 namespace {
 
 constexpr contracts::FeatureCategoryDefinition kFeatureCategories[] = {
-    {contracts::FeatureCategory::kGeneral, "基础设置", -9},
-    {contracts::FeatureCategory::kBasicOptimization, "基础优化设置", -8},
+    {contracts::FeatureCategory::kGeneral, "基础设置", -8},
+    {contracts::FeatureCategory::kBasicOptimization, "基础优化设置", -7},
     {contracts::FeatureCategory::kGameplay, "更多优化功能", -5},
     {contracts::FeatureCategory::kTools, "更多工具", -3},
     {contracts::FeatureCategory::kHidden, "调试开关", -10},
+    {contracts::FeatureCategory::kGameInfo, "游戏信息", -9},
 };
 
 struct RuntimeState {

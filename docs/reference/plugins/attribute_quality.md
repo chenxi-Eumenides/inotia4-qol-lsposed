@@ -92,7 +92,7 @@ provider 只提供范围事实与质量计算；不做整件装备聚合、UI �
 |---|---|
 | `contracts/attribute_quality.h:14-19,31-75,79-98,100-104` | capability v2.0、三槽 API、结果/选项/尺寸校验。 |
 | `contracts/item_facts.h:11-14,35-65`、`contracts/game_ports/item_port.h:41-93` | item.facts 3.3 与 item view 的容量/有效位。 |
-| `contracts/game_host.h:39-47,216-217` | Game Host attr_range 面与 ABI 2.3。 |
+| `contracts/game_host.h:39-47,205-234` | Game Host attr_range 面与 ABI 2.4（v2.4 追加 `game_identity` 尾槽）。 |
 | `plugins/attribute_quality/plugin.cpp:12-131`、`plugins/attribute_quality/feature.h:24-25` | 版本、requirements/provides/resource、Game Host 检查、lifecycle 与空 backup 拒绝说明。 |
 | `plugins/attribute_quality/feature.cpp:41-398`、`feature.h:13-43` | options 校验、查询、范围捕获、固定表、错误与 wrapper。 |
 | `plugins/attribute_quality/rules.h:11-35`、`rules.cpp:8-120` | 质量运算及固定表范围转换。 |

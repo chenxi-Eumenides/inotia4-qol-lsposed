@@ -229,6 +229,15 @@ GameVariant g_test_variant{GameSeries::kOriginal, "test", kCapWarehouse, {}, tru
 
 bool game_variant_init() { return true; }
 const GameVariant& game_variant() { return g_test_variant; }
+const char* game_series_name(GameSeries series) {
+    switch (series) {
+        case GameSeries::kOriginal: return "original";
+        case GameSeries::kOverhaul: return "overhaul";
+        case GameSeries::kMonster: return "monster";
+        case GameSeries::kUnknown: return "unknown";
+    }
+    return "unknown";
+}
 }  // namespace qol
 
 namespace qol::game {
@@ -992,7 +1001,7 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 3);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 4);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");
     static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==

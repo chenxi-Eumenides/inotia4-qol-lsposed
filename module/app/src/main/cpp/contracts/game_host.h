@@ -147,6 +147,18 @@ struct QolItemAbiDispatchApi {
     QolResult (*native_item_for_handle)(QolItemHandle item, void** out_item);
 };
 
+// 游戏身份只读面（v2.4 尾追加）：设置页展示用；字符串为静态存储或进程内有效。
+struct QolGameIdentity {
+    const char* series_name;    // "unknown"/"original"/"overhaul"/"monster"
+    const char* version_label;  // 变体表静态标签，可能为空串
+    const char* package_name;   // 启动期下发的目标包名；未下发为 nullptr
+    uint8_t known;              // 1 = 命中内置变体表
+};
+using QolGameIdentityFn = QolResult (*)(QolGameIdentity* out);
+struct QolGameIdentityApi {
+    QolGameIdentityFn read;
+};
+
 struct QolWorldActionApi {
     QolResult (*create_yesno)(const char* text, uint32_t text_len, void* ok, void* cancel,
                               void* param);
@@ -200,6 +212,7 @@ struct QolGameHost {
     QolInventoryWriteApi inventory_write;
     QolWorldActionApi world_action;
     QolItemAbiDispatchApi item_abi;
+    QolGameIdentityApi game_identity;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -209,11 +222,16 @@ static_assert(std::is_trivially_copyable<QolGameHost>::value,
 static_assert(offsetof(QolGameHost, read_only) ==
                   offsetof(QolGameHost, item_count) + sizeof(QolItemCountApi),
               "QolGameHost read_only ABI offset changed");
-static_assert(sizeof(QolGameHost) ==
+static_assert(offsetof(QolGameHost, game_identity) ==
                   offsetof(QolGameHost, item_abi) + sizeof(QolItemAbiDispatchApi),
+              "QolGameHost game_identity ABI offset changed");
+static_assert(sizeof(QolGameHost) ==
+                  offsetof(QolGameHost, game_identity) + sizeof(QolGameIdentityApi),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 2;
-constexpr uint16_t kGameHostMinor = 3;
+// 2.4 appended the read-only game identity tail used by the settings page.
+constexpr uint16_t kGameHostIdentityMinor = 4;
+constexpr uint16_t kGameHostMinor = kGameHostIdentityMinor;
 
 }  // namespace qol::contracts

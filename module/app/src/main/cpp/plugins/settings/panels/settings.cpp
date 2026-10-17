@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "../../../contracts/game_host.h"
 #include "../../../contracts/panels.h"
 #include "../../../contracts/ui.h"
 #include "../../../contracts/ui_theme.h"
@@ -46,6 +47,7 @@ constexpr bool kShowHidden = true;
 #endif
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolUiAdapter* g_ui = nullptr;
 const contracts::QolUiComponents* g_components = nullptr;
 const contracts::QolFeatureControlApi* g_control = nullptr;
@@ -59,6 +61,9 @@ int g_selected_category = 0, g_pending_category = -1, g_pending_action_item = -1
 std::vector<contracts::FeatureCategoryDefinition> g_categories;
 std::vector<feature_model::Item> g_items;
 std::vector<uint32_t> g_right_indices;
+struct GameInfoRow { char label[24]; char value[192]; };
+std::vector<GameInfoRow> g_info_rows;
+bool g_right_is_info = false;
 struct ItemState {
     bool valid = false;
     uint8_t confirmed = 0;
@@ -181,6 +186,18 @@ void draw_left_row(void*, uint32_t index, QolUiHandle row, uint8_t selected) {
         16, 18, contracts::ui_theme::kTextGold, 0, 1);
 }
 void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected) {
+    if (g_right_is_info) {
+        if (row_index >= g_info_rows.size()) return;
+        draw_row_background(row, kRightW, kRightRowH, selected);
+        const int32_t text_width = static_cast<int32_t>(kRightW - 32);
+        const auto label = settings_model::truncate_text(g_info_rows[row_index].label, text_width);
+        if (!label.lines.empty()) (void)g_components->draw_control_text(row,
+            label.lines[0].c_str(), 16, 8, contracts::ui_theme::kTextGold, 0, 1);
+        const auto value = settings_model::truncate_text(g_info_rows[row_index].value, text_width);
+        if (!value.lines.empty()) (void)g_components->draw_control_text(row,
+            value.lines[0].c_str(), 16, 42, contracts::ui_theme::kTextNormal, 0, 1);
+        return;
+    }
     if (row_index >= g_right_indices.size()) return;
     const auto i = g_right_indices[row_index];
     const auto& item = g_items[i];
@@ -221,14 +238,66 @@ void action_button_clicked(void* user) {
     g_pending_action_item = static_cast<int>(context->item_index);
     sync_controls(context->item_index);
 }
+void add_game_info_row(const char* label, const char* value) {
+    GameInfoRow row{};
+    std::snprintf(row.label, sizeof(row.label), "%s", label == nullptr ? "" : label);
+    std::snprintf(row.value, sizeof(row.value), "%s", value == nullptr ? "" : value);
+    g_info_rows.push_back(row);
+}
+const char* series_display_name(const char* series) {
+    if (series == nullptr) return "未知";
+    if (std::strcmp(series, "original") == 0) return "原版";
+    if (std::strcmp(series, "overhaul") == 0) return "盗版大修";
+    if (std::strcmp(series, "monster") == 0) return "monster 版";
+    return "未知";
+}
+void refresh_game_info() {
+    g_info_rows.clear();
+    contracts::QolGameIdentity identity{};
+    bool identity_available = false;
+    constexpr size_t kIdentityApiSize = offsetof(contracts::QolGameHost, game_identity) +
+        sizeof(((contracts::QolGameHost*)nullptr)->game_identity);
+    if (g_game != nullptr && g_game->abi.major == contracts::kGameHostMajor &&
+        g_game->abi.minor >= contracts::kGameHostIdentityMinor &&
+        g_game->abi.size >= kIdentityApiSize &&
+        g_game->game_identity.read != nullptr) {
+        identity_available = contracts::succeeded(g_game->game_identity.read(&identity));
+    }
+
+    const char* module_version = g_module_version[0] != '\0' ? g_module_version : "未知";
+    add_game_info_row("游戏名称", "艾诺迪亚4");
+    add_game_info_row("版本系列", identity_available
+        ? series_display_name(identity.series_name) : "不可用");
+    const char* game_version = identity_available && identity.known != 0 &&
+        identity.version_label != nullptr && identity.version_label[0] != '\0'
+        ? identity.version_label : (identity_available ? "未知（未识别）" : "不可用");
+    add_game_info_row("游戏版本", game_version);
+    add_game_info_row("模块版本", module_version);
+    add_game_info_row("目标包名", identity_available && identity.package_name != nullptr
+        ? identity.package_name : "未下发");
+}
 void destroy_right_list() {
     for (auto& s : g_states) { s.toggle = nullptr; s.action = nullptr; }
     if (g_right != nullptr && g_components != nullptr) (void)g_components->destroy(g_right);
     g_right = nullptr; g_right_indices.clear();
+    g_right_is_info = false; g_info_rows.clear();
 }
 bool build_right_list(int category) {
     destroy_right_list();
     if (category < 0 || static_cast<size_t>(category) >= g_categories.size()) return false;
+    if (g_categories[category].category == FeatureCategory::kGameInfo) {
+        g_right_is_info = true;
+        refresh_game_info();
+        const contracts::UiScrollListDesc list{{kRightX, kRightY, kRightW, kRightH},
+            kRightRowH, static_cast<uint32_t>(g_info_rows.size()), -1,
+            &draw_right_row, nullptr, nullptr};
+        if (!contracts::succeeded(g_components->scroll_list_create(&list, g_root, &g_right)) ||
+            !contracts::succeeded(g_components->scroll_list_set_selection_enabled(g_right, 0))) {
+            destroy_right_list();
+            return false;
+        }
+        return true;
+    }
     for (uint32_t i = 0; i < g_items.size(); ++i)
         if (g_items[i].category == g_categories[category].category) g_right_indices.push_back(i);
     const contracts::UiScrollListDesc list{{kRightX, kRightY, kRightW, kRightH}, kRightRowH,
@@ -910,6 +979,7 @@ void settings_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToke
     }
     g_module_version[0] = '\0';
 }
+void settings_bind_game(const contracts::QolGameHost* game) { g_game = game; }
 bool settings_provider_open() { return plugin_enabled() && g_control != nullptr && components_complete(); }
 bool settings_provider_active() { std::lock_guard<std::mutex> lock(g_mtx); return g_panel_active; }
 void settings_provider_close() { if (settings_provider_active()) settings_ui_close_panel(); }

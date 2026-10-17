@@ -54,11 +54,12 @@ const contracts::QolFeatureCatalogPlugin kPlugins[]{
     {"basic", kBasicOptimizationFeatures, 4},
 };
 const contracts::FeatureCategoryDefinition kCategories[]{
-    {FeatureCategory::kGeneral, "基础设置", -9},
-    {FeatureCategory::kBasicOptimization, "基础优化设置", -8},
+    {FeatureCategory::kGeneral, "基础设置", -8},
+    {FeatureCategory::kBasicOptimization, "基础优化设置", -7},
     {FeatureCategory::kGameplay, "更多优化功能", -5},
     {FeatureCategory::kTools, "更多工具", -3},
     {FeatureCategory::kHidden, "调试开关", -10},
+    {FeatureCategory::kGameInfo, "游戏信息", -9},
 };
 
 struct CallLog {
@@ -114,7 +115,7 @@ QolResult fake_read_catalog(void*, const contracts::QolFeatureCatalogPlugin** ou
 QolResult fake_read_categories(void*, const contracts::FeatureCategoryDefinition** out,
                                 uint32_t* count) {
     *out = kCategories;
-    *count = 5;
+    *count = 6;
     return contracts::ok();
 }
 QolResult fake_read_feature(void*, const char* plugin, const char* feature, uint8_t* out) {
@@ -201,6 +202,7 @@ contracts::UiButtonDesc g_last_button{};
 contracts::QolUiComponents g_components_api{};
 contracts::QolUiAdapter g_ui_api{};
 contracts::QolHostSdk g_sdk{};
+contracts::QolGameHost g_game_host{};
 
 QolResult fake_components_destroy(contracts::QolUiHandle h) {
     if (h == g_widget_handle) ++g_widget_destroys;
@@ -317,7 +319,15 @@ void setup() {
     g_list_destroys = 0;
     g_button_enabled_calls = 0;
     g_button_enabled = 0;
+    settings_bind_game(nullptr);
     bind_production();
+}
+
+QolResult fake_read_game_identity(contracts::QolGameIdentity* out) {
+    if (out == nullptr)
+        return contracts::error(kQolErrInvalidArgument, "invalid argument", 16);
+    *out = {"monster", "v29", "com.example.inotia4", 1};
+    return contracts::ok();
 }
 
 int find_feature(const char* plugin, const char* feature) {
@@ -360,12 +370,13 @@ void test_feature_model_filters_and_orders() {
     }
     assert(hidden == 0 && entry == 1 && items.size() == 6);
     std::vector<contracts::FeatureCategoryDefinition> categories;
-    assert(feature_model::build_categories(kCategories, 5, false, items, categories));
-    assert(categories.size() == 3);
-    assert(categories[0].category == FeatureCategory::kBasicOptimization);
-    assert(categories[1].category == FeatureCategory::kGameplay);
-    assert(categories[2].category == FeatureCategory::kTools);
-    assert(std::strcmp(categories[0].name, "基础优化设置") == 0);
+    assert(feature_model::build_categories(kCategories, 6, false, items, categories));
+    assert(categories.size() == 4);
+    assert(categories[0].category == FeatureCategory::kGameInfo);
+    assert(categories[1].category == FeatureCategory::kBasicOptimization);
+    assert(categories[2].category == FeatureCategory::kGameplay);
+    assert(categories[3].category == FeatureCategory::kTools);
+    assert(std::strcmp(categories[0].name, "游戏信息") == 0);
     const char* expected_basic_labels[]{"属性范围显示", "角色属性汉化",
         "更好的地图传送对话框", "拖拽合并"};
     uint32_t basic_index = 0;
@@ -387,6 +398,13 @@ void test_feature_model_filters_and_orders() {
     hidden = 0;
     for (const auto& item : items) if (item.category == FeatureCategory::kHidden) ++hidden;
     assert(hidden == 2 && items.size() == 8);  // feature rows only; no plugin-level rows
+    assert(feature_model::build_categories(kCategories, 6, true, items, categories));
+    assert(categories.size() == 5);
+    assert(categories[0].category == FeatureCategory::kHidden);
+    assert(categories[1].category == FeatureCategory::kGameInfo);
+    assert(categories[2].category == FeatureCategory::kBasicOptimization);
+    assert(categories[3].category == FeatureCategory::kGameplay);
+    assert(categories[4].category == FeatureCategory::kTools);
     assert(!feature_model::build(nullptr, 1, true, items));  // malformed catalog rejected
 }
 
@@ -412,13 +430,47 @@ void test_catalog_abi_rejected_before_read() {
 void test_catalog_categories_and_debug_visibility() {
     setup();
     assert(load_catalog());
-    assert(g_categories.size() == 4);
+    assert(g_categories.size() == 5);
     assert(g_categories[0].category == FeatureCategory::kHidden);
-    assert(g_categories[1].category == FeatureCategory::kBasicOptimization);
-    assert(g_categories[2].category == FeatureCategory::kGameplay);
-    assert(g_categories[3].category == FeatureCategory::kTools);
+    assert(g_categories[1].category == FeatureCategory::kGameInfo);
+    assert(g_categories[2].category == FeatureCategory::kBasicOptimization);
+    assert(g_categories[3].category == FeatureCategory::kGameplay);
+    assert(g_categories[4].category == FeatureCategory::kTools);
     assert(g_items.size() == 8);
     assert(find_feature("autosell", "sell") >= 0);
+}
+
+void test_game_info_category_builds_read_only_rows() {
+    setup();
+    g_game_host = {};
+    g_game_host.abi = {sizeof(g_game_host), contracts::kGameHostMajor, 4};
+    g_game_host.game_identity.read = &fake_read_game_identity;
+    settings_bind_game(&g_game_host);
+    std::snprintf(g_module_version, sizeof(g_module_version), "9.8.7");
+    assert(load_catalog());
+    const auto category = std::find_if(g_categories.begin(), g_categories.end(), [](const auto& c) {
+        return c.category == FeatureCategory::kGameInfo;
+    });
+    assert(category != g_categories.end());
+    assert(build_right_list(static_cast<int>(category - g_categories.begin())));
+    assert(g_right_is_info && g_info_rows.size() == 5 && g_right_indices.empty());
+    assert(std::strcmp(g_info_rows[0].label, "游戏名称") == 0 &&
+           std::strcmp(g_info_rows[0].value, "艾诺迪亚4") == 0);
+    assert(std::strcmp(g_info_rows[1].value, "monster 版") == 0);
+    assert(std::strcmp(g_info_rows[2].value, "v29") == 0);
+    assert(std::strcmp(g_info_rows[3].value, "9.8.7") == 0);
+    assert(std::strcmp(g_info_rows[4].value, "com.example.inotia4") == 0);
+    assert(g_widget_creates == 0 && g_button_creates == 0);
+    destroy_right_list();
+
+    // Without a Game Host the same category still builds and shows explicit fallbacks.
+    settings_bind_game(nullptr);
+    assert(build_right_list(static_cast<int>(category - g_categories.begin())));
+    assert(g_right_is_info && g_info_rows.size() == 5);
+    assert(std::strcmp(g_info_rows[1].value, "不可用") == 0);
+    assert(std::strcmp(g_info_rows[2].value, "不可用") == 0);
+    assert(std::strcmp(g_info_rows[4].value, "未下发") == 0);
+    destroy_right_list();
 }
 
 void test_page_consumes_host_priorities_and_titles() {
@@ -693,7 +745,7 @@ void test_true_entry_requires_read_actual_abi_before_invoking() {
 void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     setup();
     assert(load_catalog());
-    assert(build_right_list(1));  // Basic optimization creates four toggle children
+    assert(build_right_list(2));  // Basic optimization creates four toggle children
     assert(g_widget_creates == 4);
     g_panel_active = true;
     const uint64_t generation_before = g_generation;
@@ -736,6 +788,7 @@ int main() {
     test_page_consumes_host_priorities_and_titles();
     test_feature_model_filters_and_orders();
     test_catalog_categories_and_debug_visibility();
+    test_game_info_category_builds_read_only_rows();
     test_toggle_routes_to_host_request_set_feature();
     test_feature_toggle_writes_when_plugin_desired_disabled();
     test_entry_button_respects_validity_and_direct_invocation();

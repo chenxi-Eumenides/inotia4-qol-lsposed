@@ -85,8 +85,8 @@ static_assert(qol::contracts::kQolItemInventoryHasOptionCompleteness == (1u << 7
 static_assert(qol::contracts::kAttributeQualityVersionMajor == 2 &&
                   qol::contracts::kAttributeQualityVersionMinor == 0,
               "attribute.quality contract must be v2.0");
-static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 3,
-              "Game Host contract must be v2.3");
+static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 4,
+              "Game Host contract must be v2.4");
 static_assert(std::is_same<qol::contracts::InventorySellFn,
                            qol::contracts::InventorySellResult (*)(
                                int32_t, int32_t, qol::contracts::QolItemHandle,

@@ -1,5 +1,6 @@
 #include "game/adapter_ports/game_host_port.h"
 
+#include "game/adapter_ports/system_port.h"
 #include "game/adapter_ports/world_action_port.h"
 
 #include "contracts/game_ports/ui_write_port.h"
@@ -173,6 +174,18 @@ QolResult game_query_variant(contracts::QolTargetVariant* out) {
     const qol::GameVariant& variant = qol::game_variant();
     out->id = static_cast<uint32_t>(variant.series);
     out->capabilities = variant.capabilities;
+    return contracts::ok();
+}
+
+QolResult game_query_identity(contracts::QolGameIdentity* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    *out = contracts::QolGameIdentity{};
+    (void)qol::game_variant_init();
+    const qol::GameVariant& variant = qol::game_variant();
+    out->series_name = qol::game_series_name(variant.series);
+    out->version_label = variant.version_label != nullptr ? variant.version_label : "";
+    out->package_name = qol::game::system_port_package();
+    out->known = variant.known ? 1 : 0;
     return contracts::ok();
 }
 
@@ -760,6 +773,7 @@ contracts::QolGameHost make_game_host() {
                       &game_end_original_only,
                       &game_native_item_at,
                       &game_native_item_for_handle};
+    host.game_identity = {&game_query_identity};
     return host;
 }
 

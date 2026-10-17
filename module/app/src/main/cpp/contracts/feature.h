@@ -6,7 +6,14 @@
 
 namespace qol::contracts {
 struct PluginContext;
-enum class FeatureCategory : uint8_t { kGeneral, kGameplay, kTools, kHidden, kBasicOptimization };
+enum class FeatureCategory : uint8_t {
+    kGeneral,
+    kGameplay,
+    kTools,
+    kHidden,
+    kBasicOptimization,
+    kGameInfo = 5,  // settings page read-only information category; no feature uses it
+};
 enum class FeatureType : uint8_t { kToggle, kEntry };
 constexpr int8_t kMinFeatureDisplayPriority = -10;
 constexpr int8_t kMaxFeatureDisplayPriority = 10;

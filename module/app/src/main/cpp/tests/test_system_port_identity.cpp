@@ -4,6 +4,7 @@
 #include "game/state/system_snapshot.h"
 
 #include <atomic>
+#include <cassert>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -22,6 +23,8 @@ std::string build_system_events_json() { return "{\"events\":[]}"; }
 
 int main() {
     const auto& port = qol::game::system_port();
+    assert(qol::game::system_port_version() == nullptr);
+    assert(qol::game::system_port_package() == nullptr);
     std::atomic<bool> start{false};
     std::atomic<bool> valid{true};
     std::thread writer([&] {
@@ -57,6 +60,8 @@ int main() {
         }
     });
     qol::game::system_port_set_identity("v0", "p0");
+    assert(std::strcmp(qol::game::system_port_version(), "v0") == 0);
+    assert(std::strcmp(qol::game::system_port_package(), "p0") == 0);
     start.store(true, std::memory_order_release);
     writer.join();
     reader.join();

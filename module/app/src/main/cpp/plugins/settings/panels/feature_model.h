@@ -63,6 +63,10 @@ inline bool build_categories(const contracts::FeatureCategoryDefinition* categor
         const auto& category = categories[i];
         if (category.name == nullptr) { out.clear(); return false; }
         if (!visible(category.category, debug)) continue;
+        if (category.category == FeatureCategory::kGameInfo) {
+            out.push_back(category);
+            continue;
+        }
         if (std::any_of(items.begin(), items.end(), [&](const Item& item) {
                 return item.category == category.category;
             })) out.push_back(category);

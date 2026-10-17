@@ -20,8 +20,9 @@ struct SystemIdentity {
 };
 
 std::shared_ptr<const SystemIdentity> g_identity;
-// 身份版本只下发一次，静态副本供不持有 shared_ptr 的仅读访问使用（system_port_version）。
+// 身份只下发一次，静态副本供不持有 shared_ptr 的仅读访问使用。
 char g_version[128] = {};
+char g_package[256] = {};
 
 // system_facts 帧任务在主线程调用 body_json；实现在 legacy/system（可访问 infra/legacy
 // 数据源），本适配端口只依赖 game 层声明，保持层依赖方向。
@@ -85,11 +86,18 @@ void system_port_set_identity(const char* version, const char* package) {
         value.size() < sizeof(g_version) - 1 ? value.size() : sizeof(g_version) - 1;
     std::memcpy(g_version, value.data(), length);
     g_version[length] = '\0';
+    const std::string& package_value = identity->package;
+    const std::size_t package_length = package_value.size() < sizeof(g_package) - 1
+        ? package_value.size() : sizeof(g_package) - 1;
+    std::memcpy(g_package, package_value.data(), package_length);
+    g_package[package_length] = '\0';
     std::atomic_store_explicit(&g_identity,
                                std::shared_ptr<const SystemIdentity>(std::move(identity)),
                                std::memory_order_release);
 }
 
 const char* system_port_version() { return g_version[0] != '\0' ? g_version : nullptr; }
+
+const char* system_port_package() { return g_package[0] != '\0' ? g_package : nullptr; }
 
 }  // namespace qol::game

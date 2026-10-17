@@ -2,7 +2,7 @@
 
 ## 1. 作用与 owner 定位
 
-`settings` 是模块设置整页的普通成品页插件，只负责页面呈现：页面只展示 feature 开关和 feature entry，不展示插件 desired/overall enable 行；feature 开关经 Host 常驻管理 API 读写 feature。它**不拥有**配置 schema、Store、持久化或配置 HTTP adapter——这些由 Host 常驻模块管理设施持有，与设置页生命周期分离。
+`settings` 是模块设置整页的普通成品页插件，只负责页面呈现：页面展示 feature 开关、feature entry 和只读「游戏信息」，不展示插件 desired/overall enable 行；feature 开关经 Host 常驻管理 API 读写 feature。它**不拥有**配置 schema、Store、持久化或配置 HTTP adapter——这些由 Host 常驻模块管理设施持有，与设置页生命周期分离。
 
 配置文件与 Store 由 native Host 常驻设施管理，生命周期长于设置页插件。`GET /api/config/list`、`POST /api/config/set`、`POST /api/op/features/lifecycle`、`GET /api/config/receipt/{id}` 由 Host 常驻 resident route 直接处理，不经设置页插件；完整请求/响应契约见 [API 参考 §7.6](../api-reference.md)。
 
@@ -23,11 +23,18 @@ descriptor 只注册一个 `page` entry feature：
 ### Host catalog 渲染
 
 - 页面通过 Host 管理面 `read_catalog` 读取 feature catalog，本地构建行模型；catalog 元数据（id/name/description/type/category/default/action_label/display_priority）来自各插件 descriptor，不持久化。Host catalog 包含全部已注册 feature 定义，唯一按身份排除注册 ID 为 `settings` 的设置页插件，不按 `core.*` namespace 过滤。分类名称与 priority 由 Host 的单一静态注册表提供，管理 SDK v1.26 的 `read_categories` 返回 Host 生命周期内不可变的 POD 数组；页面不硬编码分类元数据。消费者必须以 SDK minor ≥26 校验带 display priority 的 feature catalog stride。分类和 feature 均按 priority 升序稳定排序，同 priority 保持 catalog 注册顺序。Debug 显示全部分类；Release 使用相同排序，仅不显示 Hidden 分类，不按 feature 所属插件过滤。General 中的 API 服务、OP 权限与 `debug.logging` 在 Release 仍显示。除 General 的 `core.api.api.enabled` 外，core feature 均为 Hidden；Debug 中会显示 API 服务开关和 `core.custom_ui.ui_tools` 等已注册 core feature。`core.custom_ui.open_debug_components` 仅在 `QOL_DEBUG_COMPONENTS` Debug 构建中注册为 Hidden entry，因此 Release descriptor 不含该 entry。完整注册目录、配置与管理 API 仍保留。
-- Host 分类注册表保持现有五个 category ID 与名称：Hidden「调试开关」-10、General「基础设置」-9、BasicOptimization「基础优化设置」-8、Gameplay「更多优化功能」-5、Tools「更多工具」-3。priority 较小者先显示；没有 feature 的分类不显示。
+- Host 分类注册表包含六个 category ID 与名称：Hidden「调试开关」-10、GameInfo「游戏信息」-9、General「基础设置」-8、BasicOptimization「基础优化设置」-7、Gameplay「更多优化功能」-5、Tools「更多工具」-3。priority 较小者先显示；一般分类没有 feature 时不显示，GameInfo 是设置页保留的只读信息分类，例外保留。
 - 每个 feature toggle 行只通过 `read_feature` 读取值，并经 `request_set_feature` 提交 feature 值；不读取或写入插件 desired/overall enable。Host 在每次成功的 feature 提交后（包括值未变化）根据全部已注册 feature 值重算 `enable`。
 - 带 `on_entry` 的 entry 行仅显示 `action_label` 指定的动作按钮，不显示 toggle；entry 按钮的可用性不依赖其 feature 当前为 true。feature 为 false 时，设置页先检查 `QolFeatureControlApi` 覆盖 `read_actual` 尾字段且函数非空，再经 Host `request_set_feature(true)`；单独的 `EntryContinuation` 保存复制的 plugin/feature ID、request ID 与页面 generation，不与 toggle receipt 混用。每个设置页 process tick 最多回取一次 receipt；持久化确认后还须重新读到 feature 为 true、且 Host actual `enabled` 为 true 才调用一次 `invoke_entry`。receipt 与 actual 等待从请求 admission 起共用最多 300 个 process tick；`read_actual` 返回 NotReady 或 enabled 尚未为 true 时继续等待，其他读取错误、持久化失败或超时均走现有错误状态且不调用。页面关闭/销毁或 generation 改变会清除 continuation；Host 已持久化的 true 不回滚。feature 已为 true 时，同样先校验 `read_actual` ABI 并要求 actual `enabled==1`，随后直接调用一次 `invoke_entry`、不提交 feature 写入；actual 未就绪或读取失败时立即显示错误并停止。Host `invoke_entry` 成功仅代表 admission，不保证页面已打开。无 entry callback 的 toggle 保持可编辑，不受所属插件当前 `enable=false` 影响。
 - feature 开关不因所属插件当前 `enable=false` 而禁用，用户可通过开启 feature 恢复插件 desired 状态。直接调用 Host `invoke_entry` 的契约不变：只提交调用，不修改 feature/enable，Host 仍执行实际运行状态校验；设置页的先启用再调用仅是该 UI 的编排。
 - 每行固定 96 逻辑单位高。标题与描述各最多绘制一行，超出宽度以省略号截断；无描述时标题垂直居中。动作按钮或 toggle 固定在行右侧，不增加第三行。
+
+### 游戏信息分类
+
+- 左栏「游戏信息」固定位于「调试开关」之后、「基础设置」之前；Release 隐藏「调试开关」时它是首个分类。
+- 右栏为五行只读信息，不创建 toggle 或入口按钮：`游戏名称`（艾诺迪亚4）、`版本系列`（`原版` / `盗版大修` / `monster 版` / `未知`）、`游戏版本`（变体表 `version_label`，未命中时显示「未知（未识别）」）、`模块版本`、`目标包名`。
+- 数据来源与 `/api/health` 的 `variant` 相同：Game Host v2.4 尾接口 `game_identity.read` 读取 `game_variant()` / `game_series_name()` / `GameVariant.version_label`；包名来自启动期 Kotlin `nativeSetSystemIdentity` 下发的身份，模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4、身份未下发或读取失败时对应值显示「不可用」/「未下发」，页面仍可打开。
+- 每次选中该分类时重建信息行；分类切换或撤页按既有右栏销毁流程释放，不创建子控件。
 
 ### 调试端点
 
@@ -38,6 +45,7 @@ descriptor 只注册一个 `page` entry feature：
 - 必需 capability：`ui_panels` v1.3（面板 open/close）与 `ui_components` v1.13（原生控件与文本）。Host 注入的 `QolUiAdapter` ABI 为 v1.20；组件 capability 版本与 adapter ABI minor 各自独立协商。
 - Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_categories`、`read_feature`、`request_set_feature`、`invoke_entry`、`receipt`。此 catalog 消费要求 SDK minor ≥26，以适配 `QolFeatureCatalogItem` 新 stride；设置页 UI 不调用 `read_desired` 或 `request_desired`。
 - Host 另为 Kotlin 内部 listener fallback 提供一次性 receipt observer：等待中的 receipt 完成时只通知一次；订阅已是终态的 receipt 时在 Host 锁外重放终态，不返回活动订阅 token。Host observer 容量为 256，JNI 回调携带 request id 与 `feature_receipt_json` 的 JSON。该内部推送不替代设置页 entry continuation 每个页面 process tick 至多一次的 receipt 查询，也不改变公开 `GET /api/config/receipt/{id}` 的轮询契约；内部 receipt 等待没有 200ms/50ms 定时轮询。
+- 游戏信息分类消费 Game Host v2.4 尾接口 `game_identity.read`；只追加 `QolGameHost` 尾槽，不改变 `QolTargetApi.query_variant` 与既有前缀。插件不 include `game/`，变体事实仍由 Game Host 统一收口。
 - 不再注册旧 settings catalog contribution：`settings_contribution.cpp` 的 `register_settings`/`register_categories` 为 no-op；feature 元数据只来自 descriptor。
 - 不消费 `save_backup` panel action，也不登记任何面板项；备份页入口由 `save_backup` 自己的 entry feature 承担，按钮文案为其注册的 `打开`。
 
@@ -70,7 +78,7 @@ descriptor 只注册一个 `page` entry feature：
 | 子职责 | 文件 | 职责 |
 |---|---|---|
 | 插件生命周期 | `module/app/src/main/cpp/plugins/settings/plugin.cpp`、`feature.cpp` | descriptor、SDK 绑定、panel provider 注册、调试端点与帧任务 |
-| 设置页实现 | `module/app/src/main/cpp/plugins/settings/panels/settings.cpp`、`settings.h` | catalog snapshot、页面事件、toggle/entry 与管理请求 |
+| 设置页实现 | `module/app/src/main/cpp/plugins/settings/panels/settings.cpp`、`settings.h` | catalog snapshot、页面事件、toggle/entry、只读游戏信息行与管理请求 |
 | 页面模型/绑定 | `module/app/src/main/cpp/plugins/settings/panels/settings_model.h`、`settings_binding.cpp`、`settings_binding.h` | 行模型及更多游戏入口绑定逻辑 |
 | feature 注册 | `module/app/src/main/cpp/plugins/settings/feature.cpp`、`feature.h` | `page` entry 回调与面板 provider |
 | 主菜单入口编排 | `module/app/src/main/cpp/plugins/settings/panels/settings.cpp`、`settings_binding.cpp`、`settings_binding.h`、`module/app/src/main/cpp/plugins/settings/plugin.cpp` | 帧任务、入口状态事务与必需 call patch 声明 |

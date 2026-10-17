@@ -146,6 +146,7 @@ constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
 int plugin_install(contracts::PluginContext& ctx) {
     if (contracts::feature_control_if_available(ctx.sdk) == nullptr) return 1;
     g_sdk = ctx.sdk;
+    core_ui::settings_bind_game(ctx.game);
     core_ui::panels_bind_sdk(ctx.sdk, ctx.owner_token);
     // install 只做自身初始化：注册设置页 provider + 存档备份动作项 + 按钮绑定帧任务。
     if (!core_ui::panels_register()) return 1;
@@ -161,6 +162,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    core_ui::settings_bind_game(nullptr);
     g_pending_ui_action.store(-1, std::memory_order_release);
     if (g_ui_action_task != 0 && ctx.sdk != nullptr && ctx.sdk->scheduler.remove != nullptr) {
         (void)ctx.sdk->scheduler.remove(g_ui_action_task);
