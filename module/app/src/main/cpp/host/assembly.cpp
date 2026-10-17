@@ -465,7 +465,9 @@ bool assembly_init() {
         const auto& descriptor = plugin.descriptor();
         if (!register_plugin(descriptor)) {
             ++g_registration_failures;
-            QOL_LOG_ERROR(QolDomain::kCore, "assembly: plugin descriptor registration failed");
+            QOL_LOG_ERROR(QolDomain::kCore,
+                          "assembly: plugin descriptor registration failed id=%s",
+                          descriptor.id != nullptr ? descriptor.id : "(null)");
             return false;
         }
         if (plugin.store_namespace != nullptr &&

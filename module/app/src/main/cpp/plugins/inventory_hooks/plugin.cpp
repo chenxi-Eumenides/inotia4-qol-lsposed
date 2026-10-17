@@ -287,6 +287,24 @@ const contracts::CapabilityProvisionRef kProvides[] = {
     },
 };
 
+QolResult on_inventory_support_toggle(contracts::PluginContext&, uint8_t enabled) {
+    inventory_native_hook_set_support(enabled != 0);
+    return contracts::ok();
+}
+
+const contracts::FeatureDefinition kFeatures[] = {
+    {
+        "inventory_hooks.inventory_support",
+        1,
+        contracts::FeatureCategory::kHidden,
+        contracts::FeatureType::kToggle,
+        "扩展背包库存支持",
+        "调试开关：关闭时库存 hook 全部透传原版；合并进 core.item 后删除。",
+        &on_inventory_support_toggle,
+        nullptr,
+    },
+};
+
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
         ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr || ctx.game == nullptr) {
@@ -326,11 +344,12 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
     g_action_sdk = ctx.sdk;
     g_action_game = ctx.game;
+    inventory_native_hook_set_support(true);
     // 自身初始化无额外动作：资源由宿主声明式安装，wrapper 业务体在本插件 TU。
     return 0;
 }
 
-// 空操作幂等：资源物理释放由宿主逆序执行，本插件无额外状态需要清理。
+// 资源物理释放由宿主逆序执行；门禁在 deactivate 后恢复默认启用状态。
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     g_action_sdk = nullptr;
@@ -339,6 +358,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_item_facts = nullptr;
     inventory_slot_bind(nullptr, nullptr, nullptr);
     (void)inventory_native_hook_bind_item_facts(nullptr);
+    inventory_native_hook_set_support(true);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -386,7 +406,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
             &plugin_fill_status,
             &on_resource_ready,
             nullptr, 0, nullptr, 0,
-             nullptr, 0,
+             kFeatures, 1,
         };
     }();
     return descriptor;

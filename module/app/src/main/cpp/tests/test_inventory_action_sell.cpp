@@ -5,6 +5,7 @@
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
 #include "plugins/inventory_hooks/plugin.h"
+#include "plugins/inventory_hooks/native_inventory_hook.h"
 
 #include <cstdint>
 #include <cstdarg>
@@ -39,6 +40,7 @@ bool g_logical_bag = false;
 bool g_extension_available = true;
 bool g_enforce_ref_location = false;
 bool g_count_encoded = true;
+bool g_inventory_support_enabled = true;
 int g_credit_calls = 0;
 int g_refund_calls = 0;
 int g_native_remove_calls = 0;
@@ -266,7 +268,7 @@ void install_fixture() {
     CHECK(std::strcmp(descriptor.optional_requires[0].id, "extension_bag") == 0);
     CHECK(descriptor.optional_requires[0].range.major == 3 &&
           descriptor.optional_requires[0].range.min_minor == 1);
-    CHECK(descriptor.feature_count == 0);
+    CHECK(descriptor.feature_count == 1);
     g_items = {};
     g_items.struct_size = sizeof(g_items);
     g_items.item_ref_at = &fake_item_ref_at;
@@ -299,6 +301,24 @@ void install_fixture() {
     context.game = &g_game;
     context.plugin_id = "inventory_hooks";
     CHECK(qol::features::inventory_hooks::plugin_descriptor().install(context) == 0);
+}
+
+void test_inventory_support_feature() {
+    const auto& descriptor = qol::features::inventory_hooks::plugin_descriptor();
+    CHECK(descriptor.feature_count == 1);
+    CHECK(descriptor.features != nullptr);
+    if (descriptor.features == nullptr || descriptor.feature_count != 1) return;
+    const FeatureDefinition& feature = descriptor.features[0];
+    CHECK(feature.category == FeatureCategory::kHidden);
+    CHECK(feature.default_enabled == 1);
+    CHECK(feature.on_toggle != nullptr);
+    if (feature.on_toggle == nullptr) return;
+
+    PluginContext context{};
+    CHECK(feature.on_toggle(context, 0).code == kQolOk);
+    CHECK(!inventory_native_hook_support_enabled());
+    CHECK(feature.on_toggle(context, 1).code == kQolOk);
+    CHECK(inventory_native_hook_support_enabled());
 }
 
 void test_logical_sale_uses_v31_transaction() {
@@ -631,6 +651,7 @@ void test_inventory_slot_resolve_view_remove() {
 }  // namespace
 
 int main() {
+    test_inventory_support_feature();
     test_logical_sale_uses_v31_transaction();
     test_internal_bag_identity_maps_all_extension_endpoints();
     test_v30_provider_never_reads_tail_or_falls_back();
@@ -646,6 +667,8 @@ int main() {
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk*) { return true; }
 bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost*) { return true; }
 bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi*) { return true; }
+void inventory_native_hook_set_support(bool enabled) { g_inventory_support_enabled = enabled; }
+bool inventory_native_hook_support_enabled() { return g_inventory_support_enabled; }
 bool inventory_native_hook_call_refresh_item_area_original() { return true; }
 const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count) {
     if (out_count != nullptr) *out_count = 0;

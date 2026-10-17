@@ -48,6 +48,7 @@ constexpr uint32_t kNativeApiVersion = 2;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
+std::atomic<bool> g_inventory_support{true};
 
 const qol::contracts::QolItemHandleApi* item_handle_api() {
     if (g_sdk == nullptr ||
@@ -507,8 +508,8 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
                         op, cap.target, cap.pre_full, cap.delta, cap.new_full, written);
 }
 
-// The resource table uses this only as a non-null placeholder. The runtime claim is replaced by
-// the Game Adapter-owned ABI wrapper before the hook transaction installs it.
+// The Game Host replaces this placeholder with its ABI handler; that runtime handler is outside
+// the inventory support toggle's gate.
 void* find_item_wrapper(int32_t) { return nullptr; }
 
 int extension_item_count(int32_t category) {
@@ -532,6 +533,8 @@ int have_item_wrapper(int32_t category) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_HaveItem"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_HaveItem", g_backup_have_item, category);
     if (g_backup_have_item == nullptr) {
         backup_missing("hook:INVEN_HaveItem");
         return 0;
@@ -549,6 +552,8 @@ int get_item_count_wrapper(int32_t category) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_GetItemCount"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_GetItemCount", g_backup_get_item_count, category);
     if (g_backup_get_item_count == nullptr) {
         backup_missing("hook:INVEN_GetItemCount");
         return 0;
@@ -576,6 +581,8 @@ int get_cumulate_count_wrapper(void* item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:ITEM_GetCumulateCount"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:ITEM_GetCumulateCount", g_backup_get_cumulate_count, item);
     if (g_backup_get_cumulate_count == nullptr) {
         backup_missing("hook:ITEM_GetCumulateCount");
         return 0;
@@ -589,6 +596,9 @@ int is_having_empty_slot_wrapper(int32_t needed, int32_t include_task_bag) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_IsHavingEmptySlot"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_IsHavingEmptySlot", g_backup_is_having_empty_slot,
+                           needed, include_task_bag);
     if (g_backup_is_having_empty_slot == nullptr) {
         backup_missing("hook:INVEN_IsHavingEmptySlot");
         return 0;
@@ -611,6 +621,9 @@ int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:CHAR_UnequipItemToInven"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:CHAR_UnequipItemToInven", g_backup_unequip_item_to_inven,
+                           character, equip_slot);
     if (g_backup_unequip_item_to_inven == nullptr) {
         backup_missing("hook:CHAR_UnequipItemToInven");
         return 0;
@@ -633,6 +646,10 @@ void consume_item_wrapper(void* item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_ConsumeItem"});
+    if (!inventory_native_hook_support_enabled()) {
+        call_backup("hook:INVEN_ConsumeItem", g_backup_consume_item, item);
+        return;
+    }
     const uint64_t call = g_consume_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "ConsumeItem every_calls=60 call=%llu item=%p recursive=%d backup=%p",
@@ -732,6 +749,8 @@ int remove_item_wrapper(void* item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_RemoveItem"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_RemoveItem", g_backup_remove_item, item);
     const uint64_t call = g_remove_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "RemoveItem every_calls=60 call=%llu item=%p recursive=%d backup=%p",
@@ -763,6 +782,8 @@ int save_item_wrapper(void* item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_SaveItem"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_SaveItem", g_backup_save_item, item);
     // INVEN_SaveItem 是所有"已创建物品放入背包"的唯一漏斗（任务奖励/事件
     // 发奖/开箱/拾取/商店/合成等 18 条调用点）。原版全袋无空位时
     // FindSaveSlot 失败返回 0 → 上层会掉地/静默消失。此处 backup 返回 0 时
@@ -810,6 +831,9 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_SaveItemDirect"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct,
+                           item, bag, slot);
     // INVEN_SaveItemDirect（加语义）：空槽写入不需要回写——对象创建侧数量由
     // MakeItem wrapper / 模块 s2 写点保证 a+b 完整；同身份堆叠合并时原版只写 b
     //（+0xe8/+0x110/+0x168 三处 SetBitValue 写点），合并可能 ITEMPOOL_Free(item)，
@@ -829,6 +853,8 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:ITEMSYSTEM_Divide"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:ITEMSYSTEM_Divide", g_backup_item_system_divide, item, count);
     // ITEMSYSTEM_Divide（设 + 减）：拆出 count 入栈新对象（设值），源堆扣减
     //（借位）。原版对源堆与新对象都只写 b；新对象为新建对象（a 应为 0），
     // 直接按入参 clamp 后覆盖写 a+b；源堆仅在校验「原版确实写了 b」后回写
@@ -882,6 +908,9 @@ void* make_item_wrapper(int32_t category, int32_t arg2, int32_t flag) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:ITEMSYSTEM_MakeItem"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:ITEMSYSTEM_MakeItem", g_backup_make_item,
+                           category, arg2, flag);
     // ITEMSYSTEM_MakeItem（0x10c6c8）：反汇编证明 arg2（w1）是与静态表 +0x2 域
     // 匹配的查找/品质参数——CHARSYSTEM_DropItem 传 2..5（掉落品质分支）、
     // DEALSYSTEM_MakeSale 传 5——不是数量；产物数量 = CAL_Calculate 掉落公式
@@ -979,6 +1008,9 @@ int remove_item_data_wrapper(int32_t category, int32_t count) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_RemoveItemData"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_RemoveItemData", g_backup_remove_item_data,
+                           category, count);
     // INVEN_RemoveItemData（减语义，批量按类别删除；反汇编 0x1040a8）：顺序遍历
     // 6 袋，匹配堆整删（INVEN_RemoveItemDirect）累计 w22，最后一堆部分删除时
     // `SetBitValue(+0x10, 31, 25, cum + w22 - count)`。cum 经 H-17 getter（启用态
@@ -1025,6 +1057,10 @@ void refresh_item_area_wrapper() {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_RefreshItemArea"});
+    if (!inventory_native_hook_support_enabled()) {
+        call_backup("hook:UIEquip_RefreshItemArea", g_backup_refresh_item_area);
+        return;
+    }
     if (g_backup_refresh_item_area == nullptr) {
         backup_missing("hook:UIEquip_RefreshItemArea");
         return;
@@ -1065,6 +1101,9 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_MoveItem"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_MoveItem", g_backup_move_item,
+                           item, count, target_bag, target_slot);
     // 身份与取证数据在 g_virtual_bag_mtx 短临界区内采集，返回后立即放锁；禁止持锁
     // 调 backup，因为原版函数可能进入 RemoveItem/SaveItem/ConsumeItem hooks 再 try_lock。
     const qol::contracts::ExtensionBagApi* eb = eb_active();
@@ -1132,6 +1171,10 @@ int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t 
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:CHAR_EquipItemFromInvenToSlot"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:CHAR_EquipItemFromInvenToSlot",
+                           g_backup_equip_item_from_inven_to_slot,
+                           character, bag, slot, equip_slot);
     if (g_backup_equip_item_from_inven_to_slot == nullptr) {
         backup_missing("hook:CHAR_EquipItemFromInvenToSlot");
         return 0;
@@ -1158,6 +1201,9 @@ int put_jewel_wrapper(void* equip_item, void* jewel_item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:ITEMSYSTEM_PutJewel"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:ITEMSYSTEM_PutJewel", g_backup_put_jewel,
+                           equip_item, jewel_item);
     if (g_backup_put_jewel == nullptr) {
         backup_missing("hook:ITEMSYSTEM_PutJewel");
         return 3;
@@ -1174,6 +1220,10 @@ void button_equip_exe_wrapper(void* button) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_ButtonEquipExe"});
+    if (!inventory_native_hook_support_enabled()) {
+        call_backup("hook:UIEquip_ButtonEquipExe", g_backup_button_equip_exe, button);
+        return;
+    }
     // 装备按钮函数级接管：详情物品为扩展槽背包物品时在原函数内联删源
     // （b7e04）之前分流，源物品销毁与袋表移交由扩展事务完成；其余一律
     // 走原函数，保持完全原版流程。
@@ -1201,6 +1251,10 @@ void button_destroy_exe_wrapper(void* button) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_ButtonDestroyExe"});
+    if (!inventory_native_hook_support_enabled()) {
+        call_backup("hook:UIEquip_ButtonDestroyExe", g_backup_button_destroy_exe, button);
+        return;
+    }
     if (g_sdk != nullptr && g_sdk->hooks.intercept_blocks != nullptr &&
         g_sdk->hooks.intercept_blocks("hook:UIEquip_ButtonDestroyExe", nullptr) > 0) {
         QOL_LOG_INFO(QolDomain::kInventory, "sell button blocked by gate button=%p", button);
@@ -1216,6 +1270,10 @@ void button_unequip_exe_wrapper(void* button) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_ButtonUnequipExe"});
+    if (!inventory_native_hook_support_enabled()) {
+        call_backup("hook:UIEquip_ButtonUnequipExe", g_backup_button_unequip_exe, button);
+        return;
+    }
     // 卸下按钮函数级接管：desc_type=1 卸袋（原版袋/扩展袋）时模块接管，
     // 原版背包满时把袋对象放回其他袋行或收编扩展空位；物品绝不消失。
     // 卸装备与其他场景一律走原函数。
@@ -1238,6 +1296,10 @@ void ok_confirm_use_item_wrapper(void* item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_OKConfirmUseItem"});
+    if (!inventory_native_hook_support_enabled()) {
+        call_backup("hook:UIEquip_OKConfirmUseItem", g_backup_ok_confirm_use_item, item);
+        return;
+    }
     const qol::contracts::ExtensionBagApi* eb = eb_active();
     qol::contracts::QolItemHandle use_handle{};
     if (eb != nullptr && eb->handle_confirm_use_item != nullptr &&
@@ -1259,6 +1321,11 @@ void button_use_mercenary_seal_exe_wrapper(void* button) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_ButtonUseMercenarySealExe"});
+    if (!inventory_native_hook_support_enabled()) {
+        call_backup("hook:UIEquip_ButtonUseMercenarySealExe",
+                    g_backup_button_use_mercenary_seal_exe, button);
+        return;
+    }
     const qol::contracts::ExtensionBagApi* eb = eb_active();
     if (eb != nullptr && eb->handle_use_mercenary_seal != nullptr &&
         eb->handle_use_mercenary_seal()) {
@@ -1282,6 +1349,10 @@ uint64_t ok_destroy_item_wrapper() {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_OKDestroyItem"});
+    if (!inventory_native_hook_support_enabled()) {
+        g_has_vanilla_sell_preview_context = false;
+        return call_backup("hook:UIEquip_OKDestroyItem", g_backup_ok_destroy_item);
+    }
     const auto run_backup = []() -> uint64_t {
         return call_backup("hook:UIEquip_OKDestroyItem", g_backup_ok_destroy_item);
     };
@@ -1441,6 +1512,9 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_EquipControlEventProc"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:UIEquip_EquipControlEventProc",
+                           g_backup_equip_control_event_proc, control, event, x2, param);
     if (g_backup_equip_control_event_proc == nullptr) {
         backup_missing("hook:UIEquip_EquipControlEventProc");
         return 0;
@@ -1561,6 +1635,14 @@ void** backup_slot_for_handler(void* handler) {
 }
 
 }  // namespace
+
+void inventory_native_hook_set_support(bool enabled) {
+    g_inventory_support.store(enabled, std::memory_order_release);
+}
+
+bool inventory_native_hook_support_enabled() {
+    return g_inventory_support.load(std::memory_order_acquire);
+}
 
 // ---------------------------------------------------------------------------
 // 全局桥：插件 plugins/inventory_hooks 的访问入口（双向不 include，见 plugin.cpp 头注释）。
