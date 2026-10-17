@@ -326,7 +326,7 @@ void setup() {
 QolResult fake_read_game_identity(contracts::QolGameIdentity* out) {
     if (out == nullptr)
         return contracts::error(kQolErrInvalidArgument, "invalid argument", 16);
-    *out = {"monster", "v29", "1.3.2", "com.example.inotia4", 1};
+    *out = {"monster", "v29", "1.3.2", "13", 33, "com.example.inotia4", 1};
     return contracts::ok();
 }
 
@@ -457,6 +457,8 @@ void test_game_info_category_builds_read_only_composition() {
     assert(g_game_info.game == "艾诺迪亚4 v1.3.2");
     assert(g_game_info.variant == "Monster版 v29");
     assert(g_game_info.module == "QoL模块 v9.8.7");
+    const std::string bits = sizeof(void*) == 8 ? "64位" : "32位";
+    assert(g_game_info.platform == std::string("Android 13 (API 33) ") + bits);
     assert(g_widget_creates == 0 && g_button_creates == 0);
     destroy_right_list();
 
@@ -467,6 +469,7 @@ void test_game_info_category_builds_read_only_composition() {
     assert(g_game_info.game == "艾诺迪亚4");
     assert(g_game_info.variant == "未知版本");
     assert(g_game_info.module == "QoL模块 v9.8.7");
+    assert(g_game_info.platform == std::string("Android 未知 ") + bits);
     destroy_right_list();
 }
 

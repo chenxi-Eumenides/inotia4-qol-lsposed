@@ -65,6 +65,7 @@ struct GameInfoDisplay {
     std::string game;
     std::string variant;
     std::string module;
+    std::string platform;
 };
 GameInfoDisplay g_game_info;
 bool g_selected_is_game_info = false;
@@ -270,6 +271,20 @@ void refresh_game_info() {
     g_game_info.module = "QoL模块 ";
     g_game_info.module += g_module_version[0] != '\0' ? "v" : "";
     g_game_info.module += g_module_version[0] != '\0' ? g_module_version : "未知";
+
+    g_game_info.platform = "Android ";
+    if (identity_available && identity.android_release != nullptr &&
+        identity.android_release[0] != '\0') {
+        g_game_info.platform += identity.android_release;
+    } else {
+        g_game_info.platform += "未知";
+    }
+    if (identity_available && identity.android_sdk_int > 0) {
+        g_game_info.platform += " (API ";
+        g_game_info.platform += std::to_string(identity.android_sdk_int);
+        g_game_info.platform += ")";
+    }
+    g_game_info.platform += sizeof(void*) == 8 ? " 64位" : " 32位";
 }
 void destroy_right_list() {
     for (auto& s : g_states) { s.toggle = nullptr; s.action = nullptr; }
@@ -645,12 +660,15 @@ void settings_panel_process() {
     if (g_left) (void)g_components->scroll_list_draw(g_left);
     if (g_selected_is_game_info) {
         constexpr int64_t center_x = kRightX + kRightW / 2;
-        (void)g_components->draw_control_text(g_root, g_game_info.game.c_str(), center_x, 260,
-            contracts::ui_theme::kTextGold, 2, 1);
-        (void)g_components->draw_control_text(g_root, g_game_info.variant.c_str(), center_x, 304,
-            contracts::ui_theme::kTextNormal, 2, 1);
-        (void)g_components->draw_control_text(g_root, g_game_info.module.c_str(), center_x, 348,
-            contracts::ui_theme::kTextDisabled, 2, 0);
+        // Font table: 0=20, 1=24, 2=38, 3=28. The composition uses 38/28/28/24.
+        (void)g_components->draw_control_text(g_root, g_game_info.game.c_str(), center_x, 236,
+            contracts::ui_theme::kTextGold, 2, 2);
+        (void)g_components->draw_control_text(g_root, g_game_info.variant.c_str(), center_x, 294,
+            contracts::ui_theme::kTextNormal, 2, 3);
+        (void)g_components->draw_control_text(g_root, g_game_info.module.c_str(), center_x, 338,
+            contracts::ui_theme::kTextDisabled, 2, 3);
+        (void)g_components->draw_control_text(g_root, g_game_info.platform.c_str(), center_x, 382,
+            contracts::ui_theme::kTextDisabled, 2, 1);
     } else if (g_right) {
         (void)g_components->scroll_list_draw(g_right);
     }

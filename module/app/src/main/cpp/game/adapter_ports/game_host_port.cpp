@@ -185,6 +185,8 @@ QolResult game_query_identity(contracts::QolGameIdentity* out) {
     out->series_name = qol::game_series_name(variant.series);
     out->version_label = variant.version_label != nullptr ? variant.version_label : "";
     out->game_version_name = qol::game::system_port_game_version();
+    out->android_release = qol::game::system_port_android_release();
+    out->android_sdk_int = qol::game::system_port_android_sdk_int();
     out->package_name = qol::game::system_port_package();
     out->known = variant.known ? 1 : 0;
     return contracts::ok();

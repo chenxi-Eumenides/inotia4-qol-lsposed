@@ -18,6 +18,8 @@ struct SystemIdentity {
     std::string version;
     std::string package;
     std::string game_version;
+    std::string android_release;
+    int32_t android_sdk_int = 0;
 };
 
 std::shared_ptr<const SystemIdentity> g_identity;
@@ -25,6 +27,8 @@ std::shared_ptr<const SystemIdentity> g_identity;
 char g_version[128] = {};
 char g_package[256] = {};
 char g_game_version[64] = {};
+char g_android_release[64] = {};
+int32_t g_android_sdk_int = 0;
 
 // system_facts 帧任务在主线程调用 body_json；实现在 legacy/system（可访问 infra/legacy
 // 数据源），本适配端口只依赖 game 层声明，保持层依赖方向。
@@ -79,11 +83,14 @@ const contracts::QolSystemPort kPort{contracts::kQolPortSystemVersion, kRead};
 
 const contracts::QolSystemPort& system_port() { return kPort; }
 
-void system_port_set_identity(const char* version, const char* package, const char* game_version) {
+void system_port_set_identity(const char* version, const char* package, const char* game_version,
+                              const char* android_release, int32_t android_sdk_int) {
     auto identity = std::make_shared<SystemIdentity>();
     identity->version = version != nullptr ? version : "";
     identity->package = package != nullptr ? package : "";
     identity->game_version = game_version != nullptr ? game_version : "";
+    identity->android_release = android_release != nullptr ? android_release : "";
+    identity->android_sdk_int = android_sdk_int;
     const std::string& value = identity->version;
     const std::size_t length =
         value.size() < sizeof(g_version) - 1 ? value.size() : sizeof(g_version) - 1;
@@ -99,6 +106,12 @@ void system_port_set_identity(const char* version, const char* package, const ch
         ? game_version_value.size() : sizeof(g_game_version) - 1;
     std::memcpy(g_game_version, game_version_value.data(), game_version_length);
     g_game_version[game_version_length] = '\0';
+    const std::string& android_release_value = identity->android_release;
+    const std::size_t android_release_length = android_release_value.size() < sizeof(g_android_release) - 1
+        ? android_release_value.size() : sizeof(g_android_release) - 1;
+    std::memcpy(g_android_release, android_release_value.data(), android_release_length);
+    g_android_release[android_release_length] = '\0';
+    g_android_sdk_int = identity->android_sdk_int;
     std::atomic_store_explicit(&g_identity,
                                std::shared_ptr<const SystemIdentity>(std::move(identity)),
                                std::memory_order_release);
@@ -109,6 +122,12 @@ const char* system_port_version() { return g_version[0] != '\0' ? g_version : nu
 const char* system_port_game_version() {
     return g_game_version[0] != '\0' ? g_game_version : nullptr;
 }
+
+const char* system_port_android_release() {
+    return g_android_release[0] != '\0' ? g_android_release : nullptr;
+}
+
+int32_t system_port_android_sdk_int() { return g_android_sdk_int; }
 
 const char* system_port_package() { return g_package[0] != '\0' ? g_package : nullptr; }
 

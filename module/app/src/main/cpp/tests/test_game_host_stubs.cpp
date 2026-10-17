@@ -34,6 +34,8 @@ int item_class_category(const void*) { return 28; }
 // host_adapter_tests 不链接真实 game/adapter_ports/system_port.cpp；启动期身份按未下发处理。
 const char* system_port_version() { return nullptr; }
 const char* system_port_game_version() { return nullptr; }
+const char* system_port_android_release() { return nullptr; }
+int32_t system_port_android_sdk_int() { return 0; }
 const char* system_port_package() { return nullptr; }
 
 #ifndef QOL_HOST_ADAPTER_REAL_INVENTORY

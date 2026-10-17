@@ -32,12 +32,13 @@ descriptor 只注册一个 `page` entry feature：
 ### 游戏信息分类
 
 - 左栏「游戏信息」固定位于「调试开关」之后、「基础设置」之前；Release 隐藏「调试开关」时它是首个分类。
-- 右栏不使用滚动列表或选项行，整屏居中绘制三行信息：
+- 右栏不使用滚动列表或选项行，整屏居中绘制四行信息：
   - `艾诺迪亚4 v<游戏 APK versionName>`（例如 `艾诺迪亚4 v1.3.2`）
   - `<版本系列> <变体标签>`（例如 `Monster版 v29`；系列映射为 `原版` / `盗版大修` / `Monster版` / `C18版` / `未知版本`）
   - `QoL模块 v<模块版本>`
-- 视觉层级：首行金色大字（font 1），第二行常规色大字（font 1），第三行暗色常规字（font 0）；三行在右栏内水平居中，行间距 44 逻辑单位。不绘制行分割线、行底色、toggle/entry 或信息区命中区。
-- 数据来源与 `/api/health` 的 `variant` 相同：Game Host v2.4 尾接口 `game_identity.read` 读取 `game_variant()` / `game_series_name()` / `GameVariant.version_label`；宿主游戏 APK `versionName` 由启动期 Kotlin `PackageManager` 读取后经 `nativeSetSystemIdentity` 下发，模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4、版本名或身份未下发时首行仅显示游戏名、第二行显示「未知版本」，页面仍可打开。
+  - `Android <系统版本> (API <level>) <32位/64位>`（例如 `Android 13 (API 33) 64位`）
+- 视觉层级：首行金色 font 2（38），第二、三行常规/暗色 font 3（28），第四行暗色 font 1（24）；四行在右栏内水平居中，行距按 58/44/44 逻辑单位排布。不绘制行分割线、行底色、toggle/entry 或信息区命中区。
+- 数据来源与 `/api/health` 的 `variant` 相同：Game Host v2.4 尾接口 `game_identity.read` 读取 `game_variant()` / `game_series_name()` / `GameVariant.version_label`；宿主游戏 APK `versionName`、Android 系统版本与 API level 由启动期 Kotlin `PackageManager`/`Build.VERSION` 读取后经 `nativeSetSystemIdentity` 下发，32/64 位由 native `sizeof(void*)` 判定当前进程。模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4、版本名或身份未下发时首行仅显示游戏名、第二行显示「未知版本」、第四行显示 `Android 未知 <位数>`，页面仍可打开。
 - 选择该分类时不创建右栏控件；分类切换或撤页按既有右栏清理流程释放，不创建子控件，也不对信息区做命中测试。
 
 ### 调试端点

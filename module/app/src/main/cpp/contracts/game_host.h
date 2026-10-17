@@ -152,6 +152,8 @@ struct QolGameIdentity {
     const char* series_name;    // "unknown"/"original"/"overhaul"/"monster"/"c18"
     const char* version_label;  // 变体表静态标签，可能为空串
     const char* game_version_name;  // 宿主游戏 APK versionName；未下发为 nullptr
+    const char* android_release;    // 宿主 Android 版本（Build.VERSION.RELEASE）；未下发为 nullptr
+    int32_t android_sdk_int;        // 宿主 Android API level；未下发为 0
     const char* package_name;   // 启动期下发的目标包名；未下发为 nullptr
     uint8_t known;              // 1 = 命中内置变体表
 };

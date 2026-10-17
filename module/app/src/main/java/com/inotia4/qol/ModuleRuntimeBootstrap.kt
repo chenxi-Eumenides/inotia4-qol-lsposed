@@ -1,6 +1,7 @@
 package com.inotia4.qol
 
 import android.content.Context
+import android.os.Build
 import com.inotia4.qol.store.ModuleSaveStore
 
 /** Module-owned startup work that remains active independently of the API listener. */
@@ -59,6 +60,8 @@ object ModuleRuntimeBootstrap {
                 BuildConfig.VERSION_NAME,
                 TargetPackages.current(),
                 gameVersionName,
+                Build.VERSION.RELEASE ?: "",
+                Build.VERSION.SDK_INT,
             )
         } catch (t: Throwable) {
             LogFile.error(LogDomain.HTTP, "system_facts set identity failed", t)

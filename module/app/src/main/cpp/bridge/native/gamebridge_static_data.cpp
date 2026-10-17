@@ -33,11 +33,15 @@ Java_com_inotia4_qol_NativeBridge_nativeSetQuestStaticData(JNIEnv* env, jclass, 
     qol::game::quest_port_load_static_fragments(text.c_str());
 }
 
-// 模块身份（version/package）和宿主游戏 APK 版本不是游戏静态表，来自 Kotlin 启动期下发。
+// 模块身份（version/package）、宿主游戏 APK 版本和 Android 版本不是游戏静态表，来自 Kotlin 启动期下发。
 extern "C" JNIEXPORT void JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeSetSystemIdentity(JNIEnv* env, jclass, jstring version,
-                                                          jstring package, jstring game_version) {
+                                                          jstring package, jstring game_version,
+                                                          jstring android_release,
+                                                          jint android_sdk_int) {
     qol::game::system_port_set_identity(read_string(env, version).c_str(),
                                         read_string(env, package).c_str(),
-                                        read_string(env, game_version).c_str());
+                                        read_string(env, game_version).c_str(),
+                                        read_string(env, android_release).c_str(),
+                                        static_cast<int32_t>(android_sdk_int));
 }
