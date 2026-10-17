@@ -138,7 +138,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 |---|---|---|---|
 | UNVER-01 | core.world（写执行链 game/access/world.cpp 的 `tutorial_block_error` 分支） | 教学态拦截：药水教学激活时 world 写面被拒绝、读面暂态语义 | 无教学存档可进入教学态（用户 2026-09-28 确认）；不再主动验收，代码保持现状 |
 | UNVER-02 | core.item / extension_bag | 掷骰；镶嵌；强化；商店购买；ITM-01 bag5 任务袋读取；`bag6 slot11` 写入前态 | 无 pending dice、背包无宝石、无原版强化卷轴且 EB 关闭、商店为空、任务袋为空；EB 关闭无法读取 `bag6 slot11` 写前态。用户确认留到后续其它插件审阅时再测，此后不再主动验收 |
-| UNVER-03 | inventory_hooks | c18 `85%` / overhaul `70%` 倍率仅静态金标；UI 详情页出售与调试门禁关闭分支未真机 | 设备仅有 monster v29；用户 2026-10-18 确认按静态金标验收，monster 真机覆盖 70% 路径 |
+| UNVER-03 | inventory_hooks | c18 `85%` / overhaul `70%` 倍率仅静态金标；任务袋透传无物品可测；调试门禁关闭分支跳过；autosell 路径并入 autosell 审阅 | 设备仅有 monster v29；用户 2026-10-18 确认：monster 真机覆盖 70% 与详情页出售，其余按静态金标/后续插件审阅处理 |
 
 > QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
 

@@ -50,7 +50,10 @@
 - UI 详情页接管/退款失败的运行时日志：host 覆盖分流与状态机，真机待阶段 4 取证。
 - `inventory.slot` 1.0 暂无生产消费者，仅 host 用例覆盖 resolve/view/remove。
 - 调试门禁关闭后的 23 条 wrapper 透传分支仅静态实现与 toggle 状态测试覆盖，未在真机逐条触发。
-- UI 详情页出售（预览/确认两态）与退款失败日志未在本轮真机执行，留阶段 5 人工目视。
+- UI 详情页出售的退款失败日志未真机触发（正常路径已由阶段 5 卡 1 确认）。
+- 任务袋透传（卡 2）：当前存档任务袋无物品，无法触发；用户 2026-10-18 确认无法测试。
+- 调试门禁关闭分支（卡 3）：用户跳过。
+- autosell 路径（卡 4）：用户决定并入 autosell 插件审阅时测试，本批视为完成。
 
 ## §3 已完成验收登记
 
@@ -70,5 +73,8 @@
 | 任务袋守卫（阶段 4） | **PASS**：`POST /sell_item {"bag":5,"slot":0}` → 票据 `failed` / `{"ok":false,"error":"task bag excluded"}` | 票据 2 |
 | API 出售报价（阶段 4） | **PASS**：monster v29，category=10 count=3 unit=4，`multiplier=7/10 final=8`；money 28550→28558，槽位清空 | 票据 3；`inventory_trade.cpp:148` 日志 |
 | 日志 | **PASS**：当前进程 FATAL/SIGSEGV = 0；无 `assembly: plugin descriptor registration failed` | `logcat --pid=22045` |
-| 阶段 5 人工目视 | 待执行 | `manual-runbook.md`（详情页出售/任务袋透传/调试门禁/autosell） |
+| 阶段 5 卡 1：详情页出售预览/结算 | **PASS（用户真机确认，2026-10-18）** | 用户操作；弹窗金额与结算正常 |
+| 阶段 5 卡 2：任务袋透传 | **UNVER**：当前存档任务袋无物品，无法触发 | 用户确认无法测试；代码层面 bag 5 已在分流前强制 backup |
+| 阶段 5 卡 3：调试门禁关闭 | **SKIP（用户）** | kHidden 开关不便操作，跳过 |
+| 阶段 5 卡 4：autosell 路径 | **DEFERRED（用户）**：并入 autosell 插件审阅时测试，本批视为完成 | — |
 
