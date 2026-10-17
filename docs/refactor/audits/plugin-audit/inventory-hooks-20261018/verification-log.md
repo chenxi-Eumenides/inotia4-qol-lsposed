@@ -17,8 +17,8 @@
 | IH-04 | P2 | `inventory_trade.cpp:134`、`verification-matrix.md:345-349`、`api-reference.md:1063-1069` | VM-30 写 API 100%，代码 70%，文档未写倍率 | 本批按用户裁决统一：API/autosell 跟随详情出售倍率（0/70/85%），商店 100%；同步文档 |
 | IH-05 | P1 | `native_inventory_hook.cpp:1335-1348`、`inventory_trade.cpp:178-200`、`sell_transaction.h:21-27` | 退款失败被忽略，UI 无条件记 `refunded=1` | 本批修复：透传回滚失败状态并如实记录 |
 | IH-06 | P2 | `native_inventory_hook.cpp:795-823,950-967` | `MoveItem`/`RemoveItemData`/`Divide` 原版失败或半写后仍可能回写 | 下批：先冻结原版返回值语义，再加失败注入 |
-| IH-07 | P1 | `plugin.cpp:24-29,336-343`、`extension_bag/plugin.cpp:197-200` | 「禁止 deactivate」仅在注释；停用后 EB refresh 静默 no-op | 下批：宿主实际拒绝，直到合并进 core.item |
-| IH-08 | P2 | `native_inventory_hook.cpp:1387-1437`、`host/plugin_registry.cpp:775-812` | 24 条全 required fail-closed，任一变体缺一个符号则整插件不可用 | 下批：保持 fail-closed，补逐变体符号矩阵 |
+| IH-07 | P1 | `plugin.cpp:24-29,336-343`、`extension_bag/plugin.cpp:197-200` | 「禁止 deactivate」仅在注释；停用后 EB refresh 静默 no-op | 本批修复：`PluginDescriptor` 尾部 `deactivate_allowed=false`；`lifecycle_apply_actual` 对 deactivate 直接拒绝并记录；合并 `core.item` 后移除 |
+| IH-08 | P2 | `native_inventory_hook.cpp:1387-1437`、`host/plugin_registry.cpp:775-812` | 24 条全 required fail-closed，任一变体缺一个符号则整插件不可用 | 本批验证：24/24 × original/overhaul/monster/c18 全部可解析且 VMA 一致（`evidence/symbol-matrix.md`）；保持 fail-closed |
 | IH-09 | P2 | `native_inventory_hook.cpp:1131,1174` | 两个 UI wrapper 直接调用 backup，缺空指针守卫 | 本批修复 |
 | IH-10 | P2 | `native_inventory_hook.cpp:1256-1260`、`plugin.cpp:122-124` | UI 接受 bag 5，API/autosell 拒绝，语义不一致 | 本批按裁决：模块一律不接管；UI 透传原版 |
 | IH-11 | P3 | `native_inventory_hook.cpp:988-1007`、`inventory_logging.cpp:21-30` | `caller` 恒 `libgame+0x0`；节流按调用次数冒充帧数 | 本批修复 |
@@ -73,6 +73,8 @@
 | 任务袋守卫（阶段 4） | **PASS**：`POST /sell_item {"bag":5,"slot":0}` → 票据 `failed` / `{"ok":false,"error":"task bag excluded"}` | 票据 2 |
 | API 出售报价（阶段 4） | **PASS**：monster v29，category=10 count=3 unit=4，`multiplier=7/10 final=8`；money 28550→28558，槽位清空 | 票据 3；`inventory_trade.cpp:148` 日志 |
 | 日志 | **PASS**：当前进程 FATAL/SIGSEGV = 0；无 `assembly: plugin descriptor registration failed` | `logcat --pid=22045` |
+| IH-08 逐变体符号矩阵 | **PASS**：24 条 hook 符号 × original/overhaul/monster/c18 全部可解析且 VMA 一致 | `evidence/symbol-matrix.md`；`.tmp/inventory-hooks-audit/libs/<variant>/check.txt` |
+| IH-07 deactivate 拒绝 | **PASS（host）**：`capability_lifecycle` 断言 deactivate 返回 false、状态仍 enabled、资源仍 live | `tests/test_capability_lifecycle.cpp`；`.tmp/inventory-hooks-audit/host` |
 | 阶段 5 卡 1：详情页出售预览/结算 | **PASS（用户真机确认，2026-10-18）** | 用户操作；弹窗金额与结算正常 |
 | 阶段 5 卡 2：任务袋透传 | **UNVER**：当前存档任务袋无物品，无法触发 | 用户确认无法测试；代码层面 bag 5 已在分流前强制 backup |
 | 阶段 5 卡 3：调试门禁关闭 | **SKIP（用户）** | kHidden 开关不便操作，跳过 |

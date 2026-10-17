@@ -171,17 +171,17 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 - IH-10 任务袋一律不由模块接管（UI 透传，API/autosell/slot 拒绝）。
 - IH-11 `caller` 伪地址与节流语义修正。
 - IH-12 保留为 `kHidden` 真实调试门禁（关闭时 wrapper 透传；合并 `core.item` 后删除）。
+- IH-07 宿主实际拒绝 deactivate（`PluginDescriptor.deactivate_allowed=false`）。
+- IH-08 逐变体符号矩阵：24/24 × original/overhaul/monster/c18 全部可解析且 VMA 一致（`audits/plugin-audit/inventory-hooks-20261018/evidence/symbol-matrix.md`）。
 
 开放项：
 
 | ID | 级 | 问题 | 状态 |
 |---|---|---|---|
-| IH-06 | P2 | `MoveItem`/`RemoveItemData`/`Divide` 原版失败或半写后仍可能回写 | 开放；需先冻结原版返回值语义，再补失败注入 |
-| IH-07 | P1 | 「禁止 deactivate」仅注释，代码不拦截；EB refresh 为 optional，停用后静默 no-op | 开放；合并 `core.item` 前由宿主实际拒绝 |
-| IH-08 | P2 | 24 条全 required fail-closed，变体缺一符号整插件不可用 | 开放；补逐变体 24 符号矩阵，不改成 fail-soft |
+| IH-06 | P2 | `MoveItem`/`RemoveItemData`/`Divide` 原版失败或半写后仍可能回写 | 开放；需先逆向冻结原版返回值语义，再补失败注入 |
 | G-2 | P2 | 替换后的 FindItem handler 未登记 in-flight | 开放；host/dispatch 边界补登记并做 release 等待测试 |
 
-无法验证：c18/overhaul 倍率仅静态金标；UI 详情页出售与退款失败日志未真机；`inventory.slot` 暂无生产消费者；调试门禁关闭分支未真机逐条触发。
+无法验证：c18/overhaul 倍率仅静态金标；退款失败日志未真机触发；`inventory.slot` 暂无生产消费者；调试门禁关闭分支未真机逐条触发；任务袋透传无物品可测；autosell 路径并入 autosell 审阅。
 
 ## 附录：已修复问题（存证）
 
