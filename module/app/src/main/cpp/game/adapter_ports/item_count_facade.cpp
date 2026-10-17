@@ -14,12 +14,11 @@ namespace codec = qol::game::item_count_codec;
 
 std::atomic<uint8_t> g_extended_mode{static_cast<uint8_t>(ItemCountExtendedMode::kOff)};
 
-ItemCountExtendedMode extended_mode() {
+ItemCountExtendedMode snapshot_mode() {
     return static_cast<ItemCountExtendedMode>(g_extended_mode.load(std::memory_order_acquire));
 }
 
-bool extended_applied() { return extended_mode() == ItemCountExtendedMode::kApplied; }
-bool extended_not_ready() { return extended_mode() == ItemCountExtendedMode::kNotReady; }
+bool extended_applied() { return snapshot_mode() == ItemCountExtendedMode::kApplied; }
 
 QolResult not_ready() {
     static constexpr char kMessage[] = "not ready";
@@ -59,7 +58,9 @@ QolResult canonical(const void* item, uint32_t* out_count) {
 
 QolResult effective(const void* item, uint32_t* out_count) {
     if (item == nullptr || out_count == nullptr) return invalid_argument();
-    if (extended_not_ready()) return not_ready();
+    const ItemCountExtendedMode mode = snapshot_mode();
+    if (mode == ItemCountExtendedMode::kNotReady) return not_ready();
+    const bool usable = mode == ItemCountExtendedMode::kApplied;
     const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
     if (encoding == contracts::QolItemCountEncoding::kUnknown) return unsupported();
     if (encoding != contracts::QolItemCountEncoding::kEncoded) {
@@ -68,7 +69,6 @@ QolResult effective(const void* item, uint32_t* out_count) {
     uint32_t raw = 0;
     if (!read_item_count_field(item, &raw)) return not_ready();
     const uint32_t canonical_count = codec::s2_read_count(raw);
-    const bool usable = extended_applied();
     *out_count = codec::effective_clamp(codec::effective_view_count(canonical_count, usable), usable);
     return contracts::ok();
 }
@@ -81,11 +81,12 @@ QolResult is_encoded(const void* item, contracts::QolItemCountEncoding* out_enco
 
 QolResult write_effective(void* item, uint32_t count) {
     if (item == nullptr) return invalid_argument();
-    if (extended_not_ready()) return not_ready();
+    const ItemCountExtendedMode mode = snapshot_mode();
+    if (mode == ItemCountExtendedMode::kNotReady) return not_ready();
+    const bool usable = mode == ItemCountExtendedMode::kApplied;
     const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
     if (encoding == contracts::QolItemCountEncoding::kUnknown) return unsupported();
     if (encoding != contracts::QolItemCountEncoding::kEncoded) return unsupported();
-    const bool usable = extended_applied();
     uint32_t raw = 0;
     if (!read_item_count_field(item, &raw)) return not_ready();
     const uint32_t clamped = codec::effective_clamp(count, usable);
@@ -95,14 +96,15 @@ QolResult write_effective(void* item, uint32_t count) {
 
 QolResult writeback_needed(const void* item, uint32_t count, int32_t* out_needed) {
     if (item == nullptr || out_needed == nullptr) return invalid_argument();
-    if (extended_not_ready()) return not_ready();
+    const ItemCountExtendedMode mode = snapshot_mode();
+    if (mode == ItemCountExtendedMode::kNotReady) return not_ready();
+    const bool usable = mode == ItemCountExtendedMode::kApplied;
     const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
     if (encoding == contracts::QolItemCountEncoding::kUnknown) return unsupported();
     if (encoding != contracts::QolItemCountEncoding::kEncoded) {
         *out_needed = 0;
         return contracts::ok();
     }
-    const bool usable = extended_applied();
     uint32_t raw = 0;
     if (!read_item_count_field(item, &raw)) return not_ready();
     const uint32_t canonical_count = codec::s2_read_count(raw);
@@ -149,7 +151,7 @@ QolResult write_encoded_field(void* item, uint32_t field) {
 
 QolResult read_extended_mode(uint8_t* out_extended) {
     if (out_extended == nullptr) return invalid_argument();
-    switch (extended_mode()) {
+    switch (snapshot_mode()) {
         case ItemCountExtendedMode::kOff:
             *out_extended = 0;
             return contracts::ok();
@@ -183,7 +185,7 @@ void item_count_set_extended_mode(ItemCountExtendedMode mode) {
     g_extended_mode.store(static_cast<uint8_t>(mode), std::memory_order_release);
 }
 
-ItemCountExtendedMode item_count_extended_mode() { return extended_mode(); }
+ItemCountExtendedMode item_count_extended_mode() { return snapshot_mode(); }
 
 bool item_count_active() { return extended_applied(); }
 
