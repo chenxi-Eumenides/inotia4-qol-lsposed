@@ -1060,13 +1060,13 @@
 
 `POST /api/item/inventory/sell_item`
 
-**用途**：出售指定背包物品（价格=ITEM_GetPrice 静态表）。
+**用途**：出售指定背包物品（价格=ITEM_GetSellPrice × 详情出售倍率）。
 
 **请求格式**：`{ "bag": 0, "slot": 5 }`
 
 **返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"price":N,"slots":[…],"money":N}`，包含变化槽差量和更新后的金币，不含完整 Inventory。
 
-**注意**：空槽→`slot empty`；价格由静态表决定（防刷钱）。
+**注意**：空槽→`slot empty`；任务袋 `bag=5` 拒绝；倍率按游戏变体：original/unknown 0%、overhaul/monster 70%、c18 85%。原价（100%）仅用于商店手动出售，不用于本 API。
 
 #### 穿装备
 

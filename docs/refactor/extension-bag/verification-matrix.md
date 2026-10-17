@@ -343,8 +343,8 @@
   `count=199` 的 state JSON，在关闭态读档，再以关闭态保存同一数量并在启用态读档；⑥对
   单位价或最终价超过 `INT32_MAX` 的边界注入记录拒绝日志。
 - **预期**：单位价与原版 `ITEM_GetSellPrice` 一致；数量按当前
-  `stack_codec` 上限收敛为 99/999；装备页卖出为 `100%`、销毁/粉碎为 `70%`，商店和
-  API 为 `100%`。非法单位价/最终价只出现 `sell price reject reason=...`，不创建弹窗、
+  `stack_codec` 上限收敛为 99/999；装备页卖出、销毁/粉碎、库存 API 与自动出售按变体倍率
+  （original/unknown `0%`、overhaul/monster `70%`、c18 `85%`），仅商店手动出售为 `100%`。非法单位价/最终价只出现 `sell price reject reason=...`，不创建弹窗、
   不把未校验值写入弹窗、不加钱、不删除物品；异常 JSON 不得保留超上限 descriptor/payload
   count。双态（99/999）下装备/损坏判定、存档查找与空槽检查对同一数量边界保持一致。
   状态 JSON 载入时，canonical descriptor count 只按绝对上限 999 收敛，不按当前配置
