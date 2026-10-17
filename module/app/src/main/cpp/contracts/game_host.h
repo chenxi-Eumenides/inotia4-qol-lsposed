@@ -151,6 +151,7 @@ struct QolItemAbiDispatchApi {
 struct QolGameIdentity {
     const char* series_name;    // "unknown"/"original"/"overhaul"/"monster"
     const char* version_label;  // 变体表静态标签，可能为空串
+    const char* game_version_name;  // 宿主游戏 APK versionName；未下发为 nullptr
     const char* package_name;   // 启动期下发的目标包名；未下发为 nullptr
     uint8_t known;              // 1 = 命中内置变体表
 };

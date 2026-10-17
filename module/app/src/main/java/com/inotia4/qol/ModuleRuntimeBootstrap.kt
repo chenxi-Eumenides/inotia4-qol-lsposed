@@ -49,7 +49,17 @@ object ModuleRuntimeBootstrap {
             LogFile.error(LogDomain.HTTP, "quest set static data failed", t)
         }
         try {
-            NativeBridge.nativeSetSystemIdentity(BuildConfig.VERSION_NAME, TargetPackages.current())
+            val gameVersionName = try {
+                context.packageManager.getPackageInfo(TargetPackages.current(), 0).versionName ?: ""
+            } catch (t: Throwable) {
+                LogFile.error(LogDomain.HTTP, "game version read failed", t)
+                ""
+            }
+            NativeBridge.nativeSetSystemIdentity(
+                BuildConfig.VERSION_NAME,
+                TargetPackages.current(),
+                gameVersionName,
+            )
         } catch (t: Throwable) {
             LogFile.error(LogDomain.HTTP, "system_facts set identity failed", t)
         }

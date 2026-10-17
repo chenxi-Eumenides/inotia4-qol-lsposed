@@ -326,7 +326,7 @@ void setup() {
 QolResult fake_read_game_identity(contracts::QolGameIdentity* out) {
     if (out == nullptr)
         return contracts::error(kQolErrInvalidArgument, "invalid argument", 16);
-    *out = {"monster", "v29", "com.example.inotia4", 1};
+    *out = {"monster", "v29", "1.3.2", "com.example.inotia4", 1};
     return contracts::ok();
 }
 
@@ -440,7 +440,7 @@ void test_catalog_categories_and_debug_visibility() {
     assert(find_feature("autosell", "sell") >= 0);
 }
 
-void test_game_info_category_builds_read_only_rows() {
+void test_game_info_category_builds_read_only_composition() {
     setup();
     g_game_host = {};
     g_game_host.abi = {sizeof(g_game_host), contracts::kGameHostMajor, 4};
@@ -453,23 +453,20 @@ void test_game_info_category_builds_read_only_rows() {
     });
     assert(category != g_categories.end());
     assert(build_right_list(static_cast<int>(category - g_categories.begin())));
-    assert(g_right_is_info && g_info_rows.size() == 5 && g_right_indices.empty());
-    assert(std::strcmp(g_info_rows[0].label, "游戏名称") == 0 &&
-           std::strcmp(g_info_rows[0].value, "艾诺迪亚4") == 0);
-    assert(std::strcmp(g_info_rows[1].value, "monster 版") == 0);
-    assert(std::strcmp(g_info_rows[2].value, "v29") == 0);
-    assert(std::strcmp(g_info_rows[3].value, "9.8.7") == 0);
-    assert(std::strcmp(g_info_rows[4].value, "com.example.inotia4") == 0);
+    assert(g_selected_is_game_info && g_right == nullptr && g_right_indices.empty());
+    assert(g_game_info.game == "艾诺迪亚4 v1.3.2");
+    assert(g_game_info.variant == "Monster版 v29");
+    assert(g_game_info.module == "QoL模块 v9.8.7");
     assert(g_widget_creates == 0 && g_button_creates == 0);
     destroy_right_list();
 
     // Without a Game Host the same category still builds and shows explicit fallbacks.
     settings_bind_game(nullptr);
     assert(build_right_list(static_cast<int>(category - g_categories.begin())));
-    assert(g_right_is_info && g_info_rows.size() == 5);
-    assert(std::strcmp(g_info_rows[1].value, "不可用") == 0);
-    assert(std::strcmp(g_info_rows[2].value, "不可用") == 0);
-    assert(std::strcmp(g_info_rows[4].value, "未下发") == 0);
+    assert(g_selected_is_game_info && g_right == nullptr);
+    assert(g_game_info.game == "艾诺迪亚4");
+    assert(g_game_info.variant == "未知版本");
+    assert(g_game_info.module == "QoL模块 v9.8.7");
     destroy_right_list();
 }
 
@@ -788,7 +785,7 @@ int main() {
     test_page_consumes_host_priorities_and_titles();
     test_feature_model_filters_and_orders();
     test_catalog_categories_and_debug_visibility();
-    test_game_info_category_builds_read_only_rows();
+    test_game_info_category_builds_read_only_composition();
     test_toggle_routes_to_host_request_set_feature();
     test_feature_toggle_writes_when_plugin_desired_disabled();
     test_entry_button_respects_validity_and_direct_invocation();

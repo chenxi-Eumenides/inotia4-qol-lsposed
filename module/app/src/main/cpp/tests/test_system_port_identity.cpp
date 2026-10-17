@@ -24,6 +24,7 @@ std::string build_system_events_json() { return "{\"events\":[]}"; }
 int main() {
     const auto& port = qol::game::system_port();
     assert(qol::game::system_port_version() == nullptr);
+    assert(qol::game::system_port_game_version() == nullptr);
     assert(qol::game::system_port_package() == nullptr);
     std::atomic<bool> start{false};
     std::atomic<bool> valid{true};
@@ -33,7 +34,7 @@ int main() {
             const std::string suffix = std::to_string(index % 10);
             const std::string version = "v" + suffix;
             const std::string package = "p" + suffix;
-            qol::game::system_port_set_identity(version.c_str(), package.c_str());
+            qol::game::system_port_set_identity(version.c_str(), package.c_str(), "1.3.2");
         }
     });
     std::thread reader([&] {
@@ -59,8 +60,9 @@ int main() {
             if (!match) valid.store(false, std::memory_order_relaxed);
         }
     });
-    qol::game::system_port_set_identity("v0", "p0");
+    qol::game::system_port_set_identity("v0", "p0", "1.3.2");
     assert(std::strcmp(qol::game::system_port_version(), "v0") == 0);
+    assert(std::strcmp(qol::game::system_port_game_version(), "1.3.2") == 0);
     assert(std::strcmp(qol::game::system_port_package(), "p0") == 0);
     start.store(true, std::memory_order_release);
     writer.join();

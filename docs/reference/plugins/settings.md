@@ -32,9 +32,13 @@ descriptor 只注册一个 `page` entry feature：
 ### 游戏信息分类
 
 - 左栏「游戏信息」固定位于「调试开关」之后、「基础设置」之前；Release 隐藏「调试开关」时它是首个分类。
-- 右栏为五行只读信息，不创建 toggle 或入口按钮：`游戏名称`（艾诺迪亚4）、`版本系列`（`原版` / `盗版大修` / `monster 版` / `未知`）、`游戏版本`（变体表 `version_label`，未命中时显示「未知（未识别）」）、`模块版本`、`目标包名`。
-- 数据来源与 `/api/health` 的 `variant` 相同：Game Host v2.4 尾接口 `game_identity.read` 读取 `game_variant()` / `game_series_name()` / `GameVariant.version_label`；包名来自启动期 Kotlin `nativeSetSystemIdentity` 下发的身份，模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4、身份未下发或读取失败时对应值显示「不可用」/「未下发」，页面仍可打开。
-- 每次选中该分类时重建信息行；分类切换或撤页按既有右栏销毁流程释放，不创建子控件。
+- 右栏不使用滚动列表或选项行，整屏居中绘制三行信息：
+  - `艾诺迪亚4 v<游戏 APK versionName>`（例如 `艾诺迪亚4 v1.3.2`）
+  - `<版本系列> <变体标签>`（例如 `Monster版 v29`；系列映射为 `原版` / `盗版大修` / `Monster版` / `未知版本`）
+  - `QoL模块 v<模块版本>`
+- 视觉层级：首行金色大字（font 1），第二行常规色大字（font 1），第三行暗色常规字（font 0）；三行在右栏内水平居中，行间距 44 逻辑单位。不绘制行分割线、行底色、toggle/entry 或信息区命中区。
+- 数据来源与 `/api/health` 的 `variant` 相同：Game Host v2.4 尾接口 `game_identity.read` 读取 `game_variant()` / `game_series_name()` / `GameVariant.version_label`；宿主游戏 APK `versionName` 由启动期 Kotlin `PackageManager` 读取后经 `nativeSetSystemIdentity` 下发，模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4、版本名或身份未下发时首行仅显示游戏名、第二行显示「未知版本」，页面仍可打开。
+- 选择该分类时不创建右栏控件；分类切换或撤页按既有右栏清理流程释放，不创建子控件，也不对信息区做命中测试。
 
 ### 调试端点
 
@@ -45,7 +49,7 @@ descriptor 只注册一个 `page` entry feature：
 - 必需 capability：`ui_panels` v1.3（面板 open/close）与 `ui_components` v1.13（原生控件与文本）。Host 注入的 `QolUiAdapter` ABI 为 v1.20；组件 capability 版本与 adapter ABI minor 各自独立协商。
 - Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_categories`、`read_feature`、`request_set_feature`、`invoke_entry`、`receipt`。此 catalog 消费要求 SDK minor ≥26，以适配 `QolFeatureCatalogItem` 新 stride；设置页 UI 不调用 `read_desired` 或 `request_desired`。
 - Host 另为 Kotlin 内部 listener fallback 提供一次性 receipt observer：等待中的 receipt 完成时只通知一次；订阅已是终态的 receipt 时在 Host 锁外重放终态，不返回活动订阅 token。Host observer 容量为 256，JNI 回调携带 request id 与 `feature_receipt_json` 的 JSON。该内部推送不替代设置页 entry continuation 每个页面 process tick 至多一次的 receipt 查询，也不改变公开 `GET /api/config/receipt/{id}` 的轮询契约；内部 receipt 等待没有 200ms/50ms 定时轮询。
-- 游戏信息分类消费 Game Host v2.4 尾接口 `game_identity.read`；只追加 `QolGameHost` 尾槽，不改变 `QolTargetApi.query_variant` 与既有前缀。插件不 include `game/`，变体事实仍由 Game Host 统一收口。
+- 游戏信息分类消费 Game Host v2.4 尾接口 `game_identity.read`；`QolGameHost` 尾槽在 v2.4 内追加 `game_version_name`，不改变 `QolTargetApi.query_variant` 与既有前缀。插件不 include `game/`，变体事实仍由 Game Host 统一收口。
 - 不再注册旧 settings catalog contribution：`settings_contribution.cpp` 的 `register_settings`/`register_categories` 为 no-op；feature 元数据只来自 descriptor。
 - 不消费 `save_backup` panel action，也不登记任何面板项；备份页入口由 `save_backup` 自己的 entry feature 承担，按钮文案为其注册的 `打开`。
 

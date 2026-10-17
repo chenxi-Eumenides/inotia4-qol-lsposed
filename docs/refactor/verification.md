@@ -358,10 +358,10 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 
 | 验证项 | 当前结果 | 范围与未完成项 |
 |---|---|---|
-| 实现 | **代码事实**：Host 分类注册表新增 `GameInfo`「游戏信息」priority -9，General/BasicOptimization 顺延为 -8/-7；设置页在「调试开关」之后、「基础设置」之前显示该分类，右栏渲染五行只读信息（游戏名称/版本系列/游戏版本/模块版本/目标包名），不创建 toggle/entry 子控件。 | 分类与绘制见 `host/features/production.cpp`、`plugins/settings/panels/settings.cpp`；只读信息不写 Store，不改变 feature 生命周期。 |
-| 数据来源 | **代码事实**：`GameVariant` 的 `game_series_name()`/`version_label`/`known` 经 Game Host v2.4 尾接口 `game_identity.read` 读取，与 `/api/health` 的 `variant` 同源；包名复用启动期 `nativeSetSystemIdentity` 下发的 `system_port` 身份，模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4 或读取失败时显示「不可用」/「未下发」。 | `contracts/game_host.h`、`game/adapter_ports/game_host_port.cpp`、`game/adapter_ports/system_port.{h,cpp}`；未新增 HTTP 端点。 |
-| Host/静态/Debug Gate | **PASS**：Host 全量 CTest `145/145` 通过（`.tmp/settings-game-info/ctest5.log`）；`check_arch.py` 四类检查全绿（`.tmp/settings-game-info/check-arch2.log`）；`git diff --check` 干净；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2610172109_85eb73019179.apk`（SHA-256 `85eb73019179…`）。 | 构建成功与 Host 通过不替代设备行为；`core_settings_config_store_tests` 复跑前需存在 `config-native-owner` 目录（既有测试夹具前提）。 |
-| VM-GAMEINFO-01：真机分类与读数 | **NOT_ACCEPTED（未执行）**：未安装候选、未重启游戏、未打开设置页。 | 待核验：Debug 顺序为调试开关→游戏信息→基础设置，Release 游戏信息居首；monster v29 显示 `monster 版`/`v29`；包名与模块版本非空；不可用时显示降级文案且页面可操作。 |
+| 实现 | **代码事实**：Host 分类注册表新增 `GameInfo`「游戏信息」priority -9，General/BasicOptimization 顺延为 -8/-7；设置页在「调试开关」之后、「基础设置」之前显示该分类，右栏不创建滚动列表或选项行，整屏居中绘制三行信息：`艾诺迪亚4 v1.3.2`、`Monster版 v29`、`QoL模块 v0.7.13`。 | 分类与绘制见 `host/features/production.cpp`、`plugins/settings/panels/settings.cpp`；信息区不写 Store、不创建子控件、不做命中测试，不改变 feature 生命周期。 |
+| 数据来源 | **代码事实**：`GameVariant` 的 `game_series_name()`/`version_label`/`known` 经 Game Host v2.4 尾接口 `game_identity.read` 读取，与 `/api/health` 的 `variant` 同源；宿主游戏 APK `versionName` 由启动期 Kotlin `PackageManager` 读取并经 `nativeSetSystemIdentity` 下发；模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4 或读取失败时首行仅显示游戏名、第二行显示「未知版本」。 | `contracts/game_host.h`、`game/adapter_ports/game_host_port.cpp`、`game/adapter_ports/system_port.{h,cpp}`、`ModuleRuntimeBootstrap.kt`；未新增 HTTP 端点。 |
+| Host/静态/Debug Gate | **PASS**：Host 全量 CTest `145/145` 通过（`.tmp/settings-game-info/ctest6.log`）；`check_arch.py` 四类检查全绿（`.tmp/settings-game-info/check-arch3.log`）、`check_jni.py` `163/163` 无违规（`.tmp/settings-game-info/check-jni.log`）；`git diff --check` 干净；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2610172137_ca149bbb1da2.apk`（SHA-256 `ca149bbb1da2…`）。 | 构建成功与 Host 通过不替代设备行为；`core_settings_config_store_tests` 复跑前需存在 `config-native-owner` 目录（既有测试夹具前提）。 |
+| VM-GAMEINFO-01：真机分类与读数 | **NOT_ACCEPTED（未执行）**：未安装候选、未重启游戏、未打开设置页。 | 待核验：Debug 顺序为调试开关→游戏信息→基础设置，Release 游戏信息居首；monster v29 显示 `艾诺迪亚4 v1.3.2` / `Monster版 v29` / `QoL模块 v<当前版本>`；无滚动、无分割线、无选项行；信息区不可点击；Game Host 不可用时三行降级文案正常且页面可操作。 |
 
 ## 6. 待建立
 
