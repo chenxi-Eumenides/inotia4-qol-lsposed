@@ -3,6 +3,7 @@
 #include "feature.h"
 
 #include <array>
+#include <atomic>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -37,8 +38,18 @@ std::array<char, kMapNameBufferSize> g_confirm_text{};
 constexpr char kUnknownMapName[] = "未知地图";
 ChoiceTarget g_pending_target{};
 
-const qol::contracts::QolGameHost* game() {
-    return qol::features::world_teleport::game_host();
+const qol::contracts::QolWorldActionApi* world_actions() {
+    const auto* port = qol::features::world_teleport::world_action_port();
+    return port != nullptr ? &port->actions : nullptr;
+}
+
+// 停用代次：on_disabled/deactivate 递增，使已排队的帧任务与游戏回调失效。
+// 只在游戏主线程读写；scheduler 回调与 UI 回调均在主线程。
+std::atomic<uint32_t> g_op_generation{0};
+uint32_t g_chain_generation = 0;
+
+bool chain_still_valid() {
+    return g_chain_generation == g_op_generation.load(std::memory_order_acquire);
 }
 
 void log_message(int32_t level, const char* format, ...) {
@@ -185,26 +196,34 @@ void open_choice_panel() {
 }
 
 int32_t delayed_open_choice(int64_t, void*) {
+    if (!chain_still_valid()) return 0;
     open_choice_panel();
     return 0;
 }
 
 int32_t delayed_open_confirmation(int64_t, void* param) {
+    if (!chain_still_valid()) return 0;
     const auto* target = static_cast<const ChoiceTarget*>(param);
-    if (target == nullptr || game() == nullptr || game()->world_action.create_yesno == nullptr) {
+    const auto* actions = world_actions();
+    if (target == nullptr || actions == nullptr || actions->create_yesno == nullptr) {
         log_message(3, "world teleport: confirmation symbols not resolved");
         return 0;
     }
-    (void)game()->world_action.create_yesno(
-        g_confirm_text.data(), static_cast<uint32_t>(std::strlen(g_confirm_text.data())),
-        reinterpret_cast<void*>(&teleport_confirmed), reinterpret_cast<void*>(&teleport_cancelled),
-        reinterpret_cast<void*>(static_cast<intptr_t>(target->cost)));
+    if (!qol::contracts::succeeded(actions->create_yesno(
+            g_confirm_text.data(), static_cast<uint32_t>(std::strlen(g_confirm_text.data())),
+            reinterpret_cast<void*>(&teleport_confirmed),
+            reinterpret_cast<void*>(&teleport_cancelled),
+            reinterpret_cast<void*>(static_cast<intptr_t>(target->cost))))) {
+        log_message(3, "world teleport: confirmation open failed target=%d", target->map_id);
+        return 0;
+    }
     log_message(1, "world teleport: confirmation opened target=%d cost=%d",
                 target->map_id, target->cost);
     return 0;
 }
 
 void request_open_choice() {
+    g_chain_generation = g_op_generation.load(std::memory_order_acquire);
 #if WORLD_TELEPORT_OPEN_NEXT_FRAME
     if (!schedule(delayed_open_choice, nullptr, 0)) {
         log_message(3, "world teleport: delayed choice registration failed");
@@ -215,8 +234,9 @@ void request_open_choice() {
 }
 
 void show_message(const char* message) {
-    if (game() == nullptr || game()->world_action.show_banner == nullptr ||
-        !qol::contracts::succeeded(game()->world_action.show_banner(message))) {
+    const auto* actions = world_actions();
+    if (actions == nullptr || actions->show_banner == nullptr ||
+        !qol::contracts::succeeded(actions->show_banner(message))) {
         log_message(3, "world teleport: instant message symbol not resolved");
         return;
     }
@@ -224,14 +244,15 @@ void show_message(const char* message) {
 }
 
 int32_t delayed_transfer(int64_t, void* param) {
+    if (!chain_still_valid()) return 0;
     const auto* target = static_cast<const ChoiceTarget*>(param);
     const auto* facts = qol::features::world_teleport::world_facts();
     const auto* item_facts = qol::features::world_teleport::item_facts();
+    const auto* actions = world_actions();
     if (target == nullptr || facts == nullptr || item_facts == nullptr ||
-        item_facts->money == nullptr || game() == nullptr ||
-        facts->active_player_direction == nullptr ||
-        game()->world_action.minus_money == nullptr ||
-        game()->world_action.request_map_change == nullptr) {
+        item_facts->money == nullptr || actions == nullptr ||
+        facts->active_player_direction == nullptr || actions->minus_money == nullptr ||
+        actions->request_map_change == nullptr) {
         log_message(3, "world teleport: transfer symbols not resolved");
         return 0;
     }
@@ -242,27 +263,42 @@ int32_t delayed_transfer(int64_t, void* param) {
         log_message(3, "world teleport: active player unavailable");
         return 0;
     }
-    if (money < target->cost || !qol::contracts::succeeded(
-            game()->world_action.minus_money(static_cast<int64_t>(target->cost)))) {
+    if (money < target->cost) {
         show_message("金币不足，无法传送");
         log_message(1, "world teleport: insufficient money target=%d cost=%d money=%lld",
                     target->map_id, target->cost, static_cast<long long>(money));
         return 0;
     }
-    (void)game()->world_action.request_map_change(target->map_id, 0, 0, direction);
+    if (!qol::contracts::succeeded(actions->minus_money(static_cast<int64_t>(target->cost)))) {
+        show_message("扣费失败，无法传送");
+        log_message(3, "world teleport: charge failed target=%d cost=%d",
+                    target->map_id, target->cost);
+        return 0;
+    }
+    if (!qol::contracts::succeeded(
+            actions->request_map_change(target->map_id, 0, 0, direction))) {
+        const bool refunded = actions->add_money != nullptr &&
+            qol::contracts::succeeded(actions->add_money(static_cast<int64_t>(target->cost)));
+        show_message(refunded ? "传送失败，已退还金币" : "传送失败，退款异常");
+        log_message(3, "world teleport: transfer failed target=%d cost=%d refunded=%d",
+                    target->map_id, target->cost, refunded ? 1 : 0);
+        return 0;
+    }
     log_message(1, "world teleport: transferred target=%d cost=%d direction=%d",
                 target->map_id, target->cost, direction);
     return 0;
 }
 
 int32_t delayed_close_choice(int64_t, void* param) {
-    if (game() == nullptr || game()->world_action.close_popup == nullptr ||
-        game()->world_action.restore_hud == nullptr) {
+    if (!chain_still_valid()) return 0;
+    const auto* actions = world_actions();
+    if (actions == nullptr || actions->close_popup == nullptr ||
+        actions->restore_hud == nullptr) {
         log_message(3, "world teleport: choice close symbols not resolved");
         return 0;
     }
-    (void)game()->world_action.close_popup();
-    (void)game()->world_action.restore_hud();
+    (void)actions->close_popup();
+    (void)actions->restore_hud();
     if (!schedule(delayed_transfer, param, 1)) {
         log_message(3, "world teleport: transfer registration failed");
     }
@@ -270,8 +306,10 @@ int32_t delayed_close_choice(int64_t, void* param) {
 }
 
 void teleport_confirmed(void*) {
+    if (!chain_still_valid()) return;
     const ChoiceTarget* target = &g_pending_target;
-    if (!target->valid || game() == nullptr || game()->world_action.close_popup == nullptr) {
+    const auto* actions = world_actions();
+    if (!target->valid || actions == nullptr || actions->close_popup == nullptr) {
         log_message(3, "world teleport: confirm symbols not resolved");
         return;
     }
@@ -279,13 +317,14 @@ void teleport_confirmed(void*) {
         log_message(3, "world teleport: transfer registration failed");
         return;
     }
-    (void)game()->world_action.close_popup();
-    if (game()->world_action.restore_hud != nullptr) {
-        (void)game()->world_action.restore_hud();
+    (void)actions->close_popup();
+    if (actions->restore_hud != nullptr) {
+        (void)actions->restore_hud();
     }
 }
 
 void teleport_cancelled(void*) {
+    if (!chain_still_valid()) return;
     if (!schedule(delayed_open_choice, nullptr, 1)) {
         log_message(3, "world teleport: choice reopen registration failed");
     }
@@ -293,8 +332,10 @@ void teleport_cancelled(void*) {
 }
 
 void teleport_on_select(int index, void*) {
+    if (!chain_still_valid()) return;
+    const auto* actions = world_actions();
     if (index < 0 || index >= static_cast<int>(kTeleportChoiceCount) ||
-        game() == nullptr || game()->world_action.create_yesno == nullptr) {
+        actions == nullptr || actions->create_yesno == nullptr) {
         close_choice_panel();
         log_message(3, "world teleport: confirm symbols not resolved");
         return;
@@ -309,8 +350,8 @@ void teleport_on_select(int index, void*) {
     std::snprintf(g_confirm_text.data(), g_confirm_text.size(), "是否传送至%s？",
                   map_name(target.map_id));
     close_choice_panel();
-    if (game()->world_action.restore_hud != nullptr) {
-        (void)game()->world_action.restore_hud();
+    if (actions->restore_hud != nullptr) {
+        (void)actions->restore_hud();
     }
     g_pending_target = target;
     if (!schedule(delayed_open_confirmation, &g_pending_target, 1)) {
@@ -324,6 +365,10 @@ void teleport_on_select(int index, void*) {
 }  // namespace
 
 namespace qol::features::world_teleport {
+
+void invalidate_operations() {
+    g_op_generation.fetch_add(1, std::memory_order_release);
+}
 
 void world_teleport_call_map_name() {
     int state = -1;

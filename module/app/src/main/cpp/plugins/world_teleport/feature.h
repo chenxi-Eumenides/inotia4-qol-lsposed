@@ -1,34 +1,10 @@
 #pragma once
 
-#include <cstdint>
-
 #include "../../contracts/game_ports/choice_port.h"
 
 namespace qol::features::world_teleport {
 
 const contracts::QolChoicePort* choice_port();
-
-enum class InstallDisposition : uint8_t {
-    kInstalled = 0,
-    kUnsupported = 1,
-    kFailed = 2,
-};
-
-constexpr bool install_succeeded(InstallDisposition disposition) {
-    return disposition == InstallDisposition::kInstalled;
-}
-
-constexpr const char* install_error(InstallDisposition disposition) {
-    switch (disposition) {
-        case InstallDisposition::kInstalled:
-            return nullptr;
-        case InstallDisposition::kUnsupported:
-            return "unsupported: world teleport entry instruction fingerprint";
-        case InstallDisposition::kFailed:
-            return "install failed: world teleport entry patch unavailable";
-    }
-    return "install failed: world teleport entry patch unavailable";
-}
 
 // 世界传送 4 选项插件业务层：拦截地图名横幅尾部，改为原生 UICHOICE 面板。
 // 入口指令 patch（UIPlay_CallMapName 尾部）由 plugin.cpp 声明，宿主机制层负责安装；本层
@@ -38,5 +14,8 @@ constexpr const char* install_error(InstallDisposition disposition) {
 // UIPlay_CallMapName 尾部 trampoline 调用的业务入口（游戏主线程）：非世界态忽略，
 // 世界态请求打开选择面板。
 void world_teleport_call_map_name();
+
+// 插件停用/deactivate 时使已排队的帧任务与游戏回调失效：停用后不得再开面板、扣费或切图。
+void invalidate_operations();
 
 }  // namespace qol::features::world_teleport

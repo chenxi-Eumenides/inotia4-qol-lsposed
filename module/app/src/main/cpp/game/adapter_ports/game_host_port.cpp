@@ -1,5 +1,7 @@
 #include "game/adapter_ports/game_host_port.h"
 
+#include "game/adapter_ports/world_action_port.h"
+
 #include "contracts/game_ports/ui_write_port.h"
 #include "contracts/game_ports/ports.h"
 
@@ -749,10 +751,7 @@ contracts::QolGameHost make_game_host() {
                             &write_inventory_save_item,
                             &write_inventory_free_item,
                             &write_inventory_remove_item_direct};
-    host.world_action = {&call_world_create_yesno, &call_world_minus_money, &call_world_map_change,
-                         &call_world_close_popup, &call_world_restore_hud,
-                         &call_world_show_banner, &call_world_add_money,
-                         &call_world_cancel_tutorial};
+    host.world_action = game_world_action_api();
     host.item_abi = {&game_inventory_find_item_hook,
                      &game_inventory_bind_find_item_backup,
                      &game_original_find_item_slot,
@@ -765,6 +764,14 @@ contracts::QolGameHost make_game_host() {
 }
 
 }  // namespace
+
+const contracts::QolWorldActionApi& game_world_action_api() {
+    static const contracts::QolWorldActionApi api = {
+        &call_world_create_yesno, &call_world_minus_money, &call_world_map_change,
+        &call_world_close_popup, &call_world_restore_hud, &call_world_show_banner,
+        &call_world_add_money, &call_world_cancel_tutorial};
+    return api;
+}
 
 void game_host_mark_main_thread() {
     if (g_main_thread_set.load(std::memory_order_acquire)) return;

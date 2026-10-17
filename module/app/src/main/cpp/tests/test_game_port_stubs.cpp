@@ -2,6 +2,7 @@
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_http_port.h"
 #include "contracts/game_ports/choice_port.h"
+#include "contracts/game_ports/world_action_port.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/world_port.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
@@ -119,6 +120,10 @@ void test_set_item_port_version(::QolVersion version) { kItemPort.abi_version = 
 const contracts::QolCharacterPort& character_port() { return kCharacterPort; }
 const contracts::QolCharacterHttpPort& character_http_port() { return kCharacterHttpPort; }
 const contracts::QolChoicePort& choice_port() { return kChoicePort; }
+const contracts::QolWorldActionPort& world_action_port() {
+    static const contracts::QolWorldActionPort kWorldActionPort{};
+    return kWorldActionPort;
+}
 const contracts::QolExtensionBagWritePort& extension_bag_write_port() {
     return kExtensionBagWritePort;
 }

@@ -944,6 +944,19 @@ target_compile_features(push_all_rules_tests PRIVATE cxx_std_17)
 set_target_properties(push_all_rules_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME push_all_rules_tests COMMAND push_all_rules_tests)
 
+# push_all wrapper / 安装失败语义 host 测试（fake capability + extras port）。
+add_executable(push_all_feature_tests
+    test_push_all_feature.cpp
+    ${CPP_DIR}/plugins/push_all/feature.cpp
+    ${CPP_DIR}/plugins/push_all/plugin.cpp
+    ${CPP_DIR}/plugins/push_all/rules.cpp
+)
+target_include_directories(push_all_feature_tests PRIVATE ${CPP_DIR})
+target_compile_features(push_all_feature_tests PRIVATE cxx_std_17)
+set_target_properties(push_all_feature_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME push_all_feature_tests COMMAND push_all_feature_tests)
+
 # P4 阶段 A2a：infra/scheduler 形式化 host 测试（末尾追加）
 add_executable(infra_scheduler_tests
     test_infra_scheduler.cpp
@@ -1103,11 +1116,14 @@ add_test(NAME attribute_range_display_tests COMMAND attribute_range_display_test
 # world_teleport 安装结果语义 host 测试。
 add_executable(world_teleport_status_tests
     test_world_teleport_status.cpp
+    ${CPP_DIR}/plugins/world_teleport/plugin.cpp
 )
 target_include_directories(world_teleport_status_tests PRIVATE
     ${CPP_DIR}
 )
 target_compile_features(world_teleport_status_tests PRIVATE cxx_std_17)
+set_target_properties(world_teleport_status_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME world_teleport_status_tests COMMAND world_teleport_status_tests)
 
 add_executable(world_teleport_install_tests
@@ -1118,6 +1134,18 @@ target_include_directories(world_teleport_install_tests PRIVATE ${CPP_DIR})
 target_compile_features(world_teleport_install_tests PRIVATE cxx_std_17)
 set_target_properties(world_teleport_install_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME world_teleport_install_tests COMMAND world_teleport_install_tests)
+
+add_executable(world_teleport_feature_tests
+    test_world_teleport_feature.cpp
+    ${CPP_DIR}/plugins/world_teleport/feature.cpp
+    ${CPP_DIR}/plugins/world_teleport/plugin.cpp
+    ${CPP_DIR}/plugins/world_teleport/rules.cpp
+)
+target_include_directories(world_teleport_feature_tests PRIVATE ${CPP_DIR})
+target_compile_features(world_teleport_feature_tests PRIVATE cxx_std_17)
+set_target_properties(world_teleport_feature_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME world_teleport_feature_tests COMMAND world_teleport_feature_tests)
 
 # save_backup 回滚结构化结果 host 测试。
 add_executable(save_backup_rollback_tests
@@ -1186,6 +1214,7 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/extension_bag_write_port.cpp
     ${CPP_DIR}/game/adapter_ports/move_merge_port.cpp
     ${CPP_DIR}/game/adapter_ports/game_host_port.cpp
+    ${CPP_DIR}/game/adapter_ports/world_action_port.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
     ${CPP_DIR}/game/access/inventory.cpp
     ${CPP_DIR}/game/adapter_ports/character_extras_port.cpp

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../contracts/plugin.h"
+#include "../../contracts/game_ports/world_action_port.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/world_facts.h"
 
@@ -11,7 +12,7 @@ namespace qol::features::world_teleport {
 
 const contracts::PluginDescriptor& plugin_descriptor();
 const contracts::QolHostSdk* host_sdk();
-const contracts::QolGameHost* game_host();
+const contracts::QolWorldActionPort* world_action_port();
 const contracts::WorldFactsApi* world_facts();
 const contracts::ItemFactsApi* item_facts();
 

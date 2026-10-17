@@ -59,6 +59,7 @@
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
 #include "game/adapter_ports/choice_port.h"
+#include "game/adapter_ports/world_action_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/move_merge_port.h"
@@ -228,6 +229,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_WORLD_ACTION) {
+        const auto& port = qol::game::world_action_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
     if (id == contracts::QolPortId::QOL_PORT_SAVE) {
         const auto& port = qol::game::save_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
@@ -349,6 +355,12 @@ bool resolve_plugin_ports(uint32_t index) {
             (plugin.id == nullptr ||
              (std::strcmp(plugin.id, "core.custom_ui") != 0 &&
               std::strcmp(plugin.id, "world_teleport") != 0))) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_WORLD_ACTION &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "world_teleport") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

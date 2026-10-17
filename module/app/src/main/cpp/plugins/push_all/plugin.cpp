@@ -83,7 +83,12 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_character_extras = static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[0]);
-    if (g_sdk->capabilities.require == nullptr) return 1;
+    if (g_sdk->capabilities.require == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_character_extras = nullptr;
+        return 1;
+    }
     const void* iface = nullptr;
     if (!contracts::succeeded(g_sdk->capabilities.require(
             contracts::kCharacterFactsCapabilityId,
