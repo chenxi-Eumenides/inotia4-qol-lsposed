@@ -251,7 +251,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 | H-14 | `INVEN_MoveItem` | `move_item_wrapper` | `native_inventory_hook.cpp:702-757`（wrapper）、`:1184-1187`（安装） |
 | H-15 | `UIEquip_EquipControlEventProc` | `equip_control_event_proc_wrapper` | `native_inventory_hook.cpp:946-956`（wrapper）、`:1188-1191`（安装） |
 | H-16 | `UIEquip_RefreshItemArea` | `refresh_item_area_wrapper`；原版一次刷新走 trampoline 后由 gate 做 post-projection，模块主动刷新走 raw-original dispatcher | `native_inventory_hook.cpp:669-677`（wrapper）、`:1192-1195`（安装）；`game_ui_virtbag.cpp:237-246`（gate）；`extension_bag_render.inc:533-568` |
-| H-17 | `ITEM_GetCumulateCount` | `get_cumulate_count_wrapper`；S2 读侧统一解码（R-49）：count-encoded 类别按模式视图解码 `+0x10`（启用态 `128a+b`、关闭态低 7 位 b，R-47 决策 b），非可堆叠/类别未知（kUnknown）original-first backup（R-46 fail-closed） | `native_inventory_hook.cpp`（wrapper，分流在 `inventory_hook_stage4.cpp:stage4_get_cumulate_count`）、安装链第 4 个 |
+| H-17 | `ITEM_GetCumulateCount` | `get_cumulate_count_wrapper`；S2 读侧统一解码（R-49）：count-encoded 类别按模式视图解码 `+0x10`（启用态 `128a+b`、关闭态读 b（0–127，不夹 99），R-47 决策 b），非可堆叠/类别未知（kUnknown）original-first backup（R-46 fail-closed） | `native_inventory_hook.cpp`（wrapper，分流在 `inventory_hook_stage4.cpp:stage4_get_cumulate_count`）、安装链第 4 个 |
 | H-18 | `INVEN_SaveItemDirect` | `save_item_direct_wrapper`；同身份堆叠合并时采集目标槽旧全量、backup 后确认原版 b 写再回写 a+b（R-45/R-49） | `native_inventory_hook.cpp:save_item_direct_wrapper`、安装链第 20 个 |
 | H-19 | `ITEMSYSTEM_Divide` | `item_system_divide_wrapper`；拆堆源堆借位与新对象设值（R-45/R-49） | `native_inventory_hook.cpp:item_system_divide_wrapper`、安装链第 21 个 |
 | H-20 | `ITEMSYSTEM_MakeItem` | `make_item_wrapper`；**数量回写已撤销**（arg2 是静态表查找/品质参数非数量，R-52/VM-38），wrapper 纯透传、回写计划经纯函数 `stage4_make_item_writeback_count` 恒 0 | `native_inventory_hook.cpp:make_item_wrapper`、安装链第 22 个 |
@@ -270,7 +270,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
    `inventory_hook_stage4.cpp:3-23`。
    1.1. H-17 `ITEM_GetCumulateCount` 是唯一例外：count-encoded 类别不先调 backup——
    backup 体内的数量位段仍按原版/S1 布局读取，会与 S2 解码冲突；因此对 kEncoded 直接
-   返回模式视图解码值（启用态 `item_count_codec::effective_read_count` 全量、关闭态只读 b，
+   返回模式视图解码值（启用态 `item_count_codec::effective_read_count` 全量、关闭态读 b（0–127，不夹 99），
    R-47 决策 b），其余类别保持 original-first backup
    （`inventory_hook_stage4.cpp:35-48`）。
 2. `ConsumeItem`、`RemoveItem`、装备和镶嵌必须按对象身份分流；扩展对象不能先落入
@@ -336,7 +336,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 > 素材 §三 的 25 条候选均已逐条复核。R-01..R-25 按素材顺序对应；其中 R-20
 > 对码确认 R-26..R-44 为当前实现的同类耦合规则；R-45..R-49 为已批准的 S2 数量编码
-> 契约规则（读侧、写侧与关闭态语义均已落地；真机锚 VM-32..VM-36 待取证）。
+> 契约规则（读侧、写侧与关闭态语义均已落地；VM-32..VM-36 完整真机验收仍待取证，VM-36 的插件审计批专项复测不代表整卡通过）。
 
 ### R-01 确认使用必须刷新并重投影
 
@@ -763,31 +763,35 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   真机读侧核对见 `VM-33`（待取证），装备/宝石/袋对象不变式另见 `VM-32`；写侧门控与
   进位见 `VM-34`（待取证）。
 
-### R-47 关闭态所有数量读写与操作按低 7 位视图（决策 b）
+### R-47 关闭态读取按 b 段、S2 写回由原版承担（决策 b）
 
-- **规则一句话**：堆叠上限关闭态下，模块与原版的数量读、写、操作与展示统一按低 7 位
-  视图——有效数量 = `b`（`count mod 128`），上限 99；`a`（bits22–24）不读、不写、
-  不参与运算，只原样保留；重新开启后经 S2 解码读回完整 canonical 值，关闭期操作
-  造成的 `128a+b` 变化是决策 b 的既定语义，不按数据损坏处理，也不得引入关闭期的
-  反向同步或 `a` 清零。
-- **实现锚（模式感知 helper，唯一模式入口）**：
-  `item_count_codec::effective_read_count / effective_write_count / effective_clamp /
-  effective_view_count`（`game/adapter_ports/item_count_codec.h`）；读侧 getter 分流
-  `stage4_get_cumulate_count`（`inventory_hook_stage4.cpp`）；模块合并按视图相加且
-  descriptor 回写 canonical（`extension_bag_transaction.inc`）；H-04 消耗借位预置仅在
-  启用态生效（`native_inventory_hook.cpp` `consume_item_wrapper`——关闭态 b≤1 消耗到
-  空按原版删除，不为了保留 a 而让有效数量 0 的堆无法消耗）。
+- **规则一句话**：堆叠上限 999 未应用时，`effective`/`view_from_canonical` 读取 b 段（0–127，
+  `count mod 128`），不按 99 截断。`move`/`save`/`divide`/`consume`/`remove`/`borrow` 的模块 S2
+  写回跳过，由原版只写 b、保留 a（bits22–24）；`s2_writeback_gate` 仅在 999 已应用时允许模块
+  S2 写回。`write_effective`、`field_from_canonical`、`view_limit` 的关闭态写侧上限仍为 99。
+  重新应用 999 后，S2 读取恢复当前 `128a+b`；关闭期原版操作导致的 b 变化是决策 b 的既定语义，
+  不按数据损坏处理，也不得引入反向同步或 `a` 清零。
+- **实现锚（模式感知 helper 与写回门控）**：
+  `effective_read_count`/`view_from_canonical` 关闭态返回 b（0–127，不夹 99）；
+  `write_effective`/`field_from_canonical`/`view_limit` 关闭态写侧上限为 99
+  （`game/adapter_ports/item_count_codec.h`）；读侧 getter 分流
+  `stage4_get_cumulate_count`（`inventory_hook_stage4.cpp`）；`s2_writeback_gate` 在 999 未应用时
+  令模块 S2 写回跳过，原版只写 b；999 已应用时 move/save/divide/consume/remove/borrow 才执行模块
+  S2 写回。H-04 借位预置仅在启用态生效（`native_inventory_hook.cpp` `consume_item_wrapper`）。
 - **descriptor canonical 边界（R-38/R-48 不变）**：descriptor `count` 与 sidecar
-  持久化恒为 canonical `128a+b`；关闭态只改变运行时视图与操作算术，读档不 clamp、
-  不按配置重编码。示例：canonical 199（a=1,b=71）→ 关闭态读 71；关闭态消耗 1 →
-  b=70（a 保留）→ 重开读 198；关闭态写 99 → 只改 b → 重开读 227（128a+99）。
-- **为什么（决策 b）**：读、写、操作、展示统一收敛到 b 视图，上限 99 与原版 clamp 表
-  关闭态 revert 后的原生语义一致；`a` 只保留、不读不写不参与运算，重开即可恢复完整
-  canonical 值，关闭期单次操作不会放大成数量跳变，也不需要关闭期的反向同步。
+  持久化恒为 canonical `128a+b`；关闭态不改写读档数据。示例：canonical 199（a=1,b=71）→
+  关闭态读 71；关闭态原版消耗 1 只写 b，a 保留，重开读 198。直接经关闭态
+  `write_effective`/`field_from_canonical` 写入 99 时仍受 99 上限约束，只改 b，重开读 227
+  （128a+99）；这与关闭态跳过原版 Hook 的模块 S2 写回相区分。
+- **为什么（决策 b）**：关闭态读取展示原版低 7 位 b（0–127），不对读值夹 99；原版写点只写 b，
+  保留 a。99 是关闭态写侧/上限 helper 的限制，不是读取视图上限；重新应用 999 后按 S2
+  读取保留的 `128a+b`，无需关闭期反向同步。
 - **验证锚**：Host `test_stack_codec_effective_mode`、`test_virtual_bag_mode_aware_ops`
-  （`tests/test_host.cpp`：199 off 读 71/重开 199、off 写 99 → 227、off 消耗 → 198、
-  127/128/99 off 视图、合并按视图且 a 保留）、`test_get_cumulate_count_s2`
-  （getter 分流两态视图）；真机 `VM-36`（199→71、重开 199/198/227、off 上限 99）。
+  （`tests/test_host.cpp`：199 off 读 71/重开 199、关闭态 helper 写 99 → 227、关闭态原版消耗后
+  重开读 198、低位视图与写侧 99 上限分开断言）、`test_get_cumulate_count_s2`
+  （getter 分流两态视图）；真机历史 `VM-36` 锚及插件审计批新增复测见验证矩阵。
+- **插件审计批 2026-10-17 裁决 b 修订**：口径来源记录见
+  `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。
 
 ### R-48 sidecar 无版本标识，数量位统一 S2，模式仅影响运行时视图与 clamp
 
@@ -796,14 +800,15 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   一种，持久化与 descriptor 读写统一 `s2_read_count`/`s2_write_count`（canonical 域）；
   运行时操作面（展示/查询/消耗/合并/卖出/创建）统一经模式感知层
   `effective_read_count`/`effective_write_count`/`effective_clamp`/`effective_view_count`
-  （启用态等价 canonical 全量、关闭态低 7 位视图，R-47 决策 b）；历史 sidecar 若携带
+  （启用态读取等价 canonical 全量；关闭态读取 b（0–127，不夹 99），写侧上限仍为 99，R-47
+  决策 b）；历史 sidecar 若携带
   `encodingVersion` 字段，解析时宽容忽略（不报错、不迁移）。S1→S2 迁移函数与原版袋
   `+0x10` 扫描状态机已删除，当前存档视为已迁移。
 - **读档不改写 canonical（R-48 载入侧约束）**：读档路径与 `stack_limit_enabled()`
    完全解耦——已持久化的 canonical 数量（sidecar descriptor）原样保留，读档不 clamp、
    不按当前配置重编码；`stack_limit_enabled()` 只允许出现在新建/合并/消费/派生等操作
-   层，且仅经 `effective_clamp`（99/999 上限）与 `effective_view_count`（关闭态运行时
-   视图）影响运行时，绝不影响持久化解码或编码。sidecar payload 仅与
+   层；`effective_clamp`/`view_limit` 控制 99/999 写侧上限，`effective_view_count` 在关闭态返回
+   b（0–127，不夹 99），绝不影响持久化解码或编码。sidecar payload 仅与
    descriptor canonical 对齐（descriptor 是唯一 canonical），与运行时模式无关。
 - **为什么**：解码随配置模式变化（或残留 S1 读路径）会让同一存档在不同开关态读出
   不同数量（真机实证：关闭态 S2 写入 99，开启态被 S1 解码读出 792 且随后固定）。
@@ -818,10 +823,10 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 ### R-49 S2 读侧统一 getter hook，写侧无统一 setter
 
 - **规则一句话**：S2 数量读取统一经 `ITEM_GetCumulateCount@0x106094` 的 getter hook
-  按模式视图解码（启用态 `128a+b` 全量、关闭态只读 b，R-47 决策 b）；写侧不存在统一
-  setter，每个知道物品身份的调用方必须各自完成类别门控与模式感知写
-  （启用态 `128a+b` 进位/借位、关闭态只写 b 保留 a）；禁止引入 `UTIL_SetBitValue`
-  Hook 充当统一写入点。
+  按模式解码（启用态 `128a+b` 全量、关闭态读取 b（0–127，不夹 99），R-47 决策 b）；写侧不存在统一
+  setter。999 已应用时，各调用方完成类别门控与 S2 进位/借位；999 未应用时，
+  `move`/`save`/`divide`/`consume`/`remove`/`borrow` 跳过模块 S2 写回，由原版只写 b、保留 a；
+  禁止引入 `UTIL_SetBitValue` Hook 充当统一写入点。
 - **为什么**：原版写路径没有单一「写数量」函数，各 caller 直接改 `+0x10` 位段；
   `UTIL_SetBitValue` 是无物品指针的通用位工具，hook 点无法判定类别（可堆叠/宝石/
   袋容量/装备 marker 共用），也无法计算进位。分层事实见架构册。
@@ -851,8 +856,8 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   登记点见 R-46 规则一句话；H-21 分流断言 `test_remove_item_data_plan`
   （`stage4_hook_tests`：跨 127 借位、旧 a 残留、已正确不写、全删、count≤0、
   多缩减/越域 fail-closed）；真机 `VM-34`：创建/合并/消耗跨 127 进位、非可堆叠不触碰
-  bits22–24（待取证）。关闭态读写语义已落地（S2-P5，R-47 决策 b），真机 `VM-36`
-  （待取证）。非 getter 读点白名单见架构册 §3.7。
+  bits22–24（待取证）。关闭态读写语义已落地（S2-P5，R-47 决策 b）；`VM-36` 完整验收仍待取证，
+  插件审计批专项复测见验证矩阵且不代表整卡通过。非 getter 读点白名单见架构册 §3.7。
 
 ### R-50 apply 准入必须校验目标装备类，非装备目标回退扩展事务
 
@@ -887,7 +892,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   不能推广）；直接读 b 会让整堆出售判定、出售数量输入框上限与拆堆守卫按 b 残量
   （真机实证：200 个中药水按 b=72 结算，实得 546 而非 1540）。重定向到已 hook 的
   `ITEM_GetCumulateCount` 复用 R-46/R-47/R-49 的门控与解码，且同属 libgame.so
-  （bl 无需 thunk）；getter 关闭态返回 b，与原版逐位一致。重定向属于
+  （bl 无需 thunk）；getter 关闭态返回原始 b 段（0–127，不夹 99），与原版逐位一致。重定向属于
   `stack_limit.limit_999` 资源组，随该组启停安装和物理撤销；关闭态读取语义与原版逐位一致，
   不代表重定向资源本身常驻。
 - **典型破坏方式**：用单指令窗口 patch 伪造全量；在 `UTIL_GetBitValue` 通用位工具上
@@ -1173,8 +1178,9 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 
 ### R-65 S2 写侧回写门控必须与读侧同源（堆叠上限驱动，扩展背包无关）
 
-- **规则一句话**：S2 写侧回写总门控 `s2_writeback_gate` 必须与读侧 getter 门控同源——
-  `stack_limit_enabled()` 一开即需写侧进位；扩展背包开关不得作为 S2 数量写侧的必要条件。
+- **规则一句话**：S2 写侧回写总门控 `s2_writeback_gate` 要求 999 资源组已应用；应用后需执行
+  写侧进位，扩展背包开关不得作为 S2 数量写侧的必要条件。999 未应用时跳过模块 S2 写回，
+  由原版只写 b、保留 a。
   模式统一经纯函数 `item_count_codec::writeback_needed(extension_bag_enabled, stack_limit_enabled)`
   进入，禁止在写点单用 `extension_bag_enabled()` 判定。
 - **为什么**：读侧 H-17 `get_cumulate_count_wrapper` 按 `stack_limit_enabled()` 解码 S2
@@ -1186,7 +1192,7 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
   回归，漏测「扩展关 + 堆叠开」组合；影响同门控的全部写点（`move_item_wrapper`、
   `save_item_direct_wrapper`、`consume_item_wrapper`、`remove_item_data_wrapper`）。
 - **验证锚**：Host `stage4_hook_tests::test_s2_writeback_gate` 断言
-  (ext,stack)∈{(false,false)=false,(false,true)=true,(true,false)=true,(true,true)=true}；
+  (ext,stack)∈{(false,false)=false,(false,true)=true,(true,false)=false,(true,true)=true}；
    真机 `VM-49`（堆叠开+扩展关 99+99→198，切换配置读回一致）。
 
 ### R-66 派生容量是扩展袋的有效槽范围，写入/放置/统计与保存校验都必须以它为界
@@ -1287,9 +1293,9 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
    `R-36`（触摸窗口释放必须延迟回收）、`R-37`（卖出价格边界）、`R-38`（载荷数量
    收敛适用性）、`R-39`（袋对象 marker 位段）、`R-40`（类别判定 fail-closed）、
    `R-41`（payload count 门控）、`R-42`（BagType/原生类别判定边界）、`R-43`（数量 patch
-   表准入判据）、`R-44`（持锁原版回调 TLS 直通与删除后置条件）、`R-45`（S2 编码布局
-   与总量范围）、`R-46`（S2 高位段类别门控 fail-closed）、`R-47`（关闭态低 7 位视图
-   与 `a` 保留，决策 b）、`R-48`（sidecar 无版本标识、统一 S2、模式仅影响运行时视图
+    表准入判据）、`R-44`（持锁原版回调 TLS 直通与删除后置条件）、`R-45`（S2 编码布局
+    与总量范围）、`R-46`（S2 高位段类别门控 fail-closed）、`R-47`（关闭态读 b 与原版 b 写、
+    S2 写回门控和 `a` 保留，决策 b）、`R-48`（sidecar 无版本标识、统一 S2、模式仅影响运行时视图
    与 clamp）、`R-49`（读侧统一 getter、写侧
    调用方级处理）、`R-50`（apply 准入目标装备类校验）、`R-51`（出售/拆堆位读重定向
    到统一 getter，禁止窗口伪修复）、`R-52`（数量入参必须反汇编证明，MakeItem arg2
@@ -1306,14 +1312,14 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
       写入/放置/统计与保存 prepare 校验以它为界）。
 3. `R-37` 以当前价格边界实现和 VM-30 取证为准；`R-38..R-44` 以对应 Host 断言和
    VM-09/VM-13/VM-29/VM-30/VM-31 真机证据为准；`R-45..R-49` 为已批准的 S2 数量编码
-   契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、
-   `R-46` 读侧门控已落地（H-17 fail-closed）、`R-47` 关闭态低 7 位视图与 `a` 保留
-   （决策 b）已落地（Host `test_stack_codec_effective_mode`、
-   `test_virtual_bag_mode_aware_ops`，真机锚 `VM-36` 待取证）、`R-48` 无版本标识统一
+    契约，当前落地状态：`R-45` 布局常量与读侧解码已落地（Host `test_stack_codec_s2`）、
+    `R-46` 读侧门控已落地（H-17 fail-closed）、`R-47` 关闭态读 b（0–127、不夹 99）、原版只写 b、
+    未应用 999 时模块 S2 写回跳过（决策 b）已落地（Host `test_stack_codec_effective_mode`、
+    `test_virtual_bag_mode_aware_ops`，真机完整验收锚 `VM-36` 待取证，审计批专项复测不代表整卡通过）、`R-48` 无版本标识统一
    S2 已落地（Host `test_stack_codec_mode_invariance`、
    `test_virtual_bag_cross_config_roundtrip`）、`R-49` 读侧 getter hook 与写侧调用方级
    门控已落地（S2-P2/P3，H-17 与 H-18..H-21 + Host
-   `test_get_cumulate_count_s2`、`test_remove_item_data_plan`）；真机证据 `VM-32`..`VM-36` 均待取证。`R-50`（apply 准入目标
+   `test_get_cumulate_count_s2`、`test_remove_item_data_plan`）；VM-32..VM-35 真机证据待取证；VM-36 完整验收待取证，只有插件审计批专项复测。`R-50`（apply 准入目标
    装备类校验）已落地（G-8/p5/H-15 路由 + Host `stage4_hook_tests` 断言），真机
    证据归 S-03/VM-10。`R-51`（出售/拆堆位读重定向 getter）已落地
    （`g_stack_getter_redirect_patches` + Host `test_sell_divide_s2_read_window`，
@@ -1334,5 +1340,5 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
    `R-49`，共 17 条；
    其中已给源码锚但尚无专门 host/真机锚的规则，验收册仍应补操作证据；
    `R-46`/`R-49` 的真机写侧证据归 `VM-34`，`R-47` 的真机证据归 `VM-36`
-   （均待取证）。
+   （完整卡均待取证；VM-36 插件审计批专项复测不代表整卡通过）。
 6. 规则正文以当前源码和本册证据锚为准。

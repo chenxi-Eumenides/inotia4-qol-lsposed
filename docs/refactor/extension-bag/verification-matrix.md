@@ -500,17 +500,18 @@
 - **Host 测试名(现有或「缺口」)**：`test_virtual_bag_cross_config_roundtrip`（99/127/128/217/999 三往返 payload 逐字节不变 + 旧字段宽容忽略）、`test_stack_codec_mode_invariance`（两态写入/解码一致、切换模式不改值）、`test_virtual_bag_json_count_clamp`（跨配置 canonical 不截断）；物理袋读侧依赖游戏内存与 Bridge 存储，Host 缺口。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-35`：①启用态把可堆叠物品设为 217（API 或游戏内获取）并保存；②关闭堆叠上限，读档，预期 UI/API count 仍 217、`+0x10` 位段与保存时逐字节一致；③再启用，读档，预期仍 217；④对 99/127/128/199/999 重复①②③；⑤改无 sidecar 的存档槽进档，预期空状态载入且原版袋 `+0x10` 不变。
 
-### VM-36 关闭态低 7 位视图与 a 保留（199→71、重开 199、off 上限 99）
+### VM-36 关闭态读取 b 段与原版写入（199→71、重开 199；写侧上限 99）
 
-- **操作**：启用态构造 canonical 数量（重点 199）的可堆叠物品 → 关闭堆叠上限 → 核对所有读写/操作按低 7 位视图（读 71、上限 99、`a` 位段不变）→ 关闭态执行消耗/合并 → 重新启用 → 核对重开读回完整 canonical 值。
+- **操作**：启用态构造 canonical 数量（重点 199）的可堆叠物品 → 关闭堆叠上限 → 核对读取为 b（0–127、不夹 99）→ 核对 `move`/`save`/`divide`/`consume`/`remove`/`borrow` 跳过模块 S2 写回、由原版只写 b 且保留 `a` → 重新启用 → 核对重开按 S2 读取当前 `128a+b`。另核对 `write_effective`、`field_from_canonical`、`view_limit` 的关闭态写侧上限仍为 99。
 - **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`stackLimitEnabled`；操作前记录目标物品 `+0x10` 原始值与 sidecar JSON 副本。
 - **原版链(VMA)**：`ITEM_GetCumulateCount@0x106094`（读侧模式视图解码）、`INVEN_ConsumeItem@0x1047bc+0x104818/0x104844/0x104858`（b 递减）、`INVEN_MoveItem@0x104934`（合并写 b）。
 - **扩展接管点(文件:函数)**：`inventory_hook_stage4.cpp:stage4_get_cumulate_count`（`effective_read_count` 模式视图）、`game/adapter_ports/item_count_codec.h:effective_read_count/effective_write_count/effective_clamp/effective_view_count`、`native_inventory_hook.cpp:consume_item_wrapper`（借位预置仅启用态）、`extension_bag_transaction.inc:move_extension_to_extension_locked`（合并按视图、descriptor 回写 canonical）、`extension_bag_equip.inc:consume_extension_item_after_native_locked`。
-- **共享状态读写**：关闭态模块侧写点只改 payload b 位；descriptor `count` 与 sidecar 恒为 canonical；读档路径不参与本卡（见 VM-35）。
-- **必须保持的不变式(引 R-xx)**：关闭态有效数量 = `b` = `count mod 128`、上限 99（R-47/决策 b）；关闭态任何写点不得改写 `a`（bits22–24）与 bits0–21（R-45/R-47）；重新开启后经 S2 解码读回完整 canonical（R-45/R-47）；canonical 199 关闭态读 71、关闭态消耗 1 后重开读 198、关闭态写 99 后重开读 227（128a+99）；非可堆叠类别位段不受影响（R-46）。
-- **失败语义**：关闭态 b≤1 的堆消耗到空按原版删除（有效数量 0，不预置借位）；关闭态合并超 99 按上限拒绝/分堆，不得出现视图 >99；模式切换瞬间不得出现反向同步或 `a` 清零。
-- **Host 测试名(现有或「缺口」)**：`test_stack_codec_effective_mode`（199 off 读 71/重开 199、off 写 99 → 227、off 消耗 → 198、127/128/99 off 视图、clamp 999/99、`effective_view_count`）、`test_virtual_bag_mode_aware_ops`（`patch_payload_count` off 写保留 a、off 合并视图 71+71→99 → canonical 227）、`test_get_cumulate_count_s2`（getter 分流两态视图）、`test_virtual_bag_merge_count`/`test_virtual_bag_cross_config_roundtrip`（合并上限与持久化 canonical 不改写）；原版袋写侧行为依赖游戏内存，Host 缺口以真机为准。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-36`：①启用态经 API 创建 canonical `199` 的可堆叠物品，读 `+0x10` 预期 `a=1,b=71`、UI/API count=199；②关闭堆叠上限，读 GET `/api/item/inventory/items`，预期同一物品 `count=71` 且 `+0x10` 逐字节不变；③关闭态经 API 创建/合并使请求量 100，预期落地上限 99（b=99）且 `a` 仍为 1（`+0x10`=227 的位段）；④关闭态消耗一次（使用物品），预期 b 71→70、`a` 不变，重开读 198；⑤重新启用堆叠上限，读 count 与 `+0x10`，预期恢复完整 canonical（③后 227、④后 198）；⑥对 canonical 128 重复②，预期关闭态读 0（b=0）且 `+0x10` 不变；⑦logcat 核对关闭态无 `S2 writeback ... mismatch` ERROR。
+- **共享状态读写**：关闭态原版数量写点只写 payload b 位、保留 a；模块 S2 写回不执行；descriptor `count` 与 sidecar 恒为 canonical；读档路径不参与本卡（见 VM-35）。
+- **必须保持的不变式(引 R-xx)**：关闭态读取 = b（0–127，不夹 99，R-47/决策 b）；关闭态模块 S2 写回跳过，原版写只改 b、不得改写 `a`（bits22–24）与 bits0–21（R-45/R-47）；`write_effective`/`field_from_canonical`/`view_limit` 的关闭态写侧上限仍为 99；重新开启后经 S2 解码读回当前 canonical（R-45/R-47）；canonical 199 关闭态读 71、关闭态原版消耗 1 后重开读 198；直接 helper 写 99 后重开读 227（128a+99）；非可堆叠类别位段不受影响（R-46）。
+- **失败语义**：关闭态 b≤1 的原版消耗到空按原版删除；关闭态新写入仍受写侧 99 上限约束，但已有 b 读值可大于 99；不得把读值 >99 当作视图非法，也不得因模式切换反向同步或清零 `a`。
+- **Host 测试名(现有或「缺口」)**：`test_stack_codec_effective_mode`（199 off 读 71/重开 199、helper off 写 99 → 227、关闭态原版消耗后重开读 198；读取 b 范围与写侧 clamp 99 分开）、`test_virtual_bag_mode_aware_ops`（`patch_payload_count` helper off 写保留 a、off 合并仍受写侧 99 上限约束）、`test_get_cumulate_count_s2`（getter 分流两态视图）、`test_virtual_bag_merge_count`/`test_virtual_bag_cross_config_roundtrip`（合并上限与持久化 canonical 不改写）；原版袋写侧行为依赖游戏内存，Host 缺口以真机为准。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-36`：①启用态经 API 创建 canonical `199` 的可堆叠物品，读 `+0x10` 预期 `a=1,b=71`、UI/API count=199；②关闭堆叠上限，读 GET `/api/item/inventory/items`，预期同一物品 `count=71` 且 `+0x10` 逐字节不变；③关闭态经 API 创建/合并使请求量 100，预期写侧上限 99（b=99）且 `a` 仍为 1（`+0x10`=227 的位段）；④关闭态消耗一次（使用物品），预期原版只写 b（71→70）、`a` 不变，重开读 198；⑤重新启用堆叠上限，读 count 与 `+0x10`，预期恢复完整 canonical（③后 227、④后 198）；⑥对 canonical 128 重复②，预期关闭态读 0（b=0）且 `+0x10` 不变；⑦logcat 核对关闭态无 `S2 writeback ... mismatch` ERROR。
+- **插件审计批 2026-10-17 口径修订**：用户真机复测（集成包 `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`，SHA-256 `ed0400df25a4bef4df9104c5a149a8bf328a20c92e4a19e5080e41ca1f0dbf23`）确认 107 关闭→107、206 关闭→78、107 拆 1→106、206 拆 1→b=77（重开 canonical 205），重开数量不变。该批证据仅覆盖所列读取/拆堆/重开事实，不代表本卡全量 PASS；记录索引见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。
 - **证据锚类型**：真机 + Host codec/模式感知 + 源码；本卡未取证前 S2-P5（R-47 决策 b）不得判通过。
 
 ### VM-33 S2 读侧 getter 显示与查询（99/100/127/128/199/999）
@@ -523,13 +524,14 @@
 - **必须保持的不变式(引 R-xx)**：类别判定 fail-closed（表不可用→backup）；非可堆叠（装备 marker bits25–31、宝石 bits18–23、袋容量 bits0–24）不解释 bits22–24（R-45、R-46、R-49、R-40）。
 - **失败语义**：`item=nullptr` 返回 `0`；非可堆叠/未知类别返回原版语义（装备 `1`）；hook 安装失败时回滚整链并阻塞重试，不得半安装。
 - **Host 测试名(现有或「缺口」)**：`test_stack_codec_s2`（`s2_read_count` 解码往返、`s2_clamp` 999/99 上限）；wrapper 门控依赖游戏内存类别表，Host 缺口，以本卡真机为准。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-33`：①经写侧构造可堆叠物品数量 `99/100/127/128/199/999` 各一（99 前后各取关闭态/开启态一次）；②每档读取 GET `/api/item/inventory/items` 的 `count` 与原始 `+0x10`，核对 `count == 128*((raw>>22)&7) + ((raw>>25)&0x7F)`；③在背包 UI 与详情弹窗目视数量；④对一件装备、一颗宝石、一个袋对象重复②③；预期：六档 `count` 与 UI 显示一致且等于 S2 解码值（重点 `100`、`127→128` 进位边界、`999` 上限不出现 `1000`）；装备 `count=1`、宝石/袋容量数值不受影响；`logcat` 出现 `hook install OK api=2 count=24 ... GetCumulateCount=`；关闭扩展后可堆叠物品显示回落为 `count mod 128`（`a` 保留，R-47），重新启用后恢复完整值。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-33`：①经写侧构造可堆叠物品数量 `99/100/127/128/199/999` 各一（99 前后各取关闭态/开启态一次）；②每档读取 GET `/api/item/inventory/items` 的 `count` 与原始 `+0x10`，核对开启态 `count == 128*((raw>>22)&7) + ((raw>>25)&0x7F)`、关闭态 `count == (raw>>25)&0x7F`；③在背包 UI 与详情弹窗目视数量；④对一件装备、一颗宝石、一个袋对象重复②③；预期：开启态显示 S2 解码值，关闭态显示 b（0–127、不夹 99；R-47）；装备 `count=1`、宝石/袋容量数值不受影响；`logcat` 出现 `hook install OK api=2 count=24 ... GetCumulateCount=`；重新启用后恢复完整值。
+- **插件审计批 2026-10-17 口径修订**：关闭态 getter/展示按原始 b（0–127，不夹 99）；插件审计批用户复测见 VM-36。该证据不代表本卡全量 PASS。
 - **证据锚类型**：真机 + Host codec + 源码；读侧单点通过不代表写侧（VM-34）整体通过。
 
 ### VM-34 S2 写侧门控与进位/借位（创建/合并/消耗）
 
 - **操作**：驱动模块写路径（创建、扩展袋内合并、消耗扣减）产生跨 127 边界的数量变化，核对 `+0x10` 位段的 S2 拆段写入、非可堆叠类别 bits22–24 不变与 fail-closed 拒绝。
-- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`moveMergeEnabled`；操作前记录原版袋 `0..5×16` 物理快照 digest、目标物品原始 `+0x10` 与宝石/装备/袋对象位段摘要。
+- **设备/APK/快照前置（按 VM-12 SOP）**：记录真机 `<设备序列号>`、最新 debug APK SHA-256、`extensionBagEnabled`、`moveMergeEnabled`、`stackLimitEnabled=on`；操作前记录原版袋 `0..5×16` 物理快照 digest、目标物品原始 `+0x10` 与宝石/装备/袋对象位段摘要。
 - **原版链(VMA)**：写侧 clamp 点 `INVEN_FindSaveSlot@0x103960+0x238`、`INVEN_SaveItemDirect@0x103bf0+0xdc/0xf0`、`INVEN_MoveItem@0x104934+0x150/0x158`（完整数量判定 999）；`INVEN_CheckSaveInNotEmptySlot+0xa4`、`INVEN_GetCumulateSaveSlotEx+0x164/0x17c` 保持原版 b 满判定（不进 clamp 表）。
 - **扩展接管点(文件:函数)**：`model/virtual_bag_transaction_rules.inc:patch_payload_count/merge_count`、`api/native/game_inventory_basic.inc:data_op_add_item`、`extension_bag_equip.inc:consume_extension_item_after_native_locked`；统一 `item_count_codec::s2_write_count/s2_clamp`（进位/借位内建）。
 - **共享状态读写**：写点持 `g_virtual_bag_mtx` 修改 payload 数量位与 descriptor；类别判定走 `item_count_encoding`（不持锁读 ITEMCLASSBASE）。
@@ -538,6 +540,7 @@
 - **Host 测试名(现有或「缺口」)**：`test_stack_codec_s2`（拆段写回/进位/借位/clamp）、`test_stack_codec_mode_invariance`（两态写入/解码一致）、`test_virtual_bag_payload_helpers`（非 count-encoded 与未知类别拒绝）、`test_virtual_bag_merge_count`/`test_virtual_bag_mergeable_items`（合并上限与身份门控）、`test_remove_item_data_plan`（H-21 批量删除部分删堆修正：跨 127 借位、旧 a 残留、已正确不写、全删、count≤0、多缩减/越域 fail-closed）；「S2 编码写回后位模式」断言已随 Host 用例统一 `s2_read_count` 落地（见 §3 对码表备注）。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-34`：①启用态经 API 创建数量 `128` 的可堆叠物品，读 `+0x10` 预期 `a=1,b=0`；②扩展袋内合并 `100+100`，预期目标 `a=1,b=44` 且源槽清空；③使用消耗一次使 `128→127`，预期 `a=0,b=127`；④对宝石重复①，预期拒绝且宝石 bits18–23 不变；⑤袋对象装备/卸下各一次，预期容量位 bits0–24 与 marker bit25 不受数量路径影响；⑥关闭扩展重复①，预期原版只作用 b（`a` 保留，R-47）；⑦启用态让同类可堆叠双堆 `199+50`（API 创建两堆不同槽），经合成/事件扣 60（触发 `INVEN_RemoveItemData`，logcat `S2 writeback RemoveItemData`），预期部分删堆 `+0x10` 解码 `139`（`a=1,b=11`），整删堆槽清空。
 - **证据锚类型**：真机 + Host codec/门控 + 源码；本卡未取证前 S2 写侧不得判通过，原版袋内 >127 合并的 a 进位开放点按 §2.1.1 登记归调用方级写点（S2-P3）。16 函数写点收口状态（2026-09-11 反汇编冻结）：已接管 5（含 H-21 `INVEN_RemoveItemData`@0x1040a8，调用方 MIXSYSTEM_UseStuff/QUESTSYSTEM/回滚路径）、数量回写已撤销 1（`ITEMSYSTEM_MakeItem`，R-52：arg2 非数量）、无需接管 8（证据见 `native_inventory_hook.cpp` 语义表）、待勘察 2（`NetworkStore_InitializeMenuData@0x15b7b0`、`NetworkStore_AddItem@0x15d640`——数量来自网络数据，离线不可达，冻结值域前不判通过也不判失败）。
+- **插件审计批 2026-10-17 口径修订**：模块 S2 写回仅在 `stack_limit.limit_999` 已应用时执行；关闭态原版只写 b、保留 a。新增真机结果见 VM-36，不代表本卡全量 PASS。
 
 ### VM-37 出售/拆堆数量按 S2 全量（直接位读重定向）
 
@@ -551,6 +554,7 @@
 - **Host 测试名(现有或「缺口」)**：`test_sell_divide_s2_read_window`（getter 两态解码等价、十位窗口伪修复反例、200=a1b72）。
 - **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-37`：①启用态持有一堆 `200`（a=1,b=72）中药水，商店整堆卖出，预期输入框上限 200、结算按 200 计价（对照原版实得 546 缺陷）；②输入 `150` 部分出售，预期背包剩 50、所得按 150；③关闭堆叠上限重复①，预期输入框上限 72（b 视图，与原版一致）；④`logcat` 出现 5 条 `Inotia4Qol ... domain=platform ... redirect ...` 与 `stack canonical layout applied`、`hook install OK api=2 count=24`。
 - **证据锚类型**：真机 + Host codec + 源码；重定向安装日志已在部署流程取证，行为断言待人工商店操作。
+- **插件审计批 2026-10-17 口径修订**：getter 关闭态读取 b（0–127、不夹 99）；拆堆关闭态由原版写 b，模块 S2 写回跳过。新增用户复测见 VM-36，不代表本卡全量 PASS。
 
 ### VM-38 拾取/掉落可堆叠物品数量为 1（MakeItem 回写撤销）
 
@@ -703,12 +707,13 @@
 - **设备/APK/快照前置**：真机 `<设备序列号>`、debug APK SHA-256 `44d9d78e4ad5...`；配置 stack_limit=on、move_merge=on、extension_bag=off；记录两组物品 bag/slot/field。
 - **原版链(VMA)**：`UIEquip_InvenItemControlEventProc`（drop）→ `INVEN_MoveItem`（合并写 b）→ module `move_item_wrapper`（S2 采集/回写）。
 - **扩展接管点(文件:函数)**：`feature/patch/game_patch_move_merge.inc:ui_equip_inven_item_proc_wrapper` → `native_inventory_hook.cpp:move_item_wrapper` → `s2_writeback_gate`/`s2_capture_merge`/`s2_merge_writeback`。
-- **共享状态读写**：读 `ITEM_GetCumulateCount`（`stack_limit_enabled()` 视图）；写 `+0x10` bits22–31（`effective_write_count(..., stack_limit_enabled())`）。
+- **共享状态读写**：读 `ITEM_GetCumulateCount`（999 已应用时读 S2 全量；关闭态读 b（0–127，不夹 99））；`s2_writeback_gate` 仅在 `stack_limit.limit_999` 已应用时允许模块 S2 写回。关闭态 `move`/`save`/`divide`/`consume`/`remove`/`borrow` 跳过模块 S2 写回，由原版只写 `+0x10` 的 b 段、保留 a；`write_effective`/`field_from_canonical`/`view_limit` 的关闭态写侧上限仍为 99。
 - **必须保持的不变式(引 R-xx)**：写侧门控 = `writeback_needed(ext, stack)`，与读侧同源；非 count-encoded 不触碰 bits22–24；扩展开+堆叠关行为逐位不变（R-45、R-46、R-47、R-49、R-65）。
 - **失败语义**：原版未按预测写 b（`post != pre` 且不等于预测）或目标槽对象被替换/释放 → fail-closed 跳过回写并记 `S2 writeback ... mismatch skip`，不猜测。
 - **Host 测试名(现有或「缺口」)**：`stage4_hook_tests::test_s2_writeback_gate`（已落地，真值表四组合）。
-- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-49`：①扩展关+堆叠开，两组 99 拖拽合并→显示/查询 198（日志 `S2 writeback MoveItem merge ... 99+99->198`）；②切堆叠关→读 70（b 视图，R-47 决策 b 既定语义），再切回→198；③扩展开+堆叠关同操作与原版逐位一致；④非可堆叠（装备/宝石）合并不触碰 bits22–24。
+- **真机用例号(编号规范 VM-xx，写操作步骤+预期)**：`VM-49`：①扩展关+堆叠开，两组 99 拖拽合并→显示/查询 198（日志 `S2 writeback MoveItem merge ... 99+99->198`）；②切堆叠关→读 70（b 段原值，R-47 决策 b 既定语义），再切回→198；③扩展开+堆叠关同操作时模块 S2 写回跳过、原版只写 b 且保留 a；④非可堆叠（装备/宝石）合并不触碰 bits22–24。
 - **证据锚类型**：真机必需 + 源码；不能由 Host 单独通过。
+- **插件审计批 2026-10-17 口径修订**：门控条件为 999 已应用，与扩展背包开关无关；关闭态跳过模块写回。新增真机证据在 VM-36 登记，不代表本卡全量 PASS。
 
 ### VM-50 容量上界与保存前校验（R-66）
 
@@ -869,9 +874,9 @@
 | R-44 | VM-15、VM-B01～VM-B04 | `test_original_only_queries` 与 `test_virtual_bag_transaction_domain` 覆盖 Host seam；真机 VM-15 核对跨域删除后源槽为空、事务提交且 health 持续可达。 |
 | R-45 | VM-32、VM-33、VM-34 | `test_stack_codec_s2` 断言 S2 拆段编解码往返、位保留与 clamp；`test_stack_codec_mode_invariance` 断言两态写入/解码一致；真机 VM-32 核对数量跨重启保持，VM-33 核对读侧 `128a+b` 解码展示与查询，VM-34 核对写侧创建/合并/消耗跨 127 进位与 `+0x10` 拆段位模式。 |
 | R-46 | VM-32、VM-33、VM-34 | `test_virtual_bag_json_count_clamp` 断言非可堆叠 payload 逐字节不变；`test_virtual_bag_payload_helpers` 保留装备/未知类别 no-op；读侧门控已落地（H-17 kEncoded-only），VM-33 核对装备/宝石/袋容量不受解码影响；写侧门控已落地（S2-P3：`patch_payload_count`/`data_op_add_item`/消耗写回三处 `item_count_encoding` 门控），VM-34 核对写点拒绝与非可堆叠 bits22–24 不变。 |
-| R-47 | VM-32、VM-35 | 关闭态高位保留无 Host 直接锚；真机 VM-32/VM-35 观察关闭期原版操作只作用低 7 位且 `a` 保留；Host `test_virtual_bag_cross_config_roundtrip` 断言跨配置读档不改写 payload。 |
+| R-47 | VM-32、VM-35、VM-36 | 关闭态读取为 b（0–127、不夹 99）；原版写只作用低 7 位且 `a` 保留，999 未应用时模块 S2 写回跳过；helper 写侧上限仍 99。VM-36 记载插件审计批新增真机证据，非该卡全量 PASS；Host `test_virtual_bag_cross_config_roundtrip` 断言跨配置读档不改写 payload。 |
 | R-48 | VM-32、VM-35 | `test_stack_codec_mode_invariance` 覆盖 99/127/128/217/999 两态写入/解码一致与切换模式不改值；`test_virtual_bag_cross_config_roundtrip` 覆盖 99/127/128/217/999 跨配置三往返与旧 `encodingVersion` 字段宽容忽略；无版本标识（sidecar 不写、读到即忽略）与读侧 getter 依赖真机（VM-32 步骤③④、VM-35 全流程）。 |
-| R-49 | VM-32、VM-33、VM-34 | 读侧 getter hook 已落地（S2-P2：`native_inventory_hook.cpp:get_cumulate_count_wrapper` → `inventory_hook_stage4.cpp:stage4_get_cumulate_count`，wrapper 门控 Host `test_get_cumulate_count_s2`）；真机 VM-33 核对 99/100/127/128/199/999 显示与查询解码，VM-32 覆盖读侧存档一致性；写侧调用方级门控与进位已落地（S2-P3：数量产生点统一 `s2_write_count`/`s2_clamp`，无统一 setter），VM-34 核对写侧。 |
+| R-49 | VM-32、VM-33、VM-34、VM-36 | 读侧 getter hook 已落地（S2-P2：`native_inventory_hook.cpp:get_cumulate_count_wrapper` → `inventory_hook_stage4.cpp:stage4_get_cumulate_count`，wrapper 门控 Host `test_get_cumulate_count_s2`）；999 未应用时读取 b（0–127、不夹 99），模块 S2 写回跳过、原版只写 b；应用后调用方级 S2 写回按 S2-P3 执行。VM-36 记载插件审计批新增真机复测，不代表相关卡全量 PASS。 |
 | R-51 | VM-37 | 重定向表 `g_stack_getter_redirect_patches` + `apply_s2_getter_redirects`（5 条 `mov x0,xN; bl ITEM_GetCumulateCount`）已落地；Host `test_sell_divide_s2_read_window` 断言 getter 两态解码等价与十位窗口伪修复反例；真机重定向安装日志已在部署流程取证，商店整堆/部分出售行为归 VM-37。装备页详情结算点 `0x1261c4` 当前不在表内（由 R-55 H-23 接管，归 VM-41）。 |
 | R-52 | VM-38 | `make_item_wrapper` 纯透传 + `stage4_make_item_writeback_count`（恒 0）已落地；Host `stage4_hook_tests::test_make_item_writeback_count` 覆盖掉落品质 2..5、商店 arg2=5 与边界；真机拾取/掉落数量归 VM-38。 |
 | R-53 | VM-39 | `adopt_merge_into`（model 纯函数）+ `virtual_bag_merge_native_item`（backup 前）+ `virtual_bag_adopt_native_item`（backup 失败后）合并前置查找已落地；Host `test_adopt_merge_plan` 覆盖同类合并/身份不同/上限/关闭态/非可堆叠；真机拾取（原版有空/满）归 VM-39。 |

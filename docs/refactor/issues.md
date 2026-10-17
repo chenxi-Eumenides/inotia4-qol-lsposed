@@ -154,6 +154,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | SL-05 | P3 | 停用期 `g_enabled` 与 Host status 可能分叉。 | 同上 §1；ENG-04 | 并入 ENG-04 处置，开放 |
 | SL-07 | P2 | 验收卡/规则册曾使用旧口径：6 条资源、插件拥有 S2、`stack_codec_impl.h`、重定向“常驻”。 | 同上 §1；`docs/refactor/verification.md` VM-P4-08/VM-P1-S2；`docs/refactor/extension-bag/rulebook.md` R-51 | 当前文档口径已由同批任务修订；不改写历史验收结论 |
 | SL-08 | P3 | 旧审计描述的 `g_provider` 裸指针已不存在，当前为静态 `const kFacade`。 | 同上 §1；INF-05 | 源码已变更，旧风险不再适用；待用户确认销账 |
+| SL-09 | P2 | 关闭态 `effective`/`view_from_canonical` 曾夹 99，导致 107 显示为 99。裁决 A3：关闭态读取 b（0–127）不夹 99；写回交还原版，`s2_writeback_gate` 要求 999 已应用。 | `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md` §1/§3 | 已由 `5013aba6` 修复；SL-09 专项真机 PASS，VM-P4-08/VM-P1-S2/VM-P6-01 整卡仍 NOT_ACCEPTED |
 
 ## 附录：已修复问题（存证）
 
@@ -198,3 +199,4 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | SL-03 | Host 常驻 `item_count` facade | facade 每次操作曾读取两次模式快照 | **已修复**（`e307fdce`）：每次操作只读一次模式快照；Host 用例覆盖，真机不适用。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
 | SL-06 | `stack_limit` descriptor / codec tests | 测试未覆盖真实 16 条 descriptor 与 codec 边界矩阵 | **已修复**：`6d05cddf`/`644d27f6` 补入对应测试；真机行为验收仍欠账，不能据 Host 用例宣告通过。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
 | SL-BITEND | Host 常驻 bitend claims | 两条存档 bitend 曾随 `stack_limit` 999 原子组撤销，且归属/掩码范围表述过宽 | **已修复**（`644d27f6`）：bitend ×2 迁为 Host 常驻；机制是袋槽容量掩码 `GetBitValue(24→21)`，不涵盖全部物品子项。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+| SL-09 | `stack_limit` 关闭态数量读/写 | `effective`/`view_from_canonical` 关闭态夹 99，导致 107 显示为 99 | **已修复**（`5013aba6`，裁决 A3）：关闭态读 b（0–127）不夹 99；写回由原版接管，`s2_writeback_gate` 要求 999 已应用。Host CTest 145/145；`check_arch.py`/`check_http_routes.py` 通过；Debug APK `output/inotia4_qol_lsposed_debug_2610172122_e17c53c5b138.apk`，SHA-256 `e17c53c5b138235b8f30c705d85e8511401d45141a0a846480ccc6efaa04f075`。用户真机（2026-10-17，集成包 SHA-256 `ed0400df25a4bef4df9104c5a149a8bf328a20c92e4a19e5080e41ca1f0dbf23`）专项四项 PASS：关闭 107→107、关闭 206→78、107 拆 1→106、206 拆 1→b 77（重开 canonical 205），重开数量不变。仅 SL-09 专项通过；VM-P4-08/VM-P1-S2/VM-P6-01 整卡仍 NOT_ACCEPTED。详情见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |

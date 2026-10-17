@@ -37,7 +37,7 @@
 
 ## 游戏内行为
 
-16 条资源 claim（`plugin.cpp:20-45`），统一字段：`ResourceMechanism::kCallPatch`、`ResourcePolicy::kPrivate`、`ResourceRequirement::kRequired`、`ResourceFailure::kFailClosed`、`resumable=true`、`owner="stack_limit"`、`gate=nullptr`、`step_budget=120`、`handler=nullptr`、`atomic=true`。失败原因文案为「999 数量组：S2 布局与数量上限必须整组安装，失败时回落原始 99 视图」（`plugin.cpp:17-18`）。
+16 条资源 claim（`plugin.cpp:20-45`），统一字段：`ResourceMechanism::kCallPatch`、`ResourcePolicy::kPrivate`、`ResourceRequirement::kRequired`、`ResourceFailure::kFailClosed`、`resumable=true`、`owner="stack_limit"`、`gate=nullptr`、`step_budget=120`、`handler=nullptr`、`atomic=true`。失败原因文案说明 999 数量组的 S2 布局与数量上限需整组安装（`plugin.cpp:17-18`）；未应用时的读取与写入语义见下文。
 
 站点实体在 `game/access/patches.cpp:60-100`，目标符号 VMA 来自 `game/symbols/game_symbols.h`，插件不持有裸地址。
 
@@ -66,7 +66,7 @@
 
 两处分别位于 `SAVE_SaveInventory+0x78` 与 `SAVE_LoadInventory+0xa8`，将 `UTIL_GetBitValue(bag_item+0x10, 24, 0)` 改为 `(21, 0)`。该调用返回袋容量，决定袋内物品 save/load 循环次数（`game/bag.md:46-58`）；袋容量实际值为 4/8/12/16（`:62-74`），bits22–24 恒为 0。收窄读取位段是为了避免 S2 的 `a`（bits22–24）被当作袋容量。
 
-S2 编码布局（`game/adapter_ports/item_count_codec.h`）：a 段 bits22–24、b 段 bits25–31，数量 = 128a+b，编码容量 1023（`item_count_codec.h:19-28`）。关闭态只读/写 b 段并保留 a 段与 bits0–21（`item_count_codec.h:60-70`）；上限 99/999（`item_count_codec.h:12-17`）。
+S2 编码布局（`game/adapter_ports/item_count_codec.h`）：a 段 bits22–24、b 段 bits25–31，数量 = 128a+b，编码容量 1023（`item_count_codec.h:19-28`）。999 未应用时，`effective`/`view_from_canonical` 读取 b 段（0–127，不夹 99）；`move`/`save`/`divide`/`consume`/`remove`/`borrow` 的模块 S2 写回跳过，由原版只写 b、保留 a。`write_effective`、`field_from_canonical`、`view_limit` 的关闭态写侧上限仍为 99；999 已应用时上限为 999（`item_count_codec.h:12-17`）。
 
 ## 使用的 Host SDK 与 Game 面
 
@@ -102,7 +102,7 @@ S2 编码布局（`game/adapter_ports/item_count_codec.h`）：a 段 bits22–24
 - 16 条插件 claim 全部 `kRequired + kFailClosed + atomic`：任一安装失败触发 `rollback_atomic_group` 逆序还原组内已 live/disabled 成员（`host/plugin_registry.cpp:1094-1143,1209-1226`），插件进入 `failed`。
 - 两条 Host 常驻 bitend claim 为 `kOptional + kFailSoft`、`atomic=false`；安装失败只记录 `QOL_LOG_WARN`，不阻断 boot，也不属于 `stack_limit` 原子组（`host/core_patches.cpp:43-73,97-112,182-188`）。
 - 请求开启但资源组未落地时，`sync_item_count_policy()` 置 `kNotReady`（`plugin_registry.cpp:1516-1535`）；不伪装为关闭，消费者读 `read_extended_mode` 得到 `NotReady`。
-- 插件资源组未安装时，6 条 clamp 与 10 条重定向缺席，数量读、写与上限回落原版 99 语义；Host 常驻 bitend 不随该组启停。
+- 插件资源组未安装时，6 条 clamp 与 10 条重定向缺席；关闭态读取返回 b 段（0–127，不夹 99），写操作按原版只写 b、保留 a，模块 S2 写回不执行。`write_effective`、`field_from_canonical` 与 `view_limit` 的关闭态写侧上限仍为 99；Host 常驻 bitend 不随该组启停。
 - `kApplied` 判据：无在途生命周期事务、status 为 `kEnabled`、`enabled` 为真、组内全部 atomic claim live（`plugin_registry.cpp:1516-1535`）。撤销事务一建立即退出 applied。
 
 ## 生命周期
