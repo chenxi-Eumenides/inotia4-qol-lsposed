@@ -360,8 +360,17 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 |---|---|---|
 | 实现 | **代码事实**：Host 分类注册表新增 `GameInfo`「游戏信息」priority -9，General/BasicOptimization 顺延为 -8/-7；设置页在「调试开关」之后、「基础设置」之前显示该分类，右栏不创建滚动列表或选项行，整屏居中绘制三行信息：`艾诺迪亚4 v1.3.2`、`Monster版 v29`、`QoL模块 v0.7.13`。 | 分类与绘制见 `host/features/production.cpp`、`plugins/settings/panels/settings.cpp`；信息区不写 Store、不创建子控件、不做命中测试，不改变 feature 生命周期。 |
 | 数据来源 | **代码事实**：`GameVariant` 的 `game_series_name()`/`version_label`/`known` 经 Game Host v2.4 尾接口 `game_identity.read` 读取，与 `/api/health` 的 `variant` 同源；宿主游戏 APK `versionName` 由启动期 Kotlin `PackageManager` 读取并经 `nativeSetSystemIdentity` 下发；模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4 或读取失败时首行仅显示游戏名、第二行显示「未知版本」。 | `contracts/game_host.h`、`game/adapter_ports/game_host_port.cpp`、`game/adapter_ports/system_port.{h,cpp}`、`ModuleRuntimeBootstrap.kt`；未新增 HTTP 端点。 |
-| Host/静态/Debug Gate | **PASS**：Host 全量 CTest `145/145` 通过（`.tmp/settings-game-info/ctest6.log`）；`check_arch.py` 四类检查全绿（`.tmp/settings-game-info/check-arch3.log`）、`check_jni.py` `163/163` 无违规（`.tmp/settings-game-info/check-jni.log`）；`git diff --check` 干净；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2610172137_ca149bbb1da2.apk`（SHA-256 `ca149bbb1da2…`）。 | 构建成功与 Host 通过不替代设备行为；`core_settings_config_store_tests` 复跑前需存在 `config-native-owner` 目录（既有测试夹具前提）。 |
+| Host/静态/Debug Gate | **PASS**：Host 全量 CTest `145/145` 通过（`.tmp/settings-game-info/ctest7.log`）；`check_arch.py` 四类检查全绿（`.tmp/c18-variant/check-arch.log`）、`check_jni.py` `163/163` 无违规（`.tmp/c18-variant/check-jni.log`）；`git diff --check` 干净；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2610172145_607b38beeb92.apk`（SHA-256 `607b38beeb92…`）。 | 构建成功与 Host 通过不替代设备行为；`core_settings_config_store_tests` 复跑前需存在 `config-native-owner` 目录（既有测试夹具前提）。 |
 | VM-GAMEINFO-01：真机分类与读数 | **NOT_ACCEPTED（未执行）**：未安装候选、未重启游戏、未打开设置页。 | 待核验：Debug 顺序为调试开关→游戏信息→基础设置，Release 游戏信息居首；monster v29 显示 `艾诺迪亚4 v1.3.2` / `Monster版 v29` / `QoL模块 v<当前版本>`；无滚动、无分割线、无选项行；信息区不可点击；Game Host 不可用时三行降级文案正常且页面可操作。 |
+
+### 5.21 C18 变体识别（2026-10-17；Host/静态/Debug 通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 识别实现 | **代码事实**：`艾诺迪亚4_C18_v0.2.apk` 的 arm64 `libgame.so` MD5 `4795c51d746ba097d0285a34de8ccad3` 已加入离线变体表；`GameSeries::kC18`、标签 `v0.2`、能力位 `0`。`/api/health` 的 `variant.series` 返回 `c18`，设置页「游戏信息」显示 `C18版 v0.2`。 | 识别方式与 monster 相同：按 libgame.so MD5 查表。C18 无隐藏可执行段、无 `WH4JRN01` 标记，能力位由 ELF 事实计算为 0，不复制 monster 的能力位。 |
+| 生成器与表 | **已重新生成**：`parse_series` 识别 C18；`SERIES_ORDER` 增加 `c18`；`PREFERRED_DUPLICATE_SOURCE` 的 monster v29 首选源更新为当前顶层 APK 路径；`game_variant_table.inc` 23 条，新增 `{GameSeries::kC18, "v0.2", 0x00000000u, {…4795c51d…}}`。 | 生成日志 `.tmp/c18-variant/generate2.log`；源清单变化仅为 APK 文件改名/移动后的确定性输出，既有条目 MD5、标签与能力位未变。 |
+| Host/静态/Debug Gate | **PASS**：`game_variant_tests` 覆盖 C18 表项与 `game_series_name("c18")`；Host 全量 CTest `145/145`（`.tmp/settings-game-info/ctest7.log`）；`check_arch.py` 全绿、`check_jni.py` `163/163`；`git diff --check` 干净；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2610172145_607b38beeb92.apk`（SHA-256 `607b38beeb92…`）。 | 构建与 Host 通过不替代设备行为。 |
+| VM-C18-01：真机识别 | **NOT_ACCEPTED（未执行）**：未安装候选、未重启游戏、未打开设置页。 | 待核验：安装 C18 集成包后 `/api/health` 返回 `series=c18`、`version=v0.2`、`known=true`、`capabilities=0`；设置页显示 `艾诺迪亚4 v1.3.2` / `C18版 v0.2` / `QoL模块 v<当前版本>`。 |
 
 ## 6. 待建立
 

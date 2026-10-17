@@ -69,7 +69,7 @@ CURATION = {
 
 # v28 and v29 ship the same libgame.so; retain the existing v29 runtime label.
 PREFERRED_DUPLICATE_SOURCE = {
-    "4c332e9b508b35fe1e97f1f26e56f04d": "apk/game-apk/history/艾诺迪亚4_monster_v29.apk",
+    "4c332e9b508b35fe1e97f1f26e56f04d": "apk/game-apk/艾诺迪亚4_monster_v29.apk",
 }
 
 # Preserve established runtime labels after the source APKs were renamed.
@@ -99,9 +99,12 @@ EXCLUDED_SOURCES = {
 # 文件名解析
 # ---------------------------------------------------------------------------
 def parse_series(name: str) -> str:
-    """系列：monster / overhaul(盗版大修) / original(原版) / unknown。"""
-    if "monster" in name.lower():
+    """系列：monster / c18 / overhaul(盗版大修) / original(原版) / unknown。"""
+    lower = name.lower()
+    if "monster" in lower:
         return "monster"
+    if "c18" in lower:
+        return "c18"
     if "盗版大修" in name:
         return "overhaul"
     if "原版" in name:
@@ -226,7 +229,7 @@ def collect() -> tuple[list[dict], list[str]]:
     return entries, sources
 
 
-SERIES_ORDER = {"original": 0, "overhaul": 1, "monster": 2, "unknown": 3}
+SERIES_ORDER = {"original": 0, "overhaul": 1, "monster": 2, "c18": 3, "unknown": 4}
 
 
 def md5_bytes_literal(hex32: str) -> str:

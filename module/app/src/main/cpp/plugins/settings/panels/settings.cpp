@@ -235,6 +235,7 @@ const char* series_display_name(const char* series) {
     if (std::strcmp(series, "original") == 0) return "原版";
     if (std::strcmp(series, "overhaul") == 0) return "盗版大修";
     if (std::strcmp(series, "monster") == 0) return "Monster版";
+    if (std::strcmp(series, "c18") == 0) return "C18版";
     return "未知版本";
 }
 void refresh_game_info() {

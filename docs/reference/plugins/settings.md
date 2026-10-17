@@ -34,7 +34,7 @@ descriptor 只注册一个 `page` entry feature：
 - 左栏「游戏信息」固定位于「调试开关」之后、「基础设置」之前；Release 隐藏「调试开关」时它是首个分类。
 - 右栏不使用滚动列表或选项行，整屏居中绘制三行信息：
   - `艾诺迪亚4 v<游戏 APK versionName>`（例如 `艾诺迪亚4 v1.3.2`）
-  - `<版本系列> <变体标签>`（例如 `Monster版 v29`；系列映射为 `原版` / `盗版大修` / `Monster版` / `未知版本`）
+  - `<版本系列> <变体标签>`（例如 `Monster版 v29`；系列映射为 `原版` / `盗版大修` / `Monster版` / `C18版` / `未知版本`）
   - `QoL模块 v<模块版本>`
 - 视觉层级：首行金色大字（font 1），第二行常规色大字（font 1），第三行暗色常规字（font 0）；三行在右栏内水平居中，行间距 44 逻辑单位。不绘制行分割线、行底色、toggle/entry 或信息区命中区。
 - 数据来源与 `/api/health` 的 `variant` 相同：Game Host v2.4 尾接口 `game_identity.read` 读取 `game_variant()` / `game_series_name()` / `GameVariant.version_label`；宿主游戏 APK `versionName` 由启动期 Kotlin `PackageManager` 读取后经 `nativeSetSystemIdentity` 下发，模块版本复用 Host SDK `module_version`。Game Host 缺失、minor < 4、版本名或身份未下发时首行仅显示游戏名、第二行显示「未知版本」，页面仍可打开。

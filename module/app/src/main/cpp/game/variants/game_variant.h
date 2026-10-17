@@ -13,6 +13,7 @@ enum class GameSeries : uint8_t {
     kOriginal,
     kOverhaul,
     kMonster,
+    kC18,
 };
 
 enum : uint32_t {
@@ -33,7 +34,7 @@ struct GameVariant {
 bool game_variant_init();
 // 未初始化时返回 {kUnknown, ...}。
 const GameVariant& game_variant();
-// "unknown" / "original" / "overhaul" / "monster"
+// "unknown" / "original" / "overhaul" / "monster" / "c18"
 const char* game_series_name(GameSeries s);
 
 namespace game_variant_detail {

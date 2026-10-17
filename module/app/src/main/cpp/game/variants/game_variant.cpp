@@ -299,6 +299,7 @@ const char* game_series_name(GameSeries s) {
         case GameSeries::kOriginal: return "original";
         case GameSeries::kOverhaul: return "overhaul";
         case GameSeries::kMonster: return "monster";
+        case GameSeries::kC18: return "c18";
     }
     return "unknown";
 }

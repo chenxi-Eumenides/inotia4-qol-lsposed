@@ -1399,7 +1399,7 @@
 - `ok`：服务存活，恒为 `true`（原有字段，语义不变）。
 - `ready`：native 侧 `NativeBridge.ready`。该端点经 `ControllerGuard` 校验后就绪才返回 200，因此成功响应中恒为 `true`，属诚实上报。
 - `variant`：当前 libgame.so 的变体查表结果（`{"series","version","known","capabilities"}`）。
-  - `series`：`unknown` / `original` / `overhaul` / `monster`。
+  - `series`：`unknown` / `original` / `overhaul` / `monster` / `c18`。
   - `version`：变体表内静态版本标签，可能为空串 `""`。
   - `known`：是否命中变体表。
   - `capabilities`：能力位十进制整数（bit0 隐藏段、bit1 WH4JRN01 仓库容器、bit2 内嵌 WH96v002 仓库段）。

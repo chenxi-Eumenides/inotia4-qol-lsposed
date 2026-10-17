@@ -81,6 +81,19 @@ static void test_lookup_real_entry() {
     }
 }
 
+static void test_lookup_c18_entry() {
+    // C18 v0.2 的实算 md5（同 monster 一样按 libgame.so 校验值识别）。
+    const uint8_t md5[16] = {0x47, 0x95, 0xc5, 0x1d, 0x74, 0x6b, 0xa0, 0x97,
+                             0xd0, 0x28, 0x5a, 0x34, 0xde, 0x8c, 0xca, 0xd3};
+    const qol::GameVariant* hit = qol::game_variant_detail::lookup(md5);
+    CHECK(hit != nullptr);
+    if (hit != nullptr) {
+        CHECK(hit->series == qol::GameSeries::kC18);
+        CHECK(std::strcmp(hit->version_label, "v0.2") == 0);
+        CHECK(hit->capabilities == 0);
+    }
+}
+
 static void test_lookup_miss() {
     const uint8_t absent[16] = {0};
     CHECK(qol::game_variant_detail::lookup(absent) == nullptr);
@@ -96,6 +109,7 @@ static void test_series_names() {
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kOriginal), "original") == 0);
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kOverhaul), "overhaul") == 0);
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kMonster), "monster") == 0);
+    CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kC18), "c18") == 0);
 }
 
 static void test_uninitialized_default() {
@@ -110,6 +124,7 @@ int main() {
     test_md5_incremental_matches_single_shot();
     test_md5_hex_equals();
     test_lookup_real_entry();
+    test_lookup_c18_entry();
     test_lookup_miss();
     test_classify_fallback();
     test_series_names();
