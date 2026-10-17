@@ -143,9 +143,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 
 ## 11. 功能插件（push_all / world_teleport）（开放）
 
-| ID | 级 | 问题 | 证据 | 状态 |
-|---|---|---|---|---|
-| WT-06 | P2 | `world_teleport` 必需端口 `QOL_PORT_CHOICE` 唯一用途是读 `state_id` 写日志且忽略结果；诊断依赖却阻断 install。该端口是原生 UICHOICE 的低层读写面，属控件 owner `core.custom_ui`；对外应只有 `ui_choice` 能力 | `plugins/world_teleport/plugin.cpp:59-62,72-81`、`plugins/world_teleport/feature.cpp:179-183`、`contracts/ui_choice.h:36-40` | **已裁决（2026-10-17，延后）**：由 `core.ui_state` 新增**程序化 UI 查询接口**（当前 UI 栈 + 每层 id/类型：对话框/面板/其他），`world_teleport` 改从该接口取诊断信息并移除 `QOL_PORT_CHOICE` 必需依赖。属跨插件契约变更，待当前插件其余修改实测提交后单独成批。PSH-02/03、WT-01/02/03/04/05/07 已于 `a26a97a7` 修复，见附录 |
+（无开放项）
 
 ## 附录：已修复问题（存证）
 
@@ -186,3 +184,4 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | WT-01/WT-02 | world_teleport | 直接消费聚合 `QolGameHost::world_action`；未校验 Game Host ABI | **已修复**（`a26a97a7`，WT-01 选 B）：新增私有 `QOL_PORT_WORLD_ACTION`（契约 + provider + registry 私有约束），插件脱离 `ctx.game`；WT-02 的 `g_game->abi` 校验随依赖删除而取代，版本保障由端口 `abi_version` 承担。残留：`extension_bag` 仍用 `cancel_tutorial`（另行裁决） |
 | WT-03/WT-04 | world_teleport | 扣费后切图失败无退款、`create_yesno` 结果被忽略；停用后已排队任务仍可执行 | **已修复**（`a26a97a7`，WT-03 选 B）：切图失败 `add_money(cost)` 退款并提示（退款失败单独提示）；`create_yesno` 失败不记已打开；`invalidate_operations()` 停用代次使帧任务与游戏回调失效 |
 | WT-05/WT-07 | world_teleport | `target_map_id` 溢出；状态/业务测试缺口 | **已修复**（`a26a97a7`）：`int64_t` 计算 + 越界 fail-closed；状态测试驱动真实 descriptor，补退款/停用/余额不足/无效目标用例，删除未接入的 `InstallDisposition`。host 145/145；真机点击小地图传送 PASS。登记见 `docs/refactor/audits/plugin-audit/world-teleport-20261017/verification-log.md` |
+| WT-06 | `core.ui_state` / `world_teleport` | 诊断依赖 `QOL_PORT_CHOICE` 会阻断 `world_teleport` install | **已修复**（`2140e9d3`）：`ui.state` 升至 v1.1 并新增 `read_layers`，按栈顶至栈底回调 UI 层 id/type；`world_teleport` 移除必需的 `QOL_PORT_CHOICE`，改用可选 `ui.state` 记录顶层诊断。Host 145/145；真机待验。验收记录见 `docs/refactor/audits/plugin-audit/world-teleport-20261017/verification-log.md`。 |
