@@ -372,6 +372,13 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Host/静态/Debug Gate | **PASS**：`game_variant_tests` 覆盖 C18 表项与 `game_series_name("c18")`；Host 全量 CTest `145/145`（`.tmp/settings-game-info/ctest7.log`）；`check_arch.py` 全绿、`check_jni.py` `163/163`；`git diff --check` 干净；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL → `output/inotia4_qol_lsposed_debug_2610172145_607b38beeb92.apk`（SHA-256 `607b38beeb92…`）。 | 构建与 Host 通过不替代设备行为。 |
 | VM-C18-01：真机识别 | **NOT_ACCEPTED（未执行）**：未安装候选、未重启游戏、未打开设置页。 | 待核验：安装 C18 集成包后 `/api/health` 返回 `series=c18`、`version=v0.2`、`known=true`、`capabilities=0`；设置页显示 `艾诺迪亚4 v1.3.2` / `C18版 v0.2` / `QoL模块 v<当前版本>`。 |
 
+### 5.10 inventory_hooks 审阅遗留（2026-10-18）
+
+| 债务 | 当前事实 | 清除条件 |
+|---|---|---|
+| IH-06 半写保护 | `MoveItem`/`RemoveItemData`/`Divide` 的原版失败返回值语义未冻结，当前只在可确认路径回写 | 逆向确认返回语义并补失败注入用例；登记 `issues.md` §13 |
+| G-2 FindItem in-flight | Game Host 替换后的 FindItem handler 未登记 in-flight；`g_game_host` 为静态初始化快照，需宿主层注入 | 宿主初始化顺序改造 + release 等待测试；登记 `issues.md` §13 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |
