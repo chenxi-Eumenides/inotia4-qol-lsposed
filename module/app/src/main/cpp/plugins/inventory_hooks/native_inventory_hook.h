@@ -45,6 +45,11 @@ NativeOnModuleLoaded native_init(const NativeAPIEntries* entries);
 // ---------------------------------------------------------------------------
 namespace s2_writeback {
 
+// S2 writeback is owned by the applied 999 feature and encoded item classes only.
+inline bool allowed(bool extended_applied, bool count_encoded) {
+    return extended_applied && count_encoded;
+}
+
 // original-only 写后确认：post 与 pre 不同、且恰好等于原版对 new_count 的 b 写
 // 结果时，才认定「原版确实执行了该次数量写」。post == pre（含 delta≡0 mod 128
 // 的退化与原版拒绝合并）一律 fail-closed 跳过，不得凭相等推断写发生。

@@ -69,7 +69,10 @@ QolResult effective(const void* item, uint32_t* out_count) {
     uint32_t raw = 0;
     if (!read_item_count_field(item, &raw)) return not_ready();
     const uint32_t canonical_count = codec::s2_read_count(raw);
-    *out_count = codec::effective_clamp(codec::effective_view_count(canonical_count, usable), usable);
+    // 关闭态读取原始 b 段（0–127），不套用写入上限 99；关闭态写回由调用方跳过，
+    // 交还原版只写 b，模块不回写 a+b。
+    *out_count = usable ? codec::effective_clamp(canonical_count, true)
+                        : codec::effective_view_count(canonical_count, false);
     return contracts::ok();
 }
 

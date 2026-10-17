@@ -402,13 +402,13 @@ bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
     return false;
 }
 
-// S2 写侧回写总门控（R-46 fail-closed + R-47 门控对齐）：堆叠上限开启即需要写侧
-// 进位（与读侧 getter 门控 stack_limit_enabled 对齐）；对象有效且 count-encoded。
+// S2 写侧回写总门控（R-46 fail-closed + feature 门控对齐）：999 原子组必须已应用，
+// 且对象有效并为 count-encoded。
 // kUnknown 与非可堆叠（装备 marker、宝石选项
-// bits18–23、袋容量 bits0–24）一律返回 false，调用方保持原版行为；堆叠上限关闭态按
-// R-47 决策 b 以模式视图（b 域）参与取证与回写，facade 只写当前模式视图并保留不可见段。
+// bits18–23、袋容量 bits0–24）、关闭态与 NotReady 一律返回 false，调用方保持原版行为。
 bool s2_writeback_gate(void* item) {
-    return item != nullptr && item_count_is_encoded(item);
+    return item != nullptr && s2_writeback::allowed(item_count_extended_applied(),
+                                                    item_count_is_encoded(item));
 }
 
 // 加/合并类取证（backup 前采集，backup 后确认回写）。
@@ -436,7 +436,7 @@ void s2_capture_merge(void* moved_item, int bag, int slot, int32_t delta, S2Merg
     cap->bag = bag;
     cap->slot = slot;
     cap->pre_field = read_count_field(occupant);
-    // 模式视图旧全量（R-47 决策 b）：启用态 128a+b，关闭态只读 b。
+    // gate 保证 999 原子组已应用，此处读取完整 128a+b。
     if (!item_count_effective(occupant, &cap->pre_full)) {
         cap->armed = false;
         return;
@@ -452,6 +452,7 @@ void s2_capture_merge(void* moved_item, int bag, int slot, int32_t delta, S2Merg
 void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
     if (!cap.armed) return;
     if (s2_physical_slot_item(cap.bag, cap.slot) != cap.target) return;
+    if (!s2_writeback_gate(cap.target)) return;
     const uint32_t post_field = read_count_field(cap.target);
     if (post_field == cap.pre_field) {
         if ((cap.delta % 128) == 0) {
@@ -468,7 +469,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
                             op, cap.target, cap.pre_field, post_field, cap.new_full);
         return;
     }
-    // facade 在 gate 关闭时执行原始 b 语义；provider 未就绪时保留 backup 的原始写入。
+    // gate 未通过时不进入本写回；关闭态由原版写 b，模块不回写 a+b。
     const ItemCountWriteResult write_result =
         item_count_write_effective(cap.target, cap.new_full);
     if (write_result == ItemCountWriteResult::kNotReady) return;
@@ -533,8 +534,8 @@ int get_item_count_wrapper(int32_t category) {
 }
 
 // S2 读侧统一入口（R-49）：原版 getter 只见 b 段（bits25–31），本 wrapper 对
-// count-encoded 类别按模式视图解码（R-45/R-47 决策 b：启用态 `count=128a+b`、
-// 关闭态只读 b）。门控判据沿用 R-40/R-41 的单源谓词 item_count_encoding，
+// count-encoded 类别按模式视图解码（启用态 `count=128a+b`，关闭态只读 b 且不夹 99）。
+// 门控判据沿用 R-40/R-41 的单源谓词 item_count_encoding，
 // 判定不可用（kUnknown）时 fail-closed 直通 backup（R-46）；非可堆叠（装备
 // marker/宝石选项/袋容量）不解释 bits22–24，一律 original-first。纪律：backup
 // 是纯读原版函数（UTIL_GetBitValue/MEM_ReadUint8，反汇编 0x106094–0x106124
@@ -606,9 +607,7 @@ void consume_item_wrapper(void* item) {
     // backup 前把 b 预置为 2（a 与低位原样），原版按 b=2>1 走 b-1 递减写 b=1；
     // 返回后确认预置生效再回写 a+b=full-1，失败则还原预置字段。b≥2 时原版递减
     // 天然正确不写；全量≤1 时删除即原版语义，不拦。
-    // 堆叠上限关闭态（R-47 决策 b）不预置借位：有效数量就是 b，b≤1 时消耗到
-    // 空按原版删除即关闭态语义（不为了保留 a 而让有效数量 0 的堆无法消耗）；
-    // b≥2 的原版递减只写 b，a 保留不变。
+    // 关闭态与 NotReady 不进入 S2 写侧；原版按 b 执行消耗/删除，模块不预置或回写 a+b。
     bool s2_borrow_armed = false;
     int borrow_bag = -1;
     int borrow_slot = -1;
@@ -649,7 +648,7 @@ void consume_item_wrapper(void* item) {
                                 "S2 writeback ConsumeItem borrow item removed unexpectedly "
                                 "item=%p bag=%d slot=%d pre_full=%u",
                                 item, borrow_bag, borrow_slot, borrow_pre_full);
-        } else {
+        } else if (s2_writeback_gate(item)) {
             const uint32_t post_field = read_count_field(item);
             if (s2_writeback::original_count_write_confirmed(item_count_api(), borrow_pre_field,
                                                              post_field, 1)) {
@@ -750,8 +749,8 @@ int save_item_wrapper(void* item) {
 
 // ---- S2 写侧进位框架新增 hook（H-18..H-20）----
 // 共同纪律：original-first、失败/不确定回退原版结果；wrapper 不取
-// g_virtual_bag_mtx、不调用任何被 Hook 函数（R-44）；类别门控 fail-closed
-//（R-46），回写按模式视图（R-47 决策 b：启用态全量 a+b、关闭态只写 b 保留 a）。
+// g_virtual_bag_mtx、不调用任何被 Hook 函数（R-44）；类别与 999 应用态门控 fail-closed。
+// 仅 999 已应用时模块回写 a+b；关闭态交还原版只写 b。
 
 int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
@@ -787,13 +786,13 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
     uint32_t pre_full = 0;
     if (gate) {
         pre_field = read_count_field(item);
-        // 模式视图旧全量（R-47 决策 b）：启用态 128a+b，关闭态只读 b。
+        // gate 保证 999 原子组已应用，此处读取完整 128a+b。
         if (!item_count_effective(item, &pre_full)) gate = false;
     }
     void* new_item = g_backup_item_system_divide == nullptr
         ? nullptr : g_backup_item_system_divide(item, count);
     if (!gate || new_item == nullptr) return new_item;
-    if (pre_full > static_cast<uint32_t>(count)) {
+    if (pre_full > static_cast<uint32_t>(count) && s2_writeback_gate(item)) {
         // 源堆保留剩余（不释放），此读安全；整堆拆分（pre_full==count）时
         // 原版可能已释放源对象，不做任何源堆触磁。
         const uint32_t post_field = read_count_field(item);
@@ -861,7 +860,7 @@ struct S2RemoveDataCapture {
 void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture* cap) {
     cap->armed = false;
     cap->entry_count = 0;
-    if (category < 0 || count <= 0) return;
+    if (category < 0 || count <= 0 || !item_count_extended_applied()) return;
     for (int bag = 0; bag < kInvenPhysicalBagCount; ++bag) {
         for (int slot = 0; slot < kInvenSlotsPerBag; ++slot) {
             void* item = s2_physical_slot_item(bag, slot);
@@ -886,12 +885,12 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
     cap->armed = cap->entry_count > 0;
 }
 
-// backup 后重扫 + 修正：消失堆（整删）只求和；唯一缩减堆经
+// 999 已应用时，backup 后重扫 + 修正：消失堆（整删）只求和；唯一缩减堆经
 // stage4_remove_item_data_plan 计算 remain，post 与快照不一致（b 截断或旧 a
-// 残留）时按模式视图回写 a+b。失败/矛盾一律 fail-closed 保持原版结果并记日志。
+// 残留）时回写 a+b。关闭态由原版只写 b，模块跳过此修正；失败/矛盾一律 fail-closed。
 void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
                               int32_t count) {
-    if (!cap.armed) return;
+    if (!cap.armed || !item_count_extended_applied()) return;
     if (count <= 0) return;
     Stage4RemoveDataEntry pre[kS2RemoveDataMaxEntries] = {};
     Stage4RemoveDataPost post[kS2RemoveDataMaxEntries] = {};

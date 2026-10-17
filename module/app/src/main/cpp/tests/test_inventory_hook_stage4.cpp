@@ -1,4 +1,5 @@
 #include "plugins/inventory_hooks/inventory_hook_stage4.h"
+#include "plugins/inventory_hooks/native_inventory_hook.h"
 #include "plugins/extension_bag/extension_bag_equip_rules.h"
 
 #include "game/symbols/game_symbols.h"
@@ -13,6 +14,13 @@ static int g_fail = 0;
     if (cond) ++g_pass; \
     else { ++g_fail; std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } \
 } while (0)
+
+static void test_s2_writeback_applied_gate() {
+    // Off 与 NotReady 都映射为 applied=false，故关闭态只由原版写 b，模块不回写 a+b。
+    CHECK(!s2_writeback::allowed(false, true));
+    CHECK(!s2_writeback::allowed(true, false));
+    CHECK(s2_writeback::allowed(true, true));
+}
 
 static int g_original_value = 0;
 static int g_extension_value = 0;
@@ -355,8 +363,7 @@ static QolResult fake_conversion_view(uint32_t canonical, int32_t extended,
     if (extended != 0) {
         *out_view = canonical > 999u ? 999u : canonical;
     } else {
-        const uint32_t view = canonical % 128u;
-        *out_view = view > 99u ? 99u : view;
+        *out_view = canonical % 128u;
     }
     return qol::contracts::ok();
 }
@@ -554,6 +561,7 @@ static void test_vanilla_sell_takeover() {
 }
 
 int main() {
+    test_s2_writeback_applied_gate();
     test_queries();
     test_original_only_queries();
     test_get_cumulate_count_facade();

@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-// S2 数量编码（a 段 bits22–24、b 段 bits25–31，数量 = 128a+b）与 99/999 有效视图的纯
-// 转换。adapter 私有实现：S2 的编解码语义属于 Game Adapter 常驻数量 seam，插件不得
+// S2 数量编码（a 段 bits22–24、b 段 bits25–31，数量 = 128a+b）与读视图/写上限的纯转换。
+// 关闭态读视图只取 b（0..127）；写转换仍受 99 上限约束。adapter 私有实现：插件不得
 // include 本头，也不持有编码布局。所有函数为 constexpr，不读游戏对象、不依赖 mode。
 
 namespace qol::game {
@@ -87,7 +87,7 @@ constexpr uint32_t canonical_from_field(uint32_t field) { return s2_read_count(f
 
 constexpr uint32_t view_from_canonical(uint32_t canonical, bool extended) {
     return extended ? effective_clamp(canonical, true)
-                    : effective_clamp(canonical & ((1u << kS2BitsB) - 1u), false);
+                    : (canonical & ((1u << kS2BitsB) - 1u));
 }
 
 constexpr uint32_t view_limit(bool extended) { return max_count(extended); }

@@ -52,9 +52,11 @@ void assert_closed_state_semantics() {
     const uint32_t opened = codec::effective_write_count(field, 300u, true);
     assert(codec::s2_read_count(opened) == 300u);
 
-    // effective 视图：关闭态取 b 段并 clamp 99；开启态 clamp 999。
+    // 读视图关闭态取原始 b 段；写上限仍为 99，启用态视图上限为 999。
     assert(codec::effective_view_count(5u * 128u + 77u, false) == 77u);
     assert(codec::effective_view_count(5u * 128u + 77u, true) == 5u * 128u + 77u);
+    assert(codec::view_from_canonical(107u, false) == 107u);
+    assert(codec::view_from_canonical(206u, false) == 78u);
     assert(codec::effective_clamp(200u, false) == 99u);
     assert(codec::effective_clamp(200u, true) == 200u);
     assert(codec::effective_clamp(2000u, true) == 999u);
@@ -68,17 +70,20 @@ void assert_field_and_view_conversions() {
     for (uint32_t value : canonical_values) {
         for (bool extended : {false, true}) {
             const uint32_t converted = codec::field_from_canonical(field, value, extended);
-            const uint32_t view = extended ? (value > 999u ? 999u : value)
-                                           : (value % 128u > 99u ? 99u : value % 128u);
+            const uint32_t write_view = extended ? (value > 999u ? 999u : value)
+                                                 : (value % 128u > 99u ? 99u : value % 128u);
             const uint32_t expected = extended
-                                          ? (field & ~(kMaskA | kMaskB)) |
-                                                (((view >> 7) & 0x7u) << codec::kS2ShiftA) |
-                                                ((view & 0x7fu) << codec::kS2ShiftB)
-                                          : (field & ~kMaskB) | ((view & 0x7fu) << codec::kS2ShiftB);
+                                           ? (field & ~(kMaskA | kMaskB)) |
+                                                 (((write_view >> 7) & 0x7u) << codec::kS2ShiftA) |
+                                                 ((write_view & 0x7fu) << codec::kS2ShiftB)
+                                           : (field & ~kMaskB) |
+                                                 ((write_view & 0x7fu) << codec::kS2ShiftB);
             assert(converted == expected);
             if (!extended) assert((converted & ~kMaskB) == (field & ~kMaskB));
 
-            assert(codec::view_from_canonical(value, extended) == view);
+            const uint32_t read_view = extended ? (value > 999u ? 999u : value)
+                                                : (value & 0x7fu);
+            assert(codec::view_from_canonical(value, extended) == read_view);
         }
     }
 
@@ -113,16 +118,18 @@ void assert_boundary_matrix() {
             assert(clamped == (value > (extended ? 999u : 99u)
                                    ? (extended ? 999u : 99u)
                                    : value));
-            const uint32_t expected_view = extended
-                                               ? codec::s2_clamp(value, true)
-                                               : codec::s2_clamp(codec::s2_split_b(value), false);
+            const uint32_t expected_view = extended ? codec::s2_clamp(value, true)
+                                                    : codec::s2_split_b(value);
+            const uint32_t write_view = extended
+                                            ? codec::s2_clamp(value, true)
+                                            : codec::s2_clamp(codec::s2_split_b(value), false);
             const uint32_t converted = codec::field_from_canonical(field, value, extended);
             assert((converted & kBits0To21) == (field & kBits0To21));
             if (!extended) assert((converted & ~kMaskB) == (field & ~kMaskB));
             assert(codec::canonical_from_field(converted) ==
-                   (extended ? expected_view
+                   (extended ? write_view
                              : codec::s2_combine(codec::s2_split_a(codec::s2_read_count(field)),
-                                                 expected_view)));
+                                                 write_view)));
             assert(codec::view_from_canonical(value, extended) == expected_view);
         }
     }

@@ -64,20 +64,23 @@ void assert_pure_conversion_contract() {
         for (int32_t extended : {0, 1, -1}) {
             uint32_t converted = 0;
             assert(api.field_from_canonical(field, value, extended, &converted).ok == 0);
-            const uint32_t view = extended == 0 ? (value % 128u > 99u ? 99u : value % 128u)
-                                                : (value > 999u ? 999u : value);
+            const uint32_t write_view = extended == 0
+                                            ? (value % 128u > 99u ? 99u : value % 128u)
+                                            : (value > 999u ? 999u : value);
             const uint32_t expected = extended == 0
-                                          ? (field & ~kMaskB) | ((view & 0x7fu) << 25)
+                                          ? (field & ~kMaskB) | ((write_view & 0x7fu) << 25)
                                           : (field & ~(kMaskA | kMaskB)) |
-                                                (((view >> 7) & 0x7u) << 22) |
-                                                ((view & 0x7fu) << 25);
+                                                (((write_view >> 7) & 0x7u) << 22) |
+                                                ((write_view & 0x7fu) << 25);
             assert(converted == expected);
             // 关闭态写只动 b 段，a 段与 bits0–21 原样保留。
             if (extended == 0) assert((converted & ~kMaskB) == (field & ~kMaskB));
 
             uint32_t round_view = 0;
             assert(api.view_from_canonical(value, extended, &round_view).ok == 0);
-            assert(round_view == view);
+            const uint32_t expected_read_view = extended == 0 ? (value & 0x7fu)
+                                                              : (value > 999u ? 999u : value);
+            assert(round_view == expected_read_view);
         }
     }
 
@@ -185,6 +188,18 @@ void assert_state_transition_behavior() {
 
         const bool applied = mode == ItemCountExtendedMode::kApplied;
         assert(read_mode.ok == 0 && extended == (applied ? 1u : 0u));
+        const uint32_t canonical_values[] = {107u, 206u, 127u, 1u, 999u, 1000u};
+        for (uint32_t canonical : canonical_values) {
+            item_field() = codec::s2_write_count(kField, canonical);
+            const uint32_t expected = applied ? (canonical > 999u ? 999u : canonical)
+                                              : (canonical & 0x7fu);
+            uint32_t count = 0;
+            assert(api.effective(g_item, &count).ok == 0 && count == expected);
+            uint32_t view = 0;
+            assert(api.view_from_canonical(canonical, applied ? 1 : 0, &view).ok == 0);
+            assert(view == expected);
+        }
+        item_field() = kField;
         uint32_t effective = 0;
         assert(api.effective(g_item, &effective).ok == 0);
         assert(effective == (applied ? kOffCanonical : 72u));
