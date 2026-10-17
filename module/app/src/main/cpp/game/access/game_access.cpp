@@ -525,8 +525,9 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     // 日志 sink 未初始化时发出的日志会被丢弃。
     // 表匹配用磁盘上的 so 文件 md5，不受模块内存补丁影响，故无需先于补丁执行。
     qol::game_variant_init();
-    // 启动期常驻指令 patch（S2 位段缩窄/直接位读重定向/上限 clamp/monster 兼容/hub 登录
-    // 跳过）由 host 注入的 core_patches 一次声明式安装。必需步骤失败 = fail-closed：
+    // 启动期常驻指令 patch（bitend ×2 存档位段守卫、monster 兼容、hub 登录跳过）由 host
+    // 注入的 core_patches 安装；直接位读重定向与上限 clamp 由 plugins/stack_limit 的 999 原子组
+    // 按 feature 生命周期安装。必需步骤失败 = fail-closed：
     // bridge 不就绪且清 g_base（与旧 apply_fixed_stack_layout 失败分支同语义）。
     if (g_boot_patch_hook == nullptr || !g_boot_patch_hook()) {
         g_bridge_ready.store(false, std::memory_order_release);

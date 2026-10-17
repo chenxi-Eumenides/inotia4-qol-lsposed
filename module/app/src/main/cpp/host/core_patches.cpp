@@ -13,8 +13,8 @@
 #include "hooks/registry.h"
 #include "patch/instr_patch.h"
 
-// 本文件只保留宿主兼容 patch。S2 数量布局、直接位读重定向与 clamp 全部由
-// plugins/stack_limit 的 999 原子组声明，避免 boot 阶段把数量功能变成 fatal 依赖。
+// 本文件保留宿主常驻兼容 patch；bitend ×2 存档位段守卫归 host 常驻，clamp/重定向仍归
+// plugins/stack_limit 的 999 原子组，避免 boot 阶段把数量功能变成 fatal 依赖。
 
 namespace qol::host {
 namespace {
@@ -22,6 +22,7 @@ namespace {
 constexpr const char* kOwner = "host";
 constexpr const char* kReason = "Hive 登录跳过";
 constexpr const char* kHubClaimId = "P_HUB_LOGIN_SKIP";
+constexpr const char* kBitendReason = "999 数量组存档位段守卫（常驻）";
 
 const contracts::ResourceClaim kHubClaim{
     kHubClaimId,
@@ -33,6 +34,38 @@ const contracts::ResourceClaim kHubClaim{
     true,
     kOwner,
     kReason,
+    nullptr,
+    120,
+    nullptr,
+    false,
+};
+
+const contracts::ResourceClaim kSaveInventoryBitendClaim{
+    "P_SAVE_SAVE_INVENTORY_BITEND",
+    "P_SAVE_SAVE_INVENTORY_BITEND",
+    contracts::ResourceMechanism::kCallPatch,
+    contracts::ResourcePolicy::kPrivate,
+    contracts::ResourceRequirement::kOptional,
+    contracts::ResourceFailure::kFailSoft,
+    true,
+    kOwner,
+    kBitendReason,
+    nullptr,
+    120,
+    nullptr,
+    false,
+};
+
+const contracts::ResourceClaim kLoadInventoryBitendClaim{
+    "P_SAVE_LOAD_INVENTORY_BITEND",
+    "P_SAVE_LOAD_INVENTORY_BITEND",
+    contracts::ResourceMechanism::kCallPatch,
+    contracts::ResourcePolicy::kPrivate,
+    contracts::ResourceRequirement::kOptional,
+    contracts::ResourceFailure::kFailSoft,
+    true,
+    kOwner,
+    kBitendReason,
     nullptr,
     120,
     nullptr,
@@ -58,6 +91,23 @@ bool install_hub() {
     }
     hooks::set_state(kHubClaim.id, contracts::ResourceState::kLive);
     hooks::runtime_set(kHubClaim.id, site.addr, nullptr);
+    return true;
+}
+
+bool install_bitend(const contracts::ResourceClaim& claim) {
+    qol::game::PatchSite site{};
+    if (!qol::game::patch_site(claim.symbol, &site)) {
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches: bitend site not found: %s", claim.symbol);
+        return false;
+    }
+    const qol::patch::Outcome outcome = qol::patch::install_claim(claim, site.addr);
+    if (outcome.ok != 0) {
+        QOL_LOG_WARN(QolDomain::kCore, "core_patches: bitend install failed %s: %s", claim.id,
+                     outcome.error != nullptr ? outcome.error : "?");
+        return false;
+    }
+    hooks::set_state(claim.id, contracts::ResourceState::kLive);
+    hooks::runtime_set(claim.id, site.addr, nullptr);
     return true;
 }
 
@@ -130,7 +180,11 @@ bool core_patches_install() {
     }
 
     hooks::register_claim(kHubClaim);
+    hooks::register_claim(kSaveInventoryBitendClaim);
+    hooks::register_claim(kLoadInventoryBitendClaim);
     (void)install_hub();
+    (void)install_bitend(kSaveInventoryBitendClaim);
+    (void)install_bitend(kLoadInventoryBitendClaim);
     apply_monster_compat();
     g_installed.store(true, std::memory_order_release);
     g_installing.store(false, std::memory_order_release);

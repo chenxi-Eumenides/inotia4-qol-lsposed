@@ -1,4 +1,4 @@
-// stack_limit 清单与生命周期边界：18 条无 gate 原子资源、单个 default-false feature、
+// stack_limit 清单与生命周期边界：16 条无 gate 原子资源、单个 default-false feature、
 // install/deactivate 只做自身初始化；S2 codec 与扩展模式策略归 Host 常驻 adapter。
 
 #include "plugins/stack_limit/plugin.h"
@@ -50,7 +50,7 @@ int main() {
     const qol::contracts::PluginDescriptor& descriptor =
         qol::features::stack_limit::plugin_descriptor();
     assert(std::strcmp(descriptor.id, "stack_limit") == 0);
-    assert(descriptor.resources_count == 18);
+    assert(descriptor.resources_count == 16);
     assert(descriptor.provides_count == 0 && descriptor.provides == nullptr);
     assert(descriptor.feature_count == 1 && descriptor.features != nullptr);
     assert(std::strcmp(descriptor.features[0].id, "stack_limit.limit_999") == 0);
@@ -64,8 +64,6 @@ int main() {
         "P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0",
         "P_INVEN_SAVE_ITEM_DATA_CLAMP_7C",
         "P_INVEN_FIND_SAVE_SLOT_CLAMP_238",
-        "P_SAVE_SAVE_INVENTORY_BITEND",
-        "P_SAVE_LOAD_INVENTORY_BITEND",
         "P_UISTORE_BUTTON_SELL_EXE_D18D0_ARG",
         "P_UISTORE_BUTTON_SELL_EXE_D18D0_CALL",
         "P_UISTORE_BUTTON_SELL_EXE_D18E8_ARG",
@@ -77,10 +75,29 @@ int main() {
         "P_ITEMSYSTEM_DIVIDE_10848C_ARG",
         "P_ITEMSYSTEM_DIVIDE_10848C_CALL",
     };
+    static const char* kCallArgPairs[][2] = {
+        {"P_UISTORE_BUTTON_SELL_EXE_D18D0_CALL", "P_UISTORE_BUTTON_SELL_EXE_D18D0_ARG"},
+        {"P_UISTORE_BUTTON_SELL_EXE_D18E8_CALL", "P_UISTORE_BUTTON_SELL_EXE_D18E8_ARG"},
+        {"P_UISTORE_SELL_ITEM_D26B8_CALL", "P_UISTORE_SELL_ITEM_D26B8_ARG"},
+        {"P_ITEMSYSTEM_DIVIDE_108458_CALL", "P_ITEMSYSTEM_DIVIDE_108458_ARG"},
+        {"P_ITEMSYSTEM_DIVIDE_10848C_CALL", "P_ITEMSYSTEM_DIVIDE_10848C_ARG"},
+    };
+    for (uint32_t pair = 0; pair < sizeof(kCallArgPairs) / sizeof(kCallArgPairs[0]); ++pair) {
+        bool has_call = false;
+        bool has_arg = false;
+        for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
+            const char* id = descriptor.resources[i].id;
+            has_call = has_call || std::strcmp(id, kCallArgPairs[pair][0]) == 0;
+            has_arg = has_arg || std::strcmp(id, kCallArgPairs[pair][1]) == 0;
+        }
+        assert(has_call && has_arg);
+    }
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         const qol::contracts::ResourceClaim& claim = descriptor.resources[i];
+        assert(std::strstr(claim.id, "BITEND") == nullptr);
         assert(std::strcmp(claim.id, kIds[i]) == 0);
         assert(claim.mechanism == ResourceMechanism::kCallPatch);
+        assert(claim.policy == qol::contracts::ResourcePolicy::kPrivate);
         assert(claim.requirement == ResourceRequirement::kRequired);
         assert(claim.failure == ResourceFailure::kFailClosed);
         assert(claim.resumable);
