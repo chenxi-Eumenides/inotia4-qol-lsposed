@@ -3,7 +3,7 @@
 // 扩展背包声明式资源桥（D2a-3b-1）。
 //
 // 与 inventory_hooks 同构：wrapper / OwnershipOps 业务体仍在 plugins/extension_bag
-// （本桥实现收口在 game_ui_virbag.cpp 尾部的 extension_bag_claims.inc），
+// （资源实现收口在 claims.cpp），
 // plugins/extension_bag 只经本头取得 8 条资源声明表、交还入口 hook backup、
 // 驱动门禁两态，避免插件 include plugins/extension_bag 内部头。
 
@@ -39,8 +39,7 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup);
 bool extension_bag_set_enabled(bool enabled);
 bool extension_bag_enabled();
 
-// 插件安装期注入 Host SDK/Game Host。game_ui_virtbag.cpp 是 unity TU，其 inc
-// 直接读取这里缓存的句柄；独立 TU 由各自的 bridge setter 缓存所需表。
+// 插件安装期注入 Host SDK/Game Host；独立 TU 通过这些入口更新共享状态。
 bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
                              const qol::contracts::QolGameHost* game,
                              const qol::contracts::QolExtensionBagWritePort* write_port);

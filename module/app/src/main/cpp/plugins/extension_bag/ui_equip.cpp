@@ -1480,7 +1480,5 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
 // g_extension_desc_unequip_bag 仍由扩展袋 desc 打开时记录（供函数 hook 识别），
 // 详情记录仅供函数级入口 hook 识别。
 
-// virtual_bag_handle_backpack_button_equip 定义在 game_ui_virtbag.cpp 的
-// 匿名 namespace 之外（本文件整体位于匿名 namespace 内，internal linkage
-// 无法被 extension_bag_port.cpp 跨 TU 调用），依赖的本 TU 函数在匿名
-// namespace 内仍可见。
+// virtual_bag_handle_backpack_button_equip 在 public_runtime.cpp 中外部链接，供
+// extension_bag_port.cpp 跨 TU 调用。

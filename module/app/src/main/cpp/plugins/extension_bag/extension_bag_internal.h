@@ -18,6 +18,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <thread>
 
 #include <jni.h>
@@ -36,6 +37,15 @@ enum class ExtensionBagEquipResult {
     kReject,         // 前置不满足：非背包物品 / 扩展位已装备 / 不在原版库存
     kFailed,         // 移除或回滚失败（状态可能不一致，强日志）
     kPersistFailed,  // persist 失败且已完整回滚
+};
+
+enum class ExtensionBagUnequipResult {
+    kOk,
+    kNotEquipped,
+    kNotEmpty,
+    kNoSpace,
+    kPersistFailed,
+    kFailed,
 };
 
 struct ModuleUseState {
@@ -96,6 +106,7 @@ constexpr int64_t kGridCell = 0x4a;
 constexpr int64_t kGridStep = 0x53;
 constexpr int64_t kOriginalGridX = kGridX;
 constexpr int64_t kOriginalGridY = kGridY;
+constexpr int kEquipSlotCount = 10;
 
 extern std::mutex g_virtual_bag_mtx;
 extern bool g_item_state_dirty;
@@ -185,6 +196,24 @@ extern uint8_t* store_state_entry;
 extern MixSceneNoArgFn mix_original_enter;
 extern MixSceneNoArgFn mix_original_f3;
 extern uint8_t* mix_state_entry;
+
+struct NativeCallScope {
+    const bool previous = g_in_native_call;
+    const qol::contracts::QolGameHost* game = g_game;
+
+    NativeCallScope() {
+        g_in_native_call = true;
+        if (game != nullptr && game->item_abi.begin_original_only != nullptr) {
+            game->item_abi.begin_original_only();
+        }
+    }
+    ~NativeCallScope() {
+        if (game != nullptr && game->item_abi.end_original_only != nullptr) {
+            game->item_abi.end_original_only();
+        }
+        g_in_native_call = previous;
+    }
+};
 
 void extension_bag_mark_dirty_locked();
 uint64_t extension_bag_item_revision_locked();
@@ -386,6 +415,28 @@ bool extension_bag_ui_read_save_is_ok();
 bool extension_bag_ui_read_has_empty_mercenary_slot();
 void extension_bag_ui_play_switch_sound();
 void extension_bag_ui_handle_tab_click_locked(int extension_bag);
+JNIEnv* current_env();
+uint64_t isolation_now_ms_locked();
+bool extension_apply_stuff(void* target_item, void* material);
+bool read_item_cumulate_count(const void* item, int* out_count);
+bool read_save_is_ok();
+bool read_has_empty_mercenary_slot();
+void extension_description_set_off();
+bool extension_use_item(void* character, void* item, int arg, int* out_used);
+bool extension_make_mercenary(void* item, void** out_mercenary);
+void extension_refresh_bag_area();
+qol::contracts::QolItemCountEncoding item_count_encoding(const void* item);
+uint32_t original_count_view(uint32_t field);
+qol::contracts::QolItemCountEncoding category_is_equip(int category);
+bool category_is_extension_backpack(int category);
+void handle_extension_tab_click_locked(int extension_bag);
+std::string extension_bag_status_json_locked_bridge();
+std::string extension_bag_not_ready_error_locked_bridge();
+bool extension_bag_ready_locked_bridge();
+int extension_internal_bag_bridge(int logical_bag);
+std::string extension_bag_view_result_json_bridge(bool ok, const char* error);
+ExtensionBagUnequipResult unequip_extension_bag_locked_bridge(
+    std::unique_lock<std::mutex>& lock, int internal_bag);
 bool store_module_view_installed_locked();
 void store_teardown_locked();
 void store_restore_module_view_locked();

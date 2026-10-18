@@ -1,6 +1,11 @@
 add_library(qol_plugin_extension_bag STATIC
-    game_ui_virtbag.cpp
     extension_bag_state.cpp
+    runtime.cpp
+    public_runtime.cpp
+    runtime_bind.cpp
+    api_impl.cpp
+    claims.cpp
+    move_merge_impl.cpp
     runtime_observation.cpp
     runtime_tabs.cpp
     runtime_drag_session.cpp

@@ -1,3 +1,48 @@
+#include "game_ui_virtbag.h"
+
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
+#include "contracts/ui.h"
+#include "contracts/ownership.h"
+#include "contracts/inventory_refresh.h"
+#include "contracts/item_facts.h"
+#include "plugins/extension_bag/extension_bag_equip_rules.h"
+#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/move_merge.h"
+#include "plugins/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/model/item_handle_custody.h"
+#include "plugins/extension_bag/model/sale_transaction.h"
+#include "plugins/extension_bag/model/draw_state_lock.h"
+#include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
+#include "plugins/extension_bag/model/virtual_bag_state.h"
+#include "contracts/module_save_port.h"
+#include "contracts/popup_enter_alias.h"
+#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/plugin.h"
+#include "plugins/extension_bag/store_sell_rules.h"
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <unistd.h>
+
+
+
+#define extension_bag_status_json_locked extension_bag_status_json_locked_bridge
+#define extension_bag_not_ready_error_locked extension_bag_not_ready_error_locked_bridge
+#define extension_bag_ready_locked extension_bag_ready_locked_bridge
+#define extension_internal_bag extension_internal_bag_bridge
+#define extension_bag_view_result_json extension_bag_view_result_json_bridge
+#define unequip_extension_bag_locked unequip_extension_bag_locked_bridge
 std::string extension_bag_api_status_json_impl() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!read_world_in_world()) {
@@ -422,3 +467,9 @@ std::string virtual_bag_inventory_bags_json() {
     }
     return out;
 }
+#undef extension_bag_status_json_locked
+#undef extension_bag_not_ready_error_locked
+#undef extension_bag_ready_locked
+#undef extension_internal_bag
+#undef extension_bag_view_result_json
+#undef unequip_extension_bag_locked

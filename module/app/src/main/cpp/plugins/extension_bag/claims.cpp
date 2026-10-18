@@ -1,11 +1,15 @@
+#include "game_ui_virtbag.h"
+#include "contracts/popup_enter_alias.h"
+#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+
 // ===========================================================================
 // D2a-3b-1：扩展背包 8 条声明式资源（claims + acquire/release + backup 交还）
 // ===========================================================================
 //
-// 由 game_ui_virtbag.cpp 末尾 include（此时 render/lifecycle/store/mix/equip 的
-// wrapper 与全局均已定义）。声明表经 extension_bag_bridge.h 交 plugins/extension_bag。
+// 声明式资源实现。声明表经 extension_bag_bridge.h 交 plugins/extension_bag。
 //
-// 本 inc 只做「声明式接线」：wrapper 业务体逐字未动；PopupState 占用使用 D1-a2
+// 本文件只做「声明式接线」：wrapper 业务体逐字未动；PopupState 占用使用 D1-a2
 // 部分 wrap 语义（空槽保留原值），event 槽按 hooks/popup_state 契约做 32 位返回适配。
 // C1–C21 call patch 不在本批（a3b-2 收口），故 inject 线程保留。
 

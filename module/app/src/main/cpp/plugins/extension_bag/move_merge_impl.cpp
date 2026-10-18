@@ -1,3 +1,7 @@
+#include "contracts/move_merge.h"
+#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/move_merge.h"
+
 bool move_merge_enabled() {
     if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return false;
     const void* iface = nullptr;
