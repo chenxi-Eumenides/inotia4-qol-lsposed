@@ -125,3 +125,7 @@
 - `extension_bag_move_merge_shim_tests`：provider active、身份查询、drop 结果映射。
 - `extension_bag_status_query_tests`：status query 响应。
 - 通用 `host_tests` 覆盖 ownership ledger、custody、事务阶段等纯模型。
+
+## 已知残留
+
+- **商店 EB 视图双高亮**：选中扩展袋后，原版袋列仍显示一个选中态，与 EB 页签高亮并存。已尝试 `current_bag` 遮蔽、`UIStore_DrawInvenBagGroup` 入口 hook、`UIEquip` 背景 hook 与选中按钮重绘，均未能稳定消除；当前已回退为双高亮行为，后续单独定位原版袋列的选中态来源。商店出售数量选择不受影响。
