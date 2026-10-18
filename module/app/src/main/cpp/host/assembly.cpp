@@ -47,7 +47,7 @@
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/custom_recipe/settings_contribution.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/settings_contribution.h"
+#include "plugins/extension_bag/assembly/settings_contribution.h"
 #include "plugins/inventory_hooks/plugin.h"
 #include "plugins/move_merge/plugin.h"
 #include "plugins/move_merge/settings_contribution.h"

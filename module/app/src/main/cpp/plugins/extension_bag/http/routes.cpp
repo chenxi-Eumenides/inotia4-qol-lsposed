@@ -1,7 +1,7 @@
 #include "plugins/extension_bag/http/routes.h"
 
 #include "plugins/extension_bag/game_ui_virtbag.h"
-#include "plugins/extension_bag/http_query.h"
+#include "plugins/extension_bag/http/query.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 

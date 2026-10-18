@@ -6,7 +6,7 @@
 #include "contracts/move_merge.h"
 #include "contracts/result.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
-#include "plugins/extension_bag/move_merge.h"
+#include "plugins/extension_bag/assembly/move_merge.h"
 
 bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle, void** out_item);
 bool virtual_bag_identify_native_item(void*, int* out_bag, int* out_slot);

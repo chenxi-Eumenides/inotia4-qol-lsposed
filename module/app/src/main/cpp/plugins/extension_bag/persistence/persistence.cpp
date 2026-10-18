@@ -8,12 +8,12 @@
 #include <vector>
 
 #include "contracts/slot_data.h"
-#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #if defined(QOL_EXTENSION_BAG_SLOT_DATA_TEST_SEAMS)
 #include "tests/extension_bag_slot_data_state_stubs.h"
 #else
-#include "plugins/extension_bag/runtime_state.h"
+#include "plugins/extension_bag/runtime/state.h"
 #endif
 
 // 实现坐落在全局 namespace（context.h 的声明位置）；契约名经 using 引入。

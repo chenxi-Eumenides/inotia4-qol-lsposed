@@ -1,36 +1,36 @@
 add_library(qol_plugin_extension_bag STATIC
-    extension_bag_state.cpp
-    runtime_access.cpp
-    runtime_tabs_ui.cpp
-    runtime_orchestrator.cpp
-    public_counts.cpp
-    public_projection.cpp
-    public_status.cpp
-    public_sale.cpp
-    public_equip.cpp
-    public_bridge.cpp
-    runtime_bind.cpp
-    api_impl.cpp
-    claims.cpp
-    move_merge_impl.cpp
-    runtime_observation.cpp
-    runtime_tabs.cpp
-    runtime_drag_session.cpp
-    runtime_input.cpp
-    runtime_render.cpp
-    runtime_projection.cpp
-    runtime_lifecycle.cpp
-    ownership.cpp
-    transaction_ext_orig.cpp
-    transaction_ext_ext.cpp
-    transaction_drop.cpp
-    ui_equip.cpp
-    ui_detail_hooks.cpp
-    ui_detail_actions.cpp
-    ui_store_tabs.cpp
-    ui_store_projection.cpp
-    ui_store_trade.cpp
-    ui_mix.cpp
+    runtime/state.cpp
+    runtime/access.cpp
+    runtime/tabs_ui.cpp
+    runtime/orchestrator.cpp
+    public/counts.cpp
+    public/projection.cpp
+    public/status.cpp
+    public/sale.cpp
+    public/equip.cpp
+    public/bridge.cpp
+    runtime/bind.cpp
+    api/api_impl.cpp
+    assembly/claims.cpp
+    assembly/move_merge_impl.cpp
+    runtime/observation.cpp
+    runtime/tabs.cpp
+    runtime/drag_session.cpp
+    runtime/input.cpp
+    runtime/render.cpp
+    runtime/projection.cpp
+    runtime/lifecycle.cpp
+    runtime/ownership.cpp
+    transaction/ext_orig.cpp
+    transaction/ext_ext.cpp
+    transaction/drop.cpp
+    ui/equip.cpp
+    ui/detail_hooks.cpp
+    ui/detail_actions.cpp
+    ui/store_tabs.cpp
+    ui/store_projection.cpp
+    ui/store_trade.cpp
+    ui/mix.cpp
     api/port_state.cpp
     api/handles.cpp
     api/provider.cpp
@@ -38,11 +38,11 @@ add_library(qol_plugin_extension_bag STATIC
     api/neutral_provider.cpp
     persistence/persistence.cpp
     extension_bag_geometry.cpp
-    extension_bag_api.cpp
+    api/public_api.cpp
     http/routes.cpp
-    http_query.cpp
+    http/query.cpp
     plugin.cpp
-    settings_contribution.cpp
+    assembly/settings_contribution.cpp
 )
 
 target_include_directories(qol_plugin_extension_bag PRIVATE

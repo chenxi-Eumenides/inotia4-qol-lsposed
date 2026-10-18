@@ -917,15 +917,15 @@ add_test(NAME extension_bag_deferred_free_tests COMMAND extension_bag_deferred_f
 add_executable(extension_bag_draw_lock_tests test_extension_bag_draw_lock.cpp)
 target_include_directories(extension_bag_draw_lock_tests PRIVATE ${CPP_DIR})
 target_compile_definitions(extension_bag_draw_lock_tests PRIVATE
-    QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE="${CPP_DIR}/plugins/extension_bag/public_bridge.cpp"
-    QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_render.cpp"
-    QOL_EXTENSION_BAG_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_projection.cpp"
-    QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_lifecycle.cpp"
-    QOL_EXTENSION_BAG_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_tabs_ui.cpp"
-    QOL_EXTENSION_BAG_ORCHESTRATOR_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_orchestrator.cpp"
-    QOL_EXTENSION_BAG_STORE_TABS_SOURCE="${CPP_DIR}/plugins/extension_bag/ui_store_tabs.cpp"
-    QOL_EXTENSION_BAG_STORE_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/ui_store_projection.cpp"
-    QOL_EXTENSION_BAG_MIX_SOURCE="${CPP_DIR}/plugins/extension_bag/ui_mix.cpp")
+    QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE="${CPP_DIR}/plugins/extension_bag/public/bridge.cpp"
+    QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/render.cpp"
+    QOL_EXTENSION_BAG_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/projection.cpp"
+    QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/lifecycle.cpp"
+    QOL_EXTENSION_BAG_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/tabs_ui.cpp"
+    QOL_EXTENSION_BAG_ORCHESTRATOR_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/orchestrator.cpp"
+    QOL_EXTENSION_BAG_STORE_TABS_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/store_tabs.cpp"
+    QOL_EXTENSION_BAG_STORE_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/store_projection.cpp"
+    QOL_EXTENSION_BAG_MIX_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/mix.cpp")
 target_compile_features(extension_bag_draw_lock_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_draw_lock_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_draw_lock_tests COMMAND extension_bag_draw_lock_tests)
@@ -937,7 +937,7 @@ add_test(NAME item_handle_contract_redline
 
 add_executable(extension_bag_status_query_tests
     test_extension_bag_status_query.cpp
-    ${CPP_DIR}/plugins/extension_bag/http_query.cpp
+    ${CPP_DIR}/plugins/extension_bag/http/query.cpp
 )
 target_include_directories(extension_bag_status_query_tests PRIVATE ${CPP_DIR})
 target_compile_features(extension_bag_status_query_tests PRIVATE cxx_std_17)
@@ -1969,7 +1969,7 @@ add_executable(settings_contributions_tests
     ${CPP_DIR}/host/settings_catalog_adapter.cpp
     ${CPP_DIR}/plugins/settings/settings_contribution.cpp
     ${CPP_DIR}/plugins/core.custom_ui/settings_contribution.cpp
-    ${CPP_DIR}/plugins/extension_bag/settings_contribution.cpp
+    ${CPP_DIR}/plugins/extension_bag/assembly/settings_contribution.cpp
     ${CPP_DIR}/plugins/stack_limit/settings_contribution.cpp
     ${CPP_DIR}/plugins/simple_mode/settings_contribution.cpp
     ${CPP_DIR}/plugins/push_all/settings_contribution.cpp
@@ -2011,7 +2011,7 @@ add_test(NAME move_merge_plugin_tests COMMAND move_merge_plugin_tests)
 # Production extension_bag projection shims: typed handle/inactive/output and drop tri-state.
 add_executable(extension_bag_move_merge_shim_tests
     test_extension_bag_move_merge_shims.cpp
-    ${CPP_DIR}/plugins/extension_bag/move_merge_impl.cpp)
+    ${CPP_DIR}/plugins/extension_bag/assembly/move_merge_impl.cpp)
 target_include_directories(extension_bag_move_merge_shim_tests PRIVATE
     ${CPP_DIR}
     ${JNI_INCLUDE_DIRS})

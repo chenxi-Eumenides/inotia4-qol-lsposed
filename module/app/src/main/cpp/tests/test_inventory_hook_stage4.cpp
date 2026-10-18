@@ -1,6 +1,6 @@
 #include "plugins/inventory_hooks/inventory_hook_stage4.h"
 #include "plugins/inventory_hooks/native_inventory_hook.h"
-#include "plugins/extension_bag/extension_bag_equip_rules.h"
+#include "plugins/extension_bag/model/equip_rules.h"
 
 #include "game/symbols/game_symbols.h"
 

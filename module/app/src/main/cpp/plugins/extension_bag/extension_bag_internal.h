@@ -12,7 +12,7 @@
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
-#include "plugins/extension_bag/runtime_state.h"
+#include "plugins/extension_bag/runtime/state.h"
 
 #include <array>
 #include <atomic>

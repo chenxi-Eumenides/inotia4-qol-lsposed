@@ -8,7 +8,7 @@
 #include "plugins/core.custom_ui/settings_contribution.h"
 #include "plugins/settings/settings_contribution.h"
 #include "plugins/custom_recipe/settings_contribution.h"
-#include "plugins/extension_bag/settings_contribution.h"
+#include "plugins/extension_bag/assembly/settings_contribution.h"
 #include "plugins/move_merge/settings_contribution.h"
 #include "plugins/push_all/settings_contribution.h"
 #include "plugins/save_backup/settings_contribution.h"

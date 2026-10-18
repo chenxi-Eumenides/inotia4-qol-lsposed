@@ -1,5 +1,5 @@
 #include "plugins/extension_bag/model/sale_transaction.h"
-#include "plugins/extension_bag/store_sell_rules.h"
+#include "plugins/extension_bag/ui/store_sell_rules.h"
 
 #include <array>
 #include <cstdio>

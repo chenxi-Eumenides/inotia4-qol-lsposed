@@ -1,4 +1,4 @@
-#include "plugins/extension_bag/http_query.h"
+#include "plugins/extension_bag/http/query.h"
 
 #include <array>
 #include <cstdint>

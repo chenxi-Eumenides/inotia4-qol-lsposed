@@ -1,7 +1,7 @@
 #include "contracts/host_sdk.h"
 #include "game/adapter_ports/lifecycle_participant_facade.h"
 #include "host/lifecycle_participants.h"
-#include "plugins/extension_bag/lifecycle_registration.h"
+#include "plugins/extension_bag/runtime/lifecycle_registration.h"
 
 #include <cstdio>
 #include <cstring>
