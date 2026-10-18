@@ -10,11 +10,13 @@ struct DeferredItemFree {
 };
 
 constexpr size_t kDeferredFreeQueueCapacity = 16;
+constexpr size_t kDeferredFreeMaxPending =
+    kDeferredFreeQueueCapacity + ownership::kLedgerCapacity;
 std::array<DeferredItemFree, kDeferredFreeQueueCapacity> g_deferred_free_queue{};
 size_t g_deferred_free_queue_head = 0;
 size_t g_deferred_free_queue_size = 0;
-// 账本最多同时追踪 ownership::kLedgerCapacity 个对象；队列满时使用该有界
-// 保管区承接剩余对象，保证 custody 不丢失且事务不会因回收排队失败而失败。
+// 延迟释放积压上限为主队列 16 项加独立保管区 128 项。触摸窗口期间超过上限时
+// 入队失败；调用方必须保留源指针/所有权状态，不得据此替换或摘除对象。
 std::array<DeferredItemFree, ownership::kLedgerCapacity> g_deferred_free_custody{};
 size_t g_deferred_free_custody_size = 0;
 
@@ -48,11 +50,12 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
     const DeferredItemFree entry = {
         item, handle, generation, deferred_free_now_ms_locked()};
     if (g_deferred_free_queue_size >= kDeferredFreeQueueCapacity) {
-        // 正常调用方均持有 ownership ledger handle；该保管区容量覆盖 ledger
-        // 上限，因此队列满不会把释放失败传播给事务或丢失对象指针。
+        // 队列和保管区均满时拒绝入队；调用方保留对象及其所有权状态供后续重试。
         if (g_deferred_free_custody_size >= g_deferred_free_custody.size()) {
-            VIRTBAG_LOG_ERROR("ERROR deferred free custody overflow item=%p handle=%u generation=%llu",
-                        item, handle, static_cast<unsigned long long>(generation));
+            VIRTBAG_LOG_ERROR("ERROR deferred free backlog full pending=%zu capacity=%zu item=%p handle=%u generation=%llu",
+                              g_deferred_free_queue_size + g_deferred_free_custody_size,
+                              kDeferredFreeMaxPending, item, handle,
+                              static_cast<unsigned long long>(generation));
             return false;
         }
         g_deferred_free_custody[g_deferred_free_custody_size++] = entry;
@@ -109,50 +112,40 @@ bool deferred_item_referenced_locked(void* item) {
 
 void drain_deferred_frees_locked() {
     if (object_touch_window_active_locked()) return;
-    const size_t count = g_deferred_free_queue_size + g_deferred_free_custody_size;
-    if (count == 0) return;
+    const auto can_free = [](const DeferredItemFree& entry) {
+        const auto* api = extension_bag_write_api();
+        return !deferred_item_referenced_locked(entry.item) && api != nullptr &&
+               api->inventory.free_item != nullptr;
+    };
+    const auto free_entry = [](const DeferredItemFree& entry) {
+        if (extension_free_item(entry.item)) return true;
+        VIRTBAG_LOG_ERROR("ERROR deferred free failed item=%p handle=%u generation=%llu",
+                          entry.item, entry.handle,
+                          static_cast<unsigned long long>(entry.generation));
+        return false;
+    };
 
-    std::array<DeferredItemFree, kDeferredFreeQueueCapacity> kept{};
-    size_t kept_count = 0;
-    size_t freed_count = 0;
-    for (size_t offset = 0; offset < count; ++offset) {
-        const size_t index = (g_deferred_free_queue_head + offset) % kDeferredFreeQueueCapacity;
-        const DeferredItemFree entry = g_deferred_free_queue[index];
-        if (deferred_item_referenced_locked(entry.item) || extension_bag_write_api() == nullptr ||
-            extension_bag_write_api()->inventory.free_item == nullptr) {
-            kept[kept_count++] = entry;
-            continue;
-        }
-        (void)extension_free_item(entry.item);
-        ++freed_count;
+    const size_t queue_count = g_deferred_free_queue_size;
+    const auto queue_result = qol::features::extension_bag::model::drain_deferred_free_entries(
+        g_deferred_free_queue, g_deferred_free_queue_head, queue_count, can_free, free_entry);
+    if (queue_result.unprocessed != 0) {
+        VIRTBAG_LOG_ERROR("ERROR deferred free queue size exceeded capacity size=%zu capacity=%zu",
+                          queue_count, kDeferredFreeQueueCapacity);
     }
-    g_deferred_free_queue = {};
-    g_deferred_free_queue_head = 0;
-    g_deferred_free_queue_size = 0;
-    for (size_t index = 0; index < kept_count; ++index) {
-        g_deferred_free_queue[index] = kept[index];
-    }
-    g_deferred_free_queue_size = kept_count;
+    g_deferred_free_queue_size = queue_result.kept;
 
-    std::array<DeferredItemFree, ownership::kLedgerCapacity> kept_custody{};
-    size_t kept_custody_count = 0;
-    for (size_t index = 0; index < g_deferred_free_custody_size; ++index) {
-        const DeferredItemFree entry = g_deferred_free_custody[index];
-        if (deferred_item_referenced_locked(entry.item) || extension_bag_write_api() == nullptr ||
-            extension_bag_write_api()->inventory.free_item == nullptr) {
-            kept_custody[kept_custody_count++] = entry;
-            continue;
-        }
-        (void)extension_free_item(entry.item);
-        ++freed_count;
+    const size_t custody_count = g_deferred_free_custody_size;
+    const auto custody_result =
+        qol::features::extension_bag::model::drain_deferred_free_entries(
+            g_deferred_free_custody, 0, custody_count, can_free, free_entry);
+    if (custody_result.unprocessed != 0) {
+        VIRTBAG_LOG_ERROR("ERROR deferred free custody size exceeded capacity size=%zu capacity=%zu",
+                          custody_count, ownership::kLedgerCapacity);
     }
-    g_deferred_free_custody = {};
-    g_deferred_free_custody_size = kept_custody_count;
-    for (size_t index = 0; index < kept_custody_count; ++index) {
-        g_deferred_free_custody[index] = kept_custody[index];
-    }
-    VIRTBAG_LOG("deferred free drain count=%zu freed=%zu kept=%zu", count, freed_count,
-                kept_count + kept_custody_count);
+    g_deferred_free_custody_size = custody_result.kept;
+    VIRTBAG_LOG("deferred free drain queue=%zu/%zu custody=%zu/%zu freed=%zu",
+                queue_result.kept, queue_count, custody_result.kept, custody_count,
+                queue_result.freed + custody_result.freed);
 }
 
 void log_ownership_audit_locked(const char* context) {
@@ -195,23 +188,40 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
     }
 
     const bool touch_window = object_touch_window_active_locked();
-    if (touch_window || extension_bag_write_api() == nullptr ||
-        extension_bag_write_api()->inventory.free_item == nullptr) {
-        const uint64_t generation = module_object_generation_locked(item, handle);
-        if (!enqueue_deferred_item_free_locked(item, handle, generation)) return false;
+    if (ownership::reserve_release(&g_ownership_ledger, handle) != ownership::Outcome::kOk) {
+        VIRTBAG_LOG_ERROR("ERROR ownership release reservation failed context=%s handle=%u",
+                          context, handle);
+        return false;
     }
-    if (ownership::release(&g_ownership_ledger, handle) != ownership::Outcome::kOk) {
-        VIRTBAG_LOG_ERROR("ERROR ownership release changed during custody retirement context=%s handle=%u",
-                    context, handle);
+
+    bool deferred = touch_window || extension_bag_write_api() == nullptr ||
+                    extension_bag_write_api()->inventory.free_item == nullptr;
+    if (deferred) {
+        const uint64_t generation = module_object_generation_locked(item, handle);
+        if (!enqueue_deferred_item_free_locked(item, handle, generation)) {
+            (void)ownership::cancel_reserved_release(&g_ownership_ledger, handle);
+            return false;
+        }
+    } else if (!extension_free_item(item)) {
+        VIRTBAG_LOG_ERROR("ERROR native item free failed context=%s handle=%u item=%p; retry deferred",
+                          context, handle, item);
+        const uint64_t generation = module_object_generation_locked(item, handle);
+        if (!enqueue_deferred_item_free_locked(item, handle, generation)) {
+            (void)ownership::cancel_reserved_release(&g_ownership_ledger, handle);
+            VIRTBAG_LOG_ERROR("ERROR native item free retry queue full context=%s handle=%u item=%p",
+                              context, handle, item);
+            return false;
+        }
+        deferred = true;
+    }
+    if (ownership::commit_reserved_release(&g_ownership_ledger, handle) !=
+        ownership::Outcome::kOk) {
+        VIRTBAG_LOG_ERROR("ERROR ownership release commit failed context=%s handle=%u",
+                          context, handle);
         return false;
     }
     extension_bag_invalidate_item_handle(item);
-    if (!touch_window && extension_bag_write_api() != nullptr &&
-        extension_bag_write_api()->inventory.free_item != nullptr) {
-        (void)extension_free_item(item);
-    }
-    if (touch_window || extension_bag_write_api() == nullptr ||
-        extension_bag_write_api()->inventory.free_item == nullptr) {
+    if (deferred) {
         VIRTBAG_LOG("ownership release deferred context=%s touch_window=%d handle=%u", context,
                     touch_window ? 1 : 0, handle);
     }
@@ -481,7 +491,18 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
             if (!deferred) return false;
         }
     }
-    if (!deferred) (void)extension_free_item(release.item);
+    if (!deferred && !extension_free_item(release.item)) {
+        VIRTBAG_LOG_ERROR("ERROR module-use native free failed bag=%d slot=%d handle=%u item=%p; retry deferred",
+                          release.bag, release.slot, release.handle, release.item);
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        if (!enqueue_deferred_item_free_locked(release.item, release.handle,
+                                              release.generation)) {
+            VIRTBAG_LOG_ERROR("ERROR module-use native free retry queue full bag=%d slot=%d handle=%u item=%p",
+                              release.bag, release.slot, release.handle, release.item);
+            return false;
+        }
+        deferred = true;
+    }
     return true;
 }
 

@@ -14,20 +14,34 @@ void refresh_tab_bag_items_locked() {
         void*& slot = g_tab_bag_items[i];
         if (type == 0) {
             if (slot != nullptr) {
-                if (defer_item_free_locked(slot)) slot = nullptr;
+                if (defer_item_free_locked(slot)) {
+                    slot = nullptr;
+                } else {
+                    VIRTBAG_LOG_ERROR("ERROR tab bag item retirement failed bag=%d item=%p",
+                                      i, slot);
+                }
             }
             continue;
         }
         if (slot != nullptr) {
             int category = -1;
             if (read_item_category(slot, &category) && category == static_cast<int>(type)) continue;
-            if (defer_item_free_locked(slot)) slot = nullptr;
+            if (!defer_item_free_locked(slot)) {
+                VIRTBAG_LOG_ERROR("ERROR tab bag item replacement deferred free failed bag=%d item=%p type=%u",
+                                  i, slot, static_cast<unsigned int>(type));
+                continue;
+            }
+            slot = nullptr;
         }
         slot = extension_create_item(static_cast<int32_t>(type), 0, 0, 0);
         if (slot != nullptr) {
             if (!mark_native_bag_object(slot)) {
-                (void)defer_item_free_locked(slot);
-                slot = nullptr;
+                if (defer_item_free_locked(slot)) {
+                    slot = nullptr;
+                } else {
+                    VIRTBAG_LOG_ERROR("ERROR unmarked tab bag item retirement failed bag=%d item=%p type=%u",
+                                      i, slot, static_cast<unsigned int>(type));
+                }
             }
         }
     }

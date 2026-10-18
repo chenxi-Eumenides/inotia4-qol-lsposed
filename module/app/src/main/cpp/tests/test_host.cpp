@@ -2594,6 +2594,33 @@ static void test_ownership_ledger() {
     CHECK(ownership::release(&ledger, 0x7FFFFFFF) == ownership::Outcome::kRejectUnknownHandle);
 }
 
+static void test_item_handle_custody_releasing_rebind_guard() {
+    using qol::contracts::QolItemHandle;
+    using qol::features::extension_bag::model::ItemHandleCustody;
+    ItemHandleCustody custody;
+    int item = 1;
+    void* resolved = nullptr;
+    const QolItemHandle active{21, 4};
+    const QolItemHandle replacement{21, 5};
+
+    CHECK(custody.bind(&item, active));
+    CHECK(custody.bind(&item, active));  // active same-handle bind is idempotent
+    CHECK(custody.begin_release(active));
+    CHECK(!custody.bind(&item, active));
+    CHECK(!custody.bind(&item, replacement));
+    CHECK(!custody.rebind(&item, active, replacement));
+    CHECK(custody.finish_release(active, false));
+    CHECK(custody.lookup(active, &resolved) && resolved == &item);
+
+    CHECK(custody.begin_release(active));
+    CHECK(!custody.bind(&item, replacement));
+    CHECK(!custody.rebind(&item, active, replacement));
+    CHECK(custody.finish_release(active, true));
+    CHECK(!custody.lookup(active, &resolved));
+    CHECK(custody.bind(&item, replacement));
+    CHECK(custody.lookup(replacement, &resolved) && resolved == &item);
+}
+
 static void test_ownership_ledger_p43() {
     // 过期 generation handle：释放后同槽再分配，旧句柄全部操作必须被拒。
     ownership::Ledger ledger{};
@@ -3217,6 +3244,7 @@ int main() {
     test_parse_int_field();
     test_tiles_parse();
     test_ownership_ledger();
+    test_item_handle_custody_releasing_rebind_guard();
     test_ownership_ledger_p43();
     test_p44_transaction_stages();
     test_p52_drag_session();
