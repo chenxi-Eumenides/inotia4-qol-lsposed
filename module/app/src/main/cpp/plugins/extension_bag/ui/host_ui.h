@@ -59,7 +59,6 @@ int64_t store_sell_item_wrapper(int64_t displayed_price);
 int64_t store_button_sell_exe_wrapper();
 void store_draw_inven_bag_group_entry();
 void store_draw_equip_background_entry(void* a, void* b, int32_t c, void* d, int32_t e);
-void store_ui_equip_draw_entry();
 void store_make_desc_gate(void* ctrl, void* arg);
 void store_draw_end_wrapper();
 void store_draw_inven_bag_group_wrapper();

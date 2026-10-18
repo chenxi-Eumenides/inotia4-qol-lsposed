@@ -292,13 +292,6 @@ void store_draw_inven_bag_group_entry() {
     backup();
     if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
 }
-void store_ui_equip_draw_entry() {
-    using DrawFn = void (*)();
-    const auto backup = reinterpret_cast<DrawFn>(runtime_state().ui.backup_ui_equip_draw);
-    if (backup == nullptr) return;
-    if (runtime_state().store.view_installed) return;
-    backup();
-}
 void store_draw_equip_background_entry(void* a, void* b, int32_t c, void* d, int32_t e) {
     using DrawFn = void (*)(void*, void*, int32_t, void*, int32_t);
     const auto backup = reinterpret_cast<DrawFn>(
