@@ -9,24 +9,24 @@ thread_local bool g_refresh_restore_suppress = false;
 thread_local bool g_in_native_call = false;
 
 void extension_bag_mark_dirty_locked() {
-    g_item_state_dirty = true;
-    g_item_state_revision.fetch_add(1, std::memory_order_release);
+    runtime_state().persistence.dirty = true;
+    runtime_state().persistence.revision.fetch_add(1, std::memory_order_release);
 }
 
 uint64_t extension_bag_item_revision_locked() {
-    return g_item_state_revision.load(std::memory_order_acquire);
+    return runtime_state().persistence.revision.load(std::memory_order_acquire);
 }
 
-const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() { return g_write_port; }
+const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() { return runtime_state().host.write_port; }
 
 bool read_item_category(const void* item, int* out_category) {
     qol::contracts::QolItemHandle handle{};
-    if (g_item_facts == nullptr || g_item_facts->category == nullptr ||
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->category == nullptr ||
         item == nullptr || out_category == nullptr ||
         !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
     int32_t category = 0;
     if (!qol::contracts::succeeded(
-            g_item_facts->category(handle, &category))) return false;
+            runtime_state().host.item_facts->category(handle, &category))) return false;
     *out_category = category;
     return true;
 }
@@ -42,7 +42,7 @@ void* extension_create_item(int category, int arg1, int arg2, int arg3) {
 }
 
 const qol::contracts::QolItemCountApi* item_count_api() {
-    return g_game == nullptr ? nullptr : &g_game->item_count;
+    return runtime_state().host.game == nullptr ? nullptr : &runtime_state().host.game->item_count;
 }
 
 bool mark_native_bag_object(void* item) {
@@ -62,7 +62,7 @@ bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot) {
     if (item == nullptr || out_bag == nullptr || out_slot == nullptr) return false;
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (g_module_objects[bag][slot] == item) {
+            if (runtime_state().objects.module_objects[bag][slot] == item) {
                 *out_bag = bag;
                 *out_slot = slot;
                 return true;

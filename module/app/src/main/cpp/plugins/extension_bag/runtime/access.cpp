@@ -219,12 +219,12 @@ void extension_description_set_off() {
 
 bool read_item_cumulate_count(const void* item, int* out_count) {
     qol::contracts::QolItemHandle handle{};
-    if (g_item_facts == nullptr || g_item_facts->cumulate_count == nullptr ||
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->cumulate_count == nullptr ||
         item == nullptr || out_count == nullptr ||
         !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
     int32_t count = 0;
     if (!qol::contracts::succeeded(
-            g_item_facts->cumulate_count(handle, &count))) return false;
+            runtime_state().host.item_facts->cumulate_count(handle, &count))) return false;
     *out_count = count;
     return true;
 }
@@ -232,10 +232,10 @@ bool read_item_cumulate_count(const void* item, int* out_count) {
 }  // namespace
 
 bool read_item_is_jewel(int category) {
-    if (g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr) return false;
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->is_jewel_category == nullptr) return false;
     int32_t is_jewel = 0;
     return qol::contracts::succeeded(
-               g_item_facts->is_jewel_category(category, &is_jewel)) &&
+               runtime_state().host.item_facts->is_jewel_category(category, &is_jewel)) &&
            is_jewel != 0;
 }
 
@@ -244,7 +244,7 @@ namespace {
 bool read_item_category_predicate(int category,
                                   QolResult (*predicate)(int32_t, int32_t*),
                                   bool* out_value) {
-    if (g_game == nullptr || predicate == nullptr || out_value == nullptr) return false;
+    if (runtime_state().host.game == nullptr || predicate == nullptr || out_value == nullptr) return false;
     int32_t value = 0;
     if (!qol::contracts::succeeded(predicate(category, &value))) return false;
     *out_value = value != 0;
@@ -255,33 +255,33 @@ bool read_item_category_predicate(int category,
 
 bool item_is_equip(const void* item) {
     qol::contracts::QolItemHandle handle{};
-    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr || item == nullptr ||
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->is_real_equip == nullptr || item == nullptr ||
         !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) {
         return false;
     }
     int32_t value = 0;
-    return qol::contracts::succeeded(g_item_facts->is_real_equip(handle, &value)) &&
+    return qol::contracts::succeeded(runtime_state().host.item_facts->is_real_equip(handle, &value)) &&
            value != 0;
 }
 
 bool read_item_is_enchant_scroll(int category) {
     bool value = false;
     return read_item_category_predicate(
-        category, g_game == nullptr ? nullptr : g_game->read_only.item.is_enchant_scroll, &value) &&
+        category, runtime_state().host.game == nullptr ? nullptr : runtime_state().host.game->read_only.item.is_enchant_scroll, &value) &&
         value;
 }
 
 bool read_item_is_mercenary_seal(int category) {
     bool value = false;
     return read_item_category_predicate(
-        category, g_game == nullptr ? nullptr : g_game->read_only.item.is_mercenary_seal, &value) &&
+        category, runtime_state().host.game == nullptr ? nullptr : runtime_state().host.game->read_only.item.is_mercenary_seal, &value) &&
         value;
 }
 
 bool read_item_is_usable(int category) {
     bool value = false;
     return read_item_category_predicate(
-        category, g_game == nullptr ? nullptr : g_game->read_only.item.is_usable, &value) &&
+        category, runtime_state().host.game == nullptr ? nullptr : runtime_state().host.game->read_only.item.is_usable, &value) &&
         value;
 }
 
@@ -304,10 +304,10 @@ namespace {
 
 bool read_item_sell_price(const void* item, int64_t* out_price) {
     qol::contracts::QolItemHandle handle{};
-    if (g_item_facts == nullptr || g_item_facts->sell_price == nullptr ||
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->sell_price == nullptr ||
         item == nullptr || out_price == nullptr ||
         !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
-    return qol::contracts::succeeded(g_item_facts->sell_price(handle, out_price));
+    return qol::contracts::succeeded(runtime_state().host.item_facts->sell_price(handle, out_price));
 }
 
 bool read_item_encoded_field(const void* item, uint32_t* out_field) {
@@ -331,28 +331,28 @@ qol::contracts::QolItemCountEncoding item_count_encoding(const void* item) {
 }
 
 bool read_char_can_equip(const void* character, const void* item) {
-    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.can_equip == nullptr) return false;
+    if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.can_equip == nullptr) return false;
     int32_t allowed = 0;
     return qol::contracts::succeeded(
-               g_character_extras->read.can_equip(character, item, &allowed)) &&
+               runtime_state().host.character_extras->read.can_equip(character, item, &allowed)) &&
            allowed != 0;
 }
 
 bool read_char_find_equip_slot(const void* character, const void* item, int* out_slot) {
-    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.find_equip_slot == nullptr ||
+    if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.find_equip_slot == nullptr ||
         out_slot == nullptr) return false;
     int32_t slot = -1;
     if (!qol::contracts::succeeded(
-            g_character_extras->read.find_equip_slot(character, item, &slot))) return false;
+            runtime_state().host.character_extras->read.find_equip_slot(character, item, &slot))) return false;
     *out_slot = slot;
     return true;
 }
 
 void* read_char_equipped_item(const void* character, int slot) {
-    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.equipped_item == nullptr) return nullptr;
+    if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.equipped_item == nullptr) return nullptr;
     void* item = nullptr;
     return qol::contracts::succeeded(
-               g_character_extras->read.equipped_item(character, slot, &item))
+               runtime_state().host.character_extras->read.equipped_item(character, slot, &item))
                ? item
                : nullptr;
 }
@@ -365,36 +365,36 @@ bool read_save_is_ok() {
 }
 
 bool read_has_empty_mercenary_slot() {
-    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.has_empty_mercenary_slot == nullptr) {
+    if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.has_empty_mercenary_slot == nullptr) {
         return false;
     }
     int32_t value = 0;
     return qol::contracts::succeeded(
-               g_character_extras->read.has_empty_mercenary_slot(&value)) && value != 0;
+               runtime_state().host.character_extras->read.has_empty_mercenary_slot(&value)) && value != 0;
 }
 
 bool read_inventory_bag_size(int bag, int* out_size) {
-    if (g_game == nullptr || g_inventory_extras == nullptr || g_inventory_extras->read.bag_size == nullptr ||
+    if (runtime_state().host.game == nullptr || runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.bag_size == nullptr ||
         out_size == nullptr) return false;
     int32_t value = 0;
-    if (!qol::contracts::succeeded(g_inventory_extras->read.bag_size(bag, &value))) return false;
+    if (!qol::contracts::succeeded(runtime_state().host.inventory_extras->read.bag_size(bag, &value))) return false;
     *out_size = value;
     return true;
 }
 
 bool read_inventory_is_empty_bag(int bag) {
-    if (g_game == nullptr || g_inventory_extras == nullptr || g_inventory_extras->read.is_empty_bag == nullptr) return false;
+    if (runtime_state().host.game == nullptr || runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.is_empty_bag == nullptr) return false;
     int32_t value = 0;
     return qol::contracts::succeeded(
-               g_inventory_extras->read.is_empty_bag(bag, &value)) && value != 0;
+               runtime_state().host.inventory_extras->read.is_empty_bag(bag, &value)) && value != 0;
 }
 
 bool read_inventory_find_save_slot(const void* item, int* out_slot) {
-    if (g_game == nullptr || g_inventory_extras == nullptr || g_inventory_extras->read.find_save_slot == nullptr ||
+    if (runtime_state().host.game == nullptr || runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.find_save_slot == nullptr ||
         item == nullptr || out_slot == nullptr) return false;
     int32_t value = -1;
     if (!qol::contracts::succeeded(
-            g_inventory_extras->read.find_save_slot(item, &value))) return false;
+            runtime_state().host.inventory_extras->read.find_save_slot(item, &value))) return false;
     *out_slot = value;
     return true;
 }
@@ -410,9 +410,9 @@ int read_current_save_slot() {
 }  // namespace
 
 int raw_direct_bag_locked() {
-    if (g_game == nullptr || g_write_port->ui.current_bag == nullptr) return -1;
+    if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.current_bag == nullptr) return -1;
     int32_t bag = -1;
-    return qol::contracts::succeeded(g_write_port->ui.current_bag(&bag)) ? bag : -1;
+    return qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&bag)) ? bag : -1;
 }
 
 int raw_got_bag_locked() {
@@ -420,9 +420,9 @@ int raw_got_bag_locked() {
 }
 
 int raw_desc_type_locked() {
-    if (g_game == nullptr || g_write_port->ui.desc_type == nullptr) return -1;
+    if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.desc_type == nullptr) return -1;
     int32_t type = -1;
-    return qol::contracts::succeeded(g_write_port->ui.desc_type(&type)) ? type : -1;
+    return qol::contracts::succeeded(runtime_state().host.write_port->ui.desc_type(&type)) ? type : -1;
 }
 
 namespace {
@@ -434,13 +434,13 @@ JNIEnv* current_env() {
     return jvm->AttachCurrentThread(&env, nullptr) == JNI_OK ? env : nullptr;
 }
 ::qol::contracts::QolItemCountEncoding category_is_equip(int category) {
-    if (g_game == nullptr || g_game->read_only.item.count_encoding == nullptr || category <= 0) {
+    if (runtime_state().host.game == nullptr || runtime_state().host.game->read_only.item.count_encoding == nullptr || category <= 0) {
         return ::qol::contracts::QolItemCountEncoding::kUnknown;
     }
     ::qol::contracts::QolItemCountEncoding encoding =
         ::qol::contracts::QolItemCountEncoding::kUnknown;
     return qol::contracts::succeeded(
-               g_game->read_only.item.count_encoding(category, &encoding))
+               runtime_state().host.game->read_only.item.count_encoding(category, &encoding))
         ? encoding
         : ::qol::contracts::QolItemCountEncoding::kUnknown;
 }
@@ -450,11 +450,11 @@ JNIEnv* current_env() {
 // +2 是记录字段偏移（非 VMA），表基址/步长由宿主读取面提供。
 // G_ITEMCLASS_DATA/SIZE GOT 槽。
 bool category_is_extension_backpack(int category) {
-    if (g_game == nullptr || g_game->read_only.item.is_backpack_category == nullptr ||
+    if (runtime_state().host.game == nullptr || runtime_state().host.game->read_only.item.is_backpack_category == nullptr ||
         category <= 0) return false;
     int32_t value = 0;
     return qol::contracts::succeeded(
-               g_game->read_only.item.is_backpack_category(category, &value)) && value != 0;
+               runtime_state().host.game->read_only.item.is_backpack_category(category, &value)) && value != 0;
 }
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);

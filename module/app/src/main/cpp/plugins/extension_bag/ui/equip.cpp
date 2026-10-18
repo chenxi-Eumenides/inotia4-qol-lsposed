@@ -33,12 +33,12 @@
 #include <unistd.h>
 
 void* extension_menu_character() {
-    if (g_game == nullptr || g_character_extras->read.menu_character == nullptr) {
+    if (runtime_state().host.game == nullptr || runtime_state().host.character_extras->read.menu_character == nullptr) {
         return nullptr;
     }
     void* character = nullptr;
     return qol::contracts::succeeded(
-               g_character_extras->read.menu_character(&character))
+               runtime_state().host.character_extras->read.menu_character(&character))
                ? character
                : nullptr;
 }
@@ -49,7 +49,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     if (!virtual_bag::valid_index(internal_bag) || item == nullptr) {
         return ExtensionBagEquipResult::kReject;
     }
-    if (g_virtual_bag_state.types[internal_bag] != 0) {
+    if (runtime_state().objects.bag.types[internal_bag] != 0) {
         return ExtensionBagEquipResult::kReject;
     }
     int category = 0;
@@ -67,7 +67,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     }
     const bool module_source = src_bag < 0 && module_slot_of_item_locked(item, &src_bag, &src_slot);
     if (module_source) {
-        category = g_virtual_bag_state.items[src_bag][src_slot].category;
+        category = runtime_state().objects.bag.items[src_bag][src_slot].category;
     } else {
         if (src_bag < 0 || !read_item_category(item, &category)) {
             return ExtensionBagEquipResult::kReject;
@@ -85,7 +85,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
     if (module_source) {
-        const virtual_bag::Item& source = g_virtual_bag_state.items[src_bag][src_slot];
+        const virtual_bag::Item& source = runtime_state().objects.bag.items[src_bag][src_slot];
         payload = source.payload;
         payload_size = source.payload_size;
     } else if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
@@ -95,19 +95,19 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     }
 
     if (module_source) {
-        const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
-        const uint8_t previous_type = g_virtual_bag_state.types[internal_bag];
-        if (!virtual_bag::equip_bag(&g_virtual_bag_state, internal_bag, category)) {
+        const virtual_bag::Item source = runtime_state().objects.bag.items[src_bag][src_slot];
+        const uint8_t previous_type = runtime_state().objects.bag.types[internal_bag];
+        if (!virtual_bag::equip_bag(&runtime_state().objects.bag, internal_bag, category)) {
             return ExtensionBagEquipResult::kReject;
         }
-        g_virtual_bag_state.items[src_bag][src_slot] = {};
+        runtime_state().objects.bag.items[src_bag][src_slot] = {};
         extension_bag_mark_dirty_locked();
         if (persist_state_locked()) {
             if (!free_module_object_locked(src_bag, src_slot)) {
-                g_virtual_bag_state.types[internal_bag] = previous_type;
-                g_virtual_bag_state.items[src_bag][src_slot] = source;
-                g_virtual_bag_state.isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
-                virtual_bag::normalize(&g_virtual_bag_state);
+                runtime_state().objects.bag.types[internal_bag] = previous_type;
+                runtime_state().objects.bag.items[src_bag][src_slot] = source;
+                runtime_state().objects.bag.isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
+                virtual_bag::normalize(&runtime_state().objects.bag);
                 persist_state_locked();
                 QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip rejected source release bag=%d slot=%d",
                             src_bag, src_slot);
@@ -117,17 +117,17 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
                         internal_bag, category, src_bag, src_slot);
             return ExtensionBagEquipResult::kOk;
         }
-        g_virtual_bag_state.types[internal_bag] = 0;
-        g_virtual_bag_state.items[src_bag][src_slot] = source;
-        g_virtual_bag_state.isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
-        virtual_bag::normalize(&g_virtual_bag_state);
+        runtime_state().objects.bag.types[internal_bag] = 0;
+        runtime_state().objects.bag.items[src_bag][src_slot] = source;
+        runtime_state().objects.bag.isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
+        virtual_bag::normalize(&runtime_state().objects.bag);
         persist_state_locked();
         return ExtensionBagEquipResult::kPersistFailed;
     }
 
     // P4.3：移除前先分配保管 handle（失败时物品仍在原版库存，无丢失风险）。
     uint32_t custody_handle = 0;
-    if (ownership::allocate(&g_ownership_ledger, &custody_handle) != ownership::Outcome::kOk) {
+    if (ownership::allocate(&runtime_state().objects.ownership_ledger, &custody_handle) != ownership::Outcome::kOk) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip ledger exhausted src=%d/%d", src_bag, src_slot);
         return ExtensionBagEquipResult::kFailed;
     }
@@ -142,7 +142,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     // 移除已确认：此后任何失败（state 拒绝 / persist 失败）都必须回插物品，
     // 否则真实丢失。equip_bag 前置已查 types==0，此处拒绝仅剩理论可能。
     const bool state_equipped =
-        virtual_bag::equip_bag(&g_virtual_bag_state, internal_bag, category);
+        virtual_bag::equip_bag(&runtime_state().objects.bag, internal_bag, category);
     if (state_equipped) {
         extension_bag_mark_dirty_locked();
         if (persist_state_locked()) {
@@ -153,9 +153,9 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
                         category, src_bag, src_slot);
             return ExtensionBagEquipResult::kOk;
         }
-        g_virtual_bag_state.types[internal_bag] = 0;
-        g_virtual_bag_state.isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
-        virtual_bag::normalize(&g_virtual_bag_state);
+        runtime_state().objects.bag.types[internal_bag] = 0;
+        runtime_state().objects.bag.isolation_now_ms = extension_bag_ui_isolation_now_ms_locked();
+        virtual_bag::normalize(&runtime_state().objects.bag);
     } else {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip state reject bag=%d category=%d", internal_bag, category);
     }
@@ -184,12 +184,12 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
     if (!lock.owns_lock() || character == nullptr || item == nullptr ||
         !virtual_bag::valid_index(source_bag) ||
         source_slot < 0 || source_slot >= virtual_bag::kSlotCount ||
-        g_module_objects[source_bag][source_slot] != item ||
-        g_game == nullptr || g_character_extras->read.can_equip == nullptr ||
-        g_character_extras->read.find_equip_slot == nullptr ||
+        runtime_state().objects.module_objects[source_bag][source_slot] != item ||
+        runtime_state().host.game == nullptr || runtime_state().host.character_extras->read.can_equip == nullptr ||
+        runtime_state().host.character_extras->read.find_equip_slot == nullptr ||
         extension_bag_write_api() == nullptr ||
-        !g_module_view_installed || g_module_view_index != source_bag ||
-        g_module_window_original_bag < 0 || g_module_window_original_bag >= 5) {
+        !runtime_state().objects.module_view_installed || runtime_state().objects.module_view_index != source_bag ||
+        runtime_state().objects.module_window_original_bag < 0 || runtime_state().objects.module_window_original_bag >= 5) {
         return false;
     }
     if (!module_object_replacement_allowed_locked(source_bag, source_slot,
@@ -201,7 +201,7 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
     int target = -1;
     if (!extension_bag_ui_read_char_find_equip_slot(character, item, &target)) return false;
     if (target < 0) return false;
-    const int original_bag = g_module_window_original_bag;
+    const int original_bag = runtime_state().objects.module_window_original_bag;
     const auto* inventory_write = extension_bag_write_api();
     if (inventory_write == nullptr ||
         inventory_write->inventory.set_physical_item == nullptr) return false;
@@ -211,8 +211,8 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
     // only for the duration of that call and restore the real slot afterwards.
     void* original_inventory_item = nullptr;
     qol::contracts::QolItemHandle original_inventory_handle{};
-    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
-        !qol::contracts::succeeded(g_item_facts->physical_item_at(
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->physical_item_at == nullptr ||
+        !qol::contracts::succeeded(runtime_state().host.item_facts->physical_item_at(
             original_bag, source_slot, &original_inventory_handle)) ||
         (original_inventory_handle.slot != 0 &&
          !extension_bag_private_item_for_handle(original_inventory_handle,
@@ -225,10 +225,10 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
                                        &previous_equipped_payload_size)) {
         return false;
     }
-    const uint32_t source_handle = g_module_object_handles[source_bag][source_slot];
-    const uint64_t source_generation = g_module_object_use[source_bag][source_slot].generation;
+    const uint32_t source_handle = runtime_state().objects.module_object_handles[source_bag][source_slot];
+    const uint64_t source_generation = runtime_state().objects.module_object_use[source_bag][source_slot].generation;
     const uint64_t source_hash = virtual_bag::payload_hash(
-        g_virtual_bag_state.items[source_bag][source_slot]);
+        runtime_state().objects.bag.items[source_bag][source_slot]);
     if (!qol::contracts::succeeded(inventory_write->inventory.set_physical_item(
             original_bag, source_slot, item))) return false;
 
@@ -248,13 +248,13 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
                       original_bag, source_slot, original_inventory_item, restore_result.code);
         return false;
     }
-    const bool source_unchanged = g_module_objects[source_bag][source_slot] == item &&
-        g_module_object_handles[source_bag][source_slot] == source_handle &&
-        g_module_object_use[source_bag][source_slot].generation == source_generation &&
-        virtual_bag::payload_hash(g_virtual_bag_state.items[source_bag][source_slot]) ==
+    const bool source_unchanged = runtime_state().objects.module_objects[source_bag][source_slot] == item &&
+        runtime_state().objects.module_object_handles[source_bag][source_slot] == source_handle &&
+        runtime_state().objects.module_object_use[source_bag][source_slot].generation == source_generation &&
+        virtual_bag::payload_hash(runtime_state().objects.bag.items[source_bag][source_slot]) ==
             source_hash &&
-        g_module_view_installed && g_module_view_index == source_bag &&
-        g_module_window_original_bag == original_bag;
+        runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == source_bag &&
+        runtime_state().objects.module_window_original_bag == original_bag;
     if (!source_unchanged) {
         QOL_LOG_ERROR(QolDomain::kExtensionBag,
                       "ERROR extension character equip source changed during original exchange bag=%d slot=%d item=%p handle=%u generation=%llu",
@@ -272,20 +272,20 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
     // 扩展状态表示，不能让同一个旧指针同时继续留在原版 INVEN 中。
     // 角色装备接管对象所有权，不能走 free_module_object_locked；否则下一帧
     // 会把刚装备到角色槽的对象释放掉。先结束视图借用，再转为游戏侧持有。
-    const uint32_t handle = g_module_object_handles[source_bag][source_slot];
-    if (ownership::live_state(g_ownership_ledger, handle,
+    const uint32_t handle = runtime_state().objects.module_object_handles[source_bag][source_slot];
+    if (ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                               ownership::State::kBorrowedForView)) {
-        ownership::return_from_view(&g_ownership_ledger, handle);
+        ownership::return_from_view(&runtime_state().objects.ownership_ledger, handle);
     }
-    if (ownership::live_state(g_ownership_ledger, handle,
+    if (ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                               ownership::State::kModuleOwned)) {
-        if (ownership::handover_to_inventory(&g_ownership_ledger, handle) !=
+        if (ownership::handover_to_inventory(&runtime_state().objects.ownership_ledger, handle) !=
             ownership::Outcome::kOk) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip ownership handover failed bag=%d slot=%d",
                         source_bag, source_slot);
         }
     }
-    virtual_bag::Item& descriptor = g_virtual_bag_state.items[source_bag][source_slot];
+    virtual_bag::Item& descriptor = runtime_state().objects.bag.items[source_bag][source_slot];
     if (previous_equipped_item != nullptr) {
         descriptor.payload = previous_equipped_payload;
         descriptor.payload_size = previous_equipped_payload_size;
@@ -299,14 +299,14 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
                 source_bag, source_slot, "character equip replacement")) {
             return false;
         }
-        g_module_objects[source_bag][source_slot] = previous_equipped_item;
-        g_module_object_categories[source_bag][source_slot] = descriptor.category;
-        g_module_object_hashes[source_bag][source_slot] = virtual_bag::payload_hash(descriptor);
+        runtime_state().objects.module_objects[source_bag][source_slot] = previous_equipped_item;
+        runtime_state().objects.module_object_categories[source_bag][source_slot] = descriptor.category;
+        runtime_state().objects.module_object_hashes[source_bag][source_slot] = virtual_bag::payload_hash(descriptor);
         uint32_t adopted_handle = 0;
-        if (ownership::allocate(&g_ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
-            g_module_object_handles[source_bag][source_slot] = adopted_handle;
+        if (ownership::allocate(&runtime_state().objects.ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
+            runtime_state().objects.module_object_handles[source_bag][source_slot] = adopted_handle;
         } else {
-            g_module_object_handles[source_bag][source_slot] = 0;
+            runtime_state().objects.module_object_handles[source_bag][source_slot] = 0;
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip adopt ledger exhausted bag=%d slot=%d",
                         source_bag, source_slot);
         }
@@ -316,10 +316,10 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
                 source_bag, source_slot, "character equip clear")) {
             return false;
         }
-        g_module_objects[source_bag][source_slot] = nullptr;
-        g_module_object_categories[source_bag][source_slot] = 0;
-        g_module_object_hashes[source_bag][source_slot] = 0;
-        g_module_object_handles[source_bag][source_slot] = 0;
+        runtime_state().objects.module_objects[source_bag][source_slot] = nullptr;
+        runtime_state().objects.module_object_categories[source_bag][source_slot] = 0;
+        runtime_state().objects.module_object_hashes[source_bag][source_slot] = 0;
+        runtime_state().objects.module_object_handles[source_bag][source_slot] = 0;
     }
     extension_bag_mark_dirty_locked();
     persist_state_locked();
@@ -335,21 +335,21 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
 void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     bool switched_view = false;
     refresh_tab_bag_items_locked();
-    void* tab = g_extension_tab_buttons[internal_bag];
+    void* tab = runtime_state().ui.extension_tab_buttons[internal_bag];
     if (tab != nullptr) {
         void* data = extension_bag_ui_data(tab);
         if (data != nullptr) {
-            *reinterpret_cast<void**>(data) = g_tab_bag_items[internal_bag];
+            *reinterpret_cast<void**>(data) = runtime_state().ui.tab_bag_items[internal_bag];
         }
     }
-    if (g_module_view_installed && g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
-        g_module_view_index != internal_bag) {
+    if (runtime_state().objects.module_view_installed && runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
+        runtime_state().objects.module_view_index != internal_bag) {
         extension_bag_ui_handle_tab_click_locked(internal_bag);
-        switched_view = g_module_view_index == internal_bag;
+        switched_view = runtime_state().objects.module_view_index == internal_bag;
     }
-    if (g_module_view_installed && g_module_view_index == internal_bag) {
+    if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == internal_bag) {
         refresh_module_item_area_locked(internal_bag);
-    } else if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
+    } else if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     extension_bag_ui_update_character_equip();
@@ -359,7 +359,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
 
 bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
                                             int index, void* moving_control) {
-    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) return false;
+    if (!runtime_state().enabled.load() || !read_world_in_world()) return false;
     void* data = extension_bag_ui_data(moving_control);
     void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
     if (item == nullptr) return false;
@@ -375,19 +375,19 @@ bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
 }
 
 bool extension_source_should_equip_locked(int target_bag) {
-    const auto& session = g_extension_drag_session;
+    const auto& session = runtime_state().ui.extension_drag_session;
     if (!virtual_bag::valid_index(target_bag) ||
         !virtual_bag::valid_index(session.source_bag) ||
         session.source_slot < 0 || session.source_slot >= virtual_bag::kSlotCount) {
         return false;
     }
-    const int category = g_virtual_bag_state.items[session.source_bag][session.source_slot].category;
-    return g_virtual_bag_state.types[target_bag] == 0 && extension_bag_runtime_is_backpack_category(category);
+    const int category = runtime_state().objects.bag.items[session.source_bag][session.source_slot].category;
+    return runtime_state().objects.bag.types[target_bag] == 0 && extension_bag_runtime_is_backpack_category(category);
 }
 
 int first_empty_extension_bag_locked() {
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
-        if (g_virtual_bag_state.types[bag] == 0) return bag;
+        if (runtime_state().objects.bag.types[bag] == 0) return bag;
     }
     return -1;
 }
@@ -416,10 +416,10 @@ bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, in
 // 菜单）→ 锁内重装装备按钮 hook。物品从触发控件 data[0] 取（MakeDesc 同源）。
 void make_desc_equip_gate(void* ctrl, void* arg) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_DESC_OPEN_GATE"});
-    if (ctrl == nullptr || g_game == nullptr ||
-        g_write_port->ui.make_item_description == nullptr) return;
+    if (ctrl == nullptr || runtime_state().host.game == nullptr ||
+        runtime_state().host.write_port->ui.make_item_description == nullptr) return;
     // UIEquip_RefreshItemArea may have restored the original inventory object
     // immediately before the original event reaches MakeDesc. Rebind only
     // projected controls so the original MakeDesc reads the extension item.
@@ -430,20 +430,20 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
         if (data != nullptr) item = *reinterpret_cast<void**>(data);
     }
     (void)arg;
-    (void)g_write_port->ui.make_item_description(ctrl);
+    (void)runtime_state().host.write_port->ui.make_item_description(ctrl);
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         reset_extension_desc_item_hooks_locked();
-        g_extension_desc_item = nullptr;
-        g_extension_desc_item_bag = -1;
-        g_extension_desc_item_slot = -1;
+        runtime_state().ui.extension_desc_item = nullptr;
+        runtime_state().ui.extension_desc_item_bag = -1;
+        runtime_state().ui.extension_desc_item_slot = -1;
         if (item != nullptr) {
             int item_bag = -1;
             int item_slot = -1;
             if (module_slot_of_item_locked(item, &item_bag, &item_slot)) {
-                g_extension_desc_item = item;
-                g_extension_desc_item_bag = item_bag;
-                g_extension_desc_item_slot = item_slot;
+                runtime_state().ui.extension_desc_item = item;
+                runtime_state().ui.extension_desc_item_bag = item_bag;
+                runtime_state().ui.extension_desc_item_slot = item_slot;
                 // 装备/卸下按钮由函数级 hook
                 // （ButtonEquipExe 第 10）承担，观察 hook 只覆盖其他详情按钮。
                 install_extension_desc_item_hooks_locked(item);

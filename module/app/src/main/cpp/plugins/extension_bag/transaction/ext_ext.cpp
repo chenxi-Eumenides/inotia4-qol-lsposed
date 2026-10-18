@@ -11,15 +11,15 @@
 namespace {
 
 bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst_slot) {
-    const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
-    const virtual_bag::Item destination = g_virtual_bag_state.items[dst_bag][dst_slot];
+    const virtual_bag::Item source = runtime_state().objects.bag.items[src_bag][src_slot];
+    const virtual_bag::Item destination = runtime_state().objects.bag.items[dst_bag][dst_slot];
     if (source.category <= 0 || source.count <= 0 || destination.category <= 0 ||
         destination.count <= 0 || !virtual_bag::valid_payload(destination)) {
         return false;
     }
 
-    const ModuleUseState& source_use = g_module_object_use[src_bag][src_slot];
-    const ModuleUseState& destination_use = g_module_object_use[dst_bag][dst_slot];
+    const ModuleUseState& source_use = runtime_state().objects.module_object_use[src_bag][src_slot];
+    const ModuleUseState& destination_use = runtime_state().objects.module_object_use[dst_bag][dst_slot];
     if (!virtual_bag::extension_swap_tokens_available(
             source_use.active, source_use.pending_release, destination_use.active,
             destination_use.pending_release)) {
@@ -32,18 +32,18 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         return false;
     }
 
-    const auto previous_source_object = g_module_objects[src_bag][src_slot];
-    const auto previous_destination_object = g_module_objects[dst_bag][dst_slot];
-    const int previous_source_category = g_module_object_categories[src_bag][src_slot];
-    const int previous_destination_category = g_module_object_categories[dst_bag][dst_slot];
-    const uint32_t previous_source_hash = g_module_object_hashes[src_bag][src_slot];
-    const uint32_t previous_destination_hash = g_module_object_hashes[dst_bag][dst_slot];
-    const uint32_t previous_source_handle = g_module_object_handles[src_bag][src_slot];
-    const uint32_t previous_destination_handle = g_module_object_handles[dst_bag][dst_slot];
+    const auto previous_source_object = runtime_state().objects.module_objects[src_bag][src_slot];
+    const auto previous_destination_object = runtime_state().objects.module_objects[dst_bag][dst_slot];
+    const int previous_source_category = runtime_state().objects.module_object_categories[src_bag][src_slot];
+    const int previous_destination_category = runtime_state().objects.module_object_categories[dst_bag][dst_slot];
+    const uint32_t previous_source_hash = runtime_state().objects.module_object_hashes[src_bag][src_slot];
+    const uint32_t previous_destination_hash = runtime_state().objects.module_object_hashes[dst_bag][dst_slot];
+    const uint32_t previous_source_handle = runtime_state().objects.module_object_handles[src_bag][src_slot];
+    const uint32_t previous_destination_handle = runtime_state().objects.module_object_handles[dst_bag][dst_slot];
     const ModuleUseState previous_source_use = source_use;
     const ModuleUseState previous_destination_use = destination_use;
-    const ownership::Ledger previous_ledger = g_ownership_ledger;
-    const bool previous_dirty = g_item_state_dirty;
+    const ownership::Ledger previous_ledger = runtime_state().objects.ownership_ledger;
+    const bool previous_dirty = runtime_state().persistence.dirty;
     bool objects_swapped = false;
 
     // 非空缓存若与 descriptor 不一致，不能让 materialize 先释放旧指针再尝试
@@ -69,12 +69,12 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     // 的新 handle 必须从当前槽读取，不能被旧的 0 覆盖。
     const uint32_t source_handle_for_object =
         virtual_bag::handle_if_object_matches(
-            source_object, g_module_objects[src_bag][src_slot],
-            g_module_object_handles[src_bag][src_slot]);
+            source_object, runtime_state().objects.module_objects[src_bag][src_slot],
+            runtime_state().objects.module_object_handles[src_bag][src_slot]);
     const uint32_t destination_handle_for_object =
         virtual_bag::handle_if_object_matches(
-            destination_object, g_module_objects[dst_bag][dst_slot],
-            g_module_object_handles[dst_bag][dst_slot]);
+            destination_object, runtime_state().objects.module_objects[dst_bag][dst_slot],
+            runtime_state().objects.module_object_handles[dst_bag][dst_slot]);
 
     auto restore = [&](const virtual_bag::TransactionContext* txn, const char* reason) {
         if (txn != nullptr) {
@@ -84,7 +84,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
             const int bag = objects_swapped ? dst_bag : src_bag;
             const int slot = objects_swapped ? dst_slot : src_slot;
             // 提交后 source_object 已在目标槽，不能再用入参 source_slot 查找。
-            if (g_module_objects[bag][slot] == source_object) {
+            if (runtime_state().objects.module_objects[bag][slot] == source_object) {
                 free_module_object_locked(bag, slot);
             }
         }
@@ -92,29 +92,29 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
             const int bag = objects_swapped ? src_bag : dst_bag;
             const int slot = objects_swapped ? src_slot : dst_slot;
             // 提交后 destination_object 已在源槽；回滚必须按交换后的实际槽位清理。
-            if (g_module_objects[bag][slot] == destination_object) {
+            if (runtime_state().objects.module_objects[bag][slot] == destination_object) {
                 free_module_object_locked(bag, slot);
             }
         }
-        g_module_objects[src_bag][src_slot] = previous_source_object;
-        g_module_objects[dst_bag][dst_slot] = previous_destination_object;
-        g_module_object_categories[src_bag][src_slot] = previous_source_category;
-        g_module_object_categories[dst_bag][dst_slot] = previous_destination_category;
-        g_module_object_hashes[src_bag][src_slot] = previous_source_hash;
-        g_module_object_hashes[dst_bag][dst_slot] = previous_destination_hash;
-        g_module_object_handles[src_bag][src_slot] = previous_source_handle;
-        g_module_object_handles[dst_bag][dst_slot] = previous_destination_handle;
-        g_module_object_use[src_bag][src_slot] = previous_source_use;
-        g_module_object_use[dst_bag][dst_slot] = previous_destination_use;
-        g_ownership_ledger = previous_ledger;
-        g_item_state_dirty = previous_dirty;
-        if (g_module_view_installed) {
-            if (g_module_view_index == src_bag) {
-                void* control = valid_child_locked(g_projected_item_root, src_slot);
+        runtime_state().objects.module_objects[src_bag][src_slot] = previous_source_object;
+        runtime_state().objects.module_objects[dst_bag][dst_slot] = previous_destination_object;
+        runtime_state().objects.module_object_categories[src_bag][src_slot] = previous_source_category;
+        runtime_state().objects.module_object_categories[dst_bag][dst_slot] = previous_destination_category;
+        runtime_state().objects.module_object_hashes[src_bag][src_slot] = previous_source_hash;
+        runtime_state().objects.module_object_hashes[dst_bag][dst_slot] = previous_destination_hash;
+        runtime_state().objects.module_object_handles[src_bag][src_slot] = previous_source_handle;
+        runtime_state().objects.module_object_handles[dst_bag][dst_slot] = previous_destination_handle;
+        runtime_state().objects.module_object_use[src_bag][src_slot] = previous_source_use;
+        runtime_state().objects.module_object_use[dst_bag][dst_slot] = previous_destination_use;
+        runtime_state().objects.ownership_ledger = previous_ledger;
+        runtime_state().persistence.dirty = previous_dirty;
+        if (runtime_state().objects.module_view_installed) {
+            if (runtime_state().objects.module_view_index == src_bag) {
+                void* control = valid_child_locked(runtime_state().objects.projected_item_root, src_slot);
                 if (control != nullptr) (void)extension_bag_ui_set_control_item(control, previous_source_object);
             }
-            if (g_module_view_index == dst_bag) {
-                void* control = valid_child_locked(g_projected_item_root, dst_slot);
+            if (runtime_state().objects.module_view_index == dst_bag) {
+                void* control = valid_child_locked(runtime_state().objects.projected_item_root, dst_slot);
                 if (control != nullptr) (void)extension_bag_ui_set_control_item(control, previous_destination_object);
             }
         }
@@ -143,16 +143,16 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         restore(nullptr, "swap pending record failed");
         return false;
     }
-    virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
+    virtual_bag::txn_apply_logical(&runtime_state().objects.bag, txn);
 
-    g_module_objects[src_bag][src_slot] = destination_object;
-    g_module_objects[dst_bag][dst_slot] = source_object;
-    g_module_object_categories[src_bag][src_slot] = destination.category;
-    g_module_object_categories[dst_bag][dst_slot] = source.category;
-    g_module_object_hashes[src_bag][src_slot] = virtual_bag::payload_hash(destination);
-    g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(source);
-    g_module_object_handles[src_bag][src_slot] = destination_handle_for_object;
-    g_module_object_handles[dst_bag][dst_slot] = source_handle_for_object;
+    runtime_state().objects.module_objects[src_bag][src_slot] = destination_object;
+    runtime_state().objects.module_objects[dst_bag][dst_slot] = source_object;
+    runtime_state().objects.module_object_categories[src_bag][src_slot] = destination.category;
+    runtime_state().objects.module_object_categories[dst_bag][dst_slot] = source.category;
+    runtime_state().objects.module_object_hashes[src_bag][src_slot] = virtual_bag::payload_hash(destination);
+    runtime_state().objects.module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(source);
+    runtime_state().objects.module_object_handles[src_bag][src_slot] = destination_handle_for_object;
+    runtime_state().objects.module_object_handles[dst_bag][dst_slot] = source_handle_for_object;
     objects_swapped = true;
 
     if (!module_object_generation_advance_locked(src_bag, src_slot, "extension swap source") ||
@@ -163,14 +163,14 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
 
     auto sync_view_ownership = [&](int bag, int /*slot*/, uint32_t handle) {
         if (handle == 0) return true;
-        const bool visible = g_module_view_installed && g_module_view_index == bag;
-        if (visible && ownership::live_state(g_ownership_ledger, handle,
+        const bool visible = runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == bag;
+        if (visible && ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                                              ownership::State::kModuleOwned)) {
-            return ownership::borrow_for_view(&g_ownership_ledger, handle) == ownership::Outcome::kOk;
+            return ownership::borrow_for_view(&runtime_state().objects.ownership_ledger, handle) == ownership::Outcome::kOk;
         }
-        if (!visible && ownership::live_state(g_ownership_ledger, handle,
+        if (!visible && ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                                               ownership::State::kBorrowedForView)) {
-            return ownership::return_from_view(&g_ownership_ledger, handle) == ownership::Outcome::kOk;
+            return ownership::return_from_view(&runtime_state().objects.ownership_ledger, handle) == ownership::Outcome::kOk;
         }
         return true;
     };
@@ -179,54 +179,54 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         restore(&txn, "swap view ownership update failed");
         return false;
     }
-    if (g_module_view_installed) {
-        if (g_module_view_index == src_bag) {
-            void* control = valid_child_locked(g_projected_item_root, src_slot);
+    if (runtime_state().objects.module_view_installed) {
+        if (runtime_state().objects.module_view_index == src_bag) {
+            void* control = valid_child_locked(runtime_state().objects.projected_item_root, src_slot);
             if (control != nullptr) (void)extension_bag_ui_set_control_item(control, destination_object);
         }
-        if (g_module_view_index == dst_bag) {
-            void* control = valid_child_locked(g_projected_item_root, dst_slot);
+        if (runtime_state().objects.module_view_index == dst_bag) {
+            void* control = valid_child_locked(runtime_state().objects.projected_item_root, dst_slot);
             if (control != nullptr) (void)extension_bag_ui_set_control_item(control, source_object);
         }
     }
-    g_virtual_bag_state.pending = {};
+    runtime_state().objects.bag.pending = {};
     extension_bag_mark_dirty_locked();
     reset_drag_state_locked(nullptr);
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot,
-                static_cast<unsigned long long>(g_module_object_use[src_bag][src_slot].generation),
-                static_cast<unsigned long long>(g_module_object_use[dst_bag][dst_slot].generation));
+                static_cast<unsigned long long>(runtime_state().objects.module_object_use[src_bag][src_slot].generation),
+                static_cast<unsigned long long>(runtime_state().objects.module_object_use[dst_bag][dst_slot].generation));
     return true;
 }
 
 bool sync_ext2ext_destination_view_locked(int bag, int slot, void* expected_item) {
-    if (!g_module_view_installed || g_module_view_index != bag) return true;
+    if (!runtime_state().objects.module_view_installed || runtime_state().objects.module_view_index != bag) return true;
     if (!virtual_bag::valid_index(bag) || slot < 0 ||
-        slot >= g_virtual_bag_state.capacities[bag] || g_projected_item_root == nullptr ||
-        g_module_objects[bag][slot] != expected_item) {
+        slot >= runtime_state().objects.bag.capacities[bag] || runtime_state().objects.projected_item_root == nullptr ||
+        runtime_state().objects.module_objects[bag][slot] != expected_item) {
         return false;
     }
-    const uint32_t handle = g_module_object_handles[bag][slot];
+    const uint32_t handle = runtime_state().objects.module_object_handles[bag][slot];
     if ((expected_item == nullptr) != (handle == 0)) return false;
-    void* control = valid_child_locked(g_projected_item_root, slot);
+    void* control = valid_child_locked(runtime_state().objects.projected_item_root, slot);
     if (control == nullptr || !sync_projected_slot_locked(bag, slot)) return false;
     void* data = extension_bag_ui_data(control);
     if (data == nullptr || *reinterpret_cast<void**>(data) != expected_item) return false;
 
     if (expected_item != nullptr) {
-        if (ownership::live_state(g_ownership_ledger, handle,
+        if (ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                                   ownership::State::kModuleOwned)) {
-            if (ownership::borrow_for_view(&g_ownership_ledger, handle) !=
+            if (ownership::borrow_for_view(&runtime_state().objects.ownership_ledger, handle) !=
                 ownership::Outcome::kOk) {
                 return false;
             }
-        } else if (!ownership::live_state(g_ownership_ledger, handle,
+        } else if (!ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                                           ownership::State::kBorrowedForView)) {
             return false;
         }
-        if (g_module_objects[bag][slot] != expected_item ||
-            g_module_object_handles[bag][slot] != handle ||
-            !ownership::live_state(g_ownership_ledger, handle,
+        if (runtime_state().objects.module_objects[bag][slot] != expected_item ||
+            runtime_state().objects.module_object_handles[bag][slot] != handle ||
+            !ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                                    ownership::State::kBorrowedForView) ||
             *reinterpret_cast<void**>(data) != expected_item) {
             return false;
@@ -241,12 +241,12 @@ bool restore_ext2ext_destination_locked(const virtual_bag::TransactionContext& t
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return false;
     }
-    const virtual_bag::Item& previous = g_virtual_bag_state.items[bag][slot];
+    const virtual_bag::Item& previous = runtime_state().objects.bag.items[bag][slot];
     void* item = nullptr;
     if (previous.category > 0 && previous.count > 0) {
         item = module_item_locked(bag, slot);
         if (item == nullptr) return false;
-    } else if (g_module_objects[bag][slot] != nullptr) {
+    } else if (runtime_state().objects.module_objects[bag][slot] != nullptr) {
         if (!free_module_object_locked(bag, slot)) return false;
     }
     return sync_ext2ext_destination_view_locked(bag, slot, item);
@@ -256,7 +256,7 @@ bool restore_ext2ext_destination_locked(const virtual_bag::TransactionContext& t
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot) {
     if (!virtual_bag::valid_index(src_bag) || !virtual_bag::valid_index(dst_bag) ||
-        g_virtual_bag_state.capacities[dst_bag] == 0 || src_slot < 0 ||
+        runtime_state().objects.bag.capacities[dst_bag] == 0 || src_slot < 0 ||
         src_slot >= virtual_bag::kSlotCount ||
         (requested_dst_slot >= 0 &&
          !virtual_bag::valid_ext2ext_transfer_slots(src_bag, src_slot, dst_bag,
@@ -265,7 +265,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                     src_bag, src_slot, dst_bag, requested_dst_slot);
         return false;
     }
-    const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
+    const virtual_bag::Item source = runtime_state().objects.bag.items[src_bag][src_slot];
     if (source.category <= 0 || source.count <= 0) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension source empty=%d/%d", src_bag,
                     src_slot);
@@ -281,7 +281,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         return false;
     }
 
-    const int capacity = g_virtual_bag_state.capacities[dst_bag];
+    const int capacity = runtime_state().objects.bag.capacities[dst_bag];
     virtual_bag::Item committed{};
     int dst_slot = -1;
     bool merged = false;
@@ -293,7 +293,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
             slot == src_slot) {
             return false;
         }
-        const virtual_bag::Item& existing = g_virtual_bag_state.items[dst_bag][slot];
+        const virtual_bag::Item& existing = runtime_state().objects.bag.items[dst_bag][slot];
         if (!move_merge_enabled() ||
             !virtual_bag::same_extension_bag_mergeable_items(
                 existing, source, virtual_bag_category_uses_stack_count)) {
@@ -392,7 +392,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         if (!try_merge(requested_dst_slot)) {
             if (!module_slot_is_assignable_locked(dst_bag, requested_dst_slot)) {
                 const virtual_bag::Item& destination =
-                    g_virtual_bag_state.items[dst_bag][requested_dst_slot];
+                    runtime_state().objects.bag.items[dst_bag][requested_dst_slot];
                 if (destination.category > 0 && destination.count > 0 &&
                     (src_bag != dst_bag || src_slot != requested_dst_slot)) {
                     if (swap_extension_slots_locked(src_bag, src_slot, dst_bag,
@@ -440,7 +440,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     txn.merged = merged;
     txn.source = source;
     txn.committed = committed;
-    txn.previous_dst = g_virtual_bag_state.items[dst_bag][dst_slot];
+    txn.previous_dst = runtime_state().objects.bag.items[dst_bag][dst_slot];
     generate_transaction_id_locked(txn.transaction_id);
     if (txn.merged) {
         QOL_LOG_INFO(QolDomain::kExtensionBag, "txn prepared id=%s extension merge %d/%d -> %d/%d count=%d+%d=%d",
@@ -448,7 +448,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                     txn.previous_dst.count, txn.committed.count);
     }
     if (!module_object_release_allowed_locked(
-            src_bag, src_slot, g_module_objects[src_bag][src_slot],
+            src_bag, src_slot, runtime_state().objects.module_objects[src_bag][src_slot],
             "extension-merge source", false, nullptr)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "txn reject id=%s extension merge source object in use",
                     txn.transaction_id);
@@ -459,11 +459,11 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     if (!txn_record_pending_locked(&txn)) return false;
 
     // logical-state-updated：仅更新扩展逻辑 source/target（不调用原版库存移动，不建 journal）。
-    virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
+    virtual_bag::txn_apply_logical(&runtime_state().objects.bag, txn);
     extension_bag_mark_dirty_locked();
 
     // committed
-    g_virtual_bag_state.pending = {};
+    runtime_state().objects.bag.pending = {};
     // 事务只更新 descriptor；提交前的目标控件仍绑定旧对象（或 nullptr）。
     // 先按新 descriptor 物化目标对象，后续 projection refresh 才能把新物品
     // 立即绑定到目标槽，而不是等切换标签重新 install 视图时才显示。
@@ -479,7 +479,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                           txn.transaction_id, dst_bag, dst_slot);
         }
         return false;
-    } else if (g_module_view_installed && g_module_view_index == dst_bag) {
+    } else if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == dst_bag) {
         if (!sync_ext2ext_destination_view_locked(dst_bag, dst_slot, destination_item)) {
             // 投影槽与目标 handle/borrow 必须同时确认，否则事务回到逻辑更新前且保留源。
             QOL_LOG_WARN(QolDomain::kExtensionBag, "txn destination view borrow failed id=%s dst=%d/%d",

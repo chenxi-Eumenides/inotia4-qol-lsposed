@@ -22,42 +22,42 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
         sdk->desc_button.original_matches == nullptr || sdk->desc_button.call_original == nullptr ||
         sdk->scheduler.add == nullptr ||
         sdk->scheduler.remove == nullptr || sdk->capabilities.require == nullptr) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_write_port = nullptr;
-        g_character_extras = nullptr;
-        g_inventory_extras = nullptr;
+        runtime_state().host.sdk = nullptr;
+        runtime_state().host.game = nullptr;
+        runtime_state().host.write_port = nullptr;
+        runtime_state().host.character_extras = nullptr;
+        runtime_state().host.inventory_extras = nullptr;
         return false;
     }
-    g_sdk = sdk;
-    g_game = game;
-    g_write_port = write_port;
+    runtime_state().host.sdk = sdk;
+    runtime_state().host.game = game;
+    runtime_state().host.write_port = write_port;
     return true;
 }
 
 void extension_bag_bind_character_extras(
     const qol::contracts::QolCharacterExtrasPort* port) {
-    g_character_extras = port;
+    runtime_state().host.character_extras = port;
 }
 
 void extension_bag_bind_inventory_extras(
     const qol::contracts::QolInventoryExtrasPort* port) {
-    g_inventory_extras = port;
+    runtime_state().host.inventory_extras = port;
 }
 
-const qol::contracts::QolGameHost* extension_bag_game_host() { return g_game; }
-const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return g_sdk; }
+const qol::contracts::QolGameHost* extension_bag_game_host() { return runtime_state().host.game; }
+const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return runtime_state().host.sdk; }
 
 void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts) {
-    g_item_facts = facts;
+    runtime_state().host.item_facts = facts;
 }
 
-const qol::contracts::ItemFactsApi* extension_bag_item_facts() { return g_item_facts; }
+const qol::contracts::ItemFactsApi* extension_bag_item_facts() { return runtime_state().host.item_facts; }
 
 void extension_bag_bind_craft_facts(const qol::contracts::CraftFactsApi* facts) {
-    g_craft_facts = facts;
+    runtime_state().host.craft_facts = facts;
 }
 
-const qol::contracts::CraftFactsApi* extension_bag_craft_facts() { return g_craft_facts; }
+const qol::contracts::CraftFactsApi* extension_bag_craft_facts() { return runtime_state().host.craft_facts; }
 
 }  // namespace qol::features::extension_bag

@@ -42,7 +42,7 @@ enum class ExtensionBagUnequipResult {
 
 struct NativeCallScope {
     const bool previous = g_in_native_call;
-    const qol::contracts::QolGameHost* game = g_game;
+    const qol::contracts::QolGameHost* game = runtime_state().host.game;
 
     NativeCallScope() {
         g_in_native_call = true;

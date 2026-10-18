@@ -84,8 +84,8 @@ bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, in
                                  void* expected_item, const char* context) {
     if (!lock.owns_lock() || extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.remove_item_direct == nullptr ||
-        expected_item == nullptr || g_item_facts == nullptr ||
-        g_item_facts->item_ref_at == nullptr) {
+        expected_item == nullptr || runtime_state().host.item_facts == nullptr ||
+        runtime_state().host.item_facts->item_ref_at == nullptr) {
         return false;
     }
 
@@ -93,7 +93,7 @@ bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, in
     qol::contracts::QolInventoryItemRef source_ref{};
     qol::contracts::QolItemHandle source_handle{};
     if (!inventory_slot_locked(bag, slot, &source_item) || source_item != expected_item ||
-        !qol::contracts::succeeded(g_item_facts->item_ref_at(bag, slot, &source_ref)) ||
+        !qol::contracts::succeeded(runtime_state().host.item_facts->item_ref_at(bag, slot, &source_ref)) ||
         source_ref.bag != bag || source_ref.slot != slot ||
         source_ref.item.slot == 0 || source_ref.item.generation == 0 ||
         !extension_bag_item_handle_for_pointer(expected_item, &source_handle) ||
@@ -120,7 +120,7 @@ bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, in
     const bool readable = inventory_slot_locked(bag, slot, &actual_item);
     qol::contracts::QolInventoryItemRef actual_ref{};
     const bool identity_readable = qol::contracts::succeeded(
-        g_item_facts->item_ref_at(bag, slot, &actual_ref));
+        runtime_state().host.item_facts->item_ref_at(bag, slot, &actual_ref));
     const bool identity_at_source = identity_readable &&
         actual_ref.bag == bag && actual_ref.slot == slot;
     const bool source_handle_cleared = identity_at_source &&
@@ -155,18 +155,18 @@ void teardown_extension_bag_hosts_locked() {
 }
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, uint64_t param2,
                            int64_t x = -1, int64_t y = -1) {
-    const uint64_t sequence = g_exit_trace_sequence.fetch_add(1) + 1;
+    const uint64_t sequence = runtime_state().exit_trace_sequence.fetch_add(1) + 1;
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
     VIRTBAG_LOG("exit seq=%llu ms=%lld phase=%s event=0x%llx param=0x%llx param2=0x%llx x=%lld y=%lld mode=%d selected=%d inspected=%d overlay=%d overlay_index=%d direct=%d got=%d desc=%d saved_direct=%u saved_got=%u",
                 static_cast<unsigned long long>(sequence), static_cast<long long>(milliseconds), phase,
                 static_cast<unsigned long long>(event), static_cast<unsigned long long>(param),
                 static_cast<unsigned long long>(param2), static_cast<long long>(x), static_cast<long long>(y),
-                static_cast<int>(g_virtual_bag_state.mode), g_virtual_bag_state.selected,
-                g_virtual_bag_state.inspected, g_module_view_installed ? 1 : 0, g_module_view_index,
+                static_cast<int>(runtime_state().objects.bag.mode), runtime_state().objects.bag.selected,
+                runtime_state().objects.bag.inspected, runtime_state().objects.module_view_installed ? 1 : 0, runtime_state().objects.module_view_index,
                 raw_direct_bag_locked(), raw_got_bag_locked(), raw_desc_type_locked(),
-                static_cast<unsigned int>(g_original_current_direct),
-                static_cast<unsigned int>(g_original_current_got));
+                static_cast<unsigned int>(runtime_state().objects.original_current_direct),
+                static_cast<unsigned int>(runtime_state().objects.original_current_got));
 }
 void ensure_state_loaded_locked();
 bool persist_state_locked(bool force = false);
@@ -180,7 +180,7 @@ void restore_extension_desc_popup_callbacks_locked();
 bool module_cache_clear_preflight_locked() {
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            const ModuleUseState& use = g_module_object_use[bag][slot];
+            const ModuleUseState& use = runtime_state().objects.module_object_use[bag][slot];
             if (use.active) {
                 VIRTBAG_LOG("module cache clear preflight rejected active object bag=%d slot=%d item=%p generation=%llu",
                             bag, slot, use.item,
@@ -201,33 +201,33 @@ bool clear_module_cache_locked() {
             // exit instead of retaining stale pointers across saves.
             if (!free_module_object_locked(bag, slot)) {
                 VIRTBAG_LOG("module cache clear aborted; retained object bag=%d slot=%d item=%p",
-                            bag, slot, g_module_objects[bag][slot]);
+                            bag, slot, runtime_state().objects.module_objects[bag][slot]);
                 return false;
             }
         }
     }
     cancel_projected_drag_session_locked("module-cache-clear");
     reset_extension_desc_item_hooks_locked();
-    g_extension_desc_item = nullptr;
-    g_extension_desc_item_bag = -1;
-    g_extension_desc_item_slot = -1;
-    g_original_inventory.fill(nullptr);
+    runtime_state().ui.extension_desc_item = nullptr;
+    runtime_state().ui.extension_desc_item_bag = -1;
+    runtime_state().ui.extension_desc_item_slot = -1;
+    runtime_state().objects.original_inventory.fill(nullptr);
     // 标签袋物品对象是 ItemPool 里的裸指针，跨存档槽位加载必须失效：游戏
     // SAVE_LoadItem 重置/回收池内存，旧指针会被新读入的存档物品复用（真机
     // 实证：返回主菜单不保存重进存档后，扩展标签/信息页显示成药水、金币）。
     // 此处只清引用不释放——对象可能已被池回收，再 ItemPool_Free 是 UAF；
     // 下次 install_extension_tab_buttons 按 types 重建新对象。
-    for (void*& tab_item : g_tab_bag_items) tab_item = nullptr;
-    g_original_bag_size_bag = -1;
-    g_original_bag_size = 0;
-    g_module_window_original_bag = -1;
-    g_original_current_direct = 0;
-    g_original_current_got = 0;
-    g_module_view_installed = false;
-    g_module_view_index = -1;
-    g_item_state_dirty = false;
-    g_extension_touch_capture = false;
-    g_extension_drag = {};
+    for (void*& tab_item : runtime_state().ui.tab_bag_items) tab_item = nullptr;
+    runtime_state().objects.original_bag_size_bag = -1;
+    runtime_state().objects.original_bag_size = 0;
+    runtime_state().objects.module_window_original_bag = -1;
+    runtime_state().objects.original_current_direct = 0;
+    runtime_state().objects.original_current_got = 0;
+    runtime_state().objects.module_view_installed = false;
+    runtime_state().objects.module_view_index = -1;
+    runtime_state().persistence.dirty = false;
+    runtime_state().ui.extension_touch_capture = false;
+    runtime_state().ui.extension_drag = {};
     return true;
 }
 
@@ -271,13 +271,13 @@ void ensure_state_loaded_locked() {
     // 保留函数作为全部既有调用点的稳定锚，无 IO、无游戏状态读取。
 }
 bool inventory_slot_locked(int bag, int slot, void** out) {
-    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->physical_item_at == nullptr ||
         out == nullptr || bag < 0 || bag >= 6 || slot < 0 ||
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
     qol::contracts::QolItemHandle handle{};
-    if (!qol::contracts::succeeded(g_item_facts->physical_item_at(bag, slot, &handle))) {
+    if (!qol::contracts::succeeded(runtime_state().host.item_facts->physical_item_at(bag, slot, &handle))) {
         return false;
     }
     return extension_bag_private_item_for_handle(handle, out);
@@ -285,7 +285,7 @@ bool inventory_slot_locked(int bag, int slot, void** out) {
 
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
                                                 int target_bag) {
-    if (g_game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
+    if (runtime_state().host.game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
         payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return false;
@@ -304,7 +304,7 @@ bool original_inventory_contains_payload_locked(const uint8_t* payload, int payl
 
 int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_size,
                                            int target_bag) {
-    if (g_game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
+    if (runtime_state().host.game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
         payload_size <= 0 || !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return -1;
@@ -325,7 +325,7 @@ int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_s
 
 int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected,
                                           int target_bag) {
-    if (g_item_facts == nullptr || g_item_facts->physical_item_at == nullptr ||
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->physical_item_at == nullptr ||
         !virtual_bag::valid_original_transaction_bag(target_bag)) {
         return -1;
     }
@@ -333,7 +333,7 @@ int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected
     for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
         qol::contracts::QolItemHandle handle{};
         if (qol::contracts::succeeded(
-                g_item_facts->physical_item_at(target_bag, slot, &handle))) {
+                runtime_state().host.item_facts->physical_item_at(target_bag, slot, &handle))) {
             handles[static_cast<size_t>(slot)] = handle;
         }
     }
@@ -359,7 +359,7 @@ bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
         VIRTBAG_LOG("txn pending reject id=%s reason=invalid_domain", txn->transaction_id);
         return false;
     }
-    g_virtual_bag_state.pending = txn->pending;
+    runtime_state().objects.bag.pending = txn->pending;
     extension_bag_mark_dirty_locked();
     VIRTBAG_LOG("txn stage=pending-recorded durable=false id=%s direction=%u src=%u/%u dst=%u/%u",
                 txn->transaction_id, static_cast<unsigned int>(txn->direction),
@@ -381,7 +381,7 @@ uint64_t isolation_now_ms_locked() {
 // P4.5：pending 恢复失败隔离——原始袋槽值原样保留（可能越界，不正则化），
 // payload 字节留作只读诊断。
 void isolate_pending_locked(const char* reason, const char* detail) {
-    const virtual_bag::PendingTransfer& pending = g_virtual_bag_state.pending;
+    const virtual_bag::PendingTransfer& pending = runtime_state().objects.bag.pending;
     virtual_bag::IsolationRecord record{};
     record.valid = true;
     record.reason = reason;
@@ -398,7 +398,7 @@ void isolate_pending_locked(const char* reason, const char* detail) {
     record.source_payload_size = pending.source_payload_size;
     record.source_payload = pending.source_payload;
     record.detail = detail;
-    push_isolation(&g_virtual_bag_state, record);
+    push_isolation(&runtime_state().objects.bag, record);
 }
 
 // P4.5：ext→orig 失败隔离——扩展源逻辑物品保留（payload 字节未丢），记录
@@ -421,12 +421,12 @@ void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
     record.payload_size = txn.source.payload_size;
     record.payload = txn.source.payload;
     record.detail = detail;
-    push_isolation(&g_virtual_bag_state, record);
+    push_isolation(&runtime_state().objects.bag, record);
 }
 
 void txn_abort_locked(const virtual_bag::TransactionContext& txn,
                       virtual_bag::TxnStage failed_at, const char* reason) {
-    virtual_bag::txn_rollback_logical(&g_virtual_bag_state, txn, failed_at);
+    virtual_bag::txn_rollback_logical(&runtime_state().objects.bag, txn, failed_at);
     extension_bag_mark_dirty_locked();
     VIRTBAG_LOG("txn abort stage=%d id=%s reason=%s direction=%u src=%u/%u dst=%u/%u",
                 static_cast<int>(failed_at), txn.transaction_id, reason,
@@ -438,7 +438,7 @@ void txn_abort_locked(const virtual_bag::TransactionContext& txn,
 }
 
 void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
-    const virtual_bag::PendingTransfer pending = g_virtual_bag_state.pending;
+    const virtual_bag::PendingTransfer pending = runtime_state().objects.bag.pending;
     if (!pending.valid) return;
     if (!virtual_bag::valid_pending_transfer_domain(pending)) {
         isolate_pending_locked(virtual_bag::isolation_reason::kInvalidTransactionDomain,
@@ -449,7 +449,7 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                     static_cast<unsigned int>(pending.src_slot),
                     static_cast<unsigned int>(pending.dst_bag),
                     static_cast<unsigned int>(pending.dst_slot));
-        g_virtual_bag_state.pending = {};
+        runtime_state().objects.bag.pending = {};
         extension_bag_mark_dirty_locked();
         persist_state_locked();
         return;
@@ -476,26 +476,26 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                     static_cast<unsigned int>(pending.src_slot),
                     static_cast<unsigned int>(pending.dst_bag),
                     static_cast<unsigned int>(pending.dst_slot));
-        g_virtual_bag_state.pending = {};
+        runtime_state().objects.bag.pending = {};
         extension_bag_mark_dirty_locked();
         persist_state_locked();
         return;
     }
-    const bool restore_module = g_module_view_installed;
-    const int restore_bag = g_module_view_index;
-    const int restore_original_bag = g_module_window_original_bag;
-    const virtual_bag::Mode restore_mode = g_virtual_bag_state.mode;
-    const int restore_selected = g_virtual_bag_state.selected;
-    const int restore_inspected = g_virtual_bag_state.inspected;
+    const bool restore_module = runtime_state().objects.module_view_installed;
+    const int restore_bag = runtime_state().objects.module_view_index;
+    const int restore_original_bag = runtime_state().objects.module_window_original_bag;
+    const virtual_bag::Mode restore_mode = runtime_state().objects.bag.mode;
+    const int restore_selected = runtime_state().objects.bag.selected;
+    const int restore_inspected = runtime_state().objects.bag.inspected;
     if (restore_module) restore_module_view_locked();
     const virtual_bag::RecoveryAction action =
-        virtual_bag::recovery_action(g_virtual_bag_state, pending);
+        virtual_bag::recovery_action(runtime_state().objects.bag, pending);
     VIRTBAG_LOG("pending recovery direction=%d action=%d", static_cast<int>(pending.direction),
                 static_cast<int>(action));
     bool clear_pending = false;
     if (pending.direction == virtual_bag::kTransferExtensionToOriginal) {
         const bool source_matches = virtual_bag::item_matches_payload(
-            g_virtual_bag_state.items[pending.src_bag][pending.src_slot], pending);
+            runtime_state().objects.bag.items[pending.src_bag][pending.src_slot], pending);
         const int target_slot = original_inventory_payload_slot_locked(
             pending.payload.data(), pending.payload_size, pending.dst_bag);
         const auto recovery = virtual_bag::ext2orig_recovery_action(
@@ -507,7 +507,7 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
             if (target_read && target_item != nullptr &&
                 remove_item_direct_unlocked(lock, pending.dst_bag, target_slot, target_item,
                                             "pending ext2orig rollback target")) {
-                if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
+                if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
                     virtual_bag_call_original_refresh_item_area_with_guard();
                 }
                 clear_pending = true;
@@ -586,8 +586,8 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
                     if (same_source) {
                         const bool source_removed = remove_item_direct_unlocked(
                             lock, pending.src_bag, pending.src_slot, src, "pending recovery");
-                        if (g_game != nullptr &&
-                            g_write_port->ui.refresh_item_area != nullptr) {
+                        if (runtime_state().host.game != nullptr &&
+                            runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
                             virtual_bag_call_original_refresh_item_area_with_guard();
                         }
                         if (source_removed) {
@@ -610,7 +610,7 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
         }
     }
     if (clear_pending) {
-        g_virtual_bag_state.pending = {};
+        runtime_state().objects.bag.pending = {};
         extension_bag_mark_dirty_locked();
     }
     // 恢复操作临时卸载投影；在退出前按原宿主和袋重新装载，避免 mode 与 UI 投影分离。
@@ -621,21 +621,21 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
         set_original_bag_locked(host_bag);
         const bool installed = virtual_bag::valid_index(restore_bag) &&
                                install_module_view_locked(restore_bag) &&
-                               g_module_view_installed &&
-                               g_module_view_index == restore_bag &&
-                               g_projected_item_root != nullptr;
+                               runtime_state().objects.module_view_installed &&
+                               runtime_state().objects.module_view_index == restore_bag &&
+                               runtime_state().objects.projected_item_root != nullptr;
         if (installed) {
-            g_virtual_bag_state.mode = restore_mode;
-            g_virtual_bag_state.selected = restore_selected;
-            g_virtual_bag_state.inspected = restore_inspected;
+            runtime_state().objects.bag.mode = restore_mode;
+            runtime_state().objects.bag.selected = restore_selected;
+            runtime_state().objects.bag.inspected = restore_inspected;
         } else {
-            if (g_module_view_installed) restore_module_view_locked();
+            if (runtime_state().objects.module_view_installed) restore_module_view_locked();
             QOL_LOG_ERROR(QolDomain::kExtensionBag,
                           "ERROR pending recovery could not restore module projection bag=%d host=%d",
                           restore_bag, host_bag);
-            g_virtual_bag_state.mode = virtual_bag::Mode::kOriginal;
-            g_virtual_bag_state.selected = host_bag;
-            g_virtual_bag_state.inspected = -1;
+            runtime_state().objects.bag.mode = virtual_bag::Mode::kOriginal;
+            runtime_state().objects.bag.selected = host_bag;
+            runtime_state().objects.bag.inspected = -1;
         }
     }
     persist_state_locked();
@@ -655,10 +655,10 @@ bool item_pointer_known_locked(void* item) {
     if (item == nullptr) return true;  // 空指针由调用方各自处理
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (g_module_objects[bag][slot] == item) return true;
+            if (runtime_state().objects.module_objects[bag][slot] == item) return true;
         }
     }
-    if (g_item_facts != nullptr && g_item_facts->physical_item_at != nullptr) {
+    if (runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->physical_item_at != nullptr) {
         for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
             void* physical = nullptr;
             if (inventory_slot_locked(idx / virtual_bag::kSlotCount,
@@ -669,15 +669,15 @@ bool item_pointer_known_locked(void* item) {
     }
     for (int role = 0; role < 3; ++role) {
         void* character = nullptr;
-        if (g_game == nullptr || g_character_extras->read.party_member == nullptr ||
+        if (runtime_state().host.game == nullptr || runtime_state().host.character_extras->read.party_member == nullptr ||
             !qol::contracts::succeeded(
-                g_character_extras->read.party_member(role, &character))) continue;
+                runtime_state().host.character_extras->read.party_member(role, &character))) continue;
         if (character == nullptr) continue;
         for (int slot = 0; slot < 10; ++slot) {
             void* equipped = nullptr;
-            if (g_character_extras->read.equipped_item == nullptr ||
+            if (runtime_state().host.character_extras->read.equipped_item == nullptr ||
                 !qol::contracts::succeeded(
-                    g_character_extras->read.equipped_item(character, slot, &equipped))) {
+                    runtime_state().host.character_extras->read.equipped_item(character, slot, &equipped))) {
                 continue;
             }
             if (equipped == item) return true;

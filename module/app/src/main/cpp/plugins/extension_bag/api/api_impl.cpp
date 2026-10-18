@@ -44,9 +44,9 @@
 #define extension_bag_view_result_json extension_bag_view_result_json_bridge
 #define unequip_extension_bag_locked unequip_extension_bag_locked_bridge
 std::string extension_bag_api_status_json_impl() {
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     if (!read_world_in_world()) {
-        return "{\"enabled\":" + std::string(g_virtual_bag_enabled.load() ? "true" : "false") +
+        return "{\"enabled\":" + std::string(runtime_state().enabled.load() ? "true" : "false") +
                ",\"injected\":false,\"extension_tab_button\":false," +
                "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}";
     }
@@ -58,34 +58,34 @@ std::string extension_bag_api_enter_view_impl(int logical_bag) {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
     const int internal_bag = extension_internal_bag(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
     // 面板门禁（P3 真机实证）：控件树仅在背包面板打开时有效，面板关闭时
     // enter_view 会投影到 stale 树（点击失效/重建后被 RefreshItemArea 冲掉）。
-    if (!g_inventory_frame_active) return op_err("inventory panel not open");
-    if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule) {
+    if (!runtime_state().ui.inventory_frame_active) return op_err("inventory panel not open");
+    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule) {
         return op_err("already in extension view");
     }
-    if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
+    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule) {
         return op_err("exit in progress");
     }
     handle_extension_tab_click_locked(internal_bag);
-    const bool entered = g_virtual_bag_state.mode == virtual_bag::Mode::kModule;
+    const bool entered = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule;
     return extension_bag_view_result_json(entered, "enter extension view failed");
 }
 
 std::string extension_bag_api_exit_view_impl() {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
-    if (g_virtual_bag_state.mode == virtual_bag::Mode::kExitingModule) {
+    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule) {
         return op_err("exit in progress");
     }
-    if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule || g_virtual_bag_state.selected < 0) {
+    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule || runtime_state().objects.bag.selected < 0) {
         return op_err("not in extension view");
     }
-    handle_extension_tab_click_locked(g_virtual_bag_state.selected);
-    const bool exited = g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal;
+    handle_extension_tab_click_locked(runtime_state().objects.bag.selected);
+    const bool exited = runtime_state().objects.bag.mode == virtual_bag::Mode::kOriginal;
     return extension_bag_view_result_json(exited, "exit extension view failed");
 }
 
@@ -93,14 +93,14 @@ std::string extension_bag_api_select_bag_impl(int logical_bag) {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
     const int internal_bag = extension_internal_bag(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
-    if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule) {
+    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
         return op_err("not in extension view");
     }
-    if (g_virtual_bag_state.selected == internal_bag) return op_err("bag already selected");
+    if (runtime_state().objects.bag.selected == internal_bag) return op_err("bag already selected");
     handle_extension_tab_click_locked(internal_bag);
-    const bool selected = g_virtual_bag_state.selected == internal_bag;
+    const bool selected = runtime_state().objects.bag.selected == internal_bag;
     return extension_bag_view_result_json(selected, "select bag failed");
 }
 
@@ -109,28 +109,28 @@ std::string extension_bag_api_click_item_impl(int logical_bag, int slot) {
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
     const int internal_bag = extension_internal_bag(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
-    if (g_virtual_bag_state.mode != virtual_bag::Mode::kModule) {
+    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
         return op_err("not in extension view");
     }
-    if (g_virtual_bag_state.selected != internal_bag) return op_err("bag not selected");
-    if (slot >= g_virtual_bag_state.capacities[internal_bag]) {
+    if (runtime_state().objects.bag.selected != internal_bag) return op_err("bag not selected");
+    if (slot >= runtime_state().objects.bag.capacities[internal_bag]) {
         return op_err("slot beyond derived capacity");
     }
-    const virtual_bag::Item& item = g_virtual_bag_state.items[internal_bag][slot];
+    const virtual_bag::Item& item = runtime_state().objects.bag.items[internal_bag][slot];
     if (item.category <= 0 || item.count <= 0) {
-        g_virtual_bag_state.inspected = -1;
+        runtime_state().objects.bag.inspected = -1;
         persist_state_locked();
         return "{\"ok\":true,\"item\":null}";
     }
-    g_virtual_bag_state.inspected = slot;
+    runtime_state().objects.bag.inspected = slot;
     persist_state_locked();
     return "{\"ok\":true,\"item\":{\"bag\":" + std::to_string(logical_bag) +
            ",\"slot\":" + std::to_string(slot) +
            ",\"category\":" + std::to_string(item.category) +
            ",\"count\":" +
-           std::to_string(static_cast<int>(virtual_bag_effective_count(g_module_objects[internal_bag][slot], static_cast<uint32_t>(item.count)))) +
+           std::to_string(static_cast<int>(virtual_bag_effective_count(runtime_state().objects.module_objects[internal_bag][slot], static_cast<uint32_t>(item.count)))) +
            ",\"payload\":\"" +
            virtual_bag::base64_encode(item.payload.data(), item.payload_size) + "\"}}";
 }
@@ -143,7 +143,7 @@ std::string extension_bag_api_unequip_impl(int logical_bag) {
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
     ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
     {
-        std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+        std::unique_lock<std::mutex> lock(runtime_state().mtx);
         result = unequip_extension_bag_locked(lock, internal_bag);
     }
     if (result == ExtensionBagUnequipResult::kOk) return op_ok();
@@ -156,7 +156,7 @@ std::string extension_bag_api_unequip_impl(int logical_bag) {
 
 std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to_bag, int to_slot) {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    if (g_module_view_installed) return op_err("extension view open; movement disabled (P2)");
+    if (runtime_state().objects.module_view_installed) return op_err("extension view open; movement disabled (P2)");
     if (from_bag == virtual_bag::kOriginalTaskBag ||
         to_bag == virtual_bag::kOriginalTaskBag) {
         return op_err("task bag excluded");
@@ -171,7 +171,7 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to
     if (!from_original && !from_extension) return op_err("bad from bag");
     if (!to_original && !to_extension) return op_err("bad to bag");
     if (from_original && to_original) return op_err("use /api/item/inventory/move_item");
-    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
     // 锁内复核当前 epoch 准入：readiness 与真正执行之间可能发生 detach/epoch 变化。
     if (!extension_bag_session_admitted_locked()) return extension_bag_not_ready_error_locked();
@@ -189,7 +189,7 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to
 
 namespace {
 void refresh_extension_item_operation_locked(int bag) {
-    if (g_module_view_installed && g_module_view_index == bag) {
+    if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
 }
@@ -211,10 +211,10 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     ModuleUseToken* previous_use_token = nullptr;
     ModuleUseReleasePlan release_plan{};
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         ensure_state_loaded_locked();
-        if (slot >= g_virtual_bag_state.capacities[bag]) return op_err("slot beyond derived capacity");
-        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        if (slot >= runtime_state().objects.bag.capacities[bag]) return op_err("slot beyond derived capacity");
+        const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
         // R-63 佣兵徽章（category 42..50 / 928..933）：ITEMDATA_IsUse 不认（+2=0x1d），
         // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
@@ -223,12 +223,12 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (is_seal) {
             const auto* save_facts = qol::features::extension_bag::save_facts();
             if (save_facts == nullptr || save_facts->is_ok == nullptr ||
-                g_character_extras->read.has_empty_mercenary_slot == nullptr ||
+                runtime_state().host.character_extras->read.has_empty_mercenary_slot == nullptr ||
                 extension_bag_write_api() == nullptr ||
                 extension_bag_write_api()->equipment.make_mercenary == nullptr) {
                 return op_err("symbol not resolved");
             }
-        } else if (g_game == nullptr || g_game->read_only.item.is_usable == nullptr ||
+        } else if (runtime_state().host.game == nullptr || runtime_state().host.game->read_only.item.is_usable == nullptr ||
                    extension_bag_write_api() == nullptr ||
                    extension_bag_write_api()->equipment.use_item == nullptr) {
             return op_err("symbol not resolved");
@@ -239,12 +239,12 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
 
         item = module_item_locked(bag, slot);
         leader = nullptr;
-        if (g_game != nullptr && g_character_extras->read.party_member != nullptr) {
-            (void)g_character_extras->read.party_member(0, &leader);
+        if (runtime_state().host.game != nullptr && runtime_state().host.character_extras->read.party_member != nullptr) {
+            (void)runtime_state().host.character_extras->read.party_member(0, &leader);
         }
         if (item == nullptr) return op_err("extension item unavailable");
         if (!is_seal && leader == nullptr) return op_err("no leader");
-        closes_description = g_extension_desc_item == item;
+        closes_description = runtime_state().ui.extension_desc_item == item;
         if (!module_use_begin_locked(bag, slot, item, &use_token)) {
             return op_err("extension item already in use");
         }
@@ -255,7 +255,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         const bool save_ok = read_save_is_ok();
         const bool slot_ok = save_ok && read_has_empty_mercenary_slot();
         if (!save_ok || !slot_ok) {
-            std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+            std::lock_guard<std::mutex> lock(runtime_state().mtx);
             module_use_abort_locked(use_token);
             return op_err(!save_ok ? "save busy" : "mercenary slots full");
         }
@@ -272,7 +272,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         g_active_module_use_token = previous_use_token;
     }
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         bool consumed = false;
         if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
             const bool marker_cleared = module_use_abort_locked(use_token);
@@ -286,26 +286,26 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (!module_use_release_native(release_plan)) {
             return op_err("extension item release failed");
         }
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (!module_use_finalize_release_locked(release_plan)) {
             return op_err("extension item release finalize failed");
         }
     }
     if (!used) return op_err("on cooldown");
     if (closes_description) {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         reset_extension_desc_item_hooks_locked();
-        g_extension_desc_item = nullptr;
-        g_extension_desc_item_bag = -1;
-        g_extension_desc_item_slot = -1;
+        runtime_state().ui.extension_desc_item = nullptr;
+        runtime_state().ui.extension_desc_item_bag = -1;
+        runtime_state().ui.extension_desc_item_slot = -1;
     }
     int32_t current_tutorial_state = -1;
     const auto* world_facts = qol::features::extension_bag::world_facts();
     if (used && world_facts != nullptr && world_facts->tutorial_state != nullptr &&
-        g_game->world_action.cancel_tutorial != nullptr &&
+        runtime_state().host.game->world_action.cancel_tutorial != nullptr &&
         qol::contracts::succeeded(world_facts->tutorial_state(&current_tutorial_state)) &&
         current_tutorial_state == 6) {
-        (void)g_game->world_action.cancel_tutorial();
+        (void)runtime_state().host.game->world_action.cancel_tutorial();
     }
     return op_ok();
 }
@@ -318,7 +318,7 @@ QolResult extension_put_jewel_error(const char* message) {
 QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
                                             int equip_slot) {
     if (!extension_bag_ready_locked()) {
-        return extension_put_jewel_error(!g_virtual_bag_enabled.load()
+        return extension_put_jewel_error(!runtime_state().enabled.load()
                                              ? "extension bag disabled"
                                              : "not in game");
     }
@@ -336,32 +336,32 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
     ModuleUseToken* previous_use_token = nullptr;
     ModuleUseReleasePlan release_plan{};
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         ensure_state_loaded_locked();
-        if (slot >= g_virtual_bag_state.capacities[bag]) {
+        if (slot >= runtime_state().objects.bag.capacities[bag]) {
             return extension_put_jewel_error("slot beyond derived capacity");
         }
-        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) {
             return extension_put_jewel_error("slot empty");
         }
-        if (g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr ||
-            g_character_extras->read.party_member == nullptr ||
-            g_character_extras->read.equipped_item == nullptr ||
-            g_write_port->equipment.put_jewel == nullptr) {
+        if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->is_jewel_category == nullptr ||
+            runtime_state().host.character_extras->read.party_member == nullptr ||
+            runtime_state().host.character_extras->read.equipped_item == nullptr ||
+            runtime_state().host.write_port->equipment.put_jewel == nullptr) {
             return extension_put_jewel_error("symbol not resolved");
         }
         int32_t is_jewel = 0;
         if (!qol::contracts::succeeded(
-                g_item_facts->is_jewel_category(descriptor.category, &is_jewel)) ||
+                runtime_state().host.item_facts->is_jewel_category(descriptor.category, &is_jewel)) ||
             is_jewel == 0) return extension_put_jewel_error("not jewel");
 
         void* ch = nullptr;
-        (void)g_character_extras->read.party_member(role, &ch);
+        (void)runtime_state().host.character_extras->read.party_member(role, &ch);
         if (ch == nullptr) return extension_put_jewel_error("role not found");
         jewel = module_item_locked(bag, slot);
         if (!qol::contracts::succeeded(
-                g_character_extras->read.equipped_item(ch, equip_slot, &equip))) {
+                runtime_state().host.character_extras->read.equipped_item(ch, equip_slot, &equip))) {
             return extension_put_jewel_error("equip slot unavailable");
         }
         if (jewel == nullptr) return extension_put_jewel_error("extension jewel unavailable");
@@ -378,18 +378,18 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
     g_active_module_use_token = &use_token;
     int32_t result = -1;
     const bool put_jewel_succeeded =
-        g_game != nullptr &&
+        runtime_state().host.game != nullptr &&
         qol::contracts::succeeded(
-            g_write_port->equipment.put_jewel(equip, jewel, &result));
+            runtime_state().host.write_port->equipment.put_jewel(equip, jewel, &result));
     g_active_module_use_token = previous_use_token;
     if (!put_jewel_succeeded) {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         (void)module_use_abort_locked(use_token);
         return extension_put_jewel_error("put jewel unavailable");
     }
 
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         bool consumed = false;
         if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
             const bool marker_cleared = module_use_abort_locked(use_token);
@@ -407,7 +407,7 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
             int current_slot = -1;
             if (!module_slot_of_item_locked(jewel, &current_bag, &current_slot) ||
                 current_bag != bag || current_slot != slot ||
-                g_module_objects[bag][slot] != jewel) {
+                runtime_state().objects.module_objects[bag][slot] != jewel) {
                 return extension_put_jewel_error("extension jewel changed during native operation");
             }
             if (!consume_extension_item_after_native_locked(
@@ -422,7 +422,7 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
         if (!module_use_release_native(release_plan)) {
             return extension_put_jewel_error("extension jewel release failed");
         }
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (!module_use_finalize_release_locked(release_plan)) {
             return extension_put_jewel_error("extension jewel release finalize failed");
         }

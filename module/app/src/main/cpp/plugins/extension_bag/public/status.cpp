@@ -39,34 +39,34 @@ namespace {
 
 const char* extension_recovery_action_name_locked() {
     const virtual_bag::RecoveryAction action =
-        virtual_bag::recovery_action(g_virtual_bag_state, g_virtual_bag_state.pending);
+        virtual_bag::recovery_action(runtime_state().objects.bag, runtime_state().objects.bag.pending);
     if (action == virtual_bag::RecoveryAction::kComplete) return "complete";
     if (action == virtual_bag::RecoveryAction::kRollback) return "rollback";
     return "none";
 }
 
 std::string extension_bag_status_json_locked() {
-    return "{\"enabled\":" + std::string(g_virtual_bag_enabled.load() ? "true" : "false") +
-           ",\"injected\":" + std::string(g_state_entry != nullptr ? "true" : "false") +
+    return "{\"enabled\":" + std::string(runtime_state().enabled.load() ? "true" : "false") +
+           ",\"injected\":" + std::string(runtime_state().persistence.state_entry != nullptr ? "true" : "false") +
            ",\"save_panel_hook\":" +
-           std::string(g_save_panel_hook_installed ? "true" : "false") +
+           std::string(runtime_state().persistence.save_panel_hook_installed ? "true" : "false") +
            ",\"extension_tab_button\":" +
-           std::string(g_extension_tab_buttons[0] != nullptr ? "true" : "false") +
+           std::string(runtime_state().ui.extension_tab_buttons[0] != nullptr ? "true" : "false") +
            ",\"inventory_frame_active\":" +
-           std::string(g_inventory_frame_active ? "true" : "false") +
+           std::string(runtime_state().ui.inventory_frame_active ? "true" : "false") +
            ",\"recovery_action\":\"" + extension_recovery_action_name_locked() + "\"" +
-           ",\"state\":" + virtual_bag::state_json(g_virtual_bag_state, true) + "}";
+           ",\"state\":" + virtual_bag::state_json(runtime_state().objects.bag, true) + "}";
 }
 
 std::string extension_bag_not_ready_error_locked() {
-    if (!g_virtual_bag_enabled.load()) return op_err("extension bag disabled");
+    if (!runtime_state().enabled.load()) return op_err("extension bag disabled");
     return op_err("not in game");
 }
 
 bool extension_bag_ready_locked() {
     // 操作准入与扫描同门：扩展开关 + world + 当前 epoch 已加载（未加载/降级/epoch 未登记
     // 时拒绝物品操作，不惰性 IO 兜底）。session 状态由 provider 回调维护。
-    return g_virtual_bag_enabled.load() && read_world_in_world() &&
+    return runtime_state().enabled.load() && read_world_in_world() &&
            extension_bag_session_admitted_locked();
 }
 
@@ -90,29 +90,29 @@ std::string extension_bag_view_result_json(bool ok, const char* error) {
 ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mutex>& lock,
                                                        int internal_bag) {
     ensure_state_loaded_locked();
-    if (g_virtual_bag_state.capacities[internal_bag] == 0) {
+    if (runtime_state().objects.bag.capacities[internal_bag] == 0) {
         return ExtensionBagUnequipResult::kNotEquipped;
     }
-    for (const virtual_bag::Item& item : g_virtual_bag_state.items[internal_bag]) {
+    for (const virtual_bag::Item& item : runtime_state().objects.bag.items[internal_bag]) {
         if (item.category > 0 || item.count > 0) {
             return ExtensionBagUnequipResult::kNotEmpty;
         }
     }
-    if (g_game == nullptr || g_write_port->inventory.create_item == nullptr ||
-        g_write_port->inventory.save_item_on_empty == nullptr) {
+    if (runtime_state().host.game == nullptr || runtime_state().host.write_port->inventory.create_item == nullptr ||
+        runtime_state().host.write_port->inventory.save_item_on_empty == nullptr) {
         VIRTBAG_LOG("extension unequip symbols unavailable bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
     void* item = nullptr;
-    if (!qol::contracts::succeeded(g_write_port->inventory.create_item(
-            static_cast<int32_t>(g_virtual_bag_state.types[internal_bag]), 0, 0, 0, &item)) ||
+    if (!qol::contracts::succeeded(runtime_state().host.write_port->inventory.create_item(
+            static_cast<int32_t>(runtime_state().objects.bag.types[internal_bag]), 0, 0, 0, &item)) ||
         item == nullptr) {
         VIRTBAG_LOG("extension unequip create item failed bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
     }
     // P4.3：全新对象立即入账本；分配失败立即真释放（尚未暴露，安全）。
     uint32_t item_handle = 0;
-    if (ownership::allocate(&g_ownership_ledger, &item_handle) != ownership::Outcome::kOk) {
+    if (ownership::allocate(&runtime_state().objects.ownership_ledger, &item_handle) != ownership::Outcome::kOk) {
         release_temporary_item_locked(item);
         VIRTBAG_LOG("extension unequip ledger exhausted bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
@@ -136,7 +136,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     }
 
     int preferred = original_bag_locked();
-    if (preferred < 0 || preferred > 4) preferred = g_virtual_bag_state.original_selected;
+    if (preferred < 0 || preferred > 4) preferred = runtime_state().objects.bag.original_selected;
     if (preferred < 0 || preferred > 4) preferred = 0;
     // 排除 internal_bag 自身：正在解除的袋不得作为接收方——袋对象若放回
     // 自己的行/槽，随后 unequip_bag 清袋会把刚放回的物品一起清掉
@@ -155,7 +155,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     int receiving_bag = -1;
     for (int i = 0; i < order_count && receiving_bag < 0; ++i) {
         int save_result = 0;
-        if (qol::contracts::succeeded(g_write_port->inventory.save_item_on_empty(
+        if (qol::contracts::succeeded(runtime_state().host.write_port->inventory.save_item_on_empty(
                 item, order[i], &save_result)) && save_result != 0) {
             receiving_bag = order[i];
         }
@@ -168,8 +168,8 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
         int adopt_slot = -1;
         for (int bag = 0; bag < virtual_bag::kBagCount && adopt_bag < 0; ++bag) {
             if (bag == internal_bag) continue;  // 排除正在解除的袋（见上）
-            if (g_virtual_bag_state.types[bag] == 0) continue;
-            const int capacity = g_virtual_bag_state.capacities[bag];
+            if (runtime_state().objects.bag.types[bag] == 0) continue;
+            const int capacity = runtime_state().objects.bag.capacities[bag];
             for (int slot = 0; slot < capacity; ++slot) {
                 if (module_slot_is_assignable_locked(bag, slot)) {
                     adopt_bag = bag;
@@ -189,7 +189,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
             release_tracked_item_locked(item_handle, item, "unequip adopt serialize");
             return ExtensionBagUnequipResult::kFailed;
         }
-        virtual_bag::Item& descriptor = g_virtual_bag_state.items[adopt_bag][adopt_slot];
+        virtual_bag::Item& descriptor = runtime_state().objects.bag.items[adopt_bag][adopt_slot];
         descriptor.payload = payload;
         descriptor.payload_size = payload_size;
         (void)read_item_category(item, &descriptor.category);
@@ -206,15 +206,15 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
             release_tracked_item_locked(item_handle, item, "unequip adopt handle registration");
             return ExtensionBagUnequipResult::kFailed;
         }
-        g_module_objects[adopt_bag][adopt_slot] = item;
-        g_module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
-        g_module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
-        g_module_object_handles[adopt_bag][adopt_slot] = item_handle;
-        const uint8_t adopted_type = g_virtual_bag_state.types[internal_bag];
-        virtual_bag::unequip_bag(&g_virtual_bag_state, internal_bag);
+        runtime_state().objects.module_objects[adopt_bag][adopt_slot] = item;
+        runtime_state().objects.module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
+        runtime_state().objects.module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
+        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = item_handle;
+        const uint8_t adopted_type = runtime_state().objects.bag.types[internal_bag];
+        virtual_bag::unequip_bag(&runtime_state().objects.bag, internal_bag);
         extension_bag_mark_dirty_locked();
         if (persist_state_locked()) {
-            if (g_module_view_installed && g_module_view_index == adopt_bag) {
+            if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == adopt_bag) {
                 refresh_module_item_area_locked(adopt_bag);
             }
             VIRTBAG_LOG("extension unequip adopt bag=%d type=%d dst=%d/%d", internal_bag,
@@ -227,14 +227,14 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
                         adopt_bag, adopt_slot);
             return ExtensionBagUnequipResult::kPersistFailed;
         }
-        g_module_objects[adopt_bag][adopt_slot] = nullptr;
-        g_module_object_categories[adopt_bag][adopt_slot] = 0;
-        g_module_object_hashes[adopt_bag][adopt_slot] = 0;
-        g_module_object_handles[adopt_bag][adopt_slot] = 0;
+        runtime_state().objects.module_objects[adopt_bag][adopt_slot] = nullptr;
+        runtime_state().objects.module_object_categories[adopt_bag][adopt_slot] = 0;
+        runtime_state().objects.module_object_hashes[adopt_bag][adopt_slot] = 0;
+        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
         descriptor = virtual_bag::Item{};
-        g_virtual_bag_state.types[internal_bag] = adopted_type;
-        g_virtual_bag_state.isolation_now_ms = isolation_now_ms_locked();
-        virtual_bag::normalize(&g_virtual_bag_state);
+        runtime_state().objects.bag.types[internal_bag] = adopted_type;
+        runtime_state().objects.bag.isolation_now_ms = isolation_now_ms_locked();
+        virtual_bag::normalize(&runtime_state().objects.bag);
         release_tracked_item_locked(item_handle, item, "unequip adopt rollback");
         persist_state_locked();
         VIRTBAG_LOG("extension unequip adopt persist failed bag=%d dst=%d/%d", internal_bag,
@@ -244,9 +244,9 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
 
     // 入库成功后 g_inven 拥有对象，模块不得再释放；预检后 unequip_bag 不会
     // 因非空失败。UI 恢复仍由 virtual_bag_draw_end_wrapper 下一帧完成。
-    const uint8_t saved_type = g_virtual_bag_state.types[internal_bag];
-    virtual_bag::unequip_bag(&g_virtual_bag_state, internal_bag);
-    virtual_bag::enter_original(&g_virtual_bag_state, receiving_bag);
+    const uint8_t saved_type = runtime_state().objects.bag.types[internal_bag];
+    virtual_bag::unequip_bag(&runtime_state().objects.bag, internal_bag);
+    virtual_bag::enter_original(&runtime_state().objects.bag, receiving_bag);
     set_original_bag_locked(receiving_bag);
     extension_bag_mark_dirty_locked();
     if (persist_state_locked()) {
@@ -272,9 +272,9 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
     if (rolled_back) {
         // P4.3：回滚已确认（脱离 INVEN）→ 账本终止保管 + 真释放。
         release_tracked_item_locked(item_handle, item, "unequip rollback");
-        g_virtual_bag_state.types[internal_bag] = saved_type;
-        g_virtual_bag_state.isolation_now_ms = isolation_now_ms_locked();
-        virtual_bag::normalize(&g_virtual_bag_state);
+        runtime_state().objects.bag.types[internal_bag] = saved_type;
+        runtime_state().objects.bag.isolation_now_ms = isolation_now_ms_locked();
+        virtual_bag::normalize(&runtime_state().objects.bag);
         persist_state_locked();
         VIRTBAG_LOG("extension unequip persist failed; rolled back bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kPersistFailed;
@@ -288,14 +288,14 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
 
 namespace {
 void show_extension_bag_not_empty_popup() {
-    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->show_text_popup != nullptr) {
-        (void)g_sdk->ui->show_text_popup(7);
+    if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->show_text_popup != nullptr) {
+        (void)runtime_state().host.sdk->ui->show_text_popup(7);
     }
 }
 
 void show_extension_bag_no_space_popup() {
-    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->show_text_popup != nullptr) {
-        (void)g_sdk->ui->show_text_popup(6);
+    if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->show_text_popup != nullptr) {
+        (void)runtime_state().host.sdk->ui->show_text_popup(6);
     }
 }
 }  // namespace

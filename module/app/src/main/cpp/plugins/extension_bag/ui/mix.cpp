@@ -75,9 +75,9 @@ void* mix_item_root_locked() {
 // 面板状态：0=配方菜单（原版不画背包列），1=背包/合成视图。扩展页签只在 state!=0
 // 时挂载/绘制，避免在配方菜单阶段早于原版背包出现（UIMix_Draw 状态门控反汇编确认）。
 int mix_state_locked() {
-    if (g_craft_facts == nullptr || g_craft_facts->read_only.panel_state == nullptr) return 0;
+    if (runtime_state().host.craft_facts == nullptr || runtime_state().host.craft_facts->read_only.panel_state == nullptr) return 0;
     int32_t state = 0;
-    return qol::contracts::succeeded(g_craft_facts->read_only.panel_state(&state)) ? state : 0;
+    return qol::contracts::succeeded(runtime_state().host.craft_facts->read_only.panel_state(&state)) ? state : 0;
 }
 
 int mix_tab_index(void* ctrl) {
@@ -89,7 +89,7 @@ int mix_tab_index(void* ctrl) {
 
 void mix_refresh_tab_bag_items_locked() {
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        const uint8_t type = g_virtual_bag_state.types[index];
+        const uint8_t type = runtime_state().objects.bag.types[index];
         void*& item = mix_tab_bag_items[index];
         if (type == 0) {
             if (item != nullptr) {
@@ -170,8 +170,8 @@ void mix_discard_new_tab_controls_locked(
 
 void mix_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时合成器页签不得挂载（3 个宿主之一）。
-    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked()) return;
-    if (g_sdk == nullptr) return;
+    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return;
+    if (runtime_state().host.sdk == nullptr) return;
     void* bag_container = mix_bag_container_locked();
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
@@ -253,7 +253,7 @@ void mix_install_tab_buttons_locked() {
 
 uint64_t mix_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
     if (event == 0x02) {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (!extension_bag_session_admitted_locked()) return 1;
         const int index = mix_tab_index(ctrl);
         if (index >= 0 && mix_tab_generation != 0) {
@@ -288,7 +288,7 @@ void mix_commit_pending_tab_locked() {
 void mix_refresh_projection_locked() {
     if (!mix_view_installed || mix_projected_item_root == nullptr ||
         !virtual_bag::valid_index(mix_view_bag)) return;
-    const int capacity = g_virtual_bag_state.capacities[mix_view_bag];
+    const int capacity = runtime_state().objects.bag.capacities[mix_view_bag];
     for (int slot = 0; slot < capacity; ++slot) {
         void* control = valid_child_locked(mix_projected_item_root, slot);
         if (control == nullptr) continue;
@@ -305,7 +305,7 @@ void mix_request_item_refresh_locked() {
 }
 
 void mix_refresh_item_after_unlock() {
-    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(runtime_state().mtx);
     if (!mix_refresh_pending) return;
     const uint64_t refresh_generation = mix_refresh_generation;
     const uint64_t view_generation = mix_view_generation;
@@ -330,7 +330,7 @@ void mix_refresh_item_after_unlock() {
     lock.lock();
     if (refresh_generation != mix_refresh_generation ||
         view_generation != mix_view_generation) return;
-    if (!mix_frame_active || !g_virtual_bag_enabled.load() ||
+    if (!mix_frame_active || !runtime_state().enabled.load() ||
         !extension_bag_session_admitted_locked() || mix_state_locked() == 0) {
         if (mix_view_installed) mix_restore_module_view_locked();
         return;
@@ -348,8 +348,8 @@ void mix_refresh_item_after_unlock() {
 
 void mix_install_module_view_locked(int bag) {
     if (!extension_bag_session_admitted_locked() || !virtual_bag::valid_index(bag) ||
-        g_virtual_bag_state.capacities[bag] == 0 ||
-        g_game == nullptr || g_write_port->ui.refresh_mix_item == nullptr) return;
+        runtime_state().objects.bag.capacities[bag] == 0 ||
+        runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.refresh_mix_item == nullptr) return;
     // UIMix 与 UIEquip 共用当前袋 GOT；落在任务袋 5/非法时回退原版袋 0。
     int host = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(host)) host = 0;
@@ -366,7 +366,7 @@ void mix_install_module_view_locked(int bag) {
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     if (!set_bag_size_word_locked(
             host, (size_word & ~kCapacityMask) |
-                      (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask))) {
+                      (static_cast<uint32_t>(runtime_state().objects.bag.capacities[bag]) & kCapacityMask))) {
         VIRTBAG_LOG("mix view rejected capacity write bag=%d host=%d", bag, host);
         mix_original_size_word = 0;
         mix_original_bag_size = 0;
@@ -389,11 +389,11 @@ void mix_install_module_view_locked(int bag) {
         mix_request_item_refresh_locked();
         return;
     }
-    const int capacity = g_virtual_bag_state.capacities[bag];
+    const int capacity = runtime_state().objects.bag.capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
         if (module_item_locked(bag, slot) != nullptr) {
-            ownership::borrow_for_view(&g_ownership_ledger,
-                                       g_module_object_handles[bag][slot]);
+            ownership::borrow_for_view(&runtime_state().objects.ownership_ledger,
+                                       runtime_state().objects.module_object_handles[bag][slot]);
         }
     }
     mix_view_bag = bag;
@@ -401,17 +401,17 @@ void mix_install_module_view_locked(int bag) {
     ++mix_view_generation;
     mix_request_item_refresh_locked();
     VIRTBAG_LOG("mix view installed bag=%d window=%d capacity=%d", bag, host,
-                g_virtual_bag_state.capacities[bag]);
+                runtime_state().objects.bag.capacities[bag]);
 }
 
 void mix_restore_module_view_locked() {
     if (!mix_view_installed) return;
     if (virtual_bag::valid_index(mix_view_bag)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            const uint32_t handle = g_module_object_handles[mix_view_bag][slot];
-            if (ownership::live_state(g_ownership_ledger, handle,
+            const uint32_t handle = runtime_state().objects.module_object_handles[mix_view_bag][slot];
+            if (ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                                       ownership::State::kBorrowedForView)) {
-                ownership::return_from_view(&g_ownership_ledger, handle);
+                ownership::return_from_view(&runtime_state().objects.ownership_ledger, handle);
             }
         }
     }
@@ -437,11 +437,11 @@ void mix_restore_module_view_locked() {
 
 void mix_enter_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"own:popup.mix"});
-    if (mix_original_enter != nullptr) mix_original_enter();
+    if (runtime_state().ui.mix_original_enter != nullptr) runtime_state().ui.mix_original_enter();
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         ensure_state_loaded_locked();
         mix_teardown_locked();
         // Enter 时面板处于 state 0（配方菜单，原版尚未画背包列）；页签等 state!=0 的
@@ -453,14 +453,14 @@ void mix_enter_wrapper() {
 
 void mix_f3_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"own:popup.mix"});
     MixSceneNoArgFn original = nullptr;
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         mix_teardown_locked();
         mix_frame_active = false;
-        original = mix_original_f3;
+        original = runtime_state().ui.mix_original_f3;
     }
     mix_refresh_item_after_unlock();
     if (original != nullptr) original();
@@ -486,7 +486,7 @@ void mix_draw_tab_buttons_locked() {
         int64_t y = 0;
         extension_bag_control_abs_pos(button, &x, &y);
         const bool selected = mix_view_installed && mix_view_bag == index;
-        const bool equipped = g_virtual_bag_state.capacities[index] != 0;
+        const bool equipped = runtime_state().objects.bag.capacities[index] != 0;
         if (selected) {
             (void)extension_bag_ui_draw_part(0xf, 0x13, static_cast<int32_t>(x - 5),
                                              static_cast<int32_t>(y - 12), 0, 1);
@@ -506,12 +506,12 @@ void mix_draw_tab_buttons_locked() {
 
 void mix_draw_end_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_MIX_DRAW_END"});
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (mix_frame_active) {
-            const bool interactive = g_virtual_bag_enabled.load() &&
+            const bool interactive = runtime_state().enabled.load() &&
                                      extension_bag_session_admitted_locked() &&
                                      mix_state_locked() != 0;
             if (interactive) {
@@ -537,8 +537,8 @@ void mix_draw_end_wrapper() {
         }
     }
     mix_refresh_item_after_unlock();
-    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
-        (void)g_sdk->ui->end_frame();
+    if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->end_frame != nullptr) {
+        (void)runtime_state().host.sdk->ui->end_frame();
     }
 }
 
@@ -560,21 +560,21 @@ void mix_teardown_locked() {
 // mix_draw_tab_buttons_locked 在袋列绘制之后补画。
 void mix_draw_inven_bag_group_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_MIX_BAG_DRAW"});
-    if (g_game == nullptr ||
-        g_write_port->ui.draw_original_bag == nullptr ||
-        g_write_port->ui.current_bag == nullptr ||
-        g_write_port->ui.set_current_bag == nullptr) return;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (runtime_state().host.game == nullptr ||
+        runtime_state().host.write_port->ui.draw_original_bag == nullptr ||
+        runtime_state().host.write_port->ui.current_bag == nullptr ||
+        runtime_state().host.write_port->ui.set_current_bag == nullptr) return;
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     int32_t saved_current = 0;
     bool masked = false;
     if (mix_view_installed &&
-        qol::contracts::succeeded(g_write_port->ui.current_bag(&saved_current)) &&
+        qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&saved_current)) &&
         saved_current != kNoOriginalBagSelected) {
-        (void)g_write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
-    (void)g_write_port->ui.draw_original_bag();
-    if (masked) (void)g_write_port->ui.set_current_bag(saved_current);
+    (void)runtime_state().host.write_port->ui.draw_original_bag();
+    if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
 }

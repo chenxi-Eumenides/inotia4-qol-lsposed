@@ -42,7 +42,7 @@ bool p5_take_sample(std::atomic<uint64_t>* last_sample_ms) {
 }
 
 bool p5_should_begin_item_observation(uint64_t event) {
-    return event != 0x10 || p5_take_sample(&g_p5_last_item_query_sample_ms);
+    return event != 0x10 || p5_take_sample(&runtime_state().p5_last_item_query_sample_ms);
 }
 
 namespace {
@@ -52,7 +52,7 @@ bool p5_should_emit_observation(const char* phase, uint64_t event) {
     if (g_p5_observation_active && std::strncmp(phase, "panel-", 6) == 0) return false;
     if (event != 0x19 || std::strncmp(phase, "panel-", 6) != 0) return true;
     if (std::strcmp(phase, "panel-entry") == 0) return false;
-    return p5_take_sample(&g_p5_last_panel_move_sample_ms);
+    return p5_take_sample(&runtime_state().p5_last_panel_move_sample_ms);
 }
 
 class P5ObservationScope {
@@ -119,7 +119,7 @@ P5ControlObservation p5_control_observation_locked(void* control) {
         if (module_slot_of_item_locked(item, &module_bag, &module_slot)) {
             observation.data_domain = P5DataDomain::kProjectedModuleItem;
         } else if (observation.tab_index >= 0 &&
-                   g_tab_bag_items[observation.tab_index] == item) {
+                   runtime_state().ui.tab_bag_items[observation.tab_index] == item) {
             observation.data_domain = P5DataDomain::kModuleTabItem;
         } else if (observation.original_slot >= 0 &&
                    observation.original_slot < virtual_bag::kSlotCount) {
@@ -133,7 +133,7 @@ P5ControlObservation p5_control_observation_locked(void* control) {
     void* current = control;
     observation.parent_depth = 0;
     while (current != nullptr && observation.parent_depth < kP5ParentDepthLimit) {
-        if (current == g_projected_item_root) {
+        if (current == runtime_state().objects.projected_item_root) {
             observation.parent_reaches_projection_root = true;
             break;
         }
@@ -141,17 +141,17 @@ P5ControlObservation p5_control_observation_locked(void* control) {
         ++observation.parent_depth;
     }
 
-    if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
-        g_projected_item_root == nullptr) {
+    if (!runtime_state().objects.module_view_installed || !virtual_bag::valid_index(runtime_state().objects.module_view_index) ||
+        runtime_state().objects.projected_item_root == nullptr) {
         return observation;
     }
     int child_count = 0;
-    if (!extension_bag_ui_child_count(g_projected_item_root, &child_count)) return observation;
-    const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
+    if (!extension_bag_ui_child_count(runtime_state().objects.projected_item_root, &child_count)) return observation;
+    const int capacity = runtime_state().objects.bag.capacities[runtime_state().objects.module_view_index];
     const int limit = capacity < child_count ? capacity : child_count;
     for (int slot = 0; slot < limit; ++slot) {
-        if (extension_bag_ui_child_at(g_projected_item_root, slot) == control) {
-            observation.projection_bag = g_module_view_index;
+        if (extension_bag_ui_child_at(runtime_state().objects.projected_item_root, slot) == control) {
+            observation.projection_bag = runtime_state().objects.module_view_index;
             observation.projection_slot = slot;
             break;
         }
@@ -189,7 +189,7 @@ uint64_t log_p5_observation_locked(const char* phase, void* target_control, uint
     const P5ControlObservation target = p5_control_observation_locked(target_control);
     const P5ControlObservation source = p5_control_observation_locked(source_control);
     const P5TouchObservation touch = p5_touch_observation_locked(target_control, source_control);
-    const uint64_t sequence = g_p5_observation_sequence.fetch_add(1) + 1;
+    const uint64_t sequence = runtime_state().p5_observation_sequence.fetch_add(1) + 1;
     VIRTBAG_LOG(
         "p5obs seq=%llu related_seq=%llu phase=%s event=0x%llx x2=%d param=%d result_known=%d result=0x%llx event_x=%lld event_y=%lld target_type=%d target_slot=%d target_projection=%d/%d target_tab=%d target_data=%d target_parent_depth=%d target_parent_projection_root=%d source_known=%d source_type=%d source_slot=%d source_projection=%d/%d source_tab=%d source_data=%d source_parent_depth=%d source_parent_projection_root=%d touch=%d moving=%d drop_source=%d moving_target=%d drop_target=%d moving_source=%d drop_source_match=%d release_x=%lld release_y=%lld mode=%d selected=%d overlay=%d overlay_index=%d inventory_generation=%llu tab_generation=%llu capture=%d legacy_drag=%d",
         static_cast<unsigned long long>(sequence),
@@ -208,10 +208,10 @@ uint64_t log_p5_observation_locked(const char* phase, void* target_control, uint
         touch.drop_source_matches_target ? 1 : 0, touch.moving_matches_source ? 1 : 0,
         touch.drop_source_matches_source ? 1 : 0,
         static_cast<long long>(touch.release_x), static_cast<long long>(touch.release_y),
-        static_cast<int>(g_virtual_bag_state.mode), g_virtual_bag_state.selected,
-        g_module_view_installed ? 1 : 0, g_module_view_index,
-        static_cast<unsigned long long>(g_inventory_generation),
-        static_cast<unsigned long long>(g_extension_tab_generation),
-        g_extension_touch_capture ? 1 : 0, g_extension_drag.active ? 1 : 0);
+        static_cast<int>(runtime_state().objects.bag.mode), runtime_state().objects.bag.selected,
+        runtime_state().objects.module_view_installed ? 1 : 0, runtime_state().objects.module_view_index,
+        static_cast<unsigned long long>(runtime_state().ui.inventory_generation),
+        static_cast<unsigned long long>(runtime_state().ui.extension_tab_generation),
+        runtime_state().ui.extension_touch_capture ? 1 : 0, runtime_state().ui.extension_drag.active ? 1 : 0);
     return sequence;
 }

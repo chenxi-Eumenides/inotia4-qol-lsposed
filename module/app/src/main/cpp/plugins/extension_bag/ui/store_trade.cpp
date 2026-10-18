@@ -39,8 +39,8 @@ namespace {
 using StoreSellItemFn = int64_t (*)(int64_t);
 
 void store_sell_popup(uint32_t text_id) {
-    if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->show_text_popup != nullptr) {
-        (void)g_sdk->ui->show_text_popup(static_cast<int32_t>(text_id));
+    if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->show_text_popup != nullptr) {
+        (void)runtime_state().host.sdk->ui->show_text_popup(static_cast<int32_t>(text_id));
     }
 }
 
@@ -53,7 +53,7 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
         item == nullptr || count <= 0) {
         return false;
     }
-    virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+    virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
     const int view = static_cast<int>(virtual_bag_effective_count(
         item, static_cast<uint32_t>(descriptor.count)));
     if (count >= view) return false;  // 整堆由调用方走删除分支
@@ -74,8 +74,8 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
     descriptor.payload_size = payload_size;
     descriptor.count = static_cast<int>(virtual_bag_canonical_count(
         item, virtual_bag_canonical_from_field(old_field, static_cast<uint32_t>(descriptor.count))));
-    g_module_object_categories[bag][slot] = descriptor.category;
-    g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
+    runtime_state().objects.module_object_categories[bag][slot] = descriptor.category;
+    runtime_state().objects.module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
     extension_bag_mark_dirty_locked();
     return true;
 }
@@ -83,10 +83,10 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
 
 int64_t store_sell_item_wrapper(int64_t displayed_price) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"hook:UIStore_SellItem"});
-    if (g_backup_store_sell_item == nullptr) return 0;
-    if (!g_virtual_bag_enabled.load()) return reinterpret_cast<StoreSellItemFn>(g_backup_store_sell_item)(displayed_price);
+    if (runtime_state().ui.backup_store_sell_item == nullptr) return 0;
+    if (!runtime_state().enabled.load()) return reinterpret_cast<StoreSellItemFn>(runtime_state().ui.backup_store_sell_item)(displayed_price);
 
     void* item = nullptr;
     int bag = -1;
@@ -97,28 +97,28 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     bool reject = false;
     qol::store_sell::Plan plan{};
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (store_view_installed && g_game != nullptr &&
-            g_inventory_extras->read.cursor_item != nullptr &&
-            g_item_facts != nullptr && g_item_facts->sell_price != nullptr) {
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (runtime_state().store.view_installed && runtime_state().host.game != nullptr &&
+            runtime_state().host.inventory_extras->read.cursor_item != nullptr &&
+            runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->sell_price != nullptr) {
             void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
             void* cursor = nullptr;
             if (ctrl != nullptr) {
-                (void)g_inventory_extras->read.cursor_item(ctrl, &cursor);
+                (void)runtime_state().host.inventory_extras->read.cursor_item(ctrl, &cursor);
             }
             item = cursor != nullptr ? extension_bag_ui_item(cursor) : nullptr;
             if (item != nullptr && module_slot_of_item_locked(item, &bag, &slot)) {
                 module_item = true;
                 const bool identity_ok =
-                    bag == store_view_bag && virtual_bag::valid_index(bag) && slot >= 0 &&
-                    slot < virtual_bag::kSlotCount && g_module_objects[bag][slot] == item &&
+                    bag == runtime_state().store.view_bag && virtual_bag::valid_index(bag) && slot >= 0 &&
+                    slot < virtual_bag::kSlotCount && runtime_state().objects.module_objects[bag][slot] == item &&
                     module_object_release_allowed_locked(bag, slot, item, "store sell", false,
                                                          nullptr);
-                const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+                const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
                 const bool descriptor_ok =
                     descriptor.category > 0 && descriptor.count > 0 &&
-                    g_module_object_categories[bag][slot] == descriptor.category &&
-                    g_module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
+                    runtime_state().objects.module_object_categories[bag][slot] == descriptor.category &&
+                    runtime_state().objects.module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
                 if (!identity_ok || !descriptor_ok) {
                     reject = true;
                 } else {
@@ -137,7 +137,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
             }
         }
     }
-    if (!module_item) return reinterpret_cast<StoreSellItemFn>(g_backup_store_sell_item)(displayed_price);
+    if (!module_item) return reinterpret_cast<StoreSellItemFn>(runtime_state().ui.backup_store_sell_item)(displayed_price);
     if (reject) {
         VIRTBAG_LOG("store sell reject reason=identity_or_plan bag=%d slot=%d", bag, slot);
         store_sell_popup(0xc);
@@ -165,22 +165,22 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     bool committed = false;
     bool whole = false;
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         const bool current =
             virtual_bag::valid_index(bag) && slot >= 0 && slot < virtual_bag::kSlotCount &&
-            g_module_objects[bag][slot] == item &&
+            runtime_state().objects.module_objects[bag][slot] == item &&
             module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
             (!item_encoded ||
              static_cast<int>(virtual_bag_effective_count(
-                 item, static_cast<uint32_t>(g_virtual_bag_state.items[bag][slot].count))) == view);
+                 item, static_cast<uint32_t>(runtime_state().objects.bag.items[bag][slot].count))) == view);
         if (current) {
             whole = plan.kind == qol::store_sell::PlanKind::kWhole || count >= view;
             if (whole) {
-                const virtual_bag::Item previous_item = g_virtual_bag_state.items[bag][slot];
-                g_virtual_bag_state.items[bag][slot] = {};
+                const virtual_bag::Item previous_item = runtime_state().objects.bag.items[bag][slot];
+                runtime_state().objects.bag.items[bag][slot] = {};
                 extension_bag_mark_dirty_locked();
                 if (!free_module_object_locked(bag, slot)) {
-                    g_virtual_bag_state.items[bag][slot] = previous_item;
+                    runtime_state().objects.bag.items[bag][slot] = previous_item;
                     persist_state_locked();
                     VIRTBAG_LOG("store sell rejected object release bag=%d slot=%d", bag, slot);
                 } else {
@@ -192,7 +192,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
                 committed = true;
             }
         }
-        if (committed && store_view_installed && store_view_bag == bag) {
+        if (committed && runtime_state().store.view_installed && runtime_state().store.view_bag == bag) {
             // R-12：只用商店投影刷新；调用原版 UIStore_RefreshInvenItem 会把整列刷回
             // 窗口原版袋内容，破坏扩展投影。
             store_refresh_projection_locked();
@@ -216,16 +216,16 @@ enum class StoreSaveSlotLookup : uint8_t { kFound, kNotFound, kError };
 
 StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
                                                                  int32_t* out_slot) {
-    if (item == nullptr || out_slot == nullptr || g_game == nullptr ||
-        g_inventory_extras == nullptr || g_inventory_extras->read.find_save_slot == nullptr) {
+    if (item == nullptr || out_slot == nullptr || runtime_state().host.game == nullptr ||
+        runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.find_save_slot == nullptr) {
         VIRTBAG_LOG("store buy gate original lookup unavailable item=%p", item);
         return StoreSaveSlotLookup::kError;
     }
 
-    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
-    const bool projected = store_view_installed;
-    const int original_bag = store_window_original_bag;
-    const uint64_t view_generation = store_view_generation;
+    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    const bool projected = runtime_state().store.view_installed;
+    const int original_bag = runtime_state().store.window_original_bag;
+    const uint64_t view_generation = runtime_state().store.view_generation;
     uint32_t projected_size_word = 0;
     if (projected) {
         if (!virtual_bag::valid_original_transaction_bag(original_bag) ||
@@ -233,7 +233,7 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
             VIRTBAG_LOG("store buy gate cannot read projected capacity window=%d", original_bag);
             return StoreSaveSlotLookup::kError;
         }
-        if (!set_bag_size_word_locked(original_bag, store_original_size_word)) {
+        if (!set_bag_size_word_locked(original_bag, runtime_state().store.original_size_word)) {
             VIRTBAG_LOG("store buy gate cannot restore original capacity window=%d", original_bag);
             return StoreSaveSlotLookup::kError;
         }
@@ -241,15 +241,15 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
 
     lock.unlock();
     int32_t slot = -1;
-    const QolResult result = g_inventory_extras->read.find_save_slot(item, &slot);
+    const QolResult result = runtime_state().host.inventory_extras->read.find_save_slot(item, &slot);
     lock.lock();
 
     if (projected) {
-        if (store_view_generation != view_generation || !store_view_installed ||
-            store_window_original_bag != original_bag) {
+        if (runtime_state().store.view_generation != view_generation || !runtime_state().store.view_installed ||
+            runtime_state().store.window_original_bag != original_bag) {
             VIRTBAG_LOG("store buy gate view changed during original lookup generation=%llu->%llu",
                         static_cast<unsigned long long>(view_generation),
-                        static_cast<unsigned long long>(store_view_generation));
+                        static_cast<unsigned long long>(runtime_state().store.view_generation));
             return StoreSaveSlotLookup::kError;
         }
         if (!set_bag_size_word_locked(original_bag, projected_size_word)) {
@@ -292,8 +292,8 @@ bool store_extension_can_accept_item_locked(void* item) {
     source.payload_size = payload_size;
 
     const virtual_bag::PlacePlan plan = virtual_bag::place_plan(
-        g_virtual_bag_state.items, g_virtual_bag_state.types,
-        g_virtual_bag_state.capacities, source, /*allow_new_slot=*/true,
+        runtime_state().objects.bag.items, runtime_state().objects.bag.types,
+        runtime_state().objects.bag.capacities, source, /*allow_new_slot=*/true,
         virtual_bag_extended_mode(item), virtual_bag_category_uses_stack_count,
         &module_slot_is_assignable_locked);
     return plan.outcome == virtual_bag::PlaceOutcome::kMerged ||
@@ -303,7 +303,7 @@ bool store_extension_can_accept_item_locked(void* item) {
 
 uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_STORE_BUY_GATE_1"});
     int32_t slot = -1;
     const StoreSaveSlotLookup lookup = store_find_original_slot_with_real_capacity(item, &slot);
@@ -315,7 +315,7 @@ uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
         return 1;
     }
     if (lookup == StoreSaveSlotLookup::kError) return 0;
-    if (!g_virtual_bag_enabled.load()) return 0;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (!runtime_state().enabled.load()) return 0;
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     return store_extension_can_accept_item_locked(item) ? 1 : 0;
 }

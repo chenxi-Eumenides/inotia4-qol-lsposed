@@ -20,18 +20,18 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
                     src_slot, src_bag);
         return false;
     }
-    if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
+    if (!virtual_bag::valid_index(dst_bag) || runtime_state().objects.bag.capacities[dst_bag] == 0 ||
         extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.serialize_item == nullptr ||
-        g_item_facts == nullptr || g_item_facts->cumulate_count == nullptr ||
-        g_item_facts->item_ref_at == nullptr ||
+        runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->cumulate_count == nullptr ||
+        runtime_state().host.item_facts->item_ref_at == nullptr ||
         extension_bag_write_api()->inventory.remove_item_direct == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d capacity=%d symbols=%d",
                     dst_bag,
-                    virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
+                    virtual_bag::valid_index(dst_bag) ? runtime_state().objects.bag.capacities[dst_bag] : 0,
                     extension_bag_write_api() != nullptr &&
                     extension_bag_write_api()->inventory.serialize_item != nullptr &&
-                    g_item_facts != nullptr && g_item_facts->cumulate_count != nullptr &&
+                    runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->cumulate_count != nullptr &&
                     extension_bag_write_api()->inventory.remove_item_direct != nullptr ? 1 : 0);
         return false;
     }
@@ -43,7 +43,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     }
     qol::contracts::QolInventoryItemRef source_ref{};
     if (!qol::contracts::succeeded(
-            g_item_facts->item_ref_at(src_bag, src_slot, &source_ref)) ||
+            runtime_state().host.item_facts->item_ref_at(src_bag, src_slot, &source_ref)) ||
         source_ref.bag != src_bag || source_ref.slot != src_slot ||
         source_ref.item.slot == 0 || source_ref.item.generation == 0 ||
         (expected_item.slot != 0 &&
@@ -75,7 +75,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     // 用 canonical 读取，否则 sidecar 读档会把 a 段对齐抹掉。
     const int src_count = static_cast<int>(virtual_bag_canonical_count(src_item, 1));
     const int src_category = original_item_category_locked(src_item);
-    const int capacity = g_virtual_bag_state.capacities[dst_bag];
+    const int capacity = runtime_state().objects.bag.capacities[dst_bag];
 
     // prepared：收集不可变事务快照。
     virtual_bag::TransactionContext txn{};
@@ -107,7 +107,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     txn.dst_slot = static_cast<uint8_t>(dst_slot);
     txn.merged = merged;
     txn.committed = committed;
-    txn.previous_dst = g_virtual_bag_state.items[dst_bag][dst_slot];
+    txn.previous_dst = runtime_state().objects.bag.items[dst_bag][dst_slot];
     generate_transaction_id_locked(txn.transaction_id);
     if (txn.merged) {
         QOL_LOG_INFO(QolDomain::kExtensionBag, "txn prepared id=%s original merge src=%d/%d -> extension=%d/%d count=%d+%d=%d",
@@ -119,7 +119,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     if (!txn_record_pending_locked(&txn)) return false;
 
     // logical-state-updated：写扩展逻辑目标；物化失败即回滚（源保持原版实态）。
-    virtual_bag::txn_apply_logical(&g_virtual_bag_state, txn);
+    virtual_bag::txn_apply_logical(&runtime_state().objects.bag, txn);
     extension_bag_mark_dirty_locked();
     if (module_item_locked(dst_bag, dst_slot) == nullptr) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
@@ -127,7 +127,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
         return false;
     }
     if (!module_object_release_allowed_locked(
-            dst_bag, dst_slot, g_module_objects[dst_bag][dst_slot],
+            dst_bag, dst_slot, runtime_state().objects.module_objects[dst_bag][dst_slot],
             "original-to-extension commit", false, nullptr)) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "target extension object is in use; source retained");
@@ -142,7 +142,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     // original-state-updated：删除原版源并以原版实态复核（不只信删除函数返回值）。
     qol::contracts::QolInventoryItemRef before_remove_ref{};
     if (!qol::contracts::succeeded(
-            g_item_facts->item_ref_at(src_bag, src_slot, &before_remove_ref)) ||
+            runtime_state().host.item_facts->item_ref_at(src_bag, src_slot, &before_remove_ref)) ||
         before_remove_ref.item.slot != source_handle.slot ||
         before_remove_ref.item.generation != source_handle.generation) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
@@ -157,14 +157,14 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     }
 
     // committed：不做猜测性逆转。清 pending、回收模块投影对象、刷新原版网格。
-    g_virtual_bag_state.pending = {};
+    runtime_state().objects.bag.pending = {};
     // orig→ext 后保持当前视图（对齐原版"移动后停留"）。
     // 不切 mode、不装投影：mode 与投影始终成对，此前"切 mode 不装投影"的
     // overlay 错位从根上不可达；P2 移动锁也不再因 API 移动触发。
     // 当前视图只同步发生变化的扩展槽；非扩展视图仍走原版刷新。
-    if (g_module_view_installed && g_module_view_index == dst_bag) {
+    if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == dst_bag) {
         sync_projected_slot_locked(dst_bag, dst_slot);
-    } else if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
+    } else if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s original->extension bag=%d slot=%d cat=%d count=%d src=%d/%d",
@@ -175,16 +175,16 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
 
 bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
                                        void* moving_control) {
-    if (!virtual_bag::valid_index(dst_bag) || g_virtual_bag_state.capacities[dst_bag] == 0 ||
-        g_item_facts == nullptr || g_item_facts->detail_item_context == nullptr) {
+    if (!virtual_bag::valid_index(dst_bag) || runtime_state().objects.bag.capacities[dst_bag] == 0 ||
+        runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->detail_item_context == nullptr) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension dst=%d control=%p capacity=%d symbol=%d",
                      dst_bag, moving_control,
-                     virtual_bag::valid_index(dst_bag) ? g_virtual_bag_state.capacities[dst_bag] : 0,
-                     g_item_facts != nullptr && g_item_facts->detail_item_context != nullptr ? 1 : 0);
+                     virtual_bag::valid_index(dst_bag) ? runtime_state().objects.bag.capacities[dst_bag] : 0,
+                     runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->detail_item_context != nullptr ? 1 : 0);
         return false;
     }
     qol::contracts::QolItemDetailContext source{};
-    if (!qol::contracts::succeeded(g_item_facts->detail_item_context(&source)) ||
+    if (!qol::contracts::succeeded(runtime_state().host.item_facts->detail_item_context(&source)) ||
         source.desc_type != 2 || source.bag != original_bag_locked() ||
         source.slot < 0 || source.slot >= virtual_bag::kSlotCount ||
         source.item.slot == 0 || source.item.generation == 0) {
@@ -204,7 +204,7 @@ bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int 
                                         qol::contracts::QolItemHandle item_handle) {
     // 落位复核可能已通过对象回退找到槽；回滚必须复用该槽并重新核对句柄身份。
     if (inserted_slot < 0 || inserted_slot >= virtual_bag::kSlotCount || item == nullptr ||
-        g_item_facts == nullptr || g_item_facts->item_ref_at == nullptr) {
+        runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->item_ref_at == nullptr) {
         return false;
     }
     void* current = nullptr;
@@ -217,7 +217,7 @@ bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int 
         current_handle.slot != item_handle.slot ||
         current_handle.generation != item_handle.generation ||
         !qol::contracts::succeeded(
-            g_item_facts->item_ref_at(target_bag, inserted_slot, &current_ref)) ||
+            runtime_state().host.item_facts->item_ref_at(target_bag, inserted_slot, &current_ref)) ||
         current_ref.bag != target_bag || current_ref.slot != inserted_slot ||
         current_ref.item.slot != item_handle.slot ||
         current_ref.item.generation != item_handle.generation) {
@@ -246,9 +246,9 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     // 容量判定（扩展容量 < 真实容量时宿主袋被误判已满、> 真实容量时越窗扫描）；
     // RAII 保证任何出口写回投影值（成功后由调用方 refresh 重刷控件）。
     const bool host_restore = virtual_bag::ext2orig_requires_host_capacity_restore(
-        g_module_view_installed, target_bag, g_module_window_original_bag);
+        runtime_state().objects.module_view_installed, target_bag, runtime_state().objects.module_window_original_bag);
     constexpr uint32_t kTxnCapacityMask = (1u << 25) - 1u;
-    const int host_word_bag = host_restore ? g_original_bag_size_bag : -1;
+    const int host_word_bag = host_restore ? runtime_state().objects.original_bag_size_bag : -1;
     uint32_t host_projected_word = 0;
     struct HostCapacityGuard {
         int bag = -1;
@@ -288,7 +288,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         host_capacity_guard.active = true;
         const uint32_t real_word =
             (host_projected_word & ~kTxnCapacityMask) |
-            (g_original_bag_size & kTxnCapacityMask);
+            (runtime_state().objects.original_bag_size & kTxnCapacityMask);
         if (!set_bag_size_word_locked(host_word_bag, real_word)) {
             QOL_LOG_ERROR(QolDomain::kExtensionBag,
                           "ERROR ext2orig real host capacity write failed bag=%d word=0x%x",
@@ -302,22 +302,22 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
             return false;
         }
         QOL_LOG_INFO(QolDomain::kExtensionBag, "ext2orig host capacity restored target=%d window=%d projected=0x%x real=0x%x",
-                    target_bag, g_module_window_original_bag, host_projected_word,
-                    g_original_bag_size);
+                    target_bag, runtime_state().objects.module_window_original_bag, host_projected_word,
+                    runtime_state().objects.original_bag_size);
     }
 
     const auto run_transaction = [&]() -> bool {
     int target_size = 0;
-    if (g_game != nullptr && g_inventory_extras->read.bag_size != nullptr &&
-        qol::contracts::succeeded(g_inventory_extras->read.bag_size(target_bag, &target_size)) &&
+    if (runtime_state().host.game != nullptr && runtime_state().host.inventory_extras->read.bag_size != nullptr &&
+        qol::contracts::succeeded(runtime_state().host.inventory_extras->read.bag_size(target_bag, &target_size)) &&
         target_size <= 0) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original target bag unavailable=%d", target_bag);
         return false;
     }
     // 满包预检：INVEN_SaveItemOnEmpty 是纯首空槽扫描（0x104be0，满则返回 0 无副作用），
     // 事务入口先行拒绝，避免为注定失败的插入创建 pending/隔离记录或切换当前袋。
-    if (g_game != nullptr && g_inventory_extras->read.bag_size != nullptr &&
-        qol::contracts::succeeded(g_inventory_extras->read.bag_size(target_bag, &target_size))) {
+    if (runtime_state().host.game != nullptr && runtime_state().host.inventory_extras->read.bag_size != nullptr &&
+        qol::contracts::succeeded(runtime_state().host.inventory_extras->read.bag_size(target_bag, &target_size))) {
         const int bag_size = target_size;
         bool has_empty = false;
         for (int slot = 0; slot < bag_size && slot < virtual_bag::kSlotCount; ++slot) {
@@ -333,7 +333,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
             return false;
         }
     }
-    const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
+    const virtual_bag::Item source = runtime_state().objects.bag.items[src_bag][src_slot];
     if (source.category <= 0 || source.count <= 0) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->original source empty=%d/%d", src_bag,
                     src_slot);
@@ -378,9 +378,9 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "loaded item handle registration failed; extension source retained");
         release_tracked_item_locked(item_handle, item, "ext2orig handle registration failed");
-        if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
-            set_original_bag_locked(g_module_window_original_bag);
-            refresh_module_item_area_locked(g_module_view_index);
+        if (runtime_state().objects.module_view_installed && virtual_bag::valid_index(runtime_state().objects.module_window_original_bag)) {
+            set_original_bag_locked(runtime_state().objects.module_window_original_bag);
+            refresh_module_item_area_locked(runtime_state().objects.module_view_index);
         }
         reset_drag_state_locked(nullptr);
         return false;
@@ -390,7 +390,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     // 宿主——原版袋容量字被写扩展容量、扩展内容投影上去）。投影中不切换；
     // SaveItemOnEmpty 显式携带 target_bag，不依赖 CUR_BAG。
     if (item != nullptr &&
-        virtual_bag::ext2orig_should_switch_display_bag(g_module_view_installed)) {
+        virtual_bag::ext2orig_should_switch_display_bag(runtime_state().objects.module_view_installed)) {
         set_original_bag_locked(target_bag);
     }
     const auto find_inserted_slot = [&]() {
@@ -432,9 +432,9 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         } else {
             release_tracked_item_locked(item_handle, item, "ext2orig insert failed");
         }
-        if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
-            set_original_bag_locked(g_module_window_original_bag);
-            refresh_module_item_area_locked(g_module_view_index);
+        if (runtime_state().objects.module_view_installed && virtual_bag::valid_index(runtime_state().objects.module_window_original_bag)) {
+            set_original_bag_locked(runtime_state().objects.module_window_original_bag);
+            refresh_module_item_area_locked(runtime_state().objects.module_view_index);
         }
         reset_drag_state_locked(nullptr);
         return false;
@@ -450,9 +450,9 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         // 未能定位实际目标时保留 pending 和临时对象归属，恢复器可再次核验两侧。
         handover_tracked_item_locked(item_handle, item,
                                      "ext2orig slot-not-found rollback unconfirmed");
-        if (g_module_view_installed && virtual_bag::valid_index(g_module_window_original_bag)) {
-            set_original_bag_locked(g_module_window_original_bag);
-            refresh_module_item_area_locked(g_module_view_index);
+        if (runtime_state().objects.module_view_installed && virtual_bag::valid_index(runtime_state().objects.module_window_original_bag)) {
+            set_original_bag_locked(runtime_state().objects.module_window_original_bag);
+            refresh_module_item_area_locked(runtime_state().objects.module_view_index);
         }
         reset_drag_state_locked(nullptr);
         return false;
@@ -476,7 +476,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
         return false;
     }
     if (!module_object_release_allowed_locked(
-            src_bag, src_slot, g_module_objects[src_bag][src_slot],
+            src_bag, src_slot, runtime_state().objects.module_objects[src_bag][src_slot],
             "extension-to-original commit", false, nullptr)) {
         isolate_ext2orig_failure_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                                         virtual_bag::isolation_reason::kInsertFailed,
@@ -514,20 +514,20 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     handover_tracked_item_locked(item_handle, item, "ext2orig handover");
 
     // committed：清扩展源逻辑项、恢复投影、清 pending。已移交对象不参与模块回滚。
-    g_virtual_bag_state.items[src_bag][src_slot] = {};
+    runtime_state().objects.bag.items[src_bag][src_slot] = {};
     extension_bag_mark_dirty_locked();
-    g_virtual_bag_state.pending = {};
+    runtime_state().objects.bag.pending = {};
     // 保持当前视图：仅拖放上下文（扩展视图安装中 = 当前视图即扩展袋）停留该视图；
     // API 路径（原版视图）不改写视图字段。
-    if (g_module_view_installed) {
-        g_virtual_bag_state.mode = virtual_bag::Mode::kModule;
-        g_virtual_bag_state.selected = src_bag;
-        g_virtual_bag_state.inspected = -1;
+    if (runtime_state().objects.module_view_installed) {
+        runtime_state().objects.bag.mode = virtual_bag::Mode::kModule;
+        runtime_state().objects.bag.selected = src_bag;
+        runtime_state().objects.bag.inspected = -1;
     }
     // 提交后的显示袋切换同样受 VM-40 宿主身份守卫：投影安装中宿主不变，
     // 拖放调用方的 refresh_projected_module_view_after_move_locked 负责刷新；
     // API（非投影）路径保留切到目标袋的既有语义。
-    if (virtual_bag::ext2orig_should_switch_display_bag(g_module_view_installed)) {
+    if (virtual_bag::ext2orig_should_switch_display_bag(runtime_state().objects.module_view_installed)) {
         set_original_bag_locked(target_bag);
     }
     reset_drag_state_locked(nullptr);
@@ -540,13 +540,13 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     const bool projected_capacity_restored = host_capacity_guard.restore();
     if (!projected_capacity_restored && host_restore) {
         const int host_bag = virtual_bag::valid_original_transaction_bag(
-                                 g_module_window_original_bag)
-                                 ? g_module_window_original_bag
+                                 runtime_state().objects.module_window_original_bag)
+                                 ? runtime_state().objects.module_window_original_bag
                                  : 0;
-        if (g_module_view_installed) restore_module_view_locked();
-        g_virtual_bag_state.mode = virtual_bag::Mode::kOriginal;
-        g_virtual_bag_state.selected = host_bag;
-        g_virtual_bag_state.inspected = -1;
+        if (runtime_state().objects.module_view_installed) restore_module_view_locked();
+        runtime_state().objects.bag.mode = virtual_bag::Mode::kOriginal;
+        runtime_state().objects.bag.selected = host_bag;
+        runtime_state().objects.bag.inspected = -1;
         QOL_LOG_ERROR(QolDomain::kExtensionBag,
                       "ERROR ext2orig disabled projected view after capacity restore failure host=%d",
                       host_bag);

@@ -12,6 +12,19 @@
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #if defined(QOL_EXTENSION_BAG_SLOT_DATA_TEST_SEAMS)
 #include "tests/extension_bag_slot_data_state_stubs.h"
+namespace {
+struct TestRuntimePersistenceView {
+    bool& dirty;
+};
+struct TestRuntimeStateView {
+    std::mutex& mtx;
+    TestRuntimePersistenceView persistence;
+};
+TestRuntimeStateView extension_bag_test_runtime_state() {
+    return {g_virtual_bag_mtx, {g_item_state_dirty}};
+}
+}  // namespace
+#define runtime_state() extension_bag_test_runtime_state()
 #else
 #include "plugins/extension_bag/runtime/state.h"
 #endif
@@ -61,7 +74,7 @@ uint64_t g_staged_revision = 0;
 void eb_reset_loaded_revision_state_locked() {
     g_capture = CaptureIdentity{};
     g_staged_revision = 0;
-    g_item_state_dirty = false;
+    runtime_state().persistence.dirty = false;
 }
 
 QolResult eb_ok() { return qol::contracts::ok(); }
@@ -101,7 +114,7 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
     const auto presence_kind = static_cast<qol::contracts::QolSlotDataPresence>(presence);
     if (presence_kind == qol::contracts::QolSlotDataPresence::kMissing) {
         // 默认状态：空背包、原版视图；pending 不存在。
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         *state = {};
         eb_reset_loaded_revision_state_locked();
         g_session_blocked.store(false, std::memory_order_release);
@@ -132,7 +145,7 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
     if (size > 0) payload.assign(reinterpret_cast<const char*>(bytes),
                                  static_cast<std::size_t>(size));
     // v4 payload 中的非法 pending 仅隔离该事务；状态 JSON 解析失败则阻断会话。
-    std::lock_guard<std::mutex> state_lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> state_lock(runtime_state().mtx);
     virtual_bag::PendingTransfer rejected_pending{};
     const bool has_pending = payload.find("\"pending\":") != std::string::npos;
     const auto pending_result =
@@ -203,7 +216,7 @@ QolResult eb_sd_capture(void* /*user*/, const QolSlotDataContext* ctx, uint8_t* 
                         uint64_t capacity, uint64_t* out_size) {
     if (out_buffer == nullptr || out_size == nullptr)
         return qol::contracts::error(kQolErrInvalidArgument, "invalid capture buffer", 22);
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     if (!virtual_bag_module_save_validate_locked())
         return qol::contracts::error(kQolErrBlocked, "capacity validation rejected", 24);
     const std::string json = virtual_bag::state_json(*extension_bag_state());
@@ -223,7 +236,7 @@ QolResult eb_sd_capture(void* /*user*/, const QolSlotDataContext* ctx, uint8_t* 
 // complete：幂等内存记账（不执行 section IO——提交由协调器完成）。
 void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outcome) {
     const auto kind = static_cast<qol::contracts::QolSlotDataOutcome>(outcome);
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     switch (kind) {
         case qol::contracts::QolSlotDataOutcome::kCommitted:
             {
@@ -232,7 +245,7 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
                     g_capture.revision == extension_bag_item_revision_locked();
                 if (same_capture) {
                     extension_bag_state()->pending = {};
-                    g_item_state_dirty = false;
+                    runtime_state().persistence.dirty = false;
                     g_staged_revision = 0;
                 } else {
                     QOL_LOG_WARN(QolDomain::kExtensionBag,
@@ -362,8 +375,8 @@ void extension_bag_flush_dirty_staging(const QolSlotDataApi* api) {
     uint64_t epoch = 0;
     uint64_t revision = 0;
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-        if (!g_item_state_dirty || !extension_bag_session_admitted_locked()) return;
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (!runtime_state().persistence.dirty || !extension_bag_session_admitted_locked()) return;
         epoch = g_admitted_epoch.load(std::memory_order_acquire);
         revision = extension_bag_item_revision_locked();
         if (revision == g_staged_revision) return;
@@ -374,7 +387,7 @@ void extension_bag_flush_dirty_staging(const QolSlotDataApi* api) {
                                            epoch, &request);
     if (!qol::contracts::succeeded(result)) {
         // 非主线程投递失败/epoch 不匹配：保留 dirty，下一安全点重试。
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (g_staged_revision == revision) g_staged_revision = 0;
         return;
     }

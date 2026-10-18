@@ -39,15 +39,15 @@ namespace {
 uint64_t store_tab_item_proc(void*, uint64_t, void*, void*);
 int store_tab_index(void* ctrl) {
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        if (store_tab_buttons[index] == ctrl) return index;
+        if (runtime_state().store.tab_buttons[index] == ctrl) return index;
     }
     return -1;
 }
 
 void store_refresh_tab_bag_items_locked() {
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        const uint8_t type = g_virtual_bag_state.types[index];
-        void*& item = store_tab_bag_items[index];
+        const uint8_t type = runtime_state().objects.bag.types[index];
+        void*& item = runtime_state().store.tab_bag_items[index];
         if (type == 0) {
             if (item != nullptr) {
                 if (defer_item_free_locked(item)) item = nullptr;
@@ -76,14 +76,14 @@ void store_refresh_tab_bag_items_locked() {
     }
 }
 bool store_all_tab_buttons_installed_locked() {
-    for (void* button : store_tab_buttons) {
+    for (void* button : runtime_state().store.tab_buttons) {
         if (button == nullptr) return false;
     }
     return true;
 }
 
 bool store_has_tab_buttons_locked() {
-    for (void* button : store_tab_buttons) {
+    for (void* button : runtime_state().store.tab_buttons) {
         if (button != nullptr) return true;
     }
     return false;
@@ -108,12 +108,12 @@ void store_discard_new_tab_controls_locked(
 }
 uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
     if (event == 0x02) {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (!extension_bag_session_admitted_locked()) return 1;
         const int index = store_tab_index(ctrl);
-        if (index >= 0 && store_tab_generation != 0) {
-            store_pending_tab = index;
-            store_pending_tab_generation = store_tab_generation;
+        if (index >= 0 && runtime_state().store.tab_generation != 0) {
+            runtime_state().store.pending_tab = index;
+            runtime_state().store.pending_tab_generation = runtime_state().store.tab_generation;
         }
         return 1;
     }
@@ -123,15 +123,15 @@ uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
 }  // namespace
 
 void store_disable_tab_buttons_locked() {
-    ++store_tab_generation;
-    store_pending_tab = -1;
-    store_pending_tab_generation = 0;
-    store_tab_buttons.fill(nullptr);
-    store_tab_root = nullptr;
+    ++runtime_state().store.tab_generation;
+    runtime_state().store.pending_tab = -1;
+    runtime_state().store.pending_tab_generation = 0;
+    runtime_state().store.tab_buttons.fill(nullptr);
+    runtime_state().store.tab_root = nullptr;
 }
 
 void store_delete_tab_buttons_locked() {
-    for (void*& button : store_tab_buttons) {
+    for (void*& button : runtime_state().store.tab_buttons) {
         if (button != nullptr && !extension_bag_ui_delete_control(button)) {
             VIRTBAG_LOG("store tab delete failed control=%p", button);
         }
@@ -140,15 +140,15 @@ void store_delete_tab_buttons_locked() {
 }
 void store_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时商店页签不得挂载（3 个宿主之一）。
-    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked()) return;
-    if (g_sdk == nullptr) return;
+    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return;
+    if (runtime_state().host.sdk == nullptr) return;
     void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
         bag_child_count < 6) return;
-    if (store_tab_root == bag_container && store_all_tab_buttons_installed_locked()) return;
+    if (runtime_state().store.tab_root == bag_container && store_all_tab_buttons_installed_locked()) return;
 
-    if (store_tab_root != nullptr || store_has_tab_buttons_locked()) {
+    if (runtime_state().store.tab_root != nullptr || store_has_tab_buttons_locked()) {
         store_delete_tab_buttons_locked();
         store_disable_tab_buttons_locked();
     }
@@ -205,40 +205,40 @@ void store_install_tab_buttons_locked() {
             store_discard_new_tab_controls_locked(controls, index, nullptr, "data-null");
             return;
         }
-        *reinterpret_cast<void**>(data) = store_tab_bag_items[index];
+        *reinterpret_cast<void**>(data) = runtime_state().store.tab_bag_items[index];
         if (!extension_bag_ui_set_control_data(control, data)) {
             store_discard_new_tab_controls_locked(controls, index, nullptr, "data-set");
             return;
         }
     }
-    store_tab_buttons = controls;
-    store_tab_root = bag_container;
-    ++store_tab_generation;
+    runtime_state().store.tab_buttons = controls;
+    runtime_state().store.tab_root = bag_container;
+    ++runtime_state().store.tab_generation;
     VIRTBAG_LOG("store tabs installed root=%p generation=%llu", bag_container,
-                static_cast<unsigned long long>(store_tab_generation));
+                static_cast<unsigned long long>(runtime_state().store.tab_generation));
 }
 void store_commit_pending_tab_locked() {
     if (!extension_bag_session_admitted_locked()) {
-        store_pending_tab = -1;
-        store_pending_tab_generation = 0;
+        runtime_state().store.pending_tab = -1;
+        runtime_state().store.pending_tab_generation = 0;
         return;
     }
-    if (!virtual_bag::valid_index(store_pending_tab) ||
-        store_pending_tab_generation != store_tab_generation) {
-        store_pending_tab = -1;
-        store_pending_tab_generation = 0;
+    if (!virtual_bag::valid_index(runtime_state().store.pending_tab) ||
+        runtime_state().store.pending_tab_generation != runtime_state().store.tab_generation) {
+        runtime_state().store.pending_tab = -1;
+        runtime_state().store.pending_tab_generation = 0;
         return;
     }
-    const int bag = store_pending_tab;
-    store_pending_tab = -1;
-    store_pending_tab_generation = 0;
-    if (store_view_installed && store_view_bag == bag) return;
+    const int bag = runtime_state().store.pending_tab;
+    runtime_state().store.pending_tab = -1;
+    runtime_state().store.pending_tab_generation = 0;
+    if (runtime_state().store.view_installed && runtime_state().store.view_bag == bag) return;
     store_install_module_view_locked(bag);
 }
 void store_draw_tab_buttons_locked() {
     if (!extension_bag_ui_can_draw()) return;
     for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
-        void* button = store_tab_buttons[index];
+        void* button = runtime_state().store.tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;
         int64_t y = 0;
@@ -247,13 +247,13 @@ void store_draw_tab_buttons_locked() {
                                          static_cast<int32_t>(y - 12), 0, 1);
     }
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        void* button = store_tab_buttons[index];
+        void* button = runtime_state().store.tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;
         int64_t y = 0;
         extension_bag_control_abs_pos(button, &x, &y);
-        const bool selected = store_view_installed && store_view_bag == index;
-        const bool equipped = g_virtual_bag_state.capacities[index] != 0;
+        const bool selected = runtime_state().store.view_installed && runtime_state().store.view_bag == index;
+        const bool equipped = runtime_state().objects.bag.capacities[index] != 0;
         if (selected) {
             (void)extension_bag_ui_draw_part(0xf, 0x13, static_cast<int32_t>(x - 5),
                                              static_cast<int32_t>(y - 12), 0, 1);
@@ -274,21 +274,21 @@ void store_draw_tab_buttons_locked() {
 // 的 store_draw_tab_buttons_locked 在袋列绘制之后补画。
 void store_draw_inven_bag_group_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_STORE_BAG_DRAW"});
-    if (g_game == nullptr ||
-        g_write_port->ui.draw_original_bag == nullptr ||
-        g_write_port->ui.current_bag == nullptr ||
-        g_write_port->ui.set_current_bag == nullptr) return;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    if (runtime_state().host.game == nullptr ||
+        runtime_state().host.write_port->ui.draw_original_bag == nullptr ||
+        runtime_state().host.write_port->ui.current_bag == nullptr ||
+        runtime_state().host.write_port->ui.set_current_bag == nullptr) return;
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     int32_t saved_current = 0;
     bool masked = false;
-    if (store_view_installed &&
-        qol::contracts::succeeded(g_write_port->ui.current_bag(&saved_current)) &&
+    if (runtime_state().store.view_installed &&
+        qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&saved_current)) &&
         saved_current != kNoOriginalBagSelected) {
-        (void)g_write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
-    (void)g_write_port->ui.draw_original_bag();
-    if (masked) (void)g_write_port->ui.set_current_bag(saved_current);
+    (void)runtime_state().host.write_port->ui.draw_original_bag();
+    if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
 }

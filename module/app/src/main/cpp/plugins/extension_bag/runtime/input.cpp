@@ -27,11 +27,11 @@ void clear_stale_projected_moving_locked() {
     int64_t release_y = 0;
     if (!extension_bag_ui_touch_state(&moving, &drop_source, &release_x, &release_y)) return;
     if (moving == nullptr && drop_source == nullptr) return;
-    const auto& session = g_extension_drag_session;
+    const auto& session = runtime_state().ui.extension_drag_session;
     // 会话空闲且非模块触摸捕获时，MOVING_CTRL/DROP_SRC_CTRL 属于原版 TouchHandle
     // 手势（释放时由 TouchHandle_ResetMovingControl 派发 event 8）。模块在此时清除会
     // 打断原版触摸状态机、导致 0x18 释放事件不再产生——故空闲态绝不触碰。
-    if (session.phase == virtual_bag::DragPhase::kIdle && !g_extension_touch_capture) return;
+    if (session.phase == virtual_bag::DragPhase::kIdle && !runtime_state().ui.extension_touch_capture) return;
     const bool phase_retains_moving =
         session.phase == virtual_bag::DragPhase::kPressed ||
         session.phase == virtual_bag::DragPhase::kNativeMoving ||
@@ -42,13 +42,13 @@ void clear_stale_projected_moving_locked() {
                                    session.source_slot >= 0 &&
                                    session.source_slot < virtual_bag::kSlotCount;
     const bool moving_matches_source =
-        live_root == g_projected_item_root && g_projected_item_root != nullptr &&
-        source_slot_valid && moving == valid_child_locked(g_projected_item_root, session.source_slot);
-    const bool retain = phase_retains_moving && g_module_view_installed &&
-        g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
-        g_module_view_index == session.source_bag &&
-        session.view_generation == g_extension_tab_generation &&
-        g_extension_tab_generation == g_inventory_generation &&
+        live_root == runtime_state().objects.projected_item_root && runtime_state().objects.projected_item_root != nullptr &&
+        source_slot_valid && moving == valid_child_locked(runtime_state().objects.projected_item_root, session.source_slot);
+    const bool retain = phase_retains_moving && runtime_state().objects.module_view_installed &&
+        runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
+        runtime_state().objects.module_view_index == session.source_bag &&
+        session.view_generation == runtime_state().ui.extension_tab_generation &&
+        runtime_state().ui.extension_tab_generation == runtime_state().ui.inventory_generation &&
         moving_matches_source;
     if (retain) return;
 
@@ -60,18 +60,18 @@ void clear_stale_projected_moving_locked() {
     if (drop_source != moving) clear_control_flags(drop_source);
     VIRTBAG_LOG("stale projected moving cleared moving=%p drop_source=%p phase=%d view=%d/%d "
                 "generation=%llu/%llu/%llu root=%p projected_root=%p",
-                moving, drop_source, static_cast<int>(session.phase), g_module_view_index,
+                moving, drop_source, static_cast<int>(session.phase), runtime_state().objects.module_view_index,
                 session.source_bag, static_cast<unsigned long long>(session.view_generation),
-                static_cast<unsigned long long>(g_extension_tab_generation),
-                static_cast<unsigned long long>(g_inventory_generation), live_root,
-                g_projected_item_root);
+                static_cast<unsigned long long>(runtime_state().ui.extension_tab_generation),
+                static_cast<unsigned long long>(runtime_state().ui.inventory_generation), live_root,
+                runtime_state().objects.projected_item_root);
 }
 
 void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_x, int64_t rel_y,
                                                uint64_t release_param2, bool handled) {
     void* captured_moving_control = moving_control;
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (captured_moving_control == nullptr) {
             void* drop_source = nullptr;
             int64_t ignored_x = 0;
@@ -84,7 +84,7 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
 
     // TouchHandle_ResetMovingControl performs the original 0x08 dispatch and
     // relative-coordinate restoration. Both can enter arbitrary game UI code.
-    const auto* ui = g_sdk == nullptr ? nullptr : g_sdk->ui;
+    const auto* ui = runtime_state().host.sdk == nullptr ? nullptr : runtime_state().host.sdk->ui;
     if (ui != nullptr && ui->reset_touch_moving != nullptr) {
         (void)ui->reset_touch_moving();
     } else {
@@ -96,7 +96,7 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
     }
 
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         (void)extension_bag_ui_clear_touch_drop_event();
         VIRTBAG_LOG("release_cleanup ctl=%p flags_cleared", captured_moving_control);
     }
@@ -119,11 +119,11 @@ int original_item_category_locked(void* item) {
 }
 
 int drag_source_category_locked() {
-    const auto& session = g_extension_drag_session;
+    const auto& session = runtime_state().ui.extension_drag_session;
     if (session.phase != virtual_bag::DragPhase::kIdle &&
         virtual_bag::valid_index(session.source_bag) &&
         session.source_slot >= 0 && session.source_slot < virtual_bag::kSlotCount) {
-        return g_virtual_bag_state.items[session.source_bag][session.source_slot].category;
+        return runtime_state().objects.bag.items[session.source_bag][session.source_slot].category;
     }
     void* moving = touch_moving_item_control_locked();
     if (moving == nullptr) return 0;
@@ -132,7 +132,7 @@ int drag_source_category_locked() {
     int module_bag = -1;
     int module_slot = -1;
     if (item != nullptr && module_slot_of_item_locked(item, &module_bag, &module_slot)) {
-        return g_virtual_bag_state.items[module_bag][module_slot].category;
+        return runtime_state().objects.bag.items[module_bag][module_slot].category;
     }
     return original_item_category_locked(item);
 }

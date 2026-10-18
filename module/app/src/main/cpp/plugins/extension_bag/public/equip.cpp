@@ -44,38 +44,38 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
     int jewel_bag = -1;
     int jewel_slot = -1;
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         ensure_state_loaded_locked();
         if (!module_slot_of_item_locked(equip_item, &equip_bag, &equip_slot) ||
             !module_slot_of_item_locked(jewel_item, &jewel_bag, &jewel_slot) ||
-            g_module_objects[equip_bag][equip_slot] != equip_item ||
-            g_module_objects[jewel_bag][jewel_slot] != jewel_item) {
+            runtime_state().objects.module_objects[equip_bag][equip_slot] != equip_item ||
+            runtime_state().objects.module_objects[jewel_bag][jewel_slot] != jewel_item) {
             return 3;
         }
-        if (g_virtual_bag_state.items[jewel_bag][jewel_slot].count <= 0) return 3;
+        if (runtime_state().objects.bag.items[jewel_bag][jewel_slot].count <= 0) return 3;
     }
 
     const int result = backup(equip_item, jewel_item);
     if (result != 0) return result;
 
     {
-        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
         ensure_state_loaded_locked();
-        if (g_module_objects[equip_bag][equip_slot] != equip_item ||
-            g_module_objects[jewel_bag][jewel_slot] != jewel_item) {
+        if (runtime_state().objects.module_objects[equip_bag][equip_slot] != equip_item ||
+            runtime_state().objects.module_objects[jewel_bag][jewel_slot] != jewel_item) {
             VIRTBAG_LOG("native put jewel payload sync skipped after native success");
             return 0;
         }
-        g_pending_jewel_detail_item = equip_item;
-        g_pending_jewel_detail_bag = equip_bag;
-        g_pending_jewel_detail_slot = equip_slot;
+        runtime_state().ui.pending_jewel_detail_item = equip_item;
+        runtime_state().ui.pending_jewel_detail_bag = equip_bag;
+        runtime_state().ui.pending_jewel_detail_slot = equip_slot;
         std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
         int payload_size = 0;
         if (!serialize_item_payload_locked(equip_item, &payload, &payload_size)) {
             VIRTBAG_LOG("native put jewel payload sync failed bag=%d slot=%d", equip_bag, equip_slot);
             return 0;
         }
-        virtual_bag::Item& equip_descriptor = g_virtual_bag_state.items[equip_bag][equip_slot];
+        virtual_bag::Item& equip_descriptor = runtime_state().objects.bag.items[equip_bag][equip_slot];
         equip_descriptor.payload = payload;
         equip_descriptor.payload_size = payload_size;
         // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
@@ -83,7 +83,7 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
         if (read_item_cumulate_count(equip_item, &equip_count)) {
             equip_descriptor.count = static_cast<int>(virtual_bag_canonical_count(equip_item, 1));
         }
-        g_module_object_hashes[equip_bag][equip_slot] = virtual_bag::payload_hash(equip_descriptor);
+        runtime_state().objects.module_object_hashes[equip_bag][equip_slot] = virtual_bag::payload_hash(equip_descriptor);
         extension_bag_mark_dirty_locked();
         persist_state_locked();
     }
@@ -100,13 +100,13 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
 bool virtual_bag_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
                                       int equip_slot) {
     if (character == nullptr || item == nullptr) return false;
-    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(runtime_state().mtx);
     if (!extension_bag_session_admitted_locked()) return false;
-    if (!g_module_view_installed || g_module_view_index != source_bag) return false;
-    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.find_equip_slot == nullptr) return false;
+    if (!runtime_state().objects.module_view_installed || runtime_state().objects.module_view_index != source_bag) return false;
+    if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.find_equip_slot == nullptr) return false;
     int found = -1;
     if (!qol::contracts::succeeded(
-            g_character_extras->read.find_equip_slot(character, item, &found))) {
+            runtime_state().host.character_extras->read.find_equip_slot(character, item, &found))) {
         return false;
     }
     if (found < 0 || found >= kEquipSlotCount) return false;
@@ -118,12 +118,12 @@ bool virtual_bag_equip_projected_item(void* character, void* item, int source_ba
 
 bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
     if (needed <= 0) return true;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
     int empty = 0;
     const int bag_count = include_task_bag != 0 ? virtual_bag::kBagCount : virtual_bag::kOriginalTransactionBagCount;
     for (int bag = 0; bag < bag_count; ++bag) {
-        const int capacity = g_virtual_bag_state.capacities[bag];
+        const int capacity = runtime_state().objects.bag.capacities[bag];
         for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
             if (module_slot_is_assignable_locked(bag, slot)) {
                 ++empty;
@@ -136,12 +136,12 @@ bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
 
 bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     if (character == nullptr || equip_slot < 0 || equip_slot >= kEquipSlotCount) return false;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     if (!extension_bag_session_admitted_locked()) return false;
-    if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.equipped_item == nullptr) return false;
+    if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.equipped_item == nullptr) return false;
     void* item = nullptr;
     if (!qol::contracts::succeeded(
-            g_character_extras->read.equipped_item(character, equip_slot, &item))) {
+            runtime_state().host.character_extras->read.equipped_item(character, equip_slot, &item))) {
         return false;
     }
     if (item == nullptr) return false;
@@ -154,8 +154,8 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     int dst_bag = -1;
     int dst_slot = -1;
     for (int bag = 0; bag < virtual_bag::kBagCount && dst_bag < 0; ++bag) {
-        if (g_virtual_bag_state.types[bag] == 0) continue;
-        const int capacity = g_virtual_bag_state.capacities[bag];
+        if (runtime_state().objects.bag.types[bag] == 0) continue;
+        const int capacity = runtime_state().objects.bag.capacities[bag];
         for (int slot = 0; slot < capacity; ++slot) {
             if (module_slot_is_assignable_locked(bag, slot)) {
                 dst_bag = bag;
@@ -165,7 +165,7 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
         }
     }
     if (dst_bag < 0) return false;
-    virtual_bag::Item& descriptor = g_virtual_bag_state.items[dst_bag][dst_slot];
+    virtual_bag::Item& descriptor = runtime_state().objects.bag.items[dst_bag][dst_slot];
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
     (void)read_item_category(item, &descriptor.category);
@@ -184,20 +184,20 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
                     dst_bag, dst_slot);
         return false;
     }
-    g_module_objects[dst_bag][dst_slot] = item;
-    g_module_object_categories[dst_bag][dst_slot] = descriptor.category;
-    g_module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(descriptor);
+    runtime_state().objects.module_objects[dst_bag][dst_slot] = item;
+    runtime_state().objects.module_object_categories[dst_bag][dst_slot] = descriptor.category;
+    runtime_state().objects.module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(descriptor);
     uint32_t adopted_handle = 0;
-    if (ownership::allocate(&g_ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
-        g_module_object_handles[dst_bag][dst_slot] = adopted_handle;
+    if (ownership::allocate(&runtime_state().objects.ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
+        runtime_state().objects.module_object_handles[dst_bag][dst_slot] = adopted_handle;
     } else {
-        g_module_object_handles[dst_bag][dst_slot] = 0;
+        runtime_state().objects.module_object_handles[dst_bag][dst_slot] = 0;
         VIRTBAG_LOG("extension unequip adopt ledger exhausted bag=%d slot=%d",
                     dst_bag, dst_slot);
     }
-    if (g_game->character_write.set_equipped_item == nullptr ||
+    if (runtime_state().host.game->character_write.set_equipped_item == nullptr ||
         !qol::contracts::succeeded(
-            g_game->character_write.set_equipped_item(character, equip_slot, nullptr))) {
+            runtime_state().host.game->character_write.set_equipped_item(character, equip_slot, nullptr))) {
         return false;
     }
     if (!extension_bag_rebind_item_handle(item)) {
@@ -207,7 +207,7 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     }
     extension_bag_mark_dirty_locked();
     persist_state_locked();
-    if (g_module_view_installed && g_module_view_index == dst_bag) {
+    if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == dst_bag) {
         refresh_module_item_area_locked(dst_bag);
     }
     VIRTBAG_LOG("native unequip adopt equip_slot=%d bag=%d slot=%d",
@@ -238,13 +238,13 @@ struct VirtualBagPlaceRequest {
 };
 
 VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceRequest& req) {
-    if (req.item == nullptr || !g_virtual_bag_enabled.load()) {
+    if (req.item == nullptr || !runtime_state().enabled.load()) {
         return VirtualBagPlaceOutcome::kNotApplicable;
     }
     if (req.require_world && !read_world_in_world()) {
         return VirtualBagPlaceOutcome::kNotApplicable;
     }
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     if (!extension_bag_session_admitted_locked()) return VirtualBagPlaceOutcome::kNotApplicable;
     int holder_bag = -1;
     int holder_slot = -1;
@@ -270,8 +270,8 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
     source.payload_size = payload_size;
 
     const virtual_bag::PlacePlan plan = virtual_bag::place_plan(
-        g_virtual_bag_state.items, g_virtual_bag_state.types,
-        g_virtual_bag_state.capacities, source, req.allow_new_slot, limit_enabled,
+        runtime_state().objects.bag.items, runtime_state().objects.bag.types,
+        runtime_state().objects.bag.capacities, source, req.allow_new_slot, limit_enabled,
         virtual_bag_category_uses_stack_count, &module_slot_is_assignable_locked);
 
     if (plan.outcome == virtual_bag::PlaceOutcome::kMerged) {
@@ -281,23 +281,23 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
         // 物化对象同步：已有堆对象（若已物化）数量位按模式视图写回，保持
         // 对象 +0x10 与 descriptor canonical 一致（非 count-encoded 在
         // adopt_merge_into 的 mergeable_items 门控内已拒绝，R-46）。
-        void* materialized = g_module_objects[bag][slot];
+        void* materialized = runtime_state().objects.module_objects[bag][slot];
         if (materialized != nullptr) {
             const uint32_t merged_view = virtual_bag_view_from_canonical(
                 static_cast<uint32_t>(merged.count), virtual_bag_extended_mode(materialized));
             (void)virtual_bag_write_effective(materialized, merged_view);
         }
-        g_virtual_bag_state.items[bag][slot] = merged;
-        g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(merged);
+        runtime_state().objects.bag.items[bag][slot] = merged;
+        runtime_state().objects.module_object_hashes[bag][slot] = virtual_bag::payload_hash(merged);
         extension_bag_mark_dirty_locked();
         persist_state_locked();
-        if (g_module_view_installed && g_module_view_index == bag) {
+        if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == bag) {
             refresh_module_item_area_locked(bag);
         }
         // 收编对象未进库、无其他持有者（调用方前置门控），并入后释放回池。
         if (!defer_item_free_locked(req.item)) {
-            if (g_game != nullptr && g_write_port->inventory.free_item != nullptr) {
-                (void)g_write_port->inventory.free_item(req.item);
+            if (runtime_state().host.game != nullptr && runtime_state().host.write_port->inventory.free_item != nullptr) {
+                (void)runtime_state().host.write_port->inventory.free_item(req.item);
             }
         }
         VIRTBAG_LOG("native save place merge bag=%d slot=%d category=%d count=%d->%d item=%p",
@@ -307,7 +307,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
     if (plan.outcome == virtual_bag::PlaceOutcome::kPlacedNewSlot) {
         const int bag = plan.bag;
         const int slot = plan.slot;
-        virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
         const virtual_bag::Item previous_descriptor = descriptor;
         descriptor = virtual_bag::apply_new_slot_descriptor(previous_descriptor, source, true);
         // 原版对象直接收编为扩展槽物化对象（SaveItem 失败对象未进库、无其他
@@ -325,20 +325,20 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
             VIRTBAG_LOG("native save place handle registration failed bag=%d slot=%d", bag, slot);
             return VirtualBagPlaceOutcome::kRejected;
         }
-        g_module_objects[bag][slot] = req.item;
-        g_module_object_categories[bag][slot] = descriptor.category;
-        g_module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
+        runtime_state().objects.module_objects[bag][slot] = req.item;
+        runtime_state().objects.module_object_categories[bag][slot] = descriptor.category;
+        runtime_state().objects.module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
         uint32_t adopted_handle = 0;
-        if (ownership::allocate(&g_ownership_ledger, &adopted_handle) ==
+        if (ownership::allocate(&runtime_state().objects.ownership_ledger, &adopted_handle) ==
             ownership::Outcome::kOk) {
-            g_module_object_handles[bag][slot] = adopted_handle;
+            runtime_state().objects.module_object_handles[bag][slot] = adopted_handle;
         } else {
-            g_module_object_handles[bag][slot] = 0;
+            runtime_state().objects.module_object_handles[bag][slot] = 0;
             VIRTBAG_LOG("native save place ledger exhausted bag=%d slot=%d", bag, slot);
         }
         extension_bag_mark_dirty_locked();
         persist_state_locked();
-        if (g_module_view_installed && g_module_view_index == bag) {
+        if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == bag) {
             refresh_module_item_area_locked(bag);
         }
         VIRTBAG_LOG("native save place new bag=%d slot=%d item=%p category=%d count=%d",
@@ -383,18 +383,18 @@ bool virtual_bag_adopt_native_item(void* item) {
 // 定义在匿名 namespace 之外（port 跨 TU 调用）；依赖的本 TU 匿名 namespace
 // 函数（category_is_extension_backpack 等）在 TU 内可见。
 VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
-    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) {
+    if (!runtime_state().enabled.load() || !read_world_in_world()) {
         return VirtualBagEquipButtonResult::kNotExtension;
     }
-    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
-    void* item = g_extension_desc_item;
+    void* item = runtime_state().ui.extension_desc_item;
     // g_extension_desc_item 只在扩展物品详情被捕获；原版背包物品详情点装备
     // 时（原版 ButtonEquipExe 函数级 hook 覆盖所有详情），用原版 UIDesc_GetData
     // 读取当前 desc 物品（原版 ButtonEquipExe b7c2c 同源）。
-    if (item == nullptr && g_game != nullptr && g_inventory_extras != nullptr &&
-        g_inventory_extras->read.detail_item != nullptr) {
-        (void)g_inventory_extras->read.detail_item(&item);
+    if (item == nullptr && runtime_state().host.game != nullptr && runtime_state().host.inventory_extras != nullptr &&
+        runtime_state().host.inventory_extras->read.detail_item != nullptr) {
+        (void)runtime_state().host.inventory_extras->read.detail_item(&item);
     }
     if (item == nullptr) return VirtualBagEquipButtonResult::kNotExtension;
     int src_bag = -1;
@@ -443,9 +443,9 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     int found = -1;
     for (int bag = 1; bag <= 4; ++bag) {
         int32_t bag_size = -1;
-        if (g_game != nullptr && g_inventory_extras != nullptr &&
-            g_inventory_extras->read.bag_size != nullptr &&
-            qol::contracts::succeeded(g_inventory_extras->read.bag_size(bag, &bag_size)) &&
+        if (runtime_state().host.game != nullptr && runtime_state().host.inventory_extras != nullptr &&
+            runtime_state().host.inventory_extras->read.bag_size != nullptr &&
+            qol::contracts::succeeded(runtime_state().host.inventory_extras->read.bag_size(bag, &bag_size)) &&
             bag_size == 0) {
             found = bag;
             break;
@@ -461,12 +461,12 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
                         src_bag, src_slot);
             return VirtualBagEquipButtonResult::kBlocked;
         }
-        if (g_game == nullptr || g_write_port == nullptr ||
-            g_write_port->ui.set_original_bag_item == nullptr) {
+        if (runtime_state().host.game == nullptr || runtime_state().host.write_port == nullptr ||
+            runtime_state().host.write_port->ui.set_original_bag_item == nullptr) {
             VIRTBAG_LOG("extension backpack fn-equip bag table missing");
             return VirtualBagEquipButtonResult::kBlocked;
         }
-        const ModuleUseState source_use = g_module_object_use[src_bag][src_slot];
+        const ModuleUseState source_use = runtime_state().objects.module_object_use[src_bag][src_slot];
         if (!module_object_generation_advance_locked(src_bag, src_slot,
                                                      "unequip to original")) {
             VIRTBAG_LOG("extension unequip to original blocked by active object bag=%d slot=%d",
@@ -474,26 +474,26 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
             return VirtualBagEquipButtonResult::kBlocked;
         }
         // 袋表接收对象成功后才允许清理扩展源及交接 ownership。
-        const QolResult bag_write = g_write_port->ui.set_original_bag_item(found, item);
+        const QolResult bag_write = runtime_state().host.write_port->ui.set_original_bag_item(found, item);
         if (!qol::contracts::succeeded(bag_write)) {
-            g_module_object_use[src_bag][src_slot] = source_use;
+            runtime_state().objects.module_object_use[src_bag][src_slot] = source_use;
             VIRTBAG_LOG_ERROR("ERROR extension backpack equip original bag write failed bag=%d src=%d/%d item=%p code=%d; source retained",
                               found, src_bag, src_slot, item, bag_write.code);
             return VirtualBagEquipButtonResult::kBlocked;
         }
-        virtual_bag::Item& descriptor = g_virtual_bag_state.items[src_bag][src_slot];
+        virtual_bag::Item& descriptor = runtime_state().objects.bag.items[src_bag][src_slot];
         descriptor = virtual_bag::Item{};
-        g_module_objects[src_bag][src_slot] = nullptr;
-        g_module_object_categories[src_bag][src_slot] = 0;
-        g_module_object_hashes[src_bag][src_slot] = 0;
-        const uint32_t handle = g_module_object_handles[src_bag][src_slot];
-        g_module_object_handles[src_bag][src_slot] = 0;
+        runtime_state().objects.module_objects[src_bag][src_slot] = nullptr;
+        runtime_state().objects.module_object_categories[src_bag][src_slot] = 0;
+        runtime_state().objects.module_object_hashes[src_bag][src_slot] = 0;
+        const uint32_t handle = runtime_state().objects.module_object_handles[src_bag][src_slot];
+        runtime_state().objects.module_object_handles[src_bag][src_slot] = 0;
         if (handle != 0) {
             // 对象可能仍处于扩展视图借用态（控件引用），先归还再移交，
             // 否则 handover 会因 live borrow 被拒而推迟，账本与袋表状态分裂。
-            if (ownership::live_state(g_ownership_ledger, handle,
+            if (ownership::live_state(runtime_state().objects.ownership_ledger, handle,
                                       ownership::State::kBorrowedForView)) {
-                ownership::return_from_view(&g_ownership_ledger, handle);
+                ownership::return_from_view(&runtime_state().objects.ownership_ledger, handle);
             }
             handover_tracked_item_locked(handle, item, "backpack fn-equip original");
         }
@@ -503,7 +503,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
         virtual_bag_call_original_refresh_item_area_with_guard();
         extension_refresh_bag_area();
         clear_original_desc_locked();
-        if (g_module_view_installed && g_module_view_index == src_bag) {
+        if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == src_bag) {
             refresh_module_item_area_locked(src_bag);
         }
         VIRTBAG_LOG("extension backpack fn-equip original bag=%d src=%d/%d item=%p",
@@ -553,22 +553,22 @@ bool virtual_bag_handle_backpack_button_equip() {
 bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty) {
     if (out_no_space != nullptr) *out_no_space = false;
     if (out_not_empty != nullptr) *out_not_empty = false;
-    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) return false;
-    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    if (!runtime_state().enabled.load() || !read_world_in_world()) return false;
+    std::unique_lock<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
     // 仅 desc_type=1（袋详情）卸下走接管；卸装备（desc_type=0）交原版（其
     // 收编由 CHAR_UnequipItemToInven 第 9 hook 覆盖）。
     int32_t desc_type = 0;
-    if (g_game == nullptr || g_write_port->ui.desc_type == nullptr ||
-        !qol::contracts::succeeded(g_write_port->ui.desc_type(&desc_type)) ||
+    if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.desc_type == nullptr ||
+        !qol::contracts::succeeded(runtime_state().host.write_port->ui.desc_type(&desc_type)) ||
         desc_type != 1) return false;
     // 扩展视图激活：desc 必为扩展袋（原版袋 desc 只能在原版视图触发，二次
     // 点击扩展标签打开）。识别 g_extension_desc_unequip_bag 走扩展解除。
-    if (g_virtual_bag_state.mode == virtual_bag::Mode::kModule) {
-        const int ext_bag = g_extension_desc_unequip_bag;
+    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule) {
+        const int ext_bag = runtime_state().ui.extension_desc_unequip_bag;
         const bool owns_desc = virtual_bag::valid_index(ext_bag) &&
-                               g_virtual_bag_state.selected == ext_bag &&
-                               g_virtual_bag_state.info_bag == ext_bag;
+                               runtime_state().objects.bag.selected == ext_bag &&
+                               runtime_state().objects.bag.info_bag == ext_bag;
         if (owns_desc) {
             const ExtensionBagUnequipResult result = unequip_extension_bag_locked(lock, ext_bag);
             VIRTBAG_LOG("extension desc unequip bag=%d result=%d", ext_bag,
@@ -598,23 +598,23 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         bag_index = original_bag_locked();
     } else {
         int32_t current_bag = -1;
-        if (g_write_port->ui.current_bag != nullptr &&
+        if (runtime_state().host.write_port->ui.current_bag != nullptr &&
             qol::contracts::succeeded(
-                g_write_port->ui.current_bag(&current_bag)) &&
+                runtime_state().host.write_port->ui.current_bag(&current_bag)) &&
             current_bag < kNoOriginalBagSelected) {
             bag_index = current_bag;
         }
     }
     if (bag_index < 0 || bag_index >= 6) return false;  // 无有效袋位 → 交原版
     void* item = nullptr;
-    if (g_write_port->ui.original_bag_item == nullptr ||
+    if (runtime_state().host.write_port->ui.original_bag_item == nullptr ||
         !qol::contracts::succeeded(
-            g_write_port->ui.original_bag_item(bag_index, &item))) return false;
+            runtime_state().host.write_port->ui.original_bag_item(bag_index, &item))) return false;
     if (item == nullptr) return false;  // 该袋位无袋对象（空位详情等）→ 交原版
     int32_t empty_bag = 0;
-    if (g_inventory_extras == nullptr || g_inventory_extras->read.is_empty_bag == nullptr ||
+    if (runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.is_empty_bag == nullptr ||
         !qol::contracts::succeeded(
-            g_inventory_extras->read.is_empty_bag(bag_index, &empty_bag)) ||
+            runtime_state().host.inventory_extras->read.is_empty_bag(bag_index, &empty_bag)) ||
         empty_bag == 0) {
         // 袋非空：模块接管弹"袋非空"（袋保持安全），不交原版。
         if (out_not_empty != nullptr) *out_not_empty = true;
@@ -630,7 +630,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         }
     }
     if (receiving_bag >= 0) {
-        (void)g_write_port->ui.set_original_bag_item(bag_index, nullptr);
+        (void)runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr);
         extension_bag_mark_dirty_locked();
         persist_state_locked();
         extension_description_set_off();
@@ -645,8 +645,8 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     int adopt_bag = -1;
     int adopt_slot = -1;
     for (int bag = 0; bag < virtual_bag::kBagCount && adopt_bag < 0; ++bag) {
-        if (g_virtual_bag_state.types[bag] == 0) continue;
-        const int capacity = g_virtual_bag_state.capacities[bag];
+        if (runtime_state().objects.bag.types[bag] == 0) continue;
+        const int capacity = runtime_state().objects.bag.capacities[bag];
         for (int slot = 0; slot < capacity; ++slot) {
             if (module_slot_is_assignable_locked(bag, slot)) {
                 adopt_bag = bag;
@@ -668,16 +668,16 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         VIRTBAG_LOG("original bag unequip serialize failed bag=%d", bag_index);
         return false;  // 序列化失败极罕见：交原版，宁可原版语义也不凭空丢
     }
-    virtual_bag::Item& descriptor = g_virtual_bag_state.items[adopt_bag][adopt_slot];
+    virtual_bag::Item& descriptor = runtime_state().objects.bag.items[adopt_bag][adopt_slot];
     descriptor.payload = payload;
     descriptor.payload_size = payload_size;
     (void)read_item_category(item, &descriptor.category);
     descriptor.count = 1;
     uint32_t adopted_handle = 0;
-    if (ownership::allocate(&g_ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
-        g_module_object_handles[adopt_bag][adopt_slot] = adopted_handle;
+    if (ownership::allocate(&runtime_state().objects.ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
+        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = adopted_handle;
     } else {
-        g_module_object_handles[adopt_bag][adopt_slot] = 0;
+        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
         VIRTBAG_LOG("original bag unequip ledger exhausted bag=%d", bag_index);
     }
     if (!module_object_generation_advance_locked(
@@ -688,21 +688,21 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     }
     if (!extension_bag_rebind_item_handle(item)) {
         descriptor = virtual_bag::Item{};
-        if (adopted_handle != 0) ownership::release(&g_ownership_ledger, adopted_handle);
-        g_module_object_handles[adopt_bag][adopt_slot] = 0;
+        if (adopted_handle != 0) ownership::release(&runtime_state().objects.ownership_ledger, adopted_handle);
+        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
         VIRTBAG_LOG("original bag unequip handle registration failed bag=%d slot=%d",
                     adopt_bag, adopt_slot);
         return false;
     }
-    g_module_objects[adopt_bag][adopt_slot] = item;
-    g_module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
-    g_module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
-    (void)g_write_port->ui.set_original_bag_item(bag_index, nullptr);
+    runtime_state().objects.module_objects[adopt_bag][adopt_slot] = item;
+    runtime_state().objects.module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
+    runtime_state().objects.module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
+    (void)runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr);
     extension_bag_mark_dirty_locked();
     persist_state_locked();
     extension_description_set_off();
     clear_original_desc_locked();
-    if (g_module_view_installed && g_module_view_index == adopt_bag) {
+    if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == adopt_bag) {
         refresh_module_item_area_locked(adopt_bag);
     } else {
         virtual_bag_call_original_refresh_item_area_with_guard();

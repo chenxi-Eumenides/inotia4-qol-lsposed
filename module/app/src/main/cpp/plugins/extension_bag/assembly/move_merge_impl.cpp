@@ -6,9 +6,9 @@
 #include "plugins/extension_bag/assembly/move_merge.h"
 
 bool move_merge_enabled() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return false;
+    if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->capabilities.require == nullptr) return false;
     const void* iface = nullptr;
-    const ::QolResult result = g_sdk->capabilities.require(
+    const ::QolResult result = runtime_state().host.sdk->capabilities.require(
         qol::contracts::kMoveMergeControlCapabilityId,
         {qol::contracts::kMoveMergeControlVersionMajor,
          qol::contracts::kMoveMergeControlVersionMinor},
@@ -21,7 +21,7 @@ bool move_merge_enabled() {
 }
 
 bool set_extension_source_protection_enabled(bool enabled) {
-    g_extension_source_protection_requested.store(enabled, std::memory_order_release);
+    runtime_state().source_protection_requested.store(enabled, std::memory_order_release);
     return true;
 }
 
