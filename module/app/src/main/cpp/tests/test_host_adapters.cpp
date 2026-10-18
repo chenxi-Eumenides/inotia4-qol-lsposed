@@ -633,10 +633,42 @@ void test_ui_result_snapshot_retry_does_not_repeat_write() {
     assert(g_host_ui_cancel_calls == 1);
 }
 
+void test_extension_bag_write_result_channels() {
+    const auto& port = qol::game::extension_bag_write_port();
+    int item = 0;
+    int32_t game_result = -1;
+
+    fn_inven_move_item = &fake_move_item;
+    g_move_item_calls = 0;
+    g_move_item_return = 0;
+    QolResult adapter_result = port.inventory.move_item(&item, 1, 0, 0, &game_result);
+    assert(qol::contracts::succeeded(adapter_result));
+    assert(game_result == 0 && g_move_item_calls == 1);
+
+    g_move_item_return = -7;
+    game_result = 0;
+    adapter_result = port.inventory.move_item(&item, 2, 1, 3, &game_result);
+    assert(qol::contracts::succeeded(adapter_result));
+    assert(game_result == -7 && g_move_item_calls == 2);
+
+    fn_inven_move_item = nullptr;
+    game_result = 42;
+    adapter_result = port.inventory.move_item(&item, 1, 0, 0, &game_result);
+    assert(adapter_result.code == kQolErrNotReady);
+    assert(game_result == 42 && g_move_item_calls == 2);
+
+    fn_inven_move_item = &fake_move_item;
+    adapter_result = port.inventory.move_item(nullptr, 1, 0, 0, &game_result);
+    assert(adapter_result.code == kQolErrInvalidArgument);
+    assert(game_result == 42 && g_move_item_calls == 2);
+    fn_inven_move_item = nullptr;
+}
+
 }  // namespace
 
 int main() {
     test_ui_result_snapshot_retry_does_not_repeat_write();
+    test_extension_bag_write_result_channels();
     fn_get_rarity = &fake_item_rarity;
     fn_item_is_no_sell = &fake_item_no_sell;
     fn_is_dice = &fake_item_dice;

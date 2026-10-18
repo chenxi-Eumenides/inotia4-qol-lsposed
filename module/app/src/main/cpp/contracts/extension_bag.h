@@ -29,8 +29,11 @@ constexpr int32_t kExtensionBagVersionMinor = 0;
 constexpr uint16_t kExtensionBagSaleRemoveVersionMinor = 1;
 constexpr uint16_t kExtensionBagPublishedVersionMinor = 1;
 
-// 返回 1 表示 out 中包含完整 JSON（不附加 NUL）；返回 0 表示参数无效或缓冲区不足。
-// 操作失败仍由 JSON "ok":false 表示。此固定宽度写面避免 std::string 跨契约边界。
+// 返回 1 表示移动操作成功；返回 0 表示输出参数无效或移动操作失败。
+// 输出指针有效时，body 为不附加 NUL 的 JSON；仅复制 min(capacity, body.size()) 字节，
+// out_len 始终报告完整 body 长度，因此 body 可能被截断。成功 body 仅为可忽略的诊断信息，
+// 调用方不得把它当作完整 JSON 使用；缓冲区不足不得将已执行的操作改报失败。此固定宽度
+// 写面避免 std::string 跨契约边界。
 using ExtensionBagMoveFn = int32_t (*)(int32_t from_bag, int32_t from_slot,
                                        int32_t to_bag, int32_t to_slot, char* out,
                                        uint32_t capacity, uint32_t* out_len);

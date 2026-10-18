@@ -8,6 +8,10 @@
 
 namespace qol::contracts {
 
+// QolResult reports whether the adapter accepted the arguments and could invoke the game API.
+// For functions with an out_result parameter, that output carries the game's int result
+// independently: 0 means game-level success and non-zero means game-level failure. A game-level
+// failure therefore still returns a successful QolResult when the adapter call was executable.
 struct QolExtensionBagInventoryWriteApi {
     QolResult (*save_item_on_empty)(void* item, int32_t bag, int32_t* out_result);
     QolResult (*save_item)(void* item, void* param, int32_t* out_result);
