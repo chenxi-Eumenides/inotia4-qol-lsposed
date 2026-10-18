@@ -805,6 +805,7 @@ constexpr uintptr_t F_CONTROL_OBJECT_SET_SHOW_VMA = 0x9dc28;    // (ctrl, int)�
 constexpr uintptr_t F_UIEQUIP_DRAW_VMA = 0xb764c;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_ITEM_VMA = 0xb6fac;
 constexpr uintptr_t F_UIEQUIP_DRAW_INVEN_BAG_VMA = 0xb7284;
+constexpr uintptr_t F_UIEQUIP_DRAW_EQUIP_BACKGROUND_VMA = 0xb6814;
 constexpr uintptr_t F_ITEM_DRAW_PORTING_VMA = 0x10644c; // void (item*, x, y, type, flip) 原版物品图标/数量绘制
 constexpr uintptr_t F_CONTROL_ITEM_DRAW_VMA = 0xaaedc;  // void (void* ctrl) ControlItem_Draw：图标 + 稀有度贴图；数量由内部 bl ITEM_DrawPorting 以 show_count=1 画出（0xaaf24 mov w4,#1）
 constexpr uintptr_t F_UIDESC_SET_OFF_VMA = 0xb2b48;

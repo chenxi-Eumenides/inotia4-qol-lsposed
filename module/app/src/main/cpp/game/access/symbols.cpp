@@ -44,6 +44,8 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"extension.store_button_sell_exe", F_UISTORE_BUTTON_SELL_EXE_VMA},
     {"F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA", F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA},
     {"extension.store_draw_inven_bag_group", F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA},
+    {"F_UIEQUIP_DRAW_EQUIP_BACKGROUND_VMA", F_UIEQUIP_DRAW_EQUIP_BACKGROUND_VMA},
+    {"extension.ui_equip_draw_equip_background", F_UIEQUIP_DRAW_EQUIP_BACKGROUND_VMA},
     {"F_PANEL_SAVE_SLOT_ENTER", F_PANEL_SAVE_SLOT_ENTER},
     {"F_PANEL_SHOP_ENTER", F_PANEL_SHOP_ENTER},
     {"F_PANEL_CRAFT_ENTER", F_PANEL_CRAFT_ENTER},

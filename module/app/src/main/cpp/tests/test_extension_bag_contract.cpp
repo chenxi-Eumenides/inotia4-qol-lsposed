@@ -267,7 +267,7 @@ void test_extension_bag_claim_manifest_source_contract() {
         ++resource_count;
         ++position;
     }
-    CHECK(resource_count == 19);
+    CHECK(resource_count == 20);
 
     const size_t desc_slots = claims.find("kEbS1DescSlots, kEbS1DescSlots");
     const size_t desc_gate = claims.find("\"patch:P_EXT_DESC_OPEN_GATE\"");

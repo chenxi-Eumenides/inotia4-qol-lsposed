@@ -206,6 +206,13 @@ void store_install_module_view_locked(int bag) {
                 runtime_state().store.hidden_original_bag_control = selected;
             }
         }
+        void* equip_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+        if (equip_container != nullptr) {
+            void* selected = valid_child_locked(equip_container, original_bag);
+            if (selected != nullptr && extension_bag_ui_set_control_show(selected, false)) {
+                runtime_state().store.hidden_equip_original_bag_control = selected;
+            }
+        }
     }
     ++runtime_state().store.view_generation;
     // The store scene keeps the UIEquip bag column alive next to UIStore's own
@@ -233,6 +240,11 @@ void store_restore_module_view_locked() {
         (void)extension_bag_ui_set_control_show(
             runtime_state().store.hidden_original_bag_control, true);
         runtime_state().store.hidden_original_bag_control = nullptr;
+    }
+    if (runtime_state().store.hidden_equip_original_bag_control != nullptr) {
+        (void)extension_bag_ui_set_control_show(
+            runtime_state().store.hidden_equip_original_bag_control, true);
+        runtime_state().store.hidden_equip_original_bag_control = nullptr;
     }
     if (virtual_bag::valid_index(runtime_state().store.view_bag)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {

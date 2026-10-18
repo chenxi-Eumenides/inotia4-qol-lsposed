@@ -155,6 +155,7 @@ struct ExtensionBagUiState {
     void* backup_store_sell_item = nullptr;
     void* backup_store_button_sell_exe = nullptr;
     void* backup_store_draw_inven_bag_group = nullptr;
+    void* backup_ui_equip_draw_equip_background = nullptr;
     StoreSceneEventFn store_original_event = nullptr;
     StoreSceneNoArgFn store_original_f3 = nullptr;
     StoreSceneNoArgFn store_original_enter = nullptr;
@@ -172,6 +173,7 @@ struct ExtensionBagStoreState {
     uint32_t original_bag_size = 0;
     void* projected_item_root = nullptr;
     void* hidden_equip_bag_root = nullptr;
+    void* hidden_equip_original_bag_control = nullptr;
     void* hidden_original_bag_control = nullptr;
     int original_current_bag = -1;
     std::array<void*, virtual_bag::kBagCount> tab_buttons{};

@@ -292,6 +292,29 @@ void store_draw_inven_bag_group_entry() {
     backup();
     if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
 }
+void store_draw_equip_background_entry(void* a, void* b, int32_t c, void* d, int32_t e) {
+    using DrawFn = void (*)(void*, void*, int32_t, void*, int32_t);
+    const auto backup = reinterpret_cast<DrawFn>(
+        runtime_state().ui.backup_ui_equip_draw_equip_background);
+    if (backup == nullptr) return;
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        {"hook:UIEquip_DrawEquipBackground"});
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    int32_t saved_current = 0;
+    bool masked = false;
+    const bool module_view = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule;
+    if ((runtime_state().store.view_installed || module_view) &&
+        runtime_state().host.write_port->ui.current_bag != nullptr &&
+        runtime_state().host.write_port->ui.set_current_bag != nullptr &&
+        qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&saved_current)) &&
+        saved_current != kNoOriginalBagSelected) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        masked = true;
+    }
+    backup(a, b, c, d, e);
+    if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+}
 // R-57 原版袋列高亮遮蔽（商店）：进入扩展视图时，画原版 UIStore_DrawInvenBagGroup
 // 前把当前袋 GOT 临时置 kNoOriginalBagSelected(6)，画完恢复 → 原版 6 袋不再高亮
 // （与扩展页 virtual_bag_draw_original_bag_wrapper 同法）。扩展页签高亮由 draw_end
