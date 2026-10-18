@@ -79,7 +79,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | ID | 级 | 问题 | 证据 | 状态 |
 |---|---|---|---|---|
 | EB-01 | P1 | monster v31 真机打开商店页后 SIGSEGV：`LINKEDLISTITEM_getData`←`UIEquip_DrawInvenBag+68`←EB `store_draw_inven_bag_group_wrapper`←`Scene_Draw_POPUP_SC_STORE+124`；栈经过 EB store bag draw wrapper，具体无效 linked-list 所有权/状态根因尚未确认 | 本地 `.tmp/it16-device-20261009/shop-crash-logcat.txt`、`shop-tombstone.txt`；模块 SHA `5dc50f2a2cc6…`；符号化 module frames：`game/adapter_ports/extension_bag_write_port.cpp:230-237`、`plugins/extension_bag/extension_bag_store.inc:619-637`；当时 log 有 `store tabs installed` 于崩溃前约1秒 | **用户确认已修复（2026-10-18），未复核；移出本次审阅范围。** VM-17/18 与所有涉及 EB UI 的真机卡是否恢复由设备批决定 |
-| EB-02 | P1 | 详情按钮 hook 按固定 panel index 绑定，不核验当前按钮/data 与实际 execute-slot，未按 slot 去重（R-64） | `plugins/extension_bag/extension_bag_equip.inc:743-786,1008-1052`；审阅 D-03 | 开放；需 Host SDK 校验按钮/data/execute-slot 身份（方案：SDK minor 26→27 的 `QolDescHookApi` V2）；见 `docs/refactor/audits/plugin-audit/extension-bag-20261018/verification-log.md` |
+| EB-02 | P1 | 详情按钮 hook 按固定 panel index 绑定，不核验当前按钮/data 与实际 execute-slot，未按 slot 去重（R-64） | `plugins/extension_bag/extension_bag_equip.inc:393-450,771-862,1139-1160`；审阅 D-03 | **已修复（2026-10-18）**：Host SDK v1.27 `QolDescHookApi` V2（`ccf17c41`）+ EB 迁移（`5aae1cdd`）；真机 index=8 同 execute slot 去重、点击 index=1 正确路由 bag0 slot2；证据见审计登记 §3 |
 | EB-AUDIT-01 | — | extension_bag 专项审阅（2026-10-18）：去重 39 条（P1 8/P2 25/P3 6）；除 A-01/D-03 外已修并提交 | `docs/refactor/audits/plugin-audit/extension-bag-20261018/verification-log.md` | 静态/构建面收口；设备面见审计 §2 未验证项 |
 | ENG-01 | P1 | 级联停用（cascade_stopped）不调用 owner 的 `deactivate`，仅 unregister_http_queries+on_disabled：写面 owner（core.character/item/save/world/ui_state/quest/EB）自注册的 typed result handler 残留，窗口内已接受命令可经残留 handler 用未清理的 ops 上下文执行（违反「停用后无业务副作用」判据） | `host/plugin_registry.cpp:1361-1388,2099-2101`；审计 character F6；core.world deactivate 实测消费者不自动恢复 | 开放（引擎统一修复：cascade 终态调 deactivate；关联 VM-K2-01/VM-FIX-01） |
 | ENG-02 | P2 | `http_dispatch.unregister_owner` 与 registry `sdk_unregister_owner` 在主线程条件变量等 inflight/lease 归零**无超时**：任一 handler 挂起即卡死生命周期（hooks 有帧预算，dispatch 面无） | `host/http_dispatch.cpp:241-247`、`host/http_registry.cpp:111-122`；审计 item-G02/char-G02 | 开放（加帧预算/超时+失败语义） |
@@ -141,7 +141,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | UNVER-01 | core.world（写执行链 game/access/world.cpp 的 `tutorial_block_error` 分支） | 教学态拦截：药水教学激活时 world 写面被拒绝、读面暂态语义 | 无教学存档可进入教学态（用户 2026-09-28 确认）；不再主动验收，代码保持现状 |
 | UNVER-02 | core.item / extension_bag | 掷骰；镶嵌；强化；商店购买；ITM-01 bag5 任务袋读取；`bag6 slot11` 写入前态 | 无 pending dice、背包无宝石、无原版强化卷轴且 EB 关闭、商店为空、任务袋为空；EB 关闭无法读取 `bag6 slot11` 写前态。用户确认留到后续其它插件审阅时再测，此后不再主动验收 |
 | UNVER-03 | inventory_hooks | c18 `85%` / overhaul `70%` 倍率仅静态金标；任务袋透传无物品可测；调试门禁关闭分支跳过；autosell 路径并入 autosell 审阅 | 设备仅有 monster v29；用户 2026-10-18 确认：monster 真机覆盖 70% 与详情页出售，其余按静态金标/后续插件审阅处理 |
-| UNVER-04 | extension_bag | 设备批剩余：FIX-07 失败注入/源释放失败复核；C1-01 容量读写失败注入；D-01 真实触摸窗口延迟释放压力；D-03 R-64 按钮/data/execute-slot 取证 | 2026-10-18 设备批已完成部署、设置页开关、扩展视图、正常跨袋移动、生命周期与保存重进；失败注入与 D-03 未执行。EB-01 用户确认已修复，未复核 |
+| UNVER-04 | extension_bag | 设备批剩余：FIX-07 失败注入/源释放失败复核；C1-01 容量读写失败注入；D-01 真实触摸窗口延迟释放压力 | 2026-10-18 设备批已完成部署、设置页开关、扩展视图、正常跨袋移动、生命周期、保存重进与 D-03 R-64；失败注入未执行。EB-01 用户确认已修复，未复核 |
 
 > QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
 

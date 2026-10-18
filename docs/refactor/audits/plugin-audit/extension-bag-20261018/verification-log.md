@@ -13,6 +13,8 @@
   - `adc614fb` 商店买入容量/合并预检与 Store/Mix 清理
   - `6dcd9cb6` 合并数量模式快照与移除身份复核
   - `b208c15a` 明确 write port 双通道与截断 body 契约
+  - `ccf17c41` Host SDK V2 详情按钮身份接口
+  - `5aae1cdd` EB 详情按钮 hook 迁到 V2
 - 证据底稿：`.tmp/extension-bag-audit/{baseline.md,findings.md,summary.md,0.5-A.md,d03-host-sdk-design.md}`（本地工作区，不入提交）。
 
 ## §1 本批登记问题
@@ -28,7 +30,7 @@
 | C2-01 / D-02 | `game_ui_virtbag.cpp:2000-2145`；`native_inventory_hook.cpp:1235-1292` | 已识别扩展源的装备失败/无空扩展袋仍返回 `NotExtension`，原版 backup 可能继续处理 | 本批修复：已识别扩展对象失败统一 `Blocked` |
 | C2-03 | `game_ui_virtbag.cpp:2061-2090` | `set_original_bag_item` 结果未检查就清扩展源 | 本批修复：写入成功后才清源/移交；失败保持源并 `Blocked` |
 | D-01 | `extension_bag_ownership.inc:110-160`；`extension_bag_tabs.inc:14-44` | 延迟释放排空把 `queue+custody` 当队列长度，custody 非空时重复读、越界写，可能双重释放 | 本批修复：队列 16 / custody 128 分段遍历；失败保留条目；新增 `extension_bag_deferred_free_tests` |
-| D-03 | `extension_bag_equip.inc:743-786,1008-1052` | 详情按钮 hook 按固定 index 绑定，不核验按钮/data/execute-slot 身份，违反 R-64 | **未修**：需要 Host SDK 按钮/data/execute-slot 身份接口；方案见 `.tmp/extension-bag-audit/d03-host-sdk-design.md`（SDK minor 26→27，独立批次） |
+| D-03 | `extension_bag_equip.inc:393-450,771-862,1139-1160` | 详情按钮 hook 按固定 index 绑定，不核验按钮/data/execute-slot 身份，违反 R-64 | 本批修复：Host SDK v1.27 `QolDescHookApi` V2（resolve/bind/validate/original/unbind，按 execute slot 去重）；EB 改按绑定 id 校验，身份不符直接 stale 返回；真机 R-64 PASS |
 
 ### P2
 
@@ -79,7 +81,7 @@
 - **FIX-07**：正常跨袋移动已在设备复验 PASS（bag6 slot0→bag0 slot9，源清空、count13、保存重进保持）；“目标已入原版、扩展源保留”的失败注入仍未复现，需后续受控复现后关闭。
 - **C1-01**：容量读写失败注入、pending 两侧同时存在、投影重装失败未在 host/设备复现。
 - **D-01**：真实触摸窗口内连续退役、延迟释放饱和未做压力复现；模型/纯逻辑测试通过，常规面板开关无崩溃。
-- **D-03**：Host SDK 接口未实现；R-64 真机取证未执行。
+- **D-03**：已实现并真机 PASS；真实 UI 控件重建/地址复用 ABA 仍按设计保留为残余风险。
 - **P2 UI 项**：Store/Mix 控件创建失败、UI 刷新重入、root 重建、MakeDesc 回调重入仅模型/源码守卫，未真机注入。
 - **EB-01**：用户确认已修复，本批未复核；相关真机卡是否恢复由用户在设备批决定。
 
@@ -92,7 +94,7 @@
 | 架构校验 | **PASS**：layers/offsets/jni/resources 全绿 | `uv run python scripts/maintenance/check_arch.py` |
 | 路由漂移 | **PASS**：native 147 / baseline 147 / duplicates 0 / missing 0 / extra 0 | `uv run python scripts/maintenance/check_http_routes.py` |
 | Android Debug 构建 | **PASS**：`BUILD SUCCESSFUL` | `scripts/build-debug.sh` |
-| APK | `output/inotia4_qol_lsposed_debug_2610181337_4a8e48f41472.apk`，SHA-256 `4a8e48f414729b118a47af396a7f8b7d89857e1b46e986360661f9c14e79d8af` | 构建输出 |
+| APK（P1/P2 中间构建） | `output/inotia4_qol_lsposed_debug_2610181337_4a8e48f41472.apk`，SHA-256 `4a8e48f414729b118a47af396a7f8b7d89857e1b46e986360661f9c14e79d8af`；最终 D-03 构建见下方 | 构建输出 |
 | 契约/参数测试 | **PASS**：`extension_bag_contract_tests`（版本/布局/JSON int32/票据 `ok`） | host ctest |
 | 持久化测试 | **PASS**：`extension_bag_slot_data_tests`（load 矩阵、canonical 保留、capture/complete、staging） | host ctest |
 | 出售/事务测试 | **PASS**：`extension_bag_sale_transaction_tests`（sale removal、store sell plan、ext2orig 恢复判定） | host ctest |
@@ -108,6 +110,10 @@
 | 生命周期 deactivate/activate | **PASS**：deactivate → `inactive`/0 live；activate → `enabled`/20 live、`degraded=false`；无 registration failure | 设备 API 记录（§3 文本） |
 | 日志 | **PASS**：2015 行 logcat 无 FATAL/SIGSEGV/tombstone、无 EB ERROR | `evidence/device-logcat.txt` |
 
+| Host SDK V2 | **PASS**：minor 27；`desc_hook_v2` offset 848；size 856；`host_adapter_tests` 覆盖 resolve/bind/validate/同槽冲突/解绑恢复 | `test_host_adapters`、`test_settings_catalog_abi`、`test_lifecycle_participants` |
+| D-03 R-64 真机 | **PASS**：详情打开安装 index=1/7；index=8 因同 `execute_slot` 被去重；点击出售 `index=1` 正确路由 `bag=0 slot=2`；无 stale/FATAL/SIGSEGV | `evidence/d03-r64-summary.txt`、`d03-r64-logcat.txt`、`d03-detail-buttons.png`、`d03-sell-confirmation.png` |
+| D-03 构建 | **PASS**：Debug APK `output/inotia4_qol_lsposed_debug_2610181444_b3370ebf8d0c.apk`，SHA-256 `b3370ebf8d0c…`；集成包 monster `d7bb70fc…` | `evidence/d03-apk-sha256.txt` |
+
 ## §4 用户裁决记录
 
 1. 商店卖出可见数量 `<=0`：**拒绝出售**，不按 1 件结算。
@@ -118,9 +124,10 @@
 6. A-05：**保留 `QolResult` / `out_result` 双通道**并写清契约。
 7. A-06：**JNI 保持全局 bridge**，descriptor 0 为有意；冻结签名不动。
 8. EB-01：**用户确认已修复**，移出本次审阅范围。
+9. D-03：**采用方案 A**，实现 Host SDK V2 并迁移 EB 详情 hook。
 
 ## §5 未完成 / 后续批次
 
-- 设备批剩余：FIX-07 失败注入、C1-01 容量失败注入、D-01 触摸压力、D-03 R-64、P2 UI 注入项。
-- Host SDK 批次：按 `d03-host-sdk-design.md` 实现 `QolDescHookApi` V2，minor 26→27，随后修 D-03。
+- 设备批剩余：FIX-07 失败注入、C1-01 容量失败注入、D-01 触摸压力、P2 UI 注入项。
+- D-03 已完成：Host SDK v1.27 + EB V2 迁移；证据见 §3。
 - 结构整理：审阅后按方案 A 分批拆 TU；先 move-merge shim，再运行时/UI；不与本批行为修复混合。

@@ -70,7 +70,7 @@
 - 页签控件 user type 2、data 16 字节、首字段指向物品对象；页签物品按类型复用/延迟释放（`extension_bag_runtime.inc:130-256`；`extension_bag_tabs.inc`）。
 - 投影：draw wrapper 持锁、original-first；扩展视图下临时改原版当前袋为 sentinel，绘制后恢复（`extension_bag_render.inc:145-204,816`）。
 - 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving（`extension_bag_runtime.inc:13-108`；`extension_bag_input.inc:31-99`）。
-- 详情按钮：按面板 index 绑定 11 个候选、跳过装备/卸下；确认使用/出售/销毁在详情回调分流（`extension_bag_equip.inc:743-786,1008-1052`）。
+- 详情按钮：经 Host SDK v1.27 `QolDescHookApi` 按 panel index `resolve` 出 button/data/execute-slot，按 execute-slot 去重后 `bind`；回调先 `validate` 绑定 id，身份不符直接 stale 返回；确认使用/出售/销毁在详情回调分流（`extension_bag_equip.inc:393-450,771-862,1139-1160`）。
 - 几何：网格左上 `(761,160)`、4×4、单格 74×74、步距 83×83；页签矩形 57×57、纵向步距 70（`extension_bag_geometry.cpp:15-35`；`extension_bag_runtime.inc:119-129`）。
 
 ## 消费者与职责边界

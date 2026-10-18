@@ -1,0 +1,5 @@
+10-18 14:46:58.594 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.594 f=1953 D extension_bag extension_bag extension desc hook installed index=1 id=3 button=0x793910f868 data=0x793910f960 execute_slot=0x793910f980 original=0x79572cb240
+10-18 14:46:58.626 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.626 f=1953 D extension_bag extension_bag extension desc hook installed index=7 id=4 button=0x793910f6f8 data=0x793910f7f0 execute_slot=0x793910f810 original=0x79572cb31c
+10-18 14:46:58.635 31068 31186 D Inotia4Qol: 2026-10-18 14:46:58.635 f=1953 D extension_bag extension_bag extension desc hook resolve skip index=8 reason=duplicate_execute_slot execute=0x793910f810
+10-18 14:47:08.140 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.140 f=2100 I extension_bag extension_bag extension desc execute index=1 original=0x79572cb240 bag=0 slot=2
+10-18 14:47:08.141 31068 31186 I Inotia4Qol: 2026-10-18 14:47:08.141 f=2100 I extension_bag extension_bag extension sell button matched source=destroy bag=0 slot=2 item=0x793902cc60

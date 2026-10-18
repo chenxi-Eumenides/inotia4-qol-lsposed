@@ -13,9 +13,9 @@
 - 插件在 endpoint descriptor 上独立声明是否需要 OP。Host 只提供通用 `module.security/op.enabled` 权限查询与执行前门禁（General、默认关闭、priority -4）；OP 与 API service 完全独立，不因 API 状态触发 OP 的写入或级联。
 - route metadata label、endpoint 的 lifecycle owner 和配置 namespace 是不同概念：`route_owner` 是路由表标签；插件 lifecycle owner 取 `PluginDescriptor::id`；三条配置 resident route 的 owner label 仍为 `settings`，配置 namespace 仍为 `core.settings`，Host 按路径处理并且不要求设置页插件 active。
 
-## 3. Host SDK v1.26 runtime effects、security 与 module-health ABI
+## 3. Host SDK v1.26 runtime effects、security 与 module-health ABI；v1.27 desc hook V2
 
-Host SDK major 保持 1，当前 minor 为 26。v1.24 在 `QolPluginRuntimeEffect` 末尾追加 `desired_enabled`；v1.25 在 `QolHostSdk` 尾部追加 module-health facts 指针；v1.26 为 feature catalog 增加 display priority 与 `read_categories`。`QolHostSdk` 的 runtime/security/module-health 指针分别位于 offset 824/832/840，SDK 大小仍为 848 bytes。Phase 2 route metadata 本身不再扩展 Host SDK。
+Host SDK major 保持 1，当前 minor 为 27。v1.24 在 `QolPluginRuntimeEffect` 末尾追加 `desired_enabled`；v1.25 在 `QolHostSdk` 尾部追加 module-health facts 指针；v1.26 为 feature catalog 增加 display priority 与 `read_categories`；v1.27 在 `QolHostSdk` 尾部追加 `desc_hook_v2` 指针。`QolHostSdk` 的 runtime/security/module-health/desc_hook_v2 指针分别位于 offset 824/832/840/848，SDK 大小为 856 bytes。Phase 2 route metadata 本身不再扩展 Host SDK。
 
 ```cpp
 struct QolPluginRuntimeEffect {
@@ -120,6 +120,8 @@ uint32_t http_route_metadata_count = 0;
 | `QolHostSdk::security` | 832 |
 | `QolHostSdk::module_health` | 840 |
 | `QolHostSdk` v1.26 | size 848 |
+| `QolHostSdk::desc_hook_v2` | 848 |
+| `QolHostSdk` v1.27 | size 856 |
 | `QolFeatureCatalogItem::display_priority` | offset 40; item size 48 |
 | `QolFeatureControlApi::read_categories` | offset 96; API size 104 |
 | `QolPluginRuntimeEffect` fields | `struct_size=0`, `event_revision=8`, `config_revision=16`, `plugin_id=24`, `actual_enabled=32`, `config_json=40`, `config_json_size=48`, `desired_enabled=52` |
@@ -156,7 +158,7 @@ Kotlin 内部 listener fallback 通过 `nativePluginConfigSubscribeReceipt` 等�
 
 ## 8. Phase 2 混合 transport 与 route metadata 合同
 
-Phase 2 route metadata 本身不提升 Host SDK minor，也不提升 `http.registry` / `http.dispatch` capability（保持 v1.1），不改变公开 HTTP method/path/body/status 或 REST schema。当前完整 Host SDK 为 v1.26（settings feature catalog 尾部扩展见 §3、§5）；这不属于 Phase 2 route metadata 变更。现有 147 条路由基数冻结为 68 GET、79 POST，其中 21 条 OP-gated；route metadata 只表达现有路由事实与门禁，不改写 handler 所有权或响应行为。当前运行时 dispatch 盘点为 119 条 native-handled routes、24 条 direct-Kotlin routes 与 4 条 Host-resident control routes，总计仍为 147；这是执行路径统计，与 route source inventory 的 plugin/Host resident owner facts 不同，不替换 method/path/owner/OP/lease 事实。
+Phase 2 route metadata 本身不提升 Host SDK minor，也不提升 `http.registry` / `http.dispatch` capability（保持 v1.1），不改变公开 HTTP method/path/body/status 或 REST schema。当前完整 Host SDK 为 v1.27（settings feature catalog 尾部扩展见 §3、§5；desc hook V2 见 §3）；这不属于 Phase 2 route metadata 变更。现有 147 条路由基数冻结为 68 GET、79 POST，其中 21 条 OP-gated；route metadata 只表达现有路由事实与门禁，不改写 handler 所有权或响应行为。当前运行时 dispatch 盘点为 119 条 native-handled routes、24 条 direct-Kotlin routes 与 4 条 Host-resident control routes，总计仍为 147；这是执行路径统计，与 route source inventory 的 plugin/Host resident owner facts 不同，不替换 method/path/owner/OP/lease 事实。
 
 `HttpRouteMetadataDescriptor` 是单独的轻量 metadata：只有 method、path、兼容 `route_owner` label、OP 与 lease 标志；没有 handler/context，不能伪造空 handler、占位 handler或生成 native dispatch。既有 `HttpEndpointDescriptor` 的 handler 校验保持不变：GET 仍要求 query handler，POST 仍要求 command handler。需要 native handler 的路由继续用 typed endpoint 或保留的 legacy handler 声明；由 Kotlin 通过既有 direct-JNI owner 处理的路由才可只声明 metadata。metadata-only 路由没有 native handler 时继续得到既有 501；OP 拒绝为 403，provider 缺失或 drain 为 503，未声明为 404。
 
