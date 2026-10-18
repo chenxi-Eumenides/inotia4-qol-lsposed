@@ -526,6 +526,10 @@ bool extension_use_mercenary_seal() {
     }
     ModuleUseToken use_token{};
     bool begin_failed = false;
+    void* previous_physical = nullptr;
+    int physical_bag = -1;
+    int physical_slot = -1;
+    bool physical_projected = false;
     {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (runtime_state().objects.module_objects[bag][slot] != item ||
@@ -533,6 +537,24 @@ bool extension_use_mercenary_seal() {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal begin failed bag=%d slot=%d item=%p", bag, slot,
                         item);
             begin_failed = true;
+        } else {
+            // MakeMercenary resolves the seal through INVEN. EB items are not in
+            // g_inven, so expose the seal in the projected physical slot for the
+            // duration of the call and restore the real slot afterwards.
+            const auto* game = runtime_state().host.game;
+            const int window_bag = runtime_state().objects.module_window_original_bag;
+            if (runtime_state().objects.module_view_installed && game != nullptr &&
+                game->item_abi.native_item_at != nullptr && window_bag >= 0 && window_bag < 5 &&
+                extension_bag_write_api()->inventory.set_physical_item != nullptr) {
+                (void)game->item_abi.native_item_at(window_bag, slot, &previous_physical);
+                if (qol::contracts::succeeded(
+                        extension_bag_write_api()->inventory.set_physical_item(
+                            window_bag, slot, item))) {
+                    physical_bag = window_bag;
+                    physical_slot = slot;
+                    physical_projected = true;
+                }
+            }
         }
     }
     // UI 弹窗会进入原版 UI，不在背包锁内创建。
@@ -550,6 +572,14 @@ bool extension_use_mercenary_seal() {
     bool make_failed = false;
     {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (physical_projected &&
+            !qol::contracts::succeeded(
+                extension_bag_write_api()->inventory.set_physical_item(
+                    physical_bag, physical_slot, previous_physical))) {
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "ERROR extension mercenary-seal physical slot restore failed bag=%d slot=%d",
+                          physical_bag, physical_slot);
+        }
         bool consumed = false;
         if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
             const bool marker_cleared = module_use_abort_locked(use_token);
