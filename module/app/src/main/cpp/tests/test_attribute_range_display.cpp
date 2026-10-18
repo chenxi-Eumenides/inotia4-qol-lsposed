@@ -16,6 +16,7 @@ enum class QueryMode { Success, Error, ItemFailure, InvalidLevel };
 int g_add_calls = 0;
 int g_make_calls = 0;
 int g_register_calls = 0;
+int g_lookup_calls = 0;
 int g_query_calls = 0;
 int g_insert_calls = 0;
 int g_fail_cursor_call = 0;
@@ -24,6 +25,11 @@ bool g_quality_available = true;
 bool g_use_explicit_quality_level = false;
 int32_t g_explicit_quality_level = 0;
 int32_t g_register_status = qol::contracts::kQolItemHandleStatusOk;
+int32_t g_lookup_status = qol::contracts::kQolItemHandleStatusNotFound;
+uint32_t g_lookup_owner = qol::contracts::kQolItemHandleOwnerGame;
+qol::contracts::QolItemHandle g_lookup_handle{};
+void* g_lookup_item = nullptr;
+qol::contracts::QolItemHandle g_last_query_handle{};
 QueryMode g_query_mode = QueryMode::Success;
 const qol::contracts::AttributeQualityApi* g_quality_api = nullptr;
 int g_option_type = 0;
@@ -57,6 +63,7 @@ QolResult query_option_context(
     qol::contracts::AttributeQualityItem* out) {
     ++g_query_calls;
     assert(handle.slot != 0 && handle.generation != 0);
+    g_last_query_handle = handle;
     assert(options != nullptr && options->allow_outside_range == 0);
     g_last_query_option_id = option_id;
     g_last_query_value = display_value;
@@ -109,6 +116,16 @@ int32_t register_item(void* item, uint32_t owner, qol::contracts::QolItemHandle*
     return qol::contracts::kQolItemHandleStatusOk;
 }
 
+int32_t lookup_item(void* item, qol::contracts::QolItemHandle* out, uint32_t* out_owner) {
+    ++g_lookup_calls;
+    assert(item != nullptr && out != nullptr && out_owner != nullptr);
+    if (g_lookup_status != qol::contracts::kQolItemHandleStatusOk) return g_lookup_status;
+    assert(item == g_lookup_item);
+    *out = g_lookup_handle;
+    *out_owner = g_lookup_owner;
+    return qol::contracts::kQolItemHandleStatusOk;
+}
+
 QolResult ui_desc_text_cursor(void* builder, uint32_t* out_offset) {
     ++g_cursor_calls;
     if (g_cursor_calls == g_fail_cursor_call) {
@@ -153,9 +170,14 @@ void reset_quality_state() {
     g_explicit_quality_level = 0;
     g_quality_api = &g_default_quality_api;
     g_register_status = qol::contracts::kQolItemHandleStatusOk;
+    g_lookup_status = qol::contracts::kQolItemHandleStatusNotFound;
+    g_lookup_owner = qol::contracts::kQolItemHandleOwnerGame;
+    g_lookup_handle = {};
+    g_lookup_item = nullptr;
     g_query_mode = QueryMode::Success;
     g_query_calls = 0;
     g_register_calls = 0;
+    g_lookup_calls = 0;
     g_insert_calls = 0;
     g_cursor_calls = 0;
     g_fail_cursor_call = 0;
@@ -199,12 +221,28 @@ void test_active_context_uses_provider_level_color() {
     add_with_context(item, 12, 41);
     assert(g_add_calls == 2);
     assert(g_make_calls == 2);
-    assert(g_register_calls == 1 && g_query_calls == 1 && g_insert_calls == 1);
+    assert(g_lookup_calls == 1 && g_register_calls == 1 && g_query_calls == 1 &&
+           g_insert_calls == 1);
     assert(g_cursor_calls == 2);
     assert(g_last_query_option_id == 12 && g_last_query_value == 41);
     assert(g_last_color == static_cast<uint8_t>('C'));
     assert(g_last_before_offset == 20 && g_last_after_offset == 28);
     assert(g_last_builder != nullptr);
+}
+
+void test_provider_owned_item_reuses_existing_handle() {
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    void* item = reinterpret_cast<void*>(0x1800);
+    g_lookup_status = qol::contracts::kQolItemHandleStatusOk;
+    g_lookup_item = item;
+    g_lookup_owner = qol::contracts::kQolItemHandleOwnerProvider;
+    g_lookup_handle = {91, 17};
+
+    add_with_context(item, 13, 42);
+    assert(g_lookup_calls == 1 && g_register_calls == 0);
+    assert(g_query_calls == 1 && g_insert_calls == 1);
+    assert(g_last_query_handle.slot == 91 && g_last_query_handle.generation == 17);
 }
 
 void test_current_value_disambiguates_repeated_option_id() {
@@ -382,6 +420,7 @@ int main() {
     g_sdk = {};
     g_sdk.capabilities.require = require_quality;
     g_sdk.item_handle.register_item = register_item;
+    g_sdk.item_handle.lookup_item = lookup_item;
     g_ui = {};
     g_ui.size = sizeof(g_ui);
     g_ui.major = qol::contracts::kUiAdapterMajor;
@@ -403,6 +442,7 @@ int main() {
     test_descriptor_contract();
     test_disabled_wrappers_pass_through();
     test_active_context_uses_provider_level_color();
+    test_provider_owned_item_reuses_existing_handle();
     test_current_value_disambiguates_repeated_option_id();
     test_cursor_snapshots_bracket_backup_and_unsupported_adapter_fails_closed();
     test_unavailable_or_invalid_quality_fails_closed();

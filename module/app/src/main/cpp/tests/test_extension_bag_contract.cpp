@@ -234,6 +234,53 @@ void test_extension_desc_hook_v2_source_contract() {
     CHECK(contents.find("g_sdk->desc_button.bind") == std::string::npos);
 }
 
+void test_extension_bag_claim_manifest_source_contract() {
+    std::ifstream source;
+    const std::string test_file = __FILE__;
+    const size_t separator = test_file.find_last_of("/\\");
+    if (separator != std::string::npos) {
+        source.open(test_file.substr(0, separator + 1) +
+                    "../plugins/extension_bag/assembly/claims.cpp");
+    }
+    if (!source) {
+        source.clear();
+        source.open("../plugins/extension_bag/assembly/claims.cpp");
+    }
+    if (!source) {
+        source.clear();
+        source.open("../../plugins/extension_bag/assembly/claims.cpp");
+    }
+    CHECK(source.good());
+    if (!source) return;
+
+    const std::string contents((std::istreambuf_iterator<char>(source)),
+                               std::istreambuf_iterator<char>());
+    const size_t claims_begin = contents.find("static const ::qol::contracts::ResourceClaim kClaims[] = {");
+    const size_t claims_end = contents.find("\n    };", claims_begin);
+    CHECK(claims_begin != std::string::npos && claims_end != std::string::npos);
+    if (claims_begin == std::string::npos || claims_end == std::string::npos) return;
+
+    const std::string claims = contents.substr(claims_begin, claims_end - claims_begin);
+    size_t resource_count = 0;
+    size_t position = 0;
+    while ((position = claims.find("\n        {", position)) != std::string::npos) {
+        ++resource_count;
+        ++position;
+    }
+    CHECK(resource_count == 10);
+
+    const size_t desc_slots = claims.find("kEbS1DescSlots, kEbS1DescSlots");
+    const size_t desc_gate = claims.find("\"patch:P_EXT_DESC_OPEN_GATE\"");
+    CHECK(desc_slots != std::string::npos && desc_gate != std::string::npos &&
+          desc_slots < desc_gate);
+    CHECK(claims.find("kEbDescSlotsOps") != std::string::npos);
+    CHECK(claims.find("reinterpret_cast<void*>(&make_desc_equip_gate)") != std::string::npos);
+    CHECK(claims.find("kEbP3StorePopup") == std::string::npos);
+    CHECK(claims.find("kEbP4MixPopup") == std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_STORE_") == std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_MIX_") == std::string::npos);
+}
+
 void test_extension_bag_json_integer_fields() {
     using qol::features::extension_bag::detail::parse_json_int32_field;
     int32_t value = 77;
@@ -326,6 +373,7 @@ void test_move_merge_ptr_slot() {
 int main() {
     test_contract_field_counts();
     test_extension_desc_hook_v2_source_contract();
+    test_extension_bag_claim_manifest_source_contract();
     test_extension_bag_json_integer_fields();
     test_extension_bag_top_level_ok_boolean();
     test_patch_sites_resolve();

@@ -4,7 +4,7 @@
 #include "plugins/extension_bag/runtime/logging.h"
 
 // ===========================================================================
-// D2a-3b-1：扩展背包 8 条声明式资源（claims + acquire/release + backup 交还）
+// 扩展背包 10 条声明式资源（claims + acquire/release + backup 交还）
 // ===========================================================================
 //
 // 声明式资源实现。声明表经 extension_bag_bridge.h 交 plugins/extension_bag。
@@ -235,9 +235,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
     // 校正为 required × failSoft —— 装配期失败保持 free + degraded，插件活跃且 free
     // 时宿主每逻辑帧重试到成功，语义等价旧 300ms 重试线程。
     // gate=nullptr：资源跟随插件 lifecycle，单一 feature 关闭即整体还原。
-    // Core-only scope: store/mix/detail hosts are intentionally not registered.
-    // Their implementations remain under ui/ for a later re-enable; adding the
-    // corresponding claims back is the activation point.
+    // Detail actions are registered below; store/mix hosts remain disabled.
     static const ::qol::contracts::ResourceClaim kClaims[] = {
         {
             kEbM1SaveInventory,
@@ -332,6 +330,25 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
             "ITEM_DrawPorting 绘制门禁 wrapper（悬空指针/未知物品拦截，防崩）",
             nullptr, 120, reinterpret_cast<void*>(&item_draw_porting_gate),
+        },
+        {
+            kEbS1DescSlots, kEbS1DescSlots,
+            ::qol::contracts::ResourceMechanism::kOwnership,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
+            "详情按钮 execute 槽命名空间由扩展背包独占",
+            nullptr, 120,
+            reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbDescSlotsOps)),
+        },
+        {
+            "patch:P_EXT_DESC_OPEN_GATE", "P_EXT_DESC_OPEN_GATE",
+            ::qol::contracts::ResourceMechanism::kCallPatch,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
+            "详情打开时捕获扩展物品并安装详情动作 hook",
+            nullptr, 120, reinterpret_cast<void*>(&make_desc_equip_gate),
         },
         // ---- C15–C19 商店宿主（装饰型 optional：缺省不终态化插件）----
         // ---- C20–C21 合成宿主（C21 装饰型 optional）----

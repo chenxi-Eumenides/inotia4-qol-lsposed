@@ -112,14 +112,21 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int val
     if (t_current_item == nullptr) return;
 
     const auto api = quality_api();
-    if (g_sdk == nullptr || g_sdk->item_handle.register_item == nullptr || api == nullptr) return;
+    if (g_sdk == nullptr || g_sdk->item_handle.lookup_item == nullptr || api == nullptr) return;
 
     contracts::QolItemHandle handle{};
-    if (g_sdk->item_handle.register_item(t_current_item, contracts::kQolItemHandleOwnerGame,
-                                        &handle) != contracts::kQolItemHandleStatusOk ||
-        handle.slot == 0 || handle.generation == 0) {
+    uint32_t owner = contracts::kQolItemHandleOwnerAny;
+    int32_t handle_status = g_sdk->item_handle.lookup_item(t_current_item, &handle, &owner);
+    if (handle_status == contracts::kQolItemHandleStatusNotFound) {
+        if (g_sdk->item_handle.register_item == nullptr) return;
+        handle_status = g_sdk->item_handle.register_item(
+            t_current_item, contracts::kQolItemHandleOwnerGame, &handle);
+    }
+    if (handle_status != contracts::kQolItemHandleStatusOk || handle.slot == 0 ||
+        handle.generation == 0) {
         return;
     }
+    (void)owner;
 
     contracts::AttributeQualityOptions options{};
     contracts::AttributeQualityItem option_context{};

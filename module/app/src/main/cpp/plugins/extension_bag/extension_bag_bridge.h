@@ -4,7 +4,7 @@
 //
 // 与 inventory_hooks 同构：wrapper / OwnershipOps 业务体仍在 plugins/extension_bag
 // （资源实现收口在 claims.cpp），
-// plugins/extension_bag 只经本头取得 8 条资源声明表、交还入口 hook backup、
+// plugins/extension_bag 只经本头取得 10 条资源声明表、交还入口 hook backup、
 // 驱动门禁两态，避免插件 include plugins/extension_bag 内部头。
 
 #include <cstdint>
@@ -27,8 +27,8 @@ bool host_inventory_extension_set_provider(
 
 namespace qol::features::extension_bag {
 
-// 8 条声明式资源声明表（静态存储，生命周期 ≥ 进程）；out_count 可空。
-// 顺序：M1/M2 入口 hook → P1–P4 PopupState 占用 → S1 desc 槽命名空间 → X1 move_merge 指针槽。
+// 10 条声明式资源声明表（静态存储，生命周期 ≥ 进程）；out_count 可空。
+// 详情按钮槽所有权排在 P_EXT_DESC_OPEN_GATE 之前；Store/Mix claims 不注册。
 const qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count);
 
 // 入口 hook backup 交还（宿主 on_resource_ready 调用）：按资源 id 写入对应 wrapper 的

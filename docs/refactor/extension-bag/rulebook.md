@@ -628,8 +628,8 @@ H-22/H-23 为 R-55 原版背包详情出售接管追加）：
 - **为什么**：`ITEM_GetSellPrice` 的特殊类别/能力/payload 分支和异常堆叠数量都可能
   放大最终价；弹窗参数虽使用 `uint32_t`，但业务金额边界必须更严格，避免显示溢出或
   错误结算。
-- **variant**：装备页原版卖出保持 `100%`，装备页销毁/粉碎保持 `70%`；商店页和
-  API 保持 `100%`，不得因边界修复串改宿主语义。
+- **variant**：装备页详情卖出与销毁/粉碎均使用 `70%`；商店页手动出售与库存 API
+  保持各自既定调用方倍率，不得因装备页详情恢复串改商店语义。
 - **日志锚**：成功使用
   `sell price source=equip|store category=.. count=.. unit=.. variant=.. final=.. payload=.. gen=..`；
   拒绝使用 `sell price reject reason=..`。实现锚为

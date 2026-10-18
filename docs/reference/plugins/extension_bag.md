@@ -4,7 +4,7 @@
 
 功能插件：提供 5 个扩展逻辑背包（袋号 `6..10`）、装备页扩展页签、投影式拖放与存档 sidecar。对外发布 `extension_bag` 能力（API 3.0；3.1 尾追加 `remove_for_sale`）与 `inventory.merge_projection`；注册 8 条调试 HTTP 端点、3 个 port、1 个中立 inventory provider。
 
-当前为 **core-only 范围**：只注册装备页宿主与核心绘制/拖放/存档门禁；商店、合成器、详情按钮宿主实现仍保留在 `ui/`，但对应资源 claim 未注册，后续恢复时再加回 claim。
+当前范围：装备页核心绘制/拖放/存档门禁与详情动作已注册；商店、合成器仍关闭，其资源 claim 未注册。
 
 除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -15,7 +15,7 @@
 - optional：`inventory.refresh`、`move_merge.control`、`http.registry`、`http.dispatch`（`plugin.cpp:197-208`）。
 - provides：`extension_bag`（API major 3、minor 0；sale removal 3.1）、`inventory.merge_projection`（`plugin.cpp:155-170`；`contracts/extension_bag.h:25-30`）。
 - ports：write port、character extras、inventory extras（`plugin.cpp:210-220,823-824`）。
-- resources：`assembly/claims.cpp` 的 `extension_bag_claims()`。core-only 当前 8 条：`hook:SAVE_SaveInventory`、`own:popup.inventory`、`own:popup.save_panel`、`P_EXT_INVEN_ITEM_DRAW`、`P_EXT_INVEN_BAG_DRAW`、`P_EXT_INVEN_DRAW_END`、`P_EXT_DROP_GATE`、`P_EXT_DRAW_GATE`。商店/合成/详情 claim 已移除但实现保留。
+- resources：`assembly/claims.cpp` 的 `extension_bag_claims()`，当前 10 条：`hook:SAVE_SaveInventory`、`own:popup.inventory`、`own:popup.save_panel`、`P_EXT_INVEN_ITEM_DRAW`、`P_EXT_INVEN_BAG_DRAW`、`P_EXT_INVEN_DRAW_END`、`P_EXT_DROP_GATE`、`P_EXT_DRAW_GATE`、`own:desc_button_execute_slots`、`patch:P_EXT_DESC_OPEN_GATE`。详情动作已恢复；商店/合成 claim 仍关闭。
 - JNI：descriptor `jni_count=0`；两个导出由全局 bridge 管理（`plugin.cpp:852-880`；`bridge/native/gamebridge.cpp:226`；`bridge/native/gamebridge_domain_operations.cpp:458`）。
 - feature：`extension_bag.extended_bag`，Gameplay/Toggle，`default_enabled=1`，显示优先级 -2，回调 `extension_bag_toggle`（`plugin.cpp:846-850`）。
 
@@ -68,11 +68,11 @@
 
 ## UI 宿主与输入
 
-- 当前只注册背包装备页宿主（`runtime/projection.cpp`、`runtime/tabs_ui.cpp`、`ui/equip.cpp`）；页签安装以 `runtime_state().enabled` + session admission 为门控。商店/合成器宿主代码保留在 `ui/store_*`、`ui/mix.cpp`，但 claim 未注册。
+- 当前注册背包装备页宿主（`runtime/projection.cpp`、`runtime/tabs_ui.cpp`、`ui/equip.cpp`）和详情动作（`ui/detail_actions.cpp`）；详情打开 gate 与按钮执行槽 claim 已注册。商店/合成器宿主代码保留在 `ui/store_*`、`ui/mix.cpp`，但 claim 未注册。
 - 页签控件 user type 2、data 16 字节、首字段指向物品对象；页签物品按类型复用/延迟释放（`runtime/tabs_ui.cpp`、`runtime/tabs.cpp`）。
 - 投影：draw wrapper 持锁、original-first；扩展视图下临时改原版当前袋为 sentinel，绘制后恢复（`runtime/render.cpp`、`runtime/projection.cpp`）。
 - 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving（`runtime/tabs_ui.cpp`、`runtime/input.cpp`）。
-- 详情按钮：V2 `QolDescHookApi` 实现在 `ui/detail_hooks.cpp`，确认使用/出售/销毁在 `ui/detail_actions.cpp`；core-only 下未注册 `P_EXT_DESC_OPEN_GATE`/`desc_button_execute_slots`，因此不会安装详情 hook。
+- 详情按钮：V2 `QolDescHookApi` 实现在 `ui/detail_hooks.cpp`，确认使用/出售/销毁在 `ui/detail_actions.cpp`；`P_EXT_DESC_OPEN_GATE` 捕获扩展详情，`own:desc_button_execute_slots` 负责按钮槽命名空间。
 - 几何：网格左上 `(761,160)`、4×4、单格 74×74、步距 83×83；页签矩形 57×57、纵向步距 70（`extension_bag_geometry.cpp`、`runtime/tabs_ui.cpp`）。
 
 ## 消费者与职责边界
@@ -104,15 +104,15 @@
 | `transaction/ext_ext.cpp` | 扩展袋间移动/交换 |
 | `transaction/drop.cpp` | 落袋/投影拖放路由 |
 | `ui/equip.cpp` | 装备/卸下/背包装备接管 |
-| `ui/detail_hooks.cpp` | V2 详情按钮绑定/校验（core-only 未注册） |
-| `ui/detail_actions.cpp` | 使用/出售/销毁/佣兵徽章（core-only 未注册） |
+| `ui/detail_hooks.cpp` | V2 详情按钮绑定/校验（详情 claim 已注册） |
+| `ui/detail_actions.cpp` | 使用/出售/销毁/佣兵徽章（详情 claim 已注册） |
 | `ui/store_*.cpp` | 商店宿主（core-only 未注册） |
 | `ui/mix.cpp` | 合成器宿主（core-only 未注册） |
 | `public/*.cpp` | 对外 `virtual_bag_*` 包装/状态/数量/投影/出售/桥接 |
 | `api/*.cpp` | API 表、中立 provider、句柄、公开 wrapper |
 | `http/*` | JSON parser、路由表、query |
 | `persistence/persistence.cpp` | `save.slot_data` v4 consumer |
-| `assembly/claims.cpp` | 资源 claim 表（core-only 8 条） |
+| `assembly/claims.cpp` | 资源 claim 表（10 条；详情动作恢复，Store/Mix 关闭） |
 | `assembly/move_merge_impl.cpp` | move-merge projection shim |
 | `model/*` | 纯状态、事务规则、JSON、payload、ledger |
 

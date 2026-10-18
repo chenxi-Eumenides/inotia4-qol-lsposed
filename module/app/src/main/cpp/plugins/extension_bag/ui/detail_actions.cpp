@@ -729,8 +729,8 @@ void extension_desc_item_execute_at(size_t index, void* button) {
                     qol::contracts::succeeded(
                         runtime_state().host.item_facts->is_no_sell(category, &no_sell)) &&
                     no_sell == 0 && count > 0 && extension_bag_ui_read_item_sell_price(item, &unit_price)) {
-                    runtime_state().ui.extension_sell_apply_variant_discount = modified_destroy_sell;
-                    price = extension_bag_sell_price(item, count, modified_destroy_sell);
+                    runtime_state().ui.extension_sell_apply_variant_discount = true;
+                    price = extension_bag_sell_price(item, count, true);
                     if (price >= 0) {
                         valid = true;
                         const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
@@ -740,19 +740,19 @@ void extension_desc_item_execute_at(size_t index, void* button) {
                         QOL_LOG_INFO(QolDomain::kExtensionBag,
                             "sell price source=equip category=%d count=%d unit=%lld variant=%d final=%lld payload=%u gen=%llu",
                             category, legal_count, static_cast<long long>(unit_price),
-                            modified_destroy_sell ? 70 : 100, static_cast<long long>(price), payload,
+                            70, static_cast<long long>(price), payload,
                             static_cast<unsigned long long>(generation));
                     } else {
                         QOL_LOG_WARN(QolDomain::kExtensionBag,
                             "sell price reject reason=price_bounds source=equip category=%d count=%d unit=%lld variant=%d payload=%u gen=%llu",
                             category, count, static_cast<long long>(unit_price),
-                            modified_destroy_sell ? 70 : 100, payload,
+                            70, payload,
                             static_cast<unsigned long long>(runtime_state().objects.module_object_use[bag][slot].generation));
                     }
                 } else {
                     QOL_LOG_WARN(QolDomain::kExtensionBag,
                         "sell price reject reason=no_sell_or_count source=equip category=%d count=%d variant=%d",
-                        category, count, modified_destroy_sell ? 70 : 100);
+                        category, count, 70);
                 }
             } else if (!current_item) {
                 QOL_LOG_WARN(QolDomain::kExtensionBag, "sell price reject reason=stale_or_release_guard source=equip bag=%d slot=%d",
