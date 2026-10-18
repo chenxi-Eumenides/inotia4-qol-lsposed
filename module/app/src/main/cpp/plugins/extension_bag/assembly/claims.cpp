@@ -23,7 +23,6 @@ constexpr const char* kEbM1SaveInventory = "hook:SAVE_SaveInventory";
 constexpr const char* kEbM2StoreSellItem = "hook:UIStore_SellItem";
 constexpr const char* kEbM3StoreButtonSellExe = "hook:UIStore_ButtonSellExe";
 constexpr const char* kEbM4StoreDrawBagGroup = "hook:UIStore_DrawInvenBagGroup";
-constexpr const char* kEbM5DrawEquipBackground = "hook:UIEquip_DrawEquipBackground";
 constexpr const char* kEbP1InventoryPopup = "own:popup.inventory";
 constexpr const char* kEbP2SavePopup = "own:popup.save_panel";
 constexpr const char* kEbP3StorePopup = "own:popup.store";
@@ -398,20 +397,6 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             reinterpret_cast<void*>(&store_draw_inven_bag_group_entry),
         },
         {
-            kEbM5DrawEquipBackground,
-            "extension.ui_equip_draw_equip_background",
-            ::qol::contracts::ResourceMechanism::kEntryHook,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kOptional,
-            ::qol::contracts::ResourceFailure::kFailSoft,
-            true,
-            "extension_bag",
-            "商店/装备页袋列背景：EB 选中时同样遮蔽原版当前袋，只保留 EB 页签高亮",
-            nullptr,
-            120,
-            reinterpret_cast<void*>(&store_draw_equip_background_entry),
-        },
-        {
             kEbP3StorePopup,
             kEbP3StorePopup,
             ::qol::contracts::ResourceMechanism::kOwnership,
@@ -497,11 +482,6 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup) {
     if (std::strcmp(resource_id, kEbM4StoreDrawBagGroup) == 0) {
         if (backup == nullptr) return 1;
         runtime_state().ui.backup_store_draw_inven_bag_group = backup;
-        return 0;
-    }
-    if (std::strcmp(resource_id, kEbM5DrawEquipBackground) == 0) {
-        if (backup == nullptr) return 1;
-        runtime_state().ui.backup_ui_equip_draw_equip_background = backup;
         return 0;
     }
     return 1;
