@@ -43,20 +43,7 @@ namespace {
 
 constexpr size_t kPopupStateSize = 0x40;
 constexpr int kPopupStateCount = 27;
-// 触摸事件使用 Scene_Draw 的绝对逻辑坐标；真机运行时宽度为 1408。
-constexpr int64_t kCellX = 0x4c4;
-constexpr int64_t kCellY = 0x86;
 constexpr int64_t kCellStepY = 0x46;
-// Phase one uses an independent read-only overlay. These coordinates stay in
-// the same absolute logical space as the original equipment scene.
-// UIEquip_CreateInvenControl absolute origin: bag button origin minus the
-// bag container offset plus the item-container offset.
-constexpr int64_t kGridX = 0x45c - 0x185 + 0x22; // 761
-constexpr int64_t kGridY = 0x91 - 0x0c + 0x1b;   // 160
-constexpr int64_t kGridCell = 0x4a;
-constexpr int64_t kGridStep = 0x53;
-constexpr int64_t kOriginalGridX = kGridX;
-constexpr int64_t kOriginalGridY = kGridY;
 constexpr size_t kInventorySlotStride = 16;
 constexpr int kEquipSlotCount = 10;
 // Extension tab ControlObject rects are relative to the item-list root, whose
@@ -144,11 +131,15 @@ bool extension_remove_item_direct(int bag, int slot, int* out_result) {
     return true;
 }
 
+}  // namespace
+
 bool extension_free_item(void* item) {
     const auto* api = extension_bag_write_api();
     return api != nullptr && api->inventory.free_item != nullptr &&
            qol::contracts::succeeded(api->inventory.free_item(item));
 }
+
+namespace {
 
 bool extension_serialize_item(uint8_t* payload, int payload_capacity, void* item, int* out_size) {
     const auto* api = extension_bag_write_api();
@@ -289,6 +280,8 @@ bool read_item_is_usable(int category) {
         value;
 }
 
+}  // namespace
+
 bool read_world_state_id(int* out_state) {
     if (out_state == nullptr) return false;
     const auto* facts = qol::features::extension_bag::world_facts();
@@ -303,6 +296,8 @@ bool read_world_in_world() {
     int state = -1;
     return read_world_state_id(&state) && state == 5;
 }
+
+namespace {
 
 bool read_item_sell_price(const void* item, int64_t* out_price) {
     qol::contracts::QolItemHandle handle{};
@@ -426,6 +421,48 @@ struct NativeCallScope {
     }
 };
 
+#define g_ownership_ledger g_ownership_ledger_internal
+#define clear_original_desc_locked clear_original_desc_locked_internal
+#define original_bag_locked original_bag_locked_internal
+#define set_original_bag_locked set_original_bag_locked_internal
+#define bag_size_word_locked bag_size_word_locked_internal
+#define set_bag_size_word_locked set_bag_size_word_locked_internal
+#define original_bag_button_index original_bag_button_index_internal
+#define install_module_view_locked install_module_view_locked_internal
+#define ensure_module_view_root_current_locked ensure_module_view_root_current_locked_internal
+#define restore_module_view_locked restore_module_view_locked_internal
+#define refresh_projection_if_overwritten_locked refresh_projection_if_overwritten_locked_internal
+#define refresh_projected_module_view_after_move_locked refresh_projected_module_view_after_move_locked_internal
+#define refresh_module_item_area_locked refresh_module_item_area_locked_internal
+#define sync_projected_slot_locked sync_projected_slot_locked_internal
+#define module_item_locked module_item_locked_internal
+#define prepare_main_menu_locked prepare_main_menu_locked_internal
+#define ensure_state_loaded_locked ensure_state_loaded_locked_internal
+#define persist_state_locked persist_state_locked_internal
+#define log_exit_trace_locked log_exit_trace_locked_internal
+#define delete_extension_tab_buttons_locked delete_extension_tab_buttons_locked_internal
+#define disable_extension_tab_buttons_locked disable_extension_tab_buttons_locked_internal
+#define install_extension_tab_buttons_locked install_extension_tab_buttons_locked_internal
+#define extension_tab_buttons_complete_locked extension_tab_buttons_complete_locked_internal
+#define free_module_object_locked free_module_object_locked_internal
+#define materialize_module_item_locked materialize_module_item_locked_internal
+#define release_temporary_item_locked release_temporary_item_locked_internal
+#define module_object_generation_advance_locked module_object_generation_advance_locked_internal
+#define inventory_slot_locked inventory_slot_locked_internal
+#define log_ownership_audit_locked log_ownership_audit_locked_internal
+#define drain_deferred_frees_locked drain_deferred_frees_locked_internal
+#define item_pointer_known_locked item_pointer_known_locked_internal
+#define teardown_extension_bag_hosts_locked teardown_extension_bag_hosts_locked_internal
+#define module_cache_clear_preflight_locked module_cache_clear_preflight_locked_internal
+#define clear_module_cache_locked clear_module_cache_locked_internal
+#define commit_pending_extension_tab_locked commit_pending_extension_tab_locked_internal
+#define handle_bag_drop_release_locked handle_bag_drop_release_locked_internal
+#define route_deferred_extension_to_original_locked route_deferred_extension_to_original_locked_internal
+#define route_projected_session_drop_locked route_projected_session_drop_locked_internal
+#define reset_extension_desc_unequip_hook_locked reset_extension_desc_unequip_hook_locked_internal
+#define reset_extension_desc_item_hooks_locked reset_extension_desc_item_hooks_locked_internal
+#define restore_extension_desc_popup_callbacks_locked restore_extension_desc_popup_callbacks_locked_internal
+
 bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token);
 bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
                               ModuleUseReleasePlan* out_release);
@@ -533,11 +570,141 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 
 #include "plugins/extension_bag/extension_bag_runtime.inc"
 
+#undef g_ownership_ledger
+#undef clear_original_desc_locked
+#undef original_bag_locked
+#undef set_original_bag_locked
+#undef bag_size_word_locked
+#undef set_bag_size_word_locked
+#undef original_bag_button_index
+#undef install_module_view_locked
+#undef ensure_module_view_root_current_locked
+#undef restore_module_view_locked
+#undef refresh_projection_if_overwritten_locked
+#undef refresh_projected_module_view_after_move_locked
+#undef refresh_module_item_area_locked
+#undef sync_projected_slot_locked
+#undef module_item_locked
+#undef prepare_main_menu_locked
+#undef ensure_state_loaded_locked
+#undef persist_state_locked
+#undef log_exit_trace_locked
+#undef delete_extension_tab_buttons_locked
+#undef disable_extension_tab_buttons_locked
+#undef install_extension_tab_buttons_locked
+#undef extension_tab_buttons_complete_locked
+#undef free_module_object_locked
+#undef materialize_module_item_locked
+#undef release_temporary_item_locked
+#undef module_object_generation_advance_locked
+#undef inventory_slot_locked
+#undef log_ownership_audit_locked
+#undef drain_deferred_frees_locked
+#undef item_pointer_known_locked
+#undef teardown_extension_bag_hosts_locked
+#undef module_cache_clear_preflight_locked
+#undef clear_module_cache_locked
+#undef commit_pending_extension_tab_locked
+#undef handle_bag_drop_release_locked
+#undef route_deferred_extension_to_original_locked
+#undef route_projected_session_drop_locked
+#undef reset_extension_desc_unequip_hook_locked
+#undef reset_extension_desc_item_hooks_locked
+#undef restore_extension_desc_popup_callbacks_locked
+
+int original_bag_locked_internal() { return ::original_bag_locked(); }
+void set_original_bag_locked_internal(int bag) { ::set_original_bag_locked(bag); }
+bool bag_size_word_locked_internal(int bag, uint32_t* out_word) {
+    return ::bag_size_word_locked(bag, out_word);
+}
+bool set_bag_size_word_locked_internal(int bag, uint32_t word) {
+    return ::set_bag_size_word_locked(bag, word);
+}
+int original_bag_button_index_internal(int64_t x, int64_t y) {
+    return ::original_bag_button_index(x, y);
+}
+bool install_module_view_locked_internal(int bag) { return ::install_module_view_locked(bag); }
+void restore_module_view_locked_internal() { ::restore_module_view_locked(); }
+void refresh_projected_module_view_after_move_locked_internal() {
+    ::refresh_projected_module_view_after_move_locked();
+}
+void refresh_module_item_area_locked_internal(int index) {
+    ::refresh_module_item_area_locked(index);
+}
+bool sync_projected_slot_locked_internal(int bag, int slot) {
+    return ::sync_projected_slot_locked(bag, slot);
+}
+void* module_item_locked_internal(int bag, int slot) { return ::module_item_locked(bag, slot); }
+
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);
 }
 
 }  // namespace
+
+ownership::Ledger& g_ownership_ledger = g_ownership_ledger_internal;
+
+void ensure_state_loaded_locked() { ensure_state_loaded_locked_internal(); }
+bool persist_state_locked(bool force) { return persist_state_locked_internal(force); }
+void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
+                           uint64_t param2, int64_t x, int64_t y) {
+    log_exit_trace_locked_internal(phase, event, param, param2, x, y);
+}
+void delete_extension_tab_buttons_locked() {
+    delete_extension_tab_buttons_locked_internal();
+}
+void disable_extension_tab_buttons_locked() {
+    disable_extension_tab_buttons_locked_internal();
+}
+void install_extension_tab_buttons_locked() {
+    install_extension_tab_buttons_locked_internal();
+}
+bool extension_tab_buttons_complete_locked() {
+    return extension_tab_buttons_complete_locked_internal();
+}
+bool free_module_object_locked(int bag, int slot, void* use_token) {
+    return free_module_object_locked_internal(bag, slot, use_token);
+}
+void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
+    return materialize_module_item_locked_internal(descriptor);
+}
+void release_temporary_item_locked(void* item) {
+    release_temporary_item_locked_internal(item);
+}
+bool module_object_generation_advance_locked(int bag, int slot, const char* context) {
+    return module_object_generation_advance_locked_internal(bag, slot, context);
+}
+bool inventory_slot_locked(int bag, int slot, void** out) {
+    return inventory_slot_locked_internal(bag, slot, out);
+}
+void log_ownership_audit_locked(const char* context) {
+    log_ownership_audit_locked_internal(context);
+}
+void drain_deferred_frees_locked() { drain_deferred_frees_locked_internal(); }
+bool item_pointer_known_locked(void* item) { return item_pointer_known_locked_internal(item); }
+void teardown_extension_bag_hosts_locked() {
+    teardown_extension_bag_hosts_locked_internal();
+}
+bool module_cache_clear_preflight_locked() {
+    return module_cache_clear_preflight_locked_internal();
+}
+bool clear_module_cache_locked() { return clear_module_cache_locked_internal(); }
+void commit_pending_extension_tab_locked(std::unique_lock<std::mutex>& lock) {
+    commit_pending_extension_tab_locked_internal(lock);
+}
+bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
+    return handle_bag_drop_release_locked_internal(lock, x, y);
+}
+bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& lock) {
+    return route_deferred_extension_to_original_locked_internal(lock);
+}
+bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock,
+                                         int64_t x, int64_t y) {
+    return route_projected_session_drop_locked_internal(lock, x, y);
+}
+void reset_extension_desc_unequip_hook_locked() {
+    reset_extension_desc_unequip_hook_locked_internal();
+}
 
 namespace qol::features::extension_bag {
 
@@ -1422,11 +1589,22 @@ void show_extension_bag_no_space_popup() {
 // 派生）→ persist；失败回滚（清位 + 按备份 payload 重建入库）。
 // P4.3：源物品在移除确认后入账本保管，提交/回滚均经 retire 终止保管
 // （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
+#define reset_extension_desc_item_hooks_locked reset_extension_desc_item_hooks_locked_internal
+#define restore_extension_desc_popup_callbacks_locked restore_extension_desc_popup_callbacks_locked_internal
 #include "plugins/extension_bag/extension_bag_equip.inc"
+#undef reset_extension_desc_item_hooks_locked
+#undef restore_extension_desc_popup_callbacks_locked
 #include "plugins/extension_bag/extension_bag_store.inc"
 #include "plugins/extension_bag/extension_bag_mix.inc"
 
 }  // namespace
+
+void reset_extension_desc_item_hooks_locked() {
+    reset_extension_desc_item_hooks_locked_internal();
+}
+void restore_extension_desc_popup_callbacks_locked() {
+    restore_extension_desc_popup_callbacks_locked_internal();
+}
 
 QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
                                       qol::contracts::QolItemHandle expected_item) {

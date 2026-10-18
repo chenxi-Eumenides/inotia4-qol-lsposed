@@ -1,3 +1,17 @@
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/plugin.h"
+
+#include <cstring>
+
+void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
+                           uint64_t param2, int64_t x = -1, int64_t y = -1);
+
+namespace {
+
 void draw_tab_buttons_in_frame_locked() {
     // 配置门控：扩展背包关闭时不得绘制/重装页签，并清除已挂载的页签控件。
     if (!g_virtual_bag_enabled.load()) {
@@ -53,6 +67,8 @@ void draw_tab_buttons_in_frame_locked() {
                                              static_cast<int32_t>(ay + 5), 0, 0x28);
         }
     }
+}
+
 }
 
 void draw_cells_in_frame_locked() {
@@ -217,12 +233,16 @@ void set_original_bag_locked(int bag) {
     log_exit_trace_locked("write_set", 0, 0, 0);
 }
 
+namespace {
+
 bool original_got_bag_locked(int* bag) {
     if (bag == nullptr) return false;
     const int current = original_bag_locked();
     if (current < 0 || current >= kNoOriginalBagSelected) return false;
     *bag = current;
     return true;
+}
+
 }
 
 void clear_original_bag_selection_locked() {

@@ -5,6 +5,8 @@ add_library(qol_plugin_extension_bag STATIC
     runtime_tabs.cpp
     runtime_drag_session.cpp
     runtime_input.cpp
+    runtime_render.cpp
+    runtime_lifecycle.cpp
     extension_bag_port.cpp
     extension_bag_persistence.cpp
     extension_bag_geometry.cpp

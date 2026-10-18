@@ -1260,5 +1260,3 @@ bool item_pointer_known_locked(void* item) {
 // 扩展标签绘制。挂在 DrawInvenBag wrapper（原版袋标签之后、DrawMovingItem 之前）
 // 以避免遮挡拖动中的物品。绘制顺序对齐原版 UIEquip_Draw：
 //   DrawInvenBackground 底框倒序(5→0) → DrawInvenBag 图标+高亮正序(0→5)。
-#include "plugins/extension_bag/extension_bag_render.inc"
-#include "plugins/extension_bag/extension_bag_lifecycle.inc"

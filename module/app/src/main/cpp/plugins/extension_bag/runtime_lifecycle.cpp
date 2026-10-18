@@ -1,9 +1,15 @@
-struct PhysicalInventorySnapshot {
-    std::array<void*, virtual_bag::kPhysicalInventorySnapshotSlots> slots{};
-    uint64_t digest = 0;
-    int nonnull = 0;
-    bool valid = false;
-};
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
+#include "plugins/extension_bag/plugin.h"
+
+#include <array>
+#include <cstring>
+
+void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
+                           uint64_t param2, int64_t x = -1, int64_t y = -1);
 
 PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
     PhysicalInventorySnapshot snapshot{};
@@ -26,6 +32,8 @@ PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
     snapshot.valid = true;
     return snapshot;
 }
+
+namespace {
 
 bool restore_physical_inventory_snapshot_locked(const PhysicalInventorySnapshot& snapshot) {
     if (!snapshot.valid || g_game == nullptr ||
@@ -136,6 +144,8 @@ bool consume_projected_release_locked(std::unique_lock<std::mutex>& lock, int64_
                 session.source_bag, session.source_slot, original_target_bag, routed ? 1 : 0);
     session = {};
     return true;
+}
+
 }
 
 uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
@@ -462,6 +472,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
 // 生命周期节拍（D2a-3c）：原 150ms 轮询线程体的主线程化，改由 infra::scheduler 帧任务
 // （kLogicPre，节流 30 帧，count=0 常驻）。锁纪律与原线程逐点一致：g_virtual_bag_mtx
 // 短临界区包住 prepare_main_menu_locked；R-44 不变量不变。
+namespace {
+
 int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
@@ -485,6 +497,8 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
     }
     g_lifecycle_last_state = world_state;
     return 1;
+}
+
 }
 
 void ensure_lifecycle_task() {
