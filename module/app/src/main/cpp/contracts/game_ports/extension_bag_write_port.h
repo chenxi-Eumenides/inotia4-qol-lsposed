@@ -64,6 +64,8 @@ struct QolExtensionBagUiWriteApi {
                                       void* original_ok, void* original_cancel);
     QolResult (*original_bag_item)(int32_t bag, void** out_item);
     QolResult (*set_original_bag_item)(int32_t bag, void* item);
+    // Store scene owns a different bag-group draw entry from UIEquip.
+    QolResult (*draw_original_store_bag_group)();
 };
 
 struct QolExtensionBagWritePort {

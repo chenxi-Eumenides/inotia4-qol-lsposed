@@ -277,7 +277,7 @@ void store_draw_inven_bag_group_wrapper() {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_STORE_BAG_DRAW"});
     if (runtime_state().host.game == nullptr ||
-        runtime_state().host.write_port->ui.draw_original_bag == nullptr ||
+        runtime_state().host.write_port->ui.draw_original_store_bag_group == nullptr ||
         runtime_state().host.write_port->ui.current_bag == nullptr ||
         runtime_state().host.write_port->ui.set_current_bag == nullptr) return;
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
@@ -289,6 +289,6 @@ void store_draw_inven_bag_group_wrapper() {
         (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
-    (void)runtime_state().host.write_port->ui.draw_original_bag();
+    (void)runtime_state().host.write_port->ui.draw_original_store_bag_group();
     if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
 }

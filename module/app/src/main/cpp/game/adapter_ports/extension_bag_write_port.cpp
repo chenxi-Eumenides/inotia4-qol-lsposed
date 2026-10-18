@@ -236,6 +236,15 @@ QolResult write_extension_draw_original_bag() {
     reinterpret_cast<DrawFn>(g_base + offset)();
     return contracts::ok();
 }
+QolResult write_extension_draw_original_store_bag_group() {
+    if (g_base == 0) return not_ready();
+    const uintptr_t offset = fn_resolve("F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA",
+                                        F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA);
+    if (offset == 0) return not_ready();
+    using DrawFn = void (*)();
+    reinterpret_cast<DrawFn>(g_base + offset)();
+    return contracts::ok();
+}
 QolResult write_extension_draw_original_items() {
     if (g_base == 0) return not_ready();
     const uintptr_t offset = fn_resolve("F_UIEQUIP_DRAW_INVEN_ITEM_VMA",
@@ -334,7 +343,8 @@ const contracts::QolExtensionBagWritePort kExtensionBagWritePort{
      &write_extension_bag_capacity_word, &write_extension_set_bag_capacity_word,
      &write_extension_draw_original_bag, &write_extension_draw_original_items,
      &write_extension_create_confirmation, &write_extension_restore_confirmation,
-     &write_extension_original_bag_item, &write_extension_set_original_bag_item},
+     &write_extension_original_bag_item, &write_extension_set_original_bag_item,
+     &write_extension_draw_original_store_bag_group},
 };
 
 }  // namespace
