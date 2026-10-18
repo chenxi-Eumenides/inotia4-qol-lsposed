@@ -8,9 +8,6 @@
 #include <chrono>
 #include <cstring>
 
-// P3 所有权账本：借出对象四态跟踪。
-ownership::Ledger g_ownership_ledger{};
-
 namespace {
 
 struct DeferredItemFree {

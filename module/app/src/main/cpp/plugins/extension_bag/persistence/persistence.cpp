@@ -10,6 +10,11 @@
 #include "contracts/slot_data.h"
 #include "plugins/extension_bag/extension_bag_logging.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#if defined(QOL_EXTENSION_BAG_SLOT_DATA_TEST_SEAMS)
+#include "tests/extension_bag_slot_data_state_stubs.h"
+#else
+#include "plugins/extension_bag/runtime_state.h"
+#endif
 
 // 实现坐落在全局 namespace（context.h 的声明位置）；契约名经 using 引入。
 using namespace qol::contracts;
@@ -23,8 +28,6 @@ using namespace qol::contracts;
 
 // game_ui_virtbag.cpp 的共享锁与 dirty 标记（跨 TU 引用；锁边界见 rulebook §2）。
 // extern 声明在文件作用域：匿名 namespace 内的声明是内部链接，无法引用其他 TU 的定义。
-extern std::mutex g_virtual_bag_mtx;
-extern bool g_item_state_dirty;
 uint64_t extension_bag_item_revision_locked();
 
 // game_ui_virtbag.cpp（public_runtime.inc）：R-66 保存前校验（容量归一化 + 容量外剔除，

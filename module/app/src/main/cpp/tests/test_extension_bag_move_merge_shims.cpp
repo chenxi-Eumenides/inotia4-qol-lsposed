@@ -8,9 +8,6 @@
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/move_merge.h"
 
-const qol::contracts::QolHostSdk* g_sdk = nullptr;
-std::atomic<bool> g_extension_source_protection_requested{false};
-
 bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle, void** out_item);
 bool virtual_bag_identify_native_item(void*, int* out_bag, int* out_slot);
 

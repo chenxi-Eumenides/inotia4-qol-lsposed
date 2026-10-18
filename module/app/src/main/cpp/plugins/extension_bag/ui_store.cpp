@@ -36,15 +36,6 @@
 // 商店宿主只管理 UIStore 自己的控件、投影和详情事务，不复用 UIEquip 的视图状态。
 
 
-// W1 商店扩展物品出售：UIStore_SellItem@0xd25f0 函数入口 hook（backup 存本全局）。
-// 原版数量面板/确认/取消全部保留；模块物品在入口层按「弹窗载荷 / 单价」反推数量后
-// 接管整堆删除或部分递减，原版物品一律 backup。
-void* g_backup_store_sell_item = nullptr;
-StoreSceneEventFn store_original_event = nullptr;
-StoreSceneNoArgFn store_original_f3 = nullptr;
-StoreSceneNoArgFn store_original_enter = nullptr;
-uint8_t* store_state_entry = nullptr;
-
 namespace {
 
 using StoreSellItemFn = int64_t (*)(int64_t);

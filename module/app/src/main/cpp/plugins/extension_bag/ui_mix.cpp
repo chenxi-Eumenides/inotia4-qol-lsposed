@@ -41,10 +41,6 @@
 // 宿主物理袋沿用 original_bag_locked()（UIMix 与 UIEquip 共用 [0x2f56d8] 当前袋 GOT，
 // UIMix_RefreshInvenItem 反汇编确认），合法 0..4；落在任务袋 5/非法时回退 0。
 
-MixSceneNoArgFn mix_original_enter = nullptr;
-MixSceneNoArgFn mix_original_f3 = nullptr;
-uint8_t* mix_state_entry = nullptr;
-
 namespace {
 
 bool mix_view_installed = false;
