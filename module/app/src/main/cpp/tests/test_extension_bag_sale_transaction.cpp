@@ -261,6 +261,18 @@ void test_irreversible_release_never_reports_removal_failure() {
     CHECK(h.dirty && h.revision.load() == 10);
 }
 
+void test_ext2orig_recovery_action_checks_source_and_target() {
+    using virtual_bag::Ext2OrigRecoveryAction;
+    CHECK(virtual_bag::ext2orig_recovery_action(true, false) ==
+          Ext2OrigRecoveryAction::kRollback);
+    CHECK(virtual_bag::ext2orig_recovery_action(true, true) ==
+          Ext2OrigRecoveryAction::kRollbackTarget);
+    CHECK(virtual_bag::ext2orig_recovery_action(false, true) ==
+          Ext2OrigRecoveryAction::kComplete);
+    CHECK(virtual_bag::ext2orig_recovery_action(false, false) ==
+          Ext2OrigRecoveryAction::kRetry);
+}
+
 }  // namespace
 
 int main() {
@@ -270,6 +282,7 @@ int main() {
     test_clear_projection_failure_does_not_release();
     test_replaced_slot_object_and_custody_mismatch_reject();
     test_irreversible_release_never_reports_removal_failure();
+    test_ext2orig_recovery_action_checks_source_and_target();
     std::printf("extension_bag_sale_transaction_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

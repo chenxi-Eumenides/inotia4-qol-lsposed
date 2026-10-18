@@ -761,13 +761,89 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
     }
     const bool restore_module = g_module_view_installed;
     const int restore_bag = g_module_view_index;
+    const int restore_original_bag = g_module_window_original_bag;
+    const virtual_bag::Mode restore_mode = g_virtual_bag_state.mode;
+    const int restore_selected = g_virtual_bag_state.selected;
+    const int restore_inspected = g_virtual_bag_state.inspected;
     if (restore_module) restore_module_view_locked();
     const virtual_bag::RecoveryAction action =
         virtual_bag::recovery_action(g_virtual_bag_state, pending);
     VIRTBAG_LOG("pending recovery direction=%d action=%d", static_cast<int>(pending.direction),
                 static_cast<int>(action));
-    bool clear_pending = action == virtual_bag::RecoveryAction::kRollback;
-    if (action == virtual_bag::RecoveryAction::kComplete) {
+    bool clear_pending = false;
+    if (pending.direction == virtual_bag::kTransferExtensionToOriginal) {
+        const bool source_matches = virtual_bag::item_matches_payload(
+            g_virtual_bag_state.items[pending.src_bag][pending.src_slot], pending);
+        const int target_slot = original_inventory_payload_slot_locked(
+            pending.payload.data(), pending.payload_size, pending.dst_bag);
+        const auto recovery = virtual_bag::ext2orig_recovery_action(
+            source_matches, target_slot >= 0);
+        if (recovery == virtual_bag::Ext2OrigRecoveryAction::kRollbackTarget) {
+            void* target_item = nullptr;
+            const bool target_read = inventory_slot_locked(pending.dst_bag, target_slot,
+                                                           &target_item);
+            if (target_read && target_item != nullptr &&
+                remove_item_direct_unlocked(lock, pending.dst_bag, target_slot, target_item,
+                                            "pending ext2orig rollback target")) {
+                if (g_game != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
+                    virtual_bag_call_original_refresh_item_area_with_guard();
+                }
+                clear_pending = true;
+            } else {
+                VIRTBAG_LOG("pending recovery: ext2orig target rollback not confirmed; retain pending slot=%d",
+                            target_slot);
+            }
+        } else if (recovery == virtual_bag::Ext2OrigRecoveryAction::kRollback ||
+                   recovery == virtual_bag::Ext2OrigRecoveryAction::kComplete) {
+            clear_pending = true;
+        } else {
+            set_original_bag_locked(pending.dst_bag);
+            uint32_t item_handle = 0;
+            void* item = load_item_payload_tracked_locked(
+                pending.payload.data(), pending.payload_size,
+                "recover_pending_extension_to_original", &item_handle);
+            bool loaded = item != nullptr;
+            if (loaded && extension_bag_write_api() != nullptr &&
+                extension_bag_write_api()->inventory.save_item_on_empty != nullptr) {
+                if (!extension_save_item_on_empty(item, pending.dst_bag)) {
+                    if (original_inventory_contains_payload_locked(
+                            pending.payload.data(), pending.payload_size, pending.dst_bag)) {
+                        handover_tracked_item_locked(item_handle, item,
+                                                     "recover ext2orig failed-write target observed");
+                        loaded = false;
+                    } else {
+                        release_tracked_item_locked(item_handle, item,
+                                                    "recover ext2orig insert failed");
+                        loaded = false;
+                    }
+                }
+            } else if (item != nullptr) {
+                release_tracked_item_locked(item_handle, item,
+                                            "recover ext2orig save unavailable");
+                loaded = false;
+            }
+            if (loaded && !original_inventory_contains_payload_locked(
+                               pending.payload.data(), pending.payload_size, pending.dst_bag)) {
+                VIRTBAG_LOG("pending recovery: target payload not confirmed; retain pending");
+                loaded = false;
+            }
+            if (loaded) {
+                handover_tracked_item_locked(item_handle, item,
+                                             "recover ext2orig handover");
+                clear_pending = true;
+            } else if (original_inventory_contains_payload_locked(
+                           pending.payload.data(), pending.payload_size, pending.dst_bag)) {
+                // 插入结果为假但目标载荷已可见时，目标已接管；不再释放该对象。
+                clear_pending = true;
+            } else {
+                VIRTBAG_LOG("pending recovery: extension->original retry retained");
+            }
+        }
+    } else {
+        clear_pending = action == virtual_bag::RecoveryAction::kRollback;
+    }
+    if (pending.direction != virtual_bag::kTransferExtensionToOriginal &&
+        action == virtual_bag::RecoveryAction::kComplete) {
         if (pending.direction == virtual_bag::kTransferOriginalToExtension) {
             void* src = nullptr;
             if (!inventory_slot_locked(pending.src_bag, pending.src_slot, &src) || src == nullptr) {
@@ -809,52 +885,38 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
             // 源载荷，禁止按 ext→orig 重放（§4.2 不尝试重放或推断目标）；
             // 按 kRollback 语义仅清 pending。
             clear_pending = true;
-        } else {
-            if (original_inventory_contains_payload_locked(pending.payload.data(),
-                                                           pending.payload_size,
-                                                           pending.dst_bag)) {
-                clear_pending = true;
-            } else {
-                set_original_bag_locked(pending.dst_bag);
-                uint32_t item_handle = 0;
-                void* item = load_item_payload_tracked_locked(
-                    pending.payload.data(), pending.payload_size,
-                    "recover_pending_extension_to_original", &item_handle);
-                bool loaded = item != nullptr;
-                if (loaded && extension_bag_write_api() != nullptr &&
-                    extension_bag_write_api()->inventory.save_item_on_empty != nullptr) {
-                    if (!extension_save_item_on_empty(item, pending.dst_bag)) {
-                        release_tracked_item_locked(item_handle, item,
-                                                    "recover ext2orig insert failed");
-                        loaded = false;
-                    }
-                } else if (item != nullptr) {
-                    release_tracked_item_locked(item_handle, item,
-                                                "recover ext2orig save unavailable");
-                    loaded = false;
-                }
-                if (loaded && !original_inventory_contains_payload_locked(
-                                   pending.payload.data(), pending.payload_size, pending.dst_bag)) {
-                    VIRTBAG_LOG("pending recovery: target payload not confirmed; retain pending");
-                    loaded = false;
-                }
-                if (loaded) {
-                    handover_tracked_item_locked(item_handle, item,
-                                                 "recover ext2orig handover");
-                    clear_pending = true;
-                } else {
-                    VIRTBAG_LOG("pending recovery: extension->original retry retained");
-                }
-            }
         }
     }
     if (clear_pending) {
         g_virtual_bag_state.pending = {};
         extension_bag_mark_dirty_locked();
     }
+    // 恢复操作临时卸载投影；在退出前按原宿主和袋重新装载，避免 mode 与 UI 投影分离。
+    if (restore_module) {
+        const int host_bag = virtual_bag::valid_original_transaction_bag(restore_original_bag)
+                                 ? restore_original_bag
+                                 : 0;
+        set_original_bag_locked(host_bag);
+        const bool installed = virtual_bag::valid_index(restore_bag) &&
+                               install_module_view_locked(restore_bag) &&
+                               g_module_view_installed &&
+                               g_module_view_index == restore_bag &&
+                               g_projected_item_root != nullptr;
+        if (installed) {
+            g_virtual_bag_state.mode = restore_mode;
+            g_virtual_bag_state.selected = restore_selected;
+            g_virtual_bag_state.inspected = restore_inspected;
+        } else {
+            if (g_module_view_installed) restore_module_view_locked();
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "ERROR pending recovery could not restore module projection bag=%d host=%d",
+                          restore_bag, host_bag);
+            g_virtual_bag_state.mode = virtual_bag::Mode::kOriginal;
+            g_virtual_bag_state.selected = host_bag;
+            g_virtual_bag_state.inspected = -1;
+        }
+    }
     persist_state_locked();
-    (void)restore_module;
-    (void)restore_bag;
 }
 
 

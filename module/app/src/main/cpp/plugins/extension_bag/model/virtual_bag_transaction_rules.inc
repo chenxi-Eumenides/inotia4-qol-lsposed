@@ -435,6 +435,24 @@ inline bool item_matches_payload(const Item& item, const PendingTransfer& pendin
            std::memcmp(item.payload.data(), pending.payload.data(), pending.payload_size) == 0;
 }
 
+enum class Ext2OrigRecoveryAction : uint8_t {
+    kRollback,
+    kRollbackTarget,
+    kComplete,
+    kRetry,
+};
+
+// ext→orig 恢复同时核验两侧：源仍在时撤销已落入原版的目标，源已清且目标存在时完成提交。
+inline Ext2OrigRecoveryAction ext2orig_recovery_action(bool source_matches,
+                                                       bool target_matches) {
+    if (source_matches) {
+        return target_matches ? Ext2OrigRecoveryAction::kRollbackTarget
+                              : Ext2OrigRecoveryAction::kRollback;
+    }
+    return target_matches ? Ext2OrigRecoveryAction::kComplete
+                          : Ext2OrigRecoveryAction::kRetry;
+}
+
 // 纯判定逻辑（不涉及 native 调用，host 测试覆盖）：
 // 以「状态中对应槽的载荷是否等于 pending 载荷」区分事务已提交/未提交，产出确定性恢复动作。
 inline RecoveryAction recovery_action(const State& state, const PendingTransfer& pending) {
