@@ -944,6 +944,21 @@ target_compile_features(extension_bag_status_query_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_status_query_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_status_query_tests COMMAND extension_bag_status_query_tests)
 
+# Extension bag debug HTTP parameter validation, ticket result semantics and pure view-state exit.
+add_executable(extension_bag_debug_api_tests
+    test_extension_bag_debug_api.cpp
+    ${CPP_DIR}/plugins/extension_bag/http/routes.cpp
+    ${CPP_DIR}/plugins/extension_bag/http/query.cpp
+)
+target_include_directories(extension_bag_debug_api_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(extension_bag_debug_api_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_debug_api_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_debug_api_tests COMMAND extension_bag_debug_api_tests)
+
 # D1-a2：PopupState state 表注入机制 host 测试（假 state 表；占用/幂等/还原；末尾追加）
 add_executable(hooks_popup_state_tests
     test_hooks_popup_state.cpp

@@ -58,6 +58,23 @@ inline void enter_original(State* state, int bag) {
     state->original_selected = bag >= 0 && bag < 6 ? bag : 0;
     state->selected = -1;
     state->inspected = -1;
+    state->info_bag = -1;
+}
+
+enum class ExitViewResult : uint8_t {
+    kExited,
+    kNotInModule,
+    kExitInProgress,
+};
+
+inline ExitViewResult exit_module_view(State* state, int original_bag) {
+    if (state == nullptr) return ExitViewResult::kNotInModule;
+    if (state->mode == Mode::kExitingModule) return ExitViewResult::kExitInProgress;
+    if (state->mode != Mode::kModule || !valid_index(state->selected)) {
+        return ExitViewResult::kNotInModule;
+    }
+    enter_original(state, original_bag);
+    return ExitViewResult::kExited;
 }
 
 inline void begin_exit_module(State* state) {
@@ -167,4 +184,3 @@ inline int discard_over_capacity(State* state) {
 }
 
 // ---- JSON 桥接（Kotlin ExtensionBagUiBridge 往返，payload 以 base64 安全编码）----
-

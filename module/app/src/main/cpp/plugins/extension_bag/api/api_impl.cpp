@@ -59,6 +59,9 @@ std::string extension_bag_api_enter_view_impl(int logical_bag) {
     const int internal_bag = extension_internal_bag(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
+        return extension_bag_not_ready_error_locked();
+    }
     ensure_state_loaded_locked();
     // 面板门禁（P3 真机实证）：控件树仅在背包面板打开时有效，面板关闭时
     // enter_view 会投影到 stale 树（点击失效/重建后被 RefreshItemArea 冲掉）。
@@ -77,16 +80,34 @@ std::string extension_bag_api_enter_view_impl(int logical_bag) {
 std::string extension_bag_api_exit_view_impl() {
     if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
+        return extension_bag_not_ready_error_locked();
+    }
     ensure_state_loaded_locked();
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule) {
         return op_err("exit in progress");
     }
-    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule || runtime_state().objects.bag.selected < 0) {
+    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule ||
+        !virtual_bag::valid_index(runtime_state().objects.bag.selected)) {
         return op_err("not in extension view");
     }
-    handle_extension_tab_click_locked(runtime_state().objects.bag.selected);
-    const bool exited = runtime_state().objects.bag.mode == virtual_bag::Mode::kOriginal;
-    return extension_bag_view_result_json(exited, "exit extension view failed");
+
+    const int original_bag = original_bag_locked();
+    if (runtime_state().objects.module_view_installed) {
+        restore_module_view_locked();
+    } else {
+        clear_original_desc_locked();
+    }
+    const virtual_bag::ExitViewResult result =
+        virtual_bag::exit_module_view(&runtime_state().objects.bag, original_bag);
+    if (result == virtual_bag::ExitViewResult::kExitInProgress) {
+        return op_err("exit in progress");
+    }
+    if (result != virtual_bag::ExitViewResult::kExited) {
+        return op_err("not in extension view");
+    }
+    persist_state_locked();
+    return extension_bag_view_result_json(true, "exit extension view failed");
 }
 
 std::string extension_bag_api_select_bag_impl(int logical_bag) {
@@ -94,6 +115,9 @@ std::string extension_bag_api_select_bag_impl(int logical_bag) {
     const int internal_bag = extension_internal_bag(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
+        return extension_bag_not_ready_error_locked();
+    }
     ensure_state_loaded_locked();
     if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
         return op_err("not in extension view");
@@ -110,6 +134,9 @@ std::string extension_bag_api_click_item_impl(int logical_bag, int slot) {
     const int internal_bag = extension_internal_bag(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
+        return extension_bag_not_ready_error_locked();
+    }
     ensure_state_loaded_locked();
     if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
         return op_err("not in extension view");
@@ -144,6 +171,9 @@ std::string extension_bag_api_unequip_impl(int logical_bag) {
     ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
     {
         std::unique_lock<std::mutex> lock(runtime_state().mtx);
+        if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
+            return extension_bag_not_ready_error_locked();
+        }
         result = unequip_extension_bag_locked(lock, internal_bag);
     }
     if (result == ExtensionBagUnequipResult::kOk) return op_ok();

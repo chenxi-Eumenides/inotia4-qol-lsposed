@@ -2158,6 +2158,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 #### 扩展背包调试端点（v0.6.16 自 `/api/extension_bag/*` 迁入）
 
 > 扩展背包**数据与移动**的正式操作面是 §4.1/§4.2 的原版背包 API（bag 6..10 并入）；以下端点仅服务**视图/选中**控制与内部状态诊断（`mode/selected/inspected/pending/recovery_action` 等），供开发期与控制面阶段验收使用，不构成发布操作面。编号约定与原型阶段声明见 §4.1。
+> 七条 POST 命令先在 HTTP 线程校验参数；缺失、非 int32 或越界字段返回 HTTP 400。合法请求返回 `ticket`，执行结果（包括业务错误）从该票据回取，不由 HTTP 受理响应表示操作成功。
 
 `POST /api/debug/custom-ui/components`　body `{ "open": true|false }`
 
@@ -2179,27 +2180,29 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 `POST /api/debug/extension_bag/enter_view`　body `{ "bag": 6..10 }`
 
-**用途**：进入扩展逻辑袋视图（等价点击扩展 tab）。错误：`already in extension view` / `exit in progress` / `extension bag disabled` / `not in game`。
+**用途**：进入扩展逻辑袋视图（等价点击扩展 tab；要求背包面板已打开）。业务错误：`inventory panel not open` / `already in extension view` / `exit in progress` / `extension bag disabled` / `not in game` / `enter extension view failed`。
 
 `POST /api/debug/extension_bag/exit_view`　body 可省略
 
 **用途**：退回原版背包视图。错误：`not in extension view` / `exit in progress`。
 
+退出会直接恢复原版投影并清理扩展详情状态，不会触发同袋二次点击的袋信息面板路径；退出成功返回原版视图状态。会话未准入时按 `extension bag disabled` / `not in game` 返回业务错误。
+
 `POST /api/debug/extension_bag/select_bag`　body `{ "bag": 6..10 }`
 
-**用途**：扩展视图内切换逻辑袋。错误：`not in extension view` / `bag already selected`。
+**用途**：扩展视图内切换逻辑袋。业务错误：`not in extension view` / `bag already selected` / `select bag failed` / `extension bag disabled` / `not in game`。
 
 `POST /api/debug/extension_bag/click_item`　body `{ "bag": 6..10, "slot": 0..15 }`
 
-**用途**：选中扩展物品并返回信息（含完整 payload）；空槽 → `{"ok":true,"item":null}`。错误：`bag not selected` / `not in extension view`。
+**用途**：选中扩展物品并返回信息（含完整 payload）；空槽 → `{"ok":true,"item":null}`。业务错误：`bag not selected` / `not in extension view` / `slot beyond derived capacity` / `extension bag disabled` / `not in game`。
 
 `POST /api/debug/extension_bag/equip`　body `{ "index": 0..4, "bagType": 1..4 }`
 
-**用途**：开发期测试注入：设置扩展袋装备类型（`set_test_equipped`）。`index`/`bagType` 必填；缺失、非 int32、越界返回 400。
+**用途**：开发期测试注入：设置扩展袋装备类型（`set_test_equipped`）。`index`/`bagType` 必填；缺失、非 int32、越界返回 400；会话未准入或当前袋内物品不适配新容量时，票据返回业务错误。
 
 `POST /api/debug/extension_bag/item`　body `{ "index": 0..4, "slot": 0..15, "category": N, "count": N }`
 
-**用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。四个字段均必填；缺失、非 int32、`index`/`slot`/`category`/`count` 越界返回 400。
+**用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。四个字段均必填；缺失、非 int32、`index`/`slot`/`category`/`count` 越界返回 400；会话未准入或 slot 超出该袋派生容量时，票据返回业务错误。
 
 ---
 
