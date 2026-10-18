@@ -542,215 +542,47 @@ bool virtual_bag_handle_backpack_button_equip() {
 //   · 扩展袋（mode=kModule，desc 由扩展标签二次点击打开）：走扩展解除
 //     unequip_extension_bag_locked（原扩展袋卸下按钮的职责，
 //     现已函数 hook 化；g_extension_desc_unequip_bag 记录袋位）。
-//   · 原版袋（原版视图）：纯原版下有个边角缺陷——先 INVEN_FindSaveSlot 找
-//     空槽、后清袋表[N]；FindSaveSlot 在清袋表前运行会把"即将腾空的自身
-//     袋行 N"当成可用位选中，SaveItem 却在清袋表之后执行，袋对象落进容量
-//     已归零的行 N → 不可见=物品消失（原版背包满时必现）。接管语义：
-//       袋内容非空 → 弹"袋非空"（袋保持）；
-//       原版其他袋有空位 → 放回原版（排除自身行 N）+ 清袋表[N]；
-//       原版满 → 收编扩展袋空位；
-//       扩展也满 → 弹"背包已满"，袋保持装备态（物品绝不消失）。
+//   · 原版袋（原版视图）：完全交原版。EB 不再接管原版袋的卸下、落位或
+//     收编；原版满包时的 EB 收编由 inventory_hooks::save_item_wrapper 在
+//     INVEN_SaveItem 失败后调用 adopt_native_item 完成。
+//   · EB 袋（扩展视图）：只处理本插件拥有的虚拟袋；非空/无空位结果由
+//     wrapper 转成原版弹窗。
 bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_empty) {
     if (out_no_space != nullptr) *out_no_space = false;
     if (out_not_empty != nullptr) *out_not_empty = false;
     if (!runtime_state().enabled.load() || !read_world_in_world()) return false;
     std::unique_lock<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
-    // 仅 desc_type=1（袋详情）卸下走接管；卸装备（desc_type=0）交原版（其
-    // 收编由 CHAR_UnequipItemToInven 第 9 hook 覆盖）。
+    // Only the EB bag detail belongs to this plugin. Original bag unequip stays
+    // entirely original; INVEN_SaveItem's wrapper performs the EB adoption when
+    // the original inventory has no space.
     int32_t desc_type = 0;
-    if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.desc_type == nullptr ||
-        !qol::contracts::succeeded(runtime_state().host.write_port->ui.desc_type(&desc_type)) ||
-        desc_type != 1) return false;
-    // 扩展视图激活：desc 必为扩展袋（原版袋 desc 只能在原版视图触发，二次
-    // 点击扩展标签打开）。识别 g_extension_desc_unequip_bag 走扩展解除。
-    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule) {
-        const int ext_bag = runtime_state().ui.extension_desc_unequip_bag;
-        const bool owns_desc = virtual_bag::valid_index(ext_bag) &&
-                               runtime_state().objects.bag.selected == ext_bag &&
-                               runtime_state().objects.bag.info_bag == ext_bag;
-        if (owns_desc) {
-            const ExtensionBagUnequipResult result = unequip_extension_bag_locked(lock, ext_bag);
-            VIRTBAG_LOG("extension desc unequip bag=%d result=%d", ext_bag,
-                        static_cast<int>(result));
-            if (result == ExtensionBagUnequipResult::kNotEmpty && out_not_empty != nullptr) {
-                *out_not_empty = true;
-                return true;
-            }
-            if (result == ExtensionBagUnequipResult::kNoSpace && out_no_space != nullptr) {
-                *out_no_space = true;
-                return true;
-            }
-            // 已确认详情来自扩展袋时，失败也必须阻断原版 backup，避免原版卸下
-            // 一个并不在物理袋表中的扩展对象。
-            return true;
-        }
-        // 扩展态但 desc 袋记录失效：保守拦截（不交原版误卸原版袋）。
+    if (runtime_state().host.game == nullptr ||
+        runtime_state().host.write_port->ui.desc_type == nullptr ||
+        !qol::contracts::succeeded(
+            runtime_state().host.write_port->ui.desc_type(&desc_type)) ||
+        desc_type != 1) {
+        return false;
+    }
+    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) return false;
+    const int ext_bag = runtime_state().ui.extension_desc_unequip_bag;
+    const bool owns_desc = virtual_bag::valid_index(ext_bag) &&
+                           runtime_state().objects.bag.selected == ext_bag &&
+                           runtime_state().objects.bag.info_bag == ext_bag;
+    if (!owns_desc) {
+        // In EB view an unidentified bag detail must not fall through to the
+        // original bag code: the item is not in the physical bag table.
         VIRTBAG_LOG("extension desc unequip stale rejected ext_bag=%d", ext_bag);
         return true;
     }
-    // 被卸袋位=当前袋：desc_type=1 恒为二次点击当前袋标签产生（原版
-    // InvenBagControlEventProc N==current）。不能用 UIDesc_GetData/扫袋表
-    // 反查——原版卸袋按钮回调拿的是袋标签控件 GetItem（data[0]），desc 面板
-    // 数据在卸袋详情不可靠（真机实证：扩展也满时袋仍被解除+物品消失）。
-    int bag_index = -1;
-    if (original_bag_locked() < kNoOriginalBagSelected) {
-        bag_index = original_bag_locked();
-    } else {
-        int32_t current_bag = -1;
-        if (runtime_state().host.write_port->ui.current_bag != nullptr &&
-            qol::contracts::succeeded(
-                runtime_state().host.write_port->ui.current_bag(&current_bag)) &&
-            current_bag < kNoOriginalBagSelected) {
-            bag_index = current_bag;
-        }
+    const ExtensionBagUnequipResult result = unequip_extension_bag_locked(lock, ext_bag);
+    VIRTBAG_LOG("extension desc unequip bag=%d result=%d", ext_bag,
+                static_cast<int>(result));
+    if (result == ExtensionBagUnequipResult::kNotEmpty && out_not_empty != nullptr) {
+        *out_not_empty = true;
+    } else if (result == ExtensionBagUnequipResult::kNoSpace && out_no_space != nullptr) {
+        *out_no_space = true;
     }
-    if (bag_index < 0 || bag_index >= 6) return false;  // 无有效袋位 → 交原版
-    void* item = nullptr;
-    if (runtime_state().host.write_port->ui.original_bag_item == nullptr ||
-        !qol::contracts::succeeded(
-            runtime_state().host.write_port->ui.original_bag_item(bag_index, &item))) return false;
-    if (item == nullptr) return false;  // 该袋位无袋对象（空位详情等）→ 交原版
-    int32_t empty_bag = 0;
-    if (runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.is_empty_bag == nullptr ||
-        !qol::contracts::succeeded(
-            runtime_state().host.inventory_extras->read.is_empty_bag(bag_index, &empty_bag)) ||
-        empty_bag == 0) {
-        // 袋非空：模块接管弹"袋非空"（袋保持安全），不交原版。
-        if (out_not_empty != nullptr) *out_not_empty = true;
-        return true;
-    }
-    // 放回原版背包（排除自身袋行，防再次落入容量归零行）。
-    qol::contracts::QolItemHandle source_handle{};
-    const bool source_handle_known = extension_bag_item_handle_for_pointer(item, &source_handle);
-    int receiving_bag = -1;
-    for (int bag = 0; bag < 5; ++bag) {
-        if (bag == bag_index) continue;
-        if (extension_save_item_on_empty(item, bag)) {
-            receiving_bag = bag;
-            break;
-        }
-    }
-    if (receiving_bag >= 0) {
-        if (!qol::contracts::succeeded(
-                runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr))) {
-            VIRTBAG_LOG("original bag unequip->original bag clear failed bag=%d dst=%d item=%p",
-                        bag_index, receiving_bag, item);
-        }
-        // SaveItemOnEmpty may move the same object or merge/replace it. Invalidate
-        // the old game handle only when the source identity is no longer present
-        // in any physical bag slot; invalidating a live bag object breaks the
-        // next core.item snapshot.
-        bool source_still_present = false;
-        if (source_handle_known) {
-            for (int scan_bag = 0; scan_bag < 6 && !source_still_present; ++scan_bag) {
-                for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-                    qol::contracts::QolInventoryItemRef ref{};
-                    if (!qol::contracts::succeeded(
-                            runtime_state().host.item_facts->item_ref_at(scan_bag, slot, &ref))) {
-                        continue;
-                    }
-                    if (ref.item.slot == source_handle.slot &&
-                        ref.item.generation == source_handle.generation) {
-                        source_still_present = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (source_handle_known && !source_still_present) {
-            (void)extension_bag_invalidate_game_item_handle(item);
-        }
-        extension_bag_mark_dirty_locked();
-        persist_state_locked();
-        extension_description_set_off();
-        virtual_bag_call_original_refresh_item_area_with_guard();
-        extension_refresh_bag_area();
-        clear_original_desc_locked();
-        VIRTBAG_LOG("original bag unequip->original bag=%d dst=%d item=%p", bag_index,
-                    receiving_bag, item);
-        return true;
-    }
-    // 原版背包满：收编扩展袋空位（serialize 后对象移交扩展槽，袋表清空）。
-    int adopt_bag = -1;
-    int adopt_slot = -1;
-    for (int bag = 0; bag < virtual_bag::kBagCount && adopt_bag < 0; ++bag) {
-        if (runtime_state().objects.bag.types[bag] == 0) continue;
-        const int capacity = runtime_state().objects.bag.capacities[bag];
-        for (int slot = 0; slot < capacity; ++slot) {
-            if (module_slot_is_assignable_locked(bag, slot)) {
-                adopt_bag = bag;
-                adopt_slot = slot;
-                break;
-            }
-        }
-    }
-    if (adopt_bag < 0) {
-        // 扩展也满：置标志由 wrapper 解锁后弹"背包已满"，袋保持装备态，
-        // 物品不消失（此处绝不弹窗：锁内零 UI）。
-        if (out_no_space != nullptr) *out_no_space = true;
-        VIRTBAG_LOG("original bag unequip reject no space bag=%d item=%p", bag_index, item);
-        return true;
-    }
-    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-    int payload_size = 0;
-    if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
-        VIRTBAG_LOG("original bag unequip serialize failed bag=%d", bag_index);
-        return false;  // 序列化失败极罕见：交原版，宁可原版语义也不凭空丢
-    }
-    virtual_bag::Item& descriptor = runtime_state().objects.bag.items[adopt_bag][adopt_slot];
-    descriptor.payload = payload;
-    descriptor.payload_size = payload_size;
-    (void)read_item_category(item, &descriptor.category);
-    descriptor.count = 1;
-    uint32_t adopted_handle = 0;
-    if (ownership::allocate(&runtime_state().objects.ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
-        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = adopted_handle;
-    } else {
-        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
-        VIRTBAG_LOG("original bag unequip ledger exhausted bag=%d", bag_index);
-    }
-    if (!module_object_generation_advance_locked(
-            adopt_bag, adopt_slot, "original bag unequip adopt")) {
-        VIRTBAG_LOG("original bag unequip adopt blocked by active object bag=%d slot=%d",
-                    adopt_bag, adopt_slot);
-        return false;
-    }
-    // Clear the original bag row before rebinding ownership. If the clear
-    // fails, the game-owned table must not keep pointing at a provider-owned
-    // object; abort before changing handle ownership.
-    if (!qol::contracts::succeeded(
-            runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr))) {
-        descriptor = virtual_bag::Item{};
-        if (adopted_handle != 0) ownership::release(&runtime_state().objects.ownership_ledger, adopted_handle);
-        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
-        VIRTBAG_LOG("original bag unequip->extension clear failed bag=%d slot=%d",
-                    bag_index, adopt_slot);
-        return false;
-    }
-    if (!extension_bag_rebind_item_handle(item)) {
-        descriptor = virtual_bag::Item{};
-        if (adopted_handle != 0) ownership::release(&runtime_state().objects.ownership_ledger, adopted_handle);
-        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
-        (void)runtime_state().host.write_port->ui.set_original_bag_item(bag_index, item);
-        VIRTBAG_LOG("original bag unequip handle registration failed bag=%d slot=%d",
-                    adopt_bag, adopt_slot);
-        return false;
-    }
-    runtime_state().objects.module_objects[adopt_bag][adopt_slot] = item;
-    runtime_state().objects.module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
-    runtime_state().objects.module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
-    extension_bag_mark_dirty_locked();
-    persist_state_locked();
-    extension_description_set_off();
-    clear_original_desc_locked();
-    if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == adopt_bag) {
-        refresh_module_item_area_locked(adopt_bag);
-    } else {
-        virtual_bag_call_original_refresh_item_area_with_guard();
-    }
-    extension_refresh_bag_area();
-    VIRTBAG_LOG("original bag unequip->extension bag=%d dst=%d/%d item=%p", bag_index,
-                adopt_bag, adopt_slot, item);
+    // The EB bag is virtual; never hand it to the original backup path.
     return true;
 }
