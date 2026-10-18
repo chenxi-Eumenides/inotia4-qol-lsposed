@@ -21,6 +21,9 @@ void draw_tab_buttons_in_frame_locked() {
         }
         return;
     }
+    // Store owns its own tab column. The equip-page tab controls stay mounted but
+    // must not be drawn over the store, otherwise two EB tab columns appear.
+    if (runtime_state().store.view_installed) return;
     const bool can_draw_original_button = extension_bag_ui_can_draw();
     // 标签挂袋容器（与原版 6 袋标签同父）：比对基准同步为袋容器句柄。
     void* current_bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);

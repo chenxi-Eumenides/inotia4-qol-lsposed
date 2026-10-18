@@ -126,8 +126,11 @@ void store_refresh_projection_locked() {
             const uint32_t descriptor_count =
                 static_cast<uint32_t>(runtime_state().objects.bag.items[
                     runtime_state().store.view_bag][slot].count);
-            if (descriptor_count > 0 &&
-                virtual_bag_effective_count(expected, descriptor_count) != descriptor_count) {
+            if (descriptor_count > 0) {
+                // UIStore_ButtonSellExe reads the raw native count, not the EB
+                // descriptor fallback. Always write the descriptor count here;
+                // otherwise a stack is treated as count=1 and sells without the
+                // original quantity dialog.
                 (void)virtual_bag_write_effective(expected, descriptor_count);
             }
         }
