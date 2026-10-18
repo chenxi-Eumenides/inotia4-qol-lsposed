@@ -391,6 +391,7 @@ QolResult show_text_popup(int32_t text_id) {
 
 QolResult child_count(QolUiHandle control, uint32_t* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
+    if (!game_memory_accessible(control, CO_SIZE, 'r')) return not_ready();
     if (fn_ctrl_get_count == nullptr) return not_ready();
     *out = fn_ctrl_get_count(control);
     return contracts::ok();
@@ -399,6 +400,7 @@ QolResult child_count(QolUiHandle control, uint32_t* out) {
 QolResult child_at(QolUiHandle control, uint32_t index, QolUiHandle* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
     *out = nullptr;
+    if (!game_memory_accessible(control, CO_SIZE, 'r')) return not_ready();
     if (fn_ctrl_get_child == nullptr) return not_ready();
     *out = fn_ctrl_get_child(control, index);
     return *out == nullptr ? not_ready() : contracts::ok();
