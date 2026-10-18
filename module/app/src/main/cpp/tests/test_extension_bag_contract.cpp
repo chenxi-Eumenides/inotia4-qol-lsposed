@@ -267,7 +267,7 @@ void test_extension_bag_claim_manifest_source_contract() {
         ++resource_count;
         ++position;
     }
-    CHECK(resource_count == 10);
+    CHECK(resource_count == 17);
 
     const size_t desc_slots = claims.find("kEbS1DescSlots, kEbS1DescSlots");
     const size_t desc_gate = claims.find("\"patch:P_EXT_DESC_OPEN_GATE\"");
@@ -275,9 +275,14 @@ void test_extension_bag_claim_manifest_source_contract() {
           desc_slots < desc_gate);
     CHECK(claims.find("kEbDescSlotsOps") != std::string::npos);
     CHECK(claims.find("reinterpret_cast<void*>(&make_desc_equip_gate)") != std::string::npos);
-    CHECK(claims.find("kEbP3StorePopup") == std::string::npos);
+    CHECK(claims.find("kEbM2StoreSellItem") != std::string::npos);
+    CHECK(claims.find("kEbP3StorePopup") != std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_STORE_DESC\"") != std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_STORE_DRAW_END\"") != std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_STORE_BAG_DRAW\"") != std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_STORE_BUY_GATE_1\"") != std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_STORE_BUY_GATE_2\"") != std::string::npos);
     CHECK(claims.find("kEbP4MixPopup") == std::string::npos);
-    CHECK(claims.find("\"patch:P_EXT_STORE_") == std::string::npos);
     CHECK(claims.find("\"patch:P_EXT_MIX_") == std::string::npos);
 }
 
