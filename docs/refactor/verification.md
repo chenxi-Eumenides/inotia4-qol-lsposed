@@ -148,6 +148,7 @@
 - monster v31 当前模块 SHA `e4578153818c…` 上，slot0 rules Immediate 写后 sidecar 改变而 dat 不变；force-stop/relaunch 后 slot0 配置恢复，slot2 默认配置与 sidecar 不变，回 slot0 自定义配置仍恢复。全局 autosell 关闭时库存不变；开启后 scan 启动，关闭后 task removed。
 - ITM-16 mapping-fixed build 的真机子项：direct API bag6 slot2 price2229、bag7 slot0 price11 均 done，保存/重进后EB槽为空；原版 bag0对照 price14 done；autosell特殊背包规则命中 bag6 slot9，诊断 `decision=match`、`sell_status=ok`，`sold+1/failed+0`，保存/重进后槽为空。autosell config immediate per-slot 写、进程重启恢复、slot2隔离也通过。
 - **EB UI 卡中止/延期**：用户报告无法进入扩展袋；进入商店页时 SIGSEGV。tombstone 符号化栈为 `LINKEDLISTITEM_getData`→`UIEquip_DrawInvenBag`→EB `store_draw_inven_bag_group_wrapper`→`Scene_Draw_POPUP_SC_STORE`，登记 `EB-01`。用户明确要求等扩展背包专项审阅后整体检查修复；VM-17/18及所有EB UI真机测试停止，P4/VM-44整体维持 `NOT_ACCEPTED`，P5不启动。
+- **extension_bag 专项审阅（2026-10-18）**：静态审计去重后 39 条 findings（P1 8、P2 25、P3/观察 6）；P1/P2 除 A-01（ITM-15 设备取证）与 D-03（Host SDK 身份接口）外已修复并提交（`0df29b1b`…`b208c15a`）。Host 146/146、`check_arch` 全绿、路由 147 零漂移、`build-debug.sh` 成功（APK `output/inotia4_qol_lsposed_debug_2610181337_4a8e48f41472.apk`，SHA-256 `4a8e48f41472…`）。设备项 FIX-07、C1-01、D-01、D-03、A-01 未执行，EB-01 用户确认已修复但未复核；故 VM-17/18、VM-44 及所有 EB UI 真机卡仍维持 `NOT_ACCEPTED`，不以 Host/静态结果替代。登记见 `docs/refactor/audits/plugin-audit/extension-bag-20261018/verification-log.md`。
 - 仍缺真实 Provider request 并发/注销durable drain、无session pending覆盖已有section直接测试、load错误和跨槽竞态设备证据；不宣称 fake callback 测试证明真实 Provider 并发。
 
 > **VM-D1 状态**：D1 收尾真机卡，本轮未执行设备操作，结论待填 `PASS`/`NOT_ACCEPTED`；

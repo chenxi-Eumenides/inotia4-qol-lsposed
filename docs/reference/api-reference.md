@@ -943,7 +943,7 @@
 
 ### 4.1 背包读 inventory
 
-> **扩展逻辑袋并入（v0.6.16）**：`extension_bag.extended_bag=true` 且处于 world 时，全部背包读端点自动并入扩展逻辑袋 `6..10`（schema 与原版袋一致：`bag/items/capacity/slot_count`，物品项为 `slot/category/count`）；`false` 或非 world 时仅返回原版 `0..5`。原型阶段容量固定 `16/8/4/0/0`；扩展物品不进入原版 `g_inven`（模块自持）。原版第 6 袋（索引 `5`，任务物品专用袋）不属于扩展域。
+> **扩展逻辑袋并入（v0.6.16）**：`extension_bag.extended_bag=true` 且处于 world 时，全部背包读端点自动并入扩展逻辑袋 `6..10`（schema 与原版袋一致：`bag/items/capacity/slot_count`，物品项为 `slot/category/count`）；`false` 或非 world 时仅返回原版 `0..5`。扩展袋容量按各袋已装备的 BagType 派生（0=未装备→0，1..4→4/8/12/16），不同袋可不同；扩展物品不进入原版 `g_inven`（模块自持）。原版第 6 袋（索引 `5`，任务物品专用袋）不属于扩展域。
 
 #### 背包复合
 
@@ -2175,7 +2175,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **用途**：扩展背包内部状态全量读取（使能/注入/控件旗标、视图模式、全部物品、pending 事务与恢复动作预测）。
 
-**返回格式**：`{ "enabled": bool, "injected": bool, "extension_tab_button": bool, "inventory_frame_active": bool, "recovery_action": "none|complete|rollback", "state": { "mode": "original|module|exiting_module", "selected": -1|0..4, "items": [[{slot,category,count,payload(base64)}]], "pending": {...} } }`；非 world 态 `state:{}`。
+**返回格式**：`{ "enabled": bool, "injected": bool, "save_panel_hook": bool, "extension_tab_button": bool, "inventory_frame_active": bool, "recovery_action": "none|complete|rollback", "state": { "mode": "original|module|exiting_module", "selected": -1|0..4, "items": [[{slot,category,count,payload(base64)}]], "pending": {...} } }`；非 world 态 `state:{}`。
 
 `POST /api/debug/extension_bag/enter_view`　body `{ "bag": 6..10 }`
 
@@ -2193,13 +2193,13 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **用途**：选中扩展物品并返回信息（含完整 payload）；空槽 → `{"ok":true,"item":null}`。错误：`bag not selected` / `not in extension view`。
 
-`POST /api/debug/extension_bag/equip`　body `{ "index": 0..4, "bagType": N }`
+`POST /api/debug/extension_bag/equip`　body `{ "index": 0..4, "bagType": 1..4 }`
 
-**用途**：开发期测试注入：设置扩展袋装备类型（`set_test_equipped`）。
+**用途**：开发期测试注入：设置扩展袋装备类型（`set_test_equipped`）。`index`/`bagType` 必填；缺失、非 int32、越界返回 400。
 
 `POST /api/debug/extension_bag/item`　body `{ "index": 0..4, "slot": 0..15, "category": N, "count": N }`
 
-**用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。
+**用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。四个字段均必填；缺失、非 int32、`index`/`slot`/`category`/`count` 越界返回 400。
 
 ---
 
@@ -2236,7 +2236,9 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 > HTTP 线程只把动作入队到游戏主线程帧任务，立即返回 `{"ok":true}`；UI/面板的 open/close/inject
 > 与快照一律在游戏线程执行，不返回同步业务结果。
 
-`POST /api/debug/extension_bag/unequip`
+`POST /api/debug/extension_bag/unequip`　body `{ "bag": 6..10 }`
+
+**用途**：卸下指定扩展逻辑袋。`bag` 必填；缺失或超出 6..10 返回 400 `bag required (6-10)`。业务错误：`bag not empty` / `no space` / `persist failed` / `unequip failed` / `bag not equipped` / `extension bag disabled` / `not in game`。
 
 ---
 
