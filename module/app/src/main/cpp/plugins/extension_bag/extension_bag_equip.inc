@@ -391,18 +391,30 @@ bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, in
 
 
 void reset_extension_desc_item_hooks_locked() {
-    if (g_sdk == nullptr || g_sdk->desc_button.unbind == nullptr) return;
+    const auto* api = qol::contracts::desc_hook_v2_if_available(g_sdk);
+    if (api == nullptr) {
+        g_extension_desc_item_bound.fill(false);
+        g_extension_desc_item_ids.fill(0);
+        return;
+    }
     for (size_t index = 0; index < g_extension_desc_item_bound.size(); ++index) {
-        if (!g_extension_desc_item_bound[index]) continue;
-        const QolResult result = g_sdk->desc_button.unbind(static_cast<uint32_t>(index));
-        if (!qol::contracts::succeeded(result)) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag,
-                         "extension desc unbind failed index=%d code=%d",
-                         static_cast<int>(index), result.code);
+        const uint64_t id = g_extension_desc_item_ids[index];
+        if (!g_extension_desc_item_bound[index] || id == 0) {
+            g_extension_desc_item_bound[index] = false;
+            g_extension_desc_item_ids[index] = 0;
             continue;
         }
+        const QolResult result = api->unbind(id);
+        if (!qol::contracts::succeeded(result) && result.code != kQolErrNotFound &&
+            result.code != kQolErrNotReady) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension desc hook unbind failed index=%d id=%llu reason=host_unbind_error code=%d message=%.*s",
+                         static_cast<int>(index), static_cast<unsigned long long>(id), result.code,
+                         static_cast<int>(result.message_len),
+                         result.message != nullptr ? result.message : "");
+        }
         g_extension_desc_item_bound[index] = false;
-        g_extension_desc_item_originals[index] = nullptr;
+        g_extension_desc_item_ids[index] = 0;
     }
 }
 
@@ -428,17 +440,17 @@ constexpr std::array<qol::contracts::QolDescButtonProc, 11> kDescButtonProcs = {
     &extension_desc_item_execute_10,
 };
 
-bool extension_desc_original_matches(void* original, const char* symbol) {
-    if (g_sdk == nullptr || g_sdk->desc_button.original_matches == nullptr ||
-        original == nullptr || symbol == nullptr) return false;
+bool extension_desc_original_matches(uint64_t id, const char* symbol) {
+    const auto* api = qol::contracts::desc_hook_v2_if_available(g_sdk);
+    if (api == nullptr || id == 0 || symbol == nullptr) return false;
     int32_t match = 0;
-    return qol::contracts::succeeded(
-               g_sdk->desc_button.original_matches(original, symbol, &match)) && match != 0;
+    return qol::contracts::succeeded(api->original_matches(id, symbol, &match)) && match != 0;
 }
 
-bool extension_desc_call_original(void* original, void* button) {
-    return g_sdk != nullptr && g_sdk->desc_button.call_original != nullptr &&
-           qol::contracts::succeeded(g_sdk->desc_button.call_original(original, button));
+bool extension_desc_call_original(uint64_t id, void* button) {
+    const auto* api = qol::contracts::desc_hook_v2_if_available(g_sdk);
+    return api != nullptr && id != 0 && button != nullptr &&
+           qol::contracts::succeeded(api->call_original(id, button));
 }
 
 void extension_destroy_ok(void*);
@@ -759,30 +771,123 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 }
 
 void install_extension_desc_item_hooks_locked(void* item) {
-    if (item == nullptr || g_sdk == nullptr || g_sdk->desc_button.bind == nullptr) return;
+    if (item == nullptr) return;
+    static bool unavailable_logged = false;
+    const auto* api = qol::contracts::desc_hook_v2_if_available(g_sdk);
+    if (api == nullptr) {
+        if (!unavailable_logged) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension desc hook skipped reason=desc hook v2 unavailable");
+            unavailable_logged = true;
+        }
+        return;
+    }
+    unavailable_logged = false;
+
+    std::array<void*, 11> resolved_execute_slots{};
+    size_t resolved_execute_slot_count = 0;
     for (size_t index = 0; index < g_extension_desc_item_bound.size(); ++index) {
         if (index == 2) continue;
-        void* original = nullptr;
-        const QolResult result = g_sdk->desc_button.bind(
-            static_cast<uint32_t>(index), kDescButtonProcs[index], &original);
-        if (!qol::contracts::succeeded(result) || original == nullptr) {
+        if (g_extension_desc_item_bound[index] || g_extension_desc_item_ids[index] != 0) {
             QOL_LOG_DEBUG(QolDomain::kExtensionBag,
-                          "extension desc hook bind skip index=%d code=%d",
-                          static_cast<int>(index), result.code);
+                          "extension desc hook skip index=%d reason=already_bound id=%llu",
+                          static_cast<int>(index),
+                          static_cast<unsigned long long>(g_extension_desc_item_ids[index]));
             continue;
         }
-        g_extension_desc_item_originals[index] = original;
+
+        qol::contracts::QolDescButtonTarget target{};
+        const QolResult resolve_result = api->resolve(static_cast<uint32_t>(index), &target);
+        if (!qol::contracts::succeeded(resolve_result)) {
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag,
+                          "extension desc hook resolve skip index=%d code=%d",
+                          static_cast<int>(index), resolve_result.code);
+            continue;
+        }
+        if (target.execute_slot == nullptr) {
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag,
+                          "extension desc hook resolve skip index=%d reason=null_execute_slot",
+                          static_cast<int>(index));
+            continue;
+        }
+
+        bool duplicate_execute_slot = false;
+        for (size_t seen = 0; seen < resolved_execute_slot_count; ++seen) {
+            if (resolved_execute_slots[seen] == target.execute_slot) {
+                duplicate_execute_slot = true;
+                break;
+            }
+        }
+        if (duplicate_execute_slot) {
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag,
+                          "extension desc hook resolve skip index=%d reason=duplicate_execute_slot execute=%p",
+                          static_cast<int>(index), target.execute_slot);
+            continue;
+        }
+
+        uint64_t id = 0;
+        const QolResult bind_result = api->bind(static_cast<uint32_t>(index), &target,
+                                                 kDescButtonProcs[index], &id);
+        if (!qol::contracts::succeeded(bind_result) || id == 0) {
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag,
+                          "extension desc hook bind skip index=%d code=%d id=%llu",
+                          static_cast<int>(index), bind_result.code,
+                          static_cast<unsigned long long>(id));
+            continue;
+        }
+        // only successful bindings occupy an execute slot for dedupe; a failed
+        // bind must not hide a later alias that can still be installed.
+        resolved_execute_slots[resolved_execute_slot_count++] = target.execute_slot;
+
+        int32_t equip_match = 0;
+        int32_t unequip_match = 0;
+        const QolResult equip_result = api->original_matches(id, "desc.button.equip", &equip_match);
+        const QolResult unequip_result =
+            api->original_matches(id, "desc.button.unequip", &unequip_match);
+        if (!qol::contracts::succeeded(equip_result) ||
+            !qol::contracts::succeeded(unequip_result)) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension desc hook classify failed index=%d id=%llu equip_code=%d unequip_code=%d reason=original_matches_error",
+                         static_cast<int>(index), static_cast<unsigned long long>(id),
+                         equip_result.code, unequip_result.code);
+            const QolResult unbind_result = api->unbind(id);
+            if (!qol::contracts::succeeded(unbind_result)) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "extension desc hook cleanup failed index=%d id=%llu reason=host_unbind_error code=%d",
+                             static_cast<int>(index), static_cast<unsigned long long>(id),
+                             unbind_result.code);
+                if (unbind_result.code != kQolErrNotFound &&
+                    unbind_result.code != kQolErrNotReady &&
+                    unbind_result.code != kQolErrConflict) {
+                    g_extension_desc_item_ids[index] = id;
+                    g_extension_desc_item_bound[index] = true;
+                }
+            }
+            continue;
+        }
+        if (equip_match != 0 || unequip_match != 0) {
+            const QolResult unbind_result = api->unbind(id);
+            if (!qol::contracts::succeeded(unbind_result)) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "extension desc hook equip/unequip unbind failed index=%d id=%llu equip=%d unequip=%d reason=host_unbind_error code=%d",
+                             static_cast<int>(index), static_cast<unsigned long long>(id),
+                             equip_match, unequip_match, unbind_result.code);
+                if (unbind_result.code != kQolErrNotFound &&
+                    unbind_result.code != kQolErrNotReady &&
+                    unbind_result.code != kQolErrConflict) {
+                    g_extension_desc_item_ids[index] = id;
+                    g_extension_desc_item_bound[index] = true;
+                }
+            }
+            continue;
+        }
+
+        g_extension_desc_item_ids[index] = id;
         g_extension_desc_item_bound[index] = true;
-        if (extension_desc_original_matches(original, "desc.button.equip") ||
-            extension_desc_original_matches(original, "desc.button.unequip")) {
-            (void)g_sdk->desc_button.unbind(static_cast<uint32_t>(index));
-            g_extension_desc_item_originals[index] = nullptr;
-            g_extension_desc_item_bound[index] = false;
-            continue;
-        }
         QOL_LOG_DEBUG(QolDomain::kExtensionBag,
-                      "extension desc hook installed index=%d original=%p",
-                      static_cast<int>(index), original);
+                      "extension desc hook installed index=%d id=%llu button=%p data=%p execute_slot=%p original=%p",
+                      static_cast<int>(index), static_cast<unsigned long long>(id),
+                      target.button, target.data, target.execute_slot, target.original_proc);
     }
 }
 
@@ -1036,8 +1141,22 @@ bool extension_use_mercenary_seal() {
 void extension_desc_item_execute_at(size_t index, void* button) {
     if (index >= g_extension_desc_item_bound.size() ||
         !g_extension_desc_item_bound[index] || button == nullptr) return;
+    const uint64_t id = g_extension_desc_item_ids[index];
+    const auto* api = qol::contracts::desc_hook_v2_if_available(g_sdk);
+    if (api == nullptr || id == 0 || button == nullptr) return;
+    qol::contracts::QolDescButtonTarget current{};
+    int32_t matches = 0;
+    const QolResult validate_result = api->validate(id, button, &current, &matches);
+    if (!qol::contracts::succeeded(validate_result) || matches == 0) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "extension desc hook stale index=%d id=%llu button=%p current_button=%p data=%p execute_slot=%p code=%d matches=%d reason=identity_validation_failed",
+                     static_cast<int>(index), static_cast<unsigned long long>(id), button,
+                     current.button, current.data, current.execute_slot,
+                     validate_result.code, matches);
+        return;
+    }
     const int hook_index = static_cast<int>(index);
-    void* original = g_extension_desc_item_originals[index];
+    void* original = current.original_proc;
     void* item = nullptr;
     int item_bag = -1;
     int item_slot = -1;
@@ -1047,14 +1166,13 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         item_bag = g_extension_desc_item_bag;
         item_slot = g_extension_desc_item_slot;
     }
-    if (original == nullptr) return;
     VIRTBAG_LOG("extension desc execute index=%d original=%p bag=%d slot=%d",
                 hook_index, original, item_bag, item_slot);
 
     const bool direct_use = extension_desc_original_matches(
-        original, "desc.button.use");
+        id, "desc.button.use");
     const bool confirm_use = extension_desc_original_matches(
-        original, "desc.button.use_after_confirm");
+        id, "desc.button.use_after_confirm");
     if (direct_use || confirm_use) {
         bool used = false;
         bool current_item = false;
@@ -1072,7 +1190,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
             extension_bag_write_api()->equipment.use_item == nullptr || !current_item) {
             // 扩展侧没有完整接管前置条件时，direct/confirm 都必须回退原版按钮，
             // 不能清状态或吞掉原版确认弹窗及其 OK 回调。
-            (void)extension_desc_call_original(original, button);
+            (void)extension_desc_call_original(id, button);
             return;
         }
         if (current_item && leader != nullptr && extension_bag_write_api() != nullptr &&
@@ -1085,7 +1203,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
                 // Native Hook 接管，按回调传入的物品身份分流；此处只让原版
                 // 按钮创建确认弹窗。弹窗创建/关闭不持有背包锁。
                 extension_description_set_off();
-                (void)extension_desc_call_original(original, button);
+                (void)extension_desc_call_original(id, button);
                 return;
             }
             int use_result = 0;
@@ -1112,10 +1230,10 @@ void extension_desc_item_execute_at(size_t index, void* button) {
     // 接管并走 canonical（下方 item-count facade）；其余 proc 行为不变（非目标
     // proc 直通 call_orig）。
     const bool direct_sell = extension_desc_original_matches(
-        original, "desc.button.sell");
+        id, "desc.button.sell");
     const bool modified_destroy_sell =
-        extension_desc_original_matches(original, "desc.button.destroy") ||
-        extension_desc_original_matches(original, "desc.button.destroy_ok");
+        extension_desc_original_matches(id, "desc.button.destroy") ||
+        extension_desc_original_matches(id, "desc.button.destroy_ok");
     if (direct_sell || modified_destroy_sell) {
         VIRTBAG_LOG("extension sell button matched source=%s bag=%d slot=%d item=%p",
                     modified_destroy_sell ? "destroy" : "store",
@@ -1221,7 +1339,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         VIRTBAG_LOG("extension desc execute unmatched index=%d original=%p bag=%d slot=%d",
                     hook_index, original, item_bag, item_slot);
     }
-    (void)extension_desc_call_original(original, button);
+    (void)extension_desc_call_original(id, button);
 
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (item == nullptr || !virtual_bag::valid_index(item_bag) ||

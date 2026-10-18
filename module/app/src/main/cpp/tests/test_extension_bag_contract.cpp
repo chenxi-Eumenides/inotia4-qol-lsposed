@@ -20,6 +20,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <type_traits>
 
@@ -205,6 +207,33 @@ void test_contract_field_counts() {
     CHECK(static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kRejected) == 2);
 }
 
+void test_extension_desc_hook_v2_source_contract() {
+    std::ifstream source;
+    const std::string test_file = __FILE__;
+    const size_t separator = test_file.find_last_of("/\\");
+    if (separator != std::string::npos) {
+        source.open(test_file.substr(0, separator + 1) +
+                    "../plugins/extension_bag/extension_bag_equip.inc");
+    }
+    if (!source) {
+        source.clear();
+        source.open("../plugins/extension_bag/extension_bag_equip.inc");
+    }
+    if (!source) {
+        source.clear();
+        source.open("../../plugins/extension_bag/extension_bag_equip.inc");
+    }
+    CHECK(source.good());
+    if (!source) return;
+
+    const std::string contents((std::istreambuf_iterator<char>(source)),
+                               std::istreambuf_iterator<char>());
+    CHECK(contents.find("desc_hook_v2_if_available") != std::string::npos);
+    CHECK(contents.find("g_extension_desc_item_ids") != std::string::npos);
+    CHECK(contents.find("g_extension_desc_item_originals") == std::string::npos);
+    CHECK(contents.find("g_sdk->desc_button.bind") == std::string::npos);
+}
+
 void test_extension_bag_json_integer_fields() {
     using qol::features::extension_bag::detail::parse_json_int32_field;
     int32_t value = 77;
@@ -296,6 +325,7 @@ void test_move_merge_ptr_slot() {
 
 int main() {
     test_contract_field_counts();
+    test_extension_desc_hook_v2_source_contract();
     test_extension_bag_json_integer_fields();
     test_extension_bag_top_level_ok_boolean();
     test_patch_sites_resolve();

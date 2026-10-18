@@ -169,7 +169,7 @@ uint64_t g_extension_tab_generation = 0;
 int g_pending_extension_tab = -1;
 uint64_t g_pending_extension_tab_generation = 0;
 int g_extension_desc_unequip_bag = -1;
-std::array<void*, 11> g_extension_desc_item_originals{};
+std::array<uint64_t, 11> g_extension_desc_item_ids{};
 std::array<bool, 11> g_extension_desc_item_bound{};
 void* g_extension_desc_item = nullptr;
 int g_extension_desc_item_bag = -1;
