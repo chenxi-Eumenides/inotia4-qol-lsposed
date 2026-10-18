@@ -2,7 +2,9 @@
 
 ## 摘要
 
-功能插件：提供 5 个扩展逻辑背包（袋号 `6..10`）、三宿主扩展页签（背包装备页/商店/合成器）、投影式拖放与存档 sidecar。对外发布 `extension_bag` 能力（API 3.0；3.1 尾追加 `remove_for_sale`）与 `inventory.merge_projection`；注册 8 条调试 HTTP 端点、3 个 port、1 个中立 inventory provider。
+功能插件：提供 5 个扩展逻辑背包（袋号 `6..10`）、装备页扩展页签、投影式拖放与存档 sidecar。对外发布 `extension_bag` 能力（API 3.0；3.1 尾追加 `remove_for_sale`）与 `inventory.merge_projection`；注册 8 条调试 HTTP 端点、3 个 port、1 个中立 inventory provider。
+
+当前为 **core-only 范围**：只注册装备页宿主与核心绘制/拖放/存档门禁；商店、合成器、详情按钮宿主实现仍保留在 `ui/`，但对应资源 claim 未注册，后续恢复时再加回 claim。
 
 除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -13,7 +15,7 @@
 - optional：`inventory.refresh`、`move_merge.control`、`http.registry`、`http.dispatch`（`plugin.cpp:197-208`）。
 - provides：`extension_bag`（API major 3、minor 0；sale removal 3.1）、`inventory.merge_projection`（`plugin.cpp:155-170`；`contracts/extension_bag.h:25-30`）。
 - ports：write port、character extras、inventory extras（`plugin.cpp:210-220,823-824`）。
-- resources：`extension_bag_claims()` 声明表（`plugin.cpp:151-153,808-816`；`plugins/extension_bag/extension_bag_claims.inc:234`）。
+- resources：`assembly/claims.cpp` 的 `extension_bag_claims()`。core-only 当前 8 条：`hook:SAVE_SaveInventory`、`own:popup.inventory`、`own:popup.save_panel`、`P_EXT_INVEN_ITEM_DRAW`、`P_EXT_INVEN_BAG_DRAW`、`P_EXT_INVEN_DRAW_END`、`P_EXT_DROP_GATE`、`P_EXT_DRAW_GATE`。商店/合成/详情 claim 已移除但实现保留。
 - JNI：descriptor `jni_count=0`；两个导出由全局 bridge 管理（`plugin.cpp:852-880`；`bridge/native/gamebridge.cpp:226`；`bridge/native/gamebridge_domain_operations.cpp:458`）。
 - feature：`extension_bag.extended_bag`，Gameplay/Toggle，`default_enabled=1`，显示优先级 -2，回调 `extension_bag_toggle`（`plugin.cpp:846-850`）。
 
@@ -66,12 +68,12 @@
 
 ## UI 宿主与输入
 
-- 三宿主：背包装备页袋容器、商店袋列、合成器袋列；页签安装以 `g_virtual_bag_enabled` + session admission 为门控（`extension_bag_render.inc:1-20`；`extension_bag_store.inc`；`extension_bag_mix.inc`）。
-- 页签控件 user type 2、data 16 字节、首字段指向物品对象；页签物品按类型复用/延迟释放（`extension_bag_runtime.inc:130-256`；`extension_bag_tabs.inc`）。
-- 投影：draw wrapper 持锁、original-first；扩展视图下临时改原版当前袋为 sentinel，绘制后恢复（`extension_bag_render.inc:145-204,816`）。
-- 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving（`extension_bag_runtime.inc:13-108`；`extension_bag_input.inc:31-99`）。
-- 详情按钮：经 Host SDK v1.27 `QolDescHookApi` 按 panel index `resolve` 出 button/data/execute-slot，按 execute-slot 去重后 `bind`；回调先 `validate` 绑定 id，身份不符直接 stale 返回；确认使用/出售/销毁在详情回调分流（`extension_bag_equip.inc:393-450,771-862,1139-1160`）。
-- 几何：网格左上 `(761,160)`、4×4、单格 74×74、步距 83×83；页签矩形 57×57、纵向步距 70（`extension_bag_geometry.cpp:15-35`；`extension_bag_runtime.inc:119-129`）。
+- 当前只注册背包装备页宿主（`runtime/projection.cpp`、`runtime/tabs_ui.cpp`、`ui/equip.cpp`）；页签安装以 `runtime_state().enabled` + session admission 为门控。商店/合成器宿主代码保留在 `ui/store_*`、`ui/mix.cpp`，但 claim 未注册。
+- 页签控件 user type 2、data 16 字节、首字段指向物品对象；页签物品按类型复用/延迟释放（`runtime/tabs_ui.cpp`、`runtime/tabs.cpp`）。
+- 投影：draw wrapper 持锁、original-first；扩展视图下临时改原版当前袋为 sentinel，绘制后恢复（`runtime/render.cpp`、`runtime/projection.cpp`）。
+- 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving（`runtime/tabs_ui.cpp`、`runtime/input.cpp`）。
+- 详情按钮：V2 `QolDescHookApi` 实现在 `ui/detail_hooks.cpp`，确认使用/出售/销毁在 `ui/detail_actions.cpp`；core-only 下未注册 `P_EXT_DESC_OPEN_GATE`/`desc_button_execute_slots`，因此不会安装详情 hook。
+- 几何：网格左上 `(761,160)`、4×4、单格 74×74、步距 83×83；页签矩形 57×57、纵向步距 70（`extension_bag_geometry.cpp`、`runtime/tabs_ui.cpp`）。
 
 ## 消费者与职责边界
 
@@ -87,25 +89,32 @@
 
 ## 文件地图
 
-| 文件 | 职责 |
+| 路径 | 职责 |
 |---|---|
-| `plugin.cpp/.h` | descriptor、HTTP 校验/票据、装配与生命周期 |
-| `plugin.cpp` + `plugin.h` detail parser | 顶层 JSON int32/boolean 解析 |
-| `routes.inc` | 8 条路由声明 |
-| `extension_bag_api_impl.inc` | 调试能力实现 |
-| `extension_bag_runtime.inc` | 页签/点击/事务恢复/状态操作 |
-| `extension_bag_render.inc` | 投影安装/恢复、draw-end |
-| `extension_bag_input.inc` | moving 清理与 release 等价清理 |
-| `extension_bag_tabs.inc` | 页签物品对象缓存 |
-| `extension_bag_transaction.inc` | ext↔orig、ext↔ext 事务 |
-| `extension_bag_equip.inc` | 装备/卸下/详情/佣兵徽章 |
-| `extension_bag_store.inc` | 商店页签、买入/卖出 |
-| `extension_bag_mix.inc` | 合成器页签/投影 |
-| `extension_bag_ownership.inc` | ledger/custody/延迟释放 |
-| `extension_bag_persistence.cpp` | slot_data consumer |
+| `plugin.cpp/.h` | descriptor、装配与生命周期；HTTP 参数/票据在 `http/` |
+| `runtime/state.h/.cpp` | `ExtensionBagRuntimeState`、锁、共享状态、thread_local |
+| `runtime/access.cpp` | 游戏读写/物品/世界/角色/库存 accessor |
+| `runtime/tabs_ui.cpp` | 页签控件/点击/拖拽 UI/详情 hook 入口 |
+| `runtime/orchestrator.cpp` | 进入/退出、投影恢复、pending 事务、teardown |
+| `runtime/render.cpp` | 绘制 wrapper、draw-end、投影绘制 |
+| `runtime/projection.cpp` | 投影安装/恢复/同步/原版袋读写 |
+| `runtime/lifecycle.cpp` | 生命周期、主菜单清理、事件入口 |
+| `runtime/ownership.cpp` | ledger/custody/deferred free |
+| `transaction/ext_orig.cpp` | 原版↔扩展移动与回滚 |
+| `transaction/ext_ext.cpp` | 扩展袋间移动/交换 |
+| `transaction/drop.cpp` | 落袋/投影拖放路由 |
+| `ui/equip.cpp` | 装备/卸下/背包装备接管 |
+| `ui/detail_hooks.cpp` | V2 详情按钮绑定/校验（core-only 未注册） |
+| `ui/detail_actions.cpp` | 使用/出售/销毁/佣兵徽章（core-only 未注册） |
+| `ui/store_*.cpp` | 商店宿主（core-only 未注册） |
+| `ui/mix.cpp` | 合成器宿主（core-only 未注册） |
+| `public/*.cpp` | 对外 `virtual_bag_*` 包装/状态/数量/投影/出售/桥接 |
+| `api/*.cpp` | API 表、中立 provider、句柄、公开 wrapper |
+| `http/*` | JSON parser、路由表、query |
+| `persistence/persistence.cpp` | `save.slot_data` v4 consumer |
+| `assembly/claims.cpp` | 资源 claim 表（core-only 8 条） |
+| `assembly/move_merge_impl.cpp` | move-merge projection shim |
 | `model/*` | 纯状态、事务规则、JSON、payload、ledger |
-| `extension_bag_port.cpp` | API 表、中立 provider、句柄 |
-| `game_ui_virtbag.cpp` | 运行时共享状态、装备按钮、详情 hook 宿主 |
 
 ## Host 测试
 
