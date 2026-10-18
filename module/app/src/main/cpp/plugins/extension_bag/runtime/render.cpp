@@ -61,10 +61,10 @@ void draw_tab_buttons_in_frame_locked() {
                                              static_cast<int32_t>(ay + 5), 0, 1);
         } else if (equipped) {
             (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(ax + 5),
-                                             static_cast<int32_t>(ay + 5), 0, 0x28);
+                                             static_cast<int32_t>(ay + 5), 0, 1);
         } else {
             (void)extension_bag_ui_draw_part(0xf, 9, static_cast<int32_t>(ax + 5),
-                                             static_cast<int32_t>(ay + 5), 0, 0x28);
+                                             static_cast<int32_t>(ay + 5), 0, 1);
         }
     }
 }
