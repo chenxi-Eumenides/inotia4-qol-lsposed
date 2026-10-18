@@ -119,6 +119,18 @@ void store_refresh_projection_locked() {
         void* control = valid_child_locked(runtime_state().store.projected_item_root, slot);
         if (control == nullptr) continue;
         void* expected = module_item_locked(runtime_state().store.view_bag, slot);
+        if (expected != nullptr) {
+            // UIStore_ButtonSellExe reads the native count field to decide between
+            // the quantity dialog and a single-item YesNo. Keep the projected
+            // object's count in sync with the EB descriptor before the button runs.
+            const uint32_t descriptor_count =
+                static_cast<uint32_t>(runtime_state().objects.bag.items[
+                    runtime_state().store.view_bag][slot].count);
+            if (descriptor_count > 0 &&
+                virtual_bag_effective_count(expected, descriptor_count) != descriptor_count) {
+                (void)virtual_bag_write_effective(expected, descriptor_count);
+            }
+        }
         void* data = extension_bag_ui_data(control);
         void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
         if (current != expected) (void)extension_bag_ui_set_control_item(control, expected);
@@ -179,6 +191,12 @@ void store_install_module_view_locked(int bag) {
     runtime_state().store.view_bag = bag;
     runtime_state().store.view_installed = true;
     ++runtime_state().store.view_generation;
+    // Store view keeps both UIEquip and UIStore bag columns alive. Mask the
+    // original current bag for the whole view, not only around each draw, so
+    // the UIEquip column cannot keep a second highlight.
+    if (runtime_state().host.write_port->ui.set_current_bag != nullptr) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+    }
     store_request_item_refresh_locked();
     VIRTBAG_LOG("store view installed bag=%d window=%d capacity=%d", bag, original_bag,
                 runtime_state().objects.bag.capacities[bag]);
@@ -204,6 +222,11 @@ void store_restore_module_view_locked() {
                                                 (runtime_state().store.original_bag_size & kCapacityMask))) {
             VIRTBAG_LOG("store restore capacity failed window=%d", runtime_state().store.window_original_bag);
         }
+    }
+    const int restore_bag = runtime_state().store.window_original_bag;
+    if (restore_bag >= 0 && restore_bag < kNoOriginalBagSelected &&
+        runtime_state().host.write_port->ui.set_current_bag != nullptr) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(restore_bag);
     }
     runtime_state().store.original_size_word = 0;
     runtime_state().store.original_bag_size = 0;
