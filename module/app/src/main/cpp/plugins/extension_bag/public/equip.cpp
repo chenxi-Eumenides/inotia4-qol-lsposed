@@ -621,6 +621,8 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         return true;
     }
     // 放回原版背包（排除自身袋行，防再次落入容量归零行）。
+    qol::contracts::QolItemHandle source_handle{};
+    const bool source_handle_known = extension_bag_item_handle_for_pointer(item, &source_handle);
     int receiving_bag = -1;
     for (int bag = 0; bag < 5; ++bag) {
         if (bag == bag_index) continue;
@@ -635,9 +637,30 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
             VIRTBAG_LOG("original bag unequip->original bag clear failed bag=%d dst=%d item=%p",
                         bag_index, receiving_bag, item);
         }
-        // SaveItemOnEmpty may merge or replace the source object. The old
-        // game-owned handle must not survive into the next core.item snapshot.
-        (void)extension_bag_invalidate_game_item_handle(item);
+        // SaveItemOnEmpty may move the same object or merge/replace it. Invalidate
+        // the old game handle only when the source identity is no longer present
+        // in any physical bag slot; invalidating a live bag object breaks the
+        // next core.item snapshot.
+        bool source_still_present = false;
+        if (source_handle_known) {
+            for (int scan_bag = 0; scan_bag < 6 && !source_still_present; ++scan_bag) {
+                for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+                    qol::contracts::QolInventoryItemRef ref{};
+                    if (!qol::contracts::succeeded(
+                            runtime_state().host.item_facts->item_ref_at(scan_bag, slot, &ref))) {
+                        continue;
+                    }
+                    if (ref.item.slot == source_handle.slot &&
+                        ref.item.generation == source_handle.generation) {
+                        source_still_present = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (source_handle_known && !source_still_present) {
+            (void)extension_bag_invalidate_game_item_handle(item);
+        }
         extension_bag_mark_dirty_locked();
         persist_state_locked();
         extension_description_set_off();

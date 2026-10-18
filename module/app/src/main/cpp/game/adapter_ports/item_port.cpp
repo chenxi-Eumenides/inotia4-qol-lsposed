@@ -323,7 +323,21 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
                    contracts::kQolItemInventoryHasJewelAttributeType;
     const auto* option = *reinterpret_cast<const uint8_t* const*>(bytes + I_OPTION_LIST);
     out->fields |= contracts::kQolItemInventoryHasOptionCompleteness;
+    // A stale item can still be mapped while its option-list pointer points into
+    // a freed allocation. Validate every chain node before dereferencing it.
+    const auto option_readable = [](const uint8_t* node) {
+        return node == nullptr ||
+               game_memory_accessible(node, O_NEXT + sizeof(void*), 'r');
+    };
+    if (!option_readable(option)) {
+        out->fields |= contracts::kQolItemInventoryOptionsTruncated;
+        option = nullptr;
+    }
     while (option != nullptr && out->option_count < contracts::kQolItemInventoryOptionCapacity) {
+        if (!option_readable(option)) {
+            out->fields |= contracts::kQolItemInventoryOptionsTruncated;
+            break;
+        }
         const uint16_t index = *reinterpret_cast<const uint16_t*>(option + O_INDEX);
         out->options[out->option_count++] = contracts::QolItemInventoryOptionView{
             *reinterpret_cast<const int16_t*>(option + O_VALUE), index & 0x7F,
@@ -333,6 +347,10 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
             if (next != nullptr) {
                 out->fields |= contracts::kQolItemInventoryOptionsTruncated;
             }
+            break;
+        }
+        if (!option_readable(next)) {
+            out->fields |= contracts::kQolItemInventoryOptionsTruncated;
             break;
         }
         option = next;

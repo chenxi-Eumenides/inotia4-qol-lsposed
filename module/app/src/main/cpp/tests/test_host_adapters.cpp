@@ -219,6 +219,9 @@ int fake_find_save_slot(void*, int8_t* out_slot) {
 
 uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
 
+const void* g_test_extra_readable = nullptr;
+size_t g_test_extra_readable_size = 0;
+
 bool game_memory_accessible(const void* address, size_t size, char) {
     if (address == nullptr || size == 0) return false;
     const auto in_range = [&](const auto& storage) {
@@ -228,6 +231,12 @@ bool game_memory_accessible(const void* address, size_t size, char) {
                size <= storage.size() - (target - begin);
     };
     if (in_range(g_inventory_new_item) || in_range(g_inventory_physical_item)) return true;
+    if (g_test_extra_readable != nullptr) {
+        const uintptr_t begin = reinterpret_cast<uintptr_t>(g_test_extra_readable);
+        const uintptr_t target = reinterpret_cast<uintptr_t>(address);
+        if (target >= begin && target - begin <= g_test_extra_readable_size &&
+            size <= g_test_extra_readable_size - (target - begin)) return true;
+    }
     if (!g_move_merge_fake_memory_enabled) return false;
     return in_range(g_move_merge_fake_memory);
 }
@@ -591,6 +600,8 @@ void test_inventory_option_view_completeness(
     std::array<uint8_t, 0x200>& item) {
     std::array<FakeInventoryOptionNode,
                qol::contracts::kQolItemInventoryOptionCapacity + 1> nodes{};
+    g_test_extra_readable = nodes.data();
+    g_test_extra_readable_size = sizeof(nodes);
     constexpr uint32_t kOptionType = 3;
     const uint32_t lengths[] = {0, 31, 32, 33};
     for (const uint32_t length : lengths) {
@@ -623,6 +634,8 @@ void test_inventory_option_view_completeness(
     }
     const FakeInventoryOptionNode* empty = nullptr;
     std::memcpy(item.data() + I_OPTION_LIST, &empty, sizeof(empty));
+    g_test_extra_readable = nullptr;
+    g_test_extra_readable_size = 0;
 }
 
 void test_ui_result_snapshot_retry_does_not_repeat_write() {
