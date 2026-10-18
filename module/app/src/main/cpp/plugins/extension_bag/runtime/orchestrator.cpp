@@ -125,7 +125,11 @@ bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, in
         actual_ref.bag == bag && actual_ref.slot == slot;
     const bool source_handle_cleared = identity_at_source &&
         actual_ref.item.slot == 0 && actual_ref.item.generation == 0;
-    const bool removed = readable && identity_at_source && source_handle_cleared &&
+    // A successfully removed source slot is no longer readable by
+    // physical_item_at, so the empty slot itself is the postcondition.
+    const bool removed_empty_slot = !readable && remove_call_ok && actual_item == nullptr;
+    const bool removed = ((readable && identity_at_source && source_handle_cleared) ||
+                          removed_empty_slot) &&
                          virtual_bag::original_to_extension_source_slot_postcondition(
                              expected_item, actual_item);
     if (!remove_call_ok) {
@@ -276,9 +280,19 @@ bool inventory_slot_locked(int bag, int slot, void** out) {
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
+    *out = nullptr;
     qol::contracts::QolItemHandle handle{};
     if (!qol::contracts::succeeded(runtime_state().host.item_facts->physical_item_at(bag, slot, &handle))) {
         return false;
+    }
+    // physical_item_at returns a handle that may be game-owned (original inventory)
+    // or provider-owned (EB). Private custody only knows the latter, so resolve
+    // through the Game Host handle bridge first.
+    const auto* game = runtime_state().host.game;
+    if (game != nullptr && game->item_abi.native_item_for_handle != nullptr &&
+        qol::contracts::succeeded(game->item_abi.native_item_for_handle(handle, out)) &&
+        *out != nullptr) {
+        return true;
     }
     return extension_bag_private_item_for_handle(handle, out);
 }
