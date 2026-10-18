@@ -1381,6 +1381,20 @@ uint64_t ok_destroy_item_wrapper() {
         return run_backup();
     }
 
+    // EB items are not owned by the physical INVEN pool. Letting the vanilla
+    // destroy path reach ITEMPOOL_Free would double-free the module object.
+    const qol::contracts::ExtensionBagApi* eb = eb_active();
+    if (eb != nullptr && eb->identify_native_item != nullptr) {
+        int32_t extension_bag = -1;
+        int32_t extension_slot = -1;
+        if (eb->identify_native_item(detail.item, &extension_bag, &extension_slot)) {
+            QOL_LOG_WARN(QolDomain::kInventory,
+                         "vanilla destroy blocked extension item bag=%d slot=%d",
+                         extension_bag, extension_slot);
+            g_has_vanilla_sell_preview_context = false;
+            return 0;
+        }
+    }
     void* item = s2_physical_slot_item(bag, slot);
     if (item == nullptr) {
         g_has_vanilla_sell_preview_context = false;

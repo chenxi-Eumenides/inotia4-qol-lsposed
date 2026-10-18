@@ -243,8 +243,8 @@ void store_draw_tab_buttons_locked() {
         int64_t x = 0;
         int64_t y = 0;
         extension_bag_control_abs_pos(button, &x, &y);
-        (void)extension_bag_ui_draw_part(0xf, 0x14, static_cast<int32_t>(x - 5),
-                                         static_cast<int32_t>(y - 12), 0, 1);
+        (void)extension_bag_ui_draw_part_alpha(0xf, 0x14, static_cast<int32_t>(x - 5),
+                                               static_cast<int32_t>(y - 12), 0, 1, 0);
     }
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         void* button = runtime_state().store.tab_buttons[index];
@@ -255,16 +255,16 @@ void store_draw_tab_buttons_locked() {
         const bool selected = runtime_state().store.view_installed && runtime_state().store.view_bag == index;
         const bool equipped = runtime_state().objects.bag.capacities[index] != 0;
         if (selected) {
-            (void)extension_bag_ui_draw_part(0xf, 0x13, static_cast<int32_t>(x - 5),
-                                             static_cast<int32_t>(y - 12), 0, 1);
-            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(x + 5),
-                                             static_cast<int32_t>(y + 5), 0, 1);
+            (void)extension_bag_ui_draw_part_alpha(0xf, 0x13, static_cast<int32_t>(x - 5),
+                                                   static_cast<int32_t>(y - 12), 0, 1, 0);
+            (void)extension_bag_ui_draw_part_alpha(0xf, 6, static_cast<int32_t>(x + 5),
+                                                   static_cast<int32_t>(y + 5), 0, 1, 0);
         } else if (equipped) {
-            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(x + 5),
-                                             static_cast<int32_t>(y + 5), 0, 0x28);
+            (void)extension_bag_ui_draw_part_alpha(0xf, 6, static_cast<int32_t>(x + 5),
+                                                   static_cast<int32_t>(y + 5), 0, 1, 0x28);
         } else {
-            (void)extension_bag_ui_draw_part(0xf, 9, static_cast<int32_t>(x + 5),
-                                             static_cast<int32_t>(y + 5), 0, 0x28);
+            (void)extension_bag_ui_draw_part_alpha(0xf, 9, static_cast<int32_t>(x + 5),
+                                                   static_cast<int32_t>(y + 5), 0, 1, 0x28);
         }
     }
 }
