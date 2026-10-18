@@ -25,6 +25,9 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/runtime_lifecycle.cpp
     plugins/extension_bag/ownership.cpp
     plugins/extension_bag/transaction.cpp
+    plugins/extension_bag/ui_equip.cpp
+    plugins/extension_bag/ui_store.cpp
+    plugins/extension_bag/ui_mix.cpp
     plugins/extension_bag/extension_bag_port.cpp
     plugins/extension_bag/extension_bag_persistence.cpp
     plugins/extension_bag/extension_bag_geometry.cpp

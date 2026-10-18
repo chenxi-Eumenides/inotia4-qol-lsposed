@@ -213,15 +213,15 @@ void test_extension_desc_hook_v2_source_contract() {
     const size_t separator = test_file.find_last_of("/\\");
     if (separator != std::string::npos) {
         source.open(test_file.substr(0, separator + 1) +
-                    "../plugins/extension_bag/extension_bag_equip.inc");
+                    "../plugins/extension_bag/ui_equip.cpp");
     }
     if (!source) {
         source.clear();
-        source.open("../plugins/extension_bag/extension_bag_equip.inc");
+        source.open("../plugins/extension_bag/ui_equip.cpp");
     }
     if (!source) {
         source.clear();
-        source.open("../../plugins/extension_bag/extension_bag_equip.inc");
+        source.open("../../plugins/extension_bag/ui_equip.cpp");
     }
     CHECK(source.good());
     if (!source) return;

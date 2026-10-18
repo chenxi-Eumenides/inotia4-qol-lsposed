@@ -486,11 +486,10 @@ struct NativeCallScope {
 #define extension_source_should_equip_locked extension_source_should_equip_locked_internal
 #define equip_extension_source_on_tab_locked equip_extension_source_on_tab_locked_internal
 #define remove_item_direct_unlocked remove_item_direct_unlocked_internal
+#define make_desc_equip_gate make_desc_equip_gate_runtime_internal
+#define consume_extension_item_after_native_locked consume_extension_item_after_native_locked_runtime_internal
 
 bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag);
-
-void store_teardown_locked();
-void mix_teardown_locked();
 
 // 扩展标签控件事件处理：TouchHandle 转发的控件事件（0x02=click 松开确认，
 // 0x04=drop 到袋）。挂袋容器后与原版袋标签同链：松开 → TouchHandle 判定。
@@ -579,12 +578,10 @@ bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, in
     }
     return removed;
 }
-bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
-                                                int before_count, int observed_before,
-                                                const char* context, void* use_token);
-
 #include "plugins/extension_bag/extension_bag_runtime.inc"
 
+#undef make_desc_equip_gate
+#undef consume_extension_item_after_native_locked
 #undef clear_original_desc_locked
 #undef original_bag_locked
 #undef set_original_bag_locked
@@ -705,12 +702,77 @@ bool route_projected_session_to_tab_locked_internal(std::unique_lock<std::mutex>
                                                     int target_bag) {
     return ::route_projected_session_to_tab_locked(lock, target_bag);
 }
+void reset_extension_desc_item_hooks_locked_internal() {
+    ::reset_extension_desc_item_hooks_locked();
+}
+void restore_extension_desc_popup_callbacks_locked_internal() {
+    ::restore_extension_desc_popup_callbacks_locked();
+}
+bool try_equip_on_extension_tab_drop_locked_internal(std::unique_lock<std::mutex>& lock,
+                                                     int index, void* moving_control) {
+    return ::try_equip_on_extension_tab_drop_locked(lock, index, moving_control);
+}
+bool extension_source_should_equip_locked_internal(int target_bag) {
+    return ::extension_source_should_equip_locked(target_bag);
+}
+bool equip_extension_source_on_tab_locked_internal(std::unique_lock<std::mutex>& lock,
+                                                   int target_bag, int source_bag,
+                                                   int source_slot) {
+    return ::equip_extension_source_on_tab_locked(lock, target_bag, source_bag, source_slot);
+}
 
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);
 }
 
 }  // namespace
+
+uint64_t extension_bag_ui_isolation_now_ms_locked() {
+    return isolation_now_ms_locked();
+}
+bool extension_bag_ui_equip_from_inventory(void* character, int bag, int slot, int equip_slot) {
+    return extension_equip_from_inventory(character, bag, slot, equip_slot);
+}
+bool extension_bag_ui_add_money(int64_t amount) { return extension_add_money(amount); }
+bool extension_bag_ui_minus_money(int64_t amount) { return extension_minus_money(amount); }
+void extension_bag_ui_update_character_equip() { extension_update_character_equip(); }
+void extension_bag_ui_description_set_off() { extension_description_set_off(); }
+bool extension_bag_ui_read_item_cumulate_count(const void* item, int* out_count) {
+    return read_item_cumulate_count(item, out_count);
+}
+bool extension_bag_ui_read_item_sell_price(const void* item, int64_t* out_price) {
+    return read_item_sell_price(item, out_price);
+}
+bool extension_bag_ui_read_item_encoded_field(const void* item, uint32_t* out_field) {
+    return read_item_encoded_field(item, out_field);
+}
+qol::contracts::QolItemCountEncoding extension_bag_ui_item_count_encoding(const void* item) {
+    return item_count_encoding(item);
+}
+bool extension_bag_ui_read_char_can_equip(const void* character, const void* item) {
+    return read_char_can_equip(character, item);
+}
+bool extension_bag_ui_read_char_find_equip_slot(const void* character, const void* item,
+                                                int* out_slot) {
+    return read_char_find_equip_slot(character, item, out_slot);
+}
+void* extension_bag_ui_read_char_equipped_item(const void* character, int slot) {
+    return read_char_equipped_item(character, slot);
+}
+bool extension_bag_ui_use_item(void* character, void* item, int arg, int* out_used) {
+    return extension_use_item(character, item, arg, out_used);
+}
+bool extension_bag_ui_make_mercenary(void* item, void** out_mercenary) {
+    return extension_make_mercenary(item, out_mercenary);
+}
+bool extension_bag_ui_read_save_is_ok() { return read_save_is_ok(); }
+bool extension_bag_ui_read_has_empty_mercenary_slot() {
+    return read_has_empty_mercenary_slot();
+}
+void extension_bag_ui_play_switch_sound() { play_extension_switch_sound(); }
+void extension_bag_ui_handle_tab_click_locked(int extension_bag) {
+    handle_extension_tab_click_locked(extension_bag);
+}
 
 bool extension_tab_hit(int index, int64_t x, int64_t y) {
     return extension_tab_hit_internal(index, x, y);
@@ -1688,40 +1750,7 @@ void show_extension_bag_no_space_popup() {
 // 派生）→ persist；失败回滚（清位 + 按备份 payload 重建入库）。
 // P4.3：源物品在移除确认后入账本保管，提交/回滚均经 retire 终止保管
 // （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
-#define reset_extension_desc_item_hooks_locked reset_extension_desc_item_hooks_locked_internal
-#define restore_extension_desc_popup_callbacks_locked restore_extension_desc_popup_callbacks_locked_internal
-#define try_equip_on_extension_tab_drop_locked try_equip_on_extension_tab_drop_locked_internal
-#define extension_source_should_equip_locked extension_source_should_equip_locked_internal
-#define equip_extension_source_on_tab_locked equip_extension_source_on_tab_locked_internal
-#include "plugins/extension_bag/extension_bag_equip.inc"
-#undef reset_extension_desc_item_hooks_locked
-#undef restore_extension_desc_popup_callbacks_locked
-#undef try_equip_on_extension_tab_drop_locked
-#undef extension_source_should_equip_locked
-#undef equip_extension_source_on_tab_locked
-#include "plugins/extension_bag/extension_bag_store.inc"
-#include "plugins/extension_bag/extension_bag_mix.inc"
-
 }  // namespace
-
-void reset_extension_desc_item_hooks_locked() {
-    reset_extension_desc_item_hooks_locked_internal();
-}
-void restore_extension_desc_popup_callbacks_locked() {
-    restore_extension_desc_popup_callbacks_locked_internal();
-}
-bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
-                                             int index, void* moving_control) {
-    return try_equip_on_extension_tab_drop_locked_internal(lock, index, moving_control);
-}
-bool extension_source_should_equip_locked(int target_bag) {
-    return extension_source_should_equip_locked_internal(target_bag);
-}
-bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag,
-                                          int source_bag, int source_slot) {
-    return equip_extension_source_on_tab_locked_internal(
-        lock, target_bag, source_bag, source_slot);
-}
 
 QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
                                       qol::contracts::QolItemHandle expected_item) {
@@ -1842,7 +1871,7 @@ bool virtual_bag_handle_use_mercenary_seal() {
 // （容量字还原），让原版按真实容量入库。
 void virtual_bag_store_restore_for_original_write() {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (store_view_installed) {
+    if (store_module_view_installed_locked()) {
         VIRTBAG_LOG("store save gate: restore store module view before original write");
         store_restore_module_view_locked();
     }

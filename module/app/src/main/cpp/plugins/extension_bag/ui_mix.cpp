@@ -1,5 +1,39 @@
+#include "game_ui_virtbag.h"
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
+#include "contracts/ui.h"
+#include "contracts/ownership.h"
+#include "contracts/inventory_refresh.h"
+#include "contracts/item_facts.h"
+#include "contracts/module_save_port.h"
+#include "contracts/popup_enter_alias.h"
+#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_equip_rules.h"
+#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/move_merge.h"
+#include "plugins/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/model/item_handle_custody.h"
+#include "plugins/extension_bag/model/sale_transaction.h"
+#include "plugins/extension_bag/model/draw_state_lock.h"
+#include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
+#include "plugins/extension_bag/plugin.h"
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <unistd.h>
+
 // 合成器（UIMix）宿主：只管理 UIMix 自己的页签、投影和刷新，不复用 UIEquip/商店视图
-// 状态。结构参考 extension_bag_store.inc：
+// 状态。结构参考 ui_store.cpp：
 //   - PopupState ENTER/F3 回调包装（enter 装页签、f3 teardown）；
 //   - Scene_Draw_POPUP_SC_MIX 内 bl GRPX_End 调用点 BL patch 挂 draw_end wrapper；
 //   - 自建 5 个扩展袋页签挂到 UIMix 袋组 [g_uimix+UIMIX_SLOT_BAG_GROUP]（原版 6 袋按钮同父）；
@@ -7,7 +41,11 @@
 // 宿主物理袋沿用 original_bag_locked()（UIMix 与 UIEquip 共用 [0x2f56d8] 当前袋 GOT，
 // UIMix_RefreshInvenItem 反汇编确认），合法 0..4；落在任务袋 5/非法时回退 0。
 
-using MixSceneNoArgFn = void (*)();
+MixSceneNoArgFn mix_original_enter = nullptr;
+MixSceneNoArgFn mix_original_f3 = nullptr;
+uint8_t* mix_state_entry = nullptr;
+
+namespace {
 
 bool mix_view_installed = false;
 int mix_view_bag = -1;
@@ -25,10 +63,6 @@ bool mix_frame_active = false;
 uint64_t mix_view_generation = 0;
 uint64_t mix_refresh_generation = 0;
 bool mix_refresh_pending = false;
-
-MixSceneNoArgFn mix_original_enter = nullptr;
-MixSceneNoArgFn mix_original_f3 = nullptr;
-uint8_t* mix_state_entry = nullptr;
 
 uint64_t mix_tab_item_proc(void* ctrl, uint64_t event, void*, void*);
 void mix_install_module_view_locked(int bag);
@@ -403,6 +437,8 @@ void mix_restore_module_view_locked() {
     mix_request_item_refresh_locked();
 }
 
+}  // namespace
+
 void mix_enter_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -433,6 +469,8 @@ void mix_f3_wrapper() {
     mix_refresh_item_after_unlock();
     if (original != nullptr) original();
 }
+
+namespace {
 
 void mix_draw_tab_buttons_locked() {
     if (!extension_bag_ui_can_draw()) return;
@@ -467,6 +505,8 @@ void mix_draw_tab_buttons_locked() {
         }
     }
 }
+
+}  // namespace
 
 void mix_draw_end_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(

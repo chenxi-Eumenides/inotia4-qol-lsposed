@@ -27,6 +27,16 @@ using PopupNoArgFn = void (*)();
 using OriginalDrawInvenBagFn = void (*)();
 using OriginalDrawInvenItemFn = void (*)();
 using ExtensionDestroyOkFn = void (*)(void*);
+using StoreSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
+using StoreSceneNoArgFn = void (*)();
+using MixSceneNoArgFn = void (*)();
+
+enum class ExtensionBagEquipResult {
+    kOk,
+    kReject,         // 前置不满足：非背包物品 / 扩展位已装备 / 不在原版库存
+    kFailed,         // 移除或回滚失败（状态可能不一致，强日志）
+    kPersistFailed,  // persist 失败且已完整回滚
+};
 
 struct ModuleUseState {
     bool active = false;
@@ -167,6 +177,14 @@ extern thread_local bool g_refresh_restore_suppress;
 extern thread_local bool g_in_native_call;
 extern void* g_tab_bag_items[virtual_bag::kBagCount];
 extern ownership::Ledger g_ownership_ledger;
+extern void* g_backup_store_sell_item;
+extern StoreSceneEventFn store_original_event;
+extern StoreSceneNoArgFn store_original_f3;
+extern StoreSceneNoArgFn store_original_enter;
+extern uint8_t* store_state_entry;
+extern MixSceneNoArgFn mix_original_enter;
+extern MixSceneNoArgFn mix_original_f3;
+extern uint8_t* mix_state_entry;
 
 void extension_bag_mark_dirty_locked();
 uint64_t extension_bag_item_revision_locked();
@@ -334,5 +352,55 @@ bool extension_bag_runtime_is_backpack_category(int category);
 bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
                                              int src_bag, int src_slot, int dst_bag,
                                              int dst_slot, void* material, void* target_item);
+void* extension_menu_character();
+ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mutex>& lock,
+                                                          int internal_bag, void* item);
+bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
+                                            void* character, void* item, int source_bag,
+                                            int source_slot);
+void finish_extension_equip_ui_locked(int internal_bag, void* moving_control);
+int first_empty_extension_bag_locked();
+bool extension_confirm_use_item(void* item);
+bool extension_use_mercenary_seal();
+void make_desc_equip_gate(void* ctrl, void* arg);
+bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
+                                                int before_count, int observed_before,
+                                                const char* context, void* raw_use_token);
+uint64_t extension_bag_ui_isolation_now_ms_locked();
+bool extension_bag_ui_equip_from_inventory(void* character, int bag, int slot, int equip_slot);
+bool extension_bag_ui_add_money(int64_t amount);
+bool extension_bag_ui_minus_money(int64_t amount);
+void extension_bag_ui_update_character_equip();
+void extension_bag_ui_description_set_off();
+bool extension_bag_ui_read_item_cumulate_count(const void* item, int* out_count);
+bool extension_bag_ui_read_item_sell_price(const void* item, int64_t* out_price);
+bool extension_bag_ui_read_item_encoded_field(const void* item, uint32_t* out_field);
+qol::contracts::QolItemCountEncoding extension_bag_ui_item_count_encoding(const void* item);
+bool extension_bag_ui_read_char_can_equip(const void* character, const void* item);
+bool extension_bag_ui_read_char_find_equip_slot(const void* character, const void* item,
+                                                int* out_slot);
+void* extension_bag_ui_read_char_equipped_item(const void* character, int slot);
+bool extension_bag_ui_use_item(void* character, void* item, int arg, int* out_used);
+bool extension_bag_ui_make_mercenary(void* item, void** out_mercenary);
+bool extension_bag_ui_read_save_is_ok();
+bool extension_bag_ui_read_has_empty_mercenary_slot();
+void extension_bag_ui_play_switch_sound();
+void extension_bag_ui_handle_tab_click_locked(int extension_bag);
+bool store_module_view_installed_locked();
+void store_teardown_locked();
+void store_restore_module_view_locked();
+uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2);
+void store_enter_wrapper();
+void store_f3_wrapper();
+int64_t store_sell_item_wrapper(int64_t displayed_price);
+void store_make_desc_gate(void* ctrl, void* arg);
+void store_draw_end_wrapper();
+void store_draw_inven_bag_group_wrapper();
+uint8_t store_buy_find_slot_gate(void* item, void* out_slot);
+void mix_teardown_locked();
+void mix_enter_wrapper();
+void mix_f3_wrapper();
+void mix_draw_end_wrapper();
+void mix_draw_inven_bag_group_wrapper();
 bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
                                  void* expected_item, const char* context);

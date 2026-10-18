@@ -596,7 +596,7 @@ bool autosell_entry_valid(void* container) {
     return execute_matches != 0;
 }
 
-// 动态定位入口：与扩展背包页签同一套算法（extension_bag_mix.inc:134-148）——
+// 动态定位入口：与扩展背包页签同一套算法（ui_mix.cpp）——
 // 取袋容器 child 0（原版袋 0）的绝对位置，加上「袋列右侧 68 / 下移 2」，再减去挂载层
 // （袋容器）绝对位置得到相对 rect；行号 5（与任务背包同行，扩展页签只占 0..4）。
 // 不使用绝对坐标，也不依赖子控件顺序（袋 0 = child 0）。读取失败时退回常量兜底。

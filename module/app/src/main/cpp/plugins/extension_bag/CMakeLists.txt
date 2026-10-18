@@ -9,6 +9,9 @@ add_library(qol_plugin_extension_bag STATIC
     runtime_lifecycle.cpp
     ownership.cpp
     transaction.cpp
+    ui_equip.cpp
+    ui_store.cpp
+    ui_mix.cpp
     extension_bag_port.cpp
     extension_bag_persistence.cpp
     extension_bag_geometry.cpp

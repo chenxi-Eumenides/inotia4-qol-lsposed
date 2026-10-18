@@ -1,8 +1,53 @@
+#include "game_ui_virtbag.h"
+#include "contracts/game_host.h"
+#include "contracts/host_sdk.h"
+#include "contracts/ui.h"
+#include "contracts/ownership.h"
+#include "contracts/inventory_refresh.h"
+#include "contracts/item_facts.h"
+#include "contracts/module_save_port.h"
+#include "contracts/popup_enter_alias.h"
+#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_equip_rules.h"
+#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/move_merge.h"
+#include "plugins/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/model/item_handle_custody.h"
+#include "plugins/extension_bag/model/sale_transaction.h"
+#include "plugins/extension_bag/model/draw_state_lock.h"
+#include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
+#include "plugins/extension_bag/plugin.h"
+#include "plugins/extension_bag/store_sell_rules.h"
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstdio>
+#include <cstring>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <unistd.h>
+
 // 商店宿主只管理 UIStore 自己的控件、投影和详情事务，不复用 UIEquip 的视图状态。
 
 
-using StoreSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
-using StoreSceneNoArgFn = void (*)();
+// W1 商店扩展物品出售：UIStore_SellItem@0xd25f0 函数入口 hook（backup 存本全局）。
+// 原版数量面板/确认/取消全部保留；模块物品在入口层按「弹窗载荷 / 单价」反推数量后
+// 接管整堆删除或部分递减，原版物品一律 backup。
+void* g_backup_store_sell_item = nullptr;
+StoreSceneEventFn store_original_event = nullptr;
+StoreSceneNoArgFn store_original_f3 = nullptr;
+StoreSceneNoArgFn store_original_enter = nullptr;
+uint8_t* store_state_entry = nullptr;
+
+namespace {
+
+using StoreSellItemFn = int64_t (*)(int64_t);
 
 bool store_view_installed = false;
 int store_view_bag = -1;
@@ -20,21 +65,11 @@ bool store_frame_active = false;
 uint64_t store_view_generation = 0;
 uint64_t store_refresh_generation = 0;
 bool store_refresh_pending = false;
-// W1 商店扩展物品出售：UIStore_SellItem@0xd25f0 函数入口 hook（backup 存本全局）。
-// 原版数量面板/确认/取消全部保留；模块物品在入口层按「弹窗载荷 / 单价」反推数量后
-// 接管整堆删除或部分递减，原版物品一律 backup。
-using StoreSellItemFn = int64_t (*)(int64_t);
-void* g_backup_store_sell_item = nullptr;
-
-StoreSceneEventFn store_original_event = nullptr;
-StoreSceneNoArgFn store_original_f3 = nullptr;
-StoreSceneNoArgFn store_original_enter = nullptr;
-uint8_t* store_state_entry = nullptr;
 
 uint64_t store_tab_item_proc(void*, uint64_t, void*, void*);
 
 void store_clear_desc_locked() {
-    extension_description_set_off();
+    extension_bag_ui_description_set_off();
 }
 
 int store_tab_index(void* ctrl) {
@@ -221,7 +256,6 @@ uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
 }
 
 void store_install_module_view_locked(int bag);
-void store_restore_module_view_locked();
 
 void store_commit_pending_tab_locked() {
     if (!extension_bag_session_admitted_locked()) {
@@ -363,6 +397,10 @@ void store_install_module_view_locked(int bag) {
                 g_virtual_bag_state.capacities[bag]);
 }
 
+}  // namespace
+
+bool store_module_view_installed_locked() { return store_view_installed; }
+
 void store_restore_module_view_locked() {
     if (!store_view_installed) return;
     if (virtual_bag::valid_index(store_view_bag)) {
@@ -393,6 +431,8 @@ void store_restore_module_view_locked() {
     store_request_item_refresh_locked();
 }
 
+namespace {
+
 int store_original_bag_button_index(int64_t x, int64_t y) {
     void* container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
     if (container == nullptr) return -1;
@@ -417,6 +457,8 @@ void store_restore_for_original_event_locked(int64_t x, int64_t y) {
     // 扩展视图；disable 只会清空指针（控件仍在袋容器上），draw_end 再次 install
     // 时因 store_tab_root 已清空无法删除旧控件，会导致标签重复创建。
 }
+
+}  // namespace
 
 uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
@@ -465,6 +507,8 @@ void store_f3_wrapper() {
     if (original != nullptr) original();
 }
 
+namespace {
+
 void store_draw_tab_buttons_locked() {
     if (!extension_bag_ui_can_draw()) return;
     for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
@@ -498,6 +542,8 @@ void store_draw_tab_buttons_locked() {
         }
     }
 }
+
+}  // namespace
 
 void store_draw_end_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
@@ -536,6 +582,8 @@ void store_make_desc_gate(void* ctrl, void* arg) {
     (void)arg;
     (void)g_write_port->ui.make_item_description(ctrl);
 }
+
+namespace {
 
 void store_sell_popup(uint32_t text_id) {
     if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->show_text_popup != nullptr) {
@@ -582,6 +630,8 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
 // W1：UIStore_SellItem@0xd25f0 入口接管。原版只收总价 x0（弹窗载荷），数量由函数内部
 // 自行读取并走 INVEN_RemoveItem/ITEMSYSTEM_Divide；模块在入口层用同一「载荷/单价」
 // 反推数量后接管结算，原版物品一律 backup。
+}  // namespace
+
 int64_t store_sell_item_wrapper(int64_t displayed_price) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -625,10 +675,10 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
                 } else {
                     view = static_cast<int>(virtual_bag_effective_count(
                         item, static_cast<uint32_t>(descriptor.count)));
-                    item_encoded = item_count_encoding(item) ==
+                    item_encoded = extension_bag_ui_item_count_encoding(item) ==
                                    ::qol::contracts::QolItemCountEncoding::kEncoded;
                     int64_t unit = 0;
-                    if (!read_item_sell_price(item, &unit)) {
+                    if (!extension_bag_ui_read_item_sell_price(item, &unit)) {
                         reject = true;
                     } else {
                         plan = qol::store_sell::plan(item_encoded, view, unit, displayed_price);
@@ -656,7 +706,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
         store_sell_popup(0xc);
         return 0;
     }
-    if (!extension_add_money(price)) {
+    if (!extension_bag_ui_add_money(price)) {
         VIRTBAG_LOG("store sell credit failed bag=%d slot=%d price=%lld", bag, slot,
                     static_cast<long long>(price));
         store_sell_popup(0xc);
@@ -700,7 +750,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
         }
     }
     if (!committed) {
-        const bool refunded = extension_minus_money(price);
+        const bool refunded = extension_bag_ui_minus_money(price);
         VIRTBAG_LOG("store sell remove failed bag=%d slot=%d count=%d price=%lld refunded=%d",
                     bag, slot, count, static_cast<long long>(price), refunded ? 1 : 0);
         store_sell_popup(0xc);
@@ -712,7 +762,6 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     return 0;
 }
 
-
 void store_teardown_locked() {
     store_restore_module_view_locked();
     store_disable_tab_buttons_locked();
@@ -723,6 +772,8 @@ void store_teardown_locked() {
     }
     store_frame_active = false;
 }
+
+namespace {
 
 enum class StoreSaveSlotLookup : uint8_t { kFound, kNotFound, kError };
 
@@ -816,6 +867,8 @@ bool store_extension_can_accept_item_locked(void* item) {
 // 原版查询期间临时恢复真实袋容量，并以查询成功状态而非槽编码值判断找到；
 // 原版无槽时，扩展袋预检复用 SaveItem adopt 的合并/新建落位判据，允许两种
 // CopyAsNewUID/普通货物分支进入最终 SaveItem。原版 UI 查询始终在锁外执行。
+}  // namespace
+
 uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,

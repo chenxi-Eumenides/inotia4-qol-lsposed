@@ -921,8 +921,8 @@ target_compile_definitions(extension_bag_draw_lock_tests PRIVATE
     QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_render.cpp"
     QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_lifecycle.cpp"
     QOL_EXTENSION_BAG_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/extension_bag_runtime.inc"
-    QOL_EXTENSION_BAG_STORE_SOURCE="${CPP_DIR}/plugins/extension_bag/extension_bag_store.inc"
-    QOL_EXTENSION_BAG_MIX_SOURCE="${CPP_DIR}/plugins/extension_bag/extension_bag_mix.inc")
+    QOL_EXTENSION_BAG_STORE_SOURCE="${CPP_DIR}/plugins/extension_bag/ui_store.cpp"
+    QOL_EXTENSION_BAG_MIX_SOURCE="${CPP_DIR}/plugins/extension_bag/ui_mix.cpp")
 target_compile_features(extension_bag_draw_lock_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_draw_lock_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_draw_lock_tests COMMAND extension_bag_draw_lock_tests)
