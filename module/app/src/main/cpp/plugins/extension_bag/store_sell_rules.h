@@ -12,7 +12,8 @@ struct Plan {
 };
 
 inline Plan plan(bool count_encoded, int32_t view, int64_t unit, int64_t displayed) {
-    if (!count_encoded || view <= 1) return Plan{PlanKind::kWhole, 1};
+    if (view <= 0) return Plan{PlanKind::kReject, 0};
+    if (!count_encoded || view == 1) return Plan{PlanKind::kWhole, 1};
     if (unit <= 0 || displayed <= 0 || displayed % unit != 0) {
         return Plan{PlanKind::kReject, 0};
     }

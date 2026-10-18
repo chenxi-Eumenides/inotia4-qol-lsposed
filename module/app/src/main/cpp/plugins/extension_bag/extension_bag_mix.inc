@@ -22,6 +22,9 @@ uint64_t mix_tab_generation = 0;
 int mix_pending_tab = -1;
 uint64_t mix_pending_tab_generation = 0;
 bool mix_frame_active = false;
+uint64_t mix_view_generation = 0;
+uint64_t mix_refresh_generation = 0;
+bool mix_refresh_pending = false;
 
 MixSceneNoArgFn mix_original_enter = nullptr;
 MixSceneNoArgFn mix_original_f3 = nullptr;
@@ -96,8 +99,42 @@ void mix_disable_tab_buttons_locked() {
 
 void mix_delete_tab_buttons_locked() {
     for (void*& button : mix_tab_buttons) {
-        if (button != nullptr) (void)extension_bag_ui_delete_control(button);
+        if (button != nullptr && !extension_bag_ui_delete_control(button)) {
+            VIRTBAG_LOG("mix tab delete failed control=%p", button);
+        }
         button = nullptr;
+    }
+}
+
+bool mix_all_tab_buttons_installed_locked() {
+    for (void* button : mix_tab_buttons) {
+        if (button == nullptr) return false;
+    }
+    return true;
+}
+
+bool mix_has_tab_buttons_locked() {
+    for (void* button : mix_tab_buttons) {
+        if (button != nullptr) return true;
+    }
+    return false;
+}
+
+void mix_discard_new_tab_controls_locked(
+    std::array<void*, virtual_bag::kBagCount>& controls, int failed_index,
+    void* failed_control, const char* stage) {
+    VIRTBAG_LOG("mix tab install failed index=%d stage=%s", failed_index, stage);
+    if (failed_control != nullptr && !extension_bag_ui_delete_control(failed_control)) {
+        VIRTBAG_LOG("mix tab cleanup failed index=%d control=%p", failed_index,
+                    failed_control);
+    }
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        void*& control = controls[index];
+        if (control == nullptr) continue;
+        if (!extension_bag_ui_delete_control(control)) {
+            VIRTBAG_LOG("mix tab cleanup failed index=%d control=%p", index, control);
+        }
+        control = nullptr;
     }
 }
 
@@ -109,9 +146,12 @@ void mix_install_tab_buttons_locked() {
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
         bag_child_count < 6) return;
-    if (mix_tab_root == bag_container && mix_tab_buttons[0] != nullptr) return;
+    if (mix_tab_root == bag_container && mix_all_tab_buttons_installed_locked()) return;
 
-    if (mix_tab_root != nullptr) mix_delete_tab_buttons_locked();
+    if (mix_tab_root != nullptr || mix_has_tab_buttons_locked()) {
+        mix_delete_tab_buttons_locked();
+        mix_disable_tab_buttons_locked();
+    }
     mix_refresh_tab_bag_items_locked();
 
     int64_t bag0_abs_x = 0;
@@ -128,20 +168,50 @@ void mix_install_tab_buttons_locked() {
     // 沿用扩展页/商店的原版袋列右侧间距 68、下移 2；起点来自 UIMix 实时袋 0 rect。
     const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
     const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
+    std::array<void*, virtual_bag::kBagCount> controls{};
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         void* control = nullptr;
-        if (!extension_bag_ui_create_control(bag_container, &control)) continue;
-        if (control == nullptr) continue;
-        if (!extension_bag_ui_set_control_proc(control, &mix_tab_item_proc) ||
-            !extension_bag_ui_set_control_user_type(control, 2) ||
-            !extension_bag_ui_unuse_control_event_move(control)) continue;
-        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) continue;
+        if (!extension_bag_ui_create_control(bag_container, &control)) {
+            mix_discard_new_tab_controls_locked(controls, index, control, "create");
+            return;
+        }
+        if (control == nullptr) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "create-null");
+            return;
+        }
+        controls[index] = control;
+        if (!extension_bag_ui_set_control_proc(control, &mix_tab_item_proc)) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "proc");
+            return;
+        }
+        if (!extension_bag_ui_set_control_user_type(control, 2)) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "user-type");
+            return;
+        }
+        if (!extension_bag_ui_unuse_control_event_move(control)) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "event-move");
+            return;
+        }
+        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "rect");
+            return;
+        }
         void* data = nullptr;
-        if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) continue;
+        if (!extension_bag_ui_allocate_control_data(0x10, &data)) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "data-allocate");
+            return;
+        }
+        if (data == nullptr) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "data-null");
+            return;
+        }
         *reinterpret_cast<void**>(data) = mix_tab_bag_items[index];
-        if (!extension_bag_ui_set_control_data(control, data)) continue;
-        mix_tab_buttons[index] = control;
+        if (!extension_bag_ui_set_control_data(control, data)) {
+            mix_discard_new_tab_controls_locked(controls, index, nullptr, "data-set");
+            return;
+        }
     }
+    mix_tab_buttons = controls;
     mix_tab_root = bag_container;
     ++mix_tab_generation;
     VIRTBAG_LOG("mix tabs installed root=%p bag0=(%lld,%lld) mount=(%lld,%lld) generation=%llu",
@@ -199,6 +269,53 @@ void mix_refresh_projection_locked() {
     }
 }
 
+void mix_request_item_refresh_locked() {
+    mix_refresh_pending = true;
+    ++mix_refresh_generation;
+}
+
+void mix_refresh_item_after_unlock() {
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    if (!mix_refresh_pending) return;
+    const uint64_t refresh_generation = mix_refresh_generation;
+    const uint64_t view_generation = mix_view_generation;
+    mix_refresh_pending = false;
+    lock.unlock();
+
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->ui.refresh_mix_item == nullptr) {
+        VIRTBAG_LOG("mix item refresh failed reason=missing-adapter");
+        lock.lock();
+        if (refresh_generation == mix_refresh_generation) mix_request_item_refresh_locked();
+        return;
+    }
+    const QolResult refresh_result = api->ui.refresh_mix_item();
+    if (!qol::contracts::succeeded(refresh_result)) {
+        VIRTBAG_LOG("mix item refresh failed code=%d", refresh_result.code);
+        lock.lock();
+        if (refresh_generation == mix_refresh_generation) mix_request_item_refresh_locked();
+        return;
+    }
+
+    lock.lock();
+    if (refresh_generation != mix_refresh_generation ||
+        view_generation != mix_view_generation) return;
+    if (!mix_frame_active || !g_virtual_bag_enabled.load() ||
+        !extension_bag_session_admitted_locked() || mix_state_locked() == 0) {
+        if (mix_view_installed) mix_restore_module_view_locked();
+        return;
+    }
+    if (!mix_view_installed) return;
+    void* live_root = mix_item_root_locked();
+    if (live_root == nullptr) {
+        VIRTBAG_LOG("mix item refresh completed without item root; retry scheduled");
+        mix_request_item_refresh_locked();
+        return;
+    }
+    mix_projected_item_root = live_root;
+    mix_refresh_projection_locked();
+}
+
 void mix_install_module_view_locked(int bag) {
     if (!extension_bag_session_admitted_locked() || !virtual_bag::valid_index(bag) ||
         g_virtual_bag_state.capacities[bag] == 0 ||
@@ -206,45 +323,53 @@ void mix_install_module_view_locked(int bag) {
     // UIMix 与 UIEquip 共用当前袋 GOT；落在任务袋 5/非法时回退原版袋 0。
     int host = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(host)) host = 0;
+    if (mix_view_installed) mix_restore_module_view_locked();
     uint32_t size_word = 0;
     if (!bag_size_word_locked(host, &size_word)) {
         VIRTBAG_LOG("mix view rejected host bag=%d", host);
         return;
     }
-    if (mix_view_installed) mix_restore_module_view_locked();
 
     mix_window_original_bag = host;
     mix_original_size_word = size_word;
     mix_original_bag_size = size_word;
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    (void)set_bag_size_word_locked(
-        host, (size_word & ~kCapacityMask) |
-                   (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask));
-    set_original_bag_locked(host);
-
-    mix_projected_item_root = mix_item_root_locked();
-    if (mix_projected_item_root == nullptr) {
-        (void)set_bag_size_word_locked(
-            host, (mix_original_size_word & ~kCapacityMask) | (mix_original_bag_size & kCapacityMask));
+    if (!set_bag_size_word_locked(
+            host, (size_word & ~kCapacityMask) |
+                      (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask))) {
+        VIRTBAG_LOG("mix view rejected capacity write bag=%d host=%d", bag, host);
         mix_original_size_word = 0;
         mix_original_bag_size = 0;
         mix_window_original_bag = -1;
         return;
     }
-    extension_refresh_mix_item();
+    set_original_bag_locked(host);
+
+    mix_projected_item_root = mix_item_root_locked();
+    if (mix_projected_item_root == nullptr) {
+        if (!set_bag_size_word_locked(
+                host, (mix_original_size_word & ~kCapacityMask) |
+                          (mix_original_bag_size & kCapacityMask))) {
+            VIRTBAG_LOG("mix view rollback capacity failed host=%d", host);
+        }
+        mix_original_size_word = 0;
+        mix_original_bag_size = 0;
+        mix_window_original_bag = -1;
+        mix_projected_item_root = nullptr;
+        mix_request_item_refresh_locked();
+        return;
+    }
     const int capacity = g_virtual_bag_state.capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
-        void* control = valid_child_locked(mix_projected_item_root, slot);
-        if (control == nullptr) continue;
-        void* item = module_item_locked(bag, slot);
-        (void)extension_bag_ui_set_control_item(control, item);
-        if (item != nullptr) {
+        if (module_item_locked(bag, slot) != nullptr) {
             ownership::borrow_for_view(&g_ownership_ledger,
                                        g_module_object_handles[bag][slot]);
         }
     }
     mix_view_bag = bag;
     mix_view_installed = true;
+    ++mix_view_generation;
+    mix_request_item_refresh_locked();
     VIRTBAG_LOG("mix view installed bag=%d window=%d capacity=%d", bag, host,
                 g_virtual_bag_state.capacities[bag]);
 }
@@ -262,17 +387,20 @@ void mix_restore_module_view_locked() {
     }
     if (mix_original_size_word != 0) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-        (void)set_bag_size_word_locked(
-            mix_window_original_bag,
-            (mix_original_size_word & ~kCapacityMask) | (mix_original_bag_size & kCapacityMask));
+        if (!set_bag_size_word_locked(
+                mix_window_original_bag,
+                (mix_original_size_word & ~kCapacityMask) | (mix_original_bag_size & kCapacityMask))) {
+            VIRTBAG_LOG("mix restore capacity failed host=%d", mix_window_original_bag);
+        }
     }
-    extension_refresh_mix_item();
     mix_original_size_word = 0;
     mix_original_bag_size = 0;
     mix_window_original_bag = -1;
     mix_projected_item_root = nullptr;
     mix_view_bag = -1;
     mix_view_installed = false;
+    ++mix_view_generation;
+    mix_request_item_refresh_locked();
 }
 
 void mix_enter_wrapper() {
@@ -280,12 +408,15 @@ void mix_enter_wrapper() {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"own:popup.mix"});
     if (mix_original_enter != nullptr) mix_original_enter();
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    mix_teardown_locked();
-    // Enter 时面板处于 state 0（配方菜单，原版尚未画背包列）；页签等 state!=0 的
-    // draw_end 再挂载，避免早于原版背包出现。
-    mix_frame_active = true;
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        mix_teardown_locked();
+        // Enter 时面板处于 state 0（配方菜单，原版尚未画背包列）；页签等 state!=0 的
+        // draw_end 再挂载，避免早于原版背包出现。
+        mix_frame_active = true;
+    }
+    mix_refresh_item_after_unlock();
 }
 
 void mix_f3_wrapper() {
@@ -299,6 +430,7 @@ void mix_f3_wrapper() {
         mix_frame_active = false;
         original = mix_original_f3;
     }
+    mix_refresh_item_after_unlock();
     if (original != nullptr) original();
 }
 
@@ -368,6 +500,7 @@ void mix_draw_end_wrapper() {
             }
         }
     }
+    mix_refresh_item_after_unlock();
     if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
         (void)g_sdk->ui->end_frame();
     }

@@ -17,6 +17,9 @@ uint64_t store_tab_generation = 0;
 int store_pending_tab = -1;
 uint64_t store_pending_tab_generation = 0;
 bool store_frame_active = false;
+uint64_t store_view_generation = 0;
+uint64_t store_refresh_generation = 0;
+bool store_refresh_pending = false;
 // W1 商店扩展物品出售：UIStore_SellItem@0xd25f0 函数入口 hook（backup 存本全局）。
 // 原版数量面板/确认/取消全部保留；模块物品在入口层按「弹窗载荷 / 单价」反推数量后
 // 接管整堆删除或部分递减，原版物品一律 backup。
@@ -83,8 +86,42 @@ void store_disable_tab_buttons_locked() {
 
 void store_delete_tab_buttons_locked() {
     for (void*& button : store_tab_buttons) {
-        if (button != nullptr) (void)extension_bag_ui_delete_control(button);
+        if (button != nullptr && !extension_bag_ui_delete_control(button)) {
+            VIRTBAG_LOG("store tab delete failed control=%p", button);
+        }
         button = nullptr;
+    }
+}
+
+bool store_all_tab_buttons_installed_locked() {
+    for (void* button : store_tab_buttons) {
+        if (button == nullptr) return false;
+    }
+    return true;
+}
+
+bool store_has_tab_buttons_locked() {
+    for (void* button : store_tab_buttons) {
+        if (button != nullptr) return true;
+    }
+    return false;
+}
+
+void store_discard_new_tab_controls_locked(
+    std::array<void*, virtual_bag::kBagCount>& controls, int failed_index,
+    void* failed_control, const char* stage) {
+    VIRTBAG_LOG("store tab install failed index=%d stage=%s", failed_index, stage);
+    if (failed_control != nullptr && !extension_bag_ui_delete_control(failed_control)) {
+        VIRTBAG_LOG("store tab cleanup failed index=%d control=%p", failed_index,
+                    failed_control);
+    }
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        void*& control = controls[index];
+        if (control == nullptr) continue;
+        if (!extension_bag_ui_delete_control(control)) {
+            VIRTBAG_LOG("store tab cleanup failed index=%d control=%p", index, control);
+        }
+        control = nullptr;
     }
 }
 
@@ -96,9 +133,12 @@ void store_install_tab_buttons_locked() {
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
         bag_child_count < 6) return;
-    if (store_tab_root == bag_container && store_tab_buttons[0] != nullptr) return;
+    if (store_tab_root == bag_container && store_all_tab_buttons_installed_locked()) return;
 
-    if (store_tab_root != nullptr) store_delete_tab_buttons_locked();
+    if (store_tab_root != nullptr || store_has_tab_buttons_locked()) {
+        store_delete_tab_buttons_locked();
+        store_disable_tab_buttons_locked();
+    }
     store_refresh_tab_bag_items_locked();
 
     int64_t bag0_abs_x = 0;
@@ -115,20 +155,50 @@ void store_install_tab_buttons_locked() {
     // 这里沿用原版袋列的右侧间距 68、下移 2；起点仍来自商店实时袋 0 rect。
     const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
     const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
+    std::array<void*, virtual_bag::kBagCount> controls{};
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         void* control = nullptr;
-        if (!extension_bag_ui_create_control(bag_container, &control)) continue;
-        if (control == nullptr) continue;
-        if (!extension_bag_ui_set_control_proc(control, &store_tab_item_proc) ||
-            !extension_bag_ui_set_control_user_type(control, 2) ||
-            !extension_bag_ui_unuse_control_event_move(control)) continue;
-        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) continue;
+        if (!extension_bag_ui_create_control(bag_container, &control)) {
+            store_discard_new_tab_controls_locked(controls, index, control, "create");
+            return;
+        }
+        if (control == nullptr) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "create-null");
+            return;
+        }
+        controls[index] = control;
+        if (!extension_bag_ui_set_control_proc(control, &store_tab_item_proc)) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "proc");
+            return;
+        }
+        if (!extension_bag_ui_set_control_user_type(control, 2)) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "user-type");
+            return;
+        }
+        if (!extension_bag_ui_unuse_control_event_move(control)) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "event-move");
+            return;
+        }
+        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "rect");
+            return;
+        }
         void* data = nullptr;
-        if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) continue;
+        if (!extension_bag_ui_allocate_control_data(0x10, &data)) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "data-allocate");
+            return;
+        }
+        if (data == nullptr) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "data-null");
+            return;
+        }
         *reinterpret_cast<void**>(data) = store_tab_bag_items[index];
-        if (!extension_bag_ui_set_control_data(control, data)) continue;
-        store_tab_buttons[index] = control;
+        if (!extension_bag_ui_set_control_data(control, data)) {
+            store_discard_new_tab_controls_locked(controls, index, nullptr, "data-set");
+            return;
+        }
     }
+    store_tab_buttons = controls;
     store_tab_root = bag_container;
     ++store_tab_generation;
     VIRTBAG_LOG("store tabs installed root=%p generation=%llu", bag_container,
@@ -186,6 +256,53 @@ void store_refresh_projection_locked() {
     }
 }
 
+void store_request_item_refresh_locked() {
+    store_refresh_pending = true;
+    ++store_refresh_generation;
+}
+
+void store_refresh_item_after_unlock() {
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    if (!store_refresh_pending) return;
+    const uint64_t refresh_generation = store_refresh_generation;
+    const uint64_t view_generation = store_view_generation;
+    store_refresh_pending = false;
+    lock.unlock();
+
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->ui.refresh_store_item == nullptr) {
+        VIRTBAG_LOG("store item refresh failed reason=missing-adapter");
+        lock.lock();
+        if (refresh_generation == store_refresh_generation) store_request_item_refresh_locked();
+        return;
+    }
+    const QolResult refresh_result = api->ui.refresh_store_item();
+    if (!qol::contracts::succeeded(refresh_result)) {
+        VIRTBAG_LOG("store item refresh failed code=%d", refresh_result.code);
+        lock.lock();
+        if (refresh_generation == store_refresh_generation) store_request_item_refresh_locked();
+        return;
+    }
+
+    lock.lock();
+    if (refresh_generation != store_refresh_generation ||
+        view_generation != store_view_generation) return;
+    if (!store_frame_active || !g_virtual_bag_enabled.load() ||
+        !extension_bag_session_admitted_locked()) {
+        if (store_view_installed) store_restore_module_view_locked();
+        return;
+    }
+    if (!store_view_installed) return;
+    void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
+    if (live_root == nullptr) {
+        VIRTBAG_LOG("store item refresh completed without item root; retry scheduled");
+        store_request_item_refresh_locked();
+        return;
+    }
+    store_projected_item_root = live_root;
+    store_refresh_projection_locked();
+}
+
 void store_install_module_view_locked(int bag) {
     if (!extension_bag_session_admitted_locked() || !virtual_bag::valid_index(bag) ||
         g_virtual_bag_state.capacities[bag] == 0 ||
@@ -195,43 +312,53 @@ void store_install_module_view_locked(int bag) {
         VIRTBAG_LOG("store view rejected original bag=%d", original_bag);
         return;
     }
-    uint32_t size_word = 0;
-    if (!bag_size_word_locked(original_bag, &size_word)) return;
     if (store_view_installed) store_restore_module_view_locked();
+    uint32_t size_word = 0;
+    if (!bag_size_word_locked(original_bag, &size_word)) {
+        VIRTBAG_LOG("store view rejected capacity read window=%d", original_bag);
+        return;
+    }
     store_clear_desc_locked();
 
     store_window_original_bag = original_bag;
     store_original_size_word = size_word;
     store_original_bag_size = size_word;
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    (void)set_bag_size_word_locked(
-        original_bag, (size_word & ~kCapacityMask) |
-                          (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask));
-
-    store_projected_item_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
-    if (store_projected_item_root == nullptr) {
-        (void)set_bag_size_word_locked(
-            original_bag, (store_original_size_word & ~kCapacityMask) |
-                              (store_original_bag_size & kCapacityMask));
+    if (!set_bag_size_word_locked(
+            original_bag, (size_word & ~kCapacityMask) |
+                              (static_cast<uint32_t>(g_virtual_bag_state.capacities[bag]) & kCapacityMask))) {
+        VIRTBAG_LOG("store view rejected capacity write bag=%d window=%d", bag, original_bag);
         store_original_size_word = 0;
         store_original_bag_size = 0;
         store_window_original_bag = -1;
         return;
     }
-    extension_refresh_store_item();
+
+    store_projected_item_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
+    if (store_projected_item_root == nullptr) {
+        if (!set_bag_size_word_locked(
+                original_bag, (store_original_size_word & ~kCapacityMask) |
+                                  (store_original_bag_size & kCapacityMask))) {
+            VIRTBAG_LOG("store view rollback capacity failed window=%d", original_bag);
+        }
+        store_original_size_word = 0;
+        store_original_bag_size = 0;
+        store_window_original_bag = -1;
+        store_projected_item_root = nullptr;
+        store_request_item_refresh_locked();
+        return;
+    }
     const int capacity = g_virtual_bag_state.capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
-        void* control = valid_child_locked(store_projected_item_root, slot);
-        if (control == nullptr) continue;
-        void* item = module_item_locked(bag, slot);
-        (void)extension_bag_ui_set_control_item(control, item);
-        if (item != nullptr) {
+        if (module_item_locked(bag, slot) != nullptr) {
             ownership::borrow_for_view(&g_ownership_ledger,
                                        g_module_object_handles[bag][slot]);
         }
     }
     store_view_bag = bag;
     store_view_installed = true;
+    ++store_view_generation;
+    store_request_item_refresh_locked();
     VIRTBAG_LOG("store view installed bag=%d window=%d capacity=%d", bag, original_bag,
                 g_virtual_bag_state.capacities[bag]);
 }
@@ -250,17 +377,20 @@ void store_restore_module_view_locked() {
     store_clear_desc_locked();
     if (store_original_size_word != 0) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-        (void)set_bag_size_word_locked(
-            store_window_original_bag, (store_original_size_word & ~kCapacityMask) |
-                                           (store_original_bag_size & kCapacityMask));
+        if (!set_bag_size_word_locked(
+                store_window_original_bag, (store_original_size_word & ~kCapacityMask) |
+                                                (store_original_bag_size & kCapacityMask))) {
+            VIRTBAG_LOG("store restore capacity failed window=%d", store_window_original_bag);
+        }
     }
-    extension_refresh_store_item();
     store_original_size_word = 0;
     store_original_bag_size = 0;
     store_window_original_bag = -1;
     store_projected_item_root = nullptr;
     store_view_bag = -1;
     store_view_installed = false;
+    ++store_view_generation;
+    store_request_item_refresh_locked();
 }
 
 int store_original_bag_button_index(int64_t x, int64_t y) {
@@ -300,6 +430,7 @@ uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         store_restore_for_original_event_locked(x, y);
     }
+    store_refresh_item_after_unlock();
     return store_original_event != nullptr ? store_original_event(event, param, param2) : 0;
 }
 void store_enter_wrapper() {
@@ -307,13 +438,16 @@ void store_enter_wrapper() {
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"own:popup.store"});
     if (store_original_enter != nullptr) store_original_enter();
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    store_teardown_locked();
-    set_original_bag_locked(0);
-    store_frame_active = true;
-    store_install_tab_buttons_locked();
-    extension_refresh_store_item();
+    {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        ensure_state_loaded_locked();
+        store_teardown_locked();
+        set_original_bag_locked(0);
+        store_frame_active = true;
+        store_install_tab_buttons_locked();
+        store_request_item_refresh_locked();
+    }
+    store_refresh_item_after_unlock();
 }
 
 void store_f3_wrapper() {
@@ -327,6 +461,7 @@ void store_f3_wrapper() {
         store_frame_active = false;
         original = store_original_f3;
     }
+    store_refresh_item_after_unlock();
     if (original != nullptr) original();
 }
 
@@ -383,6 +518,7 @@ void store_draw_end_wrapper() {
             store_frame_active = false;
         }
     }
+    store_refresh_item_after_unlock();
     if (g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->end_frame != nullptr) {
         (void)g_sdk->ui->end_frame();
     }
@@ -588,27 +724,115 @@ void store_teardown_locked() {
     store_frame_active = false;
 }
 
+enum class StoreSaveSlotLookup : uint8_t { kFound, kNotFound, kError };
+
+StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
+                                                                 int32_t* out_slot) {
+    if (item == nullptr || out_slot == nullptr || g_game == nullptr ||
+        g_inventory_extras == nullptr || g_inventory_extras->read.find_save_slot == nullptr) {
+        VIRTBAG_LOG("store buy gate original lookup unavailable item=%p", item);
+        return StoreSaveSlotLookup::kError;
+    }
+
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    const bool projected = store_view_installed;
+    const int original_bag = store_window_original_bag;
+    const uint64_t view_generation = store_view_generation;
+    uint32_t projected_size_word = 0;
+    if (projected) {
+        if (!virtual_bag::valid_original_transaction_bag(original_bag) ||
+            !bag_size_word_locked(original_bag, &projected_size_word)) {
+            VIRTBAG_LOG("store buy gate cannot read projected capacity window=%d", original_bag);
+            return StoreSaveSlotLookup::kError;
+        }
+        if (!set_bag_size_word_locked(original_bag, store_original_size_word)) {
+            VIRTBAG_LOG("store buy gate cannot restore original capacity window=%d", original_bag);
+            return StoreSaveSlotLookup::kError;
+        }
+    }
+
+    lock.unlock();
+    int32_t slot = -1;
+    const QolResult result = g_inventory_extras->read.find_save_slot(item, &slot);
+    lock.lock();
+
+    if (projected) {
+        if (store_view_generation != view_generation || !store_view_installed ||
+            store_window_original_bag != original_bag) {
+            VIRTBAG_LOG("store buy gate view changed during original lookup generation=%llu->%llu",
+                        static_cast<unsigned long long>(view_generation),
+                        static_cast<unsigned long long>(store_view_generation));
+            return StoreSaveSlotLookup::kError;
+        }
+        if (!set_bag_size_word_locked(original_bag, projected_size_word)) {
+            VIRTBAG_LOG("store buy gate failed to restore projected capacity window=%d", original_bag);
+            return StoreSaveSlotLookup::kError;
+        }
+    }
+
+    if (qol::contracts::succeeded(result)) {
+        if (slot < 0 || slot > UINT8_MAX) {
+            VIRTBAG_LOG("store buy gate received invalid original slot=%d", slot);
+            return StoreSaveSlotLookup::kError;
+        }
+        *out_slot = slot;
+        return StoreSaveSlotLookup::kFound;
+    }
+    if (result.code == kQolErrNotFound) return StoreSaveSlotLookup::kNotFound;
+    VIRTBAG_LOG("store buy gate original lookup failed code=%d", result.code);
+    return StoreSaveSlotLookup::kError;
+}
+
+bool store_extension_can_accept_item_locked(void* item) {
+    if (item == nullptr || !extension_bag_session_admitted_locked()) return false;
+    ensure_state_loaded_locked();
+
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+    int payload_size = 0;
+    int category = 0;
+    if (!serialize_item_payload_locked(item, &payload, &payload_size) ||
+        !read_item_category(item, &category)) {
+        VIRTBAG_LOG("store buy gate extension preflight rejected item=%p reason=source-read", item);
+        return false;
+    }
+    int canonical_count = static_cast<int>(virtual_bag_canonical_count(item, 1));
+    if (canonical_count <= 0) canonical_count = 1;
+    virtual_bag::Item source{};
+    source.category = category;
+    source.count = canonical_count;
+    source.payload = payload;
+    source.payload_size = payload_size;
+
+    const virtual_bag::PlacePlan plan = virtual_bag::place_plan(
+        g_virtual_bag_state.items, g_virtual_bag_state.types,
+        g_virtual_bag_state.capacities, source, /*allow_new_slot=*/true,
+        virtual_bag_extended_mode(item), virtual_bag_category_uses_stack_count,
+        &module_slot_is_assignable_locked);
+    return plan.outcome == virtual_bag::PlaceOutcome::kMerged ||
+           plan.outcome == virtual_bag::PlaceOutcome::kPlacedNewSlot;
+}
+
 // 买入预检 gate：替代 UIStore_BuyItem 内两处 bl INVEN_FindSaveSlot。
-// 先走原版 FindSaveSlot（真实容量），若原版有槽直接返回槽号；原版无槽
-// （返回 0）但扩展袋有空位时返回 1（非 0 槽号语义仅被上层当"有空间"
-// 判断），让流程继续调用 INVEN_SaveItem → save_item_wrapper 触发扩展
-// adopt 收编，购买不再误报"背包已满"。该函数不持锁调用原版指针。
+// 原版查询期间临时恢复真实袋容量，并以查询成功状态而非槽编码值判断找到；
+// 原版无槽时，扩展袋预检复用 SaveItem adopt 的合并/新建落位判据，允许两种
+// CopyAsNewUID/普通货物分支进入最终 SaveItem。原版 UI 查询始终在锁外执行。
 uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"patch:P_EXT_STORE_BUY_GATE_1"});
-    (void)out_slot;
-    uint8_t result = 0;
     int32_t slot = -1;
-    if (g_game != nullptr && g_inventory_extras->read.find_save_slot != nullptr &&
-        item != nullptr && qol::contracts::succeeded(
-            g_inventory_extras->read.find_save_slot(item, &slot))) {
-        result = static_cast<uint8_t>(slot);
+    const StoreSaveSlotLookup lookup = store_find_original_slot_with_real_capacity(item, &slot);
+    if (lookup == StoreSaveSlotLookup::kFound) {
+        if (out_slot != nullptr) {
+            const uint8_t encoded_slot = static_cast<uint8_t>(slot);
+            std::memcpy(out_slot, &encoded_slot, sizeof(encoded_slot));
+        }
+        return 1;
     }
-    if (result != 0) return result;
+    if (lookup == StoreSaveSlotLookup::kError) return 0;
     if (!g_virtual_bag_enabled.load()) return 0;
-    if (extension_bag_has_empty_slots(1, 0)) return 1;
-    return 0;
+    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    return store_extension_can_accept_item_locked(item) ? 1 : 0;
 }
 
 

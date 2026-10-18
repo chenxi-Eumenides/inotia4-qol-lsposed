@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/model/sale_transaction.h"
+#include "plugins/extension_bag/store_sell_rules.h"
 
 #include <array>
 #include <cstdio>
@@ -273,6 +274,25 @@ void test_ext2orig_recovery_action_checks_source_and_target() {
           Ext2OrigRecoveryAction::kRetry);
 }
 
+void test_store_sell_plan_rejects_nonpositive_view_and_checks_count_range() {
+    using qol::store_sell::PlanKind;
+
+    const auto zero = qol::store_sell::plan(true, 0, 20, 20);
+    CHECK(zero.kind == PlanKind::kReject && zero.count == 0);
+
+    const auto negative = qol::store_sell::plan(true, -1, 20, 20);
+    CHECK(negative.kind == PlanKind::kReject && negative.count == 0);
+
+    const auto one = qol::store_sell::plan(true, 1, 20, 20);
+    CHECK(one.kind == PlanKind::kWhole && one.count == 1);
+
+    const auto partial = qol::store_sell::plan(true, 5, 20, 40);
+    CHECK(partial.kind == PlanKind::kPartial && partial.count == 2);
+
+    const auto over_range = qol::store_sell::plan(true, 5, 20, 120);
+    CHECK(over_range.kind == PlanKind::kReject && over_range.count == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -283,6 +303,7 @@ int main() {
     test_replaced_slot_object_and_custody_mismatch_reject();
     test_irreversible_release_never_reports_removal_failure();
     test_ext2orig_recovery_action_checks_source_and_target();
+    test_store_sell_plan_rejects_nonpositive_view_and_checks_count_range();
     std::printf("extension_bag_sale_transaction_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
