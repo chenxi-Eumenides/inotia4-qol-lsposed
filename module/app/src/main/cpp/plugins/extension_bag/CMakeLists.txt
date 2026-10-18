@@ -18,9 +18,12 @@ add_library(qol_plugin_extension_bag STATIC
     runtime_drag_session.cpp
     runtime_input.cpp
     runtime_render.cpp
+    runtime_projection.cpp
     runtime_lifecycle.cpp
     ownership.cpp
-    transaction.cpp
+    transaction_ext_orig.cpp
+    transaction_ext_ext.cpp
+    transaction_drop.cpp
     ui_equip.cpp
     ui_store.cpp
     ui_mix.cpp

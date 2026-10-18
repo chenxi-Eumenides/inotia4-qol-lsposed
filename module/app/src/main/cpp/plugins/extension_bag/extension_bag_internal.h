@@ -143,7 +143,6 @@ void clear_original_item_selection_locked();
 int original_item_category_locked(void* item);
 int drag_source_category_locked();
 
-void draw_cells_in_frame_locked();
 bool bag_size_word_locked(int bag, uint32_t* out_word);
 bool set_bag_size_word_locked(int bag, uint32_t word);
 void refresh_module_item_area_locked(int index);

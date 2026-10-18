@@ -34,9 +34,12 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/runtime_drag_session.cpp
     plugins/extension_bag/runtime_input.cpp
     plugins/extension_bag/runtime_render.cpp
+    plugins/extension_bag/runtime_projection.cpp
     plugins/extension_bag/runtime_lifecycle.cpp
     plugins/extension_bag/ownership.cpp
-    plugins/extension_bag/transaction.cpp
+    plugins/extension_bag/transaction_ext_orig.cpp
+    plugins/extension_bag/transaction_ext_ext.cpp
+    plugins/extension_bag/transaction_drop.cpp
     plugins/extension_bag/ui_equip.cpp
     plugins/extension_bag/ui_store.cpp
     plugins/extension_bag/ui_mix.cpp

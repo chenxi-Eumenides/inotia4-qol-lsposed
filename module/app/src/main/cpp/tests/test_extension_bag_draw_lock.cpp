@@ -380,9 +380,9 @@ void test_unadmitted_panel_mutators_fail_before_touching_state() {
     CHECK(equip.find("extension_bag_session_admitted_locked") < equip.find("set_test_equipped"));
     CHECK(item.find("extension_bag_session_admitted_locked") < item.find("set_item("));
 
-    const std::string render = read_source(QOL_EXTENSION_BAG_RENDER_SOURCE);
+    const std::string projection = read_source(QOL_EXTENSION_BAG_PROJECTION_SOURCE);
     const std::string install_view =
-        source_function(render, "bool install_module_view_locked(int bag) {");
+        source_function(projection, "bool install_module_view_locked(int bag) {");
     CHECK(install_view.find("extension_bag_session_admitted_locked") <
           install_view.find("set_bag_size_word_locked"));
 
@@ -469,16 +469,17 @@ void test_runtime_regression_guards_match_behavioral_models() {
         source_function(public_runtime, "bool set_virtual_bag_enabled(bool enabled) {");
     CHECK(disable.find("teardown_extension_bag_hosts_locked()") != std::string::npos);
 
-    const std::string render = read_source(QOL_EXTENSION_BAG_RENDER_SOURCE);
+    const std::string projection = read_source(QOL_EXTENSION_BAG_PROJECTION_SOURCE);
     const std::string install_view =
-        source_function(render, "bool install_module_view_locked(int bag) {");
+        source_function(projection, "bool install_module_view_locked(int bag) {");
     CHECK(install_view.find("item_root_or_children_unavailable") != std::string::npos);
     CHECK(install_view.find("item_control_binding_failed") != std::string::npos);
     CHECK(install_view.find("g_module_view_installed = true") >
           install_view.find("item_root_replaced_before_commit"));
     const std::string refresh =
-        source_function(render, "void refresh_projection_if_overwritten_locked() {");
+        source_function(projection, "void refresh_projection_if_overwritten_locked() {");
     CHECK(refresh.find("ensure_module_view_root_current_locked()") != std::string::npos);
+    const std::string render = read_source(QOL_EXTENSION_BAG_RENDER_SOURCE);
     const std::string draw_wrapper =
         source_function(render, "void virtual_bag_draw_end_wrapper() {");
     CHECK(draw_wrapper.find("virtual_bag_inventory_state_id()") <
