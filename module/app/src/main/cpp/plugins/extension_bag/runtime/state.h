@@ -156,6 +156,7 @@ struct ExtensionBagUiState {
     void* backup_store_button_sell_exe = nullptr;
     void* backup_store_draw_inven_bag_group = nullptr;
     void* backup_ui_equip_draw_equip_background = nullptr;
+    void* backup_ui_equip_draw = nullptr;
     StoreSceneEventFn store_original_event = nullptr;
     StoreSceneNoArgFn store_original_f3 = nullptr;
     StoreSceneNoArgFn store_original_enter = nullptr;

@@ -337,6 +337,27 @@ void store_draw_end_wrapper() {
             store_commit_pending_tab_locked();
             store_refresh_projection_locked();
             store_draw_tab_buttons_locked();
+            if (runtime_state().store.view_installed && runtime_state().store.original_current_bag >= 0) {
+                void* bag_container =
+                    extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
+                void* original = bag_container != nullptr
+                                     ? valid_child_locked(bag_container,
+                                                          runtime_state().store.original_current_bag)
+                                     : nullptr;
+                if (original != nullptr) {
+                    int64_t x = 0;
+                    int64_t y = 0;
+                    extension_bag_control_abs_pos(original, &x, &y);
+                    // The store's original bag button keeps its filled-bag visual
+                    // even when the EB view is active. Repaint that one button
+                    // with the unselected background/icon so only the EB tab
+                    // remains highlighted.
+                    (void)extension_bag_ui_draw_part_alpha(0xf, 0x14, static_cast<int32_t>(x - 5),
+                                                           static_cast<int32_t>(y - 12), 0, 1, 0);
+                    (void)extension_bag_ui_draw_part_alpha(0xf, 6, static_cast<int32_t>(x + 5),
+                                                           static_cast<int32_t>(y + 5), 0, 1, 0x28);
+                }
+            }
         } else if (runtime_state().store.frame_active) {
             store_delete_tab_buttons_locked();
             store_teardown_locked();
