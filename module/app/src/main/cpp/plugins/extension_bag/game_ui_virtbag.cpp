@@ -1704,7 +1704,7 @@ void virtual_bag_store_restore_for_original_write() {
 bool virtual_bag_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
                                       int equip_slot) {
     if (character == nullptr || item == nullptr) return false;
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
     if (!extension_bag_session_admitted_locked()) return false;
     if (!g_module_view_installed || g_module_view_index != source_bag) return false;
     if (g_game == nullptr || g_character_extras == nullptr || g_character_extras->read.find_equip_slot == nullptr) return false;
@@ -1717,7 +1717,7 @@ bool virtual_bag_equip_projected_item(void* character, void* item, int source_ba
     // 原版在源槽读空时传 equip_slot=-1（FindEquipSlot(null) 的结果）；扩展
     // 物品不在 INVEN，不能把 -1 当校验失败，以真实物品计算的装备槽为准。
     if (equip_slot >= 0 && equip_slot < kEquipSlotCount && equip_slot != found) return false;
-    return equip_module_item_on_character_locked(character, item, source_bag, source_slot);
+    return equip_module_item_on_character_locked(lock, character, item, source_bag, source_slot);
 }
 
 bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
@@ -1981,8 +1981,8 @@ bool virtual_bag_adopt_native_item(void* item) {
 //   原版有空袋 → 扩展出库 + 袋表写入（b7dbc 同款：bag_table[bag]=item，
 //                袋对象移交原版袋表）+ 刷新，完全不进原函数；
 //   原版全满 → 扩展袋接管（equip_extension_bag_item_locked）；
-//   扩展也满 → 交还原函数（原版自己弹 6 号"背包已满"）。
-// 其他物品（原版物品、装备、宝石）一律交还原函数，保持原版流程。
+//   扩展也满 → 已识别扩展源时阻断，原版源才交还原函数显示原版错误。
+// 非扩展物品仍交还原函数，保持原版流程。
 // 定义在匿名 namespace 之外（port 跨 TU 调用）；依赖的本 TU 匿名 namespace
 // 函数（category_is_extension_backpack 等）在 TU 内可见。
 VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
@@ -2006,8 +2006,12 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     int category = -1;
     const bool category_read = read_item_category(item, &category);
     const bool jewel = category_read && read_item_is_jewel(category);
-    if (jewel) return VirtualBagEquipButtonResult::kNotExtension;
+    if (jewel) {
+        return from_extension ? VirtualBagEquipButtonResult::kBlocked
+                              : VirtualBagEquipButtonResult::kNotExtension;
+    }
     if (!category_is_extension_backpack(category)) {
+        // 扩展身份已确认后，角色装备未能完整完成时不运行原版删源路径。
         // 扩展槽装备物品 → 装备到角色（原详情按钮职责，函数 hook 化；
         // 装备按钮 proc 恒为 ButtonEquipExe，见 native 第 10 hook）。
         const ::qol::contracts::QolItemCountEncoding item_encoding = item_count_encoding(item);
@@ -2025,7 +2029,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
             }
             void* character = extension_menu_character();
             if (character != nullptr &&
-                equip_module_item_on_character_locked(character, item, src_bag, src_slot)) {
+                equip_module_item_on_character_locked(lock, character, item, src_bag, src_slot)) {
                 extension_description_set_off();
                 clear_original_desc_locked();
                 finish_extension_equip_ui_locked(src_bag, nullptr);
@@ -2033,8 +2037,10 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
             }
             VIRTBAG_LOG("extension character equip button failed bag=%d slot=%d", src_bag,
                         src_slot);
+            return VirtualBagEquipButtonResult::kBlocked;
         }
-        return VirtualBagEquipButtonResult::kNotExtension;  // 其余（原版源装备/其他）交还原函数
+        return from_extension ? VirtualBagEquipButtonResult::kBlocked
+                              : VirtualBagEquipButtonResult::kNotExtension;
     }
 
     int found = -1;
@@ -2058,18 +2064,26 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
                         src_bag, src_slot);
             return VirtualBagEquipButtonResult::kBlocked;
         }
-        if (g_game == nullptr ||
+        if (g_game == nullptr || g_write_port == nullptr ||
             g_write_port->ui.set_original_bag_item == nullptr) {
             VIRTBAG_LOG("extension backpack fn-equip bag table missing");
             return VirtualBagEquipButtonResult::kBlocked;
         }
+        const ModuleUseState source_use = g_module_object_use[src_bag][src_slot];
         if (!module_object_generation_advance_locked(src_bag, src_slot,
                                                      "unequip to original")) {
             VIRTBAG_LOG("extension unequip to original blocked by active object bag=%d slot=%d",
                         src_bag, src_slot);
             return VirtualBagEquipButtonResult::kBlocked;
         }
-        (void)g_write_port->ui.set_original_bag_item(found, item);
+        // 袋表接收对象成功后才允许清理扩展源及交接 ownership。
+        const QolResult bag_write = g_write_port->ui.set_original_bag_item(found, item);
+        if (!qol::contracts::succeeded(bag_write)) {
+            g_module_object_use[src_bag][src_slot] = source_use;
+            VIRTBAG_LOG_ERROR("ERROR extension backpack equip original bag write failed bag=%d src=%d/%d item=%p code=%d; source retained",
+                              found, src_bag, src_slot, item, bag_write.code);
+            return VirtualBagEquipButtonResult::kBlocked;
+        }
         virtual_bag::Item& descriptor = g_virtual_bag_state.items[src_bag][src_slot];
         descriptor = virtual_bag::Item{};
         g_module_objects[src_bag][src_slot] = nullptr;
@@ -2103,9 +2117,17 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     // 原版袋全满 → 扩展接管。equip_extension_bag_item_locked 同时支持扩展槽
     // 源与"原版 INVEN 源"（内部先扫原版库存定位物品再移除，源物品真实销毁）。
     const int target = first_empty_extension_bag_locked();
-    if (target < 0) return VirtualBagEquipButtonResult::kNotExtension;
+    if (target < 0) {
+        return from_extension ? VirtualBagEquipButtonResult::kBlocked
+                              : VirtualBagEquipButtonResult::kNotExtension;
+    }
     const ExtensionBagEquipResult result = equip_extension_bag_item_locked(lock, target, item);
-    if (result != ExtensionBagEquipResult::kOk) return VirtualBagEquipButtonResult::kNotExtension;
+    if (result != ExtensionBagEquipResult::kOk) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "extension backpack equip transaction failed result=%d target=%d source_extension=%d",
+                         static_cast<int>(result), target, from_extension ? 1 : 0);
+        return VirtualBagEquipButtonResult::kBlocked;
+    }
     extension_description_set_off();
     clear_original_desc_locked();
     finish_extension_equip_ui_locked(target, nullptr);
@@ -2163,7 +2185,9 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
                 *out_no_space = true;
                 return true;
             }
-            return result == ExtensionBagUnequipResult::kOk;
+            // 已确认详情来自扩展袋时，失败也必须阻断原版 backup，避免原版卸下
+            // 一个并不在物理袋表中的扩展对象。
+            return true;
         }
         // 扩展态但 desc 袋记录失效：保守拦截（不交原版误卸原版袋）。
         VIRTBAG_LOG("extension desc unequip stale rejected ext_bag=%d", ext_bag);

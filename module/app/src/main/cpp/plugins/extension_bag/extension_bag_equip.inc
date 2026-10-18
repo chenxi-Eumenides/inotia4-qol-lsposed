@@ -151,9 +151,11 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     return restored ? ExtensionBagEquipResult::kPersistFailed : ExtensionBagEquipResult::kFailed;
 }
 
-bool equip_module_item_on_character_locked(void* character, void* item, int source_bag,
+bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
+                                           void* character, void* item, int source_bag,
                                            int source_slot) {
-    if (character == nullptr || item == nullptr || !virtual_bag::valid_index(source_bag) ||
+    if (!lock.owns_lock() || character == nullptr || item == nullptr ||
+        !virtual_bag::valid_index(source_bag) ||
         source_slot < 0 || source_slot >= virtual_bag::kSlotCount ||
         g_module_objects[source_bag][source_slot] != item ||
         g_game == nullptr || g_character_extras->read.can_equip == nullptr ||
@@ -196,33 +198,49 @@ bool equip_module_item_on_character_locked(void* character, void* item, int sour
                                        &previous_equipped_payload_size)) {
         return false;
     }
+    const uint32_t source_handle = g_module_object_handles[source_bag][source_slot];
+    const uint64_t source_generation = g_module_object_use[source_bag][source_slot].generation;
+    const uint64_t source_hash = virtual_bag::payload_hash(
+        g_virtual_bag_state.items[source_bag][source_slot]);
     if (!qol::contracts::succeeded(inventory_write->inventory.set_physical_item(
             original_bag, source_slot, item))) return false;
 
-    // 这是原版 UI 的真实交换入口：它从 INVEN[bag][slot] 取新装备，
-    // 目标槽已有装备时把旧装备写回同一库存槽，再把新装备放入角色槽。
-    // 先不调用 CHAR_EquipItem/CHAR_Unequip，后者会跳过交换协议。
+    // 原版交换入口会重入库存 hook，因此临时安装物理槽后必须解锁调用，再重锁复核。
     extension_bag_begin_internal_equip();
-    int equip_result = 0;
-    const bool equip_called = extension_bag_write_api() != nullptr &&
-                              extension_equip_from_inventory(character, original_bag, source_slot,
-                                                              target);
-    equip_result = equip_called ? 1 : 0;
+    lock.unlock();
+    const bool equip_result = extension_bag_write_api() != nullptr &&
+                              extension_equip_from_inventory(character, original_bag,
+                                                             source_slot, target);
     extension_bag_end_internal_equip();
-    if (equip_result == 0) {
-        (void)inventory_write->inventory.set_physical_item(
-            original_bag, source_slot, original_inventory_item);
-        return false;
-    }
-    if (target >= 0 &&
-        read_char_equipped_item(character, target) != item) {
-        (void)inventory_write->inventory.set_physical_item(
-            original_bag, source_slot, original_inventory_item);
-        return false;
-    }
-
-    (void)inventory_write->inventory.set_physical_item(
+    lock.lock();
+    const QolResult restore_result = inventory_write->inventory.set_physical_item(
         original_bag, source_slot, original_inventory_item);
+    if (!qol::contracts::succeeded(restore_result)) {
+        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                      "ERROR extension character equip physical slot restore failed bag=%d slot=%d item=%p code=%d",
+                      original_bag, source_slot, original_inventory_item, restore_result.code);
+        return false;
+    }
+    const bool source_unchanged = g_module_objects[source_bag][source_slot] == item &&
+        g_module_object_handles[source_bag][source_slot] == source_handle &&
+        g_module_object_use[source_bag][source_slot].generation == source_generation &&
+        virtual_bag::payload_hash(g_virtual_bag_state.items[source_bag][source_slot]) ==
+            source_hash &&
+        g_module_view_installed && g_module_view_index == source_bag &&
+        g_module_window_original_bag == original_bag;
+    if (!source_unchanged) {
+        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                      "ERROR extension character equip source changed during original exchange bag=%d slot=%d item=%p handle=%u generation=%llu",
+                      source_bag, source_slot, item, source_handle,
+                      static_cast<unsigned long long>(source_generation));
+        return false;
+    }
+    if (!equip_result || read_char_equipped_item(character, target) != item) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "extension character equip original exchange failed bag=%d slot=%d target=%d result=%d",
+                     source_bag, source_slot, target, equip_result ? 1 : 0);
+        return false;
+    }
     // CHAR_EquipItemFromInvenToSlot 已把旧装备换入临时投影槽；该槽随后仍由
     // 扩展状态表示，不能让同一个旧指针同时继续留在原版 INVEN 中。
     // 角色装备接管对象所有权，不能走 free_module_object_locked；否则下一帧
@@ -939,15 +957,20 @@ bool extension_use_mercenary_seal() {
         return true;
     }
     ModuleUseToken use_token{};
+    bool begin_failed = false;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         if (g_module_objects[bag][slot] != item ||
             !module_use_begin_locked(bag, slot, item, &use_token)) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal begin failed bag=%d slot=%d item=%p", bag, slot,
                         item);
-            show_popup(0xc);
-            return true;
+            begin_failed = true;
         }
+    }
+    // UI 弹窗会进入原版 UI，不在背包锁内创建。
+    if (begin_failed) {
+        show_popup(0xc);
+        return true;
     }
     ModuleUseToken* previous_use_token = g_active_module_use_token;
     g_active_module_use_token = &use_token;
@@ -955,6 +978,8 @@ bool extension_use_mercenary_seal() {
     (void)extension_make_mercenary(item, &mercenary);
     g_active_module_use_token = previous_use_token;
     used = mercenary != nullptr;
+    bool token_lost = false;
+    bool make_failed = false;
     {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         bool consumed = false;
@@ -962,21 +987,24 @@ bool extension_use_mercenary_seal() {
             const bool marker_cleared = module_use_abort_locked(use_token);
             const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
             QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension mercenary-seal token lost bag=%d slot=%d item=%p "
-                        "marker_cleared=%d; treated handled",
-                        bag, slot, item, isolated ? 1 : 0);
+                          "marker_cleared=%d; treated handled",
+                          bag, slot, item, isolated ? 1 : 0);
             if (isolated) {
                 reset_extension_desc_item_hooks_locked();
                 g_extension_desc_item = nullptr;
                 g_extension_desc_item_bag = -1;
                 g_extension_desc_item_slot = -1;
             }
-            return true;
-        }
-        if (!used) {
+            token_lost = true;
+        } else if (!used) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal make failed bag=%d slot=%d", bag, slot);
-            show_popup(0xc);
-            return true;
+            make_failed = true;
         }
+    }
+    if (token_lost) return true;
+    if (make_failed) {
+        show_popup(0xc);
+        return true;
     }
     if (release_plan.pending) {
         if (!module_use_release_native(release_plan)) {
