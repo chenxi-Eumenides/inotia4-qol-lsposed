@@ -329,7 +329,7 @@ void test_main_menu_cleanup_due_edges_and_retries() {
 }
 
 void test_inventory_state_reader_uses_popup_state_entry() {
-    const std::string source = read_source(QOL_EXTENSION_BAG_PUBLIC_RUNTIME_SOURCE);
+    const std::string source = read_source(QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE);
     const size_t function_start = source.find("int virtual_bag_inventory_state_id() {");
     const size_t function_end = source.find("\n}", function_start);
     CHECK(function_start != std::string::npos && function_end != std::string::npos);
@@ -369,7 +369,7 @@ void test_unadmitted_panel_mutators_fail_before_touching_state() {
     CHECK(tab_click.find("extension_bag_session_admitted_locked") <
           tab_click.find("g_virtual_bag_state"));
 
-    const std::string public_runtime = read_source(QOL_EXTENSION_BAG_PUBLIC_RUNTIME_SOURCE);
+    const std::string public_runtime = read_source(QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE);
     const std::string capacity = source_function(
         public_runtime, "bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {");
     const std::string equip = source_function(public_runtime,
@@ -464,7 +464,7 @@ void test_runtime_regression_guards_match_behavioral_models() {
     const std::string main_menu = source_function(lifecycle, "bool prepare_main_menu_locked() {");
     CHECK(main_menu.find("teardown_extension_bag_hosts_locked()") != std::string::npos);
 
-    const std::string public_runtime = read_source(QOL_EXTENSION_BAG_PUBLIC_RUNTIME_SOURCE);
+    const std::string public_runtime = read_source(QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE);
     const std::string disable =
         source_function(public_runtime, "bool set_virtual_bag_enabled(bool enabled) {");
     CHECK(disable.find("teardown_extension_bag_hosts_locked()") != std::string::npos);

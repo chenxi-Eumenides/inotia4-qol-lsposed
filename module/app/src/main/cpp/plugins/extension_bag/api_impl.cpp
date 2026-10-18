@@ -437,36 +437,6 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
     return qol::contracts::succeeded(result) ? op_ok() : op_err(result.message);
 }
 
-std::string virtual_bag_inventory_bags_json() {
-    if (!g_virtual_bag_enabled.load() || !read_world_in_world()) return "";
-    std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    ensure_state_loaded_locked();
-    std::string out;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
-        const int capacity = g_virtual_bag_state.capacities[bag];
-        int filled = 0;
-        std::string items;
-        // 只遍历派生容量内的槽位：容量外不是有效槽（R-05），不参与 items 输出
-        // 与 slot_count 统计。
-        for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
-            const virtual_bag::Item& item = g_virtual_bag_state.items[bag][slot];
-            if (item.category <= 0 || item.count <= 0) continue;
-            if (filled > 0) items += ",";
-            // count 输出模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
-            items += "{\"slot\":" + std::to_string(slot) +
-                     ",\"category\":" + std::to_string(item.category) +
-                     ",\"count\":" +
-                     std::to_string(static_cast<int>(virtual_bag_effective_count(g_module_objects[bag][slot], static_cast<uint32_t>(item.count)))) +
-                     "}";
-            ++filled;
-        }
-        out += ",{\"bag\":" + std::to_string(bag + 6) +
-               ",\"items\":[" + items + "]" +
-               ",\"capacity\":" + std::to_string(capacity) +
-               ",\"slot_count\":" + std::to_string(filled) + "}";
-    }
-    return out;
-}
 #undef extension_bag_status_json_locked
 #undef extension_bag_not_ready_error_locked
 #undef extension_bag_ready_locked

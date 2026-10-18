@@ -3,7 +3,12 @@ add_library(qol_plugin_extension_bag STATIC
     runtime_access.cpp
     runtime_tabs_ui.cpp
     runtime_orchestrator.cpp
-    public_runtime.cpp
+    public_counts.cpp
+    public_projection.cpp
+    public_status.cpp
+    public_sale.cpp
+    public_equip.cpp
+    public_bridge.cpp
     runtime_bind.cpp
     api_impl.cpp
     claims.cpp

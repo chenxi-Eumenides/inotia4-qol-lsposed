@@ -917,7 +917,7 @@ add_test(NAME extension_bag_deferred_free_tests COMMAND extension_bag_deferred_f
 add_executable(extension_bag_draw_lock_tests test_extension_bag_draw_lock.cpp)
 target_include_directories(extension_bag_draw_lock_tests PRIVATE ${CPP_DIR})
 target_compile_definitions(extension_bag_draw_lock_tests PRIVATE
-    QOL_EXTENSION_BAG_PUBLIC_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/public_runtime.cpp"
+    QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE="${CPP_DIR}/plugins/extension_bag/public_bridge.cpp"
     QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_render.cpp"
     QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_lifecycle.cpp"
     QOL_EXTENSION_BAG_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime_tabs_ui.cpp"

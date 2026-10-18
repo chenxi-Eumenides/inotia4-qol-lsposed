@@ -301,6 +301,9 @@ int extension_internal_bag_bridge(int logical_bag);
 std::string extension_bag_view_result_json_bridge(bool ok, const char* error);
 ExtensionBagUnequipResult unequip_extension_bag_locked_bridge(
     std::unique_lock<std::mutex>& lock, int internal_bag);
+ExtensionBagUnequipResult unequip_extension_bag_locked(
+    std::unique_lock<std::mutex>& lock, int internal_bag);
+bool virtual_bag_module_save_validate_locked();
 bool store_module_view_installed_locked();
 void store_teardown_locked();
 void store_restore_module_view_locked();

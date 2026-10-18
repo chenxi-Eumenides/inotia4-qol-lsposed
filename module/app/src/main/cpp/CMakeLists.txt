@@ -19,7 +19,12 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/runtime_access.cpp
     plugins/extension_bag/runtime_tabs_ui.cpp
     plugins/extension_bag/runtime_orchestrator.cpp
-    plugins/extension_bag/public_runtime.cpp
+    plugins/extension_bag/public_counts.cpp
+    plugins/extension_bag/public_projection.cpp
+    plugins/extension_bag/public_status.cpp
+    plugins/extension_bag/public_sale.cpp
+    plugins/extension_bag/public_equip.cpp
+    plugins/extension_bag/public_bridge.cpp
     plugins/extension_bag/runtime_bind.cpp
     plugins/extension_bag/api_impl.cpp
     plugins/extension_bag/claims.cpp
