@@ -213,10 +213,15 @@ bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
     qol::contracts::QolItemHandle original_inventory_handle{};
     if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->physical_item_at == nullptr ||
         !qol::contracts::succeeded(runtime_state().host.item_facts->physical_item_at(
-            original_bag, source_slot, &original_inventory_handle)) ||
-        (original_inventory_handle.slot != 0 &&
-         !extension_bag_private_item_for_handle(original_inventory_handle,
-                                                &original_inventory_item))) return false;
+            original_bag, source_slot, &original_inventory_handle))) return false;
+    if (original_inventory_handle.slot != 0) {
+        const auto* game = runtime_state().host.game;
+        if (game == nullptr || game->item_abi.native_item_for_handle == nullptr ||
+            !qol::contracts::succeeded(
+                game->item_abi.native_item_for_handle(original_inventory_handle,
+                                                      &original_inventory_item)) ||
+            original_inventory_item == nullptr) return false;
+    }
     void* previous_equipped_item = extension_bag_ui_read_char_equipped_item(character, target);
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> previous_equipped_payload{};
     int previous_equipped_payload_size = 0;
