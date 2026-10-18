@@ -139,10 +139,21 @@ bool consume_projected_release_locked(std::unique_lock<std::mutex>& lock, int64_
 }
 
 uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
+    bool session_admitted = false;
     if (p5_panel_observation_enabled()) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         log_p5_observation_locked("panel-entry", nullptr, event, param2 != 0, param != 0,
                                   nullptr, false, 0);
+        session_admitted = extension_bag_session_admitted_locked();
+    } else {
+        std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
+        session_admitted = extension_bag_session_admitted_locked();
+    }
+    // Slot-data admission gates every extension mutation; rejected sessions only delegate.
+    if (!session_admitted) {
+        VIRTBAG_LOG("touch bypass event=0x%llx reason=session_not_admitted",
+                    static_cast<unsigned long long>(event));
+        return g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0;
     }
     const bool extension_enabled = g_virtual_bag_enabled.load();
     int32_t state_open = 0;
@@ -504,8 +515,7 @@ bool prepare_main_menu_locked() {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu preflight failed");
         return false;
     }
-    store_teardown_locked();
-    if (g_module_view_installed) restore_module_view_locked();
+    teardown_extension_bag_hosts_locked();
     if (!clear_module_cache_locked()) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu blocked by active module object");
         return false;
@@ -514,8 +524,6 @@ bool prepare_main_menu_locked() {
     g_loaded_slot = -2;
     g_item_state_dirty = false;
     g_inventory_frame_active = false;
-    disable_extension_tab_buttons_locked();
-    g_extension_tab_buttons.fill(nullptr);
     cancel_projected_drag_session_locked("main-menu");
     return true;
 }

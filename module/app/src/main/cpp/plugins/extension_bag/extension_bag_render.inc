@@ -450,7 +450,8 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
 //   INVEN_pItem 全程真实（API/存档/捡取读数无污染），restore 仅写回容量字 + RefreshItemArea。
 bool install_module_view_locked(int bag) {
     if (g_game == nullptr || !virtual_bag::valid_index(bag) ||
-        !extension_bag_session_admitted_locked()) return false;
+        !extension_bag_session_admitted_locked() ||
+        g_write_port->ui.refresh_item_area == nullptr) return false;
     if (g_virtual_bag_state.capacities[bag] == 0) return false;
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
@@ -463,44 +464,148 @@ bool install_module_view_locked(int bag) {
 
     if (g_module_view_installed) restore_module_view_locked();
     clear_original_desc_locked();  // 原版详情面板不跨视图残留
+    const int capacity = g_virtual_bag_state.capacities[bag];
+    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
+    const uint32_t projected_size_word = (size_word & ~kCapacityMask) |
+                                         (static_cast<uint32_t>(capacity) & kCapacityMask);
+    std::array<void*, virtual_bag::kSlotCount> controls{};
+    std::array<uint32_t, virtual_bag::kSlotCount> borrowed_handles{};
+    int bound_count = 0;
+    int borrowed_count = 0;
+    auto fail_install = [&](const char* reason) {
+        void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
+        if (live_root != nullptr && live_root == g_projected_item_root) {
+            for (int slot = 0; slot < bound_count; ++slot) {
+                void* control = controls[static_cast<size_t>(slot)];
+                if (control != nullptr && valid_child_locked(live_root, slot) == control &&
+                    !extension_bag_ui_set_control_item(control, nullptr)) {
+                    QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                                  "ERROR module view rollback control clear failed bag=%d slot=%d control=%p",
+                                  bag, slot, control);
+                }
+            }
+        } else if (bound_count > 0) {
+            VIRTBAG_LOG("module view rollback invalidated root saved=%p live=%p",
+                        g_projected_item_root, live_root);
+        }
+        for (int index = 0; index < borrowed_count; ++index) {
+            const uint32_t handle = borrowed_handles[static_cast<size_t>(index)];
+            if (ownership::return_from_view(&g_ownership_ledger, handle) !=
+                ownership::Outcome::kOk) {
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "ERROR module view rollback ownership return failed bag=%d handle=%u",
+                              bag, handle);
+            }
+        }
+        if (!set_bag_size_word_locked(original_bag, size_word)) {
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "ERROR module view rollback capacity restore failed bag=%d word=%u",
+                          original_bag, size_word);
+        }
+        virtual_bag_call_original_refresh_item_area_with_guard();
+        g_original_bag_size_bag = -1;
+        g_original_bag_size = 0;
+        g_module_window_original_bag = -1;
+        g_projected_item_root = nullptr;
+        g_module_view_installed = false;
+        g_module_view_index = -1;
+        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                      "ERROR module view install rejected bag=%d reason=%s",
+                      bag, reason);
+        return false;
+    };
+    if (!set_bag_size_word_locked(original_bag, projected_size_word)) {
+        return fail_install("set_projected_capacity_failed");
+    }
+    virtual_bag_call_original_refresh_item_area_with_guard();
+
+    void* root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
+    int child_count = 0;
+    if (root == nullptr || !extension_bag_ui_child_count(root, &child_count) ||
+        child_count < capacity) {
+        g_projected_item_root = root;
+        return fail_install("item_root_or_children_unavailable");
+    }
+    g_projected_item_root = root;
+    for (int slot = 0; slot < capacity; ++slot) {
+        void* control = valid_child_locked(root, slot);
+        if (control == nullptr) return fail_install("item_child_unavailable");
+        if (extension_bag_ui_data(control) == nullptr) {
+            return fail_install("item_child_data_unavailable");
+        }
+        const virtual_bag::Item& descriptor = g_virtual_bag_state.items[bag][slot];
+        void* item = module_item_locked(bag, slot);
+        if (item == nullptr && descriptor.category > 0 && descriptor.count > 0) {
+            return fail_install("item_materialization_failed");
+        }
+        if (!extension_bag_ui_set_control_item(control, item)) {
+            return fail_install("item_control_binding_failed");
+        }
+        controls[static_cast<size_t>(slot)] = control;
+        bound_count = slot + 1;
+    }
+    if (extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot) != root) {
+        return fail_install("item_root_replaced_during_binding");
+    }
+    for (int slot = 0; slot < capacity; ++slot) {
+        void* item = g_module_objects[bag][slot];
+        if (item == nullptr) continue;
+        const uint32_t handle = g_module_object_handles[bag][slot];
+        if (ownership::borrow_for_view(&g_ownership_ledger, handle) != ownership::Outcome::kOk) {
+            return fail_install("ownership_borrow_failed");
+        }
+        borrowed_handles[static_cast<size_t>(borrowed_count++)] = handle;
+    }
+    if (extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot) != root) {
+        return fail_install("item_root_replaced_before_commit");
+    }
 
     g_original_bag_size_bag = original_bag;
     g_original_bag_size = size_word;
     g_module_window_original_bag = original_bag;
-    const int capacity = g_virtual_bag_state.capacities[bag];
-    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    (void)set_bag_size_word_locked(
-        original_bag, (size_word & ~kCapacityMask) |
-                          (static_cast<uint32_t>(capacity) & kCapacityMask));
-
-    void* root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     g_projected_item_root = root;
-    if (root != nullptr && g_write_port->ui.refresh_item_area != nullptr) {
-        virtual_bag_call_original_refresh_item_area_with_guard();  // 按新容量禁用容量外控件 + 刷 INVEN 原版物品
-        for (int slot = 0; slot < capacity; ++slot) {
-            void* ctrl = valid_child_locked(root, slot);
-            if (ctrl == nullptr) continue;
-            void* item = module_item_locked(bag, slot);
-            // 空槽也必须 SetItem(nullptr)：RefreshItemArea 刚把 INVEN 原版物品刷进控件，
-            // 扩展袋空位不覆盖的话会残留原版物品显示。
-            (void)extension_bag_ui_set_control_item(ctrl, item);
-            if (item != nullptr) {
-                ownership::borrow_for_view(&g_ownership_ledger,
-                                           g_module_object_handles[bag][slot]);
-            }
-        }
-    }
     g_module_view_installed = true;
     g_module_view_index = bag;
     QOL_LOG_INFO(QolDomain::kExtensionBag, "module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
     return true;
 }
 
+// A saved projection root is reusable only while the UI adapter reports the same live tree.
+bool ensure_module_view_root_current_locked() {
+    if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index)) return false;
+    const int bag = g_module_view_index;
+    void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
+    int child_count = 0;
+    bool current = live_root != nullptr && live_root == g_projected_item_root &&
+                   extension_bag_ui_child_count(live_root, &child_count) &&
+                   child_count >= g_virtual_bag_state.capacities[bag];
+    if (current) {
+        for (int slot = 0; slot < g_virtual_bag_state.capacities[bag]; ++slot) {
+            void* child = valid_child_locked(live_root, slot);
+            if (child == nullptr || extension_bag_ui_data(child) == nullptr) {
+                current = false;
+                break;
+            }
+        }
+    }
+    if (current) return true;
+
+    VIRTBAG_LOG("module view root invalidated bag=%d saved=%p live=%p; reinstalling",
+                bag, g_projected_item_root, live_root);
+    restore_module_view_locked();
+    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked()) return false;
+    if (!install_module_view_locked(bag)) {
+        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                      "ERROR module view root reinstallation failed bag=%d", bag);
+        return false;
+    }
+    return true;
+}
+
 // H-16 post-projection：一次原版 RefreshItemArea 返回后，按当前逻辑槽重绑投影。
 // 该函数不再由 draw wrapper 每帧调用；无刷新事务的调用方必须使用定点同步。
 void refresh_projection_if_overwritten_locked() {
-    if (!g_module_view_installed || g_projected_item_root == nullptr ||
-        !virtual_bag::valid_index(g_module_view_index)) {
+    if (!g_module_view_installed || !ensure_module_view_root_current_locked()) {
         return;
     }
     const int bag = g_module_view_index;
@@ -508,11 +613,27 @@ void refresh_projection_if_overwritten_locked() {
     for (int slot = 0; slot < capacity; ++slot) {
         void* item = g_module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
         void* ctrl = valid_child_locked(g_projected_item_root, slot);
-        if (ctrl == nullptr) continue;
+        if (ctrl == nullptr) {
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "ERROR projection refresh child disappeared bag=%d slot=%d",
+                          bag, slot);
+            return;
+        }
         void* data = extension_bag_ui_data(ctrl);
-        void* current = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
+        if (data == nullptr) {
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "ERROR projection refresh control data missing bag=%d slot=%d control=%p",
+                          bag, slot, ctrl);
+            return;
+        }
+        void* current = *reinterpret_cast<void**>(data);
         if (current != item) {
-            (void)extension_bag_ui_set_control_item(ctrl, item);
+            if (!extension_bag_ui_set_control_item(ctrl, item)) {
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "ERROR projection refresh binding failed bag=%d slot=%d control=%p item=%p",
+                              bag, slot, ctrl, item);
+                return;
+            }
             QOL_LOG_INFO(QolDomain::kExtensionBag, "projection post-refresh slot=%d current=%p item=%p",
                         slot, current, item);
         }
@@ -520,7 +641,8 @@ void refresh_projection_if_overwritten_locked() {
 }
 
 bool sync_projected_slot_locked(int bag, int slot) {
-    if (!g_module_view_installed || bag != g_module_view_index ||
+    if (!g_module_view_installed || !ensure_module_view_root_current_locked() ||
+        bag != g_module_view_index ||
         !virtual_bag::valid_index(bag) || g_projected_item_root == nullptr || slot < 0 ||
         slot >= g_virtual_bag_state.capacities[bag]) {
         return false;
@@ -531,7 +653,8 @@ bool sync_projected_slot_locked(int bag, int slot) {
 }
 
 void refresh_projected_module_view_after_move_locked() {
-    if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index)) return;
+    if (!g_module_view_installed || !ensure_module_view_root_current_locked() ||
+        !virtual_bag::valid_index(g_module_view_index)) return;
     // 原版 UIEquip_InvenItemControlEventProc 在移动成功后先刷新区域：该调用除了
     // SetItem，还会按当前容量更新每个槽的 Active/Show 状态；随后再覆盖回扩展对象。
     refresh_module_item_area_locked(g_module_view_index);
@@ -690,7 +813,7 @@ void virtual_bag_save_panel_enter_wrapper() {
     if (g_orig_save_enter != nullptr) g_orig_save_enter();
 }
 
-void virtual_bag_draw_end_locked(int inventory_state) {
+void virtual_bag_draw_end_locked(int inventory_state, std::unique_lock<std::mutex>& lock) {
     static int previous_state = -1;
     const int old_state = previous_state;
     if (old_state != inventory_state) {
@@ -737,7 +860,8 @@ void virtual_bag_draw_end_locked(int inventory_state) {
         return;
     }
     ensure_state_loaded_locked();
-    commit_pending_extension_tab_locked();
+    commit_pending_extension_tab_locked(lock);
+    if (g_module_view_installed) ensure_module_view_root_current_locked();
     // 投影常驻（P2/P3）：module 视图有效期间保持安装；仅在状态不再指向
     // 模块视图（退出/切档/异常）时兜底恢复，防止遗留投影污染原版窗口。
     const bool module_view_expected =
@@ -772,7 +896,9 @@ void virtual_bag_draw_end_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"patch:P_EXT_INVEN_DRAW_END"});
-    qol::features::extension_bag::model::with_snapshot_then_lock(
-        g_virtual_bag_mtx, [] { return virtual_bag_inventory_state_id(); },
-        [](int inventory_state) { virtual_bag_draw_end_locked(inventory_state); });
+    // Read the panel-owned state before acquiring the runtime lock, then pass an unlockable
+    // lock to pending-tab commit so UI callbacks run outside the critical section.
+    const int inventory_state = virtual_bag_inventory_state_id();
+    std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
+    virtual_bag_draw_end_locked(inventory_state, lock);
 }

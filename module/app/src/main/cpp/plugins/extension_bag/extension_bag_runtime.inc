@@ -5,6 +5,11 @@ bool is_backpack_category(int category) {
     return category >= 1 && category <= 4;
 }
 
+bool extension_tab_control_is_current_locked(int index, void* control);
+bool extension_tab_buttons_complete_locked();
+bool extension_tab_buttons_have_controls_locked();
+void restore_module_view_locked();
+
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
     const uint64_t observation_token = virtual_bag_observe_item_proc_pre(ctrl, event, x2, param);
     const auto finish = [observation_token, ctrl, event, x2, param](uint64_t result) {
@@ -12,15 +17,16 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
         return result;
     };
     if (event == 0x02) {
+        uint64_t result = 1;
         {
             std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
-            if (!extension_bag_session_admitted_locked()) return finish(1);
-            const int index = extension_tab_index(ctrl);
-            if (index >= 0) {
-                queue_extension_tab_click_locked(index);
+            if (g_virtual_bag_enabled.load() && extension_bag_session_admitted_locked()) {
+                const int index = extension_tab_index(ctrl);
+                if (index >= 0) queue_extension_tab_click_locked(index);
             }
         }
-        return finish(1);  // 松开确认已处理（原版袋标签点击切袋同样返回 1，b8c60）
+        // Observation post reacquires this mutex, so finish only after leaving the scope.
+        return finish(result);  // 松开确认已处理（原版袋标签点击切袋同样返回 1，b8c60）
     }
     // 0x04 = 拖动 drop 到袋控件。无论原版源还是扩展源，只要目标袋未装备且
     // 源类别为背包物品（category 1..4）就走装备；其他情况走移动。装备路径
@@ -29,9 +35,11 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
         uint64_t result = 0;
         {
             std::unique_lock<std::mutex> lock(g_virtual_bag_mtx);
-            if (!extension_bag_session_admitted_locked()) return finish(1);
+            if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked()) {
+                result = 1;
+            } else {
             const int index = extension_tab_index(ctrl);
-            if (index >= 0 &&
+            if (index >= 0 && extension_tab_control_is_current_locked(index, ctrl) &&
                 g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
                 const int logical_bag = virtual_bag::extension_logical_bag(index);
                 const bool handled = logical_bag >= 0 &&
@@ -83,6 +91,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                     }
                 }
             }
+            }
         }
         return finish(result);
     }
@@ -99,9 +108,23 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 // 手工父链累加（自上而下）：计算控件绝对位置。CO_RECT 为 i64 相对父值。
 void delete_extension_tab_buttons_locked() {
     for (void*& button : g_extension_tab_buttons) {
-        if (button != nullptr) (void)extension_bag_ui_delete_control(button);
-        button = nullptr;
+        if (button == nullptr) continue;
+        if (extension_bag_ui_delete_control(button)) {
+            button = nullptr;
+        } else {
+            VIRTBAG_LOG("extension tab delete failed control=%p", button);
+        }
     }
+}
+
+void invalidate_extension_tab_buttons_locked() {
+    cancel_projected_drag_session_locked("extension-tab-root-change");
+    ++g_inventory_generation;
+    g_pending_extension_tab = -1;
+    g_pending_extension_tab_generation = 0;
+    g_extension_tab_buttons.fill(nullptr);
+    g_extension_tab_root = nullptr;
+    g_extension_tab_generation = 0;
 }
 
 void install_extension_tab_buttons_locked() {
@@ -128,12 +151,44 @@ void install_extension_tab_buttons_locked() {
     const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
     const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
     if (g_extension_tab_generation == g_inventory_generation &&
-        g_extension_tab_root == mount_parent && g_extension_tab_buttons[0] != nullptr) {
+        g_extension_tab_root == mount_parent && extension_tab_buttons_complete_locked()) {
         return;
     }
-    // 重建：先删旧标签（挂载层控件重建后旧指针无效）
-    delete_extension_tab_buttons_locked();
+    // A replaced root owns the old controls; invalidate them without dereferencing stale handles.
+    if (g_extension_tab_root != nullptr && g_extension_tab_root != mount_parent) {
+        invalidate_extension_tab_buttons_locked();
+    } else if (g_extension_tab_root == mount_parent || extension_tab_buttons_have_controls_locked()) {
+        delete_extension_tab_buttons_locked();
+        if (extension_tab_buttons_have_controls_locked()) {
+            VIRTBAG_LOG("extension tab install aborted reason=previous_controls_not_deleted root=%p",
+                        mount_parent);
+            return;
+        }
+        g_extension_tab_root = nullptr;
+        g_extension_tab_generation = 0;
+    }
     refresh_tab_bag_items_locked();
+    std::array<void*, virtual_bag::kBagCount> created{};
+    auto discard_created = [&]() {
+        bool all_deleted = true;
+        for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+            void*& control = created[static_cast<size_t>(index)];
+            if (control == nullptr) continue;
+            if (!extension_bag_ui_delete_control(control)) {
+                all_deleted = false;
+                g_extension_tab_buttons[static_cast<size_t>(index)] = control;
+                VIRTBAG_LOG("extension tab cleanup failed index=%d control=%p", index, control);
+            }
+            control = nullptr;
+        }
+        if (!all_deleted) {
+            // Keep the failed live controls tracked so a same-root retry can delete them.
+            g_extension_tab_root = mount_parent;
+            g_extension_tab_generation = 0;
+        }
+        return all_deleted;
+    };
+    bool complete = true;
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3, proc) + SetControlProc + SetUserType(2)。
         // 第 5 参 = proc，经 CreateControlInfo 写入 +0x90（CO_PROC，TouchHandle 统一事件分发）。
@@ -143,28 +198,57 @@ void install_extension_tab_buttons_locked() {
             !extension_bag_ui_set_control_proc(ctrl, &extension_tab_item_proc) ||
             !extension_bag_ui_set_control_user_type(ctrl, 2) ||
             !extension_bag_ui_unuse_control_event_move(ctrl)) {
-            (void)extension_bag_ui_delete_control(ctrl);
+            if (ctrl != nullptr && !extension_bag_ui_delete_control(ctrl)) {
+                VIRTBAG_LOG("extension tab cleanup failed index=%d control=%p", index, ctrl);
+                created[static_cast<size_t>(index)] = ctrl;
+                complete = false;
+                break;
+            }
             ctrl = nullptr;
         }
         if (ctrl == nullptr) {
             VIRTBAG_LOG("extension tab create failed index=%d", index);
-            continue;
+            complete = false;
+            break;
         }
+        created[static_cast<size_t>(index)] = ctrl;
         // rect：与原版袋标签同尺寸 57x57（loc6/loc9 底框 47x47 居中填充成背景框）。
         // 相对场景根（不随切袋移动），由动态计算的原版袋列绝对位置换算。
         const int64_t row_y = tab_rel_y + index * 70;
-        if (!extension_bag_ui_set_rect(ctrl, {tab_rel_x, row_y, 57, 57})) continue;
+        if (!extension_bag_ui_set_rect(ctrl, {tab_rel_x, row_y, 57, 57})) {
+            VIRTBAG_LOG("extension tab setup failed reason=set_rect index=%d control=%p", index, ctrl);
+            complete = false;
+            break;
+        }
         // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
         void* data = nullptr;
-        if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) continue;
+        if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) {
+            VIRTBAG_LOG("extension tab setup failed reason=allocate_control_data index=%d control=%p",
+                        index, ctrl);
+            complete = false;
+            break;
+        }
         std::memset(data, 0, 0x10);
         *reinterpret_cast<void**>(data) = g_tab_bag_items[index];
         if (!extension_bag_ui_set_control_data(ctrl, data)) {
-            (void)extension_bag_ui_delete_control(ctrl);
-            continue;
+            VIRTBAG_LOG("extension tab setup failed reason=set_control_data index=%d control=%p",
+                        index, ctrl);
+            complete = false;
+            break;
         }
-        g_extension_tab_buttons[index] = ctrl;
     }
+    if (extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer) != mount_parent) {
+        // The game replaced this tree while controls were being created; its handles are stale.
+        invalidate_extension_tab_buttons_locked();
+        VIRTBAG_LOG("extension tab install aborted reason=root_replaced during_create root=%p",
+                    mount_parent);
+        return;
+    }
+    if (!complete) {
+        (void)discard_created();
+        return;
+    }
+    g_extension_tab_buttons = created;
     g_extension_tab_root = mount_parent;
     g_extension_tab_generation = g_inventory_generation;
     VIRTBAG_LOG("extension tabs installed generation=%llu root=%p",
@@ -172,14 +256,23 @@ void install_extension_tab_buttons_locked() {
 }
 
 void disable_extension_tab_buttons_locked() {
-    // The game owns these controls. Invalidate module references without
-    // touching them after popup teardown, where the pointers may be stale.
-    ++g_inventory_generation;
-    g_pending_extension_tab = -1;
-    g_pending_extension_tab_generation = 0;
-    g_extension_tab_buttons.fill(nullptr);
-    g_extension_tab_root = nullptr;
-    g_extension_tab_generation = 0;
+    void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+    if (g_extension_tab_root != nullptr && live_root == g_extension_tab_root) {
+        delete_extension_tab_buttons_locked();
+    } else if (g_extension_tab_root != nullptr) {
+        VIRTBAG_LOG("extension tab references invalidated reason=root_not_live saved=%p live=%p",
+                    g_extension_tab_root, live_root);
+    }
+    // The game owns controls; stale-root references are invalidated, never deleted.
+    invalidate_extension_tab_buttons_locked();
+}
+
+void teardown_extension_bag_hosts_locked() {
+    // Disable all three UI hosts in the same lifecycle transaction.
+    store_teardown_locked();
+    mix_teardown_locked();
+    restore_module_view_locked();
+    disable_extension_tab_buttons_locked();
 }
 
 int raw_direct_bag_locked() {
@@ -233,6 +326,7 @@ bool bag_size_word_locked(int bag, uint32_t* out_word);
 bool set_bag_size_word_locked(int bag, uint32_t word);
 int original_bag_button_index(int64_t x, int64_t y);
 bool install_module_view_locked(int bag);
+bool ensure_module_view_root_current_locked();
 void restore_module_view_locked();
 void refresh_projection_if_overwritten_locked();
 void refresh_projected_module_view_after_move_locked();
@@ -240,6 +334,7 @@ void refresh_module_item_area_locked(int index);
 void* module_item_locked(int bag, int slot);
 void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock);
 bool prepare_main_menu_locked();
+void teardown_extension_bag_hosts_locked();
 bool free_module_object_locked(int bag, int slot, void* use_token = nullptr);
 bool module_slot_is_assignable_locked(int bag, int slot);
 bool module_object_replacement_allowed_locked(int bag, int slot, const char* context);
@@ -263,8 +358,25 @@ void reset_extension_desc_item_hooks_locked();
 void install_extension_desc_item_hooks_locked(void* item);
 void restore_extension_desc_popup_callbacks_locked();
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
-                                                int before_count, int observed_before,
-                                                const char* context, void* use_token);
+                                                 int before_count, int observed_before,
+                                                 const char* context, void* use_token);
+bool extension_tab_control_is_current_locked(int index, void* control);
+void handle_extension_tab_click_impl_locked(int extension_bag,
+                                            std::unique_lock<std::mutex>* unlockable_lock);
+
+bool extension_tab_buttons_complete_locked() {
+    for (void* button : g_extension_tab_buttons) {
+        if (button == nullptr) return false;
+    }
+    return true;
+}
+
+bool extension_tab_buttons_have_controls_locked() {
+    for (void* button : g_extension_tab_buttons) {
+        if (button != nullptr) return true;
+    }
+    return false;
+}
 
 void reset_extension_desc_unequip_hook_locked() {
     // 卸下按钮由函数级 ButtonUnequipExe hook 承担，
@@ -288,6 +400,16 @@ void play_extension_switch_sound() {
 }
 
 void handle_extension_tab_click_locked(int extension_bag) {
+    handle_extension_tab_click_impl_locked(extension_bag, nullptr);
+}
+
+void handle_pending_extension_tab_click_locked(std::unique_lock<std::mutex>& lock,
+                                               int extension_bag) {
+    handle_extension_tab_click_impl_locked(extension_bag, &lock);
+}
+
+void handle_extension_tab_click_impl_locked(int extension_bag,
+                                            std::unique_lock<std::mutex>* unlockable_lock) {
     if (!virtual_bag::valid_index(extension_bag) ||
         !extension_bag_session_admitted_locked()) return;
     if (g_virtual_bag_state.mode == virtual_bag::Mode::kOriginal) {
@@ -394,21 +516,111 @@ void handle_extension_tab_click_locked(int extension_bag) {
                 // 按钮有无。MakeDesc 同步尾跳 SetDescMenu（b89c0），临时把
                 // direct+GOT 双字节掩码为 1 使按钮恒生成，返回后立即恢复快照
                 // （成对写约定同 set_original_bag_locked；按钮在 panel+0x68，
-                // 不随恢复消失，点击回调已被模块 hook 接管）。此路径仅在游戏
-                // 线程的 commit_pending_extension_tab 内可达，无跨线程窗口。
+                // 不随恢复消失，点击回调已被模块 hook 接管）。Pending 路径在这些
+                // UI 回调期间释放运行时锁，并在返回后复核视图身份。
                 const int saved_bag = raw_direct_bag_locked();
                 const int saved_desc_type = raw_desc_type_locked();
-                if (qol::contracts::succeeded(g_write_port->ui.set_current_bag(1)) &&
-                    qol::contracts::succeeded(g_write_port->ui.set_desc_type(1))) {
-                    (void)g_write_port->ui.make_item_description(ctrl);
+                void* const tab_data = extension_bag_ui_data(ctrl);
+                void* const described_item = tab_data != nullptr
+                    ? *reinterpret_cast<void**>(tab_data) : nullptr;
+                const uint8_t bag_type = g_virtual_bag_state.types[extension_bag];
+                const int bag_capacity = g_virtual_bag_state.capacities[extension_bag];
+                if (tab_data == nullptr || described_item == nullptr) {
+                    QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                                  "extension bag description rejected missing control item bag=%d control=%p",
+                                  extension_bag, ctrl);
+                } else if (saved_bag < 0 || saved_desc_type < 0) {
+                    QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                                  "extension bag description rejected state snapshot bag=%d current_bag=%d desc_type=%d",
+                                  extension_bag, saved_bag, saved_desc_type);
+                } else if (unlockable_lock == nullptr) {
+                    const bool bag_set = qol::contracts::succeeded(
+                        g_write_port->ui.set_current_bag(1));
+                    const bool desc_set = bag_set && qol::contracts::succeeded(
+                        g_write_port->ui.set_desc_type(1));
+                    const bool made = desc_set && qol::contracts::succeeded(
+                        g_write_port->ui.make_item_description(ctrl));
+                    const bool bag_restored = saved_bag < 0 || qol::contracts::succeeded(
+                        g_write_port->ui.set_current_bag(saved_bag));
+                    const bool desc_restored = saved_desc_type < 0 || qol::contracts::succeeded(
+                        g_write_port->ui.set_desc_type(saved_desc_type));
+                    if (!bag_set || !desc_set || !made || !bag_restored || !desc_restored) {
+                        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                                      "extension bag description UI operation failed bag=%d bag_set=%d desc_set=%d made=%d bag_restored=%d desc_restored=%d",
+                                      extension_bag, bag_set ? 1 : 0, desc_set ? 1 : 0,
+                                      made ? 1 : 0, bag_restored ? 1 : 0,
+                                      desc_restored ? 1 : 0);
+                    } else {
+                        install_extension_desc_unequip_hook_locked(extension_bag);
+                    }
+                } else {
+                    const uint64_t generation = g_inventory_generation;
+                    void* const root = g_extension_tab_root;
+                    unlockable_lock->unlock();
+                    const bool bag_set = qol::contracts::succeeded(
+                        g_write_port->ui.set_current_bag(1));
+                    const bool desc_set = bag_set && qol::contracts::succeeded(
+                        g_write_port->ui.set_desc_type(1));
+                    const bool made = desc_set && qol::contracts::succeeded(
+                        g_write_port->ui.make_item_description(ctrl));
+                    const bool bag_restored = saved_bag < 0 || qol::contracts::succeeded(
+                        g_write_port->ui.set_current_bag(saved_bag));
+                    const bool desc_restored = saved_desc_type < 0 || qol::contracts::succeeded(
+                        g_write_port->ui.set_desc_type(saved_desc_type));
+                    unlockable_lock->lock();
+                    bool still_current = g_virtual_bag_enabled.load() &&
+                        extension_bag_session_admitted_locked() &&
+                        g_inventory_generation == generation &&
+                        g_extension_tab_root == root &&
+                        g_virtual_bag_state.mode == virtual_bag::Mode::kModule &&
+                        g_virtual_bag_state.selected == extension_bag &&
+                        g_virtual_bag_state.types[extension_bag] == bag_type &&
+                        g_virtual_bag_state.capacities[extension_bag] == bag_capacity &&
+                        g_tab_bag_items[extension_bag] == described_item &&
+                        extension_tab_control_is_current_locked(extension_bag, ctrl);
+                    if (still_current) {
+                        void* const current_data = extension_bag_ui_data(ctrl);
+                        still_current = current_data != nullptr &&
+                            *reinterpret_cast<void**>(current_data) == described_item;
+                    }
+                    if (!bag_set || !desc_set || !made || !bag_restored || !desc_restored) {
+                        QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                                      "extension bag description UI operation failed bag=%d bag_set=%d desc_set=%d made=%d bag_restored=%d desc_restored=%d",
+                                      extension_bag, bag_set ? 1 : 0, desc_set ? 1 : 0,
+                                      made ? 1 : 0, bag_restored ? 1 : 0,
+                                      desc_restored ? 1 : 0);
+                    }
+                    const bool description_ready = bag_set && desc_set && made &&
+                                                   bag_restored && desc_restored;
+                    if (!still_current || !description_ready) {
+                        if (!still_current) {
+                            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                         "extension bag description discarded after view changed bag=%d generation=%llu",
+                                         extension_bag,
+                                         static_cast<unsigned long long>(generation));
+                        }
+                        if (made) {
+                            bool closed = false;
+                            if (g_write_port->ui.description_set_off != nullptr) {
+                                unlockable_lock->unlock();
+                                closed = qol::contracts::succeeded(
+                                    g_write_port->ui.description_set_off());
+                                unlockable_lock->lock();
+                            }
+                            if (!closed) {
+                                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                                              "extension bag description close failed bag=%d",
+                                              extension_bag);
+                            }
+                        }
+                    } else {
+                        install_extension_desc_unequip_hook_locked(extension_bag);
+                    }
                 }
-                if (saved_bag >= 0) {
-                    (void)g_write_port->ui.set_current_bag(saved_bag);
-                }
-                if (saved_desc_type >= 0) {
-                    (void)g_write_port->ui.set_desc_type(saved_desc_type);
-                }
-                install_extension_desc_unequip_hook_locked(extension_bag);
+            } else {
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "extension bag description rejected UI adapter unavailable bag=%d control=%p",
+                              extension_bag, ctrl);
             }
             VIRTBAG_LOG("extension bag desc opened bag=%d", extension_bag);
         }
@@ -416,7 +628,10 @@ void handle_extension_tab_click_locked(int extension_bag) {
 }
 
 void queue_extension_tab_click_locked(int extension_bag) {
-    if (!virtual_bag::valid_index(extension_bag) ||
+    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked() ||
+        !virtual_bag::valid_index(extension_bag) ||
+        !extension_tab_control_is_current_locked(
+            extension_bag, g_extension_tab_buttons[static_cast<size_t>(extension_bag)]) ||
         g_extension_tab_generation != g_inventory_generation) {
         return;
     }
@@ -436,10 +651,33 @@ void extension_tab_button_clicked(void* ctrl) {
     queue_extension_tab_click_locked(extension_bag);
 }
 
-void commit_pending_extension_tab_locked() {
+bool extension_tab_control_is_current_locked(int index, void* control) {
+    if (!g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked() ||
+        !virtual_bag::valid_index(index) || control == nullptr ||
+        g_extension_tab_root == nullptr || g_extension_tab_buttons[index] != control ||
+        g_extension_tab_generation != g_inventory_generation ||
+        extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer) !=
+            g_extension_tab_root) {
+        return false;
+    }
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(g_extension_tab_root, &child_count)) return false;
+    for (int child = 0; child < child_count; ++child) {
+        if (extension_bag_ui_child_at(g_extension_tab_root, child) == control) {
+            return valid_child_locked(g_extension_tab_root, child) == control;
+        }
+    }
+    return false;
+}
+
+void commit_pending_extension_tab_locked(std::unique_lock<std::mutex>& lock) {
     if (!virtual_bag::valid_index(g_pending_extension_tab) ||
+        !g_virtual_bag_enabled.load() || !extension_bag_session_admitted_locked() ||
         g_pending_extension_tab_generation != g_inventory_generation ||
-        g_extension_tab_generation != g_inventory_generation) {
+        g_extension_tab_generation != g_inventory_generation ||
+        !extension_tab_control_is_current_locked(
+            g_pending_extension_tab,
+            g_extension_tab_buttons[static_cast<size_t>(g_pending_extension_tab)])) {
         g_pending_extension_tab = -1;
         g_pending_extension_tab_generation = 0;
         return;
@@ -447,7 +685,7 @@ void commit_pending_extension_tab_locked() {
     const int extension_bag = g_pending_extension_tab;
     g_pending_extension_tab = -1;
     g_pending_extension_tab_generation = 0;
-    handle_extension_tab_click_locked(extension_bag);
+    handle_pending_extension_tab_click_locked(lock, extension_bag);
 }
 
 bool module_cache_clear_preflight_locked() {
@@ -956,9 +1194,9 @@ bool category_is_extension_backpack(int category) {
 #include "plugins/extension_bag/extension_bag_transaction.inc"
 bool persist_state_locked(bool force) {
     (void)force;
-    // P3c：持久化唯一由 save.slot_data 的 capture/complete 承担（capture 在 core.save
-    // 联合保存事务内执行）。SAVE_SaveInventory 可能在原版保存结果未知前运行，
-    // 它绝不能直接持久化扩展状态（R-60 门禁只还原投影）。
+    // The bool reports acceptance of the in-memory mutation for callers' rollback decisions;
+    // it does not report durable staging. slot_data capture/complete persists state in the
+    // core.save transaction, and force cannot bypass that boundary.
     return true;
 }
 

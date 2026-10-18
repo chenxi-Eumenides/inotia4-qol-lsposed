@@ -417,10 +417,12 @@ bool set_virtual_bag_enabled(bool enabled) {
         std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
         g_virtual_bag_enabled.store(enabled);
         if (!enabled) {
-            restore_module_view_locked();
+            teardown_extension_bag_hosts_locked();
             g_virtual_bag_state.mode = virtual_bag::Mode::kOriginal;
             g_virtual_bag_state.selected = -1;
             g_virtual_bag_state.inspected = -1;
+            g_extension_drag = {};
+            g_extension_touch_capture = false;
         }
     }
     if (!set_extension_source_protection_enabled(enabled)) {
@@ -506,7 +508,8 @@ bool virtual_bag_module_save_validate_locked() {
 bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
-        g_projected_item_root == nullptr || g_sdk == nullptr || g_sdk->ui == nullptr) {
+        g_sdk == nullptr || g_sdk->ui == nullptr ||
+        !ensure_module_view_root_current_locked()) {
         return false;
     }
     if (!virtual_bag::valid_original_transaction_bag(display_bag) ||
@@ -523,14 +526,20 @@ bool virtual_bag_sync_projected_item_control(void* control) {
     if (control == nullptr) return false;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
     if (!g_module_view_installed || !virtual_bag::valid_index(g_module_view_index) ||
-        g_projected_item_root == nullptr || g_sdk == nullptr || g_sdk->ui == nullptr) {
+        g_sdk == nullptr || g_sdk->ui == nullptr ||
+        !ensure_module_view_root_current_locked()) {
         return false;
     }
     const int capacity = g_virtual_bag_state.capacities[g_module_view_index];
     for (int slot = 0; slot < capacity; ++slot) {
         if (extension_bag_ui_child_at(g_projected_item_root, slot) == control) {
-            (void)extension_bag_ui_set_control_item(
-                control, g_module_objects[g_module_view_index][slot]);
+            if (!extension_bag_ui_set_control_item(
+                    control, g_module_objects[g_module_view_index][slot])) {
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "ERROR projected control sync failed bag=%d slot=%d control=%p",
+                              g_module_view_index, slot, control);
+                return false;
+            }
             return true;
         }
     }
