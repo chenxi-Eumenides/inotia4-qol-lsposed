@@ -235,6 +235,9 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
     // 校正为 required × failSoft —— 装配期失败保持 free + degraded，插件活跃且 free
     // 时宿主每逻辑帧重试到成功，语义等价旧 300ms 重试线程。
     // gate=nullptr：资源跟随插件 lifecycle，单一 feature 关闭即整体还原。
+    // Core-only scope: store/mix/detail hosts are intentionally not registered.
+    // Their implementations remain under ui/ for a later re-enable; adding the
+    // corresponding claims back is the activation point.
     static const ::qol::contracts::ResourceClaim kClaims[] = {
         {
             kEbM1SaveInventory,
@@ -249,20 +252,6 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             nullptr,
             120,
             reinterpret_cast<void*>(&save_inventory_wrapper),
-        },
-        {
-            kEbM2StoreSellItem,
-            "extension.store_sell_item",
-            ::qol::contracts::ResourceMechanism::kEntryHook,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft,
-            true,
-            "extension_bag",
-            "商店出售入口按弹窗载荷反推数量后接管整堆/部分出售；原版物品经 backup 透传",
-            nullptr,
-            120,
-            reinterpret_cast<void*>(&store_sell_item_wrapper),
         },
         {
             kEbP1InventoryPopup,
@@ -291,48 +280,6 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             nullptr,
             120,
             reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbSavePopupOps)),
-        },
-        {
-            kEbP3StorePopup,
-            kEbP3StorePopup,
-            ::qol::contracts::ResourceMechanism::kOwnership,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft,
-            true,
-            "extension_bag",
-            "商店 PopupState 条目需换模块 enter/f3/event（部分 wrap），商店投影与袋列遮蔽依赖此三回调",
-            nullptr,
-            120,
-            reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbStorePopupOps)),
-        },
-        {
-            kEbP4MixPopup,
-            kEbP4MixPopup,
-            ::qol::contracts::ResourceMechanism::kOwnership,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft,
-            true,
-            "extension_bag",
-            "合成 PopupState 条目需换模块 enter/f3（部分 wrap），合成投影与袋列遮蔽依赖此两回调",
-            nullptr,
-            120,
-            reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbMixPopupOps)),
-        },
-        {
-            kEbS1DescSlots,
-            kEbS1DescSlots,
-            ::qol::contracts::ResourceMechanism::kOwnership,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft,
-            true,
-            "extension_bag",
-            "11 个动态 desc 实例槽命名空间占位；per-item 安装由 Host SDK 动态绑定器管理",
-            nullptr,
-            120,
-            reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbDescSlotsOps)),
         },
         // ---- D2a-3b-2 → P3c：C1–C8 存档 callsite 重定向已删除 ----
         // P3c 起 SAVE_Save 入口由 core.save 的 hook:SAVE_Save 接管（联合保存经协调器），
@@ -386,80 +333,8 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             "ITEM_DrawPorting 绘制门禁 wrapper（悬空指针/未知物品拦截，防崩）",
             nullptr, 120, reinterpret_cast<void*>(&item_draw_porting_gate),
         },
-        {
-            "patch:P_EXT_DESC_OPEN_GATE", "P_EXT_DESC_OPEN_GATE",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "物品 desc 打开入口 wrapper（desc 菜单装备按钮 hook 安装点）",
-            nullptr, 120, reinterpret_cast<void*>(&make_desc_equip_gate),
-        },
         // ---- C15–C19 商店宿主（装饰型 optional：缺省不终态化插件）----
-        {
-            "patch:P_EXT_STORE_DESC", "P_EXT_STORE_DESC",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kOptional,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "商店 desc 打开门禁 wrapper（扩展物品详情接管）",
-            nullptr, 120, reinterpret_cast<void*>(&store_make_desc_gate),
-        },
-        {
-            "patch:P_EXT_STORE_DRAW_END", "P_EXT_STORE_DRAW_END",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "商店绘制收尾 wrapper（页签/投影收尾）",
-            nullptr, 120, reinterpret_cast<void*>(&store_draw_end_wrapper),
-        },
-        {
-            "patch:P_EXT_STORE_BAG_DRAW", "P_EXT_STORE_BAG_DRAW",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kOptional,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "商店袋列 B 尾调用 wrapper（R-57 原版袋列高亮遮蔽；站点 kind=kBranchRedirect）",
-            nullptr, 120, reinterpret_cast<void*>(&store_draw_inven_bag_group_wrapper),
-        },
-        {
-            "patch:P_EXT_STORE_BUY_GATE_1", "P_EXT_STORE_BUY_GATE_1",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "买入预检门禁 wrapper：原版袋无空位但扩展袋有空位时放行收编",
-            nullptr, 120, reinterpret_cast<void*>(&store_buy_find_slot_gate),
-        },
-        {
-            "patch:P_EXT_STORE_BUY_GATE_2", "P_EXT_STORE_BUY_GATE_2",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "买入预检门禁 wrapper：原版袋无空位但扩展袋有空位时放行收编",
-            nullptr, 120, reinterpret_cast<void*>(&store_buy_find_slot_gate),
-        },
         // ---- C20–C21 合成宿主（C21 装饰型 optional）----
-        {
-            "patch:P_EXT_MIX_DRAW_END", "P_EXT_MIX_DRAW_END",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kRequired,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "合成绘制收尾 wrapper（页签/投影收尾）",
-            nullptr, 120, reinterpret_cast<void*>(&mix_draw_end_wrapper),
-        },
-        {
-            "patch:P_EXT_MIX_BAG_DRAW", "P_EXT_MIX_BAG_DRAW",
-            ::qol::contracts::ResourceMechanism::kCallPatch,
-            ::qol::contracts::ResourcePolicy::kPrivate,
-            ::qol::contracts::ResourceRequirement::kOptional,
-            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
-            "合成袋列 wrapper（R-57 原版袋列高亮遮蔽）",
-            nullptr, 120, reinterpret_cast<void*>(&mix_draw_inven_bag_group_wrapper),
-        },
     };
     if (out_count != nullptr) {
         *out_count = static_cast<uint32_t>(sizeof(kClaims) / sizeof(kClaims[0]));
