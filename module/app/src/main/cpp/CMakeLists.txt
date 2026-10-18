@@ -16,7 +16,9 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/inventory_hooks/inventory_hook_stage4.cpp
     plugins/inventory_hooks/inventory_slot.cpp
     plugins/extension_bag/extension_bag_state.cpp
-    plugins/extension_bag/runtime.cpp
+    plugins/extension_bag/runtime_access.cpp
+    plugins/extension_bag/runtime_tabs_ui.cpp
+    plugins/extension_bag/runtime_orchestrator.cpp
     plugins/extension_bag/public_runtime.cpp
     plugins/extension_bag/runtime_bind.cpp
     plugins/extension_bag/api_impl.cpp
