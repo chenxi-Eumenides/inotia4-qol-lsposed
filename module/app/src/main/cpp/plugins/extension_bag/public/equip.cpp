@@ -556,15 +556,12 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     // Only the EB bag detail belongs to this plugin. Original bag unequip stays
     // entirely original; INVEN_SaveItem's wrapper performs the EB adoption when
     // the original inventory has no space.
-    int32_t desc_type = 0;
-    if (runtime_state().host.game == nullptr ||
-        runtime_state().host.write_port->ui.desc_type == nullptr ||
-        !qol::contracts::succeeded(
-            runtime_state().host.write_port->ui.desc_type(&desc_type)) ||
-        desc_type != 1) {
+    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
         return false;
     }
-    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) return false;
+    // EB bag detail restores desc_type after MakeDesc, so the button click no
+    // longer observes desc_type=1. The armed bag index plus selected/info bag
+    // identity is the stable EB-detail ownership check.
     const int ext_bag = runtime_state().ui.extension_desc_unequip_bag;
     const bool owns_desc = virtual_bag::valid_index(ext_bag) &&
                            runtime_state().objects.bag.selected == ext_bag &&

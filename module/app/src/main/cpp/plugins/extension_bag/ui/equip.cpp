@@ -441,14 +441,25 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
             int item_bag = -1;
             int item_slot = -1;
             if (module_slot_of_item_locked(item, &item_bag, &item_slot)) {
-                runtime_state().ui.extension_desc_item = item;
-                runtime_state().ui.extension_desc_item_bag = item_bag;
-                runtime_state().ui.extension_desc_item_slot = item_slot;
-                // 装备/卸下按钮由函数级 hook
-                // （ButtonEquipExe 第 10）承担，观察 hook 只覆盖其他详情按钮。
-                install_extension_desc_item_hooks_locked(item);
-                QOL_LOG_INFO(QolDomain::kExtensionBag, "extension desc item captured bag=%d slot=%d item=%p", item_bag,
-                            item_slot, item);
+                int item_category = -1;
+                if (read_item_category(item, &item_category) &&
+                    category_is_extension_backpack(item_category)) {
+                    // 袋详情保留原版 UnequipExe；卸袋由函数级入口识别，
+                    // 不能安装普通物品的 V2 详情 hook（否则会落到分解分支）。
+                    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                                 "extension bag desc keeps original unequip bag=%d slot=%d item=%p",
+                                 item_bag, item_slot, item);
+                } else {
+                    runtime_state().ui.extension_desc_item = item;
+                    runtime_state().ui.extension_desc_item_bag = item_bag;
+                    runtime_state().ui.extension_desc_item_slot = item_slot;
+                    // 装备/卸下按钮由函数级 hook
+                    // （ButtonEquipExe 第 10）承担，观察 hook 只覆盖其他详情按钮。
+                    install_extension_desc_item_hooks_locked(item);
+                    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                                 "extension desc item captured bag=%d slot=%d item=%p", item_bag,
+                                 item_slot, item);
+                }
             }
         }
     }
