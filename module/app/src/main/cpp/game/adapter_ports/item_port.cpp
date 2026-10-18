@@ -259,6 +259,12 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid item view args");
     }
+    // A resolved handle can outlive the native item when a lifecycle path fails
+    // to invalidate it. Do not dereference an unmapped pointer here; report the
+    // stale handle so the caller can skip it instead of taking SIGSEGV.
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return error_result(kQolErrNotFound, "stale item pointer");
+    }
     *out = {};
     const auto* bytes = static_cast<const uint8_t*>(item);
     const uint16_t type_flags = *reinterpret_cast<const uint16_t*>(bytes + I_TYPE);

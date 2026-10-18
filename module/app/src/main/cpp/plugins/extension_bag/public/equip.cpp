@@ -630,7 +630,14 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
         }
     }
     if (receiving_bag >= 0) {
-        (void)runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr);
+        if (!qol::contracts::succeeded(
+                runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr))) {
+            VIRTBAG_LOG("original bag unequip->original bag clear failed bag=%d dst=%d item=%p",
+                        bag_index, receiving_bag, item);
+        }
+        // SaveItemOnEmpty may merge or replace the source object. The old
+        // game-owned handle must not survive into the next core.item snapshot.
+        (void)extension_bag_invalidate_game_item_handle(item);
         extension_bag_mark_dirty_locked();
         persist_state_locked();
         extension_description_set_off();
@@ -686,10 +693,23 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
                     adopt_bag, adopt_slot);
         return false;
     }
+    // Clear the original bag row before rebinding ownership. If the clear
+    // fails, the game-owned table must not keep pointing at a provider-owned
+    // object; abort before changing handle ownership.
+    if (!qol::contracts::succeeded(
+            runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr))) {
+        descriptor = virtual_bag::Item{};
+        if (adopted_handle != 0) ownership::release(&runtime_state().objects.ownership_ledger, adopted_handle);
+        runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
+        VIRTBAG_LOG("original bag unequip->extension clear failed bag=%d slot=%d",
+                    bag_index, adopt_slot);
+        return false;
+    }
     if (!extension_bag_rebind_item_handle(item)) {
         descriptor = virtual_bag::Item{};
         if (adopted_handle != 0) ownership::release(&runtime_state().objects.ownership_ledger, adopted_handle);
         runtime_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
+        (void)runtime_state().host.write_port->ui.set_original_bag_item(bag_index, item);
         VIRTBAG_LOG("original bag unequip handle registration failed bag=%d slot=%d",
                     adopt_bag, adopt_slot);
         return false;
@@ -697,7 +717,6 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     runtime_state().objects.module_objects[adopt_bag][adopt_slot] = item;
     runtime_state().objects.module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
     runtime_state().objects.module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
-    (void)runtime_state().host.write_port->ui.set_original_bag_item(bag_index, nullptr);
     extension_bag_mark_dirty_locked();
     persist_state_locked();
     extension_description_set_off();

@@ -220,11 +220,16 @@ int fake_find_save_slot(void*, int8_t* out_slot) {
 uintptr_t fn_resolve(const char*, uintptr_t vma) { return vma; }
 
 bool game_memory_accessible(const void* address, size_t size, char) {
-    if (!g_move_merge_fake_memory_enabled || address == nullptr || size == 0) return false;
-    const uintptr_t begin = reinterpret_cast<uintptr_t>(g_move_merge_fake_memory.data());
-    const uintptr_t target = reinterpret_cast<uintptr_t>(address);
-    return target >= begin && target - begin <= g_move_merge_fake_memory.size() &&
-           size <= g_move_merge_fake_memory.size() - (target - begin);
+    if (address == nullptr || size == 0) return false;
+    const auto in_range = [&](const auto& storage) {
+        const uintptr_t begin = reinterpret_cast<uintptr_t>(storage.data());
+        const uintptr_t target = reinterpret_cast<uintptr_t>(address);
+        return target >= begin && target - begin <= storage.size() &&
+               size <= storage.size() - (target - begin);
+    };
+    if (in_range(g_inventory_new_item) || in_range(g_inventory_physical_item)) return true;
+    if (!g_move_merge_fake_memory_enabled) return false;
+    return in_range(g_move_merge_fake_memory);
 }
 
 namespace qol {

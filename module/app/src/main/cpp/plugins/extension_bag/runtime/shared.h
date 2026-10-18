@@ -8,6 +8,7 @@
 // They stay shared because they do not have one narrower runtime owner.
 void extension_bag_mark_dirty_locked();
 uint64_t extension_bag_item_revision_locked();
+bool extension_bag_invalidate_game_item_handle(void* item);
 bool p5_observation_enabled();
 bool p5_panel_observation_enabled();
 bool p5_should_begin_item_observation(uint64_t event);

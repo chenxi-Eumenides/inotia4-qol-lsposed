@@ -56,6 +56,18 @@ void extension_bag_invalidate_item_handle(void* item) {
                                                  status == qol::contracts::kQolItemHandleStatusOk);
 }
 
+bool extension_bag_invalidate_game_item_handle(void* item) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || api == nullptr || api->lookup_item == nullptr ||
+        api->invalidate_item == nullptr) return false;
+    qol::contracts::QolItemHandle handle{};
+    uint32_t owner = 0;
+    if (api->lookup_item(item, &handle, &owner) != qol::contracts::kQolItemHandleStatusOk ||
+        owner != qol::contracts::kQolItemHandleOwnerGame) return false;
+    return api->invalidate_item(item, qol::contracts::kQolItemHandleOwnerGame) ==
+           qol::contracts::kQolItemHandleStatusOk;
+}
+
 bool extension_bag_rebind_item_handle(void* item) {
     const auto* api = item_handle_api();
     if (item == nullptr || api == nullptr) return false;
