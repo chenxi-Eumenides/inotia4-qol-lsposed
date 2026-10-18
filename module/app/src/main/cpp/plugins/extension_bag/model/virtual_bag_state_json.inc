@@ -273,10 +273,12 @@ inline bool parse_state_json(const char* json, State* state,
             char* category_end = nullptr;
             long category_value = strtol(category + strlen("\"category\":"), &category_end, 10);
             char* count_end = nullptr;
-            long count_value = strtol(count + strlen("\"count\":"), &count_end, 10);
+            const long long count_value =
+                strtoll(count + strlen("\"count\":"), &count_end, 10);
             if (category_end == category + static_cast<std::ptrdiff_t>(strlen("\"category\":")) ||
                 count_end == count + static_cast<std::ptrdiff_t>(strlen("\"count\":")) ||
-                category_value < 0 || count_value < 0) {
+                category_value < 0 || count_value < 0 ||
+                count_value > static_cast<long long>(std::numeric_limits<int>::max())) {
                 return false;
             }
             Item& item = parsed.items[bag][slot];
@@ -290,19 +292,10 @@ inline bool parse_state_json(const char* json, State* state,
                              item.category);
                 return false;
             }
-            // canonical 数量是 sidecar 的持久化语义，与当前运行时配置无关。
-            // 读档不能把启用态保存的 canonical 数量截成关闭态视图。
+            // canonical 数量是 sidecar 的持久化语义，与当前运行时配置无关；只拒绝
+            // 无法表示为 State::Item::count 的值，不按 CountPolicy 上限截断。
             const CountPolicy& count_rules = policy == nullptr ? count_policy() : *policy;
-            const uint32_t canonical_count =
-                count_value > static_cast<long>(count_rules.limit(true))
-                    ? count_rules.limit(true)
-                    : static_cast<uint32_t>(count_value);
-            if (count_value > static_cast<long>(count_rules.limit(true))) {
-                std::fprintf(stderr,
-                             "virtual_bag state_json count canonicalized category=%d "
-                             "from=%ld to=%u reason=absolute_max\n",
-                             item.category, count_value, canonical_count);
-            }
+            const uint32_t canonical_count = static_cast<uint32_t>(count_value);
             item.count = static_cast<int>(canonical_count);
             const char* payload_key = strstr(object_start, "\"payload\":\"");
             if (payload_key != nullptr && payload_key < object_end) {

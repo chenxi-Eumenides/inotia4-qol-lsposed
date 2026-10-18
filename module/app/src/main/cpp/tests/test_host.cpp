@@ -1552,8 +1552,8 @@ static void test_virtual_bag_json_count_clamp() {
     CHECK(virtual_bag::parse_state_json(
         virtual_bag::state_json(oversized_state).c_str(), &oversized_parsed,
         host_category_uses_stack_count));
-    CHECK_EQ(oversized_parsed.items[0][0].count, 999);
-    CHECK_EQ(virtual_bag::payload_count(oversized_parsed.items[0][0]), 999u);
+    CHECK_EQ(oversized_parsed.items[0][0].count, 1000);
+    CHECK_EQ(virtual_bag::payload_count(oversized_parsed.items[0][0]), 1000u);
 
     virtual_bag::State cross_config_state{};
     cross_config_state.items[0][0].category = 401;

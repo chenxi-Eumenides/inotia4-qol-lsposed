@@ -10,14 +10,18 @@ struct DeferredItemFree {
 };
 
 constexpr size_t kDeferredFreeQueueCapacity = 16;
+// The custody tier is a separate fixed retention budget, not a consequence of the live ledger
+// population: successfully deferred releases free ledger slots, so a long touch window can
+// accumulate more retired objects than the ledger can hold at one time.
+constexpr size_t kDeferredFreeCustodyCapacity = 128;
 constexpr size_t kDeferredFreeMaxPending =
-    kDeferredFreeQueueCapacity + ownership::kLedgerCapacity;
+    kDeferredFreeQueueCapacity + kDeferredFreeCustodyCapacity;
 std::array<DeferredItemFree, kDeferredFreeQueueCapacity> g_deferred_free_queue{};
 size_t g_deferred_free_queue_head = 0;
 size_t g_deferred_free_queue_size = 0;
-// 延迟释放积压上限为主队列 16 项加独立保管区 128 项。触摸窗口期间超过上限时
-// 入队失败；调用方必须保留源指针/所有权状态，不得据此替换或摘除对象。
-std::array<DeferredItemFree, ownership::kLedgerCapacity> g_deferred_free_custody{};
+// 总上限固定为 16+128 项；满载时入队 fail-closed，调用方必须保留源指针/所有权状态，
+// 不得据此替换或摘除对象。两层容量不随积压动态扩张。
+std::array<DeferredItemFree, kDeferredFreeCustodyCapacity> g_deferred_free_custody{};
 size_t g_deferred_free_custody_size = 0;
 
 bool object_touch_window_active_locked();
@@ -140,7 +144,7 @@ void drain_deferred_frees_locked() {
             g_deferred_free_custody, 0, custody_count, can_free, free_entry);
     if (custody_result.unprocessed != 0) {
         VIRTBAG_LOG_ERROR("ERROR deferred free custody size exceeded capacity size=%zu capacity=%zu",
-                          custody_count, ownership::kLedgerCapacity);
+                          custody_count, kDeferredFreeCustodyCapacity);
     }
     g_deferred_free_custody_size = custody_result.kept;
     VIRTBAG_LOG("deferred free drain queue=%zu/%zu custody=%zu/%zu freed=%zu",
@@ -199,7 +203,12 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
     if (deferred) {
         const uint64_t generation = module_object_generation_locked(item, handle);
         if (!enqueue_deferred_item_free_locked(item, handle, generation)) {
-            (void)ownership::cancel_reserved_release(&g_ownership_ledger, handle);
+            if (ownership::cancel_reserved_release(&g_ownership_ledger, handle) !=
+                ownership::Outcome::kOk) {
+                VIRTBAG_LOG_ERROR("ERROR ownership release reservation rollback failed "
+                                  "context=%s handle=%u item=%p",
+                                  context, handle, item);
+            }
             return false;
         }
     } else if (!extension_free_item(item)) {
@@ -207,7 +216,12 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
                           context, handle, item);
         const uint64_t generation = module_object_generation_locked(item, handle);
         if (!enqueue_deferred_item_free_locked(item, handle, generation)) {
-            (void)ownership::cancel_reserved_release(&g_ownership_ledger, handle);
+            if (ownership::cancel_reserved_release(&g_ownership_ledger, handle) !=
+                ownership::Outcome::kOk) {
+                VIRTBAG_LOG_ERROR("ERROR ownership release reservation rollback failed "
+                                  "context=%s handle=%u item=%p",
+                                  context, handle, item);
+            }
             VIRTBAG_LOG_ERROR("ERROR native item free retry queue full context=%s handle=%u item=%p",
                               context, handle, item);
             return false;
@@ -247,8 +261,14 @@ void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
 void handover_tracked_item_locked(uint32_t handle, void* item, const char* context) {
     if (ownership::handover_to_inventory(&g_ownership_ledger, handle) !=
         ownership::Outcome::kOk) {
-        defer_item_free_locked(item);
-        VIRTBAG_LOG("ownership handover reject; deferred context=%s", context);
+        if (defer_item_free_locked(item)) {
+            VIRTBAG_LOG("ownership handover reject; custody retained context=%s item=%p",
+                        context, item);
+        } else {
+            VIRTBAG_LOG_ERROR("ERROR ownership handover reject; custody unavailable "
+                              "context=%s handle=%u item=%p",
+                              context, handle, item);
+        }
     }
     log_ownership_audit_locked(context);
 }
@@ -257,8 +277,14 @@ void release_tracked_item_locked(uint32_t handle, void* item, const char* contex
     if (ownership::release(&g_ownership_ledger, handle) == ownership::Outcome::kOk) {
         release_temporary_item_locked(item);
     } else {
-        defer_item_free_locked(item);
-        VIRTBAG_LOG("ownership release reject; deferred context=%s", context);
+        if (defer_item_free_locked(item)) {
+            VIRTBAG_LOG("ownership release reject; custody retained context=%s item=%p",
+                        context, item);
+        } else {
+            VIRTBAG_LOG_ERROR("ERROR ownership release reject; custody unavailable "
+                              "context=%s handle=%u item=%p",
+                              context, handle, item);
+        }
     }
     log_ownership_audit_locked(context);
 }
@@ -488,7 +514,13 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
             extension_bag_write_api()->inventory.free_item == nullptr) {
             deferred = enqueue_deferred_item_free_locked(release.item, release.handle,
                                                          release.generation);
-            if (!deferred) return false;
+            if (!deferred) {
+                // module_use_finish_locked keeps this pointer in use.item with pending_release;
+                // failure leaves the slot reserved and the caller must not report completion.
+                VIRTBAG_LOG_ERROR("ERROR module-use release retained bag=%d slot=%d handle=%u item=%p",
+                                  release.bag, release.slot, release.handle, release.item);
+                return false;
+            }
         }
     }
     if (!deferred && !extension_free_item(release.item)) {

@@ -29,6 +29,9 @@ constexpr const char* kEbS1DescSlots = "own:desc_button_execute_slots";
 ::qol::contracts::QolPopupStateEntry g_store_popup_entry{};
 ::qol::contracts::QolPopupStateEntry g_mix_popup_entry{};
 
+bool extension_bag_restore_popup(::qol::contracts::QolPopupStateEntry* entry,
+                                 const char* popup_name);
+
 // 从安装前快照读取函数指针/整数（部分 wrap 与原生 backup 同源）。
 template <typename T>
 T extension_bag_backup_value(const uint8_t* backup, size_t offset) {
@@ -74,10 +77,7 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
 void extension_bag_inventory_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_inventory_popup_entry.slot != nullptr && g_sdk != nullptr &&
-        g_sdk->hooks.popup_restore != nullptr) {
-        (void)g_sdk->hooks.popup_restore(&g_inventory_popup_entry);
-    }
+    if (!extension_bag_restore_popup(&g_inventory_popup_entry, "inventory")) return;
     g_state_entry = nullptr;
     g_orig_enter = nullptr;
     g_inventory_enter = 0;
@@ -107,10 +107,7 @@ int32_t extension_bag_save_popup_acquire(const char* id) {
 void extension_bag_save_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_save_popup_entry.slot != nullptr && g_sdk != nullptr &&
-        g_sdk->hooks.popup_restore != nullptr) {
-        (void)g_sdk->hooks.popup_restore(&g_save_popup_entry);
-    }
+    if (!extension_bag_restore_popup(&g_save_popup_entry, "save")) return;
     g_save_state_entry = nullptr;
     g_orig_save_enter = nullptr;
     g_save_panel_hook_installed = false;
@@ -146,10 +143,7 @@ int32_t extension_bag_store_popup_acquire(const char* id) {
 void extension_bag_store_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_store_popup_entry.slot != nullptr && g_sdk != nullptr &&
-        g_sdk->hooks.popup_restore != nullptr) {
-        (void)g_sdk->hooks.popup_restore(&g_store_popup_entry);
-    }
+    if (!extension_bag_restore_popup(&g_store_popup_entry, "store")) return;
     store_state_entry = nullptr;
     store_original_enter = nullptr;
     store_original_f3 = nullptr;
@@ -179,13 +173,30 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
 void extension_bag_mix_popup_release(const char* id) {
     (void)id;
     std::lock_guard<std::mutex> lock(g_virtual_bag_mtx);
-    if (g_mix_popup_entry.slot != nullptr && g_sdk != nullptr &&
-        g_sdk->hooks.popup_restore != nullptr) {
-        (void)g_sdk->hooks.popup_restore(&g_mix_popup_entry);
-    }
+    if (!extension_bag_restore_popup(&g_mix_popup_entry, "mix")) return;
     mix_state_entry = nullptr;
     mix_original_enter = nullptr;
     mix_original_f3 = nullptr;
+}
+
+// Restore receives a copy so a failed Host call cannot mutate the only retry token.
+bool extension_bag_restore_popup(::qol::contracts::QolPopupStateEntry* entry,
+                                 const char* popup_name) {
+    if (entry == nullptr || entry->slot == nullptr) return true;
+    if (g_sdk == nullptr || g_sdk->hooks.popup_restore == nullptr) {
+        VIRTBAG_LOG_ERROR("ERROR popup restore unavailable popup=%s entry=%p",
+                          popup_name, entry->slot);
+        return false;
+    }
+    auto restore_entry = *entry;
+    const QolResult result = g_sdk->hooks.popup_restore(&restore_entry);
+    if (!qol::contracts::succeeded(result)) {
+        VIRTBAG_LOG_ERROR("ERROR popup restore failed popup=%s entry=%p code=%d",
+                          popup_name, entry->slot, result.code);
+        return false;
+    }
+    *entry = {};
+    return true;
 }
 
 // ---- S1：desc 动态实例槽命名空间占位（per-item 安装仍是业务 raw 写入）----

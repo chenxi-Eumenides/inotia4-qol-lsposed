@@ -89,7 +89,8 @@ QolResult eb_sd_session_ready(void* /*user*/, const QolSlotDataContext* ctx) {
     return eb_ok();
 }
 
-// bytes 仅本次调用有效；missing 生成默认状态；不可读/版本不支持明确阻断（不伪装缺失）。
+// bytes 仅本次调用有效；missing 生成默认状态；仅 v4 可解析。非 v4、不可读或解析失败
+// 均阻断当前会话，不尝试旧版本迁移，也不以空状态替代损坏数据。
 QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t presence,
                      uint32_t stored_version, const uint8_t* bytes, uint64_t size) {
     virtual_bag::State* state = extension_bag_state();
@@ -117,8 +118,17 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
         QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=unreadable");
         return qol::contracts::error(kQolErrInternal, "section unreadable", 20);
     }
-    std::string payload(reinterpret_cast<const char*>(bytes), static_cast<std::size_t>(size));
-    // 解析语义与旧 Kotlin 归一化一致：未知版本尽力解析、pending 隔离、失败回退空状态。
+    if (size > 0 && bytes == nullptr) {
+        g_session_blocked.store(true, std::memory_order_release);
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "slot data blocked reason=missing_payload_bytes slot=%d size=%llu",
+                     ctx->session.slot, static_cast<unsigned long long>(size));
+        return qol::contracts::error(kQolErrInvalidArgument, "section payload missing", 24);
+    }
+    std::string payload;
+    if (size > 0) payload.assign(reinterpret_cast<const char*>(bytes),
+                                 static_cast<std::size_t>(size));
+    // v4 payload 中的非法 pending 仅隔离该事务；状态 JSON 解析失败则阻断会话。
     std::lock_guard<std::mutex> state_lock(g_virtual_bag_mtx);
     virtual_bag::PendingTransfer rejected_pending{};
     const bool has_pending = payload.find("\"pending\":") != std::string::npos;
@@ -260,6 +270,12 @@ void eb_sd_complete(void* /*user*/, const QolSlotDataContext* ctx, uint32_t outc
 #if defined(QOL_EXTENSION_BAG_SLOT_DATA_TEST_SEAMS)
 void extension_bag_slot_data_complete_for_test(const QolSlotDataContext* ctx, uint32_t outcome) {
     eb_sd_complete(nullptr, ctx, outcome);
+}
+
+QolResult extension_bag_slot_data_load_for_test(const QolSlotDataContext* ctx, uint32_t presence,
+                                                uint32_t stored_version, const uint8_t* bytes,
+                                                uint64_t size) {
+    return eb_sd_load(nullptr, ctx, presence, stored_version, bytes, size);
 }
 #endif
 

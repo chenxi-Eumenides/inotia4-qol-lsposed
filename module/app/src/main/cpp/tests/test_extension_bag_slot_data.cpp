@@ -25,6 +25,8 @@ void extension_bag_mark_dirty_locked() {
 }
 uint64_t extension_bag_item_revision_locked() { return g_item_revision; }
 void extension_bag_slot_data_complete_for_test(const qol::contracts::QolSlotDataContext*, uint32_t);
+QolResult extension_bag_slot_data_load_for_test(
+    const qol::contracts::QolSlotDataContext*, uint32_t, uint32_t, const uint8_t*, uint64_t);
 
 namespace qol::features::extension_bag {
 const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return nullptr; }
@@ -129,6 +131,109 @@ qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int) 
     return qol::contracts::QolItemCountEncoding::kEncoded;
 }
 
+namespace {
+uint32_t limited_count_limit(bool) { return 9; }
+qol::contracts::QolItemCountEncoding unknown_count_encoding(int) {
+    return qol::contracts::QolItemCountEncoding::kUnknown;
+}
+
+const virtual_bag::CountPolicy kLimitedCountPolicy{
+    &virtual_bag::default_canonical_count,
+    &virtual_bag::default_view_count,
+    &virtual_bag::default_write_view,
+    &virtual_bag::default_write_canonical,
+    &limited_count_limit,
+};
+
+bool test_canonical_count_above_limit_preserved() {
+    virtual_bag::State source{};
+    source.items[0][0] = virtual_bag::Item{321, 100};
+    source.items[0][0].payload_size = virtual_bag::kPayloadHeaderSize;
+    source.items[0][0].payload[0] =
+        static_cast<uint8_t>(source.items[0][0].payload_size - 1);
+    uint32_t payload_count = 100;
+    std::memcpy(source.items[0][0].payload.data() + virtual_bag::kPayloadCountOffset,
+                &payload_count, sizeof(payload_count));
+    const std::string json = virtual_bag::state_json(source);
+
+    virtual_bag::State parsed{};
+    const bool loaded = virtual_bag::parse_state_json_at(
+        json.c_str(), &parsed, 0, virtual_bag_category_uses_stack_count,
+        &kLimitedCountPolicy);
+    CHECK(loaded);
+    CHECK(parsed.items[0][0].count == 100);
+    uint32_t parsed_payload_count = 0;
+    std::memcpy(&parsed_payload_count,
+                parsed.items[0][0].payload.data() + virtual_bag::kPayloadCountOffset,
+                sizeof(parsed_payload_count));
+    CHECK(parsed_payload_count == 100);
+
+    std::string unrepresentable = json;
+    const std::string canonical_count = "\"count\":100";
+    const auto count_offset = unrepresentable.find(canonical_count);
+    CHECK(count_offset != std::string::npos);
+    if (count_offset != std::string::npos) {
+        unrepresentable.replace(count_offset, canonical_count.size(), "\"count\":2147483648");
+    }
+    parsed.items[0][0].category = 777;
+    CHECK(!virtual_bag::parse_state_json_at(
+        unrepresentable.c_str(), &parsed, 0, virtual_bag_category_uses_stack_count,
+        &kLimitedCountPolicy));
+    CHECK(parsed.items[0][0].category == 777);  // 非法值 fail-closed，不改输出状态。
+    CHECK(!virtual_bag::parse_state_json_at(
+        json.c_str(), &parsed, 0, unknown_count_encoding, &kLimitedCountPolicy));
+    return true;
+}
+
+bool test_slot_data_load_fail_closed_matrix(const QolSlotDataContext& context) {
+    virtual_bag::State valid_state{};
+    valid_state.items[0][0] = virtual_bag::Item{321, 7};
+    const std::string valid_json = virtual_bag::state_json(valid_state);
+    const auto* valid_bytes = reinterpret_cast<const uint8_t*>(valid_json.data());
+
+    const auto valid = extension_bag_slot_data_load_for_test(
+        &context, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 4,
+        valid_bytes, valid_json.size());
+    CHECK(succeeded(valid));
+    CHECK(extension_bag_session_admitted_locked());
+    CHECK(g_state.items[0][0].category == 321 && g_state.items[0][0].count == 7);
+
+    for (const uint32_t version : {1u, 2u, 3u, 5u, 6u}) {
+        const auto unsupported = extension_bag_slot_data_load_for_test(
+            &context, static_cast<uint32_t>(QolSlotDataPresence::kVersionUnsupported), version,
+            nullptr, 0);
+        CHECK(!succeeded(unsupported));
+        CHECK(!extension_bag_session_admitted_locked());
+        CHECK(g_state.items[0][0].category == 321 && g_state.items[0][0].count == 7);
+    }
+
+    g_state.items[1][0] = virtual_bag::Item{222, 4};
+    const auto missing = extension_bag_slot_data_load_for_test(
+        &context, static_cast<uint32_t>(QolSlotDataPresence::kMissing), 0, nullptr, 0);
+    CHECK(succeeded(missing));
+    CHECK(extension_bag_session_admitted_locked());
+    CHECK(g_state.items[0][0].category == 0 && g_state.items[1][0].category == 0);
+
+    const auto unreadable = extension_bag_slot_data_load_for_test(
+        &context, static_cast<uint32_t>(QolSlotDataPresence::kUnreadable), 4, nullptr, 0);
+    CHECK(!succeeded(unreadable));
+    CHECK(!extension_bag_session_admitted_locked());
+
+    CHECK(succeeded(extension_bag_slot_data_load_for_test(
+        &context, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 4,
+        valid_bytes, valid_json.size())));
+    const std::string prior_state = virtual_bag::state_json(g_state);
+    const uint8_t malformed[] = {'{', 'x', '}'};
+    const auto parse_failed = extension_bag_slot_data_load_for_test(
+        &context, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 4,
+        malformed, sizeof(malformed));
+    CHECK(!succeeded(parse_failed));
+    CHECK(!extension_bag_session_admitted_locked());
+    CHECK(virtual_bag::state_json(g_state) == prior_state);
+    return true;
+}
+}  // namespace
+
 int main() {
     using namespace qol::contracts;
     using namespace qol::features::core_save;
@@ -148,6 +253,18 @@ int main() {
     CHECK(extension_bag_slot_data_register(7, &slot_data_api()));
     slot_data_pump();
     // load（missing）→ 默认状态 → 准入放行；session_ready 通知登记 epoch。
+    CHECK(extension_bag_session_admitted_locked());
+
+    // B-01 load matrix: v4, every known non-v4 direction, missing, unreadable and malformed.
+    const QolSlotDataContext load_context{
+        session, static_cast<uint32_t>(QolSlotDataReason::kEnter), 0};
+    test_slot_data_load_fail_closed_matrix(load_context);
+    CHECK(test_canonical_count_above_limit_preserved());
+    // Re-open the session after fail-closed matrix cases for subsequent save tests.
+    const std::string reopen_json = virtual_bag::state_json(virtual_bag::State{});
+    CHECK(succeeded(extension_bag_slot_data_load_for_test(
+        &load_context, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 4,
+        reinterpret_cast<const uint8_t*>(reopen_json.data()), reopen_json.size())));
     CHECK(extension_bag_session_admitted_locked());
 
     // F3: inventory popup state 4 while game world state is 5 must not reset EB memory.
