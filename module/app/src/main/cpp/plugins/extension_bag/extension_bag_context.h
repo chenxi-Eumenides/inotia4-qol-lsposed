@@ -39,7 +39,7 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
 QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
                                             int equip_slot);
 
-// P3c：容器 IO/事务面已收口到 save.slot_data（见 extension_bag_persistence.cpp）；
+// P3c：容器 IO/事务面已收口到 save.slot_data（见 persistence/persistence.cpp）；
 // 旧 JNI prepare/commit/abort 桥已删除，EB 不再依赖 ModuleSaveStore/Coordinator。
 bool extension_bag_session_admitted_locked();
 void extension_bag_flush_dirty_staging(const qol::contracts::QolSlotDataApi* api);

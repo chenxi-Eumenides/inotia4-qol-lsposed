@@ -3,7 +3,7 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 
-// 共享锁与 dirty 标记在文件作用域（非匿名 namespace）：extension_bag_persistence.cpp
+// 共享锁与 dirty 标记在文件作用域（非匿名 namespace）：persistence/persistence.cpp
 // 经 extern 引用同一实例（save.slot_data 回调/排空面与 UI 面共享锁边界，rulebook §2）。
 std::mutex g_virtual_bag_mtx;
 bool g_item_state_dirty = false;

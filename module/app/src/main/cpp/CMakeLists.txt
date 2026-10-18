@@ -33,10 +33,15 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/ui_equip.cpp
     plugins/extension_bag/ui_store.cpp
     plugins/extension_bag/ui_mix.cpp
-    plugins/extension_bag/extension_bag_port.cpp
-    plugins/extension_bag/extension_bag_persistence.cpp
+    plugins/extension_bag/api/port_state.cpp
+    plugins/extension_bag/api/handles.cpp
+    plugins/extension_bag/api/provider.cpp
+    plugins/extension_bag/api/api_table.cpp
+    plugins/extension_bag/api/neutral_provider.cpp
+    plugins/extension_bag/persistence/persistence.cpp
     plugins/extension_bag/extension_bag_geometry.cpp
     plugins/extension_bag/extension_bag_api.cpp
+    plugins/extension_bag/http/routes.cpp
     plugins/attribute_quality/rules.cpp
     plugins/attribute_quality/feature.cpp
     plugins/attribute_quality/plugin.cpp

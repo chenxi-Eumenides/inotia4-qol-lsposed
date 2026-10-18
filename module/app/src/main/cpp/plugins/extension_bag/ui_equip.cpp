@@ -1481,4 +1481,4 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
 // 详情记录仅供函数级入口 hook 识别。
 
 // virtual_bag_handle_backpack_button_equip 在 public_runtime.cpp 中外部链接，供
-// extension_bag_port.cpp 跨 TU 调用。
+// api/api_table.cpp 跨 TU 调用。

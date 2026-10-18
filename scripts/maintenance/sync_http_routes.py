@@ -65,7 +65,7 @@ PLUGIN_SOURCE_COUNTS = {
     "core.system/routes.inc": ("core.system", 5),
     "core.ui_state/routes.inc": ("core.ui_state", 9),
     "core.world/routes.inc": ("core.world", 12),
-    "extension_bag/routes.inc": ("extension_bag", 8),
+    "extension_bag/http/routes.inc": ("extension_bag", 8),
     "save_backup/routes.inc": ("save_backup", 4),
     "settings/routes.inc": ("settings", 5),
 }
@@ -143,7 +143,7 @@ def owner_sources(root: Path = ROOT) -> list[Path]:
     plugin_root = root / "module/app/src/main/cpp/plugins"
     discovered = {
         path.relative_to(plugin_root).as_posix()
-        for path in plugin_root.glob("*/routes.inc")
+        for path in plugin_root.rglob("routes.inc")
         if path != plugin_root / "core.api/routes.inc"
     }
     if (plugin_root / "core.api/owned_routes.inc").is_file():

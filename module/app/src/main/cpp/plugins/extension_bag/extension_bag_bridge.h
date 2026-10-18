@@ -56,7 +56,7 @@ const qol::contracts::CraftFactsApi* extension_bag_craft_facts();
 const qol::contracts::QolHostSdk* extension_bag_host_sdk();
 
 // 能力 v3.1 接口表（ExtensionBagApi，既有 40 成员 + sale removal 尾项）：成员逐条转发既有 extension_bag_* /
-// virtual_bag_* port 实现（实现收口 plugins/extension_bag/extension_bag_port.cpp）。
+// virtual_bag_* port 实现（实现收口 plugins/extension_bag/api/api_table.cpp）。
 // 静态存储、生命周期 ≥ 进程；provides 于插件 enabled 时注册、revoking 时注销。
 const qol::contracts::ExtensionBagApi* extension_bag_api_table();
 

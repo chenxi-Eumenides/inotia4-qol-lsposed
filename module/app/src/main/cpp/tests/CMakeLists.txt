@@ -885,7 +885,7 @@ add_test(NAME inventory_trade_provider_sell_tests COMMAND inventory_trade_provid
 # qol_log.cpp；Android 头经 stubs/ 覆盖不适用（本 target 无 Android 依赖）。
 add_executable(extension_bag_slot_data_tests
     test_extension_bag_slot_data.cpp
-    ${CPP_DIR}/plugins/extension_bag/extension_bag_persistence.cpp
+    ${CPP_DIR}/plugins/extension_bag/persistence/persistence.cpp
     ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
 )
 target_include_directories(extension_bag_slot_data_tests PRIVATE
@@ -2006,8 +2006,12 @@ set_target_properties(move_merge_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STA
 add_test(NAME move_merge_plugin_tests COMMAND move_merge_plugin_tests)
 
 # Production extension_bag projection shims: typed handle/inactive/output and drop tri-state.
-add_executable(extension_bag_move_merge_shim_tests test_extension_bag_move_merge_shims.cpp)
-target_include_directories(extension_bag_move_merge_shim_tests PRIVATE ${CPP_DIR})
+add_executable(extension_bag_move_merge_shim_tests
+    test_extension_bag_move_merge_shims.cpp
+    ${CPP_DIR}/plugins/extension_bag/move_merge_impl.cpp)
+target_include_directories(extension_bag_move_merge_shim_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS})
 target_compile_features(extension_bag_move_merge_shim_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_move_merge_shim_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

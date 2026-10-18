@@ -17,10 +17,15 @@ add_library(qol_plugin_extension_bag STATIC
     ui_equip.cpp
     ui_store.cpp
     ui_mix.cpp
-    extension_bag_port.cpp
-    extension_bag_persistence.cpp
+    api/port_state.cpp
+    api/handles.cpp
+    api/provider.cpp
+    api/api_table.cpp
+    api/neutral_provider.cpp
+    persistence/persistence.cpp
     extension_bag_geometry.cpp
     extension_bag_api.cpp
+    http/routes.cpp
     http_query.cpp
     plugin.cpp
     settings_contribution.cpp

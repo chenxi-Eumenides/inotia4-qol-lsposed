@@ -1,9 +1,18 @@
 #include <cassert>
 #include <atomic>
 #include <cstdint>
+#include "contracts/host_sdk.h"
 
 #include "contracts/move_merge.h"
 #include "contracts/result.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/move_merge.h"
+
+const qol::contracts::QolHostSdk* g_sdk = nullptr;
+std::atomic<bool> g_extension_source_protection_requested{false};
+
+bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle, void** out_item);
+bool virtual_bag_identify_native_item(void*, int* out_bag, int* out_slot);
 
 namespace qol::features::extension_bag {
 
@@ -13,33 +22,32 @@ bool fake_identity_result = false;
 int fake_drop_result = 0;
 int fake_drop_calls = 0;
 
-enum class VirtualBagProjectionDropResult : uint8_t {
-    kNotExtension = 0,
-    kHandled = 1,
-    kRejected = 2,
-};
+bool inventory_extension_provider_active() {
+    return g_provider_active.load(std::memory_order_acquire);
+}
+
+}  // namespace qol::features::extension_bag
 
 bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle, void** out_item) {
-    if (fake_private_handle_result) *out_item = reinterpret_cast<void*>(0x1);
-    return fake_private_handle_result;
+    if (qol::features::extension_bag::fake_private_handle_result) {
+        *out_item = reinterpret_cast<void*>(0x1);
+    }
+    return qol::features::extension_bag::fake_private_handle_result;
 }
 
 bool virtual_bag_identify_native_item(void*, int* out_bag, int* out_slot) {
-    if (fake_identity_result) {
+    if (qol::features::extension_bag::fake_identity_result) {
         *out_bag = 7;
         *out_slot = 3;
     }
-    return fake_identity_result;
+    return qol::features::extension_bag::fake_identity_result;
 }
 
 VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void*, void*) {
-    ++fake_drop_calls;
-    return static_cast<VirtualBagProjectionDropResult>(fake_drop_result);
+    ++qol::features::extension_bag::fake_drop_calls;
+    return static_cast<VirtualBagProjectionDropResult>(
+        qol::features::extension_bag::fake_drop_result);
 }
-
-#include "plugins/extension_bag/extension_bag_move_merge_shims.inc"
-
-}  // namespace qol::features::extension_bag
 
 int main() {
     using namespace qol::contracts;

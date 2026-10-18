@@ -1,4 +1,4 @@
-// P3c：扩展背包 save.slot_data 消费面（extension_bag_persistence.cpp）host 测试。
+// P3c：扩展背包 save.slot_data 消费面（persistence/persistence.cpp）host 测试。
 // 覆盖：注册（session ready 时 catch_up 激活 → SessionBound load 自动触发）、load 回调
 // codec（missing 默认状态 / present 解析 / 准入放行）、capture 单次序列化、committed 清
 // dirty、会话准入（未加载拒绝）、dirty 排空 request_write 的放行与拒绝分支、codec bytes
