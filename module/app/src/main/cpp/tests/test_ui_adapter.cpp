@@ -181,6 +181,23 @@ void fake_set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
 }
 void fake_reset_clip() { ++g_reset_clip_calls; }
 
+struct DrawPartCall {
+    void* group = nullptr;
+    int32_t x = 0;
+    int32_t y = 0;
+    void* loc = nullptr;
+    int32_t type = 0;
+    int32_t flip = 0;
+    int32_t alpha = -1;
+};
+DrawPartCall g_draw_part_call{};
+int g_draw_part_calls = 0;
+void fake_draw_part(void* group, int32_t x, int32_t y, void* loc, int32_t type,
+                    int32_t flip, int32_t alpha) {
+    g_draw_part_call = {group, x, y, loc, type, flip, alpha};
+    ++g_draw_part_calls;
+}
+
 // 游戏 IMGSYS fake：UnitLoad 幂等（已加载不重载、不增引用），UnitUnload 无引用计数、
 // 直接置失效并记录物理卸载次数。0x0f 边框、0x59 option/返回、0x4f/0x50 标题背景由
 // 游戏共享；模块消费者归零不代表游戏已停用，受保护 unit 的物理卸载必须为 0，否则
@@ -537,6 +554,29 @@ int main() {
     CHECK(adapter->main_menu_more_games_snapshot != nullptr);
     CHECK(adapter->main_menu_text_button_is_live != nullptr);
     CHECK(adapter->main_menu_text_button_invalidate_binding != nullptr);
+    CHECK(adapter->draw_part != nullptr);
+    CHECK(adapter->draw_part_alpha != nullptr);
+
+    // The legacy slot remains zero-alpha; the minor 23 tail slot forwards caller alpha.
+    {
+        int group = 0;
+        int loc = 0;
+        fn_grpx_draw_part = &fake_draw_part;
+        const int calls_before = g_draw_part_calls;
+        CHECK(adapter->draw_part(&group, 12, 34, &loc, 5, 1).ok == kQolOk);
+        CHECK(g_draw_part_calls == calls_before + 1 && g_draw_part_call.group == &group &&
+              g_draw_part_call.x == 12 && g_draw_part_call.y == 34 &&
+              g_draw_part_call.loc == &loc && g_draw_part_call.type == 5 &&
+              g_draw_part_call.flip == 1 && g_draw_part_call.alpha == 0);
+        CHECK(adapter->draw_part_alpha(&group, -8, 91, &loc, 2, 0, 0x28).ok == kQolOk);
+        CHECK(g_draw_part_calls == calls_before + 2 && g_draw_part_call.group == &group &&
+              g_draw_part_call.x == -8 && g_draw_part_call.y == 91 &&
+              g_draw_part_call.loc == &loc && g_draw_part_call.type == 2 &&
+              g_draw_part_call.flip == 0 && g_draw_part_call.alpha == 0x28);
+        fn_grpx_draw_part = nullptr;
+        CHECK(adapter->draw_part_alpha(&group, 0, 0, &loc, 0, 0, 0x28).code ==
+              kQolErrNotReady);
+    }
     uint64_t retired_menu_binding_token = 99;
     CHECK(adapter->bind_main_menu_more_games(+[](void*) {}, &retired_menu_binding_token).code ==
           kQolErrUnsupported);
@@ -614,6 +654,10 @@ int main() {
                       sizeof(adapter->ui_desc_text_cursor) ==
                    offsetof(qol::contracts::QolUiAdapter, insert_inline_color_span),
                    "UIDesc span operation must append the UI adapter tail");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, insert_inline_color_span) +
+                       sizeof(adapter->insert_inline_color_span) ==
+                   offsetof(qol::contracts::QolUiAdapter, draw_part_alpha),
+                   "explicit-alpha drawing must append the UI adapter tail");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
@@ -665,15 +709,15 @@ int main() {
     CHECK(adapter->insert_inline_color != nullptr);
     CHECK(adapter->ui_desc_text_cursor != nullptr);
     CHECK(adapter->insert_inline_color_span != nullptr);
-    qol::contracts::QolUiAdapter adapter_before_minor_22{};
-    adapter_before_minor_22.size = offsetof(qol::contracts::QolUiAdapter, ui_desc_text_cursor);
-    adapter_before_minor_22.major = qol::contracts::kUiAdapterMajor;
-    adapter_before_minor_22.minor = qol::contracts::kUiAdapterMinor - 1;
-    const bool old_adapter_has_span_api =
-        adapter_before_minor_22.minor >= qol::contracts::kUiAdapterMinor &&
-        adapter_before_minor_22.ui_desc_text_cursor != nullptr &&
-        adapter_before_minor_22.insert_inline_color_span != nullptr;
-    CHECK(!old_adapter_has_span_api);
+    qol::contracts::QolUiAdapter adapter_before_minor_23{};
+    adapter_before_minor_23.size = offsetof(qol::contracts::QolUiAdapter, draw_part_alpha);
+    adapter_before_minor_23.major = qol::contracts::kUiAdapterMajor;
+    adapter_before_minor_23.minor = qol::contracts::kUiAdapterMinor - 1;
+    const bool old_adapter_has_draw_part_alpha =
+        adapter_before_minor_23.minor >= qol::contracts::kUiAdapterMinor &&
+        adapter_before_minor_23.size >= offsetof(qol::contracts::QolUiAdapter, draw_part_alpha) +
+            sizeof(adapter_before_minor_23.draw_part_alpha);
+    CHECK(!old_adapter_has_draw_part_alpha);
 
     uint32_t popup_count = 42;
     uintptr_t popup_top = 0x42;
@@ -717,8 +761,8 @@ int main() {
           g_border_rect[3] == 140);
     CHECK(adapter->draw_border_rect(0, 0, 47, 140).code == kQolErrInvalidArgument);
 
-    // Minor 21 slots remain in place; minor 22 appends the UIDesc cursor and span operations.
-    CHECK(adapter->minor == 22);
+    // Minor 21/22 slots remain in place; minor 23 appends explicit-alpha image-part drawing.
+    CHECK(adapter->minor == 23);
     CHECK(adapter->set_clip != nullptr && adapter->reset_clip != nullptr);
     CHECK(adapter->set_clip(-12, 34, 320, 140).ok == kQolOk);
     CHECK(g_set_clip_calls == 1);

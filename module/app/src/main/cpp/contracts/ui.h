@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 14;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 22;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 23;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -551,6 +551,10 @@ struct QolUiAdapter {
     QolResult (*ui_desc_text_cursor)(void* builder, uint32_t* out_offset);
     QolResult (*insert_inline_color_span)(void* builder, uint32_t before_offset,
                                           uint32_t after_offset, uint8_t color_code);
+
+    // Minor 23 append-only slot. draw_part remains the zero-alpha compatibility operation.
+    QolResult (*draw_part_alpha)(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
+                                 int32_t type, int32_t flip, int32_t alpha);
 };
 
 }  // namespace qol::contracts

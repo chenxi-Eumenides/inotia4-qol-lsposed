@@ -470,6 +470,14 @@ QolResult draw_part(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc, in
     return contracts::ok();
 }
 
+QolResult draw_part_alpha(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
+                          int32_t type, int32_t flip, int32_t alpha) {
+    if (group == nullptr || loc == nullptr) return invalid_argument();
+    if (fn_grpx_draw_part == nullptr) return not_ready();
+    fn_grpx_draw_part(group, x, y, loc, type, flip, alpha);
+    return contracts::ok();
+}
+
 QolResult image_unit_load(int32_t unit) {
     if (fn_imgsys_unit_load == nullptr) return not_ready();
     fn_imgsys_unit_load(unit);
@@ -1398,9 +1406,11 @@ const QolUiAdapter g_ui_adapter{
           &layout_native_text_button,
            &draw_native_text_button,
            &main_menu_replacement_rect_available,
-           &ui_desc_text_cursor,
-           &insert_inline_color_span,
- };
+            &ui_desc_text_cursor,
+            &insert_inline_color_span,
+            // Minor 23 tail: alpha-aware atlas-part drawing.
+            &draw_part_alpha,
+  };
 
 }  // namespace
 

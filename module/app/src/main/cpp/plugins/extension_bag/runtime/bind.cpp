@@ -1,7 +1,16 @@
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
 
+#include <cstddef>
+
 namespace qol::features::extension_bag {
+
+namespace {
+
+constexpr std::size_t kRequiredUiAdapterSize =
+    offsetof(qol::contracts::QolUiAdapter, draw_part_alpha);
+
+}  // namespace
 
 bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
                              const qol::contracts::QolGameHost* game,
@@ -14,7 +23,7 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
         sdk->abi.major != qol::contracts::kHostSdkMajor ||
         game->abi.size < sizeof(qol::contracts::QolGameHost) ||
         game->abi.major != qol::contracts::kGameHostMajor ||
-        sdk->ui->size < sizeof(qol::contracts::QolUiAdapter) ||
+        sdk->ui->size < kRequiredUiAdapterSize ||
         sdk->ui->major != qol::contracts::kUiAdapterMajor ||
         sdk->hooks.popup_resolve == nullptr || sdk->hooks.popup_acquire == nullptr ||
         sdk->hooks.popup_restore == nullptr || sdk->desc_button.bind == nullptr ||

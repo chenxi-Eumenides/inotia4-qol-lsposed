@@ -831,17 +831,18 @@ public:
         constexpr size_t kActiveAdapterSize =
             offsetof(contracts::QolUiAdapter, main_menu_more_games_set_active) +
             sizeof(((contracts::QolUiAdapter*)nullptr)->main_menu_more_games_set_active);
-        if (g_ui == nullptr || g_ui->minor < contracts::kUiAdapterMinor ||
-            g_ui->size < kActiveAdapterSize || g_ui->main_menu_more_games_snapshot == nullptr ||
+        if (g_ui == nullptr || g_ui->major != contracts::kUiAdapterMajor ||
+            g_ui->size < kActiveAdapterSize ||
+            g_ui->main_menu_more_games_snapshot == nullptr ||
             g_ui->control_active == nullptr || g_ui->set_control_show == nullptr ||
             g_ui->set_button_enabled == nullptr ||
             g_ui->main_menu_more_games_set_active == nullptr) {
-            // 函数指针属尾槽：只在 minor/size 已保证覆盖整段 active tail 时才读；档位不足时
+            // 函数指针属尾槽：只在 size 已保证覆盖整段 active tail 时才读；表前缀不足时
             // 只记录 -1，避免在未受 size 保护的区间取字段。b 为缺失函数位图：
             // 1 snapshot / 2 control_active / 4 set_control_show / 8 set_button_enabled /
             // 16 set_active；c = minor，d = size，最后一位为所需 size。
             const bool tail_verified =
-                g_ui != nullptr && g_ui->minor >= contracts::kUiAdapterMinor &&
+                g_ui != nullptr && g_ui->major == contracts::kUiAdapterMajor &&
                 g_ui->size >= kActiveAdapterSize;
             int64_t missing = -1;
             if (tail_verified) {

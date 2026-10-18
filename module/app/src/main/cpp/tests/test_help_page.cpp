@@ -264,7 +264,7 @@ int main() {
         offsetof(QolUiComponents, dispatch_native_event) + sizeof(void*));
     auto ui = adapter();
     CHECK(ui_components_bind(&ui)); g_api = ui_components_api();
-    CHECK(g_api->minor == qol::contracts::kUiContractMinor && kUiAdapterMinor == 22);
+    CHECK(g_api->minor == qol::contracts::kUiContractMinor && kUiAdapterMinor == 23);
     UiHelpOption options[8]{};
     for (int i = 0; i < 8; ++i) options[i] = {&g_users[i], &detail};
     auto page_desc = desc(options);

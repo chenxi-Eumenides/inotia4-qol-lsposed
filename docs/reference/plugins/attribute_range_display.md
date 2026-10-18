@@ -32,9 +32,9 @@
 - `ctx.sdk->capabilities.require`：每次调用重新 require `attribute.quality`，不缓存接口指针（`feature.cpp:23-33`）。
 - `ctx.sdk->item_handle.register_item`：把当前 item 注册为 `kQolItemHandleOwnerGame` 句柄（`feature.cpp:112-117`）。
 - `ctx.sdk->ui`（`QolUiAdapter`）：
-  - `ui_desc_text_cursor(builder, &offset)`：读取 builder 的**写游标**相对 UIDesc 文本缓冲基址的 offset（`contracts/ui.h:533`）。
-  - `insert_inline_color_span(builder, before_offset, after_offset, code)`：在 `[before, after)` 本行 span 内插入颜色码并推进游标（`contracts/ui.h:534-535`）。
-  - 仅当 `ui->minor >= kUiAdapterMinor`（当前 22）且两槽非空时使用（`feature.cpp:94-97`）。
+  - `ui_desc_text_cursor(builder, &offset)`：读取 builder 的**写游标**相对 UIDesc 文本缓冲基址的 offset（`contracts/ui.h:551`）。
+  - `insert_inline_color_span(builder, before_offset, after_offset, code)`：在 `[before, after)` 本行 span 内插入颜色码并推进游标（`contracts/ui.h:552-553`）。
+  - 当前 Adapter ABI 为 1.23；该插件按接口尾部 size 与函数指针检查游标/span 槽（minor 22 起提供），不要求调用方恰好使用最新 minor（`feature.cpp:94-101`）。
 - 不使用任何 Game Host 面：插件不保存 `ctx.game`。
 - 说明：`QolUiAdapter::insert_inline_color`（`contracts/ui.h:437`）已标注 deprecated——它没有本行 span，无法用于行内着色；本插件不再调用。
 
@@ -75,7 +75,7 @@
 | `plugins/attribute_range_display/feature.h:9-19` | 资源 id 常量与对外函数声明。 |
 | `plugins/attribute_range_display/feature.cpp:16-19,21,23-33,35-51` | 运行状态、能力 require、颜色映射。 |
 | `plugins/attribute_range_display/feature.cpp:65-83,86-134,136-144` | resource ready（含空 backup 拒绝）、AddOption wrapper（游标快照 + span 插入）、MakeItem wrapper。 |
-| `contracts/ui.h:17,435-437,529-535` | adapter minor 22、deprecated `insert_inline_color`、游标/span 槽。 |
+| `contracts/ui.h:17,455,547-559` | adapter minor 23、deprecated `insert_inline_color`、minor 22 游标/span 槽及 minor 23 尾槽。 |
 | `contracts/attribute_quality.h:14-19,31-104` | 质量能力 id/版本、结果结构与 API 尺寸校验。 |
 | `game/access/attr_range_ui.h:45-46`、`attr_range_ui.cpp:128-135` | 文本缓冲基址只读访问器。 |
 | `game/access/attr_range_ui.cpp:136-171`、`host/ui_adapter.cpp:93-161` | 本行 span 插入与 0x200 边界/游标一致性校验。 |

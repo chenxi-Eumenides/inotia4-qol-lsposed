@@ -339,7 +339,6 @@ bool is_stuff_ctrl(void* ctrl) {
     constexpr size_t required_size = offsetof(contracts::QolUiAdapter, craft_stuff_slot_index) +
                                      sizeof(contracts::QolUiAdapter::craft_stuff_slot_index);
     if (g_sdk->ui->size < required_size || g_sdk->ui->major != contracts::kUiAdapterMajor ||
-        g_sdk->ui->minor < contracts::kUiAdapterMinor ||
         g_sdk->ui->craft_stuff_slot_index == nullptr) return false;
     int32_t slot = -1;
     return g_sdk->ui->craft_stuff_slot_index(ctrl, &slot).ok == kQolOk &&

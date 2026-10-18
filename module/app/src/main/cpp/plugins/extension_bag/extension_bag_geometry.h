@@ -26,6 +26,8 @@ bool extension_bag_ui_touch_state(void** out_moving, void** out_drop_source,
 bool extension_bag_ui_touch_coordinates(uint64_t param, int64_t* out_x, int64_t* out_y);
 bool extension_bag_ui_draw_part(int32_t unit, int32_t loc, int32_t x, int32_t y,
                                 int32_t type, int32_t flip);
+bool extension_bag_ui_draw_part_alpha(int32_t unit, int32_t loc, int32_t x, int32_t y,
+                                      int32_t type, int32_t flip, int32_t alpha);
 bool extension_bag_ui_can_draw();
 bool extension_bag_ui_draw_item(void* item, int32_t x, int32_t y, int32_t a, int32_t b);
 bool extension_bag_ui_create_control(void* parent, void** out_control);

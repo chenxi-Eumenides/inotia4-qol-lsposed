@@ -5,6 +5,8 @@
 #include "contracts/grid_geometry.h"
 #include "contracts/ui.h"
 
+#include <cstddef>
+
 namespace {
 
 const qol::contracts::QolUiAdapter* extension_bag_ui() {
@@ -164,6 +166,22 @@ bool extension_bag_ui_draw_part(int32_t unit, int32_t loc, int32_t x, int32_t y,
     if (!qol::contracts::succeeded(ui->image_group(unit, &group)) ||
         !qol::contracts::succeeded(ui->image_loc(unit, loc, &image))) return false;
     return qol::contracts::succeeded(ui->draw_part(group, x, y, image, type, flip));
+}
+
+bool extension_bag_ui_draw_part_alpha(int32_t unit, int32_t loc, int32_t x, int32_t y,
+                                      int32_t type, int32_t flip, int32_t alpha) {
+    const auto* ui = extension_bag_ui();
+    constexpr std::size_t kDrawPartAlphaEnd =
+        offsetof(qol::contracts::QolUiAdapter, draw_part_alpha) +
+        sizeof(((qol::contracts::QolUiAdapter*)nullptr)->draw_part_alpha);
+    if (ui == nullptr || ui->size < kDrawPartAlphaEnd || ui->draw_part_alpha == nullptr ||
+        ui->image_group == nullptr || ui->image_loc == nullptr) return false;
+    void* group = nullptr;
+    void* image = nullptr;
+    if (!qol::contracts::succeeded(ui->image_group(unit, &group)) ||
+        !qol::contracts::succeeded(ui->image_loc(unit, loc, &image))) return false;
+    return qol::contracts::succeeded(
+        ui->draw_part_alpha(group, x, y, image, type, flip, alpha));
 }
 
 bool extension_bag_ui_can_draw() {

@@ -1,6 +1,7 @@
 #include "feature.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -92,8 +93,12 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int val
     }
 
     const contracts::QolUiAdapter* ui = g_sdk == nullptr ? nullptr : g_sdk->ui;
+    constexpr std::size_t required_ui_size =
+        offsetof(contracts::QolUiAdapter, insert_inline_color_span) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->insert_inline_color_span);
     const bool span_api_available = builder != nullptr && ui != nullptr &&
-        ui->minor >= contracts::kUiAdapterMinor && ui->ui_desc_text_cursor != nullptr &&
+        ui->major == contracts::kUiAdapterMajor && ui->size >= required_ui_size &&
+        ui->ui_desc_text_cursor != nullptr &&
         ui->insert_inline_color_span != nullptr;
     uint32_t before_offset = 0;
     const bool before_ready = span_api_available &&

@@ -242,13 +242,16 @@ void test_cursor_snapshots_bracket_backup_and_unsupported_adapter_fails_closed()
 
     reset_quality_state();
     const uint16_t current_minor = g_ui.minor;
-    g_ui.minor = qol::contracts::kUiAdapterMinor - 1;
+    const uint32_t current_ui_size = g_ui.size;
+    g_ui.minor = 21;
+    g_ui.size = offsetof(qol::contracts::QolUiAdapter, ui_desc_text_cursor);
     const int add_calls_before_old_adapter = g_add_calls;
     add_with_context(item, 12, 41);
     assert(g_add_calls == add_calls_before_old_adapter + 1);
     assert(g_cursor_calls == 0 && g_register_calls == 0 && g_query_calls == 0 &&
            g_insert_calls == 0);
     g_ui.minor = current_minor;
+    g_ui.size = current_ui_size;
 
     reset_quality_state();
     g_ui.insert_inline_color_span = nullptr;
