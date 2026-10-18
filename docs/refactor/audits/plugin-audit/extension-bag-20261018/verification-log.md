@@ -75,10 +75,10 @@
 
 ## §2 无法验证项
 
-- **A-01 ITM-15**：设置页实际写入入口不在本仓库；静态 Host feature 路径连通，需真机取证。
-- **FIX-07**：C1-02/C1-03 已修，但“目标已入原版、扩展源保留”的崩溃窗口与源释放失败注入未在 host 复现；需重新真机复核后关闭。
-- **C1-01**：容量读写失败注入、pending 两侧同时存在、投影重装失败未在 host 复现。
-- **D-01**：真实触摸窗口内连续退役、延迟释放饱和未真机复现；模型/纯逻辑测试通过。
+- **A-01 ITM-15**：设备复验 PASS（2026-10-18）：模块设置页 `扩展背包` 开关 off→inactive/0 live，on→enabled/20 live；当前构建不再复现。证据见 §3。
+- **FIX-07**：正常跨袋移动已在设备复验 PASS（bag6 slot0→bag0 slot9，源清空、count13、保存重进保持）；“目标已入原版、扩展源保留”的失败注入仍未复现，需后续受控复现后关闭。
+- **C1-01**：容量读写失败注入、pending 两侧同时存在、投影重装失败未在 host/设备复现。
+- **D-01**：真实触摸窗口内连续退役、延迟释放饱和未做压力复现；模型/纯逻辑测试通过，常规面板开关无崩溃。
 - **D-03**：Host SDK 接口未实现；R-64 真机取证未执行。
 - **P2 UI 项**：Store/Mix 控件创建失败、UI 刷新重入、root 重建、MakeDesc 回调重入仅模型/源码守卫，未真机注入。
 - **EB-01**：用户确认已修复，本批未复核；相关真机卡是否恢复由用户在设备批决定。
@@ -101,10 +101,17 @@
 | move-merge shim | **PASS**：`extension_bag_move_merge_shim_tests` | host ctest |
 | status query | **PASS**：`extension_bag_status_query_tests` | host ctest |
 
+| 设备部署 | **PASS**：集成包 `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`，SHA-256 `48983632aff867dc5c5bc202b6ced1d9de675d367b0551da094b651a697fa588`；install -r 成功；health ready、variant monster v29 | `evidence/device-health.json` |
+| A-01 / ITM-15 设置页开关 | **PASS**：模块设置→更多优化功能→扩展背包；off → `inactive`/0 live，on → `enabled`/20 live；不再复现 | `evidence/eb-toggle-off-final.json`、`eb-toggle-on-final.json`、`eb-settings-on.png`/`off.png` |
+| 扩展视图进入 | **PASS**：打开 inventory 面板后 `enter_view bag=6` → ticket done，`mode=module`、`selected=0`、`extension_tab_button=true`；无崩溃 | `evidence/fix07-eb-status.json` |
+| FIX-07 正常跨袋移动 | **PASS**：`bag6 slot0 count13 → bag0 slot9`，ticket 9 done；源槽清空、目标 count13；保存/重进仍为 count13 | `evidence/fix07-move-ticket.json`、`fix07-bag0-slot9.json` |
+| 生命周期 deactivate/activate | **PASS**：deactivate → `inactive`/0 live；activate → `enabled`/20 live、`degraded=false`；无 registration failure | 设备 API 记录（§3 文本） |
+| 日志 | **PASS**：2015 行 logcat 无 FATAL/SIGSEGV/tombstone、无 EB ERROR | `evidence/device-logcat.txt` |
+
 ## §4 用户裁决记录
 
 1. 商店卖出可见数量 `<=0`：**拒绝出售**，不按 1 件结算。
-2. ITM-15 取证：**后置到设备批**，先修 P1 代码。
+2. ITM-15 取证：后置到设备批；**2026-10-18 设备复验 PASS，不再复现**。
 3. FIX-07：**重新真机复核后关闭**，不沿用既有证据直接关闭。
 4. B-01：**保持非 v4 拒绝**，不实现 v1–v3 迁移。
 5. B-02：**保留有效 canonical，非法值阻断**，不静默截断。
@@ -114,6 +121,6 @@
 
 ## §5 未完成 / 后续批次
 
-- 设备批：A-01、FIX-07、C1-01、D-01、D-03、P2 UI 注入项。
+- 设备批剩余：FIX-07 失败注入、C1-01 容量失败注入、D-01 触摸压力、D-03 R-64、P2 UI 注入项。
 - Host SDK 批次：按 `d03-host-sdk-design.md` 实现 `QolDescHookApi` V2，minor 26→27，随后修 D-03。
 - 结构整理：审阅后按方案 A 分批拆 TU；先 move-merge shim，再运行时/UI；不与本批行为修复混合。
