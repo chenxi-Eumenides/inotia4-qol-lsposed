@@ -66,6 +66,14 @@ struct QolExtensionBagUiWriteApi {
     QolResult (*set_original_bag_item)(int32_t bag, void* item);
     // Store scene owns a different bag-group draw entry from UIEquip.
     QolResult (*draw_original_store_bag_group)();
+    // Forces the native quantity dialog for an EB store item. callback must be
+    // the native UIStore_SellOKInputItemCount pointer returned below.
+    QolResult (*create_item_count_popup)(int32_t type, void* item, int32_t input_count,
+                                         int32_t total_count, void* callback);
+    void* (*sell_ok_input_item_count)();
+    // UIStore_MakeDesc(control, desc_control): store detail uses UIStore's own
+    // menu (UIStore_ButtonSellExe), not the UIEquip detail hooks.
+    QolResult (*make_store_item_description)(void* control, void* desc_control);
 };
 
 struct QolExtensionBagWritePort {

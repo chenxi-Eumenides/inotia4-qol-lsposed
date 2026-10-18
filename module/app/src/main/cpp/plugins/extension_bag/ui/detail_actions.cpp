@@ -728,6 +728,12 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         extension_desc_original_matches(id, "desc.button.destroy") ||
         extension_desc_original_matches(id, "desc.button.destroy_ok");
     if (direct_sell || modified_destroy_sell) {
+        // 商店页出售必须走 UIStore 的原版数量/确认链；背包页详情出售才归
+        // extension_bag 接管。两者共用 desc 按钮槽，因此按商店场景分流。
+        if (runtime_state().store.frame_active || runtime_state().store.view_installed) {
+            (void)extension_desc_call_original(id, button);
+            return;
+        }
         VIRTBAG_LOG("extension sell button matched source=%s bag=%d slot=%d item=%p",
                     modified_destroy_sell ? "destroy" : "store",
                     runtime_state().ui.extension_desc_item_bag, runtime_state().ui.extension_desc_item_slot,

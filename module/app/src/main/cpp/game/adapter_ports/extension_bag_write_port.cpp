@@ -245,6 +245,30 @@ QolResult write_extension_draw_original_store_bag_group() {
     reinterpret_cast<DrawFn>(g_base + offset)();
     return contracts::ok();
 }
+QolResult write_extension_create_item_count_popup(int32_t type, void* item, int32_t input_count,
+                                                  int32_t total_count, void* callback) {
+    if (g_base == 0 || item == nullptr || callback == nullptr) return not_ready();
+    const uintptr_t offset = fn_resolve("F_UIINPUT_ITEM_COUNT_CREATE_VMA",
+                                        F_UIINPUT_ITEM_COUNT_CREATE_VMA);
+    if (offset == 0) return not_ready();
+    using CreateFn = void (*)(int32_t, void*, int32_t, int32_t, void*);
+    reinterpret_cast<CreateFn>(g_base + offset)(type, item, input_count, total_count, callback);
+    return contracts::ok();
+}
+void* write_extension_sell_ok_input_item_count() {
+    if (g_base == 0) return nullptr;
+    const uintptr_t offset = fn_resolve("F_UISTORE_SELL_OK_INPUT_ITEM_COUNT_VMA",
+                                        F_UISTORE_SELL_OK_INPUT_ITEM_COUNT_VMA);
+    return offset == 0 ? nullptr : reinterpret_cast<void*>(g_base + offset);
+}
+QolResult write_extension_make_store_item_description(void* control, void* desc_control) {
+    if (control == nullptr || g_base == 0) return not_ready();
+    const uintptr_t offset = fn_resolve("F_UISTORE_MAKE_DESC_VMA", F_UISTORE_MAKE_DESC_VMA);
+    if (offset == 0) return not_ready();
+    using MakeDescFn = void (*)(void*, void*);
+    reinterpret_cast<MakeDescFn>(g_base + offset)(control, desc_control);
+    return contracts::ok();
+}
 QolResult write_extension_draw_original_items() {
     if (g_base == 0) return not_ready();
     const uintptr_t offset = fn_resolve("F_UIEQUIP_DRAW_INVEN_ITEM_VMA",
@@ -344,7 +368,9 @@ const contracts::QolExtensionBagWritePort kExtensionBagWritePort{
      &write_extension_draw_original_bag, &write_extension_draw_original_items,
      &write_extension_create_confirmation, &write_extension_restore_confirmation,
      &write_extension_original_bag_item, &write_extension_set_original_bag_item,
-     &write_extension_draw_original_store_bag_group},
+     &write_extension_draw_original_store_bag_group,
+     &write_extension_create_item_count_popup, &write_extension_sell_ok_input_item_count,
+     &write_extension_make_store_item_description},
 };
 
 }  // namespace

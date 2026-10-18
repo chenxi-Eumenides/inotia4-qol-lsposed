@@ -56,6 +56,8 @@ uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2);
 void store_enter_wrapper();
 void store_f3_wrapper();
 int64_t store_sell_item_wrapper(int64_t displayed_price);
+int64_t store_button_sell_exe_wrapper();
+void store_draw_inven_bag_group_entry();
 void store_make_desc_gate(void* ctrl, void* arg);
 void store_draw_end_wrapper();
 void store_draw_inven_bag_group_wrapper();

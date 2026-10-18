@@ -151,8 +151,10 @@ struct ExtensionBagUiState {
     ExtensionDrag extension_drag{};
     virtual_bag::ExtensionDragSession extension_drag_session{};
     void* tab_bag_items[virtual_bag::kBagCount]{};
-    // UIStore_SellItem hook backup and PopupState wrapper originals stay shared across TUs.
+    // UIStore hook backups and PopupState wrapper originals stay shared across TUs.
     void* backup_store_sell_item = nullptr;
+    void* backup_store_button_sell_exe = nullptr;
+    void* backup_store_draw_inven_bag_group = nullptr;
     StoreSceneEventFn store_original_event = nullptr;
     StoreSceneNoArgFn store_original_f3 = nullptr;
     StoreSceneNoArgFn store_original_enter = nullptr;
@@ -170,6 +172,8 @@ struct ExtensionBagStoreState {
     uint32_t original_bag_size = 0;
     void* projected_item_root = nullptr;
     void* hidden_equip_bag_root = nullptr;
+    void* hidden_original_bag_control = nullptr;
+    int original_current_bag = -1;
     std::array<void*, virtual_bag::kBagCount> tab_buttons{};
     std::array<void*, virtual_bag::kBagCount> tab_bag_items{};
     void* tab_root = nullptr;

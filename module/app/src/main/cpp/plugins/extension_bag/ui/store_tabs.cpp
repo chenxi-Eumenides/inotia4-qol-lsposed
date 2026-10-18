@@ -268,6 +268,30 @@ void store_draw_tab_buttons_locked() {
         }
     }
 }
+// 商店袋列入口 hook：与背包页 virtual_bag_draw_original_bag_wrapper 同法，在
+// UIStore_DrawInvenBagGroup 真正读取当前袋之前写成 6，画完恢复 → 原版袋不再高亮。
+void store_draw_inven_bag_group_entry() {
+    using DrawFn = void (*)();
+    const auto backup = reinterpret_cast<DrawFn>(
+        runtime_state().ui.backup_store_draw_inven_bag_group);
+    if (backup == nullptr) return;
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        {"hook:UIStore_DrawInvenBagGroup"});
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    int32_t saved_current = 0;
+    bool masked = false;
+    if (runtime_state().store.view_installed &&
+        runtime_state().host.write_port->ui.current_bag != nullptr &&
+        runtime_state().host.write_port->ui.set_current_bag != nullptr &&
+        qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&saved_current)) &&
+        saved_current != kNoOriginalBagSelected) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        masked = true;
+    }
+    backup();
+    if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+}
 // R-57 原版袋列高亮遮蔽（商店）：进入扩展视图时，画原版 UIStore_DrawInvenBagGroup
 // 前把当前袋 GOT 临时置 kNoOriginalBagSelected(6)，画完恢复 → 原版 6 袋不再高亮
 // （与扩展页 virtual_bag_draw_original_bag_wrapper 同法）。扩展页签高亮由 draw_end
@@ -277,18 +301,9 @@ void store_draw_inven_bag_group_wrapper() {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_STORE_BAG_DRAW"});
     if (runtime_state().host.game == nullptr ||
-        runtime_state().host.write_port->ui.draw_original_store_bag_group == nullptr ||
-        runtime_state().host.write_port->ui.current_bag == nullptr ||
-        runtime_state().host.write_port->ui.set_current_bag == nullptr) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    int32_t saved_current = 0;
-    bool masked = false;
-    if (runtime_state().store.view_installed &&
-        qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&saved_current)) &&
-        saved_current != kNoOriginalBagSelected) {
-        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
-        masked = true;
-    }
+        runtime_state().host.write_port->ui.draw_original_store_bag_group == nullptr) return;
+    // The entry hook owns masking. Do not take runtime_state().mtx here: the
+    // entry hook runs while this wrapper calls the function and uses the same
+    // non-recursive mutex.
     (void)runtime_state().host.write_port->ui.draw_original_store_bag_group();
-    if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
 }

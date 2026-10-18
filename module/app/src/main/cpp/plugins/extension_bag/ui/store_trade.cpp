@@ -81,6 +81,59 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
 }
 }  // namespace
 
+int64_t store_button_sell_exe_wrapper() {
+    using ButtonSellFn = int64_t (*)();
+    const auto backup = reinterpret_cast<ButtonSellFn>(
+        runtime_state().ui.backup_store_button_sell_exe);
+    if (backup == nullptr) return 1;
+    if (!runtime_state().enabled.load()) return backup();
+
+    void* item = nullptr;
+    int count = 0;
+    bool module_item = false;
+    {
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (runtime_state().store.view_installed && runtime_state().host.game != nullptr &&
+            runtime_state().host.inventory_extras->read.cursor_item != nullptr) {
+            void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
+            void* cursor = nullptr;
+            if (ctrl != nullptr) {
+                (void)runtime_state().host.inventory_extras->read.cursor_item(ctrl, &cursor);
+            }
+            item = cursor != nullptr ? extension_bag_ui_item(cursor) : nullptr;
+            int bag = -1;
+            int slot = -1;
+            if (item != nullptr && module_slot_of_item_locked(item, &bag, &slot) &&
+                bag == runtime_state().store.view_bag && virtual_bag::valid_index(bag) &&
+                slot >= 0 && slot < virtual_bag::kSlotCount &&
+                runtime_state().objects.module_objects[bag][slot] == item) {
+                const virtual_bag::Item& descriptor =
+                    runtime_state().objects.bag.items[bag][slot];
+                count = static_cast<int>(virtual_bag_effective_count(
+                    item, static_cast<uint32_t>(descriptor.count)));
+                module_item = descriptor.count > 0;
+            }
+        }
+    }
+    VIRTBAG_LOG("store button sell view=%d module=%d count=%d item=%p",
+                runtime_state().store.view_installed ? 1 : 0, module_item ? 1 : 0, count, item);
+    if (!module_item || count <= 1) return backup();
+
+    const auto* ui = runtime_state().host.write_port->ui.create_item_count_popup != nullptr
+                         ? &runtime_state().host.write_port->ui
+                         : nullptr;
+    void* callback = ui != nullptr && ui->sell_ok_input_item_count != nullptr
+                         ? ui->sell_ok_input_item_count()
+                         : nullptr;
+    if (ui == nullptr || callback == nullptr ||
+        !qol::contracts::succeeded(
+            ui->create_item_count_popup(1, item, 1, count, callback))) {
+        VIRTBAG_LOG("store quantity dialog unavailable; falling back count=%d", count);
+        return backup();
+    }
+    return 1;
+}
+
 int64_t store_sell_item_wrapper(int64_t displayed_price) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,

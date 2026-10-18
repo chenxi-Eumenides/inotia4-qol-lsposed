@@ -193,6 +193,20 @@ void store_install_module_view_locked(int bag) {
     }
     runtime_state().store.view_bag = bag;
     runtime_state().store.view_installed = true;
+    runtime_state().store.original_current_bag = original_bag;
+    // UIStore keeps the selected bag control's visual state until the group is
+    // rebuilt. Hide that one original button for the whole EB view; the first
+    // draw then has no original highlight and the EB tab column is the only
+    // selected bag.
+    if (original_bag >= 0 && original_bag < 6) {
+        void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
+        if (bag_container != nullptr) {
+            void* selected = valid_child_locked(bag_container, original_bag);
+            if (selected != nullptr && extension_bag_ui_set_control_show(selected, false)) {
+                runtime_state().store.hidden_original_bag_control = selected;
+            }
+        }
+    }
     ++runtime_state().store.view_generation;
     // The store scene keeps the UIEquip bag column alive next to UIStore's own
     // bag column. Hide only the former while the EB store view is installed; the
@@ -209,6 +223,17 @@ bool store_module_view_installed_locked() { return runtime_state().store.view_in
 
 void store_restore_module_view_locked() {
     if (!runtime_state().store.view_installed) return;
+    if (runtime_state().store.original_current_bag >= 0 &&
+        runtime_state().host.write_port->ui.set_current_bag != nullptr) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(
+            runtime_state().store.original_current_bag);
+    }
+    runtime_state().store.original_current_bag = -1;
+    if (runtime_state().store.hidden_original_bag_control != nullptr) {
+        (void)extension_bag_ui_set_control_show(
+            runtime_state().store.hidden_original_bag_control, true);
+        runtime_state().store.hidden_original_bag_control = nullptr;
+    }
     if (virtual_bag::valid_index(runtime_state().store.view_bag)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             const uint32_t handle = runtime_state().objects.module_object_handles[runtime_state().store.view_bag][slot];
@@ -321,7 +346,13 @@ void store_make_desc_gate(void* ctrl, void* arg) {
     // UIStore_SellItem 函数入口按 cursor item 识别，原版面板/确认/取消全部保留。
     if (ctrl == nullptr || runtime_state().host.game == nullptr ||
         runtime_state().host.write_port->ui.make_item_description == nullptr) return;
-    (void)arg;
+    if (runtime_state().host.write_port->ui.make_store_item_description != nullptr) {
+        // Store detail must be built by UIStore_MakeDesc so its sell button is
+        // UIStore_ButtonSellExe. UIEquip_MakeDesc would install the EB detail
+        // sell path, bypassing the store quantity dialog.
+        (void)runtime_state().host.write_port->ui.make_store_item_description(ctrl, arg);
+        return;
+    }
     (void)runtime_state().host.write_port->ui.make_item_description(ctrl);
 }
 void store_teardown_locked() {

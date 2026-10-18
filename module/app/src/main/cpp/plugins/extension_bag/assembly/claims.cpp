@@ -21,6 +21,8 @@
 // ---- 资源 id（诊断/桥接按 id 分发）----
 constexpr const char* kEbM1SaveInventory = "hook:SAVE_SaveInventory";
 constexpr const char* kEbM2StoreSellItem = "hook:UIStore_SellItem";
+constexpr const char* kEbM3StoreButtonSellExe = "hook:UIStore_ButtonSellExe";
+constexpr const char* kEbM4StoreDrawBagGroup = "hook:UIStore_DrawInvenBagGroup";
 constexpr const char* kEbP1InventoryPopup = "own:popup.inventory";
 constexpr const char* kEbP2SavePopup = "own:popup.save_panel";
 constexpr const char* kEbP3StorePopup = "own:popup.store";
@@ -367,6 +369,34 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             reinterpret_cast<void*>(&store_sell_item_wrapper),
         },
         {
+            kEbM3StoreButtonSellExe,
+            "extension.store_button_sell_exe",
+            ::qol::contracts::ResourceMechanism::kEntryHook,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft,
+            true,
+            "extension_bag",
+            "商店出售按钮入口：EB 物品打开原版数量弹窗；原版物品直接 backup",
+            nullptr,
+            120,
+            reinterpret_cast<void*>(&store_button_sell_exe_wrapper),
+        },
+        {
+            kEbM4StoreDrawBagGroup,
+            "extension.store_draw_inven_bag_group",
+            ::qol::contracts::ResourceMechanism::kEntryHook,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kOptional,
+            ::qol::contracts::ResourceFailure::kFailSoft,
+            true,
+            "extension_bag",
+            "商店袋列入口：EB 视图期间遮蔽原版当前袋，避免原版袋与 EB 页签同时高亮",
+            nullptr,
+            120,
+            reinterpret_cast<void*>(&store_draw_inven_bag_group_entry),
+        },
+        {
             kEbP3StorePopup,
             kEbP3StorePopup,
             ::qol::contracts::ResourceMechanism::kOwnership,
@@ -442,6 +472,16 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup) {
     if (std::strcmp(resource_id, kEbM2StoreSellItem) == 0) {
         if (backup == nullptr) return 1;
         runtime_state().ui.backup_store_sell_item = backup;
+        return 0;
+    }
+    if (std::strcmp(resource_id, kEbM3StoreButtonSellExe) == 0) {
+        if (backup == nullptr) return 1;
+        runtime_state().ui.backup_store_button_sell_exe = backup;
+        return 0;
+    }
+    if (std::strcmp(resource_id, kEbM4StoreDrawBagGroup) == 0) {
+        if (backup == nullptr) return 1;
+        runtime_state().ui.backup_store_draw_inven_bag_group = backup;
         return 0;
     }
     return 1;
