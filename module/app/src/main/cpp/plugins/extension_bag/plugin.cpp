@@ -277,21 +277,9 @@ const qol::contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
      &kEbCommandRoutes[6].kind},
 };
 
-// 从 JSON 对象文本提取整数字段。客户端 body 可能带空白：冒号后跳过空白再读
-// 可选负号与数字；键不存在或值非整数标量返回 false（调用方按 Kotlin optInt 缺省 -1 处理）。
-// debug 端点 body 只含数字字段，不做字符串值内键样子串的误匹配防护（与 core.api
-// json_field 同级取舍）。
-bool extract_int_field(const char* body, const char* key, int* out) {
-    const std::string pattern = std::string("\"") + key + "\":";
-    const char* p = std::strstr(body, pattern.c_str());
-    if (p == nullptr) return false;
-    p += pattern.size();
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') ++p;
-    char* end = nullptr;
-    const long value = std::strtol(p, &end, 10);
-    if (end == p) return false;
-    *out = static_cast<int>(value);
-    return true;
+// 仅接受顶层 JSON 对象中的 int32 整数字段；小数、指数、尾随字符和溢出均拒绝。
+bool extract_int_field(std::string_view body, const char* key, int32_t* out) {
+    return key != nullptr && detail::parse_json_int32_field(body, key, out);
 }
 
 QolResult eb_command_error(contracts::HttpRes* response, uint16_t status, const char* message) {
@@ -320,8 +308,8 @@ QolResult eb_command_body(contracts::HttpRes* response, const std::string& body)
 }
 
 // bag 合法域 [6,10] 与迁移前 Kotlin DebugController 一致；未提供同样拒绝。
-bool eb_bag_valid(const char* body, int* out_bag, contracts::HttpRes* response) {
-    int bag = -1;
+bool eb_bag_valid(std::string_view body, int32_t* out_bag, contracts::HttpRes* response) {
+    int32_t bag = -1;
     if (!extract_int_field(body, "bag", &bag)) bag = -1;
     if (bag < 6 || bag > 10) {
         eb_command_error(response, 400, "bag required (6-10)");
@@ -334,6 +322,7 @@ bool eb_bag_valid(const char* body, int* out_bag, contracts::HttpRes* response) 
 // 游戏写路由的命令化：HTTP 线程只校验并投递票据，DB 写在主线程结果处理器中执行
 // （ARCHITECTURE.md §7.1/§8.1）。结果处理器把迁移前的原响应 JSON 写入票据缓冲。
 constexpr uint32_t kEbResultHandlerId = 0x45420001;  // 全局 typed handler id 空间，EB 前缀
+bool g_result_handler_registered = false;
 
 struct EbCommandPayload {
     int32_t kind = 0;
@@ -381,8 +370,8 @@ bool eb_result_handler(void*, const uint8_t* payload, uint32_t size, char* out, 
     if (body.size() > capacity) return false;
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
-    // 业务失败（原响应体含 "ok":false）→ 票据置 failed，结果仍携带原错误体。
-    return body.find("\"ok\":false") == std::string::npos;
+    // 票据状态只由顶层 JSON 布尔 ok 决定；原始响应体仍完整写入结果缓冲。
+    return detail::parse_json_top_level_boolean(body, "ok") == detail::JsonBooleanValue::kTrue;
 }
 
 QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
@@ -392,15 +381,18 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
     }
     const EbCommand kind = *static_cast<const EbCommand*>(ctx);
     // HttpReq.body 无 null 结尾契约：拷贝到 std::string（自带结尾）再做字段提取。
+    if (request->body == nullptr && request->body_len != 0) {
+        return eb_command_error(response, 400, "bad request");
+    }
     const std::string body_text(request->body != nullptr
                                     ? reinterpret_cast<const char*>(request->body)
                                     : "",
                                 request->body_len);
-    const char* body = body_text.c_str();
+    const std::string_view body(body_text);
     EbCommandPayload payload{};
     payload.kind = static_cast<int32_t>(kind);
-    int bag = -1;
-    int slot = -1;
+    int32_t bag = -1;
+    int32_t slot = -1;
     switch (kind) {
         case EbCommand::kEnterView:
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
@@ -427,23 +419,43 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             break;
         }
         case EbCommand::kEquip: {
-            int index = -1;
-            int bag_type = -1;
-            (void)extract_int_field(body, "index", &index);
-            (void)extract_int_field(body, "bagType", &bag_type);
+            int32_t index = -1;
+            int32_t bag_type = -1;
+            if (!extract_int_field(body, "index", &index)) {
+                return eb_command_error(response, 400, "index required");
+            }
+            if (!extract_int_field(body, "bagType", &bag_type)) {
+                return eb_command_error(response, 400, "bagType required");
+            }
+            if (index < 0 || index >= virtual_bag::kBagCount || bag_type <= 0 ||
+                bag_type > static_cast<int32_t>(virtual_bag::BagType::kLargeBackpack)) {
+                return eb_command_error(response, 400, "bad virtual bag index or bag type");
+            }
             payload.a = index;
             payload.b = bag_type;
             break;
         }
         case EbCommand::kItem: {
-            int index = -1;
-            int item_slot = -1;
-            int category = -1;
-            int count = -1;
-            (void)extract_int_field(body, "index", &index);
-            (void)extract_int_field(body, "slot", &item_slot);
-            (void)extract_int_field(body, "category", &category);
-            (void)extract_int_field(body, "count", &count);
+            int32_t index = -1;
+            int32_t item_slot = -1;
+            int32_t category = -1;
+            int32_t count = -1;
+            if (!extract_int_field(body, "index", &index)) {
+                return eb_command_error(response, 400, "index required");
+            }
+            if (!extract_int_field(body, "slot", &item_slot)) {
+                return eb_command_error(response, 400, "slot required (0-15)");
+            }
+            if (!extract_int_field(body, "category", &category)) {
+                return eb_command_error(response, 400, "category required");
+            }
+            if (!extract_int_field(body, "count", &count)) {
+                return eb_command_error(response, 400, "count required");
+            }
+            if (index < 0 || index >= virtual_bag::kBagCount || item_slot < 0 ||
+                item_slot >= virtual_bag::kSlotCount || category < 0 || count < 0) {
+                return eb_command_error(response, 400, "bad virtual bag item");
+            }
             payload.a = index;
             payload.b = item_slot;
             payload.c = category;
@@ -473,6 +485,45 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
 uint64_t g_slot_data_flush_task = 0;
 const qol::contracts::QolSlotDataApi* g_slot_data_api_cache = nullptr;
 
+void unregister_extension_bag_result_handler(const qol::contracts::QolHostSdk* sdk) {
+    if (!g_result_handler_registered || sdk == nullptr ||
+        sdk->abi.size < sizeof(qol::contracts::QolHostSdk) || sdk->abi.minor < 8 ||
+        sdk->ticket_result.unregister_typed_result_handler == nullptr) {
+        return;
+    }
+    if (contracts::succeeded(
+            sdk->ticket_result.unregister_typed_result_handler(kEbResultHandlerId))) {
+        g_result_handler_registered = false;
+    }
+}
+
+void close_extension_bag_gates() {
+    g_provider_active.store(false, std::memory_order_release);
+    extension_bag_set_enabled(false);
+}
+
+// Provider and participant tables are set-once resident registrations. On install failure only
+// revoke registrations that can be undone, then keep all resident callbacks gated off.
+void rollback_extension_bag_install(const qol::contracts::QolSlotDataApi* slot_data_api = nullptr) {
+    close_extension_bag_gates();
+    if (slot_data_api == nullptr) slot_data_api = g_slot_data_api_cache;
+    if (slot_data_api != nullptr) (void)extension_bag_slot_data_unregister(slot_data_api);
+    g_slot_data_api_cache = nullptr;
+    unregister_extension_bag_result_handler(g_sdk);
+    extension_bag_bind_port_sdk(nullptr);
+    extension_bag_bind_item_facts(nullptr);
+    extension_bag_bind_craft_facts(nullptr);
+    extension_bag_bind_character_extras(nullptr);
+    extension_bag_bind_inventory_extras(nullptr);
+    g_world_facts = nullptr;
+    g_item_facts = nullptr;
+    g_save_facts = nullptr;
+    g_craft_facts = nullptr;
+    g_sdk = nullptr;
+    g_game = nullptr;
+    g_write_port = nullptr;
+}
+
 int32_t slot_data_flush_frame(int64_t, void*) {
     extension_bag_flush_dirty_staging(g_slot_data_api_cache);
     return 1;
@@ -489,10 +540,16 @@ bool register_extension_bag_result_handler(const qol::contracts::QolHostSdk* sdk
             kEbResultHandlerId, &eb_result_handler, nullptr))) {
         return false;
     }
+    g_result_handler_registered = true;
     return true;
 }
 
 int plugin_install(qol::contracts::PluginContext& ctx) {
+    if (g_result_handler_registered || g_slot_data_api_cache != nullptr) {
+        rollback_extension_bag_install();
+    } else {
+        close_extension_bag_gates();
+    }
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_write_port = nullptr;
@@ -643,28 +700,14 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     // The separate move_merge plugin owns the X1 resource.
     // Owner command result handler 注册在全部绑定就绪后执行；失败即 install 失败。
     if (!register_extension_bag_result_handler(g_sdk)) {
-        extension_bag_bind_port_sdk(nullptr);
-        extension_bag_bind_item_facts(nullptr);
-        extension_bag_bind_craft_facts(nullptr);
-        extension_bag_bind_character_extras(nullptr);
-        extension_bag_bind_inventory_extras(nullptr);
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_write_port = nullptr;
+        rollback_extension_bag_install();
         return 1;
     }
     // ITM-13：向宿主注册中立物品域 provider（set-once 静态驻留）。注册失败即 install 失败，
     // 回滚已建立的绑定，避免半注册状态。
     if (!qol::host::host_inventory_extension_set_provider(inventory_extension_provider_table(),
                                                           &inventory_extension_provider_active)) {
-        extension_bag_bind_port_sdk(nullptr);
-        extension_bag_bind_item_facts(nullptr);
-        extension_bag_bind_craft_facts(nullptr);
-        extension_bag_bind_character_extras(nullptr);
-        extension_bag_bind_inventory_extras(nullptr);
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_write_port = nullptr;
+        rollback_extension_bag_install();
         return 1;
     }
     // 生命周期参与者最末注册（与 provider 是两次独立注册）。注册表 set-once，provider 已
@@ -678,6 +721,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
             (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
+        rollback_extension_bag_install();
         return 1;
     }
     // P3c：扩展背包数据面接入 save.slot_data（owner=PluginContext 注入 token；宿主按
@@ -690,10 +734,12 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
             {qol::contracts::kQolSlotDataVersion.major, qol::contracts::kQolSlotDataVersion.minor},
             &slot_data_iface)) ||
         slot_data_iface == nullptr) {
+        rollback_extension_bag_install();
         return 1;
     }
     const auto* slot_data_api = static_cast<const qol::contracts::QolSlotDataApi*>(slot_data_iface);
     if (!extension_bag_slot_data_register(ctx.owner_token, slot_data_api)) {
+        rollback_extension_bag_install(slot_data_api);
         return 1;
     }
     g_slot_data_api_cache = slot_data_api;
@@ -710,9 +756,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
 
 void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     // 结果处理器同样需要显式注销（同一自注册理由）。
-    if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
-        (void)g_sdk->ticket_result.unregister_typed_result_handler(kEbResultHandlerId);
-    }
+    unregister_extension_bag_result_handler(g_sdk);
     (void)ctx;
     // P3c：先关 slot_data 准入（unregister 先拒绝新请求；终态后零回调由 provider 保证），
     // 磁盘 section 保留（不自动删除、不隐式保存）；注册请求在 deactivate（主线程）内
@@ -753,18 +797,18 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
 
 // 启停仅切门禁，资源安装/还原由宿主完成（§3.3）。
 void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
+    close_extension_bag_gates();
     // P3c 生命周期：启停会经 owner suspend/resume 换发 token；此处以本次 ctx.owner_token
     // 重新注册 slot_data（register 内部先注销旧凭据参与者），使 CB 回调的 owner 校验
     // 始终对应当前有效 token（§9 双凭据迁移）。
-    if (g_slot_data_api_cache != nullptr) {
-        if (!extension_bag_slot_data_register(ctx.owner_token, g_slot_data_api_cache)) {
-            if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
-                constexpr char kMessage[] =
-                    "extension bag slot_data re-register on enable failed";
-                (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
-                                       static_cast<uint32_t>(sizeof(kMessage) - 1));
-            }
+    if (g_slot_data_api_cache == nullptr ||
+        !extension_bag_slot_data_register(ctx.owner_token, g_slot_data_api_cache)) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char kMessage[] = "extension bag slot_data re-register on enable failed";
+            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+                                   static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
+        return;
     }
     g_provider_active.store(true, std::memory_order_release);
     extension_bag_set_enabled(true);
@@ -813,7 +857,10 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     kOptionalRequires,
     2, kProvides,  // provides (extension_bag + inventory.merge_projection)
     g_resource_count, g_resources,
-    0, nullptr,   // jni（JNI 入口由 bridge/native 保留，名/签名冻结）
+    // Intentional global bridge ownership: extension_bag JNI exports live in bridge/native.
+    // check_jni validates bridge declarations against exports both ways; descriptor reverse
+    // coverage is not implemented.
+    0, nullptr,
     &plugin_install,
     &plugin_deactivate,
     &plugin_on_enabled,

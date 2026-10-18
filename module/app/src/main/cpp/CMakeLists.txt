@@ -70,7 +70,6 @@ add_library(gamebridge SHARED
     bridge/native/gamebridge_ui.cpp
     bridge/native/gamebridge_domain_operations.cpp
     bridge/native/gamebridge_settings.cpp
-    bridge/native/gamebridge_extension_bag.cpp
     game/access/game_access.cpp
     game/access/item_handle_registry.cpp
     game/symbols/symbol_resolver.cpp

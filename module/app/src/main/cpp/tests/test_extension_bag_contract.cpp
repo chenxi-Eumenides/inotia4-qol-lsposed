@@ -8,6 +8,7 @@
 #include "contracts/extension_bag.h"
 #include "contracts/move_merge.h"
 #include "contracts/version.h"
+#include "plugins/extension_bag/plugin.h"
 #include "game/symbols/game_symbols.h"
 #include "game/access/patches.h"
 #include "game/access/ptr_slots.h"
@@ -204,6 +205,53 @@ void test_contract_field_counts() {
     CHECK(static_cast<uint8_t>(qol::contracts::MoveMergeProjectionDropResult::kRejected) == 2);
 }
 
+void test_extension_bag_json_integer_fields() {
+    using qol::features::extension_bag::detail::parse_json_int32_field;
+    int32_t value = 77;
+    CHECK(parse_json_int32_field("{ \"other\": [1, {\"nested\": 2}], \"index\" : -12 }",
+                                 "index", &value));
+    CHECK(value == -12);
+    CHECK(parse_json_int32_field("{\"index\":2147483647}", "index", &value));
+    CHECK(value == INT32_MAX);
+    CHECK(parse_json_int32_field("{\"index\":-2147483648}", "index", &value));
+    CHECK(value == INT32_MIN);
+
+    constexpr const char* kInvalid[] = {
+        "{\"index\":12x}",
+        "{\"index\":12.0}",
+        "{\"index\":12e0}",
+        "{\"index\":+12}",
+        "{\"index\":2147483648}",
+        "{\"index\":-2147483649}",
+        "{\"index\":\"12\"}",
+        "{\"nested\":{\"index\":12}}",
+        "{\"index\":12,\"index\":13}",
+        "{\"index\":01}",
+    };
+    for (const char* json : kInvalid) {
+        value = 77;
+        CHECK(!parse_json_int32_field(json, "index", &value));
+        CHECK(value == 77);
+    }
+}
+
+void test_extension_bag_top_level_ok_boolean() {
+    using qol::features::extension_bag::detail::JsonBooleanValue;
+    using qol::features::extension_bag::detail::parse_json_top_level_boolean;
+    CHECK(parse_json_top_level_boolean(
+              "{ \"nested\": {\"ok\":false}, \"message\":\"literal \\\"ok\\\":false\", \"ok\" : true }",
+              "ok") == JsonBooleanValue::kTrue);
+    CHECK(parse_json_top_level_boolean("{\"error\":\"failed\", \"ok\" : false}", "ok") ==
+          JsonBooleanValue::kFalse);
+    CHECK(parse_json_top_level_boolean("{\"nested\":{\"ok\":true}}", "ok") ==
+          JsonBooleanValue::kInvalid);
+    CHECK(parse_json_top_level_boolean("{\"ok\":1}", "ok") == JsonBooleanValue::kInvalid);
+    CHECK(parse_json_top_level_boolean("{\"ok\":true", "ok") ==
+          JsonBooleanValue::kInvalid);
+    CHECK(parse_json_top_level_boolean("{\"ok\":true} trailing", "ok") ==
+          JsonBooleanValue::kInvalid);
+}
+
 void test_patch_sites_resolve() {
     g_base = kBase;
     for (const SiteExpect& expected : kSites) {
@@ -248,6 +296,8 @@ void test_move_merge_ptr_slot() {
 
 int main() {
     test_contract_field_counts();
+    test_extension_bag_json_integer_fields();
+    test_extension_bag_top_level_ok_boolean();
     test_patch_sites_resolve();
     test_patch_site_guards();
     test_move_merge_ptr_slot();
