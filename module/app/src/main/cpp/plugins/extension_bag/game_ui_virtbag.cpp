@@ -646,26 +646,63 @@ bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, in
                                  void* expected_item, const char* context) {
     if (!lock.owns_lock() || extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.remove_item_direct == nullptr ||
-        expected_item == nullptr) {
+        expected_item == nullptr || g_item_facts == nullptr ||
+        g_item_facts->item_ref_at == nullptr) {
         return false;
     }
+
+    void* source_item = nullptr;
+    qol::contracts::QolInventoryItemRef source_ref{};
+    qol::contracts::QolItemHandle source_handle{};
+    if (!inventory_slot_locked(bag, slot, &source_item) || source_item != expected_item ||
+        !qol::contracts::succeeded(g_item_facts->item_ref_at(bag, slot, &source_ref)) ||
+        source_ref.bag != bag || source_ref.slot != slot ||
+        source_ref.item.slot == 0 || source_ref.item.generation == 0 ||
+        !extension_bag_item_handle_for_pointer(expected_item, &source_handle) ||
+        source_handle.slot != source_ref.item.slot ||
+        source_handle.generation != source_ref.item.generation) {
+        VIRTBAG_LOG_ERROR(
+            "ERROR native remove source identity unavailable context=%s bag=%d slot=%d expected=%p actual=%p ref_bag=%d ref_slot=%d handle=%u/%u",
+            context != nullptr ? context : "unknown", bag, slot, expected_item, source_item,
+            source_ref.bag, source_ref.slot, source_ref.item.slot,
+            source_ref.item.generation);
+        return false;
+    }
+
+    bool remove_call_ok = false;
+    int result = 0;
     lock.unlock();
     {
         NativeCallScope native_call;
-        int result = 0;
-        (void)extension_remove_item_direct(bag, slot, &result);
+        remove_call_ok = extension_remove_item_direct(bag, slot, &result);
     }
     lock.lock();
 
     void* actual_item = nullptr;
     const bool readable = inventory_slot_locked(bag, slot, &actual_item);
-    const bool removed = readable &&
+    qol::contracts::QolInventoryItemRef actual_ref{};
+    const bool identity_readable = qol::contracts::succeeded(
+        g_item_facts->item_ref_at(bag, slot, &actual_ref));
+    const bool identity_at_source = identity_readable &&
+        actual_ref.bag == bag && actual_ref.slot == slot;
+    const bool source_handle_cleared = identity_at_source &&
+        actual_ref.item.slot == 0 && actual_ref.item.generation == 0;
+    const bool removed = readable && identity_at_source && source_handle_cleared &&
                          virtual_bag::original_to_extension_source_slot_postcondition(
                              expected_item, actual_item);
+    if (!remove_call_ok) {
+        VIRTBAG_LOG_ERROR(
+            "ERROR native remove call failed context=%s bag=%d slot=%d result=%d; checking source identity postcondition",
+            context != nullptr ? context : "unknown", bag, slot, result);
+    }
     if (!removed) {
-        VIRTBAG_LOG("native remove postcondition failed context=%s bag=%d slot=%d expected=%p actual=%p readable=%d",
+        VIRTBAG_LOG_ERROR(
+                    "ERROR native remove postcondition failed context=%s bag=%d slot=%d expected=%p actual=%p readable=%d source_handle=%u/%u identity_readable=%d ref_bag=%d ref_slot=%d actual_handle=%u/%u",
                     context != nullptr ? context : "unknown", bag, slot, expected_item,
-                    actual_item, readable ? 1 : 0);
+                    actual_item, readable ? 1 : 0, source_handle.slot,
+                    source_handle.generation, identity_readable ? 1 : 0,
+                    actual_ref.bag, actual_ref.slot, actual_ref.item.slot,
+                    actual_ref.item.generation);
     }
     return removed;
 }

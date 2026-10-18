@@ -864,6 +864,9 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
     virtual_bag::Item committed{};
     int dst_slot = -1;
     bool merged = false;
+    bool merge_mode_snapshot_loaded = false;
+    bool merge_mode_snapshot_available = false;
+    bool merge_extended_mode = false;
     auto try_merge = [&](int slot) {
         if (!virtual_bag::same_extension_bag_merge_allowed(src_bag, dst_bag) ||
             slot == src_slot) {
@@ -875,17 +878,71 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                 existing, source, virtual_bag_category_uses_stack_count)) {
             return false;
         }
+        if (!merge_mode_snapshot_loaded) {
+            merge_mode_snapshot_loaded = true;
+            const auto* count_api = item_count_api();
+            if (count_api == nullptr || count_api->read_extended_mode == nullptr) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "cross move reject extension->extension merge count mode unavailable src=%d/%d dst=%d/%d",
+                             src_bag, src_slot, dst_bag, slot);
+                return false;
+            }
+            uint8_t extended_value = 0;
+            const QolResult mode_result = count_api->read_extended_mode(&extended_value);
+            if (mode_result.code == kQolErrNotReady) {
+                // The host reports NotReady while 999 mode has not been applied, so
+                // merges use the same legacy view and 99 limit as an explicit off snapshot.
+                merge_extended_mode = false;
+                merge_mode_snapshot_available = true;
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "extension merge count mode not ready; using legacy view src=%d/%d dst=%d/%d",
+                             src_bag, src_slot, dst_bag, slot);
+            } else if (!qol::contracts::succeeded(mode_result) || extended_value > 1) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "cross move reject extension->extension merge count mode read failed src=%d/%d dst=%d/%d code=%d value=%u",
+                             src_bag, src_slot, dst_bag, slot, mode_result.code,
+                             static_cast<unsigned int>(extended_value));
+                return false;
+            } else {
+                merge_extended_mode = extended_value != 0;
+                merge_mode_snapshot_available = true;
+            }
+        }
+        if (!merge_mode_snapshot_available) return false;
         // S2 合并判定在模式视图上进行（R-47 决策 b）：启用态用 descriptor
         // canonical（128a+b）；关闭态只按 b 视图相加（a 不参与运算），上限
         // 999/99。拆段写回经 patch_payload_count 的模式感知写：启用态全量进位
         // 内建，关闭态只写 b、保留 a；descriptor.count 恒回写 canonical
         // （重开后读回完整值）。
-        const uint32_t existing_view = virtual_bag_effective_count(
-            g_module_objects[dst_bag][slot], static_cast<uint32_t>(existing.count));
-        const uint32_t source_view = virtual_bag_effective_count(
-            g_module_objects[src_bag][src_slot], static_cast<uint32_t>(source.count));
-        const bool extended = virtual_bag_extended_mode(g_module_objects[dst_bag][slot]);
-        const uint32_t limit = virtual_bag_count_limit(extended);
+        const auto* count_api = item_count_api();
+        if (count_api == nullptr || count_api->view_from_canonical == nullptr ||
+            count_api->view_limit == nullptr) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "cross move reject extension->extension merge count facade unavailable src=%d/%d dst=%d/%d",
+                         src_bag, src_slot, dst_bag, slot);
+            return false;
+        }
+        uint32_t existing_view = 0;
+        uint32_t source_view = 0;
+        uint32_t limit = 0;
+        const QolResult existing_view_result = count_api->view_from_canonical(
+            static_cast<uint32_t>(existing.count), merge_extended_mode ? 1 : 0,
+            &existing_view);
+        const QolResult source_view_result = count_api->view_from_canonical(
+            static_cast<uint32_t>(source.count), merge_extended_mode ? 1 : 0,
+            &source_view);
+        const QolResult limit_result = count_api->view_limit(
+            merge_extended_mode ? 1 : 0, &limit);
+        if (!qol::contracts::succeeded(existing_view_result) ||
+            !qol::contracts::succeeded(source_view_result) ||
+            !qol::contracts::succeeded(limit_result)) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "cross move reject extension->extension merge count snapshot failed src=%d/%d dst=%d/%d existing=%d source=%d limit=%d mode=%d",
+                         src_bag, src_slot, dst_bag, slot, existing_view_result.code,
+                         source_view_result.code, limit_result.code,
+                         merge_extended_mode ? 1 : 0);
+            return false;
+        }
         const uint64_t total = static_cast<uint64_t>(existing_view) +
                                static_cast<uint64_t>(source_view);
         if (total > limit) return false;
@@ -893,8 +950,8 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
         if (!virtual_bag::patch_payload_count(
                 &committed,
                 virtual_bag::merge_count(static_cast<int>(existing_view),
-                                         static_cast<int>(source_view), extended),
-                virtual_bag_category_uses_stack_count, extended)) {
+                                         static_cast<int>(source_view), merge_extended_mode),
+                virtual_bag_category_uses_stack_count, merge_extended_mode)) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject extension->extension merge count gate src=%d/%d dst=%d/%d",
                         src_bag, src_slot, dst_bag, slot);
             return false;
