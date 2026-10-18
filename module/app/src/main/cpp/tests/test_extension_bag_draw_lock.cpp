@@ -386,11 +386,13 @@ void test_unadmitted_panel_mutators_fail_before_touching_state() {
     CHECK(install_view.find("extension_bag_session_admitted_locked") <
           install_view.find("set_bag_size_word_locked"));
 
-    const std::string store = read_source(QOL_EXTENSION_BAG_STORE_SOURCE);
+    const std::string store_tabs = read_source(QOL_EXTENSION_BAG_STORE_TABS_SOURCE);
     const std::string store_click =
-        source_function(store, "uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {");
+        source_function(store_tabs, "uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {");
+    const std::string store_projection =
+        read_source(QOL_EXTENSION_BAG_STORE_PROJECTION_SOURCE);
     const std::string store_install =
-        source_function(store, "void store_install_module_view_locked(int bag) {");
+        source_function(store_projection, "void store_install_module_view_locked(int bag) {");
     CHECK(store_click.find("extension_bag_session_admitted_locked") <
           store_click.find("store_pending_tab = index"));
     CHECK(store_install.find("extension_bag_session_admitted_locked") <

@@ -162,12 +162,32 @@ struct ExtensionBagUiState {
     uint8_t* mix_state_entry = nullptr;
 };
 
+struct ExtensionBagStoreState {
+    bool view_installed = false;
+    int view_bag = -1;
+    int window_original_bag = -1;
+    uint32_t original_size_word = 0;
+    uint32_t original_bag_size = 0;
+    void* projected_item_root = nullptr;
+    std::array<void*, virtual_bag::kBagCount> tab_buttons{};
+    std::array<void*, virtual_bag::kBagCount> tab_bag_items{};
+    void* tab_root = nullptr;
+    uint64_t tab_generation = 0;
+    int pending_tab = -1;
+    uint64_t pending_tab_generation = 0;
+    bool frame_active = false;
+    uint64_t view_generation = 0;
+    uint64_t refresh_generation = 0;
+    bool refresh_pending = false;
+};
+
 struct ExtensionBagRuntimeState {
     std::mutex mtx;
     ExtensionBagHostPorts host{};
     ExtensionBagPersistenceState persistence{};
     ExtensionBagObjectState objects{};
     ExtensionBagUiState ui{};
+    ExtensionBagStoreState store{};
     std::atomic<bool> source_protection_requested{false};
     uint64_t lifecycle_task = 0;
     int lifecycle_last_state = -1;
@@ -282,3 +302,19 @@ inline uint8_t*& store_state_entry = runtime_state().ui.store_state_entry;
 inline MixSceneNoArgFn& mix_original_enter = runtime_state().ui.mix_original_enter;
 inline MixSceneNoArgFn& mix_original_f3 = runtime_state().ui.mix_original_f3;
 inline uint8_t*& mix_state_entry = runtime_state().ui.mix_state_entry;
+inline bool& store_view_installed = runtime_state().store.view_installed;
+inline int& store_view_bag = runtime_state().store.view_bag;
+inline int& store_window_original_bag = runtime_state().store.window_original_bag;
+inline uint32_t& store_original_size_word = runtime_state().store.original_size_word;
+inline uint32_t& store_original_bag_size = runtime_state().store.original_bag_size;
+inline void*& store_projected_item_root = runtime_state().store.projected_item_root;
+inline auto& store_tab_buttons = runtime_state().store.tab_buttons;
+inline auto& store_tab_bag_items = runtime_state().store.tab_bag_items;
+inline void*& store_tab_root = runtime_state().store.tab_root;
+inline uint64_t& store_tab_generation = runtime_state().store.tab_generation;
+inline int& store_pending_tab = runtime_state().store.pending_tab;
+inline uint64_t& store_pending_tab_generation = runtime_state().store.pending_tab_generation;
+inline bool& store_frame_active = runtime_state().store.frame_active;
+inline uint64_t& store_view_generation = runtime_state().store.view_generation;
+inline uint64_t& store_refresh_generation = runtime_state().store.refresh_generation;
+inline bool& store_refresh_pending = runtime_state().store.refresh_pending;

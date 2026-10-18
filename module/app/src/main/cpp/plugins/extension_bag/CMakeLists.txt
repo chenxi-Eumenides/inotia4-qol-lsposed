@@ -25,7 +25,11 @@ add_library(qol_plugin_extension_bag STATIC
     transaction_ext_ext.cpp
     transaction_drop.cpp
     ui_equip.cpp
-    ui_store.cpp
+    ui_detail_hooks.cpp
+    ui_detail_actions.cpp
+    ui_store_tabs.cpp
+    ui_store_projection.cpp
+    ui_store_trade.cpp
     ui_mix.cpp
     api/port_state.cpp
     api/handles.cpp

@@ -41,7 +41,11 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/transaction_ext_ext.cpp
     plugins/extension_bag/transaction_drop.cpp
     plugins/extension_bag/ui_equip.cpp
-    plugins/extension_bag/ui_store.cpp
+    plugins/extension_bag/ui_detail_hooks.cpp
+    plugins/extension_bag/ui_detail_actions.cpp
+    plugins/extension_bag/ui_store_tabs.cpp
+    plugins/extension_bag/ui_store_projection.cpp
+    plugins/extension_bag/ui_store_trade.cpp
     plugins/extension_bag/ui_mix.cpp
     plugins/extension_bag/api/port_state.cpp
     plugins/extension_bag/api/handles.cpp
