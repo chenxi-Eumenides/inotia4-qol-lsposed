@@ -318,7 +318,6 @@ JNIEnv* current_env() {
 void ensure_state_loaded_locked();
 bool persist_state_locked(bool force = false);
 void clear_original_desc_locked();
-void clear_original_item_selection_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
 int original_bag_locked();
 void set_original_bag_locked(int bag);
@@ -349,9 +348,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                                         int requested_dst_slot = -1);
 bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y);
-bool defer_item_free_locked(void* item);
 bool item_pointer_known_locked(void* item);
-void* valid_child_locked(void* root, int slot);
 void make_desc_equip_gate(void* ctrl, void* arg);
 void extension_desc_item_execute_at(size_t index, void* button);
 void reset_extension_desc_item_hooks_locked();
@@ -1165,8 +1162,6 @@ void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
                                     "materialize_module_item");
 }
 
-#include "plugins/extension_bag/extension_bag_input.inc"
-
 ::qol::contracts::QolItemCountEncoding category_is_equip(int category) {
     if (g_game == nullptr || g_game->read_only.item.count_encoding == nullptr || category <= 0) {
         return ::qol::contracts::QolItemCountEncoding::kUnknown;
@@ -1215,14 +1210,6 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
     UiRect rect{};
     return extension_bag_ui_rect(ctrl, &rect) && rect.w > 0 && rect.h > 0 &&
            extension_bag_ui_hit_test(ctrl, x, y, rect);
-}
-
-// GetChild 结果必须过双重校验：面板重建窗口里 GetChild(slot≥count) 返回不可读的
-// 垃圾指针（tombstone_02），先 GetCount 判界消除越界源，再 GetUserType==2 验类型。
-// root 本身也可能被面板重建替换——调用方应实时通过 UI adapter 查询，
-// 不要使用 install 时的快照。
-void* valid_child_locked(void* root, int slot) {
-    return extension_bag_valid_child(root, slot);
 }
 
 // ---- G-8 投影拖动状态机（模块侧，独立于 TouchHandle 内部拖动）----

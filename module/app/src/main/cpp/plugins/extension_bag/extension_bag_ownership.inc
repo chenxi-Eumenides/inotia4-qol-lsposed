@@ -1,6 +1,5 @@
 // P3 所有权账本：借出对象四态跟踪。
 ownership::Ledger g_ownership_ledger{};
-uint32_t g_module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount]{};
 
 struct DeferredItemFree {
     void* item = nullptr;
@@ -76,6 +75,8 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
     return true;
 }
 
+}  // namespace
+
 bool defer_item_free_locked(void* item) {
     uint32_t handle = 0;
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
@@ -90,6 +91,8 @@ bool defer_item_free_locked(void* item) {
     return enqueue_deferred_item_free_locked(
         item, handle, module_object_generation_locked(item, handle));
 }
+
+namespace {
 
 bool deferred_item_referenced_locked(void* item) {
     for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {

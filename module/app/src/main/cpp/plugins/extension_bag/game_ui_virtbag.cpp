@@ -22,6 +22,7 @@
 #include "plugins/extension_bag/extension_bag_logging.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/store_sell_rules.h"
+#include "plugins/extension_bag/extension_bag_internal.h"
 
 #include <atomic>
 #include <chrono>
@@ -37,21 +38,6 @@
 bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
                                              int src_bag, int src_slot, int dst_bag,
                                              int dst_slot, void* material, void* target_item);
-
-// 共享锁与 dirty 标记在文件作用域（非匿名 namespace）：extension_bag_persistence.cpp
-// 经 extern 引用同一实例（save.slot_data 回调/排空面与 UI 面共享锁边界，rulebook §2）。
-std::mutex g_virtual_bag_mtx;
-bool g_item_state_dirty = false;
-std::atomic<uint64_t> g_item_state_revision{0};
-
-void extension_bag_mark_dirty_locked() {
-    g_item_state_dirty = true;
-    g_item_state_revision.fetch_add(1, std::memory_order_release);
-}
-
-uint64_t extension_bag_item_revision_locked() {
-    return g_item_state_revision.load(std::memory_order_acquire);
-}
 
 namespace {
 
@@ -73,7 +59,6 @@ constexpr int64_t kOriginalGridX = kGridX;
 constexpr int64_t kOriginalGridY = kGridY;
 constexpr size_t kInventorySlotStride = 16;
 constexpr int kEquipSlotCount = 10;
-constexpr uint8_t kNoOriginalBagSelected = 6;
 // Extension tab ControlObject rects are relative to the item-list root, whose
 // absolute origin is (kGridX, kGridY). Their visuals keep the existing overlay
 // positions so this phase changes input ownership without moving the UI.
@@ -82,138 +67,7 @@ constexpr int64_t kExtensionTabY = kCellY - kGridY;
 constexpr int64_t kExtensionTabWidth = 0x70;
 constexpr int64_t kExtensionTabHeight = 0x30;
 
-using PopupEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
-using PopupNoArgFn = void (*)();
-using OriginalDrawInvenBagFn = void (*)();
-using OriginalDrawInvenItemFn = void (*)();
-
-// Extension source protection follows the extension_bag gate independently of move_merge.
-std::atomic<bool> g_extension_source_protection_requested{false};
-// 生命周期节拍帧任务（D2a-3c：原 150ms 线程体迁 infra::scheduler，主线程执行）。
-uint64_t g_lifecycle_task = 0;
-const qol::contracts::QolHostSdk* g_sdk = nullptr;
-const qol::contracts::QolGameHost* g_game = nullptr;
-const qol::contracts::QolExtensionBagWritePort* g_write_port = nullptr;
-const qol::contracts::QolCharacterExtrasPort* g_character_extras = nullptr;
-const qol::contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
-const qol::contracts::ItemFactsApi* g_item_facts = nullptr;
-const qol::contracts::CraftFactsApi* g_craft_facts = nullptr;
-int g_lifecycle_last_state = -1;
-std::atomic<bool> g_main_menu_cleanup_dirty{false};
-std::atomic<bool> g_virtual_bag_enabled{false};
-std::atomic<uint64_t> g_exit_trace_sequence{0};
-jclass g_virtual_bag_bridge_class = nullptr;
-uint8_t* g_state_entry = nullptr;
-PopupEventFn g_orig_event = nullptr;
-PopupNoArgFn g_orig_f3 = nullptr;
-PopupNoArgFn g_orig_enter = nullptr;
-uintptr_t g_inventory_enter = 0;
-PopupNoArgFn g_orig_save_enter = nullptr;
-uint8_t* g_save_state_entry = nullptr;
-bool g_save_panel_hook_installed = false;
-void* g_backup_save_inventory = nullptr;
-virtual_bag::State g_virtual_bag_state{};
-int g_loaded_slot = -2;
-
 uint64_t isolation_now_ms_locked();
-std::array<std::array<void*, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_objects{};
-struct ModuleUseState {
-    bool active = false;
-    bool consumed = false;
-    bool pending_release = false;
-    void* item = nullptr;
-    uint64_t generation = 0;
-    std::thread::id owner{};
-};
-struct ModuleUseToken {
-    int bag = -1;
-    int slot = -1;
-    void* item = nullptr;
-    uint64_t generation = 0;
-    std::thread::id owner{};
-};
-struct ModuleUseReleasePlan {
-    bool pending = false;
-    int bag = -1;
-    int slot = -1;
-    void* item = nullptr;
-    void* control = nullptr;
-    uint32_t handle = 0;
-    uint64_t generation = 0;
-};
-std::array<std::array<ModuleUseState, virtual_bag::kSlotCount>, virtual_bag::kBagCount>
-    g_module_object_use{};
-thread_local ModuleUseToken* g_active_module_use_token = nullptr;
-std::array<std::array<int, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_categories{};
-std::array<std::array<uint32_t, virtual_bag::kSlotCount>, virtual_bag::kBagCount> g_module_object_hashes{};
-extern uint32_t g_module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount];
-std::array<void*, virtual_bag::kSlotCount> g_original_inventory{};
-uint8_t g_original_current_direct = 0;
-uint8_t g_original_current_got = 0;
-int g_original_bag_size_bag = -1;
-uint32_t g_original_bag_size = 0;
-int g_module_window_original_bag = -1;
-void* g_projected_item_root = nullptr;
-bool g_module_view_installed = false;
-int g_module_view_index = -1;
-void* g_pending_jewel_detail_item = nullptr;
-int g_pending_jewel_detail_bag = -1;
-int g_pending_jewel_detail_slot = -1;
-uint8_t g_exit_display_bag = kNoOriginalBagSelected;
-bool g_inventory_frame_active = false;
-bool g_extension_touch_capture = false;
-std::array<void*, virtual_bag::kBagCount> g_extension_tab_buttons{};
-void* g_extension_tab_root = nullptr;
-uint64_t g_inventory_generation = 0;
-uint64_t g_extension_tab_generation = 0;
-int g_pending_extension_tab = -1;
-uint64_t g_pending_extension_tab_generation = 0;
-int g_extension_desc_unequip_bag = -1;
-std::array<uint64_t, 11> g_extension_desc_item_ids{};
-std::array<bool, 11> g_extension_desc_item_bound{};
-void* g_extension_desc_item = nullptr;
-int g_extension_desc_item_bag = -1;
-int g_extension_desc_item_slot = -1;
-using ExtensionDestroyOkFn = void (*)(void*);
-ExtensionDestroyOkFn g_extension_destroy_original_ok = nullptr;
-ExtensionDestroyOkFn g_extension_sell_original_ok = nullptr;
-ExtensionDestroyOkFn g_extension_destroy_original_cancel = nullptr;
-ExtensionDestroyOkFn g_extension_sell_original_cancel = nullptr;
-bool g_extension_sell_apply_variant_discount = true;
-struct ExtensionDrag {
-    bool active = false;
-    uint8_t bag = 0;
-    uint8_t slot = 0;
-    int64_t press_x = 0;
-    int64_t press_y = 0;
-    int64_t current_x = 0;
-    int64_t current_y = 0;
-};
-
-ExtensionDrag g_extension_drag{};
-virtual_bag::ExtensionDragSession g_extension_drag_session{};
-
-std::atomic<uint64_t> g_p5_observation_sequence{0};
-std::atomic<uint64_t> g_p5_last_item_query_sample_ms{0};
-std::atomic<uint64_t> g_p5_last_panel_move_sample_ms{0};
-thread_local bool g_p5_observation_active = false;
-thread_local bool g_refresh_restore_suppress = false;
-thread_local bool g_in_native_call = false;
-void* g_tab_bag_items[virtual_bag::kBagCount] = {};
-
-bool read_item_category(const void* item, int* out_category) {
-    qol::contracts::QolItemHandle handle{};
-    if (g_item_facts == nullptr || g_item_facts->category == nullptr ||
-        item == nullptr || out_category == nullptr ||
-        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
-    int32_t category = 0;
-    if (!qol::contracts::succeeded(
-            g_item_facts->category(handle, &category))) return false;
-    *out_category = category;
-    return true;
-}
-
-const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() { return g_write_port; }
 
 bool extension_save_item_on_empty(void* item, int bag) {
     const auto* api = extension_bag_write_api();
@@ -294,16 +148,6 @@ bool extension_free_item(void* item) {
     const auto* api = extension_bag_write_api();
     return api != nullptr && api->inventory.free_item != nullptr &&
            qol::contracts::succeeded(api->inventory.free_item(item));
-}
-
-void* extension_create_item(int category, int arg1, int arg2, int arg3) {
-    const auto* api = extension_bag_write_api();
-    if (api == nullptr || api->inventory.create_item == nullptr) return nullptr;
-    void* item = nullptr;
-    return qol::contracts::succeeded(
-               api->inventory.create_item(category, arg1, arg2, arg3, &item))
-               ? item
-               : nullptr;
 }
 
 bool extension_serialize_item(uint8_t* payload, int payload_capacity, void* item, int* out_size) {
@@ -460,18 +304,6 @@ bool read_world_in_world() {
     return read_world_state_id(&state) && state == 5;
 }
 
-const qol::contracts::QolItemCountApi* item_count_api();
-
-bool mark_native_bag_object(void* item) {
-    const auto* api = item_count_api();
-    if (api == nullptr || api->read_encoded_field == nullptr ||
-        api->write_encoded_field == nullptr || item == nullptr) return false;
-    uint32_t field = 0;
-    if (!qol::contracts::succeeded(api->read_encoded_field(item, &field))) return false;
-    field = qol::features::extension_bag::write_native_bag_object_marker(field);
-    return qol::contracts::succeeded(api->write_encoded_field(item, field));
-}
-
 bool read_item_sell_price(const void* item, int64_t* out_price) {
     qol::contracts::QolItemHandle handle{};
     if (g_item_facts == nullptr || g_item_facts->sell_price == nullptr ||
@@ -594,7 +426,6 @@ struct NativeCallScope {
     }
 };
 
-int extension_tab_index(void* ctrl);
 bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token);
 bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
                               ModuleUseReleasePlan* out_release);
@@ -610,16 +441,9 @@ bool module_object_release_allowed_locked(int bag, int slot, void* item, const c
 void store_teardown_locked();
 void mix_teardown_locked();
 
-#include "plugins/extension_bag/extension_bag_observation.inc"
-
-void extension_tab_button_clicked(void* ctrl);
-
-#include "plugins/extension_bag/extension_bag_tabs.inc"
-
 // 扩展标签控件事件处理：TouchHandle 转发的控件事件（0x02=click 松开确认，
 // 0x04=drop 到袋）。挂袋容器后与原版袋标签同链：松开 → TouchHandle 判定。
 void queue_extension_tab_click_locked(int extension_bag);
-void* touch_moving_item_control_locked();
 bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
                                             int index, void* moving_control);
 bool extension_source_should_equip_locked(int target_bag);
@@ -628,12 +452,9 @@ bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, in
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag, int dst_slot);
 bool persist_state_locked(bool force);
 void refresh_projected_module_view_after_move_locked();
-void cancel_projected_drag_session_locked(const char* reason);
 void refresh_projection_if_overwritten_locked();
 bool sync_projected_slot_locked(int bag, int slot);
 bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag);
-int original_item_category_locked(void* item);
-int drag_source_category_locked();
 bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
                                        void* moving_control);
 void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
@@ -710,13 +531,7 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
                                                 const char* context, void* use_token);
 
-#include "plugins/extension_bag/extension_bag_drag_session.inc"
-
 #include "plugins/extension_bag/extension_bag_runtime.inc"
-
-const qol::contracts::QolItemCountApi* item_count_api() {
-    return g_game == nullptr ? nullptr : &g_game->item_count;
-}
 
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);

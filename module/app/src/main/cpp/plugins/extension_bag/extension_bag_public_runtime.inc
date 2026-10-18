@@ -14,23 +14,6 @@ uint64_t extension_bag_isolation_now_ms() {
     return isolation_now_ms_locked();
 }
 
-// G-8/H4 共享扩展身份判据：所有事件层与函数层守卫都反查同一份
-// g_module_objects，避免 source 判定在不同防线间漂移。调用方必须已持有
-// g_virtual_bag_mtx。
-bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot) {
-    if (item == nullptr || out_bag == nullptr || out_slot == nullptr) return false;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (g_module_objects[bag][slot] == item) {
-                *out_bag = bag;
-                *out_slot = slot;
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
 uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* x2, void* param) {
     if (g_p5_observation_active || !p5_observation_enabled() ||
         !p5_should_begin_item_observation(event)) {

@@ -1,3 +1,7 @@
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_logging.h"
+
 int extension_tab_index(void* ctrl) {
     for (int index = 0; index < virtual_bag::kBagCount; ++index) {
         if (g_extension_tab_buttons[index] == ctrl) return index;

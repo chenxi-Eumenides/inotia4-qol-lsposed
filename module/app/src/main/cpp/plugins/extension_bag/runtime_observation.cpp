@@ -1,4 +1,15 @@
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_logging.h"
+
+#include <chrono>
+#include <cstring>
+
+namespace {
+
 constexpr uint64_t kP5SampleIntervalMs = 100;
+
+}
 
 bool p5_observation_enabled() {
     const auto* sdk = qol::features::extension_bag::extension_bag_host_sdk();
@@ -8,6 +19,8 @@ bool p5_observation_enabled() {
 bool p5_panel_observation_enabled() {
     return !g_p5_observation_active && p5_observation_enabled();
 }
+
+namespace {
 
 uint64_t p5_steady_now_ms() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -26,9 +39,13 @@ bool p5_take_sample(std::atomic<uint64_t>* last_sample_ms) {
     }
 }
 
+}
+
 bool p5_should_begin_item_observation(uint64_t event) {
     return event != 0x10 || p5_take_sample(&g_p5_last_item_query_sample_ms);
 }
+
+namespace {
 
 bool p5_should_emit_observation(const char* phase, uint64_t event) {
     if (!p5_observation_enabled()) return false;
@@ -161,10 +178,12 @@ P5TouchObservation p5_touch_observation_locked(void* target_control, void* sourc
     return observation;
 }
 
+}
+
 uint64_t log_p5_observation_locked(const char* phase, void* target_control, uint64_t event,
                                    bool x2_present, bool param_present, void* source_control,
-                                   bool result_known, uint64_t result, int64_t event_x = -1,
-                                   int64_t event_y = -1, uint64_t related_sequence = 0) {
+                                   bool result_known, uint64_t result, int64_t event_x,
+                                   int64_t event_y, uint64_t related_sequence) {
     if (!p5_should_emit_observation(phase, event)) return 0;
     P5ObservationScope observation_scope;
     const P5ControlObservation target = p5_control_observation_locked(target_control);

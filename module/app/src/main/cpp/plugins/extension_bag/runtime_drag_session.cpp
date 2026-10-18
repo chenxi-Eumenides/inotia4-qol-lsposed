@@ -1,3 +1,7 @@
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_logging.h"
+
 void begin_projected_drag_session_locked(int source_slot) {
     if (g_extension_drag_session.phase != virtual_bag::DragPhase::kIdle) return;
     const uint64_t token = g_p5_observation_sequence.fetch_add(1) + 1;

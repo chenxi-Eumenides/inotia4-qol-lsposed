@@ -16,6 +16,11 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/inventory_hooks/inventory_hook_stage4.cpp
     plugins/inventory_hooks/inventory_slot.cpp
     plugins/extension_bag/game_ui_virtbag.cpp
+    plugins/extension_bag/extension_bag_state.cpp
+    plugins/extension_bag/runtime_observation.cpp
+    plugins/extension_bag/runtime_tabs.cpp
+    plugins/extension_bag/runtime_drag_session.cpp
+    plugins/extension_bag/runtime_input.cpp
     plugins/extension_bag/extension_bag_port.cpp
     plugins/extension_bag/extension_bag_persistence.cpp
     plugins/extension_bag/extension_bag_geometry.cpp

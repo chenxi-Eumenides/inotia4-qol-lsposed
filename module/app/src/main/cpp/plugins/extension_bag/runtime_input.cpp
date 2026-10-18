@@ -1,3 +1,7 @@
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_logging.h"
+
 void* touch_moving_item_control_locked() {
     void* moving = nullptr;
     void* drop_source = nullptr;
