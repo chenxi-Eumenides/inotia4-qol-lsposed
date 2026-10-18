@@ -169,6 +169,7 @@ struct ExtensionBagStoreState {
     uint32_t original_size_word = 0;
     uint32_t original_bag_size = 0;
     void* projected_item_root = nullptr;
+    void* hidden_equip_bag_root = nullptr;
     std::array<void*, virtual_bag::kBagCount> tab_buttons{};
     std::array<void*, virtual_bag::kBagCount> tab_bag_items{};
     void* tab_root = nullptr;

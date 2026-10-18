@@ -184,6 +184,16 @@ bool extension_bag_ui_draw_part_alpha(int32_t unit, int32_t loc, int32_t x, int3
         ui->draw_part_alpha(group, x, y, image, type, flip, alpha));
 }
 
+bool extension_bag_ui_set_control_show(void* control, bool show) {
+    const auto* ui = extension_bag_ui();
+    constexpr std::size_t kSetControlShowEnd =
+        offsetof(qol::contracts::QolUiAdapter, set_control_show) +
+        sizeof(((qol::contracts::QolUiAdapter*)nullptr)->set_control_show);
+    if (ui == nullptr || control == nullptr || ui->size < kSetControlShowEnd ||
+        ui->set_control_show == nullptr) return false;
+    return qol::contracts::succeeded(ui->set_control_show(control, show ? 1 : 0));
+}
+
 bool extension_bag_ui_can_draw() {
     const auto* ui = extension_bag_ui();
     return ui != nullptr && ui->image_group != nullptr && ui->image_loc != nullptr &&

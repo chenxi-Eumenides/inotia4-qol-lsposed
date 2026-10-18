@@ -194,6 +194,13 @@ void store_install_module_view_locked(int bag) {
     runtime_state().store.view_bag = bag;
     runtime_state().store.view_installed = true;
     ++runtime_state().store.view_generation;
+    // The store scene keeps the UIEquip bag column alive next to UIStore's own
+    // bag column. Hide only the former while the EB store view is installed; the
+    // store projection itself still needs the real current bag.
+    void* equip_bag_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+    if (equip_bag_root != nullptr && extension_bag_ui_set_control_show(equip_bag_root, false)) {
+        runtime_state().store.hidden_equip_bag_root = equip_bag_root;
+    }
     store_request_item_refresh_locked();
     VIRTBAG_LOG("store view installed bag=%d window=%d capacity=%d", bag, original_bag,
                 runtime_state().objects.bag.capacities[bag]);
@@ -219,6 +226,11 @@ void store_restore_module_view_locked() {
                                                 (runtime_state().store.original_bag_size & kCapacityMask))) {
             VIRTBAG_LOG("store restore capacity failed window=%d", runtime_state().store.window_original_bag);
         }
+    }
+    if (runtime_state().store.hidden_equip_bag_root != nullptr) {
+        (void)extension_bag_ui_set_control_show(
+            runtime_state().store.hidden_equip_bag_root, true);
+        runtime_state().store.hidden_equip_bag_root = nullptr;
     }
     runtime_state().store.original_size_word = 0;
     runtime_state().store.original_bag_size = 0;
