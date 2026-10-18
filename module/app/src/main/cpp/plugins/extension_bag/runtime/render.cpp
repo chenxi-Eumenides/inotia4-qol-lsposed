@@ -197,6 +197,12 @@ void virtual_bag_draw_end_locked(int inventory_state, std::unique_lock<std::mute
     }
     previous_state = inventory_state;
     if (inventory_state >= 0 && inventory_state != 5) {
+        // 页签点击只登记 pending，实际提交在 draw-end。装备页/扩展视图的
+        // inventory_state 为 4，不能因为非 5 就跳过 pending 提交。
+        if (runtime_state().ui.pending_extension_tab >= 0) {
+            ensure_state_loaded_locked();
+            commit_pending_extension_tab_locked(lock);
+        }
         if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->end_frame != nullptr) {
             (void)runtime_state().host.sdk->ui->end_frame();
         }
