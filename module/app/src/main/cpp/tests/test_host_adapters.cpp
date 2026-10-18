@@ -59,6 +59,11 @@ extern int g_host_ui_step_calls;
 extern int g_host_ui_cancel_calls;
 extern int g_host_ui_not_ready_reads;
 extern std::string g_host_ui_snapshot;
+namespace qol::game {
+void test_desc_hook_set_target(void* button, void* data, void** execute_slot,
+                               void* original_proc);
+void test_desc_hook_set_other_identity(void* button, void* data, void** execute_slot);
+}  // namespace qol::game
 
 static_assert(offsetof(qol::contracts::QolMoveMergePort, move_item) ==
               ((sizeof(QolVersion) + alignof(void*) - 1) / alignof(void*)) * alignof(void*));
@@ -503,6 +508,16 @@ namespace {
 
 int64_t g_frame = 1;
 int g_event_calls = 0;
+int g_desc_original_calls = 0;
+void* g_desc_original_button = nullptr;
+
+void desc_original_callback(void* button) {
+    ++g_desc_original_calls;
+    g_desc_original_button = button;
+}
+
+void desc_replacement_callback(void*) {}
+void desc_replacement_callback_two(void*) {}
 
 int64_t fake_frame_count() { return g_frame; }
 
@@ -664,6 +679,79 @@ void test_extension_bag_write_result_channels() {
     fn_inven_move_item = nullptr;
 }
 
+void test_desc_hook_v2(const qol::contracts::QolHostSdk& sdk) {
+    using namespace qol::contracts;
+    const QolDescHookApi* api = desc_hook_v2_if_available(&sdk);
+    assert(api != nullptr);
+
+    int button = 0;
+    int data = 0;
+    int other_button = 0;
+    int other_data = 0;
+    void* original = reinterpret_cast<void*>(&desc_original_callback);
+    void* execute_proc = original;
+    void* other_execute_proc = original;
+    qol::game::test_desc_hook_set_target(&button, &data, &execute_proc, original);
+    qol::game::test_desc_hook_set_other_identity(&other_button, &other_data, &other_execute_proc);
+
+    QolDescButtonTarget target{};
+    assert(api->resolve(0, nullptr).code == kQolErrInvalidArgument);
+    assert(api->resolve(11, &target).code == kQolErrInvalidArgument);
+    assert(api->resolve(0, &target).ok == kQolOk);
+    assert(target.button == &button && target.data == &data &&
+           target.execute_slot == &execute_proc && target.original_proc == original);
+
+    uint64_t id = 0;
+    assert(api->bind(0, nullptr, &desc_replacement_callback, &id).code == kQolErrInvalidArgument);
+    assert(api->bind(0, &target, nullptr, &id).code == kQolErrInvalidArgument);
+    assert(api->bind(0, &target, &desc_replacement_callback, nullptr).code ==
+           kQolErrInvalidArgument);
+    assert(api->bind(11, &target, &desc_replacement_callback, &id).code ==
+           kQolErrInvalidArgument);
+    assert(api->bind(0, &target, &desc_replacement_callback, &id).ok == kQolOk);
+    assert(id != 0 && execute_proc == reinterpret_cast<void*>(&desc_replacement_callback));
+
+    QolDescButtonTarget current{};
+    int32_t matches = -1;
+    assert(api->validate(id, &button, &current, &matches).ok == kQolOk);
+    assert(matches == 1 && current.button == &button && current.data == &data &&
+           current.execute_slot == &execute_proc && current.original_proc == original);
+    assert(api->validate(id, nullptr, &current, &matches).code == kQolErrInvalidArgument);
+    assert(api->validate(id, &button, nullptr, nullptr).code == kQolErrInvalidArgument);
+    assert(api->validate(0, &button, &current, &matches).code == kQolErrInvalidArgument);
+
+    assert(api->validate(id, &other_button, &current, &matches).ok == kQolOk);
+    assert(matches == 0 && current.button == &other_button && current.data == &other_data &&
+           current.execute_slot == &other_execute_proc && current.original_proc == original);
+    int32_t original_match = 0;
+    assert(api->original_matches(id, "test.desc.button", &original_match).ok == kQolOk);
+    assert(original_match == 1);
+    assert(api->original_matches(id, nullptr, &original_match).code == kQolErrInvalidArgument);
+    const int original_calls_before = g_desc_original_calls;
+    assert(api->call_original(id, &button).ok == kQolOk);
+    assert(g_desc_original_calls == original_calls_before + 1 && g_desc_original_button == &button);
+    assert(api->call_original(id, nullptr).code == kQolErrInvalidArgument);
+
+    QolDescButtonTarget alias_target{};
+    uint64_t alias_id = 0;
+    assert(api->resolve(1, &alias_target).ok == kQolOk);
+    assert(alias_target.execute_slot == target.execute_slot);
+    assert(api->bind(1, &alias_target, &desc_replacement_callback_two, &alias_id).code ==
+           kQolErrConflict);
+    assert(alias_id == 0 && execute_proc == reinterpret_cast<void*>(&desc_replacement_callback));
+
+    assert(api->unbind(id).ok == kQolOk);
+    assert(execute_proc == original);
+    assert(api->unbind(id).code == kQolErrNotFound);
+    QolDescButtonTarget tampered = target;
+    tampered.button = &other_button;
+    uint64_t rejected_id = 99;
+    assert(api->bind(0, &tampered, &desc_replacement_callback, &rejected_id).code ==
+           kQolErrConflict);
+    assert(rejected_id == 0 && execute_proc == original);
+    assert(api->unbind(0).code == kQolErrInvalidArgument);
+}
+
 }  // namespace
 
 int main() {
@@ -695,8 +783,11 @@ int main() {
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
-    assert(sdk.abi.minor == qol::contracts::kHostSdkMinor);
-    assert(qol::contracts::kHostSdkMinor == 26);
+    assert(sdk.abi.minor == 27);
+    assert(qol::contracts::kHostSdkMinor == 27);
+    assert(sdk.desc_hook_v2 != nullptr);
+    assert(sdk.desc_hook_v2->struct_size == sizeof(qol::contracts::QolDescHookApi));
+    assert(qol::contracts::desc_hook_v2_if_available(&sdk) == sdk.desc_hook_v2);
     assert(sdk.runtime_effects != nullptr);
     assert(sdk.security != nullptr);
     assert(qol::contracts::module_health_if_available(&sdk) == sdk.module_health);
@@ -784,6 +875,7 @@ int main() {
     assert(sdk.desc_button.original_matches(nullptr, "symbol", nullptr).code ==
            kQolErrInvalidArgument);
     assert(sdk.desc_button.call_original(nullptr, nullptr).code == kQolErrInvalidArgument);
+    test_desc_hook_v2(sdk);
 
     static_assert(sizeof(qol::contracts::QolStoreApi) == sizeof(void*) * 9,
                   "store ABI member count changed");

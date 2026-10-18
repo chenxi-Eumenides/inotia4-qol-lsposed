@@ -4,6 +4,7 @@
 #include "game/access/item_class.h"
 #include "game/access/item_sell_quote.h"
 #include "game/access/game_access.h"
+#include "game/access/ptr_slots.h"
 #include "game/access/ui_state.h"
 #include "game/access/world.h"
 #include "game/json/game_json.h"
@@ -28,6 +29,77 @@ decltype(fn_inven_find_item_slot) fn_inven_find_item_slot = nullptr;
 extern qol::contracts::QolItemHandle g_inventory_item_handle;
 
 namespace qol::game {
+
+namespace {
+bool g_test_desc_target_available = false;
+void* g_test_desc_panel_button = nullptr;
+void* g_test_desc_panel_data = nullptr;
+void** g_test_desc_panel_execute_slot = nullptr;
+void* g_test_desc_original_proc = nullptr;
+void* g_test_desc_other_button = nullptr;
+void* g_test_desc_other_data = nullptr;
+void** g_test_desc_other_execute_slot = nullptr;
+}
+
+void test_desc_hook_set_target(void* button, void* data, void** execute_slot,
+                               void* original_proc) {
+    g_test_desc_target_available = button != nullptr && data != nullptr &&
+                                  execute_slot != nullptr && original_proc != nullptr;
+    g_test_desc_panel_button = button;
+    g_test_desc_panel_data = data;
+    g_test_desc_panel_execute_slot = execute_slot;
+    g_test_desc_original_proc = original_proc;
+    g_test_desc_other_button = nullptr;
+    g_test_desc_other_data = nullptr;
+    g_test_desc_other_execute_slot = nullptr;
+}
+
+void test_desc_hook_set_other_identity(void* button, void* data, void** execute_slot) {
+    g_test_desc_other_button = button;
+    g_test_desc_other_data = data;
+    g_test_desc_other_execute_slot = execute_slot;
+}
+
+void test_desc_hook_set_panel_button(void* button) { g_test_desc_panel_button = button; }
+
+bool extension_desc_button_target(uint32_t index, DescButtonTarget* out) {
+    if (!g_test_desc_target_available || index >= 11 || out == nullptr ||
+        g_test_desc_panel_button == nullptr || g_test_desc_panel_data == nullptr ||
+        g_test_desc_panel_execute_slot == nullptr ||
+        *g_test_desc_panel_execute_slot == nullptr) return false;
+    *out = {g_test_desc_panel_button, g_test_desc_panel_data,
+            g_test_desc_panel_execute_slot, *g_test_desc_panel_execute_slot,
+            reinterpret_cast<uintptr_t>(&g_test_desc_panel_button)};
+    return true;
+}
+
+bool extension_desc_button_identity(void* button, void** out_data,
+                                    void** out_execute_slot, void** out_current_proc) {
+    if (out_data != nullptr) *out_data = nullptr;
+    if (out_execute_slot != nullptr) *out_execute_slot = nullptr;
+    if (out_current_proc != nullptr) *out_current_proc = nullptr;
+    if (button == nullptr || out_data == nullptr || out_execute_slot == nullptr ||
+        out_current_proc == nullptr) return false;
+    void* data = nullptr;
+    void** execute_slot = nullptr;
+    if (button == g_test_desc_panel_button) {
+        data = g_test_desc_panel_data;
+        execute_slot = g_test_desc_panel_execute_slot;
+    } else if (button == g_test_desc_other_button) {
+        data = g_test_desc_other_data;
+        execute_slot = g_test_desc_other_execute_slot;
+    }
+    if (data == nullptr || execute_slot == nullptr || *execute_slot == nullptr) return false;
+    *out_data = data;
+    *out_execute_slot = execute_slot;
+    *out_current_proc = *execute_slot;
+    return true;
+}
+
+bool extension_desc_button_original_matches(void* original, const char* symbol) {
+    return original != nullptr && original == g_test_desc_original_proc && symbol != nullptr &&
+           std::strcmp(symbol, "test.desc.button") == 0;
+}
 
 int item_sell_price(const void*) { return -1; }
 int item_class_category(const void*) { return 28; }
@@ -198,8 +270,6 @@ bool extension_desc_button_instance(uint32_t, void** out_button) {
     return false;
 }
 
-bool extension_desc_button_original_matches(void*, const char*) { return false; }
-
 // P2/G5 语义面在 host 测试中的桩（真实实现位于 game/access/*.cpp，测试目标不编译它们）。
 void* char_party_member(int32_t) { return nullptr; }
 
@@ -278,8 +348,16 @@ std::string build_inventory_json() { return "{\"bags\":[]}"; }
 
 namespace qol::patch {
 
-bool ptr_slot_write_raw(uintptr_t, void*) { return false; }
-bool ptr_slot_restore_raw(uintptr_t, void*) { return false; }
+bool ptr_slot_write_raw(uintptr_t slot, void* value) {
+    if (slot == 0 || value == nullptr) return false;
+    *reinterpret_cast<void**>(slot) = value;
+    return true;
+}
+bool ptr_slot_restore_raw(uintptr_t slot, void* value) {
+    if (slot == 0 || value == nullptr) return false;
+    *reinterpret_cast<void**>(slot) = value;
+    return true;
+}
 
 }  // namespace qol::patch
 

@@ -326,6 +326,36 @@ struct QolDescButtonApi {
     QolResult (*call_original)(void* original, void* button);
 };
 
+struct QolDescButtonTarget {
+    void* button;
+    void* data;
+    void* execute_slot;
+    void* original_proc;
+};
+
+using QolDescHookResolveFn = QolResult (*)(uint32_t panel_index, QolDescButtonTarget* out);
+using QolDescHookBindFn = QolResult (*)(uint32_t panel_index,
+                                        const QolDescButtonTarget* expected,
+                                        QolDescButtonProc replacement,
+                                        uint64_t* out_id);
+using QolDescHookValidateFn = QolResult (*)(uint64_t id, void* callback_button,
+                                            QolDescButtonTarget* out_current,
+                                            int32_t* out_matches);
+using QolDescHookOriginalMatchesFn = QolResult (*)(uint64_t id, const char* symbol,
+                                                   int32_t* out_match);
+using QolDescHookCallOriginalFn = QolResult (*)(uint64_t id, void* button);
+using QolDescHookUnbindFn = QolResult (*)(uint64_t id);
+
+struct QolDescHookApi {
+    uint32_t struct_size;
+    QolDescHookResolveFn resolve;
+    QolDescHookBindFn bind;
+    QolDescHookValidateFn validate;
+    QolDescHookOriginalMatchesFn original_matches;
+    QolDescHookCallOriginalFn call_original;
+    QolDescHookUnbindFn unbind;
+};
+
 using QolSnapshotHandle = void*;
 using QolSnapshotToken = void*;
 
@@ -461,13 +491,29 @@ struct QolHostSdk {
     const QolSecurityApi* security;
     // v1.25 tail: read-only Host module-health facts, stable for the Host lifetime.
     const QolHostModuleHealthFactsApi* module_health;
+    // v1.27 tail: identity-validated description-button hook API.
+    const QolDescHookApi* desc_hook_v2;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
 // minor 22 adds owner feature/config and resident management; minor 23 adds runtime/security APIs;
 // minor 24 appends desired lifecycle state to runtime effects; minor 25 adds module-health facts;
-// minor 26 appends feature display priority and category metadata to the settings catalog.
-constexpr uint16_t kHostSdkMinor = 26;
+// minor 26 appends feature display priority and category metadata to the settings catalog;
+// minor 27 appends desc hook V2.
+constexpr uint16_t kHostSdkMinor = 27;
+
+inline const QolDescHookApi* desc_hook_v2_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, desc_hook_v2) +
+                                sizeof(const QolDescHookApi*);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 27 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = sdk->desc_hook_v2;
+    if (api == nullptr || api->struct_size < sizeof(QolDescHookApi) ||
+        api->resolve == nullptr || api->bind == nullptr || api->validate == nullptr ||
+        api->original_matches == nullptr || api->call_original == nullptr || api->unbind == nullptr)
+        return nullptr;
+    return api;
+}
 
 inline const QolHostModuleHealthFactsApi* module_health_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, module_health) +

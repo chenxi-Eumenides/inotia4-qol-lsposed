@@ -86,6 +86,56 @@ bool extension_desc_button_instance(uint32_t index, void** out_button) {
     return *out_button != nullptr;
 }
 
+bool extension_desc_button_target(uint32_t index, DescButtonTarget* out) {
+    if (out == nullptr || index >= sizeof(UIEQUIP_DESC_BUTTON_SLOT_OFFSETS) /
+                                  sizeof(UIEQUIP_DESC_BUTTON_SLOT_OFFSETS[0]) ||
+        g_base == 0) return false;
+    *out = {};
+
+    auto* panel_slot = reinterpret_cast<void**>(
+        g_base + G_UIEQUIP_PANEL_VMA + UIEQUIP_DESC_BUTTON_SLOT_OFFSETS[index]);
+    if (!game_memory_accessible(panel_slot, sizeof(void*), 'r')) return false;
+    void* button = *panel_slot;
+    if (button == nullptr ||
+        !game_memory_accessible(static_cast<uint8_t*>(button) + CO_DATA, sizeof(void*), 'r'))
+        return false;
+    void* data = *reinterpret_cast<void**>(static_cast<uint8_t*>(button) + CO_DATA);
+    if (data == nullptr) return false;
+    void* execute_slot = static_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
+    if (execute_slot == nullptr ||
+        !game_memory_accessible(execute_slot, sizeof(void*), 'r')) return false;
+    void* original_proc = *reinterpret_cast<void**>(execute_slot);
+    if (original_proc == nullptr) return false;
+
+    out->button = button;
+    out->data = data;
+    out->execute_slot = execute_slot;
+    out->original_proc = original_proc;
+    out->panel_slot_addr = reinterpret_cast<uintptr_t>(panel_slot);
+    return true;
+}
+
+bool extension_desc_button_identity(void* button, void** out_data,
+                                    void** out_execute_slot, void** out_current_proc) {
+    if (out_data != nullptr) *out_data = nullptr;
+    if (out_execute_slot != nullptr) *out_execute_slot = nullptr;
+    if (out_current_proc != nullptr) *out_current_proc = nullptr;
+    if (button == nullptr || out_data == nullptr || out_execute_slot == nullptr ||
+        out_current_proc == nullptr ||
+        !game_memory_accessible(static_cast<uint8_t*>(button) + CO_DATA, sizeof(void*), 'r'))
+        return false;
+    void* data = *reinterpret_cast<void**>(static_cast<uint8_t*>(button) + CO_DATA);
+    if (data == nullptr) return false;
+    void* execute_slot = static_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
+    if (execute_slot == nullptr ||
+        !game_memory_accessible(execute_slot, sizeof(void*), 'r')) return false;
+    void* current_proc = *reinterpret_cast<void**>(execute_slot);
+    *out_data = data;
+    *out_execute_slot = execute_slot;
+    *out_current_proc = current_proc;
+    return true;
+}
+
 bool extension_desc_button_original_matches(void* original, const char* symbol) {
     if (original == nullptr || symbol == nullptr || g_base == 0) return false;
     uintptr_t vma = 0;

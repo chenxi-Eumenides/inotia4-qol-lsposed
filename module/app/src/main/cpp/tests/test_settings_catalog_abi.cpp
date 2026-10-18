@@ -8,7 +8,7 @@
 
 using namespace qol::contracts;
 static_assert(kSettingsCatalogMajor == 1 && kSettingsCatalogMinor == 3);
-static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 26);
+static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 27);
 static_assert(kHttpRegistryVersion.major == 1 && kHttpRegistryVersion.minor == 1);
 static_assert(kHttpDispatchVersion.major == 1 && kHttpDispatchVersion.minor == 1);
 
@@ -71,7 +71,8 @@ static_assert(offsetof(QolHostSdk, feature_control) == 816);
 static_assert(offsetof(QolHostSdk, runtime_effects) == 824);
 static_assert(offsetof(QolHostSdk, security) == 832);
 static_assert(offsetof(QolHostSdk, module_health) == 840);
-static_assert(sizeof(QolHostSdk) == 848);
+static_assert(offsetof(QolHostSdk, desc_hook_v2) == 848);
+static_assert(sizeof(QolHostSdk) == 856);
 static_assert(std::is_standard_layout_v<FeatureDefinition> &&
               std::is_trivially_copyable_v<FeatureDefinition>);
 constexpr FeatureDefinition kDefaultPriorityFeature{};
@@ -222,6 +223,14 @@ QolResult config_read_bool(const char*, int32_t*) { return ok(); }
 QolResult config_request_set_bool(const char*, int32_t, uint64_t*) { return ok(); }
 QolResult config_query_request(uint64_t, SettingsConfigRequestStatus*) { return ok(); }
 QolResult module_health_read_stub(void*, QolModuleHealthSnapshot*) { return ok(); }
+QolResult desc_hook_resolve_stub(uint32_t, QolDescButtonTarget*) { return ok(); }
+QolResult desc_hook_bind_stub(uint32_t, const QolDescButtonTarget*, QolDescButtonProc, uint64_t*) {
+    return ok();
+}
+QolResult desc_hook_validate_stub(uint64_t, void*, QolDescButtonTarget*, int32_t*) { return ok(); }
+QolResult desc_hook_original_matches_stub(uint64_t, const char*, int32_t*) { return ok(); }
+QolResult desc_hook_call_original_stub(uint64_t, void*) { return ok(); }
+QolResult desc_hook_unbind_stub(uint64_t) { return ok(); }
 
 int main() {
     constexpr uint32_t old_catalog_size = offsetof(QolSettingsCatalogApi, query_item_availability);
@@ -340,6 +349,48 @@ int main() {
     module_health_api.read = &module_health_read_stub;
     health_sdk.module_health = nullptr;
     assert(module_health_if_available(&health_sdk) == nullptr);
+
+    QolDescHookApi desc_hook_api{sizeof(QolDescHookApi), &desc_hook_resolve_stub,
+        &desc_hook_bind_stub, &desc_hook_validate_stub, &desc_hook_original_matches_stub,
+        &desc_hook_call_original_stub, &desc_hook_unbind_stub};
+    QolHostSdk desc_sdk{};
+    desc_sdk.abi = {sizeof(QolHostSdk), kHostSdkMajor, kHostSdkMinor};
+    desc_sdk.desc_hook_v2 = &desc_hook_api;
+    assert(desc_hook_v2_if_available(&desc_sdk) == &desc_hook_api);
+    assert(desc_hook_v2_if_available(nullptr) == nullptr);
+    desc_sdk.abi.minor = 26;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_sdk.abi.minor = 27;
+    desc_sdk.abi.size = offsetof(QolHostSdk, desc_hook_v2);
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_sdk.abi.size = sizeof(QolHostSdk);
+    desc_sdk.abi.major = 2;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_sdk.abi.major = kHostSdkMajor;
+    desc_hook_api.struct_size = sizeof(QolDescHookApi) - 1;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_hook_api.struct_size = sizeof(QolDescHookApi);
+    desc_hook_api.resolve = nullptr;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_hook_api.resolve = &desc_hook_resolve_stub;
+    desc_hook_api.bind = nullptr;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_hook_api.bind = &desc_hook_bind_stub;
+    desc_hook_api.validate = nullptr;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_hook_api.validate = &desc_hook_validate_stub;
+    desc_hook_api.original_matches = nullptr;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_hook_api.original_matches = &desc_hook_original_matches_stub;
+    desc_hook_api.call_original = nullptr;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_hook_api.call_original = &desc_hook_call_original_stub;
+    desc_hook_api.unbind = nullptr;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+    desc_hook_api.unbind = &desc_hook_unbind_stub;
+    desc_sdk.desc_hook_v2 = nullptr;
+    assert(desc_hook_v2_if_available(&desc_sdk) == nullptr);
+
     const QolConfigNamespaceApi namespace_v10{32, kConfigNamespaceMajor,
         kConfigNamespaceLegacyMinor,
         +[](QolOwnerToken, char*, uint32_t, uint32_t*) { return ok(); },
@@ -378,9 +429,10 @@ int main() {
     std::printf("Plugin descriptor: metadata=%zu, count=%zu, size=%zu\n",
                 offsetof(PluginDescriptor, http_route_metadata),
                 offsetof(PluginDescriptor, http_route_metadata_count), sizeof(PluginDescriptor));
-    std::printf("Host SDK v1.26: settings_catalog=%zu, settings_config=%zu, runtime_effects=%zu, "
-                "security=%zu, module_health=%zu, total=%zu\n",
+    std::printf("Host SDK v1.27: settings_catalog=%zu, settings_config=%zu, runtime_effects=%zu, "
+                "security=%zu, module_health=%zu, desc_hook_v2=%zu, total=%zu\n",
                 offsetof(QolHostSdk, settings_catalog), offsetof(QolHostSdk, settings_config),
                 offsetof(QolHostSdk, runtime_effects), offsetof(QolHostSdk, security),
-                offsetof(QolHostSdk, module_health), sizeof(QolHostSdk));
+                offsetof(QolHostSdk, module_health), offsetof(QolHostSdk, desc_hook_v2),
+                sizeof(QolHostSdk));
 }
