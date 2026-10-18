@@ -1,3 +1,15 @@
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_equip_rules.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/move_merge.h"
+
+#include <algorithm>
+#include <cstring>
+
+#define is_backpack_category extension_bag_runtime_is_backpack_category
+
 bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
                                              int src_slot, int dst_bag,
                                              qol::contracts::QolItemHandle expected_item) {
@@ -188,6 +200,8 @@ bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int d
     return moved;
 }
 
+namespace {
+
 bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int target_bag,
                                         int inserted_slot, void* item,
                                         qol::contracts::QolItemHandle item_handle) {
@@ -214,6 +228,8 @@ bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int 
     }
     return remove_item_direct_unlocked(lock, target_bag, inserted_slot, item,
                                         "ext2orig insertion verification rollback");
+}
+
 }
 
 bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
@@ -590,6 +606,8 @@ bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& l
     return moved;
 }
 
+namespace {
+
 bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst_slot) {
     const virtual_bag::Item source = g_virtual_bag_state.items[src_bag][src_slot];
     const virtual_bag::Item destination = g_virtual_bag_state.items[dst_bag][dst_slot];
@@ -830,6 +848,8 @@ bool restore_ext2ext_destination_locked(const virtual_bag::TransactionContext& t
         if (!free_module_object_locked(bag, slot)) return false;
     }
     return sync_ext2ext_destination_view_locked(bag, slot, item);
+}
+
 }
 
 bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,

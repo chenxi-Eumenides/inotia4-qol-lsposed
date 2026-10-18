@@ -1,5 +1,17 @@
+#include "plugins/extension_bag/extension_bag_internal.h"
+
+#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/extension_bag_logging.h"
+#include "plugins/extension_bag/model/item_handle_custody.h"
+
+#include <array>
+#include <chrono>
+#include <cstring>
+
 // P3 所有权账本：借出对象四态跟踪。
 ownership::Ledger g_ownership_ledger{};
+
+namespace {
 
 struct DeferredItemFree {
     void* item = nullptr;
@@ -22,8 +34,6 @@ size_t g_deferred_free_queue_size = 0;
 // 不得据此替换或摘除对象。两层容量不随积压动态扩张。
 std::array<DeferredItemFree, kDeferredFreeCustodyCapacity> g_deferred_free_custody{};
 size_t g_deferred_free_custody_size = 0;
-
-bool object_touch_window_active_locked();
 
 uint64_t deferred_free_now_ms_locked() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -116,6 +126,8 @@ bool deferred_item_referenced_locked(void* item) {
     // 保留队列项，也不能让 handover 失败路径把仍由游戏持有的对象释放掉。
     return item_pointer_known_locked(item);
 }
+
+}  // namespace
 
 void drain_deferred_frees_locked() {
     if (object_touch_window_active_locked()) return;

@@ -56,6 +56,8 @@ constexpr int64_t kExtensionTabHeight = 0x30;
 
 uint64_t isolation_now_ms_locked();
 
+}  // namespace
+
 bool extension_save_item_on_empty(void* item, int bag) {
     const auto* api = extension_bag_write_api();
     if (api == nullptr || api->inventory.save_item_on_empty == nullptr) return false;
@@ -63,6 +65,8 @@ bool extension_save_item_on_empty(void* item, int bag) {
     return qol::contracts::succeeded(api->inventory.save_item_on_empty(item, bag, &result)) &&
            result != 0;
 }
+
+namespace {
 
 bool extension_equip_from_inventory(void* character, int bag, int slot, int equip_slot) {
     const auto* api = extension_bag_write_api();
@@ -230,6 +234,8 @@ bool read_item_cumulate_count(const void* item, int* out_count) {
     return true;
 }
 
+}  // namespace
+
 bool read_item_is_jewel(int category) {
     if (g_item_facts == nullptr || g_item_facts->is_jewel_category == nullptr) return false;
     int32_t is_jewel = 0;
@@ -237,6 +243,8 @@ bool read_item_is_jewel(int category) {
                g_item_facts->is_jewel_category(category, &is_jewel)) &&
            is_jewel != 0;
 }
+
+namespace {
 
 bool read_item_category_predicate(int category,
                                   QolResult (*predicate)(int32_t, int32_t*),
@@ -246,6 +254,8 @@ bool read_item_category_predicate(int category,
     if (!qol::contracts::succeeded(predicate(category, &value))) return false;
     *out_value = value != 0;
     return true;
+}
+
 }
 
 bool item_is_equip(const void* item) {
@@ -279,8 +289,6 @@ bool read_item_is_usable(int category) {
         category, g_game == nullptr ? nullptr : g_game->read_only.item.is_usable, &value) &&
         value;
 }
-
-}  // namespace
 
 bool read_world_state_id(int* out_state) {
     if (out_state == nullptr) return false;
@@ -421,7 +429,6 @@ struct NativeCallScope {
     }
 };
 
-#define g_ownership_ledger g_ownership_ledger_internal
 #define clear_original_desc_locked clear_original_desc_locked_internal
 #define original_bag_locked original_bag_locked_internal
 #define set_original_bag_locked set_original_bag_locked_internal
@@ -447,34 +454,41 @@ struct NativeCallScope {
 #define free_module_object_locked free_module_object_locked_internal
 #define materialize_module_item_locked materialize_module_item_locked_internal
 #define release_temporary_item_locked release_temporary_item_locked_internal
-#define module_object_generation_advance_locked module_object_generation_advance_locked_internal
 #define inventory_slot_locked inventory_slot_locked_internal
-#define log_ownership_audit_locked log_ownership_audit_locked_internal
-#define drain_deferred_frees_locked drain_deferred_frees_locked_internal
 #define item_pointer_known_locked item_pointer_known_locked_internal
 #define teardown_extension_bag_hosts_locked teardown_extension_bag_hosts_locked_internal
 #define module_cache_clear_preflight_locked module_cache_clear_preflight_locked_internal
 #define clear_module_cache_locked clear_module_cache_locked_internal
 #define commit_pending_extension_tab_locked commit_pending_extension_tab_locked_internal
-#define handle_bag_drop_release_locked handle_bag_drop_release_locked_internal
-#define route_deferred_extension_to_original_locked route_deferred_extension_to_original_locked_internal
-#define route_projected_session_drop_locked route_projected_session_drop_locked_internal
 #define reset_extension_desc_unequip_hook_locked reset_extension_desc_unequip_hook_locked_internal
 #define reset_extension_desc_item_hooks_locked reset_extension_desc_item_hooks_locked_internal
 #define restore_extension_desc_popup_callbacks_locked restore_extension_desc_popup_callbacks_locked_internal
+#define move_original_to_extension_locked move_original_to_extension_locked_internal
+#define move_original_to_extension_slot_locked move_original_to_extension_slot_locked_internal
+#define move_extension_to_original_locked move_extension_to_original_locked_internal
+#define move_extension_to_extension_locked move_extension_to_extension_locked_internal
+#define route_projected_session_to_tab_locked route_projected_session_to_tab_locked_internal
+#define module_slot_is_assignable_locked module_slot_is_assignable_locked_internal
+#define module_object_replacement_allowed_locked module_object_replacement_allowed_locked_internal
+#define extension_tab_hit extension_tab_hit_internal
+#define serialize_item_payload_locked serialize_item_payload_locked_internal
+#define load_item_payload_locked load_item_payload_locked_internal
+#define generate_transaction_id_locked generate_transaction_id_locked_internal
+#define txn_record_pending_locked txn_record_pending_locked_internal
+#define txn_abort_locked txn_abort_locked_internal
+#define isolate_pending_locked isolate_pending_locked_internal
+#define isolate_ext2orig_failure_locked isolate_ext2orig_failure_locked_internal
+#define original_inventory_contains_payload_locked original_inventory_contains_payload_locked_internal
+#define original_inventory_payload_slot_locked original_inventory_payload_slot_locked_internal
+#define original_inventory_handle_slot_locked original_inventory_handle_slot_locked_internal
+#define recover_pending_transaction_locked recover_pending_transaction_locked_internal
+#define try_equip_on_extension_tab_drop_locked try_equip_on_extension_tab_drop_locked_internal
+#define extension_source_should_equip_locked extension_source_should_equip_locked_internal
+#define equip_extension_source_on_tab_locked equip_extension_source_on_tab_locked_internal
+#define remove_item_direct_unlocked remove_item_direct_unlocked_internal
 
-bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token);
-bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
-                              ModuleUseReleasePlan* out_release);
-bool module_use_abort_locked(const ModuleUseToken& token);
-bool module_use_abort_isolate_locked(const ModuleUseToken& token);
-bool module_use_release_native(const ModuleUseReleasePlan& release);
-bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release);
-bool module_slot_is_assignable_locked(int bag, int slot);
-bool module_object_replacement_allowed_locked(int bag, int slot, const char* context);
-bool module_object_generation_advance_locked(int bag, int slot, const char* context);
-bool module_object_release_allowed_locked(int bag, int slot, void* item, const char* context,
-                                          bool allow_owner, const ModuleUseToken* token);
+bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag);
+
 void store_teardown_locked();
 void mix_teardown_locked();
 
@@ -486,18 +500,19 @@ bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
 bool extension_source_should_equip_locked(int target_bag);
 bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag,
                                           int source_bag, int source_slot);
-bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag, int dst_slot);
+bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
+                                       void* moving_control);
+bool move_original_to_extension_slot_locked(
+    std::unique_lock<std::mutex>& lock, int src_bag, int src_slot, int dst_bag,
+    qol::contracts::QolItemHandle expected_item);
+bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+                                       int src_slot, int target_bag);
+bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
+                                        int requested_dst_slot);
 bool persist_state_locked(bool force);
 void refresh_projected_module_view_after_move_locked();
 void refresh_projection_if_overwritten_locked();
 bool sync_projected_slot_locked(int bag, int slot);
-bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag);
-bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
-                                       void* moving_control);
-void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
-                                       const char* context, uint32_t* out_handle);
-void handover_tracked_item_locked(uint32_t handle, void* item, const char* context);
-void release_tracked_item_locked(uint32_t handle, void* item, const char* context);
 bool inventory_slot_locked(int bag, int slot, void** out);
 
 bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
@@ -570,7 +585,6 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 
 #include "plugins/extension_bag/extension_bag_runtime.inc"
 
-#undef g_ownership_ledger
 #undef clear_original_desc_locked
 #undef original_bag_locked
 #undef set_original_bag_locked
@@ -611,6 +625,29 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 #undef reset_extension_desc_unequip_hook_locked
 #undef reset_extension_desc_item_hooks_locked
 #undef restore_extension_desc_popup_callbacks_locked
+#undef move_original_to_extension_locked
+#undef move_original_to_extension_slot_locked
+#undef move_extension_to_original_locked
+#undef move_extension_to_extension_locked
+#undef route_projected_session_to_tab_locked
+#undef module_slot_is_assignable_locked
+#undef module_object_replacement_allowed_locked
+#undef extension_tab_hit
+#undef serialize_item_payload_locked
+#undef load_item_payload_locked
+#undef generate_transaction_id_locked
+#undef txn_record_pending_locked
+#undef txn_abort_locked
+#undef isolate_pending_locked
+#undef isolate_ext2orig_failure_locked
+#undef original_inventory_contains_payload_locked
+#undef original_inventory_payload_slot_locked
+#undef original_inventory_handle_slot_locked
+#undef recover_pending_transaction_locked
+#undef try_equip_on_extension_tab_drop_locked
+#undef extension_source_should_equip_locked
+#undef equip_extension_source_on_tab_locked
+#undef remove_item_direct_unlocked
 
 int original_bag_locked_internal() { return ::original_bag_locked(); }
 void set_original_bag_locked_internal(int bag) { ::set_original_bag_locked(bag); }
@@ -635,6 +672,39 @@ bool sync_projected_slot_locked_internal(int bag, int slot) {
     return ::sync_projected_slot_locked(bag, slot);
 }
 void* module_item_locked_internal(int bag, int slot) { return ::module_item_locked(bag, slot); }
+bool free_module_object_locked_internal(int bag, int slot, void* use_token) {
+    return ::free_module_object_locked(bag, slot, use_token);
+}
+bool module_slot_is_assignable_locked_internal(int bag, int slot) {
+    return ::module_slot_is_assignable_locked(bag, slot);
+}
+bool module_object_replacement_allowed_locked_internal(int bag, int slot,
+                                                       const char* context) {
+    return ::module_object_replacement_allowed_locked(bag, slot, context);
+}
+bool move_original_to_extension_locked_internal(std::unique_lock<std::mutex>& lock,
+                                                int dst_bag, void* moving_control) {
+    return ::move_original_to_extension_locked(lock, dst_bag, moving_control);
+}
+bool move_original_to_extension_slot_locked_internal(
+    std::unique_lock<std::mutex>& lock, int src_bag, int src_slot, int dst_bag,
+    qol::contracts::QolItemHandle expected_item) {
+    return ::move_original_to_extension_slot_locked(
+        lock, src_bag, src_slot, dst_bag, expected_item);
+}
+bool move_extension_to_original_locked_internal(std::unique_lock<std::mutex>& lock,
+                                                int src_bag, int src_slot, int target_bag) {
+    return ::move_extension_to_original_locked(lock, src_bag, src_slot, target_bag);
+}
+bool move_extension_to_extension_locked_internal(int src_bag, int src_slot, int dst_bag,
+                                                 int requested_dst_slot) {
+    return ::move_extension_to_extension_locked(src_bag, src_slot, dst_bag,
+                                                requested_dst_slot);
+}
+bool route_projected_session_to_tab_locked_internal(std::unique_lock<std::mutex>& lock,
+                                                    int target_bag) {
+    return ::route_projected_session_to_tab_locked(lock, target_bag);
+}
 
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);
@@ -642,7 +712,12 @@ uint32_t original_count_view(uint32_t field) {
 
 }  // namespace
 
-ownership::Ledger& g_ownership_ledger = g_ownership_ledger_internal;
+bool extension_tab_hit(int index, int64_t x, int64_t y) {
+    return extension_tab_hit_internal(index, x, y);
+}
+bool extension_bag_runtime_is_backpack_category(int category) {
+    return is_backpack_category(category);
+}
 
 void ensure_state_loaded_locked() { ensure_state_loaded_locked_internal(); }
 bool persist_state_locked(bool force) { return persist_state_locked_internal(force); }
@@ -662,25 +737,15 @@ void install_extension_tab_buttons_locked() {
 bool extension_tab_buttons_complete_locked() {
     return extension_tab_buttons_complete_locked_internal();
 }
-bool free_module_object_locked(int bag, int slot, void* use_token) {
-    return free_module_object_locked_internal(bag, slot, use_token);
-}
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
     return materialize_module_item_locked_internal(descriptor);
 }
 void release_temporary_item_locked(void* item) {
     release_temporary_item_locked_internal(item);
 }
-bool module_object_generation_advance_locked(int bag, int slot, const char* context) {
-    return module_object_generation_advance_locked_internal(bag, slot, context);
-}
 bool inventory_slot_locked(int bag, int slot, void** out) {
     return inventory_slot_locked_internal(bag, slot, out);
 }
-void log_ownership_audit_locked(const char* context) {
-    log_ownership_audit_locked_internal(context);
-}
-void drain_deferred_frees_locked() { drain_deferred_frees_locked_internal(); }
 bool item_pointer_known_locked(void* item) { return item_pointer_known_locked_internal(item); }
 void teardown_extension_bag_hosts_locked() {
     teardown_extension_bag_hosts_locked_internal();
@@ -692,18 +757,52 @@ bool clear_module_cache_locked() { return clear_module_cache_locked_internal(); 
 void commit_pending_extension_tab_locked(std::unique_lock<std::mutex>& lock) {
     commit_pending_extension_tab_locked_internal(lock);
 }
-bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
-    return handle_bag_drop_release_locked_internal(lock, x, y);
-}
-bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& lock) {
-    return route_deferred_extension_to_original_locked_internal(lock);
-}
-bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock,
-                                         int64_t x, int64_t y) {
-    return route_projected_session_drop_locked_internal(lock, x, y);
-}
 void reset_extension_desc_unequip_hook_locked() {
     reset_extension_desc_unequip_hook_locked_internal();
+}
+bool serialize_item_payload_locked(
+    void* item, std::array<uint8_t, virtual_bag::kSerializedItemBuffer>* out, int* out_size) {
+    return serialize_item_payload_locked_internal(item, out, out_size);
+}
+void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context) {
+    return load_item_payload_locked_internal(payload, payload_size, context);
+}
+void generate_transaction_id_locked(char* out) {
+    generate_transaction_id_locked_internal(out);
+}
+bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
+    return txn_record_pending_locked_internal(txn);
+}
+void txn_abort_locked(const virtual_bag::TransactionContext& txn,
+                      virtual_bag::TxnStage failed_at, const char* reason) {
+    txn_abort_locked_internal(txn, failed_at, reason);
+}
+void isolate_pending_locked(const char* reason, const char* detail) {
+    isolate_pending_locked_internal(reason, detail);
+}
+void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
+                                    virtual_bag::TxnStage phase, const char* reason,
+                                    const char* detail) {
+    isolate_ext2orig_failure_locked_internal(txn, phase, reason, detail);
+}
+bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
+                                                int target_bag) {
+    return original_inventory_contains_payload_locked_internal(payload, payload_size, target_bag);
+}
+int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_size,
+                                           int target_bag) {
+    return original_inventory_payload_slot_locked_internal(payload, payload_size, target_bag);
+}
+int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected,
+                                          int target_bag) {
+    return original_inventory_handle_slot_locked_internal(expected, target_bag);
+}
+void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
+    recover_pending_transaction_locked_internal(lock);
+}
+bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
+                                 void* expected_item, const char* context) {
+    return remove_item_direct_unlocked_internal(lock, bag, slot, expected_item, context);
 }
 
 namespace qol::features::extension_bag {
@@ -1591,9 +1690,15 @@ void show_extension_bag_no_space_popup() {
 // （触摸窗口外真释放）；回滚重建对象经 tracked load + handover/release。
 #define reset_extension_desc_item_hooks_locked reset_extension_desc_item_hooks_locked_internal
 #define restore_extension_desc_popup_callbacks_locked restore_extension_desc_popup_callbacks_locked_internal
+#define try_equip_on_extension_tab_drop_locked try_equip_on_extension_tab_drop_locked_internal
+#define extension_source_should_equip_locked extension_source_should_equip_locked_internal
+#define equip_extension_source_on_tab_locked equip_extension_source_on_tab_locked_internal
 #include "plugins/extension_bag/extension_bag_equip.inc"
 #undef reset_extension_desc_item_hooks_locked
 #undef restore_extension_desc_popup_callbacks_locked
+#undef try_equip_on_extension_tab_drop_locked
+#undef extension_source_should_equip_locked
+#undef equip_extension_source_on_tab_locked
 #include "plugins/extension_bag/extension_bag_store.inc"
 #include "plugins/extension_bag/extension_bag_mix.inc"
 
@@ -1604,6 +1709,18 @@ void reset_extension_desc_item_hooks_locked() {
 }
 void restore_extension_desc_popup_callbacks_locked() {
     restore_extension_desc_popup_callbacks_locked_internal();
+}
+bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
+                                             int index, void* moving_control) {
+    return try_equip_on_extension_tab_drop_locked_internal(lock, index, moving_control);
+}
+bool extension_source_should_equip_locked(int target_bag) {
+    return extension_source_should_equip_locked_internal(target_bag);
+}
+bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag,
+                                          int source_bag, int source_slot) {
+    return equip_extension_source_on_tab_locked_internal(
+        lock, target_bag, source_bag, source_slot);
 }
 
 QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,

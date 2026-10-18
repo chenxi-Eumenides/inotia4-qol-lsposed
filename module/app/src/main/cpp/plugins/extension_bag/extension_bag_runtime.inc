@@ -1155,8 +1155,6 @@ void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
 }
 
 
-#include "plugins/extension_bag/extension_bag_ownership.inc"
-
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
     return load_item_payload_locked(descriptor.payload.data(), descriptor.payload_size,
                                     "materialize_module_item");
@@ -1186,7 +1184,6 @@ bool category_is_extension_backpack(int category) {
                g_game->read_only.item.is_backpack_category(category, &value)) && value != 0;
 }
 
-#include "plugins/extension_bag/extension_bag_transaction.inc"
 bool persist_state_locked(bool force) {
     (void)force;
     // The bool reports acceptance of the in-memory mutation for callers' rollback decisions;

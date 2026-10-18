@@ -166,12 +166,17 @@ extern thread_local bool g_p5_observation_active;
 extern thread_local bool g_refresh_restore_suppress;
 extern thread_local bool g_in_native_call;
 extern void* g_tab_bag_items[virtual_bag::kBagCount];
-extern ownership::Ledger& g_ownership_ledger;
+extern ownership::Ledger g_ownership_ledger;
 
 void extension_bag_mark_dirty_locked();
 uint64_t extension_bag_item_revision_locked();
 const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api();
 bool read_item_category(const void* item, int* out_category);
+bool read_item_is_jewel(int category);
+bool read_item_is_enchant_scroll(int category);
+bool read_item_is_mercenary_seal(int category);
+bool read_item_is_usable(int category);
+bool item_is_equip(const void* item);
 void* extension_create_item(int category, int arg1, int arg2, int arg3);
 bool mark_native_bag_object(void* item);
 bool extension_free_item(void* item);
@@ -182,6 +187,27 @@ int virtual_bag_inventory_state_id();
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
 void* valid_child_locked(void* root, int slot);
 bool defer_item_free_locked(void* item);
+void drain_deferred_frees_locked();
+void log_ownership_audit_locked(const char* context);
+bool object_touch_window_active_locked();
+bool retire_custody_item_locked(uint32_t handle, void* item, const char* context);
+void* load_item_payload_tracked_locked(const uint8_t* payload, int payload_size,
+                                       const char* context, uint32_t* out_handle);
+void handover_tracked_item_locked(uint32_t handle, void* item, const char* context);
+void release_tracked_item_locked(uint32_t handle, void* item, const char* context);
+bool module_slot_is_assignable_locked(int bag, int slot);
+bool module_object_replacement_allowed_locked(int bag, int slot, const char* context);
+bool module_object_release_allowed_locked(int bag, int slot, void* item, const char* context,
+                                          bool allow_owner, const ModuleUseToken* token);
+bool module_object_generation_advance_locked(int bag, int slot, const char* context);
+bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token);
+bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
+                              ModuleUseReleasePlan* out_release);
+bool module_use_abort_locked(const ModuleUseToken& token);
+bool module_use_abort_isolate_locked(const ModuleUseToken& token);
+bool module_use_release_native(const ModuleUseReleasePlan& release);
+bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release);
+bool free_module_object_locked(int bag, int slot, void* raw_use_token = nullptr);
 
 bool p5_observation_enabled();
 bool p5_panel_observation_enabled();
@@ -254,21 +280,59 @@ PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked();
 void ensure_state_loaded_locked();
 bool persist_state_locked(bool force = false);
 void virtual_bag_call_original_refresh_item_area_with_guard();
-bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& lock);
-bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock,
-                                         int64_t x, int64_t y);
-bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock,
-                                    int64_t x, int64_t y);
 bool virtual_bag_sync_projected_bag();
 void delete_extension_tab_buttons_locked();
 void disable_extension_tab_buttons_locked();
 void install_extension_tab_buttons_locked();
 bool extension_tab_buttons_complete_locked();
-bool free_module_object_locked(int bag, int slot, void* use_token = nullptr);
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor);
 void release_temporary_item_locked(void* item);
-bool module_object_generation_advance_locked(int bag, int slot, const char* context);
-bool inventory_slot_locked(int bag, int slot, void** out);
-void log_ownership_audit_locked(const char* context);
-void drain_deferred_frees_locked();
 bool item_pointer_known_locked(void* item);
+
+bool move_original_to_extension_slot_locked(
+    std::unique_lock<std::mutex>& lock, int src_bag, int src_slot, int dst_bag,
+    qol::contracts::QolItemHandle expected_item = qol::contracts::kInvalidItemHandle);
+bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
+                                       void* moving_control);
+bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+                                       int src_slot, int target_bag);
+bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
+                                        int requested_dst_slot = -1);
+bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag);
+bool extension_save_item_on_empty(void* item, int bag);
+bool serialize_item_payload_locked(
+    void* item, std::array<uint8_t, virtual_bag::kSerializedItemBuffer>* out, int* out_size);
+void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context);
+void generate_transaction_id_locked(char* out);
+bool txn_record_pending_locked(virtual_bag::TransactionContext* txn);
+void txn_abort_locked(const virtual_bag::TransactionContext& txn,
+                      virtual_bag::TxnStage failed_at, const char* reason);
+void isolate_pending_locked(const char* reason, const char* detail);
+void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
+                                    virtual_bag::TxnStage phase, const char* reason,
+                                    const char* detail);
+bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
+                                                int target_bag);
+int original_inventory_payload_slot_locked(const uint8_t* payload, int payload_size,
+                                           int target_bag);
+int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected,
+                                          int target_bag);
+void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock);
+bool extension_tab_hit(int index, int64_t x, int64_t y);
+bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
+                                             int index, void* moving_control);
+bool extension_source_should_equip_locked(int target_bag);
+bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag,
+                                          int source_bag, int source_slot);
+bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& lock);
+bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock,
+                                         int64_t x, int64_t y);
+bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock,
+                                    int64_t x, int64_t y);
+bool inventory_slot_locked(int bag, int slot, void** out);
+bool extension_bag_runtime_is_backpack_category(int category);
+bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
+                                             int src_bag, int src_slot, int dst_bag,
+                                             int dst_slot, void* material, void* target_item);
+bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
+                                 void* expected_item, const char* context);
