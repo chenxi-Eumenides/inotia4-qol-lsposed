@@ -148,22 +148,24 @@ void virtual_bag_draw_original_bag_wrapper() {
         log_exit_trace_locked("draw_bag", 0, 0, 0);
         last_module_view = module_view ? 1 : 0;
     }
-    // 进入扩展选中态（kModule）时，原版袋标签全部取消高亮（互斥）：
-    // 画原版 DrawInvenBag 前把当前袋 GOT 临时设为 kNoOriginalBagSelected(6)，
-    // 画完恢复。此前只在 !installed 分支屏蔽，installed 分支漏掉了。
+    // 进入扩展选中态（kModule）或商店扩展视图时，原版袋标签全部取消高亮
+    // （互斥）：只在本帧原版 DrawInvenBag 前后临时改 current_bag，画完恢复。
+    // 不能在整个商店视图期间改 current_bag，否则商店投影会按“无当前袋”刷新，
+    // 右侧 EB 袋物品区会变空。
+    const bool mask_original_highlight = module_view || runtime_state().store.view_installed;
     const int saved_current = original_bag_locked();
-    if (module_view && runtime_state().host.write_port->ui.set_current_bag != nullptr) {
+    if (mask_original_highlight && runtime_state().host.write_port->ui.set_current_bag != nullptr) {
         (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
     }
     if (module_view && runtime_state().objects.module_view_installed) {
         (void)runtime_state().host.write_port->ui.draw_original_bag();
-        if (module_view) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+        if (mask_original_highlight) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
         draw_tab_buttons_in_frame_locked();
         return;
     }
     (void)runtime_state().host.write_port->ui.draw_original_bag();
-    if (module_view) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
-    draw_tab_buttons_in_frame_locked();
+    if (mask_original_highlight) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+    if (!runtime_state().store.view_installed) draw_tab_buttons_in_frame_locked();
 }
 void virtual_bag_draw_inven_item_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(

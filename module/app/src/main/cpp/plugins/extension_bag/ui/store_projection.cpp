@@ -191,12 +191,6 @@ void store_install_module_view_locked(int bag) {
     runtime_state().store.view_bag = bag;
     runtime_state().store.view_installed = true;
     ++runtime_state().store.view_generation;
-    // Store view keeps both UIEquip and UIStore bag columns alive. Mask the
-    // original current bag for the whole view, not only around each draw, so
-    // the UIEquip column cannot keep a second highlight.
-    if (runtime_state().host.write_port->ui.set_current_bag != nullptr) {
-        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
-    }
     store_request_item_refresh_locked();
     VIRTBAG_LOG("store view installed bag=%d window=%d capacity=%d", bag, original_bag,
                 runtime_state().objects.bag.capacities[bag]);
@@ -222,11 +216,6 @@ void store_restore_module_view_locked() {
                                                 (runtime_state().store.original_bag_size & kCapacityMask))) {
             VIRTBAG_LOG("store restore capacity failed window=%d", runtime_state().store.window_original_bag);
         }
-    }
-    const int restore_bag = runtime_state().store.window_original_bag;
-    if (restore_bag >= 0 && restore_bag < kNoOriginalBagSelected &&
-        runtime_state().host.write_port->ui.set_current_bag != nullptr) {
-        (void)runtime_state().host.write_port->ui.set_current_bag(restore_bag);
     }
     runtime_state().store.original_size_word = 0;
     runtime_state().store.original_bag_size = 0;
