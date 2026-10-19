@@ -38,6 +38,19 @@ bool g_emit_add_from_make = false;
 bool g_emit_second_add = false;
 bool g_quality_available = true;
 bool g_item_facts_available = true;
+bool g_item_is_jewel = false;
+bool g_item_is_real_equip = true;
+bool g_category_error = false;
+bool g_jewel_query_error = false;
+bool g_real_equip_error = false;
+bool g_include_jewel_fields = true;
+bool g_view_equip = true;
+int32_t g_item_category = 200;
+int32_t g_jewel_attribute_type = 0;
+int32_t g_jewel_value = 0;
+int g_category_calls = 0;
+int g_jewel_query_calls = 0;
+int g_real_equip_calls = 0;
 bool g_use_explicit_quality_level = false;
 int32_t g_explicit_quality_level = 0;
 int32_t g_register_status = qol::contracts::kQolItemHandleStatusOk;
@@ -96,6 +109,38 @@ void append_view_option(qol::contracts::QolItemInventoryView* view, bool native,
     }
 }
 
+QolResult fake_category(qol::contracts::QolItemHandle handle, int32_t* out_category) {
+    ++g_category_calls;
+    assert(handle.slot != 0 && handle.generation != 0);
+    if (g_category_error)
+        return qol::contracts::error(kQolErrNotReady, "category error", 14);
+    if (out_category == nullptr)
+        return qol::contracts::error(kQolErrInvalidArgument, "missing category", 16);
+    *out_category = g_item_category;
+    return qol::contracts::ok();
+}
+
+QolResult fake_is_jewel_category(int32_t, int32_t* out_is_jewel) {
+    ++g_jewel_query_calls;
+    if (g_jewel_query_error)
+        return qol::contracts::error(kQolErrNotReady, "jewel query error", 17);
+    if (out_is_jewel == nullptr)
+        return qol::contracts::error(kQolErrInvalidArgument, "missing jewel flag", 18);
+    *out_is_jewel = g_item_is_jewel ? 1 : 0;
+    return qol::contracts::ok();
+}
+
+QolResult fake_is_real_equip(qol::contracts::QolItemHandle handle, int32_t* out_value) {
+    ++g_real_equip_calls;
+    assert(handle.slot != 0 && handle.generation != 0);
+    if (g_real_equip_error)
+        return qol::contracts::error(kQolErrNotReady, "real equip error", 16);
+    if (out_value == nullptr)
+        return qol::contracts::error(kQolErrInvalidArgument, "missing equip flag", 17);
+    *out_value = g_item_is_real_equip ? 1 : 0;
+    return qol::contracts::ok();
+}
+
 QolResult fake_item_view(qol::contracts::QolItemHandle handle,
                          qol::contracts::QolItemInventoryView* out) {
     ++g_item_view_calls;
@@ -106,10 +151,16 @@ QolResult fake_item_view(qol::contracts::QolItemHandle handle,
         return qol::contracts::error(kQolErrInvalidArgument, "missing item view", 17);
 
     *out = {};
-    out->equip = 1;
+    out->equip = g_view_equip ? 1 : 0;
     out->fields = qol::contracts::kQolItemInventoryHasOptionCompleteness |
                   qol::contracts::kQolItemInventoryHasNativeOptions |
                   qol::contracts::kQolItemInventoryHasJewelOptions;
+    if (g_include_jewel_fields) {
+        out->fields |= qol::contracts::kQolItemInventoryHasJewelValue |
+                       qol::contracts::kQolItemInventoryHasJewelAttributeType;
+        out->jewel_attribute_type = g_jewel_attribute_type;
+        out->jewel_value = g_jewel_value;
+    }
     if (g_view_mode == ViewMode::MissingCompleteness) {
         out->fields &= ~qol::contracts::kQolItemInventoryHasOptionCompleteness;
     }
@@ -258,18 +309,26 @@ uintptr_t original_make(void* item, void*, void*) {
     ++g_make_calls;
     FakeBuilder builder{20};
     if (g_nested_outer_item != nullptr && item == g_nested_outer_item) {
+        g_item_is_jewel = false;
+        g_item_is_real_equip = true;
         g_view_mode = ViewMode::Native;
         g_option_id = g_nested_outer_id;
         g_display_value = g_nested_outer_value;
         qol::features::attribute_range_display::uid_desc_add_option_wrapper(
             &builder, g_option_type, g_option_id, g_display_value);
 
-        g_view_mode = ViewMode::Jewel;
+        g_item_is_jewel = true;
+        g_item_is_real_equip = false;
+        g_view_mode = ViewMode::Empty;
+        g_jewel_attribute_type = g_nested_inner_id;
+        g_jewel_value = g_nested_inner_value;
         g_option_id = g_nested_inner_id;
         g_display_value = g_nested_inner_value;
         qol::features::attribute_range_display::uid_desc_make_item_wrapper(
             g_nested_inner_item, nullptr, nullptr);
 
+        g_item_is_jewel = false;
+        g_item_is_real_equip = true;
         g_view_mode = ViewMode::Native;
         g_option_id = g_nested_outer_id;
         g_display_value = g_nested_outer_value;
@@ -278,7 +337,11 @@ uintptr_t original_make(void* item, void*, void*) {
         return reinterpret_cast<uintptr_t>(item) + 1;
     }
     if (g_nested_inner_item != nullptr && item == g_nested_inner_item) {
-        g_view_mode = ViewMode::Jewel;
+        g_item_is_jewel = true;
+        g_item_is_real_equip = false;
+        g_view_mode = ViewMode::Empty;
+        g_jewel_attribute_type = g_nested_inner_id;
+        g_jewel_value = g_nested_inner_value;
         g_option_id = g_nested_inner_id;
         g_display_value = g_nested_inner_value;
         qol::features::attribute_range_display::uid_desc_add_option_wrapper(
@@ -299,6 +362,19 @@ uintptr_t original_make(void* item, void*, void*) {
 void reset_quality_state() {
     g_quality_available = true;
     g_item_facts_available = true;
+    g_item_is_jewel = false;
+    g_item_is_real_equip = true;
+    g_category_error = false;
+    g_jewel_query_error = false;
+    g_real_equip_error = false;
+    g_include_jewel_fields = true;
+    g_view_equip = true;
+    g_item_category = 200;
+    g_jewel_attribute_type = 0;
+    g_jewel_value = 0;
+    g_category_calls = 0;
+    g_jewel_query_calls = 0;
+    g_real_equip_calls = 0;
     g_use_explicit_quality_level = false;
     g_explicit_quality_level = 0;
     g_quality_api = &g_default_quality_api;
@@ -397,7 +473,7 @@ void test_native_option_is_colored_after_source_check() {
     assert(g_item_view_calls == 1 && g_query_calls == 1 && g_insert_calls == 1);
 }
 
-void test_jewel_option_is_not_colored() {
+void test_equipment_jewel_option_is_not_colored() {
     reset_quality_state();
     qol::features::attribute_range_display::set_active(true);
     g_view_mode = ViewMode::Jewel;
@@ -411,6 +487,89 @@ void test_ambiguous_native_and_jewel_id_value_is_not_colored() {
     g_view_mode = ViewMode::NativeAndJewel;
     add_with_context(reinterpret_cast<void*>(0x2600), 12, 41);
     assert(g_item_view_calls == 1 && g_query_calls == 0 && g_insert_calls == 0);
+}
+
+void test_standalone_jewel_matching_attribute_is_colored() {
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = true;
+    g_item_is_real_equip = false;
+    g_view_mode = ViewMode::Empty;
+    g_jewel_attribute_type = 30;
+    g_jewel_value = 70;
+    add_with_context(reinterpret_cast<void*>(0x3300), 30, 70);
+    assert(g_category_calls == 1 && g_jewel_query_calls == 1 && g_real_equip_calls == 1);
+    assert(g_item_view_calls == 1 && g_query_calls == 1 && g_insert_calls == 1);
+}
+
+void test_standalone_jewel_id_or_value_mismatch_is_not_colored() {
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = true;
+    g_item_is_real_equip = false;
+    g_view_mode = ViewMode::Empty;
+    g_jewel_attribute_type = 30;
+    g_jewel_value = 70;
+    add_with_context(reinterpret_cast<void*>(0x3400), 31, 70);
+    assert(g_item_view_calls == 1 && g_query_calls == 0 && g_insert_calls == 0);
+
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = true;
+    g_item_is_real_equip = false;
+    g_view_mode = ViewMode::Empty;
+    g_jewel_attribute_type = 30;
+    g_jewel_value = 70;
+    add_with_context(reinterpret_cast<void*>(0x3500), 30, 71);
+    assert(g_item_view_calls == 1 && g_query_calls == 0 && g_insert_calls == 0);
+}
+
+void test_standalone_jewel_invalid_classification_or_fields_is_not_colored() {
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = true;
+    g_item_is_real_equip = false;
+    g_view_mode = ViewMode::Empty;
+    g_include_jewel_fields = false;
+    g_jewel_attribute_type = 30;
+    g_jewel_value = 70;
+    add_with_context(reinterpret_cast<void*>(0x3600), 30, 70);
+    assert(g_item_view_calls == 1 && g_query_calls == 0 && g_insert_calls == 0);
+
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = true;
+    g_item_is_real_equip = false;
+    g_jewel_query_error = true;
+    add_with_context(reinterpret_cast<void*>(0x3700), 30, 70);
+    assert(g_item_view_calls == 0 && g_query_calls == 0 && g_insert_calls == 0);
+
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = true;
+    g_item_is_real_equip = false;
+    g_category_error = true;
+    add_with_context(reinterpret_cast<void*>(0x3800), 30, 70);
+    assert(g_item_view_calls == 0 && g_query_calls == 0 && g_insert_calls == 0);
+
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = true;
+    g_item_is_real_equip = false;
+    g_real_equip_error = true;
+    add_with_context(reinterpret_cast<void*>(0x3900), 30, 70);
+    assert(g_item_view_calls == 0 && g_query_calls == 0 && g_insert_calls == 0);
+}
+
+void test_non_jewel_non_equipment_with_native_options_is_not_colored() {
+    reset_quality_state();
+    qol::features::attribute_range_display::set_active(true);
+    g_item_is_jewel = false;
+    g_item_is_real_equip = false;
+    g_view_mode = ViewMode::Native;
+    g_view_equip = true;
+    add_with_context(reinterpret_cast<void*>(0x3a00), 12, 41);
+    assert(g_item_view_calls == 0 && g_query_calls == 0 && g_insert_calls == 0);
 }
 
 void test_duplicate_native_options_are_colored() {
@@ -479,6 +638,7 @@ void test_view_is_cached_per_make_item_cycle() {
     g_emit_second_add = true;
     add_with_context(reinterpret_cast<void*>(0x2f00), 12, 41);
     assert(g_item_view_calls == 1);
+    assert(g_category_calls == 1 && g_jewel_query_calls == 1 && g_real_equip_calls == 1);
     assert(g_query_calls == 2 && g_insert_calls == 2);
 }
 
@@ -496,9 +656,9 @@ void test_nested_make_item_restores_outer_view_cache() {
 
     assert(qol::features::attribute_range_display::uid_desc_make_item_wrapper(
                outer, nullptr, nullptr) == reinterpret_cast<uintptr_t>(outer) + 1);
-    // 外层首行读取一次 view；内层重新读取一次；外层第二行复用恢复后的缓存。
+    // 外层首行读取一次 view；内层独立宝石重新读取一次；外层第二行复用恢复后的缓存。
     assert(g_item_view_calls == 2);
-    assert(g_query_calls == 2 && g_insert_calls == 2);
+    assert(g_query_calls == 3 && g_insert_calls == 3);
 }
 
 void test_current_value_disambiguates_repeated_option_id() {
@@ -682,6 +842,9 @@ int main() {
     g_sdk.item_handle.lookup_item = lookup_item;
     g_item_facts_api = {};
     g_item_facts_api.struct_size = sizeof(g_item_facts_api);
+    g_item_facts_api.category = fake_category;
+    g_item_facts_api.is_jewel_category = fake_is_jewel_category;
+    g_item_facts_api.is_real_equip = fake_is_real_equip;
     g_item_facts_api.view = fake_item_view;
     g_ui = {};
     g_ui.size = sizeof(g_ui);
@@ -706,9 +869,13 @@ int main() {
     test_active_context_uses_provider_level_color();
     test_provider_owned_item_reuses_existing_handle();
     test_native_option_is_colored_after_source_check();
-    test_jewel_option_is_not_colored();
+    test_equipment_jewel_option_is_not_colored();
     test_ambiguous_native_and_jewel_id_value_is_not_colored();
     test_duplicate_native_options_are_colored();
+    test_standalone_jewel_matching_attribute_is_colored();
+    test_standalone_jewel_id_or_value_mismatch_is_not_colored();
+    test_standalone_jewel_invalid_classification_or_fields_is_not_colored();
+    test_non_jewel_non_equipment_with_native_options_is_not_colored();
     test_view_failure_truncation_or_missing_completeness_is_not_colored();
     test_item_facts_unavailable_or_malformed_is_not_colored();
     test_view_is_cached_per_make_item_cycle();

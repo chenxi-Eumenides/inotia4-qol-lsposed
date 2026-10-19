@@ -13,7 +13,7 @@
 | 入口 | 输入 | 输出 |
 |---|---|---|
 | `query_item` | `QolItemHandle`、可选 `AttributeQualityOptions` | `QolResult`；`AttributeQualityItemResult{count, complete, reserved, attrs[32]}`。每项含 `kind, ordinal, attribute_id, option_type, value, range{min,max}, quality{percentile,level}, status`。 |
-| `query_option_context` | item handle、option id、当前 display value、可选 options | `QolResult` 与一个 `AttributeQualityItem`，`kind=OptionContext`、`ordinal=UINT32_MAX`。 |
+| `query_option_context` | item handle（真实装备或独立宝石）、option id、当前 display value、可选 options | `QolResult` 与一个 `AttributeQualityItem`，`kind=OptionContext`、`ordinal=UINT32_MAX`。 |
 | `evaluate` | value、`AttributeRange`、可选 options | `QolResult` 与 `AttributeQuality{percentile, level}`。 |
 
 结构和字段定义见 `contracts/attribute_quality.h:31-75`；质量 capability 是 native API，不是 HTTP/JNI 接口。
@@ -57,7 +57,13 @@
 
 ## 当前词缀上下文查询
 
-`query_option_context(item, option_id, display_value, ...)` 用调用方传来的 option id 和**当前显示值**计算 `kind=OptionContext`；`ordinal=UINT32_MAX`、`option_type=-1`。它不会在 item 的储存词缀列表中搜索或匹配该 id/value，因此重复 id 的展示行由当前调用参数区分。见 `plugins/attribute_quality/feature.cpp:334-381`。
+`query_option_context(item, option_id, display_value, ...)` 用调用方传来的 option id 和**当前显示值**计算 `kind=OptionContext`；`ordinal=UINT32_MAX`、`option_type=-1`。
+
+- 真实装备：使用 `option_value` 捕获当前 option 的范围，行为不变。
+- 独立宝石：`is_jewel_category` 为真且 `is_real_equip` 为假时，要求 view 具备 `HasJewelValue`/`HasJewelAttributeType`；`option_id` 必须等于 `jewel_attribute_type`（否则 Unsupported），使用 `jewel_value` 捕获范围。字段缺失返回 NotReady。
+- 两者皆非的 item 返回 Unsupported；同时被判定为宝石与真实装备的歧义输入由展示方跳过，provider 宝石分支优先。
+
+它不会在 item 的储存词缀列表中搜索或匹配该 id/value，因此重复 id 的展示行由当前调用参数区分。见 `plugins/attribute_quality/feature.cpp:348-423`。
 
 `query_option_context` 和 `query_item` 都先校验 options，再经同步 Game Host 探测范围。范围调用的 Host 错误按原 `QolResult` 保留；上下文查询同时把错误码写入 `out.status`。插件内部对每个 stored option 都写出 `status`，不以一个失败项中止整批。
 
@@ -79,7 +85,7 @@
 | 消费者 | 依赖 | 当前调用与失败行为 |
 |---|---|---|
 | `autosell` | required `attribute.quality` | 查询宝石 `query_item`，只接受完整的单项 Jewel 且 status=0；不可用或探测失败保持 `jewel_percentile=-1`，不以默认 0 命中误售规则。见 `plugins/autosell/plugin.cpp:38-43,254-262`、`plugins/autosell/view.cpp:64-85`。 |
-| `attribute_range_display` | required `attribute.quality`（插件审计批 2026-10-17 由 optional 改硬依赖） | 以 option id + 当前 display value 调 `query_option_context`，由本消费者将 `level` 映射成内联颜色；能力/事实错误时不插入颜色。见 `plugins/attribute_range_display/plugin.cpp:13-16`、`plugins/attribute_range_display/feature.cpp:24-34,78-112`。 |
+| `attribute_range_display` | required `attribute.quality` + `item.facts` | 装备只匹配 `native_options[]`；独立宝石按 `jewel_attribute_type/value` 匹配后调 `query_option_context`；装备的 `jewel_options` 不染色。能力/事实/view 错误时不插入颜色。见 `plugins/attribute_range_display/plugin.cpp:13-18`、`plugins/attribute_range_display/feature.cpp:86-220`。 |
 | `custom_recipe` | optional `attribute.quality` | `query_item` 取宝石现态，`evaluate` 纯计算候选档位；能力或质量查询失败会在候选随机、宝石写入、材料数写回之前退出。成功的策略、随机候选、宝石位写入及材料列表更新由 custom_recipe 自己负责。见 `plugins/custom_recipe/plugin.cpp:233-250`、`plugins/custom_recipe/feature.cpp:171-249,614-669`。 |
 
 provider 只提供范围事实与质量计算；不做整件装备聚合、UI 颜色/文本写入、物品写入、craft 候选策略、自动出售策略或材料策略。Game Host 读取原语只同步调用；provider 不创建后台任务，不保证后台调用 `capabilities.require` 或能力撤销期间借用指针的 lease 并发安全。消费者应按调用重新 require，并且不得缓存能力指针跨撤销。Game Host item-handle 和 fixed-table adapter 的 wrong-thread 路径返回 Blocked，见 `game/access/attr_range_ui.h:7-10`、`game/adapter_ports/game_host_port.cpp:672-724`。
@@ -94,10 +100,10 @@ provider 只提供范围事实与质量计算；不做整件装备聚合、UI �
 | `contracts/item_facts.h:11-14,35-65`、`contracts/game_ports/item_port.h:53-107` | item.facts 3.6 与 item view 的容量/有效位。 |
 | `contracts/game_host.h:39-47,205-234` | Game Host attr_range 面与 ABI 2.4（v2.4 追加 `game_identity` 尾槽）。 |
 | `plugins/attribute_quality/plugin.cpp:12-131`、`plugins/attribute_quality/feature.h:24-25` | 版本、requirements/provides/resource、Game Host 检查、lifecycle 与空 backup 拒绝说明。 |
-| `plugins/attribute_quality/feature.cpp:41-398`、`feature.h:13-43` | options 校验、查询、范围捕获、固定表、错误与 wrapper。 |
+| `plugins/attribute_quality/feature.cpp:41-423`、`feature.h:13-43` | options 校验、查询、范围捕获、固定表、错误与 wrapper。 |
 | `plugins/attribute_quality/rules.h:11-35`、`rules.cpp:8-120` | 质量运算及固定表范围转换。 |
 | `game/access/attr_range_ui.cpp:21-95`、`game/adapter_ports/game_host_port.cpp:672-735` | 固定表/ability 原语及 Game Host 错误、线程转发。 |
 | `game/adapter_ports/item_extras_port.cpp:17-34`、`game/adapter_ports/item_port.cpp:302-318` | ability level 未就绪与 32 项完整性标记。 |
 | `plugins/autosell/view.cpp:64-85` | required consumer 的 Jewel 质量条件。 |
-| `plugins/attribute_range_display/feature.cpp:24-111` | optional consumer 的当前展示值上下文与颜色呈现。 |
+| `plugins/attribute_range_display/feature.cpp:86-220` | optional consumer 的当前展示值上下文与颜色呈现。 |
 | `plugins/custom_recipe/feature.cpp:171-249,614-669` | optional consumer 的当前宝石查询、纯候选 evaluate 及写入顺序。 |

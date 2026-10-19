@@ -22,10 +22,16 @@ void* g_backup_make_item = nullptr;
 
 thread_local void* t_current_item = nullptr;
 
+enum class ItemKind {
+    kNone,
+    kEquipment,
+    kJewel,
+};
+
 struct ItemViewCache {
     void* item = nullptr;
     bool loaded = false;
-    bool valid = false;
+    ItemKind kind = ItemKind::kNone;
     contracts::QolItemHandle handle{};
     contracts::QolItemInventoryView view{};
 };
@@ -52,7 +58,11 @@ const contracts::ItemFactsApi* item_facts_api() {
         &iface);
     if (result.ok != kQolOk || iface == nullptr) return nullptr;
     const auto* api = static_cast<const contracts::ItemFactsApi*>(iface);
-    return contracts::item_facts_api_size_valid(api) && api->view != nullptr ? api : nullptr;
+    return contracts::item_facts_api_size_valid(api) && api->category != nullptr &&
+                   api->is_jewel_category != nullptr && api->is_real_equip != nullptr &&
+                   api->view != nullptr
+               ? api
+               : nullptr;
 }
 
 char tier_color(contracts::AttributeQualityTier tier) {
@@ -74,8 +84,8 @@ char tier_color(contracts::AttributeQualityTier tier) {
 }
 
 bool load_current_item_view(contracts::QolItemInventoryView* out,
-                            contracts::QolItemHandle* out_handle) {
-    if (out == nullptr || out_handle == nullptr) return false;
+                            contracts::QolItemHandle* out_handle, ItemKind* out_kind) {
+    if (out == nullptr || out_handle == nullptr || out_kind == nullptr) return false;
     const contracts::ItemFactsApi* api = item_facts_api();
     if (api == nullptr || g_sdk == nullptr || g_sdk->item_handle.lookup_item == nullptr) {
         return false;
@@ -95,42 +105,66 @@ bool load_current_item_view(contracts::QolItemInventoryView* out,
     }
     (void)owner;
 
-    if (api->view(handle, out).ok != kQolOk) return false;
-    constexpr uint32_t kRequiredFields = contracts::kQolItemInventoryHasOptionCompleteness |
-                                        contracts::kQolItemInventoryHasNativeOptions |
-                                        contracts::kQolItemInventoryHasJewelOptions;
-    if ((out->fields & kRequiredFields) != kRequiredFields) return false;
-    if ((out->fields & contracts::kQolItemInventoryOptionsTruncated) != 0) return false;
-    if (out->native_option_count > contracts::kQolItemInventoryNativeOptionCapacity ||
-        out->jewel_option_count > contracts::kQolItemInventoryJewelOptionCapacity) {
-        return false;
+    int32_t category = 0;
+    if (api->category(handle, &category).ok != kQolOk) return false;
+    int32_t is_jewel = 0;
+    if (api->is_jewel_category(category, &is_jewel).ok != kQolOk) return false;
+    int32_t is_real_equip = 0;
+    if (api->is_real_equip(handle, &is_real_equip).ok != kQolOk) return false;
+
+    if (is_jewel != 0) {
+        // 同时被判定为真实装备时语义不唯一，不能确认是独立宝石物品。
+        if (is_real_equip != 0) return false;
+        if (api->view(handle, out).ok != kQolOk) return false;
+        constexpr uint32_t kJewelFields = contracts::kQolItemInventoryHasJewelValue |
+                                          contracts::kQolItemInventoryHasJewelAttributeType;
+        if ((out->fields & kJewelFields) != kJewelFields) return false;
+        *out_kind = ItemKind::kJewel;
+    } else {
+        // 非宝石但也不是真实装备的物品（背包、徽章等）不参与染色。
+        if (is_real_equip == 0) return false;
+        if (api->view(handle, out).ok != kQolOk) return false;
+        constexpr uint32_t kEquipmentFields =
+            contracts::kQolItemInventoryHasOptionCompleteness |
+            contracts::kQolItemInventoryHasNativeOptions |
+            contracts::kQolItemInventoryHasJewelOptions;
+        if ((out->fields & kEquipmentFields) != kEquipmentFields) return false;
+        if ((out->fields & contracts::kQolItemInventoryOptionsTruncated) != 0) return false;
+        if (out->native_option_count > contracts::kQolItemInventoryNativeOptionCapacity ||
+            out->jewel_option_count > contracts::kQolItemInventoryJewelOptionCapacity) {
+            return false;
+        }
+        *out_kind = ItemKind::kEquipment;
     }
-    // 非装备物品的详情行不参与原生词条染色。
-    if (out->equip == 0) return false;
     *out_handle = handle;
     return true;
 }
 
-// 每次 UIDesc_MakeItem 周期最多读取一次 view；同一 item 的多条 AddOption 行复用缓存。
+// 每次 UIDesc_MakeItem 周期最多读取一次 view 与物品分类；同一 item 的多条 AddOption 行复用缓存。
 bool current_item_view(const contracts::QolItemInventoryView** out_view,
-                       contracts::QolItemHandle* out_handle) {
-    if (out_view == nullptr || out_handle == nullptr || t_current_item == nullptr) return false;
+                       contracts::QolItemHandle* out_handle, ItemKind* out_kind) {
+    if (out_view == nullptr || out_handle == nullptr || out_kind == nullptr ||
+        t_current_item == nullptr) {
+        return false;
+    }
     if (t_item_view_cache.item == t_current_item && t_item_view_cache.loaded) {
-        if (!t_item_view_cache.valid) return false;
+        if (t_item_view_cache.kind == ItemKind::kNone) return false;
         *out_view = &t_item_view_cache.view;
         *out_handle = t_item_view_cache.handle;
+        *out_kind = t_item_view_cache.kind;
         return true;
     }
 
     t_item_view_cache = {};
     t_item_view_cache.item = t_current_item;
     t_item_view_cache.loaded = true;
-    if (!load_current_item_view(&t_item_view_cache.view, &t_item_view_cache.handle)) {
+    if (!load_current_item_view(&t_item_view_cache.view, &t_item_view_cache.handle,
+                                &t_item_view_cache.kind)) {
         return false;
     }
-    t_item_view_cache.valid = true;
     *out_view = &t_item_view_cache.view;
     *out_handle = t_item_view_cache.handle;
+    *out_kind = t_item_view_cache.kind;
     return true;
 }
 
@@ -159,6 +193,20 @@ bool line_is_native_option(const contracts::QolItemInventoryView& view, int32_t 
         if (option.id == option_id && option.value == display_value) ++jewel_matches;
     }
     return native_matches != 0 && jewel_matches == 0;
+}
+
+// 装备只匹配 native_options；独立宝石物品只匹配自身 jewel_attribute_type/value。
+// 装备的 jewel_options 永不参与染色。其他描述行因 id/value 不匹配而跳过。
+bool line_matches_item(ItemKind kind, const contracts::QolItemInventoryView& view,
+                       int32_t option_id, int32_t display_value) {
+    if (kind == ItemKind::kEquipment) {
+        return line_is_native_option(view, option_id, display_value);
+    }
+    if (kind == ItemKind::kJewel) {
+        return option_id == view.jewel_attribute_type &&
+               display_value == view.jewel_value;
+    }
+    return false;
 }
 
 }  // namespace
@@ -226,8 +274,9 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int val
 
     const contracts::QolItemInventoryView* view = nullptr;
     contracts::QolItemHandle handle{};
-    if (!current_item_view(&view, &handle) || view == nullptr) return;
-    if (!line_is_native_option(*view, option_id, value)) return;
+    ItemKind kind = ItemKind::kNone;
+    if (!current_item_view(&view, &handle, &kind) || view == nullptr) return;
+    if (!line_matches_item(kind, *view, option_id, value)) return;
 
     contracts::AttributeQualityOptions options{};
     contracts::AttributeQualityItem option_context{};

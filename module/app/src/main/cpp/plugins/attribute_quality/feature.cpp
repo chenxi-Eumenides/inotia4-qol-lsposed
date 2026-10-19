@@ -361,6 +361,34 @@ QolResult api_query_option_context(contracts::QolItemHandle item, int32_t option
     ItemFactsContext context{};
     result = read_item_context(item, &context);
     if (!contracts::succeeded(result)) return set_context_error(out, result);
+    if (context.is_jewel != 0) {
+        constexpr uint32_t kJewelFields = contracts::kQolItemInventoryHasJewelValue |
+                                          contracts::kQolItemInventoryHasJewelAttributeType;
+        if ((context.view.fields & kJewelFields) != kJewelFields) {
+            return set_context_error(out,
+                                     error_result(kQolErrNotReady, "jewel facts unavailable"));
+        }
+        if (option_id != context.view.jewel_attribute_type) {
+            return set_context_error(
+                out, error_result(kQolErrUnsupported, "option is not the jewel attribute"));
+        }
+        out->kind = contracts::AttributeKind::OptionContext;
+        out->ordinal = UINT32_MAX;
+        out->attribute_id = option_id;
+        out->option_type = -1;
+        out->value = display_value;
+        int32_t minimum = 0;
+        int32_t maximum = 0;
+        result = capture_jewel_range(item, context.view.jewel_attribute_type, &minimum,
+                                     &maximum);
+        if (!contracts::succeeded(result)) return set_context_error(out, result);
+        out->range = {minimum, maximum};
+        result = ::attribute_quality::evaluate_quality(display_value, out->range,
+                                                       &normalized_options, &out->quality);
+        if (!contracts::succeeded(result)) return set_context_error(out, result);
+        out->status = kQolOk;
+        return contracts::ok();
+    }
     if (context.is_real_equip == 0) {
         return set_context_error(out,
                                  error_result(kQolErrUnsupported, "item is not an equipment item"));

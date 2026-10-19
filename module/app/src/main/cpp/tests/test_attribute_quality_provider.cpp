@@ -409,6 +409,35 @@ void test_query_item_jewel_and_context_errors() {
     CHECK(batch.attrs[0].quality.percentile == 50 && batch.attrs[0].quality.level == 1);
     CHECK(batch.attrs[0].status == kQolOk);
 
+    contracts::AttributeQualityItem jewel_context{};
+    CHECK(feature::api_query_option_context(handle(1), 7, 50, nullptr, &jewel_context).ok ==
+          kQolOk);
+    CHECK(jewel_context.kind == contracts::AttributeKind::OptionContext &&
+          jewel_context.ordinal == UINT32_MAX && jewel_context.attribute_id == 7 &&
+          jewel_context.option_type == -1 && jewel_context.value == 50);
+    CHECK(jewel_context.range.min == 0 && jewel_context.range.max == 100);
+    CHECK(jewel_context.quality.percentile == 50 &&
+          jewel_context.quality.level == 1 && jewel_context.status == kQolOk);
+
+    reset_fixture();
+    set_item(1, 100, false, contracts::kQolItemInventoryHasOptionCompleteness);
+    ready_provider();
+    jewel_context = {};
+    const QolResult missing_jewel =
+        feature::api_query_option_context(handle(1), 7, 50, nullptr, &jewel_context);
+    CHECK(missing_jewel.code == kQolErrNotReady && jewel_context.status == kQolErrNotReady);
+
+    reset_fixture();
+    set_item(1, 100, false, view_fields);
+    g_items[0].view.jewel_attribute_type = 7;
+    g_items[0].view.jewel_value = 50;
+    ready_provider();
+    jewel_context = {};
+    const QolResult mismatched_jewel =
+        feature::api_query_option_context(handle(1), 8, 50, nullptr, &jewel_context);
+    CHECK(mismatched_jewel.code == kQolErrUnsupported &&
+          jewel_context.status == kQolErrUnsupported);
+
     reset_fixture();
     set_item(1, 300, false, 0);
     ready_provider();
