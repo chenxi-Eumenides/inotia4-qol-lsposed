@@ -4,7 +4,7 @@
 
 功能插件：提供 5 个扩展逻辑背包（袋号 `6..10`）、装备页扩展页签、投影式拖放与存档 sidecar。对外发布 `extension_bag` 能力（API 3.0；3.1 尾追加 `remove_for_sale`）与 `inventory.merge_projection`；注册 8 条调试 HTTP 端点、3 个 port、1 个中立 inventory provider。
 
-当前范围：装备页核心绘制/拖放/存档门禁与详情动作已注册；商店、合成器仍关闭，其资源 claim 未注册。
+当前范围：装备页核心绘制/拖放/存档门禁、详情动作、商店宿主、合成器宿主均已注册并启用。资源 claim 共 22 条；合成器双高亮与合成后短暂闪原版袋仍是已知残留。
 
 除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -15,7 +15,10 @@
 - optional：`inventory.refresh`、`move_merge.control`、`http.registry`、`http.dispatch`（`plugin.cpp:197-208`）。
 - provides：`extension_bag`（API major 3、minor 0；sale removal 3.1）、`inventory.merge_projection`（`plugin.cpp:155-170`；`contracts/extension_bag.h:25-30`）。
 - ports：write port、character extras、inventory extras（`plugin.cpp:210-220,823-824`）。
-- resources：`assembly/claims.cpp` 的 `extension_bag_claims()`，当前 10 条：`hook:SAVE_SaveInventory`、`own:popup.inventory`、`own:popup.save_panel`、`P_EXT_INVEN_ITEM_DRAW`、`P_EXT_INVEN_BAG_DRAW`、`P_EXT_INVEN_DRAW_END`、`P_EXT_DROP_GATE`、`P_EXT_DRAW_GATE`、`own:desc_button_execute_slots`、`patch:P_EXT_DESC_OPEN_GATE`。详情动作已恢复；商店/合成 claim 仍关闭。
+- resources：`assembly/claims.cpp` 的 `extension_bag_claims()`，当前 22 条：
+  - 核心/存档/详情：`hook:SAVE_SaveInventory`、`own:popup.inventory`、`own:popup.save_panel`、`patch:P_EXT_INVEN_ITEM_DRAW`、`patch:P_EXT_INVEN_BAG_DRAW`、`patch:P_EXT_INVEN_DRAW_END`、`patch:P_EXT_DROP_GATE`、`patch:P_EXT_DRAW_GATE`、`own:desc_button_execute_slots`、`patch:P_EXT_DESC_OPEN_GATE`。
+  - 商店：`hook:UIStore_SellItem`、`hook:UIStore_ButtonSellExe`、`hook:UIStore_DrawInvenBagGroup`、`own:popup.store`、`patch:P_EXT_STORE_DESC`、`patch:P_EXT_STORE_DRAW_END`、`patch:P_EXT_STORE_BAG_DRAW`、`patch:P_EXT_STORE_BUY_GATE_1`、`patch:P_EXT_STORE_BUY_GATE_2`。
+  - 合成器：`own:popup.mix`、`patch:P_EXT_MIX_DRAW_END`、`patch:P_EXT_MIX_BAG_DRAW`。
 - JNI：descriptor `jni_count=0`；两个导出由全局 bridge 管理（`plugin.cpp:852-880`；`bridge/native/gamebridge.cpp:226`；`bridge/native/gamebridge_domain_operations.cpp:458`）。
 - feature：`extension_bag.extended_bag`，Gameplay/Toggle，`default_enabled=1`，显示优先级 -2，回调 `extension_bag_toggle`（`plugin.cpp:846-850`）。
 
@@ -68,7 +71,8 @@
 
 ## UI 宿主与输入
 
-- 当前注册背包装备页宿主（`runtime/projection.cpp`、`runtime/tabs_ui.cpp`、`ui/equip.cpp`）和详情动作（`ui/detail_actions.cpp`）；详情打开 gate 与按钮执行槽 claim 已注册。商店/合成器宿主代码保留在 `ui/store_*`、`ui/mix.cpp`，但 claim 未注册。
+- 当前注册背包装备页宿主（`runtime/projection.cpp`、`runtime/tabs_ui.cpp`、`ui/equip.cpp`）、详情动作（`ui/detail_actions.cpp`）、商店宿主（`ui/store_*`）和合成器宿主（`ui/mix.cpp`）；对应 resources 均已注册。
+- 空 EB 袋解除：`unequip_extension_bag_locked` 把袋对象放回原版袋并切到接收袋；draw-end 检测到 module 视图不再成立时立即 restore，避免原版袋短暂显示为空。
 - 页签控件 user type 2、data 16 字节、首字段指向物品对象；页签物品按类型复用/延迟释放（`runtime/tabs_ui.cpp`、`runtime/tabs.cpp`）。
 - 投影：draw wrapper 持锁、original-first；扩展视图下临时改原版当前袋为 sentinel，绘制后恢复（`runtime/render.cpp`、`runtime/projection.cpp`）。
 - 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving（`runtime/tabs_ui.cpp`、`runtime/input.cpp`）。
@@ -106,13 +110,13 @@
 | `ui/equip.cpp` | 装备/卸下/背包装备接管 |
 | `ui/detail_hooks.cpp` | V2 详情按钮绑定/校验（详情 claim 已注册） |
 | `ui/detail_actions.cpp` | 使用/出售/销毁/佣兵徽章（详情 claim 已注册） |
-| `ui/store_*.cpp` | 商店宿主（core-only 未注册） |
-| `ui/mix.cpp` | 合成器宿主（core-only 未注册） |
+| `ui/store_*.cpp` | 商店宿主（已注册；出售数量、买入、袋列绘制） |
+| `ui/mix.cpp` | 合成器宿主（已注册；页签/投影/回切） |
 | `public/*.cpp` | 对外 `virtual_bag_*` 包装/状态/数量/投影/出售/桥接 |
 | `api/*.cpp` | API 表、中立 provider、句柄、公开 wrapper |
 | `http/*` | JSON parser、路由表、query |
 | `persistence/persistence.cpp` | `save.slot_data` v4 consumer |
-| `assembly/claims.cpp` | 资源 claim 表（10 条；详情动作恢复，Store/Mix 关闭） |
+| `assembly/claims.cpp` | 资源 claim 表（22 条；核心/详情/商店/合成均启用） |
 | `assembly/move_merge_impl.cpp` | move-merge projection shim |
 | `model/*` | 纯状态、事务规则、JSON、payload、ledger |
 
@@ -130,3 +134,4 @@
 
 - **商店 EB 视图双高亮**：选中扩展袋后，原版袋列仍显示一个选中态，与 EB 页签高亮并存。已尝试 `current_bag` 遮蔽、`UIStore_DrawInvenBagGroup` 入口 hook、`UIEquip` 背景 hook 与选中按钮重绘，均未能稳定消除；当前已回退为双高亮行为，后续单独定位原版袋列的选中态来源。商店出售数量选择不受影响。
 - **合成器 EB 视图双高亮**：合成器沿用 UIMix 原版袋列，选中扩展袋后同样出现原版袋 + EB 页签双高亮，表现与商店页一致；按当前决定不单独修，后续与商店页合并定位。
+- **合成后短暂闪原版袋**：点击组合确认后，个别时序仍可能在下一帧前露出原版袋；当前 draw-end/refresh 对 state 0 已避免主动 restore，完整复现仍需 `mix state edge` / `mix restore view` 日志确认触发点。

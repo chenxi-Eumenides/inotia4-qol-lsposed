@@ -4,7 +4,7 @@
 #include "plugins/extension_bag/runtime/logging.h"
 
 // ===========================================================================
-// 扩展背包 10 条声明式资源（claims + acquire/release + backup 交还）
+// 扩展背包声明式资源（claims + acquire/release + backup 交还）
 // ===========================================================================
 //
 // 声明式资源实现。声明表经 extension_bag_bridge.h 交 plugins/extension_bag。
@@ -240,7 +240,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
     // 校正为 required × failSoft —— 装配期失败保持 free + degraded，插件活跃且 free
     // 时宿主每逻辑帧重试到成功，语义等价旧 300ms 重试线程。
     // gate=nullptr：资源跟随插件 lifecycle，单一 feature 关闭即整体还原。
-    // Detail actions are registered below; store/mix hosts remain disabled.
+    // Core, detail actions, store and mix resources are all registered below.
     static const ::qol::contracts::ResourceClaim kClaims[] = {
         {
             kEbM1SaveInventory,
