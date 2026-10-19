@@ -42,11 +42,23 @@ using QolItemPortQuoteFn = QolResult (*)(QolItemHandle item, uint32_t sale_path,
                                          QolSaleQuote* out);
 
 constexpr uint32_t kQolItemInventoryOptionCapacity = 32;
+constexpr uint32_t kQolItemInventoryNativeOptionCapacity = 32;
+constexpr uint32_t kQolItemInventoryJewelOptionCapacity = 32;
+// 附魔属性列表尚无解码来源（当前只读 I_ENCHANT 的 id/level）；容量先按合并列表同等上限
+// 固定，数据未解码前适配器保持 count=0 且不置有效位，不得用 id/level 伪造属性。
+constexpr uint32_t kQolItemInventoryEnchantOptionCapacity = 32;
 // Autosell view consumer table (plugins/autosell/view.cpp): real-equip→equip; rarity→rarity;
 // remaining-enchant→enchant_remaining; filled/total sockets→socket_filled/socket_total;
 // jewel value/type→jewel_value/jewel_attribute_type; quantity uses effective_count when
 // count_supported is set. Bag category remains QolInventoryItemRef.category. Consumers do not
 // reinterpret payload or recompute the R-47b mode view.
+
+// 装备 option 节点 O_INDEX bit13-15 的条目类型。合并列表 options[] 保留全部类型；分词列表
+// 只投影这里已定义的类型，未知 type 仍只出现在合并列表。
+enum class QolItemInventoryOptionType : int32_t {
+    kNative = 0,
+    kJewel = 1,
+};
 
 enum QolItemInventoryViewField : uint32_t {
     kQolItemInventoryHasCategory = 1u << 0,
@@ -58,6 +70,10 @@ enum QolItemInventoryViewField : uint32_t {
     kQolItemInventoryHasJewelAttributeType = 1u << 6,
     kQolItemInventoryHasOptionCompleteness = 1u << 7,
     kQolItemInventoryOptionsTruncated = 1u << 8,
+    // 分词列表可用位：原生/宝石列表由本次枚举投影得到（可为空）；附魔无解码数据时不置位。
+    kQolItemInventoryHasNativeOptions = 1u << 9,
+    kQolItemInventoryHasJewelOptions = 1u << 10,
+    kQolItemInventoryHasEnchantOptions = 1u << 11,
 };
 
 struct QolItemInventoryOptionView {
@@ -93,6 +109,15 @@ struct QolItemInventoryView {
     int32_t jewel_attribute_type;
     uint32_t option_count;
     QolItemInventoryOptionView options[kQolItemInventoryOptionCapacity];
+    // v3.5 追加的分词列表。options[] 仍是全量合并列表，既有消费者保持原序语义；
+    // 原生/宝石列表按 type 投影；附魔列表当前显式为空（count=0 且无有效位），
+    // 元素暂沿用通用词条结构，待属性数据解码后再细化。
+    uint32_t native_option_count;
+    QolItemInventoryOptionView native_options[kQolItemInventoryNativeOptionCapacity];
+    uint32_t jewel_option_count;
+    QolItemInventoryOptionView jewel_options[kQolItemInventoryJewelOptionCapacity];
+    uint32_t enchant_option_count;
+    QolItemInventoryOptionView enchant_options[kQolItemInventoryEnchantOptionCapacity];
 };
 
 static_assert(std::is_standard_layout<QolItemInventoryView>::value,

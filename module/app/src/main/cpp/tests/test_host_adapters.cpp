@@ -631,7 +631,46 @@ void test_inventory_option_view_completeness(
             assert(view.options[last].type == static_cast<int32_t>(kOptionType));
             assert(view.options[last].value == 500 + static_cast<int32_t>(last));
         }
+        // 未知 type 只留在合并列表；原生/宝石分词列表为空但仍标记为可用。
+        assert(view.native_option_count == 0);
+        assert(view.jewel_option_count == 0);
+        assert(view.enchant_option_count == 0);
+        assert((view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) != 0);
+        assert((view.fields & qol::contracts::kQolItemInventoryHasJewelOptions) != 0);
+        assert((view.fields & qol::contracts::kQolItemInventoryHasEnchantOptions) == 0);
     }
+
+    // 混合 type：合并列表保持原序，原生/宝石列表按 type 投影，附魔列表显式为空。
+    constexpr uint32_t kMixedLength = 4;
+    constexpr int32_t kMixedTypes[kMixedLength] = {0, 1, 2, 0};
+    for (uint32_t i = 0; i < kMixedLength; ++i) {
+        nodes[i].index = static_cast<uint16_t>((kMixedTypes[i] << 13) | (i & 0x7Fu));
+        nodes[i].value = static_cast<int16_t>(600 + i);
+        nodes[i].next = i + 1 < kMixedLength ? &nodes[i + 1] : nullptr;
+    }
+    const auto* mixed_head = &nodes[0];
+    std::memcpy(item.data() + I_OPTION_LIST, &mixed_head, sizeof(mixed_head));
+    qol::contracts::QolItemInventoryView mixed_view{};
+    assert(port.read.inventory_item_view(handle, &mixed_view).ok == kQolOk);
+    assert(mixed_view.option_count == kMixedLength);
+    assert(mixed_view.options[0].type == 0 && mixed_view.options[0].id == 0 &&
+           mixed_view.options[0].value == 600);
+    assert(mixed_view.options[1].type == 1 && mixed_view.options[1].id == 1 &&
+           mixed_view.options[1].value == 601);
+    assert(mixed_view.options[2].type == 2 && mixed_view.options[2].id == 2 &&
+           mixed_view.options[2].value == 602);
+    assert(mixed_view.options[3].type == 0 && mixed_view.options[3].id == 3 &&
+           mixed_view.options[3].value == 603);
+    assert(mixed_view.native_option_count == 2);
+    assert(mixed_view.native_options[0].id == 0 && mixed_view.native_options[0].value == 600);
+    assert(mixed_view.native_options[1].id == 3 && mixed_view.native_options[1].value == 603);
+    assert(mixed_view.jewel_option_count == 1);
+    assert(mixed_view.jewel_options[0].id == 1 && mixed_view.jewel_options[0].type == 1 &&
+           mixed_view.jewel_options[0].value == 601);
+    assert(mixed_view.enchant_option_count == 0);
+    assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) != 0);
+    assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasJewelOptions) != 0);
+    assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasEnchantOptions) == 0);
     const FakeInventoryOptionNode* empty = nullptr;
     std::memcpy(item.data() + I_OPTION_LIST, &empty, sizeof(empty));
     g_test_extra_readable = nullptr;

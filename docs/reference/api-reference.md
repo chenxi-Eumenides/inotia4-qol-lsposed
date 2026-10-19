@@ -1805,7 +1805,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 - `resource_count`：infra 状态登记表计数（P2 恒 `0`）；资源明细以 `resources[]` 为准。
 - `resources`：该插件 `owner` 的资源声明明细，`state` 取资源登记表占用状态（`free`/`disabled`/`live`/`tombstone`）。
 - `requires` / `provides`：描述符声明的能力需求/提供，仅输出 `{id, major, minor}`（接口指针不外泄）。
-- 当前 native provider 例：`attribute_quality` 声明提供 `attribute.quality` 2.0、required `item.facts` 3.3；此处只反映 descriptor 版本声明，不表示能力当前可用或暴露接口指针。原生接口见 [`attribute_quality` 插件参考](plugins/attribute_quality.md)。
+- 当前 native provider 例：`attribute_quality` 声明提供 `attribute.quality` 2.0、required `item.facts` 3.5；此处只反映 descriptor 版本声明，不表示能力当前可用或暴露接口指针。原生接口见 [`attribute_quality` 插件参考](plugins/attribute_quality.md)。
 - `degraded`：正交健康标记（非生命周期态，§3.2）；`optional_requires` 缺失/可选依赖失效时置 `true`，插件继续工作（通常 `state` 仍为 `enabled`）。
 
 **注意**：响应体由 native `nativeFeatureStatusJson()` 原样透传，Kotlin 侧不做字段加工；native 未就绪经 ControllerGuard 返回 503（`{"ok":false,"error":"not ready"}`）。

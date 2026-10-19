@@ -36,7 +36,7 @@
 
 ### Capabilities
 
-- 提供 `item.facts`：物品分类、装备/宝石/禁售判断、价格、堆叠计数、inventory item ref/view、详情上下文及金钱查询等窄事实接口。
+- 提供 `item.facts`：物品分类、装备/宝石/禁售判断、价格、堆叠计数、inventory item ref/view、详情上下文及金钱查询等窄事实接口。v3.5 的 inventory view 追加 `native_options[]`/`jewel_options[]`/`enchant_options[]` 分词列表；`options[]` 仍是全量合并列表，现有 JSON 投影不变，附魔列表在属性未解码前恒为空。
 - 提供 `item.state`：按 kind 输出 raw 或 enriched inventory JSON 投影。
 - Descriptor 必需 `http.registry`、`http.dispatch`；可选依赖 `character.state`，用于角色状态投影相关写操作。
 

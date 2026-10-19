@@ -6,7 +6,7 @@
 
 ## 定位与版本
 
-`attribute_quality` 是只读属性质量 provider，插件版本 `0.1.0`；提供 `attribute.quality` v2.0，必需 `item.facts` v3.3。当前 descriptor 声明一项 private/required/fail-closed `MATH_GetRandom` entry hook、`jni_count=0`，无 HTTP query、endpoint 或 route metadata。见 `plugins/attribute_quality/plugin.cpp:12-65,115-131`、`contracts/attribute_quality.h:14-19,92-98`、`contracts/item_facts.h:11-14`。
+`attribute_quality` 是只读属性质量 provider，插件版本 `0.1.0`；提供 `attribute.quality` v2.0，必需 `item.facts` v3.5。当前 descriptor 声明一项 private/required/fail-closed `MATH_GetRandom` entry hook、`jni_count=0`，无 HTTP query、endpoint 或 route metadata。见 `plugins/attribute_quality/plugin.cpp:12-65,115-131`、`contracts/attribute_quality.h:14-19,92-98`、`contracts/item_facts.h:11-14`。
 
 接口是带 `struct_size` 的三槽表：`query_item`、`query_option_context`、`evaluate`。`attribute_quality_api_size_valid` 同时检查完整到 `evaluate` 的结构尺寸和三个非空回调；不能用 v1 的 `probe_jewel/probe_option/classify/percentile` 解释当前 ABI。三槽 typedef 见 `contracts/attribute_quality.h:70-90`，API struct 见 `92-98`，size validator 见 `100-104`。
 
@@ -43,7 +43,7 @@
 
 ## Item 查询
 
-`query_item` 通过 `item.facts` 依序读取 category、jewel/equip 分类和一次 `QolItemInventoryView`；属性条目从该 view 的 `options[]` 按原序处理，不按 id 去重，也不对失败条目重读或跳过。category 与分类字段是该调用中的独立 facts 读取，view 本身只取一次。见 `plugins/attribute_quality/feature.cpp:142-165,267-332`。
+`query_item` 通过 `item.facts` 依序读取 category、jewel/equip 分类和一次 `QolItemInventoryView`；属性条目从该 view 的 `options[]` 按原序处理，不按 id 去重，也不对失败条目重读或跳过。`item.facts` v3.5 的 view 同时提供按 option type 投影的 `native_options[]` / `jewel_options[]` 和当前恒空的 `enchant_options[]`；本 provider 仍只读合并列表 `options[]`，以保持既有行为。category 与分类字段是该调用中的独立 facts 读取，view 本身只取一次。见 `plugins/attribute_quality/feature.cpp:142-165,267-332`。
 
 一次 `query_item` 只取一次 facts view；每个受支持的 Jewel/StoredOption 范围仍分别运行 capture，不共享一次范围捕获覆盖整批条目。
 
@@ -53,7 +53,7 @@
 | 装备内储存词缀 | `count=view.option_count`，最多 32 项；按数组顺序记录 `ordinal`、id、type、value。只有存储 `type==0` 会探测范围；其他 type 原位返回 `Unsupported` status，不会挤掉后续项。ability-level 符号缺失由 adapter 返回 `-1`/NotReady；provider 缺 `HasNeedLevel` 有效位也返回 NotReady。 |
 | 非宝石、非装备 | 返回 Unsupported。 |
 
-`ItemFactsApi::view` 需要 `kQolItemInventoryHasOptionCompleteness`；缺位返回 NotReady。`complete` 只由 `kQolItemInventoryOptionsTruncated` 决定：它表示枚举是否完整，不代表每个属性探测成功。单项探测或固定表失败保留在该项 `status` 中，后续项仍处理；结构/输入/事实快照错误则由外层 `QolResult` 返回。`ordinal` 只表示本次 view 的遍历位置，不是跨查询身份，也不代表 UI 行号。view 容量和 bit7/bit8 定义见 `contracts/game_ports/item_port.h:41-93`；生产适配器在达到 32 项且 `next != nullptr` 时设置 truncated，见 `game/adapter_ports/item_port.cpp:302-318`。
+`ItemFactsApi::view` 需要 `kQolItemInventoryHasOptionCompleteness`；缺位返回 NotReady。`complete` 只由 `kQolItemInventoryOptionsTruncated` 决定：它表示枚举是否完整，不代表每个属性探测成功。单项探测或固定表失败保留在该项 `status` 中，后续项仍处理；结构/输入/事实快照错误则由外层 `QolResult` 返回。`ordinal` 只表示本次 view 的遍历位置，不是跨查询身份，也不代表 UI 行号。view 容量和 bit7/bit8 定义见 `contracts/game_ports/item_port.h:53-105`；`native_options[]`/`jewel_options[]` 由 type 0/1 投影且可空，`enchant_options[]` 在附魔属性未解码前恒为空且不置 bit11。生产适配器在达到 32 项且 `next != nullptr` 时设置 truncated，见 `game/adapter_ports/item_port.cpp:302-325`。
 
 ## 当前词缀上下文查询
 
@@ -69,7 +69,7 @@
 
 ## 捕获资源、启动与撤销
 
-- `MATH_GetRandom` 是唯一捕获资源，声明 `private`、`required`、`fail_closed`；安装时校验 Game Host major 2、minor 至少 3 及所需 `attr_range` 函数，并要求 `item.facts` v3.3 提供 category、jewel/equip 分类和 view 成员。`QOL_PORT_ITEM` 当前 v3.3 是 item.facts/adapter 侧版本；provider descriptor 本身声明的是 `item.facts` capability，不直接声明该 port。见 `plugin.cpp:19-33,62-85`、`contracts/game_host.h:216-217`、`contracts/game_ports/ports.h:42-45`。
+- `MATH_GetRandom` 是唯一捕获资源，声明 `private`、`required`、`fail_closed`；安装时校验 Game Host major 2、minor 至少 3 及所需 `attr_range` 函数，并要求 `item.facts` v3.5 提供 category、jewel/equip 分类和 view 成员。`QOL_PORT_ITEM` 当前 v3.5 是 item.facts/adapter 侧版本；provider descriptor 本身声明的是 `item.facts` capability，不直接声明该 port。见 `plugin.cpp:19-33,62-85`、`contracts/game_host.h:216-217`、`contracts/game_ports/ports.h:42-45`。
 - 捕获状态为 thread-local RAII scope。范围探测在同线程 armed；第一次 wrapper 命中记录 `[min,max]`、返回 `max` 并 disarm，本次宿主读取中的后续随机调用透传 backup；未命中的 capture 返回 NotReady。嵌套 capture 返回 Busy，scope 退出清除状态。见 `feature.cpp:20-23,54-89,389-398`。
 - Resource ready 对匹配 hook id 的空 backup 返回失败并关闭 active；非空 backup 被保存。`clear_runtime` 先关 active，再清除 facts、backup、Game Host 指针。`on_enabled` 打开门禁、`on_disabled` 关门禁；隐藏 feature `attribute_quality.provider` 默认 1，toggle callback 是 no-op，不是用户业务开关。见 `feature.cpp:248-264`、`plugin.cpp:67-113`。
 - **错误边界**：API 在 active/Host/facts/backup 未就绪时拒绝范围查询；纯 `evaluate` 的数值运算不依赖这些状态，但 API function pointer 仍只在能力生命周期内可借用，不能跨 revoke 缓存。wrapper 若实际在 backup 为空时被调用会返回 `INT_MIN` sentinel；这不是游戏定义的错误值，不能据此宣称游戏调用可安全处理。正常可用性依赖 Resource ready 拒绝空 backup、required/fail-closed 资源及查询门禁。见 `feature.cpp:35-39,225-230,255-264,389-398`。
@@ -91,7 +91,7 @@ provider 只提供范围事实与质量计算；不做整件装备聚合、UI �
 | 文件 | 事实位置 |
 |---|---|
 | `contracts/attribute_quality.h:14-19,31-75,79-98,100-104` | capability v2.0、三槽 API、结果/选项/尺寸校验。 |
-| `contracts/item_facts.h:11-14,35-65`、`contracts/game_ports/item_port.h:41-93` | item.facts 3.3 与 item view 的容量/有效位。 |
+| `contracts/item_facts.h:11-14,35-65`、`contracts/game_ports/item_port.h:53-105` | item.facts 3.5 与 item view 的容量/有效位。 |
 | `contracts/game_host.h:39-47,205-234` | Game Host attr_range 面与 ABI 2.4（v2.4 追加 `game_identity` 尾槽）。 |
 | `plugins/attribute_quality/plugin.cpp:12-131`、`plugins/attribute_quality/feature.h:24-25` | 版本、requirements/provides/resource、Game Host 检查、lifecycle 与空 backup 拒绝说明。 |
 | `plugins/attribute_quality/feature.cpp:41-398`、`feature.h:13-43` | options 校验、查询、范围捕获、固定表、错误与 wrapper。 |

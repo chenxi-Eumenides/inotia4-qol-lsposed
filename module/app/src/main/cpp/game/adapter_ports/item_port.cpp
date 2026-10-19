@@ -322,7 +322,9 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
     out->fields |= contracts::kQolItemInventoryHasJewelValue |
                    contracts::kQolItemInventoryHasJewelAttributeType;
     const auto* option = *reinterpret_cast<const uint8_t* const*>(bytes + I_OPTION_LIST);
-    out->fields |= contracts::kQolItemInventoryHasOptionCompleteness;
+    out->fields |= contracts::kQolItemInventoryHasOptionCompleteness |
+                   contracts::kQolItemInventoryHasNativeOptions |
+                   contracts::kQolItemInventoryHasJewelOptions;
     // A stale item can still be mapped while its option-list pointer points into
     // a freed allocation. Validate every chain node before dereferencing it.
     const auto option_readable = [](const uint8_t* node) {
@@ -339,9 +341,20 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
             break;
         }
         const uint16_t index = *reinterpret_cast<const uint16_t*>(option + O_INDEX);
-        out->options[out->option_count++] = contracts::QolItemInventoryOptionView{
+        const contracts::QolItemInventoryOptionView entry{
             *reinterpret_cast<const int16_t*>(option + O_VALUE), index & 0x7F,
             (index >> 13) & 0x7};
+        out->options[out->option_count++] = entry;
+        // 合并列表保持原序；分词列表只按已知 type 投影。32 项上限与合并列表一致，
+        // 因此单个分词列表不会因总量而溢出。
+        if (entry.type == static_cast<int32_t>(contracts::QolItemInventoryOptionType::kNative) &&
+            out->native_option_count < contracts::kQolItemInventoryNativeOptionCapacity) {
+            out->native_options[out->native_option_count++] = entry;
+        } else if (entry.type ==
+                       static_cast<int32_t>(contracts::QolItemInventoryOptionType::kJewel) &&
+                   out->jewel_option_count < contracts::kQolItemInventoryJewelOptionCapacity) {
+            out->jewel_options[out->jewel_option_count++] = entry;
+        }
         const auto* next = *reinterpret_cast<const uint8_t* const*>(option + O_NEXT);
         if (out->option_count == contracts::kQolItemInventoryOptionCapacity) {
             if (next != nullptr) {
