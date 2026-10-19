@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "../../contracts/game_host.h"
 #include "../../contracts/ui.h"
 #include "../../contracts/ui_choice.h"
 #include "plugin.h"
@@ -32,7 +33,7 @@ struct ChoiceTarget {
     int map_id = 0;
     int cost = 0;
     bool valid = false;
-    bool charge = true;
+    bool charge = false;
 };
 
 std::array<ChoiceTarget, kTeleportChoiceCount> g_targets{};
@@ -77,13 +78,17 @@ bool read_state(int* out) {
     return true;
 }
 
-// series 缺失或读取失败时保持 kWorldFactsSeriesUnknown，由调用方按收费策略处理。
+// 变体序列经既有插件面接口 QolGameHost.target.query_variant 读取；id 为 GameSeries
+// 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18，见 game_host_port.cpp
+// game_query_variant）。接口缺失或读取失败按 Unknown 处理。
 bool read_series(int* out) {
-    const auto* facts = qol::features::world_teleport::world_facts();
-    if (out == nullptr || facts == nullptr || facts->series == nullptr) return false;
-    int32_t value = qol::contracts::kWorldFactsSeriesUnknown;
-    if (!qol::contracts::succeeded(facts->series(&value))) return false;
-    *out = value;
+    const auto* game = qol::features::world_teleport::game_host();
+    if (out == nullptr || game == nullptr || game->target.query_variant == nullptr) {
+        return false;
+    }
+    qol::contracts::QolTargetVariant variant{};
+    if (!qol::contracts::succeeded(game->target.query_variant(&variant))) return false;
+    *out = static_cast<int>(variant.id);
     return true;
 }
 
@@ -204,11 +209,13 @@ void open_choice_panel() {
     log_message(1, "world teleport: map records count=%d max_map_id=%d current=%d",
                 record_count, max_map_id, current_id);
 
-    // 选择面板统一；回调按变体分流：C18/原版免费直传，monster/大修/未知走确认与扣费。
-    int series = qol::contracts::kWorldFactsSeriesUnknown;
+    // 选择面板统一；回调按变体分流：monster/大修走确认与扣费，c18/原版/未知免费直传。
+    // QolTargetVariant.id = GameSeries 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18）。
+    constexpr int kSeriesOverhaul = 2;
+    constexpr int kSeriesMonster = 3;
+    int series = 0;
     (void)read_series(&series);
-    const bool charge = !(series == qol::contracts::kWorldFactsSeriesC18 ||
-                          series == qol::contracts::kWorldFactsSeriesOriginal);
+    const bool charge = series == kSeriesMonster || series == kSeriesOverhaul;
 
     std::array<std::array<char, kMapNameBufferSize>, kChoiceCount> choice_text{};
     std::array<const char*, kChoiceCount> items{};

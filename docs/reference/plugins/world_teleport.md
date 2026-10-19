@@ -8,7 +8,7 @@
 
 ## 定位与版本
 
-`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：2 项 required 依赖 `world.facts` v2.1 与 `item.facts` v3.3（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.0（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。插件不保存 `ctx.game`：世界动作经私有端口注入（`plugin.cpp`）。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
+`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：2 项 required 依赖 `world.facts` v2.0 与 `item.facts` v3.3（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.0（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。变体序列经 `ctx.game`（`QolGameHost`）的 `target.query_variant` 读取并缓存于 `g_game`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
 
 ## 公开能力与路由
 
@@ -20,14 +20,14 @@
 
 输入来源是**点击小地图**（地图名横幅入口 `UIPlay_CallMapName`），不是走到地图边界的传送点。该传送入口在原版游戏中不可触发，只有大修（overhaul）及后续改版提供；因此本插件效果只在可触发该入口的变体上可见。
 
-选择面板在所有变体上统一（同一组 ±1/±10 目标与「关闭」项），选择后的回调按 `world.facts::series` 分流：
+选择面板在所有变体上统一（同一组 ±1/±10 目标与「关闭」项），选择后的回调按变体序列（`QolGameHost.target.query_variant` 的 `QolTargetVariant.id`，即 `GameSeries` 序数）分流：
 
 | 变体系列 | 回调路径 | 费用 |
 |---|---|---|
 | C18 | 关闭面板 + restore HUD 后直接切图 | 免费（不检查余额、不扣费） |
 | 原版 | 同 C18：直接切图 | 免费 |
+| 未知（查询缺失或读取失败） | 同 C18：直接切图 | 免费 |
 | monster / 大修 | 确认框 → 确认后关闭并切图 | `+1/-1` 300、`+10/-10` 3000 |
-| 未知（series 缺失或读取失败） | 同收费路径（保守 fail-safe） | 同上 |
 
 入口为 `UIPlay_CallMapName` 的函数级入口 hook（`plugin.cpp`），声明为 `private / required / fail_closed`，`resumable=true`，`step_budget=120`：
 
@@ -40,7 +40,7 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 业务编排（`feature.cpp`）：
 
 1. `world_teleport_call_map_name`：先读 `current_map_id`/`map_name` 复刻原函数地图名横幅（读取失败只记日志，不阻断）；再读 `world.facts::state`；非世界态（`state != 5`，`kWorldState`）忽略；世界态调用 `request_open_choice`。
-2. `open_choice_panel`（`feature.cpp`）：读 `current_map_id`/`map_record_count`，由 `max_map_id_from_record_count` 推导上限；读 `world.facts::series` 决定回调策略（C18/原版免费，其余收费；读取失败按未知收费）；构造 4 项传送目标（delta `{+1,+10,-1,-10}`，费用 `{300,3000,300,3000}`）+ 1 项「关闭」（共 `kChoiceCount=5`，`feature.cpp:18-22`）；以 `UiChoiceSpec`（`dialog_type_id="world_teleport.confirm"`）调 `ui_choice::open`。
+2. `open_choice_panel`（`feature.cpp`）：读 `current_map_id`/`map_record_count`，由 `max_map_id_from_record_count` 推导上限；读变体序列（`read_series` → `QolGameHost.target.query_variant`）决定回调策略（monster/大修收费，C18/原版/未知免费）；构造 4 项传送目标（delta `{+1,+10,-1,-10}`，费用 `{300,3000,300,3000}`）+ 1 项「关闭」（共 `kChoiceCount=5`，`feature.cpp:18-22`）；以 `UiChoiceSpec`（`dialog_type_id="world_teleport.confirm"`）调 `ui_choice::open`。
 3. `teleport_on_select`（`feature.cpp`）：越界/依赖缺失 → 关面板；无效目标 → 横幅提示；有效目标按 `target.charge` 分流：收费 → 写确认文本、关面板、`g_pending_target=target`、调度 `delayed_open_confirmation`；免费 → 关面板、restore HUD、调度 `delayed_close_choice`，不生成确认文案与确认框。
 4. `delayed_open_confirmation`（仅收费路径，`feature.cpp`）：经 `world_action.create_yesno` 弹确认框（ok=`teleport_confirmed`、cancel=`teleport_cancelled`、param=`cost`）。
 5. `teleport_confirmed`（`feature.cpp`）：调度 `delayed_close_choice`，关 popup、restore HUD。
@@ -56,7 +56,8 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 - `ctx.sdk->scheduler.add`（帧任务，interval=1）：`delayed_open_choice`/`delayed_open_confirmation`/`delayed_close_choice`/`delayed_transfer` 的延迟调度（`feature.cpp:97-103`）。
 - `ctx.sdk->log.write`：业务日志（`feature.cpp:44-56`）。
 - 私有端口 `QolWorldActionPort::actions`（`contracts/game_ports/world_action_port.h`，v1.0）：`create_yesno`、`minus_money`、`request_map_change`、`close_popup`、`restore_hud`、`show_banner`、`add_money`。实现为 `game/adapter_ports/world_action_port.cpp` + `game_host_port.cpp` 的 `game_world_action_api()`（单一实现）。`QolGameHost::world_action` 仍保留给 `extension_bag` 的 `cancel_tutorial`。
-- `WorldFactsApi`（`contracts/world_facts.h`，v2.1）：`state`、`map_record_count`、`current_map_id`、`map_name`、`active_player_direction`、`series`（变体序列，序数与 `game/variants` 的 `GameSeries` 对齐）。
+- `WorldFactsApi`（`contracts/world_facts.h`，v2.0）：`state`、`map_record_count`、`current_map_id`、`map_name`、`active_player_direction`。
+- `QolGameHost.target.query_variant`（`contracts/game_host.h:17-29`）：变体序列读取（`QolTargetVariant.id` = `GameSeries` 序数），变体回调分流的唯一数据源。
 - `ItemFactsApi`（`contracts/item_facts.h:10-14`，v3.3）：`money`（FIX-05 起金钱归 `item.facts`，`docs/refactor/issues.md`）。
 - `UiChoiceApi`（`contracts/ui_choice.h:21-22,36`，v1.1，optional）：`open`/`close`。
 

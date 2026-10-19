@@ -1,3 +1,4 @@
+#include "contracts/game_host.h"
 #include "contracts/game_ports/choice_port.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/world_action_port.h"
@@ -28,7 +29,7 @@ int32_t g_record_count = 20;
 int32_t g_current_map_id = 5;
 int32_t g_direction = 2;
 int64_t g_money = 0;
-int32_t g_series = qol::contracts::kWorldFactsSeriesUnknown;
+int32_t g_series = 3;  // GameSeries 序数：默认 Monster（确认+扣费路径为既有用例基线）。
 int g_choice_open_calls = 0;
 int g_choice_close_calls = 0;
 int g_yesno_calls = 0;
@@ -72,13 +73,15 @@ QolResult active_player_direction(int32_t* out) {
     return qol::contracts::ok();
 }
 
-QolResult series(int32_t* out) {
-    *out = g_series;
+QolResult money(int64_t* out) {
+    *out = g_money;
     return qol::contracts::ok();
 }
 
-QolResult money(int64_t* out) {
-    *out = g_money;
+// QolTargetVariant.id = GameSeries 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18）。
+QolResult query_variant(qol::contracts::QolTargetVariant* out) {
+    out->id = static_cast<uint32_t>(g_series);
+    out->capabilities = 0;
     return qol::contracts::ok();
 }
 
@@ -99,10 +102,13 @@ QolResult schedule_task(int32_t, qol::contracts::QolFrameHandler handler, void* 
 
 const qol::contracts::WorldFactsApi kWorldFacts{
     &world_state, nullptr, &map_record_count, &current_map_id, &map_name,
-    &active_player_direction, nullptr, &series};
+    &active_player_direction, nullptr};
 const qol::contracts::ItemFactsApi kItemFacts{
     static_cast<uint32_t>(sizeof(qol::contracts::ItemFactsApi)), nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &money};
+
+// 变体查询桩：id = GameSeries 序数（g_series 控制当前用例的变体）。
+qol::contracts::QolGameHost kGameHost{};
 
 bool ui_choice_open(const qol::contracts::UiChoiceSpec& spec) {
     ++g_choice_open_calls;
@@ -201,7 +207,7 @@ void reset_observations() {
     g_add_money_calls = 0;
     g_add_money_amount = 0;
     g_map_change_fail = false;
-    g_series = qol::contracts::kWorldFactsSeriesUnknown;
+    g_series = 3;  // Monster：既有确认+扣费用例的基线变体（unknown/free 有专属用例）
     g_banner.clear();
     g_last_log.clear();
     g_tasks.clear();
@@ -232,11 +238,12 @@ int main() {
     actions.actions.add_money = &add_money;
 
     const void* ports[] = {&actions};
+    kGameHost.target.query_variant = &query_variant;
     qol::contracts::PluginContext context{};
     context.struct_size = sizeof(context);
     context.sdk_major = qol::contracts::kHostSdkMajor;
     context.sdk = &sdk;
-    context.game = nullptr;  // 私有端口迁移后插件不再依赖聚合 Game Host
+    context.game = &kGameHost;  // 变体序列经 QolGameHost.target.query_variant 读取
     context.ports = ports;
     context.port_count = 1;
 
@@ -305,7 +312,7 @@ int main() {
 
     // 变体分流：C18 免费直传——无确认框、无扣费，余额不足仍传送。
     reset_observations();
-    g_series = qol::contracts::kWorldFactsSeriesC18;
+    g_series = 4;  // C18：免费直传
     g_current_map_id = 5;
     g_record_count = 20;
     g_money = 0;
@@ -323,9 +330,25 @@ int main() {
     assert(g_map_change_calls == 1);
     assert(g_banner.empty());
 
+    // 变体分流：未知变体免费直传（不确认、不扣费）。
+    reset_observations();
+    g_series = 0;  // Unknown
+    g_current_map_id = 5;
+    g_record_count = 20;
+    g_money = 10000;
+    qol::features::world_teleport::world_teleport_call_map_name();
+    assert(g_choice_select != nullptr);
+    g_choice_select(0, g_choice_user);
+    assert(g_tasks.size() == 1);
+    run_next_task();
+    assert(g_yesno_calls == 0);
+    run_next_task();
+    assert(g_minus_money_calls == 0);
+    assert(g_map_change_calls == 1);
+
     // 变体分流：monster 保持确认框 + 扣费路径。
     reset_observations();
-    g_series = qol::contracts::kWorldFactsSeriesMonster;
+    g_series = 3;  // Monster：确认+扣费
     g_current_map_id = 5;
     g_record_count = 20;
     g_money = 10000;

@@ -18,6 +18,7 @@ constexpr const char* kPluginId = "world_teleport";
 constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolWorldActionPort* g_world_action_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
@@ -77,6 +78,7 @@ const contracts::QolPortRequirement kPorts[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
+    g_game = ctx.game;
     g_world_action_port = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
@@ -86,6 +88,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr ||
         ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         g_sdk = nullptr;
+        g_game = nullptr;
         g_world_action_port = nullptr;
         g_world_facts = nullptr;
         g_item_facts = nullptr;
@@ -101,6 +104,7 @@ int plugin_install(contracts::PluginContext& ctx) {
             &world_facts_iface)) ||
         world_facts_iface == nullptr) {
         g_sdk = nullptr;
+        g_game = nullptr;
         g_world_action_port = nullptr;
         g_install_error = "install failed: world facts unavailable";
         return 1;
@@ -114,6 +118,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         item_facts_iface == nullptr || !contracts::item_facts_api_size_valid(
                                            static_cast<const contracts::ItemFactsApi*>(item_facts_iface))) {
         g_sdk = nullptr;
+        g_game = nullptr;
         g_world_action_port = nullptr;
         g_world_facts = nullptr;
         g_item_facts = nullptr;
@@ -131,6 +136,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_world_facts = nullptr;
     g_item_facts = nullptr;
     g_world_action_port = nullptr;
+    g_game = nullptr;
     g_sdk = nullptr;
     invalidate_operations();
 }
@@ -205,6 +211,10 @@ const contracts::PluginDescriptor& plugin_descriptor() {
 
 const contracts::QolHostSdk* host_sdk() {
     return g_sdk;
+}
+
+const contracts::QolGameHost* game_host() {
+    return g_game;
 }
 
 const contracts::QolWorldActionPort* world_action_port() {
