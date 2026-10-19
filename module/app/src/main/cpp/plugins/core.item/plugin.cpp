@@ -1059,7 +1059,8 @@ void append_unforced_inventory_changes(
 
 bool write_move_slots_result(const contracts::QolItemWriteArgs& args,
                              const InventoryResultSnapshot& before,
-                             char* out, uint32_t capacity, uint32_t* out_size) {
+                             char* out, uint32_t capacity, uint32_t* out_size,
+                             bool force_requested_target = true) {
     InventoryResultSnapshot after{};
     if (!capture_inventory_result(&after)) return false;
     std::array<bool, kResultBagCount * kResultSlotsPerBag> forced{};
@@ -1070,8 +1071,8 @@ bool write_move_slots_result(const contracts::QolItemWriteArgs& args,
         forced[inventory_result_index(args.i0, args.i1)] = true;
         append_result_slot(body, args.i0, args.i1, after, &first);
     }
-    if (args.i3 >= 0 && args.i3 < kResultBagCount && args.i4 >= 0 &&
-        args.i4 < kResultSlotsPerBag &&
+    if (force_requested_target && args.i3 >= 0 && args.i3 < kResultBagCount &&
+        args.i4 >= 0 && args.i4 < kResultSlotsPerBag &&
         (args.i0 != args.i3 || args.i1 != args.i4)) {
         forced[inventory_result_index(args.i3, args.i4)] = true;
         append_result_slot(body, args.i3, args.i4, after, &first);
@@ -1839,7 +1840,13 @@ bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
         const int32_t move_status = access.provider->move_item(
             args.i0, args.i1, args.i3, args.i4, error_body, sizeof(error_body), &move_result_size);
         if (move_status != 0) {
-            return write_move_slots_result(args, inventory_before, out, capacity, out_size);
+            // Original->extension ignores to_slot and auto-picks the first
+            // assignable slot. Report only slots that actually changed so clients
+            // use the real landing slot instead of the request's placeholder.
+            const bool original_to_extension =
+                !provider_owns_bag(access, args.i0) && provider_owns_bag(access, args.i3);
+            return write_move_slots_result(args, inventory_before, out, capacity, out_size,
+                                           !original_to_extension);
         }
         if (move_result_size <= sizeof(error_body) &&
             move_result_size >= 11 &&
