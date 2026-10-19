@@ -934,6 +934,7 @@ struct S2RemoveDataCapture {
     void* items[kS2RemoveDataMaxEntries] = {};
     int bags[kS2RemoveDataMaxEntries] = {};
     int slots[kS2RemoveDataMaxEntries] = {};
+    uint32_t pre_raw[kS2RemoveDataMaxEntries] = {};
     uint32_t pre_full[kS2RemoveDataMaxEntries] = {};
 };
 
@@ -961,6 +962,7 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
             cap->items[cap->entry_count] = item;
             cap->bags[cap->entry_count] = bag;
             cap->slots[cap->entry_count] = slot;
+            cap->pre_raw[cap->entry_count] = read_count_field(item);
             if (!item_count_effective(item, &cap->pre_full[cap->entry_count])) continue;
             ++cap->entry_count;
         }
@@ -968,9 +970,9 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
     cap->armed = cap->entry_count > 0;
 }
 
-// 999 已应用时，backup 后重扫 + 修正：消失堆（整删）只求和；唯一缩减堆经
-// stage4_remove_item_data_plan 计算 remain，post 与快照不一致（b 截断或旧 a
-// 残留）时回写 a+b。关闭态由原版只写 b，模块跳过此修正；失败/矛盾一律 fail-closed。
+// 999 已应用时，backup 后重扫 + 修正：消失堆（整删）只求和；唯一原版 b-only
+// 写回形态的堆经 stage4_remove_item_data_plan 计算 remain 并在需要时回写 a+b。
+// 关闭态由原版只写 b，模块跳过此修正；失败/矛盾一律 fail-closed。
 void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
                               int32_t count) {
     if (!cap.armed || !item_count_extended_applied()) return;
@@ -978,14 +980,18 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
     Stage4RemoveDataEntry pre[kS2RemoveDataMaxEntries] = {};
     Stage4RemoveDataPost post[kS2RemoveDataMaxEntries] = {};
     for (int index = 0; index < cap.entry_count; ++index) {
-        pre[index] = {cap.items[index], cap.pre_full[index]};
+        pre[index] = {cap.items[index], cap.pre_raw[index], cap.pre_full[index]};
         void* cur = s2_physical_slot_item(cap.bags[index], cap.slots[index]);
         if (cur != cap.items[index]) {
-            post[index] = {nullptr, 0};
+            post[index] = {cur, 0, 0};
         } else {
+            const auto* api = item_count_api();
+            uint32_t post_raw = 0;
+            if (api == nullptr || api->read_encoded_field == nullptr ||
+                !qol::contracts::succeeded(api->read_encoded_field(cur, &post_raw))) return;
             uint32_t effective = 0;
             if (!item_count_effective(cur, &effective)) return;
-            post[index] = {cur, effective};
+            post[index] = {cur, post_raw, effective};
         }
     }
     const Stage4RemoveDataPlan plan =

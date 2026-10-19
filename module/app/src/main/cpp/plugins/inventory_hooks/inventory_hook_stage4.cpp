@@ -239,41 +239,67 @@ Stage4RemoveDataPlan stage4_remove_item_data_plan(
     const Stage4RemoveDataPost* post, int entry_count, int32_t count) {
     Stage4RemoveDataPlan plan;
     if (pre == nullptr || post == nullptr || entry_count <= 0 || count <= 0) return plan;
-    if (item_count == nullptr || item_count->view_limit == nullptr) return plan;
+    if (item_count == nullptr || item_count->view_limit == nullptr ||
+        item_count->field_from_canonical == nullptr) return plan;
     uint32_t count_limit = 0;
     if (!qol::contracts::succeeded(item_count->view_limit(1, &count_limit))) return plan;
-    // 顺序（与原版一致）：先整删后部分删，部分删堆唯一。先汇总整删（快照对象
-    // 已不在槽内/被替换）并定位唯一缩减堆；任何第二缩减堆或增长堆都是数据矛盾，
-    // fail-closed 放弃修正。
+
     uint32_t sum_vanished = 0;
-    int shrunk_index = -1;
-    uint32_t sum_kept_post = 0;
     for (int index = 0; index < entry_count; ++index) {
-        if (post[index].item != pre[index].item) {
+        if (post[index].item != pre[index].item && post[index].item != nullptr) {
+            return Stage4RemoveDataPlan{};
+        }
+        if (post[index].item == nullptr) {
             sum_vanished += pre[index].pre_full;
-            continue;
         }
-        if (post[index].post_view < pre[index].pre_full) {
-            if (shrunk_index >= 0) return Stage4RemoveDataPlan{};
-            shrunk_index = index;
-            continue;
-        }
-        if (post[index].post_view != pre[index].pre_full) return Stage4RemoveDataPlan{};
-        sum_kept_post += post[index].post_view;
     }
-    if (shrunk_index < 0) return plan;
-    const uint32_t pre_full = pre[shrunk_index].pre_full;
     if (sum_vanished > static_cast<uint32_t>(count)) return Stage4RemoveDataPlan{};
-    // 原版部分删堆剩余 = pre_full - (count - 之前整删总量)；入参异常（count 过大、
-    // 恰好等于本堆全量——那应走整删分支）时公式越域，一律 fail-closed。
     const uint32_t deleted_here = static_cast<uint32_t>(count) - sum_vanished;
-    if (deleted_here >= pre_full) return Stage4RemoveDataPlan{};
-    const uint32_t remain = pre_full - deleted_here;
-    const uint32_t post_view = post[shrunk_index].post_view;
-    if (remain > count_limit) return Stage4RemoveDataPlan{};
-    if (remain == post_view) return plan;  // 原版 b 写已完整表达 remain（含 a=0）
+
+    if (deleted_here == 0) return plan;
+
+    int candidate_index = -1;
+    for (int index = 0; index < entry_count; ++index) {
+        if (post[index].item == nullptr) continue;
+
+        const uint32_t pre_full = pre[index].pre_full;
+        if (deleted_here >= pre_full) {
+            if (post[index].post_raw != pre[index].pre_raw) return Stage4RemoveDataPlan{};
+            continue;
+        }
+
+        const uint32_t remain = pre_full - deleted_here;
+        const uint32_t pre_a_block = (pre_full / 128u) * 128u;
+        const uint32_t expected_view = pre_a_block + (remain % 128u);
+        bool b_only_shape = false;
+        if (expected_view <= 999u) {
+            uint32_t expected_raw = 0;
+            const QolResult result = item_count->field_from_canonical(
+                pre[index].pre_raw, expected_view, 1, &expected_raw);
+            if (!qol::contracts::succeeded(result)) return Stage4RemoveDataPlan{};
+            b_only_shape = post[index].post_raw == expected_raw;
+        } else {
+            // field_from_canonical 与 effective 读视图都在 count_limit 处 clamp；该窄带
+            // 只有 pre_a=7 且 b 段 >103 时出现，故以 clamp 后的视图相等作等价判定。
+            b_only_shape = post[index].post_view == count_limit;
+        }
+
+        if (b_only_shape) {
+            if (deleted_here >= pre_full || remain >= pre_full || remain > count_limit) {
+                return Stage4RemoveDataPlan{};
+            }
+            if (candidate_index >= 0) return Stage4RemoveDataPlan{};
+            candidate_index = index;
+        } else if (post[index].post_raw != pre[index].pre_raw) {
+            return Stage4RemoveDataPlan{};
+        }
+    }
+
+    if (candidate_index < 0) return plan;
+    const uint32_t remain = pre[candidate_index].pre_full - deleted_here;
+    if (remain == post[candidate_index].post_view) return plan;
     plan.correct = true;
-    plan.entry_index = shrunk_index;
+    plan.entry_index = candidate_index;
     plan.remain = remain;
     return plan;
 }

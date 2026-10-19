@@ -363,99 +363,234 @@ static QolResult fake_conversion_limit(int32_t extended, uint32_t* out_limit) {
     return qol::contracts::ok();
 }
 
-static const qol::contracts::QolItemCountApi kStage4ConversionApi = {
-    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    &fake_conversion_limit};
+static constexpr uint32_t kTestS2ShiftA = 22u;
+static constexpr uint32_t kTestS2MaskA = 0x7u << kTestS2ShiftA;
+static constexpr uint32_t kTestS2ShiftB = 25u;
+static constexpr uint32_t kTestS2MaskB = 0x7fu << kTestS2ShiftB;
 
-// H-21 INVEN_RemoveItemData 修正计划（R-45/R-49）：部分删堆 remain 修正、
-// 整删消失堆求和、count<=0 / 无缩减 / 多缩减 / 越域 / 已正确各分支 fail-closed。
+static uint32_t s2_test_write_count(uint32_t raw, uint32_t count) {
+    return (raw & ~(kTestS2MaskA | kTestS2MaskB)) |
+           (((count / 128u) & 0x7u) << kTestS2ShiftA) |
+           ((count & 0x7fu) << kTestS2ShiftB);
+}
+
+static uint32_t s2_test_read_count(uint32_t raw) {
+    return (((raw >> kTestS2ShiftA) & 0x7u) * 128u) +
+           ((raw >> kTestS2ShiftB) & 0x7fu);
+}
+
+static uint32_t s2_test_raw(uint32_t count) {
+    return s2_test_write_count(0x00123456u, count);
+}
+
+static uint32_t s2_test_b_only_raw(uint32_t pre_raw, uint32_t remain) {
+    return (pre_raw & ~kTestS2MaskB) | ((remain & 0x7fu) << kTestS2ShiftB);
+}
+
+static QolResult fake_field_from_canonical(uint32_t raw, uint32_t canonical,
+                                           int32_t extended, uint32_t* out_raw) {
+    if (out_raw == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    if (extended != 0) {
+        if (canonical > 999u) canonical = 999u;
+        *out_raw = s2_test_write_count(raw, canonical);
+    } else {
+        uint32_t view = canonical & 0x7fu;
+        if (view > 99u) view = 99u;
+        *out_raw = (raw & ~kTestS2MaskB) | (view << kTestS2ShiftB);
+    }
+    return qol::contracts::ok();
+}
+
+static QolResult fake_field_from_canonical_failure(uint32_t, uint32_t, int32_t, uint32_t*) {
+    return qol::contracts::error(kQolErrUnsupported, "unsupported", 11);
+}
+
+static const qol::contracts::QolItemCountApi kStage4ConversionApi = {
+    nullptr, nullptr, nullptr, nullptr, nullptr, &fake_field_from_canonical,
+    nullptr, nullptr, &fake_conversion_limit, nullptr, nullptr, nullptr};
+
+static Stage4RemoveDataEntry s2_test_pre(void* item, uint32_t full) {
+    return {item, s2_test_raw(full), full};
+}
+
+static Stage4RemoveDataPost s2_test_post(void* item, uint32_t raw) {
+    const uint32_t decoded = s2_test_read_count(raw);
+    // 与 item_count.effective 的启用态读视图一致：超过 999 时 clamp。
+    return {item, raw, decoded > 999u ? 999u : decoded};
+}
+
+// H-21 INVEN_RemoveItemData 按原版 b-only 写回形态识别唯一部分删堆，覆盖跨 127、
+// clamp 边界、整删消失堆、多候选、非候选原始字段变化与 fail-closed 入参。
 static void test_remove_item_data_plan() {
     void* a = reinterpret_cast<void*>(static_cast<uintptr_t>(0x501));
     void* b = reinterpret_cast<void*>(static_cast<uintptr_t>(0x502));
     void* c = reinterpret_cast<void*>(static_cast<uintptr_t>(0x503));
-    // 场景 1（启用态跨 127 借位，单一部分删堆）：堆 199 + 堆 50，删 60。
-    // 原版顺序（0x1040a8）：60 < 199 → 首堆即部分删，remain=199+0-60=139>127，
-    // b 写截断（post_view = a 残留 0 + b=11），堆 2 不动。计划应修正 entry 0 → 139。
+
+    // 150 - 25 = 125；原版保留 a=1，只写 b，视图增大为 253，需修正为 125。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{a, 11u}, {b, 50u}};
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u))};
         const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
-            &kStage4ConversionApi, pre, post, 2, 60);
-        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 139u);
+            &kStage4ConversionApi, pre, post, 1, 25);
+        CHECK(post[0].post_view == 253u);
+        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 125u);
     }
-    // 场景 1b（整删后跨堆部分删）：堆 199 + 堆 50，删 220：199 整删（w22=199），
-    // 220 ≥ 199 → 继续遍历；220 < 249 → 堆 2 部分删 remain=199+50-220=29，
-    // 原版 b 写 29（a=0 保留）→ 已正确，不修正。
+
+    // remain=127 与 9 时，旧 a 分别使原版 b-only 视图成为 255 与 137。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 29u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 220).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 127u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 72);
+        CHECK(post[0].post_view == 255u);
+        CHECK(plan.correct && plan.remain == 127u);
     }
-    // 场景 2（remain ≤127 但旧 a 残留）：堆 199 部分删 190 → remain=9，
-    // 原版 b 写后 post_view = 旧 a(1)*128 + 9 = 137 ≠ 9 → 修正为 9。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}};
-        Stage4RemoveDataPost post[] = {{a, 137u}};
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 9u))};
         const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 190);
-        CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 9u);
+        CHECK(post[0].post_view == 137u);
+        CHECK(plan.correct && plan.remain == 9u);
     }
-    // 场景 3（remain ≤127 且 a 原本为 0）：堆 50 删 10 → remain=40，原版已写对
-    //（post_view=40）→ 不修正。
+
+    // remain=172 与 100 均按 a 段原样保留识别，尽管 b 段可不变或回绕增大。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 50u}};
-        Stage4RemoveDataPost post[] = {{a, 40u}};
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 172u))};
         const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
-            &kStage4ConversionApi, pre, post, 1, 10);
-        CHECK(!plan.correct);
+            &kStage4ConversionApi, pre, post, 1, 128);
+        CHECK(post[0].post_raw == pre[0].pre_raw);
+        CHECK(plan.correct && plan.remain == 172u);
     }
-    // 场景 4（全部整删，无部分删堆）：count ≥ 总量 → 无修正。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {nullptr, 0u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 249).correct);
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 9999).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 100u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 200);
+        CHECK(plan.correct && plan.remain == 100u);
     }
-    // 场景 5（count<=0：语义未冻结/空操作）→ 不修正。
+
+    // 300 - 44 = 256；b-only 写回视图已等于 remain，不需要二次回写。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}};
-        Stage4RemoveDataPost post[] = {{a, 137u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 1, 0).correct);
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 1, -1).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 256u))};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 44).correct);
     }
-    // 场景 6（fail-closed：缩减堆不唯一）→ 不修正。
+
+    // expected_view 超过 999 时只按未 clamp 的 S2 视图判断原版 b-only 形态。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 199u}};
-        Stage4RemoveDataPost post[] = {{a, 100u}, {b, 100u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 198).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 999u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 127u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 872);
+        CHECK(post[0].post_view == 999u);
+        CHECK(plan.correct && plan.remain == 127u);
     }
-    // 场景 7（fail-closed：未触堆数量被改/增长）→ 不修正。
+
+    // 整删只累计消失堆；全部删除与 sum_vanished > count 均不回写。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 70u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 60).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u), s2_test_pre(b, 50u)};
+        const Stage4RemoveDataPost post[] = {{nullptr, 0u, 0u}, {nullptr, 0u, 0u}};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 249).correct);
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 9999).correct);
     }
-    // 场景 8（fail-closed：count 小于整删累计，数据矛盾）→ 不修正。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 61u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 10).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const Stage4RemoveDataPost post[] = {{nullptr, 0u, 0u}};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 149).correct);
     }
-    // 场景 9（fail-closed：deleted_here 恰等于部分删堆全量——原版该走整删分支，
-    // remain=0 矛盾）→ 不修正。
+
+    // 消失堆累计扣除后，剩余堆仍按其唯一 b-only 形态修正。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 199u}, {b, 50u}};
-        Stage4RemoveDataPost post[] = {{nullptr, 0u}, {b, 0u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 2, 249).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            {nullptr, 0u, 0u},
+            s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 200u))};
+        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 250);
+        CHECK(plan.correct && plan.entry_index == 1 && plan.remain == 200u);
     }
-    // 场景 10（堆未被触及时原样通过）：无缩减 → 不修正。
+
+    // 两个堆都呈现同一 b-only 结果时，多候选 fail-closed。
     {
-        Stage4RemoveDataEntry pre[] = {{a, 999u}};
-        Stage4RemoveDataPost post[] = {{a, 999u}};
-        CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, pre, post, 1, 1).correct);
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 150u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
+            s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 125u))};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 25).correct);
     }
-    // 场景 11（空/退化入参）→ 不修正。
-    CHECK(!stage4_remove_item_data_plan(&kStage4ConversionApi, nullptr, nullptr, 0, 5).correct);
+
+    // 非候选同对象槽 raw 改变时 fail-closed，包括数量段以外的位变化。
+    {
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
+            s2_test_post(b, pre[1].pre_raw ^ 1u)};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 2, 25).correct);
+    }
+    {
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 124u))};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 25).correct);
+    }
+
+    // 没有部分删除、对象替换、count<=0 和退化输入均不回写。
+    {
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const Stage4RemoveDataPost unchanged[] = {s2_test_post(a, pre[0].pre_raw)};
+        const Stage4RemoveDataPost replaced[] = {s2_test_post(c, s2_test_raw(1u))};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, unchanged, 1, 1).correct);
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, unchanged, 1, 0).correct);
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, unchanged, 1, -1).correct);
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, replaced, 1, 1).correct);
+    }
+    CHECK(!stage4_remove_item_data_plan(
+        &kStage4ConversionApi, nullptr, nullptr, 0, 5).correct);
+    CHECK(!stage4_remove_item_data_plan(nullptr, nullptr, nullptr, 0, 5).correct);
+
+    // 转换 API 缺失或失败时不猜测原版写回形态。
+    {
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u))};
+        qol::contracts::QolItemCountApi missing_api = kStage4ConversionApi;
+        missing_api.field_from_canonical = nullptr;
+        qol::contracts::QolItemCountApi failed_api = kStage4ConversionApi;
+        failed_api.field_from_canonical = &fake_field_from_canonical_failure;
+        CHECK(!stage4_remove_item_data_plan(&missing_api, pre, post, 1, 25).correct);
+        CHECK(!stage4_remove_item_data_plan(&failed_api, pre, post, 1, 25).correct);
+    }
+
+    // 原版形态已将 a+b 表达为 remain 时无需回写。
+    {
+        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 50u)};
+        const Stage4RemoveDataPost post[] = {
+            s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 40u))};
+        CHECK(!stage4_remove_item_data_plan(
+            &kStage4ConversionApi, pre, post, 1, 10).correct);
+    }
 }
 
 // H-21 扩展桥接（R-56）补扣量纯函数：物理实扣 = 前后 H-03 总数差，扩展补扣 =
