@@ -8,8 +8,6 @@
 #include "feature.h"
 
 #include <cstdint>
-#include <cstdlib>
-#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -28,26 +26,12 @@ const char* g_install_error = nullptr;
 
 uint64_t (*g_backup_call_map_name)() = nullptr;
 
-// 诊断日志：入口 hook 触发/透传路径当前全部无日志，真机无法区分「wrapper 未触发」
-// 与「wrapper 透传」。定位入口不生效问题期间临时保留。
-void wt_diag_log(const char* message) {
-    const qol::contracts::QolHostSdk* sdk = g_sdk;
-    if (sdk == nullptr || sdk->log.write == nullptr) return;
-    const size_t length = std::strlen(message);
-    (void)sdk->log.write(1, 12, "world_teleport/plugin.cpp", message,
-                         static_cast<uint32_t>(length));
-}
-
 // 入口为 UIPlay_CallMapName 的函数级 kEntryHook（inventory_hooks 同构）：符号经 dynsym
 // 解析（game_symbols.h 单一来源），原版/monster/C18 三版本同址，无指纹、无版本表。
 // 不常规转发原函数：原函数尾部在改版上是 B→改版注入块，转发会连带触发改版自己的
 // 传送对话框。原函数体不读任何入参寄存器（首指令即覆写 x0-x2），无参 wrapper 安全。
 uint64_t world_teleport_call_map_name_wrapper() {
-    wt_diag_log("world teleport: wrapper fired");
     if (g_backup_call_map_name == nullptr || !g_installed) {
-        wt_diag_log(g_backup_call_map_name == nullptr
-                        ? "world teleport: wrapper passthrough backup=null"
-                        : "world teleport: wrapper passthrough not-installed");
         return g_backup_call_map_name != nullptr ? g_backup_call_map_name() : 1;
     }
     qol::features::world_teleport::world_teleport_call_map_name();
@@ -155,14 +139,12 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     g_installed = true;
     g_install_error = nullptr;
-    wt_diag_log("world teleport: on_enabled g_installed=1");
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     g_installed = false;
     invalidate_operations();
-    wt_diag_log("world teleport: on_disabled g_installed=0");
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
@@ -175,14 +157,9 @@ int32_t plugin_on_resource_ready(contracts::PluginContext& ctx, const char* reso
     (void)ctx;
     if (resource_id == nullptr || std::strcmp(resource_id, "hook:UIPlay_CallMapName") != 0 ||
         backup == nullptr) {
-        wt_diag_log("world teleport: on_resource_ready rejected (id/backup invalid)");
         return 1;
     }
     g_backup_call_map_name = reinterpret_cast<uint64_t (*)()>(backup);
-    char text[64];
-    std::snprintf(text, sizeof(text), "world teleport: backup bound %p",
-                  reinterpret_cast<void*>(g_backup_call_map_name));
-    wt_diag_log(text);
     return 0;
 }
 

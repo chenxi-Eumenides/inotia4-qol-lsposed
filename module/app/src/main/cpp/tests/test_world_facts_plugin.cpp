@@ -30,7 +30,7 @@ int main() {
     }
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kWorldFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 2 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].version.major == 2 && descriptor.provides[0].version.minor == 1);
     CHECK(descriptor.provides[0].iface != nullptr);
     CHECK(descriptor.port_count == 2 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_WORLD);
@@ -63,6 +63,10 @@ int main() {
     CHECK(api->map_name != nullptr);
     CHECK(api->active_player_direction != nullptr);
     CHECK(api->tutorial_state != nullptr);
+    CHECK(api->series != nullptr);
+    int32_t series = -1;
+    CHECK(qol::contracts::succeeded(api->series(&series)));
+    CHECK(series == qol::contracts::kWorldFactsSeriesUnknown);
     CHECK(g_fail == 0);
     std::printf("world_facts_plugin: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

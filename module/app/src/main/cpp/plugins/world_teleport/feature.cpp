@@ -32,6 +32,7 @@ struct ChoiceTarget {
     int map_id = 0;
     int cost = 0;
     bool valid = false;
+    bool charge = true;
 };
 
 std::array<ChoiceTarget, kTeleportChoiceCount> g_targets{};
@@ -72,6 +73,16 @@ bool read_state(int* out) {
     if (out == nullptr || facts == nullptr || facts->state == nullptr) return false;
     int32_t value = -1;
     if (!qol::contracts::succeeded(facts->state(&value))) return false;
+    *out = value;
+    return true;
+}
+
+// series 缺失或读取失败时保持 kWorldFactsSeriesUnknown，由调用方按收费策略处理。
+bool read_series(int* out) {
+    const auto* facts = qol::features::world_teleport::world_facts();
+    if (out == nullptr || facts == nullptr || facts->series == nullptr) return false;
+    int32_t value = qol::contracts::kWorldFactsSeriesUnknown;
+    if (!qol::contracts::succeeded(facts->series(&value))) return false;
     *out = value;
     return true;
 }
@@ -193,13 +204,19 @@ void open_choice_panel() {
     log_message(1, "world teleport: map records count=%d max_map_id=%d current=%d",
                 record_count, max_map_id, current_id);
 
+    // 选择面板统一；回调按变体分流：C18/原版免费直传，monster/大修/未知走确认与扣费。
+    int series = qol::contracts::kWorldFactsSeriesUnknown;
+    (void)read_series(&series);
+    const bool charge = !(series == qol::contracts::kWorldFactsSeriesC18 ||
+                          series == qol::contracts::kWorldFactsSeriesOriginal);
+
     std::array<std::array<char, kMapNameBufferSize>, kChoiceCount> choice_text{};
     std::array<const char*, kChoiceCount> items{};
     for (size_t index = 0; index < kTeleportChoiceCount; ++index) {
         const int delta = kChoiceDeltas[index];
         const int target_id = world_teleport::target_map_id(current_id, delta, max_map_id);
         const bool valid = target_id >= 0 && (record_count <= 0 || target_id < record_count);
-        g_targets[index] = {target_id, kChoiceCosts[index], valid};
+        g_targets[index] = {target_id, kChoiceCosts[index], valid, charge};
         const char* name = valid ? map_name(target_id) : "不可用";
         const char* sign = delta > 0 ? "+" : "-";
         if (valid) {
@@ -287,34 +304,51 @@ int32_t delayed_transfer(int64_t, void* param) {
     const auto* facts = qol::features::world_teleport::world_facts();
     const auto* item_facts = qol::features::world_teleport::item_facts();
     const auto* actions = world_actions();
-    if (target == nullptr || facts == nullptr || item_facts == nullptr ||
-        item_facts->money == nullptr || actions == nullptr ||
-        facts->active_player_direction == nullptr || actions->minus_money == nullptr ||
+    if (target == nullptr || facts == nullptr || actions == nullptr ||
+        facts->active_player_direction == nullptr ||
         actions->request_map_change == nullptr) {
         log_message(3, "world teleport: transfer symbols not resolved");
         return 0;
     }
+    if (target->charge && (item_facts == nullptr || item_facts->money == nullptr ||
+                           actions->minus_money == nullptr)) {
+        log_message(3, "world teleport: transfer symbols not resolved");
+        return 0;
+    }
     int32_t direction = -1;
-    int64_t money = 0;
     if (!qol::contracts::succeeded(facts->active_player_direction(&direction)) ||
-        direction < 0 || !qol::contracts::succeeded(item_facts->money(&money))) {
+        direction < 0) {
         log_message(3, "world teleport: active player unavailable");
         return 0;
     }
-    if (money < target->cost) {
-        show_message("金币不足，无法传送");
-        log_message(1, "world teleport: insufficient money target=%d cost=%d money=%lld",
-                    target->map_id, target->cost, static_cast<long long>(money));
-        return 0;
-    }
-    if (!qol::contracts::succeeded(actions->minus_money(static_cast<int64_t>(target->cost)))) {
-        show_message("扣费失败，无法传送");
-        log_message(3, "world teleport: charge failed target=%d cost=%d",
-                    target->map_id, target->cost);
-        return 0;
+    const int cost = target->charge ? target->cost : 0;
+    if (target->charge) {
+        int64_t money = 0;
+        if (!qol::contracts::succeeded(item_facts->money(&money))) {
+            log_message(3, "world teleport: active player unavailable");
+            return 0;
+        }
+        if (money < target->cost) {
+            show_message("金币不足，无法传送");
+            log_message(1, "world teleport: insufficient money target=%d cost=%d money=%lld",
+                        target->map_id, target->cost, static_cast<long long>(money));
+            return 0;
+        }
+        if (!qol::contracts::succeeded(actions->minus_money(static_cast<int64_t>(target->cost)))) {
+            show_message("扣费失败，无法传送");
+            log_message(3, "world teleport: charge failed target=%d cost=%d",
+                        target->map_id, target->cost);
+            return 0;
+        }
     }
     if (!qol::contracts::succeeded(
             actions->request_map_change(target->map_id, 0, 0, direction))) {
+        if (!target->charge) {
+            show_message("传送失败");
+            log_message(3, "world teleport: transfer failed target=%d cost=0",
+                        target->map_id);
+            return 0;
+        }
         const bool refunded = actions->add_money != nullptr &&
             qol::contracts::succeeded(actions->add_money(static_cast<int64_t>(target->cost)));
         show_message(refunded ? "传送失败，已退还金币" : "传送失败，退款异常");
@@ -322,8 +356,8 @@ int32_t delayed_transfer(int64_t, void* param) {
                     target->map_id, target->cost, refunded ? 1 : 0);
         return 0;
     }
-    log_message(1, "world teleport: transferred target=%d cost=%d direction=%d",
-                target->map_id, target->cost, direction);
+    log_message(1, "world teleport: transferred target=%d cost=%d",
+                target->map_id, cost);
     return 0;
 }
 
@@ -372,8 +406,7 @@ void teleport_cancelled(void*) {
 void teleport_on_select(int index, void*) {
     if (!chain_still_valid()) return;
     const auto* actions = world_actions();
-    if (index < 0 || index >= static_cast<int>(kTeleportChoiceCount) ||
-        actions == nullptr || actions->create_yesno == nullptr) {
+    if (index < 0 || index >= static_cast<int>(kTeleportChoiceCount) || actions == nullptr) {
         close_choice_panel();
         log_message(3, "world teleport: confirm symbols not resolved");
         return;
@@ -385,13 +418,32 @@ void teleport_on_select(int index, void*) {
         log_message(2, "world teleport: invalid target index=%d map_id=%d", index, target.map_id);
         return;
     }
+    g_pending_target = target;
+    if (!target.charge) {
+        // 免费直传：跳过确认文案与确认框，关面板后直接进入切图调度。
+        close_choice_panel();
+        if (actions->restore_hud != nullptr) {
+            (void)actions->restore_hud();
+        }
+        if (!schedule(delayed_close_choice, &g_pending_target, 1)) {
+            log_message(3, "world teleport: transfer registration failed");
+            return;
+        }
+        log_message(1, "world teleport: selected index=%d target=%d cost=0",
+                    index, target.map_id);
+        return;
+    }
+    if (actions->create_yesno == nullptr) {
+        close_choice_panel();
+        log_message(3, "world teleport: confirm symbols not resolved");
+        return;
+    }
     std::snprintf(g_confirm_text.data(), g_confirm_text.size(), "是否传送至%s？",
                   map_name(target.map_id));
     close_choice_panel();
     if (actions->restore_hud != nullptr) {
         (void)actions->restore_hud();
     }
-    g_pending_target = target;
     if (!schedule(delayed_open_confirmation, &g_pending_target, 1)) {
         log_message(3, "world teleport: confirmation registration failed");
         return;

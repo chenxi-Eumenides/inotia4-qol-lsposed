@@ -56,6 +56,7 @@ struct WorldSnapshot {
 };
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolWorldPort* g_port = nullptr;
 const contracts::QolWorldWritePort* g_world_write_port = nullptr;
 uint64_t g_frame_task = 0;
@@ -101,6 +102,20 @@ QolResult tutorial_state(int32_t* out_state) {
     return g_port->read.tutorial_state(out_state);
 }
 
+QolResult series(int32_t* out_series) {
+    if (out_series == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "series output required", 22);
+    }
+    // 变体查询属 game 层能力，插件只经 QolGameHost 契约读取；不可用时按未知返回，
+    // 由消费者采用保守策略。
+    *out_series = contracts::kWorldFactsSeriesUnknown;
+    if (g_game == nullptr || g_game->target.query_variant == nullptr) return contracts::ok();
+    contracts::QolTargetVariant variant{};
+    if (!contracts::succeeded(g_game->target.query_variant(&variant))) return contracts::ok();
+    *out_series = static_cast<int32_t>(variant.id);
+    return contracts::ok();
+}
+
 constexpr contracts::WorldFactsApi kWorldFactsApi{
     &state,
     &game_state_gate,
@@ -109,6 +124,7 @@ constexpr contracts::WorldFactsApi kWorldFactsApi{
     &map_name,
     &active_player_direction,
     &tutorial_state,
+    &series,
 };
 
 const contracts::CapabilityProvisionRef kProvides[] = {
@@ -646,6 +662,7 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
+    g_game = ctx.game;
     g_port = nullptr;
     g_world_write_port = nullptr;
     g_frame_task = 0;
@@ -653,6 +670,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 2 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr) {
         g_sdk = nullptr;
+        g_game = nullptr;
         return 1;
     }
     g_port = static_cast<const contracts::QolWorldPort*>(ctx.ports[0]);
@@ -667,6 +685,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_port->read.navigation == nullptr || g_port->read.in_world == nullptr) {
         g_port = nullptr;
         g_sdk = nullptr;
+        g_game = nullptr;
         return 1;
     }
     g_world_write_port = static_cast<const contracts::QolWorldWritePort*>(ctx.ports[1]);
@@ -677,12 +696,14 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_port = nullptr;
         g_world_write_port = nullptr;
         g_sdk = nullptr;
+        g_game = nullptr;
         return 1;
     }
     if (!g_snapshot.initialize(g_sdk)) {
         g_port = nullptr;
         g_world_write_port = nullptr;
         g_sdk = nullptr;
+        g_game = nullptr;
         return 1;
     }
     WorldSnapshot empty_snapshot{};
@@ -696,6 +717,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_port = nullptr;
         g_world_write_port = nullptr;
         g_sdk = nullptr;
+        g_game = nullptr;
         return 1;
     }
     log_message(g_sdk, "[core.world] provider install");
@@ -713,6 +735,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_port = nullptr;
     g_world_write_port = nullptr;
     g_sdk = nullptr;
+    g_game = nullptr;
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {

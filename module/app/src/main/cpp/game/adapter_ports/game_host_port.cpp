@@ -5,6 +5,7 @@
 
 #include "contracts/game_ports/ui_write_port.h"
 #include "contracts/game_ports/ports.h"
+#include "contracts/world_facts.h"
 
 #include <atomic>
 #include <cstring>
@@ -167,6 +168,18 @@ const contracts::QolUiWritePort kUiWritePort{
     contracts::kQolPortUiWriteVersion,
     {&ui_write_legacy, &ui_write_step, &ui_write_cancel_pending},
 };
+
+// world.facts 的 series 序数经 QolTargetVariant.id 暴露，必须与 GameSeries 逐位一致。
+static_assert(static_cast<uint32_t>(GameSeries::kUnknown) ==
+              contracts::kWorldFactsSeriesUnknown);
+static_assert(static_cast<uint32_t>(GameSeries::kOriginal) ==
+              contracts::kWorldFactsSeriesOriginal);
+static_assert(static_cast<uint32_t>(GameSeries::kOverhaul) ==
+              contracts::kWorldFactsSeriesOverhaul);
+static_assert(static_cast<uint32_t>(GameSeries::kMonster) ==
+              contracts::kWorldFactsSeriesMonster);
+static_assert(static_cast<uint32_t>(GameSeries::kC18) ==
+              contracts::kWorldFactsSeriesC18);
 
 QolResult game_query_variant(contracts::QolTargetVariant* out) {
     if (out == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);

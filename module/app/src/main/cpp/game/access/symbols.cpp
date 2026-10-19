@@ -2,7 +2,6 @@
 
 #include <cstring>
 
-#include "game/access/qol_log_seam.h"
 #include "game/symbols/game_symbols.h"
 #include "game/symbols/symbol_resolver.h"
 #include "game/access/game_access.h"
@@ -149,26 +148,10 @@ uintptr_t resolve_hook_entry(const char* symbol_name, bool* out_followed) {
         const uintptr_t address = g_base + offset;
         if ((address & 0x3u) != 0 ||
             !game_memory_accessible(reinterpret_cast<void*>(address), 4, 'x')) return 0;
-        // 临时诊断：入口解析结果与入口指令字（定位 UIPlay_CallMapName 入口不生效）。
-        const bool word_readable =
-            game_memory_accessible(reinterpret_cast<void*>(address), 4, 'r');
-        const uint32_t word =
-            word_readable ? *reinterpret_cast<const uint32_t*>(address) : 0;
-        QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
-                          "hook entry resolved export=%s addr=%p word=0x%08x", export_name,
-                          reinterpret_cast<void*>(address), word);
         return hookable_entry(address, followed);
     }    for (const HookEntrySymbol& entry : kHookEntrySymbols) {
         if (std::strcmp(entry.name, symbol_name) != 0) continue;
         const uintptr_t symbol_entry = g_base + fn_resolve(entry.name, entry.vma);
-        // 临时诊断：同 export 路径。
-        const bool word_readable =
-            game_memory_accessible(reinterpret_cast<void*>(symbol_entry), 4, 'r');
-        const uint32_t word =
-            word_readable ? *reinterpret_cast<const uint32_t*>(symbol_entry) : 0;
-        QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
-                          "hook entry resolved symbol=%s addr=%p word=0x%08x", symbol_name,
-                          reinterpret_cast<void*>(symbol_entry), word);
         return hookable_entry(symbol_entry, followed);
     }
     *followed = false;

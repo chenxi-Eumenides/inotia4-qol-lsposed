@@ -28,6 +28,7 @@ int32_t g_record_count = 20;
 int32_t g_current_map_id = 5;
 int32_t g_direction = 2;
 int64_t g_money = 0;
+int32_t g_series = qol::contracts::kWorldFactsSeriesUnknown;
 int g_choice_open_calls = 0;
 int g_choice_close_calls = 0;
 int g_yesno_calls = 0;
@@ -71,6 +72,11 @@ QolResult active_player_direction(int32_t* out) {
     return qol::contracts::ok();
 }
 
+QolResult series(int32_t* out) {
+    *out = g_series;
+    return qol::contracts::ok();
+}
+
 QolResult money(int64_t* out) {
     *out = g_money;
     return qol::contracts::ok();
@@ -93,7 +99,7 @@ QolResult schedule_task(int32_t, qol::contracts::QolFrameHandler handler, void* 
 
 const qol::contracts::WorldFactsApi kWorldFacts{
     &world_state, nullptr, &map_record_count, &current_map_id, &map_name,
-    &active_player_direction, nullptr};
+    &active_player_direction, nullptr, &series};
 const qol::contracts::ItemFactsApi kItemFacts{
     static_cast<uint32_t>(sizeof(qol::contracts::ItemFactsApi)), nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &money};
@@ -195,6 +201,7 @@ void reset_observations() {
     g_add_money_calls = 0;
     g_add_money_amount = 0;
     g_map_change_fail = false;
+    g_series = qol::contracts::kWorldFactsSeriesUnknown;
     g_banner.clear();
     g_last_log.clear();
     g_tasks.clear();
@@ -295,6 +302,46 @@ int main() {
     assert(g_add_money_calls == 1);
     assert(g_add_money_amount == 300);
     assert(g_banner == "传送失败，已退还金币");
+
+    // 变体分流：C18 免费直传——无确认框、无扣费，余额不足仍传送。
+    reset_observations();
+    g_series = qol::contracts::kWorldFactsSeriesC18;
+    g_current_map_id = 5;
+    g_record_count = 20;
+    g_money = 0;
+    qol::features::world_teleport::world_teleport_call_map_name();
+    assert(g_choice_select != nullptr);
+    g_banner.clear();
+    g_choice_select(0, g_choice_user);
+    assert(g_yesno_calls == 0);
+    assert(g_tasks.size() == 1);
+    run_next_task();
+    assert(g_tasks.size() == 1);
+    run_next_task();
+    assert(g_yesno_calls == 0);
+    assert(g_minus_money_calls == 0);
+    assert(g_map_change_calls == 1);
+    assert(g_banner.empty());
+
+    // 变体分流：monster 保持确认框 + 扣费路径。
+    reset_observations();
+    g_series = qol::contracts::kWorldFactsSeriesMonster;
+    g_current_map_id = 5;
+    g_record_count = 20;
+    g_money = 10000;
+    qol::features::world_teleport::world_teleport_call_map_name();
+    assert(g_choice_select != nullptr);
+    g_choice_select(0, g_choice_user);
+    assert(g_tasks.size() == 1);
+    run_next_task();
+    assert(g_yesno_calls == 1);
+    confirm = reinterpret_cast<void (*)(void*)>(g_yes_callback);
+    assert(confirm != nullptr);
+    confirm(g_yes_param);
+    run_next_task();
+    run_next_task();
+    assert(g_minus_money_calls == 1);
+    assert(g_map_change_calls == 1);
 
     // WT-04：停用后已排队的帧任务不再执行
     reset_observations();
