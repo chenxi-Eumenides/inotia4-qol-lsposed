@@ -8,7 +8,7 @@
 
 ## 定位与版本
 
-`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：2 项 required 依赖 `world.facts` v2.0 与 `item.facts` v3.3（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.0（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。变体序列经 `ctx.game`（`QolGameHost`）的 `target.query_variant` 读取并缓存于 `g_game`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
+`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：2 项 required 依赖 `world.facts` v2.0 与 `item.facts` v3.3（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.1（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。变体序列经 `ctx.game`（`QolGameHost`）的 `target.query_variant` 读取并缓存于 `g_game`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
 
 ## 公开能力与路由
 
@@ -22,12 +22,11 @@
 
 选择面板在所有变体上统一（同一组 ±1/±10 目标与「关闭」项），选择后的回调按变体序列（`QolGameHost.target.query_variant` 的 `QolTargetVariant.id`，即 `GameSeries` 序数）分流：
 
-| 变体系列 | 回调路径 | 费用 |
-|---|---|---|
-| C18 | 关闭面板 + restore HUD 后直接切图 | 免费（不检查余额、不扣费） |
-| 原版 | 同 C18：直接切图 | 免费 |
-| 未知（查询缺失或读取失败） | 同 C18：直接切图 | 免费 |
-| monster / 大修 | 确认框 → 确认后关闭并切图 | `+1/-1` 300、`+10/-10` 3000 |
+| 变体系列 | 回调路径 | 落点 | 费用 |
+|---|---|---|---|
+| C18 | 关闭面板 + restore HUD 后直接切图 | `(0,0)` + `dir|0x8000`：走 C18 进图选点（中点 → X±/Y± ≤32 步最近非阻挡） | 免费（不检查余额、不扣费） |
+| 原版 / 未知（查询缺失或读取失败） | 同 C18：直接切图 | 端口 `pick_landing`（中点 → X±/Y± ≤32 步 → 全图最近非阻挡，静态瓦片数据；无数据回退 `(0,0)`），显式坐标 | 免费 |
+| monster / 大修 | 确认框 → 确认后关闭并切图 | `(0,0)`：由改版自身进图补丁校正（monster：阻挡则 8 方向螺旋找最近可达后 `CharSetPosition`） | `+1/-1` 300、`+10/-10` 3000 |
 
 入口为 `UIPlay_CallMapName` 的函数级入口 hook（`plugin.cpp`），声明为 `private / required / fail_closed`，`resumable=true`，`step_budget=120`：
 
@@ -55,7 +54,7 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 - `ui.state.read_layers`：运行期读取 UI 栈顶层供诊断日志记录 `top=<id> type=<n>`；能力缺失时记录 `top=-`，不影响传送流程。
 - `ctx.sdk->scheduler.add`（帧任务，interval=1）：`delayed_open_choice`/`delayed_open_confirmation`/`delayed_close_choice`/`delayed_transfer` 的延迟调度（`feature.cpp:97-103`）。
 - `ctx.sdk->log.write`：业务日志（`feature.cpp:44-56`）。
-- 私有端口 `QolWorldActionPort::actions`（`contracts/game_ports/world_action_port.h`，v1.0）：`create_yesno`、`minus_money`、`request_map_change`、`close_popup`、`restore_hud`、`show_banner`、`add_money`。实现为 `game/adapter_ports/world_action_port.cpp` + `game_host_port.cpp` 的 `game_world_action_api()`（单一实现）。`QolGameHost::world_action` 仍保留给 `extension_bag` 的 `cancel_tutorial`。
+- 私有端口 `QolWorldActionPort`（`contracts/game_ports/world_action_port.h`，v1.1）：`actions`（`create_yesno`、`minus_money`、`request_map_change`、`close_popup`、`restore_hud`、`show_banner`、`add_money`）+ 尾追加 `pick_landing`（传送落点：中点锚 + 最近非阻挡，静态瓦片数据；无该图数据返回错误，调用方回退 `(0,0)`）。实现为 `game/adapter_ports/world_action_port.cpp` + `game_host_port.cpp` 的 `game_world_action_api()`（单一实现）。`QolGameHost::world_action` 仍保留给 `extension_bag` 的 `cancel_tutorial`。
 - `WorldFactsApi`（`contracts/world_facts.h`，v2.0）：`state`、`map_record_count`、`current_map_id`、`map_name`、`active_player_direction`。
 - `QolGameHost.target.query_variant`（`contracts/game_host.h:17-29`）：变体序列读取（`QolTargetVariant.id` = `GameSeries` 序数），变体回调分流的唯一数据源。
 - `ItemFactsApi`（`contracts/item_facts.h:10-14`，v3.3）：`money`（FIX-05 起金钱归 `item.facts`，`docs/refactor/issues.md`）。

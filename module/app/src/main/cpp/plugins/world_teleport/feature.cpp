@@ -34,6 +34,11 @@ struct ChoiceTarget {
     int cost = 0;
     bool valid = false;
     bool charge = false;
+    // 落点：native_landing=true 时坐标走 (0,0)+dir|0x8000（c18 进图选点门控）；
+    // false 时用 land_x/land_y（端口选点或 (0,0) 回退）。
+    int land_x = 0;
+    int land_y = 0;
+    bool native_landing = false;
 };
 
 std::array<ChoiceTarget, kTeleportChoiceCount> g_targets{};
@@ -213,6 +218,7 @@ void open_choice_panel() {
     // QolTargetVariant.id = GameSeries 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18）。
     constexpr int kSeriesOverhaul = 2;
     constexpr int kSeriesMonster = 3;
+    constexpr int kSeriesC18 = 4;
     int series = 0;
     (void)read_series(&series);
     const bool charge = series == kSeriesMonster || series == kSeriesOverhaul;
@@ -224,6 +230,19 @@ void open_choice_panel() {
         const int target_id = world_teleport::target_map_id(current_id, delta, max_map_id);
         const bool valid = target_id >= 0 && (record_count <= 0 || target_id < record_count);
         g_targets[index] = {target_id, kChoiceCosts[index], valid, charge};
+        // 落点分流：c18 走其进图选点门控（(0,0)+dir|0x8000）；原版/未知用端口选点
+        // （中点锚 + 最近非阻挡）；monster/大修保持 (0,0)，由其进图补丁自行校正。
+        ChoiceTarget& target = g_targets[index];
+        if (valid && !charge) {
+            if (series == kSeriesC18) {
+                target.native_landing = true;
+            } else {
+                const auto* port = qol::features::world_teleport::world_action_port();
+                if (port != nullptr && port->pick_landing != nullptr) {
+                    (void)port->pick_landing(target_id, &target.land_x, &target.land_y);
+                }
+            }
+        }
         const char* name = valid ? map_name(target_id) : "不可用";
         const char* sign = delta > 0 ? "+" : "-";
         if (valid) {
@@ -349,7 +368,8 @@ int32_t delayed_transfer(int64_t, void* param) {
         }
     }
     if (!qol::contracts::succeeded(
-            actions->request_map_change(target->map_id, 0, 0, direction))) {
+            actions->request_map_change(target->map_id, target->land_x, target->land_y,
+                                        direction | (target->native_landing ? 0x8000 : 0)))) {
         if (!target->charge) {
             show_message("传送失败");
             log_message(3, "world teleport: transfer failed target=%d cost=0",
@@ -363,8 +383,9 @@ int32_t delayed_transfer(int64_t, void* param) {
                     target->map_id, target->cost, refunded ? 1 : 0);
         return 0;
     }
-    log_message(1, "world teleport: transferred target=%d cost=%d",
-                target->map_id, cost);
+    log_message(1, "world teleport: transferred target=%d cost=%d landing=%d,%d native=%d",
+                target->map_id, cost, target->land_x, target->land_y,
+                target->native_landing ? 1 : 0);
     return 0;
 }
 

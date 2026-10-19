@@ -168,11 +168,28 @@ QolResult minus_money(int64_t) {
     return qol::contracts::ok();
 }
 
-QolResult request_map_change(int32_t, int32_t, int32_t, int32_t) {
+int32_t g_last_map_x = 0;
+int32_t g_last_map_y = 0;
+int32_t g_last_map_direction = 0;
+int32_t g_pick_x = 32;   // pick_landing 桩返回的落点（用例可覆盖）
+int32_t g_pick_y = 24;
+int g_pick_calls = 0;
+
+QolResult request_map_change(int32_t, int32_t x, int32_t y, int32_t direction) {
     ++g_map_change_calls;
+    g_last_map_x = x;
+    g_last_map_y = y;
+    g_last_map_direction = direction;
     if (g_map_change_fail) {
         return qol::contracts::error(kQolErrNotReady, "map change not ready", 21);
     }
+    return qol::contracts::ok();
+}
+
+QolResult pick_landing(int32_t, int32_t* out_x, int32_t* out_y) {
+    ++g_pick_calls;
+    *out_x = g_pick_x;
+    *out_y = g_pick_y;
     return qol::contracts::ok();
 }
 
@@ -204,6 +221,10 @@ void reset_observations() {
     g_yesno_calls = 0;
     g_minus_money_calls = 0;
     g_map_change_calls = 0;
+    g_last_map_x = 0;
+    g_last_map_y = 0;
+    g_last_map_direction = 0;
+    g_pick_calls = 0;
     g_add_money_calls = 0;
     g_add_money_amount = 0;
     g_map_change_fail = false;
@@ -236,6 +257,7 @@ int main() {
     actions.actions.restore_hud = &restore_hud;
     actions.actions.show_banner = &show_banner;
     actions.actions.add_money = &add_money;
+    actions.pick_landing = &pick_landing;
 
     const void* ports[] = {&actions};
     kGameHost.target.query_variant = &query_variant;
@@ -329,8 +351,13 @@ int main() {
     assert(g_minus_money_calls == 0);
     assert(g_map_change_calls == 1);
     assert(g_banner.empty());
+    // c18 走其进图选点门控：(0,0) + dir|0x8000，不调用端口选点。
+    assert(g_last_map_x == 0);
+    assert(g_last_map_y == 0);
+    assert((g_last_map_direction & 0x8000) != 0);
+    assert(g_pick_calls == 0);
 
-    // 变体分流：未知变体免费直传（不确认、不扣费）。
+    // 变体分流：未知变体免费直传（不确认、不扣费），落点走端口选点。
     reset_observations();
     g_series = 0;  // Unknown
     g_current_map_id = 5;
@@ -345,8 +372,13 @@ int main() {
     run_next_task();
     assert(g_minus_money_calls == 0);
     assert(g_map_change_calls == 1);
+    // 未知变体：pick_landing 返回的落点显式传入，dir 无 0x8000。
+    assert(g_pick_calls > 0);
+    assert(g_last_map_x == g_pick_x);
+    assert(g_last_map_y == g_pick_y);
+    assert((g_last_map_direction & 0x8000) == 0);
 
-    // 变体分流：monster 保持确认框 + 扣费路径。
+    // 变体分流：monster 保持确认框 + 扣费路径，落点 (0,0) 交其进图补丁校正。
     reset_observations();
     g_series = 3;  // Monster：确认+扣费
     g_current_map_id = 5;
@@ -365,6 +397,10 @@ int main() {
     run_next_task();
     assert(g_minus_money_calls == 1);
     assert(g_map_change_calls == 1);
+    assert(g_last_map_x == 0);
+    assert(g_last_map_y == 0);
+    assert((g_last_map_direction & 0x8000) == 0);
+    assert(g_pick_calls == 0);
 
     // WT-04：停用后已排队的帧任务不再执行
     reset_observations();
