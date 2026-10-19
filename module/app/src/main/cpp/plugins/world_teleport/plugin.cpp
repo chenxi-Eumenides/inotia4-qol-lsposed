@@ -189,7 +189,8 @@ int32_t plugin_on_resource_ready(contracts::PluginContext& ctx, const char* reso
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"world_teleport.map_jump", 1, contracts::FeatureCategory::kBasicOptimization,
-     contracts::FeatureType::kToggle, "更好的地图传送对话框", "在地图边界传送点提供地图跳转选择与费用确认。",
+     contracts::FeatureType::kToggle, "更好的地图传送对话框",
+     "点击小地图（地图名入口，改版变体提供）提供地图跳转选择与费用确认。",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

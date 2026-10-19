@@ -93,6 +93,10 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_UIMIX_DRAW_VMA", F_UIMIX_DRAW_VMA},
     {"F_UIMIX_BUTTON_MENU_LIST_DRAW_VMA", F_UIMIX_BUTTON_MENU_LIST_DRAW_VMA},
     {"F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA", F_UIMIX_RESET_STUFF_ITEM_CONTROL_VMA},
+    // 世界传送入口（owner=world_teleport）：小地图点击（地图名入口）的函数级接管点；
+    // 2026-10-19 由尾部 kCallPatch 迁移 kEntryHook 时漏登记，导致 c18 上解析静默返回 0、
+    // 插件资源未安装（preflight 无日志、不计 install_failed）。
+    {"F_UI_PLAY_CALL_MAP_NAME_VMA", F_UI_PLAY_CALL_MAP_NAME_VMA},
 };
 
 // 解析可安装 hook 的入口地址。

@@ -95,6 +95,7 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 | `plugins/world_teleport/feature.cpp:328-340` | `world_teleport_call_map_name` 入口。 |
 | `plugins/world_teleport/rules.cpp:7-22` | `max_map_id_from_record_count` / `target_map_id` 回绕。 |
 | `game/access/patches.cpp` | 声明式指令 patch 站点表；`UIPlay_CallMapName` 已不在其中（入口改由 `kEntryHook` 接管）。 |
+| `game/access/symbols.cpp` | `kHookEntrySymbols` 登记表：宏名形式的入口 hook claim 必须在此登记（含 `F_UI_PLAY_CALL_MAP_NAME_VMA`），否则 `resolve_hook_entry` 静默返回 0、preflight 静默拦截资源安装。 |
 | `game/symbols/game_symbols.h` | `F_UI_PLAY_CALL_MAP_NAME_VMA=0xc6664`（`UIPlay_CallMapName` 入口，dynsym）。 |
 | `hooks/install.cpp` | `kEntryHook` 安装/归还原语：宿主注入 native hook，并经 `on_resource_ready` 交还 backup。 |
 | `contracts/game_host.h:150-157` | `QolWorldActionApi` 成员。 |
