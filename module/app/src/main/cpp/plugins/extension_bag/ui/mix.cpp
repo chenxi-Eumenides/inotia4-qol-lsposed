@@ -331,10 +331,14 @@ void mix_refresh_item_after_unlock() {
     if (refresh_generation != mix_refresh_generation ||
         view_generation != mix_view_generation) return;
     if (!mix_frame_active || !runtime_state().enabled.load() ||
-        !extension_bag_session_admitted_locked() || mix_state_locked() == 0) {
+        !extension_bag_session_admitted_locked()) {
         if (mix_view_installed) mix_restore_module_view_locked();
         return;
     }
+    // Recipe-menu frames (state 0) are transient during a craft. Keep the EB
+    // projection/capacity installed there; restoring it for one frame shows the
+    // original host bag 0 before state 1 reinstalls the EB view.
+    if (mix_state_locked() == 0) return;
     if (!mix_view_installed) return;
     void* live_root = mix_item_root_locked();
     if (live_root == nullptr) {
@@ -455,26 +459,32 @@ uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"own:popup.mix"});
-    bool original_bag_hit = false;
+    int original_bag_target = -1;
     if ((event == 0x17 || event == 0x18) && param != 0) {
         const int64_t x = *reinterpret_cast<const int64_t*>(param);
         const int64_t y = *reinterpret_cast<const int64_t*>(param + 8);
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
-        if (mix_view_installed && mix_original_bag_button_index_locked(x, y) >= 0) {
-            // Let the original click handler select the requested bag first;
-            // restoring before it leaves one frame on the old host bag 0.
+        if (mix_view_installed) {
+            original_bag_target = mix_original_bag_button_index_locked(x, y);
+        }
+        if (original_bag_target >= 0) {
             mix_pending_tab = -1;
             mix_pending_tab_generation = 0;
-            original_bag_hit = true;
         }
     }
     const uint32_t result = runtime_state().ui.mix_original_event != nullptr
                                 ? static_cast<uint32_t>(
                                       runtime_state().ui.mix_original_event(event, param, param2))
                                 : 0;
-    if (original_bag_hit) {
+    if (original_bag_target >= 0) {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
-        if (mix_view_installed) mix_restore_module_view_locked();
+        if (mix_view_installed) {
+            // The original event may return before it writes the shared current
+            // bag. Pin the clicked original bag before restoring, otherwise the
+            // first frame after restore draws host bag 0.
+            set_original_bag_locked(original_bag_target);
+            mix_restore_module_view_locked();
+        }
     }
     return result;
 }
@@ -572,9 +582,12 @@ void mix_draw_end_wrapper() {
                 mix_refresh_projection_locked();
                 mix_draw_tab_buttons_locked();
             } else {
-                // state 0（配方菜单）/扩展禁用：卸载投影与页签，保留 frame_active 待
-                // 选配方（state 1）后重新挂载。
-                mix_restore_module_view_locked();
+                // state 0（配方菜单）：只隐藏页签，不卸载投影。合成确认会短暂
+                // 回到 state 0，若在此 restore 会在下一帧 state 1 前闪出原版袋。
+                // 仅扩展禁用或面板关闭（mix_f3）时恢复投影。
+                if (!runtime_state().enabled.load()) {
+                    mix_restore_module_view_locked();
+                }
                 if (mix_tab_buttons[0] != nullptr) {
                     mix_delete_tab_buttons_locked();
                     mix_disable_tab_buttons_locked();
