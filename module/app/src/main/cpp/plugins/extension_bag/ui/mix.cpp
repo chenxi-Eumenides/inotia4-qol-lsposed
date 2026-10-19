@@ -455,19 +455,28 @@ uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"own:popup.mix"});
+    bool original_bag_hit = false;
     if ((event == 0x17 || event == 0x18) && param != 0) {
         const int64_t x = *reinterpret_cast<const int64_t*>(param);
         const int64_t y = *reinterpret_cast<const int64_t*>(param + 8);
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (mix_view_installed && mix_original_bag_button_index_locked(x, y) >= 0) {
+            // Let the original click handler select the requested bag first;
+            // restoring before it leaves one frame on the old host bag 0.
             mix_pending_tab = -1;
             mix_pending_tab_generation = 0;
-            mix_restore_module_view_locked();
+            original_bag_hit = true;
         }
     }
-    return runtime_state().ui.mix_original_event != nullptr
-               ? static_cast<uint32_t>(runtime_state().ui.mix_original_event(event, param, param2))
-               : 0;
+    const uint32_t result = runtime_state().ui.mix_original_event != nullptr
+                                ? static_cast<uint32_t>(
+                                      runtime_state().ui.mix_original_event(event, param, param2))
+                                : 0;
+    if (original_bag_hit) {
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (mix_view_installed) mix_restore_module_view_locked();
+    }
+    return result;
 }
 
 void mix_enter_wrapper() {

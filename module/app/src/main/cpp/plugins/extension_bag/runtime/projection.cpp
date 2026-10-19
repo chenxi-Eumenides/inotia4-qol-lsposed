@@ -607,15 +607,24 @@ void virtual_bag_inventory_enter_wrapper() {
         {"own:popup.inventory"});
     PopupNoArgFn original = nullptr;
     bool session_admitted = false;
+    bool keep_module_view = false;
+    int keep_module_bag = -1;
     {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
         original = runtime_state().persistence.orig_enter;
         session_admitted = extension_bag_session_admitted_locked();
         if (session_admitted) {
+            keep_module_view =
+                runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
+                virtual_bag::valid_index(runtime_state().objects.bag.selected) &&
+                runtime_state().objects.bag.capacities[runtime_state().objects.bag.selected] > 0;
+            if (keep_module_view) keep_module_bag = runtime_state().objects.bag.selected;
             clear_original_desc_locked();
-            restore_module_view_locked();
-            set_original_bag_locked(0);
-            virtual_bag::enter_original(&runtime_state().objects.bag, 0);
+            if (!keep_module_view) {
+                restore_module_view_locked();
+                set_original_bag_locked(0);
+                virtual_bag::enter_original(&runtime_state().objects.bag, 0);
+            }
             runtime_state().ui.inventory_frame_active = true;
             runtime_state().ui.extension_touch_capture = false;
             runtime_state().ui.extension_drag = {};
@@ -628,7 +637,14 @@ void virtual_bag_inventory_enter_wrapper() {
     if (!session_admitted || !runtime_state().enabled.load()) return;
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
     install_extension_tab_buttons_locked();
-    if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
+    if (keep_module_view) {
+        // Preserve the EB bag selected before closing the mixer; installing the
+        // projection before the first inventory frame avoids a visible flash of
+        // the original bag.
+        if (!runtime_state().objects.module_view_installed) {
+            (void)install_module_view_locked(keep_module_bag);
+        }
+    } else if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
 }
