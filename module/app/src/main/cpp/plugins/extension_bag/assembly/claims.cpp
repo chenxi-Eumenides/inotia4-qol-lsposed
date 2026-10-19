@@ -455,6 +455,38 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             "买入预检门禁 wrapper：原版袋无空位但扩展袋有空位时放行收编",
             nullptr, 120, reinterpret_cast<void*>(&store_buy_find_slot_gate),
         },
+        {
+            kEbP4MixPopup,
+            kEbP4MixPopup,
+            ::qol::contracts::ResourceMechanism::kOwnership,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft,
+            true,
+            "extension_bag",
+            "合成器 PopupState 条目：模块 enter/f3/event（部分 wrap），合成器投影和页签依赖此三回调",
+            nullptr,
+            120,
+            reinterpret_cast<void*>(const_cast<::qol::contracts::OwnershipOps*>(&kEbMixPopupOps)),
+        },
+        {
+            "patch:P_EXT_MIX_DRAW_END", "P_EXT_MIX_DRAW_END",
+            ::qol::contracts::ResourceMechanism::kCallPatch,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
+            "合成器绘制收尾 wrapper（页签/投影收尾）",
+            nullptr, 120, reinterpret_cast<void*>(&mix_draw_end_wrapper),
+        },
+        {
+            "patch:P_EXT_MIX_BAG_DRAW", "P_EXT_MIX_BAG_DRAW",
+            ::qol::contracts::ResourceMechanism::kCallPatch,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kOptional,
+            ::qol::contracts::ResourceFailure::kFailSoft, true, "extension_bag",
+            "合成器袋列 B 尾调用 wrapper（原版袋列高亮遮蔽）",
+            nullptr, 120, reinterpret_cast<void*>(&mix_draw_inven_bag_group_wrapper),
+        },
     };
     if (out_count != nullptr) {
         *out_count = static_cast<uint32_t>(sizeof(kClaims) / sizeof(kClaims[0]));

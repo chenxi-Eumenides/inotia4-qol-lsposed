@@ -267,7 +267,7 @@ void test_extension_bag_claim_manifest_source_contract() {
         ++resource_count;
         ++position;
     }
-    CHECK(resource_count == 19);
+    CHECK(resource_count == 22);
 
     const size_t desc_slots = claims.find("kEbS1DescSlots, kEbS1DescSlots");
     const size_t desc_gate = claims.find("\"patch:P_EXT_DESC_OPEN_GATE\"");
@@ -282,8 +282,8 @@ void test_extension_bag_claim_manifest_source_contract() {
     CHECK(claims.find("\"patch:P_EXT_STORE_BAG_DRAW\"") != std::string::npos);
     CHECK(claims.find("\"patch:P_EXT_STORE_BUY_GATE_1\"") != std::string::npos);
     CHECK(claims.find("\"patch:P_EXT_STORE_BUY_GATE_2\"") != std::string::npos);
-    CHECK(claims.find("kEbP4MixPopup") == std::string::npos);
-    CHECK(claims.find("\"patch:P_EXT_MIX_") == std::string::npos);
+    CHECK(claims.find("kEbP4MixPopup") != std::string::npos);
+    CHECK(claims.find("\"patch:P_EXT_MIX_") != std::string::npos);
 }
 
 void test_extension_bag_json_integer_fields() {
