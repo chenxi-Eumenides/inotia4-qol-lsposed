@@ -335,7 +335,8 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
         out->fields |= contracts::kQolItemInventoryOptionsTruncated;
         option = nullptr;
     }
-    while (option != nullptr && out->option_count < contracts::kQolItemInventoryOptionCapacity) {
+    uint32_t enumerated = 0;
+    while (option != nullptr && enumerated < contracts::kQolItemInventoryOptionCapacity) {
         if (!option_readable(option)) {
             out->fields |= contracts::kQolItemInventoryOptionsTruncated;
             break;
@@ -344,9 +345,8 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
         const contracts::QolItemInventoryOptionView entry{
             *reinterpret_cast<const int16_t*>(option + O_VALUE), index & 0x7F,
             (index >> 13) & 0x7};
-        out->options[out->option_count++] = entry;
-        // 合并列表保持原序；分词列表只按已知 type 投影。32 项上限与合并列表一致，
-        // 因此单个分词列表不会因总量而溢出。
+        // 分词列表只按已知 type 投影；未知 type 不进入任何列表。32 项枚举上限与
+        // 单列表容量一致，因此不会因总量而溢出。
         if (entry.type == static_cast<int32_t>(contracts::QolItemInventoryOptionType::kNative) &&
             out->native_option_count < contracts::kQolItemInventoryNativeOptionCapacity) {
             out->native_options[out->native_option_count++] = entry;
@@ -355,8 +355,9 @@ QolResult read_inventory_item_view(contracts::QolItemHandle handle,
                    out->jewel_option_count < contracts::kQolItemInventoryJewelOptionCapacity) {
             out->jewel_options[out->jewel_option_count++] = entry;
         }
+        ++enumerated;
         const auto* next = *reinterpret_cast<const uint8_t* const*>(option + O_NEXT);
-        if (out->option_count == contracts::kQolItemInventoryOptionCapacity) {
+        if (enumerated == contracts::kQolItemInventoryOptionCapacity) {
             if (next != nullptr) {
                 out->fields |= contracts::kQolItemInventoryOptionsTruncated;
             }

@@ -232,8 +232,13 @@ void set_item(uint32_t slot, int32_t category, bool is_equip, uint32_t fields,
 
 void append_option(uint32_t slot, int32_t option_id, int32_t type, int32_t value) {
     FakeItem& item = g_items[slot - 1];
-    const uint32_t ordinal = item.view.option_count++;
-    item.view.options[ordinal] = {value, option_id, type};
+    if (type == static_cast<int32_t>(contracts::QolItemInventoryOptionType::kNative)) {
+        const uint32_t ordinal = item.view.native_option_count++;
+        item.view.native_options[ordinal] = {value, option_id, type};
+    } else if (type == static_cast<int32_t>(contracts::QolItemInventoryOptionType::kJewel)) {
+        const uint32_t ordinal = item.view.jewel_option_count++;
+        item.view.jewel_options[ordinal] = {value, option_id, type};
+    }
 }
 
 void reset_fixture() {
@@ -317,7 +322,7 @@ void test_descriptor_and_install_gates() {
     incomplete_api.evaluate = nullptr;
     CHECK(!contracts::attribute_quality_api_size_valid(&incomplete_api));
     CHECK(descriptor.requires_count == 1 && descriptor.requires != nullptr);
-    CHECK(descriptor.requires[0].range.major == 3 && descriptor.requires[0].range.min_minor == 5);
+    CHECK(descriptor.requires[0].range.major == 3 && descriptor.requires[0].range.min_minor == 6);
 
     contracts::QolHostSdk sdk{};
     sdk.capabilities.require = &fake_require_facts;
@@ -327,7 +332,7 @@ void test_descriptor_and_install_gates() {
     ctx.game = &g_game;
     CHECK(descriptor.install(ctx) == 0);
     CHECK(g_require_calls == 1);
-    CHECK(g_requested_facts_range.major == 3 && g_requested_facts_range.min_minor == 5);
+    CHECK(g_requested_facts_range.major == 3 && g_requested_facts_range.min_minor == 6);
     CHECK(feature::active());
     CHECK(descriptor.on_resource_ready(ctx, feature::kResourceIdMathGetRandom,
                                        reinterpret_cast<void*>(&fake_backup_math_get_random)) == 0);
@@ -459,7 +464,7 @@ void test_query_item_order_status_and_completeness() {
                                contracts::kQolItemInventoryHasNeedLevel;
     set_item(1, 200, true, flags, 17);
     append_option(1, 7, 0, 10);
-    append_option(1, 7, 2, 11);
+    append_option(1, 7, 1, 11);
     append_option(1, 13, 0, 12);
     g_host_error_option_id = 13;
     ready_provider();
@@ -470,11 +475,11 @@ void test_query_item_order_status_and_completeness() {
     CHECK(batch.attrs[0].ordinal == 0 && batch.attrs[0].attribute_id == 7 &&
           batch.attrs[0].value == 10 && batch.attrs[0].status == kQolOk);
     CHECK(batch.attrs[0].range.min == 0 && batch.attrs[0].range.max == 100);
-    CHECK(batch.attrs[1].ordinal == 1 && batch.attrs[1].attribute_id == 7 &&
-          batch.attrs[1].option_type == 2 && batch.attrs[1].status == kQolErrUnsupported);
-    CHECK(batch.attrs[2].ordinal == 2 && batch.attrs[2].attribute_id == 13 &&
-          batch.attrs[2].status == kOpaqueHostError.code);
-    CHECK(batch.attrs[2].range.min == 0 && batch.attrs[2].range.max == 0);
+    CHECK(batch.attrs[1].ordinal == 1 && batch.attrs[1].attribute_id == 13 &&
+          batch.attrs[1].status == kOpaqueHostError.code);
+    CHECK(batch.attrs[1].range.min == 0 && batch.attrs[1].range.max == 0);
+    CHECK(batch.attrs[2].ordinal == 2 && batch.attrs[2].attribute_id == 7 &&
+          batch.attrs[2].option_type == 1 && batch.attrs[2].status == kQolErrUnsupported);
     CHECK(g_last_option_level == 17 && g_last_option_flag == 1);
 
     reset_fixture();

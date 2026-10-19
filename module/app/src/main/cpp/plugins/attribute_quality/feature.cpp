@@ -307,26 +307,40 @@ QolResult api_query_item(contracts::QolItemHandle item,
     if ((context.view.fields & contracts::kQolItemInventoryHasNeedLevel) == 0) {
         return error_result(kQolErrNotReady, "ability level unavailable");
     }
-    if (context.view.option_count > contracts::kQolItemInventoryOptionCapacity) {
+    if (context.view.native_option_count > contracts::kQolItemInventoryNativeOptionCapacity ||
+        context.view.jewel_option_count > contracts::kQolItemInventoryJewelOptionCapacity) {
+        return error_result(kQolErrInvalidArgument, "invalid option count");
+    }
+    const uint32_t option_count = context.view.native_option_count +
+                                  context.view.jewel_option_count;
+    if (option_count > contracts::kAttributeQualityItemCapacity) {
         return error_result(kQolErrInvalidArgument, "invalid option count");
     }
 
-    out->count = context.view.option_count;
+    out->count = option_count;
     out->complete = complete ? 1 : 0;
-    for (uint32_t ordinal = 0; ordinal < context.view.option_count; ++ordinal) {
-        const contracts::QolItemInventoryOptionView& stored = context.view.options[ordinal];
-        contracts::AttributeQualityItem& entry = out->attrs[ordinal];
+    uint32_t ordinal = 0;
+    const auto append_stored = [&](const contracts::QolItemInventoryOptionView& stored) {
+        const uint32_t index = ordinal++;
+        contracts::AttributeQualityItem& entry = out->attrs[index];
         entry.kind = contracts::AttributeKind::StoredOption;
-        entry.ordinal = ordinal;
+        entry.ordinal = index;
         entry.attribute_id = stored.id;
         entry.option_type = stored.type;
         entry.value = stored.value;
-        if (stored.type != 0) {
+        if (stored.type !=
+            static_cast<int32_t>(contracts::QolItemInventoryOptionType::kNative)) {
             entry.status = kQolErrUnsupported;
-            continue;
+            return;
         }
         (void)fill_option_item(item, context.category, context.view.need_level, 1,
                                &normalized_options, &entry);
+    };
+    for (uint32_t index = 0; index < context.view.native_option_count; ++index) {
+        append_stored(context.view.native_options[index]);
+    }
+    for (uint32_t index = 0; index < context.view.jewel_option_count; ++index) {
+        append_stored(context.view.jewel_options[index]);
     }
     return contracts::ok();
 }

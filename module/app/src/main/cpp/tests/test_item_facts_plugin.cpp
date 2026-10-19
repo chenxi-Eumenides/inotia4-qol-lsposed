@@ -95,13 +95,9 @@ static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::detail_i
                             QolResult (*)(qol::contracts::QolItemDetailContext*)>::value,
                "Item Port detail context must be an atomic handle snapshot");
 static_assert(qol::contracts::kQolItemInventoryOptionCapacity == 32,
-              "inventory option capacity is an ABI constant");
-static_assert(offsetof(qol::contracts::QolItemInventoryView, options) == 100,
-              "option completeness flags must not change the inventory view layout");
-static_assert(offsetof(qol::contracts::QolItemInventoryView, native_option_count) ==
-                  offsetof(qol::contracts::QolItemInventoryView, options) +
-                      sizeof(qol::contracts::QolItemInventoryView::options),
-              "native option list must be tail-appended");
+              "inventory option enumeration capacity is an ABI constant");
+static_assert(offsetof(qol::contracts::QolItemInventoryView, native_options) == 100,
+              "native option list must follow jewel attributes");
 static_assert(offsetof(qol::contracts::QolItemInventoryView, jewel_option_count) ==
                   offsetof(qol::contracts::QolItemInventoryView, native_options) +
                       sizeof(qol::contracts::QolItemInventoryView::native_options),
@@ -110,8 +106,8 @@ static_assert(offsetof(qol::contracts::QolItemInventoryView, enchant_option_coun
                   offsetof(qol::contracts::QolItemInventoryView, jewel_options) +
                       sizeof(qol::contracts::QolItemInventoryView::jewel_options),
               "enchant option list must follow the jewel option list");
-static_assert(sizeof(qol::contracts::QolItemInventoryView) == 1648,
-              "split option lists must only append inventory view storage");
+static_assert(sizeof(qol::contracts::QolItemInventoryView) == 1260,
+              "inventory view must only contain the three split option lists");
 static_assert(qol::contracts::kQolItemInventoryHasOptionCompleteness == (1u << 7) &&
                   qol::contracts::kQolItemInventoryOptionsTruncated == (1u << 8) &&
                   qol::contracts::kQolItemInventoryHasNativeOptions == (1u << 9) &&
@@ -143,9 +139,9 @@ static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
 
 int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 3 &&
-          qol::contracts::kItemFactsVersion.minor == 5);
+          qol::contracts::kItemFactsVersion.minor == 6);
     CHECK(qol::contracts::kQolPortItemVersion.major == 3 &&
-          qol::contracts::kQolPortItemVersion.minor == 5);
+          qol::contracts::kQolPortItemVersion.minor == 6);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -230,7 +226,7 @@ int main() {
     }
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 5);
+    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 6);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -242,7 +238,7 @@ int main() {
               ->write_state_json != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 5);
+    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 6);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==

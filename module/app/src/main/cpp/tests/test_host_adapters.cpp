@@ -602,7 +602,7 @@ void test_inventory_option_view_completeness(
                qol::contracts::kQolItemInventoryOptionCapacity + 1> nodes{};
     g_test_extra_readable = nodes.data();
     g_test_extra_readable_size = sizeof(nodes);
-    constexpr uint32_t kOptionType = 3;
+    constexpr uint32_t kOptionType = 0;
     const uint32_t lengths[] = {0, 31, 32, 33};
     for (const uint32_t length : lengths) {
         for (uint32_t i = 0; i < length; ++i) {
@@ -617,22 +617,20 @@ void test_inventory_option_view_completeness(
         assert(port.read.inventory_item_view(handle, &view).ok == kQolOk);
         const uint32_t expected_count = std::min(
             length, qol::contracts::kQolItemInventoryOptionCapacity);
-        assert(view.option_count == expected_count);
+        assert(view.native_option_count == expected_count);
         assert((view.fields & qol::contracts::kQolItemInventoryHasOptionCompleteness) != 0);
         const bool truncated =
             (view.fields & qol::contracts::kQolItemInventoryOptionsTruncated) != 0;
         assert(truncated == (length > qol::contracts::kQolItemInventoryOptionCapacity));
         if (expected_count != 0) {
-            assert(view.options[0].id == 0);
-            assert(view.options[0].type == static_cast<int32_t>(kOptionType));
-            assert(view.options[0].value == 500);
+            assert(view.native_options[0].id == 0);
+            assert(view.native_options[0].type == static_cast<int32_t>(kOptionType));
+            assert(view.native_options[0].value == 500);
             const uint32_t last = expected_count - 1;
-            assert(view.options[last].id == static_cast<int32_t>(last & 0x7Fu));
-            assert(view.options[last].type == static_cast<int32_t>(kOptionType));
-            assert(view.options[last].value == 500 + static_cast<int32_t>(last));
+            assert(view.native_options[last].id == static_cast<int32_t>(last & 0x7Fu));
+            assert(view.native_options[last].type == static_cast<int32_t>(kOptionType));
+            assert(view.native_options[last].value == 500 + static_cast<int32_t>(last));
         }
-        // 未知 type 只留在合并列表；原生/宝石分词列表为空但仍标记为可用。
-        assert(view.native_option_count == 0);
         assert(view.jewel_option_count == 0);
         assert(view.enchant_option_count == 0);
         assert((view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) != 0);
@@ -640,7 +638,7 @@ void test_inventory_option_view_completeness(
         assert((view.fields & qol::contracts::kQolItemInventoryHasEnchantOptions) == 0);
     }
 
-    // 混合 type：合并列表保持原序，原生/宝石列表按 type 投影，附魔列表显式为空。
+    // 混合 type：原生/宝石列表按 type 投影，未知 type 不进入任何列表，附魔列表显式为空。
     constexpr uint32_t kMixedLength = 4;
     constexpr int32_t kMixedTypes[kMixedLength] = {0, 1, 2, 0};
     for (uint32_t i = 0; i < kMixedLength; ++i) {
@@ -652,25 +650,25 @@ void test_inventory_option_view_completeness(
     std::memcpy(item.data() + I_OPTION_LIST, &mixed_head, sizeof(mixed_head));
     qol::contracts::QolItemInventoryView mixed_view{};
     assert(port.read.inventory_item_view(handle, &mixed_view).ok == kQolOk);
-    assert(mixed_view.option_count == kMixedLength);
-    assert(mixed_view.options[0].type == 0 && mixed_view.options[0].id == 0 &&
-           mixed_view.options[0].value == 600);
-    assert(mixed_view.options[1].type == 1 && mixed_view.options[1].id == 1 &&
-           mixed_view.options[1].value == 601);
-    assert(mixed_view.options[2].type == 2 && mixed_view.options[2].id == 2 &&
-           mixed_view.options[2].value == 602);
-    assert(mixed_view.options[3].type == 0 && mixed_view.options[3].id == 3 &&
-           mixed_view.options[3].value == 603);
     assert(mixed_view.native_option_count == 2);
-    assert(mixed_view.native_options[0].id == 0 && mixed_view.native_options[0].value == 600);
-    assert(mixed_view.native_options[1].id == 3 && mixed_view.native_options[1].value == 603);
+    assert(mixed_view.native_options[0].type == 0 && mixed_view.native_options[0].id == 0 &&
+           mixed_view.native_options[0].value == 600);
+    assert(mixed_view.native_options[1].type == 0 && mixed_view.native_options[1].id == 3 &&
+           mixed_view.native_options[1].value == 603);
     assert(mixed_view.jewel_option_count == 1);
-    assert(mixed_view.jewel_options[0].id == 1 && mixed_view.jewel_options[0].type == 1 &&
+    assert(mixed_view.jewel_options[0].type == 1 && mixed_view.jewel_options[0].id == 1 &&
            mixed_view.jewel_options[0].value == 601);
     assert(mixed_view.enchant_option_count == 0);
     assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) != 0);
     assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasJewelOptions) != 0);
     assert((mixed_view.fields & qol::contracts::kQolItemInventoryHasEnchantOptions) == 0);
+    // type 2 只计入枚举总量，不落入任何分词列表。
+    for (uint32_t i = 0; i < mixed_view.native_option_count; ++i) {
+        assert(mixed_view.native_options[i].type == 0);
+    }
+    for (uint32_t i = 0; i < mixed_view.jewel_option_count; ++i) {
+        assert(mixed_view.jewel_options[i].type == 1);
+    }
     const FakeInventoryOptionNode* empty = nullptr;
     std::memcpy(item.data() + I_OPTION_LIST, &empty, sizeof(empty));
     g_test_extra_readable = nullptr;

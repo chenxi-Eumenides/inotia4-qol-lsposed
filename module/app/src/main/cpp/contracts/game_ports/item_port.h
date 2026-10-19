@@ -41,6 +41,7 @@ using QolItemJsonFn = QolResult (*)(char* out, uint32_t capacity, uint32_t* out_
 using QolItemPortQuoteFn = QolResult (*)(QolItemHandle item, uint32_t sale_path,
                                          QolSaleQuote* out);
 
+// option 链表枚举总量上限；三个分词列表各自独立容量。
 constexpr uint32_t kQolItemInventoryOptionCapacity = 32;
 constexpr uint32_t kQolItemInventoryNativeOptionCapacity = 32;
 constexpr uint32_t kQolItemInventoryJewelOptionCapacity = 32;
@@ -53,8 +54,8 @@ constexpr uint32_t kQolItemInventoryEnchantOptionCapacity = 32;
 // count_supported is set. Bag category remains QolInventoryItemRef.category. Consumers do not
 // reinterpret payload or recompute the R-47b mode view.
 
-// 装备 option 节点 O_INDEX bit13-15 的条目类型。合并列表 options[] 保留全部类型；分词列表
-// 只投影这里已定义的类型，未知 type 仍只出现在合并列表。
+// 装备 option 节点 O_INDEX bit13-15 的条目类型。分词列表只投影这里已定义的类型；
+// 未知 type 不进入任何列表，避免误归类。
 enum class QolItemInventoryOptionType : int32_t {
     kNative = 0,
     kJewel = 1,
@@ -107,15 +108,14 @@ struct QolItemInventoryView {
     int32_t chaos_rate;
     int32_t jewel_value;
     int32_t jewel_attribute_type;
-    uint32_t option_count;
-    QolItemInventoryOptionView options[kQolItemInventoryOptionCapacity];
-    // v3.5 追加的分词列表。options[] 仍是全量合并列表，既有消费者保持原序语义；
-    // 原生/宝石列表按 type 投影；附魔列表当前显式为空（count=0 且无有效位），
-    // 元素暂沿用通用词条结构，待属性数据解码后再细化。
+    // 装备词条按来源拆分。v3.6 起删除合并 options[]/option_count；三个列表均只包含
+    // 已识别来源的条目，未知 type 不写入任何列表。
     uint32_t native_option_count;
     QolItemInventoryOptionView native_options[kQolItemInventoryNativeOptionCapacity];
     uint32_t jewel_option_count;
     QolItemInventoryOptionView jewel_options[kQolItemInventoryJewelOptionCapacity];
+    // 附魔列表当前显式为空（count=0 且无有效位），元素暂沿用通用词条结构，
+    // 待属性数据解码后再细化。
     uint32_t enchant_option_count;
     QolItemInventoryOptionView enchant_options[kQolItemInventoryEnchantOptionCapacity];
 };

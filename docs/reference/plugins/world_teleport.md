@@ -8,7 +8,7 @@
 
 ## 定位与版本
 
-`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：3 项 required 依赖 `world.facts` v2.0、`item.facts` v3.5 与 `static.data` v1.1（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.0（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。变体序列经 `ctx.game`（`QolGameHost`）的 `target.query_variant` 读取并缓存于 `g_game`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
+`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：3 项 required 依赖 `world.facts` v2.0、`item.facts` v3.6 与 `static.data` v1.1（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.0（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。变体序列经 `ctx.game`（`QolGameHost`）的 `target.query_variant` 读取并缓存于 `g_game`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
 
 ## 公开能力与路由
 
@@ -58,7 +58,7 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 - `WorldFactsApi`（`contracts/world_facts.h`，v2.0）：`state`、`map_record_count`、`current_map_id`、`map_name`、`active_player_direction`。
 - `QolStaticDataApi`（`contracts/static_data.h`，v1.1，required）：`map_info`（逻辑宽高）、`map_tiles`（64×64 通行矩阵）；`map_exits`/`map_name` 本插件不使用（传送目标由运行时地图 id 回绕得出，出口数据不参与选点）。
 - `QolGameHost.target.query_variant`（`contracts/game_host.h:17-29`）：变体序列读取（`QolTargetVariant.id` = `GameSeries` 序数），变体回调分流的唯一数据源。
-- `ItemFactsApi`（`contracts/item_facts.h:10-14`，v3.5）：`money`（FIX-05 起金钱归 `item.facts`，`docs/refactor/issues.md`）。
+- `ItemFactsApi`（`contracts/item_facts.h:10-14`，v3.6）：`money`（FIX-05 起金钱归 `item.facts`，`docs/refactor/issues.md`）。
 - `UiChoiceApi`（`contracts/ui_choice.h:21-22,36`，v1.1，optional）：`open`/`close`。
 
 ## 消费者与职责边界

@@ -363,6 +363,12 @@ bool effective_item_count(contracts::QolItemHandle item, bool original_count_sup
     return true;
 }
 
+bool inventory_option_counts_valid(const contracts::QolItemInventoryView& item) {
+    return item.native_option_count <= contracts::kQolItemInventoryNativeOptionCapacity &&
+           item.jewel_option_count <= contracts::kQolItemInventoryJewelOptionCapacity &&
+           item.enchant_option_count <= contracts::kQolItemInventoryEnchantOptionCapacity;
+}
+
 void append_inventory_item(std::string* out, int32_t slot,
                            const contracts::QolItemInventoryView& item, bool count_present,
                            uint32_t count) {
@@ -417,21 +423,26 @@ void append_inventory_item(std::string* out, int32_t slot,
     out->append(",\"chaos_rate\":");
     *out += std::to_string(item.chaos_rate);
 
+    // JSON 保持既有 options/option_ids/option_types 三个平行数组；条目按原生、宝石
+    // 列表顺序拼接。附魔列表当前无数据，不参与投影；未知 type 不进入任何列表。
+    const contracts::QolItemInventoryOptionView* const lists[] = {
+        item.native_options, item.jewel_options};
+    const uint32_t counts[] = {item.native_option_count, item.jewel_option_count};
+    const auto append_option_field = [&](auto value_of) {
+        uint32_t emitted = 0;
+        for (uint32_t list = 0; list < 2; ++list) {
+            for (uint32_t index = 0; index < counts[list]; ++index) {
+                if (emitted++ != 0) out->push_back(',');
+                *out += std::to_string(value_of(lists[list][index]));
+            }
+        }
+    };
     out->append(",\"options\":[");
-    for (uint32_t index = 0; index < item.option_count; ++index) {
-        if (index != 0) out->push_back(',');
-        *out += std::to_string(item.options[index].value);
-    }
+    append_option_field([](const auto& option) { return option.value; });
     out->append("],\"option_ids\":[");
-    for (uint32_t index = 0; index < item.option_count; ++index) {
-        if (index != 0) out->push_back(',');
-        *out += std::to_string(item.options[index].id);
-    }
+    append_option_field([](const auto& option) { return option.id; });
     out->append("],\"option_types\":[");
-    for (uint32_t index = 0; index < item.option_count; ++index) {
-        if (index != 0) out->push_back(',');
-        *out += std::to_string(item.options[index].type);
-    }
+    append_option_field([](const auto& option) { return option.type; });
     out->append("]}");
 }
 
@@ -503,7 +514,7 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
             const QolResult view_result = g_port->read.inventory_item_view(item_ref.item,
                                                                             &view);
             if (!contracts::succeeded(view_result)) return view_result;
-            if (view.option_count > contracts::kQolItemInventoryOptionCapacity) {
+            if (!inventory_option_counts_valid(view)) {
                 return error_result(kQolErrInvalidArgument, "invalid item option count");
             }
             uint32_t count = 0;
@@ -978,7 +989,7 @@ bool read_enriched_item(int32_t bag, int32_t slot, std::string* out,
     }
     contracts::QolItemInventoryView view{};
     if (!contracts::succeeded(g_port->read.inventory_item_view(item_handle, &view)) ||
-        view.option_count > contracts::kQolItemInventoryOptionCapacity) {
+        !inventory_option_counts_valid(view)) {
         return false;
     }
     uint32_t count = 0;

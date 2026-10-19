@@ -2226,7 +2226,6 @@ static QolResult golden_view(qol::contracts::QolItemHandle handle,
     const uint32_t count = *reinterpret_cast<const uint32_t*>(bytes + I_COUNT);
     out->chaos_level = static_cast<int32_t>(count & 0xFF);
     out->chaos_rate = static_cast<int32_t>((count >> 8) & 0xFF);
-    out->option_count = 0;
     return qol::contracts::ok();
 }
 

@@ -18,7 +18,7 @@
 
 能力定义：`plugin.cpp:272-291`（provides）、`contracts/inventory_action.h`、`contracts/inventory_refresh.h`、`contracts/inventory_slot.h`。
 
-依赖：`world.facts 2.0`、`item.facts 3.5` 为硬依赖；`extension_bag`（≥3.1 sale-removal）为可选依赖（`plugin.cpp:43-55`）。`extension_bag` 反向 optional 依赖 `inventory_refresh`，两条软边成环，宿主按 required-only 拓扑降级软边破环。
+依赖：`world.facts 2.0`、`item.facts 3.6` 为硬依赖；`extension_bag`（≥3.1 sale-removal）为可选依赖（`plugin.cpp:43-55`）。`extension_bag` 反向 optional 依赖 `inventory_refresh`，两条软边成环，宿主按 required-only 拓扑降级软边破环。
 
 ## 资源清单（24）
 
@@ -73,4 +73,4 @@ UI 接管边界：仅当物品为 count-encoded 且实际使用 S2 编码（`can
 | `inventory_logging.{h,cpp}` | `kInventory` 域日志与节流 |
 | `claims.h`、`inventory_find_item_poc.{h,cpp}` | claim 引用与 FindItem PoC |
 
-关联契约：`contracts/item_facts.h`（3.5，`quote` 与 view 分词列表）、`contracts/inventory_action.h`（2.0）、`contracts/inventory_refresh.h`（1.0）、`contracts/inventory_slot.h`（1.0）、`contracts/sell_price.h`。
+关联契约：`contracts/item_facts.h`（3.6，`quote` 与 view 分词列表）、`contracts/inventory_action.h`（2.0）、`contracts/inventory_refresh.h`（1.0）、`contracts/inventory_slot.h`（1.0）、`contracts/sell_price.h`。
