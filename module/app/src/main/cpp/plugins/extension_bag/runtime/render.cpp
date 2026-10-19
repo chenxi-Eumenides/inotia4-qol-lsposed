@@ -214,6 +214,16 @@ void virtual_bag_draw_end_locked(int inventory_state, std::unique_lock<std::mute
             ensure_state_loaded_locked();
             commit_pending_extension_tab_locked(lock);
         }
+        // Empty EB bag unequip switches to original mode while the inventory
+        // panel is still state 4. This branch used to return before the mode
+        // check below, leaving the projected item controls installed and the
+        // original bag looking empty until a bag switch forced a refresh.
+        if (runtime_state().objects.module_view_installed) {
+            const bool module_view_expected =
+                runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
+                virtual_bag::valid_index(runtime_state().objects.bag.selected);
+            if (!module_view_expected) restore_module_view_locked();
+        }
         if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->end_frame != nullptr) {
             (void)runtime_state().host.sdk->ui->end_frame();
         }
