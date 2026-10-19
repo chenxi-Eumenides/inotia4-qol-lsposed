@@ -135,8 +135,12 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
         }
     }
 
-    int preferred = original_bag_locked();
-    if (preferred < 0 || preferred > 4) preferred = runtime_state().objects.bag.original_selected;
+    // Prefer the original bag the user selected before entering EB view.
+    // original_bag_locked() is the live UI window bag, which is temporarily
+    // repointed to the projection host (often bag 1) while the EB view is open.
+    // Using it here made an empty EB bag land in bag 1 even when bag 0 had room.
+    int preferred = runtime_state().objects.bag.original_selected;
+    if (preferred < 0 || preferred > 4) preferred = original_bag_locked();
     if (preferred < 0 || preferred > 4) preferred = 0;
     // 排除 internal_bag 自身：正在解除的袋不得作为接收方——袋对象若放回
     // 自己的行/槽，随后 unequip_bag 清袋会把刚放回的物品一起清掉
