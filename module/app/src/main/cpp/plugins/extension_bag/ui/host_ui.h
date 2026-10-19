@@ -65,5 +65,6 @@ uint8_t store_buy_find_slot_gate(void* item, void* out_slot);
 void mix_teardown_locked();
 void mix_enter_wrapper();
 void mix_f3_wrapper();
+uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2);
 void mix_draw_end_wrapper();
 void mix_draw_inven_bag_group_wrapper();

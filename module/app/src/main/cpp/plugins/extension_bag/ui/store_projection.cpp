@@ -126,11 +126,11 @@ void store_refresh_projection_locked() {
             const uint32_t descriptor_count =
                 static_cast<uint32_t>(runtime_state().objects.bag.items[
                     runtime_state().store.view_bag][slot].count);
-            if (descriptor_count > 0) {
+            if (descriptor_count > 0 &&
+                virtual_bag_effective_count(expected, 0) != descriptor_count) {
                 // UIStore_ButtonSellExe reads the raw native count, not the EB
-                // descriptor fallback. Always write the descriptor count here;
-                // otherwise a stack is treated as count=1 and sells without the
-                // original quantity dialog.
+                // descriptor fallback. Write only when the native view differs;
+                // doing this every frame for every slot is measurable UI lag.
                 (void)virtual_bag_write_effective(expected, descriptor_count);
             }
         }

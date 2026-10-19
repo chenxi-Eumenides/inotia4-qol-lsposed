@@ -165,7 +165,7 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->hooks.popup_resolve == nullptr ||
         runtime_state().host.sdk->hooks.popup_resolve("F_PANEL_CRAFT_ENTER", &entry).ok != kQolOk) return 1;
     const ::qol::contracts::QolPopupStateHooks h{
-        &mix_enter_wrapper, nullptr, &mix_f3_wrapper, nullptr, nullptr};
+        &mix_enter_wrapper, nullptr, &mix_f3_wrapper, nullptr, &mix_event_wrapper};
     if (runtime_state().host.sdk->hooks.popup_acquire == nullptr ||
         runtime_state().host.sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_mix_popup_entry = entry;
@@ -174,6 +174,8 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
         entry.backup, kPopupStateEntryEnterOffset);
     runtime_state().ui.mix_original_f3 = extension_bag_backup_value<MixSceneNoArgFn>(
         entry.backup, kPopupStateEntryF3Offset);
+    runtime_state().ui.mix_original_event = extension_bag_backup_value<MixSceneEventFn>(
+        entry.backup, kPopupStateEntryEventOffset);
     return 0;
 }
 void extension_bag_mix_popup_release(const char* id) {
@@ -183,6 +185,7 @@ void extension_bag_mix_popup_release(const char* id) {
     runtime_state().ui.mix_state_entry = nullptr;
     runtime_state().ui.mix_original_enter = nullptr;
     runtime_state().ui.mix_original_f3 = nullptr;
+    runtime_state().ui.mix_original_event = nullptr;
 }
 
 // Restore receives a copy so a failed Host call cannot mutate the only retry token.

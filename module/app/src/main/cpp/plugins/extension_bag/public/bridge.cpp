@@ -24,6 +24,7 @@
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -353,8 +354,32 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
     {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (!extension_bag_session_admitted_locked()) return op_err("slot data not ready");
+        if (!virtual_bag::valid_index(index) || slot < 0 || slot >= virtual_bag::kSlotCount ||
+            category <= 0 || count <= 0) {
+            return op_err("bad virtual bag item");
+        }
+        // Production items always carry a serialized payload. Without it the
+        // projection cannot materialize a native object, so debug injection
+        // would update status but leave the EB grid empty.
+        void* native_item = extension_create_item(category, 0, 0, count);
+        if (native_item == nullptr) return op_err("create item failed");
+        std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
+        int payload_size = 0;
+        const auto* write_api = extension_bag_write_api();
+        const bool serialized = write_api != nullptr && write_api->inventory.serialize_item != nullptr &&
+                                qol::contracts::succeeded(write_api->inventory.serialize_item(
+                                    payload.data(), static_cast<int32_t>(payload.size()),
+                                    native_item, &payload_size)) &&
+                                payload_size > 0;
+        (void)extension_free_item(native_item);
+        if (!serialized) return op_err("serialize item failed");
         updated = virtual_bag::set_item(&runtime_state().objects.bag, index, slot, category, count);
-        if (updated) extension_bag_mark_dirty_locked();
+        if (updated) {
+            virtual_bag::Item& descriptor = runtime_state().objects.bag.items[index][slot];
+            descriptor.payload = payload;
+            descriptor.payload_size = payload_size;
+            extension_bag_mark_dirty_locked();
+        }
     }
     if (!updated) return op_err("bad virtual bag item");
     return op_ok();

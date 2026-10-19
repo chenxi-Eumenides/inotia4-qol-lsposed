@@ -433,7 +433,42 @@ void mix_restore_module_view_locked() {
     mix_request_item_refresh_locked();
 }
 
+int mix_original_bag_button_index_locked(int64_t x, int64_t y) {
+    void* container = mix_bag_container_locked();
+    if (container == nullptr) return -1;
+    int count = 0;
+    if (!extension_bag_ui_child_count(container, &count)) return -1;
+    const int limit = count < 6 ? count : 6;
+    for (int index = 0; index < limit; ++index) {
+        void* control = valid_child_locked(container, index);
+        if (control == nullptr) continue;
+        UiRect rect{};
+        if (!extension_bag_ui_rect(control, &rect)) continue;
+        if (rect.w > 0 && rect.h > 0 && extension_bag_ui_hit_test(control, x, y, rect)) return index;
+    }
+    return -1;
+}
+
 }  // namespace
+
+uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
+    const ::qol::contracts::InFlightGuard in_flight_guard(
+        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        {"own:popup.mix"});
+    if ((event == 0x17 || event == 0x18) && param != 0) {
+        const int64_t x = *reinterpret_cast<const int64_t*>(param);
+        const int64_t y = *reinterpret_cast<const int64_t*>(param + 8);
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (mix_view_installed && mix_original_bag_button_index_locked(x, y) >= 0) {
+            mix_pending_tab = -1;
+            mix_pending_tab_generation = 0;
+            mix_restore_module_view_locked();
+        }
+    }
+    return runtime_state().ui.mix_original_event != nullptr
+               ? static_cast<uint32_t>(runtime_state().ui.mix_original_event(event, param, param2))
+               : 0;
+}
 
 void mix_enter_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
@@ -516,13 +551,15 @@ void mix_draw_end_wrapper() {
                                      mix_state_locked() != 0;
             if (interactive) {
                 ensure_state_loaded_locked();
-                mix_install_tab_buttons_locked();
-                mix_commit_pending_tab_locked();
-                // 点原版袋按钮 / 切配方类型会改写当前袋（UIMix_InvenBagControlEventProc /
-                // UIMix_ButtonMenuListExe 置 0）；当前袋偏离投影宿主即退出扩展视图。
+                // 原版袋/配方切换会改写当前袋。必须先处理原版切换并清掉
+                // 尚未提交的 EB 页签，否则 commit 会在同一帧重新装回旧 EB 视图。
                 if (mix_view_installed && original_bag_locked() != mix_window_original_bag) {
+                    mix_pending_tab = -1;
+                    mix_pending_tab_generation = 0;
                     mix_restore_module_view_locked();
                 }
+                mix_install_tab_buttons_locked();
+                mix_commit_pending_tab_locked();
                 mix_refresh_projection_locked();
                 mix_draw_tab_buttons_locked();
             } else {

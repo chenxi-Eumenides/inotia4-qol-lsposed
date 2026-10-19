@@ -28,6 +28,7 @@ using ExtensionDestroyOkFn = void (*)(void*);
 using StoreSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 using StoreSceneNoArgFn = void (*)();
 using MixSceneNoArgFn = void (*)();
+using MixSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 
 struct ModuleUseState {
     bool active = false;
@@ -161,6 +162,7 @@ struct ExtensionBagUiState {
     uint8_t* store_state_entry = nullptr;
     MixSceneNoArgFn mix_original_enter = nullptr;
     MixSceneNoArgFn mix_original_f3 = nullptr;
+    MixSceneEventFn mix_original_event = nullptr;
     uint8_t* mix_state_entry = nullptr;
 };
 

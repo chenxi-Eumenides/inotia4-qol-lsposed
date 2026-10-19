@@ -415,18 +415,10 @@ bool ensure_module_view_root_current_locked() {
     const int bag = runtime_state().objects.module_view_index;
     void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     int child_count = 0;
-    bool current = live_root != nullptr && live_root == runtime_state().objects.projected_item_root &&
-                   extension_bag_ui_child_count(live_root, &child_count) &&
-                   child_count >= runtime_state().objects.bag.capacities[bag];
-    if (current) {
-        for (int slot = 0; slot < runtime_state().objects.bag.capacities[bag]; ++slot) {
-            void* child = valid_child_locked(live_root, slot);
-            if (child == nullptr || extension_bag_ui_data(child) == nullptr) {
-                current = false;
-                break;
-            }
-        }
-    }
+    const bool current = live_root != nullptr &&
+                         live_root == runtime_state().objects.projected_item_root &&
+                         extension_bag_ui_child_count(live_root, &child_count) &&
+                         child_count >= runtime_state().objects.bag.capacities[bag];
     if (current) return true;
 
     VIRTBAG_LOG("module view root invalidated bag=%d saved=%p live=%p; reinstalling",

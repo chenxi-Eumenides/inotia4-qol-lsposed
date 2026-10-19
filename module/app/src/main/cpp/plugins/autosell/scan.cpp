@@ -93,6 +93,7 @@ enum class ScanGateReason : int {
     kGameStateUnavailable,
     kGameStateBlocked,
     kModuleViewInstalled,
+    kUiBusy,
 };
 
 const char* scan_gate_name(ScanGateReason reason) {
@@ -106,6 +107,7 @@ const char* scan_gate_name(ScanGateReason reason) {
         case ScanGateReason::kGameStateUnavailable: return "game_state_unavailable";
         case ScanGateReason::kGameStateBlocked: return "game_state_blocked";
         case ScanGateReason::kModuleViewInstalled: return "module_view_installed";
+        case ScanGateReason::kUiBusy: return "ui_busy";
     }
     return "unknown";
 }
@@ -309,6 +311,16 @@ bool scan_gates_ok(ScanGateReason* out_reason) {
     if (eb != nullptr && eb->module_view_installed != nullptr && eb->module_view_installed()) {
         if (out_reason != nullptr) *out_reason = ScanGateReason::kModuleViewInstalled;
         return false;
+    }
+    // Do not mutate slots while any in-game panel (inventory/store/craft/etc.)
+    // owns the frame. World state remains 5 with a panel open, so this needs an
+    // explicit UI-state gate; it is the minimal safe exclusion outside the world.
+    if (eb != nullptr && eb->inventory_state_id != nullptr) {
+        const int32_t ui_state = eb->inventory_state_id();
+        if (ui_state >= 0 && ui_state != 5) {
+            if (out_reason != nullptr) *out_reason = ScanGateReason::kUiBusy;
+            return false;
+        }
     }
     return true;
 }
