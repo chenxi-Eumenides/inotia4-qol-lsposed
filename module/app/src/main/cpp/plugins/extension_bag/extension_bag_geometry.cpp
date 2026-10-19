@@ -36,6 +36,21 @@ int extension_bag_grid_slot_index(int64_t x, int64_t y,
     return qol::contracts::grid_slot_index(grid, x, y);
 }
 
+int extension_bag_projected_slot_index(void* root, int64_t x, int64_t y, int capacity) {
+    if (root == nullptr || capacity <= 0) return -1;
+    int count = 0;
+    if (!extension_bag_ui_child_count(root, &count)) return -1;
+    const int limit = count < capacity ? count : capacity;
+    for (int slot = 0; slot < limit; ++slot) {
+        void* control = extension_bag_valid_child(root, slot);
+        if (control == nullptr) continue;
+        qol::contracts::UiRect rect{};
+        if (!extension_bag_ui_rect(control, &rect) || rect.w <= 0 || rect.h <= 0) continue;
+        if (extension_bag_ui_hit_test(control, x, y, rect)) return slot;
+    }
+    return -1;
+}
+
 void* extension_bag_valid_child(void* root, int slot) {
     if (root == nullptr || slot < 0) {
         return nullptr;

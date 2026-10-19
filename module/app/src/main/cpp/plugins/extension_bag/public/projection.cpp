@@ -371,9 +371,17 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
                     runtime_state().objects.projected_item_root, live_root);
         return VirtualBagProjectionDropResult::kRejected;
     }
-    const int dst_slot = extension_bag_ui_item_slot(dst_control);
+    const int dst_capacity = runtime_state().objects.bag.capacities[runtime_state().objects.module_view_index];
+    int dst_slot = -1;
+    for (int slot = 0; slot < dst_capacity; ++slot) {
+        if (valid_child_locked(runtime_state().objects.projected_item_root, slot) == dst_control) {
+            dst_slot = slot;
+            break;
+        }
+    }
+    if (dst_slot < 0) dst_slot = extension_bag_ui_item_slot(dst_control);
     const bool destination_control_matches =
-        dst_slot >= 0 && dst_slot < runtime_state().objects.bag.capacities[runtime_state().objects.module_view_index] &&
+        dst_slot >= 0 && dst_slot < dst_capacity &&
         valid_child_locked(runtime_state().objects.projected_item_root, dst_slot) == dst_control;
     if (!virtual_bag::projection_drop_context_matches(
             runtime_state().objects.module_view_index, src_bag, true, true, destination_control_matches)) {
@@ -438,7 +446,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
             : VirtualBagProjectionDropResult::kRejected;
     }
 
-    const bool routed = move_extension_to_extension_locked(src_bag, src_slot, src_bag, dst_slot);
+    const bool routed = move_extension_to_extension_locked(src_bag, src_slot, dst_bag, dst_slot);
     if (runtime_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
         virtual_bag::session_finish_transaction(&runtime_state().ui.extension_drag_session, routed);
     }

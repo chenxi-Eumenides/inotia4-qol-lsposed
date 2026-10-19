@@ -7,6 +7,7 @@
 bool extension_bag_grid_hit(int64_t x, int64_t y);
 int extension_bag_grid_slot_index(int64_t x, int64_t y,
                                   int64_t origin_x, int64_t origin_y);
+int extension_bag_projected_slot_index(void* root, int64_t x, int64_t y, int capacity);
 void* extension_bag_valid_child(void* root, int slot);
 void extension_bag_control_abs_pos(void* button, int64_t* ax, int64_t* ay);
 bool extension_bag_ui_child_count(void* root, int* out_count);

@@ -147,7 +147,10 @@ void* module_item_locked(int bag, int slot) {
         }
         item = materialize_module_item_locked(descriptor);
         if (item == nullptr) return nullptr;
-        if (!extension_bag_register_item_handle(item)) {
+        // The host item loader can register a game-owned handle for the freshly
+        // materialized item. Rebind first so an already-registered item is moved
+        // to provider ownership; the fallback registers truly fresh items.
+        if (!extension_bag_rebind_item_handle(item)) {
             (void)extension_free_item(item);
             QOL_LOG_ERROR(QolDomain::kExtensionBag,
                           "module materialize rejected item handle registration bag=%d slot=%d",

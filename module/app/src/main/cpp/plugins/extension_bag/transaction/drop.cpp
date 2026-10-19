@@ -91,15 +91,22 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
         return false;
     }
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule && runtime_state().ui.extension_drag.active) {
-    const int target_slot = extension_bag_grid_slot_index(x, y, kGridX, kGridY);
-            if (target_slot >= 0) {
+            int target_bag = virtual_bag::valid_index(runtime_state().objects.module_view_index)
+                                 ? runtime_state().objects.module_view_index
+                                 : runtime_state().objects.bag.selected;
+            int target_slot = extension_bag_projected_slot_index(
+                runtime_state().objects.projected_item_root, x, y,
+                virtual_bag::valid_index(target_bag)
+                    ? runtime_state().objects.bag.capacities[target_bag] : 0);
+            if (target_slot < 0) target_slot = extension_bag_grid_slot_index(x, y, kGridX, kGridY);
+            if (target_slot >= 0 && virtual_bag::valid_index(target_bag)) {
             const bool handled = move_extension_to_extension_locked(
                 runtime_state().ui.extension_drag.bag, runtime_state().ui.extension_drag.slot,
-                runtime_state().objects.bag.selected, target_slot);
+                target_bag, target_slot);
             if (handled) refresh_projected_module_view_after_move_locked();
             QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->extension handled=%d src=%d/%d dst=%d/%d",
                         handled ? 1 : 0, runtime_state().ui.extension_drag.bag, runtime_state().ui.extension_drag.slot,
-                        runtime_state().objects.bag.selected, target_slot);
+                        target_bag, target_slot);
             return handled;
         }
         for (int index = 0; index < virtual_bag::kBagCount; ++index) {
@@ -119,19 +126,19 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
                         runtime_state().ui.extension_drag.slot, index);
             return handled;
         }
-        const int target_bag = original_bag_button_index(x, y);
-        if (target_bag >= 0 && target_bag < 6) {
-            if (!virtual_bag::valid_original_transaction_bag(target_bag)) {
+        const int original_target_bag = original_bag_button_index(x, y);
+        if (original_target_bag >= 0 && original_target_bag < 6) {
+            if (!virtual_bag::valid_original_transaction_bag(original_target_bag)) {
                 // 索引 5 = 原版任务袋（ADR-006）：不得成为扩展移动目标（触摸路径与 API 门禁对齐）。
                 QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension->original reason=invalid_transaction_domain target_bag=%d",
-                            target_bag);
+                            original_target_bag);
                 return false;
             }
             const bool handled = move_extension_to_original_locked(
-                lock, runtime_state().ui.extension_drag.bag, runtime_state().ui.extension_drag.slot, target_bag);
+                lock, runtime_state().ui.extension_drag.bag, runtime_state().ui.extension_drag.slot, original_target_bag);
             if (handled) refresh_projected_module_view_after_move_locked();
             QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->original handled=%d src=%d/%d target_bag=%d",
-                        handled ? 1 : 0, runtime_state().ui.extension_drag.bag, runtime_state().ui.extension_drag.slot, target_bag);
+                        handled ? 1 : 0, runtime_state().ui.extension_drag.bag, runtime_state().ui.extension_drag.slot, original_target_bag);
             return handled;
         }
         QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject extension destination not found x=%lld y=%lld",
@@ -175,11 +182,17 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
                 lock, virtual_bag::extension_logical_bag(target_bag));
         }
     }
-    int target_bag = runtime_state().objects.bag.selected;
-    int target_slot = extension_bag_grid_slot_index(x, y, kGridX, kGridY);
+    int target_bag = virtual_bag::valid_index(runtime_state().objects.module_view_index)
+                         ? runtime_state().objects.module_view_index
+                         : runtime_state().objects.bag.selected;
+    int target_slot = extension_bag_projected_slot_index(
+        runtime_state().objects.projected_item_root, x, y,
+        virtual_bag::valid_index(target_bag) ? runtime_state().objects.bag.capacities[target_bag] : 0);
+    if (target_slot < 0) target_slot = extension_bag_grid_slot_index(x, y, kGridX, kGridY);
     virtual_bag::DragTargetKind target_kind = virtual_bag::classify_drag_target(
         virtual_bag::kExtensionLogicalBagFirst + target_bag, target_slot);
-    if (target_slot < 0 || target_slot >= runtime_state().objects.bag.capacities[target_bag]) {
+    if (!virtual_bag::valid_index(target_bag) || target_slot < 0 ||
+        target_slot >= runtime_state().objects.bag.capacities[target_bag]) {
         target_bag = -1;
         for (int index = 0; index < virtual_bag::kBagCount; ++index) {
             if (index == runtime_state().ui.extension_drag_session.source_bag) continue;

@@ -252,17 +252,22 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             // 拖动 drop 由 SaveItemOnEmpty 门禁拦截）。模块不做任何状态清理——
             // press 时 reset/clear 会破坏 TouchHandle 的按压记录导致点击失效。
         }
-    const int projected_slot = extension_bag_grid_slot_index(x, y, kOriginalGridX, kOriginalGridY);
+    int projected_slot = -1;
         bool projected_item_press = false;
         if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
             runtime_state().objects.module_view_installed && virtual_bag::valid_index(runtime_state().objects.module_view_index) &&
-            projected_slot >= 0 &&
-            projected_slot < runtime_state().objects.bag.capacities[runtime_state().objects.module_view_index] &&
             runtime_state().objects.projected_item_root != nullptr) {
-            projected_item_press = valid_child_locked(runtime_state().objects.projected_item_root, projected_slot) != nullptr;
+            // Hit the projected control rects directly. The fixed grid constants
+            // disagree with the live control spacing at the cell edges, which
+            // made an item press resolve to the neighbouring empty slot and
+            // skipped the projected drag session.
+            projected_slot = extension_bag_projected_slot_index(
+                runtime_state().objects.projected_item_root, x, y,
+                runtime_state().objects.bag.capacities[runtime_state().objects.module_view_index]);
+            projected_item_press = projected_slot >= 0;
         }
         if (runtime_state().objects.bag.mode != virtual_bag::Mode::kOriginal &&
-            projected_slot >= 0 && !projected_item_press) {
+            extension_bag_grid_hit(x, y) && !projected_item_press) {
             // The original grid is hidden underneath the module grid layout.
             // Consume it even when no extension drag is active.
             runtime_state().ui.extension_drag = {};
