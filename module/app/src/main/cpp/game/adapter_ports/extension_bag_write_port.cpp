@@ -245,6 +245,15 @@ QolResult write_extension_draw_original_store_bag_group() {
     reinterpret_cast<DrawFn>(g_base + offset)();
     return contracts::ok();
 }
+QolResult write_extension_draw_original_mix_bag_group() {
+    if (g_base == 0) return not_ready();
+    const uintptr_t offset = fn_resolve("F_UIMIX_DRAW_INVEN_BAG_GROUP_VMA",
+                                        F_UIMIX_DRAW_INVEN_BAG_GROUP_VMA);
+    if (offset == 0) return not_ready();
+    using DrawFn = void (*)();
+    reinterpret_cast<DrawFn>(g_base + offset)();
+    return contracts::ok();
+}
 QolResult write_extension_create_item_count_popup(int32_t type, void* item, int32_t input_count,
                                                   int32_t total_count, void* callback) {
     if (g_base == 0 || item == nullptr || callback == nullptr) return not_ready();
@@ -368,7 +377,7 @@ const contracts::QolExtensionBagWritePort kExtensionBagWritePort{
      &write_extension_draw_original_bag, &write_extension_draw_original_items,
      &write_extension_create_confirmation, &write_extension_restore_confirmation,
      &write_extension_original_bag_item, &write_extension_set_original_bag_item,
-     &write_extension_draw_original_store_bag_group,
+     &write_extension_draw_original_store_bag_group, &write_extension_draw_original_mix_bag_group,
      &write_extension_create_item_count_popup, &write_extension_sell_ok_input_item_count,
      &write_extension_make_store_item_description},
 };
