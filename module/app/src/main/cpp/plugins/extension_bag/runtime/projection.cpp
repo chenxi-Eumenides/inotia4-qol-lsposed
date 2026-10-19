@@ -125,6 +125,13 @@ bool bind_original_exit_display_bag_locked(int bag) {
     return has_capacity;
 }
 
+namespace {
+// install_module_view_locked restores the previous view immediately before
+// installing the next one. Skip the restore refresh so the switch performs a
+// single full item-area refresh instead of two back-to-back refreshes.
+bool g_skip_restore_refresh = false;
+}
+
 void* module_item_locked(int bag, int slot) {
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) return nullptr;
     const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
@@ -301,7 +308,12 @@ bool install_module_view_locked(int bag) {
     uint32_t size_word = 0;
     if (!bag_size_word_locked(original_bag, &size_word)) return false;
 
-    if (runtime_state().objects.module_view_installed) restore_module_view_locked();
+    if (runtime_state().objects.module_view_installed) {
+        const bool previous_skip = g_skip_restore_refresh;
+        g_skip_restore_refresh = true;
+        restore_module_view_locked();
+        g_skip_restore_refresh = previous_skip;
+    }
     clear_original_desc_locked();  // 原版详情面板不跨视图残留
     const int capacity = runtime_state().objects.bag.capacities[bag];
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
@@ -529,7 +541,8 @@ void restore_module_view_locked() {
             (runtime_state().objects.original_bag_size & kCapacityMask) |
                 (runtime_state().objects.original_bag_size & ~kCapacityMask));
     }
-    if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
+    if (!g_skip_restore_refresh && runtime_state().host.game != nullptr &&
+        runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
     }
     runtime_state().objects.original_bag_size_bag = -1;

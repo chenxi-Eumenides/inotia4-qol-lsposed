@@ -165,14 +165,13 @@ void drain_deferred_frees_locked() {
 }
 
 void log_ownership_audit_locked(const char* context) {
-    const ownership::Audit report = ownership::audit(runtime_state().objects.ownership_ledger);
-    VIRTBAG_LOG(
-        "ownership audit context=%s balanced=%d allocated=%u released=%u handed_over=%u "
-        "live=%u objects=%u borrows=%u inventory_owned=%u",
-        context, report.balanced ? 1 : 0, runtime_state().objects.ownership_ledger.total_allocated,
-        runtime_state().objects.ownership_ledger.total_released, runtime_state().objects.ownership_ledger.total_handed_over,
-        report.live_handles, report.outstanding_objects, report.outstanding_borrows,
-        report.inventory_owned);
+    // The full audit scans all 128 ownership slots and is called on every
+    // release/handover, including drag/drop and bag switches. Keep the cheap
+    // counters in normal builds; full audit remains available to diagnostics.
+    VIRTBAG_LOG("ownership counters context=%s allocated=%u released=%u handed_over=%u",
+                context, runtime_state().objects.ownership_ledger.total_allocated,
+                runtime_state().objects.ownership_ledger.total_released,
+                runtime_state().objects.ownership_ledger.total_handed_over);
 }
 
 bool object_touch_window_active_locked() {
