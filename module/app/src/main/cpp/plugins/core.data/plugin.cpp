@@ -1,6 +1,7 @@
 #include "plugin.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <climits>
 #include <cstdlib>
@@ -8,6 +9,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 
 #include "contracts/http.h"
 #include "contracts/static_data.h"
@@ -41,6 +43,18 @@ bool g_import_in_progress = false;
 bool g_catalog_ready = false;
 const contracts::QolHostSdk* g_sdk = nullptr;
 contracts::QolStaticDataApi g_static_data_api{};
+
+// maps/tiles.json 体积较大且 static.data 调用只读，首次调用时整体解码一次后复用，
+// 避免每次 map_info/map_tiles 都复制并解析原始资产。
+struct CachedMap {
+    int32_t width = contracts::kStaticMapTileDim;
+    int32_t height = contracts::kStaticMapTileDim;
+    std::array<uint8_t, contracts::kStaticMapTileSize> tiles{};
+};
+
+std::mutex g_map_cache_mutex;
+std::unordered_map<int32_t, CachedMap> g_map_cache;
+bool g_map_cache_ready = false;
 
 QolResult invalid_argument(const char* message) {
     return contracts::error(kQolErrInvalidArgument, message,
@@ -174,6 +188,51 @@ bool base64_decode(const std::string& input, std::vector<uint8_t>* output) {
         }
     }
     return bits < 6;
+}
+
+bool ensure_map_cache() {
+    {
+        std::lock_guard<std::mutex> lock(g_map_cache_mutex);
+        if (g_map_cache_ready) return true;
+    }
+    // 缓存发布与资产导入共用 catalog 锁：导入完成会清空缓存，避免发布上一版资产。
+    std::lock_guard<std::mutex> catalog_lock(g_catalog_mutex);
+    if (!g_catalog_ready) return false;
+    const auto asset = g_assets.find("maps/tiles.json");
+    if (asset == g_assets.end()) return false;
+    JsonValue root;
+    if (!parse_json(asset->second, &root) || root.type != JsonValue::Type::kObject) return false;
+    std::unordered_map<int32_t, CachedMap> parsed;
+    for (size_t i = 0; i < root.keys.size() && i < root.values.size(); ++i) {
+        const std::string& key = root.keys[i];
+        if (key.size() < 2 || key[0] != 'm') continue;
+        int32_t map_id = 0;
+        if (!parse_int(key.substr(1), &map_id)) continue;
+        const JsonValue& entry = root.values[i];
+        if (entry.type != JsonValue::Type::kObject) return false;
+        std::vector<uint8_t> bytes;
+        if (!base64_decode(entry.opt_string("tiles"), &bytes) ||
+            bytes.size() < contracts::kStaticMapTileSize)
+            return false;
+        const int64_t width = scalar_int(entry.find("width"), contracts::kStaticMapTileDim);
+        const int64_t height = scalar_int(entry.find("height"), contracts::kStaticMapTileDim);
+        if (width <= 0 || width > INT32_MAX || height <= 0 || height > INT32_MAX) return false;
+        CachedMap map;
+        map.width = static_cast<int32_t>(width);
+        map.height = static_cast<int32_t>(height);
+        std::memcpy(map.tiles.data(), bytes.data(), contracts::kStaticMapTileSize);
+        parsed[map_id] = map;
+    }
+    std::lock_guard<std::mutex> cache_lock(g_map_cache_mutex);
+    g_map_cache.swap(parsed);
+    g_map_cache_ready = true;
+    return true;
+}
+
+void invalidate_map_cache() {
+    std::lock_guard<std::mutex> lock(g_map_cache_mutex);
+    g_map_cache.clear();
+    g_map_cache_ready = false;
 }
 
 QolResult map_list(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
@@ -458,11 +517,47 @@ QolResult static_map_exits(int32_t map_id, contracts::QolStaticMapExit* out,
         const JsonValue* target_y = value.find("targetY");
         if (x == nullptr || y == nullptr || target_map == nullptr || target_x == nullptr || target_y == nullptr)
             return contracts::error(kQolErrInvalidArgument, "invalid map exits", 17);
-        out[i] = {static_cast<int32_t>(x->opt_int(0, -1)), static_cast<int32_t>(y->opt_int(0, -1)),
-                  static_cast<int32_t>(target_map->opt_int(0, -1)),
-                  static_cast<int32_t>(target_x->opt_int(0, -1)),
-                  static_cast<int32_t>(target_y->opt_int(0, -1))};
+        // exits.json 的字段是对象成员，不是数组元素：必须用 scalar_int 读取。
+        // 哨兵取 INT64_MIN，避免把缺失/非数字与合法 int32 值混淆。
+        constexpr int64_t kInvalidScalar = INT64_MIN;
+        const int64_t values[5] = {
+            scalar_int(x, kInvalidScalar), scalar_int(y, kInvalidScalar),
+            scalar_int(target_map, kInvalidScalar), scalar_int(target_x, kInvalidScalar),
+            scalar_int(target_y, kInvalidScalar)};
+        for (const int64_t field : values) {
+            if (field == kInvalidScalar || field < INT32_MIN || field > INT32_MAX)
+                return contracts::error(kQolErrInvalidArgument, "invalid map exits", 17);
+        }
+        out[i] = {static_cast<int32_t>(values[0]), static_cast<int32_t>(values[1]),
+                  static_cast<int32_t>(values[2]), static_cast<int32_t>(values[3]),
+                  static_cast<int32_t>(values[4])};
     }
+    return contracts::ok();
+}
+
+QolResult static_map_info(int32_t map_id, contracts::QolStaticMapInfo* out) {
+    if (out == nullptr) return invalid_argument("null map info");
+    if (!ensure_map_cache()) return contracts::error(kQolErrNotReady, "static tiles unavailable", 25);
+    std::lock_guard<std::mutex> lock(g_map_cache_mutex);
+    const auto found = g_map_cache.find(map_id);
+    if (found == g_map_cache.end())
+        return contracts::error(kQolErrNotFound, "map tiles not found", 19);
+    *out = {map_id, found->second.width, found->second.height};
+    return contracts::ok();
+}
+
+QolResult static_map_tiles(int32_t map_id, uint8_t* out_tiles, uint32_t capacity,
+                           uint32_t* out_size) {
+    if (out_tiles == nullptr || out_size == nullptr ||
+        capacity < contracts::kStaticMapTileSize)
+        return invalid_argument("invalid map tiles output");
+    if (!ensure_map_cache()) return contracts::error(kQolErrNotReady, "static tiles unavailable", 25);
+    std::lock_guard<std::mutex> lock(g_map_cache_mutex);
+    const auto found = g_map_cache.find(map_id);
+    if (found == g_map_cache.end())
+        return contracts::error(kQolErrNotFound, "map tiles not found", 19);
+    std::memcpy(out_tiles, found->second.tiles.data(), contracts::kStaticMapTileSize);
+    *out_size = contracts::kStaticMapTileSize;
     return contracts::ok();
 }
 
@@ -472,7 +567,7 @@ contracts::CapabilityProvisionRef kProvides[] = {
 
 int plugin_install(contracts::PluginContext& context) {
     if (context.sdk == nullptr) return 1;
-    g_static_data_api = {&static_map_name, &static_map_exits};
+    g_static_data_api = {&static_map_name, &static_map_exits, &static_map_info, &static_map_tiles};
     g_sdk = context.sdk;
     return 0;
 }
@@ -551,6 +646,7 @@ QolResult finish_asset_import() {
         g_staging_assets.clear();
         g_import_in_progress = false;
         g_catalog_ready = false;
+        invalidate_map_cache();
         return invalid_argument("static asset import size mismatch");
     }
     g_assets.swap(g_staging_assets);
@@ -558,6 +654,7 @@ QolResult finish_asset_import() {
     g_staging_bytes = 0;
     g_import_in_progress = false;
     g_catalog_ready = true;
+    invalidate_map_cache();
     return contracts::ok();
 }
 
@@ -567,6 +664,7 @@ void cancel_asset_import() {
     g_staging_bytes = 0;
     g_import_in_progress = false;
     g_catalog_ready = false;
+    invalidate_map_cache();
 }
 
 }  // namespace qol::features::core_data

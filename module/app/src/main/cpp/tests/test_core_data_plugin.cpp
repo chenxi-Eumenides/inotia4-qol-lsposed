@@ -145,6 +145,7 @@ void test_descriptor_and_basic_responses(const qol::contracts::PluginDescriptor&
                       qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(descriptor.provides_count == 1 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kStaticDataCapabilityId) == 0);
+    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 1);
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
     CHECK(descriptor.http_endpoint_count == 12 && descriptor.http_endpoints != nullptr);
     CHECK(descriptor.http_route_metadata_count == 0 && descriptor.http_route_metadata == nullptr);
@@ -163,6 +164,14 @@ void test_descriptor_and_basic_responses(const qol::contracts::PluginDescriptor&
 
     const std::string escaped_name = "Map \"A\"";
     CHECK(descriptor.install(context) == 0);
+    const auto* static_data = static_cast<const qol::contracts::QolStaticDataApi*>(
+        descriptor.provides[0].iface);
+    qol::contracts::QolStaticMapInfo early_info{};
+    uint8_t early_tiles[qol::contracts::kStaticMapTileSize]{};
+    uint32_t early_size = 0;
+    CHECK(static_data->map_info(0, &early_info).code == kQolErrNotReady);
+    CHECK(static_data->map_tiles(0, early_tiles, sizeof(early_tiles), &early_size).code ==
+          kQolErrNotReady);
     const DispatchResult unavailable = dispatch("/api/system/tables");
     CHECK(unavailable.status == 503);
     qol::contracts::HttpRoute registered[16]{};
@@ -184,8 +193,6 @@ void test_descriptor_and_basic_responses(const qol::contracts::PluginDescriptor&
     CHECK(import_assets(assets));
     char map_name[32]{};
     uint32_t map_name_size = 0;
-    const auto* static_data = static_cast<const qol::contracts::QolStaticDataApi*>(
-        descriptor.provides[0].iface);
     CHECK(qol::contracts::succeeded(static_data->map_name(0, map_name, sizeof(map_name),
                                                           &map_name_size)));
     CHECK(std::string(map_name, map_name_size) == escaped_name);
@@ -274,6 +281,48 @@ void test_tiles_and_exits() {
                        "\"targetMapId\":3,\"targetX\":4,\"targetY\":5}]}");
 }
 
+void test_static_map_tiles(const qol::contracts::PluginDescriptor& descriptor) {
+    std::vector<uint8_t> tiles(4096, 0);
+    tiles[3 * 64 + 2] = 0x08;
+    const std::string encoded = qol::features::core_data::quote_json(base64(tiles));
+    const std::string tiles_json =
+        "{\"m5\":{\"width\":64,\"height\":64,\"tiles\":" + encoded +
+        "},\"m6\":{\"tiles\":" + encoded + "}}";
+    CHECK(import_assets({{"maps/tiles.json", tiles_json}, {"maps/exits.json", kExits}}));
+    const auto* static_data = static_cast<const qol::contracts::QolStaticDataApi*>(
+        descriptor.provides[0].iface);
+
+    qol::contracts::QolStaticMapInfo info{};
+    CHECK(qol::contracts::succeeded(static_data->map_info(5, &info)));
+    CHECK(info.map_id == 5 && info.width == 64 && info.height == 64);
+    // width/height 缺失时按契约默认 64。
+    CHECK(qol::contracts::succeeded(static_data->map_info(6, &info)));
+    CHECK(info.map_id == 6 && info.width == 64 && info.height == 64);
+
+    uint8_t out[qol::contracts::kStaticMapTileSize]{};
+    uint32_t size = 0;
+    CHECK(qol::contracts::succeeded(static_data->map_tiles(
+        5, out, sizeof(out), &size)));
+    CHECK(size == qol::contracts::kStaticMapTileSize);
+    CHECK((out[3 * 64 + 2] & 0x08) != 0);
+
+    CHECK(static_data->map_info(5, nullptr).code == kQolErrInvalidArgument);
+    CHECK(static_data->map_tiles(5, out, 100, &size).code == kQolErrInvalidArgument);
+    CHECK(static_data->map_tiles(5, nullptr, sizeof(out), &size).code ==
+          kQolErrInvalidArgument);
+    CHECK(static_data->map_tiles(5, out, sizeof(out), nullptr).code ==
+          kQolErrInvalidArgument);
+    CHECK(static_data->map_info(9999, &info).code == kQolErrNotFound);
+    CHECK(static_data->map_tiles(9999, out, sizeof(out), &size).code == kQolErrNotFound);
+
+    qol::contracts::QolStaticMapExit exits[4]{};
+    uint32_t exit_count = 0;
+    CHECK(qol::contracts::succeeded(static_data->map_exits(0, exits, 4, &exit_count)));
+    CHECK(exit_count == 1);
+    CHECK(exits[0].x == 1 && exits[0].y == 2 && exits[0].target_map_id == 3 &&
+          exits[0].target_x == 4 && exits[0].target_y == 5);
+}
+
 void test_dynamic_response_sizes() {
     constexpr size_t kTextBytes = 640 * 1024;
     std::string text = "[\"" + std::string(kTextBytes - 5, 't') + "\"]";
@@ -309,6 +358,7 @@ int main() {
     auto context = make_context(&sdk);
     test_descriptor_and_basic_responses(descriptor, context);
     test_tiles_and_exits();
+    test_static_map_tiles(descriptor);
     test_dynamic_response_sizes();
     descriptor.deactivate(context);
     CHECK(qol::host::http_dispatch_api().unregister_owner("core.data").ok == kQolOk);
