@@ -74,6 +74,11 @@ int main() {
     assert(std::strcmp(descriptor.requires[1].id, qol::contracts::kItemFactsCapabilityId) == 0);
     assert(descriptor.port_count == 1);
     assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_WORLD_ACTION);
+    assert(descriptor.resources_count == 1);
+    assert(descriptor.resources[0].mechanism ==
+           qol::contracts::ResourceMechanism::kEntryHook);
+    assert(std::strcmp(descriptor.resources[0].id, "hook:UIPlay_CallMapName") == 0);
+    assert(std::strcmp(descriptor.resources[0].symbol, "F_UI_PLAY_CALL_MAP_NAME_VMA") == 0);
 
     // 端口数量不符/缺失 → fail-closed
     context.port_count = 0;
@@ -115,6 +120,16 @@ int main() {
     descriptor.fill_status(status);
     assert(!status.enabled);
     assert(status.error == nullptr);
+
+    // on_resource_ready：只接受本插件的入口 hook id 与宿主交还的非空 backup。
+    assert(descriptor.on_resource_ready != nullptr);
+    int fake_backup = 0;
+    assert(descriptor.on_resource_ready(context, "hook:unknown", &fake_backup) != 0);
+    assert(descriptor.on_resource_ready(context, "hook:UIPlay_CallMapName", nullptr) != 0);
+    assert(descriptor.on_resource_ready(context,
+                                        "hook:UIPlay_CallMapName", &fake_backup) == 0);
+    assert(descriptor.on_resource_ready(context,
+                                        "hook:UIPlay_CallMapName", &fake_backup) == 0);
 
     descriptor.deactivate(context);
     descriptor.fill_status(status);

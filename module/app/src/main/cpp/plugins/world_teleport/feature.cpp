@@ -1,4 +1,4 @@
-// 世界传送 4 选项业务层。声明式入口 patch 的 handler 转入本文件。
+// 世界传送 4 选项业务层。UIPlay_CallMapName 入口 hook 的业务入口转入本文件。
 
 #include "feature.h"
 
@@ -409,6 +409,18 @@ void invalidate_operations() {
 }
 
 void world_teleport_call_map_name() {
+    // 原函数入口即写地图名横幅；入口 hook 接管后须在业务分支前复刻该副作用。
+    int banner_map_id = 0;
+    if (!read_current_map_id(&banner_map_id)) {
+        log_message(3, "world teleport: banner map id unavailable");
+    } else {
+        const char* banner_name = read_map_name(banner_map_id);
+        if (banner_name != nullptr) {
+            show_message(banner_name);
+        } else {
+            log_message(3, "world teleport: banner map id unavailable");
+        }
+    }
     int state = -1;
     if (!read_state(&state)) {
         log_message(3, "world teleport: state unavailable");

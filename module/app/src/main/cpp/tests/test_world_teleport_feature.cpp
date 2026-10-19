@@ -242,6 +242,7 @@ int main() {
     g_money = 0;
     qol::features::world_teleport::world_teleport_call_map_name();
     assert(g_choice_open_calls == 1);
+    assert(g_banner == "测试地图");
     assert(g_last_log.find("top=world_teleport.confirm") != std::string::npos);
     assert(g_choice_items.size() == 5);
     assert(g_choice_select != nullptr);
@@ -302,8 +303,11 @@ int main() {
     g_money = 10000;
     qol::features::world_teleport::world_teleport_call_map_name();
     assert(g_choice_select != nullptr);
+    assert(g_banner == "测试地图");
     g_choice_select(0, g_choice_user);
     assert(!g_tasks.empty());
+    // 入口横幅已写入；清空后验证停用的帧任务不再产生任何横幅。
+    g_banner.clear();
     descriptor.on_disabled(context);
     while (!g_tasks.empty()) run_next_task();
     assert(g_yesno_calls == 0);

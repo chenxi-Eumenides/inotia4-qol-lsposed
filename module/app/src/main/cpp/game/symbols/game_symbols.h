@@ -826,9 +826,6 @@ constexpr uintptr_t F_MAPCHANGE_SET_VMA = 0x09c740; // void (int,int,int,int) MA
 constexpr uintptr_t F_MEMORYTEXT_GET_TEXT_VMA = 0x118674; // const char* (uint16_t) MEMORYTEXT_GetText
 constexpr uintptr_t F_INSTANTMSGSYSTEM_ADD_VMA = 0x13be64; // void (u32 type, char* text, u32, u32, u32, u32, u32, u32) 原版地图名横幅调用约定
 constexpr uintptr_t F_UI_PLAY_CALL_MAP_NAME_VMA = 0x0c6664; // UIPlay_CallMapName 函数入口（dynsym）
-constexpr size_t F_UI_PLAY_CALL_MAP_NAME_PATCH_OFF = 0x64; // 尾部入口 patch：0xc66c8
-constexpr size_t F_UI_PLAY_CALL_MAP_NAME_EPILOGUE_OFF = 0x68; // patch 后跳回：0xc66cc
-constexpr uintptr_t F_UI_PLAY_CALL_MAP_NAME_LEGACY_TARGET_VMA = 0x0c50f4; // 改版原传送注入块目标
 // ---- 合成系统（MIXSYSTEM，craft-batch-ui v0.5.18，libgame-symbols.txt 核对）----
 constexpr uintptr_t F_MAKE_MIX_VMA = 0x11af58;       // int (int32_t mixType, void** outItem) MIXSYSTEM_MakeItem：产物生成（词条定向继承由游戏处理），0=成功非 0=失败
 constexpr uintptr_t F_USE_STUFF_VMA = 0x11b300;      // void (int32_t mixType, void* stuffList) MIXSYSTEM_UseStuff：遍历材料槽逐条删材料（模块改用 RemoveItemDirect，此处仅登记）

@@ -7,6 +7,7 @@
 #include "../../contracts/http.h"
 #include "feature.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -24,22 +25,34 @@ const contracts::ItemFactsApi* g_item_facts = nullptr;
 bool g_installed = false;
 const char* g_install_error = nullptr;
 
-// 入口为 UIPlay_CallMapName 尾部的声明式 kCallPatch。game/access/patches 负责两个版本
-// 指纹与尾部回跳元数据，patch/ 负责近址 thunk、handler 调用、固定 mov x0,#1 回写和回滚。
+uint64_t (*g_backup_call_map_name)() = nullptr;
+
+// 入口为 UIPlay_CallMapName 的函数级 kEntryHook（inventory_hooks 同构）：符号经 dynsym
+// 解析（game_symbols.h 单一来源），原版/monster/C18 三版本同址，无指纹、无版本表。
+// 不常规转发原函数：原函数尾部在改版上是 B→改版注入块，转发会连带触发改版自己的
+// 传送对话框。原函数体不读任何入参寄存器（首指令即覆写 x0-x2），无参 wrapper 安全。
+uint64_t world_teleport_call_map_name_wrapper() {
+    if (g_backup_call_map_name == nullptr || !g_installed) {
+        return g_backup_call_map_name != nullptr ? g_backup_call_map_name() : 1;
+    }
+    qol::features::world_teleport::world_teleport_call_map_name();
+    return 1;  // 原版尾部语义 mov x0,#1
+}
+
 const contracts::ResourceClaim kResources[] = {
     {
-        "patch:UIPlay_CallMapName",
-        "P_UI_PLAY_CALL_MAP_NAME",
-        contracts::ResourceMechanism::kCallPatch,
+        "hook:UIPlay_CallMapName",
+        "F_UI_PLAY_CALL_MAP_NAME_VMA",
+        contracts::ResourceMechanism::kEntryHook,
         contracts::ResourcePolicy::kPrivate,
         contracts::ResourceRequirement::kRequired,
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "世界态地图名入口重定向到传送选择框",
+        "世界态地图边界传送选择面板（函数级入口接管）",
         nullptr,
         120,
-        reinterpret_cast<void*>(&world_teleport_call_map_name),
+        reinterpret_cast<void*>(&world_teleport_call_map_name_wrapper),
     },
 };
 
@@ -115,6 +128,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     g_installed = false;
+    g_backup_call_map_name = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
     g_world_action_port = nullptr;
@@ -137,6 +151,17 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
 void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.enabled = g_installed;
     out.error = g_install_error;
+}
+
+int32_t plugin_on_resource_ready(contracts::PluginContext& ctx, const char* resource_id,
+                                 void* backup) {
+    (void)ctx;
+    if (resource_id == nullptr || std::strcmp(resource_id, "hook:UIPlay_CallMapName") != 0 ||
+        backup == nullptr) {
+        return 1;
+    }
+    g_backup_call_map_name = reinterpret_cast<uint64_t (*)()>(backup);
+    return 0;
 }
 
 // Feature callback does not replace the existing lifecycle or business controls.
@@ -164,7 +189,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_enabled,
     &plugin_on_disabled,
     &plugin_fill_status,
-    nullptr,
+    &plugin_on_resource_ready,
     kPorts,
     1,
     nullptr,

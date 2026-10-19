@@ -129,17 +129,4 @@ WorldWriteResult world_interact();
 bool story_active();
 std::string story_json();
 
-// ---- 世界传送入口 patch 元信息（UIPlay_CallMapName 尾部指令点）----
-
-// patch_addr：待改写指令地址；return_addr：trampoline 跳回地址（epilogue）；
-// expected_word：原版指令字 mov x0,#1；legacy_target：改版注入块目标（其等价格式由
-// 调用方自行编码）。g_base 未就绪返回 false。
-struct WorldTeleportPatch {
-    uintptr_t patch_addr = 0;
-    uintptr_t return_addr = 0;
-    uint32_t expected_word = 0;
-    uintptr_t legacy_target = 0;
-};
-bool world_teleport_patch_info(WorldTeleportPatch* out);
-
 }  // namespace qol::game

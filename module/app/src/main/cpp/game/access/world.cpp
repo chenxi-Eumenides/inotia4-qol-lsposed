@@ -147,15 +147,6 @@ int world_choice_state_id() {
     return -1;
 }
 
-bool world_teleport_patch_info(WorldTeleportPatch* out) {
-    if (g_base == 0 || out == nullptr) return false;
-    out->patch_addr = g_base + F_UI_PLAY_CALL_MAP_NAME_VMA + F_UI_PLAY_CALL_MAP_NAME_PATCH_OFF;
-    out->return_addr = g_base + F_UI_PLAY_CALL_MAP_NAME_VMA + F_UI_PLAY_CALL_MAP_NAME_EPILOGUE_OFF;
-    out->expected_word = 0xd2800020u;  // mov x0, #1
-    out->legacy_target = g_base + F_UI_PLAY_CALL_MAP_NAME_LEGACY_TARGET_VMA;
-    return true;
-}
-
 }  // namespace qol::game
 
 // ---------------------------------------------------------------------------
