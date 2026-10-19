@@ -410,6 +410,8 @@ void mix_install_module_view_locked(int bag) {
 
 void mix_restore_module_view_locked() {
     if (!mix_view_installed) return;
+    VIRTBAG_LOG("mix restore view bag=%d window=%d current=%d state=%d",
+                mix_view_bag, mix_window_original_bag, original_bag_locked(), mix_state_locked());
     if (virtual_bag::valid_index(mix_view_bag)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             const uint32_t handle = runtime_state().objects.module_object_handles[mix_view_bag][slot];
@@ -565,9 +567,17 @@ void mix_draw_end_wrapper() {
     {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
         if (mix_frame_active) {
+            const int mix_state = mix_state_locked();
+            static int last_mix_state = -2;
+            if (last_mix_state != mix_state) {
+                last_mix_state = mix_state;
+                VIRTBAG_LOG("mix state edge state=%d installed=%d bag=%d window=%d current=%d",
+                            mix_state, mix_view_installed ? 1 : 0, mix_view_bag,
+                            mix_window_original_bag, original_bag_locked());
+            }
             const bool interactive = runtime_state().enabled.load() &&
                                      extension_bag_session_admitted_locked() &&
-                                     mix_state_locked() != 0;
+                                     mix_state != 0;
             if (interactive) {
                 ensure_state_loaded_locked();
                 // 原版袋/配方切换会改写当前袋。必须先处理原版切换并清掉
