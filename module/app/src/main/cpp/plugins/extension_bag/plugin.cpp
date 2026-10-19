@@ -18,6 +18,7 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/lifecycle_registration.h"
+#include "plugins/extension_bag/runtime/ownership.h"
 #include "plugins/extension_bag/assembly/move_merge.h"
 #include "plugins/extension_bag/http/routes.h"
 
@@ -223,6 +224,7 @@ const qol::contracts::QolPortRequirement kPorts[] = {
 // 在 install 时 require 后缓存（capability 与插件同生命周期，宿主 revoke 时先于本
 // 插件停用 provider——表指针由宿主 capability 表持有，此处不管理其生命周期）。
 uint64_t g_slot_data_flush_task = 0;
+uint64_t g_deferred_free_task = 0;
 const qol::contracts::QolSlotDataApi* g_slot_data_api_cache = nullptr;
 
 void unregister_extension_bag_result_handler(const qol::contracts::QolHostSdk* sdk) {
@@ -518,6 +520,12 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
         (void)g_sdk->scheduler.remove(g_slot_data_flush_task);
         g_slot_data_flush_task = 0;
     }
+    if (g_deferred_free_task != 0) {
+        if (g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
+            (void)g_sdk->scheduler.remove(g_deferred_free_task);
+        }
+        g_deferred_free_task = 0;
+    }
     // Resources are returned by the host; this callback only closes feature gates.
     // 中立 provider 表静态驻留（不指向可释放内存）；deactivate 只撤销 active，使路由等同无 provider。
     g_provider_active.store(false, std::memory_order_release);
@@ -549,6 +557,14 @@ void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         return;
+    }
+    if (g_sdk != nullptr && g_sdk->scheduler.add != nullptr && g_deferred_free_task == 0) {
+        uint64_t task = 0;
+        if (contracts::succeeded(g_sdk->scheduler.add(
+                qol::contracts::kQolRuntimeFramePointLogicPre,
+                &extension_bag_deferred_free_tick, nullptr, 1, 0, &task)) && task != 0) {
+            g_deferred_free_task = task;
+        }
     }
     g_provider_active.store(true, std::memory_order_release);
     extension_bag_set_enabled(true);

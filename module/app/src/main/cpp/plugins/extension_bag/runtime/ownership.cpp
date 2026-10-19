@@ -5,6 +5,7 @@
 #include "plugins/extension_bag/model/item_handle_custody.h"
 
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstring>
 
@@ -15,6 +16,7 @@ struct DeferredItemFree {
     uint32_t handle = 0;
     uint64_t generation = 0;
     uint64_t enqueued_at_ms = 0;
+    int64_t enqueued_frame = -1;
 };
 
 constexpr size_t kDeferredFreeQueueCapacity = 16;
@@ -27,6 +29,7 @@ constexpr size_t kDeferredFreeMaxPending =
 std::array<DeferredItemFree, kDeferredFreeQueueCapacity> g_deferred_free_queue{};
 size_t g_deferred_free_queue_head = 0;
 size_t g_deferred_free_queue_size = 0;
+std::atomic<bool> g_deferred_free_pending{false};
 // 总上限固定为 16+128 项；满载时入队 fail-closed，调用方必须保留源指针/所有权状态，
 // 不得据此替换或摘除对象。两层容量不随积压动态扩张。
 std::array<DeferredItemFree, kDeferredFreeCustodyCapacity> g_deferred_free_custody{};
@@ -35,6 +38,13 @@ size_t g_deferred_free_custody_size = 0;
 uint64_t deferred_free_now_ms_locked() {
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+int64_t deferred_free_frame_locked() {
+    const auto* game = runtime_state().host.game;
+    return game != nullptr && game->thread.frame_count != nullptr
+               ? game->thread.frame_count()
+               : -1;
 }
 
 uint64_t module_object_generation_locked(void* item, uint32_t handle) {
@@ -58,7 +68,7 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
         if (g_deferred_free_custody[index].item == item) return true;
     }
     const DeferredItemFree entry = {
-        item, handle, generation, deferred_free_now_ms_locked()};
+        item, handle, generation, deferred_free_now_ms_locked(), deferred_free_frame_locked()};
     if (g_deferred_free_queue_size >= kDeferredFreeQueueCapacity) {
         // 队列和保管区均满时拒绝入队；调用方保留对象及其所有权状态供后续重试。
         if (g_deferred_free_custody_size >= g_deferred_free_custody.size()) {
@@ -69,6 +79,7 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
             return false;
         }
         g_deferred_free_custody[g_deferred_free_custody_size++] = entry;
+        g_deferred_free_pending.store(true, std::memory_order_release);
         VIRTBAG_LOG("deferred free queue full; custody retained item=%p handle=%u generation=%llu",
                     item, handle, static_cast<unsigned long long>(generation));
         return true;
@@ -77,6 +88,7 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
                         kDeferredFreeQueueCapacity;
     g_deferred_free_queue[tail] = entry;
     ++g_deferred_free_queue_size;
+    g_deferred_free_pending.store(true, std::memory_order_release);
     VIRTBAG_LOG("deferred free enqueue item=%p handle=%u generation=%llu", item, handle,
                 static_cast<unsigned long long>(generation));
     return true;
@@ -128,12 +140,31 @@ bool deferred_item_referenced_locked(void* item) {
 
 void drain_deferred_frees_locked() {
     if (object_touch_window_active_locked()) return;
-    const auto can_free = [](const DeferredItemFree& entry) {
+    const int64_t current_frame = deferred_free_frame_locked();
+    const uint64_t now_ms = deferred_free_now_ms_locked();
+    const auto can_free = [current_frame, now_ms](const DeferredItemFree& entry) {
+        if (entry.item == nullptr) {
+            static bool logged_null_item = false;
+            if (!logged_null_item) {
+                VIRTBAG_LOG_WARN("deferred free drain skipped null item");
+                logged_null_item = true;
+            }
+            return true;
+        }
+        const uint64_t elapsed_ms =
+            qol::features::extension_bag::model::deferred_free_elapsed_ms(
+                entry.enqueued_at_ms, now_ms);
+        if (!qol::features::extension_bag::model::residence_met(
+                entry.enqueued_frame, current_frame, elapsed_ms,
+                qol::features::extension_bag::model::kDeferredFreeMinResidenceMs)) {
+            return false;
+        }
         const auto* api = extension_bag_write_api();
         return !deferred_item_referenced_locked(entry.item) && api != nullptr &&
                api->inventory.free_item != nullptr;
     };
     const auto free_entry = [](const DeferredItemFree& entry) {
+        if (entry.item == nullptr) return true;
         if (extension_free_item(entry.item)) return true;
         VIRTBAG_LOG_ERROR("ERROR deferred free failed item=%p handle=%u generation=%llu",
                           entry.item, entry.handle,
@@ -159,11 +190,24 @@ void drain_deferred_frees_locked() {
                           custody_count, kDeferredFreeCustodyCapacity);
     }
     g_deferred_free_custody_size = custody_result.kept;
+    g_deferred_free_pending.store(
+        g_deferred_free_queue_size != 0 || g_deferred_free_custody_size != 0,
+        std::memory_order_release);
     const size_t freed = queue_result.freed + custody_result.freed;
     if (freed > 0 || queue_result.kept > 0 || custody_result.kept > 0) {
         VIRTBAG_LOG("deferred free drain queue=%zu/%zu custody=%zu/%zu freed=%zu",
                     queue_result.kept, queue_count, custody_result.kept, custody_count, freed);
     }
+}
+
+int32_t extension_bag_deferred_free_tick(int64_t frame, void* ctx) {
+    (void)frame;
+    (void)ctx;
+    if (!g_deferred_free_pending.load(std::memory_order_acquire)) return 1;
+    std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+    if (!lock.owns_lock()) return 1;
+    drain_deferred_frees_locked();
+    return 1;
 }
 
 void log_ownership_audit_locked(const char* context) {

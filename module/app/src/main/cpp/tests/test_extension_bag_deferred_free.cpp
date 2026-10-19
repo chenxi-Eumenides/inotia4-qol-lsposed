@@ -2,7 +2,9 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <limits>
 
 namespace {
 
@@ -94,11 +96,30 @@ void test_count_is_bounded_by_backing_array_capacity() {
     }
 }
 
+void test_residence_frame_and_elapsed_fallback() {
+    using qol::features::extension_bag::model::residence_met;
+    using qol::features::extension_bag::model::deferred_free_elapsed_ms;
+    using qol::features::extension_bag::model::kDeferredFreeMinResidenceMs;
+
+    CHECK(residence_met(100, 101, 0, kDeferredFreeMinResidenceMs));
+    CHECK(!residence_met(100, 100, 100, kDeferredFreeMinResidenceMs));
+    CHECK(residence_met(-1, -1, kDeferredFreeMinResidenceMs,
+                        kDeferredFreeMinResidenceMs));
+    CHECK(!residence_met(-1, 200, kDeferredFreeMinResidenceMs - 1,
+                         kDeferredFreeMinResidenceMs));
+
+    const uint64_t wrapped_elapsed = deferred_free_elapsed_ms(
+        std::numeric_limits<uint64_t>::max() - 4, 3);
+    CHECK(wrapped_elapsed == 0);
+    CHECK(!residence_met(-1, -1, wrapped_elapsed, kDeferredFreeMinResidenceMs));
+}
+
 }  // namespace
 
 int main() {
     test_full_queue_and_nonempty_custody_are_drained_separately();
     test_count_is_bounded_by_backing_array_capacity();
+    test_residence_frame_and_elapsed_fallback();
     std::printf("extension_bag_deferred_free: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

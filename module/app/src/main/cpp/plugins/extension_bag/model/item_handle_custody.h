@@ -2,10 +2,24 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 
 #include "contracts/item_handle.h"
 
 namespace qol::features::extension_bag::model {
+
+constexpr uint64_t kDeferredFreeMinResidenceMs = 50;
+
+constexpr uint64_t deferred_free_elapsed_ms(uint64_t enqueued_at_ms,
+                                            uint64_t current_time_ms) {
+    return current_time_ms >= enqueued_at_ms ? current_time_ms - enqueued_at_ms : 0;
+}
+
+constexpr bool residence_met(int64_t enqueued_frame, int64_t current_frame,
+                             uint64_t elapsed_ms, uint64_t min_ms) {
+    if (enqueued_frame > 0 && current_frame > 0) return current_frame > enqueued_frame;
+    return elapsed_ms >= min_ms;
+}
 
 struct DeferredFreeDrainResult {
     size_t kept = 0;

@@ -5,6 +5,7 @@
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
 bool defer_item_free_locked(void* item);
 void drain_deferred_frees_locked();
+int32_t extension_bag_deferred_free_tick(int64_t frame, void* ctx);
 void log_ownership_audit_locked(const char* context);
 bool object_touch_window_active_locked();
 bool retire_custody_item_locked(uint32_t handle, void* item, const char* context);
