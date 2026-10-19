@@ -4,6 +4,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/item_facts.h"
 #include "contracts/plugin.h"
+#include "contracts/static_data.h"
 #include "contracts/version.h"
 #include "contracts/world_facts.h"
 #include "plugins/world_teleport/feature.h"
@@ -22,8 +23,10 @@ namespace {
 const qol::contracts::WorldFactsApi kWorldFacts{};
 const qol::contracts::ItemFactsApi kItemFacts{
     static_cast<uint32_t>(sizeof(qol::contracts::ItemFactsApi))};
+const qol::contracts::QolStaticDataApi kStaticData{};
 bool g_world_available = true;
 bool g_item_available = false;
+bool g_static_available = false;
 
 QolResult require_capability(const char* id, QolVersionRange, const void** out_iface) {
     if (std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) == 0 && g_world_available) {
@@ -32,6 +35,10 @@ QolResult require_capability(const char* id, QolVersionRange, const void** out_i
     }
     if (std::strcmp(id, qol::contracts::kItemFactsCapabilityId) == 0 && g_item_available) {
         *out_iface = &kItemFacts;
+        return qol::contracts::ok();
+    }
+    if (std::strcmp(id, qol::contracts::kStaticDataCapabilityId) == 0 && g_static_available) {
+        *out_iface = &kStaticData;
         return qol::contracts::ok();
     }
     *out_iface = nullptr;
@@ -50,6 +57,7 @@ void check_failure(const qol::contracts::PluginDescriptor& descriptor,
     assert(qol::features::world_teleport::world_action_port() == nullptr);
     assert(qol::features::world_teleport::world_facts() == nullptr);
     assert(qol::features::world_teleport::item_facts() == nullptr);
+    assert(qol::features::world_teleport::static_data() == nullptr);
 }
 
 }  // namespace
@@ -69,9 +77,10 @@ int main() {
     context.port_count = 1;
 
     const auto& descriptor = qol::features::world_teleport::plugin_descriptor();
-    assert(descriptor.requires_count == 2);
+    assert(descriptor.requires_count == 3);
     assert(std::strcmp(descriptor.requires[0].id, qol::contracts::kWorldFactsCapabilityId) == 0);
     assert(std::strcmp(descriptor.requires[1].id, qol::contracts::kItemFactsCapabilityId) == 0);
+    assert(std::strcmp(descriptor.requires[2].id, qol::contracts::kStaticDataCapabilityId) == 0);
     assert(descriptor.port_count == 1);
     assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_WORLD_ACTION);
     assert(descriptor.resources_count == 1);
@@ -100,11 +109,16 @@ int main() {
     check_failure(descriptor, context, "install failed: item facts unavailable");
 
     g_item_available = true;
+    g_static_available = false;
+    check_failure(descriptor, context, "install failed: static data unavailable");
+
+    g_static_available = true;
     assert(descriptor.install(context) == 0);
     assert(qol::features::world_teleport::host_sdk() == &sdk);
     assert(qol::features::world_teleport::world_action_port() == &actions);
     assert(qol::features::world_teleport::world_facts() == &kWorldFacts);
     assert(qol::features::world_teleport::item_facts() == &kItemFacts);
+    assert(qol::features::world_teleport::static_data() == &kStaticData);
 
     qol::contracts::PluginStatusOut status{};
     descriptor.fill_status(status);
@@ -139,5 +153,6 @@ int main() {
     assert(qol::features::world_teleport::world_action_port() == nullptr);
     assert(qol::features::world_teleport::world_facts() == nullptr);
     assert(qol::features::world_teleport::item_facts() == nullptr);
+    assert(qol::features::world_teleport::static_data() == nullptr);
     return 0;
 }

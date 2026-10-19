@@ -5,11 +5,13 @@
 #include "contracts/host_sdk.h"
 #include "contracts/item_facts.h"
 #include "contracts/plugin.h"
+#include "contracts/static_data.h"
 #include "contracts/ui.h"
 #include "contracts/ui_choice.h"
 #include "contracts/world_facts.h"
 #include "plugins/world_teleport/feature.h"
 #include "plugins/world_teleport/plugin.h"
+#include "plugins/world_teleport/rules.h"
 
 #include <cassert>
 #include <cstdint>
@@ -107,6 +109,64 @@ const qol::contracts::ItemFactsApi kItemFacts{
     static_cast<uint32_t>(sizeof(qol::contracts::ItemFactsApi)), nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &money};
 
+constexpr int32_t kStaticTileDim = qol::contracts::kStaticMapTileDim;
+uint8_t g_static_tiles[qol::contracts::kStaticMapTileSize]{};
+int32_t g_missing_static_map_id = -1;
+bool g_static_available = true;
+int g_static_info_calls = 0;
+int g_static_tiles_calls = 0;
+
+QolResult static_map_name(int32_t, char* out, uint32_t capacity, uint32_t* out_size) {
+    static constexpr char kName[] = "静态地图";
+    if (out == nullptr || out_size == nullptr || capacity < sizeof(kName)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid map name out", 21);
+    }
+    std::memcpy(out, kName, sizeof(kName));
+    *out_size = static_cast<uint32_t>(sizeof(kName) - 1);
+    return qol::contracts::ok();
+}
+
+QolResult static_map_exits(int32_t, qol::contracts::QolStaticMapExit*, uint32_t,
+                           uint32_t* out_count) {
+    if (out_count == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid exits out", 17);
+    }
+    *out_count = 0;
+    return qol::contracts::ok();
+}
+
+QolResult static_map_info(int32_t map_id, qol::contracts::QolStaticMapInfo* out) {
+    ++g_static_info_calls;
+    if (out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid map info", 16);
+    }
+    if (map_id == g_missing_static_map_id) {
+        return qol::contracts::error(kQolErrNotFound, "map tiles not found", 19);
+    }
+    out->map_id = map_id;
+    out->width = kStaticTileDim;
+    out->height = kStaticTileDim;
+    return qol::contracts::ok();
+}
+
+QolResult static_map_tiles(int32_t map_id, uint8_t* out_tiles, uint32_t capacity,
+                           uint32_t* out_size) {
+    ++g_static_tiles_calls;
+    if (out_tiles == nullptr || out_size == nullptr ||
+        capacity < qol::contracts::kStaticMapTileSize) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid map tiles out", 22);
+    }
+    if (map_id == g_missing_static_map_id) {
+        return qol::contracts::error(kQolErrNotFound, "map tiles not found", 19);
+    }
+    std::memcpy(out_tiles, g_static_tiles, qol::contracts::kStaticMapTileSize);
+    *out_size = qol::contracts::kStaticMapTileSize;
+    return qol::contracts::ok();
+}
+
+const qol::contracts::QolStaticDataApi kStaticData{
+    &static_map_name, &static_map_exits, &static_map_info, &static_map_tiles};
+
 // 变体查询桩：id = GameSeries 序数（g_series 控制当前用例的变体）。
 qol::contracts::QolGameHost kGameHost{};
 
@@ -148,6 +208,9 @@ QolResult require_capability(const char* id, QolVersionRange, const void** out_i
         *out_iface = &kUiChoice;
     } else if (std::strcmp(id, qol::contracts::kUiStateCapabilityId) == 0) {
         *out_iface = &kUiState;
+    } else if (std::strcmp(id, qol::contracts::kStaticDataCapabilityId) == 0 &&
+               g_static_available) {
+        *out_iface = &kStaticData;
     } else {
         *out_iface = nullptr;
         return qol::contracts::error(kQolErrNotFound, "missing capability", 18);
@@ -171,9 +234,6 @@ QolResult minus_money(int64_t) {
 int32_t g_last_map_x = 0;
 int32_t g_last_map_y = 0;
 int32_t g_last_map_direction = 0;
-int32_t g_pick_x = 32;   // pick_landing 桩返回的落点（用例可覆盖）
-int32_t g_pick_y = 24;
-int g_pick_calls = 0;
 
 QolResult request_map_change(int32_t, int32_t x, int32_t y, int32_t direction) {
     ++g_map_change_calls;
@@ -183,13 +243,6 @@ QolResult request_map_change(int32_t, int32_t x, int32_t y, int32_t direction) {
     if (g_map_change_fail) {
         return qol::contracts::error(kQolErrNotReady, "map change not ready", 21);
     }
-    return qol::contracts::ok();
-}
-
-QolResult pick_landing(int32_t, int32_t* out_x, int32_t* out_y) {
-    ++g_pick_calls;
-    *out_x = g_pick_x;
-    *out_y = g_pick_y;
     return qol::contracts::ok();
 }
 
@@ -224,7 +277,11 @@ void reset_observations() {
     g_last_map_x = 0;
     g_last_map_y = 0;
     g_last_map_direction = 0;
-    g_pick_calls = 0;
+    g_static_info_calls = 0;
+    g_static_tiles_calls = 0;
+    g_missing_static_map_id = -1;
+    std::memset(g_static_tiles, 0, sizeof(g_static_tiles));
+    g_static_available = true;
     g_add_money_calls = 0;
     g_add_money_amount = 0;
     g_map_change_fail = false;
@@ -257,7 +314,6 @@ int main() {
     actions.actions.restore_hud = &restore_hud;
     actions.actions.show_banner = &show_banner;
     actions.actions.add_money = &add_money;
-    actions.pick_landing = &pick_landing;
 
     const void* ports[] = {&actions};
     kGameHost.target.query_variant = &query_variant;
@@ -270,6 +326,23 @@ int main() {
     context.port_count = 1;
 
     const auto& descriptor = qol::features::world_teleport::plugin_descriptor();
+
+    // rules::pick_landing：全通中点、X+ 优先、全阻挡失败。
+    {
+        uint8_t tiles[qol::contracts::kStaticMapTileSize]{};
+        int land_x = -1;
+        int land_y = -1;
+        assert(world_teleport::pick_landing(tiles, 64, 64, &land_x, &land_y));
+        assert(land_x == 32 && land_y == 32);
+        tiles[32 * kStaticTileDim + 32] = 0x08;
+        assert(world_teleport::pick_landing(tiles, 64, 64, &land_x, &land_y));
+        assert(land_x == 33 && land_y == 32);
+        std::memset(tiles, 0x08, sizeof(tiles));
+        assert(!world_teleport::pick_landing(tiles, 64, 64, &land_x, &land_y));
+        assert(!world_teleport::pick_landing(nullptr, 64, 64, &land_x, &land_y));
+        assert(!world_teleport::pick_landing(tiles, 0, 64, &land_x, &land_y));
+    }
+
     assert(descriptor.install(context) == 0);
 
     reset_observations();
@@ -351,13 +424,14 @@ int main() {
     assert(g_minus_money_calls == 0);
     assert(g_map_change_calls == 1);
     assert(g_banner.empty());
-    // c18 走其进图选点门控：(0,0) + dir|0x8000，不调用端口选点。
+    // c18 走其进图选点门控：(0,0) + dir|0x8000，不调用 static.data。
     assert(g_last_map_x == 0);
     assert(g_last_map_y == 0);
     assert((g_last_map_direction & 0x8000) != 0);
-    assert(g_pick_calls == 0);
+    assert(g_static_info_calls == 0);
+    assert(g_static_tiles_calls == 0);
 
-    // 变体分流：未知变体免费直传（不确认、不扣费），落点走端口选点。
+    // 未知变体免费直传（不确认、不扣费），落点走 static.data + 插件选点（全通矩阵中点为 (32,32)）。
     reset_observations();
     g_series = 0;  // Unknown
     g_current_map_id = 5;
@@ -372,11 +446,43 @@ int main() {
     run_next_task();
     assert(g_minus_money_calls == 0);
     assert(g_map_change_calls == 1);
-    // 未知变体：pick_landing 返回的落点显式传入，dir 无 0x8000。
-    assert(g_pick_calls > 0);
-    assert(g_last_map_x == g_pick_x);
-    assert(g_last_map_y == g_pick_y);
+    assert(g_static_info_calls > 0);
+    assert(g_static_tiles_calls > 0);
+    assert(g_last_map_x == 32);
+    assert(g_last_map_y == 32);
     assert((g_last_map_direction & 0x8000) == 0);
+
+    // 未知变体 + 中点阻挡 → X+ 方向最近可站立格 (33,32)。
+    reset_observations();
+    g_static_tiles[32 * kStaticTileDim + 32] = 0x08;
+    g_series = 0;  // Unknown
+    g_current_map_id = 5;
+    g_record_count = 20;
+    g_money = 10000;
+    qol::features::world_teleport::world_teleport_call_map_name();
+    assert(g_choice_select != nullptr);
+    g_choice_select(0, g_choice_user);
+    run_next_task();
+    run_next_task();
+    assert(g_map_change_calls == 1);
+    assert(g_last_map_x == 33);
+    assert(g_last_map_y == 32);
+
+    // 目标图静态数据缺失 → 选项不可用（错误可见），不得以 (0,0) 静默传送。
+    reset_observations();
+    g_missing_static_map_id = 6;  // 当前 5，索引 0 的目标
+    g_series = 0;  // Unknown
+    g_current_map_id = 5;
+    g_record_count = 20;
+    g_money = 10000;
+    qol::features::world_teleport::world_teleport_call_map_name();
+    assert(g_choice_items.size() == 5);
+    assert(g_choice_items[0].find("地图数据缺失") != std::string::npos);
+    assert(g_choice_select != nullptr);
+    g_choice_select(0, g_choice_user);
+    assert(g_banner == "目标地图无效，无法传送");
+    assert(g_map_change_calls == 0);
+    assert(g_tasks.empty());
 
     // 变体分流：monster 保持确认框 + 扣费路径，落点 (0,0) 交其进图补丁校正。
     reset_observations();
@@ -400,7 +506,8 @@ int main() {
     assert(g_last_map_x == 0);
     assert(g_last_map_y == 0);
     assert((g_last_map_direction & 0x8000) == 0);
-    assert(g_pick_calls == 0);
+    assert(g_static_info_calls == 0);
+    assert(g_static_tiles_calls == 0);
 
     // WT-04：停用后已排队的帧任务不再执行
     reset_observations();

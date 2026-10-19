@@ -4,6 +4,7 @@
 #include "../../contracts/ui_choice.h"
 #include "../../contracts/game_ports/ports.h"
 #include "../../contracts/game_ports/world_action_port.h"
+#include "../../contracts/static_data.h"
 #include "../../contracts/http.h"
 #include "feature.h"
 
@@ -22,6 +23,7 @@ const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolWorldActionPort* g_world_action_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::QolStaticDataApi* g_static_data = nullptr;
 bool g_installed = false;
 const char* g_install_error = nullptr;
 
@@ -69,6 +71,8 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
     {contracts::kItemFactsCapabilityId,
      {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
+    {contracts::kStaticDataCapabilityId,
+     {contracts::kStaticDataVersion.major, contracts::kStaticDataVersion.minor}},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -82,6 +86,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_world_action_port = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
+    g_static_data = nullptr;
     g_installed = false;
     g_install_error = nullptr;
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
@@ -92,6 +97,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_world_action_port = nullptr;
         g_world_facts = nullptr;
         g_item_facts = nullptr;
+        g_static_data = nullptr;
         g_install_error = "install failed: world teleport dependencies not ready";
         return 1;
     }
@@ -106,6 +112,9 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_world_action_port = nullptr;
+        g_world_facts = nullptr;
+        g_item_facts = nullptr;
+        g_static_data = nullptr;
         g_install_error = "install failed: world facts unavailable";
         return 1;
     }
@@ -122,10 +131,27 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_world_action_port = nullptr;
         g_world_facts = nullptr;
         g_item_facts = nullptr;
+        g_static_data = nullptr;
         g_install_error = "install failed: item facts unavailable";
         return 1;
     }
     g_item_facts = static_cast<const contracts::ItemFactsApi*>(item_facts_iface);
+    const void* static_data_iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kStaticDataCapabilityId,
+            {contracts::kStaticDataVersion.major, contracts::kStaticDataVersion.minor},
+            &static_data_iface)) ||
+        static_data_iface == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_world_action_port = nullptr;
+        g_world_facts = nullptr;
+        g_item_facts = nullptr;
+        g_static_data = nullptr;
+        g_install_error = "install failed: static data unavailable";
+        return 1;
+    }
+    g_static_data = static_cast<const contracts::QolStaticDataApi*>(static_data_iface);
     return 0;
 }
 
@@ -135,6 +161,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     g_backup_call_map_name = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
+    g_static_data = nullptr;
     g_world_action_port = nullptr;
     g_game = nullptr;
     g_sdk = nullptr;
@@ -180,7 +207,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2,
+    3,
     kRequires,
     1,
     kOptionalRequires,
@@ -228,6 +255,10 @@ const contracts::WorldFactsApi* world_facts() {
 
 const contracts::ItemFactsApi* item_facts() {
     return g_item_facts;
+}
+
+const contracts::QolStaticDataApi* static_data() {
+    return g_static_data;
 }
 
 }  // namespace qol::features::world_teleport

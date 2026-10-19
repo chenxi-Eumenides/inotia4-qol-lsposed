@@ -127,6 +127,23 @@ const char* read_map_name(int map_id) {
     return value;
 }
 
+// 静态数据缺失、矩阵不足或全图无可站立格都返回 false；调用方把该目标置为不可用，
+// 不得以 (0,0) 静默传送。
+bool resolve_landing(int map_id, int* out_x, int* out_y) {
+    const auto* data = qol::features::world_teleport::static_data();
+    if (data == nullptr || data->map_info == nullptr || data->map_tiles == nullptr) return false;
+    qol::contracts::QolStaticMapInfo info{};
+    if (!qol::contracts::succeeded(data->map_info(map_id, &info))) return false;
+    uint8_t tiles[qol::contracts::kStaticMapTileSize]{};
+    uint32_t size = 0;
+    if (!qol::contracts::succeeded(
+            data->map_tiles(map_id, tiles, sizeof(tiles), &size))) {
+        return false;
+    }
+    if (size < qol::contracts::kStaticMapTileSize) return false;
+    return world_teleport::pick_landing(tiles, info.width, info.height, out_x, out_y);
+}
+
 bool schedule(qol::contracts::QolFrameHandler handler, void* ctx, int interval) {
     const qol::contracts::QolHostSdk* sdk = qol::features::world_teleport::host_sdk();
     if (sdk == nullptr || sdk->scheduler.add == nullptr) return false;
@@ -228,26 +245,29 @@ void open_choice_panel() {
     for (size_t index = 0; index < kTeleportChoiceCount; ++index) {
         const int delta = kChoiceDeltas[index];
         const int target_id = world_teleport::target_map_id(current_id, delta, max_map_id);
-        const bool valid = target_id >= 0 && (record_count <= 0 || target_id < record_count);
-        g_targets[index] = {target_id, kChoiceCosts[index], valid, charge};
-        // 落点分流：c18 走其进图选点门控（(0,0)+dir|0x8000）；原版/未知用端口选点
-        // （中点锚 + 最近非阻挡）；monster/大修保持 (0,0)，由其进图补丁自行校正。
-        ChoiceTarget& target = g_targets[index];
-        if (valid && !charge) {
+        const bool base_valid = target_id >= 0 && (record_count <= 0 || target_id < record_count);
+        ChoiceTarget target{target_id, kChoiceCosts[index], base_valid, charge};
+        // 落点分流：c18 走其进图选点门控（(0,0)+dir|0x8000）；原版/未知用 static.data
+        // 瓦片矩阵选点（失败=该选项不可用）；monster/大修保持 (0,0)，由其进图补丁校正。
+        bool landing_missing = false;
+        if (base_valid && !charge) {
             if (series == kSeriesC18) {
                 target.native_landing = true;
-            } else {
-                const auto* port = qol::features::world_teleport::world_action_port();
-                if (port != nullptr && port->pick_landing != nullptr) {
-                    (void)port->pick_landing(target_id, &target.land_x, &target.land_y);
-                }
+            } else if (!resolve_landing(target_id, &target.land_x, &target.land_y)) {
+                target.valid = false;
+                landing_missing = true;
+                log_message(3, "world teleport: static map data missing target=%d", target_id);
             }
         }
-        const char* name = valid ? map_name(target_id) : "不可用";
+        g_targets[index] = target;
+        const char* name = base_valid ? map_name(target_id) : "不可用";
         const char* sign = delta > 0 ? "+" : "-";
-        if (valid) {
+        if (target.valid) {
             std::snprintf(choice_text[index].data(), choice_text[index].size(),
                           "%s(id%s%d)", name, sign, delta > 0 ? delta : -delta);
+        } else if (landing_missing) {
+            std::snprintf(choice_text[index].data(), choice_text[index].size(),
+                          "%s（地图数据缺失）", name);
         } else {
             std::snprintf(choice_text[index].data(), choice_text[index].size(),
                           "%s（地图数据不足）", name);

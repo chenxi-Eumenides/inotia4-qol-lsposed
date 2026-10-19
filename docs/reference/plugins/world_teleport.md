@@ -8,7 +8,7 @@
 
 ## 定位与版本
 
-`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：2 项 required 依赖 `world.facts` v2.0 与 `item.facts` v3.3（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.1（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。变体序列经 `ctx.game`（`QolGameHost`）的 `target.query_variant` 读取并缓存于 `g_game`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
+`world_teleport`，插件版本 `0.1.0`（`plugins/world_teleport/plugin.cpp:18-19`）。descriptor（`plugin.cpp:174-198`）：3 项 required 依赖 `world.facts` v2.0、`item.facts` v3.4 与 `static.data` v1.1（`plugin.cpp:67-72`）；optional 依赖 `ui_choice` v1.1 与 `ui.state` v1.1；`provides_count=0`；1 条资源；`jni_count=0`；仅 1 个端口：私有 `QOL_PORT_WORLD_ACTION` v1.0（`plugin.cpp`，`contracts/game_ports/ports.h`、`contracts/game_ports/world_action_port.h`），`port_count=1`；1 个 feature；`on_resource_ready=plugin_on_resource_ready`（缓存宿主交还的 backup）。变体序列经 `ctx.game`（`QolGameHost`）的 `target.query_variant` 读取并缓存于 `g_game`。无 `routes.inc`、无 HTTP query/endpoint。注册于 `host/assembly.cpp:68,234`。
 
 ## 公开能力与路由
 
@@ -25,7 +25,7 @@
 | 变体系列 | 回调路径 | 落点 | 费用 |
 |---|---|---|---|
 | C18 | 关闭面板 + restore HUD 后直接切图 | `(0,0)` + `dir|0x8000`：走 C18 进图选点（中点 → X±/Y± ≤32 步最近非阻挡） | 免费（不检查余额、不扣费） |
-| 原版 / 未知（查询缺失或读取失败） | 同 C18：直接切图 | 端口 `pick_landing`（中点 → X±/Y± ≤32 步 → 全图最近非阻挡，静态瓦片数据；无数据回退 `(0,0)`），显式坐标 | 免费 |
+| 原版 / 未知（查询缺失或读取失败） | 同 C18：直接切图 | `static.data` 的 `map_info` + `map_tiles` 经 `rules.pick_landing` 选点，传显式坐标；数据缺失/全图无可站立格 → 该选项不可用，选择时横幅「目标地图无效，无法传送」，**不以 `(0,0)` 静默传送** | 免费 |
 | monster / 大修 | 确认框 → 确认后关闭并切图 | `(0,0)`：由改版自身进图补丁校正（monster：阻挡则 8 方向螺旋找最近可达后 `CharSetPosition`） | `+1/-1` 300、`+10/-10` 3000 |
 
 入口为 `UIPlay_CallMapName` 的函数级入口 hook（`plugin.cpp`），声明为 `private / required / fail_closed`，`resumable=true`，`step_budget=120`：
@@ -39,32 +39,33 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 业务编排（`feature.cpp`）：
 
 1. `world_teleport_call_map_name`：先读 `current_map_id`/`map_name` 复刻原函数地图名横幅（读取失败只记日志，不阻断）；再读 `world.facts::state`；非世界态（`state != 5`，`kWorldState`）忽略；世界态调用 `request_open_choice`。
-2. `open_choice_panel`（`feature.cpp`）：读 `current_map_id`/`map_record_count`，由 `max_map_id_from_record_count` 推导上限；读变体序列（`read_series` → `QolGameHost.target.query_variant`）决定回调策略（monster/大修收费，C18/原版/未知免费）；构造 4 项传送目标（delta `{+1,+10,-1,-10}`，费用 `{300,3000,300,3000}`）+ 1 项「关闭」（共 `kChoiceCount=5`，`feature.cpp:18-22`）；以 `UiChoiceSpec`（`dialog_type_id="world_teleport.confirm"`）调 `ui_choice::open`。
-3. `teleport_on_select`（`feature.cpp`）：越界/依赖缺失 → 关面板；无效目标 → 横幅提示；有效目标按 `target.charge` 分流：收费 → 写确认文本、关面板、`g_pending_target=target`、调度 `delayed_open_confirmation`；免费 → 关面板、restore HUD、调度 `delayed_close_choice`，不生成确认文案与确认框。
+2. `open_choice_panel`（`feature.cpp`）：读 `current_map_id`/`map_record_count`，由 `max_map_id_from_record_count` 推导上限；读变体序列（`read_series` → `QolGameHost.target.query_variant`）决定回调策略（monster/大修收费，C18/原版/未知免费）；构造 4 项传送目标（delta `{+1,+10,-1,-10}`，费用 `{300,3000,300,3000}`）+ 1 项「关闭」（共 `kChoiceCount=5`，`feature.cpp:18-22`）。免费且非 C18 的目标读取 `static.data` 的 `map_info`/`map_tiles` 并调用 `pick_landing`；数据缺失或选点失败时该目标置无效并显示「地图数据缺失」。以 `UiChoiceSpec`（`dialog_type_id="world_teleport.confirm"`）调 `ui_choice::open`。
+3. `teleport_on_select`（`feature.cpp`）：越界/依赖缺失 → 关面板；无效目标 → 横幅「目标地图无效，无法传送」（含静态数据缺失）；有效目标按 `target.charge` 分流：收费 → 写确认文本、关面板、`g_pending_target=target`、调度 `delayed_open_confirmation`；免费 → 关面板、restore HUD、调度 `delayed_close_choice`，不生成确认文案与确认框。
 4. `delayed_open_confirmation`（仅收费路径，`feature.cpp`）：经 `world_action.create_yesno` 弹确认框（ok=`teleport_confirmed`、cancel=`teleport_cancelled`、param=`cost`）。
 5. `teleport_confirmed`（`feature.cpp`）：调度 `delayed_close_choice`，关 popup、restore HUD。
-6. `delayed_close_choice` → `delayed_transfer`（`feature.cpp`）：读 `world.facts::active_player_direction`；收费路径再读 `item.facts::money`，余额不足 → 横幅「金币不足，无法传送」，否则 `world_action.minus_money`；随后 `world_action.request_map_change(map_id,0,0,direction)`。免费路径跳过余额检查与扣费。
+6. `delayed_close_choice` → `delayed_transfer`（`feature.cpp`）：读 `world.facts::active_player_direction`；收费路径再读 `item.facts::money`，余额不足 → 横幅「金币不足，无法传送」，否则 `world_action.minus_money`；随后 `world_action.request_map_change(map_id, land_x, land_y, direction | (native_landing ? 0x8000 : 0))`。免费路径跳过余额检查与扣费。
 7. `teleport_cancelled`（`feature.cpp:288-293`）：调度重开选择面板。
 
-地图 id 回绕（`rules.cpp`）：`kMaxMapId=414`（`rules.h:6`）；`target_map_id(current,delta,max)` 在 `[0,max]` 循环（`rules.cpp:12-18`）；`max_map_id_from_record_count(count)`：`count<=0` 回退静态上限，否则 `min(count-1, kMaxMapId)`（`rules.cpp:7-10`）。
+地图 id 回绕（`rules.cpp`）：`kMaxMapId=414`（`rules.h:6`）；`target_map_id(current,delta,max)` 在 `[0,max]` 循环（`rules.cpp`）；`max_map_id_from_record_count(count)`：`count<=0` 回退静态上限，否则 `min(count-1, kMaxMapId)`。`pick_landing(tiles,width,height,&x,&y)`（`rules.cpp`）：64×64 通行矩阵（bit3=不可通行），中点 → X 正/负、Y 正/负（步长 ≤32）→ 全图最近（切比雪夫）非阻挡格；矩阵不足或全图无可站立格返回 `false`。
 
 ## 使用的 Host SDK 与 Game 面
 
-- `ctx.sdk->capabilities.require`：install 期 require `world.facts` / `item.facts`（`plugin.cpp:79-127`）；运行期每次现取 `ui_choice`（`feature.cpp:105-115`），不缓存。
+- `ctx.sdk->capabilities.require`：install 期 require `world.facts` / `item.facts` / `static.data`（`plugin.cpp`）；运行期每次现取 `ui_choice`（`feature.cpp`），不缓存。
 - `ui.state.read_layers`：运行期读取 UI 栈顶层供诊断日志记录 `top=<id> type=<n>`；能力缺失时记录 `top=-`，不影响传送流程。
 - `ctx.sdk->scheduler.add`（帧任务，interval=1）：`delayed_open_choice`/`delayed_open_confirmation`/`delayed_close_choice`/`delayed_transfer` 的延迟调度（`feature.cpp:97-103`）。
 - `ctx.sdk->log.write`：业务日志（`feature.cpp:44-56`）。
-- 私有端口 `QolWorldActionPort`（`contracts/game_ports/world_action_port.h`，v1.1）：`actions`（`create_yesno`、`minus_money`、`request_map_change`、`close_popup`、`restore_hud`、`show_banner`、`add_money`）+ 尾追加 `pick_landing`（传送落点：中点锚 + 最近非阻挡，静态瓦片数据；无该图数据返回错误，调用方回退 `(0,0)`）。实现为 `game/adapter_ports/world_action_port.cpp` + `game_host_port.cpp` 的 `game_world_action_api()`（单一实现）。`QolGameHost::world_action` 仍保留给 `extension_bag` 的 `cancel_tutorial`。
+- 私有端口 `QolWorldActionPort`（`contracts/game_ports/world_action_port.h`，v1.0）：`actions`（`create_yesno`、`minus_money`、`request_map_change`、`close_popup`、`restore_hud`、`show_banner`、`add_money`）。实现为 `game/adapter_ports/world_action_port.cpp` + `game_host_port.cpp` 的 `game_world_action_api()`（单一实现）。`QolGameHost::world_action` 仍保留给 `extension_bag` 的 `cancel_tutorial`。
 - `WorldFactsApi`（`contracts/world_facts.h`，v2.0）：`state`、`map_record_count`、`current_map_id`、`map_name`、`active_player_direction`。
+- `QolStaticDataApi`（`contracts/static_data.h`，v1.1，required）：`map_info`（逻辑宽高）、`map_tiles`（64×64 通行矩阵）；`map_exits`/`map_name` 本插件不使用（传送目标由运行时地图 id 回绕得出，出口数据不参与选点）。
 - `QolGameHost.target.query_variant`（`contracts/game_host.h:17-29`）：变体序列读取（`QolTargetVariant.id` = `GameSeries` 序数），变体回调分流的唯一数据源。
-- `ItemFactsApi`（`contracts/item_facts.h:10-14`，v3.3）：`money`（FIX-05 起金钱归 `item.facts`，`docs/refactor/issues.md`）。
+- `ItemFactsApi`（`contracts/item_facts.h:10-14`，v3.4）：`money`（FIX-05 起金钱归 `item.facts`，`docs/refactor/issues.md`）。
 - `UiChoiceApi`（`contracts/ui_choice.h:21-22,36`，v1.1，optional）：`open`/`close`。
 
 ## 消费者与职责边界
 
 本插件不作为 provider，**无下游消费者**；级联影响面仅在依赖方向：
 
-- required 依赖 `world.facts`（provider=`core.world`）与 `item.facts`（provider=`core.item`）：任一 provider 缺失 → `blocked`；provider 撤销 → 作为 required consumer 被级联停用，provider 恢复后按 Host 生命周期重新激活（`docs/refactor/verification.md` VM-K2-01、VM-K4-04a/05）。
+- required 依赖 `world.facts`（provider=`core.world`）、`item.facts`（provider=`core.item`）与 `static.data`（provider=`core.data`）：任一 provider 缺失 → `blocked`；provider 撤销 → 作为 required consumer 被级联停用，provider 恢复后按 Host 生命周期重新激活（`docs/refactor/verification.md` VM-K2-01、VM-K4-04a/05）。
 - optional 依赖 `ui_choice`（provider=`core.custom_ui`）：缺失时选择面板打开失败（`feature.cpp:170-178` 记录并返回），不阻塞插件启用。
 - optional 依赖 `ui.state`（provider=`core.ui_state`）：缺失时仅将诊断层级记录降级为 `top=-`，不影响传送流程。
 - 本插件停用不影响任何其他插件（叶子）。
@@ -73,8 +74,9 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 
 ## 失败语义（fail-closed）
 
-- `plugin_install`（`plugin.cpp:79-127`）：校验 `struct_size`/`sdk_major`/`g_sdk`/`g_game`/`ports` 与两 required 能力（`item.facts` 额外做 `item_facts_api_size_valid`），失败清空全局、写 `g_install_error` 文案并返回 1。
-- 各业务函数在 `game()==nullptr` 或所需 `world_action` 槽为空时记录日志并返回（`feature.cpp:194,218,230-234,259-261,274`）。
+- `plugin_install`（`plugin.cpp`）：校验 `struct_size`/`sdk_major`/`g_sdk`/`g_game`/`ports` 与三项 required 能力（`item.facts` 额外做 `item_facts_api_size_valid`），失败清空全局、写 `g_install_error` 文案并返回 1；`static.data` 缺失时文案为 `install failed: static data unavailable`。
+- 各业务函数在 `game()==nullptr` 或所需 `world_action` 槽为空时记录日志并返回。
+- 静态地图数据缺失或选点失败：原版/未知变体的该目标在面板中显示「地图数据缺失」并置为无效；选择时走「目标地图无效，无法传送」横幅且不切图，不以 `(0,0)` 兜底。
 - `ui.state` 或 `read_layers` 不可用时，仅降级诊断字段为 `top=-`，不阻断业务。
 - `feature.h:11-31` 定义 `InstallDisposition`（`kInstalled/kUnsupported/kFailed`）与 `install_error()` 文案，供安装结果语义核对（`tests/test_world_teleport_install.cpp`）。
 - 资源声明 `kFailClosed`：入口 hook 安装失败即按还原释放并把插件置 failed。`on_resource_ready=plugin_on_resource_ready` 缓存宿主交还的 backup；未知资源 id 或空 backup 返回非 0 → 宿主回滚该资源并置 failed，wrapper 不在 backup 缺失下运行。
@@ -102,7 +104,7 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 | `plugins/world_teleport/feature.cpp:131-185,187-215` | 选择面板构造与（可延迟）打开。 |
 | `plugins/world_teleport/feature.cpp:226-322` | 确认、关闭、转账（扣费+切图）、取消、选择回调。 |
 | `plugins/world_teleport/feature.cpp:328-340` | `world_teleport_call_map_name` 入口。 |
-| `plugins/world_teleport/rules.cpp:7-22` | `max_map_id_from_record_count` / `target_map_id` 回绕。 |
+| `plugins/world_teleport/rules.cpp` | `max_map_id_from_record_count` / `target_map_id` 回绕；`pick_landing` 中点锚选点（64×64 通行矩阵，失败返回 `false`）。 |
 | `game/access/patches.cpp` | 声明式指令 patch 站点表；`UIPlay_CallMapName` 已不在其中（入口改由 `kEntryHook` 接管）。 |
 | `game/access/symbols.cpp` | `kHookEntrySymbols` 登记表：宏名形式的入口 hook claim 必须在此登记（含 `F_UI_PLAY_CALL_MAP_NAME_VMA`），否则 `resolve_hook_entry` 静默返回 0、preflight 静默拦截资源安装。 |
 | `game/symbols/game_symbols.h` | `F_UI_PLAY_CALL_MAP_NAME_VMA=0xc6664`（`UIPlay_CallMapName` 入口，dynsym）。 |

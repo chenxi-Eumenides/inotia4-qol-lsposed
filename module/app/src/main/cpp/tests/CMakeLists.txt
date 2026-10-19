@@ -1258,7 +1258,6 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/move_merge_port.cpp
     ${CPP_DIR}/game/adapter_ports/game_host_port.cpp
     ${CPP_DIR}/game/adapter_ports/world_action_port.cpp
-    ${CPP_DIR}/game/read/game_tiles.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
     ${CPP_DIR}/game/access/inventory.cpp
     ${CPP_DIR}/game/adapter_ports/character_extras_port.cpp

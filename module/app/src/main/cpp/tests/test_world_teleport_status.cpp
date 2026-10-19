@@ -4,6 +4,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/item_facts.h"
 #include "contracts/plugin.h"
+#include "contracts/static_data.h"
 #include "contracts/world_facts.h"
 #include "plugins/world_teleport/plugin.h"
 
@@ -20,12 +21,15 @@ namespace {
 const qol::contracts::WorldFactsApi kWorldFacts{};
 const qol::contracts::ItemFactsApi kItemFacts{
     static_cast<uint32_t>(sizeof(qol::contracts::ItemFactsApi))};
+const qol::contracts::QolStaticDataApi kStaticData{};
 
 QolResult require_capability(const char* id, QolVersionRange, const void** out_iface) {
     if (std::strcmp(id, qol::contracts::kWorldFactsCapabilityId) == 0) {
         *out_iface = &kWorldFacts;
     } else if (std::strcmp(id, qol::contracts::kItemFactsCapabilityId) == 0) {
         *out_iface = &kItemFacts;
+    } else if (std::strcmp(id, qol::contracts::kStaticDataCapabilityId) == 0) {
+        *out_iface = &kStaticData;
     } else {
         *out_iface = nullptr;
         return qol::contracts::error(kQolErrNotFound, "missing capability", 18);
@@ -77,5 +81,6 @@ int main() {
     assert(qol::features::world_teleport::world_action_port() == nullptr);
     assert(qol::features::world_teleport::world_facts() == nullptr);
     assert(qol::features::world_teleport::item_facts() == nullptr);
+    assert(qol::features::world_teleport::static_data() == nullptr);
     return 0;
 }
