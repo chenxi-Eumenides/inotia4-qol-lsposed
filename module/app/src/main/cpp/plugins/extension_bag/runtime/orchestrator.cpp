@@ -159,6 +159,10 @@ void teardown_extension_bag_hosts_locked() {
 }
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, uint64_t param2,
                            int64_t x = -1, int64_t y = -1) {
+    // Do not format/write a line for every touch event. The previous tracing was
+    // synchronous on the UI thread and also inflated 0x19 move latency.
+    (void)phase; (void)event; (void)param; (void)param2; (void)x; (void)y;
+    return;
     const uint64_t sequence = runtime_state().exit_trace_sequence.fetch_add(1) + 1;
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();

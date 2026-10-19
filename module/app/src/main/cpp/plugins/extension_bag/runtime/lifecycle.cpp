@@ -63,20 +63,27 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
                                                   uint64_t param2) {
     if (runtime_state().persistence.orig_event == nullptr) return 0;
 
-    PhysicalInventorySnapshot before{};
     bool session_has_projected_item = false;
+    {
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        session_has_projected_item = projected_drag_session_active_locked();
+    }
+    // Only a release (0x18) can commit INVEN_MoveItem. Press/move events (0x17/
+    // 0x19) do not change physical inventory, so scanning all 6x16 slots twice
+    // for every move only adds input latency.
+    if (!session_has_projected_item || event != 0x18) {
+        return runtime_state().persistence.orig_event(event, param, param2);
+    }
+
+    PhysicalInventorySnapshot before{};
     int source_bag = -1;
     int source_slot = -1;
     {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);
-        session_has_projected_item = projected_drag_session_active_locked();
-        if (session_has_projected_item) {
-            source_bag = runtime_state().ui.extension_drag_session.source_bag;
-            source_slot = runtime_state().ui.extension_drag_session.source_slot;
-        }
+        source_bag = runtime_state().ui.extension_drag_session.source_bag;
+        source_slot = runtime_state().ui.extension_drag_session.source_slot;
         before = capture_physical_inventory_snapshot_locked();
-        log_original_event_inventory_snapshot("pre", event, session_has_projected_item,
-                                              source_bag, source_slot, before);
+        log_original_event_inventory_snapshot("pre", event, true, source_bag, source_slot, before);
     }
 
     const uint64_t result = runtime_state().persistence.orig_event(event, param, param2);

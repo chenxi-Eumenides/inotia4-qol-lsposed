@@ -12,8 +12,11 @@ constexpr uint64_t kP5SampleIntervalMs = 100;
 }
 
 bool p5_observation_enabled() {
-    const auto* sdk = qol::features::extension_bag::extension_bag_host_sdk();
-    return sdk != nullptr && sdk->log.debug_enabled != nullptr && sdk->log.debug_enabled() != 0;
+    // Per-touch P5 observation walks the control tree and emits a very large
+    // line for every 0x19 move event. On device this dominates drag latency
+    // (2-5 s before the ghost appears), so event tracing is off in normal builds.
+    // Flip this to the host debug flag only while actively diagnosing input.
+    return false;
 }
 
 bool p5_panel_observation_enabled() {

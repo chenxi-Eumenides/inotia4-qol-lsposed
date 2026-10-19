@@ -159,9 +159,11 @@ void drain_deferred_frees_locked() {
                           custody_count, kDeferredFreeCustodyCapacity);
     }
     g_deferred_free_custody_size = custody_result.kept;
-    VIRTBAG_LOG("deferred free drain queue=%zu/%zu custody=%zu/%zu freed=%zu",
-                queue_result.kept, queue_count, custody_result.kept, custody_count,
-                queue_result.freed + custody_result.freed);
+    const size_t freed = queue_result.freed + custody_result.freed;
+    if (freed > 0 || queue_result.kept > 0 || custody_result.kept > 0) {
+        VIRTBAG_LOG("deferred free drain queue=%zu/%zu custody=%zu/%zu freed=%zu",
+                    queue_result.kept, queue_count, custody_result.kept, custody_count, freed);
+    }
 }
 
 void log_ownership_audit_locked(const char* context) {
