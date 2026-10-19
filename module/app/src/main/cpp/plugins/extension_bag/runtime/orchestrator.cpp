@@ -676,15 +676,7 @@ bool item_pointer_known_locked(void* item) {
             if (runtime_state().objects.module_objects[bag][slot] == item) return true;
         }
     }
-    if (runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->physical_item_at != nullptr) {
-        for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
-            void* physical = nullptr;
-            if (inventory_slot_locked(idx / virtual_bag::kSlotCount,
-                                      idx % virtual_bag::kSlotCount, &physical) && physical == item) {
-                return true;
-            }
-        }
-    }
+    if (original_inventory_contains_cached_locked(item)) return true;
     for (int role = 0; role < 3; ++role) {
         void* character = nullptr;
         if (runtime_state().host.game == nullptr || runtime_state().host.character_extras->read.party_member == nullptr ||

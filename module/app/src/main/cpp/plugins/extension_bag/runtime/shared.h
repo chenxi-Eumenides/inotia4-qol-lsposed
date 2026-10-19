@@ -18,6 +18,7 @@ uint64_t log_p5_observation_locked(const char* phase, void* target_control, uint
                                    int64_t event_y = -1, uint64_t related_sequence = 0);
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
                            uint64_t param2, int64_t x, int64_t y);
+bool original_inventory_contains_cached_locked(void* item);
 uint64_t extension_bag_ui_isolation_now_ms_locked();
 JNIEnv* current_env();
 uint64_t isolation_now_ms_locked();

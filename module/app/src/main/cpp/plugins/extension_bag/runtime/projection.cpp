@@ -5,7 +5,9 @@
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/plugin.h"
 
+#include <array>
 #include <cstring>
+#include <limits>
 
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
                            uint64_t param2, int64_t x = -1, int64_t y = -1);
@@ -207,24 +209,60 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
 // 物品指针必须命中已知集合（模块缓存/隔离区/INVEN_pItem）才放行绘制。
 bool item_pointer_known_locked(void* item);
 
+namespace {
+
+// The original inventory membership check used to run 6x16 physical-slot
+// queries for every drawn item. Cache the pointer snapshot for the current
+// inventory generation; ControlItem_Draw calls then only compare pointers.
+std::array<void*, 6 * virtual_bag::kSlotCount> g_original_inventory_draw_cache{};
+uint64_t g_original_inventory_draw_generation = std::numeric_limits<uint64_t>::max();
+
+void ensure_original_inventory_draw_cache_locked() {
+    const uint64_t generation = runtime_state().ui.inventory_generation;
+    if (g_original_inventory_draw_generation == generation) return;
+    g_original_inventory_draw_generation = generation;
+    g_original_inventory_draw_cache.fill(nullptr);
+    for (int bag = 0; bag < 6; ++bag) {
+        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+            void* item = nullptr;
+            if (inventory_slot_locked(bag, slot, &item)) {
+                g_original_inventory_draw_cache[bag * virtual_bag::kSlotCount + slot] = item;
+            }
+        }
+    }
+}
+
+}  // namespace
+
+bool original_inventory_contains_cached_locked(void* item) {
+    if (item == nullptr) return false;
+    ensure_original_inventory_draw_cache_locked();
+    for (void* cached : g_original_inventory_draw_cache) {
+        if (cached == item) return true;
+    }
+    return false;
+}
+
 uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int32_t b, int32_t c) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_DRAW_GATE"});
     if (runtime_state().objects.module_view_installed && item != nullptr) {
-        // 保留原版区域绘制以维护格子/Active 状态，但扩展视图下不绘制
-        // INVEN 中的原版物品；否则投影控件重绑的间隙会露出原版背包一帧。
-        // 扩展对象不在 g_inven 中，仍由下面的合法性门禁正常绘制。
-        for (int idx = 0; idx < 6 * virtual_bag::kSlotCount; ++idx) {
-            void* physical = nullptr;
-            if (inventory_slot_locked(idx / virtual_bag::kSlotCount,
-                                      idx % virtual_bag::kSlotCount, &physical) &&
-                physical == item) return 0;
+        int module_bag = -1;
+        int module_slot = -1;
+        if (module_slot_of_item_locked(item, &module_bag, &module_slot)) {
+            // Projected EB items are the common case while the overlay is installed.
+            // Avoid the physical-slot scan for every visible item every frame.
+            (void)module_bag;
+            (void)module_slot;
+        } else if (original_inventory_contains_cached_locked(item)) {
+            // 保留原版区域绘制以维护格子/Active 状态，但扩展视图下不绘制
+            // INVEN 中的原版物品；否则投影控件重绑的间隙会露出原版背包一帧。
+            return 0;
+        } else if (!item_pointer_known_locked(item)) {
+            QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw gate: suppressed unknown item=%p", item);
+            return 0;
         }
-    }
-    if (runtime_state().objects.module_view_installed && !item_pointer_known_locked(item)) {
-        QOL_LOG_DEBUG(QolDomain::kExtensionBag, "draw gate: suppressed unknown item=%p", item);
-        return 0;
     }
     (void)c;
     return extension_bag_ui_draw_item(item, x, y, a, b) ? 1u : 0u;
