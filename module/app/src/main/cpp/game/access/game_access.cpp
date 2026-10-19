@@ -4,8 +4,10 @@
 #include "game/variants/game_variant.h"
 #include "game/feature/game_feature.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
@@ -24,29 +26,96 @@ std::atomic<bool> g_bridge_ready{false};
 // 启动期常驻 patch 入口（host 在 nativeInit 早段注入；见 game/access/game_access.h 的 BridgeBootPatchFn）。
 BridgeBootPatchFn g_boot_patch_hook = nullptr;
 
-bool mapping_has_permission(uintptr_t address, size_t size, char permission) {
-    if (address == 0 || size == 0 || address > std::numeric_limits<uintptr_t>::max() - size) {
-        return false;
+struct MappingRange {
+    uintptr_t start = 0;
+    uintptr_t end = 0;
+    uint8_t permissions = 0;
+};
+
+std::mutex g_maps_mutex;
+std::vector<MappingRange> g_maps;
+std::chrono::steady_clock::time_point g_maps_refreshed{};
+
+constexpr auto kMapsCacheTtl = std::chrono::seconds(5);
+constexpr auto kMapsMissRefreshInterval = std::chrono::milliseconds(1000);
+
+uint8_t permission_bit(char permission) {
+    switch (permission) {
+        case 'r': return 1u << 0;
+        case 'w': return 1u << 1;
+        case 'x': return 1u << 2;
+        default: return 0;
     }
-    const uintptr_t end_address = address + size;
+}
+
+uint8_t permission_bits(const char* permissions) {
+    uint8_t bits = 0;
+    for (const char* p = permissions; p != nullptr && *p != '\0'; ++p) {
+        bits |= permission_bit(*p);
+    }
+    return bits;
+}
+
+void refresh_mapping_cache_locked() {
+    g_maps.clear();
     FILE* f = fopen("/proc/self/maps", "r");
-    if (f == nullptr) return false;
+    if (f == nullptr) {
+        g_maps_refreshed = std::chrono::steady_clock::now();
+        return;
+    }
     char line[512];
-    bool accessible = false;
     while (fgets(line, sizeof(line), f) != nullptr) {
         unsigned long long start = 0;
         unsigned long long end = 0;
         char permissions[5] = {};
         if (sscanf(line, "%llx-%llx %4s", &start, &end, permissions) != 3) continue;
-        if (address >= static_cast<uintptr_t>(start) &&
-            end_address <= static_cast<uintptr_t>(end) &&
-            strchr(permissions, permission) != nullptr) {
-            accessible = true;
-            break;
-        }
+        if (end <= start) continue;
+        g_maps.push_back(MappingRange{
+            static_cast<uintptr_t>(start), static_cast<uintptr_t>(end),
+            permission_bits(permissions)});
     }
     fclose(f);
-    return accessible;
+    g_maps_refreshed = std::chrono::steady_clock::now();
+}
+
+bool mapping_has_permission(uintptr_t address, size_t size, char permission) {
+    if (address == 0 || size == 0 || address > std::numeric_limits<uintptr_t>::max() - size) {
+        return false;
+    }
+    const uint8_t requested = permission_bit(permission);
+    if (requested == 0) return false;
+    const uintptr_t end_address = address + size;
+    std::lock_guard<std::mutex> lock(g_maps_mutex);
+    auto now = std::chrono::steady_clock::now();
+    bool refreshed = false;
+    if (g_maps.empty() || now - g_maps_refreshed >= kMapsCacheTtl) {
+        refresh_mapping_cache_locked();
+        refreshed = true;
+    }
+    // /proc/self/maps is sorted by start address; find the last mapping that
+    // starts at or before the target and verify the full range fits inside it.
+    const auto lookup = [&]() -> const MappingRange* {
+        const auto it = std::upper_bound(
+            g_maps.begin(), g_maps.end(), address,
+            [](uintptr_t value, const MappingRange& range) { return value < range.start; });
+        if (it == g_maps.begin()) return nullptr;
+        const MappingRange& range = *(it - 1);
+        return address >= range.start && end_address <= range.end ? &range : nullptr;
+    };
+    if (const MappingRange* range = lookup()) {
+        return (range->permissions & requested) != 0;
+    }
+    // A newly loaded library can appear after the periodic refresh. Retry a
+    // miss at most once per second so a genuinely invalid pointer cannot turn
+    // every check into a /proc/self/maps scan.
+    now = std::chrono::steady_clock::now();
+    if (!refreshed && now - g_maps_refreshed >= kMapsMissRefreshInterval) {
+        refresh_mapping_cache_locked();
+        if (const MappingRange* range = lookup()) {
+            return (range->permissions & requested) != 0;
+        }
+    }
+    return false;
 }
 
 // 宏名 → 游戏符号名查找表（X-macro 注册表生成，backlog P1 VMA 治理）

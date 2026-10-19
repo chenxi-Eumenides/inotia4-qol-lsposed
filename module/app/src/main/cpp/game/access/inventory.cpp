@@ -215,6 +215,19 @@ QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
     }
     *out_item = nullptr;
     if (g_inven == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    // Direct slot addressing matches set_physical_item. The previous
+    // for_each_bag_slot lookup was O(6*16) per query; the projection draw gate
+    // queries every visible slot and made a 96x96 scan per frame.
+    auto* slot_address = reinterpret_cast<void**>(
+        reinterpret_cast<uint8_t*>(g_inven) + static_cast<size_t>(bag) * 0x80 +
+        static_cast<size_t>(slot) * sizeof(void*));
+    if (game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
+        *out_item = *slot_address;
+        return *out_item == nullptr ? error_result(kQolErrNotFound, kNotFound) : contracts::ok();
+    }
+    // Host tests and early boot may provide a sentinel g_inven whose slot table
+    // is not directly readable. Preserve the legacy read-only lookup as a
+    // fallback instead of reporting the whole inventory unavailable.
     struct Context {
         int32_t bag;
         int32_t slot;
