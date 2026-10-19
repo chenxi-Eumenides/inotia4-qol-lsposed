@@ -1,6 +1,7 @@
 #include "plugin.h"
 
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/item_facts.h"
 #include "feature.h"
 
 namespace qol::features::attribute_range_display {
@@ -12,6 +13,8 @@ constexpr const char* kPluginVersion = "0.1.0";
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kAttributeQualityCapabilityId,
      {contracts::kAttributeQualityVersionMajor, contracts::kAttributeQualityVersionMinor}},
+    {contracts::kItemFactsCapabilityId,
+     {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
 };
 
 const contracts::ResourceClaim kResources[] = {
@@ -24,7 +27,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "详情选项行渲染：消费 attribute.quality 后改写数值内联颜色码",
+        "详情选项行渲染：按 item.facts 分类确认原生词条后消费 attribute.quality 改写数值内联颜色码",
         nullptr,
         120,
         reinterpret_cast<void*>(&uid_desc_add_option_wrapper),
@@ -81,7 +84,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    1,
+    2,
     kRequires,
     0,
     nullptr,

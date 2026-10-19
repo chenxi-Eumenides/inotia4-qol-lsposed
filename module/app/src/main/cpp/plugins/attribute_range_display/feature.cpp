@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/item_facts.h"
 #include "../../contracts/ui.h"
 
 namespace qol::features::attribute_range_display {
@@ -21,6 +22,15 @@ void* g_backup_make_item = nullptr;
 
 thread_local void* t_current_item = nullptr;
 
+struct ItemViewCache {
+    void* item = nullptr;
+    bool loaded = false;
+    bool valid = false;
+    contracts::QolItemHandle handle{};
+    contracts::QolItemInventoryView view{};
+};
+thread_local ItemViewCache t_item_view_cache;
+
 const contracts::AttributeQualityApi* quality_api() {
     if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
     const void* iface = nullptr;
@@ -31,6 +41,18 @@ const contracts::AttributeQualityApi* quality_api() {
     if (result.ok != kQolOk || iface == nullptr) return nullptr;
     const auto* api = static_cast<const contracts::AttributeQualityApi*>(iface);
     return contracts::attribute_quality_api_size_valid(api) ? api : nullptr;
+}
+
+const contracts::ItemFactsApi* item_facts_api() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
+        contracts::kItemFactsCapabilityId,
+        {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor},
+        &iface);
+    if (result.ok != kQolOk || iface == nullptr) return nullptr;
+    const auto* api = static_cast<const contracts::ItemFactsApi*>(iface);
+    return contracts::item_facts_api_size_valid(api) && api->view != nullptr ? api : nullptr;
 }
 
 char tier_color(contracts::AttributeQualityTier tier) {
@@ -49,6 +71,94 @@ char tier_color(contracts::AttributeQualityTier tier) {
             return 'Y';
     }
     return 'G';
+}
+
+bool load_current_item_view(contracts::QolItemInventoryView* out,
+                            contracts::QolItemHandle* out_handle) {
+    if (out == nullptr || out_handle == nullptr) return false;
+    const contracts::ItemFactsApi* api = item_facts_api();
+    if (api == nullptr || g_sdk == nullptr || g_sdk->item_handle.lookup_item == nullptr) {
+        return false;
+    }
+
+    contracts::QolItemHandle handle{};
+    uint32_t owner = contracts::kQolItemHandleOwnerAny;
+    int32_t status = g_sdk->item_handle.lookup_item(t_current_item, &handle, &owner);
+    if (status == contracts::kQolItemHandleStatusNotFound) {
+        if (g_sdk->item_handle.register_item == nullptr) return false;
+        status = g_sdk->item_handle.register_item(
+            t_current_item, contracts::kQolItemHandleOwnerGame, &handle);
+    }
+    if (status != contracts::kQolItemHandleStatusOk || handle.slot == 0 ||
+        handle.generation == 0) {
+        return false;
+    }
+    (void)owner;
+
+    if (api->view(handle, out).ok != kQolOk) return false;
+    constexpr uint32_t kRequiredFields = contracts::kQolItemInventoryHasOptionCompleteness |
+                                        contracts::kQolItemInventoryHasNativeOptions |
+                                        contracts::kQolItemInventoryHasJewelOptions;
+    if ((out->fields & kRequiredFields) != kRequiredFields) return false;
+    if ((out->fields & contracts::kQolItemInventoryOptionsTruncated) != 0) return false;
+    if (out->native_option_count > contracts::kQolItemInventoryNativeOptionCapacity ||
+        out->jewel_option_count > contracts::kQolItemInventoryJewelOptionCapacity) {
+        return false;
+    }
+    // 非装备物品的详情行不参与原生词条染色。
+    if (out->equip == 0) return false;
+    *out_handle = handle;
+    return true;
+}
+
+// 每次 UIDesc_MakeItem 周期最多读取一次 view；同一 item 的多条 AddOption 行复用缓存。
+bool current_item_view(const contracts::QolItemInventoryView** out_view,
+                       contracts::QolItemHandle* out_handle) {
+    if (out_view == nullptr || out_handle == nullptr || t_current_item == nullptr) return false;
+    if (t_item_view_cache.item == t_current_item && t_item_view_cache.loaded) {
+        if (!t_item_view_cache.valid) return false;
+        *out_view = &t_item_view_cache.view;
+        *out_handle = t_item_view_cache.handle;
+        return true;
+    }
+
+    t_item_view_cache = {};
+    t_item_view_cache.item = t_current_item;
+    t_item_view_cache.loaded = true;
+    if (!load_current_item_view(&t_item_view_cache.view, &t_item_view_cache.handle)) {
+        return false;
+    }
+    t_item_view_cache.valid = true;
+    *out_view = &t_item_view_cache.view;
+    *out_handle = t_item_view_cache.handle;
+    return true;
+}
+
+// AddOption wrapper 只有 (option_id, value)；用 item.facts 的 native/jewel 分类列表确认
+// 当前行确实来自 native_options。view 错误、缺完整性、截断、无匹配、或同 id/value 同时
+// 命中宝石词条时都不染色。重复原生项仍属于确定的原生来源。view 不暴露未知 option type，
+// 因此未知来源无法单独判定；它只可能在与原生条目同 id/value 时被误认为原生。
+bool line_is_native_option(const contracts::QolItemInventoryView& view, int32_t option_id,
+                           int32_t display_value) {
+    uint32_t native_matches = 0;
+    uint32_t jewel_matches = 0;
+    for (uint32_t index = 0; index < view.native_option_count; ++index) {
+        const contracts::QolItemInventoryOptionView& option = view.native_options[index];
+        if (option.type != static_cast<int32_t>(
+                                contracts::QolItemInventoryOptionType::kNative)) {
+            return false;
+        }
+        if (option.id == option_id && option.value == display_value) ++native_matches;
+    }
+    for (uint32_t index = 0; index < view.jewel_option_count; ++index) {
+        const contracts::QolItemInventoryOptionView& option = view.jewel_options[index];
+        if (option.type != static_cast<int32_t>(
+                                contracts::QolItemInventoryOptionType::kJewel)) {
+            return false;
+        }
+        if (option.id == option_id && option.value == display_value) ++jewel_matches;
+    }
+    return native_matches != 0 && jewel_matches == 0;
 }
 
 }  // namespace
@@ -112,21 +222,12 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int val
     if (t_current_item == nullptr) return;
 
     const auto api = quality_api();
-    if (g_sdk == nullptr || g_sdk->item_handle.lookup_item == nullptr || api == nullptr) return;
+    if (api == nullptr) return;
 
+    const contracts::QolItemInventoryView* view = nullptr;
     contracts::QolItemHandle handle{};
-    uint32_t owner = contracts::kQolItemHandleOwnerAny;
-    int32_t handle_status = g_sdk->item_handle.lookup_item(t_current_item, &handle, &owner);
-    if (handle_status == contracts::kQolItemHandleStatusNotFound) {
-        if (g_sdk->item_handle.register_item == nullptr) return;
-        handle_status = g_sdk->item_handle.register_item(
-            t_current_item, contracts::kQolItemHandleOwnerGame, &handle);
-    }
-    if (handle_status != contracts::kQolItemHandleStatusOk || handle.slot == 0 ||
-        handle.generation == 0) {
-        return;
-    }
-    (void)owner;
+    if (!current_item_view(&view, &handle) || view == nullptr) return;
+    if (!line_is_native_option(*view, option_id, value)) return;
 
     contracts::AttributeQualityOptions options{};
     contracts::AttributeQualityItem option_context{};
@@ -148,10 +249,14 @@ void uid_desc_add_option_wrapper(void* builder, int type, int option_id, int val
 uintptr_t uid_desc_make_item_wrapper(void* item, void* character, void* arg2) {
     const auto backup = reinterpret_cast<MakeItemFn>(g_backup_make_item);
     if (!active()) return backup == nullptr ? 0 : backup(item, character, arg2);
-    void* previous = t_current_item;
+    // 嵌套 MakeItem 必须恢复外层 item 与已缓存的 view；缓存只在本次调用周期内有效。
+    const ItemViewCache previous_cache = t_item_view_cache;
+    void* previous_item = t_current_item;
     t_current_item = item;
+    t_item_view_cache = {};
     const uintptr_t result = backup == nullptr ? 0 : backup(item, character, arg2);
-    t_current_item = previous;
+    t_item_view_cache = previous_cache;
+    t_current_item = previous_item;
     return result;
 }
 
