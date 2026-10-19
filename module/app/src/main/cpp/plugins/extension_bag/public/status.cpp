@@ -46,6 +46,18 @@ const char* extension_recovery_action_name_locked() {
 }
 
 std::string extension_bag_status_json_locked() {
+    std::string original_capacities = "[";
+    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
+    for (int bag = 0; bag < 5; ++bag) {
+        if (bag != 0) original_capacities.push_back(',');
+        uint32_t word = 0;
+        if (bag_size_word_locked(bag, &word)) {
+            original_capacities += std::to_string(word & kCapacityMask);
+        } else {
+            original_capacities += "-1";
+        }
+    }
+    original_capacities.push_back(']');
     return "{\"enabled\":" + std::string(runtime_state().enabled.load() ? "true" : "false") +
            ",\"injected\":" + std::string(runtime_state().persistence.state_entry != nullptr ? "true" : "false") +
            ",\"save_panel_hook\":" +
@@ -55,6 +67,7 @@ std::string extension_bag_status_json_locked() {
            ",\"inventory_frame_active\":" +
            std::string(runtime_state().ui.inventory_frame_active ? "true" : "false") +
            ",\"recovery_action\":\"" + extension_recovery_action_name_locked() + "\"" +
+           ",\"originalCapacities\":" + original_capacities +
            ",\"state\":" + virtual_bag::state_json(runtime_state().objects.bag, true) + "}";
 }
 
@@ -78,6 +91,25 @@ std::string extension_bag_view_result_json(bool ok, const char* error) {
     if (!ok) return op_err(error);
     return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
 }
+
+// While an EB view is installed the host window bag's capacity word is
+// temporarily projected to the EB capacity. Saving the unequipped bag object
+// must scan the real original capacity, otherwise it can choose a slot beyond
+// the real bag size and leave the bag looking smaller after restore.
+struct UnequipHostCapacityGuard {
+    int bag = -1;
+    uint32_t projected_word = 0;
+    bool active = false;
+
+    ~UnequipHostCapacityGuard() {
+        if (!active) return;
+        if (!set_bag_size_word_locked(bag, projected_word)) {
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "ERROR unequip host capacity restore failed bag=%d word=0x%x",
+                          bag, projected_word);
+        }
+    }
+};
 }  // namespace
 
 // P3 袋解除（对齐原版 UIEquip_ButtonUnequipExe desc_type=1 语义）：
@@ -132,6 +164,29 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
             release_temporary_item_locked(item);
             VIRTBAG_LOG("extension unequip bag marker write failed bag=%d", internal_bag);
             return ExtensionBagUnequipResult::kFailed;
+        }
+    }
+
+    UnequipHostCapacityGuard host_capacity_guard;
+    if (runtime_state().objects.module_view_installed &&
+        virtual_bag::valid_index(runtime_state().objects.original_bag_size_bag)) {
+        constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
+        uint32_t projected_word = 0;
+        const int host_bag = runtime_state().objects.original_bag_size_bag;
+        const uint32_t real_capacity =
+            runtime_state().objects.original_bag_size & kCapacityMask;
+        if (real_capacity != 0 && bag_size_word_locked(host_bag, &projected_word)) {
+            const uint32_t real_word = (projected_word & ~kCapacityMask) | real_capacity;
+            if (!set_bag_size_word_locked(host_bag, real_word)) {
+                release_tracked_item_locked(item_handle, item, "unequip host capacity");
+                VIRTBAG_LOG("extension unequip host capacity write failed bag=%d", host_bag);
+                return ExtensionBagUnequipResult::kFailed;
+            }
+            host_capacity_guard.bag = host_bag;
+            host_capacity_guard.projected_word = projected_word;
+            host_capacity_guard.active = true;
+            VIRTBAG_LOG("extension unequip host capacity real bag=%d projected=0x%x real=0x%x",
+                        host_bag, projected_word, real_word);
         }
     }
 
