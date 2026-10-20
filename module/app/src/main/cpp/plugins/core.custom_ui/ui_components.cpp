@@ -2544,6 +2544,7 @@ bool ui_components_bind(const contracts::QolUiAdapter* adapter) {
         if (g_unbind_pending) return false;
     }
     g_adapter = adapter;
+    ui_panels_set_callback_probe(&ui_components_in_callback);
     return true;
 }
 
@@ -2564,6 +2565,7 @@ void ui_components_unbind() {
             return;
         }
     }
+    ui_panels_set_callback_probe(nullptr);
     g_adapter = nullptr;
     g_components.clear();
     g_roots.clear();
@@ -2571,6 +2573,8 @@ void ui_components_unbind() {
 }
 
 const contracts::QolUiComponents* ui_components_api() { return &kUiComponents; }
+
+bool ui_components_in_callback() { return g_callback_depth != 0; }
 
 // ui_components.h 声明的适配表访问器：返回 ui_components_bind 注入的宿主 UI 表。
 // 定义归组件插件自身（debug 面板等组件消费者需要），不再由页面侧提供。

@@ -161,10 +161,24 @@ bool build_text_buttons(const contracts::QolUiComponents* components,
         const contracts::UiButtonDesc desc{rects[i], i < 4 ? "打开" : "较长的 UTF-8 按钮文字示例",
             0, &demo_button_clicked, reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
         contracts::QolUiHandle handle = nullptr;
-        const QolResult result = i % 2 == 0
+        QolResult result = i % 2 == 0
             ? components->capsule_text_button_create(&desc, parent, &handle)
             : components->decorated_text_button_create(&desc, parent, &handle);
-        if (!contracts::succeeded(result) || handle == nullptr) return false;
+        if (i % 2 != 0 && (!contracts::succeeded(result) || handle == nullptr)) {
+            // 装饰按钮依赖当前组的标题图集（get_group_title_img_type）；在设置页等
+            // 无标题图集的弹窗上下文里会 NotReady。演示页退化为胶囊按钮，保持面板可开。
+            debug_log("decorated text button unavailable; fallback to capsule");
+            handle = nullptr;
+            result = components->capsule_text_button_create(&desc, parent, &handle);
+        }
+        if (!contracts::succeeded(result) || handle == nullptr) {
+            char message[96]{};
+            std::snprintf(message, sizeof(message),
+                          "build_text_buttons failed index=%u code=%d handle=%p", i, result.code,
+                          handle);
+            debug_log(message);
+            return false;
+        }
         out[i] = {handle, 0};
         *out_count = i + 1;
     }
@@ -179,9 +193,14 @@ bool build_text_buttons(const contracts::QolUiComponents* components,
         const contracts::UiButtonDesc desc{active_rects[i], active_labels[i], 0,
             &demo_active_clicked, reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
         contracts::QolUiHandle handle = nullptr;
-        const QolResult result = i == 0
+        QolResult result = i == 0
             ? components->flat_text_button_create(&desc, parent, &handle)
             : components->decorated_text_button_create(&desc, parent, &handle);
+        if (i == 1 && (!contracts::succeeded(result) || handle == nullptr)) {
+            // 同前：无标题图集上下文退化为胶囊按钮。
+            handle = nullptr;
+            result = components->capsule_text_button_create(&desc, parent, &handle);
+        }
         if (!contracts::succeeded(result) || handle == nullptr) return false;
         out[6 + i] = {handle, static_cast<uint8_t>(i == 0 ? 4 : 0)};
         *out_count = 7 + i;
@@ -638,7 +657,8 @@ void panel_f3() { (void)ui_components_api()->back_request(); }
 void panel_f4() { (void)ui_components_api()->back_request(); }
 
 uint32_t panel_event(uint64_t event, uint64_t param, uint64_t param2) {
-    if (!g_active || g_root == nullptr) return 1;
+    // 未激活（enter 失败/尚未创建）时不得消费输入，否则会挡住下层面板。
+    if (!g_active || g_root == nullptr) return 0;
     const contracts::QolUiComponents* components = ui_components_api();
     if (components == nullptr || components->dispatch_native_event == nullptr) return 1;
     // 只处理 0x17 按下 / 0x18 松开 / 0x19 移动；0x8000000X 等 bit63 系统子事件伴随按下

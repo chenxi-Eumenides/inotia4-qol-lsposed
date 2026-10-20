@@ -179,7 +179,21 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         return false;
     }
     // 嵌套：共享的原始 popup 不转换，手动进入新顶层，父面板保持原状。
-    if (stack_size_ > 1 && has_callbacks(provider)) invoke_enter(provider);
+    if (stack_size_ > 1 && has_callbacks(provider)) {
+        invoke_enter(provider);
+        // 嵌套 enter 是同步的：失败时（如组件回调内创建被拒）不得把非激活面板留在栈顶，
+        // 否则它会吞掉输入并让界面看似卡死。顶层面板的 enter 由游戏稍后回调，不能在此判活。
+        if (provider.active != nullptr && !provider.active()) {
+            if (provider.close != nullptr) provider.close();
+            --stack_size_;
+            stack_[stack_size_] = {};
+            if (previous != nullptr) {
+                if (previous->open != nullptr) (void)previous->open();
+                if (has_callbacks(*previous)) invoke_enter(*previous);
+            }
+            return false;
+        }
+    }
     if (has_callbacks(provider) && !capture_owned_popup()) {
         provider.close();
         --stack_size_;

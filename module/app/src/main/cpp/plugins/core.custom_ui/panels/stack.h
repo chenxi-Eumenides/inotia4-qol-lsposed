@@ -28,6 +28,12 @@ constexpr int kPanelStackDepth = 4;
 
 // `UiPanelsApi` 实现：经 Host SDK panels 表分发。
 bool ui_panels_open(const char* panel_id);
+// 组件回调探针：由 ui_components_bind 注入（返回该线程是否处于组件点击/事件回调）。
+// 为空时 open 直接执行。inline 变量避免面板栈与组件实现互相引入链接依赖。
+inline bool (*ui_panels_components_callback_probe)() = nullptr;
+inline void ui_panels_set_callback_probe(bool (*probe)()) {
+    ui_panels_components_callback_probe = probe;
+}
 void ui_panels_close(const char* panel_id);
 bool ui_panels_back();
 // 延迟关闭请求：可在弹窗事件/生命周期回调（原生事件遍历中）安全调用，实际 pop/restore

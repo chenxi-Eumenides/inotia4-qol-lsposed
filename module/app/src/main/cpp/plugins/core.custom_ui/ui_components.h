@@ -14,6 +14,9 @@ using UiDrawProc = contracts::QolUiDrawFn;
 bool ui_components_bind(const contracts::QolUiAdapter* adapter);
 void ui_components_unbind();
 const contracts::QolUiComponents* ui_components_api();
+// 是否处于组件回调（点击/触摸事件）内：此时创建/销毁需延迟到帧安全点，
+// 否则 create_component 会以 NotReady 拒绝。
+bool ui_components_in_callback();
 const contracts::QolUiAdapter* ui_adapter();
 
 // 设置面板的迁移期薄封装：保持原面板的控件句柄和绘制回调签名。

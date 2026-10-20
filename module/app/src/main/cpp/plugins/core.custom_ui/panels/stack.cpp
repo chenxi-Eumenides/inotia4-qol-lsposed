@@ -21,6 +21,8 @@ uint64_t g_panel_snapshot_sequence = 0;
 bool g_unbind_pending = false;
 bool g_unbind_host_deactivate_started = false;
 bool g_back_requested = false;
+// 组件回调内请求的面板打开：延迟到帧安全点执行（回调内创建组件会被拒绝）。
+const char* g_open_requested = nullptr;
 
 void remove_pump_task() {
     if (g_pump_task != 0 && g_sdk != nullptr && g_sdk->scheduler.remove != nullptr) {
@@ -218,6 +220,12 @@ int32_t ui_panels_frame_pump(int64_t, void*) {
         if (drain_stack_for_unbind()) finish_unbind();
         return 1;
     }
+    // 帧边界消费延迟打开请求：组件点击回调内创建组件会被拒绝，必须移到这里。
+    if (g_open_requested != nullptr) {
+        const char* requested = g_open_requested;
+        g_open_requested = nullptr;
+        (void)ui_panels_open(requested);
+    }
     // 帧边界消费延迟关闭请求：此处不在弹窗事件/原生控件遍历内，关闭可安全执行。
     if (g_back_requested) {
         g_back_requested = false;
@@ -230,6 +238,12 @@ int32_t ui_panels_frame_pump(int64_t, void*) {
 
 bool ui_panels_open(const char* panel_id) {
     if (g_unbind_pending || panel_id == nullptr || panel_id[0] == '\0') return false;
+    // 组件回调内不能创建面板控件：记录请求，由帧泵在安全点执行。
+    if (ui_panels_components_callback_probe != nullptr &&
+        ui_panels_components_callback_probe()) {
+        g_open_requested = panel_id;
+        return true;
+    }
     const contracts::PanelProviderSpec* provider = provider_of(panel_id);
     if (provider == nullptr || provider->open == nullptr) return false;
     if (provider->owner != nullptr && g_popup_host != nullptr &&
@@ -295,6 +309,7 @@ bool ui_panels_back() {
 }
 
 void ui_panels_request_back() { g_back_requested = true; }
+
 
 bool ui_panels_deactivate_owner(const char* owner) {
     if (owner == nullptr || owner[0] == '\0') return false;

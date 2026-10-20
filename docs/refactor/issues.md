@@ -74,6 +74,8 @@
 
 SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前配置合同为 native Host 常驻管理设施持有的外部 `config.json` 三层模型（`enable`/`features`/`config`）：schema、Store、读写与管理 API 全部归 Host，`settings` 降级为普通成品页插件（id=`settings`），只渲染 Host feature catalog 并调用 Host 常驻管理 API，不再拥有配置语义；Kotlin 仅传输 raw body。旧 12 个平铺字段、旧 runtime gate 与旧 settings `bool` 桥已退出。合同见 `ARCHITECTURE.md` §2.2/§7.1/§7.2/§8.2、API 参考 §7.6 与审计记录 `docs/refactor/audits/core.settings-20261010/verification-log.md`（含 Stage1–3 Host 定向测试与 Debug 构建登记）。本轮未登记新增代码缺陷；验收范围和未执行项目见 `verification.md` §5.9。
 
+**SET-03（已修复，2026-10-21）**：设置页「打开调试面板」点击后面板不出现且界面失去输入。真机日志链条：设置页进程内调用 `ui_panels_open("debug_components")` → `panel enter` → `build_text_buttons` 的**装饰文本按钮**在无标题图集上下文返回 NotReady（`get_group_title_img_type()` 不可用）→ `create_components` 失败（`create result=6`）；宿主仍把未激活面板压栈，其 `panel_event` 对未激活状态返回 1，吞掉全部触摸。修复：①装饰按钮创建失败回退胶囊按钮（演示页可开）；②宿主在嵌套 `invoke_enter` 后复核 `active()`，失败立即出栈并恢复父面板；③调试面板未激活时不消费输入；④`ui_panels_open` 在组件点击回调内改为记录请求、由帧泵在安全点执行（防止回调内创建被拒）。
+
 ## 6. 引擎 / host / extension_bag（开放）
 
 | ID | 级 | 问题 | 证据 | 状态 |

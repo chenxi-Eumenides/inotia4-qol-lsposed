@@ -738,7 +738,7 @@ QolResult main_menu_gear_layout(void* parent, UiRect* out_rect, void* user) {
         // 主菜单树未就位/已切换：锚定层保留状态，下一帧重试。
         return contracts::error(kQolErrNotReady, "more games not ready", 20);
     }
-    constexpr int64_t kGearSize = 136;  // 自动出售入口 68 的 2 倍
+    constexpr int64_t kGearSize = 68;
     constexpr int64_t kGap = 10;
     *out_rect = {rect.x + rect.w + kGap, rect.y + (rect.h - kGearSize) / 2, kGearSize, kGearSize};
     static UiRect last_menu_rect{};
@@ -840,7 +840,7 @@ void settings_main_menu_more_games_draw(void* group, int32_t x, int32_t y, void*
         g_components->anchored_button_draw == nullptr) {
         return;
     }
-    const contracts::UiIconButtonDesc icon_desc{{0, 0, 136, 136}, 0x16, 0x00, 1, 1, "设置",
+    const contracts::UiIconButtonDesc icon_desc{{0, 0, 68, 68}, 0x16, 0x00, 1, 1, "设置",
         &more_games_clicked, nullptr, 0};
     const contracts::UiAnchoredButtonDesc desc{
         static_cast<uint32_t>(contracts::QolUiRootKind::kMainMenuParent), icon_desc};

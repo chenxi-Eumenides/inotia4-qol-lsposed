@@ -130,7 +130,7 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 - `autosell` 背包入口：`anchored_button_*`（`plugins/autosell/ui/panel.cpp`）。
 - `extension_bag` 装备页/商店/合成器页签：`anchored_control_*`（`runtime/tabs_ui.cpp`、`ui/store_tabs.cpp`、`ui/mix.cpp`），descriptor 可选依赖 `ui_components`。
 - 其余自建 root 面板（autosell 配置面板、save_backup、settings、debug 面板）：常规组件 API，无需锚定。
-- 主菜单入口齿轮：`plugins/settings/panels/settings.cpp` 的 `settings_main_menu_more_games_draw`（原版按钮照常绘制 + 锚定齿轮 136×136、原按钮右侧 +10、垂直居中）。
+- 主菜单入口齿轮：`plugins/settings/panels/settings.cpp` 的 `settings_main_menu_more_games_draw`（原版按钮照常绘制 + 锚定齿轮 68×68、原按钮右侧 +10、垂直居中）。
 - `main_menu_text_button_is_live` 仍保留为 Adapter 的菜单身份证明原语（当前生产入口不再使用替换路径）。
 
 新增游戏树挂载时必须选择上表机制；不得再手写「root 指针相等即认为句柄有效」的判断。
