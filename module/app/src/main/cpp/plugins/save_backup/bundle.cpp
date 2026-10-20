@@ -759,7 +759,7 @@ std::string build_meta_json(int source_slot, long long export_time_ms, int map_i
                             const std::string& original_sha256, const std::string& module_sha256,
                             const std::string& checksum, int class_idx,
                             const std::string& class_name, int warehouse_count,
-                            const std::string& warehouse_sha256) {
+                            const std::string& warehouse_sha256, int module_state) {
     std::string s = "{\"source_slot\":";
     s += std::to_string(source_slot);
     s += ",\"export_time\":" + std::to_string(export_time_ms);
@@ -777,8 +777,21 @@ std::string build_meta_json(int source_slot, long long export_time_ms, int map_i
     // 个人仓库（v0.8.x 追加）：数量与 blob 的 SHA-256（空仓库时 count=0、sha 为空串）。
     s += ",\"warehouse_count\":" + std::to_string(warehouse_count);
     s += ",\"warehouse_sha256\":\"" + warehouse_sha256 + "\"";
+    // sidecar 三态：0=absent、1=present；旧备份无该字段，解析时按 module 是否为空推断。
+    if (module_state >= 0) s += ",\"module_state\":" + std::to_string(module_state);
     s += "}";
     return s;
+}
+
+std::string compute_checksum(uint16_t bundle_version, const std::vector<uint8_t>& plain,
+                             const std::vector<uint8_t>& module,
+                             const std::vector<uint8_t>& warehouse_blob) {
+    std::vector<uint8_t> content = module;
+    // v1/v2 的旧公式不覆盖 warehouse 段，必须保持旧备份可导入/可删除。
+    if (bundle_version >= kBundleVersion) {
+        content.insert(content.end(), warehouse_blob.begin(), warehouse_blob.end());
+    }
+    return sha256_hex(plain, content).substr(0, 12);
 }
 
 void build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
@@ -837,11 +850,14 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
 
     std::vector<WarehouseFile> warehouse;
     bool has_warehouse = false;
+    const uint8_t* warehouse_blob = nullptr;
+    uint32_t warehouse_len = 0;
     if (version == kBundleVersionV2 || version == kBundleVersion) {
         if (off + 4 > body_size) return false;
-        const uint32_t warehouse_len = be32(bytes + off);
+        warehouse_len = be32(bytes + off);
         off += 4;
         if (warehouse_len > kMaxWarehouseBlobBytes || off + warehouse_len > body_size) return false;
+        warehouse_blob = bytes + off;
         const bool decoded = (version == kBundleVersionV2)
                                  ? decode_warehouse_v2(bytes + off, warehouse_len, warehouse)
                                  : decode_warehouse(bytes + off, warehouse_len, warehouse);
@@ -855,11 +871,17 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     off += 2;
     if (off + meta_len != body_size) return false;
 
+    out.bundle_version = version;
     out.source_slot = source_slot;
     out.export_time_ms = export_time_ms;
     out.orig_plain.assign(orig_plain, orig_plain + orig_len);
     out.module.assign(module, module + module_len);
     out.warehouse = std::move(warehouse);
+    if (warehouse_blob != nullptr && warehouse_len > 0) {
+        out.warehouse_blob.assign(warehouse_blob, warehouse_blob + warehouse_len);
+    } else {
+        out.warehouse_blob.clear();
+    }
     out.has_warehouse = has_warehouse;
     out.meta_json.assign(reinterpret_cast<const char*>(bytes + off), meta_len);
     out.size_bytes = static_cast<long long>(size);

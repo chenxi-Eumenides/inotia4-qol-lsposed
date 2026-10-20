@@ -330,6 +330,49 @@ void test_validate_warehouse() {
     CHECK(error == "warehouse name invalid");
 }
 
+// SB-12：checksum 覆盖全部可还原内容（v3 含 warehouse_blob；v1/v2 沿用旧公式）。
+void test_compute_checksum() {
+    namespace sb = save_backup;
+    WarehouseFile a;
+    a.suffix = ".wh4-000001a043a2bba1";
+    a.data = {0x01, 0x02};
+    WarehouseFile b = a;
+    b.data = {0x03, 0x04};
+    const std::vector<uint8_t> blob_a = sb::encode_warehouse({a});
+    const std::vector<uint8_t> blob_b = sb::encode_warehouse({b});
+    const std::vector<uint8_t> plain = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
+    const std::vector<uint8_t> module = {0x4D, 0x53};
+
+    // v3：blob 参与，内容不同 → checksum 不同。
+    const std::string v3_a = sb::compute_checksum(sb::kBundleVersion, plain, module, blob_a);
+    const std::string v3_b = sb::compute_checksum(sb::kBundleVersion, plain, module, blob_b);
+    CHECK(v3_a != v3_b);
+    std::vector<uint8_t> expected = module;
+    expected.insert(expected.end(), blob_a.begin(), blob_a.end());
+    CHECK(v3_a == sb::sha256_hex(plain, expected).substr(0, 12));
+    // v2：旧公式不覆盖 blob，两个 blob 得到同一 checksum。
+    CHECK(sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_a) ==
+          sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_b));
+    CHECK(sb::compute_checksum(sb::kBundleVersionV1, plain, module, blob_a) ==
+          sb::sha256_hex(plain, module).substr(0, 12));
+
+    // parse_bundle 保留版本与原始 blob。
+    std::vector<uint8_t> bundle;
+    sb::build_bundle(1, 123, plain, module, blob_a, "{}", bundle);
+    sb::ParsedBundle parsed;
+    CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
+    CHECK(parsed.bundle_version == sb::kBundleVersion);
+    CHECK(parsed.warehouse_blob == blob_a);
+
+    // metaJson 显式 module_state；缺省（-1）不写。
+    const std::string with_state =
+        sb::build_meta_json(0, 1, 1, 1, 0, 5, 0, "", "", "001122334455", -1, "", 0, "", 1);
+    CHECK(with_state.find("\"module_state\":1") != std::string::npos);
+    const std::string without_state =
+        sb::build_meta_json(0, 1, 1, 1, 0, 5, 0, "", "", "001122334455");
+    CHECK(without_state.find("module_state") == std::string::npos);
+}
+
 void test_parse_bundle_version_dispatch() {
     namespace sb = save_backup;
     WarehouseFile f0;
@@ -744,6 +787,7 @@ int main() {
     test_warehouse_v3_roundtrip();
     test_warehouse_v2_legacy_encoding();
     test_parse_bundle_version_dispatch();
+    test_compute_checksum();
     test_validate_warehouse();
     test_parse_bundle_rejects_short_orig_plain();
     test_warehouse_duplicate_suffix_rejected();

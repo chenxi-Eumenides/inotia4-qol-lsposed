@@ -1251,17 +1251,21 @@ std::string save_backup_export_json(int slot) {
         return result_error(err.c_str());
     }
 
-    // sidecar 缺失（如从未经 API 进档的槽）或损坏时仅导出原版明文；导入侧跳过 sidecar 步骤。
-    // read_container 只读 primary 且完整解码，损坏/缺失均返回非 ok（损坏 primary 不 quarantine）。
+    // sidecar 三态：present 写入 module；absent 明确记为 0 并在导入时清除目标 sidecar；
+    // 损坏/不可读整次导出失败，不再生成“仅原版”的不完整备份。
+    int module_state = 0;
     std::vector<uint8_t> module;
-    {
-        std::vector<uint8_t> container;
-        if (store_read_container(slot, container) == ContainerStatus::kOk) {
-            module.swap(container);
-        } else {
-            SB_LOG("save backup export slot=%d: module sidecar unavailable, exporting original only",
-                   slot);
-        }
+    switch (store_read_container(slot, module)) {
+        case ContainerStatus::kOk:
+            module_state = 1;
+            break;
+        case ContainerStatus::kNotFound:
+            module_state = 0;
+            module.clear();
+            break;
+        default:
+            SB_LOG("save backup export slot=%d: module sidecar unreadable", slot);
+            return result_error("module container unreadable");
     }
 
     // 个人仓库伴生文件（monster 改版）：收集同存档目录下 `save{slot}.dat.wh4-*` 普通文件
@@ -1384,11 +1388,10 @@ std::string save_backup_export_json(int slot) {
     const std::string module_sha = module.empty() ? std::string() : save_backup::sha256_hex(module, {});
     const std::string warehouse_sha =
         warehouse.empty() ? std::string() : save_backup::sha256_hex(warehouse_blob, {});
-    // checksum = sha256(origPlain ‖ module ‖ warehouseBlob) 前 12 位小写 hex。
+    // checksum = 全部可还原内容段：v3 为 sha256(origPlain ‖ module ‖ warehouseBlob) 前 12 位。
     // 无仓库时 warehouseBlob 为空 → 与旧版逐字节一致（硬约束）。
-    std::vector<uint8_t> module_and_wh = module;
-    module_and_wh.insert(module_and_wh.end(), warehouse_blob.begin(), warehouse_blob.end());
-    const std::string checksum = save_backup::sha256_hex(plain, module_and_wh).substr(0, 12);
+    const std::string checksum =
+        save_backup::compute_checksum(save_backup::kBundleVersion, plain, module, warehouse_blob);
 
     std::string dir;
     if (!backup_dir(dir)) return result_error("backup dir unavailable");
@@ -1401,24 +1404,33 @@ std::string save_backup_export_json(int slot) {
         save_backup::ParsedBundle parsed;
         if (read_file_bytes(existing, bytes) &&
             save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
-            save_backup::Entry entry;
-            save_backup::entry_from_bundle(file_name_of(existing), parsed, entry);
-            auto dit = g_map_names.find(entry.map_id);
-            if (dit != g_map_names.end()) entry.map_name = dit->second;
-            entry.class_name = save_backup_class_name(entry.class_idx);
-            SB_LOG("save backup deduplicated: %s (checksum=%s)", entry.file_name.c_str(),
-                   checksum.c_str());
-            return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) +
-                   ",\"deduplicated\":true}";
+            std::string inner_checksum;
+            const bool checksum_ok =
+                save_backup::json_find_string(parsed.meta_json, "checksum", inner_checksum) &&
+                inner_checksum == checksum &&
+                save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
+                                              parsed.module, parsed.warehouse_blob) == checksum;
+            if (checksum_ok) {
+                save_backup::Entry entry;
+                save_backup::entry_from_bundle(file_name_of(existing), parsed, entry);
+                auto dit = g_map_names.find(entry.map_id);
+                if (dit != g_map_names.end()) entry.map_name = dit->second;
+                entry.class_name = save_backup_class_name(entry.class_idx);
+                SB_LOG("save backup deduplicated: %s (checksum=%s)", entry.file_name.c_str(),
+                       checksum.c_str());
+                return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) +
+                       ",\"deduplicated\":true}";
+            }
         }
-        SB_LOG("save backup dedup hit unreadable, writing new bundle: %s", existing.c_str());
+        SB_LOG("save backup dedup hit unreadable or mismatched, writing new bundle: %s",
+               existing.c_str());
     }
 
     const std::string class_name = save_backup_class_name(class_idx);
     const std::string meta_json = save_backup::build_meta_json(
         slot, export_time_ms, map_id, hero_level, hero_index, version, save_time, original_sha,
         module_sha, checksum, class_idx, class_name, static_cast<int>(warehouse.size()),
-        warehouse_sha);
+        warehouse_sha, module_state);
     std::vector<uint8_t> bundle;
     save_backup::build_bundle(slot, export_time_ms, plain, module, warehouse_blob, meta_json, bundle);
 
@@ -1477,6 +1489,26 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     save_backup::ParsedBundle parsed;
     if (!read_file_bytes(path, bytes) ||
         !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
+        return result_error("backup unreadable or corrupt");
+    }
+    // checksum 必须覆盖全部可还原内容（v3 含 warehouse_blob），不能只信 meta 声明。
+    std::string meta_checksum;
+    if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
+        !save_backup::valid_checksum(meta_checksum) ||
+        meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
+                                                       parsed.module, parsed.warehouse_blob)) {
+        return result_error("backup checksum mismatch");
+    }
+    // module_state：新备份显式 0/1；旧备份无字段时按 module 是否为空推断。
+    long long module_state_raw = -1;
+    const bool has_module_state =
+        save_backup::json_find_int(parsed.meta_json, "module_state", module_state_raw);
+    if (has_module_state && module_state_raw != 0 && module_state_raw != 1) {
+        return result_error("backup unreadable or corrupt");
+    }
+    const bool module_present =
+        has_module_state ? module_state_raw == 1 : !parsed.module.empty();
+    if (module_present != !parsed.module.empty()) {
         return result_error("backup unreadable or corrupt");
     }
     // shared 状态（map 名表/目录根）在锁外只读；此处起进入锁外段。
@@ -1593,15 +1625,25 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                                   "save file write failed; rollback failed");
     }
 
-    // 5) sidecar：经槽操作 lease 显式入口重定槽（按源容器头槽号校验）并双写 primary +
-    //    last-good；generation 由 store 按容器语义递增（空 module = 仅原版备份，跳过）。
-    if (!parsed.module.empty()) {
+    // 5) sidecar：present 经槽操作 lease 显式入口重定槽并双写 primary + last-good；
+    //    absent 是完整替换语义——dat 写入后必须删除目标槽现存 sidecar。
+    if (module_present) {
         bool store_touched = false;
         const bool imported = store_import_container_locked_gate(guard, slot, parsed.module.data(),
                                                                  parsed.module.size(),
                                                                  &store_touched);
         sidecar_touched = store_touched;
         if (!imported) {
+            const save_backup::RollbackResult rollback = restore_from_rollback(
+                slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                sidecar_touched, &guard);
+            return fail_with_rollback(rollback, "module container import failed",
+                                      "module container import failed; rollback failed");
+        }
+    } else {
+        // 删除入口可能已删除部分文件，回滚统一按“已触碰”处理以恢复快照。
+        sidecar_touched = true;
+        if (!store_delete_slot_locked_gate(guard, slot)) {
             const save_backup::RollbackResult rollback = restore_from_rollback(
                 slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
                 sidecar_touched, &guard);
@@ -1723,6 +1765,21 @@ std::string save_backup_delete_json(const char* checksum) {
     if (!backup_dir(dir)) return result_error("backup not found");
     const std::string path = find_by_checksum(dir, ck);
     if (path.empty()) return result_error("backup not found");
+    // 删除前校验内容 checksum：防止篡改 payload 但仍以原 checksum 标识的 bundle 被清掉后
+    // 无法追溯；解析失败沿用 unreadable 文案。
+    std::vector<uint8_t> bytes;
+    save_backup::ParsedBundle parsed;
+    if (!read_file_bytes(path, bytes) ||
+        !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
+        return result_error("backup unreadable or corrupt");
+    }
+    std::string meta_checksum;
+    if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
+        !save_backup::valid_checksum(meta_checksum) ||
+        meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
+                                                       parsed.module, parsed.warehouse_blob)) {
+        return result_error("backup checksum mismatch");
+    }
     if (::unlink(path.c_str()) != 0) {
         SB_LOG("save backup delete failed: %s", path.c_str());
         return result_error("delete failed");

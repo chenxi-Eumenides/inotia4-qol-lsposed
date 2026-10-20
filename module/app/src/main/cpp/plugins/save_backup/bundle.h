@@ -73,6 +73,7 @@ constexpr uint8_t kWarehouseFlagPlain = 1u << 0;
 
 // bundle 解析产物（逐段边界 + CRC 校验通过后）。
 struct ParsedBundle {
+    uint16_t bundle_version = 0;
     int source_slot = 0;
     long long export_time_ms = 0;
     std::vector<uint8_t> orig_plain;
@@ -80,6 +81,8 @@ struct ParsedBundle {
     // 个人仓库：v2/v3 bundle 才置 has_warehouse=true（即使仓库列表为空）；
     // v1 旧备份 has_warehouse=false、warehouse 为空——导入侧据此完全跳过仓库写回。
     std::vector<WarehouseFile> warehouse;
+    // 原始 warehouseBlob 字节（不重编码）：v3 checksum 覆盖它以校验全部可还原内容。
+    std::vector<uint8_t> warehouse_blob;
     bool has_warehouse = false;
     std::string meta_json;
     long long size_bytes = 0;
@@ -198,14 +201,21 @@ InlineWarehouseStrip warehouse_strip_inline_segment(std::vector<uint8_t>& plain)
 // ---- bundle 组装与解析 ----
 
 // metaJson（字段顺序遵循 Kotlin 历史实现，扁平数字/字符串；class_idx/class_name 追加，
-// warehouse_count/warehouse_sha256 再追加在末尾；旧备份缺失时走默认值，不影响既有解析）。
+// warehouse_count/warehouse_sha256 再追加；module_state>=0 时再追加该字段；旧备份缺失时走默认值）。
 std::string build_meta_json(int source_slot, long long export_time_ms, int map_id, int hero_level,
                             int hero_index, int save_version, long long save_time,
                             const std::string& original_sha256, const std::string& module_sha256,
                             const std::string& checksum, int class_idx = -1,
                             const std::string& class_name = std::string(),
                             int warehouse_count = 0,
-                            const std::string& warehouse_sha256 = std::string());
+                            const std::string& warehouse_sha256 = std::string(),
+                            int module_state = -1);
+
+// 备份内容校验：v1/v2 为 sha256(plain ‖ module)[0:12]（旧公式，warehouse 不参与）；
+// v3+ 为 sha256(plain ‖ module ‖ warehouse_blob)[0:12]（覆盖全部可还原内容段）。
+std::string compute_checksum(uint16_t bundle_version, const std::vector<uint8_t>& plain,
+                             const std::vector<uint8_t>& module,
+                             const std::vector<uint8_t>& warehouse_blob);
 
 // v2 组装：warehouse_blob 位于 module 与 meta_json 之间（空 blob 表示无仓库）。
 void build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,

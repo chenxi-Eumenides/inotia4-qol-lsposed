@@ -102,7 +102,12 @@ QolResult op_delete_to_trash(void*, QolOwnerToken owner, const QolSlotOperationL
 }
 
 // ---- store 面（真实 infra，两段式 read_container 转发）----
+bool g_force_read_corrupt = false;
 QolResult store_read_container(int32_t slot, uint8_t* out, uint32_t capacity, uint32_t* out_size) {
+    if (g_force_read_corrupt) {
+        *out_size = 0;
+        return contracts::error(kQolErrInternal, "store error", 11);
+    }
     static std::vector<std::vector<uint8_t>> keep;
     std::vector<uint8_t> probe;
     const auto status = qol::infra::store::read_container(slot, &probe);
@@ -292,15 +297,19 @@ bool write_file(const std::string& path, const std::string& bytes) {
 }
 
 // 构造 bundle：orig_plain 满足块表布局（block0=8+rel），module 为给定容器；
-// 写入 external 根的 backups/ 目录（feature 的 backup_dir 扫描位置）。
-std::string make_bundle(const std::string& external_root, const std::string& checksum,
+// checksum 由内容计算（v3 覆盖 plain‖module），写入 external 根的 backups/ 目录。
+std::string make_bundle(const std::string& external_root, const std::string&,
                         const std::vector<uint8_t>& module) {
     std::vector<uint8_t> plain(16, 0);
     plain[8] = 4;   // u16 块表 rel=4（低字节）：block0 = 8 + 4 = 12
     plain[12] = 0;  // slot 字节占位
+    const std::string checksum =
+        save_backup::compute_checksum(save_backup::kBundleVersion, plain, module, {});
+    const std::string meta =
+        "{\"checksum\":\"" + checksum + "\",\"module_state\":" +
+        (module.empty() ? "0" : "1") + "}";
     std::vector<uint8_t> bundle;
-    save_backup::build_bundle(0, 12345, plain, module, {},
-                              "{\"checksum\":\"" + checksum + "\"}", bundle);
+    save_backup::build_bundle(0, 12345, plain, module, {}, meta, bundle);
     const std::string dir = external_root + "/backups";
     if (::mkdir(dir.c_str(), 0755) != 0 && errno != EEXIST) return std::string();
     const std::string path = dir + "/backup_s0_" + checksum + ".qol_save";
@@ -362,6 +371,57 @@ int main() {
     const std::string checksum = make_bundle(root, "aaaaaaaaaaaa", module_container);
     CHECK(!checksum.empty());
 
+    // ---- SB-12：payload 被改写但 meta checksum 未变 → 导入/删除拒绝 ----
+    {
+        std::vector<uint8_t> plain_a(16, 0x11);
+        std::vector<uint8_t> plain_b = plain_a;
+        plain_b[5] ^= 0xFF;
+        const std::string tampered_ck =
+            save_backup::compute_checksum(save_backup::kBundleVersion, plain_a, {}, {});
+        std::vector<uint8_t> tampered;
+        save_backup::build_bundle(0, 1, plain_b, {}, {},
+                                  "{\"checksum\":\"" + tampered_ck + "\",\"module_state\":0}",
+                                  tampered);
+        const std::string tampered_path =
+            root + "/backups/tampered_" + tampered_ck + ".qol_save";
+        CHECK(write_file(tampered_path, std::string(tampered.begin(), tampered.end())));
+        const std::string tampered_import =
+            save_backup_import_json(tampered_ck.c_str(), 1);
+        CHECK(tampered_import.find("backup checksum mismatch") != std::string::npos);
+        const std::string tampered_delete =
+            save_backup_delete_json(tampered_ck.c_str());
+        CHECK(tampered_delete.find("backup checksum mismatch") != std::string::npos);
+        CHECK(::access(tampered_path.c_str(), F_OK) == 0);
+    }
+
+    // ---- SB-12：v2 旧公式（warehouse 不参与 checksum）仍可导入 ----
+    {
+        save_backup::WarehouseFile wf;
+        wf.suffix = ".wh4-000001a043a2bba1";
+        wf.data = {0xAA, 0xBB, 0xCC, 0xDD};
+        const std::vector<uint8_t> wh_blob = save_backup::encode_warehouse_v2({wf});
+        std::vector<uint8_t> plain_v2(16, 0);
+        plain_v2[8] = 4;
+        const std::string ck_v2 =
+            save_backup::compute_checksum(save_backup::kBundleVersionV2, plain_v2, {}, wh_blob);
+        std::vector<uint8_t> v2;
+        save_backup::build_bundle(0, 1, plain_v2, {}, wh_blob,
+                                  "{\"checksum\":\"" + ck_v2 + "\",\"module_state\":0}", v2);
+        v2[4] = 0;  // version = 2（大端）
+        v2[5] = 2;
+        const size_t body = v2.size() - 4;
+        const uint32_t crc = save_backup::crc32_ieee(v2.data(), body);
+        v2[body] = static_cast<uint8_t>(crc >> 24);
+        v2[body + 1] = static_cast<uint8_t>(crc >> 16);
+        v2[body + 2] = static_cast<uint8_t>(crc >> 8);
+        v2[body + 3] = static_cast<uint8_t>(crc);
+        const std::string v2_path = root + "/backups/v2_" + ck_v2 + ".qol_save";
+        CHECK(write_file(v2_path, std::string(v2.begin(), v2.end())));
+        const std::string v2_import = save_backup_import_json(ck_v2.c_str(), 2);
+        CHECK(body_ok(v2_import));
+        CHECK(::access((save_dir + "/save2.dat.wh4-000001a043a2bba1").c_str(), F_OK) == 0);
+    }
+
     // ---- 导入门禁：游戏运行中（current_slot >= 0）拒绝，dat/sidecar 均不变 ----
     g_current_slot = 0;
     {
@@ -390,6 +450,11 @@ int main() {
     // ---- 导出 fail-closed：单个 wh4 超过 4 MiB → 整次导出失败，不组装 bundle ----
     const std::string export_ok = save_backup_export_json(0);
     CHECK(body_ok(export_ok));
+    // ---- SB-05：sidecar corrupt → 整次导出失败 ----
+    g_force_read_corrupt = true;
+    const std::string export_corrupt = save_backup_export_json(0);
+    g_force_read_corrupt = false;
+    CHECK(export_corrupt.find("module container unreadable") != std::string::npos);
     const std::string big_wh = save_dir + "/save0.dat.wh4-0000000000000001";
     CHECK(write_file(big_wh, std::string(4 * 1024 * 1024 + 1, 'X')));
     const std::string too_big = save_backup_export_json(0);
@@ -493,6 +558,45 @@ int main() {
     // referenced lease 保留：新 gate 申请被拒（occupier 不能接管）。
     CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &verify).code == kQolErrBusy);
     CHECK(::rmdir(blocked_last_good_tmp.c_str()) == 0);
+
+    // ---- SB-05：absent 备份导入 → 清除目标槽现存 sidecar ----
+    {
+        CHECK(qol::infra::store::write_section(1, "m", 1, &payload, 1) ==
+              qol::infra::store::Status::kOk);
+        std::vector<uint8_t> existing;
+        CHECK(qol::infra::store::read_container(1, &existing) ==
+              qol::infra::store::Status::kOk);
+        const std::string absent_ck = make_bundle(root, "", {});
+        const std::string imported = save_backup_import_json(absent_ck.c_str(), 1);
+        CHECK(body_ok(imported));
+        std::vector<uint8_t> gone;
+        CHECK(qol::infra::store::read_container(1, &gone) ==
+              qol::infra::store::Status::kNotFound);
+    }
+
+    // ---- SB-05：present 备份覆盖目标槽旧 sidecar ----
+    {
+        uint8_t module_value = 7;
+        CHECK(qol::infra::store::write_section(1, "m", 1, &module_value, 1) ==
+              qol::infra::store::Status::kOk);
+        std::vector<uint8_t> incoming;
+        CHECK(qol::infra::store::read_container(1, &incoming) ==
+              qol::infra::store::Status::kOk);
+        uint8_t old_value = 2;
+        CHECK(qol::infra::store::write_section(1, "old", 1, &old_value, 1) ==
+              qol::infra::store::Status::kOk);
+        const std::string present_ck = make_bundle(root, "", incoming);
+        const std::string imported = save_backup_import_json(present_ck.c_str(), 1);
+        CHECK(body_ok(imported));
+        std::vector<uint8_t> old_out;
+        std::vector<uint8_t> module_out;
+        uint16_t version = 0;
+        CHECK(qol::infra::store::read_section(1, "old", &old_out, &version) ==
+              qol::infra::store::Status::kNotFound);
+        CHECK(qol::infra::store::read_section(1, "m", &module_out, &version) ==
+              qol::infra::store::Status::kOk);
+        CHECK(module_out == std::vector<uint8_t>({7}));
+    }
 
     // ---- token 清零（停用）后前置门不可用 → 拒绝而非越权 ----
     save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(), nullptr, 0);
