@@ -336,6 +336,11 @@ bool write_file(const std::string& path, const std::string& bytes) {
     return true;
 }
 
+std::vector<uint8_t> read_file_vector(const std::string& path) {
+    const std::string bytes = read_file(path);
+    return std::vector<uint8_t>(bytes.begin(), bytes.end());
+}
+
 // 构造 bundle：orig_plain 满足块表布局（block0=8+rel），module 为给定容器；
 // checksum 由内容计算（v3 覆盖 plain‖module），写入 external 根的 backups/ 目录。
 std::string make_bundle(const std::string& external_root, const std::string&,
@@ -703,6 +708,100 @@ int main() {
     // referenced lease 保留：新 gate 申请被拒（occupier 不能接管）。
     CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &verify).code == kQolErrBusy);
     CHECK(::rmdir(blocked_last_good_tmp.c_str()) == 0);
+
+    // ---- B3：指定目录导出核心（原子覆盖、无 tmp 残留）----
+    const std::string auto_dir = root + "/backups/autobackup";
+    std::string core_error;
+    CHECK(save_backup_export_slot_to_dir(0, auto_dir.c_str(), "manual_test.qol_save",
+                                         &core_error));
+    CHECK(::access((auto_dir + "/manual_test.qol_save").c_str(), F_OK) == 0);
+    CHECK(!has_entry_prefix(auto_dir, "manual_test.qol_save.tmp-"));
+    CHECK(save_backup_export_slot_to_dir(0, auto_dir.c_str(), "manual_test.qol_save",
+                                         &core_error));
+    CHECK(!has_entry_prefix(auto_dir, "manual_test.qol_save.tmp-"));
+    {
+        std::vector<uint8_t> manual_bytes;
+        save_backup::ParsedBundle manual;
+        manual_bytes = read_file_vector(auto_dir + "/manual_test.qol_save"); CHECK(!manual_bytes.empty());
+        CHECK(save_backup::parse_bundle(manual_bytes.data(), manual_bytes.size(), manual));
+    }
+
+    // ---- C：自动备份（首导出、指纹跳过、源变化重导、失败保留旧文件）----
+    {
+        const std::string auto_bundle = auto_dir + "/autosave_s0.qol_save";
+        const std::string auto_fp = auto_dir + "/autosave_s0.fingerprint";
+        g_plain_variant = 3;
+        save_backup_autobackup_pre_save(0);
+        CHECK(::access(auto_bundle.c_str(), F_OK) == 0);
+        std::vector<uint8_t> bytes1;
+        save_backup::ParsedBundle parsed1;
+        bytes1 = read_file_vector(auto_bundle); CHECK(!bytes1.empty());
+        CHECK(save_backup::parse_bundle(bytes1.data(), bytes1.size(), parsed1));
+        std::string meta_ck;
+        CHECK(save_backup::json_find_string(parsed1.meta_json, "checksum", meta_ck));
+        CHECK(meta_ck == save_backup::compute_checksum(
+                             parsed1.bundle_version, parsed1.orig_plain, parsed1.module,
+                             parsed1.warehouse_blob));
+        CHECK(parsed1.orig_plain.size() == 64 && parsed1.orig_plain[12] == 0xFF);
+        CHECK(parsed1.orig_plain[6] == 3);
+        const std::string fp1 = read_file(auto_fp);
+        struct stat st1 {};
+        CHECK(::stat(auto_bundle.c_str(), &st1) == 0);
+
+        // 未变化：指纹一致，目标文件不重写。
+        ::usleep(2000);
+        save_backup_autobackup_pre_save(0);
+        struct stat st2 {};
+        CHECK(::stat(auto_bundle.c_str(), &st2) == 0);
+        CHECK(st1.st_ino == st2.st_ino);
+        CHECK(st1.st_mtim.tv_sec == st2.st_mtim.tv_sec);
+        CHECK(st1.st_mtim.tv_nsec == st2.st_mtim.tv_nsec);
+        CHECK(read_file(auto_fp) == fp1);
+
+        // dat 变化：重新导出，内容随 fake load_data 变化。
+        ::usleep(2000);
+        CHECK(write_file(dat_path, "AUTOBACKUP-DAT-1"));
+        g_plain_variant = 4;
+        save_backup_autobackup_pre_save(0);
+        struct stat st3 {};
+        CHECK(::stat(auto_bundle.c_str(), &st3) == 0);
+        CHECK(st3.st_mtim.tv_nsec != st2.st_mtim.tv_nsec || st3.st_ino != st2.st_ino);
+        std::vector<uint8_t> bytes3;
+        save_backup::ParsedBundle parsed3;
+        bytes3 = read_file_vector(auto_bundle); CHECK(!bytes3.empty());
+        CHECK(save_backup::parse_bundle(bytes3.data(), bytes3.size(), parsed3));
+        CHECK(parsed3.orig_plain[6] == 4);
+        CHECK(read_file(auto_fp) != fp1);
+
+        // wh4 变化：指纹变化并重新导出。
+        ::usleep(2000);
+        const std::string auto_wh = save_dir + "/save0.dat.wh4-autobk000001";
+        CHECK(write_file(auto_wh, "WH4-AUTOBACKUP"));
+        save_backup_autobackup_pre_save(0);
+        struct stat st4 {};
+        CHECK(::stat(auto_bundle.c_str(), &st4) == 0);
+        CHECK(st4.st_mtim.tv_nsec != st3.st_mtim.tv_nsec || st4.st_ino != st3.st_ino);
+        std::vector<uint8_t> bytes4;
+        save_backup::ParsedBundle parsed4;
+        bytes4 = read_file_vector(auto_bundle); CHECK(!bytes4.empty());
+        CHECK(save_backup::parse_bundle(bytes4.data(), bytes4.size(), parsed4));
+        CHECK(parsed4.warehouse.size() == 1);
+        CHECK(::unlink(auto_wh.c_str()) == 0);
+
+        // 写目录不可写：不崩溃，旧文件保留。
+        if (::geteuid() != 0) {
+            struct stat before {};
+            CHECK(::stat(auto_bundle.c_str(), &before) == 0);
+            CHECK(::chmod(auto_dir.c_str(), 0500) == 0);
+            ::usleep(2000);
+            save_backup_autobackup_pre_save(0);
+            struct stat after {};
+            CHECK(::stat(auto_bundle.c_str(), &after) == 0);
+            CHECK(before.st_ino == after.st_ino);
+            CHECK(before.st_mtim.tv_nsec == after.st_mtim.tv_nsec);
+            CHECK(::chmod(auto_dir.c_str(), 0755) == 0);
+        }
+    }
 
     // ---- SB-05：absent 备份导入 → 清除目标槽现存 sidecar ----
     {

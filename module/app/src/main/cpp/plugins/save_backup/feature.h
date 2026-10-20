@@ -25,6 +25,15 @@ void save_backup_recover_deletes();
 // 游戏主线程刷新 0..2 槽的 exists/hero_index/hero_level/hero_class 快照；HTTP/绘制线程只读缓存。
 void save_backup_refresh_slot_meta_cache();
 
+// 只构包/落盘到指定目录：不去重、不取 lease、不产生 HTTP JSON；调用方保证线程与串行。
+// dir 内以 file_name 原子覆盖写入（tmp+rename，失败保留旧文件）。
+bool save_backup_export_slot_to_dir(int32_t slot, const char* dir, const char* file_name,
+                                    std::string* out_error);
+
+// save.pre_save 观察者入口：主线程导出当前槽到 backups/autobackup/autosave_s<N>.qol_save，
+// 每槽 1 份原子覆盖；失败只记 WARN，不阻断保存。
+void save_backup_autobackup_pre_save(int32_t slot);
+
 // 插件装配期注入 Host SDK / Game Host；业务回调通过该上下文访问宿主适配面。
 // owner_token 为宿主按注册身份注入的 token（PluginContext.owner_token 原样透传），
 // 槽操作前置门以该 token 申请 lease；停用/解绑传 0。

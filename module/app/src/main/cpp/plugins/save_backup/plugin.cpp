@@ -9,6 +9,7 @@
 #include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/save_facts.h"
+#include "../../contracts/save_pre_save.h"
 #include "../../contracts/game_ports/save_call_port.h"
 #include "../../contracts/game_ports/save_write_port.h"
 #include "../../contracts/commands.h"
@@ -37,6 +38,10 @@ const contracts::CapabilityRequirement kRequires[] = {
     {
         contracts::kSaveFactsCapabilityId,
         {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
+    },
+    {
+        contracts::kSavePreSaveCapabilityId,
+        {contracts::kSavePreSaveVersion.major, contracts::kSavePreSaveVersion.minor},
     },
 };
 
@@ -74,6 +79,12 @@ std::atomic<bool> g_active{true};
 
 // 主线程槽元数据刷新任务（RenderPre，每 30 帧）；0 表示未注册。
 uint64_t g_slot_meta_task = 0;
+
+// save.pre_save 观察者：保存前自动备份。
+const contracts::SavePreSaveApi* g_pre_save_api = nullptr;
+uint64_t g_pre_save_observer = 0;
+
+void pre_save_cb(void*, int32_t slot) { save_backup_autobackup_pre_save(slot); }
 
 int32_t slot_meta_tick(int64_t, void*) {
     save_backup_refresh_slot_meta_cache();
@@ -240,33 +251,62 @@ const contracts::HttpEndpointDescriptor kSbHttpEndpoints[] = {
 
 int plugin_install(contracts::PluginContext& ctx) {
     const void* save_facts_iface = nullptr;
+    const void* pre_save_iface = nullptr;
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
         !contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kSaveFactsCapabilityId,
             {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor},
             &save_facts_iface)) ||
-        save_facts_iface == nullptr || ctx.ports == nullptr || ctx.port_count != 1 ||
-        ctx.ports[0] == nullptr) {
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kSavePreSaveCapabilityId,
+            {contracts::kSavePreSaveVersion.major, contracts::kSavePreSaveVersion.minor},
+            &pre_save_iface)) ||
+        save_facts_iface == nullptr || pre_save_iface == nullptr || ctx.ports == nullptr ||
+        ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
     const auto* save_call = static_cast<const contracts::QolSaveCallPort*>(ctx.ports[0]);
     const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(save_facts_iface);
+    const auto* pre_save = static_cast<const contracts::SavePreSaveApi*>(pre_save_iface);
     if (!contracts::satisfies(save_call->abi_version,
                               {contracts::kQolPortSaveCallVersion.major,
                                contracts::kQolPortSaveCallVersion.minor}) ||
         save_call->write.free_data == nullptr || save_call->write.encrypt == nullptr ||
         save_call->write.mark_stale == nullptr || save_facts->load_data == nullptr ||
         save_facts->slot_exists == nullptr || save_facts->hub_key == nullptr ||
-        save_facts->current_slot == nullptr) {
+        save_facts->current_slot == nullptr || pre_save->abi.size < sizeof(*pre_save) ||
+        !contracts::satisfies({pre_save->abi.major, pre_save->abi.minor},
+                              {contracts::kSavePreSaveVersion.major,
+                               contracts::kSavePreSaveVersion.minor}) ||
+        pre_save->register_observer == nullptr || pre_save->unregister_observer == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
     save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game, ctx.owner_token);
     g_active.store(true, std::memory_order_release);
+    if (g_pre_save_observer == 0) {
+        uint64_t observer = 0;
+        if (!contracts::succeeded(
+                pre_save->register_observer(ctx.owner_token, &pre_save_cb, nullptr, &observer)) ||
+            observer == 0) {
+            g_active.store(false, std::memory_order_release);
+            save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+            return 1;
+        }
+        g_pre_save_api = pre_save;
+        g_pre_save_observer = observer;
+    }
     // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
     if (ctx.sdk == nullptr || ctx.sdk->panels.register_provider == nullptr ||
         !contracts::succeeded(ctx.sdk->panels.register_provider(&kPanelProvider))) {
+        if (g_pre_save_observer != 0 && g_pre_save_api != nullptr &&
+            g_pre_save_api->unregister_observer != nullptr) {
+            (void)g_pre_save_api->unregister_observer(ctx.owner_token, g_pre_save_observer);
+        }
+        g_pre_save_observer = 0;
+        g_pre_save_api = nullptr;
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
     // 游戏主线程刷新槽元数据快照；HTTP 导出只读缓存，不跨线程读游戏槽结构。
@@ -301,6 +341,12 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     }
+    if (g_pre_save_observer != 0 && g_pre_save_api != nullptr &&
+        g_pre_save_api->unregister_observer != nullptr) {
+        (void)g_pre_save_api->unregister_observer(ctx.owner_token, g_pre_save_observer);
+    }
+    g_pre_save_observer = 0;
+    g_pre_save_api = nullptr;
     save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
 }
 
@@ -361,7 +407,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2, kRequires,  // requires=ui_panels + save.facts
+    3, kRequires,  // requires=ui_panels + save.facts + save.pre_save
     2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）

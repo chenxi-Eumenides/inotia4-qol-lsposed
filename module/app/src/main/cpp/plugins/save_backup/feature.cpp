@@ -1236,6 +1236,97 @@ std::string save_backup_map_name(int map_id) {
     return it != g_map_names.end() ? it->second : std::string();
 }
 
+struct FileStamp {
+    bool exists = false;
+    long long size = 0;
+    long long mtime_sec = 0;
+    long long mtime_nsec = 0;
+};
+
+static FileStamp file_stamp(const std::string& path) {
+    struct stat info{};
+    if (::lstat(path.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) return {};
+    return FileStamp{true, static_cast<long long>(info.st_size),
+                     static_cast<long long>(info.st_mtim.tv_sec),
+                     static_cast<long long>(info.st_mtim.tv_nsec)};
+}
+
+// 自动备份指纹：只记录影响导出内容/来源的文件状态，不读文件内容。
+static std::string autobackup_fingerprint(int slot, const std::string& data_dir,
+                                          const std::string& external_dir) {
+    std::string save_dir;
+    const bool have_save_dir = locate_save_directory_at(data_dir, save_dir) == 0;
+    const FileStamp dat =
+        have_save_dir ? file_stamp(save_dir + "/save" + std::to_string(slot) + ".dat") : FileStamp{};
+    const FileStamp sidecar =
+        file_stamp(external_dir + "/saves/slot-" + std::to_string(slot) + ".qol-save");
+    const std::vector<std::string> wh_names =
+        have_save_dir ? qol::features::save_backup::list_warehouse_companions(save_dir, slot)
+                      : std::vector<std::string>{};
+
+    std::string text = "v1\n";
+    text += "dat " + std::to_string(dat.exists ? 1 : 0) + " " + std::to_string(dat.size) + " " +
+            std::to_string(dat.mtime_sec) + " " + std::to_string(dat.mtime_nsec) + "\n";
+    text += "sidecar " + std::to_string(sidecar.exists ? 1 : 0) + " " +
+            std::to_string(sidecar.size) + " " + std::to_string(sidecar.mtime_sec) + " " +
+            std::to_string(sidecar.mtime_nsec) + "\n";
+    text += "wh4 " + std::to_string(wh_names.size()) + "\n";
+    for (const std::string& name : wh_names) {
+        const FileStamp stamp = file_stamp(save_dir + "/" + name);
+        text += name + " " + std::to_string(stamp.size) + " " +
+                std::to_string(stamp.mtime_sec) + " " + std::to_string(stamp.mtime_nsec) + "\n";
+    }
+    return text;
+}
+
+void save_backup_autobackup_pre_save(int32_t slot) {
+    if (slot < 0 || slot > 2) return;
+    static std::atomic<bool> running{false};
+    bool expected = false;
+    if (!running.compare_exchange_strong(expected, true)) return;
+    struct RunningReset {
+        std::atomic<bool>& flag;
+        ~RunningReset() { flag.store(false); }
+    } reset{running};
+
+    save_backup_refresh_slot_meta_cache();
+    std::string data_dir;
+    std::string external_dir;
+    {
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        data_dir = g_sb_data_dir;
+        external_dir = g_sb_external_dir;
+    }
+    if (external_dir.empty()) {
+        SB_LOG_WARN("autobackup slot=%d skipped: external dir unavailable", slot);
+        return;
+    }
+    const std::string dir = external_dir + "/backups/autobackup";
+    if (!ensure_dir(dir)) {
+        SB_LOG_WARN("autobackup slot=%d skipped: backup dir unavailable", slot);
+        return;
+    }
+    const std::string stem = "autosave_s" + std::to_string(slot);
+    const std::string bundle_path = dir + "/" + stem + ".qol_save";
+    const std::string fingerprint_path = dir + "/" + stem + ".fingerprint";
+    const std::string current = autobackup_fingerprint(slot, data_dir, external_dir);
+    std::vector<uint8_t> previous;
+    if (file_exists(bundle_path) && read_file_bytes(fingerprint_path, previous) &&
+        std::string(previous.begin(), previous.end()) == current) {
+        return;
+    }
+    std::string error;
+    if (!save_backup_export_slot_to_dir(slot, dir.c_str(), (stem + ".qol_save").c_str(), &error)) {
+        SB_LOG_WARN("autobackup slot=%d export failed: %s", slot, error.c_str());
+        return;
+    }
+    if (!write_file_bytes_atomic(fingerprint_path,
+                                 reinterpret_cast<const uint8_t*>(current.data()),
+                                 current.size())) {
+        SB_LOG_WARN("autobackup slot=%d fingerprint write failed", slot);
+    }
+}
+
 const char* save_backup_class_name(int class_idx) {
     // 与游戏 CHARCLASSBASE 文本逐条核对（apk/static-data/tables/CHARCLASSBASE.json
     // + text/zh-Hans.json，0..5）：不使用 Kotlin 下发通道，避免新增 JNI/HTTP 依赖；
@@ -1379,40 +1470,68 @@ std::string save_backup_list_json() {
     return s + "]}";
 }
 
-static std::string export_json_with_lease(int slot) {
-    const SbDirs dirs = snapshot_dirs();
-    const std::unordered_map<int, std::string> map_names = snapshot_map_names();
-    // 先收集完整快照（dat/sidecar/warehouse），再组装 bundle；行为与旧导出逐字节一致。
+struct BuiltExport {
+    std::vector<uint8_t> bundle;
+    std::string checksum;
+    std::string original_sha256;
+    std::string module_sha256;
+    std::string class_name;
+    long long export_time_ms = 0;
+    long long save_time = 0;
+    int map_id = 0;
+    int hero_level = -1;
+    int hero_index = -1;
+    int class_idx = -1;
+    int save_version = 0;
+    int warehouse_count = 0;
+};
+
+// 构包共享实现：snapshot → meta/checksum → bundle；不落盘、不去重。
+static bool build_export_bundle(int slot, BuiltExport& out, std::string& err) {
     bind_backup_files_source();
     qol::features::save_backup::SlotSnapshot snapshot;
-    std::string err;
-    if (!qol::features::save_backup::collect_slot_snapshot(slot, snapshot, err)) {
-        return result_error(err.c_str());
-    }
-    const std::vector<uint8_t>& plain = snapshot.dat.plain;
-    const int map_id = snapshot.dat.map_id;
-    const long long save_time = snapshot.dat.save_time;
-    const int version = snapshot.dat.save_version;
-    const int hero_level = snapshot.dat.hero_level;
-    const int hero_index = snapshot.dat.hero_index;
-    const int class_idx = snapshot.dat.class_idx;
+    if (!qol::features::save_backup::collect_slot_snapshot(slot, snapshot, err)) return false;
+
     const int module_state =
         snapshot.module.state == qol::features::save_backup::CollectedSidecar::State::kPresent ? 1
                                                                                               : 0;
-    const std::vector<uint8_t>& module = snapshot.module.bytes;
-    const std::vector<save_backup::WarehouseFile>& warehouse = snapshot.warehouse.files;
-
-    const std::vector<uint8_t> warehouse_blob = save_backup::encode_warehouse(warehouse);
-
-    const long long export_time_ms = now_ms();
-    const std::string original_sha = save_backup::sha256_hex(plain, {});
-    const std::string module_sha = module.empty() ? std::string() : save_backup::sha256_hex(module, {});
+    const std::vector<uint8_t> warehouse_blob =
+        save_backup::encode_warehouse(snapshot.warehouse.files);
+    out.export_time_ms = now_ms();
+    out.original_sha256 = save_backup::sha256_hex(snapshot.dat.plain, {});
+    out.module_sha256 = snapshot.module.bytes.empty()
+                            ? std::string()
+                            : save_backup::sha256_hex(snapshot.module.bytes, {});
+    out.checksum = save_backup::compute_checksum(save_backup::kBundleVersion, snapshot.dat.plain,
+                                                 snapshot.module.bytes, warehouse_blob);
+    out.class_name = save_backup_class_name(snapshot.dat.class_idx);
+    out.map_id = snapshot.dat.map_id;
+    out.hero_level = snapshot.dat.hero_level;
+    out.hero_index = snapshot.dat.hero_index;
+    out.class_idx = snapshot.dat.class_idx;
+    out.save_version = snapshot.dat.save_version;
+    out.save_time = snapshot.dat.save_time;
+    out.warehouse_count = static_cast<int>(snapshot.warehouse.files.size());
     const std::string warehouse_sha =
-        warehouse.empty() ? std::string() : save_backup::sha256_hex(warehouse_blob, {});
-    // checksum = 全部可还原内容段：v3 为 sha256(origPlain ‖ module ‖ warehouseBlob) 前 12 位。
-    // 无仓库时 warehouseBlob 为空 → 与旧版逐字节一致（硬约束）。
-    const std::string checksum =
-        save_backup::compute_checksum(save_backup::kBundleVersion, plain, module, warehouse_blob);
+        snapshot.warehouse.files.empty() ? std::string()
+                                         : save_backup::sha256_hex(warehouse_blob, {});
+    const std::string meta_json = save_backup::build_meta_json(
+        slot, out.export_time_ms, out.map_id, out.hero_level, out.hero_index, out.save_version,
+        out.save_time, out.original_sha256, out.module_sha256, out.checksum, out.class_idx,
+        out.class_name, out.warehouse_count, warehouse_sha, module_state);
+    save_backup::build_bundle(slot, out.export_time_ms, snapshot.dat.plain, snapshot.module.bytes,
+                              warehouse_blob, meta_json, out.bundle);
+    return true;
+}
+
+static std::string export_json_with_lease(int slot) {
+    const SbDirs dirs = snapshot_dirs();
+    const std::unordered_map<int, std::string> map_names = snapshot_map_names();
+    // 先收集完整快照并构包（共享核心）；去重/命名/落盘仍由本函数负责。
+    BuiltExport built;
+    std::string err;
+    if (!build_export_bundle(slot, built, err)) return result_error(err.c_str());
+    const std::string& checksum = built.checksum;
 
     std::string dir;
     if (!backup_dir_at(dirs.external, dir)) return result_error("backup dir unavailable");
@@ -1447,16 +1566,8 @@ static std::string export_json_with_lease(int slot) {
                existing.c_str());
     }
 
-    const std::string class_name = save_backup_class_name(class_idx);
-    const std::string meta_json = save_backup::build_meta_json(
-        slot, export_time_ms, map_id, hero_level, hero_index, version, save_time, original_sha,
-        module_sha, checksum, class_idx, class_name, static_cast<int>(warehouse.size()),
-        warehouse_sha, module_state);
-    std::vector<uint8_t> bundle;
-    save_backup::build_bundle(slot, export_time_ms, plain, module, warehouse_blob, meta_json, bundle);
-
     char stamp[16] = {0};
-    if (!local_stamp(export_time_ms, stamp)) return result_error("bundle write failed");
+    if (!local_stamp(built.export_time_ms, stamp)) return result_error("bundle write failed");
     const std::string base = std::string(stamp) + "_s" + std::to_string(slot) + "_" + checksum;
     std::string target = dir + "/" + base + kBundleSuffix;
     int collision = 0;
@@ -1465,28 +1576,28 @@ static std::string export_json_with_lease(int slot) {
         if (collision > 99) return result_error("backup name collision");
         target = dir + "/" + base + "_" + std::to_string(collision) + kBundleSuffix;
     }
-    if (!write_file_bytes_atomic(target, bundle.data(), bundle.size())) {
+    if (!write_file_bytes_atomic(target, built.bundle.data(), built.bundle.size())) {
         return result_error("bundle write failed");
     }
 
     save_backup::Entry entry;
     entry.file_name = file_name_of(target);
-    entry.size_bytes = static_cast<long long>(bundle.size());
+    entry.size_bytes = static_cast<long long>(built.bundle.size());
     entry.source_slot = slot;
-    entry.export_time_ms = export_time_ms;
-    entry.map_id = map_id;
-    auto mit = map_names.find(map_id);
+    entry.export_time_ms = built.export_time_ms;
+    entry.map_id = built.map_id;
+    auto mit = map_names.find(built.map_id);
     if (mit != map_names.end()) entry.map_name = mit->second;
-    entry.hero_level = hero_level;
-    entry.hero_index = hero_index;
-    entry.class_idx = class_idx;
-    entry.class_name = class_name;
-    entry.save_version = version;
-    entry.save_time = save_time;
-    entry.original_sha256 = original_sha;
-    entry.module_sha256 = module_sha;
-    entry.checksum = checksum;
-    SB_LOG("save backup exported: %s (%zu bytes)", entry.file_name.c_str(), bundle.size());
+    entry.hero_level = built.hero_level;
+    entry.hero_index = built.hero_index;
+    entry.class_idx = built.class_idx;
+    entry.class_name = built.class_name;
+    entry.save_version = built.save_version;
+    entry.save_time = built.save_time;
+    entry.original_sha256 = built.original_sha256;
+    entry.module_sha256 = built.module_sha256;
+    entry.checksum = built.checksum;
+    SB_LOG("save backup exported: %s (%zu bytes)", entry.file_name.c_str(), built.bundle.size());
     return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
 }
 
@@ -1498,6 +1609,29 @@ std::string save_backup_export_json(int slot) {
     const std::string response = export_json_with_lease(slot);
     slot_operation_release(&guard);
     return response;
+}
+
+bool save_backup_export_slot_to_dir(int32_t slot, const char* dir, const char* file_name,
+                                    std::string* out_error) {
+    if (out_error != nullptr) out_error->clear();
+    const auto reject = [out_error](const char* message) {
+        if (out_error != nullptr) *out_error = message;
+        return false;
+    };
+    if (slot < 0 || slot > 2) return reject("bad slot");
+    if (dir == nullptr || dir[0] == '\0' || file_name == nullptr || file_name[0] == '\0' ||
+        std::strchr(file_name, '/') != nullptr) {
+        return reject("bad request");
+    }
+    if (!ensure_dir(dir)) return reject("backup dir unavailable");
+    BuiltExport built;
+    std::string err;
+    if (!build_export_bundle(slot, built, err)) return reject(err.c_str());
+    const std::string path = std::string(dir) + "/" + file_name;
+    if (!write_file_bytes_atomic(path, built.bundle.data(), built.bundle.size())) {
+        return reject("bundle write failed");
+    }
+    return true;
 }
 
 std::string save_backup_import_json(const char* checksum, int slot) {
