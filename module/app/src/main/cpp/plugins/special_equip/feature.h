@@ -26,9 +26,8 @@
 // 本域只在**原版已返回 0** 时跳过 bit4 那一项并重放其余检查；其余各道原样执行。
 //
 // 关键设计取舍：
-//   - **不做「临时清位重跑」**。那需要写 ITEMDATABASE，而 `data_op_equip` 会在 HTTP 线程经
-//     `CHAR_CanEquipItem` 进入本 wrapper，产生对游戏静态表的并发写窗口（非游戏线程禁止调用
-//     有写副作用的游戏函数）。本域全部由**纯读**调用组成。
+//   - **不做「临时清位重跑」**。那需要写 ITEMDATABASE；wrapper 对游戏状态只做纯读。
+//     item handle 的注册/查询要求主线程，非主线程进入会在 item_facts_view 失败并保持原版拒绝。
 //   - **不 hook `CHAR_CanChangeEquip`**。它签名 `int(void* ch)`，拿不到 item，无法把放行限定到
 //     具体装备；而且它体内**不读 bit4**（只读 `[ch+0x352]` 与 CHAR_IsSpecialNPC），hook 它
 //     碰不到目标；更重要的是它是**必须保留**的那道检查。
@@ -45,12 +44,10 @@
 // 的谓词在创建确认弹窗前校验菜单角色 CHAR_CanChangeEquip（与穿脱闸门同一角色语义），
 // 特殊 NPC 佣兵身上装备拒绝出售；背包物品（desc_type==2）放行。
 //
-// **常开，无配置开关**：该位只影响「能否穿脱」，字符侧没有获取途径，开启不产生任何新行为；
-// 而一旦关闭，已持有这些装备的角色会被重新锁住、无法穿脱，所以不提供开关。
-// 需要开关的是后续的「获取途径 / 效果回调」等新行为，不是本域。
+// 默认开启，作为 Hidden toggle 暴露：Debug 可经 feature 关闭并触发生命周期卸载，Release 不显示 Hidden。
 //
-// 线程模型：两个 wrapper 只调用纯读游戏函数，游戏线程与 HTTP 线程均可安全进入。
-// 无共享可变状态（唯一计数器是仅用于诊断日志的 atomic）。
+// 线程模型：两个 wrapper 对游戏状态只做纯读；item handle 的注册/查询要求主线程，非主线程进入
+// 会在 item_facts_view 失败并保持原版拒绝。
 
 namespace qol::features::special_equip {
 

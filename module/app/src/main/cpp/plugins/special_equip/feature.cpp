@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cstdio>
 
+#include "../../contracts/in_flight.h"
 #include "rules.h"
 
 namespace qol::features::special_equip {
@@ -33,22 +34,39 @@ std::atomic<uint64_t> g_override_count{0};
 // 真机排障用的「未放行原因」预算：UI 每次构建详情菜单都会调，不设上限会刷爆日志。
 std::atomic<int> g_reject_log_budget{120};
 
-bool item_facts_view(void* item, contracts::QolItemInventoryView* out) {
-    if (item == nullptr || out == nullptr || g_item_facts == nullptr ||
-        g_item_facts->view == nullptr) return false;
+bool resolve_item_handle(void* item, contracts::QolItemHandle* out) {
+    if (item == nullptr || out == nullptr) return false;
+    *out = {};
     const auto* sdk = host_sdk();
-    if (sdk == nullptr) return false;
-    contracts::QolItemHandle handle{};
+    if (sdk == nullptr || sdk->item_handle.lookup_item == nullptr) return false;
     uint32_t owner = 0;
-    if (sdk->item_handle.lookup_item != nullptr &&
-        sdk->item_handle.lookup_item(item, &handle, &owner) !=
-            contracts::kQolItemHandleStatusOk) {
+    if (sdk->item_handle.lookup_item(item, out, &owner) !=
+        contracts::kQolItemHandleStatusOk) {
+        *out = {};
         if (sdk->item_handle.register_item == nullptr ||
-            sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, &handle) !=
+            sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, out) !=
                 contracts::kQolItemHandleStatusOk) return false;
     }
-    return handle.slot != 0 && handle.generation != 0 &&
+    return out->slot != 0 && out->generation != 0;
+}
+
+bool item_facts_view(void* item, contracts::QolItemInventoryView* out) {
+    if (out == nullptr || g_item_facts == nullptr || g_item_facts->view == nullptr) return false;
+    contracts::QolItemHandle handle{};
+    return resolve_item_handle(item, &handle) &&
            contracts::succeeded(g_item_facts->view(handle, out));
+}
+
+bool item_is_real_equip(void* item, int32_t* out) {
+    if (out == nullptr) return false;
+    *out = 0;
+    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) return false;
+    contracts::QolItemHandle handle{};
+    if (!resolve_item_handle(item, &handle)) return false;
+    int32_t value = 0;
+    if (!contracts::succeeded(g_item_facts->is_real_equip(handle, &value))) return false;
+    *out = value;
+    return true;
 }
 
 void log_write(int32_t level, const char* format, va_list args) {
@@ -75,8 +93,10 @@ void log_debug_impl(const char* format, ...) {
 
 // 原版判定链重放依赖（不含「菜单角色」——那只在出售门禁与安装门控需要）。
 bool replay_deps_ready() {
+    const auto* game = game_host();
     const auto* extras = character_extras();
-    return g_item_facts != nullptr && g_item_facts->view != nullptr &&
+    return g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr &&
+           game != nullptr && game->read_only.item.equip_level != nullptr &&
            extras != nullptr && extras->read.can_change_equip != nullptr;
 }
 
@@ -109,13 +129,14 @@ void log_reject(int category, void* ch, void* item) {
     if (character_extras() != nullptr && character_extras()->read.can_change_equip != nullptr) {
         (void)character_extras()->read.can_change_equip(ch, &can_change);
     }
-    contracts::QolItemInventoryView item_view{};
-    if (item_facts_view(item, &item_view)) {
-        real_equip = item_view.equip;
-        if ((item_view.fields & contracts::kQolItemInventoryHasNeedLevel) != 0) {
-            item_level = item_view.need_level;
-        }
+    (void)item_is_real_equip(item, &real_equip);
+    int32_t resolved_item_level = -1;
+    if (game != nullptr && game->read_only.item.equip_level != nullptr &&
+        contracts::succeeded(game->read_only.item.equip_level(item, &resolved_item_level))) {
+        item_level = resolved_item_level;
     }
+    contracts::QolItemInventoryView item_view{};
+    (void)item_facts_view(item, &item_view);
     int32_t item_category = category;
     int32_t no_equip_bit = -1;
     if ((item_view.fields & contracts::kQolItemInventoryHasCategory) != 0) {
@@ -171,9 +192,11 @@ bool deps_ready() {
 }
 
 void log_deps_missing() {
-    log_error("symbols unresolved (item_view=%d can_change_equip=%d "
+    const auto* game = game_host();
+    log_error("symbols unresolved (item_is_real_equip=%d equip_level=%d can_change_equip=%d "
               "menu_char=%d); not installed",
-              g_item_facts != nullptr && g_item_facts->view != nullptr,
+              g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr,
+              game != nullptr && game->read_only.item.equip_level != nullptr,
               character_extras() != nullptr &&
                   character_extras()->read.can_change_equip != nullptr,
               character_extras() != nullptr &&
@@ -209,12 +232,17 @@ void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts
 void set_character_facts(const contracts::CharacterFactsApi* facts) { g_character_facts = facts; }
 
 int can_equip_wrapper(void* ch, void* item) {
+    const auto* sdk = host_sdk();
+    const contracts::InFlightGuard guard(sdk == nullptr ? nullptr : &sdk->in_flight,
+                                         {kResourceIdCanEquipItem});
     const CanEquipFn backup =
         reinterpret_cast<CanEquipFn>(g_backup_can_equip.load(std::memory_order_acquire));
     if (backup == nullptr) return 0;                  // 未安装完成：不下放行（不会发生）
     if (backup(ch, item) != 0) return 1;              // 原版放行 → 快速路径，不介入
+    if (!gate_enabled()) return 0;
     if (ch == nullptr || item == nullptr) return 0;
-    if (!replay_deps_ready()) {
+    const auto* extras = character_extras();
+    if (!replay_deps_ready() || extras == nullptr || extras->read.level == nullptr) {
         log_reject(-1, ch, item);
         return 0;                                     // 依赖缺失：fail-closed，保持原版拒绝
     }
@@ -222,16 +250,15 @@ int can_equip_wrapper(void* ch, void* item) {
     int32_t can_change_equip = 0;
     int32_t char_level = -1;
     int32_t item_level = -1;
-    contracts::QolItemInventoryView item_view{};
-    if (g_item_facts == nullptr || !item_facts_view(item, &item_view) ||
-        (item_view.fields & contracts::kQolItemInventoryHasNeedLevel) == 0 ||
-        character_extras()->read.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
-        character_extras()->read.level(ch, &char_level).ok != kQolOk) {
+    const auto* game = game_host();
+    if (!item_is_real_equip(item, &is_real_equip) || game == nullptr ||
+        game->read_only.item.equip_level == nullptr ||
+        !contracts::succeeded(game->read_only.item.equip_level(item, &item_level)) ||
+        extras->read.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
+        extras->read.level(ch, &char_level).ok != kQolOk) {
         log_reject(-1, ch, item);
         return 0;
     }
-    is_real_equip = item_view.equip;
-    item_level = item_view.need_level;
     if (!equip_replay_allows(is_real_equip != 0, can_change_equip != 0, char_level, item_level)) {
         log_reject(-1, ch, item);  // UI 灰化走这条路径
         return 0;
@@ -242,18 +269,23 @@ int can_equip_wrapper(void* ch, void* item) {
 }
 
 int can_unequip_wrapper(void* ch, void* item) {
+    const auto* sdk = host_sdk();
+    const contracts::InFlightGuard guard(sdk == nullptr ? nullptr : &sdk->in_flight,
+                                         {kResourceIdCanUnequipItem});
     const CanUnequipFn backup =
         reinterpret_cast<CanUnequipFn>(g_backup_can_unequip.load(std::memory_order_acquire));
     if (backup == nullptr) return 0;
     if (backup(ch, item) != 0) return 1;
+    if (!gate_enabled()) return 0;
     if (ch == nullptr || item == nullptr) return 0;
     const auto* game = game_host();
-    if (game == nullptr || character_extras()->read.can_change_equip == nullptr) {
+    const auto* extras = character_extras();
+    if (game == nullptr || extras == nullptr || extras->read.can_change_equip == nullptr) {
         log_reject(-1, ch, item);
         return 0;
     }
     int32_t can_change_equip = 0;
-    if (character_extras()->read.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
+    if (extras->read.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
         !unequip_replay_allows(can_change_equip != 0)) {
         log_reject(-1, ch, item);
         return 0;

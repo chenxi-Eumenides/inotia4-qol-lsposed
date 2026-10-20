@@ -48,12 +48,13 @@ void test_unequip_replay() {
 
 // 出售门禁：仅装备详情 + 菜单角色失去装备权限时拦截。
 void test_sell_gate() {
-    // 非装备详情（背包=2 / 扩展袋=1 / 未就绪=-1）一律放行。
+    // 已知非装备详情（背包=2 / 扩展袋=1）放行；未就绪/未知类型 fail-closed。
     CHECK(!sell_gate_decides_block(2, true, true, false));
     CHECK(!sell_gate_decides_block(1, true, true, false));
     CHECK(sell_gate_decides_block(-1, true, true, false));
+    CHECK(sell_gate_decides_block(3, true, true, true));
 
-    // 装备详情但角色缺失或原语未解析：放行（不误拦）。
+    // 装备详情但角色缺失或原语未解析：fail-closed 拦截。
     CHECK(sell_gate_decides_block(0, false, true, false));
     CHECK(sell_gate_decides_block(0, true, false, false));
 

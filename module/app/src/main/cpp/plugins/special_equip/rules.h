@@ -16,9 +16,8 @@ bool equip_replay_allows(bool is_real_equip, bool can_change_equip, int char_lev
 // 原版 CHAR_CanUnequipItem 跳过 ①（+7 bit4）后的检查：② CHAR_CanChangeEquip(ch)。
 bool unequip_replay_allows(bool can_change_equip);
 
-// 出售门禁决策：仅装备详情（desc_type==0）且菜单角色存在、装备操作原语已解析、
-// 角色失去装备操作权限（特殊 NPC 佣兵）时放行原版链；关键事实缺失时拦截，避免
-// 未确认物品归属就进入出售副作用路径。
+// 出售门禁决策：desc_type 仅 0/1/2 为已知值；未知值及菜单角色或装备操作原语缺失时拦截。
+// 已知的 1/2 放行，0（装备详情）按角色装备操作权限决定是否拦截。
 bool sell_gate_decides_block(int desc_type, bool menu_char_present,
                              bool can_change_equip_resolved, bool can_change_equip);
 

@@ -21,6 +21,9 @@ constexpr const char* kSellGateResourceId = "hook:UIEquip_ButtonDestroyExe";
 const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kItemFactsCapabilityId,
      {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
+};
+
+const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kCharacterFactsCapabilityId,
      {contracts::kCharacterFactsVersionMajor, contracts::kCharacterFactsVersionMinor}},
 };
@@ -35,9 +38,17 @@ const contracts::QolPortRequirement kPorts[] = {
       contracts::kQolPortCharacterExtrasVersion.minor}},
 };
 
+void clear_install_globals() {
+    set_gate(false);
+    set_item_facts(nullptr);
+    set_character_facts(nullptr);
+    g_character_extras = nullptr;
+    g_sdk = nullptr;
+    g_game = nullptr;
+}
+
 // 资源声明（ARCHITECTURE.md §4.3 字段顺序）：两个入口 hook 均为私有、必需、fail-closed。
-// gate=nullptr = 常驻，无配置开关；理由见 feature.h §「常开，无配置开关」——关闭只会把
-// 已持有这些装备的角色重新锁住，且字符侧没有获取途径，开启不产生任何新行为。
+// 功能默认开启并作为 Hidden toggle 暴露：Debug 可关闭并触发生命周期卸载，Release 不显示 Hidden。
 const contracts::ResourceClaim kResources[] = {
     {
         kResourceIdCanEquipItem,     // id
@@ -79,22 +90,21 @@ int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr ||
         ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_character_extras = nullptr;
+        clear_install_globals();
         return 1;
     }
     g_character_extras = static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[0]);
-    if (g_sdk->capabilities.require == nullptr) return 1;
+    if (g_sdk->capabilities.require == nullptr) {
+        clear_install_globals();
+        return 1;
+    }
     const void* iface = nullptr;
     if (!contracts::succeeded(g_sdk->capabilities.require(
             contracts::kItemFactsCapabilityId,
             {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
         iface == nullptr || !contracts::item_facts_api_size_valid(
                                 static_cast<const contracts::ItemFactsApi*>(iface))) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_character_extras = nullptr;
+        clear_install_globals();
         return 1;
     }
     set_item_facts(static_cast<const contracts::ItemFactsApi*>(iface));
@@ -104,28 +114,25 @@ int plugin_install(contracts::PluginContext& ctx) {
             {contracts::kCharacterFactsVersionMajor, contracts::kCharacterFactsVersionMinor},
             &iface)) ||
         iface == nullptr) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_character_extras = nullptr;
-        set_item_facts(nullptr);
-        return 1;
+        log_warn("optional dependency unavailable: %s", contracts::kCharacterFactsCapabilityId);
+    } else {
+        set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
     }
-    set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
-    // 常开，无配置开关：只置业务门禁并注册出售门禁谓词；资源由宿主声明式安装。
-    // 依赖缺失即 fail-closed 返回非 0，宿主不安装资源并置 failed（与旧 install_if_ready
-    // 的 deps_ready 门一致）。重复调用幂等（activate 重入）。
+    // 默认开启，Hidden toggle 状态由生命周期回调驱动；Debug 可关闭并触发生命周期卸载，Release 不显示 Hidden。
+    // 依赖缺失即 fail-closed 返回非 0，宿主不安装资源并置 failed。重复调用幂等（activate 重入）。
     if (!deps_ready()) {
         log_deps_missing();
+        clear_install_globals();
         return 1;
     }
     set_gate(true);
-    // 出售门禁登记到 hooks/dispatch 布尔门（resource_id = claim id）。fail-soft：登记失败
-    // （已被他人占用/容量满，当前实际不可达）仅告警，不使 CanEquip/CanUnequip 主功能失败；
-    // 代价 = 本次出售门禁不生效。activate 重入同 fn 幂等成功，不重复告警。
+    // 出售保护是本插件功能不变量，门禁登记失败不能静默降级。
     if (g_sdk->hooks.set_intercept == nullptr ||
         g_sdk->hooks.set_intercept(kSellGateResourceId, &sell_gate_should_block, nullptr).ok !=
             kQolOk) {
-        log_warn("sell gate intercept register rejected id=%s", kSellGateResourceId);
+        log_error("sell gate unavailable: intercept register rejected id=%s", kSellGateResourceId);
+        clear_install_globals();
+        return 1;
     }
     return 0;
 }
@@ -168,11 +175,11 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    2, kRequires, // requires=item.facts + character.facts
-    0, nullptr,   // optional_requires
+    1, kRequires,
+    1, kOptionalRequires,
     0, nullptr,   // provides
     2, kResources,
-    0, nullptr,   // jni（常开无开关，无 JNI 绑定）
+    0, nullptr,   // jni（无 JNI 绑定）
     &plugin_install,
     &plugin_deactivate,
     &plugin_on_enabled,
