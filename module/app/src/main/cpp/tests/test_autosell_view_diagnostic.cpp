@@ -85,9 +85,9 @@ bool item_is_backpack(int32_t category, int32_t* out) {
     return true;
 }
 
-bool item_is_dice(int32_t, int32_t* out) {
+bool item_is_dice(int32_t category, int32_t* out) {
     if (out == nullptr) return false;
-    *out = 0;
+    *out = category >= 82 && category <= 86 ? 1 : 0;
     return true;
 }
 
@@ -248,6 +248,32 @@ void test_provider_item_special_rule_match_is_classified() {
            autosell::DecisionReason::kRuleMatch);
 }
 
+void test_ordinary_dice_is_classified_as_special() {
+    prepare_facts(kFixtureViewFields);
+    const qol::features::autosell::read_only::InventoryItemRef ref{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 82, 1,
+        {11, 19}};
+    autosell::ItemView view{};
+    AutosellViewDiagnostics diagnostics{};
+    assert(autosell_build_view(ref, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
+    assert(view.special_types == autosell::kSpecialDice);
+    assert(diagnostics.special_types == autosell::kSpecialDice);
+}
+
+void test_chaos_dice_is_not_classified_as_special() {
+    prepare_facts(kFixtureViewFields);
+    const qol::features::autosell::read_only::InventoryItemRef ref{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 86, 1,
+        {11, 19}};
+    autosell::ItemView view{};
+    AutosellViewDiagnostics diagnostics{};
+    assert(autosell_build_view(ref, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
+    assert((view.special_types & autosell::kSpecialDice) == 0);
+    assert(view.special_types == 0);
+    assert((diagnostics.special_types & autosell::kSpecialDice) == 0);
+    assert(diagnostics.special_types == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -258,5 +284,7 @@ int main() {
     test_missing_rarity_builds_view_with_unknown_sentinel();
     test_enabled_config_without_matching_rule_is_classified();
     test_provider_item_special_rule_match_is_classified();
+    test_ordinary_dice_is_classified_as_special();
+    test_chaos_dice_is_not_classified_as_special();
     return 0;
 }

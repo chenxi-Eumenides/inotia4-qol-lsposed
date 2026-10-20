@@ -15,6 +15,10 @@ constexpr int kJewelCategoryFirst = 28;
 // 被祝福/英雄/教团等其他类型，不属于自动出售的普通徽章。
 constexpr int kNormalSealFirst = 42;
 constexpr int kNormalSealLast = 47;
+// ITEMDATABASE.json: categories 82..85 are ordinary dice; category 86 is Chaos Dice.
+constexpr int kOrdinaryDiceCategoryFirst = 82;
+constexpr int kOrdinaryDiceCategoryLast = 85;
+constexpr int kChaosDiceCategory = 86;
 
 }  // namespace
 
@@ -94,7 +98,9 @@ AutosellViewBuildReason autosell_build_view(
     if (category >= kNormalSealFirst && category <= kNormalSealLast) {
         specials |= autosell::kSpecialNormalSeal;
     }
-    if (qol::features::autosell::read_only::item_is_dice(category, &value) && value != 0) {
+    if (qol::features::autosell::read_only::item_is_dice(category, &value) && value != 0 &&
+        category >= kOrdinaryDiceCategoryFirst && category <= kOrdinaryDiceCategoryLast &&
+        category != kChaosDiceCategory) {
         specials |= autosell::kSpecialDice;
     }
     out->special_types = specials;
