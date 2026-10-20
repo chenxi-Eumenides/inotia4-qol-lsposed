@@ -46,7 +46,8 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - 面板由 `own:popup.savebackup` 占用 PopupState 死条目承载，acquire 注入、release 写回快照（`plugin.cpp:64-69,116-128`；`ui/panel.cpp:655-697`）。
 - 设置入口为 descriptor feature `save_backup.open_manager`：默认 `1`、分类 Tools、类型 entry、标题「存档备份」、说明「打开存档备份管理器。」、按钮「打开」、priority `-2`；回调经 `ui_panels.open("save_backup")` 打开面板（`plugin.cpp:333-359`）。该入口在 settings 注册表中的位置见 `docs/reference/plugins/settings.md:107`。
 - `settings_contribution.cpp` 的 catalog 注册为空实现（`settings_contribution.cpp:3-7`）。
-- 面板布局：左侧 3 个槽位、中间「导出/导入/删除」、右侧备份列表每页 5 项并带上一页/下一页；面板缓存条目数不设上限（`g_backups` 为无界 vector），空列表显示「加载中…」或「暂无备份」（`ui/panel.cpp:74-116,413,515-522`；`ui/render.inc:93-119`）。
+- 面板布局：左列 3 个存档槽卡片；中列竖排「导出/删除/导入」；右列顶部为跟随选中槽的 `auto` 自动备份卡片，下方为手动备份列表（每页 5 项，底部 `‹ 1/5 ›` 与返回）。列表缓存条目数不设上限（`g_backups` 为无界 vector），空列表显示「加载中…」或「暂无备份」（`ui/panel.cpp` 布局常量与 `g_backups`；`ui/render.inc` 绘制）。
+- 选择与按钮状态：左侧槽与右侧条目独立选择；仅选槽时导出/删除可用，仅选手动备份时删除可用，槽+条目同时选中时导入可用；auto 可选中、可导入，不可删除。导出立即执行，导入与删除弹面板内确认框（确认/取消），不再使用两次点击确认（`ui/render.inc` `ops_btn_draw`、`ui/render.inc` `draw_confirm_dialog`、`ui/panel.inc` 事件分发、`ui/injection.inc`）。
 - 面板按钮**直接调用** native 业务函数（`save_backup_export_json` 等），不经 HTTP、不经 JNI/Kotlin（`ui/injection.inc:29,105,170-171`；`ui/panel.cpp:571-576`）。导入失败会显示响应中的 `error` 文案（`ui/injection.inc:11-25,108-125`）。
 - 地图名与等级显示：未知等级显示 `Lv?`；地图名先按 UTF-8 码点边界截断到 16 字节，再按宽度截断（`ui/render.inc:159-168,233-241,314-340`）。
 
