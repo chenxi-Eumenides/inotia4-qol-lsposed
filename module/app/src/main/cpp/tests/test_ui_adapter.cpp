@@ -828,6 +828,30 @@ int main() {
     g_click_proc(&control);
     CHECK(g_click_user == &click_marker);
 
+    // Minor 25：通用点击绑定身份证明。命中要求绑定元组与 ExecuteProc 同时匹配；
+    // 内存不可读返回 NotReady（unknown），不得据此删除控件。
+    {
+        int32_t live = -1;
+        CHECK(adapter->click_binding_is_current(&control, &click_proc, &click_marker, &live).ok ==
+              kQolOk);
+        CHECK(live == 1);
+        int other_owner = 0;
+        CHECK(adapter->click_binding_is_current(&control, &click_proc, &other_owner, &live).ok ==
+              kQolOk);
+        CHECK(live == 0);
+        CHECK(adapter->click_binding_is_current(&control, &draw_proc, &click_marker, &live).ok ==
+              kQolOk);
+        CHECK(live == 0);
+        FakeControl unbound{};
+        CHECK(adapter->click_binding_is_current(&unbound, &click_proc, &click_marker, &live).ok ==
+              kQolOk);
+        CHECK(live == 0);
+        g_memory_accessible = false;
+        CHECK(adapter->click_binding_is_current(&control, &click_proc, &click_marker, &live).code ==
+              kQolErrNotReady);
+        g_memory_accessible = true;
+    }
+
     // A non-main-menu screen is unknown, not proof that a retained menu component is dead.
     FakeControl menu_parent{}, original_menu_button{}, replacement_menu_button{};
     original_menu_button.rect = UiRect{612, 488, 220, 52};

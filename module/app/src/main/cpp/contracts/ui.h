@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 19;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 24;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 20;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 25;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -228,6 +228,22 @@ struct UiIconButtonDesc {
     uint8_t show_background;  // 0 draws only the icon/fallback; 1 adds the button base and frame.
 };
 
+// 锚定在游戏控件树上的图标按钮状态。调用方持有并零初始化；字段由实现读写。
+struct QolUiAnchoredButton {
+    void* handle;        // 当前 native 控件；nullptr 表示未挂载
+    void* parent;        // 上次命中的活挂载根（游戏控件树内的容器）
+    uint32_t root_kind;  // QolUiRootKind
+    uint32_t mounted;    // 1=handle 有效
+};
+
+struct UiAnchoredButtonDesc {
+    uint32_t root_kind;       // QolUiRootKind：挂载根由 QolUiAdapter::find_root 实时解析
+    UiIconButtonDesc button;  // rect 由 layout 回调给出；本字段的 rect 仅作首次设置
+};
+
+// 布局回调：parent 是当帧活的挂载根，out_rect 使用 parent 相对坐标。
+using QolUiAnchorLayoutFn = QolResult (*)(QolUiHandle parent, UiRect* out_rect, void* user);
+
 using QolUiHelpDetailDrawFn = void (*)(void* user, UiRect right_viewport);
 struct UiHelpOption {
     void* user;
@@ -381,6 +397,20 @@ struct QolUiComponents {
     // 已释放或被复用的地址），也不能保留记录（unbind/destroy 会再次删除该地址）。
     // 调用方必须先独立证明该句柄已不是在树中的本模块控件；NotFound 表示无记录。
     QolResult (*forget_native)(QolUiHandle);
+
+    // Minor 20 append-only: 锚定在游戏控件树上的图标按钮（native 生命周期归游戏）。
+    // ensure 每帧按 desc->root_kind 重新解析活挂载根，并证明 state->handle 仍在根的子链表
+    // 且仍是本模块绑定的控件；失效时只注销记录（不删 native）并重建。命中/创建后自动
+    // show=1、enabled=1，并按 layout 回调更新 rect。layout 失败返回 NotReady，不改动句柄。
+    QolResult (*anchored_button_ensure)(QolUiAnchoredButton* state,
+                                        const UiAnchoredButtonDesc* desc,
+                                        QolUiAnchorLayoutFn layout, void* user,
+                                        uint8_t* out_created);
+    // 关闭态：只隐藏仍能证明归属的控件；身份不符则注销记录（不删 native）。
+    QolResult (*anchored_button_set_visible)(QolUiAnchoredButton* state, uint8_t visible);
+    // 卸载：注销组件记录，不删除 native 控件（游戏拥有其生命周期）。
+    QolResult (*anchored_button_release)(QolUiAnchoredButton* state);
+    QolResult (*anchored_button_draw)(const QolUiAnchoredButton* state);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -603,6 +633,14 @@ struct QolUiAdapter {
     // that can mirror without changing the borrowed game-owned image data.
     QolResult (*draw_part_scaled)(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
                                   int32_t type, int32_t flip, int32_t scale_percent);
+
+    // Minor 25 append-only slot. Proves a handle is still the live control this adapter bound
+    // through set_click_proc: native memory readable, ExecuteProc is the adapter trampoline, and
+    // the binding tuple matches expected callback + owner. out_live=1 only on full proof;
+    // out_live=0 is conclusive only together with a live-parent child-list check — callers must
+    // never delete native memory merely because out_live==0. NotReady means unknown (unreadable).
+    QolResult (*click_binding_is_current)(QolUiHandle control, QolUiClickFn expected, void* owner,
+                                          int32_t* out_live);
 };
 
 }  // namespace qol::contracts

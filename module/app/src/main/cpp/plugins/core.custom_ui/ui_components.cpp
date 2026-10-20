@@ -70,6 +70,9 @@ struct Component {
     bool pending_destroy = false;
     bool native_deleted = false;
     bool main_menu_text_button = false;
+    // 锚定在游戏控件树上：native 生命周期归游戏（面板拆除时连同子树销毁），
+    // unbind 时不得 delete_control（会命中已释放或被复用的地址）。
+    bool native_externally_owned = false;
     bool enabled = true;
     bool active = false;
     bool active_state_set = false;
@@ -1209,6 +1212,158 @@ QolResult icon_button_draw(contracts::QolUiHandle handle) {
     return contracts::ok();
 }
 
+// ===== 锚定控件（minor 20）=====
+// 控件挂在游戏控件树上，native 生命周期归游戏：每帧重新解析活根、证明句柄身份，
+// 失效时只注销记录（不删除 native）再重建。身份证明来自 adapter 的 click 绑定表：
+// 控件必须仍是本模块经 set_click_proc 绑定、且 ExecuteProc 仍指向 adapter trampoline。
+
+bool identity_adapter_ready() {
+    constexpr size_t end = offsetof(contracts::QolUiAdapter, click_binding_is_current) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->click_binding_is_current);
+    return adapter_ready() && g_adapter->minor >= 25 && g_adapter->size >= end &&
+        g_adapter->click_binding_is_current != nullptr;
+}
+
+bool anchored_adapter_ready() {
+    return adapter_ready() && identity_adapter_ready() && g_adapter->find_root != nullptr &&
+        g_adapter->child_count != nullptr && g_adapter->child_at != nullptr &&
+        g_adapter->set_control_show != nullptr && g_adapter->set_rect != nullptr &&
+        g_adapter->get_rect != nullptr && g_adapter->set_draw_proc != nullptr;
+}
+
+// 纯指针比对：不解引用 child，句柄失效时也安全。count 上限防异常结构导致长循环。
+bool control_in_child_list(contracts::QolUiHandle parent, contracts::QolUiHandle child) {
+    if (parent == nullptr || child == nullptr) return false;
+    uint32_t count = 0;
+    if (!contracts::succeeded(g_adapter->child_count(parent, &count)) || count > 4096) return false;
+    for (uint32_t i = 0; i < count; ++i) {
+        contracts::QolUiHandle candidate = nullptr;
+        if (!contracts::succeeded(g_adapter->child_at(parent, i, &candidate))) return false;
+        if (candidate == child) return true;
+    }
+    return false;
+}
+
+// 入口类控件只由组件自己的 draw 绘制齿轮：清空原生 ControlButton 的 DrawProc，
+// 避免游戏绘制阶段再画一次按钮底图。
+void anchored_noop_draw(void*) {}
+
+// 注销记录但不删除 native；state 清空。不返回错误：记录不存在也视为已完成。
+void release_anchored_state(contracts::QolUiAnchoredButton* state) {
+    if (state->mounted && state->handle != nullptr) (void)forget_native(state->handle);
+    state->handle = nullptr;
+    state->parent = nullptr;
+    state->mounted = 0;
+}
+
+// 句柄是否仍是 root 子链表中的本模块控件。NotReady 表示无法证明，调用方不得改动控件。
+QolResult anchored_handle_is_current(const contracts::QolUiAnchoredButton* state,
+                                     int32_t* out_current) {
+    *out_current = 0;
+    Component* component = find_component(state->handle);
+    if (component == nullptr) return contracts::ok();
+    int32_t live = 0;
+    const QolResult proof = g_adapter->click_binding_is_current(
+        state->handle, &text_button_execute, component, &live);
+    if (!contracts::succeeded(proof)) return proof;
+    *out_current = live != 0 ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult anchored_button_ensure(contracts::QolUiAnchoredButton* state,
+                                 const contracts::UiAnchoredButtonDesc* desc,
+                                 contracts::QolUiAnchorLayoutFn layout, void* user,
+                                 uint8_t* out_created) {
+    if (state == nullptr || desc == nullptr || layout == nullptr) return invalid_argument();
+    if (out_created != nullptr) *out_created = 0;
+    if (!anchored_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(static_cast<contracts::QolUiRootKind>(desc->root_kind),
+                                            &parent)) ||
+        parent == nullptr) {
+        // 挂载根不存在：游戏已销毁该面板/子树，只丢记录，不触碰 native。
+        release_anchored_state(state);
+        return contracts::ok();
+    }
+    if (state->mounted && state->handle != nullptr) {
+        int32_t current = 0;
+        if (!control_in_child_list(parent, state->handle)) {
+            release_anchored_state(state);
+        } else {
+            const QolResult proof = anchored_handle_is_current(state, &current);
+            if (!contracts::succeeded(proof)) return proof;
+            if (current == 0) release_anchored_state(state);
+        }
+    }
+    contracts::UiRect rect{};
+    const QolResult laid_out = layout(parent, &rect, user);
+    if (!contracts::succeeded(laid_out)) return laid_out;
+    if (rect.w <= 0 || rect.h <= 0) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) {
+        contracts::UiIconButtonDesc button = desc->button;
+        button.rect = rect;
+        contracts::QolUiHandle created = nullptr;
+        const QolResult create_result = icon_button_create(&button, parent, &created);
+        if (!contracts::succeeded(create_result)) return create_result;
+        if (created == nullptr) return not_ready();
+        (void)g_adapter->set_draw_proc(created, &anchored_noop_draw);
+        if (Component* anchored = find_component(created); anchored != nullptr) {
+            anchored->native_externally_owned = true;
+        }
+        state->handle = created;
+        state->parent = parent;
+        state->root_kind = desc->root_kind;
+        state->mounted = 1;
+        (void)g_adapter->set_control_show(created, 1);
+        if (out_created != nullptr) *out_created = 1;
+        return contracts::ok();
+    }
+    contracts::UiRect current{};
+    if (!contracts::succeeded(g_adapter->get_rect(state->handle, &current)) ||
+        current.x != rect.x || current.y != rect.y || current.w != rect.w ||
+        current.h != rect.h) {
+        const QolResult moved = g_adapter->set_rect(state->handle, rect);
+        if (!contracts::succeeded(moved)) return moved;
+    }
+    (void)g_adapter->set_control_show(state->handle, 1);
+    (void)icon_button_set_enabled(state->handle, 1);
+    state->parent = parent;
+    return contracts::ok();
+}
+
+QolResult anchored_button_set_visible(contracts::QolUiAnchoredButton* state, uint8_t visible) {
+    if (state == nullptr || visible > 1) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) return contracts::ok();
+    if (!anchored_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(static_cast<contracts::QolUiRootKind>(state->root_kind),
+                                            &parent)) ||
+        parent == nullptr || !control_in_child_list(parent, state->handle)) {
+        release_anchored_state(state);
+        return contracts::ok();
+    }
+    int32_t current = 0;
+    const QolResult proof = anchored_handle_is_current(state, &current);
+    if (!contracts::succeeded(proof)) return proof;
+    if (current == 0) {
+        release_anchored_state(state);
+        return contracts::ok();
+    }
+    return g_adapter->set_control_show(state->handle, visible);
+}
+
+QolResult anchored_button_release(contracts::QolUiAnchoredButton* state) {
+    if (state == nullptr) return invalid_argument();
+    release_anchored_state(state);
+    return contracts::ok();
+}
+
+QolResult anchored_button_draw(const contracts::QolUiAnchoredButton* state) {
+    if (state == nullptr) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) return contracts::ok();
+    return icon_button_draw(state->handle);
+}
+
 QolResult explicit_text_button_create(const contracts::UiButtonDesc* desc,
                                       contracts::QolUiHandle parent,
                                       contracts::QolUiHandle* out, uint32_t appearance,
@@ -2181,6 +2336,11 @@ const contracts::QolUiComponents kUiComponents{
     &icon_button_draw,
     &compact_capsule_text_button_create,
     &forget_native,
+    // Minor 20 tail: 锚定在游戏控件树上的图标按钮。
+    &anchored_button_ensure,
+    &anchored_button_set_visible,
+    &anchored_button_release,
+    &anchored_button_draw,
 };
 
 }  // namespace
@@ -2207,6 +2367,9 @@ void ui_components_unbind() {
         return;
     }
     for (const auto& root : g_roots) {
+        // 锚定在游戏控件树上的组件不删除 native：控件生命周期归游戏，且父树可能已在
+        // 游戏侧销毁，delete_control 会命中已释放或被复用的地址。
+        if (root->native_externally_owned) continue;
         if (!contracts::succeeded(delete_owned_lists(root.get()))) {
             // Keep the adapter and every callback owner alive; the next bind retries cleanup and
             // fails closed if the native tree is still unknown.

@@ -1039,6 +1039,36 @@ QolResult main_menu_text_button_invalidate_binding(QolUiHandle replacement, void
     return contracts::ok();
 }
 
+// 通用身份证明（minor 25）：与 main_menu 版本同构，但不要求主菜单上下文。
+// 判定顺序：主线程 → 句柄内存可读 → data 可读 → 绑定表回调+owner 匹配 → ExecuteProc 仍是
+// 本 adapter 的 trampoline。任一环节不成立即 out_live=0；内存不可读返回 NotReady，调用方
+// 必须保留记录（不得据 NotReady 删除控件）。
+QolResult click_binding_is_current(QolUiHandle control, contracts::QolUiClickFn expected,
+                                   void* owner, int32_t* out_live) {
+    if (control == nullptr || expected == nullptr || owner == nullptr || out_live == nullptr) {
+        return invalid_argument();
+    }
+    *out_live = 0;
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    if (!game_memory_accessible(control, CO_DATA + sizeof(void*), 'r')) return not_ready();
+    {
+        std::lock_guard<std::mutex> lock(g_click_mtx);
+        const auto binding = g_click_bindings.find(control);
+        if (binding == g_click_bindings.end() || binding->second.callback != expected ||
+            binding->second.user != owner) {
+            return contracts::ok();
+        }
+    }
+    void* control_data = ui_control_data(control);
+    if (control_data == nullptr ||
+        !game_memory_accessible(control_data, CB_EXECUTE_PROC + sizeof(void*), 'r')) {
+        return not_ready();
+    }
+    if (!ui_execute_proc_matches(control, &click_proc_trampoline)) return contracts::ok();
+    *out_live = 1;
+    return contracts::ok();
+}
+
 QolResult main_menu_more_games_set_active(QolUiHandle original, int32_t active) {
     if (original == nullptr || (active != 0 && active != 1)) return invalid_argument();
     if (!qol::game::game_host_is_main_thread()) return not_ready();
@@ -1435,6 +1465,8 @@ const QolUiAdapter g_ui_adapter{
              &draw_part_alpha,
              // Minor 24 tail: native percentage-scaled atlas-part drawing.
              &draw_part_scaled,
+             // Minor 25 tail: generic click-binding identity proof.
+             &click_binding_is_current,
         };
 
 }  // namespace

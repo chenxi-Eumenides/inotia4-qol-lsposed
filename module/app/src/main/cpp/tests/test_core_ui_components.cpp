@@ -2,6 +2,7 @@
 #include <cstring>
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #include "contracts/ui.h"
 #include "plugins/core.custom_ui/ui_components.h"
@@ -17,6 +18,8 @@ namespace {
 struct FakeControl {
     uint32_t kind = 0;
     FakeControl* parent = nullptr;
+    std::vector<FakeControl*> children;
+    bool visible = false;
     qol::contracts::UiRect rect{};
     char text[64] = {};
     qol::contracts::QolUiClickFn click = nullptr;
@@ -84,6 +87,7 @@ QolResult create_control(uint32_t kind, qol::contracts::QolUiHandle parent,
     auto* control = new FakeControl();
     control->kind = kind;
     control->parent = static_cast<FakeControl*>(parent);
+    if (control->parent != nullptr) control->parent->children.push_back(control);
     *out = control;
     return ok();
 }
@@ -167,6 +171,16 @@ QolResult draw_native_text_button_label(qol::contracts::UiRect rect, const char*
 
 QolResult delete_control(qol::contracts::QolUiHandle handle) {
     if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    auto* control = static_cast<FakeControl*>(handle);
+    if (control->parent != nullptr) {
+        auto& siblings = control->parent->children;
+        for (auto it = siblings.begin(); it != siblings.end(); ++it) {
+            if (*it == control) {
+                siblings.erase(it);
+                break;
+            }
+        }
+    }
     ++g_native_button_deletes;
     if (handle == g_main_menu_replacement) {
         g_main_menu_replacement = nullptr;
@@ -353,24 +367,88 @@ QolResult fill_rect(qol::contracts::UiRect, uint32_t) {
     return ok();
 }
 
+
+FakeControl* g_fake_equip_bag_root = nullptr;
+
+QolResult find_root(qol::contracts::QolUiRootKind kind, qol::contracts::QolUiHandle* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    *out = kind == qol::contracts::QolUiRootKind::kEquipBagContainer ? g_fake_equip_bag_root
+                                                                    : nullptr;
+    return *out == nullptr ? qol::contracts::error(kQolErrNotFound, "missing", 7) : ok();
+}
+
+QolResult child_count(qol::contracts::QolUiHandle handle, uint32_t* out) {
+    if (handle == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out = static_cast<uint32_t>(static_cast<FakeControl*>(handle)->children.size());
+    return ok();
+}
+
+QolResult child_at(qol::contracts::QolUiHandle handle, uint32_t index,
+                   qol::contracts::QolUiHandle* out) {
+    if (handle == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    const auto& children = static_cast<FakeControl*>(handle)->children;
+    if (index >= children.size()) return qol::contracts::error(kQolErrNotFound, "missing", 7);
+    *out = children[index];
+    return ok();
+}
+
+QolResult set_control_show(qol::contracts::QolUiHandle handle, uint8_t show) {
+    if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    static_cast<FakeControl*>(handle)->visible = show != 0;
+    return ok();
+}
+
+QolResult click_binding_is_current(qol::contracts::QolUiHandle handle,
+                                   qol::contracts::QolUiClickFn expected, void* owner,
+                                   int32_t* out_live) {
+    if (handle == nullptr || expected == nullptr || owner == nullptr || out_live == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    auto* control = static_cast<FakeControl*>(handle);
+    *out_live = control->click == expected && control->click_user == owner ? 1 : 0;
+    return ok();
+}
+
+QolResult image_unit_load(int32_t) { return ok(); }
+
+QolResult draw_part_scaled(qol::contracts::QolUiHandle group, int32_t x, int32_t y,
+                           qol::contracts::QolUiHandle part, int32_t type, int32_t flip,
+                           int32_t scale) {
+    (void)group; (void)x; (void)y; (void)part; (void)type; (void)flip; (void)scale;
+    return ok();
+}
+
 QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
     g_last_container = {x, y, w, h};
     ++g_container_draws;
     return ok();
 }
 
+int g_fake_icon_group = 0;
+int g_fake_icon_loc = 0;
+
 QolResult image_group(int32_t unit, qol::contracts::QolUiHandle* out) {
-    if (unit != 0x0f || out == nullptr) {
-        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    if (unit == 0x16) {
+        *out = &g_fake_icon_group;
+        return ok();
     }
+    if (unit != 0x0f) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     *out = &g_fake_group;
     return ok();
 }
 
 QolResult image_loc(int32_t unit, int32_t loc, qol::contracts::QolUiHandle* out) {
-    if (unit != 0x0f || out == nullptr) {
-        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    if (unit == 0x16 && loc == 0) {
+        *out = &g_fake_icon_loc;
+        return ok();
     }
+    if (unit != 0x0f) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     constexpr int32_t locations[] = {0x30, 0x31, 0x35, 0x36};
     for (int i = 0; i < 4; ++i) {
         if (loc == locations[i]) {
@@ -394,9 +472,15 @@ QolResult draw_part(qol::contracts::QolUiHandle group, int32_t x, int32_t y,
 }
 
 QolResult image_loc_size(int32_t unit, int32_t loc, int32_t* out_width, int32_t* out_height) {
-    if (unit != 0x0f || out_width == nullptr || out_height == nullptr) {
+    if (out_width == nullptr || out_height == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     }
+    if (unit == 0x16 && loc == 0) {
+        *out_width = 40;
+        *out_height = 40;
+        return ok();
+    }
+    if (unit != 0x0f) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
     constexpr int32_t locations[] = {0x30, 0x31, 0x35, 0x36};
     for (int i = 0; i < 4; ++i) {
         if (loc == locations[i]) {
@@ -443,6 +527,13 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.draw_native_text_button_label = &draw_native_text_button_label;
     adapter.delete_control = &delete_control;
     adapter.control_tree_event = &control_tree_event;
+    adapter.find_root = &find_root;
+    adapter.child_count = &child_count;
+    adapter.child_at = &child_at;
+    adapter.set_control_show = &set_control_show;
+    adapter.click_binding_is_current = &click_binding_is_current;
+    adapter.image_unit_load = &image_unit_load;
+    adapter.draw_part_scaled = &draw_part_scaled;
     adapter.layout_native_text_button = &paint_layout;
     adapter.draw_native_text_button = &paint_draw;
     adapter.main_menu_replacement_rect_available = &menu_rect_available;
@@ -452,6 +543,11 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
 const qol::contracts::QolUiAdapter kFakeAdapter = make_fake_adapter();
 
 }  // namespace
+
+QolResult anchored_layout(qol::contracts::QolUiHandle, qol::contracts::UiRect* out, void*) {
+    *out = {5, 6, 20, 20};
+    return ok();
+}
 
 int main() {
     int assertions = 0;
@@ -466,6 +562,50 @@ int main() {
     CHECK(components != nullptr);
     CHECK(components->size == sizeof(qol::contracts::QolUiComponents));
     CHECK(components->panel_create != nullptr && components->scroll_view_create != nullptr);
+
+
+    // anchored_button：root 存活时只挂载一次；根子树被游戏重建后只注销记录并重建，
+    // 绝不对失效 native 调 delete_control；root 消失时清空状态、不触碰 native。
+    {
+        FakeControl bag_root{};
+        bag_root.visible = true;
+        bag_root.rect = {100, 200, 300, 300};
+        g_fake_equip_bag_root = &bag_root;
+        qol::contracts::QolUiAnchoredButton anchored{};
+        qol::contracts::UiIconButtonDesc icon_desc{{0, 0, 10, 10}, 0x16, 0, 1, 1, "x", &on_click,
+                                                   nullptr, 0};
+        qol::contracts::UiAnchoredButtonDesc anchored_desc{
+            static_cast<uint32_t>(qol::contracts::QolUiRootKind::kEquipBagContainer), icon_desc};
+        uint8_t created = 0;
+        const int deletes_before_anchor = g_native_button_deletes;
+        CHECK(components->anchored_button_ensure(&anchored, &anchored_desc, &anchored_layout,
+                                                 nullptr, &created).ok == kQolOk);
+        CHECK(created == 1 && anchored.mounted == 1 && anchored.handle != nullptr);
+        CHECK(bag_root.children.size() == 1 && bag_root.children[0] == anchored.handle);
+        CHECK(static_cast<FakeControl*>(anchored.handle)->rect.w == 20);
+        CHECK(static_cast<FakeControl*>(anchored.handle)->visible);
+        const qol::contracts::QolUiHandle first = anchored.handle;
+        CHECK(components->anchored_button_ensure(&anchored, &anchored_desc, &anchored_layout,
+                                                 nullptr, &created).ok == kQolOk);
+        CHECK(created == 0 && anchored.handle == first);
+        // 模拟游戏销毁容器子树：记录仍在，但句柄已不在子链表。
+        bag_root.children.clear();
+        CHECK(components->anchored_button_ensure(&anchored, &anchored_desc, &anchored_layout,
+                                                 nullptr, &created).ok == kQolOk);
+        CHECK(created == 1 && anchored.handle != nullptr);
+        CHECK(components->set_rect(first, {1, 2, 3, 4}).ok == kQolErrNotFound);
+        CHECK(g_native_button_deletes == deletes_before_anchor);
+        CHECK(components->anchored_button_draw(&anchored).ok == kQolOk);
+        CHECK(components->anchored_button_set_visible(&anchored, 0).ok == kQolOk);
+        CHECK(!static_cast<FakeControl*>(anchored.handle)->visible);
+        CHECK(components->anchored_button_release(&anchored).ok == kQolOk);
+        CHECK(anchored.handle == nullptr && anchored.mounted == 0);
+        CHECK(g_native_button_deletes == deletes_before_anchor);
+        g_fake_equip_bag_root = nullptr;
+        CHECK(components->anchored_button_ensure(&anchored, &anchored_desc, &anchored_layout,
+                                                 nullptr, &created).ok == kQolOk);
+        CHECK(anchored.handle == nullptr);
+    }
 
     qol::contracts::UiPanelDesc panel_desc{{100, 50, 100, 100}, {0, 0, 100, 100}, 0, 0};
     qol::contracts::QolUiHandle root = nullptr;

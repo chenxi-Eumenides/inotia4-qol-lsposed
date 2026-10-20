@@ -100,3 +100,22 @@
 | 重建频率 | **PASS**：每次页面重建恰好一条 stale 日志，无逐帧抖动 |
 | 组件记录 | **PASS**：stale 路径经 `forget_native` 注销；`core_ui_components_tests` 覆盖不删 native、注销后 destroy/set_rect 返回 NotFound（211 断言） |
 | Host | **PASS**：148/148；`check_arch`、`check_http_routes`、`git diff --check` 通过 |
+
+## §7 AS-19 后续：锚定按钮机制（2026-10-21）
+
+**实现**：`ui_components` minor 20 尾追加 `anchored_button_ensure/set_visible/release/draw`；Host adapter minor 25 尾追加 `click_binding_is_current`；autosell 入口只保留点击回调与布局回调（`panel.cpp:385-457`），句柄存活/身份校验/失效重建由框架统一处理。`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。
+
+**身份判据**：`click_binding_is_current` = 主线程 + 句柄与 data 内存可读 + 绑定表 (callback, owner) 匹配 + `ExecuteProc` 仍是 adapter trampoline。命中返回 live=1；内存不可读返回 NotReady（不得据此删除）；其余 live=0（允许注销记录并重建，不允许 delete）。
+
+**Host 覆盖**：`core_ui_components_tests` 230 断言（锚定 ensure 创建一次、子树重建后只注销+重建且 `delete_control` 计数不变、root 消失时清状态、release 不删 native）；`ui_adapter_tests` 覆盖 `click_binding_is_current` 的命中/owner 不符/回调不符/未绑定/内存不可读；Host 148/148。
+
+**真机（monster v29，模块 `9402c676cd6d`，集成包 `6c0aa81d…`）**：
+
+| 项 | 结果 |
+|---|---|
+| 首次打开背包页 | **PASS**：齿轮在底部原位，EB 5 页签列完整 |
+| 切页（技能↔背包）4 轮 + 3 轮 | **PASS**：`entry installed via anchored` 总数 = 1 + 重建次数（5→10），每次重建恰好一条，无逐帧抖动 |
+| 关闭/重开背包页 2 轮 | **PASS**：每次重建一条，位置不变 |
+| 进入 EB bag6 并返回 | **PASS**：入口不移动，页签高亮正常 |
+| 入口点击/面板关闭 | **PASS**：`panel_in_app` → 返回 `panel_inventory` |
+| 崩溃 | **PASS**：进程 pid 21512 全程存活，logcat FATAL/SIGSEGV = 0 |
