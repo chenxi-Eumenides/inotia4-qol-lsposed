@@ -46,7 +46,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - 面板由 `own:popup.savebackup` 占用 PopupState 死条目承载，acquire 注入、release 写回快照（`plugin.cpp:64-69,116-128`；`ui/panel.cpp:655-697`）。
 - 设置入口为 descriptor feature `save_backup.open_manager`：默认 `1`、分类 Tools、类型 entry、标题「存档备份」、说明「打开存档备份管理器。」、按钮「打开」、priority `-2`；回调经 `ui_panels.open("save_backup")` 打开面板（`plugin.cpp:333-359`）。该入口在 settings 注册表中的位置见 `docs/reference/plugins/settings.md:107`。
 - `settings_contribution.cpp` 的 catalog 注册为空实现（`settings_contribution.cpp:3-7`）。
-- 面板布局：左列 3 个存档槽卡片；中列竖排「导出/删除/导入」；右列顶部为跟随选中槽的 `auto` 自动备份卡片，下方为手动备份列表（每页 5 项，底部 `‹ 1/5 ›` 与返回）。列表缓存条目数不设上限（`g_backups` 为无界 vector），空列表显示「加载中…」或「暂无备份」（`ui/panel.cpp` 布局常量与 `g_backups`；`ui/render.inc` 绘制）。
+- 面板布局：左列 3 个存档槽卡片；中列竖排「导出/删除/导入」；右列顶部为跟随选中槽的 `auto` 自动备份卡片，下方为手动备份列表（每页 5 项，底部 `‹ 1/5 ›` 与返回）。列表按需解析：打开时只枚举文件名，当前页逐帧解析，未解析行显示「加载中…」；条目数不设上限（`g_backups` 为无界 vector），空列表显示「暂无备份」（`ui/panel.cpp` 布局常量与 `g_backups`；`ui/render.inc` 绘制）。
 - 选择与按钮状态：左侧槽与右侧条目独立选择；仅选槽时导出/删除可用，仅选手动备份时删除可用，槽+条目同时选中时导入可用；auto 可选中、可导入，不可删除。导出立即执行，导入与删除弹面板内确认框（确认/取消），不再使用两次点击确认（`ui/render.inc` `ops_btn_draw`、`ui/render.inc` `draw_confirm_dialog`、`ui/panel.inc` 事件分发、`ui/injection.inc`）。
 - 面板按钮**直接调用** native 业务函数（`save_backup_export_json` 等），不经 HTTP、不经 JNI/Kotlin（`ui/injection.inc:29,105,170-171`；`ui/panel.cpp:571-576`）。导入失败会显示响应中的 `error` 文案（`ui/injection.inc:11-25,108-125`）。
 - 地图名与等级显示：未知等级显示 `Lv?`；地图名先按 UTF-8 码点边界截断到 16 字节，再按宽度截断（`ui/render.inc:159-168,233-241,314-340`）。
@@ -77,7 +77,8 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - **删除备份**：解析并校验 checksum 后 `unlink` 单个 bundle（`feature.cpp:1815-1850`）。
 - **删除槽**：dat、sidecar 与 wh4 伴生文件各自在父目录内移入 `.sb-trash-<id>/`，写 `backups/.trash-<id>.index` 后统一 unlink；任一步失败把已移动文件移回；进程中断时下次 `save_backup_init` 调 `save_backup_recover_deletes()` 回滚优先（`feature.cpp` `save_backup_delete_slot_json`/`save_backup_recover_deletes`）。删档 hook 处理 sidecar 与 wh4，同样取 lease + trash + index（`feature.cpp` `save_backup_slot_deleted_sync`）。
 - **自动备份**：`save.pre_save` 回调把当前槽导出到 `backups/autobackup/autosave_s<N>.qol_save`，每槽 1 份、原子覆盖；导出前用 dat/sidecar/wh4 的 size+mtime 指纹与旧指纹比较，相同则跳过；失败只记 WARN，旧备份保留（`feature.cpp` `save_backup_autobackup_pre_save`；`plugin.cpp:83-88`）。自动备份目录不参与 `backups/` 顶层列表、去重、导入与删除扫描。
-- **列表**：先 `stat`，跳过 >64 MiB 的文件；单次扫描累计 >512 MiB 停止；锁外枚举/解析/排序，按 `export_time` 降序（`feature.cpp:57-58,1221-1290`）。
+- **HTTP 列表**：先 `stat`，跳过 >64 MiB 的文件；单次扫描累计 >512 MiB 停止；锁外枚举/解析/排序，按 `export_time` 降序（`feature.cpp:57-58,1221-1290`）。
+- **面板列表（单线程增量）**：打开面板只调 `save_backup_list_files_json`（`stat` 枚举，不解析），UI 立即绘制；面板 process 每帧最多解析 1 个当前页条目（`save_backup_entry_json`），auto 仅解析选中槽；以 `name+size+mtime` 缓存，未变化不重复解析；翻页/切槽重建队列，损坏条目移除并重算页数。面板内无后台线程（`ui/panel.cpp` 队列与缓存、`ui/panel.inc` 每帧解析点）。
 - **文件系统原语**：`lstat` 判目录/普通文件，读写用 `O_NOFOLLOW`；原子写临时名与回滚副本使用事务唯一名（`feature.cpp:293-370`）。
 - **生命周期**：install 绑定上下文、注册 panel provider 与槽元数据帧任务；enabled/disabled 只翻转 `g_active`；deactivate 注销帧任务、撤销 owner 面板、注销 provider、解绑上下文；资源物理还原由宿主执行，`on_resource_ready` 只缓存删档原函数指针（`plugin.cpp:241-301`）。
 

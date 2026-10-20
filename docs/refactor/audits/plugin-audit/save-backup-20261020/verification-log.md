@@ -126,3 +126,12 @@
 - auto 数据：跟随左侧选中槽，在后台刷新线程读取 `save_backup_auto_entry_json(slot)`，绘制路径零 IO。
 - 构建：`scripts/build-debug.sh` 成功 → `output/inotia4_qol_lsposed_debug_2610210130_b43186504387.apk`（sha256 `b4318650…`）。
 - 未验证：未安装/未进档；版式、圆角近似、字号与 960×640 适配、确认框命中、auto 导入回同槽均需真机目视。
+
+## §9 面板刷新改单线程增量（2026-10-21）
+
+用户要求：不使用后台线程；打开先显示 UI，随后每帧解析一个；只解析当前页与选中槽的 auto；未变化缓存复用；不显示的不解析。
+
+- `8e82787a`：新增 `save_backup_list_files_json`（只 stat 枚举）与 `save_backup_entry_json`（单条解析 + checksum 校验）；HTTP 列表不变。
+- `84bc9d51`：移除面板 `std::thread`/detached 刷新；改为打开时枚举、process 每帧最多解析 1 项、`name+size+mtime` 缓存、翻页/切槽重建队列、损坏条目移除重算页数。
+- 开销：枚举只做 `opendir/stat`；单条解析在读入时执行 CRC/checksum；每帧最多一项，但单个超大 bundle 的解析仍可能占一帧，后续可按时间预算再细化。
+- 构建：`scripts/build-debug.sh` 成功（两 ABI）。真机版式与逐帧回填节奏未验证。
