@@ -22,7 +22,6 @@ static void component_container(UiRect rect) {
 void root_decor_draw() {
     if (g_root == nullptr) return;
     component_container({0x10, 0x10, ROOT_W - 0x20, ROOT_H - 0x20});
-    component_container({SLOT_COL_X, SLOT_FRAME_Y, SLOT_COL_W, SLOT_FRAME_H});
     component_container({OPS_COL_X, OPS_Y0 - 0x08, OPS_COL_W, 3 * OPS_BTN_H + 2 * OPS_BTN_GAP + 0x10});
     component_container({LIST_COL_X, FRAME_Y, LIST_COL_W, FRAME_H});
 }
@@ -79,7 +78,6 @@ void list_btn_draw(void* ctrl) {
     const int absolute = g_page_index * LIST_COLS_PER_PAGE + local;
     const BackupEntry* item = backup_item_at_page(local);
     if (item == nullptr) return;
-    component_container(list_btn_rect(local));
     const bool parsed = item->parsed;
     const bool selected = absolute == g_selected_backup;
     const UiRect rect = list_btn_rect(local);
