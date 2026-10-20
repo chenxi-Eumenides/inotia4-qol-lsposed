@@ -159,6 +159,14 @@ static void sb_truncate_utf8_font3(char* s, int max_w) {
     *p = 0;
 }
 
+// 返回不超过 limit 的最大 UTF-8 码点边界；续字节不能作为截断点。
+static size_t sb_utf8_boundary(const std::string& s, size_t limit) {
+    if (limit >= s.size()) return s.size();
+    size_t pos = limit;
+    while (pos > 0 && (static_cast<unsigned char>(s[pos]) & 0xC0) == 0x80) --pos;
+    return pos;
+}
+
 static void draw_string_at_font(int x, int y, const char* s, uint32_t color, int font) {
     if (s == nullptr || s[0] == 0) return;
     if (ui_adapter() == nullptr || ui_adapter()->set_font_color_rgb == nullptr ||
@@ -225,8 +233,8 @@ void slot_btn_draw(void* ctrl) {
     char map_short[32];
     const std::string map_name = save_backup_map_name(info.map_id);
     if (!map_name.empty()) {
-        // map_name 为 UTF-8 中文（最长约 32 字节）；先截断到 16 字节，再按 font=3 宽度二次截断。
-        size_t len = map_name.size() > 16 ? 16 : map_name.size();
+        // map_name 为 UTF-8 中文（最长约 32 字节）；先按码点边界截断到 16 字节，再按宽度截断。
+        const size_t len = sb_utf8_boundary(map_name, 16);
         memcpy(map_short, map_name.c_str(), len);
         map_short[len] = 0;
     } else {
@@ -306,11 +314,10 @@ void list_btn_draw(void* ctrl) {
     // 命中/操作回调用同一 g_page_index 换算，口径一致）。绘制路径零 IO。
     char line1[CB_TEXT_SIZE];
     char line2[CB_TEXT_SIZE];
-    // map_name 为 UTF-8 中文（最长约 32 字节）；先截断到 16 字节，再按 font=3 宽度二次截断。
+    // map_name 为 UTF-8 中文（最长约 32 字节）；先按码点边界截断到 16 字节，再按宽度截断。
     char map_short[32];
     if (!e->map_name.empty()) {
-        size_t len = e->map_name.size();
-        if (len > 16) len = 16;
+        const size_t len = sb_utf8_boundary(e->map_name, 16);
         memcpy(map_short, e->map_name.c_str(), len);
         map_short[len] = 0;
     } else {
@@ -321,7 +328,6 @@ void list_btn_draw(void* ctrl) {
     char prefix[CB_TEXT_SIZE];
     const char* cls = !e->class_name.empty() ? e->class_name.c_str()
                                              : save_backup_class_name(e->class_idx);
-    const int lvl = e->hero_level >= 0 ? e->hero_level : -1;
     if (cls != nullptr && cls[0] != 0 && e->hero_level >= 0) {
         snprintf(prefix, sizeof(prefix), "%s Lv%d ", cls, e->hero_level);
     } else if (e->hero_level >= 0) {
@@ -329,7 +335,8 @@ void list_btn_draw(void* ctrl) {
     } else if (cls != nullptr && cls[0] != 0) {
         snprintf(prefix, sizeof(prefix), "%s ", cls);
     } else {
-        snprintf(prefix, sizeof(prefix), "Lv%d  ", lvl);  // 未知等级旧备份：保留 Lv-1 占位
+        // 未知等级旧备份：不显示负数等级。
+        snprintf(prefix, sizeof(prefix), "Lv? ");
     }
     // 可用宽 = 按钮宽 r.w - 左内距 0x08 - 右边距 0x04；地图名按剩余宽度截断到码点边界。
     const int text_avail = static_cast<int>(r.w) - 0x08 - 0x04;

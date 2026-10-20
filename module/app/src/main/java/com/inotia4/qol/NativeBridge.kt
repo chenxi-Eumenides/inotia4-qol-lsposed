@@ -169,10 +169,6 @@ object NativeBridge {
         androidRelease: String,
         androidSdkInt: Int,
     )
-    external fun nativeBackupList(): String
-    external fun nativeBackupExport(slot: Int): String
-    external fun nativeBackupImport(checksum: String, slot: Int): String
-    external fun nativeBackupDelete(checksum: String): String
     external fun nativeSaveBackupUiInject(): String
     external fun nativeSaveBackupUiStatus(): String
     external fun nativeSaveBackupUiRestore(): String

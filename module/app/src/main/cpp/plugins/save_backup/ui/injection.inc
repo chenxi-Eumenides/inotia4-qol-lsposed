@@ -184,7 +184,7 @@ static void delete_selected() {
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         if (ok) {
-            set_msg_locked(checksum.empty() ? "已删除存档" : "已删除", COLOR_OK, false);
+            set_msg_locked(checksum.empty() ? "已删除存档" : "已删除备份", COLOR_OK, false);
             if (checksum.empty()) g_selected_slot = -1;
             else g_selected_backup = -1;
         } else {
