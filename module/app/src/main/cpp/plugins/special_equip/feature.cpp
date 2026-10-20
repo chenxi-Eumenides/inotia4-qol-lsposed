@@ -28,9 +28,6 @@ const contracts::CharacterFactsApi* g_character_facts = nullptr;
 std::atomic<void*> g_backup_can_equip{nullptr};
 std::atomic<void*> g_backup_can_unequip{nullptr};
 
-// 真机验收用的「翻转计数」：只有「原版拒绝 → 本域放行」才 +1，便于确认生效范围。
-std::atomic<uint64_t> g_override_count{0};
-
 // 真机排障用的「未放行原因」预算：UI 每次构建详情菜单都会调，不设上限会刷爆日志。
 std::atomic<int> g_reject_log_budget{120};
 
@@ -50,13 +47,6 @@ bool resolve_item_handle(void* item, contracts::QolItemHandle* out) {
     return out->slot != 0 && out->generation != 0;
 }
 
-bool item_facts_view(void* item, contracts::QolItemInventoryView* out) {
-    if (out == nullptr || g_item_facts == nullptr || g_item_facts->view == nullptr) return false;
-    contracts::QolItemHandle handle{};
-    return resolve_item_handle(item, &handle) &&
-           contracts::succeeded(g_item_facts->view(handle, out));
-}
-
 bool item_is_real_equip(void* item, int32_t* out) {
     if (out == nullptr) return false;
     *out = 0;
@@ -67,6 +57,15 @@ bool item_is_real_equip(void* item, int32_t* out) {
     if (!contracts::succeeded(g_item_facts->is_real_equip(handle, &value))) return false;
     *out = value;
     return true;
+}
+
+bool item_category(void* item, int32_t* out) {
+    if (out == nullptr || g_item_facts == nullptr || g_item_facts->category == nullptr) {
+        return false;
+    }
+    contracts::QolItemHandle handle{};
+    return resolve_item_handle(item, &handle) &&
+           contracts::succeeded(g_item_facts->category(handle, out));
 }
 
 void log_write(int32_t level, const char* format, va_list args) {
@@ -80,11 +79,14 @@ void log_write(int32_t level, const char* format, va_list args) {
     (void)sdk->log.write(level, 17, "plugins/special_equip/feature.cpp", message, message_length);
 }
 
-void log_debug_impl(const char* format, ...) {
+bool debug_enabled() {
     const auto* sdk = host_sdk();
-    if (sdk == nullptr || sdk->log.debug_enabled == nullptr || sdk->log.debug_enabled() == 0) {
-        return;
-    }
+    return sdk != nullptr && sdk->log.debug_enabled != nullptr &&
+           sdk->log.debug_enabled() != 0;
+}
+
+void log_debug_impl(const char* format, ...) {
+    if (!debug_enabled()) return;
     va_list args;
     va_start(args, format);
     log_write(0, format, args);
@@ -100,65 +102,58 @@ bool replay_deps_ready() {
            extras != nullptr && extras->read.can_change_equip != nullptr;
 }
 
-// 仅 debug 日志开启时记录，避免热路径噪声（穿装/卸下都是用户操作级频率，无需预算门控）。
-void log_override(const char* what, void* ch, void* item) {
-    log_debug_impl("%s overridden ch=%p item=%p count=%llu", what, ch, item,
-              static_cast<unsigned long long>(g_override_count.load(std::memory_order_relaxed)));
-}
-
 // 「原版拒绝且本域也未放行」的原因快照。UI 的装备按钮灰化正是走这条路径，
 // 打出来即可判定是 ①真装备 / ③角色权限 / ④等级 中的哪一道挡住的。
-void log_reject(int category, void* ch, void* item) {
+void log_reject(int category, void* ch, void* item, const EquipReplayInputs* inputs) {
+    if (!debug_enabled()) return;
     if (g_reject_log_budget.fetch_sub(1, std::memory_order_relaxed) <= 0) return;
     const auto* game = game_host();
+    const auto* extras = character_extras();
     int32_t type = -1;
     int32_t merc_slot = -1;
     int32_t level = -1;
     int32_t can_change = 0;
     int32_t real_equip = 0;
     int32_t item_level = -1;
+    if (inputs != nullptr) {
+        real_equip = inputs->is_real_equip ? 1 : 0;
+        can_change = inputs->can_change_equip ? 1 : 0;
+        level = inputs->character_level;
+        item_level = inputs->required_item_level;
+    }
     if (g_character_facts != nullptr && g_character_facts->type != nullptr) {
         (void)g_character_facts->type(ch, &type);
     }
-    if (character_extras() != nullptr && character_extras()->read.merc_slot != nullptr) {
-        (void)character_extras()->read.merc_slot(ch, &merc_slot);
+    if (extras != nullptr && extras->read.merc_slot != nullptr) {
+        (void)extras->read.merc_slot(ch, &merc_slot);
     }
-    if (character_extras() != nullptr && character_extras()->read.level != nullptr) {
-        (void)character_extras()->read.level(ch, &level);
+    if (inputs == nullptr) {
+        if (extras != nullptr && extras->read.level != nullptr) {
+            (void)extras->read.level(ch, &level);
+        }
+        if (extras != nullptr && extras->read.can_change_equip != nullptr) {
+            (void)extras->read.can_change_equip(ch, &can_change);
+        }
+        (void)item_is_real_equip(item, &real_equip);
+        int32_t resolved_item_level = -1;
+        if (game != nullptr && game->read_only.item.equip_level != nullptr &&
+            contracts::succeeded(game->read_only.item.equip_level(item, &resolved_item_level))) {
+            item_level = resolved_item_level;
+        }
     }
-    if (character_extras() != nullptr && character_extras()->read.can_change_equip != nullptr) {
-        (void)character_extras()->read.can_change_equip(ch, &can_change);
-    }
-    (void)item_is_real_equip(item, &real_equip);
-    int32_t resolved_item_level = -1;
-    if (game != nullptr && game->read_only.item.equip_level != nullptr &&
-        contracts::succeeded(game->read_only.item.equip_level(item, &resolved_item_level))) {
-        item_level = resolved_item_level;
-    }
-    contracts::QolItemInventoryView item_view{};
-    (void)item_facts_view(item, &item_view);
-    int32_t item_category = category;
+    int32_t resolved_category = category;
+    if (item_category(item, &resolved_category)) category = resolved_category;
     int32_t no_equip_bit = -1;
-    if ((item_view.fields & contracts::kQolItemInventoryHasCategory) != 0) {
-        item_category = item_view.category;
-    }
-    if (game != nullptr && game->read_only.item.class_no_equip_bit != nullptr && item_category >= 0) {
-        (void)game->read_only.item.class_no_equip_bit(item_category, &no_equip_bit);
+    if (game != nullptr && game->read_only.item.class_no_equip_bit != nullptr && category >= 0) {
+        (void)game->read_only.item.class_no_equip_bit(category, &no_equip_bit);
     }
     log_debug_impl("not overridden ch=%p item=%p cat=%d bit4=%d ctype=%d mercSlot=%d "
-              "realEquip=%d canChange=%d chLv=%d itemLv=%d",
-              ch, item, item_category, no_equip_bit, type, merc_slot, real_equip, can_change, level,
-              item_level);
+                   "realEquip=%d canChange=%d chLv=%d itemLv=%d",
+                   ch, item, category, no_equip_bit, type, merc_slot, real_equip, can_change,
+                   level, item_level);
 }
 
 }  // namespace
-
-void log_debug(const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-    log_write(0, format, args);
-    va_end(args);
-}
 
 void log_info(const char* format, ...) {
     va_list args;
@@ -241,30 +236,49 @@ int can_equip_wrapper(void* ch, void* item) {
     if (backup(ch, item) != 0) return 1;              // 原版放行 → 快速路径，不介入
     if (!gate_enabled()) return 0;
     if (ch == nullptr || item == nullptr) return 0;
+    EquipReplayInputs inputs{false, false, -1, -1};
     const auto* extras = character_extras();
     if (!replay_deps_ready() || extras == nullptr || extras->read.level == nullptr) {
-        log_reject(-1, ch, item);
+        log_reject(-1, ch, item, &inputs);
         return 0;                                     // 依赖缺失：fail-closed，保持原版拒绝
     }
     int32_t is_real_equip = 0;
-    int32_t can_change_equip = 0;
-    int32_t char_level = -1;
-    int32_t item_level = -1;
+    if (!item_is_real_equip(item, &is_real_equip)) {
+        log_reject(-1, ch, item, &inputs);
+        return 0;
+    }
+    inputs.is_real_equip = is_real_equip != 0;
+
     const auto* game = game_host();
-    if (!item_is_real_equip(item, &is_real_equip) || game == nullptr ||
-        game->read_only.item.equip_level == nullptr ||
-        !contracts::succeeded(game->read_only.item.equip_level(item, &item_level)) ||
-        extras->read.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
-        extras->read.level(ch, &char_level).ok != kQolOk) {
-        log_reject(-1, ch, item);
+    if (game == nullptr || game->read_only.item.equip_level == nullptr) {
+        log_reject(-1, ch, item, &inputs);
         return 0;
     }
-    if (!equip_replay_allows(is_real_equip != 0, can_change_equip != 0, char_level, item_level)) {
-        log_reject(-1, ch, item);  // UI 灰化走这条路径
+    int32_t item_level = -1;
+    if (!contracts::succeeded(game->read_only.item.equip_level(item, &item_level))) {
+        log_reject(-1, ch, item, &inputs);
         return 0;
     }
-    g_override_count.fetch_add(1, std::memory_order_relaxed);
-    log_override("can_equip", ch, item);
+    inputs.required_item_level = item_level;
+
+    int32_t can_change_equip = 0;
+    if (extras->read.can_change_equip(ch, &can_change_equip).ok != kQolOk) {
+        log_reject(-1, ch, item, &inputs);
+        return 0;
+    }
+    inputs.can_change_equip = can_change_equip != 0;
+
+    int32_t char_level = -1;
+    if (extras->read.level(ch, &char_level).ok != kQolOk) {
+        log_reject(-1, ch, item, &inputs);
+        return 0;
+    }
+    inputs.character_level = char_level;
+    if (!equip_replay_allows(inputs)) {
+        log_reject(-1, ch, item, &inputs);  // UI 灰化走这条路径
+        return 0;
+    }
+    log_debug_impl("%s overridden ch=%p item=%p", "can_equip", ch, item);
     return 1;
 }
 
@@ -281,17 +295,16 @@ int can_unequip_wrapper(void* ch, void* item) {
     const auto* game = game_host();
     const auto* extras = character_extras();
     if (game == nullptr || extras == nullptr || extras->read.can_change_equip == nullptr) {
-        log_reject(-1, ch, item);
+        log_reject(-1, ch, item, nullptr);
         return 0;
     }
     int32_t can_change_equip = 0;
     if (extras->read.can_change_equip(ch, &can_change_equip).ok != kQolOk ||
         !unequip_replay_allows(can_change_equip != 0)) {
-        log_reject(-1, ch, item);
+        log_reject(-1, ch, item, nullptr);
         return 0;
     }
-    g_override_count.fetch_add(1, std::memory_order_relaxed);
-    log_override("can_unequip", ch, item);
+    log_debug_impl("%s overridden ch=%p item=%p", "can_unequip", ch, item);
     return 1;
 }
 
@@ -312,7 +325,7 @@ int32_t sell_gate_should_block(void* ctx) {
     }
     int32_t desc_type = -1;
     if (game->read_only.item.equip_desc_role_type(&desc_type).ok != kQolOk) return 1;
-    if (!sell_gate_decides_block(desc_type, true, true, can_change != 0)) return 0;
+    if (!sell_gate_decides_block({desc_type, true, true, can_change != 0})) return 0;
     log_info("sell rejected: menu char cannot change equip ch=%p", ch);
     return 1;
 }

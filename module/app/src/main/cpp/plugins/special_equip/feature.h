@@ -27,7 +27,7 @@
 //
 // 关键设计取舍：
 //   - **不做「临时清位重跑」**。那需要写 ITEMDATABASE；wrapper 对游戏状态只做纯读。
-//     item handle 的注册/查询要求主线程，非主线程进入会在 item_facts_view 失败并保持原版拒绝。
+//     item handle 的注册/查询要求主线程，非主线程进入会在 item_is_real_equip 失败并保持原版拒绝。
 //   - **不 hook `CHAR_CanChangeEquip`**。它签名 `int(void* ch)`，拿不到 item，无法把放行限定到
 //     具体装备；而且它体内**不读 bit4**（只读 `[ch+0x352]` 与 CHAR_IsSpecialNPC），hook 它
 //     碰不到目标；更重要的是它是**必须保留**的那道检查。
@@ -47,7 +47,7 @@
 // 默认开启，作为 Hidden toggle 暴露：Debug 可经 feature 关闭并触发生命周期卸载，Release 不显示 Hidden。
 //
 // 线程模型：两个 wrapper 对游戏状态只做纯读；item handle 的注册/查询要求主线程，非主线程进入
-// 会在 item_facts_view 失败并保持原版拒绝。
+// 会在 item_is_real_equip 失败并保持原版拒绝。
 
 namespace qol::features::special_equip {
 
@@ -57,7 +57,6 @@ const contracts::QolCharacterExtrasPort* character_extras();
 void set_item_facts(const contracts::ItemFactsApi* facts);
 void set_character_facts(const contracts::CharacterFactsApi* facts);
 
-void log_debug(const char* format, ...);
 void log_info(const char* format, ...);
 void log_warn(const char* format, ...);
 void log_error(const char* format, ...);

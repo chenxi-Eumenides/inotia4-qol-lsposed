@@ -1042,6 +1042,19 @@ target_compile_features(special_equip_rules_tests PRIVATE cxx_std_17)
 set_target_properties(special_equip_rules_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME special_equip_rules_tests COMMAND special_equip_rules_tests)
 
+# special_equip wrapper / 安装与生命周期 host 测试（fake Host SDK + Game Host）。
+add_executable(special_equip_feature_tests
+    test_special_equip_feature.cpp
+    ${CPP_DIR}/plugins/special_equip/feature.cpp
+    ${CPP_DIR}/plugins/special_equip/plugin.cpp
+    ${CPP_DIR}/plugins/special_equip/rules.cpp
+)
+target_include_directories(special_equip_feature_tests PRIVATE ${CPP_DIR})
+target_compile_features(special_equip_feature_tests PRIVATE cxx_std_17)
+set_target_properties(special_equip_feature_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME special_equip_feature_tests COMMAND special_equip_feature_tests)
+
 # W1：商店扩展物品出售计数/计价纯函数 host 测试（header-only，末尾追加）
 add_executable(store_sell_rules_tests
     test_store_sell_rules.cpp
