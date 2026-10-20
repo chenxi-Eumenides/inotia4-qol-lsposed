@@ -2,6 +2,8 @@
 #include "contracts/inventory_slot.h"
 #include "contracts/inventory_action.h"
 #include "contracts/inventory_refresh.h"
+#include "contracts/move_merge.h"
+#include "contracts/game_ports/move_merge_port.h"
 #include "contracts/inventory_extension.h"
 #include "contracts/extension_bag.h"
 #include "contracts/character_state.h"
@@ -184,7 +186,7 @@ int main() {
     CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
     // 合并 inventory_hooks 后新增 world.facts / extension_bag optional：出售与扩展袋
     // 路径按调用时 require，缺失时只降级对应行为，不阻断 item.facts。
-    CHECK(descriptor.optional_count == 5 && descriptor.optional_requires != nullptr);
+    CHECK(descriptor.optional_count == 6 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
     CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
@@ -210,18 +212,33 @@ int main() {
           qol::contracts::kExtensionBagVersionMajor);
     CHECK(descriptor.optional_requires[4].range.min_minor ==
           qol::contracts::kExtensionBagSaleRemoveVersionMinor);
-    CHECK(descriptor.feature_count == 1 && descriptor.features != nullptr);
+    CHECK(std::strcmp(descriptor.optional_requires[5].id,
+                      qol::contracts::kInventoryMergeProjectionCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[5].range.major ==
+          qol::contracts::kInventoryMergeProjectionVersionMajor);
+    CHECK(descriptor.optional_requires[5].range.min_minor ==
+          qol::contracts::kInventoryMergeProjectionVersionMinor);
+    CHECK(descriptor.feature_count == 2 && descriptor.features != nullptr);
     CHECK(std::strcmp(descriptor.features[0].id, "core.item.provider") == 0);
+    CHECK(std::strcmp(descriptor.features[1].id, "move_merge.drag_merge") == 0);
+    CHECK(descriptor.features[1].default_enabled == 1);
+    CHECK(descriptor.features[1].category ==
+          qol::contracts::FeatureCategory::kBasicOptimization);
+    CHECK(descriptor.features[1].on_toggle != nullptr);
     CHECK(!descriptor.deactivate_allowed);
-    CHECK(descriptor.resources_count == 24 && descriptor.resources != nullptr);
+    CHECK(descriptor.resources_count == 25 && descriptor.resources != nullptr);
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         CHECK(descriptor.resources[i].owner != nullptr &&
               std::strcmp(descriptor.resources[i].owner, "core.item") == 0);
+        const bool merge_resource =
+            std::strcmp(descriptor.resources[i].id, "ptrslot:MOVE_MERGE_GOT") == 0;
         CHECK(descriptor.resources[i].requirement ==
-              qol::contracts::ResourceRequirement::kRequired);
+              (merge_resource ? qol::contracts::ResourceRequirement::kOptional
+                              : qol::contracts::ResourceRequirement::kRequired));
         CHECK(descriptor.resources[i].failure ==
               qol::contracts::ResourceFailure::kFailClosed);
     }
+    CHECK(std::strcmp(descriptor.resources[24].id, "ptrslot:MOVE_MERGE_GOT") == 0);
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
     CHECK(descriptor.http_endpoint_count == 19 && descriptor.http_endpoints != nullptr);
     CHECK(descriptor.http_route_metadata_count == 2 &&
@@ -251,7 +268,7 @@ int main() {
         CHECK(descriptor.http_route_metadata[i].op_required == 1);
         CHECK(descriptor.http_route_metadata[i].lease_required == 1);
     }
-    CHECK(descriptor.provides_count == 5 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 6 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 6);
     CHECK(descriptor.provides[0].iface != nullptr);
@@ -272,13 +289,31 @@ int main() {
     CHECK(std::strcmp(descriptor.provides[4].id,
                       qol::contracts::kInventorySlotCapabilityId) == 0);
     CHECK(descriptor.provides[4].iface != nullptr);
-    CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
+    CHECK(std::strcmp(descriptor.provides[5].id,
+                      qol::contracts::kMoveMergeControlCapabilityId) == 0);
+    CHECK(descriptor.provides[5].iface != nullptr);
+    CHECK(descriptor.port_count == 6 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
     CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 6);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
           qol::contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE);
+    CHECK(descriptor.ports[4].id == qol::contracts::QolPortId::QOL_PORT_MOVE_MERGE);
+    CHECK(descriptor.ports[4].range.major ==
+          qol::contracts::kQolMoveMergePortVersion.major);
+    CHECK(descriptor.ports[5].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS);
+
+    const auto* merge_control = static_cast<const qol::contracts::MoveMergeControlApi*>(
+        descriptor.provides[5].iface);
+    CHECK(merge_control != nullptr && merge_control->enabled != nullptr);
+    qol::contracts::PluginContext ctx{};
+    int dummy = 0;
+    CHECK(descriptor.on_resource_ready != nullptr);
+    CHECK(descriptor.on_resource_ready(ctx, "hook:INVEN_FindItem", &dummy) == 0);
+    CHECK(!merge_control->enabled());
+    CHECK(descriptor.on_resource_ready(ctx, "ptrslot:MOVE_MERGE_GOT", &dummy) == 0);
+    CHECK(merge_control->enabled());
 
     const auto* api = static_cast<const qol::contracts::ItemFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->category != nullptr);

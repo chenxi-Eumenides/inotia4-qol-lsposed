@@ -8,4 +8,5 @@ add_library(qol_plugin_core.item STATIC
     inventory/inventory_logging.cpp
     inventory/inventory_slot.cpp
     inventory/plugin.cpp
+    merge/plugin.cpp
 )

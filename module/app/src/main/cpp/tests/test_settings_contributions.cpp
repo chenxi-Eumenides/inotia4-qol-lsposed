@@ -9,7 +9,6 @@
 #include "plugins/settings/settings_contribution.h"
 #include "plugins/custom_recipe/settings_contribution.h"
 #include "plugins/extension_bag/assembly/settings_contribution.h"
-#include "plugins/move_merge/settings_contribution.h"
 #include "plugins/push_all/settings_contribution.h"
 #include "plugins/save_backup/settings_contribution.h"
 #include "plugins/simple_mode/settings_contribution.h"
@@ -32,7 +31,6 @@ constexpr RegisterFn kRetiredContributions[]{
     &qol::features::autosell::register_settings,
     &qol::features::custom_recipe::register_settings,
     &qol::features::push_all::register_settings,
-    &qol::features::move_merge::register_settings,
     &qol::features::simple_mode::register_settings,
     &qol::features::core_ui::register_settings,
     &qol::features::core_ui::register_settings_category,

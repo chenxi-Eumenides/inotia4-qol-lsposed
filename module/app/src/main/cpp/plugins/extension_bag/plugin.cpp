@@ -37,7 +37,7 @@
 // iface 由 extension_bag_api_table() 提供（EB TU 逐条转发既有 port）。宿主在 enabled 时注册、
 // revoking 时注销（§3.4.4 既有路径）；本文件不新增 JNI / 资源。
 //
-// Move-merge projection bridge; the move_merge plugin owns the independent gate and X1 claim.
+// Move-merge projection bridge; core.item owns the independent gate and X1 claim.
 //
 // M1/M2 校正（D2a-3b-1）：ADR-0007 表中 M1/M2 记为 required × failClosed；
 // 按晚就绪语义校正为 required × failSoft —— 装配期失败时资源保持 free、插件
@@ -439,7 +439,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         return 1;
     }
     extension_bag_bind_port_sdk(g_sdk);
-    // The separate move_merge plugin owns the X1 resource.
+    // core.item owns the X1 resource.
     // Owner command result handler 注册在全部绑定就绪后执行；失败即 install 失败。
     if (!register_extension_bag_result_handler(g_sdk)) {
         rollback_extension_bag_install();

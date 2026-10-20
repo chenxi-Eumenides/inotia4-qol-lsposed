@@ -1,7 +1,8 @@
-#include "plugins/move_merge/plugin.h"
+#include "plugins/core.item/merge/plugin.h"
 
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/move_merge_port.h"
@@ -10,60 +11,42 @@
 #include "contracts/item_facts.h"
 #include "contracts/move_merge.h"
 #include "contracts/ui.h"
+#include "plugins/core.item/inventory/native_inventory_hook.h"
 
-namespace qol::features::move_merge {
+namespace qol::features::core_item::merge {
 namespace {
 
-constexpr const char* kPluginId = "move_merge";
-constexpr const char* kX1Resource = "ptrslot:MOVE_MERGE_GOT";
+constexpr const char* kMergeResource = "ptrslot:MOVE_MERGE_GOT";
 constexpr const char* kReason = "Owns the UIEquip item-proc wrapper and native merge gate";
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolMoveMergePort* g_move_port = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_port = nullptr;
-std::atomic<bool> g_active{false};
+const contracts::ItemFactsApi* g_item_facts = nullptr;
+std::atomic<bool> g_feature_enabled{true};
+std::atomic<bool> g_wrapper_ready{false};
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param);
 
 const contracts::ResourceClaim kResources[] = {{
-    kX1Resource,
-    kX1Resource,
+    kMergeResource,
+    kMergeResource,
     contracts::ResourceMechanism::kPtrSlot,
     contracts::ResourcePolicy::kPrivate,
-    contracts::ResourceRequirement::kRequired,
+    contracts::ResourceRequirement::kOptional,
     contracts::ResourceFailure::kFailClosed,
     true,
-    kPluginId,
+    "core.item",
     kReason,
     nullptr,
     120,
     reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper),
 }};
 
-const contracts::CapabilityRequirement kRequires[] = {{
-    contracts::kItemFactsCapabilityId,
-    {contracts::kItemFactsVersionMajor, 2},
-}};
-const contracts::CapabilityRequirement kOptionalRequires[] = {
-    {contracts::kInventoryMergeProjectionCapabilityId,
-     {contracts::kInventoryMergeProjectionVersionMajor,
-      contracts::kInventoryMergeProjectionVersionMinor}},
-    {contracts::kInventoryRefreshCapabilityId,
-     {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor}},
-};
-const contracts::QolPortRequirement kPorts[] = {{
-    contracts::QolPortId::QOL_PORT_MOVE_MERGE,
-    {contracts::kQolMoveMergePortVersion.major, contracts::kQolMoveMergePortVersion.minor},
-}, {
-    contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS,
-    {contracts::kQolPortCharacterExtrasVersion.major,
-     contracts::kQolPortCharacterExtrasVersion.minor},
-}};
-
-// feature 为插件唯一开关：want_run 成立才会 install；wrapper 只在插件活跃时安装，
-// 故合并门禁等价于插件活跃态。
+// 合并门禁：feature 关闭或 ptrslot 未就绪时 wrapper 只透传原版。
 bool gate_enabled() {
-    return g_active.load(std::memory_order_acquire);
+    return g_feature_enabled.load(std::memory_order_acquire) &&
+           g_wrapper_ready.load(std::memory_order_acquire);
 }
 
 const contracts::InventoryMergeProjectionApi* projection_api() {
@@ -80,29 +63,12 @@ const contracts::InventoryMergeProjectionApi* projection_api() {
     return contracts::inventory_merge_projection_api_valid(api) ? api : nullptr;
 }
 
-const contracts::InventoryRefreshApi* refresh_api() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const auto result = g_sdk->capabilities.require(
-        contracts::kInventoryRefreshCapabilityId,
-        {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor},
-        &iface);
-    const auto* api = contracts::succeeded(result)
-                          ? static_cast<const contracts::InventoryRefreshApi*>(iface)
-                          : nullptr;
-    return api != nullptr && api->call_original != nullptr ? api : nullptr;
+bool refresh_original() {
+    return inventory_native_hook_call_refresh_item_area_original();
 }
 
 const contracts::ItemFactsApi* item_facts_api() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const auto result = g_sdk->capabilities.require(
-        contracts::kItemFactsCapabilityId,
-        {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface);
-    const auto* api = contracts::succeeded(result)
-                          ? static_cast<const contracts::ItemFactsApi*>(iface)
-                          : nullptr;
-    return contracts::item_facts_api_size_valid(api) ? api : nullptr;
+    return contracts::item_facts_api_size_valid(g_item_facts) ? g_item_facts : nullptr;
 }
 
 void projection_observe_post(const contracts::InventoryMergeProjectionApi* api,
@@ -187,7 +153,10 @@ void report_item_proc_source(const contracts::InventoryMergeProjectionApi* api, 
 
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
     const contracts::InFlightGuard guard(g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-                                         {kX1Resource});
+                                         {kMergeResource});
+    if (!g_feature_enabled.load(std::memory_order_acquire)) {
+        return call_original(control, event, x2, param);
+    }
     const auto* projection = projection_api();
     const uint64_t observation = projection != nullptr && projection->observe_item_proc_pre != nullptr
                                      ? projection->observe_item_proc_pre(control, event, x2, param)
@@ -327,10 +296,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                                 (void)current->sync_projected_slot(target_bag, source_slot);
                                 (void)current->sync_projected_slot(target_bag, destination_slot);
                             }
-                            const auto* refresh = refresh_api();
-                            if (refresh != nullptr && refresh->call_original != nullptr) {
-                                (void)refresh->call_original();
-                            }
+                            (void)refresh_original();
                             void* root = nullptr;
                             const auto* ui = g_sdk != nullptr ? g_sdk->ui : nullptr;
                             if (ui != nullptr && ui->find_root != nullptr && ui->set_touch_cursor != nullptr &&
@@ -364,91 +330,71 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
 }
 
 bool control_enabled() { return gate_enabled(); }
-const contracts::MoveMergeControlApi kControlApi{
+
+}  // namespace
+
+const contracts::MoveMergeControlApi kMoveMergeControlApi{
     sizeof(contracts::MoveMergeControlApi),
     contracts::kMoveMergeControlVersionMajor,
     contracts::kMoveMergeControlVersionMinor,
     &control_enabled,
 };
-const contracts::CapabilityProvisionRef kProvides[] = {{
-    contracts::kMoveMergeControlCapabilityId,
-    {contracts::kMoveMergeControlVersionMajor, contracts::kMoveMergeControlVersionMinor},
-    &kControlApi,
-}};
 
-int plugin_install(contracts::PluginContext& ctx) {
-    if (ctx.struct_size < sizeof(contracts::PluginContext) || ctx.sdk == nullptr ||
-        ctx.ports == nullptr || ctx.port_count != 2 ||
-        ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
-        ctx.sdk->capabilities.require == nullptr) return 1;
-    const auto* port = static_cast<const contracts::QolMoveMergePort*>(ctx.ports[0]);
-    const auto* character =
-        static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[1]);
-    if (port->abi_version.major != contracts::kQolMoveMergePortVersion.major ||
-        port->abi_version.minor < contracts::kQolMoveMergePortVersion.minor ||
-        port->move_item == nullptr || port->current_bag == nullptr ||
-        port->validate_native_item == nullptr ||
-        character->abi_version.major != contracts::kQolPortCharacterExtrasVersion.major ||
-        character->abi_version.minor < contracts::kQolPortCharacterExtrasVersion.minor ||
-        !contracts::qol_character_extras_read_api_size_valid(&character->read) ||
-        character->read.can_apply_stuff_items == nullptr) return 1;
-    const void* item_iface = nullptr;
-    if (!contracts::succeeded(ctx.sdk->capabilities.require(
-            contracts::kItemFactsCapabilityId,
-            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor},
-            &item_iface)) || item_iface == nullptr ||
-        !contracts::item_facts_api_size_valid(
-            static_cast<const contracts::ItemFactsApi*>(item_iface)) ||
-        !contracts::item_facts_api_count_encoding_size_valid(
-            static_cast<const contracts::ItemFactsApi*>(item_iface)) ||
-        static_cast<const contracts::ItemFactsApi*>(item_iface)->count_encoding == nullptr) return 1;
-    g_sdk = ctx.sdk;
-    g_move_port = port;
-    g_character_port = character;
-    g_active.store(true, std::memory_order_release);
-    return 0;
+const contracts::ResourceClaim* claims(uint32_t* out_count) {
+    if (out_count != nullptr) {
+        *out_count = static_cast<uint32_t>(sizeof(kResources) / sizeof(kResources[0]));
+    }
+    return kResources;
 }
 
-void plugin_deactivate(contracts::PluginContext& ctx) {
-    g_active.store(false, std::memory_order_release);
-    (void)ctx;
+bool attach(const contracts::QolHostSdk* sdk,
+            const contracts::QolMoveMergePort* move_port,
+            const contracts::QolCharacterExtrasPort* character_port,
+            const contracts::ItemFactsApi* item_facts) {
+    if (sdk == nullptr || move_port == nullptr || character_port == nullptr ||
+        !contracts::item_facts_api_size_valid(item_facts) ||
+        !contracts::item_facts_api_count_encoding_size_valid(item_facts) ||
+        item_facts->count_encoding == nullptr ||
+        !contracts::satisfies(move_port->abi_version,
+                              {contracts::kQolMoveMergePortVersion.major,
+                               contracts::kQolMoveMergePortVersion.minor}) ||
+        move_port->move_item == nullptr || move_port->current_bag == nullptr ||
+        move_port->validate_native_item == nullptr ||
+        !contracts::satisfies(character_port->abi_version,
+                              {contracts::kQolPortCharacterExtrasVersion.major,
+                               contracts::kQolPortCharacterExtrasVersion.minor}) ||
+        !contracts::qol_character_extras_read_api_size_valid(&character_port->read) ||
+        character_port->read.can_apply_stuff_items == nullptr) {
+        return false;
+    }
+    g_sdk = sdk;
+    g_move_port = move_port;
+    g_character_port = character_port;
+    g_item_facts = item_facts;
+    // on_enabled 在资源安装完成后调用；此处保留 on_resource_ready 已写入的就绪态，
+    // 避免重新 attach 把已安装的 ptrslot 降级为未就绪。detach 才清除就绪态。
+    g_feature_enabled.store(true, std::memory_order_release);
+    return true;
+}
+
+void detach() {
     g_character_port = nullptr;
     g_move_port = nullptr;
+    g_item_facts = nullptr;
     g_sdk = nullptr;
+    g_wrapper_ready.store(false, std::memory_order_release);
+    g_feature_enabled.store(false, std::memory_order_release);
 }
 
-void plugin_on_enabled(contracts::PluginContext&) { g_active.store(true, std::memory_order_release); }
-void plugin_on_disabled(contracts::PluginContext&) { g_active.store(false, std::memory_order_release); }
-void plugin_fill_status(contracts::PluginStatusOut& out) {
-    out.enabled = g_active.load(std::memory_order_acquire);
-    out.error = nullptr;
+void set_enabled(bool enabled) { g_feature_enabled.store(enabled, std::memory_order_release); }
+// test seam
+bool enabled() { return g_feature_enabled.load(std::memory_order_acquire); }
+// test seam
+bool wrapper_ready() { return g_wrapper_ready.load(std::memory_order_acquire); }
+void set_wrapper_ready(bool ready) { g_wrapper_ready.store(ready, std::memory_order_release); }
+
+bool is_merge_resource(const char* resource_id) {
+    return resource_id != nullptr && std::strcmp(resource_id, kMergeResource) == 0;
 }
 
-const contracts::QolPortRequirement kPortRequirements[] = {{
-    contracts::QolPortId::QOL_PORT_MOVE_MERGE,
-    {contracts::kQolMoveMergePortVersion.major, contracts::kQolMoveMergePortVersion.minor},
-}, {
-    contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS,
-    {contracts::kQolPortCharacterExtrasVersion.major,
-     contracts::kQolPortCharacterExtrasVersion.minor},
-}};
-// Feature callback does not replace the existing lifecycle or business controls.
-constexpr contracts::FeatureDefinition kFeatures[] = {
-    {"move_merge.drag_merge", 1, contracts::FeatureCategory::kBasicOptimization,
-     contracts::FeatureType::kToggle, "拖拽合并", "拖拽同类物品时自动合并。",
-     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
-};
-
-const contracts::PluginDescriptor kDescriptor{
-    kPluginId, "0.1.0", 1, kRequires, 2, kOptionalRequires, 1, kProvides,
-    1, kResources, 0, nullptr, &plugin_install, &plugin_deactivate, &plugin_on_enabled,
-    &plugin_on_disabled, &plugin_fill_status, nullptr, kPortRequirements, 2,
-    nullptr, 0,
-    kFeatures, 1,
-};
-
-}  // namespace
-
-const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
-
-}  // namespace qol::features::move_merge
+}  // namespace qol::features::core_item::merge

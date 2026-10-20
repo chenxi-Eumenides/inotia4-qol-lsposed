@@ -1104,6 +1104,58 @@ void test_fail_soft_then_hard_failure_rolls_back() {
     CHECK(state_of("hook:softhard:hard") == ResourceState::kFree);
 }
 
+// kOptional + kFailClosed 不是硬失败：资源保持 Free、事务继续并最终 Succeeded，
+// 常驻资源置 retry_pending 供逐帧重试。
+void test_optional_fail_closed_continues() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:opt:A", "optional_plugin");
+    ResourceClaim b = make_claim("hook:opt:B", "optional_plugin");
+    b.requirement = ResourceRequirement::kOptional;
+    b.failure = ResourceFailure::kFailClosed;
+    b.gate = nullptr;
+    CHECK(register_claim(a));
+    CHECK(register_claim(b));
+
+    g_hook_fail_at = 2;
+    const uint64_t tx = tx_begin("optional_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));  // A 成功
+    CHECK(!tx_step(tx, &step));  // B 软失败即终态
+    CHECK(step.finished && step.ok != 0);
+    CHECK(state_of("hook:opt:B") == ResourceState::kFree);
+    CHECK(qol::hooks::retry_pending_get("hook:opt:B"));
+    CHECK(state_of("hook:opt:A") == ResourceState::kLive);
+
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kSucceeded);
+}
+
+// 对照：required + fail-closed 仍整笔回滚并 Failed。
+void test_required_fail_closed_still_fails() {
+    reset_all();
+    set_deps();
+    ResourceClaim a = make_claim("hook:req:A", "required_plugin");
+    ResourceClaim b = make_claim("hook:req:B", "required_plugin");
+    CHECK(register_claim(a));
+    CHECK(register_claim(b));
+
+    g_hook_fail_at = 2;
+    const uint64_t tx = tx_begin("required_plugin", TxKind::kInstall);
+    CHECK(tx != 0);
+    TxStep step{};
+    CHECK(tx_step(tx, &step));
+    CHECK(!tx_step(tx, &step));
+    TxStatus status{};
+    CHECK(tx_query(tx, &status));
+    CHECK(status.state == TxState::kFailed);
+    CHECK(state_of("hook:req:A") == ResourceState::kFree);
+    CHECK(state_of("hook:req:B") == ResourceState::kFree);
+    CHECK(!qol::hooks::retry_pending_get("hook:req:B"));
+}
+
 // 非入口机制（kCallPatch）软失败：保持 Free 并继续，事务 Succeeded。
 void test_fail_soft_non_entry_mechanism() {
     reset_all();
@@ -1354,6 +1406,8 @@ int main() {
     test_fail_soft_last_failure_still_succeeds();
     test_fail_soft_then_hard_failure_rolls_back();
     test_fail_soft_non_entry_mechanism();
+    test_optional_fail_closed_continues();
+    test_required_fail_closed_still_fails();
     test_rollback_skips_safely_revoked_entry();
     test_rollback_releases_free_entry_with_runtime();
     test_fail_soft_preserves_mechanism_code();

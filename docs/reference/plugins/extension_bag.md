@@ -12,7 +12,7 @@
 
 - 插件 id `extension_bag`，版本 `0.1.0`（`plugins/extension_bag/plugin.cpp:49-50`）。
 - required：`world.facts`、`item.facts`、`save.facts`、`craft.facts`、`save.slot_data`（`plugin.cpp:172-195`）。
-- optional：`inventory.refresh`、`move_merge.control`、`http.registry`、`http.dispatch`（`plugin.cpp:197-208`）。
+- optional：`inventory_refresh`、`move_merge.control`（两者均由 `core.item` 提供）、`http.registry`、`http.dispatch`（`plugin.cpp:197-208`）。
 - provides：`extension_bag`（API major 3、minor 0；sale removal 3.1）、`inventory.merge_projection`（`plugin.cpp:155-170`；`contracts/extension_bag.h:25-30`）。
 - ports：write port、character extras、inventory extras（`plugin.cpp:210-220,823-824`）。
 - resources：`assembly/claims.cpp` 的 `extension_bag_claims()`，当前 22 条：
@@ -46,7 +46,7 @@
 - `ExtensionBagApi`：状态/索引、对象反查、投影、收编/消耗、交互接管、观测/拖放、移动、容量、jewel、`remove_for_sale`（`contracts/extension_bag.h:83-155`）。
 - 线程约定：所有成员仅游戏主线程；`for_each_logical_item` 回调持 `g_virtual_bag_mtx`，回调内禁调本表加锁成员；撤销后不得缓存接口/裸指针（`contracts/extension_bag.h:9-15`）。
 - write port 36 项：inventory 9、equipment 7、UI 20（`contracts/game_ports/extension_bag_write_port.h:11-70`）。`QolResult` 表示适配器调用状态；带 `out_result` 的函数由该输出承载游戏函数 `0` 成功/非 `0` 失败。
-- 中立 provider：`inventory_extension_provider_table()`（`plugins/extension_bag/extension_bag_port.cpp:784`），消费者为 `core.item`、`inventory_hooks`、`core.save`。
+- 中立 provider：`inventory_extension_provider_table()`（`plugins/extension_bag/extension_bag_port.cpp:784`），消费者为 `core.item`（含 inventory hook 子域）与 `core.save`。
 
 ## 数据模型
 
@@ -84,10 +84,10 @@
 | 消费者 | 入口 |
 |---|---|
 | `core.item` | 中立 inventory provider / `ExtensionBagApi` |
-| `inventory_hooks` | 扩展物品识别、消耗、出售、移动 |
+| `core.item`（inventory hook 子域） | 扩展物品识别、消耗、出售、移动 |
 | `core.save` | `save.slot_data` v4 capture/complete |
 | `bridge/native` | 两个全局 JNI 导出 |
-| `move_merge` | 投影 drop / 身份查询 shim |
+| `core.item`（merge 子域） | 投影 drop / 身份查询 shim |
 
 边界：物理袋、原版物品对象与存档位段归原版/Game Adapter；扩展状态、投影控件与 sidecar 归本插件；设置页渲染归宿主 feature catalog，插件只声明 feature。
 
@@ -117,7 +117,7 @@
 | `http/*` | JSON parser、路由表、query |
 | `persistence/persistence.cpp` | `save.slot_data` v4 consumer |
 | `assembly/claims.cpp` | 资源 claim 表（22 条；核心/详情/商店/合成均启用） |
-| `assembly/move_merge_impl.cpp` | move-merge projection shim |
+| `assembly/move_merge_impl.cpp` | `core.item` merge 子域的 projection shim |
 | `model/*` | 纯状态、事务规则、JSON、payload、ledger |
 
 ## Host 测试

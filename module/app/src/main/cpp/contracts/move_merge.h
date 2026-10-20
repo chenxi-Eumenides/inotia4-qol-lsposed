@@ -14,9 +14,6 @@ constexpr uint16_t kInventoryMergeProjectionVersionMinor = 0;
 constexpr const char* kMoveMergeControlCapabilityId = "move_merge.control";
 constexpr uint16_t kMoveMergeControlVersionMajor = 1;
 constexpr uint16_t kMoveMergeControlVersionMinor = 0;
-constexpr const char* kMoveMergePluginId = "move_merge";
-constexpr uint16_t kMoveMergePluginVersionMajor = 1;
-constexpr uint16_t kMoveMergePluginVersionMinor = 0;
 
 enum class MoveMergeProjectionDropResult : uint8_t {
     kNotHandled = 0,

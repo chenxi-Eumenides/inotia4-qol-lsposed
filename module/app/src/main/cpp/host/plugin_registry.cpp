@@ -346,7 +346,7 @@ bool resolve_plugin_ports(uint32_t index) {
             return false;
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_MOVE_MERGE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "move_merge") != 0)) {
+            (plugin.id == nullptr || std::strcmp(plugin.id, "core.item") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

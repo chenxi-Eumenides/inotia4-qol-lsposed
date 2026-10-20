@@ -48,8 +48,6 @@
 #include "plugins/custom_recipe/settings_contribution.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/assembly/settings_contribution.h"
-#include "plugins/move_merge/plugin.h"
-#include "plugins/move_merge/settings_contribution.h"
 #include "plugins/core.item/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
 #include "plugins/push_all/plugin.h"
@@ -218,7 +216,6 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_ui::plugin_descriptor},
     {&features::custom_recipe::plugin_descriptor},
     {&features::extension_bag::plugin_descriptor},
-    {&features::move_merge::plugin_descriptor},
     {&features::core_item::plugin_descriptor},
     {&features::core_ui_state::plugin_descriptor},
     {&features::push_all::plugin_descriptor},

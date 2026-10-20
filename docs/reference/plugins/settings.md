@@ -124,7 +124,6 @@ descriptor 只注册一个 `page` entry feature：
 | `core.ui_state.provider` | 1 | Hidden | toggle | 0 |
 | `core.world.provider` | 1 | Hidden | toggle | 0 |
 | `attribute_quality.provider` | 1 | Hidden | toggle | 0 |
-| `inventory_hooks.inventory_support` | 1 | Hidden | toggle | 0 |
 | `core.feature.compatibility_routes` | 1 | Hidden | toggle | 0 |
 
 Host-owned feature（不属于玩家 core/plugin feature 表）：
@@ -150,7 +149,7 @@ Host-owned feature（不属于玩家 core/plugin feature 表）：
 | `custom_recipe.customRecipeEnabled` | `custom_recipe` / `custom_recipe.recipes` |
 | `stack_limit.stackLimitIncrease` | `stack_limit` / `stack_limit.limit_999` |
 | `push_all.pushAllEnabled` | `push_all` / `push_all.push` |
-| `move_merge.moveMergeEnabled` | `move_merge` / `move_merge.drag_merge` |
+| `move_merge.moveMergeEnabled` | `core.item` / `move_merge.drag_merge` |
 | `simple_mode.simpleModeEnabled` | `simple_mode` / `simple_mode.combat` |
 
 历史基线为 10 个 toggle；`op.enabled` 属于 `module.security` 的 General feature，在 Debug/Release 均显示。当前非隐藏的常规 toggle 集合为 11 项：七个既有非 core 功能开关、`module.platform.debug.logging` 和三个新增基础优化开关；`move_merge.drag_merge` 属于既有七项之一，只调整为基础优化分类。`save_backup.open_manager` 继续作为公开 Tools entry。`core.api.api.enabled` 默认开启、分类为 General、priority -5，Debug/Release 均显示；这些呈现元数据不改变 API runtime feature 行为。`module.platform.debug.logging` priority -3、名称为「debug日志」；其他显式优先级见注册表。历史 `core.settings.*` 命名不表示现行 API/OP owner 仍属于该 namespace。`special_equip.equipment_rules` 同样为 Hidden，Debug 可见、Release 不显示 Hidden 分类。`scripts/verification/test_core_feature_exposure.py` 断言常规公开集合与元数据、Hidden 项、分离的 API/OP owners、core 描述和 Debug entry 注册条件。

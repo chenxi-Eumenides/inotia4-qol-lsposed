@@ -214,10 +214,17 @@ bool fail_install_soft_step(Tx& tx, const contracts::ResourceClaim& claim, int32
 
 bool fail_install_resource(Tx& tx, const contracts::ResourceClaim& claim, int32_t code,
                            const char* error, TxStep* out) {
-    if (claim.failure == contracts::ResourceFailure::kFailSoft) {
-        return fail_install_soft_step(tx, claim, code, error, out);
+    const bool fail_closed_required =
+        claim.requirement == contracts::ResourceRequirement::kRequired &&
+        claim.failure == contracts::ResourceFailure::kFailClosed;
+    if (fail_closed_required) {
+        return fail_install(tx, claim.id, error, out);
     }
-    return fail_install(tx, claim.id, error, out);
+    const bool arm_retry = claim.gate == nullptr &&
+                           state_of(claim.id) == contracts::ResourceState::kFree;
+    const bool more = fail_install_soft_step(tx, claim, code, error, out);
+    if (arm_retry) retry_pending_set(claim.id, true);
+    return more;
 }
 
 // 非入口机制安装步：call patch 不支持空转（§4.2 规则 6），gate 关不安装、登记保持 free。

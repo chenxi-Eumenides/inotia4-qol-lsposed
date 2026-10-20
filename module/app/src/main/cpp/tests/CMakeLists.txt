@@ -1994,7 +1994,6 @@ add_executable(settings_contributions_tests
     ${CPP_DIR}/plugins/custom_recipe/settings_contribution.cpp
     ${CPP_DIR}/plugins/autosell/settings_contribution.cpp
     ${CPP_DIR}/plugins/save_backup/settings_contribution.cpp
-    ${CPP_DIR}/plugins/move_merge/settings_contribution.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
 )

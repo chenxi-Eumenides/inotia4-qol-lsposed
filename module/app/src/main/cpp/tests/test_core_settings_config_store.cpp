@@ -416,6 +416,103 @@ void test_io_states(const std::string& root) {
     assert(read_file(config_dir + "/keep") == "directory-data");
 }
 
+std::vector<PluginFeatureSeed> core_item_feature_seeds() {
+    PluginFeatureSeed item;
+    item.plugin_id = "core.item";
+    item.features.push_back({"move_merge.drag_merge", 1,
+                             qol::contracts::FeatureCategory::kBasicOptimization,
+                             qol::contracts::FeatureType::kToggle, "拖拽合并", "",
+                             [](qol::contracts::PluginContext&, uint8_t) -> QolResult {
+                                 return qol::contracts::ok();
+                             },
+                             nullptr});
+    return {item};
+}
+
+void init_core_item(ConfigStore* store, const std::string& directory) {
+    assert(store->prepare_features(core_item_feature_seeds()).ok());
+    assert(store->init(directory).ok());
+    assert(store->seed_features().result.ok());
+}
+
+void assert_drag_merge(ConfigStore* store, bool expected) {
+    JsonValue item;
+    assert(store->read_namespace("core.item", &item).ok());
+    const JsonValue* features = field(item, "features");
+    assert(features != nullptr && features->kind == JsonValue::Kind::kObject);
+    assert(bool_field(*features, "move_merge.drag_merge") == expected);
+}
+
+JsonValue root_object(const std::string& path, const std::string& key) {
+    JsonValue document;
+    assert(parse_json_document(read_file(path), &document).ok());
+    const JsonValue* value = field(document, key);
+    assert(value != nullptr && value->kind == JsonValue::Kind::kObject);
+    return *value;
+}
+
+void assert_old_move_merge_keys_removed(const JsonValue& old) {
+    assert(field(old, "enable") == nullptr);
+    const JsonValue* features = field(old, "features");
+    if (features != nullptr) {
+        assert(features->kind == JsonValue::Kind::kObject);
+        assert(field(*features, "move_merge.drag_merge") == nullptr);
+    }
+}
+
+void test_move_merge_feature_migration(const std::string& root) {
+    const std::string feature_dir = make_dir(root, "move-merge-feature");
+    write_file(feature_dir + "/config.json",
+               "{\"move_merge\":{\"enable\":false,\"features\":{"
+               "\"move_merge.drag_merge\":true},\"keep\":{\"v\":1}}}");
+    ConfigStore feature;
+    init_core_item(&feature, feature_dir);
+    assert_drag_merge(&feature, false);
+    JsonValue old = root_object(feature_dir + "/config.json", "move_merge");
+    assert_old_move_merge_keys_removed(old);
+    assert(field(old, "keep") != nullptr);
+    assert(field(*field(old, "keep"), "v") != nullptr);
+    const std::string once = read_file(feature_dir + "/config.json");
+    const auto repeat = feature.seed_features();
+    assert(repeat.result.ok() && !repeat.changed);
+    assert(read_file(feature_dir + "/config.json") == once);
+
+    const std::string enable_off_dir = make_dir(root, "move-merge-enable-off");
+    write_file(enable_off_dir + "/config.json", "{\"move_merge\":{\"enable\":false}}");
+    ConfigStore enable_off;
+    init_core_item(&enable_off, enable_off_dir);
+    assert_drag_merge(&enable_off, false);
+    assert_old_move_merge_keys_removed(
+        root_object(enable_off_dir + "/config.json", "move_merge"));
+
+    const std::string enable_on_dir = make_dir(root, "move-merge-enable-on");
+    write_file(enable_on_dir + "/config.json", "{\"move_merge\":{\"enable\":true}}");
+    ConfigStore enable_on;
+    init_core_item(&enable_on, enable_on_dir);
+    assert_drag_merge(&enable_on, true);
+
+    const std::string flat_dir = make_dir(root, "move-merge-flat");
+    write_file(flat_dir + "/config.json", "{\"moveMergeEnabled\":true}");
+    ConfigStore flat;
+    init_core_item(&flat, flat_dir);
+    assert_drag_merge(&flat, true);
+    assert(read_file(flat_dir + "/config.json").find("moveMergeEnabled") ==
+           std::string::npos);
+
+    const std::string target_dir = make_dir(root, "move-merge-target");
+    write_file(target_dir + "/config.json",
+               "{\"core.item\":{\"enable\":true,\"features\":{"
+               "\"move_merge.drag_merge\":true}},"
+               "\"move_merge\":{\"enable\":false,\"features\":{"
+               "\"move_merge.drag_merge\":false},\"keep\":[1,2]}}");
+    ConfigStore target;
+    init_core_item(&target, target_dir);
+    assert_drag_merge(&target, true);
+    const JsonValue old_target = root_object(target_dir + "/config.json", "move_merge");
+    assert_old_move_merge_keys_removed(old_target);
+    assert(field(old_target, "keep") != nullptr);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -427,5 +524,6 @@ int main(int argc, char** argv) {
     test_owner_key_authorization_and_atomic_failures(root);
     test_batch_collision_is_atomic(root);
     test_io_states(root);
+    test_move_merge_feature_migration(root);
     std::puts("core_settings_config_store_tests: pass");
 }

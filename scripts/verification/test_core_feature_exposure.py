@@ -30,6 +30,15 @@ class CoreFeatureExposureTests(unittest.TestCase):
             with self.subTest(plugin=source.parent.name):
                 features = FEATURE.findall(source.read_text())
                 self.assertTrue(features)
+                if source.parent.name == "core.item":
+                    by_id = {feature[0]: feature for feature in features}
+                    provider = by_id["core.item.provider"]
+                    self.assertEqual(provider[2], "kHidden")
+                    self.assertEqual(provider[5], "")
+                    drag_merge = by_id["move_merge.drag_merge"]
+                    self.assertEqual(drag_merge[2], "kBasicOptimization")
+                    self.assertTrue(drag_merge[5])
+                    continue
                 for feature_id, _, category, _, _, description in features:
                     expected_category = "kGeneral" if (
                         source.parent.name == "core.api" and feature_id == "api.enabled"
@@ -76,6 +85,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
         }
         sources = [source for source in PLUGINS.glob("*/plugin.cpp")
                    if not source.parent.name.startswith("core.")]
+        sources.append(PLUGINS / "core.item" / "plugin.cpp")
         sources.append(ROOT / "module/app/src/main/cpp/host/features/platform.cpp")
         actual = {
             feature_id: (default, category, kind, name)
@@ -92,11 +102,12 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "attribute_range_display": ("attribute_range_display.ranges", "属性范围显示"),
             "character_panel_i18n": ("character_panel_i18n.translation", "角色属性汉化"),
             "world_teleport": ("world_teleport.map_jump", "更好的地图传送对话框"),
-            "move_merge": ("move_merge.drag_merge", "拖拽合并"),
+            "core.item": ("move_merge.drag_merge", "拖拽合并"),
         }
         for plugin, (feature_id, label) in expected.items():
             with self.subTest(plugin=plugin):
-                features = FEATURE.findall((PLUGINS / plugin / "plugin.cpp").read_text())
+                features = [feature for feature in FEATURE.findall(
+                    (PLUGINS / plugin / "plugin.cpp").read_text()) if feature[0] == feature_id]
                 self.assertEqual(len(features), 1)
                 self.assertEqual(features[0][:4],
                                  (feature_id, "1", "kBasicOptimization", "kToggle"))

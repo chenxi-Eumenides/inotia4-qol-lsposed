@@ -819,7 +819,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | feature id | 默认 | 说明 |
 |---|---:|---|
 | `autosell.auto_sell` | `false` | 自动出售符合当前存档筛选规则的物品 |
-| `move_merge.drag_merge` | `false` | 拖拽同类物品自动合并 |
+| `move_merge.drag_merge` | `true` | 拖拽同类物品自动合并 |
 | `push_all.push` | `false` | 移动时推动怪物/队友/召唤物 |
 | `simple_mode.combat` | `false` | 简单模式（降低怪物生命、增强伤害与承伤） |
 | `custom_recipe.recipes` | `false` | 自定义合成（唯一可见开关） |

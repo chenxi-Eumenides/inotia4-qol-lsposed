@@ -2,9 +2,16 @@
 #include <cstdint>
 #include <cstring>
 
-#include "plugins/move_merge/plugin.cpp"
+#include "plugins/core.item/merge/plugin.cpp"
 
-namespace qol::features::move_merge {
+int g_test_refresh_calls = 0;
+
+bool inventory_native_hook_call_refresh_item_area_original() {
+    ++g_test_refresh_calls;
+    return true;
+}
+
+namespace qol::features::core_item::merge {
 namespace {
 
 using namespace qol;
@@ -22,7 +29,6 @@ QolItemHandle source_item{1, 1};
 QolItemHandle destination_item{2, 1};
 int original_calls = 0;
 int move_calls = 0;
-int refresh_calls = 0;
 int sync_slot_calls = 0;
 int sync_bag_calls = 0;
 int cursor_calls = 0;
@@ -140,13 +146,13 @@ bool sync_slot(int32_t bag, int32_t dest) {
     return true;
 }
 bool sync_bag() { ++sync_bag_calls; return true; }
-bool call_refresh() { ++refresh_calls; return true; }
+bool call_refresh() { ++g_test_refresh_calls; return true; }
 int inflight = 0;
-QolResult in_flight_enter(InFlightHandle handle) { assert(std::strcmp(handle.resource_id, kX1Resource) == 0); ++inflight; return ok(); }
+QolResult in_flight_enter(InFlightHandle handle) { assert(std::strcmp(handle.resource_id, kMergeResource) == 0); ++inflight; return ok(); }
 QolResult in_flight_leave(InFlightHandle) { --inflight; return ok(); }
 
 void reset() {
-    original_calls = move_calls = refresh_calls = sync_slot_calls = sync_bag_calls = cursor_calls = 0;
+    original_calls = move_calls = g_test_refresh_calls = sync_slot_calls = sync_bag_calls = cursor_calls = 0;
     moved_result = 1;
     facts_available = projection_available = refresh_available = 1;
     destination_count_value = 20;
@@ -197,23 +203,26 @@ void setup() {
     g_move_port = &move_port;
     g_character_port = &character_port;
     // 门禁等价插件活跃态：默认不活跃，需要合并语义的用例显式置 true。
-    g_active.store(false);
+    assert(attach(&sdk, &move_port, &character_port, &facts));
+    set_enabled(true);
+    set_wrapper_ready(true);
     inflight = 0;
 }
 
 void test_backup_once_and_projection_sync() {
     reset();
     setup();
+    set_enabled(false);
     const auto result = ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                                          &source_control_value);
     assert(result == 77 && original_calls == 1 && move_calls == 0);
-    assert(sync_bag_calls == 1 && inflight == 0);
-    g_active.store(true);
+    assert(sync_bag_calls == 0 && inflight == 0);
+    set_enabled(true);
     reset();
     const auto merged = ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                                          &source_control_value);
     assert(merged == 0 && move_calls == 1 && original_calls == 0);
-    assert(sync_slot_calls == 2 && refresh_calls == 1 && cursor_calls == 1);
+    assert(sync_slot_calls == 2 && g_test_refresh_calls == 1 && cursor_calls == 1);
     assert(sync_bag_calls == 0 && inflight == 0);
 }
 
@@ -248,27 +257,32 @@ void test_drop_tristate_and_protection() {
 void test_foreign_failure_and_missing_facts_fallthrough() {
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     moved_result = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 1 && original_calls == 1);
     reset();
-    extension_source_item = 0;
-    facts_available = 0;
+    setup();
+    set_enabled(true);
+    set_wrapper_ready(true);
+    facts.struct_size = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 0 && original_calls == 1);
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     count_supported_value = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 0 && original_calls == 1);
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     destination_slot_value = 16;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
@@ -278,53 +292,105 @@ void test_foreign_failure_and_missing_facts_fallthrough() {
 void test_single_owner_and_feature_lifecycle() {
     reset();
     setup();
-    const auto& descriptor = plugin_descriptor();
-    assert(std::strcmp(descriptor.id, "move_merge") == 0);
-    assert(descriptor.resources_count == 1);
-    assert(std::strcmp(descriptor.resources[0].id, "ptrslot:MOVE_MERGE_GOT") == 0);
-    assert(std::strcmp(descriptor.resources[0].owner, "move_merge") == 0);
-    assert(descriptor.resources[0].gate == nullptr);
-    assert(descriptor.provides_count == 1);
-    assert(std::strcmp(descriptor.provides[0].id, kMoveMergeControlCapabilityId) == 0);
-    // 单一 feature、无配置/事件订阅：门禁即插件活跃态，由宿主 lifecycle 驱动。
-    assert(descriptor.feature_count == 1);
-    assert(std::strcmp(descriptor.features[0].id, "move_merge.drag_merge") == 0);
-    assert(descriptor.features[0].default_enabled == 1);
-    assert(descriptor.features[0].category == FeatureCategory::kBasicOptimization);
+    uint32_t count = 0;
+    const ResourceClaim* resources = claims(&count);
+    assert(count == 1 && resources != nullptr);
+    assert(std::strcmp(resources[0].id, "ptrslot:MOVE_MERGE_GOT") == 0);
+    assert(resources[0].mechanism == ResourceMechanism::kPtrSlot);
+    assert(resources[0].policy == ResourcePolicy::kPrivate);
+    assert(resources[0].requirement == ResourceRequirement::kOptional);
+    assert(resources[0].failure == ResourceFailure::kFailClosed);
+    assert(resources[0].resumable);
+    assert(std::strcmp(resources[0].owner, "core.item") == 0);
+    assert(resources[0].step_budget == 120);
+    assert(resources[0].gate == nullptr);
+    assert(is_merge_resource("ptrslot:MOVE_MERGE_GOT"));
+    assert(!is_merge_resource("hook:INVEN_FindItem"));
+    assert(!is_merge_resource(nullptr));
 
-    const void* ports[] = {&move_port, &character_port};
-    PluginContext ctx{sizeof(PluginContext), kHostSdkMajor, kHostSdkMinor, &sdk, nullptr,
-                      "move_merge", ports, 2};
-    assert(plugin_install(ctx) == 0);
-    assert(control_enabled());
-    plugin_on_disabled(ctx);
-    assert(!control_enabled());
-    plugin_on_enabled(ctx);
-    assert(control_enabled());
-    plugin_deactivate(ctx);
-    assert(!control_enabled());
+    detach();
+    assert(attach(&sdk, &move_port, &character_port, &facts));
+    assert(enabled() && !wrapper_ready());
+    assert(!kMoveMergeControlApi.enabled());
+    set_wrapper_ready(true);
+    assert(kMoveMergeControlApi.enabled());
+    set_enabled(false);
+    assert(!kMoveMergeControlApi.enabled());
+    set_enabled(true);
+    assert(kMoveMergeControlApi.enabled());
+    detach();
+    assert(!enabled() && !wrapper_ready());
+    assert(!kMoveMergeControlApi.enabled());
+}
+
+void test_attach_rejects_invalid_ports() {
+    setup();
+    assert(!attach(nullptr, &move_port, &character_port, &facts));
+    assert(!attach(&sdk, nullptr, &character_port, &facts));
+    assert(!attach(&sdk, &move_port, nullptr, &facts));
+    assert(!attach(&sdk, &move_port, &character_port, nullptr));
+
+    QolMoveMergePort bad_version = move_port;
+    bad_version.abi_version = {static_cast<uint16_t>(kQolMoveMergePortVersion.major + 1),
+                               kQolMoveMergePortVersion.minor};
+    assert(!attach(&sdk, &bad_version, &character_port, &facts));
+
+    QolMoveMergePort missing_move = move_port;
+    missing_move.move_item = nullptr;
+    assert(!attach(&sdk, &missing_move, &character_port, &facts));
+
+    QolCharacterExtrasPort missing_character = character_port;
+    missing_character.read.can_apply_stuff_items = nullptr;
+    assert(!attach(&sdk, &move_port, &missing_character, &facts));
+
+    assert(attach(&sdk, &move_port, &character_port, &facts));
+}
+
+void test_attach_preserves_wrapper_ready() {
+    setup();
+    set_wrapper_ready(true);
+    assert(attach(&sdk, &move_port, &character_port, &facts));
+    assert(wrapper_ready());
+    set_wrapper_ready(false);
+    assert(attach(&sdk, &move_port, &character_port, &facts));
+    assert(!wrapper_ready());
+}
+
+void test_feature_on_wrapper_not_ready_passes_through() {
+    reset();
+    setup();
+    set_enabled(true);
+    set_wrapper_ready(false);
+    assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
+                                           &source_control_value) == 77);
+    assert(move_calls == 0 && original_calls == 1);
+    set_wrapper_ready(true);
+    assert(wrapper_ready());
 }
 
 void test_full_limit_apply_and_optional_refresh() {
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     destination_count_value = 99;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 0 && original_calls == 1);
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     count_limit_value = 999;
     destination_count_value = 998;
     refresh_available = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
-    assert(move_calls == 0 && original_calls == 1 && refresh_calls == 0);
+    assert(move_calls == 0 && original_calls == 1 && g_test_refresh_calls == 0);
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     apply_allowed_value = 1;
     extension_source_item = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
@@ -335,7 +401,8 @@ void test_full_limit_apply_and_optional_refresh() {
 void test_foreign_source_protected_without_projection_or_gate() {
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     extension_source_item = 1;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 0);
@@ -411,13 +478,15 @@ void test_event2_native_and_ordinary_fallback() {
 void test_native_fallback_and_count_encoding_gate() {
     reset();
     setup();
+    set_enabled(false);
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
     assert(move_calls == 0 && original_calls == 1);
 
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     source_encoding_value = QolItemCountEncoding::kNotEncoded;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
@@ -425,7 +494,8 @@ void test_native_fallback_and_count_encoding_gate() {
 
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     destination_encoding_value = QolItemCountEncoding::kUnknown;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
@@ -433,7 +503,8 @@ void test_native_fallback_and_count_encoding_gate() {
 
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     count_limit_value = 99;
     destination_count_value = 89;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
@@ -442,7 +513,8 @@ void test_native_fallback_and_count_encoding_gate() {
 
     reset();
     setup();
-    g_active.store(true);
+    set_enabled(true);
+    set_wrapper_ready(true);
     count_limit_value = 999;
     destination_count_value = 989;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
@@ -451,16 +523,19 @@ void test_native_fallback_and_count_encoding_gate() {
 }
 
 }  // namespace
-}  // namespace qol::features::move_merge
+}  // namespace qol::features::core_item::merge
 
 int main() {
-    qol::features::move_merge::test_backup_once_and_projection_sync();
-    qol::features::move_merge::test_drop_tristate_and_protection();
-    qol::features::move_merge::test_foreign_failure_and_missing_facts_fallthrough();
-    qol::features::move_merge::test_single_owner_and_feature_lifecycle();
-    qol::features::move_merge::test_full_limit_apply_and_optional_refresh();
-    qol::features::move_merge::test_foreign_source_protected_without_projection_or_gate();
-    qol::features::move_merge::test_event2_native_and_ordinary_fallback();
-    qol::features::move_merge::test_native_fallback_and_count_encoding_gate();
+    qol::features::core_item::merge::test_backup_once_and_projection_sync();
+    qol::features::core_item::merge::test_drop_tristate_and_protection();
+    qol::features::core_item::merge::test_foreign_failure_and_missing_facts_fallthrough();
+    qol::features::core_item::merge::test_single_owner_and_feature_lifecycle();
+    qol::features::core_item::merge::test_attach_rejects_invalid_ports();
+    qol::features::core_item::merge::test_attach_preserves_wrapper_ready();
+    qol::features::core_item::merge::test_feature_on_wrapper_not_ready_passes_through();
+    qol::features::core_item::merge::test_full_limit_apply_and_optional_refresh();
+    qol::features::core_item::merge::test_foreign_source_protected_without_projection_or_gate();
+    qol::features::core_item::merge::test_event2_native_and_ordinary_fallback();
+    qol::features::core_item::merge::test_native_fallback_and_count_encoding_gate();
     return 0;
 }

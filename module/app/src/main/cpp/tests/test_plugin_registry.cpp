@@ -857,12 +857,12 @@ void test_move_merge_port_is_owner_private() {
     CHECK(error != nullptr && std::strstr(error, "private port") != nullptr);
 
     reset_all();
-    PluginDescriptor owner = make_descriptor("move_merge", nullptr, 0, nullptr, 0);
+    PluginDescriptor owner = make_descriptor("core.item", nullptr, 0, nullptr, 0);
     owner.ports = &requirement;
     owner.port_count = 1;
     CHECK(register_plugin(owner));
     CHECK(install_all(make_deps()) == 0);
-    CHECK(feature_state_is("move_merge", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
 }
 
 void test_gate_off_installed_disabled() {    reset_all();

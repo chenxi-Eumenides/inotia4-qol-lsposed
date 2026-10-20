@@ -11,6 +11,8 @@
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
+#include "contracts/game_ports/character_extras_port.h"
+#include "contracts/game_ports/move_merge_port.h"
 #include "contracts/extension_bag.h"
 #include "contracts/inventory_extension.h"
 #include "contracts/character_state.h"
@@ -579,8 +581,34 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     &fake_state_enchant,
 };
 
+QolResult fake_merge_move(qol::contracts::QolItemHandle, int32_t, int32_t, int32_t, int32_t* out) {
+    if (out != nullptr) *out = 0;
+    return qol::contracts::ok();
+}
+QolResult fake_merge_current_bag(int32_t* out) {
+    if (out != nullptr) *out = 0;
+    return qol::contracts::ok();
+}
+QolResult fake_merge_validate(qol::contracts::QolItemHandle) { return qol::contracts::ok(); }
+QolResult fake_can_apply_stuff(qol::contracts::QolItemHandle, qol::contracts::QolItemHandle, int32_t* out_allowed) {
+    if (out_allowed != nullptr) *out_allowed = 0;
+    return qol::contracts::ok();
+}
+
+const qol::contracts::QolMoveMergePort kFakeMoveMergePort{
+    qol::contracts::kQolMoveMergePortVersion, &fake_merge_move, &fake_merge_current_bag,
+    &fake_merge_validate};
+qol::contracts::QolCharacterExtrasPort kFakeCharacterExtrasPort{
+    qol::contracts::kQolPortCharacterExtrasVersion, {}};
+
+void initialize_character_extras_port() {
+    kFakeCharacterExtrasPort.read.struct_size = sizeof(kFakeCharacterExtrasPort.read);
+    kFakeCharacterExtrasPort.read.can_apply_stuff_items = &fake_can_apply_stuff;
+}
+
 const void* const kPortArray[] = {
-    &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort};
+    &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort,
+    &kFakeMoveMergePort, &kFakeCharacterExtrasPort};
 
 struct FakeScheduler {
     qol::contracts::QolFrameHandler handler = nullptr;
@@ -889,6 +917,7 @@ QolResult fake_scheduler_remove(uint64_t) {
 }
 
 qol::contracts::QolHostSdk make_sdk() {
+    initialize_character_extras_port();
     qol::contracts::QolHostSdk sdk{};
     sdk.abi = {sizeof(qol::contracts::QolHostSdk), qol::contracts::kHostSdkMajor,
                qol::contracts::kHostSdkMinor};
@@ -911,7 +940,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = nullptr;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
-    ctx.port_count = 4;
+    ctx.port_count = 6;
     return ctx;
 }
 
@@ -2241,7 +2270,8 @@ const qol::contracts::QolItemPortReadApi kGoldenRead{
 const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion,
                                                sizeof(qol::contracts::QolItemPort), kGoldenRead};
 const void* const kGoldenPortArray[] = {
-    &kGoldenPort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort};
+    &kGoldenPort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort,
+    &kFakeMoveMergePort, &kFakeCharacterExtrasPort};
 
 static void golden_fill_item(uint8_t* bytes, uint16_t flags, uint32_t raw_count, uint8_t magic,
                              uint8_t socket, uint16_t enchant) {
@@ -2339,7 +2369,7 @@ void test_inventory_owner_vs_legacy_golden() {
     ctx.sdk = &sdk;
     ctx.plugin_id = "core.item";
     ctx.ports = kGoldenPortArray;
-    ctx.port_count = 4;
+    ctx.port_count = 6;
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
@@ -2498,7 +2528,7 @@ bool install_core_item_golden(GoldenHarness* out) {
     ctx.sdk = &sdk;
     ctx.plugin_id = "core.item";
     ctx.ports = kGoldenPortArray;
-    ctx.port_count = 4;
+    ctx.port_count = 6;
     if (descriptor.install(ctx) != 0) return false;
     descriptor.on_enabled(ctx);
     if (!qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor))) {
