@@ -189,7 +189,7 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
         case SbHttpRoute::kList:
             return sb_http_body(response, save_backup_list_json());
         case SbHttpRoute::kExport:
-            if (!save_backup::json_find_slot(body, slot)) {
+            if (!::save_backup::json_find_slot(body, slot)) {
                 return sb_http_error(response, 400, "bad slot");
             }
             return sb_http_body(response, save_backup_export_json(slot));
@@ -199,7 +199,7 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
                 !::save_backup::valid_checksum(checksum)) {
                 return sb_http_error(response, 400, "bad checksum");
             }
-            if (!save_backup::json_find_slot(body, slot)) {
+            if (!::save_backup::json_find_slot(body, slot)) {
                 return sb_http_error(response, 400, "bad slot");
             }
             return sb_http_body(response, save_backup_import_json(checksum.c_str(), slot));
