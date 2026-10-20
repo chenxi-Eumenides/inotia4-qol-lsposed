@@ -12,6 +12,7 @@
 #include "../../contracts/game_ports/save_call_port.h"
 #include "../../contracts/game_ports/save_write_port.h"
 #include "../../contracts/commands.h"
+#include "../../contracts/runtime_hooks.h"
 #include "bundle.h"
 #include "feature.h"
 #include "log.h"
@@ -70,6 +71,14 @@ const contracts::OwnershipOps kPopupOwnershipOps{
 
 // 常开标记：无配置门禁；仅用于 fill_status 上报（HTTP/UI 业务不受其门控）。
 std::atomic<bool> g_active{true};
+
+// 主线程槽元数据刷新任务（RenderPre，每 30 帧）；0 表示未注册。
+uint64_t g_slot_meta_task = 0;
+
+int32_t slot_meta_tick(int64_t, void*) {
+    save_backup_refresh_slot_meta_cache();
+    return 0;
+}
 
 // 删档原函数入口：宿主安装 kPtrSlot 资源成功后经 on_resource_ready 交还（§3.3 backup 交还）。
 // wrapper 先回调原函数（删 save{n}.dat + 重载三槽），再调业务同步体删该槽 sidecar。
@@ -260,6 +269,15 @@ int plugin_install(contracts::PluginContext& ctx) {
         !contracts::succeeded(ctx.sdk->panels.register_provider(&kPanelProvider))) {
         return 1;
     }
+    // 游戏主线程刷新槽元数据快照；HTTP 导出只读缓存，不跨线程读游戏槽结构。
+    if (ctx.sdk->scheduler.add != nullptr && g_slot_meta_task == 0) {
+        uint64_t task = 0;
+        if (contracts::succeeded(ctx.sdk->scheduler.add(
+                contracts::kQolRuntimeFramePointRenderPre, &slot_meta_tick, nullptr, 30, 0,
+                &task))) {
+            g_slot_meta_task = task;
+        }
+    }
     return 0;
 }
 
@@ -276,6 +294,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         }
     }
     g_active.store(false, std::memory_order_release);
+    if (g_slot_meta_task != 0 && ctx.sdk != nullptr && ctx.sdk->scheduler.remove != nullptr) {
+        (void)ctx.sdk->scheduler.remove(g_slot_meta_task);
+    }
+    g_slot_meta_task = 0;
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr) {
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     }

@@ -169,13 +169,16 @@ QolResult hub_key_fn(const char** out_key) {
     *out_key = "1234567";
     return contracts::ok();
 }
+uint8_t g_plain_variant = 0;
 QolResult load_data_fn(int32_t, void** out_data, int32_t* out_size) {
     // 最小可导出的明文头：块表 rel=4 → 块0 从 +12 开始，长度覆盖块0 的 33 字节字段。
+    // +6 仅用于让不同用例产生不同 checksum，避免导出被内容去重。
     static std::vector<uint8_t> plain = [] {
         std::vector<uint8_t> bytes(64, 0);
         bytes[8] = 4;  // u16 块表项低字节：block0 = 8 + 4 = 12
         return bytes;
     }();
+    plain[6] = g_plain_variant;
     *out_data = plain.data();
     *out_size = static_cast<int32_t>(plain.size());
     return contracts::ok();
@@ -183,6 +186,26 @@ QolResult load_data_fn(int32_t, void** out_data, int32_t* out_size) {
 int32_t g_current_slot = -1;
 bool g_current_slot_fails = false;
 bool g_current_slot_not_ready = false;
+int32_t g_slot_exists[3] = {0, 0, 0};
+int32_t g_slot_hero_index[3] = {-1, -1, -1};
+int32_t g_slot_hero_level[3] = {-1, -1, -1};
+int32_t g_slot_hero_class[3] = {-1, -1, -1};
+QolResult slot_exists_fn(int32_t slot, int32_t* out) {
+    *out = g_slot_exists[slot];
+    return contracts::ok();
+}
+QolResult slot_hero_index_fn(int32_t slot, int32_t* out) {
+    *out = g_slot_hero_index[slot];
+    return contracts::ok();
+}
+QolResult hero_level_fn(int32_t slot, int32_t* out) {
+    *out = g_slot_hero_level[slot];
+    return contracts::ok();
+}
+QolResult hero_class_fn(int32_t slot, int32_t* out) {
+    *out = g_slot_hero_class[slot];
+    return contracts::ok();
+}
 QolResult current_slot_fn(int32_t* out_slot) {
     if (g_current_slot_fails) return contracts::error(kQolErrInternal, "internal", 8);
     *out_slot = g_current_slot;
@@ -211,6 +234,10 @@ SaveFactsApi& fake_save_facts() {
     api.hub_key = &hub_key_fn;
     api.current_slot = &current_slot_fn;
     api.load_data = &load_data_fn;
+    api.slot_exists = &slot_exists_fn;
+    api.slot_hero_index = &slot_hero_index_fn;
+    api.hero_level = &hero_level_fn;
+    api.hero_class = &hero_class_fn;
     return api;
 }
 
@@ -254,6 +281,18 @@ bool has_entry_affix(const std::string& dir, const std::string& prefix,
     }
     ::closedir(d);
     return found;
+}
+
+int count_entries(const std::string& dir) {
+    DIR* d = ::opendir(dir.c_str());
+    if (d == nullptr) return 0;
+    int count = 0;
+    while (dirent* ent = ::readdir(d)) {
+        const std::string name = ent->d_name;
+        if (name != "." && name != "..") ++count;
+    }
+    ::closedir(d);
+    return count;
 }
 
 int failing_unlink(const char*) {
@@ -370,6 +409,38 @@ int main() {
 
     const std::string checksum = make_bundle(root, "aaaaaaaaaaaa", module_container);
     CHECK(!checksum.empty());
+
+    // ---- SB-01：缓存未刷新时导出仍成功，hero 字段为 -1（不调用游戏槽读取）----
+    g_plain_variant = 0;
+    const std::string cold_export = save_backup_export_json(0);
+    CHECK(body_ok(cold_export));
+    CHECK(cold_export.find("\"hero_level\":-1") != std::string::npos);
+    CHECK(cold_export.find("\"hero_index\":-1") != std::string::npos);
+    CHECK(cold_export.find("\"class_idx\":-1") != std::string::npos);
+
+    // ---- SB-01：主线程刷新缓存后导出使用缓存值 ----
+    g_slot_exists[0] = 1;
+    g_slot_hero_index[0] = 2;
+    g_slot_hero_level[0] = 42;
+    g_slot_hero_class[0] = 3;
+    save_backup_refresh_slot_meta_cache();
+    g_plain_variant = 1;
+    const std::string warm_export = save_backup_export_json(0);
+    CHECK(body_ok(warm_export));
+    CHECK(warm_export.find("\"hero_level\":42") != std::string::npos);
+    CHECK(warm_export.find("\"hero_index\":2") != std::string::npos);
+    CHECK(warm_export.find("\"class_idx\":3") != std::string::npos);
+
+    // ---- SB-08：lease 被占 → 导出失败，dat/备份目录无新增 ----
+    const int backups_before = count_entries(root + "/backups");
+    QolSlotOperationLease export_blocker{};
+    export_blocker.size = sizeof(export_blocker);
+    CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &export_blocker).ok == kQolOk);
+    const std::string export_denied = save_backup_export_json(0);
+    CHECK(export_denied.find("slot operation unavailable") != std::string::npos);
+    CHECK(qol::infra::slot_operation::release(g_occupier, &export_blocker).ok == kQolOk);
+    CHECK(count_entries(root + "/backups") == backups_before);
+    CHECK(read_file(dat_path) == original_dat);
 
     // ---- SB-12：payload 被改写但 meta checksum 未变 → 导入/删除拒绝 ----
     {

@@ -281,6 +281,15 @@ void save_mark_stale() {
 // 全局单例：g_sb_mtx 保护，启动期单线程写入、之后只读。
 std::unordered_map<int, std::string> g_map_names;
 
+// 游戏主线程槽元数据快照：HTTP/绘制线程只读，避免跨线程调用 save.facts 游戏读取函数。
+struct SlotMetaCache {
+    bool valid = false;
+    int hero_level = -1;
+    int hero_index = -1;
+    int class_idx = -1;
+};
+SlotMetaCache g_slot_meta[3];
+
 void set_map_names_locked(const std::string& json) {
     g_map_names.clear();
     if (json.empty()) return;
@@ -497,18 +506,20 @@ bool ends_with(const std::string& s, const char* suffix) {
 // ---- 路径与目录 ----
 
 // 备份目录 <external>/backups/（不存在则建）；未初始化/建目录失败返回 false。
-bool backup_dir(std::string& out) {
-    if (g_sb_external_dir.empty()) {
+bool backup_dir_at(const std::string& external_dir, std::string& out) {
+    if (external_dir.empty()) {
         SB_LOG("save backup unavailable: store not initialized");
         return false;
     }
-    out = g_sb_external_dir + "/" + kBackupDirName;
+    out = external_dir + "/" + kBackupDirName;
     if (!ensure_dir(out)) {
         SB_LOG("save backup unavailable: mkdir failed: %s", out.c_str());
         return false;
     }
     return true;
 }
+
+bool backup_dir(std::string& out) { return backup_dir_at(g_sb_external_dir, out); }
 
 // sidecar 容器操作（读 primary/校验/回退、重定槽双写、删除）统一经 infra/store；
 // 本文件不再自行拼接 saves/ 路径或直接读写 sidecar 文件。
@@ -621,31 +632,17 @@ uint64_t rd_u64(const uint8_t* p) {
     return uint64_t(rd_u32(p)) | uint64_t(rd_u32(p + 4)) << 32;
 }
 
-// 槽结构元数据（尽力而为：槽结构未加载时返回 -1/-1/-1，不阻塞明文导出）。
+// 槽结构元数据：只读主线程刷新好的缓存；缓存未建立时保持 -1，绝不跨线程读游戏结构。
 void read_hero_meta(int32_t slot, int& hero_level, int& hero_index, int& class_idx) {
     hero_level = -1;
     hero_index = -1;
     class_idx = -1;
-    if (g_save_facts == nullptr || g_save_facts->slot_exists == nullptr ||
-        g_save_facts->slot_hero_index == nullptr || g_save_facts->hero_level == nullptr ||
-        g_save_facts->hero_class == nullptr) {
-        return;
-    }
-    int32_t exists = 0;
-    if (!qol::contracts::succeeded(g_save_facts->slot_exists(slot, &exists)) || exists == 0) {
-        return;
-    }
-    int32_t value = 0;
-    if (qol::contracts::succeeded(g_save_facts->slot_hero_index(slot, &value))) {
-        hero_index = value;
-    }
-    if (qol::contracts::succeeded(g_save_facts->hero_level(slot, &value))) {
-        hero_level = value;
-    }
-    // 职业索引（0-5）；type==2 装饰物该字段非职业，但本路径取的是主角 hero 结构。
-    if (qol::contracts::succeeded(g_save_facts->hero_class(slot, &value))) {
-        class_idx = value;
-    }
+    if (slot < 0 || slot > 2) return;
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    if (!g_slot_meta[slot].valid) return;
+    hero_level = g_slot_meta[slot].hero_level;
+    hero_index = g_slot_meta[slot].hero_index;
+    class_idx = g_slot_meta[slot].class_idx;
 }
 
 // 读槽明文并归一化：SAVE_LoadData 解密 → 拷出并 MEM_Free → 块0 slot 写 0xFF。
@@ -747,14 +744,14 @@ save_backup::WarehouseReencryptStatus warehouse_reencrypt_on_device(
 
 // 定位原版存档目录：优先 dataDir 下含 save*.dat 的子目录；否则 dataDir/hex(MD5(key)) 并建目录。
 // 返回 0=成功、1=未找到（含 key 不可得）、2=建目录失败。
-int locate_save_directory(std::string& out) {
-    if (!g_sb_data_dir.empty()) {
-        DIR* d = ::opendir(g_sb_data_dir.c_str());
+int locate_save_directory_at(const std::string& data_dir, std::string& out) {
+    if (!data_dir.empty()) {
+        DIR* d = ::opendir(data_dir.c_str());
         if (d != nullptr) {
             while (dirent* ent = ::readdir(d)) {
                 const std::string name = ent->d_name;
                 if (name == "." || name == "..") continue;
-                const std::string sub = g_sb_data_dir + "/" + name;
+                const std::string sub = data_dir + "/" + name;
                 struct stat st{};
                 if (::stat(sub.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
                 if (dir_contains_save_dat(sub)) {
@@ -770,11 +767,15 @@ int locate_save_directory(std::string& out) {
     if (key == nullptr) return 1;
     const std::string dir_name = save_backup::md5_hex(reinterpret_cast<const uint8_t*>(key),
                                                       std::strlen(key));
-    const std::string dir = g_sb_data_dir + "/" + dir_name;
+    const std::string dir = data_dir + "/" + dir_name;
     if (!ensure_dir(dir)) return 2;
     SB_LOG("save backup import: save directory fallback %s", dir.c_str());
     out = dir;
     return 0;
+}
+
+int locate_save_directory(std::string& out) {
+    return locate_save_directory_at(g_sb_data_dir, out);
 }
 
 // 导入失败还原：dat 按 .rollback 副本还原；sidecar 仅在本次已改动时经 store 还原为
@@ -1044,6 +1045,35 @@ void save_backup_recover_deletes() {
     recover_orphan_sidecar_trash(g_sb_external_dir + "/saves");
 }
 
+// 游戏主线程刷新槽元数据快照；HTTP/绘制线程只读缓存，不直接调用 save.facts 游戏读取函数。
+void save_backup_refresh_slot_meta_cache() {
+    if (g_save_facts == nullptr || g_save_facts->slot_exists == nullptr) return;
+    SlotMetaCache fresh[3];
+    for (int slot = 0; slot < 3; ++slot) {
+        fresh[slot].valid = true;
+        int32_t exists = 0;
+        if (!qol::contracts::succeeded(g_save_facts->slot_exists(slot, &exists)) || exists == 0) {
+            continue;
+        }
+        int32_t value = 0;
+        if (g_save_facts->slot_hero_index != nullptr &&
+            qol::contracts::succeeded(g_save_facts->slot_hero_index(slot, &value))) {
+            fresh[slot].hero_index = value;
+        }
+        if (g_save_facts->hero_level != nullptr &&
+            qol::contracts::succeeded(g_save_facts->hero_level(slot, &value))) {
+            fresh[slot].hero_level = value;
+        }
+        // 职业索引（0-5）；type==2 装饰物该字段非职业，但本路径取的是主角 hero 结构。
+        if (g_save_facts->hero_class != nullptr &&
+            qol::contracts::succeeded(g_save_facts->hero_class(slot, &value))) {
+            fresh[slot].class_idx = value;
+        }
+    }
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    for (int slot = 0; slot < 3; ++slot) g_slot_meta[slot] = fresh[slot];
+}
+
 // 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的同步体：游戏内存档面板删档确认后，
 // 同步删除该槽模块 sidecar（slot-{n}.qol-save + .last-good）。
 // 执行上下文：游戏主线程（UIPopupMsg_ButtonOKExe → blr），slot 由 wrapper 传入。约束：
@@ -1173,11 +1203,27 @@ const char* save_backup_class_name(int class_idx) {
     return kNames[class_idx];
 }
 
-std::string save_backup_list_json() {
+struct SbDirs {
+    std::string data;
+    std::string external;
+};
+
+static SbDirs snapshot_dirs() {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
+    return SbDirs{g_sb_data_dir, g_sb_external_dir};
+}
+
+static std::unordered_map<int, std::string> snapshot_map_names() {
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    return g_map_names;
+}
+
+std::string save_backup_list_json() {
     std::string s = "{\"ok\":true,\"backups\":[";
+    const SbDirs dirs = snapshot_dirs();
+    const std::unordered_map<int, std::string> map_names = snapshot_map_names();
     std::string dir;
-    if (!backup_dir(dir)) return s + "]}";
+    if (!backup_dir_at(dirs.external, dir)) return s + "]}";
     std::vector<std::string> names;
     if (!list_bundle_files(dir, names)) return s + "]}";
     // 先解析全部 bundle，再按 export_time 倒序（新→旧，UI 第 1 页顶部 = 最新备份）。
@@ -1212,8 +1258,8 @@ std::string save_backup_list_json() {
         save_backup::Entry entry;
         save_backup::entry_from_bundle(name, parsed, entry);
         // 从内存 map_id→name 表查表（启动期 Kotlin 下发）；未命中保持空串。
-        auto it = g_map_names.find(entry.map_id);
-        if (it != g_map_names.end()) entry.map_name = it->second;
+        auto it = map_names.find(entry.map_id);
+        if (it != map_names.end()) entry.map_name = it->second;
         // 职业名由 native 常量表补齐；旧备份 class_idx=-1 → 空串（UI 退化显示）。
         entry.class_name = save_backup_class_name(entry.class_idx);
         entries.push_back(std::move(entry));
@@ -1234,10 +1280,9 @@ std::string save_backup_list_json() {
     return s + "]}";
 }
 
-std::string save_backup_export_json(int slot) {
-    std::lock_guard<std::mutex> lk(g_sb_mtx);
-    if (slot < 0 || slot > 2) return result_error("bad slot");
-
+static std::string export_json_with_lease(int slot) {
+    const SbDirs dirs = snapshot_dirs();
+    const std::unordered_map<int, std::string> map_names = snapshot_map_names();
     std::vector<uint8_t> plain;
     int map_id = 0;
     long long save_time = 0;
@@ -1275,7 +1320,7 @@ std::string save_backup_export_json(int slot) {
     std::vector<save_backup::WarehouseFile> warehouse;
     {
         std::string save_dir;
-        if (locate_save_directory(save_dir) == 0) {
+        if (locate_save_directory_at(dirs.data, save_dir) == 0) {
             const std::string dat_name = "save" + std::to_string(slot) + ".dat";
             const std::string prefix = dat_name + ".wh4-";
             DIR* d = ::opendir(save_dir.c_str());
@@ -1394,7 +1439,7 @@ std::string save_backup_export_json(int slot) {
         save_backup::compute_checksum(save_backup::kBundleVersion, plain, module, warehouse_blob);
 
     std::string dir;
-    if (!backup_dir(dir)) return result_error("backup dir unavailable");
+    if (!backup_dir_at(dirs.external, dir)) return result_error("backup dir unavailable");
 
     // 内容去重：同 checksum 备份已存在则不写新文件，直接返回既有备份
     //（metaJson 的 checksum 为权威，文件名后缀兜底）。
@@ -1413,8 +1458,8 @@ std::string save_backup_export_json(int slot) {
             if (checksum_ok) {
                 save_backup::Entry entry;
                 save_backup::entry_from_bundle(file_name_of(existing), parsed, entry);
-                auto dit = g_map_names.find(entry.map_id);
-                if (dit != g_map_names.end()) entry.map_name = dit->second;
+                auto dit = map_names.find(entry.map_id);
+                if (dit != map_names.end()) entry.map_name = dit->second;
                 entry.class_name = save_backup_class_name(entry.class_idx);
                 SB_LOG("save backup deduplicated: %s (checksum=%s)", entry.file_name.c_str(),
                        checksum.c_str());
@@ -1454,8 +1499,8 @@ std::string save_backup_export_json(int slot) {
     entry.source_slot = slot;
     entry.export_time_ms = export_time_ms;
     entry.map_id = map_id;
-    auto mit = g_map_names.find(map_id);
-    if (mit != g_map_names.end()) entry.map_name = mit->second;
+    auto mit = map_names.find(map_id);
+    if (mit != map_names.end()) entry.map_name = mit->second;
     entry.hero_level = hero_level;
     entry.hero_index = hero_index;
     entry.class_idx = class_idx;
@@ -1467,6 +1512,16 @@ std::string save_backup_export_json(int slot) {
     entry.checksum = checksum;
     SB_LOG("save backup exported: %s (%zu bytes)", entry.file_name.c_str(), bundle.size());
     return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
+}
+
+std::string save_backup_export_json(int slot) {
+    if (slot < 0 || slot > 2) return result_error("bad slot");
+    // 导出同样覆盖槽文件读取/备份写入：持 lease 与导入/删槽串行；不持 g_sb_mtx 做 IO。
+    SlotOperationGuard guard;
+    if (!slot_operation_acquire(slot, &guard)) return result_error("slot operation unavailable");
+    const std::string response = export_json_with_lease(slot);
+    slot_operation_release(&guard);
+    return response;
 }
 
 std::string save_backup_import_json(const char* checksum, int slot) {
