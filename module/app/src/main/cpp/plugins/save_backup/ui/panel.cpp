@@ -6,6 +6,7 @@
 #include "plugins/save_backup/log.h"
 
 #include <atomic>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -30,7 +31,7 @@
 #define ROOT_H 0x280
 #define CONTENT_X 0x18
 #define CONTENT_W (ROOT_W - 0x30)
-#define CONTENT_Y 0x60
+#define CONTENT_Y 0x48
 // 三栏：左、右两栏同宽 W，中栏居中于两栏之间（两侧等 GAP=0x0A，间隔加宽）。
 //   W 由内容区总宽分配：2W + OPS_COL_W + 2*GAP = CONTENT_W
 //     → W = (912 - 88 - 20) / 2 = 402 = 0x192（整除，无需再取整）。
@@ -47,12 +48,11 @@
 //   LIST_COL_X = 0x1B4 + 0x58 + 0x0A = 0x216
 //   LIST_COL_X + W = 0x216 + 0x192 = 0x3A8 = CONTENT_X + CONTENT_W（右框右缘=内容区右缘）✓
 //   三栏间隙均为 GAP=0x0A，互不重叠、不越界 ✓
-#define GAP 0x0A
-#define OPS_COL_W 0x58
-#define COL_W 0x192
-#define SLOT_COL_W COL_W
-#define LIST_COL_W COL_W
-#define SLOT_COL_X CONTENT_X
+#define GAP 0x0C
+#define SLOT_COL_W 0xF0
+#define OPS_COL_W 0x64
+#define LIST_COL_W (CONTENT_W - SLOT_COL_W - OPS_COL_W - 2 * GAP)
+#define SLOT_COL_X (CONTENT_X + 0x10)
 #define OPS_COL_X (SLOT_COL_X + SLOT_COL_W + GAP)
 #define LIST_COL_X (OPS_COL_X + OPS_COL_W + GAP)
 // 正文字号：fn_grpx_draw_string_with_font 第 5 参 font = 游戏字体表下标。GRPX_CreateFont
@@ -63,7 +63,7 @@
 #define SB_TEXT_FONT 3
 #define SB_FONT_H 0x1E      // font=3 行高 30（GRPX_GetFontHeight 表），用于垂直居中预算（最坏）
 // 右栏两行文本的 y 间隔：两行块高 = 间隔 + 行高。
-#define LIST_LINE_GAP 0x1C  // 0x1C(28)+0x1E(30)=0x3A(58) ≤ 按钮高 0x42(66)，居中 offset=4
+#define LIST_LINE_GAP 0x18  // Two-line block fits the redesigned 56px row.
 // 三栏垂直：右框最高（FRAME_H），以其中心为公共水平中线；左框/中栏按各自高度居中。
 //   框线内边界（draw_frame_box）：ui_draw_panel_decor 上边 [frame.y, frame.y+3)、
 //   下边 [frame.y+h-3, frame.y+h)；ui_draw_vertical_line 左边 [x, x+3)、右边 [x+w-3, x+w)
@@ -74,14 +74,17 @@
 //   故 FRAME_H = 5*0x46 + 6 - 4 = 0x160(352)；SLOT_FRAME_H = 3*0x48 + 6 - 4 = 0xDA(218)。
 //   右框 5 行：pitch 0x46、按钮高 0x42(66)；左框 3 槽：pitch 0x48、按钮高 0x44(68)。
 //   FRAME_Y 下移：0x60 → 0x68（CONTENT_Y+8）；标题/消息保持绝对 y=0x18 不动。
-#define FRAME_Y (CONTENT_Y + 0x08)
+#define AUTO_Y CONTENT_Y
+#define AUTO_H 0x58
+#define AUTO_X LIST_COL_X
+#define FRAME_Y (AUTO_Y + AUTO_H + 0x0C)
 #define FRAME_BORDER 0x03
-#define LIST_ROW_H 0x46               // 70
+#define LIST_ROW_H 0x3C               // 60
 #define LIST_ROW_GAP 0x04             // 行间缝隙；按钮高 = 0x46-4 = 0x42(66)
-#define FRAME_H (5 * LIST_ROW_H + 2 * FRAME_BORDER - LIST_ROW_GAP)  // = 0x160(352)
-#define SLOT_ROW_H 0x48               // 72
+#define FRAME_H (5 * LIST_ROW_H + 2 * FRAME_BORDER - LIST_ROW_GAP)
+#define SLOT_ROW_H 0x68               // 104
 #define SLOT_ROW_GAP 0x04             // 按钮高 = 0x48-4 = 0x44(68)
-#define SLOT_FRAME_H (3 * SLOT_ROW_H + 2 * FRAME_BORDER - SLOT_ROW_GAP)  // = 0xDA(218)
+#define SLOT_FRAME_H (3 * SLOT_ROW_H + 2 * FRAME_BORDER - SLOT_ROW_GAP)
 #define LIST_COLS_PER_PAGE 5
 #define LIST_COLS_MAX 64
 // 公共水平中线 = 右框中心；左框顶 SLOT_FRAME_Y / 中栏顶 OPS_Y0 据此推出。
@@ -95,7 +98,7 @@
 // 中栏 3 操作按钮：无组框（每个按钮 ui_custom::draw_button 自带 2px 边框），
 // 按钮组按公共中线垂直居中。
 #define OPS_BTN_H 0x40
-#define OPS_BTN_W 0x50   // 与 OPS_COL_W(0x58) 留 4px 边距；单行标签不溢出中栏
+#define OPS_BTN_W 0x58
 #define OPS_BTN_GAP 0x0a
 #define OPS_Y0 (CONTENT_MID_Y - (3 * OPS_BTN_H + 2 * OPS_BTN_GAP) / 2)
 // 翻页按钮：右栏框下方一行，prev 左对齐 / next 右对齐（互不重叠）；
@@ -104,7 +107,7 @@
 //   prev x ∈ [LIST_COL_X+0x04, +0x7C]，next x ∈ [LIST_COL_X+0x116, +0x18E]（W=0x192）；
 //   两按钮内缘间隙 [X+0x7C, X+0x116]，正中 = X+0xC9 = LIST_COL_X+LIST_COL_W/2。
 #define LIST_PAGE_BTN_H 0x30
-#define LIST_PAGE_BTN_W 0x78
+#define LIST_PAGE_BTN_W 0x38
 #define PAGE_ROW_Y (FRAME_Y + FRAME_H + 0x08)
 // 顶部消息/标题区：与设置页 header 标签同高（settings.cpp HEADER_Y=0x18，label rect 高 HEADER_H=0x28）。
 //   MSG_Y + root.y == 0x18（root.y=0 → MSG_Y=0x18）；文本绘制偏移同 settings header_draw 的 0x18。
@@ -390,12 +393,14 @@ UiRect g_back_btn_rect = {8, 8, BACK_BTN_W, BACK_BTN_H};
 void* g_slot_btns[3] = {nullptr, nullptr, nullptr};
 void* g_ops_btns[3] = {nullptr, nullptr, nullptr};   // 0=导出 1=导入 2=删除
 void* g_list_btns[LIST_COLS_MAX] = {nullptr};       // 当前页 5 个
+void* g_auto_btn = nullptr;
 void* g_prev_btn = nullptr;
 void* g_next_btn = nullptr;
 void* g_back_btn = nullptr;                          // 底部「← 返回」：关闭面板
 void* g_msg_label = nullptr;                         // 操作结果提示区
 int g_selected_slot = -1;                            // 左栏选中槽 0/1/2；-1=未选（默认两侧都不选）
 int g_selected_backup = -1;                          // 右栏当前页选中项下标（0..page_size-1）；-1=未选
+bool g_selected_auto = false;
 int g_page_index = 0;                                // 翻页：0..N
 // 备份列表缓存（从 save_backup_list_json 解析）；每项 checksum + hero_level + class + map_name + export_time。
 // map_name 由 entry_json 输出携带（Kotlin 启动期下发的 map_id→中文名表）；未命中为空串。
@@ -410,20 +415,20 @@ struct BackupEntry {
     long long export_time_ms = 0;
     long long save_time = 0;
 };
+BackupEntry g_auto_backup;
+bool g_auto_backup_valid = false;
+int g_auto_source_slot = -1;
 std::vector<BackupEntry> g_backups;
 int g_total_pages = 0;
 // 结果提示文本（不弹窗，在面板内独立显示区；新消息覆盖旧消息，不自动消失）。
 std::string g_msg_text;
 uint32_t g_msg_color = UI_OPTION_TEXT;
 bool g_msg_is_error = false;
-// 面板内两步确认状态（导入/删除不依赖原版 YesNo 弹窗——自定义面板下该弹窗不渲染）。
-// 0=无待确认 1=待确认导入 2=待确认删除；与目标备份 checksum + 目标槽绑定：
-// 第二次点击同操作按钮且 checksum/槽均一致才执行，否则按新操作重新武装。
-// 任何其它交互（切换槽位/选中、翻页、其它操作按钮）及列表刷新（apply_backups_locked）
-// 都会清除待确认（列表刷新后 checksum 可能失效）。
-int g_pending_op = 0;
-std::string g_pending_checksum;
-int g_pending_slot = -1;
+enum class DialogKind { kNone, kImport, kDeleteSlot, kDeleteBackup };
+DialogKind g_dialog = DialogKind::kNone;
+std::string g_dialog_checksum;
+int g_dialog_slot = -1;
+bool g_dialog_auto = false;
 // 左栏三槽缓存：enter 后由游戏线程经 Game Host 读取槽元数据，DrawProc 只读缓存。
 struct SlotInfo {
     bool exists = false;
@@ -443,6 +448,7 @@ std::atomic<bool> g_backups_loading{false};  // 右栏空列表时显示「加�
 // 三栏控件共用同一 UiClickProc（点击后用 ctrl 指针反查 g_slot_btns/g_ops_btns/g_list_btns 识别）。
 void on_btn_clicked(void* ctrl);
 void on_back_clicked(void* ctrl);
+static void execute_dialog_confirm();
 
 // 列表按钮 rect 依赖当前页条目数（垂直居中分布），定义在 panel.inc；
 // apply_backups_locked 在 inc 之前先用到，此处前置声明。
@@ -498,20 +504,33 @@ void parse_backups_json(const std::string& json, std::vector<BackupEntry>& entri
     }
 }
 
+bool parse_auto_json(const std::string& json, BackupEntry& entry) {
+    const size_t key = json.find("\"backup\":");
+    if (key == std::string::npos) return false;
+    const size_t open = json.find('{', key);
+    if (open == std::string::npos) return false;
+    const size_t close = json.find('}', open);
+    if (close == std::string::npos) return false;
+    std::vector<BackupEntry> parsed;
+    parse_backups_json(std::string("{\"backups\":[") + json.substr(open, close - open + 1) + "]}", parsed);
+    if (parsed.empty()) return false;
+    entry = parsed.front();
+    return true;
+}
+
 // 清除待确认状态（调用方须持 g_sbui_mtx）。
 void clear_pending_locked() {
-    g_pending_op = 0;
-    g_pending_checksum.clear();
-    g_pending_slot = -1;
+    g_dialog = DialogKind::kNone;
+    g_dialog_checksum.clear();
+    g_dialog_slot = -1;
+    g_dialog_auto = false;
 }
 
 // 应用刷新结果（调用方须持 g_sbui_mtx）。
 void apply_backups_locked(std::vector<BackupEntry>& entries) {
     const size_t old_count = g_backups.size();
     g_backups.swap(entries);
-    g_selected_backup = -1;
-    // 列表已重建：旧 pending 绑定的 checksum 可能已失效（备份被删/改），一并清除。
-    clear_pending_locked();
+    if (g_selected_backup >= static_cast<int>(g_backups.size())) g_selected_backup = -1;
     int total = static_cast<int>(g_backups.size());
     g_total_pages = (total + LIST_COLS_PER_PAGE - 1) / LIST_COLS_PER_PAGE;
     if (g_page_index >= g_total_pages && g_total_pages > 0) g_page_index = g_total_pages - 1;
@@ -572,13 +591,23 @@ void refresh_panel_data_async() {
         for (;;) {
             g_backups_loading.store(true);
             const auto t0 = std::chrono::steady_clock::now();
+            int slot = -1;
+            {
+                std::lock_guard<std::mutex> lock(g_sbui_mtx);
+                slot = g_selected_slot;
+            }
             const std::string json = save_backup_list_json();
             std::vector<BackupEntry> entries;
             parse_backups_json(json, entries);
+            BackupEntry auto_entry;
+            const bool has_auto = slot >= 0 && parse_auto_json(save_backup_auto_entry_json(slot), auto_entry);
             const auto t1 = std::chrono::steady_clock::now();
             {
                 std::lock_guard<std::mutex> lock(g_sbui_mtx);
                 apply_backups_locked(entries);
+                g_auto_backup = std::move(auto_entry);
+                g_auto_backup_valid = has_auto;
+                g_auto_source_slot = slot;
             }
             g_backups_loading.store(false);
             const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -608,6 +637,11 @@ const BackupEntry* backup_at_page(int local_index) {
     return &g_backups[abs];
 }
 
+const BackupEntry* selected_manual_backup() {
+    return g_selected_backup >= 0 && g_selected_backup < static_cast<int>(g_backups.size())
+               ? &g_backups[static_cast<size_t>(g_selected_backup)] : nullptr;
+}
+
 void set_msg_locked(const char* text, uint32_t color, bool is_error) {
     g_msg_text = text != nullptr ? text : "";
     g_msg_color = color;
@@ -624,6 +658,8 @@ void set_msg_locked(const char* text, uint32_t color, bool is_error) {
 void slot_btn_draw(void* ctrl);
 void ops_btn_draw(void* ctrl);
 void list_btn_draw(void* ctrl);
+void auto_btn_draw(void* ctrl);
+void draw_confirm_dialog();
 void page_btn_draw(void* ctrl);
 void msg_label_draw(void* ctrl);
 void back_btn_draw(void* ctrl);
@@ -634,6 +670,7 @@ UiRect panel_root_rect();
 UiRect slot_btn_rect(int i);
 UiRect ops_btn_rect(int i);
 UiRect list_btn_rect(int i);
+UiRect auto_btn_rect();
 UiRect page_btn_rect(bool next);
 UiRect msg_label_rect();
 UiRect back_btn_rect();

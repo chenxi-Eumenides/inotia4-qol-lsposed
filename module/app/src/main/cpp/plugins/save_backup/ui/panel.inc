@@ -65,6 +65,15 @@ UiRect list_btn_rect(int i) {
             LIST_ROW_H - LIST_ROW_GAP};
 }
 
+UiRect auto_btn_rect() { return {AUTO_X + 0x04, AUTO_Y, LIST_COL_W - 0x08, AUTO_H}; }
+
+UiRect dialog_rect() { return {0x138, 0xD8, 0x1F0, 0x128}; }
+
+UiRect dialog_button_rect(int index) {
+    const UiRect dialog = dialog_rect();
+    return {dialog.x + (index == 0 ? 0x30 : 0x118), dialog.y + 0xB0, 0xA0, 0x38};
+}
+
 // 把动态 list_btn_rect 写回列表控件（创建后 / 刷新后 / 翻页后调用，调用方持 g_sbui_mtx）。
 void sync_list_btn_rects_locked() {
     for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
@@ -117,6 +126,7 @@ void destroy_panel_controls_locked() {
         g_ops_btns[i] = nullptr;
     }
     for (int i = 0; i < LIST_COLS_MAX; ++i) g_list_btns[i] = nullptr;
+    g_auto_btn = nullptr;
     g_prev_btn = nullptr;
     g_next_btn = nullptr;
     g_back_btn = nullptr;
@@ -137,9 +147,9 @@ void create_panel_controls_locked() {
     // 尺寸 BACK_BTN_W×BACK_BTN_H 与设置页返回按钮一致（原版贴图量级）。
     UiRect root_rect{};
     if (ui_get_rect(root, &root_rect)) {
-        g_back_btn_rect = {8 - root_rect.x, 8 - root_rect.y, BACK_BTN_W, BACK_BTN_H};
+        g_back_btn_rect = {ROOT_W - 8 - BACK_BTN_W - root_rect.x, ROOT_H - 8 - BACK_BTN_H - root_rect.y, BACK_BTN_W, BACK_BTN_H};
     } else {
-        g_back_btn_rect = {8, 8, BACK_BTN_W, BACK_BTN_H};
+        g_back_btn_rect = {ROOT_W - 8 - BACK_BTN_W, ROOT_H - 8 - BACK_BTN_H, BACK_BTN_W, BACK_BTN_H};
     }
 
     // 左栏：3 个存档槽按钮。自绘按钮文本一律传空串：文字只由自定义 DrawProc 绘制，
@@ -159,6 +169,7 @@ void create_panel_controls_locked() {
         void* b = ui_create_button(root, list_btn_rect(i), "", &on_btn_clicked, &list_btn_draw);
         g_list_btns[i] = b;
     }
+    g_auto_btn = ui_create_button(root, auto_btn_rect(), "", &on_btn_clicked, &auto_btn_draw);
     // 列表按钮 rect 随当前页条目数垂直居中分布：创建时缓存可能已有数据（self_check），
     // 创建后按最新 page_entry_count 同步一次（后续刷新/翻页由 sync_list_btn_rects_locked 维护）。
     sync_list_btn_rects_locked();
@@ -248,10 +259,12 @@ void savebackup_panel_process() {
     for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) ui_draw_control(g_slot_btns[i]);
     for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) ui_draw_control(g_ops_btns[i]);
     for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) ui_draw_control(g_list_btns[i]);
+    if (g_auto_btn) ui_draw_control(g_auto_btn);
     if (g_prev_btn) ui_draw_control(g_prev_btn);
     if (g_next_btn) ui_draw_control(g_next_btn);
     if (g_back_btn) ui_draw_control(g_back_btn);
     if (g_msg_label) ui_draw_control(g_msg_label);
+    if (g_dialog != DialogKind::kNone) draw_confirm_dialog();
     ui_end_frame();
 }
 
@@ -282,6 +295,7 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
         // 内部按需拿 g_sbui_mtx；导入/删除确认执行路径要锁外做 IO 并调
         // refresh_slots_on_game_thread()（其内部自加锁，持锁调用会死锁，g_sbui_mtx 非递归）。
         void* clicked_ctrl = nullptr;
+        bool confirm = false;
         {
             std::lock_guard<std::mutex> lock(g_sbui_mtx);
             if (!g_panel_active) return 1;
@@ -293,13 +307,34 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
                 panel_abs_origin(r, p);
                 return tx >= p[0] && tx < p[0] + r.w && ty >= p[1] && ty < p[1] + r.h;
             };
+            // 对话框打开时仅接受确认/取消/面板返回；背景控件完全屏蔽。
+            if (g_dialog != DialogKind::kNone) {
+                int64_t confirm_origin[2], cancel_origin[2];
+                panel_abs_origin(dialog_button_rect(0), confirm_origin);
+                panel_abs_origin(dialog_button_rect(1), cancel_origin);
+                const UiRect confirm_rect = dialog_button_rect(0);
+                const UiRect cancel_rect = dialog_button_rect(1);
+                const bool hit_confirm = tx >= confirm_origin[0] && tx < confirm_origin[0] + confirm_rect.w &&
+                                         ty >= confirm_origin[1] && ty < confirm_origin[1] + confirm_rect.h;
+                const bool hit_cancel = tx >= cancel_origin[0] && tx < cancel_origin[0] + cancel_rect.w &&
+                                        ty >= cancel_origin[1] && ty < cancel_origin[1] + cancel_rect.h;
+                if (hit_confirm) confirm = true;
+                else if (hit_cancel || hit(g_back_btn, back_btn_rect())) clear_pending_locked();
+                if (confirm) { /* execute after releasing mutex */ }
+                else return 1;
+            }
+            if (confirm) { /* handled outside lock */ }
+            else {
             // 槽位：纯状态修改，持锁内联完成。再次点击已选槽 → 取消选中（-1）；
             // 切换/取消都清除待确认并清提示（与选中语义一致）。
             for (int i = 0; i < 3; ++i) {
                 if (hit(g_slot_btns[i], slot_btn_rect(i))) {
                     g_selected_slot = (g_selected_slot == i) ? -1 : i;
-                    if (g_pending_op != 0) clear_pending_locked();
+                    g_selected_auto = false;
+                    g_auto_backup_valid = false;
+                    g_auto_source_slot = -1;
                     set_msg_locked("", UI_OPTION_TEXT, false);
+                    refresh_panel_data_async();
                     return 1;
                 }
             }
@@ -316,14 +351,20 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
                 for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
                     if (hit(g_list_btns[i], list_btn_rect(i))) {
                         if (backup_at_page(i) != nullptr) {
-                            g_selected_backup = (g_selected_backup == i) ? -1 : i;
-                            if (g_pending_op != 0) {
-                                clear_pending_locked();
-                                set_msg_locked("", UI_OPTION_TEXT, false);
-                            }
+                            const int abs = g_page_index * LIST_COLS_PER_PAGE + i;
+                            g_selected_backup = (g_selected_backup == abs) ? -1 : abs;
+                            g_selected_auto = false;
                         }
                         return 1;
                     }
+                }
+                if (hit(g_auto_btn, auto_btn_rect())) {
+                    if (g_auto_backup_valid) {
+                        const bool was = g_selected_auto;
+                        g_selected_auto = !was;
+                        if (g_selected_auto) g_selected_backup = -1;
+                    }
+                    return 1;
                 }
                 // 翻页：同样锁外交给 on_btn_clicked。
                 if (hit(g_prev_btn, page_btn_rect(false))) {
@@ -336,7 +377,9 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
                     clicked_ctrl = g_back_btn;
                 }
             }
+            }
         }
+        if (confirm) { execute_dialog_confirm(); return 1; }
         if (clicked_ctrl != nullptr) {
             on_btn_clicked(clicked_ctrl);  // 游戏线程，锁外
         }
