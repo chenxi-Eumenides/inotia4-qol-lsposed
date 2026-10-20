@@ -117,15 +117,11 @@ void ui_uidesc_draw() {
     if (ui != nullptr && ui->uidesc_draw != nullptr) (void)ui->uidesc_draw();
 }
 
-// 入口按钮：与原版袋列（袋 0）同列右移 68、扩展页签（行距 70）之后的行 5。
-// 由扩展页签公式换算：x = 袋0绝对 + 68，y = 袋0绝对 + 2 + 5×70（尺寸 57×57）。
-constexpr int64_t kEntryRelX = 136;  // 越过两列袋标签，避免压住右侧袋格
-constexpr int64_t kEntryRelY = 2 + 5 * 70;
+// 入口按钮：中心对齐两处——横向=扩展背包页签列（原版袋 0 右侧 68、宽 57）的中心，
+// 纵向=原版任务背包格（袋容器 child 5）的中心。齿轮本身 68×68。
 constexpr int64_t kEntrySize = 68;
-constexpr int64_t kEntryCenterAdjust = -5;
-// 保持齿轮中心对齐袋列图标，并整体向右、向下各微移 2 逻辑单位。
-constexpr int64_t kEntryNudgeX = -2;
-constexpr int64_t kEntryNudgeY = 2;
+constexpr int64_t kBagTabSize = 57;       // 原版袋格/扩展页签边长
+constexpr int64_t kExtTabOffsetX = 68;    // 扩展页签列相对袋 0 的偏移
 
 // 面板几何（逻辑坐标基准 960×640；实际逻辑宽由 CalcResolution 推出，真机 1408）。
 // 宽度基准：2 × 0x180（假定物品详情面板宽 384）= 0x300 = 768 ≤ 1408。
@@ -411,19 +407,32 @@ QolResult autosell_entry_layout(void* parent, UiRect* out_rect, void* user) {
     int64_t parent_abs_x = 0, parent_abs_y = 0;
     autosell_ctrl_abs(bag0, &bag0_abs_x, &bag0_abs_y);
     autosell_ctrl_abs(parent, &parent_abs_x, &parent_abs_y);
-    UiRect out{bag0_abs_x + kEntryRelX + kEntryNudgeX + kEntryCenterAdjust - parent_abs_x,
-        0, kEntrySize, kEntrySize};
+    // 横向中心 = 扩展页签列中心；纵向中心 = 任务背包格中心。
+    const int64_t center_x = bag0_abs_x + kExtTabOffsetX + kBagTabSize / 2;
+    int64_t center_y = bag0_abs_y + 347 + kBagTabSize / 2;  // 任务袋缺失时的兜底
     void* task_bag = nullptr;
     UiRect task{};
     if (ui_child_at(parent, 5, &task_bag) && task_bag != nullptr &&
         ui_get_rect(task_bag, &task) && task.h > 0) {
         int64_t task_abs_x = 0, task_abs_y = 0;
         autosell_ctrl_abs(task_bag, &task_abs_x, &task_abs_y);
-        out.y = task_abs_y + kEntryNudgeY + kEntryCenterAdjust - parent_abs_y;
-    } else {
-        out.y = bag0_abs_y + 347 + kEntryNudgeY + kEntryCenterAdjust - parent_abs_y;
+        (void)task_abs_x;
+        center_y = task_abs_y + task.h / 2;
     }
-    *out_rect = out;
+    *out_rect = {center_x - kEntrySize / 2 - parent_abs_x,
+        center_y - kEntrySize / 2 - parent_abs_y, kEntrySize, kEntrySize};
+    static UiRect last_rect{};
+    if (last_rect.x != out_rect->x || last_rect.y != out_rect->y ||
+        last_rect.w != out_rect->w || last_rect.h != out_rect->h) {
+        last_rect = *out_rect;
+        AUTOSELLUI_LOG("entry rect=(%lld,%lld,%lld,%lld) center=(%lld,%lld) bag0=(%lld,%lld) "
+                       "task_center_y=%lld",
+                       static_cast<long long>(out_rect->x), static_cast<long long>(out_rect->y),
+                       static_cast<long long>(out_rect->w), static_cast<long long>(out_rect->h),
+                       static_cast<long long>(center_x), static_cast<long long>(center_y),
+                       static_cast<long long>(bag0_abs_x), static_cast<long long>(bag0_abs_y),
+                       static_cast<long long>(center_y));
+    }
     return qol::contracts::ok();
 }
 

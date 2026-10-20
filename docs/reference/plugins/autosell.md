@@ -49,7 +49,7 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 ### 入口按钮
 
 - 绘制宿主为 `patch:SCENE_DRAW_EQUIP+0x1cc` 的 `bl UIDesc_Draw` 调用点；wrapper 先复刻原调用再绘制入口（`plugins/autosell/ui/panel.cpp:766-770`）。
-- 入口挂在原版袋容器（与扩展背包页签同宿主），位置按袋 0 绝对坐标 +129、任务袋行对齐，尺寸 68×68（`panel.cpp:120-133,393-429`）。
+- 入口挂在原版袋容器（与扩展背包页签同宿主），尺寸 68×68；中心点对齐两处：横向 = 扩展背包页签列中心（袋 0 绝对 +68、宽 57），纵向 = 原版任务背包格（child 5）中心（`panel.cpp:120-124,389-436`）。真机 monster v29 实测：bag0=(1116,145)、任务袋中心 y=520 → 中心=(1212,520)。
 - 绘制使用 world HUD 齿轮 `unit 0x16 / loc 0x00`、flip=1；不可用时退化为深色底 + 金边 +「售」字（`panel.cpp:135-140`、`core.custom_ui/ui_components.cpp` 的 `icon_button_draw`）。
 - 句柄存活与身份校验由 `ui_components` 的锚定按钮（minor 20）统一负责（`panel.cpp:179,431-457`）：每帧 `anchored_button_ensure` 按 `root_kind` 实时解析活袋容器，先做子链表纯指针比对（不解引用句柄），再用 Host 的 `click_binding_is_current`（“点击绑定元组 + ExecuteProc 仍是 adapter trampoline”）证明身份。游戏在切页/关闭背包页时销毁容器子树，句柄随之失效且地址可能被扩展背包页签复用；失效/不符时只注销组件记录（不删 native）并重建，**不得 delete**（命中失效内存即 SIGSEGV，命中复用控件会删掉扩展背包页签）。关闭态用 `anchored_button_set_visible(0)` 只隐藏可证明归属的控件。
 - 锚定层在 `unbind` 时跳过 `native_externally_owned` 组件，不删除游戏拥有的 native；`forget_native` 与 `click_binding_is_current` 见 `contracts/ui.h:392-410,636-644` 与 `plugins/core.custom_ui/ui_components.cpp`。
@@ -165,7 +165,7 @@ Game Host：`read_only.item.is_backpack_category`、`read_only.item.is_dice`（`
 | `plugins/autosell/scan.h` | `:17` 60 帧节拍；`:22-48` 生命周期接口 |
 | `plugins/autosell/store.h` | `:54-191` special 映射与 sidecar JSON；`:193-205` participant 接口 |
 | `plugins/autosell/store.cpp` | `:20-21` section v2；`:265-383` load/capture/complete；`:385-501` 写请求/重试；`:522-703` 注册/提交/注销 |
-| `plugins/autosell/ui/panel.cpp` | `:120-133` 入口常量；`:385-457` 入口点击/布局/锚定 ensure；`:577-764` 面板绘制/事件；`:766-770` 绘制宿主；`:791-862` PanelProvider 与 PopupState |
+| `plugins/autosell/ui/panel.cpp` | `:120-124` 入口常量；`:381-438` 入口点击/布局/锚定 ensure；`:577-764` 面板绘制/事件；`:766-770` 绘制宿主；`:791-862` PanelProvider 与 PopupState |
 | `plugins/autosell/ui/panel.h` | 入口/面板接口声明 |
 | `contracts/autosell.h` | `:10-46` Config/SpecialType；运行时配置声明 |
 | `bridge/native/gamebridge_autosell.cpp` | `:26-88` 4 个 JNI 导出 |
