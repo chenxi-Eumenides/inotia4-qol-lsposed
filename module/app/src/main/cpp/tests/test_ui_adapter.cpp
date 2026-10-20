@@ -737,8 +737,8 @@ int main() {
     components.major = qol::contracts::kUiContractMajor;
     components.minor = qol::contracts::kUiContractMinor;
     CHECK(components.size == sizeof(qol::contracts::QolUiComponents));
-    // Phase1C L0：contracts UI minor 13→14（additive 尾槽）；此行随版本常量机械同步。
-    CHECK(components.major == 1 && components.minor == 14);
+    // contracts UI minor 15：additive 尾槽；此行随版本常量机械同步。
+    CHECK(components.major == 1 && components.minor == qol::contracts::kUiContractMinor);
 
     const qol::contracts::UiRect rect{10, 20, 30, 40};
     FakeControl control{};
@@ -761,8 +761,8 @@ int main() {
           g_border_rect[3] == 140);
     CHECK(adapter->draw_border_rect(0, 0, 47, 140).code == kQolErrInvalidArgument);
 
-    // Minor 21/22 slots remain in place; minor 23 appends explicit-alpha image-part drawing.
-    CHECK(adapter->minor == 23);
+    // Minor 21/22 slots remain in place; minor 23/24 append image-part drawing slots.
+    CHECK(adapter->minor == qol::contracts::kUiAdapterMinor);
     CHECK(adapter->set_clip != nullptr && adapter->reset_clip != nullptr);
     CHECK(adapter->set_clip(-12, 34, 320, 140).ok == kQolOk);
     CHECK(g_set_clip_calls == 1);

@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 14;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 23;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 18;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 24;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -207,6 +207,27 @@ struct UiNavButtonDesc {
     void* user;
 };
 
+enum UiArrowDirection : uint32_t { kUiArrowLeft = 0, kUiArrowRight = 1 };
+struct UiArrowButtonDesc {
+    UiRect rect;
+    uint32_t direction;
+    uint8_t enabled;
+    QolUiClickFn on_click;
+    void* user;
+};
+
+struct UiIconButtonDesc {
+    UiRect rect;
+    int32_t image_unit;
+    int32_t image_loc;
+    int32_t draw_type;
+    uint8_t enabled;
+    const char* fallback_text;
+    QolUiClickFn on_click;
+    void* user;
+    uint8_t show_background;  // 0 draws only the icon/fallback; 1 adds the button base and frame.
+};
+
 using QolUiHelpDetailDrawFn = void (*)(void* user, UiRect right_viewport);
 struct UiHelpOption {
     void* user;
@@ -337,8 +358,24 @@ struct QolUiComponents {
     // Uses the verified menu parent/identity path. Reject unsafe hit geometry without
     // hiding the original button; old main_menu_text_button_create keeps its own contract.
     QolResult (*main_menu_decorated_button_create)(const UiMainMenuDecoratedButtonDesc*,
-                                                   QolUiHandle* out_original,
-                                                   QolUiHandle* out_replacement);
+                                                    QolUiHandle* out_original,
+                                                    QolUiHandle* out_replacement);
+    // Minor 15 append-only: active is a visual selection state, separate from Enabled.
+    QolResult (*text_button_set_active)(QolUiHandle, uint8_t active);
+    QolResult (*arrow_button_create)(const UiArrowButtonDesc*, QolUiHandle parent,
+                                     QolUiHandle* out);
+    QolResult (*arrow_button_set_enabled)(QolUiHandle, uint8_t enabled);
+    QolResult (*arrow_button_draw)(QolUiHandle);
+    // Minor 16 append-only: compact plain-color text control and scalable game-atlas icon button.
+    QolResult (*flat_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                         QolUiHandle* out);
+    QolResult (*icon_button_create)(const UiIconButtonDesc*, QolUiHandle parent,
+                                    QolUiHandle* out);
+    QolResult (*icon_button_set_enabled)(QolUiHandle, uint8_t enabled);
+    QolResult (*icon_button_draw)(QolUiHandle);
+    // Minor 17 append-only: capsule text paint for compact hit rectangles (<204 logical px).
+    QolResult (*compact_capsule_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
+                                                    QolUiHandle* out);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -555,6 +592,12 @@ struct QolUiAdapter {
     // Minor 23 append-only slot. draw_part remains the zero-alpha compatibility operation.
     QolResult (*draw_part_alpha)(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
                                  int32_t type, int32_t flip, int32_t alpha);
+
+    // Minor 24 append-only slot. Draws an image loc with native SGL percent scaling.
+    // Direction-specific locs should be selected by the caller; flip is reserved for adapters
+    // that can mirror without changing the borrowed game-owned image data.
+    QolResult (*draw_part_scaled)(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
+                                  int32_t type, int32_t flip, int32_t scale_percent);
 };
 
 }  // namespace qol::contracts

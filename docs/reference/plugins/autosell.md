@@ -56,9 +56,9 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 ### 配置面板
 
 - 通过 `own:popup.autosell` 占用 `PopupState` 死条目 `F_PANEL_UNK3_ENTER` 的五回调；`UI_SetPopupProcessInfo` 打开/关闭（`panel.cpp:896-937,868-892`）。
-- 面板自绘：总开关、5 条规则选择器、3 个特殊类型 chip、「保存并关闭」按钮（`panel.cpp:692-755`）。
-- 规则项与档位：装备品质（关/≤白/≤绿/≤蓝/≤黄/≤紫）、装备强化耐久度（关/≤0..≤31）、装备总孔数（关/≤0..≤15）、宝石档位（关/≤低级..≤混沌）、宝石属性范围（关/≤30%/≤60%/≤75%/≤90%/≤99%）（`panel.cpp:265-267,407-472`）。
-- 面板编辑本地草稿 `g_draft`；只有「保存并关闭」释放时调用 `autosell_store_commit_config` 提交，过程中不即时生效（`panel.cpp:508-512,816-819`）。
+- 面板使用 `core.custom_ui` 组件：主面板装饰框、装备/宝石无装饰角分组框、屏幕左上返回、屏幕右上 √/X 总开关、文本按钮规则/类别控件与缩放原生箭头（`panel.cpp`、`contracts/ui.h`）。
+- 规则项与档位：装备品质（关/≤白/≤绿/≤蓝/≤黄/≤紫）、装备强化耐久度（关/≤0..≤31）、装备总孔数（关/≤0..≤15）、宝石档位（关/≤低级..≤混沌）、宝石属性范围（关/≤30%/≤60%/≤75%/≤90%/≤99%）。
+- 面板编辑本地草稿 `g_draft`；左上返回释放时调用 `autosell_store_commit_config` 提交，过程中不即时生效；右上 √/X 切换 `enabled`。
 - 面板也登记为 `PanelProviderSpec`（`panel_id="autosell"`），供 `core.ui` 面板容器打开/查询；关闭态 `provider_open` 拒绝（`plugin.cpp:84-97`、`panel.cpp:868-892`）。
 
 ### 自动扫描与出售
@@ -70,7 +70,7 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 - 每轮扫描在 tick 入口捕获取消纪元；关闭 feature、关闭存档配置或 save-exit 会递增纪元，扫描在下一个槽/下一笔出售前停止（`scan.cpp:505-536,539-547`）。已进入 `inventory.action.sell` 的单笔事务不中断。
 - 扫描范围：物理袋 0..4（inventory_extras port 遍历，任务袋 5 排除）；逻辑袋 6..10 仅在 EB `is_logical_bag` 为真时，经 `item.facts.item_ref_at` 逐槽读取，要求 provider 句柄、有效 handle 且 category>0（`scan.cpp:21-24,425-502`）。
 - 视图构建：`item.facts.view` 提供 rarity/equip/enchant_remaining/socket_filled/socket_total 等字段；缺 `HasRarity` 时 rarity 记 `-1`，不因缺少品质字段跳过整件物品；`is_jewel_category` 判宝石；宝石质量经 `attribute.quality.query_item` 取百分位，探测不可用/失败保持 `-1`（`view.cpp:40-102`）。
-- 特殊类型：背包/骰子经 Game Host `is_backpack_category`/`is_dice`；普通徽章固定 category 42..47（`view.cpp:14-17,92-101`）。
+- 特殊类型：背包/骰子经 Game Host `is_backpack_category`/`is_dice`；普通骰子仅 category 82..85，混沌骰子 category 86 不设置 `kSpecialDice`（永不出售）；普通徽章固定 category 42..47（`view.cpp:14-21,92-107`）。
 - 出售前排除 `item.facts.is_no_sell` 命中的类别；出售调用 `inventory.action.sell(bag, slot, handle, "autosell")`（`scan.cpp:362-421`）。
 - `stale`/`empty_slot`/`no_item_handle` 静默跳过；其他失败计入 `failed` 并打 WARN；成功计入 `sold`（`scan.cpp:408-421`）。
 

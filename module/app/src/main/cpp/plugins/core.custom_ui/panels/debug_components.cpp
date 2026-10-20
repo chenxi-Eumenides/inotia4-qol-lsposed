@@ -46,18 +46,19 @@ constexpr contracts::UiRect kPanelNavAbsRect{contracts::ui_theme::kNavBoxAbsX,
 // 分类清单：新增调试内容 = 加一条名称，并在 build_category_controls 与
 // draw_category_detail 各加一个分支；两类内容互不冲突。
 constexpr const char* kCategoryNames[] = {
-    "文本按钮", "开关胶囊", "X/导航按钮", "主题调色板", "框架边框"};
+    "文本按钮", "开关胶囊", "X/导航按钮", "主题调色板", "框架边框", "箭头按钮", "图标按钮"};
 constexpr uint32_t kCategoryCount = sizeof(kCategoryNames) / sizeof(kCategoryNames[0]);
 
 // 右栏交互控件：text_button 走手工命中绘制，nav_button 走自适应绘制。
 struct CategoryControl {
     contracts::QolUiHandle handle = nullptr;
-    uint8_t is_nav = 0;  // 1 = nav_button，0 = text_button。
+    uint8_t kind = 0;  // 0 text, 1 nav, 2 arrow, 3 icon.
 };
 
-constexpr uint32_t kMaxCategoryControls = 8;
+constexpr uint32_t kMaxCategoryControls = 12;
 CategoryControl g_category_controls[kMaxCategoryControls]{};
 uint32_t g_category_control_count = 0;
+bool g_active_demo_state[2] = {true, false};
 int32_t g_selected_category = -1;
 
 const contracts::QolHostSdk* g_sdk = nullptr;
@@ -107,6 +108,22 @@ void demo_button_clicked(void* user) {
     }
 }
 
+void demo_active_clicked(void* user) {
+    const uintptr_t index = reinterpret_cast<uintptr_t>(user);
+    if (index >= 2) return;
+    g_active_demo_state[index] = !g_active_demo_state[index];
+    const contracts::QolUiComponents* components = ui_components_api();
+    const uint32_t control_index = 6 + static_cast<uint32_t>(index);
+    if (components != nullptr && components->text_button_set_active != nullptr &&
+        control_index < g_category_control_count) {
+        (void)components->text_button_set_active(g_category_controls[control_index].handle,
+            g_active_demo_state[index] ? 1 : 0);
+    }
+}
+
+void demo_arrow_clicked(void*) { ++g_demo_click_count; }
+void demo_icon_clicked(void*) { ++g_demo_click_count; }
+
 // —— 左栏分类列表行：背景/边框走绘制原语，文本经 draw_control_text 不写内联缓冲。 ——
 void draw_category_row(void*, uint32_t index, contracts::QolUiHandle row, uint8_t selected) {
     const contracts::QolUiAdapter* adapter = ui_adapter();
@@ -124,10 +141,11 @@ void draw_category_row(void*, uint32_t index, contracts::QolUiHandle row, uint8_
 // —— 分类 0：文本按钮（交互）。胶囊/装饰两列 × 可用/禁用/长文本，共六枚。 ——
 bool build_text_buttons(const contracts::QolUiComponents* components,
                         contracts::QolUiHandle parent, CategoryControl* out, uint32_t* out_count) {
-    constexpr size_t end = offsetof(contracts::QolUiComponents, decorated_text_button_create) +
-        sizeof(((contracts::QolUiComponents*)nullptr)->decorated_text_button_create);
+    constexpr size_t end = offsetof(contracts::QolUiComponents, flat_text_button_create) +
+        sizeof(((contracts::QolUiComponents*)nullptr)->flat_text_button_create);
     if (!components->capsule_text_button_create || !components->decorated_text_button_create ||
-        !components->text_button_set_enabled || components->minor < 14 ||
+        !components->text_button_set_enabled || !components->text_button_set_active ||
+        components->minor < 16 ||
         components->size < end) {
         return false;
     }
@@ -153,6 +171,22 @@ bool build_text_buttons(const contracts::QolUiComponents* components,
     // 每列第二行演示禁用态：仍绘制，但点击不再触发。
     (void)components->text_button_set_enabled(out[2].handle, 0);
     (void)components->text_button_set_enabled(out[3].handle, 0);
+    const contracts::UiRect active_rects[2] = {
+        {kRightViewport.x + 20, kRightViewport.y + 288, 220, 48},
+        {kRightViewport.x + 264, kRightViewport.y + 288, 220, 48}};
+    const char* const active_labels[2] = {"纯矩形选中态", "装饰未选中态"};
+    for (uint32_t i = 0; i < 2; ++i) {
+        const contracts::UiButtonDesc desc{active_rects[i], active_labels[i], 0,
+            &demo_active_clicked, reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
+        contracts::QolUiHandle handle = nullptr;
+        const QolResult result = i == 0
+            ? components->flat_text_button_create(&desc, parent, &handle)
+            : components->decorated_text_button_create(&desc, parent, &handle);
+        if (!contracts::succeeded(result) || handle == nullptr) return false;
+        out[6 + i] = {handle, static_cast<uint8_t>(i == 0 ? 4 : 0)};
+        *out_count = 7 + i;
+        (void)components->text_button_set_active(handle, g_active_demo_state[i] ? 1 : 0);
+    }
     return true;
 }
 
@@ -176,6 +210,41 @@ bool build_nav_demos(const contracts::QolUiComponents* components,
         out[i] = {handle, 1};
         *out_count = i + 1;
     }
+    return true;
+}
+
+bool build_arrow_demos(const contracts::QolUiComponents* components,
+                       contracts::QolUiHandle parent, CategoryControl* out,
+                       uint32_t* out_count) {
+    if (!components->arrow_button_create || !components->arrow_button_draw) return false;
+    const contracts::UiRect rects[2] = {
+        {kRightViewport.x + 70, kRightViewport.y + 128, 48, 48},
+        {kRightViewport.x + 158, kRightViewport.y + 128, 48, 48}};
+    const uint32_t directions[2] = {contracts::kUiArrowLeft, contracts::kUiArrowRight};
+    for (uint32_t i = 0; i < 2; ++i) {
+        const contracts::UiArrowButtonDesc desc{rects[i], directions[i], 1,
+            &demo_arrow_clicked, nullptr};
+        contracts::QolUiHandle handle = nullptr;
+        const QolResult result = components->arrow_button_create(&desc, parent, &handle);
+        if (!contracts::succeeded(result) || handle == nullptr) return false;
+        out[i] = {handle, 2};
+        *out_count = i + 1;
+    }
+    return true;
+}
+
+bool build_icon_demo(const contracts::QolUiComponents* components,
+                     contracts::QolUiHandle parent, CategoryControl* out,
+                     uint32_t* out_count) {
+    if (!components->icon_button_create) return false;
+    const contracts::UiIconButtonDesc desc{
+        {kRightViewport.x + 56, kRightViewport.y + 112, 78, 78},
+        0x59, 0x03, 1, 1, "图标不可用", &demo_icon_clicked, nullptr, 1};
+    contracts::QolUiHandle handle = nullptr;
+    const QolResult result = components->icon_button_create(&desc, parent, &handle);
+    if (!contracts::succeeded(result) || handle == nullptr) return false;
+    out[0] = {handle, 3};
+    *out_count = 1;
     return true;
 }
 
@@ -206,6 +275,12 @@ bool build_category_controls(int32_t index) {
             break;
         case 2:
             ok = build_nav_demos(components, g_root, g_category_controls, &count);
+            break;
+        case 5:
+            ok = build_arrow_demos(components, g_root, g_category_controls, &count);
+            break;
+        case 6:
+            ok = build_icon_demo(components, g_root, g_category_controls, &count);
             break;
         default:  // 分类 1/3/4 纯绘制，无交互控件。
             break;
@@ -320,6 +395,34 @@ void draw_frames_detail(const contracts::QolUiAdapter* adapter,
     }
 }
 
+void draw_arrow_detail(const contracts::QolUiAdapter* adapter, contracts::UiRect right) {
+    if (adapter == nullptr || adapter->draw_string_with_font == nullptr) return;
+    set_text_color(adapter, contracts::ui_theme::kTextGold);
+    (void)adapter->draw_string_with_font("原生箭头按钮 · 目标框内等比缩放",
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
+    set_text_color(adapter, contracts::ui_theme::kTextNormal);
+    (void)adapter->draw_string_with_font("左 / 右箭头；按下显示原生按压态。",
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 240), 0, 0);
+    char clicks[48]{};
+    std::snprintf(clicks, sizeof(clicks), "点击：%u", g_demo_click_count);
+    (void)adapter->draw_string_with_font(clicks,
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 292), 0, 0);
+}
+
+void draw_icon_detail(const contracts::QolUiAdapter* adapter, contracts::UiRect right) {
+    if (adapter == nullptr || adapter->draw_string_with_font == nullptr) return;
+    set_text_color(adapter, contracts::ui_theme::kTextGold);
+    (void)adapter->draw_string_with_font("通用图标按钮 · unit 0x59 / loc 0x03",
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
+    set_text_color(adapter, contracts::ui_theme::kTextNormal);
+    (void)adapter->draw_string_with_font("支持替换图集位置、等比缩放与 fallback 文本。点击图标计数。",
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 224), 0, 0);
+    char clicks[48]{};
+    std::snprintf(clicks, sizeof(clicks), "点击：%u", g_demo_click_count);
+    (void)adapter->draw_string_with_font(clicks,
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 276), 0, 0);
+}
+
 // help_page detail 回调：user 存分类序号，只做静态绘制。
 void draw_category_detail(void* user, contracts::UiRect right) {
     const int32_t index = static_cast<int32_t>(reinterpret_cast<uintptr_t>(user));
@@ -338,8 +441,8 @@ void draw_category_detail(void* user, contracts::UiRect right) {
                     "三行分别为可用 / 禁用 / 长文本；两种外观共用同一 backend。",
                     static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 84), 0, 0);
                 (void)adapter->draw_string_with_font(
-                    "点击经原生事件树派发，不混用手工命中。",
-                    static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 296), 0, 0);
+                    "下排纯矩形 / 装饰按钮可点击切换 active。",
+                    static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 360), 0, 0);
             }
             break;
         case 1:
@@ -353,6 +456,12 @@ void draw_category_detail(void* user, contracts::UiRect right) {
             break;
         case 4:
             draw_frames_detail(adapter, components, right);
+            break;
+        case 5:
+            draw_arrow_detail(adapter, right);
+            break;
+        case 6:
+            draw_icon_detail(adapter, right);
             break;
         default:
             break;
@@ -495,16 +604,23 @@ void panel_process() {
 
     (void)components->help_page_draw(g_page);
 
-    // 当前分类交互控件：nav 走自适应绘制，text_button 走原生文本按钮绘制。
+    // 当前分类交互控件由类型选择对应绘制入口。
     for (uint32_t i = 0; i < g_category_control_count; ++i) {
         const CategoryControl& control = g_category_controls[i];
         if (control.handle == nullptr) continue;
-        if (control.is_nav != 0) {
-            if (components->nav_button_draw != nullptr) {
-                (void)components->nav_button_draw(control.handle);
-            }
-        } else if (components->text_button_draw != nullptr) {
-            (void)components->text_button_draw(control.handle);
+        switch (control.kind) {
+            case 1:
+                if (components->nav_button_draw) (void)components->nav_button_draw(control.handle);
+                break;
+            case 2:
+                if (components->arrow_button_draw) (void)components->arrow_button_draw(control.handle);
+                break;
+            case 3:
+                if (components->icon_button_draw) (void)components->icon_button_draw(control.handle);
+                break;
+            default:
+                if (components->text_button_draw) (void)components->text_button_draw(control.handle);
+                break;
         }
     }
 

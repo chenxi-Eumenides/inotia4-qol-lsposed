@@ -480,6 +480,27 @@ QolResult draw_part_alpha(QolUiHandle group, int32_t x, int32_t y, QolUiHandle l
     return contracts::ok();
 }
 
+QolResult draw_part_scaled(QolUiHandle group, int32_t x, int32_t y, QolUiHandle loc,
+                           int32_t type, int32_t flip, int32_t scale_percent) {
+    (void)flip;  // unit 0x59 provides separate left/right locs; no borrowed image is mutated.
+    if (group == nullptr || loc == nullptr || scale_percent < 1 || scale_percent > 400 ||
+        type < 0 || type > 2) return invalid_argument();
+    if (!game::game_host_is_main_thread() || fn_sgl_draw_texture_part_ex == nullptr ||
+        !game_memory_accessible(loc, 0x18, 'r')) return not_ready();
+    const auto* bytes = static_cast<const uint8_t*>(loc);
+    int32_t source_x = 0, source_y = 0, width = 0, height = 0, offset_x = 0, offset_y = 0;
+    std::memcpy(&source_x, bytes + IMAGE_LOC_SOURCE_X, sizeof(source_x));
+    std::memcpy(&source_y, bytes + IMAGE_LOC_SOURCE_Y, sizeof(source_y));
+    std::memcpy(&width, bytes + IMAGE_LOC_SOURCE_WIDTH, sizeof(width));
+    std::memcpy(&height, bytes + IMAGE_LOC_SOURCE_HEIGHT, sizeof(height));
+    std::memcpy(&offset_x, bytes + IMAGE_LOC_OFFSET_X, sizeof(offset_x));
+    std::memcpy(&offset_y, bytes + IMAGE_LOC_OFFSET_Y, sizeof(offset_y));
+    if (width <= 0 || height <= 0) return not_ready();
+    fn_sgl_draw_texture_part_ex(group, x, y, source_x, source_y, width, height, offset_x,
+                                offset_y, type == 0 ? 1 : type, 0, scale_percent, 0);
+    return contracts::ok();
+}
+
 QolResult image_unit_load(int32_t unit) {
     if (fn_imgsys_unit_load == nullptr) return not_ready();
     fn_imgsys_unit_load(unit);
@@ -1410,9 +1431,11 @@ const QolUiAdapter g_ui_adapter{
            &main_menu_replacement_rect_available,
             &ui_desc_text_cursor,
             &insert_inline_color_span,
-            // Minor 23 tail: alpha-aware atlas-part drawing.
-            &draw_part_alpha,
-  };
+             // Minor 23 tail: alpha-aware atlas-part drawing.
+             &draw_part_alpha,
+             // Minor 24 tail: native percentage-scaled atlas-part drawing.
+             &draw_part_scaled,
+        };
 
 }  // namespace
 

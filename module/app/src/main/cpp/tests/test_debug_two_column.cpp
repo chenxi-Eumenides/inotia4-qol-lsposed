@@ -397,9 +397,9 @@ int main() {
     g_provider->callbacks->enter();
     CHECK(g_provider->active());
 
-    // 结构：root = [双栏页, 面板导航按钮, 分类0 六枚文本按钮（胶囊/装饰各三态）]。
+    // 结构：root = [双栏页, 面板导航按钮, 分类0 八枚文本按钮（胶囊/装饰各三态 + 选中态两枚）]。
     Control* root = root_control();
-    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 8);
+    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 10);
     Control* columns = root->children[0].get();
     Control* panel_nav_control = root->children[1].get();
     g_nav_control = panel_nav_control;
@@ -415,14 +415,14 @@ int main() {
               text_button->rect.w == text_button_rects[i].w &&
               text_button->rect.h == text_button_rects[i].h);
     }
-    // 双栏页内部：左列表（原生 scroll）5 行，行高 56。
+    // 双栏页内部：左列表（原生 scroll）7 行，行高 56。
     CHECK(columns->children.size() == 1);
     Control* list = columns->children[0].get();
     CHECK(list->kind == 4 && list->rect.x == left.x && list->rect.w == left.w);
     CHECK(list->children.size() == 1);
     Control* group = list->children[0].get();
-    CHECK(group->children.size() == 5);
-    for (size_t i = 0; i < 5; ++i) {
+    CHECK(group->children.size() == 7);
+    for (size_t i = 0; i < 7; ++i) {
         CHECK(group->children[i]->rect.y == static_cast<int64_t>(i) * 56 &&
               group->children[i]->rect.h == 56 && group->children[i]->click != nullptr);
     }

@@ -29,6 +29,9 @@ enum class ComponentKind : uint8_t {
     kNativeToggle,
     kTextButton,
     kNavButton,
+    kArrowButton,
+    kFlatTextButton,
+    kIconButton,
 };
 
 struct Component;
@@ -68,9 +71,17 @@ struct Component {
     bool native_deleted = false;
     bool main_menu_text_button = false;
     bool enabled = true;
+    bool active = false;
+    bool active_state_set = false;
     bool selection_enabled = true;
     uint32_t appearance = 0;
     uint32_t font_size = 0;
+    uint32_t direction = contracts::kUiArrowLeft;
+    int32_t image_unit = 0;
+    int32_t image_loc = 0;
+    int32_t draw_type = 1;
+    bool show_background = true;
+    std::string fallback_text;
     UiRect paint_local{};
 };
 
@@ -87,6 +98,8 @@ struct CallbackScope {
 
 QolResult destroy(contracts::QolUiHandle handle);
 QolResult text_button_draw(contracts::QolUiHandle handle);
+QolResult draw_control_text(contracts::QolUiHandle control, const char* text, int32_t x_offset,
+                            int32_t y_offset, uint32_t color, int32_t align, int32_t font);
 void text_button_execute(void* user);
 bool native_list_ready();
 bool rect_within_int32(UiRect rect);
@@ -438,6 +451,9 @@ QolResult dispatch_touch(contracts::QolUiHandle root_handle, uint32_t phase, int
             return unsupported();
         case ComponentKind::kTextButton:
         case ComponentKind::kNavButton:
+        case ComponentKind::kArrowButton:
+        case ComponentKind::kFlatTextButton:
+        case ComponentKind::kIconButton:
             break;
         case ComponentKind::kPanel:
         case ComponentKind::kLabel:
@@ -493,7 +509,10 @@ bool main_menu_adapter_ready() {
 QolResult delete_owned_lists(Component* component) {
     // 组件拥有的独立 native 按钮（含导航按钮）：destroy 时删除本控件一次。
     if (component->kind == ComponentKind::kTextButton ||
-        component->kind == ComponentKind::kNavButton) {
+        component->kind == ComponentKind::kNavButton ||
+        component->kind == ComponentKind::kArrowButton ||
+        component->kind == ComponentKind::kFlatTextButton ||
+        component->kind == ComponentKind::kIconButton) {
         if (component->native_deleted) return contracts::ok();
         if (!native_list_ready()) return not_ready();
         if (component->main_menu_text_button) {
@@ -645,11 +664,12 @@ bool valid_utf8(const char* text) {
 QolResult text_button_create_impl(const contracts::UiButtonDesc* desc,
                                   contracts::QolUiHandle parent,
                                   contracts::QolUiHandle* out,
-                                  bool allow_native_parent, bool draw_from_native_tree) {
+                                  bool allow_native_parent, bool draw_from_native_tree,
+                                  int64_t minimum_width = kNativeTextButtonMinimumWidth) {
     if (out == nullptr) return invalid_argument();
     *out = nullptr;
     if (desc == nullptr || !valid_utf8(desc->text) || desc->on_click == nullptr ||
-        desc->rect.w < kNativeTextButtonMinimumWidth ||
+        desc->rect.w < minimum_width ||
         desc->rect.h < kNativeTextButtonMinimumHeight || !rect_within_int32(desc->rect) ||
         (desc->style != contracts::kUiTextButtonFontDefault &&
          desc->style != contracts::kUiTextButtonFontLarger)) {
@@ -785,7 +805,8 @@ QolResult text_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled
     Component* component = nullptr;
     const QolResult lookup = require_component(handle, &component);
     if (!contracts::succeeded(lookup)) return lookup;
-    if (component->kind != ComponentKind::kTextButton) return unsupported();
+    if (component->kind != ComponentKind::kTextButton &&
+        component->kind != ComponentKind::kFlatTextButton) return unsupported();
     if (g_adapter->set_button_enabled == nullptr) return not_ready();
     const QolResult result = g_adapter->set_button_enabled(handle, enabled);
     if (!contracts::succeeded(result)) return result;
@@ -793,12 +814,76 @@ QolResult text_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled
     return contracts::ok();
 }
 
+QolResult flat_text_button_create(const contracts::UiButtonDesc* desc,
+                                  contracts::QolUiHandle parent,
+                                  contracts::QolUiHandle* out) {
+    if (out == nullptr || desc == nullptr || !valid_utf8(desc->text) ||
+        desc->on_click == nullptr || desc->rect.w < 80 || desc->rect.h < 42 ||
+        !rect_within_int32(desc->rect) ||
+        (desc->style != contracts::kUiTextButtonFontDefault &&
+         desc->style != contracts::kUiTextButtonFontLarger)) return invalid_argument();
+    const QolResult result = create_component(ComponentKind::kFlatTextButton, 1, desc->rect,
+        parent, nullptr, desc->style, nullptr, nullptr, nullptr, out);
+    if (!contracts::succeeded(result)) return result;
+    Component* button = find_component(*out);
+    button->text = desc->text;
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    if (g_adapter->set_click_proc == nullptr) {
+        const QolResult cleanup = destroy(*out);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? not_ready() : cleanup;
+    }
+    const QolResult bound = g_adapter->set_click_proc(button->native, &text_button_execute, button);
+    if (!contracts::succeeded(bound)) {
+        const QolResult cleanup = destroy(button->native);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? bound : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult flat_text_button_draw(Component* button) {
+    if (!on_main_thread() || button == nullptr || !g_adapter->control_absolute_origin ||
+        !g_adapter->control_pressed || !g_adapter->fill_rect) return not_ready();
+    int64_t x = 0, y = 0;
+    int32_t pressed = 0;
+    QolResult result = g_adapter->control_absolute_origin(button->native, &x, &y);
+    if (contracts::succeeded(result)) result = g_adapter->control_pressed(button->native, &pressed);
+    if (!contracts::succeeded(result)) return result;
+    const UiRect rect{x, y, button->rect.w, button->rect.h};
+    const bool selected = button->active_state_set && button->active;
+    const uint32_t fill = pressed ? 0xFF474139u : selected ? 0xFF383430u : 0xFF24201Cu;
+    const uint32_t border = pressed ? contracts::ui_theme::kTextNormal :
+        selected ? contracts::ui_theme::kTextGold : 0xFF706C64u;
+    result = g_adapter->fill_rect(rect, fill);
+    if (!contracts::succeeded(result)) return result;
+    constexpr int64_t edge = 2;
+    const UiRect edges[] = {
+        {rect.x, rect.y, rect.w, edge}, {rect.x, rect.y + rect.h - edge, rect.w, edge},
+        {rect.x, rect.y, edge, rect.h}, {rect.x + rect.w - edge, rect.y, edge, rect.h}};
+    for (UiRect edge_rect : edges) {
+        result = g_adapter->fill_rect(edge_rect, border);
+        if (!contracts::succeeded(result)) return result;
+    }
+    const uint32_t text_color = !button->enabled ? contracts::ui_theme::kTextDisabled :
+        pressed ? contracts::ui_theme::kTextNormal : selected ? contracts::ui_theme::kTextGold :
+            contracts::ui_theme::kTextNormal;
+    const int32_t font = button->style == contracts::kUiTextButtonFontLarger ? 1 : 0;
+    const int32_t font_height = font == 1 ? 26 : 22;
+    return draw_control_text(button->native, button->text.c_str(),
+        static_cast<int32_t>(button->rect.w / 2),
+        static_cast<int32_t>((button->rect.h - font_height) / 2), text_color, 2, font);
+}
+
 QolResult text_button_draw(contracts::QolUiHandle handle) {
     if (!on_main_thread()) return not_ready();
     Component* button = nullptr;
     const QolResult lookup = require_component(handle, &button);
     if (!contracts::succeeded(lookup)) return lookup;
-    if (button->kind != ComponentKind::kTextButton) return unsupported();
+    if (button->kind == ComponentKind::kFlatTextButton) return flat_text_button_draw(button);
+    if (button->kind != ComponentKind::kTextButton &&
+        button->kind != ComponentKind::kFlatTextButton) return unsupported();
     if (g_adapter->draw_native_text_button_background == nullptr ||
         g_adapter->control_absolute_origin == nullptr ||
         g_adapter->control_pressed == nullptr ||
@@ -821,9 +906,31 @@ QolResult text_button_draw(contracts::QolUiHandle handle) {
         const contracts::UiTextButtonPaintDesc desc{draw_rect, button->appearance,
             button->style, button->font_size};
         const uint32_t color = !button->enabled ? contracts::ui_theme::kTextDisabled :
-            pressed ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextGold;
-        return g_adapter->draw_native_text_button(&desc, button->text.c_str(), color,
+            button->active_state_set
+                ? (pressed ? contracts::ui_theme::kTextNormal : button->active
+                    ? contracts::ui_theme::kTextGold : contracts::ui_theme::kTextDisabled)
+                : (pressed ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextGold);
+        if (button->active_state_set) {
+            contracts::UiTextButtonPaintLayout layout{};
+            result = g_adapter->layout_native_text_button(&desc, &layout);
+            if (!contracts::succeeded(result)) return result;
+            // Split the active-state paint so the dim overlay only affects the button base,
+            // never its label. The actual press state still selects the native pressed art.
+            result = g_adapter->draw_native_text_button(&desc, " ", color,
+                button->enabled && pressed ? 1 : 0);
+            if (!contracts::succeeded(result)) return result;
+            if (!button->active && g_adapter->draw_control_alpha_overlay != nullptr) {
+                result = g_adapter->draw_control_alpha_overlay(handle,
+                    {draw_rect.x - x, draw_rect.y - y, draw_rect.w, draw_rect.h},
+                    0xFF000000u, 28);
+                if (!contracts::succeeded(result)) return result;
+            }
+            return g_adapter->draw_native_text_button_label(draw_rect,
+                button->text.c_str(), color, static_cast<int32_t>(button->style));
+        }
+        result = g_adapter->draw_native_text_button(&desc, button->text.c_str(), color,
             button->enabled && pressed ? 1 : 0);
+        return result;
     }
     if (button->main_menu_text_button) {
         // Use the decorated compact-button aspect for painting only. The native
@@ -836,16 +943,251 @@ QolResult text_button_draw(contracts::QolUiHandle handle) {
         draw_rect, pressed != 0 ? 1 : 0);
     if (!contracts::succeeded(result)) return result;
 
+    if (button->active_state_set && !button->active &&
+        g_adapter->draw_control_alpha_overlay != nullptr) {
+        result = g_adapter->draw_control_alpha_overlay(handle,
+            {0, 0, button->rect.w, button->rect.h}, 0xFF000000u, 28);
+        if (!contracts::succeeded(result)) return result;
+    }
+
     const uint32_t color = !button->enabled ? contracts::ui_theme::kTextDisabled
-        : pressed != 0 ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextGold;
+        : button->active_state_set
+            ? (pressed != 0 ? contracts::ui_theme::kTextNormal : button->active
+                ? contracts::ui_theme::kTextGold : contracts::ui_theme::kTextDisabled)
+            : (pressed != 0 ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextGold);
     return g_adapter->draw_native_text_button_label(
         draw_rect, button->text.c_str(), color,
         static_cast<int32_t>(button->style));
 }
 
+QolResult text_button_set_active(contracts::QolUiHandle handle, uint8_t active) {
+    if (active > 1) return invalid_argument();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kTextButton &&
+        button->kind != ComponentKind::kFlatTextButton) return unsupported();
+    button->active = active != 0;
+    button->active_state_set = true;
+    return contracts::ok();
+}
+
+QolResult arrow_button_create(const contracts::UiArrowButtonDesc* desc,
+                              contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (out == nullptr || desc == nullptr || desc->rect.w <= 0 || desc->rect.h <= 0 ||
+        desc->direction > contracts::kUiArrowRight || desc->enabled > 1 || desc->on_click == nullptr ||
+        !rect_within_int32(desc->rect)) return invalid_argument();
+    constexpr size_t kScaledDrawEnd = offsetof(contracts::QolUiAdapter, draw_part_scaled) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_part_scaled);
+    if (!on_main_thread() || g_adapter->minor < 24 || g_adapter->size < kScaledDrawEnd ||
+        !g_adapter->draw_part_scaled || !g_adapter->image_loc_size ||
+        !g_adapter->image_group || !g_adapter->image_loc ||
+        !g_adapter->image_unit_load || !g_adapter->control_pressed ||
+        !g_adapter->control_absolute_origin || !g_adapter->set_button_enabled) return not_ready();
+    (void)g_adapter->image_unit_load(0x59);
+    const QolResult created = create_component(ComponentKind::kArrowButton, 1, desc->rect,
+        parent, nullptr, 0, nullptr, nullptr, nullptr, out, nullptr, true);
+    if (!contracts::succeeded(created)) return created;
+    Component* button = find_component(*out);
+    button->direction = desc->direction;
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    button->enabled = desc->enabled != 0;
+    QolResult result = g_adapter->set_button_enabled(*out, desc->enabled);
+    if (contracts::succeeded(result)) result = g_adapter->set_click_proc
+        ? g_adapter->set_click_proc(*out, &text_button_execute, button) : not_ready();
+    if (!contracts::succeeded(result)) {
+        const QolResult cleanup = destroy(*out);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? result : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult arrow_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    if (enabled > 1) return invalid_argument();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kArrowButton || !g_adapter->set_button_enabled) return unsupported();
+    const QolResult result = g_adapter->set_button_enabled(handle, enabled);
+    if (contracts::succeeded(result)) button->enabled = enabled != 0;
+    return result;
+}
+
+QolResult arrow_button_draw(contracts::QolUiHandle handle) {
+    if (!on_main_thread()) return not_ready();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kArrowButton) return unsupported();
+    constexpr size_t kScaledDrawEnd = offsetof(contracts::QolUiAdapter, draw_part_scaled) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_part_scaled);
+    if (g_adapter->minor < 24 || g_adapter->size < kScaledDrawEnd ||
+        !g_adapter->draw_part_scaled || !g_adapter->image_loc_size) return not_ready();
+    contracts::QolUiHandle group = nullptr, loc = nullptr;
+    const int32_t loc_id = (button->direction == contracts::kUiArrowLeft ? 0x09 : 0x0b);
+    QolResult result = g_adapter->image_group(0x59, &group);
+    if (contracts::succeeded(result)) result = g_adapter->image_loc(0x59, loc_id, &loc);
+    if (!contracts::succeeded(result)) return result;
+    int32_t pressed = 0;
+    int64_t x = 0, y = 0;
+    result = g_adapter->control_pressed(handle, &pressed);
+    if (contracts::succeeded(result)) result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (!contracts::succeeded(result)) return result;
+    // Options atlas pairs normal/pressed locs; flip 1 mirrors the native directional arrow.
+    if (pressed && button->enabled) {
+        result = g_adapter->image_loc(0x59, loc_id + 1, &loc);
+        if (!contracts::succeeded(result)) return result;
+    }
+    int32_t width = 0, height = 0;
+    result = g_adapter->image_loc_size(0x59, loc_id + ((pressed && button->enabled) ? 1 : 0),
+                                       &width, &height);
+    if (!contracts::succeeded(result) || width <= 0 || height <= 0) return not_ready();
+    const int64_t scale_x = button->rect.w * 100 / width;
+    const int64_t scale_y = button->rect.h * 100 / height;
+    const int64_t scale = std::min(scale_x, scale_y);
+    if (scale < 1 || scale > 400) return invalid_argument();
+    const int64_t drawn_width = static_cast<int64_t>(width) * scale / 100;
+    const int64_t drawn_height = static_cast<int64_t>(height) * scale / 100;
+    const int64_t draw_x = x + (button->rect.w - drawn_width) / 2;
+    const int64_t draw_y = y + (button->rect.h - drawn_height) / 2;
+    if (draw_x < INT32_MIN || draw_x > INT32_MAX || draw_y < INT32_MIN ||
+        draw_y > INT32_MAX) return invalid_argument();
+    // loc 0x09/0x0b are direction-specific assets; adjacent locs provide their pressed state.
+    result = g_adapter->draw_part_scaled(group, static_cast<int32_t>(draw_x),
+        static_cast<int32_t>(draw_y), loc, 1, 0, static_cast<int32_t>(scale));
+    if (contracts::succeeded(result) && !button->enabled &&
+        g_adapter->draw_control_alpha_overlay != nullptr) {
+        result = g_adapter->draw_control_alpha_overlay(handle,
+            {0, 0, button->rect.w, button->rect.h}, 0xFF000000u, 35);
+    }
+    return result;
+}
+
+QolResult icon_button_create(const contracts::UiIconButtonDesc* desc,
+                             contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
+    if (out == nullptr || desc == nullptr || desc->rect.w <= 0 || desc->rect.h <= 0 ||
+        desc->image_unit <= 0 || desc->image_loc < 0 || desc->draw_type < 0 ||
+        desc->draw_type > 2 || desc->enabled > 1 || desc->show_background > 1 ||
+        desc->on_click == nullptr || !rect_within_int32(desc->rect) ||
+        (desc->fallback_text != nullptr && !valid_utf8(desc->fallback_text))) {
+        return invalid_argument();
+    }
+    constexpr size_t kScaledDrawEnd = offsetof(contracts::QolUiAdapter, draw_part_scaled) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->draw_part_scaled);
+    if (!on_main_thread() || g_adapter->minor < 24 || g_adapter->size < kScaledDrawEnd ||
+        !g_adapter->draw_part_scaled || !g_adapter->image_loc_size || !g_adapter->image_group ||
+        !g_adapter->image_loc || !g_adapter->image_unit_load || !g_adapter->set_button_enabled ||
+        !g_adapter->control_absolute_origin || !g_adapter->control_pressed) return not_ready();
+    (void)g_adapter->image_unit_load(desc->image_unit);
+    const QolResult created = create_component(ComponentKind::kIconButton, 1, desc->rect,
+        parent, nullptr, 0, nullptr, nullptr, nullptr, out, nullptr, true);
+    if (!contracts::succeeded(created)) return created;
+    Component* button = find_component(*out);
+    button->image_unit = desc->image_unit;
+    button->image_loc = desc->image_loc;
+    button->draw_type = desc->draw_type;
+    button->show_background = desc->show_background != 0;
+    button->fallback_text = desc->fallback_text == nullptr ? "" : desc->fallback_text;
+    button->on_click = desc->on_click;
+    button->user = desc->user;
+    button->enabled = desc->enabled != 0;
+    QolResult result = g_adapter->set_button_enabled(*out, desc->enabled);
+    if (contracts::succeeded(result)) result = g_adapter->set_click_proc
+        ? g_adapter->set_click_proc(button->native, &text_button_execute, button) : not_ready();
+    if (!contracts::succeeded(result)) {
+        const QolResult cleanup = destroy(button->native);
+        *out = nullptr;
+        return contracts::succeeded(cleanup) ? result : cleanup;
+    }
+    return contracts::ok();
+}
+
+QolResult icon_button_set_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    if (enabled > 1) return invalid_argument();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kIconButton || !g_adapter->set_button_enabled)
+        return unsupported();
+    const QolResult result = g_adapter->set_button_enabled(handle, enabled);
+    if (contracts::succeeded(result)) button->enabled = enabled != 0;
+    return result;
+}
+
+QolResult icon_button_draw(contracts::QolUiHandle handle) {
+    if (!on_main_thread()) return not_ready();
+    Component* button = nullptr;
+    const QolResult lookup = require_component(handle, &button);
+    if (!contracts::succeeded(lookup)) return lookup;
+    if (button->kind != ComponentKind::kIconButton) return unsupported();
+    int64_t x = 0, y = 0;
+    int32_t pressed = 0;
+    QolResult result = g_adapter->control_absolute_origin(handle, &x, &y);
+    if (contracts::succeeded(result)) result = g_adapter->control_pressed(handle, &pressed);
+    if (!contracts::succeeded(result)) return result;
+    if (button->show_background && !g_adapter->fill_rect) return not_ready();
+    const UiRect rect{x, y, button->rect.w, button->rect.h};
+    const uint32_t fill = pressed ? 0xFF474139u : 0xFF241C18u;
+    const uint32_t border = pressed ? contracts::ui_theme::kTextNormal :
+        button->enabled ? contracts::ui_theme::kTextGold : contracts::ui_theme::kTextDisabled;
+    if (button->show_background) {
+        result = g_adapter->fill_rect(rect, fill);
+        if (!contracts::succeeded(result)) return result;
+        const UiRect borders[] = {
+            {rect.x, rect.y, rect.w, 2}, {rect.x, rect.y + rect.h - 2, rect.w, 2},
+            {rect.x, rect.y, 2, rect.h}, {rect.x + rect.w - 2, rect.y, 2, rect.h}};
+        for (UiRect edge : borders) {
+            result = g_adapter->fill_rect(edge, border);
+            if (!contracts::succeeded(result)) return result;
+        }
+    }
+
+    bool icon_drawn = false;
+    contracts::QolUiHandle group = nullptr, loc = nullptr;
+    int32_t width = 0, height = 0;
+    if (g_adapter->image_group && g_adapter->image_loc && g_adapter->image_loc_size &&
+        g_adapter->draw_part_scaled &&
+        contracts::succeeded(g_adapter->image_group(button->image_unit, &group)) &&
+        contracts::succeeded(g_adapter->image_loc(button->image_unit, button->image_loc, &loc)) &&
+        contracts::succeeded(g_adapter->image_loc_size(button->image_unit, button->image_loc,
+                                                       &width, &height)) &&
+        width > 0 && height > 0) {
+        const int64_t scale = std::min(button->rect.w * 100 / width,
+                                       button->rect.h * 100 / height);
+        if (scale > 0 && scale <= 400) {
+            const int64_t draw_width = static_cast<int64_t>(width) * scale / 100;
+            const int64_t draw_height = static_cast<int64_t>(height) * scale / 100;
+            const int64_t draw_x = x + (button->rect.w - draw_width) / 2;
+            const int64_t draw_y = y + (button->rect.h - draw_height) / 2;
+            if (draw_x >= INT32_MIN && draw_x <= INT32_MAX && draw_y >= INT32_MIN &&
+                draw_y <= INT32_MAX) {
+                icon_drawn = contracts::succeeded(g_adapter->draw_part_scaled(group,
+                    static_cast<int32_t>(draw_x), static_cast<int32_t>(draw_y), loc,
+                    button->draw_type, 0, static_cast<int32_t>(scale)));
+            }
+        }
+    }
+    if (!button->enabled && g_adapter->draw_control_alpha_overlay != nullptr) {
+        result = g_adapter->draw_control_alpha_overlay(handle,
+            {0, 0, button->rect.w, button->rect.h}, 0xFF000000u, 32);
+        if (!contracts::succeeded(result)) return result;
+    }
+    if (!icon_drawn && !button->fallback_text.empty()) {
+        const uint32_t color = button->enabled ? contracts::ui_theme::kTextGold :
+            contracts::ui_theme::kTextDisabled;
+        return draw_control_text(handle, button->fallback_text.c_str(),
+            static_cast<int32_t>(button->rect.w / 2),
+            static_cast<int32_t>((button->rect.h - 22) / 2), color, 2, 0);
+    }
+    return contracts::ok();
+}
+
 QolResult explicit_text_button_create(const contracts::UiButtonDesc* desc,
                                       contracts::QolUiHandle parent,
-                                      contracts::QolUiHandle* out, uint32_t appearance) {
+                                      contracts::QolUiHandle* out, uint32_t appearance,
+                                      int64_t minimum_width = kNativeTextButtonMinimumWidth) {
     if (out == nullptr) return invalid_argument();
     *out = nullptr;
     if (desc == nullptr) return invalid_argument();
@@ -854,7 +1196,7 @@ QolResult explicit_text_button_create(const contracts::UiButtonDesc* desc,
     contracts::UiTextButtonPaintLayout layout{};
     auto result = g_adapter->layout_native_text_button(&paint, &layout);
     if (!contracts::succeeded(result)) return result;
-    result = text_button_create_impl(desc, parent, out, false, false);
+    result = text_button_create_impl(desc, parent, out, false, false, minimum_width);
     if (contracts::succeeded(result)) find_component(*out)->appearance = appearance;
     return result;
 }
@@ -867,6 +1209,16 @@ QolResult capsule_text_button_create(const contracts::UiButtonDesc* desc,
 QolResult decorated_text_button_create(const contracts::UiButtonDesc* desc,
                                        contracts::QolUiHandle parent, contracts::QolUiHandle* out) {
     return explicit_text_button_create(desc, parent, out, contracts::kUiTextButtonDecorated);
+}
+
+QolResult compact_capsule_text_button_create(const contracts::UiButtonDesc* desc,
+                                             contracts::QolUiHandle parent,
+                                             contracts::QolUiHandle* out) {
+    constexpr int64_t kCompactMinimumWidth = 140;
+    if (desc == nullptr || desc->rect.h < kNativeTextButtonMinimumHeight ||
+        desc->rect.w < kCompactMinimumWidth) return invalid_argument();
+    return explicit_text_button_create(desc, parent, out, contracts::kUiTextButtonCapsule,
+                                       kCompactMinimumWidth);
 }
 
 QolResult main_menu_decorated_button_create(const contracts::UiMainMenuDecoratedButtonDesc* desc,
@@ -1794,6 +2146,15 @@ const contracts::QolUiComponents kUiComponents{
     &capsule_text_button_create,
     &decorated_text_button_create,
     &main_menu_decorated_button_create,
+    &text_button_set_active,
+    &arrow_button_create,
+    &arrow_button_set_enabled,
+    &arrow_button_draw,
+    &flat_text_button_create,
+    &icon_button_create,
+    &icon_button_set_enabled,
+    &icon_button_draw,
+    &compact_capsule_text_button_create,
 };
 
 }  // namespace
