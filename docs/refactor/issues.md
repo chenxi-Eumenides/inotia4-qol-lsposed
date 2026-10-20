@@ -198,6 +198,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 - AS-04/AS-05 声明 `ui_panels`；install/on_enabled 重新获取 world.facts/item.facts/slot_data/ui.state，on_disabled/deactivate 清空指针。
 - AS-06/AS-07 删除扫描私有锁；tick 入口捕获取消纪元，关闭/save-exit 取消当前轮次，任务注册锁内复核。
 - AS-08 POST 类型/范围/special 严格校验 400；无存档 409。AS-09 档 5 统一 99。AS-10 面板文案修正。AS-11 缺 rarity 记 -1、规则 fail-closed。AS-12 遍历/action 不可用限速 WARN。AS-14 API 参考补 schema。
+- AS-19 背包入口按钮与扩展背包页签重合/崩溃：游戏在切页或关闭背包页时销毁袋容器的控件子树，入口句柄失效；旧实现把复用同一地址的扩展页签当成入口按钮 `set_rect`（页签被移到入口位置、触摸归页签），并在容器变化分支对失效句柄调用 `components->destroy` → 游戏 `LINKEDLISTITEM_getData` 空指针 SIGSEGV（真机 tombstone 2026-10-21 00:24，`autosell_on_equip_draw` 栈帧）。现在每帧先做容器子链表指针比对，命中后校验安装时写入的入口 user type 标记 `0x51` + 类型 + data 指针；失效/不符经 `ui_components.forget_native`（契约 1.19 尾追加）注销组件记录并重建，不再 delete。真机 monster v29（模块 `c913d2108270`）：切页与关闭/重开背包页 10+ 次，入口保持原位、EB 页签列完整、齿轮点击可开面板、进程无 FATAL/SIGSEGV；日志 `entry handle stale ... in_tree=1 -> reinstall` 证实失效句柄地址确被 EB 页签复用。
 
 开放项：
 

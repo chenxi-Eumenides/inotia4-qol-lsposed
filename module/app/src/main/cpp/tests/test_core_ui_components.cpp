@@ -486,6 +486,27 @@ int main() {
     button_text[0] = 'X';
     CHECK(std::strcmp(static_cast<FakeControl*>(button)->text, "button") == 0);
 
+    // forget_native：native 由外部（游戏控件树）销毁时只注销记录，不调用 delete_control；
+    // 注销后同一句柄的所有组件入口都必须 NotFound，不能再次删除该原生地址。
+    {
+        qol::contracts::QolUiHandle foreign_root = nullptr;
+        CHECK(components->panel_create(&panel_desc, nullptr, &foreign_root).ok == kQolOk);
+        qol::contracts::UiButtonDesc foreign_desc{{0, 0, 10, 10}, "foreign", 7, &on_click,
+                                                   foreign_root};
+        qol::contracts::QolUiHandle foreign_button = nullptr;
+        CHECK(components->button_create(&foreign_desc, foreign_root, &foreign_button).ok ==
+              kQolOk);
+        const int deletes_before_forget = g_native_button_deletes;
+        CHECK(components->forget_native(foreign_button).ok == kQolOk);
+        CHECK(g_native_button_deletes == deletes_before_forget);
+        CHECK(components->forget_native(foreign_button).ok == kQolErrNotFound);
+        CHECK(components->set_rect(foreign_button, {1, 2, 3, 4}).ok == kQolErrNotFound);
+        CHECK(components->destroy(foreign_button).ok == kQolErrNotFound);
+        // 父组件记录保持可用：注销只作用于给定句柄。
+        CHECK(components->set_rect(foreign_root, {0, 0, 20, 20}).ok == kQolOk);
+        CHECK(components->destroy(foreign_root).ok == kQolOk);
+    }
+
     qol::contracts::UiLabelDesc label_desc{{40, 3, 20, 10}, "label", 0, qol::contracts::UiAlign::kLeft};
     qol::contracts::QolUiHandle label = nullptr;
     CHECK(components->label_create(&label_desc, root, &label).ok == kQolOk);

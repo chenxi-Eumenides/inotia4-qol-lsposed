@@ -11,7 +11,7 @@
 - 插件 id `autosell`，版本 `0.1.0`（`plugins/autosell/plugin.cpp:35-36`）。
 - descriptor：`requires=6`、`optional_requires=3`、`provides=0`、`resources=2`、`jni=0`、`ports=1`、`features=1`、`http_route_metadata=2`（`plugin.cpp:283-306`）；`routes.inc` 两条（`plugins/autosell/routes.inc:1-2`）。
 - 注册于 `host/assembly.cpp:216`。
-- 文件规模：`plugin.cpp` 305 行、`config.cpp` 81、`read_only.cpp` 142、`view.cpp` 102、`rules.cpp` 109、`scan.cpp` 585、`scan_session.cpp` 58、`store.cpp` 704、`ui/panel.cpp` 939。
+- 文件规模：`plugin.cpp` 305 行、`config.cpp` 81、`read_only.cpp` 142、`view.cpp` 102、`rules.cpp` 109、`scan.cpp` 585、`scan_session.cpp` 58、`store.cpp` 704、`ui/panel.cpp` 1010。
 - 稳定端口头：`contracts/autosell.h`（`Config`、`SpecialType`、运行时配置/持久化声明）。
 
 ## 公开能力与路由
@@ -48,10 +48,10 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 
 ### 入口按钮
 
-- 绘制宿主为 `patch:SCENE_DRAW_EQUIP+0x1cc` 的 `bl UIDesc_Draw` 调用点；wrapper 先复刻原调用再绘制入口（`plugins/autosell/ui/panel.cpp:836-841`）。
-- 入口挂在原版袋容器（与扩展背包页签同宿主），位置按袋 0 绝对坐标 +68、任务袋行对齐，尺寸 57×57（`panel.cpp:216-224,603-636`）。
-- 绘制使用 world HUD 齿轮 `unit 0x16 / loc 0x00`、flip=1；不可用时退化为深色底 + 金边 +「售」字（`panel.cpp:239-242,522-559`）。
-- 每帧校验容器与控件身份（子控件、type=3、active=0x20、ExecuteProc 匹配），失效则重建；关闭态只清引用，不销毁原版控件（`panel.cpp:657-688,843-864`）。
+- 绘制宿主为 `patch:SCENE_DRAW_EQUIP+0x1cc` 的 `bl UIDesc_Draw` 调用点；wrapper 先复刻原调用再绘制入口（`plugins/autosell/ui/panel.cpp:914-918`）。
+- 入口挂在原版袋容器（与扩展背包页签同宿主），位置按袋 0 绝对坐标 +129、任务袋行对齐，尺寸 68×68（`panel.cpp:120-133,472-495`）。
+- 绘制使用 world HUD 齿轮 `unit 0x16 / loc 0x00`、flip=1；不可用时退化为深色底 + 金边 +「售」字（`panel.cpp:135-140`、`core.custom_ui/ui_components.cpp` 的 `icon_button_draw`）。
+- 每帧校验入口句柄身份（`panel.cpp:409-469`）：先只用容器子链表做指针比对（不解引用句柄），命中后比对安装时写入的 user type 标记 `0x51`、控件类型与 data 指针。游戏在切页/关闭背包页时销毁容器子树，句柄随之失效且地址可能被扩展背包页签等新控件复用；失效或身份不符时经 `ui_components.forget_native` 注销组件记录（不删除控件）再重建，**不得 delete**（命中失效内存即 SIGSEGV，命中复用控件会删掉扩展背包页签）。关闭态仅隐藏可证明归属的控件并保留句柄（`panel.cpp:548-606`）。
 
 ### 配置面板
 
@@ -164,7 +164,7 @@ Game Host：`read_only.item.is_backpack_category`、`read_only.item.is_dice`（`
 | `plugins/autosell/scan.h` | `:17` 60 帧节拍；`:22-48` 生命周期接口 |
 | `plugins/autosell/store.h` | `:54-191` special 映射与 sidecar JSON；`:193-205` participant 接口 |
 | `plugins/autosell/store.cpp` | `:20-21` section v2；`:265-383` load/capture/complete；`:385-501` 写请求/重试；`:522-703` 注册/提交/注销 |
-| `plugins/autosell/ui/panel.cpp` | `:216-224,603-688` 入口；`:692-832` 面板绘制/事件；`:836-864` 绘制宿主/门控；`:868-937` PanelProvider 与 PopupState |
+| `plugins/autosell/ui/panel.cpp` | `:120-133` 入口常量；`:409-469` 入口存活/身份校验与注销；`:472-495` 入口定位；`:497-546` 入口安装；`:548-606` 每帧入口绘制；`:725-912` 面板绘制/事件；`:914-918` 绘制宿主；`:939-1010` PanelProvider 与 PopupState |
 | `plugins/autosell/ui/panel.h` | 入口/面板接口声明 |
 | `contracts/autosell.h` | `:10-46` Config/SpecialType；运行时配置声明 |
 | `bridge/native/gamebridge_autosell.cpp` | `:26-88` 4 个 JNI 导出 |

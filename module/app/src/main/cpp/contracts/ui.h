@@ -13,7 +13,7 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 18;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 19;
 constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 24;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
@@ -376,6 +376,11 @@ struct QolUiComponents {
     // Minor 17 append-only: capsule text paint for compact hit rectangles (<204 logical px).
     QolResult (*compact_capsule_text_button_create)(const UiButtonDesc*, QolUiHandle parent,
                                                     QolUiHandle* out);
+    // Minor 19 append-only: 注销组件记录但不删除 native 控件。用于组件挂在游戏控件树上、
+    // native 生命周期归游戏的场景：控件被游戏销毁后句柄失效，既不得 delete_control（命中
+    // 已释放或被复用的地址），也不能保留记录（unbind/destroy 会再次删除该地址）。
+    // 调用方必须先独立证明该句柄已不是在树中的本模块控件；NotFound 表示无记录。
+    QolResult (*forget_native)(QolUiHandle);
 };
 
 using QolUiDrawFn = void (*)(void* control);

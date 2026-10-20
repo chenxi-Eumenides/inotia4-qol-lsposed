@@ -77,3 +77,26 @@
 4. 功能开关：`POST /api/config/set {"plugin_id":"autosell","field":"feature","key":"autosell.auto_sell","value":true/false}`。
 5. 配置/校验/出售：`POST /api/feature/autosell/config`；EB 开/关两态观察 `lastScanFrame`。
 6. 回滚：`POST /api/system/backup/import {"checksum":"0b7136443c74","slot":0}`；恢复后重进档核对配置。
+
+## §6 AS-19 入口按钮句柄失效（2026-10-21）
+
+**根因证据**：tombstone 2026-10-21 00:24:31（monster v29），`#00 LINKEDLISTITEM_getData+0` → `#01-#05` 本模块帧；符号化 `pc 0x359074/0x3e3d18/0x3e52d8/0x3c5328/0x3c50b4` = `ui_adapter delete_control` ← `core.custom_ui destroy` ← `autosell_on_equip_draw`（旧 `panel.cpp:511`）← `autosell_equip_desc_draw_wrapper`。同秒 EB 日志 `extension tabs installed generation=7 root=...`：游戏销毁袋容器控件子树后，旧入口句柄已失效，`components->destroy` 命中已释放控件。
+
+**重合证据**：失效句柄地址被 EB 页签复用后，旧实现对复用控件 `set_rect`/`icon_button_draw`，页签被移到入口坐标且触摸归页签（`.tmp/autosell-audit/gear-after-switch.png`）。
+
+**修复**：`panel.cpp` 每帧 `autosell_entry_is_live()`：先容器子链表纯指针比对，命中后校验安装时写入的 user type 标记 `0x51` + 控件类型 + data 指针；失效/不符经 `ui_components.forget_native`（契约 1.19 尾追加：只注销组件记录、不删 native）丢弃记录并重建，绝不 delete。
+
+**地址复用实证**（终版真机日志）：4 次切页均为 `entry handle stale ... in_tree=1 -> reinstall`——失效句柄仍是容器子控件，说明其地址已被扩展背包页签复用；旧实现会把该页签当入口 `set_rect`，新实现由 user type/data 元组拒绝。
+
+**真机验证（2026-10-21，monster v29，模块 `c913d2108270`，集成包 `700b3eff…`）**：
+
+| 项 | 结果 |
+|---|---|
+| 切页（技能↔背包）3 轮 + 5 轮 | **PASS**：每次重建日志 `entry handle stale ... in_tree=0 -> reinstall`，齿轮保持底部原位，EB 5 页签列完整 |
+| 关闭/重开背包页 3 轮 | **PASS**：容器指针不变（`0x793bceccac`），句柄仍失效并被检出重建 |
+| 进入 EB bag6 视图并返回 | **PASS**：布局与页签高亮正常，入口不移动 |
+| 入口点击 | **PASS**：`provider open panel state=20`，面板打开/返回关闭正常（user type 标记未影响触摸） |
+| 崩溃 | **PASS**：进程 pid 18752 全程存活，logcat FATAL/SIGSEGV/SIGABRT = 0，`/api/health` ready |
+| 重建频率 | **PASS**：每次页面重建恰好一条 stale 日志，无逐帧抖动 |
+| 组件记录 | **PASS**：stale 路径经 `forget_native` 注销；`core_ui_components_tests` 覆盖不删 native、注销后 destroy/set_rect 返回 NotFound（211 断言） |
+| Host | **PASS**：148/148；`check_arch`、`check_http_routes`、`git diff --check` 通过 |

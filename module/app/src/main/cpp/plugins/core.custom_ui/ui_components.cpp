@@ -492,6 +492,31 @@ QolResult discard_new_component(Component* component) {
     return contracts::ok();
 }
 
+QolResult forget_native(contracts::QolUiHandle handle) {
+    if (handle == nullptr) return invalid_argument();
+    Component* component = find_component(handle);
+    if (component == nullptr) return not_found();
+    // native 已由外部（游戏控件树）销毁：只摘除组件记录，绝不调用 delete_control。
+    // 保留记录会让 unbind/destroy 稍后再次删除同一个地址（已释放或被新控件复用）。
+    component->native_deleted = true;
+    Component* parent = component->parent;
+    erase_component(component);
+    if (parent == nullptr) {
+        const auto it = std::find_if(g_roots.begin(), g_roots.end(),
+            [component](const std::unique_ptr<Component>& root) {
+                return root.get() == component;
+            });
+        if (it != g_roots.end()) g_roots.erase(it);
+        return contracts::ok();
+    }
+    const auto it = std::find_if(parent->children.begin(), parent->children.end(),
+        [component](const std::unique_ptr<Component>& child) {
+            return child.get() == component;
+        });
+    if (it != parent->children.end()) parent->children.erase(it);
+    return contracts::ok();
+}
+
 bool native_list_ready() {
     return g_adapter != nullptr && g_adapter->major == contracts::kUiAdapterMajor &&
         g_adapter->minor >= kUiAdapterBaseMinor && g_adapter->is_main_thread != nullptr &&
@@ -2155,6 +2180,7 @@ const contracts::QolUiComponents kUiComponents{
     &icon_button_set_enabled,
     &icon_button_draw,
     &compact_capsule_text_button_create,
+    &forget_native,
 };
 
 }  // namespace

@@ -119,7 +119,7 @@ void ui_uidesc_draw() {
 
 // 入口按钮：与原版袋列（袋 0）同列右移 68、扩展页签（行距 70）之后的行 5。
 // 由扩展页签公式换算：x = 袋0绝对 + 68，y = 袋0绝对 + 2 + 5×70（尺寸 57×57）。
-constexpr int64_t kEntryRelX = 68;
+constexpr int64_t kEntryRelX = 136;  // 越过两列袋标签，避免压住右侧袋格
 constexpr int64_t kEntryRelY = 2 + 5 * 70;
 constexpr int64_t kEntrySize = 68;
 constexpr int64_t kEntryCenterAdjust = -5;
@@ -175,9 +175,25 @@ const qol::contracts::QolUiComponents* g_ui_components = nullptr;
 std::atomic<bool> g_panel_active{false};
 // 入口控件引用：主线程与 JVM 线程都可能写，用互斥保护。
 std::mutex g_entry_mtx;
-void* g_entry_ctrl = nullptr;       // 当前已挂载的入口按钮控件
-void* g_entry_container = nullptr;  // 挂载入口按钮的容器句柄（变化即旧控件失效）
-bool g_entry_attempted = false;
+// 入口控件身份快照。入口是游戏袋容器下的子控件：面板关闭或袋容器重建时，
+// 游戏会连同子树销毁它，句柄随之失效，其地址可能被之后创建的新控件
+// （如扩展背包页签）复用。因此每帧都必须重新证明句柄仍是当前容器下的原控件；
+// 失效句柄只能丢弃，不能解引用、set_rect 或 delete——那会改写别人的控件或崩溃。
+struct EntryControl {
+    void* ctrl = nullptr;          // 已挂载的入口按钮控件
+    void* anchor = nullptr;        // 挂载容器（原版袋容器）
+    void* control_data = nullptr;  // 安装时的 ControlObject data 指针
+    int32_t type = -1;             // 安装时的控件类型（3=按钮/物品类）
+    int32_t user_type = -1;        // 安装时写入的身份标记（见 kEntryUserType）
+};
+EntryControl g_entry;
+
+// 入口按钮的 user type 身份标记。游戏只在 user type==2 时把控件 data 当物品指针
+// （ControlItem_SetItem/GetItem），其余值不参与按钮绘制与事件分发；因此非 2 的
+// 自定义值可以在不改入口行为的前提下标记「这个控件是本模块的入口」。
+// 不能用地址或 data 指针单独识别：控件与 data 都被游戏释放后，分配器可能把同一
+// 地址交给下一个控件（实测扩展背包页签就复用了入口控件的地址）。
+constexpr int32_t kEntryUserType = 0x51;
 int g_close_delay = 0;              // 仅游戏主线程访问
 PressTarget g_pressed_target;       // 仅游戏主线程访问
 ::autosell::Config g_draft;           // 面板草稿；打开时读取，关闭时一次性提交
@@ -380,6 +396,10 @@ void autosell_save_before_back(void*) { autosell_commit_draft(); }
 
 // ---- 入口按钮 ----
 
+void autosell_entry_noop_draw(void* ctrl) {
+    (void)ctrl;
+}
+
 void autosell_entry_clicked(void* ctrl) {
     (void)ctrl;
     // 关闭态残留控件（不销毁原版控件）不得再打开面板；门禁/state 校验在 provider_open 内。
@@ -399,60 +419,90 @@ bool autosell_is_child(void* parent, void* child) {
     return false;
 }
 
-// 入口控件有效性：必须是当前容器的子控件，且身份字段确为本模块入口按钮。
-// 安全顺序：容器指针比对与子控件指针扫描都不解引用 g_entry_ctrl；只有确认它仍在
-// 容器子链表中后才读取其字段（此时控件必然存活），避免对已失效控件解引用/跳转。
-bool autosell_entry_valid(void* container) {
-    if (container == nullptr || g_entry_ctrl == nullptr) return false;
-    // 子链表成员关系是存活证明；控件身份字段在部分构建/控件状态下不可靠，
-    // 继续强校验会导致每帧重建入口控件。
-    return autosell_is_child(container, g_entry_ctrl);
+// 读取控件身份字段。仅可在确认句柄是可读控件后调用。
+bool autosell_capture_control_identity(void* ctrl, EntryControl* out) {
+    const auto* ui = ui_api();
+    if (ui == nullptr || ctrl == nullptr || out == nullptr ||
+        ui->control_type == nullptr || ui->control_user_type == nullptr ||
+        ui->control_data == nullptr) {
+        return false;
+    }
+    int32_t type = -1;
+    int32_t user_type = -1;
+    void* data = nullptr;
+    if (ui->control_type(ctrl, &type).ok != kQolOk ||
+        ui->control_user_type(ctrl, &user_type).ok != kQolOk ||
+        ui->control_data(ctrl, &data).ok != kQolOk) {
+        return false;
+    }
+    out->type = type;
+    out->user_type = user_type;
+    out->control_data = data;
+    return true;
 }
 
-// 动态定位入口：与扩展背包页签同一套算法（ui_mix.cpp）——
-// 取袋容器 child 0（原版袋 0）的绝对位置，加上「袋列右侧 68 / 下移 2」，再减去挂载层
-// （袋容器）绝对位置得到相对 rect；行号 5（与任务背包同行，扩展页签只占 0..4）。
-// 不使用绝对坐标，也不依赖子控件顺序（袋 0 = child 0）。读取失败时退回常量兜底。
-UiRect autosell_entry_rect(void* container) {
-    UiRect out{kEntryRelX + 2, kEntryRelY + 2, kEntrySize, kEntrySize};
+// 入口句柄是否仍是当前袋容器下、本模块创建的那个按钮。
+// 顺序约束：先用容器子链表做纯指针比对（不解引用 g_entry.ctrl），确认命中后
+// 才读身份字段——句柄已失效时任何字段读取都可能落在别人或已释放的内存上。
+// 身份取安装时写入的 user type 标记 + type + data 指针：地址被复用成扩展页签
+// （user type 2、data 为新分配块）或本模块面板控件（无标记）时必有字段不符。
+bool autosell_entry_is_live(void* container) {
+    if (container == nullptr || g_entry.ctrl == nullptr) return false;
+    if (!autosell_is_child(container, g_entry.ctrl)) return false;
+    EntryControl current{};
+    if (!autosell_capture_control_identity(g_entry.ctrl, &current)) return false;
+    return current.type == g_entry.type && current.user_type == g_entry.user_type &&
+           current.control_data == g_entry.control_data;
+}
+
+void autosell_forget_entry() {
+    if (g_entry.ctrl != nullptr) {
+        // 记录必须从 core.custom_ui 注销：native 已被游戏销毁，保留记录会让组件表在
+        // unbind/destroy 时再次 delete_control 同一地址。注销只摘记录、不删除控件。
+        const auto* components = autosell_components();
+        if (components != nullptr && components->forget_native != nullptr)
+            (void)components->forget_native(g_entry.ctrl);
+    }
+    g_entry = EntryControl{};
+}
+
+// 入口定位：从原版袋 0 取绝对位置，行 5 取任务袋绝对位置；
+// 返回屏幕绝对 rect；入口挂载层是原版袋容器（与扩展背包页签同父），
+// 调用方再换算成相对挂载层的 rect。
+UiRect autosell_entry_abs_rect(void* container) {
+    UiRect out{0, 0, kEntrySize, kEntrySize};
     if (container == nullptr) return out;
     void* bag0 = nullptr;
-    if (!ui_child_at(container, 0, &bag0)) return out;
-    if (bag0 == nullptr || bag0 == g_entry_ctrl) return out;
-    const UiRect bag0_rect = [&]() {
-        UiRect r{};
-        ui_get_rect(bag0, &r);
-        return r;
-    }();
-    if (bag0_rect.w <= 0) return out;
-
-    int64_t bag0_abs_x = 0;
-    int64_t bag0_abs_y = 0;
+    if (!ui_child_at(container, 0, &bag0) || bag0 == nullptr) return out;
+    UiRect bag0_rect{};
+    if (!ui_get_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) return out;
+    int64_t bag0_abs_x = 0, bag0_abs_y = 0;
     autosell_ctrl_abs(bag0, &bag0_abs_x, &bag0_abs_y);
-    int64_t mount_abs_x = 0;
-    int64_t mount_abs_y = 0;
-    autosell_ctrl_abs(container, &mount_abs_x, &mount_abs_y);
 
-    out.x = bag0_abs_x + 68 - mount_abs_x + kEntryNudgeX + kEntryCenterAdjust;
-    // y 取「任务背包」实际 rect（袋列第 6 个 = child 5）：实测原版袋标签 y 为
-    // 0/70/139/208/277/347，并非严格的 2+index*70（第 6 个差 5），故用实际值对齐。
+    out.x = bag0_abs_x + kEntryRelX + kEntryNudgeX + kEntryCenterAdjust;
     void* task_bag = nullptr;
     (void)ui_child_at(container, 5, &task_bag);
     UiRect task{};
-    if (task_bag != nullptr && task_bag != g_entry_ctrl && ui_get_rect(task_bag, &task) &&
+    if (task_bag != nullptr && task_bag != g_entry.ctrl && ui_get_rect(task_bag, &task) &&
         task.h > 0) {
-        out.y = task.y + kEntryNudgeY + kEntryCenterAdjust;
+        int64_t task_abs_x = 0, task_abs_y = 0;
+        autosell_ctrl_abs(task_bag, &task_abs_x, &task_abs_y);
+        out.y = task_abs_y + kEntryNudgeY + kEntryCenterAdjust;
     } else {
-        out.y = bag0_abs_y + 2 - mount_abs_y + 5 * 70 + kEntryNudgeY +
-            kEntryCenterAdjust;
+        out.y = bag0_abs_y + 347 + kEntryNudgeY + kEntryCenterAdjust;
     }
     return out;
 }
 
 void autosell_install_entry(void* container) {
-    if (g_entry_attempted) return;
-    g_entry_attempted = true;
-    const UiRect rect = autosell_entry_rect(container);
+    const auto* ui = ui_api();
+    if (ui == nullptr || ui->set_rect == nullptr) return;
+    void* anchor = container;
+    const UiRect abs = autosell_entry_abs_rect(container);
+    if (abs.x == 0 && abs.y == 0) return;
+    int64_t ax = 0, ay = 0;
+    autosell_ctrl_abs(anchor, &ax, &ay);
+    const UiRect rect{abs.x - ax, abs.y - ay, abs.w, abs.h};
     const auto* components = autosell_components();
     if (components == nullptr || components->icon_button_create == nullptr) {
         AUTOSELLUI_LOG("entry create failed: icon button component unavailable");
@@ -461,57 +511,97 @@ void autosell_install_entry(void* container) {
     const qol::contracts::UiIconButtonDesc desc{rect, kGearImageUnit, kGearImageLoc, 1, 1,
         "售", &autosell_entry_clicked, nullptr, 0};
     void* btn = nullptr;
-    if (components->icon_button_create(&desc, container, &btn).ok != kQolOk || btn == nullptr) {
-        AUTOSELLUI_LOG("entry create failed container=%p", container);
+    if (components->icon_button_create(&desc, anchor, &btn).ok != kQolOk ||
+        btn == nullptr) {
+        AUTOSELLUI_LOG("entry create failed container=%p anchor=%p", container, anchor);
         return;
     }
-    g_entry_ctrl = btn;
-    AUTOSELLUI_LOG("entry installed container=%p ctrl=%p rect=(%lld,%lld)",
-                   container, btn, static_cast<long long>(rect.x),
-                   static_cast<long long>(rect.y));
+    // 入口只由 icon_button_draw 画齿轮，清空原生 DrawProc。
+    if (ui->set_draw_proc != nullptr)
+        (void)ui->set_draw_proc(btn, &autosell_entry_noop_draw);
+    (void)ui->set_rect(btn, rect);
+    // 身份标记必须在捕获快照前写入；写入失败说明该控件不能安全标记，直接销毁。
+    if (ui->set_control_user_type == nullptr ||
+        ui->set_control_user_type(btn, kEntryUserType).ok != kQolOk) {
+        AUTOSELLUI_LOG("entry identity marker failed ctrl=%p", btn);
+        if (components->destroy != nullptr) (void)components->destroy(btn);
+        return;
+    }
+    EntryControl identity{};
+    if (!autosell_capture_control_identity(btn, &identity) ||
+        identity.user_type != kEntryUserType) {
+        // 没有身份快照就无法在后续帧区分本模块按钮与复用同地址的其他控件。
+        // 此时控件刚创建、归属明确，直接销毁；不保留不可验证的句柄。
+        AUTOSELLUI_LOG("entry identity unavailable ctrl=%p", btn);
+        if (components->destroy != nullptr) (void)components->destroy(btn);
+        return;
+    }
+    identity.ctrl = btn;
+    identity.anchor = anchor;
+    g_entry = identity;
+    AUTOSELLUI_LOG("entry installed anchor=%p ctrl=%p abs=(%lld,%lld)",
+                   anchor, btn, static_cast<long long>(abs.x),
+                   static_cast<long long>(abs.y));
 }
 
-// 每帧（EQUIP 页）确保入口按钮存在并绘制。关闭态直接移除引用。
+// 每帧（EQUIP 页）确保入口可见并绘制；页面不在时只隐藏，不删除控件。
 void autosell_on_equip_draw() {
     std::lock_guard<std::mutex> lock(g_entry_mtx);
     const auto* ui = ui_api();
+    if (ui == nullptr || ui->find_original_bag_container == nullptr) return;
     void* container = nullptr;
-    if (ui == nullptr || ui->find_original_bag_container == nullptr ||
-        ui->find_original_bag_container(&container).ok != kQolOk || container == nullptr) {
-        g_entry_ctrl = nullptr;
-        g_entry_container = nullptr;
-        g_entry_attempted = false;
+    const bool container_ready =
+        ui->find_original_bag_container(&container).ok == kQolOk && container != nullptr;
+    if (!container_ready) {
+        // 面板已关闭：游戏销毁袋容器子树时一并销毁入口控件，句柄随之失效。
+        // 这里只丢弃引用——旧容器内存已不属于本模块，解引用或 delete 都不安全。
+        autosell_forget_entry();
         return;
     }
-    // 容器指针变化：旧控件随旧容器失效，仅移除引用（不销毁原版控件）。
-    if (container != g_entry_container) {
-        g_entry_ctrl = nullptr;
-        g_entry_container = container;
-        g_entry_attempted = false;
-    }
     if (!g_enabled.load(std::memory_order_acquire)) {
-        if (g_entry_ctrl != nullptr && autosell_entry_valid(container)) {
-            const auto* components = autosell_components();
-            if (components != nullptr && components->icon_button_set_enabled != nullptr)
-                (void)components->icon_button_set_enabled(g_entry_ctrl, 0);
+        // 关闭态只隐藏仍能证明属于自己的控件；身份不符则丢弃引用，不触碰疑似他人控件。
+        if (autosell_entry_is_live(container)) {
+            if (ui->set_control_show != nullptr)
+                (void)ui->set_control_show(g_entry.ctrl, 0);
+        } else {
+            autosell_forget_entry();
         }
         return;
     }
-    // 容器就位守卫：面板打开初期为占位容器（无原版 6 袋标签），此时不挂载。
     uint32_t child_count = 0;
-    if (!ui_child_count(container, &child_count) || child_count < 6) return;
-    if (g_entry_ctrl != nullptr && !autosell_entry_valid(container)) {
-        g_entry_ctrl = nullptr;
-        g_entry_attempted = true;  // 该容器本帧不再重建已失联的子控件。
+    if (!ui_child_count(container, &child_count) || child_count < 6) {
+        // 占位容器（原版 6 袋标签未就位）：无法定位，等下一帧；期间同样要丢弃失效句柄。
+        if (!autosell_entry_is_live(container)) autosell_forget_entry();
+        return;
     }
-    if (g_entry_ctrl == nullptr) autosell_install_entry(container);
-    if (g_entry_ctrl != nullptr && autosell_entry_valid(container)) {
-        const auto* components = autosell_components();
-        if (components != nullptr && components->icon_button_set_enabled != nullptr)
-            (void)components->icon_button_set_enabled(g_entry_ctrl, 1);
-        if (components != nullptr && components->icon_button_draw != nullptr)
-            (void)components->icon_button_draw(g_entry_ctrl);
+    if (g_entry.ctrl != nullptr && !autosell_entry_is_live(container)) {
+        // 容器重建/切页后句柄失效或地址已被其他控件复用：丢弃引用后重建本模块按钮。
+        // 不得 destroy：命中失效内存会直接崩溃，命中复用控件会删掉别人的控件。
+        const bool in_tree = autosell_is_child(container, g_entry.ctrl);
+        AUTOSELLUI_LOG("entry handle stale anchor=%p ctrl=%p in_tree=%d -> reinstall",
+                       container, g_entry.ctrl, in_tree ? 1 : 0);
+        autosell_forget_entry();
     }
+    if (g_entry.ctrl == nullptr) autosell_install_entry(container);
+    if (g_entry.ctrl == nullptr) return;
+    const UiRect wanted_abs = autosell_entry_abs_rect(container);
+    if (wanted_abs.x != 0 || wanted_abs.y != 0) {
+        int64_t ax = 0, ay = 0;
+        autosell_ctrl_abs(container, &ax, &ay);
+        const UiRect wanted{wanted_abs.x - ax, wanted_abs.y - ay, wanted_abs.w, wanted_abs.h};
+        UiRect actual{};
+        if (ui_get_rect(g_entry.ctrl, &actual) &&
+            (actual.x != wanted.x || actual.y != wanted.y || actual.w != wanted.w ||
+             actual.h != wanted.h)) {
+            (void)ui->set_rect(g_entry.ctrl, wanted);
+        }
+    }
+    if (ui->set_control_show != nullptr) (void)ui->set_control_show(g_entry.ctrl, 1);
+    const auto* components = autosell_components();
+    if (components != nullptr && components->icon_button_set_enabled != nullptr)
+        (void)components->icon_button_set_enabled(g_entry.ctrl, 1);
+    if (components != nullptr && components->icon_button_draw != nullptr)
+        (void)components->icon_button_draw(g_entry.ctrl);
 }
 
 // ---- 面板 ----
