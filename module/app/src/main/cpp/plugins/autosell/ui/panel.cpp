@@ -724,7 +724,7 @@ void autosell_panel_process() {
     // 第二行：合并说明。占满整面板宽 (panel.x+0x10 .. panel.x+panel.w-0x10)
     // 避免单行截断；y 已按真机反馈下移 3 逻辑像素（≈2 物理像素）。
     autosell_draw_text_at(panel.x + panel.w / 2, panel.y + 0x49,
-                          "按照规则定时出售物品。已强化/镶嵌/装备物品不会被出售。", kText, 2);
+                          "按规则定时出售物品。已强化或已镶嵌物品不会被出售。", kText, 2);
 
     for (int i = 0; i < kRuleCount; ++i) {
         const UiRect row = autosell_rule_row(panel, i);

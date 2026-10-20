@@ -28,7 +28,7 @@ namespace autosell {
 // 物品视图（由上层从游戏内存/扩展袋读取后填充；本层不触碰游戏内存）。
 struct ItemView {
     bool is_equip = false;
-    int rarity = 0;         // 0..4
+    int rarity = 0;         // -1 = 未知/不适用；0..4 有效
     // 强化筛选口径 = 剩余强化次数（UI 名称「强化耐久度」）；
     // 已强化次数与已镶嵌数仅供硬保护判定（>0 永不出售），不参与规则比较。
     int enhance_remaining = 0;  // 剩余强化次数 = (I_ENCHANT >> 2) & 0x0F

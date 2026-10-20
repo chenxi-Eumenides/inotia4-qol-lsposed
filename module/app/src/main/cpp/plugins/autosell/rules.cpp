@@ -12,6 +12,9 @@ bool equip_rule_hit(const ItemView& item, const Config& cfg) {
 
     if (cfg.rarity > 0) {
         any_enabled = true;
+        if (item.rarity < 0) {
+            return false;
+        }
         if (item.rarity > cfg.rarity - 1) {
             return false;
         }

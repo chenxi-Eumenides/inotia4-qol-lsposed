@@ -37,12 +37,13 @@ AutosellViewBuildReason autosell_build_view(
         diagnostics->rarity = facts.rarity;
         diagnostics->equip = facts.equip;
     }
-    if ((facts.fields & qol::contracts::kQolItemInventoryHasRarity) == 0 ||
-        (facts.fields & qol::contracts::kQolItemInventoryHasJewelValue) == 0 ||
+    if ((facts.fields & qol::contracts::kQolItemInventoryHasJewelValue) == 0 ||
         (facts.fields & qol::contracts::kQolItemInventoryHasJewelAttributeType) == 0)
         return AutosellViewBuildReason::kMissingRequiredFields;
     out->is_equip = facts.equip != 0;
-    out->rarity = facts.rarity;
+    out->rarity = (facts.fields & qol::contracts::kQolItemInventoryHasRarity) != 0
+                      ? facts.rarity
+                      : -1;
     out->enhance_remaining = facts.enchant_remaining;
     out->socket_filled = facts.socket_filled;
     out->socket_total = facts.socket_total;

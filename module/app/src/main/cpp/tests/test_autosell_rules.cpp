@@ -105,6 +105,22 @@ static void test_rarity_value_switch() {
     CHECK(!should_sell(item, cfg));
 }
 
+static void test_unknown_rarity_fails_closed() {
+    ItemView item = equip_item();
+    item.rarity = -1;
+
+    Config rarity_on;
+    rarity_on.enabled = true;
+    rarity_on.rarity = 5;
+    CHECK(!should_sell(item, rarity_on));
+
+    Config rarity_off_special_on;
+    rarity_off_special_on.enabled = true;
+    rarity_off_special_on.special_mask = autosell::kSpecialDice;
+    item.special_types = autosell::kSpecialDice;
+    CHECK(should_sell(item, rarity_off_special_on));
+}
+
 static void test_enhance_value_switch() {
     Config cfg;
     cfg.enabled = true;
@@ -599,6 +615,7 @@ static void test_global_or_across_categories() {
 int main() {
     test_master_switch_off();
     test_rarity_value_switch();
+    test_unknown_rarity_fails_closed();
     test_enhance_value_switch();
     test_socket_value_switch();
     test_hard_protection_enhanced_or_filled();

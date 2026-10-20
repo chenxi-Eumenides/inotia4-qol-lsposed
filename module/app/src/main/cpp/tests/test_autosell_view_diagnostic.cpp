@@ -95,7 +95,7 @@ bool item_is_dice(int32_t, int32_t* out) {
 
 namespace {
 
-constexpr uint32_t kRequiredViewFields =
+constexpr uint32_t kFixtureViewFields =
     qol::contracts::kQolItemInventoryHasRarity |
     qol::contracts::kQolItemInventoryHasJewelValue |
     qol::contracts::kQolItemInventoryHasJewelAttributeType;
@@ -110,7 +110,7 @@ void prepare_facts(uint32_t fields) {
 }
 
 void prepare_jewel_quality() {
-    prepare_facts(kRequiredViewFields);
+    prepare_facts(kFixtureViewFields);
     g_is_jewel = true;
     g_quality_capability_available = true;
     g_quality_api = &g_default_quality_api;
@@ -208,6 +208,18 @@ void test_missing_required_field_reason_is_reported() {
     assert(diagnostics.rarity == 0 && diagnostics.equip == 0);
 }
 
+void test_missing_rarity_builds_view_with_unknown_sentinel() {
+    prepare_facts(kFixtureViewFields & ~qol::contracts::kQolItemInventoryHasRarity);
+    const qol::features::autosell::read_only::InventoryItemRef ref{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 60, 1,
+        {11, 19}};
+    autosell::ItemView view{};
+    AutosellViewDiagnostics diagnostics{};
+    assert(autosell_build_view(ref, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
+    assert(diagnostics.fields == g_facts.fields);
+    assert(view.rarity == -1);
+}
+
 void test_enabled_config_without_matching_rule_is_classified() {
     autosell::ItemView view{};
     autosell::Config config{};
@@ -218,7 +230,7 @@ void test_enabled_config_without_matching_rule_is_classified() {
 }
 
 void test_provider_item_special_rule_match_is_classified() {
-    prepare_facts(kRequiredViewFields);
+    prepare_facts(kFixtureViewFields);
     const qol::features::autosell::read_only::InventoryItemRef ref{
         static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 60, 1,
         {11, 19}};
@@ -226,7 +238,7 @@ void test_provider_item_special_rule_match_is_classified() {
     AutosellViewDiagnostics diagnostics{};
     assert(autosell_build_view(ref, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
     assert(ref.kind == static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider));
-    assert(diagnostics.fields == kRequiredViewFields);
+    assert(diagnostics.fields == kFixtureViewFields);
     assert(diagnostics.special_types == autosell::kSpecialBackpack);
 
     autosell::Config config{};
@@ -243,6 +255,7 @@ int main() {
     test_jewel_quality_v2_failures_keep_unknown_sentinel();
     test_malformed_quality_api_keeps_unknown_sentinel();
     test_missing_required_field_reason_is_reported();
+    test_missing_rarity_builds_view_with_unknown_sentinel();
     test_enabled_config_without_matching_rule_is_classified();
     test_provider_item_special_rule_match_is_classified();
     return 0;
