@@ -23,7 +23,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - 空 request/response/context 返回 400 `bad request`；`body == nullptr && body_len > 0` 返回 400；响应缓冲不足返回内部错误并置 500（`plugin.cpp:152-173,172-180`）。
 - `slot` 由严格整数 token 解析（`bundle.h` 的 `json_find_slot`）：拒绝小数、指数、十六进制、尾随字符、溢出、负数与 >2（`bundle.cpp:846-892,1030-1038`）。
 - 成功响应统一经 `sb_http_body` 置 HTTP 200；业务错误在 body 内表达，因此“参数错误 400”与“业务错误 200”是两种状态（`plugin.cpp:165-173`）。
-- **导入仅在主菜单允许**：`save.facts.current_slot >= 0`（已加载存档）时拒绝；取值返回 `NotReady` 且值为 -1 视为主菜单放行，其余错误 fail-closed（`feature.cpp:170-190,1538`）。导出不受此限制。
+- **导入仅在主菜单允许**：优先读 `world.facts.state`，`state == 4`（main_menu）放行，其它状态拒绝；读取失败时回退 `save.facts.current_slot`（<0 放行、>=0 拒绝）并记录日志（`feature.cpp` `import_allowed_now`）。导出不受此限制。
 
 参数、响应体与错误文案的公共契约以 [API 参考「存档备份」小节（`docs/reference/api-reference.md:1509-1580`）](../api-reference.md) 为准；路由与 Kotlin 入口映射见 `docs/refactor/api-route-map.md:145-148`。
 
@@ -31,7 +31,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 
 | 面 | 内容 |
 |---|---|
-| required capabilities | `ui_panels` 1.3、`ui_components`、`save.facts` 1.0、`save.pre_save` 1.0（`plugin.cpp:32-45`） |
+| required capabilities | `ui_panels` 1.3、`ui_components`、`world.facts` 2.0、`save.facts` 1.0、`save.pre_save` 1.0（`plugin.cpp:32-50`） |
 | optional_requires | `http.registry`、`http.dispatch`（`plugin.cpp:42-47,365`） |
 | provides | 无（`plugin.cpp:366`） |
 | ports | `QOL_PORT_SAVE_CALL` 1.0（`plugin.cpp:49-52,375-376`）；不声明 `QOL_PORT_SAVE_WRITE` |
@@ -47,7 +47,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - 设置入口为 descriptor feature `save_backup.open_manager`：默认 `1`、分类 Tools、类型 entry、标题「存档备份」、说明「打开存档备份管理器。」、按钮「打开」、priority `-2`；回调经 `ui_panels.open("save_backup")` 打开面板（`plugin.cpp:333-359`）。该入口在 settings 注册表中的位置见 `docs/reference/plugins/settings.md:107`。
 - `settings_contribution.cpp` 的 catalog 注册为空实现（`settings_contribution.cpp:3-7`）。
 - 面板布局：左列 3 个存档槽卡片；中列竖排「导出/删除/导入」；右列顶部为跟随选中槽的 `auto` 自动备份卡片，下方为手动备份列表（每页 5 项，底部左右方向键与页码、标准导航返回）。所有框使用 `ui_components` 的 `draw_container`（圆角金框、无装饰角）；返回用 `nav_button`、翻页用 `arrow_button`、操作/确认按钮用 `text_button`，不再自绘按钮与边框。列表按需解析：打开时只枚举文件名，当前页逐帧解析，未解析行显示「加载中…」；条目数不设上限（`g_backups` 为无界 vector），空列表显示「暂无备份」（`ui/panel.cpp` 布局常量与 `g_backups`；`ui/render.inc` 绘制）。
-- 选择与按钮状态：左侧槽与右侧条目独立选择；仅选槽时导出/删除可用，仅选手动备份时删除可用，槽+条目同时选中时导入可用；auto 可选中、可导入，不可删除。导出立即执行，导入与删除弹面板内确认框（确认/取消），不再使用两次点击确认（`ui/render.inc` `ops_btn_draw`、`ui/render.inc` `draw_confirm_dialog`、`ui/panel.inc` 事件分发、`ui/injection.inc`）。
+- 选择与按钮状态：左侧槽与右侧条目独立选择；仅选槽时导出/删除可用，仅选手动备份时删除可用，槽+条目同时选中时导入可用；auto 可选中、可导入，不可删除。导出立即执行，导入与删除弹面板内确认框（居中、确认 200ms 防抖、确认/取消），不再使用两次点击确认；弹窗打开时隐藏底层内容与分区框（`ui/render.inc`、`ui/injection.inc`、`ui/panel.inc`）。
 - 面板按钮**直接调用** native 业务函数（`save_backup_export_json` 等），不经 HTTP、不经 JNI/Kotlin（`ui/injection.inc:29,105,170-171`；`ui/panel.cpp:571-576`）。导入失败会显示响应中的 `error` 文案（`ui/injection.inc:11-25,108-125`）。
 - 地图名与等级显示：未知等级显示 `Lv?`；地图名先按 UTF-8 码点边界截断到 16 字节，再按宽度截断（`ui/render.inc:159-168,233-241,314-340`）。
 

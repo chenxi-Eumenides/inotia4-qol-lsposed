@@ -144,3 +144,22 @@
 - `b8461775`：去掉左列分组外框与右列表每行金框，按参考图保留 3 张槽卡与 1 个列表外框。
 - 事实：`draw_container` 内部为游戏 `UI_DrawBorderRect`（金线圆角框 + 60% 黑底，`docs/reference/game/ui.md:133`），不是直角框。
 - 构建：`scripts/build-debug.sh` 成功（两 ABI）。真机视觉与组件命中未验证。
+
+## §11 真机部署与面板验证（2026-10-21）
+
+- 部署：`scripts/build-debug.sh` → `scripts/patch-apk.sh` → `adb install -r`；运行模块 sha256 `33eb5ec9…`、`64d0d22f…`（对应提交 `69ac2eaf` 前一轮与最终轮）。
+- 装配：`save_backup` enabled，requires `ui_components 1.21 / ui_panels 1.3 / world.facts 2.0 / save.facts 1.0 / save.pre_save 1.0`，资源 `ptrslot:SAVESLOT_DELETE_GOT`、`own:popup.savebackup` 均 live，无 error。
+- 面板：从设置「更多工具 → 存档备份 → 打开」进入；组件树创建成功（`create component tree`，13ms），三栏版式与金框显示正常。
+- 交互：
+  - 选中槽位后 auto 行显示 `暂无自动备份`；未选中槽显示 `未选择存档槽`。
+  - 翻页箭头从 1/9 到 2/9，当前页逐帧解析并回填。
+  - 导入确认框居中显示，正文与按钮可读；取消关闭后底层内容恢复。
+  - 导入执行成功：`20261014-203427_s0_c97d845ba2b1.qol_save -> slot0`（门禁放行验证）。
+  - **过程记录**：该次导入发生在第 2 页选中项，覆盖了槽 0；随即用部署前导出的 `20261020-194919_s0_c4bb60d4489c.qol_save` 导回槽 0，日志确认恢复。
+- 未验证：自动备份条目（本次未进档触发游戏保存，`autobackup` 为空）；删除确认框实际执行；auto 导入回同槽；真机未做 smoke。
+
+## §12 导入门禁修正（真机发现）
+
+- 现象：主菜单下导入返回 `import requires main menu`。
+- 原因：`save.facts.current_slot` 在主菜单仍可能保留上次槽号。
+- 修复：`69ac2eaf` 改为优先 `world.facts.state == 4`（main_menu），`current_slot` 仅作回退；新增 `world.facts` 2.0 required 依赖与 host 测试矩阵。
