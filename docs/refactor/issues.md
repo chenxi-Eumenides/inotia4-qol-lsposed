@@ -144,6 +144,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | UNVER-02 | core.item / extension_bag | 掷骰；镶嵌；强化；商店购买；ITM-01 bag5 任务袋读取；`bag6 slot11` 写入前态 | 无 pending dice、背包无宝石、无原版强化卷轴且 EB 关闭、商店为空、任务袋为空；EB 关闭无法读取 `bag6 slot11` 写前态。用户确认留到后续其它插件审阅时再测，此后不再主动验收 |
 | UNVER-03 | inventory_hooks | c18 `85%` / overhaul `70%` 倍率仅静态金标；任务袋透传无物品可测；调试门禁关闭分支跳过；autosell 路径并入 autosell 审阅 | 设备仅有 monster v29；用户 2026-10-18 确认：monster 真机覆盖 70% 与详情页出售，其余按静态金标/后续插件审阅处理 |
 | UNVER-04 | extension_bag | 设备批剩余：FIX-07 失败注入/源释放失败复核；C1-01 容量读写失败注入；D-01 真实触摸窗口延迟释放压力 | 2026-10-18 设备批已完成部署、设置页开关、扩展视图、正常跨袋移动、生命周期、保存重进与 D-03 R-64；失败注入未执行。EB-01 用户确认已修复，未复核 |
+| UNVER-05 | special_equip | VM-P4-06 行为面：普通队友/主角穿脱专属位装备；特殊 NPC 穿脱限制；出售门禁；两 hook 两态 | 用户 2026-10-21 决定本批不做真机验证；静态 12 条已修，设备项全部 NOT_ACCEPTED。登记见 `audits/plugin-audit/special-equip-20261021/verification-log.md` §2 |
 
 > QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
 
