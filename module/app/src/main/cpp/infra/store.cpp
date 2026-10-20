@@ -345,12 +345,21 @@ bool quarantine_locked(const std::string& path) {
 
 bool valid_slot(int slot) { return slot >= 0 && slot < kSlotCount; }
 
-bool unlink_checked_locked(const std::string& path) {
+std::string base_name_of(const std::string& path) {
+    const std::size_t pos = path.find_last_of('/');
+    return pos == std::string::npos ? path : path.substr(pos + 1);
+}
+
+int unlink_raw(const char* path) {
 #if defined(QOL_STORE_TEST_SEAMS)
-    const int result = g_unlink_for_test != nullptr ? g_unlink_for_test(path.c_str()) : ::unlink(path.c_str());
+    return g_unlink_for_test != nullptr ? g_unlink_for_test(path) : ::unlink(path);
 #else
-    const int result = ::unlink(path.c_str());
+    return ::unlink(path);
 #endif
+}
+
+bool unlink_checked_locked(const std::string& path) {
+    const int result = unlink_raw(path.c_str());
     return result == 0 || errno == ENOENT;
 }
 
@@ -541,6 +550,52 @@ Status reset_in_operation(uint64_t owner, const contracts::QolSlotOperationLease
 Status delete_in_operation(uint64_t owner, const contracts::QolSlotOperationLease* lease, int slot) {
     if (lease == nullptr) return Status::kBadSlot;
     return delete_common(slot, owner, lease);
+}
+
+Status delete_slot_to_trash(uint64_t owner, const contracts::QolSlotOperationLease* lease,
+                            int slot, const char* trash_dir) {
+    if (lease == nullptr) return Status::kBadSlot;
+    if (trash_dir == nullptr || trash_dir[0] == '\0') return Status::kIoError;
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    const Status ready = require_ready(slot);
+    if (ready != Status::kOk) return ready;
+    const auto gate = gate_admission_locked(owner, lease, slot);
+    if (gate != Status::kOk) return gate;
+    if (g_reservations[slot].id != 0) return Status::kBusy;
+
+    const std::string trash = trash_dir;
+    const std::string primary = primary_path_locked(slot);
+    // 删除语义需同时移走 pending 损坏标记，否则下次读取仍判 kCorrupt。
+    const std::string paths[3] = {last_good_path_locked(slot), primary,
+                                  primary + ".unresolved-corrupt"};
+    std::vector<std::pair<std::string, std::string>> moved;  // trash_path, original_path
+    auto rollback = [&moved]() {
+        for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
+            struct stat st{};
+            if (::lstat(it->first.c_str(), &st) != 0) continue;
+            (void)::rename(it->first.c_str(), it->second.c_str());
+        }
+    };
+    for (const std::string& path : paths) {
+        struct stat st{};
+        if (::lstat(path.c_str(), &st) != 0) {
+            if (errno == ENOENT) continue;  // 文件不存在视为已删除
+            rollback();
+            return Status::kIoError;
+        }
+        // 不跟随 symlink：只移动普通容器文件。
+        if (!S_ISREG(st.st_mode)) {
+            rollback();
+            return Status::kIoError;
+        }
+        const std::string target = trash + "/" + base_name_of(path);
+        if (::rename(path.c_str(), target.c_str()) != 0) {
+            rollback();
+            return Status::kIoError;
+        }
+        moved.emplace_back(target, path);
+    }
+    return Status::kOk;
 }
 
 Status read_container(int slot, std::vector<uint8_t>* out) {
@@ -923,6 +978,10 @@ void with_store_lock_for_test(void (*held)(void*), void* context) {
 void set_unlink_for_test(int (*unlink_fn)(const char*)) {
     std::lock_guard<std::mutex> lock(g_store_mtx);
     g_unlink_for_test = unlink_fn;
+}
+int unlink_with_test_seam(const char* path) {
+    std::lock_guard<std::mutex> lock(g_store_mtx);
+    return unlink_raw(path);
 }
 #endif
 

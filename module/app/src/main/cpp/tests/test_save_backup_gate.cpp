@@ -91,6 +91,15 @@ QolResult op_delete(void*, QolOwnerToken owner, const QolSlotOperationLease* lea
                ? contracts::ok()
                : contracts::error(kQolErrInternal, "store error", 11);
 }
+QolResult op_delete_to_trash(void*, QolOwnerToken owner, const QolSlotOperationLease* lease,
+                             int32_t slot, const char* trash_dir) {
+    if (!contracts::succeeded(qol::host::owner_authorize_slot_operation(owner)))
+        return contracts::error(kQolErrBlocked, "not authorized", 13);
+    return qol::infra::store::delete_slot_to_trash(owner, lease, slot, trash_dir) ==
+                   qol::infra::store::Status::kOk
+               ? contracts::ok()
+               : contracts::error(kQolErrInternal, "store error", 11);
+}
 
 // ---- store 面（真实 infra，两段式 read_container 转发）----
 QolResult store_read_container(int32_t slot, uint8_t* out, uint32_t capacity, uint32_t* out_size) {
@@ -180,8 +189,9 @@ QolResult current_slot_fn(int32_t* out_slot) {
 QolHostSdk& fake_sdk() {
     static QolHostSdk sdk{};
     static const contracts::QolSlotOperationApi operation_api{
-        {sizeof(contracts::QolSlotOperationApi), 1, 0}, nullptr, &op_acquire,
-        &op_set_referenced, &op_refresh, &op_release, &op_import, &op_delete};
+        {sizeof(contracts::QolSlotOperationApi), 1, 1}, nullptr, &op_acquire,
+        &op_set_referenced, &op_refresh, &op_release, &op_import, &op_delete,
+        &op_delete_to_trash};
     sdk.result.write_ok = &write_ok;
     sdk.result.write_error = &write_error;
     sdk.store.read_container = &store_read_container;
@@ -208,6 +218,43 @@ QolSaveCallPort& fake_save_call() {
 }
 
 bool body_ok(const std::string& body) { return body.find("\"ok\":true") != std::string::npos; }
+
+bool has_entry_prefix(const std::string& dir, const std::string& prefix) {
+    DIR* d = ::opendir(dir.c_str());
+    if (d == nullptr) return false;
+    bool found = false;
+    while (dirent* ent = ::readdir(d)) {
+        if (std::strncmp(ent->d_name, prefix.c_str(), prefix.size()) == 0) {
+            found = true;
+            break;
+        }
+    }
+    ::closedir(d);
+    return found;
+}
+
+bool has_entry_affix(const std::string& dir, const std::string& prefix,
+                     const std::string& suffix) {
+    DIR* d = ::opendir(dir.c_str());
+    if (d == nullptr) return false;
+    bool found = false;
+    while (dirent* ent = ::readdir(d)) {
+        const std::string name = ent->d_name;
+        if (name.size() < prefix.size() + suffix.size()) continue;
+        if (name.compare(0, prefix.size(), prefix) == 0 &&
+            name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+            found = true;
+            break;
+        }
+    }
+    ::closedir(d);
+    return found;
+}
+
+int failing_unlink(const char*) {
+    errno = EACCES;
+    return -1;
+}
 
 // 测试临时树清理：mkdtemp 根在成功/失败路径均递归删除（目录只含本测试产物）。
 void remove_tree(const std::string& path) {
@@ -299,7 +346,7 @@ int main() {
     CHECK(qol::host::owner_identity_api().query(&identity, &g_owner, &generation).ok == kQolOk);
     CHECK(qol::host::owner_identity_api().query(&occupier, &g_occupier, &generation).ok == kQolOk);
 
-    qol::infra::store::init(data_dir.c_str());
+    qol::infra::store::init(root.c_str());
     save_backup_init(data_dir.c_str(), root.c_str());
     save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(), nullptr, g_owner);
 
@@ -374,13 +421,36 @@ int main() {
     CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &verify).ok == kQolOk);
     CHECK(qol::infra::slot_operation::release(g_occupier, &verify).ok == kQolOk);
 
-    // ---- 删槽：无占用时放行 ----
+    // ---- 删槽：无占用时放行；dat/sidecar/trash/index 全部清理 ----
     const std::string deleted = save_backup_delete_slot_json(0);
     CHECK(body_ok(deleted));
     CHECK(::access(dat_path.c_str(), F_OK) != 0);
+    CHECK(!has_entry_prefix(save_dir, ".sb-trash-"));
+    CHECK(!has_entry_prefix(root + "/saves", ".sb-trash-"));
+    CHECK(!has_entry_prefix(root + "/backups", ".trash-"));
+
+    // ---- 删槽 unlink 失败：已移动文件移回，dat/sidecar 逐字节不变 ----
+    CHECK(write_file(dat_path, original_dat));
+    CHECK(qol::infra::store::write_section(0, "m", 1, &payload, 1) ==
+          qol::infra::store::Status::kOk);
+    std::vector<uint8_t> before_failed_delete;
+    CHECK(qol::infra::store::read_container(0, &before_failed_delete) ==
+          qol::infra::store::Status::kOk);
+    qol::infra::store::set_unlink_for_test(&failing_unlink);
+    const std::string delete_failed = save_backup_delete_slot_json(0);
+    qol::infra::store::set_unlink_for_test(nullptr);
+    CHECK(delete_failed.find("delete incomplete") != std::string::npos);
+    CHECK(read_file(dat_path) == original_dat);
+    std::vector<uint8_t> after_failed_delete;
+    CHECK(qol::infra::store::read_container(0, &after_failed_delete) ==
+          qol::infra::store::Status::kOk);
+    CHECK(after_failed_delete == before_failed_delete);
+    CHECK(!has_entry_prefix(save_dir, ".sb-trash-"));
+    CHECK(!has_entry_prefix(root + "/saves", ".sb-trash-"));
+    CHECK(!has_entry_prefix(root + "/backups", ".trash-"));
 
     // ---- sidecar 回滚完整 → lease 释放：primary 写入被占位目录阻断（store 面未变更）----
-    const std::string module_saves = data_dir + "/saves";
+    const std::string module_saves = root + "/saves";
     CHECK(::mkdir(module_saves.c_str(), 0755) == 0 || errno == EEXIST);
     // store 的 primary 路径为 slot-0.qol-save，write_atomic 的临时文件为同名 + .tmp。
     const std::string blocked_primary_tmp = module_saves + "/slot-0.qol-save.tmp";
@@ -419,7 +489,7 @@ int main() {
     std::vector<uint8_t> degraded_container;
     CHECK(qol::infra::store::read_container(0, &degraded_container) ==
           qol::infra::store::Status::kOk);
-    CHECK(::access((root + "/backups/.rollback/save0.dat.qol-save").c_str(), F_OK) == 0);
+    CHECK(has_entry_affix(root + "/backups/.rollback", "save0.dat.", ".qol-save"));
     // referenced lease 保留：新 gate 申请被拒（occupier 不能接管）。
     CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &verify).code == kQolErrBusy);
     CHECK(::rmdir(blocked_last_good_tmp.c_str()) == 0);
@@ -430,6 +500,28 @@ int main() {
     const std::string no_token = save_backup_import_json(checksum.c_str(), 0);
     CHECK(no_token.find("slot operation unavailable") != std::string::npos);
     CHECK(read_file(dat_path) == original_dat);
+
+    // ---- 启动恢复：index 指向的 trash 文件移回原位，index/trash 清理 ----
+    {
+        const std::string saves = root + "/saves";
+        CHECK(::mkdir(saves.c_str(), 0755) == 0 || errno == EEXIST);
+        const std::string trash = saves + "/.sb-trash-recovertest";
+        CHECK(::mkdir(trash.c_str(), 0755) == 0);
+        const std::string primary = saves + "/slot-1.qol-save";
+        const std::string last_good = primary + ".last-good";
+        (void)::unlink(primary.c_str());
+        (void)::unlink(last_good.c_str());
+        CHECK(write_file(trash + "/slot-1.qol-save", "RESTORED-PRIMARY"));
+        CHECK(write_file(trash + "/slot-1.qol-save.last-good", "RESTORED-GOOD"));
+        const std::string index = root + "/backups/.trash-recovertest.index";
+        CHECK(write_file(index, trash + "/slot-1.qol-save\t" + primary + "\n" +
+                                    trash + "/slot-1.qol-save.last-good\t" + last_good + "\n"));
+        save_backup_recover_deletes();
+        CHECK(read_file(primary) == "RESTORED-PRIMARY");
+        CHECK(read_file(last_good) == "RESTORED-GOOD");
+        CHECK(::access(trash.c_str(), F_OK) != 0);
+        CHECK(::access(index.c_str(), F_OK) != 0);
+    }
 
     save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
     qol::host::owner_identity_reset_for_test();

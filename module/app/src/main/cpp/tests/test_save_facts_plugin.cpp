@@ -413,7 +413,7 @@ int main() {
         &stub_reserve_in_operation, &stub_ensure_in_operation, &stub_reset_in_operation};
     static const qol::contracts::QolSlotOperationApi kOperation{
         {sizeof(qol::contracts::QolSlotOperationApi), 1, 0}, nullptr, &stub_acquire, &stub_set_ref,
-        &stub_refresh, &stub_release_lease, nullptr, nullptr};
+        &stub_refresh, &stub_release_lease, nullptr, nullptr, nullptr};
     sdk.owner_verify_token = &verify_owner;
     sdk.owner_store = &owner_store;
     sdk.slot_operation = &kOperation;

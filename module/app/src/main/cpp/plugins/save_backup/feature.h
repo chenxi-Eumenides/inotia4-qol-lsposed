@@ -15,7 +15,13 @@
 // Game Host 仅保留 warehouse companion 文件状态查询，不承载存档域语义。
 
 // 幂等初始化：记录 dataDir（原版存档根目录）与 externalFilesDir（备份/sidecar 根目录）。
+// 末尾执行一次删除事务恢复（trash → 原位）；启动失败不阻断。
 void save_backup_init(const char* data_dir, const char* external_files_dir);
+
+// 恢复上次删除事务留下的 trash 文件：解析 backups/.trash-<id>.index，
+// 按条目把文件 rename 回原位；无 index 的 sidecar trash 按文件名还原到 saves/。
+// 目标已存在时跳过并保留 trash（不覆盖用户数据），供下次启动继续处理。
+void save_backup_recover_deletes();
 
 // 插件装配期注入 Host SDK / Game Host；业务回调通过该上下文访问宿主适配面。
 // owner_token 为宿主按注册身份注入的 token（PluginContext.owner_token 原样透传），

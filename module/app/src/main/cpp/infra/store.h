@@ -112,9 +112,17 @@ Status import_in_operation(uint64_t owner, const contracts::QolSlotOperationLeas
                            const uint8_t*, std::size_t, contracts::QolSlotOperationApply*);
 Status delete_in_operation(uint64_t owner, const contracts::QolSlotOperationLease*, int slot);
 
+// 把槽 primary/last-good（以及 pending 损坏标记）移入调用方给定的同文件系统 trash 目录；
+// 任一步失败自动把已移动文件移回。trash_dir 必须位于 saves/ 父目录所在的同一文件系统
+// （调用方保证）。文件不存在视为成功（无需移动）；命名沿用原 basename。
+Status delete_slot_to_trash(uint64_t owner, const contracts::QolSlotOperationLease* lease,
+                            int slot, const char* trash_dir);
+
 #if defined(QOL_STORE_TEST_SEAMS)
 // 仅 Host 测试构建提供确定性文件错误注入；生产始终调用系统 unlink。
 void set_unlink_for_test(int (*unlink_fn)(const char*));
+// 按注入函数执行 unlink；供同进程内的删除事务复用同一注入点（仅测试构建可见）。
+int unlink_with_test_seam(const char* path);
 void with_store_lock_for_test(void (*held)(void*), void* context);
 #endif
 

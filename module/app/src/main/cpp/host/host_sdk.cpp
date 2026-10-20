@@ -639,9 +639,17 @@ QolResult operation_delete(void*, contracts::QolOwnerToken owner,
     const auto allowed = owner_authorize_slot_operation(owner);
     return contracts::succeeded(allowed) ? store_result(infra::store::delete_in_operation(owner, lease, slot)) : allowed;
 }
+QolResult operation_delete_container_to_trash(void*, contracts::QolOwnerToken owner,
+                                              const contracts::QolSlotOperationLease* lease,
+                                              int32_t slot, const char* trash_dir) {
+    const auto allowed = owner_authorize_slot_operation(owner);
+    if (!contracts::succeeded(allowed)) return allowed;
+    return store_result(infra::store::delete_slot_to_trash(owner, lease, slot, trash_dir));
+}
 const contracts::QolSlotOperationApi kSlotOperationApi{
-    {sizeof(contracts::QolSlotOperationApi), 1, 0}, nullptr, &operation_acquire,
-    &operation_set_referenced, &operation_refresh, &operation_release, &operation_import, &operation_delete};
+    {sizeof(contracts::QolSlotOperationApi), 1, 1}, nullptr, &operation_acquire,
+    &operation_set_referenced, &operation_refresh, &operation_release, &operation_import,
+    &operation_delete, &operation_delete_container_to_trash};
 
 // core.save 领域回调路由；授权与 drain 语义在 host/save_route 内实现。
 const contracts::QolSaveRouteApi kSaveRouteApi = qol::host::save_route::save_route_api();

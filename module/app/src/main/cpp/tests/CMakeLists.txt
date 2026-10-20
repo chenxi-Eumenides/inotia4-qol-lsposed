@@ -175,6 +175,7 @@ target_include_directories(save_backup_gate_tests PRIVATE ${CPP_DIR})
 target_compile_features(save_backup_gate_tests PRIVATE cxx_std_17)
 set_target_properties(save_backup_gate_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(save_backup_gate_tests PRIVATE Threads::Threads)
+target_compile_definitions(save_backup_gate_tests PRIVATE QOL_STORE_TEST_SEAMS=1)
 add_test(NAME save_backup_gate_tests COMMAND save_backup_gate_tests)
 
 add_executable(slot_operation_gate_tests

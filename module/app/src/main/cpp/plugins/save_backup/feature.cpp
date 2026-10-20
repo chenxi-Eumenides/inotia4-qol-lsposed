@@ -15,13 +15,16 @@
 #include "feature.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -32,6 +35,13 @@
 #include "contracts/slot_operation.h"
 #include "log.h"
 #include "rollback.h"
+
+#if defined(QOL_STORE_TEST_SEAMS)
+// 测试构建专用：与 store 共用同一个 unlink 注入点；生产分支直接调用 ::unlink。
+namespace qol::infra::store {
+int unlink_with_test_seam(const char* path);
+}  // namespace qol::infra::store
+#endif
 
 namespace {
 
@@ -55,6 +65,22 @@ const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::SaveFactsApi* g_save_facts = nullptr;
 const qol::contracts::QolSaveCallPort* g_save_call = nullptr;
 qol::contracts::QolOwnerToken g_owner_token = 0;
+
+// 进程内文件级事务序号：临时文件名/trash id 只要求单进程序唯一，不参与持久化语义。
+std::atomic<uint64_t> g_file_seq{0};
+
+std::string next_file_suffix() {
+    return std::to_string(g_file_seq.fetch_add(1, std::memory_order_relaxed) + 1);
+}
+
+// 删除原语：测试构建下与 store 共用同一 unlink 注入点，便于验证删除事务的移回路径。
+int unlink_file(const std::string& path) {
+#if defined(QOL_STORE_TEST_SEAMS)
+    return qol::infra::store::unlink_with_test_seam(path.c_str());
+#else
+    return ::unlink(path.c_str());
+#endif
+}
 
 // ---- 槽操作前置门（P3b-2）----
 // import/删槽在首次 dat/warehouse 写删之前 acquire 覆盖受影响槽的 operation lease，
@@ -319,37 +345,69 @@ void set_map_names_locked(const std::string& json) {
 
 bool ensure_dir(const std::string& path) {
     struct stat st{};
-    if (::stat(path.c_str(), &st) == 0) return S_ISDIR(st.st_mode);
+    // lstat：已存在的 symlink 不是目录，不能当作可写目录使用。
+    if (::lstat(path.c_str(), &st) == 0) return S_ISDIR(st.st_mode);
+    if (errno != ENOENT) return false;
     return ::mkdir(path.c_str(), 0755) == 0;
 }
 
 bool file_exists(const std::string& path) {
     struct stat st{};
-    return ::stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+    // symlink 视为不存在，避免通过链接读到/删到目标目录之外。
+    return ::lstat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
 }
 
 bool read_file_bytes(const std::string& path, std::vector<uint8_t>& out) {
-    FILE* f = std::fopen(path.c_str(), "rb");
-    if (f == nullptr) return false;
     out.clear();
-    uint8_t buf[8192];
-    size_t n = 0;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0) {
-        out.insert(out.end(), buf, buf + n);
+    const int fd = ::open(path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return false;
+    struct stat st{};
+    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0) {
+        ::close(fd);
+        return false;
     }
-    const bool ok = std::ferror(f) == 0;
-    std::fclose(f);
-    if (!ok) out.clear();
-    return ok;
+    std::vector<uint8_t> bytes;
+    bytes.reserve(static_cast<size_t>(st.st_size));
+    uint8_t buf[8192];
+    for (;;) {
+        const ssize_t n = ::read(fd, buf, sizeof(buf));
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            ::close(fd);
+            return false;
+        }
+        if (n == 0) break;
+        bytes.insert(bytes.end(), buf, buf + n);
+    }
+    if (::close(fd) != 0) return false;
+    out.swap(bytes);
+    return true;
 }
 
-// 原子写：写 <path>.tmp 再 rename。
+// 原子写：写 <path>.tmp-<id> 再 rename；临时文件用 O_EXCL 创建，避免复用残留路径。
 bool write_file_bytes_atomic(const std::string& path, const uint8_t* data, size_t size) {
-    const std::string tmp = path + ".tmp";
-    FILE* f = std::fopen(tmp.c_str(), "wb");
-    if (f == nullptr) return false;
-    const bool written = size == 0 || std::fwrite(data, 1, size, f) == size;
-    if (std::fclose(f) != 0 || !written) {
+    const std::string tmp = path + ".tmp-" + next_file_suffix();
+    const int fd = ::open(tmp.c_str(),
+                          O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (fd < 0) return false;
+    bool ok = true;
+    size_t offset = 0;
+    while (offset < size) {
+        const ssize_t written = ::write(fd, data + offset, size - offset);
+        if (written < 0) {
+            if (errno == EINTR) continue;
+            ok = false;
+            break;
+        }
+        if (written == 0) {
+            ok = false;
+            break;
+        }
+        offset += static_cast<size_t>(written);
+    }
+    if (ok && ::fsync(fd) != 0) ok = false;
+    if (::close(fd) != 0) ok = false;
+    if (!ok) {
         ::unlink(tmp.c_str());
         return false;
     }
@@ -360,27 +418,65 @@ bool write_file_bytes_atomic(const std::string& path, const uint8_t* data, size_
     return true;
 }
 
+// 目标必须不存在（O_EXCL）；失败时清理目标，供调用方重试。
 bool copy_file(const std::string& from, const std::string& to) {
-    FILE* in = std::fopen(from.c_str(), "rb");
-    if (in == nullptr) return false;
-    FILE* out = std::fopen(to.c_str(), "wb");
-    if (out == nullptr) {
-        std::fclose(in);
+    const int in = ::open(from.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    if (in < 0) return false;
+    struct stat st{};
+    if (::fstat(in, &st) != 0 || !S_ISREG(st.st_mode)) {
+        ::close(in);
+        return false;
+    }
+    const int out = ::open(to.c_str(),
+                           O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (out < 0) {
+        ::close(in);
         return false;
     }
     uint8_t buf[8192];
-    size_t n = 0;
     bool ok = true;
-    while ((n = std::fread(buf, 1, sizeof(buf), in)) > 0) {
-        if (std::fwrite(buf, 1, n, out) != n) {
+    for (;;) {
+        const ssize_t n = ::read(in, buf, sizeof(buf));
+        if (n < 0) {
+            if (errno == EINTR) continue;
             ok = false;
             break;
         }
+        if (n == 0) break;
+        size_t offset = 0;
+        while (offset < static_cast<size_t>(n)) {
+            const ssize_t written = ::write(out, buf + offset, static_cast<size_t>(n) - offset);
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                ok = false;
+                break;
+            }
+            if (written == 0) {
+                ok = false;
+                break;
+            }
+            offset += static_cast<size_t>(written);
+        }
+        if (!ok) break;
     }
-    ok = ok && std::ferror(in) == 0;
-    std::fclose(in);
-    if (std::fclose(out) != 0) ok = false;
-    return ok;
+    if (::close(in) != 0) ok = false;
+    if (::close(out) != 0) ok = false;
+    if (!ok) {
+        ::unlink(to.c_str());
+        return false;
+    }
+    return true;
+}
+
+// 回滚还原：先复制到同目录临时文件，再 rename 覆盖目标（目标已存在时 copy_file 不能直写）。
+bool copy_file_replacing(const std::string& from, const std::string& to) {
+    const std::string tmp = to + ".restore-" + next_file_suffix();
+    if (!copy_file(from, tmp)) return false;
+    if (::rename(tmp.c_str(), to.c_str()) != 0) {
+        ::unlink(tmp.c_str());
+        return false;
+    }
+    return true;
 }
 
 bool remove_file(const std::string& path) {
@@ -487,6 +583,16 @@ long long now_ms() {
     timespec ts{};
     ::clock_gettime(CLOCK_REALTIME, &ts);
     return static_cast<long long>(ts.tv_sec) * 1000 + ts.tv_nsec / 1000000;
+}
+
+// 事务 id：毫秒时间戳 + 进程内序号（十六进制），用于 trash 目录与导入回滚副本命名。
+std::string next_transaction_id() {
+    const uint64_t seq = g_file_seq.fetch_add(1, std::memory_order_relaxed) + 1;
+    char buffer[48] = {};
+    std::snprintf(buffer, sizeof(buffer), "%llx%llx",
+                  static_cast<unsigned long long>(now_ms()),
+                  static_cast<unsigned long long>(seq));
+    return buffer;
 }
 
 // 本地时间 yyyyMMdd-HHmmss（+NUL 共 16 字节）。
@@ -683,7 +789,7 @@ save_backup::RollbackResult restore_from_rollback(
     const SlotOperationGuard* guard) {
     save_backup::RollbackResult result;
     if (dat_existed) {
-        result.dat_restored = file_exists(rb_dat) && copy_file(rb_dat, dat_path);
+        result.dat_restored = file_exists(rb_dat) && copy_file_replacing(rb_dat, dat_path);
     } else {
         result.dat_restored = remove_file(dat_path);
     }
@@ -731,6 +837,137 @@ save_backup::RollbackResult restore_from_rollback(
     return result;
 }
 
+// ---- 删除事务（trash + index）----
+
+// trash 条目：文件当前所在的临时路径与原始路径。
+struct TrashEntry {
+    std::string trash_path;
+    std::string orig_path;
+};
+
+bool write_trash_index(const std::string& index_path, const std::vector<TrashEntry>& entries) {
+    std::string text;
+    for (const TrashEntry& entry : entries) {
+        if (entry.trash_path.empty() || entry.orig_path.empty()) continue;
+        text += entry.trash_path;
+        text += '\t';
+        text += entry.orig_path;
+        text += '\n';
+    }
+    return write_file_bytes_atomic(index_path,
+                                   reinterpret_cast<const uint8_t*>(text.data()), text.size());
+}
+
+bool parse_trash_index(const std::string& index_path, std::vector<TrashEntry>& out) {
+    out.clear();
+    std::vector<uint8_t> bytes;
+    if (!read_file_bytes(index_path, bytes)) return false;
+    const std::string text(bytes.begin(), bytes.end());
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t eol = text.find('\n', pos);
+        if (eol == std::string::npos) eol = text.size();
+        const std::string line = text.substr(pos, eol - pos);
+        pos = eol + 1;
+        if (line.empty()) continue;
+        const size_t tab = line.find('\t');
+        if (tab == std::string::npos || tab == 0 || tab + 1 >= line.size()) {
+            SB_LOG_WARN("delete recovery: invalid index entry in %s", index_path.c_str());
+            return false;
+        }
+        const std::string trash_dir = line.substr(0, tab);
+        const std::string orig_path = line.substr(tab + 1);
+        // 索引由本模块写入；仍校验形状，避免异常内容把文件 rename 到任意路径。
+        const auto traverses = [](const std::string& path) {
+            return path == ".." || path.rfind("../", 0) == 0 ||
+                   path.find("/../") != std::string::npos ||
+                   (path.size() >= 3 && path.compare(path.size() - 3, 3, "/..") == 0);
+        };
+        if (trash_dir.empty() || orig_path.empty() || traverses(trash_dir) ||
+            traverses(orig_path) || trash_dir.find("/.sb-trash-") == std::string::npos ||
+            file_name_of(orig_path).empty()) {
+            SB_LOG_WARN("delete recovery: rejected index entry in %s", index_path.c_str());
+            return false;
+        }
+        out.push_back(TrashEntry{trash_dir + "/" + file_name_of(orig_path), orig_path});
+    }
+    return true;
+}
+
+// 把 trash 中仍存在的文件移回原位；目标已存在时跳过并保留 trash（不覆盖用户数据）。
+bool restore_trash_entries(const std::vector<TrashEntry>& entries) {
+    bool complete = true;
+    for (const TrashEntry& entry : entries) {
+        if (!file_exists(entry.trash_path)) continue;  // 已删除或已移回
+        if (file_exists(entry.orig_path)) {
+            SB_LOG_WARN("delete recovery: target exists, keep trash file: %s",
+                        entry.orig_path.c_str());
+            complete = false;
+            continue;
+        }
+        if (::rename(entry.trash_path.c_str(), entry.orig_path.c_str()) != 0) {
+            SB_LOG_WARN("delete recovery: rename back failed: %s", entry.trash_path.c_str());
+            complete = false;
+        }
+    }
+    return complete;
+}
+
+void remove_dir_if_empty(const std::string& dir) {
+    if (dir.empty()) return;
+    DIR* d = ::opendir(dir.c_str());
+    if (d == nullptr) return;
+    bool empty = true;
+    while (dirent* ent = ::readdir(d)) {
+        const std::string name = ent->d_name;
+        if (name != "." && name != "..") {
+            empty = false;
+            break;
+        }
+    }
+    ::closedir(d);
+    if (empty) (void)::rmdir(dir.c_str());
+}
+
+// 无 index 的 sidecar trash（崩溃在写 index 之前/之后均可识别）：按文件名还原到 saves/。
+void recover_orphan_sidecar_trash(const std::string& saves_dir) {
+    DIR* d = ::opendir(saves_dir.c_str());
+    if (d == nullptr) return;
+    std::vector<std::string> dirs;
+    while (dirent* ent = ::readdir(d)) {
+        const std::string name = ent->d_name;
+        if (name.rfind(".sb-trash-", 0) != 0) continue;
+        dirs.push_back(saves_dir + "/" + name);
+    }
+    ::closedir(d);
+    for (const std::string& trash_dir : dirs) {
+        DIR* td = ::opendir(trash_dir.c_str());
+        if (td == nullptr) continue;
+        std::vector<std::string> names;
+        while (dirent* ent = ::readdir(td)) {
+            const std::string name = ent->d_name;
+            if (name == "." || name == "..") continue;
+            if (!file_exists(trash_dir + "/" + name)) continue;
+            names.push_back(name);
+        }
+        ::closedir(td);
+        bool complete = true;
+        for (const std::string& name : names) {
+            const std::string orig = saves_dir + "/" + name;
+            if (file_exists(orig)) {
+                SB_LOG_WARN("delete recovery: target exists, keep trash file: %s", orig.c_str());
+                complete = false;
+                continue;
+            }
+            if (::rename((trash_dir + "/" + name).c_str(), orig.c_str()) != 0) {
+                SB_LOG_WARN("delete recovery: rename back failed: %s", orig.c_str());
+                complete = false;
+            }
+        }
+        if (complete) remove_dir_if_empty(trash_dir);
+    }
+}
+
 }  // namespace
 
 void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
@@ -758,9 +995,53 @@ std::string save_backup_result_ok() { return result_ok(); }
 std::string save_backup_result_error(const char* message) { return result_error(message); }
 
 void save_backup_init(const char* data_dir, const char* external_files_dir) {
+    {
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        g_sb_data_dir = data_dir != nullptr ? data_dir : "";
+        g_sb_external_dir = external_files_dir != nullptr ? external_files_dir : "";
+    }
+    // 启动回滚优先：把上次删槽/删 sidecar 中途死亡留下的 trash 文件移回原位，不再继续删除。
+    save_backup_recover_deletes();
+}
+
+void save_backup_recover_deletes() {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
-    g_sb_data_dir = data_dir != nullptr ? data_dir : "";
-    g_sb_external_dir = external_files_dir != nullptr ? external_files_dir : "";
+    if (g_sb_external_dir.empty()) return;
+    const std::string backups = g_sb_external_dir + "/" + kBackupDirName;
+    DIR* d = ::opendir(backups.c_str());
+    if (d != nullptr) {
+        std::vector<std::string> indexes;
+        while (dirent* ent = ::readdir(d)) {
+            const std::string name = ent->d_name;
+            if (name.rfind(".trash-", 0) == 0 && ends_with(name, ".index")) {
+                indexes.push_back(backups + "/" + name);
+            }
+        }
+        ::closedir(d);
+        std::sort(indexes.begin(), indexes.end());
+        for (const std::string& index_path : indexes) {
+            std::vector<TrashEntry> entries;
+            if (!parse_trash_index(index_path, entries)) {
+                SB_LOG_WARN("delete recovery: unreadable index: %s", index_path.c_str());
+                continue;
+            }
+            if (!restore_trash_entries(entries)) {
+                SB_LOG_WARN("delete recovery: incomplete, keep index: %s", index_path.c_str());
+                continue;
+            }
+            for (const TrashEntry& entry : entries) {
+                const size_t slash = entry.trash_path.find_last_of('/');
+                if (slash != std::string::npos) {
+                    remove_dir_if_empty(entry.trash_path.substr(0, slash));
+                }
+            }
+            remove_file(index_path);
+            SB_LOG("delete recovery: restored %zu file(s) from %s", entries.size(),
+                   index_path.c_str());
+        }
+    }
+    // 无 index 的 sidecar trash：按目录内文件名还原到 saves/。
+    recover_orphan_sidecar_trash(g_sb_external_dir + "/saves");
 }
 
 // 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的同步体：游戏内存档面板删档确认后，
@@ -771,15 +1052,100 @@ void save_backup_init(const char* data_dir, const char* external_files_dir) {
 //  - 短取 g_sb_mtx，与 save_backup 导入/导出串行（锁序 g_sb_mtx → store）。
 void save_backup_slot_deleted_sync(int32_t slot) {
     if (slot < 0 || slot > 2) return;
-    std::lock_guard<std::mutex> lk(g_sb_mtx);
-    const ContainerStatus status = store_delete_slot(slot);
-    if (status == ContainerStatus::kOk) {
-        SB_LOG("slot delete hook: removed sidecar slot=%d", slot);
-    } else {
-        SB_LOG("slot delete hook: sidecar delete skipped/failed slot=%d status=%s", slot,
-               status == ContainerStatus::kNotFound ? "not_found"
-               : status == ContainerStatus::kCorrupt ? "corrupt" : "unavailable");
+    if (g_sb_external_dir.empty()) {
+        SB_LOG_WARN("slot delete hook: external dir unavailable, sidecar untouched slot=%d", slot);
+        save_mark_stale();
+        return;
     }
+    std::lock_guard<std::mutex> lk(g_sb_mtx);
+    // dat 已被游戏原函数删除，这里只处理 sidecar；两阶段（trash → unlink）保证失败可退回。
+    SlotOperationGuard guard;
+    if (!slot_operation_acquire(slot, &guard)) {
+        SB_LOG_WARN("slot delete hook: slot operation unavailable slot=%d", slot);
+        save_mark_stale();
+        return;
+    }
+    const std::string saves_dir = g_sb_external_dir + "/saves";
+    if (!ensure_dir(saves_dir)) {
+        SB_LOG_WARN("slot delete hook: saves dir unavailable slot=%d", slot);
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
+    std::string backups_dir;
+    if (!backup_dir(backups_dir)) {
+        SB_LOG_WARN("slot delete hook: backup dir unavailable slot=%d", slot);
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
+    const std::string id = next_transaction_id();
+    const std::string trash_dir = saves_dir + "/.sb-trash-" + id;
+    const std::string index_path = backups_dir + "/.trash-" + id + ".index";
+    const std::string primary = saves_dir + "/slot-" + std::to_string(slot) + ".qol-save";
+    const std::string last_good = primary + ".last-good";
+    const std::string corrupt_marker = primary + ".unresolved-corrupt";
+    std::vector<TrashEntry> entries = {
+        {trash_dir + "/" + file_name_of(primary), primary},
+        {trash_dir + "/" + file_name_of(last_good), last_good},
+        {trash_dir + "/" + file_name_of(corrupt_marker), corrupt_marker},
+    };
+    if (::mkdir(trash_dir.c_str(), 0755) != 0) {
+        SB_LOG_WARN("slot delete hook: trash mkdir failed slot=%d", slot);
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
+    if (!write_trash_index(index_path, entries)) {
+        (void)::rmdir(trash_dir.c_str());
+        SB_LOG_WARN("slot delete hook: index write failed slot=%d", slot);
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
+    if (guard.api->abi.minor < 1 || guard.api->delete_container_to_trash == nullptr) {
+        SB_LOG_WARN("slot delete hook: trash api unavailable slot=%d", slot);
+        (void)restore_trash_entries(entries);
+        remove_file(index_path);
+        remove_dir_if_empty(trash_dir);
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
+    const QolResult status = guard.api->delete_container_to_trash(
+        guard.api->host_ctx, g_owner_token, &guard.lease, slot, trash_dir.c_str());
+    if (!qol::contracts::succeeded(status)) {
+        (void)restore_trash_entries(entries);
+        remove_file(index_path);
+        remove_dir_if_empty(trash_dir);
+        SB_LOG_WARN("slot delete hook: sidecar move failed slot=%d", slot);
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
+    bool unlink_failed = false;
+    for (const TrashEntry& entry : entries) {
+        if (!file_exists(entry.trash_path)) continue;
+        if (unlink_file(entry.trash_path) != 0 && errno != ENOENT) {
+            unlink_failed = true;
+            break;
+        }
+    }
+    if (unlink_failed) {
+        if (restore_trash_entries(entries)) {
+            remove_file(index_path);
+            remove_dir_if_empty(trash_dir);
+        } else {
+            SB_LOG_WARN("slot delete hook: rollback incomplete, keep %s", index_path.c_str());
+        }
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
+    remove_file(index_path);
+    remove_dir_if_empty(trash_dir);
+    slot_operation_release(&guard);
+    SB_LOG("slot delete hook: removed sidecar slot=%d", slot);
     // 游戏删档后槽文件已变：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_mark_stale();
 }
@@ -1189,7 +1555,10 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     }
     const std::string dat_path = save_dir + "/save" + std::to_string(slot) + ".dat";
     const bool dat_existed = file_exists(dat_path);
-    const std::string rb_dat = rollback_dir + "/save" + std::to_string(slot) + ".dat";
+    // 回滚副本按事务 id 命名：并发/重试不共用同一路径。
+    const std::string tx_id = next_transaction_id();
+    const std::string rb_dat =
+        rollback_dir + "/save" + std::to_string(slot) + ".dat." + tx_id;
     if (dat_existed && !copy_file(dat_path, rb_dat)) {
         slot_operation_release(&guard);
         return result_error("rollback backup failed");
@@ -1260,7 +1629,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         for (auto it = wh_rollback.rbegin(); it != wh_rollback.rend(); ++it) {
             bool restored = true;
             if (it->existed) {
-                restored = file_exists(it->rb) && copy_file(it->rb, it->target);
+                restored = file_exists(it->rb) && copy_file_replacing(it->rb, it->target);
             } else {
                 restored = remove_file(it->target);
             }
@@ -1293,7 +1662,7 @@ std::string save_backup_import_json(const char* checksum, int slot) {
             const bool existed = file_exists(target);
             std::string rb;
             if (existed) {
-                rb = rollback_dir + "/" + file_name_of(target);
+                rb = rollback_dir + "/" + file_name_of(target) + "." + tx_id;
                 if (!copy_file(target, rb)) {
                     remove_file(rb);  // 清理可能写了一半的副本
                     const save_backup::RollbackResult warehouse_rollback = restore_warehouse();
@@ -1362,10 +1731,12 @@ std::string save_backup_delete_json(const char* checksum) {
     return "{\"ok\":true}";
 }
 
-// 删除某个槽的游戏存档：原版 save{slot}.dat（游戏目录，本文件直接删除）+ 模块 sidecar
-// （经槽操作 lease 显式入口删除 primary/.last-good）。安全边界：路径由整型 slot 精确
-// 拼接（save0/1/2.dat），不含通配/遍历，绝不删除其它槽；缺失的目标跳过。
-// 全部失败路径返回结构化 op_err，不吞异常；无任何目标文件时返回 not found。
+// 删除某个槽的游戏存档：原版 save{slot}.dat（游戏目录）+ 模块 sidecar
+// （经槽操作 lease 的 store 事务入口）。两阶段：先把所有目标 rename 到各自父目录内的
+// `.sb-trash-<id>`（dat 与 sidecar 不同文件系统，不能共用一次 rename），全部成功后再 unlink；
+// 任一步失败把已移动文件移回。index 记录 trash 路径与原路径，进程中途死亡时由启动恢复处理。
+// 安全边界：路径由整型 slot 精确拼接（save0/1/2.dat），不含通配/遍历；缺失的目标跳过。
+// 全部失败路径返回结构化 op_err；无任何目标文件时返回 not found。
 std::string save_backup_delete_slot_json(int slot) {
     // 存在性探测持锁；gate/删除在锁外，同槽串行由槽操作门保证。
     std::unique_lock<std::mutex> lk(g_sb_mtx);
@@ -1392,20 +1763,109 @@ std::string save_backup_delete_slot_json(int slot) {
 
     SlotOperationGuard guard;
     if (!slot_operation_acquire(slot, &guard)) return result_error("slot operation unavailable");
-    // 逐个删除并检查返回值：任一失败立即返回结构化错误（已删除的部分不回滚，与单文件
-    // 删除语义一致）。删槽无回滚动作，失败路径释放 lease 恢复旧入口可用性，调用方可重试。
-    if (dat_existed && ::unlink(dat_path.c_str()) != 0) {
-        SB_LOG("save slot delete failed: %s", dat_path.c_str());
-        slot_operation_release(&guard);
-        return result_error("delete save failed");
-    }
+
+    const std::string id = next_transaction_id();
+    const std::string dat_trash = save_dir + "/.sb-trash-" + id;
+    std::string saves_dir;
+    std::string sidecar_trash;
     if (sidecar_existed) {
-        if (!store_delete_slot_locked_gate(guard, slot)) {
-            SB_LOG("save slot delete failed: slot=%d sidecar", slot);
+        if (g_sb_external_dir.empty()) {
             slot_operation_release(&guard);
             return result_error("delete sidecar failed");
         }
+        saves_dir = g_sb_external_dir + "/saves";
+        if (!ensure_dir(saves_dir)) {
+            slot_operation_release(&guard);
+            return result_error("delete sidecar failed");
+        }
+        sidecar_trash = saves_dir + "/.sb-trash-" + id;
     }
+    std::string backups_dir;
+    if (!backup_dir(backups_dir)) {
+        slot_operation_release(&guard);
+        return result_error("delete save failed");
+    }
+    const std::string index_path = backups_dir + "/.trash-" + id + ".index";
+
+    std::vector<TrashEntry> entries;
+    if (dat_existed) {
+        entries.push_back({dat_trash + "/" + file_name_of(dat_path), dat_path});
+    }
+    if (sidecar_existed) {
+        const std::string sidecar_base = saves_dir + "/slot-" + std::to_string(slot) + ".qol-save";
+        entries.push_back({sidecar_trash + "/" + file_name_of(sidecar_base), sidecar_base});
+        const std::string last_good = sidecar_base + ".last-good";
+        entries.push_back({sidecar_trash + "/" + file_name_of(last_good), last_good});
+        const std::string corrupt_marker = sidecar_base + ".unresolved-corrupt";
+        entries.push_back({sidecar_trash + "/" + file_name_of(corrupt_marker), corrupt_marker});
+    }
+
+    auto cleanup_trash_dirs = [&]() {
+        if (dat_existed) remove_dir_if_empty(dat_trash);
+        if (sidecar_existed) remove_dir_if_empty(sidecar_trash);
+    };
+    // 已发生 rename 后的失败：先把仍留在 trash 的文件移回，全部移回才清 index/目录；
+    // 移回不完整时保留 trash+index 供下次启动恢复。
+    auto fail_after_moves = [&](const char* message) {
+        if (restore_trash_entries(entries)) {
+            remove_file(index_path);
+            cleanup_trash_dirs();
+        } else {
+            SB_LOG_WARN("slot delete rollback incomplete, keep %s", index_path.c_str());
+        }
+        slot_operation_release(&guard);
+        return result_error(message);
+    };
+
+    if (dat_existed && ::mkdir(dat_trash.c_str(), 0755) != 0) {
+        slot_operation_release(&guard);
+        return result_error("delete save failed");
+    }
+    if (sidecar_existed && ::mkdir(sidecar_trash.c_str(), 0755) != 0) {
+        if (dat_existed) (void)::rmdir(dat_trash.c_str());
+        slot_operation_release(&guard);
+        return result_error("delete sidecar failed");
+    }
+    if (!write_trash_index(index_path, entries)) {
+        if (dat_existed) (void)::rmdir(dat_trash.c_str());
+        if (sidecar_existed) (void)::rmdir(sidecar_trash.c_str());
+        slot_operation_release(&guard);
+        return result_error("delete save failed");
+    }
+
+    if (dat_existed && ::rename(dat_path.c_str(), entries[0].trash_path.c_str()) != 0) {
+        return fail_after_moves("delete save failed");
+    }
+    if (sidecar_existed) {
+        if (guard.api->abi.minor < 1 || guard.api->delete_container_to_trash == nullptr) {
+            SB_LOG_WARN("save slot delete: trash api unavailable slot=%d", slot);
+            return fail_after_moves("delete sidecar failed");
+        }
+        const QolResult status = guard.api->delete_container_to_trash(
+            guard.api->host_ctx, g_owner_token, &guard.lease, slot, sidecar_trash.c_str());
+        if (!qol::contracts::succeeded(status)) {
+            SB_LOG("save slot delete sidecar move failed: slot=%d", slot);
+            return fail_after_moves("delete sidecar failed");
+        }
+    }
+
+    // 第二阶段：逐文件 unlink；失败时把尚未删除的文件移回。
+    for (const TrashEntry& entry : entries) {
+        if (!file_exists(entry.trash_path)) continue;
+        if (unlink_file(entry.trash_path) != 0 && errno != ENOENT) {
+            SB_LOG("save slot delete unlink failed: %s", entry.trash_path.c_str());
+            if (restore_trash_entries(entries)) {
+                remove_file(index_path);
+                cleanup_trash_dirs();
+            } else {
+                SB_LOG_WARN("slot delete rollback incomplete, keep %s", index_path.c_str());
+            }
+            slot_operation_release(&guard);
+            return result_error("delete incomplete");
+        }
+    }
+    remove_file(index_path);
+    cleanup_trash_dirs();
     slot_operation_release(&guard);
     SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d)", slot, dat_existed, sidecar_existed);
     // 槽文件已删除：槽区结构不再代表磁盘状态，下一次读取必须重载。

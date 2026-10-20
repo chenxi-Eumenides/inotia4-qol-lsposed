@@ -35,5 +35,8 @@ struct QolSlotOperationApi {
     QolResult (*import_container)(void*, QolOwnerToken, const QolSlotOperationLease*, int32_t,
                                  const uint8_t*, uint64_t, QolSlotOperationApply*);
     QolResult (*delete_container)(void*, QolOwnerToken, const QolSlotOperationLease*, int32_t);
+    // 事务式删除入口：把该槽 primary/last-good 移入 trash_dir（同文件系统），失败自行移回。
+    QolResult (*delete_container_to_trash)(void*, QolOwnerToken, const QolSlotOperationLease*,
+                                           int32_t, const char* trash_dir);
 };
 }  // namespace qol::contracts

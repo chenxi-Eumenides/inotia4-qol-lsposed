@@ -146,7 +146,8 @@ QolResult op_release(void*, QolOwnerToken owner, const QolSlotOperationLease* le
     return qol::infra::slot_operation::release(owner, lease);
 }
 const QolSlotOperationApi kOperation{{sizeof(QolSlotOperationApi), 1, 0}, nullptr, &op_acquire,
-                                     &op_set_referenced, nullptr, &op_release, nullptr, nullptr};
+                                     &op_set_referenced, nullptr, &op_release, nullptr, nullptr,
+                                     nullptr};
 }  // namespace
 
 int main() {
