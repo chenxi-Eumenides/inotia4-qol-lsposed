@@ -1510,9 +1510,9 @@
 
 > 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qol_save` 备份，可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/qol/backups/`。
 >
-> **备份标识 = `checksum`**：`sha256(origPlain ‖ module)` 的前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol_save` 的末段。同一游戏内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名。
+> **备份标识 = `checksum`**：覆盖全部可还原内容段——bundle v3+ 为 `sha256(origPlain ‖ module ‖ warehouseBlob)`，v1/v2 旧备份为 `sha256(origPlain ‖ module)`（旧公式，warehouse 段不参与）；取前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol_save` 的末段。同一内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名，并在写盘/删除前按 bundle 内实际 payload 重算校验。
 >
-> 导入导出时机与责任由调用方负责，模块只保证原子写、CRC 校验与内容完整。
+> 导入仅在主菜单允许（`save.facts.current_slot == -1`）；导出任意时刻可调。模块保证原子写、CRC 校验与内容完整。
 
 ##### 导出备份
 
@@ -1534,7 +1534,7 @@
 { "ok": true, "backup": <BackupMeta>, "deduplicated": true }
 ```
 
-**注意**：先算出 `checksum`，再扫描 `qol/backups/*.qol_save`：任一既有备份的**内部 `checksum`（bundle metaJson 字段）**与新算值相同 → 不写入新文件直接返回；同 `checksum` 判定不依赖文件名，被重命名或带浏览器重名后缀（如 `(1)`）的副本同样命中。不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
+**注意**：先算出 `checksum`，再扫描 `qol/backups/*.qol_save`：任一既有备份的**内部 `checksum`（bundle metaJson 字段）**与新算值相同 → 不写入新文件直接返回；同 `checksum` 判定不依赖文件名，被重命名或带浏览器重名后缀（如 `(1)`）的副本同样命中（命中项的 payload 也会按上述规则重算校验）。不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。导出持该槽的 slot operation lease，被占用→`slot operation unavailable`；sidecar 损坏/不可读→`module container unreadable`（不再生成“仅原版”备份）；warehouse 单文件读失败→`warehouse read failed`、单项超 4 MiB→`warehouse file too large`、数量/总量超 64 项/8 MiB→`warehouse limit exceeded`。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
 
 ##### 备份列表
 
@@ -1544,7 +1544,7 @@
 
 **返回格式**：`{"ok":true,"backups":[<BackupMeta>,...]}`
 
-**注意**：只读文件头元数据，不解密正文；`checksum` 从 bundle 的 metaJson 读取（文件名解析兜底）；损坏文件跳过并记日志。
+**注意**：逐个完整读取并校验 CRC32 后取元数据（损坏文件跳过并记日志）；单文件超过 64 MiB 跳过，单次扫描累计超过 512 MiB 停止返回已解析结果。`checksum` 从 bundle 的 metaJson 读取（文件名解析兜底）。
 
 ##### 导入备份
 
@@ -1556,7 +1556,7 @@
 
 **返回格式**：`{"ok":true,"backup":<BackupMeta>}`
 
-**注意**：按 bundle **内部 `checksum`（metaJson 字段）**定位——目录下全部 `*.qol_save` 均为候选，逐个完整解析（含 CRC32 校验）后比对内部值，文件名不参与匹配（浏览器重名后缀 `(1)`、任意重命名均可导入）；仅 `metaJson` 缺失 `checksum` 字段的旧备份退回文件名 `_<checksum>.qol_save` 后缀。校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。写入前把目标槽现存原版文件与 sidecar 复制到 `qol/backups/.rollback/`，任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
+**注意**：**仅在主菜单允许**（`current_slot == -1`，否则 `import requires main menu`；槽状态读取失败→`save state unavailable`，fail-closed）。按 bundle **内部 `checksum`（metaJson 字段）**定位——目录下全部 `*.qol_save` 均为候选，逐个完整解析（含 CRC32 校验）后比对内部值，文件名不参与匹配（浏览器重名后缀 `(1)`、任意重命名均可导入）；仅 `metaJson` 缺失 `checksum` 字段的旧备份退回文件名 `_<checksum>.qol_save` 后缀。写入前按 bundle 版本重算 payload checksum，不一致→`backup checksum mismatch`；校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。备份标记 `module_state=0`（无 sidecar）时按完整替换语义清除目标槽现存 sidecar；`module_state=1` 时写入并覆盖。写入前把目标槽现存原版文件与 sidecar 复制到 `qol/backups/.rollback/`（事务 id 命名），任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
 
 ##### 删除备份
 
@@ -1568,9 +1568,9 @@
 
 **返回格式**：`{"ok":true}`
 
-**注意**：定位规则与导入一致（内部 `checksum` 匹配，文件名不参与）。校验值非法→`bad checksum`；无此备份→`backup not found`；删除 IO 失败→`delete failed`（记日志）。
+**注意**：定位规则与导入一致（内部 `checksum` 匹配，文件名不参与），删除前同样按 payload 重算，不一致→`backup checksum mismatch`。校验值非法→`bad checksum`；无此备份→`backup not found`；删除 IO 失败→`delete failed`（记日志）。
 
-**BackupMeta 字段**：`file_name`（含导出时间与 `checksum` 前缀）、`size_bytes`、`source_slot`（导出源槽）、`export_time`（ms）、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`（备份标识，12 位小写 hex）。
+**BackupMeta 字段**：`file_name`（含导出时间与 `checksum` 前缀）、`size_bytes`、`source_slot`（导出源槽）、`export_time`（ms）、`map_id`、`map_name`、`hero_level`、`hero_index`、`class_idx`、`class_name`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`（备份标识，12 位小写 hex）；bundle 内 metaJson 另含 `module_state`（0=无 sidecar，1=有 sidecar）。
 
 ### 7.4 静态数据表 tables
 
