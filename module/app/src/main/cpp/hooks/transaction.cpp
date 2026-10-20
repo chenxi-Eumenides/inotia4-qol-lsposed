@@ -220,7 +220,10 @@ bool fail_install_resource(Tx& tx, const contracts::ResourceClaim& claim, int32_
     if (fail_closed_required) {
         return fail_install(tx, claim.id, error, out);
     }
+    // ownership 的 NotReady 定向恢复由宿主按 SaveEnter 信号单独武装；
+    // 这里只覆盖常驻 fail-soft/optional 机制，避免与宿主恢复状态重复。
     const bool arm_retry = claim.gate == nullptr &&
+                           claim.mechanism != contracts::ResourceMechanism::kOwnership &&
                            state_of(claim.id) == contracts::ResourceState::kFree;
     const bool more = fail_install_soft_step(tx, claim, code, error, out);
     if (arm_retry) retry_pending_set(claim.id, true);
