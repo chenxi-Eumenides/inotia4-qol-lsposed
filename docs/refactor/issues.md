@@ -256,3 +256,14 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | SL-06 | `stack_limit` descriptor / codec tests | 测试未覆盖真实 16 条 descriptor 与 codec 边界矩阵 | **已修复**：`6d05cddf`/`644d27f6` 补入对应测试；真机行为验收仍欠账，不能据 Host 用例宣告通过。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
 | SL-BITEND | Host 常驻 bitend claims | 两条存档 bitend 曾随 `stack_limit` 999 原子组撤销，且归属/掩码范围表述过宽 | **已修复**（`644d27f6`）：bitend ×2 迁为 Host 常驻；机制是袋槽容量掩码 `GetBitValue(24→21)`，不涵盖全部物品子项。登记见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
 | SL-09 | `stack_limit` 关闭态数量读/写 | `effective`/`view_from_canonical` 关闭态夹 99，导致 107 显示为 99 | **已修复**（`5013aba6`，裁决 A3）：关闭态读 b（0–127）不夹 99；写回由原版接管，`s2_writeback_gate` 要求 999 已应用。Host CTest 145/145；`check_arch.py`/`check_http_routes.py` 通过；Debug APK `output/inotia4_qol_lsposed_debug_2610172122_e17c53c5b138.apk`，SHA-256 `e17c53c5b138235b8f30c705d85e8511401d45141a0a846480ccc6efaa04f075`。用户真机（2026-10-17，集成包 SHA-256 `ed0400df25a4bef4df9104c5a149a8bf328a20c92e4a19e5080e41ca1f0dbf23`）专项四项 PASS：关闭 107→107、关闭 206→78、107 拆 1→106、206 拆 1→b 77（重开 canonical 205），重开数量不变。仅 SL-09 专项通过；VM-P4-08/VM-P1-S2/VM-P6-01 整卡仍 NOT_ACCEPTED。详情见 `docs/refactor/audits/plugin-audit/stack-limit-20261017/verification-log.md`。 |
+
+## 14. core.item 库存域合并（2026-10-20）
+
+合并登记：`inventory_hooks` + `move_merge` → `core.item`，提交 `73cf0918`、`6cc08cde`；验收登记见 `audits/plugin-audit/inventory-merge-20261020/verification-log.md`。用户裁决：两个插件一并、24 条 hook 保持 required+fail-closed、`MOVE_MERGE_GOT` optional+fail-closed、`world.facts` optional、删除 `inventory_support` 调试 feature、`drag_merge` 关闭时整 wrapper 透传。
+
+| 编号 | 组件 | 问题 | 处置 |
+|---|---|---|---|
+| MERGE-01 | core.item inventory | 真实 24 条 claims 目前只有 `inventory_hook_native_compile` 编译覆盖；`item_facts_plugin_tests` 使用 `tests/stubs/core_item_inventory_stub.cpp` 的 24 条假 claim，无法运行断言 ID/symbol 唯一、owner、策略与 FindItem 特例 | 开放（P2）：补真实 claims host 测试；当前静态核对通过 |
+| MERGE-02 | core.item status | optional `inventory.merge_projection` 失败会把 `core.item` 标 degraded，即使 `item.facts`/24 hook 完全可用；基础 provider 健康状态被纯消费者失败污染 | 开放（P2）：确认是否接受；若否则拆分 merge 子域 degraded 口径 |
+| MERGE-03 | core.item merge | 拖拽合并 UI、EB 投影拖放、S2 999 交互未做真机人工目视；仅验证资源 live、feature 开关与 host 用例 | 开放（P2）：待真机人工验收；不得据本批状态面证据宣告 VM-43/VM-D2D 行为通过 |
+| MERGE-04 | scripts/verification | `test_core_feature_exposure.test_host_feature_display_categories_and_priorities` 在合并前已因分类/优先级基线不一致失败（`production.cpp` 未在本批修改） | 开放（P3）：由 feature catalog 维护方修正基线 |
