@@ -224,10 +224,9 @@ void savebackup_panel_enter() {
             g_back_pressed = 0;
         }
     }
-    // 锁外触发后台刷新：列表目录 IO + 三槽读取不占游戏线程（v0.7.x 曾同步执行
-    // refresh_backups_locked，冷 IO 下 enter → 控件创建实测延迟 13.4s）。
-    // 「每次进入读目录」语义保留：异步线程本轮结束还会补跑 queued 请求。
-    refresh_panel_data_async();
+    // 控件先创建并激活，再枚举文件名与 stat 元数据；bundle 内容留到逐帧队列解析。
+    refresh_panel_data();
+    g_skip_parse_frame = true;
     const auto t1 = std::chrono::steady_clock::now();
     SB_UI_LOG("savebackup panel enter %s in %.1f ms",
               resumed ? "resumed" : "controls created",
@@ -236,6 +235,8 @@ void savebackup_panel_enter() {
 
 void savebackup_panel_process() {
     if (!g_panel_active) return;
+    if (g_skip_parse_frame) g_skip_parse_frame = false;
+    else process_one_parse_task();
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     if (g_root == nullptr) return;
     if (g_close_delay_frames > 0) {
@@ -248,7 +249,7 @@ void savebackup_panel_process() {
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui == nullptr || ui->begin_frame == nullptr || ui->end_frame == nullptr ||
         ui->draw_control == nullptr) return;
-    // 控件 rect 写回只在游戏线程（本函数）执行：后台刷新线程不直接 ui_set_rect。
+    // 控件 rect 写回与逐帧解析都只在游戏线程执行。
     // 列表条目数/页码变化后在此把最新 rect 写回控件，使引擎侧的控件 rect 与计算 rect 一致
     // （命中/绘制另用 panel_abs_origin + 计算 rect，双保险）。
     sync_list_btn_rects_locked();
@@ -296,6 +297,7 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
         // refresh_slots_on_game_thread()（其内部自加锁，持锁调用会死锁，g_sbui_mtx 非递归）。
         void* clicked_ctrl = nullptr;
         bool confirm = false;
+        bool refresh = false;
         {
             std::lock_guard<std::mutex> lock(g_sbui_mtx);
             if (!g_panel_active) return 1;
@@ -332,12 +334,15 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
                     g_selected_slot = (g_selected_slot == i) ? -1 : i;
                     g_selected_auto = false;
                     g_auto_backup_valid = false;
-                    g_auto_source_slot = -1;
+                    g_auto_loading = false;
                     set_msg_locked("", UI_OPTION_TEXT, false);
-                    refresh_panel_data_async();
-                    return 1;
+                    refresh = true;
+                    break;
                 }
             }
+            if (refresh) {
+                // Refresh happens after releasing g_sbui_mtx.
+            } else {
             // 操作按钮：记录指针，锁外调用（导入/删除为长 IO，不得持 g_sbui_mtx）。
             for (int i = 0; i < 3; ++i) {
                 if (hit(g_ops_btns[i], ops_btn_rect(i))) {
@@ -353,6 +358,8 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
                         if (backup_at_page(i) != nullptr) {
                             const int abs = g_page_index * LIST_COLS_PER_PAGE + i;
                             g_selected_backup = (g_selected_backup == abs) ? -1 : abs;
+                            g_selected_backup_name = g_selected_backup >= 0
+                                ? g_backups[static_cast<size_t>(abs)].name : "";
                             g_selected_auto = false;
                         }
                         return 1;
@@ -362,7 +369,10 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
                     if (g_auto_backup_valid) {
                         const bool was = g_selected_auto;
                         g_selected_auto = !was;
-                        if (g_selected_auto) g_selected_backup = -1;
+                        if (g_selected_auto) {
+                            g_selected_backup = -1;
+                            g_selected_backup_name.clear();
+                        }
                     }
                     return 1;
                 }
@@ -378,7 +388,9 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
                 }
             }
             }
+            }
         }
+        if (refresh) { refresh_panel_data(); return 1; }
         if (confirm) { execute_dialog_confirm(); return 1; }
         if (clicked_ctrl != nullptr) {
             on_btn_clicked(clicked_ctrl);  // 游戏线程，锁外

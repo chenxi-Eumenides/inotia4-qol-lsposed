@@ -102,7 +102,7 @@ void root_decor_draw() {
     // ⑤ 空列表提示：右框中心（加载中 / 暂无备份）。走 fn_grpx_draw_string_with_font align=2
     //    居中（align 语义见文件头；fn_ui_draw_string_halign 在自定义面板下不出字，勿用）。
     if (n == 0 && ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
-        const bool loading = g_backups_loading.load() && g_backups.empty();
+        const bool loading = g_backups_loading && g_backups.empty();
         (void)ui_set_font_color_rgb(static_cast<int32_t>(UI_GOLD & 0xff),
                                     static_cast<int32_t>((UI_GOLD >> 8) & 0xff),
                                     static_cast<int32_t>((UI_GOLD >> 16) & 0xff));
@@ -326,7 +326,14 @@ void list_btn_draw(void* ctrl) {
     int64_t pt[2];
     panel_abs_origin(r, pt);
     const BackupEntry* e = backup_at_page(local);
-    if (e == nullptr) return;
+    if (e == nullptr) {
+        if (backup_item_at_page(local) != nullptr) {
+            draw_string_at(static_cast<int>(pt[0]) + 0x44,
+                           static_cast<int>(pt[1]) + static_cast<int>(r.h / 2) - 0x0C,
+                           "加载中…", COLOR_TEXT_GRAY);
+        }
+        return;
+    }
     // 选中备份项：深琥珀暗色填充（ui_fill_rect_alpha，COLOR_SEL_BG(RGB565) + alpha 0x50，无描边）；
     // 暗底反衬金色首行文字，绘制在文本之前，文字浮于其上。
     if (g_page_index * LIST_COLS_PER_PAGE + local == g_selected_backup) {

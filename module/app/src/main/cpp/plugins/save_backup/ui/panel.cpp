@@ -5,7 +5,6 @@
 #include "plugins/save_backup/feature.h"
 #include "plugins/save_backup/log.h"
 
-#include <atomic>
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -13,9 +12,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <deque>
+#include <map>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #define SB_UI_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
@@ -399,13 +399,17 @@ void* g_next_btn = nullptr;
 void* g_back_btn = nullptr;                          // 底部「← 返回」：关闭面板
 void* g_msg_label = nullptr;                         // 操作结果提示区
 int g_selected_slot = -1;                            // 左栏选中槽 0/1/2；-1=未选（默认两侧都不选）
-int g_selected_backup = -1;                          // 右栏当前页选中项下标（0..page_size-1）；-1=未选
+int g_selected_backup = -1;                          // 选中手动备份在列表中的绝对索引；-1=未选
 bool g_selected_auto = false;
 int g_page_index = 0;                                // 翻页：0..N
-// 备份列表缓存（从 save_backup_list_json 解析）；每项 checksum + hero_level + class + map_name + export_time。
+// 列表记录先由 files JSON 建占位；只有当前页解析完成后才填充 Entry。
 // map_name 由 entry_json 输出携带（Kotlin 启动期下发的 map_id→中文名表）；未命中为空串。
 // class_idx/class_name 由导出时写入 metaJson；旧备份缺失时 -1/空串（UI 退化显示）。
 struct BackupEntry {
+    std::string name;
+    uint64_t size = 0;
+    long long mtime_ms = 0;
+    bool parsed = false;
     std::string checksum;
     std::string map_name;
     int hero_level = -1;
@@ -417,8 +421,17 @@ struct BackupEntry {
 };
 BackupEntry g_auto_backup;
 bool g_auto_backup_valid = false;
-int g_auto_source_slot = -1;
 std::vector<BackupEntry> g_backups;
+std::map<std::string, BackupEntry> g_entry_cache;
+struct ParseTask {
+    bool is_auto = false;
+    std::string name;
+    uint64_t size = 0;
+    long long mtime_ms = 0;
+    int slot = -1;
+};
+std::deque<ParseTask> g_parse_queue;
+std::string g_selected_backup_name;
 int g_total_pages = 0;
 // 结果提示文本（不弹窗，在面板内独立显示区；新消息覆盖旧消息，不自动消失）。
 std::string g_msg_text;
@@ -438,11 +451,9 @@ struct SlotInfo {
     int map_id = -1;
 };
 SlotInfo g_slots[3];
-// 备份列表/槽位后台刷新状态：IO（save_backup_list_json + 主菜单重载三槽）全部在
-// 后台线程锁外执行，完成后一次性拿 g_sbui_mtx 应用，游戏线程 enter/process 永不等 IO。
-std::atomic<bool> g_refresh_running{false};
-std::atomic<bool> g_refresh_queued{false};
-std::atomic<bool> g_backups_loading{false};  // 右栏空列表时显示「加载中…」
+bool g_backups_loading = false;
+bool g_auto_loading = false;
+bool g_skip_parse_frame = false;
 
 // ============== 控件 ID（ExecuteProc 复用）==============
 // 三栏控件共用同一 UiClickProc（点击后用 ctrl 指针反查 g_slot_btns/g_ops_btns/g_list_btns 识别）。
@@ -450,11 +461,10 @@ void on_btn_clicked(void* ctrl);
 void on_back_clicked(void* ctrl);
 static void execute_dialog_confirm();
 
-// 列表按钮 rect 依赖当前页条目数（垂直居中分布），定义在 panel.inc；
-// apply_backups_locked 在 inc 之前先用到，此处前置声明。
+// 列表按钮 rect 依赖当前页文件记录数，定义在 panel.inc。
 void sync_list_btn_rects_locked();
 
-// 解析 save_backup_list_json() 输出到 entries（纯 CPU，无共享状态，锁外调用）。
+// 解析单条 Entry JSON（纯 CPU；调用方按当前页队列逐条调用）。
 void parse_backups_json(const std::string& json, std::vector<BackupEntry>& entries) {
     entries.clear();
     // 极简解析：从 `{"ok":true,"backups":[...]}` 提取每个备份对象的 key。
@@ -515,7 +525,58 @@ bool parse_auto_json(const std::string& json, BackupEntry& entry) {
     parse_backups_json(std::string("{\"backups\":[") + json.substr(open, close - open + 1) + "]}", parsed);
     if (parsed.empty()) return false;
     entry = parsed.front();
+    entry.parsed = true;
     return true;
+}
+
+struct BackupFile {
+    std::string name;
+    uint64_t size = 0;
+    long long mtime_ms = 0;
+};
+
+void parse_backup_files_json(const std::string& json, std::vector<BackupFile>& files) {
+    files.clear();
+    const size_t key = json.find("\"files\":[");
+    if (key == std::string::npos) return;
+    size_t pos = key + std::strlen("\"files\":[");
+    const size_t end = json.rfind(']');
+    if (end == std::string::npos || end <= pos) return;
+    while (pos < end) {
+        const size_t open = json.find('{', pos);
+        if (open == std::string::npos || open >= end) break;
+        const size_t close = json.find('}', open);
+        if (close == std::string::npos || close >= end) break;
+        const std::string obj = json.substr(open, close - open + 1);
+        BackupFile file;
+        const size_t name_key = obj.find("\"name\":\"");
+        if (name_key != std::string::npos) {
+            const size_t value = name_key + std::strlen("\"name\":\"");
+            const size_t quote = obj.find('"', value);
+            if (quote != std::string::npos) file.name = obj.substr(value, quote - value);
+        }
+        auto read_number = [&](const char* field, long long& out) {
+            const std::string pattern = std::string("\"") + field + "\":";
+            size_t p = obj.find(pattern);
+            if (p == std::string::npos) return;
+            p += pattern.size();
+            char* endp = nullptr;
+            const long long value = std::strtoll(obj.c_str() + p, &endp, 10);
+            if (endp != obj.c_str() + p) out = value;
+        };
+        long long size = 0;
+        read_number("size", size);
+        read_number("mtime_ms", file.mtime_ms);
+        if (!file.name.empty() && size >= 0) {
+            file.size = static_cast<uint64_t>(size);
+            files.push_back(std::move(file));
+        }
+        pos = close + 1;
+    }
+}
+
+std::string backup_cache_key(const std::string& name, uint64_t size, long long mtime_ms) {
+    return name + '\n' + std::to_string(size) + '\n' + std::to_string(mtime_ms);
 }
 
 // 清除待确认状态（调用方须持 g_sbui_mtx）。
@@ -526,25 +587,134 @@ void clear_pending_locked() {
     g_dialog_auto = false;
 }
 
-// 应用刷新结果（调用方须持 g_sbui_mtx）。
-void apply_backups_locked(std::vector<BackupEntry>& entries) {
-    const size_t old_count = g_backups.size();
-    g_backups.swap(entries);
-    if (g_selected_backup >= static_cast<int>(g_backups.size())) g_selected_backup = -1;
-    int total = static_cast<int>(g_backups.size());
-    g_total_pages = (total + LIST_COLS_PER_PAGE - 1) / LIST_COLS_PER_PAGE;
-    if (g_page_index >= g_total_pages && g_total_pages > 0) g_page_index = g_total_pages - 1;
-    if (g_page_index < 0) g_page_index = 0;
-    // 条目数/页码变化 → 本页条目垂直居中分布。控件 rect 的写回必须在游戏线程：
-    // 本函数可能在后台刷新线程执行（apply 阶段），故这里不直接 ui_set_rect；
-    // 由 savebackup_panel_process（游戏线程、持锁）每帧 sync_list_btn_rects_locked()。
-    // 命中/绘制本身已不依赖控件 rect（panel_abs_origin + 实时计算 rect），见 panel.inc/render.inc。
-    // 条数变化日志：真机验收据此确认「导出 → 后台读目录 → apply」链路把新条目带到列表
-    // （导出成功路径额外把 page_index 归零，见 export_selected）。
-    if (old_count != g_backups.size()) {
-        SB_UI_LOG("apply_backups: %zu -> %zu backups, total_pages=%d, page_index=%d",
-                  old_count, g_backups.size(), g_total_pages, g_page_index);
+// Queue only visible rows and the selected slot's auto entry. Caller holds g_sbui_mtx.
+void rebuild_parse_queue_locked() {
+    g_parse_queue.clear();
+    g_auto_loading = false;
+    const int begin = g_page_index * LIST_COLS_PER_PAGE;
+    const int end = std::min(begin + LIST_COLS_PER_PAGE, static_cast<int>(g_backups.size()));
+    for (int i = begin; i < end; ++i) {
+        const BackupEntry& item = g_backups[static_cast<size_t>(i)];
+        if (!item.parsed) g_parse_queue.push_back({false, item.name, item.size, item.mtime_ms, -1});
     }
+    if (g_selected_slot >= 0 && !g_auto_backup_valid && !g_auto_loading) {
+        g_auto_loading = true;
+        g_parse_queue.push_back({true, "", 0, 0, g_selected_slot});
+    }
+}
+
+void refresh_panel_data() {
+    const std::string json = save_backup_list_files_json();
+    std::vector<BackupFile> files;
+    parse_backup_files_json(json, files);
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    const std::string selected_name = g_selected_backup_name;
+    std::map<std::string, BackupEntry> current_cache;
+    std::vector<BackupEntry> items;
+    items.reserve(files.size());
+    for (const BackupFile& file : files) {
+        const std::string key = backup_cache_key(file.name, file.size, file.mtime_ms);
+        BackupEntry item;
+        item.name = file.name;
+        item.size = file.size;
+        item.mtime_ms = file.mtime_ms;
+        const auto cached = g_entry_cache.find(key);
+        if (cached != g_entry_cache.end()) {
+            item = cached->second;
+            current_cache.emplace(key, item);
+        }
+        items.push_back(std::move(item));
+    }
+    g_entry_cache.swap(current_cache);  // Entries missing or changed on disk are evicted.
+    g_backups.swap(items);
+    g_selected_backup = -1;
+    if (!selected_name.empty()) {
+        for (size_t i = 0; i < g_backups.size(); ++i) {
+            if (g_backups[i].name == selected_name) {
+                g_selected_backup = static_cast<int>(i);
+                break;
+            }
+        }
+        if (g_selected_backup < 0) g_selected_backup_name.clear();
+    }
+    g_total_pages = static_cast<int>((g_backups.size() + LIST_COLS_PER_PAGE - 1) / LIST_COLS_PER_PAGE);
+    if (g_total_pages == 0) g_page_index = 0;
+    else if (g_page_index >= g_total_pages) g_page_index = g_total_pages - 1;
+    g_auto_backup_valid = false;
+    g_auto_loading = false;
+    g_backups_loading = true;
+    rebuild_parse_queue_locked();
+    SB_UI_LOG("backup files enumerated: %zu files, %d pages, parse queue=%zu",
+              g_backups.size(), g_total_pages, g_parse_queue.size());
+}
+
+void process_one_parse_task() {
+    ParseTask task;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        if (g_parse_queue.empty()) {
+            g_backups_loading = false;
+            return;
+        }
+        task = std::move(g_parse_queue.front());
+        g_parse_queue.pop_front();
+    }
+
+    BackupEntry parsed;
+    bool ok = false;
+    std::string response;
+    if (task.is_auto) {
+        response = save_backup_auto_entry_json(task.slot);
+        ok = parse_auto_json(response, parsed);
+    } else {
+        response = save_backup_entry_json(task.name.c_str());
+        ok = parse_auto_json(response, parsed);
+        parsed.name = task.name;
+        parsed.size = task.size;
+        parsed.mtime_ms = task.mtime_ms;
+    }
+
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    if (task.is_auto) {
+        g_auto_loading = false;
+        if (task.slot == g_selected_slot) {
+            g_auto_backup_valid = ok;
+            if (ok) g_auto_backup = std::move(parsed);
+            else SB_UI_LOG("auto backup parse failed: slot=%d", task.slot);
+        }
+    } else {
+        auto it = std::find_if(g_backups.begin(), g_backups.end(), [&](const BackupEntry& item) {
+            return item.name == task.name && item.size == task.size && item.mtime_ms == task.mtime_ms;
+        });
+        if (it != g_backups.end()) {
+            if (ok) {
+                *it = std::move(parsed);
+                g_entry_cache[backup_cache_key(task.name, task.size, task.mtime_ms)] = *it;
+            } else {
+                SB_UI_LOG("backup entry parse failed: %s", task.name.c_str());
+                if (g_selected_backup_name == task.name) {
+                    g_selected_backup_name.clear();
+                    g_selected_backup = -1;
+                }
+                g_backups.erase(it);
+                g_total_pages = static_cast<int>((g_backups.size() + LIST_COLS_PER_PAGE - 1) / LIST_COLS_PER_PAGE);
+                if (g_total_pages == 0) g_page_index = 0;
+                else if (g_page_index >= g_total_pages) g_page_index = g_total_pages - 1;
+                g_selected_backup = -1;
+                if (!g_selected_backup_name.empty()) {
+                    for (size_t i = 0; i < g_backups.size(); ++i) {
+                        if (g_backups[i].name == g_selected_backup_name) {
+                            g_selected_backup = static_cast<int>(i);
+                            break;
+                        }
+                    }
+                    if (g_selected_backup < 0) g_selected_backup_name.clear();
+                }
+                rebuild_parse_queue_locked();
+            }
+        }
+    }
+    g_backups_loading = !g_parse_queue.empty();
 }
 
 // 读三槽元数据到 out（无共享状态，锁外调用；必须在游戏线程执行，见 refresh_slots_on_game_thread）。
@@ -577,51 +747,6 @@ void read_slots_into(SlotInfo out[3]) {
     }
 }
 
-// 后台刷新备份列表（仅目录 IO，锁外；应用阶段才拿 g_sbui_mtx）。
-// 注意：槽位刷新不在此线程执行——SAVE_CreateSaveSlot 走原版保存链（SAVE_LoadData→HubSave_*），
-// 必须在游戏线程调用（见 refresh_slots_on_game_thread）。从后台线程调用曾真机 SIGSEGV
-// （tombstone: HubSave_GetFolderName 空指针）。已在刷新时置 queued，本轮结束后补一轮。
-void refresh_panel_data_async() {
-    bool expected = false;
-    if (!g_refresh_running.compare_exchange_strong(expected, true)) {
-        g_refresh_queued.store(true);
-        return;
-    }
-    std::thread([]() {
-        for (;;) {
-            g_backups_loading.store(true);
-            const auto t0 = std::chrono::steady_clock::now();
-            int slot = -1;
-            {
-                std::lock_guard<std::mutex> lock(g_sbui_mtx);
-                slot = g_selected_slot;
-            }
-            const std::string json = save_backup_list_json();
-            std::vector<BackupEntry> entries;
-            parse_backups_json(json, entries);
-            BackupEntry auto_entry;
-            const bool has_auto = slot >= 0 && parse_auto_json(save_backup_auto_entry_json(slot), auto_entry);
-            const auto t1 = std::chrono::steady_clock::now();
-            {
-                std::lock_guard<std::mutex> lock(g_sbui_mtx);
-                apply_backups_locked(entries);
-                g_auto_backup = std::move(auto_entry);
-                g_auto_backup_valid = has_auto;
-                g_auto_source_slot = slot;
-            }
-            g_backups_loading.store(false);
-            const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-            SB_UI_LOG("panel data refresh: %zu backups, io %.1f ms",
-                      entries.size(), ms);
-            g_refresh_running.store(false);
-            if (!g_refresh_queued.exchange(false)) break;
-            bool again = false;
-            if (g_refresh_running.compare_exchange_strong(again, true)) continue;
-            break;
-        }
-    }).detach();
-}
-
 // 槽位刷新：必须在游戏线程调用。SAVE_CreateSaveSlot 会重载三槽并走原版保存链，
 // 从后台线程调用会因游戏线程上下文/全局竞态崩溃；结果存入 g_slots 缓存供 DrawProc 读。
 void refresh_slots_on_game_thread() {
@@ -634,11 +759,19 @@ void refresh_slots_on_game_thread() {
 const BackupEntry* backup_at_page(int local_index) {
     const int abs = g_page_index * LIST_COLS_PER_PAGE + local_index;
     if (abs < 0 || abs >= static_cast<int>(g_backups.size())) return nullptr;
-    return &g_backups[abs];
+    const BackupEntry* item = &g_backups[static_cast<size_t>(abs)];
+    return item->parsed ? item : nullptr;
+}
+
+const BackupEntry* backup_item_at_page(int local_index) {
+    const int abs = g_page_index * LIST_COLS_PER_PAGE + local_index;
+    if (abs < 0 || abs >= static_cast<int>(g_backups.size())) return nullptr;
+    return &g_backups[static_cast<size_t>(abs)];
 }
 
 const BackupEntry* selected_manual_backup() {
     return g_selected_backup >= 0 && g_selected_backup < static_cast<int>(g_backups.size())
+               && g_backups[static_cast<size_t>(g_selected_backup)].parsed
                ? &g_backups[static_cast<size_t>(g_selected_backup)] : nullptr;
 }
 
@@ -855,21 +988,8 @@ std::string data_savebackup_ui_open_panel() {
 }
 
 std::string data_savebackup_ui_self_check() {
-    // 进入面板前由 native 一次性读目录，验证 list 链路。
-    // IO 在 g_sbui_mtx 外执行：目录遍历 + 逐 bundle 读文件/校验可能秒级（冷 IO 实测），
-    // 持锁做 IO 会阻塞游戏线程 enter（v0.7.x 面板打开卡 13s 的直接原因之一）。
-    const auto t0 = std::chrono::steady_clock::now();
-    const std::string json = save_backup_list_json();
-    std::vector<BackupEntry> entries;
-    parse_backups_json(json, entries);
-    const auto t1 = std::chrono::steady_clock::now();
+    // Diagnostics report the current cache without triggering filesystem work or bundle parsing.
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    apply_backups_locked(entries);
-    const auto t2 = std::chrono::steady_clock::now();
-    SB_UI_LOG("self_check: list+parse %.1f ms, apply %.3f ms, %zu backups",
-              std::chrono::duration<double, std::milli>(t1 - t0).count(),
-              std::chrono::duration<double, std::milli>(t2 - t1).count(),
-              g_backups.size());
     char buf[256];
     snprintf(buf, sizeof(buf),
         "{\"ok\":true,\"backup_count\":%zu,\"total_pages\":%d,\"page_index\":%d}",

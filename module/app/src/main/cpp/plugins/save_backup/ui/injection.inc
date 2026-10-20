@@ -22,7 +22,7 @@ static void export_selected() {
     { std::lock_guard<std::mutex> lock(g_sbui_mtx);
       if (ok) { g_page_index = 0; set_msg_locked("导出成功", COLOR_OK, false); }
       else { char b[96]; char msg[128]; snprintf(msg, sizeof(msg), "导出失败：%s", response_error_text(resp,b,sizeof(b),"未知错误")); set_msg_locked(msg,COLOR_ERR,true); } }
-    if (ok) refresh_panel_data_async();
+    if (ok) refresh_panel_data();
 }
 
 static void open_import_dialog() {
@@ -68,7 +68,10 @@ static void execute_dialog_confirm() {
       if (ok) {
           set_msg_locked(kind == DialogKind::kImport ? "导入成功" : "删除成功", COLOR_OK, false);
           if (kind == DialogKind::kDeleteSlot) g_selected_slot = -1;
-          if (kind == DialogKind::kDeleteBackup) g_selected_backup = -1;
+          if (kind == DialogKind::kDeleteBackup) {
+              g_selected_backup = -1;
+              g_selected_backup_name.clear();
+          }
       } else {
           char b[96]; char msg[128];
           const char* action = kind == DialogKind::kImport ? "导入失败：" : "删除失败：";
@@ -77,7 +80,7 @@ static void execute_dialog_confirm() {
       } }
     if (ok) {
         if (kind == DialogKind::kImport || kind == DialogKind::kDeleteSlot) refresh_slots_on_game_thread();
-        refresh_panel_data_async();
+        refresh_panel_data();
     }
 }
 
@@ -94,8 +97,10 @@ void on_btn_clicked(void* ctrl) {
     if (op == 2) { open_import_dialog(); return; }
     if (prev || next) {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        const int old_page = g_page_index;
         if (prev && g_page_index > 0) --g_page_index;
         else if (next && g_page_index < g_total_pages-1) ++g_page_index;
+        if (old_page != g_page_index) rebuild_parse_queue_locked();
         sync_list_btn_rects_locked();
     }
 }
