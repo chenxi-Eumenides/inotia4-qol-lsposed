@@ -31,22 +31,7 @@ bool collect_warehouse(int slot, SlotSnapshot& out, std::string& err) {
     if (!g_source.locate_save_directory(save_dir)) return true;  // 目录不可得 = 无外部仓库
 
     const std::string dat_name = "save" + std::to_string(slot) + ".dat";
-    const std::string prefix = dat_name + ".wh4-";
-    DIR* dir = ::opendir(save_dir.c_str());
-    if (dir == nullptr) return true;
-    std::vector<std::string> names;
-    while (dirent* ent = ::readdir(dir)) {
-        const std::string name = ent->d_name;
-        if (name.size() <= prefix.size()) continue;
-        if (name.compare(0, prefix.size(), prefix) != 0) continue;
-        if (ends_with(name, ".tmp") || ends_with(name, ".wh-tmp")) continue;
-        const std::string full = save_dir + "/" + name;
-        struct stat info{};
-        if (::stat(full.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) continue;
-        names.push_back(name);
-    }
-    ::closedir(dir);
-    std::sort(names.begin(), names.end());
+    const std::vector<std::string> names = list_warehouse_companions(save_dir, slot);
     for (const std::string& name : names) {
         const std::string suffix = name.substr(dat_name.size());
         // 非合法仓库伴生名（如 `.wh4-` 后带路径字符）不是仓库文件，跳过。
@@ -145,6 +130,28 @@ const BackupFileClass* backup_file_classes(size_t* count) {
     };
     if (count != nullptr) *count = sizeof(kClasses) / sizeof(kClasses[0]);
     return kClasses;
+}
+
+std::vector<std::string> list_warehouse_companions(const std::string& save_dir, int slot) {
+    const std::string dat_name = "save" + std::to_string(slot) + ".dat";
+    const std::string prefix = dat_name + ".wh4-";
+    DIR* dir = ::opendir(save_dir.c_str());
+    if (dir == nullptr) return {};
+    std::vector<std::string> names;
+    while (dirent* ent = ::readdir(dir)) {
+        const std::string name = ent->d_name;
+        if (name.size() <= prefix.size()) continue;
+        if (name.compare(0, prefix.size(), prefix) != 0) continue;
+        if (ends_with(name, ".tmp") || ends_with(name, ".wh-tmp")) continue;
+        const std::string full = save_dir + "/" + name;
+        struct stat info{};
+        if (::stat(full.c_str(), &info) != 0 || !S_ISREG(info.st_mode)) continue;
+        if (!::save_backup::valid_warehouse_suffix(name.substr(dat_name.size()))) continue;
+        names.push_back(name);
+    }
+    ::closedir(dir);
+    std::sort(names.begin(), names.end());
+    return names;
 }
 
 void backup_files_bind_source(const BackupFilesSource& source) { g_source = source; }

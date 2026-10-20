@@ -53,6 +53,9 @@ struct BackupFileClass {
 
 const BackupFileClass* backup_file_classes(size_t* count);
 
+// 合法 wh4 伴生文件名（不含目录），按名升序；排除 .tmp/.wh-tmp 与非普通文件。
+std::vector<std::string> list_warehouse_companions(const std::string& save_dir, int slot);
+
 // 收集一个槽的全部可备份文件；失败时 err 为现有导出错误串。
 bool collect_slot_snapshot(int slot, SlotSnapshot& out, std::string& err);
 

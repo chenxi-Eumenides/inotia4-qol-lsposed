@@ -551,9 +551,13 @@ int main() {
         v2[body + 3] = static_cast<uint8_t>(crc);
         const std::string v2_path = root + "/backups/v2_" + ck_v2 + ".qol_save";
         CHECK(write_file(v2_path, std::string(v2.begin(), v2.end())));
+        // additive 语义：bundle 外的现存 wh4 后缀必须保留。
+        const std::string keep_wh = save_dir + "/save2.dat.wh4-keep000000000001";
+        CHECK(write_file(keep_wh, "KEEP-WH4"));
         const std::string v2_import = save_backup_import_json(ck_v2.c_str(), 2);
         CHECK(body_ok(v2_import));
         CHECK(::access((save_dir + "/save2.dat.wh4-000001a043a2bba1").c_str(), F_OK) == 0);
+        CHECK(read_file(keep_wh) == "KEEP-WH4");
     }
 
     // ---- 导入门禁：游戏运行中（current_slot >= 0）拒绝，dat/sidecar 均不变 ----
@@ -620,18 +624,23 @@ int main() {
     CHECK(qol::infra::slot_operation::acquire(g_occupier, 1, &verify).ok == kQolOk);
     CHECK(qol::infra::slot_operation::release(g_occupier, &verify).ok == kQolOk);
 
-    // ---- 删槽：无占用时放行；dat/sidecar/trash/index 全部清理 ----
+    // ---- 删槽：无占用时放行；dat/sidecar/wh4/trash/index 全部清理 ----
+    const std::string delete_wh = save_dir + "/save0.dat.wh4-0000000000000004";
+    CHECK(write_file(delete_wh, "WH4-DELETE"));
     const std::string deleted = save_backup_delete_slot_json(0);
     CHECK(body_ok(deleted));
     CHECK(::access(dat_path.c_str(), F_OK) != 0);
+    CHECK(::access(delete_wh.c_str(), F_OK) != 0);
     CHECK(!has_entry_prefix(save_dir, ".sb-trash-"));
     CHECK(!has_entry_prefix(root + "/saves", ".sb-trash-"));
     CHECK(!has_entry_prefix(root + "/backups", ".trash-"));
 
-    // ---- 删槽 unlink 失败：已移动文件移回，dat/sidecar 逐字节不变 ----
+    // ---- 删槽 unlink 失败：dat/sidecar/wh4 全部移回，内容不变 ----
     CHECK(write_file(dat_path, original_dat));
     CHECK(qol::infra::store::write_section(0, "m", 1, &payload, 1) ==
           qol::infra::store::Status::kOk);
+    const std::string rollback_wh = save_dir + "/save0.dat.wh4-0000000000000005";
+    CHECK(write_file(rollback_wh, "WH4-ROLLBACK"));
     std::vector<uint8_t> before_failed_delete;
     CHECK(qol::infra::store::read_container(0, &before_failed_delete) ==
           qol::infra::store::Status::kOk);
@@ -644,6 +653,8 @@ int main() {
     CHECK(qol::infra::store::read_container(0, &after_failed_delete) ==
           qol::infra::store::Status::kOk);
     CHECK(after_failed_delete == before_failed_delete);
+    CHECK(read_file(rollback_wh) == "WH4-ROLLBACK");
+    CHECK(::unlink(rollback_wh.c_str()) == 0);
     CHECK(!has_entry_prefix(save_dir, ".sb-trash-"));
     CHECK(!has_entry_prefix(root + "/saves", ".sb-trash-"));
     CHECK(!has_entry_prefix(root + "/backups", ".trash-"));
@@ -751,13 +762,21 @@ int main() {
         (void)::unlink(last_good.c_str());
         CHECK(write_file(trash + "/slot-1.qol-save", "RESTORED-PRIMARY"));
         CHECK(write_file(trash + "/slot-1.qol-save.last-good", "RESTORED-GOOD"));
+        const std::string wh_trash = save_dir + "/.sb-trash-recoverwh";
+        CHECK(::mkdir(wh_trash.c_str(), 0755) == 0);
+        const std::string wh_orig = save_dir + "/save0.dat.wh4-recover001";
+        (void)::unlink(wh_orig.c_str());
+        CHECK(write_file(wh_trash + "/save0.dat.wh4-recover001", "RESTORED-WH4"));
         const std::string index = root + "/backups/.trash-recovertest.index";
-        CHECK(write_file(index, trash + "/slot-1.qol-save\t" + primary + "\n" +
-                                    trash + "/slot-1.qol-save.last-good\t" + last_good + "\n"));
+        const std::string index_body = trash + "\t" + primary + "\n" + trash + "\t" + last_good +
+                                       "\n" + wh_trash + "\t" + wh_orig + "\n";
+        CHECK(write_file(index, index_body));
         save_backup_recover_deletes();
         CHECK(read_file(primary) == "RESTORED-PRIMARY");
         CHECK(read_file(last_good) == "RESTORED-GOOD");
+        CHECK(read_file(wh_orig) == "RESTORED-WH4");
         CHECK(::access(trash.c_str(), F_OK) != 0);
+        CHECK(::access(wh_trash.c_str(), F_OK) != 0);
         CHECK(::access(index.c_str(), F_OK) != 0);
     }
 

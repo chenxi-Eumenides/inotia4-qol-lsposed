@@ -898,10 +898,11 @@ bool parse_trash_index(const std::string& index_path, std::vector<TrashEntry>& o
     return true;
 }
 
-// 把 trash 中仍存在的文件移回原位；目标已存在时跳过并保留 trash（不覆盖用户数据）。
+// 把 trash 中仍存在的文件移回原位（逆序，与移动顺序相反）；目标已存在时跳过并保留 trash。
 bool restore_trash_entries(const std::vector<TrashEntry>& entries) {
     bool complete = true;
-    for (const TrashEntry& entry : entries) {
+    for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+        const TrashEntry& entry = *it;
         if (!file_exists(entry.trash_path)) continue;  // 已删除或已移回
         if (file_exists(entry.orig_path)) {
             SB_LOG_WARN("delete recovery: target exists, keep trash file: %s",
@@ -1116,6 +1117,14 @@ void save_backup_slot_deleted_sync(int32_t slot) {
     const std::string id = next_transaction_id();
     const std::string trash_dir = saves_dir + "/.sb-trash-" + id;
     const std::string index_path = backups_dir + "/.trash-" + id + ".index";
+    std::string save_dir;
+    std::vector<std::string> wh_names;
+    if (locate_save_directory_at(g_sb_data_dir, save_dir) == 0) {
+        wh_names = qol::features::save_backup::list_warehouse_companions(save_dir, slot);
+    }
+    const bool data_trash_needed = !wh_names.empty();
+    const std::string data_trash =
+        data_trash_needed ? save_dir + "/.sb-trash-" + id : std::string();
     const std::string primary = saves_dir + "/slot-" + std::to_string(slot) + ".qol-save";
     const std::string last_good = primary + ".last-good";
     const std::string corrupt_marker = primary + ".unresolved-corrupt";
@@ -1124,14 +1133,30 @@ void save_backup_slot_deleted_sync(int32_t slot) {
         {trash_dir + "/" + file_name_of(last_good), last_good},
         {trash_dir + "/" + file_name_of(corrupt_marker), corrupt_marker},
     };
+    for (const std::string& wh_name : wh_names) {
+        entries.push_back({data_trash + "/" + wh_name, save_dir + "/" + wh_name});
+    }
+    auto cleanup_trash_dirs = [&]() {
+        remove_dir_if_empty(trash_dir);
+        if (data_trash_needed) remove_dir_if_empty(data_trash);
+    };
+
     if (::mkdir(trash_dir.c_str(), 0755) != 0) {
         SB_LOG_WARN("slot delete hook: trash mkdir failed slot=%d", slot);
         slot_operation_release(&guard);
         save_mark_stale();
         return;
     }
+    if (data_trash_needed && ::mkdir(data_trash.c_str(), 0755) != 0) {
+        (void)::rmdir(trash_dir.c_str());
+        SB_LOG_WARN("slot delete hook: data trash mkdir failed slot=%d", slot);
+        slot_operation_release(&guard);
+        save_mark_stale();
+        return;
+    }
     if (!write_trash_index(index_path, entries)) {
         (void)::rmdir(trash_dir.c_str());
+        if (data_trash_needed) (void)::rmdir(data_trash.c_str());
         SB_LOG_WARN("slot delete hook: index write failed slot=%d", slot);
         slot_operation_release(&guard);
         save_mark_stale();
@@ -1141,7 +1166,7 @@ void save_backup_slot_deleted_sync(int32_t slot) {
         SB_LOG_WARN("slot delete hook: trash api unavailable slot=%d", slot);
         (void)restore_trash_entries(entries);
         remove_file(index_path);
-        remove_dir_if_empty(trash_dir);
+        cleanup_trash_dirs();
         slot_operation_release(&guard);
         save_mark_stale();
         return;
@@ -1151,11 +1176,25 @@ void save_backup_slot_deleted_sync(int32_t slot) {
     if (!qol::contracts::succeeded(status)) {
         (void)restore_trash_entries(entries);
         remove_file(index_path);
-        remove_dir_if_empty(trash_dir);
+        cleanup_trash_dirs();
         SB_LOG_WARN("slot delete hook: sidecar move failed slot=%d", slot);
         slot_operation_release(&guard);
         save_mark_stale();
         return;
+    }
+    for (const std::string& wh_name : wh_names) {
+        const std::string source = save_dir + "/" + wh_name;
+        const std::string target = data_trash + "/" + wh_name;
+        if (::rename(source.c_str(), target.c_str()) != 0) {
+            SB_LOG_WARN("slot delete hook: wh4 move failed slot=%d file=%s", slot,
+                        source.c_str());
+            (void)restore_trash_entries(entries);
+            remove_file(index_path);
+            cleanup_trash_dirs();
+            slot_operation_release(&guard);
+            save_mark_stale();
+            return;
+        }
     }
     bool unlink_failed = false;
     for (const TrashEntry& entry : entries) {
@@ -1168,7 +1207,7 @@ void save_backup_slot_deleted_sync(int32_t slot) {
     if (unlink_failed) {
         if (restore_trash_entries(entries)) {
             remove_file(index_path);
-            remove_dir_if_empty(trash_dir);
+            cleanup_trash_dirs();
         } else {
             SB_LOG_WARN("slot delete hook: rollback incomplete, keep %s", index_path.c_str());
         }
@@ -1177,9 +1216,9 @@ void save_backup_slot_deleted_sync(int32_t slot) {
         return;
     }
     remove_file(index_path);
-    remove_dir_if_empty(trash_dir);
+    cleanup_trash_dirs();
     slot_operation_release(&guard);
-    SB_LOG("slot delete hook: removed sidecar slot=%d", slot);
+    SB_LOG("slot delete hook: removed sidecar/wh4 slot=%d wh4=%zu", slot, wh_names.size());
     // 游戏删档后槽文件已变：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_mark_stale();
 }
@@ -1608,50 +1647,9 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         return result_error(degraded_message);
     };
 
-    // 4) 原子写原版 .dat（tmp+rename）。
-    if (!write_file_bytes_atomic(dat_path, cipher.data(), cipher.size())) {
-        const save_backup::RollbackResult rollback = restore_from_rollback(
-            slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
-            sidecar_touched, &guard);
-        return fail_with_rollback(rollback, "save file write failed",
-                                  "save file write failed; rollback failed");
-    }
-
-    // 5) sidecar：present 经槽操作 lease 显式入口重定槽并双写 primary + last-good；
-    //    absent 是完整替换语义——dat 写入后必须删除目标槽现存 sidecar。
-    if (module_present) {
-        bool store_touched = false;
-        const bool imported = store_import_container_locked_gate(guard, slot, parsed.module.data(),
-                                                                 parsed.module.size(),
-                                                                 &store_touched);
-        sidecar_touched = store_touched;
-        if (!imported) {
-            const save_backup::RollbackResult rollback = restore_from_rollback(
-                slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
-                sidecar_touched, &guard);
-            return fail_with_rollback(rollback, "module container import failed",
-                                      "module container import failed; rollback failed");
-        }
-    } else {
-        // 删除入口可能已删除部分文件，回滚统一按“已触碰”处理以恢复快照。
-        sidecar_touched = true;
-        if (!store_delete_slot_locked_gate(guard, slot)) {
-            const save_backup::RollbackResult rollback = restore_from_rollback(
-                slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
-                sidecar_touched, &guard);
-            return fail_with_rollback(rollback, "module container import failed",
-                                      "module container import failed; rollback failed");
-        }
-    }
-
-    // 6) 个人仓库伴生文件写回：仅当 v2/v3 备份 parsed.has_warehouse 为真时执行；
-    //    v1 旧备份（has_warehouse=false）完全跳过，绝不触碰现存 wh4 文件（保护旧备份导入用户）。
-    //    预校验/预加密已完成（见 2a），此处只做落盘。
+    // 6) 个人仓库伴生文件写回（类别顺序由注册表驱动；预校验/预加密已完成，见 2a）。
     //    **语义为 additive**：只新增/覆盖 bundle 内后缀对应的目标文件，不删除目标槽其它
-    //    后缀的 wh4 文件——理由：模块不掌握游戏仓库文件的完整集合语义，批量删除可能误删
-    //    其它存档数据。suffix 已由 decode_warehouse 校验（`.wh4-` 开头、无路径分隔/`..`），
-    //    因此 target 由 save_dir + 槽号 + suffix 直接拼接是安全的，不再引入额外路径处理。
-    //    任一步失败：先还原本函数已处理的全部 wh 文件，再回滚 dat/sidecar。
+    //    后缀的 wh4 文件——模块不掌握游戏仓库文件的完整集合语义，批量删除可能误删其它数据。
     struct WhRollback {
         std::string target;
         std::string rb;
@@ -1685,7 +1683,50 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
         return result;
     };
-    if (wh_write) {
+
+    // 4) original_dat：原子写原版 .dat（tmp+rename）。
+    auto import_original_dat = [&]() -> std::string {
+        if (!write_file_bytes_atomic(dat_path, cipher.data(), cipher.size())) {
+            const save_backup::RollbackResult rollback = restore_from_rollback(
+                slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                sidecar_touched, &guard);
+            return fail_with_rollback(rollback, "save file write failed",
+                                      "save file write failed; rollback failed");
+        }
+        return {};
+    };
+
+    // 5) module_sidecar：present 重定槽双写；absent 是完整替换——删除目标槽现存 sidecar。
+    auto import_module_sidecar = [&]() -> std::string {
+        if (module_present) {
+            bool store_touched = false;
+            const bool imported = store_import_container_locked_gate(
+                guard, slot, parsed.module.data(), parsed.module.size(), &store_touched);
+            sidecar_touched = store_touched;
+            if (!imported) {
+                const save_backup::RollbackResult rollback = restore_from_rollback(
+                    slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                    sidecar_touched, &guard);
+                return fail_with_rollback(rollback, "module container import failed",
+                                          "module container import failed; rollback failed");
+            }
+        } else {
+            // 删除入口可能已删除部分文件，回滚统一按“已触碰”处理以恢复快照。
+            sidecar_touched = true;
+            if (!store_delete_slot_locked_gate(guard, slot)) {
+                const save_backup::RollbackResult rollback = restore_from_rollback(
+                    slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                    sidecar_touched, &guard);
+                return fail_with_rollback(rollback, "module container import failed",
+                                          "module container import failed; rollback failed");
+            }
+        }
+        return {};
+    };
+
+    // 6) warehouse_companion：仅 v2/v3（has_warehouse=true）写回；v1 完全跳过。
+    auto import_warehouse = [&]() -> std::string {
+        if (!wh_write) return {};
         size_t wh_written = 0;
         size_t wh_reencrypted = 0;
         for (size_t i = 0; i < parsed.warehouse.size(); ++i) {
@@ -1732,6 +1773,27 @@ std::string save_backup_import_json(const char* checksum, int slot) {
                    "reencrypted=%zu (state=%s)",
                    slot, wh_written, wh_reencrypted, warehouse_state_name(target_state));
         }
+        return {};
+    };
+
+    // 类别顺序由注册表唯一决定；任一类失败立即返回其既有回滚结果。
+    size_t class_count = 0;
+    const qol::features::save_backup::BackupFileClass* classes =
+        qol::features::save_backup::backup_file_classes(&class_count);
+    for (size_t i = 0; i < class_count; ++i) {
+        std::string response;
+        switch (classes[i].kind) {
+            case qol::features::save_backup::BackupFileKind::kOriginalDat:
+                response = import_original_dat();
+                break;
+            case qol::features::save_backup::BackupFileKind::kModuleSidecar:
+                response = import_module_sidecar();
+                break;
+            case qol::features::save_backup::BackupFileKind::kWarehouseCompanion:
+                response = import_warehouse();
+                break;
+        }
+        if (!response.empty()) return response;
     }
 
     // 7) 成功：清理该槽回滚副本（dat 与 wh 副本；sidecar 无需副本），并释放前置门 lease。
@@ -1807,7 +1869,11 @@ std::string save_backup_delete_slot_json(int slot) {
     const ContainerStatus probe_status = store_read_container(slot, probe);
     const bool sidecar_existed = probe_status == ContainerStatus::kOk ||
                                  probe_status == ContainerStatus::kCorrupt;
-    if (!dat_existed && !sidecar_existed) return result_error("save not found");
+    const std::vector<std::string> wh_names =
+        qol::features::save_backup::list_warehouse_companions(save_dir, slot);
+    if (!dat_existed && !sidecar_existed && wh_names.empty()) {
+        return result_error("save not found");
+    }
     lk.unlock();
 
     SlotOperationGuard guard;
@@ -1815,6 +1881,7 @@ std::string save_backup_delete_slot_json(int slot) {
 
     const std::string id = next_transaction_id();
     const std::string dat_trash = save_dir + "/.sb-trash-" + id;
+    const bool dat_trash_needed = dat_existed || !wh_names.empty();
     std::string saves_dir;
     std::string sidecar_trash;
     if (sidecar_existed) {
@@ -1837,6 +1904,7 @@ std::string save_backup_delete_slot_json(int slot) {
     const std::string index_path = backups_dir + "/.trash-" + id + ".index";
 
     std::vector<TrashEntry> entries;
+    // 顺序与注册表一致：dat → sidecar → wh4；失败回滚逆序。
     if (dat_existed) {
         entries.push_back({dat_trash + "/" + file_name_of(dat_path), dat_path});
     }
@@ -1848,9 +1916,12 @@ std::string save_backup_delete_slot_json(int slot) {
         const std::string corrupt_marker = sidecar_base + ".unresolved-corrupt";
         entries.push_back({sidecar_trash + "/" + file_name_of(corrupt_marker), corrupt_marker});
     }
+    for (const std::string& wh_name : wh_names) {
+        entries.push_back({dat_trash + "/" + wh_name, save_dir + "/" + wh_name});
+    }
 
     auto cleanup_trash_dirs = [&]() {
-        if (dat_existed) remove_dir_if_empty(dat_trash);
+        if (dat_trash_needed) remove_dir_if_empty(dat_trash);
         if (sidecar_existed) remove_dir_if_empty(sidecar_trash);
     };
     // 已发生 rename 后的失败：先把仍留在 trash 的文件移回，全部移回才清 index/目录；
@@ -1866,35 +1937,61 @@ std::string save_backup_delete_slot_json(int slot) {
         return result_error(message);
     };
 
-    if (dat_existed && ::mkdir(dat_trash.c_str(), 0755) != 0) {
+    if (dat_trash_needed && ::mkdir(dat_trash.c_str(), 0755) != 0) {
         slot_operation_release(&guard);
         return result_error("delete save failed");
     }
     if (sidecar_existed && ::mkdir(sidecar_trash.c_str(), 0755) != 0) {
-        if (dat_existed) (void)::rmdir(dat_trash.c_str());
+        if (dat_trash_needed) (void)::rmdir(dat_trash.c_str());
         slot_operation_release(&guard);
         return result_error("delete sidecar failed");
     }
     if (!write_trash_index(index_path, entries)) {
-        if (dat_existed) (void)::rmdir(dat_trash.c_str());
+        if (dat_trash_needed) (void)::rmdir(dat_trash.c_str());
         if (sidecar_existed) (void)::rmdir(sidecar_trash.c_str());
         slot_operation_release(&guard);
         return result_error("delete save failed");
     }
 
-    if (dat_existed && ::rename(dat_path.c_str(), entries[0].trash_path.c_str()) != 0) {
-        return fail_after_moves("delete save failed");
-    }
-    if (sidecar_existed) {
-        if (guard.api->abi.minor < 1 || guard.api->delete_container_to_trash == nullptr) {
-            SB_LOG_WARN("save slot delete: trash api unavailable slot=%d", slot);
-            return fail_after_moves("delete sidecar failed");
-        }
-        const QolResult status = guard.api->delete_container_to_trash(
-            guard.api->host_ctx, g_owner_token, &guard.lease, slot, sidecar_trash.c_str());
-        if (!qol::contracts::succeeded(status)) {
-            SB_LOG("save slot delete sidecar move failed: slot=%d", slot);
-            return fail_after_moves("delete sidecar failed");
+    // 移动阶段按注册表顺序执行；任一失败移回全部已移动文件。
+    size_t class_count = 0;
+    const qol::features::save_backup::BackupFileClass* classes =
+        qol::features::save_backup::backup_file_classes(&class_count);
+    for (size_t i = 0; i < class_count; ++i) {
+        switch (classes[i].kind) {
+            case qol::features::save_backup::BackupFileKind::kOriginalDat:
+                if (dat_existed &&
+                    ::rename(dat_path.c_str(),
+                             (dat_trash + "/" + file_name_of(dat_path)).c_str()) != 0) {
+                    return fail_after_moves("delete save failed");
+                }
+                break;
+            case qol::features::save_backup::BackupFileKind::kModuleSidecar:
+                if (sidecar_existed) {
+                    if (guard.api->abi.minor < 1 ||
+                        guard.api->delete_container_to_trash == nullptr) {
+                        SB_LOG_WARN("save slot delete: trash api unavailable slot=%d", slot);
+                        return fail_after_moves("delete sidecar failed");
+                    }
+                    const QolResult status = guard.api->delete_container_to_trash(
+                        guard.api->host_ctx, g_owner_token, &guard.lease, slot,
+                        sidecar_trash.c_str());
+                    if (!qol::contracts::succeeded(status)) {
+                        SB_LOG("save slot delete sidecar move failed: slot=%d", slot);
+                        return fail_after_moves("delete sidecar failed");
+                    }
+                }
+                break;
+            case qol::features::save_backup::BackupFileKind::kWarehouseCompanion:
+                for (const std::string& wh_name : wh_names) {
+                    const std::string source = save_dir + "/" + wh_name;
+                    const std::string target = dat_trash + "/" + wh_name;
+                    if (::rename(source.c_str(), target.c_str()) != 0) {
+                        SB_LOG("save slot delete wh4 move failed: %s", source.c_str());
+                        return fail_after_moves("delete save failed");
+                    }
+                }
+                break;
         }
     }
 
@@ -1916,7 +2013,8 @@ std::string save_backup_delete_slot_json(int slot) {
     remove_file(index_path);
     cleanup_trash_dirs();
     slot_operation_release(&guard);
-    SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d)", slot, dat_existed, sidecar_existed);
+    SB_LOG("save slot deleted: slot=%d (dat=%d sidecar=%d wh4=%zu)", slot, dat_existed,
+           sidecar_existed, wh_names.size());
     // 槽文件已删除：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_mark_stale();
     return "{\"ok\":true,\"deleted_slot\":" + std::to_string(slot) + "}";
