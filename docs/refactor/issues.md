@@ -215,6 +215,25 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 
 无法验证：AS-02 真实保存并发路径未复现（host fake 覆盖不重入）；AS-06/07 在途出售取消未逐帧捕获；AS-10/11 面板视觉待用户目视；AS-12 WARN 未触发；scan/panel/JNI 集成测试仍缺；全量 smoke 未跑。详见审阅登记 §2。
 
+## 15. special_equip（审阅批 2026-10-21）
+
+审阅登记：`audits/plugin-audit/special-equip-20261021/verification-log.md`；参考说明：`reference/plugins/special_equip.md`。阶段 1 共 12 条 finding（P1 2 / P2 7 / P3 3），静态已全部修复（`ec90f718`）；设备行为未验收。
+
+| 编号 | 组件 | 问题 | 处置 / 状态 |
+|---|---|---|---|
+| SE-01 | special_equip | 重放 ① 用数量未编码判据代替 `ITEM_IsRealEquip` | 已修；反汇编确证不等价，改用 `item.facts.is_real_equip`。真机未验收 |
+| SE-02 | special_equip | 需求等级用 `ITEM_GetAbilityLevel` 而非原版 `ITEM_GetEquipLevel` | 已修；改用 `read_only.item.equip_level`。chaos/裁剪物品真机未验收 |
+| SE-03 | special_equip × core.item | 出售门禁拦特殊 NPC 装备详情中的全部装备，超出 VM-P4-06 字面范围 | 用户裁决保持现范围；VM-P4-06 已注记。真机目视未做 |
+| SE-04 | special_equip | 出售谓词登记失败仅 WARN，漏拦不可见 | 已修：登记失败即安装失败 |
+| SE-05 | special_equip | 未知正 `desc_type` fail-open | 已修：只接受 0/1/2，补测试 |
+| SE-06 | special_equip | 装备 wrapper 不检查业务门禁，释放失败隔离时仍覆写 | 已修：原版拒绝后检查 `g_gate` |
+| SE-07 | special_equip | 释放失败隔离后 `can_unequip_wrapper` 解引用已清空 port，可空指针崩溃 | 已修：补空值守卫与 `InFlightGuard`；失败注入未做 |
+| SE-08 | special_equip | 注释声称 HTTP 线程可安全进入，实际 item handle 仅主线程 | 已修注释并加在途保护；未发现跨线程调用点 |
+| SE-09 | special_equip | install 失败分支未就地清理全局 | 已修：统一清理函数 |
+| SE-10 | special_equip | `character.facts` 仅诊断却为 required | 已修：改为 optional |
+| SE-11 | special_equip | 「常开无开关」与 Hidden toggle 冲突 | 已修注释；保留 Debug 禁用口 |
+| SE-12 | special_equip tests | 测试注释与断言相反 | 已修注释并补未知 `desc_type` 用例 |
+
 ## 附录：已修复问题（存证）
 
 | ID | 归属 | 问题 | 修复与复验 |
