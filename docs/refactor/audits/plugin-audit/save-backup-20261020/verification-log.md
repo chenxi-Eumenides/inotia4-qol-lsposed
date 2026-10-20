@@ -79,3 +79,39 @@
 5. **旧 JNI（SB-11）**：**删除** 4 个 Kotlin `external fun` 与 4 个 native 导出；业务函数保留供面板使用。这是对 `ARCHITECTURE.md:71` 冻结面的显式裁决例外，历史证据中的 163 不改写。
 6. **删槽事务（SB-07）**：两阶段同目录改名（`saveN.dat` 与 sidecar/`last-good` 各自目录），统一 commit 删除；失败改回原名；**启动时未提交 txn 采用回滚优先**（全部改回原名）；hook 取 slot lease。
 7. **实施范围**：四批——输入/格式防护（SB-02/03/04/06/10）→ 容量（SB-09）→ 删除事务与文件系统（SB-07/13）→ 校验/快照/JNI（SB-01/05/08/11/12）。每批 host 全绿后一功能一提交，全部完成后进入阶段 4 真机。
+
+## §7 行为重构与自动备份（2026-10-20 追加）
+
+用户裁决：
+
+1. **自动备份先不接线**：面板与 HTTP 不展示、不提供恢复入口；面板 UI 后续重置时再接入。
+2. **绝不阻断保存**：自动备份失败只记 WARN，原版自动/手动保存继续。
+3. **相同则跳过**：导出前比较 dat/sidecar/wh4 的大小与 mtime 指纹，与上次成功导出相同则跳过。
+4. **结构重构边界**：只重构 save_backup 内部（文件类别注册表、统一收集/写回顺序）；bundle 格式、HTTP 契约、面板交互不变；逐点核对行为。
+
+实现：
+
+| 提交 | 内容 |
+|---|---|
+| `50ea8fbd` | `core.save` 新增观察型 `save.pre_save` 1.0；coordinator 在 capture/lease 之前通知，磁盘仍为旧档 |
+| `c5647d67` | 新增文件类别注册表 `original_dat` / `module_sidecar` / `warehouse_companion` 与 `SlotSnapshot`；导出改为先收集再构包 |
+| `a228ec83` | 导入与删槽按注册表顺序执行；删槽与删档 hook 新增 wh4 伴生文件事务删除（唯一行为变更） |
+| `ae8cd781` | 抽出 `save_backup_export_slot_to_dir`；接入 `save.pre_save` 自动备份到 `backups/autobackup/autosave_sN.qol_save` |
+
+自动备份语义：
+
+- 每槽固定 1 份，原子覆盖；导出走与手动导出相同的快照/checksum/编码路径。
+- 指纹文件 `autosave_sN.fingerprint`：dat（size + mtime）、sidecar primary（size + mtime / absent）、wh4 列表（名字 + size + mtime，排序）。完全一致才跳过。
+- 失败（构包/写文件/写指纹）只记 WARN；旧 bundle 与旧指纹保留。
+- `backups/autobackup/` 不参与顶层列表、checksum 定位、去重与删除扫描。
+
+验证：
+
+- host 全量 **148/148 PASS**；`save_backup_gate_tests` 216 断言；`save_pre_save_tests` 42；`save_coordinator_tests` 138。
+- `check_arch` 全绿；路由 147/147；JNI 159/159。
+- Debug 构建：`output/inotia4_qol_lsposed_debug_2610202100_db3c0f9cbee3.apk`（sha256 `db3c0f9c…`）。
+
+未验证：
+
+- 真机未部署；自动备份在游戏自动保存/手动保存前的实际触发、指纹跳过效果、失败保留未在设备观察。
+- 面板/API 不展示自动备份是用户裁决的当前状态，不是最终交互。

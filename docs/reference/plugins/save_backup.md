@@ -31,7 +31,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 
 | 面 | 内容 |
 |---|---|
-| required capabilities | `ui_panels` 1.3、`save.facts` 1.0（`plugin.cpp:32-41,364`） |
+| required capabilities | `ui_panels` 1.3、`save.facts` 1.0、`save.pre_save` 1.0（`plugin.cpp:32-45,364`） |
 | optional_requires | `http.registry`、`http.dispatch`（`plugin.cpp:42-47,365`） |
 | provides | 无（`plugin.cpp:366`） |
 | ports | `QOL_PORT_SAVE_CALL` 1.0（`plugin.cpp:49-52,375-376`）；不声明 `QOL_PORT_SAVE_WRITE` |
@@ -55,6 +55,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - **Host SDK**：capability require、panel provider 注册/注销、RenderPre 帧任务（槽元数据快照）、owner-bound store（sidecar `.qol-save`/`.last-good`）、slot operation lease、指针槽资源回调、日志（`plugin.cpp:241-301`；`feature.cpp:48-51,194-223`）。
 - **save 领域**：`save.facts` 提供明文、槽事实与 `current_slot`；`QOL_PORT_SAVE_CALL` 提供加解密、释放与 stale 标记；存档目录定位基于 `hub_key` 的 `hex(MD5(key))` 回退（`feature.cpp:393-419,614-644`）。
 - **UI 领域**：`ui_panels` 提供面板注册与嵌套 push/返回；控件创建与绘制走 `QolUiAdapter`（`ui/panel.cpp:175-228`；`ui/panel.inc:127-179,226-255`）。
+- **保存前观察者**：`save.pre_save`（`core.save` provide）在每次游戏自动/手动保存写盘前同步回调；插件在 install 注册、deactivate 注销，回调中执行自动备份（`plugin.cpp:83-88,281-296`；`core.save/save_coordinator.cpp:140-142`）。
 - **消费者**：插件不 provides 能力，没有 capability 消费者；对外可观察面是四条 HTTP 路由、设置 entry 与备份面板，均由 settings/catalog 与宿主 dispatch 消费（`plugin.cpp:355-381`）。
 - Kotlin 侧 `SaveController.backupExport/backupList/backupImport/backupDelete` 做轻量校验后经 `NativeHttpCommand.post`/`NativeHttpQuery.get` 转发（`module/app/src/main/java/com/inotia4/qol/api/controller/SaveController.kt:39-79`）；无旧直连 JNI 入口。
 
@@ -73,7 +74,8 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - **sidecar 三态**：metaJson 的 `module_state`（0=absent，1=present）；导入 present 写入/覆盖 sidecar，absent 则删除目标槽现存 sidecar（完整替换，`feature.cpp:1301-1315,1665-1690`）。
 - **导入**：主菜单门禁 → 解析并校验 checksum/module_state → 取槽 lease → 预加密 dat/warehouse → 现存 dat 复制到 `backups/.rollback/`（事务 id 命名）、sidecar 快照留内存 → 原子写 dat → 写/清除 sidecar → 逐项原子写 warehouse → 失败按 dat/sidecar/warehouse 逆序回滚（`feature.cpp:1527-1810`；`rollback.h:5-15`）。warehouse 写回是 additive，不清理目标槽未列出的旧文件（`feature.cpp:1720-1730`）。
 - **删除备份**：解析并校验 checksum 后 `unlink` 单个 bundle（`feature.cpp:1815-1850`）。
-- **删除槽**：dat 与 sidecar 各自在父目录内移入 `.sb-trash-<id>/`，写 `backups/.trash-<id>.index` 后统一 unlink；任一步失败把已移动文件移回；进程中断时下次 `save_backup_init` 调 `save_backup_recover_deletes()` 回滚优先（`feature.cpp:845-1050,1852-1950`）。删档 hook 只处理 sidecar，同样取 lease + trash + index（`feature.cpp:1083-1160`）。
+- **删除槽**：dat、sidecar 与 wh4 伴生文件各自在父目录内移入 `.sb-trash-<id>/`，写 `backups/.trash-<id>.index` 后统一 unlink；任一步失败把已移动文件移回；进程中断时下次 `save_backup_init` 调 `save_backup_recover_deletes()` 回滚优先（`feature.cpp` `save_backup_delete_slot_json`/`save_backup_recover_deletes`）。删档 hook 处理 sidecar 与 wh4，同样取 lease + trash + index（`feature.cpp` `save_backup_slot_deleted_sync`）。
+- **自动备份**：`save.pre_save` 回调把当前槽导出到 `backups/autobackup/autosave_s<N>.qol_save`，每槽 1 份、原子覆盖；导出前用 dat/sidecar/wh4 的 size+mtime 指纹与旧指纹比较，相同则跳过；失败只记 WARN，旧备份保留（`feature.cpp` `save_backup_autobackup_pre_save`；`plugin.cpp:83-88`）。自动备份目录不参与 `backups/` 顶层列表、去重、导入与删除扫描。
 - **列表**：先 `stat`，跳过 >64 MiB 的文件；单次扫描累计 >512 MiB 停止；锁外枚举/解析/排序，按 `export_time` 降序（`feature.cpp:57-58,1221-1290`）。
 - **文件系统原语**：`lstat` 判目录/普通文件，读写用 `O_NOFOLLOW`；原子写临时名与回滚副本使用事务唯一名（`feature.cpp:293-370`）。
 - **生命周期**：install 绑定上下文、注册 panel provider 与槽元数据帧任务；enabled/disabled 只翻转 `g_active`；deactivate 注销帧任务、撤销 owner 面板、注销 provider、解绑上下文；资源物理还原由宿主执行，`on_resource_ready` 只缓存删档原函数指针（`plugin.cpp:241-301`）。
@@ -83,6 +85,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 | 子职责 | 文件 | 关键位置 |
 |---|---|---|
 | descriptor、能力/资源/端口声明、HTTP handler、生命周期、面板 provider、帧任务 | `plugins/save_backup/plugin.cpp` | 资源 100-129；HTTP 127-239；install/lifecycle 241-301；entry 333-359；descriptor 361-383 |
+| 备份文件类别注册表、快照收集（dat/sidecar/wh4） | `plugins/save_backup/backup_files.h`、`backup_files.cpp` | 三类登记与 `collect_slot_snapshot`；wh4 收集/容量/剥离 |
 | bundle 编解码、摘要/CRC、warehouse 序列化与重加密、metaJson、checksum、严格 slot 解析 | `plugins/save_backup/bundle.h`、`bundle.cpp` | 格式与上限 bundle.h:10-35；仓库编解码 103-176；`compute_checksum` 207-220；bundle 组装/解析 222-260；实现 bundle.cpp:754-960 |
 | 目录定位、槽元数据缓存、列表、导出、导入、删除、回滚、sidecar、删档同步、启动恢复 | `plugins/save_backup/feature.cpp`、`feature.h` | 门禁 170-190；原语 293-370；删除事务 845-1050；缓存 1049-1081；列表 1221-1290；导出 1517-1525；导入 1527-1810；删除 1815-1950 |
 | 面板状态、异步刷新、生命周期、UI adapter 包装 | `plugins/save_backup/ui/panel.cpp`、`panel.h` | 布局 74-116；刷新 561-603；open/close 701-750 |
