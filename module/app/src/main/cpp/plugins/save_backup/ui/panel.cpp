@@ -29,75 +29,46 @@
 // 三栏沿同一水平中线垂直居中（左框/中按钮组按各自高度上下居中，见 CONTENT_MID_Y）。
 #define ROOT_W 0x3c0
 #define ROOT_H 0x280
-#define CONTENT_X 0x18
-#define CONTENT_W (ROOT_W - 0x30)
-#define CONTENT_Y 0x48
-// 三栏：左、右两栏同宽 W，中栏居中于两栏之间（两侧等 GAP=0x0A，间隔加宽）。
-//   W 由内容区总宽分配：2W + OPS_COL_W + 2*GAP = CONTENT_W
-//     → W = (912 - 88 - 20) / 2 = 402 = 0x192（整除，无需再取整）。
-//   字宽（libgame 0xa72ec 字形循环 / 0xa48d4 测宽反汇编：font=1 ASCII=6、空格=4、CJK=9
-//   原生单位；原生 480 宽 UI 对应本面板 960 逻辑宽，故 ×2）。
-//   现正文改 font=3（见下），宽度按字号比 28/24 放大；最长「职业名 Lv<L> <地图名>」
-//   （4 CJK 职业 + 16 字节地图名）在本模型下 ≈ 128 原生 ×2 ×(28/24) ≈ 299 逻辑 px，
-//   按钮可用宽 = (W-0x08) - 0x08 左内距 - 0x04 右边距 = 382 px，仍富余；
-//   渲染前仍按估算宽度截断地图名（render.inc est/truncate 助手）以防极端名；来源先截 16 字节。
-// 链式验算（单位 px）：
-//   SLOT 右缘  = 0x18 + 0x192 = 0x1AA
-//   OPS_COL_X  = 0x1AA + 0x0A = 0x1B4；中栏 [0x1B4, 0x20C]，中心 0x1E0 = 内容区中心
-//              （CONTENT_X + CONTENT_W/2 = 0x18 + 0x1C8 = 0x1E0）✓
-//   LIST_COL_X = 0x1B4 + 0x58 + 0x0A = 0x216
-//   LIST_COL_X + W = 0x216 + 0x192 = 0x3A8 = CONTENT_X + CONTENT_W（右框右缘=内容区右缘）✓
-//   三栏间隙均为 GAP=0x0A，互不重叠、不越界 ✓
-#define GAP 0x0C
-#define SLOT_COL_W 0xF0
-#define OPS_COL_W 0x64
+#define FRAME_BORDER 0x03
+#define CONTENT_X 0x13
+#define CONTENT_W 0x39A
+#define CONTENT_Y 0x13
+#define CONTENT_H (ROOT_H - 0x20 - 2 * FRAME_BORDER)
+#define GAP 0x10
+#define SLOT_COL_W 0x120
+#define OPS_COL_W 0x80
 #define LIST_COL_W (CONTENT_W - SLOT_COL_W - OPS_COL_W - 2 * GAP)
-#define SLOT_COL_X (CONTENT_X + 0x10)
+#define SLOT_COL_X CONTENT_X
 #define OPS_COL_X (SLOT_COL_X + SLOT_COL_W + GAP)
 #define LIST_COL_X (OPS_COL_X + OPS_COL_W + GAP)
-// 三栏垂直：右框最高（FRAME_H），以其中心为公共水平中线；左框/中栏按各自高度居中。
-#define AUTO_Y CONTENT_Y
-#define AUTO_H 0x58
-#define AUTO_X LIST_COL_X
-#define FRAME_Y (AUTO_Y + AUTO_H + 0x0C)
-#define FRAME_BORDER 0x03
-#define LIST_ROW_H 0x3C               // 60px row pitch
-#define LIST_ROW_GAP 0x04             // 4px row gap; hit card height = 56px
-#define FRAME_H (5 * LIST_ROW_H + 2 * FRAME_BORDER - LIST_ROW_GAP)
-#define SLOT_ROW_H 0x68               // 104px slot pitch
-#define SLOT_ROW_GAP 0x04             // 4px gap; hit card height = 100px
-#define SLOT_FRAME_H (3 * SLOT_ROW_H + 2 * FRAME_BORDER - SLOT_ROW_GAP)
+#define LIST_ROW_H 0x48
+#define LIST_ROW_GAP 0x04
 #define LIST_COLS_PER_PAGE 5
 #define LIST_COLS_MAX 64
-// 公共水平中线 = 右框中心；左框顶 SLOT_FRAME_Y / 中栏顶 OPS_Y0 据此推出。
-//   FRAME_Y=172, FRAME_H=302 → CONTENT_MID_Y=323
-//   SLOT_FRAME_H=314 → SLOT_FRAME_Y=166; OPS_Y0=217
-//   左右框/中栏均围绕 y=323 对齐；分页行从 y=482 开始并在逻辑画布内结束。
-#define CONTENT_MID_Y (FRAME_Y + FRAME_H / 2)
-#define SLOT_FRAME_Y (CONTENT_MID_Y - SLOT_FRAME_H / 2)
-// 操作按钮组按三栏公共中线垂直居中。
-#define OPS_BTN_H 0x40
-#define OPS_BTN_W 0x58
-#define OPS_BTN_GAP 0x0a
+#define AUTO_Y (CONTENT_Y + LIST_ROW_H / 2)
+#define AUTO_H 0x58
+#define AUTO_X LIST_COL_X
+#define SLOT_ROW_H 0x68
+#define SLOT_ROW_GAP 0x04
+#define SLOT_FRAME_H (3 * SLOT_ROW_H + 2 * FRAME_BORDER - SLOT_ROW_GAP)
+#define CONTENT_BOTTOM (CONTENT_Y + CONTENT_H)
+#define CONTENT_MID_Y (CONTENT_Y + CONTENT_H / 2)
+#define SLOT_FRAME_Y (CONTENT_Y + (CONTENT_H - SLOT_FRAME_H) / 2)
+#define OPS_BTN_H 0x60
+#define OPS_BTN_W 0x70
+#define OPS_BTN_GAP 0x10
 #define OPS_Y0 (CONTENT_MID_Y - (3 * OPS_BTN_H + 2 * OPS_BTN_GAP) / 2)
-// 翻页按钮：右栏框下方一行，prev 左对齐 / next 右对齐（互不重叠）；
-// 页码指示（如「1/2」）画在两按钮正中间（LIST_COL_X + LIST_COL_W/2），只画文字无框。
-//   翻页行底 = PAGE_ROW_Y+0x30 = (0x68+0x160+0x08)+0x30 = 0x200 = 512 (root.y=0) < ROOT_H 0x280 ✓
-//   prev x ∈ [LIST_COL_X+0x04, +0x7C]，next x ∈ [LIST_COL_X+0x116, +0x18E]（W=0x192）；
-//   两按钮内缘间隙 [X+0x7C, X+0x116]，正中 = X+0xC9 = LIST_COL_X+LIST_COL_W/2。
 #define LIST_PAGE_BTN_H 0x30
 #define LIST_PAGE_BTN_W 0x38
-#define PAGE_ROW_Y (FRAME_Y + FRAME_H + 0x08)
+#define PAGE_ROW_Y (CONTENT_BOTTOM - LIST_ROW_H / 2 - LIST_PAGE_BTN_H)
+#define FRAME_Y (AUTO_Y + AUTO_H + GAP)
+#define FRAME_H (PAGE_ROW_Y - GAP - FRAME_Y)
 // 顶部消息/标题区：与设置页 header 标签同高（settings.cpp HEADER_Y=0x18，label rect 高 HEADER_H=0x28）。
 //   MSG_Y + root.y == 0x18（root.y=0 → MSG_Y=0x18）；文本绘制偏移同 settings header_draw 的 0x18。
 #define MSG_X (ROOT_W / 2 - MSG_W / 2)
 #define MSG_Y 0x18
 #define MSG_W 0x120
 #define MSG_H 0x28
-// 返回按钮：三页统一导航标准盒（panel.h kBackBtn*，源自 contracts/ui_theme.h kNavBox*：
-// 屏幕左上 (8,8) 78×86，与 core.ui 设置页完全同款，原版 option 贴图量级）。
-#define BACK_BTN_W kBackBtnW
-#define BACK_BTN_H kBackBtnH
 // ABGR colors are only passed to the component text primitive; controls use component theme states.
 #define UI_GOLD 0xFF00B4D7
 #define UI_OPTION_TEXT 0xFFCB9EE2
@@ -188,8 +159,8 @@ bool g_panel_active = false;
 int g_state_id = -1;
 void* g_root = nullptr;
 const contracts::QolUiComponents* g_ui_components = nullptr;
-void* g_confirm_btn = nullptr;
-void* g_cancel_btn = nullptr;
+const contracts::UiChoiceApi* g_ui_choice_api = nullptr;
+int g_back_pressed = 0;
 int g_close_delay_frames = 0;
 // own:popup.savebackup 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
 contracts::QolPopupStateEntry g_popup_entry{};
@@ -244,7 +215,6 @@ uint32_t g_msg_color = UI_OPTION_TEXT;
 bool g_msg_is_error = false;
 enum class DialogKind { kNone, kImport, kDeleteSlot, kDeleteBackup };
 DialogKind g_dialog = DialogKind::kNone;
-std::chrono::steady_clock::time_point g_dialog_opened_at{};
 std::string g_dialog_checksum;
 int g_dialog_slot = -1;
 bool g_dialog_auto = false;
@@ -263,11 +233,11 @@ bool g_skip_parse_frame = false;
 
 // Component ExecuteProc callback, dispatched by core.custom_ui.
 void component_action_clicked(void* user);
+void close_active_native_choice();
+void on_native_choice_selected(int index, void* user);
 
 // 列表按钮 rect 依赖当前页文件记录数，定义在 panel.inc。
 void sync_list_btn_rects_locked();
-UiRect dialog_button_rect(int index);
-void set_dialog_controls_locked(bool active);
 
 // 解析单条 Entry JSON（纯 CPU；调用方按当前页队列逐条调用）。
 void parse_backups_json(const std::string& json, std::vector<BackupEntry>& entries) {
@@ -390,24 +360,6 @@ void clear_pending_locked() {
     g_dialog_checksum.clear();
     g_dialog_slot = -1;
     g_dialog_auto = false;
-    set_dialog_controls_locked(false);
-}
-
-void set_dialog_controls_locked(bool active) {
-    if (g_ui_components == nullptr || g_confirm_btn == nullptr || g_cancel_btn == nullptr ||
-        g_ui_components->set_rect == nullptr || g_ui_components->text_button_set_enabled == nullptr) return;
-    const UiRect hidden{0, 0, 1, 1};
-    if (active) {
-        (void)g_ui_components->set_rect(g_confirm_btn, dialog_button_rect(0));
-        (void)g_ui_components->set_rect(g_cancel_btn, dialog_button_rect(1));
-        (void)g_ui_components->text_button_set_enabled(g_confirm_btn, 1);
-        (void)g_ui_components->text_button_set_enabled(g_cancel_btn, 1);
-    } else {
-        (void)g_ui_components->text_button_set_enabled(g_confirm_btn, 0);
-        (void)g_ui_components->text_button_set_enabled(g_cancel_btn, 0);
-        (void)g_ui_components->set_rect(g_confirm_btn, hidden);
-        (void)g_ui_components->set_rect(g_cancel_btn, hidden);
-    }
 }
 
 // Queue only visible rows and the selected slot's auto entry. Caller holds g_sbui_mtx.
@@ -609,7 +561,6 @@ void slot_btn_draw(void* ctrl);
 void ops_btn_draw(void* ctrl);
 void list_btn_draw(void* ctrl);
 void auto_btn_draw(void* ctrl);
-void draw_confirm_dialog();
 void sync_component_enabled_locked();
 void page_btn_draw(void* ctrl);
 void msg_label_draw(void* ctrl);
@@ -639,6 +590,11 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
 void savebackup_set_ui_components(const contracts::QolUiComponents* components) {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     g_ui_components = components;
+}
+
+void savebackup_set_ui_choice_api(const contracts::UiChoiceApi* api) {
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    g_ui_choice_api = api;
 }
 
 // ============== own:popup.savebackup（kOwnership）==============
@@ -719,6 +675,7 @@ bool savebackup_provider_open() {
 }
 
 void savebackup_provider_close() {
+    close_active_native_choice();
     bool was_active = false;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);

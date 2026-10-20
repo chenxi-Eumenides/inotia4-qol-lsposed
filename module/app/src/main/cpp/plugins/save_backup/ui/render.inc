@@ -21,10 +21,29 @@ static void component_container(UiRect rect) {
 
 void root_decor_draw() {
     if (g_root == nullptr) return;
+    UiRect root{};
+    if (ui_get_rect(g_root, &root)) {
+        const contracts::QolUiAdapter* ui = ui_adapter();
+        if (ui != nullptr && ui->draw_image_part != nullptr) {
+            (void)ui->draw_image_part(0x4f, 0, static_cast<int32_t>(root.x + ROOT_W / 2 - 300),
+                                      static_cast<int32_t>(root.y + ROOT_H / 2), 2, 1);
+            (void)ui->draw_image_part(0x50, 0, static_cast<int32_t>(root.x + ROOT_W / 2 + 300),
+                                      static_cast<int32_t>(root.y + ROOT_H / 2), 2, 1);
+        }
+    }
     component_container({0x10, 0x10, ROOT_W - 0x20, ROOT_H - 0x20});
-    if (g_dialog != DialogKind::kNone) return;
     component_container({OPS_COL_X, OPS_Y0 - 0x08, OPS_COL_W, 3 * OPS_BTN_H + 2 * OPS_BTN_GAP + 0x10});
     component_container({LIST_COL_X, FRAME_Y, LIST_COL_W, FRAME_H});
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui != nullptr && ui->fill_rect != nullptr) {
+        const UiRect root_abs = component_absolute_rect({0, 0, 0, 0});
+        constexpr int64_t kSeparatorH = 2;
+        for (int i = 0; i < LIST_COLS_PER_PAGE - 1; ++i) {
+            const int64_t y = FRAME_Y + FRAME_BORDER + (i + 1) * LIST_ROW_H - 3;
+            (void)ui->fill_rect({root_abs.x + LIST_COL_X + FRAME_BORDER, root_abs.y + y,
+                                 LIST_COL_W - 2 * FRAME_BORDER, kSeparatorH}, UI_GOLD);
+        }
+    }
 }
 
 void slot_btn_draw(void* ctrl) {
@@ -34,7 +53,6 @@ void slot_btn_draw(void* ctrl) {
     if (index < 0) return;
     const bool selected = g_selected_slot == index;
     component_container(slot_btn_rect(index));
-    if (g_dialog != DialogKind::kNone) return;
     const UiRect rect = slot_btn_rect(index);
     if (!g_slots[index].exists) {
         char empty[32]; snprintf(empty, sizeof(empty), "存档%d 空", index + 1);
@@ -64,12 +82,26 @@ void ops_btn_draw(void* ctrl) {
     const bool slot_selected = g_selected_slot >= 0;
     const bool slot_exists = slot_selected && g_slots[g_selected_slot].exists;
     const bool backup_selected = g_selected_auto ? g_auto_backup_valid : selected_manual_backup() != nullptr;
-    bool enabled = index == 0 ? slot_exists :
-                   index == 1 ? ((slot_selected != (selected_manual_backup() != nullptr)) && !g_selected_auto) :
-                                (slot_selected && backup_selected);
-    if (g_dialog != DialogKind::kNone) enabled = false;
-    (void)g_ui_components->text_button_set_enabled(ctrl, enabled ? 1 : 0);
-    (void)g_ui_components->text_button_draw(ctrl);
+    const bool enabled = index == 0 ? slot_exists :
+                         index == 1 ? ((slot_selected != (selected_manual_backup() != nullptr)) && !g_selected_auto) :
+                                      (slot_selected && backup_selected);
+    if (index != 1) {
+        (void)g_ui_components->arrow_button_set_enabled(ctrl,
+            enabled && g_dialog == DialogKind::kNone ? 1 : 0);
+        (void)g_ui_components->arrow_button_draw(ctrl);
+        return;
+    }
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->fill_rect == nullptr) return;
+    const UiRect rect = component_absolute_rect(ops_btn_rect(index));
+    const int64_t x0 = rect.x + (rect.w - 0x20) / 2;
+    const int64_t y0 = rect.y + (rect.h - 0x20) / 2;
+    const uint32_t color = enabled && g_dialog == DialogKind::kNone ? UI_GOLD : COLOR_TEXT_GRAY;
+    for (int i = 0; i < 8; ++i) {
+        const int64_t step = i * 4;
+        (void)ui->fill_rect({x0 + step, y0 + step, 6, 4}, color);
+        (void)ui->fill_rect({x0 + 0x1C - step, y0 + step, 6, 4}, color);
+    }
 }
 
 void list_btn_draw(void* ctrl) {
@@ -83,10 +115,6 @@ void list_btn_draw(void* ctrl) {
     const bool parsed = item->parsed;
     const bool selected = absolute == g_selected_backup;
     const UiRect rect = list_btn_rect(local);
-    if (g_dialog != DialogKind::kNone) {
-        component_container(rect);
-        return;
-    }
     if (!parsed) {
         component_text("加载中…", static_cast<int>(rect.x + 0x50), static_cast<int>(rect.y + 0x12), COLOR_TEXT_GRAY);
         return;
@@ -106,15 +134,14 @@ void list_btn_draw(void* ctrl) {
     char number[8]; snprintf(number, sizeof(number), "%d", absolute + 1);
     const uint32_t primary = selected ? UI_GOLD : UI_OPTION_TEXT;
     component_text(number, static_cast<int>(rect.x + 0x20), static_cast<int>(rect.y + 0x18), primary, 2, 1);
-    component_text(first, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x02), primary, 0, 1);
-    component_text(second, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x1E), COLOR_TEXT_WHITE, 0, 1);
+    component_text(first, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x07), primary, 0, 1);
+    component_text(second, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x23), COLOR_TEXT_WHITE, 0, 1);
 }
 
 void auto_btn_draw(void* ctrl) {
     if (ctrl == nullptr || g_ui_components == nullptr) return;
     const UiRect rect = auto_btn_rect();
     component_container(rect);
-    if (g_dialog != DialogKind::kNone) return;
     component_text("auto", static_cast<int>(rect.x + 0x0C), static_cast<int>(rect.y + 0x1F),
                    g_selected_auto ? UI_GOLD : UI_OPTION_TEXT);
     if (!g_auto_backup_valid) {
@@ -154,34 +181,12 @@ void msg_label_draw(void*) {
 void sync_component_enabled_locked() {
     if (g_ui_components == nullptr) return;
     const bool modal = g_dialog != DialogKind::kNone;
-    const bool manual_selected = selected_manual_backup() != nullptr;
     (void)g_ui_components->nav_button_set_enabled(g_back_btn, modal ? 0 : 1);
     const bool export_enabled = g_selected_slot >= 0 && g_slots[g_selected_slot].exists;
-    const bool delete_enabled = ((g_selected_slot >= 0) != manual_selected) && !g_selected_auto;
+    const bool manual_selected = selected_manual_backup() != nullptr;
     const bool import_enabled = g_selected_slot >= 0 && (g_selected_auto ? g_auto_backup_valid : manual_selected);
-    (void)g_ui_components->text_button_set_enabled(g_ops_btns[0], !modal && export_enabled ? 1 : 0);
-    (void)g_ui_components->text_button_set_enabled(g_ops_btns[1], !modal && delete_enabled ? 1 : 0);
-    (void)g_ui_components->text_button_set_enabled(g_ops_btns[2], !modal && import_enabled ? 1 : 0);
+    (void)g_ui_components->arrow_button_set_enabled(g_ops_btns[0], !modal && export_enabled ? 1 : 0);
+    (void)g_ui_components->arrow_button_set_enabled(g_ops_btns[2], !modal && import_enabled ? 1 : 0);
     (void)g_ui_components->arrow_button_set_enabled(g_prev_btn, !modal && g_page_index > 0 ? 1 : 0);
     (void)g_ui_components->arrow_button_set_enabled(g_next_btn, !modal && g_page_index < g_total_pages - 1 ? 1 : 0);
-    (void)g_ui_components->text_button_set_enabled(g_confirm_btn, modal ? 1 : 0);
-    (void)g_ui_components->text_button_set_enabled(g_cancel_btn, modal ? 1 : 0);
-}
-
-void draw_confirm_dialog() {
-    if (g_dialog == DialogKind::kNone) return;
-    component_container(dialog_rect());
-    char body[96];
-    if (g_dialog == DialogKind::kImport) snprintf(body, sizeof(body), "导入备份到槽%d？", g_dialog_slot + 1);
-    else if (g_dialog == DialogKind::kDeleteSlot) snprintf(body, sizeof(body), "删除 槽%d 的存档？不可恢复。", g_dialog_slot + 1);
-    else snprintf(body, sizeof(body), "删除选中的备份？");
-    const UiRect dialog = dialog_rect();
-    component_text(g_dialog == DialogKind::kImport ? "确认导入" : "确认删除",
-                   static_cast<int>(dialog.x + dialog.w / 2), static_cast<int>(dialog.y + 0x30), UI_GOLD, 2, 1);
-    component_text(body, static_cast<int>(dialog.x + dialog.w / 2), static_cast<int>(dialog.y + 0x68), COLOR_TEXT_WHITE, 2, 1);
-    if (g_dialog == DialogKind::kImport && g_slots[g_dialog_slot].exists)
-        component_text("将覆盖现有存档。", static_cast<int>(dialog.x + dialog.w / 2),
-                       static_cast<int>(dialog.y + 0x8C), COLOR_TEXT_WHITE, 2, 1);
-    (void)g_ui_components->text_button_draw(g_confirm_btn);
-    (void)g_ui_components->text_button_draw(g_cancel_btn);
 }

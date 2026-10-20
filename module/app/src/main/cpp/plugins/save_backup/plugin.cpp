@@ -16,6 +16,7 @@
 #include "../../contracts/commands.h"
 #include "../../contracts/runtime_hooks.h"
 #include "../../contracts/ui.h"
+#include "../../contracts/ui_choice.h"
 #include "bundle.h"
 #include "feature.h"
 #include "log.h"
@@ -52,6 +53,10 @@ const contracts::CapabilityRequirement kRequires[] = {
     {
         contracts::kWorldFactsCapabilityId,
         {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
+    },
+    {
+        contracts::kUiChoiceCapabilityId,
+        {contracts::kUiChoiceVersionMajor, contracts::kUiChoiceVersionMinor},
     },
 };
 
@@ -264,6 +269,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     const void* save_facts_iface = nullptr;
     const void* pre_save_iface = nullptr;
     const void* world_facts_iface = nullptr;
+    const void* ui_choice_iface = nullptr;
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
         !contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kUiComponentsCapabilityId,
@@ -281,8 +287,12 @@ int plugin_install(contracts::PluginContext& ctx) {
             contracts::kWorldFactsCapabilityId,
             {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
             &world_facts_iface)) ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kUiChoiceCapabilityId,
+            {contracts::kUiChoiceVersionMajor, contracts::kUiChoiceVersionMinor},
+            &ui_choice_iface)) ||
         ui_components_iface == nullptr || save_facts_iface == nullptr || pre_save_iface == nullptr ||
-        world_facts_iface == nullptr || ctx.ports == nullptr ||
+        world_facts_iface == nullptr || ui_choice_iface == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
@@ -292,21 +302,19 @@ int plugin_install(contracts::PluginContext& ctx) {
     const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(save_facts_iface);
     const auto* pre_save = static_cast<const contracts::SavePreSaveApi*>(pre_save_iface);
     const auto* world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
+    const auto* ui_choice = static_cast<const contracts::UiChoiceApi*>(ui_choice_iface);
     if (ui_components->size < sizeof(*ui_components) ||
         !contracts::satisfies({ui_components->major, ui_components->minor},
                               {contracts::kUiContractMajor, contracts::kUiContractMinor}) ||
         ui_components->panel_create == nullptr || ui_components->button_create == nullptr ||
         ui_components->set_rect == nullptr ||
-        ui_components->flat_text_button_create == nullptr ||
-        ui_components->text_button_set_enabled == nullptr ||
-        ui_components->text_button_set_active == nullptr ||
-        ui_components->text_button_draw == nullptr ||
         ui_components->nav_button_create == nullptr || ui_components->nav_button_draw == nullptr ||
         ui_components->nav_button_set_enabled == nullptr ||
         ui_components->arrow_button_create == nullptr || ui_components->arrow_button_set_enabled == nullptr ||
         ui_components->arrow_button_draw == nullptr || ui_components->draw_container == nullptr ||
         ui_components->draw_control_text == nullptr || ui_components->dispatch_native_event == nullptr ||
         ui_components->destroy == nullptr ||
+        ui_choice->open == nullptr || ui_choice->active == nullptr || ui_choice->close == nullptr ||
         !contracts::satisfies(save_call->abi_version,
                               {contracts::kQolPortSaveCallVersion.major,
                                contracts::kQolPortSaveCallVersion.minor}) ||
@@ -352,6 +360,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     savebackup_set_ui_components(ui_components);
+    savebackup_set_ui_choice_api(ui_choice);
     // 游戏主线程刷新槽元数据快照；HTTP 导出只读缓存，不跨线程读游戏槽结构。
     if (ctx.sdk->scheduler.add != nullptr && g_slot_meta_task == 0) {
         uint64_t task = 0;
@@ -377,6 +386,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         }
     }
     savebackup_set_ui_components(nullptr);
+    savebackup_set_ui_choice_api(nullptr);
     g_active.store(false, std::memory_order_release);
     if (g_slot_meta_task != 0 && ctx.sdk != nullptr && ctx.sdk->scheduler.remove != nullptr) {
         (void)ctx.sdk->scheduler.remove(g_slot_meta_task);
@@ -452,7 +462,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    5, kRequires,  // requires=ui_components + ui_panels + save.facts + save.pre_save + world.facts
+    6, kRequires,  // requires=ui_components + ui_panels + save.facts + save.pre_save + world.facts + ui_choice
     2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）

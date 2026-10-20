@@ -41,35 +41,65 @@ static void export_selected() {
     if (ok) refresh_panel_data();
 }
 
-static void open_import_dialog() {
+static void execute_dialog_confirm();
+
+static void on_native_choice_selected(int index, void*) {
+    if (index == 0) execute_dialog_confirm();
+}
+
+static bool open_native_choice(const std::string& prompt) {
+    if (g_ui_choice_api == nullptr || g_ui_choice_api->open == nullptr) return false;
+    static const char* const items[] = {"确认", "取消"};
+    const contracts::UiChoiceSpec spec{items, 2, prompt.c_str(), 1,
+                                       &on_native_choice_selected, nullptr,
+                                       "save_backup.confirm"};
+    return g_ui_choice_api->open(spec);
+}
+
+static void reject_choice_open() {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    const BackupEntry* entry = g_selected_auto ? (g_auto_backup_valid ? &g_auto_backup : nullptr)
-                                               : selected_manual_backup();
-    if (g_selected_slot < 0 || entry == nullptr) {
-        set_msg_locked("当前选择不支持该操作", COLOR_ERR, true);
-        return;
+    clear_pending_locked();
+    set_msg_locked("已有原生选择框打开", COLOR_ERR, true);
+}
+
+static void open_import_dialog() {
+    std::string prompt;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        const BackupEntry* entry = g_selected_auto ? (g_auto_backup_valid ? &g_auto_backup : nullptr)
+                                                   : selected_manual_backup();
+        if (g_selected_slot < 0 || entry == nullptr) {
+            set_msg_locked("当前选择不支持该操作", COLOR_ERR, true);
+            return;
+        }
+        g_dialog = DialogKind::kImport;
+        g_dialog_checksum = entry->checksum;
+        g_dialog_slot = g_selected_slot;
+        g_dialog_auto = g_selected_auto;
+        prompt = "导入备份到槽" + std::to_string(g_dialog_slot + 1) + "？";
+        if (g_slots[g_dialog_slot].exists) prompt += "将覆盖现有存档。";
     }
-    g_dialog = DialogKind::kImport;
-    g_dialog_checksum = entry->checksum;
-    g_dialog_slot = g_selected_slot;
-    g_dialog_auto = g_selected_auto;
-    g_dialog_opened_at = std::chrono::steady_clock::now();
-    set_dialog_controls_locked(true);
+    if (!open_native_choice(prompt)) reject_choice_open();
 }
 
 static void open_delete_dialog() {
-    std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    const bool slot_selected = g_selected_slot >= 0;
-    const BackupEntry* entry = selected_manual_backup();
-    if (slot_selected == (entry != nullptr) || g_selected_auto) {
-        set_msg_locked("当前选择不支持该操作", COLOR_ERR, true);
-        return;
+    std::string prompt;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        const bool slot_selected = g_selected_slot >= 0;
+        const BackupEntry* entry = selected_manual_backup();
+        if (slot_selected == (entry != nullptr) || g_selected_auto) {
+            set_msg_locked("当前选择不支持该操作", COLOR_ERR, true);
+            return;
+        }
+        g_dialog = slot_selected ? DialogKind::kDeleteSlot : DialogKind::kDeleteBackup;
+        g_dialog_checksum = entry != nullptr ? entry->checksum : "";
+        g_dialog_slot = slot_selected ? g_selected_slot : -1;
+        prompt = slot_selected
+            ? "删除 槽" + std::to_string(g_dialog_slot + 1) + " 的存档？不可恢复。"
+            : "删除选中的备份？";
     }
-    g_dialog = slot_selected ? DialogKind::kDeleteSlot : DialogKind::kDeleteBackup;
-    g_dialog_checksum = entry != nullptr ? entry->checksum : "";
-    g_dialog_slot = slot_selected ? g_selected_slot : -1;
-    g_dialog_opened_at = std::chrono::steady_clock::now();
-    set_dialog_controls_locked(true);
+    if (!open_native_choice(prompt)) reject_choice_open();
 }
 
 static void execute_dialog_confirm() {
@@ -166,16 +196,18 @@ void component_action_clicked(void* user) {
         if (action == 500 && g_page_index > 0) --g_page_index;
         else if (action == 501 && g_page_index < g_total_pages - 1) ++g_page_index;
         rebuild_parse_queue_locked();
-    } else if (action == 600) {
-        {
-            std::lock_guard<std::mutex> lock(g_sbui_mtx);
-            if (g_dialog == DialogKind::kNone ||
-                std::chrono::steady_clock::now() - g_dialog_opened_at < std::chrono::milliseconds(200)) return;
-        }
-        execute_dialog_confirm();
-    } else if (action == 601) {
-        std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        if (g_dialog == DialogKind::kNone) return;
-        clear_pending_locked();
     }
+}
+
+void close_active_native_choice() {
+    const contracts::UiChoiceApi* api = g_ui_choice_api;
+    bool owns_choice = false;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        owns_choice = g_dialog != DialogKind::kNone;
+    }
+    if (owns_choice && api != nullptr && api->active != nullptr && api->close != nullptr && api->active())
+        api->close();
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    if (g_dialog != DialogKind::kNone) clear_pending_locked();
 }
