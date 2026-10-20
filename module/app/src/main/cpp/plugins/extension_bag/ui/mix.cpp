@@ -50,6 +50,8 @@ uint32_t mix_original_size_word = 0;
 uint32_t mix_original_bag_size = 0;
 void* mix_projected_item_root = nullptr;
 std::array<void*, virtual_bag::kBagCount> mix_tab_buttons{};
+// 页签锚定状态：句柄存活/身份校验/失效重建由 ui_components 锚定层负责。
+std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kBagCount> mix_tab_anchors{};
 std::array<void*, virtual_bag::kBagCount> mix_tab_bag_items{};
 void* mix_tab_root = nullptr;
 uint64_t mix_tab_generation = 0;
@@ -124,15 +126,26 @@ void mix_disable_tab_buttons_locked() {
     mix_pending_tab = -1;
     mix_pending_tab_generation = 0;
     mix_tab_buttons.fill(nullptr);
+    mix_tab_anchors = {};
     mix_tab_root = nullptr;
 }
 
 void mix_delete_tab_buttons_locked() {
-    for (void*& button : mix_tab_buttons) {
-        if (button != nullptr && !extension_bag_ui_delete_control(button)) {
-            VIRTBAG_LOG("mix tab delete failed control=%p", button);
+    // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
+    const auto* components = extension_bag_ui_components();
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        auto& state = mix_tab_anchors[static_cast<size_t>(index)];
+        void* handle = nullptr;
+        uint8_t live = 0;
+        if (components != nullptr && components->anchored_control_detach != nullptr) {
+            (void)components->anchored_control_detach(&state, &handle, &live);
+        } else {
+            state = {};
         }
-        button = nullptr;
+        if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
+            VIRTBAG_LOG("mix tab delete failed control=%p", handle);
+        }
+        mix_tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
 }
 
@@ -168,6 +181,99 @@ void mix_discard_new_tab_controls_locked(
     }
 }
 
+// ---- 合成器页签锚定（ui_components minor 21）----
+// 页签挂在 UIMix 袋容器上，游戏销毁容器子树后句柄失效；锚定层负责存活证明与重建。
+struct MixTabAnchorContext {
+    int index = 0;
+};
+std::array<MixTabAnchorContext, virtual_bag::kBagCount> g_mix_tab_anchor_ctx{};
+
+QolResult mix_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect, void* user) {
+    if (parent == nullptr || out_rect == nullptr || user == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "mix tab layout", 14);
+    }
+    const auto* ctx = static_cast<const MixTabAnchorContext*>(user);
+    if (!virtual_bag::valid_index(ctx->index)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "mix tab index", 13);
+    }
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(parent, &child_count) || child_count < 6) {
+        return qol::contracts::error(kQolErrNotReady, "mix bag not ready", 18);
+    }
+    void* bag0 = valid_child_locked(parent, 0);
+    qol::contracts::UiRect bag0_rect{};
+    if (bag0 == nullptr || !extension_bag_ui_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) {
+        return qol::contracts::error(kQolErrNotReady, "mix bag0 not ready", 19);
+    }
+    int64_t bag0_abs_x = 0, bag0_abs_y = 0, mount_abs_x = 0, mount_abs_y = 0;
+    extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
+    extension_bag_control_abs_pos(parent, &mount_abs_x, &mount_abs_y);
+    *out_rect = {bag0_abs_x + 68 - mount_abs_x,
+        bag0_abs_y + 2 - mount_abs_y + ctx->index * 70, 57, 57};
+    return qol::contracts::ok();
+}
+
+QolResult mix_tab_anchor_create(void* parent, qol::contracts::UiRect rect, void* user,
+                                void** out_control) {
+    if (parent == nullptr || user == nullptr || out_control == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "mix tab create", 14);
+    }
+    *out_control = nullptr;
+    const auto* ctx = static_cast<const MixTabAnchorContext*>(user);
+    if (!virtual_bag::valid_index(ctx->index)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "mix tab index", 13);
+    }
+    void* control = nullptr;
+    if (!extension_bag_ui_create_control(parent, &control) || control == nullptr) {
+        VIRTBAG_LOG("mix tab create failed index=%d", ctx->index);
+        return qol::contracts::error(kQolErrNotReady, "mix tab create", 14);
+    }
+    const auto fail = [control](const char* stage, int index) {
+        (void)extension_bag_ui_delete_control(control);
+        VIRTBAG_LOG("mix tab install failed index=%d stage=%s", index, stage);
+        return qol::contracts::error(kQolErrNotReady, "mix tab setup", 13);
+    };
+    if (!extension_bag_ui_set_control_proc(control, &mix_tab_item_proc)) {
+        return fail("proc", ctx->index);
+    }
+    if (!extension_bag_ui_set_control_user_type(control, 2)) return fail("user-type", ctx->index);
+    if (!extension_bag_ui_unuse_control_event_move(control)) return fail("event-move", ctx->index);
+    if (!extension_bag_ui_set_rect(control, rect)) return fail("rect", ctx->index);
+    void* data = nullptr;
+    if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) {
+        return fail("data-allocate", ctx->index);
+    }
+    std::memset(data, 0, 0x10);
+    *reinterpret_cast<void**>(data) = mix_tab_bag_items[ctx->index];
+    if (!extension_bag_ui_set_control_data(control, data)) return fail("data-set", ctx->index);
+    *out_control = control;
+    return qol::contracts::ok();
+}
+
+bool mix_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* components,
+                                    void* parent, bool* out_created_any) {
+    if (out_created_any != nullptr) *out_created_any = false;
+    if (components == nullptr || components->anchored_control_ensure == nullptr) return false;
+    bool all = true;
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        auto& ctx = g_mix_tab_anchor_ctx[static_cast<size_t>(index)];
+        ctx.index = index;
+        const qol::contracts::UiAnchoredControlDesc desc{
+            static_cast<uint32_t>(qol::contracts::QolUiRootKind::kMixBagContainer),
+            &mix_tab_item_proc, &mix_tab_anchor_layout, &mix_tab_anchor_create, &ctx};
+        uint8_t created = 0;
+        auto& state = mix_tab_anchors[static_cast<size_t>(index)];
+        if (components->anchored_control_ensure(&state, &desc, &created).ok != kQolOk) all = false;
+        mix_tab_buttons[static_cast<size_t>(index)] =
+            state.mounted != 0 ? state.handle : nullptr;
+        if (created != 0 && out_created_any != nullptr) *out_created_any = true;
+    }
+    if (out_created_any != nullptr && *out_created_any) {
+        VIRTBAG_LOG("mix tabs re-anchored root=%p", parent);
+    }
+    return all;
+}
+
 void mix_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时合成器页签不得挂载（3 个宿主之一）。
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return;
@@ -176,79 +282,19 @@ void mix_install_tab_buttons_locked() {
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
         bag_child_count < 6) return;
-    if (mix_tab_root == bag_container && mix_all_tab_buttons_installed_locked()) return;
-
-    if (mix_tab_root != nullptr || mix_has_tab_buttons_locked()) {
-        mix_delete_tab_buttons_locked();
-        mix_disable_tab_buttons_locked();
-    }
+    const auto* components = extension_bag_ui_components();
+    if (components == nullptr) return;
     mix_refresh_tab_bag_items_locked();
-
-    int64_t bag0_abs_x = 0;
-    int64_t bag0_abs_y = 0;
-    void* bag0 = valid_child_locked(bag_container, 0);
-    if (bag0 == nullptr) return;
-    extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
-    UiRect bag0_rect{};
-    if (!extension_bag_ui_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) return;
-
-    int64_t mount_abs_x = 0;
-    int64_t mount_abs_y = 0;
-    extension_bag_control_abs_pos(bag_container, &mount_abs_x, &mount_abs_y);
-    // 沿用扩展页/商店的原版袋列右侧间距 68、下移 2；起点来自 UIMix 实时袋 0 rect。
-    const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
-    const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
-    std::array<void*, virtual_bag::kBagCount> controls{};
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        void* control = nullptr;
-        if (!extension_bag_ui_create_control(bag_container, &control)) {
-            mix_discard_new_tab_controls_locked(controls, index, control, "create");
-            return;
-        }
-        if (control == nullptr) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "create-null");
-            return;
-        }
-        controls[index] = control;
-        if (!extension_bag_ui_set_control_proc(control, &mix_tab_item_proc)) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "proc");
-            return;
-        }
-        if (!extension_bag_ui_set_control_user_type(control, 2)) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "user-type");
-            return;
-        }
-        if (!extension_bag_ui_unuse_control_event_move(control)) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "event-move");
-            return;
-        }
-        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "rect");
-            return;
-        }
-        void* data = nullptr;
-        if (!extension_bag_ui_allocate_control_data(0x10, &data)) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "data-allocate");
-            return;
-        }
-        if (data == nullptr) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "data-null");
-            return;
-        }
-        *reinterpret_cast<void**>(data) = mix_tab_bag_items[index];
-        if (!extension_bag_ui_set_control_data(control, data)) {
-            mix_discard_new_tab_controls_locked(controls, index, nullptr, "data-set");
-            return;
-        }
+    const bool changed = !mix_all_tab_buttons_installed_locked() || mix_tab_root != bag_container;
+    bool created_any = false;
+    const bool complete = mix_refresh_tab_anchors_locked(components, bag_container, &created_any);
+    if (changed || created_any) {
+        ++mix_tab_generation;
+        mix_tab_root = bag_container;
+        VIRTBAG_LOG("mix tabs installed root=%p generation=%llu complete=%d created=%d",
+                    bag_container, static_cast<unsigned long long>(mix_tab_generation),
+                    complete ? 1 : 0, created_any ? 1 : 0);
     }
-    mix_tab_buttons = controls;
-    mix_tab_root = bag_container;
-    ++mix_tab_generation;
-    VIRTBAG_LOG("mix tabs installed root=%p bag0=(%lld,%lld) mount=(%lld,%lld) generation=%llu",
-                bag_container, static_cast<long long>(bag0_abs_x),
-                static_cast<long long>(bag0_abs_y), static_cast<long long>(mount_abs_x),
-                static_cast<long long>(mount_abs_y),
-                static_cast<unsigned long long>(mix_tab_generation));
 }
 
 uint64_t mix_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
@@ -526,6 +572,8 @@ namespace {
 
 void mix_draw_tab_buttons_locked() {
     if (!extension_bag_ui_can_draw()) return;
+    // 每帧 ensure：游戏切页/关闭面板会销毁页签子树，锚定层负责证明并重建。
+    mix_install_tab_buttons_locked();
     for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
         void* button = mix_tab_buttons[index];
         if (button == nullptr) continue;

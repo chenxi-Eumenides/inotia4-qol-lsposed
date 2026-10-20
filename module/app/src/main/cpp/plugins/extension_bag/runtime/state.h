@@ -8,6 +8,7 @@
 #include "contracts/host_sdk.h"
 #include "contracts/item_facts.h"
 #include "contracts/ownership.h"
+#include "contracts/ui.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 
@@ -133,6 +134,8 @@ struct ExtensionBagUiState {
     bool inventory_frame_active = false;
     bool extension_touch_capture = false;
     std::array<void*, virtual_bag::kBagCount> extension_tab_buttons{};
+    // 页签锚定状态：句柄存活/身份校验/失效重建由 ui_components 锚定层负责。
+    std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kBagCount> extension_tab_anchors{};
     void* extension_tab_root = nullptr;
     uint64_t inventory_generation = 0;
     uint64_t extension_tab_generation = 0;
@@ -177,6 +180,7 @@ struct ExtensionBagStoreState {
     void* hidden_original_bag_control = nullptr;
     int original_current_bag = -1;
     std::array<void*, virtual_bag::kBagCount> tab_buttons{};
+    std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kBagCount> tab_anchors{};
     std::array<void*, virtual_bag::kBagCount> tab_bag_items{};
     void* tab_root = nullptr;
     uint64_t tab_generation = 0;

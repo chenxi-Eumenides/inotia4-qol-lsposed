@@ -23,6 +23,7 @@ struct FakeControl {
     alignas(int64_t) uint8_t data[CS_SIZE]{};
     std::vector<FakeControl*> children;
     UiClickProc execute_proc = nullptr;
+    void* control_proc = nullptr;  // CO_PROC（+0x90）
     FakeControl* parent = nullptr;  // 绝对原点按父链累加（ui_control_absolute_origin）
     int32_t type = 0;               // CO_TYPE；交互按钮 = 3
 };
@@ -322,7 +323,17 @@ bool game_memory_accessible(const void* address, size_t, char) {
 }
 bool ui_set_control_item(void*, void*) { return false; }
 bool ui_set_button_enabled(void*, bool) { return true; }
-bool ui_set_control_proc(void*, UiControlProc) { return false; }
+bool ui_set_control_proc(void* control, UiControlProc proc) {
+    if (control == nullptr || proc == nullptr) return false;
+    static_cast<FakeControl*>(control)->control_proc = reinterpret_cast<void*>(proc);
+    return true;
+}
+
+bool ui_control_proc_matches(void* control, UiControlProc expected) {
+    return control != nullptr && expected != nullptr &&
+        static_cast<FakeControl*>(control)->control_proc ==
+            reinterpret_cast<void*>(expected);
+}
 bool ui_set_control_user_type(void*, int32_t) { return false; }
 bool ui_set_control_data(void*, void*) { return false; }
 void* ui_allocate_control_data(size_t) { return nullptr; }

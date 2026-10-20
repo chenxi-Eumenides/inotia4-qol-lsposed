@@ -39,6 +39,9 @@ bool ui_item_proc_source_control(void* destination, uint64_t event, const void* 
                                  void** out_source);
 void* ui_control_parent(void* ctrl);
 bool ui_execute_proc_matches(void* ctrl, UiClickProc expected);
+// CO_CONTROL_PROC（+0x98，类型事件处理器 = set_control_proc 写入值）比对：
+// 挂在游戏树上的控件用它证明「仍是本模块的控件」。
+bool ui_control_proc_matches(void* ctrl, UiControlProc expected);
 bool ui_set_button_enabled(void* ctrl, bool enabled);
 bool ui_control_absolute_origin(void* ctrl, int64_t* out_x, int64_t* out_y);
 bool ui_touch_state(void** out_moving, void** out_drop_source, int64_t* out_x, int64_t* out_y);

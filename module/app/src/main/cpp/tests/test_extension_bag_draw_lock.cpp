@@ -415,21 +415,24 @@ void test_runtime_regression_guards_match_behavioral_models() {
     CHECK(!proc.empty());
     CHECK(proc.find("return finish(1)") == std::string::npos);
 
+    // 页签安装改由锚定层负责：install 只做门禁与刷新，创建/失败清理在 create 回调，
+    // 存活证明与重建在 refresh 回调（游戏销毁容器子树后句柄由锚定层丢弃并重建）。
     const std::string install_tabs =
         source_function(runtime, "void install_extension_tab_buttons_locked() {");
-    CHECK(install_tabs.find("invalidate_extension_tab_buttons_locked()") != std::string::npos);
-    CHECK(install_tabs.find("extension_tab_buttons_complete_locked()") != std::string::npos);
-    CHECK(install_tabs.find("set_rect") != std::string::npos);
-    CHECK(install_tabs.find("set_control_data") != std::string::npos);
-    const size_t create_loop = install_tabs.find("bool complete = true;");
-    const size_t create_loop_end = install_tabs.find(
-        "if (extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer) != mount_parent)",
-        create_loop);
-    CHECK(create_loop != std::string::npos && create_loop_end != std::string::npos);
-    CHECK(install_tabs.substr(create_loop, create_loop_end - create_loop).find("continue") ==
-          std::string::npos);
-    CHECK(install_tabs.find("g_extension_tab_buttons = created") >
-          install_tabs.find("if (!complete)"));
+    CHECK(!install_tabs.empty());
+    CHECK(install_tabs.find("refresh_extension_tab_anchors_locked") != std::string::npos);
+    CHECK(install_tabs.find("extension_bag_ui_components()") != std::string::npos);
+    const std::string create_fn = source_function(runtime, "QolResult equip_tab_anchor_create(");
+    CHECK(!create_fn.empty());
+    CHECK(create_fn.find("set_rect") != std::string::npos);
+    CHECK(create_fn.find("set_control_data") != std::string::npos);
+    CHECK(create_fn.find("delete_control") != std::string::npos);
+    CHECK(create_fn.find("continue") == std::string::npos);
+    const std::string refresh_fn =
+        source_function(runtime, "bool refresh_extension_tab_anchors_locked(");
+    CHECK(!refresh_fn.empty());
+    CHECK(refresh_fn.find("anchored_control_ensure") != std::string::npos);
+    CHECK(refresh_fn.find("extension_tab_buttons") != std::string::npos);
 
     const std::string queue =
         source_function(runtime, "void queue_extension_tab_click_locked(int extension_bag) {");

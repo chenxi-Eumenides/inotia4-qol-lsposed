@@ -11,6 +11,7 @@
 #include "contracts/move_merge.h"
 #include "contracts/runtime_hooks.h"
 #include "contracts/slot_data.h"
+#include "contracts/ui.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
 #include "contracts/save_facts.h"
@@ -206,6 +207,9 @@ const qol::contracts::CapabilityRequirement kOptionalRequires[] = {
      {qol::contracts::kHttpRegistryVersion.major, qol::contracts::kHttpRegistryVersion.minor}},
     {qol::contracts::kHttpDispatchCapabilityId,
      {qol::contracts::kHttpDispatchVersion.major, qol::contracts::kHttpDispatchVersion.minor}},
+    // 页签锚定：句柄存活/身份校验/失效重建由 core.custom_ui 的 ui_components 提供。
+    {qol::contracts::kUiComponentsCapabilityId,
+     {qol::contracts::kUiContractMajor, qol::contracts::kUiContractMinor}},
 };
 
 const qol::contracts::QolPortRequirement kPorts[] = {

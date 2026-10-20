@@ -31,7 +31,8 @@ void draw_tab_buttons_in_frame_locked() {
     // 每帧检测真容器就位且尚未挂载（root 变化）时重新 install。
     int child_count = 0;
     if (current_bag_container != nullptr && extension_bag_ui_child_count(current_bag_container, &child_count) &&
-        child_count >= 6 && current_bag_container != runtime_state().ui.extension_tab_root) {
+        child_count >= 6) {
+        // 每帧 ensure：游戏切页/关闭面板会销毁页签子树，锚定层负责证明并重建。
         install_extension_tab_buttons_locked();
         current_bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     }

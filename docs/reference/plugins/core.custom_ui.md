@@ -10,7 +10,7 @@
 
 | 面 | 版本 | 当前提供内容 |
 |---|---:|---|
-| `ui_components` | 1.20 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 3 槽：`capsule_text_button_create`、`decorated_text_button_create`、`main_menu_decorated_button_create`；容器 content rect/content draw 两槽已随要求 4 撤销删除）。此后追加可缩放图标按钮族与 `compact_capsule_text_button_create`；**1.19 追加 `forget_native`**：native 控件由外部（游戏控件树）销毁时只注销组件记录、不调用 `delete_control`；**1.20 追加锚定按钮**（`anchored_button_ensure/set_visible/release/draw`）：按 `QolUiRootKind` 每帧解析活挂载根、用 `click_binding_is_current` 证明句柄身份，失效时注销记录并重建；`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native |
+| `ui_components` | 1.21 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 3 槽：`capsule_text_button_create`、`decorated_text_button_create`、`main_menu_decorated_button_create`；容器 content rect/content draw 两槽已随要求 4 撤销删除）。此后追加可缩放图标按钮族与 `compact_capsule_text_button_create`；**1.19 追加 `forget_native`**：native 控件由外部（游戏控件树）销毁时只注销组件记录、不调用 `delete_control`；**1.20 追加锚定按钮**（`anchored_button_ensure/set_visible/release/draw`）：按 `QolUiRootKind` 每帧解析活挂载根、用 `click_binding_is_current` 证明句柄身份，失效时注销记录并重建；`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。**1.21 追加任意原生控件锚定**（`anchored_control_ensure/set_visible/release/detach`）：多控件/自定义 `CO_PROC`/自带 data 的游戏树挂载，身份证明用 `control_proc_matches` + type/user_type/data 快照 |
 | `ui_panels` | 1.3 | 面板 provider 注册后的打开、关闭、状态/返回协作接口 |
 | `ui_choice` | 1.1 | 原生选择框 open/active/close API |
 | `text_layer` | 1.0 | `MEMORYTEXT_GetText` hook 上的文本订阅/分派接口 |
@@ -100,3 +100,36 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 | Debug panels/endpoints | `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`、`panels/debug_components.cpp`、`debug_scroll.cpp`、`debug_help.cpp` | descriptor endpoint facts/handlers 位于 plugin.cpp；各面板源码实现 command callback 与 scheduler task |
 | 跨插件契约 | `module/app/src/main/cpp/contracts/ui.h`、`panels.h`、`ui_choice.h`、`text_layer.h`、`game_ports/choice_port.h` | adapter/components 版本与线程说明：`ui.h:3-19`；其余 capability ID/version 与接口见各文件开头定义 |
 | 当前设置页消费者 | `module/app/src/main/cpp/plugins/settings/plugin.cpp`、`plugins/settings/panels/settings.cpp` | descriptor requires：`plugin.cpp:32-38`；运行时 require ui_components：`settings.cpp:816-821` |
+
+
+## 控件挂载归属与生命周期规则（强制）
+
+游戏会随面板关闭/切页销毁原生子树，插件若把句柄跨帧保留，就会拿到失效指针；它的地址还可能被之后创建的控件复用（实测扩展背包页签复用了自动出售入口的地址）。因此**任何跨帧保留的控件句柄都必须能证明存活**。规则按 native 归属划分：
+
+| 挂载方式 | native 由谁销毁 | 必须使用 |
+|---|---|---|
+| 自建 root（`panel_create`/`create_control(0)`），插件自己 `destroy` | 插件 | 常规组件 API（`panel_create`/`button_create`/…）；退出时 `destroy` |
+| 借用自建原生 root（页面自建 `g_root`，先 destroy 子组件再删 root） | 插件 | 常规组件 API，并保证销毁顺序（先 `destroy` 子组件，再 `delete_control(root)`） |
+| 游戏原生子树（袋容器、商店/合成器容器）中的单图标按钮 | 游戏 | `anchored_button_ensure` + `anchored_button_draw`；关闭态用 `anchored_button_set_visible(0)` |
+| 游戏原生子树中的多控件/自定义 `CO_PROC`/自带 `control_data` | 游戏 | `anchored_control_ensure`；删除前用 `anchored_control_detach` 取回已证明存活的句柄 |
+| 主菜单按钮替换 | 游戏 | Adapter 的 `main_menu_text_button_is_live` + `main_menu_text_button_invalidate_binding`（历史实现的等价证明；保留现状） |
+
+### 实现约束
+
+1. **每帧重新解析挂载根**：用 `QolUiAdapter::find_root(kind)` / `main_menu_more_games_snapshot`，不得缓存 root 指针做跨帧判断。容器指针可能不变而子树已被重建，所以 root 比对不能单独作为存活判据。
+2. **先指针、后字段**：校验顺序必须是「句柄在活父控件子链表内（纯指针比对）→ 再读 type/user_type/data/CO_PROC」。对可能已失效的句柄直接 `control_data`/`get_rect`/`set_rect` 会命中已释放内存。
+3. **失效只注销记录**：`forget_native`（组件）或 `anchored_*_release`（原生控件）。**绝不 delete 未证明存活的句柄**；`anchored_control_detach` 只在 `out_live=1` 时交出可删除句柄。
+4. **身份判据**：
+   - 组件按钮（`ui_components` 创建）：Adapter `click_binding_is_current`（绑定元组 + ExecuteProc 仍是 adapter trampoline）。
+   - 原生控件：创建时捕获 `type` + `user_type` + `control_data`，配合 `control_proc_matches`（`CO_PROC==+0x90`）。地址复用后这组字段必有一项不符。
+5. **`NotReady` 不是死亡**：内存不可读/主线程不匹配时只表示无法证明，调用方必须保留记录，不得删除或改写控件。
+6. **unbind 不删除游戏拥有的 native**：锚定层创建的组件标记 `native_externally_owned`，`ui_components_unbind` 跳过它们，避免对已销毁地址重复 `delete_control`。
+
+### 当前使用方
+
+- `autosell` 背包入口：`anchored_button_*`（`plugins/autosell/ui/panel.cpp`）。
+- `extension_bag` 装备页/商店/合成器页签：`anchored_control_*`（`runtime/tabs_ui.cpp`、`ui/store_tabs.cpp`、`ui/mix.cpp`），descriptor 可选依赖 `ui_components`。
+- 其余自建 root 面板（autosell 配置面板、save_backup、settings、debug 面板）：常规组件 API，无需锚定。
+- 主菜单替换：`main_menu_text_button_*` 既有机制（等价证明）。
+
+新增游戏树挂载时必须选择上表机制；不得再手写「root 指针相等即认为句柄有效」的判断。

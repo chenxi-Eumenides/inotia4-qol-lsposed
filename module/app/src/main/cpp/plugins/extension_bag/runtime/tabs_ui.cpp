@@ -165,13 +165,21 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 // data[0] = 按袋 types 物化的真实背包物品对象（TouchHandle/详情链合法）。
 // 手工父链累加（自上而下）：计算控件绝对位置。CO_RECT 为 i64 相对父值。
 void delete_extension_tab_buttons_locked() {
-    for (void*& button : runtime_state().ui.extension_tab_buttons) {
-        if (button == nullptr) continue;
-        if (extension_bag_ui_delete_control(button)) {
-            button = nullptr;
+    // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
+    const auto* components = extension_bag_ui_components();
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        auto& state = runtime_state().ui.extension_tab_anchors[static_cast<size_t>(index)];
+        void* handle = nullptr;
+        uint8_t live = 0;
+        if (components != nullptr && components->anchored_control_detach != nullptr) {
+            (void)components->anchored_control_detach(&state, &handle, &live);
         } else {
-            VIRTBAG_LOG("extension tab delete failed control=%p", button);
+            state = {};
         }
+        if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
+            VIRTBAG_LOG("extension tab delete failed control=%p", handle);
+        }
+        runtime_state().ui.extension_tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
 }
 
@@ -181,8 +189,116 @@ void invalidate_extension_tab_buttons_locked() {
     runtime_state().ui.pending_extension_tab = -1;
     runtime_state().ui.pending_extension_tab_generation = 0;
     runtime_state().ui.extension_tab_buttons.fill(nullptr);
+    runtime_state().ui.extension_tab_anchors = {};
     runtime_state().ui.extension_tab_root = nullptr;
     runtime_state().ui.extension_tab_generation = 0;
+}
+
+// ---- 页签锚定（ui_components minor 21）----
+// 页签挂在游戏袋容器上，游戏在切页/关闭面板时销毁整棵子树。句柄存活/身份校验/
+// 失效重建统一交给锚定层：本文件只提供几何（layout）与建控件（create）回调。
+
+struct EquipTabAnchorContext {
+    int index = 0;
+};
+std::array<EquipTabAnchorContext, virtual_bag::kBagCount> g_equip_tab_anchor_ctx{};
+
+QolResult equip_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect, void* user) {
+    if (parent == nullptr || out_rect == nullptr || user == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "tab layout", 10);
+    }
+    const auto* ctx = static_cast<const EquipTabAnchorContext*>(user);
+    if (!virtual_bag::valid_index(ctx->index)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "tab index", 9);
+    }
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(parent, &child_count) || child_count < 6) {
+        return qol::contracts::error(kQolErrNotReady, "bag container not ready", 24);
+    }
+    void* bag0 = valid_child_locked(parent, 0);
+    qol::contracts::UiRect bag0_rect{};
+    if (bag0 == nullptr || !extension_bag_ui_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) {
+        return qol::contracts::error(kQolErrNotReady, "bag0 not ready", 15);
+    }
+    int64_t bag0_abs_x = 0, bag0_abs_y = 0, mount_abs_x = 0, mount_abs_y = 0;
+    extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
+    extension_bag_control_abs_pos(parent, &mount_abs_x, &mount_abs_y);
+    *out_rect = {bag0_abs_x + 68 - mount_abs_x,
+        bag0_abs_y + 2 - mount_abs_y + ctx->index * 70, 57, 57};
+    return qol::contracts::ok();
+}
+
+QolResult equip_tab_anchor_create(void* parent, qol::contracts::UiRect rect, void* user,
+                                  void** out_control) {
+    if (parent == nullptr || user == nullptr || out_control == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "tab create", 10);
+    }
+    *out_control = nullptr;
+    const auto* ctx = static_cast<const EquipTabAnchorContext*>(user);
+    if (!virtual_bag::valid_index(ctx->index)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "tab index", 9);
+    }
+    // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3, proc) + SetControlProc + SetUserType(2)。
+    // 第 5 参 = proc，经 CreateControlInfo 写入 +0x90（CO_PROC，TouchHandle 统一事件分发）。
+    void* ctrl = nullptr;
+    if (!extension_bag_ui_create_control(parent, &ctrl) || ctrl == nullptr) {
+        VIRTBAG_LOG("extension tab create failed index=%d", ctx->index);
+        return qol::contracts::error(kQolErrNotReady, "tab create", 10);
+    }
+    const auto fail = [ctrl](const char* reason, int index) {
+        (void)extension_bag_ui_delete_control(ctrl);
+        VIRTBAG_LOG("extension tab setup failed reason=%s index=%d control=%p", reason, index, ctrl);
+        return qol::contracts::error(kQolErrNotReady, "tab setup", 9);
+    };
+    if (!extension_bag_ui_set_control_proc(ctrl, &extension_tab_item_proc)) {
+        return fail("proc", ctx->index);
+    }
+    if (!extension_bag_ui_set_control_user_type(ctrl, 2)) return fail("user-type", ctx->index);
+    if (!extension_bag_ui_unuse_control_event_move(ctrl)) return fail("event-move", ctx->index);
+    if (!extension_bag_ui_set_rect(ctrl, rect)) return fail("rect", ctx->index);
+    // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
+    void* data = nullptr;
+    if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) {
+        return fail("data-allocate", ctx->index);
+    }
+    std::memset(data, 0, 0x10);
+    *reinterpret_cast<void**>(data) = runtime_state().ui.tab_bag_items[ctx->index];
+    if (!extension_bag_ui_set_control_data(ctrl, data)) return fail("data-set", ctx->index);
+    *out_control = ctrl;
+    return qol::contracts::ok();
+}
+
+// 每帧刷新：解析活袋容器、证明/重建 5 个页签，并把句柄同步到运行视图数组。
+bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents* components,
+                                          void* parent, bool* out_created_any) {
+    if (out_created_any != nullptr) *out_created_any = false;
+    if (components == nullptr || components->anchored_control_ensure == nullptr) return false;
+    bool all = true;
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        auto& ctx = g_equip_tab_anchor_ctx[static_cast<size_t>(index)];
+        ctx.index = index;
+        const qol::contracts::UiAnchoredControlDesc desc{
+            static_cast<uint32_t>(qol::contracts::QolUiRootKind::kEquipBagContainer),
+            &extension_tab_item_proc, &equip_tab_anchor_layout, &equip_tab_anchor_create, &ctx};
+        uint8_t created = 0;
+        auto& state = runtime_state().ui.extension_tab_anchors[static_cast<size_t>(index)];
+        const QolResult ensured = components->anchored_control_ensure(&state, &desc, &created);
+        if (ensured.ok != kQolOk) {
+            all = false;
+            // NotReady 是面板打开初期的正常态（占位容器/布局未就位），不刷日志。
+            if (ensured.ok != kQolErrNotReady) {
+                VIRTBAG_LOG("extension tab anchor ensure failed index=%d code=%d root=%p", index,
+                            ensured.ok, parent);
+            }
+        }
+        runtime_state().ui.extension_tab_buttons[static_cast<size_t>(index)] =
+            state.mounted != 0 ? state.handle : nullptr;
+        if (created != 0) {
+            if (out_created_any != nullptr) *out_created_any = true;
+            VIRTBAG_LOG("extension tab re-anchored index=%d root=%p", index, parent);
+        }
+    }
+    return all;
 }
 
 void install_extension_tab_buttons_locked() {
@@ -192,125 +308,24 @@ void install_extension_tab_buttons_locked() {
     void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (bag_container == nullptr) return;
     // 容器就位守卫：面板打开初期 0x50 槽位指向占位容器（无原版袋标签子控件，
-    // rect 未定位）。此时挂载会让标签落在占位容器上（绝对 x≈296 出位）。
-    // 等原版 6 袋标签就位（child count ≥ 6）后再挂载；未就位直接跳过，
-    // 由 draw 每帧检测容器就位后重试。
+    // rect 未定位）。等原版 6 袋标签就位后再挂载；未就位由 draw 每帧重试。
     int bag_child_count = 0;
     if (!extension_bag_ui_child_count(bag_container, &bag_child_count) || bag_child_count < 6) return;
-    // 动态计算：打开面板后，原版袋 0 按钮的绝对位置 =
-    // 袋容器绝对（父链累加，袋 0 相对容器为 (0,0)）。缓存至面板重建。
-    // 挂载层 = 袋容器（与原版 6 袋标签同父，跟随容器动画，天然不漂移）。
-    int64_t bag0_abs_x = 0, bag0_abs_y = 0;
-    extension_bag_control_abs_pos(bag_container, &bag0_abs_x, &bag0_abs_y);
-    void* mount_parent = bag_container;
-    int64_t mount_abs_x = 0, mount_abs_y = 0;
-    extension_bag_control_abs_pos(mount_parent, &mount_abs_x, &mount_abs_y);
-    // 标签相对挂载层 = 原版袋列右侧（袋 0 绝对 + (68,2)，减挂载层绝对）
-    const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
-    const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
-    if (runtime_state().ui.extension_tab_generation == runtime_state().ui.inventory_generation &&
-        runtime_state().ui.extension_tab_root == mount_parent && extension_tab_buttons_complete_locked()) {
-        return;
-    }
-    // A replaced root owns the old controls; invalidate them without dereferencing stale handles.
-    if (runtime_state().ui.extension_tab_root != nullptr && runtime_state().ui.extension_tab_root != mount_parent) {
-        invalidate_extension_tab_buttons_locked();
-    } else if (runtime_state().ui.extension_tab_root == mount_parent || extension_tab_buttons_have_controls_locked()) {
-        delete_extension_tab_buttons_locked();
-        if (extension_tab_buttons_have_controls_locked()) {
-            VIRTBAG_LOG("extension tab install aborted reason=previous_controls_not_deleted root=%p",
-                        mount_parent);
-            return;
-        }
-        runtime_state().ui.extension_tab_root = nullptr;
-        runtime_state().ui.extension_tab_generation = 0;
-    }
+    const auto* components = extension_bag_ui_components();
+    if (components == nullptr) return;
     refresh_tab_bag_items_locked();
-    std::array<void*, virtual_bag::kBagCount> created{};
-    auto discard_created = [&]() {
-        bool all_deleted = true;
-        for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-            void*& control = created[static_cast<size_t>(index)];
-            if (control == nullptr) continue;
-            if (!extension_bag_ui_delete_control(control)) {
-                all_deleted = false;
-                runtime_state().ui.extension_tab_buttons[static_cast<size_t>(index)] = control;
-                VIRTBAG_LOG("extension tab cleanup failed index=%d control=%p", index, control);
-            }
-            control = nullptr;
-        }
-        if (!all_deleted) {
-            // Keep the failed live controls tracked so a same-root retry can delete them.
-            runtime_state().ui.extension_tab_root = mount_parent;
-            runtime_state().ui.extension_tab_generation = 0;
-        }
-        return all_deleted;
-    };
-    bool complete = true;
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        // ControlItem_Create 语义组装：Add(parent, 0, 0, type=3, proc) + SetControlProc + SetUserType(2)。
-        // 第 5 参 = proc，经 CreateControlInfo 写入 +0x90（CO_PROC，TouchHandle 统一事件分发）。
-        // 传 nullptr 会让 +0x90 为空 → TouchHandle 命中后无法分发到 +0x98 control proc（点击失效）。
-        void* ctrl = nullptr;
-        if (!extension_bag_ui_create_control(mount_parent, &ctrl) ||
-            !extension_bag_ui_set_control_proc(ctrl, &extension_tab_item_proc) ||
-            !extension_bag_ui_set_control_user_type(ctrl, 2) ||
-            !extension_bag_ui_unuse_control_event_move(ctrl)) {
-            if (ctrl != nullptr && !extension_bag_ui_delete_control(ctrl)) {
-                VIRTBAG_LOG("extension tab cleanup failed index=%d control=%p", index, ctrl);
-                created[static_cast<size_t>(index)] = ctrl;
-                complete = false;
-                break;
-            }
-            ctrl = nullptr;
-        }
-        if (ctrl == nullptr) {
-            VIRTBAG_LOG("extension tab create failed index=%d", index);
-            complete = false;
-            break;
-        }
-        created[static_cast<size_t>(index)] = ctrl;
-        // rect：与原版袋标签同尺寸 57x57（loc6/loc9 底框 47x47 居中填充成背景框）。
-        // 相对场景根（不随切袋移动），由动态计算的原版袋列绝对位置换算。
-        const int64_t row_y = tab_rel_y + index * 70;
-        if (!extension_bag_ui_set_rect(ctrl, {tab_rel_x, row_y, 57, 57})) {
-            VIRTBAG_LOG("extension tab setup failed reason=set_rect index=%d control=%p", index, ctrl);
-            complete = false;
-            break;
-        }
-        // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
-        void* data = nullptr;
-        if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) {
-            VIRTBAG_LOG("extension tab setup failed reason=allocate_control_data index=%d control=%p",
-                        index, ctrl);
-            complete = false;
-            break;
-        }
-        std::memset(data, 0, 0x10);
-        *reinterpret_cast<void**>(data) = runtime_state().ui.tab_bag_items[index];
-        if (!extension_bag_ui_set_control_data(ctrl, data)) {
-            VIRTBAG_LOG("extension tab setup failed reason=set_control_data index=%d control=%p",
-                        index, ctrl);
-            complete = false;
-            break;
-        }
-    }
-    if (extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer) != mount_parent) {
-        // The game replaced this tree while controls were being created; its handles are stale.
-        invalidate_extension_tab_buttons_locked();
-        VIRTBAG_LOG("extension tab install aborted reason=root_replaced during_create root=%p",
-                    mount_parent);
-        return;
-    }
-    if (!complete) {
-        (void)discard_created();
-        return;
-    }
-    runtime_state().ui.extension_tab_buttons = created;
-    runtime_state().ui.extension_tab_root = mount_parent;
+    const bool changed = runtime_state().ui.extension_tab_root != bag_container ||
+        runtime_state().ui.extension_tab_generation != runtime_state().ui.inventory_generation;
+    bool created_any = false;
+    const bool complete = refresh_extension_tab_anchors_locked(components, bag_container,
+                                                               &created_any);
+    runtime_state().ui.extension_tab_root = bag_container;
     runtime_state().ui.extension_tab_generation = runtime_state().ui.inventory_generation;
-    VIRTBAG_LOG("extension tabs installed generation=%llu root=%p",
-                static_cast<unsigned long long>(runtime_state().ui.inventory_generation), bag_container);
+    if (changed || created_any) {
+        VIRTBAG_LOG("extension tabs installed generation=%llu root=%p complete=%d created=%d",
+                    static_cast<unsigned long long>(runtime_state().ui.inventory_generation),
+                    bag_container, complete ? 1 : 0, created_any ? 1 : 0);
+    }
 }
 
 void disable_extension_tab_buttons_locked() {
@@ -620,7 +635,10 @@ void extension_tab_button_clicked(void* ctrl) {
 bool extension_tab_control_is_current_locked(int index, void* control) {
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked() ||
         !virtual_bag::valid_index(index) || control == nullptr ||
-        runtime_state().ui.extension_tab_root == nullptr || runtime_state().ui.extension_tab_buttons[index] != control ||
+        runtime_state().ui.extension_tab_root == nullptr ||
+        runtime_state().ui.extension_tab_anchors[index].mounted == 0 ||
+        runtime_state().ui.extension_tab_anchors[index].handle != control ||
+        runtime_state().ui.extension_tab_buttons[index] != control ||
         runtime_state().ui.extension_tab_generation != runtime_state().ui.inventory_generation ||
         extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer) !=
             runtime_state().ui.extension_tab_root) {

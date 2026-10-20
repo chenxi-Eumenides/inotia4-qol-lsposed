@@ -12,7 +12,7 @@
 
 - 插件 id `extension_bag`，版本 `0.1.0`（`plugins/extension_bag/plugin.cpp:49-50`）。
 - required：`world.facts`、`item.facts`、`save.facts`、`craft.facts`、`save.slot_data`（`plugin.cpp:172-195`）。
-- optional：`inventory_refresh`、`move_merge.control`（两者均由 `core.item` 提供）、`http.registry`、`http.dispatch`（`plugin.cpp:197-208`）。
+- optional：`inventory_refresh`、`move_merge.control`（两者均由 `core.item` 提供）、`http.registry`、`http.dispatch`、`ui_components` 1.21（锚定页签；`plugin.cpp:197-214`）。
 - provides：`extension_bag`（API major 3、minor 0；sale removal 3.1）、`inventory.merge_projection`（`plugin.cpp:155-170`；`contracts/extension_bag.h:25-30`）。
 - ports：write port、character extras、inventory extras（`plugin.cpp:210-220,823-824`）。
 - resources：`assembly/claims.cpp` 的 `extension_bag_claims()`，当前 22 条：
@@ -74,6 +74,7 @@
 - 当前注册背包装备页宿主（`runtime/projection.cpp`、`runtime/tabs_ui.cpp`、`ui/equip.cpp`）、详情动作（`ui/detail_actions.cpp`）、商店宿主（`ui/store_*`）和合成器宿主（`ui/mix.cpp`）；对应 resources 均已注册。
 - 空 EB 袋解除：`unequip_extension_bag_locked` 把袋对象放回原版袋并切到接收袋；接收袋按物理袋 0..4 顺序取第一个可保存袋，槽位由该袋第一个可保存空槽决定。draw-end 检测到 module 视图不再成立时立即 restore，避免原版袋短暂显示为空。
 - 页签控件 user type 2、data 16 字节、首字段指向物品对象；页签物品按类型复用/延迟释放（`runtime/tabs_ui.cpp`、`runtime/tabs.cpp`）。
+- 页签挂在游戏袋容器上，native 生命周期归游戏：装备页/商店/合成器三个宿主均用 `ui_components` 锚定层（`anchored_control_ensure/detach`）每帧重新解析活容器并证明身份（`CO_PROC` + type/user_type/data 快照），失效只注销记录并重建；禁用/退出时用 `anchored_control_detach` 取回已证明存活的句柄再删除。规则见 [`core.custom_ui.md`](core.custom_ui.md) §控件挂载归属与生命周期规则。
 - 投影：draw wrapper 持锁、original-first；扩展视图下临时改原版当前袋为 sentinel，绘制后恢复（`runtime/render.cpp`、`runtime/projection.cpp`）。
 - 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving（`runtime/tabs_ui.cpp`、`runtime/input.cpp`）。
 - 详情按钮：V2 `QolDescHookApi` 实现在 `ui/detail_hooks.cpp`，确认使用/出售/销毁在 `ui/detail_actions.cpp`；`P_EXT_DESC_OPEN_GATE` 捕获扩展详情，`own:desc_button_execute_slots` 负责按钮槽命名空间。

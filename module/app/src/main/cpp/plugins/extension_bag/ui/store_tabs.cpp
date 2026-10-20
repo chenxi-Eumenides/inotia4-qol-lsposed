@@ -127,17 +127,121 @@ void store_disable_tab_buttons_locked() {
     runtime_state().store.pending_tab = -1;
     runtime_state().store.pending_tab_generation = 0;
     runtime_state().store.tab_buttons.fill(nullptr);
+    runtime_state().store.tab_anchors = {};
     runtime_state().store.tab_root = nullptr;
 }
 
 void store_delete_tab_buttons_locked() {
-    for (void*& button : runtime_state().store.tab_buttons) {
-        if (button != nullptr && !extension_bag_ui_delete_control(button)) {
-            VIRTBAG_LOG("store tab delete failed control=%p", button);
+    // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
+    const auto* components = extension_bag_ui_components();
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        auto& state = runtime_state().store.tab_anchors[static_cast<size_t>(index)];
+        void* handle = nullptr;
+        uint8_t live = 0;
+        if (components != nullptr && components->anchored_control_detach != nullptr) {
+            (void)components->anchored_control_detach(&state, &handle, &live);
+        } else {
+            state = {};
         }
-        button = nullptr;
+        if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
+            VIRTBAG_LOG("store tab delete failed control=%p", handle);
+        }
+        runtime_state().store.tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
 }
+// ---- 商店页签锚定（ui_components minor 21）----
+// 页签挂在 UIStore 袋容器上，游戏销毁容器子树后句柄失效；锚定层负责存活证明与重建。
+struct StoreTabAnchorContext {
+    int index = 0;
+};
+std::array<StoreTabAnchorContext, virtual_bag::kBagCount> g_store_tab_anchor_ctx{};
+
+QolResult store_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect, void* user) {
+    if (parent == nullptr || out_rect == nullptr || user == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "store tab layout", 16);
+    }
+    const auto* ctx = static_cast<const StoreTabAnchorContext*>(user);
+    if (!virtual_bag::valid_index(ctx->index)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "store tab index", 15);
+    }
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(parent, &child_count) || child_count < 6) {
+        return qol::contracts::error(kQolErrNotReady, "store bag not ready", 20);
+    }
+    void* bag0 = valid_child_locked(parent, 0);
+    qol::contracts::UiRect bag0_rect{};
+    if (bag0 == nullptr || !extension_bag_ui_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) {
+        return qol::contracts::error(kQolErrNotReady, "store bag0 not ready", 21);
+    }
+    int64_t bag0_abs_x = 0, bag0_abs_y = 0, mount_abs_x = 0, mount_abs_y = 0;
+    extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
+    extension_bag_control_abs_pos(parent, &mount_abs_x, &mount_abs_y);
+    *out_rect = {bag0_abs_x + 68 - mount_abs_x,
+        bag0_abs_y + 2 - mount_abs_y + ctx->index * 70, 57, 57};
+    return qol::contracts::ok();
+}
+
+QolResult store_tab_anchor_create(void* parent, qol::contracts::UiRect rect, void* user,
+                                  void** out_control) {
+    if (parent == nullptr || user == nullptr || out_control == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "store tab create", 16);
+    }
+    *out_control = nullptr;
+    const auto* ctx = static_cast<const StoreTabAnchorContext*>(user);
+    if (!virtual_bag::valid_index(ctx->index)) {
+        return qol::contracts::error(kQolErrInvalidArgument, "store tab index", 15);
+    }
+    void* control = nullptr;
+    if (!extension_bag_ui_create_control(parent, &control) || control == nullptr) {
+        VIRTBAG_LOG("store tab create failed index=%d", ctx->index);
+        return qol::contracts::error(kQolErrNotReady, "store tab create", 16);
+    }
+    const auto fail = [control](const char* stage, int index) {
+        (void)extension_bag_ui_delete_control(control);
+        VIRTBAG_LOG("store tab install failed index=%d stage=%s", index, stage);
+        return qol::contracts::error(kQolErrNotReady, "store tab setup", 15);
+    };
+    if (!extension_bag_ui_set_control_proc(control, &store_tab_item_proc)) {
+        return fail("proc", ctx->index);
+    }
+    if (!extension_bag_ui_set_control_user_type(control, 2)) return fail("user-type", ctx->index);
+    if (!extension_bag_ui_unuse_control_event_move(control)) return fail("event-move", ctx->index);
+    if (!extension_bag_ui_set_rect(control, rect)) return fail("rect", ctx->index);
+    void* data = nullptr;
+    if (!extension_bag_ui_allocate_control_data(0x10, &data) || data == nullptr) {
+        return fail("data-allocate", ctx->index);
+    }
+    std::memset(data, 0, 0x10);
+    *reinterpret_cast<void**>(data) = runtime_state().store.tab_bag_items[ctx->index];
+    if (!extension_bag_ui_set_control_data(control, data)) return fail("data-set", ctx->index);
+    *out_control = control;
+    return qol::contracts::ok();
+}
+
+bool store_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* components,
+                                      void* parent, bool* out_created_any) {
+    if (out_created_any != nullptr) *out_created_any = false;
+    if (components == nullptr || components->anchored_control_ensure == nullptr) return false;
+    bool all = true;
+    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        auto& ctx = g_store_tab_anchor_ctx[static_cast<size_t>(index)];
+        ctx.index = index;
+        const qol::contracts::UiAnchoredControlDesc desc{
+            static_cast<uint32_t>(qol::contracts::QolUiRootKind::kStoreBagContainer),
+            &store_tab_item_proc, &store_tab_anchor_layout, &store_tab_anchor_create, &ctx};
+        uint8_t created = 0;
+        auto& state = runtime_state().store.tab_anchors[static_cast<size_t>(index)];
+        if (components->anchored_control_ensure(&state, &desc, &created).ok != kQolOk) all = false;
+        runtime_state().store.tab_buttons[static_cast<size_t>(index)] =
+            state.mounted != 0 ? state.handle : nullptr;
+        if (created != 0 && out_created_any != nullptr) *out_created_any = true;
+    }
+    if (out_created_any != nullptr && *out_created_any) {
+        VIRTBAG_LOG("store tabs re-anchored root=%p", parent);
+    }
+    return all;
+}
+
 void store_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时商店页签不得挂载（3 个宿主之一）。
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return;
@@ -146,76 +250,21 @@ void store_install_tab_buttons_locked() {
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
         bag_child_count < 6) return;
-    if (runtime_state().store.tab_root == bag_container && store_all_tab_buttons_installed_locked()) return;
-
-    if (runtime_state().store.tab_root != nullptr || store_has_tab_buttons_locked()) {
-        store_delete_tab_buttons_locked();
-        store_disable_tab_buttons_locked();
-    }
+    const auto* components = extension_bag_ui_components();
+    if (components == nullptr) return;
     store_refresh_tab_bag_items_locked();
-
-    int64_t bag0_abs_x = 0;
-    int64_t bag0_abs_y = 0;
-    void* bag0 = valid_child_locked(bag_container, 0);
-    if (bag0 == nullptr) return;
-    extension_bag_control_abs_pos(bag0, &bag0_abs_x, &bag0_abs_y);
-    UiRect bag0_rect{};
-    if (!extension_bag_ui_rect(bag0, &bag0_rect) || bag0_rect.w <= 0) return;
-
-    int64_t mount_abs_x = 0;
-    int64_t mount_abs_y = 0;
-    extension_bag_control_abs_pos(bag_container, &mount_abs_x, &mount_abs_y);
-    // 这里沿用原版袋列的右侧间距 68、下移 2；起点仍来自商店实时袋 0 rect。
-    const int64_t tab_rel_x = bag0_abs_x + 68 - mount_abs_x;
-    const int64_t tab_rel_y = bag0_abs_y + 2 - mount_abs_y;
-    std::array<void*, virtual_bag::kBagCount> controls{};
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
-        void* control = nullptr;
-        if (!extension_bag_ui_create_control(bag_container, &control)) {
-            store_discard_new_tab_controls_locked(controls, index, control, "create");
-            return;
-        }
-        if (control == nullptr) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "create-null");
-            return;
-        }
-        controls[index] = control;
-        if (!extension_bag_ui_set_control_proc(control, &store_tab_item_proc)) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "proc");
-            return;
-        }
-        if (!extension_bag_ui_set_control_user_type(control, 2)) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "user-type");
-            return;
-        }
-        if (!extension_bag_ui_unuse_control_event_move(control)) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "event-move");
-            return;
-        }
-        if (!extension_bag_ui_set_rect(control, {tab_rel_x, tab_rel_y + index * 70, 57, 57})) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "rect");
-            return;
-        }
-        void* data = nullptr;
-        if (!extension_bag_ui_allocate_control_data(0x10, &data)) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "data-allocate");
-            return;
-        }
-        if (data == nullptr) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "data-null");
-            return;
-        }
-        *reinterpret_cast<void**>(data) = runtime_state().store.tab_bag_items[index];
-        if (!extension_bag_ui_set_control_data(control, data)) {
-            store_discard_new_tab_controls_locked(controls, index, nullptr, "data-set");
-            return;
-        }
+    const bool changed = !store_all_tab_buttons_installed_locked() ||
+        runtime_state().store.tab_root != bag_container;
+    bool created_any = false;
+    const bool complete = store_refresh_tab_anchors_locked(components, bag_container, &created_any);
+    if (changed || created_any) {
+        ++runtime_state().store.tab_generation;
+        runtime_state().store.tab_root = bag_container;
+        VIRTBAG_LOG("store tabs installed root=%p generation=%llu complete=%d created=%d",
+                    bag_container,
+                    static_cast<unsigned long long>(runtime_state().store.tab_generation),
+                    complete ? 1 : 0, created_any ? 1 : 0);
     }
-    runtime_state().store.tab_buttons = controls;
-    runtime_state().store.tab_root = bag_container;
-    ++runtime_state().store.tab_generation;
-    VIRTBAG_LOG("store tabs installed root=%p generation=%llu", bag_container,
-                static_cast<unsigned long long>(runtime_state().store.tab_generation));
 }
 void store_commit_pending_tab_locked() {
     if (!extension_bag_session_admitted_locked()) {
@@ -237,6 +286,8 @@ void store_commit_pending_tab_locked() {
 }
 void store_draw_tab_buttons_locked() {
     if (!extension_bag_ui_can_draw()) return;
+    // 每帧 ensure：游戏切页/关闭面板会销毁页签子树，锚定层负责证明并重建。
+    store_install_tab_buttons_locked();
     for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
         void* button = runtime_state().store.tab_buttons[index];
         if (button == nullptr) continue;

@@ -125,6 +125,18 @@ void* extension_bag_ui_parent(void* control) {
     return qol::contracts::succeeded(ui->control_parent(control, &parent)) ? parent : nullptr;
 }
 
+const qol::contracts::QolUiComponents* extension_bag_ui_components() {
+    const auto* sdk = qol::features::extension_bag::extension_bag_host_sdk();
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    if (sdk->capabilities.require(qol::contracts::kUiComponentsCapabilityId,
+            {qol::contracts::kUiContractMajor, qol::contracts::kUiContractMinor},
+            &iface).ok != kQolOk) {
+        return nullptr;
+    }
+    return static_cast<const qol::contracts::QolUiComponents*>(iface);
+}
+
 void* extension_bag_ui_root(qol::contracts::QolUiRootKind kind) {
     const auto* ui = extension_bag_ui();
     if (ui == nullptr || ui->find_root == nullptr) return nullptr;

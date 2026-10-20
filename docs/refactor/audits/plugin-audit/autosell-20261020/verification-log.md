@@ -119,3 +119,20 @@
 | 进入 EB bag6 并返回 | **PASS**：入口不移动，页签高亮正常 |
 | 入口点击/面板关闭 | **PASS**：`panel_in_app` → 返回 `panel_inventory` |
 | 崩溃 | **PASS**：进程 pid 21512 全程存活，logcat FATAL/SIGSEGV = 0 |
+
+## §8 全部游戏树挂载迁移（2026-10-21）
+
+**范围**：`ui_components` 1.21 追加 `anchored_control_ensure/set_visible/release/detach`；Adapter 1.26 追加 `control_proc_matches`（读 `CO_CONTROL_PROC=+0x98`，即 `set_control_proc` 写入值）。`extension_bag` 装备页/商店/合成器三处页签全部改为锚定（optional 依赖 `ui_components`），不再手写 root/generation 存活判断；autosell 入口沿用 `anchored_button_*`。主菜单替换保留既有 `main_menu_text_button_is_live` 等价证明（见 `docs/reference/plugins/core.custom_ui.md` §控件挂载归属与生命周期规则）。
+
+**Host**：148/148（含新增 `anchored_control` 用例：同 proc/data 判活、地址被复用成「别的 proc」时注销重建且 `delete_control` 计数不变、`detach` 只在存活时交出句柄）。构建在 HEAD + 本批改动的独立 worktree 完成（主工作区当时有另一批未完成改动）。
+
+**真机（monster v29，模块 `449962e14d72`，集成包 `d4ffd8a6…`）**：
+
+| 项 | 结果 |
+|---|---|
+| 首次打开背包页 | **PASS**：EB 5 页签列与齿轮入口同时存在；`complete=1 created=1` |
+| 切页（技能↔背包）4 轮 | **PASS**：`re-anchored` 25 条 = 5 页签 × 5 次挂载，无逐帧抖动；无 `anchor ensure failed` |
+| EB 页签点击/返回 | **PASS**：`extension tab selected bag=0`，进入逻辑袋视图并切回原版袋 |
+| autosell 齿轮点击/关闭 | **PASS**：`panel_in_app` → 返回 `panel_inventory` |
+| 崩溃 | **PASS**：pid 25478 全程存活，FATAL/SIGSEGV = 0 |
+| 商店/合成器页签 | **NOT_ACCEPTED（真机）**：未进入商店/合成器面板，仅有静态/编译覆盖；行为待补验 |

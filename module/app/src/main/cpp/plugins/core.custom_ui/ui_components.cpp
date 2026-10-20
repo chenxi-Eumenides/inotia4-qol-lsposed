@@ -1364,6 +1364,188 @@ QolResult anchored_button_draw(const contracts::QolUiAnchoredButton* state) {
     return icon_button_draw(state->handle);
 }
 
+// ===== 任意原生控件的锚定（minor 21）=====
+// 与 anchored_button 同一套存活判定；身份快照改为 type/user_type/data + CO_CONTROL_PROC。
+// 适用于多控件、自定义事件 proc 或自带 data 的游戏树挂载（如扩展背包页签）。
+
+bool anchored_control_adapter_ready() {
+    constexpr size_t end = offsetof(contracts::QolUiAdapter, control_proc_matches) +
+        sizeof(((contracts::QolUiAdapter*)nullptr)->control_proc_matches);
+    return anchored_adapter_ready() && g_adapter->minor >= 26 && g_adapter->size >= end &&
+        g_adapter->control_proc_matches != nullptr && g_adapter->control_type != nullptr &&
+        g_adapter->control_user_type != nullptr && g_adapter->control_data != nullptr;
+}
+
+bool capture_anchor_identity(contracts::QolUiHandle handle,
+                             contracts::QolUiControlProcFn expected_proc,
+                             contracts::QolUiAnchoredControl* out) {
+    if (handle == nullptr || out == nullptr) return false;
+    int32_t type = -1;
+    int32_t user_type = -1;
+    void* data = nullptr;
+    if (!contracts::succeeded(g_adapter->control_type(handle, &type)) ||
+        !contracts::succeeded(g_adapter->control_user_type(handle, &user_type))) {
+        return false;
+    }
+    if (!contracts::succeeded(g_adapter->control_data(handle, &data))) data = nullptr;
+    if (expected_proc != nullptr) {
+        int32_t matches = 0;
+        if (!contracts::succeeded(
+                g_adapter->control_proc_matches(handle, expected_proc, &matches)) ||
+            matches == 0) {
+            return false;
+        }
+    }
+    out->type = type;
+    out->user_type = user_type;
+    out->control_data = data;
+    out->expected_proc = reinterpret_cast<void*>(expected_proc);
+    return true;
+}
+
+void release_anchored_control_state(contracts::QolUiAnchoredControl* state) {
+    state->handle = nullptr;
+    state->parent = nullptr;
+    state->control_data = nullptr;
+    state->expected_proc = nullptr;
+    state->type = 0;
+    state->user_type = 0;
+    state->mounted = 0;
+}
+
+QolResult anchored_control_probe(const contracts::QolUiAnchoredControl* state,
+                                 int32_t* out_current) {
+    *out_current = 0;
+    contracts::QolUiAnchoredControl now{};
+    if (!capture_anchor_identity(
+            state->handle, reinterpret_cast<contracts::QolUiControlProcFn>(state->expected_proc),
+            &now)) {
+        return contracts::ok();
+    }
+    *out_current = now.type == state->type && now.user_type == state->user_type &&
+            now.control_data == state->control_data
+        ? 1
+        : 0;
+    return contracts::ok();
+}
+
+QolResult anchored_control_ensure(contracts::QolUiAnchoredControl* state,
+                                  const contracts::UiAnchoredControlDesc* desc,
+                                  uint8_t* out_created) {
+    if (state == nullptr || desc == nullptr || desc->layout == nullptr ||
+        desc->create == nullptr) {
+        return invalid_argument();
+    }
+    if (out_created != nullptr) *out_created = 0;
+    if (!anchored_control_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(
+            static_cast<contracts::QolUiRootKind>(desc->root_kind), &parent)) ||
+        parent == nullptr) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    if (state->mounted && state->handle != nullptr) {
+        if (!control_in_child_list(parent, state->handle)) {
+            release_anchored_control_state(state);
+        } else {
+            int32_t current = 0;
+            const QolResult probe = anchored_control_probe(state, &current);
+            if (!contracts::succeeded(probe)) return probe;
+            if (current == 0) release_anchored_control_state(state);
+        }
+    }
+    contracts::UiRect rect{};
+    const QolResult laid_out = desc->layout(parent, &rect, desc->user);
+    if (!contracts::succeeded(laid_out)) return laid_out;
+    if (rect.w <= 0 || rect.h <= 0) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) {
+        contracts::QolUiHandle created = nullptr;
+        const QolResult create_result = desc->create(parent, rect, desc->user, &created);
+        if (!contracts::succeeded(create_result)) return create_result;
+        if (created == nullptr) return not_ready();
+        contracts::QolUiAnchoredControl identity{};
+        if (!capture_anchor_identity(created, desc->expected_proc, &identity)) {
+            // 身份无法建立时不能保留不可验证的句柄；控件刚创建、归属明确，可安全删除。
+            if (g_adapter->delete_control != nullptr) (void)g_adapter->delete_control(created);
+            return not_ready();
+        }
+        *state = identity;
+        state->handle = created;
+        state->parent = parent;
+        state->root_kind = desc->root_kind;
+        state->mounted = 1;
+        (void)g_adapter->set_control_show(created, 1);
+        if (out_created != nullptr) *out_created = 1;
+        return contracts::ok();
+    }
+    contracts::UiRect current{};
+    if (!contracts::succeeded(g_adapter->get_rect(state->handle, &current)) ||
+        current.x != rect.x || current.y != rect.y || current.w != rect.w ||
+        current.h != rect.h) {
+        const QolResult moved = g_adapter->set_rect(state->handle, rect);
+        if (!contracts::succeeded(moved)) return moved;
+    }
+    (void)g_adapter->set_control_show(state->handle, 1);
+    state->parent = parent;
+    return contracts::ok();
+}
+
+QolResult anchored_control_set_visible(contracts::QolUiAnchoredControl* state, uint8_t visible) {
+    if (state == nullptr || visible > 1) return invalid_argument();
+    if (!state->mounted || state->handle == nullptr) return contracts::ok();
+    if (!anchored_control_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (!contracts::succeeded(g_adapter->find_root(
+            static_cast<contracts::QolUiRootKind>(state->root_kind), &parent)) ||
+        parent == nullptr || !control_in_child_list(parent, state->handle)) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    int32_t current = 0;
+    const QolResult probe = anchored_control_probe(state, &current);
+    if (!contracts::succeeded(probe)) return probe;
+    if (current == 0) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    return g_adapter->set_control_show(state->handle, visible);
+}
+
+QolResult anchored_control_release(contracts::QolUiAnchoredControl* state) {
+    if (state == nullptr) return invalid_argument();
+    release_anchored_control_state(state);
+    return contracts::ok();
+}
+
+QolResult anchored_control_detach(contracts::QolUiAnchoredControl* state,
+                                  contracts::QolUiHandle* out_handle, uint8_t* out_live) {
+    if (state == nullptr || out_handle == nullptr || out_live == nullptr) {
+        return invalid_argument();
+    }
+    *out_handle = nullptr;
+    *out_live = 0;
+    if (!state->mounted || state->handle == nullptr) {
+        release_anchored_control_state(state);
+        return contracts::ok();
+    }
+    if (!anchored_control_adapter_ready()) return not_ready();
+    contracts::QolUiHandle parent = nullptr;
+    if (contracts::succeeded(g_adapter->find_root(
+            static_cast<contracts::QolUiRootKind>(state->root_kind), &parent)) &&
+        parent != nullptr && control_in_child_list(parent, state->handle)) {
+        int32_t current = 0;
+        const QolResult probe = anchored_control_probe(state, &current);
+        if (!contracts::succeeded(probe)) return probe;
+        if (current != 0) {
+            *out_handle = state->handle;
+            *out_live = 1;
+        }
+    }
+    release_anchored_control_state(state);
+    return contracts::ok();
+}
+
 QolResult explicit_text_button_create(const contracts::UiButtonDesc* desc,
                                       contracts::QolUiHandle parent,
                                       contracts::QolUiHandle* out, uint32_t appearance,
@@ -2341,6 +2523,11 @@ const contracts::QolUiComponents kUiComponents{
     &anchored_button_set_visible,
     &anchored_button_release,
     &anchored_button_draw,
+    // Minor 21 tail: 任意原生控件的锚定。
+    &anchored_control_ensure,
+    &anchored_control_set_visible,
+    &anchored_control_release,
+    &anchored_control_detach,
 };
 
 }  // namespace

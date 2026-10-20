@@ -25,6 +25,9 @@ struct FakeControl {
     qol::contracts::QolUiClickFn click = nullptr;
     void* click_user = nullptr;
     qol::contracts::QolUiDrawFn draw = nullptr;
+    void* control_data = nullptr;
+    void* control_proc = nullptr;
+    int32_t control_user_type = 0;
     bool enabled = true;
 };
 
@@ -422,6 +425,63 @@ QolResult draw_part_scaled(qol::contracts::QolUiHandle group, int32_t x, int32_t
     return ok();
 }
 
+QolResult control_type(qol::contracts::QolUiHandle handle, int32_t* out_type) {
+    if (handle == nullptr || out_type == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out_type = 3;
+    return ok();
+}
+
+QolResult control_user_type(qol::contracts::QolUiHandle handle, int32_t* out_type) {
+    if (handle == nullptr || out_type == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out_type = static_cast<FakeControl*>(handle)->control_user_type;
+    return ok();
+}
+
+QolResult control_data(qol::contracts::QolUiHandle handle, qol::contracts::QolUiHandle* out) {
+    if (handle == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out = static_cast<FakeControl*>(handle)->control_data;
+    return *out == nullptr ? qol::contracts::error(kQolErrNotFound, "missing", 7) : ok();
+}
+
+QolResult control_proc_matches(qol::contracts::QolUiHandle handle,
+                               qol::contracts::QolUiControlProcFn expected, int32_t* out) {
+    if (handle == nullptr || expected == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out = static_cast<FakeControl*>(handle)->control_proc ==
+            reinterpret_cast<void*>(expected) ? 1 : 0;
+    return ok();
+}
+
+QolResult set_control_proc(qol::contracts::QolUiHandle handle,
+                           qol::contracts::QolUiControlProcFn proc) {
+    if (handle == nullptr || proc == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    static_cast<FakeControl*>(handle)->control_proc = reinterpret_cast<void*>(proc);
+    return ok();
+}
+
+QolResult allocate_control_data(uint32_t size, qol::contracts::QolUiHandle* out) {
+    if (size == 0 || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    *out = std::calloc(1, size);
+    return *out == nullptr ? qol::contracts::error(kQolErrNotReady, "oom", 3) : ok();
+}
+
+QolResult set_control_data(qol::contracts::QolUiHandle handle, qol::contracts::QolUiHandle data) {
+    if (handle == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    static_cast<FakeControl*>(handle)->control_data = data;
+    return ok();
+}
+
 QolResult draw_border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
     g_last_container = {x, y, w, h};
     ++g_container_draws;
@@ -532,6 +592,13 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.child_at = &child_at;
     adapter.set_control_show = &set_control_show;
     adapter.click_binding_is_current = &click_binding_is_current;
+    adapter.control_proc_matches = &control_proc_matches;
+    adapter.control_type = &control_type;
+    adapter.control_user_type = &control_user_type;
+    adapter.control_data = &control_data;
+    adapter.set_control_proc = &set_control_proc;
+    adapter.allocate_control_data = &allocate_control_data;
+    adapter.set_control_data = &set_control_data;
     adapter.image_unit_load = &image_unit_load;
     adapter.draw_part_scaled = &draw_part_scaled;
     adapter.layout_native_text_button = &paint_layout;
@@ -546,6 +613,27 @@ const qol::contracts::QolUiAdapter kFakeAdapter = make_fake_adapter();
 
 QolResult anchored_layout(qol::contracts::QolUiHandle, qol::contracts::UiRect* out, void*) {
     *out = {5, 6, 20, 20};
+    return ok();
+}
+
+uint64_t raw_tab_proc(void*, uint64_t, void*, void*) { return 0; }
+
+int g_raw_creates = 0;
+QolResult raw_tab_create(qol::contracts::QolUiHandle parent, qol::contracts::UiRect rect, void*,
+                         qol::contracts::QolUiHandle* out) {
+    if (parent == nullptr || out == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    }
+    ++g_raw_creates;
+    auto* control = new FakeControl();
+    control->parent = static_cast<FakeControl*>(parent);
+    control->rect = rect;
+    control->control_proc = reinterpret_cast<void*>(&raw_tab_proc);
+    control->control_user_type = 2;
+    void* data = std::calloc(1, 16);
+    control->control_data = data;
+    control->parent->children.push_back(control);
+    *out = control;
     return ok();
 }
 
@@ -605,6 +693,47 @@ int main() {
         CHECK(components->anchored_button_ensure(&anchored, &anchored_desc, &anchored_layout,
                                                  nullptr, &created).ok == kQolOk);
         CHECK(anchored.handle == nullptr);
+    }
+
+
+    // anchored_control：任意原生控件（自定义 CO_PROC + 自带 data）的挂载与失效重建。
+    // 关键场景：游戏销毁子树后，地址被复用成「别的 proc」的控件——身份不符必须重建，
+    // 且绝不 delete_control。
+    {
+        FakeControl raw_root{};
+        raw_root.rect = {0, 0, 200, 200};
+        g_fake_equip_bag_root = &raw_root;
+        qol::contracts::QolUiAnchoredControl anchored{};
+        qol::contracts::UiAnchoredControlDesc control_desc{
+            static_cast<uint32_t>(qol::contracts::QolUiRootKind::kEquipBagContainer), &raw_tab_proc,
+            &anchored_layout, &raw_tab_create, nullptr};
+        uint8_t created = 0;
+        const int raw_deletes_before = g_native_button_deletes;
+        CHECK(components->anchored_control_ensure(&anchored, &control_desc, &created).ok == kQolOk);
+        CHECK(created == 1 && anchored.mounted == 1 && anchored.handle != nullptr);
+        CHECK(anchored.expected_proc == reinterpret_cast<void*>(&raw_tab_proc));
+        const qol::contracts::QolUiHandle raw_first = anchored.handle;
+        CHECK(components->anchored_control_ensure(&anchored, &control_desc, &created).ok == kQolOk);
+        CHECK(created == 0 && anchored.handle == raw_first);
+        // 地址复用成别的 proc：身份不符 → 注销记录并重建。
+        raw_root.children.clear();
+        auto* reused = new FakeControl();
+        reused->parent = &raw_root;
+        reused->control_proc = reinterpret_cast<void*>(&on_click);
+        reused->control_user_type = 2;
+        reused->control_data = std::calloc(1, 16);
+        raw_root.children.push_back(reused);
+        CHECK(components->anchored_control_ensure(&anchored, &control_desc, &created).ok == kQolOk);
+        CHECK(created == 1 && anchored.handle != reused);
+        CHECK(g_native_button_deletes == raw_deletes_before);
+        // detach：只有证明存活时才交出句柄，并清空状态。
+        qol::contracts::QolUiHandle detached = nullptr;
+        uint8_t live = 0;
+        CHECK(components->anchored_control_detach(&anchored, &detached, &live).ok == kQolOk);
+        CHECK(live == 1 && detached != nullptr && anchored.mounted == 0);
+        CHECK(components->anchored_control_detach(&anchored, &detached, &live).ok == kQolOk);
+        CHECK(live == 0 && detached == nullptr);
+        g_fake_equip_bag_root = nullptr;
     }
 
     qol::contracts::UiPanelDesc panel_desc{{100, 50, 100, 100}, {0, 0, 100, 100}, 0, 0};

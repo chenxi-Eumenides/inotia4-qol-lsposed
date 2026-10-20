@@ -249,6 +249,13 @@ void* ui_control_parent(void* ctrl) {
     return *reinterpret_cast<void**>(static_cast<uint8_t*>(ctrl) + CO_PARENT);
 }
 
+bool ui_control_proc_matches(void* ctrl, UiControlProc expected) {
+    if (ctrl == nullptr || expected == nullptr) return false;
+    if (!game_memory_accessible(ctrl, CO_CONTROL_PROC + sizeof(void*), 'r')) return false;
+    return *reinterpret_cast<void**>(static_cast<uint8_t*>(ctrl) + CO_CONTROL_PROC) ==
+           reinterpret_cast<void*>(expected);
+}
+
 bool ui_execute_proc_matches(void* ctrl, UiClickProc expected) {
     if (ctrl == nullptr || expected == nullptr) return false;
     uint8_t* data = static_cast<uint8_t*>(ui_control_data(ctrl));

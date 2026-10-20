@@ -828,6 +828,16 @@ QolResult draw_item_porting(QolUiHandle item, int32_t x, int32_t y, int32_t a, i
     return ui_draw_item_porting(item, x, y, a, b) ? contracts::ok() : not_ready();
 }
 
+QolResult control_proc_matches(QolUiHandle control, contracts::QolUiControlProcFn expected,
+                              int32_t* out) {
+    if (control == nullptr || expected == nullptr || out == nullptr) return invalid_argument();
+    *out = 0;
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    if (!game_memory_accessible(control, CO_CONTROL_PROC + sizeof(void*), 'r')) return not_ready();
+    *out = ui_control_proc_matches(control, expected) ? 1 : 0;
+    return contracts::ok();
+}
+
 QolResult execute_proc_matches(QolUiHandle control, contracts::QolUiClickFn expected,
                                int32_t* out) {
     if (control == nullptr || expected == nullptr || out == nullptr) return invalid_argument();
@@ -1467,6 +1477,8 @@ const QolUiAdapter g_ui_adapter{
              &draw_part_scaled,
              // Minor 25 tail: generic click-binding identity proof.
              &click_binding_is_current,
+             // Minor 26 tail: CO_PROC identity proof for raw game-tree controls.
+             &control_proc_matches,
         };
 
 }  // namespace

@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 20;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 25;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 21;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 26;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -244,6 +244,33 @@ struct UiAnchoredButtonDesc {
 // 布局回调：parent 是当帧活的挂载根，out_rect 使用 parent 相对坐标。
 using QolUiAnchorLayoutFn = QolResult (*)(QolUiHandle parent, UiRect* out_rect, void* user);
 
+using QolUiControlProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
+
+// 任意原生控件的锚定状态：调用方持有并零初始化；字段由实现读写。
+struct QolUiAnchoredControl {
+    void* handle;         // 当前 native 控件；nullptr 表示未挂载
+    void* parent;         // 上次命中的活挂载根
+    void* control_data;   // 创建时的 ControlObject data 快照（nullptr=该控件无 data）
+    void* expected_proc;  // 创建时的 CO_PROC 期望值（nullptr=不校验）
+    uint32_t root_kind;   // QolUiRootKind
+    uint32_t mounted;     // 1=handle 有效
+    int32_t type;         // 创建时的控件类型
+    int32_t user_type;    // 创建时的 user type
+};
+
+// 创建回调：parent 是当帧活的挂载根；实现负责创建控件（挂到 parent）并回填 rect。
+// 控件创建后由锚定层捕获身份快照；调用方仍需自行处理绘制与业务语义。
+using QolUiAnchorCreateFn = QolResult (*)(QolUiHandle parent, UiRect rect, void* user,
+                                          QolUiHandle* out_control);
+
+struct UiAnchoredControlDesc {
+    uint32_t root_kind;               // QolUiRootKind
+    QolUiControlProcFn expected_proc;  // 非空时要求 CO_CONTROL_PROC 仍是它（可空）
+    QolUiAnchorLayoutFn layout;
+    QolUiAnchorCreateFn create;
+    void* user;                        // 传给 layout/create
+};
+
 using QolUiHelpDetailDrawFn = void (*)(void* user, UiRect right_viewport);
 struct UiHelpOption {
     void* user;
@@ -411,6 +438,20 @@ struct QolUiComponents {
     // 卸载：注销组件记录，不删除 native 控件（游戏拥有其生命周期）。
     QolResult (*anchored_button_release)(QolUiAnchoredButton* state);
     QolResult (*anchored_button_draw)(const QolUiAnchoredButton* state);
+
+    // Minor 21 append-only: 任意原生控件的锚定（多控件/自定义 CO_PROC/自带 data 的挂载）。
+    // 与 anchored_button 同义：按 root_kind 每帧解析活挂载根，先做子链表指针比对，再用
+    // 创建时快照（type/user_type/data）与 expected_proc（CO_CONTROL_PROC）证明身份；失效只注销
+    // 记录（不删 native）并重建。控件绘制与业务语义由调用方负责。
+    QolResult (*anchored_control_ensure)(QolUiAnchoredControl* state,
+                                         const UiAnchoredControlDesc* desc,
+                                         uint8_t* out_created);
+    QolResult (*anchored_control_set_visible)(QolUiAnchoredControl* state, uint8_t visible);
+    QolResult (*anchored_control_release)(QolUiAnchoredControl* state);
+    // 取回可证明仍存活的句柄并清空状态：out_live=1 时 out_handle 有效，调用方负责删除/接管；
+    // out_live=0 时只清记录，绝不删除 native。
+    QolResult (*anchored_control_detach)(QolUiAnchoredControl* state, QolUiHandle* out_handle,
+                                         uint8_t* out_live);
 };
 
 using QolUiDrawFn = void (*)(void* control);
@@ -422,7 +463,6 @@ struct UiNativeScrollDesc {
     int64_t drag_threshold;
     uint8_t show_bar;
 };
-using QolUiControlProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 struct QolUiItemIcon {
     int32_t image_unit;
     int32_t image_loc;
@@ -641,6 +681,13 @@ struct QolUiAdapter {
     // never delete native memory merely because out_live==0. NotReady means unknown (unreadable).
     QolResult (*click_binding_is_current)(QolUiHandle control, QolUiClickFn expected, void* owner,
                                           int32_t* out_live);
+
+    // Minor 26 append-only slot. Reads CO_CONTROL_PROC (+0x98, the type event handler written by
+    // set_control_proc) of a main-thread-readable control and compares it with expected.
+    // out_matches=0 is conclusive only for a live control proven by a
+    // parent child-list check; NotReady means the field is unreadable.
+    QolResult (*control_proc_matches)(QolUiHandle control, QolUiControlProcFn expected,
+                                      int32_t* out_matches);
 };
 
 }  // namespace qol::contracts

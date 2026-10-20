@@ -18,6 +18,8 @@ void* extension_bag_ui_data(void* control);
 int extension_bag_ui_item_slot(void* control);
 void* extension_bag_ui_parent(void* control);
 void* extension_bag_ui_root(qol::contracts::QolUiRootKind kind);
+// ui_components 能力（锚定层）：每次调用重新 require，避免 provider 撤销后缓存悬空。
+const qol::contracts::QolUiComponents* extension_bag_ui_components();
 bool extension_bag_ui_rect(void* control, qol::contracts::UiRect* out_rect);
 bool extension_bag_ui_set_rect(void* control, qol::contracts::UiRect rect);
 bool extension_bag_ui_control_origin(void* control, int64_t* out_x, int64_t* out_y);
