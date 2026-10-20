@@ -135,3 +135,12 @@
 - `84bc9d51`：移除面板 `std::thread`/detached 刷新；改为打开时枚举、process 每帧最多解析 1 项、`name+size+mtime` 缓存、翻页/切槽重建队列、损坏条目移除重算页数。
 - 开销：枚举只做 `opendir/stat`；单条解析在读入时执行 CRC/checksum；每帧最多一项，但单个超大 bundle 的解析仍可能占一帧，后续可按时间预算再细化。
 - 构建：`scripts/build-debug.sh` 成功（两 ABI）。真机版式与逐帧回填节奏未验证。
+
+## §10 面板组件化（2026-10-21）
+
+用户要求：UI 必须使用 `core.custom_ui` 组件，不自绘；所有框为不带装饰角的圆角金框。
+
+- `24600d1a`：新增 `ui_components` required 能力；面板改用 `panel_create` 根/对话框、`draw_container` 圆角金框、`text_button` 操作/确认、`arrow_button` 翻页、`nav_button` 返回；事件统一走 `dispatch_native_event`；槽位/列表/auto 用不可见命中控件避免按钮背景与金框叠加。
+- `b8461775`：去掉左列分组外框与右列表每行金框，按参考图保留 3 张槽卡与 1 个列表外框。
+- 事实：`draw_container` 内部为游戏 `UI_DrawBorderRect`（金线圆角框 + 60% 黑底，`docs/reference/game/ui.md:133`），不是直角框。
+- 构建：`scripts/build-debug.sh` 成功（两 ABI）。真机视觉与组件命中未验证。
