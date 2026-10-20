@@ -55,6 +55,8 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
      {contracts::kExtensionBagVersionMajor, contracts::kExtensionBagVersionMinor}},
     {contracts::kHttpRegistryCapabilityId,
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
+    {contracts::kUiPanelsCapabilityId,
+     {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}},
 };
 
 #define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
@@ -133,61 +135,72 @@ void apply_gate(bool enabled) {
     autosell_ui_set_enabled(enabled);
 }
 
+void clear_runtime_capabilities() {
+    g_slot_data_api = nullptr;
+    g_world_facts = nullptr;
+    g_item_facts = nullptr;
+}
+
+bool acquire_runtime_capabilities(contracts::PluginContext& ctx) {
+    clear_runtime_capabilities();
+    if (ctx.sdk == nullptr || ctx.sdk->capabilities.require == nullptr) return false;
+
+    const void* iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kWorldFactsCapabilityId,
+            {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return false;
+    }
+    const auto* world_facts = static_cast<const contracts::WorldFactsApi*>(iface);
+
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kItemFactsCapabilityId,
+            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return false;
+    }
+    const auto* item_facts = static_cast<const contracts::ItemFactsApi*>(iface);
+    if (!contracts::item_facts_api_size_valid(item_facts)) return false;
+
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kQolSlotDataCapabilityId,
+            {contracts::kQolSlotDataVersion.major, contracts::kQolSlotDataVersion.minor},
+            &iface)) ||
+        iface == nullptr) {
+        return false;
+    }
+    const auto* slot_data_api = static_cast<const contracts::QolSlotDataApi*>(iface);
+
+    g_world_facts = world_facts;
+    g_item_facts = item_facts;
+    g_slot_data_api = slot_data_api;
+    if (!autosell_store_register(ctx.owner_token, slot_data_api)) {
+        clear_runtime_capabilities();
+        return false;
+    }
+    return true;
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_inventory_extras = nullptr;
-    g_world_facts = nullptr;
-    g_item_facts = nullptr;
+    clear_runtime_capabilities();
     if (ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) return 1;
     g_inventory_extras = static_cast<const contracts::QolInventoryExtrasPort*>(ctx.ports[0]);
     if (g_sdk == nullptr || g_sdk->panels.register_provider == nullptr ||
         g_sdk->panels.unregister_owner == nullptr) {
         return 1;
     }
-    const void* iface = nullptr;
-    if (g_sdk->capabilities.require == nullptr ||
-        !contracts::succeeded(g_sdk->capabilities.require(
-            contracts::kWorldFactsCapabilityId,
-            {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}, &iface)) ||
-        iface == nullptr) {
+    if (!acquire_runtime_capabilities(ctx)) {
         g_sdk = nullptr;
         g_game = nullptr;
+        g_inventory_extras = nullptr;
         return 1;
     }
-    g_world_facts = static_cast<const contracts::WorldFactsApi*>(iface);
-    iface = nullptr;
-    if (!contracts::succeeded(g_sdk->capabilities.require(
-            contracts::kItemFactsCapabilityId,
-            {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}, &iface)) ||
-        iface == nullptr) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_world_facts = nullptr;
-        return 1;
-    }
-    g_item_facts = static_cast<const contracts::ItemFactsApi*>(iface);
-    if (!contracts::item_facts_api_size_valid(g_item_facts)) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_world_facts = nullptr;
-        g_item_facts = nullptr;
-        return 1;
-    }
-    iface = nullptr;
-    if (!contracts::succeeded(g_sdk->capabilities.require(
-        contracts::kQolSlotDataCapabilityId,
-        {contracts::kQolSlotDataVersion.major, contracts::kQolSlotDataVersion.minor}, &iface)) ||
-        iface == nullptr ||
-        !autosell_store_register(ctx.owner_token,
-            static_cast<const contracts::QolSlotDataApi*>(iface))) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_world_facts = nullptr;
-        g_item_facts = nullptr;
-        return 1;
-    }
-    g_slot_data_api = static_cast<const contracts::QolSlotDataApi*>(iface);
     // save_enter/save_exit 回调设施是共享过渡依赖（B4 迁移）；注册对同一 fn+ctx 幂等，
     // activate 重入安全。
     autosell_register_save_enter();
@@ -201,7 +214,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     autosell_store_unregister();
-    g_slot_data_api = nullptr;
+    clear_runtime_capabilities();
     if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
         const void* iface = nullptr;
         if (contracts::succeeded(ctx.sdk->capabilities.require(
@@ -215,8 +228,6 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     autosell_unregister_save_callbacks();
     g_game = nullptr;
     g_inventory_extras = nullptr;
-    g_world_facts = nullptr;
-    g_item_facts = nullptr;
     apply_gate(false);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
         (void)g_sdk->panels.unregister_owner(kPluginId);
@@ -225,9 +236,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 
 // 有资源（2 条常驻）但无资源 gate：启停只切业务门禁与 UI 门控；资源物理装卸由宿主负责。
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    if (g_slot_data_api != nullptr &&
-        !autosell_store_register(ctx.owner_token, g_slot_data_api)) {
-        AUTOSELL_LOG_WARN("slot data re-register on enable failed");
+    if (!acquire_runtime_capabilities(ctx)) {
+        AUTOSELL_LOG_WARN("runtime capability acquisition on enable failed");
+        apply_gate(false);
+        return;
     }
     apply_gate(true);
 }
@@ -235,6 +247,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     autosell_store_unregister();
+    clear_runtime_capabilities();
     apply_gate(false);
 }
 
@@ -256,7 +269,7 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     5, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
-    kOptionalRequires,  // optional=extension_bag + http.registry
+    kOptionalRequires,  // optional=extension_bag + http.registry + ui_panels
     0, nullptr,   // provides
     2, kResources,// resources（入口 call patch + own:popup.autosell）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_autosell.cpp 保留）

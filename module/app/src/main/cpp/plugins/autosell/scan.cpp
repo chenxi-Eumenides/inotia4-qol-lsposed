@@ -23,12 +23,17 @@ constexpr int kLogicalBagScanFirst = 6;  // = kExtensionLogicalBagFirst
 constexpr int kLogicalBagScanCount = 5;  // = kBagCount
 constexpr int kSlotCount = 16;
 
-std::mutex g_scan_mtx;
 std::mutex g_task_mtx;
 uint64_t g_task = 0;
 uint64_t g_save_enter_subscription = 0;
 uint64_t g_save_exit_subscription = 0;
 std::atomic<bool> g_global_enabled{false};
+std::atomic<bool> g_config_enabled{false};
+std::atomic<uint64_t> g_scan_cancel_epoch{0};
+bool g_has_bag_traversal_error = false;
+int g_last_bag_traversal_error = 0;
+enum class InventoryActionState : int { kAvailable, kCapabilityUnavailable, kSellUnavailable };
+InventoryActionState g_inventory_action_state = InventoryActionState::kAvailable;
 std::atomic<int> g_last_blocked_gate{-1};
 std::atomic<bool> g_diagnostic_debug_enabled{false};
 std::atomic<bool> g_reset_diagnostic_cache{false};
@@ -76,6 +81,13 @@ InventoryActionLookup inventory_action_api_lookup() {
         lookup.api = static_cast<const qol::contracts::InventoryActionApi*>(iface);
     }
     return lookup;
+}
+
+void note_inventory_action_state(InventoryActionState state) {
+    if (state == g_inventory_action_state) return;
+    g_inventory_action_state = state;
+    if (state != InventoryActionState::kAvailable)
+        AUTOSELL_LOG_WARN("inventory.action sell unavailable");
 }
 
 struct ScanStats {
@@ -281,10 +293,30 @@ void emit_candidate_diagnostic(int64_t frame, int bag, int slot,
         diagnostic.sell_status);
 }
 
+struct ScanRound {
+    uint64_t epoch;
+    int64_t frame;
+    bool cancellation_logged = false;
+};
+
 struct PhysicalScanCtx {
     const autosell::Config* cfg;
     ScanStats* stats;
+    ScanRound* round;
 };
+
+bool scan_round_cancelled(ScanRound& round) {
+    const uint64_t current_epoch = g_scan_cancel_epoch.load(std::memory_order_acquire);
+    if (current_epoch == round.epoch) return false;
+    if (!round.cancellation_logged) {
+        round.cancellation_logged = true;
+        AUTOSELL_LOG_INFO("scan cancelled frame=%lld epoch=%llu current_epoch=%llu",
+                          static_cast<long long>(round.frame),
+                          static_cast<unsigned long long>(round.epoch),
+                          static_cast<unsigned long long>(current_epoch));
+    }
+    return true;
+}
 
 bool scan_gates_ok(ScanGateReason* out_reason) {
     if (out_reason != nullptr) *out_reason = ScanGateReason::kReady;
@@ -312,6 +344,8 @@ bool scan_gates_ok(ScanGateReason* out_reason) {
         if (out_reason != nullptr) *out_reason = ScanGateReason::kModuleViewInstalled;
         return false;
     }
+    // inventory_state_id is provided by extension_bag; without that capability there is no UI
+    // occupancy source, so physical bags continue scanning and logical bags are skipped.
     // Do not mutate slots while any in-game panel (inventory/store/craft/etc.)
     // owns the frame. World state remains 5 with a panel open, so this needs an
     // explicit UI-state gate; it is the minimal safe exclusion outside the world.
@@ -327,7 +361,7 @@ bool scan_gates_ok(ScanGateReason* out_reason) {
 
 void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref,
                  const autosell::Config& cfg, ScanStats* stats,
-                 CandidateDiagnostics* diagnostics) {
+                 CandidateDiagnostics* diagnostics, ScanRound& round) {
     autosell::ItemView view;
     const AutosellViewBuildReason view_reason =
         autosell_build_view(ref, &view, diagnostics == nullptr ? nullptr : &diagnostics->view);
@@ -360,7 +394,16 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
                                       action_lookup.api->sell != nullptr;
     }
     const auto* actions = action_lookup.api;
-    if (actions == nullptr || actions->sell == nullptr) return;
+    if (actions == nullptr) {
+        note_inventory_action_state(InventoryActionState::kCapabilityUnavailable);
+        return;
+    }
+    if (actions->sell == nullptr) {
+        note_inventory_action_state(InventoryActionState::kSellUnavailable);
+        return;
+    }
+    note_inventory_action_state(InventoryActionState::kAvailable);
+    if (scan_round_cancelled(round)) return;
     if (diagnostics != nullptr) diagnostics->sell_called = true;
     const qol::contracts::InventorySellResult result =
         actions->sell(ref.bag, ref.slot, ref.item, "autosell");
@@ -379,26 +422,38 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
                       ref.category, static_cast<int>(result.status));
 }
 
-void scan_body(const autosell::Config& cfg, int64_t frame) {
+void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
+    if (scan_round_cancelled(round)) return;
     if (g_reset_diagnostic_cache.exchange(false, std::memory_order_relaxed)) {
         g_last_candidate_diagnostics = {};
     }
     ScanStats stats;
-    PhysicalScanCtx physical{&cfg, &stats};
-    (void)qol::features::autosell::read_only::for_each_bag_slot(
+    PhysicalScanCtx physical{&cfg, &stats, &round};
+    const QolResult traversal_result = qol::features::autosell::read_only::for_each_bag_slot(
         [](const qol::features::autosell::read_only::InventoryItemRef* source, void* ctx) -> int32_t {
-            if (source == nullptr || source->bag > kLastPhysicalBag) return 0;
             auto* scan = static_cast<PhysicalScanCtx*>(ctx);
+            if (scan_round_cancelled(*scan->round)) return 1;
+            if (source == nullptr || source->bag > kLastPhysicalBag) return 0;
             auto ref = *source;
             qol::features::autosell::read_only::refresh_item_count(&ref);
-            process_ref(ref, *scan->cfg, scan->stats, nullptr);
-            return 0;
+            process_ref(ref, *scan->cfg, scan->stats, nullptr, *scan->round);
+            return scan_round_cancelled(*scan->round) ? 1 : 0;
         },
         &physical);
+    if (traversal_result.ok == kQolOk) {
+        g_has_bag_traversal_error = false;
+    } else if (!g_has_bag_traversal_error ||
+               g_last_bag_traversal_error != traversal_result.code) {
+        g_has_bag_traversal_error = true;
+        g_last_bag_traversal_error = traversal_result.code;
+        AUTOSELL_LOG_WARN("scan bag traversal failed code=%d", traversal_result.code);
+    }
 
-    const ExtensionApiLookup eb_lookup = extension_bag_api_lookup();
+    ExtensionApiLookup eb_lookup{};
+    if (!scan_round_cancelled(round)) eb_lookup = extension_bag_api_lookup();
     const auto* eb = eb_lookup.api;
-    for (int bag = kLogicalBagScanFirst; bag < kLogicalBagScanFirst + kLogicalBagScanCount;
+    for (int bag = kLogicalBagScanFirst;
+         bag < kLogicalBagScanFirst + kLogicalBagScanCount && !scan_round_cancelled(round);
          ++bag) {
         int logical_bag = -1;
         const bool logical_callback = eb != nullptr && eb->is_logical_bag != nullptr;
@@ -406,6 +461,7 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
             logical_bag = eb->is_logical_bag(bag) ? 1 : 0;
         }
         for (int slot = 0; slot < kSlotCount; ++slot) {
+            if (scan_round_cancelled(round)) break;
             CandidateDiagnostics diagnostic{};
             diagnostic.eb_require_ok = eb_lookup.result.ok;
             diagnostic.eb_require_code = eb_lookup.result.code;
@@ -430,11 +486,12 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
                         qol::contracts::QolInventoryItemKind::kProvider);
                     if (provider_ref && diagnostic.handle_valid && ref.category > 0) {
                         qol::features::autosell::read_only::refresh_item_count(&ref);
-                        process_ref(ref, cfg, &stats, &diagnostic);
+                        process_ref(ref, cfg, &stats, &diagnostic, round);
                     }
                 }
             }
             emit_candidate_diagnostic(frame, bag, slot, cfg, diagnostic);
+            if (scan_round_cancelled(round)) break;
         }
     }
 
@@ -446,33 +503,41 @@ void scan_body(const autosell::Config& cfg, int64_t frame) {
 }
 
 int32_t autosell_tick(int64_t frame, void*) {
+    const uint64_t round_epoch = g_scan_cancel_epoch.load(std::memory_order_acquire);
+    ScanRound round{round_epoch, frame};
     update_diagnostic_debug_state();
     if (!g_global_enabled.load(std::memory_order_acquire)) {
         log_blocked_gate_once(frame, ScanGateReason::kGlobalDisabled);
+        (void)scan_round_cancelled(round);
         return 1;
     }
     const int slot = autosell_active_save_slot();
     if (!autosell_scan_session_active(slot)) {
         log_blocked_gate_once(frame, ScanGateReason::kSessionInactive);
+        (void)scan_round_cancelled(round);
         return 1;
     }
     const autosell::Config cfg = autosell_get_runtime_config();
     if (!cfg.enabled) {
         log_blocked_gate_once(frame, ScanGateReason::kConfigDisabled);
+        (void)scan_round_cancelled(round);
         return 1;
     }
     ScanGateReason gate_reason = ScanGateReason::kReady;
     if (!scan_gates_ok(&gate_reason)) {
         log_blocked_gate_once(frame, gate_reason);
+        (void)scan_round_cancelled(round);
         return 1;
     }
     g_last_blocked_gate.store(-1, std::memory_order_relaxed);
-    std::lock_guard<std::mutex> lock(g_scan_mtx);
-    scan_body(cfg, frame);
+    // Scheduler ticks are serialized on the main thread; do not hold a plugin-private lock
+    // across calls into other plugins.
+    if (!scan_round_cancelled(round)) scan_body(cfg, frame, round);
     return 1;
 }
 
 void remove_task_if_any() {
+    g_scan_cancel_epoch.fetch_add(1, std::memory_order_acq_rel);
     std::lock_guard<std::mutex> lock(g_task_mtx);
     if (g_task == 0) return;
     const auto* sdk = qol::features::autosell::host_sdk();
@@ -492,12 +557,17 @@ void sync_task() {
         remove_task_if_any();
         return;
     }
-    if (!autosell_get_runtime_config().enabled) {
+    if (!g_config_enabled.load(std::memory_order_acquire)) {
         log_blocked_gate_once(-1, ScanGateReason::kConfigDisabled);
         remove_task_if_any();
         return;
     }
     std::lock_guard<std::mutex> lock(g_task_mtx);
+    if (!g_global_enabled.load(std::memory_order_acquire) ||
+        !autosell_scan_session_active(autosell_scan_session_slot()) ||
+        !g_config_enabled.load(std::memory_order_acquire)) {
+        return;
+    }
     if (g_task != 0) return;
     const auto* sdk = qol::features::autosell::host_sdk();
     if (sdk == nullptr || sdk->scheduler.add == nullptr) return;
@@ -532,6 +602,7 @@ void autosell_on_save_exit(void*, const void*) {
 void autosell_apply_config(const autosell::Config& config) {
     const bool old_enabled = autosell_get_runtime_config().enabled;
     autosell_set_runtime_config(config);
+    g_config_enabled.store(config.enabled, std::memory_order_release);
     if (old_enabled == config.enabled) return;
     AUTOSELL_LOG_INFO("save master switch %d -> %d", old_enabled ? 1 : 0, config.enabled ? 1 : 0);
     if (config.enabled) sync_task();
