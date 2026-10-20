@@ -1634,50 +1634,38 @@ bool save_backup_export_slot_to_dir(int32_t slot, const char* dir, const char* f
     return true;
 }
 
-std::string save_backup_import_json(const char* checksum, int slot) {
-    // 参数校验、bundle 定位与解析持锁；gate/容器/文件 IO 段在锁外执行——同槽串行由
-    // 槽操作门保证，不以跨插件持锁保证串行。
-    std::unique_lock<std::mutex> lk(g_sb_mtx);
-    const std::string ck = checksum != nullptr ? checksum : "";
-    if (!save_backup::valid_checksum(ck)) return result_error("bad checksum");
+static std::string import_bundle_file(const std::string& path, int slot) {
     if (slot < 0 || slot > 2) return result_error("bad slot");
-    // 导入会覆盖槽文件，必须先确认当前未加载任何槽；导出不设此限制。
-    std::string gate_error;
-    if (!import_allowed_now(gate_error)) return result_error(gate_error.c_str());
-    std::string dir;
-    if (!backup_dir(dir)) return result_error("backup dir unavailable");
-    const std::string path = find_by_checksum(dir, ck);
-    if (path.empty()) return result_error("backup not found");
     const std::string name = file_name_of(path);
-
     std::vector<uint8_t> bytes;
     save_backup::ParsedBundle parsed;
-    if (!read_file_bytes(path, bytes) ||
-        !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
-        return result_error("backup unreadable or corrupt");
+    bool module_present = false;
+    {
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        if (!read_file_bytes(path, bytes) ||
+            !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
+            return result_error("backup unreadable or corrupt");
+        }
+        // checksum 必须覆盖全部可还原内容（v3 含 warehouse_blob），不能只信 meta 声明。
+        std::string meta_checksum;
+        if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
+            !save_backup::valid_checksum(meta_checksum) ||
+            meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
+                                                           parsed.module, parsed.warehouse_blob)) {
+            return result_error("backup checksum mismatch");
+        }
+        // module_state：新备份显式 0/1；旧备份无字段时按 module 是否为空推断。
+        long long module_state_raw = -1;
+        const bool has_module_state =
+            save_backup::json_find_int(parsed.meta_json, "module_state", module_state_raw);
+        if (has_module_state && module_state_raw != 0 && module_state_raw != 1) {
+            return result_error("backup unreadable or corrupt");
+        }
+        module_present = has_module_state ? module_state_raw == 1 : !parsed.module.empty();
+        if (module_present != !parsed.module.empty()) {
+            return result_error("backup unreadable or corrupt");
+        }
     }
-    // checksum 必须覆盖全部可还原内容（v3 含 warehouse_blob），不能只信 meta 声明。
-    std::string meta_checksum;
-    if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
-        !save_backup::valid_checksum(meta_checksum) ||
-        meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
-                                                       parsed.module, parsed.warehouse_blob)) {
-        return result_error("backup checksum mismatch");
-    }
-    // module_state：新备份显式 0/1；旧备份无字段时按 module 是否为空推断。
-    long long module_state_raw = -1;
-    const bool has_module_state =
-        save_backup::json_find_int(parsed.meta_json, "module_state", module_state_raw);
-    if (has_module_state && module_state_raw != 0 && module_state_raw != 1) {
-        return result_error("backup unreadable or corrupt");
-    }
-    const bool module_present =
-        has_module_state ? module_state_raw == 1 : !parsed.module.empty();
-    if (module_present != !parsed.module.empty()) {
-        return result_error("backup unreadable or corrupt");
-    }
-    // shared 状态（map 名表/目录根）在锁外只读；此处起进入锁外段。
-    lk.unlock();
 
     // 前置门：首次写删之前 acquire；parsed.module 为空也必须 acquire（dat 写入本身
     // 就是不可逆变更）。
@@ -1744,8 +1732,11 @@ std::string save_backup_import_json(const char* checksum, int slot) {
         }
     }
 
-    // 3) 安全备份现存文件到 .rollback/（dat 落副本；sidecar 现状快照留在内存，失败时经 store 还原）。
-    const std::string rollback_dir = dir + "/" + kRollbackDirName;
+    // 3) 安全备份现存文件到 bundle 同目录的 .rollback/（手动 = backups/，auto = autobackup/）。
+    const size_t path_slash = path.find_last_of('/');
+    const std::string bundle_dir =
+        path_slash == std::string::npos ? std::string() : path.substr(0, path_slash);
+    const std::string rollback_dir = bundle_dir + "/" + kRollbackDirName;
     if (!ensure_dir(rollback_dir)) {
         slot_operation_release(&guard);
         return result_error("rollback dir mkdir failed");
@@ -1943,6 +1934,67 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     // 目标槽文件已被覆盖：槽区结构不再代表磁盘状态，下一次读取必须重载。
     save_mark_stale();
     return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
+}
+
+std::string save_backup_import_json(const char* checksum, int slot) {
+    // 参数校验、bundle 定位与解析持锁；gate/容器/文件 IO 段在锁外执行——同槽串行由
+    // 槽操作门保证，不以跨插件持锁保证串行。
+    std::unique_lock<std::mutex> lk(g_sb_mtx);
+    const std::string ck = checksum != nullptr ? checksum : "";
+    if (!save_backup::valid_checksum(ck)) return result_error("bad checksum");
+    if (slot < 0 || slot > 2) return result_error("bad slot");
+    // 导入会覆盖槽文件，必须先确认当前未加载任何槽；导出不设此限制。
+    std::string gate_error;
+    if (!import_allowed_now(gate_error)) return result_error(gate_error.c_str());
+    std::string dir;
+    if (!backup_dir(dir)) return result_error("backup dir unavailable");
+    const std::string path = find_by_checksum(dir, ck);
+    if (path.empty()) return result_error("backup not found");
+    lk.unlock();
+    return import_bundle_file(path, slot);
+}
+
+std::string save_backup_auto_entry_json(int slot) {
+    if (slot < 0 || slot > 2) return result_error("bad slot");
+    std::string external_dir;
+    {
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        external_dir = g_sb_external_dir;
+    }
+    const std::string path = external_dir + "/backups/autobackup/autosave_s" +
+                             std::to_string(slot) + ".qol_save";
+    if (!file_exists(path)) return "{\"ok\":true,\"backup\":null}";
+    std::vector<uint8_t> bytes;
+    save_backup::ParsedBundle parsed;
+    if (!read_file_bytes(path, bytes) ||
+        !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
+        return result_error("backup unreadable or corrupt");
+    }
+    save_backup::Entry entry;
+    save_backup::entry_from_bundle(file_name_of(path), parsed, entry);
+    const std::unordered_map<int, std::string> map_names = snapshot_map_names();
+    auto it = map_names.find(entry.map_id);
+    if (it != map_names.end()) entry.map_name = it->second;
+    entry.class_name = save_backup_class_name(entry.class_idx);
+    return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
+}
+
+std::string save_backup_import_auto_json(int source_slot, int target_slot) {
+    if (source_slot < 0 || source_slot > 2 || target_slot < 0 || target_slot > 2) {
+        return result_error("bad slot");
+    }
+    std::string gate_error;
+    if (!import_allowed_now(gate_error)) return result_error(gate_error.c_str());
+    std::string external_dir;
+    {
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        external_dir = g_sb_external_dir;
+    }
+    if (external_dir.empty()) return result_error("backup dir unavailable");
+    const std::string path = external_dir + "/backups/autobackup/autosave_s" +
+                             std::to_string(source_slot) + ".qol_save";
+    if (!file_exists(path)) return result_error("backup not found");
+    return import_bundle_file(path, target_slot);
 }
 
 std::string save_backup_delete_json(const char* checksum) {

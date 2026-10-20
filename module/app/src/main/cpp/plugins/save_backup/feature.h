@@ -72,6 +72,13 @@ std::string save_backup_export_json(int slot);
 // POST /api/system/backup/import 响应体（按 checksum 定位，还原 save{slot}.dat + sidecar）。
 std::string save_backup_import_json(const char* checksum, int slot);
 
+// 左侧选中槽的自动备份条目；不存在返回 {"ok":true,"backup":null}。
+std::string save_backup_auto_entry_json(int slot);
+
+// 把 source_slot 的自动备份导入到 target_slot；与手动导入共用校验/门禁/回滚。
+// 自动备份不存在 → backup not found；其余错误文案与手动导入一致。
+std::string save_backup_import_auto_json(int source_slot, int target_slot);
+
 // POST /api/system/backup/delete 响应体。
 std::string save_backup_delete_json(const char* checksum);
 

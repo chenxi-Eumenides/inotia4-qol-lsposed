@@ -664,6 +664,65 @@ int main() {
     CHECK(!has_entry_prefix(root + "/saves", ".sb-trash-"));
     CHECK(!has_entry_prefix(root + "/backups", ".trash-"));
 
+    // ---- C：自动备份条目与自动导入 ----
+    {
+        save_backup_autobackup_pre_save(0);
+        const std::string auto_path = root + "/backups/autobackup/autosave_s0.qol_save";
+        const std::string auto_entry = save_backup_auto_entry_json(0);
+        CHECK(body_ok(auto_entry));
+        CHECK(auto_entry.find("\"backup\":null") == std::string::npos);
+        std::string entry_checksum;
+        CHECK(save_backup::json_find_string(auto_entry, "checksum", entry_checksum));
+        std::vector<uint8_t> auto_bytes = read_file_vector(auto_path);
+        save_backup::ParsedBundle auto_parsed;
+        CHECK(!auto_bytes.empty());
+        CHECK(save_backup::parse_bundle(auto_bytes.data(), auto_bytes.size(), auto_parsed));
+        CHECK(entry_checksum ==
+              save_backup::compute_checksum(auto_parsed.bundle_version, auto_parsed.orig_plain,
+                                            auto_parsed.module, auto_parsed.warehouse_blob));
+        long long auto_map_id = -1;
+        long long auto_hero_level = -999;
+        long long auto_hero_index = -999;
+        long long auto_class_idx = -999;
+        CHECK(save_backup::json_find_int(auto_entry, "map_id", auto_map_id));
+        CHECK(auto_map_id == 4);
+        CHECK(save_backup::json_find_int(auto_entry, "hero_level", auto_hero_level));
+        CHECK(auto_hero_level == 42);
+        CHECK(save_backup::json_find_int(auto_entry, "hero_index", auto_hero_index));
+        CHECK(auto_hero_index == 2);
+        CHECK(save_backup::json_find_int(auto_entry, "class_idx", auto_class_idx));
+        CHECK(auto_class_idx == 3);
+        CHECK(save_backup_auto_entry_json(2) == "{\"ok\":true,\"backup\":null}");
+
+        // 自动备份不进入手动列表。
+        CHECK(save_backup_list_json().find("autosave_s0") == std::string::npos);
+
+        // 导入回原槽。
+        const int manual_files_before = count_entries(root + "/backups");
+        const std::string import_same = save_backup_import_auto_json(0, 0);
+        CHECK(body_ok(import_same));
+        CHECK(read_file(dat_path) != original_dat);
+        CHECK(count_entries(root + "/backups") == manual_files_before);
+
+        // 导入到另一槽。
+        const std::string import_other = save_backup_import_auto_json(0, 1);
+        CHECK(body_ok(import_other));
+        CHECK(::access((save_dir + "/save1.dat").c_str(), F_OK) == 0);
+
+        // 非主菜单：沿用现有门禁文案。
+        g_current_slot = 0;
+        const std::string gated = save_backup_import_auto_json(0, 0);
+        g_current_slot = -1;
+        CHECK(gated.find("import requires main menu") != std::string::npos);
+
+        // 自动备份损坏：沿用现有读取错误文案。
+        CHECK(write_file(auto_path, "CORRUPT"));
+        const std::string corrupt = save_backup_import_auto_json(0, 0);
+        CHECK(corrupt.find("backup unreadable or corrupt") != std::string::npos);
+        // 让后续自动备份指纹用例重新导出（避免跳过损坏文件）。
+        CHECK(::unlink((root + "/backups/autobackup/autosave_s0.fingerprint").c_str()) == 0);
+    }
+
     // ---- sidecar 回滚完整 → lease 释放：primary 写入被占位目录阻断（store 面未变更）----
     const std::string module_saves = root + "/saves";
     CHECK(::mkdir(module_saves.c_str(), 0755) == 0 || errno == EEXIST);
