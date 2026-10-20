@@ -937,8 +937,7 @@ void json_append_escaped(std::string& out, const std::string& value) {
 
 }  // namespace
 
-std::string entry_json(const Entry& e) {
-    std::string s = "{\"file_name\":\"";
+std::string entry_json(const Entry& e) {    std::string s = "{\"file_name\":\"";
     json_append_escaped(s, e.file_name);
     s += "\"";
     s += ",\"size_bytes\":" + std::to_string(e.size_bytes);
@@ -968,6 +967,12 @@ std::string entry_json(const Entry& e) {
     s += "\"";
     s += "}";
     return s;
+}
+
+std::string json_escape(const std::string& value) {
+    std::string out;
+    json_append_escaped(out, value);
+    return out;
 }
 
 void entry_from_bundle(const std::string& file_name, const ParsedBundle& p, Entry& out) {

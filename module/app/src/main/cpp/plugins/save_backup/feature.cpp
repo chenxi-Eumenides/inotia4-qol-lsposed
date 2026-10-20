@@ -1470,6 +1470,91 @@ std::string save_backup_list_json() {
     return s + "]}";
 }
 
+std::string save_backup_list_files_json() {
+    std::string s = "{\"ok\":true,\"files\":[";
+    const SbDirs dirs = snapshot_dirs();
+    std::string dir;
+    if (!backup_dir_at(dirs.external, dir)) return s + "]}";
+    std::vector<std::string> names;
+    if (!list_bundle_files(dir, names)) return s + "]}";
+
+    // 只 stat 不读取内容；累计上限按 stat 尺寸计（不是实际读取量）。
+    struct ListedFile {
+        std::string name;
+        long long size = 0;
+        long long mtime_ms = 0;
+    };
+    std::vector<ListedFile> files;
+    long long scanned_bytes = 0;
+    for (const std::string& name : names) {
+        const std::string path = dir + "/" + name;
+        struct stat st{};
+        if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
+            static_cast<long long>(st.st_size) > kListMaxBundleBytes) {
+            SB_LOG("save backup list files skip: %s", name.c_str());
+            continue;
+        }
+        const long long size = static_cast<long long>(st.st_size);
+        if (scanned_bytes + size > kListMaxTotalBytes) {
+            SB_LOG("save backup list files stopped: stat total %lld exceeds %lld", scanned_bytes,
+                   kListMaxTotalBytes);
+            break;
+        }
+        scanned_bytes += size;
+        files.push_back(ListedFile{name, size,
+                                   static_cast<long long>(st.st_mtim.tv_sec) * 1000 +
+                                       static_cast<long long>(st.st_mtim.tv_nsec) / 1000000});
+    }
+    std::sort(files.begin(), files.end(), [](const ListedFile& a, const ListedFile& b) {
+        if (a.name != b.name) return a.name > b.name;
+        return a.mtime_ms > b.mtime_ms;
+    });
+    for (size_t i = 0; i < files.size(); ++i) {
+        if (i != 0) s += ",";
+        s += "{\"name\":\"" + save_backup::json_escape(files[i].name) + "\",\"size\":" +
+             std::to_string(files[i].size) + ",\"mtime_ms\":" +
+             std::to_string(files[i].mtime_ms) + "}";
+    }
+    return s + "]}";
+}
+
+std::string save_backup_entry_json(const char* name) {
+    const std::string file_name = name != nullptr ? name : "";
+    if (file_name.empty() || file_name.find('/') != std::string::npos ||
+        file_name.find("..") != std::string::npos || !ends_with(file_name, kBundleSuffix)) {
+        return result_error("bad request");
+    }
+    std::string external_dir;
+    {
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        external_dir = g_sb_external_dir;
+    }
+    if (external_dir.empty()) return result_error("backup not found");
+    const std::string path = external_dir + "/" + kBackupDirName + "/" + file_name;
+    if (!file_exists(path)) return result_error("backup not found");
+
+    std::vector<uint8_t> bytes;
+    save_backup::ParsedBundle parsed;
+    if (!read_file_bytes(path, bytes) ||
+        !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
+        return result_error("backup unreadable or corrupt");
+    }
+    std::string meta_checksum;
+    if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
+        !save_backup::valid_checksum(meta_checksum) ||
+        meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
+                                                       parsed.module, parsed.warehouse_blob)) {
+        return result_error("backup checksum mismatch");
+    }
+    save_backup::Entry entry;
+    save_backup::entry_from_bundle(file_name, parsed, entry);
+    const std::unordered_map<int, std::string> map_names = snapshot_map_names();
+    auto it = map_names.find(entry.map_id);
+    if (it != map_names.end()) entry.map_name = it->second;
+    entry.class_name = save_backup_class_name(entry.class_idx);
+    return "{\"ok\":true,\"backup\":" + save_backup::entry_json(entry) + "}";
+}
+
 struct BuiltExport {
     std::vector<uint8_t> bundle;
     std::string checksum;

@@ -66,6 +66,11 @@ const char* save_backup_class_name(int class_idx);
 // GET /api/system/backup/list 响应体。
 std::string save_backup_list_json();
 
+// 仅枚举 backups/ 顶层文件名与 stat 元信息（不打开/不解析 bundle），供面板逐帧解析。
+std::string save_backup_list_files_json();
+// 解析 backups/ 下的单个直接文件名；校验 payload checksum 后返回与列表一致的 entry。
+std::string save_backup_entry_json(const char* name);
+
 // POST /api/system/backup/export 响应体（去重命中时额外带 "deduplicated":true）。
 std::string save_backup_export_json(int slot);
 

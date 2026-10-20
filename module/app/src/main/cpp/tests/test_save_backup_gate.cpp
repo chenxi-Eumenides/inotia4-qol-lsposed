@@ -901,6 +901,84 @@ int main() {
         CHECK(module_out == std::vector<uint8_t>({7}));
     }
 
+    // ---- UI 逐帧解析：文件名枚举 + 单条解析 ----
+    {
+        const std::string backups_dir = root + "/backups";
+        std::vector<uint8_t> plain_a(16, 0);
+        plain_a[8] = 4;
+        const std::string ck_a =
+            save_backup::compute_checksum(save_backup::kBundleVersion, plain_a, {}, {});
+        const std::string meta_a = save_backup::build_meta_json(
+            0, 1000, 37, 5, 0, 5, 10, std::string(64, 'a'), std::string(), ck_a, 2, "黑魔导");
+        std::vector<uint8_t> bundle_a;
+        save_backup::build_bundle(0, 1000, plain_a, {}, {}, meta_a, bundle_a);
+        const std::string name_a = "zz_ui_a.qol_save";
+        CHECK(write_file(backups_dir + "/" + name_a,
+                         std::string(bundle_a.begin(), bundle_a.end())));
+
+        std::vector<uint8_t> plain_b(16, 1);
+        plain_b[8] = 4;
+        const std::string ck_b =
+            save_backup::compute_checksum(save_backup::kBundleVersion, plain_b, {}, {});
+        const std::string meta_b = save_backup::build_meta_json(
+            0, 900, 30, 3, 1, 5, 9, std::string(64, 'b'), std::string(), ck_b);
+        std::vector<uint8_t> bundle_b;
+        save_backup::build_bundle(0, 900, plain_b, {}, {}, meta_b, bundle_b);
+        CHECK(write_file(backups_dir + "/aa_ui_b.qol_save",
+                         std::string(bundle_b.begin(), bundle_b.end())));
+        CHECK(write_file(backups_dir + "/mm_ui_corrupt.qol_save", "NOT-A-BUNDLE"));
+
+        const std::string files = save_backup_list_files_json();
+        CHECK(body_ok(files));
+        CHECK(files.find("\"name\":\"" + name_a + "\"") != std::string::npos);
+        CHECK(files.find("\"name\":\"aa_ui_b.qol_save\"") != std::string::npos);
+        CHECK(files.find("\"name\":\"mm_ui_corrupt.qol_save\"") != std::string::npos);
+        CHECK(files.find("autosave_s0") == std::string::npos);  // 只扫 backups 顶层
+        const size_t pos_a = files.find("\"name\":\"" + name_a + "\"");
+        const size_t pos_c = files.find("\"name\":\"mm_ui_corrupt.qol_save\"");
+        const size_t pos_b = files.find("\"name\":\"aa_ui_b.qol_save\"");
+        CHECK(pos_a < pos_c && pos_c < pos_b);  // 文件名降序
+        const std::string segment_a =
+            files.substr(pos_a, files.find('}', pos_a) - pos_a);
+        long long listed_size = -1;
+        long long listed_mtime = -1;
+        CHECK(save_backup::json_find_int(segment_a, "size", listed_size));
+        CHECK(listed_size == static_cast<long long>(bundle_a.size()));
+        CHECK(save_backup::json_find_int(segment_a, "mtime_ms", listed_mtime));
+        CHECK(listed_mtime > 0);
+
+        const std::string entry = save_backup_entry_json(name_a.c_str());
+        CHECK(body_ok(entry));
+        std::string entry_checksum;
+        CHECK(save_backup::json_find_string(entry, "checksum", entry_checksum));
+        CHECK(entry_checksum == ck_a);
+        long long value = 0;
+        CHECK(save_backup::json_find_int(entry, "map_id", value) && value == 37);
+        CHECK(save_backup::json_find_int(entry, "hero_level", value) && value == 5);
+        CHECK(save_backup::json_find_int(entry, "class_idx", value) && value == 2);
+        CHECK(entry.find("\"class_name\":\"黑魔导\"") != std::string::npos);
+
+        // 篡改 checksum（内容与 meta 不一致）与损坏文件。
+        const std::string wrong_checksum =
+            save_backup::compute_checksum(save_backup::kBundleVersion, plain_b, {}, {});
+        std::vector<uint8_t> tampered;
+        save_backup::build_bundle(0, 1000, plain_a, {}, {},
+                                  "{\"checksum\":\"" + wrong_checksum + "\"}", tampered);
+        CHECK(write_file(backups_dir + "/tt_ui_tampered.qol_save",
+                         std::string(tampered.begin(), tampered.end())));
+        CHECK(save_backup_entry_json("tt_ui_tampered.qol_save").find(
+                  "backup checksum mismatch") != std::string::npos);
+        CHECK(save_backup_entry_json("mm_ui_corrupt.qol_save").find(
+                  "backup unreadable or corrupt") != std::string::npos);
+        CHECK(save_backup_entry_json("missing_ui.qol_save").find("backup not found") !=
+              std::string::npos);
+        CHECK(save_backup_entry_json(nullptr).find("bad request") != std::string::npos);
+        CHECK(save_backup_entry_json("").find("bad request") != std::string::npos);
+        CHECK(save_backup_entry_json("../x.qol_save").find("bad request") != std::string::npos);
+        CHECK(save_backup_entry_json("sub/x.qol_save").find("bad request") != std::string::npos);
+        CHECK(save_backup_entry_json("x.txt").find("bad request") != std::string::npos);
+    }
+
     // ---- token 清零（停用）后前置门不可用 → 拒绝而非越权 ----
     save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(), nullptr, 0);
     CHECK(write_file(dat_path, original_dat));

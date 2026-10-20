@@ -229,6 +229,9 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out);
 // BackupMeta JSON（字段顺序与 Kotlin BackupMeta.toJson 一致；字符串值做 JSON 转义）。
 std::string entry_json(const Entry& e);
 
+// JSON 字符串内容转义（不含首尾引号）；供文件名等非 entry 字段复用。
+std::string json_escape(const std::string& value);
+
 // 从解析结果取 meta：bundle 头提供 source_slot/export_time/size；
 // metaJson 提供其余字段（缺省值与 Kotlin 一致）；checksum 以 metaJson 为权威、
 // 文件名 `_([0-9a-f]{12}).qol_save` 后缀兜底。
