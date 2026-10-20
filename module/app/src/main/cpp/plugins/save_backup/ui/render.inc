@@ -1,476 +1,182 @@
-// 控件 DrawProc：与 core.ui 设置页同一套视觉语言
-//
-// - 背景：title background 贴图左右两半 + 半透明遮罩（root_decor_draw，同
-//   settings_panel_process 的背景/遮罩口径），不再自绘面板底色/边框矩形。
-// - 分区：不做整体大框。左栏存档区、右栏备份列表区各一个 UI_GOLD 3px 框
-//   （ui_draw_panel_decor 上下边 + ui_draw_vertical_line 左右边，同设置页粗细/颜色）；
-//   左右两栏同宽（COL_W=0x192），高度按行阵精确计算（左 3 槽 SLOT_FRAME_H，右 5 行 FRAME_H）；
-//   三栏沿公共水平中线 CONTENT_MID_Y 垂直居中（左框顶 SLOT_FRAME_Y、中栏顶 OPS_Y0）；
-//   中栏操作按钮不组框，每个按钮 ui_custom::draw_button 自带 2px 边框。
-// - 行分割线：落在行间 4px 空隙内（pitch - 按钮高 = 4），3px 线不压任何按钮。
-// - 选中态：深琥珀填充（COLOR_SEL_BG=0x5182 RGB565 → RGB(0x50,0x30,0x10) + alpha 0x50=80%，
-//   ui_fill_rect_alpha/GRPX_FillRectAlpha 口径），暗底反衬金色文字；
-//   不画边框；适用左栏选中槽与右栏选中备份项。再次点击已选项取消选中（-1）。
-// - 按钮：操作/翻页/返回 fallback 走 ui_custom::draw_button（设置页 fallback 按钮样式）。
-//   中栏操作按钮文字随可用性：可用 UI_GOLD / 不可用 COLOR_TEXT_GRAY（灰态仍可点击给提示）。
-// - 文本：fn_grpx_set_font_color_rgb(ABGR 拆包) + fn_grpx_draw_string_with_font(text, x, y,
-//   align, font)。align 语义（libgame 0x8f9b0→0x9b12c→0x96adc 反汇编：align==1 → 画位
-//   x-width=右对齐、align==2 → x-width/2=居中、其余左对齐；halign 链 0xa72ec 同结论）：
-//   0=左 / 1=右 / 2=中（game_symbols.h 旧注释「0左/1中/2右」有误，勿参考）。
-//   居中文本一律 align=2；左对齐正文 align=0。
-//   font 为字体表下标：GRPX_GetFontSize(0x8fc14) 对 0..3 返回 {20,24,38,28}；左/右两栏正文
-//   统一 font=3(SB_TEXT_FONT, 28/行高30)，放大后按估算宽度截断地图名（见 sb_* 助手）。
-//   旧路径 fn_grpx_set_font_color(color) + fn_ui_draw_string_halign(..., 1, 0) 在真机上不出字：
-//   set_font_color 非 RGB 版不作用于文字，且 halign 第 4 参是 font、第 5 参才是 align；
-//   ui_draw_text_centered 内部走 halign，同样不出字。
-// - 配色：左栏空槽 COLOR_TEXT_GRAY / 有档槽 UI_GOLD；右栏备份项首行 UI_GOLD、
-//   次行 COLOR_TEXT_WHITE；正文 UI_OPTION_TEXT、次要/提示 UI_GOLD。
-//   左栏/右栏首行文案：<职业名> Lv<L> <地图名>（职业→等级→地图）；旧备份无职业字段时退化。
-//
-// 颜色均为 ABGR（与 core.ui 设置页同值：UI_GOLD=0xFF00B4D7，UI_OPTION_TEXT=0xFFCB9EE2），
-// 唯一例外是选中底色（ui_fill_rect_alpha 用 RGB565+百分比 alpha，见上）。
+// save_backup 面板绘制全部通过 core.custom_ui 组件表；只有长文本使用 draw_control_text。
+static UiRect component_absolute_rect(UiRect local) {
+    int64_t origin[2]{};
+    panel_abs_origin({0, 0, 0, 0}, origin);
+    local.x += origin[0];
+    local.y += origin[1];
+    return local;
+}
 
-// 画一个 3px 分区框：上下边线（含行分割线）走 ui_draw_panel_decor，左右边线走
-// ui_draw_vertical_line；框内透明。角部 3×3 像素由相邻边线各画一次，视觉为完整框。
-static void draw_frame_box(const UiRect& frame, const int64_t* seps, size_t sep_count) {
-    ui_draw_panel_decor(frame, seps, sep_count, UI_GOLD);
-    ui_draw_vertical_line(frame.x, frame.y, frame.h, UI_GOLD, 3);
-    ui_draw_vertical_line(frame.x + frame.w - 3, frame.y, frame.h, UI_GOLD, 3);
+static void component_text(const char* text, int x, int y, uint32_t color, int align = 0,
+                           int font = 1) {
+    if (text == nullptr || text[0] == 0 || g_ui_components == nullptr || g_root == nullptr ||
+        g_ui_components->draw_control_text == nullptr) return;
+    (void)g_ui_components->draw_control_text(g_root, text, x, y, color, align, font);
+}
+
+static void component_container(UiRect rect) {
+    if (g_ui_components == nullptr || g_ui_components->draw_container == nullptr) return;
+    (void)g_ui_components->draw_container(component_absolute_rect(rect));
 }
 
 void root_decor_draw() {
     if (g_root == nullptr) return;
-    UiRect root_rect{};
-    if (!ui_get_rect(g_root, &root_rect)) return;
-    // ① 面板基底：保留项目暗色/金色体系，以直角描边近似圆角（当前 UI adapter 仅提供直线装饰）。
-    ui_fill_rect_alpha({root_rect.x + 0x10, root_rect.y + 0x10, ROOT_W - 0x20, ROOT_H - 0x20}, 0x0841, 0x64);
-    const UiRect outer{root_rect.x + 0x10, root_rect.y + 0x10, ROOT_W - 0x20, ROOT_H - 0x20};
-    draw_frame_box(outer, nullptr, 0);
-    // 原设置背景仅作为面板外侧氛围，暗化后由大面板覆盖主体。
-    /*
-    // ① 背景图：与设置页同款 title background 左右两半（enter 加载；失败仅提示一次）。
-    //    坐标口径 = settings_panel_process 的屏幕坐标（设置页 root.y 恒 0）：
-    //    x = root.x + ROOT_W/2 ∓ 0x12c：由 panel_root_rect 的 root.x=(logical_w-ROOT_W)/2
-    //        恒等推出 = 屏幕逻辑中心 logical_w/2 ∓ 0x12c，与内容/页码无关；
-    //    y = ROOT_H/2 = 0x140 固定（设置页即 root.y(=0)+ROOT_H/2）。本面板现 root.y=0，
-    //        与设置页背景在屏幕上逐像素同位。
-    if (g_title_background_images_loaded) {
-        ui_draw_image_part(TITLE_BACKGROUND_LEFT_UNIT, TITLE_BACKGROUND_LOC,
-                           static_cast<int32_t>(root_rect.x + ROOT_W / 2 - 0x12c),
-                           static_cast<int32_t>(ROOT_H / 2), 2, 1);
-        ui_draw_image_part(TITLE_BACKGROUND_RIGHT_UNIT, TITLE_BACKGROUND_LOC,
-                           static_cast<int32_t>(root_rect.x + ROOT_W / 2 + 0x12c),
-                           static_cast<int32_t>(ROOT_H / 2), 2, 1);
-    } else if (!g_background_unavailable_logged) {
-        SAVE_BACKUP_LOG_DEBUG("background image unavailable; drawing mask + lines only");
-        g_background_unavailable_logged = true;
-    }
-    // ② 半透明遮罩（同设置页 alpha 0x50）：矩形与 settings_panel_process 完全同口径
-    //    {0, 0, ROOT_W+root.x*2, ROOT_H}（屏幕逻辑空间，顶固定 0、高 ROOT_H），
-    //    不随 root.y 扩展 —— 与背景图同一固定基准，无上下偏移。
-    ui_fill_rect_alpha({0, 0, ROOT_W + root_rect.x * 2, ROOT_H}, 0xFF000000, 0x50);
-    */
-    if (ui_adapter() == nullptr || ui_adapter()->draw_panel_decor == nullptr) return;
-    // ③ 左栏框（存档区）：与其他栏同宽（COL_W），高度按行阵精确计算（SLOT_FRAME_H=3*ROW_H+2*3-4），
-    //    框顶 SLOT_FRAME_Y（三栏公共水平中线对齐，见 cpp 常量区验算）。
-    //    行分割线落在行间 4px 空隙内：y = 框内顶 + i*ROW_H - SLOT_ROW_GAP，3px 线占
-    //    [y, y+3)，行 i 顶 = 框内顶 + i*ROW_H，不压按钮/选中背景（按钮高 ROW_H-4）。
-    const int64_t slot_seps[2] = {
-        root_rect.y + SLOT_FRAME_Y + FRAME_BORDER + 1 * SLOT_ROW_H - SLOT_ROW_GAP,
-        root_rect.y + SLOT_FRAME_Y + FRAME_BORDER + 2 * SLOT_ROW_H - SLOT_ROW_GAP,
-    };
-    const UiRect slot_frame = {root_rect.x + SLOT_COL_X, root_rect.y + SLOT_FRAME_Y,
-                               SLOT_COL_W, SLOT_FRAME_H};
-    draw_frame_box(slot_frame, slot_seps, 2);
-    const UiRect auto_frame{root_rect.x + AUTO_X, root_rect.y + AUTO_Y, LIST_COL_W, AUTO_H};
-    draw_frame_box(auto_frame, nullptr, 0);
-    // ④ 右栏框（备份列表区）：分割线随当前页条目数垂直居中分布，与 list_btn_rect 同公式。
-    const int n = page_entry_count();
-    int64_t list_seps[LIST_COLS_PER_PAGE - 1];
-    size_t list_sep_count = 0;
-    // 每行下方画一条分割线（最后一行除外）：n≤4 → n 条；n=5 → 4 条（第 5 行下方即框内下缘）。
-    // 顶部对齐（首行顶 = 框内上缘），线落在行 i 底与行 i+1 顶之间的 4px 缝隙内：
-    // y = 框内顶 + (i+1)*LIST_ROW_H − LIST_ROW_GAP；不压选中背景（按钮高 ROW_H−GAP）。
-    const int sep_rows = n < LIST_COLS_PER_PAGE ? n : LIST_COLS_PER_PAGE - 1;
-    const int64_t top = FRAME_Y + FRAME_BORDER;
-    for (int i = 0; i < sep_rows; ++i) {
-        list_seps[list_sep_count++] = root_rect.y + top + (i + 1) * LIST_ROW_H - LIST_ROW_GAP;
-    }
-    const UiRect list_frame = {root_rect.x + LIST_COL_X, root_rect.y + FRAME_Y,
-                               LIST_COL_W, FRAME_H};
-    draw_frame_box(list_frame, list_seps, list_sep_count);
-    // ⑤ 空列表提示：右框中心（加载中 / 暂无备份）。走 fn_grpx_draw_string_with_font align=2
-    //    居中（align 语义见文件头；fn_ui_draw_string_halign 在自定义面板下不出字，勿用）。
-    if (n == 0 && ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
-        const bool loading = g_backups_loading && g_backups.empty();
-        (void)ui_set_font_color_rgb(static_cast<int32_t>(UI_GOLD & 0xff),
-                                    static_cast<int32_t>((UI_GOLD >> 8) & 0xff),
-                                    static_cast<int32_t>((UI_GOLD >> 16) & 0xff));
-        (void)ui_draw_string_with_font(
-            const_cast<char*>(loading ? "加载中…" : "暂无备份"),
-            static_cast<int>(root_rect.x + LIST_COL_X + LIST_COL_W / 2),
-            static_cast<int>(root_rect.y + FRAME_Y + FRAME_H / 2 - 0x0e), 2, 1);
-    }
-    // ⑥ 页码指示（如「1/2」）：上一页/下一页两按钮正中间（LIST_COL_X + LIST_COL_W/2，
-    //    见 panel.cpp 翻页按钮注释的间隙验算），只画文字、不画任何框。
-    //    align=2 才是真正以 x 为中心（align=1 是右对齐：文字右缘贴 x，页码会整体左偏）。
-    //    垂直：按钮高 0x30、文本高约 0x18 → y = PAGE_ROW_Y + (0x30-0x18)/2 = +0x0C（同按钮文本口径）。
-    if (ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
-        char page_buf[16];
-        snprintf(page_buf, sizeof(page_buf), "%d/%d", g_page_index + 1,
-                 g_total_pages > 0 ? g_total_pages : 1);
-        (void)ui_set_font_color_rgb(static_cast<int32_t>(UI_OPTION_TEXT & 0xff),
-                                    static_cast<int32_t>((UI_OPTION_TEXT >> 8) & 0xff),
-                                    static_cast<int32_t>((UI_OPTION_TEXT >> 16) & 0xff));
-        (void)ui_draw_string_with_font(
-            page_buf,
-            static_cast<int>(root_rect.x + LIST_COL_X + LIST_COL_W / 2),
-            static_cast<int>(root_rect.y + PAGE_ROW_Y + 0x0C), 2, 1);
-    }
-    // ⑦ 面板标题已并入顶部居中消息区（msg_label_draw：无消息时显示标题），此处不再绘制。
-}
-
-// ============== 文本宽度估算（font=3，逻辑 px）与 UTF-8 截断 ==============
-// 依据 libgame 字形循环 0xa72ec / 测宽 0xa48d4：font=1 原生 ASCII=6、空格=4、CJK=9；
-// 面板逻辑 = 原生×2；font=3/font=1 字号比 = 28/24（尺寸表），故 font=3 逻辑 ≈
-// ASCII=0x0F(15)、空格=0x0A(10)、CJK/其他多字节=0x16(22)，向上取整保守。
-// 仅用于渲染前截断，不参与命中测试。
-static int sb_glyph_width_font3(unsigned char c) {
-    if (c < 0x80) return (c == ' ') ? 0x0A : 0x0F;
-    return 0x16;
-}
-static int sb_est_width_font3(const char* s) {
-    if (s == nullptr) return 0;
-    int w = 0;
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(s);
-    while (*p != 0) {
-        const unsigned char c = *p;
-        const int n = (c < 0x80) ? 1 : ((c >> 5) == 0x6 ? 2 : ((c >> 4) == 0xE ? 3 : 4));
-        w += sb_glyph_width_font3(c);
-        for (int k = 0; k < n && *p != 0; ++k) ++p;
-    }
-    return w;
-}
-// 把 UTF-8 字符串按码点边界截断到 max_w（font=3 逻辑 px），原地写回（保证合法 UTF-8）。
-static void sb_truncate_utf8_font3(char* s, int max_w) {
-    if (s == nullptr) return;
-    if (max_w < 0) max_w = 0;
-    int w = 0;
-    unsigned char* p = reinterpret_cast<unsigned char*>(s);
-    while (*p != 0) {
-        const unsigned char c = *p;
-        const int n = (c < 0x80) ? 1 : ((c >> 5) == 0x6 ? 2 : ((c >> 4) == 0xE ? 3 : 4));
-        const int gw = sb_glyph_width_font3(c);
-        if (w + gw > max_w) break;
-        w += gw;
-        for (int k = 0; k < n && *p != 0; ++k) ++p;
-    }
-    *p = 0;
-}
-
-// 返回不超过 limit 的最大 UTF-8 码点边界；续字节不能作为截断点。
-static size_t sb_utf8_boundary(const std::string& s, size_t limit) {
-    if (limit >= s.size()) return s.size();
-    size_t pos = limit;
-    while (pos > 0 && (static_cast<unsigned char>(s[pos]) & 0xC0) == 0x80) --pos;
-    return pos;
-}
-
-static void draw_string_at_font(int x, int y, const char* s, uint32_t color, int font) {
-    if (s == nullptr || s[0] == 0) return;
-    if (ui_adapter() == nullptr || ui_adapter()->set_font_color_rgb == nullptr ||
-        ui_adapter()->draw_string_with_font == nullptr) return;
-    (void)ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
-                                static_cast<int32_t>((color >> 8) & 0xff),
-                                static_cast<int32_t>((color >> 16) & 0xff));
-    (void)ui_draw_string_with_font(s, x, y, 0, font);
-}
-
-static void draw_string_at(int x, int y, const char* s, uint32_t color) {
-    draw_string_at_font(x, y, s, color, 1);
-}
-
-// 两行文本：line2 相对 line1 的 y 偏移 = gap（font=3 口径，见 cpp LIST_LINE_GAP）。
-static void draw_two_line_text_font(int x, int y, const char* line1, const char* line2,
-                                    uint32_t c1, uint32_t c2, int gap, int font) {
-    draw_string_at_font(x, y, line1, c1, font);
-    draw_string_at_font(x, y + gap, line2, c2, font);
-}
-
-// 水平居中绘制：align=2 时 fn_grpx_draw_string_with_font 以 x 为文字中心
-// （align 语义见文件头：0=左/1=右/2=中）。用于按钮文字在框内水平居中；
-// 不得用 fn_ui_draw_string_halign / ui_draw_text_centered（自定义面板下不出字）。
-static void draw_string_centered_at(int cx, int y, const char* s, uint32_t color) {
-    if (s == nullptr || s[0] == 0) return;
-    if (ui_adapter() == nullptr || ui_adapter()->set_font_color_rgb == nullptr ||
-        ui_adapter()->draw_string_with_font == nullptr) return;
-    (void)ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
-                                static_cast<int32_t>((color >> 8) & 0xff),
-                                static_cast<int32_t>((color >> 16) & 0xff));
-    (void)ui_draw_string_with_font(s, cx, y, 2, 1);
-}
-
-static void draw_string_centered_font(int cx, int y, const char* s, uint32_t color, int font) {
-    if (s == nullptr || s[0] == 0 || ui_adapter() == nullptr || ui_adapter()->draw_string_with_font == nullptr) return;
-    (void)ui_set_font_color_rgb(color & 0xff, (color >> 8) & 0xff, (color >> 16) & 0xff);
-    (void)ui_draw_string_with_font(s, cx, y, 2, font);
+    component_container({0x10, 0x10, ROOT_W - 0x20, ROOT_H - 0x20});
+    component_container({SLOT_COL_X, SLOT_FRAME_Y, SLOT_COL_W, SLOT_FRAME_H});
+    component_container({OPS_COL_X, OPS_Y0 - 0x08, OPS_COL_W, 3 * OPS_BTN_H + 2 * OPS_BTN_GAP + 0x10});
+    component_container({LIST_COL_X, FRAME_Y, LIST_COL_W, FRAME_H});
 }
 
 void slot_btn_draw(void* ctrl) {
-    if (ctrl == nullptr) return;
-    int idx = -1;
-    for (int i = 0; i < 3; ++i) if (ctrl == g_slot_btns[i]) { idx = i; break; }
-    if (idx < 0) return;
-    const UiRect r = slot_btn_rect(idx);
-    // 位置用「root 绝对原点 + 计算 rect」，与命中测试口径一致（不读控件滞后 RECT）。
-    int64_t pt[2];
-    panel_abs_origin(r, pt);
-    // 选中槽：深琥珀暗色填充（ui_fill_rect_alpha，COLOR_SEL_BG(RGB565) + alpha 0x50，无描边）；
-    // 暗底反衬金色槽文字，绘制在文本之前，文字浮于其上。
-    if (idx == g_selected_slot) {
-        ui_fill_rect_alpha({pt[0], pt[1], r.w, r.h}, COLOR_SEL_BG, COLOR_SEL_BG_ALPHA);
-    }
-    // 槽卡片以两行居中显示；仅读游戏线程缓存。
-    const SlotInfo& info = g_slots[idx];
-    char line1[CB_TEXT_SIZE], line2[CB_TEXT_SIZE];
-    const int cx = static_cast<int>(pt[0] + r.w / 2);
-    const int text_y = static_cast<int>(pt[1]) + 0x20;
-    if (!info.exists) {
-        snprintf(line1, sizeof(line1), "存档%d 空", idx + 1);
-        draw_string_centered_font(cx, text_y, line1, COLOR_TEXT_GRAY, SB_TEXT_FONT);
+    if (ctrl == nullptr || g_ui_components == nullptr) return;
+    int index = -1;
+    for (int i = 0; i < 3; ++i) if (ctrl == g_slot_btns[i]) index = i;
+    if (index < 0) return;
+    const bool selected = g_selected_slot == index;
+    component_container(slot_btn_rect(index));
+    const UiRect rect = slot_btn_rect(index);
+    if (!g_slots[index].exists) {
+        char empty[32]; snprintf(empty, sizeof(empty), "存档%d 空", index + 1);
+        component_text(empty, static_cast<int>(rect.x + rect.w / 2),
+                       static_cast<int>(rect.y + rect.h / 2 - 0x0C),
+                       selected ? UI_GOLD : COLOR_TEXT_GRAY, 2, 1);
         return;
     }
-    char map_short[32];
-    const std::string map_name = save_backup_map_name(info.map_id);
-    if (!map_name.empty()) {
-        // map_name 为 UTF-8 中文（最长约 32 字节）；先按码点边界截断到 16 字节，再按宽度截断。
-        const size_t len = sb_utf8_boundary(map_name, 16);
-        memcpy(map_short, map_name.c_str(), len);
-        map_short[len] = 0;
-    } else {
-        snprintf(map_short, sizeof(map_short), "地图%d", info.map_id);
-    }
+    const SlotInfo& info = g_slots[index];
     const char* cls = save_backup_class_name(info.class_idx);
-    snprintf(line1, sizeof(line1), "%s Lv%s", cls ? cls : "职业?", info.hero_level >= 0 ? std::to_string(info.hero_level).c_str() : "?");
-    snprintf(line2, sizeof(line2), "%s", map_short);
-    draw_string_centered_font(cx, text_y, line1, UI_GOLD, SB_TEXT_FONT);
-    draw_string_centered_font(cx, text_y + 0x24, line2, COLOR_TEXT_WHITE, SB_TEXT_FONT);
-}
-
-void auto_btn_draw(void* ctrl) {
-    if (ctrl == nullptr) return;
-    UiRect r = auto_btn_rect(); int64_t pt[2]; panel_abs_origin(r, pt);
-    ui_fill_rect_alpha({pt[0],pt[1],r.w,r.h}, g_selected_auto ? COLOR_SEL_BG : 0x2100, COLOR_SEL_BG_ALPHA);
-    draw_frame_box({pt[0],pt[1],r.w,r.h}, nullptr, 0);
-    draw_string_at(static_cast<int>(pt[0])+0x0c, static_cast<int>(pt[1])+0x22, "auto", UI_GOLD);
-    if (!g_auto_backup_valid) {
-        const char* empty = g_selected_slot < 0 ? "未选择存档槽" : "暂无自动备份";
-        draw_string_at(static_cast<int>(pt[0])+0x60, static_cast<int>(pt[1])+0x22, empty, COLOR_TEXT_GRAY);
-        return;
-    }
-    BackupEntry* e = &g_auto_backup;
-    char first[CB_TEXT_SIZE], second[CB_TEXT_SIZE];
-    const char* cls = !e->class_name.empty() ? e->class_name.c_str() : save_backup_class_name(e->class_idx);
-    snprintf(first,sizeof(first),"%s Lv%d  %s",cls ? cls : "职业?",e->hero_level,e->map_name.empty()?"未知地图":e->map_name.c_str());
-    time_t t = static_cast<time_t>(e->export_time_ms/1000); tm tmv{}; localtime_r(&t,&tmv);
-    char timebuf[32]; strftime(timebuf,sizeof(timebuf),"%Y-%m-%d %H:%M",&tmv);
-    snprintf(second,sizeof(second),"%s  #%.*s",timebuf,6,e->checksum.c_str());
-    draw_string_at(static_cast<int>(pt[0])+0x60,static_cast<int>(pt[1])+0x12,first,UI_GOLD);
-    draw_string_at(static_cast<int>(pt[0])+0x60,static_cast<int>(pt[1])+0x34,second,COLOR_TEXT_WHITE);
+    char line1[64], line2[64];
+    snprintf(line1, sizeof(line1), "%s Lv%s", cls != nullptr ? cls : "职业?",
+             info.hero_level >= 0 ? std::to_string(info.hero_level).c_str() : "?");
+    const std::string map = save_backup_map_name(info.map_id);
+    snprintf(line2, sizeof(line2), "%s", map.empty() ? "未知地图" : map.c_str());
+    component_text(line1, static_cast<int>(rect.x + rect.w / 2), static_cast<int>(rect.y + 0x20),
+                   selected ? UI_GOLD : UI_OPTION_TEXT, 2, 1);
+    component_text(line2, static_cast<int>(rect.x + rect.w / 2), static_cast<int>(rect.y + 0x48),
+                   selected ? COLOR_TEXT_WHITE : UI_OPTION_TEXT, 2, 1);
 }
 
 void ops_btn_draw(void* ctrl) {
-    if (ctrl == nullptr) return;
-    int idx = -1;
-    for (int i = 0; i < 3; ++i) if (ctrl == g_ops_btns[i]) { idx = i; break; }
-    if (idx < 0) return;
-    int64_t pt[2];
-    ctrl_abs_point(ctrl, pt);
-    const UiRect r = ops_btn_rect(idx);
-    static const char* kLabels[3] = {"导出", "删除", "导入"};
-    // 可用性（默认两侧都不选中 -1）：
-    //   导出：选中一个存档槽。
-    //   导入：槽 + 备份两侧都选中（把备份还原到该槽）。
-    //   删除：恰好只选中一侧（只删那一个：槽→删该槽游戏存档；备份→删该备份 bundle）；
-    //         两侧都选/都不选都不可用。
-    const bool slot_sel = g_selected_slot >= 0;
-    const bool slot_exists = slot_sel && g_slots[g_selected_slot].exists;
-    const bool backup_sel = g_selected_auto ? g_auto_backup_valid : selected_manual_backup() != nullptr;
-    bool enabled = false;
-    if (idx == 0) enabled = slot_exists;
-    else if (idx == 1) enabled = (g_selected_slot >= 0) != (selected_manual_backup() != nullptr) && !g_selected_auto;
-    else enabled = slot_sel && backup_sel;
-    // 按钮样式 = 设置页 fallback 按钮：深底 + UI_GOLD 2px 边框；不可用态用更深底色。
-    // 中栏不组框，每个按钮自带边框。灰态仍可点击（事件分发不拦截），点击走原回调给出提示反馈。
-    ui_custom::draw_button(ctrl, {0, 0, r.w, r.h},
-                           enabled ? COLOR_BTN_BG : COLOR_BTN_BG_DIM, UI_GOLD, 2,
-                           nullptr, 0, 0, 0);
-    // 中栏较窄（OPS_BTN_W=0x50）：单行两字标签即可；两行 hint 会与标签重叠并横向溢出。
-    // 文字在按钮框内水平居中：align=2 以按钮框中心 x = pt[0]+r.w/2 绘制（y 仍为垂直居中口径）。
-    // 文字颜色随可用性：可用 UI_GOLD 金色 / 不可用 COLOR_TEXT_GRAY 灰色。
-    draw_string_centered_at(static_cast<int>(pt[0] + r.w / 2), static_cast<int>(pt[1]) + 0x16,
-                            kLabels[idx], enabled ? UI_GOLD : COLOR_TEXT_GRAY);
+    if (ctrl == nullptr || g_ui_components == nullptr) return;
+    int index = -1;
+    for (int i = 0; i < 3; ++i) if (ctrl == g_ops_btns[i]) index = i;
+    if (index < 0) return;
+    const bool slot_selected = g_selected_slot >= 0;
+    const bool slot_exists = slot_selected && g_slots[g_selected_slot].exists;
+    const bool backup_selected = g_selected_auto ? g_auto_backup_valid : selected_manual_backup() != nullptr;
+    bool enabled = index == 0 ? slot_exists :
+                   index == 1 ? ((slot_selected != (selected_manual_backup() != nullptr)) && !g_selected_auto) :
+                                (slot_selected && backup_selected);
+    if (g_dialog != DialogKind::kNone) enabled = false;
+    (void)g_ui_components->text_button_set_enabled(ctrl, enabled ? 1 : 0);
+    (void)g_ui_components->text_button_draw(ctrl);
 }
 
 void list_btn_draw(void* ctrl) {
-    if (ctrl == nullptr) return;
+    if (ctrl == nullptr || g_ui_components == nullptr) return;
     int local = -1;
-    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
-        if (ctrl == g_list_btns[i]) { local = i; break; }
-    }
+    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (ctrl == g_list_btns[i]) local = i;
     if (local < 0) return;
-    // 空槽位（条目居中分布后本页第 n..3 格）：rect 已置空，不绘制任何占位文本。
-    const UiRect r = list_btn_rect(local);
-    if (r.w <= 0) return;
-    // 位置用「root 绝对原点 + 计算 rect」，与命中测试口径一致（不读控件滞后 RECT）。
-    int64_t pt[2];
-    panel_abs_origin(r, pt);
-    const BackupEntry* e = backup_at_page(local);
-    if (e == nullptr) {
-        if (backup_item_at_page(local) != nullptr) {
-            draw_string_at(static_cast<int>(pt[0]) + 0x44,
-                           static_cast<int>(pt[1]) + static_cast<int>(r.h / 2) - 0x0C,
-                           "加载中…", COLOR_TEXT_GRAY);
-        }
+    const int absolute = g_page_index * LIST_COLS_PER_PAGE + local;
+    const BackupEntry* item = backup_item_at_page(local);
+    if (item == nullptr) return;
+    component_container(list_btn_rect(local));
+    const bool parsed = item->parsed;
+    const bool selected = absolute == g_selected_backup;
+    const UiRect rect = list_btn_rect(local);
+    if (!parsed) {
+        component_text("加载中…", static_cast<int>(rect.x + 0x50), static_cast<int>(rect.y + 0x12), COLOR_TEXT_GRAY);
         return;
     }
-    // 选中备份项：深琥珀暗色填充（ui_fill_rect_alpha，COLOR_SEL_BG(RGB565) + alpha 0x50，无描边）；
-    // 暗底反衬金色首行文字，绘制在文本之前，文字浮于其上。
-    if (g_page_index * LIST_COLS_PER_PAGE + local == g_selected_backup) {
-        ui_fill_rect_alpha({pt[0], pt[1], r.w, r.h}, COLOR_SEL_BG, COLOR_SEL_BG_ALPHA);
+    char first[CB_TEXT_SIZE], second[CB_TEXT_SIZE], prefix[CB_TEXT_SIZE], map[48];
+    const char* cls = !item->class_name.empty() ? item->class_name.c_str() : save_backup_class_name(item->class_idx);
+    snprintf(prefix, sizeof(prefix), "%s", item->hero_level >= 0 ? "" : "Lv? ");
+    if (item->hero_level >= 0 && cls != nullptr) snprintf(prefix, sizeof(prefix), "%s Lv%d ", cls, item->hero_level);
+    else if (item->hero_level >= 0) snprintf(prefix, sizeof(prefix), "Lv%d ", item->hero_level);
+    else if (cls != nullptr) snprintf(prefix, sizeof(prefix), "%s ", cls);
+    const std::string map_name = item->map_name.empty() ? "地图" + std::to_string(item->map_id) : item->map_name;
+    snprintf(map, sizeof(map), "%s", map_name.c_str());
+    snprintf(first, sizeof(first), "%s%s", prefix, map);
+    time_t sec = static_cast<time_t>(item->export_time_ms / 1000); tm value{}; localtime_r(&sec, &value);
+    char time_text[24]; strftime(time_text, sizeof(time_text), "%Y-%m-%d %H:%M", &value);
+    snprintf(second, sizeof(second), "%s  #%.6s", time_text, item->checksum.c_str());
+    char number[8]; snprintf(number, sizeof(number), "%d", absolute + 1);
+    const uint32_t primary = selected ? UI_GOLD : UI_OPTION_TEXT;
+    component_text(number, static_cast<int>(rect.x + 0x20), static_cast<int>(rect.y + 0x18), primary, 2, 1);
+    component_text(first, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x08), primary, 0, 1);
+    component_text(second, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x2C), COLOR_TEXT_WHITE, 0, 1);
+}
+
+void auto_btn_draw(void* ctrl) {
+    if (ctrl == nullptr || g_ui_components == nullptr) return;
+    const UiRect rect = auto_btn_rect();
+    component_container(rect);
+    component_text("auto", static_cast<int>(rect.x + 0x0C), static_cast<int>(rect.y + 0x22),
+                   g_selected_auto ? UI_GOLD : UI_OPTION_TEXT);
+    if (!g_auto_backup_valid) {
+        component_text(g_selected_slot < 0 ? "未选择存档槽" : "暂无自动备份",
+                       static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x22), COLOR_TEXT_GRAY);
+        return;
     }
-    // 文案直接取面板缓存的 g_backups 条目（backup_at_page = g_page_index*5+local，与事件
-    // 命中/操作回调用同一 g_page_index 换算，口径一致）。绘制路径零 IO。
-    char line1[CB_TEXT_SIZE];
-    char line2[CB_TEXT_SIZE];
-    // map_name 为 UTF-8 中文（最长约 32 字节）；先按码点边界截断到 16 字节，再按宽度截断。
-    char map_short[32];
-    if (!e->map_name.empty()) {
-        const size_t len = sb_utf8_boundary(e->map_name, 16);
-        memcpy(map_short, e->map_name.c_str(), len);
-        map_short[len] = 0;
-    } else {
-        snprintf(map_short, sizeof(map_short), "地图%d", e->map_id);
-    }
-    // 第一行：<职业名> Lv<L> <地图名>。职业名优先取 metaJson 的 class_name（导出时写入），
-    // 旧备份缺失时用 class_idx 查 native 常量表；仍无则退化（仅等级+地图），不崩溃/不错位。
-    char prefix[CB_TEXT_SIZE];
-    const char* cls = !e->class_name.empty() ? e->class_name.c_str()
-                                             : save_backup_class_name(e->class_idx);
-    if (cls != nullptr && cls[0] != 0 && e->hero_level >= 0) {
-        snprintf(prefix, sizeof(prefix), "%s Lv%d ", cls, e->hero_level);
-    } else if (e->hero_level >= 0) {
-        snprintf(prefix, sizeof(prefix), "Lv%d ", e->hero_level);
-    } else if (cls != nullptr && cls[0] != 0) {
-        snprintf(prefix, sizeof(prefix), "%s ", cls);
-    } else {
-        // 未知等级旧备份：不显示负数等级。
-        snprintf(prefix, sizeof(prefix), "Lv? ");
-    }
-    // 可用宽 = 按钮宽 r.w - 左内距 0x08 - 右边距 0x04；地图名按剩余宽度截断到码点边界。
-    const int text_avail = static_cast<int>(r.w) - 0x08 - 0x04;
-    sb_truncate_utf8_font3(map_short, text_avail - sb_est_width_font3(prefix));
-    snprintf(line1, sizeof(line1), "%s%s", prefix, map_short);
-    // 第二行：备份时间 + 校验前 6 位
-    time_t et_sec = static_cast<time_t>(e->export_time_ms / 1000);
-    tm tm_et{};
-    localtime_r(&et_sec, &tm_et);
-    char time_buf[16];
-    strftime(time_buf, sizeof(time_buf), "%m-%d %H:%M", &tm_et);
-    char checksum_short[8];
-    size_t cklen = e->checksum.size() < 6 ? e->checksum.size() : 6;
-    memcpy(checksum_short, e->checksum.c_str(), cklen);
-    checksum_short[cklen] = 0;
-    snprintf(line2, sizeof(line2), "%s  #%s", time_buf, checksum_short);
-    // font=3 两行块垂直居中：块高 = LIST_LINE_GAP + 行高(0x1E) = 0x3A(58)，按钮高 r.h(0x42=66)；
-    // offset = (r.h - (gap+行高))/2 = (66-58)/2 = 4，两行均落在格内。
-    const int text_top = static_cast<int>(pt[1]) + static_cast<int>(r.h - (LIST_LINE_GAP + SB_FONT_H)) / 2;
-    char number[8]; snprintf(number,sizeof(number),"%d",g_page_index*LIST_COLS_PER_PAGE+local+1);
-    draw_string_centered_font(static_cast<int>(pt[0])+0x20,text_top+0x0C,number,UI_GOLD,1);
-    draw_two_line_text_font(static_cast<int>(pt[0]) + 0x44, text_top, line1, line2, UI_GOLD,
-                            COLOR_TEXT_WHITE, LIST_LINE_GAP, SB_TEXT_FONT);
+    const BackupEntry& e = g_auto_backup;
+    const char* cls = !e.class_name.empty() ? e.class_name.c_str() : save_backup_class_name(e.class_idx);
+    char line1[CB_TEXT_SIZE], line2[CB_TEXT_SIZE];
+    snprintf(line1, sizeof(line1), "%s Lv%d  %s", cls != nullptr ? cls : "职业?", e.hero_level,
+             e.map_name.empty() ? "未知地图" : e.map_name.c_str());
+    time_t sec = static_cast<time_t>(e.export_time_ms / 1000); tm value{}; localtime_r(&sec, &value);
+    char time_text[32]; strftime(time_text, sizeof(time_text), "%Y-%m-%d %H:%M", &value);
+    snprintf(line2, sizeof(line2), "%s  #%.6s", time_text, e.checksum.c_str());
+    component_text(line1, static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x10),
+                   g_selected_auto ? UI_GOLD : UI_OPTION_TEXT);
+    component_text(line2, static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x34), COLOR_TEXT_WHITE);
 }
 
 void page_btn_draw(void* ctrl) {
-    if (ctrl == nullptr) return;
-    int64_t pt[2];
-    ctrl_abs_point(ctrl, pt);
-    const bool is_next = (ctrl == g_next_btn);
-    const UiRect r = page_btn_rect(is_next);
-    const bool disabled = is_next ? (g_page_index >= g_total_pages - 1) : (g_page_index <= 0);
-    // 同操作按钮：设置页 fallback 样式（深底 + UI_GOLD 边框；禁用更深底色 + UI_GOLD 文字）
-    ui_custom::draw_button(ctrl, {0, 0, r.w, r.h},
-                           disabled ? COLOR_BTN_BG_DIM : COLOR_BTN_BG, UI_GOLD, 2,
-                           nullptr, 0, 0, 0);
-    // 标签只画「上一页/下一页」；页码指示由 root_decor_draw ⑥ 画在两按钮正中间（无框）。
-    // 文字在按钮框内水平居中：align=2 以按钮框中心 x = pt[0]+r.w/2 绘制（y 仍为垂直居中口径）。
-    draw_string_centered_at(static_cast<int>(pt[0] + r.w / 2), static_cast<int>(pt[1]) + 0x0C,
-                            is_next ? "›" : "‹", disabled ? COLOR_TEXT_GRAY : UI_OPTION_TEXT);
+    if (ctrl == nullptr || g_ui_components == nullptr) return;
+    const bool next = ctrl == g_next_btn;
+    const bool enabled = next ? g_page_index < g_total_pages - 1 : g_page_index > 0;
+    (void)g_ui_components->arrow_button_set_enabled(ctrl, enabled ? 1 : 0);
+    (void)g_ui_components->arrow_button_draw(ctrl);
+    if (!next) {
+        char page[24]; snprintf(page, sizeof(page), "%d/%d", g_page_index + 1, g_total_pages > 0 ? g_total_pages : 1);
+        component_text(page, static_cast<int>(LIST_COL_X + LIST_COL_W / 2), static_cast<int>(PAGE_ROW_Y + 0x0C), UI_OPTION_TEXT, 2, 1);
+    }
+}
+
+void msg_label_draw(void*) {
+    if (!g_msg_text.empty()) component_text(g_msg_text.c_str(), ROOT_W / 2, MSG_Y + 0x18, g_msg_color, 2, 1);
+}
+
+void sync_component_enabled_locked() {
+    if (g_ui_components == nullptr) return;
+    const bool modal = g_dialog != DialogKind::kNone;
+    const bool manual_selected = selected_manual_backup() != nullptr;
+    (void)g_ui_components->nav_button_set_enabled(g_back_btn, modal ? 0 : 1);
+    const bool export_enabled = g_selected_slot >= 0 && g_slots[g_selected_slot].exists;
+    const bool delete_enabled = ((g_selected_slot >= 0) != manual_selected) && !g_selected_auto;
+    const bool import_enabled = g_selected_slot >= 0 && (g_selected_auto ? g_auto_backup_valid : manual_selected);
+    (void)g_ui_components->text_button_set_enabled(g_ops_btns[0], !modal && export_enabled ? 1 : 0);
+    (void)g_ui_components->text_button_set_enabled(g_ops_btns[1], !modal && delete_enabled ? 1 : 0);
+    (void)g_ui_components->text_button_set_enabled(g_ops_btns[2], !modal && import_enabled ? 1 : 0);
+    (void)g_ui_components->arrow_button_set_enabled(g_prev_btn, !modal && g_page_index > 0 ? 1 : 0);
+    (void)g_ui_components->arrow_button_set_enabled(g_next_btn, !modal && g_page_index < g_total_pages - 1 ? 1 : 0);
+    (void)g_ui_components->text_button_set_enabled(g_confirm_btn, modal ? 1 : 0);
+    (void)g_ui_components->text_button_set_enabled(g_cancel_btn, modal ? 1 : 0);
 }
 
 void draw_confirm_dialog() {
-    UiRect rr{}; if (g_root == nullptr || !ui_get_rect(g_root,&rr)) return;
-    ui_fill_rect_alpha({rr.x,rr.y,ROOT_W,ROOT_H},0x0000,0x55);
-    const UiRect box_local = dialog_rect();
-    const UiRect box{rr.x + box_local.x, rr.y + box_local.y, box_local.w, box_local.h};
-    ui_fill_rect_alpha(box,0x1082,0x64); draw_frame_box(box,nullptr,0);
-    const char* title = g_dialog == DialogKind::kImport ? "确认导入" : "确认删除";
+    if (g_dialog == DialogKind::kNone) return;
+    component_container(dialog_rect());
     char body[96];
-    if (g_dialog == DialogKind::kImport) snprintf(body,sizeof(body),"导入备份到槽%d？",g_dialog_slot+1);
-    else if (g_dialog == DialogKind::kDeleteSlot) snprintf(body,sizeof(body),"删除槽%d的存档？不可恢复。",g_dialog_slot+1);
-    else snprintf(body,sizeof(body),"删除选中的备份？");
-    draw_string_centered_font(static_cast<int>(box.x+box.w/2),static_cast<int>(box.y+0x30),title,UI_GOLD,1);
-    draw_string_centered_font(static_cast<int>(box.x+box.w/2),static_cast<int>(box.y+0x68),body,COLOR_TEXT_WHITE,1);
+    if (g_dialog == DialogKind::kImport) snprintf(body, sizeof(body), "导入备份到槽%d？", g_dialog_slot + 1);
+    else if (g_dialog == DialogKind::kDeleteSlot) snprintf(body, sizeof(body), "删除 槽%d 的存档？不可恢复。", g_dialog_slot + 1);
+    else snprintf(body, sizeof(body), "删除选中的备份？");
+    const UiRect dialog = dialog_rect();
+    component_text(g_dialog == DialogKind::kImport ? "确认导入" : "确认删除",
+                   static_cast<int>(dialog.x + dialog.w / 2), static_cast<int>(dialog.y + 0x30), UI_GOLD, 2, 1);
+    component_text(body, static_cast<int>(dialog.x + dialog.w / 2), static_cast<int>(dialog.y + 0x68), COLOR_TEXT_WHITE, 2, 1);
     if (g_dialog == DialogKind::kImport && g_slots[g_dialog_slot].exists)
-        draw_string_centered_font(static_cast<int>(box.x+box.w/2),static_cast<int>(box.y+0x8C),"将覆盖现有存档。",COLOR_TEXT_WHITE,1);
-    for (int i=0;i<2;++i) {
-        const UiRect local = dialog_button_rect(i);
-        UiRect b{rr.x + local.x, rr.y + local.y, local.w, local.h};
-        draw_frame_box(b,nullptr,0);
-        draw_string_centered_at(static_cast<int>(b.x+b.w/2),static_cast<int>(b.y+0x0C),i?"取消":"确认",i?UI_OPTION_TEXT:UI_GOLD);
-    }
-}
-
-void back_btn_draw(void* ctrl) {
-    if (ctrl == nullptr || ctrl != g_back_btn) return;
-    // 与设置页同款返回按钮：优先原版 option 贴图（ui_original::draw_back_button 以控件
-    // 中心定位，本控件创建在屏幕左上 (8,8)、尺寸 BACK_BTN_W×BACK_BTN_H，与设置页返回
-    // 按钮像素级同位同尺寸）。不依赖任何「已加载」标志：单元可能被设置页 f3 卸载、
-    // 再由本面板 enter 重载，标志与实际单元状态可能不一致——直接尝试，失败退化自绘。
-    // 本面板「按下即关闭」（0x17 直接触发 on_back_clicked），无按下贴图态，pressed 恒 false。
-    if (ui_original::draw_back_button(ctrl, false)) return;
-    int64_t pt[2];
-    ctrl_abs_point(ctrl, pt);
-    const UiRect r = back_btn_rect();
-    ui_custom::draw_button(ctrl, {0, 0, r.w, r.h}, COLOR_BTN_BG, UI_GOLD, 2,
-                           nullptr, 0, 0, 0);
-    // 文字偏移同设置页 back fallback（text_x=8, text_y=0x18，BACK_BTN_H 高按钮的居中口径）。
-    draw_string_at(static_cast<int>(pt[0]) + 8, static_cast<int>(pt[1]) + 0x18,
-                   "返回", UI_OPTION_TEXT);
-}
-
-void msg_label_draw(void* ctrl) {
-    if (ctrl == nullptr) return;
-    // 顶部居中显示区：直接绘制 g_msg_text（无消息时面板标题「存档备份」）。
-    // 不走控件文本（fn_ctrl_btn_set_text 二次更新在此控件上不可靠），
-    // 也不走 ui_draw_text_centered / fn_ui_draw_string_halign（自定义面板下不出字）。
-    // 水平居中用 align=2（以 x 为中心）；此前 align=1 是右对齐（0x96adc 反汇编：
-    // align==1 → 画位 = x-文本宽），信息一长就整体向左偏，与用户反馈一致。
-    const char* text = g_msg_text.empty() ? kTitle : g_msg_text.c_str();
-    if (text == nullptr || text[0] == 0) return;
-    int64_t pt[2];
-    ctrl_abs_point(ctrl, pt);
-    UiRect rect{};
-    if (!ui_get_rect(ctrl, &rect)) return;
-    const int64_t cx = pt[0] + rect.w / 2;
-    const uint32_t color = g_msg_text.empty() ? UI_GOLD : g_msg_color;
-    if (ui_adapter() != nullptr && ui_adapter()->draw_string_with_font != nullptr) {
-        (void)ui_set_font_color_rgb(static_cast<int32_t>(color & 0xff),
-                                    static_cast<int32_t>((color >> 8) & 0xff),
-                                    static_cast<int32_t>((color >> 16) & 0xff));
-        // 垂直位置与设置页 header_draw 一致（ui_draw_text 偏移 0x18，font=1）：
-        // MSG_Y=0x18 + 0x18 = 绝对 y 0x30，与设置页 header 文本同高。
-        (void)ui_draw_string_with_font(text, static_cast<int>(cx),
-                                       static_cast<int>(pt[1]) + 0x18, 2, 1);
-    }
+        component_text("将覆盖现有存档。", static_cast<int>(dialog.x + dialog.w / 2),
+                       static_cast<int>(dialog.y + 0x8C), COLOR_TEXT_WHITE, 2, 1);
+    (void)g_ui_components->text_button_draw(g_confirm_btn);
+    (void)g_ui_components->text_button_draw(g_cancel_btn);
 }

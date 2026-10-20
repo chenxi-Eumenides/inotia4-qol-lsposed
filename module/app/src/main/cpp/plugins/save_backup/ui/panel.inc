@@ -1,8 +1,4 @@
-// 面板几何 + 控件创建 + 事件分发
-//
-// 复用 ui_create_root/ui_create_button/ui_create_label：root 不入控件树；
-// 三栏每项是一个 button（参与命中，但 DrawProc 自绘高亮/边框/多行文本）。
-// 触摸事件在 PopupState event 内自分发（event=0x17 按下 → 命中测试 → 触发点击回调）。
+// 面板几何、core.custom_ui 组件创建与组件事件派发。
 
 // 检查游戏 popup state stack 顶是否是 savebackup entry（v0.7.x）。
 // 用于嵌套 push 后校验栈顶是否真的切换：fn_popupstate_push 内部 ArrayStack_Push 失败时
@@ -77,36 +73,15 @@ UiRect dialog_button_rect(int index) {
 // 把动态 list_btn_rect 写回列表控件（创建后 / 刷新后 / 翻页后调用，调用方持 g_sbui_mtx）。
 void sync_list_btn_rects_locked() {
     for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
-        if (g_list_btns[i] != nullptr) ui_set_rect(g_list_btns[i], list_btn_rect(i));
+        if (g_list_btns[i] != nullptr && g_ui_components != nullptr && g_ui_components->set_rect != nullptr) {
+            UiRect rect = list_btn_rect(i);
+            if (rect.w <= 0 || rect.h <= 0) rect = {LIST_COL_X, 0, 1, 1};
+            (void)g_ui_components->set_rect(g_list_btns[i], rect);
+        }
     }
 }
 
-UiRect page_btn_rect(bool next) {
-    // prev 左对齐 / next 右对齐：prev x ∈ [LIST_COL_X+0x04, +0x7C]，
-    // next x ∈ [LIST_COL_X+0x116, +0x18E]（LIST_COL_W=0x192），两按钮内缘间隙 0x9A，互不重叠；
-    // 页码画在正中 = LIST_COL_X+LIST_COL_W/2（见 root_decor_draw ⑥）。
-    return {next ? LIST_COL_X + LIST_COL_W - LIST_PAGE_BTN_W - 0x04 : LIST_COL_X + 0x04,
-            PAGE_ROW_Y, LIST_PAGE_BTN_W, LIST_PAGE_BTN_H};
-}
-
-UiRect msg_label_rect() {
-    // 顶部居中（与设置页 addr 标签同位：{ROOT_W/2-0x38, 0x18, 0x120, 0x28}）。
-    return {MSG_X, MSG_Y, MSG_W, MSG_H};
-}
-
-UiRect back_btn_rect() {
-    // 创建时已按 root 修正为屏幕左上 (8,8)（同设置页返回按钮位置习惯）；
-    // 命中测试/绘制只用 w/h（ctrl_abs_point 提供绝对坐标）。
-    return g_back_btn_rect;
-}
-
-void ctrl_abs_point(void* ctrl, int64_t out[2]) {
-    ui_control_absolute_origin(ctrl, out);
-}
-
-// 计算 rect 在屏幕上的绝对原点 = root 绝对原点 + 计算 rect 的 (x,y)。
-// ui_create_root 以 parent=null 创建 root，故 ui_get_rect(root) 即其绝对原点；
-// 该口径不读取控件自身可能滞后的 RECT，保证命中区与「实时计算 rect」严格一致。
+// 计算 rect 在屏幕上的绝对原点 = 组件面板绝对原点 + 面板相对坐标。
 void panel_abs_origin(const UiRect& local, int64_t out[2]) {
     UiRect rr{};
     if (g_root != nullptr && ui_get_rect(g_root, &rr)) {
@@ -119,8 +94,12 @@ void panel_abs_origin(const UiRect& local, int64_t out[2]) {
 }
 
 void destroy_panel_controls_locked() {
-    // 控件由 root 创建但无 TouchHandle 注册，递归删除会 SIGBUS → 不调 TouchHandle_DeleteControl；
-    // 仅清字段。f3 阶段 root 自身仍复用（见 custom_panel 同模式）。
+    void* native_root = g_root;
+    if (native_root != nullptr && g_ui_components != nullptr && g_ui_components->destroy != nullptr)
+        (void)g_ui_components->destroy(native_root);
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (native_root != nullptr && ui != nullptr && ui->delete_control != nullptr)
+        (void)ui->delete_control(native_root);
     for (int i = 0; i < 3; ++i) {
         g_slot_btns[i] = nullptr;
         g_ops_btns[i] = nullptr;
@@ -130,63 +109,65 @@ void destroy_panel_controls_locked() {
     g_prev_btn = nullptr;
     g_next_btn = nullptr;
     g_back_btn = nullptr;
-    g_msg_label = nullptr;
     g_root = nullptr;
+    g_dialog_panel = nullptr;
+    g_confirm_btn = nullptr;
+    g_cancel_btn = nullptr;
 }
 
 void create_panel_controls_locked() {
-    void* root = ui_create_root(panel_root_rect());
-    if (root == nullptr) {
-        SB_UI_LOG("create root failed");
+    if (g_ui_components == nullptr || g_ui_components->panel_create == nullptr ||
+        g_ui_components->button_create == nullptr || g_ui_components->text_button_create == nullptr ||
+        g_ui_components->nav_button_create == nullptr ||
+        g_ui_components->arrow_button_create == nullptr) return;
+    const UiRect root_rect = panel_root_rect();
+    const UiRect mask{0, 0, ROOT_W + root_rect.x * 2, ROOT_H};
+    const contracts::UiPanelDesc root_desc{root_rect, mask, 0x0841, 0};
+    void* root = nullptr;
+    if (!contracts::succeeded(g_ui_components->panel_create(&root_desc, nullptr, &root)) || root == nullptr) {
+        SB_UI_LOG("create component root failed");
         return;
     }
-    // root 的 control proc 清零（防 GetData=null SIGSEGV）。
-    ui_clear_control_proc(root);
-
-    // 返回按钮：屏幕左上 (8,8)（同设置页 {8-root.x, 8-root.y} 口径），
-    // 尺寸 BACK_BTN_W×BACK_BTN_H 与设置页返回按钮一致（原版贴图量级）。
-    UiRect root_rect{};
-    if (ui_get_rect(root, &root_rect)) {
-        g_back_btn_rect = {ROOT_W - 8 - BACK_BTN_W - root_rect.x, ROOT_H - 8 - BACK_BTN_H - root_rect.y, BACK_BTN_W, BACK_BTN_H};
-    } else {
-        g_back_btn_rect = {ROOT_W - 8 - BACK_BTN_W, ROOT_H - 8 - BACK_BTN_H, BACK_BTN_W, BACK_BTN_H};
-    }
-
-    // 左栏：3 个存档槽按钮。自绘按钮文本一律传空串：文字只由自定义 DrawProc 绘制，
-    // 避免与 fn_ctrl_btn_draw 的按钮自身文本重叠（与设置页「toggle 用默认文本、
-    // desc label 自绘文本」的分工口径一致：文本只在一处绘制）。
-    for (int i = 0; i < 3; ++i) {
-        void* b = ui_create_button(root, slot_btn_rect(i), "", &on_btn_clicked, &slot_btn_draw);
-        g_slot_btns[i] = b;
-    }
-    // 中栏：3 个操作按钮（导出 / 导入 / 删除）
-    for (int i = 0; i < 3; ++i) {
-        void* b = ui_create_button(root, ops_btn_rect(i), "", &on_btn_clicked, &ops_btn_draw);
-        g_ops_btns[i] = b;
-    }
-    // 右栏：5 个备份项 + 翻页按钮 + 提示区
-    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
-        void* b = ui_create_button(root, list_btn_rect(i), "", &on_btn_clicked, &list_btn_draw);
-        g_list_btns[i] = b;
-    }
-    g_auto_btn = ui_create_button(root, auto_btn_rect(), "", &on_btn_clicked, &auto_btn_draw);
-    // 列表按钮 rect 随当前页条目数垂直居中分布：创建时缓存可能已有数据（self_check），
-    // 创建后按最新 page_entry_count 同步一次（后续刷新/翻页由 sync_list_btn_rects_locked 维护）。
-    sync_list_btn_rects_locked();
-    g_prev_btn = ui_create_button(root, page_btn_rect(false), "", &on_btn_clicked, &page_btn_draw);
-    g_next_btn = ui_create_button(root, page_btn_rect(true), "", &on_btn_clicked, &page_btn_draw);
-    // 「← 返回」：唯一关闭入口（BACK 不触达 PopupState）。
-    // 位置习惯与设置页一致：屏幕左上 (8,8)，原版贴图样式；命中测试随 g_back_btn_rect 走。
-    g_back_btn = ui_create_button(root, g_back_btn_rect, "", &on_back_clicked, &back_btn_draw);
-    g_msg_label = ui_create_label(root, msg_label_rect(), "", &msg_label_draw);
-    // 控件文本 = 当前提示或标题（msg_label_draw 用 ui_draw_text_centered 绘制控件文本）。
-    if (g_msg_label != nullptr && ui_adapter() != nullptr && ui_adapter()->set_text != nullptr) {
-        ui_set_text(g_msg_label,
-                             g_msg_text.empty() ? const_cast<char*>(kTitle)
-                                                : const_cast<char*>(g_msg_text.c_str()));
-    }
     g_root = root;
-    SB_UI_LOG("create controls: root=%p", root);
+    const auto create_text = [&](void* parent, UiRect rect, const char* text, int kind, int index, void** out) {
+        const contracts::UiButtonDesc desc{rect, text, contracts::kUiTextButtonFontDefault,
+            &component_action_clicked, reinterpret_cast<void*>(static_cast<intptr_t>(kind + index))};
+        return contracts::succeeded(g_ui_components->text_button_create(&desc, parent, out)) && *out != nullptr;
+    };
+    const auto create_hit = [&](UiRect rect, int kind, int index, void* parent, void** out) {
+        const contracts::UiButtonDesc desc{rect, "", contracts::kUiTextButtonFontDefault,
+            &component_action_clicked, reinterpret_cast<void*>(static_cast<intptr_t>(kind + index))};
+        return contracts::succeeded(g_ui_components->button_create(&desc, parent, out)) && *out != nullptr;
+    };
+    for (int i = 0; i < 3; ++i) if (!create_hit(slot_btn_rect(i), 100, i, root, &g_slot_btns[i])) return;
+    static const char* labels[] = {"导出", "删除", "导入"};
+    for (int i = 0; i < 3; ++i) if (!create_text(root, ops_btn_rect(i), labels[i], 400, i, &g_ops_btns[i])) return;
+    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
+        UiRect row = list_btn_rect(i);
+        if (row.w <= 0 || row.h <= 0) row = {LIST_COL_X, 0, 1, 1};
+        if (!create_hit(row, 200, i, root, &g_list_btns[i])) return;
+    }
+    if (!create_hit(auto_btn_rect(), 300, 0, root, &g_auto_btn)) return;
+    const contracts::UiArrowButtonDesc left{{LIST_COL_X + 0x04, PAGE_ROW_Y, LIST_PAGE_BTN_W, LIST_PAGE_BTN_H},
+        contracts::kUiArrowLeft, 1, &component_action_clicked, reinterpret_cast<void*>(500)};
+    const contracts::UiArrowButtonDesc right{{LIST_COL_X + LIST_COL_W - LIST_PAGE_BTN_W - 0x04,
+        PAGE_ROW_Y, LIST_PAGE_BTN_W, LIST_PAGE_BTN_H}, contracts::kUiArrowRight, 1,
+        &component_action_clicked, reinterpret_cast<void*>(501)};
+    if (!contracts::succeeded(g_ui_components->arrow_button_create(&left, root, &g_prev_btn)) ||
+        !contracts::succeeded(g_ui_components->arrow_button_create(&right, root, &g_next_btn))) return;
+    const UiRect back{ROOT_W - 8 - BACK_BTN_W, ROOT_H - 8 - BACK_BTN_H, BACK_BTN_W, BACK_BTN_H};
+    const contracts::UiNavButtonDesc nav{back, contracts::kUiNavButtonAuto, nullptr, nullptr};
+    if (!contracts::succeeded(g_ui_components->nav_button_create(&nav, root, &g_back_btn))) return;
+    const UiRect dialog = dialog_rect();
+    const contracts::UiPanelDesc dialog_desc{dialog, mask, 0x1082, 1};
+    if (!contracts::succeeded(g_ui_components->panel_create(&dialog_desc, root, &g_dialog_panel))) return;
+    const UiRect confirm = dialog_button_rect(0), cancel = dialog_button_rect(1);
+    if (!create_text(g_dialog_panel, {confirm.x-dialog.x, confirm.y-dialog.y, confirm.w, confirm.h}, "确认", 600, 0, &g_confirm_btn) ||
+        !create_text(g_dialog_panel, {cancel.x-dialog.x, cancel.y-dialog.y, cancel.w, cancel.h}, "取消", 601, 0, &g_cancel_btn)) return;
+    (void)g_ui_components->text_button_set_enabled(g_confirm_btn, 0);
+    (void)g_ui_components->text_button_set_enabled(g_cancel_btn, 0);
+    sync_list_btn_rects_locked();
+    SB_UI_LOG("create component tree: root=%p", root);
 }
 
 void savebackup_panel_enter() {
@@ -195,22 +176,13 @@ void savebackup_panel_enter() {
     // 槽位刷新必须在游戏线程（enter 回调即游戏线程）执行：SAVE_CreateSaveSlot 走原版保存链，
     // 后台线程调用会崩溃（见 refresh_slots_on_game_thread 注释）。
     refresh_slots_on_game_thread();
-    // 视觉资源（与设置页同款）：背景贴图两半 + 原版返回按钮贴图；resumed 分支同样补加载。
-    // option 贴图单元与设置页共用：无独立标志，每次 enter 无条件确保加载
-    // （fn_imgsys_unit_load 幂等；设置页 f3 卸载后由本面板 enter 重载）。
     bool resumed = false;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        ui_original::load_option_images();
-        if (!g_title_background_images_loaded) {
-            g_title_background_images_loaded = ui_load_image_unit(TITLE_BACKGROUND_LEFT_UNIT) &&
-                ui_load_image_unit(TITLE_BACKGROUND_RIGHT_UNIT);
-        }
         if (g_root != nullptr) {
-            // 控件树已存在（从隐藏栈回来），仅恢复活动标志；数据走后台刷新。
+            // 组件树仍在时仅恢复活动标志。
             g_panel_active = true;
             g_close_delay_frames = 0;
-            g_back_pressed = 0;
             // 页码/条目缓存可能在隐藏期间被 self_check/刷新改动，列表按钮 rect 重对齐。
             sync_list_btn_rects_locked();
             resumed = true;
@@ -219,9 +191,14 @@ void savebackup_panel_enter() {
             return;
         } else {
             create_panel_controls_locked();
+            if (g_root == nullptr || g_back_btn == nullptr || g_dialog_panel == nullptr ||
+                g_confirm_btn == nullptr || g_cancel_btn == nullptr || g_auto_btn == nullptr ||
+                g_prev_btn == nullptr || g_next_btn == nullptr) {
+                destroy_panel_controls_locked();
+                return;
+            }
             g_panel_active = true;
             g_close_delay_frames = 0;
-            g_back_pressed = 0;
         }
     }
     // 控件先创建并激活，再枚举文件名与 stat 元数据；bundle 内容留到逐帧队列解析。
@@ -247,24 +224,23 @@ void savebackup_panel_process() {
         }
     }
     const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui == nullptr || ui->begin_frame == nullptr || ui->end_frame == nullptr ||
-        ui->draw_control == nullptr) return;
+    if (ui == nullptr || ui->begin_frame == nullptr || ui->end_frame == nullptr) return;
     // 控件 rect 写回与逐帧解析都只在游戏线程执行。
     // 列表条目数/页码变化后在此把最新 rect 写回控件，使引擎侧的控件 rect 与计算 rect 一致
     // （命中/绘制另用 panel_abs_origin + 计算 rect，双保险）。
     sync_list_btn_rects_locked();
     // 帧封装与 core.ui settings_panel_process 同款（ui_begin_frame 内含 SaveLCD/RestoreLCD）
     ui_begin_frame();
-    // 背景/遮罩/分割线/标题（设置页同款视觉语言，见 render.inc）
     root_decor_draw();
-    for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) ui_draw_control(g_slot_btns[i]);
-    for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) ui_draw_control(g_ops_btns[i]);
-    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) ui_draw_control(g_list_btns[i]);
-    if (g_auto_btn) ui_draw_control(g_auto_btn);
-    if (g_prev_btn) ui_draw_control(g_prev_btn);
-    if (g_next_btn) ui_draw_control(g_next_btn);
-    if (g_back_btn) ui_draw_control(g_back_btn);
-    if (g_msg_label) ui_draw_control(g_msg_label);
+    sync_component_enabled_locked();
+    for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) slot_btn_draw(g_slot_btns[i]);
+    for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) ops_btn_draw(g_ops_btns[i]);
+    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) list_btn_draw(g_list_btns[i]);
+    if (g_auto_btn) auto_btn_draw(g_auto_btn);
+    if (g_prev_btn) page_btn_draw(g_prev_btn);
+    if (g_next_btn) page_btn_draw(g_next_btn);
+    if (g_back_btn && g_ui_components != nullptr) (void)g_ui_components->nav_button_draw(g_back_btn);
+    if (!g_msg_text.empty()) msg_label_draw(g_root);
     if (g_dialog != DialogKind::kNone) draw_confirm_dialog();
     ui_end_frame();
 }
@@ -274,131 +250,18 @@ void savebackup_panel_f3() {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     g_panel_active = false;
     g_close_delay_frames = 0;
-    g_back_pressed = 0;
-    // 不卸载任何共享贴图单元：kOptionImageUnit(0x59) 与设置页返回按钮/切换开关共用，
-    // TITLE_BACKGROUND_* (0x4f/0x50) 与主菜单标题/设置页共用——本面板不是所有者。
-    // 此前在这里 unload_option_images() 会把仍在栈中的设置页要用的贴图卸载，
-    // 返回设置页后 back_btn_draw 取不到贴图退化为「方框+文字」（用户实测 bug）；
-    // 卸载 TITLE_BACKGROUND_* 还会导致主菜单重绘 GRPX_DrawPart 空指针崩溃（tombstone_30）。
-    // 卸载职责在所有者（settings_panel_f3 / 主菜单）。
-    // 控件树保留复用（递归删除 SIGBUS）
+    destroy_panel_controls_locked();
+    // 组件树销毁归 core.custom_ui 管理；共享图集仍由宿主/其他 UI 持有。
 }
 
 void savebackup_panel_f4() {}
 
 uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
-    if (g_root == nullptr || param == 0) return 1;
-    if (g_close_delay_frames > 0) return 1;
-    if (event == 0x17) {
-        int64_t tx = *reinterpret_cast<const int64_t*>(param);
-        int64_t ty = *reinterpret_cast<const int64_t*>(param + 8);
-        // 需要锁外处理的按钮（操作按钮/翻页）：on_btn_clicked 契约为「调用方不持锁」，
-        // 内部按需拿 g_sbui_mtx；导入/删除确认执行路径要锁外做 IO 并调
-        // refresh_slots_on_game_thread()（其内部自加锁，持锁调用会死锁，g_sbui_mtx 非递归）。
-        void* clicked_ctrl = nullptr;
-        bool confirm = false;
-        bool refresh = false;
-        {
-            std::lock_guard<std::mutex> lock(g_sbui_mtx);
-            if (!g_panel_active) return 1;
-            // 命中测试：用「root 绝对原点 + 实时计算 rect」，不读控件自身可能滞后的 RECT。
-            // 这样命中区与绘制（同用计算 rect）严格一致，列表/槽等动态 rect 也稳定命中。
-            auto hit = [&](void* ctrl, UiRect r) -> bool {
-                if (ctrl == nullptr || r.w <= 0 || r.h <= 0) return false;
-                int64_t p[2];
-                panel_abs_origin(r, p);
-                return tx >= p[0] && tx < p[0] + r.w && ty >= p[1] && ty < p[1] + r.h;
-            };
-            // 对话框打开时仅接受确认/取消/面板返回；背景控件完全屏蔽。
-            if (g_dialog != DialogKind::kNone) {
-                int64_t confirm_origin[2], cancel_origin[2];
-                panel_abs_origin(dialog_button_rect(0), confirm_origin);
-                panel_abs_origin(dialog_button_rect(1), cancel_origin);
-                const UiRect confirm_rect = dialog_button_rect(0);
-                const UiRect cancel_rect = dialog_button_rect(1);
-                const bool hit_confirm = tx >= confirm_origin[0] && tx < confirm_origin[0] + confirm_rect.w &&
-                                         ty >= confirm_origin[1] && ty < confirm_origin[1] + confirm_rect.h;
-                const bool hit_cancel = tx >= cancel_origin[0] && tx < cancel_origin[0] + cancel_rect.w &&
-                                        ty >= cancel_origin[1] && ty < cancel_origin[1] + cancel_rect.h;
-                if (hit_confirm) confirm = true;
-                else if (hit_cancel || hit(g_back_btn, back_btn_rect())) clear_pending_locked();
-                if (confirm) { /* execute after releasing mutex */ }
-                else return 1;
-            }
-            if (confirm) { /* handled outside lock */ }
-            else {
-            // 槽位：纯状态修改，持锁内联完成。再次点击已选槽 → 取消选中（-1）；
-            // 切换/取消都清除待确认并清提示（与选中语义一致）。
-            for (int i = 0; i < 3; ++i) {
-                if (hit(g_slot_btns[i], slot_btn_rect(i))) {
-                    g_selected_slot = (g_selected_slot == i) ? -1 : i;
-                    g_selected_auto = false;
-                    g_auto_backup_valid = false;
-                    g_auto_loading = false;
-                    set_msg_locked("", UI_OPTION_TEXT, false);
-                    refresh = true;
-                    break;
-                }
-            }
-            if (refresh) {
-                // Refresh happens after releasing g_sbui_mtx.
-            } else {
-            // 操作按钮：记录指针，锁外调用（导入/删除为长 IO，不得持 g_sbui_mtx）。
-            for (int i = 0; i < 3; ++i) {
-                if (hit(g_ops_btns[i], ops_btn_rect(i))) {
-                    clicked_ctrl = g_ops_btns[i];
-                    break;
-                }
-            }
-            if (clicked_ctrl == nullptr) {
-                // 列表项：纯状态修改，持锁内联完成。再次点击已选备份项 → 取消选中（-1）；
-                // 切换/取消都清除待确认并清提示。
-                for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
-                    if (hit(g_list_btns[i], list_btn_rect(i))) {
-                        if (backup_at_page(i) != nullptr) {
-                            const int abs = g_page_index * LIST_COLS_PER_PAGE + i;
-                            g_selected_backup = (g_selected_backup == abs) ? -1 : abs;
-                            g_selected_backup_name = g_selected_backup >= 0
-                                ? g_backups[static_cast<size_t>(abs)].name : "";
-                            g_selected_auto = false;
-                        }
-                        return 1;
-                    }
-                }
-                if (hit(g_auto_btn, auto_btn_rect())) {
-                    if (g_auto_backup_valid) {
-                        const bool was = g_selected_auto;
-                        g_selected_auto = !was;
-                        if (g_selected_auto) {
-                            g_selected_backup = -1;
-                            g_selected_backup_name.clear();
-                        }
-                    }
-                    return 1;
-                }
-                // 翻页：同样锁外交给 on_btn_clicked。
-                if (hit(g_prev_btn, page_btn_rect(false))) {
-                    clicked_ctrl = g_prev_btn;
-                } else if (hit(g_next_btn, page_btn_rect(true))) {
-                    clicked_ctrl = g_next_btn;
-                } else if (hit(g_back_btn, back_btn_rect())) {
-                    // 返回：锁外交给 on_back_clicked（其内部调 fn_ui_set_popup_process_info
-                    // 触发 pop → savebackup_panel_f3 拿 g_sbui_mtx，持锁调用会死锁）。
-                    clicked_ctrl = g_back_btn;
-                }
-            }
-            }
-            }
-        }
-        if (refresh) { refresh_panel_data(); return 1; }
-        if (confirm) { execute_dialog_confirm(); return 1; }
-        if (clicked_ctrl != nullptr) {
-            on_btn_clicked(clicked_ctrl);  // 游戏线程，锁外
-        }
-        return 1;
-    } else if (event == 0x18 && g_back_pressed != 0) {
-        // 抬起事件无返回按钮：在自绘面板中，「关闭」通过单独的 on_btn_clicked 触发；保留兼容。
-        g_back_pressed = 0;
-    }
-    return 1;  // 吞掉触摸
+    (void)param2;
+    if (!g_panel_active || g_root == nullptr || param == 0 || g_close_delay_frames > 0 ||
+        g_ui_components == nullptr || g_ui_components->dispatch_native_event == nullptr) return 1;
+    uint32_t consumed = 0;
+    (void)g_ui_components->dispatch_native_event(g_root, event, param, param2, &consumed);
+    (void)consumed;
+    return 1;
 }

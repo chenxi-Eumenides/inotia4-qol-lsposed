@@ -4,6 +4,7 @@
 #include <string>
 
 #include "../../../contracts/ui_theme.h"
+#include "../../../contracts/ui.h"
 
 // 存档管理器游戏内面板（原 feature/ui/game_ui_savebackup，D1-b2 迁入 save_backup 插件）。
 //
@@ -36,6 +37,7 @@ void save_backup_inject_map_names_for_test(const char* json);
 // ---- PanelProviderSpec 实现（panel_id="save_backup"）----
 bool savebackup_provider_open();
 void savebackup_provider_close();
+void savebackup_set_ui_components(const contracts::QolUiComponents* components);
 bool savebackup_provider_active();
 const char* savebackup_provider_block_reason();
 

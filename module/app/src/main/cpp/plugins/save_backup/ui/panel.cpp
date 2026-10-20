@@ -55,25 +55,7 @@
 #define SLOT_COL_X (CONTENT_X + 0x10)
 #define OPS_COL_X (SLOT_COL_X + SLOT_COL_W + GAP)
 #define LIST_COL_X (OPS_COL_X + OPS_COL_W + GAP)
-// 正文字号：fn_grpx_draw_string_with_font 第 5 参 font = 游戏字体表下标。GRPX_CreateFont
-// (0x8f5f4) 用同一字体族创建 5 个字号：size={20,24,38,28,14}（vaddr 0x243c00 的
-// GRPX_GetFontSize 表：0..3），行高表 [0x2f5968]={22,26,40,30,16}。左栏与右栏正文统一
-// font=3（28/行高30）：比 font=1(24) 大，且比上一版 font=2(38) 收敛以适配更矮的行；
-// 同一字体族 → CJK 字形覆盖相同。中栏/翻页/标题/返回保持 font=1。
-#define SB_TEXT_FONT 3
-#define SB_FONT_H 0x1E      // font=3 行高 30（GRPX_GetFontHeight 表），用于垂直居中预算（最坏）
-// 右栏两行文本的 y 间隔：两行块高 = 间隔 + 行高。
-#define LIST_LINE_GAP 0x18  // Two-line block fits the redesigned 56px row.
 // 三栏垂直：右框最高（FRAME_H），以其中心为公共水平中线；左框/中栏按各自高度居中。
-//   框线内边界（draw_frame_box）：ui_draw_panel_decor 上边 [frame.y, frame.y+3)、
-//   下边 [frame.y+h-3, frame.y+h)；ui_draw_vertical_line 左边 [x, x+3)、右边 [x+w-3, x+w)
-//   （3px，左闭右开）。故框内可用区 y ∈ [frame.y+3, frame.y+h-3)，高 h-6；左右各内缩 3px。
-//   首/末行紧贴框内边缘：行按钮高 = ROW_H - ROW_GAP（行间仅留 ROW_GAP=4 缝隙），
-//     首行顶 = frame.y + FRAME_BORDER；末行底 = frame.y+3 + n*ROW_H - ROW_GAP；
-//     令其 = frame.y + h - 3 → h = n*ROW_H + 2*FRAME_BORDER - ROW_GAP。
-//   故 FRAME_H = 5*0x46 + 6 - 4 = 0x160(352)；SLOT_FRAME_H = 3*0x48 + 6 - 4 = 0xDA(218)。
-//   右框 5 行：pitch 0x46、按钮高 0x42(66)；左框 3 槽：pitch 0x48、按钮高 0x44(68)。
-//   FRAME_Y 下移：0x60 → 0x68（CONTENT_Y+8）；标题/消息保持绝对 y=0x18 不动。
 #define AUTO_Y CONTENT_Y
 #define AUTO_H 0x58
 #define AUTO_X LIST_COL_X
@@ -95,8 +77,7 @@
 //   左框底 = 0xAB+0xDA = 0x185 < 右框底 0x68+0x160 = 0x1C8；左框与右框互不重叠（异 x）。
 #define CONTENT_MID_Y (FRAME_Y + FRAME_H / 2)
 #define SLOT_FRAME_Y (CONTENT_MID_Y - SLOT_FRAME_H / 2)
-// 中栏 3 操作按钮：无组框（每个按钮 ui_custom::draw_button 自带 2px 边框），
-// 按钮组按公共中线垂直居中。
+// 操作按钮组按三栏公共中线垂直居中。
 #define OPS_BTN_H 0x40
 #define OPS_BTN_W 0x58
 #define OPS_BTN_GAP 0x0a
@@ -119,44 +100,18 @@
 // 屏幕左上 (8,8) 78×86，与 core.ui 设置页完全同款，原版 option 贴图量级）。
 #define BACK_BTN_W kBackBtnW
 #define BACK_BTN_H kBackBtnH
-// 背景贴图 unit/loc：与 core.ui 设置页同值（title background 左右两半）。
-#define TITLE_BACKGROUND_LEFT_UNIT 0x4f
-#define TITLE_BACKGROUND_RIGHT_UNIT 0x50
-#define TITLE_BACKGROUND_LOC 0x0
-
-// 颜色（ABGR 0xAABBGGRR，文字/框线/按钮用）：与 core.ui 设置页同一套视觉语言——
-// UI_GOLD 金色 = 分割线/框线/次要文本/左栏有档槽文本/右栏首行文本/中栏可用按钮文字；
-// UI_OPTION_TEXT = 正文文字；COLOR_TEXT_WHITE = 右栏次行（时间+校验）；
-// COLOR_TEXT_GRAY = 左栏空槽文本 / 中栏不可用按钮文字。
-//
-// 注意：选中底色走 ui_fill_rect_alpha → GRPX_FillRectAlpha，颜色格式与上面不同！
-// 反汇编 libgame.so 0x8fccc：color(w4)/alpha(w5) 经 GRPX_GetColorFromGRPWithAlpha(0x8fc88)
-// 转换后再 SGL_grpFillRect。该转换把 color 低 16 位当作 **RGB565**（R=bit15..11、
-// G=bit10..5、B=bit4..0），展开为 ABGR8888；alpha 是 **0..100 百分比**（w5>0x64 直接 return，
-// 内部按 alpha*255/100 写入高字节）。故此处颜色必须写 RGB565，不能写 ABGR8888——
-// 之前写 0xFF102E4A 被当作 RGB565(0x2E4A) 解码成亮绿（实测），即此故。
-// COLOR_SEL_BG 深琥珀 0x5182 = RGB565(R5=10,G6=12,B5=2) → 渲染 RGB(0x50,0x30,0x10)
-// 暖暗棕（明度低），反衬 UI_GOLD 金色文字（深底亮字高对比），仍可与冷色近黑的
-// COLOR_BTN_BG/遮罩区分。COLOR_SEL_BG_ALPHA=0x50 即 80% 不透明度（百分比口径）。
+// ABGR colors are only passed to the component text primitive; controls use component theme states.
 #define UI_GOLD 0xFF00B4D7
 #define UI_OPTION_TEXT 0xFFCB9EE2
 #define COLOR_TEXT_WHITE 0xFFFFFFFF
 #define COLOR_TEXT_GRAY 0xFF808080
-// RGB565（GRPX_FillRectAlpha 口径）：0x5182 → RGB(0x50,0x30,0x10) 深琥珀/深棕暖暗色。
-#define COLOR_SEL_BG 0x5182
-#define COLOR_SEL_BG_ALPHA 0x50
-#define COLOR_BTN_BG 0xFF241C18
-#define COLOR_BTN_BG_DIM 0xFF181012
 #define COLOR_OK 0xFFB0E89C
 #define COLOR_ERR 0xFFE89C9C
-#define COLOR_INFO 0xFF9CC2E8
 
 namespace qol::features::save_backup {
 namespace {
 
 using UiRect = contracts::UiRect;
-using UiClickProc = contracts::QolUiClickFn;
-using UiDrawProc = contracts::QolUiDrawFn;
 
 const contracts::QolUiAdapter* ui_adapter() {
     const contracts::QolHostSdk* sdk = save_backup_host_sdk();
@@ -175,45 +130,6 @@ const char* ui_screen_name() {
     return "";
 }
 
-void* ui_create_control(uint32_t kind, void* parent, UiRect rect, const char* text,
-                        UiClickProc click_proc, UiDrawProc draw_proc) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui == nullptr || ui->create_control == nullptr || ui->set_rect == nullptr) return nullptr;
-    void* control = nullptr;
-    if (!ui_ok(ui->create_control(kind, parent, &control)) || control == nullptr) return nullptr;
-    if (!ui_ok(ui->set_rect(control, rect))) return nullptr;
-    if (text != nullptr && (ui->set_text == nullptr || !ui_ok(ui->set_text(control, text)))) {
-        return nullptr;
-    }
-    if (click_proc != nullptr &&
-        (ui->set_click_proc == nullptr || !ui_ok(ui->set_click_proc(control, click_proc, control)))) {
-        return nullptr;
-    }
-    if (draw_proc != nullptr &&
-        (ui->set_draw_proc == nullptr || !ui_ok(ui->set_draw_proc(control, draw_proc)))) {
-        return nullptr;
-    }
-    return control;
-}
-
-void* ui_create_root(UiRect rect) {
-    return ui_create_control(0, nullptr, rect, nullptr, nullptr, nullptr);
-}
-
-void* ui_create_button(void* parent, UiRect rect, const char* text, UiClickProc click_proc,
-                       UiDrawProc draw_proc) {
-    return ui_create_control(1, parent, rect, text, click_proc, draw_proc);
-}
-
-void* ui_create_label(void* parent, UiRect rect, const char* text, UiDrawProc draw_proc) {
-    return ui_create_control(2, parent, rect, text, nullptr, draw_proc);
-}
-
-void ui_set_rect(void* control, UiRect rect) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->set_rect != nullptr) (void)ui->set_rect(control, rect);
-}
-
 bool ui_get_rect(void* control, UiRect* rect) {
     const contracts::QolUiAdapter* ui = ui_adapter();
     return ui != nullptr && ui->get_rect != nullptr && rect != nullptr &&
@@ -228,49 +144,6 @@ void ui_begin_frame() {
 void ui_end_frame() {
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui != nullptr && ui->end_frame != nullptr) (void)ui->end_frame();
-}
-
-void ui_fill_rect_alpha(UiRect rect, uint32_t color, uint32_t alpha) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->fill_rect_alpha != nullptr) {
-        (void)ui->fill_rect_alpha(rect, color, alpha);
-    }
-}
-
-void ui_draw_panel_decor(UiRect panel, const int64_t* separators, size_t count, uint32_t color) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->draw_panel_decor != nullptr) {
-        (void)ui->draw_panel_decor(panel, separators, static_cast<uint32_t>(count), color);
-    }
-}
-
-void ui_draw_vertical_line(int64_t x, int64_t y, int64_t height, uint32_t color, int thickness) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->draw_vertical_line != nullptr) {
-        (void)ui->draw_vertical_line(x, y, height, color, thickness);
-    }
-}
-
-bool ui_load_image_unit(int32_t unit) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->load_image_unit != nullptr && ui_ok(ui->load_image_unit(unit));
-}
-
-bool ui_draw_image_part(int32_t unit, int32_t loc, int32_t x, int32_t y, int32_t type,
-                        int32_t flip) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->draw_image_part != nullptr &&
-           ui_ok(ui->draw_image_part(unit, loc, x, y, type, flip));
-}
-
-void ui_set_text(void* control, const char* text) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->set_text != nullptr) (void)ui->set_text(control, text);
-}
-
-void ui_draw_control(void* control) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->draw_control != nullptr) (void)ui->draw_control(control);
 }
 
 bool ui_resolution_width(int32_t* out) {
@@ -310,84 +183,20 @@ bool ui_popup_top_matches(contracts::QolUiPopupEnterFn enter) {
            ui_ok(ui->popup_stack_top_matches(enter, &matches)) && matches != 0;
 }
 
-void ui_clear_control_proc(void* control) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->clear_control_proc != nullptr && control != nullptr) {
-        (void)ui->clear_control_proc(control);
-    }
-}
-
-void ui_control_absolute_origin(void* control, int64_t out[2]) {
-    out[0] = 0;
-    out[1] = 0;
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->control_absolute_origin != nullptr && control != nullptr) {
-        (void)ui->control_absolute_origin(control, &out[0], &out[1]);
-    }
-}
-
-bool ui_set_font_color_rgb(int32_t red, int32_t green, int32_t blue) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->set_font_color_rgb != nullptr &&
-           ui_ok(ui->set_font_color_rgb(red, green, blue));
-}
-
-bool ui_draw_string_with_font(const char* text, int32_t x, int32_t y, int32_t align, int32_t font) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->draw_string_with_font != nullptr &&
-           ui_ok(ui->draw_string_with_font(text, x, y, align, font));
-}
-
-namespace ui_original {
-
-bool load_option_images() {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->load_option_images != nullptr && ui_ok(ui->load_option_images());
-}
-
-bool draw_back_button(void* control, bool pressed) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->draw_back_button != nullptr &&
-           ui_ok(ui->draw_back_button(control, pressed ? 1 : 0));
-}
-
-}  // namespace ui_original
-
-namespace ui_custom {
-
-void draw_button(void* control, UiRect size, uint32_t background, uint32_t border,
-                 int border_thickness, const char* text, uint32_t text_color, int text_x,
-                 int text_y) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui != nullptr && ui->draw_custom_button != nullptr) {
-        (void)ui->draw_custom_button(control, size, background, border, border_thickness, text,
-                                      text_color, text_x, text_y);
-    }
-}
-
-}  // namespace ui_custom
-
 // ============== 全局状态 ==============
 std::mutex g_sbui_mtx;
 
 bool g_panel_active = false;
 int g_state_id = -1;
 void* g_root = nullptr;
-int g_back_pressed = 0;
+const contracts::QolUiComponents* g_ui_components = nullptr;
+void* g_dialog_panel = nullptr;
+void* g_confirm_btn = nullptr;
+void* g_cancel_btn = nullptr;
 int g_close_delay_frames = 0;
-const char* kTitle = "存档备份";
 // own:popup.savebackup 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
 contracts::QolPopupStateEntry g_popup_entry{};
 bool g_popup_acquired = false;
-// 视觉资源（与 core.ui 设置页同款）：面板背景贴图两半 + 原版返回按钮贴图（unit 0x59）。
-// 注意：option 贴图单元与设置页共用，本面板不做「已加载」标志——enter 无条件确保加载
-// （幂等）、f3 不卸载（所有者是设置页）；返回按钮绘制直接尝试贴图、失败退化自绘，
-// 避免标志与实际单元状态不一致（设置页 f3 卸载后本面板 resumed 时标志仍为 true 的窗口）。
-bool g_title_background_images_loaded = false;
-bool g_background_unavailable_logged = false;
-// 返回按钮几何：创建控件时按 root 修正为屏幕绝对 (8,8)（同设置页 ui_create_button
-// {8-root.x, 8-root.y} 口径）；命中测试与绘制只读 w/h，x/y 仅创建时使用。
-UiRect g_back_btn_rect = {8, 8, BACK_BTN_W, BACK_BTN_H};
 
 // 三栏控件容器（label 类型，参与命中但 DrawProc 自绘；DrawProc 走 fn_ctrl_btn_draw → 自定义 cb）。
 void* g_slot_btns[3] = {nullptr, nullptr, nullptr};
@@ -397,7 +206,6 @@ void* g_auto_btn = nullptr;
 void* g_prev_btn = nullptr;
 void* g_next_btn = nullptr;
 void* g_back_btn = nullptr;                          // 底部「← 返回」：关闭面板
-void* g_msg_label = nullptr;                         // 操作结果提示区
 int g_selected_slot = -1;                            // 左栏选中槽 0/1/2；-1=未选（默认两侧都不选）
 int g_selected_backup = -1;                          // 选中手动备份在列表中的绝对索引；-1=未选
 bool g_selected_auto = false;
@@ -455,11 +263,8 @@ bool g_backups_loading = false;
 bool g_auto_loading = false;
 bool g_skip_parse_frame = false;
 
-// ============== 控件 ID（ExecuteProc 复用）==============
-// 三栏控件共用同一 UiClickProc（点击后用 ctrl 指针反查 g_slot_btns/g_ops_btns/g_list_btns 识别）。
-void on_btn_clicked(void* ctrl);
-void on_back_clicked(void* ctrl);
-static void execute_dialog_confirm();
+// Component ExecuteProc callback, dispatched by core.custom_ui.
+void component_action_clicked(void* user);
 
 // 列表按钮 rect 依赖当前页文件记录数，定义在 panel.inc。
 void sync_list_btn_rects_locked();
@@ -779,23 +584,17 @@ void set_msg_locked(const char* text, uint32_t color, bool is_error) {
     g_msg_text = text != nullptr ? text : "";
     g_msg_color = color;
     g_msg_is_error = is_error;
-    // 提示文本写入控件自身（msg_label_draw 用 ui_draw_text_centered 绘制控件文本）；
-    // 无消息时控件文本回退为面板标题。
-    if (g_msg_label != nullptr && ui_adapter() != nullptr && ui_adapter()->set_text != nullptr) {
-        ui_set_text(g_msg_label,
-                    g_msg_text.empty() ? kTitle : g_msg_text.c_str());
-    }
 }
 
-// ============== DrawProc（控件内容绘制）==============
+// ============== Component 绘制 ==============
 void slot_btn_draw(void* ctrl);
 void ops_btn_draw(void* ctrl);
 void list_btn_draw(void* ctrl);
 void auto_btn_draw(void* ctrl);
 void draw_confirm_dialog();
+void sync_component_enabled_locked();
 void page_btn_draw(void* ctrl);
 void msg_label_draw(void* ctrl);
-void back_btn_draw(void* ctrl);
 void root_decor_draw();
 
 // ============== 几何（控件 rect）==============
@@ -804,9 +603,6 @@ UiRect slot_btn_rect(int i);
 UiRect ops_btn_rect(int i);
 UiRect list_btn_rect(int i);
 UiRect auto_btn_rect();
-UiRect page_btn_rect(bool next);
-UiRect msg_label_rect();
-UiRect back_btn_rect();
 int page_entry_count();
 
 // ============== 面板回调 ==============
@@ -821,6 +617,11 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
 #include "ui/injection.inc"
 
 }  // namespace
+
+void savebackup_set_ui_components(const contracts::QolUiComponents* components) {
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    g_ui_components = components;
+}
 
 // ============== own:popup.savebackup（kOwnership）==============
 
@@ -908,7 +709,6 @@ void savebackup_provider_close() {
         set_msg_locked("", UI_OPTION_TEXT, false);
         g_panel_active = false;
         g_close_delay_frames = 0;
-        g_back_pressed = 0;
         // 控件树保留复用（同 f3：递归删除 SIGBUS）；再次进入走 enter 的 resumed 分支。
     }
     // 幂等：未激活时不触碰游戏 UI（避免栈对陈旧栈顶调用 close 时误关当前顶层面板）。
@@ -962,7 +762,6 @@ std::string data_savebackup_ui_restore() {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         g_panel_active = false;
         g_close_delay_frames = 0;
-        g_back_pressed = 0;
     }
     savebackup_popup_release(nullptr);
     return save_backup_result_ok();
