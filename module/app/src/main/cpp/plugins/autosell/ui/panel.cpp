@@ -122,6 +122,7 @@ void ui_uidesc_draw() {
 constexpr int64_t kEntrySize = 68;
 constexpr int64_t kBagTabSize = 57;       // 原版袋格/扩展页签边长
 constexpr int64_t kExtTabOffsetX = 68;    // 扩展页签列相对袋 0 的偏移
+constexpr int64_t kEntryOffsetY = 3;      // 视觉微调：在中心对齐基础上整体下移 3
 
 // 面板几何（逻辑坐标基准 960×640；实际逻辑宽由 CalcResolution 推出，真机 1408）。
 // 宽度基准：2 × 0x180（假定物品详情面板宽 384）= 0x300 = 768 ≤ 1408。
@@ -420,7 +421,7 @@ QolResult autosell_entry_layout(void* parent, UiRect* out_rect, void* user) {
         center_y = task_abs_y + task.h / 2;
     }
     *out_rect = {center_x - kEntrySize / 2 - parent_abs_x,
-        center_y - kEntrySize / 2 - parent_abs_y, kEntrySize, kEntrySize};
+        center_y + kEntryOffsetY - kEntrySize / 2 - parent_abs_y, kEntrySize, kEntrySize};
     static UiRect last_rect{};
     if (last_rect.x != out_rect->x || last_rect.y != out_rect->y ||
         last_rect.w != out_rect->w || last_rect.h != out_rect->h) {
