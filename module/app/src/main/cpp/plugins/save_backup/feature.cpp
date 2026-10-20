@@ -134,6 +134,28 @@ std::string result_error(const char* message) {
     return "{\"ok\":false,\"error\":\"result unavailable\"}";
 }
 
+// 导入门禁：仅在主菜单（未加载任何槽，current_slot == -1）允许覆盖存档；游戏运行中
+// 导入会与已加载槽的结构/文件冲突。current_slot 读取失败按不可用处理（fail-closed）。
+bool import_allowed_now(std::string& err) {
+    if (g_save_facts == nullptr || g_save_facts->current_slot == nullptr) {
+        err = "save state unavailable";
+        return false;
+    }
+    int32_t current_slot = -1;
+    const QolResult result = g_save_facts->current_slot(&current_slot);
+    // 主菜单（未加载）时 Adapter 返回 NotReady 且 out=-1（game/adapter_ports/save_port.cpp:104-108），
+    // 因此 NotReady 不能单独判为不可用；其余错误码 fail-closed。
+    if (!qol::contracts::succeeded(result) && result.code != kQolErrNotReady) {
+        err = "save state unavailable";
+        return false;
+    }
+    if (current_slot >= 0) {
+        err = "import requires main menu";
+        return false;
+    }
+    return true;
+}
+
 const char* warehouse_state_name(qol::contracts::QolTargetFeatureState state) {
     switch (state) {
         case qol::contracts::QolTargetFeatureState::kUnknown: return "unknown";
@@ -527,7 +549,8 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
     void* buf = nullptr;
     int len = 0;
     const QolResult load_result = g_save_facts->load_data(slot, &buf, &len);
-    if (!qol::contracts::succeeded(load_result) || buf == nullptr || len < 8) {
+    // 明文头 8 字节 + 块表 offset(+8/+12)：不足 14 字节无法定位块 0/块 1。
+    if (!qol::contracts::succeeded(load_result) || buf == nullptr || len < 14) {
         if (buf != nullptr) (void)g_save_call->write.free_data(buf);
         if (load_result.code == kQolErrNotReady) err = "symbol not resolved";
         else err = "load failed";
@@ -561,9 +584,9 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
 bool encrypt_plain_to_slot(int32_t slot, const std::vector<uint8_t>& plain,
                            std::vector<uint8_t>& cipher) {
     if (!save_encrypt_available()) return false;
-    if (plain.size() < 8) return false;
+    if (plain.size() < 14) return false;
     const size_t block0 = 8 + rd_u16(plain.data() + 8);
-    if (block0 >= plain.size()) return false;
+    if (block0 + 1 > plain.size()) return false;
 
     std::vector<uint8_t> buf = plain;
     buf[block0] = static_cast<uint8_t>(slot);
@@ -1037,6 +1060,9 @@ std::string save_backup_import_json(const char* checksum, int slot) {
     const std::string ck = checksum != nullptr ? checksum : "";
     if (!save_backup::valid_checksum(ck)) return result_error("bad checksum");
     if (slot < 0 || slot > 2) return result_error("bad slot");
+    // 导入会覆盖槽文件，必须先确认当前未加载任何槽；导出不设此限制。
+    std::string gate_error;
+    if (!import_allowed_now(gate_error)) return result_error(gate_error.c_str());
     std::string dir;
     if (!backup_dir(dir)) return result_error("backup dir unavailable");
     const std::string path = find_by_checksum(dir, ck);

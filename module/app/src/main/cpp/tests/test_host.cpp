@@ -1996,7 +1996,7 @@ static void test_save_backup_base64() {
 static void test_save_backup_bundle_roundtrip() {
     namespace sb = save_backup;
     using sb::Entry; using sb::ParsedBundle;
-    const std::vector<uint8_t> plain = {1, 2, 3, 4, 5, 6, 7, 8};
+    const std::vector<uint8_t> plain = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
     const std::vector<uint8_t> module = {0x4D, 0x53, 0x41, 0x56, 0, 1, 0, 9};
     const std::string meta = "{\"source_slot\":1,\"export_time\":1700000000000,\"map_id\":37,"
                              "\"hero_level\":5,\"hero_index\":0,\"save_version\":5,"
@@ -2046,7 +2046,7 @@ static void test_save_backup_bundle_roundtrip() {
 static void test_save_backup_meta_entry() {
     namespace sb = save_backup;
     using sb::Entry; using sb::ParsedBundle;
-    const std::vector<uint8_t> plain(4, 0xAB);
+    const std::vector<uint8_t> plain(16, 0xAB);
     const std::string meta = sb::build_meta_json(1, 1700000000000LL, 37, 5, 0, 5, 1699999999000LL,
                                              "aa00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00bb00",
                                              "cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00cc00",
@@ -2147,7 +2147,7 @@ static void test_save_backup_entry_map_name() {
 
     // entry_from_bundle 不填充 map_name（Kotlin 启动期设置由 native 层注入；
     // bundle 字节布局未引入新字段，旧 .qol_save 解析仍向前兼容）。
-    const std::vector<uint8_t> plain(4, 0xAB);
+    const std::vector<uint8_t> plain(16, 0xAB);
     const std::string meta = sb::build_meta_json(0, 1, 30, 5, 0, 5, 0,
                                                  std::string(64, 'a'), std::string(),
                                                  "89abcdef0123");
@@ -2176,6 +2176,54 @@ static void test_save_backup_checksum_name() {
     CHECK(!sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.txt", out));
     CHECK(!sb::extract_checksum_from_name("89abcdef0123.qol_save", out));  // 缺 `_` 前缀
     CHECK(!sb::extract_checksum_from_name("short.qol_save", out));
+}
+
+// SB-02：slot 严格整数解析（拒绝小数/指数/十六进制/溢出/越界/缺失/无值/空 body）。
+static void test_save_backup_slot_parse() {
+    namespace sb = save_backup;
+    int slot = -1;
+    CHECK(sb::json_find_slot("{\"slot\":0}", slot));
+    CHECK_EQ(slot, 0);
+    CHECK(sb::json_find_slot("{\"slot\": 2}", slot));
+    CHECK_EQ(slot, 2);
+    CHECK(sb::json_find_slot("{\"slot\":1,\"checksum\":\"89abcdef0123\"}", slot));
+    CHECK_EQ(slot, 1);
+    CHECK(sb::json_find_slot("{\"checksum\":\"89abcdef0123\",\"slot\":1}", slot));
+    CHECK_EQ(slot, 1);
+    CHECK(!sb::json_find_slot("{\"slot\":1.5}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":1e3}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":0x10}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":1abc}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":4294967296}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":2147483648}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":-1}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":3}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":\"1\"}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":true}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":}", slot));
+    CHECK(!sb::json_find_slot("{\"slot\":", slot));
+    CHECK(!sb::json_find_slot("{\"other\":1}", slot));
+    CHECK(!sb::json_find_slot("", slot));
+}
+
+// SB-10：entry_json 对所有字符串字段做 JSON 转义（引号/反斜杠/换行/控制字符）。
+static void test_save_backup_entry_json_escape() {
+    namespace sb = save_backup;
+    sb::Entry e;
+    e.file_name = "a\"b\\c\n.qol_save";
+    e.map_name = "地\t图";
+    e.class_name = std::string("x") + '\x01';
+    e.original_sha256 = "aa";
+    e.module_sha256 = "bb";
+    e.checksum = "cc";
+    const std::string j = sb::entry_json(e);
+    CHECK(j.find("\"file_name\":\"a\\\"b\\\\c\\n.qol_save\"") != std::string::npos);
+    CHECK(j.find("\"map_name\":\"地\\t图\"") != std::string::npos);
+    CHECK(j.find("\"class_name\":\"x\\u0001\"") != std::string::npos);
+    CHECK(j.find('\n') == std::string::npos);  // 原始换行不得出现在输出中
+    CHECK(j.find("\"original_sha256\":\"aa\"") != std::string::npos);
+    CHECK(j.find("\"module_sha256\":\"bb\"") != std::string::npos);
+    CHECK(j.find("\"checksum\":\"cc\"") != std::string::npos);
 }
 
 // 个人仓库段（v2 bundle）：encode/decode 往返、build/parse 携带、v1 兼容、
@@ -2209,7 +2257,7 @@ static void test_save_backup_warehouse() {
     CHECK(decoded[1].data == bak_file.data);
 
     // 3) build_bundle 携带 blob → parse_bundle：has_warehouse 为真且内容一致。
-    const std::vector<uint8_t> plain = {1, 2, 3, 4};
+    const std::vector<uint8_t> plain(16, 0x5A);
     const std::string meta = "{}";
     std::vector<uint8_t> bundle;
     sb::build_bundle(1, 123, plain, {}, blob, meta, bundle);
@@ -2236,7 +2284,7 @@ static void test_save_backup_warehouse() {
     auto wb64 = [](std::vector<uint8_t>& o, uint64_t v) {
         for (int i = 7; i >= 0; --i) o.push_back(static_cast<uint8_t>(v >> (8 * i)));
     };
-    const std::vector<uint8_t> v1_plain = {9, 8, 7};
+    const std::vector<uint8_t> v1_plain = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
     const std::vector<uint8_t> v1_module = {0x4D};
     const std::string v1_meta = "{\"checksum\":\"001122334455\"}";
     std::vector<uint8_t> v1;
@@ -3284,6 +3332,8 @@ int main() {
     test_save_backup_meta_entry();
     test_save_backup_entry_map_name();
     test_save_backup_checksum_name();
+    test_save_backup_slot_parse();
+    test_save_backup_entry_json_escape();
     test_save_backup_warehouse();
 
     std::printf("host_tests: %d passed, %d failed\n", g_pass, g_fail);

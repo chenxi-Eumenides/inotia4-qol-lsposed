@@ -207,13 +207,85 @@ std::vector<uint8_t> make_bundle(uint16_t version, const std::vector<uint8_t>& o
     return b;
 }
 
+std::vector<uint8_t> make_v1_bundle(const std::vector<uint8_t>& orig,
+                                   const std::vector<uint8_t>& module,
+                                   const std::string& meta) {
+    std::vector<uint8_t> b;
+    put_be32(b, save_backup::kBundleMagic);
+    put_be16(b, save_backup::kBundleVersionV1);
+    b.push_back(0);
+    b.push_back(0);
+    b.push_back(0);
+    b.push_back(0);
+    for (int i = 7; i >= 0; --i) b.push_back(0);
+    put_be32(b, static_cast<uint32_t>(orig.size()));
+    b.insert(b.end(), orig.begin(), orig.end());
+    put_be32(b, static_cast<uint32_t>(module.size()));
+    b.insert(b.end(), module.begin(), module.end());
+    put_be16(b, static_cast<uint16_t>(meta.size()));
+    b.insert(b.end(), meta.begin(), meta.end());
+    put_be32(b, save_backup::crc32_ieee(b.data(), b.size()));
+    return b;
+}
+
+// SB-03：orig_plain 不足 14 字节（头 8 + 块表 +8/+12）一律视为损坏，v1/v2/v3 均拒绝。
+void test_parse_bundle_rejects_short_orig_plain() {
+    namespace sb = save_backup;
+    const std::string meta = "{\"checksum\":\"001122334455\"}";
+    for (size_t len : {size_t(8), size_t(10), size_t(13)}) {
+        const std::vector<uint8_t> orig(len, 0x11);
+        const std::vector<uint8_t> v1 = make_v1_bundle(orig, {}, meta);
+        sb::ParsedBundle parsed;
+        CHECK(!sb::parse_bundle(v1.data(), v1.size(), parsed));
+        for (uint16_t version : {sb::kBundleVersionV2, sb::kBundleVersion}) {
+            const std::vector<uint8_t> bound = make_bundle(version, orig, {}, {}, meta);
+            sb::ParsedBundle parsed_bound;
+            CHECK(!sb::parse_bundle(bound.data(), bound.size(), parsed_bound));
+        }
+    }
+    // 14 字节是下限：三版本都能正常解析。
+    const std::vector<uint8_t> minimum(14, 0x22);
+    const std::vector<uint8_t> v1_ok = make_v1_bundle(minimum, {}, meta);
+    sb::ParsedBundle parsed_v1;
+    CHECK(sb::parse_bundle(v1_ok.data(), v1_ok.size(), parsed_v1));
+    CHECK(parsed_v1.orig_plain == minimum);
+    for (uint16_t version : {sb::kBundleVersionV2, sb::kBundleVersion}) {
+        const std::vector<uint8_t> ok = make_bundle(version, minimum, {}, {}, meta);
+        sb::ParsedBundle parsed_ok;
+        CHECK(sb::parse_bundle(ok.data(), ok.size(), parsed_ok));
+        CHECK(parsed_ok.orig_plain == minimum);
+    }
+}
+
+// SB-06：warehouseBlob 内 suffix 重复会让写回阶段互相覆盖，解码必须 fail-closed。
+void test_warehouse_duplicate_suffix_rejected() {
+    namespace sb = save_backup;
+    WarehouseFile first;
+    first.suffix = ".wh4-000001a043a2bba1";
+    first.data = {0x01};
+    WarehouseFile duplicate = first;
+    duplicate.data = {0x02};
+
+    std::vector<WarehouseFile> out;
+    const std::vector<uint8_t> blob = sb::encode_warehouse({first, duplicate});
+    CHECK(!blob.empty());
+    CHECK(!sb::decode_warehouse(blob.data(), blob.size(), out));
+    const std::vector<uint8_t> blob_v2 = sb::encode_warehouse_v2({first, duplicate});
+    CHECK(!sb::decode_warehouse_v2(blob_v2.data(), blob_v2.size(), out));
+
+    std::vector<uint8_t> bundle;
+    sb::build_bundle(0, 1, std::vector<uint8_t>(16, 0), {}, blob, "{}", bundle);
+    sb::ParsedBundle parsed;
+    CHECK(!sb::parse_bundle(bundle.data(), bundle.size(), parsed));
+}
+
 void test_parse_bundle_version_dispatch() {
     namespace sb = save_backup;
     WarehouseFile f0;
     f0.suffix = ".wh4-000001a043a2bba1";
     f0.flags = sb::kWarehouseFlagPlain;
     f0.data = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
-    const std::vector<uint8_t> orig = {9, 8, 7};
+    const std::vector<uint8_t> orig = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
     const std::string meta = "{\"checksum\":\"001122334455\"}";
 
     // v3 bundle：build_bundle 写出 kBundleVersion，flags 完整保留。
@@ -265,7 +337,8 @@ void test_bundle_matches_checksum_internal_wins() {
     namespace sb = save_backup;
     const std::string ck = "001122334455";
     std::vector<uint8_t> v3;
-    sb::build_bundle(2, 7, {1, 2, 3}, {}, {}, "{\"checksum\":\"" + ck + "\"}", v3);
+    sb::build_bundle(2, 7, std::vector<uint8_t>(16, 0x33), {}, {},
+                     "{\"checksum\":\"" + ck + "\"}", v3);
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(v3.data(), v3.size(), parsed));
 
@@ -620,6 +693,8 @@ int main() {
     test_warehouse_v3_roundtrip();
     test_warehouse_v2_legacy_encoding();
     test_parse_bundle_version_dispatch();
+    test_parse_bundle_rejects_short_orig_plain();
+    test_warehouse_duplicate_suffix_rejected();
     test_bundle_matches_checksum_internal_wins();
     test_bundle_matches_checksum_name_fallback();
     test_integrity_hash_known_vectors();

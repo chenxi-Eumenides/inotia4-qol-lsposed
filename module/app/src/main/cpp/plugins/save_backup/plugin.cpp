@@ -124,19 +124,6 @@ const contracts::ResourceClaim kResources[] = {
 // 复用 dispatch 的 query（GET）/command（POST）双槽语义；插件不自注册，故无需显式注销。
 enum class SbHttpRoute : uint8_t { kList, kExport, kImport, kDelete };
 
-bool sb_extract_int(const char* body, const char* key, int* out) {
-    const std::string pattern = std::string("\"") + key + "\":";
-    const char* p = std::strstr(body, pattern.c_str());
-    if (p == nullptr) return false;
-    p += pattern.size();
-    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') ++p;
-    char* end = nullptr;
-    const long value = std::strtol(p, &end, 10);
-    if (end == p) return false;
-    *out = static_cast<int>(value);
-    return true;
-}
-
 // checksum 恒为 ^[0-9a-f]{12}$（无转义字符），取到下一个双引号即可。
 bool sb_extract_string(const char* body, const char* key, std::string* out) {
     const std::string pattern = std::string("\"") + key + "\":\"";
@@ -180,6 +167,10 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
     }
     const SbHttpRoute kind = *static_cast<const SbHttpRoute*>(ctx);
     // HttpReq.body 无 null 结尾契约：拷贝到 std::string（自带结尾）再做字段提取。
+    // body 为 null 且长度为 0 时按空 body 处理；null + 非零长度是非法请求。
+    if (request->body == nullptr && request->body_len > 0) {
+        return sb_http_error(response, 400, "bad request");
+    }
     const std::string body_text(
         request->body != nullptr ? reinterpret_cast<const char*>(request->body) : "",
         request->body_len);
@@ -189,7 +180,7 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
         case SbHttpRoute::kList:
             return sb_http_body(response, save_backup_list_json());
         case SbHttpRoute::kExport:
-            if (!sb_extract_int(body, "slot", &slot) || slot < 0 || slot > 2) {
+            if (!save_backup::json_find_slot(body, slot)) {
                 return sb_http_error(response, 400, "bad slot");
             }
             return sb_http_body(response, save_backup_export_json(slot));
@@ -199,7 +190,7 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
                 !::save_backup::valid_checksum(checksum)) {
                 return sb_http_error(response, 400, "bad checksum");
             }
-            if (!sb_extract_int(body, "slot", &slot) || slot < 0 || slot > 2) {
+            if (!save_backup::json_find_slot(body, slot)) {
                 return sb_http_error(response, 400, "bad slot");
             }
             return sb_http_body(response, save_backup_import_json(checksum.c_str(), slot));
@@ -257,7 +248,8 @@ int plugin_install(contracts::PluginContext& ctx) {
                                contracts::kQolPortSaveCallVersion.minor}) ||
         save_call->write.free_data == nullptr || save_call->write.encrypt == nullptr ||
         save_call->write.mark_stale == nullptr || save_facts->load_data == nullptr ||
-        save_facts->slot_exists == nullptr || save_facts->hub_key == nullptr) {
+        save_facts->slot_exists == nullptr || save_facts->hub_key == nullptr ||
+        save_facts->current_slot == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }

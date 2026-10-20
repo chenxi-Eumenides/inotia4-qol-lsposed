@@ -1,6 +1,8 @@
 #include "bundle.h"
 
 #include <algorithm>
+#include <cerrno>
+#include <climits>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -679,6 +681,10 @@ bool decode_warehouse_impl(const uint8_t* data, size_t size, bool with_flags,
         std::string suffix(reinterpret_cast<const char*>(data + off), suffix_len);
         off += suffix_len;
         if (!valid_warehouse_suffix(suffix)) return false;
+        // suffix 是槽 sidecar 文件名的唯一标识：重复项会让写回阶段互相覆盖。
+        for (const WarehouseFile& existing : files) {
+            if (existing.suffix == suffix) return false;
+        }
         if (off + 4 > size) return false;
         const uint32_t data_len = be32(data + off);
         off += 4;
@@ -793,7 +799,9 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     if (off + 4 > body_size) return false;
     const uint32_t orig_len = be32(bytes + off);
     off += 4;
-    if (orig_len > body_size || off + orig_len > body_size) return false;
+    // 存档明文头 8 字节 + 块表项(+8/+12) 至少需要 14 字节；更短的段无法定位块 0，
+    // 导入会读出越界偏移，按损坏 bundle 整体拒绝（v1/v2/v3 共用此段）。
+    if (orig_len < 14 || orig_len > body_size || off + orig_len > body_size) return false;
     const uint8_t* orig_plain = bytes + off;
     off += orig_len;
     if (off + 4 > body_size) return false;
@@ -834,23 +842,84 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     return true;
 }
 
+namespace {
+
+// 严格整数 token：可选 '-' + 至少一位数字；token 后必须是空白、','、'}' 或结尾。
+// strtol 系列会接受前缀并静默截断（"1.5" → 1、"4294967296" → 溢出），这里先校验边界。
+bool parse_strict_int_literal(const char* p, long long* out) {
+    if (p == nullptr || out == nullptr || *p == '\0') return false;
+    const char* digits = p;
+    if (*digits == '-') ++digits;
+    if (*digits < '0' || *digits > '9') return false;
+    errno = 0;
+    char* end = nullptr;
+    const long long value = std::strtoll(p, &end, 10);
+    if (end == p || errno == ERANGE) return false;
+    const char next = *end;
+    if (next != '\0' && next != ' ' && next != '\t' && next != '\n' && next != '\r' &&
+        next != ',' && next != '}') {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+// JSON 字符串转义：'"'、'\\'、控制字符按 RFC 8259 输出。
+void json_append_escaped(std::string& out, const std::string& value) {
+    constexpr char kHex[] = "0123456789abcdef";
+    for (const char ch : value) {
+        const unsigned char c = static_cast<unsigned char>(ch);
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    out += "\\u00";
+                    out += kHex[(c >> 4) & 0x0F];
+                    out += kHex[c & 0x0F];
+                } else {
+                    out += ch;
+                }
+        }
+    }
+}
+
+}  // namespace
+
 std::string entry_json(const Entry& e) {
-    std::string s = "{\"file_name\":\"" + e.file_name + "\"";
+    std::string s = "{\"file_name\":\"";
+    json_append_escaped(s, e.file_name);
+    s += "\"";
     s += ",\"size_bytes\":" + std::to_string(e.size_bytes);
     s += ",\"source_slot\":" + std::to_string(e.source_slot);
     s += ",\"export_time\":" + std::to_string(e.export_time_ms);
     s += ",\"map_id\":" + std::to_string(e.map_id);
     // map_name 缺省空串：启动前/未命中时让上层走"未知地图"显示而非丢弃字段。
-    s += ",\"map_name\":\"" + e.map_name + "\"";
+    s += ",\"map_name\":\"";
+    json_append_escaped(s, e.map_name);
+    s += "\"";
     s += ",\"hero_level\":" + std::to_string(e.hero_level);
     s += ",\"hero_index\":" + std::to_string(e.hero_index);
     s += ",\"class_idx\":" + std::to_string(e.class_idx);
-    s += ",\"class_name\":\"" + e.class_name + "\"";
+    s += ",\"class_name\":\"";
+    json_append_escaped(s, e.class_name);
+    s += "\"";
     s += ",\"save_version\":" + std::to_string(e.save_version);
     s += ",\"save_time\":" + std::to_string(e.save_time);
-    s += ",\"original_sha256\":\"" + e.original_sha256 + "\"";
-    s += ",\"module_sha256\":\"" + e.module_sha256 + "\"";
-    s += ",\"checksum\":\"" + e.checksum + "\"";
+    s += ",\"original_sha256\":\"";
+    json_append_escaped(s, e.original_sha256);
+    s += "\"";
+    s += ",\"module_sha256\":\"";
+    json_append_escaped(s, e.module_sha256);
+    s += "\"";
+    s += ",\"checksum\":\"";
+    json_append_escaped(s, e.checksum);
+    s += "\"";
     s += "}";
     return s;
 }
@@ -899,6 +968,16 @@ bool json_find_string(const std::string& json, const char* key, std::string& out
     const char* end = std::strchr(p, '"');
     if (end == nullptr) return false;
     out.assign(p, static_cast<size_t>(end - p));
+    return true;
+}
+
+bool json_find_slot(const std::string& json, int& out) {
+    const char* p = find_key_value(json, "slot");
+    if (p == nullptr) return false;
+    long long value = 0;
+    if (!parse_strict_int_literal(p, &value)) return false;
+    if (value < 0 || value > 2) return false;
+    out = static_cast<int>(value);
     return true;
 }
 

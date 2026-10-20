@@ -8,6 +8,22 @@
 // 契约：本文件所有操作回调均由 on_btn_clicked 在「不持 g_sbui_mtx」下调用；
 // 需要读/写共享状态的片段各自短临界区拿锁，文件 IO 一律在锁外。
 
+// 从 {"ok":false,"error":"..."} 提取 error 文案；无匹配/超长时回退 fallback。
+// buf 由调用方提供，返回值指向 buf 或 fallback（均在下一次调用前有效）。
+static const char* response_error_text(const std::string& resp, char* buf, size_t cap,
+                                       const char* fallback) {
+    const char* const prefix = "\"error\":\"";
+    const size_t p = resp.find(prefix);
+    if (p == std::string::npos) return fallback;
+    const size_t begin = p + std::strlen(prefix);
+    const size_t q = resp.find('"', begin);
+    if (q == std::string::npos || cap == 0) return fallback;
+    const size_t len = (q - begin < cap - 1) ? q - begin : cap - 1;
+    memcpy(buf, resp.data() + begin, len);
+    buf[len] = 0;
+    return buf;
+}
+
 static void export_selected() {
     int slot = 0;
     {
@@ -39,24 +55,11 @@ static void export_selected() {
         }
         refresh_panel_data_async();
     } else {
-        // 抽取 error 字符串
-        size_t p = resp.find("\"error\":\"");
+        // 抽取 error 字符串（与导入失败路径同一提取规则）
         char buf[64];
-        if (p != std::string::npos) {
-            p += std::string("\"error\":\"").size();
-            size_t q = resp.find('"', p);
-            if (q != std::string::npos) {
-                size_t n = q - p < sizeof(buf) - 1 ? q - p : sizeof(buf) - 1;
-                memcpy(buf, resp.c_str() + p, n);
-                buf[n] = 0;
-            } else {
-                snprintf(buf, sizeof(buf), "导出失败");
-            }
-        } else {
-            snprintf(buf, sizeof(buf), "导出失败");
-        }
+        const char* err = response_error_text(resp, buf, sizeof(buf), "导出失败");
         char full[80];
-        snprintf(full, sizeof(full), "导出失败: %s", buf);
+        snprintf(full, sizeof(full), "导出失败: %s", err);
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         set_msg_locked(full, COLOR_ERR, true);
     }
@@ -105,8 +108,16 @@ static void import_selected() {
     const std::string resp = save_backup_import_json(checksum.c_str(), slot);
     const bool ok = resp.find("\"ok\":true") != std::string::npos;
     {
+        char buf[64];
+        const char* err = ok ? nullptr : response_error_text(resp, buf, sizeof(buf), "导入失败");
+        char full[80];
+        if (ok) {
+            snprintf(full, sizeof(full), "导入成功");
+        } else {
+            snprintf(full, sizeof(full), "导入失败: %s", err);
+        }
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        set_msg_locked(ok ? "导入成功" : "导入失败", ok ? COLOR_OK : COLOR_ERR, !ok);
+        set_msg_locked(full, ok ? COLOR_OK : COLOR_ERR, !ok);
     }
     if (ok) {
         // 导入改变目标槽文件 → 槽结构必须在游戏线程重载（本回调即游戏线程），

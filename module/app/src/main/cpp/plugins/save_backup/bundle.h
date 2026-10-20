@@ -210,7 +210,7 @@ void build_bundle(int source_slot, long long export_time_ms, const std::vector<u
 // 逐段边界校验 + crc32 验证；失败返回 false（调用方跳过/报错）。
 bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out);
 
-// BackupMeta JSON（字段顺序与 Kotlin BackupMeta.toJson 一致；值均为 ASCII，无转义需求）。
+// BackupMeta JSON（字段顺序与 Kotlin BackupMeta.toJson 一致；字符串值做 JSON 转义）。
 std::string entry_json(const Entry& e);
 
 // 从解析结果取 meta：bundle 头提供 source_slot/export_time/size；
@@ -222,6 +222,11 @@ void entry_from_bundle(const std::string& file_name, const ParsedBundle& p, Entr
 
 bool json_find_int(const std::string& json, const char* key, long long& out);
 bool json_find_string(const std::string& json, const char* key, std::string& out);
+
+// 严格读取 `slot` 字段：值必须是整数字面量（可选 '-' + 数字），token 后紧跟空白、','、'}' 或
+// 字符串结尾，且取值在 0..2。小数/指数/十六进制/尾随字母/超出 int 或槽位范围一律拒绝，
+// 避免 strtol 静默截断把越界请求放行到业务层。
+bool json_find_slot(const std::string& json, int& out);
 
 // ^[0-9a-f]{12}$
 bool valid_checksum(const std::string& value);

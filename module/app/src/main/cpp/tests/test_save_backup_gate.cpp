@@ -155,6 +155,16 @@ QolResult hub_key_fn(const char** out_key) {
     *out_key = "1234567";
     return contracts::ok();
 }
+int32_t g_current_slot = -1;
+bool g_current_slot_fails = false;
+bool g_current_slot_not_ready = false;
+QolResult current_slot_fn(int32_t* out_slot) {
+    if (g_current_slot_fails) return contracts::error(kQolErrInternal, "internal", 8);
+    *out_slot = g_current_slot;
+    // 生产 Adapter 在主菜单返回 NotReady + out=-1（game/adapter_ports/save_port.cpp:104-108）。
+    if (g_current_slot_not_ready) return contracts::error(kQolErrNotReady, "not ready", 9);
+    return contracts::ok();
+}
 
 QolHostSdk& fake_sdk() {
     static QolHostSdk sdk{};
@@ -173,6 +183,7 @@ QolHostSdk& fake_sdk() {
 SaveFactsApi& fake_save_facts() {
     static SaveFactsApi api{};
     api.hub_key = &hub_key_fn;
+    api.current_slot = &current_slot_fn;
     return api;
 }
 
@@ -292,6 +303,31 @@ int main() {
     const std::string checksum = make_bundle(root, "aaaaaaaaaaaa", module_container);
     CHECK(!checksum.empty());
 
+    // ---- 导入门禁：游戏运行中（current_slot >= 0）拒绝，dat/sidecar 均不变 ----
+    g_current_slot = 0;
+    {
+        const std::string in_game = save_backup_import_json(checksum.c_str(), 0);
+        CHECK(in_game.find("import requires main menu") != std::string::npos);
+        CHECK(read_file(dat_path) == original_dat);
+        std::vector<uint8_t> gate_container;
+        CHECK(qol::infra::store::read_container(0, &gate_container) ==
+              qol::infra::store::Status::kOk);
+        CHECK(gate_container == module_container);
+    }
+    // ---- current_slot 读取失败 → fail-closed，不写任何文件 ----
+    g_current_slot_fails = true;
+    {
+        const std::string unavailable = save_backup_import_json(checksum.c_str(), 0);
+        CHECK(unavailable.find("save state unavailable") != std::string::npos);
+        CHECK(read_file(dat_path) == original_dat);
+        std::vector<uint8_t> gate_container;
+        CHECK(qol::infra::store::read_container(0, &gate_container) ==
+              qol::infra::store::Status::kOk);
+        CHECK(gate_container == module_container);
+    }
+    g_current_slot_fails = false;
+    g_current_slot = -1;
+
     // ---- gate 被占：import/删槽在首次写删前拒绝，dat 未被改 ----
     QolSlotOperationLease blocker{};
     blocker.size = sizeof(blocker);
@@ -305,7 +341,10 @@ int main() {
     CHECK(qol::infra::slot_operation::release(g_occupier, &blocker).ok == kQolOk);
 
     // ---- 无占用：import 放行（module 非空经 lease 显式入口），成功后 lease 释放 ----
+    // 主菜单真实形态：Adapter 返回 NotReady 且 out=-1，门禁必须放行而不是 fail-closed。
+    g_current_slot_not_ready = true;
     const std::string imported = save_backup_import_json(checksum.c_str(), 0);
+    g_current_slot_not_ready = false;
     CHECK(body_ok(imported));
     CHECK(read_file(dat_path) != original_dat);  // dat 已被 bundle 明文覆盖
     // lease 已释放：occupier 现在能 acquire 同槽。
