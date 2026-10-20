@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-#include "../../contracts/host_sdk.h"
+#include "../../../contracts/host_sdk.h"
 
 void inventory_log_bind_sdk(const qol::contracts::QolHostSdk* sdk);
 bool inventory_log_debug_enabled();

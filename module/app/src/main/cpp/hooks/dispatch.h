@@ -65,7 +65,7 @@ const char* dispatch_run_text(const char* resource_id, uint32_t text_id, const c
 //
 // 场景：资源入口已被唯一 owner hook（同址不可二次 NativeHook），其余功能域只能登记一个
 // 布尔谓词，由 owner 的 wrapper 在入口查询（例：UIEquip_ButtonDestroyExe 出售门禁，
-// owner=plugins/inventory_hooks，谓词由 plugins/special_equip 登记）。
+// owner=core.item，谓词由 plugins/special_equip 登记）。
 // 键为逻辑 resource_id（与 owner 的 claim id 一致）；同一资源最多 1 个；容量 8。
 // 线程纪律同本模块：set/clear 可来自任意线程；blocks 在 owner wrapper（游戏主线程）执行
 // 回调，先持锁快照再锁外调用。

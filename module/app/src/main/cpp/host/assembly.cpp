@@ -28,7 +28,7 @@
 #include "host/features/http_control.h"
 #include "host/http_dispatch.h"
 #include "infra/slot_operation_gate.h"
-#include "plugins/inventory_hooks/native_inventory_hook.h"
+#include "plugins/core.item/inventory/native_inventory_hook.h"
 #include "plugins/module_health/plugin.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"
@@ -48,7 +48,6 @@
 #include "plugins/custom_recipe/settings_contribution.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/assembly/settings_contribution.h"
-#include "plugins/inventory_hooks/plugin.h"
 #include "plugins/move_merge/plugin.h"
 #include "plugins/move_merge/settings_contribution.h"
 #include "plugins/core.item/plugin.h"
@@ -220,7 +219,6 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::custom_recipe::plugin_descriptor},
     {&features::extension_bag::plugin_descriptor},
     {&features::move_merge::plugin_descriptor},
-    {&features::inventory_hooks::plugin_descriptor},
     {&features::core_item::plugin_descriptor},
     {&features::core_ui_state::plugin_descriptor},
     {&features::push_all::plugin_descriptor},
@@ -410,7 +408,7 @@ bool assembly_init() {
         module_health_set_fact(contracts::QolModuleHealthBit::kModuleInitialization, true, true);
     }
 
-    // hook/unhook 原语过渡期取自 plugins/inventory_hooks；P5 迁往 patch/ 后改引 patch 层。
+    // hook/unhook 原语过渡期取自 plugins/core.item/inventory；P5 迁往 patch/ 后改引 patch 层。
     // 本处只把机制原语注入宿主，不构成某个游戏符号的安装点。
 #if !QOL_KERNEL_ONLY
     const auto hook_getter = native_hook_func;

@@ -1,6 +1,6 @@
 #include "inventory_slot.h"
 
-#include "../../contracts/extension_bag.h"
+#include "../../../contracts/extension_bag.h"
 
 namespace qol::features::inventory_hooks {
 namespace {

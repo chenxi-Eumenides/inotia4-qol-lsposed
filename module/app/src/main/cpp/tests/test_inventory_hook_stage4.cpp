@@ -1,5 +1,5 @@
-#include "plugins/inventory_hooks/inventory_hook_stage4.h"
-#include "plugins/inventory_hooks/native_inventory_hook.h"
+#include "plugins/core.item/inventory/inventory_hook_stage4.h"
+#include "plugins/core.item/inventory/native_inventory_hook.h"
 #include "plugins/extension_bag/model/equip_rules.h"
 
 #include "game/symbols/game_symbols.h"

@@ -13,15 +13,22 @@
 
 #include "contracts/commands.h"
 #include "contracts/character_state.h"
+#include "contracts/extension_bag.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_write_port.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/http.h"
+#include "contracts/inventory_action.h"
 #include "contracts/inventory_extension.h"
+#include "contracts/inventory_refresh.h"
+#include "contracts/inventory_slot.h"
 #include "contracts/item_facts.h"
 #include "contracts/item_state.h"
+#include "contracts/world_facts.h"
+#include "inventory/inventory_slot.h"
+#include "inventory/plugin.h"
 #include "json_lite.h"
 #include "response.h"
 #include "snapshot_sdk.h"
@@ -213,6 +220,14 @@ constexpr contracts::ItemStateApi kItemStateApi{&write_item_state_json};
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kItemFactsCapabilityId, contracts::kItemFactsVersion, &kItemFactsApi},
     {contracts::kItemStateCapabilityId, contracts::kItemStateVersion, &kItemStateApi},
+    {contracts::kInventoryRefreshCapabilityId,
+     {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor},
+     &inventory_hooks::kInventoryRefreshApi},
+    {contracts::kInventoryActionCapabilityId,
+     {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor},
+     &inventory_hooks::kInventoryActionApi},
+    {contracts::kInventorySlotCapabilityId, contracts::kInventorySlotVersion,
+     &inventory_hooks::kInventorySlotApi},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -236,6 +251,11 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
     {contracts::kHttpDispatchCapabilityId,
      {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
+    {contracts::kWorldFactsCapabilityId,
+     {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+    {contracts::kExtensionBagCapabilityId,
+     {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
+      contracts::kExtensionBagSaleRemoveVersionMinor}},
 };
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
@@ -2082,11 +2102,24 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk = nullptr;
         return 1;
     }
+    if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi)) {
+        if (g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
+            (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
+        }
+        g_snapshot.destroy();
+        g_port = nullptr;
+        g_item_money_write = nullptr;
+        g_item_dice_write = nullptr;
+        g_item_state_write = nullptr;
+        g_sdk = nullptr;
+        return 1;
+    }
     log_message(g_sdk, "[core.item] provider install");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
+    inventory_hooks::detach();
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
     log_message(ctx.sdk, "[core.item] provider deactivate");
@@ -2101,6 +2134,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi)) {
+        log_message(ctx.sdk, "[core.item] inventory hooks attach unavailable");
+        return;
+    }
     if (!g_snapshot.initialize(g_sdk)) {
         log_message(ctx.sdk, "[core.item] snapshot unavailable");
         return;
@@ -2137,42 +2174,60 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 
-const contracts::PluginDescriptor kDescriptor = {
-    kPluginId,
-    kPluginVersion,
-    0,
-    nullptr,
-    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
-    kOptionalRequires,
-    2,
-    kProvides,
-    0,
-    nullptr,
-    0,
-    nullptr,
-    &plugin_install,
-    &plugin_deactivate,
-    &plugin_on_enabled,
-    &plugin_on_disabled,
-    &plugin_fill_status,
-    nullptr,
-    kPorts,
-    4,
-    nullptr,
-    0,
-    kFeatures, 1,
-    kHttpEndpoints,
-    static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
-    nullptr,
-    kHttpRouteMetadata,
-    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
-};
+int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id,
+                          void* backup) {
+    (void)ctx;
+    return inventory_hooks::bind_backup(resource_id, backup);
+}
 
 }  // namespace
 
+const contracts::ItemFactsApi* item_facts_api() {
+    return &kItemFactsApi;
+}
+
 const contracts::PluginDescriptor& plugin_descriptor() {
     initialize_http_endpoints();
-    return kDescriptor;
+    static const contracts::PluginDescriptor descriptor = [] {
+        uint32_t resource_count = 0;
+        const contracts::ResourceClaim* resources =
+            inventory_hooks::claims(&resource_count);
+        contracts::PluginDescriptor descriptor{
+            kPluginId,
+            kPluginVersion,
+            0,
+            nullptr,
+            static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+            kOptionalRequires,
+            static_cast<uint32_t>(sizeof(kProvides) / sizeof(kProvides[0])),
+            kProvides,
+            resource_count,
+            resources,
+            0,
+            nullptr,
+            &plugin_install,
+            &plugin_deactivate,
+            &plugin_on_enabled,
+            &plugin_on_disabled,
+            &plugin_fill_status,
+            &on_resource_ready,
+            kPorts,
+            4,
+            nullptr,
+            0,
+            kFeatures,
+            1,
+            kHttpEndpoints,
+            static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
+            nullptr,
+            kHttpRouteMetadata,
+            static_cast<uint32_t>(sizeof(kHttpRouteMetadata) /
+                                  sizeof(kHttpRouteMetadata[0])),
+        };
+        descriptor.deactivate_allowed = false;
+        return descriptor;
+    }();
+    return descriptor;
 }
 
 }  // namespace qol::features::core_item

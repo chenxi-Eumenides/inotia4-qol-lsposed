@@ -1,9 +1,9 @@
 #pragma once
 
-#include "../../contracts/game_host.h"
-#include "../../contracts/host_sdk.h"
-#include "../../contracts/inventory_slot.h"
-#include "../../contracts/item_facts.h"
+#include "../../../contracts/game_host.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/inventory_slot.h"
+#include "../../../contracts/item_facts.h"
 
 namespace qol::features::inventory_hooks {
 

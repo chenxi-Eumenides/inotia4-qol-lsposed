@@ -1,10 +1,12 @@
 #include "contracts/item_facts.h"
 #include "contracts/inventory_slot.h"
 #include "contracts/inventory_action.h"
+#include "contracts/inventory_refresh.h"
 #include "contracts/inventory_extension.h"
 #include "contracts/extension_bag.h"
 #include "contracts/character_state.h"
 #include "contracts/item_state.h"
+#include "contracts/world_facts.h"
 #include "contracts/extension_bag.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/character_extras_port.h"
@@ -180,8 +182,9 @@ int main() {
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
-    // ITM-13：core.item 不再声明扩展袋可选依赖（中立 provider 经 Item Port 提供）。
-    CHECK(descriptor.optional_count == 3 && descriptor.optional_requires != nullptr);
+    // 合并 inventory_hooks 后新增 world.facts / extension_bag optional：出售与扩展袋
+    // 路径按调用时 require，缺失时只降级对应行为，不阻断 item.facts。
+    CHECK(descriptor.optional_count == 5 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
     CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
@@ -194,6 +197,30 @@ int main() {
     for (uint32_t i = 1; i < 3; ++i) {
         CHECK(descriptor.optional_requires[i].range.major == 1);
         CHECK(descriptor.optional_requires[i].range.min_minor == 1);
+    }
+    CHECK(std::strcmp(descriptor.optional_requires[3].id,
+                      qol::contracts::kWorldFactsCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[3].range.major ==
+          qol::contracts::kWorldFactsVersionMajor);
+    CHECK(descriptor.optional_requires[3].range.min_minor ==
+          qol::contracts::kWorldFactsVersionMinor);
+    CHECK(std::strcmp(descriptor.optional_requires[4].id,
+                      qol::contracts::kExtensionBagCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[4].range.major ==
+          qol::contracts::kExtensionBagVersionMajor);
+    CHECK(descriptor.optional_requires[4].range.min_minor ==
+          qol::contracts::kExtensionBagSaleRemoveVersionMinor);
+    CHECK(descriptor.feature_count == 1 && descriptor.features != nullptr);
+    CHECK(std::strcmp(descriptor.features[0].id, "core.item.provider") == 0);
+    CHECK(!descriptor.deactivate_allowed);
+    CHECK(descriptor.resources_count == 24 && descriptor.resources != nullptr);
+    for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
+        CHECK(descriptor.resources[i].owner != nullptr &&
+              std::strcmp(descriptor.resources[i].owner, "core.item") == 0);
+        CHECK(descriptor.resources[i].requirement ==
+              qol::contracts::ResourceRequirement::kRequired);
+        CHECK(descriptor.resources[i].failure ==
+              qol::contracts::ResourceFailure::kFailClosed);
     }
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
     CHECK(descriptor.http_endpoint_count == 19 && descriptor.http_endpoints != nullptr);
@@ -224,7 +251,7 @@ int main() {
         CHECK(descriptor.http_route_metadata[i].op_required == 1);
         CHECK(descriptor.http_route_metadata[i].lease_required == 1);
     }
-    CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 5 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 6);
     CHECK(descriptor.provides[0].iface != nullptr);
@@ -236,6 +263,15 @@ int main() {
     CHECK(static_cast<int32_t>(qol::contracts::QolItemStateKind::kEnrichedInventory) == 1);
     CHECK(static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[1].iface)
               ->write_state_json != nullptr);
+    CHECK(std::strcmp(descriptor.provides[2].id,
+                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
+    CHECK(descriptor.provides[2].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[3].id,
+                      qol::contracts::kInventoryActionCapabilityId) == 0);
+    CHECK(descriptor.provides[3].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[4].id,
+                      qol::contracts::kInventorySlotCapabilityId) == 0);
+    CHECK(descriptor.provides[4].iface != nullptr);
     CHECK(descriptor.port_count == 4 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
     CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 6);

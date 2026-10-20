@@ -1,11 +1,11 @@
 #include "contracts/extension_bag.h"
 #include "contracts/inventory_action.h"
 #include "contracts/inventory_slot.h"
-#include "contracts/plugin.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
-#include "plugins/inventory_hooks/plugin.h"
-#include "plugins/inventory_hooks/native_inventory_hook.h"
+#include "plugins/core.item/inventory/plugin.h"
+#include "plugins/core.item/inventory/inventory_slot.h"
+#include "plugins/core.item/inventory/native_inventory_hook.h"
 
 #include <cstdint>
 #include <cstdarg>
@@ -38,6 +38,7 @@ int g_identified_bag_override = -1;
 bool g_internal_index_invalid = false;
 bool g_logical_bag = false;
 bool g_extension_available = true;
+bool g_world_available = true;
 bool g_enforce_ref_location = false;
 bool g_count_encoded = true;
 bool g_inventory_support_enabled = true;
@@ -59,6 +60,7 @@ int g_quote_num = 7;
 int g_quote_den = 10;
 int g_quote_count_override = -1;
 int g_quote_failure_code = kQolOk;
+int g_world_require_calls = 0;
 std::vector<int> g_order;
 
 QolResult api_ok() { return qol::contracts::ok(); }
@@ -199,6 +201,10 @@ QolResult fake_capability_require(const char* id, QolVersionRange range, const v
     if (id == nullptr || out == nullptr) return api_failure(kQolErrInvalidArgument, "bad require");
     *out = nullptr;
     if (std::strcmp(id, kWorldFactsCapabilityId) == 0) {
+        ++g_world_require_calls;
+        if (!g_world_available) {
+            return api_failure(kQolErrNotFound, "world facts unavailable");
+        }
         *out = &g_world;
         return api_ok();
     }
@@ -252,24 +258,18 @@ void reset_fixture() {
     g_quote_failure_code = kQolOk;
     g_order.clear();
     g_extension_available = true;
+    g_world_available = true;
     g_enforce_ref_location = false;
     g_count_encoded = true;
+    g_world_require_calls = 0;
+    g_inventory_support_enabled = true;
 }
 
 InventoryActionApi action_api() {
-    const auto& descriptor = qol::features::inventory_hooks::plugin_descriptor();
-    CHECK(descriptor.provides_count == 3);
-    return *static_cast<const InventoryActionApi*>(descriptor.provides[1].iface);
+    return qol::features::inventory_hooks::kInventoryActionApi;
 }
 
 void install_fixture() {
-    const auto& descriptor = qol::features::inventory_hooks::plugin_descriptor();
-    CHECK(descriptor.optional_count == 1);
-    CHECK(std::strcmp(descriptor.optional_requires[0].id, "extension_bag") == 0);
-    CHECK(descriptor.optional_requires[0].range.major == 3 &&
-          descriptor.optional_requires[0].range.min_minor == 1);
-    CHECK(descriptor.feature_count == 1);
-    CHECK(!descriptor.deactivate_allowed);
     g_items = {};
     g_items.struct_size = sizeof(g_items);
     g_items.item_ref_at = &fake_item_ref_at;
@@ -294,31 +294,15 @@ void install_fixture() {
     g_sdk = {};
     g_sdk.abi = {sizeof(g_sdk), kHostSdkMajor, kHostSdkMinor};
     g_sdk.capabilities.require = &fake_capability_require;
-    PluginContext context{};
-    context.struct_size = sizeof(context);
-    context.sdk_major = kHostSdkMajor;
-    context.sdk_minor = kHostSdkMinor;
-    context.sdk = &g_sdk;
-    context.game = &g_game;
-    context.plugin_id = "inventory_hooks";
-    CHECK(qol::features::inventory_hooks::plugin_descriptor().install(context) == 0);
+    CHECK(qol::features::inventory_hooks::attach(&g_sdk, &g_game, &g_items));
+    CHECK(g_world_require_calls == 0);
 }
 
-void test_inventory_support_feature() {
-    const auto& descriptor = qol::features::inventory_hooks::plugin_descriptor();
-    CHECK(descriptor.feature_count == 1);
-    CHECK(descriptor.features != nullptr);
-    if (descriptor.features == nullptr || descriptor.feature_count != 1) return;
-    const FeatureDefinition& feature = descriptor.features[0];
-    CHECK(feature.category == FeatureCategory::kHidden);
-    CHECK(feature.default_enabled == 1);
-    CHECK(feature.on_toggle != nullptr);
-    if (feature.on_toggle == nullptr) return;
-
-    PluginContext context{};
-    CHECK(feature.on_toggle(context, 0).code == kQolOk);
-    CHECK(!inventory_native_hook_support_enabled());
-    CHECK(feature.on_toggle(context, 1).code == kQolOk);
+void test_attach_detach() {
+    reset_fixture();
+    install_fixture();
+    CHECK(inventory_native_hook_support_enabled());
+    qol::features::inventory_hooks::detach();
     CHECK(inventory_native_hook_support_enabled());
 }
 
@@ -333,6 +317,7 @@ void test_logical_sale_uses_v31_transaction() {
     g_unit_price = 20;
     g_logical_bag = true;
     const InventorySellResult result = action_api().sell(6, 2, g_item_ref.item, "autosell");
+    CHECK(g_world_require_calls == 1);
     CHECK(result.status == InventorySellStatus::kOk && result.price == 42 && result.count == 3);
     CHECK(g_quote_calls == 1 && g_quote_path == static_cast<int>(kDetailSell));
     CHECK(g_price_variant == -1 && g_extension_price_calls == 0);
@@ -573,10 +558,18 @@ void test_quote_prices_boundaries_and_missing_quote() {
 }
 
 const QolInventorySlotApi* inventory_slot_api() {
-    const auto& descriptor = qol::features::inventory_hooks::plugin_descriptor();
-    CHECK(descriptor.provides_count == 3);
-    CHECK(std::strcmp(descriptor.provides[2].id, kInventorySlotCapabilityId) == 0);
-    return static_cast<const QolInventorySlotApi*>(descriptor.provides[2].iface);
+    return &qol::features::inventory_hooks::kInventorySlotApi;
+}
+
+void test_world_facts_required_at_call_time() {
+    reset_fixture();
+    install_fixture();
+    g_world_available = false;
+    const InventorySellResult result = action_api().sell(0, 0, g_item_ref.item, "api");
+    CHECK(result.status == InventorySellStatus::kSymbolsUnresolved);
+    CHECK(g_world_require_calls == 1);
+    CHECK(g_credit_calls == 0 && g_refund_calls == 0 && g_native_remove_calls == 0 &&
+          g_extension_remove_calls == 0);
 }
 
 void test_inventory_slot_resolve_view_remove() {
@@ -652,7 +645,8 @@ void test_inventory_slot_resolve_view_remove() {
 }  // namespace
 
 int main() {
-    test_inventory_support_feature();
+    test_attach_detach();
+    test_world_facts_required_at_call_time();
     test_logical_sale_uses_v31_transaction();
     test_internal_bag_identity_maps_all_extension_endpoints();
     test_v30_provider_never_reads_tail_or_falls_back();

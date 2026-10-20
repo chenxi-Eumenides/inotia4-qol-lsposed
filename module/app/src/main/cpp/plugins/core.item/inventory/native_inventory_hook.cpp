@@ -3,10 +3,10 @@
 #include "claims.h"
 #include "inventory_logging.h"
 
-#include "../../contracts/plugin.h"
-#include "../../contracts/extension_bag.h"
-#include "../../contracts/host_sdk.h"
-#include "../../contracts/ui.h"
+#include "../../../contracts/plugin.h"
+#include "../../../contracts/extension_bag.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/ui.h"
 
 #include <atomic>
 #include <array>
@@ -1559,10 +1559,10 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
 // 安装顺序、失败回滚与物理还原归宿主声明式引擎（hooks/install + hooks/transaction +
 // host/plugin_registry），本 TU 不再自带安装引擎。
 // ---------------------------------------------------------------------------
-constexpr const char* kClaimOwner = "inventory_hooks";
+constexpr const char* kClaimOwner = "core.item";
 constexpr const char* kClaimReason =
     "库存行为 wrapper 的函数级入口：扩展袋读改写、S2 写侧进位/借位、出售门禁与 "
-    "R-55/R-56 回调层接管均需在函数入口分流；业务体随 D2c-2a 迁入本插件（plugins/inventory_hooks）";
+    "R-55/R-56 回调层接管均需在函数入口分流；业务体归属 plugins/core.item/inventory";
 
 #define INVENTORY_HOOK_CLAIM(CLAIM_ID, CLAIM_SYMBOL, HANDLER)                          \
     {CLAIM_ID, CLAIM_SYMBOL, qol::contracts::ResourceMechanism::kEntryHook,           \
@@ -1665,8 +1665,7 @@ bool inventory_native_hook_support_enabled() {
 }
 
 // ---------------------------------------------------------------------------
-// 全局桥：插件 plugins/inventory_hooks 的访问入口（双向不 include，见 plugin.cpp 头注释）。
-// 清除阶段：B2c 业务迁入 plugins/inventory_hooks 后两函数随业务迁入并删除。
+// Claims 与 backup 交还的模块入口；宿主资源回调经 core.item descriptor 调用。
 // ---------------------------------------------------------------------------
 
 const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count) {
@@ -1779,7 +1778,7 @@ void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
     QOL_LOG_INFO(QolDomain::kInventory,
                         "native_init called api_version=%u hook_func=%p",
                         entries->version, reinterpret_cast<void*>(g_hook_func));
-    // 资源安装由宿主声明式引擎在 assembly 装配期执行（plugins/inventory_hooks 插件）。
+    // 资源安装由宿主声明式引擎在 assembly 装配期执行（core.item）。
 }
 
 void inventory_native_hook_on_module_loaded(const char* name, void*) {

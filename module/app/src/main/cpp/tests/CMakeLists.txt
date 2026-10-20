@@ -30,7 +30,7 @@ set_source_files_properties(${CPP_DIR}/host/http_dispatch.cpp PROPERTIES
 add_executable(host_tests
     test_host.cpp
     test_stubs.cpp
-    ${CPP_DIR}/plugins/inventory_hooks/inventory_find_item_poc.cpp
+    ${CPP_DIR}/plugins/core.item/inventory/inventory_find_item_poc.cpp
     ${CPP_DIR}/patch/call_patch.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
     ${CPP_DIR}/game/json/game_json.cpp
@@ -45,6 +45,7 @@ add_executable(item_facts_plugin_tests
     ${CPP_DIR}/plugins/core.item/plugin.cpp
     ${CPP_DIR}/plugins/core.item/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/response.cpp
+    stubs/core_item_inventory_stub.cpp
 )
 target_include_directories(item_facts_plugin_tests PRIVATE
     ${CPP_DIR}
@@ -213,7 +214,7 @@ add_test(NAME host_tests COMMAND host_tests)
 
 add_executable(stage4_hook_tests
     test_inventory_hook_stage4.cpp
-    ${CPP_DIR}/plugins/inventory_hooks/inventory_hook_stage4.cpp
+    ${CPP_DIR}/plugins/core.item/inventory/inventory_hook_stage4.cpp
 )
 target_include_directories(stage4_hook_tests PRIVATE
     ${CPP_DIR}
@@ -224,7 +225,7 @@ add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 # Compile the production inventory hook translation unit independently. It is intentionally not
 # linked into stage4_hook_tests, whose scope remains the pure stage-4 logic.
 add_library(inventory_hook_native_compile OBJECT
-    ${CPP_DIR}/plugins/inventory_hooks/native_inventory_hook.cpp
+    ${CPP_DIR}/plugins/core.item/inventory/native_inventory_hook.cpp
 )
 target_include_directories(inventory_hook_native_compile PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -241,8 +242,8 @@ set_target_properties(inventory_hook_native_compile PROPERTIES
 # negotiation, physical-original route, and money/remove/refund ordering.
 add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
-    ${CPP_DIR}/plugins/inventory_hooks/plugin.cpp
-    ${CPP_DIR}/plugins/inventory_hooks/inventory_slot.cpp
+    ${CPP_DIR}/plugins/core.item/inventory/plugin.cpp
+    ${CPP_DIR}/plugins/core.item/inventory/inventory_slot.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
@@ -1730,6 +1731,7 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/plugins/core.item/plugin.cpp
     ${CPP_DIR}/plugins/core.item/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/response.cpp
+    stubs/core_item_inventory_stub.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
     # T2h-B0：legacy 读实现入 host golden（fake 环境）

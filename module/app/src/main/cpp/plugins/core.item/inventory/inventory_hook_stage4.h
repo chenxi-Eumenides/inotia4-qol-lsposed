@@ -3,8 +3,8 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "../../contracts/game_host.h"
-#include "../../contracts/game_ports/item_port.h"
+#include "../../../contracts/game_host.h"
+#include "../../../contracts/game_ports/item_port.h"
 
 using Stage4HaveBackup = int (*)(int32_t);
 using Stage4CountBackup = int (*)(int32_t);

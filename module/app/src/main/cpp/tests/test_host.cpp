@@ -28,7 +28,7 @@
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "contracts/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
-#include "plugins/inventory_hooks/inventory_find_item_poc.h"
+#include "plugins/core.item/inventory/inventory_find_item_poc.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/world_teleport/rules.h"
 #include "../game/read/game_tiles.cpp"

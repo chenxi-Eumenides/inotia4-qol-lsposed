@@ -11,10 +11,6 @@ endif()
 set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/save_backup/bundle.cpp
     plugins/save_backup/feature.cpp
-    plugins/inventory_hooks/native_inventory_hook.cpp
-    plugins/inventory_hooks/inventory_find_item_poc.cpp
-    plugins/inventory_hooks/inventory_hook_stage4.cpp
-    plugins/inventory_hooks/inventory_slot.cpp
     plugins/extension_bag/runtime/state.cpp
     plugins/extension_bag/runtime/access.cpp
     plugins/extension_bag/runtime/tabs_ui.cpp
@@ -84,7 +80,6 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/push_all/rules.cpp
     plugins/push_all/feature.cpp
     plugins/push_all/plugin.cpp
-    plugins/inventory_hooks/plugin.cpp
     plugins/stack_limit/plugin.cpp
     plugins/save_backup/plugin.cpp
     plugins/world_teleport/plugin.cpp
@@ -377,8 +372,7 @@ target_sources(gamebridge PRIVATE
     bridge/native/gamebridge_lifecycle.cpp
 )
 
-# B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体已随 D2c-2a
-# 迁入 plugins/inventory_hooks，同目录 claims.h 直接引用。末尾追加，不改上方既有行）
+# B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体归 core.item/inventory）
 target_sources(gamebridge PRIVATE
 )
 

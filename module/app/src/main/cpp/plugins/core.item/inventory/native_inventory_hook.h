@@ -2,9 +2,9 @@
 
 #include <cstdint>
 
-#include "../../contracts/host_sdk.h"
-#include "../../contracts/game_host.h"
-#include "../../contracts/item_facts.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/game_host.h"
+#include "../../../contracts/item_facts.h"
 
 using NativeHookFunType = int (*)(void* func, void* replace, void** backup);
 using NativeUnhookFunType = int (*)(void* func);
@@ -22,7 +22,7 @@ using NativeOnModuleLoaded = void (*)(const char* name, void* handle);
 void inventory_native_hook_on_api(const NativeAPIEntries* entries);
 void inventory_native_hook_on_module_loaded(const char* name, void* handle);
 // 模块主动刷新必须走 backup/trampoline，避免经被 Hook 地址回入 wrapper 后重复加锁。
-// provider 实现（D2c-2b-1）：经 `inventory_refresh` capability 暴露给消费者；
+// core.item 实现：raw-original refresh trampoline 经 `inventory_refresh` capability 暴露给消费者；
 // 返回 true = 已调原版（存在 trampoline），false = 无可用原函数。
 bool inventory_native_hook_call_refresh_item_area_original();
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk);
