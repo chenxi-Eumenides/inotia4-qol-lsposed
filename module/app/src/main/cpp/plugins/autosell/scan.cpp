@@ -9,11 +9,13 @@
 #include "log.h"
 #include "plugin.h"
 #include "read_only.h"
+#include "store.h"
 #include "view.h"
 
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 
 namespace {
@@ -318,6 +320,30 @@ bool scan_round_cancelled(ScanRound& round) {
     return true;
 }
 
+struct UiBusyScan {
+    bool busy = false;
+};
+
+void inspect_ui_layer(const qol::contracts::UiLayerInfo* layer, void* user) {
+    if (layer == nullptr || user == nullptr) return;
+    const auto type = static_cast<qol::contracts::UiLayerType>(layer->type);
+    if (type != qol::contracts::UiLayerType::kPanel &&
+        type != qol::contracts::UiLayerType::kDialog) {
+        return;
+    }
+    if (layer->id == nullptr || layer->id[0] == '\0' || std::strcmp(layer->id, "none") == 0)
+        return;
+    static_cast<UiBusyScan*>(user)->busy = true;
+}
+
+bool ui_busy() {
+    const auto* api = qol::features::autosell::ui_state();
+    if (api == nullptr || api->read_layers == nullptr) return true;
+    UiBusyScan scan{};
+    const QolResult result = api->read_layers(&inspect_ui_layer, &scan);
+    return !qol::contracts::succeeded(result) || scan.busy;
+}
+
 bool scan_gates_ok(ScanGateReason* out_reason) {
     if (out_reason != nullptr) *out_reason = ScanGateReason::kReady;
     int32_t world_state = -1;
@@ -344,17 +370,9 @@ bool scan_gates_ok(ScanGateReason* out_reason) {
         if (out_reason != nullptr) *out_reason = ScanGateReason::kModuleViewInstalled;
         return false;
     }
-    // inventory_state_id is provided by extension_bag; without that capability there is no UI
-    // occupancy source, so physical bags continue scanning and logical bags are skipped.
-    // Do not mutate slots while any in-game panel (inventory/store/craft/etc.)
-    // owns the frame. World state remains 5 with a panel open, so this needs an
-    // explicit UI-state gate; it is the minimal safe exclusion outside the world.
-    if (eb != nullptr && eb->inventory_state_id != nullptr) {
-        const int32_t ui_state = eb->inventory_state_id();
-        if (ui_state >= 0 && ui_state != 5) {
-            if (out_reason != nullptr) *out_reason = ScanGateReason::kUiBusy;
-            return false;
-        }
+    if (ui_busy()) {
+        if (out_reason != nullptr) *out_reason = ScanGateReason::kUiBusy;
+        return false;
     }
     return true;
 }
@@ -592,7 +610,8 @@ void autosell_on_save_enter(void*, const void* payload) {
 }
 
 void autosell_on_save_exit(void*, const void*) {
-    autosell_scan_session_closed(-1, 0);
+    // Save-exit rejects slot-data writes until the next successful sd_load marks the session ready.
+    autosell_store_reject_session();
     AUTOSELL_LOG_INFO("save exit; remove task");
     remove_task_if_any();
 }

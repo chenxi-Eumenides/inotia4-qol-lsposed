@@ -17,6 +17,7 @@
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
 #include "contracts/slot_data.h"
+#include "contracts/ui.h"
 #include "contracts/game_ports/inventory_extras_port.h"
 #include "infra/panels.h"
 
@@ -61,6 +62,10 @@ using qol::contracts::ResourceRequirement;
 
 const char* g_fail_require_id = nullptr;
 
+QolResult fake_ui_read_layers(qol::contracts::QolUiLayerVisitFn, void*) {
+    return qol::contracts::ok();
+}
+
 QolResult fake_config_get_bool(const char*, int32_t default_value, int32_t* out_value) {
     if (out_value == nullptr) return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
     *out_value = default_value;
@@ -99,6 +104,8 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
     static const qol::contracts::WorldFactsApi api{};
     static const qol::contracts::ItemFactsApi item_api{sizeof(qol::contracts::ItemFactsApi)};
     static const qol::contracts::QolSlotDataApi slot_data_api{};
+    static const qol::contracts::UiStateApi ui_state_api{nullptr, nullptr, nullptr,
+                                                         &fake_ui_read_layers};
     if (id == nullptr || out_iface == nullptr) {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
@@ -112,6 +119,8 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
         *out_iface = &item_api;
     } else if (std::strcmp(id, qol::contracts::kQolSlotDataCapabilityId) == 0) {
         *out_iface = &slot_data_api;
+    } else if (std::strcmp(id, qol::contracts::kUiStateCapabilityId) == 0) {
+        *out_iface = &ui_state_api;
     } else {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
@@ -135,12 +144,13 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 5 && d.optional_count == 3 && d.provides_count == 0);
+    CHECK(d.requires_count == 6 && d.optional_count == 3 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
     CHECK(std::strcmp(d.requires[2].id, "world.facts") == 0);
     CHECK(std::strcmp(d.requires[3].id, "item.facts") == 0);
     CHECK(std::strcmp(d.requires[4].id, "save.slot_data") == 0);
+    CHECK(std::strcmp(d.requires[5].id, qol::contracts::kUiStateCapabilityId) == 0);
     CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
     CHECK(std::strcmp(d.optional_requires[1].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(d.optional_requires[2].id, qol::contracts::kUiPanelsCapabilityId) == 0);
@@ -222,17 +232,20 @@ void test_provider_registration() {
     CHECK(!status.enabled);
     CHECK(qol::features::autosell::world_facts() == nullptr);
     CHECK(qol::features::autosell::item_facts() == nullptr);
+    CHECK(qol::features::autosell::ui_state() == nullptr);
     d.on_enabled(ctx);
     status = {};
     d.fill_status(status);
     CHECK(status.enabled);
     CHECK(qol::features::autosell::world_facts() != nullptr);
     CHECK(qol::features::autosell::item_facts() != nullptr);
+    CHECK(qol::features::autosell::ui_state() != nullptr);
 
     d.deactivate(ctx);
     CHECK(qol::infra::panels_find_provider("autosell") == nullptr);
     CHECK(qol::features::autosell::world_facts() == nullptr);
     CHECK(qol::features::autosell::item_facts() == nullptr);
+    CHECK(qol::features::autosell::ui_state() == nullptr);
 }
 
 void test_enable_capability_failure_keeps_gate_closed() {
@@ -265,10 +278,19 @@ void test_enable_capability_failure_keeps_gate_closed() {
     CHECK(qol::features::autosell::world_facts() == nullptr);
     CHECK(qol::features::autosell::item_facts() == nullptr);
 
+    g_fail_require_id = qol::contracts::kUiStateCapabilityId;
+    d.on_enabled(ctx);
+    g_fail_require_id = nullptr;
+    status = {};
+    d.fill_status(status);
+    CHECK(!status.enabled);
+    CHECK(qol::features::autosell::ui_state() == nullptr);
+
     d.on_enabled(ctx);
     status = {};
     d.fill_status(status);
     CHECK(status.enabled);
+    CHECK(qol::features::autosell::ui_state() != nullptr);
     d.deactivate(ctx);
 }
 

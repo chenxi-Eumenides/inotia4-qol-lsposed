@@ -10,6 +10,7 @@
 #include "../../contracts/world_facts.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/slot_data.h"
+#include "../../contracts/ui.h"
 #include "../../contracts/game_ports/inventory_extras_port.h"
 #include "config.h"
 #include "log.h"
@@ -46,6 +47,8 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kItemFactsVersionMajor, contracts::kItemFactsVersionMinor}},
     {contracts::kQolSlotDataCapabilityId,
      {contracts::kQolSlotDataVersion.major, contracts::kQolSlotDataVersion.minor}},
+    {contracts::kUiStateCapabilityId,
+     {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}},
 };
 
 // extension_bag 的能力只在插件进入 enabled 时注册（其资源受配置门禁），故不能作为 required：
@@ -76,6 +79,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::UiStateApi* g_ui_state = nullptr;
 const contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
 const contracts::QolSlotDataApi* g_slot_data_api = nullptr;
 std::atomic<bool> g_gate{false};
@@ -139,6 +143,7 @@ void clear_runtime_capabilities() {
     g_slot_data_api = nullptr;
     g_world_facts = nullptr;
     g_item_facts = nullptr;
+    g_ui_state = nullptr;
 }
 
 bool acquire_runtime_capabilities(contracts::PluginContext& ctx) {
@@ -174,9 +179,20 @@ bool acquire_runtime_capabilities(contracts::PluginContext& ctx) {
     }
     const auto* slot_data_api = static_cast<const contracts::QolSlotDataApi*>(iface);
 
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kUiStateCapabilityId,
+            {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return false;
+    }
+    const auto* ui_state = static_cast<const contracts::UiStateApi*>(iface);
+    if (ui_state->read_layers == nullptr) return false;
+
     g_world_facts = world_facts;
     g_item_facts = item_facts;
     g_slot_data_api = slot_data_api;
+    g_ui_state = ui_state;
     if (!autosell_store_register(ctx.owner_token, slot_data_api)) {
         clear_runtime_capabilities();
         return false;
@@ -267,7 +283,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    5, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data
+    6, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data + ui.state
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,  // optional=extension_bag + http.registry + ui_panels
     0, nullptr,   // provides
@@ -309,6 +325,10 @@ const contracts::WorldFactsApi* world_facts() {
 
 const contracts::ItemFactsApi* item_facts() {
     return g_item_facts;
+}
+
+const contracts::UiStateApi* ui_state() {
+    return g_ui_state;
 }
 
 const contracts::QolInventoryExtrasPort* inventory_extras() {

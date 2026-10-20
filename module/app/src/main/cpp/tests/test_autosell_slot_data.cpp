@@ -358,6 +358,26 @@ void test_config_edit_rejected_before_first_valid_load(const QolSlotDataApi& api
     autosell_store_unregister();
 }
 
+void test_save_exit_rejects_config_until_reload(const QolSlotDataApi& api) {
+    reset_disk_and_metrics();
+    register_consumer(api);
+    const std::string stored = autosell_config_to_json(sample(2));
+    CHECK(invoke_load(0, 15, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 2, stored));
+
+    const auto runtime_before_exit = autosell_get_runtime_config();
+    autosell_store_reject_session();
+    CHECK(!autosell_scan_session_active(0));
+    CHECK(!autosell_store_session_matches(0));
+    CHECK(!autosell_store_commit_config(sample(4)));
+    CHECK(same(autosell_get_runtime_config(), runtime_before_exit));
+
+    CHECK(invoke_load(0, 16, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 2, stored));
+    CHECK(autosell_scan_session_active(0));
+    CHECK(autosell_store_commit_config(sample(3)));
+    CHECK(same(autosell_get_runtime_config(), sample(3)));
+    autosell_store_unregister();
+}
+
 void test_immediate_write_dedupe_and_retry(const QolSlotDataApi& api) {
     reset_disk_and_metrics();
     register_consumer(api);
@@ -625,6 +645,7 @@ int main() {
     const QolSlotDataApi api = fake_api();
     test_session_load_and_presence_errors(api);
     test_config_edit_rejected_before_first_valid_load(api);
+    test_save_exit_rejects_config_until_reload(api);
     test_immediate_write_dedupe_and_retry(api);
     test_inflight_revision_completion_and_frame_retry(api);
     test_retry_task_owned_by_lifecycle(api);
