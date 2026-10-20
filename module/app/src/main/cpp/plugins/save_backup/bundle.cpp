@@ -728,6 +728,30 @@ bool decode_warehouse_v2(const uint8_t* data, size_t size, std::vector<Warehouse
     return decode_warehouse_impl(data, size, /*with_flags=*/false, out);
 }
 
+bool validate_warehouse(const std::vector<WarehouseFile>& files, std::string& error) {
+    error.clear();
+    if (files.size() > kMaxWarehouseFiles) {
+        error = "warehouse limit exceeded";
+        return false;
+    }
+    for (const WarehouseFile& file : files) {
+        if (!valid_warehouse_suffix(file.suffix)) {
+            error = "warehouse name invalid";
+            return false;
+        }
+        if (file.data.size() > kMaxWarehouseDataBytes) {
+            error = "warehouse file too large";
+            return false;
+        }
+    }
+    // 用实际编码结果判总量，与 decode_warehouse 的字节口径一致。
+    if (encode_warehouse(files).size() > kMaxWarehouseBlobBytes) {
+        error = "warehouse limit exceeded";
+        return false;
+    }
+    return true;
+}
+
 // ---- bundle 组装与解析 ----
 
 std::string build_meta_json(int source_slot, long long export_time_ms, int map_id, int hero_level,

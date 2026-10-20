@@ -42,6 +42,11 @@ constexpr const char* kBackupDirName = "backups";
 constexpr const char* kRollbackDirName = ".rollback";
 constexpr const char* kBundleSuffix = ".qol_save";
 
+// 列表扫描的本地 DoS 防护上限（不是备份格式或 HTTP 契约）：
+// 单个 .qol_save 超过 64 MiB 视为损坏/异常文件跳过；单次扫描累计读取超过 512 MiB 即停止。
+constexpr long long kListMaxBundleBytes = 64LL * 1024 * 1024;
+constexpr long long kListMaxTotalBytes = 512LL * 1024 * 1024;
+
 std::mutex g_sb_mtx;
 std::string g_sb_data_dir;
 std::string g_sb_external_dir;
@@ -814,10 +819,26 @@ std::string save_backup_list_json() {
     // 同毫秒并列时按文件名倒序保持稳定口径（文件名前缀即本地时间戳）。
     std::vector<save_backup::Entry> entries;
     entries.reserve(names.size());
+    long long scanned_bytes = 0;
     for (const std::string& name : names) {
+        const std::string path = dir + "/" + name;
+        struct stat st{};
+        // 先 stat 再读：超限文件不必先分配内存。
+        if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0 ||
+            static_cast<long long>(st.st_size) > kListMaxBundleBytes) {
+            SB_LOG("save backup list skip: %s", name.c_str());
+            continue;
+        }
+        const long long file_size = static_cast<long long>(st.st_size);
+        if (scanned_bytes + file_size > kListMaxTotalBytes) {
+            SB_LOG("save backup list scan stopped: total %lld bytes exceeds %lld", scanned_bytes,
+                   kListMaxTotalBytes);
+            break;
+        }
+        scanned_bytes += file_size;
         std::vector<uint8_t> bytes;
         save_backup::ParsedBundle parsed;
-        if (!read_file_bytes(dir + "/" + name, bytes) ||
+        if (!read_file_bytes(path, bytes) ||
             !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
             SB_LOG("save backup list skip: %s", name.c_str());
             continue;
@@ -879,10 +900,10 @@ std::string save_backup_export_json(int slot) {
 
     // 个人仓库伴生文件（monster 改版）：收集同存档目录下 `save{slot}.dat.wh4-*` 普通文件
     //（含游戏自建 `.bak`），排除目录与写入中间态 `.tmp`/`.wh-tmp`；按文件名升序保证确定性。
-    // 单文件 >1MiB 视为异常跳过并记日志；目录不可得/无命中则为空列表（导出仅原版 + sidecar）。
+    // 收集阶段 fail-closed：读失败或单文件超过 bundle 上限即整次导出失败，避免生成缺文件的
+    // 不完整备份。目录不可得/无命中则为空列表（导出仅原版 + sidecar）。
     std::vector<save_backup::WarehouseFile> warehouse;
     {
-        constexpr size_t kMaxWarehouseExportBytes = 1 * 1024 * 1024;
         std::string save_dir;
         if (locate_save_directory(save_dir) == 0) {
             const std::string dat_name = "save" + std::to_string(slot) + ".dat";
@@ -904,21 +925,31 @@ std::string save_backup_export_json(int slot) {
                 std::sort(names.begin(), names.end());
                 for (const std::string& name : names) {
                     const std::string suffix = name.substr(dat_name.size());
+                    // 非合法仓库伴生名（如 `.wh4-` 后带路径字符）不是仓库文件，跳过。
                     if (!save_backup::valid_warehouse_suffix(suffix)) {
                         SB_LOG("save backup export slot=%d: skip invalid warehouse name: %s", slot,
                                name.c_str());
                         continue;
                     }
+                    const std::string full = save_dir + "/" + name;
+                    struct stat st{};
+                    if (::stat(full.c_str(), &st) == 0 && S_ISREG(st.st_mode) &&
+                        st.st_size > 0 &&
+                        static_cast<uint64_t>(st.st_size) > save_backup::kMaxWarehouseDataBytes) {
+                        SB_LOG("save backup export slot=%d: warehouse too large (%lld): %s", slot,
+                               static_cast<long long>(st.st_size), name.c_str());
+                        return result_error("warehouse file too large");
+                    }
                     std::vector<uint8_t> bytes;
-                    if (!read_file_bytes(save_dir + "/" + name, bytes)) {
+                    if (!read_file_bytes(full, bytes)) {
                         SB_LOG("save backup export slot=%d: warehouse read failed: %s", slot,
                                name.c_str());
-                        continue;
+                        return result_error("warehouse read failed");
                     }
-                    if (bytes.size() > kMaxWarehouseExportBytes) {
-                        SB_LOG("save backup export slot=%d: warehouse too large (%zu), skip: %s",
-                               slot, bytes.size(), name.c_str());
-                        continue;
+                    if (bytes.size() > save_backup::kMaxWarehouseDataBytes) {
+                        SB_LOG("save backup export slot=%d: warehouse too large (%zu): %s", slot,
+                               bytes.size(), name.c_str());
+                        return result_error("warehouse file too large");
                     }
                     save_backup::WarehouseFile wf;
                     wf.suffix = suffix;
@@ -954,6 +985,13 @@ std::string save_backup_export_json(int slot) {
                 }
             }
         }
+    }
+    // 容量校验必须早于 bundle 组装：超限时整次导出失败，不生成不完整或解码端必然拒绝的备份。
+    std::string warehouse_error;
+    if (!save_backup::validate_warehouse(warehouse, warehouse_error)) {
+        SB_LOG("save backup export slot=%d: warehouse validation failed: %s", slot,
+               warehouse_error.c_str());
+        return result_error(warehouse_error.c_str());
     }
     // 导出统一分离：若本次确实收齐了外部 wh4，则把存档 block3 内嵌的 WH96v002 仓库段剥离，
     // 使存档退回基础形态、仓库一律走外部 wh4（跨设备可重加密）。保守规则：段不在 block3 末尾

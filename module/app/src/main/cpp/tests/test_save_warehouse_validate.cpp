@@ -279,6 +279,57 @@ void test_warehouse_duplicate_suffix_rejected() {
     CHECK(!sb::parse_bundle(bundle.data(), bundle.size(), parsed));
 }
 
+// SB-09：导出前仓库容量校验（数量/单项/总量/suffix）。
+void test_validate_warehouse() {
+    namespace sb = save_backup;
+    std::string error;
+
+    // 数量上限 64：全部合法小文件 → 通过。
+    std::vector<WarehouseFile> allowed;
+    for (int i = 0; i < 64; ++i) {
+        WarehouseFile file;
+        file.suffix = ".wh4-" + std::to_string(i);
+        file.data = {static_cast<uint8_t>(i)};
+        allowed.push_back(std::move(file));
+    }
+    CHECK(sb::validate_warehouse(allowed, error));
+    CHECK(error.empty());
+
+    // 65 个 → 数量超限。
+    std::vector<WarehouseFile> too_many = allowed;
+    WarehouseFile extra;
+    extra.suffix = ".wh4-64";
+    extra.data = {1};
+    too_many.push_back(std::move(extra));
+    CHECK(!sb::validate_warehouse(too_many, error));
+    CHECK(error == "warehouse limit exceeded");
+
+    // 单项 4 MiB + 1 → 单项超限。
+    std::vector<WarehouseFile> too_large(1);
+    too_large[0].suffix = ".wh4-large";
+    too_large[0].data.assign(sb::kMaxWarehouseDataBytes + 1, 0xAB);
+    CHECK(!sb::validate_warehouse(too_large, error));
+    CHECK(error == "warehouse file too large");
+
+    // 3 × 3 MiB：单项均合法，编码后 9 MiB > kMaxWarehouseBlobBytes → 总量超限。
+    std::vector<WarehouseFile> too_much_total;
+    for (int i = 0; i < 3; ++i) {
+        WarehouseFile file;
+        file.suffix = ".wh4-total" + std::to_string(i);
+        file.data.assign(3 * 1024 * 1024, static_cast<uint8_t>(i));
+        too_much_total.push_back(std::move(file));
+    }
+    CHECK(!sb::validate_warehouse(too_much_total, error));
+    CHECK(error == "warehouse limit exceeded");
+
+    // suffix 不在 `.wh4-` 白名单内 → 名称非法。
+    std::vector<WarehouseFile> bad_name(1);
+    bad_name[0].suffix = ".evil";
+    bad_name[0].data = {1};
+    CHECK(!sb::validate_warehouse(bad_name, error));
+    CHECK(error == "warehouse name invalid");
+}
+
 void test_parse_bundle_version_dispatch() {
     namespace sb = save_backup;
     WarehouseFile f0;
@@ -693,6 +744,7 @@ int main() {
     test_warehouse_v3_roundtrip();
     test_warehouse_v2_legacy_encoding();
     test_parse_bundle_version_dispatch();
+    test_validate_warehouse();
     test_parse_bundle_rejects_short_orig_plain();
     test_warehouse_duplicate_suffix_rejected();
     test_bundle_matches_checksum_internal_wins();

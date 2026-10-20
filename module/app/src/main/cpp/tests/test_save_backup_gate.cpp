@@ -155,6 +155,17 @@ QolResult hub_key_fn(const char** out_key) {
     *out_key = "1234567";
     return contracts::ok();
 }
+QolResult load_data_fn(int32_t, void** out_data, int32_t* out_size) {
+    // 最小可导出的明文头：块表 rel=4 → 块0 从 +12 开始，长度覆盖块0 的 33 字节字段。
+    static std::vector<uint8_t> plain = [] {
+        std::vector<uint8_t> bytes(64, 0);
+        bytes[8] = 4;  // u16 块表项低字节：block0 = 8 + 4 = 12
+        return bytes;
+    }();
+    *out_data = plain.data();
+    *out_size = static_cast<int32_t>(plain.size());
+    return contracts::ok();
+}
 int32_t g_current_slot = -1;
 bool g_current_slot_fails = false;
 bool g_current_slot_not_ready = false;
@@ -184,6 +195,7 @@ SaveFactsApi& fake_save_facts() {
     static SaveFactsApi api{};
     api.hub_key = &hub_key_fn;
     api.current_slot = &current_slot_fn;
+    api.load_data = &load_data_fn;
     return api;
 }
 
@@ -327,6 +339,15 @@ int main() {
     }
     g_current_slot_fails = false;
     g_current_slot = -1;
+
+    // ---- 导出 fail-closed：单个 wh4 超过 4 MiB → 整次导出失败，不组装 bundle ----
+    const std::string export_ok = save_backup_export_json(0);
+    CHECK(body_ok(export_ok));
+    const std::string big_wh = save_dir + "/save0.dat.wh4-0000000000000001";
+    CHECK(write_file(big_wh, std::string(4 * 1024 * 1024 + 1, 'X')));
+    const std::string too_big = save_backup_export_json(0);
+    CHECK(too_big.find("warehouse file too large") != std::string::npos);
+    CHECK(::unlink(big_wh.c_str()) == 0);
 
     // ---- gate 被占：import/删槽在首次写删前拒绝，dat 未被改 ----
     QolSlotOperationLease blocker{};

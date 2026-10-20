@@ -115,6 +115,12 @@ bool decode_warehouse_v2(const uint8_t* data, size_t size, std::vector<Warehouse
 // 路径分隔符与遍历序列。）
 bool valid_warehouse_suffix(const std::string& s);
 
+// 导出前容量校验：数量 ≤ kMaxWarehouseFiles、suffix 合法、单项 ≤ kMaxWarehouseDataBytes、
+// 编码后 blob ≤ kMaxWarehouseBlobBytes。失败返回 false 并写入固定错误串：
+// "warehouse limit exceeded"（数量/总量）、"warehouse file too large"（单项）、
+// "warehouse name invalid"（suffix 非法）。
+bool validate_warehouse(const std::vector<WarehouseFile>& files, std::string& error);
+
 // wh4 容器解密回调：buf 为可写副本（长度 len）、key 为设备密钥；返回 1 表示双校验和通过
 // （本机密钥可解），0 表示不可用。与游戏 ENCRYPT_Process2(buf, len, mode=1, key) 语义一致。
 using WarehouseDecryptFn = int (*)(void* buf, int len, const char* key);
