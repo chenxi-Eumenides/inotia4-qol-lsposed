@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "backup_files.h"
 #include "bundle.h"
 #include "contracts/slot_operation.h"
 #include "log.h"
@@ -47,6 +48,8 @@ namespace {
 
 #define SB_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
 #define SB_LOG_WARN(...) SAVE_BACKUP_LOG_WARN(__VA_ARGS__)
+
+void bind_backup_files_source();
 
 constexpr const char* kBackupDirName = "backups";
 constexpr const char* kRollbackDirName = ".rollback";
@@ -1001,6 +1004,7 @@ void save_backup_init(const char* data_dir, const char* external_files_dir) {
         g_sb_data_dir = data_dir != nullptr ? data_dir : "";
         g_sb_external_dir = external_files_dir != nullptr ? external_files_dir : "";
     }
+    bind_backup_files_source();
     // 启动回滚优先：把上次删槽/删 sidecar 中途死亡留下的 trash 文件移回原位，不再继续删除。
     save_backup_recover_deletes();
 }
@@ -1208,6 +1212,62 @@ struct SbDirs {
     std::string external;
 };
 
+namespace {
+
+bool bridge_collect_dat(int32_t slot, qol::features::save_backup::CollectedDat& out,
+                        std::string& err) {
+    return read_original_plain(slot, out.plain, out.map_id, out.save_time, out.save_version,
+                               out.hero_level, out.hero_index, out.class_idx, err);
+}
+
+bool bridge_collect_sidecar(int32_t slot, qol::features::save_backup::CollectedSidecar& out,
+                            std::string& err) {
+    out.bytes.clear();
+    switch (store_read_container(slot, out.bytes)) {
+        case ContainerStatus::kOk:
+            out.state = qol::features::save_backup::CollectedSidecar::State::kPresent;
+            return true;
+        case ContainerStatus::kNotFound:
+            out.state = qol::features::save_backup::CollectedSidecar::State::kAbsent;
+            out.bytes.clear();
+            return true;
+        default:
+            err = "module container unreadable";
+            return false;
+    }
+}
+
+bool bridge_locate_save_directory(std::string& out) {
+    std::string data_dir;
+    {
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        data_dir = g_sb_data_dir;
+    }
+    return locate_save_directory_at(data_dir, out) == 0;
+}
+
+bool bridge_read_file(const std::string& path, std::vector<uint8_t>& out) {
+    return read_file_bytes(path, out);
+}
+
+bool bridge_encrypt_available() { return save_encrypt_available(); }
+
+const char* bridge_hub_key() { return save_hub_key(); }
+
+int bridge_encrypt_process(void* data, int32_t len, int32_t mode, const char* key) {
+    return save_encrypt_process(data, len, mode, key);
+}
+
+const qol::features::save_backup::BackupFilesSource kBackupFilesSource{
+    &bridge_collect_dat,       &bridge_collect_sidecar, &bridge_locate_save_directory,
+    &bridge_read_file,         &bridge_encrypt_available, &bridge_hub_key,
+    &bridge_encrypt_process,
+};
+
+void bind_backup_files_source() { qol::features::save_backup::backup_files_bind_source(kBackupFilesSource); }
+
+}  // namespace
+
 static SbDirs snapshot_dirs() {
     std::lock_guard<std::mutex> lk(g_sb_mtx);
     return SbDirs{g_sb_data_dir, g_sb_external_dir};
@@ -1283,148 +1343,25 @@ std::string save_backup_list_json() {
 static std::string export_json_with_lease(int slot) {
     const SbDirs dirs = snapshot_dirs();
     const std::unordered_map<int, std::string> map_names = snapshot_map_names();
-    std::vector<uint8_t> plain;
-    int map_id = 0;
-    long long save_time = 0;
-    int version = 0;
-    int hero_level = -1;
-    int hero_index = -1;
-    int class_idx = -1;
+    // 先收集完整快照（dat/sidecar/warehouse），再组装 bundle；行为与旧导出逐字节一致。
+    bind_backup_files_source();
+    qol::features::save_backup::SlotSnapshot snapshot;
     std::string err;
-    if (!read_original_plain(slot, plain, map_id, save_time, version, hero_level, hero_index,
-                             class_idx, err)) {
+    if (!qol::features::save_backup::collect_slot_snapshot(slot, snapshot, err)) {
         return result_error(err.c_str());
     }
-
-    // sidecar 三态：present 写入 module；absent 明确记为 0 并在导入时清除目标 sidecar；
-    // 损坏/不可读整次导出失败，不再生成“仅原版”的不完整备份。
-    int module_state = 0;
-    std::vector<uint8_t> module;
-    switch (store_read_container(slot, module)) {
-        case ContainerStatus::kOk:
-            module_state = 1;
-            break;
-        case ContainerStatus::kNotFound:
-            module_state = 0;
-            module.clear();
-            break;
-        default:
-            SB_LOG("save backup export slot=%d: module sidecar unreadable", slot);
-            return result_error("module container unreadable");
-    }
-
-    // 个人仓库伴生文件（monster 改版）：收集同存档目录下 `save{slot}.dat.wh4-*` 普通文件
-    //（含游戏自建 `.bak`），排除目录与写入中间态 `.tmp`/`.wh-tmp`；按文件名升序保证确定性。
-    // 收集阶段 fail-closed：读失败或单文件超过 bundle 上限即整次导出失败，避免生成缺文件的
-    // 不完整备份。目录不可得/无命中则为空列表（导出仅原版 + sidecar）。
-    std::vector<save_backup::WarehouseFile> warehouse;
-    {
-        std::string save_dir;
-        if (locate_save_directory_at(dirs.data, save_dir) == 0) {
-            const std::string dat_name = "save" + std::to_string(slot) + ".dat";
-            const std::string prefix = dat_name + ".wh4-";
-            DIR* d = ::opendir(save_dir.c_str());
-            if (d != nullptr) {
-                std::vector<std::string> names;
-                while (dirent* ent = ::readdir(d)) {
-                    const std::string name = ent->d_name;
-                    if (name.size() <= prefix.size()) continue;
-                    if (name.compare(0, prefix.size(), prefix) != 0) continue;
-                    if (ends_with(name, ".tmp") || ends_with(name, ".wh-tmp")) continue;
-                    const std::string full = save_dir + "/" + name;
-                    struct stat st{};
-                    if (::stat(full.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
-                    names.push_back(name);
-                }
-                ::closedir(d);
-                std::sort(names.begin(), names.end());
-                for (const std::string& name : names) {
-                    const std::string suffix = name.substr(dat_name.size());
-                    // 非合法仓库伴生名（如 `.wh4-` 后带路径字符）不是仓库文件，跳过。
-                    if (!save_backup::valid_warehouse_suffix(suffix)) {
-                        SB_LOG("save backup export slot=%d: skip invalid warehouse name: %s", slot,
-                               name.c_str());
-                        continue;
-                    }
-                    const std::string full = save_dir + "/" + name;
-                    struct stat st{};
-                    if (::stat(full.c_str(), &st) == 0 && S_ISREG(st.st_mode) &&
-                        st.st_size > 0 &&
-                        static_cast<uint64_t>(st.st_size) > save_backup::kMaxWarehouseDataBytes) {
-                        SB_LOG("save backup export slot=%d: warehouse too large (%lld): %s", slot,
-                               static_cast<long long>(st.st_size), name.c_str());
-                        return result_error("warehouse file too large");
-                    }
-                    std::vector<uint8_t> bytes;
-                    if (!read_file_bytes(full, bytes)) {
-                        SB_LOG("save backup export slot=%d: warehouse read failed: %s", slot,
-                               name.c_str());
-                        return result_error("warehouse read failed");
-                    }
-                    if (bytes.size() > save_backup::kMaxWarehouseDataBytes) {
-                        SB_LOG("save backup export slot=%d: warehouse too large (%zu): %s", slot,
-                               bytes.size(), name.c_str());
-                        return result_error("warehouse file too large");
-                    }
-                    save_backup::WarehouseFile wf;
-                    wf.suffix = suffix;
-                    // v3：优先用本机密钥解密为明文存储（导入端可用目标设备密钥重加密，跨设备可移植）；
-                    // 解密失败（长度不足/无 key/双校验和不通过）则原样存密文，flags=0 走旧校验路径。
-                    // 注意：mode=1 会读 buf[len-3 .. len) 的尾部 3 字节做校验，必须传**完整容器**，
-                    // 只传 payload 会越界读到垃圾导致必然返回 0（真机实测）。
-                    bool decrypted = false;
-                    if (bytes.size() >= 4 && save_encrypt_available()) {
-                        const char* wh_key = save_hub_key();
-                        if (wh_key != nullptr) {
-                            const size_t payload_len = bytes.size() - 3;
-                            std::vector<uint8_t> buf = bytes;
-                            if (save_encrypt_process(buf.data(), static_cast<int>(payload_len), 1,
-                                                     wh_key) == 1) {
-                                wf.data.assign(buf.begin(), buf.begin() + payload_len);
-                                wf.flags = save_backup::kWarehouseFlagPlain;
-                                decrypted = true;
-                                SB_LOG("save backup export slot=%d: warehouse decrypted for "
-                                       "cross-device: %s (%zu bytes)",
-                                       slot, name.c_str(), wf.data.size());
-                            }
-                        }
-                    }
-                    if (!decrypted) {
-                        wf.data.swap(bytes);
-                        wf.flags = 0;
-                        SB_LOG("save backup export slot=%d: warehouse kept as ciphertext "
-                               "(decrypt unavailable): %s (%zu bytes)",
-                               slot, name.c_str(), wf.data.size());
-                    }
-                    warehouse.push_back(std::move(wf));
-                }
-            }
-        }
-    }
-    // 容量校验必须早于 bundle 组装：超限时整次导出失败，不生成不完整或解码端必然拒绝的备份。
-    std::string warehouse_error;
-    if (!save_backup::validate_warehouse(warehouse, warehouse_error)) {
-        SB_LOG("save backup export slot=%d: warehouse validation failed: %s", slot,
-               warehouse_error.c_str());
-        return result_error(warehouse_error.c_str());
-    }
-    // 导出统一分离：若本次确实收齐了外部 wh4，则把存档 block3 内嵌的 WH96v002 仓库段剥离，
-    // 使存档退回基础形态、仓库一律走外部 wh4（跨设备可重加密）。保守规则：段不在 block3 末尾
-    // 或块表异常时维持原状。无外部 wh4 时不得剥离（否则丢仓库）。
-    if (!warehouse.empty()) {
-        const save_backup::InlineWarehouseStrip strip =
-            save_backup::warehouse_strip_inline_segment(plain);
-        if (strip == save_backup::InlineWarehouseStrip::kStripped) {
-            SB_LOG("save backup export slot=%d: inline WH96v002 segment stripped (origLen=%zu)", slot,
-                   plain.size());
-        } else {
-            SB_LOG("save backup export slot=%d: inline warehouse kept (%s)", slot,
-                   save_backup::inline_warehouse_strip_name(strip));
-        }
-    } else {
-        SB_LOG("save backup export slot=%d: no external warehouse collected, keep inline warehouse",
-               slot);
-    }
+    const std::vector<uint8_t>& plain = snapshot.dat.plain;
+    const int map_id = snapshot.dat.map_id;
+    const long long save_time = snapshot.dat.save_time;
+    const int version = snapshot.dat.save_version;
+    const int hero_level = snapshot.dat.hero_level;
+    const int hero_index = snapshot.dat.hero_index;
+    const int class_idx = snapshot.dat.class_idx;
+    const int module_state =
+        snapshot.module.state == qol::features::save_backup::CollectedSidecar::State::kPresent ? 1
+                                                                                              : 0;
+    const std::vector<uint8_t>& module = snapshot.module.bytes;
+    const std::vector<save_backup::WarehouseFile>& warehouse = snapshot.warehouse.files;
 
     const std::vector<uint8_t> warehouse_blob = save_backup::encode_warehouse(warehouse);
 

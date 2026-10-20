@@ -18,6 +18,7 @@
 #include "infra/slot_operation_gate.h"
 #include "infra/store.h"
 #include "plugins/save_backup/bundle.h"
+#include "plugins/save_backup/backup_files.h"
 
 namespace {
 int g_pass = 0, g_fail = 0;
@@ -409,6 +410,68 @@ int main() {
 
     const std::string checksum = make_bundle(root, "aaaaaaaaaaaa", module_container);
     CHECK(!checksum.empty());
+
+    // ---- B1：文件类别注册表 ----
+    {
+        size_t class_count = 0;
+        const auto* classes = qol::features::save_backup::backup_file_classes(&class_count);
+        CHECK(class_count == 3 && classes != nullptr);
+        CHECK(classes[0].kind == qol::features::save_backup::BackupFileKind::kOriginalDat);
+        CHECK(std::strcmp(classes[0].id, "original_dat") == 0);
+        CHECK(classes[0].meta_state_field == nullptr);
+        CHECK(classes[0].checksum_participates && classes[0].delete_participates);
+        CHECK(classes[1].kind == qol::features::save_backup::BackupFileKind::kModuleSidecar);
+        CHECK(std::strcmp(classes[1].id, "module_sidecar") == 0);
+        CHECK(std::strcmp(classes[1].meta_state_field, "module_state") == 0);
+        CHECK(classes[1].checksum_participates && classes[1].delete_participates);
+        CHECK(classes[2].kind == qol::features::save_backup::BackupFileKind::kWarehouseCompanion);
+        CHECK(std::strcmp(classes[2].id, "warehouse_companion") == 0);
+        CHECK(classes[2].meta_state_field == nullptr);
+        CHECK(classes[2].checksum_participates && classes[2].delete_participates);
+    }
+
+    // ---- B1：snapshot 收集与旧 checksum 口径一致（dat → module → warehouse）----
+    {
+        qol::features::save_backup::SlotSnapshot snapshot;
+        std::string snapshot_error;
+        CHECK(qol::features::save_backup::collect_slot_snapshot(0, snapshot, snapshot_error));
+        CHECK(snapshot.module.state ==
+              qol::features::save_backup::CollectedSidecar::State::kPresent);
+        CHECK(snapshot.module.bytes == module_container);
+        CHECK(snapshot.warehouse.files.empty());
+        const std::vector<uint8_t> wh_blob =
+            save_backup::encode_warehouse(snapshot.warehouse.files);
+        const std::string expected_checksum = save_backup::compute_checksum(
+            save_backup::kBundleVersion, snapshot.dat.plain, snapshot.module.bytes, wh_blob);
+        const std::string snapshot_export = save_backup_export_json(0);
+        std::string actual_checksum;
+        CHECK(save_backup::json_find_string(snapshot_export, "checksum", actual_checksum));
+        CHECK(actual_checksum == expected_checksum);
+    }
+
+    // ---- B1：wh4 收集失败沿用原错误串 ----
+    {
+        const std::string too_big = save_dir + "/save0.dat.wh4-0000000000000002";
+        CHECK(write_file(too_big, std::string(4 * 1024 * 1024 + 1, 'X')));
+        qol::features::save_backup::SlotSnapshot snapshot;
+        std::string error;
+        CHECK(!qol::features::save_backup::collect_slot_snapshot(0, snapshot, error));
+        CHECK(error == "warehouse file too large");
+        CHECK(::unlink(too_big.c_str()) == 0);
+
+        // 读失败仅在非 root 下可稳定构造（root 忽略 000 权限）。
+        if (::geteuid() != 0) {
+            const std::string unreadable = save_dir + "/save0.dat.wh4-0000000000000003";
+            CHECK(write_file(unreadable, "X"));
+            CHECK(::chmod(unreadable.c_str(), 0000) == 0);
+            qol::features::save_backup::SlotSnapshot failed;
+            std::string read_error;
+            CHECK(!qol::features::save_backup::collect_slot_snapshot(0, failed, read_error));
+            CHECK(read_error == "warehouse read failed");
+            (void)::chmod(unreadable.c_str(), 0644);
+            CHECK(::unlink(unreadable.c_str()) == 0);
+        }
+    }
 
     // ---- SB-01：缓存未刷新时导出仍成功，hero 字段为 -1（不调用游戏槽读取）----
     g_plain_variant = 0;

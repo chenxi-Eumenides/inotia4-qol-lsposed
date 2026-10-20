@@ -178,6 +178,7 @@ add_test(NAME save_transaction_tests COMMAND save_transaction_tests)
 # P3b-2：save_backup 槽操作前置门集成（真实 infra gate/store + fake Host SDK 面）。
 add_executable(save_backup_gate_tests
     test_save_backup_gate.cpp
+    ${CPP_DIR}/plugins/save_backup/backup_files.cpp
     ${CPP_DIR}/plugins/save_backup/feature.cpp
     ${CPP_DIR}/plugins/save_backup/bundle.cpp
     ${CPP_DIR}/infra/store.cpp

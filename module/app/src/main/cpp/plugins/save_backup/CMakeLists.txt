@@ -1,4 +1,5 @@
 add_library(qol_plugin_save_backup STATIC
+    backup_files.cpp
     bundle.cpp
     feature.cpp
     plugin.cpp
