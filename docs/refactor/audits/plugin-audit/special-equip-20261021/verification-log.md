@@ -2,7 +2,7 @@
 
 - 审阅对象：功能插件 `special_equip`（`module/app/src/main/cpp/plugins/special_equip/`，7 文件 650 行）。
 - 现场基线：HEAD `5b9b20f8`；工作区 11 个与本插件无关的未提交改动（autosell / save_backup / core.item / extension_bag 等），本批未触碰。
-- 修复提交：`ec90f718`（代码与测试）、`bf487f69`（参考说明）。
+- 修复提交：`ec90f718`（审阅缺陷）、`bf487f69`（参考说明）、`50707436`（设计优化批）。
 - 阶段 1 由 @oracle 按 A–G 七维完成，共 12 条 finding（P1 2 / P2 7 / P3 3）；阶段 2 裁决后全部静态修复。设备面未验收。
 
 ## §1 本批登记问题
@@ -26,6 +26,8 @@ Findings 与处置以本节为准；开放/设备欠账同步登记 `docs/refact
 
 ## §2 无法验证项
 
+用户决定（2026-10-21）：本批不进行真机验证。以下设备项全部保持 **NOT_ACCEPTED**，此后不再主动验收；仅保留静态与 Host/构建证据。
+
 以下均为 **NOT_ACCEPTED**，没有真机行为证据，不得写为 PASS：
 
 | 项目 | 无法验证内容 | 结果/限制 |
@@ -47,11 +49,11 @@ Findings 与处置以本节为准；开放/设备欠账同步登记 `docs/refact
 |---|---|---|
 | 阶段 1 静态审计 A–G | **完成** | 12 条 finding；P0 0、P1 2、P2 7、P3 3。 |
 | 原语反汇编取证 | **完成** | monster v29 `libgame.so` MD5 `4c332e9b508b35fe1e97f1f26e56f04d`；`ITEM_IsRealEquip` `0x105ab8`、`ITEM_GetAbilityLevel` `0x1091f4`、`ITEM_GetEquipLevel` `0x1097ac`、`CHAR_CanEquipItem` `0xe4eb4`。见 `evidence/disassembly-primitives.md`。 |
-| Host CTest（全量） | **PASS（148/148）** | `cd module/app/src/main/cpp/tests && cmake -B build && cmake --build build && ctest --test-dir build`；`special_equip_rules_tests` 含新增 `desc_type=3` 用例。Host target 只编译 `rules.cpp`，不编译 `feature.cpp`/`plugin.cpp`。 |
+| Host CTest（全量） | **PASS（149/149）** | `cd module/app/src/main/cpp/tests && cmake -B build && cmake --build build && ctest --test-dir build`；`special_equip_rules_tests` 含 `desc_type=3` 用例；`special_equip_feature_tests` 编译 `feature.cpp`/`plugin.cpp`/`rules.cpp` 并覆盖 descriptor、安装、wrapper、出售门禁、生命周期与诊断。 |
 | 架构检查 | **PASS** | `uv run python scripts/maintenance/check_arch.py`：0 违规。 |
 | HTTP 路由检查 | **PASS（147/147）** | `uv run python scripts/maintenance/check_http_routes.py`：plugin 140 + resident 7；duplicates 0、missing/extra 0。无路由变更。 |
 | 资源安装点检查 | **PASS** | `uv run python scripts/maintenance/check_resources.py`：违规 0；常驻资源重复安装 0。 |
-| Debug 构建 | **PASS** | `scripts/build-debug.sh`：BUILD SUCCESSFUL；APK `output/inotia4_qol_lsposed_debug_2610210305_156cf3c832d8.apk`；SHA-256 `156cf3c832d892f75a55d0e536dad189f759d032c46f58dacd2a137d2ac94ccf`。构建成功不代表已部署或行为验收。 |
+| Debug 构建 | **PASS** | `scripts/build-debug.sh`：BUILD SUCCESSFUL；APK `output/inotia4_qol_lsposed_debug_2610210404_aa0ab50266d5.apk`；SHA-256 `aa0ab50266d5ba27b5cdf2bf345b832b8b2d3ae8e6b937d34d735d296d0254b3`。首轮构建 `156cf3c832d8…` 对应 `ec90f718`；设计优化批后重建为当前 APK。构建成功不代表已部署或行为验收。 |
 | `git diff --check` | **PASS** | 两批提交前均通过。 |
 
 ## §4 阶段 2 用户裁决
@@ -75,3 +77,17 @@ Findings 与处置以本节为准；开放/设备欠账同步登记 `docs/refact
 - `clear_intercept` 只按 resource id 清除，不校验登记者；并发 clear 后已快照的回调仍可能执行一次。
 - `on_resource_ready` 逐资源回调；Host 不会替插件拦截分帧安装窗口，需插件自身门禁与在途保护。
 - item-handle「lookup 失败 → register」回退模式在 `custom_recipe`、`core.item` 同样存在，均受主线程限制。
+
+## §7 设计审阅批（P1+P2+P3，`50707436`）
+
+用户要求在审阅后评估设计优化空间。结论：保持 `special_equip` 为独立叶子插件，不并入 `core.item` / inventory hook；三文件切分合理；`InFlightGuard`、`g_gate` 镜像、Hidden toggle、安装全有或全无保持现状。
+
+| 项 | 实施 | 结果 |
+|---|---|---|
+| P1 wrapper host 测试 | 新增 `special_equip_feature_tests`，编译 `feature.cpp`/`plugin.cpp`/`rules.cpp`，fake Host SDK / ItemFacts / CharacterFacts / CHARACTER_EXTRAS / Game Host | 覆盖 descriptor 与资源绑定、install 成功/失败、optional 依赖、两个 wrapper 的透传/gate/重放/fail-closed、出售门禁、资源回调与 deactivate、debug 诊断早退。Host 149/149 |
+| P2 规则输入结构 | `EquipReplayInputs` / `SellGateInputs`；wrapper 读取一次，同一快照交给规则与诊断 | 消除位置参数误传与重复读取；`rules` 测试同步 |
+| P2 诊断收敛 | 删除诊断用 `item.facts.view`，改用 `category`；`log_reject` 先判 debug 再耗预算/读事实 | 依赖面缩小，debug 关闭时拒绝路径零事实读取 |
+| P3 清理 | 删除未使用的 `log_debug` 与 `g_override_count`；保留不带计数的 debug 放行日志 | 减少热路径原子操作与死代码 |
+| 保持现状 | 不做 `State` 原子快照、wrapper 模板化、新增注入接口 | 避免为抽象而抽象 |
+
+未做：日志 domain `17` 的契约化上移（单插件不值得扩展基础设施）；拒绝明细保留，作为 UI 灰化唯一诊断路径。

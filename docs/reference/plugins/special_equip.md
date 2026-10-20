@@ -57,13 +57,15 @@ wrapper 的执行顺序：
 4. `ch`/`item` 为空返回 `0`。
 5. 重放依赖缺失、真装备/需求等级/角色权限/角色等级任一读取失败均返回 `0`（fail-closed）。
 6. 进入纯规则：装备侧要求「真装备 ∧ 角色可更换装备 ∧ 角色等级 ≥ 装备需求等级」；脱下侧只要求「角色可更换装备」（`rules.cpp:5-15`）。
-7. 仅当原版拒绝而重放允许时计数 +1（`g_override_count`），debug 日志记 `overridden`，返回 `1`。
+7. 仅当原版拒绝而重放允许时返回 `1`，debug 日志记 `overridden`。
+
+规则输入使用 `EquipReplayInputs` / `SellGateInputs` 命名结构，wrapper 读取一次后同时交给纯规则与诊断日志，避免位置参数误传和重复读取。
 
 两个 wrapper 入口都建立 `InFlightGuard`（resource id 分别为 `hook:CHAR_CanEquipItem` / `hook:CHAR_CanUnequipItem`），使 Host 在释放资源前能看到在途调用。
 
 重放的实际取值来源：
 
-- 「真装备」使用 `ItemFactsApi::is_real_equip(handle, out)`，与原版 ① 的 `ITEM_IsRealEquip` 是同一游戏函数；句柄经 `lookup_item` 或 `register_item(kQolItemHandleOwnerGame)` 解析。`QolItemInventoryView.equip` 是另一个判据（数量未编码），不用于重放，只在 `log_reject` 诊断路径读取类别时使用。
+- 「真装备」使用 `ItemFactsApi::is_real_equip(handle, out)`，与原版 ① 的 `ITEM_IsRealEquip` 是同一游戏函数；句柄经 `lookup_item` 或 `register_item(kQolItemHandleOwnerGame)` 解析。`QolItemInventoryView.equip` 是另一个判据（数量未编码），本插件不使用。
 - 装备需求等级使用 `game->read_only.item.equip_level(item, out)`，与原版 ④ 的 `ITEM_GetEquipLevel` 是同一游戏函数；该函数包含 chaos 等级加成、负值归零与上限裁剪。`QolItemInventoryView.need_level`（`ITEM_GetAbilityLevel`）只读类别记录基础值，不用于重放。
 - 角色等级按 u8 零扩展读取，比较为 32 位有符号 `>=`（`rules.cpp:9-10`）。
 
@@ -95,8 +97,8 @@ bit4 的读取与语义由 `game/access/item_class.cpp:11-26` 收口：ITEMCLASS
 ## 使用的 Host SDK 与 Game 面
 
 - `ctx.sdk->capabilities.require`：`plugin_install` 每次重新 require 两项能力，并校验 `item.facts` 的 API 尺寸（`plugin.cpp:88-113`）。运行时 wrapper/MakeItem 路径不缓存接口指针，直接使用全局 `g_item_facts`/`g_character_facts`（`feature.cpp:24-25,207-209`）。
-- `item.facts`：重放读取 `is_real_equip`；`view` 仅用于 `log_reject` 的类别/bit4 诊断。`character.facts`：`type`，仅用于 `log_reject` 诊断；未解析时不记录角色类型，其余功能继续（`feature.cpp:100-102`）。
-- `ctx.sdk->item_handle`：`lookup_item` 失败时以 `kQolItemHandleOwnerGame` 调 `register_item`，再用返回句柄调 `view`（`feature.cpp:41-51`）。
+- `item.facts`：重放读取 `is_real_equip`；`log_reject` 诊断读取 `category`（不再使用 `view`）。`character.facts`：`type`，仅用于 `log_reject` 诊断；未解析时不记录角色类型，其余功能继续。
+- `ctx.sdk->item_handle`：`lookup_item` 失败时以 `kQolItemHandleOwnerGame` 调 `register_item`，再用返回句柄调用 `is_real_equip` / `category`。
 - `QolCharacterExtrasPort::read`：`can_change_equip`（`feature.cpp:228,256,278`）、`level`（`feature.cpp:229`）、`merc_slot`（诊断，`feature.cpp:104`）、`menu_character`（`feature.cpp:277`）。
 - `QolGameHost::read_only.item`：`equip_level`（重放 ④，`feature.cpp`）、`class_no_equip_bit`（诊断，`feature.cpp:119-126`）、`equip_desc_role_type`（出售门禁，`feature.cpp:282`）。
 - `ctx.sdk->log`：`write`、`debug_enabled`（`feature.cpp:54-74`）；`ctx.sdk->hooks`：`set_intercept` / `clear_intercept`（`plugin.cpp:125-129,140-142`）。
@@ -112,13 +114,13 @@ bit4 的读取与语义由 `game/access/item_class.cpp:11-26` 收口：ITEMCLASS
 ## 生命周期与线程模型
 
 - `plugin_install`：写入 `g_sdk`/`g_game`，校验 `PluginContext` 尺寸、SDK major、`ports` 数量与指针；获取 `item.facts`（必需）与 `character.facts`（可选，失败仅 WARN）；`deps_ready()` 通过后 `set_gate(true)` 并登记出售谓词。出售谓词登记失败被视为功能不变量失效：记 ERROR、清理运行时全局并返回非 0，插件不安装资源（`plugin.cpp:73-140`）。
-- `deps_ready()` 要求 `item.facts.view`、`character_extras().read.can_change_equip`、`menu_character` 与 `game_host` 均可用（`feature.cpp:167-171`）；缺失时安装返回非 0，宿主不安装资源并置 `failed`。
+- `deps_ready()` 要求 `item.facts.is_real_equip`、`read_only.item.equip_level`、`character_extras().read.can_change_equip`、`menu_character` 与 `game_host` 均可用；缺失时安装返回非 0，宿主不安装资源并置 `failed`。
 - `plugin_deactivate`：`set_gate(false)`、清空事实 API 指针与 port、`clear_intercept`（`plugin.cpp:133-143`）。
 - `plugin_on_enabled` / `plugin_on_disabled`：只切换 `g_gate`，不做资源操作（`plugin.cpp:145-154`）。
 - `plugin_fill_status`：`enabled = gate_enabled()`，`error = nullptr`（`plugin.cpp:156-159`）。
 - `on_resource_ready`：按 resource id 保存 backup 到 `std::atomic<void*>`；未知 id 记一次告警后返回 0（`feature.cpp:192-205`）。
-- 线程模型：两个 wrapper 只调用纯读游戏函数（`feature.h:51-52`）。但 item 句柄的 `lookup_item`/`register_item` 要求主线程（`game/access/item_handle_registry.cpp:34-36,72-76,92`）；非主线程进入时 `item_facts_view` 取不到句柄并返回失败，wrapper 因此保持原版拒绝（`feature.cpp:43-51,226-231`）。当前仓库内未发现经 HTTP 线程调用这两个入口的调用点。
-- 事实 API 指针与 port 指针为普通全局变量，门禁、backup、override 计数、拒因日志预算为 atomic（`feature.cpp:23-34`）。`log_reject` 有 120 次预算，防止 UI 构建详情菜单时刷屏（`feature.cpp:34,91-92`）。
+- 线程模型：两个 wrapper 只调用纯读游戏函数（`feature.h:51-52`）。但 item 句柄的 `lookup_item`/`register_item` 要求主线程（`game/access/item_handle_registry.cpp:34-36,72-76,92`）；非主线程进入时句柄解析失败并返回原版拒绝，wrapper 因此保持原版拒绝（`feature.cpp:43-51,226-231`）。当前仓库内未发现经 HTTP 线程调用这两个入口的调用点。
+- 事实 API 指针与 port 指针为普通全局变量，门禁、backup、拒因日志预算为 atomic。`log_reject` 先判 debug 是否开启，再消耗 120 次预算并读取诊断事实；debug 关闭时不产生事实读取与日志（`feature.cpp:104-110`）。
 
 ## 文件地图
 
