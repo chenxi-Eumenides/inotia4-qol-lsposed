@@ -8,6 +8,7 @@
 #include "contracts/slot_data.h"
 #include "contracts/slot_operation.h"
 #include "save_journal.h"
+#include "save_pre_save.h"
 #include "slot_data_provider.h"
 
 namespace qol::features::core_save {
@@ -137,6 +138,8 @@ ExecuteResult save_execute_impl(int32_t slot, uint64_t frame, bool frame_retry) 
     // original belongs to this invocation, including invocations rejected by slot health.
     tx.original = {};
     if (!tx.recovery.permits_save()) return {SaveSettle::kFailed, "slot health blocks save"};
+    // 观察型保存前通知：capture/lease 之前、磁盘仍为旧档；消费者失败不影响本事务。
+    save_pre_save::notify(slot);
     // 新事务从头开始：清掉上一事务残留的捕获/日志态（凭据仅由释放路径改动）。
     tx.captured.clear();
     tx.journal = SaveJournal{};

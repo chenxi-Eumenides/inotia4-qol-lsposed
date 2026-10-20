@@ -60,6 +60,7 @@ add_executable(save_facts_plugin_tests
     ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
     ${CPP_DIR}/plugins/core.save/save_coordinator.cpp
     ${CPP_DIR}/plugins/core.save/save_journal.cpp
+    ${CPP_DIR}/plugins/core.save/save_pre_save.cpp
     ${CPP_DIR}/plugins/core.save/save_transition.cpp
     ${CPP_DIR}/host/owner_identity.cpp
     ${CPP_DIR}/host/save_route.cpp
@@ -115,6 +116,7 @@ add_executable(save_coordinator_tests
     test_save_coordinator.cpp
     ${CPP_DIR}/plugins/core.save/save_coordinator.cpp
     ${CPP_DIR}/plugins/core.save/save_journal.cpp
+    ${CPP_DIR}/plugins/core.save/save_pre_save.cpp
     ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
     ${CPP_DIR}/infra/store.cpp
     ${CPP_DIR}/infra/slot_operation_gate.cpp
@@ -125,6 +127,17 @@ target_compile_features(save_coordinator_tests PRIVATE cxx_std_17)
 set_target_properties(save_coordinator_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 target_link_libraries(save_coordinator_tests PRIVATE Threads::Threads)
 add_test(NAME save_coordinator_tests COMMAND save_coordinator_tests)
+
+# save.pre_save v1.0：观察型保存前通知注册表（纯逻辑）。
+add_executable(save_pre_save_tests
+    test_save_pre_save.cpp
+    ${CPP_DIR}/plugins/core.save/save_pre_save.cpp
+)
+target_include_directories(save_pre_save_tests PRIVATE ${CPP_DIR})
+target_compile_features(save_pre_save_tests PRIVATE cxx_std_17)
+set_target_properties(save_pre_save_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(save_pre_save_tests PRIVATE Threads::Threads)
+add_test(NAME save_pre_save_tests COMMAND save_pre_save_tests)
 
 add_executable(save_journal_tests
     test_save_journal.cpp

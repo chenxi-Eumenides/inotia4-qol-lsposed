@@ -1,4 +1,5 @@
 #include "contracts/save_facts.h"
+#include "contracts/save_pre_save.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/save_port.h"
 #include "contracts/game_ports/save_transaction_port.h"
@@ -324,13 +325,16 @@ int main() {
                       qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(descriptor.optional_requires[1].id,
                       qol::contracts::kHttpDispatchCapabilityId) == 0);
-    CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 3 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kSaveFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
     CHECK(std::strcmp(descriptor.provides[1].id, kQolSlotDataCapabilityId) == 0);
     CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 0);
     CHECK(descriptor.provides[1].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[2].id, qol::contracts::kSavePreSaveCapabilityId) == 0);
+    CHECK(descriptor.provides[2].version.major == 1 && descriptor.provides[2].version.minor == 0);
+    CHECK(descriptor.provides[2].iface != nullptr);
     CHECK(descriptor.port_count == 3 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_SAVE);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_SAVE_WRITE);

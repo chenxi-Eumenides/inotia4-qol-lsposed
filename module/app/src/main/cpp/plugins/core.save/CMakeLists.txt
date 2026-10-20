@@ -4,4 +4,5 @@ add_library(qol_plugin_core.save STATIC
     save_journal.cpp
     save_transition.cpp
     save_coordinator.cpp
+    save_pre_save.cpp
 )

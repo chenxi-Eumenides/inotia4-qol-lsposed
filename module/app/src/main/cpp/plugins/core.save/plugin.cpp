@@ -1,5 +1,6 @@
 #include "plugin.h"
 #include "save_coordinator.h"
+#include "save_pre_save.h"
 #include "save_transition.h"
 #include "slot_data_provider.h"
 
@@ -17,6 +18,7 @@
 #include "contracts/game_ports/save_write_port.h"
 #include "contracts/http.h"
 #include "contracts/save_facts.h"
+#include "contracts/save_pre_save.h"
 #include "contracts/save_route.h"
 #include "contracts/runtime_hooks.h"
 
@@ -35,10 +37,37 @@ constexpr contracts::CapabilityRequirement kOptionalHttpRequires[] = {
 };
 
 const contracts::QolSavePort* g_port = nullptr;
+const contracts::QolHostSdk* g_sdk = nullptr;
 
 QolResult not_ready() {
     return contracts::error(kQolErrNotReady, "save facts not ready", 20);
 }
+
+QolResult pre_save_unavailable() {
+    return contracts::error(kQolErrNotReady, "pre_save unavailable", 20);
+}
+
+// 保存前观察者只接受已签发 owner token；观察型接口无返回值，注册表本身不做保存阻断。
+QolResult pre_save_register(contracts::QolOwnerToken owner,
+                            contracts::SavePreSaveObserverFn fn, void* user, uint64_t* out_id) {
+    if (g_sdk == nullptr || g_sdk->owner_verify_token == nullptr) return pre_save_unavailable();
+    const QolResult allowed = g_sdk->owner_verify_token(owner);
+    if (!contracts::succeeded(allowed)) return allowed;
+    return save_pre_save::register_observer(owner, fn, user, out_id);
+}
+
+QolResult pre_save_unregister(contracts::QolOwnerToken owner, uint64_t id) {
+    if (g_sdk == nullptr || g_sdk->owner_verify_token == nullptr) return pre_save_unavailable();
+    const QolResult allowed = g_sdk->owner_verify_token(owner);
+    if (!contracts::succeeded(allowed)) return allowed;
+    return save_pre_save::unregister_observer(owner, id);
+}
+
+constexpr contracts::SavePreSaveApi kSavePreSaveApi{
+    {sizeof(contracts::SavePreSaveApi), 1, 0},
+    &pre_save_register,
+    &pre_save_unregister,
+};
 
 QolResult slot_state(int32_t slot, int32_t* out_state) {
     if (g_port == nullptr || g_port->read.slot_state == nullptr) return not_ready();
@@ -89,6 +118,7 @@ constexpr contracts::SaveFactsApi kSaveFactsApi{
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kSaveFactsCapabilityId, contracts::kSaveFactsVersion, &kSaveFactsApi},
     {contracts::kQolSlotDataCapabilityId, contracts::kQolSlotDataVersion, &slot_data_api()},
+    {contracts::kSavePreSaveCapabilityId, contracts::kSavePreSaveVersion, &kSavePreSaveApi},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -114,7 +144,6 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
 // 经 Adapter 探针判定，仅在读档转换窗口内放行。
 
 const contracts::QolSaveTransactionPort* g_save_tx = nullptr;
-const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 contracts::QolOwnerToken g_owner = 0;
 uint64_t g_save_route_binding = 0;
@@ -1013,6 +1042,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kSaveWriteHandlerId);
     }
     log_message(ctx.sdk, "[core.save] provider deactivate");
+    save_pre_save::unregister_owner(g_owner);
     g_save_tx = nullptr;
     g_save_write = nullptr;
     g_sdk = nullptr;
@@ -1077,7 +1107,7 @@ const contracts::PluginDescriptor kDescriptor = {
     0, nullptr,
     static_cast<uint32_t>(sizeof(kOptionalHttpRequires) / sizeof(kOptionalHttpRequires[0])),
     kOptionalHttpRequires,
-    2, kProvides,
+    3, kProvides,
     static_cast<uint32_t>(sizeof(kResources) / sizeof(kResources[0])), kResources,
     0, nullptr,
     &plugin_install, &plugin_deactivate, &plugin_on_enabled, &plugin_on_disabled,

@@ -9,6 +9,7 @@
 #include "infra/store.h"
 #include "plugins/core.save/save_coordinator.h"
 #include "plugins/core.save/save_journal.h"
+#include "plugins/core.save/save_pre_save.h"
 #include "plugins/core.save/slot_data_provider.h"
 
 #include <dirent.h>
@@ -287,6 +288,14 @@ QolResult on_load(void*, const QolSlotDataContext*, uint32_t, uint32_t, const ui
     return ok();
 }
 int g_capture_calls = 0;
+int g_pre_save_calls = 0;
+int g_pre_save_capture_calls = -1;
+int32_t g_pre_save_slot = -1;
+void on_pre_save(void*, int32_t slot) {
+    ++g_pre_save_calls;
+    g_pre_save_capture_calls = g_capture_calls;
+    g_pre_save_slot = slot;
+}
 QolResult on_capture(void* user, const QolSlotDataContext*, uint8_t* out, uint64_t, uint64_t* size) {
     ++g_capture_calls;
     ++static_cast<Consumer*>(user)->captures;
@@ -365,6 +374,10 @@ int main() {
     CHECK(succeeded(save_coordinator_initialize(provider, &qol::host::owner_verify_token, &kBackend,
                                                 &kOperation, &kAdapter, &is_main)));
     CHECK(save_coordinator_installed());
+    save_pre_save::reset_for_test();
+    uint64_t pre_save_id = 0;
+    CHECK(succeeded(
+        save_pre_save::register_observer(provider, &on_pre_save, nullptr, &pre_save_id)));
 
     Consumer consumer_state;
     QolSlotDataRequest initial = 0;
@@ -387,6 +400,11 @@ int main() {
           original.result_valid == 1 && original.original_result == 42);
     g_adapter.original_result = 1;
     CHECK(g_capture_calls == 1 && consumer_state.captures == 1);
+    // save.pre_save：通知发生在 capture 之前（观察者看到的 capture 计数仍为 0）。
+    CHECK(g_pre_save_calls == 1);
+    CHECK(g_pre_save_slot == 0);
+    CHECK(g_pre_save_capture_calls == 0);
+    CHECK(succeeded(save_pre_save::unregister_observer(provider, pre_save_id)));
     // B5：prepared/confirmed/final 三候选基于同一容器一次预约。
     CHECK(g_last_reserve_candidates == 3);
     // request_write（SlotBound）会先 complete(kStaged)；committed 终态追加 kCommitted。
