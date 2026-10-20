@@ -370,16 +370,15 @@ void sd_complete(void*, const qol::contracts::QolSlotDataContext* ctx, uint32_t 
         autosell_set_store_status(ctx->session.slot, ctx->session.slot, latest_durable);
     AUTOSELL_LOG_INFO("slot data write slot=%d committed=%d", ctx->session.slot, committed ? 1 : 0);
     if (committed && context_valid) {
-        uint64_t epoch = 0;
         bool dirty = false;
         {
             std::lock_guard<std::mutex> lock(g_store_mtx);
             dirty = ctx->session.slot >= 0 && ctx->session.slot < kSlotCount &&
                     g_slots[static_cast<size_t>(ctx->session.slot)].dirty;
-            epoch = g_epoch;
         }
-        if (dirty && epoch != 0 && !request_dirty_write(ctx->session.slot, epoch))
-            AUTOSELL_LOG_WARN("slot data newer revision remains dirty slot=%d", ctx->session.slot);
+        if (dirty)
+            AUTOSELL_LOG_INFO("slot data newer revision remains dirty; retry task will flush slot=%d",
+                              ctx->session.slot);
     }
 }
 
@@ -614,43 +613,31 @@ bool autosell_store_commit_config(const autosell::Config& config) {
     std::unique_lock<std::mutex> commit_lock(g_config_commit_mtx);
     {
         std::lock_guard<std::mutex> lock(g_store_mtx);
-        if (g_loaded_slot < 0 && g_epoch == 0) {
-            if (!g_pending_intent || !same_config(g_pending_config, config)) {
-                if (g_revision == UINT64_MAX) {
-                    AUTOSELL_LOG_WARN("config change rejected; revision exhausted without session");
-                    return false;
-                }
-                g_pending_config = config;
-                g_pending_revision = ++g_revision;
-                g_pending_intent = true;
-            }
-        } else {
-            if (!g_load_ready) {
-                AUTOSELL_LOG_WARN("config write rejected while slot session is not loaded");
+        if (g_loaded_slot < 0 || g_epoch == 0) {
+            AUTOSELL_LOG_WARN("config write rejected without active slot session");
+            return false;
+        }
+        if (!g_load_ready) {
+            AUTOSELL_LOG_WARN("config write rejected while slot session is not loaded");
+            return false;
+        }
+        slot = g_loaded_slot;
+        epoch = g_epoch;
+        auto& state = g_slots[static_cast<size_t>(slot)];
+        if (!state.has_config || !same_config(state.config, config)) {
+            if (g_revision == UINT64_MAX) {
+                AUTOSELL_LOG_WARN("config change rejected slot=%d; revision exhausted", slot);
                 return false;
             }
-            slot = g_loaded_slot;
-            epoch = g_epoch;
-            auto& state = g_slots[static_cast<size_t>(slot)];
-            if (!state.has_config || !same_config(state.config, config)) {
-                if (g_revision == UINT64_MAX) {
-                    AUTOSELL_LOG_WARN("config change rejected slot=%d; revision exhausted", slot);
-                    return false;
-                }
-                state.config = config;
-                state.has_config = true;
-                state.revision = ++g_revision;
-                state.dirty = true;
-            }
-            write_needed = state.dirty;
+            state.config = config;
+            state.has_config = true;
+            state.revision = ++g_revision;
+            state.dirty = true;
         }
+        write_needed = state.dirty;
     }
     autosell_apply_config(config);
     commit_lock.unlock();
-    if (slot < 0) {
-        AUTOSELL_LOG_INFO("config intent staged until a slot session loads");
-        return false;
-    }
     const bool accepted = !write_needed || request_dirty_write(slot, epoch);
     if (write_needed) autosell_set_store_status(slot, slot, false);
     if (!accepted)

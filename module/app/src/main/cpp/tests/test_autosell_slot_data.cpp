@@ -46,6 +46,10 @@ bool g_hold_next_write = false;
 int g_write_count = 0;
 int g_callback_count = 0;
 int g_request_count = 0;
+int g_query_count = 0;
+int g_requests_during_complete = 0;
+int g_queries_during_complete = 0;
+bool g_inside_complete = false;
 QolFrameHandler g_retry_handler = nullptr;
 void* g_retry_context = nullptr;
 uint64_t g_retry_task_id = 700;
@@ -54,6 +58,7 @@ QolSlotDataContext g_pending_context{};
 std::string g_pending_payload;
 bool g_submit_new_revision_in_request = false;
 bool g_submit_revision_after_sync_complete = false;
+bool g_submit_revision_before_complete = false;
 bool g_fail_pending_during_unregister = false;
 autosell::Config g_new_revision{};
 
@@ -115,7 +120,13 @@ void finish_write(QolSlotDataRequest request) {
     section.bytes = payload;
     ++g_write_count;
     ++g_callback_count;
+    if (g_submit_revision_before_complete) {
+        g_submit_revision_before_complete = false;
+        CHECK(autosell_store_commit_config(g_new_revision));
+    }
+    g_inside_complete = true;
     g_spec.complete(g_spec.user, &ctx, static_cast<uint32_t>(QolSlotDataOutcome::kCommitted));
+    g_inside_complete = false;
     settle(request, ok(), static_cast<uint32_t>(QolSlotDataRequestState::kCompleted));
 }
 
@@ -129,6 +140,7 @@ QolResult fake_request_write(QolSlotDataHandle handle, uint64_t epoch,
         g_fail_next_write = false;
         return failure(kQolErrBlocked, "injected write request failure");
     }
+    if (g_inside_complete) ++g_requests_during_complete;
     ++g_request_count;
     const QolSlotDataRequest request = ++g_next_request;
     *out_request = request;
@@ -210,6 +222,8 @@ QolResult fake_unregister(QolSlotDataHandle handle, QolSlotDataRequest* out_requ
 }
 
 QolResult fake_query(QolSlotDataRequest request, QolSlotDataStatus* out_status) {
+    ++g_query_count;
+    if (g_inside_complete) ++g_queries_during_complete;
     if (out_status == nullptr || out_status->size < sizeof(QolSlotDataStatus))
         return failure(kQolErrInvalidArgument, "invalid status");
     if (request == g_pending_request) {
@@ -238,6 +252,10 @@ void reset_disk_and_metrics() {
     g_write_count = 0;
     g_callback_count = 0;
     g_request_count = 0;
+    g_query_count = 0;
+    g_requests_during_complete = 0;
+    g_queries_during_complete = 0;
+    g_inside_complete = false;
     g_fail_next_write = false;
     g_hold_next_write = false;
     g_pending_request = 0;
@@ -245,6 +263,7 @@ void reset_disk_and_metrics() {
     g_last_request_id = 0;
     g_submit_new_revision_in_request = false;
     g_submit_revision_after_sync_complete = false;
+    g_submit_revision_before_complete = false;
     g_fail_pending_during_unregister = false;
 }
 
@@ -386,6 +405,10 @@ void test_inflight_revision_completion_and_frame_retry(const QolSlotDataApi& api
     CHECK(g_pending_request != 0);
     const auto old_request = g_pending_request;
     finish_write(old_request);
+    CHECK(g_write_count == 1);
+    CHECK(g_disk[0].bytes.find("\"rarity\":2") != std::string::npos);
+    CHECK(g_request_count == 1);
+    run_retry_frame(0);
     CHECK(g_write_count == 2);
     CHECK(g_disk[0].bytes.find("\"rarity\":3") != std::string::npos);
     CHECK(g_request_count == 2);
@@ -396,6 +419,9 @@ void test_inflight_revision_completion_and_frame_retry(const QolSlotDataApi& api
     CHECK(autosell_store_commit_config(sample(5)));
     CHECK(g_request_count == 3);
     finish_write(successful_old_request);
+    CHECK(g_write_count == 3);
+    CHECK(g_request_count == 3);
+    run_retry_frame(60);
     CHECK(g_write_count == 4);
     CHECK(g_request_count == 4);
     CHECK(g_disk[0].bytes.find("\"rarity\":5") != std::string::npos);
@@ -453,6 +479,30 @@ void test_synchronous_complete_before_request_id(const QolSlotDataApi& api) {
     autosell_store_unregister();
 }
 
+void test_complete_defers_newer_revision_to_retry_task(const QolSlotDataApi& api) {
+    reset_disk_and_metrics();
+    register_consumer(api);
+    CHECK(invoke_load(0, 252, static_cast<uint32_t>(QolSlotDataPresence::kMissing), 0, {}));
+
+    g_hold_next_write = true;
+    CHECK(autosell_store_commit_config(sample(2)));
+    const QolSlotDataRequest request = g_pending_request;
+    CHECK(request != 0);
+    g_new_revision = sample(5);
+    g_submit_revision_before_complete = true;
+    const int requests_before_complete = g_request_count;
+    finish_write(request);
+
+    CHECK(g_requests_during_complete == 0);
+    CHECK(g_queries_during_complete == 0);
+    CHECK(g_request_count == requests_before_complete);
+    CHECK(g_disk[0].bytes.find("\"rarity\":2") != std::string::npos);
+    run_retry_frame(0);
+    CHECK(g_request_count == requests_before_complete + 1);
+    CHECK(g_disk[0].bytes.find("\"rarity\":5") != std::string::npos);
+    autosell_store_unregister();
+}
+
 void test_unregistered_dirty_epoch_recovery(const QolSlotDataApi& api) {
     reset_disk_and_metrics();
     register_consumer(api);
@@ -490,7 +540,7 @@ void test_unregistered_dirty_epoch_recovery(const QolSlotDataApi& api) {
     autosell_store_unregister();
 }
 
-void test_pending_intent_slot_isolation_and_unregister(const QolSlotDataApi& api) {
+void test_no_session_rejection_and_slot_isolation(const QolSlotDataApi& api) {
     reset_disk_and_metrics();
     register_consumer(api);
     CHECK(invoke_load(0, 31, static_cast<uint32_t>(QolSlotDataPresence::kMissing), 0, {}));
@@ -515,28 +565,31 @@ void test_pending_intent_slot_isolation_and_unregister(const QolSlotDataApi& api
     const std::string slot_zero_updated = g_disk[0].bytes;
 
     autosell_store_unregister();
+    const auto runtime_before_missing_session_commit = autosell_get_runtime_config();
     CHECK(!autosell_store_commit_config(sample(4)));
-    CHECK(autosell_get_runtime_config().rarity == 4);
+    CHECK(same(autosell_get_runtime_config(), runtime_before_missing_session_commit));
     g_disk[1].present = true;
     g_disk[1].version = 2;
     g_disk[1].bytes = autosell_config_to_json(sample(1));
+    const std::string slot_one_original = g_disk[1].bytes;
     register_consumer(api);
     CHECK(!invoke_load(1, 34, static_cast<uint32_t>(QolSlotDataPresence::kUnreadable), 2, {}));
     CHECK(!autosell_store_session_matches(1));
     CHECK(!autosell_scan_session_active(1));
-    CHECK(same(autosell_get_runtime_config(), sample(4)));
+    CHECK(same(autosell_get_runtime_config(), runtime_before_missing_session_commit));
     CHECK(!invoke_load(1, 34, static_cast<uint32_t>(QolSlotDataPresence::kVersionUnsupported), 9, {}));
     CHECK(!autosell_scan_session_active(1));
-    CHECK(same(autosell_get_runtime_config(), sample(4)));
+    CHECK(same(autosell_get_runtime_config(), runtime_before_missing_session_commit));
     CHECK(!invoke_load(1, 34, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 2, "{bad"));
     CHECK(!autosell_scan_session_active(1));
-    CHECK(same(autosell_get_runtime_config(), sample(4)));
+    CHECK(same(autosell_get_runtime_config(), runtime_before_missing_session_commit));
     autosell_store_unregister();
     register_consumer(api);
     CHECK(invoke_load(1, 35, static_cast<uint32_t>(QolSlotDataPresence::kPresent), 2,
                       autosell_config_to_json(sample(1))));
     CHECK(g_disk[1].present && g_disk[1].version == 2);
-    CHECK(g_disk[1].bytes.find("\"rarity\":4") != std::string::npos);
+    CHECK(same(autosell_get_runtime_config(), sample(1)));
+    CHECK(g_disk[1].bytes == slot_one_original);
     CHECK(g_disk[0].bytes == slot_zero_updated);
 
     const int callbacks_at_terminal = g_callback_count;
@@ -576,8 +629,9 @@ int main() {
     test_inflight_revision_completion_and_frame_retry(api);
     test_retry_task_owned_by_lifecycle(api);
     test_synchronous_complete_before_request_id(api);
+    test_complete_defers_newer_revision_to_retry_task(api);
     test_unregistered_dirty_epoch_recovery(api);
-    test_pending_intent_slot_isolation_and_unregister(api);
+    test_no_session_rejection_and_slot_isolation(api);
     std::printf("autosell_slot_data_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

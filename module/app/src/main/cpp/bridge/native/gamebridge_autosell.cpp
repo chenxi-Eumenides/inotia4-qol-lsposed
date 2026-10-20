@@ -54,8 +54,7 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
         env->ReleaseStringUTFChars(specialJson, special_chars);
     }
     // 更新运行时配置并经 autosell slot-data participant 按当前 session 即时持久化。
-    autosell_store_commit_config(cfg);
-    return JNI_TRUE;
+    return autosell_store_commit_config(cfg) ? JNI_TRUE : JNI_FALSE;
 #endif
 }
 
