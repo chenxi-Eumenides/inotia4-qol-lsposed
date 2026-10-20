@@ -74,6 +74,9 @@ enum class QolUiRootKind : uint32_t {
     kStoreItemRoot = 3,
     kMixBagContainer = 4,
     kMixItemRoot = 5,
+    // 主菜单「更多游戏」按钮的父控件（由 Adapter 的主菜单快照证明存活后返回）。
+    // 用于把入口控件挂在主菜单树里，不替换原按钮。
+    kMainMenuParent = 6,
 };
 
 struct UiRect {

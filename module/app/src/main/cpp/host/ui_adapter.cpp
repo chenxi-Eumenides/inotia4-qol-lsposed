@@ -686,6 +686,20 @@ QolResult control_parent(QolUiHandle control, QolUiHandle* out) {
 
 QolResult find_root(contracts::QolUiRootKind kind, QolUiHandle* out) {
     if (out == nullptr) return invalid_argument();
+    if (kind == contracts::QolUiRootKind::kMainMenuParent) {
+        // 主菜单父控件不在 game/access 的固定根槽里：用当前菜单树快照证明后返回。
+        QolUiHandle original = nullptr;
+        QolUiHandle parent = nullptr;
+        int32_t original_in_tree = 0;
+        int32_t ignored_probe_in_tree = 0;
+        if (!ui_main_menu_live_tree_snapshot(nullptr, &original, &parent, &original_in_tree,
+                                             &ignored_probe_in_tree) ||
+            parent == nullptr) {
+            return not_ready();
+        }
+        *out = parent;
+        return contracts::ok();
+    }
     *out = ui_find_root(static_cast<uint32_t>(kind));
     return *out == nullptr ? not_ready() : contracts::ok();
 }

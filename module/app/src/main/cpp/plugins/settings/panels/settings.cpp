@@ -34,8 +34,6 @@ constexpr int64_t kBackAbsX = contracts::ui_theme::kNavBoxAbsX;
 constexpr int64_t kBackAbsY = contracts::ui_theme::kNavBoxAbsY;
 constexpr int64_t kBackW = contracts::ui_theme::kNavBoxW;
 constexpr int64_t kBackH = contracts::ui_theme::kNavBoxH;
-constexpr int32_t kNativeControlActive = 0x20;
-constexpr int32_t kNativeControlInactive = 0x21;
 constexpr size_t kFeatureControlReadActualSize =
     offsetof(contracts::QolFeatureControlApi, read_actual) +
     sizeof(((contracts::QolFeatureControlApi*)nullptr)->read_actual);
@@ -720,260 +718,41 @@ const char* ui_screen_name() {
 void more_games_clicked(void*) {
     if (plugin_enabled()) (void)settings_panels_open("settings");
 }
-QolUiHandle g_more_games_original = nullptr;
-QolUiHandle g_more_games_replacement = nullptr;
-bool g_more_games_original_active = false;
-bool g_more_games_original_active_valid = false;
-bool g_more_games_binding_ready = false;
-std::atomic<int32_t> g_more_games_bind{0};
-std::atomic<bool> g_more_games_error{false};
-bool release_more_games_runtime();
+// 主菜单入口齿轮：与原版「更多游戏」按钮同父，放在其右侧 10px；尺寸为自动出售
+// 入口（68）的 2 倍。原版按钮照常显示，不做替换/隐藏。
+contracts::QolUiAnchoredButton g_main_menu_gear{};
 
-// More Games 绑定诊断：每个 stage 在固定 32 槽静态表里各存一份四值，只有该 stage 的数值变化
-// 时才输出（consumer/reject/状态迁移交替出现不会互相顶掉）。表满后不再登记新 stage（不循环
-// 覆盖）。只记录尾槽档位、返回码与 active 实际值，不记录控件地址或文本。
-void log_more_games_stage(const char* stage, int64_t a, int64_t b, int64_t c, int64_t d) {
-    struct Slot {
-        const char* stage;
-        int64_t v[4];
-    };
-    constexpr size_t kSlots = 32;
-    static Slot slots[kSlots] = {};
-    Slot* slot = nullptr;
-    for (size_t i = 0; i < kSlots; ++i) {
-        if (slots[i].stage == stage) {
-            slot = &slots[i];
-            break;
-        }
+QolResult main_menu_gear_layout(void* parent, UiRect* out_rect, void* user) {
+    (void)user;
+    if (parent == nullptr || out_rect == nullptr || g_ui == nullptr ||
+        g_ui->main_menu_more_games_snapshot == nullptr) {
+        return contracts::error(kQolErrNotReady, "menu snapshot unavailable", 25);
     }
-    if (slot == nullptr) {
-        for (size_t i = 0; i < kSlots; ++i) {
-            if (slots[i].stage == nullptr) {
-                slots[i].stage = stage;
-                slot = &slots[i];
-                break;
-            }
-        }
+    QolUiHandle original = nullptr;
+    QolUiHandle snapshot_parent = nullptr;
+    UiRect rect{};
+    const QolResult snapshot =
+        g_ui->main_menu_more_games_snapshot(&original, &snapshot_parent, &rect);
+    if (!contracts::succeeded(snapshot) || original == nullptr || snapshot_parent != parent ||
+        rect.w <= 0 || rect.h <= 0) {
+        // 主菜单树未就位/已切换：锚定层保留状态，下一帧重试。
+        return contracts::error(kQolErrNotReady, "more games not ready", 20);
     }
-    if (slot == nullptr) return;  // 表满：只丢弃新 stage，不覆盖已有记录
-    if (slot->v[0] == a && slot->v[1] == b && slot->v[2] == c && slot->v[3] == d) return;
-    slot->v[0] = a;
-    slot->v[1] = b;
-    slot->v[2] = c;
-    slot->v[3] = d;
-    CORE_UI_LOG_INFO("more-games stage=%s a=%lld b=%lld c=%lld d=%lld", stage,
-                     static_cast<long long>(a), static_cast<long long>(b),
-                     static_cast<long long>(c), static_cast<long long>(d));
+    constexpr int64_t kGearSize = 136;  // 自动出售入口 68 的 2 倍
+    constexpr int64_t kGap = 10;
+    *out_rect = {rect.x + rect.w + kGap, rect.y + (rect.h - kGearSize) / 2, kGearSize, kGearSize};
+    static UiRect last_menu_rect{};
+    if (last_menu_rect.x != rect.x || last_menu_rect.y != rect.y ||
+        last_menu_rect.w != rect.w || last_menu_rect.h != rect.h) {
+        last_menu_rect = rect;
+        CORE_UI_LOG_INFO("main-menu more-games rect=(%lld,%lld,%lld,%lld) gear=(%lld,%lld,%lld,%lld)",
+                         static_cast<long long>(rect.x), static_cast<long long>(rect.y),
+                         static_cast<long long>(rect.w), static_cast<long long>(rect.h),
+                         static_cast<long long>(out_rect->x), static_cast<long long>(out_rect->y),
+                         static_cast<long long>(out_rect->w), static_cast<long long>(out_rect->h));
+    }
+    return contracts::ok();
 }
-
-class RuntimeMoreGamesOriginalStateOps final : public MoreGamesOriginalStateOps {
-public:
-    explicit RuntimeMoreGamesOriginalStateOps(QolUiHandle control) : control_(control) {}
-
-    bool set_show(bool shown) override {
-        return g_ui != nullptr && g_ui->set_control_show != nullptr &&
-            contracts::succeeded(g_ui->set_control_show(control_, shown ? 1 : 0));
-    }
-    bool set_enabled(bool enabled) override {
-        return g_ui != nullptr && g_ui->set_button_enabled != nullptr &&
-            contracts::succeeded(g_ui->set_button_enabled(control_, enabled ? 1 : 0));
-    }
-    bool set_active(bool active) override {
-        return g_ui != nullptr && g_ui->main_menu_more_games_set_active != nullptr &&
-            contracts::succeeded(g_ui->main_menu_more_games_set_active(
-                control_, active ? 1 : 0));
-    }
-
-private:
-    QolUiHandle control_;
-};
-
-class RuntimeMoreGamesBindOps final : public MoreGamesBindOps {
-public:
-    MoreGamesBindingState binding_state() override {
-        if (!g_more_games_binding_ready || g_more_games_original == nullptr ||
-            g_more_games_replacement == nullptr ||
-            g_ui == nullptr || g_ui->main_menu_more_games_snapshot == nullptr ||
-            g_components == nullptr || g_components->main_menu_text_button_is_live == nullptr) {
-            return MoreGamesBindingState::kNeedsReplace;
-        }
-        QolUiHandle current = nullptr;
-        QolUiHandle parent = nullptr;
-        UiRect rect{};
-        const QolResult snapshot = g_ui->main_menu_more_games_snapshot(&current, &parent, &rect);
-        if (!contracts::succeeded(snapshot)) return MoreGamesBindingState::kUnknown;
-        if (current != g_more_games_original) {
-            return MoreGamesBindingState::kNeedsReplace;
-        }
-        uint8_t live = 0;
-        const QolResult result = g_components->main_menu_text_button_is_live(
-            g_more_games_replacement, &live);
-        if (result.code == kQolErrNotFound) return MoreGamesBindingState::kNeedsReplace;
-        if (!contracts::succeeded(result)) return MoreGamesBindingState::kUnknown;
-        return live != 0 ? MoreGamesBindingState::kLive : MoreGamesBindingState::kNeedsReplace;
-    }
-    bool release() override { return release_more_games_runtime(); }
-    bool bind() override {
-        constexpr size_t end = offsetof(contracts::QolUiComponents, main_menu_decorated_button_create) +
-            sizeof(((contracts::QolUiComponents*)nullptr)->main_menu_decorated_button_create);
-        // 诊断只读已声明档位（minor/size 与所需 end），不读未受 size 保护的尾槽成员。
-        log_more_games_stage("consumer-ui", g_ui != nullptr ? g_ui->minor : -1,
-                             g_ui != nullptr ? static_cast<int64_t>(g_ui->size) : -1, 0, 0);
-        log_more_games_stage("consumer-components", g_components != nullptr ? g_components->minor : -1,
-                             g_components != nullptr ? static_cast<int64_t>(g_components->size) : -1,
-                             14, static_cast<int64_t>(end));
-        if (g_components == nullptr || g_components->minor < 14 || g_components->size < end ||
-            g_components->main_menu_decorated_button_create == nullptr) {
-            log_more_games_stage("reject-components-tail", 0, 0, 0, 0);
-            return false;
-        }
-        // Gate on the adapter ABI before touching any tail member or native control.
-        constexpr size_t kActiveAdapterSize =
-            offsetof(contracts::QolUiAdapter, main_menu_more_games_set_active) +
-            sizeof(((contracts::QolUiAdapter*)nullptr)->main_menu_more_games_set_active);
-        if (g_ui == nullptr || g_ui->major != contracts::kUiAdapterMajor ||
-            g_ui->size < kActiveAdapterSize ||
-            g_ui->main_menu_more_games_snapshot == nullptr ||
-            g_ui->control_active == nullptr || g_ui->set_control_show == nullptr ||
-            g_ui->set_button_enabled == nullptr ||
-            g_ui->main_menu_more_games_set_active == nullptr) {
-            // 函数指针属尾槽：只在 size 已保证覆盖整段 active tail 时才读；表前缀不足时
-            // 只记录 -1，避免在未受 size 保护的区间取字段。b 为缺失函数位图：
-            // 1 snapshot / 2 control_active / 4 set_control_show / 8 set_button_enabled /
-            // 16 set_active；c = minor，d = size，最后一位为所需 size。
-            const bool tail_verified =
-                g_ui != nullptr && g_ui->major == contracts::kUiAdapterMajor &&
-                g_ui->size >= kActiveAdapterSize;
-            int64_t missing = -1;
-            if (tail_verified) {
-                missing =
-                    (g_ui->main_menu_more_games_snapshot != nullptr ? 0 : 1) +
-                    (g_ui->control_active != nullptr ? 0 : 2) +
-                    (g_ui->set_control_show != nullptr ? 0 : 4) +
-                    (g_ui->set_button_enabled != nullptr ? 0 : 8) +
-                    (g_ui->main_menu_more_games_set_active != nullptr ? 0 : 16);
-            }
-            log_more_games_stage("reject-adapter-tail", missing,
-                                 g_ui != nullptr ? g_ui->minor : -1,
-                                 g_ui != nullptr ? static_cast<int64_t>(g_ui->size) : -1,
-                                 static_cast<int64_t>(kActiveAdapterSize));
-            return false;
-        }
-        QolUiHandle snapshot_original = nullptr;
-        QolUiHandle snapshot_parent = nullptr;
-        UiRect snapshot_rect{};
-        const QolResult snapshot = g_ui->main_menu_more_games_snapshot(
-            &snapshot_original, &snapshot_parent, &snapshot_rect);
-        if (!contracts::succeeded(snapshot) || snapshot_original == nullptr ||
-            snapshot_parent == nullptr) {
-            log_more_games_stage("reject-snapshot", snapshot.code,
-                                 snapshot_original != nullptr, snapshot_parent != nullptr, 0);
-            return false;
-        }
-        int32_t raw_active = 0;
-        if (!contracts::succeeded(g_ui->control_active(snapshot_original, &raw_active)) ||
-            (raw_active != kNativeControlActive && raw_active != kNativeControlInactive)) {
-            // active 实际值：读取侧只接受 0x20/0x21，其它值都会在此被拒。
-            log_more_games_stage("reject-active", raw_active, kNativeControlActive,
-                                 kNativeControlInactive, 0);
-            return false;
-        }
-        const bool original_active = raw_active == kNativeControlActive;
-        const contracts::UiMainMenuDecoratedButtonDesc desc{
-            "模块设置", contracts::kUiTextButtonFontDefault, 28, 290, 78, &more_games_clicked, nullptr};
-        QolUiHandle original = nullptr;
-        QolUiHandle replacement = nullptr;
-        const QolResult created = g_components->main_menu_decorated_button_create(
-            &desc, &original, &replacement);
-        if (!contracts::succeeded(created) || original == nullptr || replacement == nullptr) {
-            log_more_games_stage("reject-factory", created.code, original != nullptr,
-                                 replacement != nullptr, 0);
-            return false;
-        }
-        g_more_games_original = original;
-        g_more_games_replacement = replacement;
-        g_more_games_original_active = original_active;
-        g_more_games_original_active_valid = original == snapshot_original;
-        g_more_games_binding_ready = false;
-        if (original != snapshot_original) {
-            log_more_games_stage("reject-identity", 0, 0, 0, 0);
-            (void)release_more_games_runtime();
-            return false;
-        }
-        RuntimeMoreGamesOriginalStateOps state_ops(original);
-        if (!more_games_disable_original(state_ops, original_active)) {
-            log_more_games_stage("reject-disable-original", original_active, 0, 0, 0);
-            (void)release_more_games_runtime();
-            return false;
-        }
-        log_more_games_stage("bound", original_active, raw_active, 0, 0);
-        g_more_games_binding_ready = true;
-        return true;
-    }
-    bool btn_resolvable() override {
-        QolUiHandle current = nullptr;
-        QolUiHandle parent = nullptr;
-        UiRect rect{};
-        return g_ui != nullptr && g_ui->main_menu_more_games_snapshot != nullptr &&
-            contracts::succeeded(g_ui->main_menu_more_games_snapshot(&current, &parent, &rect)) &&
-            current != nullptr && parent != nullptr;
-    }
-    void mark_live() override {
-        log_more_games_stage("live", 0, 0, 0, 0);
-        g_more_games_bind.store(1);
-        g_more_games_error.store(false);
-    }
-    void mark_failed(bool resolvable) override {
-        log_more_games_stage("failed", resolvable, 0, 0, 0);
-        g_more_games_bind.store(0);
-        g_more_games_error.store(resolvable);
-    }
-    void mark_waiting() override {
-        // 与 released 区分：release 后主动等待下一次绑定，不是失败。
-        log_more_games_stage("waiting", 0, 0, 0, 0);
-        g_more_games_bind.store(0);
-        g_more_games_error.store(false);
-    }
-};
-
-class RuntimeMoreGamesDrawOps final : public MoreGamesDrawOps {
-public:
-    RuntimeMoreGamesDrawOps(void* group, int32_t x, int32_t y, void* loc,
-                            int32_t type, int32_t flip)
-        : group_(group), x_(x), y_(y), loc_(loc), type_(type), flip_(flip) {}
-
-    bool replacement_live() override {
-        if (g_more_games_original == nullptr || g_more_games_replacement == nullptr ||
-            g_components == nullptr || g_components->main_menu_text_button_is_live == nullptr) {
-            return false;
-        }
-        uint8_t live = 0;
-        const QolResult result = g_components->main_menu_text_button_is_live(
-            g_more_games_replacement, &live);
-        return contracts::succeeded(result) && live != 0;
-    }
-
-    bool draw_replacement() override {
-        if (g_components == nullptr || g_components->text_button_draw == nullptr) return false;
-        const QolResult result = g_components->text_button_draw(g_more_games_replacement);
-        return contracts::succeeded(result);
-    }
-
-    void draw_original() override {
-        // This callsite's final GRPX_DrawPart argument is zero. Adapter draw_part calls the
-        // resolved function directly, not the patched callsite, so fallback cannot recurse.
-        if (g_ui == nullptr || g_ui->draw_part == nullptr) return;
-        (void)g_ui->draw_part(group_, x_, y_, loc_, type_, flip_);
-    }
-
-private:
-    void* group_;
-    int32_t x_;
-    int32_t y_;
-    void* loc_;
-    int32_t type_;
-    int32_t flip_;
-};
 
 }  // namespace
 
@@ -1031,83 +810,45 @@ std::string data_settings_ui_open_option() {
     return result_ok();
 }
 void settings_release_more_games() {
-    if (!release_more_games_runtime()) {
-        g_more_games_bind.store(0);
-        g_more_games_error.store(false);
+    if (g_components != nullptr && g_components->anchored_button_release != nullptr) {
+        (void)g_components->anchored_button_release(&g_main_menu_gear);
+    } else {
+        g_main_menu_gear = {};
     }
 }
-namespace {
-bool release_more_games_runtime() {
-    if (g_more_games_replacement != nullptr) {
-        if (g_components == nullptr || g_components->destroy == nullptr) {
-            log_more_games_stage("reject-release-destroy-tail", 0, 0, 0, 0);
-            return false;
-        }
-        const QolResult destroyed = g_components->destroy(g_more_games_replacement);
-        if (!contracts::succeeded(destroyed) && destroyed.code != kQolErrNotFound) {
-            log_more_games_stage("reject-release-destroy", destroyed.code, 0, 0, 0);
-            return false;
-        }
-    }
-    if (g_more_games_original != nullptr) {
-        if (g_ui == nullptr || g_ui->main_menu_more_games_snapshot == nullptr) {
-            log_more_games_stage("reject-release-snapshot-tail", 0, 0, 0, 0);
-            return false;
-        }
-        QolUiHandle current = nullptr;
-        QolUiHandle parent = nullptr;
-        UiRect rect{};
-        const QolResult snapshot = g_ui->main_menu_more_games_snapshot(&current, &parent, &rect);
-        if (!contracts::succeeded(snapshot)) {
-            log_more_games_stage("reject-release-snapshot", snapshot.code, 0, 0, 0);
-            return false;
-        }
-        // A verified non-current original gets no native reads or writes.
-        if (current == g_more_games_original) {
-            RuntimeMoreGamesOriginalStateOps ops(current);
-            if (g_more_games_original_active_valid) {
-                if (!more_games_restore_original(true, g_more_games_original_active, ops)) {
-                    log_more_games_stage("reject-release-restore", g_more_games_original_active, 1, 0,
-                                         0);
-                    return false;
-                }
-            } else if (!ops.set_show(true) || !ops.set_enabled(true)) {
-                log_more_games_stage("reject-release-restore", g_more_games_original_active, 0, 0,
-                                     0);
-                return false;
-            }
-        }
-    }
-    log_more_games_stage("released", g_more_games_original_active, 0, 0, 0);
-    g_more_games_original = nullptr;
-    g_more_games_replacement = nullptr;
-    g_more_games_original_active = false;
-    g_more_games_original_active_valid = false;
-    g_more_games_binding_ready = false;
-    g_more_games_bind.store(0);
-    g_more_games_error.store(false);
-    return true;
-}
-}  // namespace
 const char* settings_more_games_bind_state() {
-    if (g_more_games_error.load()) return "error";
-    return g_more_games_bind.load() ? "live" : "waiting";
+    return g_main_menu_gear.mounted != 0 ? "live" : "waiting";
 }
 void settings_more_games_tick() {
-    RuntimeMoreGamesBindOps ops;
+    // 入口由主菜单绘制钩子每帧 ensure/draw；这里只处理关闭与离开主菜单。
     const bool on_main_menu = std::strcmp(ui_screen_name(), "main_menu") == 0;
-    if (!plugin_enabled()) {
-        if (on_main_menu) ops.release();
-        ops.mark_waiting();
-        return;
+    if (plugin_enabled() && on_main_menu) return;
+    if (g_components != nullptr && g_components->anchored_button_set_visible != nullptr) {
+        (void)g_components->anchored_button_set_visible(&g_main_menu_gear, 0);
     }
-    more_games_bind_tick(on_main_menu, ops);
 }
 
 void settings_main_menu_more_games_draw(void* group, int32_t x, int32_t y, void* loc,
                                         int32_t type, int32_t flip, int32_t unknown) {
     (void)unknown;
-    RuntimeMoreGamesDrawOps ops(group, x, y, loc, type, flip);
-    (void)more_games_draw(plugin_enabled(), ops);
+    // 原版「更多游戏」按钮照常绘制：本模块不再替换它，只在其右侧叠加齿轮入口。
+    if (g_ui != nullptr && g_ui->draw_part != nullptr) {
+        (void)g_ui->draw_part(group, x, y, loc, type, flip);
+    }
+    if (!plugin_enabled() || g_components == nullptr ||
+        g_components->anchored_button_ensure == nullptr ||
+        g_components->anchored_button_draw == nullptr) {
+        return;
+    }
+    const contracts::UiIconButtonDesc icon_desc{{0, 0, 136, 136}, 0x16, 0x00, 1, 1, "设置",
+        &more_games_clicked, nullptr, 0};
+    const contracts::UiAnchoredButtonDesc desc{
+        static_cast<uint32_t>(contracts::QolUiRootKind::kMainMenuParent), icon_desc};
+    uint8_t created = 0;
+    if (!contracts::succeeded(g_components->anchored_button_ensure(
+            &g_main_menu_gear, &desc, &main_menu_gear_layout, nullptr, &created))) {
+        return;
+    }
+    (void)g_components->anchored_button_draw(&g_main_menu_gear);
 }
 }  // namespace qol::features::core_ui

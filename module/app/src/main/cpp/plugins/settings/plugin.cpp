@@ -44,8 +44,8 @@ const contracts::CapabilityRequirement kOptionalHttpRequires[] = {
      {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
 };
 
-// DrawMainMenu makes a direct GRPX_DrawPart call for More Games; ControlObject::Show and
-// the child DrawProc do not replace this explicit sprite draw.
+// DrawMainMenu 对「更多游戏」按钮做一次显式 GRPX_DrawPart：该绘制钩子先照常绘制原版
+// 按钮，再由本插件在同一父控件上叠加主菜单入口齿轮（不替换原按钮）。
 const contracts::ResourceClaim kResources[] = {
     {
         "patch:settings.main_menu.more_games.draw",
@@ -56,7 +56,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "替换主菜单更多游戏按钮的显式 GRPX_DrawPart 绘制",
+        "主菜单更多游戏绘制点：照常绘制原版按钮并叠加模块入口齿轮",
         nullptr,
         120,
         reinterpret_cast<void*>(&core_ui::settings_main_menu_more_games_draw),

@@ -112,7 +112,7 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 | 借用自建原生 root（页面自建 `g_root`，先 destroy 子组件再删 root） | 插件 | 常规组件 API，并保证销毁顺序（先 `destroy` 子组件，再 `delete_control(root)`） |
 | 游戏原生子树（袋容器、商店/合成器容器）中的单图标按钮 | 游戏 | `anchored_button_ensure` + `anchored_button_draw`；关闭态用 `anchored_button_set_visible(0)` |
 | 游戏原生子树中的多控件/自定义 `CO_PROC`/自带 `control_data` | 游戏 | `anchored_control_ensure`；删除前用 `anchored_control_detach` 取回已证明存活的句柄 |
-| 主菜单按钮替换 | 游戏 | Adapter 的 `main_menu_text_button_is_live` + `main_menu_text_button_invalidate_binding`（历史实现的等价证明；保留现状） |
+| 主菜单入口（更多游戏右侧齿轮） | 游戏 | `anchored_button_ensure/draw` + `QolUiRootKind::kMainMenuParent`（Adapter 用主菜单快照证明父控件存活） |
 
 ### 实现约束
 
@@ -130,6 +130,7 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 - `autosell` 背包入口：`anchored_button_*`（`plugins/autosell/ui/panel.cpp`）。
 - `extension_bag` 装备页/商店/合成器页签：`anchored_control_*`（`runtime/tabs_ui.cpp`、`ui/store_tabs.cpp`、`ui/mix.cpp`），descriptor 可选依赖 `ui_components`。
 - 其余自建 root 面板（autosell 配置面板、save_backup、settings、debug 面板）：常规组件 API，无需锚定。
-- 主菜单替换：`main_menu_text_button_*` 既有机制（等价证明）。
+- 主菜单入口齿轮：`plugins/settings/panels/settings.cpp` 的 `settings_main_menu_more_games_draw`（原版按钮照常绘制 + 锚定齿轮 136×136、原按钮右侧 +10、垂直居中）。
+- `main_menu_text_button_is_live` 仍保留为 Adapter 的菜单身份证明原语（当前生产入口不再使用替换路径）。
 
 新增游戏树挂载时必须选择上表机制；不得再手写「root 指针相等即认为句柄有效」的判断。
