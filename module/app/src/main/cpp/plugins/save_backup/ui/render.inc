@@ -22,6 +22,7 @@ static void component_container(UiRect rect) {
 void root_decor_draw() {
     if (g_root == nullptr) return;
     component_container({0x10, 0x10, ROOT_W - 0x20, ROOT_H - 0x20});
+    if (g_dialog != DialogKind::kNone) return;
     component_container({OPS_COL_X, OPS_Y0 - 0x08, OPS_COL_W, 3 * OPS_BTN_H + 2 * OPS_BTN_GAP + 0x10});
     component_container({LIST_COL_X, FRAME_Y, LIST_COL_W, FRAME_H});
 }
@@ -33,6 +34,7 @@ void slot_btn_draw(void* ctrl) {
     if (index < 0) return;
     const bool selected = g_selected_slot == index;
     component_container(slot_btn_rect(index));
+    if (g_dialog != DialogKind::kNone) return;
     const UiRect rect = slot_btn_rect(index);
     if (!g_slots[index].exists) {
         char empty[32]; snprintf(empty, sizeof(empty), "存档%d 空", index + 1);
@@ -48,9 +50,9 @@ void slot_btn_draw(void* ctrl) {
              info.hero_level >= 0 ? std::to_string(info.hero_level).c_str() : "?");
     const std::string map = save_backup_map_name(info.map_id);
     snprintf(line2, sizeof(line2), "%s", map.empty() ? "未知地图" : map.c_str());
-    component_text(line1, static_cast<int>(rect.x + rect.w / 2), static_cast<int>(rect.y + 0x20),
+    component_text(line1, static_cast<int>(rect.x + rect.w / 2), static_cast<int>(rect.y + 0x18),
                    selected ? UI_GOLD : UI_OPTION_TEXT, 2, 1);
-    component_text(line2, static_cast<int>(rect.x + rect.w / 2), static_cast<int>(rect.y + 0x48),
+    component_text(line2, static_cast<int>(rect.x + rect.w / 2), static_cast<int>(rect.y + 0x34),
                    selected ? COLOR_TEXT_WHITE : UI_OPTION_TEXT, 2, 1);
 }
 
@@ -81,6 +83,10 @@ void list_btn_draw(void* ctrl) {
     const bool parsed = item->parsed;
     const bool selected = absolute == g_selected_backup;
     const UiRect rect = list_btn_rect(local);
+    if (g_dialog != DialogKind::kNone) {
+        component_container(rect);
+        return;
+    }
     if (!parsed) {
         component_text("加载中…", static_cast<int>(rect.x + 0x50), static_cast<int>(rect.y + 0x12), COLOR_TEXT_GRAY);
         return;
@@ -100,19 +106,20 @@ void list_btn_draw(void* ctrl) {
     char number[8]; snprintf(number, sizeof(number), "%d", absolute + 1);
     const uint32_t primary = selected ? UI_GOLD : UI_OPTION_TEXT;
     component_text(number, static_cast<int>(rect.x + 0x20), static_cast<int>(rect.y + 0x18), primary, 2, 1);
-    component_text(first, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x08), primary, 0, 1);
-    component_text(second, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x2C), COLOR_TEXT_WHITE, 0, 1);
+    component_text(first, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x02), primary, 0, 1);
+    component_text(second, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x1E), COLOR_TEXT_WHITE, 0, 1);
 }
 
 void auto_btn_draw(void* ctrl) {
     if (ctrl == nullptr || g_ui_components == nullptr) return;
     const UiRect rect = auto_btn_rect();
     component_container(rect);
-    component_text("auto", static_cast<int>(rect.x + 0x0C), static_cast<int>(rect.y + 0x22),
+    if (g_dialog != DialogKind::kNone) return;
+    component_text("auto", static_cast<int>(rect.x + 0x0C), static_cast<int>(rect.y + 0x1F),
                    g_selected_auto ? UI_GOLD : UI_OPTION_TEXT);
     if (!g_auto_backup_valid) {
         component_text(g_selected_slot < 0 ? "未选择存档槽" : "暂无自动备份",
-                       static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x22), COLOR_TEXT_GRAY);
+                       static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x1F), COLOR_TEXT_GRAY);
         return;
     }
     const BackupEntry& e = g_auto_backup;
@@ -123,9 +130,9 @@ void auto_btn_draw(void* ctrl) {
     time_t sec = static_cast<time_t>(e.export_time_ms / 1000); tm value{}; localtime_r(&sec, &value);
     char time_text[32]; strftime(time_text, sizeof(time_text), "%Y-%m-%d %H:%M", &value);
     snprintf(line2, sizeof(line2), "%s  #%.6s", time_text, e.checksum.c_str());
-    component_text(line1, static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x10),
+    component_text(line1, static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x12),
                    g_selected_auto ? UI_GOLD : UI_OPTION_TEXT);
-    component_text(line2, static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x34), COLOR_TEXT_WHITE);
+    component_text(line2, static_cast<int>(rect.x + 0x60), static_cast<int>(rect.y + 0x2E), COLOR_TEXT_WHITE);
 }
 
 void page_btn_draw(void* ctrl) {

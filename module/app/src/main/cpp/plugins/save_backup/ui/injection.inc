@@ -53,6 +53,8 @@ static void open_import_dialog() {
     g_dialog_checksum = entry->checksum;
     g_dialog_slot = g_selected_slot;
     g_dialog_auto = g_selected_auto;
+    g_dialog_opened_at = std::chrono::steady_clock::now();
+    set_dialog_controls_locked(true);
 }
 
 static void open_delete_dialog() {
@@ -66,6 +68,8 @@ static void open_delete_dialog() {
     g_dialog = slot_selected ? DialogKind::kDeleteSlot : DialogKind::kDeleteBackup;
     g_dialog_checksum = entry != nullptr ? entry->checksum : "";
     g_dialog_slot = slot_selected ? g_selected_slot : -1;
+    g_dialog_opened_at = std::chrono::steady_clock::now();
+    set_dialog_controls_locked(true);
 }
 
 static void execute_dialog_confirm() {
@@ -163,7 +167,11 @@ void component_action_clicked(void* user) {
         else if (action == 501 && g_page_index < g_total_pages - 1) ++g_page_index;
         rebuild_parse_queue_locked();
     } else if (action == 600) {
-        { std::lock_guard<std::mutex> lock(g_sbui_mtx); if (g_dialog == DialogKind::kNone) return; }
+        {
+            std::lock_guard<std::mutex> lock(g_sbui_mtx);
+            if (g_dialog == DialogKind::kNone ||
+                std::chrono::steady_clock::now() - g_dialog_opened_at < std::chrono::milliseconds(200)) return;
+        }
         execute_dialog_confirm();
     } else if (action == 601) {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);

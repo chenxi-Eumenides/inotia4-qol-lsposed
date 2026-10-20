@@ -187,6 +187,8 @@ QolResult load_data_fn(int32_t, void** out_data, int32_t* out_size) {
 int32_t g_current_slot = -1;
 bool g_current_slot_fails = false;
 bool g_current_slot_not_ready = false;
+int32_t g_world_state = 4;
+bool g_world_state_fails = false;
 int32_t g_slot_exists[3] = {0, 0, 0};
 int32_t g_slot_hero_index[3] = {-1, -1, -1};
 int32_t g_slot_hero_level[3] = {-1, -1, -1};
@@ -195,6 +197,13 @@ QolResult slot_exists_fn(int32_t slot, int32_t* out) {
     *out = g_slot_exists[slot];
     return contracts::ok();
 }
+QolResult world_state_fn(int32_t* out) {
+    if (g_world_state_fails) return contracts::error(kQolErrNotReady, "not ready", 9);
+    *out = g_world_state;
+    return contracts::ok();
+}
+const WorldFactsApi kWorldFacts{&world_state_fn, nullptr, nullptr, nullptr,
+                                nullptr,           nullptr, nullptr};
 QolResult slot_hero_index_fn(int32_t slot, int32_t* out) {
     *out = g_slot_hero_index[slot];
     return contracts::ok();
@@ -403,6 +412,7 @@ int main() {
     qol::infra::store::init(root.c_str());
     save_backup_init(data_dir.c_str(), root.c_str());
     save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(), nullptr, g_owner);
+    save_backup_bind_world_facts(&kWorldFacts);
 
     // 预置 slot0 sidecar 容器（module 来源），bundle 携带它使 sidecar 步骤真实执行。
     CHECK(qol::infra::store::reset_slot(0) == qol::infra::store::Status::kOk);
@@ -565,7 +575,8 @@ int main() {
         CHECK(read_file(keep_wh) == "KEEP-WH4");
     }
 
-    // ---- 导入门禁：游戏运行中（current_slot >= 0）拒绝，dat/sidecar 均不变 ----
+    // ---- 导入门禁：游戏运行中（world state != 4）拒绝，dat/sidecar 均不变 ----
+    g_world_state = 5;
     g_current_slot = 0;
     {
         const std::string in_game = save_backup_import_json(checksum.c_str(), 0);
@@ -576,7 +587,8 @@ int main() {
               qol::infra::store::Status::kOk);
         CHECK(gate_container == module_container);
     }
-    // ---- current_slot 读取失败 → fail-closed，不写任何文件 ----
+    // ---- world.facts 读取失败 → 回退 current_slot；失败 fail-closed ----
+    g_world_state_fails = true;
     g_current_slot_fails = true;
     {
         const std::string unavailable = save_backup_import_json(checksum.c_str(), 0);
@@ -587,8 +599,36 @@ int main() {
               qol::infra::store::Status::kOk);
         CHECK(gate_container == module_container);
     }
+    g_world_state_fails = false;
     g_current_slot_fails = false;
     g_current_slot = -1;
+    g_world_state = 4;
+
+    // ---- 门禁判定矩阵：world.facts 优先，失败回退 current_slot ----
+    {
+        // 主菜单（state=4）即使 current_slot 仍保留旧槽也允许；用不存在 checksum 证明越过了门禁。
+        g_world_state = 4;
+        g_current_slot = 0;
+        CHECK(save_backup_import_json("ffffffffffff", 0).find("backup not found") !=
+              std::string::npos);
+        // 非主菜单拒绝。
+        g_world_state = 5;
+        g_current_slot = -1;
+        CHECK(save_backup_import_json("ffffffffffff", 0).find("import requires main menu") !=
+              std::string::npos);
+        // world.facts 失败：回退 current_slot=-1 允许。
+        g_world_state_fails = true;
+        g_current_slot = -1;
+        CHECK(save_backup_import_json("ffffffffffff", 0).find("backup not found") !=
+              std::string::npos);
+        // world.facts 失败：回退 current_slot=0 拒绝。
+        g_current_slot = 0;
+        CHECK(save_backup_import_json("ffffffffffff", 0).find("import requires main menu") !=
+              std::string::npos);
+        g_world_state_fails = false;
+        g_current_slot = -1;
+        g_world_state = 4;
+    }
 
     // ---- 导出 fail-closed：单个 wh4 超过 4 MiB → 整次导出失败，不组装 bundle ----
     const std::string export_ok = save_backup_export_json(0);
@@ -617,10 +657,12 @@ int main() {
     CHECK(qol::infra::slot_operation::release(g_occupier, &blocker).ok == kQolOk);
 
     // ---- 无占用：import 放行（module 非空经 lease 显式入口），成功后 lease 释放 ----
-    // 主菜单真实形态：Adapter 返回 NotReady 且 out=-1，门禁必须放行而不是 fail-closed。
+    // 主菜单真实形态：world.facts 不可用且 current_slot 返回 NotReady/out=-1，回退门禁放行。
+    g_world_state_fails = true;
     g_current_slot_not_ready = true;
     const std::string imported = save_backup_import_json(checksum.c_str(), 0);
     g_current_slot_not_ready = false;
+    g_world_state_fails = false;
     CHECK(body_ok(imported));
     CHECK(read_file(dat_path) != original_dat);  // dat 已被 bundle 明文覆盖
     // lease 已释放：occupier 现在能 acquire 同槽。
@@ -710,9 +752,11 @@ int main() {
         CHECK(::access((save_dir + "/save1.dat").c_str(), F_OK) == 0);
 
         // 非主菜单：沿用现有门禁文案。
+        g_world_state = 5;
         g_current_slot = 0;
         const std::string gated = save_backup_import_auto_json(0, 0);
         g_current_slot = -1;
+        g_world_state = 4;
         CHECK(gated.find("import requires main menu") != std::string::npos);
 
         // 自动备份损坏：沿用现有读取错误文案。

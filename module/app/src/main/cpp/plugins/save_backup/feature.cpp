@@ -66,6 +66,7 @@ std::string g_sb_external_dir;
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
 const qol::contracts::SaveFactsApi* g_save_facts = nullptr;
+const qol::contracts::WorldFactsApi* g_world_facts = nullptr;
 const qol::contracts::QolSaveCallPort* g_save_call = nullptr;
 qol::contracts::QolOwnerToken g_owner_token = 0;
 
@@ -171,6 +172,22 @@ std::string result_error(const char* message) {
 // 导入门禁：仅在主菜单（未加载任何槽，current_slot == -1）允许覆盖存档；游戏运行中
 // 导入会与已加载槽的结构/文件冲突。current_slot 读取失败按不可用处理（fail-closed）。
 bool import_allowed_now(std::string& err) {
+    // world.facts state=4 为游戏主菜单；主菜单下 current_slot 可能仍保留上次槽号，不能单独依赖。
+    if (g_world_facts != nullptr && g_world_facts->state != nullptr) {
+        int32_t state = -1;
+        const QolResult world = g_world_facts->state(&state);
+        if (qol::contracts::succeeded(world)) {
+            if (state == 4) return true;
+            SB_LOG("save backup import gate: world state=%d (not main menu)", state);
+            err = "import requires main menu";
+            return false;
+        }
+        SB_LOG_WARN("save backup import gate: world state unavailable (code=%d), fallback current_slot",
+                    world.code);
+    } else {
+        SB_LOG_WARN("save backup import gate: world facts unavailable, fallback current_slot");
+    }
+
     if (g_save_facts == nullptr || g_save_facts->current_slot == nullptr) {
         err = "save state unavailable";
         return false;
@@ -180,13 +197,16 @@ bool import_allowed_now(std::string& err) {
     // 主菜单（未加载）时 Adapter 返回 NotReady 且 out=-1（game/adapter_ports/save_port.cpp:104-108），
     // 因此 NotReady 不能单独判为不可用；其余错误码 fail-closed。
     if (!qol::contracts::succeeded(result) && result.code != kQolErrNotReady) {
+        SB_LOG_WARN("save backup import gate: current_slot unavailable (code=%d)", result.code);
         err = "save state unavailable";
         return false;
     }
     if (current_slot >= 0) {
+        SB_LOG("save backup import gate: current_slot=%d (not main menu)", current_slot);
         err = "import requires main menu";
         return false;
     }
+    SB_LOG("save backup import gate: fallback current_slot=%d (main menu)", current_slot);
     return true;
 }
 
@@ -985,6 +1005,10 @@ void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
     g_save_facts = save_facts;
     g_save_call = save_call;
     g_owner_token = owner_token;
+}
+
+void save_backup_bind_world_facts(const qol::contracts::WorldFactsApi* world_facts) {
+    g_world_facts = world_facts;
 }
 
 const qol::contracts::QolHostSdk* save_backup_host_sdk() { return g_sdk; }

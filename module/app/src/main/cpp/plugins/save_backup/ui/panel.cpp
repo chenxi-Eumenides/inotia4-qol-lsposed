@@ -61,20 +61,18 @@
 #define AUTO_X LIST_COL_X
 #define FRAME_Y (AUTO_Y + AUTO_H + 0x0C)
 #define FRAME_BORDER 0x03
-#define LIST_ROW_H 0x3C               // 60
-#define LIST_ROW_GAP 0x04             // 行间缝隙；按钮高 = 0x46-4 = 0x42(66)
+#define LIST_ROW_H 0x3C               // 60px row pitch
+#define LIST_ROW_GAP 0x04             // 4px row gap; hit card height = 56px
 #define FRAME_H (5 * LIST_ROW_H + 2 * FRAME_BORDER - LIST_ROW_GAP)
-#define SLOT_ROW_H 0x68               // 104
-#define SLOT_ROW_GAP 0x04             // 按钮高 = 0x48-4 = 0x44(68)
+#define SLOT_ROW_H 0x68               // 104px slot pitch
+#define SLOT_ROW_GAP 0x04             // 4px gap; hit card height = 100px
 #define SLOT_FRAME_H (3 * SLOT_ROW_H + 2 * FRAME_BORDER - SLOT_ROW_GAP)
 #define LIST_COLS_PER_PAGE 5
 #define LIST_COLS_MAX 64
 // 公共水平中线 = 右框中心；左框顶 SLOT_FRAME_Y / 中栏顶 OPS_Y0 据此推出。
-//   CONTENT_MID_Y = FRAME_Y + FRAME_H/2 = 0x68 + 0xB0 = 0x118(280)
-//   SLOT_FRAME_Y  = CONTENT_MID_Y - SLOT_FRAME_H/2 = 0x118 - 0x6D = 0xAB(171)
-//   OPS_Y0        = CONTENT_MID_Y - (3*0x40 + 2*0x0A)/2 = 0x118 - 0x6A = 0xAE(174)
-//   三者中心：0xAB+0x6D = 0xAE+0x6A = 0x68+0xB0 = 0x118 ✓
-//   左框底 = 0xAB+0xDA = 0x185 < 右框底 0x68+0x160 = 0x1C8；左框与右框互不重叠（异 x）。
+//   FRAME_Y=172, FRAME_H=302 → CONTENT_MID_Y=323
+//   SLOT_FRAME_H=314 → SLOT_FRAME_Y=166; OPS_Y0=217
+//   左右框/中栏均围绕 y=323 对齐；分页行从 y=482 开始并在逻辑画布内结束。
 #define CONTENT_MID_Y (FRAME_Y + FRAME_H / 2)
 #define SLOT_FRAME_Y (CONTENT_MID_Y - SLOT_FRAME_H / 2)
 // 操作按钮组按三栏公共中线垂直居中。
@@ -190,7 +188,6 @@ bool g_panel_active = false;
 int g_state_id = -1;
 void* g_root = nullptr;
 const contracts::QolUiComponents* g_ui_components = nullptr;
-void* g_dialog_panel = nullptr;
 void* g_confirm_btn = nullptr;
 void* g_cancel_btn = nullptr;
 int g_close_delay_frames = 0;
@@ -247,6 +244,7 @@ uint32_t g_msg_color = UI_OPTION_TEXT;
 bool g_msg_is_error = false;
 enum class DialogKind { kNone, kImport, kDeleteSlot, kDeleteBackup };
 DialogKind g_dialog = DialogKind::kNone;
+std::chrono::steady_clock::time_point g_dialog_opened_at{};
 std::string g_dialog_checksum;
 int g_dialog_slot = -1;
 bool g_dialog_auto = false;
@@ -268,6 +266,8 @@ void component_action_clicked(void* user);
 
 // 列表按钮 rect 依赖当前页文件记录数，定义在 panel.inc。
 void sync_list_btn_rects_locked();
+UiRect dialog_button_rect(int index);
+void set_dialog_controls_locked(bool active);
 
 // 解析单条 Entry JSON（纯 CPU；调用方按当前页队列逐条调用）。
 void parse_backups_json(const std::string& json, std::vector<BackupEntry>& entries) {
@@ -390,6 +390,24 @@ void clear_pending_locked() {
     g_dialog_checksum.clear();
     g_dialog_slot = -1;
     g_dialog_auto = false;
+    set_dialog_controls_locked(false);
+}
+
+void set_dialog_controls_locked(bool active) {
+    if (g_ui_components == nullptr || g_confirm_btn == nullptr || g_cancel_btn == nullptr ||
+        g_ui_components->set_rect == nullptr || g_ui_components->text_button_set_enabled == nullptr) return;
+    const UiRect hidden{0, 0, 1, 1};
+    if (active) {
+        (void)g_ui_components->set_rect(g_confirm_btn, dialog_button_rect(0));
+        (void)g_ui_components->set_rect(g_cancel_btn, dialog_button_rect(1));
+        (void)g_ui_components->text_button_set_enabled(g_confirm_btn, 1);
+        (void)g_ui_components->text_button_set_enabled(g_cancel_btn, 1);
+    } else {
+        (void)g_ui_components->text_button_set_enabled(g_confirm_btn, 0);
+        (void)g_ui_components->text_button_set_enabled(g_cancel_btn, 0);
+        (void)g_ui_components->set_rect(g_confirm_btn, hidden);
+        (void)g_ui_components->set_rect(g_cancel_btn, hidden);
+    }
 }
 
 // Queue only visible rows and the selected slot's auto entry. Caller holds g_sbui_mtx.

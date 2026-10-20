@@ -10,6 +10,7 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/save_facts.h"
 #include "../../contracts/save_pre_save.h"
+#include "../../contracts/world_facts.h"
 #include "../../contracts/game_ports/save_call_port.h"
 #include "../../contracts/game_ports/save_write_port.h"
 #include "../../contracts/commands.h"
@@ -47,6 +48,10 @@ const contracts::CapabilityRequirement kRequires[] = {
     {
         contracts::kSavePreSaveCapabilityId,
         {contracts::kSavePreSaveVersion.major, contracts::kSavePreSaveVersion.minor},
+    },
+    {
+        contracts::kWorldFactsCapabilityId,
+        {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
     },
 };
 
@@ -258,6 +263,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     const void* ui_components_iface = nullptr;
     const void* save_facts_iface = nullptr;
     const void* pre_save_iface = nullptr;
+    const void* world_facts_iface = nullptr;
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
         !contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kUiComponentsCapabilityId,
@@ -271,7 +277,12 @@ int plugin_install(contracts::PluginContext& ctx) {
             contracts::kSavePreSaveCapabilityId,
             {contracts::kSavePreSaveVersion.major, contracts::kSavePreSaveVersion.minor},
             &pre_save_iface)) ||
-        ui_components_iface == nullptr || save_facts_iface == nullptr || pre_save_iface == nullptr || ctx.ports == nullptr ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kWorldFactsCapabilityId,
+            {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
+            &world_facts_iface)) ||
+        ui_components_iface == nullptr || save_facts_iface == nullptr || pre_save_iface == nullptr ||
+        world_facts_iface == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
@@ -280,12 +291,15 @@ int plugin_install(contracts::PluginContext& ctx) {
     const auto* ui_components = static_cast<const contracts::QolUiComponents*>(ui_components_iface);
     const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(save_facts_iface);
     const auto* pre_save = static_cast<const contracts::SavePreSaveApi*>(pre_save_iface);
+    const auto* world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
     if (ui_components->size < sizeof(*ui_components) ||
         !contracts::satisfies({ui_components->major, ui_components->minor},
                               {contracts::kUiContractMajor, contracts::kUiContractMinor}) ||
         ui_components->panel_create == nullptr || ui_components->button_create == nullptr ||
         ui_components->set_rect == nullptr ||
-        ui_components->text_button_create == nullptr || ui_components->text_button_set_enabled == nullptr ||
+        ui_components->flat_text_button_create == nullptr ||
+        ui_components->text_button_set_enabled == nullptr ||
+        ui_components->text_button_set_active == nullptr ||
         ui_components->text_button_draw == nullptr ||
         ui_components->nav_button_create == nullptr || ui_components->nav_button_draw == nullptr ||
         ui_components->nav_button_set_enabled == nullptr ||
@@ -303,11 +317,13 @@ int plugin_install(contracts::PluginContext& ctx) {
         !contracts::satisfies({pre_save->abi.major, pre_save->abi.minor},
                               {contracts::kSavePreSaveVersion.major,
                                contracts::kSavePreSaveVersion.minor}) ||
-        pre_save->register_observer == nullptr || pre_save->unregister_observer == nullptr) {
+        pre_save->register_observer == nullptr || pre_save->unregister_observer == nullptr ||
+        world_facts->state == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
     save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game, ctx.owner_token);
+    save_backup_bind_world_facts(world_facts);
     g_active.store(true, std::memory_order_release);
     if (g_pre_save_observer == 0) {
         uint64_t observer = 0;
@@ -315,6 +331,7 @@ int plugin_install(contracts::PluginContext& ctx) {
                 pre_save->register_observer(ctx.owner_token, &pre_save_cb, nullptr, &observer)) ||
             observer == 0) {
             g_active.store(false, std::memory_order_release);
+            save_backup_bind_world_facts(nullptr);
             save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
             return 1;
         }
@@ -330,6 +347,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         }
         g_pre_save_observer = 0;
         g_pre_save_api = nullptr;
+        save_backup_bind_world_facts(nullptr);
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
@@ -373,6 +391,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     g_pre_save_observer = 0;
     g_pre_save_api = nullptr;
+    save_backup_bind_world_facts(nullptr);
     save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
 }
 
@@ -433,7 +452,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    4, kRequires,  // requires=ui_components + ui_panels + save.facts + save.pre_save
+    5, kRequires,  // requires=ui_components + ui_panels + save.facts + save.pre_save + world.facts
     2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）

@@ -6,6 +6,7 @@
 #include "../../contracts/game_host.h"
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/save_facts.h"
+#include "../../contracts/world_facts.h"
 #include "../../contracts/game_ports/save_call_port.h"
 
 // 存档管理器备份 feature（save-backup）：
@@ -42,6 +43,8 @@ void save_backup_bind_context(const qol::contracts::QolHostSdk* sdk,
                               const qol::contracts::QolSaveCallPort* save_call,
                               const qol::contracts::QolGameHost* game,
                               qol::contracts::QolOwnerToken owner_token);
+// 主菜单判定依赖 world.facts；未绑定时回退 save.facts.current_slot。
+void save_backup_bind_world_facts(const qol::contracts::WorldFactsApi* world_facts);
 const qol::contracts::QolHostSdk* save_backup_host_sdk();
 const qol::contracts::QolGameHost* save_backup_game_host();
 const qol::contracts::SaveFactsApi* save_backup_save_facts();

@@ -63,11 +63,15 @@ UiRect list_btn_rect(int i) {
 
 UiRect auto_btn_rect() { return {AUTO_X + 0x04, AUTO_Y, LIST_COL_W - 0x08, AUTO_H}; }
 
-UiRect dialog_rect() { return {0x138, 0xD8, 0x1F0, 0x128}; }
+UiRect dialog_rect() { return {(ROOT_W - 0x1F0) / 2, (ROOT_H - 0x128) / 2, 0x1F0, 0x128}; }
 
 UiRect dialog_button_rect(int index) {
     const UiRect dialog = dialog_rect();
-    return {dialog.x + (index == 0 ? 0x30 : 0x118), dialog.y + 0xB0, 0xA0, 0x38};
+    constexpr int64_t button_w = 0xA0;
+    constexpr int64_t gap = 0x18;
+    const int64_t left = (dialog.w - 2 * button_w - gap) / 2;
+    return {dialog.x + left + (index == 0 ? 0 : button_w + gap), dialog.y + 0xB0,
+            button_w, 0x38};
 }
 
 // 把动态 list_btn_rect 写回列表控件（创建后 / 刷新后 / 翻页后调用，调用方持 g_sbui_mtx）。
@@ -110,62 +114,103 @@ void destroy_panel_controls_locked() {
     g_next_btn = nullptr;
     g_back_btn = nullptr;
     g_root = nullptr;
-    g_dialog_panel = nullptr;
     g_confirm_btn = nullptr;
     g_cancel_btn = nullptr;
 }
 
 void create_panel_controls_locked() {
     if (g_ui_components == nullptr || g_ui_components->panel_create == nullptr ||
-        g_ui_components->button_create == nullptr || g_ui_components->text_button_create == nullptr ||
+        g_ui_components->button_create == nullptr ||
+        g_ui_components->flat_text_button_create == nullptr ||
+        g_ui_components->text_button_set_active == nullptr ||
         g_ui_components->nav_button_create == nullptr ||
-        g_ui_components->arrow_button_create == nullptr) return;
+        g_ui_components->arrow_button_create == nullptr) {
+        SB_UI_LOG("create controls failed at component API validation");
+        return;
+    }
     const UiRect root_rect = panel_root_rect();
     const UiRect mask{0, 0, ROOT_W + root_rect.x * 2, ROOT_H};
     const contracts::UiPanelDesc root_desc{root_rect, mask, 0x0841, 0};
     void* root = nullptr;
     if (!contracts::succeeded(g_ui_components->panel_create(&root_desc, nullptr, &root)) || root == nullptr) {
-        SB_UI_LOG("create component root failed");
+        SB_UI_LOG("create controls failed at root panel_create");
         return;
     }
     g_root = root;
     const auto create_text = [&](void* parent, UiRect rect, const char* text, int kind, int index, void** out) {
         const contracts::UiButtonDesc desc{rect, text, contracts::kUiTextButtonFontDefault,
             &component_action_clicked, reinterpret_cast<void*>(static_cast<intptr_t>(kind + index))};
-        return contracts::succeeded(g_ui_components->text_button_create(&desc, parent, out)) && *out != nullptr;
+        QolResult result;
+        if (g_ui_components->flat_text_button_create != nullptr)
+            result = g_ui_components->flat_text_button_create(&desc, parent, out);
+        else if (g_ui_components->compact_capsule_text_button_create != nullptr)
+            result = g_ui_components->compact_capsule_text_button_create(&desc, parent, out);
+        else if (g_ui_components->text_button_create != nullptr)
+            result = g_ui_components->text_button_create(&desc, parent, out);
+        else
+            return false;
+        return contracts::succeeded(result) && *out != nullptr;
     };
     const auto create_hit = [&](UiRect rect, int kind, int index, void* parent, void** out) {
         const contracts::UiButtonDesc desc{rect, "", contracts::kUiTextButtonFontDefault,
             &component_action_clicked, reinterpret_cast<void*>(static_cast<intptr_t>(kind + index))};
         return contracts::succeeded(g_ui_components->button_create(&desc, parent, out)) && *out != nullptr;
     };
-    for (int i = 0; i < 3; ++i) if (!create_hit(slot_btn_rect(i), 100, i, root, &g_slot_btns[i])) return;
+    for (int i = 0; i < 3; ++i) {
+        if (!create_hit(slot_btn_rect(i), 100, i, root, &g_slot_btns[i])) {
+            SB_UI_LOG("create controls failed at slot button %d", i);
+            return;
+        }
+    }
     static const char* labels[] = {"导出", "删除", "导入"};
-    for (int i = 0; i < 3; ++i) if (!create_text(root, ops_btn_rect(i), labels[i], 400, i, &g_ops_btns[i])) return;
+    for (int i = 0; i < 3; ++i) {
+        if (!create_text(root, ops_btn_rect(i), labels[i], 400, i, &g_ops_btns[i])) {
+            SB_UI_LOG("create controls failed at operation button %d", i);
+            return;
+        }
+    }
     for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) {
         UiRect row = list_btn_rect(i);
         if (row.w <= 0 || row.h <= 0) row = {LIST_COL_X, 0, 1, 1};
-        if (!create_hit(row, 200, i, root, &g_list_btns[i])) return;
+        if (!create_hit(row, 200, i, root, &g_list_btns[i])) {
+            SB_UI_LOG("create controls failed at backup row %d", i);
+            return;
+        }
     }
-    if (!create_hit(auto_btn_rect(), 300, 0, root, &g_auto_btn)) return;
+    if (!create_hit(auto_btn_rect(), 300, 0, root, &g_auto_btn)) {
+        SB_UI_LOG("create controls failed at auto entry");
+        return;
+    }
     const contracts::UiArrowButtonDesc left{{LIST_COL_X + 0x04, PAGE_ROW_Y, LIST_PAGE_BTN_W, LIST_PAGE_BTN_H},
         contracts::kUiArrowLeft, 1, &component_action_clicked, reinterpret_cast<void*>(500)};
     const contracts::UiArrowButtonDesc right{{LIST_COL_X + LIST_COL_W - LIST_PAGE_BTN_W - 0x04,
         PAGE_ROW_Y, LIST_PAGE_BTN_W, LIST_PAGE_BTN_H}, contracts::kUiArrowRight, 1,
         &component_action_clicked, reinterpret_cast<void*>(501)};
     if (!contracts::succeeded(g_ui_components->arrow_button_create(&left, root, &g_prev_btn)) ||
-        !contracts::succeeded(g_ui_components->arrow_button_create(&right, root, &g_next_btn))) return;
+        !contracts::succeeded(g_ui_components->arrow_button_create(&right, root, &g_next_btn))) {
+        SB_UI_LOG("create controls failed at pager arrows");
+        return;
+    }
     const UiRect back{ROOT_W - 8 - BACK_BTN_W, ROOT_H - 8 - BACK_BTN_H, BACK_BTN_W, BACK_BTN_H};
     const contracts::UiNavButtonDesc nav{back, contracts::kUiNavButtonAuto, nullptr, nullptr};
-    if (!contracts::succeeded(g_ui_components->nav_button_create(&nav, root, &g_back_btn))) return;
-    const UiRect dialog = dialog_rect();
-    const contracts::UiPanelDesc dialog_desc{dialog, mask, 0x1082, 1};
-    if (!contracts::succeeded(g_ui_components->panel_create(&dialog_desc, root, &g_dialog_panel))) return;
-    const UiRect confirm = dialog_button_rect(0), cancel = dialog_button_rect(1);
-    if (!create_text(g_dialog_panel, {confirm.x-dialog.x, confirm.y-dialog.y, confirm.w, confirm.h}, "确认", 600, 0, &g_confirm_btn) ||
-        !create_text(g_dialog_panel, {cancel.x-dialog.x, cancel.y-dialog.y, cancel.w, cancel.h}, "取消", 601, 0, &g_cancel_btn)) return;
+    if (!contracts::succeeded(g_ui_components->nav_button_create(&nav, root, &g_back_btn))) {
+        SB_UI_LOG("create controls failed at navigation button");
+        return;
+    }
+    if (!create_text(root, dialog_button_rect(0), "确认", 600, 0, &g_confirm_btn)) {
+        SB_UI_LOG("create controls failed at confirm button");
+        return;
+    }
+    if (!create_text(root, dialog_button_rect(1), "取消", 601, 0, &g_cancel_btn)) {
+        SB_UI_LOG("create controls failed at cancel button");
+        return;
+    }
     (void)g_ui_components->text_button_set_enabled(g_confirm_btn, 0);
     (void)g_ui_components->text_button_set_enabled(g_cancel_btn, 0);
+    (void)g_ui_components->text_button_set_active(g_confirm_btn, 1);
+    const UiRect hidden{0, 0, 1, 1};
+    (void)g_ui_components->set_rect(g_confirm_btn, hidden);
+    (void)g_ui_components->set_rect(g_cancel_btn, hidden);
     sync_list_btn_rects_locked();
     SB_UI_LOG("create component tree: root=%p", root);
 }
@@ -191,7 +236,7 @@ void savebackup_panel_enter() {
             return;
         } else {
             create_panel_controls_locked();
-            if (g_root == nullptr || g_back_btn == nullptr || g_dialog_panel == nullptr ||
+            if (g_root == nullptr || g_back_btn == nullptr ||
                 g_confirm_btn == nullptr || g_cancel_btn == nullptr || g_auto_btn == nullptr ||
                 g_prev_btn == nullptr || g_next_btn == nullptr) {
                 destroy_panel_controls_locked();
@@ -233,15 +278,18 @@ void savebackup_panel_process() {
     ui_begin_frame();
     root_decor_draw();
     sync_component_enabled_locked();
-    for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) slot_btn_draw(g_slot_btns[i]);
-    for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) ops_btn_draw(g_ops_btns[i]);
-    for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) list_btn_draw(g_list_btns[i]);
-    if (g_auto_btn) auto_btn_draw(g_auto_btn);
-    if (g_prev_btn) page_btn_draw(g_prev_btn);
-    if (g_next_btn) page_btn_draw(g_next_btn);
-    if (g_back_btn && g_ui_components != nullptr) (void)g_ui_components->nav_button_draw(g_back_btn);
-    if (!g_msg_text.empty()) msg_label_draw(g_root);
-    if (g_dialog != DialogKind::kNone) draw_confirm_dialog();
+    if (g_dialog == DialogKind::kNone) {
+        for (int i = 0; i < 3; ++i) if (g_slot_btns[i]) slot_btn_draw(g_slot_btns[i]);
+        for (int i = 0; i < 3; ++i) if (g_ops_btns[i]) ops_btn_draw(g_ops_btns[i]);
+        for (int i = 0; i < LIST_COLS_PER_PAGE; ++i) if (g_list_btns[i]) list_btn_draw(g_list_btns[i]);
+        if (g_auto_btn) auto_btn_draw(g_auto_btn);
+        if (g_prev_btn) page_btn_draw(g_prev_btn);
+        if (g_next_btn) page_btn_draw(g_next_btn);
+        if (g_back_btn && g_ui_components != nullptr) (void)g_ui_components->nav_button_draw(g_back_btn);
+        if (!g_msg_text.empty()) msg_label_draw(g_root);
+    } else {
+        draw_confirm_dialog();
+    }
     ui_end_frame();
 }
 
