@@ -186,6 +186,31 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 
 无法验证：c18/overhaul 倍率仅静态金标；退款失败日志未真机触发；`inventory.slot` 暂无生产消费者；调试门禁关闭分支未真机逐条触发；任务袋透传无物品可测；autosell 路径并入 autosell 审阅。
 
+## 14. autosell（审阅批 2026-10-20）
+
+审阅登记：`audits/plugin-audit/autosell-20261020/verification-log.md`；参考说明：`reference/plugins/autosell.md`。
+
+本批已修复（提交 `527a2a5b`、`c4b9a971`、`a5314a46`、`665f9ebd`、`685c80e4`）：
+
+- AS-01 无活动存档 POST 拒绝且不改运行态；save-exit 失效 slot-data session；JNI 返回实际提交结果。
+- AS-02 slot-data complete 不再在回调内重入 provider；较新 revision 交 retry task。
+- AS-03/AS-18 UI 占用门禁改为 required `ui.state` 的 `read_layers`，独立于 EB；EB 关闭时物理袋继续、逻辑袋跳过；修复 EB 启用时 `inventory_state_id=20` 导致恒 `ui_busy` 的回归（真机 EB 两态扫描均推进）。
+- AS-04/AS-05 声明 `ui_panels`；install/on_enabled 重新获取 world.facts/item.facts/slot_data/ui.state，on_disabled/deactivate 清空指针。
+- AS-06/AS-07 删除扫描私有锁；tick 入口捕获取消纪元，关闭/save-exit 取消当前轮次，任务注册锁内复核。
+- AS-08 POST 类型/范围/special 严格校验 400；无存档 409。AS-09 档 5 统一 99。AS-10 面板文案修正。AS-11 缺 rarity 记 -1、规则 fail-closed。AS-12 遍历/action 不可用限速 WARN。AS-14 API 参考补 schema。
+
+开放项：
+
+| ID | 级 | 问题 | 状态 |
+|---|---|---|---|
+| AS-13 | P2 | feature 关闭不注销 panel provider；`block_reason` 恒 nullptr | 开放；provider 无枚举接口，`open` 已由门禁拒绝；是否停用时撤销待裁决 |
+| AS-16 | P3 | descriptor `jni_count=0`，存在 4 个 autosell JNI 导出 | 开放；JNI 三向绑定表 P5 未落地 |
+| AS-17 | P3 | `autosell_store_persist` 无生产调用者，保留旧 pending 写路径 | 开放；未删除 |
+| G-AS-1 | P2 | `core.save` 的 `slot_data_save_finish` 持 `g.mutex` 调参与者 `complete` | 基础设施观察；本批 autosell 侧已规避，provider 锁纪律另立 |
+| G-AS-2 | P3 | `infra::scheduler` remove 不等待已开始 callback | 基础设施观察；本批用取消纪元处理 |
+
+无法验证：AS-02 真实保存并发路径未复现（host fake 覆盖不重入）；AS-06/07 在途出售取消未逐帧捕获；AS-10/11 面板视觉待用户目视；AS-12 WARN 未触发；scan/panel/JNI 集成测试仍缺；全量 smoke 未跑。详见审阅登记 §2。
+
 ## 附录：已修复问题（存证）
 
 | ID | 归属 | 问题 | 修复与复验 |
