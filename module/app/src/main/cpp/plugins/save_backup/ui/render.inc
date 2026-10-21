@@ -19,6 +19,17 @@ static void component_container(UiRect rect) {
     (void)g_ui_components->draw_container(component_absolute_rect(rect));
 }
 
+static void component_selected_background(UiRect rect, int inset) {
+    const contracts::QolUiAdapter* ui = ui_adapter();
+    if (ui == nullptr || ui->fill_rect == nullptr) return;
+    rect.x += inset;
+    rect.y += inset;
+    rect.w -= 2 * inset;
+    rect.h -= 2 * inset;
+    if (rect.w > 0 && rect.h > 0)
+        (void)ui->fill_rect(component_absolute_rect(rect), COLOR_SELECTED_BG);
+}
+
 void root_decor_draw() {
     if (g_root == nullptr) return;
     UiRect root{};
@@ -32,7 +43,7 @@ void root_decor_draw() {
         }
     }
     component_container({-0x1E, 0x10, 0x3FC, 0x260});
-    component_container({OPS_COL_X, OPS_Y0 - 0x13, OPS_COL_W, 0xFA});
+    component_container({OPS_COL_X, OPS_Y0 - 0x18, OPS_COL_W, 0x170});
     component_container({LIST_COL_X, FRAME_Y, LIST_COL_W, FRAME_H});
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui != nullptr && ui->fill_rect != nullptr) {
@@ -41,7 +52,7 @@ void root_decor_draw() {
         for (int i = 0; i < LIST_COLS_PER_PAGE - 1; ++i) {
             const int64_t y = FRAME_Y + FRAME_BORDER + (i + 1) * LIST_ROW_H - 3;
             (void)ui->fill_rect({root_abs.x + LIST_COL_X + FRAME_BORDER, root_abs.y + y,
-                                 LIST_COL_W - 2 * FRAME_BORDER, kSeparatorH}, UI_GOLD);
+                                 LIST_COL_W - 2 * FRAME_BORDER, kSeparatorH}, COLOR_SEPARATOR);
         }
     }
 }
@@ -52,8 +63,9 @@ void slot_btn_draw(void* ctrl) {
     for (int i = 0; i < 3; ++i) if (ctrl == g_slot_btns[i]) index = i;
     if (index < 0) return;
     const bool selected = g_selected_slot == index;
-    component_container(slot_btn_rect(index));
     const UiRect rect = slot_btn_rect(index);
+    component_container(rect);
+    if (selected) component_selected_background(rect, 6);
     if (!g_slots[index].exists) {
         char empty[32]; snprintf(empty, sizeof(empty), "存档%d 空", index + 1);
         component_text(empty, static_cast<int>(rect.x + rect.w / 2),
@@ -94,13 +106,22 @@ void ops_btn_draw(void* ctrl) {
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui == nullptr || ui->fill_rect == nullptr) return;
     const UiRect rect = component_absolute_rect(ops_btn_rect(index));
-    const int64_t x0 = rect.x + (rect.w - 0x20) / 2;
-    const int64_t y0 = rect.y + (rect.h - 0x20) / 2;
+    const int64_t x0 = rect.x + (rect.w - 0x30) / 2;
+    const int64_t y0 = rect.y + (rect.h - 0x30) / 2;
     const uint32_t color = enabled && g_dialog == DialogKind::kNone ? UI_GOLD : COLOR_TEXT_GRAY;
-    for (int i = 0; i < 8; ++i) {
-        const int64_t step = i * 4;
-        (void)ui->fill_rect({x0 + step, y0 + step, 6, 4}, color);
-        (void)ui->fill_rect({x0 + 0x1C - step, y0 + step, 6, 4}, color);
+    const int64_t bound_right = x0 + 0x30;
+    const int64_t bound_bottom = y0 + 0x30;
+    auto fill_x_block = [&](int64_t x, int64_t y) {
+        const int64_t left = std::max(x, x0);
+        const int64_t top = std::max(y, y0);
+        const int64_t right = std::min(x + 0x04, bound_right);
+        const int64_t bottom = std::min(y + 0x04, bound_bottom);
+        if (right > left && bottom > top)
+            (void)ui->fill_rect({left, top, right - left, bottom - top}, color);
+    };
+    for (int step = 0; step < 0x30; ++step) {
+        fill_x_block(x0 + step, y0 + step);
+        fill_x_block(bound_right - 0x04 - step, y0 + step);
     }
 }
 
@@ -115,6 +136,7 @@ void list_btn_draw(void* ctrl) {
     const bool parsed = item->parsed;
     const bool selected = absolute == g_selected_backup;
     const UiRect rect = list_btn_rect(local);
+    if (selected) component_selected_background(rect, 6);
     if (!parsed) {
         component_text("加载中…", static_cast<int>(rect.x + 0x50), static_cast<int>(rect.y + 0x12), COLOR_TEXT_GRAY);
         return;
@@ -142,6 +164,7 @@ void auto_btn_draw(void* ctrl) {
     if (ctrl == nullptr || g_ui_components == nullptr) return;
     const UiRect rect = auto_btn_rect();
     component_container(rect);
+    if (g_selected_auto) component_selected_background(rect, 6);
     component_text("auto", static_cast<int>(rect.x + 0x0C), static_cast<int>(rect.y + 0x1F),
                    g_selected_auto ? UI_GOLD : UI_OPTION_TEXT);
     if (!g_auto_backup_valid) {
