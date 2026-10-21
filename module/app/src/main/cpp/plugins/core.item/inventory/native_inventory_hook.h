@@ -55,6 +55,13 @@ inline bool allowed(bool extended_applied, bool count_encoded) {
 // original-only 写后确认：post 与 pre 不同、且恰好等于原版对 new_count 的 b 写
 // 结果时，才认定「原版确实执行了该次数量写」。post == pre（含 delta≡0 mod 128
 // 的退化与原版拒绝合并）一律 fail-closed 跳过，不得凭相等推断写发生。
+// delta 是 128 的整数倍时原版只写 b 段，b 字段前后不变；此时只有“源槽已不再
+// 指向被移动对象”能证明原版确实完成了合并。不能仅凭 post==pre 推断未合并。
+constexpr bool source_removed_confirms_merge(uint32_t delta, bool source_found,
+                                             bool source_still_present) {
+    return delta > 0 && (delta % 128u) == 0 && source_found && !source_still_present;
+}
+
 inline bool original_count_write_confirmed(const qol::contracts::QolItemCountApi* api,
                                            uint32_t pre_field, uint32_t post_field,
                                            uint32_t new_count) {

@@ -205,9 +205,11 @@ bool ui_control_item_identity(void* ctrl, qol::contracts::QolItemHandle* out_ite
     if (item == nullptr || !game_memory_accessible(item, I_COUNT + sizeof(uint32_t), 'r')) {
         return false;
     }
-    qol::contracts::QolItemHandle handle = qol::game::lookup_item(item);
-    if (handle.slot == 0) {
-        qol::game::ItemHandleError error = qol::game::ItemHandleError::kNone;
+    uint32_t owner = 0;
+    qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &owner);
+    // 物理原版袋中的物品必须由 Game owner 持有。扩展袋历史交接可能留下
+    // Provider owner 句柄；这里按物理槽事实归一，避免拖拽合并等原生路径拒绝。
+    if (handle.slot == 0 || owner != qol::contracts::kQolItemHandleOwnerGame) {
         bool found_in_physical_inventory = false;
         for (int32_t bag = 0; bag < 6 && !found_in_physical_inventory; ++bag) {
             for (int32_t slot = 0; slot < 16; ++slot) {
@@ -221,9 +223,21 @@ bool ui_control_item_identity(void* ctrl, qol::contracts::QolItemHandle* out_ite
                 }
             }
         }
-        if (!found_in_physical_inventory) return false;
-        handle = qol::game::register_item(item, qol::contracts::kQolItemHandleOwnerGame, &error);
-        if (handle.slot == 0) return false;
+        if (handle.slot == 0) {
+            if (!found_in_physical_inventory) return false;
+            qol::game::ItemHandleError error = qol::game::ItemHandleError::kNone;
+            handle = qol::game::register_item(item, qol::contracts::kQolItemHandleOwnerGame,
+                                               &error);
+            if (handle.slot == 0) return false;
+        } else if (found_in_physical_inventory) {
+            if (!qol::game::rebind_item(item, qol::contracts::kQolItemHandleOwnerGame)) {
+                return false;
+            }
+            handle = qol::game::lookup_item(item, &owner);
+            if (handle.slot == 0 || owner != qol::contracts::kQolItemHandleOwnerGame) {
+                return false;
+            }
+        }
     }
     *out_item = handle;
     return true;

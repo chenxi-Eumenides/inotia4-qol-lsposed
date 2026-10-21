@@ -20,6 +20,12 @@ static void test_s2_writeback_applied_gate() {
     CHECK(!s2_writeback::allowed(false, true));
     CHECK(!s2_writeback::allowed(true, false));
     CHECK(s2_writeback::allowed(true, true));
+    // 128 倍数合并：b 段不变，只有源槽消失能证明原版完成合并。
+    CHECK(s2_writeback::source_removed_confirms_merge(640, true, false));
+    CHECK(!s2_writeback::source_removed_confirms_merge(640, true, true));
+    CHECK(!s2_writeback::source_removed_confirms_merge(641, true, false));
+    CHECK(!s2_writeback::source_removed_confirms_merge(640, false, false));
+    CHECK(!s2_writeback::source_removed_confirms_merge(0, true, false));
 }
 
 static int g_original_value = 0;

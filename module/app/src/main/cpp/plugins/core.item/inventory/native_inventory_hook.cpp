@@ -468,16 +468,49 @@ void s2_capture_merge(void* moved_item, int bag, int slot, int32_t delta, S2Merg
     cap->new_full = s2_writeback::added_count(item_count_api(), cap->pre_full, cap->delta);
 }
 
+// MoveItem 的源槽取证：delta 是 128 的整数倍时原版只写 b 段，b 不变，
+// 无法用 post!=pre 证明合并发生；改为确认源槽已不再指向被移动对象。
+struct S2SourceCapture {
+    bool found = false;
+    void* item = nullptr;
+    int bag = -1;
+    int slot = -1;
+};
+
+void s2_capture_source(void* item, S2SourceCapture* out) {
+    if (out == nullptr) return;
+    *out = {};
+    if (item == nullptr) return;
+    for (int bag = 0; bag < kInvenPhysicalBagCount; ++bag) {
+        for (int slot = 0; slot < kInvenSlotsPerBag; ++slot) {
+            if (s2_physical_slot_item(bag, slot) == item) {
+                out->found = true;
+                out->item = item;
+                out->bag = bag;
+                out->slot = slot;
+                return;
+            }
+        }
+    }
+}
+
 // backup 后确认回写：目标槽仍指向同一对象（防替换/释放后的 UAF 读）、原版确实
 // 写了 b（post != pre 且等于原版对 new_full 的预测写）才回写 a+b；其余一律
-// fail-closed 跳过并记日志（退化 delta≡0 mod 128、同类别不同 payload 拒并等均
-// 落入此分支，不猜测）。
-void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
+// fail-closed 跳过并记日志（同类别不同 payload 拒并等均落入此分支，不猜测）。
+// delta%128==0 的合并从 b 段不可见，但源槽消失可作为“原版确实合并”的独立证据；
+// 此时回写完整 128a+b，避免 a 段未进位导致源堆消失、目标数量不变。
+void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
+                        const S2SourceCapture* source = nullptr) {
     if (!cap.armed) return;
     if (s2_physical_slot_item(cap.bag, cap.slot) != cap.target) return;
     if (!s2_writeback_gate(cap.target)) return;
     const uint32_t post_field = read_count_field(cap.target);
-    if (post_field == cap.pre_field) {
+    const bool source_found = source != nullptr && source->found;
+    const bool source_still_present =
+        source_found && s2_physical_slot_item(source->bag, source->slot) == source->item;
+    const bool source_removed = s2_writeback::source_removed_confirms_merge(
+        cap.delta, source_found, source_still_present);
+    if (post_field == cap.pre_field && !source_removed) {
         if ((cap.delta % 128) == 0) {
             QOL_LOG_INFO(QolDomain::kInventory,
                                 "S2 writeback %s degenerate skip target=%p delta=%u (delta%%128==0)",
@@ -485,7 +518,8 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op) {
         }
         return;
     }
-    if (!s2_writeback::original_count_write_confirmed(item_count_api(), cap.pre_field, post_field,
+    if (post_field != cap.pre_field &&
+        !s2_writeback::original_count_write_confirmed(item_count_api(), cap.pre_field, post_field,
                                                       cap.new_full)) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "S2 writeback %s mismatch skip target=%p pre=0x%x post=0x%x expect_full=%u",
@@ -1149,12 +1183,16 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     // backup 后确认原版确实写了 b（post != pre 且等于原版预测写）再回写 a+b。
     // 空槽移动无合并写；扩展对象在上方 GUARD 已拒绝 backup，不进入本路径。
     S2MergeCapture move_merge{};
+    S2SourceCapture move_source{};
     if (g_backup_move_item != nullptr) {
         s2_capture_merge(item, target_bag, target_slot, count, &move_merge);
+        if (move_merge.armed && (move_merge.delta % 128) == 0) {
+            s2_capture_source(item, &move_source);
+        }
     }
     const int result = call_backup("hook:INVEN_MoveItem", g_backup_move_item,
                                    item, count, target_bag, target_slot);
-    s2_merge_writeback(move_merge, "MoveItem");
+    s2_merge_writeback(move_merge, "MoveItem", &move_source);
     if (observe) {
         qol::contracts::ExtensionBagMoveObservation after{};
         if (eb != nullptr && eb->capture_move_item_observation != nullptr &&

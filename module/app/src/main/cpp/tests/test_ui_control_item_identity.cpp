@@ -28,6 +28,7 @@ std::array<void*, 96> g_physical_items{};
 std::array<RegisteredItem, 8> g_registered{};
 int g_physical_reads = 0;
 int g_register_calls = 0;
+int g_rebind_calls = 0;
 int g_fail_physical_read = -1;
 int g_registry_failure = 0;
 bool g_main_thread = true;
@@ -83,6 +84,17 @@ contracts::QolItemHandle register_item(void* item, uint32_t owner, ItemHandleErr
     return contracts::kInvalidItemHandle;
 }
 
+bool rebind_item(void* item, uint32_t owner) {
+    for (RegisteredItem& entry : g_registered) {
+        if (entry.pointer == item) {
+            entry.owner = owner;
+            ++g_rebind_calls;
+            return true;
+        }
+    }
+    return false;
+}
+
 QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
     const int index = bag * 16 + slot;
     ++g_physical_reads;
@@ -136,6 +148,19 @@ int main() {
     assert(ui_control_item_identity(&control, &out));
     assert(out.slot == 50 && out.generation == 7);
     assert(g_register_calls == 1);
+
+    // A provider handle whose item is physically present in an original bag is
+    // normalized to Game owner; provider-only view objects stay untouched.
+    alignas(16) uint8_t physical_provider_item[0x20]{};
+    g_registered[3] = {physical_provider_item, {60, 3},
+                       qol::contracts::kQolItemHandleOwnerProvider};
+    g_physical_items[10] = physical_provider_item;
+    control.item = physical_provider_item;
+    out = {99, 99};
+    assert(ui_control_item_identity(&control, &out));
+    assert(out.slot == 60 && out.generation == 3);
+    assert(g_registered[3].owner == qol::contracts::kQolItemHandleOwnerGame);
+    assert(g_rebind_calls == 1);
 
     // The control pointer itself is not proof of original inventory membership.
     alignas(16) uint8_t foreign_item[0x20]{};
