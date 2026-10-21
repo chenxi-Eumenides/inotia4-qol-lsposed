@@ -72,6 +72,7 @@ bool g_confirmation_active = false;
 uint64_t g_next_confirmation_token = 41;
 uint64_t g_last_closed_confirmation_token = 0;
 UiConfirmationSpec g_last_confirmation{};
+UiConfirmationSpecText g_last_confirmation_text{};
 int g_confirmation_open_count = 0;
 
 bool demo_choice_open(const UiChoiceSpec& spec) {
@@ -111,8 +112,20 @@ QolResult demo_confirmation_close(uint64_t token) {
     g_confirmation_active = false;
     return ok();
 }
+QolResult demo_confirmation_open_text(const UiConfirmationSpecText* spec, uint64_t* out_token) {
+    if (spec == nullptr || out_token == nullptr ||
+        spec->size < sizeof(UiConfirmationSpecText) || g_confirmation_active) {
+        return error(kQolErrBusy, "busy", 4);
+    }
+    g_confirmation_active = true;
+    ++g_confirmation_open_count;
+    g_last_confirmation_text = *spec;
+    *out_token = g_next_confirmation_token++;
+    return ok();
+}
 const UiConfirmationApi kDemoConfirmationApi{
-    &demo_confirmation_open, &demo_confirmation_active, &demo_confirmation_close};
+    &demo_confirmation_open, &demo_confirmation_active, &demo_confirmation_close,
+    &demo_confirmation_open_text};
 
 QolResult require_debug_capability(const char* id, QolVersionRange range, const void** out) {
     if (id == nullptr || out == nullptr) return error(kQolErrInvalidArgument, "invalid", 7);
@@ -604,18 +617,19 @@ int main() {
     g_choice_active = false;
     no_price_demo->click(no_price_demo->user);
     CHECK(g_confirmation_open_count == 1 && g_confirmation_active);
-    CHECK(g_last_confirmation.text_id == 9 && g_last_confirmation.display_type == 0 &&
-          g_last_confirmation.format_arg == 2 && g_last_confirmation.price == 0);
+    CHECK(g_last_confirmation_text.display_type == 0 && g_last_confirmation_text.price == 0);
+    CHECK(std::strcmp(g_last_confirmation_text.message, "确认执行该操作？") == 0);
     g_confirmation_active = false;
-    g_last_confirmation.on_confirm(g_last_confirmation.user);
+    g_last_confirmation_text.on_confirm(g_last_confirmation_text.user);
     price_demo->click(price_demo->user);
     CHECK(g_confirmation_open_count == 2 && g_confirmation_active &&
-          g_last_confirmation.price == 100);
+          g_last_confirmation_text.price == 100);
+    CHECK(std::strcmp(g_last_confirmation_text.message, "是否出售该物品？") == 0);
     g_confirmation_active = false;
-    g_last_confirmation.on_cancel(g_last_confirmation.user);
+    g_last_confirmation_text.on_cancel(g_last_confirmation_text.user);
     price_demo->click(price_demo->user);
     CHECK(g_confirmation_open_count == 3 && g_confirmation_active &&
-          g_last_confirmation.price == 100);
+          g_last_confirmation_text.price == 100);
     const uint64_t owned_demo_token = g_next_confirmation_token - 1;
     choice_demo->click(choice_demo->user);
     CHECK(g_choice_open_count == 2 && g_choice_active);

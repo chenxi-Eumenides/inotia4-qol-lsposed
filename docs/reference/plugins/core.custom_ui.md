@@ -13,10 +13,10 @@
 | `ui_components` | 1.22 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 3 槽：`capsule_text_button_create`、`decorated_text_button_create`、`main_menu_decorated_button_create`；容器 content rect/content draw 两槽已随要求 4 撤销删除）。此后追加可缩放图标按钮族与 `compact_capsule_text_button_create`；**1.19 追加 `forget_native`**：native 控件由外部（游戏控件树）销毁时只注销组件记录、不调用 `delete_control`；**1.20 追加锚定按钮**（`anchored_button_ensure/set_visible/release/draw`）：按 `QolUiRootKind` 每帧解析活挂载根、用 `click_binding_is_current` 证明句柄身份，失效时注销组件记录并重建；`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。**1.21 追加任意原生控件锚定**（`anchored_control_ensure/set_visible/release/detach`）：多控件/自定义 `CO_PROC`/自带 data 的游戏树挂载，身份证明用 `control_proc_matches` + type/user_type/data 快照。**1.22 追加 `draw_rect`、`draw_rounded_rect`、`draw_circle`**：纯色 RGB565 填充/边框，alpha 为 0–100 百分比；圆角半径最多 256，圆形直径最多 512，不提供抗锯齿。 |
 | `ui_panels` | 1.3 | 面板 provider 注册后的打开、关闭、状态/返回协作接口 |
 | `ui_choice` | 1.1 | 原生选择框 open/active/close API |
-| `ui_confirmation` | 1.0 | 单一 owner 原生 Yes/No 确认框 `open/active/close`；自定义 panel 上由模块在帧内补绘原生外观 |
+| `ui_confirmation` | 1.1 | 单一 owner 原生 Yes/No 确认框 `open/active/close`；1.1 追加 `open_text`，正文使用显式字符串（`UIPopupMsg_CreateYesNo`），不依赖 TEXTDATABASE/TextLayer；自定义 panel 上仍由模块在帧内补绘原生外观 |
 | `text_layer` | 1.0 | `MEMORYTEXT_GetText` hook 上的文本订阅/分派接口 |
 
-提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`；`QolUiAdapter` 尾部追加：1.27 popup 活动状态、回调槽读取/条件替换、TEXTDATABASE Yes/No 创建与 owner-checked 关闭；1.28 overlay 作用域 `begin_overlay_scope/end_overlay_scope` 与绘制回调注册 `set_frame_overlay`；1.30 `call_ui_popup_msg_draw`（原生 `UIPopupMsg_Draw`）；1.31 `save_lcd`（主动 `GRP_SaveLCD` 快照）。1.29 的 raw Yes/No 槽已随 V2 移除，序号保留不回退。这些槽是 provider 实现细节，消费者必须走 `ui_confirmation` capability，不得缓存或直接调用 callback trampoline。`ui_components` 契约保持 1.22，`ui.state` 保持 1.1。公共版本定义见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`contracts/panels.h`、`contracts/ui_choice.h` 和 `contracts/text_layer.h`。本插件另声明四项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、私有 `Scene_Draw_POPUP_SC_CHOICE` entry hook、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate。`QolChoicePort` 1.1 尾追加 `draw` 原语（读 refresh flag / SaveLCD / 清 flag / GRPX Start·End / UIChoice_Draw），供选择框首帧去暗化 wrapper 使用。
+提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`；`QolUiAdapter` 尾部追加：1.27 popup 活动状态、回调槽读取/条件替换、TEXTDATABASE Yes/No 创建与 owner-checked 关闭；1.28 overlay 作用域 `begin_overlay_scope/end_overlay_scope` 与绘制回调注册 `set_frame_overlay`；1.30 `call_ui_popup_msg_draw`（原生 `UIPopupMsg_Draw`）；1.31 `save_lcd`（主动 `GRP_SaveLCD` 快照）；1.32 `create_yes_no_text`（原始字符串 Yes/No 创建，type 固定 2）。1.29 的 raw 槽曾随 V2 移除并留空号，1.32 为本次重新引入的独立尾槽，序号不回退。这些槽是 provider 实现细节，消费者必须走 `ui_confirmation` capability，不得缓存或直接调用 callback trampoline。`ui_components` 契约保持 1.22，`ui.state` 保持 1.1。公共版本定义见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`contracts/panels.h`、`contracts/ui_choice.h` 和 `contracts/text_layer.h`。本插件另声明四项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、私有 `Scene_Draw_POPUP_SC_CHOICE` entry hook、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate。`QolChoicePort` 1.1 尾追加 `draw` 原语（读 refresh flag / SaveLCD / 清 flag / GRPX Start·End / UIChoice_Draw），供选择框首帧去暗化 wrapper 使用。
 
 ### 原生确认框（`ui_confirmation`）
 
@@ -28,11 +28,14 @@
 
 `user` 必须至少存活到确认/取消 callback 完成，或该 token 的 `close` 成功返回。价格 `0` 不绘制游戏价格栏；非零价格使用原生数值参数。调用者负责选择有效的 TEXTDATABASE 文本 ID，不应把 `user`、指针或代际值编码进 `price`。
 
-示例：`UiConfirmationSpec spec{9, 0, 2, price, on_confirm, on_cancel, context}; uint64_t token = 0; api->open(&spec, &token);`。扩展背包当前 `create_confirmation(variant, price, ...)` 使用 text ID 9、display type 0、format arg 2；其 operation-specific callback template 与回调槽恢复仍由扩展背包专属端口管理，不因共享 API 改写。
+`open_text`（capability 1.1）接受 `UiConfirmationSpecText`：首字段 `size`（必须 `>= sizeof`）、NUL 结尾且不超过 256 字节的 `message`、`display_type`、`price` 与同一组 callbacks/user。正文直接传给原生 `UIPopupMsg_CreateYesNo(text, len, display_type, 2, ok, cancel, param)`，不经 TEXTDATABASE 或 `MEMORYTEXT_GetText`，因此无需 TextLayer。provider 在 open 时把 message 复制到内部静态 buffer，并保持到 `UIPopupMsg_bOn == 0` 且消费者 callback 栈退出后才清空；调用方可立即释放源字符串。长度、size、价格与 callback 校验失败返回 `kQolErrInvalidArgument`，绝不创建半成品弹窗。raw 与 TextData 共用同一 token/active/close、callback 槽恢复、Busy/ownership 与面板补绘语义。
+
+示例（TextData）：`UiConfirmationSpec spec{9, 0, 2, price, on_confirm, on_cancel, context}; uint64_t token = 0; api->open(&spec, &token);`。
+示例（raw 文本）：`UiConfirmationSpecText text{}; text.size = sizeof(text); std::snprintf(text.message, sizeof(text.message), "%s", "确认执行该操作？"); text.on_confirm = on_confirm; text.on_cancel = on_cancel; uint64_t token = 0; api->open_text(&text, &token);`。扩展背包当前 `create_confirmation(variant, price, ...)` 使用 text ID 9、display type 0、format arg 2；其 operation-specific callback template 与回调槽恢复仍由扩展背包专属端口管理，不因共享 API 改写。
 
 #### V1 面板补绘（`ui_confirmation`）
 
-V1 仍创建游戏原生 `UIPopupMsg`（TextData 路径、token/callback/close 语义不变）。当打开时顶层活动 provider 有 `process` 回调且 overlay 作用域可用，`PopupHost::dispatch_process` 会 arm `frame_overlay` scope；宿主在 parent panel 自身 GRPX 帧的 `end_frame`（`GRPX_End` 之前）调用一次注册回调，回调仅在 `UIPopupMsg_bOn==1` 时调用 Adapter 1.30 `call_ui_popup_msg_draw()`，保留 100% 原生外观。成功绘制一次后才启用模态输入门禁；`bOn==0` 时结束 scope 并撤下门禁。补绘失败只记录日志，不改变 V1 token/close 语义。
+V1 与 `open_text` 均创建游戏原生 `UIPopupMsg`（TextData/raw 路径、token/callback/close 语义一致）；补绘只依赖活动原生弹窗，因此两条创建路径共用同一机制。当打开时顶层活动 provider 有 `process` 回调且 overlay 作用域可用，`PopupHost::dispatch_process` 会 arm `frame_overlay` scope；宿主在 parent panel 自身 GRPX 帧的 `end_frame`（`GRPX_End` 之前）调用一次注册回调，回调仅在 `UIPopupMsg_bOn==1` 时调用 Adapter 1.30 `call_ui_popup_msg_draw()`，保留 100% 原生外观。成功绘制一次后才启用模态输入门禁；`bOn==0` 时结束 scope 并撤下门禁。补绘失败只记录日志，不改变 V1 token/close 语义。
 
 输入语义：补绘成功且门禁启用后，F3（Return）只消费不下传 parent，由游戏 `UIPopupMsg_Process` 关闭弹窗；帧号绑定的 suppression latch 防止同帧双关。F4 与所有非触摸事件直接消费；触摸事件（`0x17/0x18/0x19`）也只消费，**不做模块 hit_test 分发**，原生按钮命中仍由游戏控件树处理。overlay 回调注册在宿主侧；注销失败进入 orphaned 状态，重启用时重试注册。
 

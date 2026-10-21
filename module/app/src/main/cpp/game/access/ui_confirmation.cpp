@@ -96,6 +96,24 @@ bool ui_confirmation_popup_create(uint32_t text_id, uint32_t display_type,
     return true;
 }
 
+bool ui_confirmation_popup_create_text(const char* text, uint32_t length,
+                                       uint32_t display_type, uint32_t numeric_param,
+                                       UiPopupCallback ok, UiPopupCallback cancel) {
+    if (!main_thread_ready() || text == nullptr || ok == nullptr || cancel == nullptr ||
+        g_base == 0 ||
+        !native_function_ready(reinterpret_cast<const void*>(fn_popup_create_yesno))) {
+        return false;
+    }
+    uint8_t active = 0;
+    if (!ui_confirmation_popup_active(&active) || active != 0) return false;
+    static_assert(sizeof(uintptr_t) >= sizeof(numeric_param),
+                  "native callback param must carry the numeric price");
+    fn_popup_create_yesno(const_cast<char*>(text), length, display_type, 2,
+                          reinterpret_cast<void*>(ok), reinterpret_cast<void*>(cancel),
+                          reinterpret_cast<void*>(static_cast<uintptr_t>(numeric_param)));
+    return true;
+}
+
 bool ui_confirmation_popup_close_if_callbacks(UiPopupCallback expected_ok,
                                                UiPopupCallback expected_cancel,
                                                uint8_t* out_closed) {

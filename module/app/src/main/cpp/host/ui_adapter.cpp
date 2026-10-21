@@ -1429,6 +1429,23 @@ QolResult popup_msg_create_yesno_from_textdata(
         ? contracts::ok() : not_ready();
 }
 
+QolResult create_yes_no_text(const char* text, uint32_t length, uint32_t display_type,
+                             uint32_t param, contracts::QolUiPopupMsgCallbackFn ok,
+                             contracts::QolUiPopupMsgCallbackFn cancel) {
+    if (text == nullptr || length == 0 || ok == nullptr || cancel == nullptr) {
+        return invalid_argument();
+    }
+    uint8_t active = 0;
+    if (!qol::game::ui_confirmation_popup_active(&active)) return not_ready();
+    if (active != 0) {
+        static constexpr char message[] = "UIPopupMsg already active";
+        return contracts::error(kQolErrBusy, message, sizeof(message) - 1);
+    }
+    return qol::game::ui_confirmation_popup_create_text(
+               text, length, display_type, param, ok, cancel)
+        ? contracts::ok() : not_ready();
+}
+
 QolResult call_ui_popup_msg_draw() {
     if (!qol::game::game_host_is_main_thread()) return not_ready();
     return qol::game::ui_confirmation_popup_draw() ? contracts::ok() : not_ready();
@@ -1604,6 +1621,8 @@ QolUiAdapter g_ui_adapter{
             &call_ui_popup_msg_draw,
             // Minor 31 tail: proactive LCD snapshot for panel/choice open.
             &save_lcd_now,
+            // Minor 32 tail: raw-text Yes/No creation (no TEXTDATABASE/TextLayer).
+            &create_yes_no_text,
           };
 
 }  // namespace

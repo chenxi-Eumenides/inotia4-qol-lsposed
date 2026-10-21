@@ -11,6 +11,7 @@ namespace {
 using qol::contracts::QolUiAdapter;
 using qol::contracts::QolUiPopupMsgCallbackFn;
 using qol::contracts::UiConfirmationSpec;
+using qol::contracts::UiConfirmationSpecText;
 
 QolUiAdapter g_adapter{};
 uint8_t g_popup_active = 0;
@@ -35,6 +36,12 @@ uint64_t g_reentrant_token = 0;
 QolResult g_reentrant_result{};
 bool g_try_reentrant_open = false;
 UiConfirmationSpec g_reentrant_spec{};
+int g_raw_create_calls = 0;
+const char* g_raw_pointer = nullptr;
+uint32_t g_raw_length = 0;
+uint32_t g_raw_display_type = 0;
+uint32_t g_raw_param = 0;
+char g_raw_copy[256]{};
 const qol::contracts::UiConfirmationApi* g_api = nullptr;
 
 void old_ok(void*) {}
@@ -92,6 +99,26 @@ QolResult popup_create(uint32_t text_id, uint32_t display_type, uint32_t format_
     return g_fail_after_create
         ? qol::contracts::error(kQolErrBlocked, "failed", 6)
         : qol::contracts::ok();
+}
+
+QolResult popup_create_text(const char* text, uint32_t length, uint32_t display_type,
+                            uint32_t param, QolUiPopupMsgCallbackFn ok,
+                            QolUiPopupMsgCallbackFn cancel) {
+    ++g_raw_create_calls;
+    g_raw_pointer = text;
+    g_raw_length = length;
+    g_raw_display_type = display_type;
+    g_raw_param = param;
+    if (text != nullptr) {
+        std::snprintf(g_raw_copy, sizeof(g_raw_copy), "%.*s", static_cast<int>(length), text);
+    }
+    if (g_popup_active != 0) {
+        return qol::contracts::error(kQolErrBusy, "busy", 4);
+    }
+    g_ok = ok;
+    g_cancel = cancel;
+    g_popup_active = 1;
+    return qol::contracts::ok();
 }
 
 QolResult popup_close_if_callbacks(QolUiPopupMsgCallbackFn expected_ok,
@@ -152,6 +179,10 @@ void reset_fake() {
     g_reentrant_token = 0;
     g_reentrant_result = qol::contracts::ok();
     g_try_reentrant_open = false;
+    g_raw_create_calls = 0;
+    g_raw_pointer = nullptr;
+    g_raw_length = g_raw_display_type = g_raw_param = 0;
+    g_raw_copy[0] = '\0';
 }
 
 void trigger_confirm(bool b_on_cleared_first = false) {
@@ -181,6 +212,7 @@ int main() {
     g_adapter.popup_msg_get_callbacks = &popup_get_callbacks;
     g_adapter.popup_msg_replace_callback_if = &popup_replace_callback_if;
     g_adapter.popup_msg_create_yesno_from_textdata = &popup_create;
+    g_adapter.create_yes_no_text = &popup_create_text;
     g_adapter.popup_msg_close_if_callbacks = &popup_close_if_callbacks;
     g_adapter.call_ui_popup_msg_draw = &popup_draw;
     assert(qol::features::core_ui::ui_confirmation_bind(&g_adapter));
@@ -213,6 +245,50 @@ int main() {
     assert(g_confirm_calls == 1);
     assert(g_api->active(token, &active).code == kQolErrNotFound);
     assert(g_api->close(token).code == kQolErrNotFound);
+
+    // v1.1 raw-text open: provider copies the message, uses the raw adapter slot, and keeps
+    // the copy alive through the callback stack.
+    reset_fake();
+    char local_message[256] = "任意字符串：确认执行？";
+    UiConfirmationSpecText text_request{};
+    text_request.size = sizeof(text_request);
+    std::snprintf(text_request.message, sizeof(text_request.message), "%s", local_message);
+    text_request.display_type = 4;
+    text_request.price = 77;
+    text_request.on_confirm = &on_confirm;
+    text_request.on_cancel = &on_cancel;
+    text_request.user = &context;
+    uint64_t text_token = 0;
+    assert(qol::contracts::succeeded(g_api->open_text(&text_request, &text_token)) &&
+           text_token != 0);
+    assert(g_raw_create_calls == 1 && g_create_calls == 0);
+    assert(g_raw_pointer != local_message);
+    assert(g_raw_length == std::strlen(local_message) &&
+           std::strcmp(g_raw_pointer, local_message) == 0);
+    assert(g_raw_display_type == 4 && g_raw_param == 77);
+    std::memset(local_message, 0, sizeof(local_message));
+    assert(std::strcmp(g_raw_copy, "任意字符串：确认执行？") == 0);
+    trigger_confirm();
+    assert(g_confirm_calls == 1);
+    assert(g_raw_pointer[0] == '\0');  // released after consumer stack exits
+    assert(g_api->active(text_token, &active).code == kQolErrNotFound);
+
+    // Invalid raw specs are rejected before touching the native popup.
+    reset_fake();
+    UiConfirmationSpecText invalid = text_request;
+    invalid.size = sizeof(invalid) - 1;
+    token = 0;
+    assert(g_api->open_text(&invalid, &token).code == kQolErrInvalidArgument && token == 0);
+    invalid = text_request;
+    std::memset(invalid.message, 'x', sizeof(invalid.message));
+    assert(g_api->open_text(&invalid, &token).code == kQolErrInvalidArgument);
+    invalid = text_request;
+    invalid.price = 0x80000000u;
+    assert(g_api->open_text(&invalid, &token).code == kQolErrInvalidArgument);
+    invalid = text_request;
+    invalid.message[0] = '\0';
+    assert(g_api->open_text(&invalid, &token).code == kQolErrInvalidArgument);
+    assert(g_raw_create_calls == 0);
 
     // A reentrant open from the consumer callback is rejected until dispatch completes.
     reset_fake();

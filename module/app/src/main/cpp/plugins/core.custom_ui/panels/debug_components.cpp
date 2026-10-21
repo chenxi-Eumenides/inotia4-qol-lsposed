@@ -177,7 +177,7 @@ void open_demo_choice() {
 
 void open_demo_confirmation(uint32_t price) {
     const contracts::UiConfirmationApi* api = ui_confirmation_api();
-    if (api == nullptr || api->open == nullptr || api->active == nullptr) {
+    if (api == nullptr || api->open_text == nullptr || api->active == nullptr) {
         g_demo_confirmation_status = "ui_confirmation 不可用";
         return;
     }
@@ -196,11 +196,17 @@ void open_demo_confirmation(uint32_t price) {
             return;
         }
     }
-    contracts::UiConfirmationSpec spec{9, 0, 2, price,
-        &demo_confirmation_confirmed, &demo_confirmation_cancelled,
-        &g_demo_confirmation_context};
+    contracts::UiConfirmationSpecText spec{};
+    spec.size = sizeof(spec);
+    std::snprintf(spec.message, sizeof(spec.message), "%s",
+                  price == 0 ? "确认执行该操作？" : "是否出售该物品？");
+    spec.display_type = 0;
+    spec.price = price;
+    spec.on_confirm = &demo_confirmation_confirmed;
+    spec.on_cancel = &demo_confirmation_cancelled;
+    spec.user = &g_demo_confirmation_context;
     uint64_t token = 0;
-    const QolResult result = api->open(&spec, &token);
+    const QolResult result = api->open_text(&spec, &token);
     if (token != 0) {
         g_demo_confirmation_token = token;
         g_demo_confirmation_context.token = token;

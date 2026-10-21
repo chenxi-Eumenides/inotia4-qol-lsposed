@@ -35,6 +35,9 @@ uint64_t g_generation = 0;
 uint64_t g_next_token = 1;
 uint64_t g_active_token = 0;
 contracts::UiConfirmationSpec g_spec{};
+// Raw-text dialogs keep this buffer alive until bOn==0 and the consumer callback exits.
+char g_text_buffer[sizeof(contracts::UiConfirmationSpecText().message)]{};
+bool g_raw_text = false;
 NativeCallback g_previous_ok = nullptr;
 NativeCallback g_previous_cancel = nullptr;
 contracts::QolUiFrameOverlayDrawFn g_overlay_draw = nullptr;
@@ -60,6 +63,8 @@ constexpr char kBlocked[] = "ui_confirmation disabled";
 constexpr char kOwnershipChanged[] = "UIPopupMsg ownership changed";
 constexpr char kStaleToken[] = "ui_confirmation token is stale";
 constexpr char kPriceOutOfRange[] = "confirmation price exceeds INT32_MAX";
+constexpr char kTextTooLarge[] = "confirmation text is not NUL-terminated within 256 bytes";
+constexpr char kTextUnsupported[] = "confirmation adapter lacks raw-text creation";
 
 void confirmation_ok_trampoline(void*);
 void confirmation_cancel_trampoline(void*);
@@ -93,6 +98,16 @@ bool adapter_has_confirmation_slots(const contracts::QolUiAdapter* adapter) {
         adapter->popup_msg_replace_callback_if != nullptr &&
         adapter->popup_msg_create_yesno_from_textdata != nullptr &&
         adapter->popup_msg_close_if_callbacks != nullptr;
+}
+
+bool adapter_has_text_slots(const contracts::QolUiAdapter* adapter) {
+    if (adapter == nullptr || adapter->major != contracts::kUiAdapterMajor ||
+        adapter->minor < 32 || adapter->size < offsetof(contracts::QolUiAdapter,
+                                                          create_yes_no_text) +
+                                      sizeof(adapter->create_yes_no_text)) {
+        return false;
+    }
+    return adapter->create_yes_no_text != nullptr;
 }
 
 bool adapter_has_overlay_slots(const contracts::QolUiAdapter* adapter) {
@@ -267,7 +282,7 @@ bool on_main_thread(const contracts::QolUiAdapter* adapter) {
     return adapter_has_confirmation_slots(adapter) && adapter->is_main_thread() != 0;
 }
 
-uint64_t clear_locked() {
+uint64_t clear_locked(bool clear_message = true) {
     const uint64_t previous_generation = g_generation;
     g_active = false;
     g_opening = false;
@@ -277,6 +292,10 @@ uint64_t clear_locked() {
     g_v1_overlay = false;
     g_active_token = 0;
     g_spec = {};
+    if (clear_message) {
+        std::memset(g_text_buffer, 0, sizeof(g_text_buffer));
+        g_raw_text = false;
+    }
     g_previous_ok = nullptr;
     g_previous_cancel = nullptr;
     ++g_generation;
@@ -487,7 +506,8 @@ void confirmation_dispatch(bool confirm) {
         if (!g_active || g_generation != generation || g_active_token != token) return;
         consumer = confirm ? spec.on_confirm : spec.on_cancel;
         user = spec.user;
-        clear_locked();
+        // Keep the raw-text buffer valid until bOn==0 and the consumer stack exits.
+        clear_locked(false);
         if (consumer != nullptr) g_dispatching = true;
     }
 
@@ -495,6 +515,13 @@ void confirmation_dispatch(bool confirm) {
         consumer(user);
         std::lock_guard<std::mutex> lock(g_mutex);
         g_dispatching = false;
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        if (!g_active) {
+            std::memset(g_text_buffer, 0, sizeof(g_text_buffer));
+            g_raw_text = false;
+        }
     }
 }
 
@@ -524,7 +551,9 @@ void expose_retry_token_if_retained(uint64_t token, uint64_t* out_token) {
     if (g_active && g_active_token == token) *out_token = token;
 }
 
-QolResult confirmation_open(const contracts::UiConfirmationSpec* spec, uint64_t* out_token) {
+QolResult confirmation_open_impl(const contracts::UiConfirmationSpec* spec,
+                                 const char* raw_text, uint32_t raw_length, bool raw_source,
+                                 uint64_t* out_token) {
     if (out_token == nullptr) {
         return error(kQolErrInvalidArgument, kInvalidArgument, sizeof(kInvalidArgument) - 1);
     }
@@ -537,6 +566,9 @@ QolResult confirmation_open(const contracts::UiConfirmationSpec* spec, uint64_t*
     }
     const contracts::QolUiAdapter* adapter = adapter_snapshot();
     if (!on_main_thread(adapter)) return not_ready();
+    if (raw_source && !adapter_has_text_slots(adapter)) {
+        return error(kQolErrUnsupported, kTextUnsupported, sizeof(kTextUnsupported) - 1);
+    }
 
     uint64_t closing_token = 0;
     NativeCallback closing_previous_ok = nullptr;
@@ -603,14 +635,24 @@ QolResult confirmation_open(const contracts::UiConfirmationSpec* spec, uint64_t*
         g_return_suppression_pending = false;
         g_return_suppression_frame = -1;
         g_spec = *spec;
+        std::memset(g_text_buffer, 0, sizeof(g_text_buffer));
+        if (raw_source && raw_text != nullptr) {
+            // Include the NUL so the native side can also treat it as a C string.
+            std::memcpy(g_text_buffer, raw_text, raw_length + 1);
+        }
+        g_raw_text = raw_source;
         g_previous_ok = previous_ok;
         g_previous_cancel = previous_cancel;
         ++g_generation;
     }
 
-    const QolResult created = adapter->popup_msg_create_yesno_from_textdata(
-        spec->text_id, spec->display_type, spec->format_arg,
-        &confirmation_ok_trampoline, &confirmation_cancel_trampoline, spec->price);
+    const QolResult created = raw_source
+        ? adapter->create_yes_no_text(g_text_buffer, raw_length, spec->display_type,
+                                      spec->price, &confirmation_ok_trampoline,
+                                      &confirmation_cancel_trampoline)
+        : adapter->popup_msg_create_yesno_from_textdata(
+              spec->text_id, spec->display_type, spec->format_arg,
+              &confirmation_ok_trampoline, &confirmation_cancel_trampoline, spec->price);
     if (created.ok != kQolOk) {
         clear_after_failed_open(adapter, token);
         expose_retry_token_if_retained(token, out_token);
@@ -661,6 +703,41 @@ QolResult confirmation_open(const contracts::UiConfirmationSpec* spec, uint64_t*
     return contracts::ok();
 }
 
+QolResult confirmation_open(const contracts::UiConfirmationSpec* spec, uint64_t* out_token) {
+    return confirmation_open_impl(spec, nullptr, 0, false, out_token);
+}
+
+QolResult confirmation_open_text(const contracts::UiConfirmationSpecText* spec,
+                                 uint64_t* out_token) {
+    if (out_token == nullptr) {
+        return error(kQolErrInvalidArgument, kInvalidArgument, sizeof(kInvalidArgument) - 1);
+    }
+    *out_token = 0;
+    if (spec == nullptr || spec->size < sizeof(contracts::UiConfirmationSpecText) ||
+        spec->on_confirm == nullptr || spec->on_cancel == nullptr) {
+        return error(kQolErrInvalidArgument, kInvalidArgument, sizeof(kInvalidArgument) - 1);
+    }
+    if (spec->price > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+        return error(kQolErrInvalidArgument, kPriceOutOfRange, sizeof(kPriceOutOfRange) - 1);
+    }
+    const void* terminator = std::memchr(spec->message, '\0', sizeof(spec->message));
+    if (terminator == nullptr) {
+        return error(kQolErrInvalidArgument, kTextTooLarge, sizeof(kTextTooLarge) - 1);
+    }
+    const uint32_t length = static_cast<uint32_t>(
+        static_cast<const char*>(terminator) - spec->message);
+    if (length == 0) {
+        return error(kQolErrInvalidArgument, kInvalidArgument, sizeof(kInvalidArgument) - 1);
+    }
+    contracts::UiConfirmationSpec normalized{};
+    normalized.display_type = spec->display_type;
+    normalized.price = spec->price;
+    normalized.on_confirm = spec->on_confirm;
+    normalized.on_cancel = spec->on_cancel;
+    normalized.user = spec->user;
+    return confirmation_open_impl(&normalized, spec->message, length, true, out_token);
+}
+
 QolResult confirmation_active(uint64_t token, uint8_t* out_active) {
     if (out_active == nullptr || token == 0) {
         return error(kQolErrInvalidArgument, kInvalidArgument, sizeof(kInvalidArgument) - 1);
@@ -704,6 +781,7 @@ constexpr contracts::UiConfirmationApi kApi{
     &confirmation_open,
     &confirmation_active,
     &confirmation_close,
+    &confirmation_open_text,
 };
 
 }  // namespace

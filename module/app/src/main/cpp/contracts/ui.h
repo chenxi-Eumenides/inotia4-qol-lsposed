@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 22;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 31;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 32;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -748,6 +748,13 @@ struct QolUiAdapter {
     // Minor 31 tail: proactive GRP_SaveLCD snapshot of the current framebuffer, no GRPX
     // begin/end and no refresh-flag changes.
     QolResult (*save_lcd)();
+
+    // Minor 32 tail: create a Yes/No popup from an explicit UTF-8 text buffer. The game keeps
+    // referencing text until bOn returns to 0; callers must keep it alive that long. param is
+    // the numeric price encoded as the native callback argument.
+    QolResult (*create_yes_no_text)(const char* text, uint32_t length, uint32_t display_type,
+                                    uint32_t param, QolUiPopupMsgCallbackFn ok,
+                                    QolUiPopupMsgCallbackFn cancel);
 };
 
 }  // namespace qol::contracts

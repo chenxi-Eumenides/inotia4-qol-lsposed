@@ -239,6 +239,28 @@ int g_popup_test_create_calls = 0;
 int g_popup_test_close_calls = 0;
 int g_popup_test_callback_calls = 0;
 
+char g_popup_test_raw_text[256]{};
+int g_popup_test_raw_calls = 0;
+uint32_t g_popup_test_raw_length = 0;
+uint32_t g_popup_test_raw_display_type = 0;
+uint32_t g_popup_test_raw_type = 0;
+
+void fake_popup_create_yesno(char* text, uint32_t len, uint32_t display_type, uint32_t type,
+                             void* ok, void* cancel, void* param) {
+    ++g_popup_test_raw_calls;
+    g_popup_test_raw_length = len;
+    g_popup_test_raw_display_type = display_type;
+    g_popup_test_raw_type = type;
+    g_popup_test_param = param;
+    if (text != nullptr) {
+        std::snprintf(g_popup_test_raw_text, sizeof(g_popup_test_raw_text), "%.*s",
+                      static_cast<int>(len), text);
+    }
+    *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 1;
+    *reinterpret_cast<void**>(g_base + G_POPUP_FPOK_VMA) = ok;
+    *reinterpret_cast<void**>(g_base + G_POPUP_FPCANCEL_VMA) = cancel;
+}
+
 void fake_popup_create_yesno_from_textdata(uint32_t text_id, uint32_t display_type,
                                            uint32_t format_arg, void* ok, void* cancel,
                                            void* param) {
@@ -268,6 +290,7 @@ void fake_save_lcd() { ++g_save_lcd_calls; }
 }  // namespace
 
 decltype(fn_popup_create_yesno_from_textdata) fn_popup_create_yesno_from_textdata = nullptr;
+decltype(fn_popup_create_yesno) fn_popup_create_yesno = nullptr;
 decltype(fn_popup_draw) fn_popup_draw = nullptr;
 decltype(fn_grp_save_lcd) fn_grp_save_lcd = nullptr;
 decltype(fn_button_cancel_exe) fn_button_cancel_exe = nullptr;
@@ -617,6 +640,7 @@ int main() {
     CHECK(adapter->popup_msg_close_if_callbacks != nullptr);
     CHECK(adapter->call_ui_popup_msg_draw != nullptr);
     CHECK(adapter->save_lcd != nullptr);
+    CHECK(adapter->create_yes_no_text != nullptr);
 
     // Minor 27 routes popup work through the checked game adapter, preserving numeric param.
     {
@@ -648,6 +672,26 @@ int main() {
     CHECK(g_popup_test_close_calls == 1 && g_popup_test_callback_calls == 1);
     CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 0);
     fn_popup_create_yesno_from_textdata = nullptr;
+
+    // Minor 32 raw-text creation forwards explicit text/display type/type=2/price.
+    {
+        g_base = reinterpret_cast<uintptr_t>(g_popup_test_image);
+        fn_popup_create_yesno = &fake_popup_create_yesno;
+        g_popup_test_raw_calls = 0;
+        *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 0;
+        CHECK(adapter->create_yes_no_text("任意文本", 12, 5, 0x55667788u,
+                                          &fake_popup_callback, &fake_popup_callback).ok ==
+              kQolOk);
+        CHECK(g_popup_test_raw_calls == 1 && g_popup_test_raw_length == 12 &&
+              g_popup_test_raw_display_type == 5 && g_popup_test_raw_type == 2 &&
+              std::strcmp(g_popup_test_raw_text, "任意文本") == 0 &&
+              reinterpret_cast<uintptr_t>(g_popup_test_param) == 0x55667788u);
+        uint8_t active = 1;
+        CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 1);
+        CHECK(adapter->popup_msg_close_if_callbacks(&fake_popup_callback, &fake_popup_callback,
+                                                     &active).ok == kQolOk && active == 1);
+        fn_popup_create_yesno = nullptr;
+    }
 
     fn_popup_draw = &fake_popup_draw;
     g_popup_test_draw_calls = 0;

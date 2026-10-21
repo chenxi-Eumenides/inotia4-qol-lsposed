@@ -2,7 +2,7 @@
 
 ## 范围
 
-用户决策：删除 V2 显式文案与自绘确认框后端，仅保留 V1 `ui_confirmation` 1.0（TextData 原生路径）与“自定义面板帧内补绘原生外观”。本记录保留原始 trace 根因与 Gate 历史，结论范围改为：V1 补绘 + choice 单次 pop + 模块 choice 首帧去暗化 + LCD 主动快照。
+用户决策：删除 V2 显式文案与自绘确认框后端，仅保留 V1 `ui_confirmation` 1.0（TextData 原生路径）与“自定义面板帧内补绘原生外观”。本记录保留原始 trace 根因与 Gate 历史，结论范围改为：V1 补绘 + choice 单次 pop + 模块 choice 首帧去暗化 + LCD 主动快照 + 确认框 raw 文本（1.1）。
 
 ## 原始根因（保留）
 
@@ -12,9 +12,9 @@
 
 - V1 open 仍创建原生 `UIPopupMsg`；顶层自定义 provider 有 `process` 回调时，`PopupHost::dispatch_process` arm `frame_overlay` scope，宿主在 panel GRPX 帧的 `end_frame` 前调用一次注册回调，`bOn==1` 时调用 Adapter 1.30 `call_ui_popup_msg_draw()`，保留 100% 原生外观。成功绘制一次后才启用模态门禁；`bOn==0` 结束 scope。
 - 补绘失败只记录日志，不改变 V1 token/close 语义。模态期间 F3 消费且不下传 parent（游戏 `UIPopupMsg_Process` 清 bOn），F4/所有事件消费；触摸事件只消费、不做模块 hit_test 分发。
-- 原生选择框不再使用 panel 侧 Return gate（choice 用独立 entry，panel 的 `dispatch_f3` 不执行，原 gate 无效，已移除）。改为防双 pop：用户点选项时原生 `UIChoice_ButtonListExe` 必排一次 `(3,0)`，模块 wrapper 不再额外 `close_popup`；模块主动关闭按 generation 去重，同一 choice 恰好一次 pop。
+- 原生选择框不再使用 panel 侧 Return gate（choice 用独立 entry，panel 的 `dispatch_f3` 不执行，原 gate 无效，已移除）。模块 wrapper 替换整个 `UIChoice_ButtonListExe`，选项点击由模块自行排一次 pop（按 generation 去重）并只分发模块回调，不再进入原生链路（其 NPC 对话 `GAMESTATE_SetState(0)` 分支在模块无角色上下文时会崩溃）。
 - 面板 open 时主动 `GRP_SaveLCD`，首帧 RestoreLCD 显示打开前画面。choice 的 push 快照已移除：新增 `Scene_Draw_POPUP_SC_CHOICE` entry hook，模块 choice 首帧在游戏压暗前 SaveLCD、清 refresh flag，再执行 `GRPX_Start → UIChoice_Draw → GRPX_End`，跳过 fpResume/AddAlpha/FillRect/RemoveFilter；非模块 choice 与 flag==0 直接走原函数。
-- V2/自绘 overlay、Adapter 1.29 raw YesNo、ui.state 1.2 V2 快照均已删除；Adapter 序号保留 1.31（1.29 空号）。
+- V2/自绘 overlay、ui.state 1.2 V2 快照均已删除。Adapter 1.32 重新引入原始字符串 Yes/No 槽；1.29 空号保留。`ui_confirmation` 1.1 的 `open_text` 使用该槽，message 由 provider 持有至 bOn==0 且 callback 栈退出。
 
 ## 验证状态
 
