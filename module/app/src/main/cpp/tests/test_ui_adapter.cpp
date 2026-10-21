@@ -242,15 +242,15 @@ int g_popup_test_callback_calls = 0;
 char g_popup_test_raw_text[256]{};
 int g_popup_test_raw_calls = 0;
 uint32_t g_popup_test_raw_length = 0;
-uint32_t g_popup_test_raw_display_type = 0;
-uint32_t g_popup_test_raw_type = 0;
+uint32_t g_popup_test_raw_x2 = 0;
+uint32_t g_popup_test_raw_x3 = 0;
 
-void fake_popup_create_yesno(char* text, uint32_t len, uint32_t display_type, uint32_t type,
+void fake_popup_create_yesno(char* text, uint32_t len, uint32_t x2, uint32_t x3,
                              void* ok, void* cancel, void* param) {
     ++g_popup_test_raw_calls;
     g_popup_test_raw_length = len;
-    g_popup_test_raw_display_type = display_type;
-    g_popup_test_raw_type = type;
+    g_popup_test_raw_x2 = x2;
+    g_popup_test_raw_x3 = x3;
     g_popup_test_param = param;
     if (text != nullptr) {
         std::snprintf(g_popup_test_raw_text, sizeof(g_popup_test_raw_text), "%.*s",
@@ -683,7 +683,7 @@ int main() {
                                           &fake_popup_callback, &fake_popup_callback).ok ==
               kQolOk);
         CHECK(g_popup_test_raw_calls == 1 && g_popup_test_raw_length == 12 &&
-              g_popup_test_raw_display_type == 5 && g_popup_test_raw_type == 2 &&
+              g_popup_test_raw_x2 == 0 && g_popup_test_raw_x3 == 5 &&
               std::strcmp(g_popup_test_raw_text, "任意文本") == 0 &&
               reinterpret_cast<uintptr_t>(g_popup_test_param) == 0x55667788u);
         uint8_t active = 1;

@@ -108,7 +108,10 @@ bool ui_confirmation_popup_create_text(const char* text, uint32_t length,
     if (!ui_confirmation_popup_active(&active) || active != 0) return false;
     static_assert(sizeof(uintptr_t) >= sizeof(numeric_param),
                   "native callback param must carry the numeric price");
-    fn_popup_create_yesno(const_cast<char*>(text), length, display_type, 2,
+    // Native signature: (text, len, x2, x3, ok, cancel, param). x2 is forwarded to
+    // CreateButtonControl (0 for module dialogs); x3 is i32DisplayType (0=plain body,
+    // 2=price layout) and is the only layout selector. The internal i32Type is fixed.
+    fn_popup_create_yesno(const_cast<char*>(text), length, 0, display_type,
                           reinterpret_cast<void*>(ok), reinterpret_cast<void*>(cancel),
                           reinterpret_cast<void*>(static_cast<uintptr_t>(numeric_param)));
     return true;
