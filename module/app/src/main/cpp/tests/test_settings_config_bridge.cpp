@@ -28,7 +28,7 @@ using namespace qol::host;
 constexpr QolOwnerToken kSettingsOwner = 71;
 constexpr QolOwnerToken kOtherOwner = 72;
 constexpr uint32_t kFieldCount = kSettingsConfigBoolCount;
-std::array<int32_t, kFieldCount> g_values{0, 0, 0, 1, 0, 0, 1, 0, 0, 0};
+std::array<int32_t, kFieldCount> g_values{0, 0, 0, 1, 0, 0, 1, 0, 0};
 std::atomic<bool> g_fail_persist{false};
 std::atomic<bool> g_block_update{false};
 std::atomic<bool> g_update_entered{false};
@@ -44,13 +44,13 @@ SettingsConfigApplyState g_apply_state = SettingsConfigApplyState::kUnchanged;
 constexpr const char* kKeys[kFieldCount] = {
     "stackLimitIncrease", "moveMergeEnabled", "opEnabled", "extensionBagEnabled",
     "customRecipeEnabled", "autoSellEnabled", "apiEnabled", "debugLogEnabled",
-    "simpleModeEnabled", "pushAllEnabled"};
+    "pushAllEnabled"};
 constexpr const char* kPlugins[kFieldCount] = {
     "stack_limit", "move_merge", "core.settings", "extension_bag", "custom_recipe",
-    "autosell", "core.settings", "core.settings", "simple_mode", "push_all"};
+    "autosell", "core.settings", "core.settings", "push_all"};
 constexpr const char* kFields[kFieldCount] = {
     "enable", "enable", "opEnabled", "enable", "enable", "enable", "apiEnabled",
-    "debugLogEnabled", "enable", "enable"};
+    "debugLogEnabled", "enable"};
 
 QolResult test_error(int32_t code, const char* message) {
     return error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -155,8 +155,7 @@ QolResult fake_namespace_read_registered(QolOwnerToken owner, char* out, uint32_
         "},\"custom_recipe\":{\"enable\":" + boolean(g_values[4]) +
         "},\"extension_bag\":{\"enable\":" + boolean(g_values[3]) +
         "},\"move_merge\":{\"enable\":" + boolean(g_values[1]) +
-        "},\"push_all\":{\"enable\":" + boolean(g_values[9]) +
-        "},\"simple_mode\":{\"enable\":" + boolean(g_values[8]) +
+        "},\"push_all\":{\"enable\":" + boolean(g_values[8]) +
         "},\"stack_limit\":{\"enable\":" + boolean(g_values[0]) + "}}";
     *out_size = static_cast<uint32_t>(projection.size());
     if (capacity < projection.size()) return test_error(kQolErrBlocked, "buffer too small");
@@ -278,7 +277,7 @@ void test_owner_api_and_receipts() {
            value == 1);
     // apiEnabled=false does not disable the resident settings UI writer.
     g_values[6] = 0;
-    assert(contracts::succeeded(api.request_set_bool_for_owner(kSettingsOwner, "simpleModeEnabled", 1, &id)));
+    assert(contracts::succeeded(api.request_set_bool_for_owner(kSettingsOwner, "pushAllEnabled", 1, &id)));
     assert(wait_for([&] { return request_status(id, &status) &&
                                 status.state == SettingsConfigRequestState::kSucceeded; }));
     assert(status.persisted == 1 && status.configured_value == 1 &&

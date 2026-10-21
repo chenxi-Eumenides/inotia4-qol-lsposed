@@ -107,13 +107,13 @@ private:
     bool is_known(const std::string& key) const {
         return key == "listenAddress" || key == "listenPort" || key == "stackLimitIncrease" ||
                key == "moveMergeEnabled" || key == "opEnabled" || key == "extensionBagEnabled" ||
-               key == "customRecipeEnabled" || key == "simpleModeEnabled" ||
+               key == "customRecipeEnabled" ||
                key == "pushAllEnabled" || key == "autoSellEnabled" || key == "apiEnabled" ||
                key == "debugLogEnabled";
     }
 
-    static constexpr std::array<std::string_view, 8> kMigrationKeys = {
-        "moveMergeEnabled", "extensionBagEnabled", "customRecipeEnabled", "simpleModeEnabled",
+    static constexpr std::array<std::string_view, 7> kMigrationKeys = {
+        "moveMergeEnabled", "extensionBagEnabled", "customRecipeEnabled",
         "pushAllEnabled", "autoSellEnabled", "apiEnabled", "debugLogEnabled"};
 
     bool read_known(const std::string& key, ModuleConfig* c) {
@@ -140,7 +140,6 @@ private:
         else if (key == "opEnabled") field = &c->op_enabled;
         else if (key == "extensionBagEnabled") field = &c->extension_bag_enabled;
         else if (key == "customRecipeEnabled") field = &c->custom_recipe_enabled;
-        else if (key == "simpleModeEnabled") field = &c->simple_mode_enabled;
         else if (key == "pushAllEnabled") field = &c->push_all_enabled;
         else if (key == "autoSellEnabled") field = &c->auto_sell_enabled;
         else if (key == "apiEnabled") field = &c->api_enabled;
@@ -441,8 +440,8 @@ struct LegacyField {
     const char* key;
 };
 
-const std::array<LegacyField, 12>& legacy_fields() {
-    static constexpr std::array<LegacyField, 12> fields{{
+const std::array<LegacyField, 11>& legacy_fields() {
+    static constexpr std::array<LegacyField, 11> fields{{
         {"listenAddress", "core.settings", "listenAddress"},
         {"listenPort", "core.settings", "listenPort"},
         {"stackLimitIncrease", "stack_limit", "enable"},
@@ -450,7 +449,6 @@ const std::array<LegacyField, 12>& legacy_fields() {
         {"opEnabled", "core.settings", "opEnabled"},
         {"extensionBagEnabled", "extension_bag", "enable"},
         {"customRecipeEnabled", "custom_recipe", "enable"},
-        {"simpleModeEnabled", "simple_mode", "enable"},
         {"pushAllEnabled", "push_all", "enable"},
         {"autoSellEnabled", "autosell", "enable"},
         {"apiEnabled", "core.settings", "apiEnabled"},
@@ -962,7 +960,6 @@ ModuleConfig project_config(const std::vector<std::pair<std::string, JsonValue>>
     config.move_merge_enabled = feature_enabled("move_merge", false);
     config.extension_bag_enabled = feature_enabled("extension_bag", true);
     config.custom_recipe_enabled = feature_enabled("custom_recipe", false);
-    config.simple_mode_enabled = feature_enabled("simple_mode", false);
     config.push_all_enabled = feature_enabled("push_all", false);
     config.auto_sell_enabled = feature_enabled("autosell", false);
     return config;
@@ -1592,7 +1589,6 @@ ConfigStoreResult ConfigStore::update(const ModuleConfigPatch& requested) {
     if (requested.op_enabled) next.op_enabled = *requested.op_enabled;
     if (requested.extension_bag_enabled) next.extension_bag_enabled = *requested.extension_bag_enabled;
     if (requested.custom_recipe_enabled) next.custom_recipe_enabled = *requested.custom_recipe_enabled;
-    if (requested.simple_mode_enabled) next.simple_mode_enabled = *requested.simple_mode_enabled;
     if (requested.push_all_enabled) next.push_all_enabled = *requested.push_all_enabled;
     if (requested.auto_sell_enabled) next.auto_sell_enabled = *requested.auto_sell_enabled;
     if (requested.api_enabled) next.api_enabled = *requested.api_enabled;
@@ -1625,7 +1621,6 @@ ConfigStoreResult ConfigStore::update(const ModuleConfigPatch& requested) {
     set_enabled("move_merge", requested.move_merge_enabled, next.move_merge_enabled);
     set_enabled("extension_bag", requested.extension_bag_enabled, next.extension_bag_enabled);
     set_enabled("custom_recipe", requested.custom_recipe_enabled, next.custom_recipe_enabled);
-    set_enabled("simple_mode", requested.simple_mode_enabled, next.simple_mode_enabled);
     set_enabled("push_all", requested.push_all_enabled, next.push_all_enabled);
     set_enabled("autosell", requested.auto_sell_enabled, next.auto_sell_enabled);
     if (!write_atomic(path_, serialize(next_namespaces, unknown_root_)))

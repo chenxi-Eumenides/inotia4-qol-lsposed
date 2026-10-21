@@ -267,7 +267,6 @@ int main(int argc, char** argv) {
     config.listen_address = "127.0.0.1";
     config.listen_port = 8123;
     config.stack_limit_increase = true;
-    config.simple_mode_enabled = true;
     config.push_all_enabled = true;
     config.auto_sell_enabled = true;
     config.move_merge_enabled = true;
@@ -280,7 +279,6 @@ int main(int argc, char** argv) {
     qol::host::config_apply_api_enabled(true);
     qol::host::config_apply_api_enabled(false);
     assert(qol::infra::config_get_bool("plugin.stack_limit.enabled", false));
-    assert(qol::infra::config_get_bool("plugin.simple_mode.enabled", false));
     assert(qol::infra::config_get_bool("plugin.push_all.enabled", false));
     assert(qol::infra::config_get_bool("plugin.autosell.enabled", false));
     assert(qol::infra::config_get_bool("moveMergeEnabled", false));

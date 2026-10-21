@@ -314,6 +314,8 @@ void test_descriptor() {
     assert(descriptor.resources[1].handler ==
            reinterpret_cast<void*>(&char_update_attr_from_monster_wrapper));
     assert(descriptor.provides_count == 0);
+    assert(descriptor.jni_count == 0);
+    assert(descriptor.jni == nullptr);
     assert(descriptor.feature_count == 1);
     assert(std::strcmp(descriptor.features[0].id, "simple_mode.combat") == 0);
     assert(descriptor.features[0].default_enabled == 0);

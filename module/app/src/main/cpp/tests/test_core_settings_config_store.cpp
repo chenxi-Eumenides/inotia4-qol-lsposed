@@ -98,7 +98,7 @@ void test_legacy_migration_and_unknown_preservation(const std::string& root) {
         "{\"listenAddress\":\"legacy-address\",\"listenPort\":1234,"
         "\"stackLimitIncrease\":false,\"moveMergeEnabled\":true,\"opEnabled\":true,"
         "\"extensionBagEnabled\":true,\"customRecipeEnabled\":true,"
-        "\"simpleModeEnabled\":true,\"pushAllEnabled\":true,\"autoSellEnabled\":true,"
+        "\"pushAllEnabled\":true,\"autoSellEnabled\":true,"
         "\"apiEnabled\":false,\"debugLogEnabled\":true,\"jewelBatchMix\":true,"
         "\"core.settings\":{\"enable\":true,\"listenAddress\":\"192.0.2.8\","
         "\"listenPort\":4321,\"opEnabled\":false,\"apiEnabled\":true,"
@@ -127,7 +127,7 @@ void test_legacy_migration_and_unknown_preservation(const std::string& root) {
     assert(!projection.op_enabled && projection.api_enabled && !projection.debug_log_enabled);
     assert(projection.stack_limit_increase && projection.move_merge_enabled);
     assert(!projection.extension_bag_enabled && projection.custom_recipe_enabled);
-    assert(projection.simple_mode_enabled && projection.push_all_enabled && projection.auto_sell_enabled);
+    assert(projection.push_all_enabled && projection.auto_sell_enabled);
 
     JsonValue core;
     assert(store.read_namespace("core.settings", &core).ok());
@@ -169,7 +169,7 @@ void test_legacy_migration_and_unknown_preservation(const std::string& root) {
     const auto top_keys = root_keys(migrated);
     for (const char* flat : {"listenAddress", "listenPort", "stackLimitIncrease", "moveMergeEnabled",
                              "opEnabled", "extensionBagEnabled", "customRecipeEnabled",
-                             "simpleModeEnabled", "pushAllEnabled", "autoSellEnabled", "apiEnabled",
+                             "pushAllEnabled", "autoSellEnabled", "apiEnabled",
                              "debugLogEnabled", "jewelBatchMix"})
         assert(std::find(top_keys.begin(), top_keys.end(), flat) == top_keys.end());
     for (const char* unknown : {"future.scalar", "future.array", "future.object", "plugin.unregistered"})

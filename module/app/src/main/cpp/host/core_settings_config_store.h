@@ -17,7 +17,6 @@ struct ModuleConfig {
     bool op_enabled = false;
     bool extension_bag_enabled = true;
     bool custom_recipe_enabled = false;
-    bool simple_mode_enabled = false;
     bool push_all_enabled = false;
     bool auto_sell_enabled = false;
     bool api_enabled = true;
@@ -48,7 +47,6 @@ struct ModuleConfigPatch {
     std::optional<bool> op_enabled;
     std::optional<bool> extension_bag_enabled;
     std::optional<bool> custom_recipe_enabled;
-    std::optional<bool> simple_mode_enabled;
     std::optional<bool> push_all_enabled;
     std::optional<bool> auto_sell_enabled;
     std::optional<bool> api_enabled;

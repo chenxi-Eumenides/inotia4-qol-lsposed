@@ -7,9 +7,9 @@
 namespace qol::contracts {
 
 constexpr uint16_t kSettingsConfigMajor = 1;
-constexpr uint16_t kSettingsConfigMinor = 1;
+constexpr uint16_t kSettingsConfigMinor = 2;
 constexpr uint16_t kSettingsConfigLegacyMinor = 0;
-constexpr uint32_t kSettingsConfigBoolCount = 10;
+constexpr uint32_t kSettingsConfigBoolCount = 9;
 constexpr uint32_t kSettingsConfigRequestCapacity = 128;
 constexpr uint32_t kSettingsConfigMessageCapacity = 256;
 
@@ -40,7 +40,7 @@ struct QolSettingsConfigApi {
     uint32_t size;
     uint16_t major;
     uint16_t minor;
-    // Only the ten public ModuleConfig bool keys. No defaults, gate keys or HTTP dependency.
+    // Only the nine public ModuleConfig bool keys. No defaults, gate keys or HTTP dependency.
     QolResult (*read_bool)(const char* key, int32_t* out_value);
     // Nonblocking queue admission only. desired must be exactly 0/1; poll the receipt.
     QolResult (*request_set_bool)(const char* key, int32_t desired, uint64_t* out_request);

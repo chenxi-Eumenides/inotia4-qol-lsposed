@@ -342,7 +342,6 @@ target_sources(gamebridge PRIVATE
     game/access/char.cpp
     host/plugin_registry.cpp
     host/assembly.cpp
-    bridge/native/gamebridge_simple_mode.cpp
 )
 
 # P3 Lane A：资源事务引擎（运行期记录/在途计数/隔离/物理释放/帧步进事务，末尾追加，不改上方既有行）

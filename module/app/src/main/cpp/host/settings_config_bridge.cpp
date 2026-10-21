@@ -33,7 +33,6 @@ constexpr std::array<BoolSetting, kSettingsConfigBoolCount> kSettings{{
     {"autoSellEnabled", "autosell", "enable", SettingsConfigApplyState::kPendingFrame},
     {"apiEnabled", "core.settings", "apiEnabled", SettingsConfigApplyState::kPlatformPending},
     {"debugLogEnabled", "core.settings", "debugLogEnabled", SettingsConfigApplyState::kApplied},
-    {"simpleModeEnabled", "simple_mode", "enable", SettingsConfigApplyState::kPendingFrame},
     {"pushAllEnabled", "push_all", "enable", SettingsConfigApplyState::kPendingFrame},
 }};
 
