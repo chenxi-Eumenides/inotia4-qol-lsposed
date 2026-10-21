@@ -235,10 +235,23 @@ void savebackup_panel_process() {
     if (!g_panel_active) return;
     if (g_skip_parse_frame) g_skip_parse_frame = false;
     else process_one_parse_task();
-    if (g_dialog != DialogKind::kNone && g_ui_choice_api != nullptr &&
-        g_ui_choice_api->active != nullptr && !g_ui_choice_api->active()) {
+    bool dialog_pending = false;
+    uint64_t confirmation_token = 0;
+    const contracts::UiConfirmationApi* confirmation = nullptr;
+    {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        if (g_dialog != DialogKind::kNone) clear_pending_locked();
+        dialog_pending = g_dialog != DialogKind::kNone;
+        confirmation_token = g_confirmation_token;
+        confirmation = g_ui_confirmation_api;
+    }
+    // 原生确认框被外部关闭（未走本面板回调）时清掉 pending，避免面板停在“确认中”。
+    if (dialog_pending && confirmation_token != 0 && confirmation != nullptr &&
+        confirmation->active != nullptr) {
+        uint8_t active = 0;
+        if (!contracts::succeeded(confirmation->active(confirmation_token, &active)) || active == 0) {
+            std::lock_guard<std::mutex> lock(g_sbui_mtx);
+            if (g_dialog != DialogKind::kNone) clear_pending_locked();
+        }
     }
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     if (g_root == nullptr) return;
@@ -272,7 +285,7 @@ void savebackup_panel_process() {
 
 void savebackup_panel_f3() {
     SB_UI_LOG("savebackup panel f3 (terminate)");
-    close_active_native_choice();
+    close_active_confirmation();
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     g_panel_active = false;
     g_close_delay_frames = 0;

@@ -76,7 +76,9 @@
 #define COLOR_TEXT_WHITE 0xFFFFFFFF
 #define COLOR_TEXT_GRAY 0xFF808080
 #define COLOR_SEPARATOR 0xFF6F8EA2
-#define COLOR_SELECTED_BG 0xFF263238
+#define COLOR_SELECTED_FILL_RGB565 0x3984
+#define COLOR_SELECTED_ALPHA 90
+#define COLOR_SELECTED_RADIUS 8
 #define COLOR_OK 0xFFB0E89C
 #define COLOR_ERR 0xFFE89C9C
 
@@ -162,7 +164,9 @@ bool g_panel_active = false;
 int g_state_id = -1;
 void* g_root = nullptr;
 const contracts::QolUiComponents* g_ui_components = nullptr;
-const contracts::UiChoiceApi* g_ui_choice_api = nullptr;
+const contracts::UiConfirmationApi* g_ui_confirmation_api = nullptr;
+// 主线程 API 的确认框 token；0 表示没有由本面板打开的确认框。
+uint64_t g_confirmation_token = 0;
 int g_back_pressed = 0;
 int g_close_delay_frames = 0;
 // own:popup.savebackup 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
@@ -218,6 +222,8 @@ uint32_t g_msg_color = UI_OPTION_TEXT;
 bool g_msg_is_error = false;
 enum class DialogKind { kNone, kImport, kDeleteSlot, kDeleteBackup };
 DialogKind g_dialog = DialogKind::kNone;
+// 确认框自定义正文：只在打开确认框时覆盖；关闭后保留到下一次打开，避免绘制期悬垂。
+std::string g_confirmation_prompt;
 std::string g_dialog_checksum;
 int g_dialog_slot = -1;
 bool g_dialog_auto = false;
@@ -236,8 +242,7 @@ bool g_skip_parse_frame = false;
 
 // Component ExecuteProc callback, dispatched by core.custom_ui.
 void component_action_clicked(void* user);
-void close_active_native_choice();
-void on_native_choice_selected(int index, void* user);
+void close_active_confirmation();
 
 // 列表按钮 rect 依赖当前页文件记录数，定义在 panel.inc。
 void sync_list_btn_rects_locked();
@@ -590,14 +595,18 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
 
 }  // namespace
 
+const char* savebackup_text_modify(uint32_t id, const char* text, void* ctx) {
+    return on_text_modify(id, text, ctx);
+}
+
 void savebackup_set_ui_components(const contracts::QolUiComponents* components) {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     g_ui_components = components;
 }
 
-void savebackup_set_ui_choice_api(const contracts::UiChoiceApi* api) {
+void savebackup_set_ui_confirmation_api(const contracts::UiConfirmationApi* api) {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    g_ui_choice_api = api;
+    g_ui_confirmation_api = api;
 }
 
 // ============== own:popup.savebackup（kOwnership）==============
@@ -678,7 +687,7 @@ bool savebackup_provider_open() {
 }
 
 void savebackup_provider_close() {
-    close_active_native_choice();
+    close_active_confirmation();
     bool was_active = false;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);

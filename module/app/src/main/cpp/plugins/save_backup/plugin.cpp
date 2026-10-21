@@ -10,13 +10,14 @@
 #include "../../contracts/panels.h"
 #include "../../contracts/save_facts.h"
 #include "../../contracts/save_pre_save.h"
+#include "../../contracts/text_layer.h"
 #include "../../contracts/world_facts.h"
 #include "../../contracts/game_ports/save_call_port.h"
 #include "../../contracts/game_ports/save_write_port.h"
 #include "../../contracts/commands.h"
 #include "../../contracts/runtime_hooks.h"
 #include "../../contracts/ui.h"
-#include "../../contracts/ui_choice.h"
+#include "../../contracts/ui_confirmation.h"
 #include "bundle.h"
 #include "feature.h"
 #include "log.h"
@@ -55,8 +56,12 @@ const contracts::CapabilityRequirement kRequires[] = {
         {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
     },
     {
-        contracts::kUiChoiceCapabilityId,
-        {contracts::kUiChoiceVersionMajor, contracts::kUiChoiceVersionMinor},
+        contracts::kUiConfirmationCapabilityId,
+        {contracts::kUiConfirmationVersionMajor, contracts::kUiConfirmationVersionMinor},
+    },
+    {
+        contracts::kTextLayerCapabilityId,
+        {contracts::kTextLayerVersionMajor, contracts::kTextLayerVersionMinor},
     },
 };
 
@@ -98,6 +103,8 @@ uint64_t g_slot_meta_task = 0;
 // save.pre_save 观察者：保存前自动备份。
 const contracts::SavePreSaveApi* g_pre_save_api = nullptr;
 uint64_t g_pre_save_observer = 0;
+const contracts::TextLayerApi* g_text_layer = nullptr;
+uint64_t g_text_subscription = 0;
 
 void pre_save_cb(void*, int32_t slot) { save_backup_autobackup_pre_save(slot); }
 
@@ -269,7 +276,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     const void* save_facts_iface = nullptr;
     const void* pre_save_iface = nullptr;
     const void* world_facts_iface = nullptr;
-    const void* ui_choice_iface = nullptr;
+    const void* text_layer_iface = nullptr;
+    const void* ui_confirmation_iface = nullptr;
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
         !contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kUiComponentsCapabilityId,
@@ -288,11 +296,16 @@ int plugin_install(contracts::PluginContext& ctx) {
             {contracts::kWorldFactsVersion.major, contracts::kWorldFactsVersion.minor},
             &world_facts_iface)) ||
         !contracts::succeeded(ctx.sdk->capabilities.require(
-            contracts::kUiChoiceCapabilityId,
-            {contracts::kUiChoiceVersionMajor, contracts::kUiChoiceVersionMinor},
-            &ui_choice_iface)) ||
+            contracts::kUiConfirmationCapabilityId,
+            {contracts::kUiConfirmationVersionMajor, contracts::kUiConfirmationVersionMinor},
+            &ui_confirmation_iface)) ||
+        !contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kTextLayerCapabilityId,
+            {contracts::kTextLayerVersionMajor, contracts::kTextLayerVersionMinor},
+            &text_layer_iface)) ||
         ui_components_iface == nullptr || save_facts_iface == nullptr || pre_save_iface == nullptr ||
-        world_facts_iface == nullptr || ui_choice_iface == nullptr || ctx.ports == nullptr ||
+        world_facts_iface == nullptr || text_layer_iface == nullptr ||
+        ui_confirmation_iface == nullptr || ctx.ports == nullptr ||
         ctx.port_count != 1 || ctx.ports[0] == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
@@ -302,7 +315,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(save_facts_iface);
     const auto* pre_save = static_cast<const contracts::SavePreSaveApi*>(pre_save_iface);
     const auto* world_facts = static_cast<const contracts::WorldFactsApi*>(world_facts_iface);
-    const auto* ui_choice = static_cast<const contracts::UiChoiceApi*>(ui_choice_iface);
+    const auto* text_layer = static_cast<const contracts::TextLayerApi*>(text_layer_iface);
+    const auto* ui_confirmation = static_cast<const contracts::UiConfirmationApi*>(ui_confirmation_iface);
     if (ui_components->size < sizeof(*ui_components) ||
         !contracts::satisfies({ui_components->major, ui_components->minor},
                               {contracts::kUiContractMajor, contracts::kUiContractMinor}) ||
@@ -312,9 +326,11 @@ int plugin_install(contracts::PluginContext& ctx) {
         ui_components->nav_button_set_enabled == nullptr ||
         ui_components->arrow_button_create == nullptr || ui_components->arrow_button_set_enabled == nullptr ||
         ui_components->arrow_button_draw == nullptr || ui_components->draw_container == nullptr ||
+        ui_components->draw_rounded_rect == nullptr ||
         ui_components->draw_control_text == nullptr || ui_components->dispatch_native_event == nullptr ||
         ui_components->destroy == nullptr ||
-        ui_choice->open == nullptr || ui_choice->active == nullptr || ui_choice->close == nullptr ||
+        ui_confirmation->open == nullptr || ui_confirmation->active == nullptr ||
+        ui_confirmation->close == nullptr ||
         !contracts::satisfies(save_call->abi_version,
                               {contracts::kQolPortSaveCallVersion.major,
                                contracts::kQolPortSaveCallVersion.minor}) ||
@@ -326,7 +342,8 @@ int plugin_install(contracts::PluginContext& ctx) {
                               {contracts::kSavePreSaveVersion.major,
                                contracts::kSavePreSaveVersion.minor}) ||
         pre_save->register_observer == nullptr || pre_save->unregister_observer == nullptr ||
-        world_facts->state == nullptr) {
+        world_facts->state == nullptr || text_layer->subscribe == nullptr ||
+        text_layer->unsubscribe == nullptr) {
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
@@ -346,6 +363,25 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_pre_save_api = pre_save;
         g_pre_save_observer = observer;
     }
+    if (g_text_subscription == 0) {
+        const uint64_t subscription = text_layer->subscribe(
+            contracts::kTextPhaseAfter, contracts::kTextConsumerModify, &savebackup_text_modify,
+            nullptr);
+        if (subscription == 0) {
+            if (g_pre_save_observer != 0 && g_pre_save_api != nullptr &&
+                g_pre_save_api->unregister_observer != nullptr) {
+                (void)g_pre_save_api->unregister_observer(ctx.owner_token, g_pre_save_observer);
+            }
+            g_pre_save_observer = 0;
+            g_pre_save_api = nullptr;
+            g_active.store(false, std::memory_order_release);
+            save_backup_bind_world_facts(nullptr);
+            save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+            return 1;
+        }
+        g_text_layer = text_layer;
+        g_text_subscription = subscription;
+    }
     // 自身初始化：资源由宿主声明式安装；本面板注册 provider 供 core.ui 容器打开。
     if (ctx.sdk == nullptr || ctx.sdk->panels.register_provider == nullptr ||
         !contracts::succeeded(ctx.sdk->panels.register_provider(&kPanelProvider))) {
@@ -355,12 +391,18 @@ int plugin_install(contracts::PluginContext& ctx) {
         }
         g_pre_save_observer = 0;
         g_pre_save_api = nullptr;
+        if (g_text_subscription != 0 && g_text_layer != nullptr &&
+            g_text_layer->unsubscribe != nullptr) {
+            g_text_layer->unsubscribe(g_text_subscription);
+        }
+        g_text_subscription = 0;
+        g_text_layer = nullptr;
         save_backup_bind_world_facts(nullptr);
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
     }
     savebackup_set_ui_components(ui_components);
-    savebackup_set_ui_choice_api(ui_choice);
+    savebackup_set_ui_confirmation_api(ui_confirmation);
     // 游戏主线程刷新槽元数据快照；HTTP 导出只读缓存，不跨线程读游戏槽结构。
     if (ctx.sdk->scheduler.add != nullptr && g_slot_meta_task == 0) {
         uint64_t task = 0;
@@ -386,7 +428,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         }
     }
     savebackup_set_ui_components(nullptr);
-    savebackup_set_ui_choice_api(nullptr);
+    savebackup_set_ui_confirmation_api(nullptr);
     g_active.store(false, std::memory_order_release);
     if (g_slot_meta_task != 0 && ctx.sdk != nullptr && ctx.sdk->scheduler.remove != nullptr) {
         (void)ctx.sdk->scheduler.remove(g_slot_meta_task);
@@ -401,6 +443,12 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     }
     g_pre_save_observer = 0;
     g_pre_save_api = nullptr;
+    if (g_text_subscription != 0 && g_text_layer != nullptr &&
+        g_text_layer->unsubscribe != nullptr) {
+        g_text_layer->unsubscribe(g_text_subscription);
+    }
+    g_text_subscription = 0;
+    g_text_layer = nullptr;
     save_backup_bind_world_facts(nullptr);
     save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
 }
@@ -462,7 +510,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    6, kRequires,  // requires=ui_components + ui_panels + save.facts + save.pre_save + world.facts + ui_choice
+    7, kRequires,  // requires=ui_components + ui_panels + save.facts + save.pre_save + world.facts + ui_confirmation + text_layer
     2, kOptionalHttpRequires, // optional_requires=http.registry + http.dispatch
     0, nullptr,   // provides
     2, kResources,// resources（删档回调 GOT 槽 + own:popup.savebackup）

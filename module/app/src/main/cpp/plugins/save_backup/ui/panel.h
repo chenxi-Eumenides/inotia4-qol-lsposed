@@ -5,7 +5,7 @@
 
 #include "../../../contracts/ui_theme.h"
 #include "../../../contracts/ui.h"
-#include "../../../contracts/ui_choice.h"
+#include "../../../contracts/ui_confirmation.h"
 
 // 存档管理器游戏内面板（原 feature/ui/game_ui_savebackup，D1-b2 迁入 save_backup 插件）。
 //
@@ -39,7 +39,9 @@ void save_backup_inject_map_names_for_test(const char* json);
 bool savebackup_provider_open();
 void savebackup_provider_close();
 void savebackup_set_ui_components(const contracts::QolUiComponents* components);
-void savebackup_set_ui_choice_api(const contracts::UiChoiceApi* api);
+void savebackup_set_ui_confirmation_api(const contracts::UiConfirmationApi* api);
+// text_layer 回调：仅替换确认框源文案为当前动作的自定义正文。
+const char* savebackup_text_modify(uint32_t id, const char* text, void* ctx);
 bool savebackup_provider_active();
 const char* savebackup_provider_block_reason();
 

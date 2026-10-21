@@ -43,27 +43,63 @@ static void export_selected() {
 
 static void execute_dialog_confirm();
 
-static void on_native_choice_selected(int index, void*) {
-    if (index == 0) execute_dialog_confirm();
+// 确认框回调由 core.custom_ui 在游戏主线程派发，派发前 core 已清掉自身状态；
+// 这里释放 token 后推进业务（确认）或仅清理 pending（取消）。
+static void on_confirmation_confirm(void*) {
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        g_confirmation_token = 0;
+    }
+    execute_dialog_confirm();
 }
 
-static bool open_native_choice(const std::string& prompt) {
-    if (g_ui_choice_api == nullptr || g_ui_choice_api->open == nullptr) return false;
-    static const char* const items[] = {"确认", "取消"};
-    const contracts::UiChoiceSpec spec{items, 2, prompt.c_str(), 1,
-                                       &on_native_choice_selected, nullptr,
-                                       "save_backup.confirm"};
-    return g_ui_choice_api->open(spec);
+static void on_confirmation_cancel(void*) {
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    g_confirmation_token = 0;
+    clear_pending_locked();
 }
 
-static void reject_choice_open() {
+// 文本 id 统一取 35471（唯一源文案，便于 text_layer 精确替换）。
+static constexpr char kConfirmationSourceText[] =
+    "服务器中已有保存的游戏数据。是否用该数据覆盖？";
+
+// 仅替换确认框的源文案；其他文本原样返回。prompt 在下一轮打开前不会被清空。
+const char* on_text_modify(uint32_t id, const char* text, void*) {
+    (void)id;
+    if (text == nullptr) return text;
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    if (g_confirmation_token == 0) return text;
+    if (std::string(text) != kConfirmationSourceText) return text;
+    return g_confirmation_prompt.c_str();
+}
+
+static bool open_confirmation(uint32_t text_id) {
+    const contracts::UiConfirmationApi* api = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        api = g_ui_confirmation_api;
+    }
+    if (api == nullptr || api->open == nullptr) return false;
+    const contracts::UiConfirmationSpec spec{text_id, 0, 0, 0, &on_confirmation_confirm,
+                                             &on_confirmation_cancel, nullptr};
+    uint64_t token = 0;
+    if (contracts::succeeded(api->open(&spec, &token))) {
+        std::lock_guard<std::mutex> lock(g_sbui_mtx);
+        g_confirmation_token = token;
+        return true;
+    }
+    // 打开失败时契约允许保留 token 供调用方关闭，避免 core 侧残留 owner 状态。
+    if (token != 0 && api->close != nullptr) (void)api->close(token);
+    return false;
+}
+
+static void reject_confirmation_open() {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     clear_pending_locked();
-    set_msg_locked("已有原生选择框打开", COLOR_ERR, true);
+    set_msg_locked("确认框打开失败", COLOR_ERR, true);
 }
 
 static void open_import_dialog() {
-    std::string prompt;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         const BackupEntry* entry = g_selected_auto ? (g_auto_backup_valid ? &g_auto_backup : nullptr)
@@ -76,14 +112,14 @@ static void open_import_dialog() {
         g_dialog_checksum = entry->checksum;
         g_dialog_slot = g_selected_slot;
         g_dialog_auto = g_selected_auto;
-        prompt = "导入备份到槽" + std::to_string(g_dialog_slot + 1) + "？";
-        if (g_slots[g_dialog_slot].exists) prompt += "将覆盖现有存档。";
+        const bool occupied = g_slots[g_dialog_slot].exists;
+        g_confirmation_prompt = "导入备份到槽" + std::to_string(g_dialog_slot) +
+                                (occupied ? "？将覆盖现有存档。" : "？");
     }
-    if (!open_native_choice(prompt)) reject_choice_open();
+    if (!open_confirmation(35471)) reject_confirmation_open();
 }
 
 static void open_delete_dialog() {
-    std::string prompt;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         const bool slot_selected = g_selected_slot >= 0;
@@ -95,11 +131,14 @@ static void open_delete_dialog() {
         g_dialog = slot_selected ? DialogKind::kDeleteSlot : DialogKind::kDeleteBackup;
         g_dialog_checksum = entry != nullptr ? entry->checksum : "";
         g_dialog_slot = slot_selected ? g_selected_slot : -1;
-        prompt = slot_selected
-            ? "删除 槽" + std::to_string(g_dialog_slot + 1) + " 的存档？不可恢复。"
-            : "删除选中的备份？";
+        if (slot_selected) {
+            g_confirmation_prompt =
+                "删除槽" + std::to_string(g_selected_slot) + "的存档？不可恢复。";
+        } else {
+            g_confirmation_prompt = "删除选中的备份？";
+        }
     }
-    if (!open_native_choice(prompt)) reject_choice_open();
+    if (!open_confirmation(35471)) reject_confirmation_open();
 }
 
 static void execute_dialog_confirm() {
@@ -199,15 +238,17 @@ void component_action_clicked(void* user) {
     }
 }
 
-void close_active_native_choice() {
-    const contracts::UiChoiceApi* api = g_ui_choice_api;
-    bool owns_choice = false;
+void close_active_confirmation() {
+    const contracts::UiConfirmationApi* api = nullptr;
+    uint64_t token = 0;
     {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        owns_choice = g_dialog != DialogKind::kNone;
+        api = g_ui_confirmation_api;
+        token = g_confirmation_token;
+        g_confirmation_token = 0;
     }
-    if (owns_choice && api != nullptr && api->active != nullptr && api->close != nullptr && api->active())
-        api->close();
+    // close 走游戏 UI 栈，可能同步触发回调并取 g_sbui_mtx，必须锁外调用。
+    if (token != 0 && api != nullptr && api->close != nullptr) (void)api->close(token);
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     if (g_dialog != DialogKind::kNone) clear_pending_locked();
 }

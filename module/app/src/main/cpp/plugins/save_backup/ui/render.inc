@@ -20,22 +20,20 @@ static void component_container(UiRect rect) {
 }
 
 static void component_selected_background(UiRect rect, int inset) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui == nullptr || ui->fill_rect == nullptr) return;
+    if (g_ui_components == nullptr || g_ui_components->draw_rounded_rect == nullptr) return;
     rect.x += inset;
     rect.y += inset;
     rect.w -= 2 * inset;
     rect.h -= 2 * inset;
-    constexpr int64_t kCornerRadius = 8;
     if (rect.w <= 0 || rect.h <= 0) return;
-    const UiRect horizontal{rect.x, rect.y + kCornerRadius, rect.w,
-                            rect.h - 2 * kCornerRadius};
-    const UiRect vertical{rect.x + kCornerRadius, rect.y,
-                          rect.w - 2 * kCornerRadius, rect.h};
-    if (horizontal.h > 0)
-        (void)ui->fill_rect(component_absolute_rect(horizontal), COLOR_SELECTED_BG);
-    if (vertical.w > 0)
-        (void)ui->fill_rect(component_absolute_rect(vertical), COLOR_SELECTED_BG);
+    contracts::UiShapeDesc shape{};
+    shape.rect = component_absolute_rect(rect);
+    shape.fill_rgb565 = COLOR_SELECTED_FILL_RGB565;
+    shape.border_rgb565 = 0;
+    shape.alpha = COLOR_SELECTED_ALPHA;
+    shape.border_width = 0;
+    shape.radius = COLOR_SELECTED_RADIUS;
+    (void)g_ui_components->draw_rounded_rect(&shape);
 }
 
 void root_decor_draw() {
