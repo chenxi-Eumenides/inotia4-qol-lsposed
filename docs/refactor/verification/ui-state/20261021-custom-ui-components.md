@@ -20,6 +20,8 @@
 
 **NOT_ACCEPTED（未做设备行为/视觉验收）**：候选 APK 未安装，未重启游戏。Debug Components 有“基础形状”预览，但尚未目视验证。新的 `ui_confirmation` capability 当前没有消费者/调试触发入口；扩展背包继续使用其 operation-specific callback template，不能作为新 token API 的运行时证据。
 
+本次 Debug 构建基于任务开始时已有 7 个未提交文件的工作树；这些文件未纳入本功能 commit，但 APK 构建过程会编译当前工作树整体，因此该 APK 不是 pristine commit-only 构建产物。
+
 `native_choice_open` 仅写选择数据并 push 游戏 PopupState，未找到 choice 背景的原版绘制体或 alpha 控制点；黑底具体来源未知。原生 PopupState 可压在底层原生页面上，但与自定义 panel stack 的叠层关系未获真机证明。此项未改动、不得报告已支持背景透明度或任意页面叠层。
 
 `QolUiAdapter` 的 callback 槽操作是 `core.custom_ui` provider 内部实现入口；其他插件必须消费 `ui_confirmation` capability，不得直接缓存或调用 trampoline。绕过此契约持有旧 trampoline 并跨弹窗代际手动调用不受支持。
