@@ -114,22 +114,22 @@ void ops_btn_draw(void* ctrl) {
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui == nullptr || ui->fill_rect == nullptr) return;
     const UiRect rect = component_absolute_rect(ops_btn_rect(index));
-    const int64_t x0 = rect.x + (rect.w - 0x35) / 2;
-    const int64_t y0 = rect.y + (rect.h - 0x35) / 2;
+    const int64_t x0 = rect.x + (rect.w - 0x3A) / 2;
+    const int64_t y0 = rect.y + (rect.h - 0x3A) / 2;
     const uint32_t color = enabled && g_dialog == DialogKind::kNone ? UI_GOLD : COLOR_TEXT_GRAY;
-    const int64_t bound_right = x0 + 0x35;
-    const int64_t bound_bottom = y0 + 0x35;
+    const int64_t bound_right = x0 + 0x3A;
+    const int64_t bound_bottom = y0 + 0x3A;
     auto fill_x_block = [&](int64_t x, int64_t y) {
         const int64_t left = std::max(x, x0);
         const int64_t top = std::max(y, y0);
-        const int64_t right = std::min(x + 0x08, bound_right);
-        const int64_t bottom = std::min(y + 0x08, bound_bottom);
+        const int64_t right = std::min(x + 0x0C, bound_right);
+        const int64_t bottom = std::min(y + 0x0C, bound_bottom);
         if (right > left && bottom > top)
             (void)ui->fill_rect({left, top, right - left, bottom - top}, color);
     };
-    for (int step = 0; step < 0x35; ++step) {
+    for (int step = 0; step < 0x3A; step += 2) {
         fill_x_block(x0 + step, y0 + step);
-        fill_x_block(bound_right - 0x08 - step, y0 + step);
+        fill_x_block(bound_right - 0x0C - step, y0 + step);
     }
 }
 
