@@ -1,0 +1,311 @@
+Test project /home/chenxi-zqs/Code/Agent/projects/inotia4-qol-lsposed/module/app/src/main/cpp/tests/build
+        Start   1: game_host_legacy_surface_negative
+  1/153 Test   #1: game_host_legacy_surface_negative ....................   Passed    0.04 sec
+        Start   2: game_adapter_link_negative
+  2/153 Test   #2: game_adapter_link_negative ...........................   Passed    0.07 sec
+        Start   3: item_facts_plugin_tests
+  3/153 Test   #3: item_facts_plugin_tests ..............................   Passed    0.00 sec
+        Start   4: save_facts_plugin_tests
+  4/153 Test   #4: save_facts_plugin_tests ..............................   Passed    0.00 sec
+        Start   5: slot_data_contract_tests
+  5/153 Test   #5: slot_data_contract_tests .............................   Passed    0.00 sec
+        Start   6: slot_data_provider_tests
+  6/153 Test   #6: slot_data_provider_tests .............................   Passed    0.00 sec
+        Start   7: save_transition_tests
+  7/153 Test   #7: save_transition_tests ................................   Passed    0.00 sec
+        Start   8: save_coordinator_tests
+  8/153 Test   #8: save_coordinator_tests ...............................   Passed    0.12 sec
+        Start   9: save_pre_save_tests
+  9/153 Test   #9: save_pre_save_tests ..................................   Passed    0.00 sec
+        Start  10: save_journal_tests
+ 10/153 Test  #10: save_journal_tests ...................................   Passed    0.12 sec
+        Start  11: save_route_tests
+ 11/153 Test  #11: save_route_tests .....................................   Passed    0.00 sec
+        Start  12: save_transaction_tests
+ 12/153 Test  #12: save_transaction_tests ...............................   Passed    0.00 sec
+        Start  13: save_backup_gate_tests
+ 13/153 Test  #13: save_backup_gate_tests ...............................   Passed    0.10 sec
+        Start  14: slot_operation_gate_tests
+ 14/153 Test  #14: slot_operation_gate_tests ............................   Passed    0.03 sec
+        Start  15: craft_facts_plugin_tests
+ 15/153 Test  #15: craft_facts_plugin_tests .............................   Passed    0.00 sec
+        Start  16: host_tests
+ 16/153 Test  #16: host_tests ...........................................   Passed    0.01 sec
+        Start  17: stage4_hook_tests
+ 17/153 Test  #17: stage4_hook_tests ....................................   Passed    0.00 sec
+        Start  18: inventory_action_sell_tests
+ 18/153 Test  #18: inventory_action_sell_tests ..........................   Passed    0.00 sec
+        Start  19: attribute_quality_tests
+ 19/153 Test  #19: attribute_quality_tests ..............................   Passed    0.00 sec
+        Start  20: custom_recipe_tests
+ 20/153 Test  #20: custom_recipe_tests ..................................   Passed    0.00 sec
+        Start  21: custom_recipe_handle_chain_tests
+ 21/153 Test  #21: custom_recipe_handle_chain_tests .....................   Passed    0.00 sec
+        Start  22: custom_recipe_table_readiness_tests
+ 22/153 Test  #22: custom_recipe_table_readiness_tests ..................   Passed    0.00 sec
+        Start  23: autosell_rules_tests
+ 23/153 Test  #23: autosell_rules_tests .................................   Passed    0.00 sec
+        Start  24: autosell_view_diagnostic_tests
+ 24/153 Test  #24: autosell_view_diagnostic_tests .......................   Passed    0.00 sec
+        Start  25: infra_data_tests
+ 25/153 Test  #25: infra_data_tests .....................................   Passed    0.00 sec
+        Start  26: autosell_store_tests
+ 26/153 Test  #26: autosell_store_tests .................................   Passed    0.00 sec
+        Start  27: autosell_slot_data_tests
+ 27/153 Test  #27: autosell_slot_data_tests .............................   Passed    0.00 sec
+        Start  28: transition_dispatch_tests
+ 28/153 Test  #28: transition_dispatch_tests ............................   Passed    0.00 sec
+        Start  29: qol_log_tests
+ 29/153 Test  #29: qol_log_tests ........................................   Passed    0.00 sec
+        Start  30: game_variant_tests
+ 30/153 Test  #30: game_variant_tests ...................................   Passed    0.00 sec
+        Start  31: game_feature_tests
+ 31/153 Test  #31: game_feature_tests ...................................   Passed    0.00 sec
+        Start  32: save_warehouse_validate_tests
+ 32/153 Test  #32: save_warehouse_validate_tests ........................   Passed    0.06 sec
+        Start  33: native_choice_tests
+ 33/153 Test  #33: native_choice_tests ..................................   Passed    0.00 sec
+        Start  34: ui_choice_save_lcd_tests
+ 34/153 Test  #34: ui_choice_save_lcd_tests .............................   Passed    0.00 sec
+        Start  35: module_text_tests
+ 35/153 Test  #35: module_text_tests ....................................   Passed    0.00 sec
+        Start  36: hooks_dispatch_tests
+ 36/153 Test  #36: hooks_dispatch_tests .................................   Passed    0.00 sec
+        Start  37: simple_mode_rules_tests
+ 37/153 Test  #37: simple_mode_rules_tests ..............................   Passed    0.00 sec
+        Start  38: popup_enter_alias_tests
+ 38/153 Test  #38: popup_enter_alias_tests ..............................   Passed    0.00 sec
+        Start  39: host_feature_controller_tests
+ 39/153 Test  #39: host_feature_controller_tests ........................   Passed    0.58 sec
+        Start  40: production_feature_facade_tests
+ 40/153 Test  #40: production_feature_facade_tests ......................   Passed    0.09 sec
+        Start  41: module_health_tests
+ 41/153 Test  #41: module_health_tests ..................................   Passed    0.00 sec
+        Start  42: command_queue_overflow_tests
+ 42/153 Test  #42: command_queue_overflow_tests .........................   Passed    0.00 sec
+        Start  43: infra_snapshot_tests
+ 43/153 Test  #43: infra_snapshot_tests .................................   Passed    0.03 sec
+        Start  44: infra_command_queue_tests
+ 44/153 Test  #44: infra_command_queue_tests ............................   Passed    0.00 sec
+        Start  45: infra_events_tests
+ 45/153 Test  #45: infra_events_tests ...................................   Passed    0.00 sec
+        Start  46: infra_capabilities_status_tests
+ 46/153 Test  #46: infra_capabilities_status_tests ......................   Passed    0.00 sec
+        Start  47: settings_catalog_tests
+ 47/153 Test  #47: settings_catalog_tests ...............................   Passed    0.01 sec
+        Start  48: settings_catalog_adapter_tests
+ 48/153 Test  #48: settings_catalog_adapter_tests .......................   Passed    0.00 sec
+        Start  49: settings_catalog_abi_tests
+ 49/153 Test  #49: settings_catalog_abi_tests ...........................   Passed    0.00 sec
+        Start  50: infra_snapshot_handle_tests
+ 50/153 Test  #50: infra_snapshot_handle_tests ..........................   Passed    0.08 sec
+        Start  51: hooks_registry_tests
+ 51/153 Test  #51: hooks_registry_tests .................................   Passed    0.00 sec
+        Start  52: infra_config_commands_tests
+ 52/153 Test  #52: infra_config_commands_tests ..........................   Passed    0.00 sec
+        Start  53: plugin_registry_tests
+ 53/153 Test  #53: plugin_registry_tests ................................   Passed    0.01 sec
+        Start  54: hooks_transaction_tests
+ 54/153 Test  #54: hooks_transaction_tests ..............................   Passed    0.00 sec
+        Start  55: symbol_resolver_tests
+ 55/153 Test  #55: symbol_resolver_tests ................................   Passed    0.00 sec
+        Start  56: plugin_lifecycle_tests
+ 56/153 Test  #56: plugin_lifecycle_tests ...............................   Passed    0.00 sec
+        Start  57: feature_reconciler_tests
+ 57/153 Test  #57: feature_reconciler_tests .............................   Passed    0.18 sec
+        Start  58: capability_lifecycle_tests
+ 58/153 Test  #58: capability_lifecycle_tests ...........................   Passed    0.01 sec
+        Start  59: patch_layer_tests
+ 59/153 Test  #59: patch_layer_tests ....................................   Passed    0.00 sec
+        Start  60: extension_bag_contract_tests
+ 60/153 Test  #60: extension_bag_contract_tests .........................   Passed    0.01 sec
+        Start  61: extension_bag_sale_transaction_tests
+ 61/153 Test  #61: extension_bag_sale_transaction_tests .................   Passed    0.00 sec
+        Start  62: inventory_trade_provider_sell_tests
+ 62/153 Test  #62: inventory_trade_provider_sell_tests ..................   Passed    0.00 sec
+        Start  63: extension_bag_slot_data_tests
+ 63/153 Test  #63: extension_bag_slot_data_tests ........................   Passed    0.01 sec
+        Start  64: item_handle_custody_tests
+ 64/153 Test  #64: item_handle_custody_tests ............................   Passed    0.00 sec
+        Start  65: extension_bag_deferred_free_tests
+ 65/153 Test  #65: extension_bag_deferred_free_tests ....................   Passed    0.00 sec
+        Start  66: extension_bag_draw_lock_tests
+ 66/153 Test  #66: extension_bag_draw_lock_tests ........................   Passed    0.03 sec
+        Start  67: item_handle_contract_redline
+ 67/153 Test  #67: item_handle_contract_redline .........................   Passed    0.01 sec
+        Start  68: extension_bag_status_query_tests
+ 68/153 Test  #68: extension_bag_status_query_tests .....................   Passed    0.00 sec
+        Start  69: extension_bag_debug_api_tests
+ 69/153 Test  #69: extension_bag_debug_api_tests ........................   Passed    0.00 sec
+        Start  70: hooks_popup_state_tests
+ 70/153 Test  #70: hooks_popup_state_tests ..............................   Passed    0.00 sec
+        Start  71: push_all_rules_tests
+ 71/153 Test  #71: push_all_rules_tests .................................   Passed    0.00 sec
+        Start  72: push_all_feature_tests
+ 72/153 Test  #72: push_all_feature_tests ...............................   Passed    0.00 sec
+        Start  73: infra_scheduler_tests
+ 73/153 Test  #73: infra_scheduler_tests ................................   Passed    0.00 sec
+        Start  74: special_equip_rules_tests
+ 74/153 Test  #74: special_equip_rules_tests ............................   Passed    0.00 sec
+        Start  75: special_equip_feature_tests
+ 75/153 Test  #75: special_equip_feature_tests ..........................   Passed    0.00 sec
+        Start  76: store_sell_rules_tests
+ 76/153 Test  #76: store_sell_rules_tests ...............................   Passed    0.00 sec
+        Start  77: infra_store_tests
+ 77/153 Test  #77: infra_store_tests ....................................   Passed    0.37 sec
+        Start  78: infra_panels_tests
+ 78/153 Test  #78: infra_panels_tests ...................................   Passed    0.00 sec
+        Start  79: core_ui_panels_tests
+ 79/153 Test  #79: core_ui_panels_tests .................................   Passed    0.00 sec
+        Start  80: core_custom_ui_host_tests
+ 80/153 Test  #80: core_custom_ui_host_tests ............................   Passed    0.00 sec
+        Start  81: core_ui_confirmation_tests
+ 81/153 Test  #81: core_ui_confirmation_tests ...........................   Passed    0.00 sec
+        Start  82: core_frame_overlay_tests
+ 82/153 Test  #82: core_frame_overlay_tests .............................   Passed    0.00 sec
+        Start  83: autosell_plugin_tests
+ 83/153 Test  #83: autosell_plugin_tests ................................   Passed    0.00 sec
+        Start  84: character_panel_i18n_tests
+ 84/153 Test  #84: character_panel_i18n_tests ...........................   Passed    0.00 sec
+        Start  85: quest_lifecycle_tests
+ 85/153 Test  #85: quest_lifecycle_tests ................................   Passed    0.00 sec
+        Start  86: attribute_range_display_tests
+ 86/153 Test  #86: attribute_range_display_tests ........................   Passed    0.00 sec
+        Start  87: world_teleport_status_tests
+ 87/153 Test  #87: world_teleport_status_tests ..........................   Passed    0.00 sec
+        Start  88: world_teleport_install_tests
+ 88/153 Test  #88: world_teleport_install_tests .........................   Passed    0.00 sec
+        Start  89: world_teleport_feature_tests
+ 89/153 Test  #89: world_teleport_feature_tests .........................   Passed    0.00 sec
+        Start  90: save_backup_rollback_tests
+ 90/153 Test  #90: save_backup_rollback_tests ...........................   Passed    0.00 sec
+        Start  91: craft_ui_guard_tests
+ 91/153 Test  #91: craft_ui_guard_tests .................................   Passed    0.00 sec
+        Start  92: craft_ui_handle_identity_tests
+ 92/153 Test  #92: craft_ui_handle_identity_tests .......................   Passed    0.00 sec
+        Start  93: host_adapter_tests
+ 93/153 Test  #93: host_adapter_tests ...................................   Passed    0.04 sec
+        Start  94: attribute_quality_adapter_tests
+ 94/153 Test  #94: attribute_quality_adapter_tests ......................   Passed    0.01 sec
+        Start  95: attribute_quality_provider_tests
+ 95/153 Test  #95: attribute_quality_provider_tests .....................   Passed    0.00 sec
+        Start  96: http_registry_tests
+ 96/153 Test  #96: http_registry_tests ..................................   Passed    0.00 sec
+        Start  97: http_dispatch_tests
+ 97/153 Test  #97: http_dispatch_tests ..................................   Passed    0.01 sec
+        Start  98: http_endpoint_binder_tests
+ 98/153 Test  #98: http_endpoint_binder_tests ...........................   Passed    0.00 sec
+        Start  99: core_api_lifecycle_tests
+ 99/153 Test  #99: core_api_lifecycle_tests .............................   Passed    0.00 sec
+        Start 100: ui_adapter_tests
+100/153 Test #100: ui_adapter_tests .....................................   Passed    0.00 sec
+        Start 101: ui_control_item_identity_tests
+101/153 Test #101: ui_control_item_identity_tests .......................   Passed    0.00 sec
+        Start 102: native_toggle_render_tests
+102/153 Test #102: native_toggle_render_tests ...........................   Passed    0.00 sec
+        Start 103: native_text_button_render_tests
+103/153 Test #103: native_text_button_render_tests ......................   Passed    0.01 sec
+        Start 104: native_close_button_render_tests
+104/153 Test #104: native_close_button_render_tests .....................   Passed    0.00 sec
+        Start 105: close_button_component_tests
+105/153 Test #105: close_button_component_tests .........................   Passed    0.00 sec
+        Start 106: nav_button_component_tests
+106/153 Test #106: nav_button_component_tests ...........................   Passed    0.00 sec
+        Start 107: nav_box_consistency_tests
+107/153 Test #107: nav_box_consistency_tests ............................   Passed    0.00 sec
+        Start 108: debug_two_column_tests
+108/153 Test #108: debug_two_column_tests ...............................   Passed    0.00 sec
+        Start 109: core_ui_components_tests
+109/153 Test #109: core_ui_components_tests .............................   Passed    0.00 sec
+        Start 110: native_scroll_list_tests
+110/153 Test #110: native_scroll_list_tests .............................   Passed    0.00 sec
+        Start 111: settings_panel_widget_tests
+111/153 Test #111: settings_panel_widget_tests ..........................   Passed    0.00 sec
+        Start 112: help_page_tests
+112/153 Test #112: help_page_tests ......................................   Passed    0.00 sec
+        Start 113: inventory_extension_facade_tests
+113/153 Test #113: inventory_extension_facade_tests .....................   Passed    0.00 sec
+        Start 114: item_count_facade_tests
+114/153 Test #114: item_count_facade_tests ..............................   Passed    0.00 sec
+        Start 115: item_count_codec_tests
+115/153 Test #115: item_count_codec_tests ...............................   Passed    0.00 sec
+        Start 116: lifecycle_participant_tests
+116/153 Test #116: lifecycle_participant_tests ..........................   Passed    0.00 sec
+        Start 117: stack_limit_plugin_tests
+117/153 Test #117: stack_limit_plugin_tests .............................   Passed    0.00 sec
+        Start 118: world_facts_plugin_tests
+118/153 Test #118: world_facts_plugin_tests .............................   Passed    0.00 sec
+        Start 119: world_facts_dispatch_tests
+119/153 Test #119: world_facts_dispatch_tests ...........................   Passed    0.01 sec
+        Start 120: nav_bfs_tests
+120/153 Test #120: nav_bfs_tests ........................................   Passed    0.00 sec
+        Start 121: world_legacy_readers_tests
+121/153 Test #121: world_legacy_readers_tests ...........................   Passed    0.00 sec
+        Start 122: runtime_hooks_contract_tests
+122/153 Test #122: runtime_hooks_contract_tests .........................   Passed    0.00 sec
+        Start 123: item_handle_registry_tests
+123/153 Test #123: item_handle_registry_tests ...........................   Passed    0.01 sec
+        Start 124: qol_log_seam_tests
+124/153 Test #124: qol_log_seam_tests ...................................   Passed    0.00 sec
+        Start 125: character_facts_plugin_tests
+125/153 Test #125: character_facts_plugin_tests .........................   Passed    0.00 sec
+        Start 126: item_facts_dispatch_tests
+126/153 Test #126: item_facts_dispatch_tests ............................   Passed    0.02 sec
+        Start 127: quest_dispatch_tests
+127/153 Test #127: quest_dispatch_tests .................................   Passed    0.00 sec
+        Start 128: character_facts_dispatch_tests
+128/153 Test #128: character_facts_dispatch_tests .......................   Passed    0.00 sec
+        Start 129: character_json_slice_tests
+129/153 Test #129: character_json_slice_tests ...........................   Passed    0.00 sec
+        Start 130: character_http_port_tests
+130/153 Test #130: character_http_port_tests ............................   Passed    0.00 sec
+        Start 131: core_feature_plugin_tests
+131/153 Test #131: core_feature_plugin_tests ............................   Passed    0.00 sec
+        Start 132: core_data_plugin_tests
+132/153 Test #132: core_data_plugin_tests ...............................   Passed    0.03 sec
+        Start 133: system_facts_dispatch_tests
+133/153 Test #133: system_facts_dispatch_tests ..........................   Passed    0.00 sec
+        Start 134: system_events_builder_tests
+134/153 Test #134: system_events_builder_tests ..........................   Passed    0.00 sec
+        Start 135: system_port_identity_tests
+135/153 Test #135: system_port_identity_tests ...........................   Passed    0.16 sec
+        Start 136: core_settings_config_tests
+136/153 Test #136: core_settings_config_tests ...........................   Passed    0.00 sec
+        Start 137: core_settings_config_store_tests
+137/153 Test #137: core_settings_config_store_tests .....................   Passed    0.06 sec
+        Start 138: core_settings_config_service_tests
+138/153 Test #138: core_settings_config_service_tests ...................   Passed    0.00 sec
+        Start 139: core_settings_config_service_writeback_tests
+139/153 Test #139: core_settings_config_service_writeback_tests .........   Passed    0.01 sec
+        Start 140: core_settings_config_service_effect_failures_tests
+140/153 Test #140: core_settings_config_service_effect_failures_tests ...   Passed    0.01 sec
+        Start 141: core_settings_panel_migration_tests
+141/153 Test #141: core_settings_panel_migration_tests ..................   Passed    0.00 sec
+        Start 142: settings_panel_model_tests
+142/153 Test #142: settings_panel_model_tests ...........................   Passed    0.00 sec
+        Start 143: core_patches_shape_tests
+143/153 Test #143: core_patches_shape_tests .............................   Passed    0.00 sec
+        Start 144: ui_state_dialog_tests
+144/153 Test #144: ui_state_dialog_tests ................................   Passed    0.00 sec
+        Start 145: settings_contributions_tests
+145/153 Test #145: settings_contributions_tests .........................   Passed    0.00 sec
+        Start 146: settings_config_bridge_tests
+146/153 Test #146: settings_config_bridge_tests .........................   Passed    0.01 sec
+        Start 147: move_merge_plugin_tests
+147/153 Test #147: move_merge_plugin_tests ..............................   Passed    0.00 sec
+        Start 148: extension_bag_move_merge_shim_tests
+148/153 Test #148: extension_bag_move_merge_shim_tests ..................   Passed    0.00 sec
+        Start 149: core_ui_state_tests
+149/153 Test #149: core_ui_state_tests ..................................   Passed    0.00 sec
+        Start 150: ui_state_port_tests
+150/153 Test #150: ui_state_port_tests ..................................   Passed    0.00 sec
+        Start 151: game_cache_tests
+151/153 Test #151: game_cache_tests .....................................   Passed    0.15 sec
+        Start 152: custom_recipe_owner_fixture_tests
+152/153 Test #152: custom_recipe_owner_fixture_tests ....................   Passed    0.17 sec
+        Start 153: simple_mode_feature_tests
+153/153 Test #153: simple_mode_feature_tests ............................   Passed    0.00 sec
+
+100% tests passed out of 153
+
+Total Test time (real) =   2.98 sec

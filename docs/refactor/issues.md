@@ -133,6 +133,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | DOC-05 | api-reference × core.character | API 文档记载「33 条票据路由」与当前实际 41 条 `core.character` owner 路由不符；其中 35 条 native handler、6 条 Kotlin 501 占位。CHR-A7 |
 | DOC-06 | api-reference × core.system | `/api/system/info` 示例含实现不存在的 `game` 字段；`game_frame` 采样语义与旧地址描述不准确。SYS-05 |
 | DOC-07 | health 文档 × core.api / Kotlin host | health 的 `ready` 按 Kotlin `ControllerGuard` 窄定义判断，当前恒真；不得将其描述成游戏世界或插件就绪保证。SYS-07 |
+| DOC-10 | api-reference × simple_mode | §7.7 `GET /api/system/features` 示例把 `simple_mode.requires` 写成 `[]`，实际为 `character.facts` v1.0；已于 2026-10-22 修正示例。插件审计批见 `audits/plugin-audit/simple-mode-20261022/verification-log.md` |
 
 > DOC-06/07 的具体文档段落和应采用的完整措辞尚未在本批核对；本次只登记漂移，不更新 api-reference 或 health 文档。
 
@@ -145,6 +146,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | UNVER-03 | inventory_hooks | c18 `85%` / overhaul `70%` 倍率仅静态金标；任务袋透传无物品可测；调试门禁关闭分支跳过；autosell 路径并入 autosell 审阅 | 设备仅有 monster v29；用户 2026-10-18 确认：monster 真机覆盖 70% 与详情页出售，其余按静态金标/后续插件审阅处理 |
 | UNVER-04 | extension_bag | 设备批剩余：FIX-07 失败注入/源释放失败复核；C1-01 容量读写失败注入；D-01 真实触摸窗口延迟释放压力 | 2026-10-18 设备批已完成部署、设置页开关、扩展视图、正常跨袋移动、生命周期、保存重进与 D-03 R-64；失败注入未执行。EB-01 用户确认已修复，未复核 |
 | UNVER-05 | special_equip | VM-P4-06 行为面：普通队友/主角穿脱专属位装备；特殊 NPC 穿脱限制；出售门禁；两 hook 两态 | 用户 2026-10-21 决定本批不做真机验证；静态 12 条已修，设备项全部 NOT_ACCEPTED。登记见 `audits/plugin-audit/special-equip-20261021/verification-log.md` §2 |
+| UNVER-06 | simple_mode | 设备行为面：VM-P2-01/VM-P3-01/VM-P3-03 启停、半血与票据；SM-01 阵营失败分支；SM-02 部分安装窗口；SM-03 隔离残留；SM-06 hook-time 写语义；SM-07 停用后保持半血 | 用户 2026-10-22 决定本轮只做修复 + Host 验证，不做真机；设备项全部 NOT_ACCEPTED，此后不再主动验收。登记见 `audits/plugin-audit/simple-mode-20261022/verification-log.md` §2 |
 
 > QST-03 的逐字节 frozen 对比仍为 **NOT_ACCEPTED**，属于 `verification.md` §5 的待补真机证据，不作为用户确认后永久不再验收的 UNVER 条目。
 
@@ -291,3 +293,31 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | MERGE-02 | core.item status | optional `inventory.merge_projection` 失败会把 `core.item` 标 degraded，即使 `item.facts`/24 hook 完全可用；基础 provider 健康状态被纯消费者失败污染 | 开放（P2）：确认是否接受；若否则拆分 merge 子域 degraded 口径 |
 | MERGE-03 | core.item merge | 拖拽合并 UI、EB 投影拖放、S2 999 交互未做真机人工目视；仅验证资源 live、feature 开关与 host 用例 | 开放（P2）：待真机人工验收；不得据本批状态面证据宣告 VM-43/VM-D2D 行为通过 |
 | MERGE-04 | scripts/verification | `test_core_feature_exposure.test_host_feature_display_categories_and_priorities` 在合并前已因分类/优先级基线不一致失败（`production.cpp` 未在本批修改） | 开放（P3）：由 feature catalog 维护方修正基线 |
+
+## 16. simple_mode（2026-10-22 审计）
+
+审阅登记：`docs/refactor/audits/plugin-audit/simple-mode-20261022/verification-log.md`。阶段 1 共 12 条 finding（P1 4 / P2 4 / P3 4）；阶段 2 用户裁决 5 项；修复提交 `f41a48bf`、`804f9669`。设备面统一 NOT_ACCEPTED（UNVER-06）。
+
+### 16.1 已修（Host/静态）
+
+| ID | 级别 | 处置 |
+|---|---|---|
+| SM-01 | P1 | 阵营判定改三态；查询失败/超深/自环归未知，不缩放、不减半；player/active-group 命中短路。 |
+| SM-02 | P1 | install 不再开门禁，只在 `on_enabled` 开门，消除两个 hook 的非原子生效窗口。 |
+| SM-03 | P1 | 两个 wrapper 增加 `InFlightGuard`；接口指针取局部并判空；残留 hook 不空指针。 |
+| SM-04 | P2 | backup 判空提前到分类之前；保留 fail-closed 不转发。 |
+| SM-05 | P2 | feature `on_toggle(0)` 立即关门禁；lifecycle deactivate 仍由 on_disabled/deactivate 关门。 |
+| SM-08 | P2 | 新增 `simple_mode_feature_tests`，覆盖 descriptor、安装失败、门禁、伤害/生命矩阵、未知阵营、幂等、残留 wrapper 与 InFlight。 |
+| SM-09 | P3 | 统一 `clear_install_state()`，覆盖所有 install 失败出口。 |
+| SM-10 | P3 | 阵营与伤害分类短路；victim 为玩家时不再分类 attacker。 |
+| SM-12 | P2 | `api-reference.md` §7.7 示例改为 `character.facts`；插件参考说明按最终实现同步。 |
+
+### 16.2 开放 / 已裁决
+
+| ID | 级别 | 状态 |
+|---|---|---|
+| SM-06 | P1 | 用户裁决为受限例外：入口 hook wrapper 在游戏主线程可为语义所需字段同步调用 write 面。`contracts/game_host.h` 注释已更新；属性脏位/血条/死亡通知等真机语义 NOT_ACCEPTED。 |
+| SM-07 | P2 | 用户裁决接受停用后既有怪物保持半血，不增加恢复逻辑；槽复用幂等判据保留；真机未验。 |
+| SM-11 | P3 | 已删除仅测试使用的 `max_hp_percent`；空 settings contribution 与 `kCharPoolSlots` 重复保留，后续维护清理，无行为影响。 |
+| SM-08 设备面 | P2 | Host 覆盖已补，真实 hook ABI/符号、drain 时序与游戏内行为 NOT_ACCEPTED。 |
+| DOC-10 | P3 | 已修（api-reference 示例）；登记于 §9。 |

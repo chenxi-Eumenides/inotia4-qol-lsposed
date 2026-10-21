@@ -1794,7 +1794,8 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
     "resource_count": 0,
     "resources": [ { "id": "hook:CHAR_AddDamage", "state": "live" },
                    { "id": "hook:CHAR_UpdateAttrFromMonster", "state": "live" } ],
-    "requires": [], "provides": [], "degraded": false }
+    "requires": [ { "id": "character.facts", "major": 1, "minor": 0 } ],
+    "provides": [], "degraded": false }
 ] }
 ```
 
