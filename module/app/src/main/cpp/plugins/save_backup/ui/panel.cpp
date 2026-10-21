@@ -138,40 +138,16 @@ bool ui_resolution_ready() {
     return ui_resolution_width(&width) && ui_resolution_height(&height);
 }
 
-bool ui_set_popup_process_info(int32_t process, int32_t state_id) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->set_popup_process_info != nullptr &&
-           ui_ok(ui->set_popup_process_info(process, state_id));
-}
-
-bool ui_push_popup_state(uint32_t state_id) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    return ui != nullptr && ui->push_popup_state != nullptr &&
-           ui_ok(ui->push_popup_state(state_id));
-}
-
-bool ui_popup_top_matches(contracts::QolUiPopupEnterFn enter) {
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    int32_t matches = 0;
-    return ui != nullptr && ui->popup_stack_top_matches != nullptr && enter != nullptr &&
-           ui_ok(ui->popup_stack_top_matches(enter, &matches)) && matches != 0;
-}
-
 // ============== 全局状态 ==============
 std::mutex g_sbui_mtx;
 
 bool g_panel_active = false;
-int g_state_id = -1;
 void* g_root = nullptr;
 const contracts::QolUiComponents* g_ui_components = nullptr;
 const contracts::UiConfirmationApi* g_ui_confirmation_api = nullptr;
 // 主线程 API 的确认框 token；0 表示没有由本面板打开的确认框。
 uint64_t g_confirmation_token = 0;
 int g_back_pressed = 0;
-int g_close_delay_frames = 0;
-// own:popup.savebackup 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
-contracts::QolPopupStateEntry g_popup_entry{};
-bool g_popup_acquired = false;
 
 // 三栏控件容器（label 类型，参与命中但 DrawProc 自绘；DrawProc 走 fn_ctrl_btn_draw → 自定义 cb）。
 void* g_slot_btns[3] = {nullptr, nullptr, nullptr};
@@ -216,13 +192,12 @@ struct ParseTask {
 std::deque<ParseTask> g_parse_queue;
 std::string g_selected_backup_name;
 int g_total_pages = 0;
-// 结果提示文本（不弹窗，在面板内独立显示区；新消息覆盖旧消息，不自动消失）。
+// 保留状态字段与消息控件；操作反馈统一写日志，标题区不显示结果横幅。
 std::string g_msg_text;
-uint32_t g_msg_color = UI_OPTION_TEXT;
 bool g_msg_is_error = false;
-enum class DialogKind { kNone, kImport, kDeleteSlot, kDeleteBackup };
+enum class DialogKind { kNone, kExport, kImport, kDeleteSlot, kDeleteBackup };
 DialogKind g_dialog = DialogKind::kNone;
-// 确认框自定义正文：只在打开确认框时覆盖；关闭后保留到下一次打开，避免绘制期悬垂。
+// 确认框正文。
 std::string g_confirmation_prompt;
 std::string g_dialog_checksum;
 int g_dialog_slot = -1;
@@ -558,12 +533,6 @@ const BackupEntry* selected_manual_backup() {
                ? &g_backups[static_cast<size_t>(g_selected_backup)] : nullptr;
 }
 
-void set_msg_locked(const char* text, uint32_t color, bool is_error) {
-    g_msg_text = text != nullptr ? text : "";
-    g_msg_color = color;
-    g_msg_is_error = is_error;
-}
-
 // ============== Component 绘制 ==============
 void slot_btn_draw(void* ctrl);
 void ops_btn_draw(void* ctrl);
@@ -583,11 +552,11 @@ UiRect auto_btn_rect();
 int page_entry_count();
 
 // ============== 面板回调 ==============
-void savebackup_panel_enter();
-void savebackup_panel_process();
-void savebackup_panel_f3();
-void savebackup_panel_f4();
-uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2);
+void panel_enter_impl();
+void panel_process_impl();
+void panel_f3_impl();
+void panel_f4_impl();
+uint32_t panel_event_impl(uint64_t event, uint64_t param, uint64_t param2);
 
 #include "ui/panel.inc"
 #include "ui/render.inc"
@@ -595,8 +564,13 @@ uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2)
 
 }  // namespace
 
-const char* savebackup_text_modify(uint32_t id, const char* text, void* ctx) {
-    return on_text_modify(id, text, ctx);
+// PanelCallbacks 需要外部链接：匿名 namespace 内的实现经这组薄包装交给 PopupHost。
+void savebackup_panel_enter() { panel_enter_impl(); }
+void savebackup_panel_process() { panel_process_impl(); }
+void savebackup_panel_f3() { panel_f3_impl(); }
+void savebackup_panel_f4() { panel_f4_impl(); }
+uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
+    return panel_event_impl(event, param, param2);
 }
 
 void savebackup_set_ui_components(const contracts::QolUiComponents* components) {
@@ -609,101 +583,23 @@ void savebackup_set_ui_confirmation_api(const contracts::UiConfirmationApi* api)
     g_ui_confirmation_api = api;
 }
 
-// ============== own:popup.savebackup（kOwnership）==============
-
-int32_t savebackup_popup_acquire(const char* id) {
-    (void)id;
-    std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    if (g_popup_entry.slot != nullptr) return 0;
-    contracts::QolPopupStateEntry entry{};
-    const contracts::QolHostSdk* sdk = save_backup_host_sdk();
-    if (sdk == nullptr || sdk->hooks.popup_resolve == nullptr ||
-        !ui_ok(sdk->hooks.popup_resolve("F_PANEL_UNK2_ENTER", &entry))) {
-        SB_UI_LOG("popup.savebackup: state entry (INAP_GOODS) not found");
-        return 1;
-    }
-    const contracts::QolPopupStateHooks popup_hooks{
-        &savebackup_panel_enter,
-        &savebackup_panel_process,
-        &savebackup_panel_f3,
-        &savebackup_panel_f4,
-        &savebackup_panel_event,
-    };
-    if (sdk->hooks.popup_acquire == nullptr ||
-        !ui_ok(sdk->hooks.popup_acquire(&entry, &popup_hooks))) {
-        SB_UI_LOG("popup.savebackup: acquire rejected");
-        return 1;
-    }
-    g_popup_entry = entry;
-    g_state_id = entry.state_id;
-    g_popup_acquired = true;
-    SB_UI_LOG("popup.savebackup acquired: state id=%d", g_state_id);
-    return 0;
-}
-
-void savebackup_popup_release(const char* id) {
-    (void)id;
-    std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    const contracts::QolHostSdk* sdk = save_backup_host_sdk();
-    if (g_popup_entry.slot != nullptr && sdk != nullptr && sdk->hooks.popup_restore != nullptr) {
-        (void)sdk->hooks.popup_restore(&g_popup_entry);
-    }
-    g_popup_acquired = false;
-    g_state_id = -1;
-    SB_UI_LOG("popup.savebackup released");
-}
-
 // ============== PanelProviderSpec ==============
 
+// PopupState 占用、push 与 set_process_info 由 core.custom_ui 的 PopupHost 负责
+// （provider 携带 callbacks 时 host 在 open 中完成），provider 只判断本面板能否打开。
 bool savebackup_provider_open() {
-    if (g_popup_entry.slot == nullptr) return false;
-    const contracts::QolUiAdapter* ui = ui_adapter();
-    if (ui == nullptr || ui->set_popup_process_info == nullptr) return false;
-
-    // 优先尝试嵌套 push（保持设置页 keep open 在栈下方）。
-    // 真机实测：fn_popupstate_push(0x122424) 内部 Array_Add 失败但 GetTop 返回当前栈顶
-    // 地址（设置页 entry），导致原代码 rc==0 当 success 的判断逻辑误报失败，
-    // 而实际栈顶未切换为 savebackup entry。修复：
-    //   1) rc != 0 才视为 push 成功（按反汇编：rc=0 = enter NULL / push 内部失败）
-    //   2) 校验栈顶 enter_func 必须是 &savebackup_panel_enter（防止 GetTop 返回旧栈顶）
-    // 未切换栈顶时返回 false，由 core.ui 面板栈关栈顶后重试（原切换式兜底已上移）。
-    if (ui != nullptr && ui->push_popup_state != nullptr) {
-        const bool pushed = ui_push_popup_state(static_cast<uint32_t>(g_state_id));
-        SB_UI_LOG("open save backup panel via push: state=%d rc=%d", g_state_id, pushed ? 1 : 0);
-        if (pushed && is_savebackup_at_stack_top()) {
-            return true;
-        }
-        // 未切换栈顶：返回 false，由 core.ui 面板栈关栈顶后重试（原切换式兜底已上移）。
-        SB_UI_LOG("push didn't switch stack top (rc=%d); stack will close top and retry",
-                  pushed ? 1 : 0);
-        return false;
-    }
-    // 无 push 符号：切换式兜底（关当前 UI → 异步打开本面板）。栈记录由 active() 在下次 open 剔除。
-    if (!ui_set_popup_process_info(3, 0) || !ui_set_popup_process_info(1, g_state_id)) {
-        return false;
-    }
-    SB_UI_LOG("open save backup panel via switch: state=%d", g_state_id);
-    return true;
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    return g_ui_components != nullptr && g_ui_confirmation_api != nullptr;
 }
 
 void savebackup_provider_close() {
     close_active_confirmation();
-    bool was_active = false;
-    {
-        std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        was_active = g_panel_active;
-        clear_pending_locked();
-        set_msg_locked("", UI_OPTION_TEXT, false);
-        g_panel_active = false;
-        g_close_delay_frames = 0;
-        // 控件树保留复用（同 f3：递归删除 SIGBUS）；再次进入走 enter 的 resumed 分支。
-    }
-    // 幂等：未激活时不触碰游戏 UI（避免栈对陈旧栈顶调用 close 时误关当前顶层面板）。
-    if (!was_active) return;
-    // fn_ui_set_popup_process_info 必须锁外调用：pop 链会触发 savebackup_panel_f3 拿
-    // g_sbui_mtx（非递归），持锁调用会死锁。
-    (void)ui_set_popup_process_info(3, 0);
-    SB_UI_LOG("back clicked: panel closed");
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    clear_pending_locked();
+    g_msg_text.clear();
+    g_panel_active = false;
+    // 控件树由随后游戏弹出的 f3 销毁（与旧流程一致）；close 不直接 pop，pop 由 host 执行。
+    SB_UI_LOG("provider close: panel inactive");
 }
 
 bool savebackup_provider_active() {
@@ -713,29 +609,28 @@ bool savebackup_provider_active() {
 
 const char* savebackup_provider_block_reason() {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    if (g_popup_entry.slot == nullptr) return nullptr;  // 未注入 → 不阻塞
     return g_panel_active ? "ui occupied: backup panel" : nullptr;
 }
 
 // ============== 对外 API（原 data_savebackup_ui_*）==============
 
 std::string data_savebackup_ui_inject() {
-    if (savebackup_popup_acquire(nullptr) != 0) return save_backup_result_error("state entry inject failed");
+    // PopupState 注入已移交 core.custom_ui 的 PopupHost：打开面板时才 acquire。
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    if (g_ui_components == nullptr) return save_backup_result_error("ui components unavailable");
     return save_backup_result_ok();
 }
 
 std::string data_savebackup_ui_status_json() {
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
-    char buf[768];
+    char buf[640];
     snprintf(buf, sizeof(buf),
         "{"
-        "\"state_id\":%d,\"state_injected\":%s,"
         "\"panel_active\":%s,\"root\":\"%p\","
         "\"selected_slot\":%d,\"selected_backup\":%d,"
         "\"page_index\":%d,\"total_pages\":%d,\"backup_count\":%zu,"
         "\"msg\":\"%s\",\"msg_is_error\":%s,"
         "\"screen\":\"%s\"}",
-        g_state_id, g_popup_acquired ? "true" : "false",
         g_panel_active ? "true" : "false", g_root,
         g_selected_slot, g_selected_backup,
         g_page_index, g_total_pages, g_backups.size(),
@@ -745,12 +640,8 @@ std::string data_savebackup_ui_status_json() {
 }
 
 std::string data_savebackup_ui_restore() {
-    {
-        std::lock_guard<std::mutex> lock(g_sbui_mtx);
-        g_panel_active = false;
-        g_close_delay_frames = 0;
-    }
-    savebackup_popup_release(nullptr);
+    std::lock_guard<std::mutex> lock(g_sbui_mtx);
+    g_panel_active = false;
     return save_backup_result_ok();
 }
 

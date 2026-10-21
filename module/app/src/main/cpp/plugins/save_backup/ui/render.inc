@@ -204,7 +204,7 @@ void page_btn_draw(void* ctrl) {
 }
 
 void msg_label_draw(void*) {
-    if (!g_msg_text.empty()) component_text(g_msg_text.c_str(), ROOT_W / 2, MSG_Y + 0x18, g_msg_color, 2, 1);
+    component_text("存档备份", ROOT_W / 2, MSG_Y + 0x18, UI_OPTION_TEXT, 2, 1);
 }
 
 void sync_component_enabled_locked() {

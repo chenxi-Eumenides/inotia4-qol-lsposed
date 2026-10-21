@@ -10,12 +10,11 @@
 // 存档管理器游戏内面板（原 feature/ui/game_ui_savebackup，D1-b2 迁入 save_backup 插件）。
 //
 // 复用 IAP 屏蔽后的 F_PANEL_UNK2_ENTER 死条目（Scene_Init_POPUP_SC_INAPP_GOODS）承载三栏
-// （存档槽 / 操作 / 备份列表）弹出面板；PopupState 占用为 `own:popup.savebackup`
-// （kOwnership/kFailSoft，plugin.cpp 申报），acquire/release 走 hooks/popup_state。
+// （存档槽 / 操作 / 备份列表）弹出面板；PopupState 的占用/还原/入栈/退栈与 process_info
+// 由 core.custom_ui 的 PopupHost 托管（provider 携带 PanelCallbacks）。
 //
 // 面板经 ui_panels 能力被打开（设置页「存档备份」动作项 → core.ui 面板栈 →
-// 本插件 provider.open）；嵌套 push 的栈顶校验留在本 provider 内，失败由 core.ui 面板栈
-// 「关栈顶再开」兜底。
+// 本插件 provider.open）并支持嵌套打开。
 
 namespace qol::features::save_backup {
 
@@ -40,13 +39,14 @@ bool savebackup_provider_open();
 void savebackup_provider_close();
 void savebackup_set_ui_components(const contracts::QolUiComponents* components);
 void savebackup_set_ui_confirmation_api(const contracts::UiConfirmationApi* api);
-// text_layer 回调：仅替换确认框源文案为当前动作的自定义正文。
-const char* savebackup_text_modify(uint32_t id, const char* text, void* ctx);
 bool savebackup_provider_active();
 const char* savebackup_provider_block_reason();
 
-// ---- own:popup.savebackup（kOwnership）----
-int32_t savebackup_popup_acquire(const char* id);
-void savebackup_popup_release(const char* id);
+// ---- PanelCallbacks（core.custom_ui PopupHost 托管）----
+void savebackup_panel_enter();
+void savebackup_panel_process();
+void savebackup_panel_f3();
+void savebackup_panel_f4();
+uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2);
 
 }  // namespace qol::features::save_backup

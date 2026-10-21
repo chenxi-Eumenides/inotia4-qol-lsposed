@@ -1,14 +1,5 @@
 // 面板几何、core.custom_ui 组件创建与组件事件派发。
 
-// 检查游戏 popup state stack 顶是否是 savebackup entry（v0.7.x）。
-// 用于嵌套 push 后校验栈顶是否真的切换：fn_popupstate_push 内部 ArrayStack_Push 失败时
-// GetTop 会返回当前栈顶指针（settings entry），与"push 成功"返回的指针一样非 0，
-// 仅凭返回值无法区分；必须直接读栈顶 enter_func 字段与 &savebackup_panel_enter 对比。
-// 注：popup_top_vma 只能解析 g_base+VMA 的原版 enter，无法识别 wrapper 函数。
-bool is_savebackup_at_stack_top() {
-    return ui_popup_top_matches(&savebackup_panel_enter);
-}
-
 UiRect panel_root_rect() {
     int32_t inset_width = 0;
     int32_t inset_height = 0;
@@ -188,7 +179,7 @@ void create_panel_controls_locked() {
     SB_UI_LOG("create component tree: root=%p", root);
 }
 
-void savebackup_panel_enter() {
+void panel_enter_impl() {
     const auto t0 = std::chrono::steady_clock::now();
     SB_UI_LOG("savebackup panel enter");
     // 槽位刷新必须在游戏线程（enter 回调即游戏线程）执行：SAVE_CreateSaveSlot 走原版保存链，
@@ -204,7 +195,6 @@ void savebackup_panel_enter() {
         if (g_root != nullptr) {
             // 组件树仍在时仅恢复活动标志。
             g_panel_active = true;
-            g_close_delay_frames = 0;
             // 页码/条目缓存可能在隐藏期间被 self_check/刷新改动，列表按钮 rect 重对齐。
             sync_list_btn_rects_locked();
             resumed = true;
@@ -219,7 +209,6 @@ void savebackup_panel_enter() {
                 return;
             }
             g_panel_active = true;
-            g_close_delay_frames = 0;
         }
     }
     // 控件先创建并激活，再枚举文件名与 stat 元数据；bundle 内容留到逐帧队列解析。
@@ -231,7 +220,7 @@ void savebackup_panel_enter() {
               std::chrono::duration<double, std::milli>(t1 - t0).count());
 }
 
-void savebackup_panel_process() {
+void panel_process_impl() {
     if (!g_panel_active) return;
     if (g_skip_parse_frame) g_skip_parse_frame = false;
     else process_one_parse_task();
@@ -255,13 +244,6 @@ void savebackup_panel_process() {
     }
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     if (g_root == nullptr) return;
-    if (g_close_delay_frames > 0) {
-        --g_close_delay_frames;
-        if (g_close_delay_frames == 0) {
-            (void)ui_set_popup_process_info(3, 0);
-            return;
-        }
-    }
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui == nullptr || ui->begin_frame == nullptr || ui->end_frame == nullptr) return;
     // 控件 rect 写回与逐帧解析都只在游戏线程执行。
@@ -279,24 +261,23 @@ void savebackup_panel_process() {
     if (g_prev_btn) page_btn_draw(g_prev_btn);
     if (g_next_btn) page_btn_draw(g_next_btn);
     if (g_back_btn && g_ui_components != nullptr) (void)g_ui_components->nav_button_draw(g_back_btn);
-    if (!g_msg_text.empty()) msg_label_draw(g_root);
+    msg_label_draw(g_root);
     ui_end_frame();
 }
 
-void savebackup_panel_f3() {
+void panel_f3_impl() {
     SB_UI_LOG("savebackup panel f3 (terminate)");
     close_active_confirmation();
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     g_panel_active = false;
-    g_close_delay_frames = 0;
     destroy_panel_controls_locked();
     // 组件树销毁归 core.custom_ui 管理；共享图集仍由宿主/其他 UI 持有。
 }
 
-void savebackup_panel_f4() {}
+void panel_f4_impl() {}
 
-uint32_t savebackup_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
-    if (!g_panel_active || g_root == nullptr || g_close_delay_frames > 0 ||
+uint32_t panel_event_impl(uint64_t event, uint64_t param, uint64_t param2) {
+    if (!g_panel_active || g_root == nullptr ||
         g_ui_components == nullptr || g_ui_components->dispatch_native_event == nullptr) return 1;
     if (event == 0x19) {
         uint32_t consumed = 0;
