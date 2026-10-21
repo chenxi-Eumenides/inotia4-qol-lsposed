@@ -673,7 +673,8 @@ int main() {
     CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 0);
     fn_popup_create_yesno_from_textdata = nullptr;
 
-    // Minor 32 raw-text creation forwards explicit text/display type/type=2/price.
+    // Minor 32 raw-text creation derives the layout from price: >0 -> x3=2 (price bar),
+    // ==0 -> x3=0 (plain body). The caller-supplied display_type is ignored.
     {
         g_base = reinterpret_cast<uintptr_t>(g_popup_test_image);
         fn_popup_create_yesno = &fake_popup_create_yesno;
@@ -683,11 +684,19 @@ int main() {
                                           &fake_popup_callback, &fake_popup_callback).ok ==
               kQolOk);
         CHECK(g_popup_test_raw_calls == 1 && g_popup_test_raw_length == 12 &&
-              g_popup_test_raw_x2 == 0 && g_popup_test_raw_x3 == 5 &&
+              g_popup_test_raw_x2 == 0 && g_popup_test_raw_x3 == 2 &&
               std::strcmp(g_popup_test_raw_text, "任意文本") == 0 &&
               reinterpret_cast<uintptr_t>(g_popup_test_param) == 0x55667788u);
         uint8_t active = 1;
         CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 1);
+        CHECK(adapter->popup_msg_close_if_callbacks(&fake_popup_callback, &fake_popup_callback,
+                                                     &active).ok == kQolOk && active == 1);
+
+        *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 0;
+        CHECK(adapter->create_yes_no_text("无价格", 9, 5, 0, &fake_popup_callback,
+                                          &fake_popup_callback).ok == kQolOk);
+        CHECK(g_popup_test_raw_calls == 2 && g_popup_test_raw_x2 == 0 &&
+              g_popup_test_raw_x3 == 0);
         CHECK(adapter->popup_msg_close_if_callbacks(&fake_popup_callback, &fake_popup_callback,
                                                      &active).ok == kQolOk && active == 1);
         fn_popup_create_yesno = nullptr;

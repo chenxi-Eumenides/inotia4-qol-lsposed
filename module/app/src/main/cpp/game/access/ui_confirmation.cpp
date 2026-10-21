@@ -111,7 +111,11 @@ bool ui_confirmation_popup_create_text(const char* text, uint32_t length,
     // Native signature: (text, len, x2, x3, ok, cancel, param). x2 is forwarded to
     // CreateButtonControl (0 for module dialogs); x3 is i32DisplayType (0=plain body,
     // 2=price layout) and is the only layout selector. The internal i32Type is fixed.
-    fn_popup_create_yesno(const_cast<char*>(text), length, 0, display_type,
+    // Layout is derived from price so callers cannot forget it: any positive amount needs
+    // the price bar; zero stays a plain body and never renders a price area.
+    (void)display_type;
+    const uint32_t derived_display_type = numeric_param > 0 ? 2 : 0;
+    fn_popup_create_yesno(const_cast<char*>(text), length, 0, derived_display_type,
                           reinterpret_cast<void*>(ok), reinterpret_cast<void*>(cancel),
                           reinterpret_cast<void*>(static_cast<uintptr_t>(numeric_param)));
     return true;
