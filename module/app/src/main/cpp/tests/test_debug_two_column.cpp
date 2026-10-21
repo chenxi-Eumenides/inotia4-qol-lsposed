@@ -72,9 +72,7 @@ bool g_confirmation_active = false;
 uint64_t g_next_confirmation_token = 41;
 uint64_t g_last_closed_confirmation_token = 0;
 UiConfirmationSpec g_last_confirmation{};
-UiConfirmationSpecV2 g_last_confirmation_v2{};
 int g_confirmation_open_count = 0;
-int g_confirmation_v2_open_count = 0;
 
 bool demo_choice_open(const UiChoiceSpec& spec) {
     if (g_choice_active) return false;
@@ -100,17 +98,6 @@ QolResult demo_confirmation_open(const UiConfirmationSpec* spec, uint64_t* out_t
     *out_token = g_next_confirmation_token++;
     return ok();
 }
-QolResult demo_confirmation_open_v2(const UiConfirmationSpecV2* spec, uint64_t* out_token) {
-    if (spec == nullptr || spec->size < sizeof(*spec) || out_token == nullptr ||
-        g_confirmation_active) {
-        return error(kQolErrBusy, "busy", 4);
-    }
-    g_confirmation_active = true;
-    ++g_confirmation_v2_open_count;
-    g_last_confirmation_v2 = *spec;
-    *out_token = g_next_confirmation_token++;
-    return ok();
-}
 QolResult demo_confirmation_active(uint64_t token, uint8_t* out_active) {
     if (token + 1 != g_next_confirmation_token || out_active == nullptr) {
         return error(kQolErrNotFound, "stale", 5);
@@ -125,8 +112,7 @@ QolResult demo_confirmation_close(uint64_t token) {
     return ok();
 }
 const UiConfirmationApi kDemoConfirmationApi{
-    &demo_confirmation_open, &demo_confirmation_active, &demo_confirmation_close,
-    &demo_confirmation_open_v2};
+    &demo_confirmation_open, &demo_confirmation_active, &demo_confirmation_close};
 
 QolResult require_debug_capability(const char* id, QolVersionRange range, const void** out) {
     if (id == nullptr || out == nullptr) return error(kQolErrInvalidArgument, "invalid", 7);
@@ -275,8 +261,7 @@ QolResult string_with_font(const char*, int32_t, int32_t, int32_t, int32_t) {
     return ok();
 }
 QolResult font_color_rgb(int32_t, int32_t, int32_t) { return ok(); }
-// 非 0 inset：验证调试页 nav 创建按 root 原点（= inset）把绝对 (8,8) 换算成相对 rect，
-// 与设置页口径一致（三页按钮屏幕绝对位置一致）。
+// 非 0 inset：逻辑屏幕仍由 960×640 加两侧 inset 得出，全屏 root 原点为 (0,0)。
 int32_t g_fake_inset_x = 24;
 int32_t g_fake_inset_y = 16;
 QolResult inset_width(int32_t* out) { *out = g_fake_inset_x; return ok(); }
@@ -405,35 +390,36 @@ int main() {
     int checks = 0;
 #define CHECK(expr) do { assert(expr); ++checks; } while (false)
 
-    // 双栏布局常量（与 debug_components.cpp 保持一致）：左/右 viewport 扩框不重叠，
-    // 面板关闭导航按钮位于屏幕左上 (8,8)（nav 标准盒），viewport 下移让开命中区。
-    const UiRect left{16, 100, 204, 524};
-    const UiRect right{260, 100, 684, 524};
+    // 当前测试 inset 下逻辑屏幕为 1008×672；原生返回框保持 (8,8) 78×86，
+    // 左右各留按钮宽度，两栏垂直边距 10px，间距先压至 0 后宽度等比缩放至 183/613。
+    const UiRect left{94, 18, 183, 636};
+    const UiRect right{309, 18, 613, 636};
     const UiRect left_frame{left.x - 8, left.y - 8, left.w + 32, left.h + 16};
     const UiRect right_frame{right.x - 8, right.y - 8, right.w + 16, right.h + 16};
-    CHECK(left_frame.x + left_frame.w <= right_frame.x);
-    CHECK(right_frame.x + right_frame.w <= 960 && right_frame.y + right_frame.h <= 640);
-    // 面板关闭导航按钮：三页统一 nav 标准盒（ui_theme::kNavBox*，屏幕绝对 (8,8) 78×86）；
-    // 命中区只与绘制框（无点击语义）在扩框边缘 2px 相交（frame.y=92 < 94，同设置页），
-    // 与任何可命中控件不重叠（左列表首行 y=100 > 94）。
-    const UiRect panel_nav{qol::contracts::ui_theme::kNavBoxAbsX - g_fake_inset_x,
-                           qol::contracts::ui_theme::kNavBoxAbsY - g_fake_inset_y,
+    CHECK(left_frame.x == 86 && left_frame.y == 10);
+    CHECK(left_frame.x + left_frame.w == right_frame.x);
+    CHECK(right_frame.x + right_frame.w == 930 && right_frame.y == 10);
+    CHECK(left_frame.y + left_frame.h == 662 && right_frame.y + right_frame.h == 662);
+    CHECK(left.w == 183 && right.w == 613);
+    // 返回按钮完全恢复原版屏幕绝对位置、尺寸与命中框。
+    const UiRect panel_nav{qol::contracts::ui_theme::kNavBoxAbsX,
+                           qol::contracts::ui_theme::kNavBoxAbsY,
                            qol::contracts::ui_theme::kNavBoxW, qol::contracts::ui_theme::kNavBoxH};
-    const UiRect nav_abs{qol::contracts::ui_theme::kNavBoxAbsX, qol::contracts::ui_theme::kNavBoxAbsY,
+    const UiRect nav_abs{panel_nav.x, panel_nav.y,
                          qol::contracts::ui_theme::kNavBoxW, qol::contracts::ui_theme::kNavBoxH};
-    // 文本按钮/导航演示盒 rect = 右 viewport 原点 + 局部偏移（与实现同基准）：
-    // 文本按钮两行排在说明行 y+84 之下、脚注 y+242 之上；导航盒在标题带与标签行之间。
-    const UiRect text_button_rects[6] = {{280, 220, 220, 48}, {524, 220, 220, 48},
-                                         {280, 276, 220, 48}, {524, 276, 220, 48},
-                                         {280, 332, 220, 48}, {524, 332, 220, 48}};
+    // 文本按钮/导航演示盒 rect = 右 viewport 原点 + 局部偏移（与实现同基准）。
+    const UiRect text_button_rects[6] = {{right.x + 20, right.y + 120, 220, 48},
+        {right.x + 264, right.y + 120, 220, 48}, {right.x + 20, right.y + 176, 220, 48},
+        {right.x + 264, right.y + 176, 220, 48}, {right.x + 20, right.y + 232, 220, 48},
+        {right.x + 264, right.y + 232, 220, 48}};
     // 导航演示盒取原生 X/返回尺寸 78×86（与设置页共用同款金属框），间距 88 不重叠。
-    const UiRect nav_demo_rects[3] = {{280, 212, 78, 86}, {368, 212, 78, 86},
-                                      {456, 212, 78, 86}};
+    const UiRect nav_demo_rects[3] = {{right.x + 20, right.y + 112, 78, 86},
+        {right.x + 108, right.y + 112, 78, 86}, {right.x + 196, right.y + 112, 78, 86}};
     const auto overlaps = [](UiRect a, UiRect b) {
         return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
     };
-    CHECK(!overlaps(nav_abs, left) && !overlaps(nav_abs, right));  // 命中区不重叠
-    CHECK(nav_abs.y + nav_abs.h <= left_frame.y + 2);  // 与左栏扩框装饰边缘仅 ≤2px 相交
+    CHECK(!overlaps(nav_abs, left));  // 不覆盖左栏列表命中区
+    CHECK(nav_abs.x + nav_abs.w == left_frame.x && nav_abs.y == 8 && nav_abs.h == 86);
     CHECK(!overlaps(panel_nav, text_button_rects[1]));
     for (const auto& rect : nav_demo_rects) CHECK(!overlaps(nav_abs, rect));
     // 右栏说明与控件不重叠：控件 rect 全部落在右 viewport 内，且与 detail 文本行
@@ -480,7 +466,10 @@ int main() {
     // 结构：root = [双栏页, 面板导航按钮, 分类0 八枚文本按钮（胶囊/装饰各三态 + 选中态两枚）]。
     Control* root = root_control();
     CHECK(root != nullptr && root->kind == 0 && root->children.size() == 10);
+    CHECK(root->rect.x == 0 && root->rect.y == 0 && root->rect.w == 1008 && root->rect.h == 672);
     Control* columns = root->children[0].get();
+    CHECK(columns->rect.x == 0 && columns->rect.y == 0 &&
+          columns->rect.w == 1008 && columns->rect.h == 672);
     Control* panel_nav_control = root->children[1].get();
     g_nav_control = panel_nav_control;
     CHECK(columns->kind == 3);
@@ -501,15 +490,15 @@ int main() {
     CHECK(list->kind == 4 && list->rect.x == left.x && list->rect.w == left.w);
     CHECK(list->children.size() == 1);
     Control* group = list->children[0].get();
-    CHECK(group->children.size() == 10);
-    for (size_t i = 0; i < 10; ++i) {
+    CHECK(group->children.size() == 9);
+    for (size_t i = 0; i < 9; ++i) {
         CHECK(group->children[i]->rect.y == static_cast<int64_t>(i) * 56 &&
               group->children[i]->rect.h == 56 && group->children[i]->click != nullptr);
     }
 
     // 首帧 process：绘制双栏（框架 + detail 文本 + 左列表）与自动导航按钮（depth 1 → X）。
     g_provider->callbacks->process();
-    CHECK(g_border_draws >= 3);       // 外框 + 左栏框 + 右栏框
+    CHECK(g_border_draws == 2);       // 只绘制左右栏自身边框
     CHECK(g_string_draws >= 5);       // 左列表 5 个分类名
     CHECK(g_close_draws >= 1);        // 面板导航按钮（depth 1 → X）
     g_provider->callbacks->process();
@@ -541,7 +530,14 @@ int main() {
     const auto abs_text_band = [&right_abs](int32_t local_y) {
         return UiRect{right_abs.x, right_abs.y + local_y, right_abs.w, 20};
     };
-    for (const auto& rect : g_toggle_rects) {
+    const int64_t switch_group_x = (right_abs.w - 282) / 2;
+    const int32_t switch_widths[6] = {116, 116, 94, 94, 150, 150};
+    const int32_t switch_y[6] = {76, 76, 144, 144, 204, 204};
+    CHECK(g_toggle_rects.size() == 6);
+    for (size_t i = 0; i < g_toggle_rects.size(); ++i) {
+        const auto& rect = g_toggle_rects[i];
+        CHECK(rect.x == right_abs.x + switch_group_x + static_cast<int64_t>(i % 2) * 132);
+        CHECK(rect.y == right_abs.y + switch_y[i] && rect.w == switch_widths[i]);
         CHECK(within(rect, right_abs));
         CHECK(!overlaps(rect, abs_text_band(32)) && !overlaps(rect, abs_text_band(296)));
     }
@@ -552,8 +548,8 @@ int main() {
     CHECK(g_back_requested);
 
     // 新语义：按下只派发/置原生态并消费，松开仍命中导航按钮才经原生树 ExecuteProc 触发。
-    // nav 盒屏幕绝对 (8,8)-(86,94)（root 原点 = inset，控件相对 rect 已按 inset 换算）。
-    int64_t nav_hit[] = {50, 50};
+    // root 覆盖逻辑全屏，事件坐标与右栏标题带中的 nav rect 同为屏幕坐标。
+    int64_t nav_hit[] = {nav_abs.x + nav_abs.w / 2, nav_abs.y + nav_abs.h / 2};
     const uint64_t nav_hit_param = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(nav_hit));
     g_back_requested = false;
     g_nav_pressed = false;
@@ -593,14 +589,13 @@ int main() {
     g_provider->callbacks->process();
     CHECK(g_alpha_fill_draws > shape_draws_before + 1);
 
-    // 原生/自绘确认入口由四个独立根子项触发，不挂在 HelpPage 的 native scroll 子树内。
+    // 原生确认入口由三个独立根子项触发，不挂在 HelpPage 的 native scroll 子树内。
     CHECK(api->help_page_set_selected(columns, 8).ok == kQolOk);
     g_provider->callbacks->process();
-    CHECK(root->children.size() == 6);  // 双栏页、导航、4 个 Debug-only 弹窗入口。
+    CHECK(root->children.size() == 5);  // 双栏页、导航、3 个 Debug-only 弹窗入口。
     Control* choice_demo = root->children[2].get();
     Control* no_price_demo = root->children[3].get();
     Control* price_demo = root->children[4].get();
-    Control* custom_demo = root->children[5].get();
     choice_demo->click(choice_demo->user);
     CHECK(g_choice_open_count == 1 && g_choice_active);
     CHECK(g_last_choice.count == 3 && g_last_choice.close_index == 2 &&
@@ -613,16 +608,6 @@ int main() {
           g_last_confirmation.format_arg == 2 && g_last_confirmation.price == 0);
     g_confirmation_active = false;
     g_last_confirmation.on_confirm(g_last_confirmation.user);
-    custom_demo->click(custom_demo->user);
-    CHECK(g_confirmation_v2_open_count == 1 && g_confirmation_active);
-    CHECK(g_last_confirmation_v2.size == sizeof(g_last_confirmation_v2));
-    CHECK(std::strcmp(g_last_confirmation_v2.message, "是否出售该物品？") == 0);
-    CHECK(std::strcmp(g_last_confirmation_v2.confirm_label, "出售") == 0);
-    CHECK(std::strcmp(g_last_confirmation_v2.cancel_label, "取消") == 0);
-    CHECK(g_last_confirmation_v2.price == 100 &&
-          std::strcmp(g_last_confirmation_v2.price_unit, "金币") == 0);
-    g_confirmation_active = false;
-    g_last_confirmation_v2.on_cancel(g_last_confirmation_v2.user);
     price_demo->click(price_demo->user);
     CHECK(g_confirmation_open_count == 2 && g_confirmation_active &&
           g_last_confirmation.price == 100);
