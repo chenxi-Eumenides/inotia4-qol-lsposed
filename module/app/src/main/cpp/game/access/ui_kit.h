@@ -72,6 +72,10 @@ void ui_begin_frame(UiRect mask, UiRect panel, uint32_t panel_color);
 void ui_fill_rect_alpha(UiRect rect, uint32_t color, uint32_t alpha);
 void ui_fill_rect(UiRect rect, uint32_t color);
 void ui_end_frame();
+// Proactively snapshots the current framebuffer with GRP_SaveLCD (no GRPX begin/end and no
+// refresh-flag changes). Used when a custom panel or native choice opens so its first
+// RestoreLCD frame shows the画面 visible at open time instead of stale/black content.
+bool ui_save_lcd_now();
 void ui_draw_panel_decor(UiRect panel, const int64_t* separator_y, size_t separator_count,
                           uint32_t color);
 void ui_draw_vertical_line(int64_t x, int64_t y, int64_t h, uint32_t color, int thickness);

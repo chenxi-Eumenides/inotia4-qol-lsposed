@@ -401,6 +401,8 @@ bool bridge_init() {
         g_base + fn_resolve("F_UICHOICE_PROCESS_VMA", F_UICHOICE_PROCESS_VMA));
     fn_uichoice_init = reinterpret_cast<UiChoiceInitFn>(
         g_base + fn_resolve("F_UI_CHOICE_INIT_VMA", F_UI_CHOICE_INIT_VMA));
+    fn_uichoice_draw = reinterpret_cast<UiChoiceDrawFn>(
+        g_base + fn_resolve("F_UI_CHOICE_DRAW_VMA", F_UI_CHOICE_DRAW_VMA));
     fn_scene_event_popup_sc_choice = reinterpret_cast<SceneEventPopupScChoiceFn>(
         g_base + fn_resolve("F_SCENE_EVENT_POPUP_SC_CHOICE_VMA",
                             F_SCENE_EVENT_POPUP_SC_CHOICE_VMA));
@@ -554,6 +556,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
                             F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA));
     fn_popup_create_from_textdata = reinterpret_cast<UiPopupMsgCreateFromTextDataFn>(g_base + fn_resolve("F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA", F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA));
     fn_popup_free = reinterpret_cast<UiPopupMsgFreeFn>(g_base + fn_resolve("F_UIPOPUPMSG_FREE_VMA", F_UIPOPUPMSG_FREE_VMA));
+    fn_popup_draw = reinterpret_cast<UiPopupMsgDrawFn>(g_base + fn_resolve("F_UIPOPUPMSG_DRAW_VMA", F_UIPOPUPMSG_DRAW_VMA));
     fn_popupstate_push = reinterpret_cast<PopupStatePushFn>(g_base + fn_resolve("F_POPUPSTATE_PUSH_VMA", F_POPUPSTATE_PUSH_VMA));
     fn_map_drawbase = reinterpret_cast<MapDrawBaseFn>(g_base + fn_resolve("F_MAP_DRAWBASE_VMA", F_MAP_DRAWBASE_VMA));
     fn_grpx_start = reinterpret_cast<GrpxStartFn>(g_base + fn_resolve("F_GRPX_START_VMA", F_GRPX_START_VMA));

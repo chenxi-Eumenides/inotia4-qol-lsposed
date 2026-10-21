@@ -3,7 +3,6 @@ add_library(qol_plugin_core.custom_ui STATIC
     text_mechanism.cpp
     feature.cpp
     ui_confirmation.cpp
-    ui_confirmation_overlay.cpp
     ui_components.cpp
     settings_contribution.cpp
     panels/debug_components.cpp

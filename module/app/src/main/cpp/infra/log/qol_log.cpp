@@ -61,6 +61,9 @@ const DomainEntry kDomainTable[] = {
 std::atomic<QolFrameProvider> g_frame_provider{nullptr};
 std::atomic<bool> g_debug_enabled{false};
 std::atomic<int> g_sink_fd{-1};
+#if !defined(__ANDROID__)
+std::atomic<QolLogHostSink> g_host_sink{nullptr};
+#endif
 std::mutex g_sink_mtx;
 std::once_flag g_sink_once;
 thread_local bool g_in_emit = false;
@@ -160,6 +163,10 @@ void emit_line(QolLogLevel level, QolDomain domain, const char* src, const char*
     (void)required;  // host 无文件 sink 时不使用返回值
 
     __android_log_print(level_priority(level), kTag, "%s", line);
+#if !defined(__ANDROID__)
+    const QolLogHostSink sink = g_host_sink.load(std::memory_order_acquire);
+    if (sink != nullptr) sink(level, domain, line);
+#endif
 
 #if defined(__ANDROID__)
     const size_t len = required > 0 ? static_cast<size_t>(required) : 0;
@@ -223,6 +230,12 @@ bool qol_log_debug_enabled() {
 void qol_log_set_debug_enabled(bool enabled) {
     g_debug_enabled.store(enabled, std::memory_order_release);
 }
+
+#if !defined(__ANDROID__)
+void qol_log_set_host_sink(QolLogHostSink sink) {
+    g_host_sink.store(sink, std::memory_order_release);
+}
+#endif
 
 void qol_log_init() {
 #if defined(__ANDROID__)

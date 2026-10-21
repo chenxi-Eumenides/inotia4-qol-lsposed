@@ -75,6 +75,17 @@ void sdk_log(void* context, int32_t level, const char* message) {
     (void)sdk->log.write(level, 12, "core.custom_ui/panels/host", message,
                          static_cast<uint32_t>(std::strlen(message)));
 }
+void sdk_save_lcd(void* context) {
+    const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
+    if (sdk == nullptr || sdk->ui == nullptr || sdk->ui->major != contracts::kUiAdapterMajor ||
+        sdk->ui->minor < 31 ||
+        sdk->ui->size < offsetof(contracts::QolUiAdapter, save_lcd) +
+                            sizeof(sdk->ui->save_lcd) ||
+        sdk->ui->save_lcd == nullptr) {
+        return;
+    }
+    (void)sdk->ui->save_lcd();
+}
 
 void dispatch_enter() { if (g_dispatch_host != nullptr) g_dispatch_host->dispatch_enter(); }
 void dispatch_process() { if (g_dispatch_host != nullptr) g_dispatch_host->dispatch_process(); }
@@ -105,7 +116,7 @@ PopupHost::PopupHost(const char* popup_symbol, const contracts::QolHostSdk* sdk)
     : PopupHost(popup_symbol, {const_cast<contracts::QolHostSdk*>(sdk), sdk_popup_resolve,
                                sdk_popup_acquire, sdk_popup_restore, sdk_set_process_info,
                                sdk_popup_stack_snapshot, sdk_log, sdk_begin_overlay_scope,
-                               sdk_end_overlay_scope}) {}
+                               sdk_end_overlay_scope, sdk_save_lcd}) {}
 
 PopupHost::~PopupHost() {
     if (g_dispatch_host == this) g_dispatch_host = nullptr;
@@ -232,6 +243,8 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         log_message("owned popup snapshot unavailable; restore held pending");
         return false;
     }
+    // Newly opened panel: snapshot the pre-panel screen so its first RestoreLCD frame shows it.
+    if (hooks_.save_lcd != nullptr) hooks_.save_lcd(hooks_.context);
     return true;
 }
 

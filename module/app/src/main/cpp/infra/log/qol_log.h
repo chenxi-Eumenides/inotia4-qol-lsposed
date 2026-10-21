@@ -47,6 +47,13 @@ void qol_log_write(QolLogLevel level, QolDomain domain, const char* file, int li
 // Kotlin 转发入口：src 已含 "File.kt:line"，msg 为完整正文（不格式化）
 void qol_log_write_kotlin(QolLogLevel level, QolDomain domain, const char* src, const char* msg);
 
+#if !defined(__ANDROID__)
+// Host-only test seam: receives the fully formatted line from emit_line before the
+// no-op Android stub. Not compiled into Android builds.
+using QolLogHostSink = void (*)(QolLogLevel level, QolDomain domain, const char* line);
+void qol_log_set_host_sink(QolLogHostSink sink);
+#endif
+
 // 限流原语（P3 会大量使用，本次一并提供并测试）
 struct QolLogThrottle {
     int64_t last_frame = INT64_MIN;   // 注意：需要 <climits>

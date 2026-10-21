@@ -24,4 +24,13 @@ bool ui_choice_play_sound(int32_t sound_id);
 bool ui_choice_selected_index(int32_t* out_index);
 bool ui_choice_text_owns(const char* const* items, uint32_t count);
 
+// Module-choice first-frame de-dim primitives (Scene_Draw_POPUP_SC_CHOICE hook).
+// Each maps to one game primitive; the plugin wrapper owns the sequence.
+bool ui_choice_refresh_pending(bool* out_pending);
+bool ui_choice_save_lcd();
+bool ui_choice_clear_refresh_flag();
+bool ui_choice_begin_frame();
+bool ui_choice_draw();
+bool ui_choice_end_frame();
+
 }  // namespace qol::game

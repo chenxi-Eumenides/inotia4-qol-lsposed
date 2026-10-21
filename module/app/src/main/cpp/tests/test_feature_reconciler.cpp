@@ -11,6 +11,7 @@
 #include "hooks/transaction.h"
 #include "infra/capabilities.h"
 #include "infra/status.h"
+#include "infra/log/qol_log.h"
 #include <algorithm>
 #include <atomic>
 #include <cassert>
@@ -68,6 +69,15 @@ struct Probe {
 };
 std::map<std::string, Probe> probes;
 std::vector<std::string> trace;
+std::string g_log_capture;
+void capture_log(QolLogLevel, QolDomain, const char* line) {
+    if (line == nullptr) return;
+    g_log_capture.append(line);
+    g_log_capture.push_back('\n');
+}
+bool log_contains(const char* needle) {
+    return needle != nullptr && g_log_capture.find(needle) != std::string::npos;
+}
 std::thread::id main_thread;
 FeatureController* controller = nullptr;
 FeatureReconciler* reconciler = nullptr;
@@ -449,6 +459,8 @@ void test_save_busy_and_inflight() {
 
 int main(int argc, char** argv) {
     assert(argc == 2);
+    qol_log_set_host_sink(&capture_log);
+    g_log_capture.clear();
     main_thread = std::this_thread::get_id();
     test_runtime_actual_state.clear();
     test_runtime_actual_events.clear();
@@ -550,6 +562,13 @@ int main(int argc, char** argv) {
            probes["test.failure"].cleanup == probes["test.failure"].installs);
     assert(actual("test.failure") == infra::FeatureState::kFailed);
     assert(actual("test.resource_failure") == infra::FeatureState::kFailed);
+    assert(log_contains("plugin test.failure install failed: plugin install returned nonzero"));
+    assert(log_contains(
+        "plugin test.resource_failure resource install failed resource=feature:rollback:second"));
+    assert(log_contains(
+        "plugin test.resource_failure activation failed: resource feature:rollback:second"));
+    assert(log_contains(
+        "plugin test.missing blocked at assembly: missing required capability: test.external"));
     assert(probes["test.resource_failure"].cleanup >= 1);
     assert(hooks::state_of("feature:rollback:first") == ResourceState::kFree && unhook_calls >= 1);
     assert(probes["test.missing"].installs == 0 && probes["test.version"].installs == 0);

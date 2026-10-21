@@ -19,6 +19,8 @@ struct PopupHostHooks {
     bool (*begin_overlay_scope)(void* context, uint64_t token, const void* provider,
                                 uint64_t generation);
     void (*end_overlay_scope)(void* context);
+    // Optional proactive LCD snapshot (GRP_SaveLCD) after a new provider enters the stack.
+    void (*save_lcd)(void* context);
 };
 
 class PopupHost {
@@ -144,5 +146,4 @@ private:
 bool ui_panels_overlay_scope_matches(const void* provider, uint64_t generation);
 bool ui_panels_custom_backend_active();
 bool ui_panels_custom_overlay_scope_identity(const void** provider, uint64_t* generation);
-
 }  // namespace qol::features::core_ui

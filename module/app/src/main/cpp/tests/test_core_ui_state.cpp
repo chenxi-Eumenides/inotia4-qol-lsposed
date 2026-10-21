@@ -370,96 +370,6 @@ void test_read_layers(const UiStateApi* api) {
     assert(native.ids[2] == "panel_inventory");
 }
 
-void test_custom_dialog_v2(const UiStateApi* api) {
-    assert(api != nullptr && api->publish_custom_dialog_v2 != nullptr);
-    g_native_screen = "world";
-    g_native_panel = "";
-    g_native_dialog = "{\"type\":\"native\",\"text\":\"native body\"}";
-    g_frame_handler(8, nullptr);
-
-    const char* legacy_labels[] = {"Continue"};
-    const UiCustomDialogSnapshot legacy_before{110, 8, "legacy.confirm", "Legacy",
-                                                legacy_labels, 1};
-    assert(succeeded(api->publish_custom_dialog(&legacy_before)));
-
-    UiCustomDialogSnapshotV2 dialog{};
-    dialog.size = sizeof(dialog);
-    dialog.sequence = 111;
-    dialog.generation = 9;
-    std::strcpy(dialog.type_id, "custom.confirm");
-    std::strcpy(dialog.body, "Delete this item?");
-    std::strcpy(dialog.confirm_label, "Delete");
-    std::strcpy(dialog.cancel_label, "Keep");
-    dialog.has_price = 1;
-    dialog.price = 125;
-    std::strcpy(dialog.price_unit, "gold");
-    assert(succeeded(api->publish_custom_dialog_v2(&dialog)));
-    const std::string priced_json =
-        "{\"type\":\"custom.confirm\",\"text\":\"Delete this item?\","
-        "\"options\":[{\"id\":\"ok\",\"label\":\"Delete\"},"
-        "{\"id\":\"cancel\",\"label\":\"Keep\"}],\"price\":125}";
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") == priced_json);
-    assert(query(HttpMethod::kGet, "/api/ui/screen") == "{\"screen\":\"world\"}");
-    LayerCapture layers{};
-    assert(succeeded(api->read_layers(&capture_layer, &layers)));
-    assert(layers.ids.size() == 3 && layers.ids[0] == "custom.confirm" &&
-           layers.types[0] == static_cast<uint32_t>(UiLayerType::kDialog) &&
-           layers.ids[1] == "native" && layers.ids[2] == "world");
-
-    UiCustomDialogSnapshotV2 undersized = dialog;
-    undersized.size = sizeof(undersized) - 1;
-    undersized.sequence = 112;
-    undersized.generation = 10;
-    assert(api->publish_custom_dialog_v2(&undersized).code == kQolErrInvalidArgument);
-
-    UiCustomDialogSnapshotV2 stale_sequence = dialog;
-    stale_sequence.sequence = 110;
-    stale_sequence.generation = 10;
-    assert(api->publish_custom_dialog_v2(&stale_sequence).code == kQolErrConflict);
-    UiCustomDialogSnapshotV2 stale_generation = dialog;
-    stale_generation.sequence = 112;
-    stale_generation.generation = 8;
-    assert(api->publish_custom_dialog_v2(&stale_generation).code == kQolErrConflict);
-
-    UiCustomDialogSnapshotV2 wrong_thread = dialog;
-    wrong_thread.sequence = 112;
-    wrong_thread.generation = 10;
-    g_on_main_thread = false;
-    assert(api->publish_custom_dialog_v2(&wrong_thread).code == kQolErrBlocked);
-    g_on_main_thread = true;
-
-    // Clearing the legacy generation must not clear the newer V2 projection.
-    assert(succeeded(api->clear_custom_dialog(8, 112)));
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") == priced_json);
-
-    const char* newer_labels[] = {"Proceed"};
-    const UiCustomDialogSnapshot legacy_after{113, 10, "legacy.newer", "New legacy",
-                                               newer_labels, 1};
-    assert(succeeded(api->publish_custom_dialog(&legacy_after)));
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
-           "{\"type\":\"legacy.newer\",\"text\":\"native body\"}");
-    assert(succeeded(api->clear_custom_dialog(10, 114)));
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") == priced_json);
-    assert(succeeded(api->clear_custom_dialog(9, 115)));
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") == g_native_dialog);
-
-    UiCustomDialogSnapshotV2 no_price{};
-    no_price.size = sizeof(no_price);
-    no_price.sequence = 116;
-    no_price.generation = 11;
-    std::strcpy(no_price.type_id, "custom.notice");
-    std::strcpy(no_price.body, "Completed");
-    std::strcpy(no_price.confirm_label, "OK");
-    std::strcpy(no_price.cancel_label, "Close");
-    std::strcpy(no_price.price_unit, "gold");
-    assert(succeeded(api->publish_custom_dialog_v2(&no_price)));
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
-           "{\"type\":\"custom.notice\",\"text\":\"Completed\","
-           "\"options\":[{\"id\":\"ok\",\"label\":\"OK\"},"
-           "{\"id\":\"cancel\",\"label\":\"Close\"}]}");
-    assert(succeeded(api->clear_custom_dialog(11, 117)));
-}
-
 void test_native_snapshot_failure_invalidates_all_queries(const UiStateApi* api) {
     g_native_screen = "world";
     g_native_panel = "";
@@ -526,7 +436,7 @@ int main() {
     const PluginDescriptor& descriptor = qol::features::core_ui_state::plugin_descriptor();
     assert(descriptor.provides_count == 1);
     assert(std::strcmp(descriptor.provides[0].id, kUiStateCapabilityId) == 0);
-    assert(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 2);
+    assert(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 1);
     assert(std::strcmp(descriptor.optional_requires[0].id, kHttpRegistryCapabilityId) == 0);
     assert(std::strcmp(descriptor.optional_requires[1].id, kHttpDispatchCapabilityId) == 0);
     assert(descriptor.optional_requires[0].range.major == 1 &&
@@ -553,7 +463,6 @@ int main() {
     test_native_snapshot_failure_invalidates_all_queries(api);
     test_ui_write_ticket_retry();
     test_read_layers(api);
-    test_custom_dialog_v2(api);
 
     descriptor.deactivate(context);
     assert(g_frame_handler == nullptr);

@@ -10,7 +10,7 @@ namespace {
 
 using QolResult = ::QolResult;
 
-[[gnu::used]] constexpr char kChoicePortBuildMarker[] = "choice_port:v1";
+[[gnu::used]] constexpr char kChoicePortBuildMarker[] = "choice_port:v2";
 
 QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -66,10 +66,38 @@ QolResult play_sound(int32_t sound_id) {
     return ui_choice_play_sound(sound_id) ? contracts::ok() : not_ready();
 }
 
+QolResult draw_refresh_flag(uint8_t* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
+    bool pending = false;
+    if (!ui_choice_refresh_pending(&pending)) return not_ready();
+    *out = pending ? 1 : 0;
+    return contracts::ok();
+}
+
+QolResult draw_save_lcd() {
+    return ui_choice_save_lcd() ? contracts::ok() : not_ready();
+}
+
+QolResult draw_clear_refresh_flag() {
+    return ui_choice_clear_refresh_flag() ? contracts::ok() : not_ready();
+}
+
+QolResult draw_start_frame() {
+    return ui_choice_begin_frame() ? contracts::ok() : not_ready();
+}
+
+QolResult draw_choice() { return ui_choice_draw() ? contracts::ok() : not_ready(); }
+
+QolResult draw_end_frame() {
+    return ui_choice_end_frame() ? contracts::ok() : not_ready();
+}
+
 const contracts::QolChoicePort kChoicePort{
     contracts::kQolPortChoiceVersion,
     {&read_state_id, &read_selected_index, &read_text_owns},
     {&write_items, &write_title, &write_focus, &push, &close_popup, &play_sound},
+    {&draw_refresh_flag, &draw_save_lcd, &draw_clear_refresh_flag, &draw_start_frame,
+     &draw_choice, &draw_end_frame},
 };
 
 }  // namespace

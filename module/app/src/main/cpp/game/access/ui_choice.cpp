@@ -5,6 +5,7 @@
 #include "game/symbols/game_symbols.h"
 #include "game/access/popup_state.h"
 #include "game/access/game_access.h"
+#include "game/access/ui_kit.h"
 
 namespace qol::game {
 
@@ -63,7 +64,12 @@ bool ui_choice_write_focus(int32_t index) {
 
 bool ui_choice_push() {
     const int state_id = ui_choice_state_id();
-    return state_id >= 0 && fn_popupstate_push != nullptr && fn_popupstate_push(state_id) != 0;
+    if (state_id < 0 || fn_popupstate_push == nullptr || fn_popupstate_push(state_id) == 0) {
+        return false;
+    }
+    // No snapshot here: Scene_Draw_POPUP_SC_CHOICE hook saves the pre-choice frame before
+    // drawing, so push-time SaveLCD would be overwritten by the refresh-flag branch.
+    return true;
 }
 
 bool ui_choice_close_popup() {
@@ -99,6 +105,38 @@ bool ui_choice_text_owns(const char* const* items, uint32_t count) {
     for (uint32_t i = 0; i < count; ++i) {
         if (current[i] != items[i]) return false;
     }
+    return true;
+}
+
+bool ui_choice_refresh_pending(bool* out_pending) {
+    if (out_pending == nullptr || fn_ui_get_refresh_lcd_flag == nullptr) return false;
+    *out_pending = fn_ui_get_refresh_lcd_flag() != 0;
+    return true;
+}
+
+bool ui_choice_save_lcd() { return ui_save_lcd_now(); }
+
+bool ui_choice_clear_refresh_flag() {
+    if (fn_ui_set_refresh_lcd_flag == nullptr) return false;
+    fn_ui_set_refresh_lcd_flag(0);
+    return true;
+}
+
+bool ui_choice_begin_frame() {
+    if (fn_grpx_start == nullptr) return false;
+    fn_grpx_start();
+    return true;
+}
+
+bool ui_choice_draw() {
+    if (fn_uichoice_draw == nullptr) return false;
+    fn_uichoice_draw();
+    return true;
+}
+
+bool ui_choice_end_frame() {
+    if (fn_grpx_end == nullptr) return false;
+    fn_grpx_end();
     return true;
 }
 

@@ -2,6 +2,7 @@
 
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -24,32 +25,31 @@ namespace {
 constexpr const char* kPanelId = "debug_components";
 constexpr const char* kOwner = "core.custom_ui";
 
-// 双栏页：面板撑满 960×640；左右 viewport 相对 panel，扩框/裁剪由 help_page 处理。
-// viewport 顶从 y=16 下移到 y=100（参照设置页 kLeftY=100）：nav 标准盒占据左上
-// (8,8)-(86,94)，命中区必须让开，否则原生树深优先命中在首行出现歧义；
-// 高度相应收窄（panel.h=640 - 顶 100 - 底边距 16，扩框后 frame 底 632 ≤ 640）。
-// 9 行 × kRowHeight(56) = 504 ≤ 524；右栏 detail 最深内容（开关说明 y+332 行底
-// ≈ panel y 416）≤ viewport 底 624，均不越界。
-// 右栏交互控件 rect 一律 = kRightViewport 原点 + 局部偏移，与 detail 文字绘制同一
+// 双栏外框上下距逻辑屏幕边缘 10px；左右为原生返回按钮各留一个按钮宽度。
+// viewport 相对全屏 root，扩框/裁剪由 help_page 处理；宽度先放大 20%，再按可用空间缩放。
+// 右栏交互控件 rect 一律 = g_right_viewport 原点 + 局部偏移，与 detail 文字绘制同一
 // 坐标基准；控件不能用旧 viewport 下的固定 panel 绝对 y——viewport 下移后文字
 // 跟着右移下移而控件不动，说明行与按钮就会重叠。
-constexpr contracts::UiRect kPanelRect{0, 0, 960, 640};
-constexpr contracts::UiRect kLeftViewport{16, 100, 204, 524};
-constexpr contracts::UiRect kRightViewport{260, 100, 684, 524};
+contracts::UiRect g_panel_rect{0, 0, 960, 640};
+contracts::UiRect g_left_viewport{18, 18, 204, 604};
+contracts::UiRect g_right_viewport{260, 18, 684, 604};
+contracts::UiRect g_panel_nav_rect{};
+constexpr int64_t kPanelScreenMargin = 10;
+constexpr int64_t kColumnFrameGap = 0;
+constexpr int64_t kLeftFrameExtraWidth = 32;
+constexpr int64_t kRightFrameExtraWidth = 16;
+constexpr int64_t kLeftReservedWidth = contracts::ui_theme::kNavBoxAbsX +
+    contracts::ui_theme::kNavBoxW;
+constexpr int64_t kRightReservedWidth = contracts::ui_theme::kNavBoxW;
+constexpr int64_t kLeftViewportWidth = 204;
+constexpr int64_t kRightViewportWidth = 684;
 constexpr int32_t kRowHeight = 56;
-// 面板关闭入口：自适应导航按钮，X/返回共用原生金属框盒（与设置页同款）。
-// 三页统一放在屏幕左上 (8,8)（绝对逻辑坐标，ui_theme::kNavBox*）；
-// 创建时换算成 root 相对 rect（root 原点 = 屏幕 inset，同设置页口径）。
-constexpr contracts::UiRect kPanelNavAbsRect{contracts::ui_theme::kNavBoxAbsX,
-                                             contracts::ui_theme::kNavBoxAbsY,
-                                             contracts::ui_theme::kNavBoxW,
-                                             contracts::ui_theme::kNavBoxH};
-
+// 面板关闭入口使用与设置页相同的原生金属框盒，置于右栏标题带右侧以避开内容命中区。
 // 分类清单：新增调试内容 = 加一条名称，并在 build_category_controls 与
 // draw_category_detail 各加一个分支；两类内容互不冲突。
 constexpr const char* kCategoryNames[] = {
     "文本按钮", "开关胶囊", "X/导航按钮", "主题调色板", "框架边框", "箭头按钮", "图标按钮",
-    "基础形状", "原生对话框", "确认框双后端"};
+    "基础形状", "原生对话框"};
 constexpr uint32_t kCategoryCount = sizeof(kCategoryNames) / sizeof(kCategoryNames[0]);
 
 // 右栏交互控件：text_button 走手工命中绘制，nav_button 走自适应绘制。
@@ -217,64 +217,11 @@ void open_demo_confirmation(uint32_t price) {
     g_demo_confirmation_status = price == 0 ? "无价格确认框已打开" : "价格 100 确认框已打开";
 }
 
-void open_demo_custom_confirmation() {
-    const contracts::UiConfirmationApi* api = ui_confirmation_api();
-    if (api == nullptr || api->open_v2 == nullptr || api->active == nullptr) {
-        g_demo_confirmation_status = "V2 确认框不可用";
-        return;
-    }
-    if (g_demo_confirmation_token != 0) {
-        uint8_t active = 0;
-        const uint64_t token = g_demo_confirmation_token;
-        const QolResult status = api->active(token, &active);
-        if (contracts::succeeded(status) && active != 0) {
-            g_demo_confirmation_status = "调试确认框仍打开";
-            return;
-        }
-        if (contracts::succeeded(status) || status.code == kQolErrNotFound) {
-            clear_demo_confirmation_token(token);
-        } else {
-            g_demo_confirmation_status = "确认框状态暂不可读";
-            return;
-        }
-    }
-    contracts::UiConfirmationSpecV2 spec{};
-    spec.size = sizeof(spec);
-    spec.text_id = 9;
-    spec.display_type = 0;
-    spec.format_arg = 2;
-    spec.price = 100;
-    spec.on_confirm = &demo_confirmation_confirmed;
-    spec.on_cancel = &demo_confirmation_cancelled;
-    spec.user = &g_demo_confirmation_context;
-    std::snprintf(spec.message, sizeof(spec.message), "%s", "是否出售该物品？");
-    std::snprintf(spec.confirm_label, sizeof(spec.confirm_label), "%s", "出售");
-    std::snprintf(spec.cancel_label, sizeof(spec.cancel_label), "%s", "取消");
-    std::snprintf(spec.price_unit, sizeof(spec.price_unit), "%s", "金币");
-    uint64_t token = 0;
-    const QolResult result = api->open_v2(&spec, &token);
-    if (token != 0) {
-        g_demo_confirmation_token = token;
-        g_demo_confirmation_context.token = token;
-    }
-    if (!contracts::succeeded(result)) {
-        g_demo_confirmation_status = "自绘确认框打开失败";
-        if (token != 0) close_demo_confirmation();
-        return;
-    }
-    if (token == 0) {
-        g_demo_confirmation_status = "确认框未返回 token";
-        return;
-    }
-    g_demo_confirmation_status = "自绘确认框已打开（100 金币）";
-}
-
 void dialog_demo_clicked(void* user) {
     switch (reinterpret_cast<uintptr_t>(user)) {
         case 0: open_demo_choice(); break;
         case 1: open_demo_confirmation(0); break;
         case 2: open_demo_confirmation(100); break;
-        case 3: open_demo_custom_confirmation(); break;
         default: break;
     }
 }
@@ -336,7 +283,7 @@ void draw_category_row(void*, uint32_t index, contracts::QolUiHandle row, uint8_
     const contracts::QolUiComponents* components = ui_components_api();
     if (adapter == nullptr || components == nullptr || index >= kCategoryCount) return;
     if (adapter->draw_custom_button != nullptr) {
-        (void)adapter->draw_custom_button(row, {0, 0, kLeftViewport.w, kRowHeight},
+        (void)adapter->draw_custom_button(row, {0, 0, g_left_viewport.w, kRowHeight},
             selected ? 0xFF51412Cu : 0xFF211D1Au, selected ? 0xFFE6C989u : 0xFF5B4C39u,
             selected ? 2 : 1, nullptr, 0, 0, 0);
     }
@@ -357,12 +304,12 @@ bool build_text_buttons(const contracts::QolUiComponents* components,
     }
     // 局部偏移相对右 viewport：左列胶囊、右列装饰，行距 56；三行分别可用/禁用/长文本。
     const contracts::UiRect rects[6] = {
-        {kRightViewport.x + 20, kRightViewport.y + 120, 220, 48},
-        {kRightViewport.x + 264, kRightViewport.y + 120, 220, 48},
-        {kRightViewport.x + 20, kRightViewport.y + 176, 220, 48},
-        {kRightViewport.x + 264, kRightViewport.y + 176, 220, 48},
-        {kRightViewport.x + 20, kRightViewport.y + 232, 220, 48},
-        {kRightViewport.x + 264, kRightViewport.y + 232, 220, 48}};
+        {g_right_viewport.x + 20, g_right_viewport.y + 120, 220, 48},
+        {g_right_viewport.x + 264, g_right_viewport.y + 120, 220, 48},
+        {g_right_viewport.x + 20, g_right_viewport.y + 176, 220, 48},
+        {g_right_viewport.x + 264, g_right_viewport.y + 176, 220, 48},
+        {g_right_viewport.x + 20, g_right_viewport.y + 232, 220, 48},
+        {g_right_viewport.x + 264, g_right_viewport.y + 232, 220, 48}};
     for (uint32_t i = 0; i < 6; ++i) {
         const contracts::UiButtonDesc desc{rects[i], i < 4 ? "打开" : "较长的 UTF-8 按钮文字示例",
             0, &demo_button_clicked, reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
@@ -392,8 +339,8 @@ bool build_text_buttons(const contracts::QolUiComponents* components,
     (void)components->text_button_set_enabled(out[2].handle, 0);
     (void)components->text_button_set_enabled(out[3].handle, 0);
     const contracts::UiRect active_rects[2] = {
-        {kRightViewport.x + 20, kRightViewport.y + 288, 220, 48},
-        {kRightViewport.x + 264, kRightViewport.y + 288, 220, 48}};
+        {g_right_viewport.x + 20, g_right_viewport.y + 288, 220, 48},
+        {g_right_viewport.x + 264, g_right_viewport.y + 288, 220, 48}};
     const char* const active_labels[2] = {"纯矩形选中态", "装饰未选中态"};
     for (uint32_t i = 0; i < 2; ++i) {
         const contracts::UiButtonDesc desc{active_rects[i], active_labels[i], 0,
@@ -422,9 +369,9 @@ bool build_nav_demos(const contracts::QolUiComponents* components,
     // 盒尺寸取原生 78×86（与设置页一致），间距 88 使三枚金属框不重叠；
     // 标题行 y+32 之下、标签行 y+224 之上。
     const contracts::UiRect rects[3] = {
-        {kRightViewport.x + 20, kRightViewport.y + 112, 78, 86},
-        {kRightViewport.x + 108, kRightViewport.y + 112, 78, 86},
-        {kRightViewport.x + 196, kRightViewport.y + 112, 78, 86}};
+        {g_right_viewport.x + 20, g_right_viewport.y + 112, 78, 86},
+        {g_right_viewport.x + 108, g_right_viewport.y + 112, 78, 86},
+        {g_right_viewport.x + 196, g_right_viewport.y + 112, 78, 86}};
     const uint32_t modes[3] = {contracts::kUiNavButtonAuto, contracts::kUiNavButtonForceClose,
                                contracts::kUiNavButtonForceBack};
     for (uint32_t i = 0; i < 3; ++i) {
@@ -443,8 +390,8 @@ bool build_arrow_demos(const contracts::QolUiComponents* components,
                        uint32_t* out_count) {
     if (!components->arrow_button_create || !components->arrow_button_draw) return false;
     const contracts::UiRect rects[2] = {
-        {kRightViewport.x + 70, kRightViewport.y + 128, 48, 48},
-        {kRightViewport.x + 158, kRightViewport.y + 128, 48, 48}};
+        {g_right_viewport.x + 70, g_right_viewport.y + 128, 48, 48},
+        {g_right_viewport.x + 158, g_right_viewport.y + 128, 48, 48}};
     const uint32_t directions[2] = {contracts::kUiArrowLeft, contracts::kUiArrowRight};
     for (uint32_t i = 0; i < 2; ++i) {
         const contracts::UiArrowButtonDesc desc{rects[i], directions[i], 1,
@@ -463,7 +410,7 @@ bool build_icon_demo(const contracts::QolUiComponents* components,
                      uint32_t* out_count) {
     if (!components->icon_button_create) return false;
     const contracts::UiIconButtonDesc desc{
-        {kRightViewport.x + 56, kRightViewport.y + 112, 78, 78},
+        {g_right_viewport.x + 56, g_right_viewport.y + 112, 78, 78},
         0x59, 0x03, 1, 1, "图标不可用", &demo_icon_clicked, nullptr, 1};
     contracts::QolUiHandle handle = nullptr;
     const QolResult result = components->icon_button_create(&desc, parent, &handle);
@@ -479,14 +426,12 @@ bool build_native_dialog_demos(const contracts::QolUiComponents* components,
     // Popup entry buttons are siblings of the HelpPage, not children of its native scroll tree.
     if (components->flat_text_button_create == nullptr) return false;
     const contracts::UiRect rects[] = {
-        {kRightViewport.x + 20, kRightViewport.y + 120, 220, 48},
-        {kRightViewport.x + 264, kRightViewport.y + 120, 220, 48},
-        {kRightViewport.x + 20, kRightViewport.y + 176, 220, 48},
-        {kRightViewport.x + 264, kRightViewport.y + 176, 220, 48},
+        {g_right_viewport.x + 20, g_right_viewport.y + 120, 220, 48},
+        {g_right_viewport.x + 264, g_right_viewport.y + 120, 220, 48},
+        {g_right_viewport.x + 20, g_right_viewport.y + 176, 220, 48},
     };
-    const char* const labels[] = {
-        "打开原生选择框", "无价格确认框", "价格确认框 100", "自绘确认框"};
-    for (uint32_t i = 0; i < 4; ++i) {
+    const char* const labels[] = {"打开原生选择框", "无价格确认框", "价格确认框 100"};
+    for (uint32_t i = 0; i < 3; ++i) {
         const contracts::UiButtonDesc desc{rects[i], labels[i], 0, &dialog_demo_clicked,
             reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
         contracts::QolUiHandle handle = nullptr;
@@ -533,7 +478,6 @@ bool build_category_controls(int32_t index) {
             ok = build_icon_demo(components, g_root, g_category_controls, &count);
             break;
         case 8:
-        case 9:
             ok = build_native_dialog_demos(components, g_root, g_category_controls, &count);
             break;
         default:  // 分类 1/3/4 纯绘制，无交互控件。
@@ -556,10 +500,11 @@ void draw_switches_detail(const contracts::QolUiAdapter* adapter, contracts::UiR
     }
     constexpr uint32_t kSwitchDemoCount = 6;
     // 行距 68：说明文字从 y+262 下移到 y+296，避开最后一排胶囊底边（y+204+66=y+270）。
+    const int64_t switch_group_x = std::max<int64_t>(0, (right.w - 282) / 2);
     const contracts::UiRect local[kSwitchDemoCount] = {
-        {380, 76, 116, 50}, {512, 76, 116, 50},
-        {380, 144, 94, 42}, {512, 144, 94, 42},
-        {380, 204, 150, 66}, {512, 204, 150, 66},
+        {switch_group_x, 76, 116, 50}, {switch_group_x + 132, 76, 116, 50},
+        {switch_group_x, 144, 94, 42}, {switch_group_x + 132, 144, 94, 42},
+        {switch_group_x, 204, 150, 66}, {switch_group_x + 132, 204, 150, 66},
     };
     for (uint32_t i = 0; i < kSwitchDemoCount; ++i) {
         (void)adapter->draw_native_toggle(
@@ -717,7 +662,7 @@ void draw_native_dialog_detail(const contracts::QolUiAdapter* adapter, contracts
     (void)adapter->draw_string_with_font("原生选择框 / 双后端确认框预览",
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
     set_text_color(adapter, contracts::ui_theme::kTextNormal);
-    (void)adapter->draw_string_with_font("V1 保持原生 TextData；V2 在面板上自绘，按钮回调无游戏副作用。",
+    (void)adapter->draw_string_with_font("V1 保持原生 TextData；在面板上由模块补绘原生外观。",
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 84), 0, 0);
     const char* choice_status = g_demo_choice_open ? "选择框：打开中" :
         g_demo_choice_result >= 0 ? (g_demo_choice_result == 2 ? "选择框：已关闭" :
@@ -728,7 +673,7 @@ void draw_native_dialog_detail(const contracts::QolUiAdapter* adapter, contracts
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 252), 0, 0);
     (void)adapter->draw_string_with_font(g_demo_confirmation_status,
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 292), 0, 0);
-    (void)adapter->draw_string_with_font("自绘样例：是否出售该物品？价格 100 金币；不改物品、金币或存档。",
+    (void)adapter->draw_string_with_font("两类回调只更新调试状态，不写物品、金币或存档。",
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 332), 0, 0);
 }
 
@@ -776,7 +721,6 @@ void draw_category_detail(void* user, contracts::UiRect right) {
             draw_shapes_detail(adapter, components, right);
             break;
         case 8:
-        case 9:
             draw_native_dialog_detail(adapter, right);
             break;
         default:
@@ -825,14 +769,29 @@ QolResult create_components() {
     }
     const int64_t screen_width = 960 + static_cast<int64_t>(inset_width) * 2;
     const int64_t screen_height = 640 + static_cast<int64_t>(inset_height) * 2;
-    if (screen_width < kPanelRect.w || screen_height < kPanelRect.h) {
+    if (screen_width < 960 || screen_height < 640) {
         return contracts::error(kQolErrInvalidArgument, "screen too small", 16);
     }
-    const contracts::UiRect rect{(screen_width - kPanelRect.w) / 2,
-                                 (screen_height - kPanelRect.h) / 2,
-                                 kPanelRect.w, kPanelRect.h};
+    g_panel_rect = {0, 0, screen_width, screen_height};
+    const int64_t desired_left = kLeftViewportWidth * 6 / 5;
+    const int64_t desired_right = kRightViewportWidth * 6 / 5;
+    const int64_t available_viewport_width = screen_width - kLeftReservedWidth -
+        kRightReservedWidth - kLeftFrameExtraWidth - kRightFrameExtraWidth - kColumnFrameGap;
+    const int64_t desired_total = desired_left + desired_right;
+    const double scale = std::min(1.0, static_cast<double>(available_viewport_width) /
+                                           static_cast<double>(desired_total));
+    const int64_t left_width = static_cast<int64_t>(desired_left * scale + 0.5);
+    const int64_t right_width = available_viewport_width - left_width;
+    const int64_t viewport_y = kPanelScreenMargin + 8;
+    const int64_t viewport_h = screen_height - 2 * kPanelScreenMargin - 16;
+    const int64_t left_x = kLeftReservedWidth + 8;
+    const int64_t right_x = screen_width - kRightReservedWidth - right_width - 8;
+    g_left_viewport = {left_x, viewport_y, left_width, viewport_h};
+    g_right_viewport = {right_x, viewport_y, right_width, viewport_h};
+    g_panel_nav_rect = {contracts::ui_theme::kNavBoxAbsX, contracts::ui_theme::kNavBoxAbsY,
+                        contracts::ui_theme::kNavBoxW, contracts::ui_theme::kNavBoxH};
 
-    const contracts::UiPanelDesc panel_desc{rect, rect, 0, 0};
+    const contracts::UiPanelDesc panel_desc{g_panel_rect, g_panel_rect, 0, 0};
     QolResult result = components->panel_create(&panel_desc, nullptr, &g_root);
     if (!contracts::succeeded(result) || g_root == nullptr) {
         destroy_components();
@@ -845,7 +804,7 @@ QolResult create_components() {
         options[i].user = reinterpret_cast<void*>(static_cast<uintptr_t>(i));
         options[i].draw_detail = &draw_category_detail;
     }
-    const contracts::UiHelpPageDesc page_desc{kPanelRect, kLeftViewport, kRightViewport,
+    const contracts::UiHelpPageDesc page_desc{g_panel_rect, g_left_viewport, g_right_viewport,
         kRowHeight, options, kCategoryCount, 0, &draw_category_row, nullptr};
     result = components->help_page_create(&page_desc, g_root, &g_page);
     if (!contracts::succeeded(result)) {
@@ -853,11 +812,9 @@ QolResult create_components() {
         return result;
     }
 
-    // 绝对 (8,8) 换算 root 相对：root 原点 = 屏幕 inset（root rect = {inset, inset, 960, 640}），
-    // 与设置页 nav 创建（kBackAbsX - inset_x）完全同口径，三页按钮屏幕位置一致。
+    // 全屏 root 原点为 (0,0)，恢复原生屏幕绝对左上角导航框坐标。
     const contracts::UiNavButtonDesc nav_desc{
-        {kPanelNavAbsRect.x - inset_width, kPanelNavAbsRect.y - inset_height,
-         kPanelNavAbsRect.w, kPanelNavAbsRect.h},
+        g_panel_nav_rect,
         contracts::kUiNavButtonAuto, nullptr, nullptr};
     result = components->nav_button_create(&nav_desc, g_root, &g_panel_nav);
     if (!contracts::succeeded(result)) {
@@ -916,16 +873,6 @@ void panel_process() {
     }
 
     if (!contracts::succeeded(adapter->begin_frame())) return;
-
-    contracts::UiRect root_rect{};
-    if (adapter->get_rect != nullptr && adapter->fill_rect_alpha != nullptr &&
-        contracts::succeeded(adapter->get_rect(g_root, &root_rect))) {
-        (void)adapter->fill_rect_alpha(root_rect, contracts::ui_theme::kPanelBgRgb565, 94u);
-    }
-    if (adapter->draw_custom_button != nullptr) {
-        (void)adapter->draw_custom_button(g_root, {0, 0, kPanelRect.w, kPanelRect.h},
-            0xFF101820u, 0xFFB89B62u, 3, nullptr, 0, 0, 0);
-    }
 
     (void)components->help_page_draw(g_page);
 

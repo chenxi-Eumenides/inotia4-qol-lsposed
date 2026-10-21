@@ -44,7 +44,6 @@ bool ui_panels_deactivate_owner(const char* owner);
 int32_t ui_panels_frame_pump(int64_t frame, void* context);
 // 当前逻辑栈深（只读）：自适应导航按钮绘制与调试展示用；不在 open/close 之外修改栈。
 int ui_panels_depth();
-
 // 占用原因：优先返回栈顶仍处于 active 的 provider 的 block_reason；都不占用返回 nullptr。
 // 供存档/进档等 API 守卫（verbatim 文案由各 provider 提供）。
 const char* ui_panels_block_reason();

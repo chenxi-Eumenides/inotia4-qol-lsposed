@@ -47,8 +47,6 @@ struct UiSnapshotState {
     uint32_t custom_dialog_option_count = 0;
     uint64_t custom_dialog_generation = 0;
     uint64_t custom_dialog_v1_sequence = 0;
-    bool custom_dialog_v2_active = false;
-    contracts::UiCustomDialogSnapshotV2 custom_dialog_v2{};
     uint64_t custom_dialog_last_generation = 0;
     uint64_t custom_dialog_sequence = 0;
 };
@@ -242,38 +240,6 @@ QolResult publish_custom_dialog(const contracts::UiCustomDialogSnapshot* snapsho
     return contracts::ok();
 }
 
-QolResult publish_custom_dialog_v2(const contracts::UiCustomDialogSnapshotV2* snapshot) {
-    if (snapshot == nullptr) {
-        return state_error(kQolErrInvalidArgument, "invalid custom dialog snapshot v2");
-    }
-    if (snapshot->size < sizeof(contracts::UiCustomDialogSnapshotV2)) {
-        return state_error(kQolErrInvalidArgument, "custom dialog snapshot v2 too small");
-    }
-    if (snapshot->sequence == 0 || snapshot->generation == 0 ||
-        !valid_fixed_utf8(snapshot->type_id, sizeof(snapshot->type_id)) ||
-        !valid_type_id(snapshot->type_id) ||
-        !valid_fixed_utf8(snapshot->body, sizeof(snapshot->body)) ||
-        !valid_fixed_utf8(snapshot->confirm_label, sizeof(snapshot->confirm_label)) ||
-        !valid_fixed_utf8(snapshot->cancel_label, sizeof(snapshot->cancel_label)) ||
-        !valid_fixed_utf8(snapshot->price_unit, sizeof(snapshot->price_unit)) ||
-        snapshot->has_price > 1 || snapshot->price < 0) {
-        return state_error(kQolErrInvalidArgument, "invalid custom dialog snapshot v2");
-    }
-    if (!main_thread_now()) return state_error(kQolErrBlocked, "wrong thread");
-
-    const contracts::UiCustomDialogSnapshotV2 copied = *snapshot;
-    std::lock_guard<std::mutex> lock(g_snapshot_mutex);
-    if (snapshot->sequence <= g_snapshot.custom_dialog_sequence ||
-        snapshot->generation <= g_snapshot.custom_dialog_last_generation) {
-        return state_error(kQolErrConflict, "stale custom dialog snapshot");
-    }
-    g_snapshot.custom_dialog_sequence = snapshot->sequence;
-    g_snapshot.custom_dialog_last_generation = snapshot->generation;
-    g_snapshot.custom_dialog_v2_active = true;
-    g_snapshot.custom_dialog_v2 = copied;
-    return contracts::ok();
-}
-
 QolResult clear_custom_dialog(uint64_t generation, uint64_t sequence) {
     if (generation == 0 || sequence == 0) {
         return state_error(kQolErrInvalidArgument, "invalid custom dialog generation");
@@ -293,10 +259,6 @@ QolResult clear_custom_dialog(uint64_t generation, uint64_t sequence) {
         g_snapshot.custom_dialog_option_count = 0;
         g_snapshot.custom_dialog_v1_sequence = 0;
     }
-    if (g_snapshot.custom_dialog_v2_active &&
-        g_snapshot.custom_dialog_v2.generation == generation) {
-        g_snapshot.custom_dialog_v2_active = false;
-    }
     return contracts::ok();
 }
 
@@ -307,7 +269,6 @@ const contracts::UiStateApi kUiStateApi{
     &publish_custom_dialog,
     &clear_custom_dialog,
     &read_layers,
-    &publish_custom_dialog_v2,
 };
 
 const contracts::CapabilityProvisionRef kProvides[] = {
@@ -364,8 +325,6 @@ struct UiSnapshotCopy {
     char custom_dialog_options[kCustomOptionCount][contracts::kUiStateMaxDialogTextBytes]{};
     uint32_t custom_dialog_option_count = 0;
     uint64_t custom_dialog_v1_sequence = 0;
-    bool custom_dialog_v2_active = false;
-    contracts::UiCustomDialogSnapshotV2 custom_dialog_v2{};
 };
 
 UiSnapshotCopy copy_ui_snapshot() {
@@ -388,15 +347,7 @@ UiSnapshotCopy copy_ui_snapshot() {
                 sizeof(copy.custom_dialog_options));
     copy.custom_dialog_option_count = g_snapshot.custom_dialog_option_count;
     copy.custom_dialog_v1_sequence = g_snapshot.custom_dialog_v1_sequence;
-    copy.custom_dialog_v2_active = g_snapshot.custom_dialog_v2_active;
-    copy.custom_dialog_v2 = g_snapshot.custom_dialog_v2;
     return copy;
-}
-
-bool custom_dialog_v2_is_top(const UiSnapshotCopy& snapshot) {
-    return snapshot.custom_dialog_v2_active &&
-           (!snapshot.custom_dialog_active ||
-            snapshot.custom_dialog_v2.sequence > snapshot.custom_dialog_v1_sequence);
 }
 
 // 从 dialog JSON 取顶层 "type" 字段；找不到或过长返回 false。
@@ -424,9 +375,7 @@ QolResult read_layers(contracts::QolUiLayerVisitFn visit, void* user) {
         visit(&layer, user);
     };
     // 栈顶 → 栈底：自定义对话框 → 自定义面板（后压入者在上）→ 原生对话框 → 原生面板 → screen。
-    if (custom_dialog_v2_is_top(snapshot)) {
-        emit(snapshot.custom_dialog_v2.type_id, contracts::UiLayerType::kDialog);
-    } else if (snapshot.custom_dialog_active) {
+    if (snapshot.custom_dialog_active) {
         emit(snapshot.custom_dialog_type, contracts::UiLayerType::kDialog);
     }
     for (uint32_t i = snapshot.custom_panel_count; i > 0; --i) {
@@ -469,20 +418,6 @@ std::string json_quote(const char* value) {
     }
     out += '"';
     return out;
-}
-
-std::string custom_dialog_v2_json(const contracts::UiCustomDialogSnapshotV2& snapshot) {
-    std::string json = "{\"type\":" + json_quote(snapshot.type_id) +
-                       ",\"text\":" + json_quote(snapshot.body) +
-                       ",\"options\":[{\"id\":\"ok\",\"label\":" +
-                       json_quote(snapshot.confirm_label) +
-                       "},{\"id\":\"cancel\",\"label\":" +
-                       json_quote(snapshot.cancel_label) + "}]";
-    if (snapshot.has_price != 0) {
-        json += ",\"price\":" + std::to_string(snapshot.price);
-    }
-    json += '}';
-    return json;
 }
 
 class JsonScanner {
@@ -724,9 +659,6 @@ QolResult dialog_query(const contracts::HttpReq*, contracts::HttpRes* response, 
     const UiSnapshotCopy snapshot = copy_ui_snapshot();
     if (!snapshot.native_snapshot_valid) {
         return choice_http_error(response, 503, "snapshot not ready");
-    }
-    if (custom_dialog_v2_is_top(snapshot)) {
-        return query_response(response, custom_dialog_v2_json(snapshot.custom_dialog_v2));
     }
     if (!snapshot.custom_dialog_active) return query_response(response, snapshot.native_dialog);
     std::string replaced;

@@ -774,10 +774,16 @@ bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
 
 // 检查 required + fail-closed 资源的目标是否可解析，且不调用 install 或修改资源。
 const char* preflight_plugin_resources(const contracts::PluginDescriptor& plugin,
-                                       const HostDeps& deps) {
+                                       const HostDeps& deps,
+                                       const char** out_claim_id = nullptr) {
+    if (out_claim_id != nullptr) *out_claim_id = nullptr;
     uintptr_t preflight_entries[kMaxResourcesPerPlugin] = {};
     const char* preflight_ids[kMaxResourcesPerPlugin] = {};
     uint32_t preflight_count = 0;
+    auto fail = [out_claim_id](const contracts::ResourceClaim& claim, const char* reason) {
+        if (out_claim_id != nullptr) *out_claim_id = claim.id;
+        return reason;
+    };
     for (uint32_t i = 0; i < plugin.resources_count; ++i) {
         const contracts::ResourceClaim& claim = plugin.resources[i];
         if (claim.requirement != contracts::ResourceRequirement::kRequired ||
@@ -786,13 +792,14 @@ const char* preflight_plugin_resources(const contracts::PluginDescriptor& plugin
             bool followed = false;
             const uintptr_t entry =
                 deps.resolve_entry != nullptr ? deps.resolve_entry(claim.symbol, &followed) : 0;
-            if (entry == 0)
-                return "required entry unresolved";
-            if (hooks::entry_target_conflicts(entry, claim.id)) return "entry target already occupied";
+            if (entry == 0) return fail(claim, "symbol unresolved");
+            if (hooks::entry_target_conflicts(entry, claim.id)) {
+                return fail(claim, "entry target already occupied");
+            }
             for (uint32_t prior = 0; prior < preflight_count; ++prior) {
                 if (entry == preflight_entries[prior] &&
                     std::strcmp(claim.id, preflight_ids[prior]) != 0) {
-                    return "duplicate entry target";
+                    return fail(claim, "duplicate entry target");
                 }
             }
             preflight_entries[preflight_count] = entry;
@@ -800,13 +807,19 @@ const char* preflight_plugin_resources(const contracts::PluginDescriptor& plugin
             ++preflight_count;
         } else if (claim.mechanism == contracts::ResourceMechanism::kCallPatch) {
             qol::game::PatchSite site{};
-            if (!qol::game::patch_site(claim.symbol, &site)) return "required patch unresolved";
+            if (!qol::game::patch_site(claim.symbol, &site)) {
+                return fail(claim, "required patch unresolved");
+            }
         } else if (claim.mechanism == contracts::ResourceMechanism::kPtrSlot) {
             qol::game::PtrSlotSite site{};
-            if (!qol::game::ptr_slot_site(claim.symbol, &site)) return "required slot unresolved";
+            if (!qol::game::ptr_slot_site(claim.symbol, &site)) {
+                return fail(claim, "required slot unresolved");
+            }
         } else if (claim.mechanism == contracts::ResourceMechanism::kOwnership) {
             const contracts::OwnershipOps* ops = contracts::ownership_ops(claim.handler);
-            if (ops == nullptr || ops->acquire == nullptr) return "ownership ops missing";
+            if (ops == nullptr || ops->acquire == nullptr) {
+                return fail(claim, "ownership ops missing");
+            }
         }
     }
     return nullptr;
@@ -1821,8 +1834,13 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     const contracts::PluginDescriptor& plugin = g_plugins[index].descriptor;
     contracts::PluginContext ctx = make_plugin_context(plugin.id);
 
-    const char* preflight_error = preflight_plugin_resources(plugin, deps);
+    const char* preflight_claim = nullptr;
+    const char* preflight_error =
+        preflight_plugin_resources(plugin, deps, &preflight_claim);
     if (preflight_error != nullptr) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "plugin %s install unsupported resource=%s: %s", plugin.id,
+                      preflight_claim != nullptr ? preflight_claim : "?", preflight_error);
         infra::status_update(plugin.id, infra::FeatureState::kUnsupported, false,
                              preflight_error);
         publish_runtime_actual(plugin.id, false);
@@ -1830,6 +1848,8 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     }
 
     if (plugin.install(ctx) != 0) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "plugin %s install failed: plugin install returned nonzero", plugin.id);
         infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed");
         publish_runtime_actual(plugin.id, false);
         return false;
@@ -2121,6 +2141,9 @@ int install_all(const HostDeps& deps) {
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
         const bool cycle = g_error_text[i][0] != '\0' &&
                            std::strncmp(g_error_text[i], "dependency cycle", 16) == 0;
+        QOL_LOG_ERROR(QolDomain::kCore, "plugin %s %s at assembly: %s", plugin.id,
+                      cycle ? "failed" : "blocked",
+                      g_error_text[i][0] != '\0' ? g_error_text[i] : "dependency invalid");
         infra::status_update(plugin.id, cycle ? infra::FeatureState::kFailed
                                              : infra::FeatureState::kBlocked,
                              false, g_error_text[i]);
@@ -2134,6 +2157,8 @@ int install_all(const HostDeps& deps) {
         // 1) requires 校验：provider 未启用/安装失败 → blocked，并保留具体能力 id。
         const char* blocked_error = check_requires(plugin, i);
         if (blocked_error != nullptr) {
+            QOL_LOG_WARN(QolDomain::kCore, "plugin %s blocked at install: %s", plugin.id,
+                         blocked_error);
             infra::status_update(plugin.id, infra::FeatureState::kBlocked, false, blocked_error);
             ++failed_plugins;
             continue;
@@ -2142,6 +2167,11 @@ int install_all(const HostDeps& deps) {
         if (!install_plugin_sync(i, deps)) {
             ++failed_plugins;
         }
+    }
+    if (failed_plugins > 0) {
+        QOL_LOG_ERROR(QolDomain::kCore,
+                      "plugin install pass completed with failures failed_plugins=%d",
+                      static_cast<int>(failed_plugins));
     }
     return failed_plugins;
 }
@@ -2395,7 +2425,14 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
         }
 
         case contracts::kFeatureLifecycleActivate: {
-            if (g_feature_mode && g_dependency_invalid[plugin_index_of(plugin->id)]) return false;
+            if (g_feature_mode && g_dependency_invalid[plugin_index_of(plugin->id)]) {
+                const uint32_t invalid_index = plugin_index_of(plugin->id);
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s activation skipped: %s", plugin->id,
+                             g_error_text[invalid_index][0] != '\0'
+                                 ? g_error_text[invalid_index]
+                                 : "dependency invalid");
+                return false;
+            }
             // §3.2：inactive → resolving 为幂等重入；blocked/failed → resolving 为重试
             // （隔离态已在函数前置拒绝中拦截，未隔离的失败可安全重装）。
             // 级联停用复用 installed_disabled，但由 cascade_stopped 标记区分门禁关闭态；
@@ -2421,13 +2458,21 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             }
             const char* blocked_error = check_requires(*plugin, index);
             if (blocked_error != nullptr) {
+                QOL_LOG_WARN(QolDomain::kCore, "plugin %s blocked at activation: %s",
+                             plugin->id, blocked_error);
                 infra::status_update(plugin->id, infra::FeatureState::kBlocked, false,
                                      blocked_error);
                 publish_runtime_actual(plugin->id, false);
                 return false;
             }
-            const char* preflight_error = preflight_plugin_resources(*plugin, g_install_deps);
+            const char* preflight_claim = nullptr;
+            const char* preflight_error =
+                preflight_plugin_resources(*plugin, g_install_deps, &preflight_claim);
             if (preflight_error != nullptr) {
+                QOL_LOG_ERROR(QolDomain::kCore,
+                              "plugin %s install unsupported resource=%s: %s", plugin->id,
+                              preflight_claim != nullptr ? preflight_claim : "?",
+                              preflight_error);
                 infra::status_update(plugin->id, infra::FeatureState::kUnsupported, false,
                                        preflight_error);
                 publish_runtime_actual(plugin->id, false);
@@ -2444,6 +2489,9 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
             }
             ctx = make_plugin_context(plugin->id);
             if (plugin->install != nullptr && plugin->install(ctx) != 0) {
+                QOL_LOG_ERROR(QolDomain::kCore,
+                              "plugin %s install failed: plugin install returned nonzero",
+                              plugin->id);
                 infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
                                       "plugin install failed");
                 publish_runtime_actual(plugin->id, false);
@@ -2537,6 +2585,12 @@ bool feature_registry_prepare(const HostDeps& deps) {
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         owner_suspend_begin(&g_plugins[i]);
         (void)owner_suspend_poll(&g_plugins[i]);
+        if (g_dependency_invalid[i]) {
+            QOL_LOG_ERROR(QolDomain::kCore, "plugin %s blocked at assembly: %s",
+                          g_plugins[i].descriptor.id,
+                          g_error_text[i][0] != '\0' ? g_error_text[i]
+                                                      : "dependency invalid");
+        }
         infra::status_update(g_plugins[i].descriptor.id,
                              g_dependency_invalid[i] ? infra::FeatureState::kBlocked
                                                      : infra::FeatureState::kInactive,
@@ -2724,6 +2778,16 @@ static uint32_t lifecycle_step_engine() {
         // 软失败步（事务继续、资源保持自由）不伪造安装；单独记录原因供终态状态使用。
         if (g_feature_mode && slot.kind == hooks::TxKind::kInstall && out.resource_id != nullptr &&
             out.ok != 0) {
+            const char* step_error = out.error != nullptr ? out.error : "unknown";
+            if (out.ok == kQolErrNotReady) {
+                QOL_LOG_WARN(QolDomain::kCore,
+                             "plugin %s resource install deferred resource=%s code=%d: %s",
+                             plugin.id, out.resource_id, out.ok, step_error);
+            } else {
+                QOL_LOG_ERROR(QolDomain::kCore,
+                              "plugin %s resource install failed resource=%s code=%d: %s",
+                              plugin.id, out.resource_id, out.ok, step_error);
+            }
             record_resource_install_error(slot.plugin_index, out.resource_id, out.error);
             // 启动期 ownership 注入只在 SaveEnter（world 就绪）后成功：NotReady 时保持 Free
             // 并武装一次性恢复，等下一次 SaveEnter 信号在既有主帧点定向重试。
@@ -2908,6 +2972,12 @@ static uint32_t lifecycle_step_engine() {
                 const auto kind = slot.kind;
                 if (kind == hooks::TxKind::kInstall) {
                     // 安装事务失败：插件置 Failed，清逐资源 degraded 记录避免残留误报。
+                    QOL_LOG_ERROR(QolDomain::kCore, "plugin %s activation failed: %s",
+                                  plugin.id,
+                                  g_resource_error_present[index] &&
+                                          g_resource_error_text[index][0] != '\0'
+                                      ? g_resource_error_text[index]
+                                      : "resource install transaction failed");
                     clear_resource_install_error(index);
                     refresh_degraded_status(index);
                 }

@@ -85,9 +85,10 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
 #endif
 };
 
-// 原生选择控件的两条私有资源（ADR 0001：控件本体归工具插件，随 ui_choice 一起从
-// core.ui_state 迁入）。2 条资源均常驻（gate=nullptr）、私有、必需、fail-closed、
-// 可物理还原；声明序 [init, button] 与旧安装序一致，按钮槽失败时宿主逆序回滚 init。
+// 原生选择控件的三条私有资源（ADR 0001：控件本体归工具插件，随 ui_choice 一起从
+// core.ui_state 迁入）。均常驻（gate=nullptr）、私有、必需、fail-closed、可物理还原；
+// 声明序 [init, button, draw] 与安装序一致，后项失败时宿主逆序回滚前项。
+// draw 资源让模块 choice 首帧跳过游戏压暗（AddAlpha+FillRect+SaveLCD）。
 const contracts::ResourceClaim kResources[] = {
     {
         "hook:UIChoice_Init",   // id
@@ -120,6 +121,24 @@ const contracts::ResourceClaim kResources[] = {
         nullptr,
         120,
         reinterpret_cast<void*>(&choice_button_execute),  // handler
+    },
+    {
+        "hook:Scene_Draw_POPUP_SC_CHOICE",  // id
+#if defined(QOL_ENABLE_DEVICE_PROBE) && QOL_ENABLE_DEVICE_PROBE
+        "elf-export:Scene_Draw_POPUP_SC_CHOICE",  // device probe 用严格导出解析。
+#else
+        "F_SCENE_DRAW_POPUP_SC_CHOICE_VMA",  // symbol（game/access/symbols 登记）
+#endif
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,                               // resumable
+        kPluginId,                          // owner
+        "模块 choice 首帧保存原始画面并跳过游戏压暗，避免深色面板下全黑",  // reason
+        nullptr,                            // gate（常驻）
+        120,                                // step_budget
+        reinterpret_cast<void*>(&choice_draw_wrapper),  // handler
     },
     {
         // 文本机制：共享资源（§4.3/§4.5），多消费者经能力 subscribe，owner 独占同址 hook。
@@ -320,7 +339,7 @@ const contracts::PluginDescriptor kDescriptor = {
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires, // ui.state and optional Debug HTTP capabilities
     5, kProvides,    // provides（ui_components / ui_panels / text_layer / ui_confirmation，ui_choice）
-    3, kResources,   // resources（选择控件 2 条 + 文本 GetText 共享资源）
+    4, kResources,   // resources（选择控件 3 条 + 文本 GetText 共享资源）
     0, nullptr,      // jni
     &plugin_install,
     &plugin_deactivate,

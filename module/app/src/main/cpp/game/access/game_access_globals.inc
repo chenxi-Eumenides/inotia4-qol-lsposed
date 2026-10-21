@@ -162,6 +162,7 @@ UiChoiceButtonListExeFn fn_uichoice_button_list_exe = nullptr;
 UiChoiceCreateControlFn fn_uichoice_create_control = nullptr;
 UiChoiceProcessFn fn_uichoice_process = nullptr;
 UiChoiceInitFn fn_uichoice_init = nullptr;
+UiChoiceDrawFn fn_uichoice_draw = nullptr;
 SceneEventPopupScChoiceFn fn_scene_event_popup_sc_choice = nullptr;
 MapchangeSetFn fn_mapchange_set = nullptr;
 MemorytextGetTextFn fn_memorytext_get_text = nullptr;
@@ -289,6 +290,7 @@ UiPopupMsgCreateYesNoFn fn_popup_create_yesno = nullptr;
 UiPopupMsgCreateYesNoFromTextDataFn fn_popup_create_yesno_from_textdata = nullptr;
 UiPopupMsgCreateFromTextDataFn fn_popup_create_from_textdata = nullptr;
 UiPopupMsgFreeFn fn_popup_free = nullptr;
+UiPopupMsgDrawFn fn_popup_draw = nullptr;
 PopupStatePushFn fn_popupstate_push = nullptr;
 // ---- UI 绘制原语函数指针（ui-settings v0.6.9）----
 MapDrawBaseFn fn_map_drawbase = nullptr;

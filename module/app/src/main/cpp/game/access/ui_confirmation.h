@@ -18,5 +18,8 @@ bool ui_confirmation_popup_create(uint32_t text_id, uint32_t display_type,
 bool ui_confirmation_popup_close_if_callbacks(UiPopupCallback expected_ok,
                                                UiPopupCallback expected_cancel,
                                                uint8_t* out_closed);
+// Draws the active native UIPopupMsg with the game's own renderer. Callers must verify
+// ui_confirmation_popup_active() first; this wrapper only validates thread/function readiness.
+bool ui_confirmation_popup_draw();
 
 }  // namespace qol::game

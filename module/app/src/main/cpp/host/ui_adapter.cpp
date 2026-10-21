@@ -1429,28 +1429,14 @@ QolResult popup_msg_create_yesno_from_textdata(
         ? contracts::ok() : not_ready();
 }
 
-QolResult popup_msg_create_yesno_raw(
-    const char* message, uint32_t length, uint32_t display_type, uint32_t type,
-    contracts::QolUiPopupMsgCallbackFn ok, contracts::QolUiPopupMsgCallbackFn cancel,
-    uint32_t numeric_param) {
-    if (message == nullptr || length == 0 || ok == nullptr || cancel == nullptr) {
-        return invalid_argument();
-    }
-    if (!qol::game::game_host_is_main_thread() || g_base == 0 || fn_popup_create_yesno == nullptr) {
-        return not_ready();
-    }
-    uint8_t active = 0;
-    if (!qol::game::ui_confirmation_popup_active(&active)) return not_ready();
-    if (active != 0) {
-        static constexpr char busy[] = "UIPopupMsg already active";
-        return contracts::error(kQolErrBusy, busy, sizeof(busy) - 1);
-    }
-    static_assert(sizeof(uintptr_t) >= sizeof(numeric_param),
-                  "native callback param must carry the numeric price");
-    fn_popup_create_yesno(const_cast<char*>(message), length, display_type, type,
-                          reinterpret_cast<void*>(ok), reinterpret_cast<void*>(cancel),
-                          reinterpret_cast<void*>(static_cast<uintptr_t>(numeric_param)));
-    return contracts::ok();
+QolResult call_ui_popup_msg_draw() {
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return qol::game::ui_confirmation_popup_draw() ? contracts::ok() : not_ready();
+}
+
+QolResult save_lcd_now() {
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    return ui_save_lcd_now() ? contracts::ok() : not_ready();
 }
 
 QolResult popup_msg_close_if_callbacks(
@@ -1614,7 +1600,10 @@ QolUiAdapter g_ui_adapter{
             &begin_overlay_scope,
             &end_overlay_scope,
             &set_frame_overlay,
-            &popup_msg_create_yesno_raw,
+            // Minor 30 tail: native UIPopupMsg draw for panel-frame V1 compositing.
+            &call_ui_popup_msg_draw,
+            // Minor 31 tail: proactive LCD snapshot for panel/choice open.
+            &save_lcd_now,
           };
 
 }  // namespace

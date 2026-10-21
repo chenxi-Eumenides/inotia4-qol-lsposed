@@ -12,6 +12,7 @@ void test_set_item_port_version(::QolVersion version);
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 #include "contracts/plugin.h"
 #include "contracts/game_ports/move_merge_port.h"
@@ -24,6 +25,7 @@ void test_set_item_port_version(::QolVersion version);
 #include "infra/config.h"
 #include "infra/events.h"
 #include "infra/status.h"
+#include "infra/log/qol_log.h"
 #include "patch/claims.h"
 #include "patch/instr_patch.h"
 
@@ -42,6 +44,18 @@ extern bool g_ptr_slot_test_resolvable;
 
 static int g_pass = 0;
 static int g_fail = 0;
+
+namespace {
+std::string g_log_capture;
+void capture_log(QolLogLevel, QolDomain, const char* line) {
+    if (line == nullptr) return;
+    g_log_capture.append(line);
+    g_log_capture.push_back('\n');
+}
+bool log_contains(const char* needle) {
+    return needle != nullptr && g_log_capture.find(needle) != std::string::npos;
+}
+}  // namespace
 
 #define CHECK(cond) do { \
     if (cond) ++g_pass; \
@@ -963,7 +977,9 @@ void test_install_failure_marks_failed() {
     const PluginDescriptor d =
         make_descriptor("test_ok", g_ok_resources, 2, nullptr, 0);
     CHECK(register_plugin(d));
+    g_log_capture.clear();
     CHECK(install_all(make_deps()) == 1);
+    CHECK(log_contains("plugin test_ok install failed: plugin install returned nonzero"));
     CHECK(g_backend.hook_calls == 0);
     FeatureState state = FeatureState::kRegistered;
     CHECK(feature_of("test_ok", &state, nullptr, nullptr));
@@ -1520,7 +1536,11 @@ void test_required_entries_preflight_before_plugin_install() {
     PluginDescriptor d = make_descriptor("preflight", resources, 2, nullptr, 0);
     CHECK(register_plugin(d));
     g_backend.unresolved_symbol = "elf-export:Fixture_Export_B";
+    g_log_capture.clear();
     CHECK(install_all(make_deps()) == 1);
+    CHECK(log_contains("plugin preflight install unsupported resource=hook:preflight:b: "
+                       "symbol unresolved"));
+    CHECK(log_contains("plugin install pass completed with failures failed_plugins=1"));
     CHECK(g_probe.install_calls == 0);
     CHECK(g_backend.hook_calls == 0);
     CHECK(std::strcmp(g_backend.last_symbol, "elf-export:Fixture_Export_B") == 0);
@@ -2398,6 +2418,7 @@ void test_startup_ownership_restore_keeps_other_optional_degraded() {
 }  // namespace
 
 int main() {
+    qol_log_set_host_sink(&capture_log);
     test_success_path();
     test_choice_port_version_gate();
     test_item_port_v33_rejects_legacy_adapters();

@@ -298,6 +298,51 @@ QolResult choice_close_popup() {
     return qol::contracts::ok();
 }
 
+// De-dim draw hook fakes: record the exact primitive sequence so the wrapper order is
+// observable without the game image. R=read flag, S=SaveLCD, C=clear flag, B=GRPX_Start,
+// D=UIChoice_Draw, E=GRPX_End, O=original backup.
+char g_draw_events[32]{};
+size_t g_draw_event_count = 0;
+uint8_t g_refresh_flag = 0;
+bool g_draw_save_fails = false;
+
+void draw_event(char event) {
+    if (g_draw_event_count + 1 < sizeof(g_draw_events)) {
+        g_draw_events[g_draw_event_count++] = event;
+        g_draw_events[g_draw_event_count] = '\0';
+    }
+}
+
+QolResult draw_refresh_flag(uint8_t* out) {
+    draw_event('R');
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    *out = g_refresh_flag;
+    return qol::contracts::ok();
+}
+QolResult draw_save_lcd() {
+    draw_event('S');
+    return g_draw_save_fails ? qol::contracts::error(kQolErrNotReady, "save failed", 11)
+                             : qol::contracts::ok();
+}
+QolResult draw_clear_refresh_flag() {
+    draw_event('C');
+    g_refresh_flag = 0;
+    return qol::contracts::ok();
+}
+QolResult draw_start_frame() {
+    draw_event('B');
+    return qol::contracts::ok();
+}
+QolResult draw_choice() {
+    draw_event('D');
+    return qol::contracts::ok();
+}
+QolResult draw_end_frame() {
+    draw_event('E');
+    return qol::contracts::ok();
+}
+void draw_original_backup() { draw_event('O'); }
+
 // ---- 日志桩：观察失败分支 warn / 成功 debug（不引入新日志框架，仅记录 SDK 回调内容）----
 int g_log_calls = 0;
 int32_t g_log_level = -1;
@@ -378,6 +423,16 @@ void reset_fake_choice() {
     g_choice_port.write.write_focus = &choice_write_focus;
     g_choice_port.write.push = &choice_push;
     g_choice_port.write.close_popup = &choice_close_popup;
+    g_choice_port.draw.refresh_flag = &draw_refresh_flag;
+    g_choice_port.draw.save_lcd = &draw_save_lcd;
+    g_choice_port.draw.clear_refresh_flag = &draw_clear_refresh_flag;
+    g_choice_port.draw.start_frame = &draw_start_frame;
+    g_choice_port.draw.draw_choice = &draw_choice;
+    g_choice_port.draw.end_frame = &draw_end_frame;
+    g_draw_events[0] = '\0';
+    g_draw_event_count = 0;
+    g_refresh_flag = 0;
+    g_draw_save_fails = false;
     g_push_succeeds = true;
     g_push_initialized = false;
     g_close_during_prepare = false;
@@ -537,7 +592,7 @@ void test_plugin_manifest() {
     CHECK(api->open != nullptr && api->active != nullptr && api->close != nullptr);
     CHECK(!api->active());
 
-    CHECK(d.resources_count == 3);  // 选择控件 2 条 + 文本 GetText 共享资源
+    CHECK(d.resources_count == 4);  // 选择控件 3 条 + 文本 GetText 共享资源
     const qol::contracts::ResourceClaim& init = d.resources[0];
     CHECK(std::strcmp(init.id, "hook:UIChoice_Init") == 0);
     CHECK(std::strcmp(init.symbol, "F_UI_CHOICE_INIT_VMA") == 0);
@@ -557,6 +612,16 @@ void test_plugin_manifest() {
     CHECK(button.resumable);
     CHECK(button.requirement == ResourceRequirement::kRequired);
     CHECK(button.failure == ResourceFailure::kFailClosed);
+
+    const qol::contracts::ResourceClaim& draw = d.resources[2];
+    CHECK(std::strcmp(draw.id, "hook:Scene_Draw_POPUP_SC_CHOICE") == 0);
+    CHECK(std::strcmp(draw.symbol, "F_SCENE_DRAW_POPUP_SC_CHOICE_VMA") == 0);
+    CHECK(draw.mechanism == ResourceMechanism::kEntryHook);
+    CHECK(draw.handler != nullptr);
+    CHECK(draw.gate == nullptr);
+    CHECK(draw.resumable);
+    CHECK(draw.requirement == ResourceRequirement::kRequired);
+    CHECK(draw.failure == ResourceFailure::kFailClosed);
 
     CHECK(d.on_resource_ready != nullptr);
 }
@@ -724,15 +789,15 @@ void test_owned_never_original_and_failures_keep_state() {
     CHECK(log_contains("module blocked reason=owner_unavailable"));
     g_choice_port.read.text_owns = &choice_text_owns;
 
-    // 缺模块写/关闭函数 → fail module 路径，不借 original，保 active
-    g_choice_port.write.close_popup = nullptr;
+    // 缺模块写入函数 → fail module 路径，不借 original，保 active
+    g_choice_port.write.write_focus = nullptr;
     reset_log();
     g_original_calls = 0;
     qol::features::core_ui::choice_button_execute(reinterpret_cast<void*>(0x6207));
     CHECK(g_original_calls == 0);
     CHECK(qol::features::core_ui::native_choice_active());
     CHECK(log_contains("module blocked reason=missing_module_fn"));
-    g_choice_port.write.close_popup = &choice_close_popup;
+    g_choice_port.write.write_focus = &choice_write_focus;
 
     qol::features::core_ui::native_choice_close();
     bind_button_original(nullptr);
@@ -750,7 +815,7 @@ void test_module_select_path_skips_original_and_logs_index() {
     CHECK(g_select_calls == select_before + 1);
     CHECK(g_select_index == 0);                                     // 模块回调收到选中索引
     CHECK(g_original_calls == 0);                                   // 成功路径不回落原函数
-    CHECK(g_close_calls == close_before + 1);                       // close_popup 调用不变
+    CHECK(g_close_calls == close_before);                           // 原生 ButtonListExe 已排队唯一 pop
     CHECK(log_contains("module select index=0"));
     CHECK(g_log_level == 0);                                        // 成功路径极简 debug
     bind_button_original(nullptr);
@@ -926,6 +991,88 @@ void test_close_during_prepare_releases_open_gate() {
     qol::features::core_ui::native_choice_close();
 }
 
+// 同一 generation 恰好一次模块 pop：模块 close 幂等、原生按钮选择后不再补 pop、
+// 外部清理（停用）后可重新打开并正常关闭。
+void test_pop_requested_once_per_generation() {
+    const UiChoiceSpec spec = valid_spec_of();
+    CHECK(qol::features::core_ui::native_choice_open(spec));
+    const int close_before = g_close_calls;
+    qol::features::core_ui::native_choice_close();
+    CHECK(g_close_calls == close_before + 1);
+    qol::features::core_ui::native_choice_close();  // 已 inactive：不再排 pop
+    CHECK(g_close_calls == close_before + 1);
+
+    // 原生按钮选择：wrapper 不调 close_popup（原生 ButtonListExe 负责唯一 pop）。
+    CHECK(qol::features::core_ui::native_choice_open(spec));
+    g_selected_index = 0;
+    qol::features::core_ui::choice_button_execute(nullptr);
+    CHECK(!qol::features::core_ui::native_choice_active());
+    CHECK(g_close_calls == close_before + 1);
+    qol::features::core_ui::native_choice_close();
+    CHECK(g_close_calls == close_before + 1);
+
+    // 外部清理后再次打开/关闭仍恰好一次 pop。
+    CHECK(qol::features::core_ui::native_choice_open(spec));
+    qol::features::core_ui::native_choice_set_installed(false);
+    CHECK(!qol::features::core_ui::native_choice_active());
+    qol::features::core_ui::native_choice_set_installed(true);
+    CHECK(qol::features::core_ui::native_choice_open(spec));
+    qol::features::core_ui::native_choice_close();
+    CHECK(g_close_calls == close_before + 2);
+}
+
+void bind_draw_original(void* backup) {
+    qol::contracts::PluginContext context{};
+    qol::features::core_ui::on_resource_ready(context, "hook:Scene_Draw_POPUP_SC_CHOICE", backup);
+}
+
+// 模块 choice 首帧：SaveLCD → 清 flag → GRPX_Start → UIChoice_Draw → GRPX_End；非模块或
+// flag==0 直接走原函数；SaveLCD 失败回落原函数（此时尚未改 flag/画面）。
+void test_choice_draw_wrapper_de_dims_module_first_frame() {
+    bind_draw_original(reinterpret_cast<void*>(&draw_original_backup));
+
+    // 非模块 choice（游戏 NPC 对话）→ 原函数零行为变化。
+    g_refresh_flag = 1;
+    qol::features::core_ui::choice_draw_wrapper();
+    CHECK(std::strcmp(g_draw_events, "O") == 0);
+
+    // 模块 choice 普通帧（flag==0）→ 原函数 RestoreLCD 分支。
+    CHECK(qol::features::core_ui::native_choice_open(valid_spec_of()));
+    g_refresh_flag = 0;
+    g_draw_event_count = 0;
+    g_draw_events[0] = '\0';
+    qol::features::core_ui::choice_draw_wrapper();
+    CHECK(std::strcmp(g_draw_events, "RO") == 0);
+
+    // 模块 choice 首帧（flag==1）→ 去暗化序列，不调用原函数。
+    g_refresh_flag = 1;
+    g_draw_event_count = 0;
+    g_draw_events[0] = '\0';
+    qol::features::core_ui::choice_draw_wrapper();
+    CHECK(std::strcmp(g_draw_events, "RSCBDE") == 0);
+
+    // SaveLCD 失败 → 回落原函数（画面尚未改变）。
+    g_refresh_flag = 1;
+    g_draw_save_fails = true;
+    g_draw_event_count = 0;
+    g_draw_events[0] = '\0';
+    qol::features::core_ui::choice_draw_wrapper();
+    CHECK(std::strcmp(g_draw_events, "RSO") == 0);
+    g_draw_save_fails = false;
+
+    // 缺少 draw 原语 → 回落原函数，避免半套序列。
+    g_choice_port.draw.end_frame = nullptr;
+    g_refresh_flag = 1;
+    g_draw_event_count = 0;
+    g_draw_events[0] = '\0';
+    qol::features::core_ui::choice_draw_wrapper();
+    CHECK(std::strcmp(g_draw_events, "O") == 0);
+    g_choice_port.draw.end_frame = &draw_end_frame;
+
+    qol::features::core_ui::native_choice_close();
+    bind_draw_original(nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -950,6 +1097,8 @@ int main() {
     test_no_title_spec_restores_items_without_write_title();
     test_non_module_init_pass_through_does_not_overwrite();
     test_post_init_write_failure_not_reported_ready();
+    test_pop_requested_once_per_generation();
+    test_choice_draw_wrapper_de_dims_module_first_frame();
     std::printf("native_choice_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -78,6 +78,7 @@ inline uint64_t ui_dialog_generation_next() {
 // 资源 handler（plugin.cpp 的 ResourceClaim 取址）：
 void choice_init_wrapper(void* control);    // hook:UIChoice_Init
 void choice_button_execute(void* control);  // ptrslot:...button_list_exe_got
+void choice_draw_wrapper();                 // hook:Scene_Draw_POPUP_SC_CHOICE
 
 // backup 交还（§3.3）：UIChoice_Init 原函数 / 按钮槽原 ExecuteProc。
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);

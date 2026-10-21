@@ -42,7 +42,7 @@ contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion,
                                  sizeof(contracts::QolItemPort), {}};
 const contracts::QolCharacterPort kCharacterPort{{1, 0}, {}};
 const contracts::QolCharacterHttpPort kCharacterHttpPort{{1, 0}, {}};
-const contracts::QolChoicePort kChoicePort{{1, 0}, {}, {}};
+const contracts::QolChoicePort kChoicePort{{1, 1}, {}, {}, {}};
 const contracts::QolExtensionBagWritePort kExtensionBagWritePort{};
 const contracts::QolSavePort kSavePort{{1, 0}, {}};
 const contracts::QolSaveCallPort kSaveCallPort{{1, 0}, {}};

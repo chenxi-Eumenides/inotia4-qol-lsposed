@@ -19,10 +19,12 @@ constexpr size_t kDialogTypeIdBufferSize = 128;
 
 using UiChoiceInitFn = void (*)(void* control);
 using ChoiceButtonExecuteFn = void (*)(void* control);
+using ChoiceDrawFn = void (*)();
 
 std::mutex g_mutex;
 UiChoiceInitFn g_init_original = nullptr;
 ChoiceButtonExecuteFn g_button_original = nullptr;
+ChoiceDrawFn g_draw_original = nullptr;
 bool g_installed = false;
 bool g_active = false;
 bool g_open_inflight = false;
@@ -36,6 +38,10 @@ std::array<char, kDialogTypeIdBufferSize> g_dialog_type_id{};
 // （无标题 spec 同样必须恢复 items），clear/消费后复位，不逐帧重试。
 bool g_pending_init = false;
 uint64_t g_published_dialog_generation = 0;
+// Generation for which the module already queued one POPUPSTATE pop. Native
+// UIChoice_ButtonListExe queues its own pop on selection; module-side closes must never add a
+// second (3,0) for the same choice.
+uint64_t g_pop_requested_generation = 0;
 
 const contracts::QolChoicePort* choice() { return choice_port(); }
 
@@ -47,6 +53,13 @@ uint64_t clear_active_locked() {
     g_published_dialog_generation = 0;
     ++g_generation;
     return published_generation;
+}
+
+// Must hold g_mutex. Returns true only the first time a pop is requested for this generation.
+bool pop_requested_once_locked(uint64_t generation) {
+    if (generation == 0 || g_pop_requested_generation == generation) return false;
+    g_pop_requested_generation = generation;
+    return true;
 }
 
 void copy_text(char* destination, size_t destination_size, const char* source) {
@@ -237,14 +250,16 @@ void choice_init_wrapper(void* control) {
                       fail_code, spec.count, port->write.close_popup != nullptr ? 1 : 0);
         log_line(2, message);
         uint64_t cleared_generation = 0;
+        bool pop = false;
         {
             std::lock_guard<std::mutex> lock(g_mutex);
             if (g_active && g_generation == generation) {
+                pop = pop_requested_once_locked(generation);
                 cleared_generation = clear_active_locked();
             }
         }
         if (cleared_generation != 0) publish_dialog_clear(cleared_generation);
-        if (port->write.close_popup != nullptr) (void)port->write.close_popup();
+        if (pop && port->write.close_popup != nullptr) (void)port->write.close_popup();
         return;
     }
 
@@ -301,8 +316,7 @@ void choice_button_execute(void* control) {
 
     // 已确认 module owned：以下全部走模块路径，任何失败都不调用原版
     // UIChoice_ButtonListExe / EVTSYSTEM 剧情结果，只记录原因并保留模块状态供下一次点击。
-    if (port->read.selected_index == nullptr || port->write.write_focus == nullptr ||
-        port->write.close_popup == nullptr) {
+    if (port->read.selected_index == nullptr || port->write.write_focus == nullptr) {
         log_blocked("missing_module_fn", kQolOk, -1, owned, spec.count, original != nullptr);
         return;
     }
@@ -333,8 +347,9 @@ void choice_button_execute(void* control) {
     if (port->write.play_sound != nullptr) {
         (void)port->write.play_sound(2);
     }
-    (void)port->write.close_popup();
-    // 模块 close：只清自身状态 + sound/close，不 on_select、不调用原生原函数。
+    // 原生 UIChoice_ButtonListExe 在 ExecuteProc 返回后必排一次 (3,0)；模块此处再调
+    // close_popup 会连弹两层（choice 关后 panel 也被弹出），因此模块只清状态、不重复排队。
+    // 模块 close：只清自身状态 + sound，不 on_select、不调用原生原函数。
     if (!is_close && spec.on_select != nullptr) spec.on_select(index, spec.user);
 }
 
@@ -415,13 +430,50 @@ void native_choice_close() {
     uint64_t cleared_generation = 0;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        close_popup = g_active;
-        if (close_popup) cleared_generation = clear_active_locked();
+        if (g_active) {
+            close_popup = pop_requested_once_locked(g_generation);
+            cleared_generation = clear_active_locked();
+        }
     }
     if (cleared_generation != 0) publish_dialog_clear(cleared_generation);
-    if (close_popup && choice() != nullptr && choice()->write.close_popup != nullptr) {
-        (void)choice()->write.close_popup();
+    const contracts::QolChoicePort* port = close_popup ? choice() : nullptr;
+    if (port != nullptr && port->write.close_popup != nullptr) {
+        (void)port->write.close_popup();
     }
+}
+
+// 游戏 NPC 对话等非模块 choice：零行为变化，直接走原函数。
+// 模块 choice 首帧（refresh flag=1）：原函数会 AddAlpha+黑填充+SaveLCD，深色面板上观感
+// 全黑。这里在压暗前 SaveLCD 原始画面、清 flag，再按普通帧序列 Draw；不执行 AddAlpha/Fill，
+// 因此无需 RemoveFilter。fpResume 一并跳过：模块 open 流程已负责恢复/重建选择框状态，
+// 且该回调属于游戏场景恢复语义，不应在模块 choice 首帧重复触发。
+void choice_draw_wrapper() {
+    bool active = false;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        active = g_active;
+    }
+    const contracts::QolChoicePort* port = active ? choice() : nullptr;
+    const bool draw_ready = port != nullptr &&
+        port->draw.refresh_flag != nullptr && port->draw.save_lcd != nullptr &&
+        port->draw.clear_refresh_flag != nullptr && port->draw.start_frame != nullptr &&
+        port->draw.draw_choice != nullptr && port->draw.end_frame != nullptr;
+    uint8_t refresh = 0;
+    if (!draw_ready ||
+        !contracts::succeeded(port->draw.refresh_flag(&refresh)) || refresh == 0) {
+        if (g_draw_original != nullptr) g_draw_original();
+        return;
+    }
+    if (!contracts::succeeded(port->draw.save_lcd())) {
+        if (g_draw_original != nullptr) g_draw_original();
+        return;
+    }
+    // From here the original frame is already saved; never fall back to the dim path or the
+    // dimmed frame would overwrite it. Missing/clear failures degrade to best-effort draw.
+    (void)port->draw.clear_refresh_flag();
+    (void)port->draw.start_frame();
+    (void)port->draw.draw_choice();
+    (void)port->draw.end_frame();
 }
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
@@ -434,6 +486,10 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     }
     if (std::strcmp(resource_id, "ptrslot:g_uichoice_button_list_exe_got") == 0) {
         g_button_original = reinterpret_cast<ChoiceButtonExecuteFn>(backup);
+        return 0;
+    }
+    if (std::strcmp(resource_id, "hook:Scene_Draw_POPUP_SC_CHOICE") == 0) {
+        g_draw_original = reinterpret_cast<ChoiceDrawFn>(backup);
         return 0;
     }
     return 1;

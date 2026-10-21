@@ -20,6 +20,7 @@
 #include "game/access/quest.h"
 #include "game/access/save.h"
 #include "game/access/symbols.h"
+#include "game/access/qol_log_seam.h"
 #include "game/access/world.h"
 #include "game/adapter_ports/character_port.h"
 #include "game/state/game_state.h"
@@ -447,6 +448,15 @@ bool ui_choice_selected_index(int32_t* out) {
     return out != nullptr;
 }
 bool ui_choice_text_owns(const char* const*, uint32_t) { return true; }
+bool ui_choice_refresh_pending(bool* out) {
+    if (out != nullptr) *out = false;
+    return true;
+}
+bool ui_choice_save_lcd() { return true; }
+bool ui_choice_clear_refresh_flag() { return true; }
+bool ui_choice_begin_frame() { return true; }
+bool ui_choice_draw() { return true; }
+bool ui_choice_end_frame() { return true; }
 int64_t frame_count() { return 99; }
 
 #ifndef QOL_HOST_ADAPTER_REAL_INVENTORY
@@ -807,9 +817,36 @@ void test_desc_hook_v2(const qol::contracts::QolHostSdk& sdk) {
     assert(api->unbind(0).code == kQolErrInvalidArgument);
 }
 
+std::string g_seam_log;
+QolResult seam_log_write(int32_t, int32_t, const char*, const char* message,
+                         uint32_t message_len) {
+    if (message != nullptr) g_seam_log.append(message, message_len);
+    g_seam_log.push_back('\n');
+    return qol::contracts::ok();
+}
+
 }  // namespace
 
 int main() {
+    // 声明式资源按名解析必须先登记到 game/access/symbols 的 hook 入口表：漏登记会让
+    // entry-hook 资源静默返回 0，fail-closed 插件整体安装失败（依赖它的 settings 被 blocked）。
+    {
+        std::vector<uint8_t> fake_game(0x14a6d8 + 16, 0);
+        const uintptr_t saved_base = g_base;
+        g_base = reinterpret_cast<uintptr_t>(fake_game.data());
+        assert(qol::game::resolve_hook_entry("F_SCENE_DRAW_POPUP_SC_CHOICE_VMA", nullptr) ==
+               g_base + 0x14a6d8);
+
+        qol::contracts::QolHostSdk seam_sdk{};
+        seam_sdk.log.write = &seam_log_write;
+        qol::game::qol_seam_bind_host_sdk(&seam_sdk);
+        g_seam_log.clear();
+        assert(qol::game::resolve_hook_entry("F_NOT_REGISTERED_VMA", nullptr) == 0);
+        assert(g_seam_log.find("reason=not registered in game/access/symbols") !=
+               std::string::npos);
+        qol::game::qol_seam_bind_host_sdk(nullptr);
+        g_base = saved_base;
+    }
     test_ui_result_snapshot_retry_does_not_repeat_write();
     test_extension_bag_write_result_channels();
     fn_get_rarity = &fake_item_rarity;

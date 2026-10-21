@@ -444,7 +444,6 @@ add_executable(native_choice_tests
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(native_choice_tests PRIVATE
     ${CPP_DIR}
@@ -454,6 +453,20 @@ target_compile_features(native_choice_tests PRIVATE cxx_std_17)
 set_target_properties(native_choice_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME native_choice_tests COMMAND native_choice_tests)
 set_tests_properties(native_choice_tests PROPERTIES TIMEOUT 10)
+
+# game/access/ui_choice.cpp: successful popup push snapshots the pre-choice LCD once.
+add_executable(ui_choice_save_lcd_tests
+    test_ui_choice_save_lcd.cpp
+    ${CPP_DIR}/game/access/ui_choice.cpp
+)
+target_include_directories(ui_choice_save_lcd_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(ui_choice_save_lcd_tests PRIVATE cxx_std_17)
+set_target_properties(ui_choice_save_lcd_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME ui_choice_save_lcd_tests COMMAND ui_choice_save_lcd_tests)
 
 # 角色属性面板标签中文化白名单 host 测试（纯表逻辑，header-inline，末尾追加）
 add_executable(module_text_tests
@@ -1098,7 +1111,6 @@ add_executable(core_ui_panels_tests
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_ui_panels_tests PRIVATE
     ${CPP_DIR}
@@ -1112,7 +1124,6 @@ add_executable(core_custom_ui_host_tests
     test_core_custom_ui_host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_custom_ui_host_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_custom_ui_host_tests PRIVATE cxx_std_17)
@@ -1124,7 +1135,6 @@ add_executable(core_ui_confirmation_tests
     test_core_ui_confirmation.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_ui_confirmation_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_ui_confirmation_tests PRIVATE cxx_std_17)
@@ -1137,7 +1147,6 @@ add_executable(core_frame_overlay_tests
     ${CPP_DIR}/plugins/core.custom_ui/panels/frame_overlay.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_frame_overlay_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_frame_overlay_tests PRIVATE cxx_std_17)
@@ -1455,7 +1464,6 @@ add_executable(ui_adapter_tests
     ${CPP_DIR}/plugins/core.custom_ui/panels/frame_overlay.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
     ${CPP_DIR}/game/access/ui_confirmation.cpp
     ${CPP_DIR}/game/access/ui_native_toggle.cpp
     ${CPP_DIR}/game/access/ui_native_text_button.cpp
@@ -1572,16 +1580,6 @@ target_compile_features(debug_two_column_tests PRIVATE cxx_std_17)
 set_target_properties(debug_two_column_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME debug_two_column_tests COMMAND debug_two_column_tests)
 
-add_executable(core_ui_confirmation_overlay_render_tests
-    test_core_ui_confirmation_overlay_render.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
-)
-target_include_directories(core_ui_confirmation_overlay_render_tests PRIVATE ${CPP_DIR})
-target_compile_features(core_ui_confirmation_overlay_render_tests PRIVATE cxx_std_17)
-set_target_properties(core_ui_confirmation_overlay_render_tests PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME core_ui_confirmation_overlay_render_tests
-    COMMAND core_ui_confirmation_overlay_render_tests)
 
 # U11-2：core.ui 标准组件创建/更新/命中/销毁与错误语义 host 测试。
 add_executable(core_ui_components_tests
@@ -2012,7 +2010,6 @@ add_executable(core_settings_panel_migration_tests
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_settings_panel_migration_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_settings_panel_migration_tests PRIVATE cxx_std_17)
@@ -2073,7 +2070,6 @@ add_executable(settings_contributions_tests
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(settings_contributions_tests PRIVATE ${CPP_DIR})
 target_compile_features(settings_contributions_tests PRIVATE cxx_std_17)

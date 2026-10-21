@@ -16,6 +16,7 @@ namespace qol::game {
 
 // 域序数（与 infra/log/qol_log.h 的 QolDomain 对齐；game 层不 include infra 枚举）。
 constexpr int32_t kQolLogDomainPlatform = 0;
+constexpr int32_t kQolLogDomainCore = 1;
 constexpr int32_t kQolLogDomainApi = 3;
 constexpr int32_t kQolLogDomainCatalog = 14;
 

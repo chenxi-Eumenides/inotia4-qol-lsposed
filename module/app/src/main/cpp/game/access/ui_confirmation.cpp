@@ -2,6 +2,7 @@
 
 #include "game/access/game_access.h"
 #include "game/adapter_ports/game_host_port.h"
+#include "game/access/ui_kit.h"
 
 #include <cstdint>
 
@@ -118,4 +119,19 @@ bool ui_confirmation_popup_close_if_callbacks(UiPopupCallback expected_ok,
     return true;
 }
 
+bool ui_confirmation_popup_draw() {
+    if (!main_thread_ready() ||
+        !native_function_ready(reinterpret_cast<const void*>(fn_popup_draw))) {
+        return false;
+    }
+    fn_popup_draw();
+    return true;
+}
+
 }  // namespace qol::game
+
+bool ui_save_lcd_now() {
+    if (!qol::game::game_host_is_main_thread() || fn_grp_save_lcd == nullptr) return false;
+    fn_grp_save_lcd();
+    return true;
+}

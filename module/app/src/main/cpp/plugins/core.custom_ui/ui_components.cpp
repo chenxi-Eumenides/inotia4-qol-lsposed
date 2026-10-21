@@ -2540,8 +2540,11 @@ QolResult help_page_draw(contracts::QolUiHandle handle) {
     if (x < static_cast<int64_t>(INT32_MIN) + 2 || y < static_cast<int64_t>(INT32_MIN) + 2 ||
         x > INT32_MAX - page->rect.w || y > INT32_MAX - page->rect.h) return invalid_argument();
     auto absolute = [x, y](UiRect rect) { rect.x += x; rect.y += y; return rect; };
-    result = draw_container(absolute({0, 0, page->rect.w, page->rect.h}));
-    if (!contracts::succeeded(result)) return result;
+    // Full-screen help pages can use the two column frames as their only visible panels.
+    if (page->rect.x != 0 || page->rect.y != 0 || page->rect.w < 960 || page->rect.h < 640) {
+        result = draw_container(absolute({0, 0, page->rect.w, page->rect.h}));
+        if (!contracts::succeeded(result)) return result;
+    }
     result = draw_container_ornamented(absolute(help_column_frame(page->left_viewport, true)));
     if (!contracts::succeeded(result)) return result;
     result = draw_container_ornamented(absolute(help_column_frame(page->right_viewport, false)));

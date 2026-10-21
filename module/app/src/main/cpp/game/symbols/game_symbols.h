@@ -821,6 +821,8 @@ constexpr uintptr_t F_UICHOICE_BUTTON_LIST_EXE_VMA = 0x0b1a98; // void (void*) U
 constexpr uintptr_t F_UICHOICE_CREATE_CONTROL_VMA = 0x0b2110; // void (void*) UICHOICE 创建选项控件
 constexpr uintptr_t F_UICHOICE_PROCESS_VMA = 0x0b2104; // void () UICHOICE 处理函数
 constexpr uintptr_t F_UI_CHOICE_INIT_VMA = 0x0b1cd4; // void (void*) UIChoice_Init
+constexpr uintptr_t F_UI_CHOICE_DRAW_VMA = 0x0b2018; // void () UIChoice_Draw
+constexpr uintptr_t F_SCENE_DRAW_POPUP_SC_CHOICE_VMA = 0x14a6d8; // void () Scene_Draw_POPUP_SC_CHOICE
 constexpr uintptr_t F_SCENE_EVENT_POPUP_SC_CHOICE_VMA = 0x14a79c; // 选择面板事件回调
 constexpr uintptr_t F_MAPCHANGE_SET_VMA = 0x09c740; // void (int,int,int,int) MAPCHANGE_Set
 constexpr uintptr_t F_MEMORYTEXT_GET_TEXT_VMA = 0x118674; // const char* (uint16_t) MEMORYTEXT_GetText
@@ -881,6 +883,7 @@ constexpr uintptr_t F_UIPOPUPMSG_CREATE_YESNO_VMA = 0xca8dc;  // void (char*, u3
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_YESNO_FROM_TEXTDATA_VMA = 0xca7d4; // void (u32 textId, u32 dispType, u32 formatArg, fn ok, fn cancel, void* param) 原版格式化 YesNo 弹窗
 constexpr uintptr_t F_UIPOPUPMSG_CREATE_FROM_TEXTDATA_VMA = 0xca6f4; // void (u32 textId, u32 x1, u32 x2) 按 TEXTDATABASE 文本 id 弹窗（MEMORYTEXT_GetText + CS_knlSprintk 格式化）
 constexpr uintptr_t F_UIPOPUPMSG_FREE_VMA = 0xca4e8;          // void () 销毁弹窗（删主控件 + UTIL_ReleaseText + 销毁文本控件）
+constexpr uintptr_t F_UIPOPUPMSG_DRAW_VMA = 0xcb058;          // void () 绘制当前弹窗（内部经 DrawDisplayTypeRectBackground/DrawText/DrawButtonGroup；无 Save/RestoreLCD；仅 bOn 时由调用方使用）
 constexpr uintptr_t F_POPUPSTATE_PUSH_VMA = 0x122424;         // int (u32 state_id) 压弹窗栈（读 [0x2f3000+0x4f0] state list + id×0x40：blr enter@+0x10 → ArrayStack_Push process/f3/f4/event）
 // ---- UI 绘制原语符号（ui-settings v0.6.9，libgame-symbols.txt 核对，docs/system/ui.md §5）----
 constexpr uintptr_t G_FONT_OBJ_SLOT_VMA = 0x2f3000 + 0xf88;   // GOT 槽：*(此地址) = 字体对象指针（UI_DrawStringHAlign 0xaf02c 反汇编：str font, [*slot] 写入对象首字段）
@@ -1134,6 +1137,7 @@ using UiChoiceButtonListExeFn = void (*)(void*); // UIChoice_ButtonListExe(contr
 using UiChoiceCreateControlFn = void (*)(void*); // UIChoice_CreateControl(control)
 using UiChoiceProcessFn = void (*)(); // UIChoice_Process()
 using UiChoiceInitFn = void (*)(void*); // UIChoice_Init(control)
+using UiChoiceDrawFn = void (*)(); // UIChoice_Draw()
 using SceneEventPopupScChoiceFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 using MapchangeSetFn = void (*)(int32_t, int32_t, int32_t, int32_t);
 using MemorytextGetTextFn = const char* (*)(uint16_t);
@@ -1231,6 +1235,7 @@ using UiPopupMsgCreateYesNoFromTextDataFn = void (*)(uint32_t textId, uint32_t d
                                                      void* cancelFn, void* param);
 using UiPopupMsgCreateFromTextDataFn = void (*)(uint32_t textId, uint32_t x1, uint32_t x2);
 using UiPopupMsgFreeFn = void (*)();
+using UiPopupMsgDrawFn = void (*)();
 using PopupStatePushFn = int (*)(uint32_t state_id);
 using ButtonExecuteProcFn = void (*)(void* ctrl);
 

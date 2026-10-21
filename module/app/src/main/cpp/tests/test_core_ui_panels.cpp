@@ -57,7 +57,7 @@ struct Fake {
     const char* reason = nullptr;
 };
 
-Fake g_f[5];
+Fake g_f[7];
 Fake g_rebound;
 bool g_use_rebound_provider = false;
 QolHostSdk* g_test_sdk = nullptr;
@@ -171,11 +171,24 @@ char g_pf_last_log[192] = {};
 
 void pf_enter() {}
 void pf_process() {}
-void pf_f3() {}
+int g_save_lcd_calls = 0;
+QolResult pf_save_lcd() {
+    ++g_save_lcd_calls;
+    return qol::contracts::ok();
+}
+
+int g_pf_f3_calls = 0;
+void pf_f3() { ++g_pf_f3_calls; }
 void pf_f4() {}
 uint32_t pf_event(uint64_t, uint64_t, uint64_t) { return 7; }
 const qol::contracts::PanelCallbacks kPfCallbacks{&pf_enter, &pf_process, &pf_f3, &pf_f4, &pf_event};
 bool pf_open() { ++g_pf_open_calls; g_pf_active = true; return true; }
+bool g_pg_active = false;
+int g_pg_open_calls = 0;
+bool pg_open() { ++g_pg_open_calls; if (g_f[6].fail_open_times > 0) { --g_f[6].fail_open_times; return false; } g_pg_active = true; return true; }
+void pg_close() { g_pg_active = false; }
+bool pg_active() { return g_pg_active; }
+const char* pg_reason() { return nullptr; }
 void pf_close() { ++g_pf_close_calls; g_pf_active = false; }
 bool pf_active() { return g_pf_active; }
 const char* pf_reason() { return nullptr; }
@@ -236,6 +249,7 @@ const PanelProviderSpec kProviders[] = {
     {"pd", "core.ui", &d_open, &d_close, &d_active, &d_reason},
     {"pe", "core.ui", &e_open, &e_close, &e_active, &e_reason},
     {"pf", "core.ui", &pf_open, &pf_close, &pf_active, &pf_reason, &kPfCallbacks},
+    {"pg", "core.ui", &pg_open, &pg_close, &pg_active, &pg_reason, &kPfCallbacks},
 };
 
 QolResult fake_panels_find(const char* panel_id, const PanelProviderSpec** out_provider) {
@@ -597,14 +611,45 @@ void test_close_stall_escape_forces_completion() {
     CHECK(!ui_panels_back());
 }
 
+// Opening a panel snapshots the pre-panel screen once; nested opens snapshot again;
+// failed opens must not snapshot.
+void test_open_snapshots_lcd() {
+    reset_fakes();
+    reset_popup_fakes();
+    for (int pump = 0; pump < 8 && ui_panels_depth_for_test() > 0; ++pump) {
+        (void)ui_panels_frame_pump(pump + 1, nullptr);
+    }
+    g_save_lcd_calls = 0;
+    CHECK(ui_panels_open("pf"));
+    CHECK(g_save_lcd_calls == 1);
+    CHECK(ui_panels_open("pg"));
+    CHECK(g_save_lcd_calls == 2);
+    ui_panels_request_back();
+    CHECK(ui_panels_frame_pump(1, nullptr) == 1);
+    ui_panels_request_back();
+    CHECK(ui_panels_frame_pump(2, nullptr) == 1);
+    for (int pump = 3; pump < 16; ++pump) {
+        (void)ui_panels_frame_pump(pump, nullptr);
+    }
+    CHECK(ui_panels_depth_for_test() == 0);
+    g_save_lcd_calls = 0;
+    g_f[6].fail_open_times = 1;
+    CHECK(!ui_panels_open("pg"));
+    CHECK(g_save_lcd_calls == 0);
+}
+
 }  // namespace
 
 int main() {
     QolHostSdk sdk{};
     sdk.panels.find = &fake_panels_find;
     qol::contracts::QolUiAdapter ui{};
+    ui.size = sizeof(ui);
+    ui.major = qol::contracts::kUiAdapterMajor;
+    ui.minor = qol::contracts::kUiAdapterMinor;
     ui.set_popup_process_info = &pf_set_process_info;
     ui.popup_stack_snapshot = &pf_snapshot;
+    ui.save_lcd = &pf_save_lcd;
     sdk.ui = &ui;
     sdk.hooks.popup_resolve = &pf_resolve;
     sdk.hooks.popup_acquire = &pf_acquire;
@@ -630,6 +675,7 @@ int main() {
     test_frame_pump_prunes_stale_top();
     test_deferred_close_keeps_depth_until_done();
     test_close_stall_escape_forces_completion();
+    test_open_snapshots_lcd();
 
     std::printf("core_ui_panels_tests: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

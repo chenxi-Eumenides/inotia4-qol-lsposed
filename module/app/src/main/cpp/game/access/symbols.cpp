@@ -2,6 +2,8 @@
 
 #include <cstring>
 
+#include "game/access/qol_log_seam.h"
+
 #include "game/symbols/game_symbols.h"
 #include "game/symbols/symbol_resolver.h"
 #include "game/access/game_access.h"
@@ -29,6 +31,9 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_SCENE_DRAW_POPUP_SC_CHARACTER_INFO_VMA", F_SCENE_DRAW_POPUP_SC_CHARACTER_INFO_VMA},
     // 原生选择框（owner=native_choice，D1-b1 声明式化）：标题改写 wrapper 的挂载点。
     {"F_UI_CHOICE_INIT_VMA", F_UI_CHOICE_INIT_VMA},
+    // 模块 choice 首帧去暗化 wrapper（owner=native_choice）。未登记时资源解析静默返回 0，
+    // 整个 core.custom_ui 因 fail-closed 资源安装失败，依赖 ui_panels 的 settings 随之 blocked。
+    {"F_SCENE_DRAW_POPUP_SC_CHOICE_VMA", F_SCENE_DRAW_POPUP_SC_CHOICE_VMA},
     // 面板插件（D1-b0 前置）：UI 面板注入所复用的 PopupState 死条目/可开面板 enter 回调，
     // 供 hooks::popup_state_resolve_symbol 按名解析（禁止面板出现裸 VMA）。
     {"F_PANEL_UNK1_ENTER", F_PANEL_UNK1_ENTER},
@@ -135,26 +140,69 @@ uintptr_t resolve_hook_entry(const char* symbol_name, bool* out_followed) {
     // hookable_entry 始终解引用 out_followed；调用方允许传 nullptr 时用局部量承接。
     bool followed_local = false;
     bool* followed = out_followed != nullptr ? out_followed : &followed_local;
-    if (symbol_name == nullptr || g_base == 0) {
+    if (symbol_name == nullptr) {
         *followed = false;
+        return 0;
+    }
+    if (g_base == 0) {
+        *followed = false;
+        QOL_LOG_SEAM_WARN(kQolLogDomainCore,
+                          "hook entry resolve deferred symbol=%s reason=game base not ready",
+                          symbol_name);
         return 0;
     }
     const char* export_name = elf_export_name(symbol_name);
     if (export_name != nullptr) {
         *followed = false;
-        if (export_name[0] == '\0') return 0;
+        if (export_name[0] == '\0') {
+            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+                               "hook entry resolve failed elf-export=<empty> claim=%s",
+                               symbol_name);
+            return 0;
+        }
         const uintptr_t offset = g_resolver.resolveFunctionByName(export_name);
-        if (offset == 0) return 0;
+        if (offset == 0) {
+            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+                               "hook entry resolve failed elf-export=%s reason=export not found",
+                               export_name);
+            return 0;
+        }
         const uintptr_t address = g_base + offset;
         if ((address & 0x3u) != 0 ||
-            !game_memory_accessible(reinterpret_cast<void*>(address), 4, 'x')) return 0;
-        return hookable_entry(address, followed);
-    }    for (const HookEntrySymbol& entry : kHookEntrySymbols) {
+            !game_memory_accessible(reinterpret_cast<void*>(address), 4, 'x')) {
+            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+                               "hook entry resolve failed elf-export=%s reason=not executable "
+                               "address=0x%llx",
+                               export_name,
+                               static_cast<unsigned long long>(address));
+            return 0;
+        }
+        const uintptr_t entry = hookable_entry(address, followed);
+        if (entry == 0) {
+            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+                               "hook entry resolve failed elf-export=%s reason=hookable check",
+                               export_name);
+        }
+        return entry;
+    }
+    for (const HookEntrySymbol& entry : kHookEntrySymbols) {
         if (std::strcmp(entry.name, symbol_name) != 0) continue;
         const uintptr_t symbol_entry = g_base + fn_resolve(entry.name, entry.vma);
-        return hookable_entry(symbol_entry, followed);
+        const uintptr_t resolved = hookable_entry(symbol_entry, followed);
+        if (resolved == 0) {
+            QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+                               "hook entry resolve failed symbol=%s vma=0x%llx "
+                               "reason=not executable (check game/access/symbols registration)",
+                               symbol_name,
+                               static_cast<unsigned long long>(symbol_entry));
+        }
+        return resolved;
     }
     *followed = false;
+    QOL_LOG_SEAM_ERROR(kQolLogDomainCore,
+                       "hook entry resolve failed symbol=%s reason=not registered in "
+                       "game/access/symbols kHookEntrySymbols",
+                       symbol_name);
     return 0;
 }
 

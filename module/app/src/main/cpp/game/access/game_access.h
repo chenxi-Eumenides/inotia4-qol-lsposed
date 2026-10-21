@@ -191,6 +191,7 @@ extern UiChoiceButtonListExeFn fn_uichoice_button_list_exe;
 extern UiChoiceCreateControlFn fn_uichoice_create_control;
 extern UiChoiceProcessFn fn_uichoice_process;
 extern UiChoiceInitFn fn_uichoice_init;
+extern UiChoiceDrawFn fn_uichoice_draw;
 extern SceneEventPopupScChoiceFn fn_scene_event_popup_sc_choice;
 extern MapchangeSetFn fn_mapchange_set;
 extern MemorytextGetTextFn fn_memorytext_get_text;
@@ -335,6 +336,7 @@ extern UiPopupMsgCreateYesNoFn fn_popup_create_yesno;
 extern UiPopupMsgCreateYesNoFromTextDataFn fn_popup_create_yesno_from_textdata;
 extern UiPopupMsgCreateFromTextDataFn fn_popup_create_from_textdata;
 extern UiPopupMsgFreeFn fn_popup_free;
+extern UiPopupMsgDrawFn fn_popup_draw;
 extern PopupStatePushFn fn_popupstate_push;
 // ---- UI 绘制原语函数指针（ui-settings v0.6.9）----
 extern MapDrawBaseFn fn_map_drawbase;

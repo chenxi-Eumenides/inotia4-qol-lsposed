@@ -23,10 +23,24 @@ struct QolChoiceWriteApi {
     QolResult (*play_sound)(int32_t sound_id);
 };
 
+// v1.1 tail: primitives for the module-choice first-frame de-dim draw hook.
+// The wrapper owns the sequence; each slot maps to one game primitive so the
+// order (save -> clear flag -> GRPX start -> UIChoice_Draw -> GRPX end) stays
+// testable without the game image.
+struct QolChoiceDrawApi {
+    QolResult (*refresh_flag)(uint8_t* out_flag);
+    QolResult (*save_lcd)();
+    QolResult (*clear_refresh_flag)();
+    QolResult (*start_frame)();
+    QolResult (*draw_choice)();
+    QolResult (*end_frame)();
+};
+
 struct QolChoicePort {
     QolVersion abi_version;
     QolChoiceReadApi read;
     QolChoiceWriteApi write;
+    QolChoiceDrawApi draw;
 };
 
 static_assert(std::is_standard_layout<QolChoicePort>::value,
