@@ -3,8 +3,10 @@
 // Game Host API ABI 骨架（ARCHITECTURE.md §2.1–§2.4、§3.8、§6.1；ADR-0008）。
 //
 // `game/` 是 host 内部的 adapter/实现，插件不得 include。只读 read 面可按调用点标注
-// 线程使用；write 与有副作用 call 只能由 owner 插件的主线程命令处理器调用，表内不
-// 提供同步等待原语。内置表可在 P1–P4 迁移期演进，P6 才冻结对外兼容。
+// 线程使用；默认 write 与有副作用 call 只能由 owner 插件的主线程命令处理器调用，表内不
+// 提供同步等待原语。入口 hook wrapper 在游戏主线程同步执行时，为完成被 hook 函数的语义
+// 修改，可直接调用对应 write 面；范围仅限该 wrapper 语义所需字段，不得跨线程或扩大为通用写入口。
+// 内置表可在 P1–P4 迁移期演进，P6 才冻结对外兼容。
 
 #include <cstddef>
 #include <cstdint>

@@ -23,10 +23,6 @@ enum class Side {
 // 注：×1.5 是分数倍率，`scale_by_percent` 向下取整，故 1 点伤害仍是 1（详见该函数注释）。
 int damage_percent(Side attacker, Side victim);
 
-// 最大生命缩放百分比（100 = 不变）。
-//   target 是怪物 → 50；其余 → 100。
-int max_hp_percent(Side target);
-
 // 按百分比缩放并做 int32 边界保护：
 //   value <= 0 → 原样返回（非法值不放大）
 //   percent == 100 → 原样返回

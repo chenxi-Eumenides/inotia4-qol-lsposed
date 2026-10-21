@@ -1091,6 +1091,7 @@ target_include_directories(infra_store_tests PRIVATE
 )
 target_compile_features(infra_store_tests PRIVATE cxx_std_17)
 add_test(NAME infra_store_tests COMMAND infra_store_tests)
+
 target_compile_definitions(infra_store_tests PRIVATE QOL_STORE_TEST_SEAMS=1)
 
 # D1-b0：面板注册表纯数据面 host 测试（末尾追加）
@@ -2180,6 +2181,19 @@ target_compile_definitions(custom_recipe_owner_fixture_tests PRIVATE QOL_STORE_T
 add_test(NAME custom_recipe_owner_fixture_tests
     COMMAND custom_recipe_owner_fixture_tests ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(custom_recipe_owner_fixture_tests PROPERTIES TIMEOUT 60)
+
+# simple_mode wrappers / install lifecycle host coverage (fake Host SDK + Game Host).
+add_executable(simple_mode_feature_tests
+    test_simple_mode_feature.cpp
+    ${CPP_DIR}/plugins/simple_mode/feature.cpp
+    ${CPP_DIR}/plugins/simple_mode/plugin.cpp
+    ${CPP_DIR}/plugins/simple_mode/rules.cpp
+)
+target_include_directories(simple_mode_feature_tests PRIVATE ${CPP_DIR})
+target_compile_features(simple_mode_feature_tests PRIVATE cxx_std_17)
+set_target_properties(simple_mode_feature_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME simple_mode_feature_tests COMMAND simple_mode_feature_tests)
 
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)

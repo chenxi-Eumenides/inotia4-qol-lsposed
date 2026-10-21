@@ -14,7 +14,6 @@ static int g_fail = 0;
 
 using qol::features::simple_mode::damage_percent;
 using qol::features::simple_mode::halved_max_hp;
-using qol::features::simple_mode::max_hp_percent;
 using qol::features::simple_mode::scale_by_percent;
 using qol::features::simple_mode::Side;
 
@@ -34,12 +33,6 @@ static void test_damage_matrix() {
     // 中立来源 → 100。
     CHECK(damage_percent(Side::kNeutral, Side::kMonster) == 100);
     CHECK(damage_percent(Side::kNeutral, Side::kNeutral) == 100);
-}
-
-static void test_max_hp_matrix() {
-    CHECK(max_hp_percent(Side::kMonster) == 50);
-    CHECK(max_hp_percent(Side::kPlayer) == 100);
-    CHECK(max_hp_percent(Side::kNeutral) == 100);
 }
 
 static void test_scale_by_percent() {
@@ -78,7 +71,6 @@ static void test_halved_max_hp() {
 
 int main() {
     test_damage_matrix();
-    test_max_hp_matrix();
     test_scale_by_percent();
     test_halved_max_hp();
     std::printf("simple_mode_rules: %d passed, %d failed\n", g_pass, g_fail);

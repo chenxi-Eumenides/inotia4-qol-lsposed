@@ -32,6 +32,7 @@ namespace qol::features::simple_mode {
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
 const contracts::QolCharacterExtrasPort* character_extras();
+const contracts::CharacterFactsApi* character_facts();
 void set_character_facts(const contracts::CharacterFactsApi* facts);
 
 

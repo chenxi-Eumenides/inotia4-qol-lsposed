@@ -17,10 +17,6 @@ int damage_percent(Side attacker, Side victim) {
     return 100;
 }
 
-int max_hp_percent(Side target) {
-    return target == Side::kMonster ? 50 : 100;
-}
-
 std::int32_t scale_by_percent(std::int32_t value, int percent) {
     if (value <= 0 || percent == 100) {
         return value;

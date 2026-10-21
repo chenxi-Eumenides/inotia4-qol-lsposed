@@ -60,6 +60,14 @@ const contracts::ResourceClaim kResources[] = {
     },
 };
 
+void clear_install_state() {
+    set_gate(false);
+    set_character_facts(nullptr);
+    g_sdk = nullptr;
+    g_game = nullptr;
+    g_character_extras = nullptr;
+}
+
 // JNI 绑定元数据：符号名与签名在重构期冻结；签名哈希 P5 落地前为 nullptr。
 const contracts::JniBinding kJni[] = {
     {
@@ -70,33 +78,32 @@ const contracts::JniBinding kJni[] = {
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
+    set_gate(false);
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_character_extras = nullptr;
+    set_character_facts(nullptr);
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || g_game == nullptr ||
         ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_character_extras = nullptr;
+        clear_install_state();
         return 1;
     }
     g_character_extras = static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[0]);
-    if (g_sdk->capabilities.require == nullptr) return 1;
+    if (g_sdk->capabilities.require == nullptr) {
+        clear_install_state();
+        return 1;
+    }
     const void* iface = nullptr;
     if (!contracts::succeeded(g_sdk->capabilities.require(
             contracts::kCharacterFactsCapabilityId,
             {contracts::kCharacterFactsVersionMajor, contracts::kCharacterFactsVersionMinor},
             &iface)) ||
         iface == nullptr) {
-        g_sdk = nullptr;
-        g_game = nullptr;
-        g_character_extras = nullptr;
+        clear_install_state();
         return 1;
     }
     set_character_facts(static_cast<const contracts::CharacterFactsApi*>(iface));
-    // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。
-    set_gate(true);
     return 0;
 }
 
@@ -123,11 +130,14 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
     out.error = nullptr;
 }
 
-// Feature callback does not replace the existing lifecycle or business controls.
+// 关闭 feature 时先关闭门禁，资源随后由 Host drain/释放；on_disabled/deactivate 仍负责关闭门禁。
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"simple_mode.combat", 0, contracts::FeatureCategory::kGameplay,
      contracts::FeatureType::kToggle, "简单模式", "降低怪物生命并增强玩家伤害与承伤。",
-     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+     [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
+         if (enabled == 0) set_gate(false);
+         return contracts::ok();
+     }, nullptr},
 };
 
 const contracts::PluginDescriptor kDescriptor = {
