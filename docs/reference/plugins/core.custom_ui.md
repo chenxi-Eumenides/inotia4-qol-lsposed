@@ -13,10 +13,10 @@
 | `ui_components` | 1.22 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 3 槽：`capsule_text_button_create`、`decorated_text_button_create`、`main_menu_decorated_button_create`；容器 content rect/content draw 两槽已随要求 4 撤销删除）。此后追加可缩放图标按钮族与 `compact_capsule_text_button_create`；**1.19 追加 `forget_native`**：native 控件由外部（游戏控件树）销毁时只注销组件记录、不调用 `delete_control`；**1.20 追加锚定按钮**（`anchored_button_ensure/set_visible/release/draw`）：按 `QolUiRootKind` 每帧解析活挂载根、用 `click_binding_is_current` 证明句柄身份，失效时注销组件记录并重建；`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。**1.21 追加任意原生控件锚定**（`anchored_control_ensure/set_visible/release/detach`）：多控件/自定义 `CO_PROC`/自带 data 的游戏树挂载，身份证明用 `control_proc_matches` + type/user_type/data 快照。**1.22 追加 `draw_rect`、`draw_rounded_rect`、`draw_circle`**：纯色 RGB565 填充/边框，alpha 为 0–100 百分比；圆角半径最多 256，圆形直径最多 512，不提供抗锯齿。 |
 | `ui_panels` | 1.3 | 面板 provider 注册后的打开、关闭、状态/返回协作接口 |
 | `ui_choice` | 1.1 | 原生选择框 open/active/close API |
-| `ui_confirmation` | 1.0 | 单一 owner 的原生 Yes/No 确认框 `open(spec, out_token)` / `active(token, out)` / `close(token)` API |
+| `ui_confirmation` | 1.1 | 单一 owner 确认框；V1 TextData 走原生路径 `open/active/close`，V2 显式文案 `open_v2` 按上下文自动选择原生弹窗或自绘 overlay 后端 |
 | `text_layer` | 1.0 | `MEMORYTEXT_GetText` hook 上的文本订阅/分派接口 |
 
-提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`；`QolUiAdapter` 1.27 在尾部追加 popup 活动状态、回调槽读取/条件替换、TEXTDATABASE Yes/No 创建与 owner-checked 原生关闭入口；这些槽是 provider 实现细节，消费者必须走 `ui_confirmation` capability，不得缓存或直接调用 callback trampoline。`ui_components` 契约保持 1.22。公共版本定义见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`contracts/panels.h`、`contracts/ui_choice.h` 和 `contracts/text_layer.h`。本插件另声明三项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate。
+提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`；`QolUiAdapter` 尾部追加三组槽：1.27 的 popup 活动状态、回调槽读取/条件替换、TEXTDATABASE Yes/No 创建与 owner-checked 原生关闭入口；1.28 的 overlay 作用域 `begin_overlay_scope/end_overlay_scope` 与绘制回调注册 `set_frame_overlay`（宿主在 `end_frame` 内、原生 `GRPX_End` 前一次性消费）；1.29 的原生 raw `UIPopupMsg_CreateYesNo(char*, len, 0, 2, callbacks, price)` 创建入口。这些槽是 provider 实现细节，消费者必须走 `ui_confirmation` capability，不得缓存或直接调用 callback trampoline。`ui_components` 契约保持 1.22。`ui.state` 1.2 尾部追加了带 size 的 `UiCustomDialogSnapshotV2`（body/options/price）与 `publish_custom_dialog_v2`，用于自绘后端的 `/api/ui/dialog` 投影。公共版本定义见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`contracts/panels.h`、`contracts/ui_choice.h` 和 `contracts/text_layer.h`。本插件另声明三项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate。
 
 ### 原生确认框（`ui_confirmation`）
 
@@ -30,11 +30,20 @@
 
 示例：`UiConfirmationSpec spec{9, 0, 2, price, on_confirm, on_cancel, context}; uint64_t token = 0; api->open(&spec, &token);`。扩展背包当前 `create_confirmation(variant, price, ...)` 使用 text ID 9、display type 0、format arg 2；其 operation-specific callback template 与回调槽恢复仍由扩展背包专属端口管理，不因共享 API 改写。
 
+#### V2 显式文案与双后端（`ui_confirmation` 1.1）
+
+`UiConfirmationSpecV2`（首字段 `size`，capability minor 1.1）在 V1 字段外增加 `message[256]`、`confirm_label[64]`、`cancel_label[64]`、`price_unit[64]`，经 `open_v2(spec, out_token)` 打开。core.custom_ui 按自身 `ui_panels` 活动栈选择后端（不使用 `/api/ui/screen`）：
+
+- **自绘 overlay 后端**（自定义 panel 活动且顶层 provider 有 `process` 回调）：不创建原生 `UIPopupMsg`（`bOn` 保持 0），向 `ui.state` 发布 V2 快照，并经 `frame_overlay` 作用域在 parent panel 自身 GRPX 帧内、`end_frame` 之前一次性绘制遮罩/面板/正文/价格/按钮。作用域绑定 confirmation token + provider identity + open generation 三元组；嵌套 dispatch 以 sentinel 隔离；scope 收尾经幂等 owner 栈配对。打开时作用域不可用即 fail-close（不返回 token）；首帧绘制失败由收尾路径取消并清理，不留不可见模态。
+- **原生后端**（无自定义 panel）：`message` 非空走原生 raw `UIPopupMsg_CreateYesNo`（外观/按钮/价格栏由游戏渲染）；`message` 为空回退 V1 TextData 路径。
+
+输入语义（自绘后端）：open 成功起即为模态——触摸按白名单事件码 `0x17/0x18/0x19`（press/release/move）经 `hit_test` 分发按钮回调恰一次，其他事件码（含 `0x8000000X` 系统子事件）不触碰坐标参数、直接消费；F3（Return）取消确认框且不下传 parent；F4 与其他事件一律消费。Return 取消经帧号绑定的 suppression latch 防止同帧二次分发到 parent。V1 路径行为不变；`close(token)`、Busy 拒绝、callback exactly-once、停用清理对两种后端一致。overlay 绘制回调注册在宿主侧，注销失败进入 orphaned 状态（禁用绘制但保留 owner），重启用时自动重试注册，失败则插件启用整体 fail-closed。
+
 ### 选择框背景、叠层与基础形状
 
 `ui_choice` 只改写模块自有选项的 items/title/focus 并 push 游戏的 `F_PANEL_CHOICE_ENTER` PopupState；它不自行绘制背景。当前源码和符号登记没有找到 `Scene_Draw_POPUP_SC_CHOICE` 的绘制体，也没有证据定位调用方反馈的黑底来源、颜色或 alpha 参数，因此**不能安全地为原生选择框设置背景透明度**。`ui_components` 的形状 alpha 只作用于调用者主动绘制的矩形/圆角矩形/圆形，不会影响游戏原生 choice。
 
-原生 choice 位于游戏 PopupState 栈顶，结构上可以覆盖底层原生页面；它不是 `ui_panels` 的自定义 panel 栈成员。现有资料不保证它与其他 provider 的自定义页面如何排序、是否遮罩输入，也没有嵌套页面真机证据；不得据此承诺任意自定义页面叠层或 z-order。`ui_confirmation` 使用另一套全局 `UIPopupMsg` 单例，活动原生弹窗时会 Busy 拒绝。**用户真机观察**：在自定义 panel 打开确认框时，`/api/ui/dialog` 显示 `type=popup, active=true`，输入被原生弹窗阻断，但弹窗绘制在 panel 后面而不可见；返回键会同时关闭确认框和 panel。因此当前 `ui_confirmation` 不能覆盖自定义 panel，也没有接口调整它的绘制层级。
+原生 choice 位于游戏 PopupState 栈顶，结构上可以覆盖底层原生页面；它不是 `ui_panels` 的自定义 panel 栈成员。现有资料不保证它与其他 provider 的自定义页面如何排序、是否遮罩输入，也没有嵌套页面真机证据；不得据此承诺任意自定义页面叠层或 z-order。`ui_confirmation` 使用另一套全局 `UIPopupMsg` 单例，活动原生弹窗时会 Busy 拒绝。**用户真机观察（2026-10-21）**：在自定义 panel 打开确认框时，`/api/ui/dialog` 显示 `type=popup, active=true`，输入被原生弹窗阻断，但弹窗视觉不可见；返回键会同时关闭确认框和 panel。同日只读设备 trace（68/68 渲染帧）证明根因是该状态下 `UIPopupMsg_Draw` 从未被调用（输入模态由 `UIPopupMsg_Process` 提供，panel 的 GRPX 帧照常渲染），并非 z-order 遮挡；见 `docs/refactor/verification/ui-state/20261022-dual-backend-confirmation.md`。该场景现由 `ui_confirmation` 1.1 自绘 overlay 后端处理；双后端真机视觉验收仍为 NOT_ACCEPTED。
 
 `UiShapeDesc` 提供基础矩形、可调半径圆角矩形与圆形；调用方可设置逻辑尺寸、RGB565 填充/边框色、共同 alpha、边框宽度和圆角半径。alpha 为游戏 `GRPX_FillRectAlpha` 的 0–100 百分比；形状按互斥扫描线区域绘制，不重复合成边框/填充像素。栅格绘制不抗锯齿，圆角半径上限 256、圆形直径上限 512。
 
@@ -44,7 +53,7 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 
 该构建还注册唯一的 debug `entry` feature `core.custom_ui.open_debug_components`，action label 为“打开”，callback 打开 `debug_components` 面板；另外的 `ui_tools` 是 Hidden toggle，不是入口项（`plugin.cpp:220-241`）。endpoint/feature 契约以路由元数据和 descriptor 为实现事实，API 公共契约以 [API 参考](../api-reference.md) 为准。
 
-Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、圆形和 alpha 示例；“原生对话框”类别提供原生选择框、无价格确认框、价格 100 确认框三个无业务副作用的检查入口。确认/取消只更新面板状态，退出面板或停用时会关闭本 demo 自己打开的 dialog。
+Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、圆形和 alpha 示例；“原生对话框”类别提供原生选择框、无价格确认框、价格 100 确认框、自绘确认框（V2 显式文案+价格 100）四个无业务副作用的检查入口。确认/取消只更新面板状态，退出面板或停用时会关闭本 demo 自己打开的 dialog。
 
 `PluginDescriptor` 通过 `http_endpoints` 声明这三个 Debug command routes（`plugin.cpp` 中的 `kHttpEndpoints` 与 descriptor 尾部）；各 Debug panel 注册函数只登记 UI panel provider 和 scheduler task，不另行向 `http_dispatch` 动态注册 HTTP route。
 
@@ -122,7 +131,9 @@ Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、
 | 文本共享机制 | `module/app/src/main/cpp/plugins/core.custom_ui/text_mechanism.cpp`、`text_mechanism.h` | subscribe/unsubscribe 与原文 fallback dispatch：`text_mechanism.cpp:27-64` |
 | Debug panels/endpoints | `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`、`panels/debug_components.cpp`、`debug_scroll.cpp`、`debug_help.cpp` | descriptor endpoint facts/handlers 位于 plugin.cpp；各面板源码实现 command callback 与 scheduler task |
 | 跨插件契约 | `module/app/src/main/cpp/contracts/ui.h`、`panels.h`、`ui_choice.h`、`text_layer.h`、`game_ports/choice_port.h` | adapter/components 版本与线程说明：`ui.h:3-19`；其余 capability ID/version 与接口见各文件开头定义 |
-| 原生确认框能力 | `module/app/src/main/cpp/contracts/ui_confirmation.h`、`plugins/core.custom_ui/ui_confirmation.cpp` | 固定宽度 spec、单活动 owner、参数/上下文隔离、条件 callback 槽恢复与原生 close path |
+| 原生确认框能力 | `module/app/src/main/cpp/contracts/ui_confirmation.h`、`plugins/core.custom_ui/ui_confirmation.cpp` | 固定宽度 spec（V1/V2）、单活动 owner、参数/上下文隔离、条件 callback 槽恢复、原生 close path、双后端路由与自绘 overlay 接线 |
+| 确认框 overlay 作用域 | `plugins/core.custom_ui/panels/frame_overlay.{h,cpp}`、`panels/host.{h,cpp}` | 一次性帧作用域（token+provider+generation）、嵌套 sentinel、宿主 `end_frame` 前单次绘制、F3/F4/event 模态门禁 |
+| overlay 呈现组件 | `plugins/core.custom_ui/ui_confirmation_overlay.{h,cpp}` | 遮罩/面板/正文/价格/按钮布局、绘制与命中测试（仅现有绘制原语，不开帧） |
 | 当前设置页消费者 | `module/app/src/main/cpp/plugins/settings/plugin.cpp`、`plugins/settings/panels/settings.cpp` | descriptor requires：`plugin.cpp:32-38`；运行时 require ui_components：`settings.cpp:816-821` |
 
 
