@@ -20,11 +20,11 @@
 
 ## 真机状态与限制
 
-**NOT_ACCEPTED（未做设备行为/视觉验收）**：候选 APK 未安装，未重启游戏。Debug Components 提供可操作样例，但用户尚未目视确认。示例位置：打开 `core.custom_ui.open_debug_components` → 左栏“基础形状”检查矩形/圆角/圆形与 alpha → “原生对话框”依次打开原生选择框、无价格确认框、价格 100 确认框；检查黑底、是否覆盖调试页、价格显示、确认/取消和关闭面板时的清理。样例回调不写物品/金币/存档。扩展背包继续使用其 operation-specific callback template，不作为新 token API 的运行时证据。
+**NOT_ACCEPTED（尚未完成设备/视觉验收）**：Debug Components 提供可操作样例；用户报告已测试 `ui_confirmation` 打开在自定义 panel 上的层级：`/api/ui/dialog` 为 `type=popup, active=true`，弹窗模态地阻断 panel 点击，但视觉绘制在 panel 后面；按返回键会同时关闭确认框和 panel。该观察证明当前原生 `UIPopupMsg` 不能覆盖自定义 panel；未提供设备原始日志/截图，因此不将整卡标为 PASS。示例位置：打开 `core.custom_ui.open_debug_components` → 左栏“基础形状”检查矩形/圆角/圆形与 alpha → “原生对话框”依次打开原生选择框、无价格确认框、价格 100 确认框；检查选择框黑底和清理行为。样例回调不写物品/金币/存档。扩展背包继续使用其 operation-specific callback template，不作为新 token API 的运行时证据。
 
 本次 Debug 构建基于含 10 个既有未提交修改路径的工作树；这些路径未纳入本功能提交，但 APK 构建过程会编译当前工作树整体，因此该 APK 不是 pristine commit-only 构建产物。
 
-`native_choice_open` 仅写选择数据并 push 游戏 PopupState，未找到 choice 背景的原版绘制体或 alpha 控制点；黑底具体来源未知。原生 PopupState 可压在底层原生页面上，但与自定义 panel stack 的叠层关系未获真机证明。此项未改动、不得报告已支持背景透明度或任意页面叠层。
+`native_choice_open` 仅写选择数据并 push 游戏 PopupState，未找到 choice 背景的原版绘制体或 alpha 控制点；黑底具体来源未知。原生 PopupState 可压在底层原生页面上；与自定义 panel stack 的 choice 叠层关系仍未获真机证明。此项未改动、不得报告已支持背景透明度或任意页面叠层。
 
 `QolUiAdapter` 的 callback 槽操作是 `core.custom_ui` provider 内部实现入口；其他插件必须消费 `ui_confirmation` capability，不得直接缓存或调用 trampoline。绕过此契约持有旧 trampoline 并跨弹窗代际手动调用不受支持。
 
