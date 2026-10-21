@@ -647,7 +647,7 @@ QolResult confirmation_open_impl(const contracts::UiConfirmationSpec* spec,
     }
 
     const QolResult created = raw_source
-        ? adapter->create_yes_no_text(g_text_buffer, raw_length, spec->display_type,
+        ? adapter->create_yes_no_text(g_text_buffer, raw_length, 0,
                                       spec->price, &confirmation_ok_trampoline,
                                       &confirmation_cancel_trampoline)
         : adapter->popup_msg_create_yesno_from_textdata(
@@ -730,7 +730,6 @@ QolResult confirmation_open_text(const contracts::UiConfirmationSpecText* spec,
         return error(kQolErrInvalidArgument, kInvalidArgument, sizeof(kInvalidArgument) - 1);
     }
     contracts::UiConfirmationSpec normalized{};
-    normalized.display_type = spec->display_type;
     normalized.price = spec->price;
     normalized.on_confirm = spec->on_confirm;
     normalized.on_cancel = spec->on_cancel;
