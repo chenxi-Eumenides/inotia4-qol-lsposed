@@ -82,7 +82,6 @@ static bool open_confirmation(const std::string& message) {
     const size_t message_size = std::min(message.size(), sizeof(spec.message) - 1);
     std::memcpy(spec.message, message.data(), message_size);
     spec.message[message_size] = '\0';
-    spec.display_type = 0;
     spec.price = 0;
     spec.on_confirm = &on_confirmation_confirm;
     spec.on_cancel = &on_confirmation_cancel;

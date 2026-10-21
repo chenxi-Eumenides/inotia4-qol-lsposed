@@ -30,9 +30,6 @@ struct UiConfirmationSpec {
 struct UiConfirmationSpecText {
     uint32_t size;          // caller sets sizeof(UiConfirmationSpecText)
     char message[256];
-    // Ignored by the provider; layout is derived from price (price>0 -> price layout 2,
-    // price==0 -> plain body 0). Retained only for struct-layout compatibility.
-    uint32_t display_type;
     uint32_t price;         // 0..INT32_MAX; numeric native callback param
     UiConfirmationCallback on_confirm;
     UiConfirmationCallback on_cancel;

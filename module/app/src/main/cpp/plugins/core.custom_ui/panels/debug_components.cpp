@@ -200,7 +200,6 @@ void open_demo_confirmation(uint32_t price) {
     spec.size = sizeof(spec);
     std::snprintf(spec.message, sizeof(spec.message), "%s",
                   price == 0 ? "确认执行该操作？" : "是否出售该物品？");
-    spec.display_type = 0;
     spec.price = price;
     spec.on_confirm = &demo_confirmation_confirmed;
     spec.on_cancel = &demo_confirmation_cancelled;

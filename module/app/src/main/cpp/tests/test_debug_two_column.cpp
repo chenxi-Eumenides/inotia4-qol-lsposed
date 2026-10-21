@@ -617,7 +617,7 @@ int main() {
     g_choice_active = false;
     no_price_demo->click(no_price_demo->user);
     CHECK(g_confirmation_open_count == 1 && g_confirmation_active);
-    CHECK(g_last_confirmation_text.display_type == 0 && g_last_confirmation_text.price == 0);
+    CHECK(g_last_confirmation_text.price == 0);
     CHECK(std::strcmp(g_last_confirmation_text.message, "确认执行该操作？") == 0);
     g_confirmation_active = false;
     g_last_confirmation_text.on_confirm(g_last_confirmation_text.user);

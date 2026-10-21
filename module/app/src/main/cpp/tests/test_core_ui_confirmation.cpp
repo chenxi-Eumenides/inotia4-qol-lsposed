@@ -253,7 +253,6 @@ int main() {
     UiConfirmationSpecText text_request{};
     text_request.size = sizeof(text_request);
     std::snprintf(text_request.message, sizeof(text_request.message), "%s", local_message);
-    text_request.display_type = 4;
     text_request.price = 77;
     text_request.on_confirm = &on_confirm;
     text_request.on_cancel = &on_cancel;
@@ -265,7 +264,7 @@ int main() {
     assert(g_raw_pointer != local_message);
     assert(g_raw_length == std::strlen(local_message) &&
            std::strcmp(g_raw_pointer, local_message) == 0);
-    assert(g_raw_display_type == 4 && g_raw_param == 77);
+    assert(g_raw_display_type == 0 && g_raw_param == 77);  // layout is derived from price
     std::memset(local_message, 0, sizeof(local_message));
     assert(std::strcmp(g_raw_copy, "任意字符串：确认执行？") == 0);
     trigger_confirm();
