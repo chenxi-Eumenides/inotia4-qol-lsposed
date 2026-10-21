@@ -13,10 +13,10 @@
 | `ui_components` | 1.22 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 3 槽：`capsule_text_button_create`、`decorated_text_button_create`、`main_menu_decorated_button_create`；容器 content rect/content draw 两槽已随要求 4 撤销删除）。此后追加可缩放图标按钮族与 `compact_capsule_text_button_create`；**1.19 追加 `forget_native`**：native 控件由外部（游戏控件树）销毁时只注销组件记录、不调用 `delete_control`；**1.20 追加锚定按钮**（`anchored_button_ensure/set_visible/release/draw`）：按 `QolUiRootKind` 每帧解析活挂载根、用 `click_binding_is_current` 证明句柄身份，失效时注销组件记录并重建；`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。**1.21 追加任意原生控件锚定**（`anchored_control_ensure/set_visible/release/detach`）：多控件/自定义 `CO_PROC`/自带 data 的游戏树挂载，身份证明用 `control_proc_matches` + type/user_type/data 快照。**1.22 追加 `draw_rect`、`draw_rounded_rect`、`draw_circle`**：纯色 RGB565 填充/边框，alpha 为 0–100 百分比；圆角半径最多 256，圆形直径最多 512，不提供抗锯齿。 |
 | `ui_panels` | 1.3 | 面板 provider 注册后的打开、关闭、状态/返回协作接口 |
 | `ui_choice` | 1.1 | 原生选择框 open/active/close API |
-| `ui_confirmation` | 1.1 | 单一 owner 确认框；V1 TextData 走原生路径 `open/active/close`，V2 显式文案 `open_v2` 按上下文自动选择原生弹窗或自绘 overlay 后端 |
+| `ui_confirmation` | 1.0 | 单一 owner 原生 Yes/No 确认框 `open/active/close`；自定义 panel 上由模块在帧内补绘原生外观 |
 | `text_layer` | 1.0 | `MEMORYTEXT_GetText` hook 上的文本订阅/分派接口 |
 
-提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`；`QolUiAdapter` 尾部追加三组槽：1.27 的 popup 活动状态、回调槽读取/条件替换、TEXTDATABASE Yes/No 创建与 owner-checked 原生关闭入口；1.28 的 overlay 作用域 `begin_overlay_scope/end_overlay_scope` 与绘制回调注册 `set_frame_overlay`（宿主在 `end_frame` 内、原生 `GRPX_End` 前一次性消费）；1.29 的原生 raw `UIPopupMsg_CreateYesNo(char*, len, 0, 2, callbacks, price)` 创建入口。这些槽是 provider 实现细节，消费者必须走 `ui_confirmation` capability，不得缓存或直接调用 callback trampoline。`ui_components` 契约保持 1.22。`ui.state` 1.2 尾部追加了带 size 的 `UiCustomDialogSnapshotV2`（body/options/price）与 `publish_custom_dialog_v2`，用于自绘后端的 `/api/ui/dialog` 投影。公共版本定义见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`contracts/panels.h`、`contracts/ui_choice.h` 和 `contracts/text_layer.h`。本插件另声明三项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate。
+提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`；`QolUiAdapter` 尾部追加：1.27 popup 活动状态、回调槽读取/条件替换、TEXTDATABASE Yes/No 创建与 owner-checked 关闭；1.28 overlay 作用域 `begin_overlay_scope/end_overlay_scope` 与绘制回调注册 `set_frame_overlay`；1.30 `call_ui_popup_msg_draw`（原生 `UIPopupMsg_Draw`）；1.31 `save_lcd`（主动 `GRP_SaveLCD` 快照）。1.29 的 raw Yes/No 槽已随 V2 移除，序号保留不回退。这些槽是 provider 实现细节，消费者必须走 `ui_confirmation` capability，不得缓存或直接调用 callback trampoline。`ui_components` 契约保持 1.22，`ui.state` 保持 1.1。公共版本定义见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`contracts/panels.h`、`contracts/ui_choice.h` 和 `contracts/text_layer.h`。本插件另声明四项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、私有 `Scene_Draw_POPUP_SC_CHOICE` entry hook、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate。`QolChoicePort` 1.1 尾追加 `draw` 原语（读 refresh flag / SaveLCD / 清 flag / GRPX Start·End / UIChoice_Draw），供选择框首帧去暗化 wrapper 使用。
 
 ### 原生确认框（`ui_confirmation`）
 
@@ -30,20 +30,17 @@
 
 示例：`UiConfirmationSpec spec{9, 0, 2, price, on_confirm, on_cancel, context}; uint64_t token = 0; api->open(&spec, &token);`。扩展背包当前 `create_confirmation(variant, price, ...)` 使用 text ID 9、display type 0、format arg 2；其 operation-specific callback template 与回调槽恢复仍由扩展背包专属端口管理，不因共享 API 改写。
 
-#### V2 显式文案与双后端（`ui_confirmation` 1.1）
+#### V1 面板补绘（`ui_confirmation`）
 
-`UiConfirmationSpecV2`（首字段 `size`，capability minor 1.1）在 V1 字段外增加 `message[256]`、`confirm_label[64]`、`cancel_label[64]`、`price_unit[64]`，经 `open_v2(spec, out_token)` 打开。core.custom_ui 按自身 `ui_panels` 活动栈选择后端（不使用 `/api/ui/screen`）：
+V1 仍创建游戏原生 `UIPopupMsg`（TextData 路径、token/callback/close 语义不变）。当打开时顶层活动 provider 有 `process` 回调且 overlay 作用域可用，`PopupHost::dispatch_process` 会 arm `frame_overlay` scope；宿主在 parent panel 自身 GRPX 帧的 `end_frame`（`GRPX_End` 之前）调用一次注册回调，回调仅在 `UIPopupMsg_bOn==1` 时调用 Adapter 1.30 `call_ui_popup_msg_draw()`，保留 100% 原生外观。成功绘制一次后才启用模态输入门禁；`bOn==0` 时结束 scope 并撤下门禁。补绘失败只记录日志，不改变 V1 token/close 语义。
 
-- **自绘 overlay 后端**（自定义 panel 活动且顶层 provider 有 `process` 回调）：不创建原生 `UIPopupMsg`（`bOn` 保持 0），向 `ui.state` 发布 V2 快照，并经 `frame_overlay` 作用域在 parent panel 自身 GRPX 帧内、`end_frame` 之前一次性绘制遮罩/面板/正文/价格/按钮。作用域绑定 confirmation token + provider identity + open generation 三元组；嵌套 dispatch 以 sentinel 隔离；scope 收尾经幂等 owner 栈配对。打开时作用域不可用即 fail-close（不返回 token）；首帧绘制失败由收尾路径取消并清理，不留不可见模态。
-- **原生后端**（无自定义 panel）：`message` 非空走原生 raw `UIPopupMsg_CreateYesNo`（外观/按钮/价格栏由游戏渲染）；`message` 为空回退 V1 TextData 路径。
-
-输入语义（自绘后端）：open 成功起即为模态——触摸按白名单事件码 `0x17/0x18/0x19`（press/release/move）经 `hit_test` 分发按钮回调恰一次，其他事件码（含 `0x8000000X` 系统子事件）不触碰坐标参数、直接消费；F3（Return）取消确认框且不下传 parent；F4 与其他事件一律消费。Return 取消经帧号绑定的 suppression latch 防止同帧二次分发到 parent。V1 路径行为不变；`close(token)`、Busy 拒绝、callback exactly-once、停用清理对两种后端一致。overlay 绘制回调注册在宿主侧，注销失败进入 orphaned 状态（禁用绘制但保留 owner），重启用时自动重试注册，失败则插件启用整体 fail-closed。
+输入语义：补绘成功且门禁启用后，F3（Return）只消费不下传 parent，由游戏 `UIPopupMsg_Process` 关闭弹窗；帧号绑定的 suppression latch 防止同帧双关。F4 与所有非触摸事件直接消费；触摸事件（`0x17/0x18/0x19`）也只消费，**不做模块 hit_test 分发**，原生按钮命中仍由游戏控件树处理。overlay 回调注册在宿主侧；注销失败进入 orphaned 状态，重启用时重试注册。
 
 ### 选择框背景、叠层与基础形状
 
 `ui_choice` 只改写模块自有选项的 items/title/focus 并 push 游戏的 `F_PANEL_CHOICE_ENTER` PopupState；它不自行绘制背景。当前源码和符号登记没有找到 `Scene_Draw_POPUP_SC_CHOICE` 的绘制体，也没有证据定位调用方反馈的黑底来源、颜色或 alpha 参数，因此**不能安全地为原生选择框设置背景透明度**。`ui_components` 的形状 alpha 只作用于调用者主动绘制的矩形/圆角矩形/圆形，不会影响游戏原生 choice。
 
-原生 choice 位于游戏 PopupState 栈顶，结构上可以覆盖底层原生页面；它不是 `ui_panels` 的自定义 panel 栈成员。现有资料不保证它与其他 provider 的自定义页面如何排序、是否遮罩输入，也没有嵌套页面真机证据；不得据此承诺任意自定义页面叠层或 z-order。`ui_confirmation` 使用另一套全局 `UIPopupMsg` 单例，活动原生弹窗时会 Busy 拒绝。**用户真机观察（2026-10-21）**：在自定义 panel 打开确认框时，`/api/ui/dialog` 显示 `type=popup, active=true`，输入被原生弹窗阻断，但弹窗视觉不可见；返回键会同时关闭确认框和 panel。同日只读设备 trace（68/68 渲染帧）证明根因是该状态下 `UIPopupMsg_Draw` 从未被调用（输入模态由 `UIPopupMsg_Process` 提供，panel 的 GRPX 帧照常渲染），并非 z-order 遮挡；见 `docs/refactor/verification/ui-state/20261022-dual-backend-confirmation.md`。该场景现由 `ui_confirmation` 1.1 自绘 overlay 后端处理；双后端真机视觉验收仍为 NOT_ACCEPTED。
+原生 choice 位于游戏 PopupState 栈顶，结构上可以覆盖底层原生页面；它不是 `ui_panels` 的自定义 panel 栈成员。现有资料不保证它与其他 provider 的自定义页面如何排序、是否遮罩输入，也没有嵌套页面真机证据；不得据此承诺任意自定义页面叠层或 z-order。`ui_confirmation` 使用另一套全局 `UIPopupMsg` 单例，活动原生弹窗时会 Busy 拒绝。**用户真机观察（2026-10-21）**：在自定义 panel 打开确认框时，`/api/ui/dialog` 显示 `type=popup, active=true`，输入被原生弹窗阻断，但弹窗视觉不可见；返回键会同时关闭确认框和 panel。同日只读设备 trace（68/68 渲染帧）证明根因是该状态下 `UIPopupMsg_Draw` 从未被调用（输入模态由 `UIPopupMsg_Process` 提供，panel 的 GRPX 帧照常渲染），并非 z-order 遮挡；见 `docs/refactor/verification/ui-state/20261022-dual-backend-confirmation.md`。该场景现由 V1 面板补绘处理：panel 帧内调用原生 `UIPopupMsg_Draw` 保留原版外观；真机视觉验收仍为 NOT_ACCEPTED。
 
 `UiShapeDesc` 提供基础矩形、可调半径圆角矩形与圆形；调用方可设置逻辑尺寸、RGB565 填充/边框色、共同 alpha、边框宽度和圆角半径。alpha 为游戏 `GRPX_FillRectAlpha` 的 0–100 百分比；形状按互斥扫描线区域绘制，不重复合成边框/填充像素。栅格绘制不抗锯齿，圆角半径上限 256、圆形直径上限 512。
 
@@ -53,7 +50,7 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 
 该构建还注册唯一的 debug `entry` feature `core.custom_ui.open_debug_components`，action label 为“打开”，callback 打开 `debug_components` 面板；另外的 `ui_tools` 是 Hidden toggle，不是入口项（`plugin.cpp:220-241`）。endpoint/feature 契约以路由元数据和 descriptor 为实现事实，API 公共契约以 [API 参考](../api-reference.md) 为准。
 
-Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、圆形和 alpha 示例；“原生对话框”类别提供原生选择框、无价格确认框、价格 100 确认框、自绘确认框（V2 显式文案+价格 100）四个无业务副作用的检查入口。确认/取消只更新面板状态，退出面板或停用时会关闭本 demo 自己打开的 dialog。
+Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、圆形和 alpha 示例；“原生对话框”类别提供原生选择框、无价格确认框、价格 100 确认框三个无业务副作用的检查入口；确认框在自定义面板上由模块补绘原生外观。确认/取消只更新面板状态，退出面板或停用时会关闭本 demo 自己打开的 dialog。
 
 `PluginDescriptor` 通过 `http_endpoints` 声明这三个 Debug command routes（`plugin.cpp` 中的 `kHttpEndpoints` 与 descriptor 尾部）；各 Debug panel 注册函数只登记 UI panel provider 和 scheduler task，不另行向 `http_dispatch` 动态注册 HTTP route。
 
@@ -89,7 +86,7 @@ Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、
   修复（Host）：`TxDeps::MechanismOutcome` 尾追加默认 null 的 `backup`；PtrSlot 成功回填 `site.expected_value`；引擎成功步透传到 `TxStep.backup`；不改 registry 生产 gate、不改公共 header。该 Host 修复**保留**，但其目的仅是让**原生旁路能真实调用原函数**，不改变 Native 业务语义或调用协议。**注意**：`world_teleport` 的**模块 active 成功分支不依赖 backup**，其目的地问题见 B，不可照抄同一原因。
 - **B（模块侧，`UIChoice_Init` 覆写）**：v29 `Scene_Init_POPUP_SC_CHOICE` 按序调用 `UIChoice_Init` → `UIChoice_CreateControl`（两者是两个独立函数，中间无第三函数）；`CreateControl` 只读 count/items/title 等全局，是纯消费者。旧模块在 push 前写入 items/count/focus，被 `UIChoice_Init` 清写覆盖，导致 `text_owns` 失败、目的地无反应。
   修复（`plugins/core.custom_ui`，`choice_init_wrapper`，按函数名引用）：`original(control)` **之后**（Init 与 CreateControl 之间）恢复模块自有的 items/count/focus 及可选 title，**有/无 title 都要恢复**；限定为**进入 wrapper 之前已存在的 pending 且同一 generation**。判定顺序：**先 ownership 判定**——仅**明确 foreign** 才把控制权交回原函数；ownership **读取不明**时只报错，不猜、不写。
-  已确认 **module owned** 时：成功、关闭、读取错误、索引错误、focus 错误**都不得运行原版剧情回调**；**关闭由模块自己 close popup、不触发 `on_select`**；失败只记原因并保活，等待用户下次点击。**原生只在 `inactive` 或明确 `foreign`（`text_owns=0`）时透传**；**ownership 未知/读取失败保持 module 路径、不写原生**。wrapper 先捕获 `original` 与 spec/generation/pending，再调原函数，随后锁内核对同 generation、锁外调用 port 写入；无标题 spec 同样恢复 items。无新 hook/resource/port/公共 ABI/调度器，回调签名保持 `void`，调用点不使用其返回值。
+  已确认 **module owned** 时：成功、关闭、读取错误、索引错误、focus 错误**都不得运行原版剧情回调**；**选择关闭由原生 `UIChoice_ButtonListExe` 排队唯一一次 pop；模块只清自身状态、不重复 `close_popup`、不触发 `on_select`**（模块主动关闭 API 仍保留关闭能力，同 generation 仅一次）；失败只记原因并保活，等待用户下次点击。**原生只在 `inactive` 或明确 `foreign`（`text_owns=0`）时透传**；**ownership 未知/读取失败保持 module 路径、不写原生**。wrapper 先捕获 `original` 与 spec/generation/pending，再调原函数，随后锁内核对同 generation、锁外调用 port 写入；无标题 spec 同样恢复 items。无新 hook/resource/port/公共 ABI/调度器，回调签名保持 `void`，调用点不使用其返回值。
 - **日志**：模块 blocked 用 `choice button module blocked reason=…`（键：`owner_unavailable`、`owner_read_failed`、`missing_module_fn`、`selected_index`、`index`、`focus`）；foreign 旁路用 `choice button foreign passthrough text_owns=0 …`；成功用 `choice button module <select|close> index=N`。旧 `fallback reason` 关键词已删除，`original=null` 警告仍在。**不记录玩家文本**。
 - **证据与状态**：`native_choice_tests` **200 passed / 0 failed**（`.tmp/choice-dialog-fix-20261016/module-only/01-run.log`）；`hooks_transaction_tests` **543 checks 通过**，未重复运行无关测试或增加独立复核。`scripts/build-debug.sh --offline` 成功（7 秒），模块 `output/inotia4_qol_lsposed_debug_2610161506_a149d8807dd7.apk`，SHA-256 `a149d8807dd762d102ee362c7c394582a83ad8e2a32a033f3ab0c7cae64a81ab`；直接 `scripts/patch-apk.sh` 成功 **4 / 失败 0**，当前候选 `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`，SHA-256 `c06a849123edfd5f43023cd0f83bf1b3e2a8315c1200181a7c02e42ad19e41db`。脚本日志在 `.tmp/choice-dialog-fix-20261016/`。**未安装或重启、未执行选项操作**，构建身份不是运行身份；选择 VM **NOT_ACCEPTED**，由用户亲自验证。3 条资源声明、capability 版本及发布版本均不变。
 
@@ -97,7 +94,7 @@ Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、
 
 - **Requires / optional**：`ui.state` 1.0 为可选依赖；Debug 构建对 `http.registry`/`http.dispatch` v1.1 的依赖也为可选，非 Debug descriptor 不声明 HTTP 依赖（`plugin.cpp:70-79,247-253`；版本见 `contracts/http.h:96-99`）。provider 缺失只使 Debug HTTP 探针无法接线，不影响共享 UI 功能；provider 恢复后按可选依赖生命周期重新接线。选择框向 `ui.state` 发布自定义 dialog snapshot；缺少该 capability 时 native choice 本身仍按本插件路径工作（`feature.cpp` 的 `ui_state_api`、`publish_dialog_snapshot`）。
 - **Required port**：`QOL_PORT_CHOICE` 1.0，提供原生选择框状态/选项/标题/焦点/弹出等受控操作（`plugin.cpp:134-137`；版本见 `contracts/game_ports/ports.h:17,47`；接口见 `contracts/game_ports/choice_port.h:11-30`）。
-- **Host SDK**：使用 Host 注入的 `sdk->ui` Adapter（当前契约 1.27，兼容布局按 minor/size 检查；minor 23 尾追加 `draw_part_alpha(group, x, y, loc, type, flip, alpha)`，逐项转发 alpha；旧 `draw_part` 保持第七参 0；minor 27 尾追加 popup 活动状态、回调槽条件操作、原生确认框创建与 owner-checked 关闭），以及 `panels`、`hooks.text_subscribe/run_text`、descriptor endpoint handlers、scheduler/log（`contracts/ui.h:3-6,15-19`；`plugin.cpp` 中的 `kHttpEndpoints`；`text_mechanism.cpp:27-46`）。
+- **Host SDK**：使用 Host 注入的 `sdk->ui` Adapter（当前契约 1.31，兼容布局按 minor/size 检查；minor 23 追加 `draw_part_alpha`；minor 27 popup 活动状态/回调槽/创建/关闭；minor 28 overlay scope 与绘制注册；minor 30 原生 `UIPopupMsg_Draw`；minor 31 主动 `GRP_SaveLCD`），以及 `panels`、`hooks.text_subscribe/run_text`、descriptor endpoint handlers、scheduler/log（`contracts/ui.h:3-6,15-19`；`plugin.cpp` 中的 `kHttpEndpoints`；`text_mechanism.cpp:27-46`）。
 - **已核实消费者**：`ui_components` 与 `ui_panels` 由当前 `plugins/settings/` 设置页消费；`ui_panels` 还由 `save_backup`、`autosell` 使用；`ui_choice` 被 `world_teleport` 作为可选能力消费；`text_layer` 被 `custom_recipe`、`character_panel_i18n` 要求（`plugins/settings/plugin.cpp:32-38`、`settings/panels/settings.cpp:816-821`、`save_backup/plugin.cpp:31-35`、`autosell/plugin.cpp:196-204`、`world_teleport/plugin.cpp:46-61`、`custom_recipe/plugin.cpp:168-178`、`character_panel_i18n/plugin.cpp:33-36`）。
 - **真实设置页边界**：页面实现位于 `plugins/settings/`，descriptor ID 为 `settings`，只要求 `ui_panels` 与 `ui_components`；`core.custom_ui/settings_contribution.cpp` 当前不注册设置项（`plugins/settings/plugin.cpp:19-20,32-38,238-255`；`core.custom_ui/settings_contribution.cpp:4-8`）。
 
@@ -131,9 +128,9 @@ Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、
 | 文本共享机制 | `module/app/src/main/cpp/plugins/core.custom_ui/text_mechanism.cpp`、`text_mechanism.h` | subscribe/unsubscribe 与原文 fallback dispatch：`text_mechanism.cpp:27-64` |
 | Debug panels/endpoints | `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`、`panels/debug_components.cpp`、`debug_scroll.cpp`、`debug_help.cpp` | descriptor endpoint facts/handlers 位于 plugin.cpp；各面板源码实现 command callback 与 scheduler task |
 | 跨插件契约 | `module/app/src/main/cpp/contracts/ui.h`、`panels.h`、`ui_choice.h`、`text_layer.h`、`game_ports/choice_port.h` | adapter/components 版本与线程说明：`ui.h:3-19`；其余 capability ID/version 与接口见各文件开头定义 |
-| 原生确认框能力 | `module/app/src/main/cpp/contracts/ui_confirmation.h`、`plugins/core.custom_ui/ui_confirmation.cpp` | 固定宽度 spec（V1/V2）、单活动 owner、参数/上下文隔离、条件 callback 槽恢复、原生 close path、双后端路由与自绘 overlay 接线 |
-| 确认框 overlay 作用域 | `plugins/core.custom_ui/panels/frame_overlay.{h,cpp}`、`panels/host.{h,cpp}` | 一次性帧作用域（token+provider+generation）、嵌套 sentinel、宿主 `end_frame` 前单次绘制、F3/F4/event 模态门禁 |
-| overlay 呈现组件 | `plugins/core.custom_ui/ui_confirmation_overlay.{h,cpp}` | 遮罩/面板/正文/价格/按钮布局、绘制与命中测试（仅现有绘制原语，不开帧） |
+| 原生确认框能力 | `module/app/src/main/cpp/contracts/ui_confirmation.h`、`plugins/core.custom_ui/ui_confirmation.cpp` | 固定宽度 V1 spec、单活动 owner、条件 callback 槽恢复、原生 close path、V1 面板补绘与模态门禁 |
+| 确认框 overlay 作用域 | `plugins/core.custom_ui/panels/frame_overlay.{h,cpp}`、`panels/host.{h,cpp}` | 一次性帧作用域（token+provider+generation）、嵌套 sentinel、宿主 `end_frame` 前单次补绘、F3/F4/event 模态门禁 |
+
 | 当前设置页消费者 | `module/app/src/main/cpp/plugins/settings/plugin.cpp`、`plugins/settings/panels/settings.cpp` | descriptor requires：`plugin.cpp:32-38`；运行时 require ui_components：`settings.cpp:816-821` |
 
 
