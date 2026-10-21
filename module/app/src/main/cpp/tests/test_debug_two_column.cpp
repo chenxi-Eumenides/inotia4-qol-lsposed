@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "contracts/ui.h"
+#include "contracts/ui_choice.h"
+#include "contracts/ui_confirmation.h"
 #include "contracts/ui_theme.h"
 #include "plugins/core.custom_ui/panels/debug_components.h"
 #include "plugins/core.custom_ui/ui_components.h"
@@ -54,12 +56,75 @@ int g_close_draws = 0;
 int g_back_draws = 0;
 int g_border_draws = 0;
 int g_fill_draws = 0;
+int g_alpha_fill_draws = 0;
 // 记录开关胶囊绘制 rect（屏幕绝对），验证右栏内容不与文本行重叠、不越 viewport。
 std::vector<UiRect> g_toggle_rects;
 const PanelProviderSpec* g_provider = nullptr;
 // fake 原生 TouchHandle：按下置态、移出取消、松开仍落于导航按钮内才 ExecuteProc。
 Control* g_nav_control = nullptr;
 bool g_nav_pressed = false;
+QolResult ok();
+bool g_choice_active = false;
+int g_choice_open_count = 0;
+int g_choice_close_count = 0;
+UiChoiceSpec g_last_choice{};
+bool g_confirmation_active = false;
+uint64_t g_next_confirmation_token = 41;
+uint64_t g_last_closed_confirmation_token = 0;
+UiConfirmationSpec g_last_confirmation{};
+int g_confirmation_open_count = 0;
+
+bool demo_choice_open(const UiChoiceSpec& spec) {
+    if (g_choice_active) return false;
+    g_choice_active = true;
+    ++g_choice_open_count;
+    g_last_choice = spec;
+    return true;
+}
+bool demo_choice_is_active() { return g_choice_active; }
+void demo_choice_close() {
+    ++g_choice_close_count;
+    g_choice_active = false;
+}
+const UiChoiceApi kDemoChoiceApi{&demo_choice_open, &demo_choice_is_active, &demo_choice_close};
+
+QolResult demo_confirmation_open(const UiConfirmationSpec* spec, uint64_t* out_token) {
+    if (spec == nullptr || out_token == nullptr || g_confirmation_active) {
+        return error(kQolErrBusy, "busy", 4);
+    }
+    g_confirmation_active = true;
+    ++g_confirmation_open_count;
+    g_last_confirmation = *spec;
+    *out_token = g_next_confirmation_token++;
+    return ok();
+}
+QolResult demo_confirmation_active(uint64_t token, uint8_t* out_active) {
+    if (token + 1 != g_next_confirmation_token || out_active == nullptr) {
+        return error(kQolErrNotFound, "stale", 5);
+    }
+    *out_active = g_confirmation_active ? 1 : 0;
+    return ok();
+}
+QolResult demo_confirmation_close(uint64_t token) {
+    if (token + 1 != g_next_confirmation_token) return error(kQolErrNotFound, "stale", 5);
+    g_last_closed_confirmation_token = token;
+    g_confirmation_active = false;
+    return ok();
+}
+const UiConfirmationApi kDemoConfirmationApi{
+    &demo_confirmation_open, &demo_confirmation_active, &demo_confirmation_close};
+
+QolResult require_debug_capability(const char* id, QolVersionRange range, const void** out) {
+    if (id == nullptr || out == nullptr) return error(kQolErrInvalidArgument, "invalid", 7);
+    *out = nullptr;
+    if (std::strcmp(id, kUiChoiceCapabilityId) == 0 && range.major == 1 && range.min_minor == 1) {
+        *out = &kDemoChoiceApi;
+    } else if (std::strcmp(id, kUiConfirmationCapabilityId) == 0 &&
+               range.major == 1 && range.min_minor == 0) {
+        *out = &kDemoConfirmationApi;
+    }
+    return *out == nullptr ? error(kQolErrNotFound, "missing", 7) : ok();
+}
 
 QolResult ok() { return qol::contracts::ok(); }
 int32_t main_thread() { return g_main_thread ? 1 : 0; }
@@ -184,7 +249,7 @@ QolResult event(QolUiHandle root, uint64_t ev, uint64_t param, uint64_t, uint32_
 QolResult draw_control(QolUiHandle) { return ok(); }
 QolResult no_op() { return ok(); }
 QolResult fill_rect(UiRect, uint32_t) { ++g_fill_draws; return ok(); }
-QolResult fill_rect_alpha(UiRect, uint32_t, uint32_t) { return ok(); }
+QolResult fill_rect_alpha(UiRect, uint32_t, uint32_t) { ++g_alpha_fill_draws; return ok(); }
 QolResult border_rect(int32_t, int32_t, int32_t, int32_t) { ++g_border_draws; return ok(); }
 QolResult custom_button(QolUiHandle, UiRect, uint32_t, uint32_t, int32_t, const char*, uint32_t,
                         int32_t, int32_t) {
@@ -389,6 +454,7 @@ int main() {
     sdk.panels.unregister_owner = &unregister_owner;
     sdk.scheduler.add = &add_task;
     sdk.scheduler.remove = &remove_task;
+    sdk.capabilities.require = &require_debug_capability;
     CHECK(debug_components_register(&sdk));
     CHECK(g_provider != nullptr && g_provider->panel_id != nullptr &&
           std::strcmp(g_provider->panel_id, "debug_components") == 0);
@@ -415,14 +481,14 @@ int main() {
               text_button->rect.w == text_button_rects[i].w &&
               text_button->rect.h == text_button_rects[i].h);
     }
-    // 双栏页内部：左列表（原生 scroll）7 行，行高 56。
+    // 双栏页内部：左列表（原生 scroll）9 行，行高 56。
     CHECK(columns->children.size() == 1);
     Control* list = columns->children[0].get();
     CHECK(list->kind == 4 && list->rect.x == left.x && list->rect.w == left.w);
     CHECK(list->children.size() == 1);
     Control* group = list->children[0].get();
-    CHECK(group->children.size() == 7);
-    for (size_t i = 0; i < 7; ++i) {
+    CHECK(group->children.size() == 9);
+    for (size_t i = 0; i < 9; ++i) {
         CHECK(group->children[i]->rect.y == static_cast<int64_t>(i) * 56 &&
               group->children[i]->rect.h == 56 && group->children[i]->click != nullptr);
     }
@@ -507,14 +573,58 @@ int main() {
     CHECK(g_provider->callbacks->event(0x18, elsewhere_param, 0x10) == 1);
     CHECK(!g_back_requested);
 
+    // 基础形状类别保留静态绘制示例，形状绘制原语在 Debug 面板帧中被实际调用。
+    CHECK(api->help_page_set_selected(columns, 7).ok == kQolOk);
+    const int shape_draws_before = g_alpha_fill_draws;
+    g_provider->callbacks->process();
+    CHECK(g_alpha_fill_draws > shape_draws_before + 1);
+
+    // 原生对话框类别由三个独立根子项触发，不挂在 HelpPage 的 native scroll 子树内。
+    CHECK(api->help_page_set_selected(columns, 8).ok == kQolOk);
+    g_provider->callbacks->process();
+    CHECK(root->children.size() == 5);  // 双栏页、导航、3 个 Debug-only 弹窗入口。
+    Control* choice_demo = root->children[2].get();
+    Control* no_price_demo = root->children[3].get();
+    Control* price_demo = root->children[4].get();
+    choice_demo->click(choice_demo->user);
+    CHECK(g_choice_open_count == 1 && g_choice_active);
+    CHECK(g_last_choice.count == 3 && g_last_choice.close_index == 2 &&
+          std::strcmp(g_last_choice.dialog_type_id, "core.custom_ui.debug.choice") == 0);
+    g_last_choice.on_select(1, g_last_choice.user);
+    g_choice_active = false;
+    no_price_demo->click(no_price_demo->user);
+    CHECK(g_confirmation_open_count == 1 && g_confirmation_active);
+    CHECK(g_last_confirmation.text_id == 9 && g_last_confirmation.display_type == 0 &&
+          g_last_confirmation.format_arg == 2 && g_last_confirmation.price == 0);
+    g_confirmation_active = false;
+    g_last_confirmation.on_confirm(g_last_confirmation.user);
+    price_demo->click(price_demo->user);
+    CHECK(g_confirmation_open_count == 2 && g_confirmation_active &&
+          g_last_confirmation.price == 100);
+    g_confirmation_active = false;
+    g_last_confirmation.on_cancel(g_last_confirmation.user);
+    price_demo->click(price_demo->user);
+    CHECK(g_confirmation_open_count == 3 && g_confirmation_active &&
+          g_last_confirmation.price == 100);
+    const uint64_t owned_demo_token = g_next_confirmation_token - 1;
+    choice_demo->click(choice_demo->user);
+    CHECK(g_choice_open_count == 2 && g_choice_active);
+
     // 关闭：组件侧树释放，native 由宿主删除。
     g_provider->close();
     CHECK(!g_provider->active());
+    CHECK(!g_confirmation_active && g_last_closed_confirmation_token == owned_demo_token);
+    CHECK(!g_choice_active && g_choice_close_count == 1);
     CHECK(api->help_page_draw(columns).code == kQolErrNotFound);
     remove_control(root);
     CHECK(g_live == 0);
 
+    debug_components_set_enabled(false);
+    CHECK(g_choice_close_count == 1);  // Panel/disable/unregister cleanup is idempotent.
+    g_choice_active = true;  // A different owner's choice must not be closed by stale demo state.
     debug_components_unregister(&sdk);
+    CHECK(g_choice_active && g_choice_close_count == 1);
+    g_choice_active = false;
     ui_components_unbind();
     std::printf("debug_two_column checks: %d\n", checks);
     return 0;

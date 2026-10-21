@@ -44,6 +44,8 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 
 该构建还注册唯一的 debug `entry` feature `core.custom_ui.open_debug_components`，action label 为“打开”，callback 打开 `debug_components` 面板；另外的 `ui_tools` 是 Hidden toggle，不是入口项（`plugin.cpp:220-241`）。endpoint/feature 契约以路由元数据和 descriptor 为实现事实，API 公共契约以 [API 参考](../api-reference.md) 为准。
 
+Debug Components 左栏的“基础形状”类别绘制矩形、圆角矩形、圆形和 alpha 示例；“原生对话框”类别提供原生选择框、无价格确认框、价格 100 确认框三个无业务副作用的检查入口。确认/取消只更新面板状态，退出面板或停用时会关闭本 demo 自己打开的 dialog。
+
 `PluginDescriptor` 通过 `http_endpoints` 声明这三个 Debug command routes（`plugin.cpp` 中的 `kHttpEndpoints` 与 descriptor 尾部）；各 Debug panel 注册函数只登记 UI panel provider 和 scheduler task，不另行向 `http_dispatch` 动态注册 HTTP route。
 
 ### 原生控件与面板绘制事实（2026-10-15）

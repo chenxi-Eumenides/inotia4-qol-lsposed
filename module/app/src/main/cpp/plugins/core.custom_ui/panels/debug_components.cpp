@@ -12,6 +12,8 @@
 #include "../../../contracts/http.h"
 #include "../../../contracts/panels.h"
 #include "../../../contracts/ui.h"
+#include "../../../contracts/ui_choice.h"
+#include "../../../contracts/ui_confirmation.h"
 #include "../../../contracts/ui_theme.h"
 #include "../ui_components.h"
 #include "stack.h"
@@ -26,7 +28,7 @@ constexpr const char* kOwner = "core.custom_ui";
 // viewport 顶从 y=16 下移到 y=100（参照设置页 kLeftY=100）：nav 标准盒占据左上
 // (8,8)-(86,94)，命中区必须让开，否则原生树深优先命中在首行出现歧义；
 // 高度相应收窄（panel.h=640 - 顶 100 - 底边距 16，扩框后 frame 底 632 ≤ 640）。
-// 5 行 × kRowHeight(56) = 280 ≤ 524；右栏 detail 最深内容（开关说明 y+296 行底
+// 9 行 × kRowHeight(56) = 504 ≤ 524；右栏 detail 最深内容（开关说明 y+332 行底
 // ≈ panel y 416）≤ viewport 底 624，均不越界。
 // 右栏交互控件 rect 一律 = kRightViewport 原点 + 局部偏移，与 detail 文字绘制同一
 // 坐标基准；控件不能用旧 viewport 下的固定 panel 绝对 y——viewport 下移后文字
@@ -47,7 +49,7 @@ constexpr contracts::UiRect kPanelNavAbsRect{contracts::ui_theme::kNavBoxAbsX,
 // draw_category_detail 各加一个分支；两类内容互不冲突。
 constexpr const char* kCategoryNames[] = {
     "文本按钮", "开关胶囊", "X/导航按钮", "主题调色板", "框架边框", "箭头按钮", "图标按钮",
-    "基础形状"};
+    "基础形状", "原生对话框"};
 constexpr uint32_t kCategoryCount = sizeof(kCategoryNames) / sizeof(kCategoryNames[0]);
 
 // 右栏交互控件：text_button 走手工命中绘制，nav_button 走自适应绘制。
@@ -73,6 +75,156 @@ contracts::QolUiHandle g_panel_nav = nullptr;
 // 单手势根：双栏页交互控件都在 g_root 下，0x17 统一以 g_root 为根派发，0x18 后清空。
 contracts::QolUiHandle g_touch_root = nullptr;
 uint32_t g_demo_click_count = 0;
+bool g_demo_choice_open = false;
+int32_t g_demo_choice_result = -1;
+uint64_t g_demo_confirmation_token = 0;
+const char* g_demo_confirmation_status = "尚未打开";
+struct ConfirmationDemoContext {
+    uint64_t token = 0;
+};
+ConfirmationDemoContext g_demo_confirmation_context{};
+
+void log_result(const char* action, QolResult result);
+
+const contracts::UiChoiceApi* ui_choice_api() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kUiChoiceCapabilityId,
+            QolVersionRange{contracts::kUiChoiceVersionMajor,
+                            contracts::kUiChoiceVersionMinor}, &iface))) {
+        return nullptr;
+    }
+    return static_cast<const contracts::UiChoiceApi*>(iface);
+}
+
+const contracts::UiConfirmationApi* ui_confirmation_api() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kUiConfirmationCapabilityId,
+            QolVersionRange{contracts::kUiConfirmationVersionMajor,
+                            contracts::kUiConfirmationVersionMinor}, &iface))) {
+        return nullptr;
+    }
+    return static_cast<const contracts::UiConfirmationApi*>(iface);
+}
+
+void close_demo_choice() {
+    if (!g_demo_choice_open) return;
+    g_demo_choice_open = false;
+    g_demo_choice_result = -1;
+    const contracts::UiChoiceApi* api = ui_choice_api();
+    if (api != nullptr && api->close != nullptr) api->close();
+}
+
+void demo_choice_selected(int index, void*) {
+    g_demo_choice_result = index;
+    g_demo_choice_open = false;
+}
+
+void clear_demo_confirmation_token(uint64_t token) {
+    if (token == 0 || g_demo_confirmation_token != token) return;
+    g_demo_confirmation_token = 0;
+    g_demo_confirmation_context.token = 0;
+}
+
+void demo_confirmation_confirmed(void* user) {
+    const auto* context = static_cast<const ConfirmationDemoContext*>(user);
+    const uint64_t token = context == nullptr ? 0 : context->token;
+    clear_demo_confirmation_token(token);
+    g_demo_confirmation_status = "已确认（无游戏副作用）";
+}
+
+void demo_confirmation_cancelled(void* user) {
+    const auto* context = static_cast<const ConfirmationDemoContext*>(user);
+    const uint64_t token = context == nullptr ? 0 : context->token;
+    clear_demo_confirmation_token(token);
+    g_demo_confirmation_status = "已取消（无游戏副作用）";
+}
+
+void close_demo_confirmation() {
+    if (g_demo_confirmation_token == 0) return;
+    const contracts::UiConfirmationApi* api = ui_confirmation_api();
+    if (api == nullptr || api->close == nullptr) return;
+    const uint64_t token = g_demo_confirmation_token;
+    const QolResult result = api->close(token);
+    if (contracts::succeeded(result) || result.code == kQolErrNotFound) {
+        clear_demo_confirmation_token(token);
+        g_demo_confirmation_status = "已关闭调试确认框";
+    } else {
+        log_result("close debug confirmation", result);
+    }
+}
+
+void open_demo_choice() {
+    const contracts::UiChoiceApi* api = ui_choice_api();
+    if (api == nullptr || api->open == nullptr || api->active == nullptr) {
+        g_demo_choice_result = -2;
+        return;
+    }
+    if (api->active()) {
+        g_demo_choice_result = -3;
+        return;
+    }
+    static const char* const items[] = {"预览选项一", "预览选项二", "关闭"};
+    const contracts::UiChoiceSpec spec{items, 3, "原生选择框外观预览", 2,
+        &demo_choice_selected, nullptr, "core.custom_ui.debug.choice"};
+    g_demo_choice_result = -1;
+    g_demo_choice_open = api->open(spec);
+    if (!g_demo_choice_open) g_demo_choice_result = -2;
+}
+
+void open_demo_confirmation(uint32_t price) {
+    const contracts::UiConfirmationApi* api = ui_confirmation_api();
+    if (api == nullptr || api->open == nullptr || api->active == nullptr) {
+        g_demo_confirmation_status = "ui_confirmation 不可用";
+        return;
+    }
+    if (g_demo_confirmation_token != 0) {
+        uint8_t active = 0;
+        const uint64_t token = g_demo_confirmation_token;
+        const QolResult status = api->active(token, &active);
+        if (contracts::succeeded(status) && active != 0) {
+            g_demo_confirmation_status = "调试确认框仍打开";
+            return;
+        }
+        if (contracts::succeeded(status) || status.code == kQolErrNotFound) {
+            clear_demo_confirmation_token(token);
+        } else {
+            g_demo_confirmation_status = "确认框状态暂不可读";
+            return;
+        }
+    }
+    contracts::UiConfirmationSpec spec{9, 0, 2, price,
+        &demo_confirmation_confirmed, &demo_confirmation_cancelled,
+        &g_demo_confirmation_context};
+    uint64_t token = 0;
+    const QolResult result = api->open(&spec, &token);
+    if (token != 0) {
+        g_demo_confirmation_token = token;
+        g_demo_confirmation_context.token = token;
+    }
+    if (!contracts::succeeded(result)) {
+        g_demo_confirmation_status = "确认框打开失败";
+        if (token != 0) close_demo_confirmation();
+        return;
+    }
+    if (token == 0) {
+        g_demo_confirmation_status = "确认框未返回 token";
+        return;
+    }
+    g_demo_confirmation_status = price == 0 ? "无价格确认框已打开" : "价格 100 确认框已打开";
+}
+
+void dialog_demo_clicked(void* user) {
+    switch (reinterpret_cast<uintptr_t>(user)) {
+        case 0: open_demo_choice(); break;
+        case 1: open_demo_confirmation(0); break;
+        case 2: open_demo_confirmation(100); break;
+        default: break;
+    }
+}
 
 int32_t color_channel(uint32_t color, uint32_t shift) {
     return static_cast<int32_t>((color >> shift) & 0xffu);
@@ -268,6 +420,29 @@ bool build_icon_demo(const contracts::QolUiComponents* components,
     return true;
 }
 
+bool build_native_dialog_demos(const contracts::QolUiComponents* components,
+                               contracts::QolUiHandle parent, CategoryControl* out,
+                               uint32_t* out_count) {
+    // Popup entry buttons are siblings of the HelpPage, not children of its native scroll tree.
+    if (components->flat_text_button_create == nullptr) return false;
+    const contracts::UiRect rects[] = {
+        {kRightViewport.x + 20, kRightViewport.y + 120, 220, 48},
+        {kRightViewport.x + 264, kRightViewport.y + 120, 220, 48},
+        {kRightViewport.x + 20, kRightViewport.y + 176, 220, 48},
+    };
+    const char* const labels[] = {"打开原生选择框", "无价格确认框", "价格确认框 100"};
+    for (uint32_t i = 0; i < 3; ++i) {
+        const contracts::UiButtonDesc desc{rects[i], labels[i], 0, &dialog_demo_clicked,
+            reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
+        contracts::QolUiHandle handle = nullptr;
+        const QolResult result = components->flat_text_button_create(&desc, parent, &handle);
+        if (!contracts::succeeded(result) || handle == nullptr) return false;
+        out[i] = {handle, 0};
+        *out_count = i + 1;
+    }
+    return true;
+}
+
 void clear_category_controls() {
     const contracts::QolUiComponents* components = ui_components_api();
     if (components != nullptr && components->destroy != nullptr) {
@@ -301,6 +476,9 @@ bool build_category_controls(int32_t index) {
             break;
         case 6:
             ok = build_icon_demo(components, g_root, g_category_controls, &count);
+            break;
+        case 8:
+            ok = build_native_dialog_demos(components, g_root, g_category_controls, &count);
             break;
         default:  // 分类 1/3/4 纯绘制，无交互控件。
             break;
@@ -477,6 +655,27 @@ void draw_shapes_detail(const contracts::QolUiAdapter* adapter,
     (void)components->draw_rounded_rect(&translucent);
 }
 
+void draw_native_dialog_detail(const contracts::QolUiAdapter* adapter, contracts::UiRect right) {
+    if (adapter == nullptr || adapter->draw_string_with_font == nullptr) return;
+    set_text_color(adapter, contracts::ui_theme::kTextGold);
+    (void)adapter->draw_string_with_font("原生 ui_choice / ui_confirmation 预览",
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
+    set_text_color(adapter, contracts::ui_theme::kTextNormal);
+    (void)adapter->draw_string_with_font("打开后观察黑底与本页的覆盖关系；确认或取消后可继续操作。",
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 84), 0, 0);
+    const char* choice_status = g_demo_choice_open ? "选择框：打开中" :
+        g_demo_choice_result >= 0 ? (g_demo_choice_result == 2 ? "选择框：已关闭" :
+            g_demo_choice_result == 0 ? "选择框：选项一" : "选择框：选项二") :
+        g_demo_choice_result == -2 ? "选择框：打开失败 / 能力不可用" :
+        g_demo_choice_result == -3 ? "选择框：已有原生选择框" : "选择框：待打开";
+    (void)adapter->draw_string_with_font(choice_status,
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 252), 0, 0);
+    (void)adapter->draw_string_with_font(g_demo_confirmation_status,
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 292), 0, 0);
+    (void)adapter->draw_string_with_font("两类回调只更新调试状态，不写物品、金币或存档。",
+        static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 332), 0, 0);
+}
+
 // help_page detail 回调：user 存分类序号，只做静态绘制。
 void draw_category_detail(void* user, contracts::UiRect right) {
     const int32_t index = static_cast<int32_t>(reinterpret_cast<uintptr_t>(user));
@@ -520,6 +719,9 @@ void draw_category_detail(void* user, contracts::UiRect right) {
         case 7:
             draw_shapes_detail(adapter, components, right);
             break;
+        case 8:
+            draw_native_dialog_detail(adapter, right);
+            break;
         default:
             break;
     }
@@ -527,6 +729,8 @@ void draw_category_detail(void* user, contracts::UiRect right) {
 
 void destroy_components() {
     // root 是 panel 组件：destroy 归还 owned 子树（含 help_page/按钮），native root 由宿主删除。
+    close_demo_choice();
+    close_demo_confirmation();
     const contracts::QolUiComponents* components = ui_components_api();
     for (auto& control : g_category_controls) control = {};
     g_category_control_count = 0;
@@ -633,6 +837,13 @@ void panel_process() {
     if (adapter == nullptr || components == nullptr || adapter->begin_frame == nullptr ||
         adapter->end_frame == nullptr) {
         return;
+    }
+    if (g_demo_choice_open) {
+        const contracts::UiChoiceApi* choice = ui_choice_api();
+        if (choice != nullptr && choice->active != nullptr && !choice->active()) {
+            g_demo_choice_open = false;
+            if (g_demo_choice_result < 0) g_demo_choice_result = 2;
+        }
     }
 
     // 帧安全点：轮询左栏选中，切换分类时销毁旧交互控件并重建，回调内不做创建/销毁。
@@ -821,6 +1032,8 @@ bool debug_components_register(const contracts::QolHostSdk* sdk) {
 }
 
 void debug_components_unregister(const contracts::QolHostSdk* sdk) {
+    close_demo_choice();
+    close_demo_confirmation();
     ui_panels_close(kPanelId);
     if (sdk != nullptr) {
         if (g_apply_task != 0 && sdk->scheduler.remove != nullptr) {
@@ -838,6 +1051,8 @@ void debug_components_set_enabled(bool enabled) {
     g_enabled.store(enabled, std::memory_order_release);
     if (!enabled) {
         g_requested_state.store(-1, std::memory_order_release);
+        close_demo_choice();
+        close_demo_confirmation();
         ui_panels_close(kPanelId);
     }
 }
