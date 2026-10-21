@@ -31,8 +31,8 @@ void root_decor_draw() {
                                       static_cast<int32_t>(root.y + ROOT_H / 2), 2, 1);
         }
     }
-    component_container({0x10, 0x10, ROOT_W - 0x20, ROOT_H - 0x20});
-    component_container({OPS_COL_X, OPS_Y0 - 0x08, OPS_COL_W, 3 * OPS_BTN_H + 2 * OPS_BTN_GAP + 0x10});
+    component_container({-0x1E, 0x10, 0x3FC, 0x260});
+    component_container({OPS_COL_X, OPS_Y0 - 0x13, OPS_COL_W, 0xFA});
     component_container({LIST_COL_X, FRAME_Y, LIST_COL_W, FRAME_H});
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui != nullptr && ui->fill_rect != nullptr) {
