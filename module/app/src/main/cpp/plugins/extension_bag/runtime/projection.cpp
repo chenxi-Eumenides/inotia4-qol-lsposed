@@ -340,6 +340,14 @@ bool install_module_view_locked(int bag) {
         !extension_bag_session_admitted_locked() ||
         runtime_state().host.write_port->ui.refresh_item_area == nullptr) return false;
     if (runtime_state().objects.bag.capacities[bag] == 0) return false;
+    // 切换扩展袋时必须先还原旧投影，再读取窗口袋容量字；否则会把上一次
+    // 投影写入的扩展容量（如 12）当成原版真实容量保存，退出后泄漏到原版袋。
+    if (runtime_state().objects.module_view_installed) {
+        const bool previous_skip = g_skip_restore_refresh;
+        g_skip_restore_refresh = true;
+        restore_module_view_locked();
+        g_skip_restore_refresh = previous_skip;
+    }
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "module view reject install: original window bag=%d (task bag reserved)",
@@ -348,13 +356,6 @@ bool install_module_view_locked(int bag) {
     }
     uint32_t size_word = 0;
     if (!bag_size_word_locked(original_bag, &size_word)) return false;
-
-    if (runtime_state().objects.module_view_installed) {
-        const bool previous_skip = g_skip_restore_refresh;
-        g_skip_restore_refresh = true;
-        restore_module_view_locked();
-        g_skip_restore_refresh = previous_skip;
-    }
     clear_original_desc_locked();  // 原版详情面板不跨视图残留
     const int capacity = runtime_state().objects.bag.capacities[bag];
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
