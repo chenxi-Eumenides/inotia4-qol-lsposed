@@ -316,7 +316,8 @@ void choice_button_execute(void* control) {
 
     // 已确认 module owned：以下全部走模块路径，任何失败都不调用原版
     // UIChoice_ButtonListExe / EVTSYSTEM 剧情结果，只记录原因并保留模块状态供下一次点击。
-    if (port->read.selected_index == nullptr || port->write.write_focus == nullptr) {
+    if (port->read.selected_index == nullptr || port->write.write_focus == nullptr ||
+        port->write.close_popup == nullptr) {
         log_blocked("missing_module_fn", kQolOk, -1, owned, spec.count, original != nullptr);
         return;
     }
@@ -338,18 +339,26 @@ void choice_button_execute(void* control) {
 
     const bool is_close = native_choice_detail::is_close_index(index, spec.close_index);
     uint64_t cleared_generation = 0;
+    bool pop = false;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
-        if (g_active && g_generation == generation) cleared_generation = clear_active_locked();
+        if (g_active && g_generation == generation) {
+            pop = pop_requested_once_locked(generation);
+            cleared_generation = clear_active_locked();
+        }
     }
     if (cleared_generation != 0) publish_dialog_clear(cleared_generation);
     log_module_select(index, is_close);  // debug：确认该次点击走了模块路径（每次点击至多一行）
     if (port->write.play_sound != nullptr) {
         (void)port->write.play_sound(2);
     }
-    // 原生 UIChoice_ButtonListExe 在 ExecuteProc 返回后必排一次 (3,0)；模块此处再调
-    // close_popup 会连弹两层（choice 关后 panel 也被弹出），因此模块只清状态、不重复排队。
-    // 模块 close：只清自身状态 + sound，不 on_select、不调用原生原函数。
+    // 本 wrapper 替换的是整个 UIChoice_ButtonListExe，而不是单按钮 ExecuteProc。模块 choice
+    // 必须自行排唯一一次 pop；原生函数也不得再调用：UIChoice_ButtonListExe 内含 NPC 对话
+    // 语义（event 检查成功后 GAMESTATE_SetState(0) → EnterPlay），模块自建 choice 没有角色
+    // 上下文，进入该分支会空指针崩溃。音效由上面的 play_sound 保留，原生按钮链完全绕过。
+    if (pop && port->write.close_popup != nullptr) {
+        (void)port->write.close_popup();
+    }
     if (!is_close && spec.on_select != nullptr) spec.on_select(index, spec.user);
 }
 

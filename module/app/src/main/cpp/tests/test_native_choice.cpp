@@ -815,7 +815,7 @@ void test_module_select_path_skips_original_and_logs_index() {
     CHECK(g_select_calls == select_before + 1);
     CHECK(g_select_index == 0);                                     // 模块回调收到选中索引
     CHECK(g_original_calls == 0);                                   // 成功路径不回落原函数
-    CHECK(g_close_calls == close_before);                           // 原生 ButtonListExe 已排队唯一 pop
+    CHECK(g_close_calls == close_before + 1);                       // 模块 wrapper 自行排唯一 pop
     CHECK(log_contains("module select index=0"));
     CHECK(g_log_level == 0);                                        // 成功路径极简 debug
     bind_button_original(nullptr);
@@ -1002,14 +1002,16 @@ void test_pop_requested_once_per_generation() {
     qol::features::core_ui::native_choice_close();  // 已 inactive：不再排 pop
     CHECK(g_close_calls == close_before + 1);
 
-    // 原生按钮选择：wrapper 不调 close_popup（原生 ButtonListExe 负责唯一 pop）。
+    // 模块选项执行：自行排唯一 pop，不调用原生 ButtonListExe。
     CHECK(qol::features::core_ui::native_choice_open(spec));
     g_selected_index = 0;
+    const int select_before = g_select_calls;
     qol::features::core_ui::choice_button_execute(nullptr);
     CHECK(!qol::features::core_ui::native_choice_active());
-    CHECK(g_close_calls == close_before + 1);
+    CHECK(g_close_calls == close_before + 2);
+    CHECK(g_select_calls == select_before + 1);
     qol::features::core_ui::native_choice_close();
-    CHECK(g_close_calls == close_before + 1);
+    CHECK(g_close_calls == close_before + 2);
 
     // 外部清理后再次打开/关闭仍恰好一次 pop。
     CHECK(qol::features::core_ui::native_choice_open(spec));
@@ -1018,7 +1020,35 @@ void test_pop_requested_once_per_generation() {
     qol::features::core_ui::native_choice_set_installed(true);
     CHECK(qol::features::core_ui::native_choice_open(spec));
     qol::features::core_ui::native_choice_close();
+    CHECK(g_close_calls == close_before + 3);
+}
+
+// 模块选项执行完全绕开原生 UIChoice_ButtonListExe：原生链含 NPC 对话 GAMESTATE_SetState(0)
+// 分支，模块自建 choice 无角色上下文会崩。每次点击只排一次 pop、回调一次；新 generation
+// 再次点击仍安全。
+void test_module_choice_bypasses_native_button_chain() {
+    bind_button_original(reinterpret_cast<void*>(&fake_button_original));
+    const UiChoiceSpec spec = valid_spec_of();
+    CHECK(qol::features::core_ui::native_choice_open(spec));
+    const int close_before = g_close_calls;
+    const int select_before = g_select_calls;
+    g_selected_index = 0;
+    qol::features::core_ui::choice_button_execute(reinterpret_cast<void*>(0x7000));
+    CHECK(g_original_calls == 0);                       // 不进入原生 ButtonListExe
+    CHECK(g_close_calls == close_before + 1);           // 恰一次 pop
+    CHECK(g_select_calls == select_before + 1);
+    CHECK(g_select_index == 0);                         // 回调携带正确 index
+    CHECK(!qol::features::core_ui::native_choice_active());
+
+    // 新 generation：再次打开并点击，仍只回调一次、只 pop 一次。
+    CHECK(qol::features::core_ui::native_choice_open(spec));
+    g_selected_index = 0;
+    qol::features::core_ui::choice_button_execute(reinterpret_cast<void*>(0x7001));
+    CHECK(g_original_calls == 0);
     CHECK(g_close_calls == close_before + 2);
+    CHECK(g_select_calls == select_before + 2);
+    CHECK(g_select_index == 0);
+    bind_button_original(nullptr);
 }
 
 void bind_draw_original(void* backup) {
@@ -1098,6 +1128,7 @@ int main() {
     test_non_module_init_pass_through_does_not_overwrite();
     test_post_init_write_failure_not_reported_ready();
     test_pop_requested_once_per_generation();
+    test_module_choice_bypasses_native_button_chain();
     test_choice_draw_wrapper_de_dims_module_first_frame();
     std::printf("native_choice_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
