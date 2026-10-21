@@ -1113,6 +1113,16 @@ target_compile_features(core_custom_ui_host_tests PRIVATE cxx_std_17)
 set_target_properties(core_custom_ui_host_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_custom_ui_host_tests COMMAND core_custom_ui_host_tests)
 
+# Single-owner native UIPopupMsg confirmation capability with fake UI Adapter.
+add_executable(core_ui_confirmation_tests
+    test_core_ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+)
+target_include_directories(core_ui_confirmation_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_ui_confirmation_tests PRIVATE cxx_std_17)
+set_target_properties(core_ui_confirmation_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_ui_confirmation_tests COMMAND core_ui_confirmation_tests)
+
 # D1-b3：autosell 插件清单/资源 host 测试（声明式 claim + provider 登记；末尾追加）
 add_executable(autosell_plugin_tests
     test_autosell_plugin.cpp
@@ -1421,6 +1431,7 @@ add_test(NAME core_api_lifecycle_tests COMMAND core_api_lifecycle_tests)
 add_executable(ui_adapter_tests
     test_ui_adapter.cpp
     ${CPP_DIR}/host/ui_adapter.cpp
+    ${CPP_DIR}/game/access/ui_confirmation.cpp
     ${CPP_DIR}/game/access/ui_native_toggle.cpp
     ${CPP_DIR}/game/access/ui_native_text_button.cpp
     ${CPP_DIR}/game/access/ui_native_close_button.cpp

@@ -381,6 +381,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | IH-06 半写保护 | `MoveItem`/`RemoveItemData`/`Divide` 的原版失败返回值语义未冻结，当前只在可确认路径回写 | 逆向确认返回语义并补失败注入用例；登记 `issues.md` §13 |
 | G-2 FindItem in-flight | Game Host 替换后的 FindItem handler 未登记 in-flight；`g_game_host` 为静态初始化快照，需宿主层注入 | 宿主初始化顺序改造 + release 等待测试；登记 `issues.md` §13 |
 
+### 5.22 `core.custom_ui` 基础形状与原生确认框（2026-10-21；Host/Debug 构建通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现 | **代码事实**：`ui_components` 1.22 追加 `draw_rect`、`draw_rounded_rect`、`draw_circle`；RGB565 填充/边框与 0–100 alpha 使用互斥栅格 spans，圆角半径上限 256、圆形直径上限 512，无抗锯齿。新增 `ui_confirmation` 1.0，由 `core.custom_ui` 管理一个原生 `UIPopupMsg` owner，数值价格不承载 user context，token 限制 active/close；Game Adapter `QolUiAdapter` minor 27 尾追加 popup 操作。 | 实现与 API 见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`plugins/core.custom_ui/ui_components.cpp`、`plugins/core.custom_ui/ui_confirmation.cpp`、`game/access/ui_confirmation.cpp`。扩展背包旧 `create_confirmation/restore_confirmation` 路径未迁移，交易与 variant 逻辑不变。 |
+| Host/静态 Gate | **PASS**：`core_ui_components_tests`、`core_ui_confirmation_tests`、`ui_adapter_tests`、`core_custom_ui_host_tests`、`plugin_registry_tests` **5/5**；`check_arch.py` 全部通过、违规 0；`git diff --check` clean。 | `.tmp/custom-ui-final/{host-build.log,affected-ctest.log,check-arch.log,diff-check.log}`。 |
+| Debug 构建 | **PASS**：`scripts/build-debug.sh --offline` 成功，APK `output/inotia4_qol_lsposed_debug_2610211318_ab443862ac41.apk`，SHA-256 `ab443862ac41894e5e0f32890b870a054d5922ef4b3e4aa5a9e1d50e55790dba`。 | `.tmp/custom-ui-final/final-build-debug.log`；构建未安装，不替代运行时验收。 |
+| 设备/视觉 VM | **NOT_ACCEPTED（未执行）**：未部署 Debug APK。Debug Components 有形状预览；`ui_confirmation` 当前没有实际消费者或调试触发入口。 | 新能力需 consumer 后验证价格/确认/取消/Busy/token/停用关闭；Debug Components 验证形状观感。扩展背包 VM-16/17/18 仍按原卡验证。Choice 黑底绘制来源/alpha 未定位；自定义 panel 与游戏 PopupState 叠层未真机验证。详细记录：`docs/refactor/verification/ui-state/20261021-custom-ui-components.md`。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

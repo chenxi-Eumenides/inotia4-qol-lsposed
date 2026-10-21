@@ -1,0 +1,27 @@
+# core.custom_ui 基础形状与原生确认框验证记录
+
+## 范围
+
+- `ui_components` 1.22：基础矩形、圆角矩形、圆形绘制原语。
+- `ui_confirmation` 1.0：以 `UIPopupMsg_CreateYesNoFromTextData` 实现的单 owner 原生确认/价格确认框；价格和消费者 context 分离，token 约束 active/close。
+- `QolUiAdapter` minor 27：popup 状态、回调槽条件操作、创建与 owner-checked 关闭入口。
+- 未改原生 choice 绘制、alpha 或页面 z-order；扩展背包的 `create_confirmation/restore_confirmation` 专属回调流程保留。
+
+## Host 与静态验证
+
+| 验证项 | 命令与结果 | 证据 |
+|---|---|---|
+| 受影响 Host targets | `cmake --build .tmp/custom-ui-confirmation/host --target core_ui_components_tests core_ui_confirmation_tests ui_adapter_tests core_custom_ui_host_tests plugin_registry_tests -j2`；CTest `-R '^(core_ui_components_tests|core_ui_confirmation_tests|ui_adapter_tests|core_custom_ui_host_tests|plugin_registry_tests)$'`：**5/5 PASS**。覆盖形状 alpha span 不重叠、圆角像素 mask、价格范围、token、Busy、回调时序、混合 owner、失败关闭重试。 | `.tmp/custom-ui-final/host-build.log`、`affected-ctest.log` |
+| 架构与 ABI 静态检查 | `uv run python scripts/maintenance/check_arch.py`：layers/offsets/JNI/resources 全部通过，违规 **0**。 | `.tmp/custom-ui-final/check-arch.log` |
+| Diff 格式 | `git diff --check`：clean。 | `.tmp/custom-ui-final/diff-check.log` |
+| Debug 构建 | `scripts/build-debug.sh --offline`：`BUILD SUCCESSFUL`；模块 `output/inotia4_qol_lsposed_debug_2610211318_ab443862ac41.apk`，SHA-256 `ab443862ac41894e5e0f32890b870a054d5922ef4b3e4aa5a9e1d50e55790dba`。 | `.tmp/custom-ui-final/final-build-debug.log` |
+
+## 真机状态与限制
+
+**NOT_ACCEPTED（未做设备行为/视觉验收）**：候选 APK 未安装，未重启游戏。Debug Components 有“基础形状”预览，但尚未目视验证。新的 `ui_confirmation` capability 当前没有消费者/调试触发入口；扩展背包继续使用其 operation-specific callback template，不能作为新 token API 的运行时证据。
+
+`native_choice_open` 仅写选择数据并 push 游戏 PopupState，未找到 choice 背景的原版绘制体或 alpha 控制点；黑底具体来源未知。原生 PopupState 可压在底层原生页面上，但与自定义 panel stack 的叠层关系未获真机证明。此项未改动、不得报告已支持背景透明度或任意页面叠层。
+
+`QolUiAdapter` 的 callback 槽操作是 `core.custom_ui` provider 内部实现入口；其他插件必须消费 `ui_confirmation` capability，不得直接缓存或调用 trampoline。绕过此契约持有旧 trampoline 并跨弹窗代际手动调用不受支持。
+
+设备验收前置：为 `ui_confirmation` 提供实际消费者后，在目标游戏变体验证确认、取消、价格栏、已有 popup Busy、owner 生命周期；并从 Debug Components 检查方形、不同半径圆角矩形、圆形与 alpha 48 预览。扩展背包 VM-16/17/18 仍按其原验收卡独立验证，本能力 Host 测试不替代交易回归。

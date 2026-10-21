@@ -13,8 +13,8 @@
 namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
-constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 21;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 26;
+constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 22;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 27;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -81,6 +81,17 @@ enum class QolUiRootKind : uint32_t {
 
 struct UiRect {
     int64_t x, y, w, h;
+};
+
+// 基础形状绘制参数。颜色是 RGB565，alpha 使用 GRPX_FillRectAlpha 的 0..100 百分比。
+// border_width=0 表示无边框；圆角矩形半径上限 256，圆形必须是边长不超过 512 的正方形。
+struct UiShapeDesc {
+    UiRect rect;
+    uint32_t fill_rgb565;
+    uint32_t border_rgb565;
+    uint32_t alpha;
+    uint32_t border_width;
+    uint32_t radius;
 };
 
 // text_button_create interprets style as a native font choice; button_create keeps its own style.
@@ -455,10 +466,17 @@ struct QolUiComponents {
     // out_live=0 时只清记录，绝不删除 native。
     QolResult (*anchored_control_detach)(QolUiAnchoredControl* state, QolUiHandle* out_handle,
                                          uint8_t* out_live);
+
+    // Minor 22 append-only: 可预测的纯色基础形状；不提供抗锯齿。
+    // 圆角半径最大 256、圆形直径最大 512，以限制逐行栅格绘制成本。
+    QolResult (*draw_rect)(const UiShapeDesc*);
+    QolResult (*draw_rounded_rect)(const UiShapeDesc*);
+    QolResult (*draw_circle)(const UiShapeDesc*);
 };
 
 using QolUiDrawFn = void (*)(void* control);
 using QolUiNativeScrollDrawFn = void (*)(QolUiHandle scroll, int64_t displacement);
+using QolUiPopupMsgCallbackFn = void (*)(void* param);
 struct UiNativeScrollDesc {
     UiRect viewport;
     int64_t content_extent;
@@ -691,6 +709,29 @@ struct QolUiAdapter {
     // parent child-list check; NotReady means the field is unreadable.
     QolResult (*control_proc_matches)(QolUiHandle control, QolUiControlProcFn expected,
                                       int32_t* out_matches);
+
+    // Minor 27 append-only implementation slots for core.custom_ui's ui_confirmation provider.
+    // Consumers must use ui_confirmation rather than cache/invoke these callback pointers.
+    // These operate only on global UIPopupMsg state and never expose game addresses.
+    QolResult (*popup_msg_active)(uint8_t* out_active);
+    QolResult (*popup_msg_get_callbacks)(QolUiPopupMsgCallbackFn* out_ok,
+                                         QolUiPopupMsgCallbackFn* out_cancel);
+    // is_ok selects one callback slot; a mismatch leaves it unchanged and reports replaced=0.
+    QolResult (*popup_msg_replace_callback_if)(uint8_t is_ok,
+                                               QolUiPopupMsgCallbackFn expected,
+                                               QolUiPopupMsgCallbackFn replacement,
+                                               uint8_t* out_replaced);
+    // param is a numeric u32 encoded as the native void* callback parameter, not a pointer.
+    QolResult (*popup_msg_create_yesno_from_textdata)(uint32_t text_id,
+                                                       uint32_t display_type,
+                                                       uint32_t format_arg,
+                                                       QolUiPopupMsgCallbackFn ok,
+                                                       QolUiPopupMsgCallbackFn cancel,
+                                                       uint32_t param);
+    // Calls the native cancel/close path only if the active dialog still has both callbacks.
+    QolResult (*popup_msg_close_if_callbacks)(QolUiPopupMsgCallbackFn expected_ok,
+                                               QolUiPopupMsgCallbackFn expected_cancel,
+                                               uint8_t* out_closed);
 };
 
 }  // namespace qol::contracts

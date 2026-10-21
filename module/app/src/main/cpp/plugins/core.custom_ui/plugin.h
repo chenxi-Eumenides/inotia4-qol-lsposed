@@ -8,6 +8,7 @@
 //   · ui_components v1.8 提供受控原生 Options 胶囊开关与滚动行借用入口；列表拥有子开关控件树。
 //   · provides `ui_panels` v1.0（面板注册/打开/占用原因）；
 //   · provides `ui_choice` v1.0（原生选择控件；随控件迁入，能力 ID/版本不变）；
+//   · provides `ui_confirmation` v1.0（单 owner 原生 Yes/No 确认框）；
 //   · 原生选择控件的 2 条私有资源（hook:UIChoice_Init、ptrslot:...button_list_exe_got）。
 
 namespace qol::features::core_ui {

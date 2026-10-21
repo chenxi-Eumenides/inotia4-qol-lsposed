@@ -46,7 +46,8 @@ constexpr contracts::UiRect kPanelNavAbsRect{contracts::ui_theme::kNavBoxAbsX,
 // 分类清单：新增调试内容 = 加一条名称，并在 build_category_controls 与
 // draw_category_detail 各加一个分支；两类内容互不冲突。
 constexpr const char* kCategoryNames[] = {
-    "文本按钮", "开关胶囊", "X/导航按钮", "主题调色板", "框架边框", "箭头按钮", "图标按钮"};
+    "文本按钮", "开关胶囊", "X/导航按钮", "主题调色板", "框架边框", "箭头按钮", "图标按钮",
+    "基础形状"};
 constexpr uint32_t kCategoryCount = sizeof(kCategoryNames) / sizeof(kCategoryNames[0]);
 
 // 右栏交互控件：text_button 走手工命中绘制，nav_button 走自适应绘制。
@@ -442,6 +443,40 @@ void draw_icon_detail(const contracts::QolUiAdapter* adapter, contracts::UiRect 
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 276), 0, 0);
 }
 
+void draw_shapes_detail(const contracts::QolUiAdapter* adapter,
+                        const contracts::QolUiComponents* components, contracts::UiRect right) {
+    if (adapter == nullptr || components == nullptr || components->draw_rect == nullptr ||
+        components->draw_rounded_rect == nullptr || components->draw_circle == nullptr) return;
+    if (adapter->draw_string_with_font != nullptr) {
+        set_text_color(adapter, contracts::ui_theme::kTextGold);
+        (void)adapter->draw_string_with_font("基础形状 · RGB565 填充 / 边框",
+            static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
+        set_text_color(adapter, contracts::ui_theme::kTextNormal);
+        (void)adapter->draw_string_with_font("尺寸、边框宽度、圆角半径与 0–100 透明度",
+            static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 276), 0, 0);
+        (void)adapter->draw_string_with_font("方形", static_cast<int32_t>(right.x + 34),
+            static_cast<int32_t>(right.y + 204), 0, 0);
+        (void)adapter->draw_string_with_font("圆角 18", static_cast<int32_t>(right.x + 144),
+            static_cast<int32_t>(right.y + 204), 0, 0);
+        (void)adapter->draw_string_with_font("圆形", static_cast<int32_t>(right.x + 276),
+            static_cast<int32_t>(right.y + 204), 0, 0);
+        (void)adapter->draw_string_with_font("浅透明圆角", static_cast<int32_t>(right.x + 394),
+            static_cast<int32_t>(right.y + 204), 0, 0);
+    }
+    const contracts::UiShapeDesc square{{right.x + 24, right.y + 104, 72, 72},
+        0xFBE0, 0x4208, 100, 3, 0};
+    const contracts::UiShapeDesc rounded{{right.x + 132, right.y + 104, 88, 72},
+        0x07E0, 0x4208, 100, 3, 18};
+    const contracts::UiShapeDesc circle{{right.x + 252, right.y + 104, 72, 72},
+        0x001F, 0x4208, 100, 3, 0};
+    const contracts::UiShapeDesc translucent{{right.x + 372, right.y + 104, 88, 72},
+        0xF800, 0x4208, 48, 1, 8};
+    (void)components->draw_rect(&square);
+    (void)components->draw_rounded_rect(&rounded);
+    (void)components->draw_circle(&circle);
+    (void)components->draw_rounded_rect(&translucent);
+}
+
 // help_page detail 回调：user 存分类序号，只做静态绘制。
 void draw_category_detail(void* user, contracts::UiRect right) {
     const int32_t index = static_cast<int32_t>(reinterpret_cast<uintptr_t>(user));
@@ -481,6 +516,9 @@ void draw_category_detail(void* user, contracts::UiRect right) {
             break;
         case 6:
             draw_icon_detail(adapter, right);
+            break;
+        case 7:
+            draw_shapes_detail(adapter, components, right);
             break;
         default:
             break;

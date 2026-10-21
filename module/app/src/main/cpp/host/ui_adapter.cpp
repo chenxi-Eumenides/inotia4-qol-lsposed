@@ -16,6 +16,7 @@
 #include "game/access/ui_native_scroll.h"
 #include "game/access/ui_native_toggle.h"
 #include "game/access/ui_native_text_button.h"
+#include "game/access/ui_confirmation.h"
 #include "game/access/ui_components.h"
 #include "game/access/popup_state.h"
 #include "game/access/ui_state.h"
@@ -1359,6 +1360,66 @@ QolResult popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma
     return contracts::ok();
 }
 
+QolResult popup_msg_active(uint8_t* out_active) {
+    if (out_active == nullptr) return invalid_argument();
+    *out_active = 0;
+    return qol::game::ui_confirmation_popup_active(out_active) ? contracts::ok() : not_ready();
+}
+
+QolResult popup_msg_get_callbacks(contracts::QolUiPopupMsgCallbackFn* out_ok,
+                                  contracts::QolUiPopupMsgCallbackFn* out_cancel) {
+    if (out_ok == nullptr || out_cancel == nullptr) return invalid_argument();
+    *out_ok = nullptr;
+    *out_cancel = nullptr;
+    return qol::game::ui_confirmation_popup_get_callbacks(out_ok, out_cancel)
+        ? contracts::ok() : not_ready();
+}
+
+QolResult popup_msg_replace_callback_if(uint8_t is_ok,
+                                        contracts::QolUiPopupMsgCallbackFn expected,
+                                        contracts::QolUiPopupMsgCallbackFn replacement,
+                                        uint8_t* out_replaced) {
+    if (is_ok > 1 || out_replaced == nullptr) return invalid_argument();
+    *out_replaced = 0;
+    return qol::game::ui_confirmation_popup_replace_callback_if(
+               is_ok, expected, replacement, out_replaced)
+        ? contracts::ok() : not_ready();
+}
+
+QolResult popup_msg_create_yesno_from_textdata(
+    uint32_t text_id, uint32_t display_type, uint32_t format_arg,
+    contracts::QolUiPopupMsgCallbackFn ok, contracts::QolUiPopupMsgCallbackFn cancel,
+    uint32_t param) {
+    if (ok == nullptr || cancel == nullptr) return invalid_argument();
+    uint8_t active = 0;
+    if (!qol::game::ui_confirmation_popup_active(&active)) return not_ready();
+    if (active != 0) {
+        static constexpr char message[] = "UIPopupMsg already active";
+        return contracts::error(kQolErrBusy, message, sizeof(message) - 1);
+    }
+    return qol::game::ui_confirmation_popup_create(
+               text_id, display_type, format_arg, ok, cancel, param)
+        ? contracts::ok() : not_ready();
+}
+
+QolResult popup_msg_close_if_callbacks(
+    contracts::QolUiPopupMsgCallbackFn expected_ok,
+    contracts::QolUiPopupMsgCallbackFn expected_cancel, uint8_t* out_closed) {
+    if (expected_ok == nullptr || expected_cancel == nullptr || out_closed == nullptr) {
+        return invalid_argument();
+    }
+    *out_closed = 0;
+    if (!qol::game::ui_confirmation_popup_close_if_callbacks(
+            expected_ok, expected_cancel, out_closed)) {
+        return not_ready();
+    }
+    if (*out_closed == 0) {
+        static constexpr char message[] = "UIPopupMsg ownership changed";
+        return contracts::error(kQolErrConflict, message, sizeof(message) - 1);
+    }
+    return contracts::ok();
+}
+
 int32_t adapter_is_main_thread() {
     return qol::game::game_host_is_main_thread() ? 1 : 0;
 }
@@ -1492,8 +1553,13 @@ const QolUiAdapter g_ui_adapter{
              // Minor 25 tail: generic click-binding identity proof.
              &click_binding_is_current,
              // Minor 26 tail: CO_PROC identity proof for raw game-tree controls.
-             &control_proc_matches,
-        };
+           &control_proc_matches,
+           &popup_msg_active,
+           &popup_msg_get_callbacks,
+           &popup_msg_replace_callback_if,
+           &popup_msg_create_yesno_from_textdata,
+           &popup_msg_close_if_callbacks,
+         };
 
 }  // namespace
 

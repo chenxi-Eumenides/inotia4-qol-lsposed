@@ -124,6 +124,7 @@ add_library(gamebridge SHARED
     game/access/inventory_legacy_read.cpp
     game/access/hive_iap.cpp
     game/access/ui_kit.cpp
+    game/access/ui_confirmation.cpp
     game/access/ui_components.cpp
     game/access/ui_native_toggle.cpp
     game/access/ui_native_text_button.cpp

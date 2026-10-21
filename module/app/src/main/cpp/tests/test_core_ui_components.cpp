@@ -1,7 +1,10 @@
 #include <cassert>
 #include <cstring>
 #include <cstdio>
+#include <set>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "contracts/ui.h"
@@ -370,6 +373,38 @@ QolResult fill_rect(qol::contracts::UiRect, uint32_t) {
     return ok();
 }
 
+struct ShapeDraw {
+    qol::contracts::UiRect rect;
+    uint32_t color;
+    uint32_t alpha;
+};
+std::vector<ShapeDraw> g_shape_draws;
+QolResult fill_rect_alpha(qol::contracts::UiRect rect, uint32_t color, uint32_t alpha) {
+    g_shape_draws.push_back({rect, color, alpha});
+    return ok();
+}
+
+bool shape_spans_are_disjoint(uint32_t alpha, uint32_t border, uint32_t fill,
+                              size_t* out_border_pixels, size_t* out_fill_pixels) {
+    std::set<std::pair<int64_t, int64_t>> painted;
+    size_t border_pixels = 0;
+    size_t fill_pixels = 0;
+    for (const ShapeDraw& span : g_shape_draws) {
+        if (span.alpha != alpha || span.rect.w <= 0 || span.rect.h <= 0) return false;
+        for (int64_t y = span.rect.y; y < span.rect.y + span.rect.h; ++y) {
+            for (int64_t x = span.rect.x; x < span.rect.x + span.rect.w; ++x) {
+                if (!painted.emplace(x, y).second) return false;
+                if (span.color == border) ++border_pixels;
+                else if (span.color == fill) ++fill_pixels;
+                else return false;
+            }
+        }
+    }
+    if (out_border_pixels != nullptr) *out_border_pixels = border_pixels;
+    if (out_fill_pixels != nullptr) *out_fill_pixels = fill_pixels;
+    return border_pixels > 0 && fill_pixels > 0;
+}
+
 
 FakeControl* g_fake_equip_bag_root = nullptr;
 
@@ -601,6 +636,7 @@ qol::contracts::QolUiAdapter make_fake_adapter() {
     adapter.set_control_data = &set_control_data;
     adapter.image_unit_load = &image_unit_load;
     adapter.draw_part_scaled = &draw_part_scaled;
+    adapter.fill_rect_alpha = &fill_rect_alpha;
     adapter.layout_native_text_button = &paint_layout;
     adapter.draw_native_text_button = &paint_draw;
     adapter.main_menu_replacement_rect_available = &menu_rect_available;
@@ -650,6 +686,115 @@ int main() {
     CHECK(components != nullptr);
     CHECK(components->size == sizeof(qol::contracts::QolUiComponents));
     CHECK(components->panel_create != nullptr && components->scroll_view_create != nullptr);
+
+    // Minor 22 shape primitives use RGB565 + 0..100 alpha and bounded logical geometry.
+    {
+        using ShapeDesc = qol::contracts::UiShapeDesc;
+        static_assert(std::is_standard_layout<ShapeDesc>::value, "shape desc must be POD-like");
+        static_assert(std::is_trivial<ShapeDesc>::value, "shape desc must be trivial");
+        ShapeDesc shape{{10, 20, 12, 10}, 0x1234, 0x5678, 60, 2, 0};
+        g_shape_draws.clear();
+        CHECK(components->draw_rect(&shape).ok == kQolOk);
+        CHECK(g_shape_draws.size() == 5);
+        CHECK(g_shape_draws[0].rect.x == 10 && g_shape_draws[0].rect.y == 20 &&
+              g_shape_draws[0].rect.w == 12 && g_shape_draws[0].rect.h == 2 &&
+              g_shape_draws[0].color == 0x5678 && g_shape_draws[0].alpha == 60);
+        CHECK(g_shape_draws[4].rect.x == 12 && g_shape_draws[4].rect.y == 22 &&
+              g_shape_draws[4].rect.w == 8 && g_shape_draws[4].rect.h == 6 &&
+              g_shape_draws[4].color == 0x1234 && g_shape_draws[4].alpha == 60);
+
+        // Golden radius-4 mask: per-row insets [2,1,0,0,0,0,0,0,0,0,1,2].
+        shape = {{30, 40, 12, 12}, 0x001f, 0xf800, 100, 0, 4};
+        g_shape_draws.clear();
+        CHECK(components->draw_rounded_rect(&shape).ok == kQolOk);
+        const int64_t expected_insets[] = {2, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2};
+        bool rounded_mask[12][12]{};
+        for (const ShapeDraw& span : g_shape_draws) {
+            CHECK(span.alpha == 100 && span.color == 0x001f);
+            for (int64_t y = span.rect.y; y < span.rect.y + span.rect.h; ++y) {
+                const int64_t row = y - 40;
+                CHECK(row >= 0 && row < 12);
+                for (int64_t x = span.rect.x; x < span.rect.x + span.rect.w; ++x) {
+                    CHECK(x >= 30 && x < 42 && !rounded_mask[row][x - 30]);
+                    rounded_mask[row][x - 30] = true;
+                }
+            }
+        }
+        for (int y = 0; y < 12; ++y) {
+            for (int x = 0; x < 12; ++x) {
+                const bool expected_pixel = x >= expected_insets[y] &&
+                    x < 12 - expected_insets[y];
+                CHECK(rounded_mask[y][x] == expected_pixel);
+                CHECK(rounded_mask[y][x] == rounded_mask[11 - y][x]);
+                CHECK(rounded_mask[y][x] == rounded_mask[y][11 - x]);
+            }
+        }
+        shape = {{80, 90, 40, 40}, 0x001f, 0xf800, 100, 0, 18};
+        g_shape_draws.clear();
+        CHECK(components->draw_rounded_rect(&shape).ok == kQolOk);
+        bool radius18_top_row = false;
+        for (const ShapeDraw& span : g_shape_draws) {
+            if (span.rect.y == 90) {
+                radius18_top_row = span.rect.x == 94 && span.rect.w == 12 && span.rect.h == 1;
+            }
+        }
+        CHECK(radius18_top_row);
+
+        shape = {{50, 60, 9, 9}, 0x07e0, 0xf800, 75, 1, 0};
+        g_shape_draws.clear();
+        CHECK(components->draw_circle(&shape).ok == kQolOk);
+        CHECK(!g_shape_draws.empty() && g_shape_draws.front().rect.y == 60 &&
+              g_shape_draws.front().rect.h == 1 && g_shape_draws.front().rect.w < 9 &&
+              g_shape_draws.front().color == 0xf800);
+        size_t border_pixels = 0, fill_pixels = 0;
+        CHECK(shape_spans_are_disjoint(75, 0xf800, 0x07e0,
+                                       &border_pixels, &fill_pixels));
+        CHECK(border_pixels > 0 && fill_pixels > 0);
+        for (const ShapeDraw& draw : g_shape_draws) {
+            CHECK(draw.alpha == 75);
+        }
+
+        // At translucent alpha, all three shapes partition their mask into disjoint spans;
+        // no border or fill pixel is submitted twice.
+        shape = {{100, 110, 12, 10}, 0x001f, 0xf800, 48, 2, 0};
+        g_shape_draws.clear();
+        CHECK(components->draw_rect(&shape).ok == kQolOk);
+        CHECK(shape_spans_are_disjoint(48, 0xf800, 0x001f,
+                                       &border_pixels, &fill_pixels));
+        CHECK(border_pixels == 72 && fill_pixels == 48);
+
+        shape = {{100, 110, 12, 12}, 0x001f, 0xf800, 48, 1, 4};
+        g_shape_draws.clear();
+        CHECK(components->draw_rounded_rect(&shape).ok == kQolOk);
+        CHECK(shape_spans_are_disjoint(48, 0xf800, 0x001f,
+                                       &border_pixels, &fill_pixels));
+
+        shape = {{100, 110, 9, 9}, 0x001f, 0xf800, 48, 1, 0};
+        g_shape_draws.clear();
+        CHECK(components->draw_circle(&shape).ok == kQolOk);
+        CHECK(shape_spans_are_disjoint(48, 0xf800, 0x001f,
+                                       &border_pixels, &fill_pixels));
+
+        const size_t draws_before_invalid = g_shape_draws.size();
+        shape.rect = {INT32_MAX, 0, 2, 2};
+        CHECK(components->draw_rect(&shape).code == kQolErrInvalidArgument);
+        shape.rect = {0, 0, 12, 8};
+        shape.radius = 5;
+        CHECK(components->draw_rounded_rect(&shape).code == kQolErrInvalidArgument);
+        shape.radius = 0;
+        shape.alpha = 101;
+        CHECK(components->draw_circle(&shape).code == kQolErrInvalidArgument);
+        shape.alpha = 100;
+        shape.rect.w = 10;
+        CHECK(components->draw_circle(&shape).code == kQolErrInvalidArgument);
+        shape.rect = {0, 0, 600, 600};
+        shape.radius = 257;
+        CHECK(components->draw_rounded_rect(&shape).code == kQolErrInvalidArgument);
+        shape.rect = {0, 0, 514, 514};
+        shape.radius = 0;
+        CHECK(components->draw_circle(&shape).code == kQolErrInvalidArgument);
+        CHECK(g_shape_draws.size() == draws_before_invalid);
+    }
 
 
     // anchored_button：root 存活时只挂载一次；根子树被游戏重建后只注销记录并重建，

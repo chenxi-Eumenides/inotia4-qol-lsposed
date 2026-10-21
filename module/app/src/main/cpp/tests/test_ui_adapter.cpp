@@ -229,6 +229,43 @@ void fake_control_set_active(void* control, uint32_t active) {
 
 uintptr_t g_base = 0;
 
+namespace {
+uint8_t g_popup_test_image[0x310000]{};
+void* g_popup_test_param = nullptr;
+uint32_t g_popup_test_text_id = 0;
+uint32_t g_popup_test_display_type = 0;
+uint32_t g_popup_test_format_arg = 0;
+int g_popup_test_create_calls = 0;
+int g_popup_test_close_calls = 0;
+int g_popup_test_callback_calls = 0;
+
+void fake_popup_create_yesno_from_textdata(uint32_t text_id, uint32_t display_type,
+                                           uint32_t format_arg, void* ok, void* cancel,
+                                           void* param) {
+    ++g_popup_test_create_calls;
+    g_popup_test_text_id = text_id;
+    g_popup_test_display_type = display_type;
+    g_popup_test_format_arg = format_arg;
+    g_popup_test_param = param;
+    *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 1;
+    *reinterpret_cast<void**>(g_base + G_POPUP_FPOK_VMA) = ok;
+    *reinterpret_cast<void**>(g_base + G_POPUP_FPCANCEL_VMA) = cancel;
+}
+
+void fake_popup_button_cancel() {
+    ++g_popup_test_close_calls;
+    *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 0;
+    auto callback = reinterpret_cast<void (*)(void*)>(
+        *reinterpret_cast<void**>(g_base + G_POPUP_FPCANCEL_VMA));
+    if (callback != nullptr) callback(g_popup_test_param);
+}
+
+void fake_popup_callback(void*) { ++g_popup_test_callback_calls; }
+}  // namespace
+
+decltype(fn_popup_create_yesno_from_textdata) fn_popup_create_yesno_from_textdata = nullptr;
+decltype(fn_button_cancel_exe) fn_button_cancel_exe = nullptr;
+
 // host/ui_adapter.cpp 的菜单几何/绑定诊断走统一日志面（infra/log/qol_log.h）。本 target 与
 // 其它被替身的生产依赖一致，不链接 infra/log/qol_log.cpp，这里提供只计数的替身。
 int g_qol_log_calls = 0;
@@ -567,6 +604,45 @@ int main() {
     CHECK(adapter->main_menu_text_button_invalidate_binding != nullptr);
     CHECK(adapter->draw_part != nullptr);
     CHECK(adapter->draw_part_alpha != nullptr);
+    CHECK(adapter->popup_msg_active != nullptr);
+    CHECK(adapter->popup_msg_get_callbacks != nullptr);
+    CHECK(adapter->popup_msg_replace_callback_if != nullptr);
+    CHECK(adapter->popup_msg_create_yesno_from_textdata != nullptr);
+    CHECK(adapter->popup_msg_close_if_callbacks != nullptr);
+
+    // Minor 27 routes popup work through the checked game adapter, preserving numeric param.
+    {
+        g_base = reinterpret_cast<uintptr_t>(g_popup_test_image);
+        fn_popup_create_yesno_from_textdata = &fake_popup_create_yesno_from_textdata;
+        fn_button_cancel_exe = &fake_popup_button_cancel;
+        g_popup_test_create_calls = g_popup_test_close_calls = g_popup_test_callback_calls = 0;
+        *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 0;
+        *reinterpret_cast<void**>(g_base + G_POPUP_FPOK_VMA) = nullptr;
+        *reinterpret_cast<void**>(g_base + G_POPUP_FPCANCEL_VMA) = nullptr;
+        uint8_t active = 1;
+        CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 0);
+        CHECK(adapter->popup_msg_create_yesno_from_textdata(
+                  88, 3, 0x12345678, &fake_popup_callback, &fake_popup_callback, 0xfedcba98u).ok ==
+              kQolOk);
+        CHECK(g_popup_test_create_calls == 1 && g_popup_test_text_id == 88 &&
+              g_popup_test_display_type == 3 && g_popup_test_format_arg == 0x12345678 &&
+              reinterpret_cast<uintptr_t>(g_popup_test_param) == 0xfedcba98u);
+        CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 1);
+        qol::contracts::QolUiPopupMsgCallbackFn current_ok = nullptr;
+        qol::contracts::QolUiPopupMsgCallbackFn current_cancel = nullptr;
+        CHECK(adapter->popup_msg_get_callbacks(&current_ok, &current_cancel).ok == kQolOk &&
+              current_ok == &fake_popup_callback && current_cancel == &fake_popup_callback);
+        uint8_t replaced = 1;
+        CHECK(adapter->popup_msg_replace_callback_if(1, nullptr, &fake_popup_callback,
+                                                      &replaced).ok == kQolOk && replaced == 0);
+        CHECK(adapter->popup_msg_close_if_callbacks(&fake_popup_callback, &fake_popup_callback,
+                                                     &active).ok == kQolOk && active == 1);
+        CHECK(g_popup_test_close_calls == 1 && g_popup_test_callback_calls == 1);
+        CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 0);
+        fn_popup_create_yesno_from_textdata = nullptr;
+        fn_button_cancel_exe = nullptr;
+        g_base = 0;
+    }
 
     // The legacy slot remains zero-alpha; the minor 23 tail slot forwards caller alpha.
     {

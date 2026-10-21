@@ -7,6 +7,7 @@
 #include "../../contracts/http.h"
 #include "../../contracts/text_layer.h"
 #include "../../contracts/ui_choice.h"
+#include "../../contracts/ui_confirmation.h"
 #include "../../contracts/ui.h"
 #include "feature.h"
 #include "panels/debug_components.h"
@@ -15,6 +16,7 @@
 #include "panels/stack.h"
 #include "text_mechanism.h"
 #include "ui_components.h"
+#include "ui_confirmation.h"
 
 namespace qol::features::core_ui {
 namespace {
@@ -58,6 +60,11 @@ const contracts::CapabilityProvisionRef kProvides[] = {
         contracts::kUiChoiceCapabilityId,
         {contracts::kUiChoiceVersionMajor, contracts::kUiChoiceVersionMinor},
         &kUiChoiceApi,
+    },
+    {
+        contracts::kUiConfirmationCapabilityId,
+        {contracts::kUiConfirmationVersionMajor, contracts::kUiConfirmationVersionMinor},
+        ui_confirmation_api(),
     },
     {
         // 文本机制（ADR 0001 D3）：唯一 GetText 钩子 + 注册/分派；内容由各内容插件注册。
@@ -150,27 +157,62 @@ const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
 };
 #endif
 
-// 界面工具/框架插件（ADR 0001 D1 的 A 档）：可复用组件、面板注册/导航、原生选择控件
+void plugin_install_rollback(contracts::PluginContext& ctx, bool confirmation_bound,
+                             bool debug_cleanup) {
+#if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
+    if (debug_cleanup && ctx.sdk != nullptr) {
+        debug_help_unregister(ctx.sdk);
+        debug_scroll_unregister(ctx.sdk);
+        debug_components_unregister(ctx.sdk);
+    }
+#else
+    (void)debug_cleanup;
+#endif
+    if (confirmation_bound) ui_confirmation_unbind();
+    text_set_active(false);
+    text_mechanism_bind(nullptr);
+    ui_panels_bind_sdk(nullptr);
+    ui_components_unbind();
+    g_choice_port = nullptr;
+    g_sdk = nullptr;
+}
+
+// 界面工具/框架插件（ADR 0001 D1 的 A 档）：可复用组件、面板注册/导航、原生选择/确认控件
 // 与文本机制。具体页面（设置页等）由各自插件拥有；Debug 构建额外注册组件探针。
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_choice_port = nullptr;
-    if (ctx.sdk == nullptr || !ui_components_bind(ctx.sdk->ui)) return 1;
+    if (ctx.sdk == nullptr) {
+        plugin_install_rollback(ctx, false, false);
+        return 1;
+    }
+    if (!ui_components_bind(ctx.sdk->ui)) {
+        plugin_install_rollback(ctx, false, false);
+        return 1;
+    }
     ui_panels_bind_sdk(ctx.sdk);
     text_mechanism_bind(ctx.sdk);
     // 选择控件需要游戏侧原语端口；缺失即 install 失败（宿主不启用、资源不装）。
-    if (ctx.ports == nullptr || ctx.port_count < 1 || ctx.ports[0] == nullptr) return 1;
+    if (ctx.ports == nullptr || ctx.port_count < 1 || ctx.ports[0] == nullptr) {
+        plugin_install_rollback(ctx, false, false);
+        return 1;
+    }
     g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
+    if (!ui_confirmation_bind(ctx.sdk->ui)) {
+        plugin_install_rollback(ctx, false, false);
+        return 1;
+    }
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
-    if (!debug_components_register(ctx.sdk)) return 1;
+    if (!debug_components_register(ctx.sdk)) {
+        plugin_install_rollback(ctx, true, true);
+        return 1;
+    }
     if (!debug_scroll_register(ctx.sdk)) {
-        debug_components_unregister(ctx.sdk);
+        plugin_install_rollback(ctx, true, true);
         return 1;
     }
     if (!debug_help_register(ctx.sdk)) {
-        debug_help_unregister(ctx.sdk);
-        debug_scroll_unregister(ctx.sdk);
-        debug_components_unregister(ctx.sdk);
+        plugin_install_rollback(ctx, true, true);
         return 1;
     }
 #endif
@@ -180,6 +222,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
+    ui_confirmation_set_installed(false);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     debug_help_unregister(ctx.sdk);
     debug_scroll_unregister(ctx.sdk);
@@ -189,6 +232,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     text_mechanism_bind(nullptr);
     g_choice_port = nullptr;
     ui_panels_bind_sdk(nullptr);
+    ui_confirmation_unbind();
     ui_components_unbind();
     g_sdk = nullptr;
 }
@@ -196,6 +240,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(true);
+    ui_confirmation_set_installed(true);
     text_set_active(true);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     debug_components_set_enabled(true);
@@ -207,6 +252,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(false);
+    ui_confirmation_set_installed(false);
     text_set_active(false);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     debug_components_set_enabled(false);
@@ -261,7 +307,7 @@ const contracts::PluginDescriptor kDescriptor = {
     0, nullptr,      // requires
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires, // ui.state and optional Debug HTTP capabilities
-    4, kProvides,    // provides（ui_components / ui_panels / text_layer v1.0，ui_choice v1.1）
+    5, kProvides,    // provides（ui_components / ui_panels / text_layer / ui_confirmation，ui_choice）
     3, kResources,   // resources（选择控件 2 条 + 文本 GetText 共享资源）
     0, nullptr,      // jni
     &plugin_install,

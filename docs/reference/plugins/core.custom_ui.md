@@ -2,7 +2,7 @@
 
 ## 1. 作用与 owner 定位
 
-`core.custom_ui` 是普通核心共享 UI 工具/框架插件，注册 ID 为 `core.custom_ui`、版本 `0.1.1`。它拥有可复用 UI 组件、面板注册/导航、原生选择控件和文本机制；不拥有功能页面或其文案内容（`module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp:21-23,139-140`；架构边界见 [`ARCHITECTURE.md` §5.4、§7.2](../../../ARCHITECTURE.md)）。
+`core.custom_ui` 是普通核心共享 UI 工具/框架插件，注册 ID 为 `core.custom_ui`、版本 `0.1.1`。它拥有可复用 UI 组件、面板注册/导航、原生选择控件、原生确认框和文本机制；不拥有功能页面、交易规则或业务文案内容（架构边界见 [`ARCHITECTURE.md` §5.4、§7.2](../../../ARCHITECTURE.md)）。
 
 ## 2. 功能面
 
@@ -10,12 +10,33 @@
 
 | 面 | 版本 | 当前提供内容 |
 |---|---:|---|
-| `ui_components` | 1.21 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 3 槽：`capsule_text_button_create`、`decorated_text_button_create`、`main_menu_decorated_button_create`；容器 content rect/content draw 两槽已随要求 4 撤销删除）。此后追加可缩放图标按钮族与 `compact_capsule_text_button_create`；**1.19 追加 `forget_native`**：native 控件由外部（游戏控件树）销毁时只注销组件记录、不调用 `delete_control`；**1.20 追加锚定按钮**（`anchored_button_ensure/set_visible/release/draw`）：按 `QolUiRootKind` 每帧解析活挂载根、用 `click_binding_is_current` 证明句柄身份，失效时注销记录并重建；`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。**1.21 追加任意原生控件锚定**（`anchored_control_ensure/set_visible/release/detach`）：多控件/自定义 `CO_PROC`/自带 data 的游戏树挂载，身份证明用 `control_proc_matches` + type/user_type/data 快照 |
+| `ui_components` | 1.22 | 通用组件与绘制/列表/导航接口；契约中的 `QolUiComponents` 由本插件实现（1.14 在旧尾槽后追加 3 槽：`capsule_text_button_create`、`decorated_text_button_create`、`main_menu_decorated_button_create`；容器 content rect/content draw 两槽已随要求 4 撤销删除）。此后追加可缩放图标按钮族与 `compact_capsule_text_button_create`；**1.19 追加 `forget_native`**：native 控件由外部（游戏控件树）销毁时只注销组件记录、不调用 `delete_control`；**1.20 追加锚定按钮**（`anchored_button_ensure/set_visible/release/draw`）：按 `QolUiRootKind` 每帧解析活挂载根、用 `click_binding_is_current` 证明句柄身份，失效时注销组件记录并重建；`unbind` 跳过 `native_externally_owned` 组件，不删除游戏拥有的 native。**1.21 追加任意原生控件锚定**（`anchored_control_ensure/set_visible/release/detach`）：多控件/自定义 `CO_PROC`/自带 data 的游戏树挂载，身份证明用 `control_proc_matches` + type/user_type/data 快照。**1.22 追加 `draw_rect`、`draw_rounded_rect`、`draw_circle`**：纯色 RGB565 填充/边框，alpha 为 0–100 百分比；圆角半径最多 256，圆形直径最多 512，不提供抗锯齿。 |
 | `ui_panels` | 1.3 | 面板 provider 注册后的打开、关闭、状态/返回协作接口 |
 | `ui_choice` | 1.1 | 原生选择框 open/active/close API |
+| `ui_confirmation` | 1.0 | 单一 owner 的原生 Yes/No 确认框 `open(spec, out_token)` / `active(token, out)` / `close(token)` API |
 | `text_layer` | 1.0 | `MEMORYTEXT_GetText` hook 上的文本订阅/分派接口 |
 
-提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp:27-67`；公共版本定义见 `contracts/ui.h:15-19`、`contracts/panels.h:16-18`、`contracts/ui_choice.h:21-23`、`contracts/text_layer.h:10-12`。本插件另声明三项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate（`plugin.cpp:81-132`）。
+提供版本见 `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`；`QolUiAdapter` 1.27 在尾部追加 popup 活动状态、回调槽读取/条件替换、TEXTDATABASE Yes/No 创建与 owner-checked 原生关闭入口；这些槽是 provider 实现细节，消费者必须走 `ui_confirmation` capability，不得缓存或直接调用 callback trampoline。`ui_components` 契约保持 1.22。公共版本定义见 `contracts/ui.h`、`contracts/ui_confirmation.h`、`contracts/panels.h`、`contracts/ui_choice.h` 和 `contracts/text_layer.h`。本插件另声明三项必需资源：私有 `UIChoice_Init` entry hook、私有选择按钮 ptr slot、共享 `MEMORYTEXT_GetText` entry hook；均为 required/fail-closed 且无 feature gate。
+
+### 原生确认框（`ui_confirmation`）
+
+`UiConfirmationSpec` 接受 `text_id`、`display_type`、`format_arg`、`price`、确认/取消 callbacks 与消费者 `user` context。`price` 必须在 `0..INT32_MAX`，作为 `UIPopupMsg_CreateYesNoFromTextData` 的 `void* param` 数值编码传递；`user` 只保存在 `core.custom_ui` 的唯一活动状态中，绝不进入游戏 callback param。成功的 open 返回非零 `uint64_t` token；后续 active/close 必须携带该 token，wrong/stale token 返回错误且不操作弹窗。若 open 失败但清理未能完成、provider 仍保留 owner state，`out_token` 会返回非零 token，调用方可用它重试 `close(token)`；清理成功的失败 open 则返回 token 0。API 不携带扩展背包的 variant，也不实现价格、扣款或交易。
+
+创建前检查全局 `UIPopupMsg_bOn` 和 provider 活动状态；已有原生弹窗或共享确认框时以 Busy 拒绝，不覆盖现有回调槽，也不把本 provider 的 trampoline 保存为旧 callback。callback trampoline 先读取 OK/Cancel pair；活动 popup 时只有两槽都仍属于本 provider，才条件恢复两槽并分发消费者 callback。活动状态下任一槽 foreign 时不写任何槽、不分发 consumer，并保留 closing owner。已确认 `bOn == 0` 时，只条件恢复仍匹配本 provider trampoline 的槽，foreign 槽保持不变，然后清理 owner state；`active(token)` 和新 `open()` 均可触发这项 inactive cleanup。成功分发前一次性清理 spec/context，并在锁外、主线程、最多调用一次；分发期间同步重开被 Busy 拒绝。
+
+`close(token)` 与 disable/deactivate 的内部 owned-close 仅在两个 callback 槽都证明归本 provider 时调用原生 cancel/close 路径，不调用消费者取消 callback，也不以 `UIPopupMsg_Free` 代替关闭。native cancel trampoline 在关闭期间不清状态、不恢复槽、不分发 callback；外层只有在重新读取并确认 `UIPopupMsg_bOn == 0` 后才恢复仍双槽 owned 的 callbacks 并清 owner spec。close 失败或弹窗仍 active 时保留 token/spec、owned callback slots 和 closing gate，可由相同 token 或内部生命周期 close 重试；停用期间后续 trampoline 不分发业务 callback。旧的扩展背包 `create_confirmation/restore_confirmation` 专属路径与其交易逻辑保持独立、不迁移、不改动。
+
+`user` 必须至少存活到确认/取消 callback 完成，或该 token 的 `close` 成功返回。价格 `0` 不绘制游戏价格栏；非零价格使用原生数值参数。调用者负责选择有效的 TEXTDATABASE 文本 ID，不应把 `user`、指针或代际值编码进 `price`。
+
+示例：`UiConfirmationSpec spec{9, 0, 2, price, on_confirm, on_cancel, context}; uint64_t token = 0; api->open(&spec, &token);`。扩展背包当前 `create_confirmation(variant, price, ...)` 使用 text ID 9、display type 0、format arg 2；其 operation-specific callback template 与回调槽恢复仍由扩展背包专属端口管理，不因共享 API 改写。
+
+### 选择框背景、叠层与基础形状
+
+`ui_choice` 只改写模块自有选项的 items/title/focus 并 push 游戏的 `F_PANEL_CHOICE_ENTER` PopupState；它不自行绘制背景。当前源码和符号登记没有找到 `Scene_Draw_POPUP_SC_CHOICE` 的绘制体，也没有证据定位调用方反馈的黑底来源、颜色或 alpha 参数，因此**不能安全地为原生选择框设置背景透明度**。`ui_components` 的形状 alpha 只作用于调用者主动绘制的矩形/圆角矩形/圆形，不会影响游戏原生 choice。
+
+原生 choice 位于游戏 PopupState 栈顶，结构上可以覆盖底层原生页面；它不是 `ui_panels` 的自定义 panel 栈成员。现有资料不保证它与其他 provider 的自定义页面如何排序、是否遮罩输入，也没有嵌套页面真机证据；不得据此承诺任意自定义页面叠层或 z-order。`ui_confirmation` 使用另一套全局 `UIPopupMsg` 单例，活动原生弹窗时会 Busy 拒绝。
+
+`UiShapeDesc` 提供基础矩形、可调半径圆角矩形与圆形；调用方可设置逻辑尺寸、RGB565 填充/边框色、共同 alpha、边框宽度和圆角半径。alpha 为游戏 `GRPX_FillRectAlpha` 的 0–100 百分比；形状按互斥扫描线区域绘制，不重复合成边框/填充像素。栅格绘制不抗锯齿，圆角半径上限 256、圆形直径上限 512。
 
 ### Debug 专用入口
 
@@ -65,40 +86,41 @@ Debug 构建包含三个 POST 调试端点：`/api/debug/custom-ui/components`�
 
 - **Requires / optional**：`ui.state` 1.0 为可选依赖；Debug 构建对 `http.registry`/`http.dispatch` v1.1 的依赖也为可选，非 Debug descriptor 不声明 HTTP 依赖（`plugin.cpp:70-79,247-253`；版本见 `contracts/http.h:96-99`）。provider 缺失只使 Debug HTTP 探针无法接线，不影响共享 UI 功能；provider 恢复后按可选依赖生命周期重新接线。选择框向 `ui.state` 发布自定义 dialog snapshot；缺少该 capability 时 native choice 本身仍按本插件路径工作（`feature.cpp` 的 `ui_state_api`、`publish_dialog_snapshot`）。
 - **Required port**：`QOL_PORT_CHOICE` 1.0，提供原生选择框状态/选项/标题/焦点/弹出等受控操作（`plugin.cpp:134-137`；版本见 `contracts/game_ports/ports.h:17,47`；接口见 `contracts/game_ports/choice_port.h:11-30`）。
-- **Host SDK**：使用 Host 注入的 `sdk->ui` Adapter（契约版本 1.23；minor 23 追加 `draw_part_alpha(group, x, y, loc, type, flip, alpha)`，逐项转发 alpha；旧 `draw_part` 保持第七参 0。扩展背包按尾部 size 检查该槽；minor 22 的旧布局可继续走 `draw_part` 回退），以及 `panels`、`hooks.text_subscribe/run_text`、descriptor endpoint handlers、scheduler/log（`contracts/ui.h:3-6,15-19`；`plugin.cpp` 中的 `kHttpEndpoints`；`text_mechanism.cpp:27-46`）。
+- **Host SDK**：使用 Host 注入的 `sdk->ui` Adapter（当前契约 1.27，兼容布局按 minor/size 检查；minor 23 尾追加 `draw_part_alpha(group, x, y, loc, type, flip, alpha)`，逐项转发 alpha；旧 `draw_part` 保持第七参 0；minor 27 尾追加 popup 活动状态、回调槽条件操作、原生确认框创建与 owner-checked 关闭），以及 `panels`、`hooks.text_subscribe/run_text`、descriptor endpoint handlers、scheduler/log（`contracts/ui.h:3-6,15-19`；`plugin.cpp` 中的 `kHttpEndpoints`；`text_mechanism.cpp:27-46`）。
 - **已核实消费者**：`ui_components` 与 `ui_panels` 由当前 `plugins/settings/` 设置页消费；`ui_panels` 还由 `save_backup`、`autosell` 使用；`ui_choice` 被 `world_teleport` 作为可选能力消费；`text_layer` 被 `custom_recipe`、`character_panel_i18n` 要求（`plugins/settings/plugin.cpp:32-38`、`settings/panels/settings.cpp:816-821`、`save_backup/plugin.cpp:31-35`、`autosell/plugin.cpp:196-204`、`world_teleport/plugin.cpp:46-61`、`custom_recipe/plugin.cpp:168-178`、`character_panel_i18n/plugin.cpp:33-36`）。
 - **真实设置页边界**：页面实现位于 `plugins/settings/`，descriptor ID 为 `settings`，只要求 `ui_panels` 与 `ui_components`；`core.custom_ui/settings_contribution.cpp` 当前不注册设置项（`plugins/settings/plugin.cpp:19-20,32-38,238-255`；`core.custom_ui/settings_contribution.cpp:4-8`）。
 
 ## 4. 职责范围
 
-- `core.custom_ui` 提供组件、面板/导航、游戏原生选择框和文本机制；具体页面、页面状态与业务文案由各自插件拥有，设置页归注册 ID 为 `settings` 的 `plugins/settings/`（`plugin.cpp:139-140`；`ARCHITECTURE.md` §7.2）。
+- `core.custom_ui` 提供组件、面板/导航、原生选择框、单 owner 原生确认框和文本机制；具体页面、页面状态、交易与业务文案由各自插件拥有，设置页归注册 ID 为 `settings` 的 `plugins/settings/`（`ARCHITECTURE.md` §7.2）。
 - `core.ui_state` 拥有游戏界面状态/操作；`core.custom_ui` 只通过可选 `ui.state` 发布自定义 dialog 状态，不接管该领域 owner（`feature.cpp` 的 `ui_state_api`、`publish_dialog_snapshot`；架构边界见 `ARCHITECTURE.md` §7.2）。
 - UI Adapter/Game Adapter 承担底层游戏控件、绘制与资源原语；本插件通过 contracts/Host SDK 使用受控接口，不承载通用游戏语义（`contracts/ui.h:3-6,304-315`；`ARCHITECTURE.md` §4.3、§7.2）。
 - Debug 面板与 endpoint 是 Debug 构建探针，不等同于功能页面或 release 对外业务接口（`CMakeLists.txt:11-19`；`plugin.cpp:74-79,220-241`）。
 
 ## 5. 对外提供与依赖影响
 
-四项 capability 随普通插件启停发布/撤销。当前外部 consumers 如 §3 所列；`ui_choice` 的可选消费者 `world_teleport` 不把它作为 install 前提。停用时关闭选择控件门禁、停用文本分派，由 Host binder 撤销该 descriptor 的 Debug routes，并解除面板/SDK 绑定；组件或面板能力不因此变成具体页面的 owner（`plugin.cpp:166-202`）。
+五项 capability 随普通插件启停发布/撤销。当前外部 consumers 如 §3 所列；`ui_choice` 的可选消费者 `world_teleport` 不把它作为 install 前提。停用时关闭选择框与确认框门禁，确认框仅关闭 callback 槽证明为本 provider 所有的原生弹窗；同时停用文本分派，由 Host binder 撤销该 descriptor 的 Debug routes，并解除面板/SDK 绑定。
 
 ## 6. 读写线程与生命周期机制
 
-- **UI 与选择控件**：`contracts/ui.h` 明确 Host UI Adapter 接口仅可在游戏主线程调用；`UiChoiceSpec.on_select` 约定在主线程回调。选择操作使用 mutex 保护 active/spec/generation 并持有选项/标题副本，底层 read/write 通过 `QOL_PORT_CHOICE`；port contract 本身未另行规定所有函数调用的线程上下文（`contracts/ui.h:3-6`；`contracts/ui_choice.h:25-34`；`contracts/game_ports/choice_port.h:11-30`；`feature.cpp` 的 `choice_init_wrapper`、`choice_button_execute`、`native_choice_open/close`）。
+- **UI、选择框与确认框**：`contracts/ui.h` 明确 Host UI Adapter 接口仅可在游戏主线程调用；`UiChoiceSpec.on_select` 与 `UiConfirmationSpec` callbacks 均在主线程回调。确认框 provider 以 mutex 保护唯一 active spec、user context、generation 和关闭状态；native popup 读写经 minor 27 Adapter slots，callback 先核验并条件恢复槽位、清状态后锁外分发。
 - **Debug HTTP 写路径**：descriptor command handler 只验证请求并写原子请求状态；UI 面板开关交由 scheduler task 执行。三个 Debug 面板都有该“HTTP 请求→调度任务→面板”路径（`panels/debug_components.cpp`；`debug_scroll.cpp`；`debug_help.cpp`）。
 - **文本读路径**：wrapper 先调用原 `MEMORYTEXT_GetText`，若文本机制 active 再同步调用 Host `run_text` 分派，失败/空输出回退原文；订阅由 Host hooks API 登记/撤销（`text_mechanism.cpp:27-64`）。源码没有为该 hook 回调另行声明一个通用线程保证，本说明不把它扩写为 UI 主线程接口。
-- **生命周期**：install 绑定 UI/面板/文本 API 并验证 required choice port；enabled/disabled 分别打开/关闭 choice 与 text gate，Debug 构建同步启停调试面板；deactivate 关闭 choice、撤销 Debug 路由/面板、停用 text dispatch 并清理绑定（`plugin.cpp:141-180,182-202`）。
+- **生命周期**：install 绑定 UI/面板/文本 API、确认框 Adapter 与 required choice port；enabled/disabled 分别打开/关闭 choice、confirmation 与 text gate，confirmation disabled/deactivate 时仅尝试关闭自身确认框；Debug 构建同步启停调试面板。deactivate 撤销 Debug 路由/面板、停用文本分派并清理绑定。
 
 ## 7. 文件地图
 
 | 子职责 | 文件 | 关键事实 |
 |---|---|---|
 | descriptor、provides/requires/port、资源与生命周期 | `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp` | ID/version/capabilities：21-79；resources/port：81-137；install/lifecycle：141-202；Debug entry：220-267 |
-| 组件接口实现 | `module/app/src/main/cpp/plugins/core.custom_ui/ui_components.cpp`、`ui_components.h` | 组件对象/原生 adapter 绑定：`ui_components.cpp:20-78,124-130`；接口：`ui_components.h:13-45`；文本按钮/菜单 decorated 工厂：`645,862-872`；help 双栏 ornament：`1480,1601-1603` |
+| 组件接口实现 | `module/app/src/main/cpp/plugins/core.custom_ui/ui_components.cpp`、`ui_components.h` | 组件对象/原生 adapter 绑定：`ui_components.cpp:20-78,124-130`；接口：`ui_components.h:13-45`；文本按钮/菜单 decorated 工厂：`645,862-872`；基础形状扫描线绘制：`ui_components.cpp:2183-2410`；help 双栏 ornament：`1480,1601-1603` |
 | 原生 toggle 绘制 | `module/app/src/main/cpp/game/access/ui_native_toggle.cpp` | 分层源画布居中与 halo：`52-111` |
 | 原生文本按钮绘制 | `module/app/src/main/cpp/game/access/ui_native_text_button.cpp` | 比例裁切/切片判定：`157-200`；按压几何/按压层：`291-395`（当前中段 `sx=100`；旧『避开烘焙 dash』属 RGB 断言，非 alpha 证据） |
 | 原生选择框 | `module/app/src/main/cpp/plugins/core.custom_ui/feature.cpp`、`feature.h` | `choice_init_wrapper`、`choice_button_execute`、`native_choice_open/close`；锁状态、port 读写与 dialog publish |
 | 文本共享机制 | `module/app/src/main/cpp/plugins/core.custom_ui/text_mechanism.cpp`、`text_mechanism.h` | subscribe/unsubscribe 与原文 fallback dispatch：`text_mechanism.cpp:27-64` |
 | Debug panels/endpoints | `module/app/src/main/cpp/plugins/core.custom_ui/plugin.cpp`、`panels/debug_components.cpp`、`debug_scroll.cpp`、`debug_help.cpp` | descriptor endpoint facts/handlers 位于 plugin.cpp；各面板源码实现 command callback 与 scheduler task |
 | 跨插件契约 | `module/app/src/main/cpp/contracts/ui.h`、`panels.h`、`ui_choice.h`、`text_layer.h`、`game_ports/choice_port.h` | adapter/components 版本与线程说明：`ui.h:3-19`；其余 capability ID/version 与接口见各文件开头定义 |
+| 原生确认框能力 | `module/app/src/main/cpp/contracts/ui_confirmation.h`、`plugins/core.custom_ui/ui_confirmation.cpp` | 固定宽度 spec、单活动 owner、参数/上下文隔离、条件 callback 槽恢复与原生 close path |
 | 当前设置页消费者 | `module/app/src/main/cpp/plugins/settings/plugin.cpp`、`plugins/settings/panels/settings.cpp` | descriptor requires：`plugin.cpp:32-38`；运行时 require ui_components：`settings.cpp:816-821` |
 
 
