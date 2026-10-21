@@ -26,8 +26,16 @@ static void component_selected_background(UiRect rect, int inset) {
     rect.y += inset;
     rect.w -= 2 * inset;
     rect.h -= 2 * inset;
-    if (rect.w > 0 && rect.h > 0)
-        (void)ui->fill_rect(component_absolute_rect(rect), COLOR_SELECTED_BG);
+    constexpr int64_t kCornerRadius = 8;
+    if (rect.w <= 0 || rect.h <= 0) return;
+    const UiRect horizontal{rect.x, rect.y + kCornerRadius, rect.w,
+                            rect.h - 2 * kCornerRadius};
+    const UiRect vertical{rect.x + kCornerRadius, rect.y,
+                          rect.w - 2 * kCornerRadius, rect.h};
+    if (horizontal.h > 0)
+        (void)ui->fill_rect(component_absolute_rect(horizontal), COLOR_SELECTED_BG);
+    if (vertical.w > 0)
+        (void)ui->fill_rect(component_absolute_rect(vertical), COLOR_SELECTED_BG);
 }
 
 void root_decor_draw() {
@@ -106,22 +114,22 @@ void ops_btn_draw(void* ctrl) {
     const contracts::QolUiAdapter* ui = ui_adapter();
     if (ui == nullptr || ui->fill_rect == nullptr) return;
     const UiRect rect = component_absolute_rect(ops_btn_rect(index));
-    const int64_t x0 = rect.x + (rect.w - 0x30) / 2;
-    const int64_t y0 = rect.y + (rect.h - 0x30) / 2;
+    const int64_t x0 = rect.x + (rect.w - 0x35) / 2;
+    const int64_t y0 = rect.y + (rect.h - 0x35) / 2;
     const uint32_t color = enabled && g_dialog == DialogKind::kNone ? UI_GOLD : COLOR_TEXT_GRAY;
-    const int64_t bound_right = x0 + 0x30;
-    const int64_t bound_bottom = y0 + 0x30;
+    const int64_t bound_right = x0 + 0x35;
+    const int64_t bound_bottom = y0 + 0x35;
     auto fill_x_block = [&](int64_t x, int64_t y) {
         const int64_t left = std::max(x, x0);
         const int64_t top = std::max(y, y0);
-        const int64_t right = std::min(x + 0x04, bound_right);
-        const int64_t bottom = std::min(y + 0x04, bound_bottom);
+        const int64_t right = std::min(x + 0x08, bound_right);
+        const int64_t bottom = std::min(y + 0x08, bound_bottom);
         if (right > left && bottom > top)
             (void)ui->fill_rect({left, top, right - left, bottom - top}, color);
     };
-    for (int step = 0; step < 0x30; ++step) {
+    for (int step = 0; step < 0x35; ++step) {
         fill_x_block(x0 + step, y0 + step);
-        fill_x_block(bound_right - 0x04 - step, y0 + step);
+        fill_x_block(bound_right - 0x08 - step, y0 + step);
     }
 }
 
