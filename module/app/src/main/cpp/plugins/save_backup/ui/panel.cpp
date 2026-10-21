@@ -71,6 +71,7 @@
 #define MSG_H 0x28
 // ABGR colors are only passed to the component text primitive; controls use component theme states.
 #define UI_GOLD 0xFF00B4D7
+#define COLOR_ARROW_GOLD 0xFFA7CCDB
 #define UI_OPTION_TEXT 0xFFC8C7C1
 #define COLOR_TEXT_WHITE 0xFFFFFFFF
 #define COLOR_TEXT_GRAY 0xFF808080

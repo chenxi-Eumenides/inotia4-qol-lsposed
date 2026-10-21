@@ -116,7 +116,7 @@ void ops_btn_draw(void* ctrl) {
     const UiRect rect = component_absolute_rect(ops_btn_rect(index));
     const int64_t x0 = rect.x + (rect.w - 0x3A) / 2;
     const int64_t y0 = rect.y + (rect.h - 0x3A) / 2;
-    const uint32_t color = enabled && g_dialog == DialogKind::kNone ? UI_GOLD : COLOR_TEXT_GRAY;
+    const uint32_t color = enabled && g_dialog == DialogKind::kNone ? COLOR_ARROW_GOLD : COLOR_TEXT_GRAY;
     const int64_t bound_right = x0 + 0x3A;
     const int64_t bound_bottom = y0 + 0x3A;
     auto fill_x_block = [&](int64_t x, int64_t y) {
