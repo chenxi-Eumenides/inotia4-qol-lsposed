@@ -246,8 +246,13 @@ void component_action_clicked(void* user) {
     } else if (action == 500 || action == 501) {
         std::lock_guard<std::mutex> lock(g_sbui_mtx);
         if (g_dialog != DialogKind::kNone) return;
+        const int previous_page = g_page_index;
         if (action == 500 && g_page_index > 0) --g_page_index;
         else if (action == 501 && g_page_index < g_total_pages - 1) ++g_page_index;
+        if (g_page_index != previous_page) {
+            g_selected_backup = -1;
+            g_selected_backup_name.clear();
+        }
         rebuild_parse_queue_locked();
     }
 }
