@@ -2,7 +2,7 @@
 
 ## 摘要
 
-功能插件（声明式资源 owner、叶子、无 `provides`）：拥有自动出售判定策略、按存档筛选配置、背包页入口按钮和游戏内配置面板。出售事务由 `inventory_hooks` 的 `inventory.action` 执行；物品读取走 `item.facts`/Game Host；宝石质量走 `attribute.quality`；按存档 sidecar 读写走 `core.save` 的 `slot.data`。唯一开关为 descriptor feature `autosell.auto_sell`。插件不提供能力，不被其他插件依赖。
+功能插件（声明式资源 owner、叶子、无 `provides`）：拥有自动出售判定策略、按存档筛选配置、背包页入口按钮和游戏内配置面板。出售事务由 `core.item` 的 `inventory.action` 执行；物品读取走 `item.facts`/Game Host；宝石质量走 `attribute.quality`；按存档 sidecar 读写走 `core.save` 的 `slot.data`。唯一开关为 descriptor feature `autosell.auto_sell`。插件不提供能力，不被其他插件依赖。
 
 除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -124,9 +124,9 @@ Game Host：`read_only.item.is_backpack_category`、`read_only.item.is_dice`（`
 
 - 无插件级消费者：不 `provides`，其他插件不 `require` 本插件。
 - `contracts/autosell.h` 的调用方是 bridge JNI（`gamebridge_autosell.cpp`）与自身面板（`ui/panel.cpp:19-23`）。
-- 下游依赖：`inventory_hooks`（`inventory.action`）、`attribute_quality`、`item.facts`/`core.item`、`world.facts`/`core.world`、`core.save`（slot-data）、`core.ui_state`（`ui.state`）。上述任一 required 能力不可用时，插件由 Host 判为 `blocked`；`extension_bag` 关闭只影响逻辑袋扫描与 module view 门禁。
+- 下游依赖：`core.item`（`item.facts`、`inventory.action`）、`attribute_quality`、`world.facts`/`core.world`、`core.save`（slot-data）、`core.ui_state`（`ui.state`）。上述任一 required 能力不可用时，插件由 Host 判为 `blocked`；`extension_bag` 关闭只影响逻辑袋扫描与 module view 门禁。
 - 资源交界：扩展背包占用同一绘制函数的 `+0x210` `bl GRPX_End`，本插件占用 `+0x1cc` `bl UIDesc_Draw`，两者站点不同（`panel.cpp:3-8`）。
-- 边界外：售价与扣减/退款（`inventory_hooks`）、物品内存读取（`item.facts`/Game Host）、属性范围计算（`attribute_quality`）、扩展背包存储（`extension_bag`）、sidecar 文件 IO（`core.save`）、设置页渲染（`settings`）。
+- 边界外：售价与扣减/退款（`core.item`）、物品内存读取（`item.facts`/Game Host）、属性范围计算（`attribute_quality`）、扩展背包存储（`extension_bag`）、sidecar 文件 IO（`core.save`）、设置页渲染（`settings`）。
 
 ## 读写、线程与生命周期
 
