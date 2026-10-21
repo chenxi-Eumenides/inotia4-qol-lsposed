@@ -14,9 +14,9 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 22;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 27;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 29;
 constexpr const char* kUiStateCapabilityId = "ui.state";
-constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
+constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
 constexpr uint32_t kUiStateMaxPanelIdBytes = 128;
 constexpr uint32_t kUiStateMaxDialogOptions = 6;
@@ -35,6 +35,21 @@ struct UiCustomDialogSnapshot {
     const char* title;
     const char* const* option_labels;
     uint32_t option_count;
+};
+
+// v1.2 size-versioned custom dialog payload. Strings are fixed-capacity UTF-8 and
+// must be NUL-terminated within their arrays.
+struct UiCustomDialogSnapshotV2 {
+    uint32_t size;
+    uint64_t sequence;
+    uint64_t generation;
+    char type_id[kUiStateMaxDialogTextBytes];
+    char body[kUiStateMaxDialogTextBytes];
+    char confirm_label[64];
+    char cancel_label[64];
+    uint8_t has_price;
+    int32_t price;
+    char price_unit[64];
 };
 
 // UI 层类型：对话框 / 面板 / 其他（原生 screen 等）。
@@ -59,6 +74,8 @@ struct UiStateApi {
     // v1.1 尾部追加：按栈顶→栈底枚举当前 UI 层。回调在调用线程同步执行，
     // layer->id 仅在本次回调内有效，消费者需自行复制。
     QolResult (*read_layers)(QolUiLayerVisitFn visit, void* user);
+    // v1.2 尾部追加：发布具有独立 body/options/price 投影的自定义对话框。
+    QolResult (*publish_custom_dialog_v2)(const UiCustomDialogSnapshotV2* snapshot);
 };
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };
@@ -477,6 +494,8 @@ struct QolUiComponents {
 using QolUiDrawFn = void (*)(void* control);
 using QolUiNativeScrollDrawFn = void (*)(QolUiHandle scroll, int64_t displacement);
 using QolUiPopupMsgCallbackFn = void (*)(void* param);
+struct QolUiAdapter;
+using QolUiFrameOverlayDrawFn = bool (*)(void* user, QolUiAdapter* ui, uint64_t token);
 struct UiNativeScrollDesc {
     UiRect viewport;
     int64_t content_extent;
@@ -732,6 +751,21 @@ struct QolUiAdapter {
     QolResult (*popup_msg_close_if_callbacks)(QolUiPopupMsgCallbackFn expected_ok,
                                                QolUiPopupMsgCallbackFn expected_cancel,
                                                uint8_t* out_closed);
+
+    // Minor 28 append-only frame overlay seam. A live scope is consumed at most once by
+    // end_frame before GRPX_End. provider is the PanelProviderSpec identity; generation
+    // distinguishes separate opens of the same provider.
+    QolResult (*begin_overlay_scope)(uint64_t token, const void* provider, uint64_t generation);
+    QolResult (*end_overlay_scope)();
+    // Single owner slot: nullptr unregisters only when user matches the registered owner.
+    QolResult (*set_frame_overlay)(QolUiFrameOverlayDrawFn draw, void* user);
+    // Minor 29 tail: raw UTF-8 Yes/No message. message is borrowed only for this call;
+    // type selects the native popup layout and numeric_param preserves the game price path.
+    QolResult (*popup_msg_create_yesno)(const char* message, uint32_t length,
+                                        uint32_t display_type, uint32_t type,
+                                        QolUiPopupMsgCallbackFn ok,
+                                        QolUiPopupMsgCallbackFn cancel,
+                                        uint32_t numeric_param);
 };
 
 }  // namespace qol::contracts

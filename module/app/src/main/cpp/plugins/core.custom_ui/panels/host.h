@@ -16,6 +16,9 @@ struct PopupHostHooks {
     bool (*set_process_info)(void* context, int32_t process, int32_t state_id);
     bool (*popup_stack_snapshot)(void* context, uint32_t* count, uintptr_t* top_enter_vma);
     void (*log)(void* context, int32_t level, const char* message);
+    bool (*begin_overlay_scope)(void* context, uint64_t token, const void* provider,
+                                uint64_t generation);
+    void (*end_overlay_scope)(void* context);
 };
 
 class PopupHost {
@@ -49,6 +52,10 @@ public:
     bool close_pending_for_test() const;
     bool pending_deactivate_for_owner(const char* owner) const;
     bool active_for_test() const;
+    uint64_t top_open_generation_for_test() const;
+    bool overlay_scope_matches(const void* provider, uint64_t generation) const;
+    bool custom_backend_active_for_confirmation() const;
+    bool custom_overlay_scope_identity(const void** provider, uint64_t* generation) const;
     void dispatch_enter();
     void dispatch_process();
     void dispatch_f3();
@@ -58,6 +65,7 @@ public:
 private:
     struct StackItem {
         const contracts::PanelProviderSpec* provider = nullptr;
+        uint64_t open_generation = 0;
     };
 
     bool ensure_popup(const contracts::PanelProviderSpec& provider);
@@ -71,6 +79,8 @@ private:
     void restore_if_idle();
     // 嵌套逻辑切换：不触发游戏 popup 转换，手动调用新顶层的 enter 回调。
     void invoke_enter(const contracts::PanelProviderSpec& provider);
+    uint64_t allocate_open_generation();
+    bool reopen_item(int index);
 
     // close 管线本帧末的可观察进度快照：帧泵间完全不变 = 停滞（供逃生路径计数）。
     struct CloseProgress {
@@ -100,6 +110,7 @@ private:
     StackItem stack_[kStackCapacity]{};
     int stack_size_ = 0;
     uint32_t dispatch_depth_ = 0;
+    uint64_t open_generation_counter_ = 0;
     uint32_t original_popup_count_ = 0;
     uintptr_t original_popup_top_vma_ = 0;
     uint32_t owned_popup_count_ = 0;
@@ -129,5 +140,9 @@ private:
     uint32_t close_stall_frames_ = 0;
     CloseProgress close_stall_progress_{};
 };
+
+bool ui_panels_overlay_scope_matches(const void* provider, uint64_t generation);
+bool ui_panels_custom_backend_active();
+bool ui_panels_custom_overlay_scope_identity(const void** provider, uint64_t* generation);
 
 }  // namespace qol::features::core_ui

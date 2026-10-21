@@ -35,17 +35,18 @@ std::array<char, kDialogTypeIdBufferSize> g_dialog_type_id{};
 // Init 之后还需把模块已持有的 items/count(+标题) 重写回游戏态；open 为**所有** spec 置位
 // （无标题 spec 同样必须恢复 items），clear/消费后复位，不逐帧重试。
 bool g_pending_init = false;
-uint64_t g_dialog_sequence = 0;
+uint64_t g_published_dialog_generation = 0;
 
 const contracts::QolChoicePort* choice() { return choice_port(); }
 
 uint64_t clear_active_locked() {
-    const uint64_t generation = g_generation;
+    const uint64_t published_generation = g_published_dialog_generation;
     g_active = false;
     g_active_spec = {};
     g_pending_init = false;
+    g_published_dialog_generation = 0;
     ++g_generation;
-    return generation;
+    return published_generation;
 }
 
 void copy_text(char* destination, size_t destination_size, const char* source) {
@@ -138,7 +139,8 @@ struct ChoiceDialogSnapshotCopy {
 
 void publish_dialog_snapshot(const ChoiceDialogSnapshotCopy& copy) {
     const contracts::UiStateApi* api = ui_state_api();
-    if (api == nullptr || api->publish_custom_dialog == nullptr) return;
+    if (copy.sequence == 0 || copy.generation == 0 || api == nullptr ||
+        api->publish_custom_dialog == nullptr) return;
     const contracts::UiCustomDialogSnapshot snapshot{
         copy.sequence, copy.generation, copy.type_id.data(),
         copy.has_title ? copy.title.data() : nullptr, copy.label_ptrs.data(), copy.count};
@@ -147,19 +149,17 @@ void publish_dialog_snapshot(const ChoiceDialogSnapshotCopy& copy) {
 
 void publish_dialog_clear(uint64_t generation) {
     const contracts::UiStateApi* api = ui_state_api();
-    uint64_t sequence = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        sequence = ++g_dialog_sequence;
-    }
-    if (api == nullptr || api->clear_custom_dialog == nullptr) return;
+    const uint64_t sequence = ui_dialog_sequence_next();
+    if (generation == 0 || sequence == 0 || api == nullptr ||
+        api->clear_custom_dialog == nullptr) return;
     (void)api->clear_custom_dialog(generation, sequence);
 }
 
-void copy_active_dialog_locked(uint64_t generation, ChoiceDialogSnapshotCopy* out) {
+void copy_active_dialog_locked(ChoiceDialogSnapshotCopy* out) {
     if (out == nullptr) return;
-    out->sequence = ++g_dialog_sequence;
-    out->generation = generation;
+    out->sequence = ui_dialog_sequence_next();
+    out->generation = ui_dialog_generation_next();
+    g_published_dialog_generation = out->generation;
     copy_text(out->type_id.data(), out->type_id.size(), g_active_spec.dialog_type_id);
     out->has_title = g_active_spec.title != nullptr;
     if (out->has_title) copy_text(out->title.data(), out->title.size(), g_active_spec.title);
@@ -398,7 +398,7 @@ bool native_choice_open(const contracts::UiChoiceSpec& spec) {
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         opened = g_active && g_generation == generation;
-        if (opened) copy_active_dialog_locked(generation, &dialog_copy);
+        if (opened) copy_active_dialog_locked(&dialog_copy);
         g_open_inflight = false;
     }
     if (opened) publish_dialog_snapshot(dialog_copy);

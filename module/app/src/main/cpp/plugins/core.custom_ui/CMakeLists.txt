@@ -3,11 +3,13 @@ add_library(qol_plugin_core.custom_ui STATIC
     text_mechanism.cpp
     feature.cpp
     ui_confirmation.cpp
+    ui_confirmation_overlay.cpp
     ui_components.cpp
     settings_contribution.cpp
     panels/debug_components.cpp
     panels/stack.cpp
     panels/host.cpp
+    panels/frame_overlay.cpp
 )
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_sources(qol_plugin_core.custom_ui PRIVATE panels/debug_scroll.cpp panels/debug_help.cpp)

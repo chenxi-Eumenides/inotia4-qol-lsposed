@@ -235,6 +235,10 @@ void* g_popup_test_param = nullptr;
 uint32_t g_popup_test_text_id = 0;
 uint32_t g_popup_test_display_type = 0;
 uint32_t g_popup_test_format_arg = 0;
+uint32_t g_popup_test_raw_length = 0;
+uint32_t g_popup_test_raw_display_type = 0;
+uint32_t g_popup_test_raw_type = 0;
+char g_popup_test_raw_message[256]{};
 int g_popup_test_create_calls = 0;
 int g_popup_test_close_calls = 0;
 int g_popup_test_callback_calls = 0;
@@ -246,6 +250,22 @@ void fake_popup_create_yesno_from_textdata(uint32_t text_id, uint32_t display_ty
     g_popup_test_text_id = text_id;
     g_popup_test_display_type = display_type;
     g_popup_test_format_arg = format_arg;
+    g_popup_test_param = param;
+    *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 1;
+    *reinterpret_cast<void**>(g_base + G_POPUP_FPOK_VMA) = ok;
+    *reinterpret_cast<void**>(g_base + G_POPUP_FPCANCEL_VMA) = cancel;
+}
+
+void fake_popup_create_yesno_raw(char* text, uint32_t len, uint32_t display_type,
+                                 uint32_t type, void* ok, void* cancel, void* param) {
+    ++g_popup_test_create_calls;
+    g_popup_test_raw_length = len;
+    g_popup_test_raw_display_type = display_type;
+    g_popup_test_raw_type = type;
+    if (text != nullptr && len < sizeof(g_popup_test_raw_message)) {
+        std::memcpy(g_popup_test_raw_message, text, len);
+        g_popup_test_raw_message[len] = '\0';
+    }
     g_popup_test_param = param;
     *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 1;
     *reinterpret_cast<void**>(g_base + G_POPUP_FPOK_VMA) = ok;
@@ -264,6 +284,7 @@ void fake_popup_callback(void*) { ++g_popup_test_callback_calls; }
 }  // namespace
 
 decltype(fn_popup_create_yesno_from_textdata) fn_popup_create_yesno_from_textdata = nullptr;
+decltype(fn_popup_create_yesno) fn_popup_create_yesno = nullptr;
 decltype(fn_button_cancel_exe) fn_button_cancel_exe = nullptr;
 
 // host/ui_adapter.cpp 的菜单几何/绑定诊断走统一日志面（infra/log/qol_log.h）。本 target 与
@@ -609,6 +630,7 @@ int main() {
     CHECK(adapter->popup_msg_replace_callback_if != nullptr);
     CHECK(adapter->popup_msg_create_yesno_from_textdata != nullptr);
     CHECK(adapter->popup_msg_close_if_callbacks != nullptr);
+    CHECK(adapter->popup_msg_create_yesno != nullptr);
 
     // Minor 27 routes popup work through the checked game adapter, preserving numeric param.
     {
@@ -637,10 +659,25 @@ int main() {
                                                       &replaced).ok == kQolOk && replaced == 0);
         CHECK(adapter->popup_msg_close_if_callbacks(&fake_popup_callback, &fake_popup_callback,
                                                      &active).ok == kQolOk && active == 1);
-        CHECK(g_popup_test_close_calls == 1 && g_popup_test_callback_calls == 1);
-        CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 0);
-        fn_popup_create_yesno_from_textdata = nullptr;
-        fn_button_cancel_exe = nullptr;
+    CHECK(g_popup_test_close_calls == 1 && g_popup_test_callback_calls == 1);
+    CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 0);
+    fn_popup_create_yesno_from_textdata = nullptr;
+
+    fn_popup_create_yesno = &fake_popup_create_yesno_raw;
+    g_popup_test_create_calls = g_popup_test_close_calls = g_popup_test_callback_calls = 0;
+    *reinterpret_cast<uint8_t*>(g_base + G_POPUP_ON_VMA) = 0;
+    const char raw_message[] = "raw V2 body";
+    CHECK(adapter->popup_msg_create_yesno(raw_message, sizeof(raw_message) - 1, 0, 2,
+          &fake_popup_callback, &fake_popup_callback, 100).ok == kQolOk);
+    CHECK(g_popup_test_create_calls == 1 && g_popup_test_raw_length == sizeof(raw_message) - 1 &&
+          std::strcmp(g_popup_test_raw_message, raw_message) == 0 &&
+          g_popup_test_raw_display_type == 0 && g_popup_test_raw_type == 2 &&
+          reinterpret_cast<uintptr_t>(g_popup_test_param) == 100);
+    CHECK(adapter->popup_msg_close_if_callbacks(&fake_popup_callback, &fake_popup_callback,
+                                                &active).ok == kQolOk && active == 1);
+    CHECK(adapter->popup_msg_active(&active).ok == kQolOk && active == 0);
+    fn_popup_create_yesno = nullptr;
+    fn_button_cancel_exe = nullptr;
         g_base = 0;
     }
 

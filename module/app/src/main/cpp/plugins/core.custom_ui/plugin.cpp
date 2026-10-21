@@ -198,8 +198,12 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_choice_port = static_cast<const contracts::QolChoicePort*>(ctx.ports[0]);
-    if (!ui_confirmation_bind(ctx.sdk->ui)) {
+    if (!ui_confirmation_bind(ctx.sdk->ui, ctx.game, ctx.sdk)) {
         plugin_install_rollback(ctx, false, false);
+        return 1;
+    }
+    if (!ui_confirmation_register_builtin_frame_overlay()) {
+        plugin_install_rollback(ctx, true, false);
         return 1;
     }
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
@@ -240,7 +244,15 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     native_choice_set_installed(true);
-    ui_confirmation_set_installed(true);
+    if (!ui_confirmation_set_installed(true) ||
+        !ui_confirmation_register_builtin_frame_overlay()) {
+        ui_confirmation_set_installed(false);
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            static constexpr char message[] = "confirmation overlay registration failed; disabled";
+            (void)g_sdk->log.write(2, 12, "core.custom_ui/plugin", message,
+                                   sizeof(message) - 1);
+        }
+    }
     text_set_active(true);
 #if defined(QOL_DEBUG_COMPONENTS) && QOL_DEBUG_COMPONENTS
     debug_components_set_enabled(true);

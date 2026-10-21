@@ -12,6 +12,7 @@
 #include <type_traits>
 
 #include "contracts/ui_choice.h"
+#include "contracts/ui_confirmation.h"
 #include "contracts/game_ports/choice_port.h"
 #include "contracts/ui.h"
 
@@ -54,6 +55,88 @@ uint32_t g_dialog_option_count = 0;
 
 QolChoicePort g_choice_port{};
 qol::contracts::QolHostSdk g_sdk{};
+uint8_t g_confirmation_popup_active = 0;
+qol::contracts::QolUiPopupMsgCallbackFn g_confirmation_ok = nullptr;
+qol::contracts::QolUiPopupMsgCallbackFn g_confirmation_cancel = nullptr;
+qol::contracts::QolUiFrameOverlayDrawFn g_frame_overlay_draw = nullptr;
+void* g_frame_overlay_user = nullptr;
+bool g_overlay_scope_live = false;
+
+int32_t fake_ui_main_thread() { return 1; }
+QolResult fake_popup_msg_active(uint8_t* out_active) {
+    if (out_active == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    *out_active = g_confirmation_popup_active;
+    return qol::contracts::ok();
+}
+QolResult fake_popup_msg_get_callbacks(qol::contracts::QolUiPopupMsgCallbackFn* out_ok,
+                                      qol::contracts::QolUiPopupMsgCallbackFn* out_cancel) {
+    if (out_ok == nullptr || out_cancel == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    }
+    *out_ok = g_confirmation_ok;
+    *out_cancel = g_confirmation_cancel;
+    return qol::contracts::ok();
+}
+QolResult fake_popup_msg_replace_callback(uint8_t is_ok,
+    qol::contracts::QolUiPopupMsgCallbackFn expected,
+    qol::contracts::QolUiPopupMsgCallbackFn replacement, uint8_t* out_replaced) {
+    if (out_replaced == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    auto& slot = is_ok != 0 ? g_confirmation_ok : g_confirmation_cancel;
+    *out_replaced = slot == expected ? 1 : 0;
+    if (*out_replaced != 0) slot = replacement;
+    return qol::contracts::ok();
+}
+QolResult fake_popup_msg_create(uint32_t, uint32_t, uint32_t,
+    qol::contracts::QolUiPopupMsgCallbackFn ok,
+    qol::contracts::QolUiPopupMsgCallbackFn cancel, uint32_t) {
+    if (g_confirmation_popup_active != 0) {
+        return qol::contracts::error(kQolErrBusy, "busy", 4);
+    }
+    g_confirmation_popup_active = 1;
+    g_confirmation_ok = ok;
+    g_confirmation_cancel = cancel;
+    return qol::contracts::ok();
+}
+QolResult fake_popup_msg_close(qol::contracts::QolUiPopupMsgCallbackFn expected_ok,
+    qol::contracts::QolUiPopupMsgCallbackFn expected_cancel, uint8_t* out_closed) {
+    if (out_closed == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "out", 3);
+    *out_closed = 0;
+    if (g_confirmation_popup_active == 0 || g_confirmation_ok != expected_ok ||
+        g_confirmation_cancel != expected_cancel) {
+        return qol::contracts::error(kQolErrConflict, "owner", 5);
+    }
+    g_confirmation_popup_active = 0;
+    *out_closed = 1;
+    return qol::contracts::ok();
+}
+QolResult fake_begin_overlay_scope(uint64_t token, const void* provider, uint64_t generation) {
+    if (g_overlay_scope_live || token == 0 || provider == nullptr || generation == 0) {
+        return qol::contracts::error(kQolErrConflict, "scope", 5);
+    }
+    g_overlay_scope_live = true;
+    return qol::contracts::ok();
+}
+QolResult fake_end_overlay_scope() {
+    g_overlay_scope_live = false;
+    return qol::contracts::ok();
+}
+QolResult fake_set_frame_overlay(qol::contracts::QolUiFrameOverlayDrawFn draw, void* user) {
+    if (draw == nullptr) {
+        if (g_frame_overlay_draw != nullptr && g_frame_overlay_user != user) {
+            return qol::contracts::error(kQolErrConflict, "owner", 5);
+        }
+        g_frame_overlay_draw = nullptr;
+        g_frame_overlay_user = nullptr;
+        return qol::contracts::ok();
+    }
+    if (g_frame_overlay_draw != nullptr &&
+        (g_frame_overlay_draw != draw || g_frame_overlay_user != user)) {
+        return qol::contracts::error(kQolErrConflict, "owner", 5);
+    }
+    g_frame_overlay_draw = draw;
+    g_frame_overlay_user = user;
+    return qol::contracts::ok();
+}
 
 QolResult state_publish_panels(const qol::contracts::UiCustomPanelsSnapshot*) {
     return qol::contracts::ok();
@@ -262,8 +345,17 @@ bool setup_choice_feature() {
     static qol::contracts::QolUiAdapter ui{};
     static const void* ports[] = {&g_choice_port};
     ui.size = sizeof(ui);
-    ui.major = qol::contracts::kUiContractMajor;
+    ui.major = qol::contracts::kUiAdapterMajor;
     ui.minor = qol::contracts::kUiAdapterMinor;
+    ui.is_main_thread = &fake_ui_main_thread;
+    ui.popup_msg_active = &fake_popup_msg_active;
+    ui.popup_msg_get_callbacks = &fake_popup_msg_get_callbacks;
+    ui.popup_msg_replace_callback_if = &fake_popup_msg_replace_callback;
+    ui.popup_msg_create_yesno_from_textdata = &fake_popup_msg_create;
+    ui.popup_msg_close_if_callbacks = &fake_popup_msg_close;
+    ui.begin_overlay_scope = &fake_begin_overlay_scope;
+    ui.end_overlay_scope = &fake_end_overlay_scope;
+    ui.set_frame_overlay = &fake_set_frame_overlay;
     g_sdk.ui = &ui;
     g_sdk.capabilities.require = &capability_require;
     g_sdk.log.write = &fake_log_write;
@@ -429,12 +521,14 @@ void test_plugin_manifest() {
 #endif
     CHECK(d.http_query_count == 0 && d.http_queries == nullptr);
     CHECK(d.http_route_metadata_count == 0 && d.http_route_metadata == nullptr);
-    CHECK(d.provides_count == 4);  // ui_components + ui_panels + ui_choice + text_layer
+    CHECK(d.provides_count == 5);  // ui_components + ui_panels + ui_choice + ui_confirmation + text_layer
     CHECK(std::strcmp(d.provides[2].id, qol::contracts::kUiChoiceCapabilityId) == 0);
     CHECK(d.provides[2].version.major == qol::contracts::kUiChoiceVersionMajor);
     CHECK(d.provides[2].version.minor == qol::contracts::kUiChoiceVersionMinor);
     CHECK(kUiChoiceVersionMinor == 1);
     CHECK(d.provides[2].iface != nullptr);
+    CHECK(std::strcmp(d.provides[3].id, qol::contracts::kUiConfirmationCapabilityId) == 0);
+    CHECK(d.provides[3].iface != nullptr);
     CHECK(d.port_count == 1 && d.ports != nullptr);  // 仅 QOL_PORT_CHOICE
     CHECK(d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_CHOICE);
     CHECK(d.ports[0].range.major == qol::contracts::kQolPortChoiceVersion.major);

@@ -1,10 +1,12 @@
 #include "host.h"
 
+#include <cstddef>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
 
 #include "../../../contracts/ui.h"
+#include "../ui_confirmation.h"
 
 namespace qol::features::core_ui {
 namespace {
@@ -45,6 +47,28 @@ bool sdk_popup_stack_snapshot(void* context, uint32_t* count, uintptr_t* top_ent
     }
     return contracts::succeeded(result);
 }
+bool sdk_begin_overlay_scope(void* context, uint64_t token, const void* provider,
+                             uint64_t generation) {
+    const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
+    if (sdk == nullptr || sdk->ui == nullptr ||
+        sdk->ui->major != contracts::kUiAdapterMajor || sdk->ui->minor < 28 ||
+        sdk->ui->size < offsetof(contracts::QolUiAdapter, begin_overlay_scope) +
+                            sizeof(sdk->ui->begin_overlay_scope) ||
+        sdk->ui->begin_overlay_scope == nullptr) {
+        return false;
+    }
+    return contracts::succeeded(sdk->ui->begin_overlay_scope(token, provider, generation));
+}
+void sdk_end_overlay_scope(void* context) {
+    const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
+    if (sdk != nullptr && sdk->ui != nullptr &&
+        sdk->ui->major == contracts::kUiAdapterMajor && sdk->ui->minor >= 28 &&
+        sdk->ui->size >= offsetof(contracts::QolUiAdapter, end_overlay_scope) +
+                            sizeof(sdk->ui->end_overlay_scope) &&
+        sdk->ui->end_overlay_scope != nullptr) {
+        (void)sdk->ui->end_overlay_scope();
+    }
+}
 void sdk_log(void* context, int32_t level, const char* message) {
     const auto* sdk = static_cast<const contracts::QolHostSdk*>(context);
     if (sdk == nullptr || sdk->log.write == nullptr || message == nullptr) return;
@@ -80,7 +104,8 @@ PopupHost::PopupHost(const char* popup_symbol, PopupHostHooks hooks)
 PopupHost::PopupHost(const char* popup_symbol, const contracts::QolHostSdk* sdk)
     : PopupHost(popup_symbol, {const_cast<contracts::QolHostSdk*>(sdk), sdk_popup_resolve,
                                sdk_popup_acquire, sdk_popup_restore, sdk_set_process_info,
-                               sdk_popup_stack_snapshot, sdk_log}) {}
+                               sdk_popup_stack_snapshot, sdk_log, sdk_begin_overlay_scope,
+                               sdk_end_overlay_scope}) {}
 
 PopupHost::~PopupHost() {
     if (g_dispatch_host == this) g_dispatch_host = nullptr;
@@ -136,6 +161,8 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
                stack_[stack_size_ - 1].provider->active();
     }
     if (stack_size_ >= kStackCapacity) return false;
+    const uint64_t open_generation = allocate_open_generation();
+    if (open_generation == 0) return false;
     if (!acquired_) {
         original_popup_snapshot_valid_ = snapshot(&original_popup_count_, &original_popup_top_vma_);
         if (!original_popup_snapshot_valid_) return false;
@@ -147,12 +174,14 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
     }
 
     const contracts::PanelProviderSpec* previous = stack_size_ == 0 ? nullptr : stack_[stack_size_ - 1].provider;
-    stack_[stack_size_++].provider = &provider;
+    stack_[stack_size_].provider = &provider;
+    stack_[stack_size_].open_generation = open_generation;
+    ++stack_size_;
     if (!provider.open()) {
         if (provider.active != nullptr && provider.active()) provider.close();
         --stack_size_;
         stack_[stack_size_] = {};
-        if (previous != nullptr && previous->open != nullptr) (void)previous->open();
+        if (previous != nullptr) (void)reopen_item(stack_size_ - 1);
         if (stack_size_ == 0 && acquired_) {
             close_pending_ = true;
             pending_provider_ = &provider;
@@ -167,7 +196,7 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         stack_[stack_size_] = {};
         if (previous != nullptr) {
             stack_[stack_size_++].provider = previous;
-            if (previous->open != nullptr) (void)previous->open();
+            (void)reopen_item(stack_size_ - 1);
             if (has_callbacks(*previous)) {
                 (void)hooks_.set_process_info(hooks_.context, 1, popup_entry_.state_id);
             }
@@ -188,7 +217,7 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
             --stack_size_;
             stack_[stack_size_] = {};
             if (previous != nullptr) {
-                if (previous->open != nullptr) (void)previous->open();
+                (void)reopen_item(stack_size_ - 1);
                 if (has_callbacks(*previous)) invoke_enter(*previous);
             }
             return false;
@@ -228,7 +257,7 @@ bool PopupHost::close_top() {
     stack_[--stack_size_] = {};
     if (stack_size_ > 0) {
         const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
-        if (restored->open != nullptr && !restored->open()) return false;
+        if (!reopen_item(stack_size_ - 1)) return false;
         if (has_callbacks(*restored)) (void)capture_owned_popup();
         // 逻辑回到父面板：不 pop 游戏栈，手动重新进入父面板刷新其状态。
         if (has_callbacks(*restored)) invoke_enter(*restored);
@@ -308,7 +337,7 @@ bool PopupHost::deactivate_provider(const char* owner, bool main_thread) {
 
     if (removes_top && stack_size_ > 0) {
         const contracts::PanelProviderSpec* restored = stack_[stack_size_ - 1].provider;
-        if (restored->open != nullptr && !restored->open()) return false;
+        if (!reopen_item(stack_size_ - 1)) return false;
         if (has_callbacks(*restored)) (void)capture_owned_popup();
         if (has_callbacks(*restored)) invoke_enter(*restored);
         return true;
@@ -600,13 +629,58 @@ void PopupHost::dispatch_process() {
                     current_panel_for_test() == nullptr ? "none" : current_panel_for_test(),
                     main_thread_ ? 1 : 0, process_dispatch_count_);
     }
+    const auto* cb = current_callbacks();
+    const contracts::PanelProviderSpec* provider =
+        stack_size_ == 0 ? nullptr : stack_[stack_size_ - 1].provider;
+    const uint64_t open_generation =
+        stack_size_ == 0 ? 0 : stack_[stack_size_ - 1].open_generation;
     ++dispatch_depth_;
-    const auto* cb = current_callbacks(); if (cb != nullptr && cb->process != nullptr) cb->process();
-    --dispatch_depth_;
+
+    uint64_t token = 0;
+    bool scope_armed = false;
+    if (cb != nullptr && cb->process != nullptr && provider != nullptr &&
+        open_generation != 0 && ui_confirmation_modal_overlay_token(&token) &&
+        hooks_.begin_overlay_scope != nullptr) {
+        scope_armed = hooks_.begin_overlay_scope(hooks_.context, token, provider,
+                                                 open_generation);
+    }
+    const uint64_t scope_owner = scope_armed
+        ? ui_confirmation_overlay_scope_begin(token) : 0;
+    struct DispatchCleanup {
+        uint32_t* depth;
+        PopupHostHooks* hooks;
+        void* context;
+        bool* armed;
+        uint64_t token;
+        uint64_t scope_owner;
+        bool outermost;
+        bool completed = false;
+        void finish() {
+            if (completed) return;
+            completed = true;
+            if (*armed) {
+                const bool adapter_ended = scope_owner != 0 &&
+                    ui_confirmation_overlay_scope_finish(scope_owner);
+                if (!adapter_ended && hooks->end_overlay_scope != nullptr) {
+                    hooks->end_overlay_scope(context);
+                }
+                if (scope_owner != 0) ui_confirmation_overlay_scope_release(scope_owner);
+            }
+            if (*armed && outermost) ui_confirmation_overlay_scope_finished(token);
+            --*depth;
+        }
+        ~DispatchCleanup() { finish(); }
+    } cleanup{&dispatch_depth_, &hooks_, hooks_.context, &scope_armed, token, scope_owner,
+              dispatch_depth_ == 1};
+
+    if (cb != nullptr && cb->process != nullptr) cb->process();
+    cleanup.finish();
     restore_if_idle();
 }
 void PopupHost::dispatch_f3() {
     if (deactivating_ || !main_thread_) return;
+    if (ui_confirmation_cancel_for_return()) return;
+    if (ui_confirmation_consume_return_suppression()) return;
     ++dispatch_depth_;
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->f3 != nullptr) cb->f3();
     --dispatch_depth_;
@@ -618,6 +692,7 @@ void PopupHost::dispatch_f3() {
 }
 void PopupHost::dispatch_f4() {
     if (deactivating_ || !main_thread_) return;
+    if (ui_confirmation_modal_input_active()) return;
     ++dispatch_depth_;
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->f4 != nullptr) cb->f4();
     --dispatch_depth_;
@@ -625,6 +700,9 @@ void PopupHost::dispatch_f4() {
 }
 uint32_t PopupHost::dispatch_event(uint64_t a, uint64_t b, uint64_t c) {
     if (deactivating_ || !main_thread_) return 0;
+    if (ui_confirmation_modal_input_active()) {
+        return ui_confirmation_dispatch_custom_event(a, b, c);
+    }
     ++dispatch_depth_;
     const auto* cb = current_callbacks();
     const uint32_t result = cb != nullptr && cb->event != nullptr ? cb->event(a, b, c) : 0;
@@ -643,5 +721,62 @@ bool PopupHost::pending_deactivate_for_owner(const char* owner) const {
            std::strcmp(owner, pending_deactivate_owner_) == 0;
 }
 bool PopupHost::active_for_test() const { return stack_size_ != 0; }
+uint64_t PopupHost::top_open_generation_for_test() const {
+    return stack_size_ == 0 ? 0 : stack_[stack_size_ - 1].open_generation;
+}
+bool PopupHost::overlay_scope_matches(const void* provider, uint64_t generation) const {
+    return !deactivating_ && stack_size_ > 0 &&
+        stack_[stack_size_ - 1].provider == provider &&
+        stack_[stack_size_ - 1].open_generation == generation;
+}
+bool PopupHost::custom_backend_active_for_confirmation() const {
+    if (deactivating_ || stack_size_ == 0) return false;
+    const contracts::PanelProviderSpec* provider = stack_[stack_size_ - 1].provider;
+    return provider != nullptr && (provider->active == nullptr || provider->active());
+}
+bool PopupHost::custom_overlay_scope_identity(const void** provider, uint64_t* generation) const {
+    if (provider == nullptr || generation == nullptr || deactivating_ || stack_size_ == 0) {
+        return false;
+    }
+    const contracts::PanelProviderSpec* top = stack_[stack_size_ - 1].provider;
+    if (top == nullptr || top->callbacks == nullptr || top->callbacks->process == nullptr ||
+        (top->active != nullptr && !top->active()) ||
+        stack_[stack_size_ - 1].open_generation == 0) {
+        return false;
+    }
+    *provider = top;
+    *generation = stack_[stack_size_ - 1].open_generation;
+    return true;
+}
+
+uint64_t PopupHost::allocate_open_generation() {
+    if (open_generation_counter_ == UINT64_MAX) return 0;
+    return ++open_generation_counter_;
+}
+
+bool PopupHost::reopen_item(int index) {
+    if (index < 0 || index >= stack_size_) return false;
+    StackItem& item = stack_[index];
+    if (item.provider == nullptr) return false;
+    const uint64_t generation = allocate_open_generation();
+    if (generation == 0) return false;
+    item.open_generation = generation;
+    return item.provider->open == nullptr || item.provider->open();
+}
+
+bool ui_panels_overlay_scope_matches(const void* provider, uint64_t generation) {
+    return g_dispatch_host != nullptr &&
+        g_dispatch_host->overlay_scope_matches(provider, generation);
+}
+
+bool ui_panels_custom_backend_active() {
+    return g_dispatch_host != nullptr &&
+        g_dispatch_host->custom_backend_active_for_confirmation();
+}
+
+bool ui_panels_custom_overlay_scope_identity(const void** provider, uint64_t* generation) {
+    return g_dispatch_host != nullptr &&
+        g_dispatch_host->custom_overlay_scope_identity(provider, generation);
+}
 
 }  // namespace qol::features::core_ui

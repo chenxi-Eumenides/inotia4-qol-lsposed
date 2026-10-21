@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -21,6 +22,10 @@ uint32_t g_text_id = 0;
 uint32_t g_display_type = 0;
 uint32_t g_format_arg = 0;
 uint32_t g_native_param = 0;
+uint32_t g_raw_display_type = 0;
+uint32_t g_raw_type = 0;
+uint32_t g_raw_length = 0;
+char g_raw_message[256]{};
 int g_create_calls = 0;
 int g_close_calls = 0;
 bool g_fail_after_create = false;
@@ -91,6 +96,26 @@ QolResult popup_create(uint32_t text_id, uint32_t display_type, uint32_t format_
         : qol::contracts::ok();
 }
 
+QolResult popup_create_raw(const char* message, uint32_t length, uint32_t display_type,
+                           uint32_t type, QolUiPopupMsgCallbackFn ok,
+                           QolUiPopupMsgCallbackFn cancel, uint32_t param) {
+    ++g_create_calls;
+    if (message == nullptr || length == 0 || length >= sizeof(g_raw_message) ||
+        g_popup_active != 0) {
+        return qol::contracts::error(kQolErrInvalidArgument, "raw", 3);
+    }
+    std::memcpy(g_raw_message, message, length);
+    g_raw_message[length] = '\0';
+    g_raw_length = length;
+    g_raw_display_type = display_type;
+    g_raw_type = type;
+    g_native_param = param;
+    g_ok = ok;
+    g_cancel = cancel;
+    g_popup_active = 1;
+    return qol::contracts::ok();
+}
+
 QolResult popup_close_if_callbacks(QolUiPopupMsgCallbackFn expected_ok,
                                    QolUiPopupMsgCallbackFn expected_cancel,
                                    uint8_t* out_closed) {
@@ -140,6 +165,8 @@ void reset_fake() {
     g_ok = g_original_ok = &old_ok;
     g_cancel = g_original_cancel = &old_cancel;
     g_text_id = g_display_type = g_format_arg = g_native_param = 0;
+    g_raw_display_type = g_raw_type = g_raw_length = 0;
+    g_raw_message[0] = '\0';
     g_create_calls = g_close_calls = 0;
     g_fail_after_create = false;
     g_fail_close = false;
@@ -179,10 +206,39 @@ int main() {
     g_adapter.popup_msg_replace_callback_if = &popup_replace_callback_if;
     g_adapter.popup_msg_create_yesno_from_textdata = &popup_create;
     g_adapter.popup_msg_close_if_callbacks = &popup_close_if_callbacks;
+    g_adapter.popup_msg_create_yesno = &popup_create_raw;
     assert(qol::features::core_ui::ui_confirmation_bind(&g_adapter));
     qol::features::core_ui::ui_confirmation_set_installed(true);
     g_api = qol::features::core_ui::ui_confirmation_api();
     assert(g_api != nullptr);
+
+    // V2 native message uses the raw-string Adapter slot and keeps the numeric price parameter.
+    reset_fake();
+    qol::contracts::UiConfirmationSpecV2 raw_v2{};
+    raw_v2.size = sizeof(raw_v2);
+    raw_v2.text_id = 456;
+    raw_v2.display_type = 9;
+    raw_v2.format_arg = 10;
+    raw_v2.price = 321;
+    raw_v2.on_confirm = &on_confirm;
+    raw_v2.on_cancel = &on_cancel;
+    std::snprintf(raw_v2.message, sizeof(raw_v2.message), "%s", "V2 raw body");
+    uint64_t raw_token = 0;
+    assert(qol::contracts::succeeded(g_api->open_v2(&raw_v2, &raw_token)) && raw_token != 0);
+    assert(g_create_calls == 1 && g_text_id == 0 && g_raw_length == std::strlen("V2 raw body"));
+    assert(std::strcmp(g_raw_message, "V2 raw body") == 0 && g_raw_display_type == 0 &&
+           g_raw_type == 2 && g_native_param == 321);
+    trigger_confirm();
+    assert(g_confirm_calls == 1 && g_cancel_calls == 0);
+
+    // Empty V2 message is the native TextData fallback.
+    reset_fake();
+    raw_v2.message[0] = '\0';
+    uint64_t fallback_token = 0;
+    assert(qol::contracts::succeeded(g_api->open_v2(&raw_v2, &fallback_token)));
+    assert(g_create_calls == 1 && g_text_id == 456 && g_display_type == 9 &&
+           g_format_arg == 10 && g_native_param == 321);
+    assert(qol::contracts::succeeded(g_api->close(fallback_token)));
 
     // Numeric price is passed natively; the consumer context remains separate.
     reset_fake();

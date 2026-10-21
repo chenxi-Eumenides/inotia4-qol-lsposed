@@ -72,7 +72,9 @@ bool g_confirmation_active = false;
 uint64_t g_next_confirmation_token = 41;
 uint64_t g_last_closed_confirmation_token = 0;
 UiConfirmationSpec g_last_confirmation{};
+UiConfirmationSpecV2 g_last_confirmation_v2{};
 int g_confirmation_open_count = 0;
+int g_confirmation_v2_open_count = 0;
 
 bool demo_choice_open(const UiChoiceSpec& spec) {
     if (g_choice_active) return false;
@@ -98,6 +100,17 @@ QolResult demo_confirmation_open(const UiConfirmationSpec* spec, uint64_t* out_t
     *out_token = g_next_confirmation_token++;
     return ok();
 }
+QolResult demo_confirmation_open_v2(const UiConfirmationSpecV2* spec, uint64_t* out_token) {
+    if (spec == nullptr || spec->size < sizeof(*spec) || out_token == nullptr ||
+        g_confirmation_active) {
+        return error(kQolErrBusy, "busy", 4);
+    }
+    g_confirmation_active = true;
+    ++g_confirmation_v2_open_count;
+    g_last_confirmation_v2 = *spec;
+    *out_token = g_next_confirmation_token++;
+    return ok();
+}
 QolResult demo_confirmation_active(uint64_t token, uint8_t* out_active) {
     if (token + 1 != g_next_confirmation_token || out_active == nullptr) {
         return error(kQolErrNotFound, "stale", 5);
@@ -112,7 +125,8 @@ QolResult demo_confirmation_close(uint64_t token) {
     return ok();
 }
 const UiConfirmationApi kDemoConfirmationApi{
-    &demo_confirmation_open, &demo_confirmation_active, &demo_confirmation_close};
+    &demo_confirmation_open, &demo_confirmation_active, &demo_confirmation_close,
+    &demo_confirmation_open_v2};
 
 QolResult require_debug_capability(const char* id, QolVersionRange range, const void** out) {
     if (id == nullptr || out == nullptr) return error(kQolErrInvalidArgument, "invalid", 7);
@@ -120,7 +134,7 @@ QolResult require_debug_capability(const char* id, QolVersionRange range, const 
     if (std::strcmp(id, kUiChoiceCapabilityId) == 0 && range.major == 1 && range.min_minor == 1) {
         *out = &kDemoChoiceApi;
     } else if (std::strcmp(id, kUiConfirmationCapabilityId) == 0 &&
-               range.major == 1 && range.min_minor == 0) {
+               range.major == 1 && range.min_minor == kUiConfirmationVersionMinor) {
         *out = &kDemoConfirmationApi;
     }
     return *out == nullptr ? error(kQolErrNotFound, "missing", 7) : ok();
@@ -487,8 +501,8 @@ int main() {
     CHECK(list->kind == 4 && list->rect.x == left.x && list->rect.w == left.w);
     CHECK(list->children.size() == 1);
     Control* group = list->children[0].get();
-    CHECK(group->children.size() == 9);
-    for (size_t i = 0; i < 9; ++i) {
+    CHECK(group->children.size() == 10);
+    for (size_t i = 0; i < 10; ++i) {
         CHECK(group->children[i]->rect.y == static_cast<int64_t>(i) * 56 &&
               group->children[i]->rect.h == 56 && group->children[i]->click != nullptr);
     }
@@ -579,13 +593,14 @@ int main() {
     g_provider->callbacks->process();
     CHECK(g_alpha_fill_draws > shape_draws_before + 1);
 
-    // 原生对话框类别由三个独立根子项触发，不挂在 HelpPage 的 native scroll 子树内。
+    // 原生/自绘确认入口由四个独立根子项触发，不挂在 HelpPage 的 native scroll 子树内。
     CHECK(api->help_page_set_selected(columns, 8).ok == kQolOk);
     g_provider->callbacks->process();
-    CHECK(root->children.size() == 5);  // 双栏页、导航、3 个 Debug-only 弹窗入口。
+    CHECK(root->children.size() == 6);  // 双栏页、导航、4 个 Debug-only 弹窗入口。
     Control* choice_demo = root->children[2].get();
     Control* no_price_demo = root->children[3].get();
     Control* price_demo = root->children[4].get();
+    Control* custom_demo = root->children[5].get();
     choice_demo->click(choice_demo->user);
     CHECK(g_choice_open_count == 1 && g_choice_active);
     CHECK(g_last_choice.count == 3 && g_last_choice.close_index == 2 &&
@@ -598,6 +613,16 @@ int main() {
           g_last_confirmation.format_arg == 2 && g_last_confirmation.price == 0);
     g_confirmation_active = false;
     g_last_confirmation.on_confirm(g_last_confirmation.user);
+    custom_demo->click(custom_demo->user);
+    CHECK(g_confirmation_v2_open_count == 1 && g_confirmation_active);
+    CHECK(g_last_confirmation_v2.size == sizeof(g_last_confirmation_v2));
+    CHECK(std::strcmp(g_last_confirmation_v2.message, "是否出售该物品？") == 0);
+    CHECK(std::strcmp(g_last_confirmation_v2.confirm_label, "出售") == 0);
+    CHECK(std::strcmp(g_last_confirmation_v2.cancel_label, "取消") == 0);
+    CHECK(g_last_confirmation_v2.price == 100 &&
+          std::strcmp(g_last_confirmation_v2.price_unit, "金币") == 0);
+    g_confirmation_active = false;
+    g_last_confirmation_v2.on_cancel(g_last_confirmation_v2.user);
     price_demo->click(price_demo->user);
     CHECK(g_confirmation_open_count == 2 && g_confirmation_active &&
           g_last_confirmation.price == 100);

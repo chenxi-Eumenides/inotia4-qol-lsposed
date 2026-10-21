@@ -24,6 +24,8 @@
 #include "game/adapter_ports/craft_port.h"
 #include "game/state/game_state.h"
 #include "infra/log/qol_log.h"
+#include "plugins/core.custom_ui/panels/frame_overlay.h"
+#include "plugins/core.custom_ui/ui_confirmation.h"
 
 namespace qol::host {
 namespace {
@@ -33,6 +35,9 @@ using contracts::QolUiAdapter;
 using contracts::QolUiDrawFn;
 using contracts::QolUiHandle;
 using contracts::UiRect;
+using qol::features::core_ui::FrameOverlay;
+
+FrameOverlay g_frame_overlay;
 
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotReady = "ui adapter not ready";
@@ -374,7 +379,29 @@ QolResult draw_control_alpha_overlay(QolUiHandle control, UiRect rect, uint32_t 
     return contracts::ok();
 }
 
+QolResult begin_overlay_scope(uint64_t token, const void* provider, uint64_t generation) {
+    if (!g_frame_overlay.begin_scope(token, provider, generation)) {
+        static constexpr char message[] = "invalid or already-live overlay scope";
+        return contracts::error(kQolErrConflict, message, sizeof(message) - 1);
+    }
+    return contracts::ok();
+}
+
+QolResult end_overlay_scope() {
+    g_frame_overlay.end_scope();
+    return contracts::ok();
+}
+
+QolResult set_frame_overlay(contracts::QolUiFrameOverlayDrawFn draw, void* user) {
+    if (!g_frame_overlay.set_draw(draw, user)) {
+        static constexpr char message[] = "frame overlay slot owned by another registration";
+        return contracts::error(kQolErrConflict, message, sizeof(message) - 1);
+    }
+    return contracts::ok();
+}
+
 QolResult end_frame() {
+    (void)g_frame_overlay.draw_once(const_cast<QolUiAdapter*>(ui_adapter()));
     ui_end_frame();
     return contracts::ok();
 }
@@ -1402,6 +1429,30 @@ QolResult popup_msg_create_yesno_from_textdata(
         ? contracts::ok() : not_ready();
 }
 
+QolResult popup_msg_create_yesno_raw(
+    const char* message, uint32_t length, uint32_t display_type, uint32_t type,
+    contracts::QolUiPopupMsgCallbackFn ok, contracts::QolUiPopupMsgCallbackFn cancel,
+    uint32_t numeric_param) {
+    if (message == nullptr || length == 0 || ok == nullptr || cancel == nullptr) {
+        return invalid_argument();
+    }
+    if (!qol::game::game_host_is_main_thread() || g_base == 0 || fn_popup_create_yesno == nullptr) {
+        return not_ready();
+    }
+    uint8_t active = 0;
+    if (!qol::game::ui_confirmation_popup_active(&active)) return not_ready();
+    if (active != 0) {
+        static constexpr char busy[] = "UIPopupMsg already active";
+        return contracts::error(kQolErrBusy, busy, sizeof(busy) - 1);
+    }
+    static_assert(sizeof(uintptr_t) >= sizeof(numeric_param),
+                  "native callback param must carry the numeric price");
+    fn_popup_create_yesno(const_cast<char*>(message), length, display_type, type,
+                          reinterpret_cast<void*>(ok), reinterpret_cast<void*>(cancel),
+                          reinterpret_cast<void*>(static_cast<uintptr_t>(numeric_param)));
+    return contracts::ok();
+}
+
 QolResult popup_msg_close_if_callbacks(
     contracts::QolUiPopupMsgCallbackFn expected_ok,
     contracts::QolUiPopupMsgCallbackFn expected_cancel, uint8_t* out_closed) {
@@ -1424,7 +1475,7 @@ int32_t adapter_is_main_thread() {
     return qol::game::game_host_is_main_thread() ? 1 : 0;
 }
 
-const QolUiAdapter g_ui_adapter{
+QolUiAdapter g_ui_adapter{
     sizeof(QolUiAdapter), contracts::kUiAdapterMajor, contracts::kUiAdapterMinor,
     &create_control,
     &set_rect,
@@ -1557,9 +1608,14 @@ const QolUiAdapter g_ui_adapter{
            &popup_msg_active,
            &popup_msg_get_callbacks,
            &popup_msg_replace_callback_if,
-           &popup_msg_create_yesno_from_textdata,
-           &popup_msg_close_if_callbacks,
-         };
+            &popup_msg_create_yesno_from_textdata,
+            &popup_msg_close_if_callbacks,
+            // Minor 28 tail: one-shot, provider-generation-bound confirmation overlay scope.
+            &begin_overlay_scope,
+            &end_overlay_scope,
+            &set_frame_overlay,
+            &popup_msg_create_yesno_raw,
+          };
 
 }  // namespace
 

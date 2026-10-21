@@ -443,6 +443,8 @@ add_executable(native_choice_tests
     ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(native_choice_tests PRIVATE
     ${CPP_DIR}
@@ -1095,6 +1097,8 @@ add_executable(core_ui_panels_tests
     test_core_ui_panels.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_ui_panels_tests PRIVATE
     ${CPP_DIR}
@@ -1107,6 +1111,8 @@ add_test(NAME core_ui_panels_tests COMMAND core_ui_panels_tests)
 add_executable(core_custom_ui_host_tests
     test_core_custom_ui_host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_custom_ui_host_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_custom_ui_host_tests PRIVATE cxx_std_17)
@@ -1116,12 +1122,27 @@ add_test(NAME core_custom_ui_host_tests COMMAND core_custom_ui_host_tests)
 # Single-owner native UIPopupMsg confirmation capability with fake UI Adapter.
 add_executable(core_ui_confirmation_tests
     test_core_ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_ui_confirmation_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_ui_confirmation_tests PRIVATE cxx_std_17)
 set_target_properties(core_ui_confirmation_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME core_ui_confirmation_tests COMMAND core_ui_confirmation_tests)
+
+# One-shot confirmation frame overlay scope and PopupHost modal input gate.
+add_executable(core_frame_overlay_tests
+    test_core_frame_overlay.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/frame_overlay.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
+)
+target_include_directories(core_frame_overlay_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_frame_overlay_tests PRIVATE cxx_std_17)
+set_target_properties(core_frame_overlay_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_frame_overlay_tests COMMAND core_frame_overlay_tests)
 
 # D1-b3：autosell 插件清单/资源 host 测试（声明式 claim + provider 登记；末尾追加）
 add_executable(autosell_plugin_tests
@@ -1431,6 +1452,10 @@ add_test(NAME core_api_lifecycle_tests COMMAND core_api_lifecycle_tests)
 add_executable(ui_adapter_tests
     test_ui_adapter.cpp
     ${CPP_DIR}/host/ui_adapter.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/frame_overlay.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
     ${CPP_DIR}/game/access/ui_confirmation.cpp
     ${CPP_DIR}/game/access/ui_native_toggle.cpp
     ${CPP_DIR}/game/access/ui_native_text_button.cpp
@@ -1546,6 +1571,17 @@ target_compile_definitions(debug_two_column_tests PRIVATE QOL_DEBUG_COMPONENTS=1
 target_compile_features(debug_two_column_tests PRIVATE cxx_std_17)
 set_target_properties(debug_two_column_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME debug_two_column_tests COMMAND debug_two_column_tests)
+
+add_executable(core_ui_confirmation_overlay_render_tests
+    test_core_ui_confirmation_overlay_render.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
+)
+target_include_directories(core_ui_confirmation_overlay_render_tests PRIVATE ${CPP_DIR})
+target_compile_features(core_ui_confirmation_overlay_render_tests PRIVATE cxx_std_17)
+set_target_properties(core_ui_confirmation_overlay_render_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_ui_confirmation_overlay_render_tests
+    COMMAND core_ui_confirmation_overlay_render_tests)
 
 # U11-2：core.ui 标准组件创建/更新/命中/销毁与错误语义 host 测试。
 add_executable(core_ui_components_tests
@@ -1975,6 +2011,8 @@ add_executable(core_settings_panel_migration_tests
     ${CPP_DIR}/plugins/settings/panels/settings_binding.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(core_settings_panel_migration_tests PRIVATE ${CPP_DIR})
 target_compile_features(core_settings_panel_migration_tests PRIVATE cxx_std_17)
@@ -2034,6 +2072,8 @@ add_executable(settings_contributions_tests
     ${CPP_DIR}/plugins/save_backup/settings_contribution.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation_overlay.cpp
 )
 target_include_directories(settings_contributions_tests PRIVATE ${CPP_DIR})
 target_compile_features(settings_contributions_tests PRIVATE cxx_std_17)

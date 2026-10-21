@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 
 #include "../../contracts/game_ports/choice_port.h"
 #include "../../contracts/plugin.h"
@@ -49,6 +50,30 @@ inline bool address_in_range(uintptr_t address, uintptr_t begin, size_t size) {
 bool native_choice_open(const contracts::UiChoiceSpec& spec);
 bool native_choice_active();
 void native_choice_close();
+
+// Shared monotonic IDs for every core.custom_ui custom-dialog publication.
+namespace ui_dialog_sequence_detail {
+inline std::atomic<uint64_t> g_sequence{0};
+inline std::atomic<uint64_t> g_generation{0};
+
+inline uint64_t next(std::atomic<uint64_t>& counter) {
+    uint64_t current = counter.load(std::memory_order_relaxed);
+    for (;;) {
+        if (current == UINT64_MAX) return 0;
+        if (counter.compare_exchange_weak(current, current + 1, std::memory_order_relaxed,
+                                          std::memory_order_relaxed)) {
+            return current + 1;
+        }
+    }
+}
+}  // namespace ui_dialog_sequence_detail
+
+inline uint64_t ui_dialog_sequence_next() {
+    return ui_dialog_sequence_detail::next(ui_dialog_sequence_detail::g_sequence);
+}
+inline uint64_t ui_dialog_generation_next() {
+    return ui_dialog_sequence_detail::next(ui_dialog_sequence_detail::g_generation);
+}
 
 // 资源 handler（plugin.cpp 的 ResourceClaim 取址）：
 void choice_init_wrapper(void* control);    // hook:UIChoice_Init

@@ -49,7 +49,7 @@ constexpr contracts::UiRect kPanelNavAbsRect{contracts::ui_theme::kNavBoxAbsX,
 // draw_category_detail 各加一个分支；两类内容互不冲突。
 constexpr const char* kCategoryNames[] = {
     "文本按钮", "开关胶囊", "X/导航按钮", "主题调色板", "框架边框", "箭头按钮", "图标按钮",
-    "基础形状", "原生对话框"};
+    "基础形状", "原生对话框", "确认框双后端"};
 constexpr uint32_t kCategoryCount = sizeof(kCategoryNames) / sizeof(kCategoryNames[0]);
 
 // 右栏交互控件：text_button 走手工命中绘制，nav_button 走自适应绘制。
@@ -217,11 +217,64 @@ void open_demo_confirmation(uint32_t price) {
     g_demo_confirmation_status = price == 0 ? "无价格确认框已打开" : "价格 100 确认框已打开";
 }
 
+void open_demo_custom_confirmation() {
+    const contracts::UiConfirmationApi* api = ui_confirmation_api();
+    if (api == nullptr || api->open_v2 == nullptr || api->active == nullptr) {
+        g_demo_confirmation_status = "V2 确认框不可用";
+        return;
+    }
+    if (g_demo_confirmation_token != 0) {
+        uint8_t active = 0;
+        const uint64_t token = g_demo_confirmation_token;
+        const QolResult status = api->active(token, &active);
+        if (contracts::succeeded(status) && active != 0) {
+            g_demo_confirmation_status = "调试确认框仍打开";
+            return;
+        }
+        if (contracts::succeeded(status) || status.code == kQolErrNotFound) {
+            clear_demo_confirmation_token(token);
+        } else {
+            g_demo_confirmation_status = "确认框状态暂不可读";
+            return;
+        }
+    }
+    contracts::UiConfirmationSpecV2 spec{};
+    spec.size = sizeof(spec);
+    spec.text_id = 9;
+    spec.display_type = 0;
+    spec.format_arg = 2;
+    spec.price = 100;
+    spec.on_confirm = &demo_confirmation_confirmed;
+    spec.on_cancel = &demo_confirmation_cancelled;
+    spec.user = &g_demo_confirmation_context;
+    std::snprintf(spec.message, sizeof(spec.message), "%s", "是否出售该物品？");
+    std::snprintf(spec.confirm_label, sizeof(spec.confirm_label), "%s", "出售");
+    std::snprintf(spec.cancel_label, sizeof(spec.cancel_label), "%s", "取消");
+    std::snprintf(spec.price_unit, sizeof(spec.price_unit), "%s", "金币");
+    uint64_t token = 0;
+    const QolResult result = api->open_v2(&spec, &token);
+    if (token != 0) {
+        g_demo_confirmation_token = token;
+        g_demo_confirmation_context.token = token;
+    }
+    if (!contracts::succeeded(result)) {
+        g_demo_confirmation_status = "自绘确认框打开失败";
+        if (token != 0) close_demo_confirmation();
+        return;
+    }
+    if (token == 0) {
+        g_demo_confirmation_status = "确认框未返回 token";
+        return;
+    }
+    g_demo_confirmation_status = "自绘确认框已打开（100 金币）";
+}
+
 void dialog_demo_clicked(void* user) {
     switch (reinterpret_cast<uintptr_t>(user)) {
         case 0: open_demo_choice(); break;
         case 1: open_demo_confirmation(0); break;
         case 2: open_demo_confirmation(100); break;
+        case 3: open_demo_custom_confirmation(); break;
         default: break;
     }
 }
@@ -429,9 +482,11 @@ bool build_native_dialog_demos(const contracts::QolUiComponents* components,
         {kRightViewport.x + 20, kRightViewport.y + 120, 220, 48},
         {kRightViewport.x + 264, kRightViewport.y + 120, 220, 48},
         {kRightViewport.x + 20, kRightViewport.y + 176, 220, 48},
+        {kRightViewport.x + 264, kRightViewport.y + 176, 220, 48},
     };
-    const char* const labels[] = {"打开原生选择框", "无价格确认框", "价格确认框 100"};
-    for (uint32_t i = 0; i < 3; ++i) {
+    const char* const labels[] = {
+        "打开原生选择框", "无价格确认框", "价格确认框 100", "自绘确认框"};
+    for (uint32_t i = 0; i < 4; ++i) {
         const contracts::UiButtonDesc desc{rects[i], labels[i], 0, &dialog_demo_clicked,
             reinterpret_cast<void*>(static_cast<uintptr_t>(i))};
         contracts::QolUiHandle handle = nullptr;
@@ -478,6 +533,7 @@ bool build_category_controls(int32_t index) {
             ok = build_icon_demo(components, g_root, g_category_controls, &count);
             break;
         case 8:
+        case 9:
             ok = build_native_dialog_demos(components, g_root, g_category_controls, &count);
             break;
         default:  // 分类 1/3/4 纯绘制，无交互控件。
@@ -658,10 +714,10 @@ void draw_shapes_detail(const contracts::QolUiAdapter* adapter,
 void draw_native_dialog_detail(const contracts::QolUiAdapter* adapter, contracts::UiRect right) {
     if (adapter == nullptr || adapter->draw_string_with_font == nullptr) return;
     set_text_color(adapter, contracts::ui_theme::kTextGold);
-    (void)adapter->draw_string_with_font("原生 ui_choice / ui_confirmation 预览",
+    (void)adapter->draw_string_with_font("原生选择框 / 双后端确认框预览",
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 32), 0, 0);
     set_text_color(adapter, contracts::ui_theme::kTextNormal);
-    (void)adapter->draw_string_with_font("打开后观察黑底与本页的覆盖关系；确认或取消后可继续操作。",
+    (void)adapter->draw_string_with_font("V1 保持原生 TextData；V2 在面板上自绘，按钮回调无游戏副作用。",
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 84), 0, 0);
     const char* choice_status = g_demo_choice_open ? "选择框：打开中" :
         g_demo_choice_result >= 0 ? (g_demo_choice_result == 2 ? "选择框：已关闭" :
@@ -672,7 +728,7 @@ void draw_native_dialog_detail(const contracts::QolUiAdapter* adapter, contracts
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 252), 0, 0);
     (void)adapter->draw_string_with_font(g_demo_confirmation_status,
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 292), 0, 0);
-    (void)adapter->draw_string_with_font("两类回调只更新调试状态，不写物品、金币或存档。",
+    (void)adapter->draw_string_with_font("自绘样例：是否出售该物品？价格 100 金币；不改物品、金币或存档。",
         static_cast<int32_t>(right.x + 20), static_cast<int32_t>(right.y + 332), 0, 0);
 }
 
@@ -720,6 +776,7 @@ void draw_category_detail(void* user, contracts::UiRect right) {
             draw_shapes_detail(adapter, components, right);
             break;
         case 8:
+        case 9:
             draw_native_dialog_detail(adapter, right);
             break;
         default:
