@@ -431,11 +431,11 @@ target_sources(gamebridge PRIVATE
     infra/panels.cpp
 )
 
-# D1-b2：core.ui 出口面插件（设置页容器 + 面板栈 + ui_panels 能力；own:popup.settings）
+# D1-b2：core.ui 出口面插件（设置页容器 + 面板栈 + ui_panels 能力）
 target_sources(gamebridge PRIVATE
 )
 
-# D1-b2：save_backup 游戏内面板迁入插件（provider save_backup + own:popup.savebackup）
+# D1-b2：save_backup 游戏内面板迁入插件（provider save_backup）
 target_sources(gamebridge PRIVATE
 )
 

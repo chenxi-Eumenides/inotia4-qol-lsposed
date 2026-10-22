@@ -370,6 +370,14 @@ bool scan_gates_ok(ScanGateReason* out_reason) {
         if (out_reason != nullptr) *out_reason = ScanGateReason::kModuleViewInstalled;
         return false;
     }
+    // 自动出售面板打开时同样阻塞：草稿编辑中的配置不应被后台出售并发干扰。
+    const auto* sdk = qol::features::autosell::host_sdk();
+    int32_t panel_active = 0;
+    if (sdk != nullptr && sdk->panels.active != nullptr &&
+        sdk->panels.active("autosell", &panel_active).ok == kQolOk && panel_active != 0) {
+        if (out_reason != nullptr) *out_reason = ScanGateReason::kUiBusy;
+        return false;
+    }
     if (ui_busy()) {
         if (out_reason != nullptr) *out_reason = ScanGateReason::kUiBusy;
         return false;

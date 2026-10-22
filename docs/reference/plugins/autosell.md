@@ -66,7 +66,7 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 
 - 主线程帧任务每 60 帧执行一次（`scan.h:17`、`scan.cpp:505-536`）。
 - 门禁顺序（`scan.cpp:523-554`）：feature 全局开启 → 存档 session（slot+epoch）活跃 → 存档配置 `enabled` → 世界/游戏状态与 UI 空闲。
-- 世界门禁：`world.facts.state == 5`；`game_state_gate != 0`；EB `module_view_installed()` 为假；`ui.state.read_layers` 仅当 `kPanel`/`kDialog` 类型层的 id 为 `inventory`（背包页）时视为 UI 占用。其他 UI 不阻塞扫描；此门禁独立于 `extension_bag`，EB 能力不可用时物理袋继续扫描、逻辑袋 6..10 跳过（`scan.cpp:323-345`）。
+- 世界门禁：`world.facts.state == 5`；`game_state_gate != 0`；EB `module_view_installed()` 为假；自动出售面板打开（`panels.active("autosell")`）为真；`ui.state.read_layers` 仅当 `kPanel`/`kDialog` 类型层的 id 为 `inventory`（背包页）时视为 UI 占用。其他 UI 不阻塞扫描；此门禁独立于 `extension_bag`，EB 能力不可用时物理袋继续扫描、逻辑袋 6..10 跳过（`scan.cpp:323-345`）。
 - save-exit 会使 slot-data session 失效，下一次 `sd_load` 成功前配置写入被拒绝（`scan.cpp:612-617`、`store.cpp:609-650`）。
 - 每轮扫描在 tick 入口捕获取消纪元；关闭 feature、关闭存档配置或 save-exit 会递增纪元，扫描在下一个槽/下一笔出售前停止（`scan.cpp:505-536,539-547`）。已进入 `inventory.action.sell` 的单笔事务不中断。
 - 扫描范围：物理袋 0..4（inventory_extras port 遍历，任务袋 5 排除）；逻辑袋 6..10 仅在 EB `is_logical_bag` 为真时，经 `item.facts.item_ref_at` 逐槽读取，要求 provider 句柄、有效 handle 且 category>0（`scan.cpp:21-24,425-502`）。
