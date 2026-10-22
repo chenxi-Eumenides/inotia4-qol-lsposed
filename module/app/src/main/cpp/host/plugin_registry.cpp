@@ -9,6 +9,7 @@
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
 #include "contracts/game_ports/craft_lottery_port.h"
+#include "contracts/game_ports/custom_map_resource_port.h"
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_state_port.h"
@@ -60,6 +61,7 @@
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
 #include "game/adapter_ports/craft_lottery_port.h"
+#include "game/adapter_ports/custom_map_resource_port.h"
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/world_action_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
@@ -266,6 +268,12 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
+    if (id == contracts::QolPortId::QOL_PORT_CUSTOM_MAP_RESOURCE) {
+        const auto& port = qol::game::custom_map_resource_port();
+        if (out != nullptr)
+            *out = AvailablePort{id, QolVersion{port.abi.major, port.abi.minor}, &port};
+        return true;
+    }
     if (id == contracts::QolPortId::QOL_PORT_SYSTEM) {
         const auto& port = qol::game::system_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
@@ -366,6 +374,12 @@ bool resolve_plugin_ports(uint32_t index) {
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_WORLD_ACTION &&
             (plugin.id == nullptr || std::strcmp(plugin.id, "world_teleport") != 0)) {
+            std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
+                          "private port: %s", contracts::port_id_name(requirement.id));
+            return false;
+        }
+        if (requirement.id == contracts::QolPortId::QOL_PORT_CUSTOM_MAP_RESOURCE &&
+            (plugin.id == nullptr || std::strcmp(plugin.id, "custom_map") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
