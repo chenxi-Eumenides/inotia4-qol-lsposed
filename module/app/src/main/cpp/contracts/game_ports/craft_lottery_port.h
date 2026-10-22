@@ -21,10 +21,12 @@ struct QolCraftLotteryWritePort {
     QolResult (*add_recipe_book)(uint16_t recipe_idx);
     // 原版 MATH_GetRandom(n)
     QolResult (*get_random)(int32_t n, int32_t* out);
-    // 弹窗组合：fmt=MEM_ReadUint16(RECIPEBASE_data + recsize*17) 经 MEMORYTEXT_GetText，
-    // name=RECIPEBASE[recipe_idx] 首 u16 经 MEMORYTEXT_GetText，CS_knlSprintk(buf,fmt,name) 后
-    // 追加 "\n" + extra_utf8（追加失败静默截断），UIPopupMsg_CreateOK(buf,2,0,0,0)，MEM_Free
-    QolResult (*show_recipe_popup)(uint16_t recipe_idx, const char* extra_utf8);
+    // 弹窗组合：第一行保持原版不动——fmt=MEM_ReadUint16(RECIPEBASE_data + recsize*17) 经
+    // MEMORYTEXT_GetText，name=RECIPEBASE[recipe_idx] 首 u16 经 MEMORYTEXT_GetText，
+    // CS_knlSprintk(buf,fmt,name)。第二行追加 "&N" + ITEMDATABASE[use_type] 首 u16 文本
+    // （套装名，文本 id = 物品 id）+ extra_utf8（如「已获得：3/5」，追加失败静默截断），
+    // 之后 UIPopupMsg_CreateOK(buf,2,0,0,0)，MEM_Free。
+    QolResult (*show_recipe_popup)(uint16_t recipe_idx, uint32_t use_type, const char* extra_utf8);
 };
 
 static_assert(std::is_standard_layout<QolCraftLotteryWritePort>::value,

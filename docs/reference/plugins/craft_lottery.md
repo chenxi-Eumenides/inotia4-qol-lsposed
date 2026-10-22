@@ -7,6 +7,7 @@
 ## 2. 机制与实现
 
 - 原版抽奖链：`CHAR_UseItemEx` → `CHAR_ProcessRecipe(use_type)` → `ITEMSYSTEM_DecideRecipeID`（扫 `ITEMMIXLINKBASE` 池纯随机，不查配方书）→ `MIXSYSTEM_AddRecipeBook`（配方书位图）→ 弹窗。逆向依据见 `docs/refactor/audits/plugin-audit/craft-lottery-20261022/design-card.md` §2。
+- 弹窗第一行保持原版「[xxx]的配方已登录到融合器中。」不动；追加行「{套装名}已获得：x/y」——套装名由 port 读 `ITEMDATABASE[use_type]` 首 u16（物品 id=名称文本 id），「已获得：x/y」为插件文案。
 - 插件唯一资源为 entry hook `F_CHAR_PROCESS_RECIPE_VMA`（required/fail-closed）。wrapper 内：gate 关闭或 port/表异常一律直通原版（纯随机+原版弹窗，无追加行）。
 - 已学判定读游戏原生配方书位图（`MIXSYSTEM_pRecipeBook`，位偏移复刻原版 `AddRecipeBook` 公式），状态跟随存档，插件零自建持久化。
 - 表读取、原版函数调用、弹窗组合全部经 `QOL_PORT_CRAFT_LOTTERY_WRITE` v1.0（`game/adapter_ports/craft_lottery_port.cpp`）；插件侧无裸地址。弹窗由 port 复刻原版序列（格式串=RECIPEBASE[17].u16[0]、配方名=RECIPEBASE[idx].u16[0]、`CS_knlSprintk`、追加 `&N已获得 X/N`、`UIPopupMsg_CreateOK(buf,2,0,0,0)`）。

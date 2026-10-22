@@ -124,14 +124,15 @@ int process_recipe_wrapper(uint32_t use_type) {
 
     const uint32_t learned_after = learned_before + (selected_unlearned ? 1U : 0U);
     char extra[64]{};
-    const int extra_length = std::snprintf(extra, sizeof(extra), "已获得 %u/%u",
+    const int extra_length = std::snprintf(extra, sizeof(extra), "已获得：%u/%u",
                                            learned_after, pool_count);
     if (extra_length < 0 || extra_length >= static_cast<int>(sizeof(extra))) {
         note_degraded_once("popup_text_format");
         return 1;
     }
-    // 游戏文本为 UTF-8，&N 是游戏内换行标记；show_recipe_popup 负责追加换行和文本。
-    if (!contracts::succeeded(port->show_recipe_popup(selected_recipe, extra))) {
+    // 追加行=「&N{套装名}已获得：x/y」：套装名由 port 读 ITEMDATABASE 补入，「已获得：x/y」为 UTF-8 中文常量，
+    // &N 是游戏内换行标记（show_recipe_popup 负责拼接）。
+    if (!contracts::succeeded(port->show_recipe_popup(selected_recipe, use_type, extra))) {
         note_degraded_once("show_recipe_popup");
     }
     return 1;

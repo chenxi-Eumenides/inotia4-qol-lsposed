@@ -209,13 +209,42 @@ QolResult get_random(int32_t n, int32_t* out) {
     return contracts::ok();
 }
 
+bool read_item_database_table(const uint8_t** out_data, uint8_t* out_record_size,
+                              uint16_t* out_record_count) {
+    if (out_data == nullptr || out_record_size == nullptr || out_record_count == nullptr ||
+        g_base == 0) {
+        return false;
+    }
+
+    auto* data_slot = reinterpret_cast<void**>(g_base + G_ITEMDATABASE_DATA_VMA);
+    auto* size_slot = reinterpret_cast<uint8_t*>(g_base + G_ITEMDATABASE_N_RECORD_SIZE_VMA);
+    auto* count_slot = reinterpret_cast<uint16_t*>(g_base + G_ITEMDATABASE_N_RECORD_COUNT_VMA);
+    if (!game_memory_accessible(data_slot, sizeof(*data_slot), 'r') ||
+        !game_memory_accessible(size_slot, sizeof(*size_slot), 'r') ||
+        !game_memory_accessible(count_slot, sizeof(*count_slot), 'r')) {
+        return false;
+    }
+
+    const auto* data = static_cast<const uint8_t*>(*data_slot);
+    const uint8_t record_size = *size_slot;
+    const uint16_t record_count = *count_slot;
+    if (data == nullptr || record_size < sizeof(uint16_t)) return false;
+    const size_t table_size = static_cast<size_t>(record_size) * record_count;
+    if (table_size != 0 && !game_memory_accessible(data, table_size, 'r')) return false;
+
+    *out_data = data;
+    *out_record_size = record_size;
+    *out_record_count = record_count;
+    return true;
+}
+
 size_t bounded_length(const char* text, size_t cap) {
     size_t length = 0;
     while (length < cap && text[length] != '\0') ++length;
     return length;
 }
 
-QolResult show_recipe_popup(uint16_t recipe_idx, const char* extra_utf8) {
+QolResult show_recipe_popup(uint16_t recipe_idx, uint32_t use_type, const char* extra_utf8) {
     if (!game_host_is_main_thread()) return wrong_thread();
     if (g_base == 0 || fn_memorytext_get_text == nullptr || fn_mem_malloc == nullptr ||
         fn_mem_free == nullptr) {
@@ -248,6 +277,22 @@ QolResult show_recipe_popup(uint16_t recipe_idx, const char* extra_utf8) {
         return not_ready();
     }
 
+    // 套装名：ITEMDATABASE[use_type] 首 u16 即名称文本 id（物品 id 与文本 id 同域同值）。
+    const char* item_name = nullptr;
+    const uint8_t* item_data = nullptr;
+    uint8_t item_record_size = 0;
+    uint16_t item_record_count = 0;
+    if (use_type <= UINT16_MAX &&
+        read_item_database_table(&item_data, &item_record_size, &item_record_count) &&
+        static_cast<uint16_t>(use_type) < item_record_count) {
+        const uint16_t item_name_text_id = read_u16(
+            item_data + static_cast<size_t>(item_record_size) * use_type);
+        item_name = fn_memorytext_get_text(item_name_text_id);
+        if (item_name != nullptr && !game_memory_accessible(item_name, 1, 'r')) {
+            item_name = nullptr;
+        }
+    }
+
     auto* buffer = static_cast<char*>(fn_mem_malloc(kRecipePopupBufferSize));
     if (buffer == nullptr) return not_ready();
     std::memset(buffer, 0, kRecipePopupBufferSize);
@@ -266,6 +311,13 @@ QolResult show_recipe_popup(uint16_t recipe_idx, const char* extra_utf8) {
             buffer[used++] = '&';
             buffer[used++] = 'N';
             buffer[used] = '\0';
+            // 第二行行首为套装物品名（名称文本 id = 物品 id，同域同值）；读取失败则只显示 extra。
+            if (item_name != nullptr) {
+                while (used < kRecipePopupBufferSize - 1 && *item_name != '\0') {
+                    buffer[used++] = *item_name++;
+                }
+                buffer[used] = '\0';
+            }
             size_t extra_offset = 0;
             while (used < kRecipePopupBufferSize - 1) {
                 if (extra_address > std::numeric_limits<uintptr_t>::max() -
