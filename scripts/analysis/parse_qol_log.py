@@ -19,9 +19,6 @@ ISSUE_TEXT = re.compile(
     r"[\"']ok[\"']\s*:\s*(?:false|0)",
     re.IGNORECASE,
 )
-ISSUE_LEVELS = {"W", "E", "F"}
-
-
 @dataclass(frozen=True)
 class LogEntry:
     line_number: int
@@ -83,7 +80,6 @@ def main() -> int:
             entries.append(entry)
 
     level_counts = Counter(entry.level for entry in entries)
-    issues = [entry for entry in entries if entry.level in ISSUE_LEVELS]
     info_signals = [
         entry
         for entry in entries
@@ -94,12 +90,14 @@ def main() -> int:
     print(f"解析日志：{len(entries)} 行；级别统计：")
     print("  " + (", ".join(f"{level}={count}" for level, count in sorted(level_counts.items())) or "无"))
 
-    print(f"\n警告/错误（W/E/F）：{len(issues)} 条")
-    if issues:
-        for entry in issues:
-            print_entry(entry)
-    else:
-        print("  无")
+    for level, label in (("W", "警告"), ("E", "错误"), ("F", "致命错误")):
+        level_issues = [entry for entry in entries if entry.level == level]
+        print(f"\n{label}（{level}）：{len(level_issues)} 条")
+        if level_issues:
+            for entry in level_issues:
+                print_entry(entry)
+        else:
+            print("  无")
 
     print(f"\n信息级异常关键词（需人工确认）：{len(info_signals)} 条")
     if info_signals:
