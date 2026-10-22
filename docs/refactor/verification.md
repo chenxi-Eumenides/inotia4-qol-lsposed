@@ -391,6 +391,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Debug 构建 | **PASS**：`scripts/build-debug.sh --offline` 成功，APK `output/inotia4_qol_lsposed_debug_2610211441_cf1f174c03bf.apk`，SHA-256 `cf1f174c03bf11cb01442bd1ad5862b95d38bc3cce7393b019f20e0b4aa8d70e`。构建基于含 10 个既有未提交修改路径的工作树；APK 不是 pristine commit-only 产物。 | `.tmp/custom-ui-debug-showcase/build-debug-final.log`；构建未安装，不替代运行时验收。 |
 | 设备/视觉 VM | **NOT_ACCEPTED（整卡未完成）**：用户已报告 `ui_confirmation` 在自定义 panel 上 `type=popup, active=true` 且阻断触摸，但确认框绘制在 panel 后面，返回键同时关闭两者；未提供原始日志/截图。 | Debug Components 检查基础形状、原生 choice、无价格/价格 100 确认框；确认框不能覆盖自定义 panel。choice 黑底绘制来源/alpha 未定位，choice 与自定义 panel 叠层仍未验证。扩展背包 VM-16/17/18 仍按原卡验证。详细记录：`docs/refactor/verification/ui-state/20261021-custom-ui-components.md`。 |
 
+### 5.23 `craft_lottery` 合成套装保底（2026-10-22；Host/静态/构建通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现（代码事实） | **已实现**：新插件 `craft_lottery`（feature `craft_lottery.guarantee`，Gameplay toggle，default false，priority -1）。唯一资源为 entry hook `F_CHAR_PROCESS_RECIPE_VMA`（0xdcde4，required/fail-closed）。wrapper：gate 关闭或 port 异常直通原版；池读自 `ITEMMIXLINKBASE`（经新 `QOL_PORT_CRAFT_LOTTERY_WRITE` v1.0）；未学集合非空时 `MATH_GetRandom(len-1)` 从未学配方抽取，集齐后调原版 `ITEMSYSTEM_DecideRecipeID` 纯随机；`MIXSYSTEM_AddRecipeBook` 写书后弹窗追加 `&N已获得 X/N`（X 含本次）。已学判定复刻原版配方书位图偏移（`recipe_idx + GetRecipeCount(5) - GetRecipeCount(0)`，动态调用原版函数）。 | 实现位置：`plugins/craft_lottery/`、`game/adapter_ports/craft_lottery_port.{h,cpp}`、`contracts/game_ports/craft_lottery_port.h`、`game_symbols.h`（+11 符号）、`host/assembly.cpp`、`host/plugin_registry.cpp`。机制逆向依据：`CHAR_UseItemEx(0xeb670)→CHAR_ProcessRecipe(0xdcde4)→ITEMSYSTEM_DecideRecipeID(0x1081e4)→MIXSYSTEM_AddRecipeBook(0x11b938)`；位图 `MIXSYSTEM_pRecipeBook`（0x307760）；ITEMMIXLINKBASE 全局 0x301a60/0x301a68/0x301a6a。详见 `docs/refactor/audits/plugin-audit/craft-lottery-20261022/design-card.md`。 |
+| Host/静态 Gate | **PASS**：全量 CTest **153/153**（`.tmp/craft-lottery-20261022/host-ctest.log`）；`check_arch` offsets/jni/resources 全绿，`check_layers` 仅既有 `custom_map` 6 条越层（commit 5140b0af 引入，与本批无关）；`git diff --check` clean。 | Host 测试不含 craft_lottery 专属 target（行为面依赖真机游戏内存，见未完成项）。 |
+| Debug 构建 | **PASS**：`scripts/build-debug.sh --offline` BUILD SUCCESSFUL，APK `output/inotia4_qol_lsposed_debug_2610222253_58676b3fd3e6.apk`，SHA-256 `58676b3fd3e6a32aca43aa99ffe20e0938c3a8f11f64ec053c3065e7bed905d1`。 | 构建成功不替代设备行为验收；未部署。 |
+| VM-CL-01：合成套装保底行为 | **NOT_ACCEPTED（待真机）**。 | 需真机验证：①开启 feature 后使用任意合成套装，连续抽取不重复、只出未拥有配方，弹窗末行「已获得 X/N」随抽取递增；②集齐某套装全部配方后再用，恢复纯随机（可能出现重复）；③feature 关闭时行为与原版一致（无追加行）；④多存档间配方书状态隔离跟随游戏存档；⑤三个变体（大修/monster/原版）不崩溃。验收卡见 `docs/refactor/audits/plugin-audit/craft-lottery-20261022/design-card.md` §6。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

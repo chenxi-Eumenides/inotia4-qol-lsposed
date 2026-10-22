@@ -414,6 +414,10 @@ constexpr size_t UIMIX_SLOT_TARGET_ITEM = 0x40;      // 目标槽 ControlItem �
 constexpr uintptr_t G_RECIPEBASE_DATA_VMA = 0x3019b0;   // RECIPEBASE 基址指针全局（void*，原 GOT 0x2f3158）
 constexpr uintptr_t G_RECIPEBASE_SIZE_VMA = 0x3019b8;   // RECIPEBASE 记录大小全局（u8，原 GOT 0x2f55e8）
 constexpr uintptr_t G_RECIPEBASE_COUNT_VMA = 0x3019ba;  // RECIPEBASE 记录数全局（u16，原 GOT 0x2f6960）
+constexpr uintptr_t G_MIXSYSTEM_P_RECIPE_BOOK_VMA = 0x307760; // MIXSYSTEM_pRecipeBook 全局（void*，配方书位图地址）
+constexpr uintptr_t G_ITEMMIXLINKBASE_DATA_VMA = 0x301a60; // ITEMMIXLINKBASE 数据指针全局（void*）
+constexpr uintptr_t G_ITEMMIXLINKBASE_N_RECORD_SIZE_VMA = 0x301a68; // ITEMMIXLINKBASE 记录大小全局（u8）
+constexpr uintptr_t G_ITEMMIXLINKBASE_N_RECORD_COUNT_VMA = 0x301a6a; // ITEMMIXLINKBASE 记录数全局（u16）
 constexpr uintptr_t G_MIXTUREBASE_DATA_VMA = 0x3019a0;  // MIXTUREBASE 基址指针全局（void*，原 GOT 0x2f6a98）
 constexpr uintptr_t G_MIXTUREBASE_SIZE_VMA = 0x3019a8;  // MIXTUREBASE 记录大小全局（u8，原 GOT 0x2f4898）
 
@@ -551,6 +555,7 @@ constexpr size_t F_SELECTCHAR_BUTTON_START_EXE_STARTGAME_CALL_OFF = 0x10;  // �
 constexpr uintptr_t F_HUBSAVE_GET_KEY_VMA = 0x9001c;    // const char* () 存档加密密钥字符串指针（本机 "1234567"）
 constexpr uintptr_t F_SAVE_LOAD_DATA_VMA = 0x129260;    // int (int32_t slot, void** outBuf, int* outLen) 读槽明文：成功返回 1；outBuf 为 MEM_Malloc 明文缓冲（须 MEM_Free），outLen = 文件长度-3（明文长度）
 constexpr uintptr_t F_RES_LOAD_TO_POOL_VMA = 0x0a9d40;  // dynsym RES_LoadToPool，四版本同址；MAP_Load 0x114ab0 与 FONT_Load 0xa48c0 调用；成功返回 0 并写出缓冲/大小
+constexpr uintptr_t F_LZMA_DECODE_VMA = 0x0a88c4;       // int (void*, int32_t, void**, int32_t*) dynsym LZMA_Decode；成功返回非 0，输出由 MEM_Free 释放；四版本同址
 constexpr uintptr_t F_MEM_FREE_VMA = 0xa8f18;           // void (void*) dynsym MEM_Free，游戏池释放器；RES_LoadToPool 产物必须由此释放；四版本同址
 constexpr uintptr_t F_ENCRYPT_PROCESS2_VMA = 0xa413c;   // int (void* buf, int len, int mode, const char* key) 就地加解密：mode==0 加密（写入 len+3 字节，缓冲区需 len+3 容量）、mode!=0 解密；成功返回 1
 constexpr uintptr_t F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA = 0x11e760; // int (int32_t funcDisplay) 判断 NPC 功能显示类型（读 npc+0xa u16）：0=普通功能弹 UI、1=任务交付/接取直接执行、2=不可交互
@@ -828,12 +833,19 @@ constexpr uintptr_t F_SCENE_DRAW_POPUP_SC_CHOICE_VMA = 0x14a6d8; // void () Scen
 constexpr uintptr_t F_SCENE_EVENT_POPUP_SC_CHOICE_VMA = 0x14a79c; // 选择面板事件回调
 constexpr uintptr_t F_MAPCHANGE_SET_VMA = 0x09c740; // void (int,int,int,int) MAPCHANGE_Set
 constexpr uintptr_t F_MEMORYTEXT_GET_TEXT_VMA = 0x118674; // const char* (uint16_t) MEMORYTEXT_GetText
+constexpr uintptr_t F_CS_KNL_SPRINTK_VMA = 0x1b6cec; // int (char*, const char*, const char*) CS_knlSprintk：按配方格式串与名称生成原版提示文本
 constexpr uintptr_t F_INSTANTMSGSYSTEM_ADD_VMA = 0x13be64; // void (u32 type, char* text, u32, u32, u32, u32, u32, u32) 原版地图名横幅调用约定
 constexpr uintptr_t F_UI_PLAY_CALL_MAP_NAME_VMA = 0x0c6664; // UIPlay_CallMapName 函数入口（dynsym）
 // ---- 合成系统（MIXSYSTEM，craft-batch-ui v0.5.18，libgame-symbols.txt 核对）----
 constexpr uintptr_t F_MAKE_MIX_VMA = 0x11af58;       // int (int32_t mixType, void** outItem) MIXSYSTEM_MakeItem：产物生成（词条定向继承由游戏处理），0=成功非 0=失败
 constexpr uintptr_t F_USE_STUFF_VMA = 0x11b300;      // void (int32_t mixType, void* stuffList) MIXSYSTEM_UseStuff：遍历材料槽逐条删材料（模块改用 RemoveItemDirect，此处仅登记）
 constexpr uintptr_t F_GET_COST_VMA = 0x11ab64;       // int64 (int32_t mixType, void* item) MIXSYSTEM_GetCost：读配方表费用文本 → CAL_Calculate，负数=非法配方
+constexpr uintptr_t F_CHAR_PROCESS_RECIPE_VMA = 0xdcde4; // int (uint32_t use_type) CHAR_ProcessRecipe：依次 Decide、登记配方书并弹提示；导出符号 CHAR_ProcessRecipe
+constexpr uintptr_t F_ITEMSYSTEM_DECIDE_RECIPE_ID_VMA = 0x1081e4; // int (uint32_t use_type) ITEMSYSTEM_DecideRecipeID：扫描 ITEMMIXLINKBASE 后纯随机选 RECIPEBASE 下标，不查询配方书；无匹配返回负值
+constexpr uintptr_t F_MIXSYSTEM_ADD_RECIPE_BOOK_VMA = 0x11b938; // int (int recipe_idx) MIXSYSTEM_AddRecipeBook：设置配方书位图，重复学习时返回 0
+constexpr uintptr_t F_MIXSYSTEM_GET_RECIPE_COUNT_VMA = 0x11b394; // int (int mask) MIXSYSTEM_GetRecipeCount：mask 为 0 时返回记录总数，否则统计 RECIPEBASE 尾字节位匹配数
+constexpr uintptr_t F_MIXSYSTEM_GET_RECIPE_BOOK_SIZE_VMA = 0x11b450; // int (void) MIXSYSTEM_GetRecipeBookSize：返回配方书位图字节容量
+constexpr uintptr_t F_UIPOPUPMSG_CREATE_OK_VMA = 0xca880; // void (char*, int, int, int, int) UIPopupMsg_CreateOK：以给定文本创建 OK 弹窗，CHAR_ProcessRecipe 传入 2,0,0,0
 // ---- UIMix 控件回调函数（按钮注入复用，均为 .dynsym 具名符号）----
 constexpr uintptr_t F_TOUCH_HANDLE_CONTROL_EVENT_PROC_VMA = 0xa3590;   // TouchHandle_ControlEventProc（ControlObject+0x90 Proc）
 constexpr uintptr_t F_TOUCH_HANDLE_RESET_SELECTED_CONTROL_VMA = 0xa3414; // TouchHandle_ResetSelectedControl

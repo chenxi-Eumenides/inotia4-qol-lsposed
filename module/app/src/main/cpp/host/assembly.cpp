@@ -46,6 +46,8 @@
 #include "plugins/core.feature/plugin.h"
 #include "plugins/custom_recipe/plugin.h"
 #include "plugins/custom_recipe/settings_contribution.h"
+#include "plugins/craft_lottery/plugin.h"
+#include "plugins/craft_lottery/settings_contribution.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/assembly/settings_contribution.h"
 #include "plugins/core.item/plugin.h"
@@ -225,6 +227,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_quest::plugin_descriptor},
     {&features::save_backup::plugin_descriptor, nullptr, true},
     {&features::simple_mode::plugin_descriptor},
+    {&features::craft_lottery::plugin_descriptor},
     {&features::special_equip::plugin_descriptor},
     {&features::stack_limit::plugin_descriptor},
     {&features::core_system::plugin_descriptor},

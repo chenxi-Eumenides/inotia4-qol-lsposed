@@ -11,6 +11,7 @@
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
+#include "contracts/game_ports/craft_lottery_port.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/inventory_extras_port.h"
 #include "contracts/game_ports/item_extras_port.h"
@@ -57,6 +58,8 @@ const contracts::QolCraftUiWritePort kCraftUiWritePort{contracts::kQolPortCraftU
                                                         nullptr, nullptr, nullptr};
 const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     contracts::kQolPortCustomRecipeWriteVersion};
+const contracts::QolCraftLotteryWritePort kCraftLotteryWritePort{
+    contracts::kQolPortCraftLotteryWriteVersion};
 
 const contracts::QolCharacterExtrasPort kCharacterExtrasPort{{1, 0}, {}};
 const contracts::QolInventoryExtrasPort kInventoryExtrasPort{{1, 0}, {}};
@@ -137,6 +140,9 @@ const contracts::QolCraftUiWritePort& craft_ui_write_port() {
 const contracts::QolCustomRecipeWritePort& custom_recipe_write_port() {
     return custom_recipe_write_port_override != nullptr ? *custom_recipe_write_port_override
                                                         : kCustomRecipeWritePort;
+}
+const contracts::QolCraftLotteryWritePort& craft_lottery_write_port() {
+    return kCraftLotteryWritePort;
 }
 const contracts::QolCharacterExtrasPort& character_extras_port() {
     return kCharacterExtrasPort;

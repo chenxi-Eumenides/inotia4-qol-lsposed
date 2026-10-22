@@ -38,6 +38,7 @@ enum class QolPortId : uint32_t {
     QOL_PORT_MOVE_MERGE = 28,
     QOL_PORT_SAVE_TRANSACTION = 29,
     QOL_PORT_WORLD_ACTION = 30,
+    QOL_PORT_CRAFT_LOTTERY_WRITE = 31,
 };
 
 constexpr QolVersion kQolPortQuestVersion{1, 2};
@@ -51,6 +52,7 @@ constexpr QolVersion kQolPortSaveCallVersion{1, 0};
 constexpr QolVersion kQolPortCraftVersion{1, 1};
 constexpr QolVersion kQolPortCraftUiWriteVersion{1, 1};
 constexpr QolVersion kQolPortCustomRecipeWriteVersion{1, 2};
+constexpr QolVersion kQolPortCraftLotteryWriteVersion{1, 0};
 constexpr QolVersion kQolPortCharacterExtrasVersion{1, 2};
 constexpr QolVersion kQolPortInventoryExtrasVersion{1, 0};
 constexpr QolVersion kQolPortItemExtrasVersion{1, 0};
@@ -97,6 +99,8 @@ constexpr const char* port_id_name(QolPortId id) {
             return "QOL_PORT_CRAFT_UI_WRITE";
         case QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE:
             return "QOL_PORT_CUSTOM_RECIPE_WRITE";
+        case QolPortId::QOL_PORT_CRAFT_LOTTERY_WRITE:
+            return "QOL_PORT_CRAFT_LOTTERY_WRITE";
         case QolPortId::QOL_PORT_CHARACTER_EXTRAS:
             return "QOL_PORT_CHARACTER_EXTRAS";
         case QolPortId::QOL_PORT_INVENTORY_EXTRAS:

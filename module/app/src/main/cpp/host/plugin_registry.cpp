@@ -8,6 +8,7 @@
 #include "contracts/commands.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
+#include "contracts/game_ports/craft_lottery_port.h"
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/character_port.h"
 #include "contracts/game_ports/character_state_port.h"
@@ -58,6 +59,7 @@
 #include "game/adapter_ports/craft_port.h"
 #include "game/adapter_ports/craft_ui_write_port.h"
 #include "game/adapter_ports/custom_recipe_write_port.h"
+#include "game/adapter_ports/craft_lottery_port.h"
 #include "game/adapter_ports/choice_port.h"
 #include "game/adapter_ports/world_action_port.h"
 #include "game/adapter_ports/extension_bag_write_port.h"
@@ -256,6 +258,11 @@ bool available_port(contracts::QolPortId id, AvailablePort* out) {
     }
     if (id == contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE) {
         const auto& port = qol::game::custom_recipe_write_port();
+        if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
+        return true;
+    }
+    if (id == contracts::QolPortId::QOL_PORT_CRAFT_LOTTERY_WRITE) {
+        const auto& port = qol::game::craft_lottery_write_port();
         if (out != nullptr) *out = AvailablePort{id, port.abi_version, &port};
         return true;
     }
