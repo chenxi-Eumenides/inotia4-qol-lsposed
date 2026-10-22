@@ -1,6 +1,6 @@
 package com.inotia4.qol.service.action
 
-import com.inotia4.qol.AgreementPopup
+import com.inotia4.qol.patch.AgreementPopup
 import com.inotia4.qol.LogDomain
 import com.inotia4.qol.LogFile
 import com.inotia4.qol.UiActivityTracker

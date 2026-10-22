@@ -1,13 +1,10 @@
 package com.inotia4.qol
 
 import android.app.Activity
-import android.content.Intent
 import io.github.libxposed.api.XposedInterface
 import io.github.libxposed.api.XposedModule
-import com.inotia4.qol.patch.AgreementGate
-import com.inotia4.qol.patch.ActivityIndicatorBlocker
-import com.inotia4.qol.patch.IapBlocker
 import com.inotia4.qol.patch.ImmersiveMode
+import com.inotia4.qol.patch.PopupBlockers
 import com.inotia4.qol.patch.ResourceNamespaceBridge
 import com.inotia4.qol.patch.WatermarkOverlay
 import io.github.libxposed.api.XposedModuleInterface
@@ -53,27 +50,6 @@ class HookMain : XposedModule() {
             LogFile.info(LogDomain.PLATFORM, "kernel-only mode: business hooks skipped")
             return
         }
-        AgreementPopup.installOpeningAnimationHook(param.getDefaultClassLoader()) { method ->
-            hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    val result = chain.proceed()
-                    AgreementPopup.onOpeningAnimationEnded(chain.thisObject)
-                    result
-                }
-        }
-        AgreementPopup.installActivityDestroyHook(param.getDefaultClassLoader()) { method ->
-            hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    val activity = chain.thisObject as? Activity
-                    try {
-                        chain.proceed()
-                    } finally {
-                        activity?.let { AgreementPopup.onActivityDestroyed(it) }
-                    }
-                }
-        }
         ResourceNamespaceBridge.install(param) { method ->
             hook(method)
                 .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
@@ -87,39 +63,13 @@ class HookMain : XposedModule() {
                     }
                 }
         }
-        IapBlocker.install(param) { method ->
-            hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    LogFile.info(LogDomain.PLATFORM, "blocked Hive SelectTarget.iapSelectTarget (payment dialog)")
-                    IapBlocker.recover()
-                    null
-                }
-        }
 
-        AgreementGate.install(param) { method, intentIdx ->
+        // 弹窗屏蔽收束入口：更新通知弹窗、Hive 内购弹窗、同意页启动拦截与自动关闭、
+        // "Connecting.." 进度框，全部在 patch/PopupBlockers.kt 一个文件内管理。
+        PopupBlockers.install(param) { method, mode, handler ->
             hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    val intent = chain.getArg(intentIdx) as? Intent
-                    if (intent?.component?.className == AgreementGate.AGREEMENT_ACTIVITY && AgreementGate.shouldBlock()) {
-                        LogFile.info(LogDomain.PLATFORM, "blocked AgreementUIActivity launch (outside main menu or world load in progress)")
-                        null
-                    } else {
-                        chain.proceed()
-                    }
-                }
-        }
-
-        // "Connecting.." 模态进度框：native 只在联网等待点调用 Open，且关闭完全依赖 native 再调
-        // Close；显示期间切场景会让 Close 不再到达，弹窗永久抢占输入。直接空实现 Open（纯 UI，无副作用）。
-        ActivityIndicatorBlocker.install(param) { method ->
-            hook(method)
-                .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                .intercept { chain ->
-                    LogFile.info(LogDomain.PLATFORM, "blocked ActivityIndicatorOpen (Connecting.. progress dialog)")
-                    null
-                }
+                .setExceptionMode(mode)
+                .intercept(handler)
         }
 
         // 沉浸模式：hook 获焦回调隐藏系统栏（导航栏/手势条）。先 proceed 走原逻辑再做副作用。
