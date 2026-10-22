@@ -55,13 +55,13 @@ constexpr SiteEntry kSites[] = {
     {"P_INVEN_MOVE_ITEM_CLAMP_158", F_INVEN_MOVE_ITEM_VMA, 0x158, 0x52800c77, 0x52807cf7,
      PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x52800ff7, 0}},
     {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_DC", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xdc, 0x71018c7f,
-     0x710f9c7f, PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101f87f, 0}},
+     0x710f9c7f, PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101f87f, 0x7101fc7f}},
     {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xf0, 0x71018e9f,
      0x710f9e9f, PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101fe9f, 0}},
     {"P_INVEN_SAVE_ITEM_DATA_CLAMP_7C", F_INVEN_SAVE_ITEM_DATA_VMA, 0x7c, 0x71018a9f, 0x710f9a9f,
      PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101fa9f, 0}},
     {"P_INVEN_FIND_SAVE_SLOT_CLAMP_238", F_INVEN_FIND_SAVE_SLOT_VMA, 0x238, 0x71018c1f,
-     0x710f9c1f, PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101f81f, 0}},
+     0x710f9c1f, PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101f81f, 0x7101fc1f}},
     // S2 直接位读重定向 ×5（原 core.inc:110-116）：arg 点改交物品指针、call 点改指
     // ITEM_GetCumulateCount。两处均为独立 patch 点，各占一条 claim。
     {"P_UISTORE_BUTTON_SELL_EXE_D18D0_ARG", F_UISTORE_BUTTON_SELL_EXE_VMA, 0xb8, 0xb9401260,

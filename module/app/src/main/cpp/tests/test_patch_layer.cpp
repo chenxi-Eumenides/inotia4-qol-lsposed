@@ -1017,13 +1017,13 @@ void test_stack_limit_clamp_registration_and_roundtrip() {
         {"P_INVEN_MOVE_ITEM_CLAMP_158", F_INVEN_MOVE_ITEM_VMA, 0x158,
          0x52800c77u, 0x52800ff7u, 0, 0x52807cf7u},
         {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_DC", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xdc,
-         0x71018c7fu, 0x7101f87fu, 0, 0x710f9c7fu},
+         0x71018c7fu, 0x7101f87fu, 0x7101fc7fu, 0x710f9c7fu},
         {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xf0,
          0x71018e9fu, 0x7101fe9fu, 0, 0x710f9e9fu},
         {"P_INVEN_SAVE_ITEM_DATA_CLAMP_7C", F_INVEN_SAVE_ITEM_DATA_VMA, 0x7c,
          0x71018a9fu, 0x7101fa9fu, 0, 0x710f9a9fu},
         {"P_INVEN_FIND_SAVE_SLOT_CLAMP_238", F_INVEN_FIND_SAVE_SLOT_VMA, 0x238,
-         0x71018c1fu, 0x7101f81fu, 0, 0x710f9c1fu},
+         0x71018c1fu, 0x7101f81fu, 0x7101fc1fu, 0x710f9c1fu},
     };
 
     for (const ClampCase& clamp : kClamps) {
