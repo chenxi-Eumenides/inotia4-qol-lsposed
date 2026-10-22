@@ -13,8 +13,10 @@ check_symbols.py（符号 VMA 对 .so 校验）需要 APK/SO 输入且耗时，�
 用法：
     uv run python scripts/maintenance/check_arch.py                     # 全部校验（棘轮）
     uv run python scripts/maintenance/check_arch.py --freeze            # 冻结全部基线（只允许收缩）
-    uv run python scripts/maintenance/check_arch.py --only check_jni -v
+    uv run python scripts/maintenance/check_arch.py --only check_jni --all
     uv run python scripts/maintenance/check_arch.py --list              # 仅列出脚本
+
+`--verbose` 与 `-v` 是 `--all` 的兼容别名；总入口向子脚本传递 canonical `--all`。
 """
 from __future__ import annotations
 
@@ -32,7 +34,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--freeze", action="store_true", help="把当前违规写入共享基线快照")
     parser.add_argument("--json", action="store_true", help="透传 --json 给各脚本")
-    parser.add_argument("--verbose", "-v", action="store_true", help="透传 -v 给各脚本")
+    parser.add_argument(
+        "--all", "--verbose", "-v", dest="verbose", action="store_true",
+        help="透传 --all，显示各脚本完整明细",
+    )
     parser.add_argument("--only", default="", help="逗号分隔的脚本名子集（不含 check_ 前缀亦可）")
     parser.add_argument("--list", action="store_true", help="列出可用脚本后退出")
     args = parser.parse_args()
@@ -45,11 +50,12 @@ def main() -> int:
     selected = SCRIPTS
     if args.only:
         wanted = {item.strip().removeprefix("check_") for item in args.only.split(",") if item.strip()}
-        unknown = wanted - set(SCRIPTS)
+        available = {name.removeprefix("check_"): name for name in SCRIPTS}
+        unknown = wanted - set(available)
         if unknown:
             print(f"未知脚本：{sorted(unknown)}；可用：{list(SCRIPTS)}")
             return 2
-        selected = tuple(name for name in SCRIPTS if name in wanted)
+        selected = tuple(name for name in SCRIPTS if name.removeprefix("check_") in wanted)
 
     passthrough: list[str] = []
     if args.freeze:
@@ -57,7 +63,7 @@ def main() -> int:
     if args.json:
         passthrough.append("--json")
     if args.verbose:
-        passthrough.append("-v")
+        passthrough.append("--all")
 
     failures: list[str] = []
     for name in selected:

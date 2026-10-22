@@ -19,7 +19,9 @@
 用法：
     uv run python scripts/maintenance/check_offsets.py            # 棘轮校验
     uv run python scripts/maintenance/check_offsets.py --freeze   # 冻结基线（只允许收缩）
-    uv run python scripts/maintenance/check_offsets.py -v --json  # 明细 + JSON 汇总
+    uv run python scripts/maintenance/check_offsets.py --all --json  # 完整明细 + JSON 汇总
+
+`--verbose` 与 `-v` 是 `--all` 的兼容别名。统计和新增违规/警告始终显示。
 """
 from __future__ import annotations
 

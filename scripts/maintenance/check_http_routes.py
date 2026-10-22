@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
-"""核对 Kotlin controller、API 参考、native 冻结路由集合与固定 owner。"""
+"""核对 Kotlin controller、API 参考、native 冻结路由集合与固定 owner。
 
+默认只输出统计信息和 actionable 漂移/owner/重复错误；传入 ``--all`` 时，
+额外逐路由输出 controller、api-reference、native 中的存在状态及 native owner。
+"""
+
+import argparse
 from collections import Counter
 from pathlib import Path
 import re
@@ -66,7 +71,34 @@ def print_set(label: str, routes: set[tuple[str, str]]) -> None:
     print(f"{label}: {len(routes)}")
 
 
-def main() -> int:
+def print_route_details(
+    controllers: set[tuple[str, str]],
+    reference: set[tuple[str, str]],
+    native: set[tuple[str, str]],
+    route_owners: dict[tuple[str, str], str],
+) -> None:
+    print("all routes:")
+    for route in sorted(controllers | reference | native):
+        method, path = route
+        controller_status = "yes" if route in controllers else "no"
+        reference_status = "yes" if route in reference else "no"
+        native_status = "yes" if route in native else "no"
+        owner = route_owners.get(route, "-")
+        print(
+            f"  {method} {path} controller={controller_status} "
+            f"api-reference={reference_status} native={native_status} owner={owner}"
+        )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="列出三处路由集合的逐路由存在状态及 native owner",
+    )
+    args = parser.parse_args(argv)
+
     source_failures = False
     try:
         plugin_facts, resident_facts = sync_http_routes.load_route_facts(ROOT)
@@ -98,6 +130,8 @@ def main() -> int:
     print(f"native -> controller extra: {len(native - controllers)}")
     print(f"api-reference -> native missing: {len(reference - native)}")
     print(f"native -> api-reference extra: {len(native - reference)}")
+    if args.all:
+        print_route_details(controllers, reference, native, route_owners)
 
     failures = source_failures
     if len(native_list) != EXPECTED_ROUTE_COUNT:

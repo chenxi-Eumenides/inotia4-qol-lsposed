@@ -449,7 +449,10 @@ def parse_common_args(description: str) -> argparse.Namespace:
         help="允许在冻结时扩容基线（仅用于首次建立或经评审的有意变更）",
     )
     parser.add_argument("--json", action="store_true", help="额外输出 JSON 汇总")
-    parser.add_argument("--verbose", "-v", action="store_true", help="打印豁免与已消除条目")
+    parser.add_argument(
+        "--all", "--verbose", "-v", dest="verbose", action="store_true",
+        help="显示完整明细（豁免与已消除条目等）",
+    )
     args = parser.parse_args()
     if args.force_freeze:
         args.freeze = True

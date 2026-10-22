@@ -254,11 +254,15 @@ curl -s http://<设备IP>:8088/api/ui/screen
 
 #### 3.4.2 检查与验证
 
+> 全量明细统一使用 `--all`：适用于 `check_symbols.py`、`check_http_routes.py`、`smoke_all.py`，以及 `check_arch.py` 转发给各子检查。`check_arch.py` 保留 `-v`/`--verbose` 作为 `--all` 的兼容别名。`smoke_all.py` 默认隐藏 PASS 明细，但仍显示 warn/fail；`check_log_policy.py` 的 findings 默认可见。
+
 | 脚本 | 用途（含用法） | 运行时机 |
 |---|---|---|
-| `scripts/maintenance/check_symbols.py` | 校验 `game_symbols.h`/`symbol_registry.h` 常量与目标 `libgame.so` 符号 VMA 是否一致；默认比对 `apk/decoded/overhaul/lib/arm64-v8a/libgame.so` 的 120+ 符号 | **改 `game_symbols.h`/`symbol_registry.h`、新增 VMA 或换游戏版本/so 后必跑**；新增符号须登记 `SYMBOL_TO_MACRO` 映射 |
-| `scripts/verification/check_log_policy.py` | 按 `docs/archive/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only` |
-| `scripts/verification/smoke_all.py` | 从 controller 注解提取全部路由做全量 smoke 探测，产出与 `smoke_baseline_v0.5.43.json` 可对比的基线报告 | 重构或端点变更后、真机 API 可达时 |
+| `scripts/maintenance/check_symbols.py` | 校验 `game_symbols.h`/`symbol_registry.h` 常量与目标 `libgame.so` 符号 VMA 是否一致；默认比对 `apk/decoded/overhaul/lib/arm64-v8a/libgame.so` 的 120+ 符号；加 `--all` 输出全部分类和符号比对结果 | **改 `game_symbols.h`/`symbol_registry.h`、新增 VMA 或换游戏版本/so 后必跑**；新增符号须登记 `SYMBOL_TO_MACRO` 映射 |
+| `scripts/maintenance/check_http_routes.py` | 校验 controller、native 与 API reference 路由一致性；加 `--all` 输出完整检查明细 | 路由、controller 或 API reference 变更后 |
+| `scripts/maintenance/check_arch.py` | 运行架构子检查；加 `--all` 将全量明细参数转发给各子检查；`-v`/`--verbose` 是 `--all` 的兼容别名 | Native 架构、JNI、资源或偏移相关改动后 |
+| `scripts/verification/check_log_policy.py` | 按 `docs/archive/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位；findings 默认可见 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only` |
+| `scripts/verification/smoke_all.py` | 从 controller 注解提取全部路由做全量 smoke 探测，产出与 `smoke_baseline_v0.5.43.json` 可对比的基线报告；默认隐藏 PASS 明细但保留 warn/fail，使用 `--all` 显示全部明细 | 重构或端点变更后、真机 API 可达时 |
 | `scripts/verification/api_poll.py` | 连续轮询 `/api/system/game`、party、inventory，标记字段变化 | 单点联调、确认某字段是否按预期变化时（默认 2.0s × 30 次） |
 | `scripts/verification/live_session.py` | 全自动联调会话：等待 API 就绪 → 等待世界就绪 → 连续采样 → 检测失败/超时 → 输出报告 | 需要长时间观察稳定性时（默认上限 5 分钟） |
 | `scripts/verification/hp_watch_session.py` | 三开关（扩展背包/堆叠上限/拖拽合并）开启态挂机，检测任意角色 HP 下降/死亡并留取证快照 | 三开关、堆叠、拖拽合并相关改动后的真机回归取证 |

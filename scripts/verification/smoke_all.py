@@ -2,9 +2,12 @@
 """阶段 5 验收基建：147 路由全量 smoke 探测，产出基线报告（重构前后行为对比）。
 
 用法：
-python3 scripts/verification/smoke_all.py [base_url] [output_json]
-python3 scripts/verification/smoke_all.py                      # 默认 http://127.0.0.1:8088
-python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 smoke_local.json
+python3 scripts/verification/smoke_all.py [--all] [base_url] [output_json]
+python3 scripts/verification/smoke_all.py                      # 摘要及 warn/fail，默认 http://127.0.0.1:8088
+python3 scripts/verification/smoke_all.py --all http://127.0.0.1:8088 smoke_local.json
+python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 --all smoke_local.json
+
+默认仅显示摘要及 warn/fail 路由；传入 --all 时也显示 PASS 路由。JSON 报告始终包含全部路由。
 
 路由探测清单与 native routes.inc 的 147 条冻结路由保持一致；路径模板参数
 {role} {id} {slot} 等按各 controller 参数语义写死合理默认值。
@@ -22,6 +25,7 @@ python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 smoke_local.json
 """
 from __future__ import annotations
 
+import argparse
 import json
 import re
 import socket
@@ -349,9 +353,18 @@ def body_summary(body: str, limit: int = 400) -> str:
     return flat[:limit] + ("..." if len(flat) > limit else "")
 
 
-def main() -> int:
-    base = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BASE
-    out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_OUT
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="探测全部 smoke 路由并写出 JSON 报告")
+    parser.add_argument("--all", action="store_true", help="同时打印 PASS 路由行")
+    parser.add_argument("base_url", nargs="?", default=DEFAULT_BASE)
+    parser.add_argument("output_json", nargs="?", type=Path, default=DEFAULT_OUT)
+    return parser.parse_intermixed_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    base = args.base_url
+    out_path = args.output_json
 
     try:
         validate_route_coverage()
@@ -359,7 +372,6 @@ def main() -> int:
         print(f"路由清单校验失败: {error}", file=sys.stderr)
         return 2
 
-    print(f"smoke 全量探测开始: {base}（{len(ROUTES)} 条路由）")
     results = []
     pass_n = warn_n = fail_n = 0
     for i, route in enumerate(ROUTES, 1):
@@ -394,9 +406,13 @@ def main() -> int:
             "error": resp["error"],
         }
         results.append(rec)
-        flag = "PASS" if verdict == "pass" else ("warn" if verdict == "warn" else "FAIL")
-        print(f"[{i:03d}/{len(ROUTES)}] {flag} {route['m']:4s} {route['p']} "
-              f"-> {resp['status']} {resp['elapsed']}s {checks['reason'] or ''}".rstrip())
+        if verdict != "pass" or args.all:
+            flag = "PASS" if verdict == "pass" else ("warn" if verdict == "warn" else "FAIL")
+            detail = checks["reason"] or route.get("note", "")
+            if resp["error"]:
+                detail = f"{detail} error={resp['error']}".strip()
+            print(f"[{i:03d}/{len(ROUTES)}] {flag} {route['m']:4s} {route['p']} "
+                  f"-> {resp['status']} {resp['elapsed']}s {detail}".rstrip())
         time.sleep(0.05)  # 温和限速，避免打爆真机
 
     report = {
@@ -414,11 +430,6 @@ def main() -> int:
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n基线报告已写入: {out_path}")
     print(f"摘要: total={len(ROUTES)} pass={pass_n} warn={warn_n} fail={fail_n}")
-    if fail_n:
-        print("FAIL 路由：")
-        for r in results:
-            if r["verdict"] == "fail":
-                print(f"  {r['method']:4s} {r['path']} status={r['status']} reason={r['reason']}")
     return 1 if fail_n else 0
 
 

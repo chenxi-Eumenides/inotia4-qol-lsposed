@@ -23,13 +23,14 @@
 
 用法：
     uv run python scripts/maintenance/check_resources.py            # 棘轮校验
-    uv run python scripts/maintenance/check_resources.py -v         # 明细 + 资源清单
+    uv run python scripts/maintenance/check_resources.py --all       # 明细 + 完整资源清单
     uv run python scripts/maintenance/check_resources.py --inventory .tmp/res.json
         # 仅在显式传参时写出完整 JSON 清单；路径必须位于项目内，默认不写任何文件
 
-CLI 说明：`arch_common.parse_common_args()` 内部自建 parser、无法追加自定义参数，且
-`emit()` 只依赖 args 的 `freeze/json/verbose` 三个属性；因此这里按同样语义自建 parser 并
-复用 `emit`，避免改动 arch_common（保持公共库稳定）。
+`--verbose` 与 `-v` 是 `--all` 的兼容别名。统计和新增违规/警告始终显示。
+
+CLI 说明：这里自建 parser 以保留 `--inventory`，并与 `arch_common.parse_common_args()`
+使用相同的公共参数和 `args.verbose` 属性，随后复用 `emit()`。
 """
 from __future__ import annotations
 
@@ -309,7 +310,10 @@ def main() -> int:
         help="允许在冻结时扩容基线（仅用于首次建立或经评审的有意变更）",
     )
     parser.add_argument("--json", action="store_true", help="额外输出 JSON 汇总")
-    parser.add_argument("--verbose", "-v", action="store_true", help="打印完整去重资源清单")
+    parser.add_argument(
+        "--all", "--verbose", "-v", dest="verbose", action="store_true",
+        help="显示完整明细与去重资源清单",
+    )
     parser.add_argument(
         "--inventory",
         metavar="PATH",
