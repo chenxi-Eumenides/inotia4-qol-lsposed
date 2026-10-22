@@ -101,6 +101,10 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_RES_LOAD_TO_POOL_VMA", F_RES_LOAD_TO_POOL_VMA},
     // 合成套装使用效果入口（owner=craft_lottery）：CHAR_ProcessRecipe wrap 实现保底与弹窗追加。
     {"F_CHAR_PROCESS_RECIPE_VMA", F_CHAR_PROCESS_RECIPE_VMA},
+    // 存档写盘域入口（owner=core.save）：SAVE_Save 完整写盘入口、新档边界、选角取消。
+    {"F_SAVE_VMA", F_SAVE_VMA},
+    {"F_SAVESLOT_GO_TO_NEW_GAME_VMA", F_SAVESLOT_GO_TO_NEW_GAME_VMA},
+    {"F_SELECTCHAR_BUTTON_BACK_EXE_VMA", F_SELECTCHAR_BUTTON_BACK_EXE_VMA},
     // custom_map 的无 UI 数据读取直接调用 LZMA_Decode；仅解析地址，不声明 hook 资源。
     {"F_LZMA_DECODE_VMA", F_LZMA_DECODE_VMA},
 };

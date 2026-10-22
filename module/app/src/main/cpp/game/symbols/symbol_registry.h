@@ -467,3 +467,7 @@ SYM(F_STATE_NEXT_START_PROCESS_VMA, STATE_NextStartProcess)
 
 // ---- 合成套装抽奖入口（owner=craft_lottery）----
 SYM(F_CHAR_PROCESS_RECIPE_VMA, CHAR_ProcessRecipe)
+
+// ---- 存档写盘域入口（owner=core.save；原 elf-export 声明迁移为登记名）----
+SYM(F_SAVESLOT_GO_TO_NEW_GAME_VMA, SaveSlot_GoToNewGame)
+SYM(F_SELECTCHAR_BUTTON_BACK_EXE_VMA, SelectCharacter_ButtonBackExe)

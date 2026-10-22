@@ -357,7 +357,7 @@ int main() {
         CHECK(claim.handler != nullptr);
     }
     CHECK(std::strcmp(descriptor.resources[0].id, "hook:SAVE_Save") == 0);
-    CHECK(std::strcmp(descriptor.resources[0].symbol, "elf-export:SAVE_Save") == 0);
+    CHECK(std::strcmp(descriptor.resources[0].symbol, "F_SAVE_VMA") == 0);
     CHECK(std::strcmp(descriptor.resources[1].id, "hook:SaveSlot_GoToNewGame") == 0);
     CHECK(std::strcmp(descriptor.resources[2].id, "hook:SelectCharacter_ButtonBackExe") == 0);
     // 写面（阶段 5 票据契约）由同域 owner 声明式提供 3 条 POST。

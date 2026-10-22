@@ -826,7 +826,7 @@ int32_t save_on_resource_ready_trampoline(const char* resource_id, void* backup)
 
 const contracts::ResourceClaim kResources[] = {
     {"hook:SAVE_Save",
-     "elf-export:SAVE_Save",
+     "F_SAVE_VMA",
      contracts::ResourceMechanism::kEntryHook,
      contracts::ResourcePolicy::kPrivate,
      contracts::ResourceRequirement::kRequired,
@@ -839,7 +839,7 @@ const contracts::ResourceClaim kResources[] = {
      0,
      reinterpret_cast<void*>(&save_save_wrapper)},
     {"hook:SaveSlot_GoToNewGame",
-     "elf-export:SaveSlot_GoToNewGame",
+     "F_SAVESLOT_GO_TO_NEW_GAME_VMA",
      contracts::ResourceMechanism::kEntryHook,
      contracts::ResourcePolicy::kPrivate,
      contracts::ResourceRequirement::kRequired,
@@ -852,7 +852,7 @@ const contracts::ResourceClaim kResources[] = {
      0,
      reinterpret_cast<void*>(&goto_new_game_wrapper)},
     {"hook:SelectCharacter_ButtonBackExe",
-     "elf-export:SelectCharacter_ButtonBackExe",
+     "F_SELECTCHAR_BUTTON_BACK_EXE_VMA",
      contracts::ResourceMechanism::kEntryHook,
      contracts::ResourcePolicy::kPrivate,
      contracts::ResourceRequirement::kRequired,

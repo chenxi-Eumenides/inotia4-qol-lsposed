@@ -543,6 +543,10 @@ constexpr uintptr_t F_CS_FS_REMOVE_VMA = 0x1b27bc;            // int (char* path
 constexpr uintptr_t F_SAVESLOT_DELETE_VMA = 0x14c4e8;          // void (int32_t slot) 删档确认回调：SAVE_GetSaveFileName + CS_fsRemove 删 dat + SAVE_DestroySaveSlot/SAVE_CreateSaveSlot
 constexpr uintptr_t G_SAVESLOT_DELETE_GOT_VMA = 0x2f3fa8;      // .got 槽（RELRO 只读）：SaveSlot_SlotButtonDelExe 经此取删档 OK 回调，值 = SaveSlot_Delete
 
+// ---- 存档写盘域入口（owner=core.save，kEntryHook 接管点；原 elf-export 声明迁移为登记名）----
+constexpr uintptr_t F_SAVESLOT_GO_TO_NEW_GAME_VMA = 0x14cc5c;      // SaveSlot_GoToNewGame（新档入口：删旧档并重建存档槽；overhaul/monster 同址）
+constexpr uintptr_t F_SELECTCHAR_BUTTON_BACK_EXE_VMA = 0x14d500;   // void SelectCharacter_ButtonBackExe()（选角取消；overhaul/monster 同址）
+
 // ---- 进入存档（读档/新档）发起点：按钮 ExecuteProc 内调用点（save-enter-callback）----
 // 读档：SaveSlot_SlotButtonExe@0x14cd08 内 +0x88 的 `bl GAME_StartResumeGame`（原字 0x97fecd56）。
 // 新档：SelectCharacter_ButtonStartExe@0x14dee0 内 +0x10 的 `bl SelectCharacter_StartGame`（原字 0x97ffffea）。
