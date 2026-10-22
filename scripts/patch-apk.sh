@@ -239,6 +239,7 @@ for target_apk in "${game_apks[@]}"; do
             *[Mm][Oo][Nn][Ss][Tt][Ee][Rr]*) patch_name='艾4QoL(monster)' ;;
             *原版*) patch_name='艾4QoL(original)' ;;
             *盗版大修*) patch_name='艾4QoL(overhaul)' ;;
+            *C18*) patch_name='艾4QoL(c18)' ;;
             *) patch_name='艾4QoL' ;;
         esac
     fi
