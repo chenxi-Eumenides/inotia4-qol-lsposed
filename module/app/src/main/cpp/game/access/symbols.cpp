@@ -99,6 +99,8 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_UI_PLAY_CALL_MAP_NAME_VMA", F_UI_PLAY_CALL_MAP_NAME_VMA},
     // 地图和字体文件共用的资源读取入口（owner=custom_map）；wrapper 仅替换 m<数字>.dat。
     {"F_RES_LOAD_TO_POOL_VMA", F_RES_LOAD_TO_POOL_VMA},
+    // 合成套装使用效果入口（owner=craft_lottery）：CHAR_ProcessRecipe wrap 实现保底与弹窗追加。
+    {"F_CHAR_PROCESS_RECIPE_VMA", F_CHAR_PROCESS_RECIPE_VMA},
     // custom_map 的无 UI 数据读取直接调用 LZMA_Decode；仅解析地址，不声明 hook 资源。
     {"F_LZMA_DECODE_VMA", F_LZMA_DECODE_VMA},
 };

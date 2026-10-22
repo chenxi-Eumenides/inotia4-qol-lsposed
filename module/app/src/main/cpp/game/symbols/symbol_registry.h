@@ -464,3 +464,6 @@ SYM(F_GAMESTATE_DRAWPLAY_VMA, GAMESTATE_DrawPlay)
 // ---- 逻辑相位帧锚点：MainProcess 内 STATE_NextStartProcess 调用点（frame-dispatch-host）----
 SYM(F_MAINPROCESS_VMA, MainProcess)
 SYM(F_STATE_NEXT_START_PROCESS_VMA, STATE_NextStartProcess)
+
+// ---- 合成套装抽奖入口（owner=craft_lottery）----
+SYM(F_CHAR_PROCESS_RECIPE_VMA, CHAR_ProcessRecipe)
