@@ -125,13 +125,16 @@ void log_loaded_map(const MapPathId& id, int32_t size) {
     (void)sdk->log.write(1, 1, "plugins/custom_map", message, length);
 }
 
-void log_conversion(const MapPathId& id, const char* status, int32_t size) {
+void log_conversion(const MapPathId& id, const char* status,
+                   const CustomMapDecodeDiagnostics& diagnostics = {}) {
     const contracts::QolHostSdk* sdk = g_sdk.load(std::memory_order_acquire);
     if (sdk == nullptr || sdk->log.write == nullptr) return;
-    char message[192]{};
+    char message[256]{};
     const int written = std::snprintf(message, sizeof(message),
-        "custom map jpg conversion id=%.*s status=%s bytes=%d",
-        static_cast<int>(id.length), id.digits, status, size);
+        "custom map jpg conversion id=%.*s status=%s reason=%s input=%zu return=%d output=%zu",
+        static_cast<int>(id.length), id.digits, status,
+        diagnostics.failure_reason == nullptr ? "unknown" : diagnostics.failure_reason,
+        diagnostics.input_bytes, diagnostics.decoder_status, diagnostics.output_bytes);
     if (written < 0) return;
     const uint32_t length = static_cast<uint32_t>(written) < sizeof(message)
         ? static_cast<uint32_t>(written) : static_cast<uint32_t>(sizeof(message) - 1);
@@ -168,28 +171,35 @@ bool load_custom_jpg(const MapPathId& id, const char* dat_path, const char* jpg_
                      void** out_buf, int32_t* out_size) {
     struct stat jpg_stat {};
     if (stat(jpg_path, &jpg_stat) != 0) {
-        if (errno != ENOENT) log_conversion(id, "source_stat_failed", 0);
+        if (errno != ENOENT) log_conversion(id, "source_stat_failed");
         return false;
     }
     if (!S_ISREG(jpg_stat.st_mode)) {
-        log_conversion(id, "source_not_regular", 0);
+        log_conversion(id, "source_not_regular");
         return false;
     }
 
     std::vector<uint8_t> decoded;
-    const auto decoded_result = custom_map_decode_jpg(jpg_path, &decoded);
+    CustomMapDecodeDiagnostics diagnostics{};
+    const auto decoded_result = custom_map_decode_jpg(jpg_path, &decoded, &diagnostics);
     if (decoded_result != CustomMapConversionResult::kConverted || decoded.empty() ||
         decoded.size() > static_cast<size_t>(INT32_MAX)) {
-        const char* status = decoded_result == CustomMapConversionResult::kInvalidContainer
-            ? "invalid_container" : decoded_result == CustomMapConversionResult::kReadFailed
-                ? "read_failed" : "decode_failed";
-        log_conversion(id, status, 0);
+        const char* status = "decode_failed";
+        if (decoded_result == CustomMapConversionResult::kInvalidContainer) {
+            status = "invalid_container";
+        } else if (decoded_result == CustomMapConversionResult::kReadFailed) {
+            status = "read_failed";
+        } else if (decoded_result == CustomMapConversionResult::kInvalidMapData) {
+            status = "invalid_map_data";
+        }
+        log_conversion(id, status, diagnostics);
         return false;
     }
 
     void* buffer = fn_mem_malloc(decoded.size());
     if (buffer == nullptr) {
-        log_conversion(id, "game_allocation_failed", static_cast<int32_t>(decoded.size()));
+        diagnostics.failure_reason = "game_allocation_failed";
+        log_conversion(id, "game_allocation_failed", diagnostics);
         return false;
     }
     std::memcpy(buffer, decoded.data(), decoded.size());
@@ -198,14 +208,22 @@ bool load_custom_jpg(const MapPathId& id, const char* dat_path, const char* jpg_
         jpg_path, dat_path, id.value, decoded, nullptr);
     if (persisted == CustomMapConversionResult::kDatAlreadyExists) {
         fn_mem_free(buffer);
-        log_conversion(id, "dat_already_exists", 0);
+        diagnostics.failure_reason = "dat_already_exists";
+        log_conversion(id, "dat_already_exists", diagnostics);
         return load_custom_dat(id, dat_path, out_buf, out_size);
     }
+    if (persisted == CustomMapConversionResult::kInvalidMapData) {
+        fn_mem_free(buffer);
+        diagnostics.failure_reason = "map_structure_invalid_before_write";
+        log_conversion(id, "invalid_map_data", diagnostics);
+        return false;
+    }
     if (persisted == CustomMapConversionResult::kConverted) {
-        log_conversion(id, "converted", static_cast<int32_t>(decoded.size()));
+        log_conversion(id, "converted", diagnostics);
     } else {
         // A valid in-memory payload still serves this map load when persistence fails.
-        log_conversion(id, "write_failed_using_memory", static_cast<int32_t>(decoded.size()));
+        diagnostics.failure_reason = "write_failed_using_memory";
+        log_conversion(id, "write_failed_using_memory", diagnostics);
     }
 
     *out_buf = buffer;
@@ -229,7 +247,7 @@ bool load_custom_map(const MapPathId& id, void** out_buf, int32_t* out_size) {
     }
     if (errno != ENOENT) return false;
     if (!id.value_valid) {
-        log_conversion(id, "map_id_out_of_range", 0);
+        log_conversion(id, "map_id_out_of_range");
         return false;
     }
     return load_custom_jpg(id, dat_path, jpg_path, out_buf, out_size);

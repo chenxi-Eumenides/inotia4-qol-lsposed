@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -25,7 +26,15 @@ enum class CustomMapConversionResult : uint8_t {
     kReadFailed,
     kSourceChanged,
     kDecodeFailed,
+    kInvalidMapData,
     kWriteFailed,
+};
+
+struct CustomMapDecodeDiagnostics {
+    size_t input_bytes = 0;
+    int32_t decoder_status = -1;
+    size_t output_bytes = 0;
+    const char* failure_reason = "not_started";
 };
 
 struct CustomMapSummary {
@@ -55,11 +64,13 @@ bool custom_map_read_summary(const CustomMapFile& file, CustomMapSummary* out);
 bool custom_map_read_detail(const CustomMapFile& file, CustomMapDetail* out);
 bool custom_map_file_unchanged(const CustomMapFile& file);
 CustomMapConversionResult custom_map_decode_jpg(const std::string& path,
-                                                 std::vector<uint8_t>* out_decoded);
+                                                 std::vector<uint8_t>* out_decoded,
+                                                 CustomMapDecodeDiagnostics* diagnostics = nullptr);
 CustomMapConversionResult custom_map_write_decoded_dat(
     const std::string& jpg_path, const std::string& dat_path, uint32_t id,
     const std::vector<uint8_t>& decoded, CustomMapFile* out_dat);
 CustomMapConversionResult custom_map_convert_jpg(const CustomMapFile& file,
-                                                  CustomMapFile* out_dat);
+                                                  CustomMapFile* out_dat,
+                                                  CustomMapDecodeDiagnostics* diagnostics = nullptr);
 
 }  // namespace qol::features::custom_map

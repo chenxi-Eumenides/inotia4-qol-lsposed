@@ -180,7 +180,8 @@ uint32_t tile_color(uint16_t tile) {
     return kTilePalette[hash % kTilePalette.size()];
 }
 
-void log_conversion(const CustomMapFile& file, CustomMapConversionResult result) {
+void log_conversion(const CustomMapFile& file, CustomMapConversionResult result,
+                    const CustomMapDecodeDiagnostics& diagnostics) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
     const char* status = "failed";
     uint32_t level = 3;
@@ -197,11 +198,15 @@ void log_conversion(const CustomMapFile& file, CustomMapConversionResult result)
     case CustomMapConversionResult::kReadFailed: status = "read_failed"; break;
     case CustomMapConversionResult::kSourceChanged: status = "source_changed"; break;
     case CustomMapConversionResult::kDecodeFailed: status = "decode_failed"; break;
+    case CustomMapConversionResult::kInvalidMapData: status = "invalid_map_data"; break;
     case CustomMapConversionResult::kWriteFailed: status = "write_failed"; break;
     }
-    char message[160]{};
+    char message[256]{};
     const int written = std::snprintf(message, sizeof(message),
-        "custom map jpg conversion id=%u status=%s", file.id, status);
+        "custom map jpg conversion id=%u status=%s reason=%s input=%zu return=%d output=%zu",
+        file.id, status,
+        diagnostics.failure_reason == nullptr ? "unknown" : diagnostics.failure_reason,
+        diagnostics.input_bytes, diagnostics.decoder_status, diagnostics.output_bytes);
     if (written <= 0) return;
     const uint32_t length = static_cast<uint32_t>(written) < sizeof(message)
         ? static_cast<uint32_t>(written) : static_cast<uint32_t>(sizeof(message) - 1);
@@ -281,8 +286,10 @@ void process_conversion(size_t row_index) {
     if (row_index >= g_maps.size()) return;
     MapRow& row = g_maps[row_index];
     CustomMapFile dat_file{};
-    const CustomMapConversionResult result = custom_map_convert_jpg(row.file, &dat_file);
-    log_conversion(row.file, result);
+    CustomMapDecodeDiagnostics diagnostics{};
+    const CustomMapConversionResult result =
+        custom_map_convert_jpg(row.file, &dat_file, &diagnostics);
+    log_conversion(row.file, result, diagnostics);
     if (result == CustomMapConversionResult::kConverted ||
         result == CustomMapConversionResult::kDatAlreadyExists) {
         row.file = std::move(dat_file);

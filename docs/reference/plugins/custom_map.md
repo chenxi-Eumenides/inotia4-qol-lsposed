@@ -25,7 +25,7 @@
 
 `/sdcard/Android/data/<包名>/files/qol/resources/map/m<id>.dat`
 
-包名取自 `/proc/self/cmdline`；读取失败时使用默认包名 `com.com2us.inotia4.normal.freefull.google.global.android.common`。插件不创建目录。`.dat` 与 `.dat.jpg` 并存时 `.dat` 优先（哪怕 `.dat` 不可读也按 `.dat` 路径回退原函数，不尝试 `.jpg`）。`.dat` 不存在而 `.dat.jpg` 存在时，进图路径就地解密：读取 `.jpg`（要求普通文件、首字节 `0x01` 的 LZMA 容器），经游戏 `LZMA_Decode` 解码，解码输出写入同目录 `m<id>.dat`（先写同目录临时文件并 `fsync`，再以硬链接原子发布；输出首字节恰为 `1` 时前置 `0x00` 防二次解码），随后以解码内容完成本次加载；落盘失败仅记日志，不阻断本次进图。`.jpg` 文件在任何情况下保留不删。id 数字超出 `uint32_t` 时不做 jpg 转换。可接受的文件布局有两种：
+包名取自 `/proc/self/cmdline`；读取失败时使用默认包名 `com.com2us.inotia4.normal.freefull.google.global.android.common`。插件不创建目录。`.dat` 与 `.dat.jpg` 并存时 `.dat` 优先（哪怕 `.dat` 不可读也按 `.dat` 路径回退原函数，不尝试 `.jpg`）。`.dat` 不存在而 `.dat.jpg` 存在时，进图路径就地解密：读取 `.jpg`（要求普通文件、首字节 `0x01` 的 LZMA 容器），经游戏 `LZMA_Decode` 解码；传入的输入长度与 `buffer + 1` 指针对应，为原文件长度减 1。解码输出必须通过完整地图结构边界校验，才会写入同目录 `m<id>.dat`（先写同目录临时文件并 `fsync`，再以硬链接原子发布；输出首字节恰为 `1` 时前置 `0x00` 防二次解码）并用于本次加载。落盘失败仅记日志，不阻断本次进图；`.jpg` 文件保留不删。容器解码、地图结构校验或游戏堆分配失败时不返回自定义缓冲，回退到原 `RES_LoadToPool`。id 数字超出 `uint32_t` 时不做 jpg 转换。可接受的文件布局有两种：
 
 1. `.dat.jpg` 容器原始字节（magic `01 00 5d 00`，LZMA1）。`MAP_Load` 检查首字节并自行解码。
 2. 首字节不等于 `1` 的预解码布局；游戏在该分支把 `buffer + 1` 作为数据起始位置。
@@ -62,7 +62,7 @@ entry `custom_map.open_panel` 触发，经 Host `ui_panels.open("custom_map")` �
 
 - 资源声明为 `kRequired` / `kFailClosed`：hook 不能安装或资源回调未能保存有效 backup 时，Host 回滚资源并将插件置为失败，不运行无 backup 的 wrapper。
 - wrapper 没有备份函数时返回负值；正常 fail-closed 安装路径要求 backup 有效。
-- 自定义路径构造、文件打开/读取、尺寸检查或 `MEM_Malloc` 失败时回退到原 `RES_LoadToPool`，不将自定义文件错误伪装成成功。
+- 自定义路径构造、文件打开/读取、容器解码、地图结构边界校验、尺寸检查或 `MEM_Malloc` 失败时回退到原 `RES_LoadToPool`，不将自定义文件错误伪装成成功。
 - `MEM_Malloc` 已分配但文件读取失败时，先用 `MEM_Free` 释放部分读取缓冲，再回退原函数。
 - 非匹配路径（包括字体加载）无文件 I/O，原始参数逐项传给 backup。
 

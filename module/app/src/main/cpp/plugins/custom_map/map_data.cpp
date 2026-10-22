@@ -261,6 +261,7 @@ bool parse_map_data(uint32_t id, const uint8_t* data, size_t data_size,
 
     const uint32_t width = data[2];
     const uint32_t height = data[3];
+    if (width == 0 || height == 0) return false;
     const size_t tile_count = static_cast<size_t>(width) * height;
     const size_t tile_bytes = tile_count * 2;
     size_t offset = 4;
@@ -307,23 +308,44 @@ bool parse_map_data(uint32_t id, const uint8_t* data, size_t data_size,
 }
 
 bool decode_container(std::vector<uint8_t>& file_data, GameBuffer* decoded,
-                      const uint8_t** out_data, size_t* out_size) {
-    if (decoded == nullptr || out_data == nullptr || out_size == nullptr || file_data.size() <= 1 ||
-        file_data.size() - 1 > INT32_MAX || file_data[0] != 0x01) return false;
+                      const uint8_t** out_data, size_t* out_size,
+                      CustomMapDecodeDiagnostics* diagnostics) {
+    if (decoded == nullptr || out_data == nullptr || out_size == nullptr) return false;
+    if (file_data.size() <= 1 || file_data.size() - 1 > INT32_MAX || file_data[0] != 0x01) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "invalid_container";
+        return false;
+    }
     const MemFreeFn free_buffer = fn_mem_free;
-    if (free_buffer == nullptr) return false;
+    if (free_buffer == nullptr) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "mem_free_unavailable";
+        return false;
+    }
     const uintptr_t decode_address = qol::game::resolve_hook_entry("F_LZMA_DECODE_VMA", nullptr);
-    if (decode_address == 0) return false;
+    if (decode_address == 0) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "decoder_unavailable";
+        return false;
+    }
 
     const auto decode = reinterpret_cast<LzmaDecodeFn>(decode_address);
     void* decoded_buffer = nullptr;
     int32_t decoded_size = 0;
     GameBuffer decoded_guard(nullptr, GameBufferDeleter{free_buffer});
     const int32_t succeeded = decode(file_data.data() + 1,
-                                    static_cast<int32_t>(file_data.size()),
+                                    static_cast<int32_t>(file_data.size() - 1),
                                     &decoded_buffer, &decoded_size);
+    if (diagnostics != nullptr) {
+        diagnostics->decoder_status = succeeded;
+        diagnostics->output_bytes = decoded_size > 0 ? static_cast<size_t>(decoded_size) : 0;
+    }
     decoded_guard.reset(decoded_buffer);
-    if (succeeded == 0 || decoded_buffer == nullptr || decoded_size <= 0) return false;
+    if (succeeded == 0) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "decoder_rejected_input";
+        return false;
+    }
+    if (decoded_buffer == nullptr || decoded_size <= 0) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "decoder_output_invalid";
+        return false;
+    }
 
     *out_data = static_cast<const uint8_t*>(decoded_buffer);
     *out_size = static_cast<size_t>(decoded_size);
@@ -340,7 +362,7 @@ bool read_map_payload(const std::string& path, std::vector<uint8_t>* file_data,
         *out_size = file_data->size();
         return true;
     }
-    return decode_container(*file_data, decoded, out_data, out_size);
+    return decode_container(*file_data, decoded, out_data, out_size, nullptr);
 }
 
 bool file_stamp_matches(const CustomMapFile& file) {
@@ -386,6 +408,19 @@ CustomMapConversionResult write_decoded_dat_internal(
     const bool prefix_zero = decoded[0] == 1;
     if (decoded.size() > static_cast<size_t>(INT32_MAX) - (prefix_zero ? 1u : 0u))
         return CustomMapConversionResult::kWriteFailed;
+    std::vector<uint8_t> normalized;
+    const uint8_t* map_data = decoded.data();
+    size_t map_size = decoded.size();
+    if (prefix_zero) {
+        normalized.reserve(decoded.size() + 1);
+        normalized.push_back(0);
+        normalized.insert(normalized.end(), decoded.begin(), decoded.end());
+        map_data = normalized.data();
+        map_size = normalized.size();
+    }
+    CustomMapDetail detail{};
+    if (!parse_map_data(id, map_data, map_size, &detail))
+        return CustomMapConversionResult::kInvalidMapData;
 
     struct stat existing {};
     if (stat(dat_path.c_str(), &existing) == 0) {
@@ -470,30 +505,52 @@ bool custom_map_file_unchanged(const CustomMapFile& file) {
 }
 
 CustomMapConversionResult custom_map_decode_jpg(const std::string& path,
-                                                 std::vector<uint8_t>* out_decoded) {
+                                                 std::vector<uint8_t>* out_decoded,
+                                                 CustomMapDecodeDiagnostics* diagnostics) {
     if (out_decoded == nullptr) return CustomMapConversionResult::kReadFailed;
+    out_decoded->clear();
+    if (diagnostics != nullptr) *diagnostics = CustomMapDecodeDiagnostics{};
     try {
         std::vector<uint8_t> source;
-        if (!read_file(path, &source)) return CustomMapConversionResult::kReadFailed;
-        if (source.empty() || source[0] != 1) return CustomMapConversionResult::kInvalidContainer;
+        if (!read_file(path, &source)) {
+            if (diagnostics != nullptr) diagnostics->failure_reason = "read_failed";
+            return CustomMapConversionResult::kReadFailed;
+        }
+        if (diagnostics != nullptr) diagnostics->input_bytes = source.size();
+        if (source.empty() || source[0] != 1) {
+            if (diagnostics != nullptr) diagnostics->failure_reason = "invalid_container";
+            return CustomMapConversionResult::kInvalidContainer;
+        }
 
         GameBuffer decoded(nullptr, GameBufferDeleter{});
         const uint8_t* decoded_data = nullptr;
         size_t decoded_size = 0;
-        if (!decode_container(source, &decoded, &decoded_data, &decoded_size) ||
+        if (!decode_container(source, &decoded, &decoded_data, &decoded_size, diagnostics) ||
             decoded_data == nullptr || decoded_size == 0) {
             return CustomMapConversionResult::kDecodeFailed;
         }
         const bool prefix_zero = decoded_data[0] == 1;
-        if (decoded_size > static_cast<size_t>(INT32_MAX) - (prefix_zero ? 1u : 0u))
+        if (decoded_size > static_cast<size_t>(INT32_MAX) - (prefix_zero ? 1u : 0u)) {
+            if (diagnostics != nullptr) diagnostics->failure_reason = "decoded_size_too_large";
             return CustomMapConversionResult::kDecodeFailed;
+        }
         std::vector<uint8_t> result;
         result.reserve(decoded_size + (prefix_zero ? 1u : 0u));
         if (prefix_zero) result.push_back(0);
         result.insert(result.end(), decoded_data, decoded_data + decoded_size);
+        CustomMapDetail detail{};
+        if (!parse_map_data(0, result.data(), result.size(), &detail)) {
+            if (diagnostics != nullptr) diagnostics->failure_reason = "map_structure_invalid";
+            return CustomMapConversionResult::kInvalidMapData;
+        }
         *out_decoded = std::move(result);
+        if (diagnostics != nullptr) diagnostics->failure_reason = "none";
         return CustomMapConversionResult::kConverted;
     } catch (const std::bad_alloc&) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "allocation_failed";
+        return CustomMapConversionResult::kDecodeFailed;
+    } catch (...) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "decode_exception";
         return CustomMapConversionResult::kDecodeFailed;
     }
 }
@@ -510,21 +567,38 @@ CustomMapConversionResult custom_map_write_decoded_dat(
 }
 
 CustomMapConversionResult custom_map_convert_jpg(const CustomMapFile& file,
-                                                  CustomMapFile* out_dat) {
-    if (file.kind != CustomMapFileKind::kDatJpg || !file_stamp_matches(file))
+                                                  CustomMapFile* out_dat,
+                                                  CustomMapDecodeDiagnostics* diagnostics) {
+    if (diagnostics != nullptr) *diagnostics = CustomMapDecodeDiagnostics{};
+    if (file.kind != CustomMapFileKind::kDatJpg || !file_stamp_matches(file)) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "source_changed";
         return CustomMapConversionResult::kSourceChanged;
+    }
     std::vector<uint8_t> decoded;
-    const CustomMapConversionResult decode_result = custom_map_decode_jpg(file.path, &decoded);
+    const CustomMapConversionResult decode_result =
+        custom_map_decode_jpg(file.path, &decoded, diagnostics);
     if (decode_result != CustomMapConversionResult::kConverted) return decode_result;
-    if (!file_stamp_matches(file)) return CustomMapConversionResult::kSourceChanged;
+    if (!file_stamp_matches(file)) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "source_changed";
+        return CustomMapConversionResult::kSourceChanged;
+    }
 
     const size_t slash = file.path.find_last_of('/');
     const std::string directory = slash == std::string::npos ? "" : file.path.substr(0, slash + 1);
     char dat_name[32]{};
     const int written = std::snprintf(dat_name, sizeof(dat_name), "m%u.dat", file.id);
-    if (written < 0 || static_cast<size_t>(written) >= sizeof(dat_name))
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(dat_name)) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "dat_name_invalid";
         return CustomMapConversionResult::kWriteFailed;
-    return custom_map_write_decoded_dat(file.path, directory + dat_name, file.id, decoded, out_dat);
+    }
+    const CustomMapConversionResult write_result =
+        custom_map_write_decoded_dat(file.path, directory + dat_name, file.id, decoded, out_dat);
+    if (diagnostics != nullptr && write_result != CustomMapConversionResult::kConverted &&
+        write_result != CustomMapConversionResult::kDatAlreadyExists) {
+        diagnostics->failure_reason = write_result == CustomMapConversionResult::kInvalidMapData
+            ? "map_structure_invalid_before_write" : "write_failed";
+    }
+    return write_result;
 }
 
 bool custom_map_read_summary(const CustomMapFile& file, CustomMapSummary* out) {
