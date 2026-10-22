@@ -76,7 +76,7 @@ bool build_custom_path(const MapPathId& id, char* out_path, size_t out_size) {
     // Package discovery follows infra/log/qol_log.cpp:245-253.
     const int written = std::snprintf(
         out_path, out_size,
-        "/sdcard/Android/data/%s/files/qol/custom_map/m%.*s.dat",
+        "/sdcard/Android/data/%s/files/qol/resources/map/m%.*s.dat",
         package, static_cast<int>(id.length), id.digits);
     return written >= 0 && static_cast<size_t>(written) < out_size;
 }
