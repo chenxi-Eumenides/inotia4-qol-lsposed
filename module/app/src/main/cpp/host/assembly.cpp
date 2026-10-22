@@ -64,6 +64,7 @@
 #include "plugins/core.system/plugin.h"
 #include "plugins/character_panel_i18n/plugin.h"
 #include "plugins/world_teleport/plugin.h"
+#include "plugins/custom_map/plugin.h"
 #include "plugins/core.world/plugin.h"
 #include "plugins/core.save/plugin.h"
 #endif
@@ -229,6 +230,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_system::plugin_descriptor},
     {&features::character_panel_i18n::plugin_descriptor},
     {&features::world_teleport::plugin_descriptor},
+    {&features::custom_map::plugin_descriptor},
 #endif
     {nullptr},
 };

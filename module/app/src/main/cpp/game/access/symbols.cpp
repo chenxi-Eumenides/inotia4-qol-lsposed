@@ -101,6 +101,8 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     // 2026-10-19 由尾部 kCallPatch 迁移 kEntryHook 时漏登记，导致 c18 上解析静默返回 0、
     // 插件资源未安装（preflight 无日志、不计 install_failed）。
     {"F_UI_PLAY_CALL_MAP_NAME_VMA", F_UI_PLAY_CALL_MAP_NAME_VMA},
+    // 地图和字体文件共用的资源读取入口（owner=custom_map）；wrapper 仅替换 m<数字>.dat。
+    {"F_RES_LOAD_TO_POOL_VMA", F_RES_LOAD_TO_POOL_VMA},
 };
 
 // 解析可安装 hook 的入口地址。

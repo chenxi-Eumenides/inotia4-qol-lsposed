@@ -550,7 +550,8 @@ constexpr size_t F_SELECTCHAR_BUTTON_START_EXE_STARTGAME_CALL_OFF = 0x10;  // �
 // ---- 存档文件加解密链 VMA（save-export 存档管理器，overhaul v1.3.2 逆向）----
 constexpr uintptr_t F_HUBSAVE_GET_KEY_VMA = 0x9001c;    // const char* () 存档加密密钥字符串指针（本机 "1234567"）
 constexpr uintptr_t F_SAVE_LOAD_DATA_VMA = 0x129260;    // int (int32_t slot, void** outBuf, int* outLen) 读槽明文：成功返回 1；outBuf 为 MEM_Malloc 明文缓冲（须 MEM_Free），outLen = 文件长度-3（明文长度）
-constexpr uintptr_t F_MEM_FREE_VMA = 0xa8f18;           // void (void*) 游戏堆释放（与 MEM_Malloc 同堆，跨堆 free 会崩）
+constexpr uintptr_t F_RES_LOAD_TO_POOL_VMA = 0x0a9d40;  // dynsym RES_LoadToPool，四版本同址；MAP_Load 0x114ab0 与 FONT_Load 0xa48c0 调用；成功返回 0 并写出缓冲/大小
+constexpr uintptr_t F_MEM_FREE_VMA = 0xa8f18;           // void (void*) dynsym MEM_Free，游戏池释放器；RES_LoadToPool 产物必须由此释放；四版本同址
 constexpr uintptr_t F_ENCRYPT_PROCESS2_VMA = 0xa413c;   // int (void* buf, int len, int mode, const char* key) 就地加解密：mode==0 加密（写入 len+3 字节，缓冲区需 len+3 容量）、mode!=0 解密；成功返回 1
 constexpr uintptr_t F_NPCSYSTEM_CHECK_FUNCTION_DISPLAY_VMA = 0x11e760; // int (int32_t funcDisplay) 判断 NPC 功能显示类型（读 npc+0xa u16）：0=普通功能弹 UI、1=任务交付/接取直接执行、2=不可交互
 constexpr uintptr_t F_UINPC_INIT_VMA = 0xc2cfc;              // u8 (void) NPC 交互触发（UINpc_InitNPC：建 NPCBOX+任务列表+功能列表；前置 PLAYER_pNearNPC 已设）
@@ -648,7 +649,7 @@ constexpr uint32_t ARM64_NOP_WORD = 0xd503201f;
 constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_OFF = 0x168;
 constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_WORD = 0x97ffcc28;   // bl 0xdca10
 constexpr uintptr_t F_CHAR_PICK_ITEM_ALL_VMA = 0xec4d8; // int (void*, int32_t) 拾取范围内所有掉落物（CHAR_PickItemAll，官方移动按键链 GAMESTATE_PressKeyPlay 0x9d10c 以半径 0x18=24px 调用；后台线程调用会触发拾取音效 SOUNDSYSTEM_Play 空句柄崩溃，模块改用 nav_pick_items 复刻数据路径跳过音效）
-constexpr uintptr_t F_MEM_MALLOC_VMA = 0xa8d94;         // void* (size_t) 游戏堆分配（节点须用游戏堆，回调 CHAR_ActivePickupEvent 内部 MEM_Free 释放，跨堆 free 会崩）
+constexpr uintptr_t F_MEM_MALLOC_VMA = 0xa8d94;         // void* (size_t) dynsym MEM_Malloc，游戏池分配器；RES_LoadToPool 返回缓冲须由 MEM_Free 释放，插件分配必须走此函数；四版本同址
 constexpr uintptr_t F_NOTIFIER_ADD_VMA = 0x11e1b8;     // void (int type, int seq, void* callback, void* data) 延迟回调入队（NOTIFIER_Add→Create+AddTail，主线程 NOTIFIER_Process 回调；type=1 拾取，seq=0/2/4 递增）
 constexpr uintptr_t G_NOTIFIER_PICKUP_SLOT_VMA = 0x2f5000 + 0x948; // GOT 槽：*(此地址) = CHAR_ActivePickupEvent(0xdd15c) 回调函数指针（PickItemAll 0xec678 ldr 后作 NOTIFIER_Add 的 callback 参数）
 constexpr uintptr_t G_DROP_COUNT_GOT_VMA = 0x2f5000 + 0x818; // GOT 槽：*(此地址) = 掉落物计数变量（int8，PickItemAll 0xec4fc ldr）
