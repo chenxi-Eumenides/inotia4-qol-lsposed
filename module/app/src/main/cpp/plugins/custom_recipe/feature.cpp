@@ -120,6 +120,7 @@ namespace {
 
 std::atomic<bool> g_custom_recipe_enabled{false};
 bool g_ownership_ready = false;
+::custom_recipe::DynamicRecipeCache g_dynamic_recipe_cache{};
 
 // 真机验收用的有界诊断日志：每次进程最多 16 条，避免放料/合成高频刷屏。
 std::atomic<int> g_verify_log_budget{16};
@@ -440,11 +441,22 @@ QolResult make_item_rand_bridge(int32_t lo, int32_t hi, int32_t* out) {
 
 // ---- 动态特殊装备配方：进档随机重建 ----
 
+QolResult build_dynamic_recipe_cache_miss(uint64_t seed,
+                                          ::custom_recipe::ThreeSlotRecipe* out,
+                                          size_t out_capacity, size_t* out_count,
+                                          void* context) {
+    auto* reroll_count = static_cast<size_t*>(context);
+    return ::custom_recipe::build_dynamic_recipes_seeded(
+        ::custom_recipe::kSpecialEquipCategories, ::custom_recipe::kSpecialEquipCategoryCount,
+        seed, ::custom_recipe::kMaterialPool, ::custom_recipe::kMaterialPoolSize, out,
+        out_capacity, out_count, reroll_count);
+}
+
 void refresh_dynamic_recipes(void* /*ctx*/) {
     three_slot_invalidate_pending();
-    ::custom_recipe::set_dynamic_three_slot_recipes(nullptr, 0);
     if (g_save_facts == nullptr || g_save_facts->current_slot == nullptr ||
         g_save_facts->slot_times == nullptr) {
+        ::custom_recipe::set_dynamic_three_slot_recipes(nullptr, 0);
         log_message(2, "dynamic recipe rebuild skipped: save facts unavailable");
         return;
     }
@@ -452,6 +464,7 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
     int32_t slot = -1;
     const QolResult slot_result = g_save_facts->current_slot(&slot);
     if (slot_result.ok != kQolOk || slot < 0 || slot >= 3) {
+        ::custom_recipe::set_dynamic_three_slot_recipes(nullptr, 0);
         log_message(2, "dynamic recipe rebuild skipped: current slot invalid result=%d slot=%d",
                     slot_result.code, slot);
         return;
@@ -463,6 +476,7 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
         g_save_facts->slot_times(slot, &creation_time_ms, &save_time_ms);
     (void)save_time_ms;
     if (time_result.ok != kQolOk || creation_time_ms == 0) {
+        ::custom_recipe::set_dynamic_three_slot_recipes(nullptr, 0);
         log_message(2, "dynamic recipe rebuild skipped: creation time unavailable slot=%d result=%d",
                     slot, time_result.code);
         return;
@@ -471,18 +485,19 @@ void refresh_dynamic_recipes(void* /*ctx*/) {
     ::custom_recipe::ThreeSlotRecipe buffer[::custom_recipe::kMaxDynamicRecipes];
     size_t n = 0;
     size_t rerolls = 0;
-    const QolResult result = ::custom_recipe::build_dynamic_recipes_seeded(
-        ::custom_recipe::kSpecialEquipCategories, ::custom_recipe::kSpecialEquipCategoryCount,
-        creation_time_ms, ::custom_recipe::kMaterialPool, ::custom_recipe::kMaterialPoolSize,
-        buffer, ::custom_recipe::kMaxDynamicRecipes, &n, &rerolls);
+    bool cache_hit = false;
+    const QolResult result = ::custom_recipe::dynamic_recipe_cache_get_or_build(
+        &g_dynamic_recipe_cache, creation_time_ms, &build_dynamic_recipe_cache_miss, &rerolls,
+        buffer, ::custom_recipe::kMaxDynamicRecipes, &n, &cache_hit);
     if (result.ok != kQolOk) {
-        log_message(2, "dynamic recipe rebuild failed stage=seeded_catalog result=%d",
+        ::custom_recipe::set_dynamic_three_slot_recipes(nullptr, 0);
+        log_message(2, "dynamic recipe rebuild failed stage=recipe_cache result=%d",
                     result.code);
         return;
     }
     ::custom_recipe::set_dynamic_three_slot_recipes(buffer, n);
-    log_message(1, "dynamic special recipes rebuilt count=%zu slot=%d rerolls=%zu", n, slot,
-                rerolls);
+    log_message(1, "dynamic special recipes refreshed count=%zu slot=%d cache=%s rerolls=%zu",
+                n, slot, cache_hit ? "hit" : "miss", rerolls);
 }
 
 void refresh_dynamic_recipes_event(void* /*ctx*/, const void* /*payload*/) {

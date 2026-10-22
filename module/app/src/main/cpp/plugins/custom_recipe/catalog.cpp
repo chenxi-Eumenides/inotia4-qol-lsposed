@@ -1,6 +1,8 @@
 #include "catalog.h"
 
 #include <cstring>
+#include <new>
+#include <utility>
 
 #include "rules.h"
 
@@ -334,6 +336,63 @@ QolResult build_dynamic_recipes_seeded(const uint16_t* equip_categories, size_t 
     }
     *out_count = written;
     if (out_reroll_count != nullptr) *out_reroll_count = rerolls;
+    return qol::contracts::ok();
+}
+
+QolResult dynamic_recipe_cache_get_or_build(DynamicRecipeCache* cache,
+                                            uint64_t creation_time_ms,
+                                            DynamicRecipeGeneratorFn generator, void* context,
+                                            ThreeSlotRecipe* out, size_t out_capacity,
+                                            size_t* out_count, bool* out_cache_hit) {
+    if (out_count != nullptr) *out_count = 0;
+    if (out_cache_hit != nullptr) *out_cache_hit = false;
+    if (cache == nullptr || creation_time_ms == 0 || generator == nullptr || out == nullptr ||
+        out_capacity == 0) {
+        return catalog_error(kQolErrInvalidArgument, "invalid dynamic recipe cache input");
+    }
+
+    const auto cached = cache->entries.find(creation_time_ms);
+    if (cached != cache->entries.end()) {
+        const std::vector<ThreeSlotRecipe>& recipes = cached->second;
+        if (recipes.empty() || recipes.size() > kMaxDynamicRecipes) {
+            return catalog_error(kQolErrInternal, "dynamic recipe cache entry is invalid");
+        }
+        if (recipes.size() > out_capacity) {
+            return catalog_error(kQolErrInvalidArgument,
+                                 "dynamic recipe cache output capacity too small");
+        }
+        for (size_t i = 0; i < recipes.size(); ++i) out[i] = recipes[i];
+        if (out_count != nullptr) *out_count = recipes.size();
+        if (out_cache_hit != nullptr) *out_cache_hit = true;
+        return qol::contracts::ok();
+    }
+
+    ThreeSlotRecipe generated[kMaxDynamicRecipes]{};
+    size_t generated_count = 0;
+    const QolResult result = generator(creation_time_ms, generated, kMaxDynamicRecipes,
+                                       &generated_count, context);
+    if (result.ok != kQolOk) return result;
+    if (generated_count == 0 || generated_count > kMaxDynamicRecipes) {
+        return catalog_error(kQolErrInternal, "dynamic recipe generator returned invalid count");
+    }
+    if (generated_count > out_capacity) {
+        return catalog_error(kQolErrInvalidArgument,
+                             "dynamic recipe cache output capacity too small");
+    }
+
+    try {
+        std::vector<ThreeSlotRecipe> recipes(generated, generated + generated_count);
+        const auto inserted = cache->entries.emplace(creation_time_ms, std::move(recipes));
+        if (!inserted.second) {
+            return catalog_error(kQolErrConflict,
+                                 "dynamic recipe cache key appeared during generation");
+        }
+    } catch (const std::bad_alloc&) {
+        return catalog_error(kQolErrInternal, "dynamic recipe cache allocation failed");
+    }
+
+    for (size_t i = 0; i < generated_count; ++i) out[i] = generated[i];
+    if (out_count != nullptr) *out_count = generated_count;
     return qol::contracts::ok();
 }
 

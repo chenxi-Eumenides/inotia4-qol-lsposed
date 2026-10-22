@@ -693,6 +693,115 @@ static bool same_dynamic_recipe(const cr::ThreeSlotRecipe& left,
            left.same_first_last == right.same_first_last;
 }
 
+struct DynamicCacheGeneratorState {
+    size_t calls = 0;
+    bool fail = false;
+};
+
+static QolResult counted_dynamic_generator(uint64_t seed, cr::ThreeSlotRecipe* out,
+                                           size_t out_capacity, size_t* out_count,
+                                           void* context) {
+    if (context == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "missing generator state",
+                                     sizeof("missing generator state") - 1);
+    }
+    auto* state = static_cast<DynamicCacheGeneratorState*>(context);
+    ++state->calls;
+    if (state->fail) {
+        return qol::contracts::error(kQolErrBlocked, "injected generator failure", 26);
+    }
+    return cr::build_dynamic_recipes_seeded(
+        cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, seed, cr::kMaterialPool,
+        cr::kMaterialPoolSize, out, out_capacity, out_count);
+}
+
+static void test_dynamic_recipe_cache() {
+    cr::DynamicRecipeCache cache{};
+    DynamicCacheGeneratorState generator_state{};
+    cr::ThreeSlotRecipe first[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe repeated[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe other_save[cr::kMaxDynamicRecipes]{};
+    size_t first_count = 0;
+    size_t repeated_count = 0;
+    size_t other_count = 0;
+    bool cache_hit = true;
+
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 1001, &counted_dynamic_generator, &generator_state, first,
+              cr::kMaxDynamicRecipes, &first_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 1 && !cache_hit);
+    CHECK(first_count == cr::kSpecialEquipCategoryCount);
+    const uint64_t before_first_publish = cr::dynamic_recipe_generation();
+    cr::set_dynamic_three_slot_recipes(first, first_count);
+    const uint64_t after_first_publish = cr::dynamic_recipe_generation();
+    CHECK(after_first_publish != before_first_publish);
+
+    // 同一角色创建时间第二次 refresh 命中缓存，生成器不再运行且完整目录复用。
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 1001, &counted_dynamic_generator, &generator_state, repeated,
+              cr::kMaxDynamicRecipes, &repeated_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 1 && cache_hit);
+    CHECK(repeated_count == first_count);
+    cr::set_dynamic_three_slot_recipes(repeated, repeated_count);
+    CHECK(cr::dynamic_recipe_generation() != after_first_publish);
+    CHECK(cr::dynamic_three_slot_recipe_count() == repeated_count);
+    for (size_t i = 0; i < first_count; ++i) {
+        CHECK(same_dynamic_recipe(first[i], repeated[i]));
+    }
+
+    // 不同角色创建时间是 cache miss；时间戳之外不使用当前槽或保存时间作为 key。
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 2002, &counted_dynamic_generator, &generator_state, other_save,
+              cr::kMaxDynamicRecipes, &other_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 2 && !cache_hit);
+    CHECK(other_count == first_count);
+    bool differs = false;
+    for (size_t i = 0; i < first_count && !differs; ++i) {
+        differs = !same_dynamic_recipe(first[i], other_save[i]);
+    }
+    CHECK(differs);
+
+    // 失败的生成不写缓存；相同 key 再次请求仍会重新调用 generator。
+    generator_state.fail = true;
+    size_t failed_count = 7;
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 3003, &counted_dynamic_generator, &generator_state, other_save,
+              cr::kMaxDynamicRecipes, &failed_count, &cache_hit).ok != kQolOk);
+    CHECK(generator_state.calls == 3 && failed_count == 0 && !cache_hit);
+    generator_state.fail = false;
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &cache, 3003, &counted_dynamic_generator, &generator_state, other_save,
+              cr::kMaxDynamicRecipes, &failed_count, &cache_hit).ok == kQolOk);
+    CHECK(generator_state.calls == 4 && !cache_hit);
+
+    // 超过三个不同创建时间后，最初的成功 key 仍驻留并命中，不会再次生成。
+    cr::DynamicRecipeCache long_lived_cache{};
+    DynamicCacheGeneratorState long_lived_generator{};
+    cr::ThreeSlotRecipe scratch[cr::kMaxDynamicRecipes]{};
+    size_t scratch_count = 0;
+    cr::ThreeSlotRecipe oldest[cr::kMaxDynamicRecipes]{};
+    size_t oldest_count = 0;
+    for (uint64_t timestamp = 10; timestamp <= 16; ++timestamp) {
+        CHECK(cr::dynamic_recipe_cache_get_or_build(
+                  &long_lived_cache, timestamp, &counted_dynamic_generator,
+                  &long_lived_generator, scratch,
+                  cr::kMaxDynamicRecipes, &scratch_count, &cache_hit).ok == kQolOk);
+        CHECK(!cache_hit);
+        if (timestamp == 10) {
+            oldest_count = scratch_count;
+            for (size_t i = 0; i < oldest_count; ++i) oldest[i] = scratch[i];
+        }
+    }
+    CHECK(long_lived_generator.calls == 7);
+    CHECK(cr::dynamic_recipe_cache_get_or_build(
+              &long_lived_cache, 10, &counted_dynamic_generator, &long_lived_generator,
+              scratch, cr::kMaxDynamicRecipes, &scratch_count, &cache_hit).ok == kQolOk);
+    CHECK(cache_hit && long_lived_generator.calls == 7 && scratch_count == oldest_count);
+    for (size_t i = 0; i < oldest_count; ++i) {
+        CHECK(same_dynamic_recipe(oldest[i], scratch[i]));
+    }
+}
+
 static void test_dynamic_special_recipes() {
     cr::set_dynamic_three_slot_recipes(nullptr, 0);
     cr::ThreeSlotRecipe first[cr::kMaxDynamicRecipes]{};
@@ -952,6 +1061,7 @@ int main() {
     test_chaos_scroll_recipe();
     test_max_socket_enchant_recipe();
     test_recipe_match_helpers();
+    test_dynamic_recipe_cache();
     test_dynamic_special_recipes();
     test_scaled_jewel_value();
     test_recipe_book_bit_invariant();

@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <vector>
 
 #include "../../contracts/result.h"
 
@@ -123,17 +125,27 @@ const ThreeSlotRecipe* match_static_three_slot(
     bool (*is_special_equip)(uint16_t category) = nullptr);
 
 // ---------------------------------------------------------------------------
-// 动态特殊装备配方（进档时随机重建）
+// 动态特殊装备配方（进档时按创建时间 seed 构建，并使用进程内缓存）
 // ---------------------------------------------------------------------------
 //
 // 语义：每件特殊装备各有一条隐式配方 —— 3 个**互不相同**的材料，**顺序严格**；产物为该装备
-// 本身（`kFixedCategory`，原版掷值）。材料与装备的对应关系**每次进入存档时重新随机**，
-// 因此玩家无法预知，只能试（「无信息」）。
+// 本身（`kFixedCategory`，原版掷值）。材料与装备的对应关系由角色创建时间确定；在进程内
+// 首次遇到该存档时生成，后续命中缓存时直接恢复，使保存时间变化或重复进档不改变配方。
 //
-// 目录层只负责「纯逻辑生成 + 查表」；随机源与进档时机由平台侧注入（见 `plugins/custom_recipe/feature.cpp`）。
+// 目录层提供「纯逻辑生成 + 查表 + 进程生命周期缓存」；创建时间读取与进档时机由
+// `plugins/custom_recipe/feature.cpp` 负责。
 
 // 动态配方容量上限。
 constexpr size_t kMaxDynamicRecipes = 64;
+
+struct DynamicRecipeCache {
+    // 只在 SaveEnter 所在线程访问；成功目录按 creation-time 永久保留至进程结束。
+    std::map<uint64_t, std::vector<ThreeSlotRecipe>> entries;
+};
+
+using DynamicRecipeGeneratorFn = QolResult (*)(uint64_t seed, ThreeSlotRecipe* out,
+                                               size_t out_capacity, size_t* out_count,
+                                               void* context);
 
 // 动态配方允许出现空槽：生成时把「空」当作一个普通候选**并入材料池**
 // 一起随机（不是单独的空概率）。空项映射为类别 0，与三格匹配语义一致：`slots[i] == 0`
@@ -167,6 +179,13 @@ QolResult build_dynamic_recipes_seeded(const uint16_t* equip_categories, size_t 
                                        size_t pool_size, ThreeSlotRecipe* out,
                                        size_t out_capacity, size_t* out_count,
                                        size_t* out_reroll_count = nullptr);
+
+// 命中时复制缓存目录且不调用 generator；miss 时先完整生成，成功后才入缓存。
+// out_cache_hit/out_count 可选；缓存不淘汰成功项，存续到进程结束。
+QolResult dynamic_recipe_cache_get_or_build(DynamicRecipeCache* cache, uint64_t creation_time_ms,
+                                            DynamicRecipeGeneratorFn generator, void* context,
+                                            ThreeSlotRecipe* out, size_t out_capacity,
+                                            size_t* out_count, bool* out_cache_hit);
 
 // 注入/清空动态配方表（进档时调用；游戏主线程）。recipes 为空或 count 为 0 → 清空。
 // count 超 kMaxDynamicRecipes → 截断。
