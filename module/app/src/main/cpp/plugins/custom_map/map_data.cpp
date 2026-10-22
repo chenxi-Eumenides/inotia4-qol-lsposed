@@ -26,11 +26,6 @@ constexpr char kDefaultPackage[] =
 constexpr size_t kCmdlineBufferSize = 256;
 constexpr size_t kPathBufferSize = 1024;
 
-struct MapFile {
-    uint32_t id;
-    std::string name;
-};
-
 class FileDescriptor {
 public:
     explicit FileDescriptor(int fd) : fd_(fd) {}
@@ -146,15 +141,15 @@ bool parse_map_filename(const char* filename, uint32_t* out_id) {
     return true;
 }
 
-bool list_map_files(std::string* out_directory, std::vector<MapFile>* out_files) {
-    if (out_directory == nullptr || out_files == nullptr) return false;
+bool list_map_files(std::vector<CustomMapFile>* out_files) {
+    if (out_files == nullptr) return false;
     std::string directory_path;
     if (!build_map_directory(&directory_path)) return false;
 
     Directory directory(opendir(directory_path.c_str()));
     if (directory.get() == nullptr) return false;
 
-    std::vector<MapFile> files;
+    std::vector<CustomMapFile> files;
     for (;;) {
         errno = 0;
         dirent* entry = readdir(directory.get());
@@ -165,14 +160,21 @@ bool list_map_files(std::string* out_directory, std::vector<MapFile>* out_files)
 
         uint32_t id = 0;
         if (!parse_map_filename(entry->d_name, &id)) continue;
-        files.push_back(MapFile{id, entry->d_name});
+        const std::string name(entry->d_name);
+        const std::string path = directory_path + "/" + name;
+        struct stat file_stat {};
+        if (stat(path.c_str(), &file_stat) != 0 || !S_ISREG(file_stat.st_mode) ||
+            file_stat.st_size < 0) continue;
+        files.push_back(CustomMapFile{id, name, path,
+            static_cast<uint64_t>(file_stat.st_size),
+            static_cast<int64_t>(file_stat.st_mtim.tv_sec),
+            static_cast<int64_t>(file_stat.st_mtim.tv_nsec)});
     }
 
-    std::sort(files.begin(), files.end(), [](const MapFile& left, const MapFile& right) {
+    std::sort(files.begin(), files.end(), [](const CustomMapFile& left, const CustomMapFile& right) {
         if (left.id != right.id) return left.id < right.id;
         return left.name < right.name;
     });
-    *out_directory = std::move(directory_path);
     *out_files = std::move(files);
     return true;
 }
@@ -187,10 +189,8 @@ uint16_t read_u16_le(const uint8_t* data) {
 }
 
 bool parse_map_data(uint32_t id, const uint8_t* data, size_t data_size,
-                    CustomMapDetail* out_detail, CustomMapSummary* out_summary) {
-    if (data == nullptr || data_size < 4 || (out_detail == nullptr && out_summary == nullptr)) {
-        return false;
-    }
+                    CustomMapDetail* out_detail) {
+    if (data == nullptr || data_size < 4 || out_detail == nullptr) return false;
 
     const uint32_t width = data[2];
     const uint32_t height = data[3];
@@ -200,18 +200,14 @@ bool parse_map_data(uint32_t id, const uint8_t* data, size_t data_size,
     if (!has_bytes(data_size, offset, tile_bytes)) return false;
 
     CustomMapDetail detail{};
-    if (out_detail != nullptr) {
-        detail.id = id;
-        detail.width = width;
-        detail.height = height;
-        detail.base_tiles.reserve(tile_count);
-    }
+    detail.id = id;
+    detail.width = width;
+    detail.height = height;
+    detail.base_tiles.reserve(tile_count);
     for (size_t index = 0; index < tile_count; ++index) {
         const uint8_t first = data[offset++];
         const uint8_t second = data[offset++];
-        if (out_detail != nullptr) {
-            detail.base_tiles.push_back(static_cast<uint16_t>(((first & 0x7u) << 8) | second));
-        }
+        detail.base_tiles.push_back(static_cast<uint16_t>(((first & 0x7u) << 8) | second));
     }
 
     if (!has_bytes(data_size, offset, 11)) return false;
@@ -232,17 +228,14 @@ bool parse_map_data(uint32_t id, const uint8_t* data, size_t data_size,
     if (!has_bytes(data_size, offset, exit_bytes)) return false;
     for (uint32_t exit_index = 0; exit_index < exit_count; ++exit_index) {
         const uint8_t* encoded_exit = data + offset;
-        if (out_detail != nullptr) {
-            detail.exits.push_back(CustomMapExit{
-                encoded_exit[0], encoded_exit[1], encoded_exit[2], encoded_exit[3],
-                read_u16_le(encoded_exit + 4),
-            });
-        }
+        detail.exits.push_back(CustomMapExit{
+            encoded_exit[0], encoded_exit[1], encoded_exit[2], encoded_exit[3],
+            read_u16_le(encoded_exit + 4),
+        });
         offset += 6;
     }
 
-    if (out_summary != nullptr) *out_summary = CustomMapSummary{id, width, height};
-    if (out_detail != nullptr) *out_detail = std::move(detail);
+    *out_detail = std::move(detail);
     return true;
 }
 
@@ -281,92 +274,68 @@ bool read_map_payload(const std::string& path, std::vector<uint8_t>* file_data,
     return true;
 }
 
-std::string join_path(const std::string& directory, const std::string& name) {
-    return directory + "/" + name;
-}
-
-bool select_map_file(uint32_t id, const std::vector<MapFile>& files, std::string* out_name) {
-    if (out_name == nullptr) return false;
-
-    char canonical[32]{};
-    const int written = std::snprintf(canonical, sizeof(canonical), "m%u.dat", id);
-    if (written < 0 || static_cast<size_t>(written) >= sizeof(canonical)) return false;
-
-    const MapFile* canonical_file = nullptr;
-    const MapFile* alias_file = nullptr;
-    for (const MapFile& file : files) {
-        if (file.id != id) continue;
-        if (file.name == canonical) {
-            canonical_file = &file;
-        } else if (alias_file != nullptr) {
-            return false;
-        } else {
-            alias_file = &file;
-        }
-    }
-    const MapFile* selected = canonical_file != nullptr ? canonical_file : alias_file;
-    if (selected == nullptr) return false;
-    *out_name = selected->name;
-    return true;
+bool file_stamp_matches(const CustomMapFile& file) {
+    struct stat current {};
+    return stat(file.path.c_str(), &current) == 0 && S_ISREG(current.st_mode) &&
+        current.st_size >= 0 && static_cast<uint64_t>(current.st_size) == file.size &&
+        static_cast<int64_t>(current.st_mtim.tv_sec) == file.modified_sec &&
+        static_cast<int64_t>(current.st_mtim.tv_nsec) == file.modified_nsec;
 }
 
 }  // namespace
 
-bool custom_map_scan(std::vector<CustomMapSummary>* out) {
+bool custom_map_list_files(std::vector<CustomMapFile>* out) {
     if (out == nullptr) return false;
     try {
-        std::string directory;
-        std::vector<MapFile> files;
-        if (!list_map_files(&directory, &files)) return false;
-
-        std::vector<CustomMapSummary> summaries;
-        summaries.reserve(files.size());
-        for (size_t index = 0; index < files.size(); ++index) {
-            if (index > 0 && files[index - 1].id == files[index].id) return false;
-
-            std::vector<uint8_t> file_data;
-            GameBuffer decoded(nullptr, GameBufferDeleter{});
-            const uint8_t* map_data = nullptr;
-            size_t map_size = 0;
-            if (!read_map_payload(join_path(directory, files[index].name), &file_data,
-                                  &decoded, &map_data, &map_size)) {
-                return false;
-            }
-
-            CustomMapSummary summary{};
-            if (!parse_map_data(files[index].id, map_data, map_size, nullptr, &summary)) {
-                return false;
-            }
-            summaries.push_back(summary);
-        }
-        *out = std::move(summaries);
+        std::vector<CustomMapFile> files;
+        if (!list_map_files(&files)) return false;
+        for (size_t index = 1; index < files.size(); ++index)
+            if (files[index - 1].id == files[index].id) return false;
+        *out = std::move(files);
         return true;
     } catch (const std::bad_alloc&) {
         return false;
     }
 }
 
-bool custom_map_read_detail(uint32_t id, CustomMapDetail* out) {
-    if (out == nullptr) return false;
+bool custom_map_file_unchanged(const CustomMapFile& file) {
+    return file_stamp_matches(file);
+}
+
+bool custom_map_read_summary(const CustomMapFile& file, CustomMapSummary* out) {
+    if (out == nullptr || !file_stamp_matches(file)) return false;
     try {
-        std::string directory;
-        std::vector<MapFile> files;
-        if (!list_map_files(&directory, &files)) return false;
-
-        std::string name;
-        if (!select_map_file(id, files, &name)) return false;
-
         std::vector<uint8_t> file_data;
         GameBuffer decoded(nullptr, GameBufferDeleter{});
         const uint8_t* map_data = nullptr;
         size_t map_size = 0;
-        if (!read_map_payload(join_path(directory, name), &file_data,
-                              &decoded, &map_data, &map_size)) {
-            return false;
-        }
+        if (!read_map_payload(file.path, &file_data, &decoded, &map_data, &map_size)) return false;
+        if (map_data == nullptr || map_size < 4) return false;
+        const uint32_t width = map_data[2];
+        const uint32_t height = map_data[3];
+        const size_t tile_bytes = static_cast<size_t>(width) * height * 2;
+        if (!has_bytes(map_size, 4, tile_bytes) || !file_stamp_matches(file)) return false;
+        const CustomMapSummary summary{file.id, width, height};
+        *out = summary;
+        return true;
+    } catch (const std::bad_alloc&) {
+        return false;
+    }
+}
+
+bool custom_map_read_detail(const CustomMapFile& file, CustomMapDetail* out) {
+    if (out == nullptr) return false;
+    if (!file_stamp_matches(file)) return false;
+    try {
+        std::vector<uint8_t> file_data;
+        GameBuffer decoded(nullptr, GameBufferDeleter{});
+        const uint8_t* map_data = nullptr;
+        size_t map_size = 0;
+        if (!read_map_payload(file.path, &file_data, &decoded, &map_data, &map_size)) return false;
 
         CustomMapDetail detail{};
-        if (!parse_map_data(id, map_data, map_size, &detail, nullptr)) return false;
+        if (!parse_map_data(file.id, map_data, map_size, &detail) ||
+            !file_stamp_matches(file)) return false;
         *out = std::move(detail);
         return true;
     } catch (const std::bad_alloc&) {

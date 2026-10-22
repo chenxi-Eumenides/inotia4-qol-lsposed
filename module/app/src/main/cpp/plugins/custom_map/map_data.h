@@ -1,9 +1,19 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace qol::features::custom_map {
+
+struct CustomMapFile {
+    uint32_t id;
+    std::string name;
+    std::string path;
+    uint64_t size;
+    int64_t modified_sec;
+    int64_t modified_nsec;
+};
 
 struct CustomMapSummary {
     uint32_t id;
@@ -27,7 +37,9 @@ struct CustomMapDetail {
     std::vector<CustomMapExit> exits;
 };
 
-bool custom_map_scan(std::vector<CustomMapSummary>* out);
-bool custom_map_read_detail(uint32_t id, CustomMapDetail* out);
+bool custom_map_list_files(std::vector<CustomMapFile>* out);
+bool custom_map_read_summary(const CustomMapFile& file, CustomMapSummary* out);
+bool custom_map_read_detail(const CustomMapFile& file, CustomMapDetail* out);
+bool custom_map_file_unchanged(const CustomMapFile& file);
 
 }  // namespace qol::features::custom_map

@@ -40,6 +40,8 @@ entry `custom_map.open_panel` 触发，经 Host `ui_panels.open("custom_map")` �
 - 右栏选中详情第一行：地图 id、名称（`static_data.map_name` 查原版 `MAPINFOBASE` 表，命中用原名，否则「自定义」；超长按 UTF-8 边界截断加省略号）、大小（宽×高，单位：格）。
 - 右栏第二行为瓦片示意图：按解析出的 `width × height` 以 `fill_rect` 色块矩阵绘制 base layer 的 11-bit tile id（稳定哈希映射调色板色），出口格以对比色高亮。
 
+数据加载采用分帧流水线（模式对齐 save_backup 的备份解析）：进入面板时仅列举目录建立待解析队列（首帧跳过解析），此后每帧最多处理一个任务——优先解析选中地图的详情，否则解析一个文件头；列表随解析进度出现条目并显示「解析中 n/m」。详情按 mapId 缓存，以路径、文件大小和修改时间快照校验，命中则不重复解析；每次重新进入面板重扫目录并清空缓存，解析期间检测到文件变化时提示重新打开面板。
+
 解析格式与 `RES_LoadToPool` 拦截一致：首字节 `1` 为 LZMA 容器，经游戏 `LZMA_Decode`（VMA `0xa88c4`，dynsym GLOBAL 同名，四变体同址；插件登记为 `F_LZMA_DECODE_VMA`，签名 `int32_t(void* src, int32_t src_size, void** out_buf, int32_t* out_size)`，成功返回非 0，输出缓冲由 `MEM_Malloc` 分配、须以 `MEM_Free` 释放）解码；其余按预解码布局（`buffer+1` 起，byte2=宽、byte3=高）解析。base layer 每格 2 字节、tile id 取 `((b1 & 0x07) << 8) | b2`；其后依次为 5 个 u16 配置、section 数及 feature 列表、出口数及每出口 6 字节。解析失败（截断、解码失败）不进入详情。本插件不写任何地图数据回游戏。
 
 ## 使用的 Host SDK 与 Game 面
