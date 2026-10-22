@@ -331,8 +331,8 @@ void inspect_ui_layer(const qol::contracts::UiLayerInfo* layer, void* user) {
         type != qol::contracts::UiLayerType::kDialog) {
         return;
     }
-    if (layer->id == nullptr || layer->id[0] == '\0' || std::strcmp(layer->id, "none") == 0)
-        return;
+    // 自动出售门禁只拦背包页，其他 UI 打开时不阻塞扫描。
+    if (layer->id == nullptr || std::strcmp(layer->id, "inventory") != 0) return;
     static_cast<UiBusyScan*>(user)->busy = true;
 }
 

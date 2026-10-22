@@ -5,7 +5,7 @@
 //   ExecuteProc 由原生 TouchHandle 递归分发（扩展页签先例）。
 // - 入口按钮绘制：Scene_Draw_POPUP_SC_EQUIP 内 `bl UIDesc_Draw` 调用点独立 BL
 //   patch（扩展背包占用的是同函数 +0x210 的 `bl GRPX_End`，二者地址不同）。
-// - 面板：IAP 死条目 F_PANEL_UNK3_ENTER 五回调改写 + UI_SetPopupProcessInfo。
+// - 面板：由 ui_panels 注册带回调的 provider，PopupState 与面板栈由 core.custom_ui 托管。
 //
 // 线程模型：入口安装、绘制、面板 enter/process/event 全部运行在游戏主线程，
 // 故状态无需加锁；安装仅由 nativeInit 在 bridge 就绪后调用一次。
@@ -105,13 +105,6 @@ bool ui_child_at(void* parent, uint32_t index, void** out) {
     return ui != nullptr && ui->child_at != nullptr && ui->child_at(parent, index, out).ok == kQolOk;
 }
 
-void ui_set_popup_process_info(int32_t mode, int32_t state_id) {
-    const auto* ui = ui_api();
-    if (ui != nullptr && ui->set_popup_process_info != nullptr) {
-        (void)ui->set_popup_process_info(mode, state_id);
-    }
-}
-
 void ui_uidesc_draw() {
     const auto* ui = ui_api();
     if (ui != nullptr && ui->uidesc_draw != nullptr) (void)ui->uidesc_draw();
@@ -174,7 +167,6 @@ std::atomic<bool> g_panel_active{false};
 std::mutex g_entry_mtx;
 // 入口按钮的锚定状态：句柄存活/身份校验/失效重建由 core.custom_ui 管理。
 qol::contracts::QolUiAnchoredButton g_entry{};
-int g_close_delay = 0;              // 仅游戏主线程访问
 PressTarget g_pressed_target;       // 仅游戏主线程访问
 ::autosell::Config g_draft;           // 面板草稿；打开时读取，关闭时一次性提交
 void* g_hit_root = nullptr;         // 仅用于复用 ui_hit_test 的绝对区域
@@ -184,9 +176,6 @@ void* g_back_button = nullptr;
 void* g_category_buttons[kSpecialCount]{};
 void* g_arrows[kRuleCount][2]{};
 bool g_toggle_pressed = false;
-// own:popup.autosell 的 PopupState 占用条目（资源事务 acquire 写入、release 写回）。
-qol::contracts::QolPopupStateEntry g_popup_entry{};
-int g_state_id = -1;
 
 const qol::contracts::QolUiComponents* autosell_components() {
     if (g_ui_components != nullptr) return g_ui_components;
@@ -200,11 +189,16 @@ const qol::contracts::QolUiComponents* autosell_components() {
     return g_ui_components;
 }
 
-void autosell_panel_enter();
-void autosell_panel_process();
-void autosell_panel_f3();
-void autosell_panel_f4();
-uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2);
+void autosell_panel_enter_impl();
+void autosell_panel_process_impl();
+void autosell_panel_f3_impl();
+void autosell_panel_f4_impl();
+uint32_t autosell_panel_event_impl(uint64_t event, uint64_t param, uint64_t param2);
+
+void autosell_request_panel_close() {
+    const auto* sdk = host_sdk();
+    if (sdk != nullptr && sdk->panels.close != nullptr) sdk->panels.close("autosell");
+}
 
 // 控件绝对坐标（父链累加，同扩展背包/自定义面板口径）。
 void autosell_ctrl_abs(void* ctrl, int64_t* x, int64_t* y) {
@@ -381,8 +375,11 @@ void autosell_save_before_back(void*) { autosell_commit_draft(); }
 
 void autosell_entry_clicked(void* ctrl) {
     (void)ctrl;
-    // 关闭态残留控件（不销毁原版控件）不得再打开面板；门禁/state 校验在 provider_open 内。
-    autosell_provider_open();
+    const auto* sdk = host_sdk();
+    if (sdk == nullptr || sdk->panels.open == nullptr ||
+        sdk->panels.open("autosell").ok != kQolOk) {
+        AUTOSELLUI_LOG("entry click rejected: host panel open failed");
+    }
 }
 
 // 布局回调：parent 是当帧活的袋容器。取原版袋 0 绝对位置 + 偏移、
@@ -584,7 +581,7 @@ void autosell_draw_total_toggle(const UiRect& panel) {
     }
 }
 
-void autosell_panel_enter() {
+void autosell_panel_enter_impl() {
     AUTOSELLUI_LOG("panel enter");
     g_panel_active.store(false, std::memory_order_release);
     g_draft = autosell_get_runtime_config();
@@ -593,31 +590,25 @@ void autosell_panel_enter() {
         (void)ui->load_image_unit(0x0f);
     if (!autosell_destroy_panel_components()) {
         AUTOSELLUI_LOG("panel component cleanup deferred");
-        ui_set_popup_process_info(3, 0);
+        g_panel_active.store(false, std::memory_order_release);
+        autosell_request_panel_close();
         return;
     }
     if (!autosell_create_panel_components(autosell_panel_rect())) {
         (void)autosell_destroy_panel_components();
         AUTOSELLUI_LOG("panel component creation failed");
-        ui_set_popup_process_info(3, 0);
+        g_panel_active.store(false, std::memory_order_release);
+        autosell_request_panel_close();
         return;
     }
     if (g_hit_root == nullptr) g_hit_root = ui_create_root({0, 0, 1, 1});
     g_panel_active.store(true, std::memory_order_release);
-    g_close_delay = 0;
     g_pressed_target = {};
     g_toggle_pressed = false;
 }
 
-void autosell_panel_process() {
+void autosell_panel_process_impl() {
     if (!g_panel_active.load(std::memory_order_acquire) || ui_api() == nullptr) return;
-    if (g_close_delay > 0) {
-        --g_close_delay;
-        if (g_close_delay == 0) {
-            ui_set_popup_process_info(3, 0);
-            return;
-        }
-    }
     ui_begin_frame();
     const UiRect panel = autosell_panel_rect();
     const UiRect mask = autosell_mask_rect(panel);
@@ -674,21 +665,19 @@ void autosell_panel_process() {
     ui_end_frame();
 }
 
-void autosell_panel_f3() {
+void autosell_panel_f3_impl() {
     AUTOSELLUI_LOG("panel f3 (terminate)");
     (void)autosell_destroy_panel_components();
     g_panel_active.store(false, std::memory_order_release);
-    g_close_delay = 0;
     g_toggle_pressed = false;
     g_pressed_target = {};
 }
 
-void autosell_panel_f4() {}
+void autosell_panel_f4_impl() {}
 
-uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
+uint32_t autosell_panel_event_impl(uint64_t event, uint64_t param, uint64_t param2) {
     (void)param2;
     if (!g_panel_active.load(std::memory_order_acquire) || param == 0) return 1;
-    if (g_close_delay > 0) return 1;
     if (event != 0x17 && event != 0x18) return 1;
     const UiRect panel = autosell_panel_rect();
     int64_t tx = 0;
@@ -745,8 +734,7 @@ uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
         if (released_inside) {
             if (pressed.kind == 1) {
                 autosell_save_before_back(nullptr);
-                AUTOSELLUI_LOG("back released -> save and close panel");
-                g_close_delay = 2;
+                AUTOSELLUI_LOG("back released -> save and request host back");
             } else if (pressed.kind == 2) {
                 g_draft.enabled = !g_draft.enabled;
             } else if (pressed.kind == 3 || pressed.kind == 4) {
@@ -756,8 +744,7 @@ uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
                 g_draft.special_mask ^= kSpecialBits[pressed.index];
             }
         }
-        if (pressed.kind != 0 && pressed.kind != 2 &&
-            !(pressed.kind == 1 && released_inside) && g_component_root != nullptr &&
+        if (pressed.kind != 0 && pressed.kind != 2 && g_component_root != nullptr &&
             g_ui_components != nullptr && g_ui_components->dispatch_native_event != nullptr) {
             uint32_t consumed = 0;
             (void)g_ui_components->dispatch_native_event(g_component_root, event, param,
@@ -770,6 +757,14 @@ uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
 }
 
 }  // namespace
+
+void autosell_panel_enter() { autosell_panel_enter_impl(); }
+void autosell_panel_process() { autosell_panel_process_impl(); }
+void autosell_panel_f3() { autosell_panel_f3_impl(); }
+void autosell_panel_f4() { autosell_panel_f4_impl(); }
+uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2) {
+    return autosell_panel_event_impl(event, param, param2);
+}
 
 // 复刻原 `bl UIDesc_Draw`，随后绘制入口按钮（独立于扩展背包绘制宿主）。
 // kCallPatch 站点 `patch:SCENE_DRAW_EQUIP+0x1cc` 的 handler（宿主安装时写入 BL）。
@@ -790,8 +785,8 @@ void autosell_ui_set_enabled(bool enabled) {
     }
     // 不从非游戏线程触碰入口控件；下次装备页绘制时禁用原有组件，不重建。
     // 面板正打开则请求关闭（弹栈后游戏会回调 f3 清理面板状态）。
-    if (g_panel_active.exchange(false, std::memory_order_acq_rel)) {
-        ui_set_popup_process_info(3, 0);
+    if (g_panel_active.load(std::memory_order_acquire)) {
+        autosell_request_panel_close();
         AUTOSELLUI_LOG("disabled -> panel close requested");
     }
 }
@@ -801,19 +796,18 @@ void autosell_ui_set_enabled(bool enabled) {
 bool autosell_provider_open() {
     // 与旧入口按钮点击同门禁：关闭态不得打开面板（含经 core.ui 面板栈打开）。
     if (!g_enabled.load(std::memory_order_acquire)) return false;
-    if (g_state_id < 0 || ui_api() == nullptr) {
-        AUTOSELLUI_LOG("provider open rejected: state not injected");
+    if (ui_api() == nullptr) {
+        AUTOSELLUI_LOG("provider open rejected: UI adapter unavailable");
         return false;
     }
-    AUTOSELLUI_LOG("provider open panel state=%d", g_state_id);
-    ui_set_popup_process_info(1, g_state_id);
+    AUTOSELLUI_LOG("provider open accepted");
     return true;
 }
 
 void autosell_provider_close() {
-    if (!g_panel_active.exchange(false, std::memory_order_acq_rel)) return;  // 幂等
-    ui_set_popup_process_info(3, 0);
-    AUTOSELLUI_LOG("provider close requested");
+    autosell_save_before_back(nullptr);
+    g_panel_active.store(false, std::memory_order_release);
+    AUTOSELLUI_LOG("provider closed by host");
 }
 
 bool autosell_provider_active() {
@@ -822,51 +816,6 @@ bool autosell_provider_active() {
 
 const char* autosell_provider_block_reason() {
     return nullptr;  // 现有实现无占用文案
-}
-
-// ============== own:popup.autosell（kOwnership）==============
-
-int32_t autosell_popup_acquire(const char* id) {
-    (void)id;
-    if (g_popup_entry.slot != nullptr) return 0;
-    const auto* sdk = host_sdk();
-    if (sdk == nullptr || sdk->hooks.popup_resolve == nullptr ||
-        sdk->hooks.popup_acquire == nullptr) {
-        AUTOSELLUI_LOG("popup.autosell: hook API unavailable");
-        return 1;
-    }
-    qol::contracts::QolPopupStateEntry entry{};
-    if (sdk->hooks.popup_resolve("F_PANEL_UNK3_ENTER", &entry).ok != kQolOk) {
-        AUTOSELLUI_LOG("popup.autosell: state entry (INAPP_HOT) not found");
-        return 1;
-    }
-    const qol::contracts::QolPopupStateHooks popup_hooks{
-        &autosell_panel_enter,
-        &autosell_panel_process,
-        &autosell_panel_f3,
-        &autosell_panel_f4,
-        &autosell_panel_event,
-    };
-    if (sdk->hooks.popup_acquire(&entry, &popup_hooks).ok != kQolOk) {
-        AUTOSELLUI_LOG("popup.autosell: acquire rejected");
-        return 1;
-    }
-    g_popup_entry = entry;
-    g_state_id = entry.state_id;
-    AUTOSELLUI_LOG("popup.autosell acquired: state id=%d", g_state_id);
-    return 0;
-}
-
-void autosell_popup_release(const char* id) {
-    (void)id;
-    if (g_popup_entry.slot != nullptr) {
-        const auto* sdk = host_sdk();
-        if (sdk != nullptr && sdk->hooks.popup_restore != nullptr) {
-            (void)sdk->hooks.popup_restore(&g_popup_entry);
-        }
-    }
-    g_state_id = -1;
-    AUTOSELLUI_LOG("popup.autosell released");
 }
 
 }  // namespace qol::features::autosell

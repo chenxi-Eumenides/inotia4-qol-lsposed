@@ -287,9 +287,8 @@ Java_com_inotia4_qol_NativeBridge_nativeInit(JNIEnv*, jclass) {
         // 任务完成度进档重算已迁移为 quest 插件（plugin.cpp install 注册 save_enter 回调），
         // 由 assembly_init 统一装配。
         // 帧缓存预取按 Store 的 apiEnabled 在 assembly/install 完成后启停，避免早于 builder 与 frame source。
-        // 设置页/备份面板/自动出售面板注入已迁移为插件：core.ui 的 own:popup.settings、
-        // save_backup 的 own:popup.savebackup 与 autosell 的 own:popup.autosell 及入口
-        // call patch 均由 assembly_init 经资源事务声明式安装（无 nativeInit 直调）。
+        // 设置页/备份面板/自动出售面板由插件提供 panel provider；PopupState 由 core.custom_ui
+        // 管理。core.ui 与 save_backup 声明 popup ownership，autosell 仅声明入口 call patch。
         // 世界传送已迁移为 world_teleport 插件：入口 patch 由插件 install 负责（assembly_init 装配）；
         // 选择框组件为独立插件 native_choice（provides `ui_choice`），消费者经能力契约获取。
         // 合成器界面层已迁移为 craft_ui 插件（assembly 注册，声明式安装 12 条 UIMix hook）；

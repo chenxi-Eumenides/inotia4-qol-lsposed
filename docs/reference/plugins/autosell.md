@@ -9,7 +9,7 @@
 ## 定位与版本
 
 - 插件 id `autosell`，版本 `0.1.0`（`plugins/autosell/plugin.cpp:35-36`）。
-- descriptor：`requires=6`、`optional_requires=3`、`provides=0`、`resources=2`、`jni=0`、`ports=1`、`features=1`、`http_route_metadata=2`（`plugin.cpp:283-306`）；`routes.inc` 两条（`plugins/autosell/routes.inc:1-2`）。
+- descriptor：`requires=6`、`optional_requires=3`、`provides=0`、`resources=1`、`jni=0`、`ports=1`、`features=1`、`http_route_metadata=2`（`plugin.cpp:283-306`）；`routes.inc` 两条（`plugins/autosell/routes.inc:1-2`）。
 - 注册于 `host/assembly.cpp:216`。
 - 文件规模：`plugin.cpp` 305 行、`config.cpp` 81、`read_only.cpp` 142、`view.cpp` 102、`rules.cpp` 109、`scan.cpp` 585、`scan_session.cpp` 58、`store.cpp` 704、`ui/panel.cpp` 862。
 - 稳定端口头：`contracts/autosell.h`（`Config`、`SpecialType`、运行时配置/持久化声明）。
@@ -56,7 +56,7 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 
 ### 配置面板
 
-- 通过 `own:popup.autosell` 占用 `PopupState` 死条目 `F_PANEL_UNK3_ENTER` 的五回调；`UI_SetPopupProcessInfo` 打开/关闭（`panel.cpp:896-937,868-892`）。
+- 面板 provider 携带 enter/process/f3/f4/event 回调；打开时由 `core.custom_ui` 的 `PopupHost` 接管共享 PopupState，统一负责占用、面板栈 push/pop 与空闲还原。插件只创建/销毁控件并处理回调，不直接选择游戏 popup 条目或调用 `UI_SetPopupProcessInfo`。
 - 面板使用 `core.custom_ui` 组件：主面板装饰框、装备/宝石无装饰角分组框、屏幕左上返回、屏幕右上 √/X 总开关、文本按钮规则/类别控件与缩放原生箭头（`panel.cpp`、`contracts/ui.h`）。
 - 规则项与档位：装备品质（关/≤白/≤绿/≤蓝/≤黄/≤紫）、装备强化耐久度（关/≤0..≤31）、装备总孔数（关/≤0..≤15）、宝石档位（关/≤低级..≤混沌）、宝石属性范围（关/≤30%/≤60%/≤75%/≤90%/≤99%）。
 - 面板编辑本地草稿 `g_draft`；左上返回释放时调用 `autosell_store_commit_config` 提交，过程中不即时生效；右上 √/X 切换 `enabled`。
@@ -65,8 +65,8 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 ### 自动扫描与出售
 
 - 主线程帧任务每 60 帧执行一次（`scan.h:17`、`scan.cpp:505-536`）。
-- 门禁顺序（`scan.cpp:505-536`）：feature 全局开启 → 存档 session（slot+epoch）活跃 → 存档配置 `enabled` → 世界/游戏状态与 UI 空闲（`scan.cpp:322-360`）。
-- 世界门禁：`world.facts.state == 5`；`game_state_gate != 0`；EB `module_view_installed()` 为假；`ui.state.read_layers` 中存在非 `none` 的面板/对话框层时视为 UI 占用（`scan.cpp:319-378`）。UI 门禁独立于 `extension_bag`；EB 能力不可用时物理袋继续扫描、逻辑袋 6..10 跳过。
+- 门禁顺序（`scan.cpp:523-554`）：feature 全局开启 → 存档 session（slot+epoch）活跃 → 存档配置 `enabled` → 世界/游戏状态与 UI 空闲。
+- 世界门禁：`world.facts.state == 5`；`game_state_gate != 0`；EB `module_view_installed()` 为假；`ui.state.read_layers` 仅当 `kPanel`/`kDialog` 类型层的 id 为 `inventory`（背包页）时视为 UI 占用。其他 UI 不阻塞扫描；此门禁独立于 `extension_bag`，EB 能力不可用时物理袋继续扫描、逻辑袋 6..10 跳过（`scan.cpp:323-345`）。
 - save-exit 会使 slot-data session 失效，下一次 `sd_load` 成功前配置写入被拒绝（`scan.cpp:612-617`、`store.cpp:609-650`）。
 - 每轮扫描在 tick 入口捕获取消纪元；关闭 feature、关闭存档配置或 save-exit 会递增纪元，扫描在下一个槽/下一笔出售前停止（`scan.cpp:505-536,539-547`）。已进入 `inventory.action.sell` 的单笔事务不中断。
 - 扫描范围：物理袋 0..4（inventory_extras port 遍历，任务袋 5 排除）；逻辑袋 6..10 仅在 EB `is_logical_bag` 为真时，经 `item.facts.item_ref_at` 逐槽读取，要求 provider 句柄、有效 handle 且 category>0（`scan.cpp:21-24,425-502`）。
@@ -89,12 +89,13 @@ JNI 面（`bridge/native/gamebridge_autosell.cpp`）：
 
 ### 资源 claim
 
-2 条常驻资源，`gate=nullptr`、`resumable=true`、`owner="autosell"`、`step_budget=120`（`plugin.cpp:100-129`）：
+1 条常驻资源，`gate=nullptr`、`resumable=true`、`owner="autosell"`、`step_budget=120`（`plugin.cpp`）：
 
 | id | mechanism | requirement / failure | handler |
 |---|---|---|---|
 | `patch:SCENE_DRAW_EQUIP+0x1cc` | `kCallPatch` | `kRequired` / `kFailClosed` | `autosell_equip_desc_draw_wrapper` |
-| `own:popup.autosell` | `kOwnership` | `kRequired` / `kFailSoft` | `kPopupOwnershipOps`（acquire/release 写回 PopupState） |
+
+PopupState 不属于 autosell 资源 claim；带 callbacks 的 provider 打开时由 `core.custom_ui` PopupHost 临时接管，关闭后按宿主空闲还原规则归还。
 
 ## 使用的 Host SDK 与 Game 面
 
@@ -116,7 +117,7 @@ optional capabilities（`plugin.cpp:53-60`）：
 
 port：`QOL_PORT_INVENTORY_EXTRAS` 1.0（`plugin.cpp:69-73`），仅用于物理袋 0..4 遍历（`scan.cpp:425-450`）。
 
-Host SDK：`log`、`scheduler`（扫描任务 + slot-data 重试任务）、`events`（save_enter/save_exit）、`capabilities`、`panels.register_provider/unregister_owner`、`hooks.popup_resolve/popup_acquire/popup_restore`、`ui` 适配面。
+Host SDK：`log`、`scheduler`（扫描任务 + slot-data 重试任务）、`events`（save_enter/save_exit）、`capabilities`、`panels.register_provider/unregister_owner/close`、`ui` 适配面。带 callbacks 的 provider 由 `core.custom_ui` PopupHost 在面板打开时托管 PopupState；空闲时还原。
 
 Game Host：`read_only.item.is_backpack_category`、`read_only.item.is_dice`（`read_only.cpp:68-78`）。
 
@@ -138,13 +139,13 @@ Game Host：`read_only.item.is_backpack_category`、`read_only.item.is_dice`（`
 - 持久化写路径：面板/JNI → `autosell_store_commit_config` → 更新运行时配置、递增 revision、置 dirty、`request_write`；无活动 session 或 session 未 load 时拒绝，不修改运行时配置（`store.cpp:609-650`）。
 - sidecar：section `autosell` v2、`SessionBound` 读、`Immediate` 写；load 前严格 JSON 校验与字段钳制；`(slot, epoch)` 双校验，过期回调不生效（`store.cpp:20-21,554-558`、`scan_session.cpp`）。
 - 重试：每 60 帧 `store_flush` 补发 dirty revision；完成回调只按 `captured_revision == revision` 清 dirty，不在回调内重入 provider API，更新 revision 留给 retry task（`store.cpp:192-223,349-383,479-501`）。
-- 生命周期：`install` 取 world.facts/item.facts/slot_data/ui.state，注册 save 回调、`apply_gate(true)`、注册面板 provider；失败回滚全局指针并返回 1（`plugin.cpp:203-229`）。`deactivate` 注销 slot-data participant、撤销面板 owner、注销 save 回调、清指针、`apply_gate(false)`、注销面板 provider（`plugin.cpp:231-252`）。`on_enabled` 重新获取四项能力并重注册 slot-data，失败保持门禁关闭；`on_disabled` 注销 slot-data 并清空缓存的 capability 指针（`plugin.cpp:254-269`）。
-- UI 门控：`g_enabled` 同时门控入口按钮与面板；关闭时移除入口引用并请求关闭面板（`panel.cpp:843-864`）。
+- 生命周期：`install` 取 world.facts/item.facts/slot_data/ui.state，注册 save 回调、`apply_gate(true)`、注册带 callbacks 的面板 provider；失败回滚全局指针并返回 1（`plugin.cpp:203-229`）。`deactivate` 注销 slot-data participant、撤销面板 owner、注销 save 回调、清指针、`apply_gate(false)`、注销面板 provider（`plugin.cpp:231-252`）。`on_enabled` 重新获取四项能力并重注册 slot-data，失败保持门禁关闭；`on_disabled` 注销 slot-data 并清空缓存的 capability 指针（`plugin.cpp:254-269`）。
+- UI 门控：`g_enabled` 同时门控入口按钮与面板；关闭时移除入口引用并经 `panels.close("autosell")` 请求宿主关闭面板（`ui/panel.cpp`）。
 
 ## 失败语义
 
 - 扫描门禁失败按原因节流记录：`global_disabled`、`session_inactive`、`config_disabled`、`world_unavailable`、`not_in_world`、`game_state_unavailable`、`game_state_blocked`、`module_view_installed`、`ui_busy`（`scan.cpp:86-130,505-536`）。物理袋遍历失败按错误码变化限速 WARN；`inventory.action` 能力或 `sell` 不可用时按状态变化限速 WARN（`scan.cpp:83-90,443-450,394-410`）。
-- 入口绘制资源为 `kFailClosed`：安装失败会阻止插件进入可用态；PopupState 占用为 `kFailSoft`，失败按整段快照写回策略处理（`plugin.cpp:100-129`）。
+- 入口绘制资源为 `kFailClosed`：安装失败会阻止插件进入可用态（`plugin.cpp`）。PopupState 只在面板打开期间由 `core.custom_ui` PopupHost 占用并在空闲时还原。
 - `install` 任一步失败返回 1，已获取的全局指针回滚；`register_provider` 失败同样返回 1（`plugin.cpp:187-213`）。
 - sidecar load 遇到 `kUnreadable`/`kVersionUnsupported` 返回错误；JSON 非法、超过 4096 字节或未来版本返回错误（`store.cpp:265-326`）。
 - 写请求失败时保留 dirty，由重试任务补发；unregister 失败会恢复 handle 并重新确保重试任务（`store.cpp:479-501,660-703`）。
@@ -154,7 +155,7 @@ Game Host：`read_only.item.is_backpack_category`、`read_only.item.is_dice`（`
 
 | 文件 | 事实位置 |
 |---|---|
-| `plugins/autosell/plugin.cpp` | `:35-36` id/version；`:38-52` requires；`:55-63` optional；`:65-76` 路由元数据/ports；`:84-97` 面板 provider/ownership；`:100-129` 资源；`:143-269` 能力获取/生命周期；`:275-306` feature/descriptor |
+| `plugins/autosell/plugin.cpp` | `:35-36` id/version；`:38-52` requires；`:55-63` optional；`:65-76` 路由元数据/ports；面板 provider callbacks；唯一资源为入口 call patch；`:143-269` 能力获取/生命周期；`:275-306` feature/descriptor |
 | `plugins/autosell/routes.inc` | `:1-2` 两条 HTTP 路由元数据 |
 | `plugins/autosell/rules.cpp` | `:10-112` 规则判定与硬保护 |
 | `plugins/autosell/config.cpp` | `:16-45` 配置快照/计数；`:57-81` 状态 JSON |
@@ -165,7 +166,7 @@ Game Host：`read_only.item.is_backpack_category`、`read_only.item.is_dice`（`
 | `plugins/autosell/scan.h` | `:17` 60 帧节拍；`:22-48` 生命周期接口 |
 | `plugins/autosell/store.h` | `:54-191` special 映射与 sidecar JSON；`:193-205` participant 接口 |
 | `plugins/autosell/store.cpp` | `:20-21` section v2；`:265-383` load/capture/complete；`:385-501` 写请求/重试；`:522-703` 注册/提交/注销 |
-| `plugins/autosell/ui/panel.cpp` | `:120-124` 入口常量；`:381-438` 入口点击/布局/锚定 ensure；`:577-764` 面板绘制/事件；`:766-770` 绘制宿主；`:791-862` PanelProvider 与 PopupState |
+| `plugins/autosell/ui/panel.cpp` | 入口常量与锚定按钮；面板绘制/事件及 PopupHost callbacks；provider open/close 与草稿持久化 |
 | `plugins/autosell/ui/panel.h` | 入口/面板接口声明 |
 | `contracts/autosell.h` | `:10-46` Config/SpecialType；运行时配置声明 |
 | `bridge/native/gamebridge_autosell.cpp` | `:26-88` 4 个 JNI 导出 |

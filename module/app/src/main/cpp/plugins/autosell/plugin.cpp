@@ -5,7 +5,6 @@
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/extension_bag.h"
 #include "../../contracts/inventory_action.h"
-#include "../../contracts/ownership.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/world_facts.h"
 #include "../../contracts/item_facts.h"
@@ -22,10 +21,10 @@
 // feature 开启（want_run）时安装，install/on_enabled 应用启用态、on_disabled/deactivate
 // 收回。per-save-slot 筛选配置仍走 save.slot_data，不进 module config。
 //
-// 资源（2 条，均常驻 gate=nullptr）：
+// 资源（1 条，常驻 gate=nullptr）：
 //   · patch:SCENE_DRAW_EQUIP+0x1cc（kCallPatch/kFailClosed）：背包页入口按钮绘制宿主；
-//   · own:popup.autosell（kOwnership/kFailSoft）：PopupState 死条目 F_PANEL_UNK3_ENTER 占用。
-// UI（入口按钮 + 面板）为插件自有 ui/panel.*，provider 登记到 infra/panels。
+// 面板通过 ui_panels 注册 provider，由 core.custom_ui 的 PopupHost 托管回调与 popup 生命周期。
+// UI（入口按钮 + 面板）为插件自有 ui/panel.*。
 //
 // 过渡依赖：save_enter/save_exit 事件仅维护扫描活动态；配置持久化经 save.slot_data；
 // 出售副作用由 inventory_hooks 提供的 inventory.action capability 承载。
@@ -85,6 +84,14 @@ const contracts::QolSlotDataApi* g_slot_data_api = nullptr;
 std::atomic<bool> g_gate{false};
 
 // 游戏内面板 provider：由 core.ui 容器经 ui_panels 打开/查询（panel_id="autosell"）。
+const contracts::PanelCallbacks kPanelCallbacks{
+    &autosell_panel_enter,
+    &autosell_panel_process,
+    &autosell_panel_f3,
+    &autosell_panel_f4,
+    &autosell_panel_event,
+};
+
 const contracts::PanelProviderSpec kPanelProvider = {
     "autosell",
     kPluginId,
@@ -92,15 +99,10 @@ const contracts::PanelProviderSpec kPanelProvider = {
     &autosell_provider_close,
     &autosell_provider_active,
     &autosell_provider_block_reason,
+    &kPanelCallbacks,
 };
 
-// own:popup.autosell 的 OwnershipOps：acquire/release 走 hooks/popup_state 原语。
-const contracts::OwnershipOps kPopupOwnershipOps{
-    &autosell_popup_acquire,
-    &autosell_popup_release,
-};
-
-// 2 条声明式资源（见文件头注释）：入口 call patch + PopupState 死条目占用。
+// 入口按钮绘制宿主由声明式 call patch 提供；PopupState 由 core.custom_ui 的 PopupHost 托管。
 const contracts::ResourceClaim kResources[] = {
     {
         "patch:SCENE_DRAW_EQUIP+0x1cc",  // id
@@ -115,20 +117,6 @@ const contracts::ResourceClaim kResources[] = {
         nullptr,                         // gate（常驻）
         120,                             // step_budget
         reinterpret_cast<void*>(&autosell_equip_desc_draw_wrapper),  // handler
-    },
-    {
-        "own:popup.autosell",  // id
-        "own:popup.autosell",  // symbol（kOwnership 不使用站点解析，保留 id 作诊断标识）
-        contracts::ResourceMechanism::kOwnership,
-        contracts::ResourcePolicy::kPrivate,
-        contracts::ResourceRequirement::kRequired,
-        contracts::ResourceFailure::kFailSoft,
-        true,                  // resumable
-        kPluginId,             // owner
-        "面板以 PopupState 死条目 F_PANEL_UNK3_ENTER 承载，需整段占用 5 回调并承诺写回快照",  // reason
-        nullptr,               // gate（常驻）
-        120,                   // step_budget
-        reinterpret_cast<void*>(const_cast<contracts::OwnershipOps*>(&kPopupOwnershipOps)),  // handler
     },
 };
 
@@ -287,14 +275,14 @@ const contracts::PluginDescriptor kDescriptor = {
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,  // optional=extension_bag + http.registry + ui_panels
     0, nullptr,   // provides
-    2, kResources,// resources（入口 call patch + own:popup.autosell）
+    1, kResources,// resources（背包入口 call patch）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_autosell.cpp 保留）
     &plugin_install,
     &plugin_deactivate,
     &plugin_on_enabled,
     &plugin_on_disabled,
     &plugin_fill_status,
-    nullptr,      // on_resource_ready（kCallPatch/kOwnership 无 backup）
+    nullptr,      // on_resource_ready（无 backup 交接）
     kPorts,
     1,
     nullptr, 0,

@@ -9,9 +9,8 @@
 //   Scene_Draw_POPUP_SC_EQUIP 内 `bl UIDesc_Draw`（+0x1cc）调用点的独立 BL patch，
 //   不与扩展背包占用的 `bl GRPX_End`（+0x210）冲突；该 patch 现为插件的声明式
 //   kCallPatch 资源（id=`patch:SCENE_DRAW_EQUIP+0x1cc`，handler=本文件的绘制 wrapper）。
-// - 面板：PopupState 死条目 F_PANEL_UNK3_ENTER 的五回调由 `own:popup.autosell`
-//   （kOwnership/kFailSoft）占用，`hooks/popup_state` 整段快照/写回；
-//   UI_SetPopupProcessInfo(1, id) 打开、(3, 0) 关闭；面板自绘并编辑配置草稿。
+// - 面板：通过 ui_panels 注册带回调的 provider，由 core.custom_ui 的 PopupHost 在打开时
+//   托管 PopupState；面板自绘并编辑配置草稿，关闭与返回由宿主面板栈处理。
 //
 // 开关门控：入口按钮与面板均由插件启用态（descriptor feature `autosell.auto_sell` 的
 // 运行态）门控，默认关闭；开启后下一次背包页绘制时安装按钮，关闭时移除入口引用、请求
@@ -35,8 +34,11 @@ void autosell_provider_close();
 bool autosell_provider_active();
 const char* autosell_provider_block_reason();
 
-// ---- own:popup.autosell（kOwnership）----
-int32_t autosell_popup_acquire(const char* id);
-void autosell_popup_release(const char* id);
+// ---- PopupHost 面板回调 ----
+void autosell_panel_enter();
+void autosell_panel_process();
+void autosell_panel_f3();
+void autosell_panel_f4();
+uint32_t autosell_panel_event(uint64_t event, uint64_t param, uint64_t param2);
 
 }  // namespace qol::features::autosell

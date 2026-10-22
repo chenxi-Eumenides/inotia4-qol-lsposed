@@ -1,5 +1,5 @@
 // plugins/autosell 插件清单/资源 host 单测：
-// 2 条声明式资源（入口 kCallPatch + own:popup.autosell kOwnership）的机制/门禁/handler，
+// 1 条声明式资源（入口 kCallPatch）的机制/门禁/handler，
 // 以及 install/deactivate 对 infra/panels provider 的登记/反登记。
 //
 // 本 target 只链接 plugin.cpp + infra/panels.cpp；UI/扫描/配置/事件实现以桩替代（真机验证）。
@@ -10,7 +10,6 @@
 #include <cstdio>
 #include <cstring>
 
-#include "contracts/ownership.h"
 #include "contracts/http.h"
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
@@ -20,6 +19,7 @@
 #include "contracts/ui.h"
 #include "contracts/game_ports/inventory_extras_port.h"
 #include "infra/panels.h"
+#include "plugins/autosell/ui/panel.h"
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -38,8 +38,11 @@ bool autosell_provider_open() { return false; }
 void autosell_provider_close() {}
 bool autosell_provider_active() { return false; }
 const char* autosell_provider_block_reason() { return nullptr; }
-int32_t autosell_popup_acquire(const char*) { return 0; }
-void autosell_popup_release(const char*) {}
+void autosell_panel_enter() {}
+void autosell_panel_process() {}
+void autosell_panel_f3() {}
+void autosell_panel_f4() {}
+uint32_t autosell_panel_event(uint64_t, uint64_t, uint64_t) { return 0; }
 
 }  // namespace qol::features::autosell
 
@@ -55,7 +58,6 @@ void autosell_store_unregister() {}
 
 namespace {
 
-using qol::contracts::OwnershipOps;
 using qol::contracts::ResourceFailure;
 using qol::contracts::ResourceMechanism;
 using qol::contracts::ResourceRequirement;
@@ -164,8 +166,8 @@ void test_manifest() {
     CHECK(std::strcmp(d.http_route_metadata[0].route_owner, "autosell") == 0);
     CHECK(d.http_route_metadata[0].op_required == 0 && d.http_route_metadata[0].lease_required == 1);
     CHECK(d.http_route_metadata[1].op_required == 0 && d.http_route_metadata[1].lease_required == 1);
-    CHECK(d.resources_count == 2);
-    CHECK(d.on_resource_ready == nullptr);  // kCallPatch/kOwnership 无 backup
+    CHECK(d.resources_count == 1);
+    CHECK(d.on_resource_ready == nullptr);  // kCallPatch 无 backup
     CHECK(d.port_count == 1 &&
           d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS);
 
@@ -180,17 +182,6 @@ void test_manifest() {
     CHECK(patch.handler ==
           reinterpret_cast<void*>(&qol::features::autosell::autosell_equip_desc_draw_wrapper));
 
-    const qol::contracts::ResourceClaim& popup = d.resources[1];
-    CHECK(std::strcmp(popup.id, "own:popup.autosell") == 0);
-    CHECK(popup.mechanism == ResourceMechanism::kOwnership);
-    CHECK(popup.requirement == ResourceRequirement::kRequired);
-    CHECK(popup.failure == ResourceFailure::kFailSoft);
-    CHECK(popup.gate == nullptr);
-    CHECK(popup.resumable);
-    const auto* ops = static_cast<const OwnershipOps*>(popup.handler);
-    CHECK(ops != nullptr);
-    CHECK(ops->acquire == &qol::features::autosell::autosell_popup_acquire);
-    CHECK(ops->release == &qol::features::autosell::autosell_popup_release);
 }
 
 void test_provider_registration() {
@@ -222,6 +213,12 @@ void test_provider_registration() {
     CHECK(provider->active == &qol::features::autosell::autosell_provider_active);
     CHECK(provider->block_reason == &qol::features::autosell::autosell_provider_block_reason);
     CHECK(provider->block_reason() == nullptr);
+    CHECK(provider->callbacks != nullptr);
+    CHECK(provider->callbacks->enter == &qol::features::autosell::autosell_panel_enter);
+    CHECK(provider->callbacks->process == &qol::features::autosell::autosell_panel_process);
+    CHECK(provider->callbacks->f3 == &qol::features::autosell::autosell_panel_f3);
+    CHECK(provider->callbacks->f4 == &qol::features::autosell::autosell_panel_f4);
+    CHECK(provider->callbacks->event == &qol::features::autosell::autosell_panel_event);
 
     qol::contracts::PluginStatusOut status{};
     d.fill_status(status);
