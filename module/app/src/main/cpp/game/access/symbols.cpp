@@ -21,6 +21,8 @@ struct HookEntrySymbol {
 constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_CHAR_ADD_DAMAGE_VMA", F_CHAR_ADD_DAMAGE_VMA},
     {"F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA", F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA},
+    // 教程文案抑制入口（owner=popup_blocker）：hook handler 短路原绘制函数并返回 0。
+    {"F_TUTORIAL_DESCRIPTION_VMA", F_TUTORIAL_DESCRIPTION_VMA},
     // 属性显示范围：详情渲染三点（MATH_GetRandom 截获 / 选项行改写 / 构造入口缓存）。
     {"F_MATH_GET_RANDOM_VMA", F_MATH_GET_RANDOM_VMA},
     {"F_UIDESC_ADD_OPTION_VMA", F_UIDESC_ADD_OPTION_VMA},

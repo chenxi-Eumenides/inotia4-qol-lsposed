@@ -22,6 +22,7 @@
 #include "game/access/symbols.h"
 #include "game/access/qol_log_seam.h"
 #include "game/access/world.h"
+#include "game/symbols/game_symbols.h"
 #include "game/adapter_ports/character_port.h"
 #include "game/state/game_state.h"
 #include "game/adapter_ports/character_extras_port.h"
@@ -863,11 +864,13 @@ int main() {
     // 声明式资源按名解析必须先登记到 game/access/symbols 的 hook 入口表：漏登记会让
     // entry-hook 资源静默返回 0，fail-closed 插件整体安装失败（依赖它的 settings 被 blocked）。
     {
-        std::vector<uint8_t> fake_game(0x14a6d8 + 16, 0);
+        std::vector<uint8_t> fake_game(F_TUTORIAL_DESCRIPTION_VMA + 16, 0);
         const uintptr_t saved_base = g_base;
         g_base = reinterpret_cast<uintptr_t>(fake_game.data());
         assert(qol::game::resolve_hook_entry("F_SCENE_DRAW_POPUP_SC_CHOICE_VMA", nullptr) ==
                g_base + 0x14a6d8);
+        assert(qol::game::resolve_hook_entry("F_TUTORIAL_DESCRIPTION_VMA", nullptr) ==
+               g_base + F_TUTORIAL_DESCRIPTION_VMA);
 
         qol::contracts::QolHostSdk seam_sdk{};
         seam_sdk.log.write = &seam_log_write;
