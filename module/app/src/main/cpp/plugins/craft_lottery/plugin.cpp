@@ -94,7 +94,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 }
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
-    {"craft_lottery.guarantee", 0, contracts::FeatureCategory::kGameplay,
+    {"craft_lottery.guarantee", 0, contracts::FeatureCategory::kBasicOptimization,
      contracts::FeatureType::kToggle, "合成套装保底", "合成套装抽奖未集齐时只抽未拥有的配方",
      [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
          if (enabled == 0) set_gate(false);

@@ -16,7 +16,7 @@
 
 | 项 | 声明 |
 |---|---|
-| feature | `craft_lottery.guarantee`：Gameplay / toggle / default false / priority -1，名称「合成套装保底」 |
+| feature | `craft_lottery.guarantee`：BasicOptimization / toggle / default false / priority -1，名称「合成套装保底」 |
 | requires / provides | 无 capability |
 | ports | `QOL_PORT_CRAFT_LOTTERY_WRITE` v1.0（install 校验 ABI 与函数齐备） |
 | resources | 1 条：`craft_lottery_process_recipe` entry hook @ `F_CHAR_PROCESS_RECIPE_VMA`，required/fail-closed/resumable |
