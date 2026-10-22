@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 #include "contracts/game_host.h"
@@ -27,13 +28,14 @@ enum class PatchKind : uint8_t {
 
 struct PatchSite {
     uintptr_t addr = 0;              // 运行期地址（g_base + VMA + 偏移）
-    uint32_t expected_word = 0;      // 原指令字（安装前校验）
+    uint32_t expected_word = 0;      // 精确白名单的主 expected 字
     uint32_t replacement_word = 0;   // kWordReplace 的替换字；BL 类为 0
     uintptr_t redirect_target = 0;   // kBlRedirectToSymbol：BL 目标绝对地址（其余为 0）
     PatchKind kind = PatchKind::kBlRedirect;
-    uint32_t alternate_expected_word = 0;
+    uint32_t alternate_expected_word = 0;  // branch-return 原语的既有备用 expected 字
     uintptr_t return_addr = 0;
     uint32_t tail_word = 0;
+    std::array<uint32_t, 2> word_replace_alternates{};  // 固定容量精确白名单；0 表示未登记
 };
 
 // 按登记名解析 patch 点；未登记或 g_base==0 → false。

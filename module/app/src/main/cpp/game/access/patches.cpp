@@ -1,5 +1,6 @@
 #include "game/access/patches.h"
 
+#include <array>
 #include <cstring>
 
 #include "game/symbols/game_symbols.h"
@@ -22,6 +23,7 @@ struct SiteEntry {
     uintptr_t target_vma = 0;
     uintptr_t return_vma = 0;
     uint32_t tail_word = 0;
+    std::array<uint32_t, 2> word_replace_alternates{};
 };
 
 constexpr SiteEntry kSites[] = {
@@ -158,6 +160,7 @@ bool patch_site(const char* name, PatchSite* out) {
     if (name == nullptr || out == nullptr) {
         return false;
     }
+    *out = PatchSite{};
     for (uint32_t i = 0; i < g_override_count; ++i) {
         if (std::strcmp(g_overrides[i].name, name) == 0) {
             *out = g_overrides[i].site;
@@ -177,6 +180,7 @@ bool patch_site(const char* name, PatchSite* out) {
         out->redirect_target = 0;
         out->kind = entry.kind;
         out->alternate_expected_word = 0;
+        out->word_replace_alternates = entry.word_replace_alternates;
         out->return_addr = entry.return_vma == 0 ? 0 :
             g_base + entry.vma + entry.return_vma;
         out->tail_word = entry.tail_word;

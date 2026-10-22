@@ -597,6 +597,103 @@ void test_install_word_at() {
     CHECK(error_is(install_word_at("patch:scan", 0, 0, 0), "site not found"));
 }
 
+bool fake_install_memory_word(uintptr_t addr, uint32_t expected_word, uint32_t new_word) {
+    ++g_prims.install_word_calls;
+    g_prims.last_addr = addr;
+    g_prims.last_expected = expected_word;
+    g_prims.last_new_word = new_word;
+    if (!g_prims.install_word_ok || addr == 0) return false;
+    uint32_t* const word = reinterpret_cast<uint32_t*>(addr);
+    if (*word != expected_word) return false;
+    *word = new_word;
+    return true;
+}
+
+bool fake_revert_memory_word(uintptr_t addr, uint32_t original_word) {
+    ++g_prims.revert_word_calls;
+    g_prims.last_addr = addr;
+    g_prims.last_expected = original_word;
+    if (!g_prims.revert_word_ok || addr == 0) return false;
+    *reinterpret_cast<uint32_t*>(addr) = original_word;
+    return true;
+}
+
+bool use_memory_word_primitives() {
+    const Primitives* current = qol::patch::primitives();
+    if (current == nullptr) return false;
+    Primitives memory_primitives = *current;
+    memory_primitives.install_word = &fake_install_memory_word;
+    memory_primitives.revert_word = &fake_revert_memory_word;
+    set_primitives(memory_primitives);
+    return true;
+}
+
+void test_word_replace_exact_whitelist_reentry() {
+    reset_all();
+    CHECK(use_memory_word_primitives());
+
+    constexpr const char* kSiteName = "P_TEST_WORD_REPLACE_WHITELIST";
+    constexpr uint32_t kExpected = 0x11223344u;
+    constexpr uint32_t kAlternate1 = 0x55667788u;
+    constexpr uint32_t kAlternate2 = 0x99aabbccu;
+    constexpr uint32_t kReplacement = 0xddeeff00u;
+    uint32_t storage = 0;
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(&storage);
+
+    PatchSite site{};
+    site.addr = addr;
+    site.expected_word = kExpected;
+    site.word_replace_alternates = {kAlternate1, kAlternate2};
+    site.replacement_word = kReplacement;
+    site.kind = qol::game::PatchKind::kWordReplace;
+    CHECK(qol::game::patch_site_override_for_test(kSiteName, site));
+    const ResourceClaim claim = make_patch_claim("patch:word-whitelist", kSiteName, nullptr);
+    const uint32_t accepted_words[] = {kExpected, kAlternate1, kAlternate2};
+
+    for (uint32_t original_word : accepted_words) {
+        storage = original_word;
+        const int installs_before = g_prims.install_word_calls;
+        CHECK(install_claim(claim, addr).ok == 0);
+        CHECK(storage == kReplacement);
+        CHECK(g_prims.install_word_calls == installs_before + 1);
+        CHECK(g_prims.last_expected == original_word);
+
+        uint32_t saved_word = 0;
+        CHECK(qol::patch::get_saved_word(addr, &saved_word));
+        CHECK(saved_word == original_word);
+        CHECK(install_claim(claim, addr).ok == 0);
+        CHECK(g_prims.install_word_calls == installs_before + 1);
+        CHECK(storage == kReplacement);
+        CHECK(point_owner(addr) != nullptr &&
+              std::strcmp(point_owner(addr), "patch:word-whitelist") == 0);
+        CHECK(qol::patch::get_saved_word(addr, &saved_word) && saved_word == original_word);
+
+        constexpr uint32_t kInconsistentWord = 0xa5a5a5a5u;
+        storage = kInconsistentWord;
+        const Outcome inconsistent = install_claim(claim, addr);
+        CHECK(inconsistent.ok != 0 && inconsistent.error != nullptr);
+        CHECK(g_prims.install_word_calls == installs_before + 1);
+        CHECK(point_owner(addr) != nullptr &&
+              std::strcmp(point_owner(addr), "patch:word-whitelist") == 0);
+        CHECK(qol::patch::get_saved_word(addr, &saved_word) && saved_word == original_word);
+
+        storage = kReplacement;
+        CHECK(release_claim(claim, addr).ok == 0);
+        CHECK(storage == original_word);
+        CHECK(g_prims.last_expected == original_word);
+        CHECK(point_owner(addr) == nullptr && claimed_count() == 0);
+    }
+
+    constexpr uint32_t kUnknownWord = 0xdeadbeefu;
+    const int installs_before_unknown = g_prims.install_word_calls;
+    storage = kUnknownWord;
+    const Outcome unknown = install_claim(claim, addr);
+    CHECK(unknown.ok != 0 && unknown.error != nullptr);
+    CHECK(storage == kUnknownWord);
+    CHECK(g_prims.install_word_calls == installs_before_unknown);
+    CHECK(point_owner(addr) == nullptr && claimed_count() == 0);
+}
+
 void test_kind_mismatch() {
     reset_all();
     // BL 点缺 handler。
@@ -931,6 +1028,7 @@ int main() {
     test_primitive_rejected_releases_claim();
     test_release_success();
     test_release_primitive_rejected_keeps_owner();
+    test_word_replace_exact_whitelist_reentry();
     test_ptr_slot_install_success();
     test_ptr_slot_site_and_handler_errors();
     test_ptr_slot_value_mismatch();

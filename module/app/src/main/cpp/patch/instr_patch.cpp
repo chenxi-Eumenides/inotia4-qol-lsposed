@@ -1,5 +1,7 @@
 #include "patch/instr_patch.h"
 
+#include <cstring>
+
 #include "game/access/patches.h"
 #include "infra/log/qol_log.h"
 #include "patch/claims.h"
@@ -57,6 +59,14 @@ bool resolve_site(const contracts::ResourceClaim& claim, uintptr_t site_addr,
     return true;
 }
 
+bool is_expected_word(const qol::game::PatchSite& site, uint32_t word) {
+    if (word == site.expected_word) return true;
+    for (uint32_t alternate_word : site.word_replace_alternates) {
+        if (alternate_word != 0 && word == alternate_word) return true;
+    }
+    return false;
+}
+
 }  // namespace
 
 void set_primitives(const Primitives& primitives) {
@@ -79,13 +89,37 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
         !bl_target_encodable(site.addr, site.redirect_target)) {
         return failure("branch target out of BL range");
     }
+    const bool has_alternate_words = site.word_replace_alternates[0] != 0 ||
+                                     site.word_replace_alternates[1] != 0;
+    const char* existing_owner = point_owner(site.addr);
+    const bool same_claim_already_owns_site =
+        existing_owner != nullptr && claim.id != nullptr &&
+        std::strcmp(existing_owner, claim.id) == 0;
+    if (same_claim_already_owns_site && site.kind == qol::game::PatchKind::kWordReplace &&
+        has_alternate_words) {
+        uint32_t saved_word = 0;
+        if (!get_saved_word(site.addr, &saved_word)) {
+            return failure("saved word missing");
+        }
+        const uint32_t current_word = *reinterpret_cast<const uint32_t*>(site.addr);
+        if (!is_expected_word(site, saved_word) || current_word != site.replacement_word) {
+            return failure("primitive rejected");
+        }
+        return Outcome{0, nullptr};
+    }
     if (!claim_point(site.addr, claim.id)) {
         return failure("point already claimed");
     }
-    const uint32_t observed_word =
-        site.kind == qol::game::PatchKind::kBranchRedirectWithReturn
-            ? *reinterpret_cast<const uint32_t*>(site.addr)
-            : site.expected_word;
+    uint32_t observed_word = site.expected_word;
+    if (site.kind == qol::game::PatchKind::kBranchRedirectWithReturn ||
+        (site.kind == qol::game::PatchKind::kWordReplace && has_alternate_words)) {
+        observed_word = *reinterpret_cast<const uint32_t*>(site.addr);
+    }
+    if (site.kind == qol::game::PatchKind::kWordReplace && has_alternate_words &&
+        !is_expected_word(site, observed_word)) {
+        release_point(site.addr);
+        return failure("primitive rejected");
+    }
 
     if (site.kind == qol::game::PatchKind::kBranchRedirect) {
         // B 尾调用：宿主在近址池分配 thunk 并把站点 B 改指 thunk，返回 thunk 运行期地址；
@@ -146,7 +180,7 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
                                           reinterpret_cast<void*>(site.redirect_target));
     } else {
         applied = g_primitives.install_word != nullptr &&
-                  g_primitives.install_word(site.addr, site.expected_word, site.replacement_word);
+                  g_primitives.install_word(site.addr, observed_word, site.replacement_word);
     }
     if (!applied) {
         // 未生效即撤销占用：否则失败安装会把地址锁死给新所有者。
