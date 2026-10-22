@@ -38,7 +38,9 @@ using UiEquipOkConfirmUseItemFn = void (*)(void*);
 using UiEquipButtonUseMercenarySealExeFn = void (*)(void*);
 using UiEquipOkDestroyItemFn = uint64_t (*)();
 using UiEquipEquipControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
+using CharUseItemExFn = int (*)(void*, void*, int);
 using CharProcessShortcutFn = int (*)(void*, int);
+using ShortcutGetStateFn = int (*)(void*, void*);
 using InvenSaveItemDirectFn = int (*)(void*, int32_t, int32_t);
 using ItemSystemDivideFn = void* (*)(void*, int32_t);
 using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
@@ -219,7 +221,9 @@ UiEquipButtonUseMercenarySealExeFn g_backup_button_use_mercenary_seal_exe = null
 // （弹窗展示金额），用 UiEquipOkDestroyItemFn（uint64_t()）捕获 x0。
 UiEquipOkDestroyItemFn g_backup_ok_destroy_item = nullptr;
 UiEquipEquipControlEventProcFn g_backup_equip_control_event_proc = nullptr;
+CharUseItemExFn g_backup_char_use_item_ex = nullptr;
 CharProcessShortcutFn g_backup_char_process_shortcut = nullptr;
+ShortcutGetStateFn g_backup_shortcut_get_state = nullptr;
 // S2 写侧进位框架新增 hook（H-18/H-19/H-20/H-21）的 backup。
 InvenSaveItemDirectFn g_backup_save_item_direct = nullptr;
 ItemSystemDivideFn g_backup_item_system_divide = nullptr;
@@ -228,6 +232,7 @@ InvenRemoveItemDataFn g_backup_remove_item_data = nullptr;
 
 std::atomic<uint64_t> g_consume_item_calls{0};
 std::atomic<uint64_t> g_remove_item_calls{0};
+std::atomic<uint64_t> g_shortcut_trace_calls{0};
 
 thread_local bool g_in_have_item = false;
 thread_local bool g_in_get_item_count = false;
@@ -235,6 +240,7 @@ thread_local bool g_in_is_having_empty_slot = false;
 thread_local bool g_in_consume_item = false;
 thread_local bool g_in_unequip_item_to_inven = false;
 thread_local bool g_in_remove_item = false;
+thread_local uint64_t g_active_shortcut_trace = 0;
 // R-55：UIEquip_ButtonDestroyExe 动态范围内（含其同步调用的 OKDestroyItem 预演）。
 thread_local bool g_in_equip_destroy_button = false;
 thread_local bool g_has_vanilla_sell_preview_context = false;
@@ -1631,6 +1637,17 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
                        g_backup_equip_control_event_proc, control, event, x2, param);
 }
 
+struct ShortcutTraceScope {
+    uint64_t previous;
+
+    explicit ShortcutTraceScope(uint64_t trace_id)
+        : previous(g_active_shortcut_trace) {
+        g_active_shortcut_trace = trace_id;
+    }
+
+    ~ShortcutTraceScope() { g_active_shortcut_trace = previous; }
+};
+
 int char_process_shortcut_wrapper(void* character, int shortcut) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -1639,11 +1656,60 @@ int char_process_shortcut_wrapper(void* character, int shortcut) {
         backup_missing("hook:CHAR_ProcessShortcut");
         return 0;
     }
-    const int result = g_backup_char_process_shortcut(character, shortcut);
-    if (inventory_log_debug_enabled()) {
+    const bool trace_enabled = shortcut >= 0 && inventory_log_debug_enabled();
+    const uint64_t trace_id = trace_enabled
+                                  ? g_shortcut_trace_calls.fetch_add(1, std::memory_order_relaxed) + 1
+                                  : 0;
+    const ShortcutTraceScope trace_scope(trace_id);
+    if (trace_enabled) {
         inventory_log_write(0, __FILE__, __LINE__,
-                            "CHAR_ProcessShortcut character=%p shortcut=%d result=%d",
-                            character, shortcut, result);
+                            "CHAR_ProcessShortcut begin trace=%llu character=%p shortcut=%d",
+                            static_cast<unsigned long long>(trace_id), character, shortcut);
+    }
+    const int result = g_backup_char_process_shortcut(character, shortcut);
+    if (trace_enabled) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "CHAR_ProcessShortcut end trace=%llu character=%p shortcut=%d result=%d",
+                            static_cast<unsigned long long>(trace_id), character, shortcut,
+                            result);
+    }
+    return result;
+}
+
+int shortcut_get_state_wrapper(void* character, void* shortcut_state) {
+    const qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"hook:SHORTCUT_GetState"});
+    if (g_backup_shortcut_get_state == nullptr) {
+        backup_missing("hook:SHORTCUT_GetState");
+        return 0;
+    }
+    const int state = g_backup_shortcut_get_state(character, shortcut_state);
+    const uint64_t trace_id = g_active_shortcut_trace;
+    if (trace_id != 0 && inventory_log_debug_enabled()) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "SHORTCUT_GetState trace=%llu character=%p state_object=%p result=%d",
+                            static_cast<unsigned long long>(trace_id), character, shortcut_state,
+                            state);
+    }
+    return state;
+}
+
+int char_use_item_ex_wrapper(void* character, void* item, int flag) {
+    const qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"hook:CHAR_UseItemEx"});
+    if (g_backup_char_use_item_ex == nullptr) {
+        backup_missing("hook:CHAR_UseItemEx");
+        return 0;
+    }
+    const int result = g_backup_char_use_item_ex(character, item, flag);
+    const uint64_t trace_id = g_active_shortcut_trace;
+    if (trace_id != 0 && inventory_log_debug_enabled()) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "CHAR_UseItemEx trace=%llu character=%p item=%p flag=%d result=%d",
+                            static_cast<unsigned long long>(trace_id), character, item, flag,
+                            result);
     }
     return result;
 }
@@ -1674,6 +1740,20 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
      qol::contracts::ResourceFailure::kFailSoft, true, kClaimOwner,
      "shortcut-use diagnosis: log arguments/result and transparently call the original",
      nullptr, 120, reinterpret_cast<void*>(&char_process_shortcut_wrapper)},
+    {"hook:SHORTCUT_GetState", "F_SHORTCUT_GET_STATE_VMA",
+     qol::contracts::ResourceMechanism::kEntryHook,
+     qol::contracts::ResourcePolicy::kPrivate,
+     qol::contracts::ResourceRequirement::kOptional,
+     qol::contracts::ResourceFailure::kFailSoft, true, kClaimOwner,
+     "shortcut-use diagnosis: log state only during CHAR_ProcessShortcut",
+     nullptr, 120, reinterpret_cast<void*>(&shortcut_get_state_wrapper)},
+    {"hook:CHAR_UseItemEx", "F_CHAR_USE_ITEM_EX_VMA",
+     qol::contracts::ResourceMechanism::kEntryHook,
+     qol::contracts::ResourcePolicy::kPrivate,
+     qol::contracts::ResourceRequirement::kOptional,
+     qol::contracts::ResourceFailure::kFailSoft, true, kClaimOwner,
+     "shortcut-use diagnosis: log dispatch only during CHAR_ProcessShortcut",
+     nullptr, 120, reinterpret_cast<void*>(&char_use_item_ex_wrapper)},
     INVENTORY_HOOK_CLAIM("hook:INVEN_FindItem", "F_FIND_ITEM_VMA", find_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:INVEN_HaveItem", "F_INVEN_HAVE_ITEM_VMA", have_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:INVEN_GetItemCount", "F_INVEN_GET_ITEM_COUNT_VMA",
@@ -1749,7 +1829,9 @@ void** backup_slot_for_handler(void* handler) {
     BACKUP_SLOT(move_item_wrapper, g_backup_move_item);
     BACKUP_SLOT(equip_control_event_proc_wrapper, g_backup_equip_control_event_proc);
     BACKUP_SLOT(refresh_item_area_wrapper, g_backup_refresh_item_area);
+    BACKUP_SLOT(char_use_item_ex_wrapper, g_backup_char_use_item_ex);
     BACKUP_SLOT(char_process_shortcut_wrapper, g_backup_char_process_shortcut);
+    BACKUP_SLOT(shortcut_get_state_wrapper, g_backup_shortcut_get_state);
     BACKUP_SLOT(save_item_direct_wrapper, g_backup_save_item_direct);
     BACKUP_SLOT(item_system_divide_wrapper, g_backup_item_system_divide);
     BACKUP_SLOT(make_item_wrapper, g_backup_make_item);
@@ -1803,9 +1885,11 @@ int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
         void** slot = backup_slot_for_handler(claim.handler);
         if (slot == nullptr) return 1;
         *slot = backup;
-        if (std::strcmp(claim.id, "hook:CHAR_ProcessShortcut") == 0) {
+        if (std::strcmp(claim.id, "hook:CHAR_ProcessShortcut") == 0 ||
+            std::strcmp(claim.id, "hook:SHORTCUT_GetState") == 0 ||
+            std::strcmp(claim.id, "hook:CHAR_UseItemEx") == 0) {
             QOL_LOG_INFO(QolDomain::kInventory,
-                         "CHAR_ProcessShortcut diagnostic hook bound backup=%p", backup);
+                         "%s diagnostic hook bound backup=%p", claim.id, backup);
         }
         return 0;
     }

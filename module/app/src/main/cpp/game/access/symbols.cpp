@@ -57,7 +57,9 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_CAN_UNEQUIP_VMA", F_CAN_UNEQUIP_VMA},
     // 库存行为域入口 hook（owner=core.item，B2a-1 声明式化）：库存 wrapper 与快捷键
     // 诊断 wrapper 的挂载点；handler 在 plugins/core.item/inventory/native_inventory_hook.cpp 取址。
+    {"F_CHAR_USE_ITEM_EX_VMA", F_CHAR_USE_ITEM_EX_VMA},
     {"F_CHAR_PROCESS_SHORTCUT_VMA", F_CHAR_PROCESS_SHORTCUT_VMA},
+    {"F_SHORTCUT_GET_STATE_VMA", F_SHORTCUT_GET_STATE_VMA},
     {"F_FIND_ITEM_VMA", F_FIND_ITEM_VMA},
     {"F_INVEN_HAVE_ITEM_VMA", F_INVEN_HAVE_ITEM_VMA},
     {"F_INVEN_GET_ITEM_COUNT_VMA", F_INVEN_GET_ITEM_COUNT_VMA},

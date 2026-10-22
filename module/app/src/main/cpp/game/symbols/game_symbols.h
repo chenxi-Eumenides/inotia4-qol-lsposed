@@ -703,8 +703,9 @@ constexpr uintptr_t F_CHAR_IS_ACTIVE_PLAYER_GROUP_VMA = 0xe6d1c;   // int32 (voi
 // 用于补齐「队友的召唤物」这一归属缺口（前两个原语都不覆盖）。纯读、无写回副作用。
 constexpr uintptr_t F_CHAR_GET_SUMMONER_VMA = 0xdb730;   // void* (void* ch)
 constexpr uintptr_t F_CONSUME_ITEM_VMA = 0x1047bc;     // void (void*) 消耗 1 个（使用药水/卷轴）
-constexpr uintptr_t F_CHAR_USE_ITEM_EX_VMA = 0xeb670;  // void (void* ch, void* item, int flag) 物品效果分派核心
+constexpr uintptr_t F_CHAR_USE_ITEM_EX_VMA = 0xeb670;  // int (void* ch, void* item, int flag) 物品效果分派核心
 constexpr uintptr_t F_CHAR_PROCESS_SHORTCUT_VMA = 0xec028; // int (void* ch, int shortcut) 快捷栏处理
+constexpr uintptr_t F_SHORTCUT_GET_STATE_VMA = 0x121b80;  // int (void* character, void* shortcut)
 constexpr uintptr_t F_REMOVE_ITEM_DIRECT_VMA = 0x103fd8; // int (int32 bag, int32 slot) 按槽删物品；返回值不可信（v0.6.15 真机实测：删除成功仍返回 0），成功判定必须用删后槽位读取验证（与 data_op_discard_item 一致）
 constexpr uintptr_t F_INCLUDE_PARTY_VMA = 0x118e04;    // int (void*) 佣兵入队（内部校验）
 constexpr uintptr_t F_EXCLUDE_PARTY_VMA = 0x118d0c;    // int (void*) 佣兵离队
