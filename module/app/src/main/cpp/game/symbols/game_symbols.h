@@ -421,6 +421,9 @@ constexpr uintptr_t G_ITEMMIXLINKBASE_N_RECORD_COUNT_VMA = 0x301a6a; // ITEMMIXL
 constexpr uintptr_t G_ITEMDATABASE_DATA_VMA = 0x301a80;  // ITEMDATABASE 数据指针全局（void*）；记录 u16[0] = 物品 id = 名称文本 id（导出表 TEXT_ID_FIELDS 已验证）
 constexpr uintptr_t G_ITEMDATABASE_N_RECORD_SIZE_VMA = 0x301a88; // ITEMDATABASE 记录大小全局（u8）
 constexpr uintptr_t G_ITEMDATABASE_N_RECORD_COUNT_VMA = 0x301a8a; // ITEMDATABASE 记录数全局（u16）
+constexpr uintptr_t G_TEXTDATABASE_DATA_VMA = 0x3016b0;  // TEXTDATABASE 数据指针全局（void*）；recsize=2 的纯 u16 文本 id 表
+constexpr uintptr_t G_TEXTDATABASE_N_RECORD_SIZE_VMA = 0x3016b8; // TEXTDATABASE 记录大小全局（u8）
+constexpr uintptr_t G_TEXTDATABASE_N_RECORD_COUNT_VMA = 0x3016ba; // TEXTDATABASE 记录数全局（u16）
 constexpr uintptr_t G_MIXTUREBASE_DATA_VMA = 0x3019a0;  // MIXTUREBASE 基址指针全局（void*，原 GOT 0x2f6a98）
 constexpr uintptr_t G_MIXTUREBASE_SIZE_VMA = 0x3019a8;  // MIXTUREBASE 记录大小全局（u8，原 GOT 0x2f4898）
 

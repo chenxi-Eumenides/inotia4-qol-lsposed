@@ -238,6 +238,35 @@ bool read_item_database_table(const uint8_t** out_data, uint8_t* out_record_size
     return true;
 }
 
+bool read_text_database_table(const uint8_t** out_data, uint8_t* out_record_size,
+                              uint16_t* out_record_count) {
+    if (out_data == nullptr || out_record_size == nullptr || out_record_count == nullptr ||
+        g_base == 0) {
+        return false;
+    }
+
+    auto* data_slot = reinterpret_cast<void**>(g_base + G_TEXTDATABASE_DATA_VMA);
+    auto* size_slot = reinterpret_cast<uint8_t*>(g_base + G_TEXTDATABASE_N_RECORD_SIZE_VMA);
+    auto* count_slot = reinterpret_cast<uint16_t*>(g_base + G_TEXTDATABASE_N_RECORD_COUNT_VMA);
+    if (!game_memory_accessible(data_slot, sizeof(*data_slot), 'r') ||
+        !game_memory_accessible(size_slot, sizeof(*size_slot), 'r') ||
+        !game_memory_accessible(count_slot, sizeof(*count_slot), 'r')) {
+        return false;
+    }
+
+    const auto* data = static_cast<const uint8_t*>(*data_slot);
+    const uint8_t record_size = *size_slot;
+    const uint16_t record_count = *count_slot;
+    if (data == nullptr || record_size < sizeof(uint16_t)) return false;
+    const size_t table_size = static_cast<size_t>(record_size) * record_count;
+    if (table_size != 0 && !game_memory_accessible(data, table_size, 'r')) return false;
+
+    *out_data = data;
+    *out_record_size = record_size;
+    *out_record_count = record_count;
+    return true;
+}
+
 size_t bounded_length(const char* text, size_t cap) {
     size_t length = 0;
     while (length < cap && text[length] != '\0') ++length;
@@ -265,8 +294,19 @@ QolResult show_recipe_popup(uint16_t recipe_idx, uint32_t use_type, const char* 
         return not_ready();
     }
 
-    const uint16_t format_text_id = read_u16(
-        recipe_data + static_cast<size_t>(record_size) * kRecipePopupFormatRecord);
+    // 弹窗格式串：TEXTDATABASE[17] 首 u16（=35333「[%s]的配方已登录到融合器中。」）。
+    // 原版 CHAR_ProcessRecipe 第一处读的就是 TEXTDATABASE（recsize=2），不是 RECIPEBASE；
+    // RECIPEBASE[17].u16[0]=1168 是配方名（「安格巴德的剑」），误用会导致第一行只剩配方名。
+    uint16_t format_text_id = 0;
+    const uint8_t* text_data = nullptr;
+    uint8_t text_record_size = 0;
+    uint16_t text_record_count = 0;
+    if (!read_text_database_table(&text_data, &text_record_size, &text_record_count) ||
+        kRecipePopupFormatRecord >= text_record_count) {
+        return not_ready();
+    }
+    format_text_id = read_u16(text_data +
+                              static_cast<size_t>(text_record_size) * kRecipePopupFormatRecord);
     const uint16_t name_text_id =
         read_u16(recipe_data + static_cast<size_t>(record_size) * recipe_idx);
     const char* format_text = fn_memorytext_get_text(format_text_id);

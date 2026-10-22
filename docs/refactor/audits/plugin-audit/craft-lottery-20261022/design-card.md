@@ -23,7 +23,7 @@ idea.md 第 8 项「合成器任务抽奖」：合成器（融合器）任务奖
 3. **降级语义 fail-soft**：gate 关闭、backup 缺失、port 异常、池空、判定失败等一律直通原版（行为回到原版纯随机+原版弹窗），不阻断游戏链路。
 4. **插件零裸地址**：表读取、位图判定、原版函数调用全部经新 port `QOL_PORT_CRAFT_LOTTERY_WRITE` v1.0（Game Adapter 内实现）；插件只做业务判定。
 5. **X/N 计算**：入书前统计已学数 learned_before；本次选中配方原本未学则 X=learned_before+1，否则 X 不变（重复抽取情形）；N=池大小。文案「已获得 %u/%u」UTF-8 常量。
-6. **追加行格式**：第一行原版「[xxx]的配方已登录到融合器中。」不动；第二行「&N{套装名}已获得：x/y」——套装名由 port 读 `ITEMDATABASE[use_type]` 首 u16（物品 id 与名称文本 id 同域同值，导出表 `TEXT_ID_FIELDS` 与 `text/zh-Hans.json` id 736-747 已验证）经 `MEMORYTEXT_GetText` 补入；「已获得：x/y」为插件 UTF-8 常量。
+6. **追加行格式**：第一行原版「[xxx]的配方已登录到融合器中。」不动——fmt 读 `TEXTDATABASE[17]` 首 u16（=35333「[%s]的配方已登录到融合器中。」；原版第一处读的就是 TEXTDATABASE recsize=2 表，RECIPEBASE[17].u16[0]=1168 是配方名，不可混用）；配方名读 `RECIPEBASE[idx].u16[0]`。第二行「&N{套装名}已获得：x/y」——套装名由 port 读 `ITEMDATABASE[use_type]` 首 u16（物品 id 与名称文本 id 同域同值，导出表 `TEXT_ID_FIELDS` 与 `text/zh-Hans.json` id 736-747 已验证）；「已获得：x/y」为插件 UTF-8 常量。
 7. **配方书状态零自建**：跟随游戏原生配方书（存档内），多存档天然隔离；插件不持久化任何数据。
 
 ## 4. 实现位置

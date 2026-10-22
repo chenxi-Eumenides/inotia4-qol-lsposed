@@ -7,7 +7,7 @@
 | 全量 Host CTest | **153/153 PASS** | `.tmp/craft-lottery-20261022/host-ctest.log` |
 | check_arch | offsets / jni / resources 全绿；check_layers 仅既有 `custom_map` 6 条越层（commit 5140b0af，与本批无关） | `.tmp/craft-lottery-20261022/check-arch.log` |
 | git diff --check | clean | 同上目录 |
-| Debug 构建 | BUILD SUCCESSFUL，APK `output/inotia4_qol_lsposed_debug_2610230158_2c46a664c644.apk`，SHA-256 `2c46a664c64442faaf9ce9e486a1d317d7a26a599c6bf3da1200f9ddd0515d7d`（2026-10-23 追加行格式修正后复验：CTest 153/153、check_arch 除既有 custom_map 外全绿） | `.tmp/craft-lottery-20261022/{build-debug.log,check-arch-r2.log}` |
+| Debug 构建 | BUILD SUCCESSFUL，APK `output/inotia4_qol_lsposed_debug_2610230423_f178a07523d2.apk`，SHA-256 `f178a07523d21a9927894366b0675673d59b87fd431387af43a6e007a07f62c2`（2026-10-23 两轮修正后：①追加行「{套装名}已获得：x/y」；②弹窗 fmt 改读 TEXTDATABASE[17]=35333——真机反馈第一行只显示配方名，根因 RECIPEBASE[17].u16[0]=1168 是配方名而非格式串；全量 CTest 154/154 复跑通过） | `.tmp/craft-lottery-20261022/{build-debug.log,check-arch-r2.log}` |
 
 ## 2. 逆向依据（静态）
 
