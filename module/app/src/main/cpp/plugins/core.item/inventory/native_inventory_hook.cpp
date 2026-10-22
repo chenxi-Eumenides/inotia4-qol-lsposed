@@ -567,39 +567,67 @@ int have_item_wrapper(int32_t category) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_HaveItem"});
-    if (!inventory_native_hook_support_enabled())
-        return call_backup("hook:INVEN_HaveItem", g_backup_have_item, category);
+    if (!inventory_native_hook_support_enabled()) {
+        const int result = call_backup("hook:INVEN_HaveItem", g_backup_have_item, category);
+        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+                            "INVEN_HaveItem category=%d result=%d branch=support_disabled",
+                            category, result);
+        return result;
+    }
     if (g_backup_have_item == nullptr) {
         backup_missing("hook:INVEN_HaveItem");
         return 0;
     }
     const qol::contracts::ExtensionBagApi* eb = eb_active();
     if (eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active()) {
-        return stage4_have_item_original_only(category, g_backup_have_item, g_in_have_item);
+        const int result = stage4_have_item_original_only(category, g_backup_have_item,
+                                                          g_in_have_item);
+        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+                            "INVEN_HaveItem category=%d result=%d branch=original_only",
+                            category, result);
+        return result;
     }
-    return stage4_have_item(category, g_backup_have_item,
-                            eb != nullptr ? extension_item_count : nullptr,
-                            g_in_have_item);
+    const int result = stage4_have_item(category, g_backup_have_item,
+                                        eb != nullptr ? extension_item_count : nullptr,
+                                        g_in_have_item);
+    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+                        "INVEN_HaveItem category=%d result=%d branch=original_plus_extension",
+                        category, result);
+    return result;
 }
 
 int get_item_count_wrapper(int32_t category) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_GetItemCount"});
-    if (!inventory_native_hook_support_enabled())
-        return call_backup("hook:INVEN_GetItemCount", g_backup_get_item_count, category);
+    if (!inventory_native_hook_support_enabled()) {
+        const int result = call_backup("hook:INVEN_GetItemCount", g_backup_get_item_count,
+                                       category);
+        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+                            "INVEN_GetItemCount category=%d result=%d branch=support_disabled",
+                            category, result);
+        return result;
+    }
     if (g_backup_get_item_count == nullptr) {
         backup_missing("hook:INVEN_GetItemCount");
         return 0;
     }
     const qol::contracts::ExtensionBagApi* eb = eb_active();
     if (eb != nullptr && eb->native_call_active != nullptr && eb->native_call_active()) {
-        return stage4_get_item_count_original_only(category, g_backup_get_item_count,
-                                                   g_in_get_item_count);
+        const int result = stage4_get_item_count_original_only(category, g_backup_get_item_count,
+                                                               g_in_get_item_count);
+        QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+                            "INVEN_GetItemCount category=%d result=%d branch=original_only",
+                            category, result);
+        return result;
     }
-    return stage4_get_item_count(category, g_backup_get_item_count,
-                                 eb != nullptr ? extension_item_count : nullptr,
-                                 g_in_get_item_count);
+    const int result = stage4_get_item_count(category, g_backup_get_item_count,
+                                             eb != nullptr ? extension_item_count : nullptr,
+                                             g_in_get_item_count);
+    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
+                        "INVEN_GetItemCount category=%d result=%d branch=original_plus_extension",
+                        category, result);
+    return result;
 }
 
 // S2 读侧统一入口（R-49）：原版 getter 只见 b 段（bits25–31），本 wrapper 对
@@ -685,16 +713,19 @@ void consume_item_wrapper(void* item) {
         return;
     }
     const uint64_t call = g_consume_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
-    QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
-                            "ConsumeItem every_calls=60 call=%llu item=%p recursive=%d backup=%p",
-                        static_cast<unsigned long long>(call), item,
-                        g_in_consume_item ? 1 : 0,
-                        reinterpret_cast<void*>(g_backup_consume_item));
     int extension_bag = -1;
     int extension_slot = -1;
     const qol::contracts::ExtensionBagApi* eb = eb_active();
     const bool extension_item = eb != nullptr &&
                                 identify_extension_item(item, &extension_bag, &extension_slot);
+    if (inventory_log_debug_enabled()) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "INVEN_ConsumeItem call=%llu item=%p extension=%d bag=%d slot=%d "
+                            "recursive=%d backup=%p",
+                            static_cast<unsigned long long>(call), item, extension_item ? 1 : 0,
+                            extension_bag, extension_slot, g_in_consume_item ? 1 : 0,
+                            reinterpret_cast<void*>(g_backup_consume_item));
+    }
     if (!extension_item && g_backup_consume_item == nullptr) {
         backup_missing("hook:INVEN_ConsumeItem");
         return;
@@ -775,6 +806,14 @@ void consume_item_wrapper(void* item) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "ConsumeItem extension consume failed bag=%d slot=%d item=%p",
                             extension_bag, extension_slot, item);
+    }
+    if (inventory_log_debug_enabled()) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "INVEN_ConsumeItem call=%llu dispatched=%d extension=%d bag=%d "
+                            "slot=%d s2_borrow=%d",
+                            static_cast<unsigned long long>(call), dispatched ? 1 : 0,
+                            extension_item ? 1 : 0, extension_bag, extension_slot,
+                            s2_borrow_armed ? 1 : 0);
     }
     return;
 }

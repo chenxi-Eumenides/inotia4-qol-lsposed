@@ -5,6 +5,7 @@
 #include "game/access/item_class.h"
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
+#include "game/access/qol_log_seam.h"
 
 #include <cstring>
 
@@ -17,6 +18,17 @@ constexpr const char* kNotReady = "inventory not ready";
 
 contracts::QolFindItemAbiFn g_find_item_backup = nullptr;
 thread_local uint32_t g_original_only_depth = 0;
+
+void log_find_item_debug(int32_t category, const char* source, void* item,
+                         int32_t provider_code, uint32_t handle_slot = 0,
+                         uint32_t handle_generation = 0, int32_t resolve_error = 0) {
+    if (!qol_seam_debug_enabled()) return;
+    qol_seam_write(kQolLogLevelDebug, kQolLogDomainInventory, __FILE__, __LINE__,
+                   "INVEN_FindItem category=%d source=%s item=%p provider_code=%d "
+                   "handle=%u/%u resolve_error=%d original_only=%u",
+                   category, source, item, provider_code, handle_slot, handle_generation,
+                   resolve_error, g_original_only_depth != 0 ? 1u : 0u);
+}
 
 QolResult error_result(int32_t code, const char* message) {
     return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -85,17 +97,27 @@ bool bridge_bag_slot(void* item, int bag, int slot, void* context) {
 
 void* game_inventory_find_item_hook(int32_t category) {
     const contracts::QolFindItemAbiFn backup = g_find_item_backup;
-    if (backup == nullptr) return nullptr;
+    if (backup == nullptr) {
+        log_find_item_debug(category, "backup_missing", nullptr, 0);
+        return nullptr;
+    }
     void* original = backup(category);
     if (original != nullptr) {
         // The pointer remains inside this ABI wrapper and is returned only to the game caller.
         (void)register_item(original, contracts::kQolItemHandleOwnerGame);
+        log_find_item_debug(category, "original", original, 0);
         return original;
     }
-    if (g_original_only_depth != 0) return nullptr;
+    if (g_original_only_depth != 0) {
+        log_find_item_debug(category, "original_only_miss", nullptr, 0);
+        return nullptr;
+    }
     const contracts::QolInventoryExtensionProvider* provider =
         inventory_extension_provider_if_resident();
-    if (provider == nullptr || provider->for_each_item == nullptr) return nullptr;
+    if (provider == nullptr || provider->for_each_item == nullptr) {
+        log_find_item_debug(category, "provider_unavailable", nullptr, 0);
+        return nullptr;
+    }
     struct FindContext {
         int32_t category;
         contracts::QolItemHandle item;
@@ -109,10 +131,17 @@ void* game_inventory_find_item_hook(int32_t category) {
             return 1;
         },
         &context);
-    if (!contracts::succeeded(result) || context.item.slot == 0) return nullptr;
+    if (!contracts::succeeded(result) || context.item.slot == 0) {
+        log_find_item_debug(category, "extension_miss", nullptr, result.code);
+        return nullptr;
+    }
     const ItemHandleResolution resolved =
         item_handle_registry().resolve_item(context.item, contracts::kQolItemHandleOwnerAny);
-    return resolved.error == ItemHandleError::kNone ? resolved.item : nullptr;
+    void* item = resolved.error == ItemHandleError::kNone ? resolved.item : nullptr;
+    log_find_item_debug(category, item != nullptr ? "extension_hit" : "extension_stale",
+                        item, result.code, context.item.slot, context.item.generation,
+                        static_cast<int32_t>(resolved.error));
+    return item;
 }
 
 QolResult game_inventory_bind_find_item_backup(contracts::QolFindItemAbiFn backup) {
