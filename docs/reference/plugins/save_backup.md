@@ -31,14 +31,14 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 
 | 面 | 内容 |
 |---|---|
-| required capabilities | `ui_panels` 1.3、`ui_components`、`world.facts` 2.0、`save.facts` 1.0、`save.pre_save` 1.0（`plugin.cpp:32-50`） |
+| required capabilities | `ui_panels` 1.3、`ui_components`、`world.facts` 2.0、`save.facts` 1.1、`save.pre_save` 1.0（`plugin.cpp:32-50`） |
 | optional_requires | `http.registry`、`http.dispatch`（`plugin.cpp:42-47,365`） |
 | provides | 无（`plugin.cpp:366`） |
 | ports | `QOL_PORT_SAVE_CALL` 1.0（`plugin.cpp:49-52,375-376`）；不声明 `QOL_PORT_SAVE_WRITE` |
 | 资源 | `ptrslot:SAVESLOT_DELETE_GOT`（kPtrSlot，private/required/fail-closed/resumable）、`own:popup.savebackup`（kOwnership，private/required/fail-soft/resumable）（`plugin.cpp:100-129`） |
 | descriptor JNI | `jni=0`；旧 `nativeBackupList/Export/Import/Delete` 已删除，无遗留备份 JNI（`plugin.cpp:368`） |
 
-`install` 要求 `ui_panels`/`save.facts` 能力可用、恰好一个 save-call port，并校验 `free_data`/`encrypt`/`mark_stale`/`load_data`/`slot_exists`/`hub_key`/`current_slot` 函数指针，任一不满足即安装失败（`plugin.cpp:241-279`）。插件使用 `save.facts.load_data/slot_exists/slot_hero_index/hero_level/hero_class/hub_key/current_slot`；`QOL_PORT_SAVE_CALL` 提供 `write.free_data/encrypt/mark_stale`（`contracts/save_facts.h:15-36`；`contracts/game_ports/save_call_port.h:11-21`）。
+`install` 要求 `ui_panels`/`save.facts` 能力可用、恰好一个 save-call port，并校验 `free_data`/`encrypt`/`mark_stale`/`load_data`/`slot_exists`/`hub_key`/`current_slot` 函数指针，任一不满足即安装失败（`plugin.cpp:241-279`）。插件使用 `save.facts.load_data/slot_exists/slot_hero_index/hero_level/hero_class/hub_key/current_slot`；备份导出仍从 `load_data` 明文按原格式解析 `save_time`，不依赖新增的按槽时间读取函数；`QOL_PORT_SAVE_CALL` 提供 `write.free_data/encrypt/mark_stale`（`contracts/save_facts.h:15-40`；`contracts/game_ports/save_call_port.h:11-21`）。
 
 ### 游戏内面板与设置入口
 

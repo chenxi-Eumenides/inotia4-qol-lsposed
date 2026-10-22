@@ -113,6 +113,14 @@ QolResult save_load_data(int32_t, void** out, int32_t* size) {
     *size = 0;
     return ok();
 }
+QolResult save_slot_times(int32_t slot, uint64_t* out_creation_time_ms,
+                          uint64_t* out_save_time_ms) {
+    if (slot < 0 || out_creation_time_ms == nullptr || out_save_time_ms == nullptr)
+        return error(kQolErrInvalidArgument, "invalid argument", 16);
+    *out_creation_time_ms = 1234567890123ULL;
+    *out_save_time_ms = 2345678901234ULL;
+    return ok();
+}
 QolResult save_is_ok(int32_t* out) { *out = 1; return ok(); }
 QolResult save_current_slot(int32_t* out) { *out = 1; return ok(); }
 
@@ -327,7 +335,7 @@ int main() {
                       qol::contracts::kHttpDispatchCapabilityId) == 0);
     CHECK(descriptor.provides_count == 3 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kSaveFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 0);
+    CHECK(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 1);
     CHECK(descriptor.provides[0].iface != nullptr);
     CHECK(std::strcmp(descriptor.provides[1].id, kQolSlotDataCapabilityId) == 0);
     CHECK(descriptor.provides[1].version.major == 1 && descriptor.provides[1].version.minor == 0);
@@ -375,6 +383,7 @@ int main() {
     CHECK(api->map_id != nullptr);
     CHECK(api->current_slot != nullptr);
     CHECK(api->is_ok != nullptr);
+    CHECK(api->slot_times != nullptr);
 
     // owner 身份：真实注册 + save_route 授权（bind 的授权面在宿主侧）。
     CHECK(qol::host::owner_register(&g_owner_identity));
@@ -388,6 +397,7 @@ int main() {
     save_read.slot_state = &save_slot_state;
     save_read.slot_exists = &save_slot_exists;
     save_read.load_data = &save_load_data;
+    save_read.slot_times = &save_slot_times;
     save_read.is_ok = &save_is_ok;
     save_read.current_slot = &save_current_slot;
     const QolSavePort save_port{kQolPortSaveVersion, save_read};
@@ -440,6 +450,10 @@ int main() {
     g_fail_logic_scheduler = false;
     CHECK(descriptor.install(context) == 0);
     CHECK(g_result_handler != nullptr);
+    uint64_t creation_time_ms = 0;
+    uint64_t save_time_ms = 0;
+    CHECK(api->slot_times(1, &creation_time_ms, &save_time_ms).ok == kQolOk);
+    CHECK(creation_time_ms == 1234567890123ULL && save_time_ms == 2345678901234ULL);
     descriptor.on_enabled(context);
 
     // F6: LogicPre advances timeout only; confirmation/readiness is RenderPre-only.

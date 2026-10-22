@@ -24,14 +24,15 @@ descriptor 当前登记三条 POST 路由，均由 `core.save` 处理（`module/
 
 | 面 | 版本 | 当前作用 |
 |---|---:|---|
-| `save.facts` | 1.0 | 提供槽状态/存在性、英雄索引/等级/职业、load data、hub key、map ID、current slot 与 `is_ok` 读取函数（`module/app/src/main/cpp/contracts/save_facts.h:10-37`）。 |
+| `save.facts` | 1.1 | 提供槽状态/存在性、英雄索引/等级/职业、load data、hub key、map ID、current slot、`is_ok`，以及按槽读取角色创建时间和本次保存时间（毫秒，`u64`）（`module/app/src/main/cpp/contracts/save_facts.h:10-40`）。 |
 | `save.slot_data` | 1.0 | 注册按槽隔离的 section participant，并提供 session、load/write request、查询和注销接口；策略及回调契约见 [`slot-data-contract.md`](../../refactor/slot-data-contract.md) 与 `module/app/src/main/cpp/contracts/slot_data.h:11-144`。 |
+| `save.pre_save` | 1.0 | 在保存前同步通知观察者，不参与保存阻断（`module/app/src/main/cpp/contracts/save_pre_save.h:12-23`）。 |
 
-descriptor 不声明 required/optional capability；它发布以上两个 capability，并要求三个版本均为 1.0 的 Game Host ports（`module/app/src/main/cpp/plugins/core.save/plugin.cpp:82-95,1065-1077`；版本定义：`module/app/src/main/cpp/contracts/game_ports/ports.h:48,58,65`）：
+descriptor 不声明 required/optional capability；它发布以上三个 capability，并要求 `QOL_PORT_SAVE` 1.1、`QOL_PORT_SAVE_WRITE` 1.0、`QOL_PORT_SAVE_TRANSACTION` 1.0 三个 Game Host ports（`module/app/src/main/cpp/plugins/core.save/plugin.cpp:82-95,1070-1082`；版本定义：`module/app/src/main/cpp/contracts/game_ports/ports.h:49,59,66`）：
 
 | Port | 版本 | 用途 |
 |---|---:|---|
-| `QOL_PORT_SAVE` | 1.0 | 槽状态与存档事实读取（`module/app/src/main/cpp/contracts/game_ports/save_port.h:12-35`）。 |
+| `QOL_PORT_SAVE` | 1.1 | 槽状态与存档事实读取，包括按槽读取角色创建时间和本次保存时间（`module/app/src/main/cpp/contracts/game_ports/save_port.h:12-36`）。 |
 | `QOL_PORT_SAVE_WRITE` | 1.0 | 主线程执行 save/enter/create 的 owner 写操作并生成迁移前结果（`module/app/src/main/cpp/contracts/game_ports/save_write_port.h:11-35`）。 |
 | `QOL_PORT_SAVE_TRANSACTION` | 1.0 | Adapter 状态、受控原版保存 trampoline、save-file evidence 与 loading bypass 探针（`module/app/src/main/cpp/contracts/game_ports/save_transaction_port.h:18-66`）。 |
 
@@ -61,7 +62,7 @@ descriptor 不声明 required/optional capability；它发布以上两个 capabi
 
 ## 5. 读写线程与生命周期
 
-- **事实读取**：`SaveFactsApi` 函数包装 `QOL_PORT_SAVE` 的槽状态、英雄数据、地图与当前槽读取（`module/app/src/main/cpp/plugins/core.save/plugin.cpp:30-80`）；Game Adapter 的 port 实现负责具体槽解析及 NotReady/错误返回（`module/app/src/main/cpp/game/adapter_ports/save_port.cpp:23-122`）。该面不是新增 HTTP snapshot 路由。
+- **事实读取**：`SaveFactsApi` 函数包装 `QOL_PORT_SAVE` 的槽状态、英雄数据、地图、当前槽与按槽时间读取（`module/app/src/main/cpp/plugins/core.save/plugin.cpp:30-120`）；Game Adapter 的 port 通过 `SAVE_LoadData(slot, &buf, &len)` 读取解密明文并释放游戏堆内存，解析 `block0 = 8 + u16(plain + 8)` 的 `+0x05 u64 LE` 角色创建时间与 `+0x0d u64 LE` 本次保存时间，范围错误明确失败（`module/app/src/main/cpp/game/adapter_ports/save_port.cpp:23-181`）。该面不是新增 HTTP snapshot 路由。
 - **slot data**：消费者声明 `read_policy`/`write_policy`；所有消费者回调由 `slot_data_pump` 在游戏主线程执行。SessionBound 在 session ready 后加载，SlotBound 写仅先标 staged/dirty、由原版保存协调器统一 capture/commit（`module/app/src/main/cpp/contracts/slot_data.h:23-31,80-95`；`module/app/src/main/cpp/plugins/core.save/slot_data_provider.cpp:314-379,396-479`）。
 - **HTTP 写入**：Kotlin 只做传输/Agreement 前置并投递 native typed command；C++ handler 校验后立即返回 ticket，结果处理器在主线程调用 save write port。`save` 经 `save_coordinator_settle`；`enter_slot`/`create_slot` 通过 Game Host transition operation 执行，等世界态提交后才结算，等待期间 ticket 保持 pending（`module/app/src/main/java/com/inotia4/qol/service/action/SaveActions.kt:18-50`；`module/app/src/main/cpp/plugins/core.save/plugin.cpp:557-733`；`module/app/src/main/cpp/game/access/save.cpp:428-444`；`module/app/src/main/cpp/plugins/core.save/save_coordinator.h:43-54`；API 参考 §7.10）。
 - **原版保存与转换**：`SAVE_Save` wrapper 限定游戏主线程；普通保存经 `save_route` 进入同一协调器，session 未就绪时仅经 Adapter bypass 探针准入。新档 hook 先 begin，选角取消释放转换凭据；确认序执行 reset/ensure、journal 检查和 slot-data session 激活（`module/app/src/main/cpp/plugins/core.save/plugin.cpp:153-228,253-347,354-426`；`module/app/src/main/cpp/plugins/core.save/save_transition.cpp:143-249,253-267`）。
@@ -73,7 +74,7 @@ descriptor 不声明 required/optional capability；它发布以上两个 capabi
 |---|---|---|
 | descriptor、capability、ports、feature | `module/app/src/main/cpp/plugins/core.save/plugin.cpp`、`module/app/src/main/cpp/contracts/game_ports/ports.h` | plugin ID/version、provides/ports 与 feature：plugin.cpp 26-95、1058-1077；port versions：ports.h 48、58、65 |
 | 路由与 hooks | `module/app/src/main/cpp/plugins/core.save/plugin.cpp` | 写路由：768-775；required hooks：783-821；install/lifecycle：824-1021 |
-| facts capability | `module/app/src/main/cpp/contracts/save_facts.h`、`module/app/src/main/cpp/contracts/game_ports/save_port.h`、`module/app/src/main/cpp/game/adapter_ports/save_port.cpp` | facts API：save_facts.h 10-37；port 类型：save_port.h 12-35；Adapter 读实现：save_port.cpp 23-127 |
+| facts capability | `module/app/src/main/cpp/contracts/save_facts.h`、`module/app/src/main/cpp/contracts/game_ports/save_port.h`、`module/app/src/main/cpp/game/adapter_ports/save_port.cpp` | facts API：save_facts.h 10-40；port 类型：save_port.h 12-36；Adapter 读实现：save_port.cpp 23-181 |
 | section participant ABI/provider | `module/app/src/main/cpp/contracts/slot_data.h`、`module/app/src/main/cpp/plugins/core.save/slot_data_provider.h`、`slot_data_provider.cpp` | ABI/policy/callback：slot_data.h 11-144；provider API：slot_data_provider.h 8-40；init/session/pump/save capture：slot_data_provider.cpp 272-479 |
 | 保存协调器/journal | `module/app/src/main/cpp/plugins/core.save/save_coordinator.h`、`save_coordinator.cpp`、`save_journal.h`、`save_journal.cpp` | 事务顺序/接口：save_coordinator.h 11-54；settle/hook save/pump：save_coordinator.cpp 580-713；journal section/version：save_journal.h 8-10 |
 | 进档/新档状态机 | `module/app/src/main/cpp/plugins/core.save/save_transition.h`、`save_transition.cpp` | 状态/流程契约：save_transition.h 9-63；begin/confirm/cancel：save_transition.cpp 143-267 |

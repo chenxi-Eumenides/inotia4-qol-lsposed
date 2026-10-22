@@ -27,7 +27,7 @@ namespace {
 
 constexpr const char* kPluginId = "core.save";
 constexpr const char* kPluginVersion = "0.1.0";
-[[gnu::used]] constexpr char kSaveFactsBuildMarker[] = "save.facts:v1";
+[[gnu::used]] constexpr char kSaveFactsBuildMarker[] = "save.facts:v1.1";
 
 constexpr contracts::CapabilityRequirement kOptionalHttpRequires[] = {
     {contracts::kHttpRegistryCapabilityId,
@@ -109,10 +109,15 @@ QolResult is_ok(int32_t* out_ok) {
     if (g_port == nullptr || g_port->read.is_ok == nullptr) return not_ready();
     return g_port->read.is_ok(out_ok);
 }
+QolResult slot_times(int32_t slot, uint64_t* out_creation_time_ms,
+                     uint64_t* out_save_time_ms) {
+    if (g_port == nullptr || g_port->read.slot_times == nullptr) return not_ready();
+    return g_port->read.slot_times(slot, out_creation_time_ms, out_save_time_ms);
+}
 
 constexpr contracts::SaveFactsApi kSaveFactsApi{
     &slot_state, &slot_exists, &slot_hero_index, &hero_level, &hero_class,
-    &load_data, &hub_key, &map_id, &current_slot, &is_ok,
+    &load_data, &hub_key, &map_id, &current_slot, &is_ok, &slot_times,
 };
 
 const contracts::CapabilityProvisionRef kProvides[] = {
@@ -884,6 +889,7 @@ int plugin_install(contracts::PluginContext& ctx) {
                               {contracts::kQolPortSaveVersion.major,
                                contracts::kQolPortSaveVersion.minor}) ||
         g_port->read.slot_state == nullptr || g_port->read.load_data == nullptr ||
+        g_port->read.slot_times == nullptr ||
         g_port->read.is_ok == nullptr) {
         g_port = nullptr;
         return 1;

@@ -397,13 +397,30 @@ void* save_slot_hero(void*) { return reinterpret_cast<void*>(0x5); }
 int save_slot_map_id(const void*) { return 1; }
 int save_hero_level(const void*) { return 10; }
 int save_hero_class(const void*) { return 2; }
-bool save_load_deps_ready() { return true; }
+std::vector<uint8_t> g_save_load_plain(29, 0);
+bool g_save_load_dependencies_ready = true;
+bool g_save_load_succeeds = true;
+bool g_save_load_returns_buffer_on_failure = false;
+int g_save_load_reported_length = -1;
+int g_save_load_calls = 0;
+int g_save_mem_free_calls = 0;
+bool save_load_deps_ready() { return g_save_load_dependencies_ready; }
 int save_load_data(int32_t, void** out_buf, int* out_len) {
-    if (out_buf != nullptr) *out_buf = reinterpret_cast<void*>(0x6);
-    if (out_len != nullptr) *out_len = 16;
-    return out_buf != nullptr && out_len != nullptr ? 1 : 0;
+    ++g_save_load_calls;
+    if (out_buf == nullptr || out_len == nullptr) return 0;
+    *out_buf = nullptr;
+    *out_len = 0;
+    if (g_save_load_succeeds || g_save_load_returns_buffer_on_failure) {
+        *out_buf = g_save_load_plain.data();
+        *out_len = g_save_load_reported_length >= 0
+                       ? g_save_load_reported_length
+                       : static_cast<int>(g_save_load_plain.size());
+    }
+    return g_save_load_succeeds ? 1 : 0;
 }
-void save_mem_free(void*) {}
+void save_mem_free(void* buffer) {
+    if (buffer != nullptr) ++g_save_mem_free_calls;
+}
 const char* save_hub_get_key() { return "test-key"; }
 bool save_encrypt_available() { return true; }
 int save_encrypt_process2(void*, int, int, const char*) { return 1; }
@@ -828,6 +845,21 @@ QolResult seam_log_write(int32_t, int32_t, const char*, const char* message,
 }  // namespace
 
 int main() {
+    const auto set_u16_le = [](size_t offset, uint16_t value) {
+        qol::game::g_save_load_plain[offset] = static_cast<uint8_t>(value & 0xffu);
+        qol::game::g_save_load_plain[offset + 1] = static_cast<uint8_t>(value >> 8);
+    };
+    const auto set_u64_le = [](size_t offset, uint64_t value) {
+        for (size_t i = 0; i < sizeof(value); ++i) {
+            qol::game::g_save_load_plain[offset + i] =
+                static_cast<uint8_t>(value >> (i * 8));
+        }
+    };
+    qol::game::g_save_load_plain.assign(29, 0);
+    set_u16_le(8, 0);  // block0 = 8 + u16(plain + 8)
+    set_u64_le(8 + 0x05, 0x0123456789abcdefULL);
+    set_u64_le(8 + 0x0d, 0xfedcba9876543210ULL);
+
     // 声明式资源按名解析必须先登记到 game/access/symbols 的 hook 入口表：漏登记会让
     // entry-hook 资源静默返回 0，fail-closed 插件整体安装失败（依赖它的 settings 被 blocked）。
     {
@@ -1826,6 +1858,63 @@ int main() {
     assert(save_port_api.read.hero_class(0, &value).ok == kQolOk && value == 2);
     int32_t data_size = 0;
     assert(save_port_api.read.load_data(0, &pointer_value, &data_size).ok == kQolOk);
+    uint64_t creation_time_ms = 0;
+    uint64_t save_time_ms = 0;
+    const int frees_before_times = qol::game::g_save_mem_free_calls;
+    assert(save_port_api.read.slot_times(0, &creation_time_ms, &save_time_ms).ok == kQolOk);
+    assert(creation_time_ms == 0x0123456789abcdefULL);
+    assert(save_time_ms == 0xfedcba9876543210ULL);
+    assert(qol::game::g_save_mem_free_calls == frees_before_times + 1);
+
+    creation_time_ms = 11;
+    save_time_ms = 22;
+    int loads_before_invalid_slot = qol::game::g_save_load_calls;
+    assert(save_port_api.read.slot_times(3, &creation_time_ms, &save_time_ms).code ==
+           kQolErrInvalidArgument);
+    assert(qol::game::g_save_load_calls == loads_before_invalid_slot);
+    assert(creation_time_ms == 11 && save_time_ms == 22);
+    assert(save_port_api.read.slot_times(0, nullptr, &save_time_ms).code ==
+           kQolErrInvalidArgument);
+
+    qol::game::g_save_load_dependencies_ready = false;
+    assert(save_port_api.read.slot_times(0, &creation_time_ms, &save_time_ms).code ==
+           kQolErrNotReady);
+    assert(creation_time_ms == 11 && save_time_ms == 22);
+    qol::game::g_save_load_dependencies_ready = true;
+
+    set_u16_le(8, 0xffff);
+    const int frees_before_bad_block = qol::game::g_save_mem_free_calls;
+    assert(save_port_api.read.slot_times(0, &creation_time_ms, &save_time_ms).code ==
+           kQolErrInternal);
+    assert(qol::game::g_save_mem_free_calls == frees_before_bad_block + 1);
+    assert(creation_time_ms == 11 && save_time_ms == 22);
+    set_u16_le(8, 0);
+
+    set_u16_le(8, 12);  // block0 在缓冲区内，但时间字段未完整落入明文范围。
+    const int frees_before_truncated_block = qol::game::g_save_mem_free_calls;
+    assert(save_port_api.read.slot_times(0, &creation_time_ms, &save_time_ms).code ==
+           kQolErrInternal);
+    assert(qol::game::g_save_mem_free_calls == frees_before_truncated_block + 1);
+    assert(creation_time_ms == 11 && save_time_ms == 22);
+    set_u16_le(8, 0);
+
+    qol::game::g_save_load_reported_length = 9;
+    const int frees_before_short_data = qol::game::g_save_mem_free_calls;
+    assert(save_port_api.read.slot_times(0, &creation_time_ms, &save_time_ms).code ==
+           kQolErrInternal);
+    assert(qol::game::g_save_mem_free_calls == frees_before_short_data + 1);
+    qol::game::g_save_load_reported_length = -1;
+
+    qol::game::g_save_load_succeeds = false;
+    qol::game::g_save_load_returns_buffer_on_failure = true;
+    const int frees_before_failed_load = qol::game::g_save_mem_free_calls;
+    assert(save_port_api.read.slot_times(0, &creation_time_ms, &save_time_ms).code ==
+           kQolErrInternal);
+    assert(qol::game::g_save_mem_free_calls == frees_before_failed_load + 1);
+    assert(creation_time_ms == 11 && save_time_ms == 22);
+    qol::game::g_save_load_succeeds = true;
+    qol::game::g_save_load_returns_buffer_on_failure = false;
+
     assert(save_port_api.read.hub_key(&map_name).ok == kQolOk);
     assert(save_port_api.read.is_ok(&value).ok == kQolOk && value == 1);
     assert(save_port_api.read.current_slot(&value).code == kQolErrNotReady);

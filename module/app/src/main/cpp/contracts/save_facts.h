@@ -8,7 +8,7 @@
 namespace qol::contracts {
 
 constexpr const char* kSaveFactsCapabilityId = "save.facts";
-constexpr QolVersion kSaveFactsVersion{1, 0};
+constexpr QolVersion kSaveFactsVersion{1, 1};
 constexpr uint16_t kSaveFactsVersionMajor = kSaveFactsVersion.major;
 constexpr uint16_t kSaveFactsVersionMinor = kSaveFactsVersion.minor;
 
@@ -22,6 +22,9 @@ using SaveFactsHubKeyFn = QolResult (*)(const char** out_key);
 using SaveFactsMapIdFn = QolResult (*)(int32_t slot, int32_t* out_map_id);
 using SaveFactsCurrentSlotFn = QolResult (*)(int32_t* out_slot);
 using SaveFactsIsOkFn = QolResult (*)(int32_t* out_ok);
+// Reads both millisecond timestamps from the decrypted data for the requested slot.
+using SaveFactsSlotTimesFn = QolResult (*)(int32_t slot, uint64_t* out_creation_time_ms,
+                                           uint64_t* out_save_time_ms);
 
 struct SaveFactsApi {
     SaveFactsSlotStateFn slot_state;
@@ -34,6 +37,7 @@ struct SaveFactsApi {
     SaveFactsMapIdFn map_id;
     SaveFactsCurrentSlotFn current_slot;
     SaveFactsIsOkFn is_ok;
+    SaveFactsSlotTimesFn slot_times;
 };
 
 }  // namespace qol::contracts

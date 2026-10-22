@@ -44,7 +44,7 @@ const contracts::QolCharacterPort kCharacterPort{{1, 0}, {}};
 const contracts::QolCharacterHttpPort kCharacterHttpPort{{1, 0}, {}};
 const contracts::QolChoicePort kChoicePort{{1, 1}, {}, {}, {}};
 const contracts::QolExtensionBagWritePort kExtensionBagWritePort{};
-const contracts::QolSavePort kSavePort{{1, 0}, {}};
+const contracts::QolSavePort kSavePort{contracts::kQolPortSaveVersion, {}};
 const contracts::QolSaveCallPort kSaveCallPort{{1, 0}, {}};
 // 单 owner 生产装配 fixture 需要「就绪」的写端口；默认仍是空桩（其它 target 语义不变）。
 const contracts::QolCraftUiWritePort* craft_ui_write_port_override = nullptr;

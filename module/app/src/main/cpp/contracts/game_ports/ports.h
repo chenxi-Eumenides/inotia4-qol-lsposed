@@ -46,7 +46,7 @@ constexpr QolVersion kQolPortItemVersion{3, 6};
 constexpr QolVersion kQolPortCharacterVersion{1, 0};
 constexpr QolVersion kQolPortExtensionBagWriteVersion{1, 1};
 constexpr QolVersion kQolPortChoiceVersion{1, 1};
-constexpr QolVersion kQolPortSaveVersion{1, 0};
+constexpr QolVersion kQolPortSaveVersion{1, 1};
 constexpr QolVersion kQolPortSaveCallVersion{1, 0};
 constexpr QolVersion kQolPortCraftVersion{1, 1};
 constexpr QolVersion kQolPortCraftUiWriteVersion{1, 1};
