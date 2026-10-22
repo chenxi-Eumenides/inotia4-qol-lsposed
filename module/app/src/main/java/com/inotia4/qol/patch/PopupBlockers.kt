@@ -24,7 +24,10 @@ typealias PopupHookInstaller = (
 ) -> Unit
 
 /**
- * 弹窗屏蔽收束入口：游戏侧全部弹窗压制 hook 集中在本文件。
+ * 弹窗压制收束入口：Java 层全部弹窗压制 hook 集中在本文件。
+ * 原生引擎侧唯一一处弹窗压制是 core 常驻指令 patch `P_HUB_LOGIN_SKIP`
+ * （game/access/patches.cpp：主菜单 Hub 登录询问确认框，分支改写令调用不再执行），
+ * 按 ARCHITECTURE §4.3 分层不并入本文件；完整清单见 docs/reference/game/ui.md §2.2。
  *
  * - [NoticePopupBlocker]：「更新通知」弹窗（ActiveUserUpdateDialog，文案服务器下发）
  * - [IapBlocker]：Hive 内购选择弹窗（SelectTarget.iapSelectTarget）
