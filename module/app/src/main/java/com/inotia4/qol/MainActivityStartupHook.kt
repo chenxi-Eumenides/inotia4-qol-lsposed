@@ -81,10 +81,12 @@ internal object MainActivityStartupHook {
     }
 
     fun onActivityCreated(activity: Activity, moduleApkPath: String) {
+        ModuleErrorDialog.onActivityAvailable(activity)
         requestStartup(activity.applicationContext, moduleApkPath)
     }
 
     fun onActivityFocused(activity: Activity, moduleApkPath: String) {
+        ModuleErrorDialog.onActivityAvailable(activity)
         requestStartup(activity.applicationContext, moduleApkPath)
     }
 

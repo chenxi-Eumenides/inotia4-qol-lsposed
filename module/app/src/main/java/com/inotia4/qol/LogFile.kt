@@ -100,7 +100,19 @@ object LogFile {
 
     /** 错误日志：message 与压缩栈合并为单行（无栈时省略 ` stack=`）。 */
     fun error(domain: LogDomain, message: String, t: Throwable? = null) {
-        emit(LEVEL_ERROR, domain, if (t == null) message else "$message stack=${stackSummary(t)}")
+        val throwableSummary = t?.let(::stackSummary)
+        val logMessage = throwableSummary?.let { "$message stack=$it" } ?: message
+        try {
+            emit(LEVEL_ERROR, domain, logMessage)
+        } finally {
+            try {
+                ModuleErrorDialog.enqueue(
+                    formatModuleErrorDialogDetails(domain, message, throwableSummary),
+                )
+            } catch (_: Throwable) {
+                // Dialog failures must not replace or recursively report the original log error.
+            }
+        }
     }
 
     /**
@@ -253,4 +265,14 @@ object LogFile {
 
     private fun ByteArray.toHex(): String =
         joinToString(separator = "") { byte -> "%02x".format(Locale.US, byte.toInt() and 0xff) }
+}
+
+internal fun formatModuleErrorDialogDetails(
+    domain: LogDomain,
+    message: String,
+    throwableSummary: String?,
+): String = buildString {
+    append("domain=").append(domain.token)
+    append("\nmessage=").append(message)
+    if (throwableSummary != null) append("\nthrowable=").append(throwableSummary)
 }
