@@ -10,7 +10,9 @@ usage() {
 行为：
   对 apk/game-apk/ 下的每个游戏 APK 生成一个集成 APK，输出到 output/。
   命名固定：原始 艾诺迪亚4_<name>_<version>.apk
-            -> 集成 Inotia4_<name>_<version>_<debug|release>_<lspatch|npatch>.apk。
+            -> 集成 Inotia4_<name>_<version>_<debug|release>_<lspatch|npatch>.apk；
+  release 模块在通道段后追加模块版本号：
+            -> Inotia4_<name>_<version>_release_<模块版本>_<lspatch|npatch>.apk。
   <name> 变体映射：原版->Original、大修->Overhaul、monster->Monster、C18L->C18L、C18->C18；
   <version> 从原始 APK 文件名透传（如 v507、v29、v1.3.2）；
   <debug|release> 取模块 APK 文件名中的构建通道（..._debug_... / ..._release_...）；
@@ -98,11 +100,21 @@ fi
 module_apk=$(realpath "$module_apk")
 
 # 构建通道：从模块 APK 文件名（..._debug_<时间戳>_<hash>.apk / ..._release_vX.Y.Z.apk）识别，
-# 作为输出文件名固定的 <debug|release> 段。
+# 作为输出文件名固定的 <debug|release> 段；release 通道同时提取模块版本号拼入输出文件名
+# （..._release_<模块版本>_...），debug 包无版本号不追加。
 module_channel=
+module_version=
 case "$(basename "$module_apk")" in
     *_debug_*) module_channel=debug ;;
-    *_release_*) module_channel=release ;;
+    *_release_*)
+        module_channel=release
+        if [[ "$(basename "$module_apk")" =~ _release_(v[0-9][0-9A-Za-z._-]*)\.apk$ ]]; then
+            module_version=${BASH_REMATCH[1]}
+        else
+            printf 'release 模块 APK 文件名缺少版本号（需 ..._release_vX.Y.Z.apk）：%s\n' "$(basename "$module_apk")" >&2
+            exit 1
+        fi
+        ;;
 esac
 if [[ -z "$module_channel" ]]; then
     printf '无法从模块 APK 文件名识别 debug/release 通道：%s\n' "$(basename "$module_apk")" >&2
@@ -215,6 +227,7 @@ release_stem() {
 
 printf '模块 APK：%s\n' "$module_apk"
 printf '模块通道：%s\n' "$module_channel"
+[[ -n "$module_version" ]] && printf '模块版本：%s\n' "$module_version"
 printf '集成工具：%s\n' "$patcher"
 printf 'LSPatch JAR：%s\n' "$lspatch_jar"
 printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
@@ -229,7 +242,7 @@ for target_apk in "${game_apks[@]}"; do
         failed=1
         continue
     fi
-    output_apk="$repo_root/output/${output_stem}_${module_channel}_${patcher}.apk"
+    output_apk="$repo_root/output/${output_stem}_${module_channel}${module_version:+_$module_version}_${patcher}.apk"
     work_dir=$(mktemp -d "$repo_root/.tmp/lspatch-apk.XXXXXX")
 
     if [[ -n "$name_override" ]]; then
