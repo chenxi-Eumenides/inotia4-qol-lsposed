@@ -494,23 +494,23 @@ void test_install_word_success() {
     CHECK(std::strcmp(point_owner(addr), "patch:b") == 0);
 }
 
-void test_tutorial_addstate_skip_site() {
+void test_tutorial_pause_gate_skip_site() {
     reset_all();
-    constexpr const char* kSiteName = "P_TUTORIAL_ADDSTATE_SKIP";
+    constexpr const char* kSiteName = "P_TUTORIAL_PAUSE_GATE_SKIP";
     PatchSite site{};
     CHECK(qol::game::patch_site(kSiteName, &site));
-    const uintptr_t addr = g_base + F_TUTORIAL_ADDSTATE_VMA;
+    const uintptr_t addr = g_base + F_UI_PLAY_PORTING_DRAW_VMA + 0xcf4;
     CHECK(site.addr == addr);
     CHECK(site.kind == qol::game::PatchKind::kWordReplace);
-    CHECK(site.expected_word == 0xf100141fu);
-    CHECK(site.replacement_word == 0xd65f03c0u);
+    CHECK(site.expected_word == 0x39000260u);
+    CHECK(site.replacement_word == ARM64_NOP_WORD);
 
     const ResourceClaim claim = make_patch_claim(kSiteName, kSiteName, nullptr);
     CHECK(install_claim(claim, addr).ok == 0);
-    CHECK(g_prims.last_expected == 0xf100141fu);
-    CHECK(g_prims.last_new_word == 0xd65f03c0u);
+    CHECK(g_prims.last_expected == 0x39000260u);
+    CHECK(g_prims.last_new_word == ARM64_NOP_WORD);
     CHECK(release_claim(claim, addr).ok == 0);
-    CHECK(g_prims.last_expected == 0xf100141fu);
+    CHECK(g_prims.last_expected == 0x39000260u);
 }
 
 void test_bl_redirect_to_symbol_success() {
@@ -913,7 +913,7 @@ int main() {
     test_install_bl_success();
     test_settings_main_menu_more_games_draw_site();
     test_install_word_success();
-    test_tutorial_addstate_skip_site();
+    test_tutorial_pause_gate_skip_site();
     test_bl_redirect_to_symbol_success();
     test_bl_redirect_to_symbol_mismatch();
     test_bl_redirect_to_symbol_range_and_alignment();

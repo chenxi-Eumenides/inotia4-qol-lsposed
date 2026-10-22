@@ -85,10 +85,9 @@ constexpr SiteEntry kSites[] = {
     // 主菜单跳过 Com2uS Hive 登录询问 ×1（原 hub_login.inc:19-21）：cbz 分支目标改写。
     {"P_HUB_LOGIN_SKIP", F_STATE_HIDE_MODULE_MAIN_MENU_VMA, 0x48, 0x34000100, 0x34000360,
      PatchKind::kWordReplace},
-    // owner=plugins/popup_blocker：RET 教学状态入队入口，教程提示（TEXTDATABASE 174-188 提示族）
-    // 与由教学态触发的暂停源头均不再触发。
-    {"P_TUTORIAL_ADDSTATE_SKIP", F_TUTORIAL_ADDSTATE_VMA, 0x0, 0xf100141f, 0xd65f03c0,
-     PatchKind::kWordReplace},
+    // owner=plugins/popup_blocker：保留教学状态写入，仅跳过 state=6 的暂停门闩写入。
+    {"P_TUTORIAL_PAUSE_GATE_SKIP", F_UI_PLAY_PORTING_DRAW_VMA, 0xcf4, 0x39000260,
+     ARM64_NOP_WORD, PatchKind::kWordReplace},
 #if !defined(__ANDROID__) || defined(__aarch64__)
     // The actual BL is at +0xa70; +0xa6c only prepares its x1 argument.
     {"settings.main_menu.more_games.draw", F_STATE_DRAW_MAIN_MENU_VMA,

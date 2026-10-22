@@ -2195,6 +2195,17 @@ set_target_properties(simple_mode_feature_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME simple_mode_feature_tests COMMAND simple_mode_feature_tests)
 
+# popup_blocker 声明与 TutorialDescription entry hook 短路返回值。
+add_executable(popup_blocker_plugin_tests
+    test_popup_blocker_plugin.cpp
+    ${CPP_DIR}/plugins/popup_blocker/plugin.cpp
+)
+target_include_directories(popup_blocker_plugin_tests PRIVATE ${CPP_DIR})
+target_compile_features(popup_blocker_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(popup_blocker_plugin_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME popup_blocker_plugin_tests COMMAND popup_blocker_plugin_tests)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)
