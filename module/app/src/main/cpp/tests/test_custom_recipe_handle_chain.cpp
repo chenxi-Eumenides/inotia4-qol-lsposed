@@ -339,15 +339,6 @@ QolResult port_random(int32_t lo, int32_t hi, int32_t* out) {
     return ok();
 }
 
-// 轮转随机：动态配方生成需要「互不相同」的下标（避免去重失败）。
-int g_cycle_random = 0;
-QolResult cycling_random(int32_t lo, int32_t hi, int32_t* out) {
-    if (out == nullptr || lo > hi) return fail(kQolErrInvalidArgument);
-    const int32_t span = hi - lo + 1;
-    *out = lo + (g_cycle_random++ % span);
-    return ok();
-}
-
 int g_set_stuff_item_calls = 0;
 QolResult set_stuff_item(uint32_t, QolItemHandle) {
     ++g_set_stuff_item_calls;
@@ -738,9 +729,10 @@ void test_pending_invalidation() {
     // 动态表重建（SaveEnter 路径）后 pending 失效。
     custom_recipe::ThreeSlotRecipe dynamic_out[4];
     size_t dynamic_count = 0;
-    const QolResult built = custom_recipe::build_dynamic_recipes(
-        custom_recipe::kSpecialEquipCategories, 1, custom_recipe::kMaterialPool,
-        custom_recipe::kMaterialPoolSize, &cycling_random, dynamic_out, 4, &dynamic_count);
+    const QolResult built = custom_recipe::build_dynamic_recipes_seeded(
+        custom_recipe::kSpecialEquipCategories, 1, UINT64_C(0xC0FFEE),
+        custom_recipe::kMaterialPool, custom_recipe::kMaterialPoolSize, dynamic_out, 4,
+        &dynamic_count);
     assert(built.ok == kQolOk && dynamic_count == 1);
     custom_recipe::set_dynamic_three_slot_recipes(dynamic_out, dynamic_count);
     assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kStaleSlots);

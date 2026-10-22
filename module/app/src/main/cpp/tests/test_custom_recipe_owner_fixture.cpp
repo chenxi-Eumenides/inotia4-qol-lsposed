@@ -38,6 +38,7 @@
 #include "contracts/game_ports/custom_recipe_write_port.h"
 #include "contracts/item_facts.h"
 #include "contracts/plugin.h"
+#include "contracts/save_facts.h"
 #include "contracts/text_layer.h"
 #include "plugins/custom_recipe/feature.h"
 #include "plugins/custom_recipe/plugin.h"
@@ -532,7 +533,7 @@ int unhook_symbol(void* target) {
 bool gate_fn(const char*) { return true; }
 
 // ===========================================================================
-// provider 插件（4 个）
+// provider 插件（5 个）
 // ===========================================================================
 int provider_install(PluginContext&) { return 0; }
 void provider_noop(PluginContext&) {}
@@ -550,6 +551,23 @@ const CapabilityProvisionRef kTextLayerProvides[] = {
 const CapabilityProvisionRef kAttributeQualityProvides[] = {
     {kAttributeQualityCapabilityId,
      {kAttributeQualityVersionMajor, kAttributeQualityVersionMinor}, &kAttributeQualityApi}};
+QolResult fake_current_slot(int32_t* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = 0;
+    return qol::contracts::ok();
+}
+QolResult fake_slot_times(int32_t, uint64_t* out_creation, uint64_t* out_save) {
+    if (out_creation == nullptr || out_save == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    }
+    *out_creation = 1;
+    *out_save = 1;
+    return qol::contracts::ok();
+}
+const SaveFactsApi kSaveFactsApi{nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                nullptr, &fake_current_slot, nullptr, &fake_slot_times};
+const CapabilityProvisionRef kSaveFactsProvides[] = {
+    {kSaveFactsCapabilityId, {kSaveFactsVersionMajor, kSaveFactsVersionMinor}, &kSaveFactsApi}};
 
 // 零 feature 插件被禁止注册：每个 provider 声明一个 Hidden/默认开启的常驻 feature。
 const FeatureDefinition kItemFactsFeatures[] = {
@@ -564,6 +582,9 @@ const FeatureDefinition kTextLayerFeatures[] = {
 const FeatureDefinition kAttributeQualityFeatures[] = {
     {"attribute_quality.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
      "attribute.quality", "", &provider_toggle, nullptr}};
+const FeatureDefinition kSaveFactsFeatures[] = {
+    {"save_facts.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
+     "save.facts", "", &provider_toggle, nullptr}};
 
 PluginDescriptor provider_descriptor(const char* id, const CapabilityProvisionRef* provides,
                                      const FeatureDefinition* features) {
@@ -1142,12 +1163,14 @@ int main(int argc, char** argv) {
         provider_descriptor("text_layer", kTextLayerProvides, kTextLayerFeatures);
     PluginDescriptor attribute_quality = provider_descriptor(
         "attribute_quality", kAttributeQualityProvides, kAttributeQualityFeatures);
+    PluginDescriptor save_facts = provider_descriptor(
+        "save_facts", kSaveFactsProvides, kSaveFactsFeatures);
     const PluginDescriptor& custom_recipe = qol::features::custom_recipe::plugin_descriptor();
 
     // ---- 单 descriptor 形状 ----
     assert(std::strcmp(custom_recipe.id, "custom_recipe") == 0);
     assert(custom_recipe.provides_count == 0 && custom_recipe.provides == nullptr);
-    assert(custom_recipe.requires_count == 3);
+    assert(custom_recipe.requires_count == 4);
     assert(custom_recipe.optional_count == 1);
     assert(custom_recipe.jni_count == 0);
     assert(custom_recipe.port_count == 2);
@@ -1174,7 +1197,7 @@ int main(int argc, char** argv) {
     assert(!qol::features::custom_recipe::ownership_ready());
 
     for (const PluginDescriptor* provider : {&item_facts, &craft_facts, &text_layer,
-                                             &attribute_quality}) {
+                                             &attribute_quality, &save_facts}) {
         assert(qol::host::register_plugin(*provider));
     }
     assert(qol::host::register_plugin(custom_recipe));
@@ -1182,7 +1205,7 @@ int main(int argc, char** argv) {
     qol::host::HostDeps deps{&resolve_symbol, &hook_symbol, &unhook_symbol};
     qol::host::FeatureDirectory directory;
     for (const PluginDescriptor* provider : {&item_facts, &craft_facts, &text_layer,
-                                             &attribute_quality}) {
+                                             &attribute_quality, &save_facts}) {
         assert(directory.add(*provider).ok());
     }
     assert(directory.add(custom_recipe).ok());

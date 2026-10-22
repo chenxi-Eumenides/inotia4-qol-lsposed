@@ -7,6 +7,7 @@
 #include "../../contracts/host_sdk.h"
 #include "../../contracts/ownership.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/save_facts.h"
 #include "result.h"
 
 namespace qol::contracts {
@@ -26,6 +27,7 @@ namespace qol::features::custom_recipe {
 void set_context(const contracts::PluginContext& ctx);
 void set_item_facts(const contracts::ItemFactsApi* facts);
 void set_craft_facts(const contracts::CraftFactsApi* facts);
+void set_save_facts(const contracts::SaveFactsApi* facts);
 void set_write_port(const contracts::QolCustomRecipeWritePort* port);
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();

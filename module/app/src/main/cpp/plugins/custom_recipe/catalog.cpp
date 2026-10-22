@@ -214,66 +214,126 @@ const ThreeSlotRecipe* match_in_table(const ThreeSlotRecipe* table, size_t count
     return nullptr;
 }
 
+bool catalog_is_special_equip(uint16_t category) {
+    for (size_t i = 0; i < kSpecialEquipCategoryCount; ++i) {
+        if (kSpecialEquipCategories[i] == category) return true;
+    }
+    return false;
+}
+
+uint64_t splitmix64_next(uint64_t* state) {
+    *state += UINT64_C(0x9E3779B97F4A7C15);
+    uint64_t value = *state;
+    value = (value ^ (value >> 30)) * UINT64_C(0xBF58476D1CE4E5B9);
+    value = (value ^ (value >> 27)) * UINT64_C(0x94D049BB133111EB);
+    return value ^ (value >> 31);
+}
+
+constexpr size_t kMaximumDynamicMaterialPool = kMaxDynamicRecipes;
+constexpr size_t kMaximumCandidateAttempts = 4096;
+
+void make_seeded_candidate(uint64_t* state, uint16_t product,
+                           const uint16_t* material_pool, size_t pool_size,
+                           ThreeSlotRecipe* out) {
+    size_t candidate_indices[kMaximumDynamicMaterialPool + 1]{};
+    const size_t candidate_count = pool_size + 1;  // index pool_size represents the empty slot.
+    for (size_t i = 0; i < candidate_count; ++i) candidate_indices[i] = i;
+    for (size_t slot = 0; slot < kThreeSlotCount; ++slot) {
+        const size_t remaining = candidate_count - slot;
+        const size_t selected =
+            slot + static_cast<size_t>(splitmix64_next(state) % static_cast<uint64_t>(remaining));
+        const size_t swapped = candidate_indices[slot];
+        candidate_indices[slot] = candidate_indices[selected];
+        candidate_indices[selected] = swapped;
+        const size_t picked = candidate_indices[slot];
+        out->slots[slot] = picked == pool_size ? 0 : material_pool[picked];
+    }
+    out->ordered = true;
+    out->product = product;
+    out->product_mode = ProductMode::kFixedCategory;
+    out->scale_permille = 0;
+    out->same_first_last = false;
+}
+
 }  // namespace
 
-QolResult build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
-                                const uint16_t* material_pool, size_t pool_size,
-                                QolResult (*rand_inclusive)(int32_t, int32_t, int32_t*),
-                                ThreeSlotRecipe* out, size_t out_capacity,
-                                size_t* out_count) {
+bool three_slot_recipe_matches(const ThreeSlotRecipe& recipe, const uint16_t slots[3],
+                               bool (*is_special_equip)(uint16_t category)) {
+    return slots != nullptr && match_in_table(&recipe, 1, slots, is_special_equip) != nullptr;
+}
+
+const ThreeSlotRecipe* match_static_three_slot(
+    const uint16_t slots[3], bool (*is_special_equip)(uint16_t category)) {
+    if (slots == nullptr) return nullptr;
+    return match_in_table(kThreeSlotRecipes, kThreeSlotRecipeLen, slots, is_special_equip);
+}
+
+QolResult build_dynamic_recipes_seeded(const uint16_t* equip_categories, size_t equip_count,
+                                       uint64_t seed, const uint16_t* material_pool,
+                                       size_t pool_size, ThreeSlotRecipe* out,
+                                       size_t out_capacity, size_t* out_count,
+                                       size_t* out_reroll_count) {
     if (out_count == nullptr) {
         return catalog_error(kQolErrInvalidArgument, "null dynamic recipe count output");
     }
     *out_count = 0;
-    if (equip_categories == nullptr || material_pool == nullptr || rand_inclusive == nullptr ||
-        out == nullptr || pool_size < kThreeSlotCount ||
-        (equip_count > 0 && out_capacity == 0)) {
+    if (out_reroll_count != nullptr) *out_reroll_count = 0;
+    if ((equip_count > 0 && equip_categories == nullptr) || material_pool == nullptr ||
+        (equip_count > 0 && out == nullptr) || seed == 0 || pool_size < kThreeSlotCount ||
+        pool_size > kMaximumDynamicMaterialPool || equip_count > kMaxDynamicRecipes ||
+        out_capacity < equip_count) {
         return catalog_error(kQolErrInvalidArgument, "invalid dynamic recipe input");
     }
+
+    for (size_t i = 0; i < pool_size; ++i) {
+        if (material_pool[i] == 0) {
+            return catalog_error(kQolErrInvalidArgument,
+                                 "dynamic material pool contains empty id");
+        }
+        for (size_t j = 0; j < i; ++j) {
+            if (material_pool[i] == material_pool[j]) {
+                return catalog_error(kQolErrInvalidArgument,
+                                     "dynamic material pool contains duplicates");
+            }
+        }
+    }
+
     size_t written = 0;
-    for (size_t e = 0; e < equip_count && written < out_capacity; ++e) {
-        // 「空」作为一个普通候选放进池子（「空不用单独的概率，就把它加入
-        // 池子，然后随机就行」）。池 = material_pool 的 pool_size 项 + 1 个「空」项；
-        // 空项映射为类别 0，与三格匹配语义一致：`slots[i] == 0` 表示**该格必须为空**。
-        // 「3 个不同」的约束按池下标去重，因此空项最多出现一次（不会出现「三格全空」）。
-        const size_t pool_total = pool_size + 1;
-        size_t picked[kThreeSlotCount] = {0, 0, 0};
-        size_t got = 0;
-        int guard = 0;
-        while (got < kThreeSlotCount && guard < 256) {
-            ++guard;
-            int32_t idx = -1;
-            const QolResult random = rand_inclusive(0, static_cast<int32_t>(pool_total) - 1, &idx);
-            if (random.ok != kQolOk) return random;
-            if (idx < 0 || static_cast<size_t>(idx) >= pool_total) {
-                return catalog_error(kQolErrInternal, "random source returned invalid recipe index");
+    size_t rerolls = 0;
+    for (size_t e = 0; e < equip_count; ++e) {
+        if (equip_categories[e] == 0) {
+            return catalog_error(kQolErrInvalidArgument, "dynamic equipment category is empty");
+        }
+        uint64_t state = seed ^
+                         (static_cast<uint64_t>(equip_categories[e]) *
+                          UINT64_C(0xD6E8FEB86659FD93));
+        ThreeSlotRecipe candidate{};
+        bool accepted = false;
+        for (size_t attempt = 0; attempt < kMaximumCandidateAttempts; ++attempt) {
+            make_seeded_candidate(&state, equip_categories[e], material_pool, pool_size,
+                                  &candidate);
+            bool conflict =
+                match_static_three_slot(candidate.slots, &catalog_is_special_equip) != nullptr;
+            for (size_t previous = 0; !conflict && previous < written; ++previous) {
+                conflict = three_slot_recipe_matches(out[previous], candidate.slots,
+                                                      &catalog_is_special_equip);
             }
-            bool dup = false;
-            for (size_t k = 0; k < got; ++k) {
-                if (picked[k] == static_cast<size_t>(idx)) {
-                    dup = true;
-                    break;
-                }
+            if (!conflict) {
+                accepted = true;
+                break;
             }
-            if (dup) continue;
-            picked[got++] = static_cast<size_t>(idx);
+            ++rerolls;
         }
-        if (got < kThreeSlotCount) {
-            return catalog_error(kQolErrInternal, "random source did not produce distinct slots");
+        if (!accepted) {
+            if (out_reroll_count != nullptr) *out_reroll_count = rerolls;
+            return catalog_error(kQolErrInternal,
+                                 "no non-conflicting dynamic recipe candidate found");
         }
-        ThreeSlotRecipe& r = out[written];
-        for (size_t s = 0; s < kThreeSlotCount; ++s) {
-            r.slots[s] =
-                (picked[s] == pool_size) ? 0 : material_pool[picked[s]];
-        }
-        r.ordered = true;  // 顺序严格（抽取次序即槽位次序；空格写 0）
-        r.product = equip_categories[e];    // 产物 = 该装备本身
-        r.product_mode = ProductMode::kFixedCategory;
-        r.scale_permille = 0;
-        r.same_first_last = false;
+        out[written] = candidate;
         ++written;
     }
     *out_count = written;
+    if (out_reroll_count != nullptr) *out_reroll_count = rerolls;
     return qol::contracts::ok();
 }
 
@@ -294,11 +354,10 @@ size_t dynamic_three_slot_recipe_count() { return g_dynamic_recipe_count; }
 uint64_t dynamic_recipe_generation() { return g_dynamic_recipe_generation; }
 
 const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
-                                        bool (*is_special_equip)(uint16_t category)) {
+                                         bool (*is_special_equip)(uint16_t category)) {
     if (slots == nullptr) return nullptr;
     // 静态表优先（固定配方语义不受动态表影响），未命中再查进档随机生成的动态表。
-    const ThreeSlotRecipe* hit =
-        match_in_table(kThreeSlotRecipes, kThreeSlotRecipeLen, slots, is_special_equip);
+    const ThreeSlotRecipe* hit = match_static_three_slot(slots, is_special_equip);
     if (hit != nullptr) return hit;
     return match_in_table(g_dynamic_recipes, g_dynamic_recipe_count, slots, is_special_equip);
 }

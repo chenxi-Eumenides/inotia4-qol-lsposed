@@ -11,7 +11,7 @@
 | Descriptor 面 | 当前声明 |
 |---|---|
 | `provides` | 无。结果 API `result::CraftResultApi` 内化为 UI 子层对 result 层的进程内调用，不经 capability registry 对外提供。见 `plugin.cpp:297-331`、`plugins/custom_recipe/result.h:92-105`、`plugins/custom_recipe/feature.h:34-35`。 |
-| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`text_layer` v1.0。见 `plugin.cpp:265-276`。 |
+| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0。`save.facts` 用于 SaveEnter 读取当前槽的角色创建时间 seed。见 `plugin.cpp:265-276`。 |
 | `optional_requires` | `attribute.quality` v2.0。仅宝石升阶路径使用；缺失/失效只置 degraded，不阻断 owner 或三格配方。见 `plugin.cpp:259-263`。 |
 | `ports` | 两条：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2（`contracts/game_ports/ports.h:52`）与 `QOL_PORT_CRAFT_UI_WRITE` v1.1（`contracts/game_ports/ports.h:51`）。见 `plugin.cpp:278-285`。 |
 | `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 末尾 1 条 `own:RECIPEBASE_MIXTUREBASE` ownership（required/fail-soft）。顺序即声明顺序，ownership 最后。见 `plugins/custom_recipe/ui/runtime.cpp:526-566`、`plugin.cpp:55-90`。 |
@@ -45,7 +45,7 @@
 | 任意宝石 + 混沌武器卷轴 + 混沌防具卷轴 | 有序，产物为第一格宝石本身，数值按 1200 permille 缩放并保留源宝石随机等级与属性类型。 |
 | 两件同类别特殊装备 + 元气恢复药水 | 有序，产物为同类别特殊装备新建，孔总数与剩余强化次数拉满。 |
 
-动态配方：26 个特殊装备类别（`catalog.h:146-151`）各生成至多一条三格有序配方，材料从 14 条材料池（`catalog.h:138-141`，含空槽候选）随机抽取且三者互不相同；容量上限 64（`catalog.h:129`）。每次 `kEventSaveEnter` 重建并递增 generation（`catalog.cpp:280-294`、`feature.cpp:440-461`）。匹配顺序为**静态表优先，其后动态表**（`catalog.cpp:296-304`）。
+动态配方：26 个特殊装备类别（`catalog.h:146-151`）各生成一条三格有序配方，材料从 14 条材料池（`catalog.h:138-141`，另含一个空槽候选）抽取且三者互不相同；容量上限 64（`catalog.h:129`）。每次 `kEventSaveEnter` 通过 required `save.facts` v1.1 读取当前槽并以 `slot_times` 的**角色创建时间**作为 seed；自包含 SplitMix64 PRNG 按装备类别派生独立流，不使用共享游戏 RNG。相同 seed、类别列表和代码版本生成完全相同的完整配方表。构造候选若命中任何静态配方或已接受动态配方，仅推进当前类别的 PRNG 并重抽该条，不改变其他类别结果；检测复用 ordered/unordered、通配符和空槽的配方匹配器。创建时间为 0、当前槽无效、能力读取失败或目录构造失败时先清空动态表并写错误日志，不发布旧表或未播种配方。每次清空/替换递增 generation，使旧确认失效（`catalog.cpp`、`feature.cpp`）。匹配顺序仍为**静态表优先，其后动态表**。
 
 材料需求数量（`CountRule::kJewelGradeAndLevel`）：`ceil(base_count × grade × (105 − level) / 105)`，纯整数运算，`level` 钳到 `[0,105]`，满级为 0（`rules.h:60-63`、`rules.cpp:169-185`）。宝石档位由类别 28..32 映射为 1..5（低→混沌）。
 
@@ -97,11 +97,11 @@
 
 ## 生命周期、门禁与表所有权
 
-**install**（`plugin.cpp:122-210`）：先校验 `sdk`/`game`、`port_count == 2` 与两条 port 的 ABI/函数齐备、`commands` 注册句柄；再 require `text_layer`/`item.facts`（含 size 校验）/`craft.facts`；随后按序登记文本订阅、两个 typed handler、`ui::bind`。任一步失败**立即幂等清理本次注册**（退订、注销 handler、`ui::clear()`），不依赖 Host 后帧清理。install 完成时**不**打开业务门禁。
+**install**（`plugin.cpp:122-210`）：先校验 `sdk`/`game`、`port_count == 2` 与两条 port 的 ABI/函数齐备、`commands` 注册句柄；再 require `text_layer`/`item.facts`（含 size 校验）/`craft.facts`/`save.facts`（含 `current_slot` 与 v1.1 `slot_times` 函数）；随后按序登记文本订阅、两个 typed handler、`ui::bind` 并绑定 facts。任一步失败**立即幂等清理本次注册**（退订、注销 handler、`ui::clear()`），不依赖 Host 后帧清理。install 完成时**不**打开业务门禁。
 
 **门禁**：`plugin_on_enabled` 仅在 `ownership_ready()`（表注入就绪）且 `ui::core_backups_ready()`（5 条核心 hook backup 齐备）时 `set_enabled(true)`（`plugin.cpp:233-240`）。feature toggle 打开时**不提前**开门禁；关闭时立即 `set_enabled(false)` 并作废在途确认 token（`plugin.cpp:301-309`、`feature.h:44-47`）。
 
-**停用顺序**：`plugin_on_disabled` 先 `set_enabled(false)`（阻止新业务副作用、作废 pending），随后 Host 按资源声明逆序释放——ownership 先 release（`own_release` → `table_deactivate`），再释放 UI hooks（`plugin.cpp:242-248`）。`plugin_deactivate` 再清理订阅、typed handlers、事件订阅、UI context/backups 与 facts/ports（`plugin.cpp:212-231`、`ui/runtime.cpp:650-656`）。
+**停用顺序**：`plugin_on_disabled` 先 `set_enabled(false)`（阻止新业务副作用、作废 pending），随后 Host 按资源声明逆序释放——ownership 先 release（`own_release` → `table_deactivate`），再释放 UI hooks（`plugin.cpp:242-248`）。`plugin_deactivate` 再清理订阅、typed handlers、事件订阅、UI context/backups 与 facts/ports（含 `save.facts`）（`plugin.cpp:212-231`、`ui/runtime.cpp:650-656`）。
 
 **资源等级**：5 条核心 hook = required/fail-closed（任一失败整体回滚已装核心资源与内部注册）；7 条装饰 hook = optional/fail-soft（失败只 degraded，不拖垮核心）。`UIMix_ResetStuffItemControl` 保持 optional，且其 wrapper 不受 feature 门控，因为它同时服务原版成功链（`ui/runtime.cpp:508-512,472-510`）。
 

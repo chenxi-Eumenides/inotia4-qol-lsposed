@@ -113,7 +113,14 @@ const ThreeSlotRecipe* three_slot_recipes(size_t* out_count);
 // nullptr = 不支持该通配符（相关配方不命中），其余配方不受影响。
 // 查表顺序 = **静态表优先，其后动态表**（见下文），首个命中者胜出。
 const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
-                                        bool (*is_special_equip)(uint16_t category) = nullptr);
+                                         bool (*is_special_equip)(uint16_t category) = nullptr);
+
+// 复用固定配方匹配语义，供目录构造与调用方检测候选配方是否会被静态规则遮蔽。
+bool three_slot_recipe_matches(const ThreeSlotRecipe& recipe, const uint16_t slots[3],
+                               bool (*is_special_equip)(uint16_t category) = nullptr);
+const ThreeSlotRecipe* match_static_three_slot(
+    const uint16_t slots[3],
+    bool (*is_special_equip)(uint16_t category) = nullptr);
 
 // ---------------------------------------------------------------------------
 // 动态特殊装备配方（进档时随机重建）
@@ -150,16 +157,16 @@ inline constexpr uint16_t kSpecialEquipCategories[] = {
 inline constexpr size_t kSpecialEquipCategoryCount =
     sizeof(kSpecialEquipCategories) / sizeof(kSpecialEquipCategories[0]);
 
-// 纯逻辑：为 equip_categories 的每件装备各抽 3 个**互不相同**的材料，写入 out。
-// rand_inclusive(lo, hi, out) 须成功返回闭区间内的整数；失败原样传播且不发布半成品表。
-// 每条的 slots = 抽出的 3 个材料（**抽取次序即槽位次序**）、ordered = true、
-// product = 该装备、product_mode = kFixedCategory、scale_permille = 0。
-// pool_size < 3、随机函数、out 或 out_count 为空时返回 QolResult 错误。
-QolResult build_dynamic_recipes(const uint16_t* equip_categories, size_t equip_count,
-                                const uint16_t* material_pool, size_t pool_size,
-                                QolResult (*rand_inclusive)(int32_t, int32_t, int32_t*),
-                                ThreeSlotRecipe* out, size_t out_capacity,
-                                size_t* out_count);
+// 纯逻辑：按角色创建时间 seed，为每件装备独立生成 3 个互不相同的有序材料槽。
+// PRNG 算法属于本目录实现，结果不依赖进程共享 RNG 或运行平台；相同 seed、类别和代码版本
+// 生成相同目录。若候选会命中静态配方或先前动态配方，只重抽当前装备的候选。
+// seed=0、非法材料池、容量不足或找不到不冲突候选时返回错误，不发布半成品目录。
+// out_reroll_count 可为空；非空时返回因配方冲突而重抽的候选次数。
+QolResult build_dynamic_recipes_seeded(const uint16_t* equip_categories, size_t equip_count,
+                                       uint64_t seed, const uint16_t* material_pool,
+                                       size_t pool_size, ThreeSlotRecipe* out,
+                                       size_t out_capacity, size_t* out_count,
+                                       size_t* out_reroll_count = nullptr);
 
 // 注入/清空动态配方表（进档时调用；游戏主线程）。recipes 为空或 count 为 0 → 清空。
 // count 超 kMaxDynamicRecipes → 截断。

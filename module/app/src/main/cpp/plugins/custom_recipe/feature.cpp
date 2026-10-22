@@ -35,6 +35,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
+const contracts::SaveFactsApi* g_save_facts = nullptr;
 const contracts::QolCustomRecipeWritePort* g_write_port = nullptr;
 uint64_t g_save_enter_subscription = 0;
 bool valid_craft_item(qol::contracts::QolItemHandle item) {
@@ -96,6 +97,8 @@ const contracts::QolGameHost* game_host() { return g_game; }
 void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts; }
 
 void set_craft_facts(const contracts::CraftFactsApi* facts) { g_craft_facts = facts; }
+
+void set_save_facts(const contracts::SaveFactsApi* facts) { g_save_facts = facts; }
 
 void set_write_port(const contracts::QolCustomRecipeWritePort* port) { g_write_port = port; }
 
@@ -439,21 +442,47 @@ QolResult make_item_rand_bridge(int32_t lo, int32_t hi, int32_t* out) {
 
 void refresh_dynamic_recipes(void* /*ctx*/) {
     three_slot_invalidate_pending();
+    ::custom_recipe::set_dynamic_three_slot_recipes(nullptr, 0);
+    if (g_save_facts == nullptr || g_save_facts->current_slot == nullptr ||
+        g_save_facts->slot_times == nullptr) {
+        log_message(2, "dynamic recipe rebuild skipped: save facts unavailable");
+        return;
+    }
+
+    int32_t slot = -1;
+    const QolResult slot_result = g_save_facts->current_slot(&slot);
+    if (slot_result.ok != kQolOk || slot < 0 || slot >= 3) {
+        log_message(2, "dynamic recipe rebuild skipped: current slot invalid result=%d slot=%d",
+                    slot_result.code, slot);
+        return;
+    }
+
+    uint64_t creation_time_ms = 0;
+    uint64_t save_time_ms = 0;
+    const QolResult time_result =
+        g_save_facts->slot_times(slot, &creation_time_ms, &save_time_ms);
+    (void)save_time_ms;
+    if (time_result.ok != kQolOk || creation_time_ms == 0) {
+        log_message(2, "dynamic recipe rebuild skipped: creation time unavailable slot=%d result=%d",
+                    slot, time_result.code);
+        return;
+    }
+
     ::custom_recipe::ThreeSlotRecipe buffer[::custom_recipe::kMaxDynamicRecipes];
     size_t n = 0;
-    const QolResult result = ::custom_recipe::build_dynamic_recipes(
+    size_t rerolls = 0;
+    const QolResult result = ::custom_recipe::build_dynamic_recipes_seeded(
         ::custom_recipe::kSpecialEquipCategories, ::custom_recipe::kSpecialEquipCategoryCount,
-        ::custom_recipe::kMaterialPool, ::custom_recipe::kMaterialPoolSize,
-        &qol::features::custom_recipe::random_inclusive, buffer,
-        ::custom_recipe::kMaxDynamicRecipes, &n);
+        creation_time_ms, ::custom_recipe::kMaterialPool, ::custom_recipe::kMaterialPoolSize,
+        buffer, ::custom_recipe::kMaxDynamicRecipes, &n, &rerolls);
     if (result.ok != kQolOk) {
-        log_message(2, "dynamic recipe rebuild failed stage=random result=%d", result.code);
+        log_message(2, "dynamic recipe rebuild failed stage=seeded_catalog result=%d",
+                    result.code);
         return;
     }
     ::custom_recipe::set_dynamic_three_slot_recipes(buffer, n);
-    log_message(1, "dynamic special recipes rebuilt count=%zu equip=%zu materialPool=%zu", n,
-                ::custom_recipe::kSpecialEquipCategoryCount,
-                ::custom_recipe::kMaterialPoolSize);
+    log_message(1, "dynamic special recipes rebuilt count=%zu slot=%d rerolls=%zu", n, slot,
+                rerolls);
 }
 
 void refresh_dynamic_recipes_event(void* /*ctx*/, const void* /*payload*/) {

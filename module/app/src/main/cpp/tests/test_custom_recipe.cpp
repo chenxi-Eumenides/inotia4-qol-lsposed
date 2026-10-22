@@ -663,181 +663,141 @@ static void test_max_socket_enchant_recipe() {
 }
 
 // ---------------------------------------------------------------------------
-// 动态特殊装备配方：进档随机生成「装备 → 3 个不同材料（顺序严格）」的映射。
+// 静态和动态配方共用精确匹配语义：ordered、unordered、通配与空槽。
 // ---------------------------------------------------------------------------
-static const int* g_rand_seq = nullptr;
-static size_t g_rand_len = 0;
-static size_t g_rand_pos = 0;
+static void test_recipe_match_helpers() {
+    size_t n = 0;
+    const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
+    CHECK(n == 8);
 
-// 可编程随机序列（typed 输出型）：取值 = lo + (seq[i] mod span)。
-static void set_rand_seq(const int* seq, size_t len) {
-    g_rand_seq = seq;
-    g_rand_len = len;
-    g_rand_pos = 0;
+    const uint16_t leather[3] = {35, 0, 41};
+    const uint16_t leather_filled[3] = {35, 33, 41};
+    const uint16_t leather_swapped[3] = {41, 0, 35};
+    CHECK(cr::three_slot_recipe_matches(recipes[0], leather));
+    CHECK(!cr::three_slot_recipe_matches(recipes[0], leather_filled));
+    CHECK(!cr::three_slot_recipe_matches(recipes[0], leather_swapped));
+    CHECK(cr::match_static_three_slot(leather) == &recipes[0]);
+
+    const uint16_t potion_scroll[3] = {5, 16, 5};
+    const uint16_t potion_scroll_empty[3] = {0, 5, 16};
+    CHECK(cr::three_slot_recipe_matches(recipes[1], potion_scroll));
+    CHECK(!cr::three_slot_recipe_matches(recipes[1], potion_scroll_empty));
 }
 
-static QolResult fake_rand(int32_t lo, int32_t hi, int32_t* out) {
-    if (out == nullptr || lo > hi) {
-        return qol::contracts::error(kQolErrInvalidArgument, "bad rand interval", 17);
-    }
-    if (g_rand_seq == nullptr || g_rand_len == 0) {
-        return qol::contracts::error(kQolErrNotReady, "no rand sequence", 17);
-    }
-    const int32_t span = hi - lo + 1;
-    const int v = g_rand_seq[g_rand_pos++ % g_rand_len];
-    *out = lo + (v % span);
-    return qol::contracts::ok();
-}
-
-// 恒定失败随机源：错误必须原样传播，不得返回半成品表。
-static QolResult failing_rand(int32_t, int32_t, int32_t* out) {
-    if (out != nullptr) *out = 0;
-    return qol::contracts::error(kQolErrBlocked, "rand blocked", 12);
-}
-
-// 越界随机值：必须显式报错，不静默钳制。
-static QolResult out_of_range_rand(int32_t, int32_t hi, int32_t* out) {
-    if (out != nullptr) *out = hi + 1;
-    return qol::contracts::ok();
-}
-
-static size_t build_dynamic(const uint16_t* equips, size_t equip_count, const uint16_t* pool,
-                            size_t pool_size, QolResult (*rand_fn)(int32_t, int32_t, int32_t*),
-                            cr::ThreeSlotRecipe* out, size_t capacity, bool* ok,
-                            QolResult* result = nullptr) {
-    size_t count = 0;
-    const QolResult value =
-        cr::build_dynamic_recipes(equips, equip_count, pool, pool_size, rand_fn, out, capacity,
-                                  &count);
-    if (ok != nullptr) *ok = value.ok == kQolOk;
-    if (result != nullptr) *result = value;
-    return count;
+static bool same_dynamic_recipe(const cr::ThreeSlotRecipe& left,
+                                const cr::ThreeSlotRecipe& right) {
+    return left.slots[0] == right.slots[0] && left.slots[1] == right.slots[1] &&
+           left.slots[2] == right.slots[2] && left.ordered == right.ordered &&
+           left.product == right.product && left.product_mode == right.product_mode &&
+           left.scale_permille == right.scale_permille &&
+           left.same_first_last == right.same_first_last;
 }
 
 static void test_dynamic_special_recipes() {
-    cr::set_dynamic_three_slot_recipes(nullptr, 0);  // 前置：从空表开始
-    const uint16_t equips[2] = {485, 493};
-    const uint16_t pool[4] = {33, 35, 41, 57};  // 秘银/皮革/魔法衣料/生命之叶
-    // 池下标 4（== pool_size）是「空」项 → 类别 0。
-    constexpr size_t kEmptyIdx = 4;
-    cr::ThreeSlotRecipe out[8];
+    cr::set_dynamic_three_slot_recipes(nullptr, 0);
+    cr::ThreeSlotRecipe first[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe repeated[cr::kMaxDynamicRecipes]{};
+    cr::ThreeSlotRecipe changed[cr::kMaxDynamicRecipes]{};
+    size_t first_count = 0;
+    size_t repeated_count = 0;
+    size_t changed_count = 0;
+    size_t rerolls = 0;
+    constexpr uint64_t kSeed = UINT64_C(0x123456789ABCDEF0);
 
-    // A) 三格全有料：抽到池下标 0/1/2 → 33/35/41。顺序 = 抽取次序。
-    {
-        const int seq[] = {0, 1, 2};
-        set_rand_seq(seq, 3);
-        bool ok = false;
-        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
-        CHECK(ok);
-        CHECK(n == 1);
-        CHECK(out[0].ordered);
-        CHECK(out[0].product == 485);
-        CHECK(out[0].product_mode == cr::ProductMode::kFixedCategory);
-        CHECK(out[0].slots[0] == 33);
-        CHECK(out[0].slots[1] == 35);
-        CHECK(out[0].slots[2] == 41);
+    CHECK(cr::build_dynamic_recipes_seeded(
+              cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, kSeed,
+              cr::kMaterialPool, cr::kMaterialPoolSize, first, cr::kMaxDynamicRecipes,
+              &first_count, &rerolls).ok == kQolOk);
+    CHECK(first_count == cr::kSpecialEquipCategoryCount);
+    CHECK(cr::build_dynamic_recipes_seeded(
+              cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, kSeed,
+              cr::kMaterialPool, cr::kMaterialPoolSize, repeated, cr::kMaxDynamicRecipes,
+              &repeated_count).ok == kQolOk);
+    CHECK(repeated_count == first_count);
+    for (size_t i = 0; i < first_count; ++i) {
+        CHECK(same_dynamic_recipe(first[i], repeated[i]));
+        CHECK(first[i].ordered);
+        CHECK(first[i].product == cr::kSpecialEquipCategories[i]);
+        CHECK(first[i].product_mode == cr::ProductMode::kFixedCategory);
+        const uint16_t* slots = first[i].slots;
+        CHECK(slots[0] != slots[1] && slots[0] != slots[2] && slots[1] != slots[2]);
+        CHECK(cr::match_static_three_slot(slots, &fake_is_special) == nullptr);
     }
 
-    // B) 「空」是池里的普通候选：抽到空项 → 该格写 0（匹配语义 = 该格必须为空）。
-    {
-        const int seq[] = {0, 1, static_cast<int>(kEmptyIdx)};
-        set_rand_seq(seq, 3);
-        bool ok = false;
-        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
-        CHECK(ok);
-        CHECK(n == 1);
-        CHECK(out[0].slots[0] == 33);
-        CHECK(out[0].slots[1] == 35);
-        CHECK(out[0].slots[2] == 0);
-    }
-
-    // C) 空可以落在任意格（含第 0 格）。
-    {
-        const int seq[] = {static_cast<int>(kEmptyIdx), 1, 2};
-        set_rand_seq(seq, 3);
-        bool ok = false;
-        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
-        CHECK(ok);
-        CHECK(n == 1);
-        CHECK(out[0].slots[0] == 0);
-        CHECK(out[0].slots[1] == 35);
-        CHECK(out[0].slots[2] == 41);
-    }
-
-    // D) 「3 个不同」按池下标去重 ⇒ 空项最多出现一次（不可能三格全空）。
-    {
-        const int seq[] = {static_cast<int>(kEmptyIdx), static_cast<int>(kEmptyIdx), 2, 3};
-        set_rand_seq(seq, 4);
-        bool ok = false;
-        const size_t n = build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok);
-        CHECK(ok);
-        CHECK(n == 1);
-        const int zeros = (out[0].slots[0] == 0) + (out[0].slots[1] == 0) + (out[0].slots[2] == 0);
-        CHECK(zeros <= 1);
-    }
-
-    // E) 两条装备各生成一条；空格语义经 match_three_slot 生效（空格要求该格确实为空）。
-    {
-        const int seq[] = {0, 1, 2, static_cast<int>(kEmptyIdx), 3, 0};
-        set_rand_seq(seq, 6);
-        bool ok = false;
-        const size_t n = build_dynamic(equips, 2, pool, 4, &fake_rand, out, 8, &ok);
-        CHECK(ok);
-        CHECK(n == 2);
-        CHECK(out[0].product == 485);
-        CHECK(out[1].product == 493);
-        cr::set_dynamic_three_slot_recipes(out, n);
-        CHECK(cr::dynamic_three_slot_recipe_count() == 2);
-        const uint16_t hit0[3] = {out[0].slots[0], out[0].slots[1], out[0].slots[2]};
-        const cr::ThreeSlotRecipe* h0 = cr::match_three_slot(hit0);
-        CHECK(h0 != nullptr && h0->product == 485);
-        // 顺序严格：换位后不得再命中 485。
-        const uint16_t swap0[3] = {out[0].slots[1], out[0].slots[0], out[0].slots[2]};
-        const cr::ThreeSlotRecipe* s0 = cr::match_three_slot(swap0);
-        CHECK(s0 == nullptr || s0->product != 485);
-        // 第 2 条含空格：把该格填上料就不该命中。
-        if (out[1].slots[0] == 0) {
-            const uint16_t filled[3] = {33, out[1].slots[1], out[1].slots[2]};
-            const cr::ThreeSlotRecipe* f = cr::match_three_slot(filled);
-            CHECK(f == nullptr || f->product != 493);
+    // 不同存档 seed 应产生变化；跨多个 seed 做非脆弱检查，不依赖某一条具体随机组合。
+    bool seeds_changed_list = false;
+    for (uint64_t seed = kSeed + 1; seed < kSeed + 8 && !seeds_changed_list; ++seed) {
+        CHECK(cr::build_dynamic_recipes_seeded(
+                  cr::kSpecialEquipCategories, cr::kSpecialEquipCategoryCount, seed,
+                  cr::kMaterialPool, cr::kMaterialPoolSize, changed, cr::kMaxDynamicRecipes,
+                  &changed_count).ok == kQolOk);
+        bool differs = changed_count != first_count;
+        for (size_t i = 0; i < first_count && !differs; ++i) {
+            differs = !same_dynamic_recipe(first[i], changed[i]);
         }
+        seeds_changed_list = differs;
     }
+    CHECK(seeds_changed_list);
 
-    // FAIL-CLOSED：池不足 3 条 / 随机源为空 / 容量为 0 / 输出计数为空 → 显式错误。
-    set_rand_seq(nullptr, 0);
-    QolResult result = qol::contracts::ok();
-    CHECK(build_dynamic(equips, 2, pool, 2, &fake_rand, out, 8, nullptr, &result) == 0 &&
-          result.ok != kQolOk);
-    CHECK(build_dynamic(equips, 2, pool, 4, nullptr, out, 8, nullptr, &result) == 0 &&
-          result.ok != kQolOk);
-    CHECK(build_dynamic(equips, 2, pool, 4, &fake_rand, out, 0, nullptr, &result) == 0 &&
-          result.ok != kQolOk);
-    size_t ignored = 0;
-    CHECK(cr::build_dynamic_recipes(equips, 2, pool, 4, &fake_rand, out, 8, nullptr).ok != kQolOk);
-    CHECK(cr::build_dynamic_recipes(nullptr, 1, pool, 4, &fake_rand, out, 8, &ignored).ok !=
-          kQolOk);
+    // 用皮革/魔法衣料/空槽构造固定配方冲突。挑选发生重抽的 seed，并确认另一个类别
+    // 的结果与单独生成时完全相同，说明重抽只消费该类别自己的 PRNG 状态。
+    const uint16_t collision_pool[] = {33, 35, 41};
+    const uint16_t equip_a[] = {485};
+    const uint16_t equip_b[] = {493};
+    const uint16_t both_equips[] = {485, 493};
+    cr::ThreeSlotRecipe recipe_a{};
+    cr::ThreeSlotRecipe recipe_b{};
+    cr::ThreeSlotRecipe both[2]{};
+    bool found_isolated_collision = false;
+    for (uint64_t seed = 1; seed <= 4096 && !found_isolated_collision; ++seed) {
+        size_t count_a = 0;
+        size_t count_b = 0;
+        size_t count_both = 0;
+        size_t rerolls_a = 0;
+        size_t rerolls_b = 0;
+        if (cr::build_dynamic_recipes_seeded(equip_a, 1, seed, collision_pool, 3,
+                                             &recipe_a, 1, &count_a, &rerolls_a).ok != kQolOk ||
+            cr::build_dynamic_recipes_seeded(equip_b, 1, seed, collision_pool, 3,
+                                             &recipe_b, 1, &count_b, &rerolls_b).ok != kQolOk ||
+            cr::build_dynamic_recipes_seeded(both_equips, 2, seed, collision_pool, 3,
+                                             both, 2, &count_both).ok != kQolOk) {
+            continue;
+        }
+        found_isolated_collision = rerolls_a > 0 && rerolls_b == 0 && count_a == 1 &&
+                                   count_b == 1 && count_both == 2 &&
+                                   same_dynamic_recipe(both[0], recipe_a) &&
+                                   same_dynamic_recipe(both[1], recipe_b);
+    }
+    CHECK(found_isolated_collision);
+    CHECK(cr::match_static_three_slot(recipe_a.slots, &fake_is_special) == nullptr);
 
-    // CR03：随机源失败/越界必须原样传播（不返回半成品表、不钳制）。
-    const int seq[] = {0, 1, 2};
-    set_rand_seq(seq, 3);
-    CHECK(build_dynamic(equips, 1, pool, 4, &failing_rand, out, 8, nullptr, &result) == 0 &&
-          result.code == kQolErrBlocked);
-    CHECK(build_dynamic(equips, 1, pool, 4, &out_of_range_rand, out, 8, nullptr, &result) == 0 &&
-          result.ok != kQolOk);
-
-    // 动态表代际：每次替换（含清空）递增，供 SaveEnter/disable 作废在途确认（CR08）。
-    set_rand_seq(seq, 3);
+    // 动态表每次替换（含清空）递增，清空后动态配方立即失效。
     const uint64_t before_generation = cr::dynamic_recipe_generation();
-    bool ok = false;
-    CHECK(build_dynamic(equips, 1, pool, 4, &fake_rand, out, 8, &ok) == 1 && ok);
-    cr::set_dynamic_three_slot_recipes(out, 1);
+    cr::set_dynamic_three_slot_recipes(first, first_count);
     const uint64_t after_generation = cr::dynamic_recipe_generation();
     CHECK(after_generation != before_generation);
+    CHECK(cr::dynamic_three_slot_recipe_count() == first_count);
+    for (size_t i = 0; i < first_count; ++i) {
+        const cr::ThreeSlotRecipe* hit = cr::match_three_slot(first[i].slots, &fake_is_special);
+        CHECK(hit != nullptr && hit->product == first[i].product);
+        CHECK(cr::match_static_three_slot(first[i].slots, &fake_is_special) == nullptr);
+    }
     cr::set_dynamic_three_slot_recipes(nullptr, 0);
     CHECK(cr::dynamic_recipe_generation() != after_generation);
-
-    // 清空后动态配方立即失效。
     CHECK(cr::dynamic_three_slot_recipe_count() == 0);
+
+    // 无效 seed、输出容量不足和重复池项均 fail-closed，不返回半成品计数。
+    size_t out_count = 123;
+    CHECK(cr::build_dynamic_recipes_seeded(equip_a, 1, 0, collision_pool, 3,
+                                           &recipe_a, 1, &out_count).ok != kQolOk);
+    CHECK(out_count == 0);
+    CHECK(cr::build_dynamic_recipes_seeded(equip_a, 1, 1, collision_pool, 3,
+                                           &recipe_a, 0, &out_count).ok != kQolOk);
+    CHECK(out_count == 0);
+    const uint16_t duplicate_pool[] = {33, 35, 35};
+    CHECK(cr::build_dynamic_recipes_seeded(equip_a, 1, 1, duplicate_pool, 3,
+                                           &recipe_a, 1, &out_count).ok != kQolOk);
+    CHECK(out_count == 0);
 }
 
 // 宝石数值缩放：**ceil**(value × permille / 1000)，钳到 [0, 2047]。
@@ -991,6 +951,7 @@ int main() {
     test_table_group_bits_restore();
     test_chaos_scroll_recipe();
     test_max_socket_enchant_recipe();
+    test_recipe_match_helpers();
     test_dynamic_special_recipes();
     test_scaled_jewel_value();
     test_recipe_book_bit_invariant();

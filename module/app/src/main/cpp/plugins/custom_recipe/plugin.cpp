@@ -9,6 +9,7 @@
 #include "../../contracts/game_ports/craft_ui_write_port.h"
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/item_facts.h"
+#include "../../contracts/save_facts.h"
 #include "../../contracts/text_layer.h"
 #include "../../contracts/version.h"
 #include "feature.h"
@@ -172,6 +173,16 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     const auto* craft_facts = static_cast<const contracts::CraftFactsApi*>(iface);
 
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kSaveFactsCapabilityId,
+            {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor}, &iface)) ||
+        iface == nullptr) {
+        return 1;
+    }
+    const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(iface);
+    if (save_facts->current_slot == nullptr || save_facts->slot_times == nullptr) return 1;
+
     // 通过校验后开始登记；任何中途失败立即幂等清理本次注册，不依赖 Host 后帧清理。
     const uint64_t text_consumer =
         text_api->subscribe(kTextPhaseAfter, kTextKindModify, &recipe_text_modify, nullptr);
@@ -205,6 +216,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_text_consumer = text_consumer;
     set_item_facts(item_facts);
     set_craft_facts(craft_facts);
+    set_save_facts(save_facts);
     set_write_port(recipe_write_port);
     set_context(ctx);
     // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
@@ -230,6 +242,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     ui::clear();
     set_item_facts(nullptr);
     set_craft_facts(nullptr);
+    set_save_facts(nullptr);
     set_write_port(nullptr);
     ::custom_recipe::custom_recipe_table_deactivate();
 }
@@ -282,6 +295,8 @@ const contracts::CapabilityRequirement kRequires[] = {
                       static_cast<uint16_t>(contracts::kItemFactsVersionMinor)}},
     {contracts::kCraftFactsCapabilityId,
      {contracts::kCraftFactsVersion.major, contracts::kCraftFactsVersion.minor}},
+    {contracts::kSaveFactsCapabilityId,
+     {contracts::kSaveFactsVersionMajor, contracts::kSaveFactsVersionMinor}},
     // 配方呈现文案经文本层能力登记（ADR 0001 D3）。
     {contracts::kTextLayerCapabilityId,
      {static_cast<uint16_t>(contracts::kTextLayerVersionMajor),
@@ -324,7 +339,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        3, kRequires,            // requires=item.facts + craft.facts + text_layer
+        4, kRequires,             // requires=item.facts + craft.facts + save.facts + text_layer
         1, kOptionalRequires,    // optional_requires=[attribute.quality]
         0, nullptr,              // provides=无（craft_result 内部化）
         claim_table.count, claim_table.items,  // resources=12 UI hooks + ownership
