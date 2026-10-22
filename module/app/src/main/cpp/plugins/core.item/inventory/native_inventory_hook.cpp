@@ -38,6 +38,7 @@ using UiEquipOkConfirmUseItemFn = void (*)(void*);
 using UiEquipButtonUseMercenarySealExeFn = void (*)(void*);
 using UiEquipOkDestroyItemFn = uint64_t (*)();
 using UiEquipEquipControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
+using CharProcessShortcutFn = int (*)(void*, int);
 using InvenSaveItemDirectFn = int (*)(void*, int32_t, int32_t);
 using ItemSystemDivideFn = void* (*)(void*, int32_t);
 using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
@@ -218,6 +219,7 @@ UiEquipButtonUseMercenarySealExeFn g_backup_button_use_mercenary_seal_exe = null
 // （弹窗展示金额），用 UiEquipOkDestroyItemFn（uint64_t()）捕获 x0。
 UiEquipOkDestroyItemFn g_backup_ok_destroy_item = nullptr;
 UiEquipEquipControlEventProcFn g_backup_equip_control_event_proc = nullptr;
+CharProcessShortcutFn g_backup_char_process_shortcut = nullptr;
 // S2 写侧进位框架新增 hook（H-18/H-19/H-20/H-21）的 backup。
 InvenSaveItemDirectFn g_backup_save_item_direct = nullptr;
 ItemSystemDivideFn g_backup_item_system_divide = nullptr;
@@ -1629,8 +1631,25 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
                        g_backup_equip_control_event_proc, control, event, x2, param);
 }
 
+int char_process_shortcut_wrapper(void* character, int shortcut) {
+    const qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"hook:CHAR_ProcessShortcut"});
+    if (g_backup_char_process_shortcut == nullptr) {
+        backup_missing("hook:CHAR_ProcessShortcut");
+        return 0;
+    }
+    const int result = g_backup_char_process_shortcut(character, shortcut);
+    if (inventory_log_debug_enabled()) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "CHAR_ProcessShortcut character=%p shortcut=%d result=%d",
+                            character, shortcut, result);
+    }
+    return result;
+}
+
 // ---------------------------------------------------------------------------
-// 声明式资源声明（B2a-1）：24 条入口 hook 的 claims 表。wrapper 业务体在本 TU，
+// 声明式资源声明（B2a-1）：入口 hook 的 claims 表。wrapper 业务体在本 TU，
 // handler 取址只能在此处；同插件的 plugin.cpp 经本目录 claims.h 直接引用
 // inventory_hooks_claims / inventory_hooks_bind_backup 取得本表并交还 backup。
 // 安装顺序、失败回滚与物理还原归宿主声明式引擎（hooks/install + hooks/transaction +
@@ -1648,6 +1667,13 @@ constexpr const char* kClaimReason =
      nullptr, 120, reinterpret_cast<void*>(&HANDLER)}
 
 const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
+    {"hook:CHAR_ProcessShortcut", "F_CHAR_PROCESS_SHORTCUT_VMA",
+     qol::contracts::ResourceMechanism::kEntryHook,
+     qol::contracts::ResourcePolicy::kPrivate,
+     qol::contracts::ResourceRequirement::kOptional,
+     qol::contracts::ResourceFailure::kFailSoft, true, kClaimOwner,
+     "shortcut-use diagnosis: log arguments/result and transparently call the original",
+     nullptr, 120, reinterpret_cast<void*>(&char_process_shortcut_wrapper)},
     INVENTORY_HOOK_CLAIM("hook:INVEN_FindItem", "F_FIND_ITEM_VMA", find_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:INVEN_HaveItem", "F_INVEN_HAVE_ITEM_VMA", have_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:INVEN_GetItemCount", "F_INVEN_GET_ITEM_COUNT_VMA",
@@ -1723,6 +1749,7 @@ void** backup_slot_for_handler(void* handler) {
     BACKUP_SLOT(move_item_wrapper, g_backup_move_item);
     BACKUP_SLOT(equip_control_event_proc_wrapper, g_backup_equip_control_event_proc);
     BACKUP_SLOT(refresh_item_area_wrapper, g_backup_refresh_item_area);
+    BACKUP_SLOT(char_process_shortcut_wrapper, g_backup_char_process_shortcut);
     BACKUP_SLOT(save_item_direct_wrapper, g_backup_save_item_direct);
     BACKUP_SLOT(item_system_divide_wrapper, g_backup_item_system_divide);
     BACKUP_SLOT(make_item_wrapper, g_backup_make_item);
@@ -1776,6 +1803,10 @@ int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
         void** slot = backup_slot_for_handler(claim.handler);
         if (slot == nullptr) return 1;
         *slot = backup;
+        if (std::strcmp(claim.id, "hook:CHAR_ProcessShortcut") == 0) {
+            QOL_LOG_INFO(QolDomain::kInventory,
+                         "CHAR_ProcessShortcut diagnostic hook bound backup=%p", backup);
+        }
         return 0;
     }
     QOL_LOG_ERROR(QolDomain::kInventory,
