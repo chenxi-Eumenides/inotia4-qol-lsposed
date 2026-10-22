@@ -1001,6 +1001,64 @@ void test_ptr_slot_release_failure_keeps_owner() {
     CHECK(g_ptr_slot_storage == &g_other_handler);
 }
 
+void test_stack_limit_clamp_registration_and_roundtrip() {
+    struct ClampCase {
+        const char* name;
+        uintptr_t vma;
+        uintptr_t offset;
+        uint32_t expected;
+        uint32_t alternate;
+        uint32_t alternate_2;
+        uint32_t replacement;
+    };
+    constexpr ClampCase kClamps[] = {
+        {"P_INVEN_MOVE_ITEM_CLAMP_150", F_INVEN_MOVE_ITEM_VMA, 0x150,
+         0x71018c1fu, 0x7101f81fu, 0x7101fc1fu, 0x710f9c1fu},
+        {"P_INVEN_MOVE_ITEM_CLAMP_158", F_INVEN_MOVE_ITEM_VMA, 0x158,
+         0x52800c77u, 0x52800ff7u, 0, 0x52807cf7u},
+        {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_DC", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xdc,
+         0x71018c7fu, 0x7101f87fu, 0, 0x710f9c7fu},
+        {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xf0,
+         0x71018e9fu, 0x7101fe9fu, 0, 0x710f9e9fu},
+        {"P_INVEN_SAVE_ITEM_DATA_CLAMP_7C", F_INVEN_SAVE_ITEM_DATA_VMA, 0x7c,
+         0x71018a9fu, 0x7101fa9fu, 0, 0x710f9a9fu},
+        {"P_INVEN_FIND_SAVE_SLOT_CLAMP_238", F_INVEN_FIND_SAVE_SLOT_VMA, 0x238,
+         0x71018c1fu, 0x7101f81fu, 0, 0x710f9c1fu},
+    };
+
+    for (const ClampCase& clamp : kClamps) {
+        reset_all();
+        PatchSite site{};
+        CHECK(qol::game::patch_site(clamp.name, &site));
+        CHECK(site.addr == g_base + clamp.vma + clamp.offset);
+        CHECK(site.expected_word == clamp.expected);
+        CHECK(site.word_replace_alternates[0] == clamp.alternate);
+        CHECK(site.word_replace_alternates[1] == clamp.alternate_2);
+        CHECK(site.replacement_word == clamp.replacement);
+        CHECK(site.kind == qol::game::PatchKind::kWordReplace);
+
+        uint32_t storage = 0;
+        const uintptr_t addr = reinterpret_cast<uintptr_t>(&storage);
+        site.addr = addr;
+        CHECK(qol::game::patch_site_override_for_test(clamp.name, site));
+        CHECK(use_memory_word_primitives());
+        const ResourceClaim claim = make_patch_claim(clamp.name, clamp.name, nullptr);
+        const uint32_t known_words[] = {clamp.expected, clamp.alternate, clamp.alternate_2};
+        for (uint32_t original : known_words) {
+            if (original == 0) continue;
+            storage = original;
+            CHECK(install_claim(claim, addr).ok == 0);
+            CHECK(storage == clamp.replacement);
+            CHECK(g_prims.last_expected == original);
+            CHECK(g_prims.last_new_word == clamp.replacement);
+            CHECK(release_claim(claim, addr).ok == 0);
+            CHECK(storage == original);
+            CHECK(g_prims.last_expected == original);
+            CHECK(point_owner(addr) == nullptr && claimed_count() == 0);
+        }
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -1036,6 +1094,7 @@ int main() {
     test_ptr_slot_install_idempotent();
     test_ptr_slot_release_success_and_idempotent();
     test_ptr_slot_release_failure_keeps_owner();
+    test_stack_limit_clamp_registration_and_roundtrip();
     std::printf("patch_layer: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
