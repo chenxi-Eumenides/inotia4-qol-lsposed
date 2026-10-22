@@ -19,7 +19,8 @@ usage() {
   <lspatch|npatch> 取所用 JAR（JAR 文件名含 npatch 即 NPatch，否则 LSPatch；当前默认 LSPatch）。
   不符合固定命名的游戏 APK 直接失败。
   - 第二位置参数（新包名）不支持，传入会明确报错。
-  - 默认覆盖已有输出（--force）；生成前先清理 output/ 下旧集成产物（*lspatch*.apk、*npatch*.apk）。
+  - 默认覆盖同名输出（--force）：只覆盖本次重新生成的同名文件，
+    其他已有集成包（其他变体、其他通道、其他 patcher 的产物）原样保留，不再预先批量清理。
 
 默认值：
   LSPatch JAR：tools/lspatch/lspatch-v1.2-487-release.jar
@@ -190,13 +191,6 @@ if ! mkdir -p "$repo_root/output"; then
     exit 1
 fi
 
-shopt -s nullglob
-old_outputs=("$repo_root/output/"*lspatch*.apk "$repo_root/output/"*npatch*.apk)
-if [[ ${#old_outputs[@]} -gt 0 ]]; then
-    rm -f "${old_outputs[@]}"
-fi
-shopt -u nullglob
-
 # 发布文件名：原始 APK 固定命名 艾诺迪亚4_<name>_<version>.apk，集成 APK 固定命名为
 #   Inotia4_<name>_<version>_<debug|release>_<lspatch|npatch>.apk（后两段由调用方拼装）。
 #   <name> 按变体映射（先判 C18L 再判 C18，避免子串误匹配）：
@@ -284,6 +278,8 @@ for target_apk in "${game_apks[@]}"; do
         continue
     fi
 
+    # 只覆盖本次生成的目标文件：mv -f 为同文件系统原子替换，不触碰 output/ 下其他产物，
+    # 生成失败时也保留上一次的同名输出（不会出现“旧包已删、新包未生成”的空窗）。
     mv -f "${patched_apks[0]}" "$output_apk"
     printf '生成集成 APK：%s\n' "$output_apk"
     sha256sum "$output_apk"

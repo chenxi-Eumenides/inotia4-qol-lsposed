@@ -79,8 +79,8 @@ scripts/build-debug.sh
 scripts/build-debug.sh --offline
 # 正式版构建：zipalign 后用默认 debug 签名签名，产物 output/inotia4_qol_lsposed_release_v<version>.apk
 scripts/build-release.sh
-# Debug 产物 → output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha256前12位>.apk；脚本只保留最新 3 份 Debug APK
-# Release 产物 → output/inotia4_qol_lsposed_release_v<version>.apk（与 debug 同证书，可直接覆盖安装）；版本号来自 build.gradle.kts，脚本只保留最新 2 份 Release APK
+# Debug 产物 → output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha256前12位>.apk；脚本只保留最新 3 份模块 Debug APK（不清理集成包）
+# Release 产物 → output/inotia4_qol_lsposed_release_v<version>.apk（与 debug 同证书，可直接覆盖安装）；版本号来自 build.gradle.kts，脚本只保留最新 2 份模块 Release APK（不清理集成包）
 # 如需强制离线，可追加 Gradle 参数：scripts/build-release.sh --offline
 # 命名格式固定：inotia4_qol_lsposed_release_vX.Y.Z.apk（如 v0.7.8）
 # 多目标包名：逗号分隔，同时写入 LSPosed scope.list 和模块运行时过滤。
@@ -94,7 +94,7 @@ scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.goo
 # 发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<日期>] / _c18[_<子版本>]。
 # <模块版本> 从 release 模块 APK 文件名（..._vX.Y.Z.apk）提取，debug 包不追加。
 scripts/patch-apk.sh <模块.apk>
-# 默认覆盖已有输出；生成前先清理 output/ 下旧 NPatch 产物（*npatch*.apk），保持输出目录干净。
+# 默认覆盖同名输出；不预先批量清理 output/，其他变体/通道的已有集成包原样保留。
 # 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks，已入库）签名输出：
 #   - 改版（盗版大修 / monster）本就由该 testkey 签名，集成版与其证书身份一致，可覆盖安装；
 #   - 原版由 Com2us 私钥签名（私钥不可得），集成版签名身份仍与原版不同，需先卸载原版。
@@ -248,8 +248,8 @@ curl -s http://<设备IP>:8088/api/ui/screen
 
 | 脚本 | 用途（含用法） | 运行时机 |
 |---|---|---|
-| `scripts/build-debug.sh` | Debug 构建并复制为 `output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha前12>.apk`，只保留最新 3 份；无参默认 `--offline` | 日常开发与验证；改 Kotlin/Native/构建配置后 |
-| `scripts/build-release.sh` | Release 构建：zipalign 后用默认 debug 签名（`~/.android/debug.keystore`，`CN=Android Debug`，与 debug 包同证书）签名，产物 `output/inotia4_qol_lsposed_release_v<版本>.apk`，只保留最新 2 份；签名关闭 v4（`--v4-signing-enabled false`，不产出 `.idsig`）；版本号取自 `build.gradle.kts` | 仅用户明确要求 release 时（§3.2） |
+| `scripts/build-debug.sh` | Debug 构建并复制为 `output/inotia4_qol_lsposed_debug_<YYMMDDHHMM>_<sha前12>.apk`，只保留最新 3 份模块 Debug APK（不清理集成包）；无参默认 `--offline` | 日常开发与验证；改 Kotlin/Native/构建配置后 |
+| `scripts/build-release.sh` | Release 构建：zipalign 后用默认 debug 签名（`~/.android/debug.keystore`，`CN=Android Debug`，与 debug 包同证书）签名，产物 `output/inotia4_qol_lsposed_release_v<版本>.apk`，只保留最新 2 份模块 Release APK（不清理集成包）；签名关闭 v4（`--v4-signing-enabled false`，不产出 `.idsig`）；版本号取自 `build.gradle.kts` | 仅用户明确要求 release 时（§3.2） |
 | `scripts/patch-apk.sh` | 遍历 `apk/game-apk/*.apk` 逐个生成 NPatch/LSPatch 集成包到 `output/`（发布前缀全 ASCII，版本号附在 `_npatched` 之后） | release 流程第 3 步；更换模块后重出集成包 |
 
 #### 3.4.2 检查与验证

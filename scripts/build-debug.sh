@@ -43,9 +43,12 @@ python3 - "$output_dir" <<'PY'
 import pathlib
 import sys
 
+# 只清理本脚本自己的输出（inotia4_qol_lsposed_debug_<时间戳>_<sha前12>.apk）。
+# 不能用 "debug" 子串匹配：集成包名同样含 _debug_（Inotia4_<变体>_<版本>_debug_<patcher>.apk），
+# 匹配到会按 3 份上限把 patch-apk.sh 生成的集成交付物一并删掉。
 output_dir = pathlib.Path(sys.argv[1])
 debug_apks = sorted(
-    (path for path in output_dir.glob("*.apk") if "debug" in path.name.lower()),
+    output_dir.glob("inotia4_qol_lsposed_debug_*.apk"),
     key=lambda path: path.stat().st_mtime_ns,
     reverse=True,
 )
