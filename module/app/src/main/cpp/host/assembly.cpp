@@ -52,6 +52,7 @@
 #include "plugins/core.ui_state/plugin.h"
 #include "plugins/push_all/plugin.h"
 #include "plugins/push_all/settings_contribution.h"
+#include "plugins/popup_blocker/plugin.h"
 #include "plugins/core.quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
 #include "plugins/save_backup/settings_contribution.h"
@@ -219,6 +220,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_item::plugin_descriptor},
     {&features::core_ui_state::plugin_descriptor},
     {&features::push_all::plugin_descriptor},
+    {&features::popup_blocker::plugin_descriptor},
     {&features::core_quest::plugin_descriptor},
     {&features::save_backup::plugin_descriptor, nullptr, true},
     {&features::simple_mode::plugin_descriptor},

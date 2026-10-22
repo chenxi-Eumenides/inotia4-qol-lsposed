@@ -699,6 +699,7 @@ constexpr uintptr_t F_POPUPSTATE_EXIST_VMA = 0x1223f8; // int () 弹窗栈是否
 constexpr uintptr_t F_BUTTON_OK_EXE_VMA = 0xca9d8;      // void () 弹窗确定按钮执行（bOn=0 + 调 fpOK(param)；无参直接调用，v0.3.11 frida 验证）
 constexpr uintptr_t F_BUTTON_CANCEL_EXE_VMA = 0xcaa78;  // void () 弹窗取消按钮执行（bOn=0 + 调 fpCancel(param) 或 Free；无参直接调用）
 constexpr uintptr_t F_TUTORIAL_GETSTATE_VMA = 0x16de40; // int () 教学状态轮转（CHAR_ProcessShortcut 0xec340 教学完成链：读 [0x2f4000+0xce0] 对象 5 槽左移 + 写 0x63 到 [+0x28]，返回旧首槽值）
+constexpr uintptr_t F_TUTORIAL_ADDSTATE_VMA = 0x16ddc8; // void (long) 教学状态入队（5 槽轮转，仅接受 >5 且 !=99）；入口 RET 后状态恒不入队，教程提示与教学暂停均不触发
 constexpr uintptr_t F_NETWORKSTORE_SET_STATE_VMA = 0x15b0c4;  // void (int) 写 NetworkStore state（0 复位）——反汇编证实 SetState@0x15b0c4，0x15b0d0 是 GetState（只读）
 constexpr uintptr_t F_OPEN_ITEM_BOX_VMA = 0x10e970;   // int (int32_t category) 开箱（按表权重随机出物品，内部调 INVEN_SaveItem）
 constexpr uintptr_t F_RELEASE_SEALED_VMA = 0x10af4c;  // int (int32_t category) 解封（类别需在 0x3a6-0x3ab）
