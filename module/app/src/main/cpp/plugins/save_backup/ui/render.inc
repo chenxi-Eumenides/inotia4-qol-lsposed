@@ -203,10 +203,6 @@ void page_btn_draw(void* ctrl) {
     }
 }
 
-void msg_label_draw(void*) {
-    component_text("存档备份", ROOT_W / 2, MSG_Y + 0x18, UI_OPTION_TEXT, 2, 1);
-}
-
 void sync_component_enabled_locked() {
     if (g_ui_components == nullptr) return;
     const bool modal = g_dialog != DialogKind::kNone;

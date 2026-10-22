@@ -517,7 +517,11 @@ void custom_map_panel_enter() {
         contracts::ui_theme::kNavBoxAbsY - inset_y, contracts::ui_theme::kNavBoxW,
         contracts::ui_theme::kNavBoxH}, contracts::kUiNavButtonAuto, nullptr, nullptr};
     (void)g_components->nav_button_create(&nav, g_root, &g_back);
-    if (g_ui->load_image_unit != nullptr) (void)g_ui->load_image_unit(0x0f);
+    if (g_ui->load_image_unit != nullptr) {
+        (void)g_ui->load_image_unit(0x4f);
+        (void)g_ui->load_image_unit(0x50);
+        (void)g_ui->load_image_unit(0x0f);
+    }
     rebuild_left_list();
     if (!g_maps.empty() && g_left == nullptr) { destroy_panel(); return; }
     g_active = true;
@@ -551,6 +555,12 @@ void custom_map_panel_process() {
     if (!contracts::succeeded(g_ui->begin_frame())) return;
     int64_t root_x = 0, root_y = 0;
     if (contracts::succeeded(g_ui->control_absolute_origin(g_root, &root_x, &root_y))) {
+        if (g_ui->draw_image_part != nullptr) {
+            (void)g_ui->draw_image_part(0x4f, 0, root_x + kPanelW / 2 - 300,
+                                        root_y + kPanelH / 2, 2, 1);
+            (void)g_ui->draw_image_part(0x50, 0, root_x + kPanelW / 2 + 300,
+                                        root_y + kPanelH / 2, 2, 1);
+        }
         const UiRect left{root_x + kLeftView.x - 8, root_y + kLeftView.y - 8,
                           kLeftView.w + 16, kLeftView.h + 16};
         const UiRect right{root_x + kMapView.x - 8, root_y + kMapView.y - 8,

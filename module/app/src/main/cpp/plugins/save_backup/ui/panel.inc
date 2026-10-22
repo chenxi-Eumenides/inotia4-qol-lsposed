@@ -9,8 +9,7 @@ UiRect panel_root_rect() {
     const int64_t screen_w = ROOT_W + static_cast<int64_t>(inset_width) * 2;
     const int64_t screen_h = ROOT_H + static_cast<int64_t>(inset_height) * 2;
     if (screen_w <= 0 || screen_h <= 0) return {0, 0, ROOT_W, ROOT_H};
-    // 与 settings_root_rect 完全同投影口径（y=0）。整体上移后内容顶 FRAME_Y=0x60 与设置页
-    // 网格 GRID_Y=0x60 同高；标题/消息 MSG_Y=0x18 与设置页 header HEADER_Y=0x18 同高（绝对 y=0x18）。
+    // 与 settings_root_rect 完全同投影口径（y=0）。整体上移后内容顶 FRAME_Y=0x60 与设置页网格 GRID_Y=0x60 同高。
     const int64_t logical_w = screen_w * ROOT_H / screen_h;
     return {(logical_w - ROOT_W) / 2, 0, ROOT_W, ROOT_H};
 }
@@ -261,7 +260,6 @@ void panel_process_impl() {
     if (g_prev_btn) page_btn_draw(g_prev_btn);
     if (g_next_btn) page_btn_draw(g_next_btn);
     if (g_back_btn && g_ui_components != nullptr) (void)g_ui_components->nav_button_draw(g_back_btn);
-    msg_label_draw(g_root);
     ui_end_frame();
 }
 

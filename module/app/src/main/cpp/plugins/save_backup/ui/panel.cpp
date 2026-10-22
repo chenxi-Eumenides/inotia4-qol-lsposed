@@ -63,12 +63,6 @@
 #define PAGE_ROW_Y (CONTENT_BOTTOM - LIST_ROW_H / 2 - LIST_PAGE_BTN_H)
 #define FRAME_Y (AUTO_Y + AUTO_H + GAP)
 #define FRAME_H (PAGE_ROW_Y - GAP - FRAME_Y)
-// 顶部消息/标题区：与设置页 header 标签同高（settings.cpp HEADER_Y=0x18，label rect 高 HEADER_H=0x28）。
-//   MSG_Y + root.y == 0x18（root.y=0 → MSG_Y=0x18）；文本绘制偏移同 settings header_draw 的 0x18。
-#define MSG_X (ROOT_W / 2 - MSG_W / 2)
-#define MSG_Y 0x18
-#define MSG_W 0x120
-#define MSG_H 0x28
 // ABGR colors are only passed to the component text primitive; controls use component theme states.
 #define UI_GOLD 0xFF00B4D7
 #define COLOR_ARROW_GOLD 0xFFA7CCDB
@@ -540,7 +534,6 @@ void list_btn_draw(void* ctrl);
 void auto_btn_draw(void* ctrl);
 void sync_component_enabled_locked();
 void page_btn_draw(void* ctrl);
-void msg_label_draw(void* ctrl);
 void root_decor_draw();
 
 // ============== 几何（控件 rect）==============
