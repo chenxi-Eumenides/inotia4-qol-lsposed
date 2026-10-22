@@ -5,6 +5,8 @@
 #include <cstring>
 
 #include "feature.h"
+#include "../../contracts/game_ports/custom_map_resource_port.h"
+#include "../../contracts/game_ports/ports.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/static_data.h"
 #include "../../contracts/ui.h"
@@ -32,6 +34,11 @@ const contracts::CapabilityRequirement kRequires[] = {
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kStaticDataCapabilityId,
      {contracts::kStaticDataVersion.major, contracts::kStaticDataVersion.minor}},
+};
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_CUSTOM_MAP_RESOURCE,
+     {contracts::kQolPortCustomMapResourceVersion.major,
+      contracts::kQolPortCustomMapResourceVersion.minor}},
 };
 
 const contracts::PanelCallbacks kPanelCallbacks{
@@ -72,6 +79,22 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_install_error = "install failed: host SDK unavailable";
         return 1;
     }
+    if (ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) {
+        clear_runtime();
+        g_install_error = "install failed: custom map resource port unavailable";
+        return 1;
+    }
+    const auto* resource_port =
+        static_cast<const contracts::QolCustomMapResourcePort*>(ctx.ports[0]);
+    if (resource_port->abi.size < sizeof(*resource_port) ||
+        resource_port->abi.major != contracts::kQolPortCustomMapResourceVersion.major ||
+        resource_port->abi.minor < contracts::kQolPortCustomMapResourceVersion.minor ||
+        resource_port->decode_lzma_container == nullptr ||
+        resource_port->allocate_game_buffer == nullptr) {
+        clear_runtime();
+        g_install_error = "install failed: custom map resource port invalid";
+        return 1;
+    }
     const void* components_iface = nullptr;
     const auto* sdk = ctx.sdk;
     if (sdk->capabilities.require == nullptr || sdk->panels.register_provider == nullptr ||
@@ -100,8 +123,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_confirmation = static_cast<const contracts::UiConfirmationApi*>(confirmation_iface);
-    custom_map_panel_bind(sdk, components);
-    initialize(ctx.sdk);
+    custom_map_panel_bind(sdk, components, resource_port);
+    initialize(ctx.sdk, resource_port);
     return 0;
 }
 
@@ -118,7 +141,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
         }
     }
     custom_map_provider_close();
-    custom_map_panel_bind(nullptr, nullptr);
+    custom_map_panel_bind(nullptr, nullptr, nullptr);
     if (ctx.sdk != nullptr && ctx.sdk->panels.unregister_owner != nullptr)
         (void)ctx.sdk->panels.unregister_owner(kPluginId);
     g_confirmation = nullptr;
@@ -211,7 +234,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_disabled,
     &plugin_fill_status,
     &plugin_on_resource_ready,
-    nullptr, 0,   // ports
+     kPorts, 1,    // custom map resource adapter
     nullptr, 0,   // routes
     kFeatures, 2,
 };

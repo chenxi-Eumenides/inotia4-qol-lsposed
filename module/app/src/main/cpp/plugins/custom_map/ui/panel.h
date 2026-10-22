@@ -5,12 +5,14 @@
 namespace qol::contracts {
 struct QolHostSdk;
 struct QolUiComponents;
+struct QolCustomMapResourcePort;
 }
 
 namespace qol::features::custom_map {
 
 void custom_map_panel_bind(const contracts::QolHostSdk* sdk,
-                           const contracts::QolUiComponents* components);
+                           const contracts::QolUiComponents* components,
+                           const contracts::QolCustomMapResourcePort* resource_port);
 bool custom_map_provider_open();
 void custom_map_provider_close();
 bool custom_map_provider_active();

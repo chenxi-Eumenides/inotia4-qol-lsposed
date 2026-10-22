@@ -37,6 +37,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolUiComponents* g_components = nullptr;
 const contracts::QolUiAdapter* g_ui = nullptr;
 const contracts::QolStaticDataApi* g_static_data = nullptr;
+const contracts::QolCustomMapResourcePort* g_resource_port = nullptr;
 bool g_active = false;
 uint64_t g_frame = 0;
 int32_t g_pending_selection = -1;
@@ -273,7 +274,7 @@ void append_map_row(MapRow row) {
 void process_header(size_t row_index) {
     if (row_index >= g_maps.size()) return;
     MapRow& row = g_maps[row_index];
-    row.state = custom_map_read_summary(row.file, &row.summary)
+    row.state = custom_map_read_summary(row.file, g_resource_port, &row.summary)
         ? MapRow::State::kReady : MapRow::State::kFailed;
     row.decrypt_failed = false;
     ++g_scan_completed;
@@ -288,7 +289,7 @@ void process_conversion(size_t row_index) {
     CustomMapFile dat_file{};
     CustomMapDecodeDiagnostics diagnostics{};
     const CustomMapConversionResult result =
-        custom_map_convert_jpg(row.file, &dat_file, &diagnostics);
+        custom_map_convert_jpg(row.file, g_resource_port, &dat_file, &diagnostics);
     log_conversion(row.file, result, diagnostics);
     if (result == CustomMapConversionResult::kConverted ||
         result == CustomMapConversionResult::kDatAlreadyExists) {
@@ -328,7 +329,7 @@ void process_detail_load() {
     const MapRow& row = g_maps[static_cast<size_t>(g_selected)];
     DetailCache loaded{};
     loaded.file = row.file;
-    if (!custom_map_read_detail(row.file, &loaded.detail) ||
+    if (!custom_map_read_detail(row.file, g_resource_port, &loaded.detail) ||
         loaded.detail.width != row.summary.width || loaded.detail.height != row.summary.height ||
         loaded.detail.base_tiles.size() != static_cast<size_t>(row.summary.width) * row.summary.height) {
         g_detail_loading = false;
@@ -447,11 +448,13 @@ void draw_map_detail() {
 }  // namespace
 
 void custom_map_panel_bind(const contracts::QolHostSdk* sdk,
-                           const contracts::QolUiComponents* components) {
+                           const contracts::QolUiComponents* components,
+                           const contracts::QolCustomMapResourcePort* resource_port) {
     if (g_root != nullptr) destroy_panel();
     g_sdk = sdk;
     g_components = components;
     g_ui = sdk != nullptr ? sdk->ui : nullptr;
+    g_resource_port = resource_port;
     g_static_data = nullptr;
     if (sdk != nullptr && sdk->capabilities.require != nullptr) {
         const void* iface = nullptr;

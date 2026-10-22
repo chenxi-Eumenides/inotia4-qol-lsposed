@@ -7,11 +7,11 @@
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
+#include <new>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
 
-#include "../../game/access/game_access.h"
 #include "map_data.h"
 
 namespace qol::features::custom_map {
@@ -23,6 +23,7 @@ constexpr size_t kCmdlineBufferSize = 256;
 constexpr size_t kCustomPathBufferSize = 1024;
 
 std::atomic<const contracts::QolHostSdk*> g_sdk{nullptr};
+std::atomic<const contracts::QolCustomMapResourcePort*> g_resource_port{nullptr};
 std::atomic<bool> g_enabled{false};
 std::atomic<ResLoadToPoolFn> g_original_loader{nullptr};
 
@@ -142,27 +143,36 @@ void log_conversion(const MapPathId& id, const char* status,
 }
 
 bool load_custom_dat(const MapPathId& id, const char* path, void** out_buf, int32_t* out_size) {
+    const auto* resource_port = g_resource_port.load(std::memory_order_acquire);
+    if (resource_port == nullptr || resource_port->allocate_game_buffer == nullptr ||
+        out_buf == nullptr) return false;
+
     FileDescriptor fd(open(path, O_RDONLY | O_CLOEXEC));
     if (fd.get() < 0) return false;
 
     struct stat file_stat {};
     if (fstat(fd.get(), &file_stat) != 0 || !S_ISREG(file_stat.st_mode) ||
-        file_stat.st_size < 0 || file_stat.st_size > INT32_MAX) {
+        file_stat.st_size <= 0 || file_stat.st_size > INT32_MAX) {
         return false;
     }
 
     const int32_t file_size = static_cast<int32_t>(file_stat.st_size);
-    const size_t allocation_size = file_size == 0 ? 1 : static_cast<size_t>(file_size);
-    void* buffer = fn_mem_malloc(allocation_size);
-    if (buffer == nullptr) return false;
-
-    if (!read_exact(fd.get(), buffer, static_cast<size_t>(file_size))) {
-        fn_mem_free(buffer);
+    std::vector<uint8_t> contents;
+    try {
+        contents.resize(static_cast<size_t>(file_size));
+    } catch (const std::bad_alloc&) {
         return false;
     }
+    if (!read_exact(fd.get(), contents.data(), contents.size())) return false;
+
+    void* buffer = nullptr;
+    int32_t buffer_size = 0;
+    const QolResult result = resource_port->allocate_game_buffer(
+        contents.data(), static_cast<uint32_t>(contents.size()), &buffer, &buffer_size);
+    if (!contracts::succeeded(result) || buffer == nullptr || buffer_size != file_size) return false;
 
     *out_buf = buffer;
-    if (out_size != nullptr) *out_size = file_size;
+    if (out_size != nullptr) *out_size = buffer_size;
     log_loaded_map(id, file_size);
     return true;
 }
@@ -179,9 +189,14 @@ bool load_custom_jpg(const MapPathId& id, const char* dat_path, const char* jpg_
         return false;
     }
 
+    const auto* resource_port = g_resource_port.load(std::memory_order_acquire);
+    if (resource_port == nullptr || resource_port->decode_lzma_container == nullptr ||
+        resource_port->allocate_game_buffer == nullptr) return false;
+
     std::vector<uint8_t> decoded;
     CustomMapDecodeDiagnostics diagnostics{};
-    const auto decoded_result = custom_map_decode_jpg(jpg_path, &decoded, &diagnostics);
+    const auto decoded_result =
+        custom_map_decode_jpg(jpg_path, resource_port, &decoded, &diagnostics);
     if (decoded_result != CustomMapConversionResult::kConverted || decoded.empty() ||
         decoded.size() > static_cast<size_t>(INT32_MAX)) {
         const char* status = "decode_failed";
@@ -196,24 +211,16 @@ bool load_custom_jpg(const MapPathId& id, const char* dat_path, const char* jpg_
         return false;
     }
 
-    void* buffer = fn_mem_malloc(decoded.size());
-    if (buffer == nullptr) {
-        diagnostics.failure_reason = "game_allocation_failed";
-        log_conversion(id, "game_allocation_failed", diagnostics);
-        return false;
-    }
-    std::memcpy(buffer, decoded.data(), decoded.size());
-
+    // Keep a validated conversion available for a later retry if this call's game-heap allocation
+    // fails; that transient failure still falls back to the original loader for this request.
     const auto persisted = custom_map_write_decoded_dat(
         jpg_path, dat_path, id.value, decoded, nullptr);
     if (persisted == CustomMapConversionResult::kDatAlreadyExists) {
-        fn_mem_free(buffer);
         diagnostics.failure_reason = "dat_already_exists";
         log_conversion(id, "dat_already_exists", diagnostics);
         return load_custom_dat(id, dat_path, out_buf, out_size);
     }
     if (persisted == CustomMapConversionResult::kInvalidMapData) {
-        fn_mem_free(buffer);
         diagnostics.failure_reason = "map_structure_invalid_before_write";
         log_conversion(id, "invalid_map_data", diagnostics);
         return false;
@@ -226,14 +233,27 @@ bool load_custom_jpg(const MapPathId& id, const char* dat_path, const char* jpg_
         log_conversion(id, "write_failed_using_memory", diagnostics);
     }
 
+    void* buffer = nullptr;
+    int32_t buffer_size = 0;
+    const QolResult allocation = resource_port->allocate_game_buffer(
+        decoded.data(), static_cast<uint32_t>(decoded.size()), &buffer, &buffer_size);
+    if (!contracts::succeeded(allocation) || buffer == nullptr ||
+        buffer_size != static_cast<int32_t>(decoded.size())) {
+        diagnostics.failure_reason = allocation.message != nullptr
+            ? allocation.message : "game_allocation_failed";
+        log_conversion(id, "game_allocation_failed", diagnostics);
+        return false;
+    }
+
     *out_buf = buffer;
-    if (out_size != nullptr) *out_size = static_cast<int32_t>(decoded.size());
-    log_loaded_map(id, static_cast<int32_t>(decoded.size()));
+    if (out_size != nullptr) *out_size = buffer_size;
+    log_loaded_map(id, buffer_size);
     return true;
 }
 
 bool load_custom_map(const MapPathId& id, void** out_buf, int32_t* out_size) {
-    if (fn_mem_malloc == nullptr || fn_mem_free == nullptr || out_buf == nullptr) return false;
+    if (g_resource_port.load(std::memory_order_acquire) == nullptr || out_buf == nullptr)
+        return false;
 
     char dat_path[kCustomPathBufferSize]{};
     char jpg_path[kCustomPathBufferSize]{};
@@ -255,16 +275,19 @@ bool load_custom_map(const MapPathId& id, void** out_buf, int32_t* out_size) {
 
 }  // namespace
 
-void initialize(const contracts::QolHostSdk* sdk) {
+void initialize(const contracts::QolHostSdk* sdk,
+                const contracts::QolCustomMapResourcePort* resource_port) {
     g_enabled.store(false, std::memory_order_release);
     g_original_loader.store(nullptr, std::memory_order_release);
     g_sdk.store(sdk, std::memory_order_release);
+    g_resource_port.store(resource_port, std::memory_order_release);
 }
 
 void clear_runtime() {
     g_enabled.store(false, std::memory_order_release);
     g_original_loader.store(nullptr, std::memory_order_release);
     g_sdk.store(nullptr, std::memory_order_release);
+    g_resource_port.store(nullptr, std::memory_order_release);
 }
 
 void set_enabled(bool value) {

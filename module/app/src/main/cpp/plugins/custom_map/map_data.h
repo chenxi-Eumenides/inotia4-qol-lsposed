@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "../../contracts/game_ports/custom_map_resource_port.h"
+
 namespace qol::features::custom_map {
 
 enum class CustomMapFileKind : uint8_t { kDat, kDatJpg };
@@ -60,16 +62,22 @@ struct CustomMapDetail {
 };
 
 bool custom_map_list_files(std::vector<CustomMapFile>* out);
-bool custom_map_read_summary(const CustomMapFile& file, CustomMapSummary* out);
-bool custom_map_read_detail(const CustomMapFile& file, CustomMapDetail* out);
+bool custom_map_read_summary(const CustomMapFile& file,
+                             const contracts::QolCustomMapResourcePort* resource_port,
+                             CustomMapSummary* out);
+bool custom_map_read_detail(const CustomMapFile& file,
+                            const contracts::QolCustomMapResourcePort* resource_port,
+                            CustomMapDetail* out);
 bool custom_map_file_unchanged(const CustomMapFile& file);
 CustomMapConversionResult custom_map_decode_jpg(const std::string& path,
+                                                 const contracts::QolCustomMapResourcePort* resource_port,
                                                  std::vector<uint8_t>* out_decoded,
                                                  CustomMapDecodeDiagnostics* diagnostics = nullptr);
 CustomMapConversionResult custom_map_write_decoded_dat(
     const std::string& jpg_path, const std::string& dat_path, uint32_t id,
     const std::vector<uint8_t>& decoded, CustomMapFile* out_dat);
 CustomMapConversionResult custom_map_convert_jpg(const CustomMapFile& file,
+                                                  const contracts::QolCustomMapResourcePort* resource_port,
                                                   CustomMapFile* out_dat,
                                                   CustomMapDecodeDiagnostics* diagnostics = nullptr);
 

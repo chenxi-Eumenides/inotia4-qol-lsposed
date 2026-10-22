@@ -8,7 +8,6 @@
 #include <cstring>
 #include <dirent.h>
 #include <fcntl.h>
-#include <memory>
 #include <map>
 #include <new>
 #include <string>
@@ -17,9 +16,6 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
-
-#include "../../game/access/game_access.h"
-#include "../../game/access/symbols.h"
 
 namespace qol::features::custom_map {
 namespace {
@@ -68,17 +64,6 @@ public:
 private:
     DIR* dir_;
 };
-
-struct GameBufferDeleter {
-    MemFreeFn free = nullptr;
-
-    void operator()(void* buffer) const {
-        if (buffer != nullptr && free != nullptr) free(buffer);
-    }
-};
-
-using GameBuffer = std::unique_ptr<void, GameBufferDeleter>;
-using LzmaDecodeFn = int32_t (*)(void*, int32_t, void**, int32_t*);
 
 bool read_exact(int fd, void* data, size_t size) {
     auto* cursor = static_cast<uint8_t*>(data);
@@ -307,54 +292,63 @@ bool parse_map_data(uint32_t id, const uint8_t* data, size_t data_size,
     return true;
 }
 
-bool decode_container(std::vector<uint8_t>& file_data, GameBuffer* decoded,
-                      const uint8_t** out_data, size_t* out_size,
-                      CustomMapDecodeDiagnostics* diagnostics) {
+uint32_t read_u32_le(const uint8_t* data) {
+    return static_cast<uint32_t>(data[0]) |
+        (static_cast<uint32_t>(data[1]) << 8) |
+        (static_cast<uint32_t>(data[2]) << 16) |
+        (static_cast<uint32_t>(data[3]) << 24);
+}
+
+bool decode_container(const std::vector<uint8_t>& file_data,
+                      const contracts::QolCustomMapResourcePort* resource_port,
+                      std::vector<uint8_t>* decoded, const uint8_t** out_data,
+                      size_t* out_size, CustomMapDecodeDiagnostics* diagnostics) {
     if (decoded == nullptr || out_data == nullptr || out_size == nullptr) return false;
-    if (file_data.size() <= 1 || file_data.size() - 1 > INT32_MAX || file_data[0] != 0x01) {
+    if (file_data.size() < 16 || file_data.size() > UINT32_MAX || file_data[0] != 0x01) {
         if (diagnostics != nullptr) diagnostics->failure_reason = "invalid_container";
         return false;
     }
-    const MemFreeFn free_buffer = fn_mem_free;
-    if (free_buffer == nullptr) {
-        if (diagnostics != nullptr) diagnostics->failure_reason = "mem_free_unavailable";
-        return false;
-    }
-    const uintptr_t decode_address = qol::game::resolve_hook_entry("F_LZMA_DECODE_VMA", nullptr);
-    if (decode_address == 0) {
-        if (diagnostics != nullptr) diagnostics->failure_reason = "decoder_unavailable";
+    if (resource_port == nullptr || resource_port->decode_lzma_container == nullptr) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "resource_port_unavailable";
         return false;
     }
 
-    const auto decode = reinterpret_cast<LzmaDecodeFn>(decode_address);
-    void* decoded_buffer = nullptr;
-    int32_t decoded_size = 0;
-    GameBuffer decoded_guard(nullptr, GameBufferDeleter{free_buffer});
-    const int32_t succeeded = decode(file_data.data() + 1,
-                                    static_cast<int32_t>(file_data.size() - 1),
-                                    &decoded_buffer, &decoded_size);
+    const uint32_t expected_size = read_u32_le(file_data.data() + 7);
+    if (expected_size == 0 || expected_size > static_cast<uint32_t>(INT32_MAX)) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "decoded_size_invalid";
+        return false;
+    }
+
+    decoded->resize(expected_size);
+    uint32_t decoded_size = 0;
+    const QolResult result = resource_port->decode_lzma_container(
+        file_data.data(), static_cast<uint32_t>(file_data.size()), decoded->data(),
+        static_cast<uint32_t>(decoded->size()), &decoded_size);
     if (diagnostics != nullptr) {
-        diagnostics->decoder_status = succeeded;
-        diagnostics->output_bytes = decoded_size > 0 ? static_cast<size_t>(decoded_size) : 0;
+        diagnostics->decoder_status = contracts::succeeded(result) ? 1 : 0;
+        diagnostics->output_bytes = decoded_size;
     }
-    decoded_guard.reset(decoded_buffer);
-    if (succeeded == 0) {
-        if (diagnostics != nullptr) diagnostics->failure_reason = "decoder_rejected_input";
+    if (!contracts::succeeded(result)) {
+        if (diagnostics != nullptr) {
+            diagnostics->failure_reason = result.message != nullptr
+                ? result.message : "game_decoder_failed";
+        }
         return false;
     }
-    if (decoded_buffer == nullptr || decoded_size <= 0) {
-        if (diagnostics != nullptr) diagnostics->failure_reason = "decoder_output_invalid";
+    if (decoded_size != expected_size) {
+        if (diagnostics != nullptr) diagnostics->failure_reason = "decoded_size_mismatch";
         return false;
     }
 
-    *out_data = static_cast<const uint8_t*>(decoded_buffer);
-    *out_size = static_cast<size_t>(decoded_size);
-    *decoded = std::move(decoded_guard);
+    *out_data = decoded->data();
+    *out_size = decoded_size;
     return true;
 }
 
 bool read_map_payload(const std::string& path, std::vector<uint8_t>* file_data,
-                      GameBuffer* decoded, const uint8_t** out_data, size_t* out_size) {
+                      const contracts::QolCustomMapResourcePort* resource_port,
+                      std::vector<uint8_t>* decoded, const uint8_t** out_data,
+                      size_t* out_size) {
     if (file_data == nullptr || decoded == nullptr || out_data == nullptr || out_size == nullptr ||
         !read_file(path, file_data) || file_data->empty()) return false;
     if ((*file_data)[0] != 0x01) {
@@ -362,7 +356,7 @@ bool read_map_payload(const std::string& path, std::vector<uint8_t>* file_data,
         *out_size = file_data->size();
         return true;
     }
-    return decode_container(*file_data, decoded, out_data, out_size, nullptr);
+    return decode_container(*file_data, resource_port, decoded, out_data, out_size, nullptr);
 }
 
 bool file_stamp_matches(const CustomMapFile& file) {
@@ -505,6 +499,7 @@ bool custom_map_file_unchanged(const CustomMapFile& file) {
 }
 
 CustomMapConversionResult custom_map_decode_jpg(const std::string& path,
+                                                 const contracts::QolCustomMapResourcePort* resource_port,
                                                  std::vector<uint8_t>* out_decoded,
                                                  CustomMapDecodeDiagnostics* diagnostics) {
     if (out_decoded == nullptr) return CustomMapConversionResult::kReadFailed;
@@ -522,10 +517,11 @@ CustomMapConversionResult custom_map_decode_jpg(const std::string& path,
             return CustomMapConversionResult::kInvalidContainer;
         }
 
-        GameBuffer decoded(nullptr, GameBufferDeleter{});
+        std::vector<uint8_t> decoded_container;
         const uint8_t* decoded_data = nullptr;
         size_t decoded_size = 0;
-        if (!decode_container(source, &decoded, &decoded_data, &decoded_size, diagnostics) ||
+        if (!decode_container(source, resource_port, &decoded_container, &decoded_data,
+                              &decoded_size, diagnostics) ||
             decoded_data == nullptr || decoded_size == 0) {
             return CustomMapConversionResult::kDecodeFailed;
         }
@@ -567,6 +563,7 @@ CustomMapConversionResult custom_map_write_decoded_dat(
 }
 
 CustomMapConversionResult custom_map_convert_jpg(const CustomMapFile& file,
+                                                  const contracts::QolCustomMapResourcePort* resource_port,
                                                   CustomMapFile* out_dat,
                                                   CustomMapDecodeDiagnostics* diagnostics) {
     if (diagnostics != nullptr) *diagnostics = CustomMapDecodeDiagnostics{};
@@ -576,7 +573,7 @@ CustomMapConversionResult custom_map_convert_jpg(const CustomMapFile& file,
     }
     std::vector<uint8_t> decoded;
     const CustomMapConversionResult decode_result =
-        custom_map_decode_jpg(file.path, &decoded, diagnostics);
+        custom_map_decode_jpg(file.path, resource_port, &decoded, diagnostics);
     if (decode_result != CustomMapConversionResult::kConverted) return decode_result;
     if (!file_stamp_matches(file)) {
         if (diagnostics != nullptr) diagnostics->failure_reason = "source_changed";
@@ -601,15 +598,18 @@ CustomMapConversionResult custom_map_convert_jpg(const CustomMapFile& file,
     return write_result;
 }
 
-bool custom_map_read_summary(const CustomMapFile& file, CustomMapSummary* out) {
+bool custom_map_read_summary(const CustomMapFile& file,
+                             const contracts::QolCustomMapResourcePort* resource_port,
+                             CustomMapSummary* out) {
     if (out == nullptr || file.kind != CustomMapFileKind::kDat || !file_stamp_matches(file))
         return false;
     try {
         std::vector<uint8_t> file_data;
-        GameBuffer decoded(nullptr, GameBufferDeleter{});
+        std::vector<uint8_t> decoded;
         const uint8_t* map_data = nullptr;
         size_t map_size = 0;
-        if (!read_map_payload(file.path, &file_data, &decoded, &map_data, &map_size)) return false;
+        if (!read_map_payload(file.path, &file_data, resource_port, &decoded,
+                              &map_data, &map_size)) return false;
         if (map_data == nullptr || map_size < 4) return false;
         const uint32_t width = map_data[2];
         const uint32_t height = map_data[3];
@@ -623,15 +623,18 @@ bool custom_map_read_summary(const CustomMapFile& file, CustomMapSummary* out) {
     }
 }
 
-bool custom_map_read_detail(const CustomMapFile& file, CustomMapDetail* out) {
+bool custom_map_read_detail(const CustomMapFile& file,
+                            const contracts::QolCustomMapResourcePort* resource_port,
+                            CustomMapDetail* out) {
     if (out == nullptr || file.kind != CustomMapFileKind::kDat) return false;
     if (!file_stamp_matches(file)) return false;
     try {
         std::vector<uint8_t> file_data;
-        GameBuffer decoded(nullptr, GameBufferDeleter{});
+        std::vector<uint8_t> decoded;
         const uint8_t* map_data = nullptr;
         size_t map_size = 0;
-        if (!read_map_payload(file.path, &file_data, &decoded, &map_data, &map_size)) return false;
+        if (!read_map_payload(file.path, &file_data, resource_port, &decoded,
+                              &map_data, &map_size)) return false;
 
         CustomMapDetail detail{};
         if (!parse_map_data(file.id, map_data, map_size, &detail) ||
