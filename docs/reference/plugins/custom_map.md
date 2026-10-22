@@ -25,7 +25,7 @@
 
 `/sdcard/Android/data/<包名>/files/qol/resources/map/m<id>.dat`
 
-包名取自 `/proc/self/cmdline`；读取失败时使用默认包名 `com.com2us.inotia4.normal.freefull.google.global.android.common`。插件不创建目录。可接受的文件布局有两种：
+包名取自 `/proc/self/cmdline`；读取失败时使用默认包名 `com.com2us.inotia4.normal.freefull.google.global.android.common`。插件不创建目录。`.dat` 与 `.dat.jpg` 并存时 `.dat` 优先（哪怕 `.dat` 不可读也按 `.dat` 路径回退原函数，不尝试 `.jpg`）。`.dat` 不存在而 `.dat.jpg` 存在时，进图路径就地解密：读取 `.jpg`（要求普通文件、首字节 `0x01` 的 LZMA 容器），经游戏 `LZMA_Decode` 解码，解码输出写入同目录 `m<id>.dat`（先写同目录临时文件并 `fsync`，再以硬链接原子发布；输出首字节恰为 `1` 时前置 `0x00` 防二次解码），随后以解码内容完成本次加载；落盘失败仅记日志，不阻断本次进图。`.jpg` 文件在任何情况下保留不删。id 数字超出 `uint32_t` 时不做 jpg 转换。可接受的文件布局有两种：
 
 1. `.dat.jpg` 容器原始字节（magic `01 00 5d 00`，LZMA1）。`MAP_Load` 检查首字节并自行解码。
 2. 首字节不等于 `1` 的预解码布局；游戏在该分支把 `buffer + 1` 作为数据起始位置。
@@ -40,7 +40,7 @@ entry `custom_map.open_panel` 触发，经 Host `ui_panels.open("custom_map")` �
 - 右栏选中详情第一行：地图 id、名称（`static_data.map_name` 查原版 `MAPINFOBASE` 表，命中用原名，否则「自定义」；超长按 UTF-8 边界截断加省略号）、大小（宽×高，单位：格）。
 - 右栏第二行为瓦片示意图：按解析出的 `width × height` 以 `fill_rect` 色块矩阵绘制 base layer 的 11-bit tile id（稳定哈希映射调色板色），出口格以对比色高亮。
 
-数据加载采用分帧流水线（模式对齐 save_backup 的备份解析）：进入面板时仅列举目录建立待解析队列（首帧跳过解析），此后每帧最多处理一个任务——优先解析选中地图的详情，否则解析一个文件头；列表随解析进度出现条目并显示「解析中 n/m」。详情按 mapId 缓存，以路径、文件大小和修改时间快照校验，命中则不重复解析；每次重新进入面板重扫目录并清空缓存，解析期间检测到文件变化时提示重新打开面板。
+数据加载采用分帧流水线（模式对齐 save_backup 的备份解析）：进入面板时仅列举目录建立待解析队列（首帧跳过解析），此后每帧最多处理一个任务——优先级为选中地图详情 → JPG 转换 → 转换后 `.dat` 文件头解析 → 新扫描项；列表随解析进度出现条目并显示「解析中 n/m」。孤立 `.dat.jpg`（无同 id `.dat`）在队列中显示「解密中」，转换语义与进图路径相同并复用同一转换核心，失败显示「解密失败」；已有 `.dat` 的 id 其 `.jpg` 完全忽略。详情按 mapId 缓存，以路径、文件大小和修改时间快照校验，命中则不重复解析；每次重新进入面板重扫目录并清空缓存，解析期间检测到文件变化时提示重新打开面板。
 
 解析格式与 `RES_LoadToPool` 拦截一致：首字节 `1` 为 LZMA 容器，经游戏 `LZMA_Decode`（VMA `0xa88c4`，dynsym GLOBAL 同名，四变体同址；插件登记为 `F_LZMA_DECODE_VMA`，签名 `int32_t(void* src, int32_t src_size, void** out_buf, int32_t* out_size)`，成功返回非 0，输出缓冲由 `MEM_Malloc` 分配、须以 `MEM_Free` 释放）解码；其余按预解码布局（`buffer+1` 起，byte2=宽、byte3=高）解析。base layer 每格 2 字节、tile id 取 `((b1 & 0x07) << 8) | b2`；其后依次为 5 个 u16 配置、section 数及 feature 列表、出口数及每出口 6 字节。解析失败（截断、解码失败）不进入详情。本插件不写任何地图数据回游戏。
 

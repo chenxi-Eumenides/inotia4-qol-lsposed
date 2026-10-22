@@ -9,8 +9,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <vector>
 
 #include "../../game/access/game_access.h"
+#include "map_data.h"
 
 namespace qol::features::custom_map {
 namespace {
@@ -27,6 +29,8 @@ std::atomic<ResLoadToPoolFn> g_original_loader{nullptr};
 struct MapPathId {
     const char* digits = nullptr;
     size_t length = 0;
+    uint32_t value = 0;
+    bool value_valid = true;
 };
 
 class FileDescriptor {
@@ -54,12 +58,25 @@ bool parse_map_path(const char* path, MapPathId* out_id) {
     if (length == 0 || length > static_cast<size_t>(INT_MAX) || std::strcmp(suffix, ".dat") != 0) {
         return false;
     }
+    uint32_t value = 0;
+    bool value_valid = true;
+    for (size_t index = 0; index < length; ++index) {
+        const uint32_t digit = static_cast<uint32_t>(digits[index] - '0');
+        if (!value_valid) continue;
+        if (value > (UINT32_MAX - digit) / 10) {
+            value_valid = false;
+        } else {
+            value = value * 10 + digit;
+        }
+    }
     out_id->digits = digits;
     out_id->length = length;
+    out_id->value = value;
+    out_id->value_valid = value_valid;
     return true;
 }
 
-bool build_custom_path(const MapPathId& id, char* out_path, size_t out_size) {
+bool build_custom_path(const MapPathId& id, const char* suffix, char* out_path, size_t out_size) {
     char cmdline[kCmdlineBufferSize]{};
     const int cmdline_fd = open("/proc/self/cmdline", O_RDONLY | O_CLOEXEC);
     const ssize_t bytes_read = cmdline_fd >= 0
@@ -76,8 +93,8 @@ bool build_custom_path(const MapPathId& id, char* out_path, size_t out_size) {
     // Package discovery follows infra/log/qol_log.cpp:245-253.
     const int written = std::snprintf(
         out_path, out_size,
-        "/sdcard/Android/data/%s/files/qol/resources/map/m%.*s.dat",
-        package, static_cast<int>(id.length), id.digits);
+        "/sdcard/Android/data/%s/files/qol/resources/map/m%.*s%s",
+        package, static_cast<int>(id.length), id.digits, suffix);
     return written >= 0 && static_cast<size_t>(written) < out_size;
 }
 
@@ -108,12 +125,20 @@ void log_loaded_map(const MapPathId& id, int32_t size) {
     (void)sdk->log.write(1, 1, "plugins/custom_map", message, length);
 }
 
-bool load_custom_map(const MapPathId& id, void** out_buf, int32_t* out_size) {
-    if (fn_mem_malloc == nullptr || fn_mem_free == nullptr || out_buf == nullptr) return false;
+void log_conversion(const MapPathId& id, const char* status, int32_t size) {
+    const contracts::QolHostSdk* sdk = g_sdk.load(std::memory_order_acquire);
+    if (sdk == nullptr || sdk->log.write == nullptr) return;
+    char message[192]{};
+    const int written = std::snprintf(message, sizeof(message),
+        "custom map jpg conversion id=%.*s status=%s bytes=%d",
+        static_cast<int>(id.length), id.digits, status, size);
+    if (written < 0) return;
+    const uint32_t length = static_cast<uint32_t>(written) < sizeof(message)
+        ? static_cast<uint32_t>(written) : static_cast<uint32_t>(sizeof(message) - 1);
+    (void)sdk->log.write(1, 1, "plugins/custom_map", message, length);
+}
 
-    char path[kCustomPathBufferSize]{};
-    if (!build_custom_path(id, path, sizeof(path))) return false;
-
+bool load_custom_dat(const MapPathId& id, const char* path, void** out_buf, int32_t* out_size) {
     FileDescriptor fd(open(path, O_RDONLY | O_CLOEXEC));
     if (fd.get() < 0) return false;
 
@@ -137,6 +162,77 @@ bool load_custom_map(const MapPathId& id, void** out_buf, int32_t* out_size) {
     if (out_size != nullptr) *out_size = file_size;
     log_loaded_map(id, file_size);
     return true;
+}
+
+bool load_custom_jpg(const MapPathId& id, const char* dat_path, const char* jpg_path,
+                     void** out_buf, int32_t* out_size) {
+    struct stat jpg_stat {};
+    if (stat(jpg_path, &jpg_stat) != 0) {
+        if (errno != ENOENT) log_conversion(id, "source_stat_failed", 0);
+        return false;
+    }
+    if (!S_ISREG(jpg_stat.st_mode)) {
+        log_conversion(id, "source_not_regular", 0);
+        return false;
+    }
+
+    std::vector<uint8_t> decoded;
+    const auto decoded_result = custom_map_decode_jpg(jpg_path, &decoded);
+    if (decoded_result != CustomMapConversionResult::kConverted || decoded.empty() ||
+        decoded.size() > static_cast<size_t>(INT32_MAX)) {
+        const char* status = decoded_result == CustomMapConversionResult::kInvalidContainer
+            ? "invalid_container" : decoded_result == CustomMapConversionResult::kReadFailed
+                ? "read_failed" : "decode_failed";
+        log_conversion(id, status, 0);
+        return false;
+    }
+
+    void* buffer = fn_mem_malloc(decoded.size());
+    if (buffer == nullptr) {
+        log_conversion(id, "game_allocation_failed", static_cast<int32_t>(decoded.size()));
+        return false;
+    }
+    std::memcpy(buffer, decoded.data(), decoded.size());
+
+    const auto persisted = custom_map_write_decoded_dat(
+        jpg_path, dat_path, id.value, decoded, nullptr);
+    if (persisted == CustomMapConversionResult::kDatAlreadyExists) {
+        fn_mem_free(buffer);
+        log_conversion(id, "dat_already_exists", 0);
+        return load_custom_dat(id, dat_path, out_buf, out_size);
+    }
+    if (persisted == CustomMapConversionResult::kConverted) {
+        log_conversion(id, "converted", static_cast<int32_t>(decoded.size()));
+    } else {
+        // A valid in-memory payload still serves this map load when persistence fails.
+        log_conversion(id, "write_failed_using_memory", static_cast<int32_t>(decoded.size()));
+    }
+
+    *out_buf = buffer;
+    if (out_size != nullptr) *out_size = static_cast<int32_t>(decoded.size());
+    log_loaded_map(id, static_cast<int32_t>(decoded.size()));
+    return true;
+}
+
+bool load_custom_map(const MapPathId& id, void** out_buf, int32_t* out_size) {
+    if (fn_mem_malloc == nullptr || fn_mem_free == nullptr || out_buf == nullptr) return false;
+
+    char dat_path[kCustomPathBufferSize]{};
+    char jpg_path[kCustomPathBufferSize]{};
+    if (!build_custom_path(id, ".dat", dat_path, sizeof(dat_path)) ||
+        !build_custom_path(id, ".dat.jpg", jpg_path, sizeof(jpg_path))) return false;
+
+    struct stat dat_stat {};
+    if (stat(dat_path, &dat_stat) == 0) {
+        // Existing .dat always wins, even when it cannot be read.
+        return load_custom_dat(id, dat_path, out_buf, out_size);
+    }
+    if (errno != ENOENT) return false;
+    if (!id.value_valid) {
+        log_conversion(id, "map_id_out_of_range", 0);
+        return false;
+    }
+    return load_custom_jpg(id, dat_path, jpg_path, out_buf, out_size);
 }
 
 }  // namespace

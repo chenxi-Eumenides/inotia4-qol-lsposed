@@ -29,6 +29,7 @@ constexpr UiRect kLeftView{24, 100, 280, 444};
 constexpr UiRect kMapView{344, 100, 592, 444};
 constexpr int32_t kRowHeight = 54;
 constexpr size_t kMaxVisibleMaps = 1024;
+constexpr size_t kNoPendingTask = static_cast<size_t>(-1);
 constexpr const char* kDefaultPackage =
     "com.com2us.inotia4.normal.freefull.google.global.android.common";
 
@@ -48,8 +49,8 @@ bool g_back_pressed = false;
 struct MapRow {
     CustomMapFile file;
     CustomMapSummary summary{};
-    bool parsed = false;
-    bool failed = false;
+    enum class State : uint8_t { kDecrypting, kParsing, kReady, kFailed } state = State::kParsing;
+    bool decrypt_failed = false;
 };
 struct DetailCache {
     CustomMapFile file;
@@ -64,6 +65,8 @@ const DetailCache* g_selected_detail = nullptr;
 size_t g_scan_index = 0;
 size_t g_scan_completed = 0;
 size_t g_scan_failed = 0;
+size_t g_pending_conversion = kNoPendingTask;
+size_t g_pending_header = kNoPendingTask;
 bool g_scan_available = false;
 bool g_scan_truncated = false;
 bool g_detail_loading = false;
@@ -123,11 +126,20 @@ void draw_row(void*, uint32_t index, QolUiHandle row, uint8_t selected) {
     (void)g_components->draw_control_text(row, label, 16, 16,
         selected != 0 ? contracts::ui_theme::kTextGold : contracts::ui_theme::kTextNormal, 0, 1);
     char size[32]{};
-    if (g_maps[index].failed) {
-        std::snprintf(size, sizeof(size), "读取失败");
-    } else {
+    switch (g_maps[index].state) {
+    case MapRow::State::kDecrypting:
+        std::snprintf(size, sizeof(size), "解密中");
+        break;
+    case MapRow::State::kParsing:
+        std::snprintf(size, sizeof(size), "解析中");
+        break;
+    case MapRow::State::kFailed:
+        std::snprintf(size, sizeof(size), "%s", g_maps[index].decrypt_failed ? "解密失败" : "读取失败");
+        break;
+    case MapRow::State::kReady:
         std::snprintf(size, sizeof(size), "%u×%u", g_maps[index].summary.width,
                       g_maps[index].summary.height);
+        break;
     }
     (void)g_components->draw_control_text(row, size, 258, 16,
         contracts::ui_theme::kTextDisabled, 1, 0);
@@ -168,6 +180,34 @@ uint32_t tile_color(uint16_t tile) {
     return kTilePalette[hash % kTilePalette.size()];
 }
 
+void log_conversion(const CustomMapFile& file, CustomMapConversionResult result) {
+    if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
+    const char* status = "failed";
+    uint32_t level = 3;
+    switch (result) {
+    case CustomMapConversionResult::kConverted:
+        status = "converted";
+        level = 1;
+        break;
+    case CustomMapConversionResult::kDatAlreadyExists:
+        status = "dat_exists_skip";
+        level = 1;
+        break;
+    case CustomMapConversionResult::kInvalidContainer: status = "invalid_container"; break;
+    case CustomMapConversionResult::kReadFailed: status = "read_failed"; break;
+    case CustomMapConversionResult::kSourceChanged: status = "source_changed"; break;
+    case CustomMapConversionResult::kDecodeFailed: status = "decode_failed"; break;
+    case CustomMapConversionResult::kWriteFailed: status = "write_failed"; break;
+    }
+    char message[160]{};
+    const int written = std::snprintf(message, sizeof(message),
+        "custom map jpg conversion id=%u status=%s", file.id, status);
+    if (written <= 0) return;
+    const uint32_t length = static_cast<uint32_t>(written) < sizeof(message)
+        ? static_cast<uint32_t>(written) : static_cast<uint32_t>(sizeof(message) - 1);
+    (void)g_sdk->log.write(1, level, "plugins/custom_map", message, length);
+}
+
 bool same_file_snapshot(const CustomMapFile& left, const CustomMapFile& right) {
     return left.id == right.id && left.path == right.path && left.size == right.size &&
         left.modified_sec == right.modified_sec && left.modified_nsec == right.modified_nsec;
@@ -183,8 +223,10 @@ void request_detail(int32_t index) {
     g_frame = 0;
     if (index < 0 || static_cast<size_t>(index) >= g_maps.size()) return;
     const auto& row = g_maps[static_cast<size_t>(index)];
-    if (row.failed) {
-        g_detail_status = "地图文件头解析失败";
+    if (row.state != MapRow::State::kReady) {
+        if (row.state == MapRow::State::kDecrypting) g_detail_status = "解密中…";
+        else if (row.state == MapRow::State::kParsing) g_detail_status = "解析中…";
+        else g_detail_status = row.decrypt_failed ? "解密失败" : "地图文件头解析失败";
         return;
     }
     resolve_map_name(row.file.id);
@@ -214,21 +256,64 @@ void rebuild_left_list() {
         g_status = "地图列表刷新失败";
 }
 
-void process_one_header() {
-    if (!g_scan_available || g_scan_index >= g_scan_files.size()) return;
-    const CustomMapFile file = g_scan_files[g_scan_index++];
-    MapRow row{};
-    row.file = file;
-    row.parsed = custom_map_read_summary(file, &row.summary);
-    row.failed = !row.parsed;
-    ++g_scan_completed;
-    if (row.failed) ++g_scan_failed;
+void append_map_row(MapRow row) {
     g_maps.push_back(std::move(row));
     if (g_selected < 0) {
         g_selected = 0;
         request_detail(g_selected);
     }
     rebuild_left_list();
+}
+
+void process_header(size_t row_index) {
+    if (row_index >= g_maps.size()) return;
+    MapRow& row = g_maps[row_index];
+    row.state = custom_map_read_summary(row.file, &row.summary)
+        ? MapRow::State::kReady : MapRow::State::kFailed;
+    row.decrypt_failed = false;
+    ++g_scan_completed;
+    if (row.state == MapRow::State::kFailed) ++g_scan_failed;
+    if (g_selected == static_cast<int32_t>(row_index)) request_detail(g_selected);
+    rebuild_left_list();
+}
+
+void process_conversion(size_t row_index) {
+    if (row_index >= g_maps.size()) return;
+    MapRow& row = g_maps[row_index];
+    CustomMapFile dat_file{};
+    const CustomMapConversionResult result = custom_map_convert_jpg(row.file, &dat_file);
+    log_conversion(row.file, result);
+    if (result == CustomMapConversionResult::kConverted ||
+        result == CustomMapConversionResult::kDatAlreadyExists) {
+        row.file = std::move(dat_file);
+        row.state = MapRow::State::kParsing;
+        row.decrypt_failed = false;
+        g_pending_header = row_index;
+        if (g_selected == static_cast<int32_t>(row_index)) request_detail(g_selected);
+    } else {
+        row.state = MapRow::State::kFailed;
+        row.decrypt_failed = true;
+        ++g_scan_completed;
+        ++g_scan_failed;
+        if (g_selected == static_cast<int32_t>(row_index)) request_detail(g_selected);
+    }
+    rebuild_left_list();
+}
+
+void process_next_scan_item() {
+    if (!g_scan_available || g_scan_index >= g_scan_files.size()) return;
+    CustomMapFile file = g_scan_files[g_scan_index++];
+    MapRow row{};
+    row.file = std::move(file);
+    if (row.file.kind == CustomMapFileKind::kDatJpg) {
+        row.state = MapRow::State::kDecrypting;
+        append_map_row(std::move(row));
+        g_pending_conversion = g_maps.size() - 1;
+        return;
+    }
+    row.state = MapRow::State::kParsing;
+    append_map_row(std::move(row));
+    g_pending_header = g_maps.size() - 1;
 }
 
 void process_detail_load() {
@@ -281,6 +366,8 @@ void destroy_panel() {
     g_scan_index = 0;
     g_scan_completed = 0;
     g_scan_failed = 0;
+    g_pending_conversion = kNoPendingTask;
+    g_pending_header = kNoPendingTask;
     g_scan_available = false;
     g_scan_truncated = false;
     g_detail_loading = false;
@@ -299,7 +386,7 @@ void draw_map_detail() {
     char id[32]{};
     char size[48]{};
     std::snprintf(id, sizeof(id), "m%u", row.file.id);
-    if (row.parsed) {
+    if (row.state == MapRow::State::kReady) {
         std::snprintf(size, sizeof(size), "%u×%u", row.summary.width, row.summary.height);
     } else {
         std::snprintf(size, sizeof(size), "—");
@@ -395,6 +482,8 @@ void custom_map_panel_enter() {
     g_scan_index = 0;
     g_scan_completed = 0;
     g_scan_failed = 0;
+    g_pending_conversion = kNoPendingTask;
+    g_pending_header = kNoPendingTask;
     g_selected = -1;
     g_pending_selection = -1;
     g_detail_loading = false;
@@ -433,9 +522,21 @@ void custom_map_panel_process() {
         g_pending_selection = -1;
         if (selected != g_selected) request_detail(selected);
     }
-    if (g_skip_parse_frame) g_skip_parse_frame = false;
-    else if (g_detail_loading) process_detail_load();
-    else process_one_header();
+    if (g_skip_parse_frame) {
+        g_skip_parse_frame = false;
+    } else if (g_detail_loading) {
+        process_detail_load();
+    } else if (g_pending_conversion != kNoPendingTask) {
+        const size_t index = g_pending_conversion;
+        g_pending_conversion = kNoPendingTask;
+        process_conversion(index);
+    } else if (g_pending_header != kNoPendingTask) {
+        const size_t index = g_pending_header;
+        g_pending_header = kNoPendingTask;
+        process_header(index);
+    } else {
+        process_next_scan_item();
+    }
     if (g_left != nullptr) (void)g_components->scroll_list_process(g_left);
     if (!contracts::succeeded(g_ui->begin_frame())) return;
     int64_t root_x = 0, root_y = 0;
