@@ -22,12 +22,13 @@ descriptor 只注册一个 `page` entry feature：
 
 ### Host catalog 渲染
 
-- 页面通过 Host 管理面 `read_catalog` 读取 feature catalog，本地构建行模型；catalog 元数据（id/name/description/type/category/default/action_label/display_priority）来自各插件 descriptor，不持久化。Host catalog 包含全部已注册 feature 定义，唯一按身份排除注册 ID 为 `settings` 的设置页插件，不按 `core.*` namespace 过滤。分类名称与 priority 由 Host 的单一静态注册表提供，管理 SDK v1.26 的 `read_categories` 返回 Host 生命周期内不可变的 POD 数组；页面不硬编码分类元数据。消费者必须以 SDK minor ≥26 校验带 display priority 的 feature catalog stride。分类和 feature 均按 priority 升序稳定排序，同 priority 保持 catalog 注册顺序。Debug 显示全部分类；Release 使用相同排序，仅不显示 Hidden 分类，不按 feature 所属插件过滤。General 中的 API 服务、OP 权限与 `debug.logging` 在 Release 仍显示。除 General 的 `core.api.api.enabled` 外，core feature 均为 Hidden；Debug 中会显示 API 服务开关和 `core.custom_ui.ui_tools` 等已注册 core feature。`core.custom_ui.open_debug_components` 仅在 `QOL_DEBUG_COMPONENTS` Debug 构建中注册为 Hidden entry，因此 Release descriptor 不含该 entry。完整注册目录、配置与管理 API 仍保留。
+- 页面通过 Host 管理面 `read_catalog` 读取 feature catalog，本地构建行模型；catalog 元数据（owner/id/name/description/type/category/default/action_label/display_priority）来自已注册 descriptor 或 Host-owned feature 定义，不持久化。catalog 包含全部已注册 feature 定义，并按 owner 身份排除设置页自身的 `settings`；不按 `core.*` namespace 过滤。分类名称与 priority 由 Host 的静态注册表提供，管理 SDK v1.26 的 `read_categories` 返回 Host 生命周期内不可变的 POD 数组。feature-control 管理面的 v1.28 尾字段 `read_owner_availability` 提供插件级可用性投影，不改变 `read_categories` 或 catalog stride。分类按 category priority、条目按 descriptor `display_priority` 升序稳定排序，同 priority 保持注册顺序。Debug 显示 Hidden 分类；Release 隐藏整个 Hidden 分类，其他分类中的 feature 不因所属插件或 `core.*` 前缀而过滤。当前 Debug 构建定义 `QOL_DEBUG_COMPONENTS` 时 catalog 有 33 项（含 Host-owned 项）；未定义时少一个 Debug-only entry，为 32 项。Release 隐藏 Hidden 项后显示 18 项。General 中的 `core.api / api.enabled`、Host-owned `module.platform / debug.logging` 和 `module.security / op.enabled` 在 Debug/Release 均显示。`core.item / move_merge.drag_merge` 是 BasicOptimization 分类中的非 Hidden core feature。
 - Host 分类注册表包含六个 category ID 与名称：Hidden「调试开关」-10、GameInfo「游戏信息」-9、General「基础设置」-8、BasicOptimization「基础优化设置」-7、Gameplay「更多优化功能」-5、Tools「更多工具」-3。priority 较小者先显示；一般分类没有 feature 时不显示，GameInfo 是设置页保留的只读信息分类，例外保留。
 - 每个 feature toggle 行只通过 `read_feature` 读取值，并经 `request_set_feature` 提交 feature 值；不读取或写入插件 desired/overall enable。Host 在每次成功的 feature 提交后（包括值未变化）根据全部已注册 feature 值重算 `enable`。
 - 带 `on_entry` 的 entry 行仅显示 `action_label` 指定的动作按钮，不显示 toggle；entry 按钮的可用性不依赖其 feature 当前为 true。feature 为 false 时，设置页先检查 `QolFeatureControlApi` 覆盖 `read_actual` 尾字段且函数非空，再经 Host `request_set_feature(true)`；单独的 `EntryContinuation` 保存复制的 plugin/feature ID、request ID 与页面 generation，不与 toggle receipt 混用。每个设置页 process tick 最多回取一次 receipt；持久化确认后还须重新读到 feature 为 true、且 Host actual `enabled` 为 true 才调用一次 `invoke_entry`。receipt 与 actual 等待从请求 admission 起共用最多 300 个 process tick；`read_actual` 返回 NotReady 或 enabled 尚未为 true 时继续等待，其他读取错误、持久化失败或超时均走现有错误状态且不调用。页面关闭/销毁或 generation 改变会清除 continuation；Host 已持久化的 true 不回滚。feature 已为 true 时，同样先校验 `read_actual` ABI 并要求 actual `enabled==1`，随后直接调用一次 `invoke_entry`、不提交 feature 写入；actual 未就绪或读取失败时立即显示错误并停止。Host `invoke_entry` 成功仅代表 admission，不保证页面已打开。无 entry callback 的 toggle 保持可编辑，不受所属插件当前 `enable=false` 影响。
 - 页面不再绘制顶部标题行；此前标题为 `QoL 模块设置 v<模块版本>`。模块版本仍用于「游戏信息」第三行。
 - feature 开关不因所属插件当前 `enable=false` 而禁用，用户可通过开启 feature 恢复插件 desired 状态。直接调用 Host `invoke_entry` 的契约不变：只提交调用，不修改 feature/enable，Host 仍执行实际运行状态校验；设置页的先启用再调用仅是该 UI 的编排。
+- Host `read_owner_availability` 返回稳定的插件级状态：Host-owned owner 为 `available`；普通 owner 的 `registered`、`resolving`、`installed_disabled`、`enabled`、`deactivating`、`inactive` 均为 `available`。`blocked` 显示“依赖不可用”，`unsupported` 显示“当前版本不支持”，`invalid` 显示“插件无效”；`failed` 按显式记录的失败阶段显示“安装失败”“激活失败”或通用“插件不可用”，不解析底层 `error` 文本。owner 不可用时保留其 catalog 行，但该 owner 的**所有 feature toggle 与 entry**统一禁用，feature 名称改用错误红色，描述替换为对应短原因。恢复为 available 后恢复原描述和交互。正常 `inactive`（包括未启用）及 `installed_disabled` 仍可操作，以允许恢复开关；`degraded` 是正交健康标记，不改变 owner availability：仅存在 fail-soft/resource degradation 而 lifecycle 仍可用的 owner 仍可操作；required fail-closed 失败若令 owner 进入 `failed` 等不可用状态，则禁用其全部行。状态读写未加锁，`read_actual` 和 `read_owner_availability` 仅允许在 Host 主线程调用。
 - 每行固定 96 逻辑单位高。标题与描述各最多绘制一行，超出宽度以省略号截断；无描述时标题垂直居中。动作按钮或 toggle 固定在行右侧，不增加第三行。
 
 ### 游戏信息分类
@@ -48,8 +49,8 @@ descriptor 只注册一个 `page` entry feature：
 
 ## 3. 依赖与消费面
 
-- 必需 capability：`ui_panels` v1.3（面板 open/close）与 `ui_components` v1.13（原生控件与文本）。Host 注入的 `QolUiAdapter` ABI 为 v1.23；组件 capability 版本与 adapter ABI minor 各自独立协商。
-- Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_categories`、`read_feature`、`request_set_feature`、`invoke_entry`、`receipt`。此 catalog 消费要求 SDK minor ≥26，以适配 `QolFeatureCatalogItem` 新 stride；设置页 UI 不调用 `read_desired` 或 `request_desired`。
+- 必需 capability：`ui_panels` v1.3（面板 open/close）与 `ui_components` v1.22（原生控件与文本）。Host 注入的 `QolUiAdapter` ABI 为 v1.32；组件 capability 版本与 adapter ABI minor 各自独立协商。
+- Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_categories`、`read_owner_availability`、`read_feature`、`request_set_feature`、`invoke_entry`、`receipt`。v1.26 引入的 category/catalog metadata 保持原 ABI 前缀；完整管理面要求 Host SDK ABI minor ≥28，以校验新增的 `QolFeatureControlApi.read_owner_availability` 尾字段和非空函数。该 ABI 版本变化不改变 Android `minSdk`。`read_actual` 与 `read_owner_availability` 读取未加锁的 infra 状态表，只允许在 Host 主线程调用；不得从 HTTP 或后台线程调用。设置页 UI 不调用 `read_desired` 或 `request_desired`。
 - Host 另为 Kotlin 内部 listener fallback 提供一次性 receipt observer：等待中的 receipt 完成时只通知一次；订阅已是终态的 receipt 时在 Host 锁外重放终态，不返回活动订阅 token。Host observer 容量为 256，JNI 回调携带 request id 与 `feature_receipt_json` 的 JSON。该内部推送不替代设置页 entry continuation 每个页面 process tick 至多一次的 receipt 查询，也不改变公开 `GET /api/config/receipt/{id}` 的轮询契约；内部 receipt 等待没有 200ms/50ms 定时轮询。
 - 游戏信息分类消费 Game Host v2.4 尾接口 `game_identity.read`；`QolGameHost` 尾槽在 v2.4 内追加 `game_version_name`，不改变 `QolTargetApi.query_variant` 与既有前缀。插件不 include `game/`，变体事实仍由 Game Host 统一收口。
 - 不再注册旧 settings catalog contribution：`settings_contribution.cpp` 的 `register_settings`/`register_categories` 为 no-op；feature 元数据只来自 descriptor。
@@ -85,55 +86,61 @@ descriptor 只注册一个 `page` entry feature：
 |---|---|---|
 | 插件生命周期 | `module/app/src/main/cpp/plugins/settings/plugin.cpp`、`feature.cpp` | descriptor、SDK 绑定、panel provider 注册、调试端点与帧任务 |
 | 设置页实现 | `module/app/src/main/cpp/plugins/settings/panels/settings.cpp`、`settings.h` | catalog snapshot、页面事件、toggle/entry、只读游戏信息行与管理请求 |
-| 页面模型/绑定 | `module/app/src/main/cpp/plugins/settings/panels/settings_model.h`、`settings_binding.cpp`、`settings_binding.h` | 行模型及更多游戏入口绑定逻辑 |
+| 页面模型/绑定 | `module/app/src/main/cpp/plugins/settings/panels/settings_model.h`、`feature_model.h`、`settings_binding.cpp`、`settings_binding.h` | 布局/文本规则、catalog 行与 owner 可用性映射、更多游戏入口绑定逻辑 |
 | feature 注册 | `module/app/src/main/cpp/plugins/settings/feature.cpp`、`feature.h` | `page` entry 回调与面板 provider |
 | 主菜单入口编排 | `module/app/src/main/cpp/plugins/settings/panels/settings.cpp`、`settings_binding.cpp`、`settings_binding.h`、`module/app/src/main/cpp/plugins/settings/plugin.cpp` | 帧任务、入口状态事务与必需 call patch 声明 |
 | 原生菜单安全边界 | `module/app/src/main/cpp/contracts/ui.h`、`module/app/src/main/cpp/host/ui_adapter.cpp`、`module/app/src/main/cpp/plugins/core.custom_ui/ui_components.cpp`、`module/app/src/main/cpp/game/access/ui_kit.cpp`、`module/app/src/main/cpp/game/access/ui_native_text_button.cpp`、`module/app/src/main/cpp/game/access/patches.cpp` | root-child 快照、组件 owner 生命周期及单点绘制替换 |
 | 旧贡献占位 | `module/app/src/main/cpp/plugins/settings/settings_contribution.cpp` | 保留兼容入口，`register_*` 为 no-op |
-| 管理面契约 | `module/app/src/main/cpp/contracts/feature.h`、`contracts/host_sdk.h` | `QolFeatureApi` 与 v1.26 `QolFeatureControlApi.read_categories`（Host 分类 catalog） |
+| 管理面契约 | `module/app/src/main/cpp/contracts/feature.h`、`contracts/host_sdk.h` | `QolFeatureApi`、v1.26 `read_categories` 与 v1.28 尾追加的 `QolFeatureControlApi.read_owner_availability` |
 
 ## 7. 注册 feature 目录（含 Hidden/debug-only 项）
 
-插件注册 feature（不含 Debug device probe 插件）如下，`id` / 默认 / 分类 / 类型 / priority 以各 `plugins/*/plugin.cpp` descriptor 为准；Host-owned feature 另列于表后。除 General 的 `core.api.api.enabled` 外，core feature 均为 Hidden 并进入 Host catalog；Debug 设置页显示 Hidden 项，Release 只不显示 Hidden 分类。`core.custom_ui.open_debug_components` 仅在 Debug 构建中注册。Host 只在配置缺少已注册 feature 值时按 descriptor default 补入，已有值（包括显式 `false`）保持不变；以下四个基础优化项默认开启。未列特殊值的 `display_priority` 均为 0。
+下表列出当前插件 descriptor 注册的 feature 定义；`settings / page` 单独说明，因为 Host catalog 按 owner 身份排除设置页自身。分类使用代码中的 `FeatureCategory` 名称，页面显示文案见 §2；`display_priority` 未标特殊值的默认均为 0。配置缺少已注册 feature 值时，Host 按 default 补入；已有值（包括显式 `false`）保持不变。
 
-| feature id | 默认 | 分类 | 类型 | display priority |
-|---|---:|---|---|---:|
-| `autosell.auto_sell` | 0 | Gameplay | toggle | -1 |
-| `move_merge.drag_merge` | 1 | Basic optimization | toggle | 0 |
-| `push_all.push` | 0 | Gameplay | toggle | 0 |
-| `simple_mode.combat` | 0 | Gameplay | toggle | 0 |
-| `custom_recipe.recipes` | 0 | Gameplay | toggle | -1 |
-| `extension_bag.extended_bag` | 1 | Gameplay | toggle | -2 |
-| `save_backup.open_manager` | 1 | Tools | entry | -2 |
-| `stack_limit.limit_999` | 0 | Gameplay | toggle | 0 |
-| `world_teleport.map_jump` | 1 | Basic optimization | toggle | 0 |
-| `attribute_range_display.ranges` | 1 | Basic optimization | toggle | 0 |
-| `special_equip.equipment_rules` | 1 | Hidden | toggle | 0 |
-| `character_panel_i18n.translation` | 1 | Basic optimization | toggle | 0 |
-| `core.quest.completion_check` | 1 | Hidden | toggle | 0 |
-| `core.custom_ui.ui_tools` | 1 | Hidden | toggle | 0 |
-| `core.custom_ui.open_debug_components` | 1 | Hidden | entry（Debug catalog exception） | -5 |
-| `page`（`settings` 插件） | 1 | Hidden | entry | 0 |
-| `core.api` / `api.enabled` | 1 | General | toggle | -5 |
-| `core.character.provider` | 1 | Hidden | toggle | 0 |
-| `core.craft.provider` | 1 | Hidden | toggle | 0 |
-| `core.data.catalog` | 1 | Hidden | toggle | 0 |
-| `core.item.provider` | 1 | Hidden | toggle | 0 |
-| `core.save.provider` | 1 | Hidden | toggle | 0 |
-| `core.system.snapshots` | 1 | Hidden | toggle | 0 |
-| `core.ui_state.provider` | 1 | Hidden | toggle | 0 |
-| `core.world.provider` | 1 | Hidden | toggle | 0 |
-| `attribute_quality.provider` | 1 | Hidden | toggle | 0 |
-| `core.feature.compatibility_routes` | 1 | Hidden | toggle | 0 |
+| Owner | Feature ID | 显示名称 | 默认 | Category | 类型 | Priority | 注册条件 |
+|---|---|---|---:|---|---|---:|---|
+| `attribute_quality` | `attribute_quality.provider` | 属性品质服务 | 1 | Hidden | toggle | 0 | — |
+| `attribute_range_display` | `attribute_range_display.ranges` | 属性范围显示 | 1 | BasicOptimization | toggle | 0 | — |
+| `autosell` | `autosell.auto_sell` | 自动出售 | 0 | Gameplay | toggle | -1 | — |
+| `character_panel_i18n` | `character_panel_i18n.translation` | 角色属性汉化 | 1 | BasicOptimization | toggle | 0 | — |
+| `core.api` | `api.enabled` | API服务 | 1 | General | toggle | -5 | — |
+| `core.character` | `core.character.provider` | 角色领域服务 | 1 | Hidden | toggle | 0 | — |
+| `core.craft` | `core.craft.provider` | 合成领域服务 | 1 | Hidden | toggle | 0 | — |
+| `core.custom_ui` | `core.custom_ui.ui_tools` | 共享界面工具 | 1 | Hidden | toggle | 0 | — |
+| `core.custom_ui` | `core.custom_ui.open_debug_components` | 打开调试面板 | 1 | Hidden | entry | -5 | 仅 `QOL_DEBUG_COMPONENTS` 已定义且为真时注册 |
+| `core.data` | `core.data.catalog` | 静态数据服务 | 1 | Hidden | toggle | 0 | — |
+| `core.feature` | `core.feature.compatibility_routes` | 迁移占位路由 | 1 | Hidden | toggle | 0 | — |
+| `core.item` | `core.item.provider` | 物品领域服务 | 1 | Hidden | toggle | 0 | — |
+| `core.item` | `move_merge.drag_merge` | 拖拽合并 | 1 | BasicOptimization | toggle | 0 | owner 为 `core.item` |
+| `core.quest` | `core.quest.completion_check` | 任务完成检查 | 1 | Hidden | toggle | 0 | — |
+| `core.save` | `core.save.provider` | 存档领域服务 | 1 | Hidden | toggle | 0 | — |
+| `core.system` | `core.system.snapshots` | 系统状态服务 | 1 | Hidden | toggle | 0 | — |
+| `core.ui_state` | `core.ui_state.provider` | 界面状态服务 | 1 | Hidden | toggle | 0 | — |
+| `core.world` | `core.world.provider` | 世界领域服务 | 1 | Hidden | toggle | 0 | — |
+| `craft_lottery` | `craft_lottery.guarantee` | 合成套装保底 | 0 | BasicOptimization | toggle | -1 | — |
+| `custom_map` | `custom_map.load` | 自定义地图文件加载 | 1 | BasicOptimization | toggle | 0 | — |
+| `custom_map` | `custom_map.open_panel` | 打开自定义地图面板 | 1 | Tools | entry | 0 | — |
+| `custom_recipe` | `custom_recipe.recipes` | 自定义合成 | 0 | Gameplay | toggle | -1 | — |
+| `extension_bag` | `extension_bag.extended_bag` | 扩展背包 | 1 | Gameplay | toggle | -2 | — |
+| `module_health` | `module_health.enabled` | Module health | 1 | Hidden | toggle | 0 | — |
+| `popup_blocker` | `popup_blocker.enabled` | 弹窗屏蔽 | 1 | BasicOptimization | toggle | 0 | — |
+| `push_all` | `push_all.push` | 推怪 | 0 | Gameplay | toggle | 0 | — |
+| `save_backup` | `save_backup.open_manager` | 存档备份 | 1 | Tools | entry | -2 | — |
+| `simple_mode` | `simple_mode.combat` | 简单模式 | 0 | Gameplay | toggle | 0 | — |
+| `special_equip` | `special_equip.equipment_rules` | 特殊装备规则 | 1 | Hidden | toggle | 0 | — |
+| `stack_limit` | `stack_limit.limit_999` | 堆叠上限 | 0 | Gameplay | toggle | 0 | — |
+| `world_teleport` | `world_teleport.map_jump` | 更好的地图传送对话框 | 1 | BasicOptimization | toggle | 0 | — |
 
-Host-owned feature（不属于玩家 core/plugin feature 表）：
+设置页自身 `settings / page`（Hidden、entry、default `1`）用于设置页生命周期，不进入 `read_catalog` 返回值。Host-owned features 由 Host 注册，但同样进入设置页 catalog：
 
-| owner / feature id | 默认 | 分类 | 类型 | display priority | 说明 |
-|---|---:|---|---|---:|---|
-| `module.platform` / `debug.logging` | 0 | General | toggle | -3 | 名称为「debug日志」；Host 调试日志开关。 |
-| `module.security` / `op.enabled` | 0 | General | toggle | -4 | 通用 OP 授权；仅作用于 endpoint 明确声明 OP 的操作，Debug/Release 均显示。 |
+| Owner | Feature ID | 显示名称 | 默认 | Category | 类型 | Priority |
+|---|---|---|---:|---|---|---:|
+| `module.platform` | `debug.logging` | debug日志 | 0 | General | toggle | -3 |
+| `module.security` | `op.enabled` | 操作权限 | 0 | General | toggle | -4 |
 
-`core.api.features.api.enabled` 默认开启、属于 General（priority -5），并由 Kotlin listener adapter 按 Host runtime effect 的 actual、desired 与有效 listener config 控制 HTTP listener。`module.security.features.op.enabled` 默认关闭、属于 General（priority -4），dispatcher 独立检查带 OP 标记的 endpoint；API 开关不级联、不改写 OP 值，开启 API 不代表授予 OP。旧 API feature `module.platform.features.api.enabled` 与 `core.api.features.core.api.http_registry` 按 Host Store 的迁移规则保守合并；root `apiEnabled` 仅在旧 `module.platform` feature 缺失时作 fallback；已有新目标值优先。OP 迁移只接收 Host Store 明确支持的旧值，并保留显式 false，细节见 [`api-optional-op-design.md` §6](../../refactor/api-optional-op-design.md)。
+当前 Debug 构建开启 `QOL_DEBUG_COMPONENTS` 时 catalog 共 33 项，其中 15 项属于 Hidden；Release 隐藏 Hidden 分类后显示 18 项（16 toggle、2 entry）。`core.api / api.enabled` 与两个 Host-owned features 都是 General，在 Debug/Release 均显示；core features 并非全部 Hidden，`core.item / move_merge.drag_merge` 是 BasicOptimization 项。设置页的 `page` 不计入上述 catalog 数量。
+
+`core.api / api.enabled` 默认开启、属于 General（priority -5），由 Kotlin listener adapter 按 Host runtime effect 的 actual、desired 与有效 listener config 控制 HTTP listener。`module.security / op.enabled` 默认关闭、属于 General（priority -4），dispatcher 独立检查带 OP 标记的 endpoint；API 开关不级联、不改写 OP 值，开启 API 不代表授予 OP。旧 API feature `module.platform.features.api.enabled` 与 `core.api.features.core.api.http_registry` 按 Host Store 的迁移规则保守合并；root `apiEnabled` 仅在旧 `module.platform` feature 缺失时作 fallback；已有新目标值优先。OP 迁移只接收 Host Store 明确支持的旧值，并保留显式 false，细节见 [`api-optional-op-design.md` §6](../../refactor/api-optional-op-design.md)。
 
 ### 设置架构迁移前的公开开关基线
 
@@ -152,9 +159,15 @@ Host-owned feature（不属于玩家 core/plugin feature 表）：
 | `move_merge.moveMergeEnabled` | `core.item` / `move_merge.drag_merge` |
 | `simple_mode.simpleModeEnabled` | `simple_mode` / `simple_mode.combat` |
 
-历史基线为 10 个 toggle；`op.enabled` 属于 `module.security` 的 General feature，在 Debug/Release 均显示。当前非隐藏的常规 toggle 集合为 11 项：七个既有非 core 功能开关、`module.platform.debug.logging` 和三个新增基础优化开关；`move_merge.drag_merge` 属于既有七项之一，只调整为基础优化分类。`save_backup.open_manager` 继续作为公开 Tools entry。`core.api.api.enabled` 默认开启、分类为 General、priority -5，Debug/Release 均显示；这些呈现元数据不改变 API runtime feature 行为。`module.platform.debug.logging` priority -3、名称为「debug日志」；其他显式优先级见注册表。历史 `core.settings.*` 命名不表示现行 API/OP owner 仍属于该 namespace。`special_equip.equipment_rules` 同样为 Hidden，Debug 可见、Release 不显示 Hidden 分类。`scripts/verification/test_core_feature_exposure.py` 断言常规公开集合与元数据、Hidden 项、分离的 API/OP owners、core 描述和 Debug entry 注册条件。
+历史基线为 10 个 toggle，仅用于解释旧配置迁移，不代表当前目录。当前 catalog 项和呈现元数据以 §7 表格及注册 descriptor 为准；当前 Debug catalog 共 33 项（取决于 `QOL_DEBUG_COMPONENTS`），Release 可见 18 项。`core.api / api.enabled` 默认开启、分类为 General、priority -5，Debug/Release 均显示；这些呈现元数据不改变 API runtime feature 行为。`module.platform / debug.logging` priority -3、名称为「debug日志」；`module.security / op.enabled` priority -4。历史 `core.settings.*` 命名不表示现行 API/OP owner 仍属于该 namespace。`scripts/verification/test_core_feature_exposure.py` 仍用于核对公开集合、Hidden 项、分离的 API/OP owners、core 描述和 Debug entry 注册条件。
 
 ## 8. 验证证据与范围
+
+> **当前整体验收：NOT_ACCEPTED（2026-10-23）。** Host CTest、Debug 构建及当前设备的健康态观察不能替代“owner 失败时设置行置灰/红名/原因文案”的真机失败态验收。当前 Debug 构建 `output/inotia4_qol_lsposed_debug_2610230406_9e29f09336fc.apk` SHA-256 为 `9e29f09336fc722c2e5fa51594c73b5c559b0faf138fdf35796b671c22010347`；设备 `192.168.3.56:5555` 当前为 C18 v512，`/api/health` ready，`settings` 与 `popup_blocker` 均 `enabled`，设置页 `panel_active=true`、`categories=6`、`items=33`，没有 `failed`/`unsupported`/`blocked`/`invalid` owner，因此当前无失败行可目视验收。任务过程中曾观察到一次 `popup_blocker=unsupported` 而设置页仍显示原描述；重新安装/启动 C18 v512 后状态变为 `enabled`，该差异当前无法复现，原因未确认。
+
+- 当前 Host 证据：完整 CTest 154/154 通过；最新定向命令 `cmake --build module/app/src/main/cpp/tests/build --target settings_panel_model_tests settings_panel_widget_tests -j2 && ctest --test-dir module/app/src/main/cpp/tests/build --output-on-failure -R 'settings_panel_(model|widget)_tests'` 通过 2/2；widget/model 覆盖 owner 失败映射、红名/原因、同 owner 联动禁用、恢复、单项 resource degradation 不误禁及入口回调拦截。`scripts/build-debug.sh` 成功；`uv run python scripts/maintenance/check_arch.py` 全通过。以上为 Host/构建/架构证据，不构成失败态真机验收。
+
+> 下方记录是不同日期、候选包和范围的历史/局部证据，保留追溯用途；不得视为当前 HEAD 的完整验收或覆盖上述 NOT_ACCEPTED 结论。
 
 - Host 定向测试：`settings_panel_widget_tests`、`settings_panel_model_tests`、`core_settings_panel_migration_tests` 为 3/3；`production_feature_facade_tests` 为 1/1；既有 `.tmp/` 日志记录的 static exposure 检查为 7 项。当前脚本增加 API/OP owner、catalog 与迁移来源断言；本轮通过 8/8 个静态测试（2026-10-13）。这些结果不等同于完整 CTest 或全插件验收。历史日志：`.tmp/settings-entry-actual-gate-review/ctest-final.log`、`.tmp/core-custom-ui-catalog-entry/ctest-final.log`、`.tmp/core-custom-ui-catalog-entry/static-exposure.log`。
 - Debug 真机使用模块 `output/inotia4_qol_lsposed_debug_2610112252_4431d979a436.apk`（SHA-256 `4431d979a436a5620f037dd80e843b0dd856b08841c5dee18eff6bb05bd20031`），运行时 module identity SHA 一致。854×384 主菜单点击“模块设置”进入页面，在“调试开关”分类看到 `打开调试面板` entry，点击 `打开` 后组件调试面板实际出现；设置恢复后 screen 为 `main_menu` 且 panel stack 为空。坐标只对应该次设备截图，不可移用于其他尺寸。截图及运行身份日志位于 `.tmp/debug-panel-entry-delivery/`：`main-menu-before-settings.png`、`settings-debug-category.png`、`debug-components-panel.png`、`main-menu-final.png`、`logcat-runtime.txt`。
