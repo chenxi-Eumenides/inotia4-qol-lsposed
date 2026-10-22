@@ -13,7 +13,7 @@ object QolPaths {
     fun root(context: Context): File? =
         context.getExternalFilesDir(null)?.let { File(it, DIR_NAME) }
 
-    /** 创建 qol/ 及 saves、backups、plugins、resources；失败返回 null。幂等。 */
+    /** 创建 qol/ 及 saves、backups、plugins、resources（含 resources/map、resources/item）；失败返回 null。幂等。 */
     @Synchronized
     fun ensureLayout(context: Context): File? {
         return try {
@@ -21,7 +21,7 @@ object QolPaths {
             if (root.exists() && !root.isDirectory) return null
             if (!root.exists() && !root.mkdirs() && !root.isDirectory) return null
 
-            for (name in listOf("saves", "backups", "plugins", "resources")) {
+            for (name in listOf("saves", "backups", "plugins", "resources", "resources/map", "resources/item")) {
                 val directory = File(root, name)
                 if (directory.exists() && !directory.isDirectory) return null
                 if (!directory.exists()) {
