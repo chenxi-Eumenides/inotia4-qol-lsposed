@@ -69,10 +69,11 @@ scripts/*
 !scripts/build-release.sh
 !scripts/patch-apk.sh
 
-## analysis：仅放行两个可复用脚本
+## analysis：仅放行可复用脚本
 !scripts/analysis/
 scripts/analysis/**
 !scripts/analysis/parse_qol_save.py
+!scripts/analysis/parse_qol_log.py
 !scripts/analysis/frida/
 scripts/analysis/frida/**
 !scripts/analysis/frida/save0-repair-patch.js
