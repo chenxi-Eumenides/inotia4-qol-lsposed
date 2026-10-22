@@ -244,7 +244,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
     static const ::qol::contracts::ResourceClaim kClaims[] = {
         {
             kEbM1SaveInventory,
-            "extension.save_inventory",
+            "F_SAVE_SAVE_INVENTORY_VMA",
             ::qol::contracts::ResourceMechanism::kEntryHook,
             ::qol::contracts::ResourcePolicy::kPrivate,
             ::qol::contracts::ResourceRequirement::kRequired,
@@ -359,7 +359,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
         // ---- C20–C21 合成宿主（C21 装饰型 optional）----
         {
             kEbM2StoreSellItem,
-            "extension.store_sell_item",
+            "F_UISTORE_SELL_ITEM_VMA",
             ::qol::contracts::ResourceMechanism::kEntryHook,
             ::qol::contracts::ResourcePolicy::kPrivate,
             ::qol::contracts::ResourceRequirement::kRequired,
@@ -373,7 +373,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
         },
         {
             kEbM3StoreButtonSellExe,
-            "extension.store_button_sell_exe",
+            "F_UISTORE_BUTTON_SELL_EXE_VMA",
             ::qol::contracts::ResourceMechanism::kEntryHook,
             ::qol::contracts::ResourcePolicy::kPrivate,
             ::qol::contracts::ResourceRequirement::kRequired,
@@ -387,7 +387,7 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
         },
         {
             kEbM4StoreDrawBagGroup,
-            "extension.store_draw_inven_bag_group",
+            "F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA",
             ::qol::contracts::ResourceMechanism::kEntryHook,
             ::qol::contracts::ResourcePolicy::kPrivate,
             ::qol::contracts::ResourceRequirement::kOptional,

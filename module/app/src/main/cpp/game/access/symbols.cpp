@@ -42,13 +42,9 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_PANEL_INVENTORY_ENTER", F_PANEL_INVENTORY_ENTER},
     // 扩展背包（D2a-3a）：两个入口 hook 目标 + 三个 PopupState 面板 enter（部分 wrap 定位）。
     {"F_SAVE_SAVE_INVENTORY_VMA", F_SAVE_SAVE_INVENTORY_VMA},
-    {"extension.save_inventory", F_SAVE_SAVE_INVENTORY_VMA},
     {"F_UISTORE_SELL_ITEM_VMA", F_UISTORE_SELL_ITEM_VMA},
-    {"extension.store_sell_item", F_UISTORE_SELL_ITEM_VMA},
     {"F_UISTORE_BUTTON_SELL_EXE_VMA", F_UISTORE_BUTTON_SELL_EXE_VMA},
-    {"extension.store_button_sell_exe", F_UISTORE_BUTTON_SELL_EXE_VMA},
     {"F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA", F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA},
-    {"extension.store_draw_inven_bag_group", F_UISTORE_DRAW_INVEN_BAG_GROUP_VMA},
     {"F_PANEL_SAVE_SLOT_ENTER", F_PANEL_SAVE_SLOT_ENTER},
     {"F_PANEL_SHOP_ENTER", F_PANEL_SHOP_ENTER},
     {"F_PANEL_CRAFT_ENTER", F_PANEL_CRAFT_ENTER},
