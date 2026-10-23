@@ -246,7 +246,7 @@ bool md5_of_file(const char* path, uint8_t out[16]) {
 }
 
 // ---------------------------------------------------------------------------
-// 离线表（由 scripts/data/game_variant_table.py 生成）
+// 离线表（由 scripts/maintenance/build_game_variant_table.py 生成）
 // ---------------------------------------------------------------------------
 #include "game/variants/game_variant_table.inc"
 

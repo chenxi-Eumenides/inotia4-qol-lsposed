@@ -2,7 +2,7 @@
 """离线生成 libgame.so 校验值 → 游戏变体/能力对照表。
 
 用法：
-    uv run python scripts/data/game_variant_table.py
+    uv run python scripts/maintenance/build_game_variant_table.py [--all]
 
 输入：
     apk/game-apk/*.apk
@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import io
 import re
@@ -32,7 +33,7 @@ import zipfile
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# 路径解析（本文件位于 <root>/scripts/data/）
+# 路径解析（本文件位于 <root>/scripts/maintenance/）
 # ---------------------------------------------------------------------------
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "module/app/src/main/cpp/game/variants/game_variant_table.inc"
@@ -58,6 +59,7 @@ WH4_MARKER = b"WH4JRN01"             # monster 隐藏段内的仓库容器 magic
 CAP_HIDDEN_SEGMENT = 1 << 0   # 存在隐藏可执行 PT_LOAD 段
 CAP_WAREHOUSE = 1 << 1        # 隐藏段内包含 ASCII WH4JRN01
 CAP_WAREHOUSE_INLINE = 1 << 2 # block3 内嵌 WH96v002 仓库段（语义位）
+CAP_NATIVE_INVENTORY_GRID18 = 1 << 3 # 原生背包网格扩展为 18 格（语义位）
 
 # 语义位登记：客观位由脚本从 ELF 计算，语义位在此按文件名显式登记。
 # 每条必须写明依据；未登记者语义位保持 0（表示“未验证”，不是“确定没有”）。
@@ -65,6 +67,12 @@ CURATION = {
     # 依据：真机/反汇编实测（backlog 2026-09-14/15，block3 校验器 0x7413b4 调用链）
     # 仅 monster v23 的 block3 内嵌 WH96v002 仓库段；其余版本未验证。
     "艾诺迪亚4_monster_v23.apk": CAP_WAREHOUSE_INLINE,
+    # 依据：静态数据含 C18BAG01/C18Lbag.dat，原生背包循环展开 6→18。
+    "艾诺迪亚4_C18L_v507.apk": CAP_NATIVE_INVENTORY_GRID18,
+    "艾诺迪亚4_C18L_v508.apk": CAP_NATIVE_INVENTORY_GRID18,
+    "艾诺迪亚4_C18L_v512.apk": CAP_NATIVE_INVENTORY_GRID18,
+    # 依据：MD5 da3514549f416d11be2adc6e51146825；C18BAG01/C18Lbag.dat；UIEquip_DrawInvenBag 上界 18。
+    "艾诺迪亚4_C18L_v513.apk": CAP_NATIVE_INVENTORY_GRID18,
 }
 
 # v28 and v29 ship the same libgame.so; retain the existing v29 runtime label.
@@ -240,15 +248,15 @@ def md5_bytes_literal(hex32: str) -> str:
 def render(entries: list[dict], sources: list[str]) -> str:
     ordered = sorted(entries, key=lambda e: (SERIES_ORDER[e["series"]], e["version"], e["md5"]))
     lines: list[str] = []
-    lines.append("// 本文件由 scripts/data/game_variant_table.py 生成，请勿手改。")
-    lines.append("// 重新生成：uv run python scripts/data/game_variant_table.py")
+    lines.append("// 本文件由 scripts/maintenance/build_game_variant_table.py 生成，请勿手改。")
+    lines.append("// 重新生成：uv run python scripts/maintenance/build_game_variant_table.py")
     lines.append("//")
     lines.append("// 源文件清单（确定性排序，无 arm64 libgame.so 的 APK 不在此表内）：")
     for src in sources:
         lines.append(f"//   {src}")
     lines.append("//")
     lines.append("// 排序：系列(original/overhaul/monster/unknown) → 版本标签 → md5")
-    lines.append("// 能力位：bit0 kCapHiddenSegment / bit1 kCapWarehouse / bit2 kCapWarehouseInline")
+    lines.append("// 能力位：bit0 kCapHiddenSegment / bit1 kCapWarehouse / bit2 kCapWarehouseInline / bit3 kCapNativeInventoryGrid18")
     lines.append("// 条目为 qol::GameVariant 聚合初始化；known 由运行时命中后置位。")
     lines.append("")
     lines.append("static const GameVariant kGameVariantTable[] = {")
@@ -266,6 +274,10 @@ def render(entries: list[dict], sources: list[str]) -> str:
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--all", action="store_true", help="输出全部游戏变体明细")
+    args = parser.parse_args()
+
     entries, sources = collect()
     entries_by_md5: dict[str, list[dict]] = {}
     for entry in entries:
@@ -298,12 +310,13 @@ def main() -> int:
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(text, encoding="utf-8")
     print(f"生成 {OUTPUT.relative_to(ROOT)}：{len(entries)} 条")
-    for e in sorted(entries, key=lambda x: (SERIES_ORDER[x["series"]], x["version"], x["md5"])):
-        print(
-            f"  {e['series']:<8} {e['version'] or '-':<10} caps=0x{e['caps']:02x} "
-            f"hidden={'Y' if e['hidden'] else 'N'}(0x{e['hidden_size']:x}) "
-            f"marker={'Y' if e['marker'] else 'N'} md5={e['md5']} {e['name']}"
-        )
+    if args.all:
+        for e in sorted(entries, key=lambda x: (SERIES_ORDER[x["series"]], x["version"], x["md5"])):
+            print(
+                f"  {e['series']:<8} {e['version'] or '-':<10} caps=0x{e['caps']:02x} "
+                f"hidden={'Y' if e['hidden'] else 'N'}(0x{e['hidden_size']:x}) "
+                f"marker={'Y' if e['marker'] else 'N'} md5={e['md5']} {e['name']}"
+            )
     return 0
 
 

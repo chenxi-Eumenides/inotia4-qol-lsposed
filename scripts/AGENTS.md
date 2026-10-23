@@ -6,6 +6,7 @@
 - `device/`：adb、设备启动、安装和触摸自动化。
 - `data/`：静态数据导出、校验和 assets 打包。
 - `maintenance/`：符号、依赖和工作区检查。
+- 新增或更新游戏 APK 后，运行 `uv run python scripts/maintenance/build_game_variant_table.py` 一次，刷新 Native 游戏变体/能力表；加 `--all` 可输出每个变体的摘要。
 - `web/build_map_arranger.py`：从静态地图数据生成 `tools/web/map-arranger.html`。
 - `keys/`：`patch-apk.sh` 默认签名密钥（AOSP 公开 testkey，BKS，非机密）；生成与校验步骤见 `docs/guides/build-and-deploy.md` §3.1。
 - 一次性实验脚本放入项目根目录 `archive/experiments/`，不得混入正式入口。
