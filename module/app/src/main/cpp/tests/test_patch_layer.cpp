@@ -106,6 +106,7 @@ struct FakePrims {
 };
 
 FakePrims g_prims;
+uint32_t g_tutorial_pause_storage = 0;
 
 bool fake_install_bl(uintptr_t addr, uint32_t expected_word, void* wrapper) {
     ++g_prims.install_bl_calls;
@@ -127,14 +128,23 @@ bool fake_install_word(uintptr_t addr, uint32_t expected_word, uint32_t new_word
     g_prims.last_addr = addr;
     g_prims.last_expected = expected_word;
     g_prims.last_new_word = new_word;
-    return g_prims.install_word_ok;
+    if (!g_prims.install_word_ok) return false;
+    if (addr == reinterpret_cast<uintptr_t>(&g_tutorial_pause_storage)) {
+        if (g_tutorial_pause_storage != expected_word) return false;
+        g_tutorial_pause_storage = new_word;
+    }
+    return true;
 }
 
 bool fake_revert_word(uintptr_t addr, uint32_t original_word) {
     ++g_prims.revert_word_calls;
     g_prims.last_addr = addr;
     g_prims.last_expected = original_word;
-    return g_prims.revert_word_ok;
+    if (!g_prims.revert_word_ok) return false;
+    if (addr == reinterpret_cast<uintptr_t>(&g_tutorial_pause_storage)) {
+        g_tutorial_pause_storage = original_word;
+    }
+    return true;
 }
 
 // B 尾调用原语：返回站点附近（默认 +0x100）的 thunk 地址；0 = 分配失败。
@@ -228,6 +238,7 @@ void reset_all() {
     g_ptr_prims = FakePtrPrims{};
     g_ptr_slot_storage = nullptr;
     g_branch_return_storage = 0;
+    g_tutorial_pause_storage = 0;
     g_last_log_level = QolLogLevel::kInfo;
     g_base = kBase;
     g_fn_resolve_bias = 0;
@@ -499,17 +510,23 @@ void test_tutorial_pause_gate_skip_site() {
     constexpr const char* kSiteName = "P_TUTORIAL_PAUSE_GATE_SKIP";
     PatchSite site{};
     CHECK(qol::game::patch_site(kSiteName, &site));
-    const uintptr_t addr = g_base + F_UI_PLAY_PORTING_DRAW_VMA + 0xcf4;
-    CHECK(site.addr == addr);
+    const uintptr_t game_addr = g_base + F_UI_PLAY_PORTING_DRAW_VMA + 0xcf4;
+    CHECK(site.addr == game_addr);
     CHECK(site.kind == qol::game::PatchKind::kWordReplace);
     CHECK(site.expected_word == 0x39000260u);
     CHECK(site.replacement_word == ARM64_NOP_WORD);
 
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(&g_tutorial_pause_storage);
+    site.addr = addr;
+    CHECK(qol::game::patch_site_override_for_test(kSiteName, site));
+    g_tutorial_pause_storage = 0x39000260u;
     const ResourceClaim claim = make_patch_claim(kSiteName, kSiteName, nullptr);
     CHECK(install_claim(claim, addr).ok == 0);
+    CHECK(g_tutorial_pause_storage == ARM64_NOP_WORD);
     CHECK(g_prims.last_expected == 0x39000260u);
     CHECK(g_prims.last_new_word == ARM64_NOP_WORD);
     CHECK(release_claim(claim, addr).ok == 0);
+    CHECK(g_tutorial_pause_storage == 0x39000260u);
     CHECK(g_prims.last_expected == 0x39000260u);
 }
 
