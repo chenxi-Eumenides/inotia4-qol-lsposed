@@ -10,6 +10,7 @@
 #include "contracts/game_ports/save_port.h"
 #include "contracts/game_ports/craft_port.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
+#include "contracts/game_ports/custom_map_resource_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
 #include "contracts/game_ports/craft_lottery_port.h"
 #include "contracts/game_ports/character_extras_port.h"
@@ -60,6 +61,11 @@ const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     contracts::kQolPortCustomRecipeWriteVersion};
 const contracts::QolCraftLotteryWritePort kCraftLotteryWritePort{
     contracts::kQolPortCraftLotteryWriteVersion};
+const contracts::QolCustomMapResourcePort kCustomMapResourcePort{
+    {sizeof(contracts::QolCustomMapResourcePort),
+     contracts::kQolPortCustomMapResourceVersion.major,
+     contracts::kQolPortCustomMapResourceVersion.minor},
+    nullptr, nullptr};
 
 const contracts::QolCharacterExtrasPort kCharacterExtrasPort{{1, 0}, {}};
 const contracts::QolInventoryExtrasPort kInventoryExtrasPort{{1, 0}, {}};
@@ -143,6 +149,9 @@ const contracts::QolCustomRecipeWritePort& custom_recipe_write_port() {
 }
 const contracts::QolCraftLotteryWritePort& craft_lottery_write_port() {
     return kCraftLotteryWritePort;
+}
+const contracts::QolCustomMapResourcePort& custom_map_resource_port() {
+    return kCustomMapResourcePort;
 }
 const contracts::QolCharacterExtrasPort& character_extras_port() {
     return kCharacterExtrasPort;
