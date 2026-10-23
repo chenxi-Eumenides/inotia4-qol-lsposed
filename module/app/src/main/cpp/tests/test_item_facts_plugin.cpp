@@ -226,7 +226,7 @@ int main() {
           qol::contracts::FeatureCategory::kBasicOptimization);
     CHECK(descriptor.features[1].on_toggle != nullptr);
     CHECK(!descriptor.deactivate_allowed);
-    CHECK(descriptor.resources_count == 25 && descriptor.resources != nullptr);
+    CHECK(descriptor.resources_count == 28 && descriptor.resources != nullptr);
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         CHECK(descriptor.resources[i].owner != nullptr &&
               std::strcmp(descriptor.resources[i].owner, "core.item") == 0);
@@ -238,7 +238,7 @@ int main() {
         CHECK(descriptor.resources[i].failure ==
               qol::contracts::ResourceFailure::kFailClosed);
     }
-    CHECK(std::strcmp(descriptor.resources[24].id, "ptrslot:MOVE_MERGE_GOT") == 0);
+    CHECK(std::strcmp(descriptor.resources[27].id, "ptrslot:MOVE_MERGE_GOT") == 0);
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
     CHECK(descriptor.http_endpoint_count == 19 && descriptor.http_endpoints != nullptr);
     CHECK(descriptor.http_route_metadata_count == 2 &&

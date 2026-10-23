@@ -550,9 +550,20 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
                         op, cap.target, cap.pre_full, cap.delta, cap.new_full, written);
 }
 
-// The Game Host replaces this placeholder with its ABI handler; that runtime handler is outside
-// the inventory support toggle's gate.
-void* find_item_wrapper(int32_t) { return nullptr; }
+// The resource descriptor is created before plugin_install binds the Game Host. Keep this handler
+// stable for descriptor registration and dispatch through the bound Game Host at call time.
+void* find_item_wrapper(int32_t category) {
+    const qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"hook:INVEN_FindItem"});
+    const qol::contracts::QolGameHost* game = g_game;
+    if (game == nullptr || game->item_abi.find_item_wrapper == nullptr) {
+        QOL_LOG_WARN(QolDomain::kInventory,
+                     "INVEN_FindItem Game Host dispatch unavailable category=%d", category);
+        return nullptr;
+    }
+    return game->item_abi.find_item_wrapper(category);
+}
 
 int extension_item_count(int32_t category) {
     const qol::contracts::ExtensionBagApi* eb = eb_active();
@@ -1802,7 +1813,6 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
 
 constexpr uint32_t kInventoryHookClaimCount =
     sizeof(kInventoryHookClaims) / sizeof(kInventoryHookClaims[0]);
-std::array<qol::contracts::ResourceClaim, kInventoryHookClaimCount> g_runtime_hook_claims{};
 
 // claim.handler → 该 wrapper 的 backup 槽（原有 g_backup_* 全局）。以 handler 做唯一映射，
 // 避免 id 表与 backup 表两处重复维护；未登记 handler 返回 nullptr，桥按 fail-closed 处理。
@@ -1856,28 +1866,16 @@ bool inventory_native_hook_support_enabled() {
 
 const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count) {
     if (out_count != nullptr) *out_count = kInventoryHookClaimCount;
-    for (uint32_t index = 0; index < kInventoryHookClaimCount; ++index) {
-        g_runtime_hook_claims[index] = kInventoryHookClaims[index];
-    }
-    if (g_game != nullptr && g_game->item_abi.find_item_wrapper != nullptr) {
-        for (auto& claim : g_runtime_hook_claims) {
-            if (std::strcmp(claim.id, "hook:INVEN_FindItem") == 0) {
-                claim.handler = reinterpret_cast<void*>(g_game->item_abi.find_item_wrapper);
-                break;
-            }
-        }
-    }
-    return g_runtime_hook_claims.data();
+    return kInventoryHookClaims;
 }
 
 int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
     // 空 backup 或未知 id 一律非 0 → 宿主逆序回滚并置 failed（fail-closed）。
     if (resource_id == nullptr || backup == nullptr) return 1;
-    for (const qol::contracts::ResourceClaim& claim : g_runtime_hook_claims) {
+    for (const qol::contracts::ResourceClaim& claim : kInventoryHookClaims) {
         if (std::strcmp(claim.id, resource_id) != 0) continue;
-        if (std::strcmp(claim.id, "hook:INVEN_FindItem") == 0 && g_game != nullptr &&
-            g_game->item_abi.bind_find_item_backup != nullptr &&
-            claim.handler == reinterpret_cast<void*>(g_game->item_abi.find_item_wrapper)) {
+        if (std::strcmp(claim.id, "hook:INVEN_FindItem") == 0) {
+            if (g_game == nullptr || g_game->item_abi.bind_find_item_backup == nullptr) return 1;
             return g_game->item_abi.bind_find_item_backup(
                        reinterpret_cast<qol::contracts::QolFindItemAbiFn>(backup)).ok == kQolOk
                        ? 0 : 1;
@@ -1889,7 +1887,7 @@ int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
             std::strcmp(claim.id, "hook:SHORTCUT_GetState") == 0 ||
             std::strcmp(claim.id, "hook:CHAR_UseItemEx") == 0) {
             QOL_LOG_INFO(QolDomain::kInventory,
-                         "%s diagnostic hook bound backup=%p", claim.id, backup);
+                         "diagnostic hook bound resource=%s backup=%p", claim.id, backup);
         }
         return 0;
     }
@@ -1938,14 +1936,6 @@ bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game) {
         return false;
     }
     g_game = game;
-    for (uint32_t index = 0; index < kInventoryHookClaimCount; ++index) {
-        g_runtime_hook_claims[index] = kInventoryHookClaims[index];
-        if (std::strcmp(g_runtime_hook_claims[index].id, "hook:INVEN_FindItem") == 0 &&
-            game->item_abi.find_item_wrapper != nullptr) {
-            g_runtime_hook_claims[index].handler =
-                reinterpret_cast<void*>(game->item_abi.find_item_wrapper);
-        }
-    }
     return true;
 }
 

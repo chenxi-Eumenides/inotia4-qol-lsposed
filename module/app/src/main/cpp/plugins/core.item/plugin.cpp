@@ -106,8 +106,8 @@ const contracts::QolItemDiceWritePort* g_item_dice_write = nullptr;
 const contracts::QolItemInventoryStateWritePort* g_item_state_write = nullptr;
 const contracts::QolMoveMergePort* g_move_merge_port = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_extras_port = nullptr;
-// inventory 24 条 + merge ptrslot 1 条；静态存储保证 descriptor 生命周期。
-constexpr uint32_t kInventoryResourceCount = 24;
+// Inventory claims + merge ptrslot；静态存储保证 descriptor 生命周期。
+constexpr uint32_t kInventoryResourceCount = 27;
 constexpr uint32_t kMergeResourceCount = 1;
 constexpr uint32_t kMaxResources = 32;
 static_assert(kInventoryResourceCount + kMergeResourceCount <= kMaxResources,

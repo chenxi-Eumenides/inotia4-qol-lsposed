@@ -46,8 +46,8 @@ bool attach(const contracts::QolHostSdk*, const contracts::QolGameHost*,
 void detach() {}
 
 const contracts::ResourceClaim* claims(uint32_t* out_count) {
-    static std::array<contracts::ResourceClaim, 24> resources = [] {
-        std::array<contracts::ResourceClaim, 24> result{};
+    static std::array<contracts::ResourceClaim, 27> resources = [] {
+        std::array<contracts::ResourceClaim, 27> result{};
         for (uint32_t index = 0; index < result.size(); ++index) {
             result[index] = {
                 "hook:stub", "stub", contracts::ResourceMechanism::kEntryHook,
