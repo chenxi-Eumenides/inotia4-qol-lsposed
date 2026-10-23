@@ -26,6 +26,7 @@ usage() {
   LSPatch JAR：tools/lspatch/lspatch-v1.2-487-release.jar
 
 选项：
+  --all               输出全部处理明细与集成工具日志
   --lspatch-jar PATH  使用指定版本的 LSPatch JAR
   --name NAME         设置 LSPatch 输出应用名称；未指定时按目标 APK 变体自动命名
   --debuggable        将输出 APK 标记为 debuggable
@@ -41,10 +42,15 @@ lspatch_jar=${LSPATCH_JAR:-"$repo_root/tools/lspatch/lspatch-v1.2-487-release.ja
 debuggable=false
 sigbypasslv=2
 name_override=
+all_output=false
 positional=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --all)
+            all_output=true
+            shift
+            ;;
         --lspatch-jar)
             [[ $# -ge 2 ]] || usage
             lspatch_jar=$2
@@ -161,16 +167,23 @@ cleanup_signing_dir() {
 }
 trap cleanup_signing_dir EXIT
 signing_p12="$signing_dir/aosp-testkey.p12"
+keytool_output="$signing_dir/keytool.log"
 if ! keytool -importkeystore -noprompt \
     -srckeystore "$signing_bks" -srcstoretype BKS -srcstorepass 123456 \
     -srcalias testkey -srckeypass 123456 \
     -destkeystore "$signing_p12" -deststoretype PKCS12 -deststorepass 123456 \
     -destalias testkey -destkeypass 123456 \
     -providerclass org.bouncycastle.jce.provider.BouncyCastleProvider \
-    -providerpath "$lspatch_jar"; then
+    -providerpath "$lspatch_jar" >"$keytool_output" 2>&1; then
+    cat "$keytool_output" >&2
     printf '签名 keystore 转换失败：无法使用 LSPatch JAR 内置 BouncyCastle provider 将 BKS 转为 PKCS12。\n' >&2
     printf '请确认 JAR 包含 BouncyCastle provider，且 keystore 密码、别名和 key 密码正确。\n' >&2
     exit 1
+fi
+if [[ "$all_output" == true ]]; then
+    cat "$keytool_output"
+else
+    grep -Ei 'warning|error|exception|failed' "$keytool_output" || true
 fi
 if [[ ! -s "$signing_p12" ]]; then
     printf '签名 keystore 转换失败：未生成有效 PKCS12 文件：%s\n' "$signing_p12" >&2
@@ -219,12 +232,14 @@ release_stem() {
     printf 'Inotia4_%s_%s' "$name" "${BASH_REMATCH[1]}"
 }
 
-printf '模块 APK：%s\n' "$module_apk"
-printf '模块通道：%s\n' "$module_channel"
-[[ -n "$module_version" ]] && printf '模块版本：%s\n' "$module_version"
-printf '集成工具：%s\n' "$patcher"
-printf 'LSPatch JAR：%s\n' "$lspatch_jar"
-printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
+if [[ "$all_output" == true ]]; then
+    printf '模块 APK：%s\n' "$module_apk"
+    printf '模块通道：%s\n' "$module_channel"
+    [[ -n "$module_version" ]] && printf '模块版本：%s\n' "$module_version"
+    printf '集成工具：%s\n' "$patcher"
+    printf 'LSPatch JAR：%s\n' "$lspatch_jar"
+    printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
+fi
 
 failed=0
 generated=()
@@ -251,8 +266,10 @@ for target_apk in "${game_apks[@]}"; do
         esac
     fi
 
-    printf '\n===== 处理：%s\n' "$target_name"
-    printf '应用名称：%s\n' "$patch_name"
+    if [[ "$all_output" == true ]]; then
+        printf '\n===== 处理：%s\n' "$target_name"
+        printf '应用名称：%s\n' "$patch_name"
+    fi
 
     args=(java -jar "$lspatch_jar" -m "$module_apk" -o "$work_dir")
     args+=(--name "$patch_name")
@@ -261,7 +278,21 @@ for target_apk in "${game_apks[@]}"; do
     [[ "$debuggable" == true ]] && args+=(--debuggable)
     args+=(--force "$target_apk")
 
-    if ! "${args[@]}"; then
+    patch_status=0
+    patch_output="$work_dir/patcher.log"
+    if [[ "$all_output" == true ]]; then
+        if "${args[@]}"; then
+            :
+        else
+            patch_status=$?
+        fi
+    elif "${args[@]}" >"$patch_output" 2>&1; then
+        grep -Ei 'warning|error|exception|failed|fatal' "$patch_output" || true
+    else
+        patch_status=$?
+        cat "$patch_output" >&2
+    fi
+    if [[ "$patch_status" -ne 0 ]]; then
         printf '集成失败：%s\n' "$target_name" >&2
         failed=1
         rm -rf "$work_dir"
@@ -288,7 +319,9 @@ for target_apk in "${game_apks[@]}"; do
 done
 
 printf '\n===== 汇总：成功 %d / 失败 %d\n' "${#generated[@]}" "$failed"
-for apk in "${generated[@]}"; do
-    printf '  %s\n' "$apk"
-done
+if [[ "$all_output" == true ]]; then
+    for apk in "${generated[@]}"; do
+        printf '  %s\n' "$apk"
+    done
+fi
 exit "$failed"
