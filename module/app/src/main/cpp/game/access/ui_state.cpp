@@ -202,6 +202,16 @@ void main_menu_body(void*, char* out, uint32_t capacity, uint32_t* out_len) {
 
 }  // namespace
 
+uintptr_t popup_enter_vma(uintptr_t enter) {
+    if (g_base == 0) return 0;
+    if (lifecycle_participant_is_inventory_enter(enter)) {
+        return F_PANEL_INVENTORY_ENTER;
+    }
+    const uintptr_t aliased = popup_enter_alias_resolve(enter);
+    if (aliased != kPopupEnterAliasNone) return aliased;
+    return enter > g_base ? enter - g_base : 0;
+}
+
 uintptr_t popup_top_vma() {
     if (g_popup_stack == nullptr || g_base == 0) return 0;
     uint8_t* stk = reinterpret_cast<uint8_t*>(g_popup_stack);
@@ -210,16 +220,8 @@ uintptr_t popup_top_vma() {
     uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
     if (data == 0) return 0;
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
-    uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
-    // 生命周期参与者识别扩展 inventory enter；无可用参与者视为非扩展 enter。
-    if (lifecycle_participant_is_inventory_enter(enter)) {
-        return F_PANEL_INVENTORY_ENTER;
-    }
-    // 模块替换过 enter 回调的面板（商店/合成/存档槽等）在栈里存的是模块 wrapper 地址，
-    // 「enter - g_base」会得到负值而被当成无面板，须先经反查表还原成原版 VMA。
-    const uintptr_t aliased = popup_enter_alias_resolve(enter);
-    if (aliased != kPopupEnterAliasNone) return aliased;
-    return enter > g_base ? enter - g_base : 0;
+    const uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
+    return popup_enter_vma(enter);
 }
 
 bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
@@ -279,15 +281,8 @@ bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma) {
         return false;
     }
     const uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
-    uintptr_t vma = 0;
-    if (lifecycle_participant_is_inventory_enter(enter)) {
-        vma = F_PANEL_INVENTORY_ENTER;
-    } else {
-        const uintptr_t aliased = popup_enter_alias_resolve(enter);
-        vma = aliased != kPopupEnterAliasNone ? aliased : (enter > g_base ? enter - g_base : 0);
-    }
     *out_count = count;
-    *out_top_enter_vma = vma;
+    *out_top_enter_vma = popup_enter_vma(enter);
     return true;
 }
 
@@ -372,14 +367,8 @@ UiWriteResult ui_panel_close() {
     uint64_t data = *reinterpret_cast<uint64_t*>(stk + POPUP_STACK_DATA);
     if (data == 0) return pack_result(op_err("no panel open"));
     uint8_t* top = reinterpret_cast<uint8_t*>(static_cast<uintptr_t>(data)) + (count - 1) * POPUP_ENTRY_SIZE;
-    uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
-    uintptr_t vma = enter > g_base ? enter - g_base : 0;
-    // 生命周期参与者识别扩展 inventory enter；无可用参与者视为非扩展 enter。
-    if (lifecycle_participant_is_inventory_enter(enter)) {
-        vma = F_PANEL_INVENTORY_ENTER;
-    }
-    // 模块 wrapper 的 enter 不是 libgame 地址，上面的换算会归 0；经反查表还原原版 VMA。
-    if (vma == 0) vma = popup_enter_alias_resolve(enter);
+    const uintptr_t enter = *reinterpret_cast<uintptr_t*>(top + POPUP_ENTRY_ENTER);
+    const uintptr_t vma = popup_enter_vma(enter);
     if (!popup_vma_is_panel(vma)) return pack_result(op_err("top of stack is not a panel"));
     // 官方 ButtonBackExe 链：SOUNDSYSTEM_Play(0) + 流程3 + HUD 开关恢复
     fn_ui_set_popup_process_info(3, 0);

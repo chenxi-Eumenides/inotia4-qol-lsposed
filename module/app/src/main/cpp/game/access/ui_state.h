@@ -14,6 +14,9 @@ namespace qol::game {
 
 // 栈顶面板原版 enter VMA（减去 g_base；模块 wrapper 经别名反查还原）；无面板/未就绪返回 0。
 uintptr_t popup_top_vma();
+// enter → VMA 的唯一解析：扩展 inventory 特判 → wrapper alias 反查 → enter-g_base。
+// 所有读取 popup 栈顶的路径必须经此函数，禁止各自复制顺序。
+uintptr_t popup_enter_vma(uintptr_t enter);
 bool popup_stack_snapshot(uint32_t* out_count, uintptr_t* out_top_enter_vma);
 const char* popup_stack_snapshot_failure();
 // 栈顶面板名（与 panel_* 输出口径一致）；非面板/未就绪返回 nullptr。
