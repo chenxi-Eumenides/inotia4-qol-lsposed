@@ -9,6 +9,7 @@
 #include "feature.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -24,6 +25,7 @@ const contracts::QolWorldActionPort* g_world_action_port = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::QolStaticDataApi* g_static_data = nullptr;
+const contracts::UiStateApi* g_ui_state = nullptr;
 bool g_installed = false;
 const char* g_install_error = nullptr;
 
@@ -79,6 +81,26 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_WORLD_ACTION,
      {contracts::kQolPortWorldActionVersion.major, contracts::kQolPortWorldActionVersion.minor}},
 };
+
+void register_dialog_state() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return;
+    const void* ui_state_iface = nullptr;
+    if (!contracts::succeeded(g_sdk->capabilities.require(
+            contracts::kUiStateCapabilityId,
+            {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor},
+            &ui_state_iface)) ||
+        ui_state_iface == nullptr) {
+        return;
+    }
+    g_ui_state = static_cast<const contracts::UiStateApi*>(ui_state_iface);
+    if (g_ui_state->register_state == nullptr) return;
+    contracts::QolUiStateRegistration registration{};
+    registration.struct_size = sizeof(registration);
+    registration.type = contracts::kUiStateTypeDialog;
+    std::snprintf(registration.key, sizeof(registration.key), "%s", "world_teleport.confirm");
+    std::snprintf(registration.plugin_id, sizeof(registration.plugin_id), "%s", kPluginId);
+    (void)g_ui_state->register_state(&registration);
+}
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
@@ -152,11 +174,17 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     g_static_data = static_cast<const contracts::QolStaticDataApi*>(static_data_iface);
+    register_dialog_state();
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    if (g_ui_state != nullptr && g_ui_state->unregister_state != nullptr) {
+        (void)g_ui_state->unregister_state(contracts::kUiStateTypeDialog,
+                                           "world_teleport.confirm");
+    }
+    g_ui_state = nullptr;
     g_installed = false;
     g_backup_call_map_name = nullptr;
     g_world_facts = nullptr;
@@ -172,6 +200,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     g_installed = true;
     g_install_error = nullptr;
+    register_dialog_state();
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {

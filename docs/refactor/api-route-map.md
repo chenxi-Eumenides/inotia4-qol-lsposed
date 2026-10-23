@@ -157,21 +157,19 @@
 | POST | `/api/ui/open_panel` | core.ui_state | 0 | 1 | UiActionController.panelOpen | `ActionApiServiceCore.panelOpen` → `UiActions.panelOpen`（票据透传） | `NativeHttpCommand.post` → `nativeHttpDispatch` | `plugins/core.ui_state/*`（命令 + 结果处理器） | 票据契约；原响应经 `result` 回取（`state=gamestate`） |
 | POST | `/api/ui/start_interact` | core.ui_state | 0 | 1 | UiActionController.interact | `ActionApiServiceCore.npcInteract` → `UiActions.npcInteract`（票据透传） | `NativeHttpCommand.post` → `nativeHttpDispatch` | `plugins/core.ui_state/*`（命令 + 结果处理器） | 票据契约；原 op JSON 经 `result` 回取 |
 | POST | `/api/ui/dialog/select` | core.ui_state | 0 | 1 | UiActionController.select | `ActionApiServiceCore.dialogSelect` → `UiActions.dialogSelect`（票据透传；agreement 分支留 Kotlin） | `NativeHttpCommand.post` → `nativeHttpDispatch` | `plugins/core.ui_state/*`（命令 + 结果处理器） | 票据契约；原 op JSON 经 `result` 回取 |
-| GET | `/api/ui` | core.ui_state | 0 | 1 | UiController.composite | `InfoApiServiceCore.ui`（Kotlin `gamestateJson()` legacy composite） | `nativeGetGamestateJson` | `plugins/core.ui_state/routes.inc` metadata-only；既有 `core/native/game_cache.cpp` composite bridge 保留 | `UiActivityTracker` 优先注入 Android Agreement；本复合路由不汇入 custom panel/dialog state |
-| GET | `/api/ui/screen` | core.ui_state | 0 | 1 | UiController.screen | `InfoApiServiceCore.uiScreen` → `InfoSystemQueries.uiScreen` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.ui_state/plugin.cpp` + `QOL_PORT_UI_STATE_READ` | 原生 screen snapshot；custom overlay 不改写 |
-| GET | `/api/ui/panel` | core.ui_state | 0 | 1 | UiController.panel | `InfoApiServiceCore.uiPanel` → `InfoSystemQueries.uiPanel` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.ui_state/plugin.cpp`：custom stack top / native fallback | custom `panel_<panel_id>` 映射至既有 `panel` 字段 |
-| GET | `/api/ui/dialog` | core.ui_state | 0 | 1 | UiController.dialog | `InfoApiServiceCore.uiDialog`（Kotlin agreement 优先）→ `InfoSystemQueries.uiDialog` → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.ui_state/plugin.cpp`：保留 native JSON，仅替换 custom `type` | 不新增 response key；Agreement 仍为 Kotlin 分支 |
+| GET | `/api/ui/state` | core.ui_state | 0 | 1 | UI state 查询入口 | UI state query → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.ui_state` unified state query | `{name,type,source,info,options}`；Android Agreement 作为状态发布，不返回旧 screen/dialog 字段 |
+| GET | `/api/ui/state/table` | core.ui_state | 0 | 1 | UI state table 查询入口 | UI state table query → `NativeHttpQuery.get` | `nativeHttpDispatch` | `plugins/core.ui_state` state-table query / `visit_states` | `{states:[{name,type,source,stability}]}`；不分配 per-state id |
 
 ## 汇总
 
-- 冻结路由总数：**147**（68 GET、79 POST、21 条 `op_gated`）。插件 owner 源事实 140 条，Host resident 源事实 7 条；typed native endpoints 84 条，metadata-only 路由 13 条。metadata-only 只登记既有路由事实，不添加 handler 或改变响应。
-- 当前 owner 分布：`core.api=6`、`core.character=41`、`core.craft=1`、`core.custom_ui=3`、`core.data=12`、`core.feature=1`、`core.item=21`、`core.quest=8`、`core.save=3`、`core.system=5`、`core.ui_state=9`、`core.world=12`、`autosell=2`、`extension_bag=8`、`save_backup=4`、`settings=8`、`legacy.debug=3`。
+- 冻结路由总数：**145**（66 GET、79 POST、21 条 `op_gated`；旧 UI GET 删 4 条、新 UI GET 加 2 条）。插件 owner 源事实 138 条，Host resident 源事实 7 条；typed native endpoints 83 条，metadata-only 路由 12 条。metadata-only 只登记既有路由事实，不添加 handler 或改变响应。
+- 当前 owner 分布：`core.api=6`、`core.character=41`、`core.craft=1`、`core.custom_ui=3`、`core.data=12`、`core.feature=1`、`core.item=21`、`core.quest=8`、`core.save=3`、`core.system=5`、`core.ui_state=7`、`core.world=12`、`autosell=2`、`extension_bag=8`、`save_backup=4`、`settings=8`、`legacy.debug=3`。
 - Host resident routes 运行时 owner 为空：3 条 config 路由的 label 为 `settings`，lifecycle 路由 label 为 `core.api`，3 条 legacy debug 路由 label 为 `legacy.debug`。`settings` 的配置 namespace 仍为 `core.settings`；5 条 settings-ui 调试路由是插件 `settings` 的 descriptor endpoints/metadata，不是 Host resident routes。OP 门控以 `op_gated` 列为准；票据化写端点契约见 `docs/reference/api-reference.md` §7.9/§7.10。
 - 每条 owner 路由事实源位于 `plugins/<owner>/routes.inc`；`core.api` 使用 `plugins/core.api/owned_routes.inc`，Host resident facts 位于 `host/http_resident_routes.inc`。`plugins/core.api/routes.inc` 由 `scripts/maintenance/sync_http_routes.py` 聚合生成。
-- 同步工具只把现有聚合表的 method/path 顺序作为排列基线；method/path owner label、`op_gated` 与 `lease` 值均从 owner/resident 源事实读取，并在写入前校验当前 147 条冻结清单。
+- 同步工具只把现有聚合表的 method/path 顺序作为排列基线；method/path owner label、`op_gated` 与 `lease` 值均从 owner/resident 源事实读取，并在写入前校验当前 145 条冻结清单。
 
 ## 三源口径说明
 
 1. Native 路由表只提供冻结的 method/path、owner、`op_gated` 和 route lease；它不推导 Kotlin 调用链。
 2. Kotlin 端从 `api/controller/*.kt` 的 mapping 与方法体、`service/info/**`、`service/action/**` 追到 `NativeBridge` 或 `NativeHttpCommand`；配置 POST 例外只传 raw body，不在 Kotlin service/controller 解析或写入配置。Action service 的 `state` attach、`InfoApiServiceCore` 的复合组装和 enrichment 均计入加工。
-3. HTTP 契约 `docs/reference/api-reference.md` 用于校验路径语义、静态数据/名称注入和响应约定；本表不复制完整响应 schema。HTTP 契约中列出的 147 条路径以 native 路由表和 Kotlin controller 交集为最终行集合。`set_skill_usage` 由 `core.feature` 的临时 handler 透传固定 501 占位响应，不投递命令。party 的 4 条 POST 与 `PartyController` 的 `/api/character/party/{slot}` 通配映射处于同一 controller，且声明在通配映射之前。
+3. HTTP 契约 `docs/reference/api-reference.md` 用于校验路径语义、静态数据/名称注入和响应约定；本表不复制完整响应 schema。HTTP 契约中列出的 145 条路径以 native 路由表和 Kotlin controller 交集为最终行集合。`set_skill_usage` 由 `core.feature` 的临时 handler 透传固定 501 占位响应，不投递命令。party 的 4 条 POST 与 `PartyController` 的 `/api/character/party/{slot}` 通配映射处于同一 controller，且声明在通配映射之前。

@@ -16,11 +16,12 @@ constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 22;
 constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 32;
 constexpr const char* kUiStateCapabilityId = "ui.state";
-constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 1;
+constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
 constexpr uint32_t kUiStateMaxPanelIdBytes = 128;
 constexpr uint32_t kUiStateMaxDialogOptions = 6;
 constexpr uint32_t kUiStateMaxDialogTextBytes = 256;
+constexpr uint32_t kUiStateMaxNameBytes = 64;
 
 struct UiCustomPanelsSnapshot {
     uint64_t sequence;
@@ -52,6 +53,50 @@ struct UiLayerInfo {
 
 using QolUiLayerVisitFn = void (*)(const UiLayerInfo* layer, void* user);
 
+// ---- ui.state 1.2：统一状态（name/type/source） ----
+// type: 0 unknown / 1 boot / 2 menu / 3 world / 4 dialog / 5 panel
+// source: 0 unknown / 1 native / 2 module / 3 external / 4 android
+constexpr uint32_t kUiStateTypeUnknown = 0;
+constexpr uint32_t kUiStateTypeBoot = 1;
+constexpr uint32_t kUiStateTypeMenu = 2;
+constexpr uint32_t kUiStateTypeWorld = 3;
+constexpr uint32_t kUiStateTypeDialog = 4;
+constexpr uint32_t kUiStateTypePanel = 5;
+constexpr uint32_t kUiStateSourceUnknown = 0;
+constexpr uint32_t kUiStateSourceNative = 1;
+constexpr uint32_t kUiStateSourceModule = 2;
+constexpr uint32_t kUiStateSourceExternal = 3;
+constexpr uint32_t kUiStateSourceAndroid = 4;
+
+struct QolUiStateSummary {
+    uint32_t struct_size;
+    uint32_t type;
+    uint32_t source;
+    char name[kUiStateMaxNameBytes];
+};
+
+struct QolUiStateTableRow {
+    const char* name;   // 仅在 visit 调用期间有效
+    uint32_t type;
+    uint32_t source;
+    uint32_t stability; // 0 static, 1 session
+};
+
+using QolUiStateTableVisitFn = void (*)(const QolUiStateTableRow* row, void* user);
+
+struct QolUiStateRegistration {
+    uint32_t struct_size;
+    uint32_t type;          // 4 dialog / 5 panel
+    char key[64];           // panel_id 或 dialog_type_id
+    char plugin_id[64];     // 由插件从 PluginContext::plugin_id 复制
+};
+
+struct QolUiExternalSnapshot {
+    uint32_t struct_size;
+    uint32_t active;
+    char name[kUiStateMaxNameBytes]; // "android_agreement"
+};
+
 struct UiStateApi {
     QolResult (*publish_custom_panels)(const UiCustomPanelsSnapshot* snapshot);
     QolResult (*publish_custom_dialog)(const UiCustomDialogSnapshot* snapshot);
@@ -59,6 +104,13 @@ struct UiStateApi {
     // v1.1 尾部追加：按栈顶→栈底枚举当前 UI 层。回调在调用线程同步执行，
     // layer->id 仅在本次回调内有效，消费者需自行复制。
     QolResult (*read_layers)(QolUiLayerVisitFn visit, void* user);
+    // v1.2 尾部追加：统一状态摘要、状态表、注册与外部 UI 覆盖。
+    // read_state/visit_states 任意线程可调；register_state 在插件 install 阶段调用。
+    QolResult (*read_state)(QolUiStateSummary* out);
+    QolResult (*visit_states)(QolUiStateTableVisitFn visit, void* user);
+    QolResult (*register_state)(const QolUiStateRegistration* registration);
+    QolResult (*unregister_state)(uint32_t type, const char* key);
+    QolResult (*publish_external_ui)(const QolUiExternalSnapshot* snapshot);
 };
 
 enum class UiAlign : uint8_t { kLeft = 0, kRight = 1, kCenter = 2 };

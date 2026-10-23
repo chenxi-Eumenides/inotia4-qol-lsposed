@@ -33,7 +33,7 @@ SOURCE_ROUTE_COUNTS = {
     "core.quest": 8,
     "core.save": 3,
     "core.system": 5,
-    "core.ui_state": 9,
+    "core.ui_state": 7,
     "core.world": 12,
     "extension_bag": 8,
     "save_backup": 4,
@@ -45,10 +45,10 @@ EXPECTED_OWNER_COUNTS = {
     "legacy.debug": 3,
     "settings": 8,
 }
-EXPECTED_PLUGIN_FACT_COUNT = 140
+EXPECTED_PLUGIN_FACT_COUNT = 138
 EXPECTED_RESIDENT_FACT_COUNT = 7
-EXPECTED_ROUTE_COUNT = 147
-EXPECTED_METHOD_COUNTS = {"GET": 68, "POST": 79}
+EXPECTED_ROUTE_COUNT = 145
+EXPECTED_METHOD_COUNTS = {"GET": 66, "POST": 79}
 EXPECTED_OP_GATED_COUNT = 21
 
 PLUGIN_SOURCE_COUNTS = {
@@ -63,7 +63,7 @@ PLUGIN_SOURCE_COUNTS = {
     "core.quest/routes.inc": ("core.quest", 8),
     "core.save/routes.inc": ("core.save", 3),
     "core.system/routes.inc": ("core.system", 5),
-    "core.ui_state/routes.inc": ("core.ui_state", 9),
+    "core.ui_state/routes.inc": ("core.ui_state", 7),
     "core.world/routes.inc": ("core.world", 12),
     "extension_bag/http/routes.inc": ("extension_bag", 8),
     "save_backup/routes.inc": ("save_backup", 4),

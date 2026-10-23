@@ -96,6 +96,14 @@ const contracts::PanelItemSpec* panels_item_at(uint32_t index) {
     return index < g_item_count ? &g_items[index] : nullptr;
 }
 
+uint32_t panels_provider_count() {
+    return g_provider_count;
+}
+
+const contracts::PanelProviderSpec* panels_provider_at(uint32_t index) {
+    return index < g_provider_count ? &g_providers[index] : nullptr;
+}
+
 const contracts::PanelProviderSpec* panels_find_provider(const char* panel_id) {
     if (!non_empty(panel_id)) return nullptr;
     const int index = find_provider_index(panel_id);

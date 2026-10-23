@@ -786,6 +786,19 @@ QolResult sdk_panels_unregister_owner(const char* owner) {
     return contracts::ok();
 }
 
+uint32_t sdk_panels_provider_count() {
+    return infra::panels_provider_count();
+}
+
+const contracts::PanelProviderSpec* sdk_panels_provider_at(uint32_t index) {
+    return infra::panels_provider_at(index);
+}
+
+const contracts::QolPanelEnumerationApi kPanelEnumerationApi{
+    &sdk_panels_provider_count,
+    &sdk_panels_provider_at,
+};
+
 QolResult sdk_panels_find(const char* panel_id, const contracts::PanelProviderSpec** out_provider) {
     if (panel_id == nullptr || out_provider == nullptr) {
         return result_error(kQolErrInvalidArgument, kInvalidArgument);
@@ -1400,6 +1413,7 @@ contracts::QolHostSdk make_host_sdk() {
     }
     sdk.module_health = &module_health_facts_api();
     sdk.desc_hook_v2 = &g_desc_hook_api;
+    sdk.panel_enumeration = &kPanelEnumerationApi;
     return sdk;
 }
 

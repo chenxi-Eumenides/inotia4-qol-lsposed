@@ -163,6 +163,14 @@ std::string query(HttpMethod method, const char* path, uint16_t* out_status = nu
     return std::string(reinterpret_cast<const char*>(output), response.body_size);
 }
 
+QolUiStateSummary read_summary(const UiStateApi* api) {
+    QolUiStateSummary summary{};
+    summary.struct_size = sizeof(summary);
+    assert(api != nullptr && api->read_state != nullptr);
+    assert(succeeded(api->read_state(&summary)));
+    return summary;
+}
+
 void test_ui_write_ticket_retry() {
     const HttpEndpointDescriptor* open_endpoint = route(HttpMethod::kPost, "/api/ui/open_panel");
     const HttpEndpointDescriptor* close_endpoint = route(HttpMethod::kPost, "/api/ui/close_panel");
@@ -231,9 +239,9 @@ void test_native_fallback_and_keysets(const UiStateApi* api) {
     assert(g_frame_handler != nullptr);
     g_frame_handler(1, nullptr);
     const uint32_t reads_after_snapshot = g_native_reads;
-    assert(query(HttpMethod::kGet, "/api/ui/screen") == "{\"screen\":\"panel_inventory\"}");
-    assert(query(HttpMethod::kGet, "/api/ui/panel") == "{\"panel\":\"panel_inventory\"}");
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") == g_native_dialog);
+    QolUiStateSummary summary = read_summary(api);
+    assert(std::strcmp(summary.name, "panel_inventory") == 0 && summary.type == 5 &&
+           summary.source == 1);
     assert(g_native_reads == reads_after_snapshot);  // HTTP readers use only the main-thread copy.
 
     const UiStateApi* provided = api;
@@ -243,28 +251,34 @@ void test_native_fallback_and_keysets(const UiStateApi* api) {
     g_native_screen = "world";
     g_native_panel = "";
     g_frame_handler(2, nullptr);
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "world") == 0 && summary.type == 3 && summary.source == 1);
     char first_panel[] = "custom.settings";
     char second_panel[] = "custom.backup";
     const char* one[] = {first_panel};
     const UiCustomPanelsSnapshot one_layer{2, 1, one};
     assert(succeeded(provided->publish_custom_panels(&one_layer)));
-    assert(query(HttpMethod::kGet, "/api/ui/panel") == "{\"panel\":\"panel_custom.settings\"}");
-    assert(query(HttpMethod::kGet, "/api/ui/screen") == "{\"screen\":\"world\"}");
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_panel_custom_settings") == 0 && summary.type == 5 &&
+           summary.source == 2);
 
     const char* nested[] = {first_panel, second_panel};
     const UiCustomPanelsSnapshot two_layers{3, 2, nested};
     assert(succeeded(provided->publish_custom_panels(&two_layers)));
     std::memset(first_panel, 'x', sizeof(first_panel) - 1);
-    assert(query(HttpMethod::kGet, "/api/ui/panel") == "{\"panel\":\"panel_custom.backup\"}");
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_panel_custom_backup") == 0 && summary.type == 5 &&
+           summary.source == 2);
     const UiCustomPanelsSnapshot stale_panels{2, 1, one};
     assert(provided->publish_custom_panels(&stale_panels).code == kQolErrConflict);
     const UiCustomPanelsSnapshot pop_top{4, 1, nested};
     assert(succeeded(provided->publish_custom_panels(&pop_top)));
-    assert(query(HttpMethod::kGet, "/api/ui/panel") ==
-           std::string("{\"panel\":\"panel_") + std::string(15, 'x') + "\"}");
+    summary = read_summary(api);
+    assert(std::string(summary.name) == std::string("module_panel_") + std::string(15, 'x'));
     const UiCustomPanelsSnapshot unregister_owner{5, 0, nullptr};
     assert(succeeded(provided->publish_custom_panels(&unregister_owner)));
-    assert(query(HttpMethod::kGet, "/api/ui/panel") == "{\"panel\":null}");
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "world") == 0 && summary.type == 3 && summary.source == 1);
 }
 
 void test_custom_dialog_generation_and_mapping(const UiStateApi* api) {
@@ -275,6 +289,15 @@ void test_custom_dialog_generation_and_mapping(const UiStateApi* api) {
     const char* labels1[] = {option_a, option_b};
     const UiCustomDialogSnapshot dialog1{1, 1, type1, title1, labels1, 2};
     assert(succeeded(api->publish_custom_dialog(&dialog1)));
+    QolUiStateSummary summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_dialog_world_teleport_confirm") == 0 &&
+           summary.type == 4 && summary.source == 2);
+    const std::string state = query(HttpMethod::kGet, "/api/ui/state");
+    assert(state.find("\"name\":\"module_dialog_world_teleport_confirm\"") != std::string::npos);
+    assert(state.find("\"title\":\"Map title\"") != std::string::npos);
+    assert(state.find("\"content\":\"say \\\"type\\\" and \\\\ path\"") != std::string::npos);
+    assert(state.find("\"options\":[{\"id\":\"0\",\"label\":\"Open\"") != std::string::npos);
+
     char type2[] = "save_backup.confirm";
     char title2[] = "Backup";
     char option_c[] = "Save";
@@ -284,29 +307,28 @@ void test_custom_dialog_generation_and_mapping(const UiStateApi* api) {
     std::memset(type2, 'z', sizeof(type2) - 1);
     std::memset(title2, 'z', sizeof(title2) - 1);
     std::memset(option_c, 'z', sizeof(option_c) - 1);
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
-           "{\"type\":\"save_backup.confirm\",\"text\":\"say \\\"type\\\" and \\\\ path\",\"speaker\":\"merchant\",\"displayed\":true,\"options\":[{\"id\":\"0\",\"label\":\"Open\",\"meta\":{\"type\":\"nested\"}}]}");
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_dialog_save_backup_confirm") == 0 &&
+           summary.type == 4 && summary.source == 2);
     assert(api->clear_custom_dialog(1, 3).ok == kQolOk);  // Old generation cannot clear new.
-    assert(query(HttpMethod::kGet, "/api/ui/dialog").find("save_backup.confirm") !=
-           std::string::npos);
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_dialog_save_backup_confirm") == 0);
     const UiCustomDialogSnapshot late_old{4, 1, "world_teleport.confirm", "Old", labels1, 2};
     assert(api->publish_custom_dialog(&late_old).code == kQolErrConflict);
 
     g_native_dialog = "{\"t\\u0079pe\":\"native\",\"text\":\"escaped value\\\" here\"}";
     g_frame_handler(3, nullptr);
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
-           "{\"t\\u0079pe\":\"save_backup.confirm\",\"text\":\"escaped value\\\" here\"}");
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_dialog_save_backup_confirm") == 0);
 
     g_native_dialog = "{\"text\":\"no top-level type\"}";
     g_frame_handler(4, nullptr);
-    uint16_t status = 0;
-    assert(query(HttpMethod::kGet, "/api/ui/dialog", &status) ==
-           "{\"ok\":false,\"error\":\"snapshot not ready\"}");
-    assert(status == 503);
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_dialog_save_backup_confirm") == 0);
 
-    const char* malformed_native = g_native_dialog;
     assert(succeeded(api->clear_custom_dialog(2, 5)));
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") == malformed_native);
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "world") == 0 && summary.type == 3 && summary.source == 1);
     assert(api->publish_custom_dialog(&dialog2).code == kQolErrConflict);
 }
 
@@ -376,7 +398,8 @@ void test_native_snapshot_failure_invalidates_all_queries(const UiStateApi* api)
     g_native_dialog = "{\"type\":\"native\",\"text\":\"fresh\"}";
     g_native_read_fails = false;
     g_frame_handler(5, nullptr);
-    assert(query(HttpMethod::kGet, "/api/ui/screen") == "{\"screen\":\"world\"}");
+    QolUiStateSummary summary = read_summary(api);
+    assert(std::strcmp(summary.name, "world") == 0 && summary.type == 3 && summary.source == 1);
 
     const char* panel_ids[] = {"pending.panel"};
     const UiCustomPanelsSnapshot panels{6, 1, panel_ids};
@@ -387,22 +410,22 @@ void test_native_snapshot_failure_invalidates_all_queries(const UiStateApi* api)
 
     g_native_read_fails = true;
     g_frame_handler(6, nullptr);
-    for (const char* path : {"/api/ui/screen", "/api/ui/panel", "/api/ui/dialog"}) {
-        uint16_t status = 0;
-        assert(query(HttpMethod::kGet, path, &status) ==
-               "{\"ok\":false,\"error\":\"snapshot not ready\"}");
-        assert(status == 503);
-    }
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "unknown") == 0 && summary.type == 0 && summary.source == 0);
+    assert(query(HttpMethod::kGet, "/api/ui/state") ==
+           "{\"name\":\"unknown\",\"type\":0,\"source\":0,\"info\":{},\"options\":[]}");
 
     g_native_read_fails = false;
     g_native_screen = "main_menu";
     g_native_panel = "";
     g_native_dialog = "{\"type\":\"fresh\",\"text\":\"new sample\"}";
     g_frame_handler(7, nullptr);
-    assert(query(HttpMethod::kGet, "/api/ui/screen") == "{\"screen\":\"main_menu\"}");
-    assert(query(HttpMethod::kGet, "/api/ui/panel") == "{\"panel\":\"panel_pending.panel\"}");
-    assert(query(HttpMethod::kGet, "/api/ui/dialog") ==
-           "{\"type\":\"custom.confirm\",\"text\":\"new sample\"}");
+    summary = read_summary(api);
+    assert(std::strcmp(summary.name, "module_dialog_custom_confirm") == 0 &&
+           summary.type == 4 && summary.source == 2);
+    const std::string table = query(HttpMethod::kGet, "/api/ui/state/table");
+    assert(table.find("\"name\":\"main_menu\"") != std::string::npos);
+    assert(table.find("\"name\":\"module_dialog_other\"") != std::string::npos);
 }
 
 }  // namespace
@@ -436,7 +459,7 @@ int main() {
     const PluginDescriptor& descriptor = qol::features::core_ui_state::plugin_descriptor();
     assert(descriptor.provides_count == 1);
     assert(std::strcmp(descriptor.provides[0].id, kUiStateCapabilityId) == 0);
-    assert(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 1);
+    assert(descriptor.provides[0].version.major == 1 && descriptor.provides[0].version.minor == 2);
     assert(std::strcmp(descriptor.optional_requires[0].id, kHttpRegistryCapabilityId) == 0);
     assert(std::strcmp(descriptor.optional_requires[1].id, kHttpDispatchCapabilityId) == 0);
     assert(descriptor.optional_requires[0].range.major == 1 &&
@@ -444,17 +467,17 @@ int main() {
     assert(descriptor.optional_requires[1].range.major == 1 &&
            descriptor.optional_requires[1].range.min_minor == 1);
     assert(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
-    assert(descriptor.http_endpoint_count == 8 && descriptor.http_endpoints != nullptr);
-    assert(descriptor.http_route_metadata_count == 1 &&
-           descriptor.http_route_metadata != nullptr);
-    assert(descriptor.http_route_metadata[0].method == HttpMethod::kGet);
-    assert(std::strcmp(descriptor.http_route_metadata[0].path, "/api/ui") == 0);
-    assert(std::strcmp(descriptor.http_route_metadata[0].route_owner, "core.ui_state") == 0);
-    assert(descriptor.http_route_metadata[0].op_required == 0 &&
-           descriptor.http_route_metadata[0].lease_required == 1);
+    assert(descriptor.http_endpoint_count == 7 && descriptor.http_endpoints != nullptr);
+    assert(descriptor.http_route_metadata_count == 0 &&
+           descriptor.http_route_metadata == nullptr);
     assert(descriptor.ports[1].id == QolPortId::QOL_PORT_UI_WRITE &&
            descriptor.ports[1].range.major == 1 && descriptor.ports[1].range.min_minor == 1);
     assert(route(HttpMethod::kGet, "/api/ui") == nullptr);
+    assert(route(HttpMethod::kGet, "/api/ui/screen") == nullptr);
+    assert(route(HttpMethod::kGet, "/api/ui/panel") == nullptr);
+    assert(route(HttpMethod::kGet, "/api/ui/dialog") == nullptr);
+    assert(route(HttpMethod::kGet, "/api/ui/state") != nullptr);
+    assert(route(HttpMethod::kGet, "/api/ui/state/table") != nullptr);
     assert(descriptor.install(context) == 0);
     const auto* api = static_cast<const UiStateApi*>(descriptor.provides[0].iface);
 

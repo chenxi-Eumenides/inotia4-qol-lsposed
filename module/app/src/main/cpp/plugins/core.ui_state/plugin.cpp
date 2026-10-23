@@ -7,6 +7,7 @@
 #include <cstring>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "contracts/commands.h"
 #include "contracts/game_ports/choice_write_port.h"
@@ -263,12 +264,22 @@ QolResult clear_custom_dialog(uint64_t generation, uint64_t sequence) {
 }
 
 QolResult read_layers(contracts::QolUiLayerVisitFn visit, void* user);
+QolResult read_state(contracts::QolUiStateSummary* out);
+QolResult visit_states(contracts::QolUiStateTableVisitFn visit, void* user);
+QolResult register_state(const contracts::QolUiStateRegistration* registration);
+QolResult unregister_state(uint32_t type, const char* key);
+QolResult publish_external_ui(const contracts::QolUiExternalSnapshot* snapshot);
 
 const contracts::UiStateApi kUiStateApi{
     &publish_custom_panels,
     &publish_custom_dialog,
     &clear_custom_dialog,
     &read_layers,
+    &read_state,
+    &visit_states,
+    &register_state,
+    &unregister_state,
+    &publish_external_ui,
 };
 
 const contracts::CapabilityProvisionRef kProvides[] = {
@@ -418,6 +429,466 @@ std::string json_quote(const char* value) {
     }
     out += '"';
     return out;
+}
+
+// ---- ui.state 1.2：统一状态 ----
+
+struct NativeStateRow {
+    const char* screen;
+    const char* name;
+    uint32_t type;
+};
+
+constexpr NativeStateRow kNativeStateRows[] = {
+    {"loading", "loading", contracts::kUiStateTypeBoot},
+    {"main_menu", "main_menu", contracts::kUiStateTypeMenu},
+    {"world", "world", contracts::kUiStateTypeWorld},
+    {"tutorial_pause", "tutorial_pause", contracts::kUiStateTypeWorld},
+    {"dialog_popup", "game_popup", contracts::kUiStateTypeDialog},
+    {"dialog_story", "game_story", contracts::kUiStateTypeDialog},
+    {"dialog_wipeout", "game_wipeout", contracts::kUiStateTypeDialog},
+    {"dialog_quest", "game_npc_quest", contracts::kUiStateTypeDialog},
+    {"dialog_npc", "game_npc_dialog", contracts::kUiStateTypeDialog},
+    {"dialog_choice", "game_choice", contracts::kUiStateTypeDialog},
+    {"dialog_input_count", "game_input_count", contracts::kUiStateTypeDialog},
+    {"panel_character_info", "panel_character_info", contracts::kUiStateTypePanel},
+    {"panel_inventory", "panel_inventory", contracts::kUiStateTypePanel},
+    {"panel_skills", "panel_skills", contracts::kUiStateTypePanel},
+    {"panel_mercenary", "panel_mercenary", contracts::kUiStateTypePanel},
+    {"panel_quests", "panel_quests", contracts::kUiStateTypePanel},
+    {"panel_settings", "panel_settings", contracts::kUiStateTypePanel},
+    {"panel_shop", "panel_shop", contracts::kUiStateTypePanel},
+    {"panel_craft", "panel_craft", contracts::kUiStateTypePanel},
+    {"panel_npc_rest", "panel_npc_rest", contracts::kUiStateTypePanel},
+    {"panel_npc_revive", "panel_npc_revive", contracts::kUiStateTypePanel},
+    {"panel_save_slot", "panel_save_slot", contracts::kUiStateTypePanel},
+    {"panel_character_select", "panel_character_select", contracts::kUiStateTypePanel},
+    {"panel_options", "panel_options", contracts::kUiStateTypePanel},
+    {"panel_shortcut", "panel_shortcut", contracts::kUiStateTypePanel},
+    {"panel_world_map", "panel_world_map", contracts::kUiStateTypePanel},
+    {"panel_daily_reward", "panel_daily_reward", contracts::kUiStateTypePanel},
+    {"panel_in_app", "panel_in_app", contracts::kUiStateTypePanel},
+    {"panel_ui_panel", "panel_ui_panel", contracts::kUiStateTypePanel},
+    {"main_menu_save_slot", "main_menu_save_slot", contracts::kUiStateTypePanel},
+    {"main_menu_character_select", "main_menu_character_select", contracts::kUiStateTypePanel},
+    {"main_menu_daily_reward", "main_menu_daily_reward", contracts::kUiStateTypePanel},
+    {"main_menu_options", "main_menu_options", contracts::kUiStateTypePanel},
+    {"main_menu_settings", "main_menu_settings", contracts::kUiStateTypePanel},
+};
+
+const NativeStateRow* native_row_for_screen(const char* screen) {
+    if (screen == nullptr) return nullptr;
+    for (const auto& row : kNativeStateRows) {
+        if (std::strcmp(row.screen, screen) == 0) return &row;
+    }
+    return nullptr;
+}
+
+bool module_state_name(uint32_t type, const char* key, char* out, uint32_t capacity) {
+    if (out == nullptr || capacity == 0 || key == nullptr || key[0] == '\0') return false;
+    const char* prefix = nullptr;
+    if (type == contracts::kUiStateTypeDialog) {
+        prefix = "module_dialog_";
+    } else if (type == contracts::kUiStateTypePanel) {
+        prefix = "module_panel_";
+    } else {
+        return false;
+    }
+    size_t written = std::strlen(prefix);
+    if (written >= capacity) return false;
+    std::memcpy(out, prefix, written);
+    for (const char* p = key; *p != '\0'; ++p) {
+        char c = *p;
+        if (c == '.') c = '_';
+        const bool valid = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                           (c >= '0' && c <= '9') || c == '_' || c == '-';
+        if (!valid || written + 1 >= capacity) return false;
+        out[written++] = c;
+    }
+    out[written] = '\0';
+    return true;
+}
+
+struct RegisteredState {
+    uint32_t type = 0;
+    char key[64] = {};
+    char plugin_id[64] = {};
+    char name[contracts::kUiStateMaxNameBytes] = {};
+};
+
+constexpr uint32_t kMaxRegisteredStates = 32;
+RegisteredState g_registered[kMaxRegisteredStates];
+uint32_t g_registered_count = 0;
+std::mutex g_registered_mutex;
+
+struct SeenState {
+    char name[contracts::kUiStateMaxNameBytes] = {};
+    uint32_t type = 0;
+    uint32_t source = 0;
+};
+
+constexpr uint32_t kMaxSeenStates = 32;
+SeenState g_seen[kMaxSeenStates];
+uint32_t g_seen_count = 0;
+std::mutex g_seen_mutex;
+
+std::mutex g_external_mutex;
+bool g_external_active = false;
+char g_external_name[contracts::kUiStateMaxNameBytes] = "android_agreement";
+
+void mark_seen(const char* name, uint32_t type, uint32_t source) {
+    if (name == nullptr || name[0] == '\0') return;
+    std::lock_guard<std::mutex> lock(g_seen_mutex);
+    for (uint32_t i = 0; i < g_seen_count; ++i) {
+        if (std::strcmp(g_seen[i].name, name) == 0) return;
+    }
+    if (g_seen_count >= kMaxSeenStates) return;
+    std::snprintf(g_seen[g_seen_count].name, sizeof(g_seen[g_seen_count].name), "%s", name);
+    g_seen[g_seen_count].type = type;
+    g_seen[g_seen_count].source = source;
+    ++g_seen_count;
+}
+
+bool external_overlay_name(char* out, uint32_t capacity) {
+    if (out == nullptr || capacity == 0) return false;
+    std::lock_guard<std::mutex> lock(g_external_mutex);
+    if (!g_external_active || g_external_name[0] == '\0') return false;
+    std::snprintf(out, capacity, "%s", g_external_name);
+    return true;
+}
+
+struct ResolvedState {
+    std::string name;
+    uint32_t type;
+    uint32_t source;
+};
+
+ResolvedState resolve_top(const UiSnapshotCopy& snapshot) {
+    char external[contracts::kUiStateMaxNameBytes]{};
+    if (external_overlay_name(external, sizeof(external))) {
+        return {external, contracts::kUiStateTypeDialog, contracts::kUiStateSourceAndroid};
+    }
+    if (!snapshot.native_snapshot_valid) {
+        return {"unknown", contracts::kUiStateTypeUnknown, contracts::kUiStateSourceUnknown};
+    }
+    if (std::strcmp(snapshot.screen, "dialog_popup") == 0) {
+        return {"game_popup", contracts::kUiStateTypeDialog, contracts::kUiStateSourceNative};
+    }
+    if (snapshot.custom_dialog_active) {
+        char name[contracts::kUiStateMaxNameBytes]{};
+        if (!module_state_name(contracts::kUiStateTypeDialog, snapshot.custom_dialog_type, name,
+                               sizeof(name))) {
+            std::snprintf(name, sizeof(name), "%s", "module_dialog_other");
+        }
+        mark_seen(name, contracts::kUiStateTypeDialog, contracts::kUiStateSourceModule);
+        return {name, contracts::kUiStateTypeDialog, contracts::kUiStateSourceModule};
+    }
+    const NativeStateRow* native = native_row_for_screen(snapshot.screen);
+    if (native != nullptr && native->type == contracts::kUiStateTypeDialog) {
+        return {native->name, native->type, contracts::kUiStateSourceNative};
+    }
+    if (snapshot.custom_panel_count > 0) {
+        const char* id = snapshot.custom_panel_ids[snapshot.custom_panel_count - 1];
+        char name[contracts::kUiStateMaxNameBytes]{};
+        if (!module_state_name(contracts::kUiStateTypePanel, id, name, sizeof(name))) {
+            std::snprintf(name, sizeof(name), "%s", "module_panel_other");
+        }
+        mark_seen(name, contracts::kUiStateTypePanel, contracts::kUiStateSourceModule);
+        return {name, contracts::kUiStateTypePanel, contracts::kUiStateSourceModule};
+    }
+    if (native != nullptr) {
+        return {native->name, native->type, contracts::kUiStateSourceNative};
+    }
+    return {"unknown", contracts::kUiStateTypeUnknown, contracts::kUiStateSourceUnknown};
+}
+
+// 取顶层 JSON 字段的原文（字符串含引号，数组含方括号），用于原样嵌入统一响应。
+bool raw_json_field(const char* json, const char* key, std::string* out) {
+    if (json == nullptr || key == nullptr || out == nullptr) return false;
+    const std::string pattern = std::string("\"") + key + "\"";
+    const char* p = std::strstr(json, pattern.c_str());
+    if (p == nullptr) return false;
+    p += pattern.size();
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+    if (*p != ':') return false;
+    ++p;
+    while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') ++p;
+    const char* begin = p;
+    if (*p == '"') {
+        ++p;
+        bool closed = false;
+        while (*p != '\0') {
+            if (*p == '\\') {
+                if (p[1] == '\0') return false;
+                p += 2;
+                continue;
+            }
+            if (*p == '"') {
+                ++p;
+                closed = true;
+                break;
+            }
+            ++p;
+        }
+        if (!closed) return false;
+    } else if (*p == '[') {
+        int depth = 0;
+        bool in_string = false;
+        bool closed = false;
+        for (; *p != '\0'; ++p) {
+            const char c = *p;
+            if (in_string) {
+                if (c == '\\') {
+                    if (p[1] == '\0') return false;
+                    ++p;
+                    continue;
+                }
+                if (c == '"') in_string = false;
+                continue;
+            }
+            if (c == '"') {
+                in_string = true;
+            } else if (c == '[') {
+                ++depth;
+            } else if (c == ']') {
+                --depth;
+                if (depth == 0) {
+                    ++p;
+                    closed = true;
+                    break;
+                }
+            }
+        }
+        if (!closed) return false;
+    } else {
+        while (*p != '\0' && *p != ',' && *p != '}') ++p;
+    }
+    out->assign(begin, static_cast<size_t>(p - begin));
+    return !out->empty();
+}
+
+std::string build_info_json(const UiSnapshotCopy& snapshot, const ResolvedState& top) {
+    std::string title;
+    std::string content;
+    bool has_title = false;
+    bool has_content = false;
+    if (top.source == contracts::kUiStateSourceNative &&
+        top.type == contracts::kUiStateTypeDialog) {
+        has_title = raw_json_field(snapshot.native_dialog, "speaker", &title);
+        has_content = raw_json_field(snapshot.native_dialog, "text", &content);
+    } else if (top.source == contracts::kUiStateSourceModule &&
+               top.type == contracts::kUiStateTypeDialog) {
+        if (snapshot.custom_dialog_has_title && snapshot.custom_dialog_title[0] != '\0') {
+            title = json_quote(snapshot.custom_dialog_title);
+            has_title = true;
+        }
+        has_content = raw_json_field(snapshot.native_dialog, "text", &content);
+    }
+    std::string info = "{";
+    bool first = true;
+    const auto append = [&info, &first](const char* key, const std::string& value) {
+        if (!first) info += ",";
+        first = false;
+        info += json_quote(key);
+        info += ":";
+        info += value;
+    };
+    if (has_title) append("title", title);
+    if (has_content) append("content", content);
+    info += "}";
+    return info;
+}
+
+std::string build_options_json(const UiSnapshotCopy& snapshot, const ResolvedState& top) {
+    if (top.source == contracts::kUiStateSourceAndroid) {
+        return "[{\"id\":\"ok\",\"label\":\"同意\"}]";
+    }
+    if (top.source == contracts::kUiStateSourceModule &&
+        top.type == contracts::kUiStateTypePanel) {
+        return "[]";
+    }
+    if ((top.source == contracts::kUiStateSourceNative &&
+         (top.type == contracts::kUiStateTypeDialog || top.type == contracts::kUiStateTypePanel)) ||
+        (top.source == contracts::kUiStateSourceModule &&
+         top.type == contracts::kUiStateTypeDialog)) {
+        std::string options;
+        if (raw_json_field(snapshot.native_dialog, "options", &options)) return options;
+        if (top.source == contracts::kUiStateSourceModule &&
+            top.type == contracts::kUiStateTypeDialog &&
+            snapshot.custom_dialog_option_count > 0) {
+            std::string built = "[";
+            for (uint32_t i = 0; i < snapshot.custom_dialog_option_count; ++i) {
+                if (i > 0) built += ",";
+                built += "{\"id\":\"";
+                built += std::to_string(i);
+                built += "\",\"label\":";
+                built += json_quote(snapshot.custom_dialog_options[i]);
+                built += "}";
+            }
+            built += "]";
+            return built;
+        }
+    }
+    return "[]";
+}
+
+QolResult read_state(contracts::QolUiStateSummary* out) {
+    if (out == nullptr) return state_error(kQolErrInvalidArgument, "state output required");
+    if (out->struct_size != 0 && out->struct_size < sizeof(*out)) {
+        return state_error(kQolErrInvalidArgument, "state output too small");
+    }
+    const UiSnapshotCopy snapshot = copy_ui_snapshot();
+    const ResolvedState top = resolve_top(snapshot);
+    out->struct_size = sizeof(*out);
+    out->type = top.type;
+    out->source = top.source;
+    std::snprintf(out->name, sizeof(out->name), "%s", top.name.c_str());
+    return contracts::ok();
+}
+
+struct TableEntry {
+    std::string name;
+    uint32_t type;
+    uint32_t source;
+    uint32_t stability;
+};
+
+void add_table_entry(std::vector<TableEntry>* rows, const char* name, uint32_t type,
+                     uint32_t source, uint32_t stability) {
+    if (rows == nullptr || name == nullptr || name[0] == '\0') return;
+    for (const auto& row : *rows) {
+        if (row.name == name) return;
+    }
+    rows->push_back(TableEntry{name, type, source, stability});
+}
+
+void collect_table(std::vector<TableEntry>* rows) {
+    add_table_entry(rows, "unknown", contracts::kUiStateTypeUnknown,
+                    contracts::kUiStateSourceUnknown, 0);
+    for (const auto& row : kNativeStateRows) {
+        add_table_entry(rows, row.name, row.type, contracts::kUiStateSourceNative, 0);
+    }
+    if (g_sdk != nullptr && g_sdk->panel_enumeration != nullptr &&
+        g_sdk->panel_enumeration->count != nullptr && g_sdk->panel_enumeration->at != nullptr) {
+        const uint32_t provider_count = g_sdk->panel_enumeration->count();
+        for (uint32_t i = 0; i < provider_count; ++i) {
+            const contracts::PanelProviderSpec* provider = g_sdk->panel_enumeration->at(i);
+            if (provider == nullptr || provider->panel_id == nullptr ||
+                provider->panel_id[0] == '\0') {
+                continue;
+            }
+            char name[contracts::kUiStateMaxNameBytes]{};
+            if (!module_state_name(contracts::kUiStateTypePanel, provider->panel_id, name,
+                                   sizeof(name))) {
+                continue;
+            }
+            add_table_entry(rows, name, contracts::kUiStateTypePanel,
+                            contracts::kUiStateSourceModule, 0);
+        }
+    }
+    add_table_entry(rows, "android_agreement", contracts::kUiStateTypeDialog,
+                    contracts::kUiStateSourceAndroid, 0);
+    {
+        std::lock_guard<std::mutex> lock(g_registered_mutex);
+        for (uint32_t i = 0; i < g_registered_count; ++i) {
+            add_table_entry(rows, g_registered[i].name, g_registered[i].type,
+                            contracts::kUiStateSourceModule, 0);
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_seen_mutex);
+        for (uint32_t i = 0; i < g_seen_count; ++i) {
+            add_table_entry(rows, g_seen[i].name, g_seen[i].type, g_seen[i].source, 0);
+        }
+    }
+    add_table_entry(rows, "module_panel_other", contracts::kUiStateTypePanel,
+                    contracts::kUiStateSourceModule, 0);
+    add_table_entry(rows, "module_dialog_other", contracts::kUiStateTypeDialog,
+                    contracts::kUiStateSourceModule, 0);
+}
+
+QolResult visit_states(contracts::QolUiStateTableVisitFn visit, void* user) {
+    if (visit == nullptr) return state_error(kQolErrInvalidArgument, "state visitor required");
+    std::vector<TableEntry> rows;
+    collect_table(&rows);
+    for (const auto& entry : rows) {
+        const contracts::QolUiStateTableRow row{entry.name.c_str(), entry.type, entry.source,
+                                                entry.stability};
+        visit(&row, user);
+    }
+    return contracts::ok();
+}
+
+QolResult register_state(const contracts::QolUiStateRegistration* registration) {
+    if (registration == nullptr || registration->struct_size < sizeof(*registration) ||
+        (registration->type != contracts::kUiStateTypeDialog &&
+         registration->type != contracts::kUiStateTypePanel)) {
+        return state_error(kQolErrInvalidArgument, "invalid state registration");
+    }
+    char key[64]{};
+    char plugin_id[64]{};
+    if (!copy_string(key, sizeof(key), registration->key) || key[0] == '\0' ||
+        !copy_string(plugin_id, sizeof(plugin_id), registration->plugin_id) ||
+        plugin_id[0] == '\0') {
+        return state_error(kQolErrInvalidArgument, "state key and plugin id required");
+    }
+    char name[contracts::kUiStateMaxNameBytes]{};
+    if (!module_state_name(registration->type, key, name, sizeof(name))) {
+        return state_error(kQolErrInvalidArgument, "invalid state key");
+    }
+    std::lock_guard<std::mutex> lock(g_registered_mutex);
+    for (uint32_t i = 0; i < g_registered_count; ++i) {
+        if (std::strcmp(g_registered[i].name, name) == 0) {
+            return state_error(kQolErrConflict, "state name already registered");
+        }
+    }
+    if (g_registered_count >= kMaxRegisteredStates) {
+        return state_error(kQolErrInternal, "state registry full");
+    }
+    RegisteredState& entry = g_registered[g_registered_count++];
+    entry.type = registration->type;
+    std::memcpy(entry.key, key, sizeof(entry.key));
+    std::memcpy(entry.plugin_id, plugin_id, sizeof(entry.plugin_id));
+    std::memcpy(entry.name, name, sizeof(entry.name));
+    return contracts::ok();
+}
+
+QolResult unregister_state(uint32_t type, const char* key) {
+    if (key == nullptr || key[0] == '\0') {
+        return state_error(kQolErrInvalidArgument, "state key required");
+    }
+    char name[contracts::kUiStateMaxNameBytes]{};
+    if (!module_state_name(type, key, name, sizeof(name))) return contracts::ok();
+    std::lock_guard<std::mutex> lock(g_registered_mutex);
+    for (uint32_t i = 0; i < g_registered_count; ++i) {
+        if (std::strcmp(g_registered[i].name, name) != 0) continue;
+        for (uint32_t j = i + 1; j < g_registered_count; ++j) {
+            g_registered[j - 1] = g_registered[j];
+        }
+        --g_registered_count;
+        g_registered[g_registered_count] = RegisteredState{};
+        break;
+    }
+    return contracts::ok();
+}
+
+QolResult publish_external_ui(const contracts::QolUiExternalSnapshot* snapshot) {
+    if (snapshot == nullptr || snapshot->struct_size < sizeof(*snapshot)) {
+        return state_error(kQolErrInvalidArgument, "invalid external ui snapshot");
+    }
+    std::lock_guard<std::mutex> lock(g_external_mutex);
+    g_external_active = snapshot->active != 0;
+    if (g_external_active) {
+        if (snapshot->name[0] == '\0' ||
+            std::memchr(snapshot->name, '\0', sizeof(snapshot->name)) == nullptr) {
+            g_external_active = false;
+            return state_error(kQolErrInvalidArgument, "external ui name required");
+        }
+        std::snprintf(g_external_name, sizeof(g_external_name), "%s", snapshot->name);
+    } else {
+        g_external_name[0] = '\0';
+    }
+    return contracts::ok();
 }
 
 class JsonScanner {
@@ -631,41 +1102,41 @@ QolResult query_response(contracts::HttpRes* response, const std::string& body) 
     return contracts::ok();
 }
 
-QolResult screen_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
+QolResult state_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
     const UiSnapshotCopy snapshot = copy_ui_snapshot();
-    if (!snapshot.native_snapshot_valid) {
-        return choice_http_error(response, 503, "snapshot not ready");
-    }
-    return query_response(response, "{\"screen\":" + json_quote(snapshot.screen) + "}");
+    const ResolvedState top = resolve_top(snapshot);
+    std::string body = "{\"name\":";
+    body += json_quote(top.name.c_str());
+    body += ",\"type\":";
+    body += std::to_string(top.type);
+    body += ",\"source\":";
+    body += std::to_string(top.source);
+    body += ",\"info\":";
+    body += build_info_json(snapshot, top);
+    body += ",\"options\":";
+    body += build_options_json(snapshot, top);
+    body += "}";
+    return query_response(response, body);
 }
 
-QolResult panel_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
-    const UiSnapshotCopy snapshot = copy_ui_snapshot();
-    if (!snapshot.native_snapshot_valid) {
-        return choice_http_error(response, 503, "snapshot not ready");
+QolResult table_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
+    std::vector<TableEntry> rows;
+    collect_table(&rows);
+    std::string body = "{\"states\":[";
+    for (size_t i = 0; i < rows.size(); ++i) {
+        if (i > 0) body += ",";
+        body += "{\"name\":";
+        body += json_quote(rows[i].name.c_str());
+        body += ",\"type\":";
+        body += std::to_string(rows[i].type);
+        body += ",\"source\":";
+        body += std::to_string(rows[i].source);
+        body += ",\"stability\":\"";
+        body += rows[i].stability == 0 ? "static" : "session";
+        body += "\"}";
     }
-    if (snapshot.custom_panel_count > 0) {
-        const std::string panel = std::string("panel_") +
-                                  snapshot.custom_panel_ids[snapshot.custom_panel_count - 1];
-        return query_response(response, "{\"panel\":" + json_quote(panel.c_str()) + "}");
-    }
-    const std::string panel = snapshot.native_panel[0] == '\0'
-                                  ? "null"
-                                  : json_quote(snapshot.native_panel);
-    return query_response(response, "{\"panel\":" + panel + "}");
-}
-
-QolResult dialog_query(const contracts::HttpReq*, contracts::HttpRes* response, void*) {
-    const UiSnapshotCopy snapshot = copy_ui_snapshot();
-    if (!snapshot.native_snapshot_valid) {
-        return choice_http_error(response, 503, "snapshot not ready");
-    }
-    if (!snapshot.custom_dialog_active) return query_response(response, snapshot.native_dialog);
-    std::string replaced;
-    if (!replace_dialog_type(snapshot.native_dialog, snapshot.custom_dialog_type, &replaced)) {
-        return choice_http_error(response, 503, "snapshot not ready");
-    }
-    return query_response(response, replaced);
+    body += "]}";
+    return query_response(response, body);
 }
 
 // 对话写（HTTP 写路由）的票据结果处理器 id（全局 typed handler id 空间；core.ui_state 前缀）。
@@ -888,14 +1359,11 @@ bool ui_write_result(void*, const uint8_t* payload, uint32_t size, char* out, ui
     return contracts::succeeded(result);
 }
 
-// `/api/ui` remains Kotlin's gamestateJson composite; native endpoints cover the other eight routes.
 const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
-    {contracts::HttpMethod::kGet, "/api/ui/screen", kPluginId,
-     contracts::HttpHandlerKind::kQuery, 0, 1, &screen_query, nullptr, nullptr},
-    {contracts::HttpMethod::kGet, "/api/ui/panel", kPluginId,
-     contracts::HttpHandlerKind::kQuery, 0, 1, &panel_query, nullptr, nullptr},
-    {contracts::HttpMethod::kGet, "/api/ui/dialog", kPluginId,
-     contracts::HttpHandlerKind::kQuery, 0, 1, &dialog_query, nullptr, nullptr},
+    {contracts::HttpMethod::kGet, "/api/ui/state", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &state_query, nullptr, nullptr},
+    {contracts::HttpMethod::kGet, "/api/ui/state/table", kPluginId,
+     contracts::HttpHandlerKind::kQuery, 0, 1, &table_query, nullptr, nullptr},
     {contracts::HttpMethod::kPost, "/api/ui/dialog/select", kPluginId,
      contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &choice_write_command,
      &kDialogSelectKind},
@@ -911,10 +1379,6 @@ const contracts::HttpEndpointDescriptor kHttpEndpoints[] = {
     {contracts::HttpMethod::kPost, "/api/ui/go_main_menu", kPluginId,
      contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &ui_write_command,
      &kMainMenuKind},
-};
-
-constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
-    {contracts::HttpMethod::kGet, "/api/ui", kPluginId, 0, 1},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
@@ -1044,8 +1508,8 @@ const contracts::PluginDescriptor kDescriptor = {
     kHttpEndpoints,
     static_cast<uint32_t>(sizeof(kHttpEndpoints) / sizeof(kHttpEndpoints[0])),
     nullptr,
-    kHttpRouteMetadata,
-    static_cast<uint32_t>(sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0])),
+    nullptr,
+    0,
 };
 
 }  // namespace

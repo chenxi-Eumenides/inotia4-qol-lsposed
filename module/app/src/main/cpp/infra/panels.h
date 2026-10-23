@@ -28,6 +28,10 @@ uint32_t panels_item_count();
 // index 越界返回 nullptr。
 const contracts::PanelItemSpec* panels_item_at(uint32_t index);
 
+// 已注册 provider 数/按注册顺序取；越界返回 nullptr。
+uint32_t panels_provider_count();
+const contracts::PanelProviderSpec* panels_provider_at(uint32_t index);
+
 // panel_id 未登记返回 nullptr。
 const contracts::PanelProviderSpec* panels_find_provider(const char* panel_id);
 

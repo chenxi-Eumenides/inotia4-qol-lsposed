@@ -91,7 +91,7 @@
 1. **生存第一**：角色会**死亡**。全队死亡后回到主菜单，**未保存的进度全部丢失**（回到上次存档点）。所以：① 血少要喝药/逃跑；② 频繁存档。
 2. **战斗是核心玩法**：怪会主动攻击你。**被攻击扣血时不还手会很快被打死**——要么开启自动反击（`set_auto_attack`），要么主动 `attack_target` 进入战斗。
 3. **成长靠三件事**：**推进任务**（获得经验+奖励+解锁内容）、**打怪**（掉装备+升级）、**换装**（穿上更好的武器/防具变强）。三者都重要，别只做一样。
-4. **游戏会随时打断你**：剧情对话（`screen=dialog_story`）、弹窗确认（`screen=dialog_popup`）、死亡面板（`screen=dialog_wipeout`）、药水教学暂停（`screen=tutorial_pause`）都可能突然出现，**阻塞你的操作**。每次行动前都要查当前 `screen`/`dialog`。
+4. **游戏会随时打断你**：剧情对话（`name=game_story`）、弹窗确认（`name=game_popup`）、死亡面板（`name=game_wipeout`）、药水教学暂停（`name=tutorial_pause`）都可能突然出现，**阻塞你的操作**。每次行动前查询 `/api/ui/state`，按 `type` 与 `name` 判断。
 5. **移动是异步的**：`move_to` 只是发起寻路，角色需要几秒走完。**调用后要轮询确认到达**（对比坐标/距离），不能假设立即到达。
 
 ---
@@ -150,14 +150,14 @@ curl http://<手机IP>:8088/api/health
 
 ### 3.3 操作前置检查（重要！）
 
-- **UI 占据**：`GET /api/ui/screen` 返回 `dialog_*`（对话框类）/`panel_*`（面板类）/`main_menu_*`（主菜单面板）前缀时，UI 被占据，**世界操作（移动/战斗/交互/物品）被阻塞**，返回 `{"ok":false,"error":"ui occupied: <screen>"}`。操作前先查 `screen`，必要时先处理对话/关闭面板。
-- **屏幕状态**：只有 `screen="world"` 才能执行战斗/移动/背包操作；`"main_menu"` 只能做存档操作；`"dialog_story"` 表示剧情对话中（先 `select action=skip`）。
+- **UI 占据**：查询 `GET /api/ui/state`。`type=4` 表示 dialog、`type=5` 表示 panel；`type=2,name="main_menu"` 表示主菜单，`type=1` 表示启动态。世界操作（移动/战斗/交互/物品）要求 `type=3,name="world"`，否则按当前 `name` 处理状态或等待；被 UI 阻塞时服务端返回 `{"ok":false,"error":"ui occupied: <状态名>"}`。
+- **状态判断**：按 `type` 与 `name` 联合判断，不按 `screen` 前缀。`name="game_story"` 表示剧情对话（先 `POST /api/ui/dialog/select` 跳过/推进）；`name="game_wipeout"` 表示死亡面板；`name="android_agreement"` 表示 Android 同意页。
 
 ### 3.4 游玩注意点（AI 必读）
 
 > 这些是 AI 代理游玩时**最容易犯错**的地方，先读完再动手。
 
-1. **随时留意游戏状态，查看当前 screen**：游戏可能随时插入突发事件——剧情对话（`dialog_story`）、确认弹窗（`dialog_popup`）、死亡面板（`dialog_wipeout`）、教学暂停（`tutorial_pause`）。**每次行动前都先 `GET /api/ui/` 看 `screen`**（`dialog_*`/`panel_*`/`main_menu_*` 前缀 = UI 被占据）；行动过程中被打断要立即处理，否则后续操作全部无效或被阻塞。
+1. **随时留意游戏状态**：游戏可能随时插入突发事件——剧情对话（`game_story`）、确认弹窗（`game_popup`）、死亡面板（`game_wipeout`）、教学暂停（`tutorial_pause`）。**每次行动前都先 `GET /api/ui/state`**，依据 `type` 与 `name` 识别状态；行动过程中被打断要立即处理，否则后续操作全部无效或被阻塞。
 
 2. **被攻击扣血时，自动开始战斗**：怪会主动打你，**站着不动会被打死**。做法：
    - 开怪前先 `POST /api/character/combat/{role}/set_auto_attack {"on":true}`（受击自动还击）
@@ -285,20 +285,20 @@ curl -X POST http://<手机IP>:8088/api/system/save
 ### 步骤 8：突发事件处理（随时可能遇到）
 
 ```bash
-# 先看当前界面状态
-curl http://<手机IP>:8088/api/ui/
+# 先看当前统一 UI 状态（name/type/source/info/options）
+curl http://<手机IP>:8088/api/ui/state
 
-# 剧情对话（screen=dialog_story）→ 跳过
+# 剧情对话（type=4,name=game_story）→ 跳过
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"skip"}'
 
-# 启动同意页（screen=agreement）→ 同意关闭（异步生效，轮询 screen 直到 main_menu）
+# 启动同意页（type=4,name=android_agreement）→ 同意关闭（异步生效，轮询 state 直到 type=2,name=main_menu）
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"ok"}'
 
-# 有阻塞弹窗（screen=dialog_popup）→ 查看内容并选择
-curl http://<手机IP>:8088/api/ui/dialog
+# 有阻塞弹窗（type=4,name=game_popup）→ 查看 info/options 并选择
+curl http://<手机IP>:8088/api/ui/state
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"ok"}'
 
-# 死亡（screen=dialog_wipeout）→ 回主菜单后重新进档（回到上次存档点）
+# 死亡（type=4,name=game_wipeout）→ 回主菜单后重新进档（回到上次存档点）
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"game_over"}'
 curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 ```
@@ -449,32 +449,37 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 > **过滤语义（v0.5.35 起）**：`/api/world/map/enemies` 返回 `type==1` 的单位（含 NPC 与怪物）；`/api/world/map/interactives` 返回 `type==2` 且可交互的单位。不再按 `status` 过滤。
 > **出口数据（v0.6.5 起）**：`/api/world/map/exits` 为**静态数据源**（`maps/exits.json`），返回 `{x, y, targetMapId, targetX, targetY}`（瓦片坐标 + 目标地图/落点），替代原 native 瓦片矩阵扫描。
 
-### 5.7 GameState（界面状态）
+### 5.7 UI State（统一界面状态）
 
-`GET /api/ui`：
+`GET /api/ui/state`：
 
 ```json
 {
-  "screen": "world",
-  "frame": 12345,
-  "dialog": { "text": "...", "has_ok": false, "has_cancel": false, "buttons": [] }
+  "name": "game_story",
+  "type": 4,
+  "source": 1,
+  "info": { "title": "凯恩", "content": "……" },
+  "options": [
+    {"id": "next", "label": "下一句"},
+    {"id": "skip", "label": "跳过"}
+  ]
 }
 ```
 
-`screen` 是**完整界面枚举**（v0.5.42 重构，`dialog_active` 字段已删除，用前缀判断 UI 是否被占据）：
+| 字段 | 说明 |
+|---|---|
+| `name` | 唯一状态名，程序主键：`world` / `main_menu` / `loading`、`game_*`、`panel_*`、`main_menu_*`、`module_panel_*` / `module_dialog_*`、`android_agreement` |
+| `type` | `0` unknown / `1` boot / `2` menu / `3` world / `4` dialog / `5` panel |
+| `source` | `0` unknown / `1` native / `2` module / `3` external / `4` android |
+| `info` | 数据对象，仅 `title` / `content`；不适用为 `{}` |
+| `options` | 可执行 UI 动作 `[{id,label}]`；无动作为 `[]` |
 
-| 前缀 | screen 取值 | 含义 |
-|---|---|---|
-| `main_menu_` | `main_menu_save_slot` / `main_menu_character_select` / `main_menu_daily_reward` / `main_menu_options` / `main_menu_settings` / `main_menu` | 主菜单面板 |
-| `dialog_` | `dialog_popup`（弹窗） / `dialog_story`（剧情） / `dialog_wipeout`（死亡） / `dialog_quest`（任务完成） / `dialog_npc`（NPC 对话） / `dialog_choice`（选择框） / `dialog_input_count`（数量输入） | **对话框类占据** |
-| `panel_` | `panel_character_info` / `panel_inventory` / `panel_mercenary` / `panel_craft` / `panel_npc_rest` / `panel_npc_revive` / `panel_options` / `panel_quests` / `panel_save_slot` / `panel_character_select` / `panel_shortcut` / `panel_skills` / `panel_shop` / `panel_settings` / `panel_world_map` / `panel_in_app` / `panel_daily_reward` / `panel_ui_panel` | **面板类占据** |
-| 其他 | `world`（自由操作） / `loading`（加载） / `tutorial_pause`（药水教学暂停） / `agreement`（Java 层同意页，仅主菜单前，`dialog/select {"action":"ok"}` 关闭） | 特殊状态 |
-
-**判定规则**（v0.5.42+）：
-- `dialog_` 前缀 = 对话框类占据（`/api/ui/dialog` 的 `active=true` 即由此判断）
-- `panel_` 前缀 = 面板类占据
-- `world` = 可自由操作；`main_menu_*` = 主菜单场景（只能做存档操作）
-- **世界操作（移动/战斗/交互/物品）在 UI 被占据时禁止**，返回 `{"ok":false,"error":"ui occupied: <screen>"}`（v0.5.43）
+**判定规则**：
+- 世界操作（移动/战斗/交互/物品）要求 `type=3` 且 `name="world"`；否则返回 `{"ok":false,"error":"ui occupied: <name>"}`。
+- `type=4` 为对话/弹窗；具体场景看 `name`（`game_story` / `game_popup` / `game_wipeout` 等）。
+- `type=5` 为面板（原生 `panel_*` / `main_menu_*`，模块 `module_panel_*`）。
+- 不再使用 `screen` 前缀判断；旧 `/api/ui`、`/api/ui/screen`、`/api/ui/panel`、`/api/ui/dialog` 已删除。
+- 可用状态枚举见 `GET /api/ui/state/table`。
 
 ### 5.8 Snapshot（全量快照）
 
@@ -501,29 +506,23 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 > 装备明细走 `GET /api/character/party/{slot}/equipment`；佣兵走 `GET /api/character/mercenary`。
 
-### 5.9 DialogContent（对话/弹窗内容）
+### 5.9 对话/弹窗状态
 
-`GET /api/ui/dialog` 统一检测返回：
+`type=4` 的状态通过 `GET /api/ui/state` 返回；标题/正文在 `info`，动作在 `options`：
 
-```json
-{
-  "type": "npc", "active": true,
-  "speaker": "商人", "text": "欢迎光临！",
-  "options": [ { "id": "0", "label": "购买物品" }, { "id": "next", "label": "下一句" } ]
-}
-```
-
-| type | 场景 | 可选动作（select 的 action） |
+| name | info | 典型 options |
 |---|---|---|
-| `story` | 剧情对话 | `next` 下一句 / `skip` 跳过 |
-| `npc` | NPC 对话 | `next` 下一句 / `index` 选项选择（`{"index":n}`） |
-| `popup` | 确认弹窗 | `ok` / `cancel` |
-| `npc_quest` | 任务完成面板 | `complete` / `close` |
-| `wipeout` | 死亡面板 | `game_over`（仅此一项） |
-| `save_slot` | 存档槽面板 | `save` / `close` |
-| 面板态 | 其他面板（背包/技能/设置等） | `close` 关闭面板 |
-| `save`/`sell`/`quest` | 各类弹窗 | `confirm` / `quit` / `cancel` |
-| `none` | 无对话 | 空 options |
+| `game_popup` | `content` | `ok` / `cancel` |
+| `game_story` | `title`（说话人）、`content` | `next` / `skip` |
+| `game_npc_dialog` | `title`（说话人）、`content` | NPC 选项、`close` |
+| `game_npc_quest` | `{}` | `complete` / `close` |
+| `game_wipeout` | `{}` | `game_over` |
+| `game_choice` | `{}` | 事件选项 |
+| `game_input_count` | `{}` | `close` |
+| `android_agreement` | `{}` | `ok` |
+| `module_dialog_*` | `title`、`content` | provider 选项 |
+
+`options` 的 `id` 直接用于 `POST /api/ui/dialog/select`；`index` 仅用于 NPC 下标选项。旧的 `DialogContent` 响应（`type`/`active`/`text`/`speaker`）不再返回。
 
 ---
 
@@ -553,7 +552,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 **⚠️ enter_slot 注意事项**：
 - 只能在非 world 状态调用（world 中 → `already in game`）
-- 启动同意页（screen=`agreement`）→ `ui occupied: agreement`；先 `POST /api/ui/dialog/select {"action":"ok"}` 关闭后再进档；原生弹窗（screen=`dialog_popup`）→ `ui occupied: dialog_popup`
+- 启动同意页（`name=android_agreement`）→ 进档守卫返回 `ui occupied: agreement`；先 `POST /api/ui/dialog/select {"action":"ok"}` 关闭后再进档；原生弹窗（`name=game_popup`）→ `ui occupied: dialog_popup`
 - 进档调用后 15s 内同意页启动会被模块自动拦截（不会打断读档，也无需处理）；同意页在同意动作完成后的消失动画期间进档是安全的
 - 进入前会在 `enter_slot` 内执行只读完整性检查；缺失、损坏或不兼容存档返回结构化错误，不调用原版进档路径；当前没有独立预检 API。
 
@@ -679,7 +678,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 **移动语义**：
 - `move_to`/`walk_dir` 都是**正常走路**（后台线程逐帧，非瞬移），到达出口区域自动切图
 - 目标不可达 → 走到最近可达点并面向目标
-- 剧情/切图状态（screen=dialog_story 或切图中）时操作自动终止
+- 剧情/切图状态（`name=game_story` 或切图中）时操作自动终止
 
 #### 静态地图（GET）
 
@@ -757,10 +756,8 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 | 方法 | 路径 | 用途 | 返回 |
 |---|---|---|---|
-| GET | `/api/ui/` | 界面状态复合 | `<GameState>` |
-| GET | `/api/ui/screen` | 当前界面名 | `{"screen":"world"}` |
-| GET | `/api/ui/panel` | 当前面板 | `{"panel":"inventory"}` 或 `{"panel":null}` |
-| GET | `/api/ui/dialog` | **统一对话/弹窗检测** | `<DialogContent>`（见 5.9） |
+| GET | `/api/ui/state` | 当前唯一顶层状态 | `{name,type,source,info,options}`（见 5.7） |
+| GET | `/api/ui/state/table` | 可用状态表 | `{"states":[{name,type,source,stability}]}` |
 
 #### 对话与弹窗操作（POST）
 
@@ -782,8 +779,8 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | 方法 | 路径 | 用途 | 请求 | 返回 |
 |---|---|---|---|---|
 | POST | `/api/ui/go_main_menu` | 回到主菜单 | 无 body | `{"ok":true,"state":<Player>}` |
-| POST | `/api/ui/open_panel` | 打开面板 | `{"panel":"inventory"}` | `{"ok":true,"state":<GameState>}` |
-| POST | `/api/ui/close_panel` | 关闭当前面板 | 无 body | `{"ok":true,"state":<GameState>}` |
+| POST | `/api/ui/open_panel` | 打开面板 | `{"panel":"inventory"}` | `{"ok":true,"state":<action state>}` |
+| POST | `/api/ui/close_panel` | 关闭当前面板 | 无 body | `{"ok":true,"state":<action state>}` |
 
 **面板白名单**（真机验证可 API 打开）：`character_info` / `inventory` / `skills` / `mercenary` / `quests` / `settings`。
 其他面板（shop/craft/npc/options/world_map 等）需游戏内上下文 → `panel requires in-game context`。
@@ -856,11 +853,11 @@ curl http://<手机IP>:8088/api/system/info
 # 2. 创建新档（或 enter_slot 进已有档）
 curl -X POST http://<手机IP>:8088/api/system/create_slot -d '{"slot":1,"class_idx":2}'
 
-# 3. 跳过初始剧情（screen=dialog_story 时）
+# 3. 跳过初始剧情（name=game_story 时）
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"action":"skip"}'
 
 # 4. 确认进入世界
-curl http://<手机IP>:8088/api/ui/screen
+curl http://<手机IP>:8088/api/ui/state
 ```
 
 ### 7.2 移动与探索
@@ -929,11 +926,11 @@ curl -X POST http://<手机IP>:8088/api/world/movement/move_to -d '{"x":<商人x
 
 # 2. 交互 → 查看对话 → 选商店选项
 curl -X POST http://<手机IP>:8088/api/ui/start_interact
-curl http://<手机IP>:8088/api/ui/dialog
+curl http://<手机IP>:8088/api/ui/state
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"index":0}'
 
 # 3. 确认进入商店 → 看商品 → 购买
-curl http://<手机IP>:8088/api/ui/screen
+curl http://<手机IP>:8088/api/ui/state
 curl http://<手机IP>:8088/api/item/shop/items
 curl -X POST http://<手机IP>:8088/api/item/shop/buy_item -d '{"slot":0}'
 
@@ -948,7 +945,7 @@ curl -X POST http://<手机IP>:8088/api/ui/close_panel
 ```bash
 # 与 NPC 对话 → 选任务选项 → 查看已接任务
 curl -X POST http://<手机IP>:8088/api/ui/start_interact
-curl http://<手机IP>:8088/api/ui/dialog
+curl http://<手机IP>:8088/api/ui/state
 curl -X POST http://<手机IP>:8088/api/ui/dialog/select -d '{"index":0}'
 curl http://<手机IP>:8088/api/quest/active
 
@@ -1133,16 +1130,17 @@ curl http://<手机IP>:8088/api/system/events
 ```
 1. 感知（GET，并行）
    - /api/system/snapshot      # 全局状态（screen/血量/位置/队伍）
-   - /api/ui/                   # 界面状态（完整 screen 枚举）
+   - /api/ui/state             # 界面状态（name/type/source/info/options）
    - /api/world/map/units       # 周围单位（敌人/NPC）
    - /api/quest/active          # 当前任务
    - /api/system/events/        # 变化事件（扣血/升级/掉东西）
 
 2. 决策（按优先级从上到下，命中即执行）
-   P0 死亡      → screen=dialog_wipeout: 先保存可救→game_over→enter_slot 重进
-   P0 弹窗      → screen=dialog_*（非 wipeout）: 处理对话（GET /api/ui/dialog → select）
-   P0 剧情      → screen=dialog_story: select action=skip
-   P0 教学暂停  → screen=tutorial_pause: 使用药水后恢复
+   P0 死亡      → name=game_wipeout: 先保存可救→game_over→enter_slot 重进
+   P0 弹窗      → type=4 且 name≠game_wipeout: 处理对话（读 state.options → select）
+   P0 剧情      → name=game_story: select action=skip
+   P0 同意页    → name=android_agreement: select action=ok
+   P0 教学暂停  → name=tutorial_pause: 使用药水后恢复
    P1 血量过低  → hp < 30% max: use_item 药水
    P1 正在扣血  → 有敌人攻击: attack_target 反打（见 11.3）
    P1 寻路未完成→ 上一轮 move_to 还没走到: 等待/复查（见 11.3）
@@ -1165,7 +1163,7 @@ curl http://<手机IP>:8088/api/system/events
 ### 11.2 关键原则
 
 1. **状态驱动，绝不次数驱动**：循环条件用"目标是否达成 / 状态是否正常"，不用"已执行 N 次"。固定次数循环遇到弹窗/死亡会卡死。
-2. **每轮先查 screen 与 dialog**：任何行动前 `GET /api/ui/`，突发事件优先处理。
+2. **每轮先查 UI 状态**：任何行动前 `GET /api/ui/state`，突发事件优先处理。
 3. **生存优先**：血量低先喝药；被攻击先反打或逃跑；`set_auto_attack` 常开。
 4. **里程碑必存档**：升级、换装、交任务、拾取好装备之后立即 `POST /api/system/save`——死亡只回退到上次存档点。
 5. **操作后检查 state**：验证行动生效（如移动后坐标变化、用道具后数量变化）。
@@ -1187,28 +1185,33 @@ POST /api/character/combat/0/set_auto_attack {on:true}
 
 # 主循环：状态驱动，每轮最多 1 个行动，避免操作过载
 loop:
-    state = GET /api/ui/                    # ← 每次循环第一件事：看状态
+    state = GET /api/ui/state              # ← 每次循环第一件事：看状态
 
     # P0 突发事件处理（任何情况下优先）
-    if state.screen == "dialog_wipeout":    # 死亡
+    if state.name == "game_wipeout":        # 死亡
         POST ui/dialog/select {action:"game_over"}
         POST /api/system/enter_slot {slot:当前槽}
         POST /api/system/save
         continue
-    if state.screen.startswith("dialog_"):  # 其他对话框占据（弹窗/剧情/NPC/任务等）
-        dlg = GET /api/ui/dialog
-        if dlg.type in (popup, save, sell, quest):  POST select {action:"ok"/"confirm"}
-        elif dlg.type == "npc":                      POST select {index:0}
-        elif dlg.type == "npc_quest":                POST select {action:"complete"}; POST save
-        elif dlg.type == "story":                    POST select {action:"skip"}
+    if state.type == 4:                     # dialog 占据（弹窗/剧情/NPC/任务/同意页）
+        if state.name == "game_story":
+            POST ui/dialog/select {action:"skip"}
+        elif state.name == "game_npc_quest":
+            POST ui/dialog/select {action:"complete"}; POST save
+        elif state.name == "android_agreement":
+            POST ui/dialog/select {action:"ok"}
+        elif state.name == "game_npc_dialog":
+            POST ui/dialog/select {index:0}
+        else:
+            POST ui/dialog/select {action: state.options[0].id}  # popup 等
         continue
-    if state.screen == "tutorial_pause":    # 药水教学暂停
+    if state.name == "tutorial_pause":      # 药水教学暂停
         POST item/inventory/use_item {bag, slot:药水}
         continue
-    if state.screen.startswith("panel_"):   # 面板占据（背包/技能/设置等）
+    if state.type == 5:                     # 面板占据（原生/模块）
         POST ui/close_panel
         continue
-    if state.screen != "world":             # 其他界面（加载/主菜单等）
+    if not (state.type == 3 and state.name == "world"):  # 加载/主菜单等
         sleep 1s; continue
 
     snap = GET /api/system/snapshot
@@ -1266,10 +1269,10 @@ loop:
 
 | 场景 | 检测 | 处理 |
 |---|---|---|
-| 死亡 | `screen=dialog_wipeout` | `select game_over` → 存档 → `enter_slot` 重进 |
-| 剧情打断 | `screen=dialog_story` | `select skip` |
-| 弹窗阻塞 | `screen=dialog_popup` | 读 dialog → `select` 对应动作 |
-| 教学暂停 | `screen=tutorial_pause` | 使用药水 |
+| 死亡 | `name=game_wipeout` | `select game_over` → 存档 → `enter_slot` 重进 |
+| 剧情打断 | `name=game_story` | `select skip` |
+| 弹窗阻塞 | `name=game_popup` | 按 `options` → `select` 对应动作 |
+| 教学暂停 | `name=tutorial_pause` | 使用药水 |
 | 被攻击扣血 | events 有 `hp` 下降 / snapshot hp 变小 | 立即 `attack_target` 反打最近敌人 |
 | 血量过低 | hp < 30% max | `use_item` 药水 |
 | 寻路卡住 | move_to 后坐标长时间不变 | 复查 `distance` 可达性，不可达则换目标 |
@@ -1285,9 +1288,9 @@ loop:
 |---|---|
 | 返回 `{"error":"not ready"}` | 游戏未就绪（刚启动），等 1-2 秒重试 |
 | 返回 `{"error":"not in game"}` | 未进入存档，先 enter_slot / create_slot |
-| 写操作无反应 | 先 `GET /api/ui/dialog` 检查弹窗，处理后再操作 |
+| 写操作无反应 | 先 `GET /api/ui/state` 检查 `type=4/5` 的对话/面板，处理后再操作 |
 | enter_slot 后崩溃 | 新版本会在原版进档前执行内部完整性检查；若仍异常，保留 tombstone 和存档字节快照 |
-| 移动不生效 | 确认 `screen=world`；剧情/切图中操作自动终止 |
+| 移动不生效 | 确认 `type=3,name="world"`；剧情/切图中操作自动终止 |
 | 商店 items 为空 | 需先与商人交互进入商店界面 |
 | attack 返回 `target not found` | target_slot 用 `map/units` 返回的 `slot`（每帧会变，重新查询） |
 | cast 返回 `skill not learned` | action_id 必须是已学技能，先查 `party/{slot}/skills` |
@@ -1298,7 +1301,7 @@ loop:
 - **无鉴权**：合法端点局域网内可访问，勿暴露公网
 - **OP 门禁**：需要 OP 的端点默认受 `module.security/op.enabled=false` 拒绝（403）；开启后无额外鉴权，且破坏性大，用前先存档
 - **OP 破坏性**：直改等级/属性/物品可能损坏存档，用前先存档
-- **死亡处理**：全灭 → `screen=dialog_wipeout`；面板仅提供 `game_over`（回主菜单，可 `enter_slot` 重进档）；`revive`/`special_revive` 走网络链、离线无作用，已不再提供
+- **死亡处理**：全灭 → `name=game_wipeout`；面板仅提供 `game_over`（回主菜单，可 `enter_slot` 重进档）；`revive`/`special_revive` 走网络链、离线无作用，已不再提供
 - **教学状态**：新档可能触发 `tutorial_pause`（药水教学），游戏暂停移动，需使用药水后恢复
 
 ---

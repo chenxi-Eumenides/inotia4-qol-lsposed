@@ -1,6 +1,7 @@
 #include "plugin.h"
 
 #include <atomic>
+#include <cstdio>
 
 #include "../../contracts/attribute_quality.h"
 #include "../../contracts/extension_bag.h"
@@ -79,6 +80,22 @@ const contracts::QolGameHost* g_game = nullptr;
 const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::UiStateApi* g_ui_state = nullptr;
+
+void register_ui_state() {
+    if (g_ui_state == nullptr || g_ui_state->register_state == nullptr) return;
+    contracts::QolUiStateRegistration registration{};
+    registration.struct_size = sizeof(registration);
+    registration.type = contracts::kUiStateTypePanel;
+    std::snprintf(registration.key, sizeof(registration.key), "%s", kPluginId);
+    std::snprintf(registration.plugin_id, sizeof(registration.plugin_id), "%s", kPluginId);
+    (void)g_ui_state->register_state(&registration);
+}
+
+void unregister_ui_state() {
+    if (g_ui_state != nullptr && g_ui_state->unregister_state != nullptr) {
+        (void)g_ui_state->unregister_state(contracts::kUiStateTypePanel, kPluginId);
+    }
+}
 const contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
 const contracts::QolSlotDataApi* g_slot_data_api = nullptr;
 std::atomic<bool> g_gate{false};
@@ -205,6 +222,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_inventory_extras = nullptr;
         return 1;
     }
+    register_ui_state();
     // save_enter/save_exit 回调设施是共享过渡依赖（B4 迁移）；注册对同一 fn+ctx 幂等，
     // activate 重入安全。
     autosell_register_save_enter();
@@ -218,6 +236,7 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     autosell_store_unregister();
+    unregister_ui_state();
     clear_runtime_capabilities();
     if (ctx.sdk != nullptr && ctx.sdk->capabilities.require != nullptr) {
         const void* iface = nullptr;
@@ -245,12 +264,14 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
         apply_gate(false);
         return;
     }
+    register_ui_state();
     apply_gate(true);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
     autosell_store_unregister();
+    unregister_ui_state();
     clear_runtime_capabilities();
     apply_gate(false);
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""阶段 5 验收基建：147 路由全量 smoke 探测，产出基线报告（重构前后行为对比）。
+"""阶段 5 验收基建：145 路由全量 smoke 探测，产出基线报告（重构前后行为对比）。
 
 用法：
 python3 scripts/verification/smoke_all.py [--all] [base_url] [output_json]
@@ -9,7 +9,7 @@ python3 scripts/verification/smoke_all.py http://127.0.0.1:8088 --all smoke_loca
 
 默认仅显示摘要及 warn/fail 路由；传入 --all 时也显示 PASS 路由。JSON 报告始终包含全部路由。
 
-路由探测清单与 native routes.inc 的 147 条冻结路由保持一致；路径模板参数
+路由探测清单与 native routes.inc 的 145 条冻结路由保持一致；路径模板参数
 {role} {id} {slot} 等按各 controller 参数语义写死合理默认值。
 
 断言（每条路由）：
@@ -55,7 +55,7 @@ PATH_VARS = {
 MISSING = "{}"  # 对象字面量，用于危险写端点
 BAD_JSON = "{bad"  # 让带 body 的调试/备份端点停在参数解析，避免产生副作用
 
-# 147 条路由清单：method / path 模板 / query / body / 备注
+# 145 条路由清单：method / path 模板 / query / body / 备注
 ROUTES = [
     # ---- AutoSellFeatureController (2) ----
     {"m": "GET", "p": "/api/feature/autosell/config", "note": "读自动出售配置"},
@@ -220,11 +220,9 @@ ROUTES = [
     {"m": "POST", "p": "/api/ui/go_main_menu", "note": "运行时:回主菜单"},
     {"m": "POST", "p": "/api/ui/close_panel", "note": "运行时:关面板"},
     {"m": "POST", "p": "/api/ui/open_panel", "body": BAD_JSON, "note": "参数校验:避免打开面板"},
-    # ---- UiController (4) ----
-    {"m": "GET", "p": "/api/ui"},
-    {"m": "GET", "p": "/api/ui/screen"},
-    {"m": "GET", "p": "/api/ui/panel"},
-    {"m": "GET", "p": "/api/ui/dialog"},
+    # ---- UiController (2) ----
+    {"m": "GET", "p": "/api/ui/state"},
+    {"m": "GET", "p": "/api/ui/state/table"},
     # ---- core.ui settings debug routes (must remain last: may change the game UI state) ----
     {"m": "POST", "p": "/api/debug/settings-ui/inject", "note": "调试 UI 注入"},
     {"m": "GET", "p": "/api/debug/settings-ui/status", "note": "调试 UI 状态"},

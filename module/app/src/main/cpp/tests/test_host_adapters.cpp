@@ -910,8 +910,8 @@ int main() {
     const qol::contracts::QolHostSdk& sdk = qol::host::g_host_sdk;
     assert(sdk.abi.size == sizeof(qol::contracts::QolHostSdk));
     assert(sdk.abi.major == qol::contracts::kHostSdkMajor);
-    assert(sdk.abi.minor == 28);
-    assert(qol::contracts::kHostSdkMinor == 28);
+    assert(sdk.abi.minor == 29);
+    assert(qol::contracts::kHostSdkMinor == 29);
     assert(sdk.desc_hook_v2 != nullptr);
     assert(sdk.desc_hook_v2->struct_size == sizeof(qol::contracts::QolDescHookApi));
     assert(qol::contracts::desc_hook_v2_if_available(&sdk) == sdk.desc_hook_v2);

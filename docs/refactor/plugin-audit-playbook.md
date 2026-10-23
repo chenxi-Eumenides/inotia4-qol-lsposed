@@ -23,7 +23,7 @@
 1. 必读：`ARCHITECTURE.md`（§2.2 依赖矩阵、§5 领域/能力、§7 HTTP 契约）、`docs/INDEX.md`、`docs/reference/api-reference.md` 相关节、`docs/refactor/verification.md` 该插件的 VM 卡、`docs/guides/build-and-deploy.md` §3.1。
 2. 建立任务隔离目录保存证据、脚本和 runbook；收口后将审计记录迁入 `docs/refactor/audits/`，验证证据迁入 `docs/refactor/verification/`。目录约定见代理规则。
 3. 设备与模块形态：`logcat -d -s Inotia4Qol:V | head` 取 `module identity` 行的 sha256，与 `output/` 最新 debug APK 比对。**集成包形态下单独 install 模块 APK 不生效**，需 `scripts/patch-apk.sh <模块apk>` 重打（build-and-deploy 附录）。
-4. 确认设备无遗留弹窗/死亡态（`/api/ui/screen` = world 或 main_menu）。
+4. 确认设备无遗留弹窗/死亡态：查询 `/api/ui/state`，要求 `type=3,name="world"` 或 `type=2,name="main_menu"`。
 
 ## 阶段 0.5：插件讲解（先于一切审计）
 

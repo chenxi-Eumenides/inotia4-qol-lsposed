@@ -47,10 +47,8 @@ interface InfoApiService {
     fun questListId(id: Int): String
     fun questCompleted(): String
 
-    fun ui(): String
-    fun uiScreen(): String
-    fun uiPanel(): String
-    fun uiDialog(): String
+    fun uiState(): String
+    fun uiStateTable(): String
 
     fun game(): String
     fun gameSnapshot(): String

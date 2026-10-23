@@ -441,6 +441,12 @@ struct QolSecurityApi {
     QolResult (*op_enabled)(void*, uint8_t* out_enabled);
 };
 
+// v1.29 tail: read-only enumeration of registered panel providers. Host lifetime strings.
+struct QolPanelEnumerationApi {
+    uint32_t (*count)();
+    const PanelProviderSpec* (*at)(uint32_t index);
+};
+
 struct QolHostSdk {
     QolAbiHeader abi;
     QolLogApi log;
@@ -496,14 +502,17 @@ struct QolHostSdk {
     const QolHostModuleHealthFactsApi* module_health;
     // v1.27 tail: identity-validated description-button hook API.
     const QolDescHookApi* desc_hook_v2;
+    // v1.29 tail: registered panel provider enumeration (panel_id + owner).
+    const QolPanelEnumerationApi* panel_enumeration;
 };
 
 constexpr uint16_t kHostSdkMajor = 1;
 // minor 22 adds owner feature/config and resident management; minor 23 adds runtime/security APIs;
 // minor 24 appends desired lifecycle state to runtime effects; minor 25 adds module-health facts;
 // minor 26 appends feature display priority and category metadata to the settings catalog;
-// minor 27 appends desc hook V2; minor 28 appends owner availability to feature control.
-constexpr uint16_t kHostSdkMinor = 28;
+// minor 27 appends desc hook V2; minor 28 appends owner availability to feature control;
+// minor 29 appends registered panel provider enumeration.
+constexpr uint16_t kHostSdkMinor = 29;
 
 inline const QolDescHookApi* desc_hook_v2_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, desc_hook_v2) +

@@ -2,8 +2,9 @@
 
 > **本文档 = API 规格（面向调用方）**：每个 API 的路径、用途、请求格式、返回格式与注意事项。
 > 技术实现细节（VMA/函数签名/调用链/游戏内机制）：目标架构见根目录 `ARCHITECTURE.md`；历史实现细节见 `docs/archive/development/`（已归档，仅供参考，不得作为落地依据）。
-> 状态：**v0.5.13 + 配置 `enable`/`features`/`config` 三层收口**。本文档为唯一权威路由来源；当前 native/Kotlin 路由校验基线为 147 条。配置契约见 §7.6。
+> 状态：**v0.5.13 + 配置 `enable`/`features`/`config` 三层收口**。本文档为唯一权威路由来源；当前 native/Kotlin 路由校验基线为 145 条。配置契约见 §7.6。
 > 架构重构不改变既有路径与 HTTP 方法；已迁移的写端点按 §7.10 返回票据，操作结果由 §7.9 回取。内置插件 id 不映射为 URL 前缀。外部插件路由另限定在 `/api/ext/<插件id>/...`，不得占用本文档命名空间。
+> UI 状态查询迁移：旧路由 `/api/ui`、`/api/ui/screen`、`/api/ui/panel`、`/api/ui/dialog` 已移除，由 `GET /api/ui/state` 与 `GET /api/ui/state/table` 替代；五个 UI POST action 保持不变。
 >
 > 通用约定：
 > - 服务地址：`http://<设备IP>:8088`（局域网，模块监听 0.0.0.0）
@@ -28,14 +29,14 @@
 | **world**（地图与移动） | `/api/world/*` | 当前地图 map、移动操作 movement、静态地图 maps（含瓦片矩阵） | 15 |
 | **item**（物品与背包） | `/api/item/*` | 背包 inventory、商店 shop | 17 |
 | **quest**（任务） | `/api/quest/*` | 任务 | 6 |
-| **ui**（界面与对话） | `/api/ui/*` | 界面状态 ui、对话/弹窗 dialog | 9 |
+| **ui**（界面与对话） | `/api/ui/*` | 统一界面状态与对话/面板操作 | 7 |
 | **system**（系统与会话） | `/api/system/*` | 游戏整体 game、事件流 events、存档 save、静态数据表 tables（含 text/story-events）、帮助文档 help | 16 |
 | **config**（模块配置） | `/api/config/*` | registered plugin 对象投影与单 key feature/config/desired 提交、receipt 回取（list/set/receipt） | 2 |
 | **op**（越权操作） | `/api/op/*` | 改数据/强行操作（全局开关门禁，默认关闭，见 §8） | 10 已实现 + 11 定稿 |
 | debug（调试） | `/api/debug/*` | 开发期调试（含扩展背包视图/状态，见 §九） | 8 |
 | health（顶层） | `/api/health` | 服务健康检查 | 1 |
 
-> 当前冻结路由验证基线 = 147。本文的
+> 当前冻结路由验证基线 = 145。本文的
 > method/path 集合由 controller 注解与下文补充端点共同组成；重构只迁移 owner，不改变既有
 > URL、HTTP 方法与成功响应。
 
@@ -211,23 +212,53 @@
 - 自研 BFS 导航（v0.4.29，替代游戏 CHAR_SearchPath）：瓦片矩阵（bit3=阻挡 bit7=出口）+ 单位占用（NPC/怪物不可穿越，v0.4.30）
 - `found=false` 时返回 `nearest`（最近可达 tile）与最近可达路径；路径节点 = tile 中心像素（tile×16+8）
 
-### GameState（游戏界面状态）
+### UI State（统一界面状态）
+
+`GET /api/ui/state` 返回唯一的当前顶层状态：
 
 ```json
-{ "screen": "dialog_npc", "dialog": { "type": "npc", "active": true, "speaker": "杂货商人", "text": "……", "options": [...] } }
+{
+  "name": "game_story",
+  "type": 4,
+  "source": 1,
+  "info": {
+    "title": "凯恩",
+    "content": "……"
+  },
+  "options": [
+    {"id": "next", "label": "下一句"},
+    {"id": "skip", "label": "跳过"}
+  ]
+}
 ```
 
 | 字段 | 说明 |
 |---|---|
-| `screen` | 当前原生游戏界面（v0.5.42 起统一枚举，`GET /api/ui/screen` 返回底层 screen）：`"loading"` / `"main_menu"` / `"world"` / `"tutorial_pause"`（药水教学）/ 对话框 `dialog_*`（`dialog_popup` 弹窗 / `dialog_story` 剧情 AVG / `dialog_npc` NPC 对话 / `dialog_quest` 任务完成面板 / `dialog_wipeout` 死亡面板 / `dialog_choice` 选择框 / `dialog_input_count` 数量输入）/ 面板 `panel_*`（`panel_character_info`/`panel_inventory`/`panel_skills`/`panel_mercenary`/`panel_quests`/`panel_settings`/`panel_shop`/`panel_craft`/`panel_npc_rest`/`panel_npc_revive`/`panel_save_slot`/`panel_character_select`/`panel_options`/`panel_shortcut`/`panel_world_map`/`panel_daily_reward`/`panel_in_app`/`panel_ui_panel`）/ 主菜单面板 `main_menu_*`（`main_menu_save_slot`/`main_menu_character_select`/`main_menu_daily_reward`/`main_menu_options`/`main_menu_settings`）。Android Agreement 是独立 Java UI；Kotlin 在 `/api/ui` 复合状态与 `/api/ui/dialog` 优先检测并返回 `agreement`，不改写此原生 screen。自定义 PanelProvider/Dialog 同样不改写此底层 screen。 |
-| `story` | 仅 screen=dialog_story：`active`/`speaker`/`text`/`index`/`count` |
-| `dialog` | 仅 UI 被占据时存在：`<DialogContent 模型>`（type/title/text/options）。`core.custom_ui` 的自定义选择框以其 `UiChoiceSpec.dialog_type_id` 稳定 ID 输出既有 `type` 字段（当前调用方如 `world_teleport.confirm`）；自定义 PanelProvider 不改变该字段。注意：以底层 `screen` 判断游戏原生 UI。 |
+| `name` | 稳定状态名，也是状态主键；不另设 per-state `id`。例如 `world`、`game_story`、`game_wipeout`、`panel_inventory`、`android_agreement`。 |
+| `type` | `0` unknown / `1` boot / `2` menu / `3` world / `4` dialog / `5` panel。 |
+| `source` | `0` unknown / `1` native / `2` module / `3` external / `4` android。 |
+| `info` | 状态数据对象，仅允许 `title`、`content`；不适用时为 `{}`。 |
+| `options` | 当前状态可执行动作数组，元素为 `{id,label}`；无动作时为 `[]`，动作通过对应 POST action 执行。 |
 
-> **v0.5.42 变更**：`dialog_active` 字段已移除——`screen` 精确表达 UI 占据状态（`dialog_*`/`panel_*`/`main_menu_*` 前缀即 UI 占据）。不再有数据残留导致的误报（旧版：关闭 NPC 对话框后 dialog_active 残留 true）。
->
-> **v0.5.43 变更**：世界操作（移动 `move_to`/`walk_dir`/`stop_move`、战斗 `attack_target`/`cast_skill`/`stop_combat`、交互 `interact_with`、技能、物品使用、传送、`start_interact`）在 UI 占据时返回 `ui occupied: <screen>` 而非继续执行——UI 占据时游戏输入被接管，直接调 CHAR_Move 等会与 UI 竞争破坏控制态。面板内操作（装备/出售/整理/佣兵等）、对话操作（dialog/select）、菜单操作不受影响。
->
-> **商店/合成面板识别修复**：模块把 PopupState 的 enter 回调换成自己的 wrapper（商店宿主、合成宿主、扩展背包）后，popup 栈顶保存的是模块 .so 地址，而判定层按「enter − libgame 基址」换算，得到负值被当作「无面板」——真机表现为商店/合成界面打开时 `screen` 仍为 `world`、`close_panel` 报 `top of stack is not a panel`、世界操作不被 `ui occupied` 拦截。现安装 wrapper 时同步登记 `(wrapper, 原版 enter VMA)`，判定层按栈顶 enter 反查（`infra/popup_enter_alias`）。真机验证：商店 `panel_shop`、合成 `panel_craft`；商店态下 `move_to` 返回 `ui occupied: panel_shop`；`close_panel` 可关闭商店，关闭后 `screen=world` 且世界操作恢复。
+`info` 与 `options` 同级；dialog 状态的标题/正文位于 `info.title` / `info.content`，动作位于 `options`。旧 `GameState` / `DialogContent` GET 响应模型及其 `screen`、`panel`、`dialog`、`active`、`text`、`speaker` 等字段不再是 UI 状态 API 契约。
+
+`type` 与 `name` 一起用于识别具体场景：例如世界操作前要求 `type=3` 且 `name="world"`；死亡弹窗为 `type=4` 且 `name="game_wipeout"`；启动同意页为 `type=4` 且 `name="android_agreement"`。不得再按 `screen` 前缀判断 UI 占据。
+
+UI 状态表 `GET /api/ui/state/table` 返回当前可用状态名及来源：
+
+```json
+{
+  "states": [
+    {"name": "world", "type": 3, "source": 1, "stability": "static"},
+    {"name": "module_panel_autosell", "type": 5, "source": 2, "stability": "static"},
+    {"name": "ext_panel_vendor_inventory", "type": 5, "source": 3, "stability": "session"}
+  ]
+}
+```
+
+`stability` 为 `static`（原生/内置模块，跨构建不变）或 `session`（外部插件，仅本进程）。
+
+> 世界操作（移动、战斗、交互、物品使用、传送）在 UI 占据时仍由服务端守卫，失败返回 `ui occupied: <状态名>`；调用方可先读取 `/api/ui/state` 判断当前 `type` 与 `name`。面板内操作、对话选择及菜单操作依各自 action 守卫执行。
 
 ### Snapshot（快速状态快照）
 
@@ -247,29 +278,19 @@
 
 一站式聚合：UI 状态 + 玩家全局 + 队伍摘要（角色类型/职业/等级/HP MP/主属性/角色名）。**不含装备明细（party 每角色无 equipment 字段）与佣兵列表**——装备明细走 `GET /api/character/party/{slot}/equipment`，佣兵走 `GET /api/character/mercenary`。party 角色含 `class_idx`/`class_name`（职业索引/职业名注入）与 `type_name`（0 主角/1 佣兵）；不含 `party_count`（出战人数走 `GET /api/character/party/count`）。
 
-### DialogContent（对话/弹窗内容）
+### Dialog / panel content（旧 DialogContent 的替代）
 
-`GET /api/ui/dialog` 返回的统一结构（一个检测函数覆盖多种类型）：
+UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/state` 读取：
 
-```json
-{
-  "type": "sell",
-  "active": true,
-  "title": "出售物品",
-  "text": "确定要出售 治疗药水 ×5 吗？",
-  "options": [ { "id": "confirm", "label": "确定" }, { "id": "cancel", "label": "取消" } ]
-}
-```
-
-| 字段 | 说明 |
+| 旧字段 | 新位置 |
 |---|---|
-| `type` | 弹窗/对话种类：`save`/`sell`/`quest`/`npc`/`story`/`popup`/`wipeout`/`agreement`/`none`，或 `UiChoiceSpec.dialog_type_id` 指定的稳定 ASCII ID（如 `world_teleport.confirm`）；`agreement` 为 Java 层同意页，非 native 对话 |
-| `active` | 是否有对话/弹窗 |
-| `title` | 标题（任务对话框/出售弹窗等有标题的类型；无标题为 null） |
-| `text` | 内容文本 |
-| `options` | 可选动作列表 `{ id, label }`——供 `POST /api/ui/dialog/select` 选择；`id` 为动作标识（confirm/cancel/next/skip/quit/shop/revive/... 或具体选项），`label` 为按钮文案 |
+| `type` | `name`（如 `game_popup`、`game_story`、`game_npc_dialog`、`module_dialog_*`） |
+| `title` / `speaker` | `info.title`（若存在） |
+| `text` | `info.content`（若存在） |
+| `options` | `options: [{id,label}]`，供 `POST /api/ui/dialog/select` 选择 |
+| `active` | 状态存在即活动；未知/未就绪为 `name="unknown"` |
 
-各类型 options 见第六章 dialog 端点说明。
+`options` 的 `id` 是动作标识（`ok`/`cancel`/`next`/`skip`/`game_over`/`complete`/`close` 或具体选项）。
 
 ### 静态数据表
 
@@ -1240,85 +1261,66 @@
 
 ## 六、ui（界面与对话）— GET/POST /api/ui/*
 
-**界面交互**：界面状态感知（ui）、对话/弹窗统一检测（dialog）、选项选择（select_option）、NPC 交互（start_interact）。操作前置检查统一看 `dialog.active`（有阻塞弹窗时操作被 UI 阻塞）。
+**界面交互**：通过统一状态快照读取当前顶层 UI；状态由 `type`、`name`、`source` 识别，`info` 提供可选文本，`options` 提供当前动作。状态表可用于枚举可用状态名。五个 POST action 保持既有路径、参数与响应/票据契约。
 
-### 6.1 界面状态
+### 6.1 统一状态查询
 
-#### 界面状态复合
+#### 当前状态
 
-`GET /api/ui`
+`GET /api/ui/state`
 
-**用途**：获取界面状态复合（screen/dialog）。
+**用途**：获取当前唯一的顶层 UI 状态。
 
-**返回格式**：`<GameState 模型>`
+**返回格式**：`{name,type,source,info,options}`（完整字段和类型说明见 [UI State 模型](#ui-state统一界面状态)）。`info` 仅包含 `title`、`content`；`options` 为 `[{id,label}]`。
 
-**实现边界**：该复合端点继续使用 Kotlin `gamestateJson()` legacy 路径；自定义 panel/dialog 状态只汇入既有 `/api/ui/panel` 与 `/api/ui/dialog`，不改写复合端点或其字段。
+#### 可用状态表
 
-#### 当前界面
+`GET /api/ui/state/table`
 
-`GET /api/ui/screen`
+**用途**：枚举当前可用状态名及其类型、来源和稳定性；未安装的插件状态不出现。
 
-**用途**：获取当前原生界面名（v0.5.42 枚举：loading/main_menu/world/tutorial_pause/dialog_*/panel_*/main_menu_*）；自定义 panel/dialog 与 Android Agreement 不改写此底层 screen。
+**返回格式**：`{"states":[{"name":"world","type":3,"source":1,"stability":"static"}]}`。
 
-**返回格式**：`{ "screen": "world" }`
+### 6.2 对话与弹窗 action
 
-#### 当前面板
+`type=4` 的 dialog 状态通过 `/api/ui/state` 返回；具体状态由 `name` 标识，标题/正文（若存在）位于 `info.title` / `info.content`，可执行动作由 `options` 给出。
 
-`GET /api/ui/panel`
+**支持类型**（options 随状态给出；✅ v0.5.6 实机验证，面板态已纳入）：
 
-**用途**：获取当前面板。自定义面板栈非空时返回栈顶 `panel_<PanelProviderSpec.panel_id>`；否则原样按游戏原生 screen 映射，screen 为 `panel_*` 或 `main_menu_*` 时返回带前缀值。
-
-**返回格式**：`{ "panel": "panel_inventory" }` 或 `{ "panel": null }`
-
-### 6.2 对话与弹窗
-
-#### 对话/弹窗状态检测
-
-`GET /api/ui/dialog`
-
-**用途**：统一检测当前对话/弹窗状态（**一个函数覆盖多种类型**），返回类型、标题、内容与可选动作。自定义选择框使用稳定 `dialog_type_id`、标题及按选项索引生成的既有 `options[].id`/`label`；其 `active` 为 true。没有自定义状态时使用原生 DialogContent；Android Agreement 仍由 Kotlin `UiActivityTracker` 优先返回 `agreement`。
-
-**返回格式**：`<DialogContent 模型>`（`type` + `title`/`text` + `options`）
-
-**支持类型**（options 随类型给出；✅ v0.5.6 实机验证，面板态已纳入）：
-
-| type | 场景 | options 示例 |
+| `name` | 场景 | options 示例 |
 |---|---|---|
-| `popup` | 普通确认弹窗 | `[ok 确认, cancel 取消]` |
-| `agreement` | Android 同意页（主菜单前，Java 层） | `[ok 同意]` |
-| `story` | 剧情对话 | `[next 下一句, skip 跳过]` |
-| `npc` | 商人/村民对话 | 分支选项 `[0..n + close 关闭]`（选择框型，v0.6.6）或 `[next 下一句]`（线性型） |
-| `npc_quest` | NPC 任务完成面板 | `[complete 完成任务, close 关闭]` |
-| `wipeout` | 死亡面板 | `[game_over 游戏结束]`（`revive`/`special_revive` 走网络链，离线无作用，不再提供） |
-| `save_slot` | 存档槽面板 | `[save 存档, close 关闭]` |
-| `character_info`/`inventory`/`skills`/`mercenary`/`quests`/`settings`/`shop`/`craft`/`npc_rest`/`npc_revive`/`options`/`shortcut`/`world_map`/`input_count`/`choice`/`daily_reward`/`in_app` | 各可交互面板 | `[close 关闭]` |
-| `save` | 保存弹窗 | `[confirm 确认]` |
-| `sell` | 出售弹窗 | `[confirm 确认, cancel 取消]` |
-| `quest` | 任务对话框（含标题） | `[confirm 确认, quit 退出]` |
-| `none` | 无对话 | 空 options |
+| `game_popup` | 普通原生弹窗 | `[ok 确认, cancel 取消]` |
+| `android_agreement` | Android 同意页（主菜单前，Java 层） | `[ok 同意]` |
+| `game_story` | 剧情对话 | `[next 下一句, skip 跳过]` |
+| `game_npc_dialog` | 商人/村民对话 | NPC 选项与 `close`（具体动作由状态提供） |
+| `game_npc_quest` | NPC 任务完成面板 | `[complete 完成任务, close 关闭]` |
+| `game_wipeout` | 死亡面板 | `[game_over 游戏结束]`（`revive`/`special_revive` 走网络链，离线无作用，不再提供） |
+| `game_choice` / `game_input_count` | 事件选择 / 数量输入 | 由当前状态提供 |
+| `panel_*` / `main_menu_*` | 原生面板或主菜单面板 | 面板动作由状态提供，例如 `close`、存档槽面板的 `save` |
+| `module_dialog_*` / `ext_dialog_*` | 模块或外部插件对话 | 由对应状态提供 |
 
-**注意**：type 检测与 options 生成见 backlog U1/U2（✅ v0.5.6 已实现：面板态经 popup 栈顶 enter 识别，`save_slot` 额外暴露 save；`select_option` 的 close 走 panel/close 官方流程3）。
+**注意**：动作 id 以 `/api/ui/state` 当前响应的 `options` 为准；面板态关闭走对应的 `/api/ui/close_panel` 官方流程。
 
 #### 选择选项
 
 `POST /api/ui/dialog/select`
 
-**用途**：从 `GET /api/ui/dialog` 返回的 `options` 中选择一项（**唯一选择端点**，替代确认/取消/按钮/选项选择全部逻辑）。
+**用途**：从 `GET /api/ui/state` 返回的 `options` 中选择一项（**唯一选择端点**，替代确认/取消/按钮/选项选择全部逻辑）。
 
-**请求格式**：`{ "action": "close" }`（`action` 取 dialog.content options 中的一项 id；`index` 可选，NPC 对话选项用 `{"index":n}`）
+**请求格式**：`{ "action": "close" }`（`action` 取 `/api/ui/state` 当前 `options` 中的一项 id；`index` 可选，NPC 对话选项用 `{"index":n}`）
 
 **返回格式**：`{"ok":true}` 或 `{"ok":false,"error":<原因>}`
 
 **支持动作**（✅ v0.5.6 实机验证）：
-- agreement（Java 层同意页，主菜单前）：`ok`（同意——反射走 SDK 自身的放行分支关闭同意页且**不结束游戏**，返回 `{"ok":true,"result":"close_dispatched"}`；关闭异步生效，随后轮询 `GET /api/ui/screen` 直到 `main_menu`；同意页开场动画期间模块在主线程等待就绪后自动关闭（最多约 3s），调用方在页面刚可见时立刻调用也能一次成功；仅当同意页结构不可用时返回 `{"ok":false,"error":"agreement window unavailable"}`）；其他动作→`no such option in agreement`
-- popup：`ok`/`cancel`（UIPopupMsg 官方按钮）
-- story：`next`（下一句）/`skip`（跳过）
-- npc：`index`（选项选择，选择框型）/`next`（下一句，线性型）/`close`（关闭对话框，v0.6.6）
-- npc_quest：`complete`（完成任务）/`close`（关闭）
-- wipeout：`game_over`（仅此一项；`revive`/`special_revive` 走网络链，离线无作用，已移除）
-- 面板态：`close`（关闭面板，panel/close 官方流程3）；save_slot 面板另接受 `save`（存档落盘）
+- Agreement（Java 层同意页，主菜单前；状态名 `android_agreement`）：`ok`（同意——反射走 SDK 自身的放行分支关闭同意页且**不结束游戏**，返回 `{"ok":true,"result":"close_dispatched"}`；关闭异步生效，随后轮询 `GET /api/ui/state` 直到 `name="main_menu"`；同意页开场动画期间模块在主线程等待就绪后自动关闭（最多约 3s），调用方在页面刚可见时立刻调用也能一次成功；仅当同意页结构不可用时返回 `{"ok":false,"error":"agreement window unavailable"}`）；其他动作→`no such option in agreement`
+- `game_popup`：`ok`/`cancel`（UIPopupMsg 官方按钮）
+- `game_story`：`next`（下一句）/`skip`（跳过）
+- `game_npc_dialog`：NPC 选项（`index`）/线性对话（`next`）/`close`（关闭对话框，v0.6.6）
+- `game_npc_quest`：`complete`（完成任务）/`close`（关闭）
+- `game_wipeout`：`game_over`（仅此一项；`revive`/`special_revive` 走网络链，离线无作用，已移除）
+- panel 状态：`close`（关闭面板，panel/close 官方流程3）；`panel_save_slot` 另接受 `save`（存档落盘）
 
-**注意**：`action` 必须匹配当前对话态的 options（不匹配→`no such option in <type>`）；无对话→`no dialog`；Java 层同意页（screen=`agreement`）存在时走 agreement 分支，不进入 native 检测。
+**注意**：`action` 必须匹配当前状态的 options（不匹配→`no such option in <type>`）；无对话→`no dialog`；当前状态为 `name="android_agreement"` 时走 Agreement 分支，不进入 native 检测。
 
 #### 开始交互
 
@@ -1357,9 +1359,9 @@
 
 **用途**：打开指定面板（UI_SetPopupProcessInfo(1,id) 官方流程1 Push）。
 
-**请求格式**：`{ "panel": "inventory" }`（v0.5.42 起兼容裸名与 `panel_` 前缀，如 `"panel_inventory"`，与 screen 输出对称）
+**请求格式**：`{ "panel": "inventory" }`（v0.5.42 起兼容裸名与 `panel_` 前缀，如 `"panel_inventory"`，与统一状态 `name` 对称）
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<GameState 模型>}`，失败为原 op 错误体。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<action state>}`，失败为原 op 错误体。
 
 **注意**：面板白名单（character_info/choice/inventory/mercenary/quests/settings/skills/wipeout/world_map）真机验证；需游戏内上下文的面板→`panel requires in-game context`。
 
@@ -1371,7 +1373,7 @@
 
 **请求格式**：无 body
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<GameState 模型>}`，失败为原 op 错误体。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；原结果经 `GET /api/system/tickets/{id}` 的 `result` 回取，成功为 `{"ok":true,"state":<action state>}`，失败为原 op 错误体。
 ---
 
 ## 七、system（系统与会话）— GET/POST /api/system/*
@@ -1928,7 +1930,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **处理器仍在 Kotlin 的路由**（owner 已归位、仅表示领域归属；实现仍为 Kotlin 传输适配，未迁 native owner）：
 - `GET /api/system/events`（owner `core.system`）：请求驱动有状态 diff（nativeGetEventsJson）。
-- `GET /api/ui`、`GET /api/ui/screen`、`GET /api/ui/panel`、`GET /api/ui/dialog` 的路由 owner 均为 `core.ui_state`。`/api/ui` 保留 Kotlin `gamestateJson()` 复合 legacy 路径；`screen/panel/dialog` 由 Kotlin `NativeHttpQuery` 透传至 native `core.ui_state` query handlers。Agreement 仍由 Kotlin `UiActivityTracker` 优先检测并返回，不改底层 native screen。自定义 panel 只把既有 `panel` 值映射为 `panel_<panel_id>`；自定义 dialog 只将既有 `type` 值映射为稳定 dialog ID，不增减 response key。
+- `GET /api/ui/state`、`GET /api/ui/state/table` 的路由 owner 为 `core.ui_state`，由 Kotlin `NativeHttpQuery` 透传至 native `core.ui_state` query handlers。`android_agreement` 由 Kotlin `UiActivityTracker` 优先检测并返回，不进入 native screen；自定义 panel/dialog 在统一状态中分别映射为 `module_panel_<panel_id>` / `module_dialog_<type_id>` 并标注 `source=2`。
 
 **调用方迁移指引**：轮询 `GET /api/system/tickets/{id}`，在 `state` 非 `pending` 后按 §7.10 解析对应操作的 `result`。若 `result_retained=false` 且 `result.truncated=true`，这是单结果超限摘要，`state` 仍反映操作成功/失败；若 `result` 字段缺失，则没有可回取结果（无结果命令或结果文本已被总预算淘汰），不可把两者混为一类。
 ---

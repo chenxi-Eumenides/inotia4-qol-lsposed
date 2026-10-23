@@ -13,10 +13,10 @@ class RouteSyncTests(unittest.TestCase):
         plugin_facts, resident_facts = sync.load_route_facts()
         facts = sync.validate_facts(plugin_facts, resident_facts)
 
-        self.assertEqual(len(plugin_facts), 140)
+        self.assertEqual(len(plugin_facts), 138)
         self.assertEqual(len(resident_facts), 7)
-        self.assertEqual(len(facts), 147)
-        self.assertEqual(Counter(fact.method for fact in facts), {"GET": 68, "POST": 79})
+        self.assertEqual(len(facts), 145)
+        self.assertEqual(Counter(fact.method for fact in facts), {"GET": 66, "POST": 79})
         self.assertEqual(sum(fact.op_gated for fact in facts), 21)
         aggregate = sync.AGGREGATE.read_text(encoding="utf-8")
         self.assertEqual(sync.render_aggregate(facts, aggregate), aggregate)

@@ -1,14 +1,11 @@
 package com.inotia4.qol.service.info
 
-import com.inotia4.qol.LogDomain
-import com.inotia4.qol.LogFile
 import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.StaticData
 import com.inotia4.qol.UiActivityTracker
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.JsonUtil
 import com.yanzhenjie.andserver.http.StatusCode
-import org.json.JSONArray
 import org.json.JSONObject
 import com.inotia4.qol.service.contract.InfoApiService
 
@@ -84,42 +81,16 @@ class InfoApiServiceCore : InfoApiService {
 
     override fun questCompleted(): String = InfoQuestQueries.completed()
 
-    override fun ui(): String = gamestateJson()
-
-    override fun uiScreen(): String = InfoSystemQueries.uiScreen()
-
-    override fun uiPanel(): String = InfoSystemQueries.uiPanel()
-
-    override fun uiDialog(): String {
-        // v0.5.42：native 完整检测（popup/story/npc/wipeout/npc_quest/面板态），与 gamestate 的
-        // dialog 同源（data_dialog_content_json）；active 改为基于 screen 判定（screen 以 dialog_
-        // 开头即 true）——替代旧 type!=none（数据残留误报：关闭 NPC 对话框后 type 残留 npc 但
-        // UI 栈已空，旧逻辑 active 仍为 true，与已删除的 dialog_active 同源问题）
+    override fun uiState(): String {
         val activityCheck = UiActivityTracker.check()
         if (activityCheck.blockingActivityName != null) {
-            return JSONObject()
-                .put("type", "agreement")
-                .put("active", true)
-                .put("activity", activityCheck.blockingActivityName)
-                .put(
-                    "options",
-                    JSONArray().put(JSONObject().put("id", "ok").put("label", "同意")),
-                )
-                .toString()
+            return """{"name":"android_agreement","type":4,"source":4,"info":{},"options":[{"id":"ok","label":"同意"}]}"""
         }
-        val json = InfoSystemQueries.uiDialog()
-        if (isNativeError(json)) return json
-        return try {
-            val obj = JSONObject(json)
-            if (!obj.has("active")) {
-                val active = screenName().startsWith("dialog_")
-                obj.put("active", active)
-            }
-            obj.toString()
-        } catch (e: Exception) {
-            json
-        }
+        // Activity 检测失败不代表同意页存在，仍查询 native 状态。
+        return InfoSystemQueries.uiState()
     }
+
+    override fun uiStateTable(): String = InfoSystemQueries.uiStateTable()
 
     override fun game(): String = InfoSystemQueries.game()
 
@@ -178,31 +149,6 @@ class InfoApiServiceCore : InfoApiService {
 
     private fun dropsJson(): String = NativeBridge.nativeGetDropsJson()
 
-    private fun gamestateJson(): String {
-        val json = NativeBridge.nativeGetGamestateJson()
-        val activityCheck = UiActivityTracker.check()
-        val blockingActivity = activityCheck.blockingActivityName ?: return json
-        return try {
-            val root = JSONObject(json)
-            root.put("screen", "agreement")
-            root.put(
-                "dialog",
-                JSONObject()
-                    .put("type", "agreement")
-                    .put("active", true)
-                    .put("activity", blockingActivity)
-                    .put(
-                        "options",
-                        JSONArray().put(JSONObject().put("id", "ok").put("label", "同意")),
-                    ),
-            )
-            root.toString()
-        } catch (e: Exception) {
-            LogFile.error(LogDomain.API, "attach foreground activity to gamestate failed", e)
-            json
-        }
-    }
-
     private fun snapshotJson(): String = NativeBridge.nativeGetSnapshotJson()
 
     private fun attachMapStatic(mapId: Int): JSONObject? {
@@ -218,7 +164,4 @@ class InfoApiServiceCore : InfoApiService {
         r.optString("hex", "")?.let { if (it.isNotEmpty()) out.put("hex", it) }
         return out
     }
-
-    private fun screenName(): String =
-        JsonUtil.parseObj(InfoSystemQueries.uiScreen())?.optString("screen", "loading") ?: "loading"
 }
