@@ -4,6 +4,25 @@ set -euo pipefail
 repo_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 gradle_user_home=${GRADLE_USER_HOME:-"$repo_root/.gradle"}
 gradle_bin=
+all_output=false
+gradle_passthrough=()
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --)
+            gradle_passthrough+=("$@")
+            break
+            ;;
+        --all)
+            all_output=true
+            shift
+            ;;
+        *)
+            gradle_passthrough+=("$1")
+            shift
+            ;;
+    esac
+done
 
 for candidate in "$gradle_user_home"/wrapper/dists/gradle-8.11.1-bin/*/gradle-8.11.1/bin/gradle; do
     if [[ -x "$candidate" ]]; then
@@ -28,7 +47,10 @@ print(match.group(1))')
 
 export GRADLE_USER_HOME="$gradle_user_home"
 cd "$repo_root/module"
-"$gradle_bin" :app:assembleRelease --no-daemon "$@"
+gradle_args=(:app:assembleRelease --no-daemon)
+[[ "$all_output" == true ]] || gradle_args+=(--quiet)
+gradle_args+=("${gradle_passthrough[@]}")
+"$gradle_bin" "${gradle_args[@]}"
 
 source_apk="$repo_root/module/app/build/outputs/apk/release/app-release-unsigned.apk"
 output_dir="$repo_root/output"
