@@ -29,6 +29,8 @@
 
 插件参考：[`core.world`](reference/plugins/core.world.md)、[`core.item`](reference/plugins/core.item.md)、[`core.character`](reference/plugins/core.character.md)、[`core.quest`](reference/plugins/core.quest.md)、[`core.system`](reference/plugins/core.system.md)、[`core.craft`](reference/plugins/core.craft.md)、[`craft_lottery`](reference/plugins/craft_lottery.md)、[`core.save`](reference/plugins/core.save.md)、[`settings`](reference/plugins/settings.md)、[`core.api`](reference/plugins/core.api.md)、[`core.custom_ui`](reference/plugins/core.custom_ui.md)、[`core.data`](reference/plugins/core.data.md)、[`core.ui_state`](reference/plugins/core.ui_state.md)、[`module_health`](reference/plugins/module_health.md)、[`attribute_quality`](reference/plugins/attribute_quality.md)、[`autosell`](reference/plugins/autosell.md)、[`custom_recipe`](reference/plugins/custom_recipe.md)、[`attribute_range_display`](reference/plugins/attribute_range_display.md)、[`character_panel_i18n`](reference/plugins/character_panel_i18n.md)、[`push_all`](reference/plugins/push_all.md)、[`world_teleport`](reference/plugins/world_teleport.md)、[`custom_map`](reference/plugins/custom_map.md)、[`stack_limit`](reference/plugins/stack_limit.md)、[`extension_bag`](reference/plugins/extension_bag.md)、[`save_backup`](reference/plugins/save_backup.md)、[`special_equip`](reference/plugins/special_equip.md)、[`simple_mode`](reference/plugins/simple_mode.md)、[`popup_blocker`](reference/plugins/popup_blocker.md)。
 
+模块平台兜底提示（非业务插件）：[`module_error_dialog`](reference/plugins/module_error_dialog.md)。
+
 ### `guides/`：操作指南
 
 说明读者如何完成一项任务，重点是步骤和操作结果。
