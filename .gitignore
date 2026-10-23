@@ -111,3 +111,4 @@ scripts/keys/*
 # AI代理
 .sisyphus/
 .slim/
+.slim/deepwork/
