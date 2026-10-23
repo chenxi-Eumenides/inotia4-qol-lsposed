@@ -15,6 +15,15 @@ enum class FeatureCategory : uint8_t {
     kGameInfo = 5,  // settings page read-only information category; no feature uses it
 };
 enum class FeatureType : uint8_t { kToggle, kEntry };
+enum class FeatureOwnerAvailability : uint8_t {
+    kAvailable = 0,
+    kInstallFailed,
+    kActivationFailed,
+    kBlocked,
+    kUnsupported,
+    kInvalid,
+    kFailed,
+};
 constexpr int8_t kMinFeatureDisplayPriority = -10;
 constexpr int8_t kMaxFeatureDisplayPriority = 10;
 using FeatureToggleCallback = QolResult (*)(PluginContext&, uint8_t enabled);

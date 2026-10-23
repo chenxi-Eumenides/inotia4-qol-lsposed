@@ -135,11 +135,16 @@ QolResult mgmt_read_categories(void*, const FeatureCategoryDefinition** out, uin
     *count = 1;
     return ok();
 }
+QolResult mgmt_read_owner_availability(void*, const char*, FeatureOwnerAvailability* out) {
+    if (out == nullptr) return error(kQolErrInvalidArgument, nullptr, 0);
+    *out = FeatureOwnerAvailability::kAvailable;
+    return ok();
+}
 const QolFeatureControlApi kManagementControl{
     sizeof(QolFeatureControlApi), nullptr, &mgmt_read_catalog, &mgmt_read_desired,
     &mgmt_read_feature, &mgmt_request_set_feature, &mgmt_request_desired, &mgmt_receipt,
     &mgmt_invoke_entry, &mgmt_read_config, &mgmt_request_set_config, &mgmt_read_actual,
-    &mgmt_read_categories};
+    &mgmt_read_categories, &mgmt_read_owner_availability};
 
 void assert_main() { assert(std::this_thread::get_id() == main_thread); }
 FeatureReceipt await(FeatureReceipt receipt) {

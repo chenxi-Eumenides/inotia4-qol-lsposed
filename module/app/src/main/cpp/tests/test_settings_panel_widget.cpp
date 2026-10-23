@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -85,8 +86,19 @@ int g_actual_not_ready_remaining = 0;
 uint8_t g_actual_enabled = 1;
 uint8_t g_feature_values[8]{1, 0, 1, 0, 1, 1, 1, 1};
 uint8_t g_desired_values[2]{1, 1};
+contracts::FeatureOwnerAvailability g_owner_availability[3]{
+    contracts::FeatureOwnerAvailability::kAvailable,
+    contracts::FeatureOwnerAvailability::kAvailable,
+    contracts::FeatureOwnerAvailability::kAvailable};
 
 int plugin_index(const char* id) { return std::strcmp(id, "settings") == 0 ? 0 : 1; }
+QolResult fake_read_owner_availability(void*, const char* plugin,
+                                       contracts::FeatureOwnerAvailability* out) {
+    const int index = std::strcmp(plugin, "settings") == 0 ? 0 :
+        std::strcmp(plugin, "autosell") == 0 ? 1 : 2;
+    *out = g_owner_availability[index];
+    return contracts::ok();
+}
 int feature_index(const char* plugin, const char* feature) {
     if (std::strcmp(plugin, "settings") == 0) return std::strcmp(feature, "page") == 0 ? 0 : 1;
     if (std::strcmp(plugin, "basic") == 0) {
@@ -105,6 +117,8 @@ void reset_log() {
     g_feature_values[2] = 1; g_feature_values[3] = 0;
     g_feature_values[4] = g_feature_values[5] = g_feature_values[6] = g_feature_values[7] = 1;
     g_desired_values[0] = 1; g_desired_values[1] = 1;
+    for (auto& availability : g_owner_availability)
+        availability = contracts::FeatureOwnerAvailability::kAvailable;
 }
 
 QolResult fake_read_catalog(void*, const contracts::QolFeatureCatalogPlugin** out, uint32_t* count) {
@@ -192,6 +206,8 @@ int g_button_destroys = 0;
 int g_list_destroys = 0;
 int g_button_enabled_calls = 0;
 uint8_t g_button_enabled = 0;
+int g_toggle_enabled_calls = 0;
+uint8_t g_toggle_enabled = 0;
 contracts::QolUiHandle g_fake_root = reinterpret_cast<void*>(0x1000);
 contracts::QolUiHandle g_list_handle = reinterpret_cast<void*>(0x2000);
 contracts::QolUiHandle g_row_handle = reinterpret_cast<void*>(0x3000);
@@ -199,6 +215,8 @@ contracts::QolUiHandle g_widget_handle = reinterpret_cast<void*>(0x4000);
 contracts::QolUiHandle g_button_handle = reinterpret_cast<void*>(0x5000);
 contracts::UiNativeToggleDesc g_last_toggle{};
 contracts::UiButtonDesc g_last_button{};
+struct DrawnText { std::string text; uint32_t color; };
+std::vector<DrawnText> g_drawn_text;
 contracts::QolUiComponents g_components_api{};
 contracts::QolUiAdapter g_ui_api{};
 contracts::QolHostSdk g_sdk{};
@@ -211,6 +229,15 @@ QolResult fake_components_destroy(contracts::QolUiHandle h) {
     return contracts::ok();
 }
 QolResult fake_delete_control(contracts::QolUiHandle) { return contracts::ok(); }
+QolResult fake_control_origin(contracts::QolUiHandle, int64_t* x, int64_t* y) {
+    *x = 0; *y = 0; return contracts::ok();
+}
+QolResult fake_fill_rect(contracts::UiRect, uint32_t) { return contracts::ok(); }
+QolResult fake_draw_control_text(contracts::QolUiHandle, const char* text, int32_t, int32_t,
+                                 uint32_t color, int32_t, int32_t) {
+    g_drawn_text.push_back({text == nullptr ? "" : text, color});
+    return contracts::ok();
+}
 QolResult fake_list_create(const contracts::UiScrollListDesc*, contracts::QolUiHandle,
                            contracts::QolUiHandle* out) {
     *out = g_list_handle;
@@ -229,7 +256,12 @@ QolResult fake_toggle_create(const contracts::UiNativeToggleDesc* desc, contract
     return contracts::ok();
 }
 QolResult fake_toggle_set_value(contracts::QolUiHandle, int32_t) { return contracts::ok(); }
-QolResult fake_toggle_set_enabled(contracts::QolUiHandle, uint8_t) { return contracts::ok(); }
+QolResult fake_toggle_draw(contracts::QolUiHandle) { return contracts::ok(); }
+QolResult fake_toggle_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
+    ++g_toggle_enabled_calls;
+    g_toggle_enabled = enabled;
+    return contracts::ok();
+}
 QolResult fake_button_create(const contracts::UiButtonDesc* desc, contracts::QolUiHandle,
                              contracts::QolUiHandle* out) {
     g_last_button = *desc;
@@ -242,6 +274,7 @@ QolResult fake_button_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
     g_button_enabled = enabled;
     return contracts::ok();
 }
+QolResult fake_button_draw(contracts::QolUiHandle) { return contracts::ok(); }
 // 菜单工厂：测试只关心调用面与入参，替换控件由 fake 返回句柄。
 QolResult fake_menu_button_create(const contracts::UiMainMenuDecoratedButtonDesc* desc,
                                   contracts::QolUiHandle* out_original,
@@ -275,6 +308,7 @@ void bind_production() {
     g_fake_control.invoke_entry = &fake_invoke_entry;
     g_fake_control.read_actual = &fake_read_actual;
     g_fake_control.read_categories = &fake_read_categories;
+    g_fake_control.read_owner_availability = &fake_read_owner_availability;
 
     g_components_api = {};
     g_components_api.size = sizeof(g_components_api);
@@ -289,10 +323,15 @@ void bind_production() {
     g_components_api.native_toggle_create = &fake_toggle_create;
     g_components_api.native_toggle_set_value = &fake_toggle_set_value;
     g_components_api.native_toggle_set_enabled = &fake_toggle_set_enabled;
+    g_components_api.native_toggle_draw = &fake_toggle_draw;
     g_components_api.text_button_set_enabled = &fake_button_set_enabled;
+    g_components_api.text_button_draw = &fake_button_draw;
+    g_components_api.draw_control_text = &fake_draw_control_text;
 
     g_ui_api = {};
     g_ui_api.delete_control = &fake_delete_control;
+    g_ui_api.control_absolute_origin = &fake_control_origin;
+    g_ui_api.fill_rect = &fake_fill_rect;
 
     g_sdk = {};
     g_sdk.abi.major = contracts::kHostSdkMajor;
@@ -319,6 +358,9 @@ void setup() {
     g_list_destroys = 0;
     g_button_enabled_calls = 0;
     g_button_enabled = 0;
+    g_toggle_enabled_calls = 0;
+    g_toggle_enabled = 0;
+    g_drawn_text.clear();
     settings_bind_game(nullptr);
     bind_production();
 }
@@ -549,6 +591,108 @@ void test_feature_toggle_writes_when_plugin_desired_disabled() {
            g_log.feature == "sell" && g_log.value == 0);
 }
 
+void test_owner_failure_disables_only_its_features_and_recovers() {
+    setup();
+    const int page = prepare_entry_page();
+    const int console = find_feature("settings", "console");
+    const int sell = find_feature("autosell", "sell");
+    assert(console >= 0 && sell >= 0);
+    const auto original_description = g_items[static_cast<size_t>(page)].description;
+    g_owner_availability[0] = contracts::FeatureOwnerAvailability::kActivationFailed;
+    refresh_owner_availability(static_cast<uint32_t>(page));
+    assert(!toggle_enabled(static_cast<uint32_t>(console)));
+    assert(!action_enabled(static_cast<uint32_t>(page)));
+    assert(toggle_enabled(static_cast<uint32_t>(sell)));
+    assert(std::strcmp(displayed_description(static_cast<uint32_t>(page)), "激活失败") == 0);
+
+    native_toggle_changed(&g_contexts[static_cast<size_t>(console)], 0);
+    assert(!g_states[static_cast<size_t>(console)].gesture);
+    process_pending_toggles();
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.set_feature_calls == 0 && g_log.entry_calls == 0 &&
+           g_pending_action_item == -1);
+
+    g_owner_availability[0] = contracts::FeatureOwnerAvailability::kAvailable;
+    refresh_owner_availability(static_cast<uint32_t>(page));
+    assert(toggle_enabled(static_cast<uint32_t>(console)));
+    assert(action_enabled(static_cast<uint32_t>(page)));
+    assert(displayed_description(static_cast<uint32_t>(page)) == original_description);
+    destroy_page();
+}
+
+void test_owner_failure_cancels_entry_continuation() {
+    setup();
+    const int page = prepare_entry_page();
+    g_feature_values[0] = 0;
+    refresh_item_value(static_cast<uint32_t>(page));
+    click_entry_button();
+    process_pending_action();
+    assert(g_log.set_feature_calls == 1 && g_entry_continuation.active);
+    g_owner_availability[0] = contracts::FeatureOwnerAvailability::kBlocked;
+    g_log.receipt.persistence = FeaturePersistence::kPersisted;
+    g_feature_values[0] = 1;
+    poll_entry_continuation();
+    assert(!g_entry_continuation.active && g_log.entry_calls == 0 &&
+           g_log.set_feature_calls == 1);
+    destroy_page();
+}
+
+void test_owner_failure_row_rendering_and_recovery() {
+    setup();
+    assert(load_catalog());
+    refresh_all_values();
+    const int page = find_feature("settings", "page");
+    const int console = find_feature("settings", "console");
+    const int sell = find_feature("autosell", "sell");
+    assert(page >= 0 && console >= 0 && sell >= 0);
+    const auto hidden_category = std::find_if(g_categories.begin(), g_categories.end(), [](const auto& c) {
+        return c.category == FeatureCategory::kHidden;
+    });
+    assert(hidden_category != g_categories.end());
+    assert(build_right_list(static_cast<int>(hidden_category - g_categories.begin())));
+    g_states[static_cast<size_t>(page)].action = g_button_handle;
+    const auto draw = [](int item_index) {
+        refresh_owner_availability(static_cast<uint32_t>(item_index));
+        g_right_indices = {static_cast<uint32_t>(item_index)};
+        g_drawn_text.clear();
+        draw_right_row(nullptr, 0, g_row_handle, 0);
+        assert(g_drawn_text.size() == 2);
+        return std::pair<DrawnText, DrawnText>{g_drawn_text[0], g_drawn_text[1]};
+    };
+    g_owner_availability[0] = contracts::FeatureOwnerAvailability::kInstallFailed;
+    const int enabled_calls_before_failure = g_toggle_enabled_calls;
+    refresh_owner_availability(static_cast<uint32_t>(page));
+    assert(g_toggle_enabled_calls > enabled_calls_before_failure && g_toggle_enabled == 0);
+    assert(g_button_enabled == 0);
+    const auto failed_entry = draw(page);
+    assert(failed_entry.first.color == contracts::ui_theme::kError);
+    assert(failed_entry.second.text == "安装失败");
+    assert(failed_entry.second.color == contracts::ui_theme::kTextDisabled);
+    const auto failed_toggle = draw(console);
+    assert(failed_toggle.first.color == contracts::ui_theme::kError);
+    assert(failed_toggle.second.text == "安装失败");
+
+    g_owner_availability[0] = contracts::FeatureOwnerAvailability::kUnsupported;
+    const auto unsupported_toggle = draw(console);
+    assert(unsupported_toggle.first.color == contracts::ui_theme::kError);
+    assert(unsupported_toggle.second.text == "当前版本不支持");
+
+    const auto independent_owner = draw(sell);
+    assert(independent_owner.first.color == contracts::ui_theme::kTextGold);
+    assert(independent_owner.second.text == "控制自动出售扫描。");
+    assert(independent_owner.second.color == contracts::ui_theme::kTextNormal);
+
+    g_owner_availability[0] = contracts::FeatureOwnerAvailability::kAvailable;
+    refresh_owner_availability(static_cast<uint32_t>(page));
+    assert(g_toggle_enabled == 1 && g_button_enabled == 1);
+    const auto recovered_entry = draw(page);
+    assert(recovered_entry.first.color == contracts::ui_theme::kTextGold);
+    assert(recovered_entry.second.text == "在主菜单打开模块设置页。");
+    assert(recovered_entry.second.color == contracts::ui_theme::kTextNormal);
+    destroy_page();
+}
+
 void test_entry_button_respects_validity_and_direct_invocation() {
     setup();
     const int page = prepare_entry_page();
@@ -701,9 +845,7 @@ void test_entry_requires_read_actual_tail_before_enabling_write() {
     const int page = prepare_entry_page();
     g_feature_values[0] = 0;
     refresh_item_value(static_cast<uint32_t>(page));
-    g_fake_control.struct_size = static_cast<uint32_t>(
-        offsetof(contracts::QolFeatureControlApi, read_actual) +
-        sizeof(g_fake_control.read_actual) - 1);
+    g_fake_control.read_actual = nullptr;
     click_entry_button();
     process_pending_action();
     assert(g_log.set_feature_calls == 0 && g_log.read_actual_calls == 0 &&
@@ -725,9 +867,7 @@ void test_entry_requires_read_actual_function_before_enabling_write() {
 void test_true_entry_requires_read_actual_abi_before_invoking() {
     setup();
     prepare_entry_page();
-    g_fake_control.struct_size = static_cast<uint32_t>(
-        offsetof(contracts::QolFeatureControlApi, read_actual) +
-        sizeof(g_fake_control.read_actual) - 1);
+    g_fake_control.read_actual = nullptr;
     click_entry_button();
     process_pending_action();
     assert(g_log.read_actual_calls == 0 && g_log.entry_calls == 0 &&
@@ -791,6 +931,9 @@ int main() {
     test_game_info_category_builds_read_only_composition();
     test_toggle_routes_to_host_request_set_feature();
     test_feature_toggle_writes_when_plugin_desired_disabled();
+    test_owner_failure_disables_only_its_features_and_recovers();
+    test_owner_failure_row_rendering_and_recovery();
+    test_owner_failure_cancels_entry_continuation();
     test_entry_button_respects_validity_and_direct_invocation();
     test_entry_false_enables_and_waits_for_persistence_and_actual();
     test_entry_persistence_failure_stops_without_invoking();

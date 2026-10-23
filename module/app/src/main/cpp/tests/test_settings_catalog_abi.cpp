@@ -8,7 +8,7 @@
 
 using namespace qol::contracts;
 static_assert(kSettingsCatalogMajor == 1 && kSettingsCatalogMinor == 3);
-static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 27);
+static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 28);
 static_assert(kHttpRegistryVersion.major == 1 && kHttpRegistryVersion.minor == 1);
 static_assert(kHttpDispatchVersion.major == 1 && kHttpDispatchVersion.minor == 1);
 
@@ -94,11 +94,23 @@ static_assert(kDefaultPriorityCatalogItem.display_priority == 0);
 static_assert(offsetof(QolFeatureCatalogItem, display_priority) == 40);
 static_assert(sizeof(QolFeatureCatalogItem) == 48);
 static_assert(offsetof(QolFeatureControlApi, read_categories) == 96);
-static_assert(sizeof(QolFeatureControlApi) == 104);
+static_assert(offsetof(QolFeatureControlApi, read_owner_availability) == 104);
+static_assert(sizeof(QolFeatureControlApi) == 112);
 using ExpectedReadCategoriesFn =
     QolResult (*)(void*, const FeatureCategoryDefinition**, uint32_t*);
+using ExpectedReadOwnerAvailabilityFn =
+    QolResult (*)(void*, const char*, FeatureOwnerAvailability*);
 static_assert(std::is_same_v<decltype(QolFeatureControlApi::read_categories),
                              ExpectedReadCategoriesFn>);
+static_assert(std::is_same_v<decltype(QolFeatureControlApi::read_owner_availability),
+                             ExpectedReadOwnerAvailabilityFn>);
+static_assert(static_cast<uint8_t>(FeatureOwnerAvailability::kAvailable) == 0 &&
+              static_cast<uint8_t>(FeatureOwnerAvailability::kInstallFailed) == 1 &&
+              static_cast<uint8_t>(FeatureOwnerAvailability::kActivationFailed) == 2 &&
+              static_cast<uint8_t>(FeatureOwnerAvailability::kBlocked) == 3 &&
+              static_cast<uint8_t>(FeatureOwnerAvailability::kUnsupported) == 4 &&
+              static_cast<uint8_t>(FeatureOwnerAvailability::kInvalid) == 5 &&
+              static_cast<uint8_t>(FeatureOwnerAvailability::kFailed) == 6);
 static_assert(std::is_standard_layout_v<QolPluginRuntimeEffect>);
 static_assert(std::is_trivial_v<QolPluginRuntimeEffect>);
 static_assert(offsetof(QolPluginRuntimeEffect, struct_size) == 0);
@@ -429,7 +441,7 @@ int main() {
     std::printf("Plugin descriptor: metadata=%zu, count=%zu, size=%zu\n",
                 offsetof(PluginDescriptor, http_route_metadata),
                 offsetof(PluginDescriptor, http_route_metadata_count), sizeof(PluginDescriptor));
-    std::printf("Host SDK v1.27: settings_catalog=%zu, settings_config=%zu, runtime_effects=%zu, "
+    std::printf("Host SDK v1.28: settings_catalog=%zu, settings_config=%zu, runtime_effects=%zu, "
                 "security=%zu, module_health=%zu, desc_hook_v2=%zu, total=%zu\n",
                 offsetof(QolHostSdk, settings_catalog), offsetof(QolHostSdk, settings_config),
                 offsetof(QolHostSdk, runtime_effects), offsetof(QolHostSdk, security),

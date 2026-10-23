@@ -81,7 +81,26 @@ inline bool toggle_enabled(bool valid, uint64_t request, bool gesture) {
     // Actual inactivity never blocks management writes that can restore a plugin.
     return valid && request == 0 && !gesture;
 }
-inline bool entry_enabled(const Item& item, bool valid, bool request, bool gesture) {
-    return item.type == FeatureType::kEntry && valid && !request && !gesture;
+inline const char* owner_failure_text(contracts::FeatureOwnerAvailability availability) {
+    switch (availability) {
+        case contracts::FeatureOwnerAvailability::kAvailable: return "";
+        case contracts::FeatureOwnerAvailability::kInstallFailed: return "安装失败";
+        case contracts::FeatureOwnerAvailability::kActivationFailed: return "激活失败";
+        case contracts::FeatureOwnerAvailability::kBlocked: return "依赖不可用";
+        case contracts::FeatureOwnerAvailability::kUnsupported: return "当前版本不支持";
+        case contracts::FeatureOwnerAvailability::kInvalid: return "插件无效";
+        case contracts::FeatureOwnerAvailability::kFailed: return "插件不可用";
+    }
+    return "插件不可用";
+}
+inline bool owner_available(contracts::FeatureOwnerAvailability availability) {
+    return availability == contracts::FeatureOwnerAvailability::kAvailable;
+}
+inline bool toggle_enabled(bool valid, uint64_t request, bool gesture, bool owner_available) {
+    return owner_available && toggle_enabled(valid, request, gesture);
+}
+inline bool entry_enabled(const Item& item, bool valid, bool request, bool gesture,
+                          bool owner_available = true) {
+    return owner_available && item.type == FeatureType::kEntry && valid && !request && !gesture;
 }
 }  // namespace qol::features::core_ui::feature_model

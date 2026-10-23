@@ -31,6 +31,7 @@ void status_reset_for_test();
 using qol::infra::capability_count;
 using qol::infra::CapabilityProvision;
 using qol::infra::FeatureState;
+using qol::infra::FeatureFailureStage;
 using qol::infra::FeatureStatus;
 using qol::infra::feature_state_name;
 using qol::infra::register_capability;
@@ -149,6 +150,21 @@ static void test_status_lifecycle() {
     CHECK(out[0].state == FeatureState::kEnabled);
     CHECK(out[0].enabled);
     CHECK(out[0].error != nullptr && std::strcmp(out[0].error, "boom") == 0);
+    CHECK(out[0].failure_stage == FeatureFailureStage::kNone);
+
+    CHECK(status_update("feat.a", FeatureState::kFailed, false, "install diagnostic",
+                        FeatureFailureStage::kInstall));
+    CHECK(status_snapshot(out, 4, &written));
+    CHECK(out[0].failure_stage == FeatureFailureStage::kInstall);
+    CHECK(status_update("feat.a", FeatureState::kFailed, false, "install error refreshed"));
+    CHECK(status_snapshot(out, 4, &written));
+    CHECK(out[0].failure_stage == FeatureFailureStage::kInstall);
+
+    CHECK(status_update("feat.a", FeatureState::kFailed, false, "activation diagnostic",
+                        FeatureFailureStage::kActivation));
+    CHECK(status_update("feat.a", FeatureState::kFailed, false, "activation error refreshed"));
+    CHECK(status_snapshot(out, 4, &written));
+    CHECK(out[0].failure_stage == FeatureFailureStage::kActivation);
 
     // error 传 nullptr 表示清除。
     CHECK(status_update("feat.a", FeatureState::kInstalledDisabled, false, nullptr));
@@ -156,6 +172,7 @@ static void test_status_lifecycle() {
     CHECK(out[0].state == FeatureState::kInstalledDisabled);
     CHECK(!out[0].enabled);
     CHECK(out[0].error == nullptr);
+    CHECK(out[0].failure_stage == FeatureFailureStage::kNone);
 }
 
 // 4b. degraded 为正交健康标记：可与任意生命周期态同时存在，快照可读出。

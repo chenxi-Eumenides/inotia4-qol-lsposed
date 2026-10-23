@@ -22,6 +22,15 @@ enum class FeatureState : int32_t {
     kFailed = 9,
 };
 
+// Internal cause for lifecycle failures; never crosses a public ABI boundary.
+enum class FeatureFailureStage : uint8_t {
+    kNone = 0,
+    kInstall,
+    kActivation,
+    kOther,
+    kUnspecified,
+};
+
 const char* feature_state_name(FeatureState state);
 
 struct FeatureStatus {
@@ -33,13 +42,16 @@ struct FeatureStatus {
     uint32_t resource_count = 0;
     // 正交健康标记（§3.2）：optional_requires 缺失/可选依赖失效时置位，生命周期态不变。
     bool degraded = false;
+    FeatureFailureStage failure_stage = FeatureFailureStage::kNone;
 };
 
 // 注册（幂等：同 id 重复注册返回 false）；id/version 必须为静态存储。
 bool status_register(const char* id, const char* version);
 
 // 更新状态；未注册 id 返回 false。error 必须为静态字符串或 nullptr。
-bool status_update(const char* id, FeatureState state, bool enabled, const char* error);
+// kUnspecified 在状态仍为 failed 时保留已有阶段；离开 failed 会清除阶段。
+bool status_update(const char* id, FeatureState state, bool enabled, const char* error,
+                   FeatureFailureStage failure_stage = FeatureFailureStage::kUnspecified);
 
 // 设置正交健康标记 degraded（§3.2）；未注册 id 返回 false。
 bool status_set_degraded(const char* id, bool degraded);

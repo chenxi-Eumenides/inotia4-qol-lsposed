@@ -264,6 +264,28 @@ void test_entry_enable_state() {
     CHECK(!entry_enabled(entry, true, false, false));
 }
 
+void test_owner_availability_mapping_and_scope() {
+    namespace model = qol::features::core_ui::feature_model;
+    using Availability = qol::contracts::FeatureOwnerAvailability;
+    CHECK(model::owner_available(Availability::kAvailable));
+    CHECK(!model::owner_available(Availability::kInstallFailed));
+    CHECK(!model::owner_available(Availability::kActivationFailed));
+    CHECK(!model::owner_available(Availability::kBlocked));
+    CHECK(!model::owner_available(Availability::kUnsupported));
+    CHECK(!model::owner_available(Availability::kInvalid));
+    CHECK(!model::owner_available(Availability::kFailed));
+    CHECK(std::strcmp(model::owner_failure_text(Availability::kInstallFailed), "安装失败") == 0);
+    CHECK(std::strcmp(model::owner_failure_text(Availability::kActivationFailed), "激活失败") == 0);
+    CHECK(std::strcmp(model::owner_failure_text(Availability::kBlocked), "依赖不可用") == 0);
+    CHECK(std::strcmp(model::owner_failure_text(Availability::kUnsupported), "当前版本不支持") == 0);
+    CHECK(std::strcmp(model::owner_failure_text(Availability::kInvalid), "插件无效") == 0);
+    CHECK(std::strcmp(model::owner_failure_text(Availability::kFailed), "插件不可用") == 0);
+    // Inactive/installed-disabled and a single degraded resource are owner-manageable.
+    CHECK(model::toggle_enabled(true, 0, false, true));
+    CHECK(!model::toggle_enabled(true, 0, false, false));
+    CHECK(model::toggle_enabled(true, 0, false));
+}
+
 void test_error_text() {
     CHECK(std::strcmp(action_error_text(kQolErrConflict),
                       "操作冲突：设置目录已更新，请返回后重进") == 0);
@@ -383,6 +405,7 @@ int main() {
     test_toggle_target();
     test_toggle_enable_state_machine();
     test_entry_enable_state();
+    test_owner_availability_mapping_and_scope();
     test_error_text();
     test_row_paint_geometry();
     test_stable_row_text_layout();

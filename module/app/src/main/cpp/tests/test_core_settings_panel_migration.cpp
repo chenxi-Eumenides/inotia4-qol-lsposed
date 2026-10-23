@@ -137,11 +137,17 @@ QolResult control_read_categories(void*, const qol::contracts::FeatureCategoryDe
     *count = 0;
     return qol::contracts::ok();
 }
+QolResult control_read_owner_availability(
+    void*, const char*, qol::contracts::FeatureOwnerAvailability* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    *out = qol::contracts::FeatureOwnerAvailability::kAvailable;
+    return qol::contracts::ok();
+}
 const qol::contracts::QolFeatureControlApi kFeatureControl{
     sizeof(qol::contracts::QolFeatureControlApi), nullptr, &control_read_catalog,
     &control_read_desired, &control_read_feature, &control_request_set_feature,
     &control_request_desired, &control_receipt, &control_invoke_entry,
-    nullptr, nullptr, nullptr, &control_read_categories};
+    nullptr, nullptr, nullptr, &control_read_categories, &control_read_owner_availability};
 
 // 「更多游戏」替换 tick 决策的 fake 操作。
 class RecordingMoreGamesOps final : public qol::features::core_ui::MoreGamesBindOps {

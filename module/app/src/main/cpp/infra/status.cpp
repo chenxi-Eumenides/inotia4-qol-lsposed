@@ -59,13 +59,15 @@ bool status_register(const char* id, const char* version) {
             slot.error = nullptr;
             slot.resource_count = 0;
             slot.degraded = false;
+            slot.failure_stage = FeatureFailureStage::kNone;
             return true;
         }
     }
     return false;
 }
 
-bool status_update(const char* id, FeatureState state, bool enabled, const char* error) {
+bool status_update(const char* id, FeatureState state, bool enabled, const char* error,
+                   FeatureFailureStage failure_stage) {
     if (id == nullptr) {
         return false;
     }
@@ -73,9 +75,17 @@ bool status_update(const char* id, FeatureState state, bool enabled, const char*
     if (slot == kMaxFeatures) {
         return false;
     }
+    const FeatureState previous_state = g_features[slot].state;
     g_features[slot].state = state;
     g_features[slot].enabled = enabled;
     g_features[slot].error = error;  // nullptr 表示清除错误
+    if (state != FeatureState::kFailed) {
+        g_features[slot].failure_stage = FeatureFailureStage::kNone;
+    } else if (failure_stage != FeatureFailureStage::kUnspecified) {
+        g_features[slot].failure_stage = failure_stage;
+    } else if (previous_state != FeatureState::kFailed) {
+        g_features[slot].failure_stage = FeatureFailureStage::kNone;
+    }
     return true;
 }
 

@@ -933,6 +933,9 @@ void test_second_resource_failure_rolls_back() {
     CHECK(!enabled);
     CHECK(error != nullptr);
     CHECK(std::strstr(error, "hook:test:fail:b") != nullptr);
+    qol::infra::FeatureStatus status{};
+    CHECK(qol::infra::status_get("test_fail", &status));
+    CHECK(status.failure_stage == qol::infra::FeatureFailureStage::kInstall);
 }
 
 void test_unhook_failure_leaves_tombstone() {
@@ -952,6 +955,9 @@ void test_unhook_failure_leaves_tombstone() {
     FeatureState state = FeatureState::kRegistered;
     CHECK(feature_of("test_fail", &state, nullptr, nullptr));
     CHECK(state == FeatureState::kFailed);
+    qol::infra::FeatureStatus status{};
+    CHECK(qol::infra::status_get("test_fail", &status));
+    CHECK(status.failure_stage == qol::infra::FeatureFailureStage::kOther);
 }
 
 void test_missing_requires_blocks() {
@@ -984,6 +990,9 @@ void test_install_failure_marks_failed() {
     FeatureState state = FeatureState::kRegistered;
     CHECK(feature_of("test_ok", &state, nullptr, nullptr));
     CHECK(state == FeatureState::kFailed);
+    qol::infra::FeatureStatus status{};
+    CHECK(qol::infra::status_get("test_ok", &status));
+    CHECK(status.failure_stage == qol::infra::FeatureFailureStage::kInstall);
 }
 
 void test_duplicate_and_invalid_registration() {
@@ -1761,6 +1770,9 @@ void test_required_cycle_still_fails() {
     CHECK(install_all(make_deps()) == 2);
     CHECK(feature_error_is("cycle_x", "dependency cycle: cycle_x"));
     CHECK(feature_error_is("cycle_y", "dependency cycle: cycle_y"));
+    qol::infra::FeatureStatus cycle_status{};
+    CHECK(qol::infra::status_get("cycle_x", &cycle_status));
+    CHECK(cycle_status.failure_stage == qol::infra::FeatureFailureStage::kOther);
     CHECK(g_probe.install_calls == 0);
     CHECK(std::strcmp(g_dep_order, "") == 0);
 }

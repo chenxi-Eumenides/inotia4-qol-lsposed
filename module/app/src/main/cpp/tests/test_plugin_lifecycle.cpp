@@ -389,6 +389,9 @@ void test_install_failure_marks_failed_without_transaction() {
     CHECK(!lifecycle_apply("test_lc", qol::contracts::kFeatureLifecycleActivate));
     CHECK(g_probe.install_calls == 1);
     CHECK(feature_state_is("test_lc", FeatureState::kFailed));
+    qol::infra::FeatureStatus failed_status{};
+    CHECK(qol::infra::status_get("test_lc", &failed_status));
+    CHECK(failed_status.failure_stage == qol::infra::FeatureFailureStage::kActivation);
     // 未启动事务：无 hook 调用、资源保持 free、无在途可推进。
     CHECK(g_backend.hook_calls == 0);
     CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kFree);
@@ -404,6 +407,9 @@ void test_install_failure_marks_failed_without_transaction() {
     CHECK(g_probe.install_calls == 2);
     CHECK(g_backend.hook_calls == 2);
     CHECK(feature_state_is("test_lc", FeatureState::kInstalledDisabled));
+    qol::infra::FeatureStatus recovered_status{};
+    CHECK(qol::infra::status_get("test_lc", &recovered_status));
+    CHECK(recovered_status.failure_stage == qol::infra::FeatureFailureStage::kNone);
     CHECK(qol::hooks::state_of("hook:lc:a") == ResourceState::kDisabled);
     CHECK(qol::hooks::state_of("hook:lc:b") == ResourceState::kDisabled);
 }
@@ -427,6 +433,7 @@ void test_resource_ready_failure_rolls_back_installed() {
     CHECK(qol::infra::status_get("test_lc", &status));
     CHECK(status.state == FeatureState::kFailed);
     CHECK(status.error != nullptr && std::strcmp(status.error, "resource_ready_failed") == 0);
+    CHECK(status.failure_stage == qol::infra::FeatureFailureStage::kInstall);
 }
 
 // 受限回调失败（activate 事务路径，首条失败）：tx_begin(release) 被在途安装事务拒绝 →
@@ -445,6 +452,7 @@ void test_resource_ready_failure_during_activate_fallback() {
     CHECK(qol::infra::status_get("test_lc", &status));
     CHECK(status.state == FeatureState::kFailed);
     CHECK(status.error != nullptr && std::strcmp(status.error, "resource_ready_failed") == 0);
+    CHECK(status.failure_stage == qol::infra::FeatureFailureStage::kActivation);
 }
 
 // 受限回调失败（activate 事务路径，末条失败）：安装事务已终态 → 启动还原事务回滚全部资源。
@@ -462,6 +470,7 @@ void test_resource_ready_failure_activate_starts_release_tx() {
     CHECK(qol::infra::status_get("test_lc", &status));
     CHECK(status.state == FeatureState::kFailed);
     CHECK(status.error != nullptr && std::strcmp(status.error, "resource_ready_failed") == 0);
+    CHECK(status.failure_stage == qol::infra::FeatureFailureStage::kActivation);
 }
 
 void test_deactivate_calls_plugin_and_returns_inactive() {

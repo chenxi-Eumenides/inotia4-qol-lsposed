@@ -195,6 +195,9 @@ void test_abi() {
     static_assert(offsetof(QolHostSdk, config_namespace) == 800);
     static_assert(offsetof(QolHostSdk, feature) == 808);
     static_assert(offsetof(QolHostSdk, feature_control) == 816);
+    static_assert(offsetof(QolFeatureControlApi, read_categories) == 96);
+    static_assert(offsetof(QolFeatureControlApi, read_owner_availability) == 104);
+    static_assert(sizeof(QolFeatureControlApi) == 112);
     static_assert(static_cast<uint8_t>(FeatureCategory::kGeneral) == 0 &&
                   static_cast<uint8_t>(FeatureCategory::kGameplay) == 1 &&
                   static_cast<uint8_t>(FeatureCategory::kTools) == 2 &&
@@ -216,6 +219,9 @@ void test_abi() {
     sdk.feature_control = &control;
     assert(feature_control_if_available(&sdk) == &control);
     sdk.abi.minor = 25;
+    assert(feature_control_if_available(&sdk) == nullptr);
+    assert(!production_feature_bind_management_sdk(sdk));
+    sdk.abi.minor = 27;
     assert(feature_control_if_available(&sdk) == nullptr);
     assert(!production_feature_bind_management_sdk(sdk));
     sdk.abi.minor = kHostSdkMinor;
@@ -260,11 +266,14 @@ void test_abi() {
     feature.invoke_entry = nullptr;
     assert(feature_if_available(&sdk) == nullptr);
     feature = production_feature_api();
-    control.struct_size = offsetof(QolFeatureControlApi, read_categories) +
-                          sizeof(control.read_categories) - 1;
+    control.struct_size = offsetof(QolFeatureControlApi, read_owner_availability) +
+                          sizeof(control.read_owner_availability) - 1;
     assert(feature_control_if_available(&sdk) == nullptr);
     control.struct_size = sizeof(control);
     control.read_categories = nullptr;
+    assert(feature_control_if_available(&sdk) == nullptr);
+    control = production_feature_control_api();
+    control.read_owner_availability = nullptr;
     assert(feature_control_if_available(&sdk) == nullptr);
     control = production_feature_control_api();
     control.receipt = nullptr;
@@ -889,6 +898,67 @@ int main(int argc, char** argv) {
                                                   "debug.logging", 0, &receipt)));
     assert(await(control, receipt).persistence == FeaturePersistence::kPersisted);
     assert(!feature_platform_state().debug_logging && !g_debug_logging_enabled);
+
+    const auto assert_availability = [&control](const char* id,
+                                                 FeatureOwnerAvailability expected) {
+        FeatureOwnerAvailability actual = FeatureOwnerAvailability::kFailed;
+        assert(succeeded(control.read_owner_availability(control.context, id, &actual)));
+        assert(actual == expected);
+    };
+    assert_availability(kPlatformConfigOwner, FeatureOwnerAvailability::kAvailable);
+    assert_availability(kSecurityConfigOwner, FeatureOwnerAvailability::kAvailable);
+    FeatureOwnerAvailability unknown_availability = FeatureOwnerAvailability::kFailed;
+    assert(control.read_owner_availability(control.context, "not.registered",
+                                           &unknown_availability).code == kQolErrNotReady);
+    assert(control.read_owner_availability(control.context, nullptr,
+                                           &unknown_availability).code == kQolErrInvalidArgument);
+    assert(control.read_owner_availability(control.context, "plugin.alpha", nullptr).code ==
+           kQolErrInvalidArgument);
+
+    assert(qol::infra::status_register("plugin.alpha", "1.0"));
+    const qol::infra::FeatureState available_states[] = {
+        qol::infra::FeatureState::kRegistered,
+        qol::infra::FeatureState::kResolving,
+        qol::infra::FeatureState::kInstalledDisabled,
+        qol::infra::FeatureState::kEnabled,
+        qol::infra::FeatureState::kDeactivating,
+        qol::infra::FeatureState::kInactive,
+    };
+    for (const qol::infra::FeatureState state : available_states) {
+        assert(qol::infra::status_update("plugin.alpha", state,
+                                    state == qol::infra::FeatureState::kEnabled,
+                                    "unrelated diagnostic text"));
+        assert_availability("plugin.alpha", FeatureOwnerAvailability::kAvailable);
+    }
+    assert(qol::infra::status_update("plugin.alpha", qol::infra::FeatureState::kBlocked, false,
+                                "blocked message"));
+    assert_availability("plugin.alpha", FeatureOwnerAvailability::kBlocked);
+    assert(qol::infra::status_update("plugin.alpha", qol::infra::FeatureState::kUnsupported, false,
+                                "unsupported message"));
+    assert_availability("plugin.alpha", FeatureOwnerAvailability::kUnsupported);
+    assert(qol::infra::status_update("plugin.alpha", qol::infra::FeatureState::kInvalid, false,
+                                "invalid message"));
+    assert_availability("plugin.alpha", FeatureOwnerAvailability::kInvalid);
+
+    assert(qol::infra::status_update("plugin.alpha", qol::infra::FeatureState::kFailed, false,
+                                "text does not determine failure class",
+                                qol::infra::FeatureFailureStage::kInstall));
+    assert_availability("plugin.alpha", FeatureOwnerAvailability::kInstallFailed);
+    assert(qol::infra::status_update("plugin.alpha", qol::infra::FeatureState::kFailed, false,
+                                "text does not determine failure class",
+                                qol::infra::FeatureFailureStage::kActivation));
+    assert_availability("plugin.alpha", FeatureOwnerAvailability::kActivationFailed);
+    assert(qol::infra::status_update("plugin.alpha", qol::infra::FeatureState::kFailed, false,
+                                "text does not determine failure class",
+                                qol::infra::FeatureFailureStage::kOther));
+    assert_availability("plugin.alpha", FeatureOwnerAvailability::kFailed);
+    assert(qol::infra::status_update("plugin.alpha", qol::infra::FeatureState::kEnabled, true,
+                                "degraded but enabled"));
+    assert(qol::infra::status_set_degraded("plugin.alpha", true));
+    assert_availability("plugin.alpha", FeatureOwnerAvailability::kAvailable);
+    qol::infra::FeatureStatus recovered_status{};
+    assert(qol::infra::status_get("plugin.alpha", &recovered_status));
+    assert(recovered_status.failure_stage == qol::infra::FeatureFailureStage::kNone);
 
     // Host-owned HTTP control routes are resident and settings-independent.
     auto invoke = [](HttpMethod method, const std::string& path, const std::string& body_text) {

@@ -614,6 +614,7 @@ void clear_cascade_degraded_for_capability(const char* capability_id) {
 uint32_t g_install_order[kMaxPlugins];
 uint32_t g_install_order_count = 0;
 bool g_dependency_invalid[kMaxPlugins];
+bool g_dependency_cycle[kMaxPlugins];
 
 uint32_t provider_for_requirement(const contracts::CapabilityRequirement& req,
                                   bool* out_id_found) {
@@ -721,6 +722,7 @@ bool dependency_order_build() {
     g_install_order_count = 0;
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         g_dependency_invalid[i] = g_port_invalid[i];
+        g_dependency_cycle[i] = false;
     }
 
     // 先标记缺失/版本不兼容的 required，避免它们污染环检测结果。
@@ -762,6 +764,7 @@ bool dependency_order_build() {
         }
         if (!emitted[i]) {
             g_dependency_invalid[i] = true;
+            g_dependency_cycle[i] = true;
             set_dependency_error(i, "dependency cycle", g_plugins[i].descriptor.id);
             valid = false;
         }
@@ -1013,9 +1016,10 @@ bool release_non_entry_claim(const contracts::ResourceClaim& claim) {
 
 // 逆序回滚本插件已安装资源：
 // resumable==false 或释放失败 → kTombstone，成功 → kFree（§4.2 物理归还）。
-void rollback_resources(const contracts::ResourceClaim* const* claims,
+bool rollback_resources(const contracts::ResourceClaim* const* claims,
                         const uintptr_t* entries, uint32_t count,
                         const HostDeps& deps) {
+    bool released_all = true;
     for (uint32_t i = count; i > 0; --i) {
         const contracts::ResourceClaim& claim = *claims[i - 1];
         bool released = false;
@@ -1031,10 +1035,12 @@ void rollback_resources(const contracts::ResourceClaim* const* claims,
             hooks::runtime_clear(claim.id);
             hooks::set_state(claim.id, contracts::ResourceState::kFree);
         } else {
+            released_all = false;
             hooks::set_state(claim.id, contracts::ResourceState::kTombstone);
             hooks::isolated_set(claim.id, true);
         }
     }
+    return released_all;
 }
 
 // 撤回单条已安装资源（§3.3 受限回调失败路径）：成功 → kFree + runtime 清除；
@@ -1063,11 +1069,13 @@ bool revoke_resource(const char* resource_id, const HostDeps& deps) {
 }
 
 // 逆序撤回一组已记录资源（§3.2 语义 5：禁止半装对外可见）。
-void rollback_installed(const contracts::ResourceClaim* const* claims, uint32_t count,
+bool rollback_installed(const contracts::ResourceClaim* const* claims, uint32_t count,
                         const HostDeps& deps) {
+    bool released_all = true;
     for (uint32_t i = count; i > 0; --i) {
-        revoke_resource(claims[i - 1]->id, deps);
+        if (!revoke_resource(claims[i - 1]->id, deps)) released_all = false;
     }
+    return released_all;
 }
 
 // 逆序撤回插件当前处于已装态（live/disabled）的全部资源；用于还原事务启动失败时的同步兜底。
@@ -1748,7 +1756,8 @@ uint32_t poll_http_stops() {
             g_cascade_release_pending[index] = false;
             if (!schedule_release(index, true)) {
                 infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                     "cascade release unavailable");
+                                     "cascade release unavailable",
+                                     infra::FeatureFailureStage::kOther);
             }
         }
         ++completed;
@@ -1871,7 +1880,8 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     if (plugin.install(ctx) != 0) {
         QOL_LOG_ERROR(QolDomain::kCore,
                       "plugin %s install failed: plugin install returned nonzero", plugin.id);
-        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed");
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "install failed",
+                             infra::FeatureFailureStage::kInstall);
         publish_runtime_actual(plugin.id, false);
         return false;
     }
@@ -1959,9 +1969,12 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
             // kPtrSlot 的原函数入口 = 槽期望值，立即交还所有者；其余机制无 backup。
             if (backup != nullptr && plugin.on_resource_ready != nullptr &&
                 plugin.on_resource_ready(ctx, claim.id, backup) != 0) {
-                rollback_installed(installed_claims, installed_count, deps);
+                const bool rollback_succeeded =
+                    rollback_installed(installed_claims, installed_count, deps);
                 infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                     "resource_ready_failed");
+                                     "resource_ready_failed",
+                                     rollback_succeeded ? infra::FeatureFailureStage::kInstall
+                                                        : infra::FeatureFailureStage::kOther);
                 publish_runtime_actual(plugin.id, false);
                 QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
                              plugin.id, claim.id);
@@ -1999,9 +2012,12 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
             installed_claims[installed_count] = &claim;
             installed_entries[installed_count] = entry;
             ++installed_count;
-            rollback_installed(installed_claims, installed_count, deps);
+            const bool rollback_succeeded =
+                rollback_installed(installed_claims, installed_count, deps);
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                 "resource_ready_failed");
+                                  "resource_ready_failed",
+                                  rollback_succeeded ? infra::FeatureFailureStage::kInstall
+                                                     : infra::FeatureFailureStage::kOther);
             publish_runtime_actual(plugin.id, false);
             QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s", plugin.id,
                          claim.id);
@@ -2018,17 +2034,21 @@ bool install_plugin_sync(uint32_t index, const HostDeps& deps) {
     if (resource_failed && failed_claim_id == nullptr && installed_count == 0) {
         // 原子组物理回滚失败时已完成状态落盘，直接保持 failed。
         infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                              "atomic group rollback failed");
+                              "atomic group rollback failed",
+                              infra::FeatureFailureStage::kOther);
         publish_runtime_actual(plugin.id, false);
         return false;
     }
 
     if (resource_failed) {
-        rollback_resources(installed_claims, installed_entries, installed_count, deps);
+        const bool rollback_succeeded =
+            rollback_resources(installed_claims, installed_entries, installed_count, deps);
         std::snprintf(g_error_text[index], sizeof(g_error_text[index]), "resource %s: %s",
                       failed_claim_id != nullptr ? failed_claim_id : "?",
                       resource_error != nullptr ? resource_error : "failed");
-        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, g_error_text[index]);
+        infra::status_update(plugin.id, infra::FeatureState::kFailed, false, g_error_text[index],
+                             rollback_succeeded ? infra::FeatureFailureStage::kInstall
+                                                : infra::FeatureFailureStage::kOther);
         publish_runtime_actual(plugin.id, false);
         QOL_LOG_WARN(QolDomain::kCore, "plugin %s install failed: %s", plugin.id,
                      g_error_text[index]);
@@ -2160,14 +2180,15 @@ int install_all(const HostDeps& deps) {
     for (uint32_t i = 0; i < g_plugin_count; ++i) {
         if (!g_dependency_invalid[i]) continue;
         const contracts::PluginDescriptor& plugin = g_plugins[i].descriptor;
-        const bool cycle = g_error_text[i][0] != '\0' &&
-                           std::strncmp(g_error_text[i], "dependency cycle", 16) == 0;
+        const bool cycle = g_dependency_cycle[i];
         QOL_LOG_ERROR(QolDomain::kCore, "plugin %s %s at assembly: %s", plugin.id,
                       cycle ? "failed" : "blocked",
                       g_error_text[i][0] != '\0' ? g_error_text[i] : "dependency invalid");
         infra::status_update(plugin.id, cycle ? infra::FeatureState::kFailed
                                              : infra::FeatureState::kBlocked,
-                             false, g_error_text[i]);
+                              false, g_error_text[i],
+                              cycle ? infra::FeatureFailureStage::kOther
+                                    : infra::FeatureFailureStage::kNone);
         ++failed_plugins;
     }
 
@@ -2267,7 +2288,9 @@ uint32_t sync_gates() {
             // 机制门禁应用失败（fail-closed 安装失败 / 释放失败）：保留占用并隔离，插件置 failed。
             g_gate_degraded[i] = false;
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                 "mechanism gate apply failed");
+                                 "mechanism gate apply failed",
+                                 all_want ? infra::FeatureFailureStage::kInstall
+                                          : infra::FeatureFailureStage::kOther);
             publish_runtime_actual(plugin.id, false);
             refresh_degraded_status(i);
             ++changed;
@@ -2514,7 +2537,8 @@ static bool lifecycle_apply_actual(const char* plugin_id, int32_t action) {
                               "plugin %s install failed: plugin install returned nonzero",
                               plugin->id);
                 infra::status_update(plugin->id, infra::FeatureState::kFailed, false,
-                                      "plugin install failed");
+                                      "plugin install failed",
+                                      infra::FeatureFailureStage::kActivation);
                 publish_runtime_actual(plugin->id, false);
                 if (g_feature_mode) feature_stop(index, true);
                 return false;
@@ -2731,7 +2755,8 @@ static uint32_t lifecycle_step_engine() {
             retire_runtime_observers(plugin.id);
             if (plugin.deactivate) plugin.deactivate(ctx);
             infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                  "resource release failed; remaining resources released or isolated");
+                                  "resource release failed; remaining resources released or isolated",
+                                  infra::FeatureFailureStage::kOther);
             publish_runtime_actual(plugin.id, false);
             slot = LifecycleTx{};
             ++advanced;
@@ -2765,7 +2790,9 @@ static uint32_t lifecycle_step_engine() {
                 if (plugin.deactivate) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
                                                                     : infra::FeatureState::kInactive,
-                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
+                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
+                                      slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
+                                                          : infra::FeatureFailureStage::kNone);
                 publish_runtime_actual(plugin.id, false);
                 slot = LifecycleTx{};
                 ++advanced;
@@ -2776,7 +2803,8 @@ static uint32_t lifecycle_step_engine() {
                 revoke_installed_resources(plugin, g_install_deps);
                 retire_runtime_observers(plugin.id);
                 if (plugin.deactivate) plugin.deactivate(ctx);
-                infra::status_update(plugin.id, infra::FeatureState::kFailed, false, "release unavailable");
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
+                                     "release unavailable", infra::FeatureFailureStage::kOther);
                 publish_runtime_actual(plugin.id, false);
                 slot = LifecycleTx{};
                 ++advanced;
@@ -2854,7 +2882,8 @@ static uint32_t lifecycle_step_engine() {
                         // 受限回调失败：置 failed。若安装事务仍在途，先中止它（禁止后续步继续
                         // 安装，尤其末尾 ownership acquire 造成 table 短暂发布），再走清理。
                         infra::status_update(plugin.id, infra::FeatureState::kFailed, false,
-                                             "resource_ready_failed");
+                                             "resource_ready_failed",
+                                             infra::FeatureFailureStage::kActivation);
                         QOL_LOG_WARN(QolDomain::kCore, "plugin %s resource_ready_failed on %s",
                                      plugin.id, out.resource_id);
                         slot.ready_failed = true;
@@ -2984,7 +3013,9 @@ static uint32_t lifecycle_step_engine() {
                 if (plugin.deactivate != nullptr) plugin.deactivate(ctx);
                 infra::status_update(plugin.id, slot.failed_cleanup ? infra::FeatureState::kFailed
                                                                     : infra::FeatureState::kInactive,
-                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr);
+                                      false, slot.failed_cleanup ? "activation failed; cleaned up" : nullptr,
+                                      slot.failed_cleanup ? infra::FeatureFailureStage::kActivation
+                                                          : infra::FeatureFailureStage::kNone);
                 publish_runtime_actual(plugin.id, false);
             }
         } else {
@@ -3041,13 +3072,17 @@ static uint32_t lifecycle_step_engine() {
                     QOL_LOG_WARN(QolDomain::kCore, "plugin %s atomic group deferred: %s", plugin.id,
                                  g_error_text[slot.plugin_index]);
                 } else {
-                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
+                    infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
+                                         infra::FeatureFailureStage::kOther);
                     publish_runtime_actual(plugin.id, false);
                     QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
                                  error);
                 }
             } else {
-                infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error);
+                infra::status_update(plugin.id, infra::FeatureState::kFailed, false, error,
+                                     slot.kind == hooks::TxKind::kInstall
+                                         ? infra::FeatureFailureStage::kActivation
+                                         : infra::FeatureFailureStage::kOther);
                 publish_runtime_actual(plugin.id, false);
                 QOL_LOG_WARN(QolDomain::kCore, "plugin %s lifecycle failed: %s", plugin.id,
                              error);

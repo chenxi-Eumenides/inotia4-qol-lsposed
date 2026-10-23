@@ -438,6 +438,58 @@ QolResult read_actual(void* c, const char* p, int32_t* state, uint8_t* enabled) 
     return contracts::ok();
 }
 
+QolResult read_owner_availability(void* context, const char* plugin_id,
+                                  contracts::FeatureOwnerAvailability* out) {
+    if (context == nullptr || plugin_id == nullptr || plugin_id[0] == '\0' || out == nullptr)
+        return error(kQolErrInvalidArgument);
+    *out = contracts::FeatureOwnerAvailability::kAvailable;
+    auto& controller = static_cast<ProductionFeatures*>(context)->controller;
+    if (controller.host_owned(plugin_id)) return contracts::ok();
+
+    infra::FeatureStatus status{};
+    if (!infra::status_get(plugin_id, &status)) return error(kQolErrNotReady);
+    switch (status.state) {
+        case infra::FeatureState::kRegistered:
+        case infra::FeatureState::kResolving:
+        case infra::FeatureState::kInstalledDisabled:
+        case infra::FeatureState::kEnabled:
+        case infra::FeatureState::kDeactivating:
+        case infra::FeatureState::kInactive:
+            *out = contracts::FeatureOwnerAvailability::kAvailable;
+            break;
+        case infra::FeatureState::kBlocked:
+            *out = contracts::FeatureOwnerAvailability::kBlocked;
+            break;
+        case infra::FeatureState::kUnsupported:
+            *out = contracts::FeatureOwnerAvailability::kUnsupported;
+            break;
+        case infra::FeatureState::kInvalid:
+            *out = contracts::FeatureOwnerAvailability::kInvalid;
+            break;
+        case infra::FeatureState::kFailed:
+            switch (status.failure_stage) {
+                case infra::FeatureFailureStage::kInstall:
+                    *out = contracts::FeatureOwnerAvailability::kInstallFailed;
+                    break;
+                case infra::FeatureFailureStage::kActivation:
+                    *out = contracts::FeatureOwnerAvailability::kActivationFailed;
+                    break;
+                case infra::FeatureFailureStage::kNone:
+                case infra::FeatureFailureStage::kOther:
+                    *out = contracts::FeatureOwnerAvailability::kFailed;
+                    break;
+                default:
+                    *out = contracts::FeatureOwnerAvailability::kFailed;
+                    break;
+            }
+            break;
+        default:
+            *out = contracts::FeatureOwnerAvailability::kFailed;
+            break;
+    }
+    return contracts::ok();
+}
+
 }  // namespace
 
 const FeatureDirectory& production_feature_directory() { return production().directory; }
@@ -448,7 +500,8 @@ const contracts::QolFeatureControlApi& production_feature_control_api() {
     static const contracts::QolFeatureControlApi api{
         sizeof(contracts::QolFeatureControlApi), &production(), &read_catalog, &read_desired,
         &read_feature, &set_feature, &set_desired, &receipt, &entry,
-        &read_config, &set_config, &read_actual, &read_categories};
+        &read_config, &set_config, &read_actual, &read_categories,
+        &read_owner_availability};
     return api;
 }
 
@@ -505,7 +558,7 @@ bool production_feature_bind_frame(const HostDeps& deps) {
 uint32_t production_feature_frame_step() { return production().reconciler.step(); }
 
 bool production_feature_bind_management_sdk(contracts::QolHostSdk& sdk) {
-    if (sdk.abi.major != contracts::kHostSdkMajor || sdk.abi.minor < 26 ||
+    if (sdk.abi.major != contracts::kHostSdkMajor || sdk.abi.minor < 28 ||
         contracts::feature_if_available(&sdk) == nullptr ||
         sdk.abi.size < offsetof(contracts::QolHostSdk, feature_control) +
                        sizeof(sdk.feature_control)) return false;

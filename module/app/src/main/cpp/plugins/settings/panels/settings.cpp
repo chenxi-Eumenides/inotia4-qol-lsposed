@@ -37,6 +37,9 @@ constexpr int64_t kBackH = contracts::ui_theme::kNavBoxH;
 constexpr size_t kFeatureControlReadActualSize =
     offsetof(contracts::QolFeatureControlApi, read_actual) +
     sizeof(((contracts::QolFeatureControlApi*)nullptr)->read_actual);
+constexpr size_t kFeatureControlOwnerAvailabilitySize =
+    offsetof(contracts::QolFeatureControlApi, read_owner_availability) +
+    sizeof(((contracts::QolFeatureControlApi*)nullptr)->read_owner_availability);
 // Android CMake Debug omits NDEBUG; optimized configurations define it.
 #if defined(NDEBUG)
 constexpr bool kShowHidden = false;
@@ -59,6 +62,11 @@ int g_selected_category = 0, g_pending_category = -1, g_pending_action_item = -1
 std::vector<contracts::FeatureCategoryDefinition> g_categories;
 std::vector<feature_model::Item> g_items;
 std::vector<uint32_t> g_right_indices;
+struct OwnerAvailabilityState {
+    std::string plugin_id;
+    contracts::FeatureOwnerAvailability availability = contracts::FeatureOwnerAvailability::kFailed;
+};
+std::vector<OwnerAvailabilityState> g_owner_availability;
 struct GameInfoDisplay {
     std::string game;
     std::string variant;
@@ -109,6 +117,51 @@ bool feature_control_has_read_actual() {
     return g_control != nullptr && g_control->struct_size >= kFeatureControlReadActualSize &&
         g_control->read_actual != nullptr;
 }
+void sync_controls(uint32_t i);
+contracts::FeatureOwnerAvailability read_owner_availability(const char* plugin_id) {
+    if (g_control == nullptr || g_control->struct_size < kFeatureControlOwnerAvailabilitySize ||
+        g_control->read_owner_availability == nullptr || plugin_id == nullptr)
+        return contracts::FeatureOwnerAvailability::kFailed;
+    contracts::FeatureOwnerAvailability availability = contracts::FeatureOwnerAvailability::kFailed;
+    if (!contracts::succeeded(g_control->read_owner_availability(
+            g_control->context, plugin_id, &availability)))
+        return contracts::FeatureOwnerAvailability::kFailed;
+    return availability;
+}
+contracts::FeatureOwnerAvailability owner_availability(const char* plugin_id) {
+    for (const auto& owner : g_owner_availability)
+        if (owner.plugin_id == plugin_id) return owner.availability;
+    return contracts::FeatureOwnerAvailability::kFailed;
+}
+void refresh_owner_availability() {
+    for (auto& owner : g_owner_availability) {
+        const auto latest = read_owner_availability(owner.plugin_id.c_str());
+        if (latest == owner.availability) continue;
+        owner.availability = latest;
+        for (uint32_t i = 0; i < g_items.size(); ++i)
+            if (owner.plugin_id == g_items[i].plugin_id) sync_controls(i);
+    }
+}
+void refresh_owner_availability(uint32_t item_index) {
+    if (item_index >= g_items.size()) return;
+    const auto& plugin_id = g_items[item_index].plugin_id;
+    for (auto& owner : g_owner_availability) {
+        if (owner.plugin_id != plugin_id) continue;
+        const auto latest = read_owner_availability(plugin_id);
+        if (latest == owner.availability) return;
+        owner.availability = latest;
+        for (uint32_t i = 0; i < g_items.size(); ++i)
+            if (owner.plugin_id == g_items[i].plugin_id) sync_controls(i);
+        return;
+    }
+}
+bool owner_available(uint32_t i) {
+    return feature_model::owner_available(owner_availability(g_items[i].plugin_id));
+}
+const char* displayed_description(uint32_t i) {
+    const char* failure = feature_model::owner_failure_text(owner_availability(g_items[i].plugin_id));
+    return failure[0] == '\0' ? g_items[i].description : failure;
+}
 bool entry_continuation_matches(const feature_model::Item& item) {
     return g_entry_continuation.active &&
         g_entry_continuation.page_generation == g_generation &&
@@ -117,13 +170,14 @@ bool entry_continuation_matches(const feature_model::Item& item) {
 }
 bool toggle_enabled(uint32_t i) {
     const auto& s = g_states[i];
-    return feature_model::toggle_enabled(s.valid, s.request_id, s.gesture);
+    return feature_model::toggle_enabled(s.valid, s.request_id, s.gesture, owner_available(i));
 }
 bool action_enabled(uint32_t i) {
     const auto& s = g_states[i];
     const bool request_pending = s.request_id != 0 || g_pending_action_item == static_cast<int>(i) ||
         g_entry_continuation.active;
-    return feature_model::entry_enabled(g_items[i], s.valid, request_pending, s.gesture);
+    return feature_model::entry_enabled(g_items[i], s.valid, request_pending, s.gesture,
+                                        owner_available(i));
 }
 void sync_controls(uint32_t i) {
     auto& s = g_states[i];
@@ -156,6 +210,7 @@ void refresh_all_values() {
 bool load_catalog() {
     clear_entry_continuation();
     g_items.clear(); g_categories.clear(); g_states.clear(); g_contexts.clear();
+    g_owner_availability.clear();
     ++g_generation;
     g_pending_action_item = -1;
     const contracts::QolFeatureCatalogPlugin* plugins = nullptr;
@@ -170,7 +225,15 @@ bool load_catalog() {
         !feature_model::build_categories(categories, category_count, kShowHidden,
                                          g_items, g_categories)) return false;
     g_states.resize(g_items.size());
-    for (uint32_t i = 0; i < g_items.size(); ++i) g_contexts.push_back({i, g_generation});
+    for (uint32_t i = 0; i < g_items.size(); ++i) {
+        g_contexts.push_back({i, g_generation});
+        bool known_owner = false;
+        for (const auto& owner : g_owner_availability)
+            if (owner.plugin_id == g_items[i].plugin_id) { known_owner = true; break; }
+        if (!known_owner) g_owner_availability.push_back({g_items[i].plugin_id,
+            contracts::FeatureOwnerAvailability::kFailed});
+    }
+    refresh_owner_availability();
     std::lock_guard<std::mutex> lock(g_mtx);
     g_summary_categories = static_cast<int>(g_categories.size());
     g_summary_items = static_cast<int>(g_items.size());
@@ -198,15 +261,16 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected
     const int32_t text_right = control_left;
     const int32_t text_width = settings_model::description_width_for_toggle(text_right);
     const auto layout = settings_model::row_text_layout(
-        settings_model::use_item_description(item.description), kRightRowH);
+        settings_model::use_item_description(displayed_description(i)), kRightRowH);
     const auto title = settings_model::truncate_text(item.label, text_width);
     if (!title.lines.empty()) (void)g_components->draw_control_text(row, title.lines[0].c_str(),
-        16, layout.title_y, toggle_enabled(i) ? contracts::ui_theme::kTextGold :
+        16, layout.title_y, !owner_available(i) ? contracts::ui_theme::kError :
+        toggle_enabled(i) ? contracts::ui_theme::kTextGold :
         contracts::ui_theme::kTextDisabled, 0, 1);
-    const auto description = settings_model::truncate_text(item.description, text_width);
+    const auto description = settings_model::truncate_text(displayed_description(i), text_width);
     if (!description.lines.empty()) (void)g_components->draw_control_text(row,
         description.lines[0].c_str(), 16, layout.description_y,
-        contracts::ui_theme::kTextNormal, 0, 1);
+        owner_available(i) ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextDisabled, 0, 1);
     if (s.toggle != nullptr) (void)g_components->native_toggle_draw(s.toggle);
     if (s.action != nullptr) (void)g_components->text_button_draw(s.action);
 }
@@ -216,6 +280,7 @@ void native_toggle_changed(void* user, int32_t desired) {
     if (!g_panel_active || context == nullptr || context->generation != g_generation ||
         context->item_index >= g_items.size()) return;
     const auto i = context->item_index;
+    refresh_owner_availability(i);
     if (!toggle_enabled(i)) return;
     g_states[i].desired = desired != 0;
     g_states[i].gesture = true;
@@ -223,6 +288,8 @@ void native_toggle_changed(void* user, int32_t desired) {
 }
 void action_button_clicked(void* user) {
     const auto* context = static_cast<const ToggleContext*>(user);
+    if (context != nullptr && context->item_index < g_items.size())
+        refresh_owner_availability(context->item_index);
     if (!g_panel_active || context == nullptr || context->generation != g_generation ||
         context->item_index >= g_items.size() || g_pending_action_item >= 0 ||
         !action_enabled(context->item_index)) return;
@@ -348,6 +415,7 @@ void destroy_page() {
     g_root = nullptr; g_left = nullptr; g_back = nullptr; g_pressed_list = nullptr;
     g_back_pressed = false; g_selected_category = 0;
     g_states.clear(); g_contexts.clear(); g_items.clear(); g_categories.clear();
+    g_owner_availability.clear();
     g_frame = 0; set_status("");
 }
 void process_pending_toggles() {
@@ -355,7 +423,10 @@ void process_pending_toggles() {
         auto& s = g_states[i];
         if (!s.gesture) continue;
         s.gesture = false;
-        if (!toggle_enabled(i) || g_control == nullptr) { sync_controls(i); continue; }
+        refresh_owner_availability(i);
+        if (!toggle_enabled(i) || !owner_available(i) || g_control == nullptr) {
+            sync_controls(i); continue;
+        }
         if (s.confirmed == s.desired) { sync_controls(i); continue; }
         const auto& item = g_items[i];
         contracts::FeatureReceipt receipt{};
@@ -391,7 +462,12 @@ void poll_requests() {
 }
 void process_pending_action() {
     const int i = g_pending_action_item; g_pending_action_item = -1;
-    if (i < 0 || static_cast<size_t>(i) >= g_items.size() || g_control == nullptr) return;
+    if (i < 0 || static_cast<size_t>(i) >= g_items.size()) return;
+    refresh_owner_availability(static_cast<uint32_t>(i));
+    if (g_control == nullptr || !owner_available(static_cast<uint32_t>(i))) {
+        sync_controls(static_cast<uint32_t>(i));
+        return;
+    }
     refresh_item_value(i);
     auto& state = g_states[static_cast<size_t>(i)];
     const auto& item = g_items[static_cast<size_t>(i)];
@@ -487,6 +563,12 @@ void poll_entry_continuation() {
         return;
     }
     const auto index = static_cast<uint32_t>(item_index);
+    refresh_owner_availability(index);
+    if (!owner_available(index)) {
+        finish_entry_continuation(index, feature_model::owner_failure_text(
+            owner_availability(g_items[index].plugin_id)));
+        return;
+    }
     if (g_control == nullptr || g_control->receipt == nullptr ||
         g_control->read_feature == nullptr || g_control->invoke_entry == nullptr ||
         !feature_control_has_read_actual()) {
@@ -627,6 +709,7 @@ void settings_panel_enter() {
 void settings_panel_process() {
     if (!main_thread() || !g_panel_active || g_root == nullptr) return;
     ++g_frame;
+    refresh_owner_availability();
     if (g_pending_category >= 0) {
         if (g_pending_category != g_selected_category && build_right_list(g_pending_category))
             g_selected_category = g_pending_category;

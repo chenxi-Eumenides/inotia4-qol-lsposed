@@ -78,6 +78,12 @@ QolResult fc_read_categories(void*, const qol::contracts::FeatureCategoryDefinit
     *count = 1;
     return qol::contracts::ok();
 }
+QolResult fc_read_owner_availability(void*, const char*,
+                                     qol::contracts::FeatureOwnerAvailability* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = qol::contracts::FeatureOwnerAvailability::kAvailable;
+    return qol::contracts::ok();
+}
 
 qol::contracts::QolFrameHandler g_frame_handler = nullptr;
 uint64_t g_removed_task = 0;
@@ -144,7 +150,8 @@ int main() {
     contracts::QolFeatureControlApi feature_control{
         sizeof(contracts::QolFeatureControlApi), nullptr, &fc_read_catalog, &fc_read_desired,
         &fc_read_feature, &fc_request_set_feature, &fc_request_desired, &fc_receipt,
-        &fc_invoke_entry, nullptr, nullptr, nullptr, &fc_read_categories};
+        &fc_invoke_entry, nullptr, nullptr, nullptr, &fc_read_categories,
+        &fc_read_owner_availability};
     sdk.feature_control = &feature_control;
 
     if (descriptor.install(context) != 0) return 1;
