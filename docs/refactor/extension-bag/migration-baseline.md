@@ -73,6 +73,6 @@ grep -rE 'lock_guard|unique_lock' api http public ui | wc -l
 ## 6. 当前状态
 
 - Step 0：本文件。
-- Step 1：`interface/bag_query.*` 提取中。
-- Step 2：未开始。
+- Step 1：完成（`8a7ff628`，`interface/bag_query.*`）。
+- Step 2：进行中（`interface/bag_command.*` + `set_bag_count` 用例化）。
 - `runtime_state().mtx` 仍为 116 个获取点；`try_lock` 7 处。
