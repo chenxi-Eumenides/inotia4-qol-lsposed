@@ -64,7 +64,7 @@ struct SaleRemovalOps {
 inline SaleRemovalResult remove_for_sale(SaleSlotState slot, const SaleRemovalOps& ops) {
     if (!slot.session_admitted) return SaleRemovalResult::kNotAdmitted;
     if (slot.logical_bag < virtual_bag::kExtensionLogicalBagFirst ||
-        slot.logical_bag > virtual_bag::kExtensionLogicalBagLast || slot.slot < 0 ||
+        slot.logical_bag > virtual_bag::extension_logical_bag_last() || slot.slot < 0 ||
         slot.slot >= slot.capacity || slot.slot >= virtual_bag::kSlotCount || slot.descriptor == nullptr ||
         slot.object == nullptr || *slot.object == nullptr || slot.object_category == nullptr ||
         slot.object_hash == nullptr || slot.object_handle == nullptr || slot.ledger == nullptr ||

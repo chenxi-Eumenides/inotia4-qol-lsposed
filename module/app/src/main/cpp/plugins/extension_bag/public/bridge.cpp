@@ -218,7 +218,7 @@ bool virtual_bag_prepare_main_menu() {
 bool virtual_bag_module_save_validate_locked() {
     virtual_bag::normalize(&runtime_state().objects.bag);
     int discarded = 0;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         const int capacity = runtime_state().objects.bag.capacities[bag];
         for (int slot = capacity; slot < virtual_bag::kSlotCount; ++slot) {
             const virtual_bag::Item& item = runtime_state().objects.bag.items[bag][slot];
@@ -273,7 +273,7 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     }
     // 输出模式视图数量（R-47 决策 b）：启用态 canonical、关闭态 b。占位判定
     // 仍按 descriptor canonical（结构性判断与模式无关）。
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         const int capacity = runtime_state().objects.bag.capacities[bag];
         for (int slot = 0; slot < capacity; ++slot) {
             const virtual_bag::Item& item = runtime_state().objects.bag.items[bag][slot];
@@ -316,7 +316,7 @@ std::string virtual_bag_inventory_bags_json() {
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
     std::string out;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         const int capacity = runtime_state().objects.bag.capacities[bag];
         int filled = 0;
         std::string items;

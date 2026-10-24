@@ -99,8 +99,19 @@ void draw_tab_buttons_in_frame_locked() {
         current_bag_container != nullptr && current_bag_container == runtime_state().ui.extension_tab_root &&
         runtime_state().ui.extension_tab_generation == runtime_state().ui.inventory_generation;
     if (!tabs_are_current || !can_draw_original_button) return;
-    // 第一遍：底框 loc20（72x84），倒序 index 4→0（对齐原版 DrawInvenBackground 的 5→0）。
-    for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    static int last_pending_multi_column_count = 0;
+    if (active > virtual_bag::kMaxRenderedExtensionBagTabs &&
+        last_pending_multi_column_count != active) {
+        VIRTBAG_LOG("tab layout pending multi-column count=%d", active);
+        last_pending_multi_column_count = active;
+    } else if (active <= virtual_bag::kMaxRenderedExtensionBagTabs) {
+        last_pending_multi_column_count = 0;
+    }
+    // 第一遍：底框 loc20，最多绘制已有单列布局可容纳的前五个页签。
+    for (int index = visible - 1; index >= 0; --index) {
         void* button = runtime_state().ui.extension_tab_buttons[index];
         if (button == nullptr) continue;
         int64_t ax = 0, ay = 0;
@@ -108,8 +119,8 @@ void draw_tab_buttons_in_frame_locked() {
         (void)extension_bag_ui_draw_part(0xf, 0x14, static_cast<int32_t>(ax - 5),
                                          static_cast<int32_t>(ay - 12), 0, 1);
     }
-    // 第二遍：袋图标 loc6/loc9 + 选中高亮 loc19，正序 index 0→4（对齐原版 DrawInvenBag 的 0→5）。
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    // 第二遍：袋图标 loc6/loc9 + 选中高亮 loc19。
+    for (int index = 0; index < visible; ++index) {
         void* button = runtime_state().ui.extension_tab_buttons[index];
         if (button == nullptr) continue;
         const bool selected = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&

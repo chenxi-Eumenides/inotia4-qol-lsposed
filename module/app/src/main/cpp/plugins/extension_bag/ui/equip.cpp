@@ -391,7 +391,7 @@ bool extension_source_should_equip_locked(int target_bag) {
 }
 
 int first_empty_extension_bag_locked() {
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         if (runtime_state().objects.bag.types[bag] == 0) return bag;
     }
     return -1;

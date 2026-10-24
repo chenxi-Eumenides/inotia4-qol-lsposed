@@ -5,7 +5,11 @@ inline bool original_to_extension_source_slot_postcondition(void* expected_item,
 }
 
 inline bool valid_index(int index) {
-    return index >= 0 && index < kBagCount;
+    return index >= 0 && index < active_extension_bags();
+}
+
+inline bool valid_index_for_count(int index, int count) {
+    return index >= 0 && index < count;
 }
 
 inline bool valid_original_transaction_bag(int bag) {
@@ -13,7 +17,7 @@ inline bool valid_original_transaction_bag(int bag) {
 }
 
 inline bool valid_extension_logical_bag(int bag) {
-    return bag >= kExtensionLogicalBagFirst && bag <= kExtensionLogicalBagLast;
+    return bag >= kExtensionLogicalBagFirst && bag <= extension_logical_bag_last();
 }
 
 inline int extension_internal_bag(int logical_bag) {
@@ -23,7 +27,7 @@ inline int extension_internal_bag(int logical_bag) {
 }
 
 inline int extension_logical_bag(int internal_bag) {
-    return internal_bag >= 0 && internal_bag < kBagCount
+    return internal_bag >= 0 && internal_bag < active_extension_bags()
                ? kExtensionLogicalBagFirst + internal_bag
                : -1;
 }
@@ -86,7 +90,7 @@ inline bool valid_type(int type) {
 
 // 容量派生唯一入口：扩展袋容量由其已装备的背包物品 BagType 决定（ITEMSTATICBASE 镜像）。
 inline uint8_t derive_capacity(int bag_type) {
-    return valid_type(bag_type) ? kBagTypeCapacities[bag_type] : 0;
+    return static_cast<uint8_t>(capacity_for_bag_type(bag_type));
 }
 
 inline bool valid_payload(const Item& item) {
@@ -300,9 +304,9 @@ inline bool descriptor_slot_empty(const Item& item) {
 
 template <typename CategoryPredicate>
 inline PlacePlan place_plan(
-    const std::array<std::array<Item, kSlotCount>, kBagCount>& items,
-    const std::array<uint8_t, kBagCount>& types,
-    const std::array<uint8_t, kBagCount>& capacities, const Item& source,
+    const std::array<std::array<Item, kSlotCount>, kMaxExtensionBags>& items,
+    const std::array<uint8_t, kMaxExtensionBags>& types,
+    const std::array<uint8_t, kMaxExtensionBags>& capacities, const Item& source,
     bool allow_new_slot, bool limit_enabled, CategoryPredicate is_count_encoded,
     SlotAssignablePredicate slot_assignable = nullptr,
     const CountPolicy* policy = nullptr) {
@@ -312,7 +316,7 @@ inline PlacePlan place_plan(
         return plan;
     }
     // 合并优先：与 adopt_merge_into 同扫描域（已装备袋、capacity∩kSlotCount）。
-    for (int bag = 0; bag < kBagCount; ++bag) {
+    for (int bag = 0; bag < active_extension_bags(); ++bag) {
         if (types[bag] == 0) continue;
         const int capacity = capacities[bag];
         for (int slot = 0; slot < capacity && slot < kSlotCount; ++slot) {
@@ -337,7 +341,7 @@ inline PlacePlan place_plan(
     // 空槽扫描：上界与合并扫描一致，取派生容量（capacity ∩ kSlotCount）。
     // 容量外槽位不是可放置目标；不设容量上界会让容量内槽满后把新物品写进
     // slot >= capacity。
-    for (int bag = 0; bag < kBagCount; ++bag) {
+    for (int bag = 0; bag < active_extension_bags(); ++bag) {
         if (types[bag] == 0) continue;
         const int capacity = capacities[bag];
         for (int slot = 0; slot < capacity && slot < kSlotCount; ++slot) {

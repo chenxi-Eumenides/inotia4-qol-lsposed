@@ -105,6 +105,10 @@ class DebugController {
     fun extensionBagItem(@RequestBody body: String): String =
         ControllerGuard.guard { postEb("/api/debug/extension_bag/item", body) }
 
+    @PostMapping("/api/extension_bag/set_bag_count")
+    fun extensionBagSetBagCount(@RequestBody body: String): String =
+        ControllerGuard.guard { postEb("/api/extension_bag/set_bag_count", body) }
+
     /** 迁移前 Kotlin parseBody 的 400 语义保留在传输层：非法 body 拒绝，合法 body 归一化透传。 */
     private fun postEb(path: String, body: String): String {
         val json = JsonUtil.parseBody(body)

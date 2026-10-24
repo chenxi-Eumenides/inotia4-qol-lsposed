@@ -121,7 +121,9 @@ bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
     int empty = 0;
-    const int bag_count = include_task_bag != 0 ? virtual_bag::kBagCount : virtual_bag::kOriginalTransactionBagCount;
+    const int bag_count = include_task_bag != 0
+                              ? virtual_bag::kOriginalTransactionBagCount
+                              : virtual_bag::active_extension_bags();
     for (int bag = 0; bag < bag_count; ++bag) {
         const int capacity = runtime_state().objects.bag.capacities[bag];
         for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
@@ -153,7 +155,7 @@ bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     if (!serialize_item_payload_locked(item, &payload, &payload_size)) return false;
     int dst_bag = -1;
     int dst_slot = -1;
-    for (int bag = 0; bag < virtual_bag::kBagCount && dst_bag < 0; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags() && dst_bag < 0; ++bag) {
         if (runtime_state().objects.bag.types[bag] == 0) continue;
         const int capacity = runtime_state().objects.bag.capacities[bag];
         for (int slot = 0; slot < capacity; ++slot) {

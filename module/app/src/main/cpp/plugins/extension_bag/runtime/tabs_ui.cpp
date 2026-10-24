@@ -192,7 +192,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 void delete_extension_tab_buttons_locked() {
     // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
     const auto* components = extension_bag_ui_components();
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
         auto& state = runtime_state().ui.extension_tab_anchors[static_cast<size_t>(index)];
         void* handle = nullptr;
         uint8_t live = 0;
@@ -226,7 +226,7 @@ void invalidate_extension_tab_buttons_locked() {
 struct EquipTabAnchorContext {
     int index = 0;
 };
-std::array<EquipTabAnchorContext, virtual_bag::kBagCount> g_equip_tab_anchor_ctx{};
+std::array<EquipTabAnchorContext, virtual_bag::kMaxExtensionBags> g_equip_tab_anchor_ctx{};
 
 QolResult equip_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect, void* user) {
     if (parent == nullptr || out_rect == nullptr || user == nullptr) {
@@ -307,7 +307,13 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
     if (out_created_any != nullptr) *out_created_any = false;
     if (components == nullptr || components->anchored_control_ensure == nullptr) return false;
     bool all = true;
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    if (active > virtual_bag::kMaxRenderedExtensionBagTabs) {
+        VIRTBAG_LOG("tab layout pending multi-column count=%d", active);
+    }
+    for (int index = 0; index < visible; ++index) {
         auto& ctx = g_equip_tab_anchor_ctx[static_cast<size_t>(index)];
         ctx.index = index;
         const qol::contracts::UiAnchoredControlDesc desc{
@@ -376,8 +382,11 @@ bool extension_tab_control_is_current_locked(int index, void* control);
 void handle_extension_tab_click_impl_locked(int extension_bag,
                                             std::unique_lock<std::mutex>* unlockable_lock);
 bool extension_tab_buttons_complete_locked() {
-    for (void* button : runtime_state().ui.extension_tab_buttons) {
-        if (button == nullptr) return false;
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    for (int index = 0; index < visible; ++index) {
+        if (runtime_state().ui.extension_tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
     }
     return true;
 }

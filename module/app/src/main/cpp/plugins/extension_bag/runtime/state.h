@@ -106,15 +106,15 @@ struct ExtensionBagPersistenceState {
 
 struct ExtensionBagObjectState {
     virtual_bag::State bag{};
-    std::array<std::array<void*, virtual_bag::kSlotCount>, virtual_bag::kBagCount>
+    std::array<std::array<void*, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>
         module_objects{};
-    std::array<std::array<ModuleUseState, virtual_bag::kSlotCount>, virtual_bag::kBagCount>
+    std::array<std::array<ModuleUseState, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>
         module_object_use{};
-    std::array<std::array<int, virtual_bag::kSlotCount>, virtual_bag::kBagCount>
+    std::array<std::array<int, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>
         module_object_categories{};
-    std::array<std::array<uint32_t, virtual_bag::kSlotCount>, virtual_bag::kBagCount>
+    std::array<std::array<uint32_t, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>
         module_object_hashes{};
-    uint32_t module_object_handles[virtual_bag::kBagCount][virtual_bag::kSlotCount]{};
+    uint32_t module_object_handles[virtual_bag::kMaxExtensionBags][virtual_bag::kSlotCount]{};
     std::array<void*, virtual_bag::kSlotCount> original_inventory{};
     uint8_t original_current_direct = 0;
     uint8_t original_current_got = 0;
@@ -134,9 +134,9 @@ struct ExtensionBagUiState {
     uint8_t exit_display_bag = kNoOriginalBagSelected;
     bool inventory_frame_active = false;
     bool extension_touch_capture = false;
-    std::array<void*, virtual_bag::kBagCount> extension_tab_buttons{};
+    std::array<void*, virtual_bag::kMaxExtensionBags> extension_tab_buttons{};
     // 页签锚定状态：句柄存活/身份校验/失效重建由 ui_components 锚定层负责。
-    std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kBagCount> extension_tab_anchors{};
+    std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kMaxExtensionBags> extension_tab_anchors{};
     void* extension_tab_root = nullptr;
     uint64_t inventory_generation = 0;
     uint64_t extension_tab_generation = 0;
@@ -155,7 +155,7 @@ struct ExtensionBagUiState {
     bool extension_sell_apply_variant_discount = true;
     ExtensionDrag extension_drag{};
     virtual_bag::ExtensionDragSession extension_drag_session{};
-    void* tab_bag_items[virtual_bag::kBagCount]{};
+    void* tab_bag_items[virtual_bag::kMaxExtensionBags]{};
     // UIStore hook backups and PopupState wrapper originals stay shared across TUs.
     void* backup_store_sell_item = nullptr;
     void* backup_store_button_sell_exe = nullptr;
@@ -180,9 +180,9 @@ struct ExtensionBagStoreState {
     void* hidden_equip_bag_root = nullptr;
     void* hidden_original_bag_control = nullptr;
     int original_current_bag = -1;
-    std::array<void*, virtual_bag::kBagCount> tab_buttons{};
-    std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kBagCount> tab_anchors{};
-    std::array<void*, virtual_bag::kBagCount> tab_bag_items{};
+    std::array<void*, virtual_bag::kMaxExtensionBags> tab_buttons{};
+    std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kMaxExtensionBags> tab_anchors{};
+    std::array<void*, virtual_bag::kMaxExtensionBags> tab_bag_items{};
     void* tab_root = nullptr;
     uint64_t tab_generation = 0;
     int pending_tab = -1;

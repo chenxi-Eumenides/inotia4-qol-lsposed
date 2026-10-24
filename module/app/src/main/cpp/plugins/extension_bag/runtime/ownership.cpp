@@ -48,7 +48,7 @@ int64_t deferred_free_frame_locked() {
 }
 
 uint64_t module_object_generation_locked(void* item, uint32_t handle) {
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             if (runtime_state().objects.module_objects[bag][slot] == item) {
                 return runtime_state().objects.module_object_use[bag][slot].generation;
@@ -98,7 +98,7 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
 
 bool defer_item_free_locked(void* item) {
     uint32_t handle = 0;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             if (runtime_state().objects.module_objects[bag][slot] == item) {
                 handle = runtime_state().objects.module_object_handles[bag][slot];
@@ -114,7 +114,7 @@ bool defer_item_free_locked(void* item) {
 namespace {
 
 bool deferred_item_referenced_locked(void* item) {
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             if (runtime_state().objects.module_objects[bag][slot] == item) return true;
         }
@@ -351,7 +351,7 @@ void release_tracked_item_locked(uint32_t handle, void* item, const char* contex
 // derive_capacity(types[bag])；缺少容量上界会让入库/收编在容量内槽满后继续
 // 占用 slot >= capacity 的槽（超容写入）。
 bool module_slot_is_assignable_locked(int bag, int slot) {
-    if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 ||
+    if (bag < 0 || bag >= virtual_bag::active_extension_bags() || slot < 0 ||
         slot >= runtime_state().objects.bag.capacities[bag]) {
         return false;
     }
@@ -365,7 +365,7 @@ bool module_slot_is_assignable_locked(int bag, int slot) {
 }
 
 bool module_object_replacement_allowed_locked(int bag, int slot, const char* context) {
-    if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 ||
+    if (bag < 0 || bag >= virtual_bag::active_extension_bags() || slot < 0 ||
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
@@ -381,7 +381,7 @@ bool module_object_replacement_allowed_locked(int bag, int slot, const char* con
 
 bool module_object_release_allowed_locked(int bag, int slot, void* item, const char* context,
                                           bool allow_owner, const ModuleUseToken* token) {
-    if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 ||
+    if (bag < 0 || bag >= virtual_bag::active_extension_bags() || slot < 0 ||
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
@@ -404,7 +404,7 @@ bool module_object_release_allowed_locked(int bag, int slot, void* item, const c
 }
 
 bool module_object_generation_advance_locked(int bag, int slot, const char* context) {
-    if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 ||
+    if (bag < 0 || bag >= virtual_bag::active_extension_bags() || slot < 0 ||
         slot >= virtual_bag::kSlotCount) {
         return false;
     }
@@ -421,7 +421,7 @@ bool module_object_generation_advance_locked(int bag, int slot, const char* cont
 }
 
 bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_token) {
-    if (out_token == nullptr || bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 ||
+    if (out_token == nullptr || bag < 0 || bag >= virtual_bag::active_extension_bags() || slot < 0 ||
         slot >= virtual_bag::kSlotCount || item == nullptr || runtime_state().objects.module_objects[bag][slot] != item) {
         return false;
     }
@@ -441,7 +441,7 @@ bool module_use_begin_locked(int bag, int slot, void* item, ModuleUseToken* out_
 bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
                               ModuleUseReleasePlan* out_release) {
     if (out_release != nullptr) *out_release = {};
-    if (token.bag < 0 || token.bag >= virtual_bag::kBagCount || token.slot < 0 ||
+    if (token.bag < 0 || token.bag >= virtual_bag::active_extension_bags() || token.slot < 0 ||
         token.slot >= virtual_bag::kSlotCount) {
         VIRTBAG_LOG_ERROR("ERROR module use finish token mismatch invalid slot active=-1 "
                     "pending_release=-1 generation=0 item=%p handle=0 owner_thread=0 "
@@ -507,7 +507,7 @@ bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
 }
 
 bool module_use_abort_locked(const ModuleUseToken& token) {
-    if (token.bag < 0 || token.bag >= virtual_bag::kBagCount || token.slot < 0 ||
+    if (token.bag < 0 || token.bag >= virtual_bag::active_extension_bags() || token.slot < 0 ||
         token.slot >= virtual_bag::kSlotCount) {
         VIRTBAG_LOG_ERROR("ERROR module use abort token mismatch; slot may remain active invalid slot "
                     "active=-1 pending_release=-1 generation=0 item=%p handle=0 owner_thread=0 "
@@ -544,7 +544,7 @@ bool module_use_abort_locked(const ModuleUseToken& token) {
 }
 
 bool module_use_abort_isolate_locked(const ModuleUseToken& token) {
-    if (token.bag < 0 || token.bag >= virtual_bag::kBagCount || token.slot < 0 ||
+    if (token.bag < 0 || token.bag >= virtual_bag::active_extension_bags() || token.slot < 0 ||
         token.slot >= virtual_bag::kSlotCount) {
         return false;
     }
@@ -596,7 +596,7 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
 }
 
 bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release) {
-    if (!release.pending || release.bag < 0 || release.bag >= virtual_bag::kBagCount ||
+    if (!release.pending || release.bag < 0 || release.bag >= virtual_bag::active_extension_bags() ||
         release.slot < 0 || release.slot >= virtual_bag::kSlotCount) {
         return false;
     }
@@ -625,7 +625,7 @@ bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release) {
 }
 
 bool free_module_object_locked(int bag, int slot, void* raw_use_token) {
-    if (bag < 0 || bag >= virtual_bag::kBagCount || slot < 0 || slot >= virtual_bag::kSlotCount) {
+    if (bag < 0 || bag >= virtual_bag::active_extension_bags() || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return false;
     }
     void* item = runtime_state().objects.module_objects[bag][slot];

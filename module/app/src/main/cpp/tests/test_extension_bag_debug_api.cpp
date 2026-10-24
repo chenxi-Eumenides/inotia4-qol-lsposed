@@ -96,7 +96,7 @@ void test_endpoint_catalog_and_validation() {
     uint32_t count = 0;
     const auto* endpoints = qol::features::extension_bag::extension_bag_http_endpoints(&count);
     CHECK(endpoints != nullptr);
-    CHECK(count == 8);
+    CHECK(count == 9);
     int queries = 0;
     int commands = 0;
     for (uint32_t i = 0; i < count; ++i) {
@@ -113,7 +113,7 @@ void test_endpoint_catalog_and_validation() {
         }
     }
     CHECK(queries == 1);
-    CHECK(commands == 7);
+    CHECK(commands == 8);
 
     const auto* status = endpoint("/api/debug/extension_bag/status");
     CHECK(status != nullptr);

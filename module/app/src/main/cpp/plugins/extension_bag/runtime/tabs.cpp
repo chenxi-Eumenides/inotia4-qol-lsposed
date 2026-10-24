@@ -3,7 +3,7 @@
 #include "plugins/extension_bag/runtime/logging.h"
 
 int extension_tab_index(void* ctrl) {
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
         if (runtime_state().ui.extension_tab_buttons[index] == ctrl) return index;
     }
     return -1;
@@ -13,7 +13,7 @@ int extension_tab_index(void* ctrl) {
 bool defer_item_free_locked(void* item);
 
 void refresh_tab_bag_items_locked() {
-    for (int i = 0; i < virtual_bag::kBagCount; ++i) {
+    for (int i = 0; i < virtual_bag::kMaxExtensionBags; ++i) {
         const uint8_t type = runtime_state().objects.bag.types[i];
         void*& slot = runtime_state().ui.tab_bag_items[i];
         if (type == 0) {

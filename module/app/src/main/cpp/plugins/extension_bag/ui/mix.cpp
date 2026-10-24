@@ -49,10 +49,10 @@ int mix_window_original_bag = -1;
 uint32_t mix_original_size_word = 0;
 uint32_t mix_original_bag_size = 0;
 void* mix_projected_item_root = nullptr;
-std::array<void*, virtual_bag::kBagCount> mix_tab_buttons{};
+std::array<void*, virtual_bag::kMaxExtensionBags> mix_tab_buttons{};
 // 页签锚定状态：句柄存活/身份校验/失效重建由 ui_components 锚定层负责。
-std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kBagCount> mix_tab_anchors{};
-std::array<void*, virtual_bag::kBagCount> mix_tab_bag_items{};
+std::array<qol::contracts::QolUiAnchoredControl, virtual_bag::kMaxExtensionBags> mix_tab_anchors{};
+std::array<void*, virtual_bag::kMaxExtensionBags> mix_tab_bag_items{};
 void* mix_tab_root = nullptr;
 uint64_t mix_tab_generation = 0;
 int mix_pending_tab = -1;
@@ -83,17 +83,23 @@ int mix_state_locked() {
 }
 
 int mix_tab_index(void* ctrl) {
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    for (int index = 0; index < visible; ++index) {
         if (mix_tab_buttons[index] == ctrl) return index;
     }
     return -1;
 }
 
 void mix_refresh_tab_bag_items_locked() {
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
         const uint8_t type = runtime_state().objects.bag.types[index];
         void*& item = mix_tab_bag_items[index];
-        if (type == 0) {
+        const int active = virtual_bag::active_extension_bags();
+        const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                                ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+        if (type == 0 || index >= visible) {
             if (item != nullptr) {
                 if (defer_item_free_locked(item)) item = nullptr;
             }
@@ -133,7 +139,7 @@ void mix_disable_tab_buttons_locked() {
 void mix_delete_tab_buttons_locked() {
     // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
     const auto* components = extension_bag_ui_components();
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
         auto& state = mix_tab_anchors[static_cast<size_t>(index)];
         void* handle = nullptr;
         uint8_t live = 0;
@@ -150,8 +156,11 @@ void mix_delete_tab_buttons_locked() {
 }
 
 bool mix_all_tab_buttons_installed_locked() {
-    for (void* button : mix_tab_buttons) {
-        if (button == nullptr) return false;
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    for (int index = 0; index < visible; ++index) {
+        if (mix_tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
     }
     return true;
 }
@@ -164,14 +173,14 @@ bool mix_has_tab_buttons_locked() {
 }
 
 void mix_discard_new_tab_controls_locked(
-    std::array<void*, virtual_bag::kBagCount>& controls, int failed_index,
+    std::array<void*, virtual_bag::kMaxExtensionBags>& controls, int failed_index,
     void* failed_control, const char* stage) {
     VIRTBAG_LOG("mix tab install failed index=%d stage=%s", failed_index, stage);
     if (failed_control != nullptr && !extension_bag_ui_delete_control(failed_control)) {
         VIRTBAG_LOG("mix tab cleanup failed index=%d control=%p", failed_index,
                     failed_control);
     }
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
         void*& control = controls[index];
         if (control == nullptr) continue;
         if (!extension_bag_ui_delete_control(control)) {
@@ -186,7 +195,7 @@ void mix_discard_new_tab_controls_locked(
 struct MixTabAnchorContext {
     int index = 0;
 };
-std::array<MixTabAnchorContext, virtual_bag::kBagCount> g_mix_tab_anchor_ctx{};
+std::array<MixTabAnchorContext, virtual_bag::kMaxExtensionBags> g_mix_tab_anchor_ctx{};
 
 QolResult mix_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect, void* user) {
     if (parent == nullptr || out_rect == nullptr || user == nullptr) {
@@ -255,7 +264,10 @@ bool mix_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* compo
     if (out_created_any != nullptr) *out_created_any = false;
     if (components == nullptr || components->anchored_control_ensure == nullptr) return false;
     bool all = true;
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    for (int index = 0; index < visible; ++index) {
         auto& ctx = g_mix_tab_anchor_ctx[static_cast<size_t>(index)];
         ctx.index = index;
         const qol::contracts::UiAnchoredControlDesc desc{
@@ -574,7 +586,10 @@ void mix_draw_tab_buttons_locked() {
     if (!extension_bag_ui_can_draw()) return;
     // 每帧 ensure：游戏切页/关闭面板会销毁页签子树，锚定层负责证明并重建。
     mix_install_tab_buttons_locked();
-    for (int index = virtual_bag::kBagCount - 1; index >= 0; --index) {
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    for (int index = visible - 1; index >= 0; --index) {
         void* button = mix_tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;
@@ -583,7 +598,7 @@ void mix_draw_tab_buttons_locked() {
         (void)extension_bag_ui_draw_part_alpha(0xf, 0x14, static_cast<int32_t>(x - 5),
                                                  static_cast<int32_t>(y - 12), 0, 1, 0);
     }
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < visible; ++index) {
         void* button = mix_tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;

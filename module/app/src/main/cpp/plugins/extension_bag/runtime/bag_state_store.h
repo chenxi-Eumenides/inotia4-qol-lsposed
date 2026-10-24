@@ -1,5 +1,7 @@
 #pragma once
 
+#include "plugins/extension_bag/model/bag_catalog.h"
+
 #include <array>
 #include <cstdint>
 
@@ -8,8 +10,8 @@ namespace qol::extension_bag {
 // 轻量只读快照：只含标量/小数组字段，不含物品载荷。
 // 由主线程在状态变更后发布，任意线程可读取，用于替代“读一个字段也加锁”。
 struct BagSnapshot {
-    std::array<uint8_t, 5> types{};
-    std::array<uint8_t, 5> capacities{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> types{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> capacities{};
     int32_t mode = 0;
     int32_t selected = -1;
     int32_t inspected = -1;

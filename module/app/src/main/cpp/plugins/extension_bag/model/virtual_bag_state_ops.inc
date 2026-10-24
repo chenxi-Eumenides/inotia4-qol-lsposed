@@ -1,10 +1,11 @@
 inline void normalize(State* state) {
     if (state == nullptr) return;
-    for (int index = 0; index < kBagCount; ++index) {
+    const int active_count = clamp_active_extension_bags(state->bag_count);
+    for (int index = 0; index < active_count; ++index) {
         if (!valid_type(state->types[index])) state->types[index] = 0;
         state->capacities[index] = derive_capacity(state->types[index]);
     }
-    for (int bag = 0; bag < kBagCount; ++bag) {
+    for (int bag = 0; bag < active_count; ++bag) {
         for (int slot = 0; slot < kSlotCount; ++slot) {
             Item& item = state->items[bag][slot];
             if (item.category < 0 || item.count < 0) {
@@ -36,16 +37,16 @@ inline void normalize(State* state) {
     if (state->original_selected < 0 || state->original_selected >= 6) {
         state->original_selected = 0;
     }
-    if (!valid_index(state->selected)) {
+    if (!valid_index_for_count(state->selected, active_count)) {
         state->selected = -1;
     }
     if (state->mode == Mode::kModule &&
-        (!valid_index(state->selected) || state->capacities[state->selected] == 0)) {
+        (!valid_index_for_count(state->selected, active_count) || state->capacities[state->selected] == 0)) {
         state->mode = Mode::kOriginal;
         state->selected = -1;
     }
     if (state->info_bag != -1 &&
-        (!valid_index(state->info_bag) || state->capacities[state->info_bag] == 0 ||
+        (!valid_index_for_count(state->info_bag, active_count) || state->capacities[state->info_bag] == 0 ||
          state->mode != Mode::kModule)) {
         state->info_bag = -1;
     }
@@ -171,7 +172,7 @@ inline bool set_item(State* state, int bag, int slot, int category, int count) {
 inline int discard_over_capacity(State* state) {
     if (state == nullptr) return 0;
     int discarded = 0;
-    for (int bag = 0; bag < kBagCount; ++bag) {
+    for (int bag = 0; bag < clamp_active_extension_bags(state->bag_count); ++bag) {
         const int capacity = state->capacities[bag];
         for (int slot = capacity; slot < kSlotCount; ++slot) {
             Item& item = state->items[bag][slot];
@@ -181,6 +182,43 @@ inline int discard_over_capacity(State* state) {
         }
     }
     return discarded;
+}
+
+inline bool bag_has_data(const State& state, int bag) {
+    if (bag < 0 || bag >= kMaxExtensionBags) return true;
+    if (state.types[bag] != 0 || state.capacities[bag] != 0) return true;
+    for (const Item& item : state.items[bag]) {
+        if (item.category != 0 || item.count != 0 || item.payload_size != 0) return true;
+    }
+    return false;
+}
+
+inline bool set_bag_count(State* state, int count) {
+    if (state == nullptr || count < 1 || count > kMaxExtensionBags ||
+        state->bag_count < 1 || state->bag_count > kMaxExtensionBags) {
+        return false;
+    }
+    const int old_count = state->bag_count;
+    if (count < old_count) {
+        for (int bag = count; bag < old_count; ++bag) {
+            if (bag_has_data(*state, bag)) return false;
+        }
+    }
+    if (count > old_count) {
+        for (int bag = old_count; bag < count; ++bag) {
+            state->types[bag] = 0;
+            state->capacities[bag] = 0;
+            state->items[bag] = {};
+        }
+    }
+    state->bag_count = count;
+    if (state->selected >= count) {
+        state->selected = -1;
+        state->inspected = -1;
+        state->info_bag = -1;
+        state->mode = Mode::kOriginal;
+    }
+    return true;
 }
 
 // ---- JSON 桥接（Kotlin ExtensionBagUiBridge 往返，payload 以 base64 安全编码）----

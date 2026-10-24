@@ -157,7 +157,7 @@ int32_t neutral_identify_native_item(qol::contracts::QolItemHandle item,
     int internal_bag = -1;
     int slot = -1;
     if (!provider_identify_native_item(item, &internal_bag, &slot)) return 0;
-    if (internal_bag < 0 || internal_bag >= virtual_bag::kBagCount) return 0;
+    if (internal_bag < 0 || internal_bag >= virtual_bag::active_extension_bags()) return 0;
     // provider 内部完成袋号换算：对外只输出公共逻辑袋号。
     *out_bag = virtual_bag::kExtensionLogicalBagFirst + internal_bag;
     *out_slot = slot;

@@ -5,7 +5,7 @@
 namespace qol::features::extension_bag {
 
 inline constexpr uint32_t kEbResultHandlerId = 0x45420001;
-inline constexpr uint32_t kHttpEndpointCount = 8;
+inline constexpr uint32_t kHttpEndpointCount = 9;
 
 extern const qol::contracts::HttpEndpointDescriptor kHttpEndpoints[kHttpEndpointCount];
 

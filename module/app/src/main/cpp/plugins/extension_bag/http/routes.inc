@@ -6,3 +6,4 @@ QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/select_bag", "extension_bag", 0,
 QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/click_item", "extension_bag", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/equip", "extension_bag", 0, 1)
 QOL_HTTP_ROUTE(kPost, "/api/debug/extension_bag/item", "extension_bag", 0, 1)
+QOL_HTTP_ROUTE(kPost, "/api/extension_bag/set_bag_count", "extension_bag", 0, 1)

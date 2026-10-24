@@ -47,6 +47,7 @@ enum class VirtualBagProjectionDropResult : uint8_t {
 VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_control,
                                                                     void* src_control);
 std::string data_op_extension_bag_exit_view();
+std::string data_op_extension_bag_set_bag_count(int count);
 std::string data_op_extension_bag_select_bag(int logical_bag);
 std::string data_op_extension_bag_click_item(int logical_bag, int slot);
 std::string data_op_extension_bag_move_item(int from_bag, int from_slot, int to_bag, int to_slot);

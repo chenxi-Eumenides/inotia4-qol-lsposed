@@ -75,8 +75,8 @@ int original_bag_button_index(int64_t x, int64_t y) {
     int child_count = 0;
     if (!extension_bag_ui_child_count(bag_container, &child_count)) return -1;
     // 原版标签包含扩展事务袋之外的任务袋（索引 5）；不能使用
-    // virtual_bag::kBagCount（5）作为原版控件扫描上限。
-    const int original_tab_count = static_cast<int>(kNoOriginalBagSelected);
+    // 原版控件扫描范围固定包含普通袋 0..4 和任务袋 5。
+    const int original_tab_count = virtual_bag::kOriginalTransactionBagCount + 1;
     const int limit = child_count < original_tab_count ? child_count : original_tab_count;
     for (int index = 0; index < limit; ++index) {
         void* control = valid_child_locked(bag_container, index);

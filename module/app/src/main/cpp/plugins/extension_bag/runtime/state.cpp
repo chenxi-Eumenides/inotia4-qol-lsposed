@@ -4,6 +4,14 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 
+int virtual_bag::active_extension_bags() {
+    return virtual_bag::clamp_active_extension_bags(runtime_state().objects.bag.bag_count);
+}
+
+int virtual_bag::extension_logical_bag_last() {
+    return virtual_bag::kExtensionLogicalBagFirst + virtual_bag::active_extension_bags() - 1;
+}
+
 thread_local ModuleUseToken* g_active_module_use_token = nullptr;
 thread_local bool g_p5_observation_active = false;
 thread_local bool g_refresh_restore_suppress = false;
@@ -25,7 +33,7 @@ uint64_t extension_bag_item_revision_locked() {
 // g_virtual_bag_mtx。
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot) {
     if (item == nullptr || out_bag == nullptr || out_slot == nullptr) return false;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             if (runtime_state().objects.module_objects[bag][slot] == item) {
                 *out_bag = bag;

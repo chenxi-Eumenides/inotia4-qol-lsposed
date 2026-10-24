@@ -55,7 +55,8 @@ namespace {
 using namespace qol::contracts;
 
 constexpr const char* kEbSectionName = "extensionbags.items";
-constexpr uint16_t kEbSectionVersion = 4;
+constexpr uint16_t kEbSectionVersion = 5;
+constexpr uint16_t kLegacyEbSectionVersion = 4;
 
 // ---- 会话准入状态（provider 回调维护；操作面/排空面读取）----
 std::atomic<QolSlotDataHandle> g_slot_data_handle{0};
@@ -82,7 +83,7 @@ void eb_reset_loaded_revision_state_locked() {
 QolResult eb_ok() { return qol::contracts::ok(); }
 
 bool occupied_item_nonempty(const virtual_bag::State& state) {
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             const virtual_bag::Item& item = state.items[bag][slot];
             if (item.category > 0 || item.count > 0) return true;
@@ -107,8 +108,7 @@ QolResult eb_sd_session_ready(void* /*user*/, const QolSlotDataContext* ctx) {
     return eb_ok();
 }
 
-// bytes 仅本次调用有效；missing 生成默认状态；仅 v4 可解析。非 v4、不可读或解析失败
-// 均阻断当前会话，不尝试旧版本迁移，也不以空状态替代损坏数据。
+// bytes 仅本次调用有效；missing 生成默认状态；v4 JSON 缺少 bagCount 时迁移为五袋。
 QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t presence,
                      uint32_t stored_version, const uint8_t* bytes, uint64_t size) {
     virtual_bag::State* state = extension_bag_state();
@@ -125,7 +125,9 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
                      static_cast<unsigned long long>(ctx->session.epoch));
         return eb_ok();
     }
-    if (presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported) {
+    const bool legacy_v4 = presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported &&
+                           stored_version == kLegacyEbSectionVersion;
+    if (presence_kind == qol::contracts::QolSlotDataPresence::kVersionUnsupported && !legacy_v4) {
         g_session_blocked.store(true, std::memory_order_release);
         QOL_LOG_WARN(QolDomain::kExtensionBag, "slot data blocked reason=version "
                      "stored=%u expected=%u", stored_version, kEbSectionVersion);
@@ -146,7 +148,12 @@ QolResult eb_sd_load(void* /*user*/, const QolSlotDataContext* ctx, uint32_t pre
     std::string payload;
     if (size > 0) payload.assign(reinterpret_cast<const char*>(bytes),
                                  static_cast<std::size_t>(size));
-    // v4 payload 中的非法 pending 仅隔离该事务；状态 JSON 解析失败则阻断会话。
+    if (legacy_v4) {
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "slot data migrate section_version=%u->%u default_bag_count=5",
+                     stored_version, kEbSectionVersion);
+    }
+    // 非法 pending 仅隔离该事务；状态 JSON 解析失败则阻断会话。
     std::lock_guard<std::mutex> state_lock(runtime_state().mtx);
     virtual_bag::PendingTransfer rejected_pending{};
     const bool has_pending = payload.find("\"pending\":") != std::string::npos;

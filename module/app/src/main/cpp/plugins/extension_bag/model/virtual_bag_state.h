@@ -9,6 +9,8 @@
 #include <string>
 #include <type_traits>
 
+#include "plugins/extension_bag/model/bag_catalog.h"
+
 namespace virtual_bag {
 
 // 数量模型只消费调用方准备好的 canonical/view 转换结果。实际的布局
@@ -60,21 +62,7 @@ inline void set_count_policy(const CountPolicy* policy) {
 
 inline const CountPolicy& count_policy() { return *g_count_policy; }
 
-constexpr int kBagCount = 5;
 constexpr int kMaxCapacity = 16;
-constexpr int kSlotCount = 16;
-
-// 原版事务域与扩展内部索引都使用 0..4，但两者不是同一个编号空间。原版索引 5
-// 是任务袋，任何扩展事务都不得将其作为源、目标、投影窗口或恢复目标。
-constexpr int kOriginalTransactionBagCount = kBagCount;
-constexpr int kOriginalTaskBag = kOriginalTransactionBagCount;
-constexpr int kExtensionLogicalBagFirst = kOriginalTaskBag + 1;
-constexpr int kExtensionLogicalBagLast =
-    kExtensionLogicalBagFirst + kBagCount - 1;
-
-// ITEMSTATICBASE 静态表镜像（docs/system/bag.md §5，apk/static-data/json/tables/ITEMSTATICBASE.json）：
-// 下标 = BagType，容量 4/8/12/16；kNone=0 → 未装备 → 容量 0（ADR-004：固定绘制值不进入最终架构）。
-constexpr std::array<uint8_t, 5> kBagTypeCapacities = {0, 4, 8, 12, 16};
 
 // SAVE_SaveItem 记录约束（objdump 确认）：u8 长度前缀 + 18B 头 + 4B×N 词缀，总长 ≤255。
 constexpr size_t kSerializedItemBuffer = 256;  // 固定字节数组容量（State 内禁止裸指针）
@@ -104,9 +92,10 @@ enum class Mode {
 #include "plugins/extension_bag/model/virtual_bag_transaction_types.h"
 
 struct State {
-    std::array<uint8_t, kBagCount> types{};      // 各扩展袋已装备的背包物品 BagType（0=未装备）
-    std::array<uint8_t, kBagCount> capacities{}; // 派生容量 = derive_capacity(types[i])，禁止直写
-    std::array<std::array<Item, kSlotCount>, kBagCount> items{};
+    std::array<uint8_t, kMaxExtensionBags> types{};      // 各扩展袋已装备的背包物品 BagType（0=未装备）
+    std::array<uint8_t, kMaxExtensionBags> capacities{}; // 派生容量 = derive_capacity(types[i])，禁止直写
+    std::array<std::array<Item, kSlotCount>, kMaxExtensionBags> items{};
+    int bag_count = 5;
     Mode mode = Mode::kOriginal;
     int original_selected = 0;
     int selected = -1;

@@ -1,15 +1,16 @@
 inline std::string state_json(const State& state, bool include_isolations = false) {
-    // 无版本标识：sidecar 数量始终保存 canonical，和运行时开关无关。
+    const int bag_count = clamp_active_extension_bags(state.bag_count);
     std::string json = "{\"mode\":\"";
     json += state.mode == Mode::kModule ? "module" : "original";
     json += "\",\"originalSelected\":" + std::to_string(state.original_selected);
+    json += ",\"bagCount\":" + std::to_string(bag_count);
     json += ",\"types\":[";
-    for (int index = 0; index < kBagCount; ++index) {
+    for (int index = 0; index < bag_count; ++index) {
         if (index > 0) json += ',';
         json += std::to_string(state.types[index]);
     }
     json += "],\"capacities\":[";
-    for (int index = 0; index < kBagCount; ++index) {
+    for (int index = 0; index < bag_count; ++index) {
         if (index > 0) json += ',';
         json += std::to_string(state.capacities[index]);
     }
@@ -17,7 +18,7 @@ inline std::string state_json(const State& state, bool include_isolations = fals
     json += ",\"inspected\":" + std::to_string(state.inspected);
     json += ",\"infoBag\":" + std::to_string(state.info_bag);
     json += ",\"items\":[";
-    for (int bag = 0; bag < kBagCount; ++bag) {
+    for (int bag = 0; bag < bag_count; ++bag) {
         if (bag > 0) json += ',';
         json += '[';
         for (int slot = 0; slot < kSlotCount; ++slot) {
@@ -203,13 +204,21 @@ inline bool parse_state_json(const char* json, State* state,
                              CategoryPredicate is_count_encoded,
                              const CountPolicy* policy = nullptr) {
     if (json == nullptr || state == nullptr) return false;
-    // 宽容忽略旧字段：历史 sidecar 可能携带 \"encodingVersion\"，当前无版本标识、
-    // 数量字段没有版本迁移，读到历史字段直接忽略。
+    // v4 没有 bagCount，按旧版固定的五袋布局迁移；显式非法数量必须拒绝。
+    State parsed{};
+    const char* bag_count_key = strstr(json, "\"bagCount\":");
+    if (bag_count_key != nullptr) {
+        const char* count_cursor = bag_count_key + strlen("\"bagCount\":");
+        char* count_end = nullptr;
+        const long count = strtol(count_cursor, &count_end, 10);
+        if (count_end == count_cursor || count < 1 || count > kMaxExtensionBags) return false;
+        parsed.bag_count = static_cast<int>(count);
+    }
+    const int bag_count = parsed.bag_count;
     const char* types = strstr(json, "\"types\":[");
     if (types == nullptr) return false;
     const char* cursor = types + strlen("\"types\":[");
-    State parsed{};
-    for (int index = 0; index < kBagCount; ++index) {
+    for (int index = 0; index < bag_count; ++index) {
         char* end = nullptr;
         long type = strtol(cursor, &end, 10);
         if (end == cursor || type < 0 || type > static_cast<long>(BagType::kLargeBackpack)) {
@@ -217,7 +226,7 @@ inline bool parse_state_json(const char* json, State* state,
         }
         parsed.types[index] = static_cast<uint8_t>(type);
         cursor = end;
-        if (index + 1 < kBagCount) {
+        if (index + 1 < bag_count) {
             if (*cursor != ',') return false;
             ++cursor;
         }
@@ -253,13 +262,13 @@ inline bool parse_state_json(const char* json, State* state,
         cursor = info_bag + strlen("\"infoBag\":");
         char* info_end = nullptr;
         long value = strtol(cursor, &info_end, 10);
-        if (info_end == cursor || value < -1 || value >= kBagCount) return false;
+        if (info_end == cursor || value < -1 || value >= bag_count) return false;
         parsed.info_bag = static_cast<int>(value);
     }
     const char* items = strstr(json, "\"items\":[");
     if (items == nullptr) return false;
     cursor = items + strlen("\"items\":[");
-    for (int bag = 0; bag < kBagCount; ++bag) {
+    for (int bag = 0; bag < bag_count; ++bag) {
         for (int slot = 0; slot < kSlotCount; ++slot) {
             const char* object_start = strchr(cursor, '{');
             if (object_start == nullptr) return false;

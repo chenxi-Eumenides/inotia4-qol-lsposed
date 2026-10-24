@@ -181,7 +181,7 @@ void reset_extension_desc_item_hooks_locked();
 void restore_extension_desc_popup_callbacks_locked();
 
 bool module_cache_clear_preflight_locked() {
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             const ModuleUseState& use = runtime_state().objects.module_object_use[bag][slot];
             if (use.active) {
@@ -197,7 +197,7 @@ bool module_cache_clear_preflight_locked() {
 
 bool clear_module_cache_locked() {
     if (!module_cache_clear_preflight_locked()) return false;
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             // Scheme C objects never enter g_inven, so the module owns them
             // until an explicit transfer is implemented. Drop them on slot
@@ -547,7 +547,7 @@ bool persist_state_locked(bool force) {
 }
 bool item_pointer_known_locked(void* item) {
     if (item == nullptr) return true;  // 空指针由调用方各自处理
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             if (runtime_state().objects.module_objects[bag][slot] == item) return true;
         }

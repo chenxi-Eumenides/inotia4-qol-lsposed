@@ -70,7 +70,7 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
             QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject original->extension no moving original control");
             return false;
         }
-        for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
             if (!extension_tab_hit(index, x, y)) continue;
             void* item = nullptr;
             {
@@ -109,7 +109,7 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
                         target_bag, target_slot);
             return handled;
         }
-        for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
             if (index == runtime_state().ui.extension_drag.bag) continue;
             if (!extension_tab_hit(index, x, y)) continue;
             const int category = runtime_state().objects.bag.items[runtime_state().ui.extension_drag.bag][runtime_state().ui.extension_drag.slot].category;
@@ -182,7 +182,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     }
     // Tab rects and grid rows overlap in the current UI coordinate space; a tab hit is
     // therefore the explicit switch-bag intent and must take precedence over a slot hit.
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
         const int target_bag = index;
         const int target_slot = -1;
         if (target_bag == runtime_state().ui.extension_drag_session.source_bag ||
@@ -208,7 +208,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     if (!virtual_bag::valid_index(target_bag) || target_slot < 0 ||
         target_slot >= runtime_state().objects.bag.capacities[target_bag]) {
         target_bag = -1;
-        for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+        for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
             if (index == runtime_state().ui.extension_drag_session.source_bag) continue;
             if (!extension_tab_hit(index, x, y)) continue;
             target_bag = index;

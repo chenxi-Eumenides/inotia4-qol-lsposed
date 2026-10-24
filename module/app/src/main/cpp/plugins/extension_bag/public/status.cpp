@@ -67,6 +67,8 @@ std::string extension_bag_status_json_locked() {
            ",\"inventory_frame_active\":" +
            std::string(runtime_state().ui.inventory_frame_active ? "true" : "false") +
            ",\"recovery_action\":\"" + extension_recovery_action_name_locked() + "\"" +
+           ",\"bagCount\":" + std::to_string(virtual_bag::active_extension_bags()) +
+           ",\"maxBagCount\":" + std::to_string(virtual_bag::kMaxExtensionBags) +
            ",\"originalCapacities\":" + original_capacities +
            ",\"state\":" + virtual_bag::state_json(runtime_state().objects.bag, true) + "}";
 }
@@ -81,6 +83,22 @@ bool extension_bag_ready_locked() {
     // 时拒绝物品操作，不惰性 IO 兜底）。session 状态由 provider 回调维护。
     return runtime_state().enabled.load() && read_world_in_world() &&
            extension_bag_session_admitted_locked();
+}
+
+bool module_bag_index_has_runtime_data_locked(int bag) {
+    if (virtual_bag::bag_has_data(runtime_state().objects.bag, bag)) return true;
+    for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+        if (runtime_state().objects.module_objects[bag][slot] != nullptr ||
+            runtime_state().objects.module_object_handles[bag][slot] != 0) {
+            return true;
+        }
+        const ModuleUseState& use = runtime_state().objects.module_object_use[bag][slot];
+        if (use.active || use.consumed || use.pending_release || use.item != nullptr ||
+            use.generation != 0 || use.owner != std::thread::id{}) {
+            return true;
+        }
+    }
+    return false;
 }
 
 int extension_internal_bag(int logical_bag) {
@@ -111,6 +129,42 @@ struct UnequipHostCapacityGuard {
     }
 };
 }  // namespace
+
+std::string data_op_extension_bag_set_bag_count(int count) {
+    if (count < 1 || count > virtual_bag::kMaxExtensionBags) {
+        return op_err("count required (1-8)");
+    }
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ensure_state_loaded_locked();
+    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    auto& state = runtime_state().objects.bag;
+    if (state.pending.valid) return op_err("transaction pending");
+    if (runtime_state().ui.extension_drag.active || runtime_state().ui.extension_touch_capture ||
+        runtime_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
+        return op_err("drag active");
+    }
+    const int old_count = state.bag_count;
+    if (count < old_count) {
+        for (int bag = count; bag < old_count; ++bag) {
+            if (module_bag_index_has_runtime_data_locked(bag)) return op_err("bag not empty");
+        }
+    } else if (count > old_count) {
+        for (int bag = old_count; bag < count; ++bag) {
+            if (module_bag_index_has_runtime_data_locked(bag)) return op_err("inactive bag has runtime data");
+        }
+    }
+    if (!virtual_bag::set_bag_count(&state, count)) return op_err("bag count change rejected");
+    for (int bag = std::min(old_count, count); bag < std::max(old_count, count); ++bag) {
+        runtime_state().objects.module_object_use[bag] = {};
+        runtime_state().objects.module_object_categories[bag] = {};
+        runtime_state().objects.module_object_hashes[bag] = {};
+        std::fill(std::begin(runtime_state().objects.module_object_handles[bag]),
+                  std::end(runtime_state().objects.module_object_handles[bag]), 0u);
+    }
+    extension_bag_mark_dirty_locked();
+    if (!persist_state_locked()) return op_err("persist failed");
+    return "{\"ok\":true,\"count\":" + std::to_string(count) + "}";
+}
 
 // P3 袋解除（对齐原版 UIEquip_ButtonUnequipExe desc_type=1 语义）：
 // 非空 → kNotEmpty（弹窗 7，b8084）；原版袋 0..4 全满 → kNoSpace（弹窗 6，
@@ -216,7 +270,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mut
         // 模式）。收编后用户可把它拖回原版背包，或拖到空扩展标签重新装备。
         int adopt_bag = -1;
         int adopt_slot = -1;
-        for (int bag = 0; bag < virtual_bag::kBagCount && adopt_bag < 0; ++bag) {
+        for (int bag = 0; bag < virtual_bag::active_extension_bags() && adopt_bag < 0; ++bag) {
             if (bag == internal_bag) continue;  // 排除正在解除的袋（见上）
             if (runtime_state().objects.bag.types[bag] == 0) continue;
             const int capacity = runtime_state().objects.bag.capacities[bag];

@@ -44,7 +44,7 @@ void* virtual_bag_find_native_item(int category) {
     if (category <= 0) return nullptr;
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
     ensure_state_loaded_locked();
-    for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < runtime_state().objects.bag.capacities[bag]; ++slot) {
             const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
             if (descriptor.category != category || descriptor.count <= 0) continue;

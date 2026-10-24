@@ -251,9 +251,9 @@ int extension_logical_last();   // 6 + active - 1
   依赖对象加载与刷新，需与 OwnershipManager 一起迁移。
 - 验收：v513/v514/v520 页签布局、reflow、页签点击、原生袋命中、商店/合成投影。
 
-### P4 数据驱动：BagCatalog + 扩展袋数量（本次新增）
+### P4 数据驱动：BagCatalog + 扩展袋数量（已完成）
 
-1. **catalog 收口**：新增 `model/bag_catalog.h` + 生成脚本，替换 `kBagCount`、
+1. **catalog 收口**：新增 `model/bag_catalog.h` + 生成脚本，替换 `kMaxExtensionBags`、
    容量表、逻辑 ID 范围、遍历上限；先保持 `active_count == 5`，行为不变。
 2. **状态容器**：`State` 数组改为 `std::array<T, kMaxExtensionBags>`，
    业务遍历改用 `active_count`。
@@ -285,7 +285,7 @@ int extension_logical_last();   // 6 + active - 1
 3. 禁止新增 `#include "plugins/extension_bag/extension_bag_internal.h"`。
 4. 禁止 `#define <ident> <ident>_internal/_bridge` 形态的宏桥。
 5. 新增 `std::mutex` 在 extension_bag 内直接失败（P6 后）。
-6. `model/` 与业务代码禁止出现字面量 `kBagCount`/`5` 作为扩展袋数量；统一走 catalog。
+6. `model/` 与业务代码禁止出现字面量 `kMaxExtensionBags`/`5` 作为扩展袋数量；统一走 catalog。
 
 ## 9. 测试策略
 
@@ -318,6 +318,6 @@ int extension_logical_last();   // 6 + active - 1
 2. `api/`、`ui/` 不直接访问 `runtime_state()`；全部经用例层。
 3. `extension_bag_internal.h` 与宏桥为零。
 4. extension_bag 内无 `std::mutex`，入口统一 `EntryGuard` + 主线程断言。
-5. 扩展袋数量由 catalog + 设置驱动：业务代码无 `kBagCount` 字面量；1/5/8 袋均通过 Host 与真机验收。
+5. 扩展袋数量由 catalog + 设置驱动：业务代码无 `kMaxExtensionBags` 字面量；1/5/8 袋均通过 Host 与真机验收。
 6. sidecar v5 迁移可回退；缩小数量在非空时 fail-closed。
 7. Host 测试全绿；v513/v514/v520 真机验收卡通过；无新增静态检查违规。

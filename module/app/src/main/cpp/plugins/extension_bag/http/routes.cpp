@@ -28,6 +28,7 @@ enum class EbCommand : uint8_t {
     kClickItem,
     kEquip,
     kItem,
+    kSetBagCount,
 };
 
 struct EbCommandRoute {
@@ -43,6 +44,7 @@ EbCommandRoute kEbCommandRoutes[] = {
     {"/api/debug/extension_bag/click_item", EbCommand::kClickItem},
     {"/api/debug/extension_bag/equip", EbCommand::kEquip},
     {"/api/debug/extension_bag/item", EbCommand::kItem},
+    {"/api/extension_bag/set_bag_count", EbCommand::kSetBagCount},
 };
 
 QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
@@ -74,6 +76,9 @@ const qol::contracts::HttpEndpointDescriptor kHttpEndpoints[kHttpEndpointCount] 
     {qol::contracts::HttpMethod::kPost, "/api/debug/extension_bag/item", kPluginId,
      qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
      &kEbCommandRoutes[6].kind},
+    {qol::contracts::HttpMethod::kPost, "/api/extension_bag/set_bag_count", kPluginId,
+     qol::contracts::HttpHandlerKind::kCommand, 0, 1, nullptr, &eb_command_handler,
+     &kEbCommandRoutes[7].kind},
 };
 
 namespace {
@@ -168,6 +173,9 @@ bool eb_result_handler(void*, const uint8_t* payload, uint32_t size, char* out, 
         case EbCommand::kItem:
             body = data_virtual_bag_test_item(p.a, p.b, p.c, p.d);
             break;
+        case EbCommand::kSetBagCount:
+            body = data_op_extension_bag_set_bag_count(p.a);
+            break;
         default:
             return false;
     }
@@ -233,7 +241,7 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             if (!extract_int_field(body, "bagType", &bag_type)) {
                 return eb_command_error(response, 400, "bagType required");
             }
-            if (index < 0 || index >= virtual_bag::kBagCount || bag_type <= 0 ||
+            if (index < 0 || index >= virtual_bag::active_extension_bags() || bag_type <= 0 ||
                 bag_type > static_cast<int32_t>(virtual_bag::BagType::kLargeBackpack)) {
                 return eb_command_error(response, 400, "bad virtual bag index or bag type");
             }
@@ -258,7 +266,7 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             if (!extract_int_field(body, "count", &count)) {
                 return eb_command_error(response, 400, "count required");
             }
-            if (index < 0 || index >= virtual_bag::kBagCount || item_slot < 0 ||
+            if (index < 0 || index >= virtual_bag::active_extension_bags() || item_slot < 0 ||
                 item_slot >= virtual_bag::kSlotCount || category < 0 || count < 0) {
                 return eb_command_error(response, 400, "bad virtual bag item");
             }
@@ -266,6 +274,17 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             payload.b = item_slot;
             payload.c = category;
             payload.d = count;
+            break;
+        }
+        case EbCommand::kSetBagCount: {
+            int32_t count = -1;
+            if (!extract_int_field(body, "count", &count)) {
+                return eb_command_error(response, 400, "count required");
+            }
+            if (count < 1 || count > virtual_bag::kMaxExtensionBags) {
+                return eb_command_error(response, 400, "count required (1-8)");
+            }
+            payload.a = count;
             break;
         }
         default:

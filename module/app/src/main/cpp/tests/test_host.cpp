@@ -690,12 +690,12 @@ static void test_virtual_bag_state() {
     CHECK_EQ((int)virtual_bag::derive_capacity(5), 0);
     virtual_bag::State state{};
     virtual_bag::normalize(&state);
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
         CHECK_EQ((int)state.capacities[index], 0);
     }
-    state.types = {4, 4, 4, 4, 4};
+    state.types.fill(4);
     virtual_bag::normalize(&state);
-    for (int index = 0; index < virtual_bag::kBagCount; ++index) {
+    for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
         CHECK_EQ((int)state.capacities[index], 16);
     }
     state.mode = virtual_bag::Mode::kModule;
@@ -1300,10 +1300,10 @@ static void test_adopt_merge_plan() {
 static void test_place_plan() {
     using Outcome = virtual_bag::PlaceOutcome;
     using ItemGrid =
-        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kBagCount>;
+        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>;
     ItemGrid items{};
-    std::array<uint8_t, virtual_bag::kBagCount> types{};
-    std::array<uint8_t, virtual_bag::kBagCount> capacities{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> types{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> capacities{};
 
     // 同身份（payload count 位不同/a≠0）：existing canonical 150 + 拾取 1 → 151。
     types[0] = 4;
@@ -1364,7 +1364,7 @@ static void test_place_plan() {
     CHECK(no_space.outcome == Outcome::kNoSpace);
 
     // 未装备袋不参与落位：types 全 0 且有空槽仍 kNoSpace（维度保证不触物理袋 5）。
-    std::array<uint8_t, virtual_bag::kBagCount> no_types{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> no_types{};
     const virtual_bag::PlacePlan unequipped = virtual_bag::place_plan(
         items, no_types, capacities, incoming, /*allow_new_slot=*/true, true,
         host_category_uses_stack_count);
@@ -1401,11 +1401,11 @@ static void test_place_plan() {
 static void test_virtual_bag_capacity_bounds() {
     using Outcome = virtual_bag::PlaceOutcome;
     using ItemGrid =
-        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kBagCount>;
+        std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>, virtual_bag::kMaxExtensionBags>;
 
     ItemGrid items{};
-    std::array<uint8_t, virtual_bag::kBagCount> types{};
-    std::array<uint8_t, virtual_bag::kBagCount> capacities{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> types{};
+    std::array<uint8_t, virtual_bag::kMaxExtensionBags> capacities{};
     types[0] = 1;  // BagType 1 → 容量 4
     capacities[0] = virtual_bag::derive_capacity(1);
     for (int slot = 0; slot < capacities[0]; ++slot) {
@@ -1779,23 +1779,23 @@ static void test_virtual_bag_transaction_domain() {
     CHECK(!valid_original_transaction_bag(255));
 
     CHECK(valid_extension_logical_bag(kExtensionLogicalBagFirst));
-    CHECK(valid_extension_logical_bag(kExtensionLogicalBagLast));
+    CHECK(valid_extension_logical_bag(extension_logical_bag_last()));
     CHECK(!valid_extension_logical_bag(kOriginalTaskBag));
     CHECK(!valid_extension_logical_bag(11));
     CHECK_EQ(extension_internal_bag(kExtensionLogicalBagFirst), 0);
-    CHECK_EQ(extension_internal_bag(kExtensionLogicalBagLast), kBagCount - 1);
+    CHECK_EQ(extension_internal_bag(extension_logical_bag_last()), active_extension_bags() - 1);
     CHECK_EQ(extension_internal_bag(11), -1);
     CHECK_EQ(extension_logical_bag(0), kExtensionLogicalBagFirst);
-    CHECK_EQ(extension_logical_bag(kBagCount - 1), kExtensionLogicalBagLast);
-    CHECK_EQ(extension_logical_bag(kBagCount), -1);
+    CHECK_EQ(extension_logical_bag(active_extension_bags() - 1), extension_logical_bag_last());
+    CHECK_EQ(extension_logical_bag(active_extension_bags()), -1);
 
     CHECK(valid_transaction_domain(kTransferOriginalToExtension, 0, 0, 4, 15));
     CHECK(valid_transaction_domain(kTransferExtensionToOriginal, 4, 15, 0, 0));
     CHECK(!valid_transaction_domain(kTransferOriginalToExtension, -1, 0, 0, 0));
     CHECK(!valid_transaction_domain(kTransferOriginalToExtension, kOriginalTaskBag, 0, 0, 0));
     CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, 0, 0, kOriginalTaskBag, 0));
-    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, 0, kBagCount, 0));
-    CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, kBagCount, 0, 0, 0));
+    CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, 0, kMaxExtensionBags, 0));
+    CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, kMaxExtensionBags, 0, 0, 0));
     CHECK(!valid_transaction_domain(kTransferOriginalToExtension, 0, -1, 0, 0));
     CHECK(!valid_transaction_domain(kTransferExtensionToOriginal, 0, 0, 0, kSlotCount));
 
@@ -2041,6 +2041,52 @@ static void test_save_backup_bundle_roundtrip() {
     corrupted[18] = 0xFF;  // origLen 高字节越界
     CHECK(!sb::parse_bundle(corrupted.data(), corrupted.size(), parsed));
     CHECK(!sb::parse_bundle(bundle.data(), sb::kMinBundleBytes - 1, parsed));
+}
+
+static void test_save_backup_plain_slot_meta() {
+    namespace sb = save_backup;
+    // 最小原版明文：7 块目录；块 0/1/2 分别放在 36/69/79。
+    std::vector<uint8_t> plain(86, 0);
+    auto set16 = [&](size_t off, uint16_t v) {
+        plain[off] = static_cast<uint8_t>(v);
+        plain[off + 1] = static_cast<uint8_t>(v >> 8);
+    };
+    set16(8, 28);   // block0 offset_rel -> 36
+    set16(10, 33);  // block0 len
+    set16(12, 61);  // block1 offset_rel -> 69
+    set16(14, 10);  // block1 len
+    set16(16, 71);  // block2 offset_rel -> 79
+    set16(18, 7);   // block2 len
+    plain[69] = 20;  // block1 +0 i16 map_id
+    plain[79] = 1;   // block2 +0 u8 count
+    set16(80, 5);    // 记录 0 偏移（相对块 2 基址）
+    set16(82, 2);    // 记录 0 长度
+    plain[84] = 5;   // 记录 +0 等级
+    plain[85] = 3;   // 记录 +1 职业
+
+    int map_id = -1;
+    CHECK(sb::parse_plain_map_id(plain, map_id));
+    CHECK_EQ(map_id, 20);
+    int level = -1;
+    int class_idx = -1;
+    CHECK(sb::parse_plain_main_character(plain, level, class_idx));
+    CHECK_EQ(level, 5);
+    CHECK_EQ(class_idx, 3);
+
+    // 非法：空/过短、块表不完整、count=0、记录越界。
+    std::vector<uint8_t> bad;
+    CHECK(!sb::parse_plain_map_id(bad, map_id));
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
+    bad = plain;
+    bad[16] = 0;
+    bad[17] = 0;
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
+    bad = plain;
+    bad[79] = 0;
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
+    bad = plain;
+    bad.resize(84);
+    CHECK(!sb::parse_plain_main_character(bad, level, class_idx));
 }
 
 static void test_save_backup_meta_entry() {
@@ -2418,7 +2464,7 @@ static void test_prepare_journal() {
     {
         JournalRecord journal = base_record();
         journal.direction = kTransferExtensionToOriginal;
-        journal.src_bag = kBagCount;
+        journal.src_bag = kMaxExtensionBags;
         CHECK(!valid_journal_record(journal));
     }
     {
@@ -2538,14 +2584,14 @@ static void test_prepare_journal() {
             "\"mode\":\"module\",\"originalSelected\":1,\"types\":[2,0,0,0,0],"
             "\"selected\":0,\"inspected\":-1,\"items\":[" ;
         std::string json = with_unknown_fields;
-        for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int bag = 0; bag < virtual_bag::kMaxExtensionBags; ++bag) {
             json += '[';
             for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
                 if (slot > 0) json += ',';
                 json += (bag == 0 && slot == 0) ? R"({"category":7,"count":5})" : "{\"category\":0,\"count\":0}";
             }
             json += ']';
-            if (bag + 1 < virtual_bag::kBagCount) json += ',';
+            if (bag + 1 < virtual_bag::kMaxExtensionBags) json += ',';
         }
         json += "]}";
         virtual_bag::State forward{};
@@ -2562,7 +2608,7 @@ static void test_prepare_journal() {
         std::string json =
             "{\"mode\":\"original\",\"originalSelected\":1,\"types\":[0,0,0,0,0],"
             "\"selected\":-1,\"inspected\":-1,\"items\":[";
-        for (int bag = 0; bag < virtual_bag::kBagCount; ++bag) {
+        for (int bag = 0; bag < virtual_bag::kMaxExtensionBags; ++bag) {
             json += '[';
             for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
                 if (slot > 0) json += ',';
@@ -2575,7 +2621,7 @@ static void test_prepare_journal() {
                 }
             }
             json += ']';
-            if (bag + 1 < virtual_bag::kBagCount) json += ',';
+            if (bag + 1 < virtual_bag::kMaxExtensionBags) json += ',';
         }
         json += "]}";
         virtual_bag::State escaped{};
@@ -2790,7 +2836,7 @@ static void test_p44_transaction_stages() {
     CHECK(valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
     CHECK(valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 1));
     CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, 2, 0));
-    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, kBagCount, 1));
+    CHECK(!valid_pending_transaction_domain(kTransferExtensionToExtension, 2, 0, kMaxExtensionBags, 1));
     CHECK(!valid_transaction_domain(kTransferExtensionToExtension, 2, 0, 3, 4));
 
     Item src{};
@@ -3099,10 +3145,10 @@ static void test_p52_drag_session() {
     CHECK_EQ(classify_drag_target(0, 0), DragTargetKind::kOriginalBag);
     CHECK_EQ(classify_drag_target(kOriginalTaskBag, 0), DragTargetKind::kTaskBagRejected);
     CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 4), DragTargetKind::kExtensionSlot);
-    CHECK_EQ(classify_drag_target(kExtensionLogicalBagLast, 15), DragTargetKind::kExtensionSlot);
+    CHECK_EQ(classify_drag_target(extension_logical_bag_last(), 15), DragTargetKind::kExtensionSlot);
     CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 0, true),
              DragTargetKind::kExtensionTab);
-    CHECK_EQ(classify_drag_target(kBagCount, 0), DragTargetKind::kTaskBagRejected);
+    CHECK_EQ(classify_drag_target(kOriginalTaskBag, 0), DragTargetKind::kTaskBagRejected);
     CHECK_EQ(classify_drag_target(0, kSlotCount), DragTargetKind::kInvalid);
     CHECK_EQ(classify_drag_target(0, 0, false, true), DragTargetKind::kCancel);
 }
@@ -3329,6 +3375,7 @@ int main() {
     test_save_backup_digests();
     test_save_backup_base64();
     test_save_backup_bundle_roundtrip();
+    test_save_backup_plain_slot_meta();
     test_save_backup_meta_entry();
     test_save_backup_entry_map_name();
     test_save_backup_checksum_name();

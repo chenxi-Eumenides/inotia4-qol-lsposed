@@ -30,6 +30,7 @@ set_source_files_properties(${CPP_DIR}/host/http_dispatch.cpp PROPERTIES
 add_executable(host_tests
     test_host.cpp
     test_stubs.cpp
+    stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/core.item/inventory/inventory_find_item_poc.cpp
     ${CPP_DIR}/patch/call_patch.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
@@ -887,6 +888,7 @@ add_test(NAME extension_bag_contract_tests COMMAND extension_bag_contract_tests)
 
 # ITM-16: production EB sale-removal transaction core with descriptor/ownership/projection state.
 add_executable(extension_bag_sale_transaction_tests test_extension_bag_sale_transaction.cpp)
+target_sources(extension_bag_sale_transaction_tests PRIVATE stubs/extension_bag_catalog_stub.cpp)
 target_include_directories(extension_bag_sale_transaction_tests PRIVATE ${CPP_DIR})
 target_compile_features(extension_bag_sale_transaction_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_sale_transaction_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
@@ -924,6 +926,7 @@ add_test(NAME inventory_trade_provider_sell_tests COMMAND inventory_trade_provid
 # qol_log.cpp；Android 头经 stubs/ 覆盖不适用（本 target 无 Android 依赖）。
 add_executable(extension_bag_slot_data_tests
     test_extension_bag_slot_data.cpp
+    stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/persistence/persistence.cpp
     ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
 )
@@ -947,6 +950,7 @@ add_test(NAME item_handle_custody_tests COMMAND item_handle_custody_tests)
 
 add_executable(extension_bag_transaction_coordinator_tests
     test_extension_bag_transaction_coordinator.cpp
+    stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/transaction/transaction_coordinator.cpp)
 target_include_directories(extension_bag_transaction_coordinator_tests PRIVATE
     ${CPP_DIR}
@@ -959,6 +963,7 @@ add_test(NAME extension_bag_transaction_coordinator_tests COMMAND extension_bag_
 
 add_executable(extension_bag_bag_state_store_tests
     test_extension_bag_bag_state_store.cpp
+    stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp)
 target_include_directories(extension_bag_bag_state_store_tests PRIVATE
     ${CPP_DIR}
@@ -990,6 +995,7 @@ add_test(NAME extension_bag_deferred_free_tests COMMAND extension_bag_deferred_f
 
 # EB draw-end synchronous state read must not re-enter g_virtual_bag_mtx.
 add_executable(extension_bag_draw_lock_tests test_extension_bag_draw_lock.cpp)
+target_sources(extension_bag_draw_lock_tests PRIVATE stubs/extension_bag_catalog_stub.cpp)
 target_include_directories(extension_bag_draw_lock_tests PRIVATE ${CPP_DIR})
 target_compile_definitions(extension_bag_draw_lock_tests PRIVATE
     QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE="${CPP_DIR}/plugins/extension_bag/public/bridge.cpp"
@@ -1023,6 +1029,7 @@ add_test(NAME extension_bag_status_query_tests COMMAND extension_bag_status_quer
 # Extension bag debug HTTP parameter validation, ticket result semantics and pure view-state exit.
 add_executable(extension_bag_debug_api_tests
     test_extension_bag_debug_api.cpp
+    stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/http/routes.cpp
     ${CPP_DIR}/plugins/extension_bag/http/query.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/entry_guard.cpp
@@ -1035,6 +1042,14 @@ target_compile_features(extension_bag_debug_api_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_debug_api_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_debug_api_tests COMMAND extension_bag_debug_api_tests)
+
+add_executable(extension_bag_catalog_tests
+    test_bag_catalog.cpp
+    stubs/extension_bag_catalog_stub.cpp)
+target_include_directories(extension_bag_catalog_tests PRIVATE ${CPP_DIR})
+target_compile_features(extension_bag_catalog_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_catalog_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_catalog_tests COMMAND extension_bag_catalog_tests)
 
 # D1-a2：PopupState state 表注入机制 host 测试（假 state 表；占用/幂等/还原；末尾追加）
 add_executable(hooks_popup_state_tests
