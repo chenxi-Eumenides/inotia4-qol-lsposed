@@ -265,17 +265,20 @@ int extension_logical_last();   // 6 + active - 1
 6. 验收：1/5/8 个袋的 Host 测试与真机开包/切袋/跨袋移动；v4 旧档迁移；
    缩小数量在非空袋时被拒绝。
 
-### P5 用例层 + 接口收口
+### P5 用例层 + 接口收口（命令层完成）
 
-- 新增 `usecases/`；`api/`、`ui/` 只调用例。
-- 删除宏桥与 `extension_bag_internal.h` 的包含；按层拆头文件。
-- 验收：所有 HTTP 命令、UI 面板、详情/出售/合成路径。
+- 已新增 `usecases/`（view/item/unequip/move/set_bag_count）；`api_impl` 只保留薄委托。
+- 已删除 orchestrator 34 个宏桥；`extension_bag_internal.h` 仍被部分 ui/public 文件包含。
+- 剩余：`ui/` 485 处、`public/` 304 处直接 `runtime_state()` 引用，需按页面迁到
+  `bag_query`/用例；`pipeline` 安装/恢复随 P3c 迁移。
+- 验收：HTTP 命令与接口已通过；UI 面板/详情/出售/合成路径待迁移验收。
 
-### P6 删除互斥量与线程字段
+### P6 删除互斥量与线程字段（已完成）
 
-- 删除 `runtime_state().mtx`、`std::thread::id owner`、`try_lock` 退让代码。
-- 保留主线程断言与 `EntryGuard`。
-- 验收：并发命令编组到位后跑压力（连续 200 次移动/查询/开包），无重入拒绝死循环、无半状态。
+- 已删除 `runtime_state().mtx`（133 处 lock_guard、12 处 unique_lock、46 处锁参数）。
+- 7 处 `try_to_lock` 改为 `TryReentryLock`（线程局部深度判断），原生回调重入立即返回。
+- 保留 `EntryGuard` 与主线程断言；快照发布补齐页签选中/退出路径。
+- 验收：CTest 160/160、check_arch、Android Debug 构建；v520 真机开包/切袋/退出正常。
 
 ## 8. 架构约束固化（CI）
 
