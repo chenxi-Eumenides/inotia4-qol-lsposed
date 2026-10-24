@@ -162,6 +162,47 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 - HTTP：写命令由 Host 编组到主线程；查询只读快照。
 - UI 回调：只把控件事件翻译成用例调用，不读写状态。
 
+### 5.10 BagCatalog（L1，数据驱动）
+
+**唯一来源**：扩展袋的上限、活动数量、槽数与类型容量，禁止在业务代码里再写 `5`、`16`、`{0,4,8,12,16}`。
+
+- 编译期上限 `kMaxExtensionBags`：决定 `State` 数组尺寸（固定数组，避免动态分配），默认 8，可按内存预算调整。
+- 运行期活动数量 `active_count`：来自设置（见 5.11），范围 `1..kMaxExtensionBags`。
+- 类型容量表：由 `apk/static-data/json/tables/ITEMSTATICBASE.json` 经
+  `scripts/maintenance/build_bag_catalog.py` 生成 `model/bag_catalog.inc`，与变体表同一模式，避免手抄漂移。
+- 槽数 `kSlotCount = 16` 保持常量：这是游戏槽上限，不做数据化。
+
+接口（`model/bag_catalog.h`）：
+```cpp
+int max_extension_bags();       // kMaxExtensionBags
+int active_extension_bags();    // 运行期配置，1..max
+int slots_per_bag();            // 16
+int capacity_for_bag_type(int type);
+int extension_logical_first();  // 6
+int extension_logical_last();   // 6 + active - 1
+```
+
+不变量：
+- 所有遍历、API 校验、事务域、页签数量、sidecar 序列化统一读 catalog，不再各自写死。
+- `active_count` 变更只在无 pending、无活动拖拽、无未提交事务时允许。
+- 缩小数量时，被移除的袋必须全部为空；否则拒绝并提示。
+
+### 5.11 扩展袋数量设置
+
+- **存储**：sidecar `config.bagCount`（随存档），另提供模块级默认值（新档使用）。
+- **变更流程**：设置面板或 API → 主线程命令 → 校验（范围、pending、目标袋为空）→ 应用 → 持久化 → 下次打开背包按新数量重建页签。
+- **增加**：新袋 `types=0`、`capacities=0`、`items` 全空，不物化对象。
+- **减少**：要求被移除袋为空；成功后被移除袋的槽位与物化对象一并清理。
+- **API**：`POST /api/extension_bag/set_bag_count`（写命令，主线程票据）；`status` 返回 `bagCount` 与 `maxBagCount`。
+- **UI**：设置面板新增“扩展背包数量”；页签按 `active_count` 动态排布（每列最多 5 个，超出换列），与 C18 reflow 共用“模块列固定在原版列右侧”的约束。
+
+### 5.12 状态、投影与数据驱动边界
+
+- `State` 数组按 `kMaxExtensionBags` 固定；`active_count` 只控制可见/可用范围，不改变内存布局。
+- sidecar schema **v5**：新增 `bagCount`；v4 缺失按 5 迁移；`bagCount` 越界或与 `pending` 冲突时拒绝加载并隔离，不静默截断。
+- **投影只读**：绘制、命中、状态查询不写业务状态；投影安装/恢复归用例层（见 5.8）。
+- 原版袋与 C18 追加袋仍以游戏数据为唯一来源；扩展袋以 sidecar 为唯一来源。二者只在投影层汇合。
+
 ## 6. 现状映射（文件去向）
 
 | 现状 | 目标 |
@@ -188,11 +229,11 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 - 加观测：事务阶段耗时、快照版本、重入拒绝次数、原生调用次数。
 - 验收：CTest 155/155；真机开包/切袋/跨袋移动无回归。
 
-### P1 BagStateStore + InventoryAccess
+### P1 BagStateStore + InventoryAccess（已完成）
 
-- 状态读写收口到 `BagStateStore`；原生袋布局/槽读取收口到 `InventoryAccess`。
-- 读路径改快照；移除读路径里的懒加载（加载只在进档/首次）。
-- 验收：状态查询、数量查询、物理槽读取、跨袋移动（原版/C18/扩展）全部通过。
+- 已新增 `runtime/bag_state_store.*`（快照 + revision）与 `inventory_access.*`/`item_access.*` 拆分。
+- 读路径（`logical_capacity`、`module_view_installed`）已改快照，未发布时回退锁路径。
+- 验收：CTest 158/158；v520 真机 smoke 通过。
 
 ### P2 TransactionCoordinator
 
@@ -201,23 +242,36 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 - 四个方向已按“准备 → 原生调用 → 复核 → 提交/回滚”组织，阶段常量与隔离记录由 coordinator 统一。
 - 验收：四方向移动、失败回滚、进程重启恢复、sidecar 往返。
 
-### P3 ProjectionController + NativeTabLayout
+### P3 ProjectionController + NativeTabLayout（已完成 P3a/P3b）
 
-- 已完成（P3a）：`runtime/projection_controller.*` 拥有宿主容量字、当前袋（原始/raw）、
-  C18 原生袋页计数与来源袋门禁；`projection.cpp` 改为引用。
-- 进行中（P3b）：C18 布局解析/reflow/命中拆到 `runtime/native_tab_layout.*`，
-  `tabs_ui.cpp` 只保留页签安装与交互。
-- 待后续（P3c）：安装/恢复（`install_module_view_locked`/`restore_module_view_locked`）
-  仍依赖对象加载与刷新，需与 OwnershipManager 一起迁移。
+- P3a：`runtime/projection_controller.*` 拥有宿主容量字、当前袋（原始/raw）、
+  C18 原生袋页计数与来源袋门禁。
+- P3b：C18 布局解析/reflow/命中拆到 `runtime/native_tab_layout.*`；`tabs_ui.cpp` 1151→771 行。
+- P3c（待续）：安装/恢复（`install_module_view_locked`/`restore_module_view_locked`）
+  依赖对象加载与刷新，需与 OwnershipManager 一起迁移。
 - 验收：v513/v514/v520 页签布局、reflow、页签点击、原生袋命中、商店/合成投影。
 
-### P4 用例层 + 接口收口
+### P4 数据驱动：BagCatalog + 扩展袋数量（本次新增）
+
+1. **catalog 收口**：新增 `model/bag_catalog.h` + 生成脚本，替换 `kBagCount`、
+   容量表、逻辑 ID 范围、遍历上限；先保持 `active_count == 5`，行为不变。
+2. **状态容器**：`State` 数组改为 `std::array<T, kMaxExtensionBags>`，
+   业务遍历改用 `active_count`。
+3. **sidecar v5**：新增 `bagCount`，实现 v4→v5 迁移与越界拒绝。
+4. **设置项**：`set_bag_count` 命令 + 设置面板入口 + `status` 字段；
+   增加/减少的校验与清理按 5.11。
+5. **页签动态排布**：按 `active_count` 生成页签，每列最多 5 个、超出换列；
+   与 C18 reflow 的“模块列固定”约束合并。
+6. 验收：1/5/8 个袋的 Host 测试与真机开包/切袋/跨袋移动；v4 旧档迁移；
+   缩小数量在非空袋时被拒绝。
+
+### P5 用例层 + 接口收口
 
 - 新增 `usecases/`；`api/`、`ui/` 只调用例。
 - 删除宏桥与 `extension_bag_internal.h` 的包含；按层拆头文件。
 - 验收：所有 HTTP 命令、UI 面板、详情/出售/合成路径。
 
-### P5 删除互斥量与线程字段
+### P6 删除互斥量与线程字段
 
 - 删除 `runtime_state().mtx`、`std::thread::id owner`、`try_lock` 退让代码。
 - 保留主线程断言与 `EntryGuard`。
@@ -230,13 +284,15 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 2. `runtime/` 不得包含 `ui/`、`api/`。
 3. 禁止新增 `#include "plugins/extension_bag/extension_bag_internal.h"`。
 4. 禁止 `#define <ident> <ident>_internal/_bridge` 形态的宏桥。
-5. 新增 `std::mutex` 在 extension_bag 内直接失败（P5 后）。
+5. 新增 `std::mutex` 在 extension_bag 内直接失败（P6 后）。
+6. `model/` 与业务代码禁止出现字面量 `kBagCount`/`5` 作为扩展袋数量；统一走 catalog。
 
 ## 9. 测试策略
 
 | 层级 | 测试 |
 |---|---|
-| L0 模型 | 现有纯逻辑单测保持 |
+| L0 模型 | 现有纯逻辑单测保持；新增 bag catalog（上限/活动数量/容量表/逻辑 ID 范围） |
+| 数据迁移 | sidecar v4→v5、bagCount 越界拒绝、缩小数量非空拒绝 |
 | L1 组件 | 新增：状态快照一致性、所有权状态机、事务阶段/回滚、投影安装恢复、布局计划 |
 | L2 适配 | Host stub 契约测试（原生调用参数/失败注入） |
 | L3 用例 | 方向矩阵 + 失败注入（满包、身份变化、generation 失效） |
@@ -252,6 +308,9 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 | 事务阶段化改变回滚语义 | 每阶段保持现有 isolate/rollback 路径；逐方向迁移并对比日志 |
 | 删除锁后遗漏 off-main 调用 | P0 断言先跑一轮真机；编组完成前不删锁 |
 | 宏桥清理引入编译期隐式依赖 | 按文件逐个替换，保持薄 wrapper 直到所有调用点迁移 |
+| bagCount 缩小导致物品丢失 | 只允许被移除袋为空；有 pending/拖拽/未提交事务时拒绝；UI 明确提示 |
+| sidecar v4→v5 迁移失败 | 迁移前保留原始 JSON；解析失败隔离并拒绝进入，不静默按 5 截断 |
+| 页签数量增加后溢出屏幕 | 每列最多 5 个、超出换列；与 C18 reflow 的模块列约束合并，空间不足 fail-closed 不绘制 |
 
 ## 11. 完成定义（DoD）
 
@@ -259,4 +318,6 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 2. `api/`、`ui/` 不直接访问 `runtime_state()`；全部经用例层。
 3. `extension_bag_internal.h` 与宏桥为零。
 4. extension_bag 内无 `std::mutex`，入口统一 `EntryGuard` + 主线程断言。
-5. Host 测试全绿；v513/v514 真机验收卡通过；无新增静态检查违规。
+5. 扩展袋数量由 catalog + 设置驱动：业务代码无 `kBagCount` 字面量；1/5/8 袋均通过 Host 与真机验收。
+6. sidecar v5 迁移可回退；缩小数量在非空时 fail-closed。
+7. Host 测试全绿；v513/v514/v520 真机验收卡通过；无新增静态检查违规。
