@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/bag_state_store.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"

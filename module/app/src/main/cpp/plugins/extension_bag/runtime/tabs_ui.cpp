@@ -71,7 +71,8 @@ bool extension_tab_buttons_complete_locked();
 bool extension_tab_buttons_have_controls_locked();
 
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
-    EntryGuard guard("tab_proc", ReentryPolicy::kRejectWrite);
+    qol::extension_bag::EntryGuard guard(
+        "tab_proc", qol::extension_bag::ReentryPolicy::kRejectWrite);
     if (!guard.entered()) return 0;
     const uint64_t observation_token = event == 0x10
         ? 0 : virtual_bag_observe_item_proc_pre(ctrl, event, x2, param);

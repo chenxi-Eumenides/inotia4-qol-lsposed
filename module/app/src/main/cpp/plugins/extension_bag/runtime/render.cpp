@@ -4,6 +4,7 @@
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/plugin.h"
+#include "plugins/extension_bag/runtime/bag_state_store.h"
 
 #include <cstring>
 
