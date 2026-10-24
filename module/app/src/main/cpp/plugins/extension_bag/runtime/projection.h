@@ -3,6 +3,24 @@
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
+struct NativeCallScope {
+    const bool previous = g_in_native_call;
+    const qol::contracts::QolGameHost* game = runtime_state().host.game;
+
+    NativeCallScope() {
+        g_in_native_call = true;
+        if (game != nullptr && game->item_abi.begin_original_only != nullptr) {
+            game->item_abi.begin_original_only();
+        }
+    }
+    ~NativeCallScope() {
+        if (game != nullptr && game->item_abi.end_original_only != nullptr) {
+            game->item_abi.end_original_only();
+        }
+        g_in_native_call = previous;
+    }
+};
+
 void* valid_child_locked(void* root, int slot);
 bool bag_size_word_locked(int bag, uint32_t* out_word);
 bool set_bag_size_word_locked(int bag, uint32_t word);

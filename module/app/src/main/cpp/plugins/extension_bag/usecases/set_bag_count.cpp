@@ -36,7 +36,9 @@ bool module_bag_index_has_runtime_data_locked(int bag) {
 
 std::string usecase_set_bag_count(int count) {
     if (count < 1 || count > virtual_bag::kMaxExtensionBags) {
-        return op_err("count required (1-8)");
+        const std::string range = "count required (1-" +
+            std::to_string(virtual_bag::kMaxExtensionBags) + ")";
+        return op_err(range.c_str());
     }
     ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();

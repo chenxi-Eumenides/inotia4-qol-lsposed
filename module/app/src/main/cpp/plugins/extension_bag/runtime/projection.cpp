@@ -329,7 +329,7 @@ bool install_module_view_locked(int bag) {
         restore_module_view_locked();
         g_skip_restore_refresh = previous_skip;
     }
-    const int original_bag = original_bag_locked();
+    const int original_bag = projection_proxy_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "module view reject install: original window bag=%d (task bag reserved)",
                     original_bag);

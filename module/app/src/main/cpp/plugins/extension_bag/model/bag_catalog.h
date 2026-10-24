@@ -6,7 +6,10 @@
 
 namespace virtual_bag {
 
-constexpr int kMaxExtensionBags = 8;
+// 扩展袋编译期上限。不是引擎限制：袋号从 6 起、字段为 uint8_t，
+// 理论上限为 249；这里取 128 是为内存/快照留出余量（State 约 0.55MB）。
+// 实际可用数量由 sidecar config.bagCount 决定（默认 5），页签当前只渲染前 5 个。
+constexpr int kMaxExtensionBags = 128;
 constexpr int kOriginalTransactionBagCount = 5;
 constexpr int kOriginalTaskBag = 5;
 constexpr int kExtensionLogicalBagFirst = 6;

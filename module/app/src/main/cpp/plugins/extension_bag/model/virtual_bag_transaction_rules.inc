@@ -495,9 +495,9 @@ enum class TxnStage : uint8_t {
 // prepared 阶段收集的不可变事务快照；三条移动路径只负责构造它，推进与回滚共享唯一实现。
 struct TransactionContext {
     uint8_t direction = kTransferOriginalToExtension;
-    uint8_t src_bag = 0;
+    int32_t src_bag = 0;
     uint8_t src_slot = 0;
-    uint8_t dst_bag = 0;
+    int32_t dst_bag = 0;
     uint8_t dst_slot = 0;
     bool merged = false;
     bool swapped = false;

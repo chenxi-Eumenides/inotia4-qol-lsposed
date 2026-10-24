@@ -123,9 +123,22 @@ inline PendingTransferParseResult parse_pending_transfer_result(const char* json
         parsed.direction > kTransferExtensionToExtension) {
         return PendingTransferParseResult::kMalformed;
     }
-    if (!parse_field("srcBag", &parsed.src_bag) ||
+    auto parse_bag = [&](const char* name, int32_t* dst) -> bool {
+        const std::string pattern = std::string("\"") + name + "\":";
+        const char* pos = strstr(key, pattern.c_str());
+        if (pos == nullptr) return false;
+        char* end = nullptr;
+        const long v = strtol(pos + pattern.size(), &end, 10);
+        if (end == pos + static_cast<std::ptrdiff_t>(pattern.size()) || v < 0 ||
+            v > 0x7FFFFFFF) {
+            return false;
+        }
+        *dst = static_cast<int32_t>(v);
+        return true;
+    };
+    if (!parse_bag("srcBag", &parsed.src_bag) ||
         !parse_field("srcSlot", &parsed.src_slot) ||
-        !parse_field("dstBag", &parsed.dst_bag) ||
+        !parse_bag("dstBag", &parsed.dst_bag) ||
         !parse_field("dstSlot", &parsed.dst_slot)) {
         return PendingTransferParseResult::kMalformed;
     }
@@ -205,7 +218,9 @@ inline bool parse_state_json(const char* json, State* state,
                              const CountPolicy* policy = nullptr) {
     if (json == nullptr || state == nullptr) return false;
     // v4 没有 bagCount，按旧版固定的五袋布局迁移；显式非法数量必须拒绝。
-    State parsed{};
+    // State 随 kMaxExtensionBags 增长，放堆上避免解析调用栈溢出。
+    auto parsed_storage = std::make_unique<State>();
+    State& parsed = *parsed_storage;
     const char* bag_count_key = strstr(json, "\"bagCount\":");
     if (bag_count_key != nullptr) {
         const char* count_cursor = bag_count_key + strlen("\"bagCount\":");
@@ -359,8 +374,9 @@ inline bool parse_state_json_at(const char* json, State* state, uint64_t observe
                                 CategoryPredicate is_count_encoded,
                                 const CountPolicy* policy = nullptr) {
     if (state == nullptr) return false;
-    State parsed;
-    if (!parse_state_json(json, &parsed, is_count_encoded, policy)) return false;
+    auto parsed_storage = std::make_unique<State>();
+    State& parsed = *parsed_storage;
+    if (!parse_state_json(json, parsed_storage.get(), is_count_encoded, policy)) return false;
     for (size_t index = 0; index < kMaxIsolationRecords; ++index) {
         if (parsed.isolations[index].valid && parsed.isolations[index].observed_at_ms == 0) {
             parsed.isolations[index].observed_at_ms = observed_at_ms;

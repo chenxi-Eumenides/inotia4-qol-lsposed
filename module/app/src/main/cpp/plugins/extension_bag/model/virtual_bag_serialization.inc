@@ -156,11 +156,17 @@ inline bool parse_journal_json(const char* json, JournalRecord* out) {
         *dst = static_cast<uint8_t>(v);
         return true;
     };
+    auto parse_i32 = [&](const char* name, int32_t* dst) -> bool {
+        uint64_t v = 0;
+        if (!parse_u64(name, &v) || v > 0x7FFFFFFF) return false;
+        *dst = static_cast<int32_t>(v);
+        return true;
+    };
     if (!parse_u8("direction", &parsed.direction) || parsed.direction > kTransferExtensionToOriginal) {
         return false;
     }
-    if (!parse_u8("srcBag", &parsed.src_bag) || !parse_u8("srcSlot", &parsed.src_slot) ||
-        !parse_u8("dstBag", &parsed.dst_bag) || !parse_u8("dstSlot", &parsed.dst_slot)) {
+    if (!parse_i32("srcBag", &parsed.src_bag) || !parse_u8("srcSlot", &parsed.src_slot) ||
+        !parse_i32("dstBag", &parsed.dst_bag) || !parse_u8("dstSlot", &parsed.dst_slot)) {
         return false;
     }
     const char* payload_key = strstr(json, "\"payload\":\"");

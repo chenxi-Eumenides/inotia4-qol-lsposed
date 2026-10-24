@@ -82,3 +82,9 @@ void set_original_bag_locked(int bag) {
     (void)runtime_state().host.write_port->ui.set_current_bag(bag);
     log_exit_trace_locked("write_set", 0, 0, 0, -1, -1);
 }
+
+int projection_proxy_bag_locked() {
+    const int current = original_bag_locked();
+    if (current >= 0 && current < virtual_bag::kOriginalTransactionBagCount) return current;
+    return 0;
+}

@@ -24,9 +24,9 @@ struct JournalRecord {
     uint64_t generation = 0;
     char transaction_id[kMaxTransactionIdChars + 1]{};
     uint8_t direction = kTransferOriginalToExtension;
-    uint8_t src_bag = 0;
+    int32_t src_bag = 0;
     uint8_t src_slot = 0;
-    uint8_t dst_bag = 0;
+    int32_t dst_bag = 0;
     uint8_t dst_slot = 0;
     uint16_t payload_size = 0;
     std::array<uint8_t, kSerializedItemBuffer> payload{};
@@ -41,9 +41,9 @@ struct WorldProbe {
 struct PendingTransfer {
     bool valid = false;
     uint8_t direction = kTransferOriginalToExtension;
-    uint8_t src_bag = 0;
+    int32_t src_bag = 0;
     uint8_t src_slot = 0;
-    uint8_t dst_bag = 0;
+    int32_t dst_bag = 0;
     uint8_t dst_slot = 0;
     uint16_t payload_size = 0;
     std::array<uint8_t, kSerializedItemBuffer> payload{};

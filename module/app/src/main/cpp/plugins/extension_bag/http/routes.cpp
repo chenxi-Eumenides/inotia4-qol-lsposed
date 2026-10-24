@@ -244,7 +244,10 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
                 return eb_command_error(response, 400, "count required");
             }
             if (count < 1 || count > virtual_bag::kMaxExtensionBags) {
-                return eb_command_error(response, 400, "count required (1-8)");
+                return eb_command_error(response, 400,
+                                    ("count required (1-" +
+                                     std::to_string(virtual_bag::kMaxExtensionBags) + ")")
+                                        .c_str());
             }
             payload.a = count;
             break;
