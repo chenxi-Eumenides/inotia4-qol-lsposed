@@ -1055,6 +1055,7 @@ add_executable(extension_bag_debug_api_tests
     test_extension_bag_debug_api.cpp
     stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/http/routes.cpp
+    ${CPP_DIR}/plugins/extension_bag/interface/bag_command.cpp
     ${CPP_DIR}/plugins/extension_bag/http/query.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/entry_guard.cpp
 )

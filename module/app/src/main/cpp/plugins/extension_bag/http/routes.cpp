@@ -2,7 +2,7 @@
 
 #include "plugins/extension_bag/runtime/entry_guard.h"
 
-#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/interface/bag_command.h"
 #include "plugins/extension_bag/http/query.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
@@ -20,31 +20,20 @@ constexpr const char* kPluginId = "extension_bag";
 // Host 从 descriptor 绑定及撤销 HTTP handlers；票据结果处理器仍由插件生命周期管理。
 // body 校验逐字对齐迁移前 Kotlin DebugController 的 ApiException 文本与状态码。
 
-enum class EbCommand : uint8_t {
-    kEnterView,
-    kExitView,
-    kUnequip,
-    kSelectBag,
-    kClickItem,
-    kEquip,
-    kItem,
-    kSetBagCount,
-};
-
 struct EbCommandRoute {
     const char* path;
-    EbCommand kind;
+    BagCommandKind kind;
 };
 
 EbCommandRoute kEbCommandRoutes[] = {
-    {"/api/debug/extension_bag/enter_view", EbCommand::kEnterView},
-    {"/api/debug/extension_bag/exit_view", EbCommand::kExitView},
-    {"/api/debug/extension_bag/unequip", EbCommand::kUnequip},
-    {"/api/debug/extension_bag/select_bag", EbCommand::kSelectBag},
-    {"/api/debug/extension_bag/click_item", EbCommand::kClickItem},
-    {"/api/debug/extension_bag/equip", EbCommand::kEquip},
-    {"/api/debug/extension_bag/item", EbCommand::kItem},
-    {"/api/extension_bag/set_bag_count", EbCommand::kSetBagCount},
+    {"/api/debug/extension_bag/enter_view", BagCommandKind::kEnterView},
+    {"/api/debug/extension_bag/exit_view", BagCommandKind::kExitView},
+    {"/api/debug/extension_bag/unequip", BagCommandKind::kUnequip},
+    {"/api/debug/extension_bag/select_bag", BagCommandKind::kSelectBag},
+    {"/api/debug/extension_bag/click_item", BagCommandKind::kClickItem},
+    {"/api/debug/extension_bag/equip", BagCommandKind::kEquip},
+    {"/api/debug/extension_bag/item", BagCommandKind::kItem},
+    {"/api/extension_bag/set_bag_count", BagCommandKind::kSetBagCount},
 };
 
 QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
@@ -151,34 +140,7 @@ bool eb_result_handler(void*, const uint8_t* payload, uint32_t size, char* out, 
     EbCommandPayload p{};
     std::memcpy(&p, payload, size);
     std::string body;
-    switch (static_cast<EbCommand>(p.kind)) {
-        case EbCommand::kEnterView:
-            body = data_op_extension_bag_enter_view(p.a);
-            break;
-        case EbCommand::kExitView:
-            body = data_op_extension_bag_exit_view();
-            break;
-        case EbCommand::kUnequip:
-            body = data_op_extension_bag_unequip(p.a);
-            break;
-        case EbCommand::kSelectBag:
-            body = data_op_extension_bag_select_bag(p.a);
-            break;
-        case EbCommand::kClickItem:
-            body = data_op_extension_bag_click_item(p.a, p.b);
-            break;
-        case EbCommand::kEquip:
-            body = data_virtual_bag_test_equip(p.a, p.b);
-            break;
-        case EbCommand::kItem:
-            body = data_virtual_bag_test_item(p.a, p.b, p.c, p.d);
-            break;
-        case EbCommand::kSetBagCount:
-            body = data_op_extension_bag_set_bag_count(p.a);
-            break;
-        default:
-            return false;
-    }
+    if (!dispatch_bag_command(p.kind, p.a, p.b, p.c, p.d, &body)) return false;
     if (body.size() > capacity) return false;
     std::memcpy(out, body.data(), body.size());
     *out_size = static_cast<uint32_t>(body.size());
@@ -193,7 +155,7 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
     if (request == nullptr || response == nullptr || ctx == nullptr) {
         return eb_command_error(response, 400, "bad request");
     }
-    const EbCommand kind = *static_cast<const EbCommand*>(ctx);
+    const BagCommandKind kind = *static_cast<const BagCommandKind*>(ctx);
     // HttpReq.body 无 null 结尾契约：拷贝到 std::string（自带结尾）再做字段提取。
     if (request->body == nullptr && request->body_len != 0) {
         return eb_command_error(response, 400, "bad request");
@@ -208,21 +170,21 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
     int32_t bag = -1;
     int32_t slot = -1;
     switch (kind) {
-        case EbCommand::kEnterView:
+        case BagCommandKind::kEnterView:
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
             payload.a = bag;
             break;
-        case EbCommand::kExitView:
+        case BagCommandKind::kExitView:
             break;
-        case EbCommand::kUnequip:
+        case BagCommandKind::kUnequip:
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
             payload.a = bag;
             break;
-        case EbCommand::kSelectBag:
+        case BagCommandKind::kSelectBag:
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
             payload.a = bag;
             break;
-        case EbCommand::kClickItem: {
+        case BagCommandKind::kClickItem: {
             if (!eb_bag_valid(body, &bag, response)) return contracts::ok();
             if (!extract_int_field(body, "slot", &slot)) slot = -1;
             if (slot < 0 || slot > 15) {
@@ -232,7 +194,7 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             payload.b = slot;
             break;
         }
-        case EbCommand::kEquip: {
+        case BagCommandKind::kEquip: {
             int32_t index = -1;
             int32_t bag_type = -1;
             if (!extract_int_field(body, "index", &index)) {
@@ -249,7 +211,7 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             payload.b = bag_type;
             break;
         }
-        case EbCommand::kItem: {
+        case BagCommandKind::kItem: {
             int32_t index = -1;
             int32_t item_slot = -1;
             int32_t category = -1;
@@ -276,7 +238,7 @@ QolResult eb_command_handler(const contracts::HttpReq* request, contracts::HttpR
             payload.d = count;
             break;
         }
-        case EbCommand::kSetBagCount: {
+        case BagCommandKind::kSetBagCount: {
             int32_t count = -1;
             if (!extract_int_field(body, "count", &count)) {
                 return eb_command_error(response, 400, "count required");
