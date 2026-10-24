@@ -1,6 +1,6 @@
 # extension_bag 架构设计
 
-状态：目标架构；P0–P3 已落地，P4 数据层实施中，P5/P6 见 §9。
+状态：目标架构；P0–P4 已落地，P5 部分落地，P6 待查询编组（见 §9）。
 
 ## 1. 设计原则
 
@@ -141,7 +141,18 @@ draw hook → 读快照 + mode
 | 新增袋类型/容量 | 改 ITEMSTATICBASE.json，重跑 `build_bag_catalog.py` |
 | 新增移动方向 | 新增 usecase + transaction 方向实现，复用 coordinator |
 
-## 9. 阶段状态
+## 9. P6 前置：查询编组
+
+删除 `runtime_state().mtx` 前必须满足：
+
+1. 所有 HTTP 查询（`/api/debug/extension_bag/status` 等）经 `commands.post_typed` 编组到主线程，或在主线程发布“全量快照”（含 items 与 payload）。
+2. 查询线程不得直接读 `runtime_state().objects`。
+3. 原生回调重入由 `EntryGuard` 拒绝，不再依赖 `try_lock` 退让。
+4. 迁移顺序：先做 status 查询快照 → 再删读锁 → 最后删写锁；每步跑 200 次连续命令压力。
+
+在此之前保留互斥量是正确取舍：跨线程数据竞争比锁开销危险得多。
+
+## 10. 阶段状态
 
 | 阶段 | 状态 |
 |---|---|
@@ -149,6 +160,6 @@ draw hook → 读快照 + mode
 | P1 BagStateStore + Access 拆分 | 已完成 |
 | P2 TransactionCoordinator | 已完成 |
 | P3 ProjectionController + NativeTabLayout | 已完成（P3a/P3b；P3c 与 Ownership 合并迁移） |
-| P4 BagCatalog + 可配置数量 | 实施中 |
-| P5 用例层 + 接口收口 | 待开始 |
-| P6 删除互斥量 | 依赖 P5 查询快照化 |
+| P4 BagCatalog + 可配置数量 | 已完成：catalog 生成、sidecar v5、set_bag_count、1–5 可用 |
+| P5 用例层 + 接口收口 | 部分：orchestrator 宏桥已删；view usecases 已建；move/status 用例与 internal 头清理待续 |
+| P6 删除互斥量 | 阻塞：HTTP 查询仍在 worker 线程直读 live State，需先编组到主线程或全量快照 |
