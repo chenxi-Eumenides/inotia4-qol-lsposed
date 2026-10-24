@@ -4,6 +4,7 @@ add_library(qol_plugin_extension_bag STATIC
     runtime/bag_state_store.cpp
     runtime/inventory_access.cpp
     runtime/item_access.cpp
+    runtime/native_tab_layout.cpp
     runtime/tabs_ui.cpp
     runtime/orchestrator.cpp
     public/counts.cpp
