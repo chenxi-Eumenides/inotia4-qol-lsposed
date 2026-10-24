@@ -18,6 +18,8 @@ add_library(qol_plugin_extension_bag STATIC
     api/api_impl.cpp
     interface/bag_query.cpp
     interface/bag_command.cpp
+    usecases/item.cpp
+    usecases/unequip.cpp
     usecases/view.cpp
     usecases/move.cpp
     usecases/set_bag_count.cpp

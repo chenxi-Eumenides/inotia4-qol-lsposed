@@ -3,6 +3,7 @@
 #include "contracts/item_handle.h"
 
 #include <mutex>
+#include <string>
 
 namespace qol::features::extension_bag::usecases {
 
@@ -14,5 +15,6 @@ bool move_original_to_extension(std::unique_lock<std::mutex>& lock, int dst_bag,
 bool move_extension_to_original(std::unique_lock<std::mutex>& lock, int src_bag,
                                 int src_slot, int target_bag);
 bool move_extension_to_extension(int src_bag, int src_slot, int dst_bag, int dst_slot);
+std::string move_item(int from_bag, int from_slot, int to_bag, int to_slot);
 
 }  // namespace qol::features::extension_bag::usecases

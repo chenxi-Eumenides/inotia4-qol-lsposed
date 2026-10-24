@@ -24,7 +24,9 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/usecases/item.h"
 #include "plugins/extension_bag/usecases/move.h"
+#include "plugins/extension_bag/usecases/unequip.h"
 #include "plugins/extension_bag/usecases/view.h"
 
 #include <atomic>
@@ -40,11 +42,9 @@
 
 
 
-#define extension_bag_status_json_locked extension_bag_status_json_locked_bridge
 #define extension_bag_not_ready_error_locked extension_bag_not_ready_error_locked_bridge
 #define extension_bag_ready_locked extension_bag_ready_locked_bridge
 #define extension_internal_bag extension_internal_bag_bridge
-#define unequip_extension_bag_locked unequip_extension_bag_locked_bridge
 std::string extension_bag_api_status_json_impl() {
     return qol::features::extension_bag::query_status_json();
 }
@@ -62,95 +62,15 @@ std::string extension_bag_api_select_bag_impl(int logical_bag) {
 }
 
 std::string extension_bag_api_click_item_impl(int logical_bag, int slot) {
-    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
-    const int internal_bag = extension_internal_bag(logical_bag);
-    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
-        return extension_bag_not_ready_error_locked();
-    }
-    ensure_state_loaded_locked();
-    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
-        return op_err("not in extension view");
-    }
-    if (runtime_state().objects.bag.selected != internal_bag) return op_err("bag not selected");
-    if (slot >= runtime_state().objects.bag.capacities[internal_bag]) {
-        return op_err("slot beyond derived capacity");
-    }
-    const virtual_bag::Item& item = runtime_state().objects.bag.items[internal_bag][slot];
-    if (item.category <= 0 || item.count <= 0) {
-        runtime_state().objects.bag.inspected = -1;
-        persist_state_locked();
-        return "{\"ok\":true,\"item\":null}";
-    }
-    runtime_state().objects.bag.inspected = slot;
-    persist_state_locked();
-    return "{\"ok\":true,\"item\":{\"bag\":" + std::to_string(logical_bag) +
-           ",\"slot\":" + std::to_string(slot) +
-           ",\"category\":" + std::to_string(item.category) +
-           ",\"count\":" +
-           std::to_string(static_cast<int>(virtual_bag_effective_count(runtime_state().objects.module_objects[internal_bag][slot], static_cast<uint32_t>(item.count)))) +
-           ",\"payload\":\"" +
-           virtual_bag::base64_encode(item.payload.data(), item.payload_size) + "\"}}";
+    return qol::features::extension_bag::usecases::click_item(logical_bag, slot);
 }
 
-// P3 袋解除（原版语义）：非空拒绝、无空位拒绝、成功 = 按类型重建袋物品
-// 入库 + 装备清零 + 切到接收袋。HTTP 路径不弹窗，仅返回错误码。
 std::string extension_bag_api_unequip_impl(int logical_bag) {
-    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    const int internal_bag = extension_internal_bag(logical_bag);
-    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
-    {
-        std::unique_lock<std::mutex> lock(runtime_state().mtx);
-        if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
-            return extension_bag_not_ready_error_locked();
-        }
-        result = unequip_extension_bag_locked(lock, internal_bag);
-    }
-    if (result == ExtensionBagUnequipResult::kOk) return op_ok();
-    if (result == ExtensionBagUnequipResult::kNotEmpty) return op_err("bag not empty");
-    if (result == ExtensionBagUnequipResult::kNoSpace) return op_err("no space");
-    if (result == ExtensionBagUnequipResult::kPersistFailed) return op_err("persist failed");
-    if (result == ExtensionBagUnequipResult::kFailed) return op_err("unequip failed");
-    return op_err("bag not equipped");
+    return qol::features::extension_bag::usecases::unequip_bag(logical_bag);
 }
 
 std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to_bag, int to_slot) {
-    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    if (runtime_state().objects.module_view_installed) return op_err("extension view open; movement disabled (P2)");
-    if (from_bag == virtual_bag::kOriginalTaskBag ||
-        to_bag == virtual_bag::kOriginalTaskBag) {
-        return op_err("task bag excluded");
-    }
-    if (from_slot < 0 || from_slot >= virtual_bag::kSlotCount) return op_err("bad slot");
-    const bool from_original = virtual_bag::valid_original_transaction_bag(from_bag);
-    const bool to_original = virtual_bag::valid_original_transaction_bag(to_bag);
-    const int from_internal = extension_internal_bag(from_bag);
-    const int to_internal = extension_internal_bag(to_bag);
-    const bool from_extension = from_internal >= 0;
-    const bool to_extension = to_internal >= 0;
-    if (!from_original && !from_extension) return op_err("bad from bag");
-    if (!to_original && !to_extension) return op_err("bad to bag");
-    if (from_original && to_original) return op_err("use /api/item/inventory/move_item");
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
-    ensure_state_loaded_locked();
-    // 锁内复核当前 epoch 准入：readiness 与真正执行之间可能发生 detach/epoch 变化。
-    if (!extension_bag_session_admitted_locked()) return extension_bag_not_ready_error_locked();
-    bool moved = false;
-    if (from_original && to_extension) {
-        moved = qol::features::extension_bag::usecases::move_original_to_extension_slot(
-            lock, from_bag, from_slot, to_internal);
-    } else if (from_extension && to_original) {
-        moved = qol::features::extension_bag::usecases::move_extension_to_original(
-            lock, from_internal, from_slot, to_bag);
-    } else {
-        moved = qol::features::extension_bag::usecases::move_extension_to_extension(
-            from_internal, from_slot, to_internal, to_slot);
-    }
-    if (!moved) return op_err("move failed");
-    return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
+    return qol::features::extension_bag::usecases::move_item(from_bag, from_slot, to_bag, to_slot);
 }
 
 namespace {
@@ -403,8 +323,6 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
     return qol::contracts::succeeded(result) ? op_ok() : op_err(result.message);
 }
 
-#undef extension_bag_status_json_locked
 #undef extension_bag_not_ready_error_locked
 #undef extension_bag_ready_locked
 #undef extension_internal_bag
-#undef unequip_extension_bag_locked
