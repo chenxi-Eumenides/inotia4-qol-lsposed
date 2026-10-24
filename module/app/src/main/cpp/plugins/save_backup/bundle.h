@@ -198,6 +198,21 @@ const char* inline_warehouse_strip_name(InlineWarehouseStrip s);
 // plain 总长缩短。不满足保守规则时 plain 保持原样。
 InlineWarehouseStrip warehouse_strip_inline_segment(std::vector<uint8_t>& plain);
 
+// ---- 原版存档明文（非 bundle）主槽摘要 ----
+//
+// 明文块表：块 i 数据 = plain + 8 + u16(plain + 8 + i*4)；块 1 = Player，块 2 = CharacterInfo。
+// 块 1 +0 为 i16 地图 id；块 2 +0 为 u8 count，随后 count 个 u16 记录偏移（相对块 2 基址），
+// 记录 +0 i8 level、+1 i8 class_idx（SAVE_LoadCharacterInfoBlock / SAVE_LoadCharacter）。
+// 两条函数都做完整边界校验；失败返回 false 且不改写出参（调用方保留既有元数据）。
+
+// 解析块 1 +0 的地图 id（i16 小端）。
+bool parse_plain_map_id(const std::vector<uint8_t>& plain, int& map_id);
+
+// 解析块 2 第 0 条角色记录（主角）的等级与职业索引。
+// 注意：不能用运行期槽结构代替——世界内槽结构可能指向当前受控佣兵或已释放对象，
+// 与存档内主角不一致；导出/面板展示必须以此为准。
+bool parse_plain_main_character(const std::vector<uint8_t>& plain, int& hero_level, int& class_idx);
+
 // ---- bundle 组装与解析 ----
 
 // metaJson（字段顺序遵循 Kotlin 历史实现，扁平数字/字符串；class_idx/class_name 追加，

@@ -49,7 +49,7 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 - 面板布局：左列 3 个存档槽卡片；中列竖排「导出/删除/导入」；右列顶部为跟随选中槽的 `auto` 自动备份卡片，下方为手动备份列表（每页 5 项，底部左右方向键与页码、标准导航返回）。所有框使用 `ui_components` 的 `draw_container`（圆角金框、无装饰角）；返回用 `nav_button`、翻页用 `arrow_button`、操作/确认按钮用 `text_button`，不再自绘按钮与边框。列表按需解析：打开时只枚举文件名，当前页逐帧解析，未解析行显示「加载中…」；条目数不设上限（`g_backups` 为无界 vector），空列表显示「暂无备份」（`ui/panel.cpp` 布局常量与 `g_backups`；`ui/render.inc` 绘制）。
 - 选择与按钮状态：左侧槽与右侧条目独立选择；仅选槽时导出/删除可用，仅选手动备份时删除可用，槽+条目同时选中时导入可用；auto 可选中、可导入，不可删除。导出立即执行，导入与删除弹面板内确认框（居中、确认 200ms 防抖、确认/取消），不再使用两次点击确认；弹窗打开时隐藏底层内容与分区框（`ui/render.inc`、`ui/injection.inc`、`ui/panel.inc`）。
 - 面板按钮**直接调用** native 业务函数（`save_backup_export_json` 等），不经 HTTP、不经 JNI/Kotlin（`ui/injection.inc:29,105,170-171`；`ui/panel.cpp:571-576`）。导入失败会显示响应中的 `error` 文案（`ui/injection.inc:11-25,108-125`）。
-- 地图名与等级显示：未知等级显示 `Lv?`；地图名先按 UTF-8 码点边界截断到 16 字节，再按宽度截断（`ui/render.inc:159-168,233-241,314-340`）。
+- 地图名与等级显示：左栏槽卡以磁盘文件为准（`save_backup_slot_file_exists` + `save.facts.load_data`）：`save{slot}.dat` 可读 → 显示职业/等级/地图；文件存在但不可读 → `存档N 损坏`；文件不存在 → `存档N 空`。不读运行期槽状态——面板打开期间游戏槽结构可能尚未重载（导入后尤其明显），会把可读存档误报成损坏。等级/职业/地图从该槽存档明文解析（块 2 第 0 条主角记录）；明文摘要失败时才回退 `save.facts` 的槽结构读取。列表条目的未知等级显示 `Lv?`；地图名先按 UTF-8 码点边界截断到 16 字节，再按宽度截断（`ui/panel.cpp` `read_slots_into`、`feature.cpp` `save_backup_slot_file_exists`、`ui/render.inc:66-93,159-168,233-241,314-340`）。
 
 ## 3. 使用的模块功能与消费者
 
@@ -68,7 +68,8 @@ descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabl
 
 ## 5. 读写线程与生命周期
 
-- **槽元数据快照**：install 注册 RenderPre 帧任务（每 30 帧），在游戏主线程读取 0..2 槽的 exists/hero_index/hero_level/hero_class 写入缓存；HTTP 导出只读缓存，不跨线程读游戏槽结构（`plugin.cpp:75-83,269-279`；`feature.cpp:636-660,1049-1081`）。缓存建立前导出仍成功，元数据为 -1。
+- **槽元数据快照**：install 注册 RenderPre 帧任务（每 30 帧），在游戏主线程读取 0..2 槽的 exists/hero_index/hero_level/hero_class 写入缓存；HTTP 导出只读缓存，不跨线程读游戏槽结构（`plugin.cpp:75-83,269-279`；`feature.cpp:636-660,1049-1081`）。缓存建立前导出仍成功，元数据为 -1。**等级/职业不以该缓存为准**：导出与面板槽卡都从存档明文块 2 第 0 条主角记录解析（`bundle.cpp` `parse_plain_main_character`）；世界内运行期槽结构可能指向当前受控佣兵或已释放对象，与存档主角不一致。**面板槽卡也不以运行期槽状态为准**：按 `save{slot}.dat` 是否可读判定有效/损坏/空，避免导入后游戏槽结构尚未重载时把可读存档误报成损坏（`feature.cpp` `save_backup_slot_file_exists`；`ui/panel.cpp` `read_slots_into`）。
+- **旧备份元数据回填**：`save_backup_list_json`、`save_backup_entry_json`、`save_backup_auto_entry_json` 解析到 metaJson 缺职业/等级或与明文不一致时，从明文块 2 第 0 条主角记录补全，只替换 metaJson 段（bundle 版本、checksum、其余分段逐字节保留，CRC32 重算）并原子写回；写失败只记 WARN，展示继续用旧 meta。回填后右侧列表立即显示职业/等级。
 - **备份读写**：不再用 `g_sb_mtx` 跨越游戏调用与文件 IO；共享状态（目录根、地图名表）只在短临界区内拷贝快照（`feature.cpp:1221-1250,1517-1525`）。导出持槽 operation lease，与保存/导入/删槽串行，失败返回 `slot operation unavailable`（`feature.cpp:1517-1525`）。
 - **导出**：取明文 → 读 sidecar（`kOk`=present、`kNotFound`=absent、损坏=整次失败 `module container unreadable`）→ 收集 `save{slot}.dat.wh4-*`（读失败或超 4 MiB 即失败，数量/总量预检 64/8 MiB）→ 有外部 wh4 时尝试剥离 block3 内嵌 `WH96v002` 段 → `checksum` → 去重（校验既有 bundle 的内部 checksum 与 payload）→ `.tmp-<id>` 写入后 `rename`（`feature.cpp:1290-1500`）。
 - **checksum**：v1/v2 为 `sha256(明文‖sidecar)[0:12]`；v3+ 为 `sha256(明文‖sidecar‖warehouseBlob)[0:12]`，覆盖全部可还原内容段（`bundle.h:207-220`；`bundle.cpp` `compute_checksum`）。导入/删除前按 bundle 版本重算并与 meta 比对，不一致返回 `backup checksum mismatch`（`feature.cpp:1435-1465,1549-1556`）。

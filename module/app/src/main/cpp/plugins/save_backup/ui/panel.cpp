@@ -2,6 +2,7 @@
 
 #include "../../../contracts/panels.h"
 #include "../../../contracts/ui.h"
+#include "plugins/save_backup/bundle.h"
 #include "plugins/save_backup/feature.h"
 #include "plugins/save_backup/log.h"
 
@@ -196,9 +197,10 @@ std::string g_confirmation_prompt;
 std::string g_dialog_checksum;
 int g_dialog_slot = -1;
 bool g_dialog_auto = false;
-// 左栏三槽缓存：enter 后由游戏线程经 Game Host 读取槽元数据，DrawProc 只读缓存。
+// 左栏三槽缓存：enter 后由游戏线程读取磁盘存档（load_data + 明文摘要），DrawProc 只读缓存。
 struct SlotInfo {
     bool exists = false;
+    int state = 0;        // 原版槽状态：0=缺失/空、1=加载失败（损坏）、2=加载成功
     int hero_level = -1;
     int hero_index = -1;
     int class_idx = -1;   // 主角职业索引 0-5（hero+C_CLASS）；-1=未知，UI 退化显示
@@ -470,31 +472,61 @@ void process_one_parse_task() {
 }
 
 // 读三槽元数据到 out（无共享状态，锁外调用；必须在游戏线程执行，见 refresh_slots_on_game_thread）。
-// 口径与 save_backup.cpp:read_hero_meta / game/access/save.cpp 的 save_slots_json 一致：
-// 主菜单（STATE==4）下 SAVE_CreateSaveSlot 会重载三槽并覆盖角色相关全局，仅此状态调用；
-// 其余状态只读现有槽结构。槽元数据经 Game Host 读取。
+// 以磁盘文件为准，不读运行期槽状态：备份面板打开期间游戏槽结构可能尚未重载（导入后尤其明显），
+// 用槽状态会把可读存档误报成「损坏」。判定：save{slot}.dat 可读 → 有效并解析明文；
+// 文件存在但不可读 → 损坏；文件不存在 → 空。等级/职业/地图从存档明文解析（与导出同源）。
 void read_slots_into(SlotInfo out[3]) {
     for (int i = 0; i < 3; ++i) out[i] = SlotInfo{};
     const auto* facts = save_backup_save_facts();
-    if (facts == nullptr || facts->slot_exists == nullptr || facts->slot_hero_index == nullptr ||
-        facts->hero_level == nullptr || facts->hero_class == nullptr || facts->map_id == nullptr) return;
+    const auto* save_call = save_backup_save_call();
+    const bool can_load = facts != nullptr && facts->load_data != nullptr &&
+                          save_call != nullptr && save_call->write.free_data != nullptr;
     for (int i = 0; i < 3; ++i) {
-        int32_t exists = 0;
-        if (!qol::contracts::succeeded(facts->slot_exists(i, &exists)) ||
-            exists == 0) continue;
+        void* buf = nullptr;
+        int len = 0;
+        const bool load_ok =
+            can_load && qol::contracts::succeeded(facts->load_data(i, &buf, &len)) &&
+            buf != nullptr && len > 0;
+        if (!load_ok) {
+            if (buf != nullptr) (void)save_call->write.free_data(buf);
+            // 读不到时用文件存在性区分空槽与损坏文件（只读目录扫描，不触发游戏槽重载）。
+            out[i].state = save_backup_slot_file_exists(i) ? 1 : 0;
+            continue;
+        }
+        out[i].state = 2;
         out[i].exists = true;
         int32_t value = 0;
-        if (qol::contracts::succeeded(facts->slot_hero_index(i, &value))) {
+        if (facts->slot_hero_index != nullptr &&
+            qol::contracts::succeeded(facts->slot_hero_index(i, &value))) {
             out[i].hero_index = value;
         }
-        if (qol::contracts::succeeded(facts->hero_level(i, &value))) {
-            out[i].hero_level = value;
+        const std::vector<uint8_t> plain(static_cast<const uint8_t*>(buf),
+                                         static_cast<const uint8_t*>(buf) + len);
+        int map_id = -1;
+        int level = -1;
+        int class_idx = -1;
+        const bool map_ok = ::save_backup::parse_plain_map_id(plain, map_id);
+        const bool char_ok = ::save_backup::parse_plain_main_character(plain, level, class_idx);
+        if (map_ok) out[i].map_id = map_id;
+        if (char_ok) {
+            out[i].hero_level = level;
+            out[i].class_idx = class_idx;
         }
-        if (qol::contracts::succeeded(facts->hero_class(i, &value))) {
-            out[i].class_idx = value;
-        }
-        if (qol::contracts::succeeded(facts->map_id(i, &value))) {
+        (void)save_call->write.free_data(buf);
+        // 明文摘要解析失败时回退运行期槽结构（只用于展示；导出仍以明文为准）。
+        if (!map_ok && facts->map_id != nullptr &&
+            qol::contracts::succeeded(facts->map_id(i, &value))) {
             out[i].map_id = value;
+        }
+        if (!char_ok) {
+            if (facts->hero_level != nullptr &&
+                qol::contracts::succeeded(facts->hero_level(i, &value))) {
+                out[i].hero_level = value;
+            }
+            if (facts->hero_class != nullptr &&
+                qol::contracts::succeeded(facts->hero_class(i, &value))) {
+                out[i].class_idx = value;
+            }
         }
     }
 }

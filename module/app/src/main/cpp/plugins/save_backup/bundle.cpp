@@ -752,6 +752,46 @@ bool validate_warehouse(const std::vector<WarehouseFile>& files, std::string& er
     return true;
 }
 
+// ---- 原版存档明文主槽摘要 ----
+
+bool parse_plain_map_id(const std::vector<uint8_t>& plain, int& map_id) {
+    if (plain.size() < 14) return false;
+    const uint16_t block0_rel = le16(plain.data() + 8);
+    if (block0_rel == 0 || block0_rel % 4 != 0) return false;
+    const size_t block_count = block0_rel / 4;
+    if (block_count < 2 || 8 + block_count * 4 > plain.size()) return false;
+    const size_t block1 = 8 + le16(plain.data() + 12);
+    if (block1 + 2 > plain.size()) return false;
+    map_id = static_cast<int16_t>(le16(plain.data() + block1));
+    return true;
+}
+
+bool parse_plain_main_character(const std::vector<uint8_t>& plain, int& hero_level, int& class_idx) {
+    if (plain.size() < 14) return false;
+    const uint16_t block0_rel = le16(plain.data() + 8);
+    if (block0_rel == 0 || block0_rel % 4 != 0) return false;
+    const size_t block_count = block0_rel / 4;
+    // 块 2 是 CharacterInfo；块表必须完整落在明文内。
+    if (block_count < 3 || 8 + block_count * 4 > plain.size()) return false;
+    const size_t block2 = 8 + le16(plain.data() + 16);
+    const size_t block2_len = le16(plain.data() + 18);
+    if (block2 + 1 + 4 > plain.size() || block2_len < 5) return false;
+    const uint8_t count = plain[block2];
+    if (count == 0) return false;
+    // 记录 0 的偏移/长度；偏移相对块 2 基址，记录必须完整落在块 2 内。
+    const size_t record_off = le16(plain.data() + block2 + 1);
+    const size_t record_len = le16(plain.data() + block2 + 3);
+    if (record_len < 2 || record_off > block2_len || record_len > block2_len - record_off) {
+        return false;
+    }
+    const size_t record = block2 + record_off;
+    if (record < block2 || record + record_len > plain.size()) return false;
+    // 游戏按 int8 解释角色等级/职业（SAVE_LoadCharacter 的 strb + save_hero_level 的 int8 读）。
+    hero_level = static_cast<int8_t>(plain[record]);
+    class_idx = static_cast<int8_t>(plain[record + 1]);
+    return true;
+}
+
 // ---- bundle 组装与解析 ----
 
 std::string build_meta_json(int source_slot, long long export_time_ms, int map_id, int hero_level,

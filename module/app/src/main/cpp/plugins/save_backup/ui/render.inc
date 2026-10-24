@@ -73,7 +73,10 @@ void slot_btn_draw(void* ctrl) {
     component_container(rect);
     if (selected) component_selected_background(rect, 6);
     if (!g_slots[index].exists) {
-        char empty[32]; snprintf(empty, sizeof(empty), "存档%d 空", index + 1);
+        // 状态 1 = 原版加载失败（UI 显示「存档损坏」）；0 = 缺失/空。
+        char empty[32];
+        snprintf(empty, sizeof(empty), "存档%d %s", index + 1,
+                 g_slots[index].state == 1 ? "损坏" : "空");
         component_text(empty, static_cast<int>(rect.x + rect.w / 2),
                        static_cast<int>(rect.y + rect.h / 2 - 0x0C),
                        selected ? UI_GOLD : COLOR_TEXT_GRAY, 2, 1);

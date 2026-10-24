@@ -57,6 +57,10 @@ std::string save_backup_result_error(const char* message);
 // 空串视为清空（用于解绑/卸载场景）；非法 JSON 容错为空表。
 void save_backup_set_map_names(const char* json);
 
+// 原版存档目录中 save{slot}.dat 是否存在（只读目录扫描 + lstat，不打开/不解密、不建目录）。
+// 备份面板用它区分「空槽」与「文件存在但不可读」；dataDir 未初始化时返回 false。
+bool save_backup_slot_file_exists(int32_t slot);
+
 // map_id → 中文名查询（上表内存）；未命中返回空串。
 // 供 UI 层显示存档槽/备份条目地图名，避免上层复制一份映射表。
 std::string save_backup_map_name(int map_id);

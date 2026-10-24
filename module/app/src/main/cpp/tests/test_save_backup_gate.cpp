@@ -1002,6 +1002,51 @@ int main() {
         CHECK(save_backup::json_find_int(entry, "class_idx", value) && value == 2);
         CHECK(entry.find("\"class_name\":\"黑魔导\"") != std::string::npos);
 
+        // 旧备份 meta 缺职业/等级：解析明文后写回 meta（checksum/版本不变，CRC 重算）。
+        std::vector<uint8_t> plain_bf(86, 0);
+        auto set16 = [&](size_t off, uint16_t v) {
+            plain_bf[off] = static_cast<uint8_t>(v);
+            plain_bf[off + 1] = static_cast<uint8_t>(v >> 8);
+        };
+        set16(8, 28);
+        set16(10, 33);
+        set16(12, 61);
+        set16(14, 10);
+        set16(16, 71);
+        set16(18, 7);
+        plain_bf[69] = 20;  // map_id
+        plain_bf[79] = 1;   // CharacterInfo count
+        set16(80, 5);       // record 0 offset
+        set16(82, 2);       // record 0 len
+        plain_bf[84] = 7;   // level
+        plain_bf[85] = 4;   // class
+        const std::string ck_bf =
+            save_backup::compute_checksum(save_backup::kBundleVersion, plain_bf, {}, {});
+        const std::string meta_bf = save_backup::build_meta_json(
+            0, 2000, 20, -1, 0, 5, 11, std::string(64, 'c'), std::string(), ck_bf, -1,
+            std::string());
+        std::vector<uint8_t> bundle_bf;
+        save_backup::build_bundle(0, 2000, plain_bf, {}, {}, meta_bf, bundle_bf);
+        const std::string name_bf = "bf_ui.qol_save";
+        CHECK(write_file(backups_dir + "/" + name_bf,
+                         std::string(bundle_bf.begin(), bundle_bf.end())));
+        const std::string entry_bf = save_backup_entry_json(name_bf.c_str());
+        CHECK(body_ok(entry_bf));
+        CHECK(save_backup::json_find_int(entry_bf, "hero_level", value) && value == 7);
+        CHECK(save_backup::json_find_int(entry_bf, "class_idx", value) && value == 4);
+        CHECK(entry_bf.find("\"class_name\":\"暗影猎手\"") != std::string::npos);
+        const std::vector<uint8_t> rewritten = read_file_vector(backups_dir + "/" + name_bf);
+        save_backup::ParsedBundle rewritten_parsed;
+        CHECK(save_backup::parse_bundle(rewritten.data(), rewritten.size(), rewritten_parsed));
+        CHECK(save_backup::json_find_int(rewritten_parsed.meta_json, "hero_level", value) &&
+              value == 7);
+        CHECK(save_backup::json_find_int(rewritten_parsed.meta_json, "class_idx", value) &&
+              value == 4);
+        std::string rewritten_checksum;
+        CHECK(save_backup::json_find_string(rewritten_parsed.meta_json, "checksum",
+                                            rewritten_checksum) &&
+              rewritten_checksum == ck_bf);
+
         // 篡改 checksum（内容与 meta 不一致）与损坏文件。
         const std::string wrong_checksum =
             save_backup::compute_checksum(save_backup::kBundleVersion, plain_b, {}, {});

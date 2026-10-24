@@ -104,6 +104,8 @@ monster 改版把块 3 的加载器**整体替换**为自写实现（libgame 无
 | +0x04/0x0c/0x14 | ptr×3 | 角色对象指针（`SAVESLOT_Initialize` 清零；失败时保持 null） |
 | +0x1c | i8 | 主控角色索引（hero_index） |
 
+> 模块侧备份面板不以运行期槽状态判定有效槽：按 `save{slot}.dat` 是否可读区分有效/损坏/空（`save_backup_slot_file_exists` + `save.facts.load_data`），避免面板打开期间槽结构尚未重载（导入后尤其明显）时把可读存档误报成损坏。导出元数据从存档明文块 2 第 0 条主角记录读取等级/职业，不依赖运行期槽结构。
+
 **失败阶段码**（`SAVE_LoadSaveSlot` 0x1298dc 逐级短路）：
 
 | 码 | 阶段 | 含义 |

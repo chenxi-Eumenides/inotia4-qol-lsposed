@@ -253,17 +253,20 @@ QolResult load_payload(const std::shared_ptr<Participant>& p, const QolSlotDataC
     if (!succeeded(read)) {
         *presence = read.code == kQolErrNotFound ? value(QolSlotDataPresence::kMissing)
                                                : value(QolSlotDataPresence::kUnreadable);
-    } else if (version != p->spec.section_version) {
-        *presence = value(QolSlotDataPresence::kVersionUnsupported);
-        read = fail(kQolErrUnsupported, "section version unsupported");
     } else if (size > bytes.size()) {
         *presence = value(QolSlotDataPresence::kUnreadable);
         read = fail(kQolErrInvalidArgument, "section payload too large");
+    } else if (version != p->spec.section_version) {
+        *presence = value(QolSlotDataPresence::kVersionUnsupported);
+        read = fail(kQolErrUnsupported, "section version unsupported");
     }
     if (!callback_admitted(p)) return fail(kQolErrCancelled, "consumer closed");
+    const bool older_version = *presence == value(QolSlotDataPresence::kVersionUnsupported) &&
+                               *stored_version < p->spec.section_version;
     const auto loaded = p->spec.load(p->spec.user, &ctx, *presence, *stored_version,
-        *presence == value(QolSlotDataPresence::kPresent) ? bytes.data() : nullptr,
-        *presence == value(QolSlotDataPresence::kPresent) ? size : 0);
+        (*presence == value(QolSlotDataPresence::kPresent) || older_version) ? bytes.data() : nullptr,
+        (*presence == value(QolSlotDataPresence::kPresent) || older_version) ? size : 0);
+    if (older_version && succeeded(loaded)) return loaded;
     if (*presence != value(QolSlotDataPresence::kMissing) && !succeeded(read)) return read;
     return loaded;
 }

@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -708,6 +709,14 @@ bool read_original_plain(int32_t slot, std::vector<uint8_t>& plain, int& map_id,
     save_time = static_cast<long long>(rd_u64(plain.data() + block0 + 13));
     map_id = static_cast<int>(rd_i16(plain.data() + block1));
     read_hero_meta(slot, hero_level, hero_index, class_idx);
+    // 等级/职业以存档明文为准：运行期槽结构在世界内可能指向当前受控佣兵或已释放对象，
+    // 与存档主角不一致（真机 slot0 实测槽结构给祭司、存档主角是黑暗骑士）。
+    int plain_level = -1;
+    int plain_class = -1;
+    if (save_backup::parse_plain_main_character(plain, plain_level, plain_class)) {
+        hero_level = plain_level;
+        class_idx = plain_class;
+    }
     return true;
 }
 
@@ -1022,6 +1031,27 @@ const qol::contracts::QolSaveCallPort* save_backup_save_call() { return g_save_c
 std::string save_backup_result_ok() { return result_ok(); }
 
 std::string save_backup_result_error(const char* message) { return result_error(message); }
+
+bool save_backup_slot_file_exists(int32_t slot) {
+    if (slot < 0 || slot > 2 || g_sb_data_dir.empty()) return false;
+    const std::string name = "save" + std::to_string(slot) + ".dat";
+    DIR* d = ::opendir(g_sb_data_dir.c_str());
+    if (d == nullptr) return false;
+    bool found = false;
+    while (dirent* ent = ::readdir(d)) {
+        const std::string entry = ent->d_name;
+        if (entry == "." || entry == "..") continue;
+        const std::string sub = g_sb_data_dir + "/" + entry;
+        struct stat st{};
+        if (::stat(sub.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+        if (file_exists(sub + "/" + name)) {
+            found = true;
+            break;
+        }
+    }
+    ::closedir(d);
+    return found;
+}
 
 void save_backup_init(const char* data_dir, const char* external_files_dir) {
     {
@@ -1432,6 +1462,10 @@ static std::unordered_map<int, std::string> snapshot_map_names() {
     return g_map_names;
 }
 
+static bool backfill_entry_meta_from_plain(const std::string& path,
+                                           const std::vector<uint8_t>& bytes,
+                                           save_backup::ParsedBundle& parsed);
+
 std::string save_backup_list_json() {
     std::string s = "{\"ok\":true,\"backups\":[";
     const SbDirs dirs = snapshot_dirs();
@@ -1469,6 +1503,8 @@ std::string save_backup_list_json() {
             SB_LOG("save backup list skip: %s", name.c_str());
             continue;
         }
+        // 旧备份缺职业/等级：列表解析到即从明文补全并写回（只改 meta 段）。
+        (void)backfill_entry_meta_from_plain(path, bytes, parsed);
         save_backup::Entry entry;
         save_backup::entry_from_bundle(name, parsed, entry);
         // 从内存 map_id→name 表查表（启动期 Kotlin 下发）；未命中保持空串。
@@ -1542,6 +1578,86 @@ std::string save_backup_list_files_json() {
     return s + "]}";
 }
 
+// 旧备份 metaJson 缺职业/等级（-1/字段缺失）或值与明文不一致时，从明文块 2 第 0 条主角记录
+// 补全并原子写回。只替换 metaJson 段：bundle 版本、checksum 与其余段逐字节保留，CRC32 重算；
+// 写失败只记 WARN，本次展示继续用旧 meta（下次解析会再试）。
+static bool backfill_entry_meta_from_plain(const std::string& path,
+                                           const std::vector<uint8_t>& bytes,
+                                           save_backup::ParsedBundle& parsed) {
+    long long level = -1;
+    long long class_idx = -1;
+    const bool has_level = save_backup::json_find_int(parsed.meta_json, "hero_level", level);
+    const bool has_class = save_backup::json_find_int(parsed.meta_json, "class_idx", class_idx);
+    int plain_level = -1;
+    int plain_class = -1;
+    if (!save_backup::parse_plain_main_character(parsed.orig_plain, plain_level, plain_class) ||
+        plain_level < 0 || plain_class < 0) {
+        return false;
+    }
+    // 已与明文一致则不动；缺字段/旧值 -1/运行期槽结构写错的旧值都按明文修正。
+    const char* cls = save_backup_class_name(plain_class);
+    const std::string expected_class_name = cls != nullptr ? cls : std::string();
+    std::string meta_class_name;
+    save_backup::json_find_string(parsed.meta_json, "class_name", meta_class_name);
+    if (has_level && level == plain_level && has_class && class_idx == plain_class &&
+        meta_class_name == expected_class_name) {
+        return false;
+    }
+
+    long long map_id = 0;
+    long long hero_index = -1;
+    long long save_version = 0;
+    long long save_time = 0;
+    long long warehouse_count = 0;
+    long long module_state = -1;
+    std::string original_sha256;
+    std::string module_sha256;
+    std::string checksum;
+    std::string warehouse_sha256;
+    save_backup::json_find_int(parsed.meta_json, "map_id", map_id);
+    save_backup::json_find_int(parsed.meta_json, "hero_index", hero_index);
+    save_backup::json_find_int(parsed.meta_json, "save_version", save_version);
+    save_backup::json_find_int(parsed.meta_json, "save_time", save_time);
+    save_backup::json_find_int(parsed.meta_json, "warehouse_count", warehouse_count);
+    save_backup::json_find_int(parsed.meta_json, "module_state", module_state);
+    save_backup::json_find_string(parsed.meta_json, "original_sha256", original_sha256);
+    save_backup::json_find_string(parsed.meta_json, "module_sha256", module_sha256);
+    save_backup::json_find_string(parsed.meta_json, "checksum", checksum);
+    save_backup::json_find_string(parsed.meta_json, "warehouse_sha256", warehouse_sha256);
+    const std::string new_meta = save_backup::build_meta_json(
+        parsed.source_slot, parsed.export_time_ms, static_cast<int>(map_id), plain_level,
+        static_cast<int>(hero_index), static_cast<int>(save_version), save_time, original_sha256,
+        module_sha256, checksum, plain_class, expected_class_name,
+        static_cast<int>(warehouse_count), warehouse_sha256, static_cast<int>(module_state));
+    if (new_meta.size() > 0xFFFFu || bytes.size() < 6 + parsed.meta_json.size()) return false;
+
+    // 原文件布局：... | u16 metaLen | metaJson | u32 crc32；前缀与尾部分段逐字节保留。
+    const size_t prefix_len = bytes.size() - 4 - 2 - parsed.meta_json.size();
+    std::vector<uint8_t> out;
+    out.reserve(prefix_len + 2 + new_meta.size() + 4);
+    out.insert(out.end(), bytes.begin(), bytes.begin() + static_cast<ptrdiff_t>(prefix_len));
+    out.push_back(static_cast<uint8_t>(new_meta.size() >> 8));
+    out.push_back(static_cast<uint8_t>(new_meta.size()));
+    out.insert(out.end(), new_meta.begin(), new_meta.end());
+    const uint32_t crc = save_backup::crc32_ieee(out.data(), out.size());
+    out.push_back(static_cast<uint8_t>(crc >> 24));
+    out.push_back(static_cast<uint8_t>(crc >> 16));
+    out.push_back(static_cast<uint8_t>(crc >> 8));
+    out.push_back(static_cast<uint8_t>(crc));
+    {
+        // 与删除/导入的 bundle 操作串行，避免 backfill 的 rename 把刚删除的文件重新写回。
+        std::lock_guard<std::mutex> lk(g_sb_mtx);
+        if (!write_file_bytes_atomic(path, out.data(), out.size())) {
+            SB_LOG_WARN("backfill entry meta write failed: %s", path.c_str());
+            return false;
+        }
+    }
+    parsed.meta_json = new_meta;
+    parsed.size_bytes = static_cast<long long>(out.size());
+    SB_LOG("backfill entry meta: %s level=%d class=%d", path.c_str(), plain_level, plain_class);
+    return true;
+}
+
 std::string save_backup_entry_json(const char* name) {
     const std::string file_name = name != nullptr ? name : "";
     if (file_name.empty() || file_name.find('/') != std::string::npos ||
@@ -1570,6 +1686,8 @@ std::string save_backup_entry_json(const char* name) {
                                                        parsed.module, parsed.warehouse_blob)) {
         return result_error("backup checksum mismatch");
     }
+    // 旧备份缺职业/等级：从已解析的明文补全并写回（只改 meta 段，checksum/版本不变）。
+    (void)backfill_entry_meta_from_plain(path, bytes, parsed);
     save_backup::Entry entry;
     save_backup::entry_from_bundle(file_name, parsed, entry);
     const std::unordered_map<int, std::string> map_names = snapshot_map_names();
@@ -1775,6 +1893,8 @@ static std::string import_bundle_file(const std::string& path, int slot) {
             return result_error("backup unreadable or corrupt");
         }
     }
+    // 旧备份缺职业/等级：导入前先从明文补全并写回源 bundle（不改 checksum/版本）。
+    (void)backfill_entry_meta_from_plain(path, bytes, parsed);
 
     // 前置门：首次写删之前 acquire；parsed.module 为空也必须 acquire（dat 写入本身
     // 就是不可逆变更）。
@@ -2079,6 +2199,8 @@ std::string save_backup_auto_entry_json(int slot) {
         !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
         return result_error("backup unreadable or corrupt");
     }
+    // 自动备份同样是右侧条目：缺职业/等级时从明文补全并写回。
+    (void)backfill_entry_meta_from_plain(path, bytes, parsed);
     save_backup::Entry entry;
     save_backup::entry_from_bundle(file_name_of(path), parsed, entry);
     const std::unordered_map<int, std::string> map_names = snapshot_map_names();
