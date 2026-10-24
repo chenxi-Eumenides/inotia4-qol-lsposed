@@ -141,7 +141,24 @@ draw hook → 读快照 + mode
 | 新增袋类型/容量 | 改 ITEMSTATICBASE.json，重跑 `build_bag_catalog.py` |
 | 新增移动方向 | 新增 usecase + transaction 方向实现，复用 coordinator |
 
-## 9. P6 前置：查询编组
+## 9. P6 前置：查询编组与线程契约（审计结论）
+
+只读审计确认删除 `runtime_state().mtx` 前必须处理：
+
+1. `virtual_bag_inventory_bags_json()`（`api/api_impl.cpp:314-343`）仍遍历 live State，经
+   `neutral_inventory_fragment` 暴露给只读 API；须改为快照或主线程投递。
+2. `bag_capacity` / status 的 fallback 分支仍读 live State；删除锁后必须拒绝 fallback。
+3. provider 只读回调（`owns_bag`/`item_ref_at`/`for_each_item`）的“仅主线程”只是注释约定，
+   调用链 `game_state.cpp:295-312,327-363`、`game/access/inventory.cpp:129-176` 未逐条证明线程。
+4. public/JNI 入口（`public/bridge.cpp`、`public/status.cpp`、`public/equip.cpp`）大量直接操作 live State，
+   且未覆盖 `EntryGuard`。
+5. `try_lock` 同时承担同线程递归保护（`public/bridge.cpp:262-266`、`runtime/tabs_ui.cpp:87-111`），
+   EntryGuard 不阻塞、不串行化，不能直接替代。
+
+最小改造顺序：inventory fragment 快照化 → fallback 拒绝 → provider 线程契约与断言 → public 入口覆盖 →
+最后逐处替换 try_lock 的 busy 语义。完成前保留互斥量。
+
+## 9.1 查询编组设计
 
 删除 `runtime_state().mtx` 前必须满足：
 
@@ -161,5 +178,5 @@ draw hook → 读快照 + mode
 | P2 TransactionCoordinator | 已完成 |
 | P3 ProjectionController + NativeTabLayout | 已完成（P3a/P3b；P3c 与 Ownership 合并迁移） |
 | P4 BagCatalog + 可配置数量 | 已完成：catalog 生成、sidecar v5、set_bag_count、1–5 可用 |
-| P5 用例层 + 接口收口 | 部分：orchestrator 宏桥已删；view usecases 已建；move/status 用例与 internal 头清理待续 |
-| P6 删除互斥量 | 阻塞：HTTP 查询仍在 worker 线程直读 live State，需先编组到主线程或全量快照 |
+| P5 用例层 + 接口收口 | 部分：orchestrator 宏桥已删；view/move usecases 已建；status 查询走快照；api/ui 直连 runtime_state 与 internal 头待清理 |
+| P6 删除互斥量 | **不可直接执行**：审计确认仍有跨线程 live State 读与递归 try_lock 语义，需先完成 §9 的最小改造集合 |
