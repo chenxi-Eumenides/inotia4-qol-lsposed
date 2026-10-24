@@ -203,8 +203,13 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 
 ### P3 ProjectionController + NativeTabLayout
 
-- 投影安装/恢复/宿主容量字集中；`tabs_ui.cpp` 拆布局与交互。
-- 验收：v513/v514 页签布局、reflow、页签点击、原生袋命中、商店/合成投影。
+- 已完成（P3a）：`runtime/projection_controller.*` 拥有宿主容量字、当前袋（原始/raw）、
+  C18 原生袋页计数与来源袋门禁；`projection.cpp` 改为引用。
+- 进行中（P3b）：C18 布局解析/reflow/命中拆到 `runtime/native_tab_layout.*`，
+  `tabs_ui.cpp` 只保留页签安装与交互。
+- 待后续（P3c）：安装/恢复（`install_module_view_locked`/`restore_module_view_locked`）
+  仍依赖对象加载与刷新，需与 OwnershipManager 一起迁移。
+- 验收：v513/v514/v520 页签布局、reflow、页签点击、原生袋命中、商店/合成投影。
 
 ### P4 用例层 + 接口收口
 
