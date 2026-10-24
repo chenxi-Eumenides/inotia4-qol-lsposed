@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 
 namespace qol::extension_bag {
 
@@ -30,16 +29,5 @@ using StatusSnapshotPtr = std::shared_ptr<const StatusSnapshot>;
 void publish_status_snapshot();
 StatusSnapshotPtr load_status_snapshot();
 std::string status_snapshot_json(const StatusSnapshot& snapshot);
-
-template <typename Fallback>
-std::string status_snapshot_json_or_fallback(Fallback&& fallback, bool* used_fallback) {
-    const StatusSnapshotPtr snapshot = load_status_snapshot();
-    if (snapshot) {
-        if (used_fallback != nullptr) *used_fallback = false;
-        return status_snapshot_json(*snapshot);
-    }
-    if (used_fallback != nullptr) *used_fallback = true;
-    return std::forward<Fallback>(fallback)();
-}
 
 }  // namespace qol::extension_bag

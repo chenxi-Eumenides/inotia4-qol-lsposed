@@ -46,31 +46,17 @@
 #define extension_internal_bag extension_internal_bag_bridge
 #define unequip_extension_bag_locked unequip_extension_bag_locked_bridge
 std::string extension_bag_api_status_json_impl() {
-    if (!read_world_in_world()) {
-        return "{\"enabled\":" + std::string(runtime_state().enabled.load() ? "true" : "false") +
-               ",\"injected\":false,\"extension_tab_button\":false," +
-               "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}";
+    const auto snapshot = qol::extension_bag::load_status_snapshot();
+    if (snapshot) {
+        return qol::extension_bag::status_snapshot_json(*snapshot);
     }
-    bool used_fallback = false;
-    const std::string json = qol::extension_bag::status_snapshot_json_or_fallback(
-        [] {
-            std::lock_guard<std::mutex> lock(runtime_state().mtx);
-            if (!read_world_in_world()) {
-                return "{\"enabled\":" +
-                       std::string(runtime_state().enabled.load() ? "true" : "false") +
-                       ",\"injected\":false,\"extension_tab_button\":false," +
-                       "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}";
-            }
-            ensure_state_loaded_locked();
-            return extension_bag_status_json_locked();
-        },
-        &used_fallback);
-    static std::atomic_flag fallback_logged = ATOMIC_FLAG_INIT;
-    if (used_fallback && !fallback_logged.test_and_set(std::memory_order_relaxed)) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "status snapshot unavailable; using locked fallback");
+    static std::atomic_flag not_ready_logged = ATOMIC_FLAG_INIT;
+    if (!not_ready_logged.test_and_set(std::memory_order_relaxed)) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag, "status snapshot unavailable; returning not-ready status");
     }
-    return json;
+    return "{\"enabled\":" + std::string(runtime_state().enabled.load() ? "true" : "false") +
+           ",\"injected\":false,\"extension_tab_button\":false," +
+           "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}";
 }
 
 std::string extension_bag_api_enter_view_impl(int logical_bag) {

@@ -295,7 +295,9 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
 }
 
 bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
-    if (out_capacity == nullptr || !virtual_bag::valid_extension_logical_bag(logical_bag) ||
+    if (out_capacity == nullptr) return false;
+    *out_capacity = 0;
+    if (!virtual_bag::valid_extension_logical_bag(logical_bag) ||
         !runtime_state().enabled.load() || !read_world_in_world()) {
         return false;
     }
@@ -303,12 +305,8 @@ bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
     const int internal_bag = virtual_bag::extension_internal_bag(logical_bag);
     if (!virtual_bag::valid_index(internal_bag)) return false;
     qol::extension_bag::BagSnapshot snapshot{};
-    if (qol::extension_bag::bag_snapshot(&snapshot)) {
-        *out_capacity = snapshot.capacities[internal_bag];
-        return true;
-    }
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    *out_capacity = runtime_state().objects.bag.capacities[internal_bag];
+    if (!qol::extension_bag::bag_snapshot(&snapshot)) return false;
+    *out_capacity = snapshot.capacities[internal_bag];
     return true;
 }
 

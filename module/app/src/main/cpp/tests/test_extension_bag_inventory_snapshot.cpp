@@ -1,6 +1,8 @@
 #include "contracts/host_sdk.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
+#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/bag_state_store.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/status_snapshot.h"
 
@@ -62,6 +64,8 @@ bool read_world_in_world() {
     return true;
 }
 
+bool extension_bag_session_admitted_locked() { return true; }
+
 const qol::contracts::QolItemCountApi* item_count_api() { return &g_count_api; }
 
 void prepare_count_api() {
@@ -71,20 +75,14 @@ void prepare_count_api() {
 }
 
 int main() {
+    using qol::extension_bag::bag_snapshot;
     using qol::extension_bag::load_status_snapshot;
-    using qol::extension_bag::publish_status_snapshot;
+    using qol::extension_bag::publish_bag_snapshot;
 
     g_sdk.log.write = &record_log;
     prepare_count_api();
     auto& state = runtime_state();
     state.enabled.store(true);
-
-    CHECK(!load_status_snapshot());
-    CHECK(virtual_bag_inventory_bags_json().empty());
-    CHECK(virtual_bag_inventory_bags_json().empty());
-    CHECK(g_log_calls == 1);
-    CHECK(g_world_checks == 0);
-
     state.objects.bag.bag_count = 3;
     state.objects.bag.capacities = {12, 16, 8, 0, 0, 0, 0, 0};
     state.objects.bag.items[0][2].category = 222;
@@ -96,7 +94,27 @@ int main() {
     state.objects.module_objects[0][2] = &g_live_item;
     state.persistence.revision.store(41);
 
-    publish_status_snapshot();
+    CHECK(!load_status_snapshot());
+    CHECK(virtual_bag_inventory_bags_json().empty());
+    CHECK(virtual_bag_inventory_bags_json().empty());
+    CHECK(g_log_calls == 1);
+    CHECK(g_world_checks == 0);
+
+    const std::string not_ready_status = extension_bag_api_status_json_impl();
+    CHECK(not_ready_status ==
+          "{\"enabled\":true,\"injected\":false,\"extension_tab_button\":false,"
+          "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}");
+    CHECK(extension_bag_api_status_json_impl() == not_ready_status);
+    CHECK(g_log_calls == 2);
+    CHECK(g_world_checks == 0);
+
+    int32_t capacity = -1;
+    CHECK(!virtual_bag_logical_capacity(6, &capacity));
+    CHECK(capacity == 0);
+    CHECK(!virtual_bag_logical_capacity(5, &capacity));
+    CHECK(capacity == 0);
+
+    publish_bag_snapshot();
     const auto snapshot = load_status_snapshot();
     CHECK(snapshot != nullptr);
     CHECK(snapshot->effective_counts[0][2] == 81);
@@ -104,10 +122,20 @@ int main() {
     CHECK(snapshot->effective_counts[0][14] == 0);
     CHECK(g_effective_count_calls == 1);
     CHECK(g_view_count_calls == 1);
+    CHECK(extension_bag_api_status_json_impl() ==
+          qol::extension_bag::status_snapshot_json(*snapshot));
+
+    CHECK(virtual_bag_logical_capacity(6, &capacity));
+    CHECK(capacity == snapshot->bag.capacities[0]);
+    CHECK(virtual_bag_logical_capacity(7, &capacity));
+    CHECK(capacity == snapshot->bag.capacities[1]);
 
     // 发布后再改 live State 和对象指针，查询仍只使用快照中的数据。
     state.objects.bag.items[0][2].count = 99;
+    state.objects.bag.capacities[0] = 4;
     state.objects.module_objects[0][2] = nullptr;
+    CHECK(virtual_bag_logical_capacity(6, &capacity));
+    CHECK(capacity == snapshot->bag.capacities[0]);
     const uint64_t revision_before_query = state.persistence.revision.load();
     const std::string json = virtual_bag_inventory_bags_json();
     CHECK(json ==
@@ -118,7 +146,7 @@ int main() {
     CHECK(g_view_count_calls == 1);
     CHECK(state.persistence.revision.load() == revision_before_query);
     CHECK(snapshot->revision == 41);
-    CHECK(g_world_checks == 1);
+    CHECK(g_world_checks == 5);
 
     std::printf("extension-bag-inventory-snapshot: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

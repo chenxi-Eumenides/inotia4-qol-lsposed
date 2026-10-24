@@ -9,12 +9,6 @@
 namespace {
 
 std::array<uint32_t, 5> g_original_capacity_words{{31, 42, 53, 64, 75}};
-int g_fallback_calls = 0;
-
-std::string status_fallback() {
-    ++g_fallback_calls;
-    return "fallback-status";
-}
 
 }  // namespace
 
@@ -47,20 +41,16 @@ int main() {
     using qol::extension_bag::BagSnapshot;
     using qol::extension_bag::bag_snapshot;
     using qol::extension_bag::publish_bag_snapshot;
-    using qol::extension_bag::status_snapshot_json_or_fallback;
     using qol::extension_bag::load_status_snapshot;
+    using qol::extension_bag::status_snapshot_json;
 
     auto& state = ::runtime_state();
-    bool used_fallback = false;
-    CHECK(!load_status_snapshot());
-    const std::string fallback_json =
-        status_snapshot_json_or_fallback(status_fallback, &used_fallback);
-    CHECK(used_fallback);
-    CHECK(fallback_json == "fallback-status");
-    CHECK(g_fallback_calls == 1);
-
     BagSnapshot initial{};
+    CHECK(!load_status_snapshot());
+    CHECK(!load_status_snapshot());
+    CHECK(!bag_snapshot(nullptr));
     CHECK(!bag_snapshot(&initial));
+    CHECK(initial.capacities[0] == 0);
 
     qol::contracts::QolGameHost game{};
     qol::contracts::QolExtensionBagWritePort write_port{};
@@ -103,14 +93,13 @@ int main() {
     CHECK(status->extension_tab_button && status->inventory_frame_active);
     CHECK(status->original_capacities[0] == 31 && status->original_capacities[4] == 75);
 
-    const std::string status_json =
-        status_snapshot_json_or_fallback(status_fallback, &used_fallback);
-    CHECK(!used_fallback);
+    const std::string status_json = status != nullptr ? status_snapshot_json(*status) : "";
+    CHECK(status_json == status_snapshot_json(*load_status_snapshot()));
     CHECK(status_json.find("\"save_panel_hook\":true") != std::string::npos);
     CHECK(status_json.find("\"bagCount\":3") != std::string::npos);
     CHECK(status_json.find("\"originalCapacities\":[31,42,53,64,75]") != std::string::npos);
     CHECK(status_json.find("\"category\":1234,\"count\":7") != std::string::npos);
-    CHECK(g_fallback_calls == 1);
+    CHECK(load_status_snapshot() == status);
 
     // 未重新发布前，快照保持不可变。
     state.objects.bag.selected = 4;
@@ -133,13 +122,14 @@ int main() {
     state.persistence.revision.store(9);
     publish_bag_snapshot();
     const uint64_t revision_before_query = state.persistence.revision.load();
+    const auto updated_status = load_status_snapshot();
+    CHECK(updated_status != nullptr);
     const std::string updated_status_json =
-        status_snapshot_json_or_fallback(status_fallback, &used_fallback);
-    CHECK(!used_fallback);
+        updated_status != nullptr ? status_snapshot_json(*updated_status) : "";
+    CHECK(updated_status_json == status_snapshot_json(*updated_status));
     CHECK(updated_status_json.find("\"category\":4321,\"count\":7") != std::string::npos);
     CHECK(load_status_snapshot()->revision == 9);
     CHECK(state.persistence.revision.load() == revision_before_query);
-    CHECK(g_fallback_calls == 1);
 
     std::printf("bag-state-store/status-snapshot: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
