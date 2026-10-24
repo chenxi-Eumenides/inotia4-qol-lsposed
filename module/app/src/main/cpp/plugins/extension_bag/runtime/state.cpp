@@ -19,44 +19,6 @@ uint64_t extension_bag_item_revision_locked() {
     return runtime_state().persistence.revision.load(std::memory_order_acquire);
 }
 
-const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() { return runtime_state().host.write_port; }
-
-bool read_item_category(const void* item, int* out_category) {
-    qol::contracts::QolItemHandle handle{};
-    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->category == nullptr ||
-        item == nullptr || out_category == nullptr ||
-        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
-    int32_t category = 0;
-    if (!qol::contracts::succeeded(
-            runtime_state().host.item_facts->category(handle, &category))) return false;
-    *out_category = category;
-    return true;
-}
-
-void* extension_create_item(int category, int arg1, int arg2, int arg3) {
-    const auto* api = extension_bag_write_api();
-    if (api == nullptr || api->inventory.create_item == nullptr) return nullptr;
-    void* item = nullptr;
-    return qol::contracts::succeeded(
-               api->inventory.create_item(category, arg1, arg2, arg3, &item))
-               ? item
-               : nullptr;
-}
-
-const qol::contracts::QolItemCountApi* item_count_api() {
-    return runtime_state().host.game == nullptr ? nullptr : &runtime_state().host.game->item_count;
-}
-
-bool mark_native_bag_object(void* item) {
-    const auto* api = item_count_api();
-    if (api == nullptr || api->read_encoded_field == nullptr ||
-        api->write_encoded_field == nullptr || item == nullptr) return false;
-    uint32_t field = 0;
-    if (!qol::contracts::succeeded(api->read_encoded_field(item, &field))) return false;
-    field = qol::features::extension_bag::write_native_bag_object_marker(field);
-    return qol::contracts::succeeded(api->write_encoded_field(item, field));
-}
-
 // G-8/H4 共享扩展身份判据：所有事件层与函数层守卫都反查同一份
 // g_module_objects，避免 source 判定在不同防线间漂移。调用方必须已持有
 // g_virtual_bag_mtx。

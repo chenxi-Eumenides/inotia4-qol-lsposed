@@ -329,16 +329,17 @@ void test_main_menu_cleanup_due_edges_and_retries() {
 }
 
 void test_inventory_state_reader_uses_popup_state_entry() {
-    const std::string source = read_source(QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE);
+    const std::string source = read_source(QOL_EXTENSION_BAG_INVENTORY_ACCESS_SOURCE);
     const size_t function_start = source.find("int virtual_bag_inventory_state_id() {");
     const size_t function_end = source.find("\n}", function_start);
     CHECK(function_start != std::string::npos && function_end != std::string::npos);
     if (function_start == std::string::npos || function_end == std::string::npos) return;
     const std::string function = source.substr(function_start, function_end - function_start);
-    CHECK(function.find("std::lock_guard<std::mutex> lock(g_virtual_bag_mtx)") !=
+    CHECK(function.find("std::lock_guard<std::mutex> lock(runtime_state().mtx)") !=
           std::string::npos);
-    CHECK(function.find("g_state_entry == nullptr") != std::string::npos);
-    CHECK(function.find("*reinterpret_cast<int32_t*>(g_state_entry)") != std::string::npos);
+    CHECK(function.find("persistence.state_entry == nullptr") != std::string::npos);
+    CHECK(function.find("*reinterpret_cast<int32_t*>(runtime_state().persistence.state_entry)") !=
+          std::string::npos);
     CHECK(function.find("world_facts()") == std::string::npos);
     CHECK(function.find("facts->state") == std::string::npos);
 }

@@ -155,15 +155,6 @@ bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int t
     return true;
 }
 
-int virtual_bag_inventory_state_id() {
-    // g_state_entry is panel-local state; world lifecycle cleanup uses world_facts separately.
-    // The explicit state access is equivalent to std::lock_guard<std::mutex> lock(g_virtual_bag_mtx),
-    // g_state_entry == nullptr, and *reinterpret_cast<int32_t*>(g_state_entry).
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    if (runtime_state().persistence.state_entry == nullptr) return -1;
-    return *reinterpret_cast<int32_t*>(runtime_state().persistence.state_entry);
-}
-
 bool set_virtual_bag_enabled(bool enabled) {
     {
         std::lock_guard<std::mutex> lock(runtime_state().mtx);

@@ -45,7 +45,6 @@
 #define free_module_object_locked free_module_object_locked_internal
 #define generate_transaction_id_locked generate_transaction_id_locked_internal
 #define install_module_view_locked install_module_view_locked_internal
-#define inventory_slot_locked inventory_slot_locked_internal
 #define isolate_ext2orig_failure_locked isolate_ext2orig_failure_locked_internal
 #define isolate_pending_locked isolate_pending_locked_internal
 #define item_pointer_known_locked item_pointer_known_locked_internal
@@ -79,7 +78,6 @@
 #define txn_record_pending_locked txn_record_pending_locked_internal
 
 namespace {
-bool inventory_slot_locked(int bag, int slot, void** out);
 
 bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
                                  void* expected_item, const char* context) {
@@ -279,31 +277,6 @@ void ensure_state_loaded_locked() {
     // 准入状态由 provider 回调维护（extension_bag_session_admitted_locked）；
     // 保留函数作为全部既有调用点的稳定锚，无 IO、无游戏状态读取。
 }
-bool inventory_slot_locked(int bag, int slot, void** out) {
-    // C18 改版页的原生追加袋（6..N-1）也要能作为移动来源读取。
-    // 只读物理槽：原版 0..5（含任务袋）保持可读；C18 追加袋仅在候选版本放开。
-    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->physical_item_at == nullptr ||
-        out == nullptr || slot < 0 || slot >= virtual_bag::kSlotCount || bag < 0 ||
-        (bag > virtual_bag::kOriginalTaskBag && !native_source_bag_allowed_locked(bag))) {
-        return false;
-    }
-    *out = nullptr;
-    qol::contracts::QolItemHandle handle{};
-    if (!qol::contracts::succeeded(runtime_state().host.item_facts->physical_item_at(bag, slot, &handle))) {
-        return false;
-    }
-    // physical_item_at returns a handle that may be game-owned (original inventory)
-    // or provider-owned (EB). Private custody only knows the latter, so resolve
-    // through the Game Host handle bridge first.
-    const auto* game = runtime_state().host.game;
-    if (game != nullptr && game->item_abi.native_item_for_handle != nullptr &&
-        qol::contracts::succeeded(game->item_abi.native_item_for_handle(handle, out)) &&
-        *out != nullptr) {
-        return true;
-    }
-    return extension_bag_private_item_for_handle(handle, out);
-}
-
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
                                                 int target_bag) {
     if (runtime_state().host.game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
@@ -826,9 +799,6 @@ void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
 }
 void release_temporary_item_locked(void* item) {
     release_temporary_item_locked_internal(item);
-}
-bool inventory_slot_locked(int bag, int slot, void** out) {
-    return inventory_slot_locked_internal(bag, slot, out);
 }
 bool item_pointer_known_locked(void* item) { return item_pointer_known_locked_internal(item); }
 void teardown_extension_bag_hosts_locked() {

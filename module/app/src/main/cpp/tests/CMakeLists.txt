@@ -981,6 +981,7 @@ add_executable(extension_bag_draw_lock_tests test_extension_bag_draw_lock.cpp)
 target_include_directories(extension_bag_draw_lock_tests PRIVATE ${CPP_DIR})
 target_compile_definitions(extension_bag_draw_lock_tests PRIVATE
     QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE="${CPP_DIR}/plugins/extension_bag/public/bridge.cpp"
+    QOL_EXTENSION_BAG_INVENTORY_ACCESS_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/inventory_access.cpp"
     QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/render.cpp"
     QOL_EXTENSION_BAG_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/projection.cpp"
     QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/lifecycle.cpp"

@@ -1,42 +1,53 @@
-#include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/item_access.h"
 
-#include "contracts/game_host.h"
-#include "contracts/host_sdk.h"
-#include "contracts/ui.h"
-#include "contracts/ownership.h"
-#include "contracts/inventory_refresh.h"
-#include "contracts/item_facts.h"
-#include "plugins/extension_bag/model/equip_rules.h"
-#include "plugins/extension_bag/extension_bag_port.h"
-#include "plugins/extension_bag/assembly/move_merge.h"
-#include "plugins/extension_bag/model/ownership_ledger.h"
-#include "plugins/extension_bag/model/item_handle_custody.h"
-#include "plugins/extension_bag/model/sale_transaction.h"
-#include "plugins/extension_bag/model/draw_state_lock.h"
-#include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
-#include "plugins/extension_bag/model/virtual_bag_state.h"
-#include "contracts/module_save_port.h"
-#include "contracts/popup_enter_alias.h"
 #include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
-#include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/inventory_access.h"
+#include "plugins/extension_bag/plugin.h"
+#include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/ui/host_ui.h"
 
-#include <atomic>
-#include <chrono>
 #include <cstdint>
-#include <cstdlib>
-#include <cstdio>
-#include <cstring>
-#include <functional>
-#include <mutex>
-#include <thread>
-#include <unistd.h>
+
+bool read_item_category(const void* item, int* out_category) {
+    qol::contracts::QolItemHandle handle{};
+    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->category == nullptr ||
+        item == nullptr || out_category == nullptr ||
+        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) return false;
+    int32_t category = 0;
+    if (!qol::contracts::succeeded(
+            runtime_state().host.item_facts->category(handle, &category))) return false;
+    *out_category = category;
+    return true;
+}
+
+void* extension_create_item(int category, int arg1, int arg2, int arg3) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->inventory.create_item == nullptr) return nullptr;
+    void* item = nullptr;
+    return qol::contracts::succeeded(
+               api->inventory.create_item(category, arg1, arg2, arg3, &item))
+               ? item
+               : nullptr;
+}
+
+const qol::contracts::QolItemCountApi* item_count_api() {
+    return runtime_state().host.game == nullptr ? nullptr : &runtime_state().host.game->item_count;
+}
+
+bool mark_native_bag_object(void* item) {
+    const auto* api = item_count_api();
+    if (api == nullptr || api->read_encoded_field == nullptr ||
+        api->write_encoded_field == nullptr || item == nullptr) return false;
+    uint32_t field = 0;
+    if (!qol::contracts::succeeded(api->read_encoded_field(item, &field))) return false;
+    field = qol::features::extension_bag::write_native_bag_object_marker(field);
+    return qol::contracts::succeeded(api->write_encoded_field(item, field));
+}
 
 #define current_env current_env_internal
-#define extension_remove_item_direct extension_remove_item_direct_internal
 #define extension_serialize_item_payload extension_serialize_item_payload_internal
 #define extension_load_item_payload extension_load_item_payload_internal
 #define extension_free_item_payload extension_free_item_payload_internal
@@ -47,21 +58,11 @@
 #define extension_description_set_off extension_description_set_off_internal
 #define extension_use_item extension_use_item_internal
 #define extension_make_mercenary extension_make_mercenary_internal
-#define extension_refresh_bag_area extension_refresh_bag_area_internal
 #define item_count_encoding item_count_encoding_internal
 #define original_count_view original_count_view_internal
 #define category_is_equip category_is_equip_internal
 #define category_is_extension_backpack category_is_extension_backpack_internal
 
-bool extension_save_item_on_empty(void* item, int bag) {
-    const auto* api = extension_bag_write_api();
-    if (api == nullptr || api->inventory.save_item_on_empty == nullptr) return false;
-    int32_t result = 0;
-    return qol::contracts::succeeded(api->inventory.save_item_on_empty(item, bag, &result)) &&
-           result != 0;
-}
-
-namespace {
 
 bool extension_equip_from_inventory(void* character, int bag, int slot, int equip_slot) {
     const auto* api = extension_bag_write_api();
@@ -71,6 +72,7 @@ bool extension_equip_from_inventory(void* character, int bag, int slot, int equi
                api->equipment.equip_from_inventory(character, bag, slot, equip_slot, &result)) &&
            result != 0;
 }
+namespace {
 
 bool extension_apply_stuff(void* target_item, void* material) {
     const auto* api = extension_bag_write_api();
@@ -94,6 +96,8 @@ bool extension_make_mercenary(void* item, void** out_mercenary) {
            qol::contracts::succeeded(api->equipment.make_mercenary(item, out_mercenary));
 }
 
+}  // namespace
+
 bool extension_add_money(int64_t amount) {
     const auto* api = extension_bag_write_api();
     if (api == nullptr || api->equipment.add_money == nullptr) return false;
@@ -108,37 +112,11 @@ bool extension_minus_money(int64_t amount) {
     return qol::contracts::succeeded(api->equipment.minus_money(amount, &result)) && result != 0;
 }
 
-bool extension_move_item(void* item, int count, int bag, int slot, int* out_result) {
-    const auto* api = extension_bag_write_api();
-    if (api == nullptr || api->inventory.move_item == nullptr || out_result == nullptr) return false;
-    int32_t result = 0;
-    const QolResult call = api->inventory.move_item(item, count, bag, slot, &result);
-    if (!qol::contracts::succeeded(call)) return false;
-    *out_result = result;
-    return true;
-}
-
-bool extension_remove_item_direct(int bag, int slot, int* out_result) {
-    const auto* api = extension_bag_write_api();
-    if (api == nullptr || api->inventory.remove_item_direct == nullptr || out_result == nullptr) {
-        return false;
-    }
-    int32_t result = 0;
-    const QolResult call = api->inventory.remove_item_direct(bag, slot, &result);
-    if (!qol::contracts::succeeded(call)) return false;
-    *out_result = result;
-    return true;
-}
-
-}  // namespace
-
 bool extension_free_item(void* item) {
     const auto* api = extension_bag_write_api();
     return api != nullptr && api->inventory.free_item != nullptr &&
            qol::contracts::succeeded(api->inventory.free_item(item));
 }
-
-namespace {
 
 bool extension_serialize_item(uint8_t* payload, int payload_capacity, void* item, int* out_size) {
     const auto* api = extension_bag_write_api();
@@ -160,6 +138,8 @@ void* extension_load_item(const uint8_t* payload, int payload_size, int* out_con
     return nullptr;
 }
 
+namespace {
+
 int extension_serialize_item_payload(uint8_t* payload, void* item) {
     int size = 0;
     return extension_serialize_item(payload, virtual_bag::kSerializedItemProbeBuffer, item, &size)
@@ -175,19 +155,7 @@ int extension_load_item_payload(const uint8_t* payload, void** out_item, int* ou
 
 void extension_free_item_payload(void* item) { (void)extension_free_item(item); }
 
-void extension_refresh_item_area() {
-    const auto* api = extension_bag_write_api();
-    if (api != nullptr && api->ui.refresh_item_area != nullptr) {
-        (void)api->ui.refresh_item_area();
-    }
-}
 
-void extension_refresh_bag_area() {
-    const auto* api = extension_bag_write_api();
-    if (api != nullptr && api->ui.refresh_bag_area != nullptr) {
-        (void)api->ui.refresh_bag_area();
-    }
-}
 
 void extension_refresh_mix_item() {
     const auto* api = extension_bag_write_api();
@@ -285,20 +253,7 @@ bool read_item_is_usable(int category) {
         value;
 }
 
-bool read_world_state_id(int* out_state) {
-    if (out_state == nullptr) return false;
-    const auto* facts = qol::features::extension_bag::world_facts();
-    if (facts == nullptr || facts->state == nullptr) return false;
-    int32_t state = -1;
-    if (!qol::contracts::succeeded(facts->state(&state))) return false;
-    *out_state = state;
-    return true;
-}
 
-bool read_world_in_world() {
-    int state = -1;
-    return read_world_state_id(&state) && state == 5;
-}
 
 namespace {
 
@@ -373,57 +328,15 @@ bool read_has_empty_mercenary_slot() {
                runtime_state().host.character_extras->read.has_empty_mercenary_slot(&value)) && value != 0;
 }
 
-bool read_inventory_bag_size(int bag, int* out_size) {
-    if (runtime_state().host.game == nullptr || runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.bag_size == nullptr ||
-        out_size == nullptr) return false;
-    int32_t value = 0;
-    if (!qol::contracts::succeeded(runtime_state().host.inventory_extras->read.bag_size(bag, &value))) return false;
-    *out_size = value;
-    return true;
-}
 
-bool read_inventory_is_empty_bag(int bag) {
-    if (runtime_state().host.game == nullptr || runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.is_empty_bag == nullptr) return false;
-    int32_t value = 0;
-    return qol::contracts::succeeded(
-               runtime_state().host.inventory_extras->read.is_empty_bag(bag, &value)) && value != 0;
-}
 
-bool read_inventory_find_save_slot(const void* item, int* out_slot) {
-    if (runtime_state().host.game == nullptr || runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.find_save_slot == nullptr ||
-        item == nullptr || out_slot == nullptr) return false;
-    int32_t value = -1;
-    if (!qol::contracts::succeeded(
-            runtime_state().host.inventory_extras->read.find_save_slot(item, &value))) return false;
-    *out_slot = value;
-    return true;
-}
 
-int read_current_save_slot() {
-    const auto* facts = qol::features::extension_bag::save_facts();
-    if (facts == nullptr || facts->current_slot == nullptr) return -1;
-    int32_t slot = -1;
-    return qol::contracts::succeeded(facts->current_slot(&slot)) ? slot : -1;
-}
 
 
 }  // namespace
 
-int raw_direct_bag_locked() {
-    if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.current_bag == nullptr) return -1;
-    int32_t bag = -1;
-    return qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&bag)) ? bag : -1;
-}
 
-int raw_got_bag_locked() {
-    return raw_direct_bag_locked();
-}
 
-int raw_desc_type_locked() {
-    if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.desc_type == nullptr) return -1;
-    int32_t type = -1;
-    return qol::contracts::succeeded(runtime_state().host.write_port->ui.desc_type(&type)) ? type : -1;
-}
 
 namespace {
 JNIEnv* current_env() {
@@ -470,20 +383,15 @@ uint32_t original_count_view(uint32_t field) {
 #undef extension_description_set_off
 #undef extension_use_item
 #undef extension_make_mercenary
-#undef extension_refresh_bag_area
 #undef item_count_encoding
 #undef original_count_view
 #undef category_is_equip
 #undef category_is_extension_backpack
 #undef handle_extension_tab_click_locked
-#undef extension_remove_item_direct
 #undef extension_serialize_item_payload
 #undef extension_load_item_payload
 #undef extension_free_item_payload
 
-bool extension_remove_item_direct(int bag, int slot, int* out_result) {
-    return extension_remove_item_direct_internal(bag, slot, out_result);
-}
 int extension_serialize_item_payload(uint8_t* payload, void* item) {
     return extension_serialize_item_payload_internal(payload, item);
 }
@@ -508,7 +416,6 @@ bool extension_use_item(void* character, void* item, int arg, int* out_used) {
 bool extension_make_mercenary(void* item, void** out_mercenary) {
     return extension_make_mercenary_internal(item, out_mercenary);
 }
-void extension_refresh_bag_area() { extension_refresh_bag_area_internal(); }
 qol::contracts::QolItemCountEncoding item_count_encoding(const void* item) {
     return item_count_encoding_internal(item);
 }
