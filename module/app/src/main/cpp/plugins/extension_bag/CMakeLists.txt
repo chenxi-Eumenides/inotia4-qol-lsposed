@@ -2,6 +2,7 @@ add_library(qol_plugin_extension_bag STATIC
     runtime/state.cpp
     runtime/entry_guard.cpp
     runtime/bag_state_store.cpp
+    runtime/status_snapshot.cpp
     runtime/inventory_access.cpp
     runtime/item_access.cpp
     runtime/native_tab_layout.cpp

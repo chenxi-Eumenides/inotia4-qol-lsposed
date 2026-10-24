@@ -1,6 +1,7 @@
 #include "plugins/extension_bag/runtime/bag_state_store.h"
 
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/status_snapshot.h"
 
 #include <memory>
 
@@ -25,6 +26,7 @@ void publish_bag_snapshot() {
     snapshot->inventory_generation = runtime_state().ui.inventory_generation;
     std::atomic_store_explicit(&g_snapshot, std::shared_ptr<const BagSnapshot>(snapshot),
                                std::memory_order_release);
+    publish_status_snapshot();
 }
 
 void publish_bag_snapshot_if_changed() {

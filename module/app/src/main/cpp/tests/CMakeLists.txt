@@ -964,7 +964,8 @@ add_test(NAME extension_bag_transaction_coordinator_tests COMMAND extension_bag_
 add_executable(extension_bag_bag_state_store_tests
     test_extension_bag_bag_state_store.cpp
     stubs/extension_bag_catalog_stub.cpp
-    ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp)
+    ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp
+    ${CPP_DIR}/plugins/extension_bag/runtime/status_snapshot.cpp)
 target_include_directories(extension_bag_bag_state_store_tests PRIVATE
     ${CPP_DIR}
     ${JNI_INCLUDE_DIRS}
