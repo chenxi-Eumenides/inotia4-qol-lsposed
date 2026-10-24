@@ -89,7 +89,7 @@ UI 控件 ─────────────▶ EntryGuard → usecases / l
 | 数据 | 来源 | 驱动方式 |
 |---|---|---|
 | 变体（series/version/能力位） | `game_variant_table.inc` | 构建期扫描 APK 生成 |
-| 扩展袋上限/活动数量 | `model/bag_catalog.inc` + `State.bag_count` | 编译期上限 + 运行期设置 |
+| 扩展袋上限/活动数量 | `model/bag_catalog.inc` + `State.bag_count` | 编译期上限 128 + 运行期设置（默认 5） |
 | 袋类型容量 | `ITEMSTATICBASE.json` → `bag_catalog.inc` | 生成表 |
 | 槽数 16 | 游戏槽上限 | 常量 |
 | 物品属性（是否装备/宝石/可用/售价） | 宿主 `read_only.item.*` / `item_facts` | 游戏数据，EB 不复制 |
@@ -99,6 +99,7 @@ UI 控件 ─────────────▶ EntryGuard → usecases / l
 不变量：
 
 - 业务代码不写死扩展袋数量，统一 `virtual_bag::active_extension_bags()`；
+- 扩展袋内容通过**代理袋**显示：`current_bag` 只写原版事务袋 0..4，扩展袋号不进入游戏数值域；
 - 缩小 `bagCount` 仅当被移除袋为空，且有 pending/拖拽/未提交事务时拒绝；
 - 投影只读：绘制/命中/查询不修改业务状态；
 - C18 追加袋与原版袋始终以游戏数据为准，扩展袋以 sidecar 为准。
@@ -121,14 +122,16 @@ UI 控件 ─────────────▶ EntryGuard → usecases / l
 |---|---|
 | 命令编组、查询快照 | 完成（Step 1–2） |
 | 用例层承接全部命令 | 完成（Step 3） |
-| 数据层组件 | 组件已存在；L4 仍直接引用 `runtime_state()` |
+| 数据层组件 | 组件已存在；L4 统一经 `interface/state_access.h` |
 | 业务互斥量 | 已删除，改为重入锁（Step 5） |
 | 宏桥/聚合头 | 已删除 34 个宏；`extension_bag_internal.h` 仍被部分文件包含 |
 | 安装/恢复迁移 | 待办（P3c，依赖 OwnershipManager） |
 
-L4 直接引用统计（2026-10-25）：`api` 26、`public` 304、`ui` 485，共 815；
-基线为 935。剩余集中在 `ui/` 的绘制与控件适配，需要按页面逐个迁移到
-`bag_query`/用例，而不是机械替换访问器。
+L4 直接引用统计：迁移前 935；经 `state_access` 收口后为 0。该访问器当前返回
+live 引用（主线程契约），后续只读页面可替换为 `bag_query` 快照。
+
+10000 袋的可行优化（稀疏存储、分层快照、分片持久化）见 `optimizations.md`，
+本轮只记录、不实施。
 
 ## 7. 验证
 
