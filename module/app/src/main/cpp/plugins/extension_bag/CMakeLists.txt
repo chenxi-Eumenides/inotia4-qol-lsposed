@@ -17,6 +17,7 @@ add_library(qol_plugin_extension_bag STATIC
     runtime/bind.cpp
     api/api_impl.cpp
     usecases/view.cpp
+    usecases/move.cpp
     assembly/claims.cpp
     assembly/move_merge_impl.cpp
     runtime/observation.cpp

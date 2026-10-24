@@ -25,6 +25,7 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/runtime/native_tab_layout.h"
+#include "plugins/extension_bag/usecases/move.h"
 
 #include <atomic>
 #include <chrono>
@@ -152,7 +153,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                         } else if (extension_source) {
                             // 目标袋已有背包对象，或来源是装备/其他物品：一律按普通
                             // 扩展袋间移动处理，不能把“背包槽装备”误当人物装备。
-                            const bool moved = move_extension_to_extension_locked(
+                            const bool moved = qol::features::extension_bag::usecases::move_extension_to_extension(
                                 module_bag, module_slot, index, -1);
                             if (moved) {
                                 persist_state_locked(false);
@@ -161,7 +162,9 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                             VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
                                         moved ? 1 : 0, index, category);
                         } else {
-                            const bool moved = move_original_to_extension_locked(lock, index, moving);
+                            const bool moved =
+                                qol::features::extension_bag::usecases::move_original_to_extension(
+                                    lock, index, moving);
                             VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
                                         moved ? 1 : 0, index, category,
                                         runtime_state().objects.bag.types[index] != 0 ? 1 : 0);

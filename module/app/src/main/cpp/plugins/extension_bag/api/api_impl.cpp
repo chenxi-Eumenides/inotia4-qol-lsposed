@@ -24,6 +24,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/usecases/move.h"
 #include "plugins/extension_bag/usecases/view.h"
 
 #include <atomic>
@@ -163,11 +164,14 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to
     if (!extension_bag_session_admitted_locked()) return extension_bag_not_ready_error_locked();
     bool moved = false;
     if (from_original && to_extension) {
-        moved = move_original_to_extension_slot_locked(lock, from_bag, from_slot, to_internal);
+        moved = qol::features::extension_bag::usecases::move_original_to_extension_slot(
+            lock, from_bag, from_slot, to_internal);
     } else if (from_extension && to_original) {
-        moved = move_extension_to_original_locked(lock, from_internal, from_slot, to_bag);
+        moved = qol::features::extension_bag::usecases::move_extension_to_original(
+            lock, from_internal, from_slot, to_bag);
     } else {
-        moved = move_extension_to_extension_locked(from_internal, from_slot, to_internal, to_slot);
+        moved = qol::features::extension_bag::usecases::move_extension_to_extension(
+            from_internal, from_slot, to_internal, to_slot);
     }
     if (!moved) return op_err("move failed");
     return "{\"ok\":true,\"state\":" + extension_bag_status_json_locked() + "}";
