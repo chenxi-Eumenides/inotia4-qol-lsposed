@@ -23,6 +23,7 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/public/bridge.cpp
     plugins/extension_bag/runtime/bind.cpp
     plugins/extension_bag/api/api_impl.cpp
+    plugins/extension_bag/usecases/view.cpp
     plugins/extension_bag/assembly/claims.cpp
     plugins/extension_bag/assembly/move_merge_impl.cpp
     plugins/extension_bag/runtime/observation.cpp

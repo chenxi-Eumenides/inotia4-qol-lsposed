@@ -23,6 +23,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/usecases/view.h"
 
 #include <atomic>
 #include <chrono>
@@ -41,7 +42,6 @@
 #define extension_bag_not_ready_error_locked extension_bag_not_ready_error_locked_bridge
 #define extension_bag_ready_locked extension_bag_ready_locked_bridge
 #define extension_internal_bag extension_internal_bag_bridge
-#define extension_bag_view_result_json extension_bag_view_result_json_bridge
 #define unequip_extension_bag_locked unequip_extension_bag_locked_bridge
 std::string extension_bag_api_status_json_impl() {
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
@@ -55,77 +55,15 @@ std::string extension_bag_api_status_json_impl() {
 }
 
 std::string extension_bag_api_enter_view_impl(int logical_bag) {
-    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    const int internal_bag = extension_internal_bag(logical_bag);
-    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
-        return extension_bag_not_ready_error_locked();
-    }
-    ensure_state_loaded_locked();
-    // 面板门禁（P3 真机实证）：控件树仅在背包面板打开时有效，面板关闭时
-    // enter_view 会投影到 stale 树（点击失效/重建后被 RefreshItemArea 冲掉）。
-    if (!runtime_state().ui.inventory_frame_active) return op_err("inventory panel not open");
-    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule) {
-        return op_err("already in extension view");
-    }
-    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule) {
-        return op_err("exit in progress");
-    }
-    handle_extension_tab_click_locked(internal_bag);
-    const bool entered = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule;
-    return extension_bag_view_result_json(entered, "enter extension view failed");
+    return qol::features::extension_bag::usecases::enter_view(logical_bag);
 }
 
 std::string extension_bag_api_exit_view_impl() {
-    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
-        return extension_bag_not_ready_error_locked();
-    }
-    ensure_state_loaded_locked();
-    if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule) {
-        return op_err("exit in progress");
-    }
-    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule ||
-        !virtual_bag::valid_index(runtime_state().objects.bag.selected)) {
-        return op_err("not in extension view");
-    }
-
-    const int original_bag = original_bag_locked();
-    if (runtime_state().objects.module_view_installed) {
-        restore_module_view_locked();
-    } else {
-        clear_original_desc_locked();
-    }
-    const virtual_bag::ExitViewResult result =
-        virtual_bag::exit_module_view(&runtime_state().objects.bag, original_bag);
-    if (result == virtual_bag::ExitViewResult::kExitInProgress) {
-        return op_err("exit in progress");
-    }
-    if (result != virtual_bag::ExitViewResult::kExited) {
-        return op_err("not in extension view");
-    }
-    persist_state_locked();
-    return extension_bag_view_result_json(true, "exit extension view failed");
+    return qol::features::extension_bag::usecases::exit_view();
 }
 
 std::string extension_bag_api_select_bag_impl(int logical_bag) {
-    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
-    const int internal_bag = extension_internal_bag(logical_bag);
-    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
-        return extension_bag_not_ready_error_locked();
-    }
-    ensure_state_loaded_locked();
-    if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
-        return op_err("not in extension view");
-    }
-    if (runtime_state().objects.bag.selected == internal_bag) return op_err("bag already selected");
-    handle_extension_tab_click_locked(internal_bag);
-    const bool selected = runtime_state().objects.bag.selected == internal_bag;
-    return extension_bag_view_result_json(selected, "select bag failed");
+    return qol::features::extension_bag::usecases::select_bag(logical_bag);
 }
 
 std::string extension_bag_api_click_item_impl(int logical_bag, int slot) {
@@ -471,5 +409,4 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
 #undef extension_bag_not_ready_error_locked
 #undef extension_bag_ready_locked
 #undef extension_internal_bag
-#undef extension_bag_view_result_json
 #undef unequip_extension_bag_locked
