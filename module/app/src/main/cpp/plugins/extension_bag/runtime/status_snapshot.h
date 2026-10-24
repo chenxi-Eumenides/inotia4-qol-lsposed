@@ -12,6 +12,8 @@ namespace qol::extension_bag {
 
 struct StatusSnapshot {
     virtual_bag::State bag{};
+    std::array<std::array<uint32_t, virtual_bag::kSlotCount>,
+               virtual_bag::kMaxExtensionBags> effective_counts{};
     bool enabled = false;
     bool injected = false;
     bool save_panel_hook_installed = false;

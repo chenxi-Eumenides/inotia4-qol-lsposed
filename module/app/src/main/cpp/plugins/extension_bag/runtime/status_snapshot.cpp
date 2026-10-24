@@ -2,6 +2,7 @@
 
 #include "plugins/extension_bag/runtime/projection_controller.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
 
 #include <memory>
 #include <string>
@@ -24,6 +25,17 @@ void publish_status_snapshot() {
     auto snapshot = std::make_shared<StatusSnapshot>();
     snapshot->bag = state.objects.bag;
     snapshot->enabled = state.enabled.load(std::memory_order_acquire);
+    const int active_bags =
+        virtual_bag::clamp_active_extension_bags(snapshot->bag.bag_count);
+    for (int bag = 0; bag < active_bags; ++bag) {
+        const int capacity = snapshot->bag.capacities[bag];
+        for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
+            const virtual_bag::Item& item = snapshot->bag.items[bag][slot];
+            if (item.category <= 0 || item.count <= 0) continue;
+            snapshot->effective_counts[bag][slot] = virtual_bag_effective_count(
+                state.objects.module_objects[bag][slot], static_cast<uint32_t>(item.count));
+        }
+    }
     snapshot->injected = state.persistence.state_entry != nullptr;
     snapshot->save_panel_hook_installed = state.persistence.save_panel_hook_installed;
     snapshot->extension_tab_button = state.ui.extension_tab_buttons[0] != nullptr;

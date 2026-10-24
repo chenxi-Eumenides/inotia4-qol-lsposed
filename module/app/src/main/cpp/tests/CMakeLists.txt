@@ -964,6 +964,7 @@ add_test(NAME extension_bag_transaction_coordinator_tests COMMAND extension_bag_
 add_executable(extension_bag_bag_state_store_tests
     test_extension_bag_bag_state_store.cpp
     stubs/extension_bag_catalog_stub.cpp
+    stubs/extension_bag_effective_count_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/status_snapshot.cpp)
 target_include_directories(extension_bag_bag_state_store_tests PRIVATE
@@ -974,6 +975,25 @@ target_compile_features(extension_bag_bag_state_store_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_bag_state_store_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_bag_state_store_tests COMMAND extension_bag_bag_state_store_tests)
+
+add_executable(extension_bag_inventory_snapshot_tests
+    test_extension_bag_inventory_snapshot.cpp
+    stubs/extension_bag_catalog_stub.cpp
+    ${CPP_DIR}/plugins/extension_bag/public/bridge.cpp
+    ${CPP_DIR}/plugins/extension_bag/public/counts.cpp
+    ${CPP_DIR}/plugins/extension_bag/runtime/status_snapshot.cpp)
+target_include_directories(extension_bag_inventory_snapshot_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/plugins/extension_bag
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(extension_bag_inventory_snapshot_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_inventory_snapshot_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_compile_options(extension_bag_inventory_snapshot_tests PRIVATE
+    -ffunction-sections -fdata-sections)
+target_link_options(extension_bag_inventory_snapshot_tests PRIVATE -Wl,--gc-sections)
+add_test(NAME extension_bag_inventory_snapshot_tests COMMAND extension_bag_inventory_snapshot_tests)
 
 add_executable(extension_bag_entry_guard_tests
     test_extension_bag_entry_guard.cpp

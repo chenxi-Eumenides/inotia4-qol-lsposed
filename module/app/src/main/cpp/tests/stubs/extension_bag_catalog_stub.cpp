@@ -26,3 +26,6 @@ void extension_bag_test_set_active_count(int count) {
 std::string data_op_extension_bag_set_bag_count(int count) {
     return std::string("{\"ok\":true,\"count\":") + std::to_string(count) + "}";
 }
+
+// Host 快照测试不加载数量编码策略，canonical 视图直接返回原值。
+uint32_t original_count_view(uint32_t field) { return field; }

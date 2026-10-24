@@ -1,4 +1,4 @@
-#include "game_ui_virtbag.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -25,6 +25,7 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/runtime/bag_state_store.h"
+#include "plugins/extension_bag/runtime/status_snapshot.h"
 
 #include <array>
 #include <atomic>
@@ -312,25 +313,34 @@ bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
 }
 
 std::string virtual_bag_inventory_bags_json() {
-    if (!runtime_state().enabled.load() || !read_world_in_world()) return "";
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
-    ensure_state_loaded_locked();
+    const auto snapshot = qol::extension_bag::load_status_snapshot();
+    if (!snapshot) {
+        static std::atomic_flag logged = ATOMIC_FLAG_INIT;
+        if (!logged.test_and_set(std::memory_order_relaxed)) {
+            VIRTBAG_LOG("inventory bags query skipped: status snapshot not published");
+        }
+        return "";
+    }
+    if (!snapshot->enabled || !read_world_in_world()) return "";
+
     std::string out;
-    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
-        const int capacity = runtime_state().objects.bag.capacities[bag];
+    const int active_bags =
+        virtual_bag::clamp_active_extension_bags(snapshot->bag.bag_count);
+    for (int bag = 0; bag < active_bags; ++bag) {
+        const int capacity = snapshot->bag.capacities[bag];
         int filled = 0;
         std::string items;
         // 只遍历派生容量内的槽位：容量外不是有效槽（R-05），不参与 items 输出
         // 与 slot_count 统计。
         for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
-            const virtual_bag::Item& item = runtime_state().objects.bag.items[bag][slot];
+            const virtual_bag::Item& item = snapshot->bag.items[bag][slot];
             if (item.category <= 0 || item.count <= 0) continue;
             if (filled > 0) items += ",";
             // count 输出模式视图（R-47 决策 b）：启用态 canonical、关闭态 b。
             items += "{\"slot\":" + std::to_string(slot) +
                      ",\"category\":" + std::to_string(item.category) +
                      ",\"count\":" +
-                     std::to_string(static_cast<int>(virtual_bag_effective_count(runtime_state().objects.module_objects[bag][slot], static_cast<uint32_t>(item.count)))) +
+                     std::to_string(static_cast<int>(snapshot->effective_counts[bag][slot])) +
                      "}";
             ++filled;
         }
