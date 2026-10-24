@@ -126,6 +126,20 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
                         runtime_state().ui.extension_drag.slot, index);
             return handled;
         }
+        // C18 改版客户端追加袋页签：原生 drop 分支只处理“把背包类物品装进该袋”，
+        // 普通物品落上去没有原生处理，因此这里由模块事务接管。
+        int native_target_bag = -1;
+        if (extension_c18_native_bag_hit(x, y, &native_target_bag)) {
+            const bool handled = move_extension_to_original_locked(
+                lock, runtime_state().ui.extension_drag.bag,
+                runtime_state().ui.extension_drag.slot, native_target_bag);
+            if (handled) refresh_projected_module_view_after_move_locked();
+            QOL_LOG_INFO(QolDomain::kExtensionBag,
+                         "drop result direction=extension->native handled=%d src=%d/%d target_bag=%d",
+                         handled ? 1 : 0, runtime_state().ui.extension_drag.bag,
+                         runtime_state().ui.extension_drag.slot, native_target_bag);
+            return handled;
+        }
         const int original_target_bag = original_bag_button_index(x, y);
         if (original_target_bag >= 0 && original_target_bag < 6) {
             if (!virtual_bag::valid_original_transaction_bag(original_target_bag)) {

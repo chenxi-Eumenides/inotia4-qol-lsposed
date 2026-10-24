@@ -29,6 +29,9 @@ void disable_extension_tab_buttons_locked();
 void install_extension_tab_buttons_locked();
 bool extension_tab_buttons_complete_locked();
 bool extension_tab_hit(int index, int64_t x, int64_t y);
+// C18 改版客户端追加袋页签命中：返回原生袋号（= 袋容器子控件序号，与原生
+// UIEquip_GetBagSlotIndex 同一定义）。歧义/未命中返回 false。
+bool extension_c18_native_bag_hit(int64_t x, int64_t y, int* out_native_bag);
 bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
                                              int index, void* moving_control);
 bool extension_source_should_equip_locked(int target_bag);

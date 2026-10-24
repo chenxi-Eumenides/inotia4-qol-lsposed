@@ -279,7 +279,29 @@ bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int 
 }
 bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
                                        int src_slot, int target_bag) {
-    if (!virtual_bag::valid_original_transaction_bag(target_bag) ||
+    // target_bag >= 6 表示 C18 改版客户端的原生追加袋：与“回到原版袋”共用同一条
+    // 事务（载荷校验、pending、插入核验、所有权移交），差异只在宿主容量守卫、
+    // 显示袋切换与目标袋合法性判定。
+    const bool native_target = target_bag >= 6;
+    if (native_target) {
+        const auto* game = runtime_state().host.game;
+        int32_t target_size = 0;
+        const bool candidate = game != nullptr && game->target.has_capability != nullptr &&
+            game->target.has_capability(
+                qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
+        const bool sized = runtime_state().host.inventory_extras != nullptr &&
+            runtime_state().host.inventory_extras->read.bag_size != nullptr &&
+            qol::contracts::succeeded(
+                runtime_state().host.inventory_extras->read.bag_size(target_bag, &target_size)) &&
+            target_size > 0;
+        if (!candidate || !sized) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "cross move reject extension->native target=%d candidate=%d size=%d",
+                         target_bag, candidate ? 1 : 0, target_size);
+            return false;
+        }
+    }
+    if ((!native_target && !virtual_bag::valid_original_transaction_bag(target_bag)) ||
         !virtual_bag::valid_index(src_bag) ||
         src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
         extension_bag_write_api() == nullptr ||
@@ -294,8 +316,10 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     // 使下方 fn_get_bag_size 满包预检与 INVEN_SaveItemOnEmpty 空槽扫描按真实
     // 容量判定（扩展容量 < 真实容量时宿主袋被误判已满、> 真实容量时越窗扫描）；
     // RAII 保证任何出口写回投影值（成功后由调用方 refresh 重刷控件）。
-    const bool host_restore = virtual_bag::ext2orig_requires_host_capacity_restore(
-        runtime_state().objects.module_view_installed, target_bag, runtime_state().objects.module_window_original_bag);
+    const bool host_restore = !native_target &&
+        virtual_bag::ext2orig_requires_host_capacity_restore(
+            runtime_state().objects.module_view_installed, target_bag,
+            runtime_state().objects.module_window_original_bag);
     constexpr uint32_t kTxnCapacityMask = (1u << 25) - 1u;
     const int host_word_bag = host_restore ? runtime_state().objects.original_bag_size_bag : -1;
     uint32_t host_projected_word = 0;
@@ -438,7 +462,7 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     // 事务内切换会让宿主记录与 CUR_BAG 分叉（下一次 install 把用户目标袋误选为
     // 宿主——原版袋容量字被写扩展容量、扩展内容投影上去）。投影中不切换；
     // SaveItemOnEmpty 显式携带 target_bag，不依赖 CUR_BAG。
-    if (item != nullptr &&
+    if (item != nullptr && !native_target &&
         virtual_bag::ext2orig_should_switch_display_bag(runtime_state().objects.module_view_installed)) {
         set_original_bag_locked(target_bag);
     }
@@ -576,12 +600,15 @@ bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int s
     // 提交后的显示袋切换同样受 VM-40 宿主身份守卫：投影安装中宿主不变，
     // 拖放调用方的 refresh_projected_module_view_after_move_locked 负责刷新；
     // API（非投影）路径保留切到目标袋的既有语义。
-    if (virtual_bag::ext2orig_should_switch_display_bag(runtime_state().objects.module_view_installed)) {
+    if (!native_target &&
+        virtual_bag::ext2orig_should_switch_display_bag(runtime_state().objects.module_view_installed)) {
         set_original_bag_locked(target_bag);
     }
     reset_drag_state_locked(nullptr);
-    QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension->original src=%d/%d cat=%d count=%d target_bag=%d slot=%d",
-                txn.transaction_id, src_bag, src_slot, txn.source.category, txn.source.count,
+    QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s %s src=%d/%d cat=%d count=%d target_bag=%d slot=%d",
+                txn.transaction_id,
+                native_target ? "extension->native" : "extension->original",
+                src_bag, src_slot, txn.source.category, txn.source.count,
                 target_bag, inserted_slot);
     return true;
     };

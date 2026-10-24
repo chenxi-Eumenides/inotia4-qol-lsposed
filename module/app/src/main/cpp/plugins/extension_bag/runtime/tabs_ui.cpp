@@ -23,6 +23,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/runtime/equip_tab_layout.h"
 
 #include <atomic>
@@ -1044,6 +1045,46 @@ void commit_pending_extension_tab_locked(std::unique_lock<std::mutex>& lock) {
     handle_pending_extension_tab_click_locked(lock, extension_bag);
 }
 
+bool extension_c18_native_bag_hit_internal(int64_t x, int64_t y, int* out_native_bag) {
+    if (out_native_bag == nullptr) return false;
+    const auto* game = runtime_state().host.game;
+    if (game == nullptr || game->target.has_capability == nullptr ||
+        game->target.has_capability(
+            qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0) return false;
+    void* parent = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+    if (parent == nullptr) return false;
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(parent, &child_count)) return false;
+    if (child_count > static_cast<int>(qol::extension_bag::kMaxEquipBagChildren)) {
+        child_count = static_cast<int>(qol::extension_bag::kMaxEquipBagChildren);
+    }
+    // 原生 UIEquip_GetBagSlotIndex 就是“控件在袋容器里的子序号”，袋号与子序号同源。
+    // 排除模块页签（扩展页签也挂在同一容器），歧义命中一律拒绝。
+    int hit_count = 0;
+    int found = -1;
+    for (int i = 0; i < child_count; ++i) {
+        void* control = extension_bag_ui_child_at(parent, i);
+        if (control == nullptr || extension_bag_ui_parent(control) != parent ||
+            extension_bag_ui_user_type(control) != 2) continue;
+        bool module_tab = false;
+        for (size_t slot = 0; slot < runtime_state().ui.extension_tab_buttons.size(); ++slot) {
+            if (runtime_state().ui.extension_tab_buttons[slot] == control) {
+                module_tab = true;
+                break;
+            }
+        }
+        if (module_tab) continue;
+        qol::contracts::UiRect rect{};
+        if (!extension_bag_ui_rect(control, &rect) || rect.w <= 0 || rect.h <= 0) continue;
+        if (!extension_bag_ui_hit_test(control, x, y, rect)) continue;
+        found = i;
+        ++hit_count;
+    }
+    if (hit_count != 1 || found < 0) return false;
+    *out_native_bag = found;
+    return true;
+}
+
 bool extension_tab_hit(int index, int64_t x, int64_t y) {
     if (!virtual_bag::valid_index(index)) return false;
     if (runtime_state().objects.bag.capacities[index] == 0) {
@@ -1081,6 +1122,9 @@ void extension_bag_ui_handle_tab_click_locked(int extension_bag) {
 
 bool extension_tab_hit(int index, int64_t x, int64_t y) {
     return extension_tab_hit_internal(index, x, y);
+}
+bool extension_c18_native_bag_hit(int64_t x, int64_t y, int* out_native_bag) {
+    return extension_c18_native_bag_hit_internal(x, y, out_native_bag);
 }
 bool extension_bag_runtime_is_backpack_category(int category) {
     return is_backpack_category(category);
