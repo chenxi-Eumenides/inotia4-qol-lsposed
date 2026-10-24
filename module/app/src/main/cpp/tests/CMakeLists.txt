@@ -945,6 +945,18 @@ target_compile_features(item_handle_custody_tests PRIVATE cxx_std_17)
 set_target_properties(item_handle_custody_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_handle_custody_tests COMMAND item_handle_custody_tests)
 
+add_executable(extension_bag_transaction_coordinator_tests
+    test_extension_bag_transaction_coordinator.cpp
+    ${CPP_DIR}/plugins/extension_bag/transaction/transaction_coordinator.cpp)
+target_include_directories(extension_bag_transaction_coordinator_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(extension_bag_transaction_coordinator_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_transaction_coordinator_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_transaction_coordinator_tests COMMAND extension_bag_transaction_coordinator_tests)
+
 add_executable(extension_bag_bag_state_store_tests
     test_extension_bag_bag_state_store.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp)

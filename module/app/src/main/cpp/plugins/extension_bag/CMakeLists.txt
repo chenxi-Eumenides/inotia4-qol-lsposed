@@ -24,6 +24,7 @@ add_library(qol_plugin_extension_bag STATIC
     runtime/projection.cpp
     runtime/lifecycle.cpp
     runtime/ownership.cpp
+    transaction/transaction_coordinator.cpp
     transaction/ext_orig.cpp
     transaction/ext_ext.cpp
     transaction/drop.cpp

@@ -196,8 +196,9 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 
 ### P2 TransactionCoordinator
 
-- 从 `orchestrator.cpp` 抽出 pending/恢复/隔离与阶段推进。
-- 四个方向改为“准备 → 原生调用 → 复核 → 提交/回滚”。
+- 已抽出 pending 记录、事务 ID、阶段回滚与失败隔离（`transaction/transaction_coordinator.*`）。
+- `recover_pending_transaction_locked` 暂留 `orchestrator.cpp`：它依赖投影恢复、物理槽反查与对象加载，需等 P3 `ProjectionController` 落地后再迁移，避免把内部耦合搬进新组件。
+- 四个方向已按“准备 → 原生调用 → 复核 → 提交/回滚”组织，阶段常量与隔离记录由 coordinator 统一。
 - 验收：四方向移动、失败回滚、进程重启恢复、sidecar 往返。
 
 ### P3 ProjectionController + NativeTabLayout

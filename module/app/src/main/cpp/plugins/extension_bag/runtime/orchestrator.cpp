@@ -1,5 +1,7 @@
 #include "game_ui_virtbag.h"
 
+#include "plugins/extension_bag/transaction/transaction_coordinator.h"
+
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -36,17 +38,13 @@
 #include <thread>
 #include <unistd.h>
 
-#define isolation_now_ms_locked isolation_now_ms_locked_internal
 #define bag_size_word_locked bag_size_word_locked_internal
 #define clear_module_cache_locked clear_module_cache_locked_internal
 #define clear_original_desc_locked clear_original_desc_locked_internal
 #define ensure_module_view_root_current_locked ensure_module_view_root_current_locked_internal
 #define ensure_state_loaded_locked ensure_state_loaded_locked_internal
 #define free_module_object_locked free_module_object_locked_internal
-#define generate_transaction_id_locked generate_transaction_id_locked_internal
 #define install_module_view_locked install_module_view_locked_internal
-#define isolate_ext2orig_failure_locked isolate_ext2orig_failure_locked_internal
-#define isolate_pending_locked isolate_pending_locked_internal
 #define item_pointer_known_locked item_pointer_known_locked_internal
 #define load_item_payload_locked load_item_payload_locked_internal
 #define log_exit_trace_locked log_exit_trace_locked_internal
@@ -74,8 +72,6 @@
 #define set_original_bag_locked set_original_bag_locked_internal
 #define sync_projected_slot_locked sync_projected_slot_locked_internal
 #define teardown_extension_bag_hosts_locked teardown_extension_bag_hosts_locked_internal
-#define txn_abort_locked txn_abort_locked_internal
-#define txn_record_pending_locked txn_record_pending_locked_internal
 
 namespace {
 
@@ -333,102 +329,6 @@ int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected
     }
     return qol::features::extension_bag::model::find_handle_slot(
         expected, handles.data(), handles.size());
-}
-
-// ---- P4.4 五态事务协调：三条移动路径共享的唯一推进/回滚实现 ----
-
-uint64_t g_transaction_sequence = 0;
-
-void generate_transaction_id_locked(char* out) {
-    const uint64_t seq = ++g_transaction_sequence;
-    std::snprintf(out, virtual_bag::kMaxTransactionIdChars, "p4-%llu",
-                  static_cast<unsigned long long>(seq));
-}
-
-// pending-recorded 阶段：事务 pending 写入 State。durable=false：仅本进程记录。
-bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
-    virtual_bag::txn_build_pending(txn);
-    if (!virtual_bag::valid_pending_transfer_domain(txn->pending) ||
-        !virtual_bag::valid_pending_transfer_payload(txn->pending)) {
-        VIRTBAG_LOG("txn pending reject id=%s reason=invalid_domain", txn->transaction_id);
-        return false;
-    }
-    runtime_state().objects.bag.pending = txn->pending;
-    extension_bag_mark_dirty_locked();
-    VIRTBAG_LOG("txn stage=pending-recorded durable=false id=%s direction=%u src=%u/%u dst=%u/%u",
-                txn->transaction_id, static_cast<unsigned int>(txn->direction),
-                static_cast<unsigned int>(txn->src_bag),
-                static_cast<unsigned int>(txn->src_slot),
-                static_cast<unsigned int>(txn->dst_bag),
-                static_cast<unsigned int>(txn->dst_slot));
-    return true;
-}
-
-// 按失败阶段回滚：先还原逻辑槽与 pending，再由调用方释放仍归模块所有的临时对象；
-// 已移交原版库存的对象不参与（所有权账本终态）。
-uint64_t isolation_now_ms_locked() {
-    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     std::chrono::steady_clock::now().time_since_epoch())
-                                     .count());
-}
-
-// P4.5：pending 恢复失败隔离——原始袋槽值原样保留（可能越界，不正则化），
-// payload 字节留作只读诊断。
-void isolate_pending_locked(const char* reason, const char* detail) {
-    const virtual_bag::PendingTransfer& pending = runtime_state().objects.bag.pending;
-    virtual_bag::IsolationRecord record{};
-    record.valid = true;
-    record.reason = reason;
-    record.observed_at_ms = isolation_now_ms_locked();
-    std::strncpy(record.transaction_id, pending.transaction_id,
-                 virtual_bag::kMaxTransactionIdChars);
-    record.direction = pending.direction;
-    record.src_bag = pending.src_bag;
-    record.src_slot = pending.src_slot;
-    record.dst_bag = pending.dst_bag;
-    record.dst_slot = pending.dst_slot;
-    record.payload_size = pending.payload_size;
-    record.payload = pending.payload;
-    record.source_payload_size = pending.source_payload_size;
-    record.source_payload = pending.source_payload;
-    record.detail = detail;
-    push_isolation(&runtime_state().objects.bag, record);
-}
-
-// P4.5：ext→orig 失败隔离——扩展源逻辑物品保留（payload 字节未丢），记录
-// 事务上下文与失败阶段供审计。
-void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
-                                     virtual_bag::TxnStage phase, const char* reason,
-                                     const char* detail) {
-    virtual_bag::IsolationRecord record{};
-    record.valid = true;
-    record.reason = reason;
-    record.observed_at_ms = isolation_now_ms_locked();
-    std::strncpy(record.transaction_id, txn.transaction_id,
-                 virtual_bag::kMaxTransactionIdChars);
-    record.direction = txn.direction;
-    record.phase = static_cast<int>(phase);
-    record.src_bag = txn.src_bag;
-    record.src_slot = txn.src_slot;
-    record.dst_bag = txn.dst_bag;
-    record.dst_slot = txn.dst_slot;
-    record.payload_size = txn.source.payload_size;
-    record.payload = txn.source.payload;
-    record.detail = detail;
-    push_isolation(&runtime_state().objects.bag, record);
-}
-
-void txn_abort_locked(const virtual_bag::TransactionContext& txn,
-                      virtual_bag::TxnStage failed_at, const char* reason) {
-    virtual_bag::txn_rollback_logical(&runtime_state().objects.bag, txn, failed_at);
-    extension_bag_mark_dirty_locked();
-    VIRTBAG_LOG("txn abort stage=%d id=%s reason=%s direction=%u src=%u/%u dst=%u/%u",
-                static_cast<int>(failed_at), txn.transaction_id, reason,
-                static_cast<unsigned int>(txn.direction),
-                static_cast<unsigned int>(txn.src_bag),
-                static_cast<unsigned int>(txn.src_slot),
-                static_cast<unsigned int>(txn.dst_bag),
-                static_cast<unsigned int>(txn.dst_slot));
 }
 
 void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
@@ -723,11 +623,6 @@ bool item_pointer_known_locked(void* item) {
 #undef extension_tab_hit
 #undef serialize_item_payload_locked
 #undef load_item_payload_locked
-#undef generate_transaction_id_locked
-#undef txn_record_pending_locked
-#undef txn_abort_locked
-#undef isolate_pending_locked
-#undef isolate_ext2orig_failure_locked
 #undef original_inventory_contains_payload_locked
 #undef original_inventory_payload_slot_locked
 #undef original_inventory_handle_slot_locked
@@ -772,7 +667,6 @@ void restore_extension_desc_popup_callbacks_locked_internal() {
 }  // namespace
 
 #undef current_env
-#undef isolation_now_ms_locked
 #undef extension_apply_stuff
 #undef read_item_cumulate_count
 #undef read_save_is_ok
@@ -787,7 +681,6 @@ void restore_extension_desc_popup_callbacks_locked_internal() {
 #undef category_is_extension_backpack
 #undef handle_extension_tab_click_locked
 
-uint64_t isolation_now_ms_locked() { return isolation_now_ms_locked_internal(); }
 void ensure_state_loaded_locked() { ensure_state_loaded_locked_internal(); }
 bool persist_state_locked(bool force) { return persist_state_locked_internal(force); }
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
@@ -814,24 +707,6 @@ bool serialize_item_payload_locked(
 }
 void* load_item_payload_locked(const uint8_t* payload, int payload_size, const char* context) {
     return load_item_payload_locked_internal(payload, payload_size, context);
-}
-void generate_transaction_id_locked(char* out) {
-    generate_transaction_id_locked_internal(out);
-}
-bool txn_record_pending_locked(virtual_bag::TransactionContext* txn) {
-    return txn_record_pending_locked_internal(txn);
-}
-void txn_abort_locked(const virtual_bag::TransactionContext& txn,
-                      virtual_bag::TxnStage failed_at, const char* reason) {
-    txn_abort_locked_internal(txn, failed_at, reason);
-}
-void isolate_pending_locked(const char* reason, const char* detail) {
-    isolate_pending_locked_internal(reason, detail);
-}
-void isolate_ext2orig_failure_locked(const virtual_bag::TransactionContext& txn,
-                                    virtual_bag::TxnStage phase, const char* reason,
-                                    const char* detail) {
-    isolate_ext2orig_failure_locked_internal(txn, phase, reason, detail);
 }
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
                                                 int target_bag) {
