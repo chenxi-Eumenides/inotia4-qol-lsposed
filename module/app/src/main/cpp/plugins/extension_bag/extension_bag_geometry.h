@@ -4,6 +4,20 @@
 
 #include "contracts/ui.h"
 
+// 触摸事件使用 Scene_Draw 的绝对逻辑坐标；真机运行时宽度为 1408。
+constexpr int64_t kCellX = 0x4c4;
+constexpr int64_t kCellY = 0x86;
+// Phase one uses an independent read-only overlay. These coordinates stay in
+// the same absolute logical space as the original equipment scene.
+// UIEquip_CreateInvenControl absolute origin: bag button origin minus the
+// bag container offset plus the item-container offset.
+constexpr int64_t kGridX = 0x45c - 0x185 + 0x22; // 761
+constexpr int64_t kGridY = 0x91 - 0x0c + 0x1b;   // 160
+constexpr int64_t kGridCell = 0x4a;
+constexpr int64_t kGridStep = 0x53;
+constexpr int64_t kOriginalGridX = kGridX;
+constexpr int64_t kOriginalGridY = kGridY;
+
 bool extension_bag_grid_hit(int64_t x, int64_t y);
 int extension_bag_grid_slot_index(int64_t x, int64_t y,
                                   int64_t origin_x, int64_t origin_y);

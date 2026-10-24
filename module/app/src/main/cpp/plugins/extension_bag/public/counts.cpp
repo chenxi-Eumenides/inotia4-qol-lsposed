@@ -20,9 +20,9 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
+#include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
 
 #include <atomic>
 #include <chrono>

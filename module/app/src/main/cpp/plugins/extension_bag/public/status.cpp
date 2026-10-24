@@ -22,9 +22,16 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
+#include "plugins/extension_bag/runtime/access.h"
+#include "plugins/extension_bag/runtime/lifecycle.h"
+#include "plugins/extension_bag/runtime/ownership.h"
+#include "plugins/extension_bag/runtime/projection.h"
+#include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/runtime/tabs.h"
+#include "plugins/extension_bag/transaction/transaction.h"
+#include "plugins/extension_bag/ui/host_ui.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
 #include "plugins/extension_bag/usecases/set_bag_count.h"
 
 #include <atomic>

@@ -39,15 +39,6 @@
 #include <thread>
 #include <unistd.h>
 
-#define handle_extension_tab_click_locked handle_extension_tab_click_locked_internal
-#define delete_extension_tab_buttons_locked delete_extension_tab_buttons_locked_internal
-#define disable_extension_tab_buttons_locked disable_extension_tab_buttons_locked_internal
-#define install_extension_tab_buttons_locked install_extension_tab_buttons_locked_internal
-#define extension_tab_buttons_complete_locked extension_tab_buttons_complete_locked_internal
-#define commit_pending_extension_tab_locked commit_pending_extension_tab_locked_internal
-#define reset_extension_desc_unequip_hook_locked reset_extension_desc_unequip_hook_locked_internal
-#define extension_tab_hit extension_tab_hit_internal
-
 namespace {
 constexpr size_t kPopupStateSize = 0x40;
 constexpr int kPopupStateCount = 27;
@@ -69,7 +60,6 @@ bool is_backpack_category(int category) {
 }
 
 bool extension_tab_control_is_current_locked(int index, void* control);
-bool extension_tab_buttons_complete_locked();
 bool extension_tab_buttons_have_controls_locked();
 
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
@@ -193,6 +183,8 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
 // SetUserType(2) + SetControlProc（自定义，0x02 松开确认切换/详情 toggle）。
 // data[0] = 按袋 types 物化的真实背包物品对象（TouchHandle/详情链合法）。
 // 手工父链累加（自上而下）：计算控件绝对位置。CO_RECT 为 i64 相对父值。
+}  // namespace
+
 void delete_extension_tab_buttons_locked() {
     // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
     const auto* components = extension_bag_ui_components();
@@ -212,6 +204,7 @@ void delete_extension_tab_buttons_locked() {
     }
 }
 
+namespace {
 void invalidate_extension_tab_buttons_locked() {
     cancel_projected_drag_session_locked("extension-tab-root-change");
     ++runtime_state().ui.inventory_generation;
@@ -344,6 +337,8 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
     return all;
 }
 
+}  // namespace
+
 void install_extension_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时不得挂载页签（3 个宿主之一）。启用/禁用均以
     // g_virtual_bag_enabled 为准；调用方不再各自判断。
@@ -382,9 +377,13 @@ void disable_extension_tab_buttons_locked() {
     // The game owns controls; stale-root references are invalidated, never deleted.
     invalidate_extension_tab_buttons_locked();
 }
+
+namespace {
 bool extension_tab_control_is_current_locked(int index, void* control);
 void handle_extension_tab_click_impl_locked(int extension_bag,
                                             ::qol::extension_bag::ReentryLock* unlockable_lock);
+}  // namespace
+
 bool extension_tab_buttons_complete_locked() {
     const int active = virtual_bag::active_extension_bags();
     const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
@@ -395,12 +394,14 @@ bool extension_tab_buttons_complete_locked() {
     return true;
 }
 
+namespace {
 bool extension_tab_buttons_have_controls_locked() {
     for (void* button : runtime_state().ui.extension_tab_buttons) {
         if (button != nullptr) return true;
     }
     return false;
 }
+}  // namespace
 
 void reset_extension_desc_unequip_hook_locked() {
     // 卸下按钮由函数级 ButtonUnequipExe hook 承担，
@@ -408,6 +409,7 @@ void reset_extension_desc_unequip_hook_locked() {
     runtime_state().ui.extension_desc_unequip_bag = -1;
 }
 
+namespace {
 void install_extension_desc_unequip_hook_locked(int extension_bag) {
     reset_extension_desc_unequip_hook_locked();
     if (!virtual_bag::valid_index(extension_bag)) return;
@@ -422,11 +424,13 @@ void play_extension_switch_sound() {
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.play_switch_sound == nullptr) return;
     (void)runtime_state().host.write_port->ui.play_switch_sound();
 }
+}  // namespace
 
 void handle_extension_tab_click_locked(int extension_bag) {
     handle_extension_tab_click_impl_locked(extension_bag, nullptr);
 }
 
+namespace {
 void handle_pending_extension_tab_click_locked(::qol::extension_bag::ReentryLock& lock,
                                                int extension_bag) {
     handle_extension_tab_click_impl_locked(extension_bag, &lock);
@@ -702,6 +706,8 @@ bool extension_tab_control_is_current_locked(int index, void* control) {
     }
     return false;
 }
+}  // namespace
+
 void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock) {
     if (!virtual_bag::valid_index(runtime_state().ui.pending_extension_tab) ||
         !runtime_state().enabled.load() || !extension_bag_session_admitted_locked() ||
@@ -736,52 +742,18 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
     return extension_bag_ui_rect(ctrl, &rect) && rect.w > 0 && rect.h > 0 &&
            extension_bag_ui_hit_test(ctrl, x, y, rect);
 }
-}  // namespace
 
-#undef handle_extension_tab_click_locked
-#undef delete_extension_tab_buttons_locked
-#undef disable_extension_tab_buttons_locked
-#undef install_extension_tab_buttons_locked
-#undef extension_tab_buttons_complete_locked
-#undef commit_pending_extension_tab_locked
-#undef reset_extension_desc_unequip_hook_locked
-#undef extension_tab_hit
-
-void handle_extension_tab_click_locked(int extension_bag) {
-    handle_extension_tab_click_locked_internal(extension_bag);
-}
 void extension_bag_ui_play_switch_sound() { play_extension_switch_sound(); }
 void extension_bag_ui_handle_tab_click_locked(int extension_bag) {
     handle_extension_tab_click_locked(extension_bag);
 }
 
-bool extension_tab_hit(int index, int64_t x, int64_t y) {
-    return extension_tab_hit_internal(index, x, y);
-}
 bool extension_c18_native_bag_hit(int64_t x, int64_t y, int* out_native_bag) {
     return c18_native_bag_hit_locked(x, y, out_native_bag);
 }
 bool extension_bag_runtime_is_backpack_category(int category) {
     return is_backpack_category(category);
 }
-void delete_extension_tab_buttons_locked() {
-    delete_extension_tab_buttons_locked_internal();
-}
-void disable_extension_tab_buttons_locked() {
-    disable_extension_tab_buttons_locked_internal();
-}
-void install_extension_tab_buttons_locked() {
-    install_extension_tab_buttons_locked_internal();
-}
 void prepare_c18_native_bag_layout_locked() {
     prepare_c18_native_bag_layout_locked_impl();
-}
-bool extension_tab_buttons_complete_locked() {
-    return extension_tab_buttons_complete_locked_internal();
-}
-void reset_extension_desc_unequip_hook_locked() {
-    reset_extension_desc_unequip_hook_locked_internal();
-}
-void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock) {
-    commit_pending_extension_tab_locked_internal(lock);
 }
