@@ -23,6 +23,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/entry_guard.h"
 
 #include <array>
 #include <atomic>
@@ -263,6 +264,9 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
 
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     if (fn == nullptr || !runtime_state().enabled.load() || !read_world_in_world()) return;
+    qol::extension_bag::EntryGuard guard(
+        "for_each_logical_item", qol::extension_bag::ReentryPolicy::kReadSnapshot);
+    if (!guard.entered()) return;
     // 该扫描会被原生数量查询（INVEN_GetItemCount / 快捷栏刷新）回调；若当前线程
     // 已在模块事务里持有同一把锁，阻塞等待会自死锁。拿不到锁时返回空扫描即可，
     // 由调用方回退原版计数。

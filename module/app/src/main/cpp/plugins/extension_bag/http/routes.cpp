@@ -1,5 +1,7 @@
 #include "plugins/extension_bag/http/routes.h"
 
+#include "plugins/extension_bag/runtime/entry_guard.h"
+
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/http/query.h"
 #include "plugins/extension_bag/plugin.h"
@@ -133,6 +135,10 @@ struct EbCommandPayload {
 bool eb_result_handler(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
+    // 命令在宿主主线程结果处理器内执行；重入/非主线程一律拒绝，避免半事务写入。
+    qol::extension_bag::EntryGuard guard("http_command",
+                                       qol::extension_bag::ReentryPolicy::kRejectWrite);
+    if (!guard.entered()) return false;
     if (payload == nullptr || size != sizeof(EbCommandPayload) || out == nullptr ||
         out_size == nullptr) {
         return false;

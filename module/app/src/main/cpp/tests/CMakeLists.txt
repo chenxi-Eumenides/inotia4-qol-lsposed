@@ -945,6 +945,18 @@ target_compile_features(item_handle_custody_tests PRIVATE cxx_std_17)
 set_target_properties(item_handle_custody_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME item_handle_custody_tests COMMAND item_handle_custody_tests)
 
+add_executable(extension_bag_entry_guard_tests
+    test_extension_bag_entry_guard.cpp
+    ${CPP_DIR}/plugins/extension_bag/runtime/entry_guard.cpp)
+target_include_directories(extension_bag_entry_guard_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(extension_bag_entry_guard_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_entry_guard_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_entry_guard_tests COMMAND extension_bag_entry_guard_tests)
+
 add_executable(extension_bag_deferred_free_tests test_extension_bag_deferred_free.cpp)
 target_include_directories(extension_bag_deferred_free_tests PRIVATE ${CPP_DIR})
 target_compile_features(extension_bag_deferred_free_tests PRIVATE cxx_std_17)
@@ -988,6 +1000,7 @@ add_executable(extension_bag_debug_api_tests
     test_extension_bag_debug_api.cpp
     ${CPP_DIR}/plugins/extension_bag/http/routes.cpp
     ${CPP_DIR}/plugins/extension_bag/http/query.cpp
+    ${CPP_DIR}/plugins/extension_bag/runtime/entry_guard.cpp
 )
 target_include_directories(extension_bag_debug_api_tests PRIVATE
     ${CPP_DIR}
