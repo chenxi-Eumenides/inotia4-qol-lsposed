@@ -31,6 +31,14 @@ QolResult is_empty_bag(int32_t bag, int32_t* out_empty);
 QolResult find_save_slot(const void* item, int32_t* out_slot);
 QolResult current_bag(int32_t* out_bag);
 QolResult set_current_bag(int32_t bag);
+
+// 原生袋槽布局：原版为 INVEN_pItem 的 6 袋×0x80；C18 改版客户端把袋对象表和
+// 槽表搬到独立 bss 数组（容量 19）。布局按运行时探测，不写死版本号。
+struct NativeBagLayout {
+    uint8_t* slots;  // 袋槽表基址（每袋 0x80 字节、每槽 8 字节物品指针）
+    int bag_limit;   // 可用袋号上界（不含）
+};
+NativeBagLayout native_bag_layout();
 QolResult desc_type(int32_t* out_type);
 QolResult set_desc_type(int32_t type);
 QolResult bag_capacity_word(int32_t bag, uint32_t* out_word);

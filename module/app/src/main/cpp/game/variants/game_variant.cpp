@@ -1,7 +1,7 @@
 // game_variant.cpp —— libgame.so 校验值 → 游戏变体/能力 的运行时查表实现。
 //
 // 依赖方向：game 层，仅依赖 STL 与 game/access/qol_log_seam.h（过渡日志缝）。
-// 流程：/proc/self/maps 定位 libgame.so → 算 md5 → 查离线表 → 未命中回退扫描 WH4JRN01。
+// 流程：/proc/self/maps 定位 libgame.so → 算 md5 → 查离线表 → 未命中扫描库内已知签名。
 #include "game/variants/game_variant.h"
 
 #include "game/access/qol_log_seam.h"
@@ -16,6 +16,23 @@ namespace {
 constexpr const char* kLibgameName = "libgame.so";
 constexpr const char* kWh4Marker = "WH4JRN01";
 constexpr size_t kWh4MarkerLen = 8;
+constexpr char kC18BagMarker[] = "C18BAG01";
+constexpr size_t kC18BagMarkerLen = sizeof(kC18BagMarker) - 1;
+constexpr char kC18BagDataMarker[] = "C18Lbag.dat";
+constexpr size_t kC18BagDataMarkerLen = sizeof(kC18BagDataMarker) - 1;
+
+bool contains_marker(const uint8_t* data, size_t size, const char* marker, size_t marker_size) {
+    if (data == nullptr || marker == nullptr || marker_size == 0 || size < marker_size) return false;
+    for (size_t offset = 0; offset <= size - marker_size; ++offset) {
+        if (std::memcmp(data + offset, marker, marker_size) == 0) return true;
+    }
+    return false;
+}
+
+bool has_c18_native_bag_layout_candidate_signature(const uint8_t* data, size_t size) {
+    return contains_marker(data, size, kC18BagMarker, kC18BagMarkerLen) &&
+           contains_marker(data, size, kC18BagDataMarker, kC18BagDataMarkerLen);
+}
 
 // ---------------------------------------------------------------------------
 // 紧凑 MD5（RFC 1321），无第三方依赖。
@@ -181,7 +198,17 @@ bool parse_mapping_line(const char* line, MappingLine& out) {
 }
 
 bool path_is_libgame(const char* path) {
-    return std::strstr(path, kLibgameName) != nullptr;
+    if (path == nullptr) return false;
+    const size_t name_len = std::strlen(kLibgameName);
+    const char* match = path;
+    while ((match = std::strstr(match, kLibgameName)) != nullptr) {
+        const bool starts_component = match == path || match[-1] == '/' || match[-1] == '!';
+        const char suffix = match[name_len];
+        const bool ends_component = suffix == '\0' || suffix == ' ' || suffix == '!';
+        if (starts_component && ends_component) return true;
+        ++match;
+    }
+    return false;
 }
 
 // 取首个 libgame.so 映射的 pathname；找不到返回 false。
@@ -202,29 +229,65 @@ bool find_libgame_path(char* out, size_t cap) {
     return found;
 }
 
-// 在 libgame.so 的可读可执行映射里扫 ASCII WH4JRN01。
-bool scan_wh4_marker() {
+struct RuntimeMarkers {
+    bool has_wh4_marker = false;
+    bool has_wh4_executable_marker = false;
+    bool has_c18_bag_marker = false;
+    bool has_c18_bag_data_marker = false;
+};
+
+struct MemoryMappingView {
+    const uint8_t* data;
+    size_t size;
+    const char* permissions;
+    const char* path;
+};
+
+void collect_mapping_markers(const MemoryMappingView& mapping, RuntimeMarkers& markers) {
+    if (mapping.data == nullptr || mapping.permissions == nullptr || mapping.path == nullptr ||
+        std::strchr(mapping.permissions, 'r') == nullptr || !path_is_libgame(mapping.path)) {
+        return;
+    }
+    const bool mapping_has_wh4 = contains_marker(mapping.data, mapping.size, kWh4Marker, kWh4MarkerLen);
+    if (mapping_has_wh4) {
+        markers.has_wh4_marker = true;
+        if (std::strchr(mapping.permissions, 'x') != nullptr) {
+            markers.has_wh4_executable_marker = true;
+        }
+    }
+    if (!markers.has_c18_bag_marker) {
+        markers.has_c18_bag_marker =
+            contains_marker(mapping.data, mapping.size, kC18BagMarker, kC18BagMarkerLen);
+    }
+    if (!markers.has_c18_bag_data_marker) {
+        markers.has_c18_bag_data_marker =
+            contains_marker(mapping.data, mapping.size, kC18BagDataMarker, kC18BagDataMarkerLen);
+    }
+}
+
+// 检查未知 MD5 对应的 libgame 映射；绝不扫描其他进程映射。
+RuntimeMarkers scan_libgame_markers(void*) {
+    RuntimeMarkers markers{};
     FILE* f = std::fopen("/proc/self/maps", "r");
-    if (f == nullptr) return false;
+    if (f == nullptr) return markers;
     char line[1024];
-    bool found = false;
     while (std::fgets(line, sizeof(line), f) != nullptr) {
         MappingLine mapping{};
-        if (!parse_mapping_line(line, mapping)) continue;
-        if (!path_is_libgame(mapping.path)) continue;
-        if (std::strchr(mapping.perms, 'r') == nullptr || std::strchr(mapping.perms, 'x') == nullptr) {
+        if (!parse_mapping_line(line, mapping) || !path_is_libgame(mapping.path) ||
+            std::strchr(mapping.perms, 'r') == nullptr || mapping.hi <= mapping.lo) {
             continue;
         }
-        for (uintptr_t p = mapping.lo; p + kWh4MarkerLen <= mapping.hi; ++p) {
-            if (std::memcmp(reinterpret_cast<const void*>(p), kWh4Marker, kWh4MarkerLen) == 0) {
-                found = true;
-                break;
-            }
+        const size_t mapping_size = static_cast<size_t>(mapping.hi - mapping.lo);
+        const MemoryMappingView view{reinterpret_cast<const uint8_t*>(mapping.lo), mapping_size,
+                                     mapping.perms, mapping.path};
+        collect_mapping_markers(view, markers);
+        if (markers.has_wh4_executable_marker && markers.has_c18_bag_marker &&
+            markers.has_c18_bag_data_marker) {
+            break;
         }
-        if (found) break;
     }
     std::fclose(f);
-    return found;
+    return markers;
 }
 
 // 读取文件全部内容并算 md5；成功返回 true。
@@ -291,6 +354,40 @@ GameSeries classify_fallback(bool has_wh4_marker) {
     return has_wh4_marker ? GameSeries::kMonster : GameSeries::kUnknown;
 }
 
+static GameVariant fallback_variant(const uint8_t md5[16], bool has_wh4_marker,
+                                    bool has_c18_signature) {
+    GameVariant result{};
+    result.series = classify_fallback(has_wh4_marker);
+    if (!has_wh4_marker && has_c18_signature) {
+        result.capabilities |= kCapC18NativeBagLayoutCandidate;
+    }
+    result.known = false;
+    std::memcpy(result.md5, md5, sizeof(result.md5));
+    return result;
+}
+
+static GameVariant fallback_variant(const uint8_t md5[16], const RuntimeMarkers& markers) {
+    const bool has_c18_signature = markers.has_c18_bag_marker && markers.has_c18_bag_data_marker &&
+                                   !markers.has_wh4_marker;
+    return fallback_variant(md5, markers.has_wh4_executable_marker, has_c18_signature);
+}
+
+using RuntimeMarkerScanner = RuntimeMarkers (*)(void* context);
+
+static GameVariant resolve_variant(const uint8_t md5[16], bool have_md5,
+                                   RuntimeMarkerScanner scanner, void* scanner_context) {
+    if (have_md5) {
+        const GameVariant* hit = lookup(md5);
+        if (hit != nullptr) {
+            GameVariant result = *hit;
+            result.known = true;
+            return result;
+        }
+    }
+    const RuntimeMarkers markers = scanner == nullptr ? RuntimeMarkers{} : scanner(scanner_context);
+    return fallback_variant(md5, markers);
+}
+
 }  // namespace game_variant_detail
 
 const char* game_series_name(GameSeries s) {
@@ -336,7 +433,6 @@ bool game_variant_init() {
     std::lock_guard<std::mutex> lock(g_variant_mutex);
     if (g_variant_initialized) return true;
 
-    GameVariant result{};
     uint8_t md5[16] = {0};
     bool have_md5 = false;
 
@@ -354,19 +450,8 @@ bool game_variant_init() {
         }
     }
 
-    if (have_md5) {
-        const GameVariant* hit = game_variant_detail::lookup(md5);
-        if (hit != nullptr) {
-            result = *hit;
-            result.known = true;
-        }
-    }
-
-    if (!result.known) {
-        result.series = game_variant_detail::classify_fallback(scan_wh4_marker());
-        result.known = false;
-        std::memcpy(result.md5, md5, sizeof(md5));
-    }
+    const GameVariant result =
+        game_variant_detail::resolve_variant(md5, have_md5, scan_libgame_markers, nullptr);
 
     char md5_text[33];
     md5_hex(result.md5, md5_text);

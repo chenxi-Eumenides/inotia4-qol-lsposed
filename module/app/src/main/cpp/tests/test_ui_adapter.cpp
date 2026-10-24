@@ -46,6 +46,8 @@ bool g_memory_accessible = true;
 int g_data_reads = 0;
 void* g_native_parent = nullptr;
 void* g_target = nullptr;
+int g_touch_handle_use_control_event_on_calls = 0;
+void* g_touch_handle_use_control_event_on_control = nullptr;
 NativeScrollDrawProc g_scroll_draw_proc = nullptr;
 uint64_t g_event_args[3]{};
 bool g_menu_tree_known = false;
@@ -224,6 +226,10 @@ void fake_control_set_active(void* control, uint32_t active) {
     g_last_set_active_argument = active;
     g_active_value = active != 0 ? 0x20u : 0x21u;
 }
+void fake_touch_handle_use_control_event_on(void* control) {
+    ++g_touch_handle_use_control_event_on_calls;
+    g_touch_handle_use_control_event_on_control = control;
+}
 
 }  // namespace
 
@@ -332,6 +338,7 @@ decltype(fn_ctrl_get_child) fn_ctrl_get_child = &fake_child_at;
 decltype(fn_calc_res_width) fn_calc_res_width = nullptr;
 decltype(fn_calc_res_height) fn_calc_res_height = nullptr;
 decltype(fn_touch_handle_unuse_control_event_move) fn_touch_handle_unuse_control_event_move = nullptr;
+decltype(fn_touch_handle_use_control_event_on) fn_touch_handle_use_control_event_on = nullptr;
 decltype(fn_popupstate_push) fn_popupstate_push = nullptr;
 decltype(fn_uidesc_draw) fn_uidesc_draw = nullptr;
 decltype(fn_grpx_set_font_color) fn_grpx_set_font_color = nullptr;
@@ -641,6 +648,19 @@ int main() {
     CHECK(adapter->call_ui_popup_msg_draw != nullptr);
     CHECK(adapter->save_lcd != nullptr);
     CHECK(adapter->create_yes_no_text != nullptr);
+    CHECK(adapter->use_control_event_on != nullptr);
+    {
+        FakeControl native_tab{};
+        fn_touch_handle_use_control_event_on = &fake_touch_handle_use_control_event_on;
+        g_touch_handle_use_control_event_on_calls = 0;
+        g_touch_handle_use_control_event_on_control = nullptr;
+        CHECK(adapter->use_control_event_on(&native_tab).ok == kQolOk);
+        CHECK(g_touch_handle_use_control_event_on_calls == 1);
+        CHECK(g_touch_handle_use_control_event_on_control == &native_tab);
+        CHECK(adapter->use_control_event_on(nullptr).code == kQolErrInvalidArgument);
+        fn_touch_handle_use_control_event_on = nullptr;
+        CHECK(adapter->use_control_event_on(&native_tab).code == kQolErrNotReady);
+    }
 
     // Minor 27 routes popup work through the checked game adapter, preserving numeric param.
     {
@@ -814,9 +834,16 @@ int main() {
                    offsetof(qol::contracts::QolUiAdapter, insert_inline_color_span),
                    "UIDesc span operation must append the UI adapter tail");
     static_assert(offsetof(qol::contracts::QolUiAdapter, insert_inline_color_span) +
-                       sizeof(adapter->insert_inline_color_span) ==
-                   offsetof(qol::contracts::QolUiAdapter, draw_part_alpha),
-                   "explicit-alpha drawing must append the UI adapter tail");
+                        sizeof(adapter->insert_inline_color_span) ==
+                    offsetof(qol::contracts::QolUiAdapter, draw_part_alpha),
+                    "explicit-alpha drawing must append the UI adapter tail");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, create_yes_no_text) +
+                      sizeof(adapter->create_yes_no_text) ==
+                  offsetof(qol::contracts::QolUiAdapter, use_control_event_on),
+                  "native event-enable operation must append the UI adapter tail");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, use_control_event_on) +
+                      sizeof(adapter->use_control_event_on) == sizeof(qol::contracts::QolUiAdapter),
+                  "native event-enable operation must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));

@@ -275,6 +275,20 @@ bool extension_bag_ui_allocate_control_data(uint32_t size, void** out_data) {
            qol::contracts::succeeded(ui->allocate_control_data(size, out_data));
 }
 
+bool extension_bag_ui_use_control_event_on(void* control) {
+    const auto* ui = extension_bag_ui();
+    if (ui == nullptr || control == nullptr) return false;
+    constexpr std::size_t kUseControlEventOnEnd =
+        offsetof(qol::contracts::QolUiAdapter, use_control_event_on) +
+        sizeof(((qol::contracts::QolUiAdapter*)nullptr)->use_control_event_on);
+    // 尾部追加字段：旧 host 可能只报到 draw_part_alpha；缺字段时按不可用处理。
+    if (ui->size < kUseControlEventOnEnd || ui->minor < 33 ||
+        ui->use_control_event_on == nullptr) {
+        return false;
+    }
+    return qol::contracts::succeeded(ui->use_control_event_on(control));
+}
+
 bool extension_bag_ui_unuse_control_event_move(void* control) {
     const auto* ui = extension_bag_ui();
     return ui != nullptr && ui->unuse_control_event_move != nullptr && control != nullptr &&

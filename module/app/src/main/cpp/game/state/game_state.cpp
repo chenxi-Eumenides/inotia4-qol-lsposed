@@ -1,6 +1,7 @@
 // game/state/game_state.cpp —— 由 game_data.cpp 拆分生成（纯搬代码，零逻辑变更）
 
 #include "game/access/game_access.h"
+#include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
 #include "game/access/ui_state.h"
 #include "game/access/world.h"
@@ -309,10 +310,12 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
                 resolved.item};
         return true;
     }
-    if (bag > 5 || g_inven == nullptr || fn_get_bit == nullptr) {
+    // C18 改版客户端把袋槽表搬到独立 bss 数组（容量 19）；布局按运行时探测。
+    const qol::game::NativeBagLayout layout = qol::game::native_bag_layout();
+    if (bag >= layout.bag_limit || layout.slots == nullptr || fn_get_bit == nullptr) {
         return false;
     }
-    uint8_t* bag_slots = reinterpret_cast<uint8_t*>(g_inven) + bag * 0x80;
+    uint8_t* bag_slots = layout.slots + bag * 0x80;
     void* item = *reinterpret_cast<void**>(bag_slots + slot * 8);
     if (item == nullptr) return false;
     const uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);

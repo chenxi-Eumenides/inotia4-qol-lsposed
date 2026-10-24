@@ -9,8 +9,66 @@
 
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
                            uint64_t param2, int64_t x = -1, int64_t y = -1);
+void prepare_c18_native_bag_layout_locked();
 
 namespace {
+
+bool is_c18_native_bag_layout_candidate() {
+    const auto* game = runtime_state().host.game;
+    return game != nullptr && game->target.has_capability != nullptr &&
+        game->target.has_capability(
+            qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
+}
+
+// bag 页上的原生页签 = 原版袋 + 该改版追加的袋，全部是袋容器的 type-2 直接子控件
+// （模块页签是后挂的锚定控件，必须排除）。该数量正好是最后一个页签的下一个索引，
+// 因此把它写成当前袋时没有任何原生页签匹配选中，模块自己的选中环是唯一高亮。
+// v514 的 DrawInvenBag 选中分支只对 child<6 生效（ccmp lt），改版追加页签
+// 6..N-1 永远不会画成“选中”样子。这里用同一套原生素材补上选中页的亮图标：
+// 图标位置与 UIEquip_DrawInvenBag 相同（rect 原点 +5），不改变任何袋状态。
+void draw_c18_active_native_tab_locked() {
+    if (!is_c18_native_bag_layout_candidate() || runtime_state().store.view_installed) return;
+    const int raw_bag = raw_current_bag_locked();
+    if (raw_bag < 6) return;
+    void* container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+    if (container == nullptr) return;
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(container, &child_count) || raw_bag >= child_count) return;
+    void* child = extension_bag_ui_child_at(container, raw_bag);
+    if (child == nullptr || extension_bag_ui_parent(child) != container ||
+        extension_bag_ui_user_type(child) != 2) return;
+    for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+        if (anchor.mounted != 0 && anchor.handle == child) return;
+    }
+    int64_t ax = 0;
+    int64_t ay = 0;
+    if (!extension_bag_ui_control_origin(child, &ax, &ay)) return;
+    (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(ax + 5),
+                                     static_cast<int32_t>(ay + 5), 0, 1);
+}
+
+int c18_native_highlight_suppression_bag_locked() {
+    void* container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+    if (container == nullptr) return -1;
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(container, &child_count) || child_count <= 0) return -1;
+    constexpr int kMaxScan = 32;
+    const int limit = child_count < kMaxScan ? child_count : kMaxScan;
+    int native_tabs = 0;
+    for (int index = 0; index < limit; ++index) {
+        void* child = extension_bag_ui_child_at(container, index);
+        if (child == nullptr || extension_bag_ui_user_type(child) != 2) continue;
+        bool module_tab = false;
+        for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+            if (anchor.mounted != 0 && anchor.handle == child) {
+                module_tab = true;
+                break;
+            }
+        }
+        if (!module_tab) ++native_tabs;
+    }
+    return native_tabs > 0 ? native_tabs : -1;
+}
 
 void draw_tab_buttons_in_frame_locked() {
     // 配置门控：扩展背包关闭时不得绘制/重装页签，并清除已挂载的页签控件。
@@ -157,18 +215,40 @@ void virtual_bag_draw_original_bag_wrapper() {
     // 不能在整个商店视图期间改 current_bag，否则商店投影会按“无当前袋”刷新，
     // 右侧 EB 袋物品区会变空。
     const bool mask_original_highlight = module_view || runtime_state().store.view_installed;
-    const int saved_current = original_bag_locked();
-    if (mask_original_highlight && runtime_state().host.write_port->ui.set_current_bag != nullptr) {
-        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+    // C18 改版袋把追加页签放在 6..N-1，6 已是一个真实袋，不能再用 6 当无选中值。
+    // 用“原版袋 + 追加袋”的总数作临时当前袋，索引越界即无页签匹配高亮。
+    const bool c18_native_module_view =
+        module_view && is_c18_native_bag_layout_candidate();
+    int suppression_bag = -1;
+    if (mask_original_highlight) {
+        suppression_bag = c18_native_module_view
+            ? c18_native_highlight_suppression_bag_locked()
+            : static_cast<int>(kNoOriginalBagSelected);
     }
+    const int saved_current = raw_current_bag_locked();
+    // 读不到原值时不写临时袋号：否则可能留下无效 current_bag。
+    const bool write_highlight_suppression =
+        suppression_bag >= 0 && saved_current >= 0 &&
+        runtime_state().host.write_port->ui.set_current_bag != nullptr;
+    if (write_highlight_suppression) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(suppression_bag);
+    }
+    // Native bag controls consume CO_RECT during DrawInvenBag. Apply any
+    // collision-driven C18 shift before the original draw reads those rects.
+    prepare_c18_native_bag_layout_locked();
     if (module_view && runtime_state().objects.module_view_installed) {
         (void)runtime_state().host.write_port->ui.draw_original_bag();
-        if (mask_original_highlight) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+        if (write_highlight_suppression && saved_current >= 0) {
+            (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+        }
         draw_tab_buttons_in_frame_locked();
         return;
     }
     (void)runtime_state().host.write_port->ui.draw_original_bag();
-    if (mask_original_highlight) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+    if (write_highlight_suppression && saved_current >= 0) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+    }
+    draw_c18_active_native_tab_locked();
     if (!runtime_state().store.view_installed) draw_tab_buttons_in_frame_locked();
 }
 void virtual_bag_draw_inven_item_wrapper() {
@@ -187,18 +267,27 @@ void virtual_bag_draw_inven_item_wrapper() {
         // entering g_inven. Mask the original bag only for this draw call so
         // the underlying ControlItem visuals do not show through the overlay.
         const int saved_current = original_bag_locked();
-        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        const bool write_legacy_sentinel = !is_c18_native_bag_layout_candidate();
+        if (write_legacy_sentinel) {
+            (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        }
         (void)runtime_state().host.write_port->ui.draw_original_items();
-        (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+        if (write_legacy_sentinel) {
+            (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+        }
         return;
     }
-    const int saved_current = original_bag_locked();
+    // Raw 值必须原样恢复：C18 改版袋的当前袋是 6..N-1，原版投影的 0..5 clamp
+    // 会把刚由原生回调选中的页签写回 0，表现为点追加页签后又高亮回原版袋。
+    const int saved_current = raw_current_bag_locked();
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule &&
         runtime_state().ui.exit_display_bag < kNoOriginalBagSelected) {
         (void)runtime_state().host.write_port->ui.set_current_bag(runtime_state().ui.exit_display_bag);
     }
     (void)runtime_state().host.write_port->ui.draw_original_items();
-    (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+    if (saved_current >= 0) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+    }
 }
 void virtual_bag_draw_end_locked(int inventory_state, std::unique_lock<std::mutex>& lock) {
     static int previous_state = -1;

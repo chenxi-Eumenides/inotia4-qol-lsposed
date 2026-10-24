@@ -11,7 +11,9 @@
 bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
                                              int src_slot, int dst_bag,
                                              qol::contracts::QolItemHandle expected_item) {
-    if (!virtual_bag::valid_original_transaction_bag(src_bag)) {
+    // 0..4 是原版事务袋；C18 改版页的 6..N-1 是追加原生袋，可作为移动来源；
+    // 5（任务袋）始终非法。判断必须带实时袋页拓扑，不能用固定上界。
+    if (!native_source_bag_allowed_locked(src_bag)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross move reject original->extension invalid source bag=%d", src_bag);
         return false;
     }
@@ -183,17 +185,64 @@ bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int d
                      runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->detail_item_context != nullptr ? 1 : 0);
         return false;
     }
+    // 来源定位：优先原生详情上下文；拖动时上下文可能为空/非物品态，
+    // 再用移动控件自身的物品指针 + 槽索引自证来源（袋=raw 当前袋）。
+    void* moving_item = extension_bag_ui_item(moving_control);
+    const int raw_bag = raw_current_bag_locked();
+    int src_bag = -1;
+    int src_slot = -1;
+    qol::contracts::QolItemHandle src_handle{};
     qol::contracts::QolItemDetailContext source{};
-    if (!qol::contracts::succeeded(runtime_state().host.item_facts->detail_item_context(&source)) ||
-        source.desc_type != 2 || source.bag != original_bag_locked() ||
-        source.slot < 0 || source.slot >= virtual_bag::kSlotCount ||
-        source.item.slot == 0 || source.item.generation == 0) {
+    const bool context_ready =
+        qol::contracts::succeeded(runtime_state().host.item_facts->detail_item_context(&source)) &&
+        native_source_bag_allowed_locked(source.bag) && source.bag == raw_bag &&
+        source.slot >= 0 && source.slot < virtual_bag::kSlotCount &&
+        source.item.slot != 0 && source.item.generation != 0;
+    if (context_ready) {
+        bool identity_ok = true;
+        if (source.desc_type != 2) {
+            void* slot_item = nullptr;
+            identity_ok = moving_item != nullptr &&
+                          inventory_slot_locked(source.bag, source.slot, &slot_item) &&
+                          slot_item == moving_item;
+        }
+        if (identity_ok) {
+            src_bag = source.bag;
+            src_slot = source.slot;
+            src_handle = source.item;
+        }
+    }
+    if (src_bag < 0) {
+        // 详情上下文不可用时，用移动控件的物品指针在 raw 当前袋里按物理槽反查；
+        // 控件 cursor index 不保证等于物理槽号，故以指针一致性为准。
+        int found_slot = -1;
+        if (moving_item != nullptr && raw_bag >= 0 && native_source_bag_allowed_locked(raw_bag)) {
+            for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
+                void* slot_item = nullptr;
+                if (inventory_slot_locked(raw_bag, slot, &slot_item) && slot_item == moving_item) {
+                    found_slot = slot;
+                    break;
+                }
+            }
+        }
+        qol::contracts::QolInventoryItemRef slot_ref{};
+        if (found_slot >= 0 && runtime_state().host.item_facts->item_ref_at != nullptr &&
+            qol::contracts::succeeded(
+                runtime_state().host.item_facts->item_ref_at(raw_bag, found_slot, &slot_ref)) &&
+            slot_ref.item.slot != 0 && slot_ref.item.generation != 0) {
+            src_bag = raw_bag;
+            src_slot = found_slot;
+            src_handle = slot_ref.item;
+        }
+    }
+    if (src_bag < 0) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "cross move reject original->extension detail context stale");
+                     "cross move reject original->extension source unresolved desc=%d bag=%d raw=%d slot=%d moving=%p",
+                     source.desc_type, source.bag, raw_bag, source.slot, moving_item);
         return false;
     }
     const bool moved = move_original_to_extension_slot_locked(
-        lock, source.bag, source.slot, dst_bag, source.item);
+        lock, src_bag, src_slot, dst_bag, src_handle);
     if (moved) reset_drag_state_locked(moving_control);
     return moved;
 }

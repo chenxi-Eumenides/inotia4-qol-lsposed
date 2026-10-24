@@ -42,7 +42,7 @@
 |---|---|---|
 | `item.facts` | 3.6 | 分类、装备/宝石/禁售判断、价格、堆叠计数/上限/编码、inventory view、详情上下文、金钱等事实 |
 | `item.state` | 1.1 | raw / enriched inventory JSON 投影 |
-| `inventory_refresh` | 1.0 | 原版 `UIEquip_RefreshItemArea` trampoline；仅主线程 |
+| `inventory_refresh` | 1.1 | 原版 `UIEquip_RefreshItemArea` trampoline 与快捷栏数量重算；仅主线程 |
 | `inventory.action` | 2.0 | `sell(bag, slot, expected_item, source)` 出售事务 |
 | `inventory.slot` | 1.0 | `resolve` / `view` / `remove` 槽位访问 |
 | `move_merge.control` | 1.0 | `enabled()` = `move_merge.drag_merge` feature 开启且 merge wrapper 已就绪 |

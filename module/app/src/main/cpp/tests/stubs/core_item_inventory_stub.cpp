@@ -32,7 +32,7 @@ QolResult slot_remove_unavailable(int32_t, int32_t, contracts::QolItemHandle, ui
 
 }  // namespace
 
-const contracts::InventoryRefreshApi kInventoryRefreshApi{&refresh_unavailable};
+const contracts::InventoryRefreshApi kInventoryRefreshApi{&refresh_unavailable, nullptr};
 const contracts::InventoryActionApi kInventoryActionApi{&sell_unavailable};
 const contracts::QolInventorySlotApi kInventorySlotApi{
     sizeof(contracts::QolInventorySlotApi), &slot_unavailable, &slot_view_unavailable,

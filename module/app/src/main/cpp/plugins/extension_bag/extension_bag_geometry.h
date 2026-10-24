@@ -42,6 +42,7 @@ bool extension_bag_ui_set_control_user_type(void* control, int type);
 bool extension_bag_ui_set_control_data(void* control, void* data);
 bool extension_bag_ui_allocate_control_data(uint32_t size, void** out_data);
 bool extension_bag_ui_unuse_control_event_move(void* control);
+bool extension_bag_ui_use_control_event_on(void* control);
 bool extension_bag_ui_control_is_moving(void* control);
 bool extension_bag_ui_clear_control_drag_flags(void* control);
 bool extension_bag_ui_clear_touch_state();

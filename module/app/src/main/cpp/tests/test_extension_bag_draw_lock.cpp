@@ -413,7 +413,19 @@ void test_runtime_regression_guards_match_behavioral_models() {
     const std::string runtime = read_source(QOL_EXTENSION_BAG_RUNTIME_SOURCE);
     const std::string proc = source_function(runtime, "uint64_t extension_tab_item_proc(");
     CHECK(!proc.empty());
-    CHECK(proc.find("return finish(1)") == std::string::npos);
+    // 0x10 是 TouchHandle_MoveOn 的落点查询：必须返回 1 才能让原生
+    // UIEquip_DrawMovingItem 在页签上画拖入轮廓；其余事件仍一律返回 0。
+    const auto move_on = proc.find("if (event == 0x10)");
+    CHECK(move_on != std::string::npos);
+    // 分支内部本身就有 `if (!lock.owns_lock()) return finish(0);`，不能用同串
+    // 定位分支结尾；取固定窗口足够覆盖整个 0x10 分支。
+    const std::string move_on_branch = proc.substr(move_on, 600);
+    // MoveOn 在原生调用栈内触发：只允许 try_to_lock，且仅在已有 moving 物品时返回 1，
+    // 避免页签在自身按下时被登记为拖动源。
+    CHECK(move_on_branch.find("try_to_lock") != std::string::npos);
+    CHECK(move_on_branch.find("lock_guard") == std::string::npos);
+    CHECK(move_on_branch.find("touch_moving_item_control_locked()") != std::string::npos);
+    CHECK(move_on_branch.find("? 1 : 0") != std::string::npos);
 
     // 页签安装改由锚定层负责：install 只做门禁与刷新，创建/失败清理在 create 回调，
     // 存活证明与重建在 refresh 回调（游戏销毁容器子树后句柄由锚定层丢弃并重建）。

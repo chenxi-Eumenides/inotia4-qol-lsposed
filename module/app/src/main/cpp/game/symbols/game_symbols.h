@@ -705,6 +705,7 @@ constexpr uintptr_t F_CHAR_GET_SUMMONER_VMA = 0xdb730;   // void* (void* ch)
 constexpr uintptr_t F_CONSUME_ITEM_VMA = 0x1047bc;     // void (void*) 消耗 1 个（使用药水/卷轴）
 constexpr uintptr_t F_CHAR_USE_ITEM_EX_VMA = 0xeb670;  // int (void* ch, void* item, int flag) 物品效果分派核心
 constexpr uintptr_t F_CHAR_PROCESS_SHORTCUT_VMA = 0xec028; // int (void* ch, int shortcut) 快捷栏处理
+constexpr uintptr_t F_PLAYER_UPDATE_SHORTCUT_VMA = 0x120e40; // 重算快捷栏物品数量
 constexpr uintptr_t F_SHORTCUT_GET_STATE_VMA = 0x121b80;  // int (void* character, void* shortcut)
 constexpr uintptr_t F_REMOVE_ITEM_DIRECT_VMA = 0x103fd8; // int (int32 bag, int32 slot) 按槽删物品；返回值不可信（v0.6.15 真机实测：删除成功仍返回 0），成功判定必须用删后槽位读取验证（与 data_op_discard_item 一致）
 constexpr uintptr_t F_INCLUDE_PARTY_VMA = 0x118e04;    // int (void*) 佣兵入队（内部校验）
@@ -984,6 +985,7 @@ constexpr uintptr_t F_UIEQUIP_MAKE_DESC_TAIL_VMA = 0xb89c0;    // MakeDesc 尾�
 constexpr uintptr_t F_UIEQUIP_SET_DESC_MENU_VMA = 0xb8504;     // void () 详情菜单按钮生成（使用/装备/丢弃）
 constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_RECT_VMA = 0x9e748; // UiRect (ctrl)（x8 sret 出参）——禁止 C++ 直调（真机 SIGSEGV，见 game/access/game_access.h 注释）；取 rect 用手工父链读
 constexpr uintptr_t F_TOUCH_HANDLE_DELETE_CONTROL_VMA = 0xa3c04;     // void (ctrl) 删除控件（信息面板销毁）
+constexpr uintptr_t F_TOUCH_HANDLE_USE_CONTROL_EVENT_ON_VMA = 0xa3d14; // void (ctrl) 恢复控件 On/MoveOn 事件位 0x30
 constexpr uintptr_t F_CONTROL_OBJECT_SET_CONTROL_PROC_VMA = 0x9dfbc;   // void (ctrl, proc) 设置控件事件 proc（ControlItem_Create 内部同款）
 constexpr uintptr_t F_CONTROL_OBJECT_SET_USER_TYPE_VMA = 0x9dbc4;      // void (ctrl, u32) 设置控件类型（2=ControlItem）
 constexpr uintptr_t F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA = 0xa3e94; // void (ctrl) 控件不参与 TouchHandle 移动（ControlItem_Create 内部同款）

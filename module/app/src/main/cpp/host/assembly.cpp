@@ -15,6 +15,7 @@
 #include "contracts/ownership.h"
 #include "core/native/game_cache.h"
 #include "game/access/inventory_legacy_read.h"
+#include "game/access/player_shortcut.h"
 #include "game/access/save_transaction.h"
 #include "game/adapter_ports/lifecycle_participant_facade.h"
 #include "game/adapter_ports/save_transaction_port.h"
@@ -381,6 +382,11 @@ bool assembly_init() {
     static const qol::game::SaveTransactionGate kSaveTransactionGate{
         nullptr, &save_transaction_gate_admits};
     qol::game::save_transaction_bind_gate(&kSaveTransactionGate);
+#if !QOL_KERNEL_ONLY
+    // core.item owns inventory_refresh; inject the resolved native function pointer without
+    // extending the Game Host ABI or making the plugin depend on Game Adapter internals.
+    inventory_native_hook_bind_player_update_shortcut(fn_player_update_shortcut);
+#endif
     // 启动期 ownership 恢复信号源：一次注册（幂等），回调只锁存 owner token。
     (void)save_enter_register(&on_save_enter_ready, nullptr);
     // item_count facade 是宿主装配的常驻实现，始终可查；扩展模式由生命周期策略驱动。

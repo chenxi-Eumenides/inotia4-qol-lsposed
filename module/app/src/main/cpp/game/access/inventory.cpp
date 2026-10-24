@@ -6,6 +6,7 @@
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/access/qol_log_seam.h"
+#include "game/variants/game_variant.h"
 
 #include <cstring>
 
@@ -17,6 +18,36 @@ constexpr const char* kNotFound = "inventory slot is empty";
 constexpr const char* kNotReady = "inventory not ready";
 
 contracts::QolFindItemAbiFn g_find_item_backup = nullptr;
+
+// C18 改版客户端（v507..v514 同布局）的袋对象表与袋槽表地址；两者相邻，
+// 袋对象表 0x735000 起、槽表 0x735100 起（每袋 0x80）。原版客户端这两处
+// 仍是未使用的 bss，因此可以用“袋对象表是否有 >6 个非空项”做运行时探测。
+constexpr uintptr_t G_C18_BAG_TABLE_VMA = 0x735000;
+constexpr uintptr_t G_C18_SLOT_TABLE_VMA = 0x735100;
+
+NativeBagLayout probe_native_bag_layout() {
+    if (g_base != 0) {
+        auto* bag_table = reinterpret_cast<void* const*>(g_base + G_C18_BAG_TABLE_VMA);
+        if (game_memory_accessible(bag_table, sizeof(void*) * 8, 'r')) {
+            // 最多扫 20 项：袋对象表之后紧接着槽表，越过会读到物品指针。
+            // 上界取“最高非空袋对象索引 + 1”，追加袋被游戏分配后自动纳入。
+            int highest = -1;
+            for (int index = 0; index < 20; ++index) {
+                if (!game_memory_accessible(bag_table + index, sizeof(void*), 'r')) break;
+                if (bag_table[index] != nullptr) highest = index;
+            }
+            // 判别依据：C18 客户端会初始化袋对象表（至少袋 0 非空），原版客户端
+            // 这块 bss 始终为 0。
+            if (bag_table[0] != nullptr) {
+                int limit = highest + 1;
+                if (limit < 6) limit = 6;
+                if (limit > 19) limit = 19;
+                return {reinterpret_cast<uint8_t*>(g_base + G_C18_SLOT_TABLE_VMA), limit};
+            }
+        }
+    }
+    return {reinterpret_cast<uint8_t*>(g_inven), 6};
+}
 thread_local uint32_t g_original_only_depth = 0;
 
 void log_find_item_debug(int32_t category, const char* source, void* item,
@@ -215,7 +246,11 @@ QolResult game_native_item_for_handle(contracts::QolItemHandle handle, void** ou
 
 QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
                                 contracts::QolInventoryItemRef* out) {
-    if (out == nullptr || bag < 0 || bag > 10 || slot < 0 || slot >= 16) {
+    // 0..10 = 原版袋 + 扩展逻辑袋；C18 改版客户端再放开原生追加袋 11..N-1。
+    int bag_limit = 11;
+    const int native_limit = native_bag_layout().bag_limit;
+    if (native_limit > bag_limit) bag_limit = native_limit;
+    if (out == nullptr || bag < 0 || bag >= bag_limit || slot < 0 || slot >= 16) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     InventoryItemRef source{};
@@ -238,18 +273,20 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
     return contracts::ok();
 }
 
+NativeBagLayout native_bag_layout() { return probe_native_bag_layout(); }
+
 QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
-    if (out_item == nullptr || bag < 0 || bag >= 6 || slot < 0 || slot >= 16) {
+    const NativeBagLayout layout = native_bag_layout();
+    if (out_item == nullptr || bag < 0 || bag >= layout.bag_limit || slot < 0 || slot >= 16) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     *out_item = nullptr;
-    if (g_inven == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
     // Direct slot addressing matches set_physical_item. The previous
     // for_each_bag_slot lookup was O(6*16) per query; the projection draw gate
     // queries every visible slot and made a 96x96 scan per frame.
     auto* slot_address = reinterpret_cast<void**>(
-        reinterpret_cast<uint8_t*>(g_inven) + static_cast<size_t>(bag) * 0x80 +
-        static_cast<size_t>(slot) * sizeof(void*));
+        layout.slots + static_cast<size_t>(bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
     if (game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
         *out_item = *slot_address;
         return *out_item == nullptr ? error_result(kQolErrNotFound, kNotFound) : contracts::ok();
@@ -384,7 +421,10 @@ QolResult current_bag(int32_t* out_bag) {
 }
 
 QolResult set_current_bag(int32_t bag) {
-    if (bag < 0 || bag >= 7 || g_base == 0) {
+    // 0..5 是原版袋，6 是扩展投影用的“无原版选中”值；C18 追加袋范围与
+    // “页签总数 N”这个越界无选中值都随运行时袋布局动态放开，其他版本保持 <7。
+    const int32_t upper = static_cast<int32_t>(native_bag_layout().bag_limit) + 1;
+    if (bag < 0 || bag >= upper || g_base == 0) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     auto* direct = reinterpret_cast<uint8_t*>(g_base + G_UIEQUIP_CUR_BAG_VMA);

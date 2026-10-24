@@ -10,6 +10,7 @@
 #include "contracts/item_facts.h"
 #include "game/access/attr_range_ui.h"
 #include "game/access/game_access.h"
+#include "game/access/qol_log_seam.h"
 #include "game/access/inventory.h"
 #include "game/access/item_class.h"
 #include "game/access/item_handle_registry.h"

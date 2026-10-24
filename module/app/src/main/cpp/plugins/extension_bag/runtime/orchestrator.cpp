@@ -23,6 +23,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/projection.h"
 
 #include <atomic>
 #include <chrono>
@@ -279,9 +280,11 @@ void ensure_state_loaded_locked() {
     // 保留函数作为全部既有调用点的稳定锚，无 IO、无游戏状态读取。
 }
 bool inventory_slot_locked(int bag, int slot, void** out) {
+    // C18 改版页的原生追加袋（6..N-1）也要能作为移动来源读取。
+    // 只读物理槽：原版 0..5（含任务袋）保持可读；C18 追加袋仅在候选版本放开。
     if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->physical_item_at == nullptr ||
-        out == nullptr || bag < 0 || bag >= 6 || slot < 0 ||
-        slot >= virtual_bag::kSlotCount) {
+        out == nullptr || slot < 0 || slot >= virtual_bag::kSlotCount || bag < 0 ||
+        (bag > virtual_bag::kOriginalTaskBag && !native_source_bag_allowed_locked(bag))) {
         return false;
     }
     *out = nullptr;

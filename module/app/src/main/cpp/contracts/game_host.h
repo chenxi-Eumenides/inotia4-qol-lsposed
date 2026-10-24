@@ -16,6 +16,8 @@
 
 namespace qol::contracts {
 
+constexpr uint64_t kQolTargetCapabilityC18NativeBagLayoutCandidate = 1ull << 3;  // 配对签名候选，仍需 2×5 拓扑准入。
+
 struct QolTargetVariant {
     uint32_t id;
     uint32_t capabilities;

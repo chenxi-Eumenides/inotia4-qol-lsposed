@@ -438,6 +438,8 @@ bool bridge_init() {
     fn_char_use_item_ex = reinterpret_cast<CharUseItemExFn>(g_base + fn_resolve("F_CHAR_USE_ITEM_EX_VMA", F_CHAR_USE_ITEM_EX_VMA));
     fn_char_process_shortcut = reinterpret_cast<CharProcessShortcutFn>(
         g_base + fn_resolve("F_CHAR_PROCESS_SHORTCUT_VMA", F_CHAR_PROCESS_SHORTCUT_VMA));
+    fn_player_update_shortcut = reinterpret_cast<PlayerUpdateShortcutFn>(
+        g_base + fn_resolve("F_PLAYER_UPDATE_SHORTCUT_VMA", F_PLAYER_UPDATE_SHORTCUT_VMA));
     fn_remove_item_direct = reinterpret_cast<RemoveItemDirectFn>(g_base + fn_resolve("F_REMOVE_ITEM_DIRECT_VMA", F_REMOVE_ITEM_DIRECT_VMA));
     fn_include_party = reinterpret_cast<IncludePartyFn>(g_base + fn_resolve("F_INCLUDE_PARTY_VMA", F_INCLUDE_PARTY_VMA));
     fn_exclude_party = reinterpret_cast<ExcludePartyFn>(g_base + fn_resolve("F_EXCLUDE_PARTY_VMA", F_EXCLUDE_PARTY_VMA));
@@ -511,6 +513,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_control_object_set_control_proc = reinterpret_cast<ControlObjectSetControlProcFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_CONTROL_PROC_VMA", F_CONTROL_OBJECT_SET_CONTROL_PROC_VMA));
     fn_control_object_set_user_type = reinterpret_cast<ControlObjectSetUserTypeFn>(g_base + fn_resolve("F_CONTROL_OBJECT_SET_USER_TYPE_VMA", F_CONTROL_OBJECT_SET_USER_TYPE_VMA));
     fn_touch_handle_unuse_control_event_move = reinterpret_cast<TouchHandleUnuseControlEventMoveFn>(g_base + fn_resolve("F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA", F_TOUCH_HANDLE_UNUSE_CONTROL_EVENT_MOVE_VMA));
+    fn_touch_handle_use_control_event_on = reinterpret_cast<TouchHandleUseControlEventOnFn>(g_base + fn_resolve("F_TOUCH_HANDLE_USE_CONTROL_EVENT_ON_VMA", F_TOUCH_HANDLE_USE_CONTROL_EVENT_ON_VMA));
     fn_ui_desc_set_off = reinterpret_cast<UiDescSetOffFn>(g_base + fn_resolve("F_UIDESC_SET_OFF_VMA", F_UIDESC_SET_OFF_VMA));
     fn_ui_desc_get_data = reinterpret_cast<UiDescGetDataFn>(g_base + fn_resolve("F_UIDESC_GET_DATA_VMA", F_UIDESC_GET_DATA_VMA));
     fn_ui_equip_make_desc = reinterpret_cast<UiEquipMakeDescFn>(g_base + fn_resolve("F_UIEQUIP_MAKE_DESC_VMA", F_UIEQUIP_MAKE_DESC_VMA));

@@ -263,7 +263,11 @@ void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
 
 void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     if (fn == nullptr || !runtime_state().enabled.load() || !read_world_in_world()) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    // 该扫描会被原生数量查询（INVEN_GetItemCount / 快捷栏刷新）回调；若当前线程
+    // 已在模块事务里持有同一把锁，阻塞等待会自死锁。拿不到锁时返回空扫描即可，
+    // 由调用方回退原版计数。
+    std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+    if (!lock.owns_lock()) return;
     ensure_state_loaded_locked();
     // P3c 准入：session 未加载/epoch 未登记/降级阻断时明确拒绝扫描（不产出任何物品，
     // 不再惰性 IO 兜底空状态）。

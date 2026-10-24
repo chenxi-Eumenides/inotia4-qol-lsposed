@@ -892,6 +892,14 @@ target_compile_features(extension_bag_sale_transaction_tests PRIVATE cxx_std_17)
 set_target_properties(extension_bag_sale_transaction_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_sale_transaction_tests COMMAND extension_bag_sale_transaction_tests)
 
+add_executable(extension_bag_equip_tab_layout_tests
+    test_extension_bag_equip_tab_layout.cpp)
+target_include_directories(extension_bag_equip_tab_layout_tests PRIVATE ${CPP_DIR})
+target_compile_features(extension_bag_equip_tab_layout_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_equip_tab_layout_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_equip_tab_layout_tests COMMAND extension_bag_equip_tab_layout_tests)
+
+
 # ITM-16: exercise inventory_trade::sell with neutral provider item removal and the original route.
 add_executable(inventory_trade_provider_sell_tests
     test_inventory_trade_provider_sell.cpp

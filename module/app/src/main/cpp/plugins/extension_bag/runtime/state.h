@@ -90,6 +90,7 @@ struct ExtensionBagHostPorts {
 struct ExtensionBagPersistenceState {
     bool dirty = false;
     std::atomic<uint64_t> revision{0};
+    int64_t shortcut_refreshed_revision = -1;
     int loaded_slot = -2;
     uint8_t* state_entry = nullptr;
     uint8_t* save_state_entry = nullptr;

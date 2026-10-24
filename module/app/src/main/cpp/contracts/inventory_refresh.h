@@ -10,7 +10,8 @@
 //
 // 语义：`call_original` 经 backup trampoline 直调原版 `UIEquip_RefreshItemArea`，绕过
 // 入口 hook 避免回入 wrapper（回入会重复加锁）；返回 true = 已调用（存在可用原函数），
-// false = 无可用原函数（未刷新，调用方按 no-op 降级）。仅游戏主线程调用。
+// false = 无可用原函数（未刷新，调用方按 no-op 降级）。`update_shortcut` 直调绑定的原版
+// `PLAYER_UpdateShortcut`，不经过 hook。两个函数仅游戏主线程调用。
 //
 // 契约类型限制同 contracts/plugin.h：POD + 固定宽度 C 类型 + 函数指针；禁止 STL。
 
@@ -18,10 +19,11 @@ namespace qol::contracts {
 
 constexpr const char* kInventoryRefreshCapabilityId = "inventory_refresh";
 constexpr int32_t kInventoryRefreshVersionMajor = 1;
-constexpr int32_t kInventoryRefreshVersionMinor = 0;
+constexpr int32_t kInventoryRefreshVersionMinor = 1;
 
 struct InventoryRefreshApi {
     bool (*call_original)();
+    void (*update_shortcut)();  // 直接重算快捷栏物品数量，不经入口 hook
 };
 
 }  // namespace qol::contracts

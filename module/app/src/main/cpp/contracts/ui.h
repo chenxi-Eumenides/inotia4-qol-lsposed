@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 1, kUiContractMinor = 22;
-constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 32;
+constexpr uint16_t kUiAdapterMajor = 1, kUiAdapterMinor = 33;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -807,6 +807,9 @@ struct QolUiAdapter {
     QolResult (*create_yes_no_text)(const char* text, uint32_t length, uint32_t display_type,
                                     uint32_t param, QolUiPopupMsgCallbackFn ok,
                                     QolUiPopupMsgCallbackFn cancel);
+
+    // Minor 33 tail: restore native ControlItem On/MoveOn event eligibility.
+    QolResult (*use_control_event_on)(QolUiHandle);
 };
 
 }  // namespace qol::contracts

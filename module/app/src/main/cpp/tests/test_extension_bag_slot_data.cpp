@@ -18,6 +18,7 @@
 // ---- 测试提供的 EB 环境（persistence.cpp 的 extern / context 依赖）----
 std::mutex g_virtual_bag_mtx;
 bool g_item_state_dirty = false;
+int64_t g_item_state_shortcut_refreshed_revision = -1;
 uint64_t g_item_revision = 0;
 void extension_bag_mark_dirty_locked() {
     g_item_state_dirty = true;

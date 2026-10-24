@@ -1,7 +1,7 @@
 // game_variant.h —— libgame.so 校验值 → 游戏变体/能力 的运行时查表接口。
 //
 // 依赖方向：core 层，仅依赖 STL + infra/log/qol_log.h；不得依赖 game/access/game_access.h / g_base 等上层。
-// 数据来源：game/variants/game_variant_table.inc（由 scripts/data/game_variant_table.py 离线生成）。
+// 数据来源：game/variants/game_variant_table.inc（由 scripts/maintenance/build_game_variant_table.py 离线生成）。
 #pragma once
 
 #include <cstdint>
@@ -22,6 +22,7 @@ enum : uint32_t {
     kCapHiddenSegment   = 1u << 0,  // 存在隐藏可执行 PT_LOAD 段（monster 注入段）
     kCapWarehouse       = 1u << 1,  // 隐藏段内含 ASCII WH4JRN01（wh4 仓库容器）
     kCapWarehouseInline = 1u << 2,  // block3 内嵌 WH96v002 仓库段（语义位，未验证为 0）
+    kCapC18NativeBagLayoutCandidate = 1u << 3,  // C18 背包布局候选；最终准入仍需 2×5 拓扑校验
 };
 
 struct GameVariant {
@@ -45,7 +46,7 @@ namespace game_variant_detail {
 bool md5_hex_equals(const uint8_t md5[16], const char* hex32);
 // 命中返回表内条目指针，未命中返回 nullptr。
 const GameVariant* lookup(const uint8_t md5[16]);
-// 回退分类：libgame 可执行映射里命中 WH4JRN01 → kMonster，否则 kUnknown。
+// 基础回退分类：libgame 可执行映射里命中 WH4JRN01 → kMonster，否则 kUnknown；C18 签名另行判定。
 GameSeries classify_fallback(bool has_wh4_marker);
 }  // namespace game_variant_detail
 

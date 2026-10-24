@@ -15,13 +15,14 @@
 namespace {
 struct TestRuntimePersistenceView {
     bool& dirty;
+    int64_t& shortcut_refreshed_revision;
 };
 struct TestRuntimeStateView {
     std::mutex& mtx;
     TestRuntimePersistenceView persistence;
 };
 TestRuntimeStateView extension_bag_test_runtime_state() {
-    return {g_virtual_bag_mtx, {g_item_state_dirty}};
+    return {g_virtual_bag_mtx, {g_item_state_dirty, g_item_state_shortcut_refreshed_revision}};
 }
 }  // namespace
 #define runtime_state() extension_bag_test_runtime_state()
@@ -75,6 +76,7 @@ void eb_reset_loaded_revision_state_locked() {
     g_capture = CaptureIdentity{};
     g_staged_revision = 0;
     runtime_state().persistence.dirty = false;
+    runtime_state().persistence.shortcut_refreshed_revision = -1;
 }
 
 QolResult eb_ok() { return qol::contracts::ok(); }

@@ -4,6 +4,7 @@
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/plugin.h"
+#include "contracts/inventory_refresh.h"
 
 #include <array>
 #include <cstring>
@@ -57,6 +58,13 @@ void log_original_event_inventory_snapshot(const char* phase, uint64_t event,
                 session_has_projected_item ? 1 : 0, source_bag, source_slot,
                 snapshot.valid ? 1 : 0,
                 static_cast<unsigned long long>(snapshot.digest), snapshot.nonnull);
+}
+
+bool c18_native_bag_candidate_locked() {
+    const auto* game = runtime_state().host.game;
+    return game != nullptr && game->target.has_capability != nullptr &&
+           game->target.has_capability(
+               qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
 }
 
 uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param,
@@ -454,6 +462,29 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         // 0x17/0x19 只负责原版 TouchHandle 的 press/move 握手，不提交扩展事务。
         // 投影 session 的 0x18 已在 delegate 前返回，不能在这里再出现第二个 owner。
         if (event == 0x17 || event == 0x19) advance_projected_drag_session_locked();
+        if ((event == 0x17 || event == 0x18) &&
+            runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
+            c18_native_bag_candidate_locked()) {
+            const int raw_bag = raw_current_bag_locked();
+            if (raw_bag >= 0 && raw_bag != runtime_state().objects.original_current_got) {
+                // 必须先归还投影并让原版按原生当前袋重画物品区：改版袋 6..N-1 的
+                // 内容只在投影撤掉、容量字还原后才会正确切过去。
+                restore_module_view_locked();
+                if (raw_bag < kNoOriginalBagSelected) {
+                    set_original_bag_locked(raw_bag);
+                    if (runtime_state().host.game != nullptr &&
+                        runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
+                        virtual_bag_call_original_refresh_item_area_with_guard();
+                    }
+                    virtual_bag::enter_original(&runtime_state().objects.bag, raw_bag);
+                } else {
+                    virtual_bag::enter_original(&runtime_state().objects.bag, 0);
+                }
+                persist_state_locked();
+                runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
+                return result;
+            }
+        }
         if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule) {
             if (event == 0x18 && !complete_original_exit_locked()) {
                 cancel_original_exit_locked();
@@ -476,7 +507,13 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             persist_state_locked();
             runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
         } else if (event == 0x17 || event == 0x18) {
-            runtime_state().objects.bag.original_selected = original_bag_locked();
+            if (c18_native_bag_candidate_locked()) {
+                const int raw_bag = raw_current_bag_locked();
+                runtime_state().objects.bag.original_selected =
+                    raw_bag >= 0 && raw_bag < kNoOriginalBagSelected ? raw_bag : 0;
+            } else {
+                runtime_state().objects.bag.original_selected = original_bag_locked();
+            }
         }
     }
     return result;
@@ -506,6 +543,44 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
                          "lifecycle main-menu cleanup failed; retry scheduled");
         } else {
             runtime_state().main_menu_cleanup_dirty.store(false, std::memory_order_release);
+        }
+    }
+    // 进档后尽早装载 sidecar 状态：快捷栏/物品数量查询走 EB 扫描，若等到打开
+    // 背包面板才装载，进档后到首次开包前的数量会显示为 0。
+    {
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (extension_bag_session_admitted_locked()) ensure_state_loaded_locked();
+    }
+    uint64_t shortcut_revision = 0;
+    const qol::contracts::QolHostSdk* sdk = nullptr;
+    bool refresh_shortcut = false;
+    {
+        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        if (world_state == 5 && extension_bag_session_admitted_locked()) {
+            shortcut_revision = extension_bag_item_revision_locked();
+            refresh_shortcut = runtime_state().persistence.shortcut_refreshed_revision !=
+                               static_cast<int64_t>(shortcut_revision);
+            sdk = runtime_state().host.sdk;
+        }
+    }
+    if (refresh_shortcut && sdk != nullptr && sdk->capabilities.require != nullptr) {
+        const void* refresh_iface = nullptr;
+        const QolResult require_result = sdk->capabilities.require(
+            qol::contracts::kInventoryRefreshCapabilityId,
+            QolVersionRange{static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
+                            static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)},
+            &refresh_iface);
+        const auto* refresh = require_result.ok == kQolOk
+            ? static_cast<const qol::contracts::InventoryRefreshApi*>(refresh_iface)
+            : nullptr;
+        if (refresh != nullptr && refresh->update_shortcut != nullptr) {
+            refresh->update_shortcut();
+            std::lock_guard<std::mutex> lock(runtime_state().mtx);
+            if (extension_bag_session_admitted_locked() &&
+                extension_bag_item_revision_locked() == shortcut_revision) {
+                runtime_state().persistence.shortcut_refreshed_revision =
+                    static_cast<int64_t>(shortcut_revision);
+            }
         }
     }
     runtime_state().lifecycle_last_state = world_state;

@@ -10,6 +10,8 @@ bool inventory_native_hook_call_refresh_item_area_original() {
     ++g_test_refresh_calls;
     return true;
 }
+void inventory_native_hook_bind_player_update_shortcut(void (*)(void)) {}
+void inventory_native_hook_update_shortcut() {}
 
 namespace qol::features::core_item::merge {
 namespace {

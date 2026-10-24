@@ -23,6 +23,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/equip_tab_layout.h"
 
 #include <atomic>
 #include <chrono>
@@ -69,7 +70,8 @@ bool extension_tab_buttons_complete_locked();
 bool extension_tab_buttons_have_controls_locked();
 
 uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* param) {
-    const uint64_t observation_token = virtual_bag_observe_item_proc_pre(ctrl, event, x2, param);
+    const uint64_t observation_token = event == 0x10
+        ? 0 : virtual_bag_observe_item_proc_pre(ctrl, event, x2, param);
     const auto finish = [observation_token, ctrl, event, x2, param](uint64_t result) {
         virtual_bag_observe_item_proc_post(observation_token, ctrl, event, x2, param, result);
         return result;
@@ -77,7 +79,14 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
     if (event == 0x02) {
         uint64_t result = 1;
         {
-            std::unique_lock<std::mutex> lock(runtime_state().mtx);
+            // 原生事件分发可能在模块已持锁的调用栈内回调本 proc；拿不到锁时
+            // 不能阻塞，直接放行让原版处理，避免自死锁。
+            std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+            if (!lock.owns_lock()) {
+                VIRTBAG_LOG("extension tab proc busy event=0x%llx",
+                            static_cast<unsigned long long>(event));
+                return finish(0);
+            }
             if (runtime_state().enabled.load() && extension_bag_session_admitted_locked()) {
                 const int index = extension_tab_index(ctrl);
                 if (index >= 0) queue_extension_tab_click_locked(index);
@@ -92,71 +101,83 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
     if (event == 0x04) {
         uint64_t result = 0;
         {
-            std::unique_lock<std::mutex> lock(runtime_state().mtx);
+            // 同 0x02：drop 也可能在模块持锁的原生调用栈内到达。
+            std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+            if (!lock.owns_lock()) {
+                VIRTBAG_LOG("extension tab proc busy event=0x%llx",
+                            static_cast<unsigned long long>(event));
+                return finish(0);
+            }
             if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
                 result = 1;
             } else {
-            const int index = extension_tab_index(ctrl);
-            if (index >= 0 && extension_tab_control_is_current_locked(index, ctrl) &&
-                runtime_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
-                const int logical_bag = virtual_bag::extension_logical_bag(index);
-                const bool handled = logical_bag >= 0 &&
-                                     route_projected_session_to_tab_locked(lock, logical_bag);
-                if (logical_bag < 0) {
-                    VIRTBAG_LOG("cross tab reject reason=target_tab_index_invalid index=%d", index);
-                }
-                result = handled ? 1 : 0;
-            } else {
-                void* moving = touch_moving_item_control_locked();
-                // 原版不可堆叠装备在 drop 事件到达时可能已经清掉
-                // ITEM_CTRL_MOVING_FLAG，但事件参数仍保留真实 source control。
-                // 优先使用 TouchHandle 状态，只有状态已清空时才回退到事件源，避免
-                // 放宽普通点击/无效控件的处理范围。
-                if (moving == nullptr && param != nullptr) {
-                    moving = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
-                }
-                if (index >= 0 && moving != nullptr) {
-                    void* data = extension_bag_ui_data(moving);
-                    void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
-                    int module_bag = -1;
-                    int module_slot = -1;
-                    const bool extension_source =
-                        item != nullptr && module_slot_of_item_locked(item, &module_bag, &module_slot);
-                    const int category = extension_source
-                        ? runtime_state().objects.bag.items[module_bag][module_slot].category
-                        : original_item_category_locked(item);
-                    const bool backpack_item = is_backpack_category(category);
-                    if (runtime_state().objects.bag.types[index] == 0 && backpack_item) {
-                        // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
-                        // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
-                        try_equip_on_extension_tab_drop_locked(lock, index, moving);
-                    } else if (extension_source) {
-                        // 目标袋已有背包对象，或来源是装备/其他物品：一律按普通
-                        // 扩展袋间移动处理，不能把“背包槽装备”误当成人物装备。
-                        const bool moved = move_extension_to_extension_locked(
-                            module_bag, module_slot, index, -1);
-                        if (moved) {
-                            persist_state_locked(false);
-                            refresh_projected_module_view_after_move_locked();
+                const int index = extension_tab_index(ctrl);
+                if (index >= 0 && extension_tab_control_is_current_locked(index, ctrl) &&
+                    runtime_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
+                    const int logical_bag = virtual_bag::extension_logical_bag(index);
+                    const bool handled = logical_bag >= 0 &&
+                                         route_projected_session_to_tab_locked(lock, logical_bag);
+                    if (logical_bag < 0) {
+                        VIRTBAG_LOG("cross tab reject reason=target_tab_index_invalid index=%d", index);
+                    }
+                    result = handled ? 1 : 0;
+                } else {
+                    void* moving = touch_moving_item_control_locked();
+                    // 原版不可堆叠装备在 drop 事件到达时可能已经清掉
+                    // ITEM_CTRL_MOVING_FLAG，但事件参数仍保留真实 source control。
+                    // 优先使用 TouchHandle 状态，只有状态已清空时才回退到事件源，避免
+                    // 放宽普通点击/无效控件的处理范围。
+                    if (moving == nullptr && param != nullptr) {
+                        moving = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(param) + 8);
+                    }
+                    if (index >= 0 && moving != nullptr) {
+                        void* data = extension_bag_ui_data(moving);
+                        void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
+                        int module_bag = -1;
+                        int module_slot = -1;
+                        const bool extension_source =
+                            item != nullptr && module_slot_of_item_locked(item, &module_bag, &module_slot);
+                        const int category = extension_source
+                            ? runtime_state().objects.bag.items[module_bag][module_slot].category
+                            : original_item_category_locked(item);
+                        const bool backpack_item = is_backpack_category(category);
+                        if (runtime_state().objects.bag.types[index] == 0 && backpack_item) {
+                            // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
+                            // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
+                            try_equip_on_extension_tab_drop_locked(lock, index, moving);
+                        } else if (extension_source) {
+                            // 目标袋已有背包对象，或来源是装备/其他物品：一律按普通
+                            // 扩展袋间移动处理，不能把“背包槽装备”误当人物装备。
+                            const bool moved = move_extension_to_extension_locked(
+                                module_bag, module_slot, index, -1);
+                            if (moved) {
+                                persist_state_locked(false);
+                                refresh_projected_module_view_after_move_locked();
+                            }
+                            VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
+                                        moved ? 1 : 0, index, category);
+                        } else {
+                            const bool moved = move_original_to_extension_locked(lock, index, moving);
+                            VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
+                                        moved ? 1 : 0, index, category,
+                                        runtime_state().objects.bag.types[index] != 0 ? 1 : 0);
                         }
-                        VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
-                                    moved ? 1 : 0, index, category);
-                    } else {
-                        const bool moved = move_original_to_extension_locked(lock, index, moving);
-                        VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
-                                    moved ? 1 : 0, index, category,
-                                    runtime_state().objects.bag.types[index] != 0 ? 1 : 0);
                     }
                 }
-            }
             }
         }
         return finish(result);
     }
-    // 其余事件（含 0x10 拖动发起查询：TouchHandle_MoveOn @a2fec-a304c 派发，
-    // proc 返回 1 即登记 moving 控件）一律返回 0——兜底返回 1 会让标签成为
-    // 拖动源（标签可被拖出背包物品的真因，且拖出物可被 drop 入库造成复制）。
-    // 原版控件对未处理事件同样返回 0。
+    // Native MoveOn queries this proc while traversing its current control tree.
+    // Only claim eligibility when an item is already being dragged, so the tab is
+    // never registered as a drag source on its own press; and never block on the
+    // runtime mutex from that native callback stack.
+    if (event == 0x10) {
+        std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+        if (!lock.owns_lock()) return finish(0);
+        return finish(touch_moving_item_control_locked() != nullptr ? 1 : 0);
+    }
+    // 其余未处理事件返回 0；原版控件对未处理事件同样返回 0。
     return finish(0);
 }
 
@@ -203,6 +224,341 @@ struct EquipTabAnchorContext {
 };
 std::array<EquipTabAnchorContext, virtual_bag::kBagCount> g_equip_tab_anchor_ctx{};
 
+struct C18LayoutDiagnosticKey {
+    void* root = nullptr;
+    uint64_t generation = 0;
+};
+std::array<C18LayoutDiagnosticKey, 32> g_c18_layout_diagnostic_keys{};
+size_t g_c18_layout_diagnostic_next = 0;
+std::mutex g_c18_layout_diagnostic_mutex;
+
+struct C18GeometryPlanCache {
+    bool valid = false;
+    void* root = nullptr;
+    uint64_t generation = 0;
+    size_t child_count = 0;
+    int64_t parent_x = 0;
+    int64_t parent_y = 0;
+    int64_t screen_width = 0;
+    int64_t screen_height = 0;
+    std::array<qol::extension_bag::NativeTabBounds,
+               qol::extension_bag::kMaxEquipBagChildren> children{};
+    qol::extension_bag::C18ReflowPlan plan{};
+};
+C18GeometryPlanCache g_c18_geometry_plan_cache{};
+
+struct C18AppliedReflow {
+    bool active = false;
+    void* root = nullptr;
+    uint64_t generation = 0;
+    int64_t delta = 0;
+    std::array<uint8_t, qol::extension_bag::kMaxEquipBagChildren> changed{};
+    std::array<qol::contracts::UiRect, qol::extension_bag::kMaxEquipBagChildren> original_rects{};
+};
+C18AppliedReflow g_c18_applied_reflow{};
+
+bool same_c18_geometry(const C18GeometryPlanCache& cache, void* root, uint64_t generation,
+                       size_t count, int64_t parent_x, int64_t parent_y,
+                       int64_t screen_width, int64_t screen_height,
+                       const std::array<qol::extension_bag::NativeTabBounds,
+                                        qol::extension_bag::kMaxEquipBagChildren>& children) {
+    if (!cache.valid || cache.root != root || cache.generation != generation ||
+        cache.child_count != count || cache.parent_x != parent_x || cache.parent_y != parent_y ||
+        cache.screen_width != screen_width || cache.screen_height != screen_height) return false;
+    for (size_t i = 0; i < count; ++i) {
+        const auto& a = cache.children[i];
+        const auto& b = children[i];
+        if (a.x != b.x || a.y != b.y || a.width != b.width || a.height != b.height ||
+            a.local_x != b.local_x || a.local_y != b.local_y ||
+            a.module_control != b.module_control || a.native_tab != b.native_tab) return false;
+    }
+    return true;
+}
+
+QolResult c18_layout_not_ready(void* parent, const char* reason, int detail,
+                               int64_t inset_width = -1, int64_t inset_height = -1,
+                               int64_t screen_width = 0, int64_t screen_height = 0) {
+    const uint64_t generation = runtime_state().ui.inventory_generation;
+    bool should_log = false;
+    {
+        std::lock_guard<std::mutex> lock(g_c18_layout_diagnostic_mutex);
+        for (const auto& key : g_c18_layout_diagnostic_keys) {
+            if (key.root == parent && key.generation == generation) return
+                qol::contracts::error(kQolErrNotReady, reason, detail);
+        }
+        g_c18_layout_diagnostic_keys[g_c18_layout_diagnostic_next] = {parent, generation};
+        g_c18_layout_diagnostic_next = (g_c18_layout_diagnostic_next + 1) %
+            g_c18_layout_diagnostic_keys.size();
+        should_log = true;
+    }
+    if (should_log) {
+        int child_count = 0;
+        const bool count_ok = extension_bag_ui_child_count(parent, &child_count);
+        VIRTBAG_LOG("C18 tab layout fail-closed root=%p generation=%llu child_count=%d count_ok=%d "
+                    "insets=%lldx%lld screen=%lldx%lld topology=reject reason=%s detail=%d",
+                    parent, static_cast<unsigned long long>(generation), child_count,
+                    count_ok ? 1 : 0, static_cast<long long>(inset_width),
+                    static_cast<long long>(inset_height), static_cast<long long>(screen_width),
+                    static_cast<long long>(screen_height), reason, detail);
+        const int limit = count_ok && child_count > 0
+            ? (child_count < static_cast<int>(qol::extension_bag::kMaxEquipBagChildren)
+                ? child_count : static_cast<int>(qol::extension_bag::kMaxEquipBagChildren))
+            : 0;
+        for (int index = 0; index < limit; ++index) {
+            void* child = extension_bag_ui_child_at(parent, index);
+            const bool parent_valid = child != nullptr && extension_bag_ui_parent(child) == parent;
+            const int user_type = child != nullptr ? extension_bag_ui_user_type(child) : -1;
+            bool module_anchor = false;
+            if (child != nullptr && parent_valid) {
+                for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+                    if (anchor.mounted != 0 && anchor.handle == child &&
+                        extension_bag_ui_parent(anchor.handle) == parent) {
+                        module_anchor = true;
+                        break;
+                    }
+                }
+            }
+            qol::contracts::UiRect rect{};
+            const bool rect_ok = child != nullptr && extension_bag_ui_rect(child, &rect);
+            int64_t origin_x = 0, origin_y = 0;
+            const bool origin_ok = child != nullptr &&
+                extension_bag_ui_control_origin(child, &origin_x, &origin_y);
+            VIRTBAG_LOG("C18 tab child index=%d handle=%p type2=%d user_type=%d parent_valid=%d "
+                        "module_anchor=%d rect_ok=%d rect=%lld,%lld,%lld,%lld origin_ok=%d "
+                        "origin=%lld,%lld",
+                        index, child, user_type == 2 ? 1 : 0, user_type,
+                        parent_valid ? 1 : 0, module_anchor ? 1 : 0, rect_ok ? 1 : 0,
+                        static_cast<long long>(rect.x), static_cast<long long>(rect.y),
+                        static_cast<long long>(rect.w), static_cast<long long>(rect.h),
+                        origin_ok ? 1 : 0, static_cast<long long>(origin_x),
+                        static_cast<long long>(origin_y));
+        }
+    }
+    return qol::contracts::error(kQolErrNotReady, reason, detail);
+}
+
+QolResult resolve_c18_layout(void* parent,
+    std::array<qol::extension_bag::NativeTabBounds,
+               qol::extension_bag::kMaxEquipBagChildren>* out_children,
+    int* out_child_count, int64_t* out_parent_x, int64_t* out_parent_y,
+    qol::extension_bag::C18ReflowPlan* out_plan) {
+    if (out_children == nullptr || out_child_count == nullptr || out_parent_x == nullptr ||
+        out_parent_y == nullptr || out_plan == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "C18 layout output", 1);
+    }
+    int child_count = 0;
+    if (!extension_bag_ui_child_count(parent, &child_count) || child_count < 6 ||
+        child_count > static_cast<int>(qol::extension_bag::kMaxEquipBagChildren)) {
+        return c18_layout_not_ready(parent, "native controls incomplete", 15);
+    }
+    out_children->fill({});
+    for (int child_index = 0; child_index < child_count; ++child_index) {
+        auto& candidate = (*out_children)[static_cast<size_t>(child_index)];
+        candidate.native_tab = false;
+        void* child = extension_bag_ui_child_at(parent, child_index);
+        if (child == nullptr || extension_bag_ui_parent(child) != parent) {
+            return c18_layout_not_ready(parent, "native controls incomplete", 15);
+        }
+        bool module_control = false;
+        for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+            if (anchor.mounted != 0 && anchor.handle == child &&
+                extension_bag_ui_parent(anchor.handle) == parent) {
+                module_control = true;
+                break;
+            }
+        }
+        if (module_control) {
+            candidate.module_control = true;
+            continue;
+        }
+        if (extension_bag_ui_user_type(child) != 2) continue;
+        qol::contracts::UiRect rect{};
+        if (!extension_bag_ui_rect(child, &rect)) {
+            return c18_layout_not_ready(parent, "native control bounds unavailable", 17);
+        }
+        candidate.native_tab = true;
+        if (rect.w <= 0 || rect.h <= 0) continue;
+        int64_t abs_x = 0, abs_y = 0;
+        if (!extension_bag_ui_control_origin(child, &abs_x, &abs_y)) {
+            return c18_layout_not_ready(parent, "native control origin unavailable", 19);
+        }
+        candidate.x = abs_x;
+        candidate.y = abs_y;
+        candidate.width = rect.w;
+        candidate.height = rect.h;
+        candidate.local_x = rect.x;
+        candidate.local_y = rect.y;
+    }
+    if (!extension_bag_ui_control_origin(parent, out_parent_x, out_parent_y)) {
+        return c18_layout_not_ready(parent, "bag origin unavailable", 20);
+    }
+    const auto* ui = runtime_state().host.sdk != nullptr ? runtime_state().host.sdk->ui : nullptr;
+    constexpr size_t inset_height_end = offsetof(qol::contracts::QolUiAdapter, screen_inset_height) +
+        sizeof(((qol::contracts::QolUiAdapter*)nullptr)->screen_inset_height);
+    int32_t inset_width = -1, inset_height = -1;
+    if (ui == nullptr || ui->size < inset_height_end || ui->screen_inset_width == nullptr ||
+        ui->screen_inset_height == nullptr ||
+        !qol::contracts::succeeded(ui->screen_inset_width(&inset_width)) ||
+        !qol::contracts::succeeded(ui->screen_inset_height(&inset_height)) ||
+        inset_width < 0 || inset_height < 0) {
+        return c18_layout_not_ready(parent, "screen bounds unavailable", 21,
+                                    inset_width, inset_height);
+    }
+    const int64_t screen_width = 960 + static_cast<int64_t>(inset_width) * 2;
+    const int64_t screen_height = 640 + static_cast<int64_t>(inset_height) * 2;
+    const uint64_t generation = runtime_state().ui.inventory_generation;
+    if (same_c18_geometry(g_c18_geometry_plan_cache, parent, generation,
+            static_cast<size_t>(child_count), *out_parent_x, *out_parent_y,
+            screen_width, screen_height, *out_children)) {
+        *out_plan = g_c18_geometry_plan_cache.plan;
+    } else {
+        if (!qol::extension_bag::c18_extension_tab_layout(*out_children,
+                static_cast<size_t>(child_count), *out_parent_x, *out_parent_y,
+                screen_width, screen_height, out_plan)) {
+            g_c18_geometry_plan_cache.valid = false;
+            return c18_layout_not_ready(parent, "native layout ambiguous or out of bounds", 18,
+                                        inset_width, inset_height, screen_width, screen_height);
+        }
+        g_c18_geometry_plan_cache.valid = true;
+        g_c18_geometry_plan_cache.root = parent;
+        g_c18_geometry_plan_cache.generation = generation;
+        g_c18_geometry_plan_cache.child_count = static_cast<size_t>(child_count);
+        g_c18_geometry_plan_cache.parent_x = *out_parent_x;
+        g_c18_geometry_plan_cache.parent_y = *out_parent_y;
+        g_c18_geometry_plan_cache.screen_width = screen_width;
+        g_c18_geometry_plan_cache.screen_height = screen_height;
+        g_c18_geometry_plan_cache.children = *out_children;
+        g_c18_geometry_plan_cache.plan = *out_plan;
+    }
+    *out_child_count = child_count;
+    return qol::contracts::ok();
+}
+
+bool c18_shifted_local_x(int64_t original_x, int64_t delta, int64_t* out_x) {
+    if (out_x == nullptr || delta < 0 ||
+        original_x > std::numeric_limits<int64_t>::max() - delta) return false;
+    *out_x = original_x + delta;
+    return true;
+}
+
+void prepare_c18_native_bag_layout_locked_impl() {
+    const auto* game = runtime_state().host.game;
+    if (game == nullptr || game->target.has_capability == nullptr ||
+        game->target.has_capability(
+            qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0) return;
+    void* parent = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+    if (parent == nullptr) return;
+    const uint64_t generation = runtime_state().ui.inventory_generation;
+    if (g_c18_applied_reflow.active &&
+        (g_c18_applied_reflow.root != parent || g_c18_applied_reflow.generation != generation)) {
+        // Root/generation changes invalidate geometry; never reuse old handles.
+        g_c18_applied_reflow = {};
+    }
+    const bool should_reflow = runtime_state().enabled.load() &&
+        extension_bag_session_admitted_locked() && !runtime_state().store.view_installed;
+    if (!should_reflow) {
+        if (!g_c18_applied_reflow.active) return;
+        int child_count = 0;
+        if (!extension_bag_ui_child_count(parent, &child_count)) return;
+        std::array<int32_t, qol::extension_bag::kMaxEquipBagChildren> restored{};
+        size_t restored_count = 0;
+        for (size_t i = 0; i < g_c18_applied_reflow.changed.size(); ++i) {
+            if (g_c18_applied_reflow.changed[i] == 0) continue;
+            if (i >= static_cast<size_t>(child_count)) return;
+            void* control = extension_bag_ui_child_at(parent, static_cast<int>(i));
+            qol::contracts::UiRect current{};
+            const auto& original = g_c18_applied_reflow.original_rects[i];
+            int64_t shifted_x = 0;
+            if (control == nullptr || extension_bag_ui_parent(control) != parent ||
+                extension_bag_ui_user_type(control) != 2 ||
+                !extension_bag_ui_rect(control, &current) ||
+                !c18_shifted_local_x(original.x, g_c18_applied_reflow.delta, &shifted_x) ||
+                current.x != shifted_x ||
+                current.y != original.y || current.w != original.w || current.h != original.h ||
+                !extension_bag_ui_set_rect(control, original)) {
+                for (size_t n = restored_count; n > 0; --n) {
+                    const int index = restored[n - 1];
+                    void* rollback = extension_bag_ui_child_at(parent, index);
+                    const auto& saved = g_c18_applied_reflow.original_rects[static_cast<size_t>(index)];
+                    int64_t shifted_x = 0;
+                    if (rollback != nullptr && extension_bag_ui_parent(rollback) == parent) {
+                        if (c18_shifted_local_x(saved.x, g_c18_applied_reflow.delta, &shifted_x)) {
+                            (void)extension_bag_ui_set_rect(rollback,
+                                {shifted_x, saved.y, saved.w, saved.h});
+                        }
+                    }
+                }
+                VIRTBAG_LOG("C18 native reflow restore deferred root=%p generation=%llu child=%zu",
+                            parent, static_cast<unsigned long long>(generation), i);
+                return;
+            }
+            restored[restored_count++] = static_cast<int32_t>(i);
+        }
+        VIRTBAG_LOG("C18 native reflow restored root=%p generation=%llu",
+                    parent, static_cast<unsigned long long>(generation));
+        g_c18_applied_reflow = {};
+        return;
+    }
+    std::array<qol::extension_bag::NativeTabBounds,
+               qol::extension_bag::kMaxEquipBagChildren> children{};
+    int child_count = 0;
+    int64_t parent_x = 0, parent_y = 0;
+    qol::extension_bag::C18ReflowPlan plan{};
+    if (!qol::contracts::succeeded(resolve_c18_layout(parent, &children, &child_count,
+            &parent_x, &parent_y, &plan)) || plan.vertical_delta == 0) return;
+    if (g_c18_applied_reflow.active) {
+        VIRTBAG_LOG("C18 native reflow unexpected renewed collision root=%p generation=%llu",
+                    parent, static_cast<unsigned long long>(generation));
+        return;
+    }
+    std::array<int32_t, qol::extension_bag::kMaxEquipBagChildren> changed{};
+    size_t changed_count = 0;
+    for (int i = 0; i < child_count; ++i) {
+        if (plan.move_vertical[static_cast<size_t>(i)] == 0) continue;
+        void* control = extension_bag_ui_child_at(parent, i);
+        const auto& candidate = children[static_cast<size_t>(i)];
+        qol::contracts::UiRect current_rect{};
+        int64_t shifted_x = 0;
+        if (control == nullptr || extension_bag_ui_parent(control) != parent ||
+            extension_bag_ui_user_type(control) != 2 ||
+            !extension_bag_ui_rect(control, &current_rect) ||
+            current_rect.x != candidate.local_x || current_rect.y != candidate.local_y ||
+            current_rect.w != candidate.width || current_rect.h != candidate.height ||
+            !c18_shifted_local_x(candidate.local_x, plan.vertical_delta, &shifted_x) ||
+            !extension_bag_ui_set_rect(control,
+                {shifted_x, candidate.local_y,
+                 candidate.width, candidate.height})) {
+            for (size_t n = changed_count; n > 0; --n) {
+                const int index = changed[n - 1];
+                void* rollback = extension_bag_ui_child_at(parent, index);
+                const auto& original = children[static_cast<size_t>(index)];
+                if (rollback != nullptr && extension_bag_ui_parent(rollback) == parent) {
+                    (void)extension_bag_ui_set_rect(rollback,
+                        {original.local_x, original.local_y, original.width, original.height});
+                }
+            }
+            VIRTBAG_LOG("C18 native reflow aborted root=%p generation=%llu failed_child=%d",
+                        parent, static_cast<unsigned long long>(runtime_state().ui.inventory_generation), i);
+            return;
+        }
+        changed[changed_count++] = i;
+    }
+    VIRTBAG_LOG("C18 native reflow applied root=%p generation=%llu moved=%zu delta=%lld",
+                parent, static_cast<unsigned long long>(runtime_state().ui.inventory_generation),
+                changed_count, static_cast<long long>(plan.vertical_delta));
+    g_c18_applied_reflow.active = changed_count != 0;
+    g_c18_applied_reflow.root = parent;
+    g_c18_applied_reflow.generation = generation;
+    g_c18_applied_reflow.delta = plan.vertical_delta;
+    for (size_t n = 0; n < changed_count; ++n) {
+        const size_t index = static_cast<size_t>(changed[n]);
+        g_c18_applied_reflow.changed[index] = 1;
+        const auto& candidate = children[index];
+        g_c18_applied_reflow.original_rects[index] = {
+            candidate.local_x, candidate.local_y, candidate.width, candidate.height};
+    }
+}
+
 QolResult equip_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect, void* user) {
     if (parent == nullptr || out_rect == nullptr || user == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "tab layout", 10);
@@ -210,6 +566,22 @@ QolResult equip_tab_anchor_layout(void* parent, qol::contracts::UiRect* out_rect
     const auto* ctx = static_cast<const EquipTabAnchorContext*>(user);
     if (!virtual_bag::valid_index(ctx->index)) {
         return qol::contracts::error(kQolErrInvalidArgument, "tab index", 9);
+    }
+    const auto* game = runtime_state().host.game;
+    const bool c18_grid = game != nullptr && game->target.has_capability != nullptr &&
+        game->target.has_capability(
+            qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
+    if (c18_grid) {
+        std::array<qol::extension_bag::NativeTabBounds,
+                   qol::extension_bag::kMaxEquipBagChildren> native_candidates{};
+        int child_count = 0;
+        int64_t parent_x = 0, parent_y = 0;
+        qol::extension_bag::C18ReflowPlan plan{};
+        const QolResult resolved = resolve_c18_layout(parent, &native_candidates, &child_count,
+                                                       &parent_x, &parent_y, &plan);
+        if (!qol::contracts::succeeded(resolved)) return resolved;
+        *out_rect = {plan.module_x, plan.module_y[static_cast<size_t>(ctx->index)], 57, 57};
+        return qol::contracts::ok();
     }
     int child_count = 0;
     if (!extension_bag_ui_child_count(parent, &child_count) || child_count < 6) {
@@ -255,6 +627,7 @@ QolResult equip_tab_anchor_create(void* parent, qol::contracts::UiRect rect, voi
     }
     if (!extension_bag_ui_set_control_user_type(ctrl, 2)) return fail("user-type", ctx->index);
     if (!extension_bag_ui_unuse_control_event_move(ctrl)) return fail("event-move", ctx->index);
+    if (!extension_bag_ui_use_control_event_on(ctrl)) return fail("event-on", ctx->index);
     if (!extension_bag_ui_set_rect(ctrl, rect)) return fail("rect", ctx->index);
     // data：16B（+0x0=item、+0x8..0xb=标志），装箱背包物品对象
     void* data = nullptr;
@@ -720,6 +1093,9 @@ void disable_extension_tab_buttons_locked() {
 }
 void install_extension_tab_buttons_locked() {
     install_extension_tab_buttons_locked_internal();
+}
+void prepare_c18_native_bag_layout_locked() {
+    prepare_c18_native_bag_layout_locked_impl();
 }
 bool extension_tab_buttons_complete_locked() {
     return extension_tab_buttons_complete_locked_internal();

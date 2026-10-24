@@ -25,6 +25,8 @@ void inventory_native_hook_on_module_loaded(const char* name, void* handle);
 // core.item 实现：raw-original refresh trampoline 经 `inventory_refresh` capability 暴露给消费者；
 // 返回 true = 已调原版（存在 trampoline），false = 无可用原函数。
 bool inventory_native_hook_call_refresh_item_area_original();
+void inventory_native_hook_bind_player_update_shortcut(void (*update_shortcut)());
+void inventory_native_hook_update_shortcut();
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk);
 bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game);
 bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* facts);

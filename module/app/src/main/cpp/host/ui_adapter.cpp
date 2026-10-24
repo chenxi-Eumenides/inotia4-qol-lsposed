@@ -455,6 +455,13 @@ QolResult unuse_control_event_move(QolUiHandle control) {
     return contracts::ok();
 }
 
+QolResult use_control_event_on(QolUiHandle control) {
+    if (control == nullptr) return invalid_argument();
+    if (fn_touch_handle_use_control_event_on == nullptr) return not_ready();
+    fn_touch_handle_use_control_event_on(control);
+    return contracts::ok();
+}
+
 QolResult set_popup_process_info(int32_t process, int32_t state_id) {
     if (fn_ui_set_popup_process_info == nullptr) return not_ready();
     fn_ui_set_popup_process_info(process, state_id);
@@ -1621,9 +1628,11 @@ QolUiAdapter g_ui_adapter{
             &call_ui_popup_msg_draw,
             // Minor 31 tail: proactive LCD snapshot for panel/choice open.
             &save_lcd_now,
-            // Minor 32 tail: raw-text Yes/No creation (no TEXTDATABASE/TextLayer).
-            &create_yes_no_text,
-          };
+             // Minor 32 tail: raw-text Yes/No creation (no TEXTDATABASE/TextLayer).
+             &create_yes_no_text,
+             // Minor 33 tail: restore native ControlItem On/MoveOn event eligibility.
+             &use_control_event_on,
+           };
 
 }  // namespace
 

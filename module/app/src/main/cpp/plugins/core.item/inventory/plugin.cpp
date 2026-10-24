@@ -239,6 +239,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
 
 const contracts::InventoryRefreshApi kInventoryRefreshApi{
     &inventory_native_hook_call_refresh_item_area_original,
+    &inventory_native_hook_update_shortcut,
 };
 
 const contracts::InventoryActionApi kInventoryActionApi{
