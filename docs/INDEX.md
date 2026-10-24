@@ -52,6 +52,7 @@
 - `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
 - `api-route-map.md`：API 路由核对材料。
 - `api-optional-op-design.md`：API 服务归属、可选 HTTP 接线和通用 OP 授权合同。
+- `extension-bag/refactor-plan.md`：扩展背包插件分层与内部组件重构方案（执行契约、组件边界、分阶段迁移）。
 - `audits/infrastructure-20261013/inspection.md`：近址 thunk mmap 检查与验证证据状态。
 - `audits/ui-handle-lifecycle-20261021/delete-path-audit.md`：游戏控件删除路径审计（C 方案：`TouchHandle_DeleteControl` 不递归、推荐 `ControlObject_Delete` 入口；袋容器子树释放链 UNPROVEN）。
 - `audits/plugin-audit/attribute-quality-20261014/verification-log.md`、`audits/plugin-audit/attribute-quality-20261014/design-card.md`：attribute_quality v2.0 审计登记与 VM-AQ-01 验收卡。
