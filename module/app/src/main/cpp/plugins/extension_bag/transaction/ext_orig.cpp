@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
@@ -8,7 +9,7 @@
 #include <algorithm>
 #include <cstring>
 
-bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& lock, int src_bag,
                                              int src_slot, int dst_bag,
                                              qol::contracts::QolItemHandle expected_item) {
     // 0..4 是原版事务袋；C18 改版页的 6..N-1 是追加原生袋，可作为移动来源；
@@ -175,7 +176,7 @@ bool move_original_to_extension_slot_locked(std::unique_lock<std::mutex>& lock, 
     return true;
 }
 
-bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int dst_bag,
+bool move_original_to_extension_locked(::qol::extension_bag::ReentryLock& lock, int dst_bag,
                                        void* moving_control) {
     if (!virtual_bag::valid_index(dst_bag) || runtime_state().objects.bag.capacities[dst_bag] == 0 ||
         runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->detail_item_context == nullptr) {
@@ -248,7 +249,7 @@ bool move_original_to_extension_locked(std::unique_lock<std::mutex>& lock, int d
 }
 namespace {
 
-bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int target_bag,
+bool rollback_ext2orig_insertion_locked(::qol::extension_bag::ReentryLock& lock, int target_bag,
                                         int inserted_slot, void* item,
                                         qol::contracts::QolItemHandle item_handle) {
     // 落位复核可能已通过对象回退找到槽；回滚必须复用该槽并重新核对句柄身份。
@@ -277,7 +278,7 @@ bool rollback_ext2orig_insertion_locked(std::unique_lock<std::mutex>& lock, int 
 }
 
 }
-bool move_extension_to_original_locked(std::unique_lock<std::mutex>& lock, int src_bag,
+bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, int src_bag,
                                        int src_slot, int target_bag) {
     // target_bag >= 6 表示 C18 改版客户端的原生追加袋：与“回到原版袋”共用同一条
     // 事务（载荷校验、pending、插入核验、所有权移交），差异只在宿主容量守卫、

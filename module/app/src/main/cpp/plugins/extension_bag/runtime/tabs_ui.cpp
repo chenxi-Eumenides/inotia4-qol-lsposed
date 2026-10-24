@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -86,7 +87,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
         {
             // 原生事件分发可能在模块已持锁的调用栈内回调本 proc；拿不到锁时
             // 不能阻塞，直接放行让原版处理，避免自死锁。
-            std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+            ::qol::extension_bag::TryReentryLock lock;
             if (!lock.owns_lock()) {
                 VIRTBAG_LOG("extension tab proc busy event=0x%llx",
                             static_cast<unsigned long long>(event));
@@ -107,7 +108,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
         uint64_t result = 0;
         {
             // 同 0x02：drop 也可能在模块持锁的原生调用栈内到达。
-            std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+            ::qol::extension_bag::TryReentryLock lock;
             if (!lock.owns_lock()) {
                 VIRTBAG_LOG("extension tab proc busy event=0x%llx",
                             static_cast<unsigned long long>(event));
@@ -180,7 +181,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
     // never registered as a drag source on its own press; and never block on the
     // runtime mutex from that native callback stack.
     if (event == 0x10) {
-        std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+        ::qol::extension_bag::TryReentryLock lock;
         if (!lock.owns_lock()) return finish(0);
         return finish(touch_moving_item_control_locked() != nullptr ? 1 : 0);
     }
@@ -383,7 +384,7 @@ void disable_extension_tab_buttons_locked() {
 }
 bool extension_tab_control_is_current_locked(int index, void* control);
 void handle_extension_tab_click_impl_locked(int extension_bag,
-                                            std::unique_lock<std::mutex>* unlockable_lock);
+                                            ::qol::extension_bag::ReentryLock* unlockable_lock);
 bool extension_tab_buttons_complete_locked() {
     const int active = virtual_bag::active_extension_bags();
     const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
@@ -426,13 +427,13 @@ void handle_extension_tab_click_locked(int extension_bag) {
     handle_extension_tab_click_impl_locked(extension_bag, nullptr);
 }
 
-void handle_pending_extension_tab_click_locked(std::unique_lock<std::mutex>& lock,
+void handle_pending_extension_tab_click_locked(::qol::extension_bag::ReentryLock& lock,
                                                int extension_bag) {
     handle_extension_tab_click_impl_locked(extension_bag, &lock);
 }
 
 void handle_extension_tab_click_impl_locked(int extension_bag,
-                                            std::unique_lock<std::mutex>* unlockable_lock) {
+                                            ::qol::extension_bag::ReentryLock* unlockable_lock) {
     if (!virtual_bag::valid_index(extension_bag) ||
         !extension_bag_session_admitted_locked()) return;
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kOriginal) {
@@ -492,6 +493,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                 return;
             }
             persist_state_locked();
+            extension_bag_mark_dirty_locked();
             VIRTBAG_LOG("extension tab selected bag=%d original_bag=%d projection_host=%d",
                         extension_bag, original_bag, projection_host);
             return;
@@ -503,6 +505,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                 virtual_bag::ClickResult::kIgnored) {
                 install_module_view_locked(extension_bag);
                 persist_state_locked();
+                extension_bag_mark_dirty_locked();
                 VIRTBAG_LOG("extension tab selected bag=%d original_bag=%d", extension_bag,
                             original_bag);
             }
@@ -517,6 +520,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
             if (virtual_bag::click(&runtime_state().objects.bag, extension_bag) !=
                 virtual_bag::ClickResult::kIgnored) {
                 install_module_view_locked(extension_bag);
+                extension_bag_mark_dirty_locked();
                 play_extension_switch_sound();
                 VIRTBAG_LOG("extension tab switched bag=%d", extension_bag);
             }
@@ -672,7 +676,7 @@ void queue_extension_tab_click_locked(int extension_bag) {
 }
 
 void extension_tab_button_clicked(void* ctrl) {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     const int extension_bag = extension_tab_index(ctrl);
     queue_extension_tab_click_locked(extension_bag);
 }
@@ -698,7 +702,7 @@ bool extension_tab_control_is_current_locked(int index, void* control) {
     }
     return false;
 }
-void commit_pending_extension_tab_locked(std::unique_lock<std::mutex>& lock) {
+void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock) {
     if (!virtual_bag::valid_index(runtime_state().ui.pending_extension_tab) ||
         !runtime_state().enabled.load() || !extension_bag_session_admitted_locked() ||
         runtime_state().ui.pending_extension_tab_generation != runtime_state().ui.inventory_generation ||
@@ -778,6 +782,6 @@ bool extension_tab_buttons_complete_locked() {
 void reset_extension_desc_unequip_hook_locked() {
     reset_extension_desc_unequip_hook_locked_internal();
 }
-void commit_pending_extension_tab_locked(std::unique_lock<std::mutex>& lock) {
+void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock) {
     commit_pending_extension_tab_locked_internal(lock);
 }

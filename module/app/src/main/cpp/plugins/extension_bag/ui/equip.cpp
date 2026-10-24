@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -43,7 +44,7 @@ void* extension_menu_character() {
                : nullptr;
 }
 
-ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mutex>& lock,
+ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::ReentryLock& lock,
                                                         int internal_bag, void* item) {
     ensure_state_loaded_locked();
     if (!virtual_bag::valid_index(internal_bag) || item == nullptr) {
@@ -178,7 +179,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mu
     return restored ? ExtensionBagEquipResult::kPersistFailed : ExtensionBagEquipResult::kFailed;
 }
 
-bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
+bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lock,
                                            void* character, void* item, int source_bag,
                                            int source_slot) {
     if (!lock.owns_lock() || character == nullptr || item == nullptr ||
@@ -362,7 +363,7 @@ void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     if (!switched_view) extension_bag_ui_play_switch_sound();
 }
 
-bool try_equip_on_extension_tab_drop_locked(std::unique_lock<std::mutex>& lock,
+bool try_equip_on_extension_tab_drop_locked(::qol::extension_bag::ReentryLock& lock,
                                             int index, void* moving_control) {
     if (!runtime_state().enabled.load() || !read_world_in_world()) return false;
     void* data = extension_bag_ui_data(moving_control);
@@ -397,7 +398,7 @@ int first_empty_extension_bag_locked() {
     return -1;
 }
 
-bool equip_extension_source_on_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag,
+bool equip_extension_source_on_tab_locked(::qol::extension_bag::ReentryLock& lock, int target_bag,
                                           int source_bag, int source_slot) {
     void* source_item = module_item_locked(source_bag, source_slot);
     if (source_item == nullptr) return false;
@@ -437,7 +438,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
     (void)arg;
     (void)runtime_state().host.write_port->ui.make_item_description(ctrl);
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         int item_bag = -1;
         int item_slot = -1;
         int item_category = -1;

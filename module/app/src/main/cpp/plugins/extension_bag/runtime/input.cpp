@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/runtime/logging.h"
 
@@ -71,7 +72,7 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
                                                uint64_t release_param2, bool handled) {
     void* captured_moving_control = moving_control;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (captured_moving_control == nullptr) {
             void* drop_source = nullptr;
             int64_t ignored_x = 0;
@@ -96,7 +97,7 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
     }
 
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         (void)extension_bag_ui_clear_touch_drop_event();
         VIRTBAG_LOG("release_cleanup ctl=%p flags_cleared", captured_moving_control);
     }

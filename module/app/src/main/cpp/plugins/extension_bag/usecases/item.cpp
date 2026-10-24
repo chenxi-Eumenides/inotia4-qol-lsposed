@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/usecases/item.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/extension_bag_context.h"
@@ -19,7 +20,7 @@ std::string click_item(int logical_bag, int slot) {
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
     const int internal_bag = extension_internal_bag_bridge(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
         return extension_bag_not_ready_error_locked_bridge();
     }

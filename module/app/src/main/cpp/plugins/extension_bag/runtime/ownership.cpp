@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/logging.h"
@@ -204,7 +205,7 @@ int32_t extension_bag_deferred_free_tick(int64_t frame, void* ctx) {
     (void)frame;
     (void)ctx;
     if (!g_deferred_free_pending.load(std::memory_order_acquire)) return 1;
-    std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+    ::qol::extension_bag::TryReentryLock lock;
     if (!lock.owns_lock()) return 1;
     drain_deferred_frees_locked();
     return 1;
@@ -565,7 +566,7 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
     if (!release.pending || release.item == nullptr || release.handle == 0) return false;
     bool deferred = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (release.control != nullptr) (void)extension_bag_ui_set_control_item(release.control, nullptr);
         if (object_touch_window_active_locked() || extension_bag_write_api() == nullptr ||
             extension_bag_write_api()->inventory.free_item == nullptr) {
@@ -583,7 +584,7 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
     if (!deferred && !extension_free_item(release.item)) {
         VIRTBAG_LOG_ERROR("ERROR module-use native free failed bag=%d slot=%d handle=%u item=%p; retry deferred",
                           release.bag, release.slot, release.handle, release.item);
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!enqueue_deferred_item_free_locked(release.item, release.handle,
                                               release.generation)) {
             VIRTBAG_LOG_ERROR("ERROR module-use native free retry queue full bag=%d slot=%d handle=%u item=%p",

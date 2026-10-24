@@ -1,6 +1,7 @@
 #pragma once
 
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 void* valid_child_locked(void* root, int slot);
 bool bag_size_word_locked(int bag, uint32_t* out_word);
@@ -33,7 +34,7 @@ void refresh_projected_module_view_after_move_locked();
 void restore_module_view_locked();
 bool complete_original_exit_locked();
 void cancel_original_exit_locked();
-void virtual_bag_draw_end_locked(int inventory_state, std::unique_lock<std::mutex>& lock);
+void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::ReentryLock& lock);
 void virtual_bag_draw_end_wrapper();
 void virtual_bag_call_original_refresh_item_area_with_guard();
 bool virtual_bag_sync_projected_bag();

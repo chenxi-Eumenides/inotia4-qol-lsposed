@@ -335,7 +335,7 @@ void test_inventory_state_reader_uses_popup_state_entry() {
     CHECK(function_start != std::string::npos && function_end != std::string::npos);
     if (function_start == std::string::npos || function_end == std::string::npos) return;
     const std::string function = source.substr(function_start, function_end - function_start);
-    CHECK(function.find("std::lock_guard<std::mutex> lock(runtime_state().mtx)") !=
+    CHECK(function.find("::qol::extension_bag::ReentryLock lock;") !=
           std::string::npos);
     CHECK(function.find("persistence.state_entry == nullptr") != std::string::npos);
     CHECK(function.find("*reinterpret_cast<int32_t*>(runtime_state().persistence.state_entry)") !=
@@ -347,7 +347,7 @@ void test_inventory_state_reader_uses_popup_state_entry() {
 void test_panel_edges_cannot_reset_loaded_state() {
     const std::string render = read_source(QOL_EXTENSION_BAG_RENDER_SOURCE);
     const std::string draw_end = source_function(
-        render, "void virtual_bag_draw_end_locked(int inventory_state, std::unique_lock<std::mutex>& lock) {");
+        render, "void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::ReentryLock& lock) {");
     CHECK(!draw_end.empty());
     CHECK(draw_end.find("prepare_main_menu_locked") == std::string::npos);
     CHECK(draw_end.find("g_virtual_bag_state = {}") == std::string::npos);
@@ -365,7 +365,7 @@ void test_panel_edges_cannot_reset_loaded_state() {
 void test_unadmitted_panel_mutators_fail_before_touching_state() {
     const std::string runtime = read_source(QOL_EXTENSION_BAG_RUNTIME_SOURCE);
     const std::string tab_click = source_function(
-        runtime, "void handle_extension_tab_click_impl_locked(int extension_bag,\n                                            std::unique_lock<std::mutex>* unlockable_lock) {");
+        runtime, "void handle_extension_tab_click_impl_locked(int extension_bag,\n                                            ::qol::extension_bag::ReentryLock* unlockable_lock) {");
     CHECK(tab_click.find("extension_bag_session_admitted_locked") != std::string::npos);
     CHECK(tab_click.find("extension_bag_session_admitted_locked") <
           tab_click.find("g_virtual_bag_state"));
@@ -423,7 +423,7 @@ void test_runtime_regression_guards_match_behavioral_models() {
     const std::string move_on_branch = proc.substr(move_on, 600);
     // MoveOn 在原生调用栈内触发：只允许 try_to_lock，且仅在已有 moving 物品时返回 1，
     // 避免页签在自身按下时被登记为拖动源。
-    CHECK(move_on_branch.find("try_to_lock") != std::string::npos);
+    CHECK(move_on_branch.find("TryReentryLock") != std::string::npos);
     CHECK(move_on_branch.find("lock_guard") == std::string::npos);
     CHECK(move_on_branch.find("touch_moving_item_control_locked()") != std::string::npos);
     CHECK(move_on_branch.find("? 1 : 0") != std::string::npos);
@@ -450,18 +450,18 @@ void test_runtime_regression_guards_match_behavioral_models() {
     const std::string queue =
         source_function(runtime, "void queue_extension_tab_click_locked(int extension_bag) {");
     const std::string commit = source_function(
-        runtime, "void commit_pending_extension_tab_locked(std::unique_lock<std::mutex>& lock) {");
+        runtime, "void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock) {");
     CHECK(queue.find("g_virtual_bag_enabled.load()") != std::string::npos);
     CHECK(queue.find("extension_tab_control_is_current_locked") != std::string::npos);
     CHECK(commit.find("extension_tab_control_is_current_locked") != std::string::npos);
     CHECK(commit.find("handle_pending_extension_tab_click_locked(lock") != std::string::npos);
 
     const std::string pending_click = source_function(
-        runtime, "void handle_pending_extension_tab_click_locked(std::unique_lock<std::mutex>& lock,");
+        runtime, "void handle_pending_extension_tab_click_locked(::qol::extension_bag::ReentryLock& lock,");
     CHECK(pending_click.find("handle_extension_tab_click_impl_locked(extension_bag, &lock)") !=
           std::string::npos);
     const std::string click_impl = source_function(
-        runtime, "void handle_extension_tab_click_impl_locked(int extension_bag,\n                                            std::unique_lock<std::mutex>* unlockable_lock) {");
+        runtime, "void handle_extension_tab_click_impl_locked(int extension_bag,\n                                            ::qol::extension_bag::ReentryLock* unlockable_lock) {");
     const size_t unlock = click_impl.find("unlockable_lock->unlock()");
     CHECK(unlock != std::string::npos);
     const size_t pending_make = click_impl.find("g_write_port->ui.make_item_description(ctrl)", unlock);

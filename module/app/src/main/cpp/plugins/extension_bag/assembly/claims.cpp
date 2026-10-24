@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/popup_enter_alias.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
 #include "plugins/extension_bag/runtime/logging.h"
@@ -56,7 +57,7 @@ uint32_t store_event_32(uint64_t event, uint64_t param, uint64_t param2) {
 // ---- P1：背包 PopupState（enter/f3/event 部分 wrap；process/f4 保留原值）----
 int32_t extension_bag_inventory_popup_acquire(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (g_inventory_popup_entry.slot != nullptr) return 0;
     ::qol::contracts::QolPopupStateEntry entry{};
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->hooks.popup_resolve == nullptr ||
@@ -82,7 +83,7 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
 }
 void extension_bag_inventory_popup_release(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_inventory_popup_entry, "inventory")) return;
     runtime_state().persistence.state_entry = nullptr;
     runtime_state().persistence.orig_enter = nullptr;
@@ -94,7 +95,7 @@ void extension_bag_inventory_popup_release(const char* id) {
 // ---- P2：存档槽 PopupState（仅 enter 部分 wrap）----
 int32_t extension_bag_save_popup_acquire(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (g_save_popup_entry.slot != nullptr) return 0;
     ::qol::contracts::QolPopupStateEntry entry{};
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->hooks.popup_resolve == nullptr ||
@@ -112,7 +113,7 @@ int32_t extension_bag_save_popup_acquire(const char* id) {
 }
 void extension_bag_save_popup_release(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_save_popup_entry, "save")) return;
     runtime_state().persistence.save_state_entry = nullptr;
     runtime_state().persistence.orig_save_enter = nullptr;
@@ -122,7 +123,7 @@ void extension_bag_save_popup_release(const char* id) {
 // ---- P3：商店 PopupState（enter/f3/event 部分 wrap）----
 int32_t extension_bag_store_popup_acquire(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (g_store_popup_entry.slot != nullptr) return 0;
     ::qol::contracts::QolPopupStateEntry entry{};
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->hooks.popup_resolve == nullptr ||
@@ -148,7 +149,7 @@ int32_t extension_bag_store_popup_acquire(const char* id) {
 }
 void extension_bag_store_popup_release(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_store_popup_entry, "store")) return;
     runtime_state().ui.store_state_entry = nullptr;
     runtime_state().ui.store_original_enter = nullptr;
@@ -159,7 +160,7 @@ void extension_bag_store_popup_release(const char* id) {
 // ---- P4：合成 PopupState（enter/f3 部分 wrap）----
 int32_t extension_bag_mix_popup_acquire(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (g_mix_popup_entry.slot != nullptr) return 0;
     ::qol::contracts::QolPopupStateEntry entry{};
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->hooks.popup_resolve == nullptr ||
@@ -180,7 +181,7 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
 }
 void extension_bag_mix_popup_release(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_mix_popup_entry, "mix")) return;
     runtime_state().ui.mix_state_entry = nullptr;
     runtime_state().ui.mix_original_enter = nullptr;
@@ -216,7 +217,7 @@ int32_t extension_bag_desc_slots_acquire(const char* id) {
 }
 void extension_bag_desc_slots_release(const char* id) {
     (void)id;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     reset_extension_desc_item_hooks_locked();
 }
 

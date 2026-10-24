@@ -3,6 +3,7 @@
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include <cstdint>
 

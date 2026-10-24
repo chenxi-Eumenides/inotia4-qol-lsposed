@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/logging.h"
@@ -173,7 +174,7 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"hook:SAVE_SaveInventory"});
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (runtime_state().objects.module_view_installed) {
             QOL_LOG_DEBUG(QolDomain::kExtensionBag, "save gate: restoring projected view before SAVE_SaveInventory");
             restore_module_view_locked();
@@ -256,7 +257,7 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_DROP_GATE"});
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         int src_bag = -1, src_slot = -1;
         const bool module_item = module_slot_of_item_locked(item, &src_bag, &src_slot);
         const bool session_source_match =
@@ -586,6 +587,7 @@ bool complete_original_exit_locked() {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&runtime_state().objects.bag, selected_original_bag);
+    extension_bag_mark_dirty_locked();
     persist_state_locked();
     runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
     log_exit_trace_locked("complete_success", 0, 0, 0);
@@ -600,6 +602,7 @@ void cancel_original_exit_locked() {
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&runtime_state().objects.bag, original_bag);
+    extension_bag_mark_dirty_locked();
     persist_state_locked();
     runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
     log_exit_trace_locked("complete_cancel", 0, 0, 0);
@@ -611,7 +614,7 @@ void virtual_bag_f3_wrapper() {
         {"own:popup.inventory"});
     PopupNoArgFn original = nullptr;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) {
             original = runtime_state().persistence.orig_f3;
         } else {
@@ -619,6 +622,7 @@ void virtual_bag_f3_wrapper() {
         if (runtime_state().objects.module_view_installed) restore_module_view_locked();
         if (!was_exiting_module && runtime_state().objects.bag.mode != virtual_bag::Mode::kOriginal) {
             virtual_bag::enter_original(&runtime_state().objects.bag, original_bag_locked());
+            extension_bag_mark_dirty_locked();
         }
         if (was_exiting_module) {
             cancel_original_exit_locked();
@@ -645,7 +649,7 @@ void virtual_bag_inventory_enter_wrapper() {
     bool keep_module_view = false;
     int keep_module_bag = -1;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         original = runtime_state().persistence.orig_enter;
         session_admitted = extension_bag_session_admitted_locked();
         if (session_admitted) {
@@ -659,6 +663,7 @@ void virtual_bag_inventory_enter_wrapper() {
                 restore_module_view_locked();
                 set_original_bag_locked(0);
                 virtual_bag::enter_original(&runtime_state().objects.bag, 0);
+                extension_bag_mark_dirty_locked();
             }
             runtime_state().ui.inventory_frame_active = true;
             runtime_state().ui.extension_touch_capture = false;
@@ -670,7 +675,7 @@ void virtual_bag_inventory_enter_wrapper() {
     }
     if (original != nullptr) original();
     if (!session_admitted || !runtime_state().enabled.load()) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     install_extension_tab_buttons_locked();
     if (keep_module_view) {
         // Preserve the EB bag selected before closing the mixer; installing the

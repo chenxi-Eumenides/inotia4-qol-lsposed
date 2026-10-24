@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
@@ -10,7 +11,7 @@
 
 #define is_backpack_category extension_bag_runtime_is_backpack_category
 
-bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& lock) {
+bool route_deferred_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock) {
     virtual_bag::ExtensionDragSession& session = runtime_state().ui.extension_drag_session;
     if (session.target_kind != virtual_bag::DragTargetKind::kOriginalBag ||
         !virtual_bag::valid_original_transaction_bag(session.target_bag) ||
@@ -57,7 +58,7 @@ bool route_deferred_extension_to_original_locked(std::unique_lock<std::mutex>& l
     }
     return moved;
 }
-bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
+bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int64_t x, int64_t y) {
     ensure_state_loaded_locked();
     recover_pending_transaction_locked(lock);
     QOL_LOG_INFO(QolDomain::kExtensionBag, "drop release mode=%d selected=%d x=%lld y=%lld moving=%p extension_drag=%d",
@@ -164,7 +165,7 @@ bool handle_bag_drop_release_locked(std::unique_lock<std::mutex>& lock, int64_t 
     return false;
 }
 
-bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
+bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock, int64_t x, int64_t y) {
     if (runtime_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kIdle ||
         runtime_state().objects.bag.mode != virtual_bag::Mode::kModule ||
         !virtual_bag::valid_index(runtime_state().objects.bag.selected)) {
@@ -291,7 +292,7 @@ bool route_projected_session_drop_locked(std::unique_lock<std::mutex>& lock, int
     return handled;
 }
 
-bool route_projected_session_to_tab_locked(std::unique_lock<std::mutex>& lock, int target_bag) {
+bool route_projected_session_to_tab_locked(::qol::extension_bag::ReentryLock& lock, int target_bag) {
     // 入口 target_bag 使用扩展逻辑袋号 6..10；事务状态和 State 数组统一使用
     // 内部索引 0..4。成功装备由 finish_extension_equip_ui_locked
     // 复用 handle_extension_tab_click_locked/install_module_view_locked 同步当前视图，

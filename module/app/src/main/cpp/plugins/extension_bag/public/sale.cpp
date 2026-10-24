@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -37,12 +38,12 @@
 
 bool virtual_bag_identify_native_item(void* item, int* out_bag, int* out_slot) {
     if (item == nullptr || out_bag == nullptr || out_slot == nullptr) return false;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     return module_slot_of_item_locked(item, out_bag, out_slot);
 }
 void* virtual_bag_find_native_item(int category) {
     if (category <= 0) return nullptr;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < runtime_state().objects.bag.capacities[bag]; ++slot) {
@@ -59,7 +60,7 @@ void* virtual_bag_find_native_item(int category) {
 
 bool virtual_bag_remove_native_item(void* item, void* raw_use_token) {
     if (item == nullptr) return false;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     int bag = -1;
     int slot = -1;
@@ -130,7 +131,7 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
     void* detail_control = nullptr;
     void* detail_item = nullptr;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         int bag = -1;
         int slot = -1;
@@ -192,7 +193,7 @@ QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid extension sale slot", 27);
     }
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load(std::memory_order_acquire) ||
         !extension_bag_session_admitted_locked()) {
         return qol::contracts::error(kQolErrNotReady, "extension sale session unavailable", 34);

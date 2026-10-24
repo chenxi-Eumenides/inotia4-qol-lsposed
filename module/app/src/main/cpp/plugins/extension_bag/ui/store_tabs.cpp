@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -117,7 +118,7 @@ void store_discard_new_tab_controls_locked(
 }
 uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
     if (event == 0x02) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) return 1;
         const int index = store_tab_index(ctrl);
         if (index >= 0 && runtime_state().store.tab_generation != 0) {
@@ -344,7 +345,7 @@ void store_draw_inven_bag_group_entry() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"hook:UIStore_DrawInvenBagGroup"});
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     int32_t saved_current = 0;
     bool masked = false;
     if (runtime_state().store.view_installed &&

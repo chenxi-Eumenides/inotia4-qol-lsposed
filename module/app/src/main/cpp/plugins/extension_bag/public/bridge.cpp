@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -43,7 +44,7 @@ void* virtual_bag_item_at(int bag, int slot) {
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return nullptr;
     }
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     return module_item_locked(bag, slot);
 }
@@ -55,7 +56,7 @@ void* virtual_bag_view_item_at(int bag, int slot) {
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return nullptr;
     }
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     return module_item_locked(bag, slot);
 }
@@ -80,7 +81,7 @@ uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* 
         return 0;
     }
     g_p5_observation_active = true;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     const uint64_t observation_token =
         log_p5_observation_locked("item-pre", control, event, x2 != nullptr, param != nullptr,
                                   nullptr, false, 0);
@@ -91,7 +92,7 @@ uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* 
 void virtual_bag_observe_item_proc_source(uint64_t observation_token, void* control, uint64_t event,
                                           void* x2, void* param, void* source_control) {
     if (observation_token == 0) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     log_p5_observation_locked("item-source", control, event, x2 != nullptr, param != nullptr,
                               source_control, false, 0, -1, -1, observation_token);
 }
@@ -101,7 +102,7 @@ void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* contro
     if (observation_token == 0) return;
     (void)control;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         // The original proc may have rebuilt the control tree. Do not dereference its prior control.
         log_p5_observation_locked("item-post", nullptr, event, x2 != nullptr, param != nullptr,
                                   nullptr, true, result, -1, -1, observation_token);
@@ -110,14 +111,14 @@ void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* contro
 }
 
 bool virtual_bag_is_inventory_enter(uintptr_t enter) {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     return runtime_state().persistence.inventory_enter != 0 && enter == runtime_state().persistence.inventory_enter;
 }
 
 bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int target_slot,
                                                VirtualBagMoveItemObservation* out) {
     if (out == nullptr) return false;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     *out = {};
     out->module_view_index = runtime_state().objects.module_view_index;
     out->drag_session_active = projected_drag_session_active_locked();
@@ -158,7 +159,7 @@ bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int t
 
 bool set_virtual_bag_enabled(bool enabled) {
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         runtime_state().enabled.store(enabled);
         if (!enabled) {
             teardown_extension_bag_hosts_locked();
@@ -186,7 +187,7 @@ bool virtual_bag_enabled() {
 }
 
 bool virtual_bag_prepare_save_slot_load() {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!module_cache_clear_preflight_locked()) {
         VIRTBAG_LOG("prepare save-slot load preflight failed");
         return false;
@@ -204,7 +205,7 @@ bool virtual_bag_prepare_save_slot_load() {
 }
 
 bool virtual_bag_prepare_main_menu() {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     return prepare_main_menu_locked();
 }
 
@@ -248,7 +249,7 @@ bool virtual_bag_module_save_validate_locked() {
 // 扫描入口的准入拒绝见 virtual_bag_for_each_logical_item 与各写操作入口。
 void virtual_bag_ui_register_bridge(JNIEnv* env, jclass bridge_class) {
     if (env == nullptr || bridge_class == nullptr) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (runtime_state().persistence.bridge_class != nullptr) env->DeleteGlobalRef(runtime_state().persistence.bridge_class);
     runtime_state().persistence.bridge_class = static_cast<jclass>(env->NewGlobalRef(bridge_class));
     // P3c：旧 module_save 参与者注册已退出——保存协调唯一走 save.slot_data + core.save
@@ -263,7 +264,7 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     // 该扫描会被原生数量查询（INVEN_GetItemCount / 快捷栏刷新）回调；若当前线程
     // 已在模块事务里持有同一把锁，阻塞等待会自死锁。拿不到锁时返回空扫描即可，
     // 由调用方回退原版计数。
-    std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+    ::qol::extension_bag::TryReentryLock lock;
     if (!lock.owns_lock()) return;
     ensure_state_loaded_locked();
     // P3c 准入：session 未加载/epoch 未登记/降级阻断时明确拒绝扫描（不产出任何物品，
@@ -353,7 +354,7 @@ std::string virtual_bag_inventory_bags_json() {
 std::string data_virtual_bag_test_equip(int index, int bag_type) {
     bool updated = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) return op_err("slot data not ready");
         updated = virtual_bag::set_test_equipped(&runtime_state().objects.bag, index, bag_type);
         if (updated) extension_bag_mark_dirty_locked();
@@ -365,7 +366,7 @@ std::string data_virtual_bag_test_equip(int index, int bag_type) {
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count) {
     bool updated = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) return op_err("slot data not ready");
         if (!virtual_bag::valid_index(index) || slot < 0 || slot >= virtual_bag::kSlotCount ||
             category <= 0 || count <= 0) {

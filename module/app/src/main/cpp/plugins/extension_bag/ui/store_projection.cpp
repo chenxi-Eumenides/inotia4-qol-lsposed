@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -45,7 +46,7 @@ void store_request_item_refresh_locked() {
 }
 
 void store_refresh_item_after_unlock() {
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().store.refresh_pending) return;
     const uint64_t refresh_generation = runtime_state().store.refresh_generation;
     const uint64_t view_generation = runtime_state().store.view_generation;
@@ -275,7 +276,7 @@ uint64_t store_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
     if ((event == 0x17 || event == 0x18) && param != 0) {
         x = *reinterpret_cast<const int64_t*>(param);
         y = *reinterpret_cast<const int64_t*>(param + 8);
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         store_restore_for_original_event_locked(x, y);
     }
     store_refresh_item_after_unlock();
@@ -287,7 +288,7 @@ void store_enter_wrapper() {
         {"own:popup.store"});
     if (runtime_state().ui.store_original_enter != nullptr) runtime_state().ui.store_original_enter();
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         store_teardown_locked();
         set_original_bag_locked(0);
@@ -304,7 +305,7 @@ void store_f3_wrapper() {
         {"own:popup.store"});
     StoreSceneNoArgFn original = nullptr;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         store_teardown_locked();
         runtime_state().store.frame_active = false;
         original = runtime_state().ui.store_original_f3;
@@ -317,7 +318,7 @@ void store_draw_end_wrapper() {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_STORE_DRAW_END"});
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (runtime_state().store.frame_active && runtime_state().enabled.load() &&
             extension_bag_session_admitted_locked()) {
             ensure_state_loaded_locked();

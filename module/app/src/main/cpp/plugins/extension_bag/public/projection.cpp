@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -59,7 +60,7 @@ void virtual_bag_call_original_refresh_item_area_with_guard() {
     }
 }
 void virtual_bag_refresh_item_area_with_gate() {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     virtual_bag_call_original_refresh_item_area_with_guard();
     const bool projection_installed =
         runtime_state().objects.module_view_installed && runtime_state().objects.projected_item_root != nullptr &&
@@ -84,7 +85,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     int target_slot_index = -1;
     ModuleUseToken use_token{};
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         // 控件指针只作为当前投影索引；data 和 item 必须在同一锁上下文重读，
         // 防止控件在锁外被重绑后仍沿用旧身份。
@@ -154,7 +155,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     bool finished = false;
     ModuleUseReleasePlan release_plan{};
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         finished = module_use_finish_locked(use_token, &consumed, &release_plan);
         if (extension_bag_finish_requires_abort(finished)) {
             const bool aborted = module_use_abort_locked(use_token);
@@ -175,18 +176,18 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     bool released = true;
     if (release_plan.pending) {
         released = module_use_release_native(release_plan);
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (released) released = module_use_finalize_release_locked(release_plan);
     }
     if (!released) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         cancel_projected_drag_session_locked("equip-control-native-release-failed");
         return VirtualBagEquipControlEventResult::kBlocked;
     }
 
     bool session_committed = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         auto& session = runtime_state().ui.extension_drag_session;
         if (session.phase == virtual_bag::DragPhase::kPressed) {
             virtual_bag::session_on_native_moving(&session, runtime_state().ui.extension_tab_generation);
@@ -217,7 +218,7 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     if (out_result != nullptr) *out_result = original_result;
     return VirtualBagEquipControlEventResult::kHandled;
 }
-bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
+bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& lock,
                                              int src_bag, int src_slot, int dst_bag,
                                              int dst_slot, void* material, void* target_item) {
     const int source_category = runtime_state().objects.bag.items[src_bag][src_slot].category;
@@ -345,7 +346,7 @@ bool apply_extension_material_to_slot_locked(std::unique_lock<std::mutex>& lock,
 // stale 控件或错视图一律是 kRejected。
 VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_control,
                                                                      void* src_control) {
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (src_control == nullptr) {
         return VirtualBagProjectionDropResult::kNotExtension;
     }
@@ -464,12 +465,12 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
 bool virtual_bag_module_view_installed() {
     qol::extension_bag::BagSnapshot snapshot{};
     if (qol::extension_bag::bag_snapshot(&snapshot)) return snapshot.module_view_installed;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     return runtime_state().objects.module_view_installed;
 }
 
 bool virtual_bag_original_item_input_blocked() {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     const bool blocked = runtime_state().enabled.load() &&
                          (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule ||
                           runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule);
@@ -482,7 +483,7 @@ bool virtual_bag_original_item_input_blocked() {
 
 bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
                                          uint64_t caller_offset) {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !runtime_state().objects.module_view_installed ||
         control == nullptr || source_control == nullptr ||
         runtime_state().host.sdk == nullptr || runtime_state().host.sdk->ui == nullptr) {
@@ -520,7 +521,7 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
 // G-14（方案 C）：原版物品操作后 RefreshItemArea 会以 INVEN 重刷控件，窗口袋投影需重写。
 // 投影只占窗口袋；其他袋调用为 no-op。调用方（data_op_*）不持模块锁，此处安全获锁。
 bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().objects.module_view_installed || !virtual_bag::valid_index(runtime_state().objects.module_view_index) ||
         runtime_state().host.sdk == nullptr || runtime_state().host.sdk->ui == nullptr ||
         !ensure_module_view_root_current_locked()) {
@@ -538,7 +539,7 @@ bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
 
 bool virtual_bag_sync_projected_item_control(void* control) {
     if (control == nullptr) return false;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().objects.module_view_installed || !virtual_bag::valid_index(runtime_state().objects.module_view_index) ||
         runtime_state().host.sdk == nullptr || runtime_state().host.sdk->ui == nullptr ||
         !ensure_module_view_root_current_locked()) {
@@ -561,7 +562,7 @@ bool virtual_bag_sync_projected_item_control(void* control) {
 }
 
 bool virtual_bag_sync_projected_bag() {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_session_admitted_locked()) return false;
     refresh_projection_if_overwritten_locked();
     return runtime_state().objects.module_view_installed;
@@ -572,7 +573,7 @@ bool virtual_bag_sync_projected_bag() {
 // 由 SaveItem hook wrapper 在 backup 前调用：商店投影激活时先恢复投影
 // （容量字还原），让原版按真实容量入库。
 void virtual_bag_store_restore_for_original_write() {
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (store_module_view_installed_locked()) {
         VIRTBAG_LOG("store save gate: restore store module view before original write");
         store_restore_module_view_locked();

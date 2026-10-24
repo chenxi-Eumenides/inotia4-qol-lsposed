@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -44,7 +45,7 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
     int jewel_bag = -1;
     int jewel_slot = -1;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         if (!module_slot_of_item_locked(equip_item, &equip_bag, &equip_slot) ||
             !module_slot_of_item_locked(jewel_item, &jewel_bag, &jewel_slot) ||
@@ -59,7 +60,7 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
     if (result != 0) return result;
 
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         if (runtime_state().objects.module_objects[equip_bag][equip_slot] != equip_item ||
             runtime_state().objects.module_objects[jewel_bag][jewel_slot] != jewel_item) {
@@ -100,7 +101,7 @@ int virtual_bag_put_jewel_native(void* equip_item, void* jewel_item,
 bool virtual_bag_equip_projected_item(void* character, void* item, int source_bag, int source_slot,
                                       int equip_slot) {
     if (character == nullptr || item == nullptr) return false;
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_session_admitted_locked()) return false;
     if (!runtime_state().objects.module_view_installed || runtime_state().objects.module_view_index != source_bag) return false;
     if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.find_equip_slot == nullptr) return false;
@@ -118,7 +119,7 @@ bool virtual_bag_equip_projected_item(void* character, void* item, int source_ba
 
 bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
     if (needed <= 0) return true;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     int empty = 0;
     const int bag_count = include_task_bag != 0
@@ -138,7 +139,7 @@ bool virtual_bag_has_empty_slots(int needed, int include_task_bag) {
 
 bool virtual_bag_adopt_unequipped_item(void* character, int equip_slot) {
     if (character == nullptr || equip_slot < 0 || equip_slot >= kEquipSlotCount) return false;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_session_admitted_locked()) return false;
     if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.equipped_item == nullptr) return false;
     void* item = nullptr;
@@ -246,7 +247,7 @@ VirtualBagPlaceOutcome virtual_bag_place_native_item(const VirtualBagPlaceReques
     if (req.require_world && !read_world_in_world()) {
         return VirtualBagPlaceOutcome::kNotApplicable;
     }
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_session_admitted_locked()) return VirtualBagPlaceOutcome::kNotApplicable;
     int holder_bag = -1;
     int holder_slot = -1;
@@ -388,7 +389,7 @@ VirtualBagEquipButtonResult virtual_bag_handle_backpack_button_equip_result() {
     if (!runtime_state().enabled.load() || !read_world_in_world()) {
         return VirtualBagEquipButtonResult::kNotExtension;
     }
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     void* item = runtime_state().ui.extension_desc_item;
     // g_extension_desc_item 只在扩展物品详情被捕获；原版背包物品详情点装备
@@ -553,7 +554,7 @@ bool virtual_bag_handle_original_bag_unequip(bool* out_no_space, bool* out_not_e
     if (out_no_space != nullptr) *out_no_space = false;
     if (out_not_empty != nullptr) *out_not_empty = false;
     if (!runtime_state().enabled.load() || !read_world_in_world()) return false;
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     // Only the EB bag detail belongs to this plugin. Original bag unequip stays
     // entirely original; INVEN_SaveItem's wrapper performs the EB adoption when

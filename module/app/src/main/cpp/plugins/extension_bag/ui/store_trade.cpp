@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -92,7 +93,7 @@ int64_t store_button_sell_exe_wrapper() {
     int count = 0;
     bool module_item = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (runtime_state().store.view_installed && runtime_state().host.game != nullptr &&
             runtime_state().host.inventory_extras->read.cursor_item != nullptr) {
             void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
@@ -150,7 +151,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     bool reject = false;
     qol::store_sell::Plan plan{};
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (runtime_state().store.view_installed && runtime_state().host.game != nullptr &&
             runtime_state().host.inventory_extras->read.cursor_item != nullptr &&
             runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->sell_price != nullptr) {
@@ -218,7 +219,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     bool committed = false;
     bool whole = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         const bool current =
             virtual_bag::valid_index(bag) && slot >= 0 && slot < virtual_bag::kSlotCount &&
             runtime_state().objects.module_objects[bag][slot] == item &&
@@ -275,7 +276,7 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
         return StoreSaveSlotLookup::kError;
     }
 
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     const bool projected = runtime_state().store.view_installed;
     const int original_bag = runtime_state().store.window_original_bag;
     const uint64_t view_generation = runtime_state().store.view_generation;
@@ -369,6 +370,6 @@ uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
     }
     if (lookup == StoreSaveSlotLookup::kError) return 0;
     if (!runtime_state().enabled.load()) return 0;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     return store_extension_can_accept_item_locked(item) ? 1 : 0;
 }

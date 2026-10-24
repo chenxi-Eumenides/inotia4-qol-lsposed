@@ -194,7 +194,6 @@ struct ExtensionBagStoreState {
 };
 
 struct ExtensionBagRuntimeState {
-    std::mutex mtx;
     ExtensionBagHostPorts host{};
     ExtensionBagPersistenceState persistence{};
     ExtensionBagObjectState objects{};

@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -126,7 +127,7 @@ std::string data_op_extension_bag_set_bag_count(int count) {
 // 顺序铁律：先预检空袋再建对象（原版同序 b7f94→b7fa8），否则非空路径会把
 // 已入库物品滞留 g_inven 造成复制；转移成功后仅 persist 失败需回滚
 // （INVEN_RemoveItemDirect 返回值不可信 → 槽位重读确认后再真释放）。
-ExtensionBagUnequipResult unequip_extension_bag_locked(std::unique_lock<std::mutex>& lock,
+ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::ReentryLock& lock,
                                                        int internal_bag) {
     ensure_state_loaded_locked();
     if (runtime_state().objects.bag.capacities[internal_bag] == 0) {
@@ -371,6 +372,6 @@ std::string extension_bag_view_result_json_bridge(bool ok, const char* error) {
     return extension_bag_view_result_json(ok, error);
 }
 ExtensionBagUnequipResult unequip_extension_bag_locked_bridge(
-    std::unique_lock<std::mutex>& lock, int internal_bag) {
+    ::qol::extension_bag::ReentryLock& lock, int internal_bag) {
     return unequip_extension_bag_locked(lock, internal_bag);
 }

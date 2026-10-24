@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -67,7 +68,7 @@ namespace {
 void extension_sell_cancel(void*) {
     ExtensionDestroyOkFn original_cancel = nullptr;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         original_cancel = runtime_state().ui.extension_sell_original_cancel;
         restore_extension_desc_popup_callbacks_locked();
         reset_extension_desc_item_hooks_locked();
@@ -82,7 +83,7 @@ void extension_sell_cancel(void*) {
 void extension_destroy_cancel(void*) {
     ExtensionDestroyOkFn original_cancel = nullptr;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         original_cancel = runtime_state().ui.extension_destroy_original_cancel;
         restore_extension_desc_popup_callbacks_locked();
         reset_extension_desc_item_hooks_locked();
@@ -102,7 +103,7 @@ void extension_sell_ok(void*) {
     int64_t price = 0;
     bool apply_variant_discount = true;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         restore_extension_desc_popup_callbacks_locked();
         item = runtime_state().ui.extension_desc_item;
         bag = runtime_state().ui.extension_desc_item_bag;
@@ -173,13 +174,13 @@ void extension_sell_ok(void*) {
     if (price < 0 || !extension_bag_ui_add_money(price)) {
         VIRTBAG_LOG("extension sell money credit failed bag=%d slot=%d price=%lld", bag, slot,
                     static_cast<long long>(price));
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         clear_original_desc_locked();
         return;
     }
     bool removed = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         const bool current_item = runtime_state().ui.extension_desc_item == item &&
                                   runtime_state().ui.extension_desc_item_bag == bag &&
                                   runtime_state().ui.extension_desc_item_slot == slot &&
@@ -209,13 +210,13 @@ void extension_sell_ok(void*) {
         const bool refunded = extension_bag_ui_minus_money(price);
         VIRTBAG_LOG("extension sell remove failed bag=%d slot=%d price=%lld refunded=%d", bag,
                     slot, static_cast<long long>(price), refunded ? 1 : 0);
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         clear_original_desc_locked();
         return;
     }
 
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         reset_extension_desc_item_hooks_locked();
         runtime_state().ui.extension_desc_item = nullptr;
         runtime_state().ui.extension_desc_item_bag = -1;
@@ -231,7 +232,7 @@ void extension_destroy_ok(void*) {
     int committed_slot = -1;
     bool committed = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         restore_extension_desc_popup_callbacks_locked();
 
         const int bag = runtime_state().ui.extension_desc_item_bag;
@@ -364,7 +365,7 @@ bool extension_confirm_use_item(void* item) {
     int slot = -1;
     ModuleUseReleasePlan release_plan{};
     {
-        std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+        ::qol::extension_bag::TryReentryLock lock;
         if (!lock.owns_lock()) {
             QOL_LOG_INFO(QolDomain::kExtensionBag, "extension confirm-use lock busy item=%p", item);
             return false;
@@ -442,7 +443,7 @@ bool extension_confirm_use_item(void* item) {
                         bag, slot);
             return true;
         }
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!module_use_finalize_release_locked(release_plan)) {
             QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension confirm-use release finalize failed bag=%d slot=%d",
                         bag, slot);
@@ -450,7 +451,7 @@ bool extension_confirm_use_item(void* item) {
         }
     }
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         // native 释放和对象摘除完成后再刷新并清理详情控件，避免悬挂绑定。
         refresh_module_item_area_locked(bag);
         reset_extension_desc_item_hooks_locked();
@@ -475,7 +476,7 @@ bool extension_use_mercenary_seal() {
     void* item = nullptr;
     ModuleUseReleasePlan release_plan{};
     {
-        std::unique_lock<std::mutex> lock(runtime_state().mtx, std::try_to_lock);
+        ::qol::extension_bag::TryReentryLock lock;
         if (!lock.owns_lock()) {
             QOL_LOG_INFO(QolDomain::kExtensionBag, "extension mercenary-seal lock busy");
             return false;
@@ -531,7 +532,7 @@ bool extension_use_mercenary_seal() {
     int physical_slot = -1;
     bool physical_projected = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (runtime_state().objects.module_objects[bag][slot] != item ||
             !module_use_begin_locked(bag, slot, item, &use_token)) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal begin failed bag=%d slot=%d item=%p", bag, slot,
@@ -571,7 +572,7 @@ bool extension_use_mercenary_seal() {
     bool token_lost = false;
     bool make_failed = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (physical_projected &&
             !qol::contracts::succeeded(
                 extension_bag_write_api()->inventory.set_physical_item(
@@ -610,7 +611,7 @@ bool extension_use_mercenary_seal() {
                         slot);
             return true;
         }
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!module_use_finalize_release_locked(release_plan)) {
             QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension mercenary-seal release finalize failed bag=%d slot=%d", bag,
                         slot);
@@ -618,7 +619,7 @@ bool extension_use_mercenary_seal() {
         }
     }
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         // native 释放和对象摘除完成后再刷新并清理详情控件，避免悬挂绑定。
         refresh_module_item_area_locked(bag);
         reset_extension_desc_item_hooks_locked();
@@ -654,7 +655,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
     int item_bag = -1;
     int item_slot = -1;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         item = runtime_state().ui.extension_desc_item;
         item_bag = runtime_state().ui.extension_desc_item_bag;
         item_slot = runtime_state().ui.extension_desc_item_slot;
@@ -672,7 +673,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         void* leader = nullptr;
         bool closes_description = false;
         {
-            std::lock_guard<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
                            item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
                            runtime_state().objects.module_objects[item_bag][item_slot] == item;
@@ -703,7 +704,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
             used = extension_bag_ui_use_item(leader, item, 0, &use_result) && use_result != 0;
         }
         {
-            std::lock_guard<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             if (closes_description) {
                 if (used) refresh_module_item_area_locked(item_bag);
                 reset_extension_desc_item_hooks_locked();
@@ -741,7 +742,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         int64_t price = 0;
         bool valid = false;
         {
-            std::lock_guard<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             const int bag = runtime_state().ui.extension_desc_item_bag;
             const int slot = runtime_state().ui.extension_desc_item_slot;
             void* item = runtime_state().ui.extension_desc_item;
@@ -825,7 +826,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
             VIRTBAG_LOG("sell price reject reason=popup_unavailable source=equip valid=%d",
                         valid ? 1 : 0);
         }
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (popup_created) {
             reset_extension_desc_item_hooks_locked();
         } else {
@@ -840,7 +841,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
     }
     (void)extension_desc_call_original(id, button);
 
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (item == nullptr || !virtual_bag::valid_index(item_bag) ||
         item_slot < 0 || item_slot >= virtual_bag::kSlotCount ||
         runtime_state().objects.module_objects[item_bag][item_slot] != item) {

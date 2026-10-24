@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -97,7 +98,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     ModuleUseToken* previous_use_token = nullptr;
     ModuleUseReleasePlan release_plan{};
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         if (slot >= runtime_state().objects.bag.capacities[bag]) return op_err("slot beyond derived capacity");
         const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
@@ -141,7 +142,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         const bool save_ok = read_save_is_ok();
         const bool slot_ok = save_ok && read_has_empty_mercenary_slot();
         if (!save_ok || !slot_ok) {
-            std::lock_guard<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             module_use_abort_locked(use_token);
             return op_err(!save_ok ? "save busy" : "mercenary slots full");
         }
@@ -158,7 +159,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         g_active_module_use_token = previous_use_token;
     }
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         bool consumed = false;
         if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
             const bool marker_cleared = module_use_abort_locked(use_token);
@@ -172,14 +173,14 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (!module_use_release_native(release_plan)) {
             return op_err("extension item release failed");
         }
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!module_use_finalize_release_locked(release_plan)) {
             return op_err("extension item release finalize failed");
         }
     }
     if (!used) return op_err("on cooldown");
     if (closes_description) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         reset_extension_desc_item_hooks_locked();
         runtime_state().ui.extension_desc_item = nullptr;
         runtime_state().ui.extension_desc_item_bag = -1;
@@ -222,7 +223,7 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
     ModuleUseToken* previous_use_token = nullptr;
     ModuleUseReleasePlan release_plan{};
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         if (slot >= runtime_state().objects.bag.capacities[bag]) {
             return extension_put_jewel_error("slot beyond derived capacity");
@@ -269,13 +270,13 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
             runtime_state().host.write_port->equipment.put_jewel(equip, jewel, &result));
     g_active_module_use_token = previous_use_token;
     if (!put_jewel_succeeded) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         (void)module_use_abort_locked(use_token);
         return extension_put_jewel_error("put jewel unavailable");
     }
 
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         bool consumed = false;
         if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
             const bool marker_cleared = module_use_abort_locked(use_token);
@@ -308,7 +309,7 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
         if (!module_use_release_native(release_plan)) {
             return extension_put_jewel_error("extension jewel release failed");
         }
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!module_use_finalize_release_locked(release_plan)) {
             return extension_put_jewel_error("extension jewel release finalize failed");
         }

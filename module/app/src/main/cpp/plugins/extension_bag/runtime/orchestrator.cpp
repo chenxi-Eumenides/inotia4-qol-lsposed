@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/transaction/transaction_coordinator.h"
 
@@ -39,7 +40,7 @@ internal.h"
 #include <thread>
 #include <unistd.h>
 
-bool remove_item_direct_unlocked(std::unique_lock<std::mutex>& lock, int bag, int slot,
+bool remove_item_direct_unlocked(::qol::extension_bag::ReentryLock& lock, int bag, int slot,
                                  void* expected_item, const char* context) {
     if (!lock.owns_lock() || extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->inventory.remove_item_direct == nullptr ||
@@ -284,7 +285,7 @@ int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected
         expected, handles.data(), handles.size());
 }
 
-void recover_pending_transaction_locked(std::unique_lock<std::mutex>& lock) {
+void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock) {
     const virtual_bag::PendingTransfer pending = runtime_state().objects.bag.pending;
     if (!pending.valid) return;
     if (!virtual_bag::valid_pending_transfer_domain(pending)) {

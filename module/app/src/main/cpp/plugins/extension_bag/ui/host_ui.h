@@ -1,14 +1,15 @@
 #pragma once
 
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 // Forward declarations keep the host UI surface independent of the common umbrella.
 enum class ExtensionBagEquipResult;
 enum class ExtensionBagUnequipResult;
 void* extension_menu_character();
-ExtensionBagEquipResult equip_extension_bag_item_locked(std::unique_lock<std::mutex>& lock,
+ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::ReentryLock& lock,
                                                           int internal_bag, void* item);
-bool equip_module_item_on_character_locked(std::unique_lock<std::mutex>& lock,
+bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lock,
                                             void* character, void* item, int source_bag,
                                             int source_slot);
 void finish_extension_equip_ui_locked(int internal_bag, void* moving_control);
@@ -39,9 +40,9 @@ bool extension_bag_ui_read_has_empty_mercenary_slot();
 void extension_bag_ui_play_switch_sound();
 bool extension_apply_stuff(void* target_item, void* material);
 ExtensionBagUnequipResult unequip_extension_bag_locked_bridge(
-    std::unique_lock<std::mutex>& lock, int internal_bag);
+    ::qol::extension_bag::ReentryLock& lock, int internal_bag);
 ExtensionBagUnequipResult unequip_extension_bag_locked(
-    std::unique_lock<std::mutex>& lock, int internal_bag);
+    ::qol::extension_bag::ReentryLock& lock, int internal_bag);
 bool store_module_view_installed_locked();
 void store_teardown_locked();
 void store_restore_module_view_locked();

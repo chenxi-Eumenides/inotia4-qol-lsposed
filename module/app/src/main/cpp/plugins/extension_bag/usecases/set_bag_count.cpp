@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/usecases/set_bag_count.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
@@ -37,7 +38,7 @@ std::string usecase_set_bag_count(int count) {
     if (count < 1 || count > virtual_bag::kMaxExtensionBags) {
         return op_err("count required (1-8)");
     }
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     if (!extension_bag_ready_locked_bridge()) return extension_bag_not_ready_error_locked_bridge();
     auto& state = runtime_state().objects.bag;

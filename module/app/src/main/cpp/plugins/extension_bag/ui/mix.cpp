@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -311,7 +312,7 @@ void mix_install_tab_buttons_locked() {
 
 uint64_t mix_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
     if (event == 0x02) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) return 1;
         const int index = mix_tab_index(ctrl);
         if (index >= 0 && mix_tab_generation != 0) {
@@ -363,7 +364,7 @@ void mix_request_item_refresh_locked() {
 }
 
 void mix_refresh_item_after_unlock() {
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!mix_refresh_pending) return;
     const uint64_t refresh_generation = mix_refresh_generation;
     const uint64_t view_generation = mix_view_generation;
@@ -523,7 +524,7 @@ uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
     if ((event == 0x17 || event == 0x18) && param != 0) {
         const int64_t x = *reinterpret_cast<const int64_t*>(param);
         const int64_t y = *reinterpret_cast<const int64_t*>(param + 8);
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (mix_view_installed) {
             original_bag_target = mix_original_bag_button_index_locked(x, y);
         }
@@ -537,7 +538,7 @@ uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
                                       runtime_state().ui.mix_original_event(event, param, param2))
                                 : 0;
     if (original_bag_target >= 0) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (mix_view_installed) {
             // The original event may return before it writes the shared current
             // bag. Pin the clicked original bag before restoring, otherwise the
@@ -555,7 +556,7 @@ void mix_enter_wrapper() {
         {"own:popup.mix"});
     if (runtime_state().ui.mix_original_enter != nullptr) runtime_state().ui.mix_original_enter();
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         mix_teardown_locked();
         // Enter 时面板处于 state 0（配方菜单，原版尚未画背包列）；页签等 state!=0 的
@@ -571,7 +572,7 @@ void mix_f3_wrapper() {
         {"own:popup.mix"});
     MixSceneNoArgFn original = nullptr;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         mix_teardown_locked();
         mix_frame_active = false;
         original = runtime_state().ui.mix_original_f3;
@@ -628,7 +629,7 @@ void mix_draw_end_wrapper() {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_MIX_DRAW_END"});
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (mix_frame_active) {
             const int mix_state = mix_state_locked();
             static int last_mix_state = -2;
@@ -698,7 +699,7 @@ void mix_draw_inven_bag_group_wrapper() {
         runtime_state().host.write_port->ui.draw_original_mix_bag_group == nullptr ||
         runtime_state().host.write_port->ui.current_bag == nullptr ||
         runtime_state().host.write_port->ui.set_current_bag == nullptr) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     int32_t saved_current = 0;
     bool masked = false;
     if (mix_view_installed &&

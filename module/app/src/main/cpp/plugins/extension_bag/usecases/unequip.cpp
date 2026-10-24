@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/usecases/unequip.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
@@ -20,7 +21,7 @@ std::string unequip_bag(int logical_bag) {
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
     ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
     {
-        std::unique_lock<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
             return extension_bag_not_ready_error_locked_bridge();
         }

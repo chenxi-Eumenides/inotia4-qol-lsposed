@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/runtime/inventory_access.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/plugin.h"
@@ -160,7 +161,7 @@ int virtual_bag_inventory_state_id() {
     // g_state_entry is panel-local state; world lifecycle cleanup uses world_facts separately.
     // The explicit state access is equivalent to std::lock_guard<std::mutex> lock(g_virtual_bag_mtx),
     // g_state_entry == nullptr, and *reinterpret_cast<int32_t*>(g_state_entry).
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (runtime_state().persistence.state_entry == nullptr) return -1;
     return *reinterpret_cast<int32_t*>(runtime_state().persistence.state_entry);
 }

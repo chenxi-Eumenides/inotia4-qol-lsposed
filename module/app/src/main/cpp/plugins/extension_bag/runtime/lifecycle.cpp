@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/logging.h"
@@ -73,7 +74,7 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
 
     bool session_has_projected_item = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         session_has_projected_item = projected_drag_session_active_locked();
     }
     // Only a release (0x18) can commit INVEN_MoveItem. Press/move events (0x17/
@@ -87,7 +88,7 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     int source_bag = -1;
     int source_slot = -1;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         source_bag = runtime_state().ui.extension_drag_session.source_bag;
         source_slot = runtime_state().ui.extension_drag_session.source_slot;
         before = capture_physical_inventory_snapshot_locked();
@@ -97,7 +98,7 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     const uint64_t result = runtime_state().persistence.orig_event(event, param, param2);
     bool restored = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         const PhysicalInventorySnapshot after = capture_physical_inventory_snapshot_locked();
         log_original_event_inventory_snapshot("post", event, session_has_projected_item,
                                               source_bag, source_slot, after);
@@ -127,7 +128,7 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     return result;
 }
 
-bool consume_projected_release_locked(std::unique_lock<std::mutex>& lock, int64_t x, int64_t y) {
+bool consume_projected_release_locked(::qol::extension_bag::ReentryLock& lock, int64_t x, int64_t y) {
     if (!projected_drag_session_active_locked()) return false;
     auto& session = runtime_state().ui.extension_drag_session;
     if (session.phase == virtual_bag::DragPhase::kCommitted ||
@@ -166,12 +167,12 @@ bool consume_projected_release_locked(std::unique_lock<std::mutex>& lock, int64_
 uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     bool session_admitted = false;
     if (p5_panel_observation_enabled()) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         log_p5_observation_locked("panel-entry", nullptr, event, param2 != 0, param != 0,
                                   nullptr, false, 0);
         session_admitted = extension_bag_session_admitted_locked();
     } else {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         session_admitted = extension_bag_session_admitted_locked();
     }
     // Slot-data admission gates every extension mutation; rejected sessions only delegate.
@@ -193,7 +194,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             int64_t release_x = 0;
             int64_t release_y = 0;
             {
-                std::lock_guard<std::mutex> lock(runtime_state().mtx);
+                ::qol::extension_bag::ReentryLock lock;
                 if (projected_drag_session_active_locked()) {
                     if (param != 0) {
                         release_x = *reinterpret_cast<const int64_t*>(param);
@@ -223,7 +224,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         }
         const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
         if (p5_panel_observation_enabled()) {
-            std::unique_lock<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             log_p5_observation_locked("panel-bypass-post", nullptr, event, param2 != 0,
                                       param != 0, nullptr, true, result);
         }
@@ -235,7 +236,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     if (event == 0x17 && param != 0) {
         x = *reinterpret_cast<const int64_t*>(param);
         y = *reinterpret_cast<const int64_t*>(param + 8);
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         log_exit_trace_locked("event_enter", event, param, param2, x, y);
         const int64_t grid_width = 4 * kGridStep - (kGridStep - kGridCell);
@@ -317,7 +318,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         bool release_cleanup_needed = false;
         bool release_cleanup_handled = false;
         {
-            std::unique_lock<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             ensure_state_loaded_locked();
             log_exit_trace_locked("event_release", event, param, param2, x, y);
         if (virtual_bag::projected_release_owns_event(
@@ -398,7 +399,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             void* drop_source = nullptr;
             (void)extension_bag_ui_touch_state(&moving, &drop_source, &x, &y);
         }
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         if (runtime_state().ui.extension_touch_capture) {
             // 0x19 is the native MOVE event. Keep the source and capture
@@ -413,7 +414,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         }
     }
     if (runtime_state().ui.extension_touch_capture && event != 0x17 && event != 0x18 && event != 0x19) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         runtime_state().ui.extension_drag = {};
         runtime_state().ui.extension_touch_capture = false;
         reset_drag_state_locked(nullptr);
@@ -425,20 +426,20 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     if (runtime_state().ui.extension_touch_capture) {
         // Consume every event in the captured sequence, not only release and cancel.
         if (p5_panel_observation_enabled()) {
-            std::lock_guard<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             log_p5_observation_locked("panel-capture-consume", nullptr, event, param2 != 0,
                                       param != 0, nullptr, true, 1, x, y);
         }
         return 1;
     }
     if (event != 0x17) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         log_exit_trace_locked("event_enter", event, param, param2);
     }
     if (exiting_to_original) {
         const uint64_t original_result = call_original_event_with_inventory_guard(event, param, param2);
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         log_exit_trace_locked("original_press_post_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-original-post", nullptr, event, param2 != 0,
@@ -446,7 +447,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         return original_result;
     }
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         log_exit_trace_locked("delegate_pre_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-delegate-pre", nullptr, event, param2 != 0,
@@ -454,7 +455,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     }
     const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
         log_exit_trace_locked("delegate_post_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-delegate-post", nullptr, event, param2 != 0,
@@ -477,8 +478,10 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                         virtual_bag_call_original_refresh_item_area_with_guard();
                     }
                     virtual_bag::enter_original(&runtime_state().objects.bag, raw_bag);
+                    extension_bag_mark_dirty_locked();
                 } else {
                     virtual_bag::enter_original(&runtime_state().objects.bag, 0);
+                    extension_bag_mark_dirty_locked();
                 }
                 persist_state_locked();
                 runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
@@ -504,6 +507,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                 virtual_bag_call_original_refresh_item_area_with_guard();
             }
             virtual_bag::enter_original(&runtime_state().objects.bag, selected_original_bag);
+            extension_bag_mark_dirty_locked();
             persist_state_locked();
             runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
         } else if (event == 0x17 || event == 0x18) {
@@ -533,7 +537,7 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
         runtime_state().lifecycle_last_state, world_state, true,
         runtime_state().main_menu_cleanup_dirty.load(std::memory_order_acquire));
     if (due) {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) {
             // An unloaded or degraded slot is not an empty inventory that may be reset.
             runtime_state().main_menu_cleanup_dirty.store(false, std::memory_order_release);
@@ -548,14 +552,14 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
     // 进档后尽早装载 sidecar 状态：快捷栏/物品数量查询走 EB 扫描，若等到打开
     // 背包面板才装载，进档后到首次开包前的数量会显示为 0。
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (extension_bag_session_admitted_locked()) ensure_state_loaded_locked();
     }
     uint64_t shortcut_revision = 0;
     const qol::contracts::QolHostSdk* sdk = nullptr;
     bool refresh_shortcut = false;
     {
-        std::lock_guard<std::mutex> lock(runtime_state().mtx);
+        ::qol::extension_bag::ReentryLock lock;
         if (world_state == 5 && extension_bag_session_admitted_locked()) {
             shortcut_revision = extension_bag_item_revision_locked();
             refresh_shortcut = runtime_state().persistence.shortcut_refreshed_revision !=
@@ -575,7 +579,7 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
             : nullptr;
         if (refresh != nullptr && refresh->update_shortcut != nullptr) {
             refresh->update_shortcut();
-            std::lock_guard<std::mutex> lock(runtime_state().mtx);
+            ::qol::extension_bag::ReentryLock lock;
             if (extension_bag_session_admitted_locked() &&
                 extension_bag_item_revision_locked() == shortcut_revision) {
                 runtime_state().persistence.shortcut_refreshed_revision =

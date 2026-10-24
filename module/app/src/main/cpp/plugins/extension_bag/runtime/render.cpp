@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/logging.h"
@@ -213,7 +214,7 @@ void virtual_bag_draw_original_bag_wrapper() {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_INVEN_BAG_DRAW"});
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.draw_original_bag == nullptr) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     ensure_state_loaded_locked();
     const bool module_view = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
                              virtual_bag::valid_index(runtime_state().objects.bag.selected);
@@ -268,7 +269,7 @@ void virtual_bag_draw_inven_item_wrapper() {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_INVEN_ITEM_DRAW"});
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.draw_original_items == nullptr) return;
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(runtime_state().objects.bag.selected)) {
         if (runtime_state().objects.module_view_installed) {
@@ -301,7 +302,7 @@ void virtual_bag_draw_inven_item_wrapper() {
         (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
     }
 }
-void virtual_bag_draw_end_locked(int inventory_state, std::unique_lock<std::mutex>& lock) {
+void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::ReentryLock& lock) {
     static int previous_state = -1;
     const int old_state = previous_state;
     if (old_state != inventory_state) {
@@ -403,7 +404,7 @@ void virtual_bag_draw_end_wrapper() {
     // Read the panel-owned state before acquiring the runtime lock, then pass an unlockable
     // lock to pending-tab commit so UI callbacks run outside the critical section.
     const int inventory_state = virtual_bag_inventory_state_id();
-    std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     // 主线程绘制收尾：revision 变化时刷新轻量快照，读侧无需再加锁。
     qol::extension_bag::publish_bag_snapshot_if_changed();
     virtual_bag_draw_end_locked(inventory_state, lock);

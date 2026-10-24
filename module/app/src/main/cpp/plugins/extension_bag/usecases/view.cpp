@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/usecases/view.h"
+#include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
@@ -12,7 +13,7 @@ std::string enter_view(int logical_bag) {
     if (!extension_bag_ready_locked_bridge()) return extension_bag_not_ready_error_locked_bridge();
     const int internal_bag = extension_internal_bag_bridge(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
         return extension_bag_not_ready_error_locked_bridge();
     }
@@ -33,7 +34,7 @@ std::string enter_view(int logical_bag) {
 
 std::string exit_view() {
     if (!extension_bag_ready_locked_bridge()) return extension_bag_not_ready_error_locked_bridge();
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
         return extension_bag_not_ready_error_locked_bridge();
     }
@@ -68,7 +69,7 @@ std::string select_bag(int logical_bag) {
     if (!extension_bag_ready_locked_bridge()) return extension_bag_not_ready_error_locked_bridge();
     const int internal_bag = extension_internal_bag_bridge(logical_bag);
     if (internal_bag < 0) return op_err("bad extension bag (6-10)");
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
+    ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
         return extension_bag_not_ready_error_locked_bridge();
     }
