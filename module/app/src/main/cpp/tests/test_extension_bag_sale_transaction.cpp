@@ -100,10 +100,10 @@ struct Harness {
     std::thread::id use_owner{};
     bool dirty = false;
     std::atomic<uint64_t> revision{9};
-    std::array<int, virtual_bag::kBagCount * virtual_bag::kSlotCount> categories{};
-    std::array<uint32_t, virtual_bag::kBagCount * virtual_bag::kSlotCount> hashes{};
-    std::array<void*, virtual_bag::kBagCount * virtual_bag::kSlotCount> objects{};
-    std::array<uint32_t, virtual_bag::kBagCount * virtual_bag::kSlotCount> handles{};
+    std::array<int, virtual_bag::kMaxExtensionBags * virtual_bag::kSlotCount> categories{};
+    std::array<uint32_t, virtual_bag::kMaxExtensionBags * virtual_bag::kSlotCount> hashes{};
+    std::array<void*, virtual_bag::kMaxExtensionBags * virtual_bag::kSlotCount> objects{};
+    std::array<uint32_t, virtual_bag::kMaxExtensionBags * virtual_bag::kSlotCount> handles{};
     FakeRelease release{};
     FakeProjection projection{};
     CallbackContext callback_context{&projection, &release};

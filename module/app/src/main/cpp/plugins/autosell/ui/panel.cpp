@@ -177,6 +177,19 @@ void* g_category_buttons[kSpecialCount]{};
 void* g_arrows[kRuleCount][2]{};
 bool g_toggle_pressed = false;
 
+// 面板打开只能经 core.custom_ui 发布的 `ui_panels` 能力：容器负责 popup 栈、PopupHost
+// 回调与「组件回调内延迟到帧泵」保护。Host SDK 的 `panels.open` 只是注册表原始
+// `provider->open()`，不建面板也不推进 popup 状态。
+const qol::contracts::UiPanelsApi* autosell_panels_api() {
+    const auto* sdk = host_sdk();
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    if (sdk->capabilities.require(qol::contracts::kUiPanelsCapabilityId,
+            {qol::contracts::kUiPanelsVersionMajor, qol::contracts::kUiPanelsVersionMinor},
+            &iface).ok != kQolOk) return nullptr;
+    return static_cast<const qol::contracts::UiPanelsApi*>(iface);
+}
+
 const qol::contracts::QolUiComponents* autosell_components() {
     if (g_ui_components != nullptr) return g_ui_components;
     const auto* sdk = host_sdk();
@@ -375,10 +388,9 @@ void autosell_save_before_back(void*) { autosell_commit_draft(); }
 
 void autosell_entry_clicked(void* ctrl) {
     (void)ctrl;
-    const auto* sdk = host_sdk();
-    if (sdk == nullptr || sdk->panels.open == nullptr ||
-        sdk->panels.open("autosell").ok != kQolOk) {
-        AUTOSELLUI_LOG("entry click rejected: host panel open failed");
+    const auto* panels = autosell_panels_api();
+    if (panels == nullptr || panels->open == nullptr || !panels->open("autosell")) {
+        AUTOSELLUI_LOG("entry click rejected: ui_panels open failed");
     }
 }
 

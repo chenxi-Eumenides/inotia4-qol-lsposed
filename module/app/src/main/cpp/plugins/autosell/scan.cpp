@@ -17,12 +17,12 @@
 #include <cstdint>
 #include <cstring>
 #include <mutex>
+#include <unordered_map>
 
 namespace {
 
 constexpr int kLastPhysicalBag = 4;      // 原版任务袋 5 排除
 constexpr int kLogicalBagScanFirst = 6;  // = kExtensionLogicalBagFirst
-constexpr int kLogicalBagScanCount = 5;  // = kBagCount
 constexpr int kSlotCount = 16;
 
 std::mutex g_task_mtx;
@@ -169,8 +169,7 @@ struct LastCandidateDiagnostic {
     uint64_t fingerprint = 0;
 };
 
-std::array<std::array<LastCandidateDiagnostic, kSlotCount>, kLogicalBagScanCount>
-    g_last_candidate_diagnostics{};
+std::unordered_map<uint32_t, LastCandidateDiagnostic> g_last_candidate_diagnostics{};
 
 bool diagnostic_debug_enabled() {
     const auto* sdk = qol::features::autosell::host_sdk();
@@ -264,9 +263,8 @@ void emit_candidate_diagnostic(int64_t frame, int bag, int slot,
                                const autosell::Config& cfg,
                                const CandidateDiagnostics& diagnostic) {
     if (!diagnostic_debug_enabled()) return;
-    const size_t bag_index = static_cast<size_t>(bag - kLogicalBagScanFirst);
-    const size_t slot_index = static_cast<size_t>(slot);
-    LastCandidateDiagnostic& previous = g_last_candidate_diagnostics[bag_index][slot_index];
+    const uint32_t key = static_cast<uint32_t>(bag * kSlotCount + slot);
+    LastCandidateDiagnostic& previous = g_last_candidate_diagnostics[key];
     const uint64_t fingerprint = candidate_fingerprint(diagnostic, cfg);
     if (previous.emitted && previous.fingerprint == fingerprint) return;
     previous = {true, fingerprint};
@@ -451,7 +449,7 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
 void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
     if (scan_round_cancelled(round)) return;
     if (g_reset_diagnostic_cache.exchange(false, std::memory_order_relaxed)) {
-        g_last_candidate_diagnostics = {};
+        g_last_candidate_diagnostics.clear();
     }
     ScanStats stats;
     PhysicalScanCtx physical{&cfg, &stats, &round};
@@ -478,14 +476,13 @@ void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
     ExtensionApiLookup eb_lookup{};
     if (!scan_round_cancelled(round)) eb_lookup = extension_bag_api_lookup();
     const auto* eb = eb_lookup.api;
-    for (int bag = kLogicalBagScanFirst;
-         bag < kLogicalBagScanFirst + kLogicalBagScanCount && !scan_round_cancelled(round);
-         ++bag) {
+    for (int bag = kLogicalBagScanFirst; !scan_round_cancelled(round); ++bag) {
         int logical_bag = -1;
         const bool logical_callback = eb != nullptr && eb->is_logical_bag != nullptr;
         if (eb != nullptr && eb->is_logical_bag != nullptr) {
             logical_bag = eb->is_logical_bag(bag) ? 1 : 0;
         }
+        if (logical_bag != 1) break;
         for (int slot = 0; slot < kSlotCount; ++slot) {
             if (scan_round_cancelled(round)) break;
             CandidateDiagnostics diagnostic{};
