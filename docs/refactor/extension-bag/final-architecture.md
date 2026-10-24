@@ -116,22 +116,25 @@ UI 控件 ─────────────▶ EntryGuard → usecases / l
 | `usecases/*` | 校验 → 事务 → 刷新 | 控件、JSON |
 | `entry_guard` / `reentry_lock` | 主线程与重入策略 | 跨线程同步 |
 
-## 6. 与目标架构的差距
+## 6. 分层完成度
 
 | 项 | 状态 |
 |---|---|
-| 命令编组、查询快照 | 完成（Step 1–2） |
-| 用例层承接全部命令 | 完成（Step 3） |
-| 数据层组件 | 组件已存在；L4 统一经 `interface/state_access.h` |
-| 业务互斥量 | 已删除，改为重入锁（Step 5） |
-| 宏桥/聚合头 | 已删除 34 个宏；`extension_bag_internal.h` 仍被部分文件包含 |
-| 安装/恢复迁移 | 待办（P3c，依赖 OwnershipManager） |
+| 命令编组、查询快照 | 完成 |
+| 用例层承接全部命令 | 完成 |
+| L4 访问收口（api/public/ui） | 完成：`interface/state_access.h`，直接 `runtime_state()` 为 0 |
+| 聚合头与宏桥 | 完成：`extension_bag_internal.h` 已删除，包含数为 0；orchestrator/tabs_ui 宏桥已移除 |
+| 业务互斥量 | 完成：删除 `mtx`，改为 `ReentryLock`/`TryReentryLock` |
+| 投影状态 | `projection_controller.*`（L1） |
+| 投影安装/恢复 | `runtime/projection.cpp`（L2 投影适配层），与状态端口分离 |
+| 所有权 / 拖拽 / 页签 / 生命周期 | 独立文件：`runtime/ownership.*`、`runtime/drag_session.*`、`runtime/tabs.*`、`runtime/lifecycle.*` |
+| 事务 | `transaction/transaction_coordinator.*` + 方向实现 |
+| 持久化 | `persistence/*`，sidecar v5 |
+| 数据驱动 | `model/bag_catalog.*` 生成表 + `State.bag_count` |
 
-L4 直接引用统计：迁移前 935；经 `state_access` 收口后为 0。该访问器当前返回
-live 引用（主线程契约），后续只读页面可替换为 `bag_query` 快照。
-
-10000 袋的可行优化（稀疏存储、分层快照、分片持久化）见 `optimizations.md`，
-本轮只记录、不实施。
+不存在“待迁移的安装/恢复”项：安装/恢复属于 L2 投影适配层，状态端口属于 L1，
+依赖方向正确。10000 袋的存储/快照/持久化优化见 `optimizations.md`，属于性能演进，
+不属于分层债。
 
 ## 7. 验证
 

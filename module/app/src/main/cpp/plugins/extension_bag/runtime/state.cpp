@@ -1,4 +1,6 @@
-#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/ownership.h"
+#include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/bag_state_store.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"

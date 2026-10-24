@@ -1,9 +1,9 @@
 #include "plugins/extension_bag/runtime/projection_controller.h"
 
 #include "plugins/extension_bag/extension_bag_geometry.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/projection.h"
 
 bool bag_size_word_locked(int bag, uint32_t* out_word) {
     return runtime_state().host.game != nullptr &&

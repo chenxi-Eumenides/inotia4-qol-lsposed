@@ -1,12 +1,13 @@
 #include "plugins/extension_bag/runtime/item_access.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/tabs.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 
 #include <cstdint>

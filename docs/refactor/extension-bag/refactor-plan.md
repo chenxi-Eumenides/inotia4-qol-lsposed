@@ -83,7 +83,7 @@ L0 模型层    model/*（纯数据、规则、状态机；无原生、无 IO、
 | L0 | 无 |
 
 禁止：
-- `extension_bag_internal.h` 全量聚合头（新代码不得包含；存量按阶段清理）。
+- 插件级全量聚合头（新代码不得包含；存量按阶段清理）。
 - `#define <name> <name>_internal/_bridge` 宏桥。
 - L1/L2 直接包含 `ui/` 头；UI 只能通过用例层。
 
@@ -216,7 +216,7 @@ int extension_logical_last();   // 6 + active - 1
 | `ui/*.cpp` | `ui_pages/*`（页面适配）+ 用例调用 |
 | `public/status.cpp` | 拆成 `queries.*`（快照 JSON）与 `usecases/unequip.*` |
 | `api/api_impl.cpp` | `commands.*`（参数校验 + 用例） |
-| `extension_bag_internal.h` | 删除；按层拆窄头文件 |
+| 插件级全量聚合头 | 删除；按层拆窄头文件 |
 
 ## 7. 分阶段计划
 
@@ -268,9 +268,9 @@ int extension_logical_last();   // 6 + active - 1
 ### P5 用例层 + 接口收口（命令层完成）
 
 - 已新增 `usecases/`（view/item/unequip/move/set_bag_count）；`api_impl` 只保留薄委托。
-- 已删除 orchestrator 34 个宏桥；`extension_bag_internal.h` 仍被部分 ui/public 文件包含。
-- 剩余：`ui/` 485 处、`public/` 304 处直接 `runtime_state()` 引用，需按页面迁到
-  `bag_query`/用例；`pipeline` 安装/恢复随 P3c 迁移。
+- 已删除 orchestrator 34 个宏桥；插件级全量聚合头已删除，存量 include 已替换为窄头。
+- `api`/`public`/`ui` 已统一经 `interface/state_access.h`，L4 直接 `runtime_state()` 为 0。
+- 只读页面后续可替换为 `bag_query` 快照；当前主线程 live 访问符合契约。
 - 验收：HTTP 命令与接口已通过；UI 面板/详情/出售/合成路径待迁移验收。
 
 ### P6 删除互斥量与线程字段（已完成）
@@ -285,7 +285,7 @@ int extension_logical_last();   // 6 + active - 1
 在 `scripts/maintenance/check_arch.py` 增加 extension_bag 局部规则：
 1. `model/` 不得包含 `runtime/`、`ui/`、`public/`。
 2. `runtime/` 不得包含 `ui/`、`api/`。
-3. 禁止新增 `#include "plugins/extension_bag/extension_bag_internal.h"`。
+3. 禁止新增插件级全量聚合头 include。
 4. 禁止 `#define <ident> <ident>_internal/_bridge` 形态的宏桥。
 5. 新增 `std::mutex` 在 extension_bag 内直接失败（P6 后）。
 6. `model/` 与业务代码禁止出现字面量 `kMaxExtensionBags`/`5` 作为扩展袋数量；统一走 catalog。
@@ -319,7 +319,7 @@ int extension_logical_last();   // 6 + active - 1
 
 1. L1 六个组件有独立头文件、窄接口与单测。
 2. `api/`、`ui/` 不直接访问 `runtime_state()`；全部经用例层。
-3. `extension_bag_internal.h` 与宏桥为零。
+3. 插件级全量聚合头与宏桥为零。
 4. extension_bag 内无 `std::mutex`，入口统一 `EntryGuard` + 主线程断言。
 5. 扩展袋数量由 catalog + 设置驱动：业务代码无 `kMaxExtensionBags` 字面量；1/5/8 袋均通过 Host 与真机验收。
 6. sidecar v5 迁移可回退；缩小数量在非空时 fail-closed。

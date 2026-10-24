@@ -2,21 +2,10 @@
 
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
+#include "plugins/extension_bag/runtime/drag_session.h"
 
 int extension_tab_index(void* ctrl);
 void refresh_tab_bag_items_locked();
-void begin_projected_drag_session_locked(int source_slot);
-void advance_projected_drag_session_locked();
-bool projected_drag_session_active_locked();
-void cancel_projected_drag_session_locked(const char* reason);
-void* touch_moving_item_control_locked();
-void reset_drag_state_locked(void* moving_control);
-void clear_stale_projected_moving_locked();
-void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_x, int64_t rel_y,
-                                              uint64_t release_param2, bool handled);
-void clear_original_item_selection_locked();
-int original_item_category_locked(void* item);
-int drag_source_category_locked();
 void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock);
 void reset_extension_desc_unequip_hook_locked();
 void reset_extension_desc_item_hooks_locked();

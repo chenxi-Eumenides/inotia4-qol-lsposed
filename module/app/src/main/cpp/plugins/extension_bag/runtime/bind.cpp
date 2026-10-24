@@ -1,5 +1,5 @@
 #include "plugins/extension_bag/extension_bag_bridge.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/state.h"
 
 #include <cstddef>
 

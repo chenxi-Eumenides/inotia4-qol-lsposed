@@ -2,7 +2,8 @@
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/ui/host_ui.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/runtime/shared.h"
 

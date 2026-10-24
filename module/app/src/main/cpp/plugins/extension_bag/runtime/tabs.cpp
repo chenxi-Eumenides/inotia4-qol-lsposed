@@ -1,4 +1,6 @@
-#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/tabs.h"
 
 #include "plugins/extension_bag/runtime/logging.h"
 

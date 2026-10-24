@@ -1,4 +1,12 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/transaction/transaction.h"
+#include "plugins/extension_bag/runtime/ownership.h"
+#include "plugins/extension_bag/runtime/lifecycle.h"
+#include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/ui/host_ui.h"
+#include "plugins/extension_bag/runtime/tabs.h"
+#include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/transaction/transaction_coordinator.h"
@@ -25,8 +33,6 @@
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
-#include "plugins/extension_bag/extension_bag_\
-internal.h"
 #include "plugins/extension_bag/runtime/projection.h"
 
 #include <atomic>

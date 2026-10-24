@@ -1,6 +1,6 @@
 #include "contracts/move_merge.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/assembly/move_merge.h"

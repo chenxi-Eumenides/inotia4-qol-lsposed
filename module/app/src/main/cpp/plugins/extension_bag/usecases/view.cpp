@@ -2,7 +2,10 @@
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/lifecycle.h"
+#include "plugins/extension_bag/runtime/projection.h"
+#include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/tabs.h"
 #include "plugins/extension_bag/runtime/shared.h"
 
 #include <mutex>
