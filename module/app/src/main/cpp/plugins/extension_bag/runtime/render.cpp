@@ -392,5 +392,7 @@ void virtual_bag_draw_end_wrapper() {
     // lock to pending-tab commit so UI callbacks run outside the critical section.
     const int inventory_state = virtual_bag_inventory_state_id();
     std::unique_lock<std::mutex> lock(runtime_state().mtx);
+    // 主线程绘制收尾：revision 变化时刷新轻量快照，读侧无需再加锁。
+    qol::extension_bag::publish_bag_snapshot_if_changed();
     virtual_bag_draw_end_locked(inventory_state, lock);
 }

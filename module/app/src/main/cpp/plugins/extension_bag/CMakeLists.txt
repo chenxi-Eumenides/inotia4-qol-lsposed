@@ -1,6 +1,7 @@
 add_library(qol_plugin_extension_bag STATIC
     runtime/state.cpp
     runtime/entry_guard.cpp
+    runtime/bag_state_store.cpp
     runtime/access.cpp
     runtime/tabs_ui.cpp
     runtime/orchestrator.cpp

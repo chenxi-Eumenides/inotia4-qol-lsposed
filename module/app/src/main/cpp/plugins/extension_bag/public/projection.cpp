@@ -23,6 +23,7 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
+#include "plugins/extension_bag/runtime/bag_state_store.h"
 
 #include <atomic>
 #include <chrono>
@@ -461,6 +462,8 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     return VirtualBagProjectionDropResult::kRejected;
 }
 bool virtual_bag_module_view_installed() {
+    qol::extension_bag::BagSnapshot snapshot{};
+    if (qol::extension_bag::bag_snapshot(&snapshot)) return snapshot.module_view_installed;
     std::lock_guard<std::mutex> lock(runtime_state().mtx);
     return runtime_state().objects.module_view_installed;
 }

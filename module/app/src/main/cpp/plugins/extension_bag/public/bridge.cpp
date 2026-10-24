@@ -24,6 +24,7 @@
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
+#include "plugins/extension_bag/runtime/bag_state_store.h"
 
 #include <array>
 #include <atomic>
@@ -306,10 +307,15 @@ bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
         !runtime_state().enabled.load() || !read_world_in_world()) {
         return false;
     }
-    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     if (!extension_bag_session_admitted_locked()) return false;
     const int internal_bag = virtual_bag::extension_internal_bag(logical_bag);
     if (!virtual_bag::valid_index(internal_bag)) return false;
+    qol::extension_bag::BagSnapshot snapshot{};
+    if (qol::extension_bag::bag_snapshot(&snapshot)) {
+        *out_capacity = snapshot.capacities[internal_bag];
+        return true;
+    }
+    std::lock_guard<std::mutex> lock(runtime_state().mtx);
     *out_capacity = runtime_state().objects.bag.capacities[internal_bag];
     return true;
 }

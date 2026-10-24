@@ -11,6 +11,8 @@ thread_local bool g_in_native_call = false;
 void extension_bag_mark_dirty_locked() {
     runtime_state().persistence.dirty = true;
     runtime_state().persistence.revision.fetch_add(1, std::memory_order_release);
+    // 主线程写路径统一在这里发布轻量快照，读侧可无锁取一致视图。
+    qol::extension_bag::publish_bag_snapshot();
 }
 
 uint64_t extension_bag_item_revision_locked() {
