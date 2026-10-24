@@ -1,138 +1,207 @@
-# `extension_bag` 插件参考
+# `extension_bag` 插件设计
 
 ## 摘要
 
-功能插件：提供 5 个扩展逻辑背包（袋号 `6..10`）、装备页扩展页签、投影式拖放与存档 sidecar。对外发布 `extension_bag` 能力（API 3.0；3.1 尾追加 `remove_for_sale`）与 `inventory.merge_projection`；注册 8 条调试 HTTP 端点、3 个 port、1 个中立 inventory provider。
+功能插件：在装备页提供可配置数量的扩展逻辑背包（默认 5，范围 1–8）、原生风格页签、投影式拖放与 sidecar 持久化；同时兼容 C18L 的原生追加袋布局。
 
-当前范围：装备页核心绘制/拖放/存档门禁、详情动作、商店宿主、合成器宿主均已注册并启用。资源 claim 共 22 条；合成器双高亮与合成后短暂闪原版袋仍是已知残留。
+- 插件 id `extension_bag`，版本 `0.1.0`（`plugin.cpp`）。
+- 对外能力：`extension_bag` v3.1（API 3.0 前缀 + 尾追加 `remove_for_sale`）、`inventory.merge_projection`。
+- HTTP：9 条（8 条调试/操作 + `POST /api/extension_bag/set_bag_count`）。
+- 持久化：`extensionbags.items` **v5**（v4 自动迁移，默认 5 袋）。
+- 线程模型：写命令主线程执行；状态查询读已发布快照；过渡期保留 `runtime_state().mtx`。
 
-除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
+除特别说明，路径相对 `module/app/src/main/cpp/plugins/extension_bag/`。
 
-## 定位与版本
+## 1. 分层
 
-- 插件 id `extension_bag`，版本 `0.1.0`（`plugins/extension_bag/plugin.cpp:49-50`）。
-- required：`world.facts`、`item.facts`、`save.facts`、`craft.facts`、`save.slot_data`（`plugin.cpp:172-195`）。
-- optional：`inventory_refresh`、`move_merge.control`（两者均由 `core.item` 提供）、`http.registry`、`http.dispatch`、`ui_components` 1.21（锚定页签；`plugin.cpp:197-214`）。
-- provides：`extension_bag`（API major 3、minor 0；sale removal 3.1）、`inventory.merge_projection`（`plugin.cpp:155-170`；`contracts/extension_bag.h:25-30`）。
-- ports：write port、character extras、inventory extras（`plugin.cpp:210-220,823-824`）。
-- resources：`assembly/claims.cpp` 的 `extension_bag_claims()`，当前 22 条：
-  - 核心/存档/详情：`hook:SAVE_SaveInventory`、`own:popup.inventory`、`own:popup.save_panel`、`patch:P_EXT_INVEN_ITEM_DRAW`、`patch:P_EXT_INVEN_BAG_DRAW`、`patch:P_EXT_INVEN_DRAW_END`、`patch:P_EXT_DROP_GATE`、`patch:P_EXT_DRAW_GATE`、`own:desc_button_execute_slots`、`patch:P_EXT_DESC_OPEN_GATE`。
-  - 商店：`hook:UIStore_SellItem`、`hook:UIStore_ButtonSellExe`、`hook:UIStore_DrawInvenBagGroup`、`own:popup.store`、`patch:P_EXT_STORE_DESC`、`patch:P_EXT_STORE_DRAW_END`、`patch:P_EXT_STORE_BAG_DRAW`、`patch:P_EXT_STORE_BUY_GATE_1`、`patch:P_EXT_STORE_BUY_GATE_2`。
-  - 合成器：`own:popup.mix`、`patch:P_EXT_MIX_DRAW_END`、`patch:P_EXT_MIX_BAG_DRAW`。
-- JNI：descriptor `jni_count=0`；两个导出由全局 bridge 管理（`plugin.cpp:852-880`；`bridge/native/gamebridge.cpp:226`；`bridge/native/gamebridge_domain_operations.cpp:458`）。
-- feature：`extension_bag.extended_bag`，Gameplay/Toggle，`default_enabled=1`，显示优先级 -2，回调 `extension_bag_toggle`（`plugin.cpp:846-850`）。
+| 层 | 目录 | 职责 |
+|---|---|---|
+| L0 模型 | `model/` | 纯数据与规则：袋/物品/事务/拖拽/序列化；无 UI、无 hook |
+| L1 组件 | `runtime/`、`transaction/` | 状态存储、所有权、事务、投影、布局、重入守卫 |
+| L2 适配 | `runtime/*_access.*`、`extension_bag_geometry.*` | 原生袋布局、物理槽、物品属性、UI 原语 |
+| L3 用例 | `usecases/` | `view`（enter/exit/select）、`move`（四方向） |
+| L4 接口 | `api/`、`http/`、`public/`、`ui/` | 参数校验、命令编组、事件翻译、页面适配 |
 
-## 公开能力与路由
+依赖只向下：`model ← runtime/transaction ← usecases ← api/http/ui/public`。
 
-### HTTP（8 条，owner 均为 `extension_bag`）
+### 核心组件
+
+| 组件 | 文件 | 职责 |
+|---|---|---|
+| BagCatalog | `model/bag_catalog.h`、`bag_catalog.inc` | 扩展袋上限 8、活动数量、槽 16、类型容量 |
+| BagStateStore | `runtime/bag_state_store.*` | 轻量只读快照（types/capacities/mode/…）+ revision |
+| StatusSnapshot | `runtime/status_snapshot.*` | 完整状态快照（含 items），原子发布供查询线程读 |
+| InventoryAccess | `runtime/inventory_access.*` | 原生袋布局探测、物理槽读写、当前袋 |
+| ItemAccess | `runtime/item_access.*` | 物品属性、句柄、序列化、物化 |
+| Ownership | `runtime/ownership.*`、`model/ownership_ledger.h` | 原生对象所有权账本与回收 |
+| TransactionCoordinator | `transaction/transaction_coordinator.*` | 事务 ID、pending、阶段回滚、失败隔离 |
+| ProjectionController | `runtime/projection_controller.*` | 容量字、当前袋原始/raw、C18 页计数、来源门禁 |
+| NativeTabLayout | `runtime/native_tab_layout.*` | C18 布局解析、reflow、命中、锚定 |
+| EntryGuard | `runtime/entry_guard.*` | 同线程重入拒绝、主线程断言 |
+| Usecases | `usecases/view.*`、`usecases/move.*` | 视图与移动的用例入口 |
+
+## 2. 数据模型
+
+### 2.1 编号域
+
+- 扩展内部索引 `0..active-1`；逻辑 ID `6..6+active-1`。
+- 原版事务袋 `0..4`；任务袋 `5` 禁止扩展事务。
+- C18 追加袋页签序号（运行时可达 18）是 **UI 命名空间**，只在投影层与扩展逻辑 ID 汇合。
+
+### 2.2 袋定义
+
+```cpp
+kMaxExtensionBags = 8;        // 数组上限
+kSlotCount = 16;              // 游戏槽上限，固定
+active_extension_bags();      // 1..8，来自 State.bag_count
+capacity_for_bag_type(type);  // {0,4,8,12,16}，生成表
+extension_logical_bag_last(); // 6 + active - 1
+```
+
+`State.types/capacities/items` 固定按上限分配；`bag_count` 只控制可见/可用范围，不改变内存布局。
+
+### 2.3 State
+
+- `types[8]`、`capacities[8]`、`items[8][16]`、`bag_count`、`mode`、`original_selected`、`selected`、`inspected`、`info_bag`、`pending`、隔离记录。
+- `Item`：category、canonical count、payload 长度与 256B 固定缓冲。
+- `mode`：Original / Module / ExitingModule；`ExitingModule` 过渡态用于原版回调收尾。
+- 所有权账本：None/ModuleOwned/BorrowedForView/InventoryOwned/Released/ReservedForRelease（容量 128）。
+- 句柄保管：Empty/Active/Releasing（容量 1024）。
+
+### 2.4 两类袋的数据来源
+
+| 袋 | 数据源 | 容量来源 | 操作落点 |
+|---|---|---|---|
+| 原版 0–4 | 游戏 | 游戏容量字 | 原生接口 |
+| 任务袋 5 | 游戏 | 游戏 | 禁止 EB 事务 |
+| C18 追加袋 6..N | 游戏 | 游戏 | 原生回调 + EB 门禁 |
+| 扩展袋 6..6+active−1 | sidecar | catalog | EB 事务 + 物化/回收 |
+
+**物品属性不由插件复制**：是否装备/宝石/强化卷/可用、售价、装备槽均读宿主 `read_only.item.*` / `item_facts.*`。
+
+## 3. 数据驱动
+
+- `bagCount` 是设置项：随存档写入 sidecar 状态 JSON 顶层 `bagCount`。
+- 增加袋：新袋 `types=0`、`capacities=0`、items 空；减少袋：被移除袋必须为空，否则拒绝。
+- 变更前置条件：无 pending、无活动拖拽、无未提交事务。
+- 容量表由 `scripts/maintenance/build_bag_catalog.py` 从 `apk/static-data/json/tables/ITEMSTATICBASE.json` 生成；业务代码不得再写死 5/16/容量数组。
+- 原版/C18 袋仍由游戏数据驱动；扩展袋由 sidecar 驱动，二者只在投影层汇合。
+
+## 4. 持久化
+
+- section `extensionbags.items`，版本 **v5**；v4 读取时按默认 5 袋迁移并记录日志。
+- `bagCount` 越界、非整数或与 pending 冲突 → 拒绝加载，不静默截断。
+- load：缺失清空并放行；版本不符、不可读、payload 损坏阻断会话。
+- capture：锁内校验 + 序列化 + 容量检查，记录 transaction/epoch/revision。
+- complete：仅身份与 revision 匹配时清 pending/dirty。
+- dirty staging：每 revision 至多一次 `request_write`；失败清回 staged，安全点重试。
+- 启动发布：load 完成后发布状态快照，供查询线程读取。
+
+## 5. 投影与绘制
+
+- 安装扩展视图：选可用原版宿主袋 → 写容量字 → 同步物品控件 → 记录投影宿主；失败回退不改变原版选择。
+- 恢复：走 `restore_module_view_locked()`（含物品区刷新），否则“扩展袋→改版袋”不刷新。
+- 绘制只读：绘制 wrapper 读快照/mode，不改业务状态；临时 `current_bag` 的写入/恢复由投影控制器提供。
+- 原版与 C18 原生袋物品不复制，仅投影显示。
+
+## 6. C18L 兼容
+
+- 能力位 bit3 `kQolTargetCapabilityC18NativeBagLayoutCandidate`：已知 C18L v507/v508/v512/v513/v514/v520 置位；未知 MD5 仅在运行期特征匹配时置位。
+- 袋布局：`native_bag_layout()` 探测原生袋对象表（原版 6 袋 / C18 19 袋），`physical_item_at`、`item_ref_at`、`set_current_bag` 上界同源。
+- 页签 reflow：模块列固定在原版列右侧；用完整 72×84 框判断冲突；冲突时只平移 C18 竖向组（保持 5px 间距），底部横排与其他控件不动；歧义 fail-closed。
+- 几何按每个 equip root/generation 重新扫描（≤32 子控件，排除模块锚点），不跨 generation 缓存原生指针。
+- 命中：C18 原生页签 child index 只作 UI 命中，不进入扩展逻辑 ID/事务域。
+- 高亮：C18 module view 临时把 `current_bag` 写成页签总数（无对应页签→原生无高亮），绘制后恢复 raw；不使用 18/19 作为持久哨兵。
+
+## 7. UI 与输入
+
+- 页签宿主：背包装备页、商店、合成器；挂载在游戏袋容器上，所有权归游戏。
+- 锚定：每帧重新解析活容器并证明身份（proc/type/user_type/data 快照）；失效只注销记录并重建；禁用/退出时 detach 后删除。
+- 页签控件：user type 2、data 16 字节；点击经 proc 投递，主线程消费；同一帧多击做合并。
+- 当前页签渲染上限 `kMaxRenderedExtensionBagTabs = 5`；`bagCount > 5` 时只渲染前 5 个并记录 `tab layout pending multi-column`，多列布局待实现。
+- 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving。
+- 详情/出售/合成：详情按钮槽、商店宿主、合成器宿主各自注册资源；扩展物品与原生表现一致。
+
+## 8. 用例与接口
+
+### 8.1 用例
+
+- `usecases/view.*`：`enter_view`、`exit_view`、`select_bag`；校验顺序、锁边界、错误字符串与原 API 一致。
+- `usecases/move.*`：四方向转发到事务层；API/页签 UI 不直接调用 transaction。
+- `transaction/drop.cpp`：drop 路由属于事务层，不经用例层。
+
+### 8.2 扩展 API（v3.1）
+
+- 状态/索引、对象反查、投影、收编/消耗、交互接管、观测/拖放、移动、容量、jewel、`remove_for_sale`。
+- 线程约定：成员仅游戏主线程；`for_each_logical_item` 回调持锁，回调内禁调本表加锁成员；撤销后不得缓存接口/裸指针。
+- 中立 provider：`inventory_extension_provider_table()`，消费者 `core.item`、`core.save`。
+
+### 8.3 HTTP（9 条，owner `extension_bag`）
 
 | 方法/路径 | 请求 | 语义 |
 |---|---|---|
-| `GET /api/debug/extension_bag/status` | 无 | 返回 enabled/injected/save_panel_hook/tab/frame/recovery_action/state |
-| `POST .../enter_view` | `{bag:6..10}` | 进入扩展视图 |
+| `GET /api/debug/extension_bag/status` | 无 | 读快照返回状态（含 `bagCount`/`maxBagCount`） |
+| `POST .../enter_view` | `{bag:6..}` | 进入扩展视图 |
 | `POST .../exit_view` | 可省略 | 退回原版视图 |
-| `POST .../select_bag` | `{bag:6..10}` | 扩展视图内切袋 |
-| `POST .../unequip` | `{bag:6..10}` | 卸下扩展袋 |
-| `POST .../click_item` | `{bag:6..10,slot:0..15}` | 选中/读取物品 |
-| `POST .../equip` | `{index:0..4,bagType:1..4}` | 测试注入装备类型 |
-| `POST .../item` | `{index:0..4,slot:0..15,category:N,count:N}` | 测试注入物品 |
+| `POST .../select_bag` | `{bag}` | 扩展视图内切袋 |
+| `POST .../unequip` | `{bag}` | 卸下扩展袋 |
+| `POST .../click_item` | `{bag,slot}` | 选中/读取物品 |
+| `POST .../equip` | `{index,bagType}` | 测试注入装备类型 |
+| `POST .../item` | `{index,slot,category,count}` | 测试注入物品 |
+| `POST /api/extension_bag/set_bag_count` | `{count:1..8}` | 调整扩展袋数量 |
 
-- 声明与命令枚举：`plugin.cpp:226-278`；POST 只做字段校验并投递 typed command（handler id `0x45420001`），主线程执行后回写票据（`plugin.cpp:334-385,456-467`）。
-- 成功 POST 返回 `{"ok":true,"ticket":N}`；业务结果仅在顶层 `ok` 为 `true` 时票据成功，原响应体保留。
-- 参数错误返回 HTTP 400；字段缺失、非 int32、越界均拒绝。
+- POST 只做参数校验并投递 typed command，主线程执行后回写票据；成功返回 `{"ok":true,"ticket":N}`。
+- 路由聚合由 `scripts/maintenance/sync_http_routes.py` 生成 `plugins/core.api/routes.inc`；Kotlin 控制器在 `DebugController.kt` 显式映射。
 
-### 能力与 port
+## 9. 线程、锁与重入
 
-- `ExtensionBagApi`：状态/索引、对象反查、投影、收编/消耗、交互接管、观测/拖放、移动、容量、jewel、`remove_for_sale`（`contracts/extension_bag.h:83-155`）。
-- 线程约定：所有成员仅游戏主线程；`for_each_logical_item` 回调持 `g_virtual_bag_mtx`，回调内禁调本表加锁成员；撤销后不得缓存接口/裸指针（`contracts/extension_bag.h:9-15`）。
-- write port 36 项：inventory 9、equipment 7、UI 20（`contracts/game_ports/extension_bag_write_port.h:11-70`）。`QolResult` 表示适配器调用状态；带 `out_result` 的函数由该输出承载游戏函数 `0` 成功/非 `0` 失败。
-- 中立 provider：`inventory_extension_provider_table()`（`plugins/extension_bag/extension_bag_port.cpp:784`），消费者为 `core.item`（含 inventory hook 子域）与 `core.save`。
+- 写命令：HTTP → `commands.post_typed` → `commands_drain()`（主线程）。
+- 查询：`/status` 读 `StatusSnapshot`（`shared_ptr` 原子发布）；快照未发布时回退加锁路径并记录一次日志。
+- 重入：`EntryGuard` 使用 `thread_local` 深度检测，同线程重入拒绝并计数；不提供跨线程互斥。
+- 过渡期保留 `runtime_state().mtx`：部分 provider 只读路径与 public/JNI 入口仍读 live State。
+- `try_lock` 同时承担递归/竞争保护（逻辑扫描、页签 proc 等），不能直接用 EntryGuard 替代。
 
-## 数据模型
+### 删除锁的前置条件（P6）
 
-- 逻辑袋 `6..10`，内部索引 `0..4`；物理袋 `0..4` 普通、`5` 任务袋排除（`model/virtual_bag_state.h:63-73`）。
-- 每袋固定 16 槽；容量按 BagType 派生：0→0、1→4、2→8、3→12、4→16（`virtual_bag_state.h:77`；`model/virtual_bag_transaction_rules.inc:88-90`）。
-- `State`：5 袋类型、派生容量、5×16 槽物品、`mode`、选中/详情、`pending`、隔离记录（`virtual_bag_state.h:106-122`）。
-- `Item`：category、count（canonical）、payload 长度与 256B 固定缓冲（`model/virtual_bag_transaction_types.h:3-8`）。
-- pending 参与状态 JSON；`extensionbags.journal` v1 是模型/序列化/恢复判定，当前生产持久化只注册 `extensionbags.items` v4。
-- ownership ledger：None/ModuleOwned/BorrowedForView/InventoryOwned/Released/ReservedForRelease，容量 128（`model/ownership_ledger.h:16-57`）。
-- `ItemHandleCustody`：容量 1024，Empty/Active/Releasing（`model/item_handle_custody.h:22-27`）。
+1. `virtual_bag_inventory_bags_json()` 快照化或主线程投递（当前遍历 live State 与物化对象）。
+2. `bag_capacity`/status fallback 分支改为拒绝或快照。
+3. provider 只读回调的“仅主线程”从注释约定变为逐链证明/断言。
+4. public/JNI 入口覆盖 EntryGuard 与主线程投递。
+5. 保留 `for_each_logical_item`、tab proc 的 busy/重入拒绝语义。
 
-## 生命周期与持久化
+完成前保留互斥量是正确取舍。
 
-- install：绑定 SDK/game/ports → require facts → 注册 typed result handler → inventory provider → lifecycle participant → `save.slot_data` owner → RenderPre flush（`plugin.cpp:547-756`）。
-- activate/enable：关闭 gate 后用当前 owner token 重注册 slot_data；失败保持 gate 关闭；成功置 provider active + enabled（`plugin.cpp:799-816`）。
-- deactivate/disable：注销 result handler/slot_data、清 cache、关 provider/enabled；provider/participant 为 set-once 常驻（`plugin.cpp:757-797`）。
-- feature 回调：`extension_bag_toggle` → `set_virtual_bag_enabled`；只切运行时 gate 与 lifecycle task，资源安装/还原由宿主按 `want_run` 完成（`plugin.cpp:846-850`；`extension_bag_public_runtime.inc:415-435`）。
-- 持久化：section `extensionbags.items` v4，SessionBound 读、SlotBound 写（`extension_bag_persistence.cpp:40-41,278-290`）。
-- load：missing 清空状态并放行；非 v4、不可读、损坏 payload 阻断会话；读档保留 canonical，不按运行时上限截断。
-- capture：锁内校验 + 序列化 + 容量检查，记录 transaction/epoch/revision；complete 仅在身份与 revision 匹配时清 pending/dirty（`extension_bag_persistence.cpp:196-255`）。
-- dirty staging：每 revision 至多一次 `request_write`；失败清回 staged，安全点重试（`extension_bag_persistence.cpp:339-362`）。
+## 10. 失败与恢复
 
-## UI 宿主与输入
+- 每个方向：准备 → 原生调用 → 复核 → 提交/回滚。
+- pending 记录在 State 与 sidecar；启动恢复按方向/源目标一致性判定 complete/rollback/隔离。
+- 失败隔离保留原始 payload 与事务上下文，记录原因，不猜测内容。
+- 原生调用失败必须回收临时对象或登记所有权，避免复制/泄漏。
+- 布局/来源/事务歧义一律 fail-closed，不移动控件、不写选择。
 
-- 当前注册背包装备页宿主（`runtime/projection.cpp`、`runtime/tabs_ui.cpp`、`ui/equip.cpp`）、详情动作（`ui/detail_actions.cpp`）、商店宿主（`ui/store_*`）和合成器宿主（`ui/mix.cpp`）；对应 resources 均已注册。
-- 空 EB 袋解除：`unequip_extension_bag_locked` 把袋对象放回原版袋并切到接收袋；接收袋按物理袋 0..4 顺序取第一个可保存袋，槽位由该袋第一个可保存空槽决定。draw-end 检测到 module 视图不再成立时立即 restore，避免原版袋短暂显示为空。
-- 页签控件 user type 2、data 16 字节、首字段指向物品对象；页签物品按类型复用/延迟释放（`runtime/tabs_ui.cpp`、`runtime/tabs.cpp`）。
-- 页签挂在游戏袋容器上，native 生命周期归游戏：装备页/商店/合成器三个宿主均用 `ui_components` 锚定层（`anchored_control_ensure/detach`）每帧重新解析活容器并证明身份（`CO_PROC` + type/user_type/data 快照），失效只注销记录并重建；禁用/退出时用 `anchored_control_detach` 取回已证明存活的句柄再删除。规则见 [`core.custom_ui.md`](core.custom_ui.md) §控件挂载归属与生命周期规则。
-- 投影：draw wrapper 持锁、original-first；扩展视图下临时改原版当前袋为 sentinel，绘制后恢复（`runtime/render.cpp`、`runtime/projection.cpp`）。
-- 输入：`0x02` 松开确认、`0x04` drop 到袋；moving 保留六条件；吞 release 后锁外 reset moving（`runtime/tabs_ui.cpp`、`runtime/input.cpp`）。
-- 详情按钮：V2 `QolDescHookApi` 实现在 `ui/detail_hooks.cpp`，确认使用/出售/销毁在 `ui/detail_actions.cpp`；`P_EXT_DESC_OPEN_GATE` 捕获扩展详情，`own:desc_button_execute_slots` 负责按钮槽命名空间。
-- 几何：网格左上 `(761,160)`、4×4、单格 74×74、步距 83×83；页签矩形 57×57、纵向步距 70（`extension_bag_geometry.cpp`、`runtime/tabs_ui.cpp`）。
+## 11. 已知限制
 
-## 消费者与职责边界
+| 限制 | 影响 | 后续 |
+|---|---|---|
+| `bagCount > 5` 只渲染前 5 个页签 | 6–8 袋需 API 访问 | 多列页签布局 + reflow 区域加宽 |
+| provider/JNI 仍有 live State 读 | 不能删除 `mtx` | 完成 §9 前置条件 |
+| `recover_pending_transaction_locked` 仍在 orchestrator | 与投影/对象加载耦合 | 与 OwnershipManager 一起迁移 |
+| C18 高亮抑制依赖“页签总数” | 依赖原生无该索引 | 新版本需复核页签计数 |
+| 详情/合成残留（双高亮、闪原版袋） | 视觉瑕疵 | 按真机反馈收敛 |
 
-| 消费者 | 入口 |
-|---|---|
-| `core.item` | 中立 inventory provider / `ExtensionBagApi` |
-| `core.item`（inventory hook 子域） | 扩展物品识别、消耗、出售、移动 |
-| `core.save` | `save.slot_data` v4 capture/complete |
-| `bridge/native` | 两个全局 JNI 导出 |
-| `core.item`（merge 子域） | 投影 drop / 身份查询 shim |
+## 12. 关键不变量
 
-边界：物理袋、原版物品对象与存档位段归原版/Game Adapter；扩展状态、投影控件与 sidecar 归本插件；设置页渲染归宿主 feature catalog，插件只声明 feature。
+1. 扩展逻辑 ID `6..6+active−1`；原版事务袋固定 `0..4`、任务袋 `5`，命名空间不混用。
+2. 绘制、命中、查询不写业务状态；状态只由用例/事务层修改。
+3. 原生对象所有权只在账本内转移；事务失败必须 isolate 或回收。
+4. 布局、来源、事务歧义 fail-closed。
+5. 主线程写 + EntryGuard；跨线程读只允许快照。
+6. 容量/上限/槽数只从 catalog 取，业务代码不写死。
 
-## 文件地图
+## 13. 测试与验收
 
-| 路径 | 职责 |
-|---|---|
-| `plugin.cpp/.h` | descriptor、装配与生命周期；HTTP 参数/票据在 `http/` |
-| `runtime/state.h/.cpp` | `ExtensionBagRuntimeState`、锁、共享状态、thread_local |
-| `runtime/access.cpp` | 游戏读写/物品/世界/角色/库存 accessor |
-| `runtime/tabs_ui.cpp` | 页签控件/点击/拖拽 UI/详情 hook 入口 |
-| `runtime/orchestrator.cpp` | 进入/退出、投影恢复、pending 事务、teardown |
-| `runtime/render.cpp` | 绘制 wrapper、draw-end、投影绘制 |
-| `runtime/projection.cpp` | 投影安装/恢复/同步/原版袋读写 |
-| `runtime/lifecycle.cpp` | 生命周期、主菜单清理、事件入口 |
-| `runtime/ownership.cpp` | ledger/custody/deferred free |
-| `transaction/ext_orig.cpp` | 原版↔扩展移动与回滚 |
-| `transaction/ext_ext.cpp` | 扩展袋间移动/交换 |
-| `transaction/drop.cpp` | 落袋/投影拖放路由 |
-| `ui/equip.cpp` | 装备/卸下/背包装备接管 |
-| `ui/detail_hooks.cpp` | V2 详情按钮绑定/校验（详情 claim 已注册） |
-| `ui/detail_actions.cpp` | 使用/出售/销毁/佣兵徽章（详情 claim 已注册） |
-| `ui/store_*.cpp` | 商店宿主（已注册；出售数量、买入、袋列绘制） |
-| `ui/mix.cpp` | 合成器宿主（已注册；页签/投影/回切） |
-| `public/*.cpp` | 对外 `virtual_bag_*` 包装/状态/数量/投影/出售/桥接 |
-| `api/*.cpp` | API 表、中立 provider、句柄、公开 wrapper |
-| `http/*` | JSON parser、路由表、query |
-| `persistence/persistence.cpp` | `save.slot_data` v4 consumer |
-| `assembly/claims.cpp` | 资源 claim 表（22 条；核心/详情/商店/合成均启用） |
-| `assembly/move_merge_impl.cpp` | `core.item` merge 子域的 projection shim |
-| `model/*` | 纯状态、事务规则、JSON、payload、ledger |
-
-## Host 测试
-
-- `extension_bag_contract_tests`：版本、POD/布局、枚举、patch site、JSON 参数/票据解析。
-- `extension_bag_slot_data_tests`：注册、load 矩阵、canonical 保留、capture/complete、dirty staging、degraded。
-- `extension_bag_sale_transaction_tests`：sale removal 模型、出售 plan、ext→orig 恢复判定。
-- `extension_bag_draw_lock_tests`：draw 锁顺序、主菜单清理边沿、页签 generation/部分创建/投影安装模型。
-- `extension_bag_move_merge_shim_tests`：provider active、身份查询、drop 结果映射。
-- `extension_bag_status_query_tests`：status query 响应。
-- 通用 `host_tests` 覆盖 ownership ledger、custody、事务阶段等纯模型。
-
-## 已知残留
-
-- **商店 EB 视图双高亮**：选中扩展袋后，原版袋列仍显示一个选中态，与 EB 页签高亮并存。已尝试 `current_bag` 遮蔽、`UIStore_DrawInvenBagGroup` 入口 hook、`UIEquip` 背景 hook 与选中按钮重绘，均未能稳定消除；当前已回退为双高亮行为，后续单独定位原版袋列的选中态来源。商店出售数量选择不受影响。
-- **合成器 EB 视图双高亮**：合成器沿用 UIMix 原版袋列，选中扩展袋后同样出现原版袋 + EB 页签双高亮，表现与商店页一致；按当前决定不单独修，后续与商店页合并定位。
-- **合成后短暂闪原版袋**：点击组合确认后，个别时序仍可能在下一帧前露出原版袋；当前 draw-end/refresh 对 state 0 已避免主动 restore，完整复现仍需 `mix state edge` / `mix restore view` 日志确认触发点。
+- Host：`module/app/src/main/cpp/tests`，CTest 159 项；覆盖模型、catalog、快照、事务、布局、HTTP 参数校验。
+- 静态：`scripts/maintenance/check_arch.py`、`check_http_routes.py`。
+- 构建：`scripts/build-debug.sh`（唯一 Debug 入口）。
+- 真机：v513/v514/v520；页签挂载、reflow（`moved=6 delta=75`）、点击切袋、原生竖列退出、`set_bag_count` 增删。
+- 详细验收口径见 `docs/refactor/verification.md`；重构状态见 `docs/refactor/extension-bag/`。
