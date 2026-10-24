@@ -16,6 +16,7 @@ add_library(qol_plugin_extension_bag STATIC
     public/bridge.cpp
     runtime/bind.cpp
     api/api_impl.cpp
+    interface/bag_query.cpp
     usecases/view.cpp
     usecases/move.cpp
     assembly/claims.cpp

@@ -2,6 +2,7 @@
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/interface/bag_query.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/api/port_internal.h"
@@ -89,9 +90,11 @@ QolResult neutral_for_each_item(qol::contracts::QolInventoryExtensionItemFn fn, 
 QolResult neutral_bag_capacity(int32_t bag, int32_t* out_capacity) {
     if (out_capacity == nullptr) return neutral_error(kQolErrInvalidArgument, "invalid argument");
     *out_capacity = 0;
-    if (!virtual_bag_logical_capacity(bag, out_capacity)) {
+    int capacity = 0;
+    if (!query_bag_capacity(bag, &capacity)) {
         return neutral_error(kQolErrNotFound, "not found");
     }
+    *out_capacity = capacity;
     return qol::contracts::ok();
 }
 
@@ -101,7 +104,7 @@ QolResult neutral_inventory_fragment(char* out, uint32_t capacity, uint32_t* out
     }
     *out_size = 0;
     // R-47b 真值表与袋号/capacity/slot_count 组装唯一实现点在扩展袋序列化内。
-    const std::string fragment = extension_bag_inventory_bags_json();
+    const std::string fragment = query_inventory_fragment();
     if (fragment.empty()) return qol::contracts::ok();
     if (fragment.size() >= capacity) return neutral_error(kQolErrBlocked, "buffer too small");
     std::memcpy(out, fragment.data(), fragment.size());

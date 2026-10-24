@@ -980,6 +980,7 @@ add_executable(extension_bag_inventory_snapshot_tests
     test_extension_bag_inventory_snapshot.cpp
     stubs/extension_bag_catalog_stub.cpp
     ${CPP_DIR}/plugins/extension_bag/api/api_impl.cpp
+    ${CPP_DIR}/plugins/extension_bag/interface/bag_query.cpp
     ${CPP_DIR}/plugins/extension_bag/public/bridge.cpp
     ${CPP_DIR}/plugins/extension_bag/public/counts.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp

@@ -20,7 +20,7 @@
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/runtime/status_snapshot.h"
+#include "plugins/extension_bag/interface/bag_query.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/ui/store_sell_rules.h"
 #include "plugins/extension_bag/extension_bag_internal.h"
@@ -46,17 +46,7 @@
 #define extension_internal_bag extension_internal_bag_bridge
 #define unequip_extension_bag_locked unequip_extension_bag_locked_bridge
 std::string extension_bag_api_status_json_impl() {
-    const auto snapshot = qol::extension_bag::load_status_snapshot();
-    if (snapshot) {
-        return qol::extension_bag::status_snapshot_json(*snapshot);
-    }
-    static std::atomic_flag not_ready_logged = ATOMIC_FLAG_INIT;
-    if (!not_ready_logged.test_and_set(std::memory_order_relaxed)) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "status snapshot unavailable; returning not-ready status");
-    }
-    return "{\"enabled\":" + std::string(runtime_state().enabled.load() ? "true" : "false") +
-           ",\"injected\":false,\"extension_tab_button\":false," +
-           "\"inventory_frame_active\":false,\"recovery_action\":\"none\",\"state\":{}}";
+    return qol::features::extension_bag::query_status_json();
 }
 
 std::string extension_bag_api_enter_view_impl(int logical_bag) {
