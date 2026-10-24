@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/interface/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -40,8 +41,8 @@ namespace {
 using StoreSellItemFn = int64_t (*)(int64_t);
 
 void store_sell_popup(uint32_t text_id) {
-    if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->show_text_popup != nullptr) {
-        (void)runtime_state().host.sdk->ui->show_text_popup(static_cast<int32_t>(text_id));
+    if (::qol::extension_bag::access::host().sdk != nullptr && ::qol::extension_bag::access::host().sdk->ui != nullptr && ::qol::extension_bag::access::host().sdk->ui->show_text_popup != nullptr) {
+        (void)::qol::extension_bag::access::host().sdk->ui->show_text_popup(static_cast<int32_t>(text_id));
     }
 }
 
@@ -54,7 +55,7 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
         item == nullptr || count <= 0) {
         return false;
     }
-    virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
+    virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
     const int view = static_cast<int>(virtual_bag_effective_count(
         item, static_cast<uint32_t>(descriptor.count)));
     if (count >= view) return false;  // 整堆由调用方走删除分支
@@ -75,8 +76,8 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
     descriptor.payload_size = payload_size;
     descriptor.count = static_cast<int>(virtual_bag_canonical_count(
         item, virtual_bag_canonical_from_field(old_field, static_cast<uint32_t>(descriptor.count))));
-    runtime_state().objects.module_object_categories[bag][slot] = descriptor.category;
-    runtime_state().objects.module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
+    ::qol::extension_bag::access::objects().module_object_categories[bag][slot] = descriptor.category;
+    ::qol::extension_bag::access::objects().module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
     extension_bag_mark_dirty_locked();
     return true;
 }
@@ -85,31 +86,31 @@ bool decrement_extension_item_view_locked(int bag, int slot, void* item, int cou
 int64_t store_button_sell_exe_wrapper() {
     using ButtonSellFn = int64_t (*)();
     const auto backup = reinterpret_cast<ButtonSellFn>(
-        runtime_state().ui.backup_store_button_sell_exe);
+        ::qol::extension_bag::access::ui().backup_store_button_sell_exe);
     if (backup == nullptr) return 1;
-    if (!runtime_state().enabled.load()) return backup();
+    if (!::qol::extension_bag::access::enabled().load()) return backup();
 
     void* item = nullptr;
     int count = 0;
     bool module_item = false;
     {
         ::qol::extension_bag::ReentryLock lock;
-        if (runtime_state().store.view_installed && runtime_state().host.game != nullptr &&
-            runtime_state().host.inventory_extras->read.cursor_item != nullptr) {
+        if (::qol::extension_bag::access::store().view_installed && ::qol::extension_bag::access::host().game != nullptr &&
+            ::qol::extension_bag::access::host().inventory_extras->read.cursor_item != nullptr) {
             void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
             void* cursor = nullptr;
             if (ctrl != nullptr) {
-                (void)runtime_state().host.inventory_extras->read.cursor_item(ctrl, &cursor);
+                (void)::qol::extension_bag::access::host().inventory_extras->read.cursor_item(ctrl, &cursor);
             }
             item = cursor != nullptr ? extension_bag_ui_item(cursor) : nullptr;
             int bag = -1;
             int slot = -1;
             if (item != nullptr && module_slot_of_item_locked(item, &bag, &slot) &&
-                bag == runtime_state().store.view_bag && virtual_bag::valid_index(bag) &&
+                bag == ::qol::extension_bag::access::store().view_bag && virtual_bag::valid_index(bag) &&
                 slot >= 0 && slot < virtual_bag::kSlotCount &&
-                runtime_state().objects.module_objects[bag][slot] == item) {
+                ::qol::extension_bag::access::objects().module_objects[bag][slot] == item) {
                 const virtual_bag::Item& descriptor =
-                    runtime_state().objects.bag.items[bag][slot];
+                    ::qol::extension_bag::access::bag().items[bag][slot];
                 count = static_cast<int>(virtual_bag_effective_count(
                     item, static_cast<uint32_t>(descriptor.count)));
                 module_item = descriptor.count > 0;
@@ -117,11 +118,11 @@ int64_t store_button_sell_exe_wrapper() {
         }
     }
     VIRTBAG_LOG("store button sell view=%d module=%d count=%d item=%p",
-                runtime_state().store.view_installed ? 1 : 0, module_item ? 1 : 0, count, item);
+                ::qol::extension_bag::access::store().view_installed ? 1 : 0, module_item ? 1 : 0, count, item);
     if (!module_item || count <= 1) return backup();
 
-    const auto* ui = runtime_state().host.write_port->ui.create_item_count_popup != nullptr
-                         ? &runtime_state().host.write_port->ui
+    const auto* ui = ::qol::extension_bag::access::host().write_port->ui.create_item_count_popup != nullptr
+                         ? &::qol::extension_bag::access::host().write_port->ui
                          : nullptr;
     void* callback = ui != nullptr && ui->sell_ok_input_item_count != nullptr
                          ? ui->sell_ok_input_item_count()
@@ -137,10 +138,10 @@ int64_t store_button_sell_exe_wrapper() {
 
 int64_t store_sell_item_wrapper(int64_t displayed_price) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"hook:UIStore_SellItem"});
-    if (runtime_state().ui.backup_store_sell_item == nullptr) return 0;
-    if (!runtime_state().enabled.load()) return reinterpret_cast<StoreSellItemFn>(runtime_state().ui.backup_store_sell_item)(displayed_price);
+    if (::qol::extension_bag::access::ui().backup_store_sell_item == nullptr) return 0;
+    if (!::qol::extension_bag::access::enabled().load()) return reinterpret_cast<StoreSellItemFn>(::qol::extension_bag::access::ui().backup_store_sell_item)(displayed_price);
 
     void* item = nullptr;
     int bag = -1;
@@ -152,27 +153,27 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     qol::store_sell::Plan plan{};
     {
         ::qol::extension_bag::ReentryLock lock;
-        if (runtime_state().store.view_installed && runtime_state().host.game != nullptr &&
-            runtime_state().host.inventory_extras->read.cursor_item != nullptr &&
-            runtime_state().host.item_facts != nullptr && runtime_state().host.item_facts->sell_price != nullptr) {
+        if (::qol::extension_bag::access::store().view_installed && ::qol::extension_bag::access::host().game != nullptr &&
+            ::qol::extension_bag::access::host().inventory_extras->read.cursor_item != nullptr &&
+            ::qol::extension_bag::access::host().item_facts != nullptr && ::qol::extension_bag::access::host().item_facts->sell_price != nullptr) {
             void* ctrl = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
             void* cursor = nullptr;
             if (ctrl != nullptr) {
-                (void)runtime_state().host.inventory_extras->read.cursor_item(ctrl, &cursor);
+                (void)::qol::extension_bag::access::host().inventory_extras->read.cursor_item(ctrl, &cursor);
             }
             item = cursor != nullptr ? extension_bag_ui_item(cursor) : nullptr;
             if (item != nullptr && module_slot_of_item_locked(item, &bag, &slot)) {
                 module_item = true;
                 const bool identity_ok =
-                    bag == runtime_state().store.view_bag && virtual_bag::valid_index(bag) && slot >= 0 &&
-                    slot < virtual_bag::kSlotCount && runtime_state().objects.module_objects[bag][slot] == item &&
+                    bag == ::qol::extension_bag::access::store().view_bag && virtual_bag::valid_index(bag) && slot >= 0 &&
+                    slot < virtual_bag::kSlotCount && ::qol::extension_bag::access::objects().module_objects[bag][slot] == item &&
                     module_object_release_allowed_locked(bag, slot, item, "store sell", false,
                                                          nullptr);
-                const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
+                const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
                 const bool descriptor_ok =
                     descriptor.category > 0 && descriptor.count > 0 &&
-                    runtime_state().objects.module_object_categories[bag][slot] == descriptor.category &&
-                    runtime_state().objects.module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
+                    ::qol::extension_bag::access::objects().module_object_categories[bag][slot] == descriptor.category &&
+                    ::qol::extension_bag::access::objects().module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
                 if (!identity_ok || !descriptor_ok) {
                     reject = true;
                 } else {
@@ -191,7 +192,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
             }
         }
     }
-    if (!module_item) return reinterpret_cast<StoreSellItemFn>(runtime_state().ui.backup_store_sell_item)(displayed_price);
+    if (!module_item) return reinterpret_cast<StoreSellItemFn>(::qol::extension_bag::access::ui().backup_store_sell_item)(displayed_price);
     if (reject) {
         VIRTBAG_LOG("store sell reject reason=identity_or_plan bag=%d slot=%d", bag, slot);
         store_sell_popup(0xc);
@@ -222,19 +223,19 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
         ::qol::extension_bag::ReentryLock lock;
         const bool current =
             virtual_bag::valid_index(bag) && slot >= 0 && slot < virtual_bag::kSlotCount &&
-            runtime_state().objects.module_objects[bag][slot] == item &&
+            ::qol::extension_bag::access::objects().module_objects[bag][slot] == item &&
             module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
             (!item_encoded ||
              static_cast<int>(virtual_bag_effective_count(
-                 item, static_cast<uint32_t>(runtime_state().objects.bag.items[bag][slot].count))) == view);
+                 item, static_cast<uint32_t>(::qol::extension_bag::access::bag().items[bag][slot].count))) == view);
         if (current) {
             whole = plan.kind == qol::store_sell::PlanKind::kWhole || count >= view;
             if (whole) {
-                const virtual_bag::Item previous_item = runtime_state().objects.bag.items[bag][slot];
-                runtime_state().objects.bag.items[bag][slot] = {};
+                const virtual_bag::Item previous_item = ::qol::extension_bag::access::bag().items[bag][slot];
+                ::qol::extension_bag::access::bag().items[bag][slot] = {};
                 extension_bag_mark_dirty_locked();
                 if (!free_module_object_locked(bag, slot)) {
-                    runtime_state().objects.bag.items[bag][slot] = previous_item;
+                    ::qol::extension_bag::access::bag().items[bag][slot] = previous_item;
                     persist_state_locked();
                     VIRTBAG_LOG("store sell rejected object release bag=%d slot=%d", bag, slot);
                 } else {
@@ -246,7 +247,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
                 committed = true;
             }
         }
-        if (committed && runtime_state().store.view_installed && runtime_state().store.view_bag == bag) {
+        if (committed && ::qol::extension_bag::access::store().view_installed && ::qol::extension_bag::access::store().view_bag == bag) {
             // R-12：只用商店投影刷新；调用原版 UIStore_RefreshInvenItem 会把整列刷回
             // 窗口原版袋内容，破坏扩展投影。
             store_refresh_projection_locked();
@@ -270,16 +271,16 @@ enum class StoreSaveSlotLookup : uint8_t { kFound, kNotFound, kError };
 
 StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
                                                                  int32_t* out_slot) {
-    if (item == nullptr || out_slot == nullptr || runtime_state().host.game == nullptr ||
-        runtime_state().host.inventory_extras == nullptr || runtime_state().host.inventory_extras->read.find_save_slot == nullptr) {
+    if (item == nullptr || out_slot == nullptr || ::qol::extension_bag::access::host().game == nullptr ||
+        ::qol::extension_bag::access::host().inventory_extras == nullptr || ::qol::extension_bag::access::host().inventory_extras->read.find_save_slot == nullptr) {
         VIRTBAG_LOG("store buy gate original lookup unavailable item=%p", item);
         return StoreSaveSlotLookup::kError;
     }
 
     ::qol::extension_bag::ReentryLock lock;
-    const bool projected = runtime_state().store.view_installed;
-    const int original_bag = runtime_state().store.window_original_bag;
-    const uint64_t view_generation = runtime_state().store.view_generation;
+    const bool projected = ::qol::extension_bag::access::store().view_installed;
+    const int original_bag = ::qol::extension_bag::access::store().window_original_bag;
+    const uint64_t view_generation = ::qol::extension_bag::access::store().view_generation;
     uint32_t projected_size_word = 0;
     if (projected) {
         if (!virtual_bag::valid_original_transaction_bag(original_bag) ||
@@ -287,7 +288,7 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
             VIRTBAG_LOG("store buy gate cannot read projected capacity window=%d", original_bag);
             return StoreSaveSlotLookup::kError;
         }
-        if (!set_bag_size_word_locked(original_bag, runtime_state().store.original_size_word)) {
+        if (!set_bag_size_word_locked(original_bag, ::qol::extension_bag::access::store().original_size_word)) {
             VIRTBAG_LOG("store buy gate cannot restore original capacity window=%d", original_bag);
             return StoreSaveSlotLookup::kError;
         }
@@ -295,15 +296,15 @@ StoreSaveSlotLookup store_find_original_slot_with_real_capacity(void* item,
 
     lock.unlock();
     int32_t slot = -1;
-    const QolResult result = runtime_state().host.inventory_extras->read.find_save_slot(item, &slot);
+    const QolResult result = ::qol::extension_bag::access::host().inventory_extras->read.find_save_slot(item, &slot);
     lock.lock();
 
     if (projected) {
-        if (runtime_state().store.view_generation != view_generation || !runtime_state().store.view_installed ||
-            runtime_state().store.window_original_bag != original_bag) {
+        if (::qol::extension_bag::access::store().view_generation != view_generation || !::qol::extension_bag::access::store().view_installed ||
+            ::qol::extension_bag::access::store().window_original_bag != original_bag) {
             VIRTBAG_LOG("store buy gate view changed during original lookup generation=%llu->%llu",
                         static_cast<unsigned long long>(view_generation),
-                        static_cast<unsigned long long>(runtime_state().store.view_generation));
+                        static_cast<unsigned long long>(::qol::extension_bag::access::store().view_generation));
             return StoreSaveSlotLookup::kError;
         }
         if (!set_bag_size_word_locked(original_bag, projected_size_word)) {
@@ -346,8 +347,8 @@ bool store_extension_can_accept_item_locked(void* item) {
     source.payload_size = payload_size;
 
     const virtual_bag::PlacePlan plan = virtual_bag::place_plan(
-        runtime_state().objects.bag.items, runtime_state().objects.bag.types,
-        runtime_state().objects.bag.capacities, source, /*allow_new_slot=*/true,
+        ::qol::extension_bag::access::bag().items, ::qol::extension_bag::access::bag().types,
+        ::qol::extension_bag::access::bag().capacities, source, /*allow_new_slot=*/true,
         virtual_bag_extended_mode(item), virtual_bag_category_uses_stack_count,
         &module_slot_is_assignable_locked);
     return plan.outcome == virtual_bag::PlaceOutcome::kMerged ||
@@ -357,7 +358,7 @@ bool store_extension_can_accept_item_locked(void* item) {
 
 uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"patch:P_EXT_STORE_BUY_GATE_1"});
     int32_t slot = -1;
     const StoreSaveSlotLookup lookup = store_find_original_slot_with_real_capacity(item, &slot);
@@ -369,7 +370,7 @@ uint8_t store_buy_find_slot_gate(void* item, void* out_slot) {
         return 1;
     }
     if (lookup == StoreSaveSlotLookup::kError) return 0;
-    if (!runtime_state().enabled.load()) return 0;
+    if (!::qol::extension_bag::access::enabled().load()) return 0;
     ::qol::extension_bag::ReentryLock lock;
     return store_extension_can_accept_item_locked(item) ? 1 : 0;
 }

@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/interface/state_access.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
 #include "contracts/ui.h"
@@ -33,19 +34,19 @@
 #include <unistd.h>
 
 void reset_extension_desc_item_hooks_locked() {
-    // Binding IDs now live at runtime_state().ui.extension_desc_item_ids (the prior alias was
+    // Binding IDs now live at ::qol::extension_bag::access::ui().extension_desc_item_ids (the prior alias was
     // g_extension_desc_item_ids).
-    const auto* api = qol::contracts::desc_hook_v2_if_available(runtime_state().host.sdk);
+    const auto* api = qol::contracts::desc_hook_v2_if_available(::qol::extension_bag::access::host().sdk);
     if (api == nullptr) {
-        runtime_state().ui.extension_desc_item_bound.fill(false);
-        runtime_state().ui.extension_desc_item_ids.fill(0);
+        ::qol::extension_bag::access::ui().extension_desc_item_bound.fill(false);
+        ::qol::extension_bag::access::ui().extension_desc_item_ids.fill(0);
         return;
     }
-    for (size_t index = 0; index < runtime_state().ui.extension_desc_item_bound.size(); ++index) {
-        const uint64_t id = runtime_state().ui.extension_desc_item_ids[index];
-        if (!runtime_state().ui.extension_desc_item_bound[index] || id == 0) {
-            runtime_state().ui.extension_desc_item_bound[index] = false;
-            runtime_state().ui.extension_desc_item_ids[index] = 0;
+    for (size_t index = 0; index < ::qol::extension_bag::access::ui().extension_desc_item_bound.size(); ++index) {
+        const uint64_t id = ::qol::extension_bag::access::ui().extension_desc_item_ids[index];
+        if (!::qol::extension_bag::access::ui().extension_desc_item_bound[index] || id == 0) {
+            ::qol::extension_bag::access::ui().extension_desc_item_bound[index] = false;
+            ::qol::extension_bag::access::ui().extension_desc_item_ids[index] = 0;
             continue;
         }
         const QolResult result = api->unbind(id);
@@ -57,8 +58,8 @@ void reset_extension_desc_item_hooks_locked() {
                          static_cast<int>(result.message_len),
                          result.message != nullptr ? result.message : "");
         }
-        runtime_state().ui.extension_desc_item_bound[index] = false;
-        runtime_state().ui.extension_desc_item_ids[index] = 0;
+        ::qol::extension_bag::access::ui().extension_desc_item_bound[index] = false;
+        ::qol::extension_bag::access::ui().extension_desc_item_ids[index] = 0;
     }
 }
 
@@ -86,14 +87,14 @@ constexpr std::array<qol::contracts::QolDescButtonProc, 11> kDescButtonProcs = {
 }  // namespace
 
 bool extension_desc_original_matches(uint64_t id, const char* symbol) {
-    const auto* api = qol::contracts::desc_hook_v2_if_available(runtime_state().host.sdk);
+    const auto* api = qol::contracts::desc_hook_v2_if_available(::qol::extension_bag::access::host().sdk);
     if (api == nullptr || id == 0 || symbol == nullptr) return false;
     int32_t match = 0;
     return qol::contracts::succeeded(api->original_matches(id, symbol, &match)) && match != 0;
 }
 
 bool extension_desc_call_original(uint64_t id, void* button) {
-    const auto* api = qol::contracts::desc_hook_v2_if_available(runtime_state().host.sdk);
+    const auto* api = qol::contracts::desc_hook_v2_if_available(::qol::extension_bag::access::host().sdk);
     return api != nullptr && id != 0 && button != nullptr &&
            qol::contracts::succeeded(api->call_original(id, button));
 }
@@ -101,7 +102,7 @@ bool extension_desc_call_original(uint64_t id, void* button) {
 void install_extension_desc_item_hooks_locked(void* item) {
     if (item == nullptr) return;
     static bool unavailable_logged = false;
-    const auto* api = qol::contracts::desc_hook_v2_if_available(runtime_state().host.sdk);
+    const auto* api = qol::contracts::desc_hook_v2_if_available(::qol::extension_bag::access::host().sdk);
     if (api == nullptr) {
         if (!unavailable_logged) {
             QOL_LOG_WARN(QolDomain::kExtensionBag,
@@ -114,13 +115,13 @@ void install_extension_desc_item_hooks_locked(void* item) {
 
     std::array<void*, 11> resolved_execute_slots{};
     size_t resolved_execute_slot_count = 0;
-    for (size_t index = 0; index < runtime_state().ui.extension_desc_item_bound.size(); ++index) {
+    for (size_t index = 0; index < ::qol::extension_bag::access::ui().extension_desc_item_bound.size(); ++index) {
         if (index == 2) continue;
-        if (runtime_state().ui.extension_desc_item_bound[index] || runtime_state().ui.extension_desc_item_ids[index] != 0) {
+        if (::qol::extension_bag::access::ui().extension_desc_item_bound[index] || ::qol::extension_bag::access::ui().extension_desc_item_ids[index] != 0) {
             QOL_LOG_DEBUG(QolDomain::kExtensionBag,
                           "extension desc hook skip index=%d reason=already_bound id=%llu",
                           static_cast<int>(index),
-                          static_cast<unsigned long long>(runtime_state().ui.extension_desc_item_ids[index]));
+                          static_cast<unsigned long long>(::qol::extension_bag::access::ui().extension_desc_item_ids[index]));
             continue;
         }
 
@@ -187,8 +188,8 @@ void install_extension_desc_item_hooks_locked(void* item) {
                 if (unbind_result.code != kQolErrNotFound &&
                     unbind_result.code != kQolErrNotReady &&
                     unbind_result.code != kQolErrConflict) {
-                    runtime_state().ui.extension_desc_item_ids[index] = id;
-                    runtime_state().ui.extension_desc_item_bound[index] = true;
+                    ::qol::extension_bag::access::ui().extension_desc_item_ids[index] = id;
+                    ::qol::extension_bag::access::ui().extension_desc_item_bound[index] = true;
                 }
             }
             continue;
@@ -203,15 +204,15 @@ void install_extension_desc_item_hooks_locked(void* item) {
                 if (unbind_result.code != kQolErrNotFound &&
                     unbind_result.code != kQolErrNotReady &&
                     unbind_result.code != kQolErrConflict) {
-                    runtime_state().ui.extension_desc_item_ids[index] = id;
-                    runtime_state().ui.extension_desc_item_bound[index] = true;
+                    ::qol::extension_bag::access::ui().extension_desc_item_ids[index] = id;
+                    ::qol::extension_bag::access::ui().extension_desc_item_bound[index] = true;
                 }
             }
             continue;
         }
 
-        runtime_state().ui.extension_desc_item_ids[index] = id;
-        runtime_state().ui.extension_desc_item_bound[index] = true;
+        ::qol::extension_bag::access::ui().extension_desc_item_ids[index] = id;
+        ::qol::extension_bag::access::ui().extension_desc_item_bound[index] = true;
         QOL_LOG_DEBUG(QolDomain::kExtensionBag,
                       "extension desc hook installed index=%d id=%llu button=%p data=%p execute_slot=%p original=%p",
                       static_cast<int>(index), static_cast<unsigned long long>(id),

@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/interface/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
@@ -76,7 +77,7 @@ std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to
 
 namespace {
 void refresh_extension_item_operation_locked(int bag) {
-    if (runtime_state().objects.module_view_installed && runtime_state().objects.module_view_index == bag) {
+    if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
 }
@@ -100,8 +101,8 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     {
         ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
-        if (slot >= runtime_state().objects.bag.capacities[bag]) return op_err("slot beyond derived capacity");
-        const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
+        if (slot >= ::qol::extension_bag::access::bag().capacities[bag]) return op_err("slot beyond derived capacity");
+        const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
         // R-63 佣兵徽章（category 42..50 / 928..933）：ITEMDATA_IsUse 不认（+2=0x1d），
         // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
@@ -110,12 +111,12 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (is_seal) {
             const auto* save_facts = qol::features::extension_bag::save_facts();
             if (save_facts == nullptr || save_facts->is_ok == nullptr ||
-                runtime_state().host.character_extras->read.has_empty_mercenary_slot == nullptr ||
+                ::qol::extension_bag::access::host().character_extras->read.has_empty_mercenary_slot == nullptr ||
                 extension_bag_write_api() == nullptr ||
                 extension_bag_write_api()->equipment.make_mercenary == nullptr) {
                 return op_err("symbol not resolved");
             }
-        } else if (runtime_state().host.game == nullptr || runtime_state().host.game->read_only.item.is_usable == nullptr ||
+        } else if (::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().game->read_only.item.is_usable == nullptr ||
                    extension_bag_write_api() == nullptr ||
                    extension_bag_write_api()->equipment.use_item == nullptr) {
             return op_err("symbol not resolved");
@@ -126,12 +127,12 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
 
         item = module_item_locked(bag, slot);
         leader = nullptr;
-        if (runtime_state().host.game != nullptr && runtime_state().host.character_extras->read.party_member != nullptr) {
-            (void)runtime_state().host.character_extras->read.party_member(0, &leader);
+        if (::qol::extension_bag::access::host().game != nullptr && ::qol::extension_bag::access::host().character_extras->read.party_member != nullptr) {
+            (void)::qol::extension_bag::access::host().character_extras->read.party_member(0, &leader);
         }
         if (item == nullptr) return op_err("extension item unavailable");
         if (!is_seal && leader == nullptr) return op_err("no leader");
-        closes_description = runtime_state().ui.extension_desc_item == item;
+        closes_description = ::qol::extension_bag::access::ui().extension_desc_item == item;
         if (!module_use_begin_locked(bag, slot, item, &use_token)) {
             return op_err("extension item already in use");
         }
@@ -182,17 +183,17 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     if (closes_description) {
         ::qol::extension_bag::ReentryLock lock;
         reset_extension_desc_item_hooks_locked();
-        runtime_state().ui.extension_desc_item = nullptr;
-        runtime_state().ui.extension_desc_item_bag = -1;
-        runtime_state().ui.extension_desc_item_slot = -1;
+        ::qol::extension_bag::access::ui().extension_desc_item = nullptr;
+        ::qol::extension_bag::access::ui().extension_desc_item_bag = -1;
+        ::qol::extension_bag::access::ui().extension_desc_item_slot = -1;
     }
     int32_t current_tutorial_state = -1;
     const auto* world_facts = qol::features::extension_bag::world_facts();
     if (used && world_facts != nullptr && world_facts->tutorial_state != nullptr &&
-        runtime_state().host.game->world_action.cancel_tutorial != nullptr &&
+        ::qol::extension_bag::access::host().game->world_action.cancel_tutorial != nullptr &&
         qol::contracts::succeeded(world_facts->tutorial_state(&current_tutorial_state)) &&
         current_tutorial_state == 6) {
-        (void)runtime_state().host.game->world_action.cancel_tutorial();
+        (void)::qol::extension_bag::access::host().game->world_action.cancel_tutorial();
     }
     return op_ok();
 }
@@ -205,7 +206,7 @@ QolResult extension_put_jewel_error(const char* message) {
 QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
                                             int equip_slot) {
     if (!extension_bag_ready_locked()) {
-        return extension_put_jewel_error(!runtime_state().enabled.load()
+        return extension_put_jewel_error(!::qol::extension_bag::access::enabled().load()
                                              ? "extension bag disabled"
                                              : "not in game");
     }
@@ -225,30 +226,30 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
     {
         ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
-        if (slot >= runtime_state().objects.bag.capacities[bag]) {
+        if (slot >= ::qol::extension_bag::access::bag().capacities[bag]) {
             return extension_put_jewel_error("slot beyond derived capacity");
         }
-        const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
+        const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
         if (descriptor.category <= 0 || descriptor.count <= 0) {
             return extension_put_jewel_error("slot empty");
         }
-        if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->is_jewel_category == nullptr ||
-            runtime_state().host.character_extras->read.party_member == nullptr ||
-            runtime_state().host.character_extras->read.equipped_item == nullptr ||
-            runtime_state().host.write_port->equipment.put_jewel == nullptr) {
+        if (::qol::extension_bag::access::host().item_facts == nullptr || ::qol::extension_bag::access::host().item_facts->is_jewel_category == nullptr ||
+            ::qol::extension_bag::access::host().character_extras->read.party_member == nullptr ||
+            ::qol::extension_bag::access::host().character_extras->read.equipped_item == nullptr ||
+            ::qol::extension_bag::access::host().write_port->equipment.put_jewel == nullptr) {
             return extension_put_jewel_error("symbol not resolved");
         }
         int32_t is_jewel = 0;
         if (!qol::contracts::succeeded(
-                runtime_state().host.item_facts->is_jewel_category(descriptor.category, &is_jewel)) ||
+                ::qol::extension_bag::access::host().item_facts->is_jewel_category(descriptor.category, &is_jewel)) ||
             is_jewel == 0) return extension_put_jewel_error("not jewel");
 
         void* ch = nullptr;
-        (void)runtime_state().host.character_extras->read.party_member(role, &ch);
+        (void)::qol::extension_bag::access::host().character_extras->read.party_member(role, &ch);
         if (ch == nullptr) return extension_put_jewel_error("role not found");
         jewel = module_item_locked(bag, slot);
         if (!qol::contracts::succeeded(
-                runtime_state().host.character_extras->read.equipped_item(ch, equip_slot, &equip))) {
+                ::qol::extension_bag::access::host().character_extras->read.equipped_item(ch, equip_slot, &equip))) {
             return extension_put_jewel_error("equip slot unavailable");
         }
         if (jewel == nullptr) return extension_put_jewel_error("extension jewel unavailable");
@@ -265,9 +266,9 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
     g_active_module_use_token = &use_token;
     int32_t result = -1;
     const bool put_jewel_succeeded =
-        runtime_state().host.game != nullptr &&
+        ::qol::extension_bag::access::host().game != nullptr &&
         qol::contracts::succeeded(
-            runtime_state().host.write_port->equipment.put_jewel(equip, jewel, &result));
+            ::qol::extension_bag::access::host().write_port->equipment.put_jewel(equip, jewel, &result));
     g_active_module_use_token = previous_use_token;
     if (!put_jewel_succeeded) {
         ::qol::extension_bag::ReentryLock lock;
@@ -294,7 +295,7 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
             int current_slot = -1;
             if (!module_slot_of_item_locked(jewel, &current_bag, &current_slot) ||
                 current_bag != bag || current_slot != slot ||
-                runtime_state().objects.module_objects[bag][slot] != jewel) {
+                ::qol::extension_bag::access::objects().module_objects[bag][slot] != jewel) {
                 return extension_put_jewel_error("extension jewel changed during native operation");
             }
             if (!consume_extension_item_after_native_locked(

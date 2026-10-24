@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/interface/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -43,15 +44,15 @@ int store_tab_index(void* ctrl) {
     const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
                             ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
     for (int index = 0; index < visible; ++index) {
-        if (runtime_state().store.tab_buttons[index] == ctrl) return index;
+        if (::qol::extension_bag::access::store().tab_buttons[index] == ctrl) return index;
     }
     return -1;
 }
 
 void store_refresh_tab_bag_items_locked() {
     for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
-        const uint8_t type = runtime_state().objects.bag.types[index];
-        void*& item = runtime_state().store.tab_bag_items[index];
+        const uint8_t type = ::qol::extension_bag::access::bag().types[index];
+        void*& item = ::qol::extension_bag::access::store().tab_bag_items[index];
         const int visible = virtual_bag::active_extension_bags() < virtual_bag::kMaxRenderedExtensionBagTabs
                                 ? virtual_bag::active_extension_bags()
                                 : virtual_bag::kMaxRenderedExtensionBagTabs;
@@ -87,13 +88,13 @@ bool store_all_tab_buttons_installed_locked() {
     const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
                             ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
     for (int index = 0; index < visible; ++index) {
-        if (runtime_state().store.tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
+        if (::qol::extension_bag::access::store().tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
     }
     return true;
 }
 
 bool store_has_tab_buttons_locked() {
-    for (void* button : runtime_state().store.tab_buttons) {
+    for (void* button : ::qol::extension_bag::access::store().tab_buttons) {
         if (button != nullptr) return true;
     }
     return false;
@@ -121,9 +122,9 @@ uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
         ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) return 1;
         const int index = store_tab_index(ctrl);
-        if (index >= 0 && runtime_state().store.tab_generation != 0) {
-            runtime_state().store.pending_tab = index;
-            runtime_state().store.pending_tab_generation = runtime_state().store.tab_generation;
+        if (index >= 0 && ::qol::extension_bag::access::store().tab_generation != 0) {
+            ::qol::extension_bag::access::store().pending_tab = index;
+            ::qol::extension_bag::access::store().pending_tab_generation = ::qol::extension_bag::access::store().tab_generation;
         }
         return 1;
     }
@@ -133,19 +134,19 @@ uint64_t store_tab_item_proc(void* ctrl, uint64_t event, void*, void*) {
 }  // namespace
 
 void store_disable_tab_buttons_locked() {
-    ++runtime_state().store.tab_generation;
-    runtime_state().store.pending_tab = -1;
-    runtime_state().store.pending_tab_generation = 0;
-    runtime_state().store.tab_buttons.fill(nullptr);
-    runtime_state().store.tab_anchors = {};
-    runtime_state().store.tab_root = nullptr;
+    ++::qol::extension_bag::access::store().tab_generation;
+    ::qol::extension_bag::access::store().pending_tab = -1;
+    ::qol::extension_bag::access::store().pending_tab_generation = 0;
+    ::qol::extension_bag::access::store().tab_buttons.fill(nullptr);
+    ::qol::extension_bag::access::store().tab_anchors = {};
+    ::qol::extension_bag::access::store().tab_root = nullptr;
 }
 
 void store_delete_tab_buttons_locked() {
     // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
     const auto* components = extension_bag_ui_components();
     for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
-        auto& state = runtime_state().store.tab_anchors[static_cast<size_t>(index)];
+        auto& state = ::qol::extension_bag::access::store().tab_anchors[static_cast<size_t>(index)];
         void* handle = nullptr;
         uint8_t live = 0;
         if (components != nullptr && components->anchored_control_detach != nullptr) {
@@ -156,7 +157,7 @@ void store_delete_tab_buttons_locked() {
         if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
             VIRTBAG_LOG("store tab delete failed control=%p", handle);
         }
-        runtime_state().store.tab_buttons[static_cast<size_t>(index)] = nullptr;
+        ::qol::extension_bag::access::store().tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
 }
 // ---- 商店页签锚定（ui_components minor 21）----
@@ -222,7 +223,7 @@ QolResult store_tab_anchor_create(void* parent, qol::contracts::UiRect rect, voi
         return fail("data-allocate", ctx->index);
     }
     std::memset(data, 0, 0x10);
-    *reinterpret_cast<void**>(data) = runtime_state().store.tab_bag_items[ctx->index];
+    *reinterpret_cast<void**>(data) = ::qol::extension_bag::access::store().tab_bag_items[ctx->index];
     if (!extension_bag_ui_set_control_data(control, data)) return fail("data-set", ctx->index);
     *out_control = control;
     return qol::contracts::ok();
@@ -243,9 +244,9 @@ bool store_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* com
             static_cast<uint32_t>(qol::contracts::QolUiRootKind::kStoreBagContainer),
             &store_tab_item_proc, &store_tab_anchor_layout, &store_tab_anchor_create, &ctx};
         uint8_t created = 0;
-        auto& state = runtime_state().store.tab_anchors[static_cast<size_t>(index)];
+        auto& state = ::qol::extension_bag::access::store().tab_anchors[static_cast<size_t>(index)];
         if (components->anchored_control_ensure(&state, &desc, &created).ok != kQolOk) all = false;
-        runtime_state().store.tab_buttons[static_cast<size_t>(index)] =
+        ::qol::extension_bag::access::store().tab_buttons[static_cast<size_t>(index)] =
             state.mounted != 0 ? state.handle : nullptr;
         if (created != 0 && out_created_any != nullptr) *out_created_any = true;
     }
@@ -257,8 +258,8 @@ bool store_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* com
 
 void store_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时商店页签不得挂载（3 个宿主之一）。
-    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return;
-    if (runtime_state().host.sdk == nullptr) return;
+    if (!::qol::extension_bag::access::enabled().load() || !extension_bag_session_admitted_locked()) return;
+    if (::qol::extension_bag::access::host().sdk == nullptr) return;
     void* bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreBagContainer);
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
@@ -267,34 +268,34 @@ void store_install_tab_buttons_locked() {
     if (components == nullptr) return;
     store_refresh_tab_bag_items_locked();
     const bool changed = !store_all_tab_buttons_installed_locked() ||
-        runtime_state().store.tab_root != bag_container;
+        ::qol::extension_bag::access::store().tab_root != bag_container;
     bool created_any = false;
     const bool complete = store_refresh_tab_anchors_locked(components, bag_container, &created_any);
     if (changed || created_any) {
-        ++runtime_state().store.tab_generation;
-        runtime_state().store.tab_root = bag_container;
+        ++::qol::extension_bag::access::store().tab_generation;
+        ::qol::extension_bag::access::store().tab_root = bag_container;
         VIRTBAG_LOG("store tabs installed root=%p generation=%llu complete=%d created=%d",
                     bag_container,
-                    static_cast<unsigned long long>(runtime_state().store.tab_generation),
+                    static_cast<unsigned long long>(::qol::extension_bag::access::store().tab_generation),
                     complete ? 1 : 0, created_any ? 1 : 0);
     }
 }
 void store_commit_pending_tab_locked() {
     if (!extension_bag_session_admitted_locked()) {
-        runtime_state().store.pending_tab = -1;
-        runtime_state().store.pending_tab_generation = 0;
+        ::qol::extension_bag::access::store().pending_tab = -1;
+        ::qol::extension_bag::access::store().pending_tab_generation = 0;
         return;
     }
-    if (!virtual_bag::valid_index(runtime_state().store.pending_tab) ||
-        runtime_state().store.pending_tab_generation != runtime_state().store.tab_generation) {
-        runtime_state().store.pending_tab = -1;
-        runtime_state().store.pending_tab_generation = 0;
+    if (!virtual_bag::valid_index(::qol::extension_bag::access::store().pending_tab) ||
+        ::qol::extension_bag::access::store().pending_tab_generation != ::qol::extension_bag::access::store().tab_generation) {
+        ::qol::extension_bag::access::store().pending_tab = -1;
+        ::qol::extension_bag::access::store().pending_tab_generation = 0;
         return;
     }
-    const int bag = runtime_state().store.pending_tab;
-    runtime_state().store.pending_tab = -1;
-    runtime_state().store.pending_tab_generation = 0;
-    if (runtime_state().store.view_installed && runtime_state().store.view_bag == bag) return;
+    const int bag = ::qol::extension_bag::access::store().pending_tab;
+    ::qol::extension_bag::access::store().pending_tab = -1;
+    ::qol::extension_bag::access::store().pending_tab_generation = 0;
+    if (::qol::extension_bag::access::store().view_installed && ::qol::extension_bag::access::store().view_bag == bag) return;
     store_install_module_view_locked(bag);
 }
 void store_draw_tab_buttons_locked() {
@@ -305,7 +306,7 @@ void store_draw_tab_buttons_locked() {
     const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
                             ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
     for (int index = visible - 1; index >= 0; --index) {
-        void* button = runtime_state().store.tab_buttons[index];
+        void* button = ::qol::extension_bag::access::store().tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;
         int64_t y = 0;
@@ -314,13 +315,13 @@ void store_draw_tab_buttons_locked() {
                                                static_cast<int32_t>(y - 12), 0, 1, 0);
     }
     for (int index = 0; index < visible; ++index) {
-        void* button = runtime_state().store.tab_buttons[index];
+        void* button = ::qol::extension_bag::access::store().tab_buttons[index];
         if (button == nullptr) continue;
         int64_t x = 0;
         int64_t y = 0;
         extension_bag_control_abs_pos(button, &x, &y);
-        const bool selected = runtime_state().store.view_installed && runtime_state().store.view_bag == index;
-        const bool equipped = runtime_state().objects.bag.capacities[index] != 0;
+        const bool selected = ::qol::extension_bag::access::store().view_installed && ::qol::extension_bag::access::store().view_bag == index;
+        const bool equipped = ::qol::extension_bag::access::bag().capacities[index] != 0;
         if (selected) {
             (void)extension_bag_ui_draw_part_alpha(0xf, 0x13, static_cast<int32_t>(x - 5),
                                                    static_cast<int32_t>(y - 12), 0, 1, 0);
@@ -340,24 +341,24 @@ void store_draw_tab_buttons_locked() {
 void store_draw_inven_bag_group_entry() {
     using DrawFn = void (*)();
     const auto backup = reinterpret_cast<DrawFn>(
-        runtime_state().ui.backup_store_draw_inven_bag_group);
+        ::qol::extension_bag::access::ui().backup_store_draw_inven_bag_group);
     if (backup == nullptr) return;
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"hook:UIStore_DrawInvenBagGroup"});
     ::qol::extension_bag::ReentryLock lock;
     int32_t saved_current = 0;
     bool masked = false;
-    if (runtime_state().store.view_installed &&
-        runtime_state().host.write_port->ui.current_bag != nullptr &&
-        runtime_state().host.write_port->ui.set_current_bag != nullptr &&
-        qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&saved_current)) &&
+    if (::qol::extension_bag::access::store().view_installed &&
+        ::qol::extension_bag::access::host().write_port->ui.current_bag != nullptr &&
+        ::qol::extension_bag::access::host().write_port->ui.set_current_bag != nullptr &&
+        qol::contracts::succeeded(::qol::extension_bag::access::host().write_port->ui.current_bag(&saved_current)) &&
         saved_current != kNoOriginalBagSelected) {
-        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        (void)::qol::extension_bag::access::host().write_port->ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
     backup();
-    if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+    if (masked) (void)::qol::extension_bag::access::host().write_port->ui.set_current_bag(saved_current);
 }
 // R-57 原版袋列高亮遮蔽（商店）：进入扩展视图时，画原版 UIStore_DrawInvenBagGroup
 // 前把当前袋 GOT 临时置 kNoOriginalBagSelected(6)，画完恢复 → 原版 6 袋不再高亮
@@ -365,12 +366,12 @@ void store_draw_inven_bag_group_entry() {
 // 的 store_draw_tab_buttons_locked 在袋列绘制之后补画。
 void store_draw_inven_bag_group_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"patch:P_EXT_STORE_BAG_DRAW"});
-    if (runtime_state().host.game == nullptr ||
-        runtime_state().host.write_port->ui.draw_original_store_bag_group == nullptr) return;
-    // The entry hook owns masking. Do not take runtime_state().mtx here: the
+    if (::qol::extension_bag::access::host().game == nullptr ||
+        ::qol::extension_bag::access::host().write_port->ui.draw_original_store_bag_group == nullptr) return;
+    // The entry hook owns masking. The runtime has no business mutex: the
     // entry hook runs while this wrapper calls the function and uses the same
     // non-recursive mutex.
-    (void)runtime_state().host.write_port->ui.draw_original_store_bag_group();
+    (void)::qol::extension_bag::access::host().write_port->ui.draw_original_store_bag_group();
 }

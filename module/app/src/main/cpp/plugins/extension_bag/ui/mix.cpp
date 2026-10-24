@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/interface/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -78,9 +79,9 @@ void* mix_item_root_locked() {
 // 面板状态：0=配方菜单（原版不画背包列），1=背包/合成视图。扩展页签只在 state!=0
 // 时挂载/绘制，避免在配方菜单阶段早于原版背包出现（UIMix_Draw 状态门控反汇编确认）。
 int mix_state_locked() {
-    if (runtime_state().host.craft_facts == nullptr || runtime_state().host.craft_facts->read_only.panel_state == nullptr) return 0;
+    if (::qol::extension_bag::access::host().craft_facts == nullptr || ::qol::extension_bag::access::host().craft_facts->read_only.panel_state == nullptr) return 0;
     int32_t state = 0;
-    return qol::contracts::succeeded(runtime_state().host.craft_facts->read_only.panel_state(&state)) ? state : 0;
+    return qol::contracts::succeeded(::qol::extension_bag::access::host().craft_facts->read_only.panel_state(&state)) ? state : 0;
 }
 
 int mix_tab_index(void* ctrl) {
@@ -95,7 +96,7 @@ int mix_tab_index(void* ctrl) {
 
 void mix_refresh_tab_bag_items_locked() {
     for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
-        const uint8_t type = runtime_state().objects.bag.types[index];
+        const uint8_t type = ::qol::extension_bag::access::bag().types[index];
         void*& item = mix_tab_bag_items[index];
         const int active = virtual_bag::active_extension_bags();
         const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
@@ -289,8 +290,8 @@ bool mix_refresh_tab_anchors_locked(const qol::contracts::QolUiComponents* compo
 
 void mix_install_tab_buttons_locked() {
     // 配置门控：扩展背包关闭时合成器页签不得挂载（3 个宿主之一）。
-    if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return;
-    if (runtime_state().host.sdk == nullptr) return;
+    if (!::qol::extension_bag::access::enabled().load() || !extension_bag_session_admitted_locked()) return;
+    if (::qol::extension_bag::access::host().sdk == nullptr) return;
     void* bag_container = mix_bag_container_locked();
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
@@ -347,7 +348,7 @@ void mix_commit_pending_tab_locked() {
 void mix_refresh_projection_locked() {
     if (!mix_view_installed || mix_projected_item_root == nullptr ||
         !virtual_bag::valid_index(mix_view_bag)) return;
-    const int capacity = runtime_state().objects.bag.capacities[mix_view_bag];
+    const int capacity = ::qol::extension_bag::access::bag().capacities[mix_view_bag];
     for (int slot = 0; slot < capacity; ++slot) {
         void* control = valid_child_locked(mix_projected_item_root, slot);
         if (control == nullptr) continue;
@@ -389,7 +390,7 @@ void mix_refresh_item_after_unlock() {
     lock.lock();
     if (refresh_generation != mix_refresh_generation ||
         view_generation != mix_view_generation) return;
-    if (!mix_frame_active || !runtime_state().enabled.load() ||
+    if (!mix_frame_active || !::qol::extension_bag::access::enabled().load() ||
         !extension_bag_session_admitted_locked()) {
         if (mix_view_installed) mix_restore_module_view_locked();
         return;
@@ -411,8 +412,8 @@ void mix_refresh_item_after_unlock() {
 
 void mix_install_module_view_locked(int bag) {
     if (!extension_bag_session_admitted_locked() || !virtual_bag::valid_index(bag) ||
-        runtime_state().objects.bag.capacities[bag] == 0 ||
-        runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.refresh_mix_item == nullptr) return;
+        ::qol::extension_bag::access::bag().capacities[bag] == 0 ||
+        ::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().write_port->ui.refresh_mix_item == nullptr) return;
     // UIMix 与 UIEquip 共用当前袋 GOT；落在任务袋 5/非法时回退原版袋 0。
     int host = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(host)) host = 0;
@@ -429,7 +430,7 @@ void mix_install_module_view_locked(int bag) {
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     if (!set_bag_size_word_locked(
             host, (size_word & ~kCapacityMask) |
-                      (static_cast<uint32_t>(runtime_state().objects.bag.capacities[bag]) & kCapacityMask))) {
+                      (static_cast<uint32_t>(::qol::extension_bag::access::bag().capacities[bag]) & kCapacityMask))) {
         VIRTBAG_LOG("mix view rejected capacity write bag=%d host=%d", bag, host);
         mix_original_size_word = 0;
         mix_original_bag_size = 0;
@@ -452,11 +453,11 @@ void mix_install_module_view_locked(int bag) {
         mix_request_item_refresh_locked();
         return;
     }
-    const int capacity = runtime_state().objects.bag.capacities[bag];
+    const int capacity = ::qol::extension_bag::access::bag().capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
         if (module_item_locked(bag, slot) != nullptr) {
-            ownership::borrow_for_view(&runtime_state().objects.ownership_ledger,
-                                       runtime_state().objects.module_object_handles[bag][slot]);
+            ownership::borrow_for_view(&::qol::extension_bag::access::objects().ownership_ledger,
+                                       ::qol::extension_bag::access::objects().module_object_handles[bag][slot]);
         }
     }
     mix_view_bag = bag;
@@ -464,7 +465,7 @@ void mix_install_module_view_locked(int bag) {
     ++mix_view_generation;
     mix_request_item_refresh_locked();
     VIRTBAG_LOG("mix view installed bag=%d window=%d capacity=%d", bag, host,
-                runtime_state().objects.bag.capacities[bag]);
+                ::qol::extension_bag::access::bag().capacities[bag]);
 }
 
 void mix_restore_module_view_locked() {
@@ -473,10 +474,10 @@ void mix_restore_module_view_locked() {
                 mix_view_bag, mix_window_original_bag, original_bag_locked(), mix_state_locked());
     if (virtual_bag::valid_index(mix_view_bag)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            const uint32_t handle = runtime_state().objects.module_object_handles[mix_view_bag][slot];
-            if (ownership::live_state(runtime_state().objects.ownership_ledger, handle,
+            const uint32_t handle = ::qol::extension_bag::access::objects().module_object_handles[mix_view_bag][slot];
+            if (ownership::live_state(::qol::extension_bag::access::objects().ownership_ledger, handle,
                                       ownership::State::kBorrowedForView)) {
-                ownership::return_from_view(&runtime_state().objects.ownership_ledger, handle);
+                ownership::return_from_view(&::qol::extension_bag::access::objects().ownership_ledger, handle);
             }
         }
     }
@@ -518,7 +519,7 @@ int mix_original_bag_button_index_locked(int64_t x, int64_t y) {
 
 uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"own:popup.mix"});
     int original_bag_target = -1;
     if ((event == 0x17 || event == 0x18) && param != 0) {
@@ -533,9 +534,9 @@ uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
             mix_pending_tab_generation = 0;
         }
     }
-    const uint32_t result = runtime_state().ui.mix_original_event != nullptr
+    const uint32_t result = ::qol::extension_bag::access::ui().mix_original_event != nullptr
                                 ? static_cast<uint32_t>(
-                                      runtime_state().ui.mix_original_event(event, param, param2))
+                                      ::qol::extension_bag::access::ui().mix_original_event(event, param, param2))
                                 : 0;
     if (original_bag_target >= 0) {
         ::qol::extension_bag::ReentryLock lock;
@@ -552,9 +553,9 @@ uint32_t mix_event_wrapper(uint64_t event, uint64_t param, uint64_t param2) {
 
 void mix_enter_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"own:popup.mix"});
-    if (runtime_state().ui.mix_original_enter != nullptr) runtime_state().ui.mix_original_enter();
+    if (::qol::extension_bag::access::ui().mix_original_enter != nullptr) ::qol::extension_bag::access::ui().mix_original_enter();
     {
         ::qol::extension_bag::ReentryLock lock;
         ensure_state_loaded_locked();
@@ -568,14 +569,14 @@ void mix_enter_wrapper() {
 
 void mix_f3_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"own:popup.mix"});
     MixSceneNoArgFn original = nullptr;
     {
         ::qol::extension_bag::ReentryLock lock;
         mix_teardown_locked();
         mix_frame_active = false;
-        original = runtime_state().ui.mix_original_f3;
+        original = ::qol::extension_bag::access::ui().mix_original_f3;
     }
     mix_refresh_item_after_unlock();
     if (original != nullptr) original();
@@ -606,7 +607,7 @@ void mix_draw_tab_buttons_locked() {
         int64_t y = 0;
         extension_bag_control_abs_pos(button, &x, &y);
         const bool selected = mix_view_installed && mix_view_bag == index;
-        const bool equipped = runtime_state().objects.bag.capacities[index] != 0;
+        const bool equipped = ::qol::extension_bag::access::bag().capacities[index] != 0;
         if (selected) {
             (void)extension_bag_ui_draw_part_alpha(0xf, 0x13, static_cast<int32_t>(x - 5),
                                                  static_cast<int32_t>(y - 12), 0, 1, 0);
@@ -626,7 +627,7 @@ void mix_draw_tab_buttons_locked() {
 
 void mix_draw_end_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"patch:P_EXT_MIX_DRAW_END"});
     {
         ::qol::extension_bag::ReentryLock lock;
@@ -639,7 +640,7 @@ void mix_draw_end_wrapper() {
                             mix_state, mix_view_installed ? 1 : 0, mix_view_bag,
                             mix_window_original_bag, original_bag_locked());
             }
-            const bool interactive = runtime_state().enabled.load() &&
+            const bool interactive = ::qol::extension_bag::access::enabled().load() &&
                                      extension_bag_session_admitted_locked() &&
                                      mix_state != 0;
             if (interactive) {
@@ -659,7 +660,7 @@ void mix_draw_end_wrapper() {
                 // state 0（配方菜单）：只隐藏页签，不卸载投影。合成确认会短暂
                 // 回到 state 0，若在此 restore 会在下一帧 state 1 前闪出原版袋。
                 // 仅扩展禁用或面板关闭（mix_f3）时恢复投影。
-                if (!runtime_state().enabled.load()) {
+                if (!::qol::extension_bag::access::enabled().load()) {
                     mix_restore_module_view_locked();
                 }
                 if (mix_tab_buttons[0] != nullptr) {
@@ -670,8 +671,8 @@ void mix_draw_end_wrapper() {
         }
     }
     mix_refresh_item_after_unlock();
-    if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->end_frame != nullptr) {
-        (void)runtime_state().host.sdk->ui->end_frame();
+    if (::qol::extension_bag::access::host().sdk != nullptr && ::qol::extension_bag::access::host().sdk->ui != nullptr && ::qol::extension_bag::access::host().sdk->ui->end_frame != nullptr) {
+        (void)::qol::extension_bag::access::host().sdk->ui->end_frame();
     }
 }
 
@@ -693,21 +694,21 @@ void mix_teardown_locked() {
 // mix_draw_tab_buttons_locked 在袋列绘制之后补画。
 void mix_draw_inven_bag_group_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
-        runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
+        ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
         {"patch:P_EXT_MIX_BAG_DRAW"});
-    if (runtime_state().host.game == nullptr ||
-        runtime_state().host.write_port->ui.draw_original_mix_bag_group == nullptr ||
-        runtime_state().host.write_port->ui.current_bag == nullptr ||
-        runtime_state().host.write_port->ui.set_current_bag == nullptr) return;
+    if (::qol::extension_bag::access::host().game == nullptr ||
+        ::qol::extension_bag::access::host().write_port->ui.draw_original_mix_bag_group == nullptr ||
+        ::qol::extension_bag::access::host().write_port->ui.current_bag == nullptr ||
+        ::qol::extension_bag::access::host().write_port->ui.set_current_bag == nullptr) return;
     ::qol::extension_bag::ReentryLock lock;
     int32_t saved_current = 0;
     bool masked = false;
     if (mix_view_installed &&
-        qol::contracts::succeeded(runtime_state().host.write_port->ui.current_bag(&saved_current)) &&
+        qol::contracts::succeeded(::qol::extension_bag::access::host().write_port->ui.current_bag(&saved_current)) &&
         saved_current != kNoOriginalBagSelected) {
-        (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        (void)::qol::extension_bag::access::host().write_port->ui.set_current_bag(kNoOriginalBagSelected);
         masked = true;
     }
-    (void)runtime_state().host.write_port->ui.draw_original_mix_bag_group();
-    if (masked) (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
+    (void)::qol::extension_bag::access::host().write_port->ui.draw_original_mix_bag_group();
+    if (masked) (void)::qol::extension_bag::access::host().write_port->ui.set_current_bag(saved_current);
 }
