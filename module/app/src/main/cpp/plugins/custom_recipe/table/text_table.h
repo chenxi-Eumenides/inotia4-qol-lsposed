@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "catalog.h"
+#include "../model/catalog.h"
 
 // 「宝石强化」呈现文案表（ADR 0001 D3：合成域的配方呈现文案归 custom_recipe）。
 // Scope 由 custom_recipe UI 子层持有并作为参数传入；本表不读取 infra 的活动 scope。

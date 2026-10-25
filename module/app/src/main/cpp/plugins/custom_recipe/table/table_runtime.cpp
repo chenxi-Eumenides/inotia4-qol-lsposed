@@ -8,8 +8,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "catalog.h"
-#include "rules.h"
+#include "../model/catalog.h"
+#include "../model/rules.h"
 #include "table.h"
 
 namespace custom_recipe {

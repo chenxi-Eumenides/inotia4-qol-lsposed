@@ -1,7 +1,7 @@
 // custom_recipe UI 子层：放料处置映射门禁（合并后内部结果枚举；不再依赖外部 craft_result 能力）。
 #include <cassert>
 
-#include "plugins/custom_recipe/result.h"
+#include "plugins/custom_recipe/model/result.h"
 #include "plugins/custom_recipe/ui/feature.h"
 
 int main() {

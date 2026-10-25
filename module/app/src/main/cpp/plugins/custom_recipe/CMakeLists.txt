@@ -1,9 +1,9 @@
 add_library(qol_plugin_custom_recipe STATIC
-    catalog.cpp
-    rules.cpp
-    table.cpp
-    table_runtime.cpp
-    feature.cpp
+    model/catalog.cpp
+    model/rules.cpp
+    table/table.cpp
+    table/table_runtime.cpp
+    result/feature.cpp
     plugin.cpp
     settings_contribution.cpp
     ui/feature.cpp

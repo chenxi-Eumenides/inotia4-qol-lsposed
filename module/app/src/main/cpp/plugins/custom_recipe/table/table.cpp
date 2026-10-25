@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "rules.h"
+#include "../model/rules.h"
 
 namespace custom_recipe {
 

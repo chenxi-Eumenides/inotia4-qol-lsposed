@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-#include "../../contracts/item_handle.h"
-#include "../../contracts/result.h"
+#include "../../../contracts/item_handle.h"
+#include "../../../contracts/result.h"
 
 // `custom_recipe` 内部结果层与 UI 子层之间的 typed contract。
 // 不经 capability registry 对外提供。

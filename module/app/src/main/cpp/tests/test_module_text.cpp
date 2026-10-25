@@ -1,7 +1,7 @@
 #include "plugins/character_panel_i18n/feature.h"
 
-#include "plugins/custom_recipe/catalog.h"
-#include "plugins/custom_recipe/text_table.h"
+#include "plugins/custom_recipe/model/catalog.h"
+#include "plugins/custom_recipe/table/text_table.h"
 #include "infra/text_scope.h"
 
 #include <cstddef>

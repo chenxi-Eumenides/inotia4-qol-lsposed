@@ -13,9 +13,9 @@
 #include "../../contracts/save_facts.h"
 #include "../../contracts/text_layer.h"
 #include "../../contracts/version.h"
-#include "feature.h"
-#include "table.h"
-#include "text_table.h"
+#include "result/feature.h"
+#include "table/table.h"
+#include "table/text_table.h"
 #include "ui/feature.h"
 #include "ui/runtime.h"
 

@@ -3,11 +3,11 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "catalog.h"
-#include "../../contracts/game_host.h"
-#include "../../contracts/game_ports/recipe_table_port.h"
-#include "../../contracts/result.h"
-#include "../../contracts/host_sdk.h"
+#include "../model/catalog.h"
+#include "../../../contracts/game_host.h"
+#include "../../../contracts/game_ports/recipe_table_port.h"
+#include "../../../contracts/result.h"
+#include "../../../contracts/host_sdk.h"
 
 // 自定义合成配方的 RECIPEBASE / MIXTUREBASE 表注入（custom-craft-recipe §4.3）。
 //

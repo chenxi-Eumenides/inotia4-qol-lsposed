@@ -76,10 +76,10 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/special_equip/rules.cpp
     plugins/special_equip/feature.cpp
     plugins/special_equip/plugin.cpp
-    plugins/custom_recipe/catalog.cpp
-    plugins/custom_recipe/rules.cpp
-    plugins/custom_recipe/table.cpp
-    plugins/custom_recipe/feature.cpp
+    plugins/custom_recipe/model/catalog.cpp
+    plugins/custom_recipe/model/rules.cpp
+    plugins/custom_recipe/table/table.cpp
+    plugins/custom_recipe/result/feature.cpp
     plugins/custom_recipe/plugin.cpp
     plugins/core.craft/plugin.cpp
     plugins/push_all/rules.cpp

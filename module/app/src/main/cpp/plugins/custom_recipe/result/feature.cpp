@@ -16,12 +16,12 @@
 #include <cstdio>
 #include <cstring>
 
-#include "../../contracts/attribute_quality.h"
-#include "../../contracts/events.h"
-#include "../../contracts/plugin.h"
-#include "catalog.h"
-#include "rules.h"
-#include "table.h"
+#include "../../../contracts/attribute_quality.h"
+#include "../../../contracts/events.h"
+#include "../../../contracts/plugin.h"
+#include "../model/catalog.h"
+#include "../model/rules.h"
+#include "../table/table.h"
 
 namespace qol::features::custom_recipe {
 

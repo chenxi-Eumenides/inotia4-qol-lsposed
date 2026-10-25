@@ -10,8 +10,8 @@
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/plugin.h"
 #include "contracts/ui.h"
-#include "plugins/custom_recipe/result.h"
-#include "plugins/custom_recipe/text_table.h"
+#include "plugins/custom_recipe/model/result.h"
+#include "plugins/custom_recipe/table/text_table.h"
 
 namespace {
 

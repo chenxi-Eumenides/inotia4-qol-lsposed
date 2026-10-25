@@ -6,7 +6,7 @@
 //
 // 本目标链接真实 plugins/custom_recipe/feature.cpp；表注入与游戏表由测试替身提供。
 
-#include "plugins/custom_recipe/feature.h"
+#include "plugins/custom_recipe/result/feature.h"
 
 #include <cassert>
 #include <cstdint>
@@ -17,9 +17,9 @@
 #include "contracts/craft_commands.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/plugin.h"
-#include "plugins/custom_recipe/catalog.h"
-#include "plugins/custom_recipe/result.h"
-#include "plugins/custom_recipe/table.h"
+#include "plugins/custom_recipe/model/catalog.h"
+#include "plugins/custom_recipe/model/result.h"
+#include "plugins/custom_recipe/table/table.h"
 
 namespace {
 

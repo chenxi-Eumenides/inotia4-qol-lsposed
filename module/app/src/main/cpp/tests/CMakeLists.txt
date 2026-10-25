@@ -294,9 +294,9 @@ add_test(NAME attribute_quality_tests COMMAND attribute_quality_tests)
 add_executable(custom_recipe_tests
     test_custom_recipe.cpp
     ${CPP_DIR}/plugins/attribute_quality/rules.cpp
-    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
-    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
-    ${CPP_DIR}/plugins/custom_recipe/table.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/rules.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table/table.cpp
 )
 target_include_directories(custom_recipe_tests PRIVATE
     ${CPP_DIR}
@@ -307,9 +307,9 @@ add_test(NAME custom_recipe_tests COMMAND custom_recipe_tests)
 # Exercise the production custom_recipe provider through typed craft item handles and ports.
 add_executable(custom_recipe_handle_chain_tests
     test_custom_recipe_handle_chain.cpp
-    ${CPP_DIR}/plugins/custom_recipe/feature.cpp
-    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
-    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
+    ${CPP_DIR}/plugins/custom_recipe/result/feature.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/rules.cpp
 )
 target_include_directories(custom_recipe_handle_chain_tests PRIVATE ${CPP_DIR})
 target_compile_features(custom_recipe_handle_chain_tests PRIVATE cxx_std_17)
@@ -321,10 +321,10 @@ add_test(NAME custom_recipe_handle_chain_tests COMMAND custom_recipe_handle_chai
 # 链接 production table.cpp（核心与 Android 入口共用），因此走真实分类/注入路径而非替身。
 add_executable(custom_recipe_table_readiness_tests
     test_custom_recipe_table_readiness.cpp
-    ${CPP_DIR}/plugins/custom_recipe/table.cpp
-    ${CPP_DIR}/plugins/custom_recipe/table_runtime.cpp
-    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
-    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table/table.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table/table_runtime.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/rules.cpp
     ${CPP_DIR}/game/adapter_ports/recipe_table_port.cpp
 )
 target_include_directories(custom_recipe_table_readiness_tests PRIVATE ${CPP_DIR})
@@ -2278,10 +2278,10 @@ add_executable(custom_recipe_owner_fixture_tests
     test_custom_recipe_owner_fixture.cpp
     test_custom_recipe_owner_fixture_stubs.cpp
     ${CUSTOM_RECIPE_FIXTURE_HARNESS}
-    ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
-    ${CPP_DIR}/plugins/custom_recipe/rules.cpp
-    ${CPP_DIR}/plugins/custom_recipe/table.cpp
-    ${CPP_DIR}/plugins/custom_recipe/feature.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/catalog.cpp
+    ${CPP_DIR}/plugins/custom_recipe/model/rules.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table/table.cpp
+    ${CPP_DIR}/plugins/custom_recipe/result/feature.cpp
     ${CPP_DIR}/plugins/custom_recipe/plugin.cpp
     ${CPP_DIR}/plugins/custom_recipe/ui/feature.cpp
     ${CPP_DIR}/plugins/custom_recipe/ui/runtime.cpp

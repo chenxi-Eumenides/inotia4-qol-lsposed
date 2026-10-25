@@ -5,7 +5,7 @@
 #include <map>
 #include <vector>
 
-#include "../../contracts/result.h"
+#include "../../../contracts/result.h"
 
 // 自定义合成配方目录（custom-craft-recipe §4.2）——唯一真源。
 //

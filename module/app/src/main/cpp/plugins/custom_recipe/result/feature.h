@@ -1,14 +1,14 @@
 #pragma once
 
-#include "../../contracts/craft_commands.h"
-#include "../../contracts/craft_facts.h"
-#include "../../contracts/game_host.h"
-#include "../../contracts/game_ports/custom_recipe_write_port.h"
-#include "../../contracts/host_sdk.h"
-#include "../../contracts/ownership.h"
-#include "../../contracts/item_facts.h"
-#include "../../contracts/save_facts.h"
-#include "result.h"
+#include "../../../contracts/craft_commands.h"
+#include "../../../contracts/craft_facts.h"
+#include "../../../contracts/game_host.h"
+#include "../../../contracts/game_ports/custom_recipe_write_port.h"
+#include "../../../contracts/host_sdk.h"
+#include "../../../contracts/ownership.h"
+#include "../../../contracts/item_facts.h"
+#include "../../../contracts/save_facts.h"
+#include "../model/result.h"
 
 namespace qol::contracts {
 struct PluginContext;

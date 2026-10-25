@@ -13,9 +13,9 @@
 
 #include "contracts/game_ports/recipe_table_port.h"
 #include "game/adapter_ports/recipe_table_port.h"
-#include "plugins/custom_recipe/catalog.h"
-#include "plugins/custom_recipe/rules.h"
-#include "plugins/custom_recipe/table.h"
+#include "plugins/custom_recipe/model/catalog.h"
+#include "plugins/custom_recipe/model/rules.h"
+#include "plugins/custom_recipe/table/table.h"
 
 #include <cassert>
 #include <cstdint>

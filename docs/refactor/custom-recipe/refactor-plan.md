@@ -35,7 +35,7 @@
 
 | 编号 | 条款 | 事实 |
 |---|---|---|
-| G-01 | §4.1 / `ARCHITECTURE.md:74,351` | `plugins/custom_recipe/table.cpp:420,426-430,450` 在插件内持有 `extern uintptr_t g_base` 与 5 个十进制 VMA（`3152304/3152312/3152314/3152288/3152296`），等于 `game_symbols.h:414-416,427-428` 的 `G_RECIPEBASE_*`/`G_MIXTUREBASE_*`，同一事实维护两份。`check_offsets.py` 只匹配十六进制与 `VMA/ADDR/OFFSET` 标识符，漏检该十进制形态。 |
+| G-01 | §4.1 / `ARCHITECTURE.md:74,351` | `plugins/custom_recipe/table/table.cpp:420,426-430,450（迁移前路径）` 在插件内持有 `extern uintptr_t g_base` 与 5 个十进制 VMA（`3152304/3152312/3152314/3152288/3152296`），等于 `game_symbols.h:414-416,427-428` 的 `G_RECIPEBASE_*`/`G_MIXTUREBASE_*`，同一事实维护两份。`check_offsets.py` 只匹配十六进制与 `VMA/ADDR/OFFSET` 标识符，漏检该十进制形态。 |
 | G-02 | §3.2 / DoD-5 | 无 `EntryGuard`/线程断言。主线程契约只写在注释（`feature.cpp:363`、`catalog.cpp:138-141`）。当前风险由「`api_execute` 入口先清 pending」与 generation 校验兜住（`feature.cpp:745-763`），未验证。 |
 | G-03 | §6-5 组件抽取 | 18 个文件平铺 + `ui/` 子目录；`feature.cpp` 1,267 行承载结果层、材料需求、动态配方事件、ownership ops、命令 handler。仅可读性问题，不影响依赖方向。 |
 
@@ -64,8 +64,8 @@
 ```
 contracts/game_ports/recipe_table_port.h     新契约（POD）
 game/adapter_ports/recipe_table_port.{h,cpp} 唯一地址来源（可 include game_symbols.h）
-plugins/custom_recipe/table_runtime.cpp    端口 → TableAccess 适配 + 3 个生产入口
-plugins/custom_recipe/table.{h,cpp}        纯核心，删除 #ifdef __ANDROID__ 整段
+plugins/custom_recipe/table/table_runtime.cpp  端口 → TableAccess 适配 + 3 个生产入口
+plugins/custom_recipe/table/table.{h,cpp}      纯核心，删除 #ifdef __ANDROID__ 整段
 ```
 
 ### 3.2 新端口契约

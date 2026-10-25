@@ -5,9 +5,9 @@
 #include <cstdint>
 #include <cstring>
 
-#include "../feature.h"
-#include "../result.h"
-#include "../text_table.h"
+#include "../result/feature.h"
+#include "../model/result.h"
+#include "../table/text_table.h"
 #include "feature.h"
 
 // ===========================================================================

@@ -5,7 +5,7 @@
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
 #include "plugins/core.craft/plugin.h"
-#include "plugins/custom_recipe/result.h"
+#include "plugins/custom_recipe/model/result.h"
 
 #include <cstdio>
 #include <cstddef>

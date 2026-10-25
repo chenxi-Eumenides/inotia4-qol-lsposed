@@ -23,10 +23,10 @@
 |---|---|---|
 | Descriptor / 生命周期 / typed 接线 | `plugin.cpp` | 依赖与端口校验、注册事务与失败清理、门禁、text 消费者、资源声明组装。 |
 | UI 子层 | `ui/feature.{h,cpp}`、`ui/runtime.{h,cpp}` | UIMix 界面动作与文案、12 条 hook wrapper、本地 TLS text scope、UI 本地 backups 与 claims。 |
-| 结果层 | `feature.cpp`、`feature.h` | 放料/准备/执行/产物/材料需求/宝石升阶、quality 消费、动态配方事件、ownership ops。 |
-| 纯规则 | `rules.{h,cpp}` | 档位序数与区间搜索、材料数量、三格库存/token 判定、宝石数值缩放。 |
-| 静态/动态目录 | `catalog.{h,cpp}` | 两条 RECIPEBASE 注入 entry、8 条静态三格规则、26 类特殊装备动态配方构造。 |
-| 表注入 | `table.{h,cpp}`、`table_runtime.cpp`、`text_table.h` | 注入构造与组位快照/恢复（纯核心）、端口槽位装配与 ensure/deactivate（运行时）、配方呈现文案表。 |
+| 结果层 | `result/feature.cpp`、`result/feature.h` | 放料/准备/执行/产物/材料需求/宝石升阶、quality 消费、动态配方事件、ownership ops。 |
+| 纯规则 | `model/rules.{h,cpp}` | 档位序数与区间搜索、材料数量、三格库存/token 判定、宝石数值缩放。 |
+| 静态/动态目录 | `model/catalog.{h,cpp}` | 两条 RECIPEBASE 注入 entry、8 条静态三格规则、26 类特殊装备动态配方构造。 |
+| 表注入 | `table/table.{h,cpp}`、`table/table_runtime.cpp`、`table/text_table.h` | 注入构造与组位快照/恢复（纯核心）、端口槽位装配与 ensure/deactivate（运行时）、配方呈现文案表。 |
 
 ## 配方目录与运行机制
 
@@ -150,12 +150,12 @@
 | Descriptor、依赖、开关与生命周期 | `plugins/custom_recipe/plugin.cpp:33-331` | required/optional、两条 port、13 条资源组装、安装事务与清理、门禁、text 消费者、唯一 feature。 |
 | UI 子层接口与实现 | `plugins/custom_recipe/ui/feature.h:26-156`、`ui/feature.cpp:11-351` | UIMix 控件/事实读写封装、local TLS text scope、放料处置映射、成功收尾与提示。 |
 | UI runtime | `plugins/custom_recipe/ui/runtime.h:12-25`、`ui/runtime.cpp:34-658` | 12 条 hook wrapper、claims、backups、bind/clear、CR01/CR02/CR03 提示与真实随机适配。 |
-| 结果层 | `plugins/custom_recipe/feature.cpp:64-1216`、`feature.h:24-60` | place/prepare/execute/make-item、quality 消费、动态配方事件、材料需求、table ownership ops。 |
-| 内部结果契约 | `plugins/custom_recipe/result.h:10-105` | 结果枚举与 Input/Output POD 及 `CraftResultApi`。 |
-| 纯规则 | `plugins/custom_recipe/rules.h:17-101`、`rules.cpp:42-224` | 档位/区间/候选、材料数量、三格库存与 token、宝石缩放。 |
-| 静态/动态目录 | `plugins/custom_recipe/catalog.h:14-200`、`catalog.cpp:43-345` | 两条注入 entry、8 条静态规则、26 类动态构造与匹配。 |
-| 表注入（纯核心） | `plugins/custom_recipe/table.h:20-111`、`table.cpp:1-411` | 注入构造、组位快照/恢复、分类/注入/还原核心；不含平台或地址代码。 |
-| 表注入（运行时） | `plugins/custom_recipe/table_runtime.cpp` | 绑定 `QolRecipeTablePort`、装配 `TableAccess`、ensure/deactivate 入口、表日志绑定。 |
-| 配方呈现文案 | `plugins/custom_recipe/text_table.h:9-90` | 本地 scope 与 id 的替换映射。 |
+| 结果层 | `plugins/custom_recipe/result/feature.cpp`、`result/feature.h` | place/prepare/execute/make-item、quality 消费、动态配方事件、材料需求、table ownership ops。 |
+| 内部结果契约 | `plugins/custom_recipe/model/result.h` | 结果枚举与 Input/Output POD 及 `CraftResultApi`。 |
+| 纯规则 | `plugins/custom_recipe/model/rules.h`、`model/rules.cpp` | 档位/区间/候选、材料数量、三格库存与 token、宝石缩放。 |
+| 静态/动态目录 | `plugins/custom_recipe/model/catalog.h`、`model/catalog.cpp` | 两条注入 entry、8 条静态规则、26 类动态构造与匹配。 |
+| 表注入（纯核心） | `plugins/custom_recipe/table/table.h`、`table/table.cpp` | 注入构造、组位快照/恢复、分类/注入/还原核心；不含平台或地址代码。 |
+| 表注入（运行时） | `plugins/custom_recipe/table/table_runtime.cpp` | 绑定 `QolRecipeTablePort`、装配 `TableAccess`、ensure/deactivate 入口、表日志绑定。 |
+| 配方呈现文案 | `plugins/custom_recipe/table/text_table.h` | 本地 scope 与 id 的替换映射。 |
 | 设置兼容源 | `plugins/custom_recipe/settings_contribution.cpp:3-6` | 兼容入口不注册设置项；feature metadata 唯一来自 descriptor。 |
-| Build composition | `plugins/custom_recipe/CMakeLists.txt:1-10` | catalog/rules/table/feature/plugin/settings contribution 与 `ui/feature.cpp`、`ui/runtime.cpp`。 |
+| Build composition | `plugins/custom_recipe/CMakeLists.txt` | `model/`、`table/`、`result/`、`ui/` 与 `plugin.cpp`、`settings_contribution.cpp`。 |

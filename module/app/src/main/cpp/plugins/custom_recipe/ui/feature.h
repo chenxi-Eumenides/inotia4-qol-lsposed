@@ -8,7 +8,7 @@
 #include "../../../contracts/game_ports/craft_ui_write_port.h"
 #include "../../../contracts/host_sdk.h"
 #include "../../../contracts/item_facts.h"
-#include "../result.h"
+#include "../model/result.h"
 
 namespace qol::contracts {
 struct PluginContext;

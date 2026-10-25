@@ -40,10 +40,10 @@
 #include "contracts/plugin.h"
 #include "contracts/save_facts.h"
 #include "contracts/text_layer.h"
-#include "plugins/custom_recipe/feature.h"
+#include "plugins/custom_recipe/result/feature.h"
 #include "plugins/custom_recipe/plugin.h"
-#include "plugins/custom_recipe/table.h"
-#include "plugins/custom_recipe/text_table.h"
+#include "plugins/custom_recipe/table/table.h"
+#include "plugins/custom_recipe/table/text_table.h"
 #include "plugins/custom_recipe/ui/feature.h"
 #include "plugins/custom_recipe/ui/runtime.h"
 
