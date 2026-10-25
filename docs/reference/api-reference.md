@@ -964,15 +964,29 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 ### 4.1 背包读 inventory
 
-> **扩展逻辑袋并入（v0.6.16）**：`extension_bag.extended_bag=true` 且处于 world 时，全部背包读端点自动并入扩展逻辑袋 `6..10`（schema 与原版袋一致：`bag/items/capacity/slot_count`，物品项为 `slot/category/count`）；`false` 或非 world 时仅返回原版 `0..5`。扩展袋容量按各袋已装备的 BagType 派生（0=未装备→0，1..4→4/8/12/16），不同袋可不同；扩展物品不进入原版 `g_inven`（模块自持）。原版第 6 袋（索引 `5`，任务物品专用袋）不属于扩展域。
+> **三空间编号**：
+>
+> | 空间 | `space` | 空间内 `bag` 索引 | 来源 |
+> |---|---:|---|---|
+> | 原版 | 0 | 0..5 | 索引固定；袋 5 为任务袋，只可作为读取来源，不得作为移动源或目标 |
+> | 改版（C18 追加袋） | 1 | 0..c−1 | 动态探测；原生袋号为 `6 + bag` |
+> | 扩展 | 2 | 0..e−1 | 注册袋源 |
+>
+> 各空间内的 `bag` 索引均从 0 开始。扁平袋号按「原版 → 改版 → 注册源」连接；注册源之间的顺序不保证。扁平袋号仅为便利入口，不可持久化、用作跨请求稳定标识或排序键；排序与游标使用 `(space, bag, slot)`。
 
 #### 背包复合
 
-`GET /api/item/inventory`
+`GET /api/item/inventory?space=&bag=&cursor=&limit=`
 
-**用途**：获取背包完整信息（原版 6 袋 × 16 槽 + 扩展逻辑袋 6..10（启用时），含名称注入）。
+**用途**：按空间、袋筛选并分页获取袋元数据与物品列表，物品含名称注入。
 
-**返回格式**：`<Inventory 模型>`
+**返回格式**：
+
+```text
+{"bags":[{space,bag,capacity,slot_count}],"items":[{space,bag,slot,<item fields>}],"next_cursor":"S:B:K"|null,"has_more":bool}
+```
+
+`bags` 返回快照中的袋元数据；`items` 按游标分页。查询参数 `space`、`bag`、`cursor`、`limit` 均可选；指定 `space` 时 `bag` 是该空间内索引，未指定 `space` 时 `bag` 是扁平袋号；只指定 `space` 时筛选该空间。扁平袋号或空间内袋索引无法解析时返回 HTTP 404 `bag not found`。
 
 #### 金币
 
@@ -984,35 +998,39 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 #### 全部物品展平
 
-`GET /api/item/inventory/items`
+`GET /api/item/inventory/items?space=&bag=&cursor=&limit=`
 
-**用途**：获取全部物品展平列表（每项附 bag 字段；启用时含扩展袋物品 bag=6..10）。
+**用途**：按空间、袋筛选并分页获取物品展平列表。
 
-**返回格式**：`{ "items": [ { "bag": 0, "slot": 3, "category": 1, "count": 1, "name": "治疗药水" }, ... ] }`
+**返回格式**：`{"items":[{space,bag,slot,<item fields>}],"next_cursor":"S:B:K"|null,"has_more":bool}`（不含 `bags`）
+
+**分页规则（以上两条列表端点）**：`limit` 默认 100、最大 500，限制每页物品数；无效值返回 HTTP 400 `bad limit`。游标格式为 `<space>:<bag>:<slot>`，无效游标返回 HTTP 400 `bad cursor`。物品按 `(space,bag,slot)` 排序，`next_cursor` 指向当前页最后一件物品；没有后续页时为 `null`。不返回总数；分页期间袋发生变化时，后续页可能跳过或重复物品。
 
 #### 袋信息
 
-`GET /api/item/inventory/bag/{bag}/info`
+`GET /api/item/inventory/bag/{bag}/info[?space=]`
 
-**用途**：获取指定袋（0..5 原版；6..10 扩展，启用时）信息（容量/占用）。
+**用途**：获取指定袋的容量与占用数。指定 `space` 时 `{bag}` 是空间内索引；省略时 `{bag}` 是扁平袋号；无效袋返回 HTTP 404 `bag not found`。
 
-**返回格式**：`{ "bag": 0, "capacity": 16, "slot_count": 13 }`
+**返回格式**：`{"space":S,"bag":B,"capacity":C,"slot_count":N}`
 
 #### 袋内指定槽
 
-`GET /api/item/inventory/bag/{bag}/{slot}`
+`GET /api/item/inventory/bag/{bag}/{slot}[?space=]`
 
-**用途**：获取指定袋内指定槽物品（**按 `slot` 字段匹配，不跳过空格**）。
+**用途**：获取指定袋内指定槽物品（**按 `slot` 字段匹配，不跳过空格**）。`{bag}` 按袋信息端点的规则解析；无效袋返回 HTTP 404 `bag not found`，越界槽返回 HTTP 404 `slot not found`。
 
-**返回格式**：`<Item 对象>`（含 name）或 `null`（空槽）
+**返回格式**：`<Item 对象>`（含 `space`、`bag`、`slot` 和既有 Item 字段）或 `null`（有效范围内的空槽）
 
 **注意**：按实际格号（物品的 `slot` 字段）匹配，不做数组下标偏移——native 输出跳过空格后数组下标 ≠ 实际格号，查询以 `slot` 为准。
 
 ### 4.2 背包操作 inventory
 
-> 写操作统一「动词+宾语」两词命名。
+> 写操作统一「动词+宾语」两词命名。涉及背包位置的请求可带 `space`，省略时 `bag` 按扁平袋号解析；移动请求的目标可带 `to_space`，省略时 `to_bag` 按扁平袋号解析。提供 `space` / `to_space` 时，对应的 `bag` / `to_bag` 为该空间内索引。
 
-**数字字段错误**：body 数字字段缺失时返回该端点原有的 `... required` 错误；字段存在但不是有效 int32 整数（包括小数、指数、前导 `+`、超 int32 或超长数字）时返回 HTTP 400 `{"ok":false,"error":"bad value for <field>"}`。整包 JSON 语法非法或 body 不是对象时仍返回 `bad request`。适用于本节中的 `bag`、`slot`、`count`、`to_bag`、`to_slot`、`category`、`equip_slot`，以及 OP add 的 `socket`/`enhanceRemaining`/`rarity` 和 OP money 的 `money`。
+**数字字段错误**：body 数字字段缺失时返回该端点原有的 `... required` 错误；字段存在但不是有效 int32 整数（包括小数、指数、前导 `+`、超 int32 或超长数字）时返回 HTTP 400 `{"ok":false,"error":"bad value for <field>"}`。整包 JSON 语法非法或 body 不是对象时仍返回 `bad request`。适用于本节中的 `bag`、`space`、`slot`、`count`、`to_bag`、`to_space`、`to_slot`、`category`、`equip_slot`，以及 OP add 的 `socket`/`enhanceRemaining`/`rarity` 和 OP money 的 `money`。
+
+空间 1 中对应原生袋号（`6 + bag`）已被扩展 provider 认领时，写入返回 HTTP 409 `{"ok":false,"error":"c18 bag write requires host arbitration"}`。成功结果中 `slots[]` / `inventory[]` 的槽条目以 `space` 为首字段，后续为 `bag`、`slot`、`item`；`gained[]` 条目也以 `space` 为首字段，后续为 `bag`、`slot`、`category`、`count`。
 
 #### 使用物品
 
@@ -1022,7 +1040,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **请求格式**：`{ "bag": 0, "slot": 3 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 含实际变化槽的 `slots`，有获得物品时另含 `gained`，且只有当前主控 HP/MP 发生变化时才附对应 `player` 字段。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 含实际变化槽的 `slots`，有获得物品时另含 `gained`（位置条目均带 `space`），且只有当前主控 HP/MP 发生变化时才附对应 `player` 字段。
 
 **注意**：骰子→掷骰预览返回 `base/pending/delta`（不应用，由 `accept_dice`/`reject_dice` 处理）；非消耗品→`item not usable`；常规物品冷却中/状态不符→`on cooldown`（不消耗）。
 
@@ -1058,7 +1076,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **请求格式**：`{ "bag": 0, "slot": 5 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":null},…]}`，列出源槽与其他实际变化槽。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；result 为 `{"ok":true,"slots":[{"space":S,"bag":B,"slot":K,"item":null},…]}`，列出源槽与其他实际变化槽。
 
 **注意**：按槽位清空判定成功。
 
@@ -1066,16 +1084,15 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 `POST /api/item/inventory/move_item`
 
-**用途**：移动物品或堆叠合并。按 bag 域自动分派：原版↔原版走 `INVEN_MoveItem`（支持部分数量）；任一端为扩展逻辑袋（6..10）时走扩展事务路径（整堆移动、序列化/重建、自动选槽）。
+**用途**：在背包空间之间移动物品或堆叠合并；源、目标通过 `space` / `to_space` 与对应袋索引确定，省略空间时使用扁平袋号。
 
 **请求格式**：`{ "bag": 0, "slot": 3, "count": 1, "to_bag": 0, "to_slot": 4 }`
 
-**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":<Item|null>},…]}`。原版↔原版列出请求源/目标槽及其他实际变化槽；扩展袋路径只列出源槽和**实际变化槽**，不强制返回请求目标槽（重复槽去重）。原版→扩展忽略 `to_slot`，客户端应以响应中的实际变化槽作为落槽。扩展袋成功同样由 `core.item` 生成该差量结果，不返回完整扩展背包状态；失败体保持扩展操作原错误 JSON。
+**返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"slots":[{"space":S,"bag":B,"slot":K,"item":<Item|null>},…]}`，列出源/目标槽及其他实际变化槽，重复槽去重；失败返回对应错误。
 
 **注意**：
 - 源空槽→`slot empty`；count≤0→参数错；同槽→`same slot`；目标越界→`bad target`。
-- **扩展路径（bag 含 6..10）**：整堆移动（`count` 忽略）；同一扩展逻辑袋内同类可堆叠物品才尝试合并，跨扩展袋不合并；原版→扩展属于跨域移动，也不合并；放置槽自动选择（优先同袋可合并槽/空槽，`to_slot` 仅扩展→扩展生效）；`bag`/`to_bag`=5（任务物品袋）→`task bag excluded`；扩展开关关闭→`extension bag disabled`；跨域移动写入模块 unsaved journal，显式保存（`/api/system/save`）成功后清零。
-- 原版→原版不可经扩展路径分派；扩展内部事务失败自动回滚，可安全重试。
+- 任务袋 `(space=0, bag=5)` 不得作为移动源或目标，返回 `task bag excluded`。
 
 #### 出售物品
 
@@ -1087,7 +1104,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；成功 result 为 `{"ok":true,"price":N,"slots":[…],"money":N}`，包含变化槽差量和更新后的金币，不含完整 Inventory。
 
-**注意**：空槽→`slot empty`；任务袋 `bag=5` 拒绝；倍率按游戏变体：original/unknown 0%、overhaul/monster 70%、c18 85%。原价（100%）仅用于商店手动出售，不用于本 API。
+**注意**：空槽→`slot empty`；任务袋 `(space=0, bag=5)` 拒绝；倍率按游戏变体：original/unknown 0%、overhaul/monster 70%、c18 85%。原价（100%）仅用于商店手动出售，不用于本 API。
 
 #### 穿装备
 
