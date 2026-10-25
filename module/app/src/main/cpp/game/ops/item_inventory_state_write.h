@@ -14,6 +14,13 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
                    int32_t enhance_remaining, int32_t rarity_group,
                    const contracts::QolItemCountApi* item_count,
                    contracts::QolItemInventoryStateWriteResult* out);
+QolResult load_item(const uint8_t* payload, uint32_t size, contracts::QolItemHandle* out_item);
+QolResult free_loaded_item(contracts::QolItemHandle item);
+QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
+                     contracts::QolItemHandle item,
+                     contracts::QolItemInventoryStateWriteResult* out);
+QolResult remove_item(contracts::QolItemHandle item, int32_t count,
+                      contracts::QolItemInventoryStateWriteResult* out);
 QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
                      const contracts::QolInventoryExtensionProvider* provider,
                      contracts::QolItemInventoryStateWriteResult* out);

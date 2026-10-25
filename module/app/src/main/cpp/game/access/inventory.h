@@ -52,6 +52,9 @@ QolResult set_desc_type(int32_t type);
 QolResult bag_capacity_word(int32_t bag, uint32_t* out_word);
 QolResult set_bag_capacity_word(int32_t bag, uint32_t word);
 QolResult set_physical_item(int32_t bag, int32_t slot, void* item);
+QolResult set_native_space_item(const contracts::QolBagRef* ref, int32_t slot, void* item);
+QolResult serialize_item(contracts::QolItemHandle item, uint8_t* out, uint32_t capacity,
+                         uint32_t* out_size);
 
 // Hook dispatch belongs to Game Adapter so an ABI object pointer is never returned to a plugin.
 void* game_inventory_find_item_hook(int32_t category);

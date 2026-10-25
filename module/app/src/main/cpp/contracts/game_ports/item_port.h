@@ -193,6 +193,11 @@ struct QolItemPortReadApi {
     QolResult (*bag_info)(const QolBagRef* ref, QolBagInfo* out_info);
     QolResult (*item_at)(const QolBagRef* ref, int32_t slot, QolInventoryItemRef* out);
     QolResult (*for_each_space_slot)(int32_t space_id, QolInventoryBagSlotFn fn, void* ctx);
+    // 3.8: serialize the complete stack via SAVE_SaveItem. A null out queries required size;
+    // insufficient capacity returns InvalidArgument and still reports the required size.
+    // Stale handles return NotFound; an unavailable game or symbol returns NotReady.
+    QolResult (*serialize_item)(QolItemHandle item, uint8_t* out, uint32_t capacity,
+                                uint32_t* out_size);
 };
 
 struct QolItemPort {
@@ -225,6 +230,13 @@ inline bool qol_item_port_bag_space_size_valid(const QolItemPort* port) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, for_each_space_slot) +
         sizeof(QolItemPortReadApi::for_each_space_slot));
+    return port != nullptr && port->struct_size >= kRequiredSize;
+}
+
+inline bool qol_item_port_transfer_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, serialize_item) +
+        sizeof(decltype(QolItemPortReadApi::serialize_item)));
     return port != nullptr && port->struct_size >= kRequiredSize;
 }
 

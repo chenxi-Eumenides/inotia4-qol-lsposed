@@ -233,6 +233,11 @@ QolResult read_for_each_space_slot(int32_t space_id,
     return inventory_for_each_space_slot(space_id, callback, ctx);
 }
 
+QolResult read_serialize_item(contracts::QolItemHandle item, uint8_t* out, uint32_t capacity,
+                              uint32_t* out_size) {
+    return serialize_item(item, out, capacity, out_size);
+}
+
 QolResult read_inventory_extension_access(contracts::QolInventoryExtensionAccess* out_access) {
     return inventory_extension_get_access(out_access);
 }
@@ -441,8 +446,8 @@ const contracts::QolItemPort kItemPort{
       &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
         &read_static_text, &read_static_ready, &read_inventory_item_view,
         &read_effective_cumulate_count, &read_inventory_extension_access, &read_count_limit,
-          &read_count_encoding, &read_quote, &read_bag_count, &read_bag_info,
-          &read_space_item_at, &read_for_each_space_slot},
+           &read_count_encoding, &read_quote, &read_bag_count, &read_bag_info,
+           &read_space_item_at, &read_for_each_space_slot, &read_serialize_item},
 };
 
 }  // namespace

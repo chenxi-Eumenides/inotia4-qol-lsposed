@@ -23,6 +23,22 @@ QolResult trade_error(contracts::QolItemInventoryStateWriteResult* out, const ch
     return contracts::error(kQolErrInternal, out->error_message, out->error_message_len);
 }
 
+QolResult cleanup_error(contracts::QolItemInventoryStateWriteResult* out,
+                        const QolResult& cleanup) {
+    const char* message = cleanup.message != nullptr ? cleanup.message : "loaded item cleanup failed";
+    const size_t length = cleanup.message != nullptr
+                              ? cleanup.message_len
+                              : std::strlen(message);
+    if (out == nullptr) return contracts::error(cleanup.code, message, static_cast<uint32_t>(length));
+    const size_t copied = length < sizeof(out->error_message) - 1
+                              ? length
+                              : sizeof(out->error_message) - 1;
+    std::memcpy(out->error_message, message, copied);
+    out->error_message[copied] = '\0';
+    out->error_message_len = static_cast<uint32_t>(copied);
+    return contracts::error(cleanup.code, out->error_message, out->error_message_len);
+}
+
 const char* sell_error(inventory_trade::Status status) {
     switch (status) {
         case inventory_trade::Status::kNotInWorld: return "not in game";
@@ -151,6 +167,28 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
                                     rarity_group, provider, out);
 }
 
+QolResult load_item(const uint8_t* payload, uint32_t size, contracts::QolItemHandle* out_item) {
+    return qol::game::ops::load_item(payload, size, out_item);
+}
+
+QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
+                     contracts::QolItemHandle item,
+                     contracts::QolItemInventoryStateWriteResult* out) {
+    const QolResult result = qol::game::ops::place_item(ref, slot, item, out);
+    if (contracts::succeeded(result) || item.slot == 0 || item.generation == 0) return result;
+    const QolResult cleanup = qol::game::ops::free_loaded_item(item);
+    if (!contracts::succeeded(cleanup) && cleanup.code != kQolErrConflict &&
+        cleanup.code != kQolErrNotFound) {
+        return cleanup_error(out, cleanup);
+    }
+    return result;
+}
+
+QolResult remove_item(contracts::QolItemHandle item, int32_t count,
+                      contracts::QolItemInventoryStateWriteResult* out) {
+    return qol::game::ops::remove_item(item, count, out);
+}
+
 // host 只转发：provider 由 facade 解析（调用方已显式传入时以其为准），不在 host 缓存。
 const contracts::QolInventoryExtensionProvider* resolve_extension_provider(
     const contracts::QolInventoryExtensionProvider* provided) {
@@ -199,6 +237,9 @@ const contracts::QolItemInventoryStateWritePort kPort{
     &unequip_item,
     &put_jewel,
     &enchant,
+    &load_item,
+    &place_item,
+    &remove_item,
 };
 
 }  // namespace

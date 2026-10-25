@@ -611,7 +611,7 @@ const QolItemPortReadApi kFakeRead{
     &fake_shop, &fake_in_world, &fake_static_text, &fake_static_ready,
     &fake_inventory_item_view, &stub_effective_cumulate, &fake_inventory_extension_access,
     &fake_item_count_limit, &fake_count_encoding, nullptr, &fake_bag_count, &fake_bag_info, &fake_item_at,
-    nullptr,
+    nullptr, nullptr,
 };
 
 const QolItemPort kFakePort{qol::contracts::kQolPortItemVersion, sizeof(QolItemPort), kFakeRead};
@@ -794,6 +794,9 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     &fake_state_unequip,
     &fake_state_put_jewel,
     &fake_state_enchant,
+    nullptr,
+    nullptr,
+    nullptr,
 };
 
 QolResult fake_merge_move(qol::contracts::QolItemHandle, int32_t, int32_t, int32_t, int32_t* out) {
@@ -2683,7 +2686,7 @@ const qol::contracts::QolItemPortReadApi kGoldenRead{
     &golden_shop, &golden_in_world, &golden_static_text,
     &golden_static_ready, &golden_view, &stub_effective_cumulate,
     &fake_inventory_extension_access, &fake_item_count_limit, &fake_count_encoding, nullptr,
-    &golden_bag_count, &golden_bag_info, &golden_item_at, &golden_for_each_space_slot,
+    &golden_bag_count, &golden_bag_info, &golden_item_at, &golden_for_each_space_slot, nullptr,
 };
 const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersion,
                                                sizeof(qol::contracts::QolItemPort), kGoldenRead};

@@ -380,6 +380,37 @@ QolResult game_native_item_for_handle(contracts::QolItemHandle handle, void** ou
     return contracts::ok();
 }
 
+QolResult serialize_item(contracts::QolItemHandle handle, uint8_t* out, uint32_t capacity,
+                         uint32_t* out_size) {
+    if (out_size == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_size = 0;
+    if (handle.slot == 0 || handle.generation == 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    void* item = nullptr;
+    QolResult result = game_native_item_for_handle(handle, &item);
+    if (!contracts::succeeded(result)) return result;
+    if (!game_in_world() || fn_save_save_item == nullptr) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+
+    uint8_t payload[UINT8_MAX]{};
+    const int serialized_size = fn_save_save_item(payload, item);
+    if (serialized_size <= 0 || serialized_size > static_cast<int>(sizeof(payload))) {
+        return error_result(kQolErrInternal, "item serialization failed");
+    }
+    *out_size = static_cast<uint32_t>(serialized_size);
+    if (out == nullptr) return contracts::ok();
+    if (capacity < *out_size) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    std::memcpy(out, payload, *out_size);
+    return contracts::ok();
+}
+
 QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
                                 contracts::QolInventoryItemRef* out) {
     // 0..10 = 原版袋 + 扩展逻辑袋；C18 改版客户端再放开原生追加袋 11..N-1。
@@ -622,6 +653,30 @@ QolResult set_physical_item(int32_t bag, int32_t slot, void* item) {
     auto* slot_address = reinterpret_cast<void**>(
         reinterpret_cast<uint8_t*>(g_inven) + static_cast<size_t>(bag) * 0x80 +
         static_cast<size_t>(slot) * sizeof(void*));
+    if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'w')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    *slot_address = item;
+    return contracts::ok();
+}
+
+QolResult set_native_space_item(const contracts::QolBagRef* ref, int32_t slot, void* item) {
+    if (ref == nullptr || (ref->space_id != contracts::kQolBagSpaceOriginal &&
+                           ref->space_id != contracts::kQolBagSpaceC18) ||
+        ref->bag < 0 || slot < 0 || slot >= 16 ||
+        (ref->space_id == contracts::kQolBagSpaceOriginal &&
+         ref->bag == contracts::kQolTaskBagIndex)) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    int32_t bag_count = 0;
+    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
+    if (!contracts::succeeded(result)) return result;
+    if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    const NativeBagLayout layout = native_bag_layout();
+    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    if (ref->bag >= layout.bag_limit) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    auto* slot_address = reinterpret_cast<void**>(layout.slots +
+        static_cast<size_t>(ref->bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
     if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'w')) {
         return error_result(kQolErrNotReady, kNotReady);
     }

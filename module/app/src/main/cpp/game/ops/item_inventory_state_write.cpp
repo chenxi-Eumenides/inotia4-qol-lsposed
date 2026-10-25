@@ -1,12 +1,15 @@
 #include "game/ops/item_inventory_state_write.h"
 
 #include <cstring>
+#include <initializer_list>
 #include <mutex>
 
 #include "contracts/game_cache.h"
 #include "game/access/game_access.h"
+#include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
+#include "game/adapter_ports/item_count_facade.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
 
@@ -24,6 +27,124 @@ QolResult item_error(contracts::QolItemInventoryStateWriteResult* out, int32_t c
     out->error_message[length] = '\0';
     out->error_message_len = static_cast<uint32_t>(length);
     return contracts::error(code, out->error_message, out->error_message_len);
+}
+
+QolResult item_error(contracts::QolItemInventoryStateWriteResult* out,
+                     const QolResult& source, const char* fallback) {
+    if (out == nullptr || (source.message == nullptr && fallback == nullptr)) {
+        return contracts::error(kQolErrInvalidArgument, "invalid item write result", 24);
+    }
+    const char* message = source.message != nullptr ? source.message : fallback;
+    size_t length = source.message != nullptr ? source.message_len : std::strlen(fallback);
+    if (length >= sizeof(out->error_message)) length = sizeof(out->error_message) - 1;
+    std::memcpy(out->error_message, message, length);
+    out->error_message[length] = '\0';
+    out->error_message_len = static_cast<uint32_t>(length);
+    return contracts::error(source.code, out->error_message, out->error_message_len);
+}
+
+QolResult transfer_error(int32_t code, const char* message) {
+    return contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
+}
+
+QolResult handle_error(ItemHandleError error) {
+    switch (error) {
+        case ItemHandleError::kNone: return contracts::ok();
+        case ItemHandleError::kInvalidArgument:
+            return transfer_error(kQolErrInvalidArgument, "invalid item handle");
+        case ItemHandleError::kWrongThread:
+            return transfer_error(kQolErrBlocked, "wrong thread");
+        case ItemHandleError::kFull:
+            return transfer_error(kQolErrNotReady, "item handle registry full");
+        case ItemHandleError::kStale:
+            return transfer_error(kQolErrNotFound, "stale item handle");
+        case ItemHandleError::kType:
+            return transfer_error(kQolErrConflict, "item handle ownership conflict");
+        case ItemHandleError::kTransition:
+            return transfer_error(kQolErrBlocked, "item handle transition");
+    }
+    return transfer_error(kQolErrInternal, "item handle registration failed");
+}
+
+QolResult resolve_loaded_item(contracts::QolItemHandle handle, void** out_item) {
+    if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
+        return transfer_error(kQolErrInvalidArgument, "invalid item handle");
+    }
+    const ItemHandleResolution resolution = item_handle_registry().resolve_item(
+        handle, kQolLoadedItemHandleOwner);
+    if (resolution.error != ItemHandleError::kNone || resolution.item == nullptr) {
+        return handle_error(resolution.error);
+    }
+    *out_item = resolution.item;
+    return contracts::ok();
+}
+
+QolResult item_stack_count(void* item, uint32_t* out_count) {
+    if (item == nullptr || out_count == nullptr) {
+        return transfer_error(kQolErrInvalidArgument, "invalid item count arguments");
+    }
+    const contracts::QolItemCountApi* api = item_count_api_if_resident();
+    if (api != nullptr && api->canonical != nullptr) {
+        const QolResult result = api->canonical(item, out_count);
+        if (contracts::succeeded(result)) return result;
+        if (result.code != kQolErrUnsupported) return result;
+    }
+    if (fn_get_cumulate_count == nullptr) {
+        return transfer_error(kQolErrNotReady, "item count unavailable");
+    }
+    const int count = fn_get_cumulate_count(item);
+    if (count <= 0) return transfer_error(kQolErrNotReady, "item count unavailable");
+    *out_count = static_cast<uint32_t>(count);
+    return contracts::ok();
+}
+
+QolResult find_native_item_slot(contracts::QolItemHandle handle, const NativeBagLayout& layout,
+                                contracts::QolBagRef* out_ref, int32_t* out_slot) {
+    if (out_ref == nullptr || out_slot == nullptr) {
+        return transfer_error(kQolErrInvalidArgument, "invalid slot output");
+    }
+    for (int32_t space_id : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceC18}) {
+        if (space_id == contracts::kQolBagSpaceC18 && layout.bag_limit <= 6) continue;
+        int32_t bag_count = 0;
+        QolResult result = inventory_bag_count(space_id, &bag_count);
+        if (!contracts::succeeded(result)) {
+            if (space_id == contracts::kQolBagSpaceC18 && result.code == kQolErrNotReady) continue;
+            return result;
+        }
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            if (space_id == contracts::kQolBagSpaceOriginal &&
+                bag == contracts::kQolTaskBagIndex) continue;
+            const contracts::QolBagRef ref{space_id, bag};
+            for (int32_t slot = 0; slot < 16; ++slot) {
+                contracts::QolInventoryItemRef item_ref{};
+                result = inventory_space_item_at(&ref, slot, &item_ref);
+                if (result.code == kQolErrNotFound) continue;
+                if (!contracts::succeeded(result)) return result;
+                if (item_ref.item.slot == handle.slot &&
+                    item_ref.item.generation == handle.generation) {
+                    *out_ref = ref;
+                    *out_slot = slot;
+                    return contracts::ok();
+                }
+            }
+        }
+    }
+    return transfer_error(kQolErrNotFound, "item is not in native inventory");
+}
+
+QolResult write_item_canonical_count(void* item, uint32_t count) {
+    const contracts::QolItemCountApi* api = item_count_api_if_resident();
+    if (api == nullptr || api->read_encoded_field == nullptr ||
+        api->field_from_canonical == nullptr || api->write_encoded_field == nullptr) {
+        return transfer_error(kQolErrNotReady, "item count writer unavailable");
+    }
+    uint32_t field = 0;
+    QolResult result = api->read_encoded_field(item, &field);
+    if (!contracts::succeeded(result)) return result;
+    uint32_t updated = 0;
+    result = api->field_from_canonical(field, count, 1, &updated);
+    if (!contracts::succeeded(result)) return result;
+    return api->write_encoded_field(item, updated);
 }
 
 // 原版物理袋数量（0..5，含任务袋）；provider 认领的袋号由 provider 自管，本快照只覆盖物理袋。
@@ -94,6 +215,203 @@ void sync_projected_bag_if_available() {
 }
 
 }  // namespace
+
+QolResult load_item(const uint8_t* payload, uint32_t size,
+                    contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) {
+        return transfer_error(kQolErrInvalidArgument, "invalid serialized item output");
+    }
+    *out_item = contracts::kInvalidItemHandle;
+    if (payload == nullptr || size < 19 || size > 255 ||
+        static_cast<uint32_t>(payload[0]) + 1u != size) {
+        return transfer_error(kQolErrInvalidArgument, "invalid serialized item");
+    }
+    if (!game_in_world() || fn_save_load_item == nullptr || fn_itempool_free == nullptr) {
+        return transfer_error(kQolErrNotReady, "item loading not ready");
+    }
+    void* item = nullptr;
+    int32_t consumed = 0;
+    const int loaded = fn_save_load_item(payload, &item, &consumed);
+    if (loaded == 0 || item == nullptr || consumed != static_cast<int32_t>(size)) {
+        if (item != nullptr) fn_itempool_free(item);
+        return transfer_error(kQolErrInternal, "item load failed");
+    }
+    ItemHandleError registry_error = ItemHandleError::kNone;
+    const contracts::QolItemHandle handle =
+        register_item(item, kQolLoadedItemHandleOwner, &registry_error);
+    if (handle.slot == 0 || handle.generation == 0) {
+        fn_itempool_free(item);
+        return handle_error(registry_error);
+    }
+    *out_item = handle;
+    return contracts::ok();
+}
+
+QolResult free_loaded_item(contracts::QolItemHandle handle) {
+    if (fn_itempool_free == nullptr) {
+        return transfer_error(kQolErrNotReady, "item free not ready");
+    }
+    void* item = nullptr;
+    QolResult result = resolve_loaded_item(handle, &item);
+    if (!contracts::succeeded(result)) return result;
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        invalidate_item(handle);
+        return transfer_error(kQolErrNotFound, "stale item handle");
+    }
+    if (!invalidate_item(handle)) {
+        return transfer_error(kQolErrNotFound, "stale item handle");
+    }
+    fn_itempool_free(item);
+    return contracts::ok();
+}
+
+QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
+                     contracts::QolItemHandle handle,
+                     contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return transfer_error(kQolErrInvalidArgument, "invalid item write result");
+    *out = {};
+    if (ref == nullptr ||
+        (ref->space_id != contracts::kQolBagSpaceOriginal &&
+         ref->space_id != contracts::kQolBagSpaceC18) ||
+        ref->bag < 0 || slot < -1 || slot >= 16 ||
+        (ref->space_id == contracts::kQolBagSpaceOriginal &&
+         ref->bag == contracts::kQolTaskBagIndex)) {
+        return item_error(out, kQolErrInvalidArgument, "invalid native bag slot");
+    }
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    void* item = nullptr;
+    QolResult result = resolve_loaded_item(handle, &item);
+    if (!contracts::succeeded(result)) {
+        return item_error(out, result, "invalid loaded item");
+    }
+    const int category = item_class_category(item);
+    if (category < 0) return item_error(out, kQolErrNotReady, "item category unavailable");
+    uint32_t count = 0;
+    result = item_stack_count(item, &count);
+    if (!contracts::succeeded(result)) {
+        return item_error(out, result, "item count unavailable");
+    }
+
+    contracts::QolBagInfo info{};
+    result = inventory_bag_info(ref, &info);
+    if (!contracts::succeeded(result)) {
+        return item_error(out, result, "native bag unavailable");
+    }
+    const int32_t slot_limit = info.capacity < 16 ? info.capacity : 16;
+    if (slot_limit <= 0 || (slot >= 0 && slot >= slot_limit)) {
+        return item_error(out, kQolErrInvalidArgument, "invalid native bag slot");
+    }
+    int32_t target_slot = slot;
+    bool already_placed = false;
+    const int32_t begin = slot == -1 ? 0 : slot;
+    const int32_t end = slot == -1 ? slot_limit : slot + 1;
+    bool found_empty = false;
+    for (int32_t candidate = begin; candidate < end; ++candidate) {
+        contracts::QolInventoryItemRef target{};
+        result = inventory_space_item_at(ref, candidate, &target);
+        if (result.code == kQolErrNotFound) {
+            target_slot = candidate;
+            found_empty = true;
+            break;
+        }
+        if (!contracts::succeeded(result)) {
+            return item_error(out, result, "native slot unavailable");
+        }
+        if (target.item.slot == handle.slot && target.item.generation == handle.generation) {
+            target_slot = candidate;
+            already_placed = true;
+            found_empty = true;
+            break;
+        }
+        if (slot >= 0) return item_error(out, kQolErrConflict, "native slot occupied");
+    }
+    if (!found_empty) return item_error(out, kQolErrBlocked, "native bag full");
+
+    if (!rebind_item(item, contracts::kQolItemHandleOwnerGame)) {
+        return item_error(out, kQolErrNotFound, "stale item handle");
+    }
+    if (!already_placed) {
+        result = set_native_space_item(ref, target_slot, item);
+        if (!contracts::succeeded(result)) {
+            (void)rebind_item(item, kQolLoadedItemHandleOwner);
+            return item_error(out, result, "native slot write failed");
+        }
+    }
+    auto& gained = out->gained[0];
+    gained.bag = ref->bag;
+    gained.slot = target_slot;
+    gained.category = category;
+    gained.count = static_cast<int32_t>(count);
+    out->gained_count = 1;
+    out->flags |= contracts::kQolItemInventoryStateHasGained;
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
+QolResult remove_item(contracts::QolItemHandle handle, int32_t count,
+                      contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return transfer_error(kQolErrInvalidArgument, "invalid item write result");
+    *out = {};
+    if (handle.slot == 0 || handle.generation == 0 || count <= 0) {
+        return item_error(out, kQolErrInvalidArgument, "invalid item removal arguments");
+    }
+    const ItemHandleResolution resolution =
+        item_handle_registry().resolve_item(handle, contracts::kQolItemHandleOwnerAny);
+    if (resolution.error != ItemHandleError::kNone || resolution.item == nullptr) {
+        const QolResult error = handle_error(resolution.error);
+        return item_error(out, error, "stale item handle");
+    }
+    if (!game_memory_accessible(resolution.item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return item_error(out, kQolErrNotFound, "stale item handle");
+    }
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    const NativeBagLayout layout = native_bag_layout();
+    if (layout.slots == nullptr) return item_error(out, kQolErrNotReady, "inventory not ready");
+    contracts::QolBagRef ref{};
+    int32_t slot = -1;
+    QolResult result = find_native_item_slot(handle, layout, &ref, &slot);
+    if (!contracts::succeeded(result)) {
+        return item_error(out, result, "item not found");
+    }
+    uint32_t stack_count = 0;
+    result = item_stack_count(resolution.item, &stack_count);
+    if (!contracts::succeeded(result)) {
+        return item_error(out, result, "item count unavailable");
+    }
+    if (static_cast<uint32_t>(count) > stack_count) {
+        return item_error(out, kQolErrInvalidArgument, "item removal exceeds stack count");
+    }
+    if (static_cast<uint32_t>(count) < stack_count) {
+        result = write_item_canonical_count(resolution.item,
+                                            stack_count - static_cast<uint32_t>(count));
+        if (!contracts::succeeded(result)) {
+            return item_error(out, result, "item count update failed");
+        }
+    } else {
+        if (fn_itempool_free == nullptr) {
+            return item_error(out, kQolErrNotReady, "item free not ready");
+        }
+        contracts::QolItemHandle checkpoint{};
+        if (!begin_item_invalidation(resolution.item, contracts::kQolItemHandleOwnerAny,
+                                     &checkpoint)) {
+            return item_error(out, kQolErrBlocked, "item handle transition");
+        }
+        result = set_native_space_item(&ref, slot, nullptr);
+        if (!contracts::succeeded(result)) {
+            (void)finish_item_invalidation(checkpoint, false);
+            return item_error(out, result, "native slot removal failed");
+        }
+        if (!finish_item_invalidation(checkpoint, true)) {
+            (void)set_native_space_item(&ref, slot, resolution.item);
+            (void)finish_item_invalidation(checkpoint, false);
+            return item_error(out, kQolErrInternal, "item handle removal failed");
+        }
+        fn_itempool_free(resolution.item);
+    }
+    out->value = count;
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
 
 QolResult use_item(int32_t bag, int32_t slot,
                    contracts::QolItemInventoryStateWriteResult* out) {

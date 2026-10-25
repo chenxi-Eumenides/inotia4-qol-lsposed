@@ -8,6 +8,9 @@
 
 namespace qol::game {
 
+// Detached objects decoded by SAVE_LoadItem remain caller-owned until placed in a native slot.
+constexpr uint32_t kQolLoadedItemHandleOwner = UINT32_MAX - 1u;
+
 enum class ItemHandleError : uint8_t {
     kNone, kInvalidArgument, kWrongThread, kFull, kStale, kType, kTransition
 };

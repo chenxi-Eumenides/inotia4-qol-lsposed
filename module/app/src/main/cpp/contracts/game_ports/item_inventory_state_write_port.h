@@ -7,6 +7,8 @@
 #include "../version.h"
 #include "../game_host.h"
 #include "../inventory_extension.h"
+#include "../item_handle.h"
+#include "item_port.h"
 
 namespace qol::contracts {
 
@@ -48,6 +50,13 @@ using QolItemInventoryStateApplyFn = QolResult (*)(
 using QolItemInventoryStateMoveFn = QolResult (*)(
     int32_t bag, int32_t slot, int32_t count, int32_t to_bag, int32_t to_slot,
     QolItemInventoryStateWriteResult* out);
+using QolItemInventoryStateLoadItemFn = QolResult (*)(
+    const uint8_t* payload, uint32_t size, QolItemHandle* out_item);
+using QolItemInventoryStatePlaceItemFn = QolResult (*)(
+    const QolBagRef* ref, int32_t slot, QolItemHandle item,
+    QolItemInventoryStateWriteResult* out);
+using QolItemInventoryStateRemoveItemFn = QolResult (*)(
+    QolItemHandle item, int32_t count, QolItemInventoryStateWriteResult* out);
 
 struct QolItemInventoryStateWritePort {
     QolVersion abi_version;
@@ -61,10 +70,17 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateUnequipFn unequip_item;
     QolItemInventoryStateApplyFn put_jewel;
     QolItemInventoryStateApplyFn enchant;
+    QolItemInventoryStateLoadItemFn load_item;
+    QolItemInventoryStatePlaceItemFn place_item;
+    QolItemInventoryStateRemoveItemFn remove_item;
 };
 
 // 1.1：成员参数由 extension_bag 能力类型改为中立 provider 类型（尾随语义不变，minor++）。
-constexpr QolVersion kQolPortItemInventoryStateWriteVersion{1, 1};
+// 1.2：尾部追加 SAVE_LoadItem、原生精确写槽与按句柄移除原语。
+// load_item 返回调用方拥有的脱离背包对象句柄；成功 place_item 后对象归原生库存所有。
+// Host 在 place_item 失败时释放 load_item 创建的对象，因此失败后句柄失效；成功后调用方不得释放。
+// remove_item 失败时不改变槽位或数量；移除整堆会释放对象并使句柄失效。
+constexpr QolVersion kQolPortItemInventoryStateWriteVersion{1, 2};
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,
               "QolItemInventoryStateGainedItem must remain standard layout");
