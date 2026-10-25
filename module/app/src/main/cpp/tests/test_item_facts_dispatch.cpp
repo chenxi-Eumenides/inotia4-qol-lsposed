@@ -2552,7 +2552,7 @@ static void* golden_bag_item(int bag, int slot) {
 static std::string golden_legacy_eb_json() {
     if (g_golden_eb_enabled == 0) return "";
     std::string out =
-        ",{\"bag\":6,\"items\":[{\"slot\":0,\"category\":10,\"count\":199}],\"capacity\":16,"
+        ",{\"bag\":6,\"items\":[{\"slot\":0,\"category\":10,\"count\":71}],\"capacity\":16,"
         "\"slot_count\":1}";
     for (int bag = 7; bag <= 10; ++bag) {
         out += ",{\"bag\":" + std::to_string(bag) + ",\"items\":[],\"capacity\":" +
@@ -3350,10 +3350,9 @@ void test_item_state_without_registered_sources_is_valid_json() {
     const std::string expected = frozen_inventory_json();
     const std::string json = owner_raw_inventory();
     CHECK(json == expected);
-    CHECK(json.find("\"bags\":[") == 0);
+    CHECK(json.compare(0, 9, "{\"bags\":[") == 0);
     CHECK(json.size() >= 2 && json.compare(json.size() - 2, 2, "]}") == 0);
     CHECK(json.find("\"space\":2") == std::string::npos);
-    g_golden_require_active = false;
 }
 
 // R2-2 用例 3：原版袋写票据不因 EB 段降级而 failed，结果只包含移动槽位。
@@ -3396,12 +3395,12 @@ void test_extension_degrade_write_ticket_done() {
 
 void test_extension_move_result_capacity_and_overflow() {
     CHECK(install_core_item_golden(nullptr));
-    CHECK(register_golden_source());
     g_golden_eb_enabled = 1;
+    CHECK(register_golden_source());
     g_provider_resident = true;
     g_provider_available = true;
-        g_golden_eb_move_complete = 0;
     const auto run_case = [](std::size_t body_size) {
+        g_golden_eb_move_complete = 0;
         const std::string prefix = "{\"ok\":true,\"message\":\"";
         const std::string embedded = "\\\"ok\\\":false";
         const std::string suffix = "\"}";
@@ -3444,8 +3443,8 @@ void test_extension_move_result_capacity_and_overflow() {
         qol::infra::command_queue_reset_for_test();
     };
     run_case(5000);
-    CHECK(unregister_golden_source());
     run_case(20000);
+    CHECK(unregister_golden_source());
     g_provider_resident = false;
     g_provider_available = false;
     g_golden_eb_enabled = 0;

@@ -130,11 +130,6 @@ static_assert(qol::contracts::kAttributeQualityVersionMajor == 2 &&
               "attribute.quality contract must be v2.0");
 static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 4,
               "Game Host contract must be v2.4");
-static_assert(std::is_same<qol::contracts::InventorySellFn,
-                           qol::contracts::InventorySellResult (*)(
-                               int32_t, int32_t, qol::contracts::QolItemHandle,
-                               const char*)>::value,
-              "cross-plugin sell must carry an expected handle");
 static_assert(sizeof(qol::contracts::QolInventoryExtensionItemRef) ==
                   sizeof(int32_t) * 5 + sizeof(qol::contracts::QolItemHandle),
               "inventory extension Ref must not carry an object pointer");
@@ -187,9 +182,9 @@ int main() {
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
     CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
-    // 合并 inventory_hooks 后新增 world.facts / extension_bag optional：出售与扩展袋
-    // 路径按调用时 require，缺失时只降级对应行为，不阻断 item.facts。
-    CHECK(descriptor.optional_count == 6 && descriptor.optional_requires != nullptr);
+    // 合并 inventory_hooks 后新增 world.facts optional：匹配与物品事实按调用时 require，
+    // 缺失时只降级对应行为，不阻断 item.facts。
+    CHECK(descriptor.optional_count == 4 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
     CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
@@ -209,18 +204,6 @@ int main() {
           qol::contracts::kWorldFactsVersionMajor);
     CHECK(descriptor.optional_requires[3].range.min_minor ==
           qol::contracts::kWorldFactsVersionMinor);
-    CHECK(std::strcmp(descriptor.optional_requires[4].id,
-                      qol::contracts::kExtensionBagCapabilityId) == 0);
-    CHECK(descriptor.optional_requires[4].range.major ==
-          qol::contracts::kExtensionBagVersionMajor);
-    CHECK(descriptor.optional_requires[4].range.min_minor ==
-          qol::contracts::kExtensionBagSaleRemoveVersionMinor);
-    CHECK(std::strcmp(descriptor.optional_requires[5].id,
-                      qol::contracts::kInventoryMergeProjectionCapabilityId) == 0);
-    CHECK(descriptor.optional_requires[5].range.major ==
-          qol::contracts::kInventoryMergeProjectionVersionMajor);
-    CHECK(descriptor.optional_requires[5].range.min_minor ==
-          qol::contracts::kInventoryMergeProjectionVersionMinor);
     CHECK(descriptor.feature_count == 2 && descriptor.features != nullptr);
     CHECK(std::strcmp(descriptor.features[0].id, "core.item.provider") == 0);
     CHECK(std::strcmp(descriptor.features[1].id, "move_merge.drag_merge") == 0);
@@ -271,7 +254,7 @@ int main() {
         CHECK(descriptor.http_route_metadata[i].op_required == 1);
         CHECK(descriptor.http_route_metadata[i].lease_required == 1);
     }
-    CHECK(descriptor.provides_count == 7 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 8 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 6);
     CHECK(descriptor.provides[0].iface != nullptr);

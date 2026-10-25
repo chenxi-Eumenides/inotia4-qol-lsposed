@@ -347,7 +347,7 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
     }
     contracts::QolItemInventoryStateWriteResult write_result{};
     const QolResult operation = g_item_state_write->equip_item(
-        role, native_bag_number(ref), ref.slot, nullptr, &write_result);
+        role, native_bag_number(ref), ref.slot, &write_result);
     outcome.status = contracts::succeeded(operation)
                          ? InventoryActionStatus::kOk
                          : status_from_result(operation, true);
@@ -367,7 +367,7 @@ contracts::InventoryUseOutcome unequip(int32_t role, int32_t equip_slot) {
     }
     contracts::QolItemInventoryStateWriteResult write_result{};
     const QolResult operation =
-        g_item_state_write->unequip_item(role, equip_slot, nullptr, &write_result);
+        g_item_state_write->unequip_item(role, equip_slot, &write_result);
     outcome.status = contracts::succeeded(operation)
                          ? InventoryActionStatus::kOk
                          : status_from_result(operation, true);
@@ -397,7 +397,7 @@ contracts::InventoryUseOutcome put_jewel(int32_t role, QolActionRef jewel,
     }
     contracts::QolItemInventoryStateWriteResult write_result{};
     const QolResult operation = g_item_state_write->put_jewel(
-        role, native_bag_number(jewel), jewel.slot, equip_slot, nullptr, &write_result);
+        role, native_bag_number(jewel), jewel.slot, equip_slot, &write_result);
     outcome.status = contracts::succeeded(operation)
                          ? InventoryActionStatus::kOk
                          : status_from_result(operation, true);
