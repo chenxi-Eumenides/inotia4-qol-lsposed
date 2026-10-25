@@ -333,6 +333,8 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
     JsonValue body_object{};
     const bool body_valid = parse_write_body(body, &body_object);
     contracts::QolItemWriteArgs args{};
+    int32_t resolved_from_space = -1;
+    int32_t resolved_to_space = -1;
     args.kind = static_cast<int32_t>(kind);
     args.i0 = -1;
     args.i1 = -1;
@@ -419,6 +421,8 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
                 }
                 args.i0 = write_port_bag(source);
                 args.i3 = write_port_bag(target);
+                resolved_from_space = source.space_id;
+                resolved_to_space = target.space_id;
             }
             break;
         }
@@ -514,8 +518,9 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
         return response_error(response, 503, "command port unavailable");
     }
     contracts::QolCommandTicket ticket = 0;
+    const ItemWritePayload payload{args, resolved_from_space, resolved_to_space};
     if (!contracts::succeeded(g_sdk->commands.post_typed(
-            kItemWriteHandlerId, &args, sizeof(args), &ticket)) ||
+            kItemWriteHandlerId, &payload, sizeof(payload), &ticket)) ||
         ticket == 0) {
         return response_error(response, 503, "command queue unavailable");
     }

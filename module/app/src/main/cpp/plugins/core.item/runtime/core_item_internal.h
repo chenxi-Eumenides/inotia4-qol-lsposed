@@ -69,6 +69,14 @@ struct ItemWriteRoute {
     contracts::HttpCommandHandlerFn handler;
 };
 
+// 写命令载荷：在 Host 端口参数之外携带解析后的袋空间，供主线程结果处理器
+// 精确重建 source/target（`QolItemWriteArgs` 只有扁平袋号，C18 下无法区分 6..10）。
+struct ItemWritePayload {
+    contracts::QolItemWriteArgs args;
+    int32_t from_space;
+    int32_t to_space;
+};
+
 inline constexpr uint32_t kItemWriteRouteCount = 13;
 extern ItemWriteRoute kItemWriteRoutes[kItemWriteRouteCount];
 QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpRes* response,

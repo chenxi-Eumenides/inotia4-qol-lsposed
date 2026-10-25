@@ -1872,7 +1872,7 @@ void test_write_routes() {
 
     CHECK(dispatch_post("/api/op/inventory/money", "{\"money\":\"Infinity\"}", nullptr, 0,
                         &status) == "{\"ok\":true,\"ticket\":72}");
-    CHECK(g_post_payload_size == sizeof(QolItemWriteArgs));
+    CHECK(g_post_payload_size == sizeof(QolItemWriteArgs) + sizeof(int32_t) * 2);
     QolItemWriteArgs money_args{};
     std::memcpy(&money_args, g_post_payload, sizeof(money_args));
     CHECK(money_args.i64 == std::numeric_limits<int64_t>::max());
