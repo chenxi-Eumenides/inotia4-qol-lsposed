@@ -13,7 +13,7 @@
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/assembly/move_merge.h"
+#include "plugins/extension_bag/model/move_merge.h"
 
 #include <algorithm>
 #include <cstring>

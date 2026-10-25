@@ -3,7 +3,8 @@
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/state.h"
-#include "plugins/extension_bag/ui/host_ui.h"
+#include "plugins/extension_bag/model/bag_result.h"
+#include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/runtime/shared.h"
 

@@ -37,10 +37,10 @@ add_library(qol_plugin_extension_bag STATIC
     transaction/transaction_coordinator.cpp
     transaction/ext_orig.cpp
     transaction/ext_ext.cpp
-    transaction/drop.cpp
     ui/equip.cpp
     ui/detail_hooks.cpp
     ui/detail_actions.cpp
+    ui/drop_routing.cpp
     ui/store_tabs.cpp
     ui/store_projection.cpp
     ui/store_trade.cpp

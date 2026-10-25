@@ -17,7 +17,7 @@
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/assembly/move_merge.h"
+#include "plugins/extension_bag/model/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"

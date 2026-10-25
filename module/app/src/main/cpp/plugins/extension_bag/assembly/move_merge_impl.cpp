@@ -3,7 +3,7 @@
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
-#include "plugins/extension_bag/assembly/move_merge.h"
+#include "plugins/extension_bag/model/move_merge.h"
 
 bool move_merge_enabled() {
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->capabilities.require == nullptr) return false;
