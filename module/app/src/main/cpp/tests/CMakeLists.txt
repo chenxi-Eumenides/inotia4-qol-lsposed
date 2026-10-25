@@ -44,8 +44,8 @@ add_executable(host_tests
 add_executable(item_facts_plugin_tests
     test_item_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.item/plugin.cpp
-    ${CPP_DIR}/plugins/core.item/json_lite.cpp
-    ${CPP_DIR}/plugins/core.item/response.cpp
+    ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
+    ${CPP_DIR}/plugins/core.item/http/response.cpp
     stubs/core_item_inventory_stub.cpp
 )
 target_include_directories(item_facts_plugin_tests PRIVATE
@@ -230,7 +230,7 @@ add_test(NAME host_tests COMMAND host_tests)
 
 add_executable(stage4_hook_tests
     test_inventory_hook_stage4.cpp
-    ${CPP_DIR}/plugins/core.item/inventory/inventory_hook_stage4.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/consume_item.cpp
 )
 target_include_directories(stage4_hook_tests PRIVATE
     ${CPP_DIR}
@@ -241,7 +241,7 @@ add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 # Compile the production inventory hook translation unit independently. It is intentionally not
 # linked into stage4_hook_tests, whose scope remains the pure stage-4 logic.
 add_library(inventory_hook_native_compile OBJECT
-    ${CPP_DIR}/plugins/core.item/inventory/native_inventory_hook.cpp
+    ${CPP_DIR}/plugins/core.item/hooks/inventory_hooks.cpp
 )
 target_include_directories(inventory_hook_native_compile PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -258,8 +258,8 @@ set_target_properties(inventory_hook_native_compile PROPERTIES
 # negotiation, physical-original route, and money/remove/refund ordering.
 add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
-    ${CPP_DIR}/plugins/core.item/inventory/plugin.cpp
-    ${CPP_DIR}/plugins/core.item/inventory/inventory_slot.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/item_slot.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
@@ -1895,8 +1895,8 @@ add_executable(item_facts_dispatch_tests
     test_item_facts_dispatch.cpp
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/plugins/core.item/plugin.cpp
-    ${CPP_DIR}/plugins/core.item/json_lite.cpp
-    ${CPP_DIR}/plugins/core.item/response.cpp
+    ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
+    ${CPP_DIR}/plugins/core.item/http/response.cpp
     stubs/core_item_inventory_stub.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp

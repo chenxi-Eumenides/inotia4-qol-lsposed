@@ -1,4 +1,4 @@
-#include "plugins/core.item/merge/plugin.h"
+#include "plugins/core.item/hooks/merge_hook.h"
 
 #include <atomic>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include "contracts/item_facts.h"
 #include "contracts/move_merge.h"
 #include "contracts/ui.h"
-#include "plugins/core.item/inventory/native_inventory_hook.h"
+#include "plugins/core.item/hooks/inventory_hooks.h"
 
 namespace qol::features::core_item::merge {
 namespace {

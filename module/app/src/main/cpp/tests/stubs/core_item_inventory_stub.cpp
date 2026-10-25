@@ -1,9 +1,9 @@
 #include "contracts/inventory_action.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_slot.h"
-#include "plugins/core.item/inventory/inventory_slot.h"
-#include "plugins/core.item/inventory/plugin.h"
-#include "plugins/core.item/merge/plugin.h"
+#include "plugins/core.item/usecases/item_slot.h"
+#include "plugins/core.item/usecases/sell_item.h"
+#include "plugins/core.item/hooks/merge_hook.h"
 
 #include <array>
 #include <cstring>

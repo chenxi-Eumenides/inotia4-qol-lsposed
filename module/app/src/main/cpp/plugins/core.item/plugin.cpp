@@ -30,12 +30,12 @@
 #include "contracts/item_state.h"
 #include "contracts/move_merge.h"
 #include "contracts/world_facts.h"
-#include "inventory/inventory_slot.h"
-#include "inventory/plugin.h"
-#include "merge/plugin.h"
-#include "json_lite.h"
-#include "response.h"
-#include "snapshot_sdk.h"
+#include "usecases/item_slot.h"
+#include "usecases/sell_item.h"
+#include "hooks/merge_hook.h"
+#include "http/json_lite.h"
+#include "http/response.h"
+#include "bags/snapshot_sdk.h"
 
 namespace qol::features::core_item {
 namespace {

@@ -1,4 +1,4 @@
-#include "inventory_slot.h"
+#include "item_slot.h"
 
 #include "../../../contracts/extension_bag.h"
 

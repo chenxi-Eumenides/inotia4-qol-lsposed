@@ -1,12 +1,12 @@
 add_library(qol_plugin_core.item STATIC
     plugin.cpp
-    json_lite.cpp
-    response.cpp
-    inventory/native_inventory_hook.cpp
+    http/json_lite.cpp
+    http/response.cpp
+    hooks/inventory_hooks.cpp
     inventory/inventory_find_item_poc.cpp
-    inventory/inventory_hook_stage4.cpp
-    inventory/inventory_logging.cpp
-    inventory/inventory_slot.cpp
-    inventory/plugin.cpp
-    merge/plugin.cpp
+    usecases/consume_item.cpp
+    hooks/inventory_logging.cpp
+    usecases/item_slot.cpp
+    usecases/sell_item.cpp
+    hooks/merge_hook.cpp
 )

@@ -379,7 +379,7 @@ target_sources(gamebridge PRIVATE
     bridge/native/gamebridge_lifecycle.cpp
 )
 
-# B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体归 core.item/inventory）
+# B2a-1：库存行为域声明式化（24 条入口 hook 的插件 owner；wrapper 业务体归 core.item/hooks + usecases）
 target_sources(gamebridge PRIVATE
 )
 

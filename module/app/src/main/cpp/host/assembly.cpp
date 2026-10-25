@@ -29,7 +29,7 @@
 #include "host/features/http_control.h"
 #include "host/http_dispatch.h"
 #include "infra/slot_operation_gate.h"
-#include "plugins/core.item/inventory/native_inventory_hook.h"
+#include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/module_health/plugin.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"

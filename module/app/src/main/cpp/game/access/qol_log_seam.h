@@ -2,7 +2,7 @@
 
 // game 层日志过渡缝（T2l-w-write，seam 方案 D）：调用点沿用 QOL_LOG_* 形态，后端经
 // contracts 面 QolHostSdk.log 输出（game→contracts 允许，零 infra include）。
-// 先例形态见 plugins/core.item/inventory/inventory_logging（同 contracts 面 + 本地宏重定义）。
+// 先例形态见 plugins/core.item/hooks/inventory_logging（同 contracts 面 + 本地宏重定义）。
 // 未注入 SDK 时静默降级（不输出、不崩溃）；帧节流语义与 infra QolLogThrottle::due 帧分支一致。
 
 #include <cstdarg>

@@ -1,5 +1,5 @@
-#include "native_inventory_hook.h"
-#include "inventory_hook_stage4.h"
+#include "inventory_hooks.h"
+#include "../usecases/consume_item.h"
 #include "claims.h"
 #include "inventory_logging.h"
 

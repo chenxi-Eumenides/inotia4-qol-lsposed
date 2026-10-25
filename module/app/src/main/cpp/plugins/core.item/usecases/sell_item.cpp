@@ -1,8 +1,8 @@
-#include "plugin.h"
-#include "claims.h"
-#include "inventory_logging.h"
-#include "native_inventory_hook.h"
-#include "inventory_slot.h"
+#include "sell_item.h"
+#include "../hooks/claims.h"
+#include "../hooks/inventory_logging.h"
+#include "../hooks/inventory_hooks.h"
+#include "item_slot.h"
 
 #include <cstdint>
 

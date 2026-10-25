@@ -2,7 +2,7 @@
 #include <cstdint>
 #include <cstring>
 
-#include "plugins/core.item/merge/plugin.cpp"
+#include "plugins/core.item/hooks/merge_hook.cpp"
 
 int g_test_refresh_calls = 0;
 

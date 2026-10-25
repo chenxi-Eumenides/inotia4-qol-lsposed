@@ -3,9 +3,9 @@
 #include "contracts/inventory_slot.h"
 #include "contracts/world_facts.h"
 #include "contracts/item_facts.h"
-#include "plugins/core.item/inventory/plugin.h"
-#include "plugins/core.item/inventory/inventory_slot.h"
-#include "plugins/core.item/inventory/native_inventory_hook.h"
+#include "plugins/core.item/usecases/sell_item.h"
+#include "plugins/core.item/usecases/item_slot.h"
+#include "plugins/core.item/hooks/inventory_hooks.h"
 
 #include <cstdint>
 #include <cstdarg>

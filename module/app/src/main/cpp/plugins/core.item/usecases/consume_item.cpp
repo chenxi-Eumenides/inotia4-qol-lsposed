@@ -1,4 +1,4 @@
-#include "inventory_hook_stage4.h"
+#include "consume_item.h"
 
 #include <cassert>
 
