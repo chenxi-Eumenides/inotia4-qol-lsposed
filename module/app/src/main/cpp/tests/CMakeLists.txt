@@ -23,7 +23,8 @@ set(CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 # core.custom_ui 组件源清单：Host 测试直接编译插件源码，集中定义避免新增 TU 时漏 target。
 set(CORE_CUSTOM_UI_COMPONENTS_SOURCES
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp)
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CPP_DIR}/plugins/core.custom_ui/ui_shapes.cpp)
 
 # Test builds inject the generic Host security authorizer instead of linking the production feature facade.
 set_source_files_properties(${CPP_DIR}/host/http_dispatch.cpp PROPERTIES
