@@ -1,4 +1,5 @@
 #include "contracts/item_facts.h"
+#include "contracts/bag.h"
 #include "contracts/inventory_slot.h"
 #include "contracts/inventory_action.h"
 #include "contracts/inventory_refresh.h"
@@ -268,7 +269,7 @@ int main() {
         CHECK(descriptor.http_route_metadata[i].op_required == 1);
         CHECK(descriptor.http_route_metadata[i].lease_required == 1);
     }
-    CHECK(descriptor.provides_count == 6 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 7 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 6);
     CHECK(descriptor.provides[0].iface != nullptr);
@@ -281,17 +282,28 @@ int main() {
     CHECK(static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[1].iface)
               ->write_state_json != nullptr);
     CHECK(std::strcmp(descriptor.provides[2].id,
-                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
+                      qol::contracts::kBagSourceCapabilityId) == 0);
+    CHECK(descriptor.provides[2].version.major == qol::contracts::kBagSourceVersion.major &&
+          descriptor.provides[2].version.minor == qol::contracts::kBagSourceVersion.minor);
     CHECK(descriptor.provides[2].iface != nullptr);
+    const auto* bag_source_api = static_cast<const qol::contracts::QolBagSourceRegistryApi*>(
+        descriptor.provides[2].iface);
+    CHECK(bag_source_api != nullptr &&
+          bag_source_api->struct_size == sizeof(qol::contracts::QolBagSourceRegistryApi));
+    CHECK(bag_source_api->register_source != nullptr &&
+          bag_source_api->unregister_source != nullptr);
     CHECK(std::strcmp(descriptor.provides[3].id,
-                      qol::contracts::kInventoryActionCapabilityId) == 0);
+                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
     CHECK(descriptor.provides[3].iface != nullptr);
     CHECK(std::strcmp(descriptor.provides[4].id,
-                      qol::contracts::kInventorySlotCapabilityId) == 0);
+                      qol::contracts::kInventoryActionCapabilityId) == 0);
     CHECK(descriptor.provides[4].iface != nullptr);
     CHECK(std::strcmp(descriptor.provides[5].id,
-                      qol::contracts::kMoveMergeControlCapabilityId) == 0);
+                      qol::contracts::kInventorySlotCapabilityId) == 0);
     CHECK(descriptor.provides[5].iface != nullptr);
+    CHECK(std::strcmp(descriptor.provides[6].id,
+                      qol::contracts::kMoveMergeControlCapabilityId) == 0);
+    CHECK(descriptor.provides[6].iface != nullptr);
     CHECK(descriptor.port_count == 6 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
     CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 7);
@@ -305,7 +317,7 @@ int main() {
     CHECK(descriptor.ports[5].id == qol::contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS);
 
     const auto* merge_control = static_cast<const qol::contracts::MoveMergeControlApi*>(
-        descriptor.provides[5].iface);
+        descriptor.provides[6].iface);
     CHECK(merge_control != nullptr && merge_control->enabled != nullptr);
     qol::contracts::PluginContext ctx{};
     int dummy = 0;
