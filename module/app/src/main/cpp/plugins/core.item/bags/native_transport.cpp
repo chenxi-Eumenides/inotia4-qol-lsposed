@@ -165,7 +165,10 @@ QolResult import_item(const BagTransfer& transfer, int32_t target_space,
             contracts::QolItemInventoryStateWriteResult discarded{};
             (void)g_item_state_write->remove_item(item, transfer.count, &discarded);
         }
-        return result;
+        // Host fills result.message from write_result's local storage; never return it.
+        constexpr char kMessage[] = "target bag rejected the transferred item";
+        return contracts::error(result.code, kMessage,
+                                static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
 
     int32_t actual_slot = preferred_slot;
@@ -196,7 +199,11 @@ QolResult remove_item(int32_t space, contracts::QolItemHandle expected, int32_t 
 
     contracts::QolItemInventoryStateWriteResult write_result{};
     result = g_item_state_write->remove_item(expected, count, &write_result);
-    if (!contracts::succeeded(result)) return result;
+    if (!contracts::succeeded(result)) {
+        constexpr char kMessage[] = "source bag rejected the item removal";
+        return contracts::error(result.code, kMessage,
+                                static_cast<uint32_t>(sizeof(kMessage) - 1));
+    }
     *out = contracts::QolBagMutationResult{ref, expected, count};
     return contracts::ok();
 }
