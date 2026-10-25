@@ -1,6 +1,7 @@
 #include "contracts/inventory_action.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_slot.h"
+#include "plugins/core.item/usecases/item_action.h"
 #include "plugins/core.item/usecases/item_slot.h"
 #include "plugins/core.item/usecases/sell_item.h"
 #include "plugins/core.item/hooks/merge_hook.h"
@@ -11,9 +12,36 @@
 namespace qol::features::inventory_hooks {
 namespace {
 
-contracts::InventorySellResult sell_unavailable(int32_t, int32_t,
-                                                contracts::QolItemHandle, const char*) {
+contracts::InventorySellResult sell_unavailable(contracts::QolActionRef,
+                                                contracts::QolItemHandle, int32_t,
+                                                const char*) {
     return {contracts::InventorySellStatus::kSymbolsUnresolved, 0, 0, 0};
+}
+
+contracts::InventoryMoveOutcome move_unavailable(contracts::QolActionRef, int32_t,
+                                                  contracts::QolActionRef target) {
+    return {contracts::InventoryActionStatus::kUnsupported, 0, 0, target, {}};
+}
+
+contracts::InventoryUseOutcome use_unavailable(contracts::QolActionRef) {
+    return {contracts::InventoryActionStatus::kUnsupported, 0};
+}
+
+contracts::InventoryUseOutcome discard_unavailable(contracts::QolActionRef, int32_t) {
+    return {contracts::InventoryActionStatus::kUnsupported, 0};
+}
+
+contracts::InventoryUseOutcome equip_unavailable(int32_t, contracts::QolActionRef, int32_t) {
+    return {contracts::InventoryActionStatus::kUnsupported, 0};
+}
+
+contracts::InventoryUseOutcome unequip_unavailable(int32_t, int32_t) {
+    return {contracts::InventoryActionStatus::kUnsupported, 0};
+}
+
+contracts::InventoryUseOutcome put_jewel_unavailable(int32_t, contracts::QolActionRef,
+                                                     int32_t) {
+    return {contracts::InventoryActionStatus::kUnsupported, 0};
 }
 
 bool refresh_unavailable() { return false; }
@@ -33,7 +61,6 @@ QolResult slot_remove_unavailable(int32_t, int32_t, contracts::QolItemHandle, ui
 }  // namespace
 
 const contracts::InventoryRefreshApi kInventoryRefreshApi{&refresh_unavailable, nullptr};
-const contracts::InventoryActionApi kInventoryActionApi{&sell_unavailable};
 const contracts::QolInventorySlotApi kInventorySlotApi{
     sizeof(contracts::QolInventorySlotApi), &slot_unavailable, &slot_view_unavailable,
     &slot_remove_unavailable};
@@ -64,6 +91,20 @@ const contracts::ResourceClaim* claims(uint32_t* out_count) {
 int32_t bind_backup(const char*, void*) { return 0; }
 
 }  // namespace qol::features::inventory_hooks
+
+namespace qol::features::core_item {
+
+const contracts::InventoryActionApi kInventoryActionApi{
+    sizeof(contracts::InventoryActionApi), contracts::kInventoryActionVersionMajor,
+    contracts::kInventoryActionVersionMinor, &qol::features::inventory_hooks::move_unavailable,
+    &qol::features::inventory_hooks::use_unavailable,
+    &qol::features::inventory_hooks::discard_unavailable,
+    &qol::features::inventory_hooks::sell_unavailable,
+    &qol::features::inventory_hooks::equip_unavailable,
+    &qol::features::inventory_hooks::unequip_unavailable,
+    &qol::features::inventory_hooks::put_jewel_unavailable};
+
+}  // namespace qol::features::core_item
 
 namespace qol::features::core_item::merge {
 namespace {

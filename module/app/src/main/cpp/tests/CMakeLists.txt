@@ -273,7 +273,7 @@ set_target_properties(inventory_hook_native_compile PROPERTIES
 add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
     ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
-    ${CPP_DIR}/plugins/core.item/usecases/item_slot.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)

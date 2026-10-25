@@ -31,6 +31,7 @@
 #include "contracts/move_merge.h"
 #include "contracts/world_facts.h"
 #include "usecases/item_slot.h"
+#include "usecases/item_action.h"
 #include "usecases/sell_item.h"
 #include "hooks/merge_hook.h"
 #include "http/json_lite.h"
@@ -56,7 +57,7 @@ const contracts::CapabilityProvisionRef kProvides[] = {
      &inventory_hooks::kInventoryRefreshApi},
     {contracts::kInventoryActionCapabilityId,
      {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor},
-     &inventory_hooks::kInventoryActionApi},
+     &kInventoryActionApi},
     {contracts::kInventorySlotCapabilityId, contracts::kInventorySlotVersion,
      &inventory_hooks::kInventorySlotApi},
     {contracts::kMoveMergeControlCapabilityId,
