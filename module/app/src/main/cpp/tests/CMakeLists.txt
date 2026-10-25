@@ -44,6 +44,15 @@ add_executable(host_tests
 add_executable(item_facts_plugin_tests
     test_item_facts_plugin.cpp
     ${CPP_DIR}/plugins/core.item/plugin.cpp
+    ${CPP_DIR}/plugins/core.item/runtime/context.cpp
+    ${CPP_DIR}/plugins/core.item/runtime/lifecycle.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/item_helpers.cpp
+    ${CPP_DIR}/plugins/core.item/api/facts.cpp
+    ${CPP_DIR}/plugins/core.item/api/state.cpp
+    ${CPP_DIR}/plugins/core.item/http/query_handler.cpp
+    ${CPP_DIR}/plugins/core.item/http/write_handler.cpp
+    ${CPP_DIR}/plugins/core.item/http/write_results.cpp
+    ${CPP_DIR}/plugins/core.item/http/routes.cpp
     ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/http/response.cpp
     stubs/core_item_inventory_stub.cpp
@@ -1895,6 +1904,15 @@ add_executable(item_facts_dispatch_tests
     test_item_facts_dispatch.cpp
     ${CPP_DIR}/infra/command_queue.cpp
     ${CPP_DIR}/plugins/core.item/plugin.cpp
+    ${CPP_DIR}/plugins/core.item/runtime/context.cpp
+    ${CPP_DIR}/plugins/core.item/runtime/lifecycle.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/item_helpers.cpp
+    ${CPP_DIR}/plugins/core.item/api/facts.cpp
+    ${CPP_DIR}/plugins/core.item/api/state.cpp
+    ${CPP_DIR}/plugins/core.item/http/query_handler.cpp
+    ${CPP_DIR}/plugins/core.item/http/write_handler.cpp
+    ${CPP_DIR}/plugins/core.item/http/write_results.cpp
+    ${CPP_DIR}/plugins/core.item/http/routes.cpp
     ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/http/response.cpp
     stubs/core_item_inventory_stub.cpp

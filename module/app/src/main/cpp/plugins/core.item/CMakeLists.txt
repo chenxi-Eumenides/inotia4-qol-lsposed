@@ -1,5 +1,14 @@
 add_library(qol_plugin_core.item STATIC
     plugin.cpp
+    runtime/context.cpp
+    runtime/lifecycle.cpp
+    usecases/item_helpers.cpp
+    api/facts.cpp
+    api/state.cpp
+    http/query_handler.cpp
+    http/write_handler.cpp
+    http/write_results.cpp
+    http/routes.cpp
     http/json_lite.cpp
     http/response.cpp
     hooks/inventory_hooks.cpp
