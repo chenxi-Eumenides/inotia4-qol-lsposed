@@ -24,11 +24,11 @@ interface InfoApiService {
     fun mercenary(): String
     fun mercenaryList(): String
     fun mercenarySlot(slot: Int): String
-    fun inventory(): String
+    fun inventory(space: Int? = null, cursor: String? = null, limit: Int? = null): String
     fun inventoryMoney(): String
-    fun inventoryItems(): String
-    fun bagInfo(bag: Int): String
-    fun bagSlot(bag: Int, slot: Int): String
+    fun inventoryItems(space: Int? = null, cursor: String? = null, limit: Int? = null): String
+    fun bagInfo(bag: Int, space: Int? = null): String
+    fun bagSlot(bag: Int, slot: Int, space: Int? = null): String
     fun quest(): String
     fun questActive(): String
     fun questDetails(): String

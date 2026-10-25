@@ -39,6 +39,14 @@ struct NativeBagLayout {
     int bag_limit;   // 可用袋号上界（不含）
 };
 NativeBagLayout native_bag_layout();
+void invalidate_native_bag_layout_cache();
+QolResult inventory_bag_count(int32_t space_id, int32_t* out_count);
+QolResult inventory_bag_info(const contracts::QolBagRef* ref,
+                             contracts::QolBagInfo* out_info);
+QolResult inventory_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
+                                  contracts::QolInventoryItemRef* out);
+QolResult inventory_for_each_space_slot(int32_t space_id,
+                                        contracts::QolInventoryBagSlotFn callback, void* ctx);
 QolResult desc_type(int32_t* out_type);
 QolResult set_desc_type(int32_t type);
 QolResult bag_capacity_word(int32_t bag, uint32_t* out_word);

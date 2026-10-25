@@ -44,7 +44,7 @@ enum class QolPortId : uint32_t {
 
 constexpr QolVersion kQolPortQuestVersion{1, 2};
 constexpr QolVersion kQolPortWorldVersion{2, 0};
-constexpr QolVersion kQolPortItemVersion{3, 6};
+constexpr QolVersion kQolPortItemVersion{3, 7};
 constexpr QolVersion kQolPortCharacterVersion{1, 0};
 constexpr QolVersion kQolPortExtensionBagWriteVersion{1, 1};
 constexpr QolVersion kQolPortChoiceVersion{1, 1};
@@ -55,7 +55,7 @@ constexpr QolVersion kQolPortCraftUiWriteVersion{1, 1};
 constexpr QolVersion kQolPortCustomRecipeWriteVersion{1, 2};
 constexpr QolVersion kQolPortCraftLotteryWriteVersion{1, 0};
 constexpr QolVersion kQolPortCharacterExtrasVersion{1, 2};
-constexpr QolVersion kQolPortInventoryExtrasVersion{1, 0};
+constexpr QolVersion kQolPortInventoryExtrasVersion{1, 1};
 constexpr QolVersion kQolPortItemExtrasVersion{1, 0};
 constexpr QolVersion kQolPortSystemVersion{1, 1};
 constexpr QolVersion kQolPortCharacterHttpVersion{1, 0};

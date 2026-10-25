@@ -9,6 +9,7 @@
 #include "game/variants/game_variant.h"
 
 #include <cstring>
+#include <mutex>
 
 namespace qol::game {
 namespace {
@@ -16,6 +17,11 @@ namespace {
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotFound = "inventory slot is empty";
 constexpr const char* kNotReady = "inventory not ready";
+
+QolResult error_result(int32_t code, const char* message);
+ItemHandleError copy_ref(const InventoryItemRef& source,
+                         contracts::QolInventoryItemRef* target);
+QolResult item_handle_error(ItemHandleError error);
 
 contracts::QolFindItemAbiFn g_find_item_backup = nullptr;
 
@@ -25,28 +31,158 @@ contracts::QolFindItemAbiFn g_find_item_backup = nullptr;
 constexpr uintptr_t G_C18_BAG_TABLE_VMA = 0x735000;
 constexpr uintptr_t G_C18_SLOT_TABLE_VMA = 0x735100;
 
+constexpr int32_t kRegisteredProviderBagBase = contracts::kQolOriginalBagCount;
+
+struct C18BagLayoutCache {
+    uintptr_t table_address = 0;
+    void* first_bag = nullptr;
+    int32_t count = 0;
+    bool table_readable = false;
+    bool initialized = false;
+};
+
+C18BagLayoutCache g_c18_bag_layout_cache;
+std::mutex g_c18_bag_layout_cache_mutex;
+
+bool probe_c18_bag_count(int32_t* out_count) {
+    if (out_count == nullptr) return false;
+
+    const uintptr_t table_address = g_base == 0 ? 0 : g_base + G_C18_BAG_TABLE_VMA;
+    auto* bag_table = reinterpret_cast<void* const*>(table_address);
+    const bool table_readable = table_address != 0 &&
+                                game_memory_accessible(bag_table,
+                                    sizeof(void*) * contracts::kQolMaxNativeBagCount, 'r');
+    void* first_bag = table_readable ? bag_table[0] : nullptr;
+
+    std::lock_guard<std::mutex> lock(g_c18_bag_layout_cache_mutex);
+    if (!g_c18_bag_layout_cache.initialized ||
+        g_c18_bag_layout_cache.table_address != table_address ||
+        g_c18_bag_layout_cache.first_bag != first_bag ||
+        g_c18_bag_layout_cache.table_readable != table_readable) {
+        g_c18_bag_layout_cache = {table_address, first_bag, 0, table_readable, true};
+    }
+    if (!table_readable || first_bag == nullptr) return false;
+    if (g_c18_bag_layout_cache.count != 0) {
+        *out_count = g_c18_bag_layout_cache.count;
+        return true;
+    }
+
+    int32_t highest = -1;
+    for (int32_t index = 0; index < contracts::kQolMaxNativeBagCount; ++index) {
+        if (!game_memory_accessible(bag_table + index, sizeof(void*), 'r')) return false;
+        if (bag_table[index] != nullptr) highest = index;
+    }
+    int32_t count = highest + 1;
+    if (count < contracts::kQolOriginalBagCount) count = contracts::kQolOriginalBagCount;
+    if (count > contracts::kQolMaxNativeBagCount) count = contracts::kQolMaxNativeBagCount;
+    g_c18_bag_layout_cache.count = count;
+    *out_count = count;
+    return true;
+}
+
 NativeBagLayout probe_native_bag_layout() {
+    int32_t count = 0;
+    if (probe_c18_bag_count(&count)) {
+        return {reinterpret_cast<uint8_t*>(g_base + G_C18_SLOT_TABLE_VMA), count};
+    }
+    return {reinterpret_cast<uint8_t*>(g_inven), contracts::kQolOriginalBagCount};
+}
+
+QolResult unsupported_space() {
+    return error_result(kQolErrUnsupported, "bag space unsupported");
+}
+
+QolResult provider_bag_id(int32_t bag, int32_t* out_provider_bag) {
+    if (bag < 0 || out_provider_bag == nullptr ||
+        bag > INT32_MAX - kRegisteredProviderBagBase) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_provider_bag = bag + kRegisteredProviderBagBase;
+    return contracts::ok();
+}
+
+QolResult registered_bag_count(const contracts::QolInventoryExtensionProvider* provider,
+                               int32_t* out_count) {
+    if (provider == nullptr) return unsupported_space();
+    if (provider->owns_bag == nullptr) return unsupported_space();
+    int32_t count = 0;
+    while (count <= INT32_MAX - kRegisteredProviderBagBase &&
+           provider->owns_bag(count + kRegisteredProviderBagBase) != 0) {
+        ++count;
+    }
+    *out_count = count;
+    return contracts::ok();
+}
+
+QolResult native_item_ref_at(const NativeBagLayout& layout, int32_t space_id, int32_t bag,
+                            int32_t slot, contracts::QolInventoryItemRef* out) {
+    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    auto* slot_address = reinterpret_cast<void**>(layout.slots +
+        static_cast<size_t>(bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
+    if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    void* item = *slot_address;
+    if (item == nullptr) return error_result(kQolErrNotFound, kNotFound);
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    const int category = item_class_category(item);
+    if (category < 0) return error_result(kQolErrNotReady, kNotReady);
+    const InventoryItemRef source{
+        InventoryItemKind::kOriginal, bag, slot, category,
+        fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1, item};
+    const ItemHandleError handle_error = copy_ref(source, out);
+    if (handle_error != ItemHandleError::kNone) return item_handle_error(handle_error);
+    out->space_id = space_id;
+    return contracts::ok();
+}
+
+QolResult native_bag_capacity(int32_t space_id, int32_t bag, int32_t* out_capacity) {
+    uint32_t capacity = 16;
+    void* bag_object = nullptr;
     if (g_base != 0) {
-        auto* bag_table = reinterpret_cast<void* const*>(g_base + G_C18_BAG_TABLE_VMA);
-        if (game_memory_accessible(bag_table, sizeof(void*) * 8, 'r')) {
-            // 最多扫 20 项：袋对象表之后紧接着槽表，越过会读到物品指针。
-            // 上界取“最高非空袋对象索引 + 1”，追加袋被游戏分配后自动纳入。
-            int highest = -1;
-            for (int index = 0; index < 20; ++index) {
-                if (!game_memory_accessible(bag_table + index, sizeof(void*), 'r')) break;
-                if (bag_table[index] != nullptr) highest = index;
-            }
-            // 判别依据：C18 客户端会初始化袋对象表（至少袋 0 非空），原版客户端
-            // 这块 bss 始终为 0。
-            if (bag_table[0] != nullptr) {
-                int limit = highest + 1;
-                if (limit < 6) limit = 6;
-                if (limit > 19) limit = 19;
-                return {reinterpret_cast<uint8_t*>(g_base + G_C18_SLOT_TABLE_VMA), limit};
+        if (space_id == contracts::kQolBagSpaceC18) {
+            auto* bag_table = reinterpret_cast<void**>(g_base + G_C18_BAG_TABLE_VMA);
+            auto* entry = bag_table + bag;
+            if (game_memory_accessible(entry, sizeof(*entry), 'r')) bag_object = *entry;
+        } else {
+            auto*** table_slot = reinterpret_cast<void***>(g_base + G_BAG_TABLE_VMA);
+            if (game_memory_accessible(table_slot, sizeof(*table_slot), 'r') &&
+                *table_slot != nullptr &&
+                game_memory_accessible(*table_slot + bag, sizeof(**table_slot), 'r')) {
+                bag_object = (*table_slot)[bag];
             }
         }
     }
-    return {reinterpret_cast<uint8_t*>(g_inven), 6};
+    if (bag_object != nullptr) {
+        auto* word = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) +
+                                                  BAG_OBJECT_CAPACITY);
+        if (game_memory_accessible(word, sizeof(*word), 'r')) capacity = *word;
+    }
+    *out_capacity = static_cast<int32_t>(capacity);
+    return contracts::ok();
+}
+
+struct ProviderSlotContext {
+    int32_t space_id;
+    contracts::QolInventoryBagSlotFn callback;
+    void* callback_context;
+    bool invalid_ref;
+};
+
+int32_t bridge_provider_space_slot(const contracts::QolInventoryExtensionItemRef* source,
+                                   void* raw_context) {
+    auto* context = static_cast<ProviderSlotContext*>(raw_context);
+    if (source == nullptr || source->bag < kRegisteredProviderBagBase || source->slot < 0 ||
+        source->slot >= 16) {
+        context->invalid_ref = true;
+        return 1;
+    }
+    const contracts::QolInventoryItemRef ref{
+        source->kind, source->bag - kRegisteredProviderBagBase, source->slot,
+        source->category, source->count, source->item, context->space_id};
+    return context->callback(&ref, context->callback_context) != 0 ? 1 : 0;
 }
 thread_local uint32_t g_original_only_depth = 0;
 
@@ -262,6 +398,11 @@ QolResult inventory_item_ref_at(int32_t bag, int32_t slot,
     }
     const ItemHandleError handle_error = copy_ref(source, out);
     if (handle_error != ItemHandleError::kNone) return item_handle_error(handle_error);
+    out->space_id = source.kind == InventoryItemKind::kProvider
+                        ? contracts::kQolBagSpaceFirstRegistered
+                        : (bag < contracts::kQolOriginalBagCount
+                               ? contracts::kQolBagSpaceOriginal
+                               : contracts::kQolBagSpaceC18);
     return contracts::ok();
 }
 
@@ -274,6 +415,169 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
 }
 
 NativeBagLayout native_bag_layout() { return probe_native_bag_layout(); }
+
+void invalidate_native_bag_layout_cache() {
+    std::lock_guard<std::mutex> lock(g_c18_bag_layout_cache_mutex);
+    g_c18_bag_layout_cache = {};
+}
+
+QolResult inventory_bag_count(int32_t space_id, int32_t* out_count) {
+    if (out_count == nullptr || space_id < contracts::kQolBagSpaceOriginal) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (space_id == contracts::kQolBagSpaceOriginal) {
+        *out_count = contracts::kQolOriginalBagCount;
+        return contracts::ok();
+    }
+    if (space_id == contracts::kQolBagSpaceC18) {
+        int32_t count = 0;
+        if (!probe_c18_bag_count(&count)) return error_result(kQolErrNotReady, kNotReady);
+        *out_count = count;
+        return contracts::ok();
+    }
+    return registered_bag_count(inventory_extension_provider_if_resident(), out_count);
+}
+
+QolResult inventory_bag_info(const contracts::QolBagRef* ref,
+                             contracts::QolBagInfo* out_info) {
+    if (ref == nullptr || out_info == nullptr || ref->space_id < contracts::kQolBagSpaceOriginal ||
+        ref->bag < 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_info = {};
+    int32_t bag_count = 0;
+    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
+    if (!contracts::succeeded(result)) return result;
+    if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+
+    if (ref->space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        const contracts::QolInventoryExtensionProvider* provider =
+            inventory_extension_provider_if_resident();
+        if (provider == nullptr) return unsupported_space();
+        if (provider->bag_capacity == nullptr || provider->for_each_item == nullptr) {
+            return unsupported_space();
+        }
+        int32_t provider_bag = 0;
+        result = provider_bag_id(ref->bag, &provider_bag);
+        if (!contracts::succeeded(result)) return result;
+        int32_t capacity = 0;
+        result = provider->bag_capacity(provider_bag, &capacity);
+        if (!contracts::succeeded(result)) return result;
+        struct CountContext {
+            int32_t bag;
+            int32_t slot_count;
+            bool invalid_ref;
+        } context{provider_bag, 0, false};
+        result = provider->for_each_item(
+            [](const contracts::QolInventoryExtensionItemRef* item, void* raw) -> int32_t {
+                auto* state = static_cast<CountContext*>(raw);
+                if (item == nullptr) {
+                    state->invalid_ref = true;
+                    return 1;
+                }
+                if (item->bag == state->bag) ++state->slot_count;
+                return 0;
+            },
+            &context);
+        if (!contracts::succeeded(result)) return result;
+        if (context.invalid_ref) return error_result(kQolErrInternal, "invalid provider item ref");
+        out_info->capacity = capacity;
+        out_info->slot_count = context.slot_count;
+        return contracts::ok();
+    }
+
+    const NativeBagLayout layout = native_bag_layout();
+    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    int32_t capacity = 16;
+    result = native_bag_capacity(ref->space_id, ref->bag, &capacity);
+    if (!contracts::succeeded(result)) return result;
+    int32_t slot_count = 0;
+    for (int32_t slot = 0; slot < 16; ++slot) {
+        auto* slot_address = reinterpret_cast<void**>(layout.slots +
+            static_cast<size_t>(ref->bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
+        if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
+            return error_result(kQolErrNotReady, kNotReady);
+        }
+        if (*slot_address != nullptr) ++slot_count;
+    }
+    out_info->capacity = capacity;
+    out_info->slot_count = slot_count;
+    return contracts::ok();
+}
+
+QolResult inventory_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
+                                  contracts::QolInventoryItemRef* out) {
+    if (ref == nullptr || out == nullptr || ref->space_id < contracts::kQolBagSpaceOriginal ||
+        ref->bag < 0 || slot < 0 || slot >= 16) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out = {};
+    int32_t bag_count = 0;
+    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
+    if (!contracts::succeeded(result)) return result;
+    if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+
+    if (ref->space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        const contracts::QolInventoryExtensionProvider* provider =
+            inventory_extension_provider_if_resident();
+        if (provider == nullptr) return unsupported_space();
+        if (provider->owns_bag == nullptr || provider->item_ref_at == nullptr) {
+            return unsupported_space();
+        }
+        int32_t provider_bag = 0;
+        result = provider_bag_id(ref->bag, &provider_bag);
+        if (!contracts::succeeded(result)) return result;
+        if (provider->owns_bag(provider_bag) == 0) {
+            return error_result(kQolErrNotFound, "bag not found");
+        }
+        contracts::QolInventoryExtensionItemRef source{};
+        result = provider->item_ref_at(provider_bag, slot, &source);
+        if (!contracts::succeeded(result)) return result;
+        if (source.bag != provider_bag || source.slot != slot) {
+            return error_result(kQolErrInternal, "provider item reference mismatch");
+        }
+        *out = {source.kind, ref->bag, slot, source.category, source.count, source.item,
+                ref->space_id};
+        return contracts::ok();
+    }
+
+    const NativeBagLayout layout = native_bag_layout();
+    return native_item_ref_at(layout, ref->space_id, ref->bag, slot, out);
+}
+
+QolResult inventory_for_each_space_slot(int32_t space_id,
+                                        contracts::QolInventoryBagSlotFn callback, void* ctx) {
+    if (space_id < contracts::kQolBagSpaceOriginal || callback == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        const contracts::QolInventoryExtensionProvider* provider =
+            inventory_extension_provider_if_resident();
+        if (provider == nullptr) return unsupported_space();
+        if (provider->for_each_item == nullptr) return unsupported_space();
+        ProviderSlotContext context{space_id, callback, ctx, false};
+        const QolResult result = provider->for_each_item(&bridge_provider_space_slot, &context);
+        if (!contracts::succeeded(result)) return result;
+        if (context.invalid_ref) return error_result(kQolErrInternal, "invalid provider item ref");
+        return contracts::ok();
+    }
+
+    int32_t bag_count = 0;
+    QolResult result = inventory_bag_count(space_id, &bag_count);
+    if (!contracts::succeeded(result)) return result;
+    const NativeBagLayout layout = native_bag_layout();
+    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    contracts::QolInventoryItemRef item{};
+    for (int32_t bag = 0; bag < bag_count; ++bag) {
+        for (int32_t slot = 0; slot < 16; ++slot) {
+            result = native_item_ref_at(layout, space_id, bag, slot, &item);
+            if (result.code == kQolErrNotFound) continue;
+            if (!contracts::succeeded(result)) return result;
+            if (callback(&item, ctx) != 0) return contracts::ok();
+        }
+    }
+    return contracts::ok();
+}
 
 QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item) {
     const NativeBagLayout layout = native_bag_layout();

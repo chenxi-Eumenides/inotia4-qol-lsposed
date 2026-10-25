@@ -138,14 +138,14 @@ static_assert(std::is_same<qol::contracts::ExtensionBagItemFn,
 static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
               "Host SDK handle table must not expose resolve_item");
 static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
-                  sizeof(int32_t) * 5 + sizeof(qol::contracts::QolItemHandle),
+                  sizeof(int32_t) * 6 + sizeof(qol::contracts::QolItemHandle),
               "inventory reference must not carry a native object pointer");
 
 int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 3 &&
           qol::contracts::kItemFactsVersion.minor == 6);
     CHECK(qol::contracts::kQolPortItemVersion.major == 3 &&
-          qol::contracts::kQolPortItemVersion.minor == 6);
+          qol::contracts::kQolPortItemVersion.minor == 7);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -294,7 +294,7 @@ int main() {
     CHECK(descriptor.provides[5].iface != nullptr);
     CHECK(descriptor.port_count == 6 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 6);
+    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 7);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==

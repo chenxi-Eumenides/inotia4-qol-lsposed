@@ -26,6 +26,28 @@ QolResult read_is_empty_bag(int32_t bag, int32_t* out_empty) {
     return is_empty_bag(bag, out_empty);
 }
 
+QolResult read_bag_size_ref(const contracts::QolBagRef* ref, int32_t* out_size) {
+    if (ref == nullptr || out_size == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid argument");
+    }
+    contracts::QolBagInfo info{};
+    const QolResult result = inventory_bag_info(ref, &info);
+    if (!contracts::succeeded(result)) return result;
+    *out_size = info.capacity;
+    return contracts::ok();
+}
+
+QolResult read_is_empty_bag_ref(const contracts::QolBagRef* ref, int32_t* out_empty) {
+    if (ref == nullptr || out_empty == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid argument");
+    }
+    contracts::QolBagInfo info{};
+    const QolResult result = inventory_bag_info(ref, &info);
+    if (!contracts::succeeded(result)) return result;
+    *out_empty = info.slot_count == 0 ? 1 : 0;
+    return contracts::ok();
+}
+
 QolResult read_find_save_slot(const void* item, int32_t* out_slot) {
     return find_save_slot(item, out_slot);
 }
@@ -52,7 +74,7 @@ QolResult read_detail_item(void** out_item) {
 const contracts::QolInventoryExtrasPort kPort{
     contracts::kQolPortInventoryExtrasVersion,
     {&read_for_each_bag_slot, &read_bag_size, &read_is_empty_bag, &read_find_save_slot,
-     &read_cursor_item, &read_detail_item},
+      &read_cursor_item, &read_detail_item, &read_bag_size_ref, &read_is_empty_bag_ref},
 };
 
 }  // namespace

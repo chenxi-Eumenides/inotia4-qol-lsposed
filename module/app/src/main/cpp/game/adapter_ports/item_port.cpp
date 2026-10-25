@@ -215,6 +215,24 @@ QolResult read_item_ref_at(int32_t bag, int32_t slot, contracts::QolInventoryIte
     return qol::game::inventory_item_ref_at(bag, slot, out);
 }
 
+QolResult read_bag_count(int32_t space_id, int32_t* out_count) {
+    return inventory_bag_count(space_id, out_count);
+}
+
+QolResult read_bag_info(const contracts::QolBagRef* ref, contracts::QolBagInfo* out_info) {
+    return inventory_bag_info(ref, out_info);
+}
+
+QolResult read_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
+                             contracts::QolInventoryItemRef* out) {
+    return inventory_space_item_at(ref, slot, out);
+}
+
+QolResult read_for_each_space_slot(int32_t space_id,
+                                   contracts::QolInventoryBagSlotFn callback, void* ctx) {
+    return inventory_for_each_space_slot(space_id, callback, ctx);
+}
+
 QolResult read_inventory_extension_access(contracts::QolInventoryExtensionAccess* out_access) {
     return inventory_extension_get_access(out_access);
 }
@@ -421,9 +439,10 @@ const contracts::QolItemPort kItemPort{
     {&read_category, &read_real_equip, &read_jewel_category, &read_no_sell, &read_sell_price,
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_item_context,
       &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
-       &read_static_text, &read_static_ready, &read_inventory_item_view,
-         &read_effective_cumulate_count, &read_inventory_extension_access, &read_count_limit,
-         &read_count_encoding, &read_quote},
+        &read_static_text, &read_static_ready, &read_inventory_item_view,
+        &read_effective_cumulate_count, &read_inventory_extension_access, &read_count_limit,
+          &read_count_encoding, &read_quote, &read_bag_count, &read_bag_info,
+          &read_space_item_at, &read_for_each_space_slot},
 };
 
 }  // namespace

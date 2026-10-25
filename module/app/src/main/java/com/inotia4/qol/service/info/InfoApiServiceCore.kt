@@ -61,15 +61,18 @@ class InfoApiServiceCore : InfoApiService {
 
     // item/quest 查询已迁 owner（item_facts/quest）：Kotlin 只做 nativeHttpDispatch 透传，
     // 成功响应与冻结语义由 owner 快照与启动期静态 enrichment 生成（见 NativeHttpQuery）。
-    override fun inventory(): String = InfoItemQueries.inventory()
+    override fun inventory(space: Int?, cursor: String?, limit: Int?): String =
+        InfoItemQueries.inventory(space, cursor, limit)
 
     override fun inventoryMoney(): String = InfoItemQueries.money()
 
-    override fun inventoryItems(): String = InfoItemQueries.items()
+    override fun inventoryItems(space: Int?, cursor: String?, limit: Int?): String =
+        InfoItemQueries.items(space, cursor, limit)
 
-    override fun bagInfo(bag: Int): String = InfoItemQueries.bagInfo(bag)
+    override fun bagInfo(bag: Int, space: Int?): String = InfoItemQueries.bagInfo(bag, space)
 
-    override fun bagSlot(bag: Int, slot: Int): String = InfoItemQueries.bagSlot(bag, slot)
+    override fun bagSlot(bag: Int, slot: Int, space: Int?): String =
+        InfoItemQueries.bagSlot(bag, slot, space)
 
     override fun quest(): String = InfoQuestQueries.quest()
 

@@ -19,6 +19,28 @@ enum class QolInventoryItemKind : int32_t {
     kProvider = 1,
 };
 
+// 袋编号空间：原版 0、改版（C18 追加袋）1，其余为注册源分配值（>=2）。
+// 各空间索引一律从 0 起；扁平袋号仅是按 原版→改版→注册源 顺序连接的派生便利键。
+constexpr int32_t kQolBagSpaceOriginal = 0;
+constexpr int32_t kQolBagSpaceC18 = 1;
+constexpr int32_t kQolBagSpaceFirstRegistered = 2;
+
+// 原版固定 6 袋（0..4 事务袋 + 5 任务袋）；改版为动态袋数，索引上界排他。
+constexpr int32_t kQolOriginalBagCount = 6;
+constexpr int32_t kQolTaskBagIndex = 5;
+// 原生袋索引 18 只是 getter 可接受值，不是真实袋；真实袋号上界为 18（0..17）。
+constexpr int32_t kQolMaxNativeBagCount = 18;
+
+struct QolBagRef {
+    int32_t space_id;
+    int32_t bag;
+};
+
+struct QolBagInfo {
+    int32_t capacity;
+    int32_t slot_count;
+};
+
 struct QolInventoryItemRef {
     int32_t kind;
     int32_t bag;
@@ -26,6 +48,8 @@ struct QolInventoryItemRef {
     int32_t category;
     int32_t count;
     QolItemHandle item;
+    // 袋编号空间；与 bag 一起构成稳定身份。旧字段顺序保持不变。
+    int32_t space_id;
 };
 
 // Atomic snapshot of the selected inventory detail slot. The control object stays in Game Adapter.
@@ -163,6 +187,12 @@ struct QolItemPortReadApi {
     QolResult (*count_limit)(QolItemHandle item, uint32_t* out_limit);
     QolResult (*count_encoding)(QolItemHandle item, QolItemCountEncoding* out_encoding);
     QolItemPortQuoteFn quote;
+    // 3.7：空间化袋访问。space_id 0/1 为原生（原版/改版），>=2 由注册源提供。
+    // bag_count 给出该空间索引上界（排他）；bag_info 给出该袋容量与占用槽数。
+    QolResult (*bag_count)(int32_t space_id, int32_t* out_count);
+    QolResult (*bag_info)(const QolBagRef* ref, QolBagInfo* out_info);
+    QolResult (*item_at)(const QolBagRef* ref, int32_t slot, QolInventoryItemRef* out);
+    QolResult (*for_each_space_slot)(int32_t space_id, QolInventoryBagSlotFn fn, void* ctx);
 };
 
 struct QolItemPort {
@@ -188,6 +218,13 @@ inline bool qol_item_port_quote_size_valid(const QolItemPort* port) {
     constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
         offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, quote) +
         sizeof(QolItemPortQuoteFn));
+    return port != nullptr && port->struct_size >= kRequiredSize;
+}
+
+inline bool qol_item_port_bag_space_size_valid(const QolItemPort* port) {
+    constexpr uint32_t kRequiredSize = static_cast<uint32_t>(
+        offsetof(QolItemPort, read) + offsetof(QolItemPortReadApi, for_each_space_slot) +
+        sizeof(QolItemPortReadApi::for_each_space_slot));
     return port != nullptr && port->struct_size >= kRequiredSize;
 }
 
