@@ -21,6 +21,10 @@ find_package(JNI REQUIRED)
 
 set(CPP_DIR ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+# core.custom_ui 组件源清单：Host 测试直接编译插件源码，集中定义避免新增 TU 时漏 target。
+set(CORE_CUSTOM_UI_COMPONENTS_SOURCES
+    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp)
+
 # Test builds inject the generic Host security authorizer instead of linking the production feature facade.
 set_source_files_properties(${CPP_DIR}/host/http_dispatch.cpp PROPERTIES
     COMPILE_DEFINITIONS QOL_HTTP_DISPATCH_TEST_SEAMS=1)
@@ -450,7 +454,7 @@ add_executable(native_choice_tests
     ${CPP_DIR}/plugins/core.custom_ui/feature.cpp
     ${CPP_DIR}/plugins/core.custom_ui/plugin.cpp
     ${CPP_DIR}/plugins/core.custom_ui/text_mechanism.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
     ${CPP_DIR}/plugins/core.custom_ui/panels/stack.cpp
     ${CPP_DIR}/plugins/core.custom_ui/panels/host.cpp
     ${CPP_DIR}/plugins/core.custom_ui/ui_confirmation.cpp
@@ -1638,7 +1642,7 @@ add_test(NAME native_close_button_render_tests COMMAND native_close_button_rende
 # nav 关闭形态（ForceClose）组件级测试：X 路径的原生事件树命中、按下态透传与旧 minor 拒绝。
 add_executable(close_button_component_tests
     test_close_button_component.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
 )
 target_include_directories(close_button_component_tests PRIVATE
     ${CPP_DIR}
@@ -1649,7 +1653,7 @@ add_test(NAME close_button_component_tests COMMAND close_button_component_tests)
 
 add_executable(nav_button_component_tests
     test_nav_button_component.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
 )
 target_include_directories(nav_button_component_tests PRIVATE
     ${CPP_DIR}
@@ -1671,7 +1675,7 @@ add_test(NAME nav_box_consistency_tests COMMAND nav_box_consistency_tests)
 
 add_executable(debug_two_column_tests
     test_debug_two_column.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
     ${CPP_DIR}/plugins/core.custom_ui/panels/debug_components.cpp
 )
 target_include_directories(debug_two_column_tests PRIVATE
@@ -1686,7 +1690,7 @@ add_test(NAME debug_two_column_tests COMMAND debug_two_column_tests)
 # U11-2：core.ui 标准组件创建/更新/命中/销毁与错误语义 host 测试。
 add_executable(core_ui_components_tests
     test_core_ui_components.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
 )
 target_include_directories(core_ui_components_tests PRIVATE
     ${CPP_DIR}
@@ -1697,7 +1701,7 @@ add_test(NAME core_ui_components_tests COMMAND core_ui_components_tests)
 
 add_executable(native_scroll_list_tests
     test_native_scroll_list.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
     ${CPP_DIR}/plugins/core.custom_ui/panels/debug_scroll.cpp
 )
 target_include_directories(native_scroll_list_tests PRIVATE ${CPP_DIR})
@@ -1718,7 +1722,7 @@ add_test(NAME settings_panel_widget_tests COMMAND settings_panel_widget_tests)
 
 add_executable(help_page_tests
     test_help_page.cpp
-    ${CPP_DIR}/plugins/core.custom_ui/ui_components.cpp
+    ${CORE_CUSTOM_UI_COMPONENTS_SOURCES}
     ${CPP_DIR}/plugins/core.custom_ui/panels/debug_help.cpp
 )
 target_include_directories(help_page_tests PRIVATE ${CPP_DIR})
