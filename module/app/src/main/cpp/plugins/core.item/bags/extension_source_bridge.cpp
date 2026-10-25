@@ -116,7 +116,13 @@ QolResult for_each_item(contracts::QolInventoryBagSlotFn fn, void* ctx) {
     return g_provider->for_each_item(&visit_provider_item, &context);
 }
 
-QolResult insert(const contracts::QolBagInsertRequest*, contracts::QolBagMutationResult*) {
+QolResult export_item(contracts::QolItemHandle, int32_t,
+                      contracts::QolBagTransfer*) {
+    return unsupported();
+}
+
+QolResult import_item(const contracts::QolBagTransfer*, int32_t, int32_t,
+                      contracts::QolBagMutationResult*) {
     return unsupported();
 }
 
@@ -125,7 +131,7 @@ QolResult remove(contracts::QolItemHandle, int32_t,
     return unsupported();
 }
 
-QolResult identify(contracts::QolItemHandle, contracts::QolBagRef*) {
+QolResult identify(contracts::QolItemHandle, contracts::QolBagRef*, int32_t*) {
     return unsupported();
 }
 
@@ -140,7 +146,8 @@ const contracts::QolBagSource kSource{
     &info,
     &item_at,
     &for_each_item,
-    &insert,
+    &export_item,
+    &import_item,
     &remove,
     &identify,
     &use,
