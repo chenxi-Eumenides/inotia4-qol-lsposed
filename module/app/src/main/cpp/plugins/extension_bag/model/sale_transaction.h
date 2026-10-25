@@ -4,7 +4,7 @@
 #include <atomic>
 #include <cstdint>
 
-#include "contracts/extension_bag.h"
+#include "contracts/item_handle.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 

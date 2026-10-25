@@ -430,8 +430,7 @@ namespace {
 void install_extension_desc_unequip_hook_locked(int extension_bag) {
     reset_extension_desc_unequip_hook_locked();
     if (!virtual_bag::valid_index(extension_bag)) return;
-    // 扩展袋 desc 打开时记录袋位，供函数级 ButtonUnequipExe hook
-    // （virtual_bag_handle_original_bag_unequip）识别扩展袋解除路径。
+    // 扩展袋 desc 打开时记录袋位，供卸下入口识别路径。
     qol::extension_bag::ui_state().ui.extension_desc_unequip_bag = extension_bag;
     VIRTBAG_LOG("extension desc unequip armed bag=%d", extension_bag);
 }

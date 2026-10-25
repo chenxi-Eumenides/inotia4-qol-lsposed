@@ -6,6 +6,7 @@
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/transaction/transaction.h"
+#include "plugins/extension_bag/core/move_merge.h"
 
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/logging.h"

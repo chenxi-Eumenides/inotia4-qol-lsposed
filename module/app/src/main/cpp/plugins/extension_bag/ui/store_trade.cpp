@@ -4,6 +4,7 @@
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/inventory_action.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
@@ -54,41 +55,6 @@ void store_sell_popup(uint32_t text_id) {
     }
 }
 
-// W1 部分出售：把模式视图数量从 view 递减 count（不调用原版 ITEMSYSTEM_Divide）。
-// 写回经 item-count facade（R-47 决策 b：启用态拆段进位、关闭态只写 b 保留 a），
-// 随后重序列化 payload 并把 descriptor.count 回写为 canonical（R-38/R-48）。
-bool decrement_extension_item_view_locked(int bag, int slot, void* item, int count,
-                                          const char* context) {
-    if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount ||
-        item == nullptr || count <= 0) {
-        return false;
-    }
-    virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
-    const int view = static_cast<int>(virtual_bag_effective_count(
-        item, static_cast<uint32_t>(descriptor.count)));
-    if (count >= view) return false;  // 整堆由调用方走删除分支
-    const auto* count_api = item_count_api();
-    uint32_t old_field = 0;
-    if (count_api == nullptr || count_api->read_encoded_field == nullptr ||
-        count_api->write_encoded_field == nullptr ||
-        !qol::contracts::succeeded(count_api->read_encoded_field(item, &old_field))) return false;
-    if (!virtual_bag_write_effective(item, static_cast<uint32_t>(view - count))) return false;
-    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-    int payload_size = 0;
-    if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
-        (void)count_api->write_encoded_field(item, old_field);
-        VIRTBAG_LOG("store sell reserialize failed context=%s bag=%d slot=%d", context, bag, slot);
-        return false;
-    }
-    descriptor.payload = payload;
-    descriptor.payload_size = payload_size;
-    descriptor.count = static_cast<int>(virtual_bag_canonical_count(
-        item, virtual_bag_canonical_from_field(old_field, static_cast<uint32_t>(descriptor.count))));
-    qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] = descriptor.category;
-    qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] = virtual_bag::payload_hash(descriptor);
-    extension_bag_mark_dirty_locked();
-    return true;
-}
 }  // namespace
 
 int64_t store_button_sell_exe_wrapper() {
@@ -158,6 +124,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
     bool item_encoded = false;
     bool module_item = false;
     bool reject = false;
+    qol::contracts::QolItemHandle expected_item{};
     qol::store_sell::Plan plan{};
     {
         ::qol::extension_bag::ReentryLock lock;
@@ -185,6 +152,9 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
                 if (!identity_ok || !descriptor_ok) {
                     reject = true;
                 } else {
+                    if (!extension_bag_item_handle_for_pointer(item, &expected_item)) {
+                        reject = true;
+                    }
                     view = static_cast<int>(virtual_bag_effective_count(
                         item, static_cast<uint32_t>(descriptor.count)));
                     item_encoded = extension_bag_ui_item_count_encoding(item) ==
@@ -209,68 +179,37 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
 
     const int count = plan.kind == qol::store_sell::PlanKind::kWhole ? 1 : plan.count;
     const int64_t price = extension_bag_sell_price(item, count, false);
-    if (price < 0 || price != displayed_price || extension_bag_write_api() == nullptr ||
-        extension_bag_write_api()->equipment.add_money == nullptr ||
-        extension_bag_write_api()->equipment.minus_money == nullptr) {
+    if (price < 0 || price != displayed_price) {
         VIRTBAG_LOG("store sell reject reason=price_mismatch bag=%d slot=%d count=%d price=%lld displayed=%lld",
                     bag, slot, count, static_cast<long long>(price),
                     static_cast<long long>(displayed_price));
         store_sell_popup(0xc);
         return 0;
     }
-    if (!extension_bag_ui_add_money(price)) {
-        VIRTBAG_LOG("store sell credit failed bag=%d slot=%d price=%lld", bag, slot,
-                    static_cast<long long>(price));
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    if (action == nullptr) {
         store_sell_popup(0xc);
         return 0;
     }
-
-    bool committed = false;
-    bool whole = false;
+    const auto result = action->sell({2, bag, slot}, expected_item, count, "store");
+    if (result.status != qol::contracts::InventorySellStatus::kOk) {
+        VIRTBAG_LOG("store sell action rejected bag=%d slot=%d count=%d status=%d",
+                    bag, slot, count, static_cast<int>(result.status));
+        store_sell_popup(0xc);
+        return 0;
+    }
     {
         ::qol::extension_bag::ReentryLock lock;
-        const bool current =
-            virtual_bag::valid_index(bag) && slot >= 0 && slot < virtual_bag::kSlotCount &&
-            qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item &&
-            module_object_release_allowed_locked(bag, slot, item, "store sell", false, nullptr) &&
-            (!item_encoded ||
-             static_cast<int>(virtual_bag_effective_count(
-                 item, static_cast<uint32_t>(::qol::extension_bag::access::bag().items[bag][slot].count))) == view);
-        if (current) {
-            whole = plan.kind == qol::store_sell::PlanKind::kWhole || count >= view;
-            if (whole) {
-                const virtual_bag::Item previous_item = ::qol::extension_bag::access::bag().items[bag][slot];
-                ::qol::extension_bag::access::bag().items[bag][slot] = {};
-                extension_bag_mark_dirty_locked();
-                if (!free_module_object_locked(bag, slot)) {
-                    ::qol::extension_bag::access::bag().items[bag][slot] = previous_item;
-                    persist_state_locked();
-                    VIRTBAG_LOG("store sell rejected object release bag=%d slot=%d", bag, slot);
-                } else {
-                    persist_state_locked();
-                    committed = true;
-                }
-            } else if (decrement_extension_item_view_locked(bag, slot, item, count, "store sell")) {
-                persist_state_locked();
-                committed = true;
-            }
-        }
-        if (committed && qol::extension_bag::ui_state().store.view_installed && qol::extension_bag::ui_state().store.view_bag == bag) {
-            // R-12：只用商店投影刷新；调用原版 UIStore_RefreshInvenItem 会把整列刷回
-            // 窗口原版袋内容，破坏扩展投影。
+        if (qol::extension_bag::ui_state().store.view_installed &&
+            qol::extension_bag::ui_state().store.view_bag == bag) {
+            // The core action changed sidecar state through QolBagSource; this refresh only
+            // rebinds the store's independent display projection.
             store_refresh_projection_locked();
         }
     }
-    if (!committed) {
-        const bool refunded = extension_bag_ui_minus_money(price);
-        VIRTBAG_LOG("store sell remove failed bag=%d slot=%d count=%d price=%lld refunded=%d",
-                    bag, slot, count, static_cast<long long>(price), refunded ? 1 : 0);
-        store_sell_popup(0xc);
-        return 0;
-    }
     store_sell_popup(0x1f);
-    VIRTBAG_LOG("store sell committed bag=%d slot=%d count=%d whole=%d view=%d price=%lld",
-                bag, slot, count, whole ? 1 : 0, view, static_cast<long long>(price));
+    VIRTBAG_LOG("store sell committed through inventory.action bag=%d slot=%d count=%d view=%d price=%lld",
+                bag, slot, count, view, static_cast<long long>(result.price));
     return 0;
 }
 

@@ -9,6 +9,7 @@
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
+#include "plugins/extension_bag/core/item_display_hook.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "contracts/game_host.h"
@@ -59,6 +60,7 @@ void store_refresh_item_after_unlock() {
     if (!qol::extension_bag::ui_state().store.refresh_pending) return;
     const uint64_t refresh_generation = qol::extension_bag::ui_state().store.refresh_generation;
     const uint64_t view_generation = qol::extension_bag::ui_state().store.view_generation;
+    const bool suppress_display = !qol::extension_bag::ui_state().store.view_installed;
     qol::extension_bag::ui_state().store.refresh_pending = false;
     lock.unlock();
 
@@ -69,7 +71,13 @@ void store_refresh_item_after_unlock() {
         if (refresh_generation == qol::extension_bag::ui_state().store.refresh_generation) store_request_item_refresh_locked();
         return;
     }
-    const QolResult refresh_result = api->ui.refresh_store_item();
+    QolResult refresh_result{};
+    if (suppress_display) {
+        qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
+        refresh_result = api->ui.refresh_store_item();
+    } else {
+        refresh_result = api->ui.refresh_store_item();
+    }
     if (!qol::contracts::succeeded(refresh_result)) {
         VIRTBAG_LOG("store item refresh failed code=%d", refresh_result.code);
         lock.lock();
@@ -153,6 +161,15 @@ void store_install_module_view_locked(int bag) {
     if (!extension_bag_session_admitted_locked() || !virtual_bag::valid_index(bag) ||
         ::qol::extension_bag::access::bag().capacities[bag] == 0 ||
         ::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().write_port->ui.refresh_store_item == nullptr) return;
+    if (qol::extension_bag::ui_state().ui.backup_control_item_set_item == nullptr ||
+        qol::extension_bag::ui_state().ui.backup_control_item_get_item == nullptr ||
+        qol::extension_bag::ui_state().ui.backup_get_bag_size == nullptr) {
+        VIRTBAG_LOG("store view rejected display hooks unavailable set=%d get=%d size=%d",
+                    qol::extension_bag::ui_state().ui.backup_control_item_set_item != nullptr,
+                    qol::extension_bag::ui_state().ui.backup_control_item_get_item != nullptr,
+                    qol::extension_bag::ui_state().ui.backup_get_bag_size != nullptr);
+        return;
+    }
     const int original_bag = original_bag_locked();
     if (!virtual_bag::valid_original_transaction_bag(original_bag)) {
         VIRTBAG_LOG("store view rejected original bag=%d", original_bag);
@@ -169,24 +186,9 @@ void store_install_module_view_locked(int bag) {
     qol::extension_bag::ui_state().store.window_original_bag = original_bag;
     qol::extension_bag::ui_state().store.original_size_word = size_word;
     qol::extension_bag::ui_state().store.original_bag_size = size_word;
-    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    if (!set_bag_size_word_locked(
-            original_bag, (size_word & ~kCapacityMask) |
-                              (static_cast<uint32_t>(::qol::extension_bag::access::bag().capacities[bag]) & kCapacityMask))) {
-        VIRTBAG_LOG("store view rejected capacity write bag=%d window=%d", bag, original_bag);
-        qol::extension_bag::ui_state().store.original_size_word = 0;
-        qol::extension_bag::ui_state().store.original_bag_size = 0;
-        qol::extension_bag::ui_state().store.window_original_bag = -1;
-        return;
-    }
 
     qol::extension_bag::ui_state().store.projected_item_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kStoreItemRoot);
     if (qol::extension_bag::ui_state().store.projected_item_root == nullptr) {
-        if (!set_bag_size_word_locked(
-                original_bag, (qol::extension_bag::ui_state().store.original_size_word & ~kCapacityMask) |
-                                  (qol::extension_bag::ui_state().store.original_bag_size & kCapacityMask))) {
-            VIRTBAG_LOG("store view rollback capacity failed window=%d", original_bag);
-        }
         qol::extension_bag::ui_state().store.original_size_word = 0;
         qol::extension_bag::ui_state().store.original_bag_size = 0;
         qol::extension_bag::ui_state().store.window_original_bag = -1;
@@ -254,14 +256,6 @@ void store_restore_module_view_locked() {
         }
     }
     store_clear_desc_locked();
-    if (qol::extension_bag::ui_state().store.original_size_word != 0) {
-        constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-        if (!set_bag_size_word_locked(
-                qol::extension_bag::ui_state().store.window_original_bag, (qol::extension_bag::ui_state().store.original_size_word & ~kCapacityMask) |
-                                                (qol::extension_bag::ui_state().store.original_bag_size & kCapacityMask))) {
-            VIRTBAG_LOG("store restore capacity failed window=%d", qol::extension_bag::ui_state().store.window_original_bag);
-        }
-    }
     if (qol::extension_bag::ui_state().store.hidden_equip_bag_root != nullptr) {
         (void)extension_bag_ui_set_control_show(
             qol::extension_bag::ui_state().store.hidden_equip_bag_root, true);

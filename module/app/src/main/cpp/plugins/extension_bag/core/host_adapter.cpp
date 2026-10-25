@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -13,7 +14,6 @@
 #include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
-#include "plugins/extension_bag/model/sale_transaction.h"
 #include "plugins/extension_bag/model/draw_state_lock.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
@@ -28,7 +28,6 @@
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
-#include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/model/store_sell_rules.h"
 #include "plugins/extension_bag/usecases/set_bag_count.h"
@@ -165,8 +164,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
     }
     if (receiving_bag < 0) {
         // 原版袋 0..4 全满：袋对象不回原版背包，转而收编为扩展袋物品槽的
-        // 普通袋物品（与装备卸下收编 virtual_bag_adopt_unequipped_item 同
-        // 模式）。收编后用户可把它拖回原版背包，或拖到空扩展标签重新装备。
+        // 普通袋物品。收编后用户可把它拖回原版背包，或拖到空扩展标签重新装备。
         int adopt_bag = -1;
         int adopt_slot = -1;
         for (int bag = 0; bag < virtual_bag::active_extension_bags() && adopt_bag < 0; ++bag) {

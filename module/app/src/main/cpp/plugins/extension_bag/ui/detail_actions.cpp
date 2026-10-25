@@ -1,15 +1,16 @@
+#include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/inventory_action.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
-#include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "contracts/game_host.h"
@@ -26,7 +27,6 @@
 #include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
-#include "plugins/extension_bag/model/sale_transaction.h"
 #include "plugins/extension_bag/model/draw_state_lock.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/plugin.h"
@@ -111,6 +111,7 @@ void extension_sell_ok(void*) {
     int slot = -1;
     int count = 0;
     int64_t price = 0;
+    qol::contracts::QolItemHandle expected_item{};
     bool apply_variant_discount = true;
     {
         ::qol::extension_bag::ReentryLock lock;
@@ -134,10 +135,16 @@ void extension_sell_ok(void*) {
             clear_original_desc_locked();
             return;
         }
-        if (::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().item_facts == nullptr || ::qol::extension_bag::access::host().item_facts->sell_price == nullptr ||
-            ::qol::extension_bag::access::host().item_facts->is_no_sell == nullptr || extension_bag_write_api() == nullptr ||
-            extension_bag_write_api()->equipment.add_money == nullptr ||
-            extension_bag_write_api()->equipment.minus_money == nullptr) {
+        if (!extension_bag_item_handle_for_pointer(item, &expected_item)) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension sell rejected item handle unavailable bag=%d slot=%d", bag, slot);
+            clear_original_desc_locked();
+            return;
+        }
+        if (::qol::extension_bag::access::host().game == nullptr ||
+            ::qol::extension_bag::access::host().item_facts == nullptr ||
+            ::qol::extension_bag::access::host().item_facts->sell_price == nullptr ||
+            ::qol::extension_bag::access::host().item_facts->is_no_sell == nullptr) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected symbols unavailable bag=%d slot=%d", bag, slot);
             clear_original_desc_locked();
             return;
@@ -181,49 +188,21 @@ void extension_sell_ok(void*) {
             static_cast<unsigned long long>(qol::extension_bag::ui_state().objects.module_object_use[bag][slot].generation));
     }
 
-    if (price < 0 || !extension_bag_ui_add_money(price)) {
-        VIRTBAG_LOG("extension sell money credit failed bag=%d slot=%d price=%lld", bag, slot,
-                    static_cast<long long>(price));
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    if (action == nullptr) {
         ::qol::extension_bag::ReentryLock lock;
         clear_original_desc_locked();
         return;
     }
-    bool removed = false;
-    {
-        ::qol::extension_bag::ReentryLock lock;
-        const bool current_item = qol::extension_bag::ui_state().ui.extension_desc_item == item &&
-                                  qol::extension_bag::ui_state().ui.extension_desc_item_bag == bag &&
-                                  qol::extension_bag::ui_state().ui.extension_desc_item_slot == slot &&
-                                  qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item &&
-                                  virtual_bag_effective_count(item, static_cast<uint32_t>(::qol::extension_bag::access::bag().items[bag][slot].count)) ==
-                                      static_cast<uint32_t>(count) &&
-                                  module_object_release_allowed_locked(
-                                      bag, slot, item, "extension sell commit", false, nullptr);
-        if (current_item) {
-            const virtual_bag::Item previous_item = ::qol::extension_bag::access::bag().items[bag][slot];
-            ::qol::extension_bag::access::bag().items[bag][slot] = {};
-            extension_bag_mark_dirty_locked();
-            if (!free_module_object_locked(bag, slot)) {
-                ::qol::extension_bag::access::bag().items[bag][slot] = previous_item;
-                persist_state_locked();
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected object release bag=%d slot=%d", bag, slot);
-            } else {
-                persist_state_locked();
-                if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == bag) {
-                    refresh_module_item_area_locked(bag);
-                }
-                removed = true;
-            }
-        }
-    }
-    if (!removed) {
-        const bool refunded = extension_bag_ui_minus_money(price);
-        VIRTBAG_LOG("extension sell remove failed bag=%d slot=%d price=%lld refunded=%d", bag,
-                    slot, static_cast<long long>(price), refunded ? 1 : 0);
+    const auto result = action->sell({2, bag, slot}, expected_item, count, "equip");
+    if (result.status != qol::contracts::InventorySellStatus::kOk) {
+        VIRTBAG_LOG("extension sell action rejected bag=%d slot=%d count=%d status=%d",
+                    bag, slot, count, static_cast<int>(result.status));
         ::qol::extension_bag::ReentryLock lock;
         clear_original_desc_locked();
         return;
     }
+    price = result.price;
 
     {
         ::qol::extension_bag::ReentryLock lock;
@@ -238,52 +217,48 @@ void extension_sell_ok(void*) {
 }
 
 void extension_destroy_ok(void*) {
-    int committed_bag = -1;
-    int committed_slot = -1;
-    bool committed = false;
+    int bag = -1;
+    int slot = -1;
+    int count = 0;
     {
         ::qol::extension_bag::ReentryLock lock;
         restore_extension_desc_popup_callbacks_locked();
 
-        const int bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
-        const int slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
-        if (qol::extension_bag::ui_state().ui.extension_desc_item != nullptr && virtual_bag::valid_index(bag) &&
+        bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
+        slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
+        void* item = qol::extension_bag::ui_state().ui.extension_desc_item;
+        const bool valid_item = item != nullptr && virtual_bag::valid_index(bag) &&
             slot >= 0 && slot < virtual_bag::kSlotCount &&
-            qol::extension_bag::ui_state().objects.module_objects[bag][slot] == qol::extension_bag::ui_state().ui.extension_desc_item &&
-            module_object_release_allowed_locked(
-                bag, slot, qol::extension_bag::ui_state().ui.extension_desc_item, "extension destroy", false, nullptr)) {
-            const virtual_bag::Item previous_item = ::qol::extension_bag::access::bag().items[bag][slot];
-            ::qol::extension_bag::access::bag().items[bag][slot] = {};
-            extension_bag_mark_dirty_locked();
-            if (!free_module_object_locked(bag, slot)) {
-                ::qol::extension_bag::access::bag().items[bag][slot] = previous_item;
-                persist_state_locked();
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "extension destroy rejected object release bag=%d slot=%d", bag, slot);
-            } else {
-                persist_state_locked();
-                committed_bag = bag;
-                committed_slot = slot;
-                committed = true;
-            }
-            reset_extension_desc_item_hooks_locked();
-            qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
-            qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
-            qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
-            clear_original_desc_locked();
+            qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item &&
+            module_object_release_allowed_locked(bag, slot, item, "extension destroy", false, nullptr);
+        if (valid_item) {
+            count = static_cast<int>(virtual_bag_effective_count(
+                item, static_cast<uint32_t>(::qol::extension_bag::access::bag().items[bag][slot].count)));
         } else {
-            reset_extension_desc_item_hooks_locked();
-            qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
-            qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
-            qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension destroy rejected stale detail bag=%d slot=%d", bag, slot);
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension destroy rejected stale detail bag=%d slot=%d", bag, slot);
         }
     }
-    if (committed && ::qol::extension_bag::access::host().game != nullptr &&
-        ::qol::extension_bag::access::host().write_port->ui.refresh_item_area != nullptr) {
-        virtual_bag_call_original_refresh_item_area_with_guard();
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    bool committed = false;
+    if (action != nullptr && count > 0) {
+        const auto result = action->discard({2, bag, slot}, count);
+        committed = result.status == qol::contracts::InventoryActionStatus::kOk;
+        if (!committed) {
+            VIRTBAG_LOG("extension destroy action rejected bag=%d slot=%d count=%d status=%d",
+                        bag, slot, count, static_cast<int>(result.status));
+        }
+    }
+    {
+        ::qol::extension_bag::ReentryLock lock;
+        reset_extension_desc_item_hooks_locked();
+        qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+        qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+        qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
+        clear_original_desc_locked();
     }
     if (committed) {
-        VIRTBAG_LOG("extension destroy committed bag=%d slot=%d", committed_bag, committed_slot);
+        VIRTBAG_LOG("extension destroy committed through inventory.action bag=%d slot=%d", bag, slot);
     }
 }
 
@@ -370,17 +345,16 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
 // CHAR_UseItemEx 后清理 hooks/描述。身份不一致时返回 false，由 Native Hook
 // wrapper 调用原版 backup。
 bool extension_confirm_use_item(void* item) {
-    bool used = false;
     int bag = -1;
     int slot = -1;
-    ModuleUseReleasePlan release_plan{};
     {
         ::qol::extension_bag::TryReentryLock lock;
         if (!lock.owns_lock()) {
             QOL_LOG_INFO(QolDomain::kExtensionBag, "extension confirm-use lock busy item=%p", item);
             return false;
         }
-        if (!extension_bag_enabled() || item == nullptr || item != qol::extension_bag::ui_state().ui.extension_desc_item) {
+        if (!extension_bag_enabled() || item == nullptr ||
+            item != qol::extension_bag::ui_state().ui.extension_desc_item) {
             return false;
         }
         bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
@@ -395,81 +369,31 @@ bool extension_confirm_use_item(void* item) {
             module_bag != bag || module_slot != slot) {
             return false;
         }
-        void* character = extension_menu_character();
-        if (character == nullptr || extension_bag_write_api() == nullptr ||
-            extension_bag_write_api()->equipment.use_item == nullptr) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag,
-                        "extension confirm-use unavailable bag=%d slot=%d character=%p",
-                        bag, slot, character);
-            return false;
-        }
-        ModuleUseToken use_token{};
-        if (!module_use_begin_locked(bag, slot, item, &use_token)) {
-            QOL_LOG_INFO(QolDomain::kExtensionBag, "extension confirm-use already active bag=%d slot=%d item=%p",
-                        bag, slot, item);
-            return false;
-        }
-        // CHAR_UseItemEx 会同步进入 INVEN_ConsumeItem；不得持有背包锁调用。
-        ModuleUseToken* previous_use_token = g_active_module_use_token;
-        g_active_module_use_token = &use_token;
-        lock.unlock();
-        int use_result = 0;
-        used = extension_bag_ui_use_item(character, item, 0, &use_result) && use_result != 0;
-        lock.lock();
-        g_active_module_use_token = previous_use_token;
-        bool consumed = false;
-        const bool use_token_valid = module_use_finish_locked(use_token, &consumed, &release_plan);
-        const bool same_item = qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item;
-        if (!use_token_valid) {
-            const bool marker_cleared = module_use_abort_locked(use_token);
-            const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
-            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension confirm-use token lost after use bag=%d slot=%d item=%p marker_cleared=%d; treated handled",
-                        bag, slot, item, isolated ? 1 : 0);
-            if (isolated) {
-                reset_extension_desc_item_hooks_locked();
-                qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
-                qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
-                qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
-            } else {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension confirm-use abort failed; slot may remain active "
-                            "bag=%d slot=%d item=%p",
-                            bag, slot, item);
-            }
-            return true;
-        }
-        if (!used) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension confirm-use executed failed bag=%d slot=%d", bag, slot);
-            return true;
-        }
-        if (!same_item && !consumed) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension confirm-use identity changed unexpectedly bag=%d slot=%d item=%p",
-                        bag, slot, item);
-            return true;
-        }
     }
-    if (release_plan.pending) {
-        if (!module_use_release_native(release_plan)) {
-            VIRTBAG_LOG_ERROR("ERROR extension confirm-use native release failed bag=%d slot=%d",
-                        bag, slot);
-            return true;
-        }
-        ::qol::extension_bag::ReentryLock lock;
-        if (!module_use_finalize_release_locked(release_plan)) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension confirm-use release finalize failed bag=%d slot=%d",
-                        bag, slot);
-            return true;
+
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    bool used = false;
+    if (action != nullptr) {
+        const auto outcome = action->use({2, bag, slot});
+        used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
+        if (!used) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension confirm-use action rejected bag=%d slot=%d status=%d",
+                         bag, slot, static_cast<int>(outcome.status));
         }
     }
     {
         ::qol::extension_bag::ReentryLock lock;
-        // native 释放和对象摘除完成后再刷新并清理详情控件，避免悬挂绑定。
-        refresh_module_item_area_locked(bag);
-        reset_extension_desc_item_hooks_locked();
-        qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
-        qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
-        qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
+        if (qol::extension_bag::ui_state().ui.extension_desc_item == item) {
+            if (used && virtual_bag::valid_index(bag)) refresh_module_item_area_locked(bag);
+            reset_extension_desc_item_hooks_locked();
+            qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+            qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+            qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
+        }
     }
-    VIRTBAG_LOG("extension confirm-use handled bag=%d slot=%d used=1", bag, slot);
+    VIRTBAG_LOG("extension confirm-use inventory.action bag=%d slot=%d used=%d",
+                bag, slot, used ? 1 : 0);
     return true;
 }
 
@@ -480,165 +404,58 @@ bool extension_confirm_use_item(void* item) {
 // INVEN_RemoveItem（H-04）承接扩展槽删除；SAVE_IsOK/空槽校验顺序与原版一致。
 // 返回 true=已接管（原版按钮不再执行）；false=非扩展详情佣兵徽章，交原版透传。
 bool extension_use_mercenary_seal() {
-    bool used = false;
     int bag = -1;
     int slot = -1;
-    void* item = nullptr;
-    ModuleUseReleasePlan release_plan{};
     {
         ::qol::extension_bag::TryReentryLock lock;
         if (!lock.owns_lock()) {
             QOL_LOG_INFO(QolDomain::kExtensionBag, "extension mercenary-seal lock busy");
             return false;
         }
-        const auto* save_facts = extension_bag_save_facts();
-        if (!extension_bag_enabled() || qol::extension_bag::ui_state().ui.extension_desc_item == nullptr ||
-            ::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().game->read_only.item.is_mercenary_seal == nullptr ||
-            save_facts == nullptr || save_facts->is_ok == nullptr ||
-            ::qol::extension_bag::access::host().character_extras->read.has_empty_mercenary_slot == nullptr ||
-            extension_bag_write_api() == nullptr ||
-            extension_bag_write_api()->equipment.make_mercenary == nullptr) {
+        if (!extension_bag_enabled() ||
+            qol::extension_bag::ui_state().ui.extension_desc_item == nullptr) {
             return false;
         }
-        item = qol::extension_bag::ui_state().ui.extension_desc_item;
+        void* item = qol::extension_bag::ui_state().ui.extension_desc_item;
         bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
         slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
         if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount ||
-            qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item) {
+            qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item ||
+            ::qol::extension_bag::access::bag().items[bag][slot].category <= 0 ||
+            ::qol::extension_bag::access::bag().items[bag][slot].count <= 0) {
             return false;
         }
-        const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
-        if (descriptor.category <= 0 || descriptor.count <= 0) return false;
-        // 用物品自身 flags 的类别（与原版 SetDescMenu 创建 0x98 按钮同源）判定，
-        // descriptor.category 仅作回退，避免序列化差异导致误判。
-        int category = descriptor.category;
+        int category = ::qol::extension_bag::access::bag().items[bag][slot].category;
         (void)read_item_category(item, &category);
         if (!read_item_is_mercenary_seal(category)) return false;
     }
-    // 原版按钮顺序：UIDesc_SetOff → SAVE_IsOK → IsEmptyManagerSlot → MakeMercenary。
-    // 游戏函数一律在 g_virtual_bag_mtx 外调用（MakeMercenary 内部会进入
-    // INVEN_RemoveItem → H-04 再次取锁，持锁调用必死锁）。
-    extension_bag_ui_description_set_off();
-    const auto show_popup = [](uint32_t text_id) {
-        if (::qol::extension_bag::access::host().sdk != nullptr && ::qol::extension_bag::access::host().sdk->ui != nullptr &&
-            ::qol::extension_bag::access::host().sdk->ui->show_text_popup != nullptr) {
-            (void)::qol::extension_bag::access::host().sdk->ui->show_text_popup(static_cast<int32_t>(text_id));
-        }
-    };
-    if (!extension_bag_ui_read_save_is_ok()) {
-        VIRTBAG_LOG("extension mercenary-seal reject reason=save_busy bag=%d slot=%d", bag, slot);
-        show_popup(0x25);
-        return true;
-    }
-    if (!extension_bag_ui_read_has_empty_mercenary_slot()) {
-        VIRTBAG_LOG("extension mercenary-seal reject reason=slots_full bag=%d slot=%d", bag, slot);
-        show_popup(0x17);
-        return true;
-    }
-    ModuleUseToken use_token{};
-    bool begin_failed = false;
-    void* previous_physical = nullptr;
-    int physical_bag = -1;
-    int physical_slot = -1;
-    bool physical_projected = false;
-    {
-        ::qol::extension_bag::ReentryLock lock;
-        if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item ||
-            !module_use_begin_locked(bag, slot, item, &use_token)) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal begin failed bag=%d slot=%d item=%p", bag, slot,
-                        item);
-            begin_failed = true;
-        } else {
-            // MakeMercenary resolves the seal through INVEN. EB items are not in
-            // g_inven, so expose the seal in the projected physical slot for the
-            // duration of the call and restore the real slot afterwards.
-            const auto* game = ::qol::extension_bag::access::host().game;
-            const int window_bag = qol::extension_bag::ui_state().objects.module_window_original_bag;
-            if (qol::extension_bag::ui_state().objects.module_view_installed && game != nullptr &&
-                game->item_abi.native_item_at != nullptr && window_bag >= 0 && window_bag < 5 &&
-                extension_bag_write_api()->inventory.set_physical_item != nullptr) {
-                (void)game->item_abi.native_item_at(window_bag, slot, &previous_physical);
-                if (qol::contracts::succeeded(
-                        extension_bag_write_api()->inventory.set_physical_item(
-                            window_bag, slot, item))) {
-                    physical_bag = window_bag;
-                    physical_slot = slot;
-                    physical_projected = true;
-                }
-            }
-        }
-    }
-    // UI 弹窗会进入原版 UI，不在背包锁内创建。
-    if (begin_failed) {
-        show_popup(0xc);
-        return true;
-    }
-    ModuleUseToken* previous_use_token = g_active_module_use_token;
-    g_active_module_use_token = &use_token;
-    void* mercenary = nullptr;
-    (void)extension_bag_ui_make_mercenary(item, &mercenary);
-    g_active_module_use_token = previous_use_token;
-    used = mercenary != nullptr;
-    bool token_lost = false;
-    bool make_failed = false;
-    {
-        ::qol::extension_bag::ReentryLock lock;
-        if (physical_projected &&
-            !qol::contracts::succeeded(
-                extension_bag_write_api()->inventory.set_physical_item(
-                    physical_bag, physical_slot, previous_physical))) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                          "ERROR extension mercenary-seal physical slot restore failed bag=%d slot=%d",
-                          physical_bag, physical_slot);
-        }
-        bool consumed = false;
-        if (!module_use_finish_locked(use_token, &consumed, &release_plan)) {
-            const bool marker_cleared = module_use_abort_locked(use_token);
-            const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
-            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension mercenary-seal token lost bag=%d slot=%d item=%p "
-                          "marker_cleared=%d; treated handled",
-                          bag, slot, item, isolated ? 1 : 0);
-            if (isolated) {
-                reset_extension_desc_item_hooks_locked();
-                qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
-                qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
-                qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
-            }
-            token_lost = true;
-        } else if (!used) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension mercenary-seal make failed bag=%d slot=%d", bag, slot);
-            make_failed = true;
-        }
-    }
-    if (token_lost) return true;
-    if (make_failed) {
-        show_popup(0xc);
-        return true;
-    }
-    if (release_plan.pending) {
-        if (!module_use_release_native(release_plan)) {
-            VIRTBAG_LOG_ERROR("ERROR extension mercenary-seal native release failed bag=%d slot=%d", bag,
-                        slot);
-            return true;
-        }
-        ::qol::extension_bag::ReentryLock lock;
-        if (!module_use_finalize_release_locked(release_plan)) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR extension mercenary-seal release finalize failed bag=%d slot=%d", bag,
-                        slot);
-            return true;
+
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    bool used = false;
+    if (action != nullptr) {
+        const auto outcome = action->use({2, bag, slot});
+        used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
+        if (!used) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension mercenary-seal action rejected bag=%d slot=%d status=%d",
+                         bag, slot, static_cast<int>(outcome.status));
         }
     }
     {
         ::qol::extension_bag::ReentryLock lock;
-        // native 释放和对象摘除完成后再刷新并清理详情控件，避免悬挂绑定。
-        refresh_module_item_area_locked(bag);
         reset_extension_desc_item_hooks_locked();
         qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
         qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
         qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
     }
-    show_popup(0x18);
-    VIRTBAG_LOG("extension mercenary-seal handled bag=%d slot=%d used=1", bag, slot);
+    if (::qol::extension_bag::access::host().sdk != nullptr &&
+        ::qol::extension_bag::access::host().sdk->ui != nullptr &&
+        ::qol::extension_bag::access::host().sdk->ui->show_text_popup != nullptr) {
+        (void)::qol::extension_bag::access::host().sdk->ui->show_text_popup(
+            used ? 0x18 : 0xc);
+    }
+    VIRTBAG_LOG("extension mercenary-seal inventory.action bag=%d slot=%d used=%d",
+                bag, slot, used ? 1 : 0);
     return true;
 }
 
@@ -680,38 +497,34 @@ void extension_desc_item_execute_at(size_t index, void* button) {
     if (direct_use || confirm_use) {
         bool used = false;
         bool current_item = false;
-        void* leader = nullptr;
         bool closes_description = false;
         {
             ::qol::extension_bag::ReentryLock lock;
             current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
                            item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
                            qol::extension_bag::ui_state().objects.module_objects[item_bag][item_slot] == item;
-            leader = current_item ? extension_menu_character() : nullptr;
             closes_description = current_item;
         }
-        if (leader == nullptr || extension_bag_write_api() == nullptr ||
-            extension_bag_write_api()->equipment.use_item == nullptr || !current_item) {
-            // 扩展侧没有完整接管前置条件时，direct/confirm 都必须回退原版按钮，
-            // 不能清状态或吞掉原版确认弹窗及其 OK 回调。
+        if (!current_item) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension use rejected stale detail bag=%d slot=%d", item_bag, item_slot);
+            return;
+        }
+        if (confirm_use) {
+            // 原版只负责创建确认弹窗；确认回调自身用 inventory.action.use 结算。
+            extension_bag_ui_description_set_off();
             (void)extension_desc_call_original(id, button);
             return;
         }
-        if (current_item && leader != nullptr && extension_bag_write_api() != nullptr &&
-            extension_bag_write_api()->equipment.use_item != nullptr) {
-            if (confirm_use) {
-                // IsUseAfterConfirm 类物品（如卓越灵药）：原版按钮会弹确认
-                // YesNo，其 OK 回调（UIEquip_OKConfrimUseItem）在调
-                // CHAR_UseItemEx 前先 INVEN_FindItemSlot 定位——扩展物品不在
-                // INVEN 会被拦截而无效果。确认使用函数入口由常驻 LSPosed
-                // Native Hook 接管，按回调传入的物品身份分流；此处只让原版
-                // 按钮创建确认弹窗。弹窗创建/关闭不持有背包锁。
-                extension_bag_ui_description_set_off();
-                (void)extension_desc_call_original(id, button);
-                return;
+        const auto* action = ::qol::features::extension_bag::inventory_action_api();
+        if (action != nullptr) {
+            const auto outcome = action->use({2, item_bag, item_slot});
+            used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
+            if (!used) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "extension use action rejected bag=%d slot=%d status=%d",
+                             item_bag, item_slot, static_cast<int>(outcome.status));
             }
-            int use_result = 0;
-            used = extension_bag_ui_use_item(leader, item, 0, &use_result) && use_result != 0;
         }
         {
             ::qol::extension_bag::ReentryLock lock;
@@ -844,53 +657,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         }
         return;
     }
-    // 未命中任何目标 proc 时回退原版；item 为分流块锁内捕获的本地副本。
-    if (item != nullptr) {
-        VIRTBAG_LOG("extension desc execute unmatched index=%d original=%p bag=%d slot=%d",
-                    hook_index, original, item_bag, item_slot);
-    }
-    (void)extension_desc_call_original(id, button);
-
-    ::qol::extension_bag::ReentryLock lock;
-    if (item == nullptr || !virtual_bag::valid_index(item_bag) ||
-        item_slot < 0 || item_slot >= virtual_bag::kSlotCount ||
-        qol::extension_bag::ui_state().objects.module_objects[item_bag][item_slot] != item) {
-        reset_extension_desc_item_hooks_locked();
-        return;
-    }
-    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-    int payload_size = 0;
-    if (!serialize_item_payload_locked(item, &payload, &payload_size)) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag, "extension desc operation reserialize failed bag=%d slot=%d", item_bag,
-                    item_slot);
-        reset_extension_desc_item_hooks_locked();
-        return;
-    }
-    virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[item_bag][item_slot];
-    const virtual_bag::Item previous_descriptor = descriptor;
-    descriptor.payload = payload;
-    descriptor.payload_size = payload_size;
-    (void)read_item_category(item, &descriptor.category);
-    // descriptor.count 恒为 canonical（R-38/R-48）：getter 在关闭态只返回 b 视图
-    //（R-47 决策 b），物化/重同步必须保存完整 128a+b。
-    if (extension_bag_ui_read_item_cumulate_count(item, &descriptor.count)) {
-        descriptor.count = static_cast<int>(virtual_bag_canonical_count(item, 1));
-    }
-    if (descriptor.category <= 0 || descriptor.count <= 0) {
-        descriptor = {};
-        if (!free_module_object_locked(item_bag, item_slot)) {
-            descriptor = previous_descriptor;
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension desc sync rejected object release bag=%d slot=%d",
-                        item_bag, item_slot);
-            reset_extension_desc_item_hooks_locked();
-            return;
-        }
-    } else {
-        qol::extension_bag::ui_state().objects.module_object_categories[item_bag][item_slot] = descriptor.category;
-        qol::extension_bag::ui_state().objects.module_object_hashes[item_bag][item_slot] = virtual_bag::payload_hash(descriptor);
-    }
-    extension_bag_mark_dirty_locked();
-    reset_extension_desc_item_hooks_locked();
-    QOL_LOG_INFO(QolDomain::kExtensionBag, "extension desc operation synced bag=%d slot=%d category=%d count=%d",
-                item_bag, item_slot, descriptor.category, descriptor.count);
+    // 未识别操作没有 inventory.action 入口时必须拒绝，不能让原版直接改写 sidecar 对象。
+    VIRTBAG_LOG("extension desc execute rejected unsupported action index=%d original=%p bag=%d slot=%d",
+                hook_index, original, item_bag, item_slot);
 }

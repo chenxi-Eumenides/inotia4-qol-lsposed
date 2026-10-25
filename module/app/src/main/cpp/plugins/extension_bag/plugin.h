@@ -11,8 +11,6 @@
 #include "contracts/plugin.h"
 #include "contracts/item_facts.h"
 
-#include "plugins/extension_bag/http/json.h"
-
 namespace qol::features::extension_bag {
 
 const qol::contracts::PluginDescriptor& plugin_descriptor();

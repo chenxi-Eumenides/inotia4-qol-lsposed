@@ -2,6 +2,7 @@
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
+#include "plugins/extension_bag/runtime/inventory_action.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -210,141 +211,48 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     if (out_result != nullptr) *out_result = original_result;
     return VirtualBagEquipControlEventResult::kHandled;
 }
-bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& lock,
-                                              int src_bag, int src_slot, int dst_bag,
-                                              int dst_slot,
-                                              qol::contracts::QolItemHandle material_handle,
-                                              qol::contracts::QolItemHandle target_handle) {
-    if (!virtual_bag::valid_index(src_bag) || !virtual_bag::valid_index(dst_bag) ||
-        src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
-        dst_slot < 0 || dst_slot >= virtual_bag::kSlotCount) {
+bool apply_extension_material_to_slot_locked(
+    ::qol::extension_bag::ReentryLock& lock, int src_bag, int src_slot,
+    int dst_bag, int dst_slot, qol::contracts::QolItemHandle material_handle,
+    qol::contracts::QolItemHandle target_handle) {
+    if (!lock.owns_lock() || !virtual_bag::valid_index(src_bag) ||
+        !virtual_bag::valid_index(dst_bag) || src_slot < 0 ||
+        src_slot >= virtual_bag::kSlotCount || dst_slot < 0 ||
+        dst_slot >= virtual_bag::kSlotCount) {
         return false;
     }
     void* material = nullptr;
     void* target_item = nullptr;
-    if (!extension_bag_private_item_for_handle(material_handle, &material) || material == nullptr ||
-        !extension_bag_private_item_for_handle(target_handle, &target_item) || target_item == nullptr ||
+    if (!extension_bag_private_item_for_handle(material_handle, &material) ||
+        material == nullptr ||
+        !extension_bag_private_item_for_handle(target_handle, &target_item) ||
+        target_item == nullptr ||
         qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot] != material ||
-        qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot] != material_handle.slot ||
         qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] != target_item ||
-        qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot] != target_handle.slot) {
+        !read_item_is_jewel(::qol::extension_bag::access::bag().items[src_bag][src_slot].category)) {
         return false;
     }
-    const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
-    const bool source_is_jewel = read_item_is_jewel(source_category);
-    const char* kind = source_is_jewel ? "jewel" : "scroll";
-    int32_t apply_allowed = 0;
-    if (::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().character_extras->read.can_apply_stuff == nullptr ||
-        !qol::contracts::succeeded(::qol::extension_bag::access::host().character_extras->read.can_apply_stuff(
-            target_item, material, &apply_allowed)) || apply_allowed == 0) {
-        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-        }
-        VIRTBAG_LOG("apply reject reason=not_applicable kind=%s equip=%p material=%p",
-                    kind, target_item, material);
-        return false;
-    }
-    const auto* save_facts = extension_bag_save_facts();
-    if (save_facts == nullptr || save_facts->is_ok == nullptr ||
-        extension_bag_write_api() == nullptr ||
-        extension_bag_write_api()->equipment.apply_stuff == nullptr) {
-        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-        }
-        VIRTBAG_LOG("apply reject reason=symbol_unresolved kind=%s equip=%p material=%p",
-                    kind, target_item, material);
-        return false;
-    }
-    ModuleUseToken use_token{};
-    if (!module_use_begin_locked(src_bag, src_slot, material, &use_token)) {
-        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-        }
-        VIRTBAG_LOG("apply reject reason=stale_token kind=%s equip=%p material=%p",
-                    kind, target_item, material);
-        return false;
-    }
-    VIRTBAG_LOG("apply branch kind=%s equip=%p material=%p", kind, target_item, material);
-    ModuleUseToken* previous_use_token = g_active_module_use_token;
-    g_active_module_use_token = &use_token;
     lock.unlock();
-    const bool save_ok = read_save_is_ok();
-    const bool apply_ok = save_ok && extension_apply_stuff(target_item, material);
-    g_active_module_use_token = previous_use_token;
+    void* character = extension_menu_character();
+    int32_t role = -1;
+    const auto* extras = ::qol::extension_bag::access::host().character_extras;
+    if (character != nullptr && extras != nullptr && extras->read.party_index != nullptr) {
+        (void)extras->read.party_index(character, &role);
+    }
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    const auto outcome = action != nullptr && role >= 0
+                             ? action->put_jewel(role, {2, src_bag, src_slot}, dst_slot)
+                             : qol::contracts::InventoryUseOutcome{
+                                   qol::contracts::InventoryActionStatus::kUnsupported, 0};
     lock.lock();
-
-    if (!apply_ok) {
-        module_use_abort_locked(use_token);
-        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-        }
-        VIRTBAG_LOG("apply reject reason=is_ok_failed kind=%s equip=%p material=%p",
-                    kind, target_item, material);
+    if (outcome.status != qol::contracts::InventoryActionStatus::kOk) {
+        VIRTBAG_LOG("apply rejected: inventory.action put_jewel status=%d source=%d/%d slot=%d",
+                    static_cast<int>(outcome.status), src_bag, src_slot, dst_slot);
         return false;
     }
-    bool consumed = false;
-    ModuleUseReleasePlan release_plan{};
-    const bool finished = module_use_finish_locked(use_token, &consumed, &release_plan);
-    if (!finished || !consumed) {
-        if (finished) {
-            module_use_abort_isolate_locked(use_token);
-        } else if (!module_use_abort_locked(use_token)) {
-            module_use_abort_isolate_locked(use_token);
-        }
-        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-        }
-        VIRTBAG_LOG("apply reject reason=%s kind=%s equip=%p material=%p",
-                    finished ? "native_apply_failed" : "stale_token",
-                    kind, target_item, material);
-        return false;
-    }
-    if (release_plan.pending) {
-        lock.unlock();
-        const bool released = module_use_release_native(release_plan);
-        lock.lock();
-        if (!released || !module_use_finalize_release_locked(release_plan)) {
-            if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-                virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-            }
-            VIRTBAG_LOG("apply reject reason=material_release_failed kind=%s equip=%p material=%p",
-                        kind, target_item, material);
-            return false;
-        }
-    }
-    if (qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] != target_item) {
-        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-        }
-        VIRTBAG_LOG("apply reject reason=stale_target kind=%s equip=%p material=%p",
-                    kind, target_item, material);
-        return false;
-    }
-    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
-    int payload_size = 0;
-    if (!serialize_item_payload_locked(target_item, &payload, &payload_size)) {
-        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
-        }
-        VIRTBAG_LOG("apply reject reason=target_payload_sync_failed kind=%s equip=%p material=%p",
-                    kind, target_item, material);
-        return false;
-    }
-    virtual_bag::Item& target_descriptor = ::qol::extension_bag::access::bag().items[dst_bag][dst_slot];
-    target_descriptor.payload = payload;
-    target_descriptor.payload_size = payload_size;
-    // descriptor.count 恒为 canonical（R-38/R-48；getter 关闭态只返回 b 视图）。
-    if (read_item_cumulate_count(target_item, &target_descriptor.count)) {
-        target_descriptor.count = static_cast<int>(virtual_bag_canonical_count(target_item, 1));
-    }
-    qol::extension_bag::ui_state().objects.module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
-    extension_bag_mark_dirty_locked();
-    persist_state_locked();
     refresh_projected_module_view_after_move_locked();
-    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-        virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, true);
-    }
-    VIRTBAG_LOG("apply committed kind=%s equip=%p material=%p", kind, target_item, material);
+    VIRTBAG_LOG("apply committed through inventory.action role=%d source=%d/%d slot=%d",
+                role, src_bag, src_slot, dst_slot);
     return true;
 }
 
@@ -450,31 +358,74 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     const bool apply_candidate = extension_bag_is_apply_candidate(
         src_bag == dst_bag, source_is_apply_material,
         target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
-    if (apply_candidate) {
-        qol::contracts::QolItemHandle material_handle{};
-        qol::contracts::QolItemHandle target_handle{};
-        if (!extension_bag_item_handle_for_pointer(item, &material_handle) ||
-            !extension_bag_item_handle_for_pointer(target_item, &target_handle)) {
-            return VirtualBagProjectionDropResult::kRejected;
+    const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[src_bag][src_slot];
+    const int move_count = static_cast<int>(virtual_bag_effective_count(
+        item, static_cast<uint32_t>(descriptor.count)));
+    const bool is_jewel = read_item_is_jewel(source_category);
+    int role = -1;
+    if (apply_candidate && is_jewel) {
+        lock.unlock();
+        void* character = extension_menu_character();
+        const auto* extras = ::qol::extension_bag::access::host().character_extras;
+        if (character != nullptr && extras != nullptr && extras->read.party_index != nullptr) {
+            (void)extras->read.party_index(character, &role);
         }
-        return apply_extension_material_to_slot_locked(
-            lock, src_bag, src_slot, dst_bag, dst_slot, material_handle, target_handle)
-            ? VirtualBagProjectionDropResult::kHandled
-            : VirtualBagProjectionDropResult::kRejected;
+        const auto* action = ::qol::features::extension_bag::inventory_action_api();
+        const auto outcome = action != nullptr && role >= 0
+                                 ? action->put_jewel(
+                                       role, {2, src_bag, src_slot}, dst_slot)
+                                 : qol::contracts::InventoryUseOutcome{
+                                       qol::contracts::InventoryActionStatus::kUnsupported, 0};
+        const bool handled = outcome.status == qol::contracts::InventoryActionStatus::kOk;
+        if (!handled) {
+            VIRTBAG_LOG("drop rejected: inventory.action put_jewel status=%d src=%d/%d slot=%d",
+                        static_cast<int>(outcome.status), src_bag, src_slot, dst_slot);
+        }
+        lock.lock();
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase ==
+            virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(
+                &qol::extension_bag::ui_state().ui.extension_drag_session, handled);
+        }
+        if (handled) refresh_projected_module_view_after_move_locked();
+        return handled ? VirtualBagProjectionDropResult::kHandled
+                       : VirtualBagProjectionDropResult::kRejected;
+    }
+    if (apply_candidate) {
+        // inventory.action 3.0 has no enchant operation; never mutate scrolls through
+        // the old local apply path.
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase ==
+            virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(
+                &qol::extension_bag::ui_state().ui.extension_drag_session, false);
+        }
+        VIRTBAG_LOG("drop rejected: inventory.action has no enchant operation src=%d/%d",
+                    src_bag, src_slot);
+        return VirtualBagProjectionDropResult::kRejected;
     }
 
-    const bool routed = move_extension_to_extension_locked(src_bag, src_slot, dst_bag, dst_slot);
-    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-        virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, routed);
+    lock.unlock();
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    const auto outcome = action != nullptr && move_count > 0
+                             ? action->move({2, src_bag, src_slot}, move_count,
+                                            {2, dst_bag, dst_slot})
+                             : qol::contracts::InventoryMoveOutcome{
+                                   qol::contracts::InventoryActionStatus::kUnsupported,
+                                   0, 0, {2, dst_bag, dst_slot}, {}};
+    const bool routed = outcome.status == qol::contracts::InventoryActionStatus::kOk;
+    lock.lock();
+    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase ==
+        virtual_bag::DragPhase::kTransactionInFlight) {
+        virtual_bag::session_finish_transaction(
+            &qol::extension_bag::ui_state().ui.extension_drag_session, routed);
     }
     if (routed) {
-        persist_state_locked();
         refresh_projected_module_view_after_move_locked();
         VIRTBAG_LOG("drop routed ext->ext dst_slot=%d", dst_slot);
         return VirtualBagProjectionDropResult::kHandled;
     }
-    VIRTBAG_LOG("drop rejected: extension transaction refused src=%d/%d dst=%d",
-                src_bag, src_slot, dst_slot);
+    VIRTBAG_LOG("drop rejected: inventory.action move status=%d src=%d/%d dst=%d",
+                static_cast<int>(outcome.status), src_bag, src_slot, dst_slot);
     return VirtualBagProjectionDropResult::kRejected;
 }
 bool virtual_bag_module_view_installed() {

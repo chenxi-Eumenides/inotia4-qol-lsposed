@@ -9,6 +9,7 @@
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/core/host_adapter.h"
+#include "plugins/extension_bag/core/item_display_hook.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "plugins/extension_bag/runtime/logging.h"
 
@@ -32,6 +33,9 @@ constexpr const char* kEbM1SaveInventory = "hook:SAVE_SaveInventory";
 constexpr const char* kEbM2StoreSellItem = "hook:UIStore_SellItem";
 constexpr const char* kEbM3StoreButtonSellExe = "hook:UIStore_ButtonSellExe";
 constexpr const char* kEbM4StoreDrawBagGroup = "hook:UIStore_DrawInvenBagGroup";
+constexpr const char* kEbControlItemSetItem = "hook:ControlItem_SetItem";
+constexpr const char* kEbControlItemGetItem = "hook:ControlItem_GetItem";
+constexpr const char* kEbGetBagSize = "hook:INVEN_GetBagSize";
 constexpr const char* kEbP1InventoryPopup = "own:popup.inventory";
 constexpr const char* kEbP2SavePopup = "own:popup.save_panel";
 constexpr const char* kEbP3StorePopup = "own:popup.store";
@@ -264,6 +268,48 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             nullptr,
             120,
             reinterpret_cast<void*>(&save_inventory_wrapper),
+        },
+        {
+            kEbControlItemSetItem,
+            "F_CONTROL_ITEM_SET_ITEM_VMA",
+            ::qol::contracts::ResourceMechanism::kEntryHook,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft,
+            true,
+            "extension_bag",
+            "投影期间在控件写入入口替换为扩展物品，避免写 INVEN_pItem 造成原版空间归属歧义",
+            nullptr,
+            120,
+            reinterpret_cast<void*>(&extension_bag_control_item_set_item),
+        },
+        {
+            kEbControlItemGetItem,
+            "F_CONTROL_ITEM_GET_ITEM_VMA",
+            ::qol::contracts::ResourceMechanism::kEntryHook,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft,
+            true,
+            "extension_bag",
+            "投影期间读取控件物品时返回扩展物品，覆盖 SetItem 被绕过的路径",
+            nullptr,
+            120,
+            reinterpret_cast<void*>(&extension_bag_control_item_get_item),
+        },
+        {
+            kEbGetBagSize,
+            "F_GET_BAG_SIZE_VMA",
+            ::qol::contracts::ResourceMechanism::kEntryHook,
+            ::qol::contracts::ResourcePolicy::kPrivate,
+            ::qol::contracts::ResourceRequirement::kRequired,
+            ::qol::contracts::ResourceFailure::kFailSoft,
+            true,
+            "extension_bag",
+            "投影窗口内将 INVEN_GetBagSize 读取虚拟化为扩展袋派生容量",
+            nullptr,
+            120,
+            reinterpret_cast<void*>(&extension_bag_inven_get_bag_size),
         },
         {
             kEbP1InventoryPopup,
@@ -526,6 +572,21 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup) {
     if (std::strcmp(resource_id, kEbM4StoreDrawBagGroup) == 0) {
         if (backup == nullptr) return 1;
         qol::extension_bag::ui_state().ui.backup_store_draw_inven_bag_group = backup;
+        return 0;
+    }
+    if (std::strcmp(resource_id, kEbControlItemSetItem) == 0) {
+        if (backup == nullptr) return 1;
+        qol::extension_bag::ui_state().ui.backup_control_item_set_item = backup;
+        return 0;
+    }
+    if (std::strcmp(resource_id, kEbControlItemGetItem) == 0) {
+        if (backup == nullptr) return 1;
+        qol::extension_bag::ui_state().ui.backup_control_item_get_item = backup;
+        return 0;
+    }
+    if (std::strcmp(resource_id, kEbGetBagSize) == 0) {
+        if (backup == nullptr) return 1;
+        qol::extension_bag::ui_state().ui.backup_get_bag_size = backup;
         return 0;
     }
     return 1;

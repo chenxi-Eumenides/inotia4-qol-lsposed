@@ -31,11 +31,9 @@ int original_inventory_handle_slot_locked(qol::contracts::QolItemHandle expected
                                           int target_bag);
 void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock);
 bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& lock,
-                                             int src_bag, int src_slot, int dst_bag,
-                                             int dst_slot,
-                                             qol::contracts::QolItemHandle material_item,
-                                             qol::contracts::QolItemHandle target_item);
+                                              int src_bag, int src_slot, int dst_bag,
+                                              int dst_slot,
+                                              qol::contracts::QolItemHandle material_item,
+                                              qol::contracts::QolItemHandle target_item);
 bool remove_item_direct_unlocked(::qol::extension_bag::ReentryLock& lock, int bag, int slot,
                                  void* expected_item, const char* context);
-
-bool move_merge_enabled();

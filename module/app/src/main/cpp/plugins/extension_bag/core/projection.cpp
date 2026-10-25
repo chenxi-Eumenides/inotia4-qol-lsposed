@@ -4,6 +4,7 @@
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/core/lifecycle.h"
+#include "plugins/extension_bag/core/item_display_hook.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
@@ -40,16 +41,8 @@ void virtual_bag_call_original_refresh_item_area_with_guard() {
 }
 
 void refresh_module_item_area_locked(int index) {
+    (void)index;
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.refresh_item_area == nullptr) return;
-    if (qol::extension_bag::ui_state().objects.original_bag_size_bag < 0) {
-        virtual_bag_call_original_refresh_item_area_with_guard();
-        return;
-    }
-    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    (void)set_bag_size_word_locked(
-        qol::extension_bag::ui_state().objects.original_bag_size_bag,
-        (qol::extension_bag::ui_state().objects.original_bag_size & ~kCapacityMask) |
-            (static_cast<uint32_t>(runtime_state().objects.bag.capacities[index]) & kCapacityMask));
     virtual_bag_call_original_refresh_item_area_with_guard();
     refresh_projection_if_overwritten_locked();
 }
@@ -334,18 +327,14 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
                runtime_state().host.write_port->inventory.save_item_on_empty(item, bag, &result))
                ? result : 0;
 }
-// 正式窗口投影（P3 方案 C，控件级）：只写控件不写 INVEN——
-//   容量字（袋对象 +0x10）临时写扩展容量驱动 RefreshItemArea/DrawInvenBag 的容量语义；
-//   RefreshItemArea 按容量字 SetActive/SetShow 容量外控件（隐藏）；
-//   容量内控件 ControlItem_SetItem(借出对象) 显示扩展物品；
-//   INVEN_pItem 全程真实（API/存档/捡取读数无污染），restore 仅写回容量字 + RefreshItemArea。
+// 正式窗口投影（控件级）：只写控件不写 INVEN；INVEN_GetBagSize hook 提供扩展容量，
+// ControlItem_SetItem hook 在刷新首帧绑定扩展物品，恢复时由原版刷新读回真实槽表。
 bool install_module_view_locked(int bag) {
     if (runtime_state().host.game == nullptr || !virtual_bag::valid_index(bag) ||
         !extension_bag_session_admitted_locked() ||
         runtime_state().host.write_port->ui.refresh_item_area == nullptr) return false;
     if (runtime_state().objects.bag.capacities[bag] == 0) return false;
-    // 切换扩展袋时必须先还原旧投影，再读取窗口袋容量字；否则会把上一次
-    // 投影写入的扩展容量（如 12）当成原版真实容量保存，退出后泄漏到原版袋。
+    // 切换扩展袋时先还原旧投影，再读取窗口袋容量字供事务容量恢复使用。
     if (qol::extension_bag::ui_state().objects.module_view_installed) {
         const bool previous_skip = g_skip_restore_refresh;
         g_skip_restore_refresh = true;
@@ -362,14 +351,14 @@ bool install_module_view_locked(int bag) {
     if (!bag_size_word_locked(original_bag, &size_word)) return false;
     clear_original_desc_locked();  // 原版详情面板不跨视图残留
     const int capacity = runtime_state().objects.bag.capacities[bag];
-    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    const uint32_t projected_size_word = (size_word & ~kCapacityMask) |
-                                         (static_cast<uint32_t>(capacity) & kCapacityMask);
     std::array<void*, virtual_bag::kSlotCount> controls{};
     std::array<uint32_t, virtual_bag::kSlotCount> borrowed_handles{};
     int bound_count = 0;
     int borrowed_count = 0;
     auto fail_install = [&](const char* reason) {
+        // 回滚期间先抑制替换，否则清空控件的 SetItem 会被 hook 再写回扩展物品。
+        qol::features::extension_bag::extension_bag_display_cancel();
+        qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
         void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
         if (live_root != nullptr && live_root == qol::extension_bag::ui_state().objects.projected_item_root) {
             for (int slot = 0; slot < bound_count; ++slot) {
@@ -394,11 +383,6 @@ bool install_module_view_locked(int bag) {
                               bag, handle);
             }
         }
-        if (!set_bag_size_word_locked(original_bag, size_word)) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                          "ERROR module view rollback capacity restore failed bag=%d word=%u",
-                          original_bag, size_word);
-        }
         virtual_bag_call_original_refresh_item_area_with_guard();
         qol::extension_bag::ui_state().objects.original_bag_size_bag = -1;
         qol::extension_bag::ui_state().objects.original_bag_size = 0;
@@ -411,9 +395,19 @@ bool install_module_view_locked(int bag) {
                       bag, reason);
         return false;
     };
-    if (!set_bag_size_word_locked(original_bag, projected_size_word)) {
-        return fail_install("set_projected_capacity_failed");
+    if (qol::extension_bag::ui_state().ui.backup_control_item_set_item == nullptr) {
+        return fail_install("control_item_set_item_hook_unavailable");
     }
+    if (qol::extension_bag::ui_state().ui.backup_control_item_get_item == nullptr) {
+        return fail_install("control_item_get_item_hook_unavailable");
+    }
+    if (qol::extension_bag::ui_state().ui.backup_get_bag_size == nullptr) {
+        return fail_install("get_bag_size_hook_unavailable");
+    }
+    // 在 refresh 前建立 pending 显示上下文：ControlItem_SetItem hook 在第一次写入时
+    // 就替换为扩展物品，避免“先画原版再改控件”的闪烁，同时不写 INVEN_pItem。
+    qol::features::extension_bag::extension_bag_display_begin_pending(
+        qol::contracts::QolUiRootKind::kEquipItemRoot, bag, original_bag);
     virtual_bag_call_original_refresh_item_area_with_guard();
 
     void* root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
@@ -463,6 +457,7 @@ bool install_module_view_locked(int bag) {
     qol::extension_bag::ui_state().objects.projected_item_root = root;
     qol::extension_bag::ui_state().objects.module_view_installed = true;
     qol::extension_bag::ui_state().objects.module_view_index = bag;
+    qol::features::extension_bag::extension_bag_display_commit();
     QOL_LOG_INFO(QolDomain::kExtensionBag, "module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
     return true;
 }
@@ -580,16 +575,11 @@ void restore_module_view_locked() {
         log_ownership_audit_locked("restore_module_view");
     }
     clear_original_desc_locked();  // 关闭原版详情面板（二次点击 MakeDesc 打开）
-    if (qol::extension_bag::ui_state().objects.original_bag_size_bag >= 0) {
-        constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-        (void)set_bag_size_word_locked(
-            qol::extension_bag::ui_state().objects.original_bag_size_bag,
-            (qol::extension_bag::ui_state().objects.original_bag_size & kCapacityMask) |
-                (qol::extension_bag::ui_state().objects.original_bag_size & ~kCapacityMask));
-    }
+    qol::features::extension_bag::extension_bag_display_cancel();
     if (!g_skip_restore_refresh && runtime_state().host.game != nullptr &&
         runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
-        virtual_bag_call_original_refresh_item_area_with_guard();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
+        qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
+        virtual_bag_call_original_refresh_item_area_with_guard();  // suppression 保证原版读回真实槽表与真实容量。
     }
     qol::extension_bag::ui_state().objects.original_bag_size_bag = -1;
     qol::extension_bag::ui_state().objects.original_bag_size = 0;
@@ -607,6 +597,7 @@ bool complete_original_exit_locked() {
     }
     set_original_bag_locked(selected_original_bag);
     if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
+        qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&runtime_state().objects.bag, selected_original_bag);
@@ -622,6 +613,7 @@ void cancel_original_exit_locked() {
                              qol::extension_bag::ui_state().objects.original_current_got : qol::extension_bag::ui_state().objects.original_current_direct;
     set_original_bag_locked(original_bag);
     if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
+        qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
         virtual_bag_call_original_refresh_item_area_with_guard();
     }
     virtual_bag::enter_original(&runtime_state().objects.bag, original_bag);

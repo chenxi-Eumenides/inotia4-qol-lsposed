@@ -9,31 +9,29 @@ add_library(qol_plugin_extension_bag STATIC
     runtime/status_snapshot.cpp
     runtime/inventory_access.cpp
     runtime/item_access.cpp
+    runtime/extension_bag_port.cpp
     runtime/ui_ports.cpp
     runtime/session.cpp
     runtime/state_load.cpp
     runtime/response.cpp
     core/native_tab_layout.cpp
     core/host_adapter.cpp
+    core/item_display_hook.cpp
+    core/move_merge.cpp
     core/tabs_ui.cpp
     core/orchestrator.cpp
-    public/counts.cpp
     public/projection.cpp
-    public/status.cpp
-    public/sale.cpp
-    public/equip.cpp
     public/bridge.cpp
     core/bind.cpp
     api/api_impl.cpp
-    interface/bag_query.cpp
-    interface/bag_command.cpp
+    api/bag_source.cpp
     usecases/item.cpp
     usecases/move.cpp
     usecases/set_bag_count.cpp
     core/view.cpp
     core/unequip.cpp
     assembly/claims.cpp
-    assembly/move_merge_impl.cpp
+    assembly/projection_registration.cpp
     core/observation.cpp
     core/tabs.cpp
     core/drag_session.cpp
@@ -55,14 +53,8 @@ add_library(qol_plugin_extension_bag STATIC
     ui/mix.cpp
     api/port_state.cpp
     api/handles.cpp
-    api/provider.cpp
-    api/api_table.cpp
-    api/neutral_provider.cpp
     persistence/persistence.cpp
     core/geometry.cpp
-    api/public_api.cpp
-    http/routes.cpp
-    http/query.cpp
     plugin.cpp
     assembly/settings_contribution.cpp
 )

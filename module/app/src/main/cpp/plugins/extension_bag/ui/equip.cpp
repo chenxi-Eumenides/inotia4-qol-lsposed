@@ -1,15 +1,16 @@
+#include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/inventory_action.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
-#include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "contracts/game_host.h"
@@ -26,7 +27,6 @@
 #include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
-#include "plugins/extension_bag/model/sale_transaction.h"
 #include "plugins/extension_bag/model/draw_state_lock.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/plugin.h"
@@ -192,154 +192,49 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
                                            void* character, void* item, int source_bag,
                                            int source_slot) {
     if (!lock.owns_lock() || character == nullptr || item == nullptr ||
-        !virtual_bag::valid_index(source_bag) ||
-        source_slot < 0 || source_slot >= virtual_bag::kSlotCount ||
+        !virtual_bag::valid_index(source_bag) || source_slot < 0 ||
+        source_slot >= virtual_bag::kSlotCount ||
         qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] != item ||
-        ::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().character_extras->read.can_equip == nullptr ||
+        ::qol::extension_bag::access::host().character_extras == nullptr ||
+        ::qol::extension_bag::access::host().character_extras->read.can_equip == nullptr ||
         ::qol::extension_bag::access::host().character_extras->read.find_equip_slot == nullptr ||
-        extension_bag_write_api() == nullptr ||
-        !qol::extension_bag::ui_state().objects.module_view_installed || qol::extension_bag::ui_state().objects.module_view_index != source_bag ||
-        qol::extension_bag::ui_state().objects.module_window_original_bag < 0 || qol::extension_bag::ui_state().objects.module_window_original_bag >= 5) {
+        ::qol::extension_bag::access::host().character_extras->read.party_index == nullptr ||
+        !qol::extension_bag::ui_state().objects.module_view_installed ||
+        qol::extension_bag::ui_state().objects.module_view_index != source_bag ||
+        qol::extension_bag::ui_state().objects.module_window_original_bag < 0 ||
+        qol::extension_bag::ui_state().objects.module_window_original_bag >= 5) {
         return false;
     }
     if (!module_object_replacement_allowed_locked(source_bag, source_slot,
-                                                  "character equip")) {
+                                                   "character equip")) {
         return false;
     }
     if (!extension_bag_ui_read_char_can_equip(character, item)) return false;
 
-    int target = -1;
-    if (!extension_bag_ui_read_char_find_equip_slot(character, item, &target)) return false;
-    if (target < 0) return false;
-    const int original_bag = qol::extension_bag::ui_state().objects.module_window_original_bag;
-    const auto* inventory_write = extension_bag_write_api();
-    if (inventory_write == nullptr ||
-        inventory_write->inventory.set_physical_item == nullptr) return false;
-
-    // Projection deliberately leaves the real inventory untouched. The original
-    // exchange entry point reads INVEN[bag][slot], so expose the projected item
-    // only for the duration of that call and restore the real slot afterwards.
-    void* original_inventory_item = nullptr;
-    qol::contracts::QolItemHandle original_inventory_handle{};
-    if (::qol::extension_bag::access::host().item_facts == nullptr || ::qol::extension_bag::access::host().item_facts->physical_item_at == nullptr ||
-        !qol::contracts::succeeded(::qol::extension_bag::access::host().item_facts->physical_item_at(
-            original_bag, source_slot, &original_inventory_handle))) return false;
-    if (original_inventory_handle.slot != 0) {
-        const auto* game = ::qol::extension_bag::access::host().game;
-        if (game == nullptr || game->item_abi.native_item_for_handle == nullptr ||
-            !qol::contracts::succeeded(
-                game->item_abi.native_item_for_handle(original_inventory_handle,
-                                                      &original_inventory_item)) ||
-            original_inventory_item == nullptr) return false;
-    }
-    void* previous_equipped_item = extension_bag_ui_read_char_equipped_item(character, target);
-    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> previous_equipped_payload{};
-    int previous_equipped_payload_size = 0;
-    if (previous_equipped_item != nullptr &&
-        !serialize_item_payload_locked(previous_equipped_item, &previous_equipped_payload,
-                                       &previous_equipped_payload_size)) {
+    int role = -1;
+    int equip_slot = -1;
+    if (!qol::contracts::succeeded(
+            ::qol::extension_bag::access::host().character_extras->read.party_index(
+                character, &role)) ||
+        role < 0 || !extension_bag_ui_read_char_find_equip_slot(character, item, &equip_slot) ||
+        equip_slot < 0) {
         return false;
     }
-    const uint32_t source_handle = qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot];
-    const uint64_t source_generation = qol::extension_bag::ui_state().objects.module_object_use[source_bag][source_slot].generation;
-    const uint64_t source_hash = virtual_bag::payload_hash(
-        ::qol::extension_bag::access::bag().items[source_bag][source_slot]);
-    if (!qol::contracts::succeeded(inventory_write->inventory.set_physical_item(
-            original_bag, source_slot, item))) return false;
+    qol::contracts::QolItemHandle expected_item{};
+    if (!extension_bag_item_handle_for_pointer(item, &expected_item)) return false;
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    if (action == nullptr) return false;
 
-    // 原版交换入口会重入库存 hook，因此临时安装物理槽后必须解锁调用，再重锁复核。
-    extension_bag_begin_equip_operation();
     lock.unlock();
-    const bool equip_result = extension_bag_write_api() != nullptr &&
-                              extension_bag_ui_equip_from_inventory(character, original_bag,
-                                                             source_slot, target);
-    extension_bag_end_equip_operation();
+    const auto outcome = action->equip(role, {2, source_bag, source_slot}, equip_slot);
     lock.lock();
-    const QolResult restore_result = inventory_write->inventory.set_physical_item(
-        original_bag, source_slot, original_inventory_item);
-    if (!qol::contracts::succeeded(restore_result)) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                      "ERROR extension character equip physical slot restore failed bag=%d slot=%d item=%p code=%d",
-                      original_bag, source_slot, original_inventory_item, restore_result.code);
-        return false;
-    }
-    const bool source_unchanged = qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] == item &&
-        qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] == source_handle &&
-        qol::extension_bag::ui_state().objects.module_object_use[source_bag][source_slot].generation == source_generation &&
-        virtual_bag::payload_hash(::qol::extension_bag::access::bag().items[source_bag][source_slot]) ==
-            source_hash &&
-        qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == source_bag &&
-        qol::extension_bag::ui_state().objects.module_window_original_bag == original_bag;
-    if (!source_unchanged) {
-        QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                      "ERROR extension character equip source changed during original exchange bag=%d slot=%d item=%p handle=%u generation=%llu",
-                      source_bag, source_slot, item, source_handle,
-                      static_cast<unsigned long long>(source_generation));
-        return false;
-    }
-    if (!equip_result || extension_bag_ui_read_char_equipped_item(character, target) != item) {
+    if (outcome.status != qol::contracts::InventoryActionStatus::kOk) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "extension character equip original exchange failed bag=%d slot=%d target=%d result=%d",
-                     source_bag, source_slot, target, equip_result ? 1 : 0);
+                     "extension character equip action rejected role=%d bag=%d slot=%d equip_slot=%d status=%d",
+                     role, source_bag, source_slot, equip_slot,
+                     static_cast<int>(outcome.status));
         return false;
     }
-    // CHAR_EquipItemFromInvenToSlot 已把旧装备换入临时投影槽；该槽随后仍由
-    // 扩展状态表示，不能让同一个旧指针同时继续留在原版 INVEN 中。
-    // 角色装备接管对象所有权，不能走 free_module_object_locked；否则下一帧
-    // 会把刚装备到角色槽的对象释放掉。先结束视图借用，再转为游戏侧持有。
-    const uint32_t handle = qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot];
-    if (ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
-                              ownership::State::kBorrowedForView)) {
-        ownership::return_from_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle);
-    }
-    if (ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
-                              ownership::State::kModuleOwned)) {
-        if (ownership::handover_to_inventory(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) !=
-            ownership::Outcome::kOk) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip ownership handover failed bag=%d slot=%d",
-                        source_bag, source_slot);
-        }
-    }
-    virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[source_bag][source_slot];
-    if (previous_equipped_item != nullptr) {
-        descriptor.payload = previous_equipped_payload;
-        descriptor.payload_size = previous_equipped_payload_size;
-        (void)read_item_category(previous_equipped_item, &descriptor.category);
-        int previous_count = 1;
-        descriptor.count = extension_bag_ui_read_item_cumulate_count(previous_equipped_item, &previous_count)
-            ? static_cast<int>(virtual_bag_canonical_count(previous_equipped_item, 1)) : previous_count;
-        // 旧装备对象被原版 UI（装备槽 desc/控件缓存）持续引用，绝不能释放：
-        // 直接收编为扩展槽的物化对象，投影与详情都继续指向同一存活对象。
-        if (!module_object_generation_advance_locked(
-                source_bag, source_slot, "character equip replacement")) {
-            return false;
-        }
-        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] = previous_equipped_item;
-        qol::extension_bag::ui_state().objects.module_object_categories[source_bag][source_slot] = descriptor.category;
-        qol::extension_bag::ui_state().objects.module_object_hashes[source_bag][source_slot] = virtual_bag::payload_hash(descriptor);
-        uint32_t adopted_handle = 0;
-        if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
-            qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] = adopted_handle;
-        } else {
-            qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] = 0;
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip adopt ledger exhausted bag=%d slot=%d",
-                        source_bag, source_slot);
-        }
-    } else {
-        descriptor = {};
-        if (!module_object_generation_advance_locked(
-                source_bag, source_slot, "character equip clear")) {
-            return false;
-        }
-        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] = nullptr;
-        qol::extension_bag::ui_state().objects.module_object_categories[source_bag][source_slot] = 0;
-        qol::extension_bag::ui_state().objects.module_object_hashes[source_bag][source_slot] = 0;
-        qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] = 0;
-    }
-    extension_bag_mark_dirty_locked();
-    persist_state_locked();
-    QOL_LOG_INFO(QolDomain::kExtensionBag, "extension character equip ok bag=%d slot=%d target=%d", source_bag,
-                source_slot, target);
     return true;
 }
 
@@ -421,14 +316,6 @@ bool equip_extension_source_on_tab_locked(::qol::extension_bag::ReentryLock& loc
     finish_extension_equip_ui_locked(target_bag, nullptr);
     return true;
 }
-// ---- Path A：装备按钮语义（函数级 hook）----
-// 详情"装备"按钮 execute proc 恒为 UIEquip_ButtonEquipExe（0xb7c18），因此
-// 其全部扩展语义由 native 第 10 hook（button_equip_exe_wrapper →
-// virtual_bag_handle_backpack_button_equip）承担：背包物品（装原版/扩展袋）
-// 与扩展槽装备物品（装角色）在原函数内联删源之前分流；其余交还原函数。
-// 装备/卸下按钮不再由详情实例绑定器接管，避免与函数级入口 hook 重复执行。
-// BL 门禁（0xb9188）：物品 desc 打开 → 调原 MakeDesc（同步生成含装备按钮的
-// 菜单）→ 锁内重装装备按钮 hook。物品从触发控件 data[0] 取（MakeDesc 同源）。
 void make_desc_equip_gate(void* ctrl, void* arg) {
     const ::qol::contracts::InFlightGuard in_flight_guard(
         ::qol::extension_bag::access::host().sdk == nullptr ? nullptr : &::qol::extension_bag::access::host().sdk->in_flight,
@@ -482,14 +369,3 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
         }
     }
 }
-
-// ---- Path 卸下按钮：函数级 hook ----
-// 卸下按钮 execute proc 恒为 UIEquip_ButtonUnequipExe（0xb7e14），扩展语义由
-// native 第 11 hook（button_unequip_exe_wrapper →
-// virtual_bag_handle_original_bag_unequip）承担：扩展视图内识别扩展袋 desc
-// 解除扩展袋；原版视图解除原版袋并在背包满时放回其他袋行/收编扩展空位。
-// g_extension_desc_unequip_bag 仍由扩展袋 desc 打开时记录（供函数 hook 识别），
-// 详情记录仅供函数级入口 hook 识别。
-
-// virtual_bag_handle_backpack_button_equip 在 public_runtime.cpp 中外部链接，供
-// api/api_table.cpp 跨 TU 调用。

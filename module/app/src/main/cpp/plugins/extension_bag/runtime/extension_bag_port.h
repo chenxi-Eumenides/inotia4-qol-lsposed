@@ -10,9 +10,6 @@ using LogicalInventoryItemFn = bool (*)(int bag, int slot, int category, int cou
 
 bool extension_bag_enabled();
 int64_t extension_bag_sell_price(void* item, int count, bool apply_variant_discount);
-bool extension_bag_has_empty_slots(int needed, int include_task_bag);
-void extension_bag_begin_equip_operation();
-void extension_bag_end_equip_operation();
 bool extension_bag_register_item_handle(void* item);
 void extension_bag_invalidate_item_handle(void* item);
 bool extension_bag_rebind_item_handle(void* item);

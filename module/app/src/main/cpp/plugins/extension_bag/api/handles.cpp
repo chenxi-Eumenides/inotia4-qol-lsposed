@@ -4,8 +4,6 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/api/port_internal.h"
-#include "contracts/inventory_extension.h"
-#include "contracts/sell_price.h"
 #include "contracts/host_sdk.h"
 
 #include <algorithm>
