@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include "contracts/bag.h"
 #include "contracts/http.h"
 #include "contracts/extension_bag.h"
 #include "contracts/item_facts.h"
@@ -32,6 +33,10 @@ void append_inventory_item(std::string* out, int32_t slot,
                            const contracts::QolItemInventoryView& item, bool count_present,
                            uint32_t count);
 InventoryExtensionAccessResult inventory_extension();
+const contracts::QolBagSource* find_bag_source(int32_t space_id);
+uint32_t registered_bag_source_count();
+const contracts::QolBagSource* registered_bag_source_at(uint32_t index);
+void reset_bag_sources();
 QolResult read_inventory();
 void request_inventory_refresh();
 

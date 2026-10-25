@@ -37,13 +37,20 @@
 #include "http/response.h"
 #include "bags/snapshot_sdk.h"
 
+#include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
+
+#if !defined(QOL_CORE_ITEM_BAG_SOURCE_SEPARATE)
+// 宿主测试直接编译 plugin.cpp，不读取插件 CMake 源清单；插件 target 单独编译该实现。
+#include "plugins/core.item/api/bag_source.cpp"
+#endif
 
 namespace qol::features::core_item {
 
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kItemFactsCapabilityId, contracts::kItemFactsVersion, &kItemFactsApi},
     {contracts::kItemStateCapabilityId, contracts::kItemStateVersion, &kItemStateApi},
+    {contracts::kBagSourceCapabilityId, contracts::kBagSourceVersion, &kBagSourceRegistryApi},
     {contracts::kInventoryRefreshCapabilityId,
      {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor},
      &inventory_hooks::kInventoryRefreshApi},

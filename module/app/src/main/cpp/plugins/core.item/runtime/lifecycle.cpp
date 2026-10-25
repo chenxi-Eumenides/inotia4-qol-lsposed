@@ -65,6 +65,7 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 
 int plugin_install(contracts::PluginContext& ctx) {
     reset_ports();
+    reset_bag_sources();
     bags::inventory_snapshot_store().clear();
     g_sdk = ctx.sdk;
     g_degrade_warn_ticks = 0;
@@ -185,6 +186,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
     bags::inventory_snapshot_store().clear();
+    reset_bag_sources();
     log_message(ctx.sdk, "[core.item] provider deactivate");
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);

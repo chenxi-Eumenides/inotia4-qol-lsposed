@@ -33,10 +33,16 @@ bool item_is_unavailable(const QolResult& result) {
     return result.code == kQolErrUnsupported || result.code == kQolErrNotReady;
 }
 
-QolResult read_space_count(int32_t space_id, int32_t* out_count) {
+QolResult read_space_count(int32_t space_id, const contracts::QolBagSource* source,
+                           int32_t* out_count) {
     if (out_count == nullptr) return error_result(kQolErrInvalidArgument, "invalid bag count");
     if (space_id == contracts::kQolBagSpaceOriginal) {
         *out_count = contracts::kQolOriginalBagCount;
+        return contracts::ok();
+    }
+    if (source != nullptr) {
+        const int32_t count = source->count();
+        *out_count = count > 0 ? count : 0;
         return contracts::ok();
     }
     *out_count = 0;
@@ -82,14 +88,17 @@ QolResult append_item_record(const contracts::QolInventoryItemRef& item, int32_t
 }
 
 QolResult read_bag(int32_t space_id, int32_t bag,
+                   const contracts::QolBagSource* source,
                    const std::vector<contracts::QolInventoryItemRef>* space_items,
                    bool has_space_items, bags::BagSnapshot* out_bag) {
-    if (out_bag == nullptr || g_port == nullptr || g_port->read.bag_info == nullptr) {
+    if (out_bag == nullptr ||
+        (source == nullptr && (g_port == nullptr || g_port->read.bag_info == nullptr))) {
         return error_result(kQolErrNotReady, "bag info unavailable");
     }
     const contracts::QolBagRef ref{space_id, bag};
     contracts::QolBagInfo info{};
-    const QolResult info_result = g_port->read.bag_info(&ref, &info);
+    const QolResult info_result = source != nullptr ? source->info(bag, &info)
+                                                    : g_port->read.bag_info(&ref, &info);
     if (!contracts::succeeded(info_result)) return info_result;
     if (info.capacity < 0 || info.slot_count < 0) {
         return error_result(kQolErrInvalidArgument, "invalid bag info");
@@ -104,12 +113,14 @@ QolResult read_bag(int32_t space_id, int32_t bag,
             if (!contracts::succeeded(result)) return result;
         }
     } else {
-        if (g_port->read.item_at == nullptr) {
+        if (source == nullptr && g_port->read.item_at == nullptr) {
             return error_result(kQolErrNotReady, "bag item read unavailable");
         }
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             contracts::QolInventoryItemRef item{};
-            const QolResult item_result = g_port->read.item_at(&ref, slot, &item);
+            const QolResult item_result = source != nullptr
+                                              ? source->item_at(bag, slot, &item)
+                                              : g_port->read.item_at(&ref, slot, &item);
             if (!contracts::succeeded(item_result)) {
                 if (item_is_not_found(item_result)) continue;
                 return item_result;
@@ -127,10 +138,20 @@ QolResult read_bag(int32_t space_id, int32_t bag,
     return contracts::ok();
 }
 
-QolResult append_space(int32_t space_id, int32_t count, bags::InventorySnapshot* snapshot) {
+QolResult append_space(int32_t space_id, int32_t count,
+                       const contracts::QolBagSource* source,
+                       bags::InventorySnapshot* snapshot) {
     std::vector<contracts::QolInventoryItemRef> space_items;
     bool has_space_items = false;
-    if (g_port != nullptr && g_port->read.for_each_space_slot != nullptr &&
+    if (source != nullptr) {
+        SpaceItems context{space_id, &space_items};
+        const QolResult result = source->for_each_item(&collect_space_item, &context);
+        if (contracts::succeeded(result)) {
+            has_space_items = true;
+        } else if (!item_is_unavailable(result)) {
+            return result;
+        }
+    } else if (g_port != nullptr && g_port->read.for_each_space_slot != nullptr &&
         contracts::qol_item_port_bag_space_size_valid(g_port)) {
         SpaceItems context{space_id, &space_items};
         const QolResult result = g_port->read.for_each_space_slot(
@@ -144,7 +165,7 @@ QolResult append_space(int32_t space_id, int32_t count, bags::InventorySnapshot*
 
     for (int32_t bag = 0; bag < count; ++bag) {
         bags::BagSnapshot bag_snapshot{};
-        const QolResult result = read_bag(space_id, bag, &space_items, has_space_items,
+        const QolResult result = read_bag(space_id, bag, source, &space_items, has_space_items,
                                           &bag_snapshot);
         if (!contracts::succeeded(result)) return result;
         snapshot->bags.push_back(std::move(bag_snapshot));
@@ -177,10 +198,22 @@ QolResult read_inventory() {
     for (const int32_t space_id : {contracts::kQolBagSpaceOriginal,
                                    contracts::kQolBagSpaceC18,
                                    contracts::kQolBagSpaceFirstRegistered}) {
+        const contracts::QolBagSource* source = find_bag_source(space_id);
         int32_t count = 0;
-        const QolResult count_result = read_space_count(space_id, &count);
+        const QolResult count_result = read_space_count(space_id, source, &count);
         if (!contracts::succeeded(count_result)) return count_result;
-        const QolResult append_result = append_space(space_id, count, next.get());
+        const QolResult append_result = append_space(space_id, count, source, next.get());
+        if (!contracts::succeeded(append_result)) return append_result;
+    }
+    for (uint32_t index = 0; index < registered_bag_source_count(); ++index) {
+        const contracts::QolBagSource* source = registered_bag_source_at(index);
+        if (source == nullptr || source->space_id == contracts::kQolBagSpaceFirstRegistered) {
+            continue;
+        }
+        int32_t count = 0;
+        const QolResult count_result = read_space_count(source->space_id, source, &count);
+        if (!contracts::succeeded(count_result)) return count_result;
+        const QolResult append_result = append_space(source->space_id, count, source, next.get());
         if (!contracts::succeeded(append_result)) return append_result;
     }
     const QolResult money_result = g_port->read.money(&next->money);
