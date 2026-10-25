@@ -21,7 +21,7 @@ OpResult not_ready_result() {
 
 OpResult enter_view(int logical_bag) {
     if (!extension_bag_ready_locked()) return not_ready_result();
-    const int internal_bag = extension_internal_bag(logical_bag);
+    const int internal_bag = extension_storage_index(logical_bag);
     if (internal_bag < 0) return failure(Error::kBadBag);
     ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
@@ -74,7 +74,7 @@ OpResult exit_view() {
 
 OpResult select_bag(int logical_bag) {
     if (!extension_bag_ready_locked()) return not_ready_result();
-    const int internal_bag = extension_internal_bag(logical_bag);
+    const int internal_bag = extension_storage_index(logical_bag);
     if (internal_bag < 0) return failure(Error::kBadBag);
     ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {

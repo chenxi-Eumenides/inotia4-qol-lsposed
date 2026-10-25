@@ -18,7 +18,7 @@ ClickItemResult click_item(int logical_bag, int slot) {
         return {false, runtime_state().enabled.load() ? Error::kNotInGame : Error::kDisabled};
     }
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return {false, Error::kBadSlot};
-    const int internal_bag = extension_internal_bag(logical_bag);
+    const int internal_bag = extension_storage_index(logical_bag);
     if (internal_bag < 0) return {false, Error::kBadBag};
     ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {

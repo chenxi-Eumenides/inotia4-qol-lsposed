@@ -49,23 +49,6 @@ bool mark_native_bag_object(void* item) {
     return qol::contracts::succeeded(api->write_encoded_field(item, field));
 }
 
-#define current_env current_env_internal
-#define extension_serialize_item_payload extension_serialize_item_payload_internal
-#define extension_load_item_payload extension_load_item_payload_internal
-#define extension_free_item_payload extension_free_item_payload_internal
-#define extension_apply_stuff extension_apply_stuff_internal
-#define read_item_cumulate_count read_item_cumulate_count_internal
-#define read_save_is_ok read_save_is_ok_internal
-#define read_has_empty_mercenary_slot read_has_empty_mercenary_slot_internal
-#define extension_description_set_off extension_description_set_off_internal
-#define extension_use_item extension_use_item_internal
-#define extension_make_mercenary extension_make_mercenary_internal
-#define item_count_encoding item_count_encoding_internal
-#define original_count_view original_count_view_internal
-#define category_is_equip category_is_equip_internal
-#define category_is_extension_backpack category_is_extension_backpack_internal
-
-
 bool extension_equip_from_inventory(void* character, int bag, int slot, int equip_slot) {
     const auto* api = extension_bag_write_api();
     if (api == nullptr || api->equipment.equip_from_inventory == nullptr) return false;
@@ -74,8 +57,6 @@ bool extension_equip_from_inventory(void* character, int bag, int slot, int equi
                api->equipment.equip_from_inventory(character, bag, slot, equip_slot, &result)) &&
            result != 0;
 }
-namespace {
-
 bool extension_apply_stuff(void* target_item, void* material) {
     const auto* api = extension_bag_write_api();
     return api != nullptr && api->equipment.apply_stuff != nullptr &&
@@ -97,8 +78,6 @@ bool extension_make_mercenary(void* item, void** out_mercenary) {
     return api != nullptr && api->equipment.make_mercenary != nullptr &&
            qol::contracts::succeeded(api->equipment.make_mercenary(item, out_mercenary));
 }
-
-}  // namespace
 
 bool extension_add_money(int64_t amount) {
     const auto* api = extension_bag_write_api();
@@ -140,8 +119,6 @@ void* extension_load_item(const uint8_t* payload, int payload_size, int* out_con
     return nullptr;
 }
 
-namespace {
-
 int extension_serialize_item_payload(uint8_t* payload, void* item) {
     int size = 0;
     return extension_serialize_item(payload, virtual_bag::kSerializedItemProbeBuffer, item, &size)
@@ -158,6 +135,8 @@ int extension_load_item_payload(const uint8_t* payload, void** out_item, int* ou
 void extension_free_item_payload(void* item) { (void)extension_free_item(item); }
 
 
+
+namespace {
 
 void extension_refresh_mix_item() {
     const auto* api = extension_bag_write_api();
@@ -180,6 +159,8 @@ void extension_update_character_equip() {
     }
 }
 
+}  // namespace
+
 void extension_description_set_off() {
     const auto* api = extension_bag_write_api();
     if (api != nullptr && api->ui.description_set_off != nullptr) {
@@ -198,8 +179,6 @@ bool read_item_cumulate_count(const void* item, int* out_count) {
     *out_count = count;
     return true;
 }
-
-}  // namespace
 
 bool read_item_is_jewel(int category) {
     if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->is_jewel_category == nullptr) return false;
@@ -274,6 +253,8 @@ bool read_item_encoded_field(const void* item, uint32_t* out_field) {
     return qol::contracts::succeeded(api->read_encoded_field(item, out_field));
 }
 
+}  // namespace
+
 qol::contracts::QolItemCountEncoding item_count_encoding(const void* item) {
     const auto* api = item_count_api();
     if (api == nullptr || api->is_encoded == nullptr || item == nullptr) {
@@ -286,6 +267,8 @@ qol::contracts::QolItemCountEncoding item_count_encoding(const void* item) {
     }
     return encoding;
 }
+
+namespace {
 
 bool read_char_can_equip(const void* character, const void* item) {
     if (runtime_state().host.game == nullptr || runtime_state().host.character_extras == nullptr || runtime_state().host.character_extras->read.can_equip == nullptr) return false;
@@ -310,9 +293,11 @@ void* read_char_equipped_item(const void* character, int slot) {
     void* item = nullptr;
     return qol::contracts::succeeded(
                runtime_state().host.character_extras->read.equipped_item(character, slot, &item))
-               ? item
-               : nullptr;
+                ? item
+                : nullptr;
 }
+
+}  // namespace
 
 bool read_save_is_ok() {
     const auto* facts = extension_bag_save_facts();
@@ -329,18 +314,6 @@ bool read_has_empty_mercenary_slot() {
     return qol::contracts::succeeded(
                runtime_state().host.character_extras->read.has_empty_mercenary_slot(&value)) && value != 0;
 }
-
-
-
-
-
-
-}  // namespace
-
-
-
-
-namespace {
 JNIEnv* current_env() {
     JavaVM* jvm = g_jvm();
     if (jvm == nullptr) return nullptr;
@@ -374,60 +347,7 @@ bool category_is_extension_backpack(int category) {
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);
 }
-}  // namespace
 
-#undef current_env
-#undef isolation_now_ms_locked
-#undef extension_apply_stuff
-#undef read_item_cumulate_count
-#undef read_save_is_ok
-#undef read_has_empty_mercenary_slot
-#undef extension_description_set_off
-#undef extension_use_item
-#undef extension_make_mercenary
-#undef item_count_encoding
-#undef original_count_view
-#undef category_is_equip
-#undef category_is_extension_backpack
-#undef handle_extension_tab_click_locked
-#undef extension_serialize_item_payload
-#undef extension_load_item_payload
-#undef extension_free_item_payload
-
-int extension_serialize_item_payload(uint8_t* payload, void* item) {
-    return extension_serialize_item_payload_internal(payload, item);
-}
-int extension_load_item_payload(const uint8_t* payload, void** out_item, int* out_consumed) {
-    return extension_load_item_payload_internal(payload, out_item, out_consumed);
-}
-void extension_free_item_payload(void* item) { extension_free_item_payload_internal(item); }
-
-JNIEnv* current_env() { return current_env_internal(); }
-bool extension_apply_stuff(void* target_item, void* material) {
-    return extension_apply_stuff_internal(target_item, material);
-}
-bool read_item_cumulate_count(const void* item, int* out_count) {
-    return read_item_cumulate_count_internal(item, out_count);
-}
-bool read_save_is_ok() { return read_save_is_ok_internal(); }
-bool read_has_empty_mercenary_slot() { return read_has_empty_mercenary_slot_internal(); }
-void extension_description_set_off() { extension_description_set_off_internal(); }
-bool extension_use_item(void* character, void* item, int arg, int* out_used) {
-    return extension_use_item_internal(character, item, arg, out_used);
-}
-bool extension_make_mercenary(void* item, void** out_mercenary) {
-    return extension_make_mercenary_internal(item, out_mercenary);
-}
-qol::contracts::QolItemCountEncoding item_count_encoding(const void* item) {
-    return item_count_encoding_internal(item);
-}
-uint32_t original_count_view(uint32_t field) { return original_count_view_internal(field); }
-qol::contracts::QolItemCountEncoding category_is_equip(int category) {
-    return category_is_equip_internal(category);
-}
-bool category_is_extension_backpack(int category) {
-    return category_is_extension_backpack_internal(category);
-}
 uint64_t extension_bag_ui_isolation_now_ms_locked() {
     return isolation_now_ms_locked();
 }

@@ -1784,9 +1784,9 @@ static void test_virtual_bag_transaction_domain() {
     CHECK(valid_extension_logical_bag(extension_logical_bag_last()));
     CHECK(!valid_extension_logical_bag(kOriginalTaskBag));
     CHECK(!valid_extension_logical_bag(11));
-    CHECK_EQ(extension_internal_bag(kExtensionLogicalBagFirst), 0);
-    CHECK_EQ(extension_internal_bag(extension_logical_bag_last()), active_extension_bags() - 1);
-    CHECK_EQ(extension_internal_bag(11), -1);
+    CHECK_EQ(extension_storage_index(kExtensionLogicalBagFirst), 0);
+    CHECK_EQ(extension_storage_index(extension_logical_bag_last()), active_extension_bags() - 1);
+    CHECK_EQ(extension_storage_index(11), -1);
     CHECK_EQ(extension_logical_bag(0), kExtensionLogicalBagFirst);
     CHECK_EQ(extension_logical_bag(active_extension_bags() - 1), extension_logical_bag_last());
     CHECK_EQ(extension_logical_bag(active_extension_bags()), -1);

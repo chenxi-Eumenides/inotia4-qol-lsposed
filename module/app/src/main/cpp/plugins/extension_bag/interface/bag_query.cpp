@@ -35,7 +35,7 @@ bool query_bag_capacity(int logical_bag, int* out_capacity) {
     }
     if (!extension_bag_session_admitted_locked()) return false;
 
-    const int internal_bag = virtual_bag::extension_internal_bag(logical_bag);
+    const int internal_bag = virtual_bag::extension_storage_index(logical_bag);
     if (!virtual_bag::valid_index(internal_bag)) return false;
     qol::extension_bag::BagSnapshot snapshot{};
     if (!qol::extension_bag::bag_snapshot(&snapshot)) return false;

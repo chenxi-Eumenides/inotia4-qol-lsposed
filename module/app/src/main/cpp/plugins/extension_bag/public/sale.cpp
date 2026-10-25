@@ -11,7 +11,7 @@
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
@@ -194,7 +194,7 @@ void* virtual_bag_current_use_token() {
 }
 QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
                                       qol::contracts::QolItemHandle expected_item) {
-    const int bag = virtual_bag::extension_internal_bag(logical_bag);
+    const int bag = virtual_bag::extension_storage_index(logical_bag);
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return qol::contracts::error(kQolErrInvalidArgument, "invalid extension sale slot", 27);
     }

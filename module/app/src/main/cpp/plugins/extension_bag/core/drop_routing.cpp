@@ -16,7 +16,7 @@
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/core/game_ui_port.h"
 #include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/usecases/move.h"
 #include "plugins/extension_bag/runtime/ui_ports.h"
@@ -24,8 +24,6 @@
 
 #include <algorithm>
 #include <cstring>
-
-#define is_backpack_category extension_bag_runtime_is_backpack_category
 
 bool resolve_original_drag_source(void* moving_control, int* out_bag, int* out_slot,
                                   qol::contracts::QolItemHandle* out_expected_item) {
@@ -149,7 +147,8 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
                 item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
             }
             const int category = original_item_category_locked(item);
-            if (runtime_state().objects.bag.types[index] == 0 && is_backpack_category(category)) {
+            if (runtime_state().objects.bag.types[index] == 0 &&
+                extension_bag_runtime_is_backpack_category(category)) {
                 // 原版背包来源的袋物品拖到空扩展标签也必须走“袋槽装备”，
                 // 不能直接落入普通扩展物品槽。
                 return try_equip_on_extension_tab_drop_locked(lock, index, moving_control);
@@ -163,7 +162,7 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
             const bool moved = resolved &&
                 qol::features::extension_bag::usecases::move_original_to_extension(
                     lock, src_bag, src_slot, index, expected_item);
-            if (moved) reset_drag_via_port(moving_control);
+            if (moved) reset_drag_state_locked(moving_control);
             return moved;
         }
         QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject original->extension no extension tab hit x=%lld y=%lld",
@@ -194,7 +193,7 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
             if (!extension_tab_hit(index, x, y)) continue;
             const int category = runtime_state().objects.bag.items[qol::extension_bag::ui_state().ui.extension_drag.bag][qol::extension_bag::ui_state().ui.extension_drag.slot].category;
             const bool should_equip = runtime_state().objects.bag.types[index] == 0 &&
-                                      is_backpack_category(category);
+                                      extension_bag_runtime_is_backpack_category(category);
             const bool handled = should_equip
                 ? try_equip_on_extension_tab_drop_locked(
                       lock, index, touch_moving_item_control_locked())
@@ -349,8 +348,13 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
         source_bag == target_bag && target_slot >= 0, source_is_apply_material,
         target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
     if (apply_candidate) {
-        handled = apply_extension_material_to_slot_locked(
-            lock, source_bag, source_slot, target_bag, target_slot, material, target_item);
+        qol::contracts::QolItemHandle material_handle{};
+        qol::contracts::QolItemHandle target_handle{};
+        handled = extension_bag_item_handle_for_pointer(material, &material_handle) &&
+                  extension_bag_item_handle_for_pointer(target_item, &target_handle) &&
+                  apply_extension_material_to_slot_locked(
+                      lock, source_bag, source_slot, target_bag, target_slot,
+                      material_handle, target_handle);
     } else if (should_equip) {
         handled = equip_extension_source_on_tab_locked(
             lock, target_bag, source_bag, source_slot);
@@ -377,7 +381,7 @@ bool route_projected_session_to_tab_locked(::qol::extension_bag::ReentryLock& lo
     // 复用 handle_extension_tab_click_locked/install_module_view_locked 同步当前视图，
     // 不能只结束 session 后继续沿用源袋的 g_module_view_index。
     auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
-    const int target_internal = virtual_bag::extension_internal_bag(target_bag);
+    const int target_internal = virtual_bag::extension_storage_index(target_bag);
     const auto reject = [&](const char* reason) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "cross tab reject reason=%s bag=%d slot=%d target_bag=%d target_internal=%d "
                     "phase=%d generation=%llu/%llu/%llu",
@@ -469,5 +473,3 @@ bool route_projected_session_to_tab_locked(::qol::extension_bag::ReentryLock& lo
     }
     return handled;
 }
-
-#undef is_backpack_category

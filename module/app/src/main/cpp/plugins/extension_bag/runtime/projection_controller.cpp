@@ -1,5 +1,6 @@
 #include "plugins/extension_bag/runtime/projection_controller.h"
 
+#include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
 
@@ -74,7 +75,7 @@ void set_original_bag_locked(int bag) {
         runtime_state().host.write_port->ui.set_current_bag == nullptr ||
         bag < 0 || bag >= virtual_bag::kOriginalNativeBagCount) return;
     (void)runtime_state().host.write_port->ui.set_current_bag(bag);
-    log_exit_trace_locked("write_set", 0, 0, 0, -1, -1);
+    QOL_LOG_DEBUG(QolDomain::kExtensionBag, "write_set bag=%d", bag);
 }
 
 int projection_proxy_bag_locked() {

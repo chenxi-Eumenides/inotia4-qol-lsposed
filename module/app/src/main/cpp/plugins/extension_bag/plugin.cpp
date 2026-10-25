@@ -21,7 +21,7 @@
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/http/routes.h"
 
 #include <cstdlib>

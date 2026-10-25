@@ -14,7 +14,7 @@ bool extension_bag_session_admitted_locked();
 
 bool persist_state_locked(bool force = false);
 bool extension_bag_ready_locked();
-int extension_internal_bag(int logical_bag);
+int extension_storage_index(int logical_bag);
 bool virtual_bag_module_save_validate_locked();
 bool extension_bag_module_slot_has_native_object(int bag, int slot);
 bool virtual_bag_prepare_save_slot_load();

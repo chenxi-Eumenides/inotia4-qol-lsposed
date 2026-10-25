@@ -11,7 +11,7 @@
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
@@ -168,7 +168,7 @@ void refresh_extension_item_operation_locked(int bag) {
 
 std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     if (!extension_bag_ready_locked()) return api_not_ready_error();
-    const int bag = extension_internal_bag(logical_bag);
+    const int bag = extension_storage_index(logical_bag);
     if (bag < 0) return extension_bag_op_err("bad extension bag (6-10)");
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return extension_bag_op_err("bad slot");
 
@@ -291,7 +291,7 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
                                              ? "extension bag disabled"
                                              : "not in game");
     }
-    const int bag = extension_internal_bag(logical_bag);
+    const int bag = extension_storage_index(logical_bag);
     if (bag < 0) return extension_put_jewel_error("bad extension bag (6-10)");
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return extension_put_jewel_error("bad slot");
     if (equip_slot < 0 || equip_slot >= kEquipSlotCount) {

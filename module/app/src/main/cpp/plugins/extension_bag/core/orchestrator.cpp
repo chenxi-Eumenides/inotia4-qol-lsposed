@@ -3,6 +3,7 @@
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/core/observation.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/runtime/item_access.h"
@@ -19,7 +20,7 @@
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
@@ -120,7 +121,7 @@ void teardown_extension_bag_hosts_locked() {
     disable_extension_tab_buttons_locked();
 }
 void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, uint64_t param2,
-                           int64_t x = -1, int64_t y = -1) {
+                           int64_t x, int64_t y) {
     // Do not format/write a line for every touch event. The previous tracing was
     // synchronous on the UI thread and also inflated 0x19 move latency.
     (void)phase; (void)event; (void)param; (void)param2; (void)x; (void)y;

@@ -3,7 +3,6 @@
 #include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/ui_ports.h"
-#include "plugins/extension_bag/transaction/transaction_ports.h"
 
 #include <algorithm>
 

@@ -21,8 +21,8 @@ bool extension_bag_ready_locked() {
            extension_bag_session_admitted_locked();
 }
 
-int extension_internal_bag(int logical_bag) {
-    return virtual_bag::extension_internal_bag(logical_bag);
+int extension_storage_index(int logical_bag) {
+    return virtual_bag::extension_storage_index(logical_bag);
 }
 
 bool virtual_bag_module_save_validate_locked() {

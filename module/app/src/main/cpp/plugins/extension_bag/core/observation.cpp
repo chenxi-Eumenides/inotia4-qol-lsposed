@@ -1,5 +1,6 @@
 #include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/core/geometry.h"
+#include "plugins/extension_bag/core/observation.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"

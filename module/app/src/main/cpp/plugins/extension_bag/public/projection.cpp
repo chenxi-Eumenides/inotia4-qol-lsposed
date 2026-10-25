@@ -11,7 +11,7 @@
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
@@ -211,8 +211,25 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     return VirtualBagEquipControlEventResult::kHandled;
 }
 bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& lock,
-                                             int src_bag, int src_slot, int dst_bag,
-                                             int dst_slot, void* material, void* target_item) {
+                                              int src_bag, int src_slot, int dst_bag,
+                                              int dst_slot,
+                                              qol::contracts::QolItemHandle material_handle,
+                                              qol::contracts::QolItemHandle target_handle) {
+    if (!virtual_bag::valid_index(src_bag) || !virtual_bag::valid_index(dst_bag) ||
+        src_slot < 0 || src_slot >= virtual_bag::kSlotCount ||
+        dst_slot < 0 || dst_slot >= virtual_bag::kSlotCount) {
+        return false;
+    }
+    void* material = nullptr;
+    void* target_item = nullptr;
+    if (!extension_bag_private_item_for_handle(material_handle, &material) || material == nullptr ||
+        !extension_bag_private_item_for_handle(target_handle, &target_item) || target_item == nullptr ||
+        qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot] != material ||
+        qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot] != material_handle.slot ||
+        qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] != target_item ||
+        qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot] != target_handle.slot) {
+        return false;
+    }
     const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
     const bool source_is_jewel = read_item_is_jewel(source_category);
     const char* kind = source_is_jewel ? "jewel" : "scroll";
@@ -434,8 +451,14 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         src_bag == dst_bag, source_is_apply_material,
         target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
     if (apply_candidate) {
+        qol::contracts::QolItemHandle material_handle{};
+        qol::contracts::QolItemHandle target_handle{};
+        if (!extension_bag_item_handle_for_pointer(item, &material_handle) ||
+            !extension_bag_item_handle_for_pointer(target_item, &target_handle)) {
+            return VirtualBagProjectionDropResult::kRejected;
+        }
         return apply_extension_material_to_slot_locked(
-            lock, src_bag, src_slot, dst_bag, dst_slot, item, target_item)
+            lock, src_bag, src_slot, dst_bag, dst_slot, material_handle, target_handle)
             ? VirtualBagProjectionDropResult::kHandled
             : VirtualBagProjectionDropResult::kRejected;
     }

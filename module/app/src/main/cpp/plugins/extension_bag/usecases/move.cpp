@@ -51,8 +51,8 @@ MoveResult move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
     if (from_slot < 0 || from_slot >= virtual_bag::kSlotCount) return {false, Error::kBadSlot};
     const bool from_original = virtual_bag::valid_original_transaction_bag(from_bag);
     const bool to_original = virtual_bag::valid_original_transaction_bag(to_bag);
-    const int from_internal = extension_internal_bag(from_bag);
-    const int to_internal = extension_internal_bag(to_bag);
+    const int from_internal = extension_storage_index(from_bag);
+    const int to_internal = extension_storage_index(to_bag);
     const bool from_extension = from_internal >= 0;
     const bool to_extension = to_internal >= 0;
     if (!from_original && !from_extension) return {false, Error::kBadSourceBag};

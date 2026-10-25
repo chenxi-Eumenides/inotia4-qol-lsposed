@@ -55,7 +55,7 @@ QolResult neutral_item_ref_at(int32_t bag, int32_t slot,
         },
         &ctx);
     if (!ctx.found) return neutral_error(kQolErrNotFound, "not found");
-    const int internal_bag = virtual_bag::extension_internal_bag(bag);
+    const int internal_bag = virtual_bag::extension_storage_index(bag);
     if (internal_bag < 0) return neutral_error(kQolErrNotFound, "not found");
     void* item = virtual_bag_item_at(internal_bag, slot);
     if (item == nullptr || !extension_bag_register_item_handle(item) ||

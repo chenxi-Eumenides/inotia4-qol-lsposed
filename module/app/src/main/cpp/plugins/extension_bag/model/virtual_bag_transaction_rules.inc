@@ -20,7 +20,7 @@ inline bool valid_extension_logical_bag(int bag) {
     return bag >= kExtensionLogicalBagFirst && bag <= extension_logical_bag_last();
 }
 
-inline int extension_internal_bag(int logical_bag) {
+inline int extension_storage_index(int logical_bag) {
     return valid_extension_logical_bag(logical_bag)
                ? logical_bag - kExtensionLogicalBagFirst
                : -1;

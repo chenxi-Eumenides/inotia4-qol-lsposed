@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/core/ui_state.h"
+#include "plugins/extension_bag/core/drag_session.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -11,7 +12,7 @@
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
@@ -171,7 +172,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                             const bool moved = resolved &&
                                 qol::features::extension_bag::usecases::move_original_to_extension(
                                     lock, src_bag, src_slot, index, expected_item);
-                            if (moved) reset_drag_via_port(moving);
+                            if (moved) reset_drag_state_locked(moving);
                             VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
                                         moved ? 1 : 0, index, category,
                                         runtime_state().objects.bag.types[index] != 0 ? 1 : 0);

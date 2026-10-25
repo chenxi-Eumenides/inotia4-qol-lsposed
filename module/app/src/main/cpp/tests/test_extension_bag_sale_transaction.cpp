@@ -113,7 +113,7 @@ struct Harness {
     SaleRemovalOps ops{};
 
     void prepare(int logical_bag, int slot, bool borrowed = false, bool projected = true) {
-        const int bag = virtual_bag::extension_internal_bag(logical_bag);
+        const int bag = virtual_bag::extension_storage_index(logical_bag);
         auto& descriptor = state.items[bag][slot];
         descriptor.category = 77;
         descriptor.count = 3;
@@ -169,7 +169,7 @@ void test_successful_whole_item_removal_and_roundtrip(int logical_bag, int slot)
     h.prepare(logical_bag, slot, true);
     const auto outcome = remove_for_sale(h.request, h.ops);
     CHECK(outcome == SaleRemovalResult::kRemoved);
-    const int bag = virtual_bag::extension_internal_bag(logical_bag);
+    const int bag = virtual_bag::extension_storage_index(logical_bag);
     const size_t index = static_cast<size_t>(bag * virtual_bag::kSlotCount + slot);
     CHECK(h.state.items[bag][slot].category == 0 && h.state.items[bag][slot].count == 0);
     CHECK(h.objects[index] == nullptr);

@@ -44,3 +44,9 @@ bool extension_drag_session_active_port();
 // These adapters keep projected-control pointers inside core/.
 bool set_projected_slot_item_port(int bag, int slot, void* item);
 bool projected_slot_matches_port(int bag, int slot, void* item);
+
+void* module_item_locked(int bag, int slot);
+
+void refresh_module_item_area_locked(int index);
+
+void restore_module_view_locked();

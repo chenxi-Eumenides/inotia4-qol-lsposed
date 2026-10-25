@@ -22,9 +22,6 @@ void extension_bag_bind_save_facts(const qol::contracts::SaveFactsApi* facts) {
     runtime_state().host.save_facts = facts;
 }
 
-#define extension_remove_item_direct extension_remove_item_direct_internal
-#define extension_refresh_bag_area extension_refresh_bag_area_internal
-
 const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() { return runtime_state().host.write_port; }
 
 bool extension_save_item_on_empty(void* item, int bag) {
@@ -45,8 +42,6 @@ bool extension_move_item(void* item, int count, int bag, int slot, int* out_resu
     return true;
 }
 
-namespace {
-
 bool extension_remove_item_direct(int bag, int slot, int* out_result) {
     const auto* api = extension_bag_write_api();
     if (api == nullptr || api->inventory.remove_item_direct == nullptr || out_result == nullptr) {
@@ -59,8 +54,6 @@ bool extension_remove_item_direct(int bag, int slot, int* out_result) {
     return true;
 }
 
-}  // namespace
-
 void extension_refresh_item_area() {
     const auto* api = extension_bag_write_api();
     if (api != nullptr && api->ui.refresh_item_area != nullptr) {
@@ -68,16 +61,12 @@ void extension_refresh_item_area() {
     }
 }
 
-namespace {
-
 void extension_refresh_bag_area() {
     const auto* api = extension_bag_write_api();
     if (api != nullptr && api->ui.refresh_bag_area != nullptr) {
         (void)api->ui.refresh_bag_area();
     }
 }
-
-}  // namespace
 
 namespace {
 
@@ -180,11 +169,3 @@ int virtual_bag_inventory_state_id() {
     if (runtime_state().persistence.state_entry == nullptr) return -1;
     return *reinterpret_cast<int32_t*>(runtime_state().persistence.state_entry);
 }
-
-#undef extension_remove_item_direct
-#undef extension_refresh_bag_area
-
-bool extension_remove_item_direct(int bag, int slot, int* out_result) {
-    return extension_remove_item_direct_internal(bag, slot, out_result);
-}
-void extension_refresh_bag_area() { extension_refresh_bag_area_internal(); }

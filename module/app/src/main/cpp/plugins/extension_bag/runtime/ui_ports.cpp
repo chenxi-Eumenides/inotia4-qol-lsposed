@@ -16,6 +16,6 @@ bool sync_slot_via_port(int bag, int slot) {
     return g_sync_slot != nullptr && g_sync_slot(bag, slot);
 }
 
-void reset_drag_via_port(void* control) {
-    if (g_reset_drag != nullptr) g_reset_drag(control);
+void reset_drag_via_port() {
+    if (g_reset_drag != nullptr) g_reset_drag();
 }

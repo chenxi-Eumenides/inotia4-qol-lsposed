@@ -19,7 +19,7 @@ OpResult unequip_bag(int logical_bag) {
     if (!extension_bag_ready_locked()) {
         return {false, runtime_state().enabled.load() ? Error::kNotInGame : Error::kDisabled};
     }
-    const int internal_bag = extension_internal_bag(logical_bag);
+    const int internal_bag = extension_storage_index(logical_bag);
     if (internal_bag < 0) return failure(Error::kBadBag);
     ExtensionBagUnequipResult result = ExtensionBagUnequipResult::kNotEquipped;
     {

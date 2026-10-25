@@ -1,7 +1,7 @@
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/object_state_port.h"
-#include "plugins/extension_bag/transaction/transaction_ports.h"
+#include "plugins/extension_bag/runtime/object_state_port.h"
 #include "plugins/extension_bag/runtime/ui_ports.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -9,7 +9,7 @@
 
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/transaction/transaction.h"
 
 #include <algorithm>
 #include <cstring>
@@ -193,7 +193,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     }
     runtime_state().objects.bag.pending = {};
     extension_bag_mark_dirty_locked();
-    reset_drag_via_port(nullptr);
+    reset_drag_via_port();
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot,
                 static_cast<unsigned long long>(module_object_slot_port(src_bag, src_slot).use.generation),
@@ -506,7 +506,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                     txn.transaction_id);
         return false;
     }
-    reset_drag_via_port(nullptr);
+    reset_drag_via_port();
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension->extension %d/%d -> %d/%d cat=%d count=%d",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot, txn.source.category,
                 txn.committed.count);

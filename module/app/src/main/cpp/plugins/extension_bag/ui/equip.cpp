@@ -23,7 +23,7 @@
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
@@ -248,12 +248,12 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
             original_bag, source_slot, item))) return false;
 
     // 原版交换入口会重入库存 hook，因此临时安装物理槽后必须解锁调用，再重锁复核。
-    extension_bag_begin_internal_equip();
+    extension_bag_begin_equip_operation();
     lock.unlock();
     const bool equip_result = extension_bag_write_api() != nullptr &&
                               extension_bag_ui_equip_from_inventory(character, original_bag,
                                                              source_slot, target);
-    extension_bag_end_internal_equip();
+    extension_bag_end_equip_operation();
     lock.lock();
     const QolResult restore_result = inventory_write->inventory.set_physical_item(
         original_bag, source_slot, original_inventory_item);

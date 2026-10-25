@@ -27,3 +27,5 @@ int raw_desc_type_locked();
 
 void extension_refresh_item_area();
 void extension_refresh_bag_area();
+
+void virtual_bag_call_original_refresh_item_area_with_guard();

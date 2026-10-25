@@ -52,7 +52,7 @@ bool provider_is_logical_bag(int bag) {
 }
 
 int provider_internal_index(int logical_bag) {
-    return virtual_bag::extension_internal_bag(logical_bag);
+    return virtual_bag::extension_storage_index(logical_bag);
 }
 
 bool provider_prepare_main_menu() {
@@ -267,8 +267,8 @@ bool extension_bag_has_empty_slots(int needed, int include_task_bag) {
     return provider_has_empty_slots(needed, include_task_bag);
 }
 
-void extension_bag_begin_internal_equip() { provider_begin_internal_equip(); }
-void extension_bag_end_internal_equip() { provider_end_internal_equip(); }
+void extension_bag_begin_equip_operation() { provider_begin_internal_equip(); }
+void extension_bag_end_equip_operation() { provider_end_internal_equip(); }
 
 // ===========================================================================
 // capability provider —— ExtensionBagApi v3.1 接口表

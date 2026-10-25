@@ -7,6 +7,7 @@
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/core/observation.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/transaction/transaction.h"
@@ -20,11 +21,6 @@
 #include <array>
 #include <cstring>
 #include <limits>
-
-void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
-                           uint64_t param2, int64_t x = -1, int64_t y = -1);
-
-
 
 void refresh_projection_if_overwritten_locked();
 

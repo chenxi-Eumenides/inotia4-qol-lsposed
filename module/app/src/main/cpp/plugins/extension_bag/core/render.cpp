@@ -4,6 +4,7 @@
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/core/observation.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -15,8 +16,6 @@
 
 #include <cstring>
 
-void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
-                           uint64_t param2, int64_t x = -1, int64_t y = -1);
 void prepare_c18_native_bag_layout_locked();
 
 namespace {

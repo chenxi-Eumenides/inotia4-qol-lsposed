@@ -3,7 +3,7 @@
 #include "plugins/extension_bag/runtime/projection_controller.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/object_state_port.h"
-#include "plugins/extension_bag/transaction/transaction_ports.h"
+#include "plugins/extension_bag/runtime/object_state_port.h"
 #include "plugins/extension_bag/runtime/ui_ports.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -12,7 +12,7 @@
 
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/logging.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/transaction/transaction.h"
 
 #include <algorithm>
 #include <cstring>
@@ -393,7 +393,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
             set_original_bag_locked(module_view_state_port().window_original_bag);
             refresh_module_item_area_locked(module_view_state_port().index);
         }
-        reset_drag_via_port(nullptr);
+        reset_drag_via_port();
         return false;
     }
     // VM-40 宿主身份守卫：投影安装中 CUR_BAG 是宿主身份的一部分（R-27 成对写），
@@ -447,7 +447,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
             set_original_bag_locked(module_view_state_port().window_original_bag);
             refresh_module_item_area_locked(module_view_state_port().index);
         }
-        reset_drag_via_port(nullptr);
+        reset_drag_via_port();
         return false;
     }
 
@@ -465,7 +465,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
             set_original_bag_locked(module_view_state_port().window_original_bag);
             refresh_module_item_area_locked(module_view_state_port().index);
         }
-        reset_drag_via_port(nullptr);
+        reset_drag_via_port();
         return false;
     }
     // 在提交或释放扩展源前检查投影容量恢复；失败时目标回滚，扩展源保持不变。
@@ -483,7 +483,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
             handover_tracked_item_locked(item_handle, item,
                                          "ext2orig host capacity rollback unconfirmed");
         }
-        reset_drag_via_port(nullptr);
+        reset_drag_via_port();
         return false;
     }
     if (!module_object_release_allowed_locked(
@@ -496,13 +496,13 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
                                                 item, inserted_handle)) {
             handover_tracked_item_locked(item_handle, item,
                                          "ext2orig rollback removal unconfirmed");
-            reset_drag_via_port(nullptr);
+            reset_drag_via_port();
             return false;
         }
         txn_abort_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                          "source extension object release rejected");
         release_tracked_item_locked(item_handle, item, "ext2orig release rejected rollback");
-        reset_drag_via_port(nullptr);
+        reset_drag_via_port();
         return false;
     }
     // P4.3：入库已确认 → 原版库存接管终态（此后模块不得触碰 item 指针）。
@@ -514,12 +514,12 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
                                                 item, inserted_handle)) {
             handover_tracked_item_locked(item_handle, item,
                                          "ext2orig rollback removal unconfirmed");
-            reset_drag_via_port(nullptr);
+            reset_drag_via_port();
             return false;
         }
         // 释放调用失败时保留 pending；恢复器会依据源/目标实态裁决，不能提前宣告回滚完成。
         release_tracked_item_locked(item_handle, item, "ext2orig release rejected rollback");
-        reset_drag_via_port(nullptr);
+        reset_drag_via_port();
         return false;
     }
     handover_tracked_item_locked(item_handle, item, "ext2orig handover");
@@ -542,7 +542,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
         virtual_bag::ext2orig_should_switch_display_bag(module_view_state_port().installed)) {
         set_original_bag_locked(target_bag);
     }
-    reset_drag_via_port(nullptr);
+    reset_drag_via_port();
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s %s src=%d/%d cat=%d count=%d target_bag=%d slot=%d",
                 txn.transaction_id,
                 native_target ? "extension->native" : "extension->original",

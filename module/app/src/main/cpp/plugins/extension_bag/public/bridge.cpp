@@ -11,7 +11,7 @@
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/model/equip_rules.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
-#include "plugins/extension_bag/model/move_merge.h"
+#include "plugins/extension_bag/core/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
@@ -32,6 +32,7 @@
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/core/observation.h"
 #include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/runtime/status_snapshot.h"
 #include "plugins/extension_bag/transaction/transaction.h"
@@ -260,7 +261,7 @@ bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity) {
         return false;
     }
     if (!extension_bag_session_admitted_locked()) return false;
-    const int internal_bag = virtual_bag::extension_internal_bag(logical_bag);
+    const int internal_bag = virtual_bag::extension_storage_index(logical_bag);
     if (!virtual_bag::valid_index(internal_bag)) return false;
     qol::extension_bag::BagSnapshot snapshot{};
     if (!qol::extension_bag::bag_snapshot(&snapshot)) return false;

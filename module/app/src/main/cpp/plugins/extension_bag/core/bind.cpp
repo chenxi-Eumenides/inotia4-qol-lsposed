@@ -45,7 +45,7 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
     runtime_state().host.sdk = sdk;
     runtime_state().host.game = game;
     runtime_state().host.write_port = write_port;
-    set_ui_ports(sync_projected_slot_locked, reset_drag_state_locked);
+    set_ui_ports(sync_projected_slot_locked, [] { reset_drag_state_locked(nullptr); });
     return true;
 }
 
