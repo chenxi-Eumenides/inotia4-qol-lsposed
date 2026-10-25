@@ -12,6 +12,7 @@
 | 构建、部署与设备验收 | `guides/build-and-deploy.md` | `reference/api-reference.md`（涉及 API 验收时） |
 | 修改源码或设计边界 | 根目录 `ARCHITECTURE.md` | `refactor/`、相关 `reference/plugins/` |
 | 插件审计 | `refactor/plugin-audit-playbook.md` | `refactor/audits/`、`refactor/issues.md` |
+| 插件重构架构指导 | `refactor/plugin-architecture-guide.md` | `refactor/extension-bag/final-architecture.md` |
 | 配置 `enable` 与插件生命周期方案评审 | `refactor/config-enable-lifecycle-proposal.md` | `ARCHITECTURE.md` §7.2/§8.2、`reference/api-reference.md` §7.6 |
 | 查询验证标准和当前欠账 | `refactor/verification.md` | `refactor/verification/`、`refactor/slot-data-contract.md` |
 | 理解原版游戏机制 | `reference/game/` | `archive/` 中相关历史记录仅用于追溯 |
@@ -52,6 +53,7 @@
 - `map.md`：脚本生成的当前源码结构统计；不定义目标架构。
 - `api-route-map.md`：API 路由核对材料。
 - `api-optional-op-design.md`：API 服务归属、可选 HTTP 接线和通用 OP 授权合同。
+- `plugin-architecture-guide.md`：从 extension_bag 重构沉淀的通用分层/线程/数据/迁移准则，供其他插件参照。
 - `extension-bag/refactor-plan.md`：扩展背包插件分层与内部组件重构方案（执行契约、组件边界、分阶段迁移）。
 - `audits/infrastructure-20261013/inspection.md`：近址 thunk mmap 检查与验证证据状态。
 - `audits/ui-handle-lifecycle-20261021/delete-path-audit.md`：游戏控件删除路径审计（C 方案：`TouchHandle_DeleteControl` 不递归、推荐 `ControlObject_Delete` 入口；袋容器子树释放链 UNPROVEN）。
@@ -61,6 +63,7 @@
 - `audits/plugin-audit/simple-mode-20261022/verification-log.md`：`simple_mode` 审阅登记（12 findings、5 项用户裁决、Host 153/153 与构建证据；设备面 `NOT_ACCEPTED`）。
 - `slot-data-contract.md`：Slot data 当前契约与状态。
 - `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
+- `core-item/architecture.md`：`core.item` 目标架构（三空间袋编号、注册式袋源、快照与分页、分层与分阶段迁移）。
 - `adr/`：架构决策记录。
 
 ### `archive/`：只读历史归档
