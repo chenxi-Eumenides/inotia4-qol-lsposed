@@ -16,4 +16,19 @@ uint64_t SnapshotStore::bump_epoch() {
     return epoch_.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
+uint64_t SnapshotStore::epoch() const {
+    return epoch_.load(std::memory_order_acquire);
+}
+
+void SnapshotStore::clear() {
+    std::shared_ptr<const InventorySnapshot> empty;
+    std::atomic_store_explicit(&snapshot_, empty, std::memory_order_release);
+    (void)bump_epoch();
+}
+
+SnapshotStore& inventory_snapshot_store() {
+    static SnapshotStore store;
+    return store;
+}
+
 }  // namespace qol::features::core_item::bags

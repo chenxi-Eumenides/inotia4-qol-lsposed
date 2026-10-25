@@ -4,6 +4,7 @@
 #include <string>
 
 #include "json_lite.h"
+#include "plugins/core.item/runtime/core_item_internal.h"
 
 namespace qol::features::core_item {
 namespace {
@@ -274,6 +275,29 @@ bool enrich_item_value(const JsonValue& item, const contracts::QolItemPort* port
                        std::string* out) {
     if (out == nullptr || item.type != JsonValue::Type::kObject) return false;
     *out = enrich_item(item, port);
+    return true;
+}
+
+bool enrich_snapshot_item(int32_t space, int32_t bag, const bags::SlotRecord& item,
+                          const contracts::QolItemPort* port, bool include_bag,
+                          std::string* out) {
+    if (out == nullptr) return false;
+    std::string raw;
+    append_inventory_item(&raw, item.slot, item.view, item.view.count_supported != 0,
+                          item.count);
+    JsonValue value;
+    if (!json_parse(raw.data(), static_cast<uint32_t>(raw.size()), &value)) return false;
+    std::string enriched;
+    if (!enrich_item_value(value, port, &enriched) || enriched.size() < 2 ||
+        enriched.front() != '{' || enriched.back() != '}') {
+        return false;
+    }
+    std::string result = "{\"space\":" + std::to_string(space);
+    if (include_bag) result += ",\"bag\":" + std::to_string(bag);
+    result += ",";
+    result.append(enriched.data() + 1, enriched.size() - 2);
+    result.push_back('}');
+    *out = std::move(result);
     return true;
 }
 

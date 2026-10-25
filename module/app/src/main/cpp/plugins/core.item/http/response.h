@@ -5,6 +5,7 @@
 
 #include "contracts/game_ports/item_port.h"
 #include "json_lite.h"
+#include "plugins/core.item/bags/snapshot_store.h"
 
 // item_facts HTTP owner 的响应构造：把 native 原始库存/商店 JSON 富化为迁移前 Kotlin 输出，
 // 静态名称来自 port 的启动期名称表。只在 HTTP handler 调用（不读游戏内存）。
@@ -17,6 +18,11 @@ bool enrich_inventory(const char* json, uint32_t size, const contracts::QolItemP
 // 以公开读面相同的 restructureItem 字段顺序富化单个原始物品对象。
 bool enrich_item_value(const JsonValue& item, const contracts::QolItemPort* port,
                        std::string* out);
+
+// 空间化快照项目，复用既有原始字段投影与名称富化顺序。
+bool enrich_snapshot_item(int32_t space, int32_t bag, const bags::SlotRecord& item,
+                          const contracts::QolItemPort* port, bool include_bag,
+                          std::string* out);
 
 // {"items":[...]}：展平全部袋内物品（物品对象与库存内同构，不含 bag 字段）。
 bool enrich_items_list(const char* json, uint32_t size, const contracts::QolItemPort* port,

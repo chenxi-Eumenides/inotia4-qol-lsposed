@@ -32,6 +32,8 @@ void append_inventory_item(std::string* out, int32_t slot,
                            const contracts::QolItemInventoryView& item, bool count_present,
                            uint32_t count);
 InventoryExtensionAccessResult inventory_extension();
+QolResult read_inventory();
+void request_inventory_refresh();
 
 extern const contracts::ItemFactsApi kItemFactsApi;
 extern const contracts::ItemStateApi kItemStateApi;

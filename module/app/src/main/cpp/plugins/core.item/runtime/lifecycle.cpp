@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "contracts/commands.h"
+#include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/core.item/hooks/merge_hook.h"
 #include "plugins/core.item/usecases/sell_item.h"
@@ -10,7 +11,7 @@
 namespace qol::features::core_item {
 namespace {
 
-constexpr int32_t kSnapshotIntervalFrames = 15;
+constexpr int32_t kSnapshotFallbackIntervalFrames = 60;
 uint64_t g_frame_task = 0;
 
 void log_message(const contracts::QolHostSdk* sdk, const char* message) {
@@ -64,6 +65,7 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 
 int plugin_install(contracts::PluginContext& ctx) {
     reset_ports();
+    bags::inventory_snapshot_store().clear();
     g_sdk = ctx.sdk;
     g_degrade_warn_ticks = 0;
     g_frame_task = 0;
@@ -182,6 +184,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     inventory_hooks::detach();
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
+    bags::inventory_snapshot_store().clear();
     log_message(ctx.sdk, "[core.item] provider deactivate");
     if (g_sdk != nullptr && g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
         (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
@@ -208,10 +211,11 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     }
     ItemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
+    bags::inventory_snapshot_store().clear();
     if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
         uint64_t task = 0;
         if (contracts::succeeded(g_sdk->scheduler.add(
-                1, &frame_tick, nullptr, kSnapshotIntervalFrames, 0, &task))) {
+                1, &frame_tick, nullptr, kSnapshotFallbackIntervalFrames, 0, &task))) {
             g_frame_task = task;
         } else {
             log_message(ctx.sdk, "[core.item] snapshot scheduler unavailable");
@@ -225,6 +229,7 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
     merge::set_enabled(false);
     stop_frame_task(ctx.sdk);
     g_snapshot.destroy();
+    bags::inventory_snapshot_store().clear();
     log_message(ctx.sdk, "[core.item] provider disabled: capability + http queries withdrawn");
 }
 

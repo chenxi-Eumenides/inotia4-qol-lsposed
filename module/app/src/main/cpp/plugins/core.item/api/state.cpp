@@ -2,11 +2,17 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
 #include "contracts/extension_bag.h"
+#include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/http/response.h"
+#ifndef QOL_CORE_ITEM_TYPED_READ_SOURCES_SEPARATELY
+#include "plugins/core.item/bags/snapshot_store.cpp"
+#include "plugins/core.item/usecases/read_inventory.cpp"
+#endif
 
 namespace qol::features::core_item {
 
@@ -33,6 +39,7 @@ void log_degrade_warn(const char* message) {
 }
 
 void publish_not_in_game(ItemSnapshot& snapshot) {
+    bags::inventory_snapshot_store().clear();
     snapshot.state = SnapshotState::kNotInGame;
     (void)copy_buffer(snapshot.inventory, kInventoryCapacity, &snapshot.inventory_size,
                       kNotInGameBody, static_cast<uint32_t>(sizeof(kNotInGameBody) - 1));
@@ -55,35 +62,36 @@ QolResult append_extension_inventory_bags(std::string* out) {
         !contracts::succeeded(g_port->read.in_world(&in_world)) || in_world == 0) {
         return contracts::ok();
     }
-    thread_local std::vector<char> fragment(kInventoryCapacity);
-    uint32_t fragment_size = 0;
-    const QolResult result = access.provider->inventory_json_fragment(
-        fragment.data(), static_cast<uint32_t>(fragment.size()), &fragment_size);
-    if (!contracts::succeeded(result) || fragment_size == 0) {
-        // provider 门禁关闭或不可用时贡献空片段：省略扩展段，主快照/写票据照常。
-        log_degrade_warn("extension inventory omitted: fragment unavailable");
-        return contracts::ok();
+    size_t capacity = kInventoryCapacity;
+    constexpr size_t kMaximumFragmentCapacity = 8u * 1024u * 1024u;
+    for (;;) {
+        std::vector<char> fragment(capacity);
+        uint32_t fragment_size = 0;
+        const QolResult result = access.provider->inventory_json_fragment(
+            fragment.data(), static_cast<uint32_t>(fragment.size()), &fragment_size);
+        if (contracts::succeeded(result) && fragment_size != 0 &&
+            fragment_size <= fragment.size()) {
+            out->append(fragment.data(), fragment_size);
+            return contracts::ok();
+        }
+        if (capacity >= kMaximumFragmentCapacity) break;
+        capacity = std::min(capacity * 2, kMaximumFragmentCapacity);
     }
-    out->append(fragment.data(), fragment_size);
+    // provider 门禁关闭或不可用时贡献空片段：省略扩展段（限速 WARN 保留可诊断性）。
+    log_degrade_warn("extension inventory omitted: fragment unavailable");
     return contracts::ok();
 }
 
-QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_size) {
-    if (out == nullptr || out_size == nullptr || g_port == nullptr ||
+QolResult build_inventory_json(std::string* out) {
+    if (out == nullptr || g_port == nullptr ||
         g_port->read.in_world == nullptr || g_port->read.item_ref_at == nullptr ||
         g_port->read.inventory_item_view == nullptr) {
         return error_result(kQolErrInvalidArgument, "inventory serializer unavailable");
     }
-    *out_size = 0;
     int32_t in_world = 0;
     if (!contracts::succeeded(g_port->read.in_world(&in_world))) return not_ready();
     if (in_world == 0) {
-        constexpr char kNotInWorld[] = "{\"error\":\"not in game\"}";
-        if (sizeof(kNotInWorld) - 1 > capacity) {
-            return error_result(kQolErrInvalidArgument, "inventory buffer too small");
-        }
-        std::memcpy(out, kNotInWorld, sizeof(kNotInWorld) - 1);
-        *out_size = sizeof(kNotInWorld) - 1;
+        *out = kNotInGameBody;
         return contracts::ok();
     }
 
@@ -122,20 +130,97 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
         }
         json += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
     }
+
+    int32_t c18_bag_count = 0;
+    if (contracts::qol_item_port_bag_space_size_valid(g_port) &&
+        g_port->read.bag_count != nullptr) {
+        const QolResult count_result =
+            g_port->read.bag_count(contracts::kQolBagSpaceC18, &c18_bag_count);
+        if (!contracts::succeeded(count_result)) {
+            if (count_result.code != kQolErrUnsupported && count_result.code != kQolErrNotReady) {
+                return count_result;
+            }
+            c18_bag_count = 0;
+        }
+    }
+    if (c18_bag_count < 0) c18_bag_count = 0;
+    for (int32_t bag = 0; bag < c18_bag_count; ++bag) {
+        if (g_port->read.bag_info == nullptr || g_port->read.item_at == nullptr) {
+            return error_result(kQolErrUnsupported, "c18 bag read unavailable");
+        }
+        const contracts::QolBagRef ref{contracts::kQolBagSpaceC18, bag};
+        contracts::QolBagInfo info{};
+        const QolResult info_result = g_port->read.bag_info(&ref, &info);
+        if (!contracts::succeeded(info_result)) return info_result;
+        if (info.capacity < 0 || info.slot_count < 0) {
+            return error_result(kQolErrInvalidArgument, "invalid c18 bag info");
+        }
+        // 原始 item.state 保留扁平袋号，不新增 space 字段。
+        json += ",{\"bag\":" + std::to_string(contracts::kQolOriginalBagCount + bag) +
+                ",\"items\":[";
+        int32_t filled = 0;
+        for (int32_t slot = 0; slot < info.capacity; ++slot) {
+            contracts::QolInventoryItemRef item_ref{};
+            const QolResult ref_result = g_port->read.item_at(&ref, slot, &item_ref);
+            if (!contracts::succeeded(ref_result)) {
+                if (ref_result.code == kQolErrNotFound) continue;
+                return ref_result;
+            }
+            if (item_ref.item.slot == 0 || item_ref.item.generation == 0) continue;
+            contracts::QolItemInventoryView view{};
+            const QolResult view_result =
+                g_port->read.inventory_item_view(item_ref.item, &view);
+            if (!contracts::succeeded(view_result)) {
+                if (view_result.code == kQolErrNotFound) continue;
+                return view_result;
+            }
+            if (!inventory_option_counts_valid(view)) {
+                return error_result(kQolErrInvalidArgument, "invalid item option count");
+            }
+            uint32_t count = 0;
+            bool count_present = false;
+            if (!effective_item_count(item_ref.item, view.count_supported != 0, &count,
+                                      &count_present)) {
+                return error_result(kQolErrNotReady, "item count unavailable");
+            }
+            if (filled != 0) json.push_back(',');
+            append_inventory_item(&json, slot, view, count_present, count);
+            ++filled;
+        }
+        json += "],\"capacity\":" + std::to_string(info.capacity) +
+                ",\"slot_count\":" + std::to_string(info.slot_count) + "}";
+    }
     const QolResult extension_result = append_extension_inventory_bags(&json);
     if (!contracts::succeeded(extension_result)) return extension_result;
     json += "]}";
+    *out = std::move(json);
+    return contracts::ok();
+}
+
+QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_size) {
+    if (out_size == nullptr) {
+        return error_result(kQolErrInvalidArgument, "invalid item state output");
+    }
+    *out_size = 0;
+    std::string json;
+    const QolResult result = build_inventory_json(&json);
+    if (!contracts::succeeded(result)) return result;
+    if (json.size() > std::numeric_limits<uint32_t>::max()) {
+        return error_result(kQolErrInvalidArgument, "inventory json too large");
+    }
+    *out_size = static_cast<uint32_t>(json.size());
+    if (out == nullptr) return contracts::ok();
     if (json.size() > capacity) {
+        *out_size = 0;
         return error_result(kQolErrInvalidArgument, "inventory buffer too small");
     }
     std::memcpy(out, json.data(), json.size());
-    *out_size = static_cast<uint32_t>(json.size());
     return contracts::ok();
 }
 
 QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
-    if (out == nullptr || out_size == nullptr) {
+    if (out_size == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid item state output");
     }
     switch (static_cast<contracts::QolItemStateKind>(kind)) {
@@ -145,6 +230,10 @@ QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint
             const auto write_error = [out, capacity, out_size](const char* error) {
                 const std::string body = std::string("{\"ok\":false,\"error\":\"") + error +
                                          "\"}";
+                if (out == nullptr) {
+                    *out_size = static_cast<uint32_t>(body.size());
+                    return contracts::ok();
+                }
                 if (body.size() > capacity) {
                     return error_result(kQolErrBlocked, "item state buffer too small");
                 }
@@ -152,28 +241,27 @@ QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint
                 *out_size = static_cast<uint32_t>(body.size());
                 return contracts::ok();
             };
-            static thread_local std::vector<char> raw_inventory(kInventoryCapacity);
-            uint32_t raw_size = 0;
-            const QolResult serialized = serialize_inventory_json(
-                raw_inventory.data(), static_cast<uint32_t>(raw_inventory.size()), &raw_size);
+            std::string raw_inventory;
+            const QolResult serialized = build_inventory_json(&raw_inventory);
             if (!contracts::succeeded(serialized)) return serialized;
-            if (std::strncmp(raw_inventory.data(), "{\"error\":", 9) == 0) {
-                if (raw_size > capacity) {
-                    return error_result(kQolErrBlocked, "item state buffer too small");
-                }
-                std::memcpy(out, raw_inventory.data(), raw_size);
-                *out_size = raw_size;
-                return contracts::ok();
-            }
             std::string body;
-            if (!enrich_inventory(raw_inventory.data(), raw_size, g_port, &body)) {
+            if (raw_inventory.compare(0, 9, "{\"error\":") == 0) {
+                body = std::move(raw_inventory);
+            } else if (!enrich_inventory(raw_inventory.data(),
+                                         static_cast<uint32_t>(raw_inventory.size()), g_port,
+                                         &body)) {
                 return write_error("internal error");
             }
+            if (body.size() > std::numeric_limits<uint32_t>::max()) {
+                return error_result(kQolErrBlocked, "item state json too large");
+            }
+            *out_size = static_cast<uint32_t>(body.size());
+            if (out == nullptr) return contracts::ok();
             if (body.size() > capacity) {
+                *out_size = 0;
                 return error_result(kQolErrBlocked, "item state buffer too small");
             }
             std::memcpy(out, body.data(), body.size());
-            *out_size = static_cast<uint32_t>(body.size());
             return contracts::ok();
         }
         default:
@@ -182,10 +270,8 @@ QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint
 }
 
 void update_snapshot() {
-    if (g_port == nullptr || g_port->read.inventory_item_view == nullptr ||
-        g_port->read.item_ref_at == nullptr ||
-        g_port->read.shop_items_json == nullptr || g_port->read.money == nullptr ||
-        g_port->read.in_world == nullptr) {
+    if (g_port == nullptr || g_port->read.shop_items_json == nullptr ||
+        g_port->read.money == nullptr || g_port->read.in_world == nullptr) {
         log_snapshot_serialize_failure();
         return;
     }
@@ -210,31 +296,14 @@ void update_snapshot() {
         return;
     }
 
-    thread_local std::vector<char> inventory(kInventoryCapacity);
-    std::fill(inventory.begin(), inventory.end(), '\0');
-    uint32_t inventory_size = 0;
-    if (!contracts::succeeded(serialize_inventory_json(inventory.data(), kInventoryCapacity,
-                                                       &inventory_size))) {
-        log_snapshot_serialize_failure();
-        return;
-    }
-    if (std::strncmp(inventory.data(), "{\"error\":", 9) == 0) {
-        publish_not_in_game(next);
-        return;
-    }
-    if (!copy_buffer(next.inventory, kInventoryCapacity, &next.inventory_size, inventory.data(),
-                     inventory_size)) {
-        log_snapshot_serialize_failure();
-        return;
-    }
-
-    char shop[kShopCapacity]{};
+    std::vector<char> shop(kShopCapacity);
     uint32_t shop_size = 0;
-    if (!contracts::succeeded(g_port->read.shop_items_json(shop, kShopCapacity, &shop_size))) {
+    if (!contracts::succeeded(g_port->read.shop_items_json(
+            shop.data(), static_cast<uint32_t>(shop.size()), &shop_size))) {
         log_snapshot_serialize_failure();
         return;
     }
-    if (!copy_buffer(next.shop, kShopCapacity, &next.shop_size, shop, shop_size)) {
+    if (!copy_buffer(next.shop, kShopCapacity, &next.shop_size, shop.data(), shop_size)) {
         log_snapshot_serialize_failure();
         return;
     }
@@ -248,6 +317,7 @@ void update_snapshot() {
 }
 
 int32_t frame_tick(int64_t, void*) {
+    (void)read_inventory();
     update_snapshot();
     return 1;
 }

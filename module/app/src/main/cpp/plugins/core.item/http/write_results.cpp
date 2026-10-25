@@ -429,6 +429,7 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
                           static_cast<uint32_t>(body.size()));
         return false;
     }
+    request_inventory_refresh();
 
     if (kind == contracts::QolItemWriteKind::kAddItem) {
         constexpr char kAddItemSuccess[] = "{\"ok\":true}";
@@ -631,6 +632,7 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
                           static_cast<uint32_t>(body.size()));
         return false;
     }
+    request_inventory_refresh();
 
     std::string party_after_json;
     int32_t equip_slot = kind == contracts::QolItemWriteKind::kUnequipItem ? args.i1 : args.i3;

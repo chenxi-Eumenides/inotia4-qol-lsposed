@@ -2,7 +2,9 @@ add_library(qol_plugin_core.item STATIC
     plugin.cpp
     runtime/context.cpp
     runtime/lifecycle.cpp
+    bags/snapshot_store.cpp
     usecases/item_helpers.cpp
+    usecases/read_inventory.cpp
     api/facts.cpp
     api/state.cpp
     http/query_handler.cpp
@@ -19,3 +21,4 @@ add_library(qol_plugin_core.item STATIC
     usecases/sell_item.cpp
     hooks/merge_hook.cpp
 )
+target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_TYPED_READ_SOURCES_SEPARATELY=1)

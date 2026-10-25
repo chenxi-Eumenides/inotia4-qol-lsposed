@@ -19,14 +19,14 @@ struct BagSnapshot {
     int32_t space_id;
     int32_t bag;
     int32_t capacity;
-    contracts::QolBagInfo info;
+    int32_t slot_count;
+    std::vector<SlotRecord> items;
 };
 
 struct InventorySnapshot {
     uint64_t epoch;
-    uint32_t c18_bag_count;
+    int64_t money;
     std::vector<BagSnapshot> bags;
-    std::vector<std::pair<BagSnapshot, std::vector<SlotRecord>>> contents;
 };
 
 class SnapshotStore {
@@ -36,10 +36,14 @@ public:
     void publish(std::shared_ptr<const InventorySnapshot> snapshot);
     std::shared_ptr<const InventorySnapshot> read() const;
     uint64_t bump_epoch();
+    uint64_t epoch() const;
+    void clear();
 
 private:
     std::shared_ptr<const InventorySnapshot> snapshot_;
     std::atomic<uint64_t> epoch_;
 };
+
+SnapshotStore& inventory_snapshot_store();
 
 }  // namespace qol::features::core_item::bags
