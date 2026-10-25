@@ -19,6 +19,8 @@
 | 8 | HTTP 列表输出分页；扁平袋号公开，但注册源顺序不保证 |
 | 9 | 快照独立 epoch（库存 / 钱包 / 商店各自）
 | 10 | 商店本次只拆为独立文件，仍留在 `core.item`；重构完成后另建 `core.shop` 迁移 |
+| 11 | 迁移后 `extension_bag` 只负责扩展空间的数据与读写原语；原版/改版袋的读写全部由 `core.item` 承担 |
+| 12 | 投影窗口对原版显示槽的写入保留为扩展背包的 UI 副作用例外，不参与物品所有权与存档 |
 
 ## 2. 目标与非目标
 
@@ -33,7 +35,7 @@
 
 **非目标**
 
-1. 不改 `extension_bag` 源码、sidecar schema、页签与投影。
+1. 本轮不改 `extension_bag` 源码、sidecar schema、页签与投影；迁移时它只保留扩展空间职责（见决策 11/12）。
 2. 不在本任务内新建 `core.shop`（M9 独立任务）。
 3. 不改 C18 内存布局探测逻辑（归 Host）。
 4. 不引入分布式事务或跨插件锁。
@@ -80,7 +82,7 @@
 |---|---|
 | `ExtensionBagApi` 能力调用（识别物品、使用、投影同步） | `plugins/core.item/inventory/inventory_slot.cpp:22,118`、`native_inventory_hook.cpp:740,912,1493` |
 | `QolItemPortReadApi::inventory_extension_access` 返回 provider 指针 | `contracts/game_ports/item_port.h:148-149` |
-| `inventory.merge_projection`（EB 提供、item 消费） | `plugins/core.item/merge/plugin.cpp` |
+| `inventory.projection`（core.item 提供注册表、EB 注册回调） | `plugins/core.item/merge/plugin.cpp` |
 | Host 写端口带 `QolInventoryExtensionProvider*` 参数 | `host/item_inventory_state_write_port.cpp:74,155-184` |
 
 ### 4.2 目标依赖
@@ -127,7 +129,7 @@ struct QolBagSource {
 
 1. 只有该文件可以引用扩展背包类型。
 2. 迁移完成后整文件删除，其余层不改。
-3. `inventory.merge_projection` 反转为 `core.item` 提供注册面、扩展背包注册投影回调；过渡期同样只在 bridge 内适配。
+3. `inventory.projection` 已由 `core.item` 提供注册面、扩展背包注册投影回调；不再保留 `inventory.merge_projection` 提供面。
 
 ## 5. 分层
 
@@ -276,7 +278,7 @@ struct QolBagInfo { int32_t capacity; int32_t slot_count; };
 | `inventory.slot` | 2.0 | 解析 / 查看 / 移除（空间化） |
 | `inventory_refresh` | 2.0 | 刷新入口 |
 | `move_merge.control` | 2.0 | 合并门控 |
-| `inventory.bag_source` | 1.0 | **新增**：袋源注册/注销 |
+| `inventory.bag_source` | 1.1 | **新增**：袋源注册/注销 + 转移原语（`export_item`/`import_item`/`remove`） |
 
 `inventory.wallet` 1.0 在 M9（`core.shop`）引入，本任务不定义。
 
@@ -397,6 +399,8 @@ ShopSnapshot      { uint64_t epoch; vector<ShopItemRecord> items; }
 5. 袋数、容量、注册源缺失时 fail-closed：读返回空段，写返回明确错误，不猜测。
 6. 索引 18 不作为真实袋；`space_id` 不持久化。
 7. 任何用例失败必须回滚已执行的源操作或进入隔离，不得返回成功。
+8. 投影不再写原版显示槽：扩展背包更换方案后不再覆盖 `INVEN_pItem[bag][slot]`，读路径按槽表内容即可判定归属；若未来重新引入槽级投影，必须由投影注册面提供槽位信息，读路径不得逐物品猜测。
+9. Host 仲裁未完成前，C18 原生袋号被扩展 provider 认领的写操作必须 fail-closed（HTTP 409），不得按数字猜测路由。
 
 ## 12. 迁移阶段
 
@@ -439,3 +443,12 @@ M1–M3、M6 必须“行为不变、测试逐字通过”；M4 起为显式契�
 4. 改版袋数缓存必须有指纹兜底，否则后期新增袋对象不可见。
 5. 过渡适配器是唯一遗留耦合，必须物理隔离在单文件。
 6. 分页游标依赖 `(space_id, bag, slot)`；注册源顺序变化不得影响既有游标语义。
+7. Host 未提供序列化/装载/精确写槽原语前，原生↔扩展移动必须 fail-closed，不得用新建物品模拟。
+
+## 15. 物品操作入口
+
+所有物品副作用统一由 `inventory.action` 3.0（`contracts/inventory_action.h`）承载：`move`、`use`、`discard`、`sell`、`equip`、`unequip`、`put_jewel`。`move` 内部判定普通移动、合并与跨介质转移；扩展背包 UI 与自动出售只提供显式 `(space, bag, slot)`，不直接修改扩展袋数据或原生槽表。
+
+详见 `docs/refactor/core-item/item-operations.md`。
+
+provider 读仲裁与 `QolInventoryExtensionProvider` 是最后一项待删除的旧耦合；删除后 Host 只解析原生空间 0/1（含 C18），扩展空间由注册袋源在插件层提供。
