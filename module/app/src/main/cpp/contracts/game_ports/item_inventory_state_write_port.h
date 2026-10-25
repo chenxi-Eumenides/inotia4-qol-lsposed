@@ -40,14 +40,12 @@ using QolItemInventoryStateAddItemFn = QolResult (*)(
     int32_t category, int32_t count, int32_t socket_total, int32_t enhance_remaining,
     int32_t rarity_group, const QolItemCountApi* item_count, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateEquipFn = QolResult (*)(
-    int32_t role, int32_t bag, int32_t slot, const QolInventoryExtensionProvider* provider,
-    QolItemInventoryStateWriteResult* out);
+    int32_t role, int32_t bag, int32_t slot, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateUnequipFn = QolResult (*)(
-    int32_t role, int32_t equip_slot, const QolInventoryExtensionProvider* provider,
-    QolItemInventoryStateWriteResult* out);
+    int32_t role, int32_t equip_slot, QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateApplyFn = QolResult (*)(
     int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-    const QolInventoryExtensionProvider* provider, QolItemInventoryStateWriteResult* out);
+    QolItemInventoryStateWriteResult* out);
 using QolItemInventoryStateMoveFn = QolResult (*)(
     int32_t bag, int32_t slot, int32_t count, int32_t to_bag, int32_t to_slot,
     QolItemInventoryStateWriteResult* out);
@@ -91,7 +89,6 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStatePutJewelHandlesFn put_jewel_handles;
 };
 
-// 1.1：成员参数由 extension_bag 能力类型改为中立 provider 类型（尾随语义不变，minor++）。
 // 1.2：尾部追加 SAVE_LoadItem、原生精确写槽与按句柄移除原语。
 // load_item 返回调用方拥有的脱离背包对象句柄；成功 place_item 后对象归原生库存所有。
 // Host 在 place_item 失败时释放 load_item 创建的对象，因此失败后句柄失效；成功后调用方不得释放。
@@ -101,6 +98,7 @@ struct QolItemInventoryStateWritePort {
 // equip_handle 成功转移 detached item 所有权，失败时对象仍归调用方；unequip_handle 成功后
 // detached item 归调用方，调用方必须释放、丢弃或重新装备。
 // put_jewel_handles 成功保留装备对象归属并消耗宝石对象；失败时两个对象归属均不变。
+// 2.1：装备、脱下、镶嵌与附魔回调不再接收旧扩展库存 provider。
 constexpr uint32_t kQolItemInventoryStateWritePortSize = sizeof(QolItemInventoryStateWritePort);
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,

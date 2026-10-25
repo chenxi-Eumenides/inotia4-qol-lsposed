@@ -3,8 +3,6 @@
 #include <cstring>
 #include <string>
 
-#include "contracts/extension_bag.h"
-
 namespace qol::features::core_item {
 
 QolResult not_ready() {
@@ -25,16 +23,6 @@ bool copy_buffer(char* destination, uint32_t capacity, uint32_t* destination_siz
     *destination_size = source_size;
     return true;
 }
-InventoryExtensionAccessResult inventory_extension() {
-    InventoryExtensionAccessResult result;
-    if (g_port == nullptr || g_port->read.inventory_extension_access == nullptr) return result;
-    contracts::QolInventoryExtensionAccess access{};
-    if (!contracts::succeeded(g_port->read.inventory_extension_access(&access))) return result;
-    result.provider = access.provider;
-    result.available = access.available != 0;
-    return result;
-}
-
 bool effective_item_count(contracts::QolItemHandle item, bool original_count_supported,
                           uint32_t* out_count,
                           bool* out_present) {

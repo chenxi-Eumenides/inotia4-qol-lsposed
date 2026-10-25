@@ -6,11 +6,9 @@
 #include "contracts/move_merge.h"
 #include "contracts/game_ports/move_merge_port.h"
 #include "contracts/inventory_extension.h"
-#include "contracts/extension_bag.h"
 #include "contracts/character_state.h"
 #include "contracts/item_state.h"
 #include "contracts/world_facts.h"
-#include "contracts/extension_bag.h"
 #include "contracts/game_ports/ports.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_host.h"
@@ -140,10 +138,6 @@ static_assert(std::is_same<qol::contracts::InventorySellFn,
 static_assert(sizeof(qol::contracts::QolInventoryExtensionItemRef) ==
                   sizeof(int32_t) * 5 + sizeof(qol::contracts::QolItemHandle),
               "inventory extension Ref must not carry an object pointer");
-static_assert(std::is_same<qol::contracts::ExtensionBagItemFn,
-                           int32_t (*)(const qol::contracts::QolInventoryExtensionItemRef*,
-                                       void*)>::value,
-              "extension bag enumeration must not carry an object pointer");
 static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
               "Host SDK handle table must not expose resolve_item");
 static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==

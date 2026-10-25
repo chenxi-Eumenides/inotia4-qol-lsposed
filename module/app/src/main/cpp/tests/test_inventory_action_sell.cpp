@@ -47,7 +47,6 @@ int g_native_unequip_calls = 0;
 int g_native_jewel_calls = 0;
 int g_last_write_bag = -1;
 int g_last_to_bag = -1;
-bool g_provider_was_null = false;
 bool g_force_empty = false;
 
 QolResult fail(int code, const char* message) {
@@ -128,30 +127,24 @@ QolResult fake_native_move(int32_t bag, int32_t slot, int32_t count, int32_t to_
 }
 
 QolResult fake_native_equip(int32_t, int32_t bag, int32_t slot,
-                            const QolInventoryExtensionProvider* provider,
                             QolItemInventoryStateWriteResult* out) {
     ++g_native_equip_calls;
     g_last_write_bag = bag;
-    g_provider_was_null = provider == nullptr;
     if (out == nullptr || g_item.bag != bag || g_item.slot != slot)
         return fail(kQolErrNotFound, "stale");
     return ok();
 }
 
 QolResult fake_native_unequip(int32_t, int32_t,
-                              const QolInventoryExtensionProvider* provider,
                               QolItemInventoryStateWriteResult* out) {
     ++g_native_unequip_calls;
-    g_provider_was_null = provider == nullptr;
     return out != nullptr ? ok() : fail(kQolErrInvalidArgument, "out required");
 }
 
 QolResult fake_native_jewel(int32_t, int32_t bag, int32_t slot, int32_t,
-                            const QolInventoryExtensionProvider* provider,
                             QolItemInventoryStateWriteResult* out) {
     ++g_native_jewel_calls;
     g_last_write_bag = bag;
-    g_provider_was_null = provider == nullptr;
     if (out == nullptr || g_item.bag != bag || g_item.slot != slot)
         return fail(kQolErrNotFound, "stale");
     return ok();
@@ -239,7 +232,6 @@ void reset_fixture() {
     g_native_jewel_calls = 0;
     g_last_write_bag = -1;
     g_last_to_bag = -1;
-    g_provider_was_null = false;
     g_force_empty = false;
 
     g_game.world_action.add_money = &fake_add_money;
@@ -414,7 +406,6 @@ void test_native_move_use_discard_and_equipment() {
     CHECK(qol::features::core_item::kInventoryActionApi.put_jewel(0, {0, 0, 0}, 1).status ==
           InventoryActionStatus::kOk);
     CHECK(g_native_equip_calls == 1 && g_native_unequip_calls == 1 && g_native_jewel_calls == 1);
-    CHECK(g_provider_was_null);
 }
 
 }  // namespace

@@ -4,7 +4,6 @@
 #include "bridge/native/item_write_result.h"
 #include "contracts/commands.h"
 #include "core/native/inventory_trade.h"
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/access/world.h"
 #include "game/ops/character_write.h"
@@ -12,17 +11,6 @@
 #include "game/ops/item_inventory_state_write.h"
 #include "infra/commands.h"
 #include "infra/config.h"
-
-namespace {
-
-// ITM-13：bridge 写入口向 game::ops 传中立 provider；不可用时传 nullptr（game::ops 保留原版路径）。
-const qol::contracts::QolInventoryExtensionProvider* neutral_extension_provider() {
-    return qol::game::inventory_extension_available()
-               ? qol::game::inventory_extension_provider_if_resident()
-               : nullptr;
-}
-
-}  // namespace
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_inotia4_qol_NativeBridge_nativeOpJewel(JNIEnv* env, jclass, jint role, jint bag, jint slot, jint equipSlot) {
@@ -222,20 +210,6 @@ Java_com_inotia4_qol_NativeBridge_nativeOpUseItem(JNIEnv* env, jclass, jint bag,
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return op_result(env, "op_use_item", args, qol::bridge::item_error_json("slot empty"));
     }
-    // 扩展逻辑袋：经中立 provider 透传插件字符串（不套信封）。
-    if (item_ref.kind == InventoryItemKind::kProvider) {
-        const qol::contracts::QolInventoryExtensionProvider* provider =
-            neutral_extension_provider();
-        char buffer[4096]{};
-        uint32_t length = 0;
-        if (provider == nullptr || provider->use_item == nullptr ||
-            provider->use_item(bag, slot, buffer, sizeof(buffer), &length) == 0 ||
-            length > sizeof(buffer)) {
-            return op_result(env, "op_use_item", args,
-                             qol::bridge::item_error_json("extension item use failed"));
-        }
-        return op_result(env, "op_use_item", args, std::string(buffer, length));
-    }
     qol::contracts::QolItemInventoryStateWriteResult out{};
     const QolResult result = qol::game::ops::use_item(bag, slot, &out);
     return op_result(env, "op_use_item", args, qol::bridge::item_use_result_json(result, out));
@@ -317,35 +291,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpMoveItem(JNIEnv* env, jclass, jint bag
         return op_result(env, "op_move_item", args,
                          qol::bridge::item_error_json("task bag excluded"));
     }
-    const qol::contracts::QolInventoryExtensionProvider* provider =
-        neutral_extension_provider();
-    if (provider != nullptr && provider->owns_bag != nullptr &&
-        (provider->owns_bag(bag) != 0 || provider->owns_bag(toBag) != 0)) {
-        if (count <= 0) {
-            return op_result(env, "op_move_item", args, qol::bridge::item_error_json("bad count"));
-        }
-        if (toSlot < 0 || toSlot >= 16) {
-            return op_result(env, "op_move_item", args, qol::bridge::item_error_json("bad target"));
-        }
-        // 扩展逻辑袋：走中立 provider `move_item`（唯一实现点，字节同源透传，不刷）；
-        // 缓冲不足视为不可达边界，fallback 与 owner 兜底同款（见 T2j 方案 §3）。
-        char move_buf[4096]{};
-        uint32_t move_len = 0;
-        if (provider->move_item != nullptr &&
-            provider->move_item(bag, slot, toBag, toSlot, move_buf, sizeof(move_buf),
-                                &move_len) != 0 &&
-            move_len <= sizeof(move_buf)) {
-            return op_result(env, "op_move_item", args, std::string(move_buf, move_len));
-        }
-        return op_result(env, "op_move_item", args,
-                         qol::bridge::item_error_json("extension bag move failed"));
-    }
-    if (provider != nullptr && provider->module_view_installed != nullptr &&
-        provider->module_view_installed() != 0) {
-        return op_result(env, "op_move_item", args,
-                         qol::bridge::item_error_json("extension view open; movement disabled (P2)"));
-    }
-    // 原版袋：与 owner 回落同一 typed 实现；成功补刷恰一次复刻旧 op_ok()（EB 分支不刷）。
+    // 原生空间写经 typed Game Ops；registered-source 空间在该 native port fail-closed。
     qol::contracts::QolItemInventoryStateWriteResult out{};
     const QolResult result = qol::game::ops::move_item(
         static_cast<int32_t>(bag), static_cast<int32_t>(slot), static_cast<int32_t>(count),

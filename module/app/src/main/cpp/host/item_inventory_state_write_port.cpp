@@ -1,6 +1,5 @@
 #include "host/item_inventory_state_write_port.h"
 
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include <cstring>
 #include <string>
@@ -86,36 +85,8 @@ QolResult use_item(int32_t bag, int32_t slot,
         return trade_error(out, "slot empty");
     }
     if (item_ref.kind == InventoryItemKind::kProvider) {
-        // 中立 provider use：结果字符串字节与旧 extension_bag_use_item 同源（同一实现点）。
-        const contracts::QolInventoryExtensionProvider* provider =
-            qol::game::inventory_extension_available()
-                ? qol::game::inventory_extension_provider_if_resident()
-                : nullptr;
-        char buffer[4096]{};
-        uint32_t length = 0;
-        if (provider == nullptr || provider->use_item == nullptr ||
-            provider->use_item(bag, slot, buffer, sizeof(buffer), &length) == 0 ||
-            length > sizeof(buffer)) {
-            return contracts::error(kQolErrInternal, "extension item use failed", 25);
-        }
-        const std::string result(buffer, length);
-        constexpr char kOk[] = "{\"ok\":true}";
-        if (result == kOk) return contracts::ok();
-        constexpr char kErrorPrefix[] = "{\"ok\":false,\"error\":\"";
-        if (result.size() >= sizeof(kErrorPrefix) - 1 + 2 &&
-            result.compare(0, sizeof(kErrorPrefix) - 1, kErrorPrefix) == 0 &&
-            result.compare(result.size() - 2, 2, "\"}") == 0) {
-            const size_t begin = sizeof(kErrorPrefix) - 1;
-            const size_t inner = result.size() - begin - 2;
-            if (inner < sizeof(out->error_message)) {
-                std::memcpy(out->error_message, result.data() + begin, inner);
-                out->error_message[inner] = '\0';
-                out->error_message_len = static_cast<uint32_t>(inner);
-                return contracts::error(kQolErrInternal, out->error_message,
-                                        out->error_message_len);
-            }
-        }
-        return contracts::error(kQolErrInternal, "extension item use failed", 25);
+        return contracts::error(kQolErrUnsupported,
+                                "registered bag source use is unavailable on native port", 55);
     }
     return qol::game::ops::use_item(bag, slot, out);
 }
@@ -190,25 +161,21 @@ QolResult remove_item(contracts::QolItemHandle item, int32_t count,
 }
 
 QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
-                     const contracts::QolInventoryExtensionProvider*,
                      contracts::QolItemInventoryStateWriteResult* out) {
     return qol::game::ops::equip_item(role, bag, slot, out);
 }
 
 QolResult unequip_item(int32_t role, int32_t equip_slot,
-                       const contracts::QolInventoryExtensionProvider*,
                        contracts::QolItemInventoryStateWriteResult* out) {
     return qol::game::ops::unequip_item(role, equip_slot, out);
 }
 
 QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                    const contracts::QolInventoryExtensionProvider*,
                     contracts::QolItemInventoryStateWriteResult* out) {
     return qol::game::ops::put_jewel(role, bag, slot, equip_slot, out);
 }
 
 QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                  const contracts::QolInventoryExtensionProvider*,
                   contracts::QolItemInventoryStateWriteResult* out) {
     return qol::game::ops::enchant(role, bag, slot, equip_slot, out);
 }

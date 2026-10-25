@@ -5,7 +5,6 @@
 
 #include "contracts/bag.h"
 #include "contracts/http.h"
-#include "contracts/extension_bag.h"
 #include "contracts/item_facts.h"
 #include "contracts/item_state.h"
 #include "contracts/plugin.h"
@@ -17,11 +16,6 @@ namespace qol::features::core_item {
 
 namespace inventory_hooks = ::qol::features::inventory_hooks;
 
-struct InventoryExtensionAccessResult {
-    const contracts::QolInventoryExtensionProvider* provider = nullptr;
-    bool available = false;
-};
-
 QolResult error_result(int32_t code, const char* message);
 QolResult not_ready();
 bool copy_buffer(char* destination, uint32_t capacity, uint32_t* destination_size,
@@ -32,7 +26,6 @@ bool inventory_option_counts_valid(const contracts::QolItemInventoryView& item);
 void append_inventory_item(std::string* out, int32_t slot,
                            const contracts::QolItemInventoryView& item, bool count_present,
                            uint32_t count);
-InventoryExtensionAccessResult inventory_extension();
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
 uint32_t registered_bag_source_count();
 const contracts::QolBagSource* registered_bag_source_at(uint32_t index);

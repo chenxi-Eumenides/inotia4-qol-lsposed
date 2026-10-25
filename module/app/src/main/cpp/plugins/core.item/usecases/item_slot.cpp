@@ -1,30 +1,25 @@
 #include "item_slot.h"
 
 #include <limits>
+#include <initializer_list>
 
-#include "../../../contracts/extension_bag.h"
+#include "contracts/bag.h"
+
+namespace qol::features::core_item {
+const contracts::QolBagSource* find_bag_source(int32_t space_id);
+uint32_t registered_bag_source_count();
+const contracts::QolBagSource* registered_bag_source_at(uint32_t index);
+}
 
 namespace qol::features::inventory_hooks {
 namespace {
 
-const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::QolItemPort* g_item_port = nullptr;
 
 QolResult slot_error(int32_t code, const char* message, uint32_t length) {
     return contracts::error(code, message, length);
-}
-
-const contracts::ExtensionBagApi* extension_bag(uint16_t minor) {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const QolResult result = g_sdk->capabilities.require(
-        contracts::kExtensionBagCapabilityId,
-        {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor), minor}, &iface);
-    return contracts::succeeded(result)
-        ? static_cast<const contracts::ExtensionBagApi*>(iface)
-        : nullptr;
 }
 
 bool item_facts_ready() {
@@ -37,6 +32,18 @@ bool item_facts_ready() {
 
 bool space_count(int32_t space_id, int32_t* out_count) {
     if (out_count == nullptr || !item_facts_ready()) return false;
+    if (space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        const contracts::QolBagSource* source =
+            qol::features::core_item::find_bag_source(space_id);
+        if (source == nullptr || source->count == nullptr) {
+            *out_count = 0;
+            return true;
+        }
+        const int32_t count = source->count();
+        if (count < 0) return false;
+        *out_count = count;
+        return true;
+    }
     int32_t count = 0;
     const QolResult result = g_item_port->read.bag_count(space_id, &count);
     if (!contracts::succeeded(result)) {
@@ -53,43 +60,39 @@ bool space_count(int32_t space_id, int32_t* out_count) {
 }
 
 int32_t port_bag(const contracts::QolBagRef& ref) {
-    return ref.space_id == contracts::kQolBagSpaceOriginal
-               ? ref.bag
-               : contracts::kQolOriginalBagCount + ref.bag;
-}
-
-bool flat_bag(const contracts::QolBagRef& ref, int32_t* out_bag) {
-    if (out_bag == nullptr) return false;
-    if (ref.space_id == contracts::kQolBagSpaceOriginal) {
-        *out_bag = ref.bag;
-        return true;
-    }
+    if (ref.space_id == contracts::kQolBagSpaceOriginal) return ref.bag;
     int32_t original_count = 0;
     int32_t c18_count = 0;
     if (!space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !space_count(contracts::kQolBagSpaceC18, &c18_count) || ref.bag < 0) {
-        return false;
+        !space_count(contracts::kQolBagSpaceC18, &c18_count)) {
+        return -1;
     }
-    int64_t offset = original_count;
-    if (ref.space_id >= contracts::kQolBagSpaceFirstRegistered) {
-        offset += c18_count;
-    } else if (ref.space_id != contracts::kQolBagSpaceC18) {
-        return false;
+    int64_t offset = original_count + c18_count;
+    if (ref.space_id == contracts::kQolBagSpaceC18) return original_count + ref.bag;
+    for (uint32_t index = 0;
+         index < qol::features::core_item::registered_bag_source_count(); ++index) {
+        const contracts::QolBagSource* source =
+            qol::features::core_item::registered_bag_source_at(index);
+        if (source == nullptr || source->count == nullptr) continue;
+        if (source->space_id == ref.space_id) {
+            const int64_t flat = offset + ref.bag;
+            return flat <= std::numeric_limits<int32_t>::max()
+                       ? static_cast<int32_t>(flat)
+                       : -1;
+        }
+        const int32_t count = source->count();
+        if (count < 0) return -1;
+        offset += count;
     }
-    const int64_t flat = offset + ref.bag;
-    if (flat > std::numeric_limits<int32_t>::max()) return false;
-    *out_bag = static_cast<int32_t>(flat);
-    return true;
+    return -1;
 }
 
 bool resolve_flat_bag(int32_t flat_bag, contracts::QolBagRef* out_ref) {
     if (flat_bag < 0 || out_ref == nullptr) return false;
     int32_t original_count = 0;
     int32_t c18_count = 0;
-    int32_t extension_count = 0;
     if (!space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !space_count(contracts::kQolBagSpaceC18, &c18_count) ||
-        !space_count(contracts::kQolBagSpaceFirstRegistered, &extension_count)) {
+        !space_count(contracts::kQolBagSpaceC18, &c18_count)) {
         return false;
     }
     if (flat_bag < original_count) {
@@ -102,13 +105,35 @@ bool resolve_flat_bag(int32_t flat_bag, contracts::QolBagRef* out_ref) {
         return true;
     }
     remaining -= c18_count;
-    if (remaining >= extension_count) return false;
-    *out_ref = {contracts::kQolBagSpaceFirstRegistered, remaining};
-    return true;
+    for (uint32_t index = 0;
+         index < qol::features::core_item::registered_bag_source_count(); ++index) {
+        const contracts::QolBagSource* source =
+            qol::features::core_item::registered_bag_source_at(index);
+        if (source == nullptr || source->count == nullptr) continue;
+        const int32_t count = source->count();
+        if (count < 0) return false;
+        if (remaining < count) {
+            *out_ref = {source->space_id, remaining};
+            return true;
+        }
+        remaining -= count;
+    }
+    return false;
 }
 
 bool bag_capacity(const contracts::QolBagRef& ref, int32_t* out_capacity) {
     if (out_capacity == nullptr || !item_facts_ready()) return false;
+    if (ref.space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        const contracts::QolBagSource* source =
+            qol::features::core_item::find_bag_source(ref.space_id);
+        if (source == nullptr || source->info == nullptr) return false;
+        contracts::QolBagInfo info{};
+        if (!contracts::succeeded(source->info(ref.bag, &info)) || info.capacity < 0) {
+            return false;
+        }
+        *out_capacity = info.capacity;
+        return true;
+    }
     contracts::QolBagInfo info{};
     if (!contracts::succeeded(g_item_port->read.bag_info(&ref, &info)) || info.capacity < 0) {
         return false;
@@ -165,28 +190,14 @@ QolResult ref_at(const contracts::QolBagRef& bag, int32_t slot,
     if (!item_facts_ready()) {
         return slot_error(kQolErrNotReady, "item facts unavailable", 22);
     }
+    if (bag.space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        const contracts::QolBagSource* source =
+            qol::features::core_item::find_bag_source(bag.space_id);
+        return source != nullptr && source->item_at != nullptr
+                   ? source->item_at(bag.bag, slot, out)
+                   : slot_error(kQolErrUnsupported, "registered bag source unavailable", 33);
+    }
     return g_item_port->read.item_at(&bag, slot, out);
-}
-
-QolResult validate_logical_identity(const contracts::ExtensionBagApi* eb,
-                                     int32_t bag, int32_t slot,
-                                     const contracts::QolInventoryItemRef& ref) {
-    if (eb == nullptr || eb->is_logical_bag == nullptr || eb->internal_index == nullptr ||
-        eb->identify_native_item == nullptr) {
-        return slot_error(kQolErrUnsupported, "extension inventory unavailable", 31);
-    }
-    if (!eb->is_logical_bag(bag)) {
-        return slot_error(kQolErrConflict, "stale inventory slot", 21);
-    }
-    const int32_t internal = eb->internal_index(bag);
-    int32_t identified_bag = -1;
-    int32_t identified_slot = -1;
-    if (internal < 0 || ref.kind != static_cast<int32_t>(contracts::QolInventoryItemKind::kProvider) ||
-        !eb->identify_native_item(ref.item, &identified_bag, &identified_slot) ||
-        identified_bag != internal || identified_slot != slot) {
-        return slot_error(kQolErrConflict, "stale inventory slot", 21);
-    }
-    return contracts::ok();
 }
 
 QolResult resolve_slot(int32_t bag, int32_t slot, contracts::QolInventorySlotView* out) {
@@ -199,19 +210,17 @@ QolResult resolve_slot(int32_t bag, int32_t slot, contracts::QolInventorySlotVie
         return slot_error(kQolErrInvalidArgument, "invalid inventory slot", 22);
     }
 
-    const contracts::ExtensionBagApi* eb = nullptr;
-    if (bag_ref.space_id == contracts::kQolBagSpaceFirstRegistered) {
-        eb = extension_bag(0);
-        if (eb == nullptr) {
-            return slot_error(kQolErrUnsupported, "extension inventory unavailable", 31);
-        }
+    if (bag_ref.space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        if (qol::features::core_item::find_bag_source(bag_ref.space_id) == nullptr)
+            return slot_error(kQolErrUnsupported, "registered bag source unavailable", 32);
     }
 
     contracts::QolInventoryItemRef ref{};
     result = ref_at(bag_ref, slot, &ref);
     if (!contracts::succeeded(result)) {
         if (result.code != kQolErrNotFound) return result;
-        if (!flat_bag(bag_ref, &out->bag)) {
+        out->bag = port_bag(bag_ref);
+        if (out->bag < 0) {
             return slot_error(kQolErrNotReady, "item facts unavailable", 22);
         }
         out->slot = slot;
@@ -221,20 +230,20 @@ QolResult resolve_slot(int32_t bag, int32_t slot, contracts::QolInventorySlotVie
         return slot_error(kQolErrConflict, "stale inventory slot", 21);
     }
     if (ref.item.slot == 0) {
-        if (!flat_bag(bag_ref, &out->bag)) {
+        out->bag = port_bag(bag_ref);
+        if (out->bag < 0) {
             return slot_error(kQolErrNotReady, "item facts unavailable", 22);
         }
         out->slot = slot;
         return contracts::ok();
     }
-    if (bag_ref.space_id == contracts::kQolBagSpaceFirstRegistered) {
-        result = validate_logical_identity(eb, port_bag(bag_ref), slot, ref);
-        if (!contracts::succeeded(result)) return result;
-    } else if (ref.kind != static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal)) {
+    if (bag_ref.space_id < contracts::kQolBagSpaceFirstRegistered &&
+        ref.kind != static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal)) {
         return slot_error(kQolErrConflict, "stale inventory slot", 20);
     }
     result = fill_view(ref, out);
-    if (contracts::succeeded(result) && !flat_bag(bag_ref, &out->bag)) {
+    out->bag = port_bag(bag_ref);
+    if (contracts::succeeded(result) && out->bag < 0) {
         return slot_error(kQolErrNotReady, "item facts unavailable", 22);
     }
     return result;
@@ -250,16 +259,11 @@ QolResult view_item(contracts::QolItemHandle item, contracts::QolInventorySlotVi
         return slot_error(kQolErrNotReady, "item facts unavailable", 22);
     }
 
-    const int32_t spaces[] = {contracts::kQolBagSpaceOriginal,
-                              contracts::kQolBagSpaceC18,
-                              contracts::kQolBagSpaceFirstRegistered};
-    for (int32_t space_id : spaces) {
+    const auto search_space = [&](int32_t space_id) -> QolResult {
         int32_t count = 0;
         if (!space_count(space_id, &count)) {
             return slot_error(kQolErrNotReady, "item facts unavailable", 22);
         }
-        const contracts::ExtensionBagApi* eb =
-            space_id == contracts::kQolBagSpaceFirstRegistered ? extension_bag(0) : nullptr;
         for (int32_t bag = 0; bag < count; ++bag) {
             const contracts::QolBagRef bag_ref{space_id, bag};
             int32_t capacity = 0;
@@ -280,20 +284,31 @@ QolResult view_item(contracts::QolItemHandle item, contracts::QolInventorySlotVi
                     return slot_error(kQolErrConflict, "stale inventory item", 20);
                 }
                 if (ref.item.slot != item.slot || ref.item.generation != item.generation) continue;
-                if (space_id == contracts::kQolBagSpaceFirstRegistered) {
-                    result = validate_logical_identity(eb, port_bag(bag_ref), slot, ref);
-                    if (!contracts::succeeded(result)) return result;
-                } else if (ref.kind !=
+                if (space_id < contracts::kQolBagSpaceFirstRegistered && ref.kind !=
                            static_cast<int32_t>(contracts::QolInventoryItemKind::kOriginal)) {
                     return slot_error(kQolErrConflict, "stale inventory item", 20);
                 }
                 result = fill_view(ref, out);
-                if (contracts::succeeded(result) && !flat_bag(bag_ref, &out->bag)) {
+                out->bag = port_bag(bag_ref);
+                if (contracts::succeeded(result) && out->bag < 0) {
                     return slot_error(kQolErrNotReady, "item facts unavailable", 22);
                 }
                 return result;
             }
         }
+        return slot_error(kQolErrConflict, "stale inventory item", 20);
+    };
+    for (int32_t space_id : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceC18}) {
+        result = search_space(space_id);
+        if (contracts::succeeded(result) || result.code != kQolErrConflict) return result;
+    }
+    for (uint32_t index = 0;
+         index < qol::features::core_item::registered_bag_source_count(); ++index) {
+        const contracts::QolBagSource* source =
+            qol::features::core_item::registered_bag_source_at(index);
+        if (source == nullptr) continue;
+        result = search_space(source->space_id);
+        if (contracts::succeeded(result) || result.code != kQolErrConflict) return result;
     }
     return slot_error(kQolErrConflict, "stale inventory item", 20);
 }
@@ -320,21 +335,24 @@ QolResult remove_item(int32_t bag, int32_t slot, contracts::QolItemHandle expect
     }
 
     if (current.kind == 1u) {
-        const contracts::ExtensionBagApi* eb = extension_bag(
-            reason == contracts::kRemoveSell ? contracts::kExtensionBagSaleRemoveVersionMinor : 0);
-        if (eb == nullptr) {
-            return slot_error(kQolErrUnsupported, "extension inventory unavailable", 31);
-        }
         if (reason == contracts::kRemoveSell) {
-            if (eb->remove_for_sale == nullptr) {
-                return slot_error(kQolErrUnsupported, "extension sale unavailable", 26);
-            }
-            return eb->remove_for_sale(port_bag(bag_ref), slot, expected);
+            return slot_error(kQolErrUnsupported,
+                              "registered bag sale requires inventory action", 45);
         }
-        if (eb->remove_native_item == nullptr || !eb->remove_native_item(expected)) {
-            return slot_error(kQolErrConflict, "extension item removal failed", 29);
+        const contracts::QolBagSource* source =
+            qol::features::core_item::find_bag_source(bag_ref.space_id);
+        if (source == nullptr || source->remove == nullptr) {
+            return slot_error(kQolErrUnsupported,
+                              "registered bag source does not support removal", 46);
         }
-        return contracts::ok();
+        contracts::QolInventoryItemRef item{};
+        result = ref_at(bag_ref, slot, &item);
+        if (!contracts::succeeded(result) || item.item.slot != expected.slot ||
+            item.item.generation != expected.generation || item.count <= 0) {
+            return slot_error(kQolErrConflict, "stale inventory item", 20);
+        }
+        contracts::QolBagMutationResult mutation{};
+        return source->remove(expected, item.count, &mutation);
     }
 
     if (g_game == nullptr || g_game->inventory_write.remove_item == nullptr) {
@@ -352,7 +370,7 @@ void inventory_slot_bind(const contracts::QolHostSdk* sdk,
                          const contracts::QolGameHost* game,
                          const contracts::ItemFactsApi* item_facts,
                          const contracts::QolItemPort* item_port) {
-    g_sdk = sdk;
+    (void)sdk;
     g_game = game;
     g_item_facts = item_facts;
     g_item_port = item_port;

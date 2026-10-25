@@ -208,13 +208,6 @@ void sync_projected_slot_if_available(int bag, int slot) {
     }
 }
 
-void sync_projected_bag_if_available() {
-    const auto* provider = extension_provider();
-    if (provider != nullptr && provider->sync_projected_bag != nullptr) {
-        provider->sync_projected_bag();
-    }
-}
-
 }  // namespace
 
 QolResult load_item(const uint8_t* payload, uint32_t size,
@@ -428,7 +421,8 @@ QolResult use_item(int32_t bag, int32_t slot,
         return item_error(out, kQolErrNotFound, "slot empty");
     }
     if (item_ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported, "extension item use requires provider");
+        return item_error(out, kQolErrUnsupported,
+                          "registered bag source use must use core.item inventory action");
     }
     if (const char* screen = ui_blocked()) {
         char message[sizeof(out->error_message)]{};
@@ -595,13 +589,10 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     *out = {};
     if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
     if (bag == 5 || to_bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
-    if (bag < 0 || bag > 17 || to_bag < 0 || to_bag > 17) {
-        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
-    }
-    const auto* provider = inventory_extension_provider_if_resident();
-    if (provider != nullptr && provider->owns_bag != nullptr &&
-        (provider->owns_bag(bag) != 0 || provider->owns_bag(to_bag) != 0)) {
-        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
+    const NativeBagLayout layout = native_bag_layout();
+    if (bag < 0 || to_bag < 0 || bag >= layout.bag_limit || to_bag >= layout.bag_limit) {
+        return item_error(out, kQolErrUnsupported,
+                          "registered bag source movement must use core.item inventory action");
     }
     if (fn_inven_move_item == nullptr) {
         return item_error(out, kQolErrUnsupported, "symbol not resolved");
@@ -611,7 +602,8 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
         return item_error(out, kQolErrNotFound, "slot empty");
     }
     if (item_ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
+        return item_error(out, kQolErrUnsupported,
+                          "registered bag source movement must use core.item inventory action");
     }
     if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
     if (to_slot < 0 || to_slot >= 16 || to_bag >= native_bag_layout().bag_limit) {
@@ -1086,7 +1078,8 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
         return item_error(out, kQolErrNotFound, "jewel not found");
     }
     if (jewel_ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
+        return item_error(out, kQolErrUnsupported,
+                          "registered bag source jewel writes are unsupported by native port");
     }
     void* jewel = jewel_ref.native_item;
     void* equipped = *reinterpret_cast<void**>(
@@ -1158,26 +1151,8 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
         return item_error(out, kQolErrNotFound, "extension item unavailable");
     }
     if (ref.kind == InventoryItemKind::kProvider) {
-        // 中立 provider：provider 缺失（未注册/停用）时按删除失败处理，不落入原版删除链。
-        const auto* provider = extension_provider();
-        contracts::QolItemHandle checkpoint{};
-        uint32_t provider_id = contracts::kQolItemHandleOwnerGame;
-        contracts::QolItemHandle item_handle = lookup_item(ref.native_item, &provider_id);
-        if (item_handle.slot == 0) {
-            item_handle = register_item(ref.native_item, contracts::kQolItemHandleOwnerGame);
-        }
-        const bool suspended = begin_item_invalidation(
-            ref.native_item, contracts::kQolItemHandleOwnerAny, &checkpoint);
-        if (provider == nullptr || provider->remove_native_item == nullptr ||
-            item_handle.slot == 0 || provider->remove_native_item(item_handle) == 0) {
-            if (suspended) finish_item_invalidation(checkpoint, false);
-            return item_error(out, kQolErrInternal, "extension item removal failed");
-        }
-        if (suspended) finish_item_invalidation(checkpoint, true);
-        else invalidate_item(ref.native_item);
-        sync_projected_slot_if_available(ref.bag, ref.slot);
-        frame_cache_force_refresh();
-        return contracts::ok();
+        return item_error(out, kQolErrUnsupported,
+                          "registered bag source removal must use core.item inventory action");
     }
     if (ref.bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
     contracts::QolItemHandle checkpoint{};

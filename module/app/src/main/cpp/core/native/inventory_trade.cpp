@@ -11,7 +11,6 @@
 #include "infra/capabilities.h"
 #include "game/access/game_access.h"
 #include "game/access/item_handle_registry.h"
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/state/game_state.h"
 
 #include <cstdint>
@@ -22,14 +21,6 @@ namespace inventory_trade {
 namespace {
 
 std::mutex g_inventory_trade_mtx;
-
-// 中立扩展 provider 每次调用现取（不缓存跨帧指针）。provider 不可用（未注册/停用）= 走
-// 原版算法 fallback；provider 自身门禁由 provider 内部处理。
-const qol::contracts::QolInventoryExtensionProvider* extension_provider() {
-    return qol::game::inventory_extension_available()
-               ? qol::game::inventory_extension_provider_if_resident()
-               : nullptr;
-}
 
 const qol::contracts::ItemFactsApi* item_facts_api() {
     const void* iface = qol::infra::require_capability(
@@ -44,14 +35,6 @@ const qol::contracts::ItemFactsApi* item_facts_api() {
 
 bool rollback_money(int64_t price) {
     return fn_minus_money != nullptr && fn_minus_money(price) != 0;
-}
-
-// 投影同步：provider 门禁关闭时为 no-op（无模块视图）；provider 不可用时跳过等价。
-void sync_projected_slot_if_available(
-    const qol::contracts::QolInventoryExtensionProvider* provider, int bag, int slot) {
-    if (provider != nullptr && provider->sync_projected_slot != nullptr) {
-        provider->sync_projected_slot(bag, slot);
-    }
 }
 
 Result sell_locked(int bag, int slot, const void* expected_item, const char* source) {
@@ -83,10 +66,12 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kStale;
         return result;
     }
+    if (item_ref.kind == InventoryItemKind::kProvider) {
+        result.status = Status::kNoNativeItem;
+        return result;
+    }
     void* item = item_ref.native_item;
-    const bool provider_item = item_ref.kind == InventoryItemKind::kProvider;
-    const qol::contracts::QolInventoryExtensionProvider* provider = extension_provider();
-    if (!provider_item && fn_remove_item == nullptr) {
+    if (fn_remove_item == nullptr) {
         result.status = Status::kSymbolsUnresolved;
         return result;
     }
@@ -113,8 +98,7 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kSymbolsUnresolved;
         return result;
     }
-    uint32_t owner = provider_item ? qol::contracts::kQolItemHandleOwnerProvider
-                                   : qol::contracts::kQolItemHandleOwnerGame;
+    uint32_t owner = qol::contracts::kQolItemHandleOwnerGame;
     qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &owner);
     if (handle.slot == 0 || handle.generation == 0) {
         handle = qol::game::register_item(item, owner);
@@ -158,41 +142,18 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kCreditFailed;
         return result;
     }
-    // 扩展物品必须走中立 provider 的专用 sale callback；原版物品沿用
-    // INVEN_RemoveItem 与其句柄失效路径。两种删除失败均回退本次已加金币。
-    bool removed = false;
-    if (provider_item) {
-        uint32_t owner = qol::contracts::kQolItemHandleOwnerAny;
-        const qol::contracts::QolItemHandle handle = qol::game::lookup_item(item, &owner);
-        if (provider == nullptr || provider->remove_for_sale == nullptr ||
-            owner != qol::contracts::kQolItemHandleOwnerProvider || handle.slot == 0 ||
-            handle.generation == 0) {
-            result.status = rollback_money(price) ? Status::kRemoveFailed
-                                                  : Status::kRollbackFailed;
-            return result;
-        }
-        removed = qol::contracts::succeeded(
-            provider->remove_for_sale(bag, slot, handle));
-    } else {
-        if (fn_remove_item == nullptr) {
-            result.status = rollback_money(price) ? Status::kRemoveFailed
-                                                  : Status::kRollbackFailed;
-            return result;
-        }
-        qol::contracts::QolItemHandle checkpoint{};
-        const bool suspended = qol::game::begin_item_invalidation(
-            item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
-        const int remove_result = fn_remove_item(item);
-        if (suspended) qol::game::finish_item_invalidation(checkpoint, remove_result != 0);
-        removed = remove_result != 0;
-        if (removed && !suspended) qol::game::invalidate_item(item);
-    }
+    qol::contracts::QolItemHandle checkpoint{};
+    const bool suspended = qol::game::begin_item_invalidation(
+        item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
+    const int remove_result = fn_remove_item(item);
+    if (suspended) qol::game::finish_item_invalidation(checkpoint, remove_result != 0);
+    const bool removed = remove_result != 0;
+    if (removed && !suspended) qol::game::invalidate_item(item);
     if (!removed) {
         result.status = rollback_money(price) ? Status::kRemoveFailed
                                               : Status::kRollbackFailed;
         return result;
     }
-    if (!provider_item) sync_projected_slot_if_available(provider, bag, slot);
     result.status = Status::kOk;
     return result;
 }
@@ -203,12 +164,12 @@ Status discard_locked(int bag, int slot, const void* expected_item) {
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return Status::kEmptySlot;
     if (item_ref.native_item == nullptr) return Status::kNoNativeItem;
+    if (item_ref.kind == InventoryItemKind::kProvider) return Status::kNoNativeItem;
     if (fn_remove_item == nullptr) return Status::kSymbolsUnresolved;
     // 处置身份复核（I-1）：与 sell 同口径；置于符号检查之后以保持原有错误优先级。
     if (expected_item != nullptr && static_cast<const void*>(item_ref.native_item) != expected_item) {
         return Status::kStale;
     }
-    // 统一走已 Hook 的 INVEN_RemoveItem：扩展物品由 Stage4 识别后走扩展删除，原版物品透传原版。
     qol::contracts::QolItemHandle checkpoint{};
     const bool suspended = qol::game::begin_item_invalidation(
         item_ref.native_item, qol::contracts::kQolItemHandleOwnerAny, &checkpoint);
@@ -216,7 +177,6 @@ Status discard_locked(int bag, int slot, const void* expected_item) {
     if (suspended) qol::game::finish_item_invalidation(checkpoint, removed != 0);
     if (removed == 0) return Status::kRemoveFailed;
     if (!suspended) qol::game::invalidate_item(item_ref.native_item);
-    sync_projected_slot_if_available(extension_provider(), bag, slot);
     return Status::kOk;
 }
 

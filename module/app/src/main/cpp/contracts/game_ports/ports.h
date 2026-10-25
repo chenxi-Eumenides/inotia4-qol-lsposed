@@ -67,7 +67,7 @@ constexpr QolVersion kQolPortUiStateReadVersion{1, 0};
 constexpr QolVersion kQolPortChoiceWriteVersion{1, 0};
 constexpr QolVersion kQolPortCharacterStateVersion{1, 0};
 constexpr QolVersion kQolPortCharacterWriteOpsVersion{1, 0};
-constexpr QolVersion kQolPortItemInventoryStateWriteVersion{2, 0};
+constexpr QolVersion kQolPortItemInventoryStateWriteVersion{2, 1};
 constexpr QolVersion kQolPortSaveTransactionVersion{1, 0};
 constexpr QolVersion kQolPortWorldActionVersion{1, 0};
 constexpr QolVersion kQolPortCustomMapResourceVersion{1, 0};

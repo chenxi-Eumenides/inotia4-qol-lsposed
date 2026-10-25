@@ -13,7 +13,6 @@
 
 #include "contracts/commands.h"
 #include "contracts/character_state.h"
-#include "contracts/extension_bag.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/move_merge_port.h"
 #include "contracts/game_ports/item_port.h"
@@ -23,7 +22,6 @@
 #include "contracts/game_ports/item_inventory_state_write_port.h"
 #include "contracts/http.h"
 #include "contracts/inventory_action.h"
-#include "contracts/inventory_extension.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_slot.h"
 #include "contracts/item_facts.h"
