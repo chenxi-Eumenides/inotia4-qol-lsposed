@@ -10,6 +10,7 @@
 #include "game/access/item_handle_registry.h"
 #include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
+#include "game/access/item_class.h"
 #include "game/read/item_class.h"
 #include "game/state/game_state.h"
 
@@ -594,21 +595,13 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     *out = {};
     if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
     if (bag == 5 || to_bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
-
-    const auto* provider = extension_provider();
-    const bool provider_requested =
-        provider != nullptr && provider->owns_bag != nullptr &&
-        (provider->owns_bag(bag) != 0 || provider->owns_bag(to_bag) != 0);
-    if (provider_requested) {
-        if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
-        if (to_slot < 0 || to_slot >= 16) return item_error(out, kQolErrInvalidArgument, "bad target");
-        // provider 认领的袋号在 core.item 路由经 provider->move_item 处理；本分支仅覆盖
-        // provider 已注册但 move 不可用的直接调用，报文不含扩展袋实现细节。
-        return item_error(out, kQolErrUnsupported, "provider move unavailable");
+    if (bag < 0 || bag > 17 || to_bag < 0 || to_bag > 17) {
+        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
     }
-    if (provider != nullptr && provider->module_view_installed != nullptr &&
-        provider->module_view_installed() != 0) {
-        return item_error(out, kQolErrBlocked, "extension view open; movement disabled (P2)");
+    const auto* provider = inventory_extension_provider_if_resident();
+    if (provider != nullptr && provider->owns_bag != nullptr &&
+        (provider->owns_bag(bag) != 0 || provider->owns_bag(to_bag) != 0)) {
+        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
     }
     if (fn_inven_move_item == nullptr) {
         return item_error(out, kQolErrUnsupported, "symbol not resolved");
@@ -618,11 +611,10 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
         return item_error(out, kQolErrNotFound, "slot empty");
     }
     if (item_ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported,
-                          "extension item move not supported by original API");
+        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
     }
     if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
-    if (to_bag < 0 || to_bag >= 5 || to_slot < 0 || to_slot >= 16) {
+    if (to_slot < 0 || to_slot >= 16 || to_bag >= native_bag_layout().bag_limit) {
         return item_error(out, kQolErrInvalidArgument, "bad target");
     }
     if (bag == to_bag && slot == to_slot) {
@@ -633,6 +625,108 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     }
     sync_projected_slot_if_available(bag, slot);
     sync_projected_slot_if_available(to_bag, to_slot);
+    return contracts::ok();
+}
+
+QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
+                      const contracts::QolBagRef* ref, int32_t slot,
+                      contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return transfer_error(kQolErrInvalidArgument, "invalid item write result");
+    *out = {};
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    if (ref == nullptr ||
+        (ref->space_id != contracts::kQolBagSpaceOriginal &&
+         ref->space_id != contracts::kQolBagSpaceC18) ||
+        ref->bag < 0 || slot < -1 || slot >= 16 ||
+        (ref->space_id == contracts::kQolBagSpaceOriginal &&
+         ref->bag == contracts::kQolTaskBagIndex)) {
+        return item_error(out, kQolErrInvalidArgument, "invalid native bag slot");
+    }
+    if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
+    if (fn_inven_move_item == nullptr) {
+        return item_error(out, kQolErrUnsupported, "symbol not resolved");
+    }
+
+    void* item = nullptr;
+    QolResult result = resolve_loaded_item(handle, &item);
+    if (!contracts::succeeded(result)) return item_error(out, result, "invalid loaded item");
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return item_error(out, kQolErrNotFound, "stale item handle");
+    }
+    const int32_t category = item_class_category(item);
+    if (category < 0) return item_error(out, kQolErrNotReady, "item category unavailable");
+    uint32_t source_count = 0;
+    result = item_stack_count(item, &source_count);
+    if (!contracts::succeeded(result)) return item_error(out, result, "item count unavailable");
+    if (static_cast<uint32_t>(count) > source_count) {
+        return item_error(out, kQolErrInvalidArgument, "move count exceeds stack count");
+    }
+
+    contracts::QolBagInfo bag_info{};
+    result = inventory_bag_info(ref, &bag_info);
+    if (!contracts::succeeded(result)) return item_error(out, result, "native bag unavailable");
+    const int32_t slot_limit = bag_info.capacity < 16 ? bag_info.capacity : 16;
+    if (slot_limit <= 0 || (slot >= 0 && slot >= slot_limit)) {
+        return item_error(out, kQolErrInvalidArgument, "invalid native bag slot");
+    }
+
+    int32_t target_slot = slot;
+    bool target_empty = false;
+    const int32_t first = slot == -1 ? 0 : slot;
+    const int32_t last = slot == -1 ? slot_limit : slot + 1;
+    for (int32_t candidate = first; candidate < last; ++candidate) {
+        contracts::QolInventoryItemRef target{};
+        result = inventory_space_item_at(ref, candidate, &target);
+        if (result.code == kQolErrNotFound) {
+            target_slot = candidate;
+            target_empty = true;
+            break;
+        }
+        if (!contracts::succeeded(result)) {
+            return item_error(out, result, "native slot unavailable");
+        }
+        if (slot == -1) continue;
+        if (target.category != category) {
+            return item_error(out, kQolErrConflict, "native slot contains another item");
+        }
+        break;
+    }
+    if (target_slot < 0 || (slot == -1 && !target_empty)) {
+        return item_error(out, kQolErrBlocked, "native bag full");
+    }
+
+    const NativeBagLayout layout = native_bag_layout();
+    if (layout.slots == nullptr || ref->bag >= layout.bag_limit) {
+        return item_error(out, kQolErrNotReady, "native bag unavailable");
+    }
+    auto** target_address = reinterpret_cast<void**>(
+        layout.slots + static_cast<size_t>(ref->bag) * 0x80 +
+        static_cast<size_t>(target_slot) * sizeof(void*));
+    if (!game_memory_accessible(target_address, sizeof(*target_address), 'r')) {
+        return item_error(out, kQolErrNotReady, "native slot unavailable");
+    }
+
+    if (fn_inven_move_item(item, count, ref->bag, target_slot) == 0) {
+        return item_error(out, kQolErrInternal, "move failed");
+    }
+
+    if (*target_address == item) {
+        if (!rebind_item(item, contracts::kQolItemHandleOwnerGame)) {
+            (void)set_native_space_item(ref, target_slot, nullptr);
+            return item_error(out, kQolErrInternal, "item ownership transfer failed");
+        }
+    } else if (static_cast<uint32_t>(count) == source_count) {
+        (void)invalidate_item(handle);
+    }
+
+    auto& gained = out->gained[0];
+    gained.bag = ref->bag;
+    gained.slot = target_slot;
+    gained.category = category;
+    gained.count = count;
+    out->gained_count = 1;
+    out->flags |= contracts::kQolItemInventoryStateHasGained;
+    frame_cache_force_refresh();
     return contracts::ok();
 }
 
@@ -734,8 +828,182 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
     return contracts::ok();
 }
 
+QolResult equip_handle(int32_t role, contracts::QolItemHandle handle, int32_t equip_slot,
+                       contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return transfer_error(kQolErrInvalidArgument, "invalid item write result");
+    *out = {};
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    if (role < 0 || role > 2 || equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) {
+        return item_error(out, kQolErrInvalidArgument, "bad role or equip slot");
+    }
+    void* character = member_or_null(role);
+    if (character == nullptr) return item_error(out, kQolErrNotFound, "role not found");
+    if (fn_can_equip == nullptr || fn_find_equip_slot == nullptr || fn_equip_item == nullptr ||
+        fn_set_equip_item == nullptr) {
+        return item_error(out, kQolErrUnsupported, "symbol not resolved");
+    }
+    void* item = nullptr;
+    QolResult result = resolve_loaded_item(handle, &item);
+    if (!contracts::succeeded(result)) return item_error(out, result, "invalid loaded item");
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return item_error(out, kQolErrNotFound, "stale item handle");
+    }
+    auto** equipped_slot = reinterpret_cast<void**>(
+        reinterpret_cast<uint8_t*>(character) + C_EQUIP + static_cast<size_t>(equip_slot) * 8);
+    if (!game_memory_accessible(equipped_slot, sizeof(*equipped_slot), 'r')) {
+        return item_error(out, kQolErrNotReady, "equip slot unavailable");
+    }
+    if (*equipped_slot != nullptr) return item_error(out, kQolErrConflict, "equip slot occupied");
+    if (!fn_can_equip(character, item) || fn_find_equip_slot(character, item) != equip_slot) {
+        return item_error(out, kQolErrBlocked, "cannot equip");
+    }
+
+    const int equipped = fn_equip_item(character, item);
+    if (equipped == 0) {
+        if (*equipped_slot == item) fn_set_equip_item(character, equip_slot, nullptr);
+        return item_error(out, kQolErrInternal, "equip failed");
+    }
+    if (*equipped_slot != item) {
+        for (int32_t slot = 0; slot < C_EQUIP_SLOTS; ++slot) {
+            auto** candidate = reinterpret_cast<void**>(
+                reinterpret_cast<uint8_t*>(character) + C_EQUIP + static_cast<size_t>(slot) * 8);
+            if (game_memory_accessible(candidate, sizeof(*candidate), 'r') && *candidate == item) {
+                fn_set_equip_item(character, slot, nullptr);
+            }
+        }
+        return item_error(out, kQolErrInternal, "equip slot mismatch");
+    }
+    if (!rebind_item(item, contracts::kQolItemHandleOwnerGame)) {
+        fn_set_equip_item(character, equip_slot, nullptr);
+        return item_error(out, kQolErrInternal, "item ownership transfer failed");
+    }
+    out->value = equip_slot;
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
+QolResult unequip_handle(int32_t role, int32_t equip_slot,
+                         contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return transfer_error(kQolErrInvalidArgument, "invalid item write result");
+    *out = {};
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    if (role < 0 || role > 2 || equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) {
+        return item_error(out, kQolErrInvalidArgument, "bad role or equip slot");
+    }
+    void* character = member_or_null(role);
+    if (character == nullptr) return item_error(out, kQolErrNotFound, "role not found");
+    if (fn_set_equip_item == nullptr) {
+        return item_error(out, kQolErrUnsupported, "symbol not resolved");
+    }
+    auto** equipped_slot = reinterpret_cast<void**>(
+        reinterpret_cast<uint8_t*>(character) + C_EQUIP + static_cast<size_t>(equip_slot) * 8);
+    if (!game_memory_accessible(equipped_slot, sizeof(*equipped_slot), 'r')) {
+        return item_error(out, kQolErrNotReady, "equip slot unavailable");
+    }
+    void* item = *equipped_slot;
+    if (item == nullptr) return item_error(out, kQolErrNotFound, "equip slot empty");
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return item_error(out, kQolErrNotFound, "stale equip item");
+    }
+    if (fn_can_unequip != nullptr && fn_can_unequip(character, item) == 0) {
+        return item_error(out, kQolErrBlocked, "cannot unequip");
+    }
+
+    contracts::QolItemHandle handle = lookup_item(item);
+    if (handle.slot == 0 || handle.generation == 0) {
+        ItemHandleError registry_error = ItemHandleError::kNone;
+        handle = register_item(item, contracts::kQolItemHandleOwnerGame, &registry_error);
+        if (handle.slot == 0 || handle.generation == 0) {
+            return item_error(out, handle_error(registry_error), "item handle registration failed");
+        }
+    }
+
+    fn_set_equip_item(character, equip_slot, nullptr);
+    if (*equipped_slot != nullptr) {
+        fn_set_equip_item(character, equip_slot, item);
+        return item_error(out, kQolErrInternal, "unequip failed");
+    }
+    if (!rebind_item(item, kQolLoadedItemHandleOwner)) {
+        fn_set_equip_item(character, equip_slot, item);
+        return item_error(out, kQolErrInternal, "item ownership transfer failed");
+    }
+    out->value = equip_slot;
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
+QolResult put_jewel_handles(int32_t role, contracts::QolItemHandle equip_handle,
+                            contracts::QolItemHandle jewel_handle,
+                            contracts::QolItemInventoryStateWriteResult* out) {
+    if (out == nullptr) return transfer_error(kQolErrInvalidArgument, "invalid item write result");
+    *out = {};
+    if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
+    if (role < 0 || role > 2) return item_error(out, kQolErrInvalidArgument, "bad role");
+    void* character = member_or_null(role);
+    if (character == nullptr) return item_error(out, kQolErrNotFound, "role not found");
+    if (fn_put_jewel == nullptr || fn_is_jewel == nullptr || fn_itempool_free == nullptr) {
+        return item_error(out, kQolErrUnsupported, "symbol not resolved");
+    }
+
+    const ItemHandleResolution equip_resolution =
+        item_handle_registry().resolve_item(equip_handle, contracts::kQolItemHandleOwnerAny);
+    if (equip_resolution.error != ItemHandleError::kNone || equip_resolution.item == nullptr) {
+        return item_error(out, handle_error(equip_resolution.error), "stale equip item handle");
+    }
+    void* equipped = equip_resolution.item;
+    if (!game_memory_accessible(equipped, I_TYPE + sizeof(uint16_t), 'r')) {
+        return item_error(out, kQolErrNotFound, "stale equip item handle");
+    }
+    bool is_equipped = false;
+    for (int32_t slot = 0; slot < C_EQUIP_SLOTS; ++slot) {
+        auto** equipped_slot = reinterpret_cast<void**>(
+            reinterpret_cast<uint8_t*>(character) + C_EQUIP + static_cast<size_t>(slot) * 8);
+        if (!game_memory_accessible(equipped_slot, sizeof(*equipped_slot), 'r')) {
+            return item_error(out, kQolErrNotReady, "equip slot unavailable");
+        }
+        if (*equipped_slot == equipped) {
+            is_equipped = true;
+            break;
+        }
+    }
+    if (!is_equipped) return item_error(out, kQolErrConflict, "equip item is not equipped");
+
+    void* jewel = nullptr;
+    QolResult result = resolve_loaded_item(jewel_handle, &jewel);
+    if (!contracts::succeeded(result)) return item_error(out, result, "invalid loaded jewel");
+    if (!game_memory_accessible(jewel, I_TYPE + sizeof(uint16_t), 'r')) {
+        return item_error(out, kQolErrNotFound, "stale jewel handle");
+    }
+    const int32_t jewel_category = item_class_category(jewel);
+    if (jewel_category < 0) return item_error(out, kQolErrNotReady, "jewel category unavailable");
+    if (fn_is_jewel(jewel_category) == 0) {
+        return item_error(out, kQolErrInvalidArgument, "not jewel");
+    }
+    uint32_t jewel_count = 0;
+    result = item_stack_count(jewel, &jewel_count);
+    if (!contracts::succeeded(result)) return item_error(out, result, "jewel count unavailable");
+    if (jewel_count != 1) {
+        return item_error(out, kQolErrUnsupported, "stacked jewel unsupported");
+    }
+
+    contracts::QolItemHandle checkpoint{};
+    if (!begin_item_invalidation(jewel, kQolLoadedItemHandleOwner, &checkpoint)) {
+        return item_error(out, kQolErrBlocked, "item handle transition");
+    }
+    const int put_result = fn_put_jewel(equipped, jewel);
+    if (put_result != 0) {
+        (void)finish_item_invalidation(checkpoint, false);
+        return item_error(out, kQolErrInternal, put_result == 2 ? "no socket" : "not jewel");
+    }
+    if (!finish_item_invalidation(checkpoint, true)) {
+        return item_error(out, kQolErrInternal, "jewel handle consumption failed");
+    }
+    fn_itempool_free(jewel);
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
 QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
-                     const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                      contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
@@ -766,15 +1034,11 @@ QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
     // This entry remains hooked by Stage4; it owns the original exchange and special_equip chain.
     const int result = fn_equip_item_from_inven_to_slot(character, bag, slot, target);
     if (result == 0) return item_error(out, kQolErrInternal, "equip failed");
-    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_bag != nullptr) {
-        extension_provider_arg->sync_projected_bag();
-    }
     frame_cache_force_refresh();
     return contracts::ok();
 }
 
 QolResult unequip_item(int32_t role, int32_t equip_slot,
-                       const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                        contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
@@ -795,36 +1059,17 @@ QolResult unequip_item(int32_t role, int32_t equip_slot,
     }
     const int result = fn_unequip(character, equip_slot);
     if (result == 0) return item_error(out, kQolErrInternal, "unequip failed");
-    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_bag != nullptr) {
-        extension_provider_arg->sync_projected_bag();
-    }
     frame_cache_force_refresh();
     return contracts::ok();
 }
 
 QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                    const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                     contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
     }
     *out = {};
     if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
-    if (extension_provider_arg != nullptr && extension_provider_arg->owns_bag != nullptr &&
-        extension_provider_arg->owns_bag(bag) != 0) {
-        if (extension_provider_arg->put_jewel == nullptr) {
-            return item_error(out, kQolErrUnsupported, "extension jewel unavailable");
-        }
-        const QolResult result =
-            extension_provider_arg->put_jewel(role, bag, slot, equip_slot);
-        if (!contracts::succeeded(result)) {
-            return item_error(out, result.code, result.message != nullptr
-                                                    ? result.message
-                                                    : "extension jewel failed");
-        }
-        frame_cache_force_refresh();
-        return contracts::ok();
-    }
     void* character = member_or_null(role);
     if (character == nullptr) return item_error(out, kQolErrNotFound, "role not found");
     if (fn_put_jewel == nullptr || fn_is_jewel == nullptr || fn_consume_item == nullptr) {
@@ -836,32 +1081,14 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
     if (equip_slot < 0 || equip_slot >= C_EQUIP_SLOTS) {
         return item_error(out, kQolErrInvalidArgument, "bad equip slot");
     }
-    void* jewel = inventory_item_at(bag, slot);
-    if (jewel == nullptr) return item_error(out, kQolErrNotFound, "jewel not found");
-    // provider 命中（物品属于 provider）时按其自带逻辑袋号下发；调用方不推导袋号偏移。
-    int32_t provider_bag = -1;
-    int32_t provider_slot = -1;
-    uint32_t provider_id = contracts::kQolItemHandleOwnerGame;
-    contracts::QolItemHandle jewel_handle = lookup_item(jewel, &provider_id);
-    if (jewel_handle.slot == 0) {
-        jewel_handle = register_item(jewel, contracts::kQolItemHandleOwnerGame);
+    InventoryItemRef jewel_ref{};
+    if (!inventory_item_ref_at(bag, slot, &jewel_ref)) {
+        return item_error(out, kQolErrNotFound, "jewel not found");
     }
-    if (extension_provider_arg != nullptr && extension_provider_arg->identify_native_item != nullptr &&
-        jewel_handle.slot != 0 &&
-        extension_provider_arg->identify_native_item(jewel_handle, &provider_bag, &provider_slot) != 0) {
-        if (extension_provider_arg->put_jewel == nullptr) {
-            return item_error(out, kQolErrUnsupported, "extension jewel unavailable");
-        }
-        const QolResult result =
-            extension_provider_arg->put_jewel(role, provider_bag, provider_slot, equip_slot);
-        if (!contracts::succeeded(result)) {
-            return item_error(out, result.code, result.message != nullptr
-                                                    ? result.message
-                                                    : "extension jewel failed");
-        }
-        frame_cache_force_refresh();
-        return contracts::ok();
+    if (jewel_ref.kind == InventoryItemKind::kProvider) {
+        return item_error(out, kQolErrUnsupported, "extension bag requires bag_source");
     }
+    void* jewel = jewel_ref.native_item;
     void* equipped = *reinterpret_cast<void**>(
         reinterpret_cast<uint8_t*>(character) + C_EQUIP + equip_slot * 8);
     if (equipped == nullptr) return item_error(out, kQolErrNotFound, "equip slot empty");
@@ -871,15 +1098,11 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
     }
     // ConsumeItem is the original ApplyStuff consumption primitive and decrements one item.
     fn_consume_item(jewel);
-    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_slot != nullptr) {
-        extension_provider_arg->sync_projected_slot(bag, slot);
-    }
     frame_cache_force_refresh();
     return contracts::ok();
 }
 
 QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                  const contracts::QolInventoryExtensionProvider* extension_provider_arg,
                   contracts::QolItemInventoryStateWriteResult* out) {
     if (out == nullptr) {
         return contracts::error(kQolErrInvalidArgument, "invalid item write result", 25);
@@ -914,9 +1137,6 @@ QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
         return item_error(out, kQolErrInternal, result == 7 ? "not enchantable" : "enchant failed");
     }
     fn_consume_item(scroll);
-    if (extension_provider_arg != nullptr && extension_provider_arg->sync_projected_slot != nullptr) {
-        extension_provider_arg->sync_projected_slot(bag, slot);
-    }
     frame_cache_force_refresh();
     return contracts::ok();
 }

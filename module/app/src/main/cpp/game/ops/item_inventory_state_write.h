@@ -21,18 +21,24 @@ QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
                      contracts::QolItemInventoryStateWriteResult* out);
 QolResult remove_item(contracts::QolItemHandle item, int32_t count,
                       contracts::QolItemInventoryStateWriteResult* out);
+QolResult move_handle(contracts::QolItemHandle item, int32_t count,
+                      const contracts::QolBagRef* ref, int32_t slot,
+                      contracts::QolItemInventoryStateWriteResult* out);
 QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
-                     const contracts::QolInventoryExtensionProvider* provider,
                      contracts::QolItemInventoryStateWriteResult* out);
 QolResult unequip_item(int32_t role, int32_t equip_slot,
-                       const contracts::QolInventoryExtensionProvider* provider,
                        contracts::QolItemInventoryStateWriteResult* out);
 QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                    const contracts::QolInventoryExtensionProvider* provider,
                     contracts::QolItemInventoryStateWriteResult* out);
 QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
-                  const contracts::QolInventoryExtensionProvider* provider,
                   contracts::QolItemInventoryStateWriteResult* out);
+QolResult equip_handle(int32_t role, contracts::QolItemHandle item, int32_t equip_slot,
+                       contracts::QolItemInventoryStateWriteResult* out);
+QolResult unequip_handle(int32_t role, int32_t equip_slot,
+                         contracts::QolItemInventoryStateWriteResult* out);
+QolResult put_jewel_handles(int32_t role, contracts::QolItemHandle equip_item,
+                            contracts::QolItemHandle jewel_item,
+                            contracts::QolItemInventoryStateWriteResult* out);
 // 按 category 删除单件（原版袋经 fn_remove_item 指针路径；扩展袋经中立 provider）。
 QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteResult* out);
 

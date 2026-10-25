@@ -36,8 +36,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpJewel(JNIEnv* env, jclass, jint role, 
     qol::contracts::QolItemInventoryStateWriteResult op{};
     const QolResult result =
         qol::game::ops::put_jewel(static_cast<int>(role), static_cast<int>(bag),
-                                  static_cast<int>(slot), static_cast<int>(equipSlot),
-                                  neutral_extension_provider(), &op);
+                                  static_cast<int>(slot), static_cast<int>(equipSlot), &op);
     return op_result(env, "op_jewel", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
@@ -56,7 +55,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpEnchant(JNIEnv* env, jclass, jint role
     const QolResult result =
         qol::game::ops::enchant(static_cast<int>(role), static_cast<int>(bag),
                                 static_cast<int>(slot), static_cast<int>(equipSlot),
-                                neutral_extension_provider(), &op);
+                                &op);
     return op_result(env, "op_enchant", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot) + " " + "equipSlot=" + str_of(equipSlot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
@@ -90,8 +89,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpEquip(JNIEnv* env, jclass, jint role, 
 #else
     qol::contracts::QolItemInventoryStateWriteResult op{};
     const QolResult result = qol::game::ops::equip_item(
-        static_cast<int>(role), static_cast<int>(bag), static_cast<int>(slot),
-        neutral_extension_provider(), &op);
+        static_cast<int>(role), static_cast<int>(bag), static_cast<int>(slot), &op);
     return op_result(env, "op_equip", ("role=" + str_of(role) + " " + "bag=" + str_of(bag) + " " + "slot=" + str_of(slot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
@@ -106,7 +104,7 @@ Java_com_inotia4_qol_NativeBridge_nativeOpUnequip(JNIEnv* env, jclass, jint role
 #else
     qol::contracts::QolItemInventoryStateWriteResult op{};
     const QolResult result = qol::game::ops::unequip_item(
-        static_cast<int>(role), static_cast<int32_t>(slot), neutral_extension_provider(), &op);
+        static_cast<int>(role), static_cast<int32_t>(slot), &op);
     return op_result(env, "op_unequip", ("role=" + str_of(role) + " " + "slot=" + str_of(slot)),
                      qol::bridge::item_write_result_json(result, "item write failed"));
 #endif
