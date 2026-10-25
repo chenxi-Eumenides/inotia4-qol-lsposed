@@ -35,7 +35,6 @@
 #include "game/adapter_ports/extension_bag_write_port.h"
 #include "game/adapter_ports/item_port.h"
 #include "game/adapter_ports/move_merge_port.h"
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/adapter_ports/item_extras_port.h"
 #include "game/adapter_ports/inventory_extras_port.h"
@@ -600,18 +599,6 @@ int fake_find_item_slot(void* item, int8_t* out_slot) {
     *out_slot = static_cast<int8_t>((2 << 5) | 7);
     return 1;
 }
-
-QolResult find_item_provider_for_each(qol::contracts::QolInventoryExtensionItemFn callback,
-                                      void* ctx) {
-    if (callback == nullptr) return qol::contracts::error(kQolErrInvalidArgument, "null", 4);
-    const qol::contracts::QolInventoryExtensionItemRef ref{
-        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 3,
-        g_find_item_category, 1, g_find_item_handle};
-    (void)callback(&ref, ctx);
-    return qol::contracts::ok();
-}
-
-bool find_item_provider_available() { return true; }
 
 struct FakeInventoryOptionNode {
     uint16_t index;
@@ -1269,29 +1256,25 @@ int main() {
     assert(game.item_abi.native_item_at != nullptr);
     assert(game.item_abi.native_item_for_handle != nullptr);
     assert(game.item_abi.bind_find_item_backup(&fake_find_item_backup).ok == kQolOk);
-    qol::game::inventory_extension_bind_host();
-    qol::contracts::QolInventoryExtensionProvider find_item_provider{};
-    find_item_provider.for_each_item = &find_item_provider_for_each;
-    assert(qol::game::inventory_extension_set_provider(&find_item_provider,
-                                                        &find_item_provider_available));
     g_find_item_handle = qol::game::register_item(
         &g_find_item_item, qol::contracts::kQolItemHandleOwnerProvider);
     assert(g_find_item_handle.slot != 0 && g_find_item_handle.generation != 0);
     assert(item_port_api.read.quote != nullptr);
-    qol::contracts::QolSaleQuote provider_quote{};
+    qol::contracts::QolSaleQuote quote{};
     assert(item_port_api.read.quote(g_find_item_handle, qol::contracts::kDetailSell,
-                                   &provider_quote).ok == kQolOk);
-    assert(provider_quote.struct_size == sizeof(provider_quote));
-    assert(provider_quote.unit_price == 10 && provider_quote.count == 99 &&
-           provider_quote.price == 990);
+                                   &quote).ok == kQolOk);
+    assert(quote.struct_size == sizeof(quote));
+    assert(quote.unit_price == 10 && quote.count == 99 && quote.price == 990);
     g_find_item_mode = 1;
     g_find_item_backup_calls = 0;
     assert(game.item_abi.find_item_wrapper(g_find_item_category) == &g_find_item_item);
     assert(g_find_item_backup_calls == 1);
     g_find_item_mode = 0;
-    assert(game.item_abi.find_item_wrapper(g_find_item_category) == &g_find_item_item);
+    assert(game.item_abi.find_item_wrapper(g_find_item_category) == nullptr);
+    assert(g_find_item_backup_calls == 2);
     game.item_abi.begin_original_only();
     assert(game.item_abi.find_item_wrapper(g_find_item_category) == nullptr);
+    assert(g_find_item_backup_calls == 3);
     game.item_abi.end_original_only();
     fn_inven_find_item_slot = &fake_find_item_slot;
     int32_t found_bag = -1;

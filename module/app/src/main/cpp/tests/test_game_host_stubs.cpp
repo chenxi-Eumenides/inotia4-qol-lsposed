@@ -1,6 +1,5 @@
 #include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/access/item_class.h"
 #include "game/access/item_sell_quote.h"
 #include "game/access/game_access.h"
@@ -131,25 +130,7 @@ void* game_inventory_find_item_hook(int32_t category) {
         if (original != nullptr) return original;
     }
     if (g_test_original_only_depth != 0) return nullptr;
-    const contracts::QolInventoryExtensionProvider* provider =
-        inventory_extension_provider_if_resident();
-    if (provider == nullptr || provider->for_each_item == nullptr) return nullptr;
-    struct Context {
-        int32_t category;
-        contracts::QolItemHandle item;
-    } context{category, contracts::kInvalidItemHandle};
-    const QolResult result = provider->for_each_item(
-        [](const contracts::QolInventoryExtensionItemRef* ref, void* raw) -> int32_t {
-            auto* state = static_cast<Context*>(raw);
-            if (ref == nullptr || ref->category != state->category) return 0;
-            state->item = ref->item;
-            return 1;
-        },
-        &context);
-    if (!contracts::succeeded(result) || context.item.slot == 0) return nullptr;
-    const ItemHandleResolution resolved =
-        item_handle_registry().resolve_item(context.item, contracts::kQolItemHandleOwnerAny);
-    return resolved.error == ItemHandleError::kNone ? resolved.item : nullptr;
+    return nullptr;
 }
 
 QolResult game_inventory_bind_find_item_backup(contracts::QolFindItemAbiFn backup) {

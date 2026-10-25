@@ -43,7 +43,7 @@ const char* sell_error(inventory_trade::Status status) {
         case inventory_trade::Status::kNotInWorld: return "not in game";
         case inventory_trade::Status::kTaskBagExcluded: return "task bag excluded";
         case inventory_trade::Status::kEmptySlot: return "slot empty";
-        case inventory_trade::Status::kNoNativeItem: return "extension item unavailable";
+        case inventory_trade::Status::kNoNativeItem: return "item unavailable";
         case inventory_trade::Status::kStale: return "slot empty";
         case inventory_trade::Status::kSymbolsUnresolved: return "symbol not resolved";
         case inventory_trade::Status::kNoSell: return "item cannot be sold";
@@ -61,7 +61,7 @@ const char* discard_error(inventory_trade::Status status) {
         case inventory_trade::Status::kNotInWorld: return "not in game";
         case inventory_trade::Status::kTaskBagExcluded: return "task bag excluded";
         case inventory_trade::Status::kEmptySlot: return "slot empty";
-        case inventory_trade::Status::kNoNativeItem: return "extension item unavailable";
+        case inventory_trade::Status::kNoNativeItem: return "item unavailable";
         case inventory_trade::Status::kStale: return "slot empty";
         case inventory_trade::Status::kSymbolsUnresolved: return "symbol not resolved";
         case inventory_trade::Status::kRemoveFailed: return "discard failed";
@@ -83,10 +83,6 @@ QolResult use_item(int32_t bag, int32_t slot,
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return trade_error(out, "slot empty");
-    }
-    if (item_ref.kind == InventoryItemKind::kProvider) {
-        return contracts::error(kQolErrUnsupported,
-                                "registered bag source use is unavailable on native port", 55);
     }
     return qol::game::ops::use_item(bag, slot, out);
 }

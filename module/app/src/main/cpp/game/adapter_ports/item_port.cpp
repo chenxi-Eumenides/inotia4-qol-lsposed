@@ -15,7 +15,6 @@
 #include "game/access/item_class.h"
 #include "game/access/item_handle_registry.h"
 #include "game/access/item_sell_quote.h"
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/access/shop.h"
 #include "game/access/world.h"
@@ -208,7 +207,7 @@ QolResult read_count_encoding(contracts::QolItemHandle handle,
 }
 
 QolResult read_item_ref_at(int32_t bag, int32_t slot, contracts::QolInventoryItemRef* out) {
-    // 中立 provider 契约：只校验负 bag/slot 与固定槽界；逻辑袋号认领交由 provider。
+    // Flat lookup resolves native original bags and C18 additions only.
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
@@ -236,10 +235,6 @@ QolResult read_for_each_space_slot(int32_t space_id,
 QolResult read_serialize_item(contracts::QolItemHandle item, uint8_t* out, uint32_t capacity,
                               uint32_t* out_size) {
     return serialize_item(item, out, capacity, out_size);
-}
-
-QolResult read_inventory_extension_access(contracts::QolInventoryExtensionAccess* out_access) {
-    return inventory_extension_get_access(out_access);
 }
 
 QolResult read_physical_item_at(int32_t bag, int32_t slot, contracts::QolItemHandle* out) {
@@ -445,7 +440,7 @@ const contracts::QolItemPort kItemPort{
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_item_context,
       &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
         &read_static_text, &read_static_ready, &read_inventory_item_view,
-        &read_effective_cumulate_count, &read_inventory_extension_access, &read_count_limit,
+         &read_effective_cumulate_count, nullptr, &read_count_limit,
            &read_count_encoding, &read_quote, &read_bag_count, &read_bag_info,
            &read_space_item_at, &read_for_each_space_slot, &read_serialize_item},
 };

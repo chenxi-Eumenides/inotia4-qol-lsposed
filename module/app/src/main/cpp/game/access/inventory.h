@@ -3,9 +3,8 @@
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_host.h"
 
-// 游戏层：库存只读遍历与引用适配（ARCHITECTURE.md §5）。
-// 物理袋/扩展袋的底层布局和扩展背包端口均留在 game/ 与既有宿主实现内；插件只接收
-// contracts 中的不透明库存引用。
+// 游戏层：原版与 C18 原生库存只读遍历、引用适配（ARCHITECTURE.md §5）。
+// 扩展袋数据通过 core.item 注册的 QolBagSource 访问；插件只接收 contracts 中的不透明库存引用。
 
 namespace qol::game {
 

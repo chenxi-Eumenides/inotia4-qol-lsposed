@@ -82,7 +82,6 @@
 #include "host/core_settings_config_service.h"
 #include "host/frame_source.h"
 #include "host/item_count_facade.h"
-#include "host/inventory_extension_facade.h"
 #include "host/lifecycle_participants.h"
 #include "host/module_health.h"
 #include "host/plugin_registry.h"
@@ -391,7 +390,6 @@ bool assembly_init() {
     (void)save_enter_register(&on_save_enter_ready, nullptr);
     // item_count facade 是宿主装配的常驻实现，始终可查；扩展模式由生命周期策略驱动。
     const_cast<contracts::QolGameHost&>(g_game_host).item_count = host_item_count_api();
-    host_inventory_extension_bind();
     qol::game::lifecycle_participant_bind_host(host_lifecycle_dispatch());
     // 仅在完整成功后置位：失败可重试，成功则幂等。
     if (g_assembly_done) return true;

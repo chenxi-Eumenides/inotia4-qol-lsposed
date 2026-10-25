@@ -8,7 +8,6 @@
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/access/item_class.h"
 #include "game/read/item_class.h"
@@ -192,21 +191,6 @@ bool capture_gained_item(void* item, int bag, int slot, void* raw) {
 }
 
 std::mutex g_shop_buy_mtx;
-
-// 中立扩展 provider：每次现取，不缓存跨帧指针。provider 仅在其可用（已注册且未停用）时参与
-// 路由；停用后路由等同无 provider，保留原 typed 路径。provider 内部再按自身门禁两态处理。
-const contracts::QolInventoryExtensionProvider* extension_provider() {
-    return qol::game::inventory_extension_available()
-               ? qol::game::inventory_extension_provider_if_resident()
-               : nullptr;
-}
-
-void sync_projected_slot_if_available(int bag, int slot) {
-    const auto* provider = extension_provider();
-    if (provider != nullptr && provider->sync_projected_slot != nullptr) {
-        provider->sync_projected_slot(bag, slot);
-    }
-}
 
 }  // namespace
 
@@ -420,10 +404,6 @@ QolResult use_item(int32_t bag, int32_t slot,
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return item_error(out, kQolErrNotFound, "slot empty");
     }
-    if (item_ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported,
-                          "registered bag source use must use core.item inventory action");
-    }
     if (const char* screen = ui_blocked()) {
         char message[sizeof(out->error_message)]{};
         constexpr char prefix[] = "ui occupied: ";
@@ -472,7 +452,6 @@ QolResult use_item(int32_t bag, int32_t slot,
         if (pending == nullptr) return item_error(out, kQolErrInternal, "dice result missing");
         if (fn_consume_item != nullptr) fn_consume_item(item);
         if (flag != nullptr) *flag |= 1u;
-        sync_projected_slot_if_available(bag, slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
@@ -489,7 +468,6 @@ QolResult use_item(int32_t bag, int32_t slot,
             return item_error(out, kQolErrInternal, "release sealed failed");
         }
         if (fn_consume_item != nullptr) fn_consume_item(item);
-        sync_projected_slot_if_available(bag, slot);
         out->flags |= contracts::kQolItemInventoryStateHasGained;
         GainedContext context{&before, out};
         for_each_bag_slot(&capture_gained_item, &context);
@@ -508,7 +486,6 @@ QolResult use_item(int32_t bag, int32_t slot,
             return item_error(out, kQolErrInternal, "open box failed");
         }
         if (fn_consume_item != nullptr) fn_consume_item(item);
-        sync_projected_slot_if_available(bag, slot);
         out->flags |= contracts::kQolItemInventoryStateHasGained;
         GainedContext context{&before, out};
         for_each_bag_slot(&capture_gained_item, &context);
@@ -527,7 +504,6 @@ QolResult use_item(int32_t bag, int32_t slot,
         if (fn_mercenary_make_mercenary(item) == nullptr) {
             return item_error(out, kQolErrInternal, "make mercenary failed");
         }
-        sync_projected_slot_if_available(bag, slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
@@ -539,7 +515,6 @@ QolResult use_item(int32_t bag, int32_t slot,
     const int used = fn_char_use_item_ex(leader, item, 0);
     if (used != 0 && tutorial_state() == 6) tutorial_cancel();
     if (used != 0) {
-        sync_projected_slot_if_available(bag, slot);
         frame_cache_force_refresh();
         return contracts::ok();
     }
@@ -591,8 +566,7 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     if (bag == 5 || to_bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
     const NativeBagLayout layout = native_bag_layout();
     if (bag < 0 || to_bag < 0 || bag >= layout.bag_limit || to_bag >= layout.bag_limit) {
-        return item_error(out, kQolErrUnsupported,
-                          "registered bag source movement must use core.item inventory action");
+        return item_error(out, kQolErrNotFound, "native bag not found");
     }
     if (fn_inven_move_item == nullptr) {
         return item_error(out, kQolErrUnsupported, "symbol not resolved");
@@ -600,10 +574,6 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) {
         return item_error(out, kQolErrNotFound, "slot empty");
-    }
-    if (item_ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported,
-                          "registered bag source movement must use core.item inventory action");
     }
     if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
     if (to_slot < 0 || to_slot >= 16 || to_bag >= native_bag_layout().bag_limit) {
@@ -615,8 +585,6 @@ QolResult move_item(int32_t bag, int32_t slot, int32_t count, int32_t to_bag,
     if (fn_inven_move_item(item_ref.native_item, count, to_bag, to_slot) == 0) {
         return item_error(out, kQolErrInternal, "move failed");
     }
-    sync_projected_slot_if_available(bag, slot);
-    sync_projected_slot_if_available(to_bag, to_slot);
     return contracts::ok();
 }
 
@@ -1077,10 +1045,6 @@ QolResult put_jewel(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
     if (!inventory_item_ref_at(bag, slot, &jewel_ref)) {
         return item_error(out, kQolErrNotFound, "jewel not found");
     }
-    if (jewel_ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported,
-                          "registered bag source jewel writes are unsupported by native port");
-    }
     void* jewel = jewel_ref.native_item;
     void* equipped = *reinterpret_cast<void**>(
         reinterpret_cast<uint8_t*>(character) + C_EQUIP + equip_slot * 8);
@@ -1148,11 +1112,7 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
         return item_error(out, kQolErrNotFound, "item not found");
     }
     if (ref.native_item == nullptr) {
-        return item_error(out, kQolErrNotFound, "extension item unavailable");
-    }
-    if (ref.kind == InventoryItemKind::kProvider) {
-        return item_error(out, kQolErrUnsupported,
-                          "registered bag source removal must use core.item inventory action");
+        return item_error(out, kQolErrNotFound, "native item unavailable");
     }
     if (ref.bag == 5) return item_error(out, kQolErrBlocked, "task bag excluded");
     contracts::QolItemHandle checkpoint{};
@@ -1161,7 +1121,6 @@ QolResult remove_item(int32_t category, contracts::QolItemInventoryStateWriteRes
     const int result = fn_remove_item(ref.native_item);
     if (suspended) finish_item_invalidation(checkpoint, result != 0);
     else if (result) invalidate_item(ref.native_item);
-    if (result) sync_projected_slot_if_available(ref.bag, ref.slot);
     if (!result) return item_error(out, kQolErrNotFound, "item not found");
     frame_cache_force_refresh();
     return contracts::ok();

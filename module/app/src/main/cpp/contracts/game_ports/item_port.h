@@ -12,8 +12,6 @@
 
 namespace qol::contracts {
 
-struct QolInventoryExtensionAccess;
-
 enum class QolInventoryItemKind : int32_t {
     kOriginal = 0,
     kProvider = 1,
@@ -183,7 +181,8 @@ struct QolItemPortReadApi {
     // Synchronous main-thread typed view; item pointers remain inside the adapter call path.
     QolResult (*inventory_item_view)(QolItemHandle item, QolItemInventoryView* out_view);
     QolResult (*effective_cumulate_count)(QolItemHandle item, int32_t* out_count);
-    QolResult (*inventory_extension_access)(QolInventoryExtensionAccess* out_access);
+    // Reserved ABI slot from the retired inventory extension provider accessor.
+    void* reserved_3_7;
     QolResult (*count_limit)(QolItemHandle item, uint32_t* out_limit);
     QolResult (*count_encoding)(QolItemHandle item, QolItemCountEncoding* out_encoding);
     QolItemPortQuoteFn quote;

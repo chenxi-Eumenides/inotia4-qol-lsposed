@@ -66,10 +66,6 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
         result.status = Status::kStale;
         return result;
     }
-    if (item_ref.kind == InventoryItemKind::kProvider) {
-        result.status = Status::kNoNativeItem;
-        return result;
-    }
     void* item = item_ref.native_item;
     if (fn_remove_item == nullptr) {
         result.status = Status::kSymbolsUnresolved;
@@ -84,7 +80,7 @@ Result sell_locked(int bag, int slot, const void* expected_item, const char* sou
     // UIEquip_ButtonDestroyExe(0xb6240) 仅做金额预演（x23=0x666 标记）+ 创建确认弹窗；
     // 弹窗 OK 回调 UIEquip_OKDestroyItem(0xb83d0) 才是真实结算（背包分支走 0x1261c4
     // 删物品 + 加钱，game_symbols.h 反汇编结论）。弹窗前步骤无业务副作用，API 在此
-    // 直连结算语义：金额计算 + INVEN_RemoveItem（经 Stage4 Hook，扩展物品透明路由）。
+    // 直连结算语义：金额计算 + INVEN_RemoveItem（经 Stage4 Hook 的物品处理链）。
     if (fn_item_is_no_sell(category) != 0) {
         QOL_LOG_WARN(QolDomain::kInventory,
                      "sell price reject reason=no_sell source=%s category=%d count=%d "
@@ -164,7 +160,6 @@ Status discard_locked(int bag, int slot, const void* expected_item) {
     InventoryItemRef item_ref;
     if (!inventory_item_ref_at(bag, slot, &item_ref)) return Status::kEmptySlot;
     if (item_ref.native_item == nullptr) return Status::kNoNativeItem;
-    if (item_ref.kind == InventoryItemKind::kProvider) return Status::kNoNativeItem;
     if (fn_remove_item == nullptr) return Status::kSymbolsUnresolved;
     // 处置身份复核（I-1）：与 sell 同口径；置于符号检查之后以保持原有错误优先级。
     if (expected_item != nullptr && static_cast<const void*>(item_ref.native_item) != expected_item) {

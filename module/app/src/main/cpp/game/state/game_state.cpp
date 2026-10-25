@@ -2,10 +2,8 @@
 
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
-#include "game/access/item_handle_registry.h"
 #include "game/access/ui_state.h"
 #include "game/access/world.h"
-#include "game/adapter_ports/inventory_extension_facade.h"
 #include "game/symbols/game_symbols.h"
 #include "contracts/runtime_hooks.h"
 
@@ -284,33 +282,13 @@ bool find_inventory_item_ref(int category, InventoryItemRef* out) {
         p->found = true;
         return true;
     }, &ctx);
-    if (ctx.found && out->kind == InventoryItemKind::kProvider && out->native_item == nullptr) {
-        const int bag = out->bag;
-        const int slot = out->slot;
-        return inventory_item_ref_at(bag, slot, out);
-    }
     return ctx.found;
 }
 
 bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
     if (out == nullptr || bag < 0 || slot < 0 || slot >= 16) return false;
     *out = {};
-    // 中立 provider 通道：provider 认领的袋号全部走 provider，game 层不感知具体扩展袋
-    // 编号；provider 缺失时视为不存在，物理任务袋 5 仍可只读访问。每次现取，不缓存跨帧指针。
-    const qol::contracts::QolInventoryExtensionProvider* provider =
-        qol::game::inventory_extension_provider_if_resident();
-    if (provider != nullptr && provider->owns_bag != nullptr && provider->owns_bag(bag) != 0) {
-        if (provider->item_ref_at == nullptr) return false;
-        qol::contracts::QolInventoryExtensionItemRef ref{};
-        if (!qol::contracts::succeeded(provider->item_ref_at(bag, slot, &ref))) return false;
-        const auto resolved = qol::game::resolve_item(
-            ref.item, qol::contracts::kQolItemHandleOwnerProvider);
-        if (resolved.error != qol::game::ItemHandleError::kNone) return false;
-        *out = {InventoryItemKind::kProvider, ref.bag, ref.slot, ref.category, ref.count,
-                resolved.item};
-        return true;
-    }
-    // C18 改版客户端把袋槽表搬到独立 bss 数组（容量 19）；布局按运行时探测。
+    // Host only resolves native spaces: original bags 0..5 and C18 additions 6..17.
     const qol::game::NativeBagLayout layout = qol::game::native_bag_layout();
     if (bag >= layout.bag_limit || layout.slots == nullptr || fn_get_bit == nullptr) {
         return false;
@@ -326,40 +304,16 @@ bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
 
 void for_each_inventory_item(InventoryItemFn fn, void* ctx) {
     if (fn == nullptr) return;
-    struct Ctx { InventoryItemFn fn; void* ctx; bool stopped; } state{fn, ctx, false};
-    if (fn_get_bit != nullptr) {
-        for_each_bag_slot([](void* item, int bag, int slot, void* c) -> bool {
-            Ctx* p = static_cast<Ctx*>(c);
+    if (fn_get_bit == nullptr) return;
+    const qol::game::NativeBagLayout layout = qol::game::native_bag_layout();
+    if (layout.slots == nullptr) return;
+    for (int bag = 0; bag < layout.bag_limit; ++bag) {
+        for (int slot = 0; slot < 16; ++slot) {
             InventoryItemRef ref;
-            const uint16_t flags = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(item) + I_TYPE);
-            ref = {InventoryItemKind::kOriginal, bag, slot, fn_get_bit(flags, 15, 6),
-                   fn_get_cumulate_count != nullptr ? fn_get_cumulate_count(item) : 1, item};
-            p->stopped = p->fn(ref, p->ctx);
-            return p->stopped;
-        }, &state);
-    }
-    if (state.stopped) return;
-    // 中立 provider 通道：provider 缺失时（未注册/不可用）不并扩展物品；provider 内部
-    // 仍按门禁两态决定是否输出。每次现取，不缓存跨帧指针。
-    const qol::contracts::QolInventoryExtensionProvider* provider =
-        qol::game::inventory_extension_provider_if_resident();
-    if (provider == nullptr || provider->for_each_item == nullptr) return;
-    provider->for_each_item(
-        [](const qol::contracts::QolInventoryExtensionItemRef* ref, void* c) -> int32_t {
-        Ctx* p = static_cast<Ctx*>(c);
-        void* native_item = nullptr;
-        if (ref->item.slot != 0) {
-            const auto resolved = qol::game::resolve_item(
-                ref->item, qol::contracts::kQolItemHandleOwnerProvider);
-            if (resolved.error == qol::game::ItemHandleError::kNone) {
-                native_item = resolved.item;
-            }
+            if (!inventory_item_ref_at(bag, slot, &ref)) continue;
+            if (fn(ref, ctx)) return;
         }
-        const InventoryItemRef item{InventoryItemKind::kProvider, ref->bag, ref->slot, ref->category,
-                                    ref->count, native_item};
-        p->stopped = p->fn(item, p->ctx);
-        return p->stopped ? 1 : 0;
-    }, &state);
+    }
 }
 
 void for_each_bag_slot(BagSlotFn fn, void* ctx) {

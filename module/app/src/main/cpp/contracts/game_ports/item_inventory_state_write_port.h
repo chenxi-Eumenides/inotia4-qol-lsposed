@@ -6,7 +6,6 @@
 #include "../result.h"
 #include "../version.h"
 #include "../game_host.h"
-#include "../inventory_extension.h"
 #include "../item_handle.h"
 #include "ports.h"
 #include "item_port.h"

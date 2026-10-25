@@ -5,7 +5,6 @@
 #include "contracts/inventory_refresh.h"
 #include "contracts/move_merge.h"
 #include "contracts/game_ports/move_merge_port.h"
-#include "contracts/inventory_extension.h"
 #include "contracts/character_state.h"
 #include "contracts/item_state.h"
 #include "contracts/world_facts.h"
@@ -36,9 +35,9 @@ static_assert(offsetof(qol::contracts::ItemFactsApi, count_limit) ==
                       sizeof(qol::contracts::ItemFactsEffectiveCountFn),
               "ItemFactsApi count_limit must be tail-appended");
 static_assert(offsetof(qol::contracts::QolItemPortReadApi, count_limit) ==
-                  offsetof(qol::contracts::QolItemPortReadApi, inventory_extension_access) +
-                      sizeof(decltype(qol::contracts::QolItemPortReadApi::inventory_extension_access)),
-              "Item Port count_limit must be tail-appended");
+                  offsetof(qol::contracts::QolItemPortReadApi, reserved_3_7) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::reserved_3_7)),
+               "Item Port retired slot must preserve the count_limit offset");
 static_assert(offsetof(qol::contracts::ItemFactsApi, count_encoding) ==
                   offsetof(qol::contracts::ItemFactsApi, count_limit) +
                       sizeof(qol::contracts::ItemFactsCountLimitFn),
@@ -130,9 +129,6 @@ static_assert(qol::contracts::kAttributeQualityVersionMajor == 2 &&
               "attribute.quality contract must be v2.0");
 static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 4,
               "Game Host contract must be v2.4");
-static_assert(sizeof(qol::contracts::QolInventoryExtensionItemRef) ==
-                  sizeof(int32_t) * 5 + sizeof(qol::contracts::QolItemHandle),
-              "inventory extension Ref must not carry an object pointer");
 static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
               "Host SDK handle table must not expose resolve_item");
 static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==

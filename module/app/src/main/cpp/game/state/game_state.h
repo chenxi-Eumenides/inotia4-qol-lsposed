@@ -60,8 +60,6 @@ void char_next_exp_cache_start();
 
 enum class InventoryItemKind : uint8_t {
     kOriginal,
-    // 中立扩展物品来源：由物品域扩展 provider 认领，game 层不感知具体 provider。
-    kProvider,
 };
 
 struct InventoryItemRef {

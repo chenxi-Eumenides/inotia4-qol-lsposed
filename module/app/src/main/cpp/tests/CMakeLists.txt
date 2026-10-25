@@ -917,24 +917,23 @@ set_target_properties(extension_bag_equip_tab_layout_tests PROPERTIES CXX_STANDA
 add_test(NAME extension_bag_equip_tab_layout_tests COMMAND extension_bag_equip_tab_layout_tests)
 
 
-# ITM-16: exercise inventory_trade::sell with neutral provider item removal and the original route.
-add_executable(inventory_trade_provider_sell_tests
-    test_inventory_trade_provider_sell.cpp
+# ITM-16: exercise inventory_trade::sell with native item removal and the original route.
+add_executable(inventory_trade_sell_tests
+    test_inventory_trade_sell.cpp
     ${CPP_DIR}/core/native/inventory_trade.cpp
-    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
     ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
 )
-target_include_directories(inventory_trade_provider_sell_tests PRIVATE
+target_include_directories(inventory_trade_sell_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
     ${CPP_DIR}
     ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
-target_compile_features(inventory_trade_provider_sell_tests PRIVATE cxx_std_17)
-set_target_properties(inventory_trade_provider_sell_tests PROPERTIES
+target_compile_features(inventory_trade_sell_tests PRIVATE cxx_std_17)
+set_target_properties(inventory_trade_sell_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME inventory_trade_provider_sell_tests COMMAND inventory_trade_provider_sell_tests)
+add_test(NAME inventory_trade_sell_tests COMMAND inventory_trade_sell_tests)
 
 # P3c：EB save.slot_data 消费面（注册/load/capture/complete/准入/排空 + codec 等价）。
 # QOL_LOG_* 宏的 domain 参数被 logging.h 丢弃（extension_bag_log 不解释域），不需要
@@ -1442,7 +1441,6 @@ add_executable(host_adapter_tests
     ${CPP_DIR}/game/adapter_ports/item_extras_port.cpp
     ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
     ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
     ${CPP_DIR}/game/adapter_ports/save_port.cpp
     ${CPP_DIR}/game/adapter_ports/save_call_port.cpp
     ${CPP_DIR}/game/adapter_ports/craft_port.cpp
@@ -1732,18 +1730,6 @@ target_compile_definitions(help_page_tests PRIVATE QOL_DEBUG_COMPONENTS=1)
 target_compile_features(help_page_tests PRIVATE cxx_std_17)
 add_test(NAME help_page_tests COMMAND help_page_tests)
 
-# P1-A：item_count facade provider 槽、未驻留错误与空参数契约。
-# ITM-13：中立物品域扩展 provider facade（set-once / resident-available 分离 / 缺成员拒绝）。
-add_executable(inventory_extension_facade_tests
-    test_inventory_extension_facade.cpp
-    ${CPP_DIR}/host/inventory_extension_facade.cpp
-    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
-)
-target_include_directories(inventory_extension_facade_tests PRIVATE ${CPP_DIR})
-target_compile_features(inventory_extension_facade_tests PRIVATE cxx_std_17)
-set_target_properties(inventory_extension_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME inventory_extension_facade_tests COMMAND inventory_extension_facade_tests)
-
 add_executable(item_count_facade_tests
     test_item_count_facade.cpp
     ${CPP_DIR}/host/item_count_facade.cpp
@@ -1926,7 +1912,6 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/host/http_dispatch.cpp
     # T2h-B0：legacy 读实现入 host golden（fake 环境）
     ${CPP_DIR}/game/access/inventory_legacy_read.cpp
-    ${CPP_DIR}/game/adapter_ports/inventory_extension_facade.cpp
     ${CPP_DIR}/game/ops/game_ops_common.cpp
     # T2h-B3#2：debug raw 整函数搬迁后的新落点
     ${CPP_DIR}/game/read/item_class.cpp

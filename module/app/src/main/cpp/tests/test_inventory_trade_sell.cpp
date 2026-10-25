@@ -15,7 +15,6 @@
 namespace {
 
 alignas(8) uint8_t g_item[64]{};
-InventoryItemKind g_kind = InventoryItemKind::kOriginal;
 int g_count = 1;
 int64_t g_money = 0;
 int g_add_calls = 0;
@@ -48,9 +47,8 @@ qol::contracts::ItemFactsApi kItemFacts{
     sizeof(qol::contracts::ItemFactsApi), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &item_facts_quote};
 
-void reset(InventoryItemKind kind) {
+void reset() {
     std::memset(g_item, 0, sizeof(g_item));
-    g_kind = kind;
     g_count = 1;
     g_money = 0;
     g_add_calls = 0;
@@ -79,7 +77,7 @@ bool game_in_world() { return true; }
 
 bool inventory_item_ref_at(int bag, int slot, InventoryItemRef* out) {
     if (out == nullptr) return false;
-    *out = {g_kind, bag, slot, 77, g_count, g_item};
+    *out = {InventoryItemKind::kOriginal, bag, slot, 77, g_count, g_item};
     return true;
 }
 
@@ -136,19 +134,8 @@ int generic_remove(void*) {
     return 1;
 }
 
-void test_registered_source_sell_fails_closed() {
-    reset(InventoryItemKind::kProvider);
-    const auto result = inventory_trade::sell(6, 2, g_item, "api");
-    assert(result.status == inventory_trade::Status::kNoNativeItem);
-    assert(g_add_calls == 0 && g_refund_calls == 0 && g_money == 0);
-    assert(g_generic_remove_calls == 0 && g_quote_calls == 0);
-    const auto discarded = inventory_trade::discard(6, 2, g_item);
-    assert(discarded == inventory_trade::Status::kNoNativeItem);
-    assert(g_generic_remove_calls == 0);
-}
-
 void test_original_bag_keeps_generic_remove_path() {
-    reset(InventoryItemKind::kOriginal);
+    reset();
     g_count = 3;
     const auto result = inventory_trade::sell(0, 6, g_item, "api");
     assert(result.status == inventory_trade::Status::kOk && result.price == 29);
@@ -159,7 +146,7 @@ void test_original_bag_keeps_generic_remove_path() {
 }
 
 void test_task_bag_exclusion() {
-    reset(InventoryItemKind::kOriginal);
+    reset();
     const auto excluded = inventory_trade::sell(5, 2, g_item, "api");
     assert(excluded.status == inventory_trade::Status::kTaskBagExcluded);
     assert(g_add_calls == 0 && g_refund_calls == 0 && g_generic_remove_calls == 0);
@@ -180,7 +167,6 @@ int main() {
         {qol::contracts::kItemFactsVersionMajor, qol::contracts::kItemFactsVersionMinor},
         &kItemFacts}));
 
-    test_registered_source_sell_fails_closed();
     test_original_bag_keeps_generic_remove_path();
     test_task_bag_exclusion();
     return 0;
