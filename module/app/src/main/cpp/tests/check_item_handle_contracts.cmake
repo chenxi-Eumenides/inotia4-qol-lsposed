@@ -2,7 +2,6 @@ set(contract_files
     "${CPP_DIR}/contracts/item_facts.h"
     "${CPP_DIR}/contracts/game_ports/item_port.h"
     "${CPP_DIR}/contracts/inventory_extension.h"
-    "${CPP_DIR}/contracts/extension_bag.h"
     "${CPP_DIR}/contracts/attribute_quality.h"
     "${CPP_DIR}/contracts/inventory_action.h"
 )
