@@ -19,31 +19,35 @@ class InventoryController {
 
     @GetMapping("/api/item/inventory")
     fun composite(
-        @RequestParam(value = "space", required = false) space: Int?,
+        @RequestParam(value = "space", required = false) space: String?,
         @RequestParam(value = "cursor", required = false) cursor: String?,
-        @RequestParam(value = "limit", required = false) limit: Int?,
-    ): String = ControllerGuard.guard { ApiServices.info.inventory(space, cursor, limit) }
+        @RequestParam(value = "limit", required = false) limit: String?,
+    ): String = ControllerGuard.guard {
+        ApiServices.info.inventory(space?.toIntOrNull(), cursor, limit?.toIntOrNull())
+    }
 
     @GetMapping("/api/item/inventory/money")
     fun money(): String = ControllerGuard.guard(ApiServices.info::inventoryMoney)
 
     @GetMapping("/api/item/inventory/items")
     fun items(
-        @RequestParam(value = "space", required = false) space: Int?,
+        @RequestParam(value = "space", required = false) space: String?,
         @RequestParam(value = "cursor", required = false) cursor: String?,
-        @RequestParam(value = "limit", required = false) limit: Int?,
-    ): String = ControllerGuard.guard { ApiServices.info.inventoryItems(space, cursor, limit) }
+        @RequestParam(value = "limit", required = false) limit: String?,
+    ): String = ControllerGuard.guard {
+        ApiServices.info.inventoryItems(space?.toIntOrNull(), cursor, limit?.toIntOrNull())
+    }
 
     @GetMapping("/api/item/inventory/bag/{bag}/info")
     fun bagInfo(
         @PathVariable("bag") bag: Int,
-        @RequestParam(value = "space", required = false) space: Int?,
-    ): String = ControllerGuard.guard { ApiServices.info.bagInfo(bag, space) }
+        @RequestParam(value = "space", required = false) space: String?,
+    ): String = ControllerGuard.guard { ApiServices.info.bagInfo(bag, space?.toIntOrNull()) }
 
     @GetMapping("/api/item/inventory/bag/{bag}/{slot}")
     fun bagSlot(
         @PathVariable("bag") bag: Int,
         @PathVariable("slot") slot: Int,
-        @RequestParam(value = "space", required = false) space: Int?,
-    ): String = ControllerGuard.guard { ApiServices.info.bagSlot(bag, slot, space) }
+        @RequestParam(value = "space", required = false) space: String?,
+    ): String = ControllerGuard.guard { ApiServices.info.bagSlot(bag, slot, space?.toIntOrNull()) }
 }

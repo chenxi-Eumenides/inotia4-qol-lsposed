@@ -138,7 +138,7 @@ QolResult import_item(const BagTransfer& transfer, int32_t target_space,
         constexpr char kMessage[] = "item loading unavailable";
         return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
-    if (g_item_state_write->place_item == nullptr) {
+    if (g_item_state_write->move_handle == nullptr) {
         constexpr char kMessage[] = "item placement unavailable";
         return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
@@ -155,9 +155,18 @@ QolResult import_item(const BagTransfer& transfer, int32_t target_space,
     if (!contracts::succeeded(result)) return result;
 
     contracts::QolItemInventoryStateWriteResult write_result{};
-    result = g_item_state_write->place_item(&ref, preferred_slot, item, &write_result);
-    // The host frees the loaded object when placement fails.
-    if (!contracts::succeeded(result)) return result;
+    // move_handle routes through the game's move primitive: an empty target receives the
+    // stack, an occupied same-category target merges, and a full/conflicting target fails.
+    result = g_item_state_write->move_handle(item, transfer.count, &ref, preferred_slot,
+                                             &write_result);
+    if (!contracts::succeeded(result)) {
+        // move_handle keeps ownership on failure; drop the detached object to avoid a leak.
+        if (g_item_state_write->remove_item != nullptr) {
+            contracts::QolItemInventoryStateWriteResult discarded{};
+            (void)g_item_state_write->remove_item(item, transfer.count, &discarded);
+        }
+        return result;
+    }
 
     int32_t actual_slot = preferred_slot;
     if (actual_slot < 0) {
