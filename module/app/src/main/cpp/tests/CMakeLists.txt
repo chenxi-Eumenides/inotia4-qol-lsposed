@@ -322,13 +322,14 @@ add_test(NAME custom_recipe_handle_chain_tests COMMAND custom_recipe_handle_chai
 add_executable(custom_recipe_table_readiness_tests
     test_custom_recipe_table_readiness.cpp
     ${CPP_DIR}/plugins/custom_recipe/table.cpp
+    ${CPP_DIR}/plugins/custom_recipe/table_runtime.cpp
     ${CPP_DIR}/plugins/custom_recipe/catalog.cpp
     ${CPP_DIR}/plugins/custom_recipe/rules.cpp
+    ${CPP_DIR}/game/adapter_ports/recipe_table_port.cpp
 )
 target_include_directories(custom_recipe_table_readiness_tests PRIVATE ${CPP_DIR})
-# 该 target 以 __ANDROID__ 编译 production table.cpp 的 Android 入口分支：测试自带 g_base 与
-# 槽位 VMA 覆盖的可控内存，直接驱动 custom_recipe_table_acquire()/deactivate()（真实 bridge 证据）。
-target_compile_definitions(custom_recipe_table_readiness_tests PRIVATE __ANDROID__)
+# 生产入口与 game 端口一并链接：测试用 fake .bss 作 g_base，经真实端口解析槽位后驱动
+# custom_recipe_table_acquire()/deactivate()（不复制 VMA 常量）。
 target_compile_features(custom_recipe_table_readiness_tests PRIVATE cxx_std_17)
 set_target_properties(custom_recipe_table_readiness_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)

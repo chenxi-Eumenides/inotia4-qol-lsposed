@@ -11,6 +11,8 @@
 //   · 成功注入 / 合法重新激活 → OK；
 //   · deactivate 保留模块缓冲、只收记录数、还原原版段组位，且不写回陈旧原表指针。
 
+#include "contracts/game_ports/recipe_table_port.h"
+#include "game/adapter_ports/recipe_table_port.h"
 #include "plugins/custom_recipe/catalog.h"
 #include "plugins/custom_recipe/rules.h"
 #include "plugins/custom_recipe/table.h"
@@ -22,10 +24,8 @@
 #include <cstring>
 #include <initializer_list>
 
-#ifdef __ANDROID__
-// 生产 Android 入口（table.cpp 的 __ANDROID__ 分支）需要该全局；测试从 .bss 槽位 VMA 造可控内存。
+// 生产入口经 game 端口解析槽位；测试用该全局把 fake .bss 当作模块基址。
 uintptr_t g_base = 0;
-#endif
 
 namespace cr = custom_recipe;
 
@@ -600,25 +600,35 @@ void test_busy_lifecycle_and_reentry() {
     }
 }
 
-#ifdef __ANDROID__
 // ---------------------------------------------------------------------------
-// 真实 Android 入口（table.cpp 的 __ANDROID__ 分支）：按 .bss 槽位 VMA 造可控内存，
+// 真实生产入口：game 端口解析槽位 → table_runtime 装配 TableAccess → 便携核心。
 // 直接调用 production custom_recipe_table_acquire()/deactivate() 与 production
 // custom_recipe::set_context()（测试**不**定义自己的 set_context 替身）。
-// 槽位 VMA 与 table.cpp 的 slot 常量一致（独立声明，用于构造内存，不复制算法）。
 // ---------------------------------------------------------------------------
-constexpr uintptr_t kMixtureDataVma = 0x3019A0;
-constexpr uintptr_t kMixtureSizeVma = 0x3019A8;
-constexpr uintptr_t kRecipeDataVma = 0x3019B0;
-constexpr uintptr_t kRecipeSizeVma = 0x3019B8;
-constexpr uintptr_t kRecipeCountVma = 0x3019BA;
 constexpr size_t kFakeBssSize = 0x3019C0;  // 覆盖到 count 字段之后（约 3.15MB）
 
 uint8_t g_fake_bss[kFakeBssSize];
 
+// 槽位地址不再由测试复制 VMA：直接取 game 端口的解析结果（g_base + 权威符号常量）。
+uintptr_t g_recipe_data_addr = 0;
+uintptr_t g_mixture_data_addr = 0;
+uintptr_t g_recipe_size_addr = 0;
+uintptr_t g_mixture_size_addr = 0;
+uintptr_t g_recipe_count_addr = 0;
+
+void refresh_slot_addrs() {
+    qol::contracts::QolRecipeTableSlots slots{};
+    qol::game::recipe_table_port().resolve(&slots);
+    g_recipe_data_addr = reinterpret_cast<uintptr_t>(slots.recipe_ptr_slot);
+    g_mixture_data_addr = reinterpret_cast<uintptr_t>(slots.mixture_ptr_slot);
+    g_recipe_size_addr = reinterpret_cast<uintptr_t>(slots.recipe_size_slot);
+    g_mixture_size_addr = reinterpret_cast<uintptr_t>(slots.mixture_size_slot);
+    g_recipe_count_addr = reinterpret_cast<uintptr_t>(slots.recipe_count_slot);
+}
+
 template <typename T>
-T* bss_at(uintptr_t vma) {
-    return reinterpret_cast<T*>(g_base + vma);
+T* at(uintptr_t addr) {
+    return reinterpret_cast<T*>(addr);
 }
 
 // 记录型 SDK 日志桩：核对 tag（source）、message 内容与回调次数（去重语义）。
@@ -650,13 +660,14 @@ qol::contracts::QolHostSdk g_fake_sdk{};
 
 bool log_contains(const char* needle) { return std::strstr(g_log.copy, needle) != nullptr; }
 
-void test_android_bridge() {
+void test_table_entry_bridge() {
     // production set_context 绑定日志面（测试自定义的 g_fake_sdk，不是 set_context 替身）。
     g_fake_sdk = qol::contracts::QolHostSdk{};
     g_fake_sdk.abi = {sizeof(g_fake_sdk), qol::contracts::kHostSdkMajor,
                       qol::contracts::kHostSdkMinor};
     g_fake_sdk.log.write = &fake_log_write;
     cr::set_context(nullptr, &g_fake_sdk);
+    cr::table_bind_port(&qol::game::recipe_table_port());
 
     // g_base==0 → NotReady（不得读取槽位，也不产生日志）。
     g_base = 0;
@@ -667,6 +678,7 @@ void test_android_bridge() {
     // base 有效但槽位全空 → NotReady，并经 production 日志面记录一条（tag/message/次数）。
     std::memset(g_fake_bss, 0, sizeof(g_fake_bss));
     g_base = reinterpret_cast<uintptr_t>(g_fake_bss);
+    refresh_slot_addrs();
     const QolResult not_ready = cr::custom_recipe_table_acquire();
     assert(not_ready.code == kQolErrNotReady);
     const char* const not_ready_message = not_ready.message;  // 静态生命周期：后续仍须可读
@@ -686,11 +698,11 @@ void test_android_bridge() {
     // 真实小表 → OK 且完成注入；**关键回归：不是 Busy**（修前桥自置 busy 被 core 拒绝）。
     ForgedTable forged{};
     build_forged(&forged, 3, 3);
-    *bss_at<void*>(kRecipeDataVma) = forged.recipe;
-    *bss_at<void*>(kMixtureDataVma) = forged.mixture;
-    *bss_at<uint8_t>(kRecipeSizeVma) = kRecordSize;
-    *bss_at<uint8_t>(kMixtureSizeVma) = kMixtureSize;
-    *bss_at<uint16_t>(kRecipeCountVma) = forged.record_count;
+    *at<void*>(g_recipe_data_addr) = forged.recipe;
+    *at<void*>(g_mixture_data_addr) = forged.mixture;
+    *at<uint8_t>(g_recipe_size_addr) = kRecordSize;
+    *at<uint8_t>(g_mixture_size_addr) = kMixtureSize;
+    *at<uint16_t>(g_recipe_count_addr) = forged.record_count;
     const QolResult acquire = cr::custom_recipe_table_acquire();
     assert(acquire.ok == kQolOk);
     assert(acquire.code != kQolErrBusy);
@@ -698,42 +710,42 @@ void test_android_bridge() {
     assert(g_log.level == 1);
     assert(log_contains("injected"));
     assert(log_contains("records="));
-    void* const module_recipe = *bss_at<void*>(kRecipeDataVma);
+    void* const module_recipe = *at<void*>(g_recipe_data_addr);
     assert(module_recipe != nullptr && module_recipe != forged.recipe);
-    assert(*bss_at<void*>(kMixtureDataVma) != nullptr);
-    assert(*bss_at<uint16_t>(kRecipeCountVma) == forged.record_count + 2);
+    assert(*at<void*>(g_mixture_data_addr) != nullptr);
+    assert(*at<uint16_t>(g_recipe_count_addr) == forged.record_count + 2);
     assert(cr::catalog_ready());
     assert(cr::custom_recipe_table_ensure());
 
     // 合法重新激活：记录数被改回后再次 acquire → 归位且指针不变（不重新分配）。
-    *bss_at<uint16_t>(kRecipeCountVma) = forged.record_count;
+    *at<uint16_t>(g_recipe_count_addr) = forged.record_count;
     assert(cr::custom_recipe_table_acquire().ok == kQolOk);
-    assert(*bss_at<uint16_t>(kRecipeCountVma) == forged.record_count + 2);
-    assert(*bss_at<void*>(kRecipeDataVma) == module_recipe);
+    assert(*at<uint16_t>(g_recipe_count_addr) == forged.record_count + 2);
+    assert(*at<void*>(g_recipe_data_addr) == module_recipe);
 
     // 非法 probe 不得经「已有 buffer」捷径判 OK：尺寸越界 → 永久 Unsupported，
     // 且不得把 metadata 错误记成「未就绪」（不产生新的日志回调）。
     const int log_calls_before_metadata_error = g_log.calls;
-    *bss_at<uint8_t>(kRecipeSizeVma) = cr::kMaxRecipeRecordSize + 1;
+    *at<uint8_t>(g_recipe_size_addr) = cr::kMaxRecipeRecordSize + 1;
     assert(cr::custom_recipe_table_acquire().code == kQolErrUnsupported);
-    assert(*bss_at<void*>(kRecipeDataVma) == module_recipe);  // 非法分支不改动状态
+    assert(*at<void*>(g_recipe_data_addr) == module_recipe);  // 非法分支不改动状态
     assert(g_log.calls == log_calls_before_metadata_error);
-    *bss_at<uint8_t>(kRecipeSizeVma) = kRecordSize;
+    *at<uint8_t>(g_recipe_size_addr) = kRecordSize;
 
     // NotReady 不改动模块状态；恢复后仍走合法重新激活。
-    *bss_at<uint16_t>(kRecipeCountVma) = 0;
+    *at<uint16_t>(g_recipe_count_addr) = 0;
     assert(cr::custom_recipe_table_acquire().code == kQolErrNotReady);
-    *bss_at<uint16_t>(kRecipeCountVma) = forged.record_count;
+    *at<uint16_t>(g_recipe_count_addr) = forged.record_count;
     assert(cr::custom_recipe_table_acquire().ok == kQolOk);
-    assert(*bss_at<void*>(kRecipeDataVma) == module_recipe);
+    assert(*at<void*>(g_recipe_data_addr) == module_recipe);
 
     // deactivate：收回记录数、保留模块缓冲；再次 acquire 重新激活且指针不变。
     cr::custom_recipe_table_deactivate();
-    assert(*bss_at<uint16_t>(kRecipeCountVma) == forged.record_count);
-    assert(*bss_at<void*>(kRecipeDataVma) == module_recipe);
+    assert(*at<uint16_t>(g_recipe_count_addr) == forged.record_count);
+    assert(*at<void*>(g_recipe_data_addr) == module_recipe);
     assert(cr::custom_recipe_table_acquire().ok == kQolOk);
-    assert(*bss_at<uint16_t>(kRecipeCountVma) == forged.record_count + 2);
-    assert(*bss_at<void*>(kRecipeDataVma) == module_recipe);
+    assert(*at<uint16_t>(g_recipe_count_addr) == forged.record_count + 2);
+    assert(*at<void*>(g_recipe_data_addr) == module_recipe);
 
     // 连续调用仍为 OK（busy 已在所有返回路径复位）。
     assert(cr::custom_recipe_table_acquire().ok == kQolOk);
@@ -745,15 +757,15 @@ void test_android_bridge() {
     // 解除绑定（set_context(nullptr,nullptr)）后，未就绪路径日志静默。
     cr::set_context(nullptr, nullptr);
     std::memset(g_fake_bss, 0, sizeof(g_fake_bss));  // 回到未就绪（尺寸/计数变化以绕过去重）
-    *bss_at<void*>(kRecipeDataVma) = forged.recipe;
-    *bss_at<void*>(kMixtureDataVma) = forged.mixture;
+    *at<void*>(g_recipe_data_addr) = forged.recipe;
+    *at<void*>(g_mixture_data_addr) = forged.mixture;
     const int calls_after_unbind = g_log.calls;
     assert(cr::custom_recipe_table_acquire().code == kQolErrNotReady);
     assert(g_log.calls == calls_after_unbind);
 
     g_base = 0;  // 复位，避免影响其它进程内用例
+    cr::table_bind_port(nullptr);
 }
-#endif
 
 }  // namespace
 
@@ -762,11 +774,7 @@ int main() {
     test_acquire_core();
     test_busy_lifecycle_and_reentry();
     test_deactivate_core();
-#ifdef __ANDROID__
-    test_android_bridge();
-    std::printf("custom_recipe_table_readiness: classify/acquire/deactivate core + android bridge verified\n");
-#else
-    std::printf("custom_recipe_table_readiness: classify/acquire/deactivate core verified\n");
-#endif
+    test_table_entry_bridge();
+    std::printf("custom_recipe_table_readiness: classify/acquire/deactivate core + entry bridge verified\n");
     return 0;
 }

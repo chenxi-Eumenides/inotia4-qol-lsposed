@@ -1117,6 +1117,9 @@ namespace custom_recipe {
 
 void set_context(const qol::contracts::QolGameHost*, const qol::contracts::QolHostSdk*) {}
 
+// 宿主端口绑定在 fixture 中不改变替身行为：表注入结果由下方 custom_recipe_table_* 直接控制。
+void table_bind_port(const qol::contracts::QolRecipeTablePort*) {}
+
 QolResult custom_recipe_table_acquire() {
     ++g_table_ensure_calls;
     const int32_t code = g_table_acquire_ok != 0
@@ -1173,9 +1176,10 @@ int main(int argc, char** argv) {
     assert(custom_recipe.requires_count == 4);
     assert(custom_recipe.optional_count == 1);
     assert(custom_recipe.jni_count == 0);
-    assert(custom_recipe.port_count == 2);
+    assert(custom_recipe.port_count == 3);
     assert(custom_recipe.ports[0].id == QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE);
     assert(custom_recipe.ports[1].id == QolPortId::QOL_PORT_CRAFT_UI_WRITE);
+    assert(custom_recipe.ports[2].id == QolPortId::QOL_PORT_RECIPE_TABLE);
     assert(custom_recipe.feature_count == 1);
     assert(std::strcmp(custom_recipe.features[0].id, "custom_recipe.recipes") == 0);
     assert(custom_recipe.features[0].default_enabled == 0);

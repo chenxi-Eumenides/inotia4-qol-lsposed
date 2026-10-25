@@ -148,7 +148,7 @@ void clear_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint
 }  // namespace custom_recipe
 
 // ---------------------------------------------------------------------------
-// acquire / deactivate 便携核心（Android 入口与 host 测试共用同一实现）
+// acquire / deactivate 便携核心（生产入口与 host 测试共用同一实现）
 // ---------------------------------------------------------------------------
 namespace custom_recipe {
 
@@ -409,85 +409,3 @@ TableAcquireStatus table_deactivate_core(const TableAccess& access, TableState* 
 }
 
 }  // namespace custom_recipe
-
-// ---------------------------------------------------------------------------
-// Android 专属入口：把真实 .bss 槽位装配成 TableAccess 后调用便携核心。
-// host 单测不编译本段（仅使用上面的核心与纯构造器），故不产生 game_access 链接依赖。
-// ---------------------------------------------------------------------------
-#ifdef __ANDROID__
-#include <cstdlib>
-
-extern uintptr_t g_base;
-
-namespace custom_recipe {
-
-namespace {
-
-constexpr uintptr_t kRecipeDataSlot = 3152304;
-constexpr uintptr_t kRecipeSizeSlot = 3152312;
-constexpr uintptr_t kRecipeCountSlot = 3152314;
-constexpr uintptr_t kMixtureDataSlot = 3152288;
-constexpr uintptr_t kMixtureSizeSlot = 3152296;
-
-const qol::contracts::QolGameHost* g_game = nullptr;
-const qol::contracts::QolHostSdk* g_sdk = nullptr;
-
-// 模块侧状态与日志去重（本 TU 单一实例；核心按状态机处理重入与快照）。
-TableState g_state;
-TableLogDedupe g_dedupe;
-
-void table_log_line(int32_t level, const char* message) {
-    if (g_sdk == nullptr || g_sdk->log.write == nullptr || message == nullptr) return;
-    const size_t length = std::strlen(message);
-    if (length == 0) return;
-    const uint32_t size = length >= qol::contracts::kMessageCap
-                              ? qol::contracts::kMessageCap
-                              : static_cast<uint32_t>(length);
-    (void)g_sdk->log.write(level, 15, "plugins/custom_recipe/table", message, size);
-}
-
-// 读 .bss 全局。
-inline uintptr_t bss(uintptr_t vma) { return ::g_base + vma; }
-
-TableAccess android_table_access() {
-    TableAccess access{};
-    access.base = ::g_base;
-    access.recipe_ptr_slot = reinterpret_cast<void**>(bss(kRecipeDataSlot));
-    access.mixture_ptr_slot = reinterpret_cast<void**>(bss(kMixtureDataSlot));
-    access.recipe_size_slot = reinterpret_cast<uint8_t*>(bss(kRecipeSizeSlot));
-    access.mixture_size_slot = reinterpret_cast<uint8_t*>(bss(kMixtureSizeSlot));
-    access.recipe_count_slot = reinterpret_cast<uint16_t*>(bss(kRecipeCountSlot));
-    return access;
-}
-
-}  // namespace
-
-// 表日志绑定：宿主在 install/激活期经 PluginContext 注入（feature.cpp set_context 转发）。
-// 表状态日志经 table_log_line 使用此绑定；未绑定时静默。
-void set_context(const qol::contracts::QolGameHost* game, const qol::contracts::QolHostSdk* sdk) {
-    g_game = game;
-    g_sdk = sdk;
-}
-
-QolResult custom_recipe_table_acquire() {
-    // g_base 未就绪时槽位地址本身无意义，必须先判（不得带着垃圾指针读取）。
-    if (::g_base == 0) return table_status_result(TableAcquireStatus::kNotReady);
-    size_t catalog_len = 0;
-    const Def* catalog_ptr = catalog(&catalog_len);
-    const TableAccess access = android_table_access();
-    // busy 检测/置位/复位全部在 core 内（RAII），本入口不重复管理，避免自我拒绝。
-    return table_status_result(table_acquire_core(access, &g_state, catalog_ptr, catalog_len,
-                                                  &std::malloc, &std::free, &table_log_line,
-                                                  &g_dedupe));
-}
-
-bool custom_recipe_table_ensure() { return custom_recipe_table_acquire().ok == kQolOk; }
-
-void custom_recipe_table_deactivate() {
-    if (::g_base == 0) return;
-    const TableAccess access = android_table_access();
-    (void)table_deactivate_core(access, &g_state);
-}
-
-}  // namespace custom_recipe
-#endif  // __ANDROID__

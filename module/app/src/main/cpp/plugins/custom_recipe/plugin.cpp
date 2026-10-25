@@ -8,6 +8,7 @@
 #include "../../contracts/craft_facts.h"
 #include "../../contracts/game_ports/craft_ui_write_port.h"
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
+#include "../../contracts/game_ports/recipe_table_port.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/save_facts.h"
 #include "../../contracts/text_layer.h"
@@ -124,19 +125,32 @@ bool recipe_write_port_ready(const contracts::QolCustomRecipeWritePort* port) {
            port->set_max_socket_enchant != nullptr && port->random_inclusive != nullptr;
 }
 
+bool table_port_ready(const contracts::QolRecipeTablePort* port) {
+    if (port == nullptr ||
+        !contracts::satisfies(port->abi_version,
+                              {contracts::kQolPortRecipeTableVersion.major,
+                               contracts::kQolPortRecipeTableVersion.minor})) {
+        return false;
+    }
+    return port->resolve != nullptr;
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr) {
         return 1;
     }
-    if (ctx.ports == nullptr || ctx.port_count != 2 || ctx.ports[0] == nullptr ||
-        ctx.ports[1] == nullptr) {
+    if (ctx.ports == nullptr || ctx.port_count != 3 || ctx.ports[0] == nullptr ||
+        ctx.ports[1] == nullptr || ctx.ports[2] == nullptr) {
         return 1;
     }
     const auto* recipe_write_port =
         static_cast<const contracts::QolCustomRecipeWritePort*>(ctx.ports[0]);
     const auto* ui_write_port =
         static_cast<const contracts::QolCraftUiWritePort*>(ctx.ports[1]);
-    if (!recipe_write_port_ready(recipe_write_port) || !ui_write_port_ready(ui_write_port)) {
+    const auto* table_port =
+        static_cast<const contracts::QolRecipeTablePort*>(ctx.ports[2]);
+    if (!recipe_write_port_ready(recipe_write_port) || !ui_write_port_ready(ui_write_port) ||
+        !table_port_ready(table_port)) {
         return 1;
     }
     if (ctx.sdk->commands.register_typed_handler == nullptr ||
@@ -218,6 +232,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     set_craft_facts(craft_facts);
     set_save_facts(save_facts);
     set_write_port(recipe_write_port);
+    ::custom_recipe::table_bind_port(table_port);
     set_context(ctx);
     // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
     register_dynamic_recipes();
@@ -245,6 +260,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     set_save_facts(nullptr);
     set_write_port(nullptr);
     ::custom_recipe::custom_recipe_table_deactivate();
+    ::custom_recipe::table_bind_port(nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
@@ -303,7 +319,8 @@ const contracts::CapabilityRequirement kRequires[] = {
       static_cast<uint16_t>(contracts::kTextLayerVersionMinor)}},
 };
 
-// 两个写端口：custom recipe 结果/材料写面 + UIMix 控件写面（合并前分属两个 descriptor）。
+// 两条写端口 + 一条表槽位端口：custom recipe 结果/材料写面、UIMix 控件写面、RECIPEBASE/
+// MIXTUREBASE 槽位（地址装配归 game 适配层）。
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE,
      {contracts::kQolPortCustomRecipeWriteVersion.major,
@@ -311,6 +328,9 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_CRAFT_UI_WRITE,
      {contracts::kQolPortCraftUiWriteVersion.major,
       contracts::kQolPortCraftUiWriteVersion.minor}},
+    {contracts::QolPortId::QOL_PORT_RECIPE_TABLE,
+     {contracts::kQolPortRecipeTableVersion.major,
+      contracts::kQolPortRecipeTableVersion.minor}},
 };
 
 bool write_stuff_need_handler(void*, const uint8_t* payload, uint32_t size) {
@@ -350,7 +370,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
         &plugin_on_disabled,
         &plugin_fill_status,
         &on_resource_ready,
-        kPorts, 2,
+        kPorts, 3,
         nullptr, 0,
         kFeatures, 1,
     };

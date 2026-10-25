@@ -12,6 +12,7 @@
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_map_resource_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
+#include "contracts/game_ports/recipe_table_port.h"
 #include "contracts/game_ports/craft_lottery_port.h"
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/inventory_extras_port.h"
@@ -146,6 +147,14 @@ const contracts::QolCraftUiWritePort& craft_ui_write_port() {
 const contracts::QolCustomRecipeWritePort& custom_recipe_write_port() {
     return custom_recipe_write_port_override != nullptr ? *custom_recipe_write_port_override
                                                         : kCustomRecipeWritePort;
+}
+const contracts::QolRecipeTablePort& recipe_table_port() {
+    static const contracts::QolRecipeTablePort port{
+        contracts::kQolPortRecipeTableVersion,
+        [](contracts::QolRecipeTableSlots* out) {
+            if (out != nullptr) *out = contracts::QolRecipeTableSlots{};
+        }};
+    return port;
 }
 const contracts::QolCraftLotteryWritePort& craft_lottery_write_port() {
     return kCraftLotteryWritePort;

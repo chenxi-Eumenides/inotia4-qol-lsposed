@@ -5,18 +5,23 @@
 
 #include "catalog.h"
 #include "../../contracts/game_host.h"
+#include "../../contracts/game_ports/recipe_table_port.h"
 #include "../../contracts/result.h"
 #include "../../contracts/host_sdk.h"
 
 // 自定义合成配方的 RECIPEBASE / MIXTUREBASE 表注入（custom-craft-recipe §4.3）。
 //
-// 纯构造器（build_record_bytes / derive_material_count / inject_into_buffers）不触碰游戏
-// 内存，可 host 单测；custom_recipe_table_ensure() 为 Android 专属（读 .bss 指针全局、分配
-// 模块自有缓冲、改写字段全局、绑定目录）。
+// 纯构造器（build_record_bytes / derive_material_count / inject_into_buffers）与便携核心
+// （table_acquire_core / table_deactivate_core）不触碰游戏内存，host 单测直接覆盖。
+// 真实槽位由 game 适配层经 QolRecipeTablePort 注入（table_runtime.cpp 装配），本目录不持有
+// 游戏基址或 VMA。
 namespace custom_recipe {
 
 void set_context(const qol::contracts::QolGameHost* game,
                  const qol::contracts::QolHostSdk* sdk);
+
+// 绑定/解绑 game 侧槽位端口；port 为 nullptr 时所有表操作按 NotReady 处理。
+void table_bind_port(const qol::contracts::QolRecipeTablePort* port);
 
 // 注入记录布局常量（RECIPEBASE 12B / MIXTUREBASE 3B；字段语义见设计书 §3.2）。
 constexpr size_t kRecipeRecordSize = 12;
@@ -100,10 +105,11 @@ void clear_original_group_bits(uint8_t* buffer, uint16_t base_record_count, uint
                                const uint8_t* original_group_bits, uint8_t module_bits);
 
 // ---------------------------------------------------------------------------
-// acquire / deactivate 的便携核心（Android 与 host 测试共用同一实现）
+// acquire / deactivate 的便携核心（生产入口与 host 测试共用同一实现）
 // ---------------------------------------------------------------------------
-// Android 入口把真实 .bss 槽位装配成 TableAccess 后调用本核心；host 测试用可控内存装配
-// 同一核心。分类、注入、分配、重入与 deactivate 语义因此只有一套实现，不存在第二份算法。
+// 生产入口（table_runtime.cpp）把 QolRecipeTablePort 解析出的槽位装配成 TableAccess 后调用
+// 本核心；host 测试用可控内存装配同一核心。分类、注入、分配、重入与 deactivate 语义因此只有
+// 一套实现，不存在第二份算法。
 
 enum class TableAcquireStatus : uint8_t {
     kOk = 0,           // 注入完成，或对已注入表的合法重新激活
@@ -124,7 +130,7 @@ using TableAllocFn = void* (*)(size_t);
 using TableFreeFn = void (*)(void*);
 using TableLogFn = void (*)(int32_t level, const char* message);
 
-// 游戏侧表槽位：Android 指向可写 .bss 全局；host 测试指向任意内存。
+// 游戏侧表槽位：生产经端口指向可写 .bss 全局；host 测试指向任意内存。
 struct TableAccess {
     uintptr_t base = 0;
     void** recipe_ptr_slot = nullptr;
@@ -185,16 +191,16 @@ TableAcquireStatus table_acquire_core(const TableAccess& access, TableState* sta
 // 指针已被游戏改写时只清模块状态，**绝不把（可能陈旧的）原表指针写回**。
 TableAcquireStatus table_deactivate_core(const TableAccess& access, TableState* state);
 
-// Android：读 .bss 槽位后调用核心；typed 结果供 ownership 路径区分错误域。
-// - g_base==0 / 表指针缺失 / 尺寸或 count 为 0 → NotReady；
+// 生产入口：经 QolRecipeTablePort 解析槽位后调用核心；typed 结果供 ownership 路径区分错误域。
+// - 端口未绑定 / base==0 / 表指针缺失 / 尺寸或 count 为 0 → NotReady；
 // - 非零非法上界、目录不可用、书名册不变式不满足 → Unsupported（永久）；
 // - 分配失败 → Internal；重入 → Busy；其余 → OK。
 QolResult custom_recipe_table_acquire();
 
-// Android：`custom_recipe_table_acquire()` 的 bool 薄包装（保留给按 bool 判断的调用者）。
+// `custom_recipe_table_acquire()` 的 bool 薄包装（保留给按 bool 判断的调用者）。
 bool custom_recipe_table_ensure();
 
-// Android：停用注入配方（见 table_deactivate_core 语义）。
+// 停用注入配方（见 table_deactivate_core 语义）。
 void custom_recipe_table_deactivate();
 
 }  // namespace custom_recipe
