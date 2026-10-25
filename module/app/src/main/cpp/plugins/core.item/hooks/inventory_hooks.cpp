@@ -1,5 +1,6 @@
 #include "inventory_hooks.h"
 #include "../usecases/consume_item.h"
+#include "../bags/native_bag_limit.h"
 #include "claims.h"
 #include "inventory_logging.h"
 
@@ -386,14 +387,22 @@ bool item_count_feature_enabled(void* item) {
 // ---------------------------------------------------------------------------
 
 // 物理库存包含 6 袋（含任务袋 5）；写侧读取经 Game Host 物理槽原语，避免扩展物化路径取锁。
+// C18 客户端原生袋为 0..17，运行期由 lifecycle 按 bag_count(0)+bag_count(1) 下发。
 constexpr int kInvenPhysicalBagCount = 6;
+constexpr int kInvenMaxPhysicalBagCount = 18;
 constexpr int kInvenSlotsPerBag = 16;
 constexpr size_t kInvenBagStride = 0x80;
 
-// 纯内存读物理袋槽物品指针（bag 0..5，含任务袋；越界/未就绪返回 nullptr）。
+int physical_bag_limit() {
+    const int limit = qol::features::core_item::bags::native_bag_limit();
+    if (limit < kInvenPhysicalBagCount) return kInvenPhysicalBagCount;
+    return limit > kInvenMaxPhysicalBagCount ? kInvenMaxPhysicalBagCount : limit;
+}
+
+// 纯内存读物理袋槽物品指针（bag 0..limit-1，含任务袋；越界/未就绪返回 nullptr）。
 // 该函数只读取物理槽，不经过逻辑袋物化。
 void* s2_physical_slot_item(int bag, int slot) {
-    if (bag < 0 || bag >= kInvenPhysicalBagCount || slot < 0 || slot >= kInvenSlotsPerBag ||
+    if (bag < 0 || bag >= physical_bag_limit() || slot < 0 || slot >= kInvenSlotsPerBag ||
         g_game == nullptr) {
         return nullptr;
     }
@@ -422,7 +431,7 @@ void s2_write_count_field(void* item, uint32_t field) {
 // 防止对象被原版释放后触磁悬垂指针。
 bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
     if (item == nullptr) return false;
-    for (int bag = 0; bag < kInvenPhysicalBagCount; ++bag) {
+    for (int bag = 0; bag < physical_bag_limit(); ++bag) {
         for (int slot = 0; slot < kInvenSlotsPerBag; ++slot) {
             if (s2_physical_slot_item(bag, slot) == item) {
                 *out_bag = bag;
@@ -490,7 +499,7 @@ void s2_capture_source(void* item, S2SourceCapture* out) {
     if (out == nullptr) return;
     *out = {};
     if (item == nullptr) return;
-    for (int bag = 0; bag < kInvenPhysicalBagCount; ++bag) {
+    for (int bag = 0; bag < physical_bag_limit(); ++bag) {
         for (int slot = 0; slot < kInvenSlotsPerBag; ++slot) {
             if (s2_physical_slot_item(bag, slot) == item) {
                 out->found = true;
@@ -1019,7 +1028,7 @@ void* make_item_wrapper(int32_t category, int32_t arg2, int32_t flag) {
 }
 
 // INVEN_RemoveItemData 快照条目上限：6 袋 × 16 槽。
-constexpr int kS2RemoveDataMaxEntries = kInvenPhysicalBagCount * kInvenSlotsPerBag;
+constexpr int kS2RemoveDataMaxEntries = kInvenMaxPhysicalBagCount * kInvenSlotsPerBag;
 
 struct S2RemoveDataCapture {
     bool armed = false;
@@ -1038,7 +1047,7 @@ void s2_capture_remove_data(int32_t category, int32_t count, S2RemoveDataCapture
     cap->armed = false;
     cap->entry_count = 0;
     if (category < 0 || count <= 0 || !item_count_extended_applied()) return;
-    for (int bag = 0; bag < kInvenPhysicalBagCount; ++bag) {
+    for (int bag = 0; bag < physical_bag_limit(); ++bag) {
         for (int slot = 0; slot < kInvenSlotsPerBag; ++slot) {
             void* item = s2_physical_slot_item(bag, slot);
             if (item == nullptr) continue;
@@ -1478,7 +1487,7 @@ uint64_t ok_destroy_item_wrapper() {
         g_has_vanilla_sell_preview_context = false;
         return run_backup();
     }
-    if (bag < 0 || bag >= kInvenPhysicalBagCount || slot < 0 ||
+    if (bag < 0 || bag >= physical_bag_limit() || slot < 0 ||
         slot >= kInvenSlotsPerBag || detail.item.slot == 0 || detail.item.generation == 0) {
         g_has_vanilla_sell_preview_context = false;
         return run_backup();

@@ -4,6 +4,7 @@
 
 #include "contracts/commands.h"
 #include "plugins/core.item/bags/snapshot_store.h"
+#include "plugins/core.item/bags/native_bag_limit.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/core.item/hooks/merge_hook.h"
 #include "plugins/core.item/shop/snapshot.h"
@@ -25,6 +26,27 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     uint32_t length = 0;
     while (message[length] != '\0') ++length;
     (void)sdk->log.write(1, 1, kPluginId, message, length);
+}
+
+// 物理扫描上界 = 原版袋数 + 改版袋数；原版客户端保持 6，C18 最多 18。
+void apply_native_bag_limit() {
+    if (g_port == nullptr || g_port->read.bag_count == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+        return;
+    }
+    int32_t limit = contracts::kQolOriginalBagCount;
+    int32_t original = 0;
+    if (contracts::succeeded(
+            g_port->read.bag_count(contracts::kQolBagSpaceOriginal, &original)) &&
+        original > 0) {
+        limit = original;
+    }
+    int32_t c18 = 0;
+    if (contracts::succeeded(g_port->read.bag_count(contracts::kQolBagSpaceC18, &c18)) &&
+        c18 > 0) {
+        limit += c18;
+    }
+    bags::set_native_bag_limit(limit);
 }
 
 // Inventory claims + merge ptrslot；静态存储保证 descriptor 生命周期。
@@ -191,6 +213,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     (void)usecases::transfer_journal::reconcile();
+    apply_native_bag_limit();
     log_message(g_sdk, "[core.item] provider install");
     return 0;
 }
@@ -211,6 +234,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
+    apply_native_bag_limit();
     if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi, g_port)) {
         log_message(ctx.sdk, "[core.item] inventory hooks attach unavailable");
         return;

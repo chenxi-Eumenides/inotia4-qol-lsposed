@@ -1,6 +1,25 @@
 #include "plugins/core.item/runtime/context.h"
 
+#include <algorithm>
+
+#include "plugins/core.item/bags/native_bag_limit.h"
+
 namespace qol::features::core_item {
+
+namespace {
+int g_native_bag_limit = contracts::kQolOriginalBagCount;
+}
+
+namespace bags {
+
+int native_bag_limit() { return g_native_bag_limit; }
+
+void set_native_bag_limit(int32_t limit) {
+    g_native_bag_limit = std::clamp(limit, contracts::kQolOriginalBagCount,
+                                    contracts::kQolMaxNativeBagCount);
+}
+
+}  // namespace bags
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolItemPort* g_port = nullptr;
