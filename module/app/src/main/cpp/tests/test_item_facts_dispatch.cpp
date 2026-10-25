@@ -1991,6 +1991,27 @@ void test_write_routes() {
     qol::host::http_dispatch_set_op_enabled(false);
 }
 
+std::string dispatch_get_query(const char* path, const char* query, uint16_t* status = nullptr) {
+    const std::string path_value(path);
+    const std::string query_value(query == nullptr ? "" : query);
+    char storage[8192]{};
+    qol::contracts::HttpReq request{
+        qol::contracts::HttpMethod::kGet,
+        path_value.c_str(),
+        static_cast<uint32_t>(path_value.size()),
+        nullptr,
+        0,
+        query_value.c_str(),
+        static_cast<uint32_t>(query_value.size()),
+        nullptr,
+        0,
+    };
+    qol::contracts::HttpRes response{reinterpret_cast<uint8_t*>(storage), sizeof(storage), 0, 0};
+    (void)qol::host::http_dispatch_api().dispatch(&request, &response);
+    if (status != nullptr) *status = response.status;
+    return std::string(storage, response.body_size);
+}
+
 std::string dispatch_get(const char* path, uint16_t* status = nullptr) {
     const std::string path_value(path);
     char storage[8192]{};
@@ -2146,6 +2167,12 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/item/inventory/items", &status) ==
           std::string("{\"items\":[") + expected_inventory_item(3, 0, 0, 0) +
               "],\"next_cursor\":null,\"has_more\":false}");
+    CHECK(dispatch_get_query("/api/item/inventory/items", "cursor=", &status) ==
+          std::string("{\"items\":[") + expected_inventory_item(3, 0, 0, 0) +
+              "],\"next_cursor\":null,\"has_more\":false}");
+    CHECK(dispatch_get_query("/api/item/inventory/items", "cursor=9%3A9%3A9", &status) ==
+          "{\"items\":[],\"next_cursor\":null,\"has_more\":false}");
+    CHECK(status == 200);
     CHECK(dispatch_get("/api/item/shop/items", &status) ==
           "{\"items\":[{\"slot\":0,\"category\":10,\"count\":5,\"price\":15,"
           "\"name\":\"再生药水（小）\"}]}");

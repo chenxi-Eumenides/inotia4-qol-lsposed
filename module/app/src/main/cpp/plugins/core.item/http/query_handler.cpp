@@ -48,6 +48,35 @@ bool query_value(const contracts::HttpReq& request, const char* name, std::strin
     return false;
 }
 
+std::string decode_value(std::string_view raw) {
+    std::string out;
+    out.reserve(raw.size());
+    for (size_t index = 0; index < raw.size(); ++index) {
+        const char character = raw[index];
+        if (character == '+') {
+            out.push_back(' ');
+            continue;
+        }
+        if (character == '%' && index + 2 < raw.size()) {
+            const auto hex = [](char digit) -> int {
+                if (digit >= '0' && digit <= '9') return digit - '0';
+                if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
+                if (digit >= 'A' && digit <= 'F') return digit - 'A' + 10;
+                return -1;
+            };
+            const int high = hex(raw[index + 1]);
+            const int low = hex(raw[index + 2]);
+            if (high >= 0 && low >= 0) {
+                out.push_back(static_cast<char>(high * 16 + low));
+                index += 2;
+                continue;
+            }
+        }
+        out.push_back(character);
+    }
+    return out;
+}
+
 bool parse_nonnegative(std::string_view text, int32_t* out) {
     if (out == nullptr || text.empty()) return false;
     int32_t parsed = 0;
@@ -66,7 +95,8 @@ bool parse_optional_index(const contracts::HttpReq& request, const char* name, b
     std::string_view value;
     *present = query_value(request, name, &value);
     if (!*present) return true;
-    return parse_nonnegative(value, out);
+    const std::string decoded = decode_value(value);
+    return parse_nonnegative(decoded, out);
 }
 
 bool parse_cursor(std::string_view value, Cursor* out) {
@@ -140,15 +170,20 @@ bool parse_page_options(const contracts::HttpReq& request, int32_t* space, bool*
     *limit = 100;
     std::string_view limit_value;
     if (query_value(request, "limit", &limit_value) &&
-        (!parse_nonnegative(limit_value, limit) || *limit <= 0 || *limit > 500)) {
+        (!parse_nonnegative(decode_value(limit_value), limit) || *limit <= 0 || *limit > 500)) {
         *error = "bad limit";
         return false;
     }
 
     *has_cursor = query_value(request, "cursor", &limit_value);
-    if (*has_cursor && !parse_cursor(limit_value, cursor)) {
-        *error = "bad cursor";
-        return false;
+    if (*has_cursor) {
+        const std::string decoded_cursor = decode_value(limit_value);
+        if (decoded_cursor.empty()) {
+            *has_cursor = false;
+        } else if (!parse_cursor(decoded_cursor, cursor)) {
+            *error = "bad cursor";
+            return false;
+        }
     }
     return true;
 }
