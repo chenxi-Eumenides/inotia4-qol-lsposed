@@ -56,7 +56,15 @@ static_assert(offsetof(qol::contracts::ItemFactsApi, quote) ==
 static_assert(offsetof(qol::contracts::QolItemPortReadApi, quote) ==
                   offsetof(qol::contracts::QolItemPortReadApi, count_encoding) +
                       sizeof(decltype(qol::contracts::QolItemPortReadApi::count_encoding)),
-              "Item Port quote must be tail-appended");
+               "Item Port quote must be tail-appended");
+static_assert(offsetof(qol::contracts::QolItemPortReadApi, serialize_item) ==
+                  offsetof(qol::contracts::QolItemPortReadApi, for_each_space_slot) +
+                      sizeof(decltype(qol::contracts::QolItemPortReadApi::for_each_space_slot)),
+              "Item Port transfer primitive must be tail-appended");
+static_assert(std::is_same<decltype(qol::contracts::QolItemPortReadApi::serialize_item),
+                           QolResult (*)(qol::contracts::QolItemHandle, uint8_t*, uint32_t,
+                                         uint32_t*)>::value,
+              "Item Port serialization must be handle-keyed and size-query capable");
 static_assert(std::is_same<qol::contracts::ItemFactsCountEncodingFn,
                            QolResult (*)(qol::contracts::QolItemHandle,
                                          qol::contracts::QolItemCountEncoding*)>::value,
@@ -146,7 +154,7 @@ int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 3 &&
           qol::contracts::kItemFactsVersion.minor == 6);
     CHECK(qol::contracts::kQolPortItemVersion.major == 3 &&
-          qol::contracts::kQolPortItemVersion.minor == 7);
+          qol::contracts::kQolPortItemVersion.minor == 8);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -306,7 +314,7 @@ int main() {
     CHECK(descriptor.provides[6].iface != nullptr);
     CHECK(descriptor.port_count == 6 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 7);
+    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 8);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
