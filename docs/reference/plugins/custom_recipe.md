@@ -107,6 +107,8 @@
 
 **表所有权**：`own:RECIPEBASE_MIXTUREBASE` 为 required + fail-soft：`own_acquire` 调 `custom_recipe_table_ensure` 并据结果置 `g_ownership_ready`，失败时回滚表状态并返回非 0（`feature.cpp:1131-1141`）；`own_release` 为 total。槽位由 game 端 `QOL_PORT_RECIPE_TABLE` 解析（`game/adapter_ports/recipe_table_port.cpp`，唯一 VMA 来源），`table_runtime.cpp` 映射为 `TableAccess` 后驱动核心。ensure 注入模块缓冲、清除模块占用组位并追加记录；deactivate 还原原版段组位并把 RECIPEBASE 记录数还原为 base，但**保持游戏指针指向模块缓冲且不 free**，使残留面板持有的注入下标仍在缓冲界内（`table.h:101-111`、`table.cpp:363-395`）。表未就绪时 `def_for_mix_type` 返回 `nullptr`，不把未注入状态伪装成可用配方。
 
+**主线程契约观测**：`place`/`prepare`/`execute`/`make_item` 与表 `acquire`/`deactivate` 在 `game_host.thread.is_main_thread()` 返回 0 时写一次 WARN `wrong thread entry=...`；只记录、不改返回值。
+
 **typed commands 时序**：UI 经 `commands.post_typed` 入队（`ui/feature.cpp:205-222`），Host 主线程 drain 后由 `plugin.cpp` 的 handler 转交结果层执行（`plugin.cpp:289-295`、`feature.cpp:1195-1214`）。未改成 UI callback 直接同步写；handler 在校验通过前先检查 `enabled()`，停用后 drain 中的命令直接失败（`feature.cpp:1195,1193`）。
 
 ## 消费者 API 边界与不迁移面

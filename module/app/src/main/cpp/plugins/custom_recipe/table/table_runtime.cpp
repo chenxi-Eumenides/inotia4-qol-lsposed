@@ -4,6 +4,7 @@
 // 便携核心的 TableAccess，并承接全部与宿主/平台的接线（日志绑定、模块侧状态）。
 // 地址与 VMA 不在此目录出现：槽位由 game 适配层装配。
 
+#include <atomic>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -59,7 +60,17 @@ void set_context(const qol::contracts::QolGameHost* game, const qol::contracts::
     g_sdk = sdk;
 }
 
+// 主线程契约：仅日志级观测，不改变表状态机（表槽位只在游戏主线程读写）。
+static void note_thread_contract(const char* entry) {
+    if (g_game == nullptr || g_game->thread.is_main_thread == nullptr) return;
+    if (g_game->thread.is_main_thread() != 0) return;
+    static std::atomic<bool> reported{false};
+    if (reported.exchange(true)) return;
+    table_log_line(2, entry);
+}
+
 QolResult custom_recipe_table_acquire() {
+    note_thread_contract("wrong thread entry=recipe_table acquire");
     // 端口缺失或 base 未就绪时槽位地址本身无意义，必须先判（不得带着垃圾指针读取）。
     const TableAccess access = resolve_access();
     if (access.base == 0) return table_status_result(TableAcquireStatus::kNotReady);
@@ -74,6 +85,7 @@ QolResult custom_recipe_table_acquire() {
 bool custom_recipe_table_ensure() { return custom_recipe_table_acquire().ok == kQolOk; }
 
 void custom_recipe_table_deactivate() {
+    note_thread_contract("wrong thread entry=recipe_table deactivate");
     const TableAccess access = resolve_access();
     if (access.base == 0) return;
     (void)table_deactivate_core(access, &g_state);

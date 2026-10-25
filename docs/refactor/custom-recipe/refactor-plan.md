@@ -230,13 +230,13 @@ include 相对路径影响面：插件内 10 个文件 + 6 个测试文件（`te
 
 不在此阶段拆 `feature.cpp`。触发条件：文件超 1,500 行，或同一迭代内三个以上互不相关的改动落在该文件，再单独立项。
 
-## 5. 阶段 3（可选）：主线程/重入契约
+## 5. 阶段 3（已实施）：主线程/重入契约
 
-不做行为变更，只把隐式约定变可观测：
+只做日志级观测，不改变任何返回值：
 
-- 在 `table_runtime.cpp` 与 `feature.cpp` 的 6 个入口（acquire/deactivate/place/prepare/execute/make_item）加**日志级**主线程检查：`g_game != nullptr && g_game->is_main_thread != nullptr && g_game->is_main_thread() == 0` 时写一次 `wrong thread entry` 并继续（不返回错误）。
+- 已落地：`table/table_runtime.cpp` 与 `result/feature.cpp` 的 6 个入口（acquire/deactivate/place/prepare/execute/make_item）在 `g_game->thread.is_main_thread()` 返回 0 时写一次 WARN `wrong thread entry=...`，随后照常执行；每进程只报一次。
 - 契约写入 `docs/refactor/custom-recipe/refactor-plan.md` §5 与插件参考的机制段，不新增公共头。
-- 升级为 fail-closed 的前置条件：确认 `game_host_mark_main_thread()` 在插件 install 前已执行（当前由 host 启动期标记，需真机日志确认）；未确认前不做返回错误。
+- 仍不做 fail-closed：需先在真机确认 `game_host_mark_main_thread()` 在插件 install 前已执行，否则会把合法主线程调用误判为拒绝。
 
 ## 6. 验证矩阵
 
@@ -289,4 +289,15 @@ include 相对路径影响面：插件内 10 个文件 + 6 个测试文件（`te
   - Host：`custom_recipe_tests`、`custom_recipe_handle_chain_tests`、`custom_recipe_table_readiness_tests`、`custom_recipe_owner_fixture_tests` **4/4 PASS**。
   - `check_arch` 全部通过；`check_offsets --all` 违规 0（`plugins/` 无 `g_base` 命中）；`test_check_offsets.py` 9 用例通过。
   - `scripts/build-debug.sh --offline` BUILD SUCCESSFUL：`output/inotia4_qol_lsposed_debug_2610252029_80c40d98bcff.apk`（SHA-256 `80c40d98bcfff45780c3ac4143d2e8397ecbd03ce3fba193f6fbee9fac98808c`）。
-- **未完成**：真机 smoke（表注入/还原、开关 toggle、合成与升阶）尚未执行；`VM-CR-MERGE-01` 状态不变。阶段 2/3 未实施。
+- **未完成**：真机 smoke（表注入/还原、开关 toggle、合成与升阶）尚未执行；`VM-CR-MERGE-01` 状态不变。
+
+### 10.1 阶段 2（目录归位，已实施）
+
+- 新布局：`model/`（rules、catalog、result）、`result/`（feature）、`table/`（table 核心、table_runtime、text_table）、`ui/` 与 `plugin.cpp` 保持原位。
+- 纯移动：`git mv` + include/CMake 路径同步，无逻辑改动；受影响 7 个 CTest 全绿。
+- 证据：`output/inotia4_qol_lsposed_debug_2610252040_77f9041231fa.apk`（SHA-256 `77f9041231fa247c9d05d821aa95d4a5cd750b4e4499d30604c5e919b011ae38`）。
+
+### 10.2 阶段 3（主线程契约观测，已实施）
+
+- `result/feature.cpp` 的 place/prepare/execute/make_item 与 `table/table_runtime.cpp` 的 acquire/deactivate 各加一处日志级检查：非主线程时写一次 WARN，随后照常执行；不改变返回码与状态机。
+- Host 4/4 与 `scripts/build-debug.sh --offline` 通过：`output/inotia4_qol_lsposed_debug_2610252044_693c7bab3ce7.apk`（SHA-256 `693c7bab3ce7af6367ce2c3b55f91539da2e8fd9a848fa6bd6f269166b6c4074`）。

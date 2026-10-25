@@ -641,7 +641,17 @@ result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
 
 bool api_is_jewel_item(qol::contracts::QolItemHandle item) { return item_is_jewel(item); }
 
+// 主线程契约：仅日志级观测，不改变返回值（所有入口约定在游戏主线程执行）。
+static void note_thread_contract(const char* entry) {
+    if (g_game == nullptr || g_game->thread.is_main_thread == nullptr) return;
+    if (g_game->thread.is_main_thread() != 0) return;
+    static std::atomic<bool> reported{false};
+    if (reported.exchange(true)) return;
+    log_message(2, "wrong thread entry=%s (main-thread contract violated)", entry);
+}
+
 result::PlaceOutcome api_place(const result::CraftPlaceInput* in) {
+    note_thread_contract("place");
     using result::PlaceOutcome;
     if (in == nullptr || !enabled()) return PlaceOutcome::kNotMine;
     const qol::contracts::QolItemHandle item = in->item;
@@ -679,6 +689,7 @@ result::PlaceOutcome api_place(const result::CraftPlaceInput* in) {
 }
 
 result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
+    note_thread_contract("prepare");
     using result::PrepareOutcome;
     if (in == nullptr || !enabled()) return PrepareOutcome::kNotMine;
     three_slot_invalidate_pending();
@@ -737,6 +748,7 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
 }
 
 result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
+    note_thread_contract("execute");
     using ::custom_recipe::ProductMode;
     using ::custom_recipe::ThreeSlotRecipe;
     using result::CraftExecuteResult;
@@ -1068,6 +1080,7 @@ void api_material_needs(const result::CraftMaterialNeedInput* in,
 }
 
 int32_t api_make_item(const result::CraftMakeItemInput* in) {
+    note_thread_contract("make_item");
     if (in == nullptr) return 1;
     const ::custom_recipe::Def* def = module_recipe_for_mix_type(in->mix_type);
     if (def == nullptr) return -1;  // 非本层配方：界面转调原版
