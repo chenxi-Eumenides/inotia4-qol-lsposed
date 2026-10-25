@@ -12,6 +12,7 @@ namespace virtual_bag {
 constexpr int kMaxExtensionBags = 128;
 constexpr int kOriginalTransactionBagCount = 5;
 constexpr int kOriginalTaskBag = 5;
+constexpr int kOriginalNativeBagCount = kOriginalTaskBag + 1;
 constexpr int kExtensionLogicalBagFirst = 6;
 constexpr int kSlotCount = 16;
 constexpr int kMaxRenderedExtensionBagTabs = 5;

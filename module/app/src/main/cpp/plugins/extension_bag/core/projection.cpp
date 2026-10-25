@@ -1,9 +1,10 @@
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/ui_state.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -11,7 +12,6 @@
 #include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/projection_controller.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
@@ -47,14 +47,14 @@ void virtual_bag_call_original_refresh_item_area_with_guard() {
 
 void refresh_module_item_area_locked(int index) {
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.refresh_item_area == nullptr) return;
-    if (runtime_state().objects.original_bag_size_bag < 0) {
+    if (qol::extension_bag::ui_state().objects.original_bag_size_bag < 0) {
         virtual_bag_call_original_refresh_item_area_with_guard();
         return;
     }
     constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
     (void)set_bag_size_word_locked(
-        runtime_state().objects.original_bag_size_bag,
-        (runtime_state().objects.original_bag_size & ~kCapacityMask) |
+        qol::extension_bag::ui_state().objects.original_bag_size_bag,
+        (qol::extension_bag::ui_state().objects.original_bag_size & ~kCapacityMask) |
             (static_cast<uint32_t>(runtime_state().objects.bag.capacities[index]) & kCapacityMask));
     virtual_bag_call_original_refresh_item_area_with_guard();
     refresh_projection_if_overwritten_locked();
@@ -68,7 +68,7 @@ namespace {
 bool original_got_bag_locked(int* bag) {
     if (bag == nullptr) return false;
     const int current = original_bag_locked();
-    if (current < 0 || current >= kNoOriginalBagSelected) return false;
+    if (current < 0 || current >= virtual_bag::kOriginalNativeBagCount) return false;
     *bag = current;
     return true;
 }
@@ -76,7 +76,7 @@ bool original_got_bag_locked(int* bag) {
 }
 void clear_original_bag_selection_locked() {
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.set_current_bag == nullptr) return;
-    (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+    (void)runtime_state().host.write_port->ui.set_current_bag(native_bag_count_locked());
     log_exit_trace_locked("write_clear", 0, 0, 0);
 }
 
@@ -84,9 +84,9 @@ void clear_original_desc_locked() {
     restore_extension_desc_popup_callbacks_locked();
     reset_extension_desc_unequip_hook_locked();
     reset_extension_desc_item_hooks_locked();
-    runtime_state().ui.extension_desc_item = nullptr;
-    runtime_state().ui.extension_desc_item_bag = -1;
-    runtime_state().ui.extension_desc_item_slot = -1;
+    qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+    qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+    qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.set_desc_type == nullptr) return;
     (void)runtime_state().host.write_port->ui.set_desc_type(0);
     if (runtime_state().host.write_port->ui.description_set_off != nullptr) {
@@ -112,7 +112,7 @@ int original_bag_button_index(int64_t x, int64_t y) {
         int64_t absolute_x = 0;
         int64_t absolute_y = 0;
         extension_bag_control_abs_pos(control, &absolute_x, &absolute_y);
-        UiRect rect{};
+        qol::contracts::UiRect rect{};
         if (extension_bag_ui_rect(control, &rect) && rect.w > 0 && rect.h > 0 &&
             extension_bag_ui_hit_test(control, x, y, rect)) {
             return index;
@@ -122,7 +122,8 @@ int original_bag_button_index(int64_t x, int64_t y) {
 }
 
 bool bind_original_exit_display_bag_locked(int bag) {
-    if (runtime_state().host.game == nullptr || bag < 0 || bag >= 6 ||
+    if (runtime_state().host.game == nullptr || bag < 0 ||
+        bag >= virtual_bag::kOriginalNativeBagCount ||
         runtime_state().host.write_port->ui.refresh_item_area == nullptr) return false;
     const int saved_bag = original_bag_locked();
     set_original_bag_locked(bag);
@@ -147,9 +148,9 @@ void* module_item_locked(int bag, int slot) {
     const virtual_bag::Item& descriptor = runtime_state().objects.bag.items[bag][slot];
     if (descriptor.category <= 0 || descriptor.count <= 0) return nullptr;
     const uint32_t descriptor_hash = virtual_bag::payload_hash(descriptor);
-    void* item = runtime_state().objects.module_objects[bag][slot];
-    if (item == nullptr || runtime_state().objects.module_object_categories[bag][slot] != descriptor.category ||
-        runtime_state().objects.module_object_hashes[bag][slot] != descriptor_hash) {
+    void* item = qol::extension_bag::ui_state().objects.module_objects[bag][slot];
+    if (item == nullptr || qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] != descriptor.category ||
+        qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] != descriptor_hash) {
         if (!free_module_object_locked(bag, slot)) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "module materialize rejected stale object bag=%d slot=%d item=%p",
                         bag, slot, item);
@@ -168,23 +169,23 @@ void* module_item_locked(int bag, int slot) {
             return nullptr;
         }
         uint32_t handle = 0;
-        if (ownership::allocate(&runtime_state().objects.ownership_ledger, &handle) != ownership::Outcome::kOk) {
+        if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &handle) != ownership::Outcome::kOk) {
             release_temporary_item_locked(item);
             QOL_LOG_WARN(QolDomain::kExtensionBag, "module materialize rejected ownership ledger exhausted bag=%d slot=%d",
                         bag, slot);
             return nullptr;
         }
-        runtime_state().objects.module_object_handles[bag][slot] = handle;  // module-owned（G-13）
+        qol::extension_bag::ui_state().objects.module_object_handles[bag][slot] = handle;  // module-owned（G-13）
         if (!module_object_generation_advance_locked(bag, slot, "materialize replacement")) {
-            runtime_state().objects.module_object_handles[bag][slot] = 0;
-            ownership::release(&runtime_state().objects.ownership_ledger, handle);
+            qol::extension_bag::ui_state().objects.module_object_handles[bag][slot] = 0;
+            ownership::release(&qol::extension_bag::ui_state().objects.ownership_ledger, handle);
             release_temporary_item_locked(item);
             QOL_LOG_WARN(QolDomain::kExtensionBag, "module materialize replacement rejected bag=%d slot=%d", bag, slot);
             return nullptr;
         }
-        runtime_state().objects.module_objects[bag][slot] = item;
-        runtime_state().objects.module_object_categories[bag][slot] = descriptor.category;
-        runtime_state().objects.module_object_hashes[bag][slot] = descriptor_hash;
+        qol::extension_bag::ui_state().objects.module_objects[bag][slot] = item;
+        qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] = descriptor.category;
+        qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] = descriptor_hash;
     }
     return item;
 }
@@ -202,14 +203,14 @@ uint32_t save_inventory_wrapper(uint8_t* cursor) {
         {"hook:SAVE_SaveInventory"});
     {
         ::qol::extension_bag::ReentryLock lock;
-        if (runtime_state().objects.module_view_installed) {
+        if (qol::extension_bag::ui_state().objects.module_view_installed) {
             QOL_LOG_DEBUG(QolDomain::kExtensionBag, "save gate: restoring projected view before SAVE_SaveInventory");
             restore_module_view_locked();
         }
     }
     // 函数入口 hook：必须走框架 backup（原函数 trampoline）；按符号地址直调会重入自身。
-    if (runtime_state().persistence.backup_save_inventory == nullptr) return 0;
-    return reinterpret_cast<SaveInventoryRawFn>(runtime_state().persistence.backup_save_inventory)(cursor);
+    if (qol::extension_bag::ui_state().persistence_hooks.backup_save_inventory == nullptr) return 0;
+    return reinterpret_cast<SaveInventoryRawFn>(qol::extension_bag::ui_state().persistence_hooks.backup_save_inventory)(cursor);
 }
 
 // G-6 终极绘制门禁：ControlItem_Draw 的 bl ITEM_DrawPorting（0xaaf28）替换——
@@ -222,15 +223,16 @@ namespace {
 // The original inventory membership check used to run 6x16 physical-slot
 // queries for every drawn item. Cache the pointer snapshot for the current
 // inventory generation; ControlItem_Draw calls then only compare pointers.
-std::array<void*, 6 * virtual_bag::kSlotCount> g_original_inventory_draw_cache{};
+std::array<void*, virtual_bag::kOriginalNativeBagCount * virtual_bag::kSlotCount>
+    g_original_inventory_draw_cache{};
 uint64_t g_original_inventory_draw_generation = std::numeric_limits<uint64_t>::max();
 
 void ensure_original_inventory_draw_cache_locked() {
-    const uint64_t generation = runtime_state().ui.inventory_generation;
+    const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
     if (g_original_inventory_draw_generation == generation) return;
     g_original_inventory_draw_generation = generation;
     g_original_inventory_draw_cache.fill(nullptr);
-    for (int bag = 0; bag < 6; ++bag) {
+    for (int bag = 0; bag < virtual_bag::kOriginalNativeBagCount; ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
             void* item = nullptr;
             if (inventory_slot_locked(bag, slot, &item)) {
@@ -255,7 +257,7 @@ uint32_t item_draw_porting_gate(void* item, int32_t x, int32_t y, int32_t a, int
     const ::qol::contracts::InFlightGuard in_flight_guard(
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"patch:P_EXT_DRAW_GATE"});
-    if (runtime_state().objects.module_view_installed && item != nullptr) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed && item != nullptr) {
         int module_bag = -1;
         int module_slot = -1;
         if (module_slot_of_item_locked(item, &module_bag, &module_slot)) {
@@ -288,24 +290,24 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
         int src_bag = -1, src_slot = -1;
         const bool module_item = module_slot_of_item_locked(item, &src_bag, &src_slot);
         const bool session_source_match =
-            module_item && runtime_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle &&
-            runtime_state().ui.extension_drag_session.source_bag == src_bag &&
-            runtime_state().ui.extension_drag_session.source_slot == src_slot &&
+            module_item && qol::extension_bag::ui_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle &&
+            qol::extension_bag::ui_state().ui.extension_drag_session.source_bag == src_bag &&
+            qol::extension_bag::ui_state().ui.extension_drag_session.source_slot == src_slot &&
             virtual_bag::drag_session_generation_current(
-                runtime_state().ui.extension_drag_session, runtime_state().ui.extension_tab_generation);
+                qol::extension_bag::ui_state().ui.extension_drag_session, qol::extension_bag::ui_state().ui.extension_tab_generation);
         if (session_source_match && virtual_bag::valid_original_transaction_bag(bag)) {
-            if (runtime_state().ui.extension_drag_session.target_kind != virtual_bag::DragTargetKind::kInvalid &&
-                (runtime_state().ui.extension_drag_session.target_kind !=
+            if (qol::extension_bag::ui_state().ui.extension_drag_session.target_kind != virtual_bag::DragTargetKind::kInvalid &&
+                (qol::extension_bag::ui_state().ui.extension_drag_session.target_kind !=
                      virtual_bag::DragTargetKind::kOriginalBag ||
-                 runtime_state().ui.extension_drag_session.target_bag != bag)) {
+                 qol::extension_bag::ui_state().ui.extension_drag_session.target_bag != bag)) {
                 QOL_LOG_DEBUG(QolDomain::kExtensionBag, "drop gate: conflicting deferred target old=%d/%d new=%d",
-                            static_cast<int>(runtime_state().ui.extension_drag_session.target_kind),
-                            runtime_state().ui.extension_drag_session.target_bag, bag);
+                            static_cast<int>(qol::extension_bag::ui_state().ui.extension_drag_session.target_kind),
+                            qol::extension_bag::ui_state().ui.extension_drag_session.target_bag, bag);
                 return 0;
             }
-            runtime_state().ui.extension_drag_session.target_kind = virtual_bag::DragTargetKind::kOriginalBag;
-            runtime_state().ui.extension_drag_session.target_bag = bag;
-            runtime_state().ui.extension_drag_session.target_slot = -1;
+            qol::extension_bag::ui_state().ui.extension_drag_session.target_kind = virtual_bag::DragTargetKind::kOriginalBag;
+            qol::extension_bag::ui_state().ui.extension_drag_session.target_bag = bag;
+            qol::extension_bag::ui_state().ui.extension_drag_session.target_slot = -1;
             QOL_LOG_DEBUG(QolDomain::kExtensionBag, "drop deferred ext->orig source=%d/%d bag=%d",
                         src_bag, src_slot, bag);
             // 返回 0（而非伪成功 1）：反汇编证实（b8cc8 cbz）原版仅在返回 0 时
@@ -314,7 +316,7 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
             // 之后的 route_deferred_extension_to_original_locked 执行。
             return 0;
         }
-        if (runtime_state().objects.module_view_installed) {
+        if (qol::extension_bag::ui_state().objects.module_view_installed) {
             if (!module_item) {
                 if (runtime_state().host.game == nullptr || runtime_state().host.write_port->inventory.save_item_on_empty == nullptr) {
                     return 0;
@@ -326,7 +328,7 @@ int32_t save_item_on_empty_gate(void* item, int32_t bag) {
             }
             QOL_LOG_DEBUG(QolDomain::kExtensionBag, "drop gate: source/session mismatch src=%d/%d bag=%d phase=%d",
                         src_bag, src_slot, bag,
-                        static_cast<int>(runtime_state().ui.extension_drag_session.phase));
+                        static_cast<int>(qol::extension_bag::ui_state().ui.extension_drag_session.phase));
             return 0;
         }
     }
@@ -350,7 +352,7 @@ bool install_module_view_locked(int bag) {
     if (runtime_state().objects.bag.capacities[bag] == 0) return false;
     // 切换扩展袋时必须先还原旧投影，再读取窗口袋容量字；否则会把上一次
     // 投影写入的扩展容量（如 12）当成原版真实容量保存，退出后泄漏到原版袋。
-    if (runtime_state().objects.module_view_installed) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed) {
         const bool previous_skip = g_skip_restore_refresh;
         g_skip_restore_refresh = true;
         restore_module_view_locked();
@@ -375,7 +377,7 @@ bool install_module_view_locked(int bag) {
     int borrowed_count = 0;
     auto fail_install = [&](const char* reason) {
         void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
-        if (live_root != nullptr && live_root == runtime_state().objects.projected_item_root) {
+        if (live_root != nullptr && live_root == qol::extension_bag::ui_state().objects.projected_item_root) {
             for (int slot = 0; slot < bound_count; ++slot) {
                 void* control = controls[static_cast<size_t>(slot)];
                 if (control != nullptr && valid_child_locked(live_root, slot) == control &&
@@ -387,11 +389,11 @@ bool install_module_view_locked(int bag) {
             }
         } else if (bound_count > 0) {
             VIRTBAG_LOG("module view rollback invalidated root saved=%p live=%p",
-                        runtime_state().objects.projected_item_root, live_root);
+                        qol::extension_bag::ui_state().objects.projected_item_root, live_root);
         }
         for (int index = 0; index < borrowed_count; ++index) {
             const uint32_t handle = borrowed_handles[static_cast<size_t>(index)];
-            if (ownership::return_from_view(&runtime_state().objects.ownership_ledger, handle) !=
+            if (ownership::return_from_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) !=
                 ownership::Outcome::kOk) {
                 QOL_LOG_ERROR(QolDomain::kExtensionBag,
                               "ERROR module view rollback ownership return failed bag=%d handle=%u",
@@ -404,12 +406,12 @@ bool install_module_view_locked(int bag) {
                           original_bag, size_word);
         }
         virtual_bag_call_original_refresh_item_area_with_guard();
-        runtime_state().objects.original_bag_size_bag = -1;
-        runtime_state().objects.original_bag_size = 0;
-        runtime_state().objects.module_window_original_bag = -1;
-        runtime_state().objects.projected_item_root = nullptr;
-        runtime_state().objects.module_view_installed = false;
-        runtime_state().objects.module_view_index = -1;
+        qol::extension_bag::ui_state().objects.original_bag_size_bag = -1;
+        qol::extension_bag::ui_state().objects.original_bag_size = 0;
+        qol::extension_bag::ui_state().objects.module_window_original_bag = -1;
+        qol::extension_bag::ui_state().objects.projected_item_root = nullptr;
+        qol::extension_bag::ui_state().objects.module_view_installed = false;
+        qol::extension_bag::ui_state().objects.module_view_index = -1;
         QOL_LOG_ERROR(QolDomain::kExtensionBag,
                       "ERROR module view install rejected bag=%d reason=%s",
                       bag, reason);
@@ -424,10 +426,10 @@ bool install_module_view_locked(int bag) {
     int child_count = 0;
     if (root == nullptr || !extension_bag_ui_child_count(root, &child_count) ||
         child_count < capacity) {
-        runtime_state().objects.projected_item_root = root;
+        qol::extension_bag::ui_state().objects.projected_item_root = root;
         return fail_install("item_root_or_children_unavailable");
     }
-    runtime_state().objects.projected_item_root = root;
+    qol::extension_bag::ui_state().objects.projected_item_root = root;
     for (int slot = 0; slot < capacity; ++slot) {
         void* control = valid_child_locked(root, slot);
         if (control == nullptr) return fail_install("item_child_unavailable");
@@ -449,10 +451,10 @@ bool install_module_view_locked(int bag) {
         return fail_install("item_root_replaced_during_binding");
     }
     for (int slot = 0; slot < capacity; ++slot) {
-        void* item = runtime_state().objects.module_objects[bag][slot];
+        void* item = qol::extension_bag::ui_state().objects.module_objects[bag][slot];
         if (item == nullptr) continue;
-        const uint32_t handle = runtime_state().objects.module_object_handles[bag][slot];
-        if (ownership::borrow_for_view(&runtime_state().objects.ownership_ledger, handle) != ownership::Outcome::kOk) {
+        const uint32_t handle = qol::extension_bag::ui_state().objects.module_object_handles[bag][slot];
+        if (ownership::borrow_for_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) != ownership::Outcome::kOk) {
             return fail_install("ownership_borrow_failed");
         }
         borrowed_handles[static_cast<size_t>(borrowed_count++)] = handle;
@@ -461,30 +463,30 @@ bool install_module_view_locked(int bag) {
         return fail_install("item_root_replaced_before_commit");
     }
 
-    runtime_state().objects.original_bag_size_bag = original_bag;
-    runtime_state().objects.original_bag_size = size_word;
-    runtime_state().objects.module_window_original_bag = original_bag;
-    runtime_state().objects.projected_item_root = root;
-    runtime_state().objects.module_view_installed = true;
-    runtime_state().objects.module_view_index = bag;
+    qol::extension_bag::ui_state().objects.original_bag_size_bag = original_bag;
+    qol::extension_bag::ui_state().objects.original_bag_size = size_word;
+    qol::extension_bag::ui_state().objects.module_window_original_bag = original_bag;
+    qol::extension_bag::ui_state().objects.projected_item_root = root;
+    qol::extension_bag::ui_state().objects.module_view_installed = true;
+    qol::extension_bag::ui_state().objects.module_view_index = bag;
     QOL_LOG_INFO(QolDomain::kExtensionBag, "module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
     return true;
 }
 
 // A saved projection root is reusable only while the UI adapter reports the same live tree.
 bool ensure_module_view_root_current_locked() {
-    if (!runtime_state().objects.module_view_installed || !virtual_bag::valid_index(runtime_state().objects.module_view_index)) return false;
-    const int bag = runtime_state().objects.module_view_index;
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || !virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index)) return false;
+    const int bag = qol::extension_bag::ui_state().objects.module_view_index;
     void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
     int child_count = 0;
     const bool current = live_root != nullptr &&
-                         live_root == runtime_state().objects.projected_item_root &&
+                         live_root == qol::extension_bag::ui_state().objects.projected_item_root &&
                          extension_bag_ui_child_count(live_root, &child_count) &&
                          child_count >= runtime_state().objects.bag.capacities[bag];
     if (current) return true;
 
     VIRTBAG_LOG("module view root invalidated bag=%d saved=%p live=%p; reinstalling",
-                bag, runtime_state().objects.projected_item_root, live_root);
+                bag, qol::extension_bag::ui_state().objects.projected_item_root, live_root);
     restore_module_view_locked();
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) return false;
     if (!install_module_view_locked(bag)) {
@@ -498,14 +500,14 @@ bool ensure_module_view_root_current_locked() {
 // H-16 post-projection：一次原版 RefreshItemArea 返回后，按当前逻辑槽重绑投影。
 // 该函数不再由 draw wrapper 每帧调用；无刷新事务的调用方必须使用定点同步。
 void refresh_projection_if_overwritten_locked() {
-    if (!runtime_state().objects.module_view_installed || !ensure_module_view_root_current_locked()) {
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || !ensure_module_view_root_current_locked()) {
         return;
     }
-    const int bag = runtime_state().objects.module_view_index;
+    const int bag = qol::extension_bag::ui_state().objects.module_view_index;
     const int capacity = runtime_state().objects.bag.capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
-        void* item = runtime_state().objects.module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
-        void* ctrl = valid_child_locked(runtime_state().objects.projected_item_root, slot);
+        void* item = qol::extension_bag::ui_state().objects.module_objects[bag][slot];  // 空槽为 nullptr，同样需要清空控件
+        void* ctrl = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, slot);
         if (ctrl == nullptr) {
             QOL_LOG_ERROR(QolDomain::kExtensionBag,
                           "ERROR projection refresh child disappeared bag=%d slot=%d",
@@ -534,23 +536,23 @@ void refresh_projection_if_overwritten_locked() {
 }
 
 bool sync_projected_slot_locked(int bag, int slot) {
-    if (!runtime_state().objects.module_view_installed || !ensure_module_view_root_current_locked() ||
-        bag != runtime_state().objects.module_view_index ||
-        !virtual_bag::valid_index(bag) || runtime_state().objects.projected_item_root == nullptr || slot < 0 ||
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || !ensure_module_view_root_current_locked() ||
+        bag != qol::extension_bag::ui_state().objects.module_view_index ||
+        !virtual_bag::valid_index(bag) || qol::extension_bag::ui_state().objects.projected_item_root == nullptr || slot < 0 ||
         slot >= runtime_state().objects.bag.capacities[bag]) {
         return false;
     }
-    void* ctrl = valid_child_locked(runtime_state().objects.projected_item_root, slot);
+    void* ctrl = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, slot);
     if (ctrl == nullptr) return false;
-    return extension_bag_ui_set_control_item(ctrl, runtime_state().objects.module_objects[bag][slot]);
+    return extension_bag_ui_set_control_item(ctrl, qol::extension_bag::ui_state().objects.module_objects[bag][slot]);
 }
 
 void refresh_projected_module_view_after_move_locked() {
-    if (!runtime_state().objects.module_view_installed || !ensure_module_view_root_current_locked() ||
-        !virtual_bag::valid_index(runtime_state().objects.module_view_index)) return;
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || !ensure_module_view_root_current_locked() ||
+        !virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index)) return;
     // 原版 UIEquip_InvenItemControlEventProc 在移动成功后先刷新区域：该调用除了
     // SetItem，还会按当前容量更新每个槽的 Active/Show 状态；随后再覆盖回扩展对象。
-    refresh_module_item_area_locked(runtime_state().objects.module_view_index);
+    refresh_module_item_area_locked(qol::extension_bag::ui_state().objects.module_view_index);
 }
 
 namespace {
@@ -570,37 +572,37 @@ struct RefreshRestoreSuppressScope {
 }  // namespace
 
 void restore_module_view_locked() {
-    if (!runtime_state().objects.module_view_installed) return;
+    if (!qol::extension_bag::ui_state().objects.module_view_installed) return;
     RefreshRestoreSuppressScope suppress_refresh;
     // P4.3：视图借出逐槽归还（安装时借出的槽位必须成对归还，窗口外借用为零）。
-    if (virtual_bag::valid_index(runtime_state().objects.module_view_index)) {
+    if (virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index)) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            const uint32_t handle = runtime_state().objects.module_object_handles[runtime_state().objects.module_view_index][slot];
-            if (ownership::live_state(runtime_state().objects.ownership_ledger, handle,
+            const uint32_t handle = qol::extension_bag::ui_state().objects.module_object_handles[qol::extension_bag::ui_state().objects.module_view_index][slot];
+            if (ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
                                       ownership::State::kBorrowedForView)) {
-                ownership::return_from_view(&runtime_state().objects.ownership_ledger, handle);
+                ownership::return_from_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle);
             }
         }
         log_ownership_audit_locked("restore_module_view");
     }
     clear_original_desc_locked();  // 关闭原版详情面板（二次点击 MakeDesc 打开）
-    if (runtime_state().objects.original_bag_size_bag >= 0) {
+    if (qol::extension_bag::ui_state().objects.original_bag_size_bag >= 0) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
         (void)set_bag_size_word_locked(
-            runtime_state().objects.original_bag_size_bag,
-            (runtime_state().objects.original_bag_size & kCapacityMask) |
-                (runtime_state().objects.original_bag_size & ~kCapacityMask));
+            qol::extension_bag::ui_state().objects.original_bag_size_bag,
+            (qol::extension_bag::ui_state().objects.original_bag_size & kCapacityMask) |
+                (qol::extension_bag::ui_state().objects.original_bag_size & ~kCapacityMask));
     }
     if (!g_skip_restore_refresh && runtime_state().host.game != nullptr &&
         runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();  // 容量字已还原：原版逻辑自动恢复控件（INVEN 全程真实）
     }
-    runtime_state().objects.original_bag_size_bag = -1;
-    runtime_state().objects.original_bag_size = 0;
-    runtime_state().objects.module_window_original_bag = -1;
-    runtime_state().objects.projected_item_root = nullptr;
-    runtime_state().objects.module_view_installed = false;
-    runtime_state().objects.module_view_index = -1;
+    qol::extension_bag::ui_state().objects.original_bag_size_bag = -1;
+    qol::extension_bag::ui_state().objects.original_bag_size = 0;
+    qol::extension_bag::ui_state().objects.module_window_original_bag = -1;
+    qol::extension_bag::ui_state().objects.projected_item_root = nullptr;
+    qol::extension_bag::ui_state().objects.module_view_installed = false;
+    qol::extension_bag::ui_state().objects.module_view_index = -1;
     log_exit_trace_locked("write_restore", 0, 0, 0);
 }
 bool complete_original_exit_locked() {
@@ -616,14 +618,14 @@ bool complete_original_exit_locked() {
     virtual_bag::enter_original(&runtime_state().objects.bag, selected_original_bag);
     extension_bag_mark_dirty_locked();
     persist_state_locked();
-    runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
+    qol::extension_bag::ui_state().ui.exit_display_bag = -1;
     log_exit_trace_locked("complete_success", 0, 0, 0);
     return true;
 }
 
 void cancel_original_exit_locked() {
-    const int original_bag = runtime_state().objects.original_current_got < kNoOriginalBagSelected ?
-                             runtime_state().objects.original_current_got : runtime_state().objects.original_current_direct;
+    const int original_bag = qol::extension_bag::ui_state().objects.original_current_got < virtual_bag::kOriginalNativeBagCount ?
+                             qol::extension_bag::ui_state().objects.original_current_got : qol::extension_bag::ui_state().objects.original_current_direct;
     set_original_bag_locked(original_bag);
     if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
@@ -631,7 +633,7 @@ void cancel_original_exit_locked() {
     virtual_bag::enter_original(&runtime_state().objects.bag, original_bag);
     extension_bag_mark_dirty_locked();
     persist_state_locked();
-    runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
+    qol::extension_bag::ui_state().ui.exit_display_bag = -1;
     log_exit_trace_locked("complete_cancel", 0, 0, 0);
 }
 
@@ -643,10 +645,10 @@ void virtual_bag_f3_wrapper() {
     {
         ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) {
-            original = runtime_state().persistence.orig_f3;
+            original = qol::extension_bag::ui_state().persistence_hooks.orig_f3;
         } else {
         const bool was_exiting_module = runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule;
-        if (runtime_state().objects.module_view_installed) restore_module_view_locked();
+        if (qol::extension_bag::ui_state().objects.module_view_installed) restore_module_view_locked();
         if (!was_exiting_module && runtime_state().objects.bag.mode != virtual_bag::Mode::kOriginal) {
             virtual_bag::enter_original(&runtime_state().objects.bag, original_bag_locked());
             extension_bag_mark_dirty_locked();
@@ -654,14 +656,14 @@ void virtual_bag_f3_wrapper() {
         if (was_exiting_module) {
             cancel_original_exit_locked();
         }
-        runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
-        runtime_state().ui.inventory_frame_active = false;
-        runtime_state().ui.extension_touch_capture = false;
-        runtime_state().ui.extension_drag = {};
+        qol::extension_bag::ui_state().ui.exit_display_bag = -1;
+        qol::extension_bag::ui_state().ui.inventory_frame_active = false;
+        qol::extension_bag::ui_state().ui.extension_touch_capture = false;
+        qol::extension_bag::ui_state().ui.extension_drag = {};
         cancel_projected_drag_session_locked("f3");
         disable_extension_tab_buttons_locked();
         log_exit_trace_locked("f3", 0, 0, 0);
-        original = runtime_state().persistence.orig_f3;
+        original = qol::extension_bag::ui_state().persistence_hooks.orig_f3;
         }
     }
     if (original != nullptr) original();
@@ -677,7 +679,7 @@ void virtual_bag_inventory_enter_wrapper() {
     int keep_module_bag = -1;
     {
         ::qol::extension_bag::ReentryLock lock;
-        original = runtime_state().persistence.orig_enter;
+        original = qol::extension_bag::ui_state().persistence_hooks.orig_enter;
         session_admitted = extension_bag_session_admitted_locked();
         if (session_admitted) {
             keep_module_view =
@@ -692,9 +694,9 @@ void virtual_bag_inventory_enter_wrapper() {
                 virtual_bag::enter_original(&runtime_state().objects.bag, 0);
                 extension_bag_mark_dirty_locked();
             }
-            runtime_state().ui.inventory_frame_active = true;
-            runtime_state().ui.extension_touch_capture = false;
-            runtime_state().ui.extension_drag = {};
+            qol::extension_bag::ui_state().ui.inventory_frame_active = true;
+            qol::extension_bag::ui_state().ui.extension_touch_capture = false;
+            qol::extension_bag::ui_state().ui.extension_drag = {};
             cancel_projected_drag_session_locked("inventory-enter");
             disable_extension_tab_buttons_locked();
             persist_state_locked();
@@ -708,7 +710,7 @@ void virtual_bag_inventory_enter_wrapper() {
         // Preserve the EB bag selected before closing the mixer; installing the
         // projection before the first inventory frame avoids a visible flash of
         // the original bag.
-        if (!runtime_state().objects.module_view_installed) {
+        if (!qol::extension_bag::ui_state().objects.module_view_installed) {
             (void)install_module_view_locked(keep_module_bag);
         }
     } else if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
@@ -721,18 +723,18 @@ void virtual_bag_save_panel_enter_wrapper() {
         runtime_state().host.sdk == nullptr ? nullptr : &runtime_state().host.sdk->in_flight,
         {"own:popup.save_panel"});
     QOL_LOG_DEBUG(QolDomain::kExtensionBag, "save panel enter wrapper invoked world=%d hook=%d",
-                read_world_in_world() ? 1 : 0, runtime_state().persistence.save_panel_hook_installed ? 1 : 0);
+                read_world_in_world() ? 1 : 0, qol::extension_bag::ui_state().persistence_hooks.save_panel_hook_installed ? 1 : 0);
     if (read_world_in_world()) {
         if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->store.save_game != nullptr) {
             (void)runtime_state().host.sdk->store.save_game();
         }
     }
-    if (runtime_state().persistence.orig_save_enter != nullptr) runtime_state().persistence.orig_save_enter();
+    if (qol::extension_bag::ui_state().persistence_hooks.orig_save_enter != nullptr) qol::extension_bag::ui_state().persistence_hooks.orig_save_enter();
 }
 
 bool virtual_bag_sync_projected_bag() {
     ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_session_admitted_locked()) return false;
     refresh_projection_if_overwritten_locked();
-    return runtime_state().objects.module_view_installed;
+    return qol::extension_bag::ui_state().objects.module_view_installed;
 }

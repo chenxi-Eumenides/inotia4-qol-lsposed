@@ -28,6 +28,8 @@
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "contracts/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
+#include "plugins/extension_bag/model/serialization.h"
+#include "plugins/extension_bag/core/drag_session.h"
 #include "plugins/core.item/inventory/inventory_find_item_poc.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/world_teleport/rules.h"
@@ -3059,6 +3061,7 @@ static void test_p44_transaction_stages() {
 
 static void test_p52_drag_session() {
     using namespace virtual_bag;
+    using qol::features::extension_bag::core::classify_drag_target;
 
     ExtensionDragSession session{};
     CHECK_EQ(session_begin(&session, 17, 42, 2, 3), DragTransition::kAdvanced);
@@ -3088,7 +3091,7 @@ static void test_p52_drag_session() {
     ExtensionDragSession tab_session{};
     CHECK_EQ(session_begin(&tab_session, 22, 9, 0, 1), DragTransition::kAdvanced);
     CHECK_EQ(session_on_native_moving(&tab_session, 9), DragTransition::kAdvanced);
-    CHECK_EQ(session_resolve_target(&tab_session, 9, DragTargetKind::kExtensionTab),
+    CHECK_EQ(session_resolve_target(&tab_session, 9, DragTargetKind::kExternalTarget),
              DragTransition::kAdvanced);
     CHECK_EQ(session_begin_transaction(&tab_session, 9), DragTransition::kAdvanced);
     CHECK(session_claim_transaction(&tab_session));
@@ -3104,7 +3107,7 @@ static void test_p52_drag_session() {
 
     ExtensionDragSession tab_illegal{};
     CHECK_EQ(session_begin(&tab_illegal, 23, 9, 0, 1), DragTransition::kAdvanced);
-    CHECK_EQ(session_resolve_target(&tab_illegal, 9, DragTargetKind::kExtensionTab),
+    CHECK_EQ(session_resolve_target(&tab_illegal, 9, DragTargetKind::kExternalTarget),
              DragTransition::kIllegal);
 
     // 非法跳转不能绕过原生 moving、目标解析或事务阶段。
@@ -3149,7 +3152,7 @@ static void test_p52_drag_session() {
     CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 4), DragTargetKind::kExtensionSlot);
     CHECK_EQ(classify_drag_target(extension_logical_bag_last(), 15), DragTargetKind::kExtensionSlot);
     CHECK_EQ(classify_drag_target(kExtensionLogicalBagFirst, 0, true),
-             DragTargetKind::kExtensionTab);
+             DragTargetKind::kExternalTarget);
     CHECK_EQ(classify_drag_target(kOriginalTaskBag, 0), DragTargetKind::kTaskBagRejected);
     CHECK_EQ(classify_drag_target(0, kSlotCount), DragTargetKind::kInvalid);
     CHECK_EQ(classify_drag_target(0, 0, false, true), DragTargetKind::kCancel);

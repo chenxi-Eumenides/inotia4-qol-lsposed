@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/core/drag_session.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -5,31 +6,31 @@
 #include "plugins/extension_bag/runtime/logging.h"
 
 void begin_projected_drag_session_locked(int source_slot) {
-    if (runtime_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) return;
-    const uint64_t token = runtime_state().p5_observation_sequence.fetch_add(1) + 1;
-    if (virtual_bag::session_begin(&runtime_state().ui.extension_drag_session, token,
-                                   runtime_state().ui.extension_tab_generation, runtime_state().objects.module_view_index,
+    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) return;
+    const uint64_t token = qol::extension_bag::ui_state().aux.p5_observation_sequence.fetch_add(1) + 1;
+    if (virtual_bag::session_begin(&qol::extension_bag::ui_state().ui.extension_drag_session, token,
+                                   qol::extension_bag::ui_state().ui.extension_tab_generation, qol::extension_bag::ui_state().objects.module_view_index,
                                    source_slot) == virtual_bag::DragTransition::kAdvanced) {
-        if (virtual_bag::valid_index(runtime_state().objects.module_view_index) && source_slot >= 0 &&
+        if (virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index) && source_slot >= 0 &&
             source_slot < virtual_bag::kSlotCount) {
-            runtime_state().ui.extension_drag_session.source_identity =
-                runtime_state().objects.module_object_handles[runtime_state().objects.module_view_index][source_slot];
+            qol::extension_bag::ui_state().ui.extension_drag_session.source_identity =
+                qol::extension_bag::ui_state().objects.module_object_handles[qol::extension_bag::ui_state().objects.module_view_index][source_slot];
         }
         VIRTBAG_LOG("p5 session begin token=%llu source=%d/%d generation=%llu",
-                    static_cast<unsigned long long>(token), runtime_state().objects.module_view_index, source_slot,
-                    static_cast<unsigned long long>(runtime_state().ui.extension_tab_generation));
+                    static_cast<unsigned long long>(token), qol::extension_bag::ui_state().objects.module_view_index, source_slot,
+                    static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.extension_tab_generation));
     }
 }
 
 void advance_projected_drag_session_locked() {
-    if (runtime_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kPressed) return;
+    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kPressed) return;
     if (touch_moving_item_control_locked() == nullptr) return;
-    virtual_bag::session_on_native_moving(&runtime_state().ui.extension_drag_session,
-                                          runtime_state().ui.extension_tab_generation);
+    virtual_bag::session_on_native_moving(&qol::extension_bag::ui_state().ui.extension_drag_session,
+                                          qol::extension_bag::ui_state().ui.extension_tab_generation);
 }
 
 bool projected_drag_session_active_locked() {
-    const auto& session = runtime_state().ui.extension_drag_session;
+    const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
     // session 本身只由当前投影槽 press 建立；即使投影 generation 随后失效，也必须
     // 继续把 release 视为模块拥有，不能让 stale session 穿过原版 INVEN 链。
     return session.phase != virtual_bag::DragPhase::kIdle &&
@@ -38,7 +39,7 @@ bool projected_drag_session_active_locked() {
 }
 
 void cancel_projected_drag_session_locked(const char* reason) {
-    auto& session = runtime_state().ui.extension_drag_session;
+    auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
     if (session.phase == virtual_bag::DragPhase::kIdle) return;
     if (session.phase == virtual_bag::DragPhase::kRejected ||
         session.phase == virtual_bag::DragPhase::kCommitted) {
@@ -50,7 +51,7 @@ void cancel_projected_drag_session_locked(const char* reason) {
         return;
     }
     const virtual_bag::DragTransition transition =
-        virtual_bag::session_on_cancel(&session, runtime_state().ui.extension_tab_generation);
+        virtual_bag::session_on_cancel(&session, qol::extension_bag::ui_state().ui.extension_tab_generation);
     VIRTBAG_LOG("p5 session cancel reason=%s token=%llu phase=%d transition=%d",
                 reason != nullptr ? reason : "unknown",
                 static_cast<unsigned long long>(session.token),

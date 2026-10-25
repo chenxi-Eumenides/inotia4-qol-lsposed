@@ -1,52 +1,48 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/usecases/item.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
-#include "game_ui_virtbag.h"
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/shared.h"
+#include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/state.h"
-
-#include <mutex>
 
 namespace qol::features::extension_bag::usecases {
 
-std::string click_item(int logical_bag, int slot) {
+ClickItemResult click_item(int logical_bag, int slot) {
     if (!qol::extension_bag::extension_bag_on_main_thread()) {
-        return extension_bag_not_ready_error_locked_bridge();
+        return {false, runtime_state().enabled.load() ? Error::kNotInGame : Error::kDisabled};
     }
-    if (!extension_bag_ready_locked_bridge()) return extension_bag_not_ready_error_locked_bridge();
-    if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
-    const int internal_bag = extension_internal_bag_bridge(logical_bag);
-    if (internal_bag < 0) return op_err("bad extension bag (6-10)");
+    if (!extension_bag_ready_locked()) {
+        return {false, runtime_state().enabled.load() ? Error::kNotInGame : Error::kDisabled};
+    }
+    if (slot < 0 || slot >= virtual_bag::kSlotCount) return {false, Error::kBadSlot};
+    const int internal_bag = extension_internal_bag(logical_bag);
+    if (internal_bag < 0) return {false, Error::kBadBag};
     ::qol::extension_bag::ReentryLock lock;
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked()) {
-        return extension_bag_not_ready_error_locked_bridge();
+        return {false, runtime_state().enabled.load() ? Error::kNotInGame : Error::kDisabled};
     }
-    ensure_state_loaded_locked();
     if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule) {
-        return op_err("not in extension view");
+        return {false, Error::kNotInExtensionView};
     }
-    if (runtime_state().objects.bag.selected != internal_bag) return op_err("bag not selected");
+    if (runtime_state().objects.bag.selected != internal_bag) return {false, Error::kBagNotSelected};
     if (slot >= runtime_state().objects.bag.capacities[internal_bag]) {
-        return op_err("slot beyond derived capacity");
+        return {false, Error::kSlotBeyondCapacity};
     }
     const virtual_bag::Item& item = runtime_state().objects.bag.items[internal_bag][slot];
     if (item.category <= 0 || item.count <= 0) {
         runtime_state().objects.bag.inspected = -1;
         persist_state_locked();
-        return "{\"ok\":true,\"item\":null}";
+        return {true, Error::kNone, false, logical_bag, slot, 0, {}};
     }
     runtime_state().objects.bag.inspected = slot;
     persist_state_locked();
-    return "{\"ok\":true,\"item\":{\"bag\":" + std::to_string(logical_bag) +
-           ",\"slot\":" + std::to_string(slot) +
-           ",\"category\":" + std::to_string(item.category) +
-           ",\"count\":" +
-           std::to_string(static_cast<int>(virtual_bag_effective_count(runtime_state().objects.module_objects[internal_bag][slot], static_cast<uint32_t>(item.count)))) +
-           ",\"payload\":\"" +
-           virtual_bag::base64_encode(item.payload.data(), item.payload_size) + "\"}}";
+    return {true, Error::kNone, true, logical_bag, slot,
+            static_cast<int>(virtual_bag_effective_count(
+                qol::extension_bag::ui_state().objects.module_objects[internal_bag][slot],
+                static_cast<uint32_t>(item.count))), item};
 }
 
 }  // namespace qol::features::extension_bag::usecases

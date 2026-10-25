@@ -1,5 +1,6 @@
 #pragma once
 
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);

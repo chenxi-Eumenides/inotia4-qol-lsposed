@@ -1,6 +1,7 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/transaction/transaction.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/host_adapter.h"
@@ -28,8 +29,7 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/model/store_sell_rules.h"
@@ -127,7 +127,7 @@ void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, ui
     // synchronous on the UI thread and also inflated 0x19 move latency.
     (void)phase; (void)event; (void)param; (void)param2; (void)x; (void)y;
     return;
-    const uint64_t sequence = runtime_state().exit_trace_sequence.fetch_add(1) + 1;
+    const uint64_t sequence = qol::extension_bag::ui_state().aux.exit_trace_sequence.fetch_add(1) + 1;
     const auto now = std::chrono::steady_clock::now().time_since_epoch();
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
     VIRTBAG_LOG("exit seq=%llu ms=%lld phase=%s event=0x%llx param=0x%llx param2=0x%llx x=%lld y=%lld mode=%d selected=%d inspected=%d overlay=%d overlay_index=%d direct=%d got=%d desc=%d saved_direct=%u saved_got=%u",
@@ -135,15 +135,15 @@ void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param, ui
                 static_cast<unsigned long long>(event), static_cast<unsigned long long>(param),
                 static_cast<unsigned long long>(param2), static_cast<long long>(x), static_cast<long long>(y),
                 static_cast<int>(runtime_state().objects.bag.mode), runtime_state().objects.bag.selected,
-                runtime_state().objects.bag.inspected, runtime_state().objects.module_view_installed ? 1 : 0, runtime_state().objects.module_view_index,
+                runtime_state().objects.bag.inspected, qol::extension_bag::ui_state().objects.module_view_installed ? 1 : 0, qol::extension_bag::ui_state().objects.module_view_index,
                 raw_direct_bag_locked(), raw_got_bag_locked(), raw_desc_type_locked(),
-                static_cast<unsigned int>(runtime_state().objects.original_current_direct),
-                static_cast<unsigned int>(runtime_state().objects.original_current_got));
+                static_cast<unsigned int>(qol::extension_bag::ui_state().objects.original_current_direct),
+                static_cast<unsigned int>(qol::extension_bag::ui_state().objects.original_current_got));
 }
 bool module_cache_clear_preflight_locked() {
     for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            const ModuleUseState& use = runtime_state().objects.module_object_use[bag][slot];
+            const ModuleUseState& use = qol::extension_bag::ui_state().objects.module_object_use[bag][slot];
             if (use.active) {
                 VIRTBAG_LOG("module cache clear preflight rejected active object bag=%d slot=%d item=%p generation=%llu",
                             bag, slot, use.item,
@@ -164,33 +164,33 @@ bool clear_module_cache_locked() {
             // exit instead of retaining stale pointers across saves.
             if (!free_module_object_locked(bag, slot)) {
                 VIRTBAG_LOG("module cache clear aborted; retained object bag=%d slot=%d item=%p",
-                            bag, slot, runtime_state().objects.module_objects[bag][slot]);
+                            bag, slot, qol::extension_bag::ui_state().objects.module_objects[bag][slot]);
                 return false;
             }
         }
     }
     cancel_projected_drag_session_locked("module-cache-clear");
     reset_extension_desc_item_hooks_locked();
-    runtime_state().ui.extension_desc_item = nullptr;
-    runtime_state().ui.extension_desc_item_bag = -1;
-    runtime_state().ui.extension_desc_item_slot = -1;
-    runtime_state().objects.original_inventory.fill(nullptr);
+    qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+    qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+    qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
+    qol::extension_bag::ui_state().objects.original_inventory.fill(nullptr);
     // 标签袋物品对象是 ItemPool 里的裸指针，跨存档槽位加载必须失效：游戏
     // SAVE_LoadItem 重置/回收池内存，旧指针会被新读入的存档物品复用（真机
     // 实证：返回主菜单不保存重进存档后，扩展标签/信息页显示成药水、金币）。
     // 此处只清引用不释放——对象可能已被池回收，再 ItemPool_Free 是 UAF；
     // 下次 install_extension_tab_buttons 按 types 重建新对象。
-    for (void*& tab_item : runtime_state().ui.tab_bag_items) tab_item = nullptr;
-    runtime_state().objects.original_bag_size_bag = -1;
-    runtime_state().objects.original_bag_size = 0;
-    runtime_state().objects.module_window_original_bag = -1;
-    runtime_state().objects.original_current_direct = 0;
-    runtime_state().objects.original_current_got = 0;
-    runtime_state().objects.module_view_installed = false;
-    runtime_state().objects.module_view_index = -1;
+    for (void*& tab_item : qol::extension_bag::ui_state().ui.tab_bag_items) tab_item = nullptr;
+    qol::extension_bag::ui_state().objects.original_bag_size_bag = -1;
+    qol::extension_bag::ui_state().objects.original_bag_size = 0;
+    qol::extension_bag::ui_state().objects.module_window_original_bag = -1;
+    qol::extension_bag::ui_state().objects.original_current_direct = 0;
+    qol::extension_bag::ui_state().objects.original_current_got = 0;
+    qol::extension_bag::ui_state().objects.module_view_installed = false;
+    qol::extension_bag::ui_state().objects.module_view_index = -1;
     runtime_state().persistence.dirty = false;
-    runtime_state().ui.extension_touch_capture = false;
-    runtime_state().ui.extension_drag = {};
+    qol::extension_bag::ui_state().ui.extension_touch_capture = false;
+    qol::extension_bag::ui_state().ui.extension_drag = {};
     return true;
 }
 
@@ -326,9 +326,9 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
         persist_state_locked();
         return;
     }
-    const bool restore_module = runtime_state().objects.module_view_installed;
-    const int restore_bag = runtime_state().objects.module_view_index;
-    const int restore_original_bag = runtime_state().objects.module_window_original_bag;
+    const bool restore_module = qol::extension_bag::ui_state().objects.module_view_installed;
+    const int restore_bag = qol::extension_bag::ui_state().objects.module_view_index;
+    const int restore_original_bag = qol::extension_bag::ui_state().objects.module_window_original_bag;
     const virtual_bag::Mode restore_mode = runtime_state().objects.bag.mode;
     const int restore_selected = runtime_state().objects.bag.selected;
     const int restore_inspected = runtime_state().objects.bag.inspected;
@@ -466,15 +466,15 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
         set_original_bag_locked(host_bag);
         const bool installed = virtual_bag::valid_index(restore_bag) &&
                                install_module_view_locked(restore_bag) &&
-                               runtime_state().objects.module_view_installed &&
-                               runtime_state().objects.module_view_index == restore_bag &&
-                               runtime_state().objects.projected_item_root != nullptr;
+                               qol::extension_bag::ui_state().objects.module_view_installed &&
+                               qol::extension_bag::ui_state().objects.module_view_index == restore_bag &&
+                               qol::extension_bag::ui_state().objects.projected_item_root != nullptr;
         if (installed) {
             runtime_state().objects.bag.mode = restore_mode;
             runtime_state().objects.bag.selected = restore_selected;
             runtime_state().objects.bag.inspected = restore_inspected;
         } else {
-            if (runtime_state().objects.module_view_installed) restore_module_view_locked();
+            if (qol::extension_bag::ui_state().objects.module_view_installed) restore_module_view_locked();
             QOL_LOG_ERROR(QolDomain::kExtensionBag,
                           "ERROR pending recovery could not restore module projection bag=%d host=%d",
                           restore_bag, host_bag);
@@ -493,7 +493,7 @@ bool item_pointer_known_locked(void* item) {
     if (item == nullptr) return true;  // 空指针由调用方各自处理
     for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (runtime_state().objects.module_objects[bag][slot] == item) return true;
+            if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item) return true;
         }
     }
     if (original_inventory_contains_cached_locked(item)) return true;

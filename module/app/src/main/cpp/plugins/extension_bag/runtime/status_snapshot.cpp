@@ -1,8 +1,6 @@
 #include "plugins/extension_bag/runtime/status_snapshot.h"
 
-#include "plugins/extension_bag/runtime/projection_controller.h"
-#include "plugins/extension_bag/runtime/state.h"
-#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/model/serialization.h"
 
 #include <memory>
 #include <string>
@@ -20,39 +18,8 @@ const char* recovery_action_name(virtual_bag::RecoveryAction action) {
 
 }  // namespace
 
-void publish_status_snapshot() {
-    const auto& state = runtime_state();
-    auto snapshot = std::make_shared<StatusSnapshot>();
-    snapshot->bag = state.objects.bag;
-    snapshot->enabled = state.enabled.load(std::memory_order_acquire);
-    const int active_bags =
-        virtual_bag::clamp_active_extension_bags(snapshot->bag.bag_count);
-    for (int bag = 0; bag < active_bags; ++bag) {
-        const int capacity = snapshot->bag.capacities[bag];
-        for (int slot = 0; slot < capacity && slot < virtual_bag::kSlotCount; ++slot) {
-            const virtual_bag::Item& item = snapshot->bag.items[bag][slot];
-            if (item.category <= 0 || item.count <= 0) continue;
-            snapshot->effective_counts[bag][slot] = virtual_bag_effective_count(
-                state.objects.module_objects[bag][slot], static_cast<uint32_t>(item.count));
-        }
-    }
-    snapshot->injected = state.persistence.state_entry != nullptr;
-    snapshot->save_panel_hook_installed = state.persistence.save_panel_hook_installed;
-    snapshot->extension_tab_button = state.ui.extension_tab_buttons[0] != nullptr;
-    snapshot->inventory_frame_active = state.ui.inventory_frame_active;
-    snapshot->recovery_action = virtual_bag::recovery_action(snapshot->bag, snapshot->bag.pending);
-    snapshot->revision = state.persistence.revision.load(std::memory_order_acquire);
-
-    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
-    if (state.host.game != nullptr && state.host.write_port != nullptr) {
-        for (int bag = 0; bag < static_cast<int>(snapshot->original_capacities.size()); ++bag) {
-            uint32_t word = 0;
-            if (bag_size_word_locked(bag, &word)) {
-                snapshot->original_capacities[bag] = static_cast<int32_t>(word & kCapacityMask);
-            }
-        }
-    }
-
+void publish_status_snapshot(const StatusSnapshot& value) {
+    auto snapshot = std::make_shared<StatusSnapshot>(value);
     std::atomic_store_explicit(&g_status_snapshot, StatusSnapshotPtr(std::move(snapshot)),
                                std::memory_order_release);
 }

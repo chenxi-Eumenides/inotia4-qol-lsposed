@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -19,8 +20,7 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/model/store_sell_rules.h"
@@ -29,7 +29,7 @@
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -54,35 +54,18 @@ void* virtual_bag_item_at(int bag, int slot) {
         return nullptr;
     }
     ::qol::extension_bag::ReentryLock lock;
-    ensure_state_loaded_locked();
     return module_item_locked(bag, slot);
 }
 
 void* virtual_bag_view_item_at(int bag, int slot) {
     // 仅当 bag 处于扩展视图（控件 index 与扩展槽 1:1 对应）时才物化兜底；
     // 原版视图下原版坐标读出的 null 就是真空槽，不得误物化成扩展物品。
-    if (!::qol::extension_bag::access::objects().module_view_installed || ::qol::extension_bag::access::objects().module_view_index != bag) return nullptr;
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || qol::extension_bag::ui_state().objects.module_view_index != bag) return nullptr;
     if (!virtual_bag::valid_index(bag) || slot < 0 || slot >= virtual_bag::kSlotCount) {
         return nullptr;
     }
     ::qol::extension_bag::ReentryLock lock;
-    ensure_state_loaded_locked();
     return module_item_locked(bag, slot);
-}
-JNIEnv* extension_bag_current_env() {
-    return current_env();
-}
-
-jclass extension_bag_bridge_class() {
-    return ::qol::extension_bag::access::persistence().bridge_class;
-}
-
-virtual_bag::State* extension_bag_state() {
-    return &::qol::extension_bag::access::bag();
-}
-
-uint64_t extension_bag_isolation_now_ms() {
-    return isolation_now_ms_locked();
 }
 uint64_t virtual_bag_observe_item_proc_pre(void* control, uint64_t event, void* x2, void* param) {
     if (g_p5_observation_active || !p5_observation_enabled() ||
@@ -121,7 +104,8 @@ void virtual_bag_observe_item_proc_post(uint64_t observation_token, void* contro
 
 bool virtual_bag_is_inventory_enter(uintptr_t enter) {
     ::qol::extension_bag::ReentryLock lock;
-    return ::qol::extension_bag::access::persistence().inventory_enter != 0 && enter == ::qol::extension_bag::access::persistence().inventory_enter;
+    const uintptr_t inventory_enter = qol::extension_bag::ui_state().persistence_hooks.inventory_enter;
+    return inventory_enter != 0 && enter == inventory_enter;
 }
 
 bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int target_slot,
@@ -129,19 +113,19 @@ bool virtual_bag_capture_move_item_observation(void* item, int target_bag, int t
     if (out == nullptr) return false;
     ::qol::extension_bag::ReentryLock lock;
     *out = {};
-    out->module_view_index = ::qol::extension_bag::access::objects().module_view_index;
+    out->module_view_index = qol::extension_bag::ui_state().objects.module_view_index;
     out->drag_session_active = projected_drag_session_active_locked();
     out->extension_item = item != nullptr &&
                           module_slot_of_item_locked(item, &out->extension_bag,
                                                      &out->extension_slot);
     if (out->extension_item) {
         out->extension_handle =
-            ::qol::extension_bag::access::objects().module_object_handles[out->extension_bag][out->extension_slot];
+            qol::extension_bag::ui_state().objects.module_object_handles[out->extension_bag][out->extension_slot];
         for (const ownership::State state : {ownership::State::kModuleOwned,
                                              ownership::State::kBorrowedForView,
                                              ownership::State::kInventoryOwned,
                                              ownership::State::kReleased}) {
-            if (ownership::live_state(::qol::extension_bag::access::objects().ownership_ledger, out->extension_handle, state)) {
+            if (ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, out->extension_handle, state)) {
                 out->ownership_state = static_cast<int>(state);
                 break;
             }
@@ -175,8 +159,8 @@ bool set_virtual_bag_enabled(bool enabled) {
             ::qol::extension_bag::access::bag().mode = virtual_bag::Mode::kOriginal;
             ::qol::extension_bag::access::bag().selected = -1;
             ::qol::extension_bag::access::bag().inspected = -1;
-            ::qol::extension_bag::access::ui().extension_drag = {};
-            ::qol::extension_bag::access::ui().extension_touch_capture = false;
+            qol::extension_bag::ui_state().ui.extension_drag = {};
+            qol::extension_bag::ui_state().ui.extension_touch_capture = false;
         }
     }
     if (!set_extension_source_protection_enabled(enabled)) {
@@ -201,7 +185,7 @@ bool virtual_bag_prepare_save_slot_load() {
         VIRTBAG_LOG("prepare save-slot load preflight failed");
         return false;
     }
-    if (::qol::extension_bag::access::objects().module_view_installed) restore_module_view_locked();
+    if (qol::extension_bag::ui_state().objects.module_view_installed) restore_module_view_locked();
     if (!clear_module_cache_locked()) {
         VIRTBAG_LOG("prepare save-slot load blocked by active module object");
         return false;
@@ -209,7 +193,7 @@ bool virtual_bag_prepare_save_slot_load() {
     ::qol::extension_bag::access::bag() = {};
     ::qol::extension_bag::access::persistence().loaded_slot = -2;
     disable_extension_tab_buttons_locked();
-    ::qol::extension_bag::access::ui().extension_tab_buttons.fill(nullptr);
+    qol::extension_bag::ui_state().ui.extension_tab_buttons.fill(nullptr);
     return true;
 }
 
@@ -240,7 +224,6 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
     // 由调用方回退原版计数。
     ::qol::extension_bag::TryReentryLock lock;
     if (!lock.owns_lock()) return;
-    ensure_state_loaded_locked();
     // P3c 准入：session 未加载/epoch 未登记/降级阻断时明确拒绝扫描（不产出任何物品，
     // 不再惰性 IO 兜底空状态）。
     if (!extension_bag_session_admitted_locked()) {
@@ -255,13 +238,13 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx) {
             const virtual_bag::Item& item = ::qol::extension_bag::access::bag().items[bag][slot];
             if (item.category <= 0 || item.count <= 0) continue;
             qol::contracts::QolItemHandle item_handle = qol::contracts::kInvalidItemHandle;
-            void* native_item = ::qol::extension_bag::access::objects().module_objects[bag][slot];
+            void* native_item = qol::extension_bag::ui_state().objects.module_objects[bag][slot];
             if (native_item != nullptr && extension_bag_register_item_handle(native_item)) {
                 (void)extension_bag_item_handle_for_pointer(native_item, &item_handle);
             }
             if (fn(virtual_bag::kExtensionLogicalBagFirst + bag, slot, item.category,
                    static_cast<int>(virtual_bag_effective_count(
-                        ::qol::extension_bag::access::objects().module_objects[bag][slot], static_cast<uint32_t>(item.count))),
+                        qol::extension_bag::ui_state().objects.module_objects[bag][slot], static_cast<uint32_t>(item.count))),
                    item_handle, ctx)) {
                 return;
             }
@@ -329,28 +312,28 @@ std::string data_virtual_bag_test_equip(int index, int bag_type) {
     bool updated = false;
     {
         ::qol::extension_bag::ReentryLock lock;
-        if (!extension_bag_session_admitted_locked()) return op_err("slot data not ready");
+        if (!extension_bag_session_admitted_locked()) return extension_bag_op_err("slot data not ready");
         updated = virtual_bag::set_test_equipped(&::qol::extension_bag::access::bag(), index, bag_type);
         if (updated) extension_bag_mark_dirty_locked();
     }
-    if (!updated) return op_err("bad virtual bag index or bag type");
-    return op_ok();
+    if (!updated) return extension_bag_op_err("bad virtual bag index or bag type");
+    return extension_bag_op_ok();
 }
 
 std::string data_virtual_bag_test_item(int index, int slot, int category, int count) {
     bool updated = false;
     {
         ::qol::extension_bag::ReentryLock lock;
-        if (!extension_bag_session_admitted_locked()) return op_err("slot data not ready");
+        if (!extension_bag_session_admitted_locked()) return extension_bag_op_err("slot data not ready");
         if (!virtual_bag::valid_index(index) || slot < 0 || slot >= virtual_bag::kSlotCount ||
             category <= 0 || count <= 0) {
-            return op_err("bad virtual bag item");
+            return extension_bag_op_err("bad virtual bag item");
         }
         // Production items always carry a serialized payload. Without it the
         // projection cannot materialize a native object, so debug injection
         // would update status but leave the EB grid empty.
         void* native_item = extension_create_item(category, 0, 0, count);
-        if (native_item == nullptr) return op_err("create item failed");
+        if (native_item == nullptr) return extension_bag_op_err("create item failed");
         std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
         int payload_size = 0;
         const auto* write_api = extension_bag_write_api();
@@ -360,7 +343,7 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
                                     native_item, &payload_size)) &&
                                 payload_size > 0;
         (void)extension_free_item(native_item);
-        if (!serialized) return op_err("serialize item failed");
+        if (!serialized) return extension_bag_op_err("serialize item failed");
         updated = virtual_bag::set_item(&::qol::extension_bag::access::bag(), index, slot, category, count);
         if (updated) {
             virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[index][slot];
@@ -369,6 +352,6 @@ std::string data_virtual_bag_test_item(int index, int slot, int category, int co
             extension_bag_mark_dirty_locked();
         }
     }
-    if (!updated) return op_err("bad virtual bag item");
-    return op_ok();
+    if (!updated) return extension_bag_op_err("bad virtual bag item");
+    return extension_bag_op_ok();
 }

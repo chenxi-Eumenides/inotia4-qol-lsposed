@@ -19,13 +19,12 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -47,5 +46,15 @@
 
 
 std::string data_op_extension_bag_set_bag_count(int count) {
-    return qol::features::extension_bag::usecases::usecase_set_bag_count(count);
+    const auto result = qol::features::extension_bag::usecases::usecase_set_bag_count(count);
+    if (result.ok) {
+        return "{\"ok\":true,\"count\":" + std::to_string(result.count) + "}";
+    }
+    if (result.error == qol::features::extension_bag::usecases::Error::kInvalidBagCount) {
+        const std::string message = "count required (1-" +
+            std::to_string(virtual_bag::kMaxExtensionBags) + ")";
+        return extension_bag_op_err(message.c_str());
+    }
+    return extension_bag_op_err(
+        qol::features::extension_bag::usecases::error_text(result.error));
 }

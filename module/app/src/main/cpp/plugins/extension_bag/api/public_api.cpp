@@ -1,5 +1,5 @@
 #include "plugins/extension_bag/game_ui_virtbag.h"
-#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/api/api_impl.h"
 
 std::string data_op_extension_bag_enter_view(int logical_bag) {
     return extension_bag_api_enter_view_impl(logical_bag);

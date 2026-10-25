@@ -1,15 +1,18 @@
 add_library(qol_plugin_extension_bag STATIC
+    core/ui_state.cpp
+    core/status_snapshot.cpp
     runtime/state.cpp
     runtime/entry_guard.cpp
     runtime/bag_state_store.cpp
     runtime/status_snapshot.cpp
     runtime/inventory_access.cpp
     runtime/item_access.cpp
+    runtime/ui_ports.cpp
     runtime/session.cpp
     runtime/state_load.cpp
+    runtime/response.cpp
     core/native_tab_layout.cpp
     core/host_adapter.cpp
-    core/unequip.cpp
     core/tabs_ui.cpp
     core/orchestrator.cpp
     public/counts.cpp
@@ -23,9 +26,10 @@ add_library(qol_plugin_extension_bag STATIC
     interface/bag_query.cpp
     interface/bag_command.cpp
     usecases/item.cpp
-    core/view.cpp
     usecases/move.cpp
     usecases/set_bag_count.cpp
+    usecases/view.cpp
+    usecases/unequip.cpp
     assembly/claims.cpp
     assembly/move_merge_impl.cpp
     core/observation.cpp
@@ -54,7 +58,7 @@ add_library(qol_plugin_extension_bag STATIC
     api/api_table.cpp
     api/neutral_provider.cpp
     persistence/persistence.cpp
-    extension_bag_geometry.cpp
+    core/geometry.cpp
     api/public_api.cpp
     http/routes.cpp
     http/query.cpp

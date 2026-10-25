@@ -1,5 +1,9 @@
 #include "plugins/extension_bag/extension_bag_bridge.h"
+#include "plugins/extension_bag/core/drag_session.h"
+#include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/ui_ports.h"
+#include "contracts/ui.h"
 
 #include <cstddef>
 
@@ -41,6 +45,7 @@ bool extension_bag_bind_host(const qol::contracts::QolHostSdk* sdk,
     runtime_state().host.sdk = sdk;
     runtime_state().host.game = game;
     runtime_state().host.write_port = write_port;
+    set_ui_ports(sync_projected_slot_locked, reset_drag_state_locked);
     return true;
 }
 
@@ -54,9 +59,6 @@ void extension_bag_bind_inventory_extras(
     runtime_state().host.inventory_extras = port;
 }
 
-const qol::contracts::QolGameHost* extension_bag_game_host() { return runtime_state().host.game; }
-const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return runtime_state().host.sdk; }
-
 void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts) {
     runtime_state().host.item_facts = facts;
 }
@@ -66,7 +68,5 @@ const qol::contracts::ItemFactsApi* extension_bag_item_facts() { return runtime_
 void extension_bag_bind_craft_facts(const qol::contracts::CraftFactsApi* facts) {
     runtime_state().host.craft_facts = facts;
 }
-
-const qol::contracts::CraftFactsApi* extension_bag_craft_facts() { return runtime_state().host.craft_facts; }
 
 }  // namespace qol::features::extension_bag

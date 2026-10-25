@@ -26,7 +26,8 @@ struct StatusSnapshot {
 using StatusSnapshotPtr = std::shared_ptr<const StatusSnapshot>;
 
 // 主线程在扩展状态提交点发布；查询线程只读取最近一次已发布的不可变快照。
-void publish_status_snapshot();
+void publish_status_snapshot(const StatusSnapshot& snapshot);
+void publish_extension_bag_status_snapshot();
 StatusSnapshotPtr load_status_snapshot();
 std::string status_snapshot_json(const StatusSnapshot& snapshot);
 

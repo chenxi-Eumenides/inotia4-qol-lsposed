@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -6,7 +7,7 @@
 
 int extension_tab_index(void* ctrl) {
     for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
-        if (runtime_state().ui.extension_tab_buttons[index] == ctrl) return index;
+        if (qol::extension_bag::ui_state().ui.extension_tab_buttons[index] == ctrl) return index;
     }
     return -1;
 }
@@ -17,7 +18,7 @@ bool defer_item_free_locked(void* item);
 void refresh_tab_bag_items_locked() {
     for (int i = 0; i < virtual_bag::kMaxExtensionBags; ++i) {
         const uint8_t type = runtime_state().objects.bag.types[i];
-        void*& slot = runtime_state().ui.tab_bag_items[i];
+        void*& slot = qol::extension_bag::ui_state().ui.tab_bag_items[i];
         if (type == 0) {
             if (slot != nullptr) {
                 if (defer_item_free_locked(slot)) {

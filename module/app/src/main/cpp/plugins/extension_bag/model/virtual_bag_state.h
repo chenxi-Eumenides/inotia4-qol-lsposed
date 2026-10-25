@@ -7,7 +7,6 @@
 #include <cstring>
 #include <cstdio>
 #include <limits>
-#include <string>
 #include <type_traits>
 
 #include "plugins/extension_bag/model/bag_catalog.h"
@@ -143,6 +142,4 @@ enum class RecoveryAction {
 
 #include "plugins/extension_bag/model/virtual_bag_transaction_rules.inc"
 #include "plugins/extension_bag/model/virtual_bag_state_ops.inc"
-#include "plugins/extension_bag/model/virtual_bag_serialization.inc"
-#include "plugins/extension_bag/model/virtual_bag_state_json.inc"
 }  // namespace virtual_bag

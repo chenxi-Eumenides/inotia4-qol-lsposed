@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/api/port_internal.h"
+#include "plugins/extension_bag/runtime/item_access.h"
 
 #include <cstddef>
 

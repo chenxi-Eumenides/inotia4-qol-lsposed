@@ -1,6 +1,7 @@
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/ui_state.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/item_access.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -34,11 +35,11 @@ void clear_stale_projected_moving_locked() {
     int64_t release_y = 0;
     if (!extension_bag_ui_touch_state(&moving, &drop_source, &release_x, &release_y)) return;
     if (moving == nullptr && drop_source == nullptr) return;
-    const auto& session = runtime_state().ui.extension_drag_session;
+    const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
     // 会话空闲且非模块触摸捕获时，MOVING_CTRL/DROP_SRC_CTRL 属于原版 TouchHandle
     // 手势（释放时由 TouchHandle_ResetMovingControl 派发 event 8）。模块在此时清除会
     // 打断原版触摸状态机、导致 0x18 释放事件不再产生——故空闲态绝不触碰。
-    if (session.phase == virtual_bag::DragPhase::kIdle && !runtime_state().ui.extension_touch_capture) return;
+    if (session.phase == virtual_bag::DragPhase::kIdle && !qol::extension_bag::ui_state().ui.extension_touch_capture) return;
     const bool phase_retains_moving =
         session.phase == virtual_bag::DragPhase::kPressed ||
         session.phase == virtual_bag::DragPhase::kNativeMoving ||
@@ -49,13 +50,13 @@ void clear_stale_projected_moving_locked() {
                                    session.source_slot >= 0 &&
                                    session.source_slot < virtual_bag::kSlotCount;
     const bool moving_matches_source =
-        live_root == runtime_state().objects.projected_item_root && runtime_state().objects.projected_item_root != nullptr &&
-        source_slot_valid && moving == valid_child_locked(runtime_state().objects.projected_item_root, session.source_slot);
-    const bool retain = phase_retains_moving && runtime_state().objects.module_view_installed &&
+        live_root == qol::extension_bag::ui_state().objects.projected_item_root && qol::extension_bag::ui_state().objects.projected_item_root != nullptr &&
+        source_slot_valid && moving == valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, session.source_slot);
+    const bool retain = phase_retains_moving && qol::extension_bag::ui_state().objects.module_view_installed &&
         runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
-        runtime_state().objects.module_view_index == session.source_bag &&
-        session.view_generation == runtime_state().ui.extension_tab_generation &&
-        runtime_state().ui.extension_tab_generation == runtime_state().ui.inventory_generation &&
+        qol::extension_bag::ui_state().objects.module_view_index == session.source_bag &&
+        session.view_generation == qol::extension_bag::ui_state().ui.extension_tab_generation &&
+        qol::extension_bag::ui_state().ui.extension_tab_generation == qol::extension_bag::ui_state().ui.inventory_generation &&
         moving_matches_source;
     if (retain) return;
 
@@ -67,11 +68,11 @@ void clear_stale_projected_moving_locked() {
     if (drop_source != moving) clear_control_flags(drop_source);
     VIRTBAG_LOG("stale projected moving cleared moving=%p drop_source=%p phase=%d view=%d/%d "
                 "generation=%llu/%llu/%llu root=%p projected_root=%p",
-                moving, drop_source, static_cast<int>(session.phase), runtime_state().objects.module_view_index,
+                moving, drop_source, static_cast<int>(session.phase), qol::extension_bag::ui_state().objects.module_view_index,
                 session.source_bag, static_cast<unsigned long long>(session.view_generation),
-                static_cast<unsigned long long>(runtime_state().ui.extension_tab_generation),
-                static_cast<unsigned long long>(runtime_state().ui.inventory_generation), live_root,
-                runtime_state().objects.projected_item_root);
+                static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.extension_tab_generation),
+                static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation), live_root,
+                qol::extension_bag::ui_state().objects.projected_item_root);
 }
 
 void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_x, int64_t rel_y,
@@ -119,14 +120,8 @@ void clear_original_item_selection_locked() {
     }
 }
 
-int original_item_category_locked(void* item) {
-    if (item == nullptr) return 0;
-    int category = 0;
-    return read_item_category(item, &category) ? category : 0;
-}
-
 int drag_source_category_locked() {
-    const auto& session = runtime_state().ui.extension_drag_session;
+    const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
     if (session.phase != virtual_bag::DragPhase::kIdle &&
         virtual_bag::valid_index(session.source_bag) &&
         session.source_slot >= 0 && session.source_slot < virtual_bag::kSlotCount) {

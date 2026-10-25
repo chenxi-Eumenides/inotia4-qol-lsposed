@@ -6,8 +6,8 @@
 #include "contracts/game_host.h"
 #include "contracts/slot_data.h"
 #include "plugins/core.save/slot_data_provider.h"
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
+#include "plugins/extension_bag/model/serialization.h"
 #include "plugins/extension_bag/runtime/session.h"
 
 #include <cstdio>
@@ -122,7 +122,7 @@ std::string section_json(const char* name) {
 
 }  // namespace
 
-// context.h 的访问器与 game_ui_virtbag.h 的准入依赖（persistence.cpp 引用）。
+// Runtime state/session accessors referenced by persistence.cpp.
 virtual_bag::State* extension_bag_state() { return &g_state; }
 uint64_t extension_bag_isolation_now_ms() { return 1234; }
 bool virtual_bag_prepare_save_slot_load() { return true; }

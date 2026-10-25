@@ -1,5 +1,6 @@
 #pragma once
 
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 void virtual_bag_f3_wrapper();

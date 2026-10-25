@@ -5,11 +5,10 @@
 #include <cstring>
 #include <cstdint>
 
-#include "plugins/extension_bag/extension_bag_bridge.h"
+#include "plugins/extension_bag/runtime/state.h"
 
 inline void extension_bag_log(int32_t level, const char* format, ...) {
-    const qol::contracts::QolHostSdk* sdk =
-        qol::features::extension_bag::extension_bag_host_sdk();
+    const qol::contracts::QolHostSdk* sdk = runtime_state().host.sdk;
     if (sdk == nullptr || sdk->log.write == nullptr || format == nullptr) return;
     char message[1024]{};
     va_list args;

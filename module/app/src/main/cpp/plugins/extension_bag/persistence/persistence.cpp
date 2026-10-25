@@ -1,5 +1,6 @@
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/model/serialization.h"
 
 #include <algorithm>
 #include <atomic>
@@ -29,11 +30,10 @@ TestRuntimeStateView extension_bag_test_runtime_state() {
 }  // namespace
 #define runtime_state() extension_bag_test_runtime_state()
 #else
-#include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #endif
 
-// 实现坐落在全局 namespace（context.h 的声明位置）；契约名经 using 引入。
+// 契约名引入：slot_data 回调使用 contracts 中定义的类型。
 using namespace qol::contracts;
 
 // ===========================================================================

@@ -9,10 +9,7 @@
 namespace qol::extension_bag::access {
 
 inline virtual_bag::State& bag() { return runtime_state().objects.bag; }
-inline ExtensionBagObjectState& objects() { return runtime_state().objects; }
-inline ExtensionBagUiState& ui() { return runtime_state().ui; }
 inline ExtensionBagPersistenceState& persistence() { return runtime_state().persistence; }
-inline ExtensionBagStoreState& store() { return runtime_state().store; }
 inline ExtensionBagHostPorts& host() { return runtime_state().host; }
 inline std::atomic<bool>& enabled() { return runtime_state().enabled; }
 

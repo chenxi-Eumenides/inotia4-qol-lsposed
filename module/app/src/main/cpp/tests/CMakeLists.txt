@@ -966,6 +966,8 @@ add_executable(extension_bag_bag_state_store_tests
     test_extension_bag_bag_state_store.cpp
     stubs/extension_bag_catalog_stub.cpp
     stubs/extension_bag_effective_count_stub.cpp
+    ${CPP_DIR}/plugins/extension_bag/core/ui_state.cpp
+    ${CPP_DIR}/plugins/extension_bag/core/status_snapshot.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp
     ${CPP_DIR}/plugins/extension_bag/runtime/status_snapshot.cpp)
 target_include_directories(extension_bag_bag_state_store_tests PRIVATE
@@ -980,6 +982,8 @@ add_test(NAME extension_bag_bag_state_store_tests COMMAND extension_bag_bag_stat
 add_executable(extension_bag_inventory_snapshot_tests
     test_extension_bag_inventory_snapshot.cpp
     stubs/extension_bag_catalog_stub.cpp
+    ${CPP_DIR}/plugins/extension_bag/core/ui_state.cpp
+    ${CPP_DIR}/plugins/extension_bag/core/status_snapshot.cpp
     ${CPP_DIR}/plugins/extension_bag/api/api_impl.cpp
     ${CPP_DIR}/plugins/extension_bag/interface/bag_query.cpp
     ${CPP_DIR}/plugins/extension_bag/public/bridge.cpp
@@ -2191,7 +2195,8 @@ add_test(NAME move_merge_plugin_tests COMMAND move_merge_plugin_tests)
 # Production extension_bag projection shims: typed handle/inactive/output and drop tri-state.
 add_executable(extension_bag_move_merge_shim_tests
     test_extension_bag_move_merge_shims.cpp
-    ${CPP_DIR}/plugins/extension_bag/assembly/move_merge_impl.cpp)
+    ${CPP_DIR}/plugins/extension_bag/assembly/move_merge_impl.cpp
+    ${CPP_DIR}/plugins/extension_bag/core/ui_state.cpp)
 target_include_directories(extension_bag_move_merge_shim_tests PRIVATE
     ${CPP_DIR}
     ${JNI_INCLUDE_DIRS})

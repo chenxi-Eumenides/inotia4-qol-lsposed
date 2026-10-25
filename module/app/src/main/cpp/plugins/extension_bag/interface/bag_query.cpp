@@ -1,6 +1,5 @@
 #include "plugins/extension_bag/interface/bag_query.h"
 
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/extension_bag/runtime/bag_state_store.h"

@@ -1,10 +1,10 @@
 #include "plugins/extension_bag/http/query.h"
+#include "plugins/extension_bag/api/api_impl.h"
 
 #include <cstdint>
 #include <cstring>
 #include <string>
 
-std::string extension_bag_api_status_json_impl();
 
 namespace qol::features::extension_bag {
 

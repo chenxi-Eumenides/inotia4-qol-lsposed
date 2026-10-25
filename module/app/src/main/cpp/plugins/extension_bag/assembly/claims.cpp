@@ -1,3 +1,5 @@
+#include "plugins/extension_bag/core/ui_state.h"
+#include "contracts/ownership.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/popup_enter_alias.h"
@@ -79,11 +81,11 @@ int32_t extension_bag_inventory_popup_acquire(const char* id) {
         runtime_state().host.sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_inventory_popup_entry = entry;
     runtime_state().persistence.state_entry = entry.slot;
-    runtime_state().persistence.orig_enter = extension_bag_backup_value<PopupNoArgFn>(
+    qol::extension_bag::ui_state().persistence_hooks.orig_enter = extension_bag_backup_value<PopupNoArgFn>(
         entry.backup, kPopupStateEntryEnterOffset);
-    runtime_state().persistence.inventory_enter = reinterpret_cast<uintptr_t>(runtime_state().persistence.orig_enter);
-    runtime_state().persistence.orig_f3 = extension_bag_backup_value<PopupNoArgFn>(entry.backup, kPopupStateEntryF3Offset);
-    runtime_state().persistence.orig_event = extension_bag_backup_value<PopupEventFn>(
+    qol::extension_bag::ui_state().persistence_hooks.inventory_enter = reinterpret_cast<uintptr_t>(qol::extension_bag::ui_state().persistence_hooks.orig_enter);
+    qol::extension_bag::ui_state().persistence_hooks.orig_f3 = extension_bag_backup_value<PopupNoArgFn>(entry.backup, kPopupStateEntryF3Offset);
+    qol::extension_bag::ui_state().persistence_hooks.orig_event = extension_bag_backup_value<PopupEventFn>(
         entry.backup, kPopupStateEntryEventOffset);
     return 0;
 }
@@ -92,10 +94,10 @@ void extension_bag_inventory_popup_release(const char* id) {
     ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_inventory_popup_entry, "inventory")) return;
     runtime_state().persistence.state_entry = nullptr;
-    runtime_state().persistence.orig_enter = nullptr;
-    runtime_state().persistence.inventory_enter = 0;
-    runtime_state().persistence.orig_f3 = nullptr;
-    runtime_state().persistence.orig_event = nullptr;
+    qol::extension_bag::ui_state().persistence_hooks.orig_enter = nullptr;
+    qol::extension_bag::ui_state().persistence_hooks.inventory_enter = 0;
+    qol::extension_bag::ui_state().persistence_hooks.orig_f3 = nullptr;
+    qol::extension_bag::ui_state().persistence_hooks.orig_event = nullptr;
 }
 
 // ---- P2：存档槽 PopupState（仅 enter 部分 wrap）----
@@ -112,9 +114,9 @@ int32_t extension_bag_save_popup_acquire(const char* id) {
         runtime_state().host.sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_save_popup_entry = entry;
     runtime_state().persistence.save_state_entry = entry.slot;
-    runtime_state().persistence.orig_save_enter = extension_bag_backup_value<PopupNoArgFn>(
+    qol::extension_bag::ui_state().persistence_hooks.orig_save_enter = extension_bag_backup_value<PopupNoArgFn>(
         entry.backup, kPopupStateEntryEnterOffset);
-    runtime_state().persistence.save_panel_hook_installed = true;
+    qol::extension_bag::ui_state().persistence_hooks.save_panel_hook_installed = true;
     return 0;
 }
 void extension_bag_save_popup_release(const char* id) {
@@ -122,8 +124,8 @@ void extension_bag_save_popup_release(const char* id) {
     ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_save_popup_entry, "save")) return;
     runtime_state().persistence.save_state_entry = nullptr;
-    runtime_state().persistence.orig_save_enter = nullptr;
-    runtime_state().persistence.save_panel_hook_installed = false;
+    qol::extension_bag::ui_state().persistence_hooks.orig_save_enter = nullptr;
+    qol::extension_bag::ui_state().persistence_hooks.save_panel_hook_installed = false;
 }
 
 // ---- P3：商店 PopupState（enter/f3/event 部分 wrap）----
@@ -144,12 +146,12 @@ int32_t extension_bag_store_popup_acquire(const char* id) {
     if (runtime_state().host.sdk->hooks.popup_acquire == nullptr ||
         runtime_state().host.sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_store_popup_entry = entry;
-    runtime_state().ui.store_state_entry = entry.slot;
-    runtime_state().ui.store_original_enter =
+    qol::extension_bag::ui_state().ui.store_state_entry = entry.slot;
+    qol::extension_bag::ui_state().ui.store_original_enter =
         extension_bag_backup_value<StoreSceneNoArgFn>(entry.backup, kPopupStateEntryEnterOffset);
-    runtime_state().ui.store_original_f3 =
+    qol::extension_bag::ui_state().ui.store_original_f3 =
         extension_bag_backup_value<StoreSceneNoArgFn>(entry.backup, kPopupStateEntryF3Offset);
-    runtime_state().ui.store_original_event =
+    qol::extension_bag::ui_state().ui.store_original_event =
         extension_bag_backup_value<StoreSceneEventFn>(entry.backup, kPopupStateEntryEventOffset);
     return 0;
 }
@@ -157,10 +159,10 @@ void extension_bag_store_popup_release(const char* id) {
     (void)id;
     ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_store_popup_entry, "store")) return;
-    runtime_state().ui.store_state_entry = nullptr;
-    runtime_state().ui.store_original_enter = nullptr;
-    runtime_state().ui.store_original_f3 = nullptr;
-    runtime_state().ui.store_original_event = nullptr;
+    qol::extension_bag::ui_state().ui.store_state_entry = nullptr;
+    qol::extension_bag::ui_state().ui.store_original_enter = nullptr;
+    qol::extension_bag::ui_state().ui.store_original_f3 = nullptr;
+    qol::extension_bag::ui_state().ui.store_original_event = nullptr;
 }
 
 // ---- P4：合成 PopupState（enter/f3 部分 wrap）----
@@ -176,12 +178,12 @@ int32_t extension_bag_mix_popup_acquire(const char* id) {
     if (runtime_state().host.sdk->hooks.popup_acquire == nullptr ||
         runtime_state().host.sdk->hooks.popup_acquire(&entry, &h).ok != kQolOk) return 1;
     g_mix_popup_entry = entry;
-    runtime_state().ui.mix_state_entry = entry.slot;
-    runtime_state().ui.mix_original_enter = extension_bag_backup_value<MixSceneNoArgFn>(
+    qol::extension_bag::ui_state().ui.mix_state_entry = entry.slot;
+    qol::extension_bag::ui_state().ui.mix_original_enter = extension_bag_backup_value<MixSceneNoArgFn>(
         entry.backup, kPopupStateEntryEnterOffset);
-    runtime_state().ui.mix_original_f3 = extension_bag_backup_value<MixSceneNoArgFn>(
+    qol::extension_bag::ui_state().ui.mix_original_f3 = extension_bag_backup_value<MixSceneNoArgFn>(
         entry.backup, kPopupStateEntryF3Offset);
-    runtime_state().ui.mix_original_event = extension_bag_backup_value<MixSceneEventFn>(
+    qol::extension_bag::ui_state().ui.mix_original_event = extension_bag_backup_value<MixSceneEventFn>(
         entry.backup, kPopupStateEntryEventOffset);
     return 0;
 }
@@ -189,10 +191,10 @@ void extension_bag_mix_popup_release(const char* id) {
     (void)id;
     ::qol::extension_bag::ReentryLock lock;
     if (!extension_bag_restore_popup(&g_mix_popup_entry, "mix")) return;
-    runtime_state().ui.mix_state_entry = nullptr;
-    runtime_state().ui.mix_original_enter = nullptr;
-    runtime_state().ui.mix_original_f3 = nullptr;
-    runtime_state().ui.mix_original_event = nullptr;
+    qol::extension_bag::ui_state().ui.mix_state_entry = nullptr;
+    qol::extension_bag::ui_state().ui.mix_original_enter = nullptr;
+    qol::extension_bag::ui_state().ui.mix_original_f3 = nullptr;
+    qol::extension_bag::ui_state().ui.mix_original_event = nullptr;
 }
 
 // Restore receives a copy so a failed Host call cannot mutate the only retry token.
@@ -508,22 +510,22 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup) {
     if (resource_id == nullptr) return 1;
     if (std::strcmp(resource_id, kEbM1SaveInventory) == 0) {
         if (backup == nullptr) return 1;
-        runtime_state().persistence.backup_save_inventory = backup;
+        qol::extension_bag::ui_state().persistence_hooks.backup_save_inventory = backup;
         return 0;
     }
     if (std::strcmp(resource_id, kEbM2StoreSellItem) == 0) {
         if (backup == nullptr) return 1;
-        runtime_state().ui.backup_store_sell_item = backup;
+        qol::extension_bag::ui_state().ui.backup_store_sell_item = backup;
         return 0;
     }
     if (std::strcmp(resource_id, kEbM3StoreButtonSellExe) == 0) {
         if (backup == nullptr) return 1;
-        runtime_state().ui.backup_store_button_sell_exe = backup;
+        qol::extension_bag::ui_state().ui.backup_store_button_sell_exe = backup;
         return 0;
     }
     if (std::strcmp(resource_id, kEbM4StoreDrawBagGroup) == 0) {
         if (backup == nullptr) return 1;
-        runtime_state().ui.backup_store_draw_inven_bag_group = backup;
+        qol::extension_bag::ui_state().ui.backup_store_draw_inven_bag_group = backup;
         return 0;
     }
     return 1;

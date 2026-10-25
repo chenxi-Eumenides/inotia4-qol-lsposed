@@ -16,11 +16,11 @@
 #include "contracts/item_facts.h"
 #include "contracts/save_facts.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/assembly/lifecycle_registration.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/runtime/session.h"
+#include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/model/move_merge.h"
 #include "plugins/extension_bag/http/routes.h"
 
@@ -56,9 +56,7 @@ bool g_result_handler_registered = false;
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolGameHost* g_game = nullptr;
 const contracts::QolExtensionBagWritePort* g_write_port = nullptr;
-const contracts::WorldFactsApi* g_world_facts = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
-const contracts::SaveFactsApi* g_save_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 
 // 中立 provider / 生命周期参与者的可用探针：进入 enabled 时置位，installed_disabled 与
@@ -262,9 +260,9 @@ void rollback_extension_bag_install(const qol::contracts::QolSlotDataApi* slot_d
     extension_bag_bind_craft_facts(nullptr);
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
-    g_world_facts = nullptr;
+    extension_bag_bind_world_facts(nullptr);
     g_item_facts = nullptr;
-    g_save_facts = nullptr;
+    extension_bag_bind_save_facts(nullptr);
     g_craft_facts = nullptr;
     g_sdk = nullptr;
     g_game = nullptr;
@@ -302,9 +300,9 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
-    g_world_facts = nullptr;
+    extension_bag_bind_world_facts(nullptr);
     g_item_facts = nullptr;
-    g_save_facts = nullptr;
+    extension_bag_bind_save_facts(nullptr);
     g_craft_facts = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
@@ -361,7 +359,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
-    g_world_facts = static_cast<const qol::contracts::WorldFactsApi*>(world_facts_iface);
+    extension_bag_bind_world_facts(static_cast<const qol::contracts::WorldFactsApi*>(world_facts_iface));
     const void* item_facts_iface = nullptr;
     if (!qol::contracts::succeeded(ctx.sdk->capabilities.require(
             qol::contracts::kItemFactsCapabilityId,
@@ -376,7 +374,7 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     extension_bag_bind_inventory_extras(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
-        g_world_facts = nullptr;
+        extension_bag_bind_world_facts(nullptr);
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         extension_bag_bind_craft_facts(nullptr);
@@ -396,15 +394,15 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     extension_bag_bind_inventory_extras(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
-        g_world_facts = nullptr;
+        extension_bag_bind_world_facts(nullptr);
         g_item_facts = nullptr;
-        g_save_facts = nullptr;
+        extension_bag_bind_save_facts(nullptr);
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
-    g_save_facts = static_cast<const qol::contracts::SaveFactsApi*>(save_facts_iface);
+    extension_bag_bind_save_facts(static_cast<const qol::contracts::SaveFactsApi*>(save_facts_iface));
     const void* craft_facts_iface = nullptr;
     if (!qol::contracts::succeeded(ctx.sdk->capabilities.require(
             qol::contracts::kCraftFactsCapabilityId,
@@ -418,9 +416,9 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     extension_bag_bind_inventory_extras(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
-        g_world_facts = nullptr;
+        extension_bag_bind_world_facts(nullptr);
         g_item_facts = nullptr;
-        g_save_facts = nullptr;
+        extension_bag_bind_save_facts(nullptr);
         g_craft_facts = nullptr;
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
@@ -535,9 +533,9 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     // 中立 provider 表静态驻留（不指向可释放内存）；deactivate 只撤销 active，使路由等同无 provider。
     g_provider_active.store(false, std::memory_order_release);
     extension_bag_set_enabled(false);
-    g_world_facts = nullptr;
+    extension_bag_bind_world_facts(nullptr);
     g_item_facts = nullptr;
-    g_save_facts = nullptr;
+    extension_bag_bind_save_facts(nullptr);
     g_craft_facts = nullptr;
     extension_bag_bind_item_facts(nullptr);
     extension_bag_bind_craft_facts(nullptr);
@@ -645,12 +643,6 @@ const qol::contracts::QolHostSdk* extension_bag_http_host_sdk() { return g_sdk; 
 const qol::contracts::PluginDescriptor& plugin_descriptor() {
     return kDescriptor;
 }
-
-const qol::contracts::WorldFactsApi* world_facts() {
-    return g_world_facts;
-}
-
-const qol::contracts::SaveFactsApi* save_facts() { return g_save_facts; }
 
 bool inventory_extension_provider_active() {
     return g_provider_active.load(std::memory_order_acquire);

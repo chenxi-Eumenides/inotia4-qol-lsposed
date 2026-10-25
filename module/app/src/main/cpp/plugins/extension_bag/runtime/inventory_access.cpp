@@ -2,10 +2,25 @@
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/extension_bag_port.h"
-#include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/runtime/projection_controller.h"
 
 #include <mutex>
+
+const qol::contracts::WorldFactsApi* extension_bag_world_facts() {
+    return runtime_state().host.world_facts;
+}
+
+const qol::contracts::SaveFactsApi* extension_bag_save_facts() {
+    return runtime_state().host.save_facts;
+}
+
+void extension_bag_bind_world_facts(const qol::contracts::WorldFactsApi* facts) {
+    runtime_state().host.world_facts = facts;
+}
+
+void extension_bag_bind_save_facts(const qol::contracts::SaveFactsApi* facts) {
+    runtime_state().host.save_facts = facts;
+}
 
 #define extension_remove_item_direct extension_remove_item_direct_internal
 #define extension_refresh_bag_area extension_refresh_bag_area_internal
@@ -93,7 +108,7 @@ bool read_inventory_find_save_slot(const void* item, int* out_slot) {
 }
 
 int read_current_save_slot() {
-    const auto* facts = qol::features::extension_bag::save_facts();
+    const auto* facts = extension_bag_save_facts();
     if (facts == nullptr || facts->current_slot == nullptr) return -1;
     int32_t slot = -1;
     return qol::contracts::succeeded(facts->current_slot(&slot)) ? slot : -1;
@@ -103,7 +118,7 @@ int read_current_save_slot() {
 
 bool read_world_state_id(int* out_state) {
     if (out_state == nullptr) return false;
-    const auto* facts = qol::features::extension_bag::world_facts();
+    const auto* facts = extension_bag_world_facts();
     if (facts == nullptr || facts->state == nullptr) return false;
     int32_t state = -1;
     if (!qol::contracts::succeeded(facts->state(&state))) return false;

@@ -1,10 +1,7 @@
 #include "plugins/extension_bag/runtime/item_access.h"
 
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_port.h"
-#include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
-#include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
 
@@ -20,6 +17,12 @@ bool read_item_category(const void* item, int* out_category) {
             runtime_state().host.item_facts->category(handle, &category))) return false;
     *out_category = category;
     return true;
+}
+
+int original_item_category_locked(void* item) {
+    if (item == nullptr) return 0;
+    int category = 0;
+    return read_item_category(item, &category) ? category : 0;
 }
 
 void* extension_create_item(int category, int arg1, int arg2, int arg3) {
@@ -312,7 +315,7 @@ void* read_char_equipped_item(const void* character, int slot) {
 }
 
 bool read_save_is_ok() {
-    const auto* facts = qol::features::extension_bag::save_facts();
+    const auto* facts = extension_bag_save_facts();
     if (facts == nullptr || facts->is_ok == nullptr) return false;
     int32_t value = 0;
     return qol::contracts::succeeded(facts->is_ok(&value)) && value != 0;
@@ -470,4 +473,110 @@ bool extension_bag_ui_read_has_empty_mercenary_slot() {
 
 ::qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category) {
     return category_is_equip(category);
+}
+
+uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (item != nullptr) {
+        if (api != nullptr && api->effective != nullptr) {
+            uint32_t count = 0;
+            const QolResult result = api->effective(item, &count);
+            if (qol::contracts::succeeded(result)) {
+                if (count != 0 || fallback_canonical == 0) return count;
+                return virtual_bag_view_from_canonical(fallback_canonical, true);
+            }
+        }
+        uint32_t field = 0;
+        if (api != nullptr && api->read_encoded_field != nullptr &&
+            qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
+            const uint32_t view = original_count_view(field);
+            if (view != 0) return view;
+        }
+    }
+    return virtual_bag_view_from_canonical(fallback_canonical, true);
+}
+
+uint32_t virtual_bag_canonical_from_field(uint32_t field, uint32_t fallback_canonical) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->canonical_from_field != nullptr) {
+        uint32_t canonical = fallback_canonical;
+        if (qol::contracts::succeeded(api->canonical_from_field(field, &canonical))) {
+            return canonical;
+        }
+    }
+    return fallback_canonical;
+}
+
+uint32_t virtual_bag_field_from_canonical(uint32_t field, uint32_t canonical, bool extended) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->field_from_canonical != nullptr) {
+        uint32_t updated = field;
+        if (qol::contracts::succeeded(
+                api->field_from_canonical(field, canonical, extended ? 1 : 0, &updated))) {
+            return updated;
+        }
+    }
+    return field;
+}
+
+uint32_t virtual_bag_view_from_canonical(uint32_t canonical, bool extended) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->view_from_canonical != nullptr) {
+        uint32_t view = canonical;
+        if (qol::contracts::succeeded(
+                api->view_from_canonical(canonical, extended ? 1 : 0, &view))) {
+            return view;
+        }
+    }
+    return canonical;
+}
+
+uint32_t virtual_bag_count_limit(bool extended) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->view_limit != nullptr) {
+        uint32_t limit = 0;
+        if (qol::contracts::succeeded(api->view_limit(extended ? 1 : 0, &limit))) return limit;
+    }
+    return 0;
+}
+
+uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api != nullptr && api->canonical != nullptr && item != nullptr) {
+        uint32_t count = 0;
+        const QolResult result = api->canonical(item, &count);
+        if (qol::contracts::succeeded(result)) return count;
+        if (result.code == kQolErrUnsupported) return fallback_canonical;
+    }
+    if (item == nullptr) return fallback_canonical;
+    uint32_t field = 0;
+    if (api == nullptr || api->read_encoded_field == nullptr ||
+        !qol::contracts::succeeded(api->read_encoded_field(item, &field))) {
+        return fallback_canonical;
+    }
+    return virtual_bag_canonical_from_field(field, fallback_canonical);
+}
+
+bool virtual_bag_extended_mode(const void* item) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (item == nullptr || api == nullptr || api->read_extended_mode == nullptr) return false;
+    uint8_t extended = 0;
+    if (!qol::contracts::succeeded(api->read_extended_mode(&extended)) || extended == 0 ||
+        api->effective == nullptr) return false;
+    uint32_t effective = 0;
+    return qol::contracts::succeeded(api->effective(item, &effective));
+}
+
+bool virtual_bag_write_effective(void* item, uint32_t count) {
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api == nullptr || api->write_effective == nullptr ||
+        api->writeback_needed == nullptr || item == nullptr) return false;
+    int32_t needed = 0;
+    const QolResult needed_result = api->writeback_needed(item, count, &needed);
+    if (needed_result.code == kQolErrNotReady || !qol::contracts::succeeded(needed_result)) {
+        return false;
+    }
+    if (needed == 0) return true;
+    const QolResult write_result = api->write_effective(item, count);
+    return write_result.code != kQolErrNotReady && qol::contracts::succeeded(write_result);
 }

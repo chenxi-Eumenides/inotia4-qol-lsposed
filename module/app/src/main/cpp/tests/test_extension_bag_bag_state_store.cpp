@@ -1,6 +1,7 @@
 #include "plugins/extension_bag/runtime/bag_state_store.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/status_snapshot.h"
+#include "plugins/extension_bag/core/ui_state.h"
 
 #include <array>
 #include <cstdio>
@@ -60,9 +61,9 @@ int main() {
     state.host.write_port = &write_port;
     state.enabled.store(true);
     state.persistence.state_entry = &state_entry;
-    state.persistence.save_panel_hook_installed = true;
-    state.ui.extension_tab_buttons[0] = &tab_button;
-    state.ui.inventory_frame_active = true;
+    qol::extension_bag::ui_state().persistence_hooks.save_panel_hook_installed = true;
+    qol::extension_bag::ui_state().ui.extension_tab_buttons[0] = &tab_button;
+    qol::extension_bag::ui_state().ui.inventory_frame_active = true;
     state.objects.bag.types = {4, 4, 3, 0, 0};
     state.objects.bag.capacities = {16, 16, 12, 0, 0};
     state.objects.bag.bag_count = 3;
@@ -72,8 +73,8 @@ int main() {
     state.objects.bag.selected = 2;
     state.objects.bag.inspected = 5;
     state.persistence.revision.store(7);
-    state.ui.inventory_generation = 11;
-    publish_bag_snapshot();
+    qol::extension_bag::ui_state().ui.inventory_generation = 11;
+    publish_bag_snapshot({false, -1, 11});
 
     BagSnapshot published{};
     CHECK(bag_snapshot(&published));
@@ -111,7 +112,7 @@ int main() {
     CHECK(stale.capacities[0] == 16);
     CHECK(stale.revision == 7);
 
-    publish_bag_snapshot();
+    publish_bag_snapshot({false, -1, 11});
     BagSnapshot fresh{};
     CHECK(bag_snapshot(&fresh));
     CHECK(fresh.selected == 4);
@@ -120,7 +121,7 @@ int main() {
 
     state.objects.bag.items[1][2].category = 4321;
     state.persistence.revision.store(9);
-    publish_bag_snapshot();
+    publish_bag_snapshot({false, -1, 11});
     const uint64_t revision_before_query = state.persistence.revision.load();
     const auto updated_status = load_status_snapshot();
     CHECK(updated_status != nullptr);

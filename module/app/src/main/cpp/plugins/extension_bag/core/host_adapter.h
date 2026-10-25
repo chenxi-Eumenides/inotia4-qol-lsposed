@@ -18,8 +18,6 @@ bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
                                                 const char* context, void* raw_use_token);
 void extension_bag_ui_play_switch_sound();
-ExtensionBagUnequipResult unequip_extension_bag_locked_bridge(
-    ::qol::extension_bag::ReentryLock& lock, int internal_bag);
 ExtensionBagUnequipResult unequip_extension_bag_locked(
     ::qol::extension_bag::ReentryLock& lock, int internal_bag);
 bool store_module_view_installed_locked();

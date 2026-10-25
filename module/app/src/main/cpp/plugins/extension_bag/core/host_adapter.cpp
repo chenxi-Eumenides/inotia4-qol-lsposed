@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -19,13 +20,12 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -77,7 +77,6 @@ struct UnequipHostCapacityGuard {
 // （INVEN_RemoveItemDirect 返回值不可信 → 槽位重读确认后再真释放）。
 ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::ReentryLock& lock,
                                                        int internal_bag) {
-    ensure_state_loaded_locked();
     if (::qol::extension_bag::access::bag().capacities[internal_bag] == 0) {
         return ExtensionBagUnequipResult::kNotEquipped;
     }
@@ -100,7 +99,7 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
     }
     // P4.3：全新对象立即入账本；分配失败立即真释放（尚未暴露，安全）。
     uint32_t item_handle = 0;
-    if (ownership::allocate(&::qol::extension_bag::access::objects().ownership_ledger, &item_handle) != ownership::Outcome::kOk) {
+    if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &item_handle) != ownership::Outcome::kOk) {
         release_temporary_item_locked(item);
         VIRTBAG_LOG("extension unequip ledger exhausted bag=%d", internal_bag);
         return ExtensionBagUnequipResult::kFailed;
@@ -124,13 +123,13 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
     }
 
     UnequipHostCapacityGuard host_capacity_guard;
-    if (::qol::extension_bag::access::objects().module_view_installed &&
-        virtual_bag::valid_index(::qol::extension_bag::access::objects().original_bag_size_bag)) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed &&
+        virtual_bag::valid_index(qol::extension_bag::ui_state().objects.original_bag_size_bag)) {
         constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
         uint32_t projected_word = 0;
-        const int host_bag = ::qol::extension_bag::access::objects().original_bag_size_bag;
+        const int host_bag = qol::extension_bag::ui_state().objects.original_bag_size_bag;
         const uint32_t real_capacity =
-            ::qol::extension_bag::access::objects().original_bag_size & kCapacityMask;
+            qol::extension_bag::ui_state().objects.original_bag_size & kCapacityMask;
         if (real_capacity != 0 && bag_size_word_locked(host_bag, &projected_word)) {
             const uint32_t real_word = (projected_word & ~kCapacityMask) | real_capacity;
             if (!set_bag_size_word_locked(host_bag, real_word)) {
@@ -212,15 +211,15 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
             release_tracked_item_locked(item_handle, item, "unequip adopt handle registration");
             return ExtensionBagUnequipResult::kFailed;
         }
-        ::qol::extension_bag::access::objects().module_objects[adopt_bag][adopt_slot] = item;
-        ::qol::extension_bag::access::objects().module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
-        ::qol::extension_bag::access::objects().module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
-        ::qol::extension_bag::access::objects().module_object_handles[adopt_bag][adopt_slot] = item_handle;
+        qol::extension_bag::ui_state().objects.module_objects[adopt_bag][adopt_slot] = item;
+        qol::extension_bag::ui_state().objects.module_object_categories[adopt_bag][adopt_slot] = descriptor.category;
+        qol::extension_bag::ui_state().objects.module_object_hashes[adopt_bag][adopt_slot] = virtual_bag::payload_hash(descriptor);
+        qol::extension_bag::ui_state().objects.module_object_handles[adopt_bag][adopt_slot] = item_handle;
         const uint8_t adopted_type = ::qol::extension_bag::access::bag().types[internal_bag];
         virtual_bag::unequip_bag(&::qol::extension_bag::access::bag(), internal_bag);
         extension_bag_mark_dirty_locked();
         if (persist_state_locked()) {
-            if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == adopt_bag) {
+            if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == adopt_bag) {
                 refresh_module_item_area_locked(adopt_bag);
             }
             VIRTBAG_LOG("extension unequip adopt bag=%d type=%d dst=%d/%d", internal_bag,
@@ -233,10 +232,10 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
                         adopt_bag, adopt_slot);
             return ExtensionBagUnequipResult::kPersistFailed;
         }
-        ::qol::extension_bag::access::objects().module_objects[adopt_bag][adopt_slot] = nullptr;
-        ::qol::extension_bag::access::objects().module_object_categories[adopt_bag][adopt_slot] = 0;
-        ::qol::extension_bag::access::objects().module_object_hashes[adopt_bag][adopt_slot] = 0;
-        ::qol::extension_bag::access::objects().module_object_handles[adopt_bag][adopt_slot] = 0;
+        qol::extension_bag::ui_state().objects.module_objects[adopt_bag][adopt_slot] = nullptr;
+        qol::extension_bag::ui_state().objects.module_object_categories[adopt_bag][adopt_slot] = 0;
+        qol::extension_bag::ui_state().objects.module_object_hashes[adopt_bag][adopt_slot] = 0;
+        qol::extension_bag::ui_state().objects.module_object_handles[adopt_bag][adopt_slot] = 0;
         descriptor = virtual_bag::Item{};
         ::qol::extension_bag::access::bag().types[internal_bag] = adopted_type;
         ::qol::extension_bag::access::bag().isolation_now_ms = isolation_now_ms_locked();
@@ -290,9 +289,4 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
     VIRTBAG_LOG("extension unequip rollback failed bag=%d receiving=%d", internal_bag,
                 receiving_bag);
     return ExtensionBagUnequipResult::kFailed;
-}
-
-ExtensionBagUnequipResult unequip_extension_bag_locked_bridge(
-    ::qol::extension_bag::ReentryLock& lock, int internal_bag) {
-    return unequip_extension_bag_locked(lock, internal_bag);
 }

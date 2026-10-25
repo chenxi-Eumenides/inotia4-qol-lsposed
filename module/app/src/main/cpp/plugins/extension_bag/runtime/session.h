@@ -3,7 +3,6 @@
 #include "contracts/slot_data.h"
 
 #include <cstdint>
-#include <string>
 
 void extension_bag_session_set_blocked(bool blocked);
 void extension_bag_session_set_admitted_epoch(uint64_t epoch);
@@ -13,16 +12,17 @@ qol::contracts::QolSlotDataHandle extension_bag_session_handle();
 uint64_t extension_bag_session_epoch();
 bool extension_bag_session_admitted_locked();
 
-void ensure_state_loaded_locked();
 bool persist_state_locked(bool force = false);
 bool extension_bag_ready_locked();
-std::string extension_bag_not_ready_error_locked();
 int extension_internal_bag(int logical_bag);
 bool virtual_bag_module_save_validate_locked();
+bool extension_bag_module_slot_has_native_object(int bag, int slot);
 bool virtual_bag_prepare_save_slot_load();
-
-std::string extension_bag_status_json_locked_bridge();
-std::string extension_bag_not_ready_error_locked_bridge();
-bool extension_bag_ready_locked_bridge();
-int extension_internal_bag_bridge(int logical_bag);
-std::string extension_bag_view_result_json_bridge(bool ok, const char* error);
+uint64_t extension_bag_isolation_now_ms();
+void extension_bag_flush_dirty_staging(const qol::contracts::QolSlotDataApi* api);
+bool extension_bag_slot_data_register(qol::contracts::QolOwnerToken owner,
+                                      const qol::contracts::QolSlotDataApi* api);
+qol::contracts::QolSlotDataRequest extension_bag_slot_data_unregister(
+    const qol::contracts::QolSlotDataApi* api);
+bool extension_bag_slot_data_request_settled(const qol::contracts::QolSlotDataApi* api,
+                                              qol::contracts::QolSlotDataRequest request);

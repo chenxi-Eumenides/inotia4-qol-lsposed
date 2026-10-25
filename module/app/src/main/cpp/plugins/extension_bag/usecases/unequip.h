@@ -1,9 +1,9 @@
 #pragma once
 
-#include <string>
+#include "plugins/extension_bag/usecases/result.h"
 
 namespace qol::features::extension_bag::usecases {
 
-std::string unequip_bag(int logical_bag);
+OpResult unequip_bag(int logical_bag);
 
 }  // namespace qol::features::extension_bag::usecases

@@ -1,11 +1,12 @@
 #include "contracts/host_sdk.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
-#include "plugins/extension_bag/extension_bag_context.h"
+#include "plugins/extension_bag/api/api_impl.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/bag_state_store.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/status_snapshot.h"
 #include "plugins/extension_bag/runtime/session.h"
+#include "plugins/extension_bag/core/ui_state.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -60,6 +61,23 @@ const qol::contracts::QolHostSdk* extension_bag_host_sdk() { return &g_sdk; }
 
 bool bag_size_word_locked(int, uint32_t*) { return false; }
 
+uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical) {
+    if (item != nullptr && g_count_api.effective != nullptr) {
+        uint32_t count = 0;
+        if (qol::contracts::succeeded(g_count_api.effective(item, &count))) {
+            if (count != 0 || fallback_canonical == 0) return count;
+        }
+    }
+    if (g_count_api.view_from_canonical != nullptr) {
+        uint32_t count = 0;
+        if (qol::contracts::succeeded(
+                g_count_api.view_from_canonical(fallback_canonical, 1, &count))) {
+            return count;
+        }
+    }
+    return fallback_canonical;
+}
+
 bool read_world_in_world() {
     ++g_world_checks;
     return true;
@@ -83,6 +101,7 @@ int main() {
     g_sdk.log.write = &record_log;
     prepare_count_api();
     auto& state = runtime_state();
+    state.host.sdk = &g_sdk;
     state.enabled.store(true);
     state.objects.bag.bag_count = 3;
     state.objects.bag.capacities = {12, 16, 8, 0, 0, 0, 0, 0};
@@ -92,7 +111,7 @@ int main() {
     state.objects.bag.items[0][14].count = 4;
     state.objects.bag.items[1][5].category = 333;
     state.objects.bag.items[1][5].count = 7;
-    state.objects.module_objects[0][2] = &g_live_item;
+    qol::extension_bag::ui_state().objects.module_objects[0][2] = &g_live_item;
     state.persistence.revision.store(41);
 
     CHECK(!load_status_snapshot());
@@ -115,7 +134,7 @@ int main() {
     CHECK(!virtual_bag_logical_capacity(5, &capacity));
     CHECK(capacity == 0);
 
-    publish_bag_snapshot();
+    publish_bag_snapshot({false, -1, 0});
     const auto snapshot = load_status_snapshot();
     CHECK(snapshot != nullptr);
     CHECK(snapshot->effective_counts[0][2] == 81);
@@ -134,7 +153,7 @@ int main() {
     // 发布后再改 live State 和对象指针，查询仍只使用快照中的数据。
     state.objects.bag.items[0][2].count = 99;
     state.objects.bag.capacities[0] = 4;
-    state.objects.module_objects[0][2] = nullptr;
+    qol::extension_bag::ui_state().objects.module_objects[0][2] = nullptr;
     CHECK(virtual_bag_logical_capacity(6, &capacity));
     CHECK(capacity == snapshot->bag.capacities[0]);
     const uint64_t revision_before_query = state.persistence.revision.load();

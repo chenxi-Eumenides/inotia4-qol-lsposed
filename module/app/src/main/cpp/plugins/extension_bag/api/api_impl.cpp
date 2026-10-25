@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -17,17 +18,17 @@
 #include "plugins/extension_bag/model/draw_state_lock.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
+#include "plugins/extension_bag/model/serialization.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/interface/bag_query.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -38,6 +39,7 @@
 #include "plugins/extension_bag/usecases/move.h"
 #include "plugins/extension_bag/usecases/unequip.h"
 #include "plugins/extension_bag/usecases/view.h"
+#include "plugins/extension_bag/usecases/result.h"
 
 #include <atomic>
 #include <chrono>
@@ -52,40 +54,112 @@
 
 
 
-#define extension_bag_not_ready_error_locked extension_bag_not_ready_error_locked_bridge
-#define extension_bag_ready_locked extension_bag_ready_locked_bridge
-#define extension_internal_bag extension_internal_bag_bridge
 std::string extension_bag_api_status_json_impl() {
     return qol::features::extension_bag::query_status_json();
 }
 
+namespace {
+
+std::string api_not_ready_error() {
+    return extension_bag_op_err(runtime_state().enabled.load()
+                                     ? "not in game"
+                                     : "extension bag disabled");
+}
+
+const char* recovery_action_name_api() {
+    const virtual_bag::RecoveryAction action =
+        virtual_bag::recovery_action(runtime_state().objects.bag,
+                                     runtime_state().objects.bag.pending);
+    if (action == virtual_bag::RecoveryAction::kComplete) return "complete";
+    if (action == virtual_bag::RecoveryAction::kRollback) return "rollback";
+    return "none";
+}
+
+std::string api_status_json_locked() {
+    std::string original_capacities = "[";
+    constexpr uint32_t kCapacityMask = (1u << 25) - 1u;
+    for (int bag = 0; bag < 5; ++bag) {
+        if (bag != 0) original_capacities.push_back(',');
+        uint32_t word = 0;
+        if (bag_size_word_locked(bag, &word)) {
+            original_capacities += std::to_string(word & kCapacityMask);
+        } else {
+            original_capacities += "-1";
+        }
+    }
+    original_capacities.push_back(']');
+    const auto& state = runtime_state();
+    return "{\"enabled\":" + std::string(state.enabled.load() ? "true" : "false") +
+           ",\"injected\":" + std::string(state.persistence.state_entry != nullptr ? "true" : "false") +
+           ",\"save_panel_hook\":" +
+            std::string(qol::extension_bag::ui_state().persistence_hooks.save_panel_hook_installed ? "true" : "false") +
+            ",\"extension_tab_button\":" +
+            std::string(qol::extension_bag::ui_state().ui.extension_tab_buttons[0] != nullptr ? "true" : "false") +
+            ",\"inventory_frame_active\":" +
+            std::string(qol::extension_bag::ui_state().ui.inventory_frame_active ? "true" : "false") +
+           ",\"recovery_action\":\"" + recovery_action_name_api() + "\"" +
+           ",\"bagCount\":" + std::to_string(virtual_bag::active_extension_bags()) +
+           ",\"maxBagCount\":" + std::to_string(virtual_bag::kMaxExtensionBags) +
+           ",\"originalCapacities\":" + original_capacities +
+           ",\"state\":" + virtual_bag::state_json(state.objects.bag, true) + "}";
+}
+
+std::string api_op_result(qol::features::extension_bag::usecases::OpResult result,
+                          bool include_state) {
+    if (!result.ok) {
+        return extension_bag_op_err(
+            qol::features::extension_bag::usecases::error_text(result.error));
+    }
+    return include_state ? "{\"ok\":true,\"state\":" + api_status_json_locked() + "}"
+                         : extension_bag_op_ok();
+}
+
+}  // namespace
+
 std::string extension_bag_api_enter_view_impl(int logical_bag) {
-    return qol::features::extension_bag::usecases::enter_view(logical_bag);
+    return api_op_result(qol::features::extension_bag::usecases::enter_view(logical_bag), true);
 }
 
 std::string extension_bag_api_exit_view_impl() {
-    return qol::features::extension_bag::usecases::exit_view();
+    return api_op_result(qol::features::extension_bag::usecases::exit_view(), true);
 }
 
 std::string extension_bag_api_select_bag_impl(int logical_bag) {
-    return qol::features::extension_bag::usecases::select_bag(logical_bag);
+    return api_op_result(qol::features::extension_bag::usecases::select_bag(logical_bag), true);
 }
 
 std::string extension_bag_api_click_item_impl(int logical_bag, int slot) {
-    return qol::features::extension_bag::usecases::click_item(logical_bag, slot);
+    const auto result = qol::features::extension_bag::usecases::click_item(logical_bag, slot);
+    if (!result.ok) {
+        return extension_bag_op_err(
+            qol::features::extension_bag::usecases::error_text(result.error));
+    }
+    if (!result.has_item) return "{\"ok\":true,\"item\":null}";
+    return "{\"ok\":true,\"item\":{\"bag\":" + std::to_string(result.logical_bag) +
+           ",\"slot\":" + std::to_string(result.slot) +
+           ",\"category\":" + std::to_string(result.item.category) +
+           ",\"count\":" + std::to_string(result.effective_count) +
+           ",\"payload\":\"" + virtual_bag::base64_encode(
+               result.item.payload.data(), result.item.payload_size) + "\"}}";
 }
 
 std::string extension_bag_api_unequip_impl(int logical_bag) {
-    return qol::features::extension_bag::usecases::unequip_bag(logical_bag);
+    return api_op_result(qol::features::extension_bag::usecases::unequip_bag(logical_bag), false);
 }
 
 std::string extension_bag_api_move_item_impl(int from_bag, int from_slot, int to_bag, int to_slot) {
-    return qol::features::extension_bag::usecases::move_item(from_bag, from_slot, to_bag, to_slot);
+    const auto result = qol::features::extension_bag::usecases::move_item(
+        from_bag, from_slot, to_bag, to_slot);
+    if (!result.ok) {
+        return extension_bag_op_err(
+            qol::features::extension_bag::usecases::error_text(result.error));
+    }
+    return "{\"ok\":true,\"state\":" + api_status_json_locked() + "}";
 }
 
 namespace {
 void refresh_extension_item_operation_locked(int bag) {
-    if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == bag) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
 }
@@ -93,10 +167,10 @@ void refresh_extension_item_operation_locked(int bag) {
 }  // namespace
 
 std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
-    if (!extension_bag_ready_locked()) return extension_bag_not_ready_error_locked();
+    if (!extension_bag_ready_locked()) return api_not_ready_error();
     const int bag = extension_internal_bag(logical_bag);
-    if (bag < 0) return op_err("bad extension bag (6-10)");
-    if (slot < 0 || slot >= virtual_bag::kSlotCount) return op_err("bad slot");
+    if (bag < 0) return extension_bag_op_err("bad extension bag (6-10)");
+    if (slot < 0 || slot >= virtual_bag::kSlotCount) return extension_bag_op_err("bad slot");
 
     bool used = false;
     bool is_seal = false;
@@ -108,29 +182,28 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     ModuleUseReleasePlan release_plan{};
     {
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
-        if (slot >= ::qol::extension_bag::access::bag().capacities[bag]) return op_err("slot beyond derived capacity");
+        if (slot >= ::qol::extension_bag::access::bag().capacities[bag]) return extension_bag_op_err("slot beyond derived capacity");
         const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
-        if (descriptor.category <= 0 || descriptor.count <= 0) return op_err("slot empty");
+        if (descriptor.category <= 0 || descriptor.count <= 0) return extension_bag_op_err("slot empty");
         // R-63 佣兵徽章（category 42..50 / 928..933）：ITEMDATA_IsUse 不认（+2=0x1d），
         // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
         // fn_is_use 并按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary。
         is_seal = read_item_is_mercenary_seal(descriptor.category);
         if (is_seal) {
-            const auto* save_facts = qol::features::extension_bag::save_facts();
+            const auto* save_facts = extension_bag_save_facts();
             if (save_facts == nullptr || save_facts->is_ok == nullptr ||
                 ::qol::extension_bag::access::host().character_extras->read.has_empty_mercenary_slot == nullptr ||
                 extension_bag_write_api() == nullptr ||
                 extension_bag_write_api()->equipment.make_mercenary == nullptr) {
-                return op_err("symbol not resolved");
+                return extension_bag_op_err("symbol not resolved");
             }
         } else if (::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().game->read_only.item.is_usable == nullptr ||
                    extension_bag_write_api() == nullptr ||
                    extension_bag_write_api()->equipment.use_item == nullptr) {
-            return op_err("symbol not resolved");
+            return extension_bag_op_err("symbol not resolved");
         }
         if (!is_seal && !read_item_is_usable(descriptor.category)) {
-            return op_err("item not usable");
+            return extension_bag_op_err("item not usable");
         }
 
         item = module_item_locked(bag, slot);
@@ -138,11 +211,11 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (::qol::extension_bag::access::host().game != nullptr && ::qol::extension_bag::access::host().character_extras->read.party_member != nullptr) {
             (void)::qol::extension_bag::access::host().character_extras->read.party_member(0, &leader);
         }
-        if (item == nullptr) return op_err("extension item unavailable");
-        if (!is_seal && leader == nullptr) return op_err("no leader");
-        closes_description = ::qol::extension_bag::access::ui().extension_desc_item == item;
+        if (item == nullptr) return extension_bag_op_err("extension item unavailable");
+        if (!is_seal && leader == nullptr) return extension_bag_op_err("no leader");
+        closes_description = qol::extension_bag::ui_state().ui.extension_desc_item == item;
         if (!module_use_begin_locked(bag, slot, item, &use_token)) {
-            return op_err("extension item already in use");
+            return extension_bag_op_err("extension item already in use");
         }
     }
     if (closes_description) extension_description_set_off();
@@ -153,7 +226,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (!save_ok || !slot_ok) {
             ::qol::extension_bag::ReentryLock lock;
             module_use_abort_locked(use_token);
-            return op_err(!save_ok ? "save busy" : "mercenary slots full");
+            return extension_bag_op_err(!save_ok ? "save busy" : "mercenary slots full");
         }
         previous_use_token = g_active_module_use_token;
         g_active_module_use_token = &use_token;
@@ -175,35 +248,35 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
             const bool isolated = marker_cleared || module_use_abort_isolate_locked(use_token);
             VIRTBAG_LOG_ERROR("ERROR API use token mismatch bag=%d slot=%d item=%p marker_cleared=%d",
                         bag, slot, item, isolated ? 1 : 0);
-            return op_err("extension item changed during native operation");
+            return extension_bag_op_err("extension item changed during native operation");
         }
     }
     if (release_plan.pending) {
         if (!module_use_release_native(release_plan)) {
-            return op_err("extension item release failed");
+            return extension_bag_op_err("extension item release failed");
         }
         ::qol::extension_bag::ReentryLock lock;
         if (!module_use_finalize_release_locked(release_plan)) {
-            return op_err("extension item release finalize failed");
+            return extension_bag_op_err("extension item release finalize failed");
         }
     }
-    if (!used) return op_err("on cooldown");
+    if (!used) return extension_bag_op_err("on cooldown");
     if (closes_description) {
         ::qol::extension_bag::ReentryLock lock;
         reset_extension_desc_item_hooks_locked();
-        ::qol::extension_bag::access::ui().extension_desc_item = nullptr;
-        ::qol::extension_bag::access::ui().extension_desc_item_bag = -1;
-        ::qol::extension_bag::access::ui().extension_desc_item_slot = -1;
+        qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+        qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+        qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
     }
     int32_t current_tutorial_state = -1;
-    const auto* world_facts = qol::features::extension_bag::world_facts();
+    const auto* world_facts = extension_bag_world_facts();
     if (used && world_facts != nullptr && world_facts->tutorial_state != nullptr &&
         ::qol::extension_bag::access::host().game->world_action.cancel_tutorial != nullptr &&
         qol::contracts::succeeded(world_facts->tutorial_state(&current_tutorial_state)) &&
         current_tutorial_state == 6) {
         (void)::qol::extension_bag::access::host().game->world_action.cancel_tutorial();
     }
-    return op_ok();
+    return extension_bag_op_ok();
 }
 
 QolResult extension_put_jewel_error(const char* message) {
@@ -233,7 +306,6 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
     ModuleUseReleasePlan release_plan{};
     {
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         if (slot >= ::qol::extension_bag::access::bag().capacities[bag]) {
             return extension_put_jewel_error("slot beyond derived capacity");
         }
@@ -297,13 +369,12 @@ QolResult extension_bag_api_put_jewel_typed(int role, int logical_bag, int slot,
         if (result != 0) {
             return extension_put_jewel_error(result == 2 ? "no socket" : "not jewel");
         }
-        ensure_state_loaded_locked();
         if (!consumed) {
             int current_bag = -1;
             int current_slot = -1;
             if (!module_slot_of_item_locked(jewel, &current_bag, &current_slot) ||
                 current_bag != bag || current_slot != slot ||
-                ::qol::extension_bag::access::objects().module_objects[bag][slot] != jewel) {
+                qol::extension_bag::ui_state().objects.module_objects[bag][slot] != jewel) {
                 return extension_put_jewel_error("extension jewel changed during native operation");
             }
             if (!consume_extension_item_after_native_locked(
@@ -330,9 +401,5 @@ std::string extension_bag_api_put_jewel_impl(int role, int logical_bag, int slot
                                              int equip_slot) {
     const QolResult result =
         extension_bag_api_put_jewel_typed(role, logical_bag, slot, equip_slot);
-    return qol::contracts::succeeded(result) ? op_ok() : op_err(result.message);
+    return qol::contracts::succeeded(result) ? extension_bag_op_ok() : extension_bag_op_err(result.message);
 }
-
-#undef extension_bag_not_ready_error_locked
-#undef extension_bag_ready_locked
-#undef extension_internal_bag

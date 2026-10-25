@@ -1,10 +1,11 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -19,9 +20,8 @@
 #include "contracts/item_facts.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/model/equip_rules.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/model/move_merge.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
@@ -56,7 +56,6 @@ void* extension_menu_character() {
 
 ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::ReentryLock& lock,
                                                         int internal_bag, void* item) {
-    ensure_state_loaded_locked();
     if (!virtual_bag::valid_index(internal_bag) || item == nullptr) {
         return ExtensionBagEquipResult::kReject;
     }
@@ -138,7 +137,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::Re
 
     // P4.3：移除前先分配保管 handle（失败时物品仍在原版库存，无丢失风险）。
     uint32_t custody_handle = 0;
-    if (ownership::allocate(&::qol::extension_bag::access::objects().ownership_ledger, &custody_handle) != ownership::Outcome::kOk) {
+    if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &custody_handle) != ownership::Outcome::kOk) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "extension equip ledger exhausted src=%d/%d", src_bag, src_slot);
         return ExtensionBagEquipResult::kFailed;
     }
@@ -195,12 +194,12 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
     if (!lock.owns_lock() || character == nullptr || item == nullptr ||
         !virtual_bag::valid_index(source_bag) ||
         source_slot < 0 || source_slot >= virtual_bag::kSlotCount ||
-        ::qol::extension_bag::access::objects().module_objects[source_bag][source_slot] != item ||
+        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] != item ||
         ::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().character_extras->read.can_equip == nullptr ||
         ::qol::extension_bag::access::host().character_extras->read.find_equip_slot == nullptr ||
         extension_bag_write_api() == nullptr ||
-        !::qol::extension_bag::access::objects().module_view_installed || ::qol::extension_bag::access::objects().module_view_index != source_bag ||
-        ::qol::extension_bag::access::objects().module_window_original_bag < 0 || ::qol::extension_bag::access::objects().module_window_original_bag >= 5) {
+        !qol::extension_bag::ui_state().objects.module_view_installed || qol::extension_bag::ui_state().objects.module_view_index != source_bag ||
+        qol::extension_bag::ui_state().objects.module_window_original_bag < 0 || qol::extension_bag::ui_state().objects.module_window_original_bag >= 5) {
         return false;
     }
     if (!module_object_replacement_allowed_locked(source_bag, source_slot,
@@ -212,7 +211,7 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
     int target = -1;
     if (!extension_bag_ui_read_char_find_equip_slot(character, item, &target)) return false;
     if (target < 0) return false;
-    const int original_bag = ::qol::extension_bag::access::objects().module_window_original_bag;
+    const int original_bag = qol::extension_bag::ui_state().objects.module_window_original_bag;
     const auto* inventory_write = extension_bag_write_api();
     if (inventory_write == nullptr ||
         inventory_write->inventory.set_physical_item == nullptr) return false;
@@ -241,8 +240,8 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
                                        &previous_equipped_payload_size)) {
         return false;
     }
-    const uint32_t source_handle = ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot];
-    const uint64_t source_generation = ::qol::extension_bag::access::objects().module_object_use[source_bag][source_slot].generation;
+    const uint32_t source_handle = qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot];
+    const uint64_t source_generation = qol::extension_bag::ui_state().objects.module_object_use[source_bag][source_slot].generation;
     const uint64_t source_hash = virtual_bag::payload_hash(
         ::qol::extension_bag::access::bag().items[source_bag][source_slot]);
     if (!qol::contracts::succeeded(inventory_write->inventory.set_physical_item(
@@ -264,13 +263,13 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
                       original_bag, source_slot, original_inventory_item, restore_result.code);
         return false;
     }
-    const bool source_unchanged = ::qol::extension_bag::access::objects().module_objects[source_bag][source_slot] == item &&
-        ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot] == source_handle &&
-        ::qol::extension_bag::access::objects().module_object_use[source_bag][source_slot].generation == source_generation &&
+    const bool source_unchanged = qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] == item &&
+        qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] == source_handle &&
+        qol::extension_bag::ui_state().objects.module_object_use[source_bag][source_slot].generation == source_generation &&
         virtual_bag::payload_hash(::qol::extension_bag::access::bag().items[source_bag][source_slot]) ==
             source_hash &&
-        ::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == source_bag &&
-        ::qol::extension_bag::access::objects().module_window_original_bag == original_bag;
+        qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == source_bag &&
+        qol::extension_bag::ui_state().objects.module_window_original_bag == original_bag;
     if (!source_unchanged) {
         QOL_LOG_ERROR(QolDomain::kExtensionBag,
                       "ERROR extension character equip source changed during original exchange bag=%d slot=%d item=%p handle=%u generation=%llu",
@@ -288,14 +287,14 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
     // 扩展状态表示，不能让同一个旧指针同时继续留在原版 INVEN 中。
     // 角色装备接管对象所有权，不能走 free_module_object_locked；否则下一帧
     // 会把刚装备到角色槽的对象释放掉。先结束视图借用，再转为游戏侧持有。
-    const uint32_t handle = ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot];
-    if (ownership::live_state(::qol::extension_bag::access::objects().ownership_ledger, handle,
+    const uint32_t handle = qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot];
+    if (ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
                               ownership::State::kBorrowedForView)) {
-        ownership::return_from_view(&::qol::extension_bag::access::objects().ownership_ledger, handle);
+        ownership::return_from_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle);
     }
-    if (ownership::live_state(::qol::extension_bag::access::objects().ownership_ledger, handle,
+    if (ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
                               ownership::State::kModuleOwned)) {
-        if (ownership::handover_to_inventory(&::qol::extension_bag::access::objects().ownership_ledger, handle) !=
+        if (ownership::handover_to_inventory(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) !=
             ownership::Outcome::kOk) {
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip ownership handover failed bag=%d slot=%d",
                         source_bag, source_slot);
@@ -315,14 +314,14 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
                 source_bag, source_slot, "character equip replacement")) {
             return false;
         }
-        ::qol::extension_bag::access::objects().module_objects[source_bag][source_slot] = previous_equipped_item;
-        ::qol::extension_bag::access::objects().module_object_categories[source_bag][source_slot] = descriptor.category;
-        ::qol::extension_bag::access::objects().module_object_hashes[source_bag][source_slot] = virtual_bag::payload_hash(descriptor);
+        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] = previous_equipped_item;
+        qol::extension_bag::ui_state().objects.module_object_categories[source_bag][source_slot] = descriptor.category;
+        qol::extension_bag::ui_state().objects.module_object_hashes[source_bag][source_slot] = virtual_bag::payload_hash(descriptor);
         uint32_t adopted_handle = 0;
-        if (ownership::allocate(&::qol::extension_bag::access::objects().ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
-            ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot] = adopted_handle;
+        if (ownership::allocate(&qol::extension_bag::ui_state().objects.ownership_ledger, &adopted_handle) == ownership::Outcome::kOk) {
+            qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] = adopted_handle;
         } else {
-            ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot] = 0;
+            qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] = 0;
             QOL_LOG_WARN(QolDomain::kExtensionBag, "extension character equip adopt ledger exhausted bag=%d slot=%d",
                         source_bag, source_slot);
         }
@@ -332,10 +331,10 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
                 source_bag, source_slot, "character equip clear")) {
             return false;
         }
-        ::qol::extension_bag::access::objects().module_objects[source_bag][source_slot] = nullptr;
-        ::qol::extension_bag::access::objects().module_object_categories[source_bag][source_slot] = 0;
-        ::qol::extension_bag::access::objects().module_object_hashes[source_bag][source_slot] = 0;
-        ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot] = 0;
+        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] = nullptr;
+        qol::extension_bag::ui_state().objects.module_object_categories[source_bag][source_slot] = 0;
+        qol::extension_bag::ui_state().objects.module_object_hashes[source_bag][source_slot] = 0;
+        qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] = 0;
     }
     extension_bag_mark_dirty_locked();
     persist_state_locked();
@@ -351,19 +350,19 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
 void finish_extension_equip_ui_locked(int internal_bag, void* moving_control) {
     bool switched_view = false;
     refresh_tab_bag_items_locked();
-    void* tab = ::qol::extension_bag::access::ui().extension_tab_buttons[internal_bag];
+    void* tab = qol::extension_bag::ui_state().ui.extension_tab_buttons[internal_bag];
     if (tab != nullptr) {
         void* data = extension_bag_ui_data(tab);
         if (data != nullptr) {
-            *reinterpret_cast<void**>(data) = ::qol::extension_bag::access::ui().tab_bag_items[internal_bag];
+            *reinterpret_cast<void**>(data) = qol::extension_bag::ui_state().ui.tab_bag_items[internal_bag];
         }
     }
-    if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::bag().mode == virtual_bag::Mode::kModule &&
-        ::qol::extension_bag::access::objects().module_view_index != internal_bag) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed && ::qol::extension_bag::access::bag().mode == virtual_bag::Mode::kModule &&
+        qol::extension_bag::ui_state().objects.module_view_index != internal_bag) {
         extension_bag_ui_handle_tab_click_locked(internal_bag);
-        switched_view = ::qol::extension_bag::access::objects().module_view_index == internal_bag;
+        switched_view = qol::extension_bag::ui_state().objects.module_view_index == internal_bag;
     }
-    if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == internal_bag) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == internal_bag) {
         refresh_module_item_area_locked(internal_bag);
     } else if (::qol::extension_bag::access::host().game != nullptr && ::qol::extension_bag::access::host().write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
@@ -391,7 +390,7 @@ bool try_equip_on_extension_tab_drop_locked(::qol::extension_bag::ReentryLock& l
 }
 
 bool extension_source_should_equip_locked(int target_bag) {
-    const auto& session = ::qol::extension_bag::access::ui().extension_drag_session;
+    const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
     if (!virtual_bag::valid_index(target_bag) ||
         !virtual_bag::valid_index(session.source_bag) ||
         session.source_slot < 0 || session.source_slot >= virtual_bag::kSlotCount) {
@@ -461,18 +460,18 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
             // Reuse the execute-slot bindings across consecutive EB item
             // details. Unbinding and resolving all slots on every click is the
             // dominant extra latency versus the original detail path.
-            ::qol::extension_bag::access::ui().extension_desc_item = item;
-            ::qol::extension_bag::access::ui().extension_desc_item_bag = item_bag;
-            ::qol::extension_bag::access::ui().extension_desc_item_slot = item_slot;
+            qol::extension_bag::ui_state().ui.extension_desc_item = item;
+            qol::extension_bag::ui_state().ui.extension_desc_item_bag = item_bag;
+            qol::extension_bag::ui_state().ui.extension_desc_item_slot = item_slot;
             install_extension_desc_item_hooks_locked(item);
             QOL_LOG_INFO(QolDomain::kExtensionBag,
                          "extension desc item captured bag=%d slot=%d item=%p",
                          item_bag, item_slot, item);
         } else {
             reset_extension_desc_item_hooks_locked();
-            ::qol::extension_bag::access::ui().extension_desc_item = nullptr;
-            ::qol::extension_bag::access::ui().extension_desc_item_bag = -1;
-            ::qol::extension_bag::access::ui().extension_desc_item_slot = -1;
+            qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+            qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+            qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
             if (extension_bag_item) {
                 // 袋详情保留原版 UnequipExe；卸袋由函数级入口识别，
                 // 不能安装普通物品的 V2 详情 hook（否则会落到分解分支）。

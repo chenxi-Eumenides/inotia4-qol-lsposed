@@ -1,16 +1,15 @@
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_bridge.h"
 #include "contracts/grid_geometry.h"
 #include "contracts/ui.h"
+#include "plugins/extension_bag/runtime/state.h"
 
 #include <cstddef>
 
 namespace {
 
 const qol::contracts::QolUiAdapter* extension_bag_ui() {
-    const auto* sdk = qol::features::extension_bag::extension_bag_host_sdk();
+    const auto* sdk = runtime_state().host.sdk;
     return sdk == nullptr ? nullptr : sdk->ui;
 }
 
@@ -20,9 +19,8 @@ constexpr qol::contracts::GridGeometry kExtensionGrid{
 }
 
 bool extension_bag_grid_hit(int64_t x, int64_t y) {
-    const virtual_bag::State* state = extension_bag_state();
-    if (state == nullptr || state->mode == virtual_bag::Mode::kOriginal ||
-        !virtual_bag::valid_index(state->selected)) {
+    const virtual_bag::State& state = runtime_state().objects.bag;
+    if (state.mode == virtual_bag::Mode::kOriginal || !virtual_bag::valid_index(state.selected)) {
         return false;
     }
     return qol::contracts::grid_contains(kExtensionGrid, x, y);
@@ -62,6 +60,10 @@ void* extension_bag_valid_child(void* root, int slot) {
         return nullptr;
     }
     return ctrl;
+}
+
+void* valid_child_locked(void* root, int slot) {
+    return extension_bag_valid_child(root, slot);
 }
 
 void extension_bag_control_abs_pos(void* button, int64_t* ax, int64_t* ay) {
@@ -126,7 +128,7 @@ void* extension_bag_ui_parent(void* control) {
 }
 
 const qol::contracts::QolUiComponents* extension_bag_ui_components() {
-    const auto* sdk = qol::features::extension_bag::extension_bag_host_sdk();
+    const auto* sdk = runtime_state().host.sdk;
     if (sdk == nullptr || sdk->capabilities.require == nullptr) return nullptr;
     const void* iface = nullptr;
     if (sdk->capabilities.require(qol::contracts::kUiComponentsCapabilityId,
@@ -144,13 +146,13 @@ void* extension_bag_ui_root(qol::contracts::QolUiRootKind kind) {
     return qol::contracts::succeeded(ui->find_root(kind, &root)) ? root : nullptr;
 }
 
-bool extension_bag_ui_rect(void* control, UiRect* out_rect) {
+bool extension_bag_ui_rect(void* control, qol::contracts::UiRect* out_rect) {
     const auto* ui = extension_bag_ui();
     return ui != nullptr && ui->get_rect != nullptr && control != nullptr && out_rect != nullptr &&
            qol::contracts::succeeded(ui->get_rect(control, out_rect));
 }
 
-bool extension_bag_ui_set_rect(void* control, UiRect rect) {
+bool extension_bag_ui_set_rect(void* control, qol::contracts::UiRect rect) {
     const auto* ui = extension_bag_ui();
     return ui != nullptr && ui->set_rect != nullptr && control != nullptr &&
            qol::contracts::succeeded(ui->set_rect(control, rect));
@@ -163,7 +165,7 @@ bool extension_bag_ui_control_origin(void* control, int64_t* out_x, int64_t* out
            qol::contracts::succeeded(ui->control_absolute_origin(control, out_x, out_y));
 }
 
-bool extension_bag_ui_hit_test(void* control, int64_t x, int64_t y, UiRect rect) {
+bool extension_bag_ui_hit_test(void* control, int64_t x, int64_t y, qol::contracts::UiRect rect) {
     const auto* ui = extension_bag_ui();
     return ui != nullptr && ui->hit_test != nullptr && control != nullptr &&
            ui->hit_test(control, x, y, rect) == 1;
@@ -326,7 +328,7 @@ bool extension_bag_ui_clear_touch_drop_event() {
            qol::contracts::succeeded(ui->clear_touch_drop_event());
 }
 
-bool extension_bag_ui_fill_rect(UiRect rect, uint32_t color) {
+bool extension_bag_ui_fill_rect(qol::contracts::UiRect rect, uint32_t color) {
     const auto* ui = extension_bag_ui();
     return ui != nullptr && ui->fill_rect != nullptr &&
            qol::contracts::succeeded(ui->fill_rect(rect, color));

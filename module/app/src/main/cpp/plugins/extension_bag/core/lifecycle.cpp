@@ -1,4 +1,5 @@
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/ui_state.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/core/lifecycle.h"
@@ -9,7 +10,6 @@
 #include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/plugin.h"
@@ -78,7 +78,7 @@ bool c18_native_bag_candidate_locked() {
 
 uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param,
                                                   uint64_t param2) {
-    if (runtime_state().persistence.orig_event == nullptr) return 0;
+    if (qol::extension_bag::ui_state().persistence_hooks.orig_event == nullptr) return 0;
 
     bool session_has_projected_item = false;
     {
@@ -89,7 +89,7 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     // 0x19) do not change physical inventory, so scanning all 6x16 slots twice
     // for every move only adds input latency.
     if (!session_has_projected_item || event != 0x18) {
-        return runtime_state().persistence.orig_event(event, param, param2);
+        return qol::extension_bag::ui_state().persistence_hooks.orig_event(event, param, param2);
     }
 
     PhysicalInventorySnapshot before{};
@@ -97,13 +97,13 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     int source_slot = -1;
     {
         ::qol::extension_bag::ReentryLock lock;
-        source_bag = runtime_state().ui.extension_drag_session.source_bag;
-        source_slot = runtime_state().ui.extension_drag_session.source_slot;
+        source_bag = qol::extension_bag::ui_state().ui.extension_drag_session.source_bag;
+        source_slot = qol::extension_bag::ui_state().ui.extension_drag_session.source_slot;
         before = capture_physical_inventory_snapshot_locked();
         log_original_event_inventory_snapshot("pre", event, true, source_bag, source_slot, before);
     }
 
-    const uint64_t result = runtime_state().persistence.orig_event(event, param, param2);
+    const uint64_t result = qol::extension_bag::ui_state().persistence_hooks.orig_event(event, param, param2);
     bool restored = false;
     {
         ::qol::extension_bag::ReentryLock lock;
@@ -138,7 +138,7 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
 
 bool consume_projected_release_locked(::qol::extension_bag::ReentryLock& lock, int64_t x, int64_t y) {
     if (!projected_drag_session_active_locked()) return false;
-    auto& session = runtime_state().ui.extension_drag_session;
+    auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
     if (session.phase == virtual_bag::DragPhase::kCommitted ||
         session.phase == virtual_bag::DragPhase::kRejected ||
         session.phase == virtual_bag::DragPhase::kCancelled) {
@@ -188,11 +188,11 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         VIRTBAG_LOG("touch bypass event=0x%llx reason=session_not_admitted",
                     static_cast<unsigned long long>(event));
         // Explicit state access equivalent: return g_orig_event != nullptr ? g_orig_event(event, param, param2) : 0
-        return runtime_state().persistence.orig_event != nullptr ? runtime_state().persistence.orig_event(event, param, param2) : 0;
+        return qol::extension_bag::ui_state().persistence_hooks.orig_event != nullptr ? qol::extension_bag::ui_state().persistence_hooks.orig_event(event, param, param2) : 0;
     }
     const bool extension_enabled = runtime_state().enabled.load();
     int32_t state_open = 0;
-    const auto* world_facts = qol::features::extension_bag::world_facts();
+    const auto* world_facts = extension_bag_world_facts();
     const bool state_ready = world_facts != nullptr && world_facts->game_state_gate != nullptr &&
         qol::contracts::succeeded(world_facts->game_state_gate(&state_open));
     const uint32_t gamestate = state_ready && state_open != 0 ? 0U : 1U;
@@ -213,7 +213,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                         (void)extension_bag_ui_touch_state(&moving, &drop_source, &release_x, &release_y);
                     }
                     cancel_projected_drag_session_locked("release-bypassed-gamestate");
-                    runtime_state().ui.extension_drag_session = {};
+                    qol::extension_bag::ui_state().ui.extension_drag_session = {};
                     QOL_LOG_DEBUG(QolDomain::kExtensionBag, "projected release intercepted event=0x18 reason=gamestate=%u",
                                 gamestate);
                     // Non-world cancellation is unhandled: clear native selection as original does.
@@ -245,7 +245,6 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         x = *reinterpret_cast<const int64_t*>(param);
         y = *reinterpret_cast<const int64_t*>(param + 8);
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         log_exit_trace_locked("event_enter", event, param, param2, x, y);
         const int64_t grid_width = 4 * kGridStep - (kGridStep - kGridCell);
         const int64_t grid_height = 4 * kGridStep - (kGridStep - kGridCell);
@@ -255,10 +254,10 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                     static_cast<long long>(grid_width), static_cast<long long>(grid_height),
         extension_bag_grid_hit(x, y) ? 1 : 0, static_cast<long long>(kCellX),
                     static_cast<long long>(kCellY), static_cast<int>(runtime_state().objects.bag.mode),
-                    runtime_state().objects.bag.selected, runtime_state().objects.module_view_installed ? 1 : 0,
-                    runtime_state().ui.extension_tab_root, static_cast<unsigned long long>(runtime_state().ui.extension_tab_generation),
-                    static_cast<unsigned long long>(runtime_state().ui.inventory_generation));
-        if (runtime_state().ui.extension_touch_capture) {
+                    runtime_state().objects.bag.selected, qol::extension_bag::ui_state().objects.module_view_installed ? 1 : 0,
+                    qol::extension_bag::ui_state().ui.extension_tab_root, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.extension_tab_generation),
+                    static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation));
+        if (qol::extension_bag::ui_state().ui.extension_touch_capture) {
             log_p5_observation_locked("panel-capture-press", nullptr, event, param2 != 0,
                                       param != 0, nullptr, true, 1, x, y);
             return 1;
@@ -272,41 +271,41 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     int projected_slot = -1;
         bool projected_item_press = false;
         if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
-            runtime_state().objects.module_view_installed && virtual_bag::valid_index(runtime_state().objects.module_view_index) &&
-            runtime_state().objects.projected_item_root != nullptr) {
+            qol::extension_bag::ui_state().objects.module_view_installed && virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index) &&
+            qol::extension_bag::ui_state().objects.projected_item_root != nullptr) {
             // Hit the projected control rects directly. The fixed grid constants
             // disagree with the live control spacing at the cell edges, which
             // made an item press resolve to the neighbouring empty slot and
             // skipped the projected drag session.
             projected_slot = extension_bag_projected_slot_index(
-                runtime_state().objects.projected_item_root, x, y,
-                runtime_state().objects.bag.capacities[runtime_state().objects.module_view_index]);
+                qol::extension_bag::ui_state().objects.projected_item_root, x, y,
+                runtime_state().objects.bag.capacities[qol::extension_bag::ui_state().objects.module_view_index]);
             projected_item_press = projected_slot >= 0;
         }
         if (runtime_state().objects.bag.mode != virtual_bag::Mode::kOriginal &&
             extension_bag_grid_hit(x, y) && !projected_item_press) {
             // The original grid is hidden underneath the module grid layout.
             // Consume it even when no extension drag is active.
-            runtime_state().ui.extension_drag = {};
+            qol::extension_bag::ui_state().ui.extension_drag = {};
             reset_drag_state_locked(nullptr);
-            runtime_state().ui.extension_touch_capture = true;
+            qol::extension_bag::ui_state().ui.extension_touch_capture = true;
             log_p5_observation_locked("panel-hidden-grid-press", nullptr, event, param2 != 0,
                                       param != 0, nullptr, true, 1, x, y);
             return 1;
         }
-        if (projected_item_press && runtime_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kIdle) {
+        if (projected_item_press && qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kIdle) {
             begin_projected_drag_session_locked(projected_slot);
         }
         const int target_original_bag = original_bag_button_index(x, y);
-        if (!runtime_state().ui.extension_touch_capture && runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
+        if (!qol::extension_bag::ui_state().ui.extension_touch_capture && runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
             target_original_bag >= 0) {
             restore_module_view_locked();
             virtual_bag::begin_exit_module(&runtime_state().objects.bag);
             clear_original_bag_selection_locked();
-            runtime_state().ui.exit_display_bag = runtime_state().objects.original_current_got < kNoOriginalBagSelected ?
-                                 runtime_state().objects.original_current_got : runtime_state().objects.original_current_direct;
+            qol::extension_bag::ui_state().ui.exit_display_bag = qol::extension_bag::ui_state().objects.original_current_got < virtual_bag::kOriginalNativeBagCount ?
+                                 qol::extension_bag::ui_state().objects.original_current_got : qol::extension_bag::ui_state().objects.original_current_direct;
             if (bind_original_exit_display_bag_locked(target_original_bag)) {
-                runtime_state().ui.exit_display_bag = static_cast<uint8_t>(target_original_bag);
+                qol::extension_bag::ui_state().ui.exit_display_bag = static_cast<uint8_t>(target_original_bag);
             }
             exiting_to_original = true;
             log_exit_trace_locked("original_press_pre_orig", event, param, param2, x, y);
@@ -327,7 +326,6 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         bool release_cleanup_handled = false;
         {
             ::qol::extension_bag::ReentryLock lock;
-            ensure_state_loaded_locked();
             log_exit_trace_locked("event_release", event, param, param2, x, y);
         if (virtual_bag::projected_release_owns_event(
                 event, projected_drag_session_active_locked())) {
@@ -337,14 +335,14 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                 // Owner/terminal release is handled by the module; preserve native selection.
                 release_cleanup_needed = true;
                 release_cleanup_handled = true;
-            } else if (runtime_state().ui.extension_touch_capture) {
-            if (param == 0 && x == 0 && y == 0 && runtime_state().ui.extension_drag.active) {
-                x = runtime_state().ui.extension_drag.current_x;
-                y = runtime_state().ui.extension_drag.current_y;
+            } else if (qol::extension_bag::ui_state().ui.extension_touch_capture) {
+            if (param == 0 && x == 0 && y == 0 && qol::extension_bag::ui_state().ui.extension_drag.active) {
+                x = qol::extension_bag::ui_state().ui.extension_drag.current_x;
+                y = qol::extension_bag::ui_state().ui.extension_drag.current_y;
             }
             if (param == 0 && x == 0 && y == 0) {
-                runtime_state().ui.extension_drag = {};
-                runtime_state().ui.extension_touch_capture = false;
+                qol::extension_bag::ui_state().ui.extension_drag = {};
+                qol::extension_bag::ui_state().ui.extension_touch_capture = false;
                 log_p5_observation_locked("panel-capture-release-empty", nullptr, event,
                                           param2 != 0, param != 0, nullptr, true, 1, x, y);
                 // Empty capture has no module transaction; use the unhandled cleanup variant.
@@ -352,29 +350,29 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                 release_cleanup_handled = false;
             } else {
                 constexpr int64_t kTouchSlop = 24;
-                const int64_t dx = x - runtime_state().ui.extension_drag.press_x;
-                const int64_t dy = y - runtime_state().ui.extension_drag.press_y;
-                const bool is_click = runtime_state().ui.extension_drag.active &&
+                const int64_t dx = x - qol::extension_bag::ui_state().ui.extension_drag.press_x;
+                const int64_t dy = y - qol::extension_bag::ui_state().ui.extension_drag.press_y;
+                const bool is_click = qol::extension_bag::ui_state().ui.extension_drag.active &&
                                       dx >= -kTouchSlop && dx <= kTouchSlop &&
                                       dy >= -kTouchSlop && dy <= kTouchSlop;
                 if (is_click) {
-                    runtime_state().objects.bag.inspected = static_cast<int>(runtime_state().ui.extension_drag.slot);
+                    runtime_state().objects.bag.inspected = static_cast<int>(qol::extension_bag::ui_state().ui.extension_drag.slot);
                     const virtual_bag::Item& item =
-                        runtime_state().objects.bag.items[runtime_state().ui.extension_drag.bag][runtime_state().ui.extension_drag.slot];
+                        runtime_state().objects.bag.items[qol::extension_bag::ui_state().ui.extension_drag.bag][qol::extension_bag::ui_state().ui.extension_drag.slot];
                     QOL_LOG_DEBUG(QolDomain::kExtensionBag, "extension item click bag=%d slot=%d category=%d count=%d",
-                                runtime_state().ui.extension_drag.bag, runtime_state().ui.extension_drag.slot, item.category,
+                                qol::extension_bag::ui_state().ui.extension_drag.bag, qol::extension_bag::ui_state().ui.extension_drag.slot, item.category,
                                 item.count);
                     log_exit_trace_locked("extension_item_click", event, param, param2, x, y);
                     // The module consumed the click; still clear native selection state.
                     release_cleanup_handled = false;
                 } else {
-                    const bool handled = runtime_state().ui.extension_drag.active &&
+                    const bool handled = qol::extension_bag::ui_state().ui.extension_drag.active &&
                                          handle_bag_drop_release_locked(lock, x, y);
                     // Drop keeps the transaction result; failed/no-source drops use unhandled cleanup.
                     release_cleanup_handled = handled;
                 }
-                runtime_state().ui.extension_drag = {};
-                runtime_state().ui.extension_touch_capture = false;
+                qol::extension_bag::ui_state().ui.extension_drag = {};
+                qol::extension_bag::ui_state().ui.extension_touch_capture = false;
                 log_p5_observation_locked("panel-capture-release", nullptr, event, param2 != 0,
                                           param != 0, nullptr, true, 1, x, y);
                 release_cleanup_needed = true;
@@ -408,30 +406,29 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             (void)extension_bag_ui_touch_state(&moving, &drop_source, &x, &y);
         }
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
-        if (runtime_state().ui.extension_touch_capture) {
+        if (qol::extension_bag::ui_state().ui.extension_touch_capture) {
             // 0x19 is the native MOVE event. Keep the source and capture
             // alive until 0x18 performs click-vs-drop classification.
-            if (runtime_state().ui.extension_drag.active) {
-                runtime_state().ui.extension_drag.current_x = x;
-                runtime_state().ui.extension_drag.current_y = y;
+            if (qol::extension_bag::ui_state().ui.extension_drag.active) {
+                qol::extension_bag::ui_state().ui.extension_drag.current_x = x;
+                qol::extension_bag::ui_state().ui.extension_drag.current_y = y;
             }
             log_p5_observation_locked("panel-capture-move", nullptr, event, param2 != 0,
                                       param != 0, nullptr, true, 1, x, y);
             return 1;
         }
     }
-    if (runtime_state().ui.extension_touch_capture && event != 0x17 && event != 0x18 && event != 0x19) {
+    if (qol::extension_bag::ui_state().ui.extension_touch_capture && event != 0x17 && event != 0x18 && event != 0x19) {
         ::qol::extension_bag::ReentryLock lock;
-        runtime_state().ui.extension_drag = {};
-        runtime_state().ui.extension_touch_capture = false;
+        qol::extension_bag::ui_state().ui.extension_drag = {};
+        qol::extension_bag::ui_state().ui.extension_touch_capture = false;
         reset_drag_state_locked(nullptr);
         log_exit_trace_locked("event_cancel", event, param, param2, x, y);
         log_p5_observation_locked("panel-capture-cancel", nullptr, event, param2 != 0,
                                   param != 0, nullptr, true, 1, x, y);
         return 1;
     }
-    if (runtime_state().ui.extension_touch_capture) {
+    if (qol::extension_bag::ui_state().ui.extension_touch_capture) {
         // Consume every event in the captured sequence, not only release and cancel.
         if (p5_panel_observation_enabled()) {
             ::qol::extension_bag::ReentryLock lock;
@@ -442,13 +439,11 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     }
     if (event != 0x17) {
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         log_exit_trace_locked("event_enter", event, param, param2);
     }
     if (exiting_to_original) {
         const uint64_t original_result = call_original_event_with_inventory_guard(event, param, param2);
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         log_exit_trace_locked("original_press_post_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-original-post", nullptr, event, param2 != 0,
                                   param != 0, nullptr, true, original_result, x, y);
@@ -456,7 +451,6 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     }
     {
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         log_exit_trace_locked("delegate_pre_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-delegate-pre", nullptr, event, param2 != 0,
                                   param != 0, nullptr, false, 0, x, y);
@@ -464,7 +458,6 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
     const uint64_t result = call_original_event_with_inventory_guard(event, param, param2);
     {
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         log_exit_trace_locked("delegate_post_orig", event, param, param2, x, y);
         log_p5_observation_locked("panel-delegate-post", nullptr, event, param2 != 0,
                                   param != 0, nullptr, true, result, x, y);
@@ -475,11 +468,11 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
             c18_native_bag_candidate_locked()) {
             const int raw_bag = raw_current_bag_locked();
-            if (raw_bag >= 0 && raw_bag != runtime_state().objects.original_current_got) {
+            if (raw_bag >= 0 && raw_bag != qol::extension_bag::ui_state().objects.original_current_got) {
                 // 必须先归还投影并让原版按原生当前袋重画物品区：改版袋 6..N-1 的
                 // 内容只在投影撤掉、容量字还原后才会正确切过去。
                 restore_module_view_locked();
-                if (raw_bag < kNoOriginalBagSelected) {
+                if (raw_bag < virtual_bag::kOriginalNativeBagCount) {
                     set_original_bag_locked(raw_bag);
                     if (runtime_state().host.game != nullptr &&
                         runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
@@ -492,7 +485,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
                     extension_bag_mark_dirty_locked();
                 }
                 persist_state_locked();
-                runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
+                qol::extension_bag::ui_state().ui.exit_display_bag = -1;
                 return result;
             }
         }
@@ -505,7 +498,7 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         // 物品格点击也会产生 0x17；原版袋按钮已在上方单独处理。
         // 这里仅处理原版事件确实改写当前袋的兜底退出路径。
         const bool original_bag_changed = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
-                                          original_bag_locked() != runtime_state().objects.original_current_got;
+                                          original_bag_locked() != qol::extension_bag::ui_state().objects.original_current_got;
         if (event == 0x17 && runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
             original_bag_changed) {
             const int selected_original_bag = original_bag_locked();
@@ -517,12 +510,12 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
             virtual_bag::enter_original(&runtime_state().objects.bag, selected_original_bag);
             extension_bag_mark_dirty_locked();
             persist_state_locked();
-            runtime_state().ui.exit_display_bag = kNoOriginalBagSelected;
+            qol::extension_bag::ui_state().ui.exit_display_bag = -1;
         } else if (event == 0x17 || event == 0x18) {
             if (c18_native_bag_candidate_locked()) {
                 const int raw_bag = raw_current_bag_locked();
                 runtime_state().objects.bag.original_selected =
-                    raw_bag >= 0 && raw_bag < kNoOriginalBagSelected ? raw_bag : 0;
+                    raw_bag >= 0 && raw_bag < virtual_bag::kOriginalNativeBagCount ? raw_bag : 0;
             } else {
                 runtime_state().objects.bag.original_selected = original_bag_locked();
             }
@@ -542,26 +535,25 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
     int world_state = -1;
     if (!read_world_state_id(&world_state)) return 1;
     const bool due = qol::features::extension_bag::model::main_menu_cleanup_due(
-        runtime_state().lifecycle_last_state, world_state, true,
-        runtime_state().main_menu_cleanup_dirty.load(std::memory_order_acquire));
+        qol::extension_bag::ui_state().aux.lifecycle_last_state, world_state, true,
+        qol::extension_bag::ui_state().aux.main_menu_cleanup_dirty.load(std::memory_order_acquire));
     if (due) {
         ::qol::extension_bag::ReentryLock lock;
         if (!extension_bag_session_admitted_locked()) {
             // An unloaded or degraded slot is not an empty inventory that may be reset.
-            runtime_state().main_menu_cleanup_dirty.store(false, std::memory_order_release);
+            qol::extension_bag::ui_state().aux.main_menu_cleanup_dirty.store(false, std::memory_order_release);
         } else if (!prepare_main_menu_locked()) {
-            runtime_state().main_menu_cleanup_dirty.store(true, std::memory_order_release);
+            qol::extension_bag::ui_state().aux.main_menu_cleanup_dirty.store(true, std::memory_order_release);
             QOL_LOG_WARN(QolDomain::kExtensionBag,
                          "lifecycle main-menu cleanup failed; retry scheduled");
         } else {
-            runtime_state().main_menu_cleanup_dirty.store(false, std::memory_order_release);
+            qol::extension_bag::ui_state().aux.main_menu_cleanup_dirty.store(false, std::memory_order_release);
         }
     }
     // 进档后尽早装载 sidecar 状态：快捷栏/物品数量查询走 EB 扫描，若等到打开
     // 背包面板才装载，进档后到首次开包前的数量会显示为 0。
     {
         ::qol::extension_bag::ReentryLock lock;
-        if (extension_bag_session_admitted_locked()) ensure_state_loaded_locked();
     }
     uint64_t shortcut_revision = 0;
     const qol::contracts::QolHostSdk* sdk = nullptr;
@@ -595,28 +587,28 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
             }
         }
     }
-    runtime_state().lifecycle_last_state = world_state;
+    qol::extension_bag::ui_state().aux.lifecycle_last_state = world_state;
     return 1;
 }
 
 }
 
 void ensure_lifecycle_task() {
-    if (runtime_state().lifecycle_task != 0) return;
-    runtime_state().lifecycle_last_state = -1;
+    if (qol::extension_bag::ui_state().aux.lifecycle_task != 0) return;
+    qol::extension_bag::ui_state().aux.lifecycle_last_state = -1;
     if (runtime_state().host.sdk == nullptr || runtime_state().host.sdk->scheduler.add == nullptr) return;
     uint64_t task = 0;
     const QolResult result = runtime_state().host.sdk->scheduler.add(1, &extension_bag_lifecycle_tick, nullptr, 30, 0,
                                                   &task);
-    if (result.ok == kQolOk) runtime_state().lifecycle_task = task;
+    if (result.ok == kQolOk) qol::extension_bag::ui_state().aux.lifecycle_task = task;
 }
 
 void remove_lifecycle_task() {
-    if (runtime_state().lifecycle_task == 0) return;
+    if (qol::extension_bag::ui_state().aux.lifecycle_task == 0) return;
     if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->scheduler.remove != nullptr) {
-        (void)runtime_state().host.sdk->scheduler.remove(runtime_state().lifecycle_task);
+        (void)runtime_state().host.sdk->scheduler.remove(qol::extension_bag::ui_state().aux.lifecycle_task);
     }
-    runtime_state().lifecycle_task = 0;
+    qol::extension_bag::ui_state().aux.lifecycle_task = 0;
 }
 
 bool prepare_main_menu_locked() {
@@ -637,7 +629,7 @@ bool prepare_main_menu_locked() {
     runtime_state().objects.bag = {};
     runtime_state().persistence.loaded_slot = -2;
     runtime_state().persistence.dirty = false;
-    runtime_state().ui.inventory_frame_active = false;
+    qol::extension_bag::ui_state().ui.inventory_frame_active = false;
     cancel_projected_drag_session_locked("main-menu");
     return true;
 }

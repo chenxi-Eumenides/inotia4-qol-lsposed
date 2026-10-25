@@ -1,13 +1,14 @@
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/ui_state.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
-#include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/plugin.h"
@@ -35,9 +36,9 @@ bool is_c18_native_bag_layout_candidate() {
 // 6..N-1 永远不会画成“选中”样子。这里用同一套原生素材补上选中页的亮图标：
 // 图标位置与 UIEquip_DrawInvenBag 相同（rect 原点 +5），不改变任何袋状态。
 void draw_c18_active_native_tab_locked() {
-    if (!is_c18_native_bag_layout_candidate() || runtime_state().store.view_installed) return;
+    if (!is_c18_native_bag_layout_candidate() || qol::extension_bag::ui_state().store.view_installed) return;
     const int raw_bag = raw_current_bag_locked();
-    if (raw_bag < 6) return;
+    if (raw_bag < virtual_bag::kOriginalNativeBagCount) return;
     void* container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (container == nullptr) return;
     int child_count = 0;
@@ -45,7 +46,7 @@ void draw_c18_active_native_tab_locked() {
     void* child = extension_bag_ui_child_at(container, raw_bag);
     if (child == nullptr || extension_bag_ui_parent(child) != container ||
         extension_bag_ui_user_type(child) != 2) return;
-    for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+    for (const auto& anchor : qol::extension_bag::ui_state().ui.extension_tab_anchors) {
         if (anchor.mounted != 0 && anchor.handle == child) return;
     }
     int64_t ax = 0;
@@ -67,7 +68,7 @@ int c18_native_highlight_suppression_bag_locked() {
         void* child = extension_bag_ui_child_at(container, index);
         if (child == nullptr || extension_bag_ui_user_type(child) != 2) continue;
         bool module_tab = false;
-        for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+        for (const auto& anchor : qol::extension_bag::ui_state().ui.extension_tab_anchors) {
             if (anchor.mounted != 0 && anchor.handle == child) {
                 module_tab = true;
                 break;
@@ -81,7 +82,7 @@ int c18_native_highlight_suppression_bag_locked() {
 void draw_tab_buttons_in_frame_locked() {
     // 配置门控：扩展背包关闭时不得绘制/重装页签，并清除已挂载的页签控件。
     if (!runtime_state().enabled.load()) {
-        if (runtime_state().ui.extension_tab_root != nullptr || runtime_state().ui.extension_tab_buttons[0] != nullptr) {
+        if (qol::extension_bag::ui_state().ui.extension_tab_root != nullptr || qol::extension_bag::ui_state().ui.extension_tab_buttons[0] != nullptr) {
             delete_extension_tab_buttons_locked();
             disable_extension_tab_buttons_locked();
         }
@@ -89,7 +90,7 @@ void draw_tab_buttons_in_frame_locked() {
     }
     // Store owns its own tab column. The equip-page tab controls stay mounted but
     // must not be drawn over the store, otherwise two EB tab columns appear.
-    if (runtime_state().store.view_installed) return;
+    if (qol::extension_bag::ui_state().store.view_installed) return;
     const bool can_draw_original_button = extension_bag_ui_can_draw();
     // 标签挂袋容器（与原版 6 袋标签同父）：比对基准同步为袋容器句柄。
     void* current_bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
@@ -97,14 +98,14 @@ void draw_tab_buttons_in_frame_locked() {
     // 每帧检测真容器就位且尚未挂载（root 变化）时重新 install。
     int child_count = 0;
     if (current_bag_container != nullptr && extension_bag_ui_child_count(current_bag_container, &child_count) &&
-        child_count >= 6) {
+        child_count >= virtual_bag::kOriginalNativeBagCount) {
         // 每帧 ensure：游戏切页/关闭面板会销毁页签子树，锚定层负责证明并重建。
         install_extension_tab_buttons_locked();
         current_bag_container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     }
     const bool tabs_are_current =
-        current_bag_container != nullptr && current_bag_container == runtime_state().ui.extension_tab_root &&
-        runtime_state().ui.extension_tab_generation == runtime_state().ui.inventory_generation;
+        current_bag_container != nullptr && current_bag_container == qol::extension_bag::ui_state().ui.extension_tab_root &&
+        qol::extension_bag::ui_state().ui.extension_tab_generation == qol::extension_bag::ui_state().ui.inventory_generation;
     if (!tabs_are_current || !can_draw_original_button) return;
     const int active = virtual_bag::active_extension_bags();
     const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
@@ -119,7 +120,7 @@ void draw_tab_buttons_in_frame_locked() {
     }
     // 第一遍：底框 loc20，最多绘制已有单列布局可容纳的前五个页签。
     for (int index = visible - 1; index >= 0; --index) {
-        void* button = runtime_state().ui.extension_tab_buttons[index];
+        void* button = qol::extension_bag::ui_state().ui.extension_tab_buttons[index];
         if (button == nullptr) continue;
         int64_t ax = 0, ay = 0;
         extension_bag_control_abs_pos(button, &ax, &ay);
@@ -128,7 +129,7 @@ void draw_tab_buttons_in_frame_locked() {
     }
     // 第二遍：袋图标 loc6/loc9 + 选中高亮 loc19。
     for (int index = 0; index < visible; ++index) {
-        void* button = runtime_state().ui.extension_tab_buttons[index];
+        void* button = qol::extension_bag::ui_state().ui.extension_tab_buttons[index];
         if (button == nullptr) continue;
         const bool selected = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
                               runtime_state().objects.bag.selected == index;
@@ -163,7 +164,7 @@ namespace {
 void draw_cells_in_frame_locked() {
     const bool can_draw_original_button = extension_bag_ui_can_draw();
     if (runtime_state().objects.bag.mode != virtual_bag::Mode::kModule ||
-        !virtual_bag::valid_index(runtime_state().objects.bag.selected) || runtime_state().objects.module_view_installed) {
+        !virtual_bag::valid_index(runtime_state().objects.bag.selected) || qol::extension_bag::ui_state().objects.module_view_installed) {
         return;
     }
 
@@ -172,14 +173,14 @@ void draw_cells_in_frame_locked() {
     for (int slot = 0; slot < capacity; ++slot) {
         const int column = slot % 4;
         const int row = slot / 4;
-        const UiRect rect{kGridX + column * kGridStep, kGridY + row * kGridStep,
+        const qol::contracts::UiRect rect{kGridX + column * kGridStep, kGridY + row * kGridStep,
                           kGridCell, kGridCell};
         const bool occupied = slot < capacity &&
                               runtime_state().objects.bag.items[bag][slot].category > 0 &&
                               runtime_state().objects.bag.items[bag][slot].count > 0;
-        const bool dragging_source = runtime_state().ui.extension_drag.active &&
-                                     runtime_state().ui.extension_drag.bag == bag &&
-                                     runtime_state().ui.extension_drag.slot == slot;
+        const bool dragging_source = qol::extension_bag::ui_state().ui.extension_drag.active &&
+                                     qol::extension_bag::ui_state().ui.extension_drag.bag == bag &&
+                                     qol::extension_bag::ui_state().ui.extension_drag.slot == slot;
         if (can_draw_original_button) {
             (void)extension_bag_ui_draw_part(0xf, 0x29, static_cast<int32_t>(rect.x),
                                              static_cast<int32_t>(rect.y), 0, 1);
@@ -204,11 +205,11 @@ void draw_cells_in_frame_locked() {
                 {rect.x + kGridCell - kInspectBorder, rect.y, kInspectBorder, kGridCell}, kInspectColor);
         }
     }
-    if (runtime_state().ui.extension_drag.active && runtime_state().ui.extension_drag.bag == bag) {
-        void* item = module_item_locked(bag, runtime_state().ui.extension_drag.slot);
+    if (qol::extension_bag::ui_state().ui.extension_drag.active && qol::extension_bag::ui_state().ui.extension_drag.bag == bag) {
+        void* item = module_item_locked(bag, qol::extension_bag::ui_state().ui.extension_drag.slot);
         if (item != nullptr) {
-            const int32_t ghost_x = static_cast<int32_t>(runtime_state().ui.extension_drag.current_x - kGridCell / 2);
-            const int32_t ghost_y = static_cast<int32_t>(runtime_state().ui.extension_drag.current_y - kGridCell / 2);
+            const int32_t ghost_x = static_cast<int32_t>(qol::extension_bag::ui_state().ui.extension_drag.current_x - kGridCell / 2);
+            const int32_t ghost_y = static_cast<int32_t>(qol::extension_bag::ui_state().ui.extension_drag.current_y - kGridCell / 2);
             (void)extension_bag_ui_draw_item(item, ghost_x, ghost_y, 0, 1);
         }
     }
@@ -221,7 +222,6 @@ void virtual_bag_draw_original_bag_wrapper() {
         {"patch:P_EXT_INVEN_BAG_DRAW"});
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.draw_original_bag == nullptr) return;
     ::qol::extension_bag::ReentryLock lock;
-    ensure_state_loaded_locked();
     const bool module_view = runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
                              virtual_bag::valid_index(runtime_state().objects.bag.selected);
     static int last_module_view = -1;
@@ -233,8 +233,8 @@ void virtual_bag_draw_original_bag_wrapper() {
     // （互斥）：只在本帧原版 DrawInvenBag 前后临时改 current_bag，画完恢复。
     // 不能在整个商店视图期间改 current_bag，否则商店投影会按“无当前袋”刷新，
     // 右侧 EB 袋物品区会变空。
-    const bool mask_original_highlight = module_view || runtime_state().store.view_installed;
-    // C18 改版袋把追加页签放在 6..N-1，6 已是一个真实袋，不能再用 6 当无选中值。
+    const bool mask_original_highlight = module_view || qol::extension_bag::ui_state().store.view_installed;
+    // C18 改版袋把追加页签放在原生袋数之后；不使用固定袋号表示无选中。
     // 用“原版袋 + 追加袋”的总数作临时当前袋，索引越界即无页签匹配高亮。
     const bool c18_native_module_view =
         module_view && is_c18_native_bag_layout_candidate();
@@ -242,7 +242,7 @@ void virtual_bag_draw_original_bag_wrapper() {
     if (mask_original_highlight) {
         suppression_bag = c18_native_module_view
             ? c18_native_highlight_suppression_bag_locked()
-            : static_cast<int>(kNoOriginalBagSelected);
+            : native_bag_count_locked();
     }
     const int saved_current = raw_current_bag_locked();
     // 读不到原值时不写临时袋号：否则可能留下无效 current_bag。
@@ -255,7 +255,7 @@ void virtual_bag_draw_original_bag_wrapper() {
     // Native bag controls consume CO_RECT during DrawInvenBag. Apply any
     // collision-driven C18 shift before the original draw reads those rects.
     prepare_c18_native_bag_layout_locked();
-    if (module_view && runtime_state().objects.module_view_installed) {
+    if (module_view && qol::extension_bag::ui_state().objects.module_view_installed) {
         (void)runtime_state().host.write_port->ui.draw_original_bag();
         if (write_highlight_suppression && saved_current >= 0) {
             (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
@@ -268,7 +268,7 @@ void virtual_bag_draw_original_bag_wrapper() {
         (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
     }
     draw_c18_active_native_tab_locked();
-    if (!runtime_state().store.view_installed) draw_tab_buttons_in_frame_locked();
+    if (!qol::extension_bag::ui_state().store.view_installed) draw_tab_buttons_in_frame_locked();
 }
 void virtual_bag_draw_inven_item_wrapper() {
     const ::qol::contracts::InFlightGuard in_flight_guard(
@@ -278,7 +278,7 @@ void virtual_bag_draw_inven_item_wrapper() {
     ::qol::extension_bag::ReentryLock lock;
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(runtime_state().objects.bag.selected)) {
-        if (runtime_state().objects.module_view_installed) {
+        if (qol::extension_bag::ui_state().objects.module_view_installed) {
             (void)runtime_state().host.write_port->ui.draw_original_items();
             return;
         }
@@ -288,7 +288,7 @@ void virtual_bag_draw_inven_item_wrapper() {
         const int saved_current = original_bag_locked();
         const bool write_legacy_sentinel = !is_c18_native_bag_layout_candidate();
         if (write_legacy_sentinel) {
-            (void)runtime_state().host.write_port->ui.set_current_bag(kNoOriginalBagSelected);
+            (void)runtime_state().host.write_port->ui.set_current_bag(native_bag_count_locked());
         }
         (void)runtime_state().host.write_port->ui.draw_original_items();
         if (write_legacy_sentinel) {
@@ -300,8 +300,8 @@ void virtual_bag_draw_inven_item_wrapper() {
     // 会把刚由原生回调选中的页签写回 0，表现为点追加页签后又高亮回原版袋。
     const int saved_current = raw_current_bag_locked();
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule &&
-        runtime_state().ui.exit_display_bag < kNoOriginalBagSelected) {
-        (void)runtime_state().host.write_port->ui.set_current_bag(runtime_state().ui.exit_display_bag);
+        qol::extension_bag::ui_state().ui.exit_display_bag >= 0) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(qol::extension_bag::ui_state().ui.exit_display_bag);
     }
     (void)runtime_state().host.write_port->ui.draw_original_items();
     if (saved_current >= 0) {
@@ -313,21 +313,20 @@ void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::Reen
     const int old_state = previous_state;
     if (old_state != inventory_state) {
         VIRTBAG_LOG("draw-end state edge previous=%d current=%d gen=%llu", old_state,
-                    inventory_state, static_cast<unsigned long long>(runtime_state().ui.inventory_generation));
+                    inventory_state, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation));
     }
     previous_state = inventory_state;
     if (inventory_state >= 0 && inventory_state != 5) {
         // 页签点击只登记 pending，实际提交在 draw-end。装备页/扩展视图的
         // inventory_state 为 4，不能因为非 5 就跳过 pending 提交。
-        if (runtime_state().ui.pending_extension_tab >= 0) {
-            ensure_state_loaded_locked();
+        if (qol::extension_bag::ui_state().ui.pending_extension_tab >= 0) {
             commit_pending_extension_tab_locked(lock);
         }
         // Empty EB bag unequip switches to original mode while the inventory
         // panel is still state 4. This branch used to return before the mode
         // check below, leaving the projected item controls installed and the
         // original bag looking empty until a bag switch forced a refresh.
-        if (runtime_state().objects.module_view_installed) {
+        if (qol::extension_bag::ui_state().objects.module_view_installed) {
             const bool module_view_expected =
                 runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
                 virtual_bag::valid_index(runtime_state().objects.bag.selected);
@@ -345,7 +344,7 @@ void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::Reen
         return;
     }
     int32_t game_state_open = 1;
-    const auto* world_facts = qol::features::extension_bag::world_facts();
+    const auto* world_facts = extension_bag_world_facts();
     if (world_facts != nullptr && world_facts->game_state_gate != nullptr &&
         qol::contracts::succeeded(world_facts->game_state_gate(&game_state_open)) &&
         game_state_open == 0) {
@@ -356,11 +355,11 @@ void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::Reen
         drain_deferred_frees_locked();
         return;
     }
-    if (!runtime_state().ui.inventory_frame_active) {
+    if (!qol::extension_bag::ui_state().ui.inventory_frame_active) {
         restore_module_view_locked();
         set_original_bag_locked(0);
         virtual_bag::enter_original(&runtime_state().objects.bag, 0);
-        runtime_state().ui.inventory_frame_active = true;
+        qol::extension_bag::ui_state().ui.inventory_frame_active = true;
     }
     if (!runtime_state().enabled.load()) {
         restore_module_view_locked();
@@ -370,16 +369,15 @@ void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::Reen
         drain_deferred_frees_locked();
         return;
     }
-    ensure_state_loaded_locked();
     commit_pending_extension_tab_locked(lock);
-    if (runtime_state().objects.module_view_installed) ensure_module_view_root_current_locked();
+    if (qol::extension_bag::ui_state().objects.module_view_installed) ensure_module_view_root_current_locked();
     // 投影常驻（P2/P3）：module 视图有效期间保持安装；仅在状态不再指向
     // 模块视图（退出/切档/异常）时兜底恢复，防止遗留投影污染原版窗口。
     const bool module_view_expected =
         runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(runtime_state().objects.bag.selected);
-    if (runtime_state().objects.module_view_installed && !module_view_expected) restore_module_view_locked();
-    if (runtime_state().objects.module_view_installed) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed && !module_view_expected) restore_module_view_locked();
+    if (qol::extension_bag::ui_state().objects.module_view_installed) {
         clear_stale_projected_moving_locked();
     }
     static int last_mode = -1;
@@ -388,13 +386,13 @@ void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::Reen
     static int last_overlay_index = -2;
     if (last_mode != static_cast<int>(runtime_state().objects.bag.mode) ||
         last_selected != runtime_state().objects.bag.selected ||
-        last_overlay != static_cast<int>(runtime_state().objects.module_view_installed) ||
-        last_overlay_index != runtime_state().objects.module_view_index) {
+        last_overlay != static_cast<int>(qol::extension_bag::ui_state().objects.module_view_installed) ||
+        last_overlay_index != qol::extension_bag::ui_state().objects.module_view_index) {
         log_exit_trace_locked("draw_end", 0, 0, 0);
         last_mode = static_cast<int>(runtime_state().objects.bag.mode);
         last_selected = runtime_state().objects.bag.selected;
-        last_overlay = runtime_state().objects.module_view_installed ? 1 : 0;
-        last_overlay_index = runtime_state().objects.module_view_index;
+        last_overlay = qol::extension_bag::ui_state().objects.module_view_installed ? 1 : 0;
+        last_overlay_index = qol::extension_bag::ui_state().objects.module_view_index;
     }
     draw_cells_in_frame_locked();
     if (runtime_state().host.sdk != nullptr && runtime_state().host.sdk->ui != nullptr && runtime_state().host.sdk->ui->end_frame != nullptr) {
@@ -412,6 +410,6 @@ void virtual_bag_draw_end_wrapper() {
     const int inventory_state = virtual_bag_inventory_state_id();
     ::qol::extension_bag::ReentryLock lock;
     // 主线程绘制收尾：revision 变化时刷新轻量快照，读侧无需再加锁。
-    qol::extension_bag::publish_bag_snapshot_if_changed();
+    qol::extension_bag::publish_extension_bag_snapshot_if_changed();
     virtual_bag_draw_end_locked(inventory_state, lock);
 }

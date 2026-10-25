@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "contracts/move_merge.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -21,7 +22,7 @@ bool move_merge_enabled() {
 }
 
 bool set_extension_source_protection_enabled(bool enabled) {
-    runtime_state().source_protection_requested.store(enabled, std::memory_order_release);
+    qol::extension_bag::ui_state().aux.source_protection_requested.store(enabled, std::memory_order_release);
     return true;
 }
 

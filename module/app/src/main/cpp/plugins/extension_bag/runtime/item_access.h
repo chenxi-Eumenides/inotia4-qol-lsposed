@@ -2,7 +2,15 @@
 
 #include "plugins/extension_bag/runtime/state.h"
 
+#include <jni.h>
+
+JavaVM* g_jvm();
+
 bool read_item_category(const void* item, int* out_category);
+int original_item_category_locked(void* item);
+bool extension_bag_register_item_handle(void* item);
+bool extension_bag_item_handle_for_pointer(void* item,
+                                           qol::contracts::QolItemHandle* out_handle);
 bool read_item_is_jewel(int category);
 bool read_item_is_enchant_scroll(int category);
 bool read_item_is_mercenary_seal(int category);
@@ -12,6 +20,14 @@ bool read_item_cumulate_count(const void* item, int* out_count);
 const qol::contracts::QolItemCountApi* item_count_api();
 qol::contracts::QolItemCountEncoding item_count_encoding(const void* item);
 uint32_t original_count_view(uint32_t field);
+uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical);
+uint32_t virtual_bag_canonical_from_field(uint32_t field, uint32_t fallback_canonical);
+uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical);
+uint32_t virtual_bag_field_from_canonical(uint32_t field, uint32_t canonical, bool extended);
+uint32_t virtual_bag_view_from_canonical(uint32_t canonical, bool extended);
+uint32_t virtual_bag_count_limit(bool extended);
+bool virtual_bag_extended_mode(const void* item);
+bool virtual_bag_write_effective(void* item, uint32_t count);
 qol::contracts::QolItemCountEncoding category_is_equip(int category);
 qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category);
 bool category_is_extension_backpack(int category);

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <string>
+#include "plugins/extension_bag/usecases/result.h"
 
 namespace qol::features::extension_bag::usecases {
 
-std::string usecase_set_bag_count(int count);
+SetBagCountResult usecase_set_bag_count(int count);
 
 }  // namespace qol::features::extension_bag::usecases

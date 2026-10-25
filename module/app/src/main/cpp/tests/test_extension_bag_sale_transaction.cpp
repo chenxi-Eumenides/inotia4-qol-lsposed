@@ -1,5 +1,6 @@
-#include "plugins/extension_bag/model/sale_transaction.h"
+#include "plugins/extension_bag/core/sale_transaction.h"
 #include "plugins/extension_bag/model/store_sell_rules.h"
+#include "plugins/extension_bag/model/serialization.h"
 
 #include <array>
 #include <cstdio>
@@ -14,9 +15,10 @@ static int g_fail = 0;
 namespace {
 
 using namespace qol::contracts;
-using qol::features::extension_bag::model::SaleRemovalOps;
+using qol::features::extension_bag::core::SaleRemovalOps;
 using qol::features::extension_bag::model::SaleRemovalResult;
 using qol::features::extension_bag::model::SaleSlotState;
+using qol::features::extension_bag::core::remove_for_sale;
 
 struct FakeRelease {
     void* expected_object = nullptr;
@@ -152,9 +154,9 @@ struct Harness {
         request.use_owner = &use_owner;
         request.dirty = &dirty;
         request.revision = &revision;
-        request.projection_control = projected ? &projection : nullptr;
         callback_context = {&projection, &release};
-        ops = {&callback_context, &clear_projection, &restore_projection, &release_object};
+        ops = {&callback_context, projected ? &projection : nullptr,
+               &clear_projection, &restore_projection, &release_object};
     }
 };
 
@@ -165,7 +167,7 @@ bool descriptor_empty(const virtual_bag::Item& item) {
 void test_successful_whole_item_removal_and_roundtrip(int logical_bag, int slot) {
     Harness h;
     h.prepare(logical_bag, slot, true);
-    const auto outcome = qol::features::extension_bag::model::remove_for_sale(h.request, h.ops);
+    const auto outcome = remove_for_sale(h.request, h.ops);
     CHECK(outcome == SaleRemovalResult::kRemoved);
     const int bag = virtual_bag::extension_internal_bag(logical_bag);
     const size_t index = static_cast<size_t>(bag * virtual_bag::kSlotCount + slot);
@@ -201,7 +203,7 @@ void test_rejections_leave_slot_and_revision_unchanged() {
         if (fault == 4) h.use_pending_release = true;
         if (fault == 5) h.release.fail_release = true;
         if (fault == 6) h.request.descriptor_hash_matches = false;
-        const auto result = qol::features::extension_bag::model::remove_for_sale(h.request, h.ops);
+        const auto result = remove_for_sale(h.request, h.ops);
         CHECK(result != SaleRemovalResult::kRemoved);
         const auto& after = h.state.items[0][2];
         CHECK(after.category == before.category && after.count == before.count &&
@@ -222,7 +224,7 @@ void test_clear_projection_failure_does_not_release() {
     h.prepare(7, 1);
     h.projection.fail_clear = true;
     const uint64_t revision = h.revision.load();
-    CHECK(qol::features::extension_bag::model::remove_for_sale(h.request, h.ops) ==
+    CHECK(remove_for_sale(h.request, h.ops) ==
           SaleRemovalResult::kProjectionFailed);
     CHECK(h.release.calls == 0);
     CHECK(h.release.object_live && h.release.handle_live);
@@ -236,7 +238,7 @@ void test_replaced_slot_object_and_custody_mismatch_reject() {
     int replacement = 2;
     h.objects[2] = &replacement;
     h.request.descriptor_matches_object = false;
-    CHECK(qol::features::extension_bag::model::remove_for_sale(h.request, h.ops) ==
+    CHECK(remove_for_sale(h.request, h.ops) ==
           SaleRemovalResult::kInvalidIdentity);
     CHECK(h.release.calls == 0 && h.projection.clear_calls == 0);
     CHECK(h.objects[2] == &replacement && h.state.items[0][2].category == 77);
@@ -245,7 +247,7 @@ void test_replaced_slot_object_and_custody_mismatch_reject() {
     Harness custody;
     custody.prepare(6, 2);
     custody.request.handle_custody_matches = false;
-    CHECK(qol::features::extension_bag::model::remove_for_sale(custody.request, custody.ops) ==
+    CHECK(remove_for_sale(custody.request, custody.ops) ==
           SaleRemovalResult::kInvalidIdentity);
     CHECK(custody.release.calls == 0 && custody.projection.visible);
     CHECK(custody.objects[2] == &custody.object && !custody.dirty && custody.revision.load() == 9);
@@ -255,7 +257,7 @@ void test_irreversible_release_never_reports_removal_failure() {
     Harness h;
     h.prepare(6, 2, true);
     h.release.invalidate_reservation_after_free = true;
-    const auto result = qol::features::extension_bag::model::remove_for_sale(h.request, h.ops);
+    const auto result = remove_for_sale(h.request, h.ops);
     CHECK(result == SaleRemovalResult::kRemovedLedgerDiagnostic);
     CHECK(!h.release.object_live && !h.release.handle_live);
     CHECK(h.objects[2] == nullptr && descriptor_empty(h.state.items[0][2]));

@@ -28,7 +28,7 @@ enum class DragTransition : uint8_t {
 enum class DragTargetKind : uint8_t {
     kOriginalBag,
     kExtensionSlot,
-    kExtensionTab,
+    kExternalTarget,
     kEquipmentSlot,
     kTaskBagRejected,
     kInvalid,
@@ -136,7 +136,7 @@ inline DragTransition session_resolve_target(ExtensionDragSession* session,
         return DragTransition::kIllegal;
     }
     if (target != DragTargetKind::kOriginalBag && target != DragTargetKind::kExtensionSlot &&
-        target != DragTargetKind::kExtensionTab && target != DragTargetKind::kEquipmentSlot) {
+        target != DragTargetKind::kExternalTarget && target != DragTargetKind::kEquipmentSlot) {
         session->phase = DragPhase::kRejected;
         session->terminal_cause = DragTerminalCause::kInvalidTarget;
         return DragTransition::kAdvanced;
@@ -207,15 +207,4 @@ inline bool session_claim_transaction(ExtensionDragSession* session) {
     if (session == nullptr || !session_may_create_transaction(*session)) return false;
     session->transaction_dispatched = true;
     return true;
-}
-
-inline DragTargetKind classify_drag_target(int bag, int slot, bool extension_tab = false,
-                                           bool cancelled = false) {
-    if (cancelled) return DragTargetKind::kCancel;
-    if (extension_tab) return DragTargetKind::kExtensionTab;
-    if (bag == kOriginalTaskBag) return DragTargetKind::kTaskBagRejected;
-    if (slot < 0 || slot >= kSlotCount) return DragTargetKind::kInvalid;
-    if (valid_original_transaction_bag(bag)) return DragTargetKind::kOriginalBag;
-    if (valid_extension_logical_bag(bag)) return DragTargetKind::kExtensionSlot;
-    return DragTargetKind::kInvalid;
 }

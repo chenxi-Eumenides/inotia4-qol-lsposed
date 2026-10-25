@@ -48,12 +48,9 @@ void extension_bag_bind_character_extras(
     const qol::contracts::QolCharacterExtrasPort* port);
 void extension_bag_bind_inventory_extras(
     const qol::contracts::QolInventoryExtrasPort* port);
-const qol::contracts::QolGameHost* extension_bag_game_host();
 void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts);
 const qol::contracts::ItemFactsApi* extension_bag_item_facts();
 void extension_bag_bind_craft_facts(const qol::contracts::CraftFactsApi* facts);
-const qol::contracts::CraftFactsApi* extension_bag_craft_facts();
-const qol::contracts::QolHostSdk* extension_bag_host_sdk();
 
 // 能力 v3.1 接口表（ExtensionBagApi，既有 40 成员 + sale removal 尾项）：成员逐条转发既有 extension_bag_* /
 // virtual_bag_* port 实现（实现收口 plugins/extension_bag/api/api_table.cpp）。

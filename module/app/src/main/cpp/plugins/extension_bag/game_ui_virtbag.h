@@ -19,7 +19,6 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
 bool set_virtual_bag_enabled(bool enabled);
 bool virtual_bag_enabled();
 bool virtual_bag_is_inventory_enter(uintptr_t enter);
-int virtual_bag_inventory_state_id();
 bool virtual_bag_prepare_main_menu();
 bool virtual_bag_sync_projected_slot(int display_bag, int slot);
 bool virtual_bag_sync_projected_bag();
@@ -56,14 +55,6 @@ bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity);
 void* virtual_bag_item_at(int bag, int slot);
 // 按 ITEMCLASSBASE +6 bit0 统一判定 payload 数量字段是否为 S2 数量语义。
 // 数量 facade 适配：NotReady 时仅回落原版低 b 位写法；Unsupported 保持失败关闭。
-uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical);
-uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical);
-uint32_t virtual_bag_canonical_from_field(uint32_t field, uint32_t fallback_canonical);
-uint32_t virtual_bag_field_from_canonical(uint32_t field, uint32_t canonical, bool extended);
-uint32_t virtual_bag_view_from_canonical(uint32_t canonical, bool extended);
-uint32_t virtual_bag_count_limit(bool extended);
-bool virtual_bag_extended_mode(const void* item);
-bool virtual_bag_write_effective(void* item, uint32_t count);
 // 视图门禁版：仅当 bag 处于扩展视图（控件 index 与扩展槽 1:1 对应）时物化，
 // 否则返回 nullptr。供 Stage4 装备路径在原版源槽读空时兜底。
 void* virtual_bag_view_item_at(int bag, int slot);

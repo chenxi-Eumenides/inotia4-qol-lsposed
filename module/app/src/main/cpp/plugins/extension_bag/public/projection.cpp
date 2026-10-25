@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -19,16 +20,16 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/core/tabs.h"
+#include "plugins/extension_bag/core/drag_session.h"
 #include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
@@ -55,8 +56,8 @@ void virtual_bag_refresh_item_area_with_gate() {
     ::qol::extension_bag::ReentryLock lock;
     virtual_bag_call_original_refresh_item_area_with_guard();
     const bool projection_installed =
-        ::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().projected_item_root != nullptr &&
-        virtual_bag::valid_index(::qol::extension_bag::access::objects().module_view_index);
+        qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.projected_item_root != nullptr &&
+        virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index);
     if (!g_refresh_restore_suppress && projection_installed) {
         refresh_projection_if_overwritten_locked();
     }
@@ -78,7 +79,6 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     ModuleUseToken use_token{};
     {
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         // 控件指针只作为当前投影索引；data 和 item 必须在同一锁上下文重读，
         // 防止控件在锁外被重绑后仍沿用旧身份。
         void* source_data = source_control != nullptr
@@ -105,24 +105,24 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         }
 
         const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[source_bag][source_slot];
-        const ModuleUseState& use = ::qol::extension_bag::access::objects().module_object_use[source_bag][source_slot];
+        const ModuleUseState& use = qol::extension_bag::ui_state().objects.module_object_use[source_bag][source_slot];
         const bool descriptor_valid = descriptor.category > 0 && descriptor.count > 0 &&
             descriptor.payload_size > 0 && descriptor.payload_size <= virtual_bag::kMaxSerializedItem &&
-            ::qol::extension_bag::access::objects().module_objects[source_bag][source_slot] == source_item &&
-            ::qol::extension_bag::access::objects().module_object_categories[source_bag][source_slot] == descriptor.category &&
-            ::qol::extension_bag::access::objects().module_object_hashes[source_bag][source_slot] == virtual_bag::payload_hash(descriptor) &&
-            ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot] != 0 && use.generation != 0 &&
+            qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] == source_item &&
+            qol::extension_bag::ui_state().objects.module_object_categories[source_bag][source_slot] == descriptor.category &&
+            qol::extension_bag::ui_state().objects.module_object_hashes[source_bag][source_slot] == virtual_bag::payload_hash(descriptor) &&
+            qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot] != 0 && use.generation != 0 &&
             !use.active && !use.pending_release;
-        const auto& session = ::qol::extension_bag::access::ui().extension_drag_session;
-        const bool session_valid = ::qol::extension_bag::access::objects().module_view_installed &&
-            ::qol::extension_bag::access::objects().module_view_index == source_bag && ::qol::extension_bag::access::objects().projected_item_root != nullptr &&
-            valid_child_locked(::qol::extension_bag::access::objects().projected_item_root, source_slot) == source_control &&
+        const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
+        const bool session_valid = qol::extension_bag::ui_state().objects.module_view_installed &&
+            qol::extension_bag::ui_state().objects.module_view_index == source_bag && qol::extension_bag::ui_state().objects.projected_item_root != nullptr &&
+            valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, source_slot) == source_control &&
             session.phase != virtual_bag::DragPhase::kIdle &&
             session.source_bag == source_bag && session.source_slot == source_slot &&
             virtual_bag::drag_session_source_identity_matches(
                 session, source_bag, source_slot,
-                ::qol::extension_bag::access::objects().module_object_handles[source_bag][source_slot]) &&
-            virtual_bag::drag_session_generation_current(session, ::qol::extension_bag::access::ui().extension_tab_generation);
+                qol::extension_bag::ui_state().objects.module_object_handles[source_bag][source_slot]) &&
+            virtual_bag::drag_session_generation_current(session, qol::extension_bag::ui_state().ui.extension_tab_generation);
         if (!descriptor_valid || !session_valid || backup == nullptr ||
             !module_use_begin_locked(source_bag, source_slot, source_item, &use_token)) {
             VIRTBAG_LOG("equip control blocked caller=UIEquip_EquipControlEventProc source=%p/%d/%d target=%p descriptor=%d session=%d",
@@ -180,18 +180,18 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     bool session_committed = false;
     {
         ::qol::extension_bag::ReentryLock lock;
-        auto& session = ::qol::extension_bag::access::ui().extension_drag_session;
+        auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
         if (session.phase == virtual_bag::DragPhase::kPressed) {
-            virtual_bag::session_on_native_moving(&session, ::qol::extension_bag::access::ui().extension_tab_generation);
+            virtual_bag::session_on_native_moving(&session, qol::extension_bag::ui_state().ui.extension_tab_generation);
         }
         if (session.source_bag == source_bag && session.source_slot == source_slot &&
-            virtual_bag::drag_session_generation_current(session, ::qol::extension_bag::access::ui().extension_tab_generation) &&
+            virtual_bag::drag_session_generation_current(session, qol::extension_bag::ui_state().ui.extension_tab_generation) &&
             session.phase == virtual_bag::DragPhase::kNativeMoving &&
             virtual_bag::session_resolve_target(
-                &session, ::qol::extension_bag::access::ui().extension_tab_generation,
+                &session, qol::extension_bag::ui_state().ui.extension_tab_generation,
                 virtual_bag::DragTargetKind::kEquipmentSlot) != virtual_bag::DragTransition::kIllegal &&
             virtual_bag::session_begin_transaction(
-                &session, ::qol::extension_bag::access::ui().extension_tab_generation) != virtual_bag::DragTransition::kIllegal &&
+                &session, qol::extension_bag::ui_state().ui.extension_tab_generation) != virtual_bag::DragTransition::kIllegal &&
             virtual_bag::session_claim_transaction(&session) &&
             virtual_bag::session_finish_transaction(&session, true) ==
                 virtual_bag::DragTransition::kAdvanced) {
@@ -220,19 +220,19 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
     if (::qol::extension_bag::access::host().game == nullptr || ::qol::extension_bag::access::host().character_extras->read.can_apply_stuff == nullptr ||
         !qol::contracts::succeeded(::qol::extension_bag::access::host().character_extras->read.can_apply_stuff(
             target_item, material, &apply_allowed)) || apply_allowed == 0) {
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
         }
         VIRTBAG_LOG("apply reject reason=not_applicable kind=%s equip=%p material=%p",
                     kind, target_item, material);
         return false;
     }
-    const auto* save_facts = qol::features::extension_bag::save_facts();
+    const auto* save_facts = extension_bag_save_facts();
     if (save_facts == nullptr || save_facts->is_ok == nullptr ||
         extension_bag_write_api() == nullptr ||
         extension_bag_write_api()->equipment.apply_stuff == nullptr) {
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
         }
         VIRTBAG_LOG("apply reject reason=symbol_unresolved kind=%s equip=%p material=%p",
                     kind, target_item, material);
@@ -240,8 +240,8 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
     }
     ModuleUseToken use_token{};
     if (!module_use_begin_locked(src_bag, src_slot, material, &use_token)) {
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
         }
         VIRTBAG_LOG("apply reject reason=stale_token kind=%s equip=%p material=%p",
                     kind, target_item, material);
@@ -258,8 +258,8 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
 
     if (!apply_ok) {
         module_use_abort_locked(use_token);
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
         }
         VIRTBAG_LOG("apply reject reason=is_ok_failed kind=%s equip=%p material=%p",
                     kind, target_item, material);
@@ -274,8 +274,8 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
         } else if (!module_use_abort_locked(use_token)) {
             module_use_abort_isolate_locked(use_token);
         }
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
         }
         VIRTBAG_LOG("apply reject reason=%s kind=%s equip=%p material=%p",
                     finished ? "native_apply_failed" : "stale_token",
@@ -287,17 +287,17 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
         const bool released = module_use_release_native(release_plan);
         lock.lock();
         if (!released || !module_use_finalize_release_locked(release_plan)) {
-            if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-                virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+            if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+                virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
             }
             VIRTBAG_LOG("apply reject reason=material_release_failed kind=%s equip=%p material=%p",
                         kind, target_item, material);
             return false;
         }
     }
-    if (::qol::extension_bag::access::objects().module_objects[dst_bag][dst_slot] != target_item) {
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+    if (qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] != target_item) {
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
         }
         VIRTBAG_LOG("apply reject reason=stale_target kind=%s equip=%p material=%p",
                     kind, target_item, material);
@@ -306,8 +306,8 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
     std::array<uint8_t, virtual_bag::kSerializedItemBuffer> payload{};
     int payload_size = 0;
     if (!serialize_item_payload_locked(target_item, &payload, &payload_size)) {
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-            virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, false);
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+            virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, false);
         }
         VIRTBAG_LOG("apply reject reason=target_payload_sync_failed kind=%s equip=%p material=%p",
                     kind, target_item, material);
@@ -320,12 +320,12 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
     if (read_item_cumulate_count(target_item, &target_descriptor.count)) {
         target_descriptor.count = static_cast<int>(virtual_bag_canonical_count(target_item, 1));
     }
-    ::qol::extension_bag::access::objects().module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
+    qol::extension_bag::ui_state().objects.module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(target_descriptor);
     extension_bag_mark_dirty_locked();
     persist_state_locked();
     refresh_projected_module_view_after_move_locked();
-    if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-        virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, true);
+    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+        virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, true);
     }
     VIRTBAG_LOG("apply committed kind=%s equip=%p material=%p", kind, target_item, material);
     return true;
@@ -348,27 +348,27 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     if (item == nullptr || !module_slot_of_item_locked(item, &src_bag, &src_slot)) {
         return VirtualBagProjectionDropResult::kNotExtension;
     }
-    if (!::qol::extension_bag::access::objects().module_view_installed || dst_control == nullptr ||
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || dst_control == nullptr ||
         ::qol::extension_bag::access::host().sdk == nullptr || ::qol::extension_bag::access::host().sdk->ui == nullptr ||
-        ::qol::extension_bag::access::objects().module_view_index != src_bag || ::qol::extension_bag::access::objects().projected_item_root == nullptr) {
+        qol::extension_bag::ui_state().objects.module_view_index != src_bag || qol::extension_bag::ui_state().objects.projected_item_root == nullptr) {
         VIRTBAG_LOG("drop rejected: extension source view mismatch src=%d/%d view=%d root=%p",
-                    src_bag, src_slot, ::qol::extension_bag::access::objects().module_view_index, ::qol::extension_bag::access::objects().projected_item_root);
+                    src_bag, src_slot, qol::extension_bag::ui_state().objects.module_view_index, qol::extension_bag::ui_state().objects.projected_item_root);
         return VirtualBagProjectionDropResult::kRejected;
     }
     void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
-    void* projected_source = valid_child_locked(::qol::extension_bag::access::objects().projected_item_root, src_slot);
-    if (live_root == nullptr || live_root != ::qol::extension_bag::access::objects().projected_item_root ||
+    void* projected_source = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, src_slot);
+    if (live_root == nullptr || live_root != qol::extension_bag::ui_state().objects.projected_item_root ||
         projected_source != src_control) {
         VIRTBAG_LOG("drop rejected: extension source control is not current projection "
                     "src=%d/%d source=%p expected=%p root=%p live_root=%p",
                     src_bag, src_slot, src_control, projected_source,
-                    ::qol::extension_bag::access::objects().projected_item_root, live_root);
+                    qol::extension_bag::ui_state().objects.projected_item_root, live_root);
         return VirtualBagProjectionDropResult::kRejected;
     }
-    const int dst_capacity = ::qol::extension_bag::access::bag().capacities[::qol::extension_bag::access::objects().module_view_index];
+    const int dst_capacity = ::qol::extension_bag::access::bag().capacities[qol::extension_bag::ui_state().objects.module_view_index];
     int dst_slot = -1;
     for (int slot = 0; slot < dst_capacity; ++slot) {
-        if (valid_child_locked(::qol::extension_bag::access::objects().projected_item_root, slot) == dst_control) {
+        if (valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, slot) == dst_control) {
             dst_slot = slot;
             break;
         }
@@ -376,45 +376,45 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     if (dst_slot < 0) dst_slot = extension_bag_ui_item_slot(dst_control);
     const bool destination_control_matches =
         dst_slot >= 0 && dst_slot < dst_capacity &&
-        valid_child_locked(::qol::extension_bag::access::objects().projected_item_root, dst_slot) == dst_control;
+        valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, dst_slot) == dst_control;
     if (!virtual_bag::projection_drop_context_matches(
-            ::qol::extension_bag::access::objects().module_view_index, src_bag, true, true, destination_control_matches)) {
+            qol::extension_bag::ui_state().objects.module_view_index, src_bag, true, true, destination_control_matches)) {
         VIRTBAG_LOG("drop rejected: extension source invalid projected target src=%d/%d dst=%d",
                     src_bag, src_slot, dst_slot);
         return VirtualBagProjectionDropResult::kRejected;
     }
-    if (::qol::extension_bag::access::ui().extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
-        if (::qol::extension_bag::access::ui().extension_drag_session.source_bag != src_bag ||
-            ::qol::extension_bag::access::ui().extension_drag_session.source_slot != src_slot ||
-            ::qol::extension_bag::access::ui().extension_drag_session.view_generation != ::qol::extension_bag::access::ui().extension_tab_generation ||
+    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.source_bag != src_bag ||
+            qol::extension_bag::ui_state().ui.extension_drag_session.source_slot != src_slot ||
+            qol::extension_bag::ui_state().ui.extension_drag_session.view_generation != qol::extension_bag::ui_state().ui.extension_tab_generation ||
             !virtual_bag::drag_session_source_identity_matches(
-                ::qol::extension_bag::access::ui().extension_drag_session, src_bag, src_slot,
-                ::qol::extension_bag::access::objects().module_object_handles[src_bag][src_slot])) {
+                qol::extension_bag::ui_state().ui.extension_drag_session, src_bag, src_slot,
+                qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot])) {
             VIRTBAG_LOG("drop rejected: extension source session mismatch src=%d/%d phase=%d",
-                        src_bag, src_slot, static_cast<int>(::qol::extension_bag::access::ui().extension_drag_session.phase));
+                        src_bag, src_slot, static_cast<int>(qol::extension_bag::ui_state().ui.extension_drag_session.phase));
             return VirtualBagProjectionDropResult::kRejected;
         }
-        if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kPressed) {
+        if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kPressed) {
             advance_projected_drag_session_locked();
         }
-        const virtual_bag::DragTargetKind target_kind = virtual_bag::classify_drag_target(
+        const virtual_bag::DragTargetKind target_kind = qol::features::extension_bag::core::classify_drag_target(
             virtual_bag::kExtensionLogicalBagFirst + src_bag, dst_slot);
-        if (virtual_bag::session_resolve_target(&::qol::extension_bag::access::ui().extension_drag_session,
-                                                ::qol::extension_bag::access::ui().extension_tab_generation, target_kind) ==
+        if (virtual_bag::session_resolve_target(&qol::extension_bag::ui_state().ui.extension_drag_session,
+                                                qol::extension_bag::ui_state().ui.extension_tab_generation, target_kind) ==
                  virtual_bag::DragTransition::kIllegal ||
-             virtual_bag::session_begin_transaction(&::qol::extension_bag::access::ui().extension_drag_session,
-                                                    ::qol::extension_bag::access::ui().extension_tab_generation) ==
+             virtual_bag::session_begin_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session,
+                                                    qol::extension_bag::ui_state().ui.extension_tab_generation) ==
                  virtual_bag::DragTransition::kIllegal ||
-             virtual_bag::session_on_release(&::qol::extension_bag::access::ui().extension_drag_session,
-                                             ::qol::extension_bag::access::ui().extension_tab_generation) !=
+             virtual_bag::session_on_release(&qol::extension_bag::ui_state().ui.extension_drag_session,
+                                             qol::extension_bag::ui_state().ui.extension_tab_generation) !=
                  virtual_bag::DragTransition::kAdvanced ||
-             !virtual_bag::session_claim_transaction(&::qol::extension_bag::access::ui().extension_drag_session)) {
+             !virtual_bag::session_claim_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session)) {
             VIRTBAG_LOG("drop rejected: extension source session transition failed src=%d/%d",
                         src_bag, src_slot);
             return VirtualBagProjectionDropResult::kRejected;
         }
     }
-    const int dst_bag = ::qol::extension_bag::access::objects().module_view_index;
+    const int dst_bag = qol::extension_bag::ui_state().objects.module_view_index;
     const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
     const bool source_is_apply_material =
         read_item_is_jewel(source_category) || read_item_is_enchant_scroll(source_category);
@@ -441,8 +441,8 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     }
 
     const bool routed = move_extension_to_extension_locked(src_bag, src_slot, dst_bag, dst_slot);
-    if (::qol::extension_bag::access::ui().extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
-        virtual_bag::session_finish_transaction(&::qol::extension_bag::access::ui().extension_drag_session, routed);
+    if (qol::extension_bag::ui_state().ui.extension_drag_session.phase == virtual_bag::DragPhase::kTransactionInFlight) {
+        virtual_bag::session_finish_transaction(&qol::extension_bag::ui_state().ui.extension_drag_session, routed);
     }
     if (routed) {
         persist_state_locked();
@@ -458,7 +458,7 @@ bool virtual_bag_module_view_installed() {
     qol::extension_bag::BagSnapshot snapshot{};
     if (qol::extension_bag::bag_snapshot(&snapshot)) return snapshot.module_view_installed;
     ::qol::extension_bag::ReentryLock lock;
-    return ::qol::extension_bag::access::objects().module_view_installed;
+    return qol::extension_bag::ui_state().objects.module_view_installed;
 }
 
 bool virtual_bag_original_item_input_blocked() {
@@ -476,7 +476,7 @@ bool virtual_bag_original_item_input_blocked() {
 bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
                                          uint64_t caller_offset) {
     ::qol::extension_bag::ReentryLock lock;
-    if (!::qol::extension_bag::access::enabled().load() || !::qol::extension_bag::access::objects().module_view_installed ||
+    if (!::qol::extension_bag::access::enabled().load() || !qol::extension_bag::ui_state().objects.module_view_installed ||
         control == nullptr || source_control == nullptr ||
         ::qol::extension_bag::access::host().sdk == nullptr || ::qol::extension_bag::access::host().sdk->ui == nullptr) {
         return false;
@@ -498,8 +498,8 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
         VIRTBAG_LOG(
             "drop rejected: extension source entering original proc item=%p caller=libgame+0x%llx "
             "view=%d session=%d source=%d/%d target_slot=%d",
-            item, static_cast<unsigned long long>(caller_offset), ::qol::extension_bag::access::objects().module_view_index,
-            ::qol::extension_bag::access::ui().extension_drag_session.phase != virtual_bag::DragPhase::kIdle ? 1 : 0,
+            item, static_cast<unsigned long long>(caller_offset), qol::extension_bag::ui_state().objects.module_view_index,
+            qol::extension_bag::ui_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle ? 1 : 0,
             source_bag, source_slot, target_slot);
         return false;
     }
@@ -514,7 +514,7 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
 // 投影只占窗口袋；其他袋调用为 no-op。调用方（data_op_*）不持模块锁，此处安全获锁。
 bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
     ::qol::extension_bag::ReentryLock lock;
-    if (!::qol::extension_bag::access::objects().module_view_installed || !virtual_bag::valid_index(::qol::extension_bag::access::objects().module_view_index) ||
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || !virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index) ||
         ::qol::extension_bag::access::host().sdk == nullptr || ::qol::extension_bag::access::host().sdk->ui == nullptr ||
         !ensure_module_view_root_current_locked()) {
         return false;
@@ -523,28 +523,28 @@ bool virtual_bag_sync_projected_slot(int display_bag, int slot) {
         display_bag != original_bag_locked()) {
         return false;
     }
-    if (slot < 0 || slot >= ::qol::extension_bag::access::bag().capacities[::qol::extension_bag::access::objects().module_view_index]) {
+    if (slot < 0 || slot >= ::qol::extension_bag::access::bag().capacities[qol::extension_bag::ui_state().objects.module_view_index]) {
         return false;
     }
-    return sync_projected_slot_locked(::qol::extension_bag::access::objects().module_view_index, slot);
+    return sync_projected_slot_locked(qol::extension_bag::ui_state().objects.module_view_index, slot);
 }
 
 bool virtual_bag_sync_projected_item_control(void* control) {
     if (control == nullptr) return false;
     ::qol::extension_bag::ReentryLock lock;
-    if (!::qol::extension_bag::access::objects().module_view_installed || !virtual_bag::valid_index(::qol::extension_bag::access::objects().module_view_index) ||
+    if (!qol::extension_bag::ui_state().objects.module_view_installed || !virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index) ||
         ::qol::extension_bag::access::host().sdk == nullptr || ::qol::extension_bag::access::host().sdk->ui == nullptr ||
         !ensure_module_view_root_current_locked()) {
         return false;
     }
-    const int capacity = ::qol::extension_bag::access::bag().capacities[::qol::extension_bag::access::objects().module_view_index];
+    const int capacity = ::qol::extension_bag::access::bag().capacities[qol::extension_bag::ui_state().objects.module_view_index];
     for (int slot = 0; slot < capacity; ++slot) {
-        if (extension_bag_ui_child_at(::qol::extension_bag::access::objects().projected_item_root, slot) == control) {
+        if (extension_bag_ui_child_at(qol::extension_bag::ui_state().objects.projected_item_root, slot) == control) {
             if (!extension_bag_ui_set_control_item(
-                    control, ::qol::extension_bag::access::objects().module_objects[::qol::extension_bag::access::objects().module_view_index][slot])) {
+                    control, qol::extension_bag::ui_state().objects.module_objects[qol::extension_bag::ui_state().objects.module_view_index][slot])) {
                 QOL_LOG_ERROR(QolDomain::kExtensionBag,
                               "ERROR projected control sync failed bag=%d slot=%d control=%p",
-                              ::qol::extension_bag::access::objects().module_view_index, slot, control);
+                              qol::extension_bag::ui_state().objects.module_view_index, slot, control);
                 return false;
             }
             return true;

@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -14,17 +15,17 @@
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/sale_transaction.h"
+#include "plugins/extension_bag/core/sale_transaction.h"
 #include "plugins/extension_bag/model/draw_state_lock.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/tabs.h"
@@ -51,7 +52,6 @@ bool virtual_bag_identify_native_item(void* item, int* out_bag, int* out_slot) {
 void* virtual_bag_find_native_item(int category) {
     if (category <= 0) return nullptr;
     ::qol::extension_bag::ReentryLock lock;
-    ensure_state_loaded_locked();
     for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < ::qol::extension_bag::access::bag().capacities[bag]; ++slot) {
             const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
@@ -68,11 +68,10 @@ void* virtual_bag_find_native_item(int category) {
 bool virtual_bag_remove_native_item(void* item, void* raw_use_token) {
     if (item == nullptr) return false;
     ::qol::extension_bag::ReentryLock lock;
-    ensure_state_loaded_locked();
     int bag = -1;
     int slot = -1;
     if (!module_slot_of_item_locked(item, &bag, &slot) ||
-        ::qol::extension_bag::access::objects().module_objects[bag][slot] != item) {
+        qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item) {
         return false;
     }
     ModuleUseToken* use_token = static_cast<ModuleUseToken*>(raw_use_token);
@@ -89,7 +88,7 @@ bool virtual_bag_remove_native_item(void* item, void* raw_use_token) {
         return false;
     }
     const bool persisted = persist_state_locked();
-    if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == bag) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
     VIRTBAG_LOG("native remove extension bag=%d slot=%d persisted=%d", bag, slot,
@@ -139,10 +138,9 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
     void* detail_item = nullptr;
     {
         ::qol::extension_bag::ReentryLock lock;
-        ensure_state_loaded_locked();
         int bag = -1;
         int slot = -1;
-        if (!module_slot_of_item_locked(item, &bag, &slot) || ::qol::extension_bag::access::objects().module_objects[bag][slot] != item) {
+        if (!module_slot_of_item_locked(item, &bag, &slot) || qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item) {
             return false;
         }
         ModuleUseToken* use_token = static_cast<ModuleUseToken*>(raw_use_token);
@@ -163,23 +161,23 @@ bool virtual_bag_consume_native_item(void* item, void* raw_use_token) {
         }
         extension_bag_mark_dirty_locked();
         persist_state_locked();
-        if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == bag) {
+        if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == bag) {
             refresh_module_item_area_locked(bag);
         }
-        if (::qol::extension_bag::access::ui().pending_jewel_detail_item != nullptr &&
-            virtual_bag::valid_index(::qol::extension_bag::access::objects().module_view_index) &&
-            ::qol::extension_bag::access::ui().pending_jewel_detail_bag == ::qol::extension_bag::access::objects().module_view_index &&
-            ::qol::extension_bag::access::ui().pending_jewel_detail_slot >= 0 &&
-            ::qol::extension_bag::access::ui().pending_jewel_detail_slot < ::qol::extension_bag::access::bag().capacities[::qol::extension_bag::access::objects().module_view_index] &&
-            ::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().projected_item_root != nullptr &&
+        if (qol::extension_bag::ui_state().ui.pending_jewel_detail_item != nullptr &&
+            virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_view_index) &&
+            qol::extension_bag::ui_state().ui.pending_jewel_detail_bag == qol::extension_bag::ui_state().objects.module_view_index &&
+            qol::extension_bag::ui_state().ui.pending_jewel_detail_slot >= 0 &&
+            qol::extension_bag::ui_state().ui.pending_jewel_detail_slot < ::qol::extension_bag::access::bag().capacities[qol::extension_bag::ui_state().objects.module_view_index] &&
+            qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.projected_item_root != nullptr &&
             ::qol::extension_bag::access::host().sdk != nullptr && ::qol::extension_bag::access::host().sdk->ui != nullptr) {
-            detail_control = valid_child_locked(::qol::extension_bag::access::objects().projected_item_root,
-                                                ::qol::extension_bag::access::ui().pending_jewel_detail_slot);
-            detail_item = ::qol::extension_bag::access::ui().pending_jewel_detail_item;
+            detail_control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root,
+                                                qol::extension_bag::ui_state().ui.pending_jewel_detail_slot);
+            detail_item = qol::extension_bag::ui_state().ui.pending_jewel_detail_item;
         }
-        ::qol::extension_bag::access::ui().pending_jewel_detail_item = nullptr;
-        ::qol::extension_bag::access::ui().pending_jewel_detail_bag = -1;
-        ::qol::extension_bag::access::ui().pending_jewel_detail_slot = -1;
+        qol::extension_bag::ui_state().ui.pending_jewel_detail_item = nullptr;
+        qol::extension_bag::ui_state().ui.pending_jewel_detail_bag = -1;
+        qol::extension_bag::ui_state().ui.pending_jewel_detail_slot = -1;
         VIRTBAG_LOG("native consume extension bag=%d slot=%d before=%d", bag, slot, before_count);
     }
     if (detail_control != nullptr && ::qol::extension_bag::access::host().sdk != nullptr && ::qol::extension_bag::access::host().sdk->ui != nullptr) {
@@ -210,7 +208,7 @@ QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
     }
 
     virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
-    void* const item = ::qol::extension_bag::access::objects().module_objects[bag][slot];
+    void* const item = qol::extension_bag::ui_state().objects.module_objects[bag][slot];
     int item_bag = -1;
     int item_slot = -1;
     qol::contracts::QolItemHandle current_item{};
@@ -219,42 +217,42 @@ QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
     const bool custody_matches = located &&
         extension_bag_sale_item_matches(expected_item, item, &current_item);
     const bool descriptor_match = located && descriptor.category > 0 && descriptor.count > 0 &&
-                                  ::qol::extension_bag::access::objects().module_object_categories[bag][slot] == descriptor.category;
+                                  qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] == descriptor.category;
     const bool hash_matches = descriptor_match &&
-        ::qol::extension_bag::access::objects().module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
+        qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] == virtual_bag::payload_hash(descriptor);
     const bool release_allowed = located &&
         module_object_release_allowed_locked(bag, slot, item, "inventory sale", false, nullptr);
     if (!descriptor_match || !hash_matches || !custody_matches || !release_allowed) {
         return qol::contracts::error(kQolErrConflict, "extension sale identity stale", 29);
     }
     void* projection_control = nullptr;
-    if (::qol::extension_bag::access::objects().module_view_installed && ::qol::extension_bag::access::objects().module_view_index == bag) {
-        if (::qol::extension_bag::access::objects().projected_item_root == nullptr ||
-            (projection_control = valid_child_locked(::qol::extension_bag::access::objects().projected_item_root, slot)) == nullptr ||
+    if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == bag) {
+        if (qol::extension_bag::ui_state().objects.projected_item_root == nullptr ||
+            (projection_control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, slot)) == nullptr ||
             extension_bag_ui_item(projection_control) != item) {
             return qol::contracts::error(kQolErrConflict, "extension sale projection stale", 31);
         }
     }
 
-    ModuleUseState& use = ::qol::extension_bag::access::objects().module_object_use[bag][slot];
+    ModuleUseState& use = qol::extension_bag::ui_state().objects.module_object_use[bag][slot];
     const int capacity = ::qol::extension_bag::access::bag().capacities[bag];
     qol::features::extension_bag::model::SaleSlotState state{};
     state.logical_bag = logical_bag;
     state.slot = slot;
     state.capacity = capacity;
     state.session_admitted = extension_bag_session_admitted_locked();
-    state.descriptor_matches_object = located && ::qol::extension_bag::access::objects().module_objects[bag][slot] == item;
+    state.descriptor_matches_object = located && qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item;
     state.descriptor_hash_matches = hash_matches;
     state.handle_custody_matches = custody_matches;
     state.expected_item = expected_item;
     state.current_item = current_item;
     state.descriptor = &descriptor;
-    state.object = &::qol::extension_bag::access::objects().module_objects[bag][slot];
-    state.object_category = &::qol::extension_bag::access::objects().module_object_categories[bag][slot];
-    state.object_hash = &::qol::extension_bag::access::objects().module_object_hashes[bag][slot];
-    state.object_handle = &::qol::extension_bag::access::objects().module_object_handles[bag][slot];
-    state.ledger_handle = ::qol::extension_bag::access::objects().module_object_handles[bag][slot];
-    state.ledger = &::qol::extension_bag::access::objects().ownership_ledger;
+    state.object = &qol::extension_bag::ui_state().objects.module_objects[bag][slot];
+    state.object_category = &qol::extension_bag::ui_state().objects.module_object_categories[bag][slot];
+    state.object_hash = &qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot];
+    state.object_handle = &qol::extension_bag::ui_state().objects.module_object_handles[bag][slot];
+    state.ledger_handle = qol::extension_bag::ui_state().objects.module_object_handles[bag][slot];
+    state.ledger = &qol::extension_bag::ui_state().objects.ownership_ledger;
     state.use_active = &use.active;
     state.use_consumed = &use.consumed;
     state.use_pending_release = &use.pending_release;
@@ -263,12 +261,11 @@ QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
     state.use_owner = &use.owner;
     state.dirty = &::qol::extension_bag::access::persistence().dirty;
     state.revision = &::qol::extension_bag::access::persistence().revision;
-    state.projection_control = projection_control;
     SaleReleaseContext release_context{expected_item};
-    const qol::features::extension_bag::model::SaleRemovalOps ops{
-        &release_context, &sale_clear_projection,
+    const qol::features::extension_bag::core::SaleRemovalOps ops{
+        &release_context, projection_control, &sale_clear_projection,
         &sale_restore_projection, &sale_release_object};
-    const auto removed = qol::features::extension_bag::model::remove_for_sale(state, ops);
+    const auto removed = qol::features::extension_bag::core::remove_for_sale(state, ops);
     if (removed != qol::features::extension_bag::model::SaleRemovalResult::kRemoved &&
         removed != qol::features::extension_bag::model::SaleRemovalResult::kRemovedLedgerDiagnostic) {
         const int error = removed == qol::features::extension_bag::model::SaleRemovalResult::kNotAdmitted
@@ -286,11 +283,11 @@ QolResult virtual_bag_remove_for_sale(int32_t logical_bag, int32_t slot,
                       "ERROR sale removed with ownership ledger diagnostic logical_bag=%d slot=%d",
                       logical_bag, slot);
     }
-    if (::qol::extension_bag::access::ui().extension_desc_item == item) {
+    if (qol::extension_bag::ui_state().ui.extension_desc_item == item) {
         reset_extension_desc_item_hooks_locked();
-        ::qol::extension_bag::access::ui().extension_desc_item = nullptr;
-        ::qol::extension_bag::access::ui().extension_desc_item_bag = -1;
-        ::qol::extension_bag::access::ui().extension_desc_item_slot = -1;
+        qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+        qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+        qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
         clear_original_desc_locked();
     }
     QOL_LOG_INFO(QolDomain::kExtensionBag, "extension sale removed logical_bag=%d slot=%d",

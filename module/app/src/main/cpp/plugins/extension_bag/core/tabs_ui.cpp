@@ -1,5 +1,7 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
+#include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
@@ -19,13 +21,12 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
+#include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/model/store_sell_rules.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/transaction/ownership.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -35,6 +36,8 @@
 #include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/core/native_tab_layout.h"
 #include "plugins/extension_bag/usecases/move.h"
+#include "plugins/extension_bag/ui/drop_routing.h"
+#include "plugins/extension_bag/runtime/ui_ports.h"
 
 #include <atomic>
 #include <chrono>
@@ -117,7 +120,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
             } else {
                 const int index = extension_tab_index(ctrl);
                 if (index >= 0 && extension_tab_control_is_current_locked(index, ctrl) &&
-                    runtime_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
+                    qol::extension_bag::ui_state().ui.extension_drag_session.phase != virtual_bag::DragPhase::kIdle) {
                     const int logical_bag = virtual_bag::extension_logical_bag(index);
                     const bool handled = logical_bag >= 0 &&
                                          route_projected_session_to_tab_locked(lock, logical_bag);
@@ -161,9 +164,15 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                             VIRTBAG_LOG("extension tab drop extension move result=%d index=%d category=%d",
                                         moved ? 1 : 0, index, category);
                         } else {
-                            const bool moved =
+                            int src_bag = -1;
+                            int src_slot = -1;
+                            qol::contracts::QolItemHandle expected_item{};
+                            const bool resolved = resolve_original_drag_source(
+                                moving, &src_bag, &src_slot, &expected_item);
+                            const bool moved = resolved &&
                                 qol::features::extension_bag::usecases::move_original_to_extension(
-                                    lock, index, moving);
+                                    lock, src_bag, src_slot, index, expected_item);
+                            if (moved) reset_drag_via_port(moving);
                             VIRTBAG_LOG("extension tab drop original move result=%d index=%d category=%d equipped=%d",
                                         moved ? 1 : 0, index, category,
                                         runtime_state().objects.bag.types[index] != 0 ? 1 : 0);
@@ -197,7 +206,7 @@ void delete_extension_tab_buttons_locked() {
     // 句柄存活由锚定层证明：只删除仍能证明属于本模块的控件；失效句柄只清记录。
     const auto* components = extension_bag_ui_components();
     for (int index = 0; index < virtual_bag::kMaxExtensionBags; ++index) {
-        auto& state = runtime_state().ui.extension_tab_anchors[static_cast<size_t>(index)];
+        auto& state = qol::extension_bag::ui_state().ui.extension_tab_anchors[static_cast<size_t>(index)];
         void* handle = nullptr;
         uint8_t live = 0;
         if (components != nullptr && components->anchored_control_detach != nullptr) {
@@ -208,20 +217,20 @@ void delete_extension_tab_buttons_locked() {
         if (live != 0 && handle != nullptr && !extension_bag_ui_delete_control(handle)) {
             VIRTBAG_LOG("extension tab delete failed control=%p", handle);
         }
-        runtime_state().ui.extension_tab_buttons[static_cast<size_t>(index)] = nullptr;
+        qol::extension_bag::ui_state().ui.extension_tab_buttons[static_cast<size_t>(index)] = nullptr;
     }
 }
 
 namespace {
 void invalidate_extension_tab_buttons_locked() {
     cancel_projected_drag_session_locked("extension-tab-root-change");
-    ++runtime_state().ui.inventory_generation;
-    runtime_state().ui.pending_extension_tab = -1;
-    runtime_state().ui.pending_extension_tab_generation = 0;
-    runtime_state().ui.extension_tab_buttons.fill(nullptr);
-    runtime_state().ui.extension_tab_anchors = {};
-    runtime_state().ui.extension_tab_root = nullptr;
-    runtime_state().ui.extension_tab_generation = 0;
+    ++qol::extension_bag::ui_state().ui.inventory_generation;
+    qol::extension_bag::ui_state().ui.pending_extension_tab = -1;
+    qol::extension_bag::ui_state().ui.pending_extension_tab_generation = 0;
+    qol::extension_bag::ui_state().ui.extension_tab_buttons.fill(nullptr);
+    qol::extension_bag::ui_state().ui.extension_tab_anchors = {};
+    qol::extension_bag::ui_state().ui.extension_tab_root = nullptr;
+    qol::extension_bag::ui_state().ui.extension_tab_generation = 0;
 }
 
 // ---- 页签锚定（ui_components minor 21）----
@@ -300,7 +309,7 @@ QolResult equip_tab_anchor_create(void* parent, qol::contracts::UiRect rect, voi
         return fail("data-allocate", ctx->index);
     }
     std::memset(data, 0, 0x10);
-    *reinterpret_cast<void**>(data) = runtime_state().ui.tab_bag_items[ctx->index];
+    *reinterpret_cast<void**>(data) = qol::extension_bag::ui_state().ui.tab_bag_items[ctx->index];
     if (!extension_bag_ui_set_control_data(ctrl, data)) return fail("data-set", ctx->index);
     *out_control = ctrl;
     return qol::contracts::ok();
@@ -325,7 +334,7 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
             static_cast<uint32_t>(qol::contracts::QolUiRootKind::kEquipBagContainer),
             &extension_tab_item_proc, &equip_tab_anchor_layout, &equip_tab_anchor_create, &ctx};
         uint8_t created = 0;
-        auto& state = runtime_state().ui.extension_tab_anchors[static_cast<size_t>(index)];
+        auto& state = qol::extension_bag::ui_state().ui.extension_tab_anchors[static_cast<size_t>(index)];
         const QolResult ensured = components->anchored_control_ensure(&state, &desc, &created);
         if (ensured.ok != kQolOk) {
             all = false;
@@ -335,7 +344,7 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
                             ensured.ok, parent);
             }
         }
-        runtime_state().ui.extension_tab_buttons[static_cast<size_t>(index)] =
+        qol::extension_bag::ui_state().ui.extension_tab_buttons[static_cast<size_t>(index)] =
             state.mounted != 0 ? state.handle : nullptr;
         if (created != 0) {
             if (out_created_any != nullptr) *out_created_any = true;
@@ -360,27 +369,27 @@ void install_extension_tab_buttons_locked() {
     const auto* components = extension_bag_ui_components();
     if (components == nullptr) return;
     refresh_tab_bag_items_locked();
-    const bool changed = runtime_state().ui.extension_tab_root != bag_container ||
-        runtime_state().ui.extension_tab_generation != runtime_state().ui.inventory_generation;
+    const bool changed = qol::extension_bag::ui_state().ui.extension_tab_root != bag_container ||
+        qol::extension_bag::ui_state().ui.extension_tab_generation != qol::extension_bag::ui_state().ui.inventory_generation;
     bool created_any = false;
     const bool complete = refresh_extension_tab_anchors_locked(components, bag_container,
                                                                &created_any);
-    runtime_state().ui.extension_tab_root = bag_container;
-    runtime_state().ui.extension_tab_generation = runtime_state().ui.inventory_generation;
+    qol::extension_bag::ui_state().ui.extension_tab_root = bag_container;
+    qol::extension_bag::ui_state().ui.extension_tab_generation = qol::extension_bag::ui_state().ui.inventory_generation;
     if (changed || created_any) {
         VIRTBAG_LOG("extension tabs installed generation=%llu root=%p complete=%d created=%d",
-                    static_cast<unsigned long long>(runtime_state().ui.inventory_generation),
+                    static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation),
                     bag_container, complete ? 1 : 0, created_any ? 1 : 0);
     }
 }
 
 void disable_extension_tab_buttons_locked() {
     void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
-    if (runtime_state().ui.extension_tab_root != nullptr && live_root == runtime_state().ui.extension_tab_root) {
+    if (qol::extension_bag::ui_state().ui.extension_tab_root != nullptr && live_root == qol::extension_bag::ui_state().ui.extension_tab_root) {
         delete_extension_tab_buttons_locked();
-    } else if (runtime_state().ui.extension_tab_root != nullptr) {
+    } else if (qol::extension_bag::ui_state().ui.extension_tab_root != nullptr) {
         VIRTBAG_LOG("extension tab references invalidated reason=root_not_live saved=%p live=%p",
-                    runtime_state().ui.extension_tab_root, live_root);
+                    qol::extension_bag::ui_state().ui.extension_tab_root, live_root);
     }
     // The game owns controls; stale-root references are invalidated, never deleted.
     invalidate_extension_tab_buttons_locked();
@@ -397,14 +406,14 @@ bool extension_tab_buttons_complete_locked() {
     const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
                             ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
     for (int index = 0; index < visible; ++index) {
-        if (runtime_state().ui.extension_tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
+        if (qol::extension_bag::ui_state().ui.extension_tab_buttons[static_cast<size_t>(index)] == nullptr) return false;
     }
     return true;
 }
 
 namespace {
 bool extension_tab_buttons_have_controls_locked() {
-    for (void* button : runtime_state().ui.extension_tab_buttons) {
+    for (void* button : qol::extension_bag::ui_state().ui.extension_tab_buttons) {
         if (button != nullptr) return true;
     }
     return false;
@@ -414,7 +423,7 @@ bool extension_tab_buttons_have_controls_locked() {
 void reset_extension_desc_unequip_hook_locked() {
     // 卸下按钮由函数级 ButtonUnequipExe hook 承担，
     // 仅清 desc 袋记录。
-    runtime_state().ui.extension_desc_unequip_bag = -1;
+    qol::extension_bag::ui_state().ui.extension_desc_unequip_bag = -1;
 }
 
 namespace {
@@ -423,7 +432,7 @@ void install_extension_desc_unequip_hook_locked(int extension_bag) {
     if (!virtual_bag::valid_index(extension_bag)) return;
     // 扩展袋 desc 打开时记录袋位，供函数级 ButtonUnequipExe hook
     // （virtual_bag_handle_original_bag_unequip）识别扩展袋解除路径。
-    runtime_state().ui.extension_desc_unequip_bag = extension_bag;
+    qol::extension_bag::ui_state().ui.extension_desc_unequip_bag = extension_bag;
     VIRTBAG_LOG("extension desc unequip armed bag=%d", extension_bag);
 }
 
@@ -482,12 +491,12 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                 return;
             }
             set_original_bag_locked(projection_host);
-            runtime_state().objects.original_current_direct = static_cast<uint8_t>(projection_host);
-            runtime_state().objects.original_current_got = static_cast<uint8_t>(projection_host);
+            qol::extension_bag::ui_state().objects.original_current_direct = static_cast<uint8_t>(projection_host);
+            qol::extension_bag::ui_state().objects.original_current_got = static_cast<uint8_t>(projection_host);
             if (!install_module_view_locked(extension_bag)) {
                 set_original_bag_locked(original_bag);
-                runtime_state().objects.original_current_direct = static_cast<uint8_t>(original_bag);
-                runtime_state().objects.original_current_got = static_cast<uint8_t>(original_bag);
+                qol::extension_bag::ui_state().objects.original_current_direct = static_cast<uint8_t>(original_bag);
+                qol::extension_bag::ui_state().objects.original_current_got = static_cast<uint8_t>(original_bag);
                 VIRTBAG_LOG(
                     "extension tab reject reason=projection_host_unavailable source_original_bag=%d target=%d host=%d",
                     original_bag, extension_bag, projection_host);
@@ -497,8 +506,8 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                 virtual_bag::ClickResult::kSelected) {
                 restore_module_view_locked();
                 set_original_bag_locked(original_bag);
-                runtime_state().objects.original_current_direct = static_cast<uint8_t>(original_bag);
-                runtime_state().objects.original_current_got = static_cast<uint8_t>(original_bag);
+                qol::extension_bag::ui_state().objects.original_current_direct = static_cast<uint8_t>(original_bag);
+                qol::extension_bag::ui_state().objects.original_current_got = static_cast<uint8_t>(original_bag);
                 VIRTBAG_LOG(
                     "extension tab reject reason=projection_host_unavailable source_original_bag=%d target=%d host=%d",
                     original_bag, extension_bag, projection_host);
@@ -511,8 +520,8 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
             return;
         }
         if (virtual_bag::valid_original_transaction_bag(original_bag)) {
-            runtime_state().objects.original_current_direct = static_cast<uint8_t>(original_bag);
-            runtime_state().objects.original_current_got = static_cast<uint8_t>(original_bag);
+            qol::extension_bag::ui_state().objects.original_current_direct = static_cast<uint8_t>(original_bag);
+            qol::extension_bag::ui_state().objects.original_current_got = static_cast<uint8_t>(original_bag);
             if (virtual_bag::click(&runtime_state().objects.bag, extension_bag) !=
                 virtual_bag::ClickResult::kIgnored) {
                 install_module_view_locked(extension_bag);
@@ -544,7 +553,7 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
         if (virtual_bag::click(&runtime_state().objects.bag, extension_bag) ==
             virtual_bag::ClickResult::kInspected) {
             play_extension_switch_sound();
-            void* ctrl = runtime_state().ui.extension_tab_buttons[extension_bag];
+            void* ctrl = qol::extension_bag::ui_state().ui.extension_tab_buttons[extension_bag];
             if (ctrl != nullptr && runtime_state().host.game != nullptr &&
                 runtime_state().host.write_port->ui.make_item_description != nullptr &&
                 runtime_state().host.write_port->ui.set_current_bag != nullptr &&
@@ -593,8 +602,8 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                         install_extension_desc_unequip_hook_locked(extension_bag);
                     }
                 } else {
-                    const uint64_t generation = runtime_state().ui.inventory_generation;
-                    void* const root = runtime_state().ui.extension_tab_root;
+                    const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
+                    void* const root = qol::extension_bag::ui_state().ui.extension_tab_root;
                     unlockable_lock->unlock();
                     // Original callback operation: g_write_port->ui.make_item_description(ctrl).
                     const bool bag_set = qol::contracts::succeeded(
@@ -611,13 +620,13 @@ void handle_extension_tab_click_impl_locked(int extension_bag,
                     bool still_current = runtime_state().enabled.load() &&
                         extension_bag_session_admitted_locked() &&
                         // Former generation predicate: g_inventory_generation == generation.
-                        runtime_state().ui.inventory_generation == generation &&
-                        runtime_state().ui.extension_tab_root == root &&
+                        qol::extension_bag::ui_state().ui.inventory_generation == generation &&
+                        qol::extension_bag::ui_state().ui.extension_tab_root == root &&
                         runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
                         runtime_state().objects.bag.selected == extension_bag &&
                         runtime_state().objects.bag.types[extension_bag] == bag_type &&
                         runtime_state().objects.bag.capacities[extension_bag] == bag_capacity &&
-                        runtime_state().ui.tab_bag_items[extension_bag] == described_item &&
+                        qol::extension_bag::ui_state().ui.tab_bag_items[extension_bag] == described_item &&
                         extension_tab_control_is_current_locked(extension_bag, ctrl);
                     if (still_current) {
                         void* const current_data = extension_bag_ui_data(ctrl);
@@ -673,18 +682,18 @@ void queue_extension_tab_click_locked(int extension_bag) {
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked() ||
         !virtual_bag::valid_index(extension_bag) ||
         !extension_tab_control_is_current_locked(
-            extension_bag, runtime_state().ui.extension_tab_buttons[static_cast<size_t>(extension_bag)]) ||
-        runtime_state().ui.extension_tab_generation != runtime_state().ui.inventory_generation) {
+            extension_bag, qol::extension_bag::ui_state().ui.extension_tab_buttons[static_cast<size_t>(extension_bag)]) ||
+        qol::extension_bag::ui_state().ui.extension_tab_generation != qol::extension_bag::ui_state().ui.inventory_generation) {
         return;
     }
-    if (runtime_state().ui.pending_extension_tab == extension_bag &&
-        runtime_state().ui.pending_extension_tab_generation == runtime_state().ui.inventory_generation) {
+    if (qol::extension_bag::ui_state().ui.pending_extension_tab == extension_bag &&
+        qol::extension_bag::ui_state().ui.pending_extension_tab_generation == qol::extension_bag::ui_state().ui.inventory_generation) {
         return;
     }
-    runtime_state().ui.pending_extension_tab = extension_bag;
-    runtime_state().ui.pending_extension_tab_generation = runtime_state().ui.inventory_generation;
+    qol::extension_bag::ui_state().ui.pending_extension_tab = extension_bag;
+    qol::extension_bag::ui_state().ui.pending_extension_tab_generation = qol::extension_bag::ui_state().ui.inventory_generation;
     VIRTBAG_LOG("extension tab pending bag=%d generation=%llu", extension_bag,
-                static_cast<unsigned long long>(runtime_state().ui.inventory_generation));
+                static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation));
 }
 
 void extension_tab_button_clicked(void* ctrl) {
@@ -696,20 +705,20 @@ void extension_tab_button_clicked(void* ctrl) {
 bool extension_tab_control_is_current_locked(int index, void* control) {
     if (!runtime_state().enabled.load() || !extension_bag_session_admitted_locked() ||
         !virtual_bag::valid_index(index) || control == nullptr ||
-        runtime_state().ui.extension_tab_root == nullptr ||
-        runtime_state().ui.extension_tab_anchors[index].mounted == 0 ||
-        runtime_state().ui.extension_tab_anchors[index].handle != control ||
-        runtime_state().ui.extension_tab_buttons[index] != control ||
-        runtime_state().ui.extension_tab_generation != runtime_state().ui.inventory_generation ||
+        qol::extension_bag::ui_state().ui.extension_tab_root == nullptr ||
+        qol::extension_bag::ui_state().ui.extension_tab_anchors[index].mounted == 0 ||
+        qol::extension_bag::ui_state().ui.extension_tab_anchors[index].handle != control ||
+        qol::extension_bag::ui_state().ui.extension_tab_buttons[index] != control ||
+        qol::extension_bag::ui_state().ui.extension_tab_generation != qol::extension_bag::ui_state().ui.inventory_generation ||
         extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer) !=
-            runtime_state().ui.extension_tab_root) {
+            qol::extension_bag::ui_state().ui.extension_tab_root) {
         return false;
     }
     int child_count = 0;
-    if (!extension_bag_ui_child_count(runtime_state().ui.extension_tab_root, &child_count)) return false;
+    if (!extension_bag_ui_child_count(qol::extension_bag::ui_state().ui.extension_tab_root, &child_count)) return false;
     for (int child = 0; child < child_count; ++child) {
-        if (extension_bag_ui_child_at(runtime_state().ui.extension_tab_root, child) == control) {
-            return valid_child_locked(runtime_state().ui.extension_tab_root, child) == control;
+        if (extension_bag_ui_child_at(qol::extension_bag::ui_state().ui.extension_tab_root, child) == control) {
+            return valid_child_locked(qol::extension_bag::ui_state().ui.extension_tab_root, child) == control;
         }
     }
     return false;
@@ -717,20 +726,20 @@ bool extension_tab_control_is_current_locked(int index, void* control) {
 }  // namespace
 
 void commit_pending_extension_tab_locked(::qol::extension_bag::ReentryLock& lock) {
-    if (!virtual_bag::valid_index(runtime_state().ui.pending_extension_tab) ||
+    if (!virtual_bag::valid_index(qol::extension_bag::ui_state().ui.pending_extension_tab) ||
         !runtime_state().enabled.load() || !extension_bag_session_admitted_locked() ||
-        runtime_state().ui.pending_extension_tab_generation != runtime_state().ui.inventory_generation ||
-        runtime_state().ui.extension_tab_generation != runtime_state().ui.inventory_generation ||
+        qol::extension_bag::ui_state().ui.pending_extension_tab_generation != qol::extension_bag::ui_state().ui.inventory_generation ||
+        qol::extension_bag::ui_state().ui.extension_tab_generation != qol::extension_bag::ui_state().ui.inventory_generation ||
         !extension_tab_control_is_current_locked(
-            runtime_state().ui.pending_extension_tab,
-            runtime_state().ui.extension_tab_buttons[static_cast<size_t>(runtime_state().ui.pending_extension_tab)])) {
-        runtime_state().ui.pending_extension_tab = -1;
-        runtime_state().ui.pending_extension_tab_generation = 0;
+            qol::extension_bag::ui_state().ui.pending_extension_tab,
+            qol::extension_bag::ui_state().ui.extension_tab_buttons[static_cast<size_t>(qol::extension_bag::ui_state().ui.pending_extension_tab)])) {
+        qol::extension_bag::ui_state().ui.pending_extension_tab = -1;
+        qol::extension_bag::ui_state().ui.pending_extension_tab_generation = 0;
         return;
     }
-    const int extension_bag = runtime_state().ui.pending_extension_tab;
-    runtime_state().ui.pending_extension_tab = -1;
-    runtime_state().ui.pending_extension_tab_generation = 0;
+    const int extension_bag = qol::extension_bag::ui_state().ui.pending_extension_tab;
+    qol::extension_bag::ui_state().ui.pending_extension_tab = -1;
+    qol::extension_bag::ui_state().ui.pending_extension_tab_generation = 0;
     handle_pending_extension_tab_click_locked(lock, extension_bag);
 }
 
@@ -744,9 +753,9 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
     }
     // 标签位置是动态换算的（tab_rel + 袋容器绝对），用控件真实绝对 rect 判断，
     // 不用旧硬编码 kCellX/kCellY（标签左移后二者偏移 36px 致命中失效）。
-    void* ctrl = runtime_state().ui.extension_tab_buttons[index];
+    void* ctrl = qol::extension_bag::ui_state().ui.extension_tab_buttons[index];
     if (ctrl == nullptr) return false;
-    UiRect rect{};
+    qol::contracts::UiRect rect{};
     return extension_bag_ui_rect(ctrl, &rect) && rect.w > 0 && rect.h > 0 &&
            extension_bag_ui_hit_test(ctrl, x, y, rect);
 }

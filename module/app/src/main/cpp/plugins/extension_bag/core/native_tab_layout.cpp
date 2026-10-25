@@ -1,8 +1,8 @@
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/core/native_tab_layout.h"
 
-#include "plugins/extension_bag/extension_bag_context.h"
-#include "plugins/extension_bag/extension_bag_geometry.h"
-#include "plugins/extension_bag/model/equip_tab_layout.h"
+#include "plugins/extension_bag/core/geometry.h"
+#include "plugins/extension_bag/core/equip_tab_layout.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -68,7 +68,7 @@ bool same_c18_geometry(const C18GeometryPlanCache& cache, void* root, uint64_t g
 QolResult c18_layout_not_ready(void* parent, const char* reason, int detail,
                                int64_t inset_width = -1, int64_t inset_height = -1,
                                int64_t screen_width = 0, int64_t screen_height = 0) {
-    const uint64_t generation = runtime_state().ui.inventory_generation;
+    const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
     bool should_log = false;
     {
         std::lock_guard<std::mutex> lock(g_c18_layout_diagnostic_mutex);
@@ -100,7 +100,7 @@ QolResult c18_layout_not_ready(void* parent, const char* reason, int detail,
             const int user_type = child != nullptr ? extension_bag_ui_user_type(child) : -1;
             bool module_anchor = false;
             if (child != nullptr && parent_valid) {
-                for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+                for (const auto& anchor : qol::extension_bag::ui_state().ui.extension_tab_anchors) {
                     if (anchor.mounted != 0 && anchor.handle == child &&
                         extension_bag_ui_parent(anchor.handle) == parent) {
                         module_anchor = true;
@@ -150,7 +150,7 @@ QolResult resolve_c18_layout(void* parent,
             return c18_layout_not_ready(parent, "native controls incomplete", 15);
         }
         bool module_control = false;
-        for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
+        for (const auto& anchor : qol::extension_bag::ui_state().ui.extension_tab_anchors) {
             if (anchor.mounted != 0 && anchor.handle == child &&
                 extension_bag_ui_parent(anchor.handle) == parent) {
                 module_control = true;
@@ -196,7 +196,7 @@ QolResult resolve_c18_layout(void* parent,
     }
     const int64_t screen_width = 960 + static_cast<int64_t>(inset_width) * 2;
     const int64_t screen_height = 640 + static_cast<int64_t>(inset_height) * 2;
-    const uint64_t generation = runtime_state().ui.inventory_generation;
+    const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
     if (same_c18_geometry(g_c18_geometry_plan_cache, parent, generation,
             static_cast<size_t>(child_count), *out_parent_x, *out_parent_y,
             screen_width, screen_height, *out_children)) {
@@ -241,14 +241,14 @@ void prepare_c18_native_bag_layout_locked_impl() {
             qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0) return;
     void* parent = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
     if (parent == nullptr) return;
-    const uint64_t generation = runtime_state().ui.inventory_generation;
+    const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
     if (g_c18_applied_reflow.active &&
         (g_c18_applied_reflow.root != parent || g_c18_applied_reflow.generation != generation)) {
         // Root/generation changes invalidate geometry; never reuse old handles.
         g_c18_applied_reflow = {};
     }
     const bool should_reflow = runtime_state().enabled.load() &&
-        extension_bag_session_admitted_locked() && !runtime_state().store.view_installed;
+        extension_bag_session_admitted_locked() && !qol::extension_bag::ui_state().store.view_installed;
     if (!should_reflow) {
         if (!g_c18_applied_reflow.active) return;
         int child_count = 0;
@@ -331,13 +331,13 @@ void prepare_c18_native_bag_layout_locked_impl() {
                 }
             }
             VIRTBAG_LOG("C18 native reflow aborted root=%p generation=%llu failed_child=%d",
-                        parent, static_cast<unsigned long long>(runtime_state().ui.inventory_generation), i);
+                        parent, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation), i);
             return;
         }
         changed[changed_count++] = i;
     }
     VIRTBAG_LOG("C18 native reflow applied root=%p generation=%llu moved=%zu delta=%lld",
-                parent, static_cast<unsigned long long>(runtime_state().ui.inventory_generation),
+                parent, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation),
                 changed_count, static_cast<long long>(plan.vertical_delta));
     g_c18_applied_reflow.active = changed_count != 0;
     g_c18_applied_reflow.root = parent;
@@ -388,8 +388,8 @@ bool c18_native_bag_hit_locked(int64_t x, int64_t y, int* out_native_bag) {
         if (control == nullptr || extension_bag_ui_parent(control) != parent ||
             extension_bag_ui_user_type(control) != 2) continue;
         bool module_tab = false;
-        for (size_t slot = 0; slot < runtime_state().ui.extension_tab_buttons.size(); ++slot) {
-            if (runtime_state().ui.extension_tab_buttons[slot] == control) {
+        for (size_t slot = 0; slot < qol::extension_bag::ui_state().ui.extension_tab_buttons.size(); ++slot) {
+            if (qol::extension_bag::ui_state().ui.extension_tab_buttons[slot] == control) {
                 module_tab = true;
                 break;
             }
