@@ -1,163 +1,336 @@
 # `custom_recipe` 插件参考
 
+> 本文是该插件的设计、架构、能力与职责的唯一权威文档。实现事实以本文件为准；验收状态见
+> `docs/refactor/verification.md`，问题台账见 `docs/refactor/issues.md`。路径相对
+> `module/app/src/main/cpp/`。
+
 ## 摘要
 
-`custom_recipe` 是自定义合成配方与合成结果的唯一 owner：查询/判定配方结果，管理静态与动态三格配方，执行扣料、产物创建/保存与宝石升阶，并持有 RECIPEBASE/MIXTUREBASE 表注入的行为所有权。原独立 `craft_ui` 插件已并入本 owner 的内部 UI 子层（`plugins/custom_recipe/ui/`），不再作为独立 descriptor 注册。`core.craft` 仍是独立 `craft.facts` v1.0 provider。本插件不提供 HTTP 或 JNI，也不聚合通用 craft API。文中路径相对 `module/app/src/main/cpp/`。
+`custom_recipe` 是自定义合成配方与合成结果的唯一 owner：判定三格配方结果、执行扣料与产物
+创建/保存、宝石升阶、管理静态/动态配方目录，并持有 RECIPEBASE/MIXTUREBASE 注入记录的
+行为所有权。界面部分（原 `craft_ui`）已并入本插件的 `ui/` 子层，不再是独立 descriptor。
 
-## 身份、开关与 descriptor 面
+- 插件 id/version：`custom_recipe` / `0.1.0`（`plugins/custom_recipe/plugin.cpp:36-37`）。
+- 唯一可见开关：descriptor feature `custom_recipe.recipes`（默认关闭、Gameplay/toggle、
+  priority `-1`，`plugin.cpp:350-357`）。
+- 不提供 capability、不声明 HTTP handler/route、JNI count 为 0。
+- 目录内不出现游戏基址或 VMA：槽位由 game 侧端口装配，`check_offsets` 的
+  `offsets_plugin_base` 规则持续守护。
 
-插件 id/version 为 `custom_recipe` / `0.1.0`（`plugins/custom_recipe/plugin.cpp:33-34,311-312`）。唯一可见开关是 descriptor feature `custom_recipe.recipes`：默认关闭、Gameplay/toggle、priority `-1`（`plugin.cpp:297-331`）。原 `craft_ui` 的 hidden feature key `craft_ui.custom_crafting` 已从注册面删除；Store 中既有残留保持原样，既不迁移、不改写、不删除，也不参与注册投影或运行。
+## 1. 职责边界
 
-| Descriptor 面 | 当前声明 |
+| 在本插件内 | 不在本插件内 |
 |---|---|
-| `provides` | 无。结果 API `result::CraftResultApi` 内化为 UI 子层对 result 层的进程内调用，不经 capability registry 对外提供。见 `plugin.cpp:297-331`、`plugins/custom_recipe/result.h:92-105`、`plugins/custom_recipe/feature.h:34-35`。 |
-| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0。`save.facts` 用于 SaveEnter 读取当前槽的角色创建时间 seed。见 `plugin.cpp:265-276`。 |
-| `optional_requires` | `attribute.quality` v2.0。仅宝石升阶路径使用；缺失/失效只置 degraded，不阻断 owner 或三格配方。见 `plugin.cpp:259-263`。 |
-| `ports` | 三条：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0（RECIPEBASE/MIXTUREBASE 槽位，地址装配在 game 适配层）。见 `contracts/game_ports/ports.h`、`plugin.cpp` 的 `kPorts`。 |
-| `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 末尾 1 条 `own:RECIPEBASE_MIXTUREBASE` ownership（required/fail-soft）。顺序即声明顺序，ownership 最后。见 `plugins/custom_recipe/ui/runtime.cpp:526-566`、`plugin.cpp:55-90`。 |
-| HTTP/JNI | JNI count 为 0，不声明 HTTP handler/route。合成直操作路由仍归 `core.craft`（见下文）。见 `plugin.cpp:297-331`。 |
+| 两条注入配方入口（「合成」「宝石强化」）与三格匹配目录 | 原版背包/物品读写原语（`inventory_hooks`、`core.item`） |
+| 三格 place/prepare/execute、确认与取消、扣料与产物保存 | 只读配方事实 `craft.facts` 与 `/api/op/craft/mix-direct`（归 `core.craft`，当前 501） |
+| 宝石升阶的 gate、候选值、need/jewel 写入顺序 | 宝石档位与数值区间查询（`attribute.quality`，optional 依赖） |
+| 动态特殊装备配方的播种、缓存与代际 | 特殊装备类别判定数据来源（`ITEMCLASSBASE` 静态结论，由 `special_equip` 共用同一组） |
+| RECIPEBASE/MIXTUREBASE 注入与还原（ownership） | 文本层的 `MEMORYTEXT_GetText` hook 本体（`core.custom_ui`） |
+| 配方呈现文案与提示 scope（2–11） | 通用 UI 控件/状态服务（`core.custom_ui`、`core.ui_state`） |
 
-## 层分工
+## 2. Descriptor 面
 
-| 层 | 文件 | 职责 |
-|---|---|---|
-| Descriptor / 生命周期 / typed 接线 | `plugin.cpp` | 依赖与端口校验、注册事务与失败清理、门禁、text 消费者、资源声明组装。 |
-| UI 子层 | `ui/feature.{h,cpp}`、`ui/runtime.{h,cpp}` | UIMix 界面动作与文案、12 条 hook wrapper、本地 TLS text scope、UI 本地 backups 与 claims。 |
-| 结果层 | `result/feature.cpp`、`result/feature.h` | 放料/准备/执行/产物/材料需求/宝石升阶、quality 消费、动态配方事件、ownership ops。 |
-| 纯规则 | `model/rules.{h,cpp}` | 档位序数与区间搜索、材料数量、三格库存/token 判定、宝石数值缩放。 |
-| 静态/动态目录 | `model/catalog.{h,cpp}` | 两条 RECIPEBASE 注入 entry、8 条静态三格规则、26 类特殊装备动态配方构造。 |
-| 表注入 | `table/table.{h,cpp}`、`table/table_runtime.cpp`、`table/text_table.h` | 注入构造与组位快照/恢复（纯核心）、端口槽位装配与 ensure/deactivate（运行时）、配方呈现文案表。 |
-
-## 配方目录与运行机制
-
-`catalog.cpp` 有两条注入 RECIPEBASE 的 entry，均挂在宝石强化页（group 3 = `1<<3`）：`Kind::kThreeSlotCraft` 的「合成」与 `Kind::kJewelTierUp` 的「宝石强化」（`catalog.cpp:52-63`）。
-
-静态三格匹配表共 8 条规则（表序即优先级；`catalog.cpp:84-111`，定义见 `catalog.h:97-116`）：
-
-| 规则 | 匹配语义 |
+| 面 | 当前声明 |
 |---|---|
-| 皮革 + 空槽 + 魔法衣料 | 有序，产物为大背包。 |
-| 小恢复药水×2 + 低级武器强化卷轴 | 无序，产物为顶级宝石。 |
-| 低级宝石×3 | 无序，产物为中级宝石。 |
-| 中级宝石×3 | 无序，产物为高级宝石。 |
-| 高级宝石×3 | 无序，产物为顶级宝石。 |
-| 顶级宝石×3 | 无序，产物为混沌宝石。 |
-| 任意宝石 + 混沌武器卷轴 + 混沌防具卷轴 | 有序，产物为第一格宝石本身，数值按 1200 permille 缩放并保留源宝石随机等级与属性类型。 |
-| 两件同类别特殊装备 + 元气恢复药水 | 有序，产物为同类别特殊装备新建，孔总数与剩余强化次数拉满。 |
+| `provides` | 无。结果 API `result::CraftResultApi` 只在插件内部由 UI 子层调用。 |
+| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0（`plugin.cpp:308-321`）。 |
+| `optional_requires` | `attribute.quality` v2.0；缺失/失效只置 degraded，仅影响升阶路径（`plugin.cpp:302-307`）。 |
+| `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
+| `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 1 条 `own:RECIPEBASE_MIXTUREBASE`（required/fail-soft）。顺序即释放逆序，ownership 最后声明、最先释放。 |
+| `jni` / HTTP | 均为 0（`plugin.cpp:359-377`）。 |
+| `features` | 仅 `custom_recipe.recipes`。 |
 
-动态配方：26 个特殊装备类别（`catalog.h:173-177`）各生成一条三格有序配方，材料从 14 条材料池（`catalog.h:164-167`，另含一个空槽候选）抽取且三者互不相同；目录容量上限 64（`catalog.h:136-137`）。每次 `kEventSaveEnter` 通过 required `save.facts` v1.1 读取当前槽并以 `slot_times` 的**角色创建时间**作为 seed；自包含 SplitMix64 PRNG 按装备类别派生独立流，不使用共享游戏 RNG。相同 seed、类别列表和代码版本生成完全相同的完整配方表。构造候选若命中任何静态配方或已接受动态配方，仅推进当前类别的 PRNG 并重抽该条，不改变其他类别结果；检测复用 ordered/unordered、通配符和空槽的配方匹配器。进程内用 `std::map<creation_time, std::vector<recipe>>` 保留所有成功缓存的目录直到进程结束，不设淘汰、不写磁盘；cache hit 不调用生成器，但仍发布完整动态表、推进 generation 并作废 pending。槽位复用时创建时间变化会自然 miss；保存时间不参与 key。缓存分配 OOM 时捕获 `std::bad_alloc`，不发布目录、不写缓存并记录错误，后续刷新可重试。创建时间为 0、当前槽无效、能力读取失败或目录构造失败时清空动态表并写错误日志，不发布旧表或未播种配方；生成失败不会写缓存。匹配顺序仍为**静态表优先，其后动态表**。
+## 3. 分层与目录
 
-材料需求数量（`CountRule::kJewelGradeAndLevel`）：`ceil(base_count × grade × (105 − level) / 105)`，纯整数运算，`level` 钳到 `[0,105]`，满级为 0（`rules.h:60-63`、`rules.cpp:169-185`）。宝石档位由类别 28..32 映射为 1..5（低→混沌）。
-
-### 三格放料、prepare 与 execute
-
-`ui/` 对当前 UIMix 状态构造输入，结果层只使用调用方传入的槽位类别、typed item handles 与持有数量，不读取 UIMix/control（`feature.h:16-22`）。
-
-- `api_place`（`feature.cpp:600-635`）：无效槽/无效物品视为「无事发生」返回 `kPlaced`（CR06 现状，见审计）；重复不可堆叠对象 → `kAlreadyPlaced`；可堆叠类别的持有数不足 → `kNotEnoughHeld`；写入失败 → `kWriteFailed`。
-- `api_prepare`（`feature.cpp:637-693`）：先使旧 pending 失效，再按静态/动态表匹配；**真正未命中** → `kNoMatch`；命中后复核每格 live identity 与类别，通过才写 pending（recipe、items、categories、generation、token）→ `kConfirmPending`；**已匹配但读取槽位身份/类别等上下文失败**（`stuff_item` 读取错误、类别读取错误、传入类别与槽内实际类别不一致、声称空槽却存在对象）→ 尾追加的 `PrepareOutcome::kUnavailable`（`result.h:20-26`），与 `kNoMatch` 区分（`feature.cpp:637-693`）。
-- `api_execute`（`feature.cpp:695-1005`）分阶段，结果枚举见 `result.h:35-46`：
-  1. **precheck**：pending 有效且 token 未失效；动态表 generation 未变；`in` 的类别与 handle 与 pending 一致；live handle/类别/可堆叠性/类别持有数复核；扣料入口就绪；重复对象身份检查。阶段 1 冲突 → `kStaleSlots`，阶段 2 就绪失败 → `kPrecheckFailed`（均未扣料）。类别持有数不足 → `kNotEnoughHeld`。
-  2. **产物准备（未入包）**：`create_perfect_item`（否则 `create_item`）创建产物并按模式改写（缩放数值位 / 拉满孔位与强化段）。失败即丢弃未提交产物并返回 `kProductPrepareFailed`（此时尚未扣料）。
-  3. **扣料**：仍经原版 inventory entry（可堆叠用 `remove_item_data`、不可堆叠用 `remove_item`），并读取类别数量前后差值观察。扣料调用失败 → `kMaterialRemoveFailed`；观察失败或差值与预期不符 → `kMaterialObservationFailed`。
-  4. **保存**：`write_port.save_item`。成功且 `out_saved & 0xff != 0` 才 `kOk`，否则 `kProductSaveFailed`。
-- 确认与取消（UI 子层，`ui/runtime.cpp:160-358`）：
-  - `kConfirmPending` 时 `craft_show_yesno` 必须提供**非空 `ok` 与 `cancel`**（adapter 契约：任一为空即拒绝创建，历史 bug 即 cancel 传 `nullptr`）。
-  - 槽位读取返回的 handle 只有 `slot` 与 `generation` **同时为 0** 才算合法空槽；**半无效 handle**（任一为 0、另一非 0）视为畸形身份，返回 `kQolErrInvalidArgument`("malformed item handle") 且不进入配方判定（`ui/feature.cpp:158-203`）。
-  - 取消回调 `on_cancel_three_slot` 只调用内部 `cancel_pending_confirmation()` 作废 pending/token：**不写物品、不随机、不扣料、不保存、不清空已填格**（`ui/runtime.cpp:160-163`、`feature.cpp:1152`、`feature.h:51`）。
-  - 弹窗创建失败（写端口缺失、回调为空、adapter 返回非 OK）不静默：作废 pending 并明确提示「合成暂不可用，材料未扣。」，保留已填格（`ui/runtime.cpp:343-351`、`ui/feature.cpp:265-284`）。
-  - 提示文案按错误分类各走独立本地 scope：配方未命中见下节；已匹配但上下文不可用/弹窗创建失败用 scope 9；确认期间格子或代际变化（`kStaleSlots`/`kAborted`）用 scope 10；放料写入失败（`kWriteFailed`）用 scope 11。**真正的库存不足**仍是既有的材料不足提示（scope 无覆盖，popup 94 原文，`ui/runtime.cpp:256-258`），取消后保留已填格；扣料后的可能损失**不回滚**（CR01 口径不变）。
-- CR01 口径：前置校验在任何扣料之前；产物在扣料前准备并在扣料前失败时丢弃；扣料后的失败**允许不回退**，提示区分阶段（不伪称已回滚）。扣料后阶段（remove / observation / save）统一提示「合成失败，材料可能已扣，请检查背包。」并清格——save 后产物所有权未知，不得提示空间不足或断言无产物入包；产物准备失败（扣料前）独立提示「产物准备失败，材料未扣。」并清格。`save_item` 之后 handle 所有权可能转移，代码不再 free 或回读该 handle，因此**不承诺 save 失败后可清理该 handle**（`feature.cpp:982-997`、`ui/runtime.cpp:167-221`）。
-- CR10 口径（宝石升阶）：走 `api_make_item`，顺序为 quality 查询 → 读取并与 item word 交叉核对 → 材料需求**前置校验** → 计算升阶候选（随机）→ **先提交 need 写入** → **最后写 jewel word**；need 写入失败直接返回失败且不写 jewel（`feature.cpp:1026-1101`）。失败时已写入的展示值允许残留；该顺序不等价于 full atomic。
-
-### Jewel tier-up
-
-- 档位为 `AttributeQualityTier` 的 Grey..Gold（0..5，`contracts/attribute_quality.h:22-29`）。当前档来自 `attribute.quality` 查询结果的 `quality.level`。
-- 候选值：以 `AttributeRange` 调 `evaluate`（经 `AttributeQualityApi::evaluate`）搜索当前档之上的首个有代表值档位区间，再在闭区间内调用随机源取值（`rules.cpp:60-168`、`feature.cpp:259-277,1056-1066`）。
-- 边界：已是 Gold → `UpgradeResult::kAlreadyGold`；区间退化（`max <= min`）→ `kDegenerate`；两者都返回失败，与合成键 `kAlreadyGold` 前置拦截互为双保险（`rules.h:18-22`、`feature.cpp:1079-1081`）。
-- 随机：`api_make_item` 使用调用方 `CraftMakeItemInput::rand_inclusive`，经 `make_item_rand_bridge` 传播错误并校验落点（`feature.cpp:425-436`）。UI 侧 `craft_rand_inclusive` 直接调用父命名空间 `random_inclusive`，即 write port ABI 1.2 的真实游戏随机（`ui/runtime.cpp:394-396`、`feature.cpp:62-75`）；不恒返回下界、不做静默 clamp。
-
-### 宝石升阶 gate 与提示（CR02/CR03）
-
-`api_craft_gate` 返回 `result::CraftGate`（`result.h:48-53`）：物品事实或 quality 查询失败、item word 与查询 facts 不一致 → `kUnavailable`；真正非宝石 → `kNotJewel`；已金档 → `kAlreadyGold`；其余 `kPass`（`feature.cpp:572-596`）。UI 将 `kUnavailable` 映射为「功能不可用」提示，与「只有宝石」分开，且只阻断升阶路径（`ui/runtime.cpp:380-383`）。
-
-## 文本与作用域
-
-- 呈现文案表在 `text_table.h`：35291 于本地 scope 2（配方按钮）/3（面板标题）替换为「宝石升阶」；scope 4（页签）**不登记**，保持页签名原文。本插件内部提示 scope 现为 5–11（均不推入 Host）：
-  - 5 = 「功能不可用」（97，tier-up 质量服务不可用）；
-  - 6 = 「合成失败，材料可能已扣，请检查背包。」（94，扣料后阶段）；
-  - 7 = 「产物准备失败，材料未扣。」（94，扣料前产物准备失败）；
-  - 8 = 「配方不匹配，请检查材料组合。」（94，真正未命中配方）；
-  - 9 = 「合成暂不可用，材料未扣。」（94，已匹配但上下文不可用 / 弹窗创建失败 / 确认时读取失败）；
-  - 10 = 「合成状态已变化，请重新填入材料。」（94，确认期间格子或代际变化）；
-  - 11 = 「放入失败，请重试。」（99，放料写入失败）。
-  这里 94/97/99 是**弹窗索引**（调用 `show_text` 的参数），不是消费者匹配键；见下条。
-- 消费者匹配键是 **MEMORYTEXT id**，不是弹窗索引：`craft_show_popup(popup_index, scope)` 仍以原版弹窗索引（94/97/99）调用 `show_text`，另有一条 debug 事实日志 `craft popup index=%u memoryTextId=%u` 记录翻译结果（`ui/runtime.cpp:125-160`）。两域常量与映射表在 `text_table.h`：`kPopupIndex{OnlyJewel=97, MaterialInsufficient=94, AlreadyPlaced=99}`（`:30-32`）、`kMemoryText{OnlyJewel=35413, MaterialInsufficient=35410, AlreadyPlaced=35415}`（`:36-38`）、`kPopupTextIds` 与 `popup_memory_text_id()`（`:48-62`，未知索引返回 0，不猜测）。`TextEntry.text_id` 采用 MEMORYTEXT 域，因此仅当处于对应本地 scope 时替换生效；真「材料不足」路径无 scope 覆盖，仍落到原版 94 原文。映射与文案在 `原版 v1.3.2`、`盗版大修 v0810`、`monster v31` 三份输入包一致，并已对当前输入 **monster v29** 静态复核：`game.dat.jpg` 表 73 的 row 94/97/99 = 字节 `52 8a`/`55 8a`/`57 8a` → MEMORYTEXT 35410「材料不足。&N无法进行合成。」/35413「只有宝石道具才可以。」/35415「该宝石已被添加。」，标题 `35291` = 「宝石强化」（该输入 SHA-256 `3cd09818…e4a1c` 与运行原始 v29 一致）。这**只扩三条映射与标题的静态数据支持范围**，不代表运行时替换成功或用户已看到正确提示；未列出的其他映射仍未验证。
-- scope 由 UI 子层本地 TLS 持有：`t_current_text_scope`（`ui/feature.cpp:20`）与 `TextScopeGuard`（`ui/feature.h:140-152`、`ui/feature.cpp:294-309`）在绘制回调内保存/恢复，并继续调用 Host SDK `text_scope.push/pop` 对准范围 2/3/4；不在表中登记的私有 scope 不推入 Host。查表签名是显式 `text_lookup(scope, id)`，删除旧的 infra 活动 scope 裸声明（`text_table.h:71-78`）。
-- 消费者在 install 时订阅 after/modify，在 deactivate 时退订（`plugin.cpp:44-47,172-178,212-216`）。
-
-## 生命周期、门禁与表所有权
-
-**install**（`plugin.cpp:122-210`）：先校验 `sdk`/`game`、`port_count == 2` 与两条 port 的 ABI/函数齐备、`commands` 注册句柄；再 require `text_layer`/`item.facts`（含 size 校验）/`craft.facts`/`save.facts`（含 `current_slot` 与 v1.1 `slot_times` 函数）；随后按序登记文本订阅、两个 typed handler、`ui::bind` 并绑定 facts。任一步失败**立即幂等清理本次注册**（退订、注销 handler、`ui::clear()`），不依赖 Host 后帧清理。install 完成时**不**打开业务门禁。
-
-**门禁**：`plugin_on_enabled` 仅在 `ownership_ready()`（表注入就绪）且 `ui::core_backups_ready()`（5 条核心 hook backup 齐备）时 `set_enabled(true)`（`plugin.cpp:233-240`）。feature toggle 打开时**不提前**开门禁；关闭时立即 `set_enabled(false)` 并作废在途确认 token（`plugin.cpp:301-309`、`feature.h:44-47`）。
-
-**停用顺序**：`plugin_on_disabled` 先 `set_enabled(false)`（阻止新业务副作用、作废 pending），随后 Host 按资源声明逆序释放——ownership 先 release（`own_release` → `table_deactivate`），再释放 UI hooks（`plugin.cpp:242-248`）。`plugin_deactivate` 再清理订阅、typed handlers、事件订阅、UI context/backups 与 facts/ports（含 `save.facts`）（`plugin.cpp:212-231`、`ui/runtime.cpp:650-656`）。
-
-**资源等级**：5 条核心 hook = required/fail-closed（任一失败整体回滚已装核心资源与内部注册）；7 条装饰 hook = optional/fail-soft（失败只 degraded，不拖垮核心）。`UIMix_ResetStuffItemControl` 保持 optional，且其 wrapper 不受 feature 门控，因为它同时服务原版成功链（`ui/runtime.cpp:508-512,472-510`）。
-
-**表所有权**：`own:RECIPEBASE_MIXTUREBASE` 为 required + fail-soft：`own_acquire` 调 `custom_recipe_table_ensure` 并据结果置 `g_ownership_ready`，失败时回滚表状态并返回非 0（`feature.cpp:1131-1141`）；`own_release` 为 total。槽位由 game 端 `QOL_PORT_RECIPE_TABLE` 解析（`game/adapter_ports/recipe_table_port.cpp`，唯一 VMA 来源），`table_runtime.cpp` 映射为 `TableAccess` 后驱动核心。ensure 注入模块缓冲、清除模块占用组位并追加记录；deactivate 还原原版段组位并把 RECIPEBASE 记录数还原为 base，但**保持游戏指针指向模块缓冲且不 free**，使残留面板持有的注入下标仍在缓冲界内（`table.h:101-111`、`table.cpp:363-395`）。表未就绪时 `def_for_mix_type` 返回 `nullptr`，不把未注入状态伪装成可用配方。
-
-**主线程契约观测**：`place`/`prepare`/`execute`/`make_item` 与表 `acquire`/`deactivate` 在 `game_host.thread.is_main_thread()` 返回 0 时写一次 WARN `wrong thread entry=...`；只记录、不改返回值。
-
-**typed commands 时序**：UI 经 `commands.post_typed` 入队（`ui/feature.cpp:205-222`），Host 主线程 drain 后由 `plugin.cpp` 的 handler 转交结果层执行（`plugin.cpp:289-295`、`feature.cpp:1195-1214`）。未改成 UI callback 直接同步写；handler 在校验通过前先检查 `enabled()`，停用后 drain 中的命令直接失败（`feature.cpp:1195,1193`）。
-
-## 消费者 API 边界与不迁移面
-
-- 内部结果 API `result::CraftResultApi` 的 12 个成员（`enabled`/`three_slot_mode_active`/`is_jewel_tier_up_recipe`/`form_ui_type_for_mix_type`/`craft_gate`/`is_jewel_item`/`place`/`prepare`/`execute`/`material_needs`/`make_item`/`desc_should_replace`）由 `craft_result_api()` 返回（`feature.h:34-35`、`result.h:92-105`、`feature.cpp:1114-1128,1191`），只有本 owner 的 UI 子层调用；`result.h` 另保留未被当前 API 使用的 `CraftOutcome` 枚举。本轮确认回归**未增删该表成员、未新增 provider、未改 Host SDK/ABI**；`PrepareOutcome` 只做尾追加（`kUnavailable = 3`），`prepare` 槽内可返回该新枚举。
-- 两写端口：`QOL_PORT_CUSTOM_RECIPE_WRITE`（写需求/槽位/描述/产物创建保存释放/宝石字/随机）与 `QOL_PORT_CRAFT_UI_WRITE`（UIMix 控件操作、提示与 YesNo、费用归零）。见 `contracts/game_ports/custom_recipe_write_port.h:12-26`、`contracts/game_ports/craft_ui_write_port.h:14-28`。
-- `core.craft` 继续提供只读 `craft.facts` v1.0；`POST /api/op/craft/mix-direct` 仍由 `core.craft` 标记 owner，并保持 Kotlin `OpController` 的 501 `not implemented`；本插件不实现该 route，不新增 JNI。见 `plugins/core.craft/`、`docs/reference/api-reference.md` §8。
-
-## 已知限制
-
-- 三格流程继续调用受 inventory hooks 管理的原版入口，因此保留 H-03 类别总数（物理+扩展）、H-05 对象删除、H-13 保存与 H-21 类别补扣的扩展背包支持；支持以对应 hook `live`、EB capability 可用且 enabled 为条件，不限制为物理袋，也不默认拒绝 EB。
-- 宝石升阶的 Game-owner 写入限制与三格流程分开核验，仍为待核项，不作为三格拒绝 EB 的理由（见 `static-audit.md`）。
-- CR06（放料空/无效输入返回 `kPlaced` 并推进选格）行为尚未裁决，保持原行为。
-- CR11（install 部分失败清理在 feature-mode 与 legacy `install_all` 路径的差异）为条件性基础设施观察，当前无确认的运行时泄漏证据。
-
-## 本轮确认回归（2026-10-15）
-
-- 修复内容：YesNo 确认补齐非空 `ok`/`cancel` 回调（历史 bug：`cancel = nullptr` 被 adapter 拒绝 → 正确配方无反应）；取消只作废内部 pending/token；`prepare` 区分「真正未命中」与「已匹配但上下文不可用」（新增 `PrepareOutcome::kUnavailable`）；槽位/类别读取失败不再伪装成空槽或「材料不足」；弹窗创建失败明确提示而非静默；提示文案按错误分类走 scope 8–11。
-- Host 证据：7 个受影响 target 全部**重新构建后**运行 `custom_recipe_tests`、`custom_recipe_handle_chain_tests`、`custom_recipe_owner_fixture_tests`、`host_adapter_tests`、`craft_ui_guard_tests`、`craft_ui_handle_identity_tests`、`module_text_tests`（717 断言）共 **7/7 PASS**，确保最终 `ui/feature.cpp`（畸形 handle 分支）进入二进制（`.tmp/custom-recipe-fix-20261015/final-ctest.log`）。其中 owner fixture 用真实 wrapper 验证确认链；handle_chain 的 `wrapper_equivalent` 用构造输入覆盖结果层成功路径，属交叉覆盖而非真机。
-- 构建、打包与部署（按脚本直接执行，未手工构建/搬迁旧包；**以下对应旧 source `dc779a83`，作为历史记录保留**）：`scripts/build-debug.sh --offline` 成功并正常清理旧包，模块 APK `output/inotia4_qol_lsposed_debug_2610151038_6ef35a38129e.apk`（SHA-256 `6ef35a38129e2c8b0971a6c7629c578bcd278a0098a331b2931eb081523baa77`）；`scripts/patch-apk.sh <该模块>` 默认 3 variants 成功 3 / 失败 0，当时 canonical 交付入口为 `output/Inotia4_v1.3.2_monster_v31_lspatched.apk`（SHA-256 `00dcbd36b16b27efe517dc99a374b6ccd1e797669d3683b04ca3b2921def84c2`）。
-- 部署与运行身份（`192.168.3.56:5555`，**同属旧 source `dc779a83` 的历史记录**）：`install -r` canonical → `Success`，force-stop + monkey 重启后 `/api/health` `ready=true`/`monster v31`、`screen=main_menu`；运行身份 `versionCode=192`/`versionName=0.7.13`/`sha256=6ef35a38129e…` 与模块**严格一致**，assembly `initialized=true registered=28 install_failed=0`（`running-module.log:24,33`）。
-- 状态：上述部署身份不等于业务验收；用户后续在旧包（`6ef35…`）上的反馈只作为用户观察记录，**不绑定本批新源码**。`VM-CR-MERGE-01` 仍 **NOT_ACCEPTED**。回归登记见 [`verification-log.md`](../../refactor/audits/plugin-audit/custom-recipe-20261014/verification-log.md) 与 `docs/refactor/verification.md` §5.13。
-
-## 子集 A：MEMORYTEXT 映射、合成启动恢复与表状态域（2026-10-15；源码/Host + 脚本交付与冷启资源恢复观察）
-
-- **文本域分离**（见上节）修复「无效配方仍显示材料不足」：消费者按 MEMORYTEXT id 匹配，插件仍以弹窗索引调用 `show_text`。
-- **启动期 ownership 定向恢复**：初始 fail-soft 安装只对「ownership × fail-soft × 明确 `kQolErrNotReady` × Free」武装一次；`host/assembly.cpp` 一次性订阅 SaveEnter，回调只锁存当前有效 owner token（`assembly.cpp:359,386`），主帧在 `production_feature_frame_step()` 之后调用 Host 私有 helper（`assembly.cpp:349-352`）。信号只在**安装事务已终态、准入通过且确实选出待恢复 claim 后**消费：desired 关闭/owner 失活/旧 token/已隔离立即作废，同 token 的初始安装在途时**保留信号**（`host/plugin_registry.cpp:3022-3122`）。恢复完成 acquire → registry Live → 清 pending → `on_resource_ready(ctx, "own:RECIPEBASE_MIXTUREBASE", nullptr)`；插件侧只据此重算业务门禁（`plugin.cpp:258-270`），**不重装 12 hook、不改 desired/Store、不重复 install/on_enabled**。实现见 `host/plugin_registry.h:75,80`、`host/plugin_registry.cpp:509-523,2704-2712,2956-3056`、`hooks/transaction.cpp`（软失败保留原机制码）、`contracts/plugin.h:198`（注释）；仅 `kNotReady` 可自动恢复，`kBusy` 本轮不作为恢复条件。
-- **表注入结果分类与 P1 整改**：`table.{h,cpp}` 增加 typed 状态域 `TableAcquireStatus{Ok, NotReady, Unsupported, Internal, Busy}`（`table.h:108-121`；分类 `table.cpp:230`，核心入口 `table.cpp:246`，deactivate `table.cpp:388`），`own_acquire` 依 typed 结果置 `g_ownership_ready` 并**透传原码**（`feature.cpp:1131-1146`）。顺序为实际实现：缺表/元数据**分类先于**合法重激活或换表状态变更，书名册字节不变式在实际新注入前、抓取组位快照之后校验（`table.cpp:331-343`）；不声称「所有永久错误发生前没有任何模块状态/RAII 变化」。**G1A-01**（production Android `set_context` 定义遗漏，P1）已恢复定义（现位于 `table_runtime.cpp`，`feature.cpp:87-90` 转发）并以生产 setter + 真实 bridge 日志/静态 message 与 `nm` 符号核对；P1-A/P1-B 保持更早实现检查发现的编号，见 [`design-card.md`](../../refactor/audits/plugin-audit/custom-recipe-20261014/design-card.md) §3.4。
-- **本轮证据（仅源码/Host；`status-r2.txt`）**：跨 lane 生产链复验（真实 registry + 真实 descriptor + 真实 `on_resource_ready`）10 目标 CTest **10/10**；整树 **143 目标全部编译通过**、全量 CTest **141/143**，红项仍是既有的 `core_api_lifecycle_tests`（旧 `kHidden` 断言）与 `help_page_tests`（布局断言），两者源/测试相对 HEAD 未改、不归因本批在途 UI（先前的 `config-native-owner` mkdtemp 失败已消除，不再计入）。`check_http_routes` 147 条、缺失/额外 0（`0/147`）无漂移；`check_arch` **全部通过**（layers/offsets/JNI/resources）。原 `check_resources` 的 13 条来自扫描器把 `TableAccess` 的 `recipe_ptr_slot`/`mixture_ptr_slot` 业务字段名当成机制标识——已按**机制完整标识符/调用形态边界**修复扫描器（非字段改名、非新豁免、非 freeze），新增 12 正反例单测；证据 `.tmp/ui-craft-regression-20261015/validation/*-r2.log` 与 `.tmp/ui-craft-regression-20261015/checker/`。
-- **Gate 1A**：attempt1 **暂不通过**——G1A-01（P1，提取 table 核心时漏掉 production Android `set_context` 定义）与 G1A-02（P2，installing 期到达的 SaveEnter 被下一帧提前消费）已在各 lane 修复并补 production setter + 实际日志/`nm` 符号核对、逐帧 `step → retry` 安装中保信号测试；P3（恢复后 error 指向实际未 Live 资源 / ready 失败原因）亦修。**attempt2 已正式 PASS**（G1A-01/02/P3 可关闭静态整改，无新材料阻断），**VM 仍 NOT_ACCEPTED**。G1A-01/02 为 Gate 编号，P1-A/P1-B 为更早实现检查发现的编号，互不覆盖。
-- **边界**：Debug 构建成功（`output/inotia4_qol_lsposed_debug_2610151556_ed9081c4c54e.apk`，SHA-256 `ed9081c4c54e4bd5e0829ae8749d58d6a70e5101a0428f131cb299e953d29fd2`，`.tmp/ui-craft-regression-20261015/validation/build-debug.log:272-276`）。**脚本交付与冷启资源恢复观察**：用户已把输入换成 `apk/game-apk/艾诺迪亚4_monster_v29.apk`（**v29，非 v31**；`pre-health` 已 v29），`scripts/patch-apk.sh` 4 成功/0 失败，canonical `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`（SHA-256 `aaf20f5288b6d3acac9e0b8dc1494bcfb4794c6857dbb4c7e2785fa47ae3b980`；内嵌 module 仍 `ed9081c4c54e4bd5e0829ae8749d58d6a70e5101a0428f131cb299e953d29fd2`，origin `3cd098184c03cdc9a89a7c0a9746298f9f72196778eac8bec3d9b40296fe4a1c` 匹配该 v29 输入），`apksigner`(v2)/`aapt` 通过、package 原 ID / versionCode 32 / versionName 1.3.2、module 192/0.7.13 未变（`.tmp/ui-craft-regression-20261015/deploy/patch-apk.log`、`signature.txt`、`package.txt`）。**本批没有 install.log，也不写「Main 安装成功」**：由用户自行手动安装并测试，主代理仅只读校验（`identity-summary.json`）：设备 `192.168.3.56:5555` PID 6913，`pm path` 的 base APK sha256 与 canonical 完全一致；`running-module.log:33` 运行模块 identity 严格等于 `ed9081c4c54e4bd5e0829ae8749d58d6a70e5101a0428f131cb299e953d29fd2`；health `monster/v29`、screen `main_menu`。冷启进档资源自动恢复被观察到：`f17` `recipe table not ready` → `f547` SaveEnter + 动态组合重建 26 → `f548` 表注入 `base=69`（原版记录）+ 2 条入口 → `records=71` 且 `ownership restored`（写入的是 71 条精确记录，**不是新增 69 条**），API `custom_recipe` enabled、13 条资源全 `live`、`degraded=false`、`error=null`。该观察只证明资源恢复，**不等于正常合成/扣料/品质或全 VM 验收**；也不假设用户从未开关或从未变动状态。**Gate 2A attempt1 交付身份 PASS**（模块/内嵌/运行 module、canonical/设备 base APK、origin/v29 输入三条链闭合，签名 v2 与 PID 6913、health monster/v29 一致；非功能 VM 验收），整体 VM 仍 **NOT_ACCEPTED**。
-- **为什么先只见资源恢复**：UI hooks 本就在插件装配期先安装，原生两页面入口的表注入依赖**原表 ready**；26 条动态组合只是模块内部匹配表，生成不等于逐条注册进原版 RECIPEBASE——本批没有为此新增方案/实现。
-- 旧 `6ef35…`/`00dcbd36…`（旧 source `dc779a83`）仅为历史记录，不作本批身份。无关项仍未实现：双 TEXT 工厂与 Debug 并列展示、mainmenu 精确字号 20→30、高度 ×1.5、容器 clip。
-
-## 文件地图
-
-路径相对 `module/app/src/main/cpp/`。
-
-| 子职责 | 文件 | 当前职责 |
+| 层 | 目录/文件 | 职责 |
 |---|---|---|
-| Descriptor、依赖、开关与生命周期 | `plugins/custom_recipe/plugin.cpp:33-331` | required/optional、两条 port、13 条资源组装、安装事务与清理、门禁、text 消费者、唯一 feature。 |
-| UI 子层接口与实现 | `plugins/custom_recipe/ui/feature.h:26-156`、`ui/feature.cpp:11-351` | UIMix 控件/事实读写封装、local TLS text scope、放料处置映射、成功收尾与提示。 |
-| UI runtime | `plugins/custom_recipe/ui/runtime.h:12-25`、`ui/runtime.cpp:34-658` | 12 条 hook wrapper、claims、backups、bind/clear、CR01/CR02/CR03 提示与真实随机适配。 |
-| 结果层 | `plugins/custom_recipe/result/feature.cpp`、`result/feature.h` | place/prepare/execute/make-item、quality 消费、动态配方事件、材料需求、table ownership ops。 |
-| 内部结果契约 | `plugins/custom_recipe/model/result.h` | 结果枚举与 Input/Output POD 及 `CraftResultApi`。 |
-| 纯规则 | `plugins/custom_recipe/model/rules.h`、`model/rules.cpp` | 档位/区间/候选、材料数量、三格库存与 token、宝石缩放。 |
-| 静态/动态目录 | `plugins/custom_recipe/model/catalog.h`、`model/catalog.cpp` | 两条注入 entry、8 条静态规则、26 类动态构造与匹配。 |
-| 表注入（纯核心） | `plugins/custom_recipe/table/table.h`、`table/table.cpp` | 注入构造、组位快照/恢复、分类/注入/还原核心；不含平台或地址代码。 |
-| 表注入（运行时） | `plugins/custom_recipe/table/table_runtime.cpp` | 绑定 `QolRecipeTablePort`、装配 `TableAccess`、ensure/deactivate 入口、表日志绑定。 |
-| 配方呈现文案 | `plugins/custom_recipe/table/text_table.h` | 本地 scope 与 id 的替换映射。 |
-| 设置兼容源 | `plugins/custom_recipe/settings_contribution.cpp:3-6` | 兼容入口不注册设置项；feature metadata 唯一来自 descriptor。 |
-| Build composition | `plugins/custom_recipe/CMakeLists.txt` | `model/`、`table/`、`result/`、`ui/` 与 `plugin.cpp`、`settings_contribution.cpp`。 |
+| L0 纯模型与规则 | `model/rules.*`、`model/catalog.*`、`model/result.h` | 档位/区间、材料数量、三格匹配、静态与动态目录、typed 结果 POD。不触碰游戏内存。 |
+| L1 状态 | `result/feature.cpp` 文件级状态 | 门禁、ownership readiness、pending/token、动态目录缓存、日志预算。 |
+| L2 持久化 | 无 | 只经 `save.facts` 读取创建时间 seed，不写盘。 |
+| L3 事务 | `result/feature.cpp` 执行阶段 | place/prepare/execute 的阶段化写路径；明确不回滚扣料后失败。 |
+| L4 用例 | `result/feature.cpp` | `api_place/prepare/execute/material_needs/make_item/craft_gate` 等。 |
+| L5 核心适配 | `table/table_runtime.cpp`、`ui/runtime.cpp` | 端口→`TableAccess` 装配、表注入入口；12 条 hook wrapper 与 backups/claims。 |
+| L6 接口 | `plugin.cpp`、`table/text_table.h`、`ui/feature.*` | descriptor/生命周期、文案表、UIMix 控件与事实读写封装。 |
+
+唯一依赖规则：只允许高层 include 低层。当前 `model/` 不 include `result/`、`table/`、`ui/`；
+`result/` 不 include `ui/`，也不使用控件类型；`ui/` 与 `plugin.cpp` 向下调用 L4/L5。
+
+## 4. 能力与契约
+
+### 4.1 内部结果 API
+
+`result::CraftResultApi`（`model/result.h:92-106`）共 12 个成员，由
+`craft_result_api()`（`result/feature.cpp`）返回，只供本插件 UI 子层调用：
+
+`enabled`、`three_slot_mode_active`、`is_jewel_tier_up_recipe`、`form_ui_type_for_mix_type`、
+`craft_gate`、`is_jewel_item`、`place`、`prepare`、`execute`、`material_needs`、`make_item`、
+`desc_should_replace`。
+
+结果类型全部为 typed enum/POD，不返回 JSON 字符串。UI 状态经 `CraftPlaceInput`/
+`CraftPrepareInput`/`CraftExecuteInput`（`model/result.h:55-90`）显式入参携带，结果层不读
+UIMix 控件。
+
+### 4.2 端口
+
+| 端口 | 用途 | 来源 |
+|---|---|---|
+| `QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2 | 写 stuff 需求、槽位物品、产物创建/保存/释放、宝石字、真实闭区间随机 | `contracts/game_ports/custom_recipe_write_port.h` |
+| `QOL_PORT_CRAFT_UI_WRITE` v1.1 | UIMix 控件状态、提示/YesNo、费用归零 | `contracts/game_ports/craft_ui_write_port.h` |
+| `QOL_PORT_RECIPE_TABLE` v1.0 | RECIPEBASE/MIXTUREBASE 槽位（base + 5 个字段指针） | `contracts/game_ports/recipe_table_port.h` |
+
+表槽位契约要求全有或全无：`base == 0` 时 6 个字段全部为 0；实现位于
+`game/adapter_ports/recipe_table_port.cpp`，是这些 VMA 的唯一来源。
+
+### 4.3 与 `core.craft` 的边界
+
+`core.craft` 继续提供只读 `craft.facts` v1.0，并持有 `/api/op/craft/mix-direct` owner
+（Kotlin `OpController` 返回 501）。本插件不实现该 route、不新增 JNI、不聚合通用 craft API。
+
+## 5. 配方目录
+
+### 5.1 注入入口
+
+`model/catalog.cpp:54-65` 的 `kCatalog` 有两条，均挂在宝石强化页（group 3 = `1<<3`）：
+
+| 入口 | Kind | 形式 | 说明 |
+|---|---|---|---|
+| 「合成」（label wordId 35216，记录下标 69） | `kThreeSlotCraft` | `kMultiInputCreate`（type 1） | 三格隐式配方；材料显示镜像原版 record 12，费用由 hook 强制 0。 |
+| 「宝石强化」（label wordId 35291，记录下标 70） | `kJewelTierUp` | `kTargetAndCreate`（type 3） | 材料数量按 `ceil(1 × 档位 × (105 − 等级) / 105)`；满级 0 瓶。 |
+
+注入记录布局 12 字节（RECIPEBASE）与 3 字节（MIXTUREBASE），由 `table/table.cpp` 的纯构造器
+生成；组位只保留模块自己的位，停用时还原原版段组位。
+
+### 5.2 静态三格规则（8 条，表序即优先级）
+
+`model/catalog.cpp:86-111`；匹配键是物品类别（本项目内类别 == itemId）。
+
+| # | 规则 | 匹配语义 |
+|---|---|---|
+| 1 | 皮革 + 空槽 + 魔法衣料 | 有序；产物大背包 |
+| 2 | 小恢复药水 ×2 + 低级武器强化卷轴 | 无序；产物顶级宝石 |
+| 3 | 低级宝石 ×3 | 无序；产物中级宝石 |
+| 4 | 中级宝石 ×3 | 无序；产物高级宝石 |
+| 5 | 高级宝石 ×3 | 无序；产物顶级宝石 |
+| 6 | 顶级宝石 ×3 | 无序；产物混沌宝石 |
+| 7 | 任意宝石 + 混沌武器卷轴 + 混沌防具卷轴 | 有序；产物为第 1 格宝石本身，数值 ×1200/1000（向上取整），保留随机等级与属性类型 |
+| 8 | 两件同类特殊装备 + 元气恢复药水 | 有序且槽 0/2 同类；产物同类别新建，孔总数与剩余强化次数拉满 |
+
+通配符：`kAnyJewelSlot`（任意宝石 28–32）、`kAnySpecialEquipSlot`（26 类特殊装备，谓词由
+调用方注入；谓词为空时该通配不命中）。
+
+### 5.3 动态特殊装备配方
+
+- 26 个特殊装备类别（`model/catalog.h:165-168`）各生成一条三格有序配方；材料从 14 条材料池
+  （`catalog.h:157-160`，含一个空槽候选）抽取且三者互不相同。
+- 每次 `kEventSaveEnter`：经 `save.facts` v1.1 读取当前槽 `slot_times` 的**角色创建时间**作
+  seed（`result/feature.cpp:455-502`）；自包含 SplitMix64 PRNG 按类别派生独立流，不使用共享
+  游戏 RNG。同 seed + 同类别 + 同代码版本生成完全相同目录。
+- 候选若命中静态配方或已接受的动态配方，只重抽当前类别，不改变其它类别结果。
+- 进程内按 `std::map<creation_time, std::vector<ThreeSlotRecipe>>` 缓存成功目录直到进程结束：
+  无淘汰、不写磁盘；cache hit 不调用生成器，但仍发布完整动态表、推进 generation 并使 pending
+  失效（`model/catalog.cpp:342-396`、`399-413`）。
+- 创建时间为 0、槽位无效、能力读取失败或生成失败 → 清空动态表并记 WARN，不发布旧表。
+- 匹配顺序：**静态表优先，其后动态表**；容量上限 64（`catalog.h:139`）。
+
+## 6. 三格合成流程
+
+`place`（`result/feature.cpp:653`）→ `prepare`（`:691`）→ UI 确认弹窗 → `execute`（`:750`）。
+
+### 6.1 放料
+
+| 结果 | 触发 |
+|---|---|
+| `kNotMine` | 输入为空或插件未启用（三格模式判定在 UI 子层） |
+| `kPlaced` | 有效写入；**无效槽/无效物品也返回 `kPlaced`（无事发生）** |
+| `kAlreadyPlaced` | 重复不可堆叠对象 |
+| `kNotEnoughHeld` | 可堆叠类别持有数不足 |
+| `kWriteFailed` | 槽位写入失败 |
+
+`ui/feature.h` 的 `craft_place_disposition` 把结果映射为推进选格/提示，不自行改状态。
+
+### 6.2 prepare
+
+1. 先作废旧 pending；
+2. 按静态→动态表匹配；真正未命中 → `kNoMatch`；
+3. 命中后复核每格 live identity 与类别，通过才写 pending（recipe、items、categories、
+   generation、token）→ `kConfirmPending`；
+4. 已匹配但读取槽位身份/类别失败（`stuff_item` 错误、类别错误、传入类别与槽内不符、声称空槽
+   却有对象）→ `kUnavailable`，与 `kNoMatch` 区分。
+
+槽位读取返回的 handle 仅当 `slot == 0 && generation == 0` 才算合法空槽；半无效 handle 视为
+畸形身份，返回 `kQolErrInvalidArgument` 且不进入配方判定。
+
+### 6.3 execute 阶段
+
+| 阶段 | 失败结果 | 是否已扣料 |
+|---|---|---|
+| 1 precheck：pending/token/generation、live handle/类别/可堆叠/持有数、扣料入口就绪 | `kStaleSlots` / `kPrecheckFailed` / `kNotEnoughHeld` | 否 |
+| 2 产物准备（未入包）：`create_perfect_item` 或 `create_item` 并改写 | `kProductPrepareFailed` | 否 |
+| 3 扣料：原版 inventory entry（可堆叠 `remove_item_data`、不可堆叠 `remove_item`）+ 数量前后差观察 | `kMaterialRemoveFailed` / `kMaterialObservationFailed` | **是，可能** |
+| 4 保存：`save_item` 且 `out_saved & 0xff != 0` | `kProductSaveFailed` | 是 |
+
+前置校验全部在任何扣料之前；产物在扣料前准备、失败即丢弃。扣料后的失败**不回滚**，提示
+「合成失败，材料可能已扣，请检查背包。」；`save_item` 之后 handle 所有权可能转移，代码不再
+free 或回读该 handle，因此不承诺 save 失败后可清理。
+
+### 6.4 确认与取消
+
+- `kConfirmPending` 时 `craft_show_yesno` 必须提供非空 `ok` 与 `cancel`（任一为空即拒绝创建）。
+- 取消只调用 `cancel_pending_confirmation()`：作废 pending/token，不写物品、不随机、不扣料、
+  不保存、不清空已填格（`result/feature.cpp:1216`）。
+- 弹窗创建失败不静默：作废 pending，提示「合成暂不可用，材料未扣。」并保留已填格。
+- 提示按错误分类各走独立 scope（见 §10）：未命中 8、上下文不可用/弹窗失败 9、格子或代际变化
+  10、放料写入失败 11；真正库存不足仍走原版材料不足提示（94 原文）。
+
+## 7. 宝石升阶
+
+- gate（`api_craft_gate`，`result/feature.cpp:616`）返回 `CraftGate`：
+  - 物品事实或 quality 查询失败、item word 与 facts 不一致 → `kUnavailable`；
+  - 真正非宝石 → `kNotJewel`；已金档 → `kAlreadyGold`；其余 `kPass`。
+  - UI 把 `kUnavailable` 显示为「功能不可用」，只阻断升阶路径，不停用三格配方。
+- 候选值：以 `AttributeRange` 调 `evaluate` 搜索当前档之上首个有代表值的区间，再在闭区间内用
+  调用方 `rand_inclusive` 取样；已是 Gold → `kAlreadyGold`，区间退化 → `kDegenerate`。
+- `api_make_item`（`:1082`）顺序：quality 查询 → 与 item word 交叉核对 → 材料需求前置校验 →
+  计算候选（随机）→ **先提交 need 写入** → **最后写 jewel word**。need 失败直接返回且不写
+  jewel；失败时已写入的展示值允许残留，不等价于强原子。
+- 随机源必须是真实游戏闭区间随机：UI 侧直接调用 write port ABI 1.2 的 `random_inclusive`，
+  不恒返回下界、不静默 clamp。
+
+## 8. 状态与线程
+
+### 8.1 状态清单
+
+| 状态 | 位置 | 类别 |
+|---|---|---|
+| `g_custom_recipe_enabled`（atomic） | `result/feature.cpp:121` | 业务门禁 |
+| `g_ownership_ready` | `:122` | 生命周期/资源 |
+| `g_dynamic_recipe_cache` | `:123` | 进程级缓存 |
+| pending recipe/items/categories/generation/token/valid | `:364-371` | 待确认业务状态 |
+| 动态目录表 + generation | `model/catalog.cpp:138-145` | 业务目录 |
+| `g_state` / `g_dedupe` | `table/table_runtime.cpp` | 表注入状态机与日志去重 |
+| TLS 文本 scope | `ui/feature.cpp` | UI 渲染控制状态 |
+| hook backups、绘制槽位（atomic） | `ui/runtime.cpp:53-68` | UI/hook 控制状态 |
+
+### 8.2 线程与重入
+
+- 全部业务状态只在游戏主线程读写；注释显式声明（`model/catalog.cpp:138-141`、
+  `result/feature.cpp:363`）。
+- 无业务互斥量、无 `try_lock`；仅有 6 个 `std::atomic`：门禁、两处日志预算、绘制标志各 1，另有 2 个“线程告警只报一次”去重标志。
+- 业务写跨线程入口只有两个 typed command：`write_stuff_need` 与 `set_stuff_item` 经
+  `commands.post_typed` 入队（`ui/feature.cpp:205-219`），主线程 handler 校验 `enabled()`
+  后执行。其余同步写端口调用只做 UI 表现（`set_ui_type`、`show_text`、`show_yesno` 等）。
+- pending 在 `api_execute` 入口即被复制并清除 valid/token，后续阶段调用写端口时不再持有
+  pending；动态 generation 与 token 共同防止确认期间目录或槽位变化。
+- 主线程契约观测：`place`/`prepare`/`execute`/`make_item` 与表 `acquire`/`deactivate` 在
+  `g_game->thread.is_main_thread()` 返回 0 时写一次 WARN `wrong thread entry=...`；只记录、
+  不改返回值（`table/table_runtime.cpp:63`、`result/feature.cpp:645`）。
+
+## 9. 表注入与 ownership
+
+- 端口解析（`table/table_runtime.cpp:72`）：端口未绑定或 `base == 0` → `NotReady`；否则把 6 个
+  字段映射为 `TableAccess` 交给便携核心。
+- `TableAcquireStatus`（`table/table.h:114`）：`Ok / NotReady / Unsupported / Internal / Busy`。
+  **只有 `NotReady` 是可自动恢复信号**；`Unsupported`/`Internal` 为固定错误；`Busy` 只表示本次
+  调用未开始。
+- 分类在任何模块状态改动之前完成：非法布局不得借「已有 buffer」判 OK，也不得在拒绝路径改写
+  状态。书名册字节不变式在抓取组位快照之后、实际新注入之前校验。
+- `ensure` 注入模块缓冲、清除模块占用组位并追加记录（`table/table.h`、`table/table.cpp`）。
+- `deactivate` 还原原版段组位并把 RECIPEBASE 记录数还原为 base，但**保持游戏指针指向模块缓冲
+  且不 free**，使残留面板持有的注入下标仍在缓冲界内；指针已被游戏改写时只清模块状态，绝不
+  写回陈旧原表指针。
+- ownership 资源 `own:RECIPEBASE_MIXTUREBASE` 为 required + fail-soft：`own_acquire` 调
+  `custom_recipe_table_ensure` 并据结果置 `g_ownership_ready`，失败回滚表状态并返回原错误码
+  （`result/feature.cpp:1188-1212`）；`own_release` 为 total。
+- 启动期定向恢复：Host 仅在单 claim 恢复成功时以 `backup=nullptr` 回调
+  `on_resource_ready(ctx, "own:RECIPEBASE_MIXTUREBASE", nullptr)`；插件只据此与 UI 核心 hook
+  备份就绪重算业务门禁，不重装 hook、不改 desired/Store（`plugin.cpp:287-300`）。
+
+## 10. 文本与作用域
+
+- 消费者匹配键是 **MEMORYTEXT id**，不是弹窗索引：`craft_show_popup(popup_index, scope)` 仍以
+  原版索引（94/97/99）调用 `show_text`，另记一条 debug 事实日志。
+- 两个域在 `table/text_table.h:30-45` 显式分列：`kPopupIndex*`（94/97/99）与 `kMemoryText*`
+  （35410/35413/35415）；未知索引返回 0，不猜测。
+- scope 由 UI 子层本地 TLS 持有（`TextScopeGuard`），并在绘制回调内保存/恢复；仅 2/3/4 推入
+  Host text scope，私有 scope 不推入。
+- 映射表（`table/text_table.h:71-90`）：
+
+| scope | 用途 |
+|---|---|
+| 2 | 配方按钮「宝石升阶」（35291） |
+| 3 | 面板标题「宝石升阶」 |
+| 4 | 页签：**不登记**，保持原版「宝石强化」 |
+| 5 | 功能不可用（97） |
+| 6 | 合成失败，材料可能已扣（94） |
+| 7 | 产物准备失败，材料未扣（94） |
+| 8 | 配方不匹配（94） |
+| 9 | 合成暂不可用，材料未扣（94） |
+| 10 | 合成状态已变化（94） |
+| 11 | 放入失败，请重试（99） |
+
+真正的库存不足不覆盖 scope，落到原版 94 原文。
+
+## 11. 生命周期与资源
+
+**install**（`plugin.cpp:138-241`）
+
+1. 校验 `sdk`/`game`/`capabilities.require`、`port_count == 3` 且三条端口的 ABI 与函数指针齐备；
+2. require `text_layer`、`item.facts`（含 size 校验）、`craft.facts`、`save.facts`（含
+   `current_slot` 与 v1.1 `slot_times`）；
+3. 按序订阅文本消费者、注册两个 typed handler、`ui::bind`、注入 facts/write port、绑定表端口、
+   注册动态配方回调；
+4. 任一步失败立即幂等清理本次注册（退订、注销 handler、`ui::clear()`、解绑端口），不依赖 Host
+   后帧清理；
+5. install 完成时**不**打开业务门禁。
+
+**门禁**：`plugin_on_enabled` 仅在 `ownership_ready()` 且 `ui::core_backups_ready()` 时
+`set_enabled(true)`（`plugin.cpp:266-273`）；feature toggle 关闭时立即 `set_enabled(false)` 并
+作废在途 token，打开时不提前开门禁。资源声明带 `gate=nullptr`，跟随插件生命周期而非 feature。
+
+**停用顺序**：`plugin_on_disabled` 先 `set_enabled(false)`（阻止新副作用、作废 pending），
+随后 Host 按资源逆序释放——ownership 先 release（`own_release` → `table_deactivate`），再释放
+UI hooks。`plugin_deactivate` 再清理订阅、typed handlers、事件订阅、UI context/backups 与
+facts/ports（含 `save.facts`），最后解绑表端口（`plugin.cpp:243-264`）。
+
+**资源等级**：5 条核心 hook = required/fail-closed（任一失败整体回滚）；7 条装饰 hook =
+optional/fail-soft（失败只 degraded）。`UIMix_ResetStuffItemControl` 保持 optional，且 wrapper
+不受 feature 门控，因为它同时服务原版成功链（`ui/runtime.cpp:512-518`）。
+
+## 12. 文件地图
+
+| 子职责 | 文件 | 职责 |
+|---|---|---|
+| Descriptor/生命周期/接线 | `plugins/custom_recipe/plugin.cpp`、`plugin.h` | 依赖与端口校验、资源声明组装、安装事务与清理、门禁、text 消费者、typed handler。 |
+| 纯规则 | `model/rules.h`、`model/rules.cpp` | 档位序数与区间搜索、材料数量、三格库存/token 判定、宝石数值缩放。 |
+| 目录 | `model/catalog.h`、`model/catalog.cpp` | 两条注入 entry、8 条静态规则、26 类动态构造、匹配与进程缓存。 |
+| 结果契约 | `model/result.h` | 结果枚举、Input/Output POD、`CraftResultApi`。 |
+| 结果层 | `result/feature.h`、`result/feature.cpp` | place/prepare/execute/make-item、quality 消费、动态配方事件、材料需求、ownership ops、门禁与端口状态。 |
+| 表纯核心 | `table/table.h`、`table/table.cpp` | 记录构造、组位快照/恢复、分类/注入/还原核心；不含平台或地址代码。 |
+| 表运行时 | `table/table_runtime.cpp` | 绑定 `QolRecipeTablePort`、装配 `TableAccess`、ensure/deactivate、表日志与线程观测。 |
+| 呈现文案 | `table/text_table.h` | scope 与 MEMORYTEXT id 的替换映射。 |
+| UI 子层 | `ui/feature.h`、`ui/feature.cpp` | UIMix 控件/事实读写封装、放料处置映射、提示与成功收尾。 |
+| UI runtime | `ui/runtime.h`、`ui/runtime.cpp` | 12 条 hook wrapper、claims/backups、bind/clear、确认/取消与错误提示、真实随机适配。 |
+| 设置兼容源 | `settings_contribution.cpp` | 兼容入口不注册设置项；feature metadata 唯一来自 descriptor。 |
+| 构建 | `CMakeLists.txt` | `model/`、`table/`、`result/`、`ui/` 与 `plugin.cpp`、`settings_contribution.cpp`。 |
+
+## 13. 已知限制
+
+- 三格流程继续调用受 inventory hooks 管理的原版入口，因此保留 H-03（物理+扩展类别总数）、
+  H-05（对象删除）、H-13（保存）、H-21（类别补扣）的扩展背包支持；条件是对应 hook `live`、
+  EB capability 可用且 enabled，不限制为物理袋。
+- 宝石升阶的 Game-owner 写入限制与三格流程分开核验，仍为待核项，不作为三格拒绝 EB 的理由。
+- 放料对空/无效输入返回 `kPlaced` 并推进选格（历史行为，未裁决）。
+- 扣料后阶段失败允许不回退（CR01 口径）；`save_item` 之后不承诺清理 handle。
+- 动态配方缓存按创建时间永久保留到进程结束，不设淘汰；这是「重复进档配方不变」的设计代价。
+- 无跨线程查询快照：本插件没有 HTTP/JNI 只读面，主线程契约由约定与日志观测保证，尚未做
+  fail-closed 线程拒绝。
+- 启动期表注入依赖原表 ready；26 条动态组合只存在于模块内部匹配表，不逐条注册进原版
+  RECIPEBASE。
+
+## 14. 相关文档
+
+- 构建、打包与设备验收：`docs/guides/build-and-deploy.md`。
+- 验收卡与当前欠账：`docs/refactor/verification.md`（本插件相关条目）。
+- 历史静态审计与合并设计：`docs/refactor/audits/plugin-audit/custom-recipe-20261014/`。
+- 架构整改方案与实施记录：`docs/refactor/custom-recipe/refactor-plan.md`。
+- 插件分层通用准则：`docs/refactor/plugin-architecture-guide.md`。
