@@ -66,6 +66,7 @@
 - `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
 - `core-item/architecture.md`：`core.item` 目标架构（三空间袋编号、注册式袋源、快照与分页、分层与分阶段迁移）。
 - `custom-ui/refactor-plan.md`：`core.custom_ui` 局部拆分方案（Debug 编译门、形状绘制抽离、确认框 overlay 可选拆分；不做 L0–L6 全量重构）。
+- `core-character/architecture.md`：`core.character` 收敛方案（写面判定单点化、路由表 drift 防护、解析器合并、快照只读视图；不做 L0–L6 全量重构）。
 - `adr/`：架构决策记录。
 
 ### `archive/`：只读历史归档

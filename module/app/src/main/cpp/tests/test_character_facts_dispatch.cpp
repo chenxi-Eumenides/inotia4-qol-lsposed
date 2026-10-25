@@ -581,12 +581,6 @@ void test_add_stat_result_semantics() {
     CharWritePayloadMirror payload{};
     std::memcpy(&payload, g_post_payload, sizeof(payload));
     CHECK(payload.point_count == 1 && payload.point_idx[0] == 0 && payload.point_amt[0] == 3);
-    const uint32_t accepted_payload_size = g_post_payload_size;
-    const uint32_t accepted_handler = g_post_handler_id;
-    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":4}}",
-                        &role, 1, &status) == "{\"ok\":false,\"error\":\"no status point\"}");
-    CHECK(status == 400 && g_post_payload_size == accepted_payload_size &&
-          g_post_handler_id == accepted_handler);
     g_op_calls = 0;
     g_op_fail_at = 0;
     g_last_op = FakeOp::kNone;
@@ -598,6 +592,20 @@ void test_add_stat_result_semantics() {
           success);
     CHECK(g_op_calls == 3);
     CHECK(g_last_op == FakeOp::kAddStat && g_op_a == 0 && g_op_b == 0);
+
+    g_status_points[0] = 2;
+    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":4}}",
+                        &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
+    CHECK(status == 200);
+    CharWritePayloadMirror over_budget_payload{};
+    std::memcpy(&over_budget_payload, g_post_payload, sizeof(over_budget_payload));
+    CHECK(over_budget_payload.point_count == 1 && over_budget_payload.point_idx[0] == 0 &&
+          over_budget_payload.point_amt[0] == 4);
+    g_op_calls = 0;
+    CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"no status point\"}" &&
+          !success);
+    CHECK(g_op_calls == 0);
+    g_status_points[0] = 12;
 
     const qol::contracts::HttpPathParam overflow_role{"role", 4, "99999999999999999999", 20};
     const qol::contracts::HttpPathParam negative_role{"role", 4, "-1", 2};
@@ -631,15 +639,6 @@ void test_add_stat_result_semantics() {
     CHECK(g_op_calls == 1);
     g_op_fail_at = 0;
 
-    g_status_points[0] = 12;
-    CHECK(dispatch_post("/api/character/grow/0/add_stat", "{\"attrs\":{\"strength\":3}}",
-                        &role, 1, &status) == "{\"ok\":true,\"ticket\":11}");
-    g_status_points[0] = 2;
-    g_op_calls = 0;
-    CHECK(run_post_result(&success) == "{\"ok\":false,\"error\":\"no status point\"}" &&
-          !success);
-    CHECK(g_op_calls == 0);
-    g_status_points[0] = 12;
 }
 
 void test_operation_specific_result_goldens() {

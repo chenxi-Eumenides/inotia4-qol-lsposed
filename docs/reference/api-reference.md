@@ -693,7 +693,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **返回格式**（票据契约，§7.10）：`{"ok":true,"ticket":N}`；终态 result 保留 `applied` 数组，并在角色状态读写前后均可读时追加本次变化的 `role.main_stats` 与 `role.status_point`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
 
-**注意**：⚠️ 分配数量只能为正整数；各属性分配数量**总和不能超过剩余能力点**，否则报错（`no status point`）；属性名非法→`bad attr`。
+**注意**：⚠️ 分配数量只能为正整数；属性名非法→HTTP 400 `bad attr`。各属性分配数量**总和不能超过剩余能力点**：HTTP 层只校验请求格式并照常返回 `ticket`，点数判定在主线程执行，票据终态 `failed`，result 为 `{"ok":false,"error":"no status point"}`，不产生任何属性变更。
 
 #### 属性重置
 
@@ -1916,7 +1916,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 - `POST /api/op/inventory/add`（`core.item`，`kAddItem`）：`category` 必须非负，否则 400 `category required`；非法 JSON → 400 `bad request`。请求字段为 `category`、`count`（默认 1）、`socket`（默认 0）、`enhanceRemaining`（默认 0）、`rarity`（默认 -1）；其余可选值由 native 钳制。result 保持 `{"ok":true}`。
 - `POST /api/op/inventory/money`（`core.item`，`kSetMoney`）：负/缺失 `money` → 400 `money required`；非法 JSON → 400 `bad request`。result 保持 `{"ok":true}`。
 - `POST /api/character/grow/add_skill`（`core.character`，`kLearnAction`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"skills":[{"action_id":A,"level":N}],"skill_points":N}`；未能读回时退化为 `{"ok":true}`。
-- `POST /api/character/grow/{role}/add_stat`（`core.character`，`kAddStat`）：`attrs` 非 object/缺失 → 400 `attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；非正 value → 400 `bad value for $k (must be positive)`；非整数 value（含小数部分，如 `1.5`）→ 400 `bad value for $k (must be integer)`；空对象 → 400 `attrs empty`；非法 JSON → 400 `bad request`。成功 result 保留 `applied:[{"attr":idx},…]`，且角色状态前后快照可读时附 `role:{role,main_stats:[{"attr":idx,"value":N},…],status_point:N}`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
+- `POST /api/character/grow/{role}/add_stat`（`core.character`，`kAddStat`）：`attrs` 非 object/缺失 → 400 `attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；非正 value → 400 `bad value for $k (must be positive)`；非整数 value（含小数部分，如 `1.5`）→ 400 `bad value for $k (must be integer)`；空对象 → 400 `attrs empty`；非法 JSON → 400 `bad request`。剩余能力点不足**不属 HTTP 层校验**：请求照常受理为 `{"ok":true,"ticket":N}`，终态 `failed` 且 result 为 `{"ok":false,"error":"no status point"}`，不产生属性变更。成功 result 保留 `applied:[{"attr":idx},…]`，且角色状态前后快照可读时附 `role:{role,main_stats:[{"attr":idx,"value":N},…],status_point:N}`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
 - `POST /api/character/grow/reset_stat`（`core.character`，`kStatReset`）：无 body 字段校验；成功且状态可读时 result 为 `{"ok":true,"role":{"role":0,"main_stats":[N,N,N,N,N],"status_point":N}}`；读面不可用时为 `{"ok":true}`。
 - `POST /api/character/grow/reset_skill`（`core.character`，`kSkillReset`）：无 body 字段校验；成功且技能读面可用时 result 为 `{"ok":true,"skill_points":N}`（仅剩余技能点，重置后其余字段为默认不回传）；读面不可用时为 `{"ok":true}`。
 - `POST /api/character/combat/{role}/set_auto_attack`（`core.character`，`kSetAutoAttack`）：缺少 `on` → 400 `on required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"role":{"role":R,"auto_attack":B}}`，`B` 是请求值，不是读回状态。

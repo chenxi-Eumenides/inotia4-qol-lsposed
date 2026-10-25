@@ -1,7 +1,7 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <type_traits>
 
 #include "contracts/host_sdk.h"
@@ -12,8 +12,40 @@ template <typename T>
 class Snapshot {
     static_assert(std::is_trivially_copyable<T>::value,
                   "snapshot payload must be trivially copyable");
+    // 宿主快照存储是 std::vector<uint8_t> 持有的字节副本（默认 new 对齐 ≥ alignof(max_align_t)），
+    // ReadView 直接把该缓冲当 T 读取，不做整块拷贝；超出该对齐的 T 不能这样读。
+    static_assert(alignof(T) <= alignof(std::max_align_t),
+                  "snapshot payload alignment must not exceed default new alignment");
 
 public:
+    class ReadView {
+    public:
+        ReadView() = default;
+        ~ReadView() { release(); }
+
+        ReadView(const ReadView&) = delete;
+        ReadView& operator=(const ReadView&) = delete;
+
+        // 无锁视图：返回宿主快照缓冲的首地址，生命周期由本守卫持有到析构。
+        const T* get() const { return data_; }
+
+    private:
+        friend class Snapshot<T>;
+
+        void release() {
+            if (active_ && sdk_ != nullptr) sdk_->snapshot_release(token_);
+            sdk_ = nullptr;
+            data_ = nullptr;
+            token_ = nullptr;
+            active_ = false;
+        }
+
+        const contracts::QolHostSdk* sdk_ = nullptr;
+        const T* data_ = nullptr;
+        contracts::QolSnapshotToken token_ = nullptr;
+        bool active_ = false;
+    };
+
     bool initialize(const contracts::QolHostSdk* sdk) {
         if (handle_ != nullptr) return sdk_ == sdk;
         constexpr uint32_t kApiEnd =
@@ -42,16 +74,21 @@ public:
                sdk_->snapshot_publish(handle_, &value, sizeof(T));
     }
 
-    bool read(T& out) const {
-        if (handle_ == nullptr || sdk_ == nullptr) return false;
+    bool acquire(ReadView& out) const {
+        if (handle_ == nullptr || sdk_ == nullptr || out.active_) return false;
         const void* data = nullptr;
         uint32_t size = 0;
         contracts::QolSnapshotToken token = nullptr;
         if (!sdk_->snapshot_acquire(handle_, &data, &size, &token)) return false;
-        const bool valid = data != nullptr && size == sizeof(T);
-        if (valid) std::memcpy(&out, data, sizeof(T));
-        sdk_->snapshot_release(token);
-        return valid;
+        if (data == nullptr || size != sizeof(T)) {
+            sdk_->snapshot_release(token);
+            return false;
+        }
+        out.sdk_ = sdk_;
+        out.data_ = static_cast<const T*>(data);
+        out.token_ = token;
+        out.active_ = true;
+        return true;
     }
 
 private:

@@ -171,6 +171,11 @@ constexpr contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
     {contracts::HttpMethod::kPost, "/api/op/combat/{role}/hate", kPluginId, 1, 1},
 };
 
+static_assert(sizeof(kRoutes) / sizeof(kRoutes[0]) +
+                      sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0]) ==
+                  sizeof(kRouteFacts) / sizeof(kRouteFacts[0]),
+              "native 绑定表 + metadata 必须覆盖 routes.inc 全部声明，防止漏配");
+
 QolResult not_ready() {
     return contracts::error(kQolErrNotReady, "character facts not ready", 25);
 }
@@ -519,29 +524,7 @@ QolResult not_found(contracts::HttpRes* response) {
     return response_error(response, 404, "not found");
 }
 
-bool parse_path_int(const contracts::HttpReq& request, const char* name, int32_t* out) {
-    if (request.path_params == nullptr || name == nullptr || out == nullptr) return false;
-    for (uint32_t i = 0; i < request.path_param_count; ++i) {
-        const contracts::HttpPathParam& param = request.path_params[i];
-        if (param.name == nullptr || param.name_len != std::strlen(name) ||
-            std::strncmp(param.name, name, param.name_len) != 0) {
-            continue;
-        }
-        if (param.value == nullptr || param.value_len == 0) return false;
-        if (param.value_len > 10) return false;
-        int32_t parsed = 0;
-        for (uint32_t k = 0; k < param.value_len; ++k) {
-            const char c = param.value[k];
-            if (c < '0' || c > '9') return false;
-            const int32_t digit = c - '0';
-            if (parsed > (std::numeric_limits<int32_t>::max() - digit) / 10) return false;
-            parsed = parsed * 10 + digit;
-        }
-        *out = parsed;
-        return true;
-    }
-    return false;
-}
+bool char_path_int(const contracts::HttpReq* request, const char* name, int32_t* out);
 
 // 追加成员整数字段：缺失或负值跳过（迁移前 `optInt(key,-1).takeIf{it>=0}`）。
 void append_int_field(std::string& out, bool* first, const char* key, const char* json,
@@ -559,23 +542,27 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
     if (request == nullptr || response == nullptr || ctx == nullptr) {
         return response_error(response, 400, "bad request");
     }
-    CharacterSnapshot snapshot{};
-    if (!g_snapshot.read(snapshot) || snapshot.state == SnapshotState::kUnavailable) {
+    Snapshot<CharacterSnapshot>::ReadView snapshot_view;
+    if (!g_snapshot.acquire(snapshot_view)) {
         return response_error(response, 503, "snapshot not ready");
     }
-    if (snapshot.state == SnapshotState::kNotInGame) {
+    const CharacterSnapshot* snapshot = snapshot_view.get();
+    if (snapshot == nullptr || snapshot->state == SnapshotState::kUnavailable) {
+        return response_error(response, 503, "snapshot not ready");
+    }
+    if (snapshot->state == SnapshotState::kNotInGame) {
         return response_body(response, kNotInGameBody,
                              static_cast<uint32_t>(sizeof(kNotInGameBody) - 1));
     }
 
-    const char* party = snapshot.party;
-    const uint32_t party_size = snapshot.party_size;
-    const char* skills = snapshot.skills;
-    const uint32_t skills_size = snapshot.skills_size;
-    const char* mercenaries = snapshot.mercenaries;
-    const uint32_t mercenaries_size = snapshot.mercenaries_size;
-    const char* player = snapshot.player;
-    const uint32_t player_size = snapshot.player_size;
+    const char* party = snapshot->party;
+    const uint32_t party_size = snapshot->party_size;
+    const char* skills = snapshot->skills;
+    const uint32_t skills_size = snapshot->skills_size;
+    const char* mercenaries = snapshot->mercenaries;
+    const uint32_t mercenaries_size = snapshot->mercenaries_size;
+    const char* player = snapshot->player;
+    const uint32_t player_size = snapshot->player_size;
 
     const Query query = *static_cast<const Query*>(ctx);
     switch (query) {
@@ -604,7 +591,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kMercenarySlot: {
             int32_t requested = 0;
-            if (!parse_path_int(*request, "slot", &requested)) {
+            if (!char_path_int(request, "slot", &requested)) {
                 return response_error(response, 400, "bad request");
             }
             int32_t count = 0;
@@ -643,7 +630,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMember: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -654,7 +641,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMemberId: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -677,7 +664,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMemberName: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -691,7 +678,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMemberLevel: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -707,7 +694,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMemberStatus: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -736,7 +723,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMemberStats: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -755,7 +742,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMemberEquipment: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -774,8 +761,8 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         case Query::kPartyMemberEquip: {
             int32_t slot = 0;
             int32_t equip_slot = 0;
-            if (!parse_path_int(*request, "slot", &slot) ||
-                !parse_path_int(*request, "equip_slot", &equip_slot)) {
+            if (!char_path_int(request, "slot", &slot) ||
+                !char_path_int(request, "equip_slot", &equip_slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice member{};
@@ -796,7 +783,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         }
         case Query::kPartyMemberSkills: {
             int32_t slot = 0;
-            if (!parse_path_int(*request, "slot", &slot)) {
+            if (!char_path_int(request, "slot", &slot)) {
                 return response_error(response, 400, "bad request");
             }
             JsonSlice element{};
@@ -1326,19 +1313,6 @@ QolResult char_write_command(const contracts::HttpReq* request, contracts::HttpR
             std::string error;
             if (!char_parse_points(body, "attrs", &payload, &error)) {
                 return response_error(response, 400, error.c_str());
-            }
-            CharacterSnapshot snapshot{};
-            JsonSlice member{};
-            long long remaining = 0;
-            int64_t requested = 0;
-            for (int32_t i = 0; i < payload.point_count; ++i) {
-                requested += payload.point_amt[i];
-            }
-            if (g_snapshot.read(snapshot) && snapshot.state == SnapshotState::kReady &&
-                json_element(snapshot.party, snapshot.party_size, payload.i0, &member) &&
-                json_int_member(member.data, member.size, "status_point", &remaining) &&
-                requested > remaining) {
-                return response_error(response, 400, "no status point");
             }
             break;
         }
@@ -2002,19 +1976,56 @@ bool char_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     return write_truncated_result(out, capacity, out_size, body);
 }
 
-void initialize_http_routes() {
-    if (g_http_routes_initialized) return;
+bool initialize_http_routes() {
+    if (g_http_routes_initialized) return true;
+    constexpr size_t kRouteCount = sizeof(kRoutes) / sizeof(kRoutes[0]);
+    constexpr size_t kRouteFactCount = sizeof(kRouteFacts) / sizeof(kRouteFacts[0]);
+    constexpr size_t kMetadataCount =
+        sizeof(kHttpRouteMetadata) / sizeof(kHttpRouteMetadata[0]);
+    if (kRouteFactCount != kRouteCount + kMetadataCount) return false;
+
+    bool matched_facts[kRouteFactCount]{};
+    const contracts::HttpRoute* route_facts[kRouteCount]{};
     for (size_t i = 0; i < sizeof(kRoutes) / sizeof(kRoutes[0]); ++i) {
-        CharacterRoute& route = kRoutes[i];
-        const contracts::HttpRoute* facts = nullptr;
-        for (const contracts::HttpRoute& candidate : kRouteFacts) {
-            if (candidate.method == route.method &&
+        const CharacterRoute& route = kRoutes[i];
+        size_t match_index = 0;
+        size_t match_count = 0;
+        for (size_t j = 0; j < kRouteFactCount; ++j) {
+            const contracts::HttpRoute& candidate = kRouteFacts[j];
+            if (route.path != nullptr && candidate.path != nullptr &&
+                candidate.method == route.method &&
                 std::strcmp(candidate.path, route.path) == 0) {
-                facts = &candidate;
-                break;
+                match_index = j;
+                ++match_count;
             }
         }
-        if (facts == nullptr) continue;
+        if (match_count != 1 || matched_facts[match_index]) return false;
+        matched_facts[match_index] = true;
+        route_facts[i] = &kRouteFacts[match_index];
+    }
+    for (size_t i = 0; i < kMetadataCount; ++i) {
+        const contracts::HttpRouteMetadataDescriptor& metadata = kHttpRouteMetadata[i];
+        size_t match_index = 0;
+        size_t match_count = 0;
+        for (size_t j = 0; j < kRouteFactCount; ++j) {
+            const contracts::HttpRoute& candidate = kRouteFacts[j];
+            if (metadata.path != nullptr && candidate.path != nullptr &&
+                candidate.method == metadata.method &&
+                std::strcmp(candidate.path, metadata.path) == 0) {
+                match_index = j;
+                ++match_count;
+            }
+        }
+        if (match_count != 1 || matched_facts[match_index]) return false;
+        matched_facts[match_index] = true;
+    }
+    for (bool matched : matched_facts) {
+        if (!matched) return false;
+    }
+
+    for (size_t i = 0; i < kRouteCount; ++i) {
+        CharacterRoute& route = kRoutes[i];
+        const contracts::HttpRoute* facts = route_facts[i];
         if (route.query) {
             kHttpEndpoints[i] = contracts::HttpEndpointDescriptor{
                 route.method, route.path, kPluginId, contracts::HttpHandlerKind::kQuery,
@@ -2028,6 +2039,7 @@ void initialize_http_routes() {
         }
     }
     g_http_routes_initialized = true;
+    return true;
 }
 
 void stop_frame_task(const contracts::QolHostSdk* sdk) {
@@ -2039,6 +2051,11 @@ void stop_frame_task(const contracts::QolHostSdk* sdk) {
 
 int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
+    if (!initialize_http_routes()) {
+        log_message(g_sdk, "[core.character] http route table mismatch");
+        g_sdk = nullptr;
+        return 1;
+    }
     g_port = nullptr;
     g_http_port = nullptr;
     g_character_write_ops = nullptr;
@@ -2206,7 +2223,7 @@ const contracts::PluginDescriptor kDescriptor = {
 }  // namespace
 
 const contracts::PluginDescriptor& plugin_descriptor() {
-    initialize_http_routes();
+    (void)initialize_http_routes();
     return kDescriptor;
 }
 

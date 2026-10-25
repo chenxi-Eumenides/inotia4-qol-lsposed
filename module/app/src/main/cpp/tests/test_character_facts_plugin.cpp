@@ -18,10 +18,12 @@
 #include "plugins/core.character/plugin.h"
 #include "test_snapshot_sdk.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <thread>
+#include <vector>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -1959,19 +1961,32 @@ int main() {
     CHECK(descriptor.http_endpoint_count == 35 && descriptor.http_endpoints != nullptr);
     CHECK(descriptor.http_route_metadata_count == 6 &&
           descriptor.http_route_metadata != nullptr);
+    CHECK(descriptor.http_endpoint_count + descriptor.http_route_metadata_count == 41);
+    std::vector<std::string> route_keys;
     uint32_t op_endpoint_count = 0;
     for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
         const auto& endpoint = descriptor.http_endpoints[i];
+        CHECK(endpoint.path != nullptr);
+        if (endpoint.path != nullptr) {
+            route_keys.push_back(std::to_string(static_cast<int>(endpoint.method)) + ":" +
+                                 endpoint.path);
+        }
         CHECK(endpoint.route_owner != nullptr &&
               std::strcmp(endpoint.route_owner, "core.character") == 0);
         CHECK(endpoint.lease_required == 1);
         if (endpoint.op_required != 0) ++op_endpoint_count;
+        CHECK(endpoint.method == qol::contracts::HttpMethod::kGet ||
+              endpoint.method == qol::contracts::HttpMethod::kPost);
         if (endpoint.method == qol::contracts::HttpMethod::kGet) {
             CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
-            CHECK(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
-        } else {
+            CHECK(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr &&
+                  endpoint.ctx != nullptr);
+        } else if (endpoint.method == qol::contracts::HttpMethod::kPost) {
             CHECK(endpoint.kind == qol::contracts::HttpHandlerKind::kCommand);
-            CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
+            CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr &&
+                  endpoint.ctx != nullptr);
+        } else {
+            CHECK(false);
         }
     }
     CHECK(op_endpoint_count == 7);
@@ -1983,10 +1998,19 @@ int main() {
     for (uint32_t i = 0; i < descriptor.http_route_metadata_count; ++i) {
         const auto& metadata = descriptor.http_route_metadata[i];
         CHECK(metadata.method == qol::contracts::HttpMethod::kPost);
-        CHECK(std::strcmp(metadata.path, metadata_paths[i]) == 0);
+        CHECK(metadata.path != nullptr);
+        if (metadata.path != nullptr) {
+            route_keys.push_back(std::to_string(static_cast<int>(metadata.method)) + ":" +
+                                 metadata.path);
+        }
+        CHECK(metadata.path != nullptr &&
+              std::strcmp(metadata.path, metadata_paths[i]) == 0);
         CHECK(std::strcmp(metadata.route_owner, "core.character") == 0);
         CHECK(metadata.op_required == 1 && metadata.lease_required == 1);
     }
+    std::sort(route_keys.begin(), route_keys.end());
+    CHECK(route_keys.size() == 41);
+    CHECK(std::unique(route_keys.begin(), route_keys.end()) == route_keys.end());
     CHECK(descriptor.provides_count == 2 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id,
                       qol::contracts::kCharacterFactsCapabilityId) == 0);

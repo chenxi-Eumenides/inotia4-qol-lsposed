@@ -24,6 +24,8 @@
 
 `/api/character/combat/{role}/set_skill_usage`、`/api/op/character/{role}/skill-point`、`/api/op/character/{role}/skill-level` 是 owner 元数据归本插件但当前由 Kotlin 占位响应，不在 native descriptor handler 中。特别是 `set_skill_usage` 保持 501；以上区分以 routes 与真实 handler 为准。
 
+`POST /api/character/grow/{role}/add_stat` 的剩余能力点判定在主线程执行：HTTP 层只校验请求格式并照常返回票据，点数不足表现为票据终态 `{"ok":false,"error":"no status point"}`，不产生属性变更。
+
 正式路径参数、响应和错误契约见 [API 参考 §4、§7.9–§7.10](../api-reference.md)。
 
 ### Capabilities
@@ -54,9 +56,10 @@ provider 为常驻需求，用 default true 的 hidden feature 表达；`enable`
 
 ## 5. 核心实现流程
 
-- **读/快照**：每 15 帧通过 `QOL_PORT_CHARACTER_HTTP` 读取 player、party、skills、mercenaries JSON。四项都可用才整体发布 `Snapshot<CharacterSnapshot>`；未进入游戏时发布 not-in-game 状态；读失败保留上一快照并告警。HTTP handler 从快照切片、筛选成员或组装小型响应。
+- **读/快照**：每 15 帧通过 `QOL_PORT_CHARACTER_HTTP` 读取 player、party、skills、mercenaries JSON。四项都可用才整体发布 `Snapshot<CharacterSnapshot>`；未进入游戏时发布 not-in-game 状态；读失败保留上一快照并告警。HTTP handler 从快照切片、筛选成员或组装小型响应。查询路径经 `Snapshot::ReadView`（RAII 持有 `QolSnapshotToken`）直接读宿主快照缓冲，不整块复制，指针不跨 handler 作用域。
 - **Capability state**：`character.state` 的 party/player/skills 输出通过 state port 读取 POD，再由 owner 序列化为版本化 JSON 投影；不将游戏指针或低层对象暴露给消费者。
-- **写/命令/票据**：POST handler 校验路径/body 并组装有界 POD payload，通过 Host SDK 投递 typed command，立即返回 ticket。主线程 result handler 按 `QolCharacterWriteKind` 调用写 ops port，必要时读取 owner state 生成瘦身结果并存入票据。op 路由的门控由 API dispatch 层按 routes 声明执行。
+- **写/命令/票据**：POST handler 校验路径/body 并组装有界 POD payload，通过 Host SDK 投递 typed command，立即返回 ticket。主线程 result handler 按 `QolCharacterWriteKind` 调用写 ops port，必要时读取 owner state 生成瘦身结果并存入票据。op 路由的门控由 API dispatch 层按 routes 声明执行。HTTP 线程只做路径与 body 的语法/范围校验；依赖角色当前状态的判定（如 `add_stat` 剩余能力点）只在主线程读取 state port 后执行，不用滞后快照做业务裁决。
+- **路由表**：`kRoutes`（35 条 handler 绑定）与 `kHttpRouteMetadata`（6 条 Kotlin 占位元数据）之和必须等于 `routes.inc` 的 41 条声明（编译期断言）；`initialize_http_routes` 逐条唯一匹配并向全部校验通过后才填充 descriptor，任一不符即 install 失败并记 error 日志，不注册半张路由表。
 - **生命周期**：install 校验 SDK 与四个 ports、初始化快照和 handler；enable 启动快照帧任务；disable/deactivate 停任务、销毁快照、注销 handler 并清空依赖引用。descriptor 的 optional item.state 缺失不阻止插件主体启用。
 
 ## 6. 文件地图
@@ -65,7 +68,7 @@ provider 为常驻需求，用 default true 的 hidden feature 表达；`enable`
 |---|---|---|
 | 主要实现 | `module/app/src/main/cpp/plugins/core.character/plugin.cpp` | descriptor、能力、快照、query/command handler 与结果处理 |
 | JSON 切片 | `module/app/src/main/cpp/plugins/core.character/json_slice.h`、`json_slice.cpp` | 对已缓存 JSON 执行字段/数组切片读取 |
-| 插件与快照 | `module/app/src/main/cpp/plugins/core.character/plugin.h`、`snapshot_sdk.h` | 入口声明与 Host SDK 快照包装 |
+| 插件与快照 | `module/app/src/main/cpp/plugins/core.character/plugin.h`、`snapshot_sdk.h` | 入口声明、Host SDK 快照包装与 RAII 只读视图 |
 | 状态/事实契约 | `contracts/character_facts.h`、`contracts/character_state.h` | capability API 与 state 投影类型 |
 | Game Host 契约 | `contracts/game_ports/character_http_port.h`、`character_state_port.h`、`character_write_ops_port.h` | HTTP JSON 读面、typed state 与写操作端口 |
 | Kotlin 入口 | `module/app/src/main/java/com/inotia4/qol/api/controller/CharacterController.kt`、`PartyController.kt`、`CombatController.kt`、`OpController.kt` | 路由解析和 service/bridge 调用 |
