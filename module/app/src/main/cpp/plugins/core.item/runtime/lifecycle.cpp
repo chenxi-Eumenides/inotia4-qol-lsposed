@@ -150,6 +150,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         reset_ports();
         return 1;
     }
+    // The v1.2 transfer callbacks and Item Port serialize_item are optional; transfer reports
+    // Unsupported when a host does not provide them.
     g_move_merge_port = static_cast<const contracts::QolMoveMergePort*>(ctx.ports[4]);
     if (!contracts::satisfies(g_move_merge_port->abi_version,
                               {contracts::kQolMoveMergePortVersion.major,

@@ -5,6 +5,7 @@
 
 #include "contracts/host_sdk.h"
 #include "contracts/save_facts.h"
+#include "plugins/core.item/bags/native_transport.h"
 #include "plugins/core.item/bags/source_transport.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
 #if !defined(QOL_CORE_ITEM_SOURCE_TRANSPORT_SEPARATE)
@@ -359,8 +360,13 @@ bool reconcile() {
         }
         if (source_exists && target_exists) {
             contracts::QolBagMutationResult removed{};
-            const QolResult result = bags::source_transport::remove_item(
-                target.space_id, target_item, record.count, &removed);
+            const auto remove_target =
+                target.space_id == contracts::kQolBagSpaceOriginal ||
+                        target.space_id == contracts::kQolBagSpaceC18
+                    ? &bags::native_transport::remove_item
+                    : &bags::source_transport::remove_item;
+            const QolResult result =
+                remove_target(target.space_id, target_item, record.count, &removed);
             if (!contracts::succeeded(result)) {
                 log_message(3, "[core.item] transfer journal target rollback failed");
                 return false;

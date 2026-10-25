@@ -15,6 +15,7 @@
 #include "plugins/core.item/http/json_lite.h"
 #include "plugins/core.item/http/response.h"
 #include "plugins/core.item/http/write_result_inventory.h"
+#include "plugins/core.item/bags/native_transport.h"
 #include "plugins/core.item/bags/source_transport.h"
 #include "plugins/core.item/usecases/move_item.h"
 #include "plugins/core.item/shop/buy.h"
@@ -939,8 +940,14 @@ bool write_cross_space_move_result(const ItemWritePayload& payload, char* out,
     if (placed.item.slot != 0 && placed.item.generation != 0) {
         contracts::QolBagRef located{};
         int32_t located_slot = -1;
-        if (contracts::succeeded(bags::source_transport::locate(
-                placed.ref.space_id, placed.item, &located, &located_slot)) &&
+        const QolResult located_result =
+            placed.ref.space_id == contracts::kQolBagSpaceOriginal ||
+                    placed.ref.space_id == contracts::kQolBagSpaceC18
+                ? bags::native_transport::locate(placed.ref.space_id, placed.item, &located,
+                                                 &located_slot)
+                : bags::source_transport::locate(placed.ref.space_id, placed.item, &located,
+                                                 &located_slot);
+        if (contracts::succeeded(located_result) &&
             located_slot >= 0) {
             target_ref = located;
             target_slot = located_slot;
@@ -1045,9 +1052,7 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     if (kind == contracts::QolItemWriteKind::kMoveItem) {
         const bool cross_space =
             command.from_space >= 0 && command.to_space >= 0 &&
-            command.from_space != command.to_space &&
-            (command.from_space >= contracts::kQolBagSpaceFirstRegistered ||
-             command.to_space >= contracts::kQolBagSpaceFirstRegistered);
+            command.from_space != command.to_space;
         if (cross_space) {
             return write_cross_space_move_result(command, out, capacity, out_size);
         }
