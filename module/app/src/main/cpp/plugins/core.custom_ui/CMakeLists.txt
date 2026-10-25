@@ -5,13 +5,17 @@ add_library(qol_plugin_core.custom_ui STATIC
     ui_confirmation.cpp
     ui_components.cpp
     settings_contribution.cpp
-    panels/debug_components.cpp
     panels/stack.cpp
     panels/host.cpp
     panels/frame_overlay.cpp
 )
+# Debug 面板只在 Debug 构建参与编译：plugin.cpp 中相关引用全部位于 QOL_DEBUG_COMPONENTS
+# 条件块内，Release 下没有可达引用。
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_sources(qol_plugin_core.custom_ui PRIVATE panels/debug_scroll.cpp panels/debug_help.cpp)
+    target_sources(qol_plugin_core.custom_ui PRIVATE
+        panels/debug_scroll.cpp
+        panels/debug_help.cpp
+        panels/debug_components.cpp)
 endif()
 
 # 选择控件资源在 device probe 构建下改用严格导出名解析（elf-export:），分支在 plugin.cpp 的 hook:UIChoice_Init 声明。
