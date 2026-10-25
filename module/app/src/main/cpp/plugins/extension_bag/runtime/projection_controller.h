@@ -9,7 +9,7 @@ bool set_bag_size_word_locked(int bag, uint32_t word);
 int original_bag_locked();
 int raw_current_bag_locked();
 void set_original_bag_locked(int bag);
-int native_bag_page_count_locked();
+int native_bag_count_locked();
 
 // 投影代理袋：始终取一个真实原版事务袋（0..4），排除任务袋 5 与 C18 追加袋。
 // 扩展袋内容通过该代理窗口显示，current_bag 不再承载扩展袋号。

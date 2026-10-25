@@ -38,26 +38,19 @@ int raw_current_bag_locked() {
     return qol::contracts::succeeded(port->ui.current_bag(&bag)) ? static_cast<int>(bag) : -1;
 }
 
-int native_bag_page_count_locked() {
-    void* container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
-    if (container == nullptr) return 0;
-    int child_count = 0;
-    if (!extension_bag_ui_child_count(container, &child_count) || child_count <= 0) return 0;
-    const int limit = child_count < 32 ? child_count : 32;
-    int native_tabs = 0;
-    for (int index = 0; index < limit; ++index) {
-        void* child = extension_bag_ui_child_at(container, index);
-        if (child == nullptr || extension_bag_ui_user_type(child) != 2) continue;
-        bool module_tab = false;
-        for (const auto& anchor : runtime_state().ui.extension_tab_anchors) {
-            if (anchor.mounted != 0 && anchor.handle == child) {
-                module_tab = true;
-                break;
-            }
-        }
-        if (!module_tab) ++native_tabs;
+int native_bag_count_locked() {
+    // 袋号拓扑来自游戏袋数据（INVEN_GetBagSize 语义），不依赖任何控件树；
+    // 未打开背包时同样可用。C18 追加袋上界为 18，原版为 6。
+    const auto* extras = runtime_state().host.inventory_extras;
+    if (extras == nullptr || extras->read.bag_size == nullptr) return 6;
+    int highest = -1;
+    for (int bag = 0; bag < 18; ++bag) {
+        int32_t size = 0;
+        if (!qol::contracts::succeeded(extras->read.bag_size(bag, &size))) continue;
+        if (size > 0) highest = bag;
     }
-    return native_tabs;
+    const int count = highest + 1;
+    return count < 6 ? 6 : count;
 }
 
 bool native_source_bag_allowed_locked(int bag) {
@@ -71,8 +64,7 @@ bool native_source_bag_allowed_locked(int bag) {
             qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0) {
         return false;
     }
-    const int page_count = native_bag_page_count_locked();
-    return page_count > 0 && bag < page_count;
+    return bag < native_bag_count_locked();
 }
 
 void set_original_bag_locked(int bag) {
