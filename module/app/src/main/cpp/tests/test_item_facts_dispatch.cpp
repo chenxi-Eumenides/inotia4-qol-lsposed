@@ -121,9 +121,11 @@ std::string expected_inventory_item(uint32_t count, int32_t space, int32_t bag,
            std::to_string(bag) + "," + item.substr(1);
 }
 
-std::string expected_slot_record(int32_t bag, int32_t slot, const std::string& item) {
-    return "{\"bag\":" + std::to_string(bag) + ",\"slot\":" +
-           std::to_string(slot) + ",\"item\":" + item + "}";
+std::string expected_slot_record(int32_t bag, int32_t slot, const std::string& item,
+                                 int32_t space = 0) {
+    return "{\"space\":" + std::to_string(space) + ",\"bag\":" +
+           std::to_string(bag) + ",\"slot\":" + std::to_string(slot) +
+           ",\"item\":" + item + "}";
 }
 
 std::string expected_inventory_with_count(uint32_t count) {
@@ -310,8 +312,12 @@ int32_t g_state_add_count = -1;
 int32_t g_state_add_socket = -1;
 int32_t g_state_add_enhance = -1;
 int32_t g_state_add_rarity = -1;
-bool g_inventory_slot_present[11][16] = {{true}};
-uint32_t g_inventory_slot_count[11][16]{};
+bool g_inventory_slot_present[32][16] = {{true}};
+uint32_t g_inventory_slot_count[32][16]{};
+int32_t g_c18_bag_count = 0;
+int32_t g_fake_extension_bag_count = 0;
+extern bool g_provider_resident;
+extern bool g_provider_available;
 int32_t g_party_hp = 100;
 int32_t g_party_mp = 50;
 int32_t g_party_main_stats[5] = {10, 11, 13, 14, 15};
@@ -387,7 +393,7 @@ QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryI
     if (g_item_ref_result != kQolOk) {
         return qol::contracts::error(g_item_ref_result, "item reference unavailable", 26);
     }
-    if (bag < 0 || bag >= 11 || slot < 0 || slot >= 16 ||
+    if (bag < 0 || bag >= 32 || slot < 0 || slot >= 16 ||
         !g_inventory_slot_present[bag][slot]) {
         return qol::contracts::error(kQolErrNotFound, "empty", 5);
     }
@@ -400,26 +406,75 @@ QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryI
     return qol::contracts::ok();
 }
 
+QolResult fake_bag_count(int32_t space_id, int32_t* out_count) {
+    if (out_count == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad count", 9);
+    }
+    if (space_id == qol::contracts::kQolBagSpaceOriginal) {
+        *out_count = 6;
+        return qol::contracts::ok();
+    }
+    if (space_id == qol::contracts::kQolBagSpaceC18) {
+        *out_count = g_c18_bag_count;
+        return qol::contracts::ok();
+    }
+    if (space_id == qol::contracts::kQolBagSpaceFirstRegistered) {
+        *out_count = g_provider_resident ? 5 : g_fake_extension_bag_count;
+        return qol::contracts::ok();
+    }
+    return qol::contracts::error(kQolErrUnsupported, "unknown space", 13);
+}
+
 QolResult fake_bag_info(const qol::contracts::QolBagRef* bag,
                         qol::contracts::QolBagInfo* out) {
-    if (bag == nullptr || out == nullptr ||
-        bag->space_id != qol::contracts::kQolBagSpaceOriginal || bag->bag < 0 || bag->bag >= 6) {
+    if (bag == nullptr || out == nullptr || bag->bag < 0) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
+    }
+    int32_t physical_bag = bag->bag;
+    int32_t capacity = 16;
+    if (bag->space_id == qol::contracts::kQolBagSpaceC18) {
+        if (bag->bag >= g_c18_bag_count) {
+            return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
+        }
+        physical_bag += 6;
+    } else if (bag->space_id == qol::contracts::kQolBagSpaceFirstRegistered) {
+        if (bag->bag >= 5) return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
+        physical_bag += 6;
+    } else if (bag->space_id != qol::contracts::kQolBagSpaceOriginal || bag->bag >= 6) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
     }
     int32_t slot_count = 0;
-    for (int32_t slot = 0; slot < 16; ++slot) {
-        if (g_inventory_slot_present[bag->bag][slot]) ++slot_count;
+    if (physical_bag < 32) {
+        for (int32_t slot = 0; slot < capacity; ++slot) {
+            if (g_inventory_slot_present[physical_bag][slot]) ++slot_count;
+        }
     }
-    *out = qol::contracts::QolBagInfo{16, slot_count};
+    *out = qol::contracts::QolBagInfo{capacity, slot_count};
     return qol::contracts::ok();
 }
 
 QolResult fake_item_at(const qol::contracts::QolBagRef* bag, int32_t slot,
                        qol::contracts::QolInventoryItemRef* out) {
-    if (bag == nullptr || bag->space_id != qol::contracts::kQolBagSpaceOriginal) {
+    if (bag == nullptr || out == nullptr || slot < 0 || slot >= 16) {
         return qol::contracts::error(kQolErrNotFound, "empty", 5);
     }
-    const QolResult result = stub_item_ref(bag->bag, slot, out);
+    QolResult result = qol::contracts::error(kQolErrNotFound, "empty", 5);
+    if (bag->space_id == qol::contracts::kQolBagSpaceOriginal) {
+        result = stub_item_ref(bag->bag, slot, out);
+    } else if (bag->space_id == qol::contracts::kQolBagSpaceC18) {
+        if (bag->bag < g_c18_bag_count && bag->bag + 6 < 32) {
+            result = stub_item_ref(bag->bag + 6, slot, out);
+            if (qol::contracts::succeeded(result)) out->bag = bag->bag;
+        }
+    } else if (bag->space_id == qol::contracts::kQolBagSpaceFirstRegistered &&
+               g_provider_resident && g_provider_available) {
+        if (bag->bag < 5) result = stub_item_ref(bag->bag + 6, slot, out);
+        if (qol::contracts::succeeded(result)) {
+            out->kind = static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider);
+            out->bag = bag->bag;
+            out->space_id = bag->space_id;
+        }
+    }
     if (qol::contracts::succeeded(result)) out->space_id = bag->space_id;
     return result;
 }
@@ -555,7 +610,7 @@ const QolItemPortReadApi kFakeRead{
     &stub_detail_item_context, &fake_inventory, &fake_money,
     &fake_shop, &fake_in_world, &fake_static_text, &fake_static_ready,
     &fake_inventory_item_view, &stub_effective_cumulate, &fake_inventory_extension_access,
-    &fake_item_count_limit, &fake_count_encoding, nullptr, nullptr, &fake_bag_info, &fake_item_at,
+    &fake_item_count_limit, &fake_count_encoding, nullptr, &fake_bag_count, &fake_bag_info, &fake_item_at,
     nullptr,
 };
 
@@ -793,6 +848,7 @@ QolResult fake_log_write(int32_t level, int32_t, const char*, const char* messag
 
 // T2h-B0：golden fixture 期间让 EB capability 返回带 inventory 成员的金装 API。
 bool g_golden_require_active = false;
+int32_t g_golden_eb_move_complete = 0;
 const qol::contracts::ExtensionBagApi* golden_extension_bag_api();
 
 QolResult override_canonical(const void*, uint32_t* out_count) {
@@ -909,6 +965,7 @@ int32_t fake_provider_move(int32_t from_bag, int32_t from_slot, int32_t to_bag, 
     const int32_t target_slot = to_slot >= 0 ? to_slot : 0;
     g_inventory_slot_present[to_bag][target_slot] = true;
     g_inventory_slot_count[to_bag][target_slot] = 3;
+    if (g_golden_require_active) g_golden_eb_move_complete = 1;
     return 1;
 }
 QolResult fake_provider_sell_price(qol::contracts::QolItemHandle, int32_t, int32_t,
@@ -1225,7 +1282,7 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"gained\":[{\"bag\":4,\"slot\":2,\"category\":10,\"count\":3}],"
+          "{\"ok\":true,\"gained\":[{\"space\":0,\"bag\":4,\"slot\":2,\"category\":10,\"count\":3}],"
           "\"slots\":[" + expected_slot_record(0, 0, expected_item_at_slot(0, 3)) + "," +
               expected_slot_record(4, 2, expected_item_at_slot(2, 3)) + "]}");
 
@@ -1407,7 +1464,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/move_item",
                         "{\"bag\":0,\"slot\":2,\"count\":4,\"to_bag\":0}",
                         nullptr, 0, &status) ==
-          "{\"ok\":false,\"error\":\"bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)\"}");
+          "{\"ok\":false,\"error\":\"bag/slot/count/to_bag/to_slot required\"}");
     CHECK(status == 400);
     CHECK(g_post_payload_size == payload_size_before_invalid);
     CHECK(g_state_write_calls == state_calls_before_invalid);
@@ -1444,8 +1501,8 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"slots\":[" + expected_slot_record(6, 2, "null") + "," +
-              expected_slot_record(7, 0, expected_item_at_slot(0, 3)) + "]}");
+           "{\"ok\":true,\"slots\":[" + expected_slot_record(0, 2, "null", 2) + "," +
+               expected_slot_record(1, 0, expected_item_at_slot(0, 3), 2) + "]}");
     CHECK(g_extension_move_calls == 1);
     const int state_calls_before_missing = g_state_write_calls;
     g_extension_move_body = "{\"ok\":false,\"error\":\"move failed\"}";
@@ -1459,6 +1516,7 @@ void test_write_routes() {
     // 能力缺失回退：扩展请求回落 typed 移动分支，票据仍只保留源/目标槽终态。
     g_provider_resident = false;
     g_provider_available = false;
+    g_fake_extension_bag_count = 5;
     g_state_write_result = qol::contracts::ok();
     g_state_write_count = 2;
     g_state_write_data = {};
@@ -1470,9 +1528,77 @@ void test_write_routes() {
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
-          "{\"ok\":true,\"slots\":[" + expected_slot_record(6, 2, "null") + "]}");
+           "{\"ok\":true,\"slots\":[" + expected_slot_record(0, 2, "null", 2) + "]}");
     CHECK(g_state_write_calls == state_calls_before_missing + 1);
     CHECK(g_state_move_count == 4 && g_state_move_to_bag == 7 && g_state_move_to_slot == -1);
+    g_fake_extension_bag_count = 0;
+
+    // C18 请求按空间解析；占用同一数字的 provider 袋返回 409，空闲 native bag 正常排队。
+    g_c18_bag_count = 6;
+    g_provider_resident = true;
+    g_provider_available = true;
+    const uint32_t payload_size_before_c18 = g_post_payload_size;
+    const int state_calls_before_c18 = g_state_write_calls;
+    CHECK(dispatch_post("/api/item/inventory/use_item",
+                        "{\"space\":1,\"bag\":0,\"slot\":1}", nullptr, 0, &status) ==
+          "{\"ok\":false,\"error\":\"c18 bag write requires host arbitration\"}");
+    CHECK(status == 409 && g_post_payload_size == payload_size_before_c18 &&
+          g_state_write_calls == state_calls_before_c18);
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"space\":1,\"bag\":0,\"slot\":1,\"count\":1,"
+                        "\"to_space\":0,\"to_bag\":0,\"to_slot\":2}",
+                        nullptr, 0, &status) ==
+          "{\"ok\":false,\"error\":\"c18 bag write requires host arbitration\"}");
+    CHECK(status == 409 && g_post_payload_size == payload_size_before_c18 &&
+          g_state_write_calls == state_calls_before_c18);
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"space\":1,\"bag\":5,\"slot\":1,\"count\":1,"
+                        "\"to_space\":0,\"to_bag\":0,\"to_slot\":2}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    QolItemWriteArgs c18_args{};
+    std::memcpy(&c18_args, g_post_payload, sizeof(c18_args));
+    CHECK(status == 200 && c18_args.i0 == 11 && c18_args.i3 == 0);
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":11,\"slot\":1,\"count\":1,"
+                        "\"to_bag\":0,\"to_slot\":2}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    std::memcpy(&c18_args, g_post_payload, sizeof(c18_args));
+    CHECK(c18_args.i0 == 11);
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"space\":2,\"bag\":0,\"slot\":1,\"count\":1,"
+                        "\"to_space\":0,\"to_bag\":0,\"to_slot\":2}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    std::memcpy(&c18_args, g_post_payload, sizeof(c18_args));
+    CHECK(c18_args.i0 == 6);
+    g_inventory_slot_present[11][1] = false;
+    g_state_write_count = 9;
+    g_state_write_data = {};
+    CHECK(dispatch_post("/api/item/inventory/use_item",
+                        "{\"space\":1,\"bag\":5,\"slot\":1}", nullptr, 0, &status) ==
+          "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+                           &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":true,\"slots\":[" +
+              expected_slot_record(5, 1, expected_item_at_slot(1, 9), 1) + "]}");
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"bag\":12,\"slot\":1,\"count\":1,"
+                        "\"to_bag\":0,\"to_slot\":2}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    std::memcpy(&c18_args, g_post_payload, sizeof(c18_args));
+    CHECK(c18_args.i0 == 6);
+    CHECK(dispatch_post("/api/item/inventory/use_item",
+                        "{\"space\":0,\"bag\":5,\"slot\":1}", nullptr, 0, &status) ==
+          "{\"ok\":false,\"error\":\"task bag excluded\"}");
+    CHECK(status == 400);
+    CHECK(dispatch_post("/api/item/inventory/use_item",
+                        "{\"space\":1.5,\"bag\":0,\"slot\":1}", nullptr, 0, &status) ==
+          "{\"ok\":false,\"error\":\"bad value for space\"}");
+    CHECK(status == 400);
+    g_c18_bag_count = 0;
+    g_provider_resident = false;
+    g_provider_available = false;
 
     // 失败票据：owner 返回 false 并把原错误体写入结果缓冲，可经票据回取。
     g_state_write_result = qol::contracts::error(kQolErrBlocked, "move failed", 11);
@@ -2230,7 +2356,9 @@ static int32_t golden_eb_item_at(int32_t bag, int32_t slot,
                                  qol::contracts::QolItemHandle* out_item) {
     if (out_item == nullptr) return 0;
     *out_item = {};
-    if ((bag != 6 || slot != 0) &&
+    const bool original_item = g_golden_eb_move_complete == 0 && bag == 6 && slot == 0;
+    const bool moved_item = g_golden_eb_move_complete != 0 && bag == 6 && slot == 1;
+    if (!original_item && !moved_item &&
         (bag != 9 || slot != 4 || g_golden_projected_canonical == 0)) {
         return 0;
     }
@@ -2434,6 +2562,10 @@ static QolResult golden_view(qol::contracts::QolItemHandle handle,
 QolResult golden_bag_count(int32_t space_id, int32_t* out_count) {
     if (out_count == nullptr) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad bag count", 13);
+    }
+    if (space_id == qol::contracts::kQolBagSpaceOriginal) {
+        *out_count = qol::contracts::kQolOriginalBagCount;
+        return qol::contracts::ok();
     }
     if (space_id == qol::contracts::kQolBagSpaceC18) {
         *out_count = 0;
@@ -2745,19 +2877,13 @@ void test_inventory_owner_vs_legacy_golden() {
         (void)dispatch_template("/api/item/inventory/bag/5/16", task_slot_out_of_range, 2,
                                 &status);
         CHECK(status == 400 || status == 404);
+        const uint32_t payload_size_before_task_write = g_post_payload_size;
         CHECK(dispatch_post("/api/item/inventory/move_item",
                             "{\"bag\":\"5\",\"slot\":\"15\",\"count\":\"1\","
                             "\"to_bag\":\"0\",\"to_slot\":\"0\"}",
-                            nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
-        ItemWriteResultContext context{};
-        context.handler = g_result_handler;
-        context.payload_size = g_post_payload_size;
-        std::memcpy(context.payload, g_post_payload, g_post_payload_size);
-        char result[128]{};
-        uint32_t result_size = 0;
-        CHECK(!run_item_write_result(&context, result, sizeof(result), &result_size));
-        CHECK(std::string(result, result_size) ==
+                            nullptr, 0, &status) ==
               "{\"ok\":false,\"error\":\"task bag excluded\"}");
+        CHECK(status == 400 && g_post_payload_size == payload_size_before_task_write);
     }
     // T2h-B2：not-in-world owner raw == legacy；capability 缺席（停用/未注册形态）→ fallback legacy。
     g_golden_world = 0;
@@ -2798,6 +2924,7 @@ bool install_core_item_golden(GoldenHarness* out) {
     *reinterpret_cast<void**>(g_golden_bag_storage + 5 * 0x80 + 15 * 8) = g_golden_item_task;
     g_inven = g_golden_bag_storage;
     g_golden_world = 1;
+    g_golden_eb_move_complete = 0;
     g_in_world = true;
     g_golden_bad_slot = 0;
     g_golden_projected_canonical = 0;
@@ -2992,13 +3119,13 @@ void test_extension_move_result_capacity_and_overflow() {
         uint32_t size = 0;
         CHECK(qol::infra::read_result(ticket, result.data(), result.size(), &size));
         constexpr std::string_view expected =
-            "{\"ok\":true,\"slots\":[{\"bag\":6,\"slot\":0,\"item\":null},"
-            "{\"bag\":6,\"slot\":1,\"item\":{\"slot\":1,\"name\":null,"
+            "{\"ok\":true,\"slots\":[{\"space\":2,\"bag\":0,\"slot\":0,\"item\":null},"
+            "{\"space\":2,\"bag\":0,\"slot\":1,\"item\":{\"slot\":1,\"name\":null,"
             "\"category\":10,\"count\":199,\"item_type\":\"consumable\","
-            "\"need_level\":0,\"rarity\":0,\"rarity_tier\":\"白\","
-            "\"base\":{\"damage\":0,\"defense\":0,\"magic_rate\":0},"
+            "\"need_level\":0,\"rarity\":null,\"rarity_tier\":null,"
+            "\"base\":{\"damage\":null,\"defense\":null,\"magic_rate\":0},"
             "\"bonus\":[],\"gem\":{\"total_slots\":0,\"slots\":[]},"
-            "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
+            "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":0},"
             "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}}]}";
         CHECK(size == expected.size());
         CHECK(std::string_view(result.data(), size) == expected);

@@ -1,11 +1,13 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
 
 #include <algorithm>
-#include <array>
 #include <climits>
 #include <cstring>
+#include <map>
+#include <set>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 #include "contracts/character_state.h"
@@ -26,56 +28,145 @@ constexpr char kDiceRejectNoPending[] =
     "{\"ok\":false,\"error\":\"no dice result pending\"}";
 constexpr char kDiceRejectFailed[] = "{\"ok\":false,\"error\":\"dice reject failed\"}";
 
-constexpr int32_t kOriginalInventoryBagCount = 6;
-
-bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
-    if (g_port == nullptr || g_port->read.item_ref_at == nullptr || bag_out == nullptr ||
-        slot_out == nullptr) return false;
-    for (int32_t bag = 0; bag < kOriginalInventoryBagCount; ++bag) {
-        for (int32_t slot = 0; slot < 16; ++slot) {
-            contracts::QolInventoryItemRef item{};
-            const QolResult result = g_port->read.item_ref_at(bag, slot, &item);
-            if (!contracts::succeeded(result) || item.category != category) continue;
-            *bag_out = item.bag;
-            *slot_out = item.slot;
-            return true;
-        }
-    }
-    const InventoryExtensionAccessResult access = inventory_extension();
-    if (!access.available || access.provider == nullptr ||
-        access.provider->for_each_item == nullptr) {
-        return false;
-    }
-    struct Ctx {
-        int32_t category;
-        int32_t* bag;
-        int32_t* slot;
-        bool found;
-    } ctx{category, bag_out, slot_out, false};
-    (void)access.provider->for_each_item(
-        [](const contracts::QolInventoryExtensionItemRef* ref, void* raw) -> int32_t {
-            auto* p = static_cast<Ctx*>(raw);
-            if (ref->category != p->category) return 0;
-            *p->bag = ref->bag;
-            *p->slot = ref->slot;
-            p->found = true;
-            return 1;
-        },
-        &ctx);
-    return ctx.found;
-}
-constexpr int32_t kResultBagCount = 11;
-constexpr int32_t kResultSlotsPerBag = 16;
-using InventoryResultSnapshot =
-    std::array<std::string, kResultBagCount * kResultSlotsPerBag>;
-
-std::size_t inventory_result_index(int32_t bag, int32_t slot) {
-    return static_cast<std::size_t>(bag * kResultSlotsPerBag + slot);
-}
-
 bool provider_owns_bag(const InventoryExtensionAccessResult& access, int32_t bag) {
     return access.provider != nullptr && access.provider->owns_bag != nullptr &&
            access.provider->owns_bag(bag) != 0;
+}
+
+struct WriteRef {
+    int32_t space_id;
+    int32_t bag;
+    int32_t slot;
+};
+
+struct SlotKey {
+    int32_t space_id;
+    int32_t bag;
+    int32_t slot;
+
+    bool operator<(const SlotKey& other) const {
+        return std::tie(space_id, bag, slot) <
+               std::tie(other.space_id, other.bag, other.slot);
+    }
+};
+
+using InventoryResultSnapshot = std::map<SlotKey, std::string>;
+using ForcedSlots = std::set<SlotKey>;
+
+bool result_space_count(int32_t space_id, int32_t* out_count) {
+    if (out_count == nullptr || g_port == nullptr || g_port->read.bag_count == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+        return false;
+    }
+    int32_t count = 0;
+    const QolResult result = g_port->read.bag_count(space_id, &count);
+    if (!contracts::succeeded(result)) {
+        if (space_id != contracts::kQolBagSpaceOriginal &&
+            (result.code == kQolErrUnsupported || result.code == kQolErrNotReady)) {
+            *out_count = 0;
+            return true;
+        }
+        return false;
+    }
+    if (count < 0) return false;
+    *out_count = count;
+    return true;
+}
+
+int32_t write_port_bag(const WriteRef& ref) {
+    return ref.space_id == contracts::kQolBagSpaceOriginal
+               ? ref.bag
+               : contracts::kQolOriginalBagCount + ref.bag;
+}
+
+bool decode_write_bag(int32_t host_bag, const InventoryExtensionAccessResult& access,
+                      WriteRef* out) {
+    if (host_bag < 0 || out == nullptr) return false;
+    int32_t original_count = 0;
+    int32_t c18_count = 0;
+    int32_t extension_count = 0;
+    if (!result_space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
+        !result_space_count(contracts::kQolBagSpaceC18, &c18_count) ||
+        !result_space_count(contracts::kQolBagSpaceFirstRegistered, &extension_count)) {
+        return false;
+    }
+    if (host_bag < original_count) {
+        *out = {contracts::kQolBagSpaceOriginal, host_bag, -1};
+        return true;
+    }
+    if (host_bag < contracts::kQolOriginalBagCount) return false;
+    const int32_t index = host_bag - contracts::kQolOriginalBagCount;
+    if (provider_owns_bag(access, host_bag)) {
+        if (index >= extension_count) return false;
+        *out = {contracts::kQolBagSpaceFirstRegistered, index, -1};
+        return true;
+    }
+    if (index < c18_count) {
+        *out = {contracts::kQolBagSpaceC18, index, -1};
+        return true;
+    }
+    if (index < extension_count) {
+        *out = {contracts::kQolBagSpaceFirstRegistered, index, -1};
+        return true;
+    }
+    return false;
+}
+
+bool write_slot_key(int32_t host_bag, int32_t slot,
+                    const InventoryExtensionAccessResult& access, SlotKey* out) {
+    if (out == nullptr || slot < 0) return false;
+    WriteRef ref{};
+    if (!decode_write_bag(host_bag, access, &ref)) return false;
+    *out = {ref.space_id, ref.bag, slot};
+    return true;
+}
+
+bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
+    if (g_port == nullptr || g_port->read.bag_info == nullptr ||
+        g_port->read.item_at == nullptr || bag_out == nullptr || slot_out == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+        return false;
+    }
+    const InventoryExtensionAccessResult access = inventory_extension();
+    const int32_t spaces[] = {contracts::kQolBagSpaceOriginal,
+                              contracts::kQolBagSpaceC18,
+                              contracts::kQolBagSpaceFirstRegistered};
+    for (int32_t space_id : spaces) {
+        int32_t count = 0;
+        if (!result_space_count(space_id, &count)) return false;
+        for (int32_t bag = 0; bag < count; ++bag) {
+            const contracts::QolBagRef ref{space_id, bag};
+            contracts::QolBagInfo info{};
+            if (!contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
+                info.capacity < 0) {
+                return false;
+            }
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                contracts::QolInventoryItemRef item{};
+                const QolResult result = g_port->read.item_at(&ref, slot, &item);
+                if (!contracts::succeeded(result)) {
+                    if (result.code == kQolErrNotFound || result.code == kQolErrNotReady ||
+                        result.code == kQolErrUnsupported) {
+                        continue;
+                    }
+                    return false;
+                }
+                if (item.item.slot == 0 || item.item.generation == 0 ||
+                    item.category != category) {
+                    continue;
+                }
+                const int32_t host_bag = write_port_bag({space_id, bag, slot});
+                if (space_id == contracts::kQolBagSpaceC18 &&
+                    provider_owns_bag(access, host_bag)) {
+                    continue;
+                }
+                *bag_out = host_bag;
+                *slot_out = item.slot;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 const contracts::CharacterStateApi* character_state_capability() {
@@ -90,24 +181,13 @@ const contracts::CharacterStateApi* character_state_capability() {
     return static_cast<const contracts::CharacterStateApi*>(iface);
 }
 
-bool read_enriched_item(int32_t bag, int32_t slot, std::string* out,
-                        const InventoryExtensionAccessResult& extension_access) {
-    if (out == nullptr || g_port == nullptr || g_port->read.item_ref_at == nullptr ||
+bool read_enriched_item(const contracts::QolBagRef& bag, int32_t slot, std::string* out) {
+    if (out == nullptr || g_port == nullptr || g_port->read.item_at == nullptr ||
         g_port->read.inventory_item_view == nullptr) {
         return false;
     }
     contracts::QolInventoryItemRef item_ref{};
-    contracts::QolInventoryExtensionItemRef extension_item_ref{};
-    const bool provider_item = bag >= kOriginalInventoryBagCount;
-    QolResult ref_result = contracts::error(kQolErrNotFound, "empty slot", 10);
-    if (!provider_item) {
-        ref_result = g_port->read.item_ref_at(bag, slot, &item_ref);
-    } else {
-        if (extension_access.available && extension_access.provider != nullptr &&
-            extension_access.provider->item_ref_at != nullptr) {
-            ref_result = extension_access.provider->item_ref_at(bag, slot, &extension_item_ref);
-        }
-    }
+    const QolResult ref_result = g_port->read.item_at(&bag, slot, &item_ref);
     if (!contracts::succeeded(ref_result)) {
         if (ref_result.code == kQolErrNotFound || ref_result.code == kQolErrNotReady ||
             ref_result.code == kQolErrUnsupported) {
@@ -116,8 +196,10 @@ bool read_enriched_item(int32_t bag, int32_t slot, std::string* out,
         }
         return false;
     }
-    const contracts::QolItemHandle item_handle = provider_item ? extension_item_ref.item
-                                                               : item_ref.item;
+    if (item_ref.space_id != bag.space_id || item_ref.bag != bag.bag || item_ref.slot != slot) {
+        return false;
+    }
+    const contracts::QolItemHandle item_handle = item_ref.item;
     if (item_handle.slot == 0 || item_handle.generation == 0) {
         *out = "null";
         return true;
@@ -144,51 +226,74 @@ bool read_enriched_item(int32_t bag, int32_t slot, std::string* out,
 }
 
 bool capture_inventory_result(InventoryResultSnapshot* out) {
-    if (out == nullptr) return false;
-    const InventoryExtensionAccessResult extension_access = inventory_extension();
-    for (int32_t bag = 0; bag < kResultBagCount; ++bag) {
-        for (int32_t slot = 0; slot < kResultSlotsPerBag; ++slot) {
-            if (!read_enriched_item(bag, slot, &(*out)[inventory_result_index(bag, slot)],
-                                    extension_access)) {
+    if (out == nullptr || g_port == nullptr || g_port->read.bag_info == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+        return false;
+    }
+    InventoryResultSnapshot snapshot;
+    const int32_t spaces[] = {contracts::kQolBagSpaceOriginal,
+                              contracts::kQolBagSpaceC18,
+                              contracts::kQolBagSpaceFirstRegistered};
+    for (int32_t space_id : spaces) {
+        int32_t bag_count = 0;
+        if (!result_space_count(space_id, &bag_count)) return false;
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            const contracts::QolBagRef ref{space_id, bag};
+            contracts::QolBagInfo info{};
+            if (!contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
+                info.capacity < 0) {
                 return false;
+            }
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                std::string item_json;
+                if (!read_enriched_item(ref, slot, &item_json)) return false;
+                snapshot.emplace(SlotKey{space_id, bag, slot}, std::move(item_json));
             }
         }
     }
+    *out = std::move(snapshot);
     return true;
 }
 
-void append_result_slot(std::string& body, int32_t bag, int32_t slot,
+std::string result_item_at(const InventoryResultSnapshot& snapshot, const SlotKey& key) {
+    const auto found = snapshot.find(key);
+    return found == snapshot.end() ? "null" : found->second;
+}
+
+void append_result_slot(std::string& body, const SlotKey& key,
                         const InventoryResultSnapshot& snapshot, bool* first) {
     if (!*first) body.push_back(',');
     *first = false;
-    body += "{\"bag\":" + std::to_string(bag) + ",\"slot\":" +
-            std::to_string(slot) + ",\"item\":" +
-            snapshot[inventory_result_index(bag, slot)] + "}";
+    body += "{\"space\":" + std::to_string(key.space_id) + ",\"bag\":" +
+            std::to_string(key.bag) + ",\"slot\":" + std::to_string(key.slot) +
+            ",\"item\":" + result_item_at(snapshot, key) + "}";
 }
 
 void append_inventory_changes(std::string& body, const InventoryResultSnapshot& before,
                               const InventoryResultSnapshot& after,
-                              const std::array<bool, kResultBagCount * kResultSlotsPerBag>& forced,
-                              bool* first) {
-    for (int32_t bag = 0; bag < kResultBagCount; ++bag) {
-        for (int32_t slot = 0; slot < kResultSlotsPerBag; ++slot) {
-            const std::size_t index = inventory_result_index(bag, slot);
-            if (!forced[index] && before[index] == after[index]) continue;
-            append_result_slot(body, bag, slot, after, first);
+                              const ForcedSlots& forced, bool* first) {
+    std::set<SlotKey> keys = forced;
+    for (const auto& entry : before) keys.insert(entry.first);
+    for (const auto& entry : after) keys.insert(entry.first);
+    for (const SlotKey& key : keys) {
+        if (forced.count(key) == 0 && result_item_at(before, key) == result_item_at(after, key)) {
+            continue;
         }
+        append_result_slot(body, key, after, first);
     }
 }
 
 void append_unforced_inventory_changes(
     std::string& body, const InventoryResultSnapshot& before,
-    const InventoryResultSnapshot& after,
-    const std::array<bool, kResultBagCount * kResultSlotsPerBag>& forced, bool* first) {
-    for (int32_t bag = 0; bag < kResultBagCount; ++bag) {
-        for (int32_t slot = 0; slot < kResultSlotsPerBag; ++slot) {
-            const std::size_t index = inventory_result_index(bag, slot);
-            if (forced[index] || before[index] == after[index]) continue;
-            append_result_slot(body, bag, slot, after, first);
+    const InventoryResultSnapshot& after, const ForcedSlots& forced, bool* first) {
+    std::set<SlotKey> keys;
+    for (const auto& entry : before) keys.insert(entry.first);
+    for (const auto& entry : after) keys.insert(entry.first);
+    for (const SlotKey& key : keys) {
+        if (forced.count(key) != 0 || result_item_at(before, key) == result_item_at(after, key)) {
+            continue;
         }
+        append_result_slot(body, key, after, first);
     }
 }
 
@@ -207,19 +312,23 @@ bool write_move_slots_result(const contracts::QolItemWriteArgs& args,
                              bool force_requested_target = true) {
     InventoryResultSnapshot after{};
     if (!capture_inventory_result(&after)) return false;
-    std::array<bool, kResultBagCount * kResultSlotsPerBag> forced{};
+    const InventoryExtensionAccessResult access = inventory_extension();
+    ForcedSlots forced;
     std::string body = "{\"ok\":true,\"slots\":[";
     bool first = true;
-    if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
-        args.i1 < kResultSlotsPerBag) {
-        forced[inventory_result_index(args.i0, args.i1)] = true;
-        append_result_slot(body, args.i0, args.i1, after, &first);
+    SlotKey source{};
+    SlotKey target{};
+    const bool has_source = write_slot_key(args.i0, args.i1, access, &source);
+    const bool has_target = write_slot_key(args.i3, args.i4, access, &target);
+    if (has_source) {
+        forced.insert(source);
+        append_result_slot(body, source, after, &first);
     }
-    if (force_requested_target && args.i3 >= 0 && args.i3 < kResultBagCount &&
-        args.i4 >= 0 && args.i4 < kResultSlotsPerBag &&
-        (args.i0 != args.i3 || args.i1 != args.i4)) {
-        forced[inventory_result_index(args.i3, args.i4)] = true;
-        append_result_slot(body, args.i3, args.i4, after, &first);
+    const bool same_slot = has_source && has_target && source.space_id == target.space_id &&
+                           source.bag == target.bag && source.slot == target.slot;
+    if (force_requested_target && has_target && !same_slot) {
+        forced.insert(target);
+        append_result_slot(body, target, after, &first);
     }
     append_unforced_inventory_changes(body, before, after, forced, &first);
     body += "]}";
@@ -445,11 +554,21 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
             (void)copy_buffer(out, capacity, out_size, kBadGained, sizeof(kBadGained) - 1);
             return false;
         }
+        const InventoryExtensionAccessResult access = inventory_extension();
         body += ",\"gained\":[";
         for (uint32_t i = 0; i < operation_data.gained_count; ++i) {
             if (i != 0) body.push_back(',');
             const auto& item = operation_data.gained[i];
-            body += "{\"bag\":" + std::to_string(item.bag) +
+            WriteRef ref{};
+            if (!decode_write_bag(item.bag, access, &ref) || item.slot < 0) {
+                constexpr char kInvalidGained[] =
+                    "{\"ok\":false,\"error\":\"invalid gained item location\"}";
+                (void)copy_buffer(out, capacity, out_size, kInvalidGained,
+                                  sizeof(kInvalidGained) - 1);
+                return false;
+            }
+            body += "{\"space\":" + std::to_string(ref.space_id) +
+                    ",\"bag\":" + std::to_string(ref.bag) +
                     ",\"slot\":" + std::to_string(item.slot) +
                     ",\"category\":" + std::to_string(item.category) +
                     ",\"count\":" + std::to_string(item.count) + "}";
@@ -470,43 +589,41 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
     }
     if (tracks_inventory) {
         body += ",\"slots\":[";
-        std::array<bool, kResultBagCount * kResultSlotsPerBag> forced{};
+        const InventoryExtensionAccessResult access = inventory_extension();
+        ForcedSlots forced;
         if (kind == contracts::QolItemWriteKind::kUseItem ||
             kind == contracts::QolItemWriteKind::kSellItem ||
             kind == contracts::QolItemWriteKind::kDiscardItem) {
-            if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
-                args.i1 < kResultSlotsPerBag) {
-                forced[inventory_result_index(args.i0, args.i1)] = true;
+            SlotKey source{};
+            if (write_slot_key(args.i0, args.i1, access, &source)) {
+                forced.insert(source);
             }
         } else if (kind == contracts::QolItemWriteKind::kMoveItem) {
-            if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
-                args.i1 < kResultSlotsPerBag) {
-                forced[inventory_result_index(args.i0, args.i1)] = true;
-            }
-            if (args.i3 >= 0 && args.i3 < kResultBagCount && args.i4 >= 0 &&
-                args.i4 < kResultSlotsPerBag) {
-                forced[inventory_result_index(args.i3, args.i4)] = true;
-            }
+            SlotKey source{};
+            SlotKey target{};
+            if (write_slot_key(args.i0, args.i1, access, &source)) forced.insert(source);
+            if (write_slot_key(args.i3, args.i4, access, &target)) forced.insert(target);
         }
         if (kind == contracts::QolItemWriteKind::kUseItem &&
             (operation_data.flags & contracts::kQolItemInventoryStateHasGained) != 0) {
             for (uint32_t i = 0; i < operation_data.gained_count; ++i) {
                 const auto& gained = operation_data.gained[i];
-                if (gained.bag >= 0 && gained.bag < kResultBagCount && gained.slot >= 0 &&
-                    gained.slot < kResultSlotsPerBag) {
-                    forced[inventory_result_index(gained.bag, gained.slot)] = true;
+                SlotKey key{};
+                if (write_slot_key(gained.bag, gained.slot, access, &key)) {
+                    forced.insert(key);
                 }
             }
         }
         bool first_slot = true;
         if (kind == contracts::QolItemWriteKind::kMoveItem) {
-            if (args.i0 >= 0 && args.i0 < kResultBagCount && args.i1 >= 0 &&
-                args.i1 < kResultSlotsPerBag) {
-                append_result_slot(body, args.i0, args.i1, inventory_after, &first_slot);
-            }
-            if (args.i3 >= 0 && args.i3 < kResultBagCount && args.i4 >= 0 &&
-                args.i4 < kResultSlotsPerBag && (args.i0 != args.i3 || args.i1 != args.i4)) {
-                append_result_slot(body, args.i3, args.i4, inventory_after, &first_slot);
+            SlotKey source{};
+            SlotKey target{};
+            const bool has_source = write_slot_key(args.i0, args.i1, access, &source);
+            const bool has_target = write_slot_key(args.i3, args.i4, access, &target);
+            if (has_source) append_result_slot(body, source, inventory_after, &first_slot);
+            if (has_target && (!has_source || source.space_id != target.space_id ||
+                               source.bag != target.bag || source.slot != target.slot)) {
+                append_result_slot(body, target, inventory_after, &first_slot);
             }
             append_unforced_inventory_changes(body, inventory_before, inventory_after, forced,
                                               &first_slot);
@@ -669,7 +786,7 @@ bool write_item_party_state_result(const contracts::QolItemWriteArgs& args, char
             return false;
         }
         body += ",\"inventory\":[";
-        std::array<bool, kResultBagCount * kResultSlotsPerBag> forced{};
+        const ForcedSlots forced;
         bool first_slot = true;
         append_inventory_changes(body, inventory_before, inventory_after, forced, &first_slot);
         body.push_back(']');

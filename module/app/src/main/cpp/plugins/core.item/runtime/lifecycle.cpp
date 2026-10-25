@@ -157,7 +157,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         reset_ports();
         return 1;
     }
-    if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi)) {
+    if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi, g_port)) {
         if (g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
             (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
         }
@@ -193,7 +193,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
-    if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi)) {
+    if (!inventory_hooks::attach(ctx.sdk, ctx.game, &kItemFactsApi, g_port)) {
         log_message(ctx.sdk, "[core.item] inventory hooks attach unavailable");
         return;
     }

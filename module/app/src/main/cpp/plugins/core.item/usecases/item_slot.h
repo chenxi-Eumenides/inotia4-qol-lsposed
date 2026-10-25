@@ -4,6 +4,7 @@
 #include "../../../contracts/host_sdk.h"
 #include "../../../contracts/inventory_slot.h"
 #include "../../../contracts/item_facts.h"
+#include "../../../contracts/game_ports/item_port.h"
 
 namespace qol::features::inventory_hooks {
 
@@ -11,6 +12,7 @@ extern const contracts::QolInventorySlotApi kInventorySlotApi;
 
 void inventory_slot_bind(const contracts::QolHostSdk* sdk,
                          const contracts::QolGameHost* game,
-                         const contracts::ItemFactsApi* item_facts);
+                         const contracts::ItemFactsApi* item_facts,
+                         const contracts::QolItemPort* item_port);
 
 }  // namespace qol::features::inventory_hooks

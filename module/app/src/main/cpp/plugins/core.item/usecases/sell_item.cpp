@@ -20,6 +20,58 @@ namespace {
 const contracts::QolHostSdk* g_action_sdk = nullptr;
 const contracts::QolGameHost* g_action_game = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
+const contracts::QolItemPort* g_item_port = nullptr;
+
+bool read_space_count(int32_t space_id, int32_t* out_count) {
+    if (out_count == nullptr || g_item_port == nullptr || g_item_port->read.bag_count == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_item_port)) {
+        return false;
+    }
+    int32_t count = 0;
+    const QolResult result = g_item_port->read.bag_count(space_id, &count);
+    if (!contracts::succeeded(result)) {
+        if (space_id != contracts::kQolBagSpaceOriginal &&
+            (result.code == kQolErrUnsupported || result.code == kQolErrNotReady)) {
+            *out_count = 0;
+            return true;
+        }
+        return false;
+    }
+    if (count < 0) return false;
+    *out_count = count;
+    return true;
+}
+
+bool resolve_flat_bag(int32_t flat_bag, contracts::QolBagRef* out_ref) {
+    if (flat_bag < 0 || out_ref == nullptr) return false;
+    int32_t original_count = 0;
+    int32_t c18_count = 0;
+    int32_t extension_count = 0;
+    if (!read_space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
+        !read_space_count(contracts::kQolBagSpaceC18, &c18_count) ||
+        !read_space_count(contracts::kQolBagSpaceFirstRegistered, &extension_count)) {
+        return false;
+    }
+    if (flat_bag < original_count) {
+        *out_ref = {contracts::kQolBagSpaceOriginal, flat_bag};
+        return true;
+    }
+    int32_t remaining = flat_bag - original_count;
+    if (remaining < c18_count) {
+        *out_ref = {contracts::kQolBagSpaceC18, remaining};
+        return true;
+    }
+    remaining -= c18_count;
+    if (remaining >= extension_count) return false;
+    *out_ref = {contracts::kQolBagSpaceFirstRegistered, remaining};
+    return true;
+}
+
+int32_t host_bag(const contracts::QolBagRef& ref) {
+    return ref.space_id == contracts::kQolBagSpaceOriginal
+               ? ref.bag
+               : contracts::kQolOriginalBagCount + ref.bag;
+}
 
 struct SellTransactionContext {
     const contracts::QolGameHost* game = nullptr;
@@ -81,7 +133,9 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         }
     }
     if (facts == nullptr || facts->state == nullptr || g_action_game == nullptr ||
-        g_item_facts == nullptr || g_item_facts->item_ref_at == nullptr) {
+        g_item_facts == nullptr || g_item_facts->item_ref_at == nullptr || g_item_port == nullptr ||
+        g_item_port->read.item_at == nullptr || g_item_port->read.bag_info == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_item_port)) {
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
         return result;
     }
@@ -91,13 +145,30 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         result.status = contracts::InventorySellStatus::kNotInWorld;
         return result;
     }
-    if (bag == 5) {
+    contracts::QolBagRef bag_ref{};
+    if (!resolve_flat_bag(bag, &bag_ref)) {
+        result.status = contracts::InventorySellStatus::kStale;
+        return result;
+    }
+    if (bag_ref.space_id == contracts::kQolBagSpaceOriginal &&
+        bag_ref.bag == contracts::kQolTaskBagIndex) {
         result.status = contracts::InventorySellStatus::kTaskBagExcluded;
         return result;
     }
-    contracts::QolInventoryItemRef item_ref{};
-    if (!contracts::succeeded(g_item_facts->item_ref_at(bag, slot, &item_ref))) {
+    contracts::QolBagInfo bag_info{};
+    if (!contracts::succeeded(g_item_port->read.bag_info(&bag_ref, &bag_info)) ||
+        bag_info.capacity < 0 || slot < 0 || slot >= bag_info.capacity) {
         result.status = contracts::InventorySellStatus::kEmptySlot;
+        return result;
+    }
+    contracts::QolInventoryItemRef item_ref{};
+    if (!contracts::succeeded(g_item_port->read.item_at(&bag_ref, slot, &item_ref))) {
+        result.status = contracts::InventorySellStatus::kEmptySlot;
+        return result;
+    }
+    if (item_ref.space_id != bag_ref.space_id || item_ref.bag != bag_ref.bag ||
+        item_ref.slot != slot) {
+        result.status = contracts::InventorySellStatus::kStale;
         return result;
     }
     if (item_ref.item.slot == 0 || item_ref.item.generation == 0) {
@@ -128,8 +199,10 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
         if (contracts::succeeded(required) && iface != nullptr)
             eb_prefix = static_cast<const contracts::ExtensionBagApi*>(iface);
     }
-    const bool logical_bag = eb_prefix != nullptr && eb_prefix->is_logical_bag != nullptr &&
-                             eb_prefix->is_logical_bag(bag);
+    const int32_t resolved_host_bag = host_bag(bag_ref);
+    const bool logical_bag = bag_ref.space_id == contracts::kQolBagSpaceFirstRegistered &&
+                             eb_prefix != nullptr && eb_prefix->is_logical_bag != nullptr &&
+                             eb_prefix->is_logical_bag(resolved_host_bag);
     const bool extension_item = kind == contracts::QolInventoryItemKind::kProvider;
     if (extension_item != logical_bag) {
         result.status = extension_item ? contracts::InventorySellStatus::kExtensionSaleUnavailable
@@ -145,7 +218,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
             result.status = contracts::InventorySellStatus::kStale;
             return result;
         }
-        const int32_t internal_bag = eb_prefix->internal_index(bag);
+        const int32_t internal_bag = eb_prefix->internal_index(resolved_host_bag);
         if (internal_bag < 0 ||
             !eb_prefix->identify_native_item(item_ref.item, &identified_bag, &identified_slot) ||
             identified_bag != internal_bag || identified_slot != slot) {
@@ -172,7 +245,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
             result.status = contracts::InventorySellStatus::kExtensionSaleUnavailable;
             return result;
         }
-    } else if (bag < 0 || bag > 4) {
+    } else if (bag_ref.space_id == contracts::kQolBagSpaceFirstRegistered) {
         result.status = contracts::InventorySellStatus::kStale;
         return result;
     }
@@ -215,7 +288,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
     result.price = price;
     result.count = count;
     SellTransactionContext transaction{g_action_game, eb_prefix, eb_sale, item_ref.item,
-                                        bag, slot, extension_item, kQolOk};
+                                        resolved_host_bag, slot, extension_item, kQolOk};
     result.status = run_sale_transaction(
         price, SaleTransactionOps{&transaction, &sell_credit, &sell_remove, &sell_refund});
     if (result.status == contracts::InventorySellStatus::kRollbackFailed) {
@@ -230,6 +303,7 @@ contracts::InventorySellResult inventory_action_sell(int32_t bag, int32_t slot,
                      source != nullptr ? source : "unknown", bag, slot);
     }
     if (result.status == contracts::InventorySellStatus::kOk && !extension_item &&
+        bag_ref.space_id == contracts::kQolBagSpaceOriginal &&
         eb_prefix != nullptr && eb_prefix->sync_projected_slot != nullptr)
         (void)eb_prefix->sync_projected_slot(bag, slot);
     return result;
@@ -248,7 +322,9 @@ const contracts::InventoryActionApi kInventoryActionApi{
 
 bool attach(const contracts::QolHostSdk* sdk, const contracts::QolGameHost* game,
             const contracts::ItemFactsApi* item_facts) {
+    const contracts::QolItemPort* const item_port = detail::bound_item_port();
     if (sdk == nullptr || game == nullptr || !contracts::item_facts_api_size_valid(item_facts) ||
+        item_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(item_port) ||
         !inventory_native_hook_bind_sdk(sdk) || !inventory_native_hook_bind_game(game) ||
         !inventory_native_hook_bind_item_facts(item_facts)) {
         detach();
@@ -257,7 +333,8 @@ bool attach(const contracts::QolHostSdk* sdk, const contracts::QolGameHost* game
     g_action_sdk = sdk;
     g_action_game = game;
     g_item_facts = item_facts;
-    inventory_slot_bind(sdk, game, item_facts);
+    g_item_port = item_port;
+    inventory_slot_bind(sdk, game, item_facts, item_port);
     inventory_native_hook_set_support(true);
     return true;
 }
@@ -266,7 +343,9 @@ void detach() {
     g_action_sdk = nullptr;
     g_action_game = nullptr;
     g_item_facts = nullptr;
-    inventory_slot_bind(nullptr, nullptr, nullptr);
+    g_item_port = nullptr;
+    detail::bound_item_port() = nullptr;
+    inventory_slot_bind(nullptr, nullptr, nullptr, nullptr);
     (void)inventory_native_hook_bind_sdk(nullptr);
     (void)inventory_native_hook_bind_game(nullptr);
     (void)inventory_native_hook_bind_item_facts(nullptr);

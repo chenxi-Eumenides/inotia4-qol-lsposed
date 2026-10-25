@@ -62,7 +62,7 @@ uint32_t native_equip_sell_count(uint32_t field,
 VanillaSellRoute vanilla_sell_route(int32_t bag, bool count_encoded,
                                     uint32_t canonical_count, bool button_dry_run) {
     // 只有实际使用 S2 数量表示的物品由模块接管；原版可表示物品与任务袋透传。
-    if (bag == 5 || !count_encoded || canonical_count <= 127u) {
+    if (bag == qol::contracts::kQolTaskBagIndex || !count_encoded || canonical_count <= 127u) {
         return VanillaSellRoute::kBackup;
     }
     // 按钮预演只回填展示金额，绝不结算；弹窗 OK 才真实接管。

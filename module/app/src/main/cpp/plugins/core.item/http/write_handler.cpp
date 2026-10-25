@@ -109,6 +109,144 @@ bool write_has_member(const JsonValue& object, const char* key) {
     return write_member_last(object, key) != nullptr;
 }
 
+struct WriteRef {
+    int32_t space_id;
+    int32_t bag;
+    int32_t slot;
+};
+
+enum class WriteRefStatus {
+    kOk,
+    kInvalid,
+    kTaskBag,
+    kC18HostArbitration,
+};
+
+bool parse_optional_space(const JsonValue& object, const char* field, bool* present,
+                          int32_t* out_space) {
+    if (present == nullptr || out_space == nullptr) return false;
+    const JsonValue* value = write_member_last(object, field);
+    *present = value != nullptr;
+    if (value == nullptr) return true;
+    if (write_has_invalid_number(object, field)) return false;
+    const int32_t space = write_opt_int(object, field, -1);
+    if (space < 0) return false;
+    *out_space = space;
+    return true;
+}
+
+bool write_space_count(int32_t space_id, int32_t* out_count) {
+    if (out_count == nullptr || g_port == nullptr || g_port->read.bag_count == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+        return false;
+    }
+    int32_t count = 0;
+    const QolResult result = g_port->read.bag_count(space_id, &count);
+    if (!contracts::succeeded(result)) {
+        if (space_id != contracts::kQolBagSpaceOriginal &&
+            (result.code == kQolErrUnsupported || result.code == kQolErrNotReady)) {
+            *out_count = 0;
+            return true;
+        }
+        return false;
+    }
+    if (count < 0) return false;
+    *out_count = count;
+    return true;
+}
+
+bool write_provider_owns_bag(int32_t bag) {
+    const InventoryExtensionAccessResult access = inventory_extension();
+    return access.provider != nullptr && access.provider->owns_bag != nullptr &&
+           access.provider->owns_bag(bag) != 0;
+}
+
+WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t requested_space,
+                                 int32_t slot, bool allow_auto_slot, WriteRef* out) {
+    if (out == nullptr || requested_bag < 0 || slot < (allow_auto_slot ? -1 : 0)) {
+        return WriteRefStatus::kInvalid;
+    }
+    int32_t original_count = 0;
+    int32_t c18_count = 0;
+    int32_t extension_count = 0;
+    if (!write_space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
+        !write_space_count(contracts::kQolBagSpaceC18, &c18_count) ||
+        !write_space_count(contracts::kQolBagSpaceFirstRegistered, &extension_count)) {
+        return WriteRefStatus::kInvalid;
+    }
+
+    WriteRef ref{};
+    if (has_space) {
+        if (requested_space == contracts::kQolBagSpaceOriginal) {
+            ref = {requested_space, requested_bag, slot};
+        } else if (requested_space == contracts::kQolBagSpaceC18 ||
+                   requested_space == contracts::kQolBagSpaceFirstRegistered) {
+            ref = {requested_space, requested_bag, slot};
+        } else {
+            return WriteRefStatus::kInvalid;
+        }
+    } else {
+        int32_t remaining = requested_bag;
+        if (remaining < original_count) {
+            ref = {contracts::kQolBagSpaceOriginal, remaining, slot};
+        } else {
+            remaining -= original_count;
+            if (remaining < c18_count) {
+                ref = {contracts::kQolBagSpaceC18, remaining, slot};
+            } else {
+                remaining -= c18_count;
+                if (remaining >= extension_count) return WriteRefStatus::kInvalid;
+                ref = {contracts::kQolBagSpaceFirstRegistered, remaining, slot};
+            }
+        }
+    }
+
+    const int32_t count = ref.space_id == contracts::kQolBagSpaceOriginal
+                              ? original_count
+                              : ref.space_id == contracts::kQolBagSpaceC18 ? c18_count
+                                                                           : extension_count;
+    if (ref.bag < 0 || ref.bag >= count) return WriteRefStatus::kInvalid;
+    if (ref.space_id == contracts::kQolBagSpaceOriginal &&
+        ref.bag == contracts::kQolTaskBagIndex) {
+        return WriteRefStatus::kTaskBag;
+    }
+    const int32_t host_bag = ref.space_id == contracts::kQolBagSpaceOriginal
+                                 ? ref.bag
+                                 : contracts::kQolOriginalBagCount + ref.bag;
+    if (ref.space_id == contracts::kQolBagSpaceC18 && write_provider_owns_bag(host_bag)) {
+        return WriteRefStatus::kC18HostArbitration;
+    }
+    if (g_port == nullptr || g_port->read.bag_info == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+        return WriteRefStatus::kInvalid;
+    }
+    const contracts::QolBagRef bag_ref{ref.space_id, ref.bag};
+    contracts::QolBagInfo info{};
+    if (!contracts::succeeded(g_port->read.bag_info(&bag_ref, &info)) || info.capacity < 0 ||
+        ((!allow_auto_slot || slot >= 0) && slot >= info.capacity)) {
+        return WriteRefStatus::kInvalid;
+    }
+    *out = ref;
+    return WriteRefStatus::kOk;
+}
+
+int32_t write_port_bag(const WriteRef& ref) {
+    return ref.space_id == contracts::kQolBagSpaceOriginal
+               ? ref.bag
+               : contracts::kQolOriginalBagCount + ref.bag;
+}
+
+QolResult write_ref_error(WriteRefStatus status, contracts::HttpRes* response,
+                          const char* invalid_message) {
+    if (status == WriteRefStatus::kTaskBag) {
+        return response_error(response, 400, "task bag excluded");
+    }
+    if (status == WriteRefStatus::kC18HostArbitration) {
+        return response_error(response, 409, "c18 bag write requires host arbitration");
+    }
+    return response_error(response, 400, invalid_message);
+}
+
 QolResult invalid_write_number_error(const char* key, contracts::HttpRes* response) {
     const std::string message = std::string("bad value for ") + key;
     return response_error(response, 400, message.c_str());
@@ -207,35 +345,79 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
         case contracts::QolItemWriteKind::kUseItem:
         case contracts::QolItemWriteKind::kSellItem:
         case contracts::QolItemWriteKind::kDiscardItem:
+        {
             if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
             if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
+            bool has_space = false;
+            int32_t space = -1;
+            if (!parse_optional_space(body_object, "space", &has_space, &space)) {
+                return invalid_write_number_error("space", response);
+            }
             args.i0 = write_opt_int(body_object, "bag", -1);
             args.i1 = write_opt_int(body_object, "slot", -1);
             if (args.i0 < 0 || args.i1 < 0) return response_error(response, 400, "bag/slot required");
+            WriteRef ref{};
+            const WriteRefStatus ref_status =
+                resolve_write_ref(args.i0, has_space, space, args.i1, false, &ref);
+            if (ref_status != WriteRefStatus::kOk) {
+                return write_ref_error(ref_status, response, "bag/slot required");
+            }
+            args.i0 = write_port_bag(ref);
             break;
-        case contracts::QolItemWriteKind::kMoveItem:
+        }
+        case contracts::QolItemWriteKind::kMoveItem: {
             if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
             if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
             if (write_has_invalid_number(body_object, "count")) return invalid_write_number_error("count", response);
             if (write_has_invalid_number(body_object, "to_bag")) return invalid_write_number_error("to_bag", response);
             if (write_has_invalid_number(body_object, "to_slot")) return invalid_write_number_error("to_slot", response);
+            bool has_space = false;
+            bool has_to_space = false;
+            int32_t space = -1;
+            int32_t to_space = -1;
+            if (!parse_optional_space(body_object, "space", &has_space, &space)) {
+                return invalid_write_number_error("space", response);
+            }
+            if (!parse_optional_space(body_object, "to_space", &has_to_space, &to_space)) {
+                return invalid_write_number_error("to_space", response);
+            }
             if (!write_has_member(body_object, "bag") || !write_has_member(body_object, "slot") ||
                 !write_has_member(body_object, "count") || !write_has_member(body_object, "to_bag") ||
                 !write_has_member(body_object, "to_slot")) {
                 return response_error(response, 400,
-                                      "bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)");
+                                      "bag/slot/count/to_bag/to_slot required");
             }
             args.i0 = write_opt_int(body_object, "bag", -1);
             args.i1 = write_opt_int(body_object, "slot", -1);
             args.i2 = write_opt_int(body_object, "count", -1);
             args.i3 = write_opt_int(body_object, "to_bag", -1);
             args.i4 = write_opt_int(body_object, "to_slot", -1);
-            if (args.i0 < 0 || args.i0 > 10 || args.i1 < 0 || args.i2 <= 0 || args.i3 < 0 ||
-                args.i3 > 10 || args.i4 < -1) {
+            if (args.i0 < 0 || args.i1 < 0 || args.i2 <= 0 || args.i3 < 0 || args.i4 < -1) {
                 return response_error(response, 400,
-                                      "bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)");
+                                      "bag/slot/count/to_bag/to_slot required");
+            }
+            {
+                WriteRef source{};
+                WriteRef target{};
+                const WriteRefStatus source_status =
+                    resolve_write_ref(args.i0, has_space, space, args.i1, false, &source);
+                if (source_status != WriteRefStatus::kOk) {
+                    return write_ref_error(
+                        source_status, response,
+                        "bag/slot/count/to_bag/to_slot required");
+                }
+                const WriteRefStatus target_status = resolve_write_ref(
+                    args.i3, has_to_space, to_space, args.i4, true, &target);
+                if (target_status != WriteRefStatus::kOk) {
+                    return write_ref_error(
+                        target_status, response,
+                        "bag/slot/count/to_bag/to_slot required");
+                }
+                args.i0 = write_port_bag(source);
+                args.i3 = write_port_bag(target);
             }
             break;
+        }
         case contracts::QolItemWriteKind::kAcceptDice:
         case contracts::QolItemWriteKind::kRejectDice:
             break;
@@ -245,11 +427,28 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
             if (write_has_invalid_number(body_object, "category")) return invalid_write_number_error("category", response);
             if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
             if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
-            args.i5 = write_opt_int(body_object, "category", -1);
-            args.i1 = write_opt_int(body_object, "bag", -1);
-            args.i2 = write_opt_int(body_object, "slot", -1);
-            if (args.i5 < 0 && (args.i1 < 0 || args.i2 < 0)) {
-                return response_error(response, 400, "bag+slot or category required");
+            {
+                bool has_space = false;
+                int32_t space = -1;
+                if (!parse_optional_space(body_object, "space", &has_space, &space)) {
+                    return invalid_write_number_error("space", response);
+                }
+                args.i5 = write_opt_int(body_object, "category", -1);
+                args.i1 = write_opt_int(body_object, "bag", -1);
+                args.i2 = write_opt_int(body_object, "slot", -1);
+                if (args.i5 < 0 && (args.i1 < 0 || args.i2 < 0)) {
+                    return response_error(response, 400, "bag+slot or category required");
+                }
+                if (args.i1 >= 0 && args.i2 >= 0) {
+                    WriteRef ref{};
+                    const WriteRefStatus ref_status =
+                        resolve_write_ref(args.i1, has_space, space, args.i2, false, &ref);
+                    if (ref_status != WriteRefStatus::kOk) {
+                        return write_ref_error(ref_status, response,
+                                               "bag+slot or category required");
+                    }
+                    args.i1 = write_port_bag(ref);
+                }
             }
             break;
         case contracts::QolItemWriteKind::kUnequipItem:
@@ -266,11 +465,26 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
             if (write_has_invalid_number(body_object, "bag")) return invalid_write_number_error("bag", response);
             if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
             if (write_has_invalid_number(body_object, "equip_slot")) return invalid_write_number_error("equip_slot", response);
-            args.i1 = write_opt_int(body_object, "bag", -1);
-            args.i2 = write_opt_int(body_object, "slot", -1);
-            args.i3 = write_opt_int(body_object, "equip_slot", -1);
-            if (args.i1 < 0 || args.i2 < 0 || args.i3 < 0) {
-                return response_error(response, 400, "bag/slot/equip_slot required");
+            {
+                bool has_space = false;
+                int32_t space = -1;
+                if (!parse_optional_space(body_object, "space", &has_space, &space)) {
+                    return invalid_write_number_error("space", response);
+                }
+                args.i1 = write_opt_int(body_object, "bag", -1);
+                args.i2 = write_opt_int(body_object, "slot", -1);
+                args.i3 = write_opt_int(body_object, "equip_slot", -1);
+                if (args.i1 < 0 || args.i2 < 0 || args.i3 < 0) {
+                    return response_error(response, 400, "bag/slot/equip_slot required");
+                }
+                WriteRef ref{};
+                const WriteRefStatus ref_status =
+                    resolve_write_ref(args.i1, has_space, space, args.i2, false, &ref);
+                if (ref_status != WriteRefStatus::kOk) {
+                    return write_ref_error(ref_status, response,
+                                           "bag/slot/equip_slot required");
+                }
+                args.i1 = write_port_bag(ref);
             }
             break;
         case contracts::QolItemWriteKind::kShopBuy:
