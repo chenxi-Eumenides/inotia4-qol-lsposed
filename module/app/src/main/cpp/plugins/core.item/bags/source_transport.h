@@ -16,5 +16,6 @@ QolResult remove_item(int32_t space, contracts::QolItemHandle expected, int32_t 
                       contracts::QolBagMutationResult* out);
 QolResult locate(int32_t space, contracts::QolItemHandle item,
                  contracts::QolBagRef* out, int32_t* out_slot);
+bool belongs_to_registered_source(contracts::QolItemHandle item);
 
 }  // namespace qol::features::core_item::bags::source_transport

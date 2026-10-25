@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "plugins/core.item/bags/snapshot_store.h"
+#include "plugins/core.item/bags/source_transport.h"
 
 namespace qol::features::core_item {
 namespace {
@@ -64,6 +65,12 @@ QolResult append_item_record(const contracts::QolInventoryItemRef& item, int32_t
                              int32_t bag, int32_t capacity, bags::BagSnapshot* snapshot) {
     if (snapshot == nullptr || item.space_id != space_id || item.bag != bag || item.slot < 0 ||
         item.slot >= capacity || item.item.slot == 0 || item.item.generation == 0) {
+        return contracts::ok();
+    }
+    const bool native_space = space_id == contracts::kQolBagSpaceOriginal ||
+                              space_id == contracts::kQolBagSpaceC18;
+    if (native_space && registered_bag_source_count() != 0 &&
+        bags::source_transport::belongs_to_registered_source(item.item)) {
         return contracts::ok();
     }
 

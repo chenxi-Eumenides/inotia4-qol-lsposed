@@ -6,6 +6,8 @@ namespace qol::features::core_item::bags {
 namespace {
 
 constexpr int32_t kProbeBagCap = 128;
+constexpr int32_t kFirstExtensionLogicalBag = 6;
+constexpr int32_t kLastExtensionLogicalBag = 10;
 const contracts::QolInventoryExtensionProvider* g_provider = nullptr;
 
 QolResult unsupported() {
@@ -17,6 +19,18 @@ QolResult unsupported() {
 QolResult provider_unavailable() {
     constexpr char kMessage[] = "extension bag provider unavailable";
     return contracts::error(kQolErrNotReady, kMessage,
+                            static_cast<uint32_t>(sizeof(kMessage) - 1));
+}
+
+QolResult not_found() {
+    constexpr char kMessage[] = "extension bag item not found";
+    return contracts::error(kQolErrNotFound, kMessage,
+                            static_cast<uint32_t>(sizeof(kMessage) - 1));
+}
+
+QolResult invalid_identified_location() {
+    constexpr char kMessage[] = "extension bag identify returned invalid location";
+    return contracts::error(kQolErrInternal, kMessage,
                             static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
 
@@ -131,8 +145,31 @@ QolResult remove(contracts::QolItemHandle, int32_t,
     return unsupported();
 }
 
-QolResult identify(contracts::QolItemHandle, contracts::QolBagRef*, int32_t*) {
-    return unsupported();
+QolResult identify(contracts::QolItemHandle item, contracts::QolBagRef* out_ref,
+                   int32_t* out_slot) {
+    if (out_ref == nullptr || out_slot == nullptr) {
+        constexpr char kMessage[] = "invalid extension item location output";
+        return contracts::error(kQolErrInvalidArgument, kMessage,
+                                static_cast<uint32_t>(sizeof(kMessage) - 1));
+    }
+    if (g_provider == nullptr || g_provider->identify_native_item == nullptr) {
+        return unsupported();
+    }
+
+    int32_t logical_bag = -1;
+    int32_t slot = -1;
+    if (g_provider->identify_native_item(item, &logical_bag, &slot) == 0) {
+        return not_found();
+    }
+    if (logical_bag < kFirstExtensionLogicalBag ||
+        logical_bag > kLastExtensionLogicalBag || slot < 0) {
+        return invalid_identified_location();
+    }
+
+    *out_ref = contracts::QolBagRef{contracts::kQolBagSpaceFirstRegistered,
+                                    logical_bag - kFirstExtensionLogicalBag};
+    *out_slot = slot;
+    return contracts::ok();
 }
 
 QolResult use(contracts::QolBagRef, int32_t) {

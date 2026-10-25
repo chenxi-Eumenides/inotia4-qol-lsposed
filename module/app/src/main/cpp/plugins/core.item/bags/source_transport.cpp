@@ -69,4 +69,19 @@ QolResult locate(int32_t space, contracts::QolItemHandle item,
     return result;
 }
 
+bool belongs_to_registered_source(contracts::QolItemHandle item) {
+    if (!valid_handle(item)) return false;
+
+    const uint32_t source_count = registered_bag_source_count();
+    for (uint32_t index = 0; index < source_count; ++index) {
+        const contracts::QolBagSource* source = registered_bag_source_at(index);
+        if (source == nullptr || source->identify == nullptr) continue;
+
+        contracts::QolBagRef ref{};
+        int32_t slot = -1;
+        if (contracts::succeeded(source->identify(item, &ref, &slot))) return true;
+    }
+    return false;
+}
+
 }  // namespace qol::features::core_item::bags::source_transport
