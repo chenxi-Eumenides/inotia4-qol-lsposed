@@ -305,6 +305,10 @@ int32_t g_state_write_count = 2;
 int32_t g_state_move_count = -1;
 int32_t g_state_move_to_bag = -1;
 int32_t g_state_move_to_slot = -1;
+int g_state_move_handle_calls = 0;
+int32_t g_state_move_handle_count = -1;
+bool g_state_move_handle_fail = false;
+qol::contracts::QolItemHandle g_loaded_item_handle{0x4000, 1};
 int32_t g_state_add_category = -1;
 int32_t g_state_add_count = -1;
 int32_t g_state_add_socket = -1;
@@ -695,6 +699,41 @@ QolResult fake_state_add(int32_t category, int32_t count, int32_t socket_total,
                             category, count, out);
 }
 
+QolResult fake_load_item(const uint8_t*, uint32_t,
+                         qol::contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad loaded item", 15);
+    }
+    *out_item = g_loaded_item_handle;
+    return qol::contracts::ok();
+}
+
+QolResult fake_move_handle(qol::contracts::QolItemHandle, int32_t count,
+                           const qol::contracts::QolBagRef* ref, int32_t slot,
+                           qol::contracts::QolItemInventoryStateWriteResult* out) {
+    ++g_state_move_handle_calls;
+    g_state_move_handle_count = count;
+    if (ref == nullptr || out == nullptr || ref->space_id != 0 || ref->bag < 0 ||
+        ref->bag >= 6 || slot < 0 || slot >= 16 || count <= 0) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad handle move", 15);
+    }
+    *out = {};
+    if (g_state_move_handle_fail) {
+        constexpr char message[] = "move handle failed";
+        std::memcpy(out->error_message, message, sizeof(message));
+        out->error_message_len = static_cast<uint32_t>(sizeof(message) - 1);
+        return qol::contracts::error(kQolErrInternal, out->error_message,
+                                     out->error_message_len);
+    }
+    const uint32_t current = g_inventory_slot_count[ref->bag][slot];
+    g_inventory_slot_present[ref->bag][slot] = true;
+    g_inventory_slot_count[ref->bag][slot] = current + static_cast<uint32_t>(count);
+    out->gained[0] = {ref->bag, slot, 10, count};
+    out->gained_count = 1;
+    out->flags |= qol::contracts::kQolItemInventoryStateHasGained;
+    return qol::contracts::ok();
+}
+
 QolResult fake_party_write(int32_t kind, int32_t role, int32_t arg1, int32_t arg2,
                            int32_t arg3, qol::contracts::QolItemInventoryStateWriteResult* out) {
     ++g_party_write_calls;
@@ -768,9 +807,10 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     &fake_state_unequip,
     &fake_state_put_jewel,
     &fake_state_enchant,
+    &fake_load_item,
     nullptr,
     nullptr,
-    nullptr,
+    &fake_move_handle,
     nullptr,
     nullptr,
     nullptr,
@@ -1590,32 +1630,51 @@ void test_write_routes() {
     CHECK(g_state_write_arg0 == 1 && g_state_write_arg1 == 2);
     CHECK(g_state_move_count == 4 && g_state_move_to_bag == 0 && g_state_move_to_slot == 3);
 
-    // 注册袋源移动通过 export/import/remove 精确转移请求数量。
+    // 注册袋源移入已占用原生槽时通过 move_handle 合并，失败结果仍为稳定 JSON。
     CHECK(set_fake_registered_source(true));
     g_inventory_slot_present[6][2] = true;
     g_inventory_slot_count[6][2] = 3;
+    g_inventory_slot_present[0][4] = true;
+    g_inventory_slot_count[0][4] = 2;
     g_bag_source_export_calls = 0;
     g_bag_source_export_fail = false;
-    g_state_write_count = 1;
+    g_state_move_handle_calls = 0;
+    g_state_move_handle_count = -1;
+    g_state_move_handle_fail = false;
     CHECK(dispatch_post("/api/item/inventory/move_item",
-                        "{\"bag\":\"6\",\"slot\":\"2\",\"count\":\"1\","
-                        "\"to_bag\":\"7\",\"to_slot\":\"-1\"}",
+                        "{\"space\":2,\"bag\":0,\"slot\":2,\"count\":1,"
+                        "\"to_space\":0,\"to_bag\":0,\"to_slot\":4}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
     CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
-    CHECK(std::string(result, result_size) ==
-           "{\"ok\":true,\"slots\":[" + expected_slot_record(0, 2, expected_item_at_slot(2, 2), 2) + "," +
-                expected_slot_record(1, 0, expected_item_at_slot(0, 1), 2) + "]}");
+    const std::string merge_result_expected =
+        "{\"ok\":true,\"slots\":[" +
+        expected_slot_record(0, 4, expected_item_at_slot(4, 3)) + "," +
+        expected_slot_record(0, 2, expected_item_at_slot(2, 2), 2) + "]}";
+    CHECK(std::string(result, result_size) == merge_result_expected);
     CHECK(g_bag_source_export_calls == 1);
-    const int state_calls_before_missing = g_state_write_calls;
-    g_bag_source_export_fail = true;
+    CHECK(g_state_move_handle_calls == 1 && g_state_move_handle_count == 1 &&
+          g_inventory_slot_count[0][4] == 3);
+    g_state_move_handle_fail = true;
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"space\":2,\"bag\":0,\"slot\":2,\"count\":1,"
+                        "\"to_space\":0,\"to_bag\":0,\"to_slot\":4}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                             &result_size));
-    CHECK(std::string(result, result_size) == "{\"ok\":false,\"error\":\"move failed\"}");
-    CHECK(g_bag_source_export_calls == 2);
-    CHECK(g_state_write_calls == state_calls_before_missing);
-    g_bag_source_export_fail = false;
+    const std::string failed_transfer =
+        "{\"ok\":false,\"error\":\"target bag rejected the transferred item\"}";
+    CHECK(std::string(result, result_size) == failed_transfer &&
+          result_size == failed_transfer.size() &&
+          std::string(result, result_size).find('\0') == std::string::npos &&
+          g_bag_source_export_calls == 2 && g_state_move_handle_calls == 2 &&
+          g_inventory_slot_count[6][2] == 2 && g_inventory_slot_count[0][4] == 3);
+    g_state_move_handle_fail = false;
+    g_inventory_slot_present[6][2] = false;
+    g_inventory_slot_count[6][2] = 0;
+    g_inventory_slot_present[0][4] = false;
+    g_inventory_slot_count[0][4] = 0;
 
     // source 失活时，旧 flat bag 请求 fail-closed，不再进入 native write port。
     CHECK(set_fake_registered_source(false));

@@ -179,7 +179,11 @@ QolResult enchant(int32_t role, int32_t bag, int32_t slot, int32_t equip_slot,
 QolResult move_handle(contracts::QolItemHandle item, int32_t count,
                       const contracts::QolBagRef* ref, int32_t slot,
                       contracts::QolItemInventoryStateWriteResult* out) {
-    return qol::game::ops::move_handle(item, count, ref, slot, out);
+    const QolResult result = qol::game::ops::move_handle(item, count, ref, slot, out);
+    if (contracts::succeeded(result)) return result;
+    const QolResult cleanup = qol::game::ops::free_loaded_item(item);
+    if (!contracts::succeeded(cleanup) && cleanup.code != kQolErrNotFound) return cleanup;
+    return result;
 }
 
 QolResult equip_handle(int32_t role, contracts::QolItemHandle item, int32_t equip_slot,

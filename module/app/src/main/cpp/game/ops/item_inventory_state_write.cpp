@@ -147,6 +147,21 @@ QolResult write_item_canonical_count(void* item, uint32_t count) {
     return api->write_encoded_field(item, updated);
 }
 
+QolResult write_item_count_in_mode(void* item, uint32_t count, int32_t extended) {
+    const contracts::QolItemCountApi* api = item_count_api_if_resident();
+    if (api == nullptr || api->read_encoded_field == nullptr ||
+        api->field_from_canonical == nullptr || api->write_encoded_field == nullptr) {
+        return transfer_error(kQolErrNotReady, "item count writer unavailable");
+    }
+    uint32_t field = 0;
+    QolResult result = api->read_encoded_field(item, &field);
+    if (!contracts::succeeded(result)) return result;
+    uint32_t updated = 0;
+    result = api->field_from_canonical(field, count, extended, &updated);
+    if (!contracts::succeeded(result)) return result;
+    return api->write_encoded_field(item, updated);
+}
+
 // 原版物理袋数量（0..5，含任务袋）；provider 认领的袋号由 provider 自管，本快照只覆盖物理袋。
 constexpr int kOriginalInventoryBagCount = 6;
 
@@ -603,10 +618,6 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
         return item_error(out, kQolErrInvalidArgument, "invalid native bag slot");
     }
     if (count <= 0) return item_error(out, kQolErrInvalidArgument, "bad count");
-    if (fn_inven_move_item == nullptr) {
-        return item_error(out, kQolErrUnsupported, "symbol not resolved");
-    }
-
     void* item = nullptr;
     QolResult result = resolve_loaded_item(handle, &item);
     if (!contracts::succeeded(result)) return item_error(out, result, "invalid loaded item");
@@ -622,6 +633,42 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
         return item_error(out, kQolErrInvalidArgument, "move count exceeds stack count");
     }
 
+    uint32_t stack_limit = 1;
+    const contracts::QolItemCountApi* count_api = item_count_api_if_resident();
+    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
+    int32_t extended = 0;
+    if (encoding == contracts::QolItemCountEncoding::kEncoded) {
+        if (count_api == nullptr || count_api->read_extended_mode == nullptr ||
+            count_api->view_limit == nullptr) {
+            return item_error(out, kQolErrNotReady, "item count writer unavailable");
+        }
+        uint8_t extended_mode = 0;
+        result = count_api->read_extended_mode(&extended_mode);
+        if (result.code == kQolErrNotReady) {
+            // An unapplied stack-limit group uses the legacy 99-item encoding.
+            extended = 0;
+        } else if (!contracts::succeeded(result)) {
+            return item_error(out, result, "item count mode unavailable");
+        } else {
+            extended = extended_mode != 0 ? 1 : 0;
+        }
+        result = count_api->view_limit(extended, &stack_limit);
+        if (!contracts::succeeded(result)) {
+            return item_error(out, result, "item stack limit unavailable");
+        }
+        if (static_cast<uint32_t>(count) > stack_limit) {
+            return item_error(out, kQolErrBlocked, "move count exceeds native stack limit");
+        }
+        if (static_cast<uint32_t>(count) != source_count) {
+            result = write_item_count_in_mode(item, static_cast<uint32_t>(count), extended);
+            if (!contracts::succeeded(result)) {
+                return item_error(out, result, "item count update failed");
+            }
+        }
+    } else if (encoding != contracts::QolItemCountEncoding::kNotEncoded || count != 1) {
+        return item_error(out, kQolErrUnsupported, "item stack encoding unavailable");
+    }
+
     contracts::QolBagInfo bag_info{};
     result = inventory_bag_info(ref, &bag_info);
     if (!contracts::succeeded(result)) return item_error(out, result, "native bag unavailable");
@@ -632,6 +679,8 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
 
     int32_t target_slot = slot;
     bool target_empty = false;
+    bool target_occupied = false;
+    contracts::QolInventoryItemRef target_item_ref{};
     const int32_t first = slot == -1 ? 0 : slot;
     const int32_t last = slot == -1 ? slot_limit : slot + 1;
     for (int32_t candidate = first; candidate < last; ++candidate) {
@@ -649,6 +698,8 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
         if (target.category != category) {
             return item_error(out, kQolErrConflict, "native slot contains another item");
         }
+        target_item_ref = target;
+        target_occupied = true;
         break;
     }
     if (target_slot < 0 || (slot == -1 && !target_empty)) {
@@ -666,17 +717,71 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
         return item_error(out, kQolErrNotReady, "native slot unavailable");
     }
 
-    if (fn_inven_move_item(item, count, ref->bag, target_slot) == 0) {
-        return item_error(out, kQolErrInternal, "move failed");
+    if (target_occupied) {
+        if (*target_address == nullptr) {
+            return item_error(out, kQolErrConflict, "native target changed");
+        }
+        const ItemHandleResolution target_resolution = item_handle_registry().resolve_item(
+            target_item_ref.item, contracts::kQolItemHandleOwnerGame);
+        if (target_resolution.error != ItemHandleError::kNone) {
+            return item_error(out, handle_error(target_resolution.error),
+                              "native target item unavailable");
+        }
+        if (target_resolution.item == nullptr || target_resolution.item != *target_address) {
+            return item_error(out, kQolErrNotFound, "native target item unavailable");
+        }
+        void* target_item = target_resolution.item;
+        if (item_class_category(target_item) != category ||
+            item_count_encoding(target_item) != contracts::QolItemCountEncoding::kEncoded) {
+            return item_error(out, kQolErrConflict, "native target is not stackable");
+        }
+        uint32_t target_count = 0;
+        result = item_stack_count(target_item, &target_count);
+        if (!contracts::succeeded(result)) {
+            return item_error(out, result, "native target count unavailable");
+        }
+        if (target_count > stack_limit - static_cast<uint32_t>(count)) {
+            return item_error(out, kQolErrBlocked, "native target stack full");
+        }
+        if (count_api == nullptr) {
+            return item_error(out, kQolErrNotReady, "item count writer unavailable");
+        }
+        result = write_item_count_in_mode(target_item,
+                                          target_count + static_cast<uint32_t>(count), extended);
+        if (!contracts::succeeded(result)) {
+            return item_error(out, result, "native target count update failed");
+        }
+        result = free_loaded_item(handle);
+        if (!contracts::succeeded(result)) {
+            const QolResult restored =
+                write_item_count_in_mode(target_item, target_count, extended);
+            if (!contracts::succeeded(restored)) {
+                return item_error(out, kQolErrInternal, "native merge rollback failed");
+            }
+            return item_error(out, result, "loaded item cleanup failed");
+        }
+
+        auto& gained = out->gained[0];
+        gained.bag = ref->bag;
+        gained.slot = target_slot;
+        gained.category = category;
+        gained.count = count;
+        out->gained_count = 1;
+        out->flags |= contracts::kQolItemInventoryStateHasGained;
+        frame_cache_force_refresh();
+        return contracts::ok();
     }
 
-    if (*target_address == item) {
-        if (!rebind_item(item, contracts::kQolItemHandleOwnerGame)) {
-            (void)set_native_space_item(ref, target_slot, nullptr);
-            return item_error(out, kQolErrInternal, "item ownership transfer failed");
-        }
-    } else if (static_cast<uint32_t>(count) == source_count) {
-        (void)invalidate_item(handle);
+    if (!target_empty || *target_address != nullptr) {
+        return item_error(out, kQolErrConflict, "native target changed");
+    }
+    if (!rebind_item(item, contracts::kQolItemHandleOwnerGame)) {
+        return item_error(out, kQolErrNotFound, "stale item handle");
+    }
+    result = set_native_space_item(ref, target_slot, item);
+    if (!contracts::succeeded(result)) {
+        (void)rebind_item(item, kQolLoadedItemHandleOwner);
+        return item_error(out, result, "native slot write failed");
     }
 
     auto& gained = out->gained[0];

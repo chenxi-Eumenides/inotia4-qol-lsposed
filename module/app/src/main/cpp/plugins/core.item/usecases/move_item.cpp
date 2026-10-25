@@ -12,7 +12,7 @@ namespace qol::features::core_item::usecases {
 namespace {
 
 QolResult invalid_argument() {
-    constexpr char kMessage[] = "invalid item transfer request";
+    static constexpr char kMessage[] = "invalid item transfer request";
     return contracts::error(kQolErrInvalidArgument, kMessage,
                             static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
@@ -22,7 +22,7 @@ QolResult unsupported(const char* message, uint32_t size) {
 }
 
 QolResult internal_error() {
-    constexpr char kMessage[] = "item transfer rollback failed";
+    static constexpr char kMessage[] = "item transfer rollback failed";
     return contracts::error(kQolErrInternal, kMessage,
                             static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
@@ -41,14 +41,14 @@ QolResult source_item_at(const contracts::QolBagRef& ref, int32_t slot,
     if (is_native_space(ref.space_id)) {
         if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
             g_port->read.item_at == nullptr) {
-            constexpr char kMessage[] = "native bag read unavailable";
+            static constexpr char kMessage[] = "native bag read unavailable";
             return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         return g_port->read.item_at(&ref, slot, out);
     }
     const contracts::QolBagSource* source = find_bag_source(ref.space_id);
     if (source == nullptr || source->item_at == nullptr) {
-        constexpr char kMessage[] = "source bag unavailable";
+        static constexpr char kMessage[] = "source bag unavailable";
         return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
     return source->item_at(ref.bag, slot, out);
@@ -61,20 +61,20 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
     if (is_native_space(ref.space_id)) {
         if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
             g_port->read.bag_info == nullptr || g_port->read.item_at == nullptr) {
-            constexpr char kMessage[] = "native bag read unavailable";
+            static constexpr char kMessage[] = "native bag read unavailable";
             return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         result = g_port->read.bag_info(&ref, &info);
     } else {
         const contracts::QolBagSource* source = find_bag_source(ref.space_id);
         if (source == nullptr || source->info == nullptr || source->item_at == nullptr) {
-            constexpr char kMessage[] = "target bag unavailable";
+            static constexpr char kMessage[] = "target bag unavailable";
             return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         result = source->info(ref.bag, &info);
         if (!contracts::succeeded(result)) return result;
         if (info.capacity < 0) {
-            constexpr char kMessage[] = "invalid target bag capacity";
+            static constexpr char kMessage[] = "invalid target bag capacity";
             return contracts::error(kQolErrInternal, kMessage,
                                     static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
@@ -87,13 +87,13 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
             }
             if (!contracts::succeeded(result)) return result;
         }
-        constexpr char kMessage[] = "target bag full";
+        static constexpr char kMessage[] = "target bag full";
         return contracts::error(kQolErrBlocked, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
     if (!contracts::succeeded(result)) return result;
     if (info.capacity < 0) {
-        constexpr char kMessage[] = "invalid target bag capacity";
+        static constexpr char kMessage[] = "invalid target bag capacity";
         return contracts::error(kQolErrInternal, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
@@ -106,7 +106,7 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
         }
         if (!contracts::succeeded(result)) return result;
     }
-    constexpr char kMessage[] = "target bag full";
+    static constexpr char kMessage[] = "target bag full";
     return contracts::error(kQolErrBlocked, kMessage,
                             static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
@@ -121,12 +121,12 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
         return invalid_argument();
     }
     if (contracts::qol_bag_ref_is_task_bag(from) || contracts::qol_bag_ref_is_task_bag(to)) {
-        constexpr char kMessage[] = "task bag excluded";
+        static constexpr char kMessage[] = "task bag excluded";
         return contracts::error(kQolErrBlocked, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
     if (from.space_id == to.space_id && is_native_space(from.space_id)) {
-        constexpr char kMessage[] = "native move path owned by host";
+        static constexpr char kMessage[] = "native move path owned by host";
         return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
     if ((!is_native_space(from.space_id) &&
@@ -136,7 +136,7 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
         return invalid_argument();
     }
     if (from.space_id == to.space_id && from.bag == to.bag && from_slot == to_slot) {
-        constexpr char kMessage[] = "source and target are identical";
+        static constexpr char kMessage[] = "source and target are identical";
         return contracts::error(kQolErrConflict, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
@@ -153,7 +153,7 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
     if (!valid_handle(source_item.item) || source_item.space_id != from.space_id ||
         source_item.bag != from.bag || source_item.slot != from_slot ||
         source_item.category <= 0) {
-        constexpr char kMessage[] = "source bag returned invalid item";
+        static constexpr char kMessage[] = "source bag returned invalid item";
         return contracts::error(kQolErrInternal, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
@@ -161,7 +161,7 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
     transfer_journal::JournalId journal_id{};
     if (!transfer_journal::begin(from, from_slot, to, target_slot, source_item.category, count,
                                  &journal_id)) {
-        constexpr char kMessage[] = "transfer journal unavailable";
+        static constexpr char kMessage[] = "transfer journal unavailable";
         return contracts::error(kQolErrBlocked, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
@@ -179,7 +179,7 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
         transfer.payload_size == 0 ||
         transfer.payload_size > contracts::kQolBagTransferPayloadMaxSize) {
         transfer_journal::clear(journal_id);
-        constexpr char kMessage[] = "source returned invalid transfer payload";
+        static constexpr char kMessage[] = "source returned invalid transfer payload";
         return contracts::error(kQolErrInternal, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
