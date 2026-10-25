@@ -1,7 +1,7 @@
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/runtime/projection_controller.h"
 
 #include <mutex>

@@ -3,7 +3,7 @@
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/popup_enter_alias.h"
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/state.h"

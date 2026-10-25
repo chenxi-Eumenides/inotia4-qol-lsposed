@@ -6,7 +6,7 @@
 #include "contracts/extension_bag.h"
 #include "contracts/item_handle.h"
 #include "contracts/inventory_extension.h"
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"

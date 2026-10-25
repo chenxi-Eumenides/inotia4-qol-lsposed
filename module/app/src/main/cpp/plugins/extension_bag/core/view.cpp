@@ -1,6 +1,6 @@
-#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/usecases/view.h"
 
+#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/core/tabs.h"

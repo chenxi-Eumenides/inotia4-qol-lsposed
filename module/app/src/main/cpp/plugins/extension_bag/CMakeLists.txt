@@ -1,5 +1,7 @@
 add_library(qol_plugin_extension_bag STATIC
     core/ui_state.cpp
+    core/state_ports.cpp
+    core/drop_routing.cpp
     core/status_snapshot.cpp
     runtime/state.cpp
     runtime/entry_guard.cpp
@@ -28,8 +30,8 @@ add_library(qol_plugin_extension_bag STATIC
     usecases/item.cpp
     usecases/move.cpp
     usecases/set_bag_count.cpp
-    usecases/view.cpp
-    usecases/unequip.cpp
+    core/view.cpp
+    core/unequip.cpp
     assembly/claims.cpp
     assembly/move_merge_impl.cpp
     core/observation.cpp
@@ -47,7 +49,6 @@ add_library(qol_plugin_extension_bag STATIC
     ui/equip.cpp
     ui/detail_hooks.cpp
     ui/detail_actions.cpp
-    ui/drop_routing.cpp
     ui/store_tabs.cpp
     ui/store_projection.cpp
     ui/store_trade.cpp

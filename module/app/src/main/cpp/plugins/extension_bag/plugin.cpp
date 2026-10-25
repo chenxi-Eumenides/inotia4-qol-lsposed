@@ -18,7 +18,7 @@
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/assembly/lifecycle_registration.h"
-#include "plugins/extension_bag/transaction/ownership.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/model/move_merge.h"

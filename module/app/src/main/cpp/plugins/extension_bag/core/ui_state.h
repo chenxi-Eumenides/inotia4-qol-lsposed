@@ -2,6 +2,7 @@
 
 #include "contracts/ui.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 #include <array>
@@ -18,33 +19,6 @@ using StoreSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
 using StoreSceneNoArgFn = void (*)();
 using MixSceneNoArgFn = void (*)();
 using MixSceneEventFn = uint64_t (*)(uint64_t, uint64_t, uint64_t);
-
-struct ModuleUseState {
-    bool active = false;
-    bool consumed = false;
-    bool pending_release = false;
-    void* item = nullptr;
-    uint64_t generation = 0;
-    std::thread::id owner{};
-};
-
-struct ModuleUseToken {
-    int bag = -1;
-    int slot = -1;
-    void* item = nullptr;
-    uint64_t generation = 0;
-    std::thread::id owner{};
-};
-
-struct ModuleUseReleasePlan {
-    bool pending = false;
-    int bag = -1;
-    int slot = -1;
-    void* item = nullptr;
-    void* control = nullptr;
-    uint32_t handle = 0;
-    uint64_t generation = 0;
-};
 
 struct ExtensionDrag {
     bool active = false;

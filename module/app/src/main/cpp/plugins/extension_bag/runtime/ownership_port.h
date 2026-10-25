@@ -1,7 +1,35 @@
 #pragma once
 
-#include "plugins/extension_bag/core/ui_state.h"
-#include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/model/ownership_ledger.h"
+
+#include <cstdint>
+#include <thread>
+
+struct ModuleUseState {
+    bool active = false;
+    bool consumed = false;
+    bool pending_release = false;
+    void* item = nullptr;
+    uint64_t generation = 0;
+    std::thread::id owner{};
+};
+
+struct ModuleUseToken {
+    int bag = -1;
+    int slot = -1;
+    void* item = nullptr;
+    uint64_t generation = 0;
+    std::thread::id owner{};
+};
+
+struct ModuleUseReleasePlan {
+    bool pending = false;
+    int bag = -1;
+    int slot = -1;
+    void* item = nullptr;
+    uint32_t handle = 0;
+    uint64_t generation = 0;
+};
 
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
 bool defer_item_free_locked(void* item);
@@ -27,3 +55,10 @@ bool module_use_abort_isolate_locked(const ModuleUseToken& token);
 bool module_use_release_native(const ModuleUseReleasePlan& release);
 bool module_use_finalize_release_locked(const ModuleUseReleasePlan& release);
 bool free_module_object_locked(int bag, int slot, void* raw_use_token = nullptr);
+
+// Transactions use these ports rather than reaching through the UI-state owner.
+ownership::Ledger ownership_ledger_snapshot();
+void ownership_ledger_restore(const ownership::Ledger& snapshot);
+bool ownership_handle_live(uint32_t handle, ownership::State expected);
+ownership::Outcome ownership_borrow_for_view(uint32_t handle);
+ownership::Outcome ownership_return_from_view(uint32_t handle);

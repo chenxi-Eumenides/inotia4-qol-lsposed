@@ -2,7 +2,7 @@
 
 #include "contracts/game_host.h"
 #include "contracts/move_merge.h"
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 
 #include <jni.h>
 

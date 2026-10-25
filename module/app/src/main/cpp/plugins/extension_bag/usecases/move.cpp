@@ -1,4 +1,3 @@
-#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/usecases/move.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
@@ -7,6 +6,7 @@
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/object_state_port.h"
 #include "plugins/extension_bag/transaction/transaction.h"
 
 namespace qol::features::extension_bag::usecases {
@@ -41,7 +41,7 @@ MoveResult move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
     if (!extension_bag_ready_locked()) {
         return {false, runtime_state().enabled.load() ? Error::kNotInGame : Error::kDisabled};
     }
-    if (qol::extension_bag::ui_state().objects.module_view_installed) {
+    if (module_view_installed_port()) {
         return {false, Error::kMovementDisabled};
     }
     if (from_bag == virtual_bag::kOriginalTaskBag ||

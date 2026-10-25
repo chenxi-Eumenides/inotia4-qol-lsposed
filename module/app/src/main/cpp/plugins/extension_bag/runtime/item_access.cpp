@@ -1,6 +1,6 @@
 #include "plugins/extension_bag/runtime/item_access.h"
 
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"

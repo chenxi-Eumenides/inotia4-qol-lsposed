@@ -2,13 +2,14 @@
 #include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/transaction/transaction.h"
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
-#include "plugins/extension_bag/transaction/ownership.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/object_state_port.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/runtime/logging.h"
@@ -511,10 +512,6 @@ bool module_use_finish_locked(const ModuleUseToken& token, bool* out_consumed,
         release.item = token.item;
         release.handle = qol::extension_bag::ui_state().objects.module_object_handles[bag][slot];
         release.generation = use.generation;
-        if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == bag &&
-            qol::extension_bag::ui_state().objects.projected_item_root != nullptr) {
-            release.control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, slot);
-        }
         // 事务状态、对象索引和 handle 在锁内摘除；native 控件写入及 itempool
         // 释放由调用方在解锁后完成，避免重入 Remove/Save/Consume hook。
         qol::extension_bag::ui_state().objects.module_objects[bag][slot] = nullptr;
@@ -596,7 +593,10 @@ bool module_use_release_native(const ModuleUseReleasePlan& release) {
     bool deferred = false;
     {
         ::qol::extension_bag::ReentryLock lock;
-        if (release.control != nullptr) (void)extension_bag_ui_set_control_item(release.control, nullptr);
+        if (qol::extension_bag::ui_state().objects.module_view_installed &&
+            qol::extension_bag::ui_state().objects.module_view_index == release.bag) {
+            (void)set_projected_slot_item_port(release.bag, release.slot, nullptr);
+        }
         if (object_touch_window_active_locked() || extension_bag_write_api() == nullptr ||
             extension_bag_write_api()->inventory.free_item == nullptr) {
             deferred = enqueue_deferred_item_free_locked(release.item, release.handle,
@@ -702,4 +702,27 @@ bool free_module_object_locked(int bag, int slot, void* raw_use_token) {
     qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] = 0;
     qol::extension_bag::ui_state().objects.module_object_handles[bag][slot] = 0;
     return module_object_generation_advance_locked(bag, slot, "free-object");
+}
+
+ownership::Ledger ownership_ledger_snapshot() {
+    return qol::extension_bag::ui_state().objects.ownership_ledger;
+}
+
+void ownership_ledger_restore(const ownership::Ledger& snapshot) {
+    qol::extension_bag::ui_state().objects.ownership_ledger = snapshot;
+}
+
+bool ownership_handle_live(uint32_t handle, ownership::State expected) {
+    return ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger,
+                                 handle, expected);
+}
+
+ownership::Outcome ownership_borrow_for_view(uint32_t handle) {
+    return ownership::borrow_for_view(
+        &qol::extension_bag::ui_state().objects.ownership_ledger, handle);
+}
+
+ownership::Outcome ownership_return_from_view(uint32_t handle) {
+    return ownership::return_from_view(
+        &qol::extension_bag::ui_state().objects.ownership_ledger, handle);
 }

@@ -14,13 +14,13 @@
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "plugins/extension_bag/model/equip_rules.h"
-#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/core/game_ui_port.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/model/move_merge.h"
 #include "contracts/item_facts.h"
 #include "plugins/extension_bag/usecases/move.h"
 #include "plugins/extension_bag/runtime/ui_ports.h"
-#include "plugins/extension_bag/ui/drop_routing.h"
+#include "plugins/extension_bag/core/drop_routing.h"
 
 #include <algorithm>
 #include <cstring>

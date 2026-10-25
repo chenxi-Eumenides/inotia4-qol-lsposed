@@ -1,8 +1,8 @@
-#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/projection_controller.h"
-#include "plugins/extension_bag/transaction/ownership.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
+#include "plugins/extension_bag/runtime/object_state_port.h"
 #include "plugins/extension_bag/transaction/transaction_ports.h"
 #include "plugins/extension_bag/runtime/ui_ports.h"
 #include "plugins/extension_bag/runtime/shared.h"
@@ -138,7 +138,7 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
         return false;
     }
     if (!module_object_release_allowed_locked(
-            dst_bag, dst_slot, qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot],
+            dst_bag, dst_slot, module_object_slot_port(dst_bag, dst_slot).item,
             "original-to-extension commit", false, nullptr)) {
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "target extension object is in use; source retained");
@@ -173,7 +173,7 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
     // 不切 mode、不装投影：mode 与投影始终成对，此前"切 mode 不装投影"的
     // overlay 错位从根上不可达；P2 移动锁也不再因 API 移动触发。
     // 当前视图只同步发生变化的扩展槽；非扩展视图仍走原版刷新。
-    if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == dst_bag) {
+    if (module_view_state_port().installed && module_view_state_port().index == dst_bag) {
         (void)sync_slot_via_port(dst_bag, dst_slot);
     } else if (runtime_state().host.game != nullptr && runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         virtual_bag_call_original_refresh_item_area_with_guard();
@@ -256,10 +256,10 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
     // RAII 保证任何出口写回投影值（成功后由调用方 refresh 重刷控件）。
     const bool host_restore = !native_target &&
         virtual_bag::ext2orig_requires_host_capacity_restore(
-            qol::extension_bag::ui_state().objects.module_view_installed, target_bag,
-            qol::extension_bag::ui_state().objects.module_window_original_bag);
+            module_view_state_port().installed, target_bag,
+            module_view_state_port().window_original_bag);
     constexpr uint32_t kTxnCapacityMask = (1u << 25) - 1u;
-    const int host_word_bag = host_restore ? qol::extension_bag::ui_state().objects.original_bag_size_bag : -1;
+    const int host_word_bag = host_restore ? module_view_state_port().original_bag_size_bag : -1;
     uint32_t host_projected_word = 0;
     struct HostCapacityGuard {
         int bag = -1;
@@ -299,7 +299,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
         host_capacity_guard.active = true;
         const uint32_t real_word =
             (host_projected_word & ~kTxnCapacityMask) |
-            (qol::extension_bag::ui_state().objects.original_bag_size & kTxnCapacityMask);
+            (module_view_state_port().original_bag_size & kTxnCapacityMask);
         if (!set_bag_size_word_locked(host_word_bag, real_word)) {
             QOL_LOG_ERROR(QolDomain::kExtensionBag,
                           "ERROR ext2orig real host capacity write failed bag=%d word=0x%x",
@@ -313,8 +313,8 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
             return false;
         }
         QOL_LOG_INFO(QolDomain::kExtensionBag, "ext2orig host capacity restored target=%d window=%d projected=0x%x real=0x%x",
-                    target_bag, qol::extension_bag::ui_state().objects.module_window_original_bag, host_projected_word,
-                    qol::extension_bag::ui_state().objects.original_bag_size);
+                    target_bag, module_view_state_port().window_original_bag, host_projected_word,
+                    module_view_state_port().original_bag_size);
     }
 
     const auto run_transaction = [&]() -> bool {
@@ -389,9 +389,9 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
         txn_abort_locked(txn, virtual_bag::TxnStage::kLogicalUpdated,
                          "loaded item handle registration failed; extension source retained");
         release_tracked_item_locked(item_handle, item, "ext2orig handle registration failed");
-        if (qol::extension_bag::ui_state().objects.module_view_installed && virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_window_original_bag)) {
-            set_original_bag_locked(qol::extension_bag::ui_state().objects.module_window_original_bag);
-            refresh_module_item_area_locked(qol::extension_bag::ui_state().objects.module_view_index);
+        if (module_view_state_port().installed && virtual_bag::valid_index(module_view_state_port().window_original_bag)) {
+            set_original_bag_locked(module_view_state_port().window_original_bag);
+            refresh_module_item_area_locked(module_view_state_port().index);
         }
         reset_drag_via_port(nullptr);
         return false;
@@ -401,7 +401,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
     // 宿主——原版袋容量字被写扩展容量、扩展内容投影上去）。投影中不切换；
     // SaveItemOnEmpty 显式携带 target_bag，不依赖 CUR_BAG。
     if (item != nullptr && !native_target &&
-        virtual_bag::ext2orig_should_switch_display_bag(qol::extension_bag::ui_state().objects.module_view_installed)) {
+        virtual_bag::ext2orig_should_switch_display_bag(module_view_state_port().installed)) {
         set_original_bag_locked(target_bag);
     }
     const auto find_inserted_slot = [&]() {
@@ -443,9 +443,9 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
         } else {
             release_tracked_item_locked(item_handle, item, "ext2orig insert failed");
         }
-        if (qol::extension_bag::ui_state().objects.module_view_installed && virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_window_original_bag)) {
-            set_original_bag_locked(qol::extension_bag::ui_state().objects.module_window_original_bag);
-            refresh_module_item_area_locked(qol::extension_bag::ui_state().objects.module_view_index);
+        if (module_view_state_port().installed && virtual_bag::valid_index(module_view_state_port().window_original_bag)) {
+            set_original_bag_locked(module_view_state_port().window_original_bag);
+            refresh_module_item_area_locked(module_view_state_port().index);
         }
         reset_drag_via_port(nullptr);
         return false;
@@ -461,9 +461,9 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
         // 未能定位实际目标时保留 pending 和临时对象归属，恢复器可再次核验两侧。
         handover_tracked_item_locked(item_handle, item,
                                      "ext2orig slot-not-found rollback unconfirmed");
-        if (qol::extension_bag::ui_state().objects.module_view_installed && virtual_bag::valid_index(qol::extension_bag::ui_state().objects.module_window_original_bag)) {
-            set_original_bag_locked(qol::extension_bag::ui_state().objects.module_window_original_bag);
-            refresh_module_item_area_locked(qol::extension_bag::ui_state().objects.module_view_index);
+        if (module_view_state_port().installed && virtual_bag::valid_index(module_view_state_port().window_original_bag)) {
+            set_original_bag_locked(module_view_state_port().window_original_bag);
+            refresh_module_item_area_locked(module_view_state_port().index);
         }
         reset_drag_via_port(nullptr);
         return false;
@@ -487,7 +487,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
         return false;
     }
     if (!module_object_release_allowed_locked(
-            src_bag, src_slot, qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot],
+            src_bag, src_slot, module_object_slot_port(src_bag, src_slot).item,
             "extension-to-original commit", false, nullptr)) {
         isolate_ext2orig_failure_locked(txn, virtual_bag::TxnStage::kOriginalUpdated,
                                         virtual_bag::isolation_reason::kInsertFailed,
@@ -530,7 +530,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
     runtime_state().objects.bag.pending = {};
     // 保持当前视图：仅拖放上下文（扩展视图安装中 = 当前视图即扩展袋）停留该视图；
     // API 路径（原版视图）不改写视图字段。
-    if (qol::extension_bag::ui_state().objects.module_view_installed) {
+    if (module_view_state_port().installed) {
         runtime_state().objects.bag.mode = virtual_bag::Mode::kModule;
         runtime_state().objects.bag.selected = src_bag;
         runtime_state().objects.bag.inspected = -1;
@@ -539,7 +539,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
     // 拖放调用方的 refresh_projected_module_view_after_move_locked 负责刷新；
     // API（非投影）路径保留切到目标袋的既有语义。
     if (!native_target &&
-        virtual_bag::ext2orig_should_switch_display_bag(qol::extension_bag::ui_state().objects.module_view_installed)) {
+        virtual_bag::ext2orig_should_switch_display_bag(module_view_state_port().installed)) {
         set_original_bag_locked(target_bag);
     }
     reset_drag_via_port(nullptr);
@@ -554,10 +554,10 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
     const bool projected_capacity_restored = host_capacity_guard.restore();
     if (!projected_capacity_restored && host_restore) {
         const int host_bag = virtual_bag::valid_original_transaction_bag(
-                                 qol::extension_bag::ui_state().objects.module_window_original_bag)
-                                 ? qol::extension_bag::ui_state().objects.module_window_original_bag
+                                 module_view_state_port().window_original_bag)
+                                 ? module_view_state_port().window_original_bag
                                  : 0;
-        if (qol::extension_bag::ui_state().objects.module_view_installed) restore_module_view_locked();
+        if (module_view_state_port().installed) restore_module_view_locked();
         runtime_state().objects.bag.mode = virtual_bag::Mode::kOriginal;
         runtime_state().objects.bag.selected = host_bag;
         runtime_state().objects.bag.inspected = -1;

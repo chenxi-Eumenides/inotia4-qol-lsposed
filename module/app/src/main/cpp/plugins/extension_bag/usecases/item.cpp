@@ -1,4 +1,3 @@
-#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/usecases/item.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
@@ -6,6 +5,7 @@
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/object_state_port.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 namespace qol::features::extension_bag::usecases {
@@ -41,7 +41,7 @@ ClickItemResult click_item(int logical_bag, int slot) {
     persist_state_locked();
     return {true, Error::kNone, true, logical_bag, slot,
             static_cast<int>(virtual_bag_effective_count(
-                qol::extension_bag::ui_state().objects.module_objects[internal_bag][slot],
+                 module_object_slot_port(internal_bag, slot).item,
                 static_cast<uint32_t>(item.count))), item};
 }
 

@@ -1,7 +1,7 @@
 #include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/core/geometry.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
@@ -12,7 +12,6 @@
 
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
-#include "plugins/extension_bag/plugin.h"
 #include "contracts/inventory_refresh.h"
 
 #include <array>

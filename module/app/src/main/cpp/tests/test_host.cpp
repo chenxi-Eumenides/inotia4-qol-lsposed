@@ -25,7 +25,7 @@
 #include "patch/call_patch.h"
 #include "plugins/extension_bag/model/ownership_ledger.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
-#include "plugins/extension_bag/extension_bag_port.h"
+#include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "contracts/sell_price.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/extension_bag/model/serialization.h"

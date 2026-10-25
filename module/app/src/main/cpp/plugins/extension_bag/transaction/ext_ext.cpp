@@ -1,7 +1,6 @@
-#include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/item_access.h"
-#include "plugins/extension_bag/core/geometry.h"
-#include "plugins/extension_bag/transaction/ownership.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
+#include "plugins/extension_bag/runtime/object_state_port.h"
 #include "plugins/extension_bag/transaction/transaction_ports.h"
 #include "plugins/extension_bag/runtime/ui_ports.h"
 #include "plugins/extension_bag/runtime/shared.h"
@@ -25,8 +24,8 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         return false;
     }
 
-    const ModuleUseState& source_use = qol::extension_bag::ui_state().objects.module_object_use[src_bag][src_slot];
-    const ModuleUseState& destination_use = qol::extension_bag::ui_state().objects.module_object_use[dst_bag][dst_slot];
+    const ModuleUseState& source_use = module_object_slot_port(src_bag, src_slot).use;
+    const ModuleUseState& destination_use = module_object_slot_port(dst_bag, dst_slot).use;
     if (!virtual_bag::extension_swap_tokens_available(
             source_use.active, source_use.pending_release, destination_use.active,
             destination_use.pending_release)) {
@@ -39,17 +38,17 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         return false;
     }
 
-    const auto previous_source_object = qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot];
-    const auto previous_destination_object = qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot];
-    const int previous_source_category = qol::extension_bag::ui_state().objects.module_object_categories[src_bag][src_slot];
-    const int previous_destination_category = qol::extension_bag::ui_state().objects.module_object_categories[dst_bag][dst_slot];
-    const uint32_t previous_source_hash = qol::extension_bag::ui_state().objects.module_object_hashes[src_bag][src_slot];
-    const uint32_t previous_destination_hash = qol::extension_bag::ui_state().objects.module_object_hashes[dst_bag][dst_slot];
-    const uint32_t previous_source_handle = qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot];
-    const uint32_t previous_destination_handle = qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot];
+    const auto previous_source_object = module_object_slot_port(src_bag, src_slot).item;
+    const auto previous_destination_object = module_object_slot_port(dst_bag, dst_slot).item;
+    const int previous_source_category = module_object_slot_port(src_bag, src_slot).category;
+    const int previous_destination_category = module_object_slot_port(dst_bag, dst_slot).category;
+    const uint32_t previous_source_hash = module_object_slot_port(src_bag, src_slot).hash;
+    const uint32_t previous_destination_hash = module_object_slot_port(dst_bag, dst_slot).hash;
+    const uint32_t previous_source_handle = module_object_slot_port(src_bag, src_slot).handle;
+    const uint32_t previous_destination_handle = module_object_slot_port(dst_bag, dst_slot).handle;
     const ModuleUseState previous_source_use = source_use;
     const ModuleUseState previous_destination_use = destination_use;
-    const ownership::Ledger previous_ledger = qol::extension_bag::ui_state().objects.ownership_ledger;
+    const ownership::Ledger previous_ledger = ownership_ledger_snapshot();
     const bool previous_dirty = runtime_state().persistence.dirty;
     bool objects_swapped = false;
 
@@ -76,12 +75,12 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     // 的新 handle 必须从当前槽读取，不能被旧的 0 覆盖。
     const uint32_t source_handle_for_object =
         virtual_bag::handle_if_object_matches(
-            source_object, qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot],
-            qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot]);
+            source_object, module_object_slot_port(src_bag, src_slot).item,
+            module_object_slot_port(src_bag, src_slot).handle);
     const uint32_t destination_handle_for_object =
         virtual_bag::handle_if_object_matches(
-            destination_object, qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot],
-            qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot]);
+            destination_object, module_object_slot_port(dst_bag, dst_slot).item,
+            module_object_slot_port(dst_bag, dst_slot).handle);
 
     auto restore = [&](const virtual_bag::TransactionContext* txn, const char* reason) {
         if (txn != nullptr) {
@@ -91,7 +90,7 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
             const int bag = objects_swapped ? dst_bag : src_bag;
             const int slot = objects_swapped ? dst_slot : src_slot;
             // 提交后 source_object 已在目标槽，不能再用入参 source_slot 查找。
-            if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] == source_object) {
+            if (module_object_slot_port(bag, slot).item == source_object) {
                 free_module_object_locked(bag, slot);
             }
         }
@@ -99,30 +98,28 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
             const int bag = objects_swapped ? src_bag : dst_bag;
             const int slot = objects_swapped ? src_slot : dst_slot;
             // 提交后 destination_object 已在源槽；回滚必须按交换后的实际槽位清理。
-            if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] == destination_object) {
+            if (module_object_slot_port(bag, slot).item == destination_object) {
                 free_module_object_locked(bag, slot);
             }
         }
-        qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot] = previous_source_object;
-        qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] = previous_destination_object;
-        qol::extension_bag::ui_state().objects.module_object_categories[src_bag][src_slot] = previous_source_category;
-        qol::extension_bag::ui_state().objects.module_object_categories[dst_bag][dst_slot] = previous_destination_category;
-        qol::extension_bag::ui_state().objects.module_object_hashes[src_bag][src_slot] = previous_source_hash;
-        qol::extension_bag::ui_state().objects.module_object_hashes[dst_bag][dst_slot] = previous_destination_hash;
-        qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot] = previous_source_handle;
-        qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot] = previous_destination_handle;
-        qol::extension_bag::ui_state().objects.module_object_use[src_bag][src_slot] = previous_source_use;
-        qol::extension_bag::ui_state().objects.module_object_use[dst_bag][dst_slot] = previous_destination_use;
-        qol::extension_bag::ui_state().objects.ownership_ledger = previous_ledger;
+        module_object_slot_port(src_bag, src_slot).item = previous_source_object;
+        module_object_slot_port(dst_bag, dst_slot).item = previous_destination_object;
+        module_object_slot_port(src_bag, src_slot).category = previous_source_category;
+        module_object_slot_port(dst_bag, dst_slot).category = previous_destination_category;
+        module_object_slot_port(src_bag, src_slot).hash = previous_source_hash;
+        module_object_slot_port(dst_bag, dst_slot).hash = previous_destination_hash;
+        module_object_slot_port(src_bag, src_slot).handle = previous_source_handle;
+        module_object_slot_port(dst_bag, dst_slot).handle = previous_destination_handle;
+        module_object_slot_port(src_bag, src_slot).use = previous_source_use;
+        module_object_slot_port(dst_bag, dst_slot).use = previous_destination_use;
+        ownership_ledger_restore(previous_ledger);
         runtime_state().persistence.dirty = previous_dirty;
-        if (qol::extension_bag::ui_state().objects.module_view_installed) {
-            if (qol::extension_bag::ui_state().objects.module_view_index == src_bag) {
-                void* control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, src_slot);
-                if (control != nullptr) (void)extension_bag_ui_set_control_item(control, previous_source_object);
+        if (module_view_state_port().installed) {
+            if (module_view_state_port().index == src_bag) {
+                (void)set_projected_slot_item_port(src_bag, src_slot, previous_source_object);
             }
-            if (qol::extension_bag::ui_state().objects.module_view_index == dst_bag) {
-                void* control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, dst_slot);
-                if (control != nullptr) (void)extension_bag_ui_set_control_item(control, previous_destination_object);
+            if (module_view_state_port().index == dst_bag) {
+                (void)set_projected_slot_item_port(dst_bag, dst_slot, previous_destination_object);
             }
         }
     };
@@ -152,14 +149,14 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     }
     virtual_bag::txn_apply_logical(&runtime_state().objects.bag, txn);
 
-    qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot] = destination_object;
-    qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] = source_object;
-    qol::extension_bag::ui_state().objects.module_object_categories[src_bag][src_slot] = destination.category;
-    qol::extension_bag::ui_state().objects.module_object_categories[dst_bag][dst_slot] = source.category;
-    qol::extension_bag::ui_state().objects.module_object_hashes[src_bag][src_slot] = virtual_bag::payload_hash(destination);
-    qol::extension_bag::ui_state().objects.module_object_hashes[dst_bag][dst_slot] = virtual_bag::payload_hash(source);
-    qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot] = destination_handle_for_object;
-    qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot] = source_handle_for_object;
+    module_object_slot_port(src_bag, src_slot).item = destination_object;
+    module_object_slot_port(dst_bag, dst_slot).item = source_object;
+    module_object_slot_port(src_bag, src_slot).category = destination.category;
+    module_object_slot_port(dst_bag, dst_slot).category = source.category;
+    module_object_slot_port(src_bag, src_slot).hash = virtual_bag::payload_hash(destination);
+    module_object_slot_port(dst_bag, dst_slot).hash = virtual_bag::payload_hash(source);
+    module_object_slot_port(src_bag, src_slot).handle = destination_handle_for_object;
+    module_object_slot_port(dst_bag, dst_slot).handle = source_handle_for_object;
     objects_swapped = true;
 
     if (!module_object_generation_advance_locked(src_bag, src_slot, "extension swap source") ||
@@ -170,14 +167,14 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
 
     auto sync_view_ownership = [&](int bag, int /*slot*/, uint32_t handle) {
         if (handle == 0) return true;
-        const bool visible = qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == bag;
-        if (visible && ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
+        const bool visible = module_view_state_port().installed && module_view_state_port().index == bag;
+        if (visible && ownership_handle_live( handle,
                                              ownership::State::kModuleOwned)) {
-            return ownership::borrow_for_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) == ownership::Outcome::kOk;
+            return ownership_borrow_for_view( handle) == ownership::Outcome::kOk;
         }
-        if (!visible && ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
+        if (!visible && ownership_handle_live( handle,
                                               ownership::State::kBorrowedForView)) {
-            return ownership::return_from_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) == ownership::Outcome::kOk;
+            return ownership_return_from_view( handle) == ownership::Outcome::kOk;
         }
         return true;
     };
@@ -186,14 +183,12 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
         restore(&txn, "swap view ownership update failed");
         return false;
     }
-    if (qol::extension_bag::ui_state().objects.module_view_installed) {
-        if (qol::extension_bag::ui_state().objects.module_view_index == src_bag) {
-            void* control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, src_slot);
-            if (control != nullptr) (void)extension_bag_ui_set_control_item(control, destination_object);
+    if (module_view_state_port().installed) {
+        if (module_view_state_port().index == src_bag) {
+            (void)set_projected_slot_item_port(src_bag, src_slot, destination_object);
         }
-        if (qol::extension_bag::ui_state().objects.module_view_index == dst_bag) {
-            void* control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, dst_slot);
-            if (control != nullptr) (void)extension_bag_ui_set_control_item(control, source_object);
+        if (module_view_state_port().index == dst_bag) {
+            (void)set_projected_slot_item_port(dst_bag, dst_slot, source_object);
         }
     }
     runtime_state().objects.bag.pending = {};
@@ -201,41 +196,39 @@ bool swap_extension_slots_locked(int src_bag, int src_slot, int dst_bag, int dst
     reset_drag_via_port(nullptr);
     QOL_LOG_INFO(QolDomain::kExtensionBag, "txn committed id=%s extension swap %d/%d <-> %d/%d generation=%llu/%llu",
                 txn.transaction_id, src_bag, src_slot, dst_bag, dst_slot,
-                static_cast<unsigned long long>(qol::extension_bag::ui_state().objects.module_object_use[src_bag][src_slot].generation),
-                static_cast<unsigned long long>(qol::extension_bag::ui_state().objects.module_object_use[dst_bag][dst_slot].generation));
+                static_cast<unsigned long long>(module_object_slot_port(src_bag, src_slot).use.generation),
+                static_cast<unsigned long long>(module_object_slot_port(dst_bag, dst_slot).use.generation));
     return true;
 }
 
 bool sync_ext2ext_destination_view_locked(int bag, int slot, void* expected_item) {
-    if (!qol::extension_bag::ui_state().objects.module_view_installed || qol::extension_bag::ui_state().objects.module_view_index != bag) return true;
+    const auto view = module_view_state_port();
+    if (!view.installed || view.index != bag) return true;
     if (!virtual_bag::valid_index(bag) || slot < 0 ||
-        slot >= runtime_state().objects.bag.capacities[bag] || qol::extension_bag::ui_state().objects.projected_item_root == nullptr ||
-        qol::extension_bag::ui_state().objects.module_objects[bag][slot] != expected_item) {
+        slot >= runtime_state().objects.bag.capacities[bag] ||
+        module_object_slot_port(bag, slot).item != expected_item) {
         return false;
     }
-    const uint32_t handle = qol::extension_bag::ui_state().objects.module_object_handles[bag][slot];
+    const uint32_t handle = module_object_slot_port(bag, slot).handle;
     if ((expected_item == nullptr) != (handle == 0)) return false;
-    void* control = valid_child_locked(qol::extension_bag::ui_state().objects.projected_item_root, slot);
-    if (control == nullptr || !sync_slot_via_port(bag, slot)) return false;
-    void* data = extension_bag_ui_data(control);
-    if (data == nullptr || *reinterpret_cast<void**>(data) != expected_item) return false;
+    if (!projected_slot_matches_port(bag, slot, expected_item)) return false;
 
     if (expected_item != nullptr) {
-        if (ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
+        if (ownership_handle_live( handle,
                                   ownership::State::kModuleOwned)) {
-            if (ownership::borrow_for_view(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) !=
+            if (ownership_borrow_for_view( handle) !=
                 ownership::Outcome::kOk) {
                 return false;
             }
-        } else if (!ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
+        } else if (!ownership_handle_live( handle,
                                           ownership::State::kBorrowedForView)) {
             return false;
         }
-        if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] != expected_item ||
-            qol::extension_bag::ui_state().objects.module_object_handles[bag][slot] != handle ||
-            !ownership::live_state(qol::extension_bag::ui_state().objects.ownership_ledger, handle,
-                                   ownership::State::kBorrowedForView) ||
-            *reinterpret_cast<void**>(data) != expected_item) {
+        if (module_object_slot_port(bag, slot).item != expected_item ||
+            module_object_slot_port(bag, slot).handle != handle ||
+            !ownership_handle_live( handle,
+                                    ownership::State::kBorrowedForView) ||
+            !projected_slot_matches_port(bag, slot, expected_item)) {
             return false;
         }
     }
@@ -253,7 +246,7 @@ bool restore_ext2ext_destination_locked(const virtual_bag::TransactionContext& t
     if (previous.category > 0 && previous.count > 0) {
         item = module_item_locked(bag, slot);
         if (item == nullptr) return false;
-    } else if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] != nullptr) {
+    } else if (module_object_slot_port(bag, slot).item != nullptr) {
         if (!free_module_object_locked(bag, slot)) return false;
     }
     return sync_ext2ext_destination_view_locked(bag, slot, item);
@@ -455,7 +448,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                     txn.previous_dst.count, txn.committed.count);
     }
     if (!module_object_release_allowed_locked(
-            src_bag, src_slot, qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot],
+            src_bag, src_slot, module_object_slot_port(src_bag, src_slot).item,
             "extension-merge source", false, nullptr)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "txn reject id=%s extension merge source object in use",
                     txn.transaction_id);
@@ -486,7 +479,7 @@ bool move_extension_to_extension_locked(int src_bag, int src_slot, int dst_bag,
                           txn.transaction_id, dst_bag, dst_slot);
         }
         return false;
-    } else if (qol::extension_bag::ui_state().objects.module_view_installed && qol::extension_bag::ui_state().objects.module_view_index == dst_bag) {
+    } else if (module_view_state_port().installed && module_view_state_port().index == dst_bag) {
         if (!sync_ext2ext_destination_view_locked(dst_bag, dst_slot, destination_item)) {
             // 投影槽与目标 handle/borrow 必须同时确认，否则事务回到逻辑更新前且保留源。
             QOL_LOG_WARN(QolDomain::kExtensionBag, "txn destination view borrow failed id=%s dst=%d/%d",

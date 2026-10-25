@@ -9,7 +9,7 @@
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/core/lifecycle.h"
-#include "plugins/extension_bag/transaction/ownership.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"

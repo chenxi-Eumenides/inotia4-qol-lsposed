@@ -1,4 +1,4 @@
-#include "plugins/extension_bag/extension_bag_bridge.h"
+#include "plugins/extension_bag/core/host_bindings.h"
 #include "plugins/extension_bag/core/drag_session.h"
 #include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/state.h"
