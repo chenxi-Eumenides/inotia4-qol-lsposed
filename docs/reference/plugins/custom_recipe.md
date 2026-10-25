@@ -13,7 +13,7 @@
 | `provides` | 无。结果 API `result::CraftResultApi` 内化为 UI 子层对 result 层的进程内调用，不经 capability registry 对外提供。见 `plugin.cpp:297-331`、`plugins/custom_recipe/result.h:92-105`、`plugins/custom_recipe/feature.h:34-35`。 |
 | `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0。`save.facts` 用于 SaveEnter 读取当前槽的角色创建时间 seed。见 `plugin.cpp:265-276`。 |
 | `optional_requires` | `attribute.quality` v2.0。仅宝石升阶路径使用；缺失/失效只置 degraded，不阻断 owner 或三格配方。见 `plugin.cpp:259-263`。 |
-| `ports` | 两条：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2（`contracts/game_ports/ports.h:52`）与 `QOL_PORT_CRAFT_UI_WRITE` v1.1（`contracts/game_ports/ports.h:51`）。见 `plugin.cpp:278-285`。 |
+| `ports` | 三条：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0（RECIPEBASE/MIXTUREBASE 槽位，地址装配在 game 适配层）。见 `contracts/game_ports/ports.h`、`plugin.cpp` 的 `kPorts`。 |
 | `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 末尾 1 条 `own:RECIPEBASE_MIXTUREBASE` ownership（required/fail-soft）。顺序即声明顺序，ownership 最后。见 `plugins/custom_recipe/ui/runtime.cpp:526-566`、`plugin.cpp:55-90`。 |
 | HTTP/JNI | JNI count 为 0，不声明 HTTP handler/route。合成直操作路由仍归 `core.craft`（见下文）。见 `plugin.cpp:297-331`。 |
 
@@ -26,7 +26,7 @@
 | 结果层 | `feature.cpp`、`feature.h` | 放料/准备/执行/产物/材料需求/宝石升阶、quality 消费、动态配方事件、ownership ops。 |
 | 纯规则 | `rules.{h,cpp}` | 档位序数与区间搜索、材料数量、三格库存/token 判定、宝石数值缩放。 |
 | 静态/动态目录 | `catalog.{h,cpp}` | 两条 RECIPEBASE 注入 entry、8 条静态三格规则、26 类特殊装备动态配方构造。 |
-| 表注入 | `table.{h,cpp}`、`text_table.h` | 注入构造与组位快照/恢复、ensure/deactivate、配方呈现文案表。 |
+| 表注入 | `table.{h,cpp}`、`table_runtime.cpp`、`text_table.h` | 注入构造与组位快照/恢复（纯核心）、端口槽位装配与 ensure/deactivate（运行时）、配方呈现文案表。 |
 
 ## 配方目录与运行机制
 
@@ -105,7 +105,7 @@
 
 **资源等级**：5 条核心 hook = required/fail-closed（任一失败整体回滚已装核心资源与内部注册）；7 条装饰 hook = optional/fail-soft（失败只 degraded，不拖垮核心）。`UIMix_ResetStuffItemControl` 保持 optional，且其 wrapper 不受 feature 门控，因为它同时服务原版成功链（`ui/runtime.cpp:508-512,472-510`）。
 
-**表所有权**：`own:RECIPEBASE_MIXTUREBASE` 为 required + fail-soft：`own_acquire` 调 `custom_recipe_table_ensure` 并据结果置 `g_ownership_ready`，失败时回滚表状态并返回非 0（`feature.cpp:1131-1141`）；`own_release` 为 total。ensure 注入模块缓冲、清除模块占用组位并追加记录；deactivate 还原原版段组位并把 RECIPEBASE 记录数还原为 base，但**保持游戏指针指向模块缓冲且不 free**，使残留面板持有的注入下标仍在缓冲界内（`table.h:101-111`、`table.cpp:363-395`）。表未就绪时 `def_for_mix_type` 返回 `nullptr`，不把未注入状态伪装成可用配方。
+**表所有权**：`own:RECIPEBASE_MIXTUREBASE` 为 required + fail-soft：`own_acquire` 调 `custom_recipe_table_ensure` 并据结果置 `g_ownership_ready`，失败时回滚表状态并返回非 0（`feature.cpp:1131-1141`）；`own_release` 为 total。槽位由 game 端 `QOL_PORT_RECIPE_TABLE` 解析（`game/adapter_ports/recipe_table_port.cpp`，唯一 VMA 来源），`table_runtime.cpp` 映射为 `TableAccess` 后驱动核心。ensure 注入模块缓冲、清除模块占用组位并追加记录；deactivate 还原原版段组位并把 RECIPEBASE 记录数还原为 base，但**保持游戏指针指向模块缓冲且不 free**，使残留面板持有的注入下标仍在缓冲界内（`table.h:101-111`、`table.cpp:363-395`）。表未就绪时 `def_for_mix_type` 返回 `nullptr`，不把未注入状态伪装成可用配方。
 
 **typed commands 时序**：UI 经 `commands.post_typed` 入队（`ui/feature.cpp:205-222`），Host 主线程 drain 后由 `plugin.cpp` 的 handler 转交结果层执行（`plugin.cpp:289-295`、`feature.cpp:1195-1214`）。未改成 UI callback 直接同步写；handler 在校验通过前先检查 `enabled()`，停用后 drain 中的命令直接失败（`feature.cpp:1195,1193`）。
 
@@ -134,7 +134,7 @@
 
 - **文本域分离**（见上节）修复「无效配方仍显示材料不足」：消费者按 MEMORYTEXT id 匹配，插件仍以弹窗索引调用 `show_text`。
 - **启动期 ownership 定向恢复**：初始 fail-soft 安装只对「ownership × fail-soft × 明确 `kQolErrNotReady` × Free」武装一次；`host/assembly.cpp` 一次性订阅 SaveEnter，回调只锁存当前有效 owner token（`assembly.cpp:359,386`），主帧在 `production_feature_frame_step()` 之后调用 Host 私有 helper（`assembly.cpp:349-352`）。信号只在**安装事务已终态、准入通过且确实选出待恢复 claim 后**消费：desired 关闭/owner 失活/旧 token/已隔离立即作废，同 token 的初始安装在途时**保留信号**（`host/plugin_registry.cpp:3022-3122`）。恢复完成 acquire → registry Live → 清 pending → `on_resource_ready(ctx, "own:RECIPEBASE_MIXTUREBASE", nullptr)`；插件侧只据此重算业务门禁（`plugin.cpp:258-270`），**不重装 12 hook、不改 desired/Store、不重复 install/on_enabled**。实现见 `host/plugin_registry.h:75,80`、`host/plugin_registry.cpp:509-523,2704-2712,2956-3056`、`hooks/transaction.cpp`（软失败保留原机制码）、`contracts/plugin.h:198`（注释）；仅 `kNotReady` 可自动恢复，`kBusy` 本轮不作为恢复条件。
-- **表注入结果分类与 P1 整改**：`table.{h,cpp}` 增加 typed 状态域 `TableAcquireStatus{Ok, NotReady, Unsupported, Internal, Busy}`（`table.h:108-121`；分类 `table.cpp:230`，核心入口 `table.cpp:246`，deactivate `table.cpp:388`），`own_acquire` 依 typed 结果置 `g_ownership_ready` 并**透传原码**（`feature.cpp:1131-1146`）。顺序为实际实现：缺表/元数据**分类先于**合法重激活或换表状态变更，书名册字节不变式在实际新注入前、抓取组位快照之后校验（`table.cpp:331-343`）；不声称「所有永久错误发生前没有任何模块状态/RAII 变化」。**G1A-01**（production Android `set_context` 定义遗漏，P1）已恢复定义（`table.cpp:467-470`，`feature.cpp:87-90` 转发）并以生产 setter + 真实 bridge 日志/静态 message 与 `nm` 符号核对；P1-A/P1-B 保持更早实现检查发现的编号，见 [`design-card.md`](../../refactor/audits/plugin-audit/custom-recipe-20261014/design-card.md) §3.4。
+- **表注入结果分类与 P1 整改**：`table.{h,cpp}` 增加 typed 状态域 `TableAcquireStatus{Ok, NotReady, Unsupported, Internal, Busy}`（`table.h:108-121`；分类 `table.cpp:230`，核心入口 `table.cpp:246`，deactivate `table.cpp:388`），`own_acquire` 依 typed 结果置 `g_ownership_ready` 并**透传原码**（`feature.cpp:1131-1146`）。顺序为实际实现：缺表/元数据**分类先于**合法重激活或换表状态变更，书名册字节不变式在实际新注入前、抓取组位快照之后校验（`table.cpp:331-343`）；不声称「所有永久错误发生前没有任何模块状态/RAII 变化」。**G1A-01**（production Android `set_context` 定义遗漏，P1）已恢复定义（现位于 `table_runtime.cpp`，`feature.cpp:87-90` 转发）并以生产 setter + 真实 bridge 日志/静态 message 与 `nm` 符号核对；P1-A/P1-B 保持更早实现检查发现的编号，见 [`design-card.md`](../../refactor/audits/plugin-audit/custom-recipe-20261014/design-card.md) §3.4。
 - **本轮证据（仅源码/Host；`status-r2.txt`）**：跨 lane 生产链复验（真实 registry + 真实 descriptor + 真实 `on_resource_ready`）10 目标 CTest **10/10**；整树 **143 目标全部编译通过**、全量 CTest **141/143**，红项仍是既有的 `core_api_lifecycle_tests`（旧 `kHidden` 断言）与 `help_page_tests`（布局断言），两者源/测试相对 HEAD 未改、不归因本批在途 UI（先前的 `config-native-owner` mkdtemp 失败已消除，不再计入）。`check_http_routes` 147 条、缺失/额外 0（`0/147`）无漂移；`check_arch` **全部通过**（layers/offsets/JNI/resources）。原 `check_resources` 的 13 条来自扫描器把 `TableAccess` 的 `recipe_ptr_slot`/`mixture_ptr_slot` 业务字段名当成机制标识——已按**机制完整标识符/调用形态边界**修复扫描器（非字段改名、非新豁免、非 freeze），新增 12 正反例单测；证据 `.tmp/ui-craft-regression-20261015/validation/*-r2.log` 与 `.tmp/ui-craft-regression-20261015/checker/`。
 - **Gate 1A**：attempt1 **暂不通过**——G1A-01（P1，提取 table 核心时漏掉 production Android `set_context` 定义）与 G1A-02（P2，installing 期到达的 SaveEnter 被下一帧提前消费）已在各 lane 修复并补 production setter + 实际日志/`nm` 符号核对、逐帧 `step → retry` 安装中保信号测试；P3（恢复后 error 指向实际未 Live 资源 / ready 失败原因）亦修。**attempt2 已正式 PASS**（G1A-01/02/P3 可关闭静态整改，无新材料阻断），**VM 仍 NOT_ACCEPTED**。G1A-01/02 为 Gate 编号，P1-A/P1-B 为更早实现检查发现的编号，互不覆盖。
 - **边界**：Debug 构建成功（`output/inotia4_qol_lsposed_debug_2610151556_ed9081c4c54e.apk`，SHA-256 `ed9081c4c54e4bd5e0829ae8749d58d6a70e5101a0428f131cb299e953d29fd2`，`.tmp/ui-craft-regression-20261015/validation/build-debug.log:272-276`）。**脚本交付与冷启资源恢复观察**：用户已把输入换成 `apk/game-apk/艾诺迪亚4_monster_v29.apk`（**v29，非 v31**；`pre-health` 已 v29），`scripts/patch-apk.sh` 4 成功/0 失败，canonical `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`（SHA-256 `aaf20f5288b6d3acac9e0b8dc1494bcfb4794c6857dbb4c7e2785fa47ae3b980`；内嵌 module 仍 `ed9081c4c54e4bd5e0829ae8749d58d6a70e5101a0428f131cb299e953d29fd2`，origin `3cd098184c03cdc9a89a7c0a9746298f9f72196778eac8bec3d9b40296fe4a1c` 匹配该 v29 输入），`apksigner`(v2)/`aapt` 通过、package 原 ID / versionCode 32 / versionName 1.3.2、module 192/0.7.13 未变（`.tmp/ui-craft-regression-20261015/deploy/patch-apk.log`、`signature.txt`、`package.txt`）。**本批没有 install.log，也不写「Main 安装成功」**：由用户自行手动安装并测试，主代理仅只读校验（`identity-summary.json`）：设备 `192.168.3.56:5555` PID 6913，`pm path` 的 base APK sha256 与 canonical 完全一致；`running-module.log:33` 运行模块 identity 严格等于 `ed9081c4c54e4bd5e0829ae8749d58d6a70e5101a0428f131cb299e953d29fd2`；health `monster/v29`、screen `main_menu`。冷启进档资源自动恢复被观察到：`f17` `recipe table not ready` → `f547` SaveEnter + 动态组合重建 26 → `f548` 表注入 `base=69`（原版记录）+ 2 条入口 → `records=71` 且 `ownership restored`（写入的是 71 条精确记录，**不是新增 69 条**），API `custom_recipe` enabled、13 条资源全 `live`、`degraded=false`、`error=null`。该观察只证明资源恢复，**不等于正常合成/扣料/品质或全 VM 验收**；也不假设用户从未开关或从未变动状态。**Gate 2A attempt1 交付身份 PASS**（模块/内嵌/运行 module、canonical/设备 base APK、origin/v29 输入三条链闭合，签名 v2 与 PID 6913、health monster/v29 一致；非功能 VM 验收），整体 VM 仍 **NOT_ACCEPTED**。
@@ -154,7 +154,8 @@
 | 内部结果契约 | `plugins/custom_recipe/result.h:10-105` | 结果枚举与 Input/Output POD 及 `CraftResultApi`。 |
 | 纯规则 | `plugins/custom_recipe/rules.h:17-101`、`rules.cpp:42-224` | 档位/区间/候选、材料数量、三格库存与 token、宝石缩放。 |
 | 静态/动态目录 | `plugins/custom_recipe/catalog.h:14-200`、`catalog.cpp:43-345` | 两条注入 entry、8 条静态规则、26 类动态构造与匹配。 |
-| 表注入 | `plugins/custom_recipe/table.h:20-111`、`table.cpp:24-398` | 注入构造、组位快照/恢复、ensure/deactivate、模块缓冲生命周期。 |
+| 表注入（纯核心） | `plugins/custom_recipe/table.h:20-111`、`table.cpp:1-411` | 注入构造、组位快照/恢复、分类/注入/还原核心；不含平台或地址代码。 |
+| 表注入（运行时） | `plugins/custom_recipe/table_runtime.cpp` | 绑定 `QolRecipeTablePort`、装配 `TableAccess`、ensure/deactivate 入口、表日志绑定。 |
 | 配方呈现文案 | `plugins/custom_recipe/text_table.h:9-90` | 本地 scope 与 id 的替换映射。 |
 | 设置兼容源 | `plugins/custom_recipe/settings_contribution.cpp:3-6` | 兼容入口不注册设置项；feature metadata 唯一来自 descriptor。 |
 | Build composition | `plugins/custom_recipe/CMakeLists.txt:1-10` | catalog/rules/table/feature/plugin/settings contribution 与 `ui/feature.cpp`、`ui/runtime.cpp`。 |

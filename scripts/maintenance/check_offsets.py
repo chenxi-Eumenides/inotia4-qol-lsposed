@@ -42,8 +42,11 @@ _SYMBOL_HEADER_PATHS = frozenset(
     }
 )
 
-# 规则 2.1：基址加十六进制字面量
-_BASE_ADD_RE = re.compile(r"\b(?:g_base|image_base|base)\s*\+\s*0x[0-9a-fA-F]+")
+# 规则 2.1：基址加十六进制字面量或十进制 VMA（十进制形态曾使插件内 3152304 一类裸地址漏检）
+_BASE_ADD_RE = re.compile(r"\b(?:g_base|image_base|base)\s*\+\s*(?:0x[0-9a-fA-F]+|[0-9]{5,})")
+
+# 规则 3：插件目录禁止引用模块基址（地址装配只允许在 game/）
+_PLUGIN_BASE_RE = re.compile(r"\bg_base\b")
 
 # 规则 2.2：宏风格 VMA/ADDR/OFFSET 常量定义（前缀 F_/G_/C_/I_/O_/S_/M_）
 _VMA_CONST_RE = re.compile(
@@ -70,10 +73,14 @@ def _scan_line(line: str) -> str | None:
     return None
 
 
-def main() -> int:
-    args = ac.parse_common_args(__doc__ or "裸地址与符号头越权校验")
+def _scan_plugin_base(line: str) -> str | None:
+    """插件目录内的模块基址引用；注释行不算。"""
+    code = line.split("//", 1)[0]
+    match = _PLUGIN_BASE_RE.search(code)
+    return match.group(0) if match is not None else None
 
-    graph = ac.IncludeGraph(ac.iter_sources())
+
+def collect_violations(graph) -> list[ac.Violation]:
     violations: list[ac.Violation] = []
 
     for rel in sorted(graph.paths):
@@ -89,16 +96,36 @@ def main() -> int:
                         )
                     )
 
+        text = ac.read_text(rel, graph.paths[rel])
+        lines = text.splitlines()
+
+        # 规则 3：插件不得引用模块基址（无论是否参与运算）
+        if rel.startswith("plugins/"):
+            for lineno, line in enumerate(lines, start=1):
+                snippet = _scan_plugin_base(line)
+                if snippet is not None:
+                    violations.append(
+                        ac.Violation("offsets_plugin_base", rel, "", f"L{lineno}: {snippet}")
+                    )
+
         # 规则 2：非 game 层禁止明显裸地址
         if src_layer == "game":
             continue
-        text = ac.read_text(rel, graph.paths[rel])
-        for lineno, line in enumerate(text.splitlines(), start=1):
+        for lineno, line in enumerate(lines, start=1):
             snippet = _scan_line(line)
             if snippet is not None:
                 violations.append(
                     ac.Violation("offsets_bare_address", rel, "", f"L{lineno}: {snippet}")
                 )
+
+    return violations
+
+
+def main() -> int:
+    args = ac.parse_common_args(__doc__ or "裸地址与符号头越权校验")
+
+    graph = ac.IncludeGraph(ac.iter_sources())
+    violations = collect_violations(graph)
 
     game_files = sum(1 for rel in graph.paths if graph.layer(rel) == "game")
     hit_by_layer = Counter(
@@ -115,7 +142,7 @@ def main() -> int:
         args,
         "裸地址与符号头越权",
         extra_lines,
-        rules=("offsets_symbols_header", "offsets_bare_address"),
+        rules=("offsets_symbols_header", "offsets_plugin_base", "offsets_bare_address"),
     )
 
 
