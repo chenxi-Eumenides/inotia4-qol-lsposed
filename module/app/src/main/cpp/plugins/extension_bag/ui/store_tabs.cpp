@@ -1,4 +1,5 @@
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/projection_controller.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/item_access.h"
@@ -357,8 +358,8 @@ void store_draw_inven_bag_group_entry() {
         ::qol::extension_bag::access::host().write_port->ui.current_bag != nullptr &&
         ::qol::extension_bag::access::host().write_port->ui.set_current_bag != nullptr &&
         qol::contracts::succeeded(::qol::extension_bag::access::host().write_port->ui.current_bag(&saved_current)) &&
-        saved_current != kNoOriginalBagSelected) {
-        (void)::qol::extension_bag::access::host().write_port->ui.set_current_bag(kNoOriginalBagSelected);
+        saved_current != native_bag_count_locked()) {
+        (void)::qol::extension_bag::access::host().write_port->ui.set_current_bag(native_bag_count_locked());
         masked = true;
     }
     backup();
