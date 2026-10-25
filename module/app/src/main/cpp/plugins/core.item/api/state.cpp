@@ -1,12 +1,9 @@
 #include "plugins/core.item/runtime/core_item_internal.h"
 
-#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <string>
-#include <vector>
 
-#include "contracts/extension_bag.h"
 #include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/http/response.h"
 #include "plugins/core.item/shop/snapshot.h"
@@ -50,37 +47,66 @@ void publish_not_in_game(ItemSnapshot& snapshot) {
     g_snapshot.publish(snapshot);
 }
 
-QolResult append_extension_inventory_bags(std::string* out) {
-    if (out == nullptr || g_port == nullptr) return contracts::ok();
-    const InventoryExtensionAccessResult access = inventory_extension();
-    if (!access.available || access.provider == nullptr ||
-        access.provider->inventory_json_fragment == nullptr) {
-        // provider 未注册/停用 → 省略扩展段（限速 WARN 保留可诊断性）；主快照照常。
-        log_degrade_warn("extension inventory omitted: provider unavailable");
-        return contracts::ok();
-    }
-    int32_t in_world = 0;
-    if (g_port->read.in_world == nullptr ||
-        !contracts::succeeded(g_port->read.in_world(&in_world)) || in_world == 0) {
-        return contracts::ok();
-    }
-    size_t capacity = kInventoryCapacity;
-    constexpr size_t kMaximumFragmentCapacity = 8u * 1024u * 1024u;
-    for (;;) {
-        std::vector<char> fragment(capacity);
-        uint32_t fragment_size = 0;
-        const QolResult result = access.provider->inventory_json_fragment(
-            fragment.data(), static_cast<uint32_t>(fragment.size()), &fragment_size);
-        if (contracts::succeeded(result) && fragment_size != 0 &&
-            fragment_size <= fragment.size()) {
-            out->append(fragment.data(), fragment_size);
-            return contracts::ok();
+QolResult append_registered_inventory_bags(std::string* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid inventory output");
+    for (uint32_t source_index = 0; source_index < registered_bag_source_count(); ++source_index) {
+        const contracts::QolBagSource* source = registered_bag_source_at(source_index);
+        if (source == nullptr || source->count == nullptr || source->info == nullptr ||
+            source->item_at == nullptr || source->space_id < contracts::kQolBagSpaceFirstRegistered) {
+            return error_result(kQolErrInvalidArgument, "invalid registered bag source");
         }
-        if (capacity >= kMaximumFragmentCapacity) break;
-        capacity = std::min(capacity * 2, kMaximumFragmentCapacity);
+        const int32_t bag_count = source->count();
+        if (bag_count < 0) {
+            return error_result(kQolErrInvalidArgument, "invalid registered bag count");
+        }
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            contracts::QolBagInfo info{};
+            const QolResult info_result = source->info(bag, &info);
+            if (!contracts::succeeded(info_result)) return info_result;
+            if (info.capacity < 0 || info.slot_count < 0 || info.slot_count > info.capacity) {
+                return error_result(kQolErrInvalidArgument, "invalid registered bag info");
+            }
+
+            out->append(",{\"space\":");
+            *out += std::to_string(source->space_id);
+            out->append(",\"bag\":");
+            *out += std::to_string(bag);
+            out->append(",\"capacity\":");
+            *out += std::to_string(info.capacity);
+            out->append(",\"used\":");
+            *out += std::to_string(info.slot_count);
+            out->append(",\"items\":[");
+
+            bool first_item = true;
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                contracts::QolInventoryItemRef item_ref{};
+                const QolResult item_result = source->item_at(bag, slot, &item_ref);
+                if (!contracts::succeeded(item_result)) {
+                    if (item_result.code == kQolErrNotFound) continue;
+                    return item_result;
+                }
+                if (item_ref.space_id != source->space_id || item_ref.bag != bag ||
+                    item_ref.slot != slot || item_ref.item.slot == 0 ||
+                    item_ref.item.generation == 0) {
+                    return error_result(kQolErrInvalidArgument, "invalid registered bag item");
+                }
+                if (!first_item) out->push_back(',');
+                first_item = false;
+                out->append("{\"space\":");
+                *out += std::to_string(source->space_id);
+                out->append(",\"bag\":");
+                *out += std::to_string(bag);
+                out->append(",\"slot\":");
+                *out += std::to_string(slot);
+                out->append(",\"item\":{\"slot\":");
+                *out += std::to_string(item_ref.item.slot);
+                out->append(",\"generation\":");
+                *out += std::to_string(item_ref.item.generation);
+                out->append("}}");
+            }
+            out->append("]}");
+        }
     }
-    // provider 门禁关闭或不可用时贡献空片段：省略扩展段（限速 WARN 保留可诊断性）。
-    log_degrade_warn("extension inventory omitted: fragment unavailable");
     return contracts::ok();
 }
 
@@ -192,7 +218,7 @@ QolResult build_inventory_json(std::string* out) {
         json += "],\"capacity\":" + std::to_string(info.capacity) +
                 ",\"slot_count\":" + std::to_string(info.slot_count) + "}";
     }
-    const QolResult extension_result = append_extension_inventory_bags(&json);
+    const QolResult extension_result = append_registered_inventory_bags(&json);
     if (!contracts::succeeded(extension_result)) return extension_result;
     json += "]}";
     *out = std::move(json);
@@ -213,7 +239,6 @@ QolResult serialize_inventory_json(char* out, uint32_t capacity, uint32_t* out_s
     *out_size = static_cast<uint32_t>(json.size());
     if (out == nullptr) return contracts::ok();
     if (json.size() > capacity) {
-        *out_size = 0;
         return error_result(kQolErrInvalidArgument, "inventory buffer too small");
     }
     std::memcpy(out, json.data(), json.size());
@@ -237,6 +262,7 @@ QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint
                     return contracts::ok();
                 }
                 if (body.size() > capacity) {
+                    *out_size = static_cast<uint32_t>(body.size());
                     return error_result(kQolErrBlocked, "item state buffer too small");
                 }
                 std::memcpy(out, body.data(), body.size());
@@ -260,7 +286,6 @@ QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint
             *out_size = static_cast<uint32_t>(body.size());
             if (out == nullptr) return contracts::ok();
             if (body.size() > capacity) {
-                *out_size = 0;
                 return error_result(kQolErrBlocked, "item state buffer too small");
             }
             std::memcpy(out, body.data(), body.size());
