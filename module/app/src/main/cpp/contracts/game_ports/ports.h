@@ -40,6 +40,7 @@ enum class QolPortId : uint32_t {
     QOL_PORT_WORLD_ACTION = 30,
     QOL_PORT_CRAFT_LOTTERY_WRITE = 31,
     QOL_PORT_CUSTOM_MAP_RESOURCE = 32,
+    QOL_PORT_RECIPE_TABLE = 33,
 };
 
 constexpr QolVersion kQolPortQuestVersion{1, 2};
@@ -69,6 +70,7 @@ constexpr QolVersion kQolPortCharacterWriteOpsVersion{1, 0};
 constexpr QolVersion kQolPortSaveTransactionVersion{1, 0};
 constexpr QolVersion kQolPortWorldActionVersion{1, 0};
 constexpr QolVersion kQolPortCustomMapResourceVersion{1, 0};
+constexpr QolVersion kQolPortRecipeTableVersion{1, 0};
 
 struct QolPortRequirement {
     QolPortId id;
@@ -139,6 +141,8 @@ constexpr const char* port_id_name(QolPortId id) {
             return "QOL_PORT_SAVE_TRANSACTION";
         case QolPortId::QOL_PORT_CUSTOM_MAP_RESOURCE:
             return "QOL_PORT_CUSTOM_MAP_RESOURCE";
+        case QolPortId::QOL_PORT_RECIPE_TABLE:
+            return "QOL_PORT_RECIPE_TABLE";
     }
     return "QOL_PORT_UNKNOWN";
 }

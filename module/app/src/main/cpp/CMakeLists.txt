@@ -259,6 +259,7 @@ target_sources(gamebridge PRIVATE
     game/adapter_ports/character_port.cpp
     game/adapter_ports/craft_port.cpp
     game/adapter_ports/craft_lottery_port.cpp
+    game/adapter_ports/recipe_table_port.cpp
     game/adapter_ports/custom_map_resource_port.cpp
     game/adapter_ports/choice_port.cpp
     game/adapter_ports/world_action_port.cpp
