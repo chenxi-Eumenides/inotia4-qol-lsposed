@@ -11,6 +11,9 @@
 
 #include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/http/response.h"
+#ifndef QOL_CORE_ITEM_SHOP_SEPARATE
+#include "plugins/core.item/shop/query.cpp"
+#endif
 
 namespace qol::features::core_item {
 namespace {
@@ -293,7 +296,7 @@ QolResult bag_slot(const contracts::HttpReq& request, contracts::HttpRes* respon
 
 Query kQueries[] = {
     Query::kInventory, Query::kMoney,        Query::kItems,
-    Query::kBagInfo,   Query::kBagSlot,      Query::kShopItems,
+    Query::kBagInfo,   Query::kBagSlot,
 };
 
 QolResult response_error(contracts::HttpRes* response, uint16_t status, const char* message) {
@@ -325,23 +328,6 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
         return response_error(response, 400, "bad request");
     }
     const Query query = *static_cast<const Query*>(ctx);
-    if (query == Query::kShopItems) {
-        ItemSnapshot legacy_snapshot{};
-        if (!g_snapshot.read(legacy_snapshot)) return response_error(response, 503, "not ready");
-        if (legacy_snapshot.state == SnapshotState::kNotInGame) {
-            return response_body(response, kNotInGameBody,
-                                 static_cast<uint32_t>(sizeof(kNotInGameBody) - 1));
-        }
-        if (legacy_snapshot.state != SnapshotState::kReady) {
-            return response_error(response, 503, "not ready");
-        }
-        std::string body;
-        if (!enrich_shop_items(legacy_snapshot.shop, legacy_snapshot.shop_size, g_port, &body)) {
-            return response_error(response, 500, "internal error");
-        }
-        return response_body(response, body.data(), static_cast<uint32_t>(body.size()));
-    }
-
     const std::shared_ptr<const bags::InventorySnapshot> snapshot =
         bags::inventory_snapshot_store().read();
     if (snapshot == nullptr) return response_error(response, 503, "not ready");
@@ -358,8 +344,6 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
             return bag_info(*request, response, *snapshot);
         case Query::kBagSlot:
             return bag_slot(*request, response, *snapshot);
-        case Query::kShopItems:
-            break;
     }
     return response_error(response, 500, "internal error");
 }

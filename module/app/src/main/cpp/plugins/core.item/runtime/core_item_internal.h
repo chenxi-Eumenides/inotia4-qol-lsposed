@@ -39,6 +39,7 @@ const contracts::QolBagSource* registered_bag_source_at(uint32_t index);
 void reset_bag_sources();
 QolResult read_inventory();
 void request_inventory_refresh();
+void log_snapshot_serialize_failure();
 
 extern const contracts::ItemFactsApi kItemFactsApi;
 extern const contracts::ItemStateApi kItemStateApi;
@@ -57,7 +58,6 @@ enum class Query : uint8_t {
     kItems,
     kBagInfo,
     kBagSlot,
-    kShopItems,
 };
 
 extern Query kQueries[];
@@ -66,6 +66,7 @@ QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* r
 struct ItemWriteRoute {
     const char* path;
     contracts::QolItemWriteKind kind;
+    contracts::HttpCommandHandlerFn handler;
 };
 
 inline constexpr uint32_t kItemWriteRouteCount = 13;

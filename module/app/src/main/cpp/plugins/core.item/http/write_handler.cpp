@@ -7,6 +7,10 @@
 #include <string>
 
 #include "plugins/core.item/http/json_lite.h"
+#include "plugins/core.item/shop/buy.h"
+#ifndef QOL_CORE_ITEM_SHOP_SEPARATE
+#include "plugins/core.item/shop/buy.cpp"
+#endif
 
 namespace qol::features::core_item {
 namespace {
@@ -301,19 +305,19 @@ bool write_path_int(const contracts::HttpReq* request, const char* name, int32_t
 }  // namespace
 
 ItemWriteRoute kItemWriteRoutes[kItemWriteRouteCount] = {
-    {"/api/item/inventory/use_item", contracts::QolItemWriteKind::kUseItem},
-    {"/api/item/inventory/sell_item", contracts::QolItemWriteKind::kSellItem},
-    {"/api/item/inventory/move_item", contracts::QolItemWriteKind::kMoveItem},
-    {"/api/item/inventory/discard_item", contracts::QolItemWriteKind::kDiscardItem},
-    {"/api/item/inventory/accept_dice", contracts::QolItemWriteKind::kAcceptDice},
-    {"/api/item/inventory/reject_dice", contracts::QolItemWriteKind::kRejectDice},
-    {"/api/item/inventory/{role}/equip_item", contracts::QolItemWriteKind::kEquipItem},
-    {"/api/item/inventory/{role}/unequip_item", contracts::QolItemWriteKind::kUnequipItem},
-    {"/api/item/inventory/{role}/put_jewel", contracts::QolItemWriteKind::kPutJewel},
-    {"/api/item/inventory/{role}/enchant", contracts::QolItemWriteKind::kEnchant},
-    {"/api/item/shop/buy_item", contracts::QolItemWriteKind::kShopBuy},
-    {"/api/op/inventory/add", contracts::QolItemWriteKind::kAddItem},
-    {"/api/op/inventory/money", contracts::QolItemWriteKind::kSetMoney},
+    {"/api/item/inventory/use_item", contracts::QolItemWriteKind::kUseItem, &item_write_command},
+    {"/api/item/inventory/sell_item", contracts::QolItemWriteKind::kSellItem, &item_write_command},
+    {"/api/item/inventory/move_item", contracts::QolItemWriteKind::kMoveItem, &item_write_command},
+    {"/api/item/inventory/discard_item", contracts::QolItemWriteKind::kDiscardItem, &item_write_command},
+    {"/api/item/inventory/accept_dice", contracts::QolItemWriteKind::kAcceptDice, &item_write_command},
+    {"/api/item/inventory/reject_dice", contracts::QolItemWriteKind::kRejectDice, &item_write_command},
+    {"/api/item/inventory/{role}/equip_item", contracts::QolItemWriteKind::kEquipItem, &item_write_command},
+    {"/api/item/inventory/{role}/unequip_item", contracts::QolItemWriteKind::kUnequipItem, &item_write_command},
+    {"/api/item/inventory/{role}/put_jewel", contracts::QolItemWriteKind::kPutJewel, &item_write_command},
+    {"/api/item/inventory/{role}/enchant", contracts::QolItemWriteKind::kEnchant, &item_write_command},
+    {shop::kBuyRoute},
+    {"/api/op/inventory/add", contracts::QolItemWriteKind::kAddItem, &item_write_command},
+    {"/api/op/inventory/money", contracts::QolItemWriteKind::kSetMoney, &item_write_command},
 };
 
 QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpRes* response,
@@ -486,11 +490,6 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
                 }
                 args.i1 = write_port_bag(ref);
             }
-            break;
-        case contracts::QolItemWriteKind::kShopBuy:
-            if (write_has_invalid_number(body_object, "slot")) return invalid_write_number_error("slot", response);
-            args.i0 = write_opt_int(body_object, "slot", -1);
-            if (args.i0 < 0) return response_error(response, 400, "slot required");
             break;
         case contracts::QolItemWriteKind::kAddItem:
             if (write_has_invalid_number(body_object, "category")) return invalid_write_number_error("category", response);

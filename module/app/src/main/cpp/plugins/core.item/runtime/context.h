@@ -17,7 +17,6 @@ namespace qol::features::core_item {
 inline constexpr const char* kPluginId = "core.item";
 inline constexpr const char* kPluginVersion = "0.1.0";
 inline constexpr uint32_t kInventoryCapacity = contracts::kQolItemStateRawInventoryCapacity;
-inline constexpr uint32_t kShopCapacity = 32768;
 
 enum class SnapshotState : uint8_t { kUnavailable, kNotInGame, kReady };
 
@@ -26,8 +25,6 @@ struct ItemSnapshot {
     int64_t money = 0;
     uint32_t inventory_size = 0;
     char inventory[kInventoryCapacity]{};
-    uint32_t shop_size = 0;
-    char shop[kShopCapacity]{};
 };
 
 inline constexpr char kNotInGameBody[] = "{\"error\":\"not in game\"}";

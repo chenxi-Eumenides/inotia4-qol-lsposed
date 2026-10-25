@@ -9,6 +9,10 @@
 #include "contracts/extension_bag.h"
 #include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/http/response.h"
+#include "plugins/core.item/shop/snapshot.h"
+#ifndef QOL_CORE_ITEM_SHOP_SEPARATE
+#include "plugins/core.item/shop/snapshot.cpp"
+#endif
 #ifndef QOL_CORE_ITEM_TYPED_READ_SOURCES_SEPARATELY
 #include "plugins/core.item/bags/snapshot_store.cpp"
 #include "plugins/core.item/usecases/read_inventory.cpp"
@@ -43,8 +47,6 @@ void publish_not_in_game(ItemSnapshot& snapshot) {
     snapshot.state = SnapshotState::kNotInGame;
     (void)copy_buffer(snapshot.inventory, kInventoryCapacity, &snapshot.inventory_size,
                       kNotInGameBody, static_cast<uint32_t>(sizeof(kNotInGameBody) - 1));
-    (void)copy_buffer(snapshot.shop, kShopCapacity, &snapshot.shop_size, kNotInGameBody,
-                      static_cast<uint32_t>(sizeof(kNotInGameBody) - 1));
     g_snapshot.publish(snapshot);
 }
 
@@ -270,8 +272,7 @@ QolResult write_item_state_json(int32_t kind, char* out, uint32_t capacity, uint
 }
 
 void update_snapshot() {
-    if (g_port == nullptr || g_port->read.shop_items_json == nullptr ||
-        g_port->read.money == nullptr || g_port->read.in_world == nullptr) {
+    if (g_port == nullptr || g_port->read.money == nullptr || g_port->read.in_world == nullptr) {
         log_snapshot_serialize_failure();
         return;
     }
@@ -296,18 +297,6 @@ void update_snapshot() {
         return;
     }
 
-    std::vector<char> shop(kShopCapacity);
-    uint32_t shop_size = 0;
-    if (!contracts::succeeded(g_port->read.shop_items_json(
-            shop.data(), static_cast<uint32_t>(shop.size()), &shop_size))) {
-        log_snapshot_serialize_failure();
-        return;
-    }
-    if (!copy_buffer(next.shop, kShopCapacity, &next.shop_size, shop.data(), shop_size)) {
-        log_snapshot_serialize_failure();
-        return;
-    }
-
     if (!contracts::succeeded(g_port->read.money(&next.money))) {
         log_snapshot_serialize_failure();
         return;
@@ -319,6 +308,7 @@ void update_snapshot() {
 int32_t frame_tick(int64_t, void*) {
     (void)read_inventory();
     update_snapshot();
+    shop::refresh_snapshot();
     return 1;
 }
 extern const contracts::ItemStateApi kItemStateApi{&write_item_state_json};

@@ -6,6 +6,7 @@
 #include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/core.item/hooks/merge_hook.h"
+#include "plugins/core.item/shop/snapshot.h"
 #include "plugins/core.item/usecases/sell_item.h"
 
 namespace qol::features::core_item {
@@ -147,6 +148,11 @@ int plugin_install(contracts::PluginContext& ctx) {
         reset_ports();
         return 1;
     }
+    if (!shop::initialize_snapshot(g_sdk)) {
+        g_snapshot.destroy();
+        reset_ports();
+        return 1;
+    }
     ItemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     // 结果处理器需要 host 尾部的票据结果面（QolHostSdk 尾部追加，按 abi 协商）。
@@ -154,6 +160,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_sdk->ticket_result.register_typed_result_handler == nullptr ||
         !contracts::succeeded(g_sdk->ticket_result.register_typed_result_handler(
             kItemWriteHandlerId, &item_write_result, nullptr))) {
+        shop::destroy_snapshot();
         g_snapshot.destroy();
         reset_ports();
         return 1;
@@ -162,6 +169,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         if (g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
             (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
         }
+        shop::destroy_snapshot();
         g_snapshot.destroy();
         reset_ports();
         return 1;
@@ -172,6 +180,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         if (g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
             (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
         }
+        shop::destroy_snapshot();
         g_snapshot.destroy();
         reset_ports();
         return 1;
@@ -184,6 +193,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     merge::detach();
     inventory_hooks::detach();
     stop_frame_task(ctx.sdk);
+    shop::destroy_snapshot();
     g_snapshot.destroy();
     bags::inventory_snapshot_store().clear();
     reset_bag_sources();
@@ -211,6 +221,13 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
         log_message(ctx.sdk, "[core.item] snapshot unavailable");
         return;
     }
+    if (!shop::initialize_snapshot(g_sdk)) {
+        g_snapshot.destroy();
+        merge::detach();
+        inventory_hooks::detach();
+        log_message(ctx.sdk, "[core.item] snapshot unavailable");
+        return;
+    }
     ItemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     bags::inventory_snapshot_store().clear();
@@ -230,6 +247,7 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
     // 只关功能门；ptrslot 就绪态保留，避免未重新安装资源时二次 enable 后门禁无法恢复。
     merge::set_enabled(false);
     stop_frame_task(ctx.sdk);
+    shop::destroy_snapshot();
     g_snapshot.destroy();
     bags::inventory_snapshot_store().clear();
     log_message(ctx.sdk, "[core.item] provider disabled: capability + http queries withdrawn");

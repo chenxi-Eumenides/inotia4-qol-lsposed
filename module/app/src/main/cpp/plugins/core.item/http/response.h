@@ -7,7 +7,7 @@
 #include "json_lite.h"
 #include "plugins/core.item/bags/snapshot_store.h"
 
-// item_facts HTTP owner 的响应构造：把 native 原始库存/商店 JSON 富化为迁移前 Kotlin 输出，
+// item_facts HTTP owner 的响应构造：把 native 原始库存 JSON 富化为迁移前 Kotlin 输出，
 // 静态名称来自 port 的启动期名称表。只在 HTTP handler 调用（不读游戏内存）。
 namespace qol::features::core_item {
 
@@ -35,9 +35,5 @@ bool enrich_bag_info(const char* json, uint32_t size, int32_t bag, std::string* 
 // 袋存在但槽为空时写入 "null"。
 bool enrich_bag_slot(const char* json, uint32_t size, int32_t bag, int32_t slot,
                      const contracts::QolItemPort* port, std::string* out, bool* bag_found);
-
-// {"items":[...]}：商店货架物品追加 name（category 无名称时不加）。
-bool enrich_shop_items(const char* json, uint32_t size, const contracts::QolItemPort* port,
-                       std::string* out);
 
 }  // namespace qol::features::core_item

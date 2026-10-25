@@ -14,6 +14,8 @@
 #include "contracts/extension_bag.h"
 #include "plugins/core.item/http/json_lite.h"
 #include "plugins/core.item/http/response.h"
+#include "plugins/core.item/http/write_result_inventory.h"
+#include "plugins/core.item/shop/buy.h"
 
 namespace qol::features::core_item {
 namespace {
@@ -39,18 +41,8 @@ struct WriteRef {
     int32_t slot;
 };
 
-struct SlotKey {
-    int32_t space_id;
-    int32_t bag;
-    int32_t slot;
-
-    bool operator<(const SlotKey& other) const {
-        return std::tie(space_id, bag, slot) <
-               std::tie(other.space_id, other.bag, other.slot);
-    }
-};
-
-using InventoryResultSnapshot = std::map<SlotKey, std::string>;
+using SlotKey = write_result::SlotKey;
+using InventoryResultSnapshot = write_result::InventorySnapshot;
 using ForcedSlots = std::set<SlotKey>;
 
 bool result_space_count(int32_t space_id, int32_t* out_count) {
@@ -492,7 +484,6 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
         kind == contracts::QolItemWriteKind::kUseItem ||
         kind == contracts::QolItemWriteKind::kSellItem ||
         kind == contracts::QolItemWriteKind::kDiscardItem ||
-        kind == contracts::QolItemWriteKind::kShopBuy ||
         kind == contracts::QolItemWriteKind::kMoveItem;
     if (tracks_inventory) (void)capture_inventory_result(&inventory_before);
     int32_t hp_before = 0;
@@ -509,9 +500,6 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
             break;
         case contracts::QolItemWriteKind::kDiscardItem:
             operation = g_item_state_write->discard_item(args.i0, args.i1, &operation_data);
-            break;
-        case contracts::QolItemWriteKind::kShopBuy:
-            operation = g_item_state_write->shop_buy(args.i0, &operation_data);
             break;
         case contracts::QolItemWriteKind::kMoveItem:
             operation = g_item_state_write->move_item(args.i0, args.i1, args.i2, args.i3,
@@ -632,8 +620,7 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
         }
         body.push_back(']');
     }
-    if (kind == contracts::QolItemWriteKind::kSellItem ||
-        kind == contracts::QolItemWriteKind::kShopBuy) {
+    if (kind == contracts::QolItemWriteKind::kSellItem) {
         int64_t money_after = 0;
         if (!contracts::succeeded(money(&money_after))) {
             constexpr char kMoneyUnavailable[] =
@@ -642,14 +629,7 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
                               sizeof(kMoneyUnavailable) - 1);
             return false;
         }
-        if (kind == contracts::QolItemWriteKind::kShopBuy) {
-            const std::size_t slots_key = body.find(",\"slots\":");
-            body.insert(slots_key,
-                        ",\"price\":" + std::to_string(operation_data.value) +
-                            ",\"money\":" + std::to_string(money_after));
-        } else {
-            body += ",\"money\":" + std::to_string(money_after);
-        }
+        body += ",\"money\":" + std::to_string(money_after);
     }
     if (kind == contracts::QolItemWriteKind::kUseItem && health_before_available) {
         int32_t hp_after = 0;
@@ -946,6 +926,21 @@ bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
 
 }  // namespace
 
+bool write_result::SlotKey::operator<(const SlotKey& other) const {
+    return std::tie(space_id, bag, slot) < std::tie(other.space_id, other.bag, other.slot);
+}
+
+bool write_result::capture_inventory_snapshot(InventorySnapshot* out) {
+    return capture_inventory_result(out);
+}
+
+void write_result::append_changed_slots(std::string& body, const InventorySnapshot& before,
+                                        const InventorySnapshot& after) {
+    const ForcedSlots forced;
+    bool first = true;
+    append_inventory_changes(body, before, after, forced, &first);
+}
+
 bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
                        uint32_t* out_size) {
     if (out_size != nullptr) *out_size = 0;
@@ -956,6 +951,10 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     contracts::QolItemWriteArgs args{};
     std::memcpy(&args, payload, size);
     const auto kind = static_cast<contracts::QolItemWriteKind>(args.kind);
+    bool shop_result_handled = false;
+    const bool shop_result =
+        shop::write_result_if_requested(args, out, capacity, out_size, &shop_result_handled);
+    if (shop_result_handled) return shop_result;
     if (kind == contracts::QolItemWriteKind::kEquipItem ||
         kind == contracts::QolItemWriteKind::kUnequipItem ||
         kind == contracts::QolItemWriteKind::kPutJewel ||
@@ -973,8 +972,7 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     }
     if (kind == contracts::QolItemWriteKind::kUseItem ||
         kind == contracts::QolItemWriteKind::kSellItem ||
-        kind == contracts::QolItemWriteKind::kDiscardItem ||
-        kind == contracts::QolItemWriteKind::kShopBuy) {
+        kind == contracts::QolItemWriteKind::kDiscardItem) {
         return write_item_inventory_state_result(args, out, capacity, out_size);
     }
     if (g_item_money_write == nullptr || g_item_money_write->set_money == nullptr ||

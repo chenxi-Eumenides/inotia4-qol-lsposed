@@ -2,21 +2,31 @@
 
 #include <cstring>
 
+#include "plugins/core.item/shop/buy.h"
+#include "plugins/core.item/shop/query.h"
+
 namespace qol::features::core_item {
 namespace {
 
-constexpr contracts::HttpRoute kRoutes[] = {
+constexpr contracts::HttpRoute kInventoryRoutes[] = {
     {contracts::HttpMethod::kGet, "/api/item/inventory", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/item/inventory/money", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/item/inventory/items", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/info", kPluginId, 0, 1},
     {contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/{slot}", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/item/shop/items", kPluginId, 0, 1},
 };
 #define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
     {contracts::HttpMethod::method, path, owner, op_gated, lease_required},
+constexpr contracts::HttpRoute kShopRoutes[] = {
+#include "plugins/core.item/shop/routes.inc"
+};
+constexpr contracts::HttpRoute kRoutes[] = {
+    kInventoryRoutes[0], kInventoryRoutes[1], kInventoryRoutes[2],
+    kInventoryRoutes[3], kInventoryRoutes[4], kShopRoutes[0],
+};
 const contracts::HttpRoute kRouteFacts[] = {
 #include "plugins/core.item/routes.inc"
+#include "plugins/core.item/shop/routes.inc"
 };
 #undef QOL_HTTP_ROUTE
 
@@ -39,7 +49,9 @@ extern const uint32_t kHttpEndpointCount =
 
 void initialize_http_endpoints() {
     if (g_http_endpoints_initialized) return;
-    for (size_t index = 0; index < sizeof(kRoutes) / sizeof(kRoutes[0]); ++index) {
+    constexpr size_t kInventoryRouteCount = sizeof(kInventoryRoutes) / sizeof(kInventoryRoutes[0]);
+    constexpr size_t kQueryRouteCount = sizeof(kRoutes) / sizeof(kRoutes[0]);
+    for (size_t index = 0; index < kInventoryRouteCount; ++index) {
         const contracts::HttpRoute& route = kRoutes[index];
         const contracts::HttpRoute* facts = route_facts(route.method, route.path);
         if (facts == nullptr) continue;
@@ -47,16 +59,23 @@ void initialize_http_endpoints() {
             route.method, route.path, route.owner, contracts::HttpHandlerKind::kQuery,
             facts->op_gated, facts->lease_required, &query_handler, nullptr, &kQueries[index]};
     }
-    constexpr size_t kQueryCount = sizeof(kRoutes) / sizeof(kRoutes[0]);
+    const contracts::HttpRoute& shop_route = kRoutes[kInventoryRouteCount];
+    const contracts::HttpRoute* shop_facts = route_facts(shop_route.method, shop_route.path);
+    if (shop_facts != nullptr) {
+        kHttpEndpoints[kInventoryRouteCount] = contracts::HttpEndpointDescriptor{
+            shop_route.method, shop_route.path, shop_route.owner,
+            contracts::HttpHandlerKind::kQuery, shop_facts->op_gated,
+            shop_facts->lease_required, &shop::query_handler, nullptr, nullptr};
+    }
     for (size_t index = 0; index < kItemWriteRouteCount;
          ++index) {
         ItemWriteRoute& route = kItemWriteRoutes[index];
         const contracts::HttpRoute* facts = route_facts(contracts::HttpMethod::kPost, route.path);
         if (facts == nullptr) continue;
-        kHttpEndpoints[kQueryCount + index] = contracts::HttpEndpointDescriptor{
+        kHttpEndpoints[kQueryRouteCount + index] = contracts::HttpEndpointDescriptor{
             contracts::HttpMethod::kPost, route.path, kPluginId,
             contracts::HttpHandlerKind::kCommand, facts->op_gated, facts->lease_required,
-            nullptr, &item_write_command, &route.kind};
+            nullptr, route.handler, &route.kind};
     }
     g_http_endpoints_initialized = true;
 }
