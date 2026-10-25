@@ -4,7 +4,7 @@
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
-#include "plugins/extension_bag/runtime/lifecycle.h"
+#include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
 

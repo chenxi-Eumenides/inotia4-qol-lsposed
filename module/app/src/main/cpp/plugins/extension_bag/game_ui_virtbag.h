@@ -21,7 +21,6 @@ bool virtual_bag_enabled();
 bool virtual_bag_is_inventory_enter(uintptr_t enter);
 int virtual_bag_inventory_state_id();
 bool virtual_bag_prepare_main_menu();
-bool virtual_bag_prepare_save_slot_load();
 bool virtual_bag_sync_projected_slot(int display_bag, int slot);
 bool virtual_bag_sync_projected_bag();
 bool virtual_bag_sync_projected_item_control(void* control);
@@ -56,7 +55,6 @@ void virtual_bag_for_each_logical_item(LogicalInventoryItemFn fn, void* ctx);
 bool virtual_bag_logical_capacity(int32_t logical_bag, int32_t* out_capacity);
 void* virtual_bag_item_at(int bag, int slot);
 // 按 ITEMCLASSBASE +6 bit0 统一判定 payload 数量字段是否为 S2 数量语义。
-::qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category);
 // 数量 facade 适配：NotReady 时仅回落原版低 b 位写法；Unsupported 保持失败关闭。
 uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical);
 uint32_t virtual_bag_canonical_count(const void* item, uint32_t fallback_canonical);

@@ -2,6 +2,7 @@
 
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
+#include "plugins/extension_bag/runtime/projection_controller.h"
 
 struct NativeCallScope {
     const bool previous = g_in_native_call;
@@ -21,20 +22,9 @@ struct NativeCallScope {
     }
 };
 
-void* valid_child_locked(void* root, int slot);
-bool bag_size_word_locked(int bag, uint32_t* out_word);
-bool set_bag_size_word_locked(int bag, uint32_t word);
 void refresh_module_item_area_locked(int index);
 void virtual_bag_draw_original_bag_wrapper();
 void virtual_bag_draw_inven_item_wrapper();
-int original_bag_locked();
-int raw_current_bag_locked();
-// 袋页原生页签数（原版袋 + C18 追加袋，模块锚定控件不计入）。
-int native_bag_count_locked();
-// 可作为原版/改版侧移动来源的袋索引：0..4 恒合法，5（任务袋）恒不合法，
-// >=6 仅 C18 candidate 且小于当前袋页原生页签数时合法。
-bool native_source_bag_allowed_locked(int bag);
-void set_original_bag_locked(int bag);
 void clear_original_bag_selection_locked();
 void clear_original_desc_locked();
 int original_bag_button_index(int64_t x, int64_t y);

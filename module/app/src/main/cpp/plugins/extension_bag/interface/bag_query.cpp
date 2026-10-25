@@ -6,6 +6,7 @@
 #include "plugins/extension_bag/runtime/bag_state_store.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/logging.h"
+#include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/status_snapshot.h"
 
 #include <atomic>

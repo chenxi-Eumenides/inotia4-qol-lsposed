@@ -469,8 +469,8 @@ void test_runtime_regression_guards_match_behavioral_models() {
     CHECK(unlock < pending_make && pending_make < relock);
     CHECK(click_impl.find("g_inventory_generation == generation") != std::string::npos);
 
-    const std::string orchestrator = read_source(QOL_EXTENSION_BAG_ORCHESTRATOR_SOURCE);
-    const std::string persist = source_function(orchestrator, "bool persist_state_locked(bool force) {");
+    const std::string state_load = read_source(QOL_EXTENSION_BAG_STATE_LOAD_SOURCE);
+    const std::string persist = source_function(state_load, "bool persist_state_locked(bool force) {");
     CHECK(persist.find("does not report durable staging") != std::string::npos);
 
     const std::string lifecycle = read_source(QOL_EXTENSION_BAG_LIFECYCLE_SOURCE);

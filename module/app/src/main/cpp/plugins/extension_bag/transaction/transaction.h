@@ -43,6 +43,3 @@ bool apply_extension_material_to_slot_locked(::qol::extension_bag::ReentryLock& 
                                              int dst_slot, void* material, void* target_item);
 bool remove_item_direct_unlocked(::qol::extension_bag::ReentryLock& lock, int bag, int slot,
                                  void* expected_item, const char* context);
-
-ExtensionBagUnequipResult unequip_extension_bag_locked_bridge(
-    ::qol::extension_bag::ReentryLock& lock, int internal_bag);

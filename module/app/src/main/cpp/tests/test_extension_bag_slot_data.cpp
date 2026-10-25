@@ -8,6 +8,7 @@
 #include "plugins/core.save/slot_data_provider.h"
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
+#include "plugins/extension_bag/runtime/session.h"
 
 #include <cstdio>
 #include <cstring>

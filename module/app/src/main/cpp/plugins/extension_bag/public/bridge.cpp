@@ -1,5 +1,5 @@
 #include "plugins/extension_bag/game_ui_virtbag.h"
-#include "plugins/extension_bag/interface/state_access.h"
+#include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
@@ -23,18 +23,19 @@
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/ui/store_sell_rules.h"
+#include "plugins/extension_bag/model/store_sell_rules.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
 #include "plugins/extension_bag/runtime/bag_state_store.h"
-#include "plugins/extension_bag/runtime/access.h"
-#include "plugins/extension_bag/runtime/lifecycle.h"
-#include "plugins/extension_bag/runtime/ownership.h"
-#include "plugins/extension_bag/runtime/projection.h"
+#include "plugins/extension_bag/runtime/inventory_access.h"
+#include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/core/lifecycle.h"
+#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
-#include "plugins/extension_bag/runtime/tabs.h"
+#include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/runtime/status_snapshot.h"
 #include "plugins/extension_bag/transaction/transaction.h"
-#include "plugins/extension_bag/ui/host_ui.h"
+#include "plugins/extension_bag/core/host_adapter.h"
 
 #include <array>
 #include <atomic>
@@ -215,41 +216,6 @@ bool virtual_bag_prepare_save_slot_load() {
 bool virtual_bag_prepare_main_menu() {
     ::qol::extension_bag::ReentryLock lock;
     return prepare_main_menu_locked();
-}
-
-// 模块级保存 prepare 中扩展背包自己的校验部分。模块级协调在
-// Host SDK 存档参与者的 prepare 阶段，各功能只负责自己数据的
-// 校验与收敛；本函数即扩展背包在 prepare 中的唯一校验/清理落点。调用方必须已持有
-// g_virtual_bag_mtx。
-// 1) 归一化 types → capacities（派生容量的唯一来源）；
-// 2) 剔除派生容量之外的槽位数据：超容数据不参与 sidecar 序列化、不落盘；
-// 3) 容量外槽若仍持有物化对象或账本句柄（写入路径全部收紧后不可达），拒绝保存并记
-//    ERROR，避免半持久化与悬挂引用。
-bool virtual_bag_module_save_validate_locked() {
-    virtual_bag::normalize(&::qol::extension_bag::access::bag());
-    int discarded = 0;
-    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
-        const int capacity = ::qol::extension_bag::access::bag().capacities[bag];
-        for (int slot = capacity; slot < virtual_bag::kSlotCount; ++slot) {
-            const virtual_bag::Item& item = ::qol::extension_bag::access::bag().items[bag][slot];
-            if (item.category <= 0 && item.count <= 0) continue;
-            if (::qol::extension_bag::access::objects().module_objects[bag][slot] != nullptr ||
-                ::qol::extension_bag::access::objects().module_object_handles[bag][slot] != 0) {
-                QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                              "save validation reject: over-capacity slot holds live object bag=%d slot=%d",
-                              bag, slot);
-                return false;
-            }
-            ++discarded;
-        }
-    }
-    if (discarded > 0) {
-        virtual_bag::discard_over_capacity(&::qol::extension_bag::access::bag());
-        extension_bag_mark_dirty_locked();
-        QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "save validation discarded %d over-capacity item(s)", discarded);
-    }
-    return true;
 }
 
 // P3c：SlotBound 写入统一经 save.slot_data 的 request_write（安全点排空），provider 在

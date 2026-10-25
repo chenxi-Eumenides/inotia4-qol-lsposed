@@ -2,12 +2,12 @@
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/extension_bag_port.h"
-#include "plugins/extension_bag/runtime/lifecycle.h"
-#include "plugins/extension_bag/runtime/ownership.h"
-#include "plugins/extension_bag/runtime/projection.h"
+#include "plugins/extension_bag/core/lifecycle.h"
+#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/core/projection.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
-#include "plugins/extension_bag/runtime/tabs.h"
+#include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
@@ -16,6 +16,8 @@
 #include "plugins/extension_bag/runtime/projection_controller.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/plugin.h"
+#include "contracts/host_sdk.h"
+#include "contracts/inventory_refresh.h"
 
 #include <array>
 #include <cstring>
@@ -27,6 +29,21 @@ void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
 
 
 void refresh_projection_if_overwritten_locked();
+
+void virtual_bag_call_original_refresh_item_area_with_guard() {
+    NativeCallScope native_call;
+    const void* refresh_iface = nullptr;
+    const auto* sdk = runtime_state().host.sdk;
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) return;
+    const QolResult refresh_result = sdk->capabilities.require(
+        qol::contracts::kInventoryRefreshCapabilityId,
+        QolVersionRange{static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
+                        static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)},
+        &refresh_iface);
+    const auto* refresh = refresh_result.ok == kQolOk
+        ? static_cast<const qol::contracts::InventoryRefreshApi*>(refresh_iface) : nullptr;
+    if (refresh != nullptr && refresh->call_original != nullptr) refresh->call_original();
+}
 
 void refresh_module_item_area_locked(int index) {
     if (runtime_state().host.game == nullptr || runtime_state().host.write_port->ui.refresh_item_area == nullptr) return;
@@ -711,4 +728,11 @@ void virtual_bag_save_panel_enter_wrapper() {
         }
     }
     if (runtime_state().persistence.orig_save_enter != nullptr) runtime_state().persistence.orig_save_enter();
+}
+
+bool virtual_bag_sync_projected_bag() {
+    ::qol::extension_bag::ReentryLock lock;
+    if (!extension_bag_session_admitted_locked()) return false;
+    refresh_projection_if_overwritten_locked();
+    return runtime_state().objects.module_view_installed;
 }

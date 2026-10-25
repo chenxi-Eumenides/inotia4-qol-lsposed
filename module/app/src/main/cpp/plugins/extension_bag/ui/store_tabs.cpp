@@ -1,9 +1,10 @@
 #include "game_ui_virtbag.h"
-#include "plugins/extension_bag/interface/state_access.h"
+#include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/shared.h"
-#include "plugins/extension_bag/runtime/ownership.h"
+#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -24,7 +25,7 @@
 #include "plugins/extension_bag/model/draw_state_lock.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/ui/store_sell_rules.h"
+#include "plugins/extension_bag/model/store_sell_rules.h"
 
 #include <array>
 #include <atomic>

@@ -1,4 +1,4 @@
-#include "plugins/extension_bag/runtime/equip_tab_layout.h"
+#include "plugins/extension_bag/model/equip_tab_layout.h"
 
 #include <cassert>
 #include <cstdint>

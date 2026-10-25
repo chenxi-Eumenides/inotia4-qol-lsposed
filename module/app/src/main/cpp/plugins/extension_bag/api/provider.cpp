@@ -2,6 +2,7 @@
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/extension_bag/model/item_handle_custody.h"
 #include "plugins/extension_bag/api/port_internal.h"

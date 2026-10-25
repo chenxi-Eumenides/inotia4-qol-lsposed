@@ -2,7 +2,7 @@
 
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
-#include "plugins/extension_bag/runtime/drag_session.h"
+#include "plugins/extension_bag/core/drag_session.h"
 
 int extension_tab_index(void* ctrl);
 void refresh_tab_bag_items_locked();

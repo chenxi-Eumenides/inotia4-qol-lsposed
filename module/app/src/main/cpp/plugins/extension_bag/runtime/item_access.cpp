@@ -7,8 +7,6 @@
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
-#include "plugins/extension_bag/runtime/tabs.h"
-#include "plugins/extension_bag/ui/host_ui.h"
 
 #include <cstdint>
 
@@ -468,4 +466,8 @@ bool extension_bag_ui_make_mercenary(void* item, void** out_mercenary) {
 bool extension_bag_ui_read_save_is_ok() { return read_save_is_ok(); }
 bool extension_bag_ui_read_has_empty_mercenary_slot() {
     return read_has_empty_mercenary_slot();
+}
+
+::qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category) {
+    return category_is_equip(category);
 }

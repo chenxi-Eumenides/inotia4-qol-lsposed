@@ -22,7 +22,7 @@
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/ui/store_sell_rules.h"
+#include "plugins/extension_bag/model/store_sell_rules.h"
 
 #include <atomic>
 #include <chrono>
@@ -160,9 +160,4 @@ bool virtual_bag_write_effective(void* item, uint32_t count) {
     const QolResult write_result = api->write_effective(item, count);
     if (write_result.code == kQolErrNotReady) return false;
     return qol::contracts::succeeded(write_result);
-}
-// 与 item_count_encoding/ITEM_GetCumulateCount 使用同一 ITEMCLASSBASE +6 bit0 语义：
-// kUnknown 必须继续向载入/合并调用方传播，不能降级成可堆叠。
-::qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category) {
-    return category_is_equip(category);
 }

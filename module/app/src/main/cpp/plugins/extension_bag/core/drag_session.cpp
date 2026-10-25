@@ -1,6 +1,6 @@
 #include "plugins/extension_bag/runtime/state.h"
-#include "plugins/extension_bag/runtime/drag_session.h"
-#include "plugins/extension_bag/runtime/tabs.h"
+#include "plugins/extension_bag/core/drag_session.h"
+#include "plugins/extension_bag/core/tabs.h"
 
 #include "plugins/extension_bag/runtime/logging.h"
 

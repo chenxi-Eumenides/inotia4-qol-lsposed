@@ -1,5 +1,5 @@
 #include "game_ui_virtbag.h"
-#include "plugins/extension_bag/interface/state_access.h"
+#include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
 #include "contracts/game_host.h"
@@ -23,15 +23,17 @@
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/shared.h"
-#include "plugins/extension_bag/runtime/access.h"
-#include "plugins/extension_bag/runtime/lifecycle.h"
-#include "plugins/extension_bag/runtime/ownership.h"
-#include "plugins/extension_bag/runtime/projection.h"
-#include "plugins/extension_bag/runtime/tabs.h"
+#include "plugins/extension_bag/runtime/inventory_access.h"
+#include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/core/lifecycle.h"
+#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/core/projection.h"
+#include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/transaction/transaction.h"
+#include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/ui/store_sell_rules.h"
+#include "plugins/extension_bag/model/store_sell_rules.h"
 #include "plugins/extension_bag/runtime/bag_state_store.h"
 
 #include <atomic>
@@ -49,24 +51,6 @@ bool virtual_bag_native_call_active() {
     return g_in_native_call;
 }
 
-void virtual_bag_call_original_refresh_item_area_with_guard() {
-    NativeCallScope native_call;
-    // D2c-2b-1：经 inventory_refresh capability 现取 raw-original trampoline；能力缺失
-    // （provider 未安装/撤销中）按既有 no-op 降级——不直呼 fn_ui_equip_refresh_item_area，
-    // 否则会经已被 hook 的入口回入 wrapper（原 trampoline 存在的唯一原因）。
-    const void* refresh_iface = nullptr;
-    if (::qol::extension_bag::access::host().sdk == nullptr || ::qol::extension_bag::access::host().sdk->capabilities.require == nullptr) return;
-    const QolResult refresh_result = ::qol::extension_bag::access::host().sdk->capabilities.require(
-        qol::contracts::kInventoryRefreshCapabilityId,
-        QolVersionRange{static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
-                        static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)},
-        &refresh_iface);
-    const auto* refresh = refresh_result.ok == kQolOk
-        ? static_cast<const qol::contracts::InventoryRefreshApi*>(refresh_iface) : nullptr;
-    if (refresh != nullptr && refresh->call_original != nullptr) {
-        refresh->call_original();
-    }
-}
 void virtual_bag_refresh_item_area_with_gate() {
     ::qol::extension_bag::ReentryLock lock;
     virtual_bag_call_original_refresh_item_area_with_guard();
@@ -569,12 +553,6 @@ bool virtual_bag_sync_projected_item_control(void* control) {
     return false;
 }
 
-bool virtual_bag_sync_projected_bag() {
-    ::qol::extension_bag::ReentryLock lock;
-    if (!extension_bag_session_admitted_locked()) return false;
-    refresh_projection_if_overwritten_locked();
-    return ::qol::extension_bag::access::objects().module_view_installed;
-}
 // 商店扩展视图会把窗口原版袋容量字临时放大到扩展容量；若玩家在此视图下
 // 触发原版库存写入（买入→INVEN_SaveItem），FindSaveSlot 会按放大容量找
 // 空槽，可能把物品写进超过真实容量的槽位（恢复后物品丢失/错乱）。该函数

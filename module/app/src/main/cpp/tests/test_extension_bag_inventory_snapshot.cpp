@@ -5,6 +5,7 @@
 #include "plugins/extension_bag/runtime/bag_state_store.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/status_snapshot.h"
+#include "plugins/extension_bag/runtime/session.h"
 
 #include <cstdint>
 #include <cstdio>

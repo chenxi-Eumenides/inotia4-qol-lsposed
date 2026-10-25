@@ -462,6 +462,10 @@ int main() {
         std::string actual_checksum;
         CHECK(save_backup::json_find_string(snapshot_export, "checksum", actual_checksum));
         CHECK(actual_checksum == expected_checksum);
+        std::string exported_name;
+        CHECK(save_backup::json_find_string(snapshot_export, "file_name", exported_name));
+        CHECK(exported_name.size() > 8 &&
+              exported_name.compare(exported_name.size() - 8, 8, ".qol.bak") == 0);
     }
 
     // ---- B1：wh4 收集失败沿用原错误串 ----
@@ -709,7 +713,7 @@ int main() {
     // ---- C：自动备份条目与自动导入 ----
     {
         save_backup_autobackup_pre_save(0);
-        const std::string auto_path = root + "/backups/autobackup/autosave_s0.qol_save";
+        const std::string auto_path = root + "/backups/autobackup/autosave_s0.qol.bak";
         const std::string auto_entry = save_backup_auto_entry_json(0);
         CHECK(body_ok(auto_entry));
         CHECK(auto_entry.find("\"backup\":null") == std::string::npos);
@@ -831,7 +835,7 @@ int main() {
 
     // ---- C：自动备份（首导出、指纹跳过、源变化重导、失败保留旧文件）----
     {
-        const std::string auto_bundle = auto_dir + "/autosave_s0.qol_save";
+        const std::string auto_bundle = auto_dir + "/autosave_s0.qol.bak";
         const std::string auto_fp = auto_dir + "/autosave_s0.fingerprint";
         g_plain_variant = 3;
         save_backup_autobackup_pre_save(0);
@@ -904,9 +908,14 @@ int main() {
             CHECK(before.st_mtim.tv_nsec == after.st_mtim.tv_nsec);
             CHECK(::chmod(auto_dir.c_str(), 0755) == 0);
         }
+        // 旧版自动备份 .qol_save 仍可读取。
+        const std::string legacy_auto = auto_dir + "/autosave_s0.qol_save";
+        CHECK(::rename(auto_bundle.c_str(), legacy_auto.c_str()) == 0);
+        const std::string legacy_entry = save_backup_auto_entry_json(0);
+        CHECK(body_ok(legacy_entry));
+        CHECK(legacy_entry.find("\"backup\":null") == std::string::npos);
+        CHECK(::rename(legacy_auto.c_str(), auto_bundle.c_str()) == 0);
     }
-
-    // ---- SB-05：absent 备份导入 → 清除目标槽现存 sidecar ----
     {
         CHECK(qol::infra::store::write_section(1, "m", 1, &payload, 1) ==
               qol::infra::store::Status::kOk);
@@ -1001,6 +1010,18 @@ int main() {
         CHECK(save_backup::json_find_int(entry, "hero_level", value) && value == 5);
         CHECK(save_backup::json_find_int(entry, "class_idx", value) && value == 2);
         CHECK(entry.find("\"class_name\":\"黑魔导\"") != std::string::npos);
+
+        // 新后缀 .qol.bak 同样被列表与单条解析接受。
+        const std::string name_bak = "zz_ui_bak.qol.bak";
+        CHECK(write_file(backups_dir + "/" + name_bak,
+                         std::string(bundle_a.begin(), bundle_a.end())));
+        const std::string files_bak = save_backup_list_files_json();
+        CHECK(files_bak.find("\"name\":\"" + name_bak + "\"") != std::string::npos);
+        const std::string entry_bak = save_backup_entry_json(name_bak.c_str());
+        CHECK(body_ok(entry_bak));
+        CHECK(save_backup::json_find_int(entry_bak, "hero_level", value) && value == 5);
+        CHECK(save_backup::json_find_int(entry_bak, "class_idx", value) && value == 2);
+        CHECK(::unlink((backups_dir + "/" + name_bak).c_str()) == 0);
 
         // 旧备份 meta 缺职业/等级：解析明文后写回 meta（checksum/版本不变，CRC 重算）。
         std::vector<uint8_t> plain_bf(86, 0);

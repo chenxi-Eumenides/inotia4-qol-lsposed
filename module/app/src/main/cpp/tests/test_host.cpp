@@ -2217,11 +2217,13 @@ static void test_save_backup_checksum_name() {
     CHECK(!sb::valid_checksum("89abcdef01234")); // 14 位
     CHECK(!sb::valid_checksum("89abcdefg123"));  // 非 hex
     std::string out;
+    CHECK(sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.qol.bak", out));
+    CHECK_EQ(out, std::string("89abcdef0123"));
     CHECK(sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.qol_save", out));
     CHECK_EQ(out, std::string("89abcdef0123"));
     CHECK(!sb::extract_checksum_from_name("20260912-122823_s0_89abcdef0123.txt", out));
-    CHECK(!sb::extract_checksum_from_name("89abcdef0123.qol_save", out));  // 缺 `_` 前缀
-    CHECK(!sb::extract_checksum_from_name("short.qol_save", out));
+    CHECK(!sb::extract_checksum_from_name("89abcdef0123.qol.bak", out));  // 缺 `_` 前缀
+    CHECK(!sb::extract_checksum_from_name("short.qol.bak", out));
 }
 
 // SB-02：slot 严格整数解析（拒绝小数/指数/十六进制/溢出/越界/缺失/无值/空 body）。

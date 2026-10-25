@@ -13,6 +13,7 @@ const qol::contracts::QolItemCountApi* item_count_api();
 qol::contracts::QolItemCountEncoding item_count_encoding(const void* item);
 uint32_t original_count_view(uint32_t field);
 qol::contracts::QolItemCountEncoding category_is_equip(int category);
+qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category);
 bool category_is_extension_backpack(int category);
 bool extension_bag_runtime_is_backpack_category(int category);
 

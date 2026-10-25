@@ -927,6 +927,7 @@ add_test(NAME inventory_trade_provider_sell_tests COMMAND inventory_trade_provid
 add_executable(extension_bag_slot_data_tests
     test_extension_bag_slot_data.cpp
     stubs/extension_bag_catalog_stub.cpp
+    ${CPP_DIR}/plugins/extension_bag/runtime/session.cpp
     ${CPP_DIR}/plugins/extension_bag/persistence/persistence.cpp
     ${CPP_DIR}/plugins/core.save/slot_data_provider.cpp
 )
@@ -1024,11 +1025,12 @@ target_include_directories(extension_bag_draw_lock_tests PRIVATE ${CPP_DIR})
 target_compile_definitions(extension_bag_draw_lock_tests PRIVATE
     QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE="${CPP_DIR}/plugins/extension_bag/public/bridge.cpp"
     QOL_EXTENSION_BAG_INVENTORY_ACCESS_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/inventory_access.cpp"
-    QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/render.cpp"
-    QOL_EXTENSION_BAG_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/projection.cpp"
-    QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/lifecycle.cpp"
-    QOL_EXTENSION_BAG_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/tabs_ui.cpp"
-    QOL_EXTENSION_BAG_ORCHESTRATOR_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/orchestrator.cpp"
+    QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/core/render.cpp"
+    QOL_EXTENSION_BAG_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/core/projection.cpp"
+    QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/core/lifecycle.cpp"
+    QOL_EXTENSION_BAG_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/core/tabs_ui.cpp"
+    QOL_EXTENSION_BAG_ORCHESTRATOR_SOURCE="${CPP_DIR}/plugins/extension_bag/core/orchestrator.cpp"
+    QOL_EXTENSION_BAG_STATE_LOAD_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/state_load.cpp"
     QOL_EXTENSION_BAG_STORE_TABS_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/store_tabs.cpp"
     QOL_EXTENSION_BAG_STORE_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/store_projection.cpp"
     QOL_EXTENSION_BAG_MIX_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/mix.cpp")

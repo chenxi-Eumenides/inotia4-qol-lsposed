@@ -3,7 +3,7 @@
 
 #include "plugins/extension_bag/extension_bag_port.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/runtime/projection.h"
+#include "plugins/extension_bag/runtime/projection_controller.h"
 
 #include <mutex>
 

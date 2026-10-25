@@ -1,6 +1,7 @@
 #pragma once
 
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/runtime/session.h"
 
 #include <string>
 
@@ -23,8 +24,3 @@ bool original_inventory_contains_cached_locked(void* item);
 uint64_t extension_bag_ui_isolation_now_ms_locked();
 JNIEnv* current_env();
 uint64_t isolation_now_ms_locked();
-std::string extension_bag_status_json_locked_bridge();
-std::string extension_bag_not_ready_error_locked_bridge();
-bool extension_bag_ready_locked_bridge();
-int extension_internal_bag_bridge(int logical_bag);
-std::string extension_bag_view_result_json_bridge(bool ok, const char* error);

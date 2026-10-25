@@ -13,8 +13,5 @@ void teardown_extension_bag_hosts_locked();
 bool clear_module_cache_locked();
 bool module_cache_clear_preflight_locked();
 PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked();
-void ensure_state_loaded_locked();
-bool persist_state_locked(bool force = false);
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor);
 void release_temporary_item_locked(void* item);
-bool virtual_bag_module_save_validate_locked();

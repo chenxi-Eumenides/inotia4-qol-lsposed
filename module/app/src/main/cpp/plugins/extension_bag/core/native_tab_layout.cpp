@@ -1,9 +1,10 @@
-#include "plugins/extension_bag/runtime/native_tab_layout.h"
+#include "plugins/extension_bag/core/native_tab_layout.h"
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/extension_bag_geometry.h"
-#include "plugins/extension_bag/runtime/equip_tab_layout.h"
+#include "plugins/extension_bag/model/equip_tab_layout.h"
 #include "plugins/extension_bag/runtime/logging.h"
+#include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/state.h"
 
 #include <array>

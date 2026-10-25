@@ -3,7 +3,7 @@
 
 #include "plugins/extension_bag/extension_bag_context.h"
 #include "plugins/extension_bag/model/virtual_bag_state.h"
-#include "plugins/extension_bag/runtime/lifecycle.h"
+#include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
 

@@ -1,10 +1,10 @@
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/transaction/transaction.h"
-#include "plugins/extension_bag/runtime/ownership.h"
-#include "plugins/extension_bag/runtime/lifecycle.h"
+#include "plugins/extension_bag/core/ownership.h"
+#include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/shared.h"
-#include "plugins/extension_bag/ui/host_ui.h"
-#include "plugins/extension_bag/runtime/tabs.h"
+#include "plugins/extension_bag/core/host_adapter.h"
+#include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/runtime/item_access.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
@@ -32,8 +32,8 @@
 #include "plugins/extension_bag/extension_bag_geometry.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/plugin.h"
-#include "plugins/extension_bag/ui/store_sell_rules.h"
-#include "plugins/extension_bag/runtime/projection.h"
+#include "plugins/extension_bag/model/store_sell_rules.h"
+#include "plugins/extension_bag/core/projection.h"
 
 #include <atomic>
 #include <chrono>
@@ -224,15 +224,6 @@ void* load_item_payload_locked(const uint8_t* payload, int payload_size, const c
 // 唯一调用点是模块级保存 prepare 中扩展背包自己的校验
 // virtual_bag_module_save_validate_locked，其他路径不做任何丢弃。
 
-// P3c 准入化：加载由 save.slot_data provider 的 SessionBound load 承担（每次 session
-// 激活回调 EB 内部 codec），本函数不再执行惰性 IO（读档/清缓存/换槽重读全部移除）。
-// 未加载（epoch 未登记）/降级阻断时保持空状态——扫描与物品操作由调用点经
-// extension_bag_session_admitted_locked() 明确拒绝；slot 漂移由 provider 的转换
-// 回调（prepare_detach + load）处理，这里不得再读 current_save_slot 兜底。
-void ensure_state_loaded_locked() {
-    // 准入状态由 provider 回调维护（extension_bag_session_admitted_locked）；
-    // 保留函数作为全部既有调用点的稳定锚，无 IO、无游戏状态读取。
-}
 bool original_inventory_contains_payload_locked(const uint8_t* payload, int payload_size,
                                                 int target_bag) {
     if (runtime_state().host.game == nullptr || payload == nullptr || extension_bag_write_api() == nullptr ||
@@ -497,13 +488,6 @@ void recover_pending_transaction_locked(::qol::extension_bag::ReentryLock& lock)
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
     return load_item_payload_locked(descriptor.payload.data(), descriptor.payload_size,
                                     "materialize_module_item");
-}
-bool persist_state_locked(bool force) {
-    (void)force;
-    // The bool reports acceptance of the in-memory mutation for callers' rollback decisions;
-    // it does not report durable staging. slot_data capture/complete persists state in the
-    // core.save transaction, and force cannot bypass that boundary.
-    return true;
 }
 bool item_pointer_known_locked(void* item) {
     if (item == nullptr) return true;  // 空指针由调用方各自处理

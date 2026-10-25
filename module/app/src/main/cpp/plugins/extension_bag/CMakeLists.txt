@@ -5,35 +5,38 @@ add_library(qol_plugin_extension_bag STATIC
     runtime/status_snapshot.cpp
     runtime/inventory_access.cpp
     runtime/item_access.cpp
-    runtime/native_tab_layout.cpp
-    runtime/tabs_ui.cpp
-    runtime/orchestrator.cpp
+    runtime/session.cpp
+    runtime/state_load.cpp
+    core/native_tab_layout.cpp
+    core/host_adapter.cpp
+    core/unequip.cpp
+    core/tabs_ui.cpp
+    core/orchestrator.cpp
     public/counts.cpp
     public/projection.cpp
     public/status.cpp
     public/sale.cpp
     public/equip.cpp
     public/bridge.cpp
-    runtime/bind.cpp
+    core/bind.cpp
     api/api_impl.cpp
     interface/bag_query.cpp
     interface/bag_command.cpp
     usecases/item.cpp
-    usecases/unequip.cpp
-    usecases/view.cpp
+    core/view.cpp
     usecases/move.cpp
     usecases/set_bag_count.cpp
     assembly/claims.cpp
     assembly/move_merge_impl.cpp
-    runtime/observation.cpp
-    runtime/tabs.cpp
-    runtime/drag_session.cpp
-    runtime/input.cpp
-    runtime/render.cpp
-    runtime/projection.cpp
+    core/observation.cpp
+    core/tabs.cpp
+    core/drag_session.cpp
+    core/input.cpp
+    core/render.cpp
+    core/projection.cpp
     runtime/projection_controller.cpp
-    runtime/lifecycle.cpp
-    runtime/ownership.cpp
+    core/lifecycle.cpp
+    core/ownership.cpp
     transaction/transaction_coordinator.cpp
     transaction/ext_orig.cpp
     transaction/ext_ext.cpp
