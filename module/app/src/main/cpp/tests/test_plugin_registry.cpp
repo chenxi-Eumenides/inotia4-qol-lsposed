@@ -526,6 +526,12 @@ const CapabilityRequirement g_character_state_optional[] = {
      {qol::contracts::kCharacterStateVersion.major,
       qol::contracts::kCharacterStateVersion.minor}},
 };
+const CapabilityRequirement g_character_state_x_api_optional[] = {
+    {qol::contracts::kCharacterStateCapabilityId,
+     {qol::contracts::kCharacterStateVersion.major,
+      qol::contracts::kCharacterStateVersion.minor}},
+    {"x.api", QolVersionRange{1, 0}},
+};
 const CapabilityRequirement g_b_api_optional[] = {
     {"b.api", QolVersionRange{1, 0}},
 };
@@ -539,6 +545,11 @@ int dep_install_a(PluginContext&) {
 int dep_install_b(PluginContext&) {
     ++g_probe.install_calls;
     std::strcat(g_dep_order, "B");
+    return 0;
+}
+int dep_install_c(PluginContext&) {
+    ++g_probe.install_calls;
+    std::strcat(g_dep_order, "C");
     return 0;
 }
 int dep_install_fail(PluginContext&) {
@@ -1654,7 +1665,7 @@ void test_elf_export_prefix_rejected_for_other_mechanisms() {
 }
 
 // ---------------------------------------------------------------------------
-// R1：optional 软边两阶段拓扑 + optional 两段检查
+// R1：optional 环内软边定向切除 + optional 两段检查
 // ---------------------------------------------------------------------------
 
 bool feature_error_is(const char* id, const char* expected) {
@@ -1669,7 +1680,7 @@ bool feature_error_lacks(const char* id, const char* needle) {
     return error == nullptr || std::strstr(error, needle) == nullptr;
 }
 
-// ① 环最小复现：A optional eb.api + B required item.facts → 阶段 2 回退，全 enabled、A 先 B 后。
+// ① 环最小复现：A optional eb.api + B required item.facts → 只切除闭环软边，全 enabled、A 先 B 后。
 void test_optional_cycle_soft_edge() {
     reset_all();
     const PluginDescriptor a = make_dep_descriptor("alpha", nullptr, 0, g_eb_api_optional, 1,
@@ -1707,6 +1718,75 @@ void test_optional_required_mixed_cycle_real_topology() {
     CHECK(!feature_degraded("extension_bag"));
     CHECK(std::strcmp(g_dep_order, "AB") == 0);
     CHECK(feature_error_lacks("core.item", "dependency cycle"));
+}
+
+void test_optional_mutual_cycle_keeps_plugins_enabled() {
+    reset_all();
+    const PluginDescriptor character = make_dep_descriptor(
+        "core.character", nullptr, 0, g_item_state_optional, 1, g_character_state_provides, 1,
+        &dep_install_b);
+    const PluginDescriptor item = make_dep_descriptor(
+        "core.item", nullptr, 0, g_character_state_optional, 1, g_item_state_provides, 1,
+        &dep_install_a);
+    CHECK(register_plugin(character));
+    CHECK(register_plugin(item));
+
+    g_log_capture.clear();
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.character", FeatureState::kEnabled));
+    CHECK(!feature_degraded("core.item"));
+    CHECK(!feature_degraded("core.character"));
+    CHECK(feature_error_lacks("core.item", "dependency cycle"));
+    CHECK(feature_error_lacks("core.character", "dependency cycle"));
+    CHECK(std::strcmp(g_dep_order, "BA") == 0);
+    CHECK(log_contains("optional edge downgraded to avoid cycle: provider=core.item "
+                       "consumer=core.character capability=item.state"));
+
+    reset_all();
+    CHECK(register_plugin(item));
+    CHECK(register_plugin(character));
+
+    g_log_capture.clear();
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.character", FeatureState::kEnabled));
+    CHECK(!feature_degraded("core.item"));
+    CHECK(!feature_degraded("core.character"));
+    CHECK(feature_error_lacks("core.item", "dependency cycle"));
+    CHECK(feature_error_lacks("core.character", "dependency cycle"));
+    CHECK(std::strcmp(g_dep_order, "BA") == 0);
+    CHECK(log_contains("optional edge downgraded to avoid cycle: provider=core.item "
+                       "consumer=core.character capability=item.state"));
+}
+
+void test_optional_edge_outside_cycle_preserved() {
+    reset_all();
+    const PluginDescriptor item = make_dep_descriptor(
+        "core.item", nullptr, 0, g_character_state_x_api_optional, 2, g_item_state_provides, 1,
+        &dep_install_a);
+    const PluginDescriptor character = make_dep_descriptor(
+        "core.character", nullptr, 0, g_item_state_optional, 1, g_character_state_provides, 1,
+        &dep_install_b);
+    const PluginDescriptor provider = make_dep_descriptor(
+        "zprovider", nullptr, 0, nullptr, 0, g_x_api_provides, 1, &dep_install_c);
+    CHECK(register_plugin(item));
+    CHECK(register_plugin(character));
+    CHECK(register_plugin(provider));
+
+    g_log_capture.clear();
+    CHECK(install_all(make_deps()) == 0);
+    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
+    CHECK(feature_state_is("core.character", FeatureState::kEnabled));
+    CHECK(feature_state_is("zprovider", FeatureState::kEnabled));
+    CHECK(!feature_degraded("core.item"));
+    CHECK(!feature_degraded("core.character"));
+    CHECK(!feature_degraded("zprovider"));
+    CHECK(std::strcmp(g_dep_order, "BCA") == 0);
+    CHECK(log_contains("optional edge downgraded to avoid cycle: provider=core.item "
+                       "consumer=core.character capability=item.state"));
+    CHECK(!log_contains("optional edge downgraded to avoid cycle: provider=zprovider "
+                        "consumer=core.item capability=x.api"));
 }
 
 void test_core_item_optional_character_state_degradation() {
@@ -2476,6 +2556,8 @@ int main() {
     test_elf_export_prefix_rejected_for_other_mechanisms();
     test_optional_cycle_soft_edge();
     test_optional_required_mixed_cycle_real_topology();
+    test_optional_mutual_cycle_keeps_plugins_enabled();
+    test_optional_edge_outside_cycle_preserved();
     test_core_item_optional_character_state_degradation();
     test_core_character_optional_item_state_degradation_and_topology();
     test_required_cycle_still_fails();

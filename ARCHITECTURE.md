@@ -318,7 +318,7 @@ HTTP 传输边界固定为：
 
 ### 8.1 capability 与命令
 
-provider 在描述符中静态声明 `provides`，消费者声明 `requires`/`optional_requires`；版本按 major 相等、minor 满足进行协商。能力撤销先拒绝新 lease，再通知可选消费者摘除、按必需依赖级联、等待在途归零，最后注销。
+provider 在描述符中静态声明 `provides`，消费者声明 `requires`/`optional_requires`；版本按 major 相等、minor 满足进行协商。optional 依赖只表达运行时可用性与排序偏好；required-only 图成环才装配失败。能力撤销先拒绝新 lease，再通知可选消费者摘除、按必需依赖级联、等待在途归零，最后注销。
 
 只读 capability 不能直接修改游戏；副作用统一进入 owner command。命令使用固定宽度 POD payload、票据和明确错误；空指针表示不可用，不能用默认值伪装未就绪。
 

@@ -644,15 +644,12 @@ void set_dependency_error(uint32_t index, const char* prefix, const char* capabi
                   capability_id != nullptr ? capability_id : "<null>");
 }
 
-// 构建确定性拓扑顺序（字典序最小 id）。include_optional=false 时只按 required 建边，
-// 供全图成环时回退；out_emitted 非空则回填本遍发射标记。
-bool topo_build(bool include_optional, bool* out_emitted) {
-    bool edges[kMaxPlugins][kMaxPlugins] = {};
-    uint32_t indegree[kMaxPlugins] = {};
-    g_install_order_count = 0;
-
-    // required 和已注册的 optional provider 都进入 DAG。optional provider 不存在时不建边，
-    // consumer 仍可按 degraded 语义安装；存在时固定先发布 provider，避免无意义的顺序依赖。
+// required 边优先，避免同一对插件同时声明 required 与 optional 时误降级 required。
+void dependency_edges_build(bool edges[kMaxPlugins][kMaxPlugins],
+                            bool optional_edge[kMaxPlugins][kMaxPlugins],
+                            const char* optional_capability[kMaxPlugins][kMaxPlugins],
+                            uint32_t* out_edge_count) {
+    *out_edge_count = 0;
     for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
         if (g_dependency_invalid[consumer]) continue;
         const contracts::PluginDescriptor& plugin = g_plugins[consumer].descriptor;
@@ -661,23 +658,47 @@ bool topo_build(bool include_optional, bool* out_emitted) {
             if (provider == kNoPlugin || g_dependency_invalid[provider]) continue;
             if (!edges[provider][consumer]) {
                 edges[provider][consumer] = true;
-                ++indegree[consumer];
+                optional_edge[provider][consumer] = false;
+                optional_capability[provider][consumer] = nullptr;
+                ++*out_edge_count;
             }
         }
-        if (!include_optional) continue;
+    }
+    for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
+        if (g_dependency_invalid[consumer]) continue;
+        const contracts::PluginDescriptor& plugin = g_plugins[consumer].descriptor;
         for (uint32_t o = 0; o < plugin.optional_count; ++o) {
-            const uint32_t provider = provider_for_requirement(plugin.optional_requires[o], nullptr);
+            const contracts::CapabilityRequirement& requirement = plugin.optional_requires[o];
+            const uint32_t provider = provider_for_requirement(requirement, nullptr);
             if (provider == kNoPlugin || g_dependency_invalid[provider] || provider == consumer) {
                 continue;
             }
             if (!edges[provider][consumer]) {
                 edges[provider][consumer] = true;
-                ++indegree[consumer];
+                optional_edge[provider][consumer] = true;
+                optional_capability[provider][consumer] = requirement.id;
+                ++*out_edge_count;
             }
         }
     }
+}
 
+// 按拓扑边发射插件；同一时刻可选节点按 id 字典序取最小者。
+bool topo_emit(const bool edges[kMaxPlugins][kMaxPlugins],
+               const bool optional_edge[kMaxPlugins][kMaxPlugins], bool include_optional) {
+    uint32_t indegree[kMaxPlugins] = {};
+    uint32_t eligible_count = 0;
+    g_install_order_count = 0;
     bool emitted[kMaxPlugins] = {};
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) continue;
+        ++eligible_count;
+        for (uint32_t provider = 0; provider < g_plugin_count; ++provider) {
+            if (!edges[provider][i] || (!include_optional && optional_edge[provider][i])) continue;
+            ++indegree[i];
+        }
+    }
+
     for (;;) {
         uint32_t selected = kNoPlugin;
         for (uint32_t i = 0; i < g_plugin_count; ++i) {
@@ -691,38 +712,120 @@ bool topo_build(bool include_optional, bool* out_emitted) {
         emitted[selected] = true;
         g_install_order[g_install_order_count++] = selected;
         for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
-            if (edges[selected][consumer] && indegree[consumer] > 0) --indegree[consumer];
+            if (edges[selected][consumer] &&
+                (include_optional || !optional_edge[selected][consumer]) && indegree[consumer] > 0) {
+                --indegree[consumer];
+            }
         }
     }
 
-    bool all_emitted = true;
-    for (uint32_t i = 0; i < g_plugin_count; ++i) {
-        if (!g_dependency_invalid[i] && !emitted[i]) all_emitted = false;
-        if (out_emitted != nullptr) out_emitted[i] = emitted[i];
-    }
-    return all_emitted;
+    return g_install_order_count == eligible_count;
 }
 
-// optional 边因全图成环被降级时的诊断：仅当边两端都在全图未发射集内（即该边参与环）。
-// 只写 WARN 日志，不改 g_error_text / features 状态。
-void log_downgraded_optional_edges(const bool* full_emitted) {
-    for (uint32_t consumer = 0; consumer < g_plugin_count; ++consumer) {
-        if (g_dependency_invalid[consumer] || full_emitted[consumer]) continue;
-        const contracts::PluginDescriptor& plugin = g_plugins[consumer].descriptor;
-        for (uint32_t o = 0; o < plugin.optional_count; ++o) {
-            const contracts::CapabilityRequirement& req = plugin.optional_requires[o];
-            const uint32_t provider = provider_for_requirement(req, nullptr);
-            if (provider == kNoPlugin || g_dependency_invalid[provider] || provider == consumer) {
+bool find_cycle_dfs(uint32_t node, const bool edges[kMaxPlugins][kMaxPlugins],
+                    const bool emitted[kMaxPlugins], uint8_t state[kMaxPlugins],
+                    uint32_t parent[kMaxPlugins], uint32_t cycle_nodes[kMaxPlugins],
+                    uint32_t* out_cycle_count) {
+    state[node] = 1;
+    bool visited_neighbor[kMaxPlugins] = {};
+    for (;;) {
+        uint32_t consumer = kNoPlugin;
+        for (uint32_t i = 0; i < g_plugin_count; ++i) {
+            if (visited_neighbor[i] || !edges[node][i] || emitted[i] ||
+                g_dependency_invalid[i]) {
                 continue;
             }
-            if (full_emitted[provider]) continue;
-            QOL_LOG_WARN(QolDomain::kCore,
-                         "optional edge downgraded to avoid cycle: provider=%s consumer=%s "
-                         "capability=%s",
-                         g_plugins[provider].descriptor.id, plugin.id,
-                         req.id != nullptr ? req.id : "<null>");
+            if (consumer == kNoPlugin ||
+                std::strcmp(g_plugins[i].descriptor.id,
+                            g_plugins[consumer].descriptor.id) < 0) {
+                consumer = i;
+            }
+        }
+        if (consumer == kNoPlugin) break;
+        visited_neighbor[consumer] = true;
+        if (state[consumer] == 0) {
+            parent[consumer] = node;
+            if (find_cycle_dfs(consumer, edges, emitted, state, parent, cycle_nodes,
+                               out_cycle_count)) {
+                return true;
+            }
+        } else if (state[consumer] == 1) {
+            uint32_t reverse_path[kMaxPlugins] = {};
+            uint32_t path_count = 0;
+            uint32_t current = node;
+            while (current != consumer && path_count < kMaxPlugins) {
+                reverse_path[path_count++] = current;
+                current = parent[current];
+                if (current == kNoPlugin) return false;
+            }
+            if (current != consumer || path_count >= kMaxPlugins) return false;
+            reverse_path[path_count++] = consumer;
+            for (uint32_t i = 0; i < path_count; ++i) {
+                cycle_nodes[i] = reverse_path[path_count - 1 - i];
+            }
+            *out_cycle_count = path_count;
+            return true;
         }
     }
+    state[node] = 2;
+    return false;
+}
+
+bool find_unemitted_cycle(const bool edges[kMaxPlugins][kMaxPlugins],
+                          const bool emitted[kMaxPlugins], uint32_t cycle_nodes[kMaxPlugins],
+                          uint32_t* out_cycle_count) {
+    uint8_t state[kMaxPlugins] = {};
+    uint32_t parent[kMaxPlugins];
+    for (uint32_t i = 0; i < kMaxPlugins; ++i) parent[i] = kNoPlugin;
+    bool visited_root[kMaxPlugins] = {};
+    for (;;) {
+        uint32_t root = kNoPlugin;
+        for (uint32_t i = 0; i < g_plugin_count; ++i) {
+            if (visited_root[i] || emitted[i] || g_dependency_invalid[i] || state[i] != 0) {
+                continue;
+            }
+            if (root == kNoPlugin ||
+                std::strcmp(g_plugins[i].descriptor.id, g_plugins[root].descriptor.id) < 0) {
+                root = i;
+            }
+        }
+        if (root == kNoPlugin) return false;
+        visited_root[root] = true;
+        if (find_cycle_dfs(root, edges, emitted, state, parent, cycle_nodes,
+                           out_cycle_count)) {
+            return true;
+        }
+    }
+}
+
+struct DowngradedOptionalEdge {
+    uint32_t provider;
+    uint32_t consumer;
+    const char* capability_id;
+};
+
+bool dependency_order_fail_required_cycle(const bool edges[kMaxPlugins][kMaxPlugins],
+                                          const bool optional_edge[kMaxPlugins][kMaxPlugins]) {
+    // required-only 图决定硬失败时的发射集合，避免 optional 下游边扩大 cycle 标记范围。
+    (void)topo_emit(edges, optional_edge, /*include_optional=*/false);
+    bool emitted[kMaxPlugins] = {};
+    for (uint32_t i = 0; i < g_install_order_count; ++i) {
+        emitted[g_install_order[i]] = true;
+    }
+    bool valid = true;
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_dependency_invalid[i]) {
+            valid = false;
+            continue;
+        }
+        if (!emitted[i]) {
+            g_dependency_invalid[i] = true;
+            g_dependency_cycle[i] = true;
+            set_dependency_error(i, "dependency cycle", g_plugins[i].descriptor.id);
+            valid = false;
+        }
+    }
+    return valid;
 }
 
 bool dependency_order_build() {
@@ -748,35 +851,69 @@ bool dependency_order_build() {
         }
     }
 
-    // 阶段 1：required + optional 全图。无环时顺序/结果与单遍实现逐字一致。
-    bool full_emitted[kMaxPlugins] = {};
-    if (topo_build(/*include_optional=*/true, full_emitted)) return true;
+    bool edges[kMaxPlugins][kMaxPlugins] = {};
+    bool optional_edge[kMaxPlugins][kMaxPlugins] = {};
+    const char* optional_capability[kMaxPlugins][kMaxPlugins] = {};
+    uint32_t edge_count = 0;
+    dependency_edges_build(edges, optional_edge, optional_capability, &edge_count);
+    DowngradedOptionalEdge downgraded[kMaxPlugins * kMaxPlugins] = {};
+    uint32_t downgraded_count = 0;
 
-    // 阶段 2：optional 软边不参与环判定，只按 required 重建（optional 语义为运行时现取）。
-    if (topo_build(/*include_optional=*/false, nullptr)) {
-        log_downgraded_optional_edges(full_emitted);
-        return true;
+    // 只切除实际闭合环的 optional 边，环外排序偏好保持不变。
+    for (uint32_t attempt = 0; attempt <= edge_count; ++attempt) {
+        if (topo_emit(edges, optional_edge, /*include_optional=*/true)) {
+            for (uint32_t i = 0; i < downgraded_count; ++i) {
+                const DowngradedOptionalEdge& edge = downgraded[i];
+                QOL_LOG_WARN(QolDomain::kCore,
+                             "optional edge downgraded to avoid cycle: provider=%s consumer=%s "
+                             "capability=%s",
+                             g_plugins[edge.provider].descriptor.id,
+                             g_plugins[edge.consumer].descriptor.id,
+                             edge.capability_id != nullptr ? edge.capability_id : "<null>");
+            }
+            return true;
+        }
+
+        bool emitted[kMaxPlugins] = {};
+        for (uint32_t i = 0; i < g_install_order_count; ++i) {
+            emitted[g_install_order[i]] = true;
+        }
+        uint32_t cycle_nodes[kMaxPlugins] = {};
+        uint32_t cycle_count = 0;
+        if (!find_unemitted_cycle(edges, emitted, cycle_nodes, &cycle_count)) {
+            return dependency_order_fail_required_cycle(edges, optional_edge);
+        }
+
+        uint32_t cut_provider = kNoPlugin;
+        uint32_t cut_consumer = kNoPlugin;
+        for (uint32_t i = 0; i < cycle_count; ++i) {
+            const uint32_t provider = cycle_nodes[i];
+            const uint32_t consumer = cycle_nodes[(i + 1) % cycle_count];
+            if (!optional_edge[provider][consumer]) continue;
+            if (cut_consumer == kNoPlugin ||
+                std::strcmp(g_plugins[consumer].descriptor.id,
+                            g_plugins[cut_consumer].descriptor.id) < 0 ||
+                (std::strcmp(g_plugins[consumer].descriptor.id,
+                             g_plugins[cut_consumer].descriptor.id) == 0 &&
+                 std::strcmp(g_plugins[provider].descriptor.id,
+                             g_plugins[cut_provider].descriptor.id) < 0)) {
+                cut_provider = provider;
+                cut_consumer = consumer;
+            }
+        }
+        if (cut_provider == kNoPlugin || downgraded_count >= edge_count) {
+            return dependency_order_fail_required_cycle(edges, optional_edge);
+        }
+
+        // 同环候选按 consumer、provider id 排序，避免注册顺序改变被降级的软边。
+        downgraded[downgraded_count++] = {
+            cut_provider, cut_consumer, optional_capability[cut_provider][cut_consumer]};
+        edges[cut_provider][cut_consumer] = false;
+        optional_edge[cut_provider][cut_consumer] = false;
+        optional_capability[cut_provider][cut_consumer] = nullptr;
     }
 
-    // 阶段 3：required-only 仍成环 → 硬失败（文案与 kFailed 状态不变）。
-    bool emitted[kMaxPlugins] = {};
-    for (uint32_t i = 0; i < g_install_order_count; ++i) {
-        emitted[g_install_order[i]] = true;
-    }
-    bool valid = true;
-    for (uint32_t i = 0; i < g_plugin_count; ++i) {
-        if (g_dependency_invalid[i]) {
-            valid = false;
-            continue;
-        }
-        if (!emitted[i]) {
-            g_dependency_invalid[i] = true;
-            g_dependency_cycle[i] = true;
-            set_dependency_error(i, "dependency cycle", g_plugins[i].descriptor.id);
-            valid = false;
-        }
-    }
-    return valid;
+    return dependency_order_fail_required_cycle(edges, optional_edge);
 }
 
 bool descriptor_valid(const contracts::PluginDescriptor& plugin) {
