@@ -495,12 +495,13 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
   - `feature.{h,cpp}`：端口/门禁、三个 wrapper、backup、诊断日志。
 - Host：端口注册与私有端口校验、插件 descriptor 注册。
 - 符号/patch：新增 `UIPlay_ButtonDirection`、`GAMESTATE_PressKeyPlay`、`SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`、`KEY_nCode`、`KEYSET_nData`，以及 `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`。
+- 入口 hook 符号必须同时登记到 `game/access/symbols.cpp` 的 `kHookEntrySymbols`：`resolve_hook_entry` 只按该白名单解析入口，不读取 `symbol_registry.h` 的完整表。漏登记会让 preflight 报 `symbol unresolved`，插件状态变 `unsupported`，设置页显示「当前版本不支持」——这不是游戏变体限制。
 
 ### 13.2 验证
 
 - `eight_way_move_tests`：八向分类、22.5°/45° 边界、死区、自定义键码、副轴条件，通过。
 - `eight_way_move_plugin_tests`：插件 id、资源数量/机制/策略/必要性、端口、feature 默认关闭与 Hidden 分类，通过。
-- `scripts/build-debug.sh`：通过；产物 `output/inotia4_qol_lsposed_debug_2610270110_054d745bf360.apk`，SHA-256 `054d745bf360b9af4811b9cb2c2bcea6e01b2ec879f792ec529d21b096787093`。
+- `scripts/build-debug.sh`：通过；产物 `output/inotia4_qol_lsposed_debug_2610270153_a8f51386d401.apk`，SHA-256 `a8f51386d4018ebd2d3fe8b15fd40f663be7cb635147f254f84fc12705eb6253`。
 - 真机：未执行，`NOT_ACCEPTED`。需要在 Debug 设置页「调试开关」开启「八向移动（原型）」后验证八向、松开停止、撞墙滑动、切图/拾取/动画、物理键盘和插件关闭还原。
 
 ### 13.3 已知原型取舍
