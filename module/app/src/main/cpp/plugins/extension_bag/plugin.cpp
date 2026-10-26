@@ -6,6 +6,7 @@
 
 #include "contracts/bag.h"
 #include "contracts/craft_facts.h"
+#include "contracts/inventory_projection.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_action.h"
 #include "contracts/move_merge.h"
@@ -127,6 +128,12 @@ const qol::contracts::CapabilityRequirement kRequires[] = {
         qol::contracts::kInventoryActionCapabilityId,
         {qol::contracts::kInventoryActionVersionMajor,
          qol::contracts::kInventoryActionVersionMinor},
+    },
+    // 拖拽/合并回调注册在 core.item 的注册表；缺它时扩展页只能显示，不能完成跨袋移动。
+    {
+        qol::contracts::kInventoryProjectionCapabilityId,
+        {qol::contracts::kInventoryProjectionVersionMajor,
+         qol::contracts::kInventoryProjectionVersionMinor},
     },
 };
 
@@ -358,15 +365,17 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         return 1;
     }
     extension_bag_bind_port_sdk(g_sdk);
-    // 袋源注册：descriptor 已声明 requires，但注册失败按 degraded 处理，不阻塞 UI。
-    // 扩展袋数据面此时不可被 core.item 读取；原版功能不受影响。
+    // 袋源是 core.item 访问扩展袋的唯一入口；注册失败时插件没有可用数据面，
+    // 不能以 enabled 状态继续运行。
     if (!register_bag_source_if_available()) {
         if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
             constexpr char kMessage[] =
-                "extension bag bag_source registration failed; running degraded";
+                "extension bag bag_source registration failed; install rejected";
             (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
+        rollback_extension_bag_install();
+        return 1;
     }
     // 生命周期参与者最末注册。注册表 set-once；失败时保持不可用（active=false）并登记
     // 部分注册状态，install 返回失败。
@@ -414,8 +423,9 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
 
 void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     (void)ctx;
-    // 先注销袋源：注销后 core.item 不再回调本插件，随后才拆绑定。
+    // 先注销袋源与投影回调：注销后 core.item 不再回调本插件，随后才拆绑定。
     extension_bag_bag_source_unregister();
+    unregister_projection_callbacks();
     // P3c：先关 slot_data 准入（unregister 先拒绝新请求；终态后零回调由 provider 保证），
     // 磁盘 section 保留（不自动删除、不隐式保存）；注册请求在 deactivate（主线程）内
     // 经当帧 pump 收敛，返回 request 仅供诊断。
@@ -482,14 +492,32 @@ void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
         }
     }
     // enable 会重新注册袋源，保证 core.item 的注册表代次变化、快照失效。
-    if (!register_bag_source_if_available() && g_sdk != nullptr && g_sdk->log.write != nullptr) {
-        constexpr char kMessage[] = "extension bag bag_source re-register on enable failed";
-        (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
-                               static_cast<uint32_t>(sizeof(kMessage) - 1));
+    if (!register_bag_source_if_available()) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char kMessage[] = "extension bag bag_source re-register on enable failed";
+            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+                                   static_cast<uint32_t>(sizeof(kMessage) - 1));
+        }
+        extension_bag_set_enabled(false);
+        g_source_active.store(false, std::memory_order_release);
+        return;
+    }
+    // 投影回调是跨袋移动/合并的唯一 UI 适配入口；注册失败时数据面仍可用，
+    // 但拖拽会退化，必须让插件保持关闭而不是暴露半可用状态。
+    const QolResult projection_result = register_projection_callbacks();
+    if (!contracts::succeeded(projection_result)) {
+        if (g_sdk != nullptr && g_sdk->log.write != nullptr) {
+            constexpr char kMessage[] = "extension bag projection registration on enable failed";
+            (void)g_sdk->log.write(2, 1, kPluginId, kMessage,
+                                   static_cast<uint32_t>(sizeof(kMessage) - 1));
+        }
+        extension_bag_bag_source_unregister();
+        extension_bag_set_enabled(false);
+        g_source_active.store(false, std::memory_order_release);
+        return;
     }
     g_source_active.store(true, std::memory_order_release);
     extension_bag_set_enabled(true);
-    (void)register_projection_callbacks();
 }
 
 void plugin_on_disabled(qol::contracts::PluginContext& ctx) {
@@ -522,12 +550,24 @@ QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
     if (enabled != 0) {
         extension_bag_set_enabled(true);
         // 重新注册使 core.item 的注册表代次变化、快照失效。
-        (void)register_bag_source_if_available();
-        (void)register_projection_callbacks();
+        if (!register_bag_source_if_available()) {
+            extension_bag_set_enabled(false);
+            g_source_active.store(false, std::memory_order_release);
+            return contracts::error(kQolErrNotReady, "bag source unavailable", 22);
+        }
+        const QolResult projection_result = register_projection_callbacks();
+        if (!contracts::succeeded(projection_result)) {
+            extension_bag_bag_source_unregister();
+            extension_bag_set_enabled(false);
+            g_source_active.store(false, std::memory_order_release);
+            return projection_result;
+        }
+        g_source_active.store(true, std::memory_order_release);
     } else {
         extension_bag_bag_source_unregister();
         unregister_projection_callbacks();
         extension_bag_set_enabled(false);
+        g_source_active.store(false, std::memory_order_release);
     }
     return contracts::ok();
 }
@@ -541,7 +581,7 @@ constexpr qol::contracts::FeatureDefinition kFeatures[] = {
 const qol::contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    7, kRequires,  // requires=world.facts + item.facts + save.facts + craft.facts + save.slot_data + inventory.bag_source + inventory.action 3.0
+    8, kRequires,  // requires=world.facts + item.facts + save.facts + craft.facts + save.slot_data + inventory.bag_source + inventory.action 3.0 + inventory.projection 1.0
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,
     0, nullptr,

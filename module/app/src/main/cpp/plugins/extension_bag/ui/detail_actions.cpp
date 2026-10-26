@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/transaction/transaction.h"
+#include "plugins/extension_bag/api/bag_source.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
@@ -194,7 +195,7 @@ void extension_sell_ok(void*) {
         clear_original_desc_locked();
         return;
     }
-    const auto result = action->sell({2, bag, slot}, expected_item, count, "equip");
+    const auto result = action->sell({qol::features::extension_bag::kExtensionBagSpaceId, bag, slot}, expected_item, count, "equip");
     if (result.status != qol::contracts::InventorySellStatus::kOk) {
         VIRTBAG_LOG("extension sell action rejected bag=%d slot=%d count=%d status=%d",
                     bag, slot, count, static_cast<int>(result.status));
@@ -242,7 +243,7 @@ void extension_destroy_ok(void*) {
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     bool committed = false;
     if (action != nullptr && count > 0) {
-        const auto result = action->discard({2, bag, slot}, count);
+        const auto result = action->discard({qol::features::extension_bag::kExtensionBagSpaceId, bag, slot}, count);
         committed = result.status == qol::contracts::InventoryActionStatus::kOk;
         if (!committed) {
             VIRTBAG_LOG("extension destroy action rejected bag=%d slot=%d count=%d status=%d",
@@ -374,7 +375,7 @@ bool extension_confirm_use_item(void* item) {
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     bool used = false;
     if (action != nullptr) {
-        const auto outcome = action->use({2, bag, slot});
+        const auto outcome = action->use({qol::features::extension_bag::kExtensionBagSpaceId, bag, slot});
         used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
         if (!used) {
             QOL_LOG_WARN(QolDomain::kExtensionBag,
@@ -433,7 +434,7 @@ bool extension_use_mercenary_seal() {
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     bool used = false;
     if (action != nullptr) {
-        const auto outcome = action->use({2, bag, slot});
+        const auto outcome = action->use({qol::features::extension_bag::kExtensionBagSpaceId, bag, slot});
         used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
         if (!used) {
             QOL_LOG_WARN(QolDomain::kExtensionBag,
@@ -518,7 +519,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         }
         const auto* action = ::qol::features::extension_bag::inventory_action_api();
         if (action != nullptr) {
-            const auto outcome = action->use({2, item_bag, item_slot});
+            const auto outcome = action->use({qol::features::extension_bag::kExtensionBagSpaceId, item_bag, item_slot});
             used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
             if (!used) {
                 QOL_LOG_WARN(QolDomain::kExtensionBag,

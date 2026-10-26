@@ -179,9 +179,11 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
                     ? runtime_state().objects.bag.capacities[target_bag] : 0);
             if (target_slot < 0) target_slot = extension_bag_grid_slot_index(x, y, kGridX, kGridY);
             if (target_slot >= 0 && virtual_bag::valid_index(target_bag)) {
-            const bool handled = move_extension_to_extension_locked(
-                qol::extension_bag::ui_state().ui.extension_drag.bag, qol::extension_bag::ui_state().ui.extension_drag.slot,
-                target_bag, target_slot);
+            const bool handled = qol::features::extension_bag::usecases::
+                move_extension_to_extension_via_action_locked(
+                    lock, qol::extension_bag::ui_state().ui.extension_drag.bag,
+                    qol::extension_bag::ui_state().ui.extension_drag.slot, target_bag,
+                    target_slot);
             if (handled) refresh_projected_module_view_after_move_locked();
             QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->extension handled=%d src=%d/%d dst=%d/%d",
                         handled ? 1 : 0, qol::extension_bag::ui_state().ui.extension_drag.bag, qol::extension_bag::ui_state().ui.extension_drag.slot,
@@ -197,8 +199,10 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
             const bool handled = should_equip
                 ? try_equip_on_extension_tab_drop_locked(
                       lock, index, touch_moving_item_control_locked())
-                : move_extension_to_extension_locked(
-                    qol::extension_bag::ui_state().ui.extension_drag.bag, qol::extension_bag::ui_state().ui.extension_drag.slot, index, -1);
+                : qol::features::extension_bag::usecases::
+                      move_extension_to_extension_via_action_locked(
+                          lock, qol::extension_bag::ui_state().ui.extension_drag.bag,
+                          qol::extension_bag::ui_state().ui.extension_drag.slot, index, -1);
             if (handled) refresh_projected_module_view_after_move_locked();
             QOL_LOG_INFO(QolDomain::kExtensionBag, "drop result direction=extension->tab handled=%d equip=%d src=%d/%d dst_bag=%d",
                         handled ? 1 : 0, should_equip ? 1 : 0, qol::extension_bag::ui_state().ui.extension_drag.bag,
@@ -359,11 +363,11 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
         handled = equip_extension_source_on_tab_locked(
             lock, target_bag, source_bag, source_slot);
     } else {
-        handled = move_extension_to_extension_locked(
-            source_bag, source_slot,
-            target_bag, target_slot);
+        handled = qol::features::extension_bag::usecases::
+            move_extension_to_extension_via_action_locked(lock, source_bag, source_slot,
+                                                          target_bag, target_slot);
         if (handled) {
-            persist_state_locked();
+            // inventory.action 已经持久化；这里只刷新独立投影。
             refresh_projected_module_view_after_move_locked();
         }
     }
@@ -453,10 +457,11 @@ bool route_projected_session_to_tab_locked(::qol::extension_bag::ReentryLock& lo
         handled = equip_extension_source_on_tab_locked(
             lock, target_internal, session.source_bag, session.source_slot);
     } else {
-        handled = move_extension_to_extension_locked(
-            session.source_bag, session.source_slot, target_internal, -1);
+        handled = qol::features::extension_bag::usecases::
+            move_extension_to_extension_via_action_locked(lock, session.source_bag,
+                                                          session.source_slot, target_internal,
+                                                          -1);
         if (handled) {
-            persist_state_locked();
             refresh_projected_module_view_after_move_locked();
         }
     }

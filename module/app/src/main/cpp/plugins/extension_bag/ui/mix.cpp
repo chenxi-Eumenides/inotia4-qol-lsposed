@@ -371,6 +371,7 @@ void mix_refresh_item_after_unlock() {
         if (refresh_generation == qol::extension_bag::ui_state().mix.refresh_generation) mix_request_item_refresh_locked();
         return;
     }
+    qol::features::extension_bag::BagSizeProjectionScope capacity_projection;
     QolResult refresh_result{};
     if (suppress_display) {
         qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;

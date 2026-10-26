@@ -43,19 +43,6 @@ PhysicalInventorySnapshot capture_physical_inventory_snapshot_locked() {
 
 namespace {
 
-bool restore_physical_inventory_snapshot_locked(const PhysicalInventorySnapshot& snapshot) {
-    if (!snapshot.valid || runtime_state().host.game == nullptr ||
-        runtime_state().host.write_port->inventory.set_physical_item == nullptr) return false;
-    for (size_t index = 0; index < snapshot.slots.size(); ++index) {
-        if (!qol::contracts::succeeded(runtime_state().host.write_port->inventory.set_physical_item(
-                static_cast<int32_t>(index / virtual_bag::kSlotCount),
-                static_cast<int32_t>(index % virtual_bag::kSlotCount), snapshot.slots[index]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
 void log_original_event_inventory_snapshot(const char* phase, uint64_t event,
                                            bool session_has_projected_item,
                                            int source_bag, int source_slot,
@@ -102,7 +89,6 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
     }
 
     const uint64_t result = qol::extension_bag::ui_state().persistence_hooks.orig_event(event, param, param2);
-    bool restored = false;
     {
         ::qol::extension_bag::ReentryLock lock;
         const PhysicalInventorySnapshot after = capture_physical_inventory_snapshot_locked();
@@ -110,26 +96,23 @@ uint64_t call_original_event_with_inventory_guard(uint64_t event, uint64_t param
                                               source_bag, source_slot, after);
         if (session_has_projected_item && before.valid && after.valid &&
             virtual_bag::physical_inventory_snapshot_changed(before.slots, after.slots)) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR original event changed physical inventory while projected session active "
-                        "event=0x%llx before_digest=0x%llx after_digest=0x%llx",
-                        static_cast<unsigned long long>(event),
-                        static_cast<unsigned long long>(before.digest),
-                        static_cast<unsigned long long>(after.digest));
+            // 原版库存的写入权归 core.item。这里只保留诊断，不通过 EB 的写端口回滚；
+            // 否则 EB 会在 core.item 不知情的情况下改写原版背包指针表。
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "ERROR original event changed physical inventory while projected session "
+                          "active event=0x%llx before_digest=0x%llx after_digest=0x%llx",
+                          static_cast<unsigned long long>(event),
+                          static_cast<unsigned long long>(before.digest),
+                          static_cast<unsigned long long>(after.digest));
             for (size_t index = 0; index < before.slots.size(); ++index) {
                 if (before.slots[index] == after.slots[index]) continue;
                 const int bag = static_cast<int>(index / virtual_bag::kSlotCount);
                 const int slot = static_cast<int>(index % virtual_bag::kSlotCount);
-                QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR physical inventory mutation bag=%d slot=%d old=%p new=%p",
-                            bag, slot, before.slots[index], after.slots[index]);
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "ERROR physical inventory mutation bag=%d slot=%d old=%p new=%p", bag,
+                              slot, before.slots[index], after.slots[index]);
             }
-            restored = restore_physical_inventory_snapshot_locked(before);
-            QOL_LOG_ERROR(QolDomain::kExtensionBag, "ERROR physical inventory rollback event=0x%llx restored=%d",
-                        static_cast<unsigned long long>(event), restored ? 1 : 0);
         }
-    }
-    if (restored) {
-        const bool synced = virtual_bag_sync_projected_bag();
-        VIRTBAG_LOG_ERROR("ERROR physical inventory rollback projection_sync=%d", synced ? 1 : 0);
     }
     return result;
 }
@@ -464,7 +447,8 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         if (event == 0x17 || event == 0x19) advance_projected_drag_session_locked();
         if ((event == 0x17 || event == 0x18) &&
             runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
-            c18_native_bag_candidate_locked()) {
+            c18_native_bag_candidate_locked() &&
+            !projected_drag_session_active_locked()) {
             const int raw_bag = raw_current_bag_locked();
             if (raw_bag >= 0 && raw_bag != qol::extension_bag::ui_state().objects.original_current_got) {
                 // 必须先归还投影并让原版按原生当前袋重画物品区：改版袋 6..N-1 的

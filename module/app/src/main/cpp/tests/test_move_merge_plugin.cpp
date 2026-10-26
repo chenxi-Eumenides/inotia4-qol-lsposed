@@ -24,7 +24,7 @@ QolUiAdapter ui{};
 QolMoveMergePort move_port{};
 QolCharacterExtrasPort character_port{};
 ItemFactsApi facts{};
-InventoryMergeProjectionApi projection{};
+InventoryProjectionCallbacks projection{};
 InventoryRefreshApi refresh{};
 MoveMergeControlApi control{};
 QolItemHandle source_item{1, 1};
@@ -62,8 +62,6 @@ QolResult ok() { return contracts::ok(); }
 QolResult require(const char* id, QolVersionRange, const void** out) {
     *out = nullptr;
     if (std::strcmp(id, kItemFactsCapabilityId) == 0 && facts_available) *out = &facts;
-    if (std::strcmp(id, kInventoryMergeProjectionCapabilityId) == 0 && projection_available)
-        *out = &projection;
     if (std::strcmp(id, kInventoryRefreshCapabilityId) == 0 && refresh_available)
         *out = &refresh;
     return *out != nullptr ? ok() : error(kQolErrNotReady, "unavailable", 11);
@@ -196,8 +194,8 @@ void setup() {
     facts.cumulate_count = &cumulate;
     facts.count_limit = &count_limit;
     facts.count_encoding = &count_encoding;
-    projection = {sizeof(projection), kInventoryMergeProjectionVersionMajor,
-                  kInventoryMergeProjectionVersionMinor, &projection_drop, &input_blocked,
+    projection = {sizeof(projection), kInventoryProjectionVersionMajor,
+                  kInventoryProjectionVersionMinor, &projection_drop, &input_blocked,
                   &allow_tab_drop, &identify_extension, &observe_pre, &observe_source,
                   &observe_post, &module_view, &sync_slot, &sync_bag};
     refresh = {&call_refresh};
@@ -525,7 +523,18 @@ void test_native_fallback_and_count_encoding_gate() {
 }
 
 }  // namespace
+
+const InventoryProjectionCallbacks* projection_callbacks_for_test() {
+    return projection_available ? &projection : nullptr;
+}
+
 }  // namespace qol::features::core_item::merge
+
+namespace qol::features::core_item {
+const contracts::InventoryProjectionCallbacks* projection_callbacks() {
+    return merge::projection_callbacks_for_test();
+}
+}  // namespace qol::features::core_item
 
 int main() {
     qol::features::core_item::merge::test_backup_once_and_projection_sync();

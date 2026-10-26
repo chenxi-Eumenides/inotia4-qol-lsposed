@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/api/bag_source.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
@@ -191,7 +192,7 @@ int64_t store_sell_item_wrapper(int64_t displayed_price) {
         store_sell_popup(0xc);
         return 0;
     }
-    const auto result = action->sell({2, bag, slot}, expected_item, count, "store");
+    const auto result = action->sell({qol::features::extension_bag::kExtensionBagSpaceId, bag, slot}, expected_item, count, "store");
     if (result.status != qol::contracts::InventorySellStatus::kOk) {
         VIRTBAG_LOG("store sell action rejected bag=%d slot=%d count=%d status=%d",
                     bag, slot, count, static_cast<int>(result.status));

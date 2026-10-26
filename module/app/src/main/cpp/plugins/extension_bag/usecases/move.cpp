@@ -1,12 +1,20 @@
 #include "plugins/extension_bag/usecases/move.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
+#include "contracts/inventory_action.h"
 #include "contracts/item_facts.h"
+#include "plugins/extension_bag/api/bag_source.h"
+#include "plugins/extension_bag/core/projection.h"
+#include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/extension_bag/runtime/entry_guard.h"
+#include "plugins/extension_bag/runtime/inventory_action.h"
+#include "plugins/extension_bag/runtime/item_access.h"
+#include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/session.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/object_state_port.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/transaction/transaction.h"
 
 namespace qol::features::extension_bag::usecases {
@@ -32,6 +40,67 @@ bool move_extension_to_original(::qol::extension_bag::ReentryLock& lock, int src
 
 bool move_extension_to_extension(int src_bag, int src_slot, int dst_bag, int dst_slot) {
     return ::move_extension_to_extension_locked(src_bag, src_slot, dst_bag, dst_slot);
+}
+
+bool move_extension_to_extension_via_action_locked(::qol::extension_bag::ReentryLock& lock,
+                                                   int src_bag, int src_slot, int dst_bag,
+                                                   int requested_dst_slot) {
+    if (!lock.owns_lock() || !virtual_bag::valid_index(src_bag) ||
+        !virtual_bag::valid_index(dst_bag) || src_slot < 0 ||
+        src_slot >= virtual_bag::kSlotCount) {
+        return false;
+    }
+    // 目标非空时保留旧事务的合并/交换语义；空槽移动统一交给 core.item。
+    if (requested_dst_slot >= 0 &&
+        !module_slot_is_assignable_locked(dst_bag, requested_dst_slot)) {
+        const bool moved = ::move_extension_to_extension_locked(src_bag, src_slot, dst_bag,
+                                                                requested_dst_slot);
+        if (moved) (void)persist_state_locked();
+        return moved;
+    }
+
+    int dst_slot = requested_dst_slot;
+    const int capacity = ::qol::extension_bag::access::bag().capacities[dst_bag];
+    if (dst_slot < 0) {
+        for (int slot = 0; slot < capacity; ++slot) {
+            if (module_slot_is_assignable_locked(dst_bag, slot)) {
+                dst_slot = slot;
+                break;
+            }
+        }
+    }
+    if (dst_slot < 0 || dst_slot >= capacity) return false;
+
+    void* item = module_item_locked(src_bag, src_slot);
+    const virtual_bag::Item& descriptor =
+        ::qol::extension_bag::access::bag().items[src_bag][src_slot];
+    if (item == nullptr || descriptor.category <= 0 || descriptor.count <= 0) return false;
+    const int count = static_cast<int>(
+        virtual_bag_effective_count(item, static_cast<uint32_t>(descriptor.count)));
+    if (count <= 0) return false;
+
+    const auto* action = ::qol::features::extension_bag::inventory_action_api();
+    if (action == nullptr) return false;
+
+    lock.unlock();
+    const auto outcome = action->move(
+        {qol::features::extension_bag::kExtensionBagSpaceId, src_bag, src_slot}, count,
+        {qol::features::extension_bag::kExtensionBagSpaceId, dst_bag, dst_slot});
+    lock.lock();
+
+    if (outcome.status != qol::contracts::InventoryActionStatus::kOk ||
+        outcome.moved_count <= 0) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "extension->extension action rejected status=%d src=%d/%d dst=%d/%d",
+                     static_cast<int>(outcome.status), src_bag, src_slot, dst_bag, dst_slot);
+        return false;
+    }
+    refresh_projected_module_view_after_move_locked();
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "extension->extension committed through inventory.action src=%d/%d dst=%d/%d "
+                 "count=%d",
+                 src_bag, src_slot, dst_bag, dst_slot, outcome.moved_count);
+    return true;
 }
 
 MoveResult move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
@@ -80,7 +149,8 @@ MoveResult move_item(int from_bag, int from_slot, int to_bag, int to_slot) {
     } else if (from_extension && to_original) {
         moved = move_extension_to_original(lock, from_internal, from_slot, to_bag);
     } else {
-        moved = move_extension_to_extension(from_internal, from_slot, to_internal, to_slot);
+        moved = move_extension_to_extension_via_action_locked(lock, from_internal, from_slot,
+                                                              to_internal, to_slot);
     }
     return moved ? MoveResult{true, Error::kNone} : MoveResult{false, Error::kMoveFailed};
 }

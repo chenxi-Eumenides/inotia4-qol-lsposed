@@ -27,6 +27,7 @@ void refresh_projection_if_overwritten_locked();
 
 void virtual_bag_call_original_refresh_item_area_with_guard() {
     NativeCallScope native_call;
+    qol::features::extension_bag::BagSizeProjectionScope capacity_projection;
     const void* refresh_iface = nullptr;
     const auto* sdk = runtime_state().host.sdk;
     if (sdk == nullptr || sdk->capabilities.require == nullptr) return;
@@ -346,6 +347,12 @@ bool install_module_view_locked(int bag) {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "module view reject install: original window bag=%d (task bag reserved)",
                     original_bag);
         return false;
+    }
+    // C18 进入扩展页时 current_bag 仍可能是 C18 袋号；投影窗口是原版代理袋。
+    // 先切到代理袋，避免刷新/绘制第一帧按 C18 袋重画，同时保证
+    // ControlItem_SetItem 的 current_bag == window_bag 条件成立。
+    if (raw_current_bag_locked() != original_bag) {
+        set_original_bag_locked(original_bag);
     }
     uint32_t size_word = 0;
     if (!bag_size_word_locked(original_bag, &size_word)) return false;

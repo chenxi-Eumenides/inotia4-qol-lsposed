@@ -35,7 +35,6 @@ SOURCE_ROUTE_COUNTS = {
     "core.system": 5,
     "core.ui_state": 7,
     "core.world": 12,
-    "extension_bag": 9,
     "save_backup": 4,
     "settings": 5,
 }
@@ -45,10 +44,10 @@ EXPECTED_OWNER_COUNTS = {
     "legacy.debug": 3,
     "settings": 8,
 }
-EXPECTED_PLUGIN_FACT_COUNT = 139
+EXPECTED_PLUGIN_FACT_COUNT = 130
 EXPECTED_RESIDENT_FACT_COUNT = 7
-EXPECTED_ROUTE_COUNT = 146
-EXPECTED_METHOD_COUNTS = {"GET": 66, "POST": 80}
+EXPECTED_ROUTE_COUNT = 137
+EXPECTED_METHOD_COUNTS = {"GET": 65, "POST": 72}
 EXPECTED_OP_GATED_COUNT = 21
 
 PLUGIN_SOURCE_COUNTS = {
@@ -59,13 +58,13 @@ PLUGIN_SOURCE_COUNTS = {
     "core.custom_ui/routes.inc": ("core.custom_ui", 3),
     "core.data/routes.inc": ("core.data", 12),
     "core.feature/routes.inc": ("core.feature", 1),
-    "core.item/routes.inc": ("core.item", 21),
+    "core.item/routes.inc": ("core.item", 19),
+    "core.item/shop/routes.inc": ("core.item", 2),
     "core.quest/routes.inc": ("core.quest", 8),
     "core.save/routes.inc": ("core.save", 3),
     "core.system/routes.inc": ("core.system", 5),
     "core.ui_state/routes.inc": ("core.ui_state", 7),
     "core.world/routes.inc": ("core.world", 12),
-    "extension_bag/http/routes.inc": ("extension_bag", 9),
     "save_backup/routes.inc": ("save_backup", 4),
     "settings/routes.inc": ("settings", 5),
 }

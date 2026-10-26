@@ -1,4 +1,5 @@
 #include "plugins/extension_bag/transaction/transaction.h"
+#include "plugins/extension_bag/api/bag_source.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
@@ -226,7 +227,7 @@ bool equip_module_item_on_character_locked(::qol::extension_bag::ReentryLock& lo
     if (action == nullptr) return false;
 
     lock.unlock();
-    const auto outcome = action->equip(role, {2, source_bag, source_slot}, equip_slot);
+    const auto outcome = action->equip(role, {qol::features::extension_bag::kExtensionBagSpaceId, source_bag, source_slot}, equip_slot);
     lock.lock();
     if (outcome.status != qol::contracts::InventoryActionStatus::kOk) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,

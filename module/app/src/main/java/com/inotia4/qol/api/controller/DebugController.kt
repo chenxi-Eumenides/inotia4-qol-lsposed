@@ -5,7 +5,6 @@ import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.service.info.NativeHttpQuery
 import com.inotia4.qol.util.ApiException
 import com.inotia4.qol.util.ControllerGuard
-import com.inotia4.qol.util.JsonUtil
 import com.inotia4.qol.util.withNativeRouteLease
 import com.yanzhenjie.andserver.annotation.GetMapping
 import com.yanzhenjie.andserver.annotation.PostMapping
@@ -18,7 +17,7 @@ import com.yanzhenjie.andserver.http.StatusCode
 /**
  * 调试端点：/api/debug/ui、/api/debug/path（architecture §9.1 登记）。
  * 路由统一全路径写法（无类级 RequestMapping，见 architecture §3）。
- * settings-ui / extension_bag 的写端点已迁 owner（core.ui / extension_bag）：
+ * settings-ui 的写端点已迁 owner（core.ui）：
  * Kotlin 只做传输适配（NativeHttpCommand.post），body 原样透传、参数校验与响应由 owner 承载。
  */
 @RestController
@@ -73,46 +72,4 @@ class DebugController {
     fun customUiHelp(@RequestBody body: String): String =
         ControllerGuard.guard { NativeHttpCommand.post("/api/debug/custom-ui/help", body) }
 
-    @GetMapping("/api/debug/extension_bag/status")
-    fun extensionBagStatus(): String =
-        ControllerGuard.guard { NativeHttpQuery.get("/api/debug/extension_bag/status") }
-
-    @PostMapping("/api/debug/extension_bag/enter_view")
-    fun extensionBagEnterView(@RequestBody body: String): String =
-        ControllerGuard.guard { postEb("/api/debug/extension_bag/enter_view", body) }
-
-    @PostMapping("/api/debug/extension_bag/exit_view")
-    fun extensionBagExitView(): String =
-        ControllerGuard.guard { NativeHttpCommand.post("/api/debug/extension_bag/exit_view", null) }
-
-    @PostMapping("/api/debug/extension_bag/unequip")
-    fun extensionBagUnequip(@RequestBody body: String): String =
-        ControllerGuard.guard { postEb("/api/debug/extension_bag/unequip", body) }
-
-    @PostMapping("/api/debug/extension_bag/select_bag")
-    fun extensionBagSelectBag(@RequestBody body: String): String =
-        ControllerGuard.guard { postEb("/api/debug/extension_bag/select_bag", body) }
-
-    @PostMapping("/api/debug/extension_bag/click_item")
-    fun extensionBagClickItem(@RequestBody body: String): String =
-        ControllerGuard.guard { postEb("/api/debug/extension_bag/click_item", body) }
-
-    @PostMapping("/api/debug/extension_bag/equip")
-    fun extensionBagEquip(@RequestBody body: String): String =
-        ControllerGuard.guard { postEb("/api/debug/extension_bag/equip", body) }
-
-    @PostMapping("/api/debug/extension_bag/item")
-    fun extensionBagItem(@RequestBody body: String): String =
-        ControllerGuard.guard { postEb("/api/debug/extension_bag/item", body) }
-
-    @PostMapping("/api/extension_bag/set_bag_count")
-    fun extensionBagSetBagCount(@RequestBody body: String): String =
-        ControllerGuard.guard { postEb("/api/extension_bag/set_bag_count", body) }
-
-    /** 迁移前 Kotlin parseBody 的 400 语义保留在传输层：非法 body 拒绝，合法 body 归一化透传。 */
-    private fun postEb(path: String, body: String): String {
-        val json = JsonUtil.parseBody(body)
-            ?: throw ApiException(StatusCode.SC_BAD_REQUEST, "bad request")
-        return NativeHttpCommand.post(path, json.toString())
-    }
 }

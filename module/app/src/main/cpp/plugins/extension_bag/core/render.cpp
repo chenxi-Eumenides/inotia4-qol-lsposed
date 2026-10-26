@@ -7,6 +7,7 @@
 #include "plugins/extension_bag/core/observation.h"
 #include "plugins/extension_bag/runtime/state.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
+#include "plugins/extension_bag/runtime/projection_controller.h"
 #include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 
@@ -75,6 +76,53 @@ int c18_native_highlight_suppression_bag_locked() {
         if (!module_tab) ++native_tabs;
     }
     return native_tabs > 0 ? native_tabs : -1;
+}
+
+// 原版 DrawInvenBag 的选中高亮是叠加绘制，未选中分支只重画图标，不会擦掉
+// 上一帧的 0xf/0x13。扩展页选中时即使临时 current_bag 已指向无匹配值，旧高亮
+// 仍可能残留。这里对原版 0..5 重画底框和未选中图标，不写任何袋状态，也不影响
+// core.item。
+void clear_native_tab_highlight_locked(int bag) {
+    if (bag < 0 || bag >= virtual_bag::kOriginalNativeBagCount) return;
+    void* container = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipBagContainer);
+    if (container == nullptr) return;
+    void* tab = extension_bag_ui_child_at(container, bag);
+    if (tab == nullptr || extension_bag_ui_parent(tab) != container ||
+        extension_bag_ui_user_type(tab) != 2) {
+        return;
+    }
+    int64_t ax = 0;
+    int64_t ay = 0;
+    extension_bag_control_abs_pos(tab, &ax, &ay);
+    (void)extension_bag_ui_draw_part(0xf, 0x14, static_cast<int32_t>(ax - 5),
+                                     static_cast<int32_t>(ay - 12), 0, 1);
+    uint32_t size_word = 0;
+    // 原生对袋 0 和任务袋 5 走特殊分支，固定使用已装备袋图标。
+    const bool special = bag == 0 || bag == virtual_bag::kOriginalTaskBag;
+    const bool equipped = special ||
+                          (bag_size_word_locked(bag, &size_word) &&
+                           (size_word & ((1u << 25) - 1u)) != 0);
+    if (equipped) {
+        if (!extension_bag_ui_draw_part_alpha(0xf, 6, static_cast<int32_t>(ax + 5),
+                                              static_cast<int32_t>(ay + 5), 0, 1, 0x28)) {
+            (void)extension_bag_ui_draw_part(0xf, 6, static_cast<int32_t>(ax + 5),
+                                             static_cast<int32_t>(ay + 5), 0, 1);
+        }
+    } else {
+        if (!extension_bag_ui_draw_part_alpha(0xf, 9, static_cast<int32_t>(ax + 5),
+                                              static_cast<int32_t>(ay + 5), 0, 1, 0x28)) {
+            (void)extension_bag_ui_draw_part(0xf, 9, static_cast<int32_t>(ax + 5),
+                                             static_cast<int32_t>(ay + 5), 0, 1);
+        }
+    }
+}
+
+void clear_native_tab_highlights_locked() {
+    // 只处理原版 0..5。C18 追加页签由原生绘制和 current_bag 抑制负责，
+    // EB 不能再叠加图标，否则会把所有追加袋画成“已选中”。
+    for (int bag = 0; bag < virtual_bag::kOriginalNativeBagCount; ++bag) {
+        clear_native_tab_highlight_locked(bag);
+    }
 }
 
 void draw_tab_buttons_in_frame_locked() {
@@ -243,11 +291,23 @@ void virtual_bag_draw_original_bag_wrapper() {
             : native_bag_count_locked();
     }
     const int saved_current = raw_current_bag_locked();
+    // 退出扩展视图的首帧：current_bag 可能仍是投影窗口袋（通常是 0），
+    // 但用户点击的是原版袋 X。绘制袋列前临时切到 exit_display_bag，
+    // 避免先闪一帧原版袋 0 的选中态。
+    const bool exiting_to_original =
+        runtime_state().objects.bag.mode == virtual_bag::Mode::kExitingModule &&
+        qol::extension_bag::ui_state().ui.exit_display_bag >= 0;
+    const bool write_exit_display =
+        exiting_to_original && saved_current >= 0 &&
+        runtime_state().host.write_port->ui.set_current_bag != nullptr;
     // 读不到原值时不写临时袋号：否则可能留下无效 current_bag。
     const bool write_highlight_suppression =
         suppression_bag >= 0 && saved_current >= 0 &&
         runtime_state().host.write_port->ui.set_current_bag != nullptr;
-    if (write_highlight_suppression) {
+    if (write_exit_display) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(
+            qol::extension_bag::ui_state().ui.exit_display_bag);
+    } else if (write_highlight_suppression) {
         (void)runtime_state().host.write_port->ui.set_current_bag(suppression_bag);
     }
     // Native bag controls consume CO_RECT during DrawInvenBag. Apply any
@@ -255,17 +315,21 @@ void virtual_bag_draw_original_bag_wrapper() {
     prepare_c18_native_bag_layout_locked();
     if (module_view && qol::extension_bag::ui_state().objects.module_view_installed) {
         (void)runtime_state().host.write_port->ui.draw_original_bag();
-        if (write_highlight_suppression && saved_current >= 0) {
+        if ((write_highlight_suppression || write_exit_display) && saved_current >= 0) {
             (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
         }
+        if (module_view && !qol::extension_bag::ui_state().store.view_installed) clear_native_tab_highlights_locked();
         draw_tab_buttons_in_frame_locked();
         return;
     }
     (void)runtime_state().host.write_port->ui.draw_original_bag();
-    if (write_highlight_suppression && saved_current >= 0) {
+    // 退出扩展视图时 current_bag 已临时切到 exit_display_bag；C18 选中图标
+    // 必须在恢复 current_bag 之前补画，否则会画成上一个 C18 袋。
+    if (!module_view) draw_c18_active_native_tab_locked();
+    if ((write_highlight_suppression || write_exit_display) && saved_current >= 0) {
         (void)runtime_state().host.write_port->ui.set_current_bag(saved_current);
     }
-    draw_c18_active_native_tab_locked();
+    if (module_view && !qol::extension_bag::ui_state().store.view_installed) clear_native_tab_highlights_locked();
     if (!qol::extension_bag::ui_state().store.view_installed) draw_tab_buttons_in_frame_locked();
 }
 void virtual_bag_draw_inven_item_wrapper() {

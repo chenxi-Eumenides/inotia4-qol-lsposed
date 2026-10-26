@@ -16,6 +16,19 @@ void extension_bag_display_begin_pending(qol::contracts::QolUiRootKind kind, int
 void extension_bag_display_commit();
 void extension_bag_display_cancel();
 
+// 只有 EB 自己的显示刷新/绘制窗口才把 INVEN_GetBagSize 投影成扩展容量。
+// core.item 等其他调用方在窗口外读取时必须拿到真实原版容量。
+class BagSizeProjectionScope {
+public:
+    BagSizeProjectionScope();
+    ~BagSizeProjectionScope();
+    BagSizeProjectionScope(const BagSizeProjectionScope&) = delete;
+    BagSizeProjectionScope& operator=(const BagSizeProjectionScope&) = delete;
+
+private:
+    bool entered_ = false;
+};
+
 // 恢复/回滚 refresh 期间抑制替换，让原版控件重新读到真实槽表。
 class DisplaySubstitutionSuppressScope {
 public:

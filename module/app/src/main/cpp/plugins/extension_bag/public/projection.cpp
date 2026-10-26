@@ -1,3 +1,4 @@
+#include "plugins/extension_bag/api/bag_source.h"
 #include "plugins/extension_bag/core/ui_state.h"
 #include "game_ui_virtbag.h"
 #include "plugins/extension_bag/runtime/state_access.h"
@@ -241,7 +242,7 @@ bool apply_extension_material_to_slot_locked(
     }
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     const auto outcome = action != nullptr && role >= 0
-                             ? action->put_jewel(role, {2, src_bag, src_slot}, dst_slot)
+                             ? action->put_jewel(role, {qol::features::extension_bag::kExtensionBagSpaceId, src_bag, src_slot}, dst_slot)
                              : qol::contracts::InventoryUseOutcome{
                                    qol::contracts::InventoryActionStatus::kUnsupported, 0};
     lock.lock();
@@ -373,7 +374,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         const auto* action = ::qol::features::extension_bag::inventory_action_api();
         const auto outcome = action != nullptr && role >= 0
                                  ? action->put_jewel(
-                                       role, {2, src_bag, src_slot}, dst_slot)
+                                       role, {qol::features::extension_bag::kExtensionBagSpaceId, src_bag, src_slot}, dst_slot)
                                  : qol::contracts::InventoryUseOutcome{
                                        qol::contracts::InventoryActionStatus::kUnsupported, 0};
         const bool handled = outcome.status == qol::contracts::InventoryActionStatus::kOk;
@@ -407,11 +408,11 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     lock.unlock();
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     const auto outcome = action != nullptr && move_count > 0
-                             ? action->move({2, src_bag, src_slot}, move_count,
-                                            {2, dst_bag, dst_slot})
+                             ? action->move({qol::features::extension_bag::kExtensionBagSpaceId, src_bag, src_slot}, move_count,
+                                            {qol::features::extension_bag::kExtensionBagSpaceId, dst_bag, dst_slot})
                              : qol::contracts::InventoryMoveOutcome{
                                    qol::contracts::InventoryActionStatus::kUnsupported,
-                                   0, 0, {2, dst_bag, dst_slot}, {}};
+                                   0, 0, {qol::features::extension_bag::kExtensionBagSpaceId, dst_bag, dst_slot}, {}};
     const bool routed = outcome.status == qol::contracts::InventoryActionStatus::kOk;
     lock.lock();
     if (qol::extension_bag::ui_state().ui.extension_drag_session.phase ==
@@ -477,12 +478,12 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
             source_bag, source_slot, target_slot);
         return false;
     }
-    const bool allowed = item != nullptr;
-    if (allowed) {
-        VIRTBAG_LOG("original drop allowed control=%p source=original item=%p target_slot=%d",
-                    control, item, target_slot);
-    }
-    return allowed;
+    // 落点是扩展投影格时，原版 INVEN_MoveItem 只会按窗口原版袋处理，
+    // 不可能把物品写进扩展 sidecar；放行反而会提前消费一次拖拽。
+    // 原版/改版 -> 扩展的唯一提交点是 0x18 release 路由（inventory.action.move）。
+    VIRTBAG_LOG("original drop blocked for extension target control=%p item=%p target_slot=%d",
+                control, item, target_slot);
+    return false;
 }
 // G-14（方案 C）：原版物品操作后 RefreshItemArea 会以 INVEN 重刷控件，窗口袋投影需重写。
 // 投影只占窗口袋；其他袋调用为 no-op。调用方（data_op_*）不持模块锁，此处安全获锁。

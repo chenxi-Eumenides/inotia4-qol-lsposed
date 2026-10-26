@@ -141,6 +141,7 @@ bool projected_capacity_for_bag(int requested_bag, int* out_capacity) {
 }
 
 thread_local int g_bag_size_depth = 0;
+thread_local int g_bag_size_projection_depth = 0;
 
 struct BagSizeDepthScope {
     BagSizeDepthScope() { ++g_bag_size_depth; }
@@ -188,7 +189,8 @@ int extension_bag_inven_get_bag_size(int bag) {
     if (backup == nullptr) return 0;
     if (g_bag_size_depth > 0) return backup(bag);
     BagSizeDepthScope depth;
-    if (g_suppressed) return backup(bag);
+    // 非 EB 显示刷新窗口（尤其是 core.item 的原版袋容量查询）必须看到真实容量。
+    if (g_suppressed || g_bag_size_projection_depth == 0) return backup(bag);
 
     int capacity = 0;
     if (projected_capacity_for_bag(bag, &capacity)) return capacity;
@@ -206,6 +208,15 @@ void extension_bag_display_begin_pending(qol::contracts::QolUiRootKind kind, int
 void extension_bag_display_commit() { g_pending = {}; }
 
 void extension_bag_display_cancel() { g_pending = {}; }
+
+BagSizeProjectionScope::BagSizeProjectionScope() {
+    ++g_bag_size_projection_depth;
+    entered_ = true;
+}
+
+BagSizeProjectionScope::~BagSizeProjectionScope() {
+    if (entered_) --g_bag_size_projection_depth;
+}
 
 DisplaySubstitutionSuppressScope::DisplaySubstitutionSuppressScope() {
     previous_ = g_suppressed;
