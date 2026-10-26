@@ -117,6 +117,29 @@ inline EightWayClass classify_vector(int32_t dx, int32_t dy) {
     return out;
 }
 
+inline int32_t key_index_for_dir(int32_t dir) {
+    switch (dir) {
+        case 1: return 0;  // left
+        case 3: return 1;  // right
+        case 2: return 2;  // up
+        case 0: return 3;  // down
+        default: return -1;
+    }
+}
+
+// 斜向时优先保持角色当前朝向：从右进入右上/右下仍朝右，从上进入右上/左上仍朝上。
+// 当前朝向不是该斜向的两个轴之一时，保留主轴判定。
+inline void apply_facing_preference(EightWayClass& classified, int32_t facing) {
+    if (!classified.valid || !classified.diagonal) return;
+    if (facing < 0 || facing > 3) return;
+    if (facing == classified.primary_dir) return;
+    if (facing != classified.secondary_dir) return;
+    const int32_t previous_primary = classified.primary_dir;
+    classified.primary_dir = facing;
+    classified.secondary_dir = previous_primary;
+    classified.primary_key_index = key_index_for_dir(facing);
+}
+
 inline bool is_custom_dir_key(int32_t key) {
     const uint32_t value = static_cast<uint32_t>(key);
     return (value & 0xFFFF0000u) == kCustomDirKeyBase && (value & 0x0000FFF8u) == 0;

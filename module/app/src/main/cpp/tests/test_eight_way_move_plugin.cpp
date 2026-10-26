@@ -19,7 +19,7 @@ void check(bool condition, const char* what) {
 int main() {
     const auto& d = qol::features::eight_way_move::plugin_descriptor();
     check(std::strcmp(d.id, "eight_way_move") == 0, "plugin id");
-    check(d.resources_count == 3, "resource count");
+    check(d.resources_count == 4, "resource count");
     check(d.port_count == 1, "port count");
     check(d.port_count == 1 &&
               d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT,
@@ -41,6 +41,9 @@ int main() {
           "char move id");
     check(d.resources[2].mechanism == qol::contracts::ResourceMechanism::kCallPatch,
           "char move call patch");
+    check(std::strcmp(d.resources[3].id, "hook:UIPlayPorting_Draw") == 0, "porting draw id");
+    check(d.resources[3].mechanism == qol::contracts::ResourceMechanism::kEntryHook,
+          "porting draw entry hook");
 
     for (uint32_t i = 0; i < d.resources_count; ++i) {
         check(d.resources[i].policy == qol::contracts::ResourcePolicy::kPrivate, "private");

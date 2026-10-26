@@ -18,7 +18,10 @@ namespace {
 void log_first_diagonal() {
     static std::atomic<bool> logged{false};
     if (logged.exchange(true, std::memory_order_acq_rel)) return;
-    QOL_LOG_SEAM_INFO(kQolLogDomainPlatform, "eight_way diagonal applied");
+    const State& state = current_state();
+    QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
+                      "eight_way diagonal applied primary=%d secondary=%d",
+                      state.primary_dir, state.secondary_dir);
 }
 
 bool has_path(const void* ch) {

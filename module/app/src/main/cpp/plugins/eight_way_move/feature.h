@@ -22,6 +22,7 @@ bool gate_enabled();
 inline constexpr const char* kResourceIdDirectionTouch = "hook:UIPlay_ButtonDirection";
 inline constexpr const char* kResourceIdPressKeyPlay = "hook:GAMESTATE_PressKeyPlay";
 inline constexpr const char* kResourceIdCharMove = "patch:GAMESTATE_PressKeyPlay+0x21c";
+inline constexpr const char* kResourceIdPortingDraw = "hook:UIPlayPorting_Draw";
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
 
@@ -30,5 +31,6 @@ uint64_t direction_touch_wrapper(void* ctrl, uint64_t event, int64_t* point,
                                  uint64_t param3);
 void press_key_play_wrapper(int32_t key);
 int32_t eight_way_char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_t flag);
+void porting_draw_wrapper();
 
 }  // namespace qol::features::eight_way_move

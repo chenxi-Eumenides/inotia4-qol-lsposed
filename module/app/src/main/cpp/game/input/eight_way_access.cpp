@@ -18,6 +18,8 @@ struct AbsPoint {
 };
 
 using GetAbsolutePointFn = AbsPoint (*)(void*);
+using VirtualKeyRootFn = void* (*)();
+using FindControlByIdFn = void* (*)(void*, int32_t);
 
 struct TouchOffset {
     int64_t x = 0;
@@ -63,6 +65,26 @@ GetAbsolutePointFn absolute_point_fn() {
         fn = reinterpret_cast<GetAbsolutePointFn>(
             g_base + fn_resolve("F_CONTROL_OBJECT_GET_ABSOLUTE_POINT_VMA",
                                 F_CONTROL_OBJECT_GET_ABSOLUTE_POINT_VMA));
+    }
+    return fn;
+}
+
+VirtualKeyRootFn virtual_key_root_fn() {
+    static VirtualKeyRootFn fn = nullptr;
+    if (fn == nullptr && g_base != 0) {
+        fn = reinterpret_cast<VirtualKeyRootFn>(
+            g_base + fn_resolve("F_INPUT_LAYER_GET_VIRTUAL_KEY_VMA",
+                                F_INPUT_LAYER_GET_VIRTUAL_KEY_VMA));
+    }
+    return fn;
+}
+
+FindControlByIdFn find_control_by_id_fn() {
+    static FindControlByIdFn fn = nullptr;
+    if (fn == nullptr && g_base != 0) {
+        fn = reinterpret_cast<FindControlByIdFn>(
+            g_base + fn_resolve("F_CONTROL_OBJECT_FIND_BY_ID_VMA",
+                                F_CONTROL_OBJECT_FIND_BY_ID_VMA));
     }
     return fn;
 }
@@ -131,6 +153,15 @@ bool control_absolute_point(void* ctrl, int64_t* x, int64_t* y) {
     *x = point.x;
     *y = point.y;
     return true;
+}
+
+void* virtual_pad_control() {
+    const VirtualKeyRootFn root_fn = virtual_key_root_fn();
+    const FindControlByIdFn find_fn = find_control_by_id_fn();
+    if (root_fn == nullptr || find_fn == nullptr) return nullptr;
+    void* root = root_fn();
+    if (root == nullptr) return nullptr;
+    return find_fn(root, 0x15);
 }
 
 }  // namespace qol::game::input::access

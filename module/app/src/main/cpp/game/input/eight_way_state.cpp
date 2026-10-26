@@ -3,10 +3,12 @@
 #include <atomic>
 #include <cstdint>
 
+#include "game/access/game_access.h"
 #include "game/access/qol_log_seam.h"
 #include "game/access/world.h"
 #include "game/input/eight_way_access.h"
 #include "game/input/eight_way_move_math.h"
+#include "game/state/game_state.h"
 
 namespace qol::game::input {
 namespace {
@@ -28,12 +30,26 @@ int direction_key_index(int32_t key) {
     return -1;
 }
 
+int32_t current_facing() {
+    void* ch = lead_member();
+    if (ch == nullptr) return -1;
+    const auto* direction = reinterpret_cast<const int8_t*>(
+        static_cast<const uint8_t*>(ch) + C_DIRECTION);
+    if (!game_memory_accessible(direction, sizeof(int8_t), 'r')) return -1;
+    const int32_t value = *direction;
+    return value >= 0 && value <= 3 ? value : -1;
+}
+
 void log_first_touch(const EightWayClass& c, int32_t dx, int32_t dy) {
     static std::atomic<bool> logged{false};
     if (logged.exchange(true, std::memory_order_acq_rel)) return;
-    QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
-                      "eight_way touch sector=%d primary=%d secondary=%d dx=%d dy=%d",
-                      c.sector, c.primary_dir, c.secondary_dir, dx, dy);
+    int32_t table[4]{};
+    (void)access::read_key_table(table);
+    QOL_LOG_SEAM_INFO(
+        kQolLogDomainPlatform,
+        "eight_way touch sector=%d primary=%d secondary=%d dx=%d dy=%d keys=%d,%d,%d,%d",
+        c.sector, c.primary_dir, c.secondary_dir, dx, dy, table[0], table[1], table[2],
+        table[3]);
 }
 
 void clear_state() {
@@ -122,7 +138,17 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
     const int32_t dx = static_cast<int32_t>(touch_x - center_x);
     const int32_t dy = static_cast<int32_t>(center_y - touch_y);
 
-    const EightWayClass classified = classify_vector(dx, dy);
+    EightWayClass classified = classify_vector(dx, dy);
+    const int32_t facing = current_facing();
+    apply_facing_preference(classified, facing);
+    if (classified.diagonal) {
+        static std::atomic<bool> logged_diagonal{false};
+        if (!logged_diagonal.exchange(true, std::memory_order_acq_rel)) {
+            QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
+                              "eight_way facing=%d primary=%d secondary=%d", facing,
+                              classified.primary_dir, classified.secondary_dir);
+        }
+    }
     int32_t table[4]{};
     if (!classified.valid || !access::read_key_table(table)) {
         suppress_motion();

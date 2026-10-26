@@ -17,11 +17,13 @@ std::atomic<uint64_t> g_poll_task{0};
 std::atomic<bool> g_gate{false};
 std::atomic<void*> g_backup_direction{nullptr};
 std::atomic<void*> g_backup_press_key{nullptr};
+std::atomic<void*> g_backup_porting_draw{nullptr};
 std::atomic<bool> g_direction_seen{false};
 std::atomic<bool> g_move_seen{false};
 
 using DirectionFn = uint64_t (*)(void*, uint64_t, int64_t*, uint64_t);
 using PressKeyFn = void (*)(int32_t);
+using PortingDrawFn = void (*)();
 
 void log_info(const char* format, ...) {
     const auto* sdk = g_sdk;
@@ -113,6 +115,17 @@ void press_key_play_wrapper(int32_t key) {
     backup(mapped);
 }
 
+void porting_draw_wrapper() {
+    const auto backup = reinterpret_cast<PortingDrawFn>(
+        g_backup_porting_draw.load(std::memory_order_acquire));
+    if (backup == nullptr) return;
+    backup();
+    const auto* port = input_port();
+    if (gate_enabled() && port != nullptr && port->api.draw_overlay != nullptr) {
+        port->api.draw_overlay();
+    }
+}
+
 int32_t eight_way_char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
     const auto* port = input_port();
     if (port == nullptr || port->api.char_move == nullptr) return 0;
@@ -130,6 +143,8 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
         g_backup_direction.store(backup, std::memory_order_release);
     } else if (std::strcmp(resource_id, kResourceIdPressKeyPlay) == 0) {
         g_backup_press_key.store(backup, std::memory_order_release);
+    } else if (std::strcmp(resource_id, kResourceIdPortingDraw) == 0) {
+        g_backup_porting_draw.store(backup, std::memory_order_release);
     }
     return 0;
 }

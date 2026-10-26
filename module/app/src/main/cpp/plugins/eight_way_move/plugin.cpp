@@ -60,6 +60,20 @@ const contracts::ResourceClaim kResources[] = {
         120,
         reinterpret_cast<void*>(&eight_way_char_move_wrapper),
     },
+    {
+        kResourceIdPortingDraw,
+        "F_UI_PLAY_PORTING_DRAW_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,
+        kPluginId,
+        "UIPlayPorting_Draw 原函数返回后补画斜向第二根方向箭头",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&porting_draw_wrapper),
+    },
 };
 
 constexpr contracts::FeatureDefinition kFeatures[] = {

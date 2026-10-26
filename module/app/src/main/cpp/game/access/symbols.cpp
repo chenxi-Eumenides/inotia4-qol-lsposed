@@ -26,6 +26,7 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     // “当前版本不支持”），不是变体限制。
     {"F_UIPLAY_BUTTON_DIRECTION_VMA", F_UIPLAY_BUTTON_DIRECTION_VMA},
     {"F_GAMESTATE_PRESSKEYPLAY_VMA", F_GAMESTATE_PRESSKEYPLAY_VMA},
+    {"F_UI_PLAY_PORTING_DRAW_VMA", F_UI_PLAY_PORTING_DRAW_VMA},
     // 教程文案抑制入口（owner=popup_blocker）：hook handler 短路原绘制函数并返回 0。
     {"F_TUTORIAL_DESCRIPTION_VMA", F_TUTORIAL_DESCRIPTION_VMA},
     // 属性显示范围：详情渲染三点（MATH_GetRandom 截获 / 选项行改写 / 构造入口缓存）。

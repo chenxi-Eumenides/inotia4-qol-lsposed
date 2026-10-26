@@ -1,6 +1,6 @@
 # 八向/全向移动设计
 
-状态：原型已实现（`eight_way_move.direction`，默认关闭，Debug「调试开关」）；构建与 Host 单测通过，C18L v586 真机烟测通过（八向触摸与角色斜向移动），完整验收 NOT_ACCEPTED。
+状态：原型已实现（`eight_way_move.direction`，默认关闭，Debug「调试开关」）；构建与 Host 单测通过，C18L v586 真机烟测通过（八向触摸、角色斜向移动、斜向双箭头），朝向偏好已单测、真机完整验收 NOT_ACCEPTED。
 范围：Android 触屏虚拟方向摇杆；不改键盘、AI、寻路和其他移动调用点。
 
 ## 1. 结论先行
@@ -300,6 +300,31 @@ return 0   // 主轴已移动；副轴被挡时也按成功返回，避免原版
 - 归一化到 `0.707 * delta`：斜向等速，但 `delta=8` 时步长约 6px，位置不再 8px 对齐；下一次转向会触发 `+0x2e0` 和 `CHAR_MoveOnWaitCoord` 补步，可能卡顿。
 - 结论：第一期用完整 `delta`，接受 1.41 倍斜向速度；等速版本需要同时改转向闸门，放到全向阶段。
 
+### 6.5 斜向双箭头与朝向
+
+**双箭头显示**：原版 `UIPlayPorting_Draw` 遍历虚拟按键子控件 0x1e..0x21，按 `KEY_nCode` 匹配各自键码后点亮对应箭头，一帧只能匹配一个键码。原型在 `UIPlayPorting_Draw` 入口 hook 中先执行原函数，再由 `game/input/eight_way_draw.cpp` 补画副轴箭头：
+
+- 取 `0x15` 控件绝对中心 `abs+126`；
+- `IMGSYS_GetGroup(0x16)` + `IMGSYS_GetLoc(0x16, lit_loc)`；
+- `GRPX_DrawPart(group, x, y, loc, 2, 2, 0)`。
+
+真机 KEY 表为 `[-3,-4,-1,-2]`，绘制栈按 child 0..3 使用 `[-4,-2,-3,-1]`，即 child 顺序为 右/下/左/上。点亮 loc：
+
+| 方向 | lit loc |
+|---|---|
+| 下(0) | `0x10` |
+| 左(1) | `0x0d` |
+| 上(2) | `0x0f` |
+| 右(3) | `0x0e` |
+
+**朝向**：角色只有 4 个基础朝向，斜向时优先保持角色当前朝向，只要它属于该斜向的两个轴：
+
+- 当前朝右 → 右上/右下仍朝右；
+- 当前朝上 → 右上/左上仍朝上；
+- 当前朝向不属于该斜向的两个轴 → 回退到主轴判定。
+
+实现上在触摸分类后读取 `lead_member()+C_DIRECTION`，调用 `apply_facing_preference()` 把 `primary_dir` 换成当前朝向，并把另一轴设为副方向；原版 `CHAR_SetDirection` 因此保持当前朝向。
+
 ## 7. 全向移动扩展
 
 ### 7.1 输入
@@ -339,7 +364,7 @@ step_y = round(delta * |dy| / len)
 
 | 文件 | 职责 |
 |---|---|
-| `plugin.cpp` | descriptor、3 个 ResourceClaim、feature、生命周期 |
+| `plugin.cpp` | descriptor、4 个 ResourceClaim、feature、生命周期 |
 | `feature.h/.cpp` | 三个 wrapper、backup 原子、port 指针、gate、reset |
 | `CMakeLists.txt` | `qol_plugin_eight_way_move` |
 | `settings_contribution.cpp` | 空贡献，与现有插件一致 |
@@ -353,6 +378,7 @@ ResourceClaim：
 | `hook:UIPlay_ButtonDirection` | `F_UIPLAY_BUTTON_DIRECTION_VMA` | `kEntryHook` | `direction_touch_wrapper` |
 | `hook:GAMESTATE_PressKeyPlay` | `F_GAMESTATE_PRESSKEYPLAY_VMA` | `kEntryHook` | `press_key_play_wrapper` |
 | `patch:GAMESTATE_PressKeyPlay+0x21c` | `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE` | `kCallPatch` | `eight_way_char_move_wrapper` |
+| `hook:UIPlayPorting_Draw` | `F_UI_PLAY_PORTING_DRAW_VMA` | `kEntryHook` | `porting_draw_wrapper` |
 
 全部 private/required/fail-closed/resumable；`gate=nullptr`，跟随 lifecycle。
 
@@ -370,29 +396,34 @@ struct QolMovementInputApi {
     void (*on_direction_touch)(void* ctrl, uint64_t event, const void* point,
                                uint64_t param3);
     int32_t (*translate_press_key)(int32_t key);   // 写回 KEY_nCode，返回要传给原函数的键码
-    int32_t (*char_move)(void* ch, int32_t dir, int32_t delta, int32_t flag);
+    int32_t (*char_move)(void* ch, int32_t dir, int32_t delta, uint8_t flag);
+    void (*draw_overlay)();   // UIPlayPorting_Draw 返回后补画副轴箭头
     void (*set_enabled)(uint8_t enabled);
     void (*reset)();
+    void (*poll)();           // 非 Play 状态清理
 };
 ```
 
-- `on_direction_touch`：读触点/偏移/屏幕高度，计算八向 state，写自定义键码。
+- `on_direction_touch`：读触点/偏移/控件绝对中心，计算八向 state，写自定义键码。
 - `translate_press_key`：自定义码 → 主方向键码并写回 `KEY_nCode`；非自定义码原样返回。
 - `char_move`：内部调用原 `fn_char_move`，执行 6.2 的两轴逻辑。
-- `set_enabled/reset`：feature gate 与状态清理。
+- `draw_overlay`：执行 6.5 的副轴箭头绘制。
+- `set_enabled/reset/poll`：feature gate、状态清理与残留码清理。
 
 `game/adapter_ports/movement_input_port.{h,cpp}` 提供端口实例；`host/plugin_registry.cpp` 注册 `QOL_PORT_MOVEMENT_INPUT`；`contracts/game_ports/ports.h` 增加枚举、版本、`port_id_name`。
 
 ### 8.3 游戏层实现
 
-`game/input/eight_way_move.{h,cpp}`：
+游戏层按职责拆分：
 
-- 读 `KEY_nCode` / `KEY` 表 / `KEY_bPressed(0x7135a0)` / `UIPlay_bPressedDirection`。
-- `SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`。
-- `lead_member()`、`gamestate_state()`、`C_PATH_LIST`。
-- `fn_char_move`。
-- 固定几何常量：`0x15` 摇杆矩形、`0x16` 命中矩形。
-- 若真机发现虚拟按键根有额外偏移，再加一个 `ControlObject_GetAbsoluteRect` 的 x8 sret asm wrapper；第一期先用固定几何 + 设备探针验证。
+- `game/input/eight_way_move_math.h`：八向分类、键码映射、朝向偏好纯逻辑。
+- `game/input/eight_way_access.{h,cpp}`：`KEY_nCode` / `KEY` 表 / `KEY_bPressed(0x7135a0)`、屏幕高度、TouchHandle 偏移、`ControlObject_GetAbsolutePoint`、虚拟按键根/`FindByID(0x15)`。
+- `game/input/eight_way_state.{h,cpp}`：触摸状态机、动态中心、自定义键码、主方向翻译、`lead_member()+C_DIRECTION` 朝向偏好。
+- `game/input/eight_way_move.{h,cpp}`：`CHAR_Move` 双轴 wrapper、回滚/恢复坐标。
+- `game/input/eight_way_draw.{h,cpp}`：`UIPlayPorting_Draw` 后的副轴箭头补画。
+- `game/adapter_ports/movement_input_port.{h,cpp}`：端口实例。
+
+真机逻辑高度为 `640`、显示为横屏 `854x384`，且虚拟按键根有父偏移，因此不能用固定几何；`ControlObject_GetAbsoluteRect` 是 x8 sret ABI，改用 `ControlObject_GetAbsolutePoint(ctrl)+126`。
 
 ### 8.4 符号与 patch 登记
 
@@ -401,7 +432,12 @@ struct QolMovementInputApi {
 ```
 F_UIPLAY_BUTTON_DIRECTION_VMA = 0xc66d4
 F_GAMESTATE_PRESSKEYPLAY_VMA = 0x9cfc0
+F_UI_PLAY_PORTING_DRAW_VMA = 0xc87a0
+F_CONTROL_OBJECT_GET_ABSOLUTE_POINT_VMA = 0x9e6b4
+F_INPUT_LAYER_GET_VIRTUAL_KEY_VMA = 0xac594
+F_CONTROL_OBJECT_FIND_BY_ID_VMA = 0x9faa4
 G_KEY_CODE_VMA = 0x71353c
+G_KEY_BPRESSED_VMA = 0x7135a0
 G_KEY_TABLE_VMA = 0x713540
 G_KEY_BPRESSED_VMA = KEY_bPressed(0x7135a0)
 G_UIPLAY_BPRESSED_DIRECTION_VMA = 0x307081
@@ -415,7 +451,7 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 
 ## 9. 失败与回滚
 
-- 三个资源任一安装失败：整组 fail-closed，插件 failed，不保留半装状态。
+- 四个资源任一安装失败：整组 fail-closed，插件 failed，不保留半装状态。
 - entry hook 的 `backup=nullptr`：宿主拒绝/回滚，wrapper 不执行。
 - port 缺失/ABI 不匹配：install 失败，不安装任何资源。
 - disable/deactivate：`set_enabled(false)`、`reset()`、清自定义键码，资源事务物理还原。
@@ -477,32 +513,35 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 ### 13.1 已落地
 
 - 新插件 `plugins/eight_way_move/`：feature `eight_way_move.direction`，默认 `0`，分类 `Hidden`（设置页「调试开关」），toggle。
-- 三个私有、必需、fail-closed、可还原资源：
+- 四个私有、必需、fail-closed、可还原资源：
   - `hook:UIPlay_ButtonDirection`（`F_UIPLAY_BUTTON_DIRECTION_VMA`）
   - `hook:GAMESTATE_PressKeyPlay`（`F_GAMESTATE_PRESSKEYPLAY_VMA`）
   - `patch:GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`（`P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`，`+0x21c`，原字 `0x9401318B`）
+  - `hook:UIPlayPorting_Draw`（`F_UI_PLAY_PORTING_DRAW_VMA`，副轴箭头补画）
 - 新窄端口 `QOL_PORT_MOVEMENT_INPUT`（`contracts/game_ports/movement_input_port.h`），仅 `eight_way_move` 可声明。
 - 游戏层按职责拆分：
-  - `game/input/eight_way_move_math.h`：纯八向分类/键码数学，可单测。
-  - `game/input/eight_way_access.{h,cpp}`：KEY 键码/键表、按住位、屏幕高度、TouchHandle 偏移。
-  - `game/input/eight_way_state.{h,cpp}`：触摸状态机、自定义键码、主方向键码翻译。
+  - `game/input/eight_way_move_math.h`：纯八向分类/键码数学、朝向偏好，可单测。
+  - `game/input/eight_way_access.{h,cpp}`：KEY 键码/键表、按住位、屏幕高度、TouchHandle 偏移、控件绝对点、虚拟按键根。
+  - `game/input/eight_way_state.{h,cpp}`：触摸状态机、自定义键码、主方向键码翻译、朝向偏好。
   - `game/input/eight_way_move.{h,cpp}`：`CHAR_Move` 双轴 wrapper。
+  - `game/input/eight_way_draw.{h,cpp}`：`UIPlayPorting_Draw` 后补画副轴箭头。
   - `game/adapter_ports/movement_input_port.{h,cpp}`：端口实例。
 - 插件层：
   - `plugin.cpp`：descriptor、资源声明、生命周期。
-  - `feature.{h,cpp}`：端口/门禁、三个 wrapper、backup、诊断日志。
+  - `feature.{h,cpp}`：端口/门禁、四个 wrapper、backup、诊断日志。
 - Host：端口注册与私有端口校验、插件 descriptor 注册。
-- 符号/patch：新增 `UIPlay_ButtonDirection`、`GAMESTATE_PressKeyPlay`、`SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`、`KEY_nCode`、`KEYSET_nData`，以及 `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`。
+- 符号/patch：新增 `UIPlay_ButtonDirection`、`GAMESTATE_PressKeyPlay`、`UIPlayPorting_Draw`、`SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`、`ControlObject_GetAbsolutePoint`、`InputLayer_GetVirtualKey`、`ControlObject_FindByID`、`KEY_nCode`、`KEYSET_nData`、`KEY_bPressed`，以及 `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`。
 - 入口 hook 符号必须同时登记到 `game/access/symbols.cpp` 的 `kHookEntrySymbols`：`resolve_hook_entry` 只按该白名单解析入口，不读取 `symbol_registry.h` 的完整表。漏登记会让 preflight 报 `symbol unresolved`，插件状态变 `unsupported`，设置页显示「当前版本不支持」——这不是游戏变体限制。
 - 按住有效位是 `KEY_bPressed`（`0x7135a0`，dynsym 可解析），不是 `0x3076d3`；`0x3076d3` 实际是 `MAP_bShadowTile1`。读错地址会表现为 `press=0`、所有触摸都被当成取消。
 - 摇杆中心必须动态取 `ControlObject_GetAbsolutePoint(ctrl) + 126`。真机逻辑高度为 `640`、显示为横屏 `854x384`，虚拟按键根还有父偏移；固定 `(136,H-126)`/`(200,H-190)` 会让斜向触点被算成上下左右。
 
 ### 13.2 验证
 
-- `eight_way_move_tests`：八向分类、22.5°/45° 边界、死区、自定义键码、副轴条件，通过。
-- `eight_way_move_plugin_tests`：插件 id、资源数量/机制/策略/必要性、端口、feature 默认关闭与 Hidden 分类，通过。
-- `scripts/build-debug.sh`：通过；模块产物 `output/inotia4_qol_lsposed_debug_2610270220_1a9d01cfb70c.apk`，SHA-256 `1a9d01cfb70c409b7e3b7ad23027b71914ddd79c1a62a3a310960c0eae1ded94`。
-- C18L v586 真机烟测：集成包 `output/Inotia4_C18L_v586_debug_1a9d01cfb70c_lspatch.apk`；资源 `hook:UIPlay_ButtonDirection` / `hook:GAMESTATE_PressKeyPlay` / `patch:GAMESTATE_PressKeyPlay+0x21c` 均 `live`；日志出现 `eight_way touch`、`char_move hook active`、`eight_way diagonal applied`，角色实际向右上斜向移动。
+- `eight_way_move_tests`：八向分类、22.5°/45° 边界、死区、自定义键码、副轴条件、朝向偏好（右上保持右/上、非轴回退、基本方向忽略），通过。
+- `eight_way_move_plugin_tests`：插件 id、4 个资源、端口、feature 默认关闭与 Hidden 分类，通过。
+- `scripts/build-debug.sh`：通过；最终模块产物 `output/inotia4_qol_lsposed_debug_2610270257_2b8877adfa94.apk`，SHA-256 `2b8877adfa944a863d3cd20afe79dc620a90796d82a8c1bc5d1219cc791f9950`。
+- C18L v586 真机烟测：集成包 `output/Inotia4_C18L_v586_debug_2b8877adfa94_lspatch.apk`；四个资源均 `live`；日志出现 `eight_way touch`、`char_move hook active`、`eight_way draw secondary=3 loc=0xe`；截图确认斜向时原版上箭头与补画右箭头同时点亮，角色实际斜向移动。
+- 朝向偏好已有单测；多段触摸（先右后右上）真机逐帧验证未完成。
 - 完整验收仍 `NOT_ACCEPTED`：松开停止、撞墙、切图/拾取/动画、物理键盘、插件关闭还原和不同分辨率仍需逐项验证。
 
 ### 13.3 已知原型取舍
@@ -513,4 +552,6 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 - 输入清理用 `owns_input` 区分本功能写入与物理键；同方向物理键与触摸主键完全同码时仍有理论歧义。
 - 物理方向键与触摸主方向键码相同时，原型仍靠 `press_active` 和键码匹配判断，理论上存在同方向物理键叠加副轴的边界；真机验证时重点检查。
 - 每 30 帧的逻辑帧任务负责离开 Play 状态时清理 state/残留码；不是逐帧强保证。
+- 双箭头采用“原版画完后补画副轴”的方式；若原版 HUD 绘制顺序变化，补画可能盖到更高层元素，需真机回归。
+- 朝向偏好读取 `lead_member()+C_DIRECTION`；角色在 8px 补步期间可能仍使用上一朝向，属于预期。
 - 全向移动未实现；仍需处理 `GAMESTATE_PressKeyPlay` 的 `x&7/y&7` 转向闸门。

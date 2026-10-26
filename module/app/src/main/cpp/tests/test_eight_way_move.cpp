@@ -14,6 +14,7 @@ void check(bool condition, const char* what) {
 }
 
 using qol::game::input::EightWayClass;
+using qol::game::input::apply_facing_preference;
 using qol::game::input::classify_vector;
 using qol::game::input::custom_dir_key;
 using qol::game::input::is_custom_dir_key;
@@ -61,6 +62,35 @@ int main() {
     check(is_custom_dir_key(custom_dir_key(7)), "custom key 7");
     check(!is_custom_dir_key(0x51000008), "custom key out of sector range");
     check(!is_custom_dir_key(0x1234), "non custom key");
+
+    {
+        EightWayClass c = classify_vector(100, 100);  // NE, default primary right
+        apply_facing_preference(c, 2);                 // facing up
+        check(c.primary_dir == 2 && c.secondary_dir == 3 && c.primary_key_index == 2,
+              "NE keeps up facing");
+    }
+    {
+        EightWayClass c = classify_vector(100, 100);  // NE, primary right
+        apply_facing_preference(c, 3);                 // facing right
+        check(c.primary_dir == 3 && c.secondary_dir == 2 && c.primary_key_index == 1,
+              "NE keeps right facing");
+    }
+    {
+        EightWayClass c = classify_vector(60, 100);   // NE, default primary up
+        apply_facing_preference(c, 3);                 // facing right (secondary)
+        check(c.primary_dir == 3 && c.secondary_dir == 2 && c.primary_key_index == 1,
+              "NE swaps to right facing");
+    }
+    {
+        EightWayClass c = classify_vector(100, 100);  // NE
+        apply_facing_preference(c, 0);                 // facing down, not an axis
+        check(c.primary_dir == 3 && c.secondary_dir == 2, "NE ignores unrelated facing");
+    }
+    {
+        EightWayClass c = classify_vector(100, 0);    // E cardinal
+        apply_facing_preference(c, 2);                 // must be ignored
+        check(c.primary_dir == 3 && c.secondary_dir == -1, "cardinal ignores facing");
+    }
 
     check(should_apply_secondary(true, true, true, 0, 3, 3, 2), "apply secondary");
     check(!should_apply_secondary(true, true, true, 0, 2, 3, 2), "dir mismatch");
