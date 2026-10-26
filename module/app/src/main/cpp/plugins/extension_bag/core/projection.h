@@ -39,11 +39,6 @@ bool ensure_module_view_root_current_locked();
 void refresh_projection_if_overwritten_locked();
 bool sync_projected_slot_locked(int bag, int slot);
 void refresh_projected_module_view_after_move_locked();
-// 跨空间移动后刷新仍处于原生视图的袋。扩展视图安装时只刷新投影，
-// 避免原版刷新把投影控件覆盖回空槽。
-void refresh_native_item_area_after_move_locked(int native_bag, int native_slot);
-// 拖拽释放事件结束后的下一帧再同步一次，覆盖原生释放路径的最后一次控件重绘。
-void flush_pending_native_slot_sync_locked();
 void restore_module_view_locked();
 bool complete_original_exit_locked();
 void cancel_original_exit_locked();

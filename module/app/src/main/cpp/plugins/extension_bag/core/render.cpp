@@ -371,7 +371,6 @@ void virtual_bag_draw_inven_item_wrapper() {
     }
 }
 void virtual_bag_draw_end_locked(int inventory_state, ::qol::extension_bag::ReentryLock& lock) {
-    flush_pending_native_slot_sync_locked();
     static int previous_state = -1;
     const int old_state = previous_state;
     if (old_state != inventory_state) {
