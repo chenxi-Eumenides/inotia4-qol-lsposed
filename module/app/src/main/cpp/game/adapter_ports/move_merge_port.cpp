@@ -28,7 +28,7 @@ QolResult not_ready() {
 QolResult move_item(contracts::QolItemHandle source, int32_t count, int32_t target_bag,
                     int32_t target_slot, int32_t* out_result) {
     if (!game_host_is_main_thread()) return wrong_thread();
-    if (out_result == nullptr || count <= 0 || target_bag < 0 || target_bag > 5 ||
+    if (out_result == nullptr || count <= 0 || target_bag < 0 || target_bag > 17 ||
         target_slot < 0 || target_slot > 15) {
         return invalid_argument();
     }
@@ -58,7 +58,7 @@ QolResult current_bag(int32_t* out_bag) {
     int32_t bag = -1;
     const QolResult result = qol::game::current_bag(&bag);
     if (!contracts::succeeded(result)) return result;
-    if (bag < 0 || bag > 5) return invalid_argument();
+    if (bag < 0 || bag > 17) return invalid_argument();
 
     *out_bag = bag;
     return contracts::ok();

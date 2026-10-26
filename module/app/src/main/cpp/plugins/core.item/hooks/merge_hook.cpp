@@ -13,6 +13,7 @@
 #include "contracts/ui.h"
 #include "plugins/core.item/api/projection.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
+#include "plugins/core.item/hooks/inventory_logging.h"
 
 namespace qol::features::core_item::merge {
 namespace {
@@ -102,14 +103,6 @@ bool extension_item(const contracts::InventoryProjectionCallbacks* projection,
     int32_t bag = -1;
     int32_t slot = -1;
     return contracts::succeeded(projection->identify_extension_item(item, &bag, &slot));
-}
-
-bool can_apply_stuff(contracts::QolItemHandle target, contracts::QolItemHandle material,
-                     int32_t* out_allowed) {
-    return out_allowed != nullptr && g_character_port != nullptr &&
-           g_character_port->read.can_apply_stuff_items != nullptr &&
-           contracts::succeeded(g_character_port->read.can_apply_stuff_items(
-               target, material, out_allowed));
 }
 
 bool item_facts(const contracts::ItemFactsApi* facts, contracts::QolItemHandle item,
@@ -248,12 +241,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                                              source_handle, &source_category)) &&
                                          contracts::succeeded(facts->category(
                                              destination_handle, &destination_category));
-                int32_t apply_allowed = 0;
-                const bool apply_known = facts_ready &&
-                                         can_apply_stuff(destination_handle, source_handle,
-                                                         &apply_allowed);
-                if (facts_ready && apply_known && apply_allowed == 0 &&
-                    source_category == destination_category &&
+                // UIEquip_IsApplyStuff 对同类别可堆叠物品也返回 1，不能用作合并前提；
+                // 同类别的堆叠合并只由类别与容量决定，材料使用是跨类别路径。
+                if (facts_ready && source_category == destination_category &&
                     source_count > 0 && destination_count > 0) {
                     int32_t limit = 0;
                     if (facts->count_limit != nullptr) {
@@ -270,7 +260,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                                                     g_move_port->current_bag(&target_bag)) &&
                                                 control_slot(control, &destination_slot) &&
                                                 control_slot(source, &source_slot);
-                    if (location_ready && target_bag >= 0 && target_bag <= 5 &&
+                    if (location_ready && target_bag >= 0 && target_bag <= 17 &&
                         destination_slot >= 0 && destination_slot < 16 && source_slot >= 0 &&
                         source_slot < 16 && destination_count >= 0 && source_count > 0 &&
                         limit >= static_cast<int32_t>(destination_count) &&
