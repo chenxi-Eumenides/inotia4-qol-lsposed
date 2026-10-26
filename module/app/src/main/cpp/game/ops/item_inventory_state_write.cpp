@@ -71,7 +71,7 @@ QolResult resolve_loaded_item(contracts::QolItemHandle handle, void** out_item) 
         return transfer_error(kQolErrInvalidArgument, "invalid item handle");
     }
     const ItemHandleResolution resolution = item_handle_registry().resolve_item(
-        handle, kQolLoadedItemHandleOwner);
+        handle, contracts::kQolItemHandleOwnerAny);
     if (resolution.error != ItemHandleError::kNone || resolution.item == nullptr) {
         return handle_error(resolution.error);
     }
@@ -230,11 +230,16 @@ QolResult load_item(const uint8_t* payload, uint32_t size,
         return transfer_error(kQolErrInternal, "item load failed");
     }
     ItemHandleError registry_error = ItemHandleError::kNone;
-    const contracts::QolItemHandle handle =
+    contracts::QolItemHandle handle =
         register_item(item, kQolLoadedItemHandleOwner, &registry_error);
     if (handle.slot == 0 || handle.generation == 0) {
-        fn_itempool_free(item);
-        return handle_error(registry_error);
+        // 钩子或既有所有权可能已为同一对象登记句柄；回查后沿用，不重复注册。
+        const contracts::QolItemHandle existing = lookup_item(item, nullptr);
+        if (existing.slot == 0 || existing.generation == 0) {
+            fn_itempool_free(item);
+            return handle_error(registry_error);
+        }
+        handle = existing;
     }
     *out_item = handle;
     return contracts::ok();
