@@ -11,7 +11,11 @@ namespace {
 qol::contracts::QolItemInventoryView g_facts{};
 bool g_facts_available = true;
 bool g_real_equip = false;
+bool g_real_equip_available = true;
 bool g_is_jewel = false;
+bool g_jewel_predicate_available = true;
+bool g_backpack_predicate_available = true;
+bool g_dice_predicate_available = true;
 bool g_quality_capability_available = true;
 const qol::contracts::AttributeQualityApi* g_quality_api = nullptr;
 int g_quality_query_calls = 0;
@@ -54,7 +58,7 @@ const qol::contracts::AttributeQualityApi* quality_provider() {
 namespace qol::features::autosell::read_only {
 
 bool item_is_real_equip(contracts::QolItemHandle, int32_t* out) {
-    if (out == nullptr) return false;
+    if (out == nullptr || !g_real_equip_available) return false;
     *out = g_real_equip ? 1 : 0;
     return true;
 }
@@ -67,19 +71,19 @@ bool item_inventory_view(contracts::QolItemHandle,
 }
 
 bool item_is_jewel(int32_t, int32_t* out) {
-    if (out == nullptr) return false;
+    if (out == nullptr || !g_jewel_predicate_available) return false;
     *out = g_is_jewel ? 1 : 0;
     return true;
 }
 
 bool item_is_backpack(int32_t category, int32_t* out) {
-    if (out == nullptr) return false;
+    if (out == nullptr || !g_backpack_predicate_available) return false;
     *out = category >= 1 && category <= 4 ? 1 : 0;
     return true;
 }
 
 bool item_is_dice(int32_t category, int32_t* out) {
-    if (out == nullptr) return false;
+    if (out == nullptr || !g_dice_predicate_available) return false;
     *out = category >= 52 && category <= 56 ? 1 : 0;
     return true;
 }
@@ -100,7 +104,11 @@ void prepare_facts(uint32_t fields) {
     g_facts.equip = 0;
     g_facts_available = true;
     g_real_equip = false;
+    g_real_equip_available = true;
     g_is_jewel = false;
+    g_jewel_predicate_available = true;
+    g_backpack_predicate_available = true;
+    g_dice_predicate_available = true;
 }
 
 void prepare_jewel_quality() {
@@ -198,14 +206,22 @@ void test_missing_required_field_reason_is_reported() {
     prepare_facts(qol::contracts::kQolItemInventoryHasRarity |
                   qol::contracts::kQolItemInventoryHasJewelValue);
     const qol::features::autosell::read_only::InventoryItemRef ref{
-        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 60, 1,
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 28, 1,
         {11, 19}};
+    g_is_jewel = true;
     autosell::ItemView view{};
     AutosellViewDiagnostics diagnostics{};
     assert(autosell_build_view(ref, &view, &diagnostics) ==
            AutosellViewBuildReason::kMissingRequiredFields);
     assert(diagnostics.fields == g_facts.fields);
     assert(diagnostics.rarity == 0 && diagnostics.equip == 0);
+}
+
+void test_non_jewel_without_jewel_fields_builds_view() {
+    prepare_facts(qol::contracts::kQolItemInventoryHasRarity);
+    autosell::ItemView view{};
+    assert(build_category_view(60, &view) == AutosellViewBuildReason::kBuilt);
+    assert(!view.is_jewel && !view.is_equip);
 }
 
 void test_missing_rarity_builds_view_with_unknown_sentinel() {
@@ -237,6 +253,53 @@ void test_real_equip_uses_item_predicate_not_inventory_view_fact() {
     g_real_equip = true;
     assert(autosell_build_view(ref, &view) == AutosellViewBuildReason::kBuilt);
     assert(view.is_equip);
+}
+
+void test_real_equip_failure_only_skips_possible_equipment() {
+    autosell::ItemView view{};
+
+    prepare_facts(kFixtureViewFields);
+    g_real_equip_available = false;
+    g_backpack_predicate_available = false;
+    assert(build_category_view(1, &view) == AutosellViewBuildReason::kBuilt);
+    assert(view.is_backpack && !view.is_equip);
+
+    prepare_facts(kFixtureViewFields);
+    g_real_equip_available = false;
+    g_dice_predicate_available = false;
+    assert(build_category_view(52, &view) == AutosellViewBuildReason::kBuilt);
+    assert(view.dice_tier == 1 && !view.is_equip);
+
+    prepare_facts(kFixtureViewFields);
+    g_real_equip_available = false;
+    g_is_jewel = true;
+    assert(build_category_view(28, &view) == AutosellViewBuildReason::kBuilt);
+    assert(view.is_jewel && !view.is_equip);
+
+    prepare_facts(kFixtureViewFields);
+    g_real_equip_available = false;
+    assert(build_category_view(60, &view) == AutosellViewBuildReason::kFactsUnavailable);
+}
+
+void test_jewel_predicate_failure_falls_back_to_category() {
+    prepare_facts(kFixtureViewFields);
+    g_jewel_predicate_available = false;
+    autosell::ItemView view{};
+    assert(build_category_view(28, &view) == AutosellViewBuildReason::kBuilt);
+    assert(view.is_jewel && view.jewel_tier == 0);
+
+    prepare_facts(kFixtureViewFields);
+    g_jewel_predicate_available = false;
+    assert(build_category_view(60, &view) == AutosellViewBuildReason::kBuilt);
+    assert(!view.is_jewel);
+}
+
+void test_enhance_level_is_copied_from_inventory_facts() {
+    prepare_facts(kFixtureViewFields);
+    g_facts.enchant_level = 7;
+    autosell::ItemView view{};
+    assert(build_category_view(60, &view) == AutosellViewBuildReason::kBuilt);
+    assert(view.enhance_level == 7);
 }
 
 void test_enabled_config_without_matching_rule_is_classified() {
@@ -300,8 +363,12 @@ int main() {
     test_jewel_quality_v2_failures_keep_unknown_sentinel();
     test_malformed_quality_api_keeps_unknown_sentinel();
     test_missing_required_field_reason_is_reported();
+    test_non_jewel_without_jewel_fields_builds_view();
     test_missing_rarity_builds_view_with_unknown_sentinel();
     test_real_equip_uses_item_predicate_not_inventory_view_fact();
+    test_real_equip_failure_only_skips_possible_equipment();
+    test_jewel_predicate_failure_falls_back_to_category();
+    test_enhance_level_is_copied_from_inventory_facts();
     test_enabled_config_without_matching_rule_is_classified();
     test_provider_item_backpack_tier_rule_match_is_classified();
     test_category_tiers_are_exposed_in_view();

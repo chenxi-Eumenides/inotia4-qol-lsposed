@@ -129,6 +129,15 @@ bool game_state_gate(int32_t* out) {
     return port->read.for_each_bag_slot(callback, ctx);
 }
 
+::QolResult for_each_space_slot(int32_t space_id, BagSlotFn callback, void* ctx) {
+    const auto* port = item_port();
+    if (!contracts::qol_item_port_bag_space_size_valid(port) ||
+        port->read.for_each_space_slot == nullptr) {
+        return contracts::error(kQolErrNotReady, "not ready", 9);
+    }
+    return port->read.for_each_space_slot(space_id, callback, ctx);
+}
+
 void refresh_item_count(InventoryItemRef* ref) {
     if (ref == nullptr || ref->item.slot == 0 || ref->item.generation == 0) return;
     const auto* api = facts();

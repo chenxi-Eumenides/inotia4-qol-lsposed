@@ -22,7 +22,7 @@
 |---|---|
 | `slot` | 存档槽 `0..2`。配置按槽保存；切换存档不会把上一个槽的配置带到新槽。 |
 | 物品身份 | 出售时使用 `core.item` 的 `QolItemHandle {slot, generation}` 与 `QolActionRef {space_id, bag, slot}`；`autosell` 不定义新的物品编号。 |
-| 扫描范围 | 原版物理袋 `0..4`，以及 `inventory.bag_source` 注册的扩展袋源（`space_id>=2`）。任务袋 `5` 不处理。 |
+| 扫描范围 | 原版物理袋 `space=0` 的 `bag 0..4`、C18 原生追加袋 `space=1`，以及 `inventory.bag_source` 注册源 `space>=2`。任务袋 `5` 不处理。 |
 | 规则值 | 数值规则 `0` 表示关闭；`rarity`/`gemTier`/`gemRange` 的正整数 `v` 表示阈值 `v-1`，比较方向 `<=`；`backpackTier`/`badgeTier`/`diceTier` 的正整数 `v` 直接表示最大可售档位。 |
 
 物品句柄只在进程内有效，不能持久化；扫描和出售都要求句柄仍然有效，失效时静默跳过该物品。
@@ -39,9 +39,9 @@
 | `item.facts` | 3.6 | 读取物品分类、真实装备/宝石属性、禁售标记和物品视图。 |
 | `save.slot_data` | 1.0 | 按存档槽读写 `autosell` sidecar 配置。 |
 | `ui.state` | 1.2 | 判断背包页/对话框是否占用扫描。 |
-| `inventory.bag_source` | 1.2 | 枚举已注册扩展袋源并读取其中的物品。 |
+| `inventory.bag_source` | 1.2（可选） | 枚举已注册扩展袋源并读取其中的物品；缺失时只跳过注册源。 |
 
-可选依赖：`http.registry` 1.1（HTTP 路由元数据）、`ui_panels` 1.3（打开/关闭游戏内面板）。缺失可选依赖不影响物理袋扫描；任一必需能力不可用时，Host 会把插件判为 `blocked`。`extension_bag` 不是本插件的依赖；扩展袋数据经 `core.item` 的 `inventory.bag_source` 访问，存储仍归扩展袋 owner。
+可选依赖：`inventory.bag_source` 1.2、`http.registry` 1.1（HTTP 路由元数据）、`ui_panels` 1.3（打开/关闭游戏内面板）。缺失可选依赖不影响原版物理袋和 C18 追加袋扫描；任一必需能力不可用时，Host 会把插件判为 `blocked`。`extension_bag` 不是本插件的依赖；扩展袋数据经 `core.item` 的 `inventory.bag_source` 访问，存储仍归扩展袋 owner。
 
 | Feature | 默认 | 类型 | 行为 |
 |---|---|---|---|
@@ -101,7 +101,7 @@ HTTP 与游戏内面板共用同一条配置提交路径，写成功后的运行
 | 规则 | 语义 |
 |---|---|
 | 装备组 / 宝石组 / 背包徽章骰子组之间 | **OR**：任一组命中即出售。 |
-| 硬保护 | 已强化或已镶嵌的物品永不出售，优先于所有规则。 |
+| 硬保护 | 已强化或已镶嵌的**真实装备**永不出售，优先于所有规则；非装备的原始强化/孔位字段不参与保护。 |
 | `enabled=false` | 所有规则均不生效。 |
 | 规则全为 0 | 不出售。 |
 | 未知字段值 | 需要该字段的规则不命中（fail-closed），不会按 0 猜测。 |
@@ -165,9 +165,16 @@ POST 字段：
 
 扫描期间单件出售失败不会中断整轮扫描；`stale`、`empty_slot`、`no_item_handle` 视为物品已变化并静默跳过，其他失败计入 `failed` 并记录 WARN。
 
+## 故障排查
+
+- **面板/背包打开时不会扫描**：`inventory` 面板或自动出售面板 active 时，`ui_busy`/panel gate 会暂停本轮；关闭后最多等待 20 帧。
+- **`lastScanFrame` 不更新**：看 INFO 日志 `scan gate ... reason=...`，按 `global_disabled`、`session_inactive`、`config_disabled`、`not_in_world`、`game_state_blocked`、`ui_busy` 逐项排除。
+- **`lastScanFrame` 更新但 `sold=0`**：确认目标 tier 不是 `0`（0=关）；查看 WARN `scan item view skipped reason=...` 和 `sell failed ... status=...`。
+- **扩展袋**：C18 原生追加袋是 `space=1`；`inventory.bag_source` 注册源是 `space>=2`。任务袋 `space=0 bag=5` 不扫描。
+
 ## 线程与不变量
 
-- 扫描只在游戏主线程执行，由帧调度器每 60 帧触发一次；扫描不持有插件私有锁跨插件调用，也不主动保存存档（`plugins/autosell/scan.cpp`、`plugins/autosell/scan.h`）。
+- 扫描只在游戏主线程执行，由帧调度器每 20 帧触发一次；扫描不持有插件私有锁跨插件调用，也不主动保存存档（`plugins/autosell/scan.cpp`、`plugins/autosell/scan.h`）。
 - 扫描覆盖原版物理袋 `0..4` 和 `inventory.bag_source` 注册源；注册源通过 `source_count`/`source_at` 枚举，未注册任何源时物理袋照常扫描。
 - 配置读写允许来自 HTTP/JVM 线程和游戏主线程；运行时配置快照是线程安全的。面板与 HTTP 的写入共用同一条提交路径。
 - 只有活动且已加载的存档会话才能提交配置；`save_exit` 后写入会被拒绝，直到下一次成功加载。

@@ -214,14 +214,14 @@ static void test_hard_protection_enhanced_or_filled() {
     enhanced.socket_filled = 2;
     CHECK(!should_sell(enhanced, cfg));
 
-    // 硬保护无条件生效：特殊类型命中（骰子）也被拦下。
+    // 非装备（骰子）的原始强化/镶嵌位不触发装备硬保护，规则命中仍出售。
     ItemView special;
     special.dice_tier = 1;
     special.enhance_level = 2;
-    CHECK(!should_sell(special, cfg));
+    CHECK(should_sell(special, cfg));
     special.enhance_level = 0;
     special.socket_filled = 3;
-    CHECK(!should_sell(special, cfg));
+    CHECK(should_sell(special, cfg));
 
     // 对照组：两字段为 0 时不触发硬保护，规则照常命中出售。
     ItemView plain = equip_item();

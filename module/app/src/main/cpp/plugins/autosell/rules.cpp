@@ -96,7 +96,7 @@ DecisionReason should_sell_with_reason(const ItemView& item, const Config& cfg) 
     // 硬保护：已强化或已镶嵌的装备永不出售。
     // 已强化 = I_ENCHANT bits6-10 > 0；已镶嵌 = I_SOCKET bits0-3 > 0。
     // 无条件、不受配置影响，在一切规则判定（含宝石/特殊类型）之前先行排除。
-    if (item.enhance_level > 0 || item.socket_filled > 0) {
+    if (item.is_equip && (item.enhance_level > 0 || item.socket_filled > 0)) {
         return DecisionReason::kHardProtected;
     }
 

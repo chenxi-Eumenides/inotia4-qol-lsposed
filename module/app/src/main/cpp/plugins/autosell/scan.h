@@ -14,7 +14,7 @@
 // inventory_hooks 提供。
 
 // 扫描间隔（帧）：作为 scheduler_add 的 interval，由统一帧调度器按帧节流。
-constexpr int kAutoSellScanIntervalFrames = 60;
+constexpr int kAutoSellScanIntervalFrames = 20;
 
 // 更新存档配置运行时快照；
 // 仅当存档总开关 `enabled` 发生切换时才同步扫描任务（关→删除、开→按条件注册），规则/

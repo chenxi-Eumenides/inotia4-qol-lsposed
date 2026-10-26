@@ -132,6 +132,7 @@ QolResult inventory_item_ref_at(int32_t, int32_t, InventoryItemRef* out) {
     return qol::contracts::ok();
 }
 QolResult for_each_bag_slot(BagSlotFn, void*) { return qol::contracts::ok(); }
+QolResult for_each_space_slot(int32_t, BagSlotFn, void*) { return qol::contracts::ok(); }
 void refresh_item_count(InventoryItemRef*) {}
 
 }  // namespace qol::features::autosell::read_only

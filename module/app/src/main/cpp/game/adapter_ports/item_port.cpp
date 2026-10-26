@@ -75,7 +75,7 @@ QolResult read_real_equip(contracts::QolItemHandle handle, int32_t* out) {
     if (item == nullptr || out == nullptr) {
         return error_result(kQolErrInvalidArgument, "invalid argument");
     }
-    if (!item_equip_primitives_ready()) return not_ready();
+    if (!item_is_real_equip_resolved()) return not_ready();
     *out = item_is_real_equip(item) ? 1 : 0;
     return contracts::ok();
 }

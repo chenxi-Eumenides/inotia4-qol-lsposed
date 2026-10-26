@@ -19,6 +19,7 @@
 #include "contracts/slot_data.h"
 #include "contracts/ui.h"
 #include "contracts/game_ports/inventory_extras_port.h"
+#include "contracts/game_ports/item_port.h"
 #include "infra/panels.h"
 #include "plugins/autosell/ui/panel.h"
 
@@ -170,18 +171,18 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 7 && d.optional_count == 2 && d.provides_count == 0);
+    CHECK(d.requires_count == 6 && d.optional_count == 3 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
     CHECK(std::strcmp(d.requires[2].id, "world.facts") == 0);
     CHECK(std::strcmp(d.requires[3].id, "item.facts") == 0);
     CHECK(std::strcmp(d.requires[4].id, "save.slot_data") == 0);
     CHECK(std::strcmp(d.requires[5].id, qol::contracts::kUiStateCapabilityId) == 0);
-    CHECK(std::strcmp(d.requires[6].id, qol::contracts::kBagSourceCapabilityId) == 0);
-    CHECK(d.requires[6].range.major == qol::contracts::kBagSourceVersion.major);
-    CHECK(d.requires[6].range.min_minor == qol::contracts::kBagSourceVersion.minor);
     CHECK(std::strcmp(d.optional_requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
     CHECK(std::strcmp(d.optional_requires[1].id, qol::contracts::kUiPanelsCapabilityId) == 0);
+    CHECK(std::strcmp(d.optional_requires[2].id, qol::contracts::kBagSourceCapabilityId) == 0);
+    CHECK(d.optional_requires[2].range.major == qol::contracts::kBagSourceVersion.major);
+    CHECK(d.optional_requires[2].range.min_minor == qol::contracts::kBagSourceVersion.minor);
     CHECK(d.http_query_count == 0 && d.http_queries == nullptr);
     CHECK(d.http_endpoint_count == 0 && d.http_endpoints == nullptr);
     CHECK(d.http_route_metadata_count == 2 && d.http_route_metadata != nullptr);
@@ -194,8 +195,9 @@ void test_manifest() {
     CHECK(d.http_route_metadata[1].op_required == 0 && d.http_route_metadata[1].lease_required == 1);
     CHECK(d.resources_count == 1);
     CHECK(d.on_resource_ready == nullptr);  // kCallPatch 无 backup
-    CHECK(d.port_count == 1 &&
-          d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS);
+    CHECK(d.port_count == 2 &&
+          d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS &&
+          d.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
 
     const qol::contracts::ResourceClaim& patch = d.resources[0];
     CHECK(std::strcmp(patch.id, "patch:SCENE_DRAW_EQUIP+0x1cc") == 0);
@@ -214,7 +216,9 @@ void test_provider_registration() {
     qol::infra::panels_reset_for_test();
     const qol::contracts::QolHostSdk sdk = fake_sdk();
     static const qol::contracts::QolInventoryExtrasPort inventory_port{{1, 0}, {}};
-    const void* ports[] = {&inventory_port};
+    static const qol::contracts::QolItemPort item_port{
+        qol::contracts::kQolPortItemVersion, sizeof(qol::contracts::QolItemPort), {}};
+    const void* ports[] = {&inventory_port, &item_port};
     qol::contracts::PluginContext ctx{
         sizeof(qol::contracts::PluginContext),
         qol::contracts::kHostSdkMajor,
@@ -223,13 +227,17 @@ void test_provider_registration() {
         nullptr,
         "autosell",
         ports,
-        1,
+        2,
     };
     ctx.owner_token = 1;
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
 
+    g_fail_require_id = qol::contracts::kBagSourceCapabilityId;
     CHECK(d.install(ctx) == 0);
+    g_fail_require_id = nullptr;
+    CHECK(qol::features::autosell::inventory_extras() == &inventory_port);
+    CHECK(qol::features::autosell::item_port() == &item_port);
     const qol::contracts::PanelProviderSpec* provider =
         qol::infra::panels_find_provider("autosell");
     CHECK(provider != nullptr);
@@ -269,13 +277,16 @@ void test_provider_registration() {
     CHECK(qol::features::autosell::world_facts() == nullptr);
     CHECK(qol::features::autosell::item_facts() == nullptr);
     CHECK(qol::features::autosell::ui_state() == nullptr);
+    CHECK(qol::features::autosell::item_port() == nullptr);
 }
 
 void test_enable_capability_failure_keeps_gate_closed() {
     qol::infra::panels_reset_for_test();
     const qol::contracts::QolHostSdk sdk = fake_sdk();
     static const qol::contracts::QolInventoryExtrasPort inventory_port{{1, 0}, {}};
-    const void* ports[] = {&inventory_port};
+    static const qol::contracts::QolItemPort item_port{
+        qol::contracts::kQolPortItemVersion, sizeof(qol::contracts::QolItemPort), {}};
+    const void* ports[] = {&inventory_port, &item_port};
     qol::contracts::PluginContext ctx{
         sizeof(qol::contracts::PluginContext),
         qol::contracts::kHostSdkMajor,
@@ -284,7 +295,7 @@ void test_enable_capability_failure_keeps_gate_closed() {
         nullptr,
         "autosell",
         ports,
-        1,
+        2,
     };
     ctx.owner_token = 2;
     const auto& d = qol::features::autosell::plugin_descriptor();

@@ -16,7 +16,7 @@
 | Host 只读适配 | `plugins/autosell/read_only.{h,cpp}` | 转调 `item.facts`、Game Host、inventory extras port；不向业务层暴露游戏指针。 |
 | 物品视图 | `plugins/autosell/view.{h,cpp}` | 物品引用 → 规则视图；宝石质量由调用方注入 provider。 |
 | 扫描门禁 | `plugins/autosell/scan_gates.{h,cpp}` | 纯门禁顺序，依赖以函数指针注入，可 host 单测。 |
-| 扫描与任务 | `plugins/autosell/scan.{h,cpp}` | 60 帧 tick、扫描体、轮次取消、任务同步、save 事件回调。 |
+| 扫描与任务 | `plugins/autosell/scan.{h,cpp}` | 20 帧 tick、扫描体、轮次取消、任务同步、save 事件回调。 |
 | 装配 | `plugins/autosell/plugin.{h,cpp}`、`routes.inc` | descriptor、能力获取、资源声明、feature、面板 provider、生命周期。 |
 | 游戏内 UI | `plugins/autosell/ui/panel_*.cpp`、`ui/panel.h` | 入口锚定、几何、控件、事件草稿、provider；共享声明在 `panel_internal.h`。 |
 | 状态 JSON | `plugins/autosell/status_json.{h,cpp}` | 只负责将 `StatusSnapshot` 组装为固定 JSON。 |
@@ -31,16 +31,16 @@
 | 项目 | 当前值 |
 |---|---|
 | id / version | `autosell` / `0.1.0`（`plugins/autosell/plugin.cpp`） |
-| required capabilities | 7 项；id/版本/用途见对外契约的“能力与开关”。 |
-| optional capabilities | 2 项：`http.registry`、`ui_panels`。 |
+| required capabilities | 6 项；id/版本/用途见对外契约的“能力与开关”。 |
+| optional capabilities | 3 项：`inventory.bag_source`、`http.registry`、`ui_panels`。 |
 | provides | 0 项。 |
 | resources | 1 项：背包入口 call patch。 |
-| ports | 1 项：`QOL_PORT_INVENTORY_EXTRAS` 1.1，用于原版物理袋遍历（`contracts/game_ports/ports.h:59`）。 |
+| ports | 2 项：`QOL_PORT_INVENTORY_EXTRAS` 1.1（原版物理袋遍历）、`QOL_PORT_ITEM` 3.8（`for_each_space_slot` 扫描 `space=1` C18 追加袋）。 |
 | features | 1 项：`autosell.auto_sell`，默认 `0`，`kGameplay`/`kToggle`，`display_priority=-1`，callback 为 no-op。 |
 | HTTP route metadata | 2 条：GET/POST `/api/feature/autosell/config`，owner `autosell`，`op_gated=false`，`lease_required=true`。 |
 | JNI | descriptor `jni_count=0`；实际存在 4 个 JNI 导出（见“已知限制与风险”）。 |
 
-required capabilities 在 `plugin.cpp` 声明；其中 `inventory.bag_source` 1.2 只用于扩展袋源枚举，EB 关闭时 `source_count=0`，物理袋仍扫描。descriptor 定义见 `plugins/autosell/plugin.cpp`；路由元数据见 `plugins/autosell/routes.inc`。
+required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是可选能力，只用于注册源枚举，缺失时原版袋与 C18 追加袋仍扫描。descriptor 定义见 `plugins/autosell/plugin.cpp`；路由元数据见 `plugins/autosell/routes.inc`。
 
 ### 资源 claim
 
@@ -61,7 +61,7 @@ required capabilities 在 `plugin.cpp` 声明；其中 `inventory.bag_source` 1.
 
 | 入口 | 行为 |
 |---|---|
-| `plugin_install` | 保存 SDK/Game Host 指针；要求 1 个 port；获取 `world.facts`/`item.facts`/`save.slot_data`/`ui.state`；注册 UI state 面板；注册 save-enter/save-exit；`apply_gate(true)`；注册面板 provider。任一步失败回滚指针并返回 1（`plugin.cpp`）。 |
+| `plugin_install` | 保存 SDK/Game Host 指针；要求 2 个 port（inventory extras + item）；获取 `world.facts`/`item.facts`/`save.slot_data`/`ui.state`；注册 UI state 面板；注册 save-enter/save-exit；`apply_gate(true)`；注册面板 provider。任一步失败回滚指针并返回 1（`plugin.cpp`）。 |
 | `plugin_on_enabled` | 重新获取运行时能力、注册 UI state、`apply_gate(true)`；失败保持门禁关闭（`plugin.cpp`）。 |
 | `plugin_on_disabled` | 注销 slot-data participant、注销 UI state、清空能力指针、`apply_gate(false)`（`plugin.cpp`）。 |
 | `plugin_deactivate` | 注销 slot-data、撤销 `ui_panels` owner、注销 save 回调、清 Game Host/port、`apply_gate(false)`、注销面板 provider（`plugin.cpp`）。 |
@@ -73,14 +73,14 @@ required capabilities 在 `plugin.cpp` 声明；其中 `inventory.bag_source` 1.
 
 ### 扫描 tick、门禁与取消
 
-- `infra::scheduler` 以 `kRenderPre`、间隔 60 帧注册 `autosell_tick`（`scan.h`、`scan.cpp`）。
+- `infra::scheduler` 以 `kRenderPre`、间隔 20 帧注册 `autosell_tick`（`scan.h`、`scan.cpp`）。
 - tick 入口先读取 `g_scan_cancel_epoch` 并构造 `ScanRound`；随后按顺序检查：feature 全局开启、slot-data session 活跃、存档配置 `enabled`、纯门禁（`scan.cpp`）。
 - 纯门禁在 `scan_gates.cpp:18-52`：世界状态、游戏状态、自动出售面板 active、UI busy；`scan.cpp` 将 `read_only`/`panels.active`/`ui_busy` 适配为 `ScanGateDeps`。
 - `ui_busy()` 只把 `kPanel`/`kDialog` 且 id 为 `inventory` 的层视为占用；其他 UI 不阻塞扫描（`scan.cpp`）。
 - `remove_task_if_any()` 先递增取消纪元，再在 `g_task_mtx` 内移除任务；扫描在每个槽和每次出售前检查纪元，已进入 `inventory.action.sell` 的单笔事务允许完成（`scan.cpp`）。
 - `sync_task()` 在 `g_task_mtx` 内二次复核 global/session/config，避免检查与注册之间的迟到窗口；重复调用不会重复注册（`scan.cpp`）。
 - `save_enter` 校验 slot 后同步任务；`save_exit` 调 `autosell_store_reject_session()` 并移除任务（`scan.cpp`）。
-- 注册源扫描：`scan_body` 在物理袋后调用 `scan_registered_sources`；通过 `inventory.bag_source` 1.2 的 `source_count/source_at` 枚举注册源，对每个 `source->for_each_item` 回调里的 `space_id>=2` 物品执行 `refresh_item_count` + `process_ref`。每个 source 失败按 `(space_id, code)` 变化限速 WARN；`kQolErrNotReady` 静默。取消纪元同样在回调内检查。
+- 注册源扫描：`scan_body` 在物理袋后先调用 `scan_variant_bags`（`space=1` C18 原生追加袋，经 `QOL_PORT_ITEM.for_each_space_slot`），再调用 `scan_registered_sources`（`inventory.bag_source` 1.2 的 `source_count/source_at`，`space>=2`）。每个引用校验句柄/category、`refresh_item_count` 后进入 `process_ref`；每类遍历错误按 code 变化限速 WARN，`kQolErrNotReady` 静默。取消纪元同样在回调内检查。
 
 ### 配置快照与计数
 
@@ -110,10 +110,10 @@ required capabilities 在 `plugin.cpp` 声明；其中 `inventory.bag_source` 1.
 ### 物品视图与宝石质量
 
 - `autosell_build_view` 通过 `item.facts.is_real_equip` 填 `is_equip`，不再使用 `item.facts.view.equip`（后者是“计数未编码/不可堆叠”，不是真实装备）。`read_only::item_is_real_equip()` 直接调用 `ItemFactsApi.is_real_equip`。
-- 读取 `item.facts.view`，缺 `HasRarity` 时 rarity 记 `-1`；缺必需宝石字段时返回 `kMissingRequiredFields`；`is_jewel_category` 判定宝石，category 28..32 映射档位 0..4。
-- 分类字段：`category`、`is_backpack`（category 1..4 + Game Host 谓词）、`badge_rank`（42..47→1、48→2、49/928..933→3、50→0）、`dice_tier`（52..56→1..5 + Game Host 谓词）。
+- 读取 `item.facts.view`，缺 `HasRarity` 时 rarity 记 `-1`；先按 category 判定宝石/背包/徽章/骰子，已知非装备不再查询真实装备。宝石 category 28..32 才要求 Jewel 字段；谓词不可用时按 category 28..32 回退。背包 1..4、骰子 52..56 直接按 category 识别，避免谓词未接线导致整类不卖。
+- 分类字段：`category`、`is_backpack`、`badge_rank`（42..47→1、48→2、50→3、49/928..933→4）、`dice_tier`（52..56→1..5）。
 - 宝石质量通过 `AttributeQualityApiProvider` 注入；provider 为空、struct_size 不合法、查询失败、结果不完整或状态非 Ok 时保持 `jewel_percentile=-1`，`gemRange` 规则不命中（fail-closed）。
-- 硬保护在规则入口先于一切规则执行：`enhance_level > 0` 或 `socket_filled > 0` 直接返回 `kHardProtected`（`rules.cpp`）。
+- 硬保护在规则入口先于一切规则执行，但只对真实装备：`is_equip && (enhance_level > 0 || socket_filled > 0)` 才返回 `kHardProtected`；`enhance_level` 由 view 从 `facts.enchant_level` 复制。
 
 ### 编解码与状态 JSON
 
@@ -148,10 +148,11 @@ HTTP POST / 游戏内面板
 ### 扫描
 
 ```text
-scheduler (每 60 帧)
+scheduler (每 20 帧)
   → autosell_tick: global/session/config + scan_gates
   → for_each_bag_slot (原版物理袋 0..4)
-  → scan_registered_sources (inventory.bag_source 1.2 source_count/source_at → for_each_item)
+  → scan_variant_bags (QOL_PORT_ITEM.for_each_space_slot space=1)
+  → scan_registered_sources (inventory.bag_source 1.2 source_count/source_at → for_each_item, space>=2)
   → refresh_item_count
   → autosell_build_view (item.facts + 注入的 attribute.quality)
   → should_sell_with_reason
@@ -187,11 +188,11 @@ save_exit → reject session → remove task
 
 ## 已知限制与风险
 
-1. **扩展袋依赖注册源**：扩展袋通过 `inventory.bag_source` 1.2 的 `source_count/source_at` 枚举；没有注册源（例如 EB 关闭）时只扫描物理袋。注册源回调失败只跳过该源，不影响物理袋。
+1. **扩展袋分三类空间**：原版 `space=0 bag 0..4`；C18 原生追加袋 `space=1`；`inventory.bag_source` 注册源 `space>=2`。`inventory.bag_source` 是可选能力，缺失时只跳过注册源；注册源回调失败只跳过该源，不影响前两类。任务袋 `space=0 bag=5` 始终不扫描。
 2. **AS-13**：feature 关闭时不注销面板 provider；`autosell_provider_block_reason` 恒返回 `nullptr`。provider 没有枚举接口，当前依靠 `provider_open` 门禁拒绝。
 3. **AS-16**：descriptor `jni_count=0`，但 bridge 保留 4 个 JNI 导出；JNI 三向绑定表尚未落地。
-4. **AS-15 测试缺口**：已补 scan gates/task 的 host 覆盖；仍无真实 panel enter/process/event、JNI/Kotlin、HTTP 集成用例，也没有注册源扫描的独立 host 用例。
-5. **真机覆盖**：本轮未做真机验证。上一轮 C18 v520 的入口/面板证据不覆盖本次 real-equip、tier、注册源扫描和 8 行 UI 改动。
+4. **AS-15 测试缺口**：已补 scan gates/task 的 host 覆盖；仍无真实 panel enter/process/event、JNI/Kotlin、HTTP 集成用例，也没有 `space=1`/注册源扫描的独立 host 用例。
+5. **真机覆盖**：本轮未做真机验证。上一轮 C18 v520 的入口/面板证据不覆盖本次 real-equip、tier、`space=1`/注册源扫描和 8 行 UI 改动。
 6. **业务互斥量保留**：`g_config_mtx`、`g_store_mtx`、`g_config_commit_mtx`、`g_task_mtx`、`g_entry_mtx` 仍存在。配置提交允许来自 HTTP/JVM 线程，因此没有按“全部业务状态只在主线程”模型改成命令队列；AS-02/06/07 已修掉已知重入/持锁跨插件调用路径。
 7. **装配注释漂移**：`plugin.cpp` 的资源注释仍写“2 条常驻”，descriptor 实际为 1 条资源；以 descriptor 为准。
 8. **面板关闭重复提交**：返回按钮与 provider close 都会调用 `autosell_commit_draft`；第二次提交在配置未变化时无写入，仅为一次幂等提交和日志。
@@ -208,9 +209,9 @@ save_exit → reject session → remove task
 | `autosell_view_diagnostic_tests` | 物品视图字段、真实装备判定、rarity 缺失、宝石档位、背包/徽章/骰子分类、注入的 quality provider 成功/失败/畸形 API。 |
 | `autosell_store_tests` | sidecar JSON 编解码、tier 字段、旧 `special` 回退、字段钳制、版本回退。 |
 | `autosell_slot_data_tests` | slot-data load/capture/complete、revision/dirty、无 session 拒绝、重试路径。 |
-| `autosell_plugin_tests` | descriptor/资源/feature、install/deactivate 对面板 provider 的登记/反登记；扫描/UI 以桩替代。 |
+| `autosell_plugin_tests` | descriptor/资源/feature、required/optional 能力、2 个 port、install/deactivate 对面板 provider 的登记/反登记；扫描/UI 以桩替代。 |
 | `autosell_scan_gates_tests` | 纯门禁顺序、短路、面板查询失败软处理、reason 名称。 |
-| `autosell_scan_task_tests` | global/session/config 门控、scheduler add/remove 去重、重复 sync 幂等。 |
+| `autosell_scan_task_tests` | global/session/config 门控、scheduler add/remove 去重、重复 sync 幂等；`for_each_space_slot` 以桩替代。 |
 
 以上 target 的源文件为 `tests/test_autosell_*.cpp`，CMake 注册见 `tests/CMakeLists.txt`。
 
@@ -218,7 +219,7 @@ save_exit → reject session → remove task
 
 - Host 全量 `155/155` 通过（本轮改动后）。
 - `check_arch.py`：layers/offsets/jni/resources 全部通过。
-- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610261610_7d0b39c52a01.apk`，sha256 `7d0b39c52a017d8c5e392ff2ec2fcb34a7c548856fddcfe2a60b6f094a0c16df`。
+- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610261708_9917df9026c0.apk`，sha256 `9917df9026c06c1043ed69fbc6b6e093df2ed140283bfbefd5b20aa77f917788`。
 - 本轮未做真机验证；入口/面板/注册源扫描/规则实际行为待设备验收。
 
 ## 已删除旧结构
@@ -232,7 +233,7 @@ save_exit → reject session → remove task
 | `autosell_status_json` 在 `config.cpp` | 移到 `status_json.cpp`；`config.cpp` 只提供快照。 |
 | `special_mask`/`SpecialType` | 删除；改为 `backpack_tier`/`badge_tier`/`dice_tier`，旧 `special` 仅作 JSON 兼容。 |
 | `item.facts.view.equip` 作为装备判定 | 改为 `item.facts.is_real_equip`；`view.equip` 仅表示“计数未编码/不可堆叠”。 |
-| EB 逻辑袋扫描与 `module_view_installed` 门禁 | 删除；改为 `inventory.bag_source` 1.2 注册源枚举。 |
+| EB 逻辑袋扫描与 `module_view_installed` 门禁 | 删除；改为 `space=1` C18 原生追加袋 + `inventory.bag_source` 注册源 `space>=2`。 |
 | `CandidateDiagnostics`/fingerprint/`emit_candidate_diagnostic` | 删除；EB 逻辑袋移除后无调用者。 |
 | 特殊类型 chips、宝石分组框 | 删除；面板改为 8 行，右列 5 行与宝石同列。 |
 

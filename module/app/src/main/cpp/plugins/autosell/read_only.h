@@ -30,6 +30,7 @@ bool game_state_gate(int32_t* out);
 
 ::QolResult inventory_item_ref_at(int32_t bag, int32_t slot, InventoryItemRef* out);
 ::QolResult for_each_bag_slot(BagSlotFn callback, void* ctx);
+::QolResult for_each_space_slot(int32_t space_id, BagSlotFn callback, void* ctx);
 
 // 物品数量只经 item_count facade 读取；失败时保留库存引用原有数量，保持扫描的
 // fail-soft 语义，出售事务仍会在 owner 内重新读取并复核数量。

@@ -8,6 +8,7 @@ namespace {
 
 // 宝石 category 起档（IsJewel 闭区间 28..32；档位 = category - 28）。
 constexpr int kJewelCategoryFirst = 28;
+constexpr int kJewelCategoryLast = 32;
 constexpr int kBackpackCategoryFirst = 1;
 constexpr int kBackpackCategoryLast = 4;
 constexpr int kBadgeRankOneFirst = 42;
@@ -43,27 +44,28 @@ AutosellViewBuildReason autosell_build_view(
         diagnostics->rarity = facts.rarity;
         diagnostics->equip = facts.equip;
     }
-    if ((facts.fields & qol::contracts::kQolItemInventoryHasJewelValue) == 0 ||
-        (facts.fields & qol::contracts::kQolItemInventoryHasJewelAttributeType) == 0)
-        return AutosellViewBuildReason::kMissingRequiredFields;
-    int32_t real_equip = 0;
-    if (!qol::features::autosell::read_only::item_is_real_equip(ref.item, &real_equip))
-        return AutosellViewBuildReason::kFactsUnavailable;
-    out->is_equip = real_equip != 0;
     out->rarity = (facts.fields & qol::contracts::kQolItemInventoryHasRarity) != 0
                       ? facts.rarity
                       : -1;
     out->enhance_remaining = facts.enchant_remaining;
+    out->enhance_level = facts.enchant_level;
     out->socket_filled = facts.socket_filled;
     out->socket_total = facts.socket_total;
 
     int32_t value = 0;
 
-    if (!qol::features::autosell::read_only::item_is_jewel(category, &value)) {
-        return AutosellViewBuildReason::kJewelPredicateUnavailable;
+    const bool jewel_predicate_available =
+        qol::features::autosell::read_only::item_is_jewel(category, &value);
+    if (!jewel_predicate_available) {
+        value = category >= kJewelCategoryFirst && category <= kJewelCategoryLast ? 1 : 0;
     }
     out->is_jewel = value != 0;
     if (diagnostics != nullptr) diagnostics->jewel = value;
+    if (category >= kJewelCategoryFirst && category <= kJewelCategoryLast &&
+        ((facts.fields & qol::contracts::kQolItemInventoryHasJewelValue) == 0 ||
+         (facts.fields & qol::contracts::kQolItemInventoryHasJewelAttributeType) == 0)) {
+        return AutosellViewBuildReason::kMissingRequiredFields;
+    }
     if (out->is_jewel) {
         // M-4：IsJewel 命中却 category < 28（闭区间 28..32）属异常，跳过，
         // 避免负 tier 落入宝石阈值命中区间。
@@ -85,9 +87,7 @@ AutosellViewBuildReason autosell_build_view(
         }
     }
 
-    out->is_backpack = category >= kBackpackCategoryFirst && category <= kBackpackCategoryLast &&
-                       qol::features::autosell::read_only::item_is_backpack(category, &value) &&
-                       value != 0;
+    out->is_backpack = category >= kBackpackCategoryFirst && category <= kBackpackCategoryLast;
     if (category >= kBadgeRankOneFirst && category <= kBadgeRankOneLast) {
         out->badge_rank = 1;
     } else if (category == kBlessedBadgeCategory) {
@@ -98,9 +98,17 @@ AutosellViewBuildReason autosell_build_view(
                (category >= kClassHeroBadgeFirst && category <= kClassHeroBadgeLast)) {
         out->badge_rank = 4;
     }
-    if (category >= kDiceCategoryFirst && category <= kDiceCategoryLast &&
-        qol::features::autosell::read_only::item_is_dice(category, &value) && value != 0) {
+    if (category >= kDiceCategoryFirst && category <= kDiceCategoryLast) {
         out->dice_tier = category - 51;
+    }
+
+    const bool known_non_equip = out->is_jewel || out->is_backpack || out->badge_rank > 0 ||
+                                 out->dice_tier > 0;
+    if (!known_non_equip) {
+        int32_t real_equip = 0;
+        if (!qol::features::autosell::read_only::item_is_real_equip(ref.item, &real_equip))
+            return AutosellViewBuildReason::kFactsUnavailable;
+        out->is_equip = real_equip != 0;
     }
     if (diagnostics != nullptr) {
         diagnostics->is_backpack = out->is_backpack;

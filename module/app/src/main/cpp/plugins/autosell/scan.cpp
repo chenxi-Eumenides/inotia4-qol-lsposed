@@ -18,6 +18,7 @@
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace {
 
@@ -34,11 +35,10 @@ int g_last_bag_traversal_error = 0;
 enum class InventoryActionState : int { kAvailable, kCapabilityUnavailable, kSellUnavailable };
 InventoryActionState g_inventory_action_state = InventoryActionState::kAvailable;
 std::atomic<int> g_last_blocked_gate{-1};
-std::atomic<bool> g_diagnostic_debug_enabled{false};
 std::unordered_map<int32_t, int32_t> g_last_bag_source_error_by_space{};
-
-bool diagnostic_debug_enabled();
-void update_diagnostic_debug_state();
+bool g_has_variant_scan_error = false;
+int g_last_variant_scan_error = 0;
+std::unordered_set<int> g_logged_view_reasons{};
 
 struct InventoryActionLookup {
     QolResult result = qol::contracts::error(kQolErrNotReady, "not ready", 9);
@@ -74,26 +74,11 @@ struct ScanStats {
 };
 
 void log_blocked_gate_once(int64_t frame, ScanGateReason reason) {
-    if (!diagnostic_debug_enabled()) return;
     const int code = static_cast<int>(reason);
     const int previous = g_last_blocked_gate.exchange(code, std::memory_order_relaxed);
     if (previous != code) {
-        AUTOSELL_LOG_DEBUG("scan gate frame=%lld result=blocked reason=%s",
-                           static_cast<long long>(frame), autosell_scan_gate_name(reason));
-    }
-}
-
-bool diagnostic_debug_enabled() {
-    const auto* sdk = qol::features::autosell::host_sdk();
-    return sdk != nullptr && sdk->log.debug_enabled != nullptr &&
-           sdk->log.debug_enabled() != 0;
-}
-
-void update_diagnostic_debug_state() {
-    const bool enabled = diagnostic_debug_enabled();
-    const bool previous = g_diagnostic_debug_enabled.exchange(enabled, std::memory_order_relaxed);
-    if (enabled && !previous) {
-        g_last_blocked_gate.store(-1, std::memory_order_relaxed);
+        AUTOSELL_LOG_INFO("scan gate frame=%lld result=blocked reason=%s",
+                          static_cast<long long>(frame), autosell_scan_gate_name(reason));
     }
 }
 
@@ -183,7 +168,14 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
     autosell::ItemView view;
     const AutosellViewBuildReason view_reason = autosell_build_view(
         ref, &view, nullptr, &quality_api_provider);
-    if (view_reason != AutosellViewBuildReason::kBuilt) return;
+    if (view_reason != AutosellViewBuildReason::kBuilt) {
+        const int reason = static_cast<int>(view_reason);
+        if (g_logged_view_reasons.insert(reason).second) {
+            AUTOSELL_LOG_WARN("scan item view skipped reason=%d category=%d space_id=%d bag=%d slot=%d",
+                              reason, ref.category, ref.space_id, ref.bag, ref.slot);
+        }
+        return;
+    }
 
     const auto decision = autosell::should_sell_with_reason(view, cfg);
     if (decision != autosell::DecisionReason::kRuleMatch) return;
@@ -293,6 +285,44 @@ void scan_registered_sources(const autosell::Config& cfg, ScanStats* stats,
     }
 }
 
+struct VariantScanCtx {
+    const autosell::Config* cfg;
+    ScanStats* stats;
+    ScanRound* round;
+};
+
+int32_t scan_variant_item(const qol::contracts::QolInventoryItemRef* ref, void* user) {
+    auto* scan = static_cast<VariantScanCtx*>(user);
+    if (scan == nullptr || scan->cfg == nullptr || scan->stats == nullptr ||
+        scan->round == nullptr) {
+        return 0;
+    }
+    if (scan_round_cancelled(*scan->round)) return 1;
+    if (ref == nullptr || ref->space_id != qol::contracts::kQolBagSpaceVariant ||
+        ref->item.slot == 0 || ref->item.generation == 0 || ref->category <= 0) {
+        return 0;
+    }
+    qol::features::autosell::read_only::InventoryItemRef copy = *ref;
+    qol::features::autosell::read_only::refresh_item_count(&copy);
+    process_ref(copy, *scan->cfg, scan->stats, *scan->round);
+    return scan_round_cancelled(*scan->round) ? 1 : 0;
+}
+
+void scan_variant_bags(const autosell::Config& cfg, ScanStats* stats, ScanRound& round) {
+    if (stats == nullptr || scan_round_cancelled(round)) return;
+    VariantScanCtx scan{&cfg, stats, &round};
+    const QolResult result = qol::features::autosell::read_only::for_each_space_slot(
+        qol::contracts::kQolBagSpaceVariant, &scan_variant_item, &scan);
+    if (result.ok == kQolOk) {
+        g_has_variant_scan_error = false;
+    } else if (!g_has_variant_scan_error || g_last_variant_scan_error != result.code) {
+        g_has_variant_scan_error = true;
+        g_last_variant_scan_error = result.code;
+        AUTOSELL_LOG_WARN("scan variant bags failed space_id=%d code=%d",
+                          qol::contracts::kQolBagSpaceVariant, result.code);
+    }
+}
+
 void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
     if (scan_round_cancelled(round)) return;
     ScanStats stats;
@@ -317,6 +347,7 @@ void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
         AUTOSELL_LOG_WARN("scan bag traversal failed code=%d", traversal_result.code);
     }
 
+    if (!scan_round_cancelled(round)) scan_variant_bags(cfg, &stats, round);
     if (!scan_round_cancelled(round)) scan_registered_sources(cfg, &stats, round);
 
     autosell_note_scan(frame, stats.sold, stats.failed);
@@ -329,7 +360,6 @@ void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
 int32_t autosell_tick(int64_t frame, void*) {
     const uint64_t round_epoch = g_scan_cancel_epoch.load(std::memory_order_acquire);
     ScanRound round{round_epoch, frame};
-    update_diagnostic_debug_state();
     if (!g_global_enabled.load(std::memory_order_acquire)) {
         log_blocked_gate_once(frame, ScanGateReason::kGlobalDisabled);
         (void)scan_round_cancelled(round);

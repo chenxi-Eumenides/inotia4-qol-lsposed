@@ -29,7 +29,7 @@
 //
 // 过渡依赖：save_enter/save_exit 事件仅维护扫描活动态；配置持久化经 save.slot_data；
 // 出售副作用由 inventory_hooks 提供的 inventory.action 承载；扩展袋由 core.item 的
-// inventory.bag_source 枚举，未注册源时仍扫描原版物理袋。
+// inventory.bag_source 枚举；原版和 C18 原生袋由 item port 扫描。
 
 namespace qol::features::autosell {
 namespace {
@@ -50,16 +50,16 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kQolSlotDataVersion.major, contracts::kQolSlotDataVersion.minor}},
     {contracts::kUiStateCapabilityId,
      {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}},
-    {contracts::kBagSourceCapabilityId,
-     {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
 };
 
-// optional= http.registry + ui_panels
+// optional=3: http.registry + ui_panels + inventory.bag_source
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kHttpRegistryCapabilityId,
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
     {contracts::kUiPanelsCapabilityId,
      {contracts::kUiPanelsVersionMajor, contracts::kUiPanelsVersionMinor}},
+    {contracts::kBagSourceCapabilityId,
+     {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
 };
 
 #define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
@@ -72,7 +72,9 @@ const contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS,
      {contracts::kQolPortInventoryExtrasVersion.major,
-      contracts::kQolPortInventoryExtrasVersion.minor}},
+       contracts::kQolPortInventoryExtrasVersion.minor}},
+    {contracts::QolPortId::QOL_PORT_ITEM,
+     {contracts::kQolPortItemVersion.major, contracts::kQolPortItemVersion.minor}},
 };
 
 const contracts::QolHostSdk* g_sdk = nullptr;
@@ -97,6 +99,7 @@ void unregister_ui_state() {
     }
 }
 const contracts::QolInventoryExtrasPort* g_inventory_extras = nullptr;
+const contracts::QolItemPort* g_item_port = nullptr;
 const contracts::QolSlotDataApi* g_slot_data_api = nullptr;
 std::atomic<bool> g_gate{false};
 
@@ -209,17 +212,29 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_sdk = ctx.sdk;
     g_game = ctx.game;
     g_inventory_extras = nullptr;
+    g_item_port = nullptr;
     clear_runtime_capabilities();
-    if (ctx.ports == nullptr || ctx.port_count != 1 || ctx.ports[0] == nullptr) return 1;
+    if (ctx.ports == nullptr || ctx.port_count != 2 || ctx.ports[0] == nullptr ||
+        ctx.ports[1] == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        return 1;
+    }
     g_inventory_extras = static_cast<const contracts::QolInventoryExtrasPort*>(ctx.ports[0]);
+    g_item_port = static_cast<const contracts::QolItemPort*>(ctx.ports[1]);
     if (g_sdk == nullptr || g_sdk->panels.register_provider == nullptr ||
         g_sdk->panels.unregister_owner == nullptr) {
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_inventory_extras = nullptr;
+        g_item_port = nullptr;
         return 1;
     }
     if (!acquire_runtime_capabilities(ctx)) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_inventory_extras = nullptr;
+        g_item_port = nullptr;
         return 1;
     }
     register_ui_state();
@@ -230,7 +245,10 @@ int plugin_install(contracts::PluginContext& ctx) {
     // feature 为插件唯一开关：want_run 成立才会 install，故进入此路径即视为启用。
     apply_gate(true);
     // 自身初始化：资源由宿主声明式安装；本面板登记 provider 供 core.ui 容器打开。
-    if (g_sdk->panels.register_provider(&kPanelProvider).ok != kQolOk) return 1;
+    if (g_sdk->panels.register_provider(&kPanelProvider).ok != kQolOk) {
+        g_item_port = nullptr;
+        return 1;
+    }
     return 0;
 }
 
@@ -251,6 +269,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     autosell_unregister_save_callbacks();
     g_game = nullptr;
     g_inventory_extras = nullptr;
+    g_item_port = nullptr;
     apply_gate(false);
     if (g_sdk != nullptr && g_sdk->panels.unregister_owner != nullptr) {
         (void)g_sdk->panels.unregister_owner(kPluginId);
@@ -292,9 +311,9 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    7, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data + ui.state + inventory.bag_source
+    6, kRequires,  // requires=6: attribute.quality + inventory.action + world.facts + item.facts + save.slot_data + ui.state
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
-    kOptionalRequires,  // optional=http.registry + ui_panels
+    kOptionalRequires,  // optional=3: http.registry + ui_panels + inventory.bag_source
     0, nullptr,   // provides
     1, kResources,// resources（背包入口 call patch）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_autosell.cpp 保留）
@@ -305,7 +324,7 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     nullptr,      // on_resource_ready（无 backup 交接）
     kPorts,
-    1,
+    2,             // ports=2
     nullptr, 0,
     kFeatures, 1,
     nullptr, 0,
@@ -342,6 +361,10 @@ const contracts::UiStateApi* ui_state() {
 
 const contracts::QolInventoryExtrasPort* inventory_extras() {
     return g_inventory_extras;
+}
+
+const contracts::QolItemPort* item_port() {
+    return g_item_port;
 }
 
 }  // namespace qol::features::autosell
