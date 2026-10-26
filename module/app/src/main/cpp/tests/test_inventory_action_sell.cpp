@@ -75,6 +75,15 @@ QolResult fake_item_at(const QolBagRef* bag, int32_t slot, QolInventoryItemRef* 
     return ok();
 }
 
+QolResult fake_extension_item_at(int32_t bag, int32_t slot, QolInventoryItemRef* out) {
+    if (out == nullptr) return fail(kQolErrInvalidArgument, "out required");
+    if (g_force_empty || bag != g_item.bag || slot != g_item.slot) {
+        return fail(kQolErrNotFound, "slot empty");
+    }
+    *out = g_item;
+    return ok();
+}
+
 QolResult fake_no_sell(int32_t, int32_t* out) {
     if (out == nullptr) return fail(kQolErrInvalidArgument, "out required");
     *out = 0;
@@ -256,6 +265,7 @@ void reset_fixture() {
 
     g_source.version = kBagSourceVersion;
     g_source.space_id = kQolBagSpaceFirstRegistered;
+    g_source.item_at = &fake_extension_item_at;
     g_source.export_item = &fake_extension_export;
     g_source.import_item = &fake_extension_import;
     g_source.remove = &fake_extension_remove;

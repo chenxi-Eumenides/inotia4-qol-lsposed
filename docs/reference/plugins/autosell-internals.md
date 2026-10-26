@@ -104,7 +104,7 @@ required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是�
 - 入口几何：68×68；横向对齐扩展页签列中心，纵向对齐原版任务袋中心，整体下移 3px（`ui/panel_internal.h:26-31`、`ui/panel_entry.cpp:25-75`）。
 - 入口点击只通过 `ui_panels` 能力打开 `autosell` 面板；`panels.open` 只做注册表门禁，不建立 popup 栈（`ui/panel_ui.cpp`、`ui/panel_entry.cpp:17-23`）。
 - 面板 provider 注册在 `plugin.cpp`；PopupState 与面板栈由 `core.custom_ui` 的 PopupHost 托管。面板 enter 创建控件，process 绘制，event 处理 `0x17/0x18`（`ui/panel_events.cpp`）。
-- 草稿 `g_draft` 在 enter 时从运行时配置复制；返回/关闭时 `autosell_commit_draft` 调 `autosell_store_commit_config`。面板打开期间 `scan_gates` 的 `panels.active("autosell")` 会阻塞扫描（`ui/panel_events.cpp`、`scan.cpp`）。
+- 草稿 `g_draft` 在 enter 时从运行时配置复制；返回/关闭时 `autosell_commit_draft` 调 `autosell_store_commit_config`，随后调用 `autosell_reset_scan_timer()`：移除当前 scheduler 任务并按 20 帧重新注册，使下一次扫描从关闭时刻重新计时，避免面板关闭后抢在背包页 active 之前出售。面板打开期间 `scan_gates` 的 `panels.active("autosell")` 会阻塞扫描（`ui/panel_events.cpp`、`scan.cpp`）。
 - 面板实现已拆为 `panel_ui.cpp`（适配器/能力查找）、`panel_layout.cpp`（几何/命中）、`panel_entry.cpp`（入口/门控）、`panel_components.cpp`（控件/绘制）、`panel_events.cpp`（草稿/事件/provider）。
 - 面板规则为 8 行：左列 3 行装备规则；右列 5 行依次为宝石等级、宝石属性、骰子、背包、徽章。右列不再绘制独立宝石分组框，未启用文字使用灰色。
 
@@ -214,7 +214,7 @@ save_exit → reject session → remove task
 | `autosell_slot_data_tests` | slot-data load/capture/complete、revision/dirty、无 session 拒绝、重试路径。 |
 | `autosell_plugin_tests` | descriptor/资源/feature、required/optional 能力、2 个 port、install/deactivate 对面板 provider 的登记/反登记；扫描/UI 以桩替代。 |
 | `autosell_scan_gates_tests` | 纯门禁顺序、短路、面板查询失败软处理、reason 名称。 |
-| `autosell_scan_task_tests` | global/session/config 门控、scheduler add/remove 去重、重复 sync 幂等；`for_each_space_slot` 以桩替代。 |
+| `autosell_scan_task_tests` | global/session/config 门控、scheduler add/remove 去重、重复 sync 幂等、面板关闭重置 20 帧计时器；`for_each_space_slot` 以桩替代。 |
 | `inventory_action_sell_tests` | core.item 原生出售、provider 空间预读/export/remove/import、回滚与 stale 语义。 |
 
 以上 target 的源文件为 `tests/test_autosell_*.cpp`，CMake 注册见 `tests/CMakeLists.txt`。
@@ -223,8 +223,9 @@ save_exit → reject session → remove task
 
 - Host 全量 `155/155` 通过（本轮改动后）。
 - `check_arch.py`：layers/offsets/jni/resources 全部通过。
-- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610261921_ccddcac32d7e.apk`，sha256 `ccddcac32d7ec2c7faf69f5b1cac1266c0ea054cac2238e4f5ff7de9a946b7d3`。
-- C18 v520 真机（LSPatch 集成包）验证：`refs=45 view_skipped=0 no_rule=33 no_sell=0 sold=12 failed=0 stale=0`；原版背包/白装、EB 空间的白/蓝装、宝石、背包、英雄徽章均已出售；剩余为药水/卷轴/材料等未命中规则物品。当前存档无骰子样本，骰子分类仅由 host 测试覆盖。
+- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610262032_c5c30269fc3a.apk`，sha256 `c5c30269fc3ad1e3d62526b083b7cd339d9f88fc868153e17c857478b6e657c8`。
+- C18 v520 真机（`ccddcac3`，出售路径同源）：`refs=45 view_skipped=0 no_rule=33 no_sell=0 sold=12 failed=0 stale=0`；原版背包/白装、EB 空间的白/蓝装、宝石、背包、英雄徽章均已出售；剩余为药水/卷轴/材料等未命中规则物品。当前存档无骰子样本，骰子分类仅由 host 测试覆盖。
+- 面板关闭重置 20 帧计时器由 `autosell_scan_task_tests` 覆盖；未单独抓真机时序。
 
 ## 已删除旧结构
 

@@ -190,10 +190,15 @@ int main() {
 
     autosell_apply_config(enabled);
     CHECK(g_scheduler_adds == 2);
+    const int removes_before_reset = g_scheduler_removes;
+    const int adds_before_reset = g_scheduler_adds;
+    autosell_reset_scan_timer();
+    CHECK(g_scheduler_removes == removes_before_reset + 1);
+    CHECK(g_scheduler_adds == adds_before_reset + 1);
     autosell_set_global_enabled(false);
-    CHECK(g_scheduler_removes == 2);
+    CHECK(g_scheduler_removes == removes_before_reset + 2);
     autosell_set_global_enabled(false);
-    CHECK(g_scheduler_removes == 2);  // Repeated global disable does not remove twice.
+    CHECK(g_scheduler_removes == removes_before_reset + 2);  // Repeated global disable does not remove twice.
 
     std::printf("autosell_scan_task_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

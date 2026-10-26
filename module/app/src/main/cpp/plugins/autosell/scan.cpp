@@ -546,6 +546,12 @@ void autosell_apply_config(const autosell::Config& config) {
 
 void autosell_scan_sync_after_session_change() { sync_task(); }
 
+void autosell_reset_scan_timer() {
+    remove_task_if_any();
+    sync_task();
+    AUTOSELL_LOG_INFO("scan timer reset after panel close");
+}
+
 void autosell_set_global_enabled(bool enabled) {
     g_global_enabled.store(enabled, std::memory_order_release);
     AUTOSELL_LOG_INFO("global enabled=%d save_active=%d", enabled ? 1 : 0,

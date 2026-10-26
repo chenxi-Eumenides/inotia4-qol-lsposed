@@ -21,6 +21,10 @@ constexpr int kAutoSellScanIntervalFrames = 20;
 // 阈值改动不触碰任务生命周期。配置提交由 panel/JNI 共用 slot-data 路径；任务回调每次现取配置。
 void autosell_apply_config(const autosell::Config& config);
 
+// 面板保存退出后重置一次扫描计时器：移除当前 scheduler 任务并按 20 帧重新注册，
+// 使下一次扫描从关闭时刻重新计时，避免面板刚关闭时抢在背包页 active 之前出售。
+void autosell_reset_scan_timer();
+
 // 插件开关（descriptor feature `autosell.auto_sell`）：置位/清位「已武装」标志并同步扫描
 // 任务；幂等、内部加锁。
 //

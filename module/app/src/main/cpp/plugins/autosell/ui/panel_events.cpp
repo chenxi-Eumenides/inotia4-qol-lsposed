@@ -1,5 +1,7 @@
 #include "panel_internal.h"
 
+#include "../scan.h"
+
 namespace qol::features::autosell {
 
 // 面板是否激活：主线程写、JVM 线程读（关闭时判断是否需要关闭面板）。
@@ -99,6 +101,7 @@ void autosell_commit_draft() {
     const int slot = autosell_active_save_slot();
     const bool persisted = autosell_store_commit_config(g_draft);
     AUTOSELLUI_LOG("panel close applied config; persist slot=%d ok=%d", slot, persisted ? 1 : 0);
+    autosell_reset_scan_timer();
 }
 
 void autosell_save_before_back(void*) { autosell_commit_draft(); }
