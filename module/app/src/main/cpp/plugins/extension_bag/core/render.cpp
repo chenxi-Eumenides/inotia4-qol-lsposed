@@ -3,6 +3,7 @@
 #include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/core/projection.h"
+#include "plugins/extension_bag/core/item_display_hook.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/core/observation.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -341,6 +342,9 @@ void virtual_bag_draw_inven_item_wrapper() {
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kModule &&
         virtual_bag::valid_index(runtime_state().objects.bag.selected)) {
         if (qol::extension_bag::ui_state().objects.module_view_installed) {
+            // UIEquip_DrawInvenItem 在绘制时再次读 INVEN_GetBagSize；只在
+            // 刷新窗口投影容量会让 12 格袋仍画出 16 个背景格。
+            qol::features::extension_bag::BagSizeProjectionScope capacity_projection;
             (void)runtime_state().host.write_port->ui.draw_original_items();
             return;
         }

@@ -23,9 +23,7 @@ constexpr int32_t kTextGlyphHeight = 24;
 constexpr int32_t kTextColumnGap = 16;
 constexpr int32_t kDescriptionTop = 42;
 constexpr int32_t kMinimumRightRowHeight = 96;
-// 140 is the compact-capsule minimum; it is the smallest width whose label box fits font 0's
-// 22 px line height. At 132 (60% of 220), capsule creation fails.
-constexpr int32_t kToggleWidth = 140;
+constexpr int32_t kToggleWidth = 220;
 constexpr int32_t kToggleHeight = 80;
 constexpr int32_t kRightControlRightInset = 20;
 

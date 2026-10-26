@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdio>
-#include <cstdint>
 #include <cstring>
 #include <string>
 #include <utility>
@@ -200,20 +199,22 @@ contracts::QolFeatureControlApi g_fake_control{};
 
 // ---- fake UI adapter/components (only members the exercised paths touch) ----
 
+int g_widget_creates = 0;
+int g_widget_destroys = 0;
 int g_button_creates = 0;
 int g_button_destroys = 0;
 int g_list_destroys = 0;
 int g_button_enabled_calls = 0;
 uint8_t g_button_enabled = 0;
+int g_toggle_enabled_calls = 0;
+uint8_t g_toggle_enabled = 0;
 contracts::QolUiHandle g_fake_root = reinterpret_cast<void*>(0x1000);
 contracts::QolUiHandle g_list_handle = reinterpret_cast<void*>(0x2000);
 contracts::QolUiHandle g_row_handle = reinterpret_cast<void*>(0x3000);
+contracts::QolUiHandle g_widget_handle = reinterpret_cast<void*>(0x4000);
 contracts::QolUiHandle g_button_handle = reinterpret_cast<void*>(0x5000);
+contracts::UiNativeToggleDesc g_last_toggle{};
 contracts::UiButtonDesc g_last_button{};
-contracts::UiButtonDesc g_last_toggle_button{};
-contracts::UiButtonDesc g_last_entry_button{};
-std::vector<contracts::QolUiHandle> g_created_button_handles;
-std::vector<std::pair<contracts::QolUiHandle, std::string>> g_button_text_updates;
 struct DrawnText { std::string text; uint32_t color; };
 std::vector<DrawnText> g_drawn_text;
 contracts::QolUiComponents g_components_api{};
@@ -222,8 +223,8 @@ contracts::QolHostSdk g_sdk{};
 contracts::QolGameHost g_game_host{};
 
 QolResult fake_components_destroy(contracts::QolUiHandle h) {
-    if (std::find(g_created_button_handles.begin(), g_created_button_handles.end(), h) !=
-        g_created_button_handles.end()) ++g_button_destroys;
+    if (h == g_widget_handle) ++g_widget_destroys;
+    if (h == g_button_handle) ++g_button_destroys;
     if (h == g_list_handle) ++g_list_destroys;
     return contracts::ok();
 }
@@ -247,19 +248,25 @@ QolResult fake_list_get_row(contracts::QolUiHandle, uint32_t, contracts::QolUiHa
     return contracts::ok();
 }
 QolResult fake_list_selection(contracts::QolUiHandle, uint8_t) { return contracts::ok(); }
+QolResult fake_toggle_create(const contracts::UiNativeToggleDesc* desc, contracts::QolUiHandle,
+                             contracts::QolUiHandle* out) {
+    g_last_toggle = *desc;
+    ++g_widget_creates;
+    *out = g_widget_handle;
+    return contracts::ok();
+}
+QolResult fake_toggle_set_value(contracts::QolUiHandle, int32_t) { return contracts::ok(); }
+QolResult fake_toggle_draw(contracts::QolUiHandle) { return contracts::ok(); }
+QolResult fake_toggle_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
+    ++g_toggle_enabled_calls;
+    g_toggle_enabled = enabled;
+    return contracts::ok();
+}
 QolResult fake_button_create(const contracts::UiButtonDesc* desc, contracts::QolUiHandle,
                              contracts::QolUiHandle* out) {
     g_last_button = *desc;
     ++g_button_creates;
-    if (desc->on_click == &toggle_button_clicked) g_last_toggle_button = *desc;
-    if (desc->on_click == &action_button_clicked) g_last_entry_button = *desc;
-    *out = reinterpret_cast<contracts::QolUiHandle>(
-        static_cast<std::uintptr_t>(0x5000 + g_button_creates));
-    g_created_button_handles.push_back(*out);
-    return contracts::ok();
-}
-QolResult fake_button_set_text(contracts::QolUiHandle handle, const char* text) {
-    g_button_text_updates.emplace_back(handle, text == nullptr ? "" : text);
+    *out = g_button_handle;
     return contracts::ok();
 }
 QolResult fake_button_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
@@ -268,11 +275,6 @@ QolResult fake_button_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
     return contracts::ok();
 }
 QolResult fake_button_draw(contracts::QolUiHandle) { return contracts::ok(); }
-std::string last_button_text(contracts::QolUiHandle handle) {
-    for (auto update = g_button_text_updates.rbegin(); update != g_button_text_updates.rend(); ++update)
-        if (update->first == handle) return update->second;
-    return {};
-}
 // 菜单工厂：测试只关心调用面与入参，替换控件由 fake 返回句柄。
 QolResult fake_menu_button_create(const contracts::UiMainMenuDecoratedButtonDesc* desc,
                                   contracts::QolUiHandle* out_original,
@@ -312,13 +314,16 @@ void bind_production() {
     g_components_api.size = sizeof(g_components_api);
     g_components_api.major = contracts::kUiContractMajor;
     g_components_api.minor = contracts::kUiContractMinor;
-    g_components_api.compact_capsule_text_button_create = &fake_button_create;
+    g_components_api.capsule_text_button_create = &fake_button_create;
     g_components_api.main_menu_decorated_button_create = &fake_menu_button_create;
     g_components_api.destroy = &fake_components_destroy;
     g_components_api.scroll_list_create = &fake_list_create;
     g_components_api.scroll_list_get_row = &fake_list_get_row;
     g_components_api.scroll_list_set_selection_enabled = &fake_list_selection;
-    g_components_api.button_set_text = &fake_button_set_text;
+    g_components_api.native_toggle_create = &fake_toggle_create;
+    g_components_api.native_toggle_set_value = &fake_toggle_set_value;
+    g_components_api.native_toggle_set_enabled = &fake_toggle_set_enabled;
+    g_components_api.native_toggle_draw = &fake_toggle_draw;
     g_components_api.text_button_set_enabled = &fake_button_set_enabled;
     g_components_api.text_button_draw = &fake_button_draw;
     g_components_api.draw_control_text = &fake_draw_control_text;
@@ -349,15 +354,12 @@ void setup() {
     g_read_actual_fails = false;
     g_actual_not_ready_remaining = 0;
     g_actual_enabled = 1;
-    g_button_creates = g_button_destroys = 0;
+    g_widget_creates = g_widget_destroys = g_button_creates = g_button_destroys = 0;
     g_list_destroys = 0;
     g_button_enabled_calls = 0;
     g_button_enabled = 0;
-    g_created_button_handles.clear();
-    g_button_text_updates.clear();
-    g_last_button = {};
-    g_last_toggle_button = {};
-    g_last_entry_button = {};
+    g_toggle_enabled_calls = 0;
+    g_toggle_enabled = 0;
     g_drawn_text.clear();
     settings_bind_game(nullptr);
     bind_production();
@@ -394,18 +396,8 @@ int prepare_entry_page() {
 }
 
 void click_entry_button() {
-    assert(g_last_entry_button.on_click != nullptr);
-    g_last_entry_button.on_click(g_last_entry_button.user);
-}
-
-void prepare_toggle_row(int item_index) {
-    assert(item_index >= 0 && static_cast<size_t>(item_index) < g_items.size());
-    const auto category = std::find_if(g_categories.begin(), g_categories.end(), [item_index](const auto& c) {
-        return c.category == g_items[static_cast<size_t>(item_index)].category;
-    });
-    assert(category != g_categories.end());
-    assert(build_right_list(static_cast<int>(category - g_categories.begin())));
-    g_panel_active = true;
+    assert(g_last_button.on_click != nullptr);
+    g_last_button.on_click(g_last_button.user);
 }
 
 // ---- pure model checks (small UI model test) ----
@@ -509,7 +501,7 @@ void test_game_info_category_builds_read_only_composition() {
     assert(g_game_info.module == "QoL模块 v9.8.7");
     const std::string bits = sizeof(void*) == 8 ? "64位" : "32位";
     assert(g_game_info.platform == std::string("Android 13 (API 33) ") + bits);
-    assert(g_button_creates == 0);
+    assert(g_widget_creates == 0 && g_button_creates == 0);
     destroy_right_list();
 
     // Without a Game Host the same category still builds and shows explicit fallbacks.
@@ -520,38 +512,6 @@ void test_game_info_category_builds_read_only_composition() {
     assert(g_game_info.variant == "未知版本");
     assert(g_game_info.module == "QoL模块 v9.8.7");
     assert(g_game_info.platform == std::string("Android 未知 ") + bits);
-    destroy_right_list();
-}
-
-void test_toggle_and_entry_share_compact_capsule_geometry() {
-    setup();
-    assert(load_catalog());
-    g_feature_values[1] = 1;
-    g_feature_values[3] = 1;
-    refresh_all_values();
-    const auto hidden_category = std::find_if(g_categories.begin(), g_categories.end(), [](const auto& c) {
-        return c.category == FeatureCategory::kHidden;
-    });
-    assert(hidden_category != g_categories.end());
-    assert(build_right_list(static_cast<int>(hidden_category - g_categories.begin())));
-    assert(g_last_toggle_button.on_click == &toggle_button_clicked);
-    const auto toggle_desc = g_last_toggle_button;
-
-    const auto tools_category = std::find_if(g_categories.begin(), g_categories.end(), [](const auto& c) {
-        return c.category == FeatureCategory::kTools;
-    });
-    assert(tools_category != g_categories.end());
-    assert(build_right_list(static_cast<int>(tools_category - g_categories.begin())));
-    assert(g_last_entry_button.on_click == &action_button_clicked);
-    const auto entry_desc = g_last_entry_button;
-
-    assert(toggle_desc.rect.w == 140 && toggle_desc.rect.h == 80 &&
-           toggle_desc.style == contracts::kUiTextButtonFontDefault);
-    assert(entry_desc.rect.w == 140 && entry_desc.rect.h == 80 &&
-           entry_desc.style == contracts::kUiTextButtonFontDefault);
-    assert(toggle_desc.rect.x == entry_desc.rect.x && toggle_desc.rect.y == entry_desc.rect.y &&
-           toggle_desc.rect.w == entry_desc.rect.w && toggle_desc.rect.h == entry_desc.rect.h &&
-           toggle_desc.style == entry_desc.style);
     destroy_right_list();
 }
 
@@ -600,13 +560,9 @@ void test_toggle_routes_to_host_request_set_feature() {
     refresh_all_values();
     const int index = find_feature("autosell", "sell");
     assert(index >= 0 && toggle_enabled(static_cast<uint32_t>(index)));
-    prepare_toggle_row(index);
-    const auto toggle_handle = g_states[static_cast<size_t>(index)].toggle;
-    assert(toggle_handle != nullptr && std::strcmp(g_last_toggle_button.text, "开") == 0);
-    assert(last_button_text(toggle_handle) == "开");
 
-    toggle_button_clicked(&g_contexts[static_cast<size_t>(index)]);
-    assert(g_states[index].gesture && g_states[index].desired == 0);
+    g_states[index].gesture = true;
+    g_states[index].desired = 0;
     process_pending_toggles();
     assert(g_log.set_feature_calls == 1 && g_log.plugin == "autosell" && g_log.feature == "sell");
     assert(g_log.value == 0 && g_states[index].request_id != 0);
@@ -615,9 +571,6 @@ void test_toggle_routes_to_host_request_set_feature() {
     g_log.receipt.persistence = FeaturePersistence::kPersisted;
     poll_requests();
     assert(g_states[index].request_id == 0);
-    g_states[index].confirmed = 0;
-    sync_controls(static_cast<uint32_t>(index));
-    assert(last_button_text(toggle_handle) == "关");
     assert(toggle_enabled(static_cast<uint32_t>(index)));
 }
 
@@ -629,20 +582,13 @@ void test_feature_toggle_writes_when_plugin_desired_disabled() {
     const int index = find_feature("autosell", "sell");
     assert(index >= 0 && g_states[index].valid);
     assert(toggle_enabled(static_cast<uint32_t>(index)));
-    prepare_toggle_row(index);
-    const auto toggle_handle = g_states[static_cast<size_t>(index)].toggle;
-    assert(toggle_handle != nullptr && std::strcmp(g_last_toggle_button.text, "开") == 0);
-    assert(last_button_text(toggle_handle) == "开");
 
-    toggle_button_clicked(&g_contexts[static_cast<size_t>(index)]);
-    assert(g_states[index].gesture && g_states[index].desired == 0);
+    g_states[index].gesture = true;
+    g_states[index].desired = 0;
     process_pending_toggles();
     assert(g_log.set_feature_calls == 1 && g_log.desired_calls == 0 &&
            g_log.read_desired_calls == 0 && g_log.plugin == "autosell" &&
            g_log.feature == "sell" && g_log.value == 0);
-    g_states[index].confirmed = 0;
-    sync_controls(static_cast<uint32_t>(index));
-    assert(last_button_text(toggle_handle) == "关");
 }
 
 void test_owner_failure_disables_only_its_features_and_recovers() {
@@ -659,7 +605,7 @@ void test_owner_failure_disables_only_its_features_and_recovers() {
     assert(toggle_enabled(static_cast<uint32_t>(sell)));
     assert(std::strcmp(displayed_description(static_cast<uint32_t>(page)), "激活失败") == 0);
 
-    toggle_button_clicked(&g_contexts[static_cast<size_t>(console)]);
+    native_toggle_changed(&g_contexts[static_cast<size_t>(console)], 0);
     assert(!g_states[static_cast<size_t>(console)].gesture);
     process_pending_toggles();
     click_entry_button();
@@ -705,7 +651,6 @@ void test_owner_failure_row_rendering_and_recovery() {
     });
     assert(hidden_category != g_categories.end());
     assert(build_right_list(static_cast<int>(hidden_category - g_categories.begin())));
-    g_panel_active = true;
     g_states[static_cast<size_t>(page)].action = g_button_handle;
     const auto draw = [](int item_index) {
         refresh_owner_availability(static_cast<uint32_t>(item_index));
@@ -716,11 +661,9 @@ void test_owner_failure_row_rendering_and_recovery() {
         return std::pair<DrawnText, DrawnText>{g_drawn_text[0], g_drawn_text[1]};
     };
     g_owner_availability[0] = contracts::FeatureOwnerAvailability::kInstallFailed;
-    const int enabled_calls_before_failure = g_button_enabled_calls;
+    const int enabled_calls_before_failure = g_toggle_enabled_calls;
     refresh_owner_availability(static_cast<uint32_t>(page));
-    assert(g_button_enabled_calls > enabled_calls_before_failure && g_button_enabled == 0);
-    toggle_button_clicked(&g_contexts[static_cast<size_t>(console)]);
-    assert(!g_states[static_cast<size_t>(console)].gesture);
+    assert(g_toggle_enabled_calls > enabled_calls_before_failure && g_toggle_enabled == 0);
     assert(g_button_enabled == 0);
     const auto failed_entry = draw(page);
     assert(failed_entry.first.color == contracts::ui_theme::kError);
@@ -742,7 +685,7 @@ void test_owner_failure_row_rendering_and_recovery() {
 
     g_owner_availability[0] = contracts::FeatureOwnerAvailability::kAvailable;
     refresh_owner_availability(static_cast<uint32_t>(page));
-    assert(g_button_enabled == 1);
+    assert(g_toggle_enabled == 1 && g_button_enabled == 1);
     const auto recovered_entry = draw(page);
     assert(recovered_entry.first.color == contracts::ui_theme::kTextGold);
     assert(recovered_entry.second.text == "在主菜单打开模块设置页。");
@@ -753,7 +696,7 @@ void test_owner_failure_row_rendering_and_recovery() {
 void test_entry_button_respects_validity_and_direct_invocation() {
     setup();
     const int page = prepare_entry_page();
-    assert(g_button_creates == 1);
+    assert(g_widget_creates == 0);
     assert(std::strcmp(g_last_button.text, "打开设置") == 0);
     g_feature_values[0] = 0;
     refresh_item_value(static_cast<uint32_t>(page));
@@ -942,8 +885,8 @@ void test_true_entry_requires_read_actual_abi_before_invoking() {
 void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     setup();
     assert(load_catalog());
-    assert(build_right_list(2));  // Basic optimization creates four capsule buttons
-    assert(g_button_creates == 4);
+    assert(build_right_list(2));  // Basic optimization creates four toggle children
+    assert(g_widget_creates == 4);
     g_panel_active = true;
     const uint64_t generation_before = g_generation;
 
@@ -952,13 +895,13 @@ void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     assert(g_root == nullptr && g_left == nullptr && g_back == nullptr);
     assert(!settings_provider_active());
     assert(g_items.empty() && g_categories.empty());
-    assert(g_list_destroys >= 1);  // Child buttons are released with their list.
+    assert(g_widget_destroys >= 1 || g_list_destroys >= 1);  // toggle child released with its list
     assert(!load_catalog());  // control channel released: no catalog without a live SDK
 
     // New lifecycle: fresh SDK + fresh catalog replays metadata/state into a new page.
     g_feature_values[0] = 0; g_feature_values[1] = 1;
     g_feature_values[2] = 0; g_feature_values[3] = 1;
-    g_button_creates = 0;
+    g_widget_creates = 0;
     bind_production();
     assert(load_catalog());
     assert(g_items.size() == 8);
@@ -986,7 +929,6 @@ int main() {
     test_feature_model_filters_and_orders();
     test_catalog_categories_and_debug_visibility();
     test_game_info_category_builds_read_only_composition();
-    test_toggle_and_entry_share_compact_capsule_geometry();
     test_toggle_routes_to_host_request_set_feature();
     test_feature_toggle_writes_when_plugin_desired_disabled();
     test_owner_failure_disables_only_its_features_and_recovers();

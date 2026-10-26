@@ -177,7 +177,7 @@
 | 按压中段采样 | `sx = 100`（源 `[100,120)×[40,60)`：各行 RGBA 横向一致、alpha 0..10）；`sx = 30` 是旧假设，会带出周期性黄块 |
 | 两端饰裁切 | 由 rect 比例决定：`height_percent <= width_percent` 或 rect 不小于源 405×77 时整体等比缩放，否则水平切片只压缩中段 |
 | 主菜单 decorated | 显式目标尺寸 290×72，字号 28；命中区等于原生 snapshot rect；工厂以原生控件中心为锚点 |
-| 设置页入口 | toggle 与 entry 动作按钮均为 140×80、`kUiTextButtonFontDefault`，由 `compact_capsule_text_button_create` 创建 |
+| 设置页入口 | feature entry 统一 capsule 外观 + `kUiTextButtonFontLarger` |
 | 圆角/圆形 | 圆角按 doubled-coordinate 求像素中心 inset；边框与填充按互斥行区间绘制 |
 
 ## 5. 消费者
