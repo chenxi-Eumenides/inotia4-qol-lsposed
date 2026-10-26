@@ -41,21 +41,24 @@ bool first_empty_extension_slot_locked(int bag, int* out_slot) {
     return false;
 }
 
+bool native_slot_empty_locked(int bag, int slot) {
+    const auto* facts = ::qol::extension_bag::access::host().item_facts;
+    if (facts == nullptr || facts->physical_item_at == nullptr) return false;
+    qol::contracts::QolItemHandle handle{};
+    const QolResult result = facts->physical_item_at(bag, slot, &handle);
+    if (result.code == kQolErrNotFound) return true;
+    if (!qol::contracts::succeeded(result)) return false;
+    return handle.slot == 0 || handle.generation == 0;
+}
+
 bool first_empty_native_slot_locked(int bag, int* out_slot) {
-    if (out_slot == nullptr || ::qol::extension_bag::access::host().inventory_extras == nullptr ||
-        ::qol::extension_bag::access::host().inventory_extras->read.bag_size == nullptr) {
-        return false;
-    }
+    if (out_slot == nullptr) return false;
     int32_t size = 0;
-    if (!qol::contracts::succeeded(
-            ::qol::extension_bag::access::host().inventory_extras->read.bag_size(bag, &size)) ||
-        size <= 0) {
+    if (!native_bag_size_locked(bag, &size) || size <= 0) {
         return false;
     }
     for (int slot = 0; slot < size && slot < virtual_bag::kSlotCount; ++slot) {
-        void* item = nullptr;
-        if (!inventory_slot_locked(bag, slot, &item)) return false;
-        if (item == nullptr) {
+        if (native_slot_empty_locked(bag, slot)) {
             *out_slot = slot;
             return true;
         }
@@ -123,7 +126,7 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
                      move_count);
         return false;
     }
-    refresh_projected_module_view_after_move_locked();
+    refresh_native_item_area_after_move_locked(src_bag);
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "cross move committed through inventory.action original->extension source=%d/%d "
                  "dst=%d/%d count=%d",
@@ -149,12 +152,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
             game != nullptr && game->target.has_capability != nullptr &&
             game->target.has_capability(
                 qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
-        const bool sized = ::qol::extension_bag::access::host().inventory_extras != nullptr &&
-                           ::qol::extension_bag::access::host().inventory_extras->read.bag_size !=
-                               nullptr &&
-                           qol::contracts::succeeded(
-                               ::qol::extension_bag::access::host().inventory_extras->read.bag_size(
-                                   target_bag, &target_size)) &&
+        const bool sized = native_bag_size_locked(target_bag, &target_size) &&
                            target_size > 0;
         if (!candidate || !sized) {
             QOL_LOG_WARN(QolDomain::kExtensionBag,
@@ -203,7 +201,7 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
                      static_cast<int>(outcome.status), src_bag, src_slot, target_bag, target_slot);
         return false;
     }
-    refresh_projected_module_view_after_move_locked();
+    refresh_native_item_area_after_move_locked(target_bag);
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "cross move committed through inventory.action extension->original source=%d/%d "
                  "target=%d/%d count=%d",

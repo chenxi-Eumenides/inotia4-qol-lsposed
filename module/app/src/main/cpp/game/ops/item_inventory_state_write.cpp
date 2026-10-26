@@ -634,13 +634,19 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
     uint32_t source_count = 0;
     result = item_stack_count(item, &source_count);
     if (!contracts::succeeded(result)) return item_error(out, result, "item count unavailable");
+    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
+    // SAVE_LoadItem 重建的单件装备/特殊物品可能没有数量位段，canonical 返回 0；
+    // 非堆叠单件仍按 1 处理，否则跨介质移动会在放置前被误判为数量超限。
+    if (source_count == 0 && encoding != contracts::QolItemCountEncoding::kEncoded &&
+        count == 1) {
+        source_count = 1;
+    }
     if (static_cast<uint32_t>(count) > source_count) {
         return item_error(out, kQolErrInvalidArgument, "move count exceeds stack count");
     }
 
     uint32_t stack_limit = 1;
     const contracts::QolItemCountApi* count_api = item_count_api_if_resident();
-    const contracts::QolItemCountEncoding encoding = item_count_encoding(item);
     int32_t extended = 0;
     if (encoding == contracts::QolItemCountEncoding::kEncoded) {
         if (count_api == nullptr || count_api->read_extended_mode == nullptr ||
@@ -669,6 +675,11 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
             if (!contracts::succeeded(result)) {
                 return item_error(out, result, "item count update failed");
             }
+        }
+    } else if (encoding == contracts::QolItemCountEncoding::kUnknown) {
+        // 未知编码只能证明“单件”是安全的；多件仍拒绝，避免把可堆叠物拆坏。
+        if (count != 1) {
+            return item_error(out, kQolErrUnsupported, "item stack encoding unavailable");
         }
     } else if (encoding != contracts::QolItemCountEncoding::kNotEncoded || count != 1) {
         return item_error(out, kQolErrUnsupported, "item stack encoding unavailable");

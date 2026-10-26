@@ -551,6 +551,34 @@ void refresh_projected_module_view_after_move_locked() {
     refresh_module_item_area_locked(qol::extension_bag::ui_state().objects.module_view_index);
 }
 
+void refresh_native_item_area_after_move_locked(int native_bag) {
+    if (qol::extension_bag::ui_state().objects.module_view_installed) {
+        refresh_projected_module_view_after_move_locked();
+        return;
+    }
+    if (runtime_state().host.game == nullptr ||
+        runtime_state().host.write_port == nullptr ||
+        runtime_state().host.write_port->ui.refresh_item_area == nullptr) {
+        return;
+    }
+    const int saved_bag = raw_current_bag_locked();
+    const int target_bag =
+        native_bag >= 0 && native_bag < native_bag_count_locked() ? native_bag : saved_bag;
+    if (target_bag < 0) return;
+    if (target_bag != saved_bag) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(target_bag);
+    }
+    {
+        // 原生视图必须读真实槽表与真实容量；投影替换只在扩展视图生效。
+        qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
+        virtual_bag_call_original_refresh_item_area_with_guard();
+    }
+    if (saved_bag >= 0 && saved_bag != target_bag) {
+        (void)runtime_state().host.write_port->ui.set_current_bag(saved_bag);
+    }
+    ++qol::extension_bag::ui_state().ui.inventory_generation;
+}
+
 namespace {
 
 struct RefreshRestoreSuppressScope {

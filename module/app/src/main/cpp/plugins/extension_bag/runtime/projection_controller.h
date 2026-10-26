@@ -15,3 +15,5 @@ int native_bag_count_locked();
 // 扩展袋内容通过该代理窗口显示，current_bag 不再承载扩展袋号。
 int projection_proxy_bag_locked();
 bool native_source_bag_allowed_locked(int bag);
+// 原生袋容量（原版 0..5 与 C18 追加袋 6..N-1 均可查询）。旧 bag_size 只接受 0..5。
+bool native_bag_size_locked(int bag, int32_t* out_size);

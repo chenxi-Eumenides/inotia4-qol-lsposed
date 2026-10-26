@@ -205,11 +205,19 @@ QolResult source_import_item(const contracts::QolBagTransfer* transfer, int32_t 
     candidate.count = transfer->count;
     candidate.payload_size = transfer->payload_size;
     std::memcpy(candidate.payload.data(), transfer->payload, transfer->payload_size);
-    if (encoded_category(transfer->category) == 2 &&
+    const bool stackable =
+        encoded_category(transfer->category) ==
+        static_cast<int>(qol::contracts::QolItemCountEncoding::kEncoded);
+    if (stackable &&
         static_cast<uint32_t>(transfer->count) > virtual_bag_count_limit(true)) {
         return source_error(kQolErrInvalidArgument, "transfer count exceeds stack limit");
     }
-    if (virtual_bag::payload_count(candidate) != static_cast<uint32_t>(transfer->count)) {
+    if (!stackable) {
+        // 非堆叠装备/袋类物品的序列化 payload 可能没有 count 位段，不能因为
+        // payload_count 为 0 就拒绝单件转移。
+        candidate.count = transfer->count;
+    } else if (virtual_bag::payload_count(candidate) !=
+               static_cast<uint32_t>(transfer->count)) {
         if (!virtual_bag::patch_payload_count(&candidate,
                                               static_cast<uint32_t>(transfer->count),
                                               &encoded_category)) {

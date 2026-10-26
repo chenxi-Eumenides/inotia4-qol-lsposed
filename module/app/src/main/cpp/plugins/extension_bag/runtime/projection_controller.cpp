@@ -38,23 +38,45 @@ int raw_current_bag_locked() {
     return qol::contracts::succeeded(port->ui.current_bag(&bag)) ? static_cast<int>(bag) : -1;
 }
 
-int native_bag_count_locked() {
-    // 袋号拓扑来自游戏袋数据（INVEN_GetBagSize 语义），不依赖任何控件树；
-    // 未打开背包时同样可用。C18 上界使用 item port 的布局容量信源。
+bool native_bag_size_locked(int bag, int32_t* out_size) {
+    if (out_size == nullptr || bag < 0) return false;
     const auto* extras = runtime_state().host.inventory_extras;
-    if (extras == nullptr || extras->read.bag_size == nullptr) {
-        return virtual_bag::kOriginalNativeBagCount;
+    if (extras == nullptr) return false;
+    if (extras->read.bag_size_ref != nullptr) {
+        const qol::contracts::QolBagRef ref{
+            bag >= qol::contracts::kQolOriginalBagCount
+                ? qol::contracts::kQolBagSpaceVariant
+                : qol::contracts::kQolBagSpaceOriginal,
+            bag >= qol::contracts::kQolOriginalBagCount
+                ? bag - qol::contracts::kQolOriginalBagCount
+                : bag};
+        return qol::contracts::succeeded(extras->read.bag_size_ref(&ref, out_size));
     }
-    int highest = -1;
-    for (int bag = 0; bag < qol::contracts::kQolMaxNativeBagCount; ++bag) {
+    // 旧 Host 只提供扁平 bag_size，且仅支持原版 0..5。
+    if (bag >= qol::contracts::kQolOriginalBagCount ||
+        extras->read.bag_size == nullptr) {
+        return false;
+    }
+    return qol::contracts::succeeded(extras->read.bag_size(bag, out_size));
+}
+
+int native_bag_count_locked() {
+    // 原版袋恒为 0..5；C18 追加袋使用空间化 bag_size_ref 查询，不能继续用
+    // 只接受 0..5 的扁平 bag_size，否则追加袋永远不会被视为合法来源。
+    int count = virtual_bag::kOriginalNativeBagCount;
+    const auto* game = runtime_state().host.game;
+    if (game == nullptr || game->target.has_capability == nullptr ||
+        game->target.has_capability(
+            qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0) {
+        return count;
+    }
+    for (int bag = qol::contracts::kQolOriginalBagCount;
+         bag < qol::contracts::kQolMaxNativeBagCount; ++bag) {
         int32_t size = 0;
-        if (!qol::contracts::succeeded(extras->read.bag_size(bag, &size))) continue;
-        if (size > 0) highest = bag;
+        if (!native_bag_size_locked(bag, &size) || size <= 0) continue;
+        count = bag + 1;
     }
-    const int count = highest + 1;
-    return count < virtual_bag::kOriginalNativeBagCount
-               ? virtual_bag::kOriginalNativeBagCount
-               : count;
+    return count;
 }
 
 bool native_source_bag_allowed_locked(int bag) {
