@@ -105,7 +105,7 @@ QolResult source_item_at(int32_t bag, int32_t slot, contracts::QolInventoryItemR
     out->count = static_cast<int32_t>(
         virtual_bag_effective_count(item, static_cast<uint32_t>(descriptor.count)));
     out->item = handle;
-    out->space_id = contracts::kQolBagSpaceFirstRegistered;
+    out->space_id = kExtensionBagSpaceId;
     return contracts::ok();
 }
 
@@ -135,7 +135,7 @@ QolResult source_for_each_item(contracts::QolInventoryBagSlotFn fn, void* ctx) {
             ref.count = static_cast<int32_t>(
                 virtual_bag_effective_count(item, static_cast<uint32_t>(descriptor.count)));
             ref.item = handle;
-            ref.space_id = contracts::kQolBagSpaceFirstRegistered;
+            ref.space_id = kExtensionBagSpaceId;
             if (fn(&ref, ctx) != 0) return contracts::ok();
         }
     }
@@ -265,8 +265,56 @@ QolResult source_import_item(const contracts::QolBagTransfer* transfer, int32_t 
     if (bag < 0 || slot < 0) {
         return source_error(kQolErrConflict, "extension bag has no free slot");
     }
-    if (!descriptor_empty(::qol::extension_bag::access::bag().items[bag][slot])) {
-        return source_error(kQolErrConflict, "extension slot occupied");
+    auto& bag_items = ::qol::extension_bag::access::bag().items[bag][slot];
+    if (!descriptor_empty(bag_items)) {
+        if (bag_items.category != candidate.category || bag_items.count < 0) {
+            return source_error(kQolErrConflict, "extension slot contains another item");
+        }
+        const uint32_t merged_count =
+            static_cast<uint32_t>(bag_items.count) + static_cast<uint32_t>(transfer->count);
+        if (merged_count > virtual_bag_count_limit(true)) {
+            return source_error(kQolErrBlocked, "extension target stack full");
+        }
+        virtual_bag::Item merged = bag_items;
+        if (!virtual_bag::patch_payload_count(&merged, merged_count, &encoded_category) ||
+            !virtual_bag::valid_payload(merged)) {
+            return source_error(kQolErrInternal, "extension merge payload failed");
+        }
+        merged.count = static_cast<int>(merged_count);
+        const virtual_bag::Item previous = bag_items;
+        const uint32_t previous_hash =
+            qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot];
+        bag_items = merged;
+        qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] =
+            virtual_bag::payload_hash(merged);
+        extension_bag_mark_dirty_locked();
+        if (!persist_state_locked()) {
+            bag_items = previous;
+            qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] = previous_hash;
+            return source_error(kQolErrInternal, "extension item persist failed");
+        }
+        if (module_item_locked(bag, slot) != nullptr &&
+            !free_module_object_locked(bag, slot, nullptr)) {
+            bag_items = previous;
+            qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] = previous_hash;
+            (void)persist_state_locked();
+            return source_error(kQolErrConflict, "extension item busy");
+        }
+        contracts::QolItemHandle handle{};
+        if (materialize_item_locked(bag, slot, &handle) == nullptr) {
+            bag_items = previous;
+            qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] = previous_hash;
+            (void)persist_state_locked();
+            return source_error(kQolErrInternal, "extension item materialization failed");
+        }
+        if (qol::extension_bag::ui_state().objects.module_view_installed &&
+            qol::extension_bag::ui_state().objects.module_view_index == bag) {
+            refresh_module_item_area_locked(bag);
+        }
+        out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
+        out->item = handle;
+        out->count = transfer->count;
+        return contracts::ok();
     }
     if (!module_slot_is_assignable_locked(bag, slot)) {
         return source_error(kQolErrConflict, "extension slot unavailable");
@@ -284,14 +332,22 @@ QolResult source_import_item(const contracts::QolBagTransfer* transfer, int32_t 
     extension_bag_mark_dirty_locked();
     if (!persist_state_locked()) {
         ::qol::extension_bag::access::bag().items[bag][slot] = previous;
-        (void)free_module_object_locked(bag, slot);
+        qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] =
+            virtual_bag::payload_hash(previous);
+        qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] =
+            previous.category;
+        if (!free_module_object_locked(bag, slot)) {
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "bag source import rollback could not release object bag=%d slot=%d",
+                          bag, slot);
+        }
         return source_error(kQolErrInternal, "extension item persist failed");
     }
     if (qol::extension_bag::ui_state().objects.module_view_installed &&
         qol::extension_bag::ui_state().objects.module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
-    out->ref = contracts::QolBagRef{contracts::kQolBagSpaceFirstRegistered, bag};
+    out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
     out->item = handle;
     out->count = transfer->count;
     return contracts::ok();
@@ -336,17 +392,33 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
             return source_error(kQolErrConflict, "extension item remove rejected");
         }
         extension_bag_mark_dirty_locked();
-        const bool persisted = persist_state_locked();
+        if (!persist_state_locked()) {
+            // 整堆 remove 的持久化失败必须恢复内存状态，否则 core.item 会认为源物品
+            // 已删除，而下次读档又回到旧状态。对象已释放，按旧 descriptor 重新物化；
+            // 物化失败时 descriptor 仍保留，后续读取会再次尝试。
+            ::qol::extension_bag::access::bag().items[bag][slot] = previous;
+            qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] =
+                virtual_bag::payload_hash(previous);
+            qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] =
+                previous.category;
+            extension_bag_mark_dirty_locked();
+            if (module_item_locked(bag, slot) == nullptr) {
+                QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                              "bag source remove persist failed and restore materialization failed "
+                              "bag=%d slot=%d",
+                              bag, slot);
+            }
+            if (qol::extension_bag::ui_state().objects.module_view_installed &&
+                qol::extension_bag::ui_state().objects.module_view_index == bag) {
+                refresh_module_item_area_locked(bag);
+            }
+            return source_error(kQolErrInternal, "extension item persist failed");
+        }
         if (qol::extension_bag::ui_state().objects.module_view_installed &&
             qol::extension_bag::ui_state().objects.module_view_index == bag) {
             refresh_module_item_area_locked(bag);
         }
-        if (!persisted) {
-            QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                          "bag source remove completed but persist failed bag=%d slot=%d",
-                          bag, slot);
-        }
-        out->ref = contracts::QolBagRef{contracts::kQolBagSpaceFirstRegistered, bag};
+        out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
         out->item = expected;
         out->count = count;
         return contracts::ok();
@@ -371,7 +443,11 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
     extension_bag_mark_dirty_locked();
     if (!persist_state_locked()) {
         ::qol::extension_bag::access::bag().items[bag][slot] = descriptor;
-        (void)virtual_bag_write_effective(item, static_cast<uint32_t>(descriptor.count));
+        if (!virtual_bag_write_effective(item, static_cast<uint32_t>(descriptor.count))) {
+            QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                          "bag source remove rollback count write failed bag=%d slot=%d",
+                          bag, slot);
+        }
         qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] =
             virtual_bag::payload_hash(descriptor);
         return source_error(kQolErrInternal, "extension item persist failed");
@@ -380,7 +456,7 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
         qol::extension_bag::ui_state().objects.module_view_index == bag) {
         refresh_module_item_area_locked(bag);
     }
-    out->ref = contracts::QolBagRef{contracts::kQolBagSpaceFirstRegistered, bag};
+    out->ref = contracts::QolBagRef{kExtensionBagSpaceId, bag};
     out->item = expected;
     out->count = count;
     return contracts::ok();
@@ -401,17 +477,18 @@ QolResult source_identify(contracts::QolItemHandle item_handle, contracts::QolBa
     }
     int bag = -1;
     int slot = -1;
-    if (!module_slot_of_item_locked(item, &bag, &slot) || !valid_slot(bag, slot)) {
+    if (!module_slot_of_item_locked(item, &bag, &slot) || !valid_slot(bag, slot) ||
+        descriptor_empty(::qol::extension_bag::access::bag().items[bag][slot])) {
         return source_error(kQolErrNotFound, "extension item not found");
     }
-    out->space_id = contracts::kQolBagSpaceFirstRegistered;
+    out->space_id = kExtensionBagSpaceId;
     out->bag = bag;
     *out_slot = slot;
     return contracts::ok();
 }
 
 QolResult source_use(contracts::QolBagRef ref, int32_t slot) {
-    if (ref.space_id != contracts::kQolBagSpaceFirstRegistered || slot < 0) {
+    if (ref.space_id != kExtensionBagSpaceId || slot < 0) {
         return source_error(kQolErrInvalidArgument, "invalid use request");
     }
     if (!source_ready()) return source_error(kQolErrNotReady, "extension bag not ready");
@@ -453,7 +530,7 @@ QolResult source_use(contracts::QolBagRef ref, int32_t slot) {
 
 const contracts::QolBagSource kBagSource{
     contracts::kBagSourceVersion,
-    contracts::kQolBagSpaceFirstRegistered,
+    kExtensionBagSpaceId,
     &source_count,
     &source_info,
     &source_item_at,
@@ -483,7 +560,7 @@ bool extension_bag_bag_source_register(
 
 void extension_bag_bag_source_unregister() {
     if (g_registered && g_registry != nullptr && g_registry->unregister_source != nullptr) {
-        (void)g_registry->unregister_source(contracts::kQolBagSpaceFirstRegistered);
+        (void)g_registry->unregister_source(kExtensionBagSpaceId);
     }
     g_registered = false;
     g_registry = nullptr;
