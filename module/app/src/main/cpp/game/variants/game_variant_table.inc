@@ -2,7 +2,7 @@
 // 重新生成：uv run python scripts/maintenance/build_game_variant_table.py
 //
 // 源文件清单（确定性排序，无 arm64 libgame.so 的 APK 不在此表内）：
-//   apk/game-apk/艾诺迪亚4_C18L_v520.apk
+//   apk/game-apk/艾诺迪亚4_C18L_v586.apk
 //   apk/game-apk/艾诺迪亚4_monster_v29.apk
 //   apk/game-apk/艾诺迪亚4_原版_v1.3.2.apk
 //   apk/game-apk/艾诺迪亚4_盗版大修_v0810.apk
@@ -11,6 +11,7 @@
 //   apk/game-apk/history/艾诺迪亚4_C18L_v512.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v513.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v514.apk
+//   apk/game-apk/history/艾诺迪亚4_C18L_v520.apk
 //   apk/game-apk/history/艾诺迪亚4_C18_v0.2.apk
 //   apk/game-apk/history/艾诺迪亚4_C18_v0.38b.apk
 //   apk/game-apk/history/艾诺迪亚4_monster_v19.apk
@@ -71,6 +72,7 @@ static const GameVariant kGameVariantTable[] = {
     {GameSeries::kC18, "v513", 0x00000008u, {0xda, 0x35, 0x14, 0x54, 0x9f, 0x41, 0x6d, 0x11, 0xbe, 0x2a, 0xdc, 0x6e, 0x51, 0x14, 0x68, 0x25}},
     {GameSeries::kC18, "v514", 0x00000008u, {0x05, 0x9e, 0x26, 0x4f, 0xcd, 0x66, 0x6a, 0x79, 0x50, 0x94, 0x00, 0x35, 0xb0, 0x38, 0xc2, 0x15}},
     {GameSeries::kC18, "v520", 0x00000008u, {0x98, 0x8c, 0xf0, 0x79, 0x21, 0x29, 0xe3, 0xc2, 0x14, 0x96, 0x9e, 0x68, 0x5c, 0xd4, 0xea, 0x74}},
+    {GameSeries::kC18, "v586", 0x00000008u, {0x3b, 0x07, 0x04, 0xe7, 0xd2, 0x0e, 0x1b, 0x3a, 0xbe, 0x68, 0xe6, 0x95, 0x80, 0x26, 0xd0, 0xc8}},
 };
 
 static const size_t kGameVariantTableSize =
