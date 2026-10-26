@@ -26,9 +26,14 @@ contracts::QolFindItemAbiFn g_find_item_backup = nullptr;
 
 // C18 改版客户端（v507..v514 同布局）的袋对象表与袋槽表地址；两者相邻，
 // 袋对象表 0x735000 起、槽表 0x735100 起（每袋 0x80）。原版客户端这两处
-// 仍是未使用的 bss，因此可以用“袋对象表是否有 >6 个非空项”做运行时探测。
+// 仍是未使用的 bss；C18 探测会校验表项对象的可读性、类别和容量。
 constexpr uintptr_t G_C18_BAG_TABLE_VMA = 0x735000;
 constexpr uintptr_t G_C18_SLOT_TABLE_VMA = 0x735100;
+#if __SIZEOF_POINTER__ == 8
+static_assert((G_C18_SLOT_TABLE_VMA - G_C18_BAG_TABLE_VMA) / sizeof(void*) ==
+                  contracts::kQolMaxNativeBagCount,
+              "C18 bag table capacity changed");
+#endif
 // C18's native tables keep the original six-bag prefix before added bags.
 constexpr int32_t kC18FirstNativeBag = contracts::kQolOriginalBagCount;
 
@@ -42,6 +47,16 @@ struct C18BagLayoutCache {
 
 C18BagLayoutCache g_c18_bag_layout_cache;
 std::mutex g_c18_bag_layout_cache_mutex;
+
+bool is_c18_bag_candidate(void* bag) {
+    if (!game_memory_accessible(bag, 0x20, 'r')) return false;
+    const int category = item_class_category(bag);
+    if (category < 1 || category > 4) return false;
+    const auto* bytes = reinterpret_cast<const uint8_t*>(bag);
+    const uint32_t capacity =
+        *reinterpret_cast<const uint32_t*>(bytes + 0x10) & 0x1FFFFFFu;
+    return capacity == 4 || capacity == 8 || capacity == 12 || capacity == 16;
+}
 
 bool probe_c18_bag_count(int32_t* out_count) {
     if (out_count == nullptr) return false;
@@ -69,7 +84,8 @@ bool probe_c18_bag_count(int32_t* out_count) {
     int32_t highest = -1;
     for (int32_t index = 0; index < contracts::kQolMaxNativeBagCount; ++index) {
         if (!game_memory_accessible(bag_table + index, sizeof(void*), 'r')) return false;
-        if (bag_table[index] != nullptr) highest = index;
+        void* candidate = bag_table[index];
+        if (candidate != nullptr && is_c18_bag_candidate(candidate)) highest = index;
     }
     int32_t count = highest + 1;
     if (count < contracts::kQolOriginalBagCount) count = contracts::kQolOriginalBagCount;

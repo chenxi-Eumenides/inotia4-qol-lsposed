@@ -12,6 +12,7 @@ namespace {
 struct Fixture {
     std::array<NativeTabBounds, kMaxEquipBagChildren> children{};
     size_t count = 0;
+    size_t native_tab_count = 0;
     int64_t parent_x = 200;
     int64_t parent_y = 50;
 };
@@ -28,6 +29,7 @@ Fixture make_v513(int64_t vertical_x1 = 254, int64_t vertical_x2 = 308) {
             fixture.children[fixture.count++] = {x, y, 40, 40, 0, 0, false, true};
         }
     }
+    fixture.native_tab_count = fixture.count;
     for (int i = 0; i < 5; ++i) {
         fixture.children[fixture.count++] = {0, 0, 0, 0, 0, 0, true, false};
     }
@@ -48,6 +50,7 @@ Fixture make_v514() {
     for (const int64_t x : bottom_x) {
         fixture.children[fixture.count++] = {x, 470, 40, 40, 0, 0, false, true};
     }
+    fixture.native_tab_count = fixture.count;
     for (int i = 0; i < 5; ++i) {
         fixture.children[fixture.count++] = {0, 0, 0, 0, 0, 0, true, false};
     }
@@ -95,8 +98,10 @@ int main() {
     const int64_t module_frame_right = module_frame_left + 72;
     assert(module_frame_left - original_right == 5);
     assert((254 + plan513.vertical_delta) - module_frame_right == 5);
-    for (size_t i = 6; i < 18; ++i) assert(plan513.move_vertical[i] == 1);
-    for (size_t i = 18; i < v513.count; ++i) assert(plan513.move_vertical[i] == 0);
+    for (size_t i = 6; i < v513.native_tab_count; ++i) assert(plan513.move_vertical[i] == 1);
+    for (size_t i = v513.native_tab_count; i < v513.count; ++i) {
+        assert(plan513.move_vertical[i] == 0);
+    }
 
     // A clear slot after the original column means no native rect is changed.
     C18ReflowPlan clear_plan{};
@@ -136,7 +141,9 @@ int main() {
     for (size_t i = 6; i < 13; ++i) assert(seven_rows.move_vertical[i] == 1);
 
     // Re-running against moved geometry is idempotent; a rebuilt tree is scanned afresh.
-    for (size_t i = 6; i < 18; ++i) v513.children[i].x += plan513.vertical_delta;
+    for (size_t i = 6; i < v513.native_tab_count; ++i) {
+        v513.children[i].x += plan513.vertical_delta;
+    }
     C18ReflowPlan moved_plan{};
     assert(plan(v513, &moved_plan));
     assert(moved_plan.vertical_delta == 0);

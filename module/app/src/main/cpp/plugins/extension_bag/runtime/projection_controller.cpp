@@ -1,5 +1,6 @@
 #include "plugins/extension_bag/runtime/projection_controller.h"
 
+#include "contracts/game_ports/item_port.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/shared.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -39,13 +40,13 @@ int raw_current_bag_locked() {
 
 int native_bag_count_locked() {
     // 袋号拓扑来自游戏袋数据（INVEN_GetBagSize 语义），不依赖任何控件树；
-    // 未打开背包时同样可用。C18 追加袋上界为 18，原版为 6。
+    // 未打开背包时同样可用。C18 上界使用 item port 的布局容量信源。
     const auto* extras = runtime_state().host.inventory_extras;
     if (extras == nullptr || extras->read.bag_size == nullptr) {
         return virtual_bag::kOriginalNativeBagCount;
     }
     int highest = -1;
-    for (int bag = 0; bag < 18; ++bag) {
+    for (int bag = 0; bag < qol::contracts::kQolMaxNativeBagCount; ++bag) {
         int32_t size = 0;
         if (!qol::contracts::succeeded(extras->read.bag_size(bag, &size))) continue;
         if (size > 0) highest = bag;

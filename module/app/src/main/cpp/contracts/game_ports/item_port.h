@@ -26,8 +26,8 @@ constexpr int32_t kQolBagSpaceFirstRegistered = 2;
 // 原版固定 6 袋（0..4 事务袋 + 5 任务袋）；改版为动态袋数，索引上界排他。
 constexpr int32_t kQolOriginalBagCount = 6;
 constexpr int32_t kQolTaskBagIndex = 5;
-// 原生袋索引 18 只是 getter 可接受值，不是真实袋；真实袋号上界为 18（0..17）。
-constexpr int32_t kQolMaxNativeBagCount = 18;
+// C18 袋对象表到槽表之间的指针容量：(0x735100 - 0x735000) / sizeof(void*)。
+constexpr int32_t kQolMaxNativeBagCount = 32;
 
 struct QolBagRef {
     int32_t space_id;

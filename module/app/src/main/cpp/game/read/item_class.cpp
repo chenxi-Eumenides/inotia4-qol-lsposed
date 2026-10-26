@@ -62,7 +62,7 @@ std::string dbg_hex(unsigned long value, int digits) {
 std::string debug_item_raw_json(int32_t bag, int32_t slot) {
     // GET /api/debug/item/raw?bag=&slot=（仅测试/调试）：输出槽位物品原始字节 + 位分解，
     // 用于位级 A/B 实测（强化 / 镶宝石后哪一位段变化）。纯读取，不写任何游戏内存；
-    // bag 0..17（C18 追加袋经 inventory_item_ref_at 读取）。
+    // C18 追加袋经 inventory_item_ref_at 读取。
     if (!game_in_world()) return op_err("not in world");
     InventoryItemRef ref{};
     if (!inventory_item_ref_at(bag, slot, &ref) || ref.native_item == nullptr) {

@@ -314,8 +314,9 @@ int32_t g_state_add_count = -1;
 int32_t g_state_add_socket = -1;
 int32_t g_state_add_enhance = -1;
 int32_t g_state_add_rarity = -1;
-bool g_inventory_slot_present[32][16] = {{true}};
-uint32_t g_inventory_slot_count[32][16]{};
+constexpr int32_t kFakePhysicalBagCount = qol::contracts::kQolMaxNativeBagCount;
+bool g_inventory_slot_present[kFakePhysicalBagCount][16] = {{true}};
+uint32_t g_inventory_slot_count[kFakePhysicalBagCount][16]{};
 int32_t g_c18_bag_count = 0;
 bool g_fake_registered_source_enabled = false;
 int32_t g_party_hp = 100;
@@ -392,7 +393,7 @@ QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryI
     if (g_item_ref_result != kQolOk) {
         return qol::contracts::error(g_item_ref_result, "item reference unavailable", 26);
     }
-    if (bag < 0 || bag >= 32 || slot < 0 || slot >= 16 ||
+    if (bag < 0 || bag >= kFakePhysicalBagCount || slot < 0 || slot >= 16 ||
         !g_inventory_slot_present[bag][slot]) {
         return qol::contracts::error(kQolErrNotFound, "empty", 5);
     }
@@ -431,12 +432,13 @@ QolResult fake_bag_info(const qol::contracts::QolBagRef* bag,
         if (bag->bag >= g_c18_bag_count) {
             return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
         }
-        physical_bag += 6;
-    } else if (bag->space_id != qol::contracts::kQolBagSpaceOriginal || bag->bag >= 6) {
+        physical_bag += qol::contracts::kQolOriginalBagCount;
+    } else if (bag->space_id != qol::contracts::kQolBagSpaceOriginal ||
+               bag->bag >= qol::contracts::kQolOriginalBagCount) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
     }
     int32_t slot_count = 0;
-    if (physical_bag < 32) {
+    if (physical_bag < kFakePhysicalBagCount) {
         for (int32_t slot = 0; slot < capacity; ++slot) {
             if (g_inventory_slot_present[physical_bag][slot]) ++slot_count;
         }
@@ -454,8 +456,9 @@ QolResult fake_item_at(const qol::contracts::QolBagRef* bag, int32_t slot,
     if (bag->space_id == qol::contracts::kQolBagSpaceOriginal) {
         result = stub_item_ref(bag->bag, slot, out);
     } else if (bag->space_id == qol::contracts::kQolBagSpaceC18) {
-        if (bag->bag < g_c18_bag_count && bag->bag + 6 < 32) {
-            result = stub_item_ref(bag->bag + 6, slot, out);
+        const int32_t physical_bag = bag->bag + qol::contracts::kQolOriginalBagCount;
+        if (bag->bag < g_c18_bag_count && physical_bag < kFakePhysicalBagCount) {
+            result = stub_item_ref(physical_bag, slot, out);
             if (qol::contracts::succeeded(result)) out->bag = bag->bag;
         }
     }

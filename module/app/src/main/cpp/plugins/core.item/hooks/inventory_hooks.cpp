@@ -9,6 +9,7 @@
 #include "../../../contracts/host_sdk.h"
 #include "../../../contracts/ui.h"
 
+#include <algorithm>
 #include <atomic>
 #include <array>
 #include <climits>
@@ -440,16 +441,14 @@ bool item_count_feature_enabled(void* item) {
 // ---------------------------------------------------------------------------
 
 // 物理库存包含 6 袋（含任务袋 5）；写侧读取经 Game Host 物理槽原语，避免扩展物化路径取锁。
-// C18 客户端原生袋为 0..17，运行期由 lifecycle 按 bag_count(0)+bag_count(1) 下发。
+// C18 原生袋上界由 lifecycle 按 bag_count(0)+bag_count(1) 下发。
 constexpr int kInvenPhysicalBagCount = 6;
-constexpr int kInvenMaxPhysicalBagCount = 18;
 constexpr int kInvenSlotsPerBag = 16;
 constexpr size_t kInvenBagStride = 0x80;
 
 int physical_bag_limit() {
-    const int limit = qol::features::core_item::bags::native_bag_limit();
-    if (limit < kInvenPhysicalBagCount) return kInvenPhysicalBagCount;
-    return limit > kInvenMaxPhysicalBagCount ? kInvenMaxPhysicalBagCount : limit;
+    return std::max(qol::features::core_item::bags::native_bag_limit(),
+                    kInvenPhysicalBagCount);
 }
 
 // 纯内存读物理袋槽物品指针（bag 0..limit-1，含任务袋；越界/未就绪返回 nullptr）。
@@ -999,8 +998,9 @@ void* make_item_wrapper(int32_t category, int32_t arg2, int32_t flag) {
     return item;
 }
 
-// INVEN_RemoveItemData 快照条目上限：6 袋 × 16 槽。
-constexpr int kS2RemoveDataMaxEntries = kInvenMaxPhysicalBagCount * kInvenSlotsPerBag;
+// INVEN_RemoveItemData 快照最多覆盖 item port 声明的原生袋数及其槽位。
+constexpr int kS2RemoveDataMaxEntries = qol::contracts::kQolMaxNativeBagCount *
+                                        kInvenSlotsPerBag;
 
 struct S2RemoveDataCapture {
     bool armed = false;

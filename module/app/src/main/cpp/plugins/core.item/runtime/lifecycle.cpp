@@ -28,7 +28,7 @@ void log_message(const contracts::QolHostSdk* sdk, const char* message) {
     (void)sdk->log.write(1, 1, kPluginId, message, length);
 }
 
-// 物理扫描上界 = 原版袋数 + 改版袋数；原版客户端保持 6，C18 最多 18。
+// 物理扫描上界 = 原版袋数 + C18 探测到的追加袋数，最终夹到 item port 布局容量。
 void apply_native_bag_limit() {
     if (g_port == nullptr || g_port->read.bag_count == nullptr ||
         !contracts::qol_item_port_bag_space_size_valid(g_port)) {
