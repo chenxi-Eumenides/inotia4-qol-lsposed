@@ -1,7 +1,7 @@
 # 脚本目录规则
 
 - 根级入口：`build-debug.sh`（日常 Debug 构建）、`build-release.sh`（仅按仓库 Release 规则）、`patch-apk.sh`（生成集成 APK）。
-- `analysis/parse_qol_save.py`：解析 `.qol_save` 备份；`analysis/frida/save0-repair-patch.js`：已登记的可复用存档修复 patch；一次性逆向探针不保留在当前项目。
+- `analysis/parse_qol_save.py`：解析 `.qol.bak` 备份（旧 `.qol_save` 兼容）；`analysis/frida/save0-repair-patch.js`：已登记的可复用存档修复 patch；一次性逆向探针不保留在当前项目。
 - `verification/`：smoke、性能、回归和 live session。
 - `device/`：adb、设备启动、安装和触摸自动化。
 - `data/`：静态数据导出、校验和 assets 打包。

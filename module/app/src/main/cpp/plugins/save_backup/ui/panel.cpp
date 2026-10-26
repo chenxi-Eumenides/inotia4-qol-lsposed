@@ -4,6 +4,7 @@
 #include "../../../contracts/ui.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/save_backup/feature.h"
+#include "plugins/save_backup/usecases/backup_usecases.h"
 #include "plugins/save_backup/log.h"
 
 #include <algorithm>
@@ -218,116 +219,7 @@ void close_active_confirmation();
 // 列表按钮 rect 依赖当前页文件记录数，定义在 panel.inc。
 void sync_list_btn_rects_locked();
 
-// 解析单条 Entry JSON（纯 CPU；调用方按当前页队列逐条调用）。
-void parse_backups_json(const std::string& json, std::vector<BackupEntry>& entries) {
-    entries.clear();
-    // 极简解析：从 `{"ok":true,"backups":[...]}` 提取每个备份对象的 key。
-    // 注意：entry_json 内含双引号字符串 / 数字字段；按外层 {} 配对扫描。
-    size_t i = json.find("\"backups\":[");
-    if (i == std::string::npos) return;
-    i += std::string("\"backups\":[").size();
-    const size_t end = json.rfind(']');
-    if (end == std::string::npos || end <= i) return;
-    while (i < end) {
-        size_t open = json.find('{', i);
-        if (open == std::string::npos || open >= end) break;
-        size_t close = json.find('}', open);
-        if (close == std::string::npos || close >= end) break;
-        const std::string obj = json.substr(open, close - open + 1);
-        BackupEntry e;
-        auto find_str = [&](const char* key, std::string& out) {
-            const std::string pat = std::string("\"") + key + "\":\"";
-            size_t p = obj.find(pat);
-            if (p == std::string::npos) return false;
-            p += pat.size();
-            size_t q = obj.find('"', p);
-            if (q == std::string::npos) return false;
-            out = obj.substr(p, q - p);
-            return true;
-        };
-        auto find_int = [&](const char* key, long long& out) {
-            const std::string pat = std::string("\"") + key + "\":";
-            size_t p = obj.find(pat);
-            if (p == std::string::npos) return false;
-            p += pat.size();
-            char* endp = nullptr;
-            out = std::strtoll(obj.c_str() + p, &endp, 10);
-            return endp != obj.c_str() + p;
-        };
-        find_str("checksum", e.checksum);
-        find_str("map_name", e.map_name);
-        find_str("class_name", e.class_name);
-        long long v = 0;
-        if (find_int("hero_level", v)) e.hero_level = static_cast<int>(v);
-        if (find_int("class_idx", v)) e.class_idx = static_cast<int>(v);
-        if (find_int("map_id", v)) e.map_id = static_cast<int>(v);
-        if (find_int("export_time", v)) e.export_time_ms = v;
-        if (find_int("save_time", v)) e.save_time = v;
-        if (!e.checksum.empty()) entries.push_back(e);
-        i = close + 1;
-    }
-}
-
-bool parse_auto_json(const std::string& json, BackupEntry& entry) {
-    const size_t key = json.find("\"backup\":");
-    if (key == std::string::npos) return false;
-    const size_t open = json.find('{', key);
-    if (open == std::string::npos) return false;
-    const size_t close = json.find('}', open);
-    if (close == std::string::npos) return false;
-    std::vector<BackupEntry> parsed;
-    parse_backups_json(std::string("{\"backups\":[") + json.substr(open, close - open + 1) + "]}", parsed);
-    if (parsed.empty()) return false;
-    entry = parsed.front();
-    entry.parsed = true;
-    return true;
-}
-
-struct BackupFile {
-    std::string name;
-    uint64_t size = 0;
-    long long mtime_ms = 0;
-};
-
-void parse_backup_files_json(const std::string& json, std::vector<BackupFile>& files) {
-    files.clear();
-    const size_t key = json.find("\"files\":[");
-    if (key == std::string::npos) return;
-    size_t pos = key + std::strlen("\"files\":[");
-    const size_t end = json.rfind(']');
-    if (end == std::string::npos || end <= pos) return;
-    while (pos < end) {
-        const size_t open = json.find('{', pos);
-        if (open == std::string::npos || open >= end) break;
-        const size_t close = json.find('}', open);
-        if (close == std::string::npos || close >= end) break;
-        const std::string obj = json.substr(open, close - open + 1);
-        BackupFile file;
-        const size_t name_key = obj.find("\"name\":\"");
-        if (name_key != std::string::npos) {
-            const size_t value = name_key + std::strlen("\"name\":\"");
-            const size_t quote = obj.find('"', value);
-            if (quote != std::string::npos) file.name = obj.substr(value, quote - value);
-        }
-        auto read_number = [&](const char* field, long long& out) {
-            const std::string pattern = std::string("\"") + field + "\":";
-            size_t p = obj.find(pattern);
-            if (p == std::string::npos) return;
-            p += pattern.size();
-            char* endp = nullptr;
-            const long long value = std::strtoll(obj.c_str() + p, &endp, 10);
-            if (endp != obj.c_str() + p) out = value;
-        };
-        long long size = 0;
-        read_number("size", size);
-        read_number("mtime_ms", file.mtime_ms);
-        if (!file.name.empty() && size >= 0) {
-            file.size = static_cast<uint64_t>(size);
-            files.push_back(std::move(file));
-        }
-        pos = close + 1;
-    }
-}
+using BackupFile = ::save_backup::BackupFile;
 
 std::string backup_cache_key(const std::string& name, uint64_t size, long long mtime_ms) {
     return name + '\n' + std::to_string(size) + '\n' + std::to_string(mtime_ms);
@@ -357,10 +249,22 @@ void rebuild_parse_queue_locked() {
     }
 }
 
+void fill_backup_entry(const ::save_backup::Entry& src, BackupEntry& out) {
+    out.parsed = true;
+    out.checksum = src.checksum;
+    out.map_name = src.map_name;
+    out.hero_level = src.hero_level;
+    out.class_idx = src.class_idx;
+    out.class_name = src.class_name;
+    out.map_id = src.map_id;
+    out.export_time_ms = src.export_time_ms;
+    out.save_time = src.save_time;
+}
+
 void refresh_panel_data() {
-    const std::string json = save_backup_list_files_json();
+    const auto listed = ::save_backup::usecases::list_backup_files();
     std::vector<BackupFile> files;
-    parse_backup_files_json(json, files);
+    if (listed.ok) files = listed.value.files;
     std::lock_guard<std::mutex> lock(g_sbui_mtx);
     const std::string selected_name = g_selected_backup_name;
     std::map<std::string, BackupEntry> current_cache;
@@ -416,13 +320,14 @@ void process_one_parse_task() {
 
     BackupEntry parsed;
     bool ok = false;
-    std::string response;
     if (task.is_auto) {
-        response = save_backup_auto_entry_json(task.slot);
-        ok = parse_auto_json(response, parsed);
+        const auto result = ::save_backup::usecases::auto_entry(task.slot);
+        ok = result.ok;
+        if (ok) fill_backup_entry(result.value.entry, parsed);
     } else {
-        response = save_backup_entry_json(task.name.c_str());
-        ok = parse_auto_json(response, parsed);
+        const auto result = ::save_backup::usecases::describe_backup(task.name);
+        ok = result.ok;
+        if (ok) fill_backup_entry(result.value.entry, parsed);
         parsed.name = task.name;
         parsed.size = task.size;
         parsed.mtime_ms = task.mtime_ms;

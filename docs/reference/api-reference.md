@@ -1527,9 +1527,9 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 #### 存档备份（导出 / 列表 / 导入 / 删除）
 
-> 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qol_save` 备份，可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/qol/backups/`。
+> 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qol.bak` 备份（旧 `.qol_save` 继续识别/导入），可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/qol/backups/`。
 >
-> **备份标识 = `checksum`**：覆盖全部可还原内容段——bundle v3+ 为 `sha256(origPlain ‖ module ‖ warehouseBlob)`，v1/v2 旧备份为 `sha256(origPlain ‖ module)`（旧公式，warehouse 段不参与）；取前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol_save` 的末段。同一内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名，并在写盘/删除前按 bundle 内实际 payload 重算校验。
+> **备份标识 = `checksum`**：覆盖全部可还原内容段——bundle v3+ 为 `sha256(origPlain ‖ module ‖ warehouseBlob)`，v1/v2 旧备份为 `sha256(origPlain ‖ module)`（旧公式，warehouse 段不参与）；取前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol.bak` 的末段。同一内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名，并在写盘/删除前按 bundle 内实际 payload 重算校验。
 >
 > 导入仅在主菜单允许（`save.facts.current_slot == -1`）；导出任意时刻可调。模块保证原子写、CRC 校验与内容完整。
 
@@ -1537,7 +1537,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 `POST /api/system/backup/export`
 
-**用途**：把指定槽导出为 `.qol_save` 备份（原版存档解密为明文 + 模块 sidecar 原始字节 + 元数据 + CRC32）。
+**用途**：把指定槽导出为 `.qol.bak` 备份（原版存档解密为明文 + 模块 sidecar 原始字节 + 元数据 + CRC32）。旧版 `.qol_save` 备份继续可列出/导入/删除。
 
 **请求格式**：`{ "slot": 0 }`（0/1/2）
 
@@ -1553,7 +1553,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 { "ok": true, "backup": <BackupMeta>, "deduplicated": true }
 ```
 
-**注意**：先算出 `checksum`，再扫描 `qol/backups/*.qol_save`：任一既有备份的**内部 `checksum`（bundle metaJson 字段）**与新算值相同 → 不写入新文件直接返回；同 `checksum` 判定不依赖文件名，被重命名或带浏览器重名后缀（如 `(1)`）的副本同样命中（命中项的 payload 也会按上述规则重算校验）。不存在 → 按命名规则写入。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。导出持该槽的 slot operation lease，被占用→`slot operation unavailable`；sidecar 损坏/不可读→`module container unreadable`（不再生成“仅原版”备份）；warehouse 单文件读失败→`warehouse read failed`、单项超 4 MiB→`warehouse file too large`、数量/总量超 64 项/8 MiB→`warehouse limit exceeded`。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
+**注意**：先算出 `checksum`，再扫描 `qol/backups/*.qol.bak` 与旧 `*.qol_save`：任一既有备份的**内部 `checksum`（bundle metaJson 字段）**与新算值相同 → 不写入新文件直接返回；同 `checksum` 判定不依赖文件名，被重命名或带浏览器重名后缀（如 `(1)`）的副本同样命中（命中项的 payload 也会按上述规则重算校验）。不存在 → 按命名规则写入 `.qol.bak`。读取已落盘的 `save{slot}.dat` 与 sidecar，**不触发游戏保存**，任意时刻可调；备份内原版明文的槽位字段归一化为 `0xFF`，导入时写入目标槽。导出持该槽的 slot operation lease，被占用→`slot operation unavailable`；sidecar 损坏/不可读→`module container unreadable`（不再生成“仅原版”备份）；warehouse 单文件读失败→`warehouse read failed`、单项超 4 MiB→`warehouse file too large`、数量/总量超 64 项/8 MiB→`warehouse limit exceeded`。slot 越界→`bad slot`；槽为空或读取失败→`load failed`；写盘失败→`bundle write failed`。
 
 ##### 备份列表
 
@@ -1575,7 +1575,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **返回格式**：`{"ok":true,"backup":<BackupMeta>}`
 
-**注意**：**仅在主菜单允许**（`current_slot == -1`，否则 `import requires main menu`；槽状态读取失败→`save state unavailable`，fail-closed）。按 bundle **内部 `checksum`（metaJson 字段）**定位——目录下全部 `*.qol_save` 均为候选，逐个完整解析（含 CRC32 校验）后比对内部值，文件名不参与匹配（浏览器重名后缀 `(1)`、任意重命名均可导入）；仅 `metaJson` 缺失 `checksum` 字段的旧备份退回文件名 `_<checksum>.qol_save` 后缀。写入前按 bundle 版本重算 payload checksum，不一致→`backup checksum mismatch`；校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。备份标记 `module_state=0`（无 sidecar）时按完整替换语义清除目标槽现存 sidecar；`module_state=1` 时写入并覆盖。写入前把目标槽现存原版文件与 sidecar 复制到 `qol/backups/.rollback/`（事务 id 命名），任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
+**注意**：**仅在主菜单允许**（`current_slot == -1`，否则 `import requires main menu`；槽状态读取失败→`save state unavailable`，fail-closed）。按 bundle **内部 `checksum`（metaJson 字段）**定位——目录下全部 `*.qol.bak` 与旧 `*.qol_save` 均为候选，逐个完整解析（含 CRC32 校验）后比对内部值，文件名不参与匹配（浏览器重名后缀 `(1)`、任意重命名均可导入）；仅 `metaJson` 缺失 `checksum` 字段的旧备份退回文件名 `_<checksum>.qol.bak`/`.qol_save` 后缀。写入前按 bundle 版本重算 payload checksum，不一致→`backup checksum mismatch`；校验值非法→`bad checksum`；无此备份→`backup not found`；文件损坏→`backup unreadable or corrupt`；重加密失败→`encrypt failed`；原版写盘失败→`save file write failed`；sidecar 导入失败→`module container import failed`。备份标记 `module_state=0`（无 sidecar）时按完整替换语义清除目标槽现存 sidecar；`module_state=1` 时写入并覆盖。写入前把目标槽现存原版文件与 sidecar 复制到 `qol/backups/.rollback/`（事务 id 命名），任一步失败自动还原，成功后清理回滚副本；导入不自动刷新游戏内存态，主菜单下一次 `enter_slot`/`system/info` 会重载。
 
 ##### 删除备份
 
@@ -1892,6 +1892,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 - `POST /api/op/features/lifecycle`（P3 起即为票据语义）。
 - `/api/debug/extension_bag/` 下 7 条 POST 调试端点（`enter_view`、`exit_view`、`unequip`、`select_bag`、`click_item`、`equip`、`item`；阶段 5 批 5-2 回补为主线程 owner command）。
 - 世界写 5 条（`routes.inc` 中 owner `core.world`）：`/api/world/movement/` 下 `move_to`、`walk_dir`、`stop_move`、`interact_with` 四个 POST，以及 `/api/op/movement/teleport`（op 门控，403 信封同旧）。字段范围校验仍在投递前执行且文本不变（`x/y required`、`direction 0-3 required`、`map_id/x/y required`；非法 body → 400 `bad request`）。`move_to`/`walk_dir`/`interact_with` 成功 result 为 `{"ok":true,"player":{"map_id":N,"x":N,"y":N}}`；这是命令结束时读取的当前位置（像素坐标右移 4 位转 tile），不承诺已到达目标。失败保留原错误体；`stop_move` 成功 result 为 `{"ok":true}`，teleport 保留原始 op JSON。`teleport` 为真实切图（owner 命令在逻辑相位内联执行）。
+- 存档备份写 3 条（owner `save_backup`）：`POST /api/system/backup/export`、`POST /api/system/backup/import`、`POST /api/system/backup/delete`。参数校验不变（`bad slot`/`bad checksum` → 400）；native 立即返回 `{"ok":true,"ticket":N}`，原 `BackupMeta` 响应经 §7.9 `result` 回取。Kotlin `SaveController` 内部轮询票据并保持对外同步 JSON 形状；`GET /api/system/backup/list` 仍同步。
 - `POST /api/system/save`、`POST /api/system/enter_slot`、`POST /api/system/create_slot`（owner `core.save`）。`enter_slot`/`create_slot` 为转场类写：结果在**游戏世界态提交后**结算；结算前票据保持 `pending`（最长约 2s，超限以 `result:{"ok":false,"error":"settlement timeout"}` 失败，不提前报告 done）；`save` 不涉转场，当帧结算。参数校验不变（`slot` ∉ [0,2] → 400 `slot required (0-2)`；非法/空 body → 400 `bad request`）。成功 result 分别为 `{"ok":true,"slot":S,"sidecar":"ensured"}`、`{"ok":true,"slot":S,"entered":true}`、`{"ok":true,"slot":S,"created":true}`；不返回 Player 快照。失败仍为原错误体，包括 sidecar 错误。
 - `POST /api/quest/quit_quest`（阶段 5 批 5-3；owner `quest`）。缺/负 `quest_id` → 400 `questId required`（投递前校验，与迁移前一致）；成功 `{"ok":true,"ticket":N}`，`result` 为 `{"ok":true,"state":<Player>}`；无任务 → 票据 `state=failed` 且 `result={"ok":false,"error":"quest not found"}`。
 - 对话写 2 条（阶段 5 批 5-7a 迁移；批 5-8a 起 owner 为 `core.ui_state`）：`/api/ui/dialog/select`、`/api/ui/start_interact`。`dialog/select` 缺 `action` 且 `index<0` → 400 `action or index required`（投递前校验，与迁移前一致）；非法 body → 400 `bad request`。原响应为**原始 op JSON**（如成功 `{"ok":true,"result":"dialog_shown"}`、无对话 `{"ok":false,"error":"no dialog"}`），经票据 `result` 回取。**同意页（Java 窗口）分支仍留在 Kotlin 传输层**（`UiActivityTracker` 平台检测，JVM-only）：该分支不经票据，直接返回 `{"ok":true,"result":"close_dispatched"}` 或 `agreement window unavailable` / `no such option in agreement`。

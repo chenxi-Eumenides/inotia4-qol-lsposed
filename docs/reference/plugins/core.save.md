@@ -57,7 +57,7 @@ descriptor 不声明 required/optional capability；它发布以上三个 capabi
 ## 4. 职责边界
 
 - `core.save` 拥有存档事实 capability、进档/建档转换、保存参与者顺序与三条 system save 写路由；低层原版读写通过 Game Host ports/Adapter 完成，不在 HTTP 线程直接写游戏内存（`module/app/src/main/cpp/plugins/core.save/plugin.cpp:153-228,354-397,441-447`）。
-- `save.slot_data` 是消费者 section 的会话/保存参与机制，不是 `.qol_save` 备份管理 API；备份文件格式、外部目录、去重与恢复归 `save_backup`，契约见 API 参考 §7.3 的“存档备份”小节及 `module/app/src/main/cpp/plugins/save_backup/`。
+- `save.slot_data` 是消费者 section 的会话/保存参与机制，不是 `.qol.bak` 备份管理 API；备份文件格式、外部目录、去重与恢复归 `save_backup`，契约见 API 参考 §7.3 的“存档备份”小节及 `module/app/src/main/cpp/plugins/save_backup/`。
 - 回主菜单命令归 `core.ui_state`；Host 管理存储及 Adapter 受控原版 save/evidence 端口是协作边界，不把 `core.save` 描述为 socket、通用路由或配置存储 owner（`ARCHITECTURE.md` §5.2；API 参考 §7.10）。
 
 ## 5. 读写线程与生命周期

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -16,6 +17,7 @@
 #include "../../contracts/runtime_hooks.h"
 #include "../../contracts/ui.h"
 #include "../../contracts/ui_confirmation.h"
+#include "api/commands.h"
 #include "bundle.h"
 #include "feature.h"
 #include "log.h"
@@ -25,6 +27,8 @@ namespace qol::features::save_backup {
 namespace {
 
 #define SB_LOG(...) SAVE_BACKUP_LOG_INFO(__VA_ARGS__)
+
+namespace api = ::save_backup::api;
 
 constexpr const char* kPluginId = "save_backup";
 constexpr const char* kPluginVersion = "0.1.0";
@@ -93,6 +97,9 @@ std::atomic<bool> g_active{true};
 
 // 主线程槽元数据刷新任务（RenderPre，每 30 帧）；0 表示未注册。
 uint64_t g_slot_meta_task = 0;
+
+// typed result 命令注册状态；install/deactivate 对称注销。
+bool g_commands_registered = false;
 
 // save.pre_save 观察者：保存前自动备份。
 const contracts::SavePreSaveApi* g_pre_save_api = nullptr;
@@ -180,6 +187,48 @@ QolResult sb_http_body(contracts::HttpRes* response, const std::string& body) {
     return contracts::ok();
 }
 
+QolResult sb_http_ticket(contracts::HttpRes* response, uint64_t ticket) {
+    const std::string body = api::ticket_json(ticket);
+    if (body.empty()) return sb_http_error(response, 500, "http response buffer too small");
+    return sb_http_body(response, body);
+}
+
+bool sb_copy_result(const std::string& result, char* out, uint32_t capacity, uint32_t* out_size) {
+    return api::copy_result(result, out, capacity, out_size);
+}
+
+bool sb_export_command(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                       uint32_t* out_size) {
+    if (payload == nullptr || size != sizeof(api::ExportPayload)) return false;
+    api::ExportPayload request{};
+    std::memcpy(&request, payload, sizeof(request));
+    return sb_copy_result(save_backup_export_json(request.slot), out, capacity, out_size);
+}
+
+bool sb_import_command(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                       uint32_t* out_size) {
+    if (payload == nullptr || size != sizeof(api::ImportPayload)) return false;
+    api::ImportPayload request{};
+    std::memcpy(&request, payload, sizeof(request));
+    return sb_copy_result(save_backup_import_json(request.checksum, request.slot), out, capacity,
+                          out_size);
+}
+
+bool sb_delete_command(void*, const uint8_t* payload, uint32_t size, char* out, uint32_t capacity,
+                       uint32_t* out_size) {
+    if (payload == nullptr || size != sizeof(api::DeletePayload)) return false;
+    api::DeletePayload request{};
+    std::memcpy(&request, payload, sizeof(request));
+    return sb_copy_result(save_backup_delete_json(request.checksum), out, capacity, out_size);
+}
+
+bool sb_post_command(uint32_t command_id, const void* payload, uint32_t size, uint64_t* ticket) {
+    const auto* sdk = save_backup_host_sdk();
+    if (sdk == nullptr || sdk->commands.post_typed == nullptr || ticket == nullptr) return false;
+    return contracts::succeeded(sdk->commands.post_typed(command_id, payload, size, ticket)) &&
+           *ticket != 0;
+}
+
 QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes* response,
                           void* ctx) {
     if (request == nullptr || response == nullptr || ctx == nullptr) {
@@ -199,11 +248,17 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
     switch (kind) {
         case SbHttpRoute::kList:
             return sb_http_body(response, save_backup_list_json());
-        case SbHttpRoute::kExport:
+        case SbHttpRoute::kExport: {
             if (!::save_backup::json_find_slot(body, slot)) {
                 return sb_http_error(response, 400, "bad slot");
             }
-            return sb_http_body(response, save_backup_export_json(slot));
+            const api::ExportPayload payload{slot};
+            uint64_t ticket = 0;
+            if (!sb_post_command(api::kCmdExport, &payload, sizeof(payload), &ticket)) {
+                return sb_http_error(response, 500, "command unavailable");
+            }
+            return sb_http_ticket(response, ticket);
+        }
         case SbHttpRoute::kImport: {
             std::string checksum;
             if (!sb_extract_string(body, "checksum", &checksum) ||
@@ -213,7 +268,14 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
             if (!::save_backup::json_find_slot(body, slot)) {
                 return sb_http_error(response, 400, "bad slot");
             }
-            return sb_http_body(response, save_backup_import_json(checksum.c_str(), slot));
+            api::ImportPayload payload{};
+            payload.slot = slot;
+            std::memcpy(payload.checksum, checksum.data(), checksum.size());
+            uint64_t ticket = 0;
+            if (!sb_post_command(api::kCmdImport, &payload, sizeof(payload), &ticket)) {
+                return sb_http_error(response, 500, "command unavailable");
+            }
+            return sb_http_ticket(response, ticket);
         }
         case SbHttpRoute::kDelete: {
             std::string checksum;
@@ -221,7 +283,13 @@ QolResult sb_http_handler(const contracts::HttpReq* request, contracts::HttpRes*
                 !::save_backup::valid_checksum(checksum)) {
                 return sb_http_error(response, 400, "bad checksum");
             }
-            return sb_http_body(response, save_backup_delete_json(checksum.c_str()));
+            api::DeletePayload payload{};
+            std::memcpy(payload.checksum, checksum.data(), checksum.size());
+            uint64_t ticket = 0;
+            if (!sb_post_command(api::kCmdDelete, &payload, sizeof(payload), &ticket)) {
+                return sb_http_error(response, 500, "command unavailable");
+            }
+            return sb_http_ticket(response, ticket);
         }
     }
     return sb_http_error(response, 400, "bad request");
@@ -249,6 +317,36 @@ const contracts::HttpEndpointDescriptor kSbHttpEndpoints[] = {
      &kSbHttpRouteKinds[3]},
 };
 
+bool sb_register_commands(const qol::contracts::QolHostSdk* sdk) {
+    if (sdk == nullptr || sdk->ticket_result.register_typed_result_handler == nullptr ||
+        sdk->ticket_result.unregister_typed_result_handler == nullptr) {
+        return false;
+    }
+    if (!qol::contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
+            api::kCmdExport, &sb_export_command, nullptr))) {
+        return false;
+    }
+    if (!qol::contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
+            api::kCmdImport, &sb_import_command, nullptr))) {
+        (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdExport);
+        return false;
+    }
+    if (!qol::contracts::succeeded(sdk->ticket_result.register_typed_result_handler(
+            api::kCmdDelete, &sb_delete_command, nullptr))) {
+        (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdExport);
+        (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdImport);
+        return false;
+    }
+    return true;
+}
+
+void sb_unregister_commands(const qol::contracts::QolHostSdk* sdk) {
+    if (sdk == nullptr || sdk->ticket_result.unregister_typed_result_handler == nullptr) return;
+    (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdExport);
+    (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdImport);
+    (void)sdk->ticket_result.unregister_typed_result_handler(api::kCmdDelete);
+}
+
 int plugin_install(contracts::PluginContext& ctx) {
     const void* ui_components_iface = nullptr;
     const void* save_facts_iface = nullptr;
@@ -256,6 +354,9 @@ int plugin_install(contracts::PluginContext& ctx) {
     const void* world_facts_iface = nullptr;
     const void* ui_confirmation_iface = nullptr;
     if (ctx.sdk == nullptr || ctx.game == nullptr || ctx.sdk->capabilities.require == nullptr ||
+        ctx.sdk->abi.size < sizeof(contracts::QolHostSdk) || ctx.sdk->abi.minor < 9 ||
+        ctx.sdk->ticket_result.register_typed_result_handler == nullptr ||
+        ctx.sdk->ticket_result.unregister_typed_result_handler == nullptr ||
         !contracts::succeeded(ctx.sdk->capabilities.require(
             contracts::kUiComponentsCapabilityId,
             {contracts::kUiContractMajor, contracts::kUiContractMinor},
@@ -320,6 +421,12 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     save_backup_bind_context(ctx.sdk, save_facts, save_call, ctx.game, ctx.owner_token);
     save_backup_bind_world_facts(world_facts);
+    if (!sb_register_commands(ctx.sdk)) {
+        save_backup_bind_world_facts(nullptr);
+        save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
+        return 1;
+    }
+    g_commands_registered = true;
     g_active.store(true, std::memory_order_release);
     if (g_pre_save_observer == 0) {
         uint64_t observer = 0;
@@ -327,6 +434,10 @@ int plugin_install(contracts::PluginContext& ctx) {
                 pre_save->register_observer(ctx.owner_token, &pre_save_cb, nullptr, &observer)) ||
             observer == 0) {
             g_active.store(false, std::memory_order_release);
+            if (g_commands_registered) {
+                sb_unregister_commands(ctx.sdk);
+                g_commands_registered = false;
+            }
             save_backup_bind_world_facts(nullptr);
             save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
             return 1;
@@ -343,6 +454,10 @@ int plugin_install(contracts::PluginContext& ctx) {
         }
         g_pre_save_observer = 0;
         g_pre_save_api = nullptr;
+        if (g_commands_registered) {
+            sb_unregister_commands(ctx.sdk);
+            g_commands_registered = false;
+        }
         save_backup_bind_world_facts(nullptr);
         save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);
         return 1;
@@ -376,6 +491,10 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     savebackup_set_ui_components(nullptr);
     savebackup_set_ui_confirmation_api(nullptr);
     g_active.store(false, std::memory_order_release);
+    if (g_commands_registered) {
+        sb_unregister_commands(ctx.sdk);
+        g_commands_registered = false;
+    }
     if (g_slot_meta_task != 0 && ctx.sdk != nullptr && ctx.sdk->scheduler.remove != nullptr) {
         (void)ctx.sdk->scheduler.remove(g_slot_meta_task);
     }

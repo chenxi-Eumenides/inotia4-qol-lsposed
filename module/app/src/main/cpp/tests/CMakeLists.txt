@@ -194,8 +194,15 @@ add_test(NAME save_transaction_tests COMMAND save_transaction_tests)
 add_executable(save_backup_gate_tests
     test_save_backup_gate.cpp
     ${CPP_DIR}/plugins/save_backup/backup_files.cpp
+    ${CPP_DIR}/plugins/save_backup/api/json_codec.cpp
     ${CPP_DIR}/plugins/save_backup/feature.cpp
     ${CPP_DIR}/plugins/save_backup/bundle.cpp
+    ${CPP_DIR}/plugins/save_backup/persistence/persistence.cpp
+    ${CPP_DIR}/plugins/save_backup/port/save_port.cpp
+    ${CPP_DIR}/plugins/save_backup/state/state.cpp
+    ${CPP_DIR}/plugins/save_backup/transaction/transactions.cpp
+    ${CPP_DIR}/plugins/save_backup/usecases/backup_usecases.cpp
+    ${CPP_DIR}/plugins/save_backup/usecases/meta_backfill.cpp
     ${CPP_DIR}/infra/store.cpp
     ${CPP_DIR}/infra/slot_operation_gate.cpp
     ${CPP_DIR}/host/owner_identity.cpp

@@ -17,6 +17,7 @@
 #include "host/owner_identity.h"
 #include "infra/slot_operation_gate.h"
 #include "infra/store.h"
+#include "plugins/save_backup/api/commands.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/save_backup/backup_files.h"
 
@@ -373,6 +374,23 @@ std::string make_bundle(const std::string& external_root, const std::string&,
 }  // namespace
 
 int main() {
+    // ---- L6：typed command payload / 票据 ACK 契约 ----
+    {
+        CHECK(save_backup::api::ticket_json(7) == "{\"ok\":true,\"ticket\":7}");
+        CHECK(sizeof(save_backup::api::ExportPayload) == sizeof(int32_t));
+        CHECK(sizeof(save_backup::api::ImportPayload) >= sizeof(int32_t) + 13);
+        CHECK(sizeof(save_backup::api::DeletePayload) == 13);
+        save_backup::api::ImportPayload import{};
+        import.slot = 2;
+        std::memcpy(import.checksum, "89abcdef0123", 12);
+        CHECK(import.checksum[12] == '\0');
+        CHECK(std::string(import.checksum) == "89abcdef0123");
+        char out[16] = {};
+        uint32_t out_size = 0;
+        CHECK(save_backup::api::copy_result("{\"ok\":true}", out, sizeof(out), &out_size));
+        CHECK(std::string(out, out_size) == "{\"ok\":true}");
+        CHECK(!save_backup::api::copy_result("0123456789abcdefg", out, sizeof(out), &out_size));
+    }
     static_assert(sizeof(kSaveBackupRouteFacts) / sizeof(kSaveBackupRouteFacts[0]) == 4);
     const char* const route_paths[] = {
         "/api/system/backup/export", "/api/system/backup/list",

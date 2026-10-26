@@ -10,7 +10,7 @@
 #include "../../contracts/game_ports/save_call_port.h"
 
 // 存档管理器备份 feature（save-backup）：
-// .qol_save bundle 的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
+// .qol.bak bundle（旧 .qol_save 兼容）的导出/导入/列表/删除全部收口本层（文件 IO + 游戏加解密 + 事务回滚），
 // 返回值即 HTTP 响应 JSON（{"ok":true,...} / {"ok":false,"error":"..."}）。
 // 依赖方向：feature → Host SDK（结果与 sidecar 容器）+ save.facts + save_call port；
 // Game Host 仅保留 warehouse companion 文件状态查询，不承载存档域语义。
@@ -31,8 +31,8 @@ void save_backup_refresh_slot_meta_cache();
 bool save_backup_export_slot_to_dir(int32_t slot, const char* dir, const char* file_name,
                                     std::string* out_error);
 
-// save.pre_save 观察者入口：主线程导出当前槽到 backups/autobackup/autosave_s<N>.qol_save，
-// 每槽 1 份原子覆盖；失败只记 WARN，不阻断保存。
+// save.pre_save 观察者入口：主线程导出当前槽到 backups/autobackup/autosave_s<N>.qol.bak
+//（旧 .qol_save 继续读取/导入）。每槽 1 份原子覆盖；失败只记 WARN，不阻断保存。
 void save_backup_autobackup_pre_save(int32_t slot);
 
 // 插件装配期注入 Host SDK / Game Host；业务回调通过该上下文访问宿主适配面。
@@ -96,7 +96,7 @@ std::string save_backup_delete_json(const char* checksum);
 
 // 游戏删档回调（SaveSlot_Delete）PtrHook wrapper 的 sidecar 同步体：
 // 游戏内存档面板删档确认后，按槽删除模块 sidecar（slot-{n}.qol-save + .last-good）并标记槽区 stale。
-// 由插件删档 PtrHook wrapper 在原函数返回后调用（锁序 g_sb_mtx → store）；slot 越界直接返回。
+// 由插件删档 PtrHook wrapper 在原函数返回后调用（锁序 file_mutex → store）；slot 越界直接返回。
 void save_backup_slot_deleted_sync(int32_t slot);
 
 // 删除指定槽的游戏存档（原版 save{slot}.dat + 模块 sidecar slot-{slot}.qol-save/.last-good）。

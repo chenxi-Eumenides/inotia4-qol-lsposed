@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-// save-backup 纯逻辑层：.qol_save bundle 编解码、摘要/校验原语、极简 metaJson 字段提取。
+// save-backup 纯逻辑层：.qol.bak bundle 编解码、摘要/校验原语、极简 metaJson 字段提取。
 // 零游戏/Android 依赖（纯 STL，编入 host 单测）；文件 IO 与游戏函数调用在 feature.cpp。
 //
 // bundle 布局（大端，与 docs/archive/development/plugins/save-backup.md §3 一致）：
@@ -249,7 +249,7 @@ std::string json_escape(const std::string& value);
 
 // 从解析结果取 meta：bundle 头提供 source_slot/export_time/size；
 // metaJson 提供其余字段（缺省值与 Kotlin 一致）；checksum 以 metaJson 为权威、
-// 文件名 `_([0-9a-f]{12}).qol_save` 后缀兜底。
+// 文件名 `_([0-9a-f]{12}).qol.bak`（旧 `.qol_save` 兼容）后缀兜底。
 void entry_from_bundle(const std::string& file_name, const ParsedBundle& p, Entry& out);
 
 // ---- 极简扁平 JSON 字段提取器（值只有数字与带引号字符串）----
@@ -264,12 +264,12 @@ bool json_find_slot(const std::string& json, int& out);
 
 // ^[0-9a-f]{12}$
 bool valid_checksum(const std::string& value);
-// 从文件名后缀 `_([0-9a-f]{12}).qol_save` 提取 checksum。
+// 从文件名后缀 `_([0-9a-f]{12}).qol.bak`（旧 `.qol_save` 兼容）提取 checksum。
 bool extract_checksum_from_name(const std::string& file_name, std::string& out);
 
 // 判定候选备份是否对应目标 checksum：以 bundle 内部 metaJson 的 `checksum` 字段为权威
 //（parse_bundle 已通过 CRC32 门禁，该字段与文件内容一致）；metaJson 缺失该字段或其值
-// 非法的旧备份，退回文件名 `_([0-9a-f]{12}).qol_save` 后缀。file_name 为不含目录的目录项名。
+// 非法的旧备份，退回文件名 `_([0-9a-f]{12}).qol.bak`/`.qol_save` 后缀。file_name 为不含目录的目录项名。
 // 目标 checksum 非法时直接返回 false。
 bool bundle_matches_checksum(const std::string& file_name, const ParsedBundle& parsed,
                              const std::string& checksum);

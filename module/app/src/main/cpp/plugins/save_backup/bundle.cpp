@@ -1082,19 +1082,27 @@ bool valid_checksum(const std::string& value) {
 }
 
 bool extract_checksum_from_name(const std::string& file_name, std::string& out) {
-    // `_([0-9a-f]{12}).qol_save$`
-    constexpr size_t kPat = 12 + 10;  // '_' + 12 hex + ".qol_save"
-    if (file_name.size() < kPat) return false;
-    if (!ends_with(file_name, ".qol_save", 9)) return false;
-    const size_t start = file_name.size() - 9 - 12;
-    if (file_name[start - 1] != '_') return false;
-    for (size_t i = 0; i < 12; ++i) {
-        const char c = file_name[start + i];
-        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-        if (!ok) return false;
+    // `_([0-9a-f]{12})` + 新 `.qol.bak` 或旧 `.qol_save` 后缀。
+    static constexpr const char* kSuffixes[] = {".qol.bak", ".qol_save"};
+    for (const char* suffix : kSuffixes) {
+        const size_t suffix_len = std::strlen(suffix);
+        if (file_name.size() < suffix_len + 13) continue;  // '_' + 12 hex + suffix
+        if (!ends_with(file_name, suffix, suffix_len)) continue;
+        const size_t start = file_name.size() - suffix_len - 12;
+        if (start < 1 || file_name[start - 1] != '_') continue;
+        bool hex_ok = true;
+        for (size_t i = 0; i < 12; ++i) {
+            const char c = file_name[start + i];
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) {
+                hex_ok = false;
+                break;
+            }
+        }
+        if (!hex_ok) continue;
+        out = file_name.substr(start, 12);
+        return true;
     }
-    out = file_name.substr(start, 12);
-    return true;
+    return false;
 }
 
 bool bundle_matches_checksum(const std::string& file_name, const ParsedBundle& parsed,

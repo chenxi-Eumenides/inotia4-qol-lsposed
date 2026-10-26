@@ -1,5 +1,6 @@
 package com.inotia4.qol.api.controller
 
+import com.inotia4.qol.NativeBridge
 import com.inotia4.qol.service.ApiServices
 import com.inotia4.qol.service.info.NativeHttpCommand
 import com.inotia4.qol.service.info.NativeHttpQuery
@@ -44,7 +45,7 @@ class SaveController {
         val o = JsonUtil.parseBody(body)
         strictBackupSlot(o)
         return ControllerGuard.guard {
-            NativeHttpCommand.post("/api/system/backup/export", o?.toString() ?: "{}")
+            postAndAwait("/api/system/backup/export", o?.toString() ?: "{}")
         }
     }
 
@@ -59,7 +60,7 @@ class SaveController {
         val checksum = o.optString("checksum")
         if (!CHECKSUM_PATTERN.matches(checksum)) throw ApiException(StatusCode.SC_BAD_REQUEST, "bad checksum")
         return ControllerGuard.guard {
-            NativeHttpCommand.post("/api/system/backup/import", o.toString())
+            postAndAwait("/api/system/backup/import", o.toString())
         }
     }
 
@@ -69,8 +70,41 @@ class SaveController {
         val checksum = o?.optString("checksum").orEmpty()
         if (!CHECKSUM_PATTERN.matches(checksum)) throw ApiException(StatusCode.SC_BAD_REQUEST, "bad checksum")
         return ControllerGuard.guard {
-            NativeHttpCommand.post("/api/system/backup/delete", o?.toString() ?: "{}")
+            postAndAwait("/api/system/backup/delete", o?.toString() ?: "{}")
         }
+    }
+
+    /**
+     * 写端点票据化：native 立即返回 {"ok":true,"ticket":N}，主线程执行完成后经
+     * GET /api/system/tickets/{id} 回取原 JSON 结果。对外响应形状保持不变。
+     */
+    private fun postAndAwait(path: String, body: String): String {
+        val ack = JsonUtil.parseObj(NativeHttpCommand.post(path, body))
+            ?: throw ApiException(StatusCode.SC_SERVICE_UNAVAILABLE, "not ready")
+        val ticket = ack.optLong("ticket", 0L)
+        if (ticket <= 0L) return ack.toString()
+        val deadline = System.currentTimeMillis() + 15_000L
+        while (System.currentTimeMillis() < deadline) {
+            val state = JsonUtil.parseObj(NativeBridge.nativeTicketStateJson(ticket))
+                ?: throw ApiException(StatusCode.SC_SERVICE_UNAVAILABLE, "ticket unavailable")
+            when (state.optString("state")) {
+                "done", "failed" -> {
+                    val result = state.opt("result")
+                    if (result != null) return result.toString()
+                    return if (state.optString("state") == "failed") {
+                        JsonUtil.err("backup command failed")
+                    } else {
+                        "{\"ok\":true}"
+                    }
+                }
+                "unknown", "expired" -> throw ApiException(
+                    StatusCode.SC_SERVICE_UNAVAILABLE,
+                    "ticket ${state.optString("state")}",
+                )
+            }
+            Thread.sleep(20L)
+        }
+        throw ApiException(StatusCode.SC_SERVICE_UNAVAILABLE, "ticket timeout")
     }
 
     companion object {

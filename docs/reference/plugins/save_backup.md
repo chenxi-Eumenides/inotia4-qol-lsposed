@@ -1,98 +1,317 @@
-# `save_backup` 插件
+# `save_backup` 插件（唯一权威文档）
 
-## 1. 作用与 owner 定位
+> 本文是 `save_backup` 的设计、架构、能力、职责、数据与验收的唯一权威来源。
+> 代码路径：`module/app/src/main/cpp/plugins/save_backup/`。
+> 文档中的行号/文件名只在需要定位实现时使用；行为以本文为准。
 
-`save_backup` 是存档备份管理的功能插件，注册 ID `save_backup`、版本 `0.1.0`（`module/app/src/main/cpp/plugins/save_backup/plugin.cpp:26-27`）。它负责 `.qol_save` 备份文件的导出、列表、导入与删除，以及游戏内存档备份面板和“内存档面板删档后同步清理 sidecar”的挂钩；存档事实、进档/建档与保存协调仍归 `core.save`（`docs/reference/plugins/core.save.md:59`；边界见 §4）。
+## 1. 定位与职责
 
-插件无配置项：descriptor 不声明 config，`g_active` 只用于状态上报，不门控 HTTP 或面板（`plugin.cpp:72-73,327-330,376-378`）。
+`save_backup`（插件 ID `save_backup`，版本 `0.1.0`）是存档备份管理插件：把原版 `save{slot}.dat` 的明文、模块 sidecar 与元信息打包为自包含 `.qol.bak`，并负责列出、导入、删除、自动备份和游戏内备份面板。插件无配置项；`g_active` 只用于状态上报，不门控 HTTP 或 UI。
 
-## 2. 功能面
+**属于本插件：**
 
-### HTTP 路由
+- `.qol.bak` bundle 格式、编解码、CRC32 与 checksum。
+- `externalFilesDir/qol/backups/` 目录、去重、导出/导入/删除、自动备份。
+- 旧备份 `.qol_save` 的读取/导入/删除兼容。
+- 旧 metaJson 的职业/等级回填（只改 meta 段）。
+- 游戏内备份面板、设置页「存档备份」入口。
+- 游戏内存档面板删档后的 sidecar/wh4 清理 GOT wrapper。
+- 面板槽卡的文件级状态判定（空/损坏/有效）。
 
-descriptor 通过 `http_endpoints` 声明四条端点，由宿主在插件 enabled 时注册、停用时置路由墓碑摘除；插件不自注册，也不自行注销（`plugin.cpp:122-124,226-239,379-381`）。`routes.inc` 是同一组路由的静态清单（`module/app/src/main/cpp/plugins/save_backup/routes.inc:1-4`）。
+**不属于本插件：**
 
-| 方法 | 路径 | 入口 | 参数校验 | 失败语义 |
-|---|---|---|---|---|
-| GET | `/api/system/backup/list` | `sb_http_handler` list 分支（`plugin.cpp:181-182`） | 无 | 目录不可用/不可读时仍返回 `{"ok":true,"backups":[]}` |
-| POST | `/api/system/backup/export` | export 分支（`plugin.cpp:183-187`） | `slot` 必须为整数且 ∈[0,2]，否则 400 `bad slot` | 业务失败为 200 + `{"ok":false,"error":...}` |
-| POST | `/api/system/backup/import` | import 分支（`plugin.cpp:188-197`） | `checksum` 满足 `^[0-9a-f]{12}$`，再校验 `slot`；错误依次为 400 `bad checksum` / `bad slot` | 同上；非主菜单时业务错误 `import requires main menu` |
-| POST | `/api/system/backup/delete` | delete 分支（`plugin.cpp:199-206`） | `checksum` 同上，否则 400 `bad checksum` | 同上 |
+- 存档槽事实、`save`/`enter_slot`/`create_slot` 写路由（`core.save`）。
+- sidecar MSAV 容器的实际读写/原子写/last-good/quarantine（native `infra/store`）。
+- 面板栈、PopupState、控件绘制（`core.custom_ui` / `ui_panels`）。
+- HTTP 路由注册/墓碑/dispatch（`core.api` / 宿主）。
+- 游戏明文格式的逆向定义（见 `docs/reference/game/save.md`）。
 
-- handler 同步执行，**不创建票据**，无异步结算与超时（`plugin.cpp:172-213`）。
-- 空 request/response/context 返回 400 `bad request`；`body == nullptr && body_len > 0` 返回 400；响应缓冲不足返回内部错误并置 500（`plugin.cpp:152-173,172-180`）。
-- `slot` 由严格整数 token 解析（`bundle.h` 的 `json_find_slot`）：拒绝小数、指数、十六进制、尾随字符、溢出、负数与 >2（`bundle.cpp:846-892,1030-1038`）。
-- 成功响应统一经 `sb_http_body` 置 HTTP 200；业务错误在 body 内表达，因此“参数错误 400”与“业务错误 200”是两种状态（`plugin.cpp:165-173`）。
-- **导入仅在主菜单允许**：优先读 `world.facts.state`，`state == 4`（main_menu）放行，其它状态拒绝；读取失败时回退 `save.facts.current_slot`（<0 放行、>=0 拒绝）并记录日志（`feature.cpp` `import_allowed_now`）。导出不受此限制。
+## 2. 分层架构
 
-参数、响应体与错误文案的公共契约以 [API 参考「存档备份」小节（`docs/reference/api-reference.md:1509-1580`）](../api-reference.md) 为准；路由与 Kotlin 入口映射见 `docs/refactor/api-route-map.md:145-148`。
+只允许高层 include 低层。`feature.cpp` 是公共 API facade，不是业务实现。
 
-### Capabilities、ports 与资源
-
-| 面 | 内容 |
-|---|---|
-| required capabilities | `ui_panels` 1.3、`ui_components`、`world.facts` 2.0、`save.facts` 1.1、`save.pre_save` 1.0（`plugin.cpp:32-50`） |
-| optional_requires | `http.registry`、`http.dispatch`（`plugin.cpp:42-47,365`） |
-| provides | 无（`plugin.cpp:366`） |
-| ports | `QOL_PORT_SAVE_CALL` 1.0（`plugin.cpp:49-52,375-376`）；不声明 `QOL_PORT_SAVE_WRITE` |
-| 资源 | `ptrslot:SAVESLOT_DELETE_GOT`（kPtrSlot，private/required/fail-closed/resumable）、`own:popup.savebackup`（kOwnership，private/required/fail-soft/resumable）（`plugin.cpp:100-129`） |
-| descriptor JNI | `jni=0`；旧 `nativeBackupList/Export/Import/Delete` 已删除，无遗留备份 JNI（`plugin.cpp:368`） |
-
-`install` 要求 `ui_panels`/`save.facts` 能力可用、恰好一个 save-call port，并校验 `free_data`/`encrypt`/`mark_stale`/`load_data`/`slot_exists`/`hub_key`/`current_slot` 函数指针，任一不满足即安装失败（`plugin.cpp:241-279`）。插件使用 `save.facts.load_data/slot_exists/slot_hero_index/hero_level/hero_class/hub_key/current_slot`；备份导出仍从 `load_data` 明文按原格式解析 `save_time`，不依赖新增的按槽时间读取函数；`QOL_PORT_SAVE_CALL` 提供 `write.free_data/encrypt/mark_stale`（`contracts/save_facts.h:15-40`；`contracts/game_ports/save_call_port.h:11-21`）。
-
-### 游戏内面板与设置入口
-
-- 面板 provider：`panel_id="save_backup"`、owner=`save_backup`，install 时经 `sdk->panels.register_provider` 注册，deactivate 时 `unregister_owner`（`plugin.cpp:54-62,266-279,284-301`）。
-- 面板由 `own:popup.savebackup` 占用 PopupState 死条目承载，acquire 注入、release 写回快照（`plugin.cpp:64-69,116-128`；`ui/panel.cpp:655-697`）。
-- 设置入口为 descriptor feature `save_backup.open_manager`：默认 `1`、分类 Tools、类型 entry、标题「存档备份」、说明「打开存档备份管理器。」、按钮「打开」、priority `-2`；回调经 `ui_panels.open("save_backup")` 打开面板（`plugin.cpp:333-359`）。该入口在 settings 注册表中的位置见 `docs/reference/plugins/settings.md:107`。
-- `settings_contribution.cpp` 的 catalog 注册为空实现（`settings_contribution.cpp:3-7`）。
-- 面板布局：左列 3 个存档槽卡片；中列竖排「导出/删除/导入」；右列顶部为跟随选中槽的 `auto` 自动备份卡片，下方为手动备份列表（每页 5 项，底部左右方向键与页码、标准导航返回）。所有框使用 `ui_components` 的 `draw_container`（圆角金框、无装饰角）；返回用 `nav_button`、翻页用 `arrow_button`、操作/确认按钮用 `text_button`，不再自绘按钮与边框。列表按需解析：打开时只枚举文件名，当前页逐帧解析，未解析行显示「加载中…」；条目数不设上限（`g_backups` 为无界 vector），空列表显示「暂无备份」（`ui/panel.cpp` 布局常量与 `g_backups`；`ui/render.inc` 绘制）。
-- 选择与按钮状态：左侧槽与右侧条目独立选择；仅选槽时导出/删除可用，仅选手动备份时删除可用，槽+条目同时选中时导入可用；auto 可选中、可导入，不可删除。导出立即执行，导入与删除弹面板内确认框（居中、确认 200ms 防抖、确认/取消），不再使用两次点击确认；弹窗打开时隐藏底层内容与分区框（`ui/render.inc`、`ui/injection.inc`、`ui/panel.inc`）。
-- 面板按钮**直接调用** native 业务函数（`save_backup_export_json` 等），不经 HTTP、不经 JNI/Kotlin（`ui/injection.inc:29,105,170-171`；`ui/panel.cpp:571-576`）。导入失败会显示响应中的 `error` 文案（`ui/injection.inc:11-25,108-125`）。
-- 地图名与等级显示：左栏槽卡以磁盘文件为准（`save_backup_slot_file_exists` + `save.facts.load_data`）：`save{slot}.dat` 可读 → 显示职业/等级/地图；文件存在但不可读 → `存档N 损坏`；文件不存在 → `存档N 空`。不读运行期槽状态——面板打开期间游戏槽结构可能尚未重载（导入后尤其明显），会把可读存档误报成损坏。等级/职业/地图从该槽存档明文解析（块 2 第 0 条主角记录）；明文摘要失败时才回退 `save.facts` 的槽结构读取。列表条目的未知等级显示 `Lv?`；地图名先按 UTF-8 码点边界截断到 16 字节，再按宽度截断（`ui/panel.cpp` `read_slots_into`、`feature.cpp` `save_backup_slot_file_exists`、`ui/render.inc:66-93,159-168,233-241,314-340`）。
-
-## 3. 使用的模块功能与消费者
-
-- **Host SDK**：capability require、panel provider 注册/注销、RenderPre 帧任务（槽元数据快照）、owner-bound store（sidecar `.qol-save`/`.last-good`）、slot operation lease、指针槽资源回调、日志（`plugin.cpp:241-301`；`feature.cpp:48-51,194-223`）。
-- **save 领域**：`save.facts` 提供明文、槽事实与 `current_slot`；`QOL_PORT_SAVE_CALL` 提供加解密、释放与 stale 标记；存档目录定位基于 `hub_key` 的 `hex(MD5(key))` 回退（`feature.cpp:393-419,614-644`）。
-- **UI 领域**：`ui_panels` 提供面板注册与嵌套 push/返回；控件创建与绘制走 `QolUiAdapter`（`ui/panel.cpp:175-228`；`ui/panel.inc:127-179,226-255`）。
-- **保存前观察者**：`save.pre_save`（`core.save` provide）在每次游戏自动/手动保存写盘前同步回调；插件在 install 注册、deactivate 注销，回调中执行自动备份（`plugin.cpp:83-88,281-296`；`core.save/save_coordinator.cpp:140-142`）。
-- **消费者**：插件不 provides 能力，没有 capability 消费者；对外可观察面是四条 HTTP 路由、设置 entry 与备份面板，均由 settings/catalog 与宿主 dispatch 消费（`plugin.cpp:355-381`）。
-- Kotlin 侧 `SaveController.backupExport/backupList/backupImport/backupDelete` 做轻量校验后经 `NativeHttpCommand.post`/`NativeHttpQuery.get` 转发（`module/app/src/main/java/com/inotia4/qol/api/controller/SaveController.kt:39-79`）；无旧直连 JNI 入口。
-
-## 4. 职责边界
-
-- **属于本插件**：`.qol_save` bundle 格式与编解码、`externalFilesDir/backups/` 目录、checksum 去重、导出/导入/删除、备份面板、`save_backup.open_manager` entry，以及内存档面板删档后清理同槽 sidecar 的 GOT wrapper（`plugin.cpp:28-29,74-129`；`bundle.h:7-29`）。
-- **不属于本插件**：存档槽事实与 `save`/`enter_slot`/`create_slot` 写路由、slot-data 参与者、进档/新档转换与保存协调（`core.save`）；回主菜单（`core.ui_state`）；面板栈与控件绘制（`core.custom_ui`/`ui_panels`）；路由注册、墓碑与 dispatch（`core.api`/宿主）（`docs/reference/plugins/core.save.md:58-60`；`plugin.cpp:122-124`）。
-- 删档 hook 只做“原函数返回后同步删除 sidecar 并 `mark_stale`”，不重造存档槽、不取虚拟背包锁、不走 JNI（`feature.cpp:1083-1160`）。
-
-## 5. 读写线程与生命周期
-
-- **槽元数据快照**：install 注册 RenderPre 帧任务（每 30 帧），在游戏主线程读取 0..2 槽的 exists/hero_index/hero_level/hero_class 写入缓存；HTTP 导出只读缓存，不跨线程读游戏槽结构（`plugin.cpp:75-83,269-279`；`feature.cpp:636-660,1049-1081`）。缓存建立前导出仍成功，元数据为 -1。**等级/职业不以该缓存为准**：导出与面板槽卡都从存档明文块 2 第 0 条主角记录解析（`bundle.cpp` `parse_plain_main_character`）；世界内运行期槽结构可能指向当前受控佣兵或已释放对象，与存档主角不一致。**面板槽卡也不以运行期槽状态为准**：按 `save{slot}.dat` 是否可读判定有效/损坏/空，避免导入后游戏槽结构尚未重载时把可读存档误报成损坏（`feature.cpp` `save_backup_slot_file_exists`；`ui/panel.cpp` `read_slots_into`）。
-- **旧备份元数据回填**：`save_backup_list_json`、`save_backup_entry_json`、`save_backup_auto_entry_json` 解析到 metaJson 缺职业/等级或与明文不一致时，从明文块 2 第 0 条主角记录补全，只替换 metaJson 段（bundle 版本、checksum、其余分段逐字节保留，CRC32 重算）并原子写回；写失败只记 WARN，展示继续用旧 meta。回填后右侧列表立即显示职业/等级。
-- **备份读写**：不再用 `g_sb_mtx` 跨越游戏调用与文件 IO；共享状态（目录根、地图名表）只在短临界区内拷贝快照（`feature.cpp:1221-1250,1517-1525`）。导出持槽 operation lease，与保存/导入/删槽串行，失败返回 `slot operation unavailable`（`feature.cpp:1517-1525`）。
-- **导出**：取明文 → 读 sidecar（`kOk`=present、`kNotFound`=absent、损坏=整次失败 `module container unreadable`）→ 收集 `save{slot}.dat.wh4-*`（读失败或超 4 MiB 即失败，数量/总量预检 64/8 MiB）→ 有外部 wh4 时尝试剥离 block3 内嵌 `WH96v002` 段 → `checksum` → 去重（校验既有 bundle 的内部 checksum 与 payload）→ `.tmp-<id>` 写入后 `rename`（`feature.cpp:1290-1500`）。
-- **checksum**：v1/v2 为 `sha256(明文‖sidecar)[0:12]`；v3+ 为 `sha256(明文‖sidecar‖warehouseBlob)[0:12]`，覆盖全部可还原内容段（`bundle.h:207-220`；`bundle.cpp` `compute_checksum`）。导入/删除前按 bundle 版本重算并与 meta 比对，不一致返回 `backup checksum mismatch`（`feature.cpp:1435-1465,1549-1556`）。
-- **sidecar 三态**：metaJson 的 `module_state`（0=absent，1=present）；导入 present 写入/覆盖 sidecar，absent 则删除目标槽现存 sidecar（完整替换，`feature.cpp:1301-1315,1665-1690`）。
-- **导入**：主菜单门禁 → 解析并校验 checksum/module_state → 取槽 lease → 预加密 dat/warehouse → 现存 dat 复制到 `backups/.rollback/`（事务 id 命名）、sidecar 快照留内存 → 原子写 dat → 写/清除 sidecar → 逐项原子写 warehouse → 失败按 dat/sidecar/warehouse 逆序回滚（`feature.cpp:1527-1810`；`rollback.h:5-15`）。warehouse 写回是 additive，不清理目标槽未列出的旧文件（`feature.cpp:1720-1730`）。
-- **删除备份**：解析并校验 checksum 后 `unlink` 单个 bundle（`feature.cpp:1815-1850`）。
-- **删除槽**：dat、sidecar 与 wh4 伴生文件各自在父目录内移入 `.sb-trash-<id>/`，写 `backups/.trash-<id>.index` 后统一 unlink；任一步失败把已移动文件移回；进程中断时下次 `save_backup_init` 调 `save_backup_recover_deletes()` 回滚优先（`feature.cpp` `save_backup_delete_slot_json`/`save_backup_recover_deletes`）。删档 hook 处理 sidecar 与 wh4，同样取 lease + trash + index（`feature.cpp` `save_backup_slot_deleted_sync`）。
-- **自动备份**：`save.pre_save` 回调把当前槽导出到 `backups/autobackup/autosave_s<N>.qol_save`，每槽 1 份、原子覆盖；导出前用 dat/sidecar/wh4 的 size+mtime 指纹与旧指纹比较，相同则跳过；失败只记 WARN，旧备份保留（`feature.cpp` `save_backup_autobackup_pre_save`；`plugin.cpp:83-88`）。自动备份目录不参与 `backups/` 顶层列表、去重、导入与删除扫描。
-- **HTTP 列表**：先 `stat`，跳过 >64 MiB 的文件；单次扫描累计 >512 MiB 停止；锁外枚举/解析/排序，按 `export_time` 降序（`feature.cpp:57-58,1221-1290`）。
-- **面板列表（单线程增量）**：打开面板只调 `save_backup_list_files_json`（`stat` 枚举，不解析），UI 立即绘制；面板 process 每帧最多解析 1 个当前页条目（`save_backup_entry_json`），auto 仅解析选中槽；以 `name+size+mtime` 缓存，未变化不重复解析；翻页/切槽重建队列，损坏条目移除并重算页数。面板内无后台线程（`ui/panel.cpp` 队列与缓存、`ui/panel.inc` 每帧解析点）。
-- **文件系统原语**：`lstat` 判目录/普通文件，读写用 `O_NOFOLLOW`；原子写临时名与回滚副本使用事务唯一名（`feature.cpp:293-370`）。
-- **生命周期**：install 绑定上下文、注册 panel provider 与槽元数据帧任务；enabled/disabled 只翻转 `g_active`；deactivate 注销帧任务、撤销 owner 面板、注销 provider、解绑上下文；资源物理还原由宿主执行，`on_resource_ready` 只缓存删档原函数指针（`plugin.cpp:241-301`）。
-
-## 6. 文件地图
-
-| 子职责 | 文件 | 关键位置 |
+| 层 | 目录/文件 | 职责 |
 |---|---|---|
-| descriptor、能力/资源/端口声明、HTTP handler、生命周期、面板 provider、帧任务 | `plugins/save_backup/plugin.cpp` | 资源 100-129；HTTP 127-239；install/lifecycle 241-301；entry 333-359；descriptor 361-383 |
-| 备份文件类别注册表、快照收集（dat/sidecar/wh4） | `plugins/save_backup/backup_files.h`、`backup_files.cpp` | 三类登记与 `collect_slot_snapshot`；wh4 收集/容量/剥离 |
-| bundle 编解码、摘要/CRC、warehouse 序列化与重加密、metaJson、checksum、严格 slot 解析 | `plugins/save_backup/bundle.h`、`bundle.cpp` | 格式与上限 bundle.h:10-35；仓库编解码 103-176；`compute_checksum` 207-220；bundle 组装/解析 222-260；实现 bundle.cpp:754-960 |
-| 目录定位、槽元数据缓存、列表、导出、导入、删除、回滚、sidecar、删档同步、启动恢复 | `plugins/save_backup/feature.cpp`、`feature.h` | 门禁 170-190；原语 293-370；删除事务 845-1050；缓存 1049-1081；列表 1221-1290；导出 1517-1525；导入 1527-1810；删除 1815-1950 |
-| 面板状态、异步刷新、生命周期、UI adapter 包装 | `plugins/save_backup/ui/panel.cpp`、`panel.h` | 布局 74-116；刷新 561-603；open/close 701-750 |
-| 控件/几何/事件、按钮回调与两步确认、渲染与文本截断 | `plugins/save_backup/ui/panel.inc`、`injection.inc`、`render.inc` | 事件 panel.inc:275-343；操作 injection.inc:22-188；渲染 render.inc:93-348 |
-| 路由静态清单 | `plugins/save_backup/routes.inc` | 1-4 |
-| 空 catalog 注册 | `plugins/save_backup/settings_contribution.cpp` | 3-7 |
-| host 测试 | `module/app/src/main/cpp/tests/test_save_backup_gate.cpp`、`test_save_backup_rollback.cpp`、`test_save_warehouse_validate.cpp` | gate 删除/回滚/门禁/checksum/导出；rollback 结果组合；warehouse 校验与校验和 |
+| L0 | `model/types.h`、`bundle.*`、`backup_files.*`、`rollback.h` | 结果/错误类型、bundle 纯逻辑、快照收集、回滚结果 |
+| L1 | `state/state.*` | 运行期上下文、map names 快照、槽元数据快照、职业名表 |
+| L2 | `persistence/persistence.*`、`port/save_port.*` | 文件原语/目录/bundle 枚举；游戏 load/encrypt/free/stale 端口 |
+| L3 | `transaction/transactions.*` | 导入事务、删除事务、回滚、trash 恢复、槽操作门 |
+| L4 | `usecases/backup_usecases.*`、`usecases/meta_backfill.*` | 导出/列表/条目/导入/删除/自动备份/回填用例 |
+| L6 | `plugin.cpp`、`api/commands.h`、`api/json_codec.*`、`ui/*`、`feature.cpp/h`、`settings_contribution.*` | 生命周期、HTTP、typed command、JSON、面板、公共 API 适配 |
+
+依赖方向：
+
+```text
+plugin / api / ui
+        ↓
+     usecases
+        ↓
+   transaction
+    ↓        ↓
+persistence  port
+    ↓        ↓
+   state → model / contracts
+bundle / backup_files → model
+```
+
+关键约束：
+
+- L1–L4 不出现 UI 控件、rect、JSON 字符串或 `_bridge`。
+- `bundle`/`backup_files` 不依赖 Android/游戏运行时。
+- 游戏原生函数只经 `port`/`state` 的窄接口进入；插件业务代码不出现裸地址。
+- `api/json_codec` 是唯一拼 HTTP JSON 的地方。
+
+## 3. 能力、端口、资源与入口
+
+### 3.1 required capabilities
+
+| 能力 | 版本 | 用途 |
+|---|---|---|
+| `ui_components` | 1.22 | 面板控件创建/绘制/事件 |
+| `ui_panels` | 1.3 | 面板 provider 注册、嵌套打开 |
+| `save.facts` | 1.1 | 明文读取、槽事实、map id/current slot |
+| `save.pre_save` | 1.0 | 保存前自动备份观察者 |
+| `world.facts` | 2.0 | 主菜单判定（import 门禁） |
+| `ui_confirmation` | 1.1 | 面板内确认框 |
+
+### 3.2 optional capabilities
+
+- `http.registry`、`http.dispatch`：由 descriptor 的 `http_endpoints` 声明四条路由，宿主负责注册/墓碑。
+
+### 3.3 ports
+
+- `QOL_PORT_SAVE_CALL` 1.0：`free_data`/`encrypt`/`mark_stale`；wh4 解密/加密也走该端口。
+
+### 3.4 resources
+
+| 资源 | 机制 | 语义 |
+|---|---|---|
+| `ptrslot:SAVESLOT_DELETE_GOT` | `kPtrSlot` | private/required/fail-closed/resumable；`step_budget=120`；wrapper 先回调原 `SaveSlot_Delete`，再删该槽 sidecar/wh4 |
+
+`on_resource_ready` 只缓存原函数入口，常数时间、无资源操作。
+
+### 3.5 装配与 ABI 门禁
+
+`plugin_install` 要求：
+
+- `ctx.sdk->abi.size >= sizeof(QolHostSdk)` 且 `ctx.sdk->abi.minor >= 9`。
+- `ctx.sdk->ticket_result.register_typed_result_handler` / `unregister_typed_result_handler` 非空。
+- 六个 required capability、一个 save-call port、全部必需函数指针可用。
+- 失败即 fail-closed：解绑上下文并返回 1。
+
+注册/注销：
+
+- install 注册 3 个 typed result handler（export/import/delete）；失败时逆序注销并回滚 context/provider/pre_save。
+- deactivate 注销命令、panel provider、pre_save observer、帧任务，并解绑 context。
+- enabled/disabled 只翻转 `g_active`；不改变已注册命令。
+
+### 3.6 面板与功能入口
+
+- panel provider：`panel_id="save_backup"`、owner=`save_backup`；install 注册，deactivate 撤销。
+- feature entry：`save_backup.open_manager`（Tools/entry，标题「存档备份」，priority `-2`），经 `UiPanelsApi::open("save_backup")` 打开。
+- 面板由 `core.custom_ui` 的 PopupHost 托管，插件只提供回调与绘制。
+
+## 4. HTTP 面
+
+| 方法 | 路径 | 模式 | 校验/结果 |
+|---|---|---|---|
+| GET | `/api/system/backup/list` | 同步 | 目录不可用/不可读返回 `{"ok":true,"backups":[]}`；逐 bundle 校验 CRC |
+| POST | `/api/system/backup/export` | 票据 | `slot∈[0,2]`；native 返回 `{"ok":true,"ticket":N}`；result 为原 `BackupMeta` JSON（去重时带 `deduplicated:true`） |
+| POST | `/api/system/backup/import` | 票据 | `checksum ^[0-9a-f]{12}$`、`slot∈[0,2]`；result 为原 `BackupMeta` JSON |
+| POST | `/api/system/backup/delete` | 票据 | `checksum` 校验；result 为 `{"ok":true}` |
+
+### 4.1 票据链路
+
+```text
+Kotlin SaveController
+  → NativeHttpCommand.post(路径, body)
+  → nativeHttpDispatch
+  → save_backup plugin sb_http_handler
+  → 参数校验
+  → QolCommands::post_typed(命令 id, payload)
+  → 返回 {"ok":true,"ticket":N}
+Kotlin postAndAwait
+  → NativeBridge.nativeTicketStateJson(ticket) 轮询
+  → state=done/failed 时取 result 原样返回
+```
+
+- 命令 id/payload：`api/commands.h`（`kCmdExport=0x53420101`、`kCmdImport=0x53420102`、`kCmdDelete=0x53420103`）。
+- 命令在主线程执行；result 由 `QolTypedResultCommandHandler` 写入票据。
+- 对外 `POST backup/{export,import,delete}` 的 **JSON 形状保持原同步响应**；票据是内部实现细节。
+- list 仍同步；面板列表/条目/auto 直接调用 typed usecase，导出/导入/删除调用公共 API 适配（内部仍走同一 usecase），均不经 HTTP/票据。
+
+### 4.2 参数与错误语义
+
+- 参数错误 → 400：`bad slot`、`bad checksum`。
+- 业务失败 → HTTP 200 + `{"ok":false,"error":"..."}`（由 `api/json_codec` 组装）。
+- 命令不可用/票据异常 → 500 `command unavailable` 或 Kotlin 503 `ticket unavailable/timeout`。
+- import 非主菜单 → `import requires main menu`；槽事实不可读 → `save state unavailable`。
+- 具体导出/导入/删除错误见 §8。
+
+## 5. 数据模型与存储
+
+### 5.1 原版存档
+
+- 文件：`save{slot}.dat`（slot 0/1/2）。
+- 目录：应用私有 files 下的 32 位小写 hex 子目录（游戏用设备唯一 ID 的 MD5）。模块按“含 `save*.dat` 的子目录”扫描定位，找不到时退回 `hex(MD5(HubSave 密钥))`。
+- monster 个人仓库伴生文件：`save{slot}.dat.wh4-<16hex>`，可带 `.bak`；与 dat 同密钥，跨设备不可直接解密。
+
+### 5.2 模块 sidecar
+
+- 目录：`<externalFilesDir>/qol/saves/`。
+- `slot-{N}.qol-save`：primary MSAV 容器。
+- `slot-{N}.qol-save.last-good`：上次有效副本。
+- `slot-{N}.qol-save.unresolved-corrupt`：坏容器隔离标记。
+- sidecar 由 native `infra/store` 读写；本插件只经 Host SDK store 面操作，不自行拼路径。
+
+### 5.3 备份 bundle
+
+- 目录：`<externalFilesDir>/qol/backups/`。
+- 手动导出：`<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol.bak`；同名冲突追加 `_1.._99`。
+- 旧版 `.qol_save` 继续列出、解析、导入、删除、去重命中。
+- 自动备份：`<externalFilesDir>/qol/backups/autobackup/autosave_s<N>.qol.bak` + `autosave_s<N>.fingerprint`；旧 `.qol_save` 回退读取。
+- 回滚副本：手动 `backups/.rollback/`、自动 `autobackup/.rollback/`。
+- 删除事务中间态：`qol/saves/.sb-trash-<id>/`、`qol/backups/.trash-<id>.index`。
+
+### 5.4 bundle 格式
+
+- 大端分段，magic `QSB1`，当前 v3；解析兼容 v1/v2。
+- v3：`header | origLen | origPlain | moduleLen | module | warehouseLen | warehouseBlob | metaLen | metaJson | crc32`。
+- v2：warehouse 段无 flags；v1：无 warehouse 段。
+- `checksum`：v3+ `sha256(origPlain ‖ module ‖ warehouseBlob)[0:12]`；v1/v2 `sha256(origPlain ‖ module)[0:12]`。
+- `metaJson` 字段：`source_slot`、`export_time`、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`、`class_idx`、`class_name`、`warehouse_count`、`warehouse_sha256`、`module_state`。
+- 原版明文块 0/1/2：块表、Information、Player、CharacterInfo；主角等级/职业取 CharacterInfo 第 0 条记录。
+
+## 6. 业务流程
+
+### 6.1 导出
+
+1. 取槽明文（`save.facts.load_data`）、sidecar、wh4 伴生文件。
+2. 有外部 wh4 时尝试剥离 block3 内嵌 `WH96v002` 段。
+3. 计算 checksum、构造 meta/bundle、CRC32。
+4. 按内部 checksum 去重；命中返回既有 entry + `deduplicated:true`。
+5. 取 slot operation lease；`.tmp-<id>` 原子写后 rename。
+6. 返回 `BackupMeta`；不触发游戏保存。
+
+### 6.2 导入
+
+1. 主菜单门禁（`world.facts.state==4`，失败回退 `current_slot`）。
+2. 按内部 checksum 定位 bundle；校验 payload checksum、`module_state`。
+3. 取目标槽 lease；预加密 dat / wh4（补目标槽、重算 wh4 `+0x38`、往返自检）。
+4. 目标槽现存 dat/sidecar 复制到 `.rollback/`。
+5. 原子写 dat → sidecar → wh4；失败按逆序回滚。
+6. 成功后清理回滚副本；`save_mark_stale()`；返回 `BackupMeta`。
+
+### 6.3 删除
+
+- 删备份：checksum 定位 → 重算 payload checksum → `unlink` 单文件。
+- 删槽：dat、sidecar、wh4 分别移入同文件系统 `.sb-trash-<id>/`，写 `.trash-<id>.index`，全部成功后统一 unlink；失败移回；启动时 `save_backup_recover_deletes` 恢复。
+- 游戏内删档 hook：原函数返回后调用 `save_backup_slot_deleted_sync`，只清该槽 sidecar/wh4 并 `mark_stale`。
+
+### 6.4 自动备份
+
+- `save.pre_save` 观察者在保存写盘前触发。
+- 以 dat/sidecar/wh4 的 size+mtime 指纹判断是否跳过。
+- 每槽一份 `autosave_sN.qol.bak` 原子覆盖；失败只记 WARN，不阻断保存。
+- 自动备份不进入 `backups/` 顶层列表、去重、导入、删除扫描。
+
+### 6.5 旧 meta 回填
+
+- 触发：`list_backup_files`/`describe_backup`/`auto_entry`/`import` 解析到 meta。
+- 从明文块 2 第 0 条主角记录取 level/class；与 meta 不一致时重建 metaJson。
+- 只替换 meta 段；bundle 版本、checksum、其余分段逐字节保留；CRC32 重算；`.tmp-<id>` + rename 原子写。
+- `persistence::file_mutex` 串行 bundle 读改写；失败只记 WARN，下次再试。
+
+### 6.6 面板
+
+- 打开：设置页「存档备份」→ `ui_panels.open("save_backup")` → provider 回调。
+- 左栏三槽：以 `save{slot}.dat` 是否可读判定有效/损坏/空；有效槽从明文解析职业/等级/地图；不再使用运行期槽状态。
+- 右栏：手动备份列表（每页 5 项，逐帧增量解析）+ `auto` 卡片。
+- 操作：导出/删除/导入；导入/删除弹确认框；列表/条目/auto 直接消费 typed usecase，导出/导入/删除经公共 API 适配；面板不解析 JSON。
+- 面板状态（选中、页码、缓存）只在 `ui/panel.cpp`，不进入核心层。
+
+## 7. 线程、快照与锁
+
+- **查询**（list/entry/list_files/auto_entry）：任意线程；只读文件 + `state` 快照，不调用游戏。
+- **写/游戏读取**（export/import/delete/delete_slot/auto_backup/slot_summary）：游戏主线程；HTTP 写经 typed command 投递，面板直接调用。
+- **state 快照**：`state::Context`、map names、槽元数据用不可变 `shared_ptr` 发布；RenderPre 每 30 帧刷新槽元数据，HTTP/绘制线程只读快照。
+- **file_mutex**：只保护 bundle 读改写（回填/删除/导入定位），不承载业务状态。
+- **slot_operation lease**：导出/导入/删槽按槽串行，与游戏保存/删档互斥。
+- **锁序**：`slot_lease → file_mutex → store`；不用 `recursive_mutex`，不用 `try_lock` 做重入检测。
+- 无全局业务互斥量 `g_sb_mtx`。
+
+## 8. 错误语义
+
+| 错误串 | 场景 |
+|---|---|
+| `bad slot` | slot 缺失/非整数/越界（400） |
+| `bad checksum` | checksum 非 `^[0-9a-f]{12}$`（400） |
+| `backup not found` | 目录/文件/自动备份不存在 |
+| `backup unreadable or corrupt` | bundle 解析/CRC 失败 |
+| `backup checksum mismatch` | 内部 checksum 与 payload 不一致 |
+| `slot operation unavailable` | 槽被保存/导入/删档占用 |
+| `import requires main menu` | 非主菜单导入 |
+| `save state unavailable` | current_slot 读取失败 |
+| `encrypt failed` | 目标槽 dat 预加密失败 |
+| `save file write failed` | dat 写盘失败 |
+| `module container import failed` | sidecar 导入失败 |
+| `module container unreadable` | sidecar 损坏/不可读 |
+| `bundle write failed` | 备份落盘失败 |
+| `backup name collision` | `_1.._99` 用尽 |
+| `warehouse read failed` / `warehouse file too large` / `warehouse limit exceeded` | wh4 收集/容量失败 |
+| `load failed` | 明文读取失败 |
+| `command unavailable` | typed command 未注册/post 失败 |
+| `ticket unavailable` / `ticket timeout` | Kotlin 票据回取失败/超时 |
+
+L4 用 `Outcome<T>`/`BackupError`；`api/json_codec` 负责映射到上述文案与 HTTP 形状。
+
+## 9. 测试与验收
+
+当前基线（2026-10-25）：
+
+- `save_backup_gate_tests`：**304 passed / 0 failed**（含 L6 typed command payload/票据 ACK 契约）。
+- `host_tests`：**2791 passed / 0 failed**。
+- `check_arch`：layers/offsets/jni/resources 全绿；`check_jni` 0 违规；`git diff --check` 通过。
+- Android Debug：`scripts/build-debug.sh` 成功。
+
+**禁止真机验证**：当前策略要求多代理不得同时使用一台真机；本文不把真机证据作为本次重构的完成条件。后续如获授权，按以下清单复跑：
+
+1. v514/v520 对应游戏版本安装集成包；确认模块加载、`/api/health` ready。
+2. 主菜单导出 → list → 导入到另一槽 → `enter_slot` 成功；确认对外仍返回 `BackupMeta` 而非 ticket。
+3. 删除备份、删槽、启动后 trash 恢复。
+4. auto backup 生成/指纹跳过/源变化重导。
+5. 旧 `.qol_save` 列表/导入/删除；旧 meta 回填后条目显示职业/等级。
+6. 面板空/损坏/有效槽显示；导入后左栏立即刷新。
+
+## 10. 文件地图与扩展点
+
+| 子职责 | 文件 |
+|---|---|
+| descriptor、capabilities/ports/resources、typed command 注册、HTTP handler、生命周期、panel provider、帧任务 | `plugin.cpp` |
+| 公共 API facade（40 行）、测试 seam | `feature.cpp`、`feature.h` |
+| 结果/错误/请求响应类型 | `model/types.h` |
+| bundle 编解码、checksum、明文摘要、warehouse 编解码/重加密 | `bundle.*` |
+| 槽快照收集（dat/sidecar/wh4） | `backup_files.*` |
+| 上下文/快照/map names/槽元数据/职业名 | `state/state.*` |
+| 文件原语/目录定位/bundle 枚举/自动备份路径 | `persistence/persistence.*` |
+| 游戏 load/encrypt/free/stale/warehouse helpers | `port/save_port.*` |
+| 导入/删除/回滚/trash 恢复/槽操作门 | `transaction/transactions.*`、`rollback.h` |
+| 导出/列表/条目/导入/删除/自动备份用例 | `usecases/backup_usecases.*` |
+| 旧 meta 回填 | `usecases/meta_backfill.*` |
+| typed command id/payload/票据 ACK | `api/commands.h` |
+| JSON 组装 | `api/json_codec.*` |
+| 面板 provider/状态/绘制/事件 | `ui/panel.*`、`ui/panel.inc`、`ui/render.inc`、`ui/injection.inc` |
+| 空 settings catalog | `settings_contribution.*` |
+| 路由静态清单 | `routes.inc` |
+| host 测试 | `tests/test_save_backup_gate.cpp`、`test_save_warehouse_validate.cpp`、`test_host.cpp`（bundle 纯逻辑） |
+
+**新增能力的顺序**：`model` 类型 → `usecases` 用例 → `api/commands`（如写端点）→ `plugin.cpp` handler/descriptor → Kotlin/文档 → host 测试。不要从 UI 反向 include 业务实现。
+
+## 11. 设计决策与非目标
+
+- **票据化写端点**：export/import/delete 用 `post_typed` 回主线程；Kotlin 隐藏票据，对外 JSON 不变。list 保持同步。
+- **`.qol.bak` 命名**：新导出统一 `.qol.bak`；旧 `.qol_save` 永久读取兼容，避免升级丢备份。
+- **文件级槽状态**：面板不看运行期槽状态，按 `save{slot}.dat` 可读性判定，避免导入后槽结构未重载时误报损坏。
+- **明文优先**：等级/职业/地图从存档明文解析，运行期槽结构只作回退；避免世界内槽结构指向受控佣兵或已释放对象。
+- **meta 回填**：只修复旧备份的职业/等级，不改 checksum/版本/其他段。
+- **非目标**：不重写游戏存档格式；不做跨设备 dat 解密；不把 sidecar 存储实现搬回 Kotlin；不为了 UI 便利在 L1–L4 引入 JSON/控件依赖。
