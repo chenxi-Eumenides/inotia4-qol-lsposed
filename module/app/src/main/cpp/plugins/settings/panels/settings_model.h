@@ -25,7 +25,7 @@ constexpr int32_t kDescriptionTop = 42;
 constexpr int32_t kMinimumRightRowHeight = 96;
 constexpr int32_t kToggleWidth = 220;
 constexpr int32_t kToggleHeight = 80;
-constexpr int32_t kRightControlRightInset = 20;
+constexpr int32_t kRightControlRightInset = 10;
 
 struct WrappedText {
     std::vector<std::string> lines;
