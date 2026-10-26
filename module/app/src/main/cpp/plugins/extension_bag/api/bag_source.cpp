@@ -533,6 +533,7 @@ QolResult source_use(contracts::QolBagRef ref, int32_t slot) {
         extension_bag_mark_dirty_locked();
         return contracts::ok();
     }
+    VIRTBAG_LOG("bag source use rejected bag=%d slot=%d body=%s", ref.bag, slot, body.c_str());
     if (body.find("not in game") != std::string::npos ||
         body.find("slot data not ready") != std::string::npos) {
         return source_error(kQolErrNotReady, "extension bag not ready");

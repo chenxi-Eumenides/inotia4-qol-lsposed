@@ -329,6 +329,8 @@ bool extension_handle_backpack_equip() {
     }
     const int target = first_empty_extension_bag_locked();
     if (target < 0) {
+        VIRTBAG_LOG("extension backpack button equip no empty bag slot src=%d/%d", source_bag,
+                    source_slot);
         const auto* sdk = ::qol::extension_bag::access::host().sdk;
         if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
             (void)sdk->ui->show_text_popup(6);

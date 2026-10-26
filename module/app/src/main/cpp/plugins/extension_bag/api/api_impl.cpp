@@ -67,9 +67,9 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
                    extension_bag_write_api()->equipment.use_item == nullptr) {
             return extension_bag_op_err("symbol not resolved");
         }
-        if (!is_seal && !read_item_is_usable(descriptor.category)) {
-            return extension_bag_op_err("item not usable");
-        }
+        // 技能书等类别由 CHAR_UseItemEx 内部按类别分派；ITEMDATA_IsUse
+        // 并不覆盖所有可执行类别，提前用 is_usable 拦截会让扩展背包
+        // 静默失败并丢掉原版的“职业不符合”等反馈。
 
         item = module_item_locked(bag, slot);
         leader = nullptr;
