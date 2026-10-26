@@ -1,5 +1,7 @@
 #include "host/ui_adapter.h"
 
+#include <array>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -8,6 +10,9 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+#include <sys/uio.h>
+#include <unistd.h>
 
 #include "game/access/game_access.h"
 #include "game/access/attr_range_ui.h"
@@ -417,9 +422,25 @@ QolResult show_text_popup(int32_t text_id) {
     return contracts::ok();
 }
 
+// ControlObject pointers can be freed or mprotected while the cached
+// /proc/self/maps snapshot still reports them readable. Probe the exact range
+// through process_vm_readv before dereferencing a game-owned control.
+bool control_readable(const void* control, size_t size) {
+    if (control == nullptr || size == 0 || size > CO_SIZE) return false;
+    std::array<uint8_t, CO_SIZE> probe{};
+    iovec local{probe.data(), size};
+    iovec remote{const_cast<void*>(control), size};
+    const ssize_t read = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
+    if (read == static_cast<ssize_t>(size)) return true;
+    if (read < 0 && (errno == ENOSYS || errno == EPERM)) {
+        return game_memory_accessible(control, size, 'r');
+    }
+    return false;
+}
+
 QolResult child_count(QolUiHandle control, uint32_t* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
-    if (!game_memory_accessible(control, CO_SIZE, 'r')) return not_ready();
+    if (!control_readable(control, CO_SIZE)) return not_ready();
     if (fn_ctrl_get_count == nullptr) return not_ready();
     *out = fn_ctrl_get_count(control);
     return contracts::ok();
@@ -428,7 +449,7 @@ QolResult child_count(QolUiHandle control, uint32_t* out) {
 QolResult child_at(QolUiHandle control, uint32_t index, QolUiHandle* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
     *out = nullptr;
-    if (!game_memory_accessible(control, CO_SIZE, 'r')) return not_ready();
+    if (!control_readable(control, CO_SIZE)) return not_ready();
     if (fn_ctrl_get_child == nullptr) return not_ready();
     *out = fn_ctrl_get_child(control, index);
     return *out == nullptr ? not_ready() : contracts::ok();
