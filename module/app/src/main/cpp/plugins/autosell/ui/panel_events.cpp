@@ -149,7 +149,7 @@ static void autosell_panel_process_impl() {
     if (g_ui_components != nullptr && g_back_button != nullptr)
         (void)g_ui_components->nav_button_draw(g_back_button);
 
-    autosell_draw_component_text("装备", 207, 150, kGold, 2, 1);
+    autosell_draw_component_text("装备", 207, 146, kGold, 2, 1);
     for (int i = 0; i < kRuleCount; ++i) {
         const UiRect row = autosell_rule_row(panel, i);
         const char* label = autosell_rule_name(i);

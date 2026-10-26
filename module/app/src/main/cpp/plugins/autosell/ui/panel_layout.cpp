@@ -39,7 +39,7 @@ UiRect autosell_mask_rect(const UiRect& panel) {
 }
 
 UiRect autosell_equipment_group(const UiRect& panel) {
-    return {panel.x + 24, panel.y + 128, 366, 240};
+    return {panel.x + 24, panel.y + 128, 366, 216};
 }
 
 UiRect autosell_back_rect() {
@@ -53,8 +53,8 @@ UiRect autosell_total_rect() {
 }
 
 UiRect autosell_rule_row(const UiRect& panel, int index) {
-    if (index < 3) return {panel.x + 40, panel.y + 184 + index * 52, 334, 44};
-    return {panel.x + 433, panel.y + 184 + (index - 3) * 52, 334, 44};
+    if (index < 3) return {panel.x + 40, panel.y + 184 + index * 49, 334, 44};
+    return {panel.x + 433, panel.y + 136 + (index - 3) * 49, 334, 44};
 }
 
 UiRect autosell_rule_prev(const UiRect& panel, int index) {

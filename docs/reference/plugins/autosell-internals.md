@@ -218,7 +218,7 @@ save_exit → reject session → remove task
 
 - Host 全量 `155/155` 通过（本轮改动后）。
 - `check_arch.py`：layers/offsets/jni/resources 全部通过。
-- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610261438_eb8fba13e5c4.apk`，sha256 `eb8fba13e5c40d5a425ed9ee2986b20ad1fa764f5a4e0997e7b95d88f1933a68`。
+- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610261610_7d0b39c52a01.apk`，sha256 `7d0b39c52a017d8c5e392ff2ec2fcb34a7c548856fddcfe2a60b6f094a0c16df`。
 - 本轮未做真机验证；入口/面板/注册源扫描/规则实际行为待设备验收。
 
 ## 已删除旧结构
