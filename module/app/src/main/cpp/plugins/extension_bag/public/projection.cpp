@@ -481,9 +481,21 @@ bool virtual_bag_allow_original_tab_drop(void* control, void* source_control,
     // 落点是扩展投影格时，原版 INVEN_MoveItem 只会按窗口原版袋处理，
     // 不可能把物品写进扩展 sidecar；放行反而会提前消费一次拖拽。
     // 原版/改版 -> 扩展的唯一提交点是 0x18 release 路由（inventory.action.move）。
-    VIRTBAG_LOG("original drop blocked for extension target control=%p item=%p target_slot=%d",
-                control, item, target_slot);
-    return false;
+    const int view_bag = qol::extension_bag::ui_state().objects.module_view_index;
+    void* projected_root = qol::extension_bag::ui_state().objects.projected_item_root;
+    if (projected_root != nullptr && virtual_bag::valid_index(view_bag)) {
+        const int capacity = ::qol::extension_bag::access::bag().capacities[view_bag];
+        for (int slot = 0; slot < capacity; ++slot) {
+            if (valid_child_locked(projected_root, slot) == control) {
+                VIRTBAG_LOG(
+                    "original drop blocked for extension target control=%p item=%p target_slot=%d",
+                    control, item, target_slot);
+                return false;
+            }
+        }
+    }
+    // 原版/改版落点：交回原版处理，合并与普通移动都由游戏自己的 INVEN_MoveItem 完成。
+    return true;
 }
 // G-14（方案 C）：原版物品操作后 RefreshItemArea 会以 INVEN 重刷控件，窗口袋投影需重写。
 // 投影只占窗口袋；其他袋调用为 no-op。调用方（data_op_*）不持模块锁，此处安全获锁。
