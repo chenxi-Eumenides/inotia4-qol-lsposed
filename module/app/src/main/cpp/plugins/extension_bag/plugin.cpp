@@ -138,6 +138,7 @@ const qol::contracts::CapabilityRequirement kRequires[] = {
 };
 
 const qol::contracts::CapabilityRequirement kOptionalRequires[] = {
+    // 运行期才调用：能力缺失时回退到写端口持有的原版刷新函数。
     {qol::contracts::kInventoryRefreshCapabilityId,
      {qol::contracts::kInventoryRefreshVersionMajor,
       qol::contracts::kInventoryRefreshVersionMinor}},

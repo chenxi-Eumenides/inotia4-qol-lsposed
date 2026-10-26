@@ -42,13 +42,15 @@ void virtual_bag_call_original_refresh_item_area_with_guard() {
         refresh->call_original()) {
         return;
     }
-    // core.item 的 inventory_refresh 在插件拓扑中可能因可选依赖环被降级；
-    // 或其 hook backup 尚未绑定导致 call_original 返回 false。此时直接调用
-    // 写端口持有的原函数，否则移动后原生袋完全不刷新。
+    // inventory_refresh 是运行期可选能力：能力缺失或 backup 未绑定时，
+    // 直接调用写端口持有的原版刷新函数，刷新不能因此静默失效。
     if (runtime_state().host.write_port != nullptr &&
         runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
         (void)runtime_state().host.write_port->ui.refresh_item_area();
+        return;
     }
+    QOL_LOG_ERROR(QolDomain::kExtensionBag,
+                  "inventory_refresh unavailable and native refresh port missing");
 }
 
 void refresh_module_item_area_locked(int index) {
