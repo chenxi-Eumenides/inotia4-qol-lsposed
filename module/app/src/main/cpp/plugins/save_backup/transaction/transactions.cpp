@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <cerrno>
 
 #include "contracts/result.h"
 #include "plugins/save_backup/backup_files.h"
@@ -61,6 +62,7 @@ bool backup_dir(std::string& out) {
 }
 
 int locate_save_directory_at(const std::string& data_dir, std::string& out) {
+    if (data_dir.empty()) return 1;
     const char* key = save_backup::port::hub_key();
     return save_backup::persistence::locate_save_directory(data_dir, key != nullptr ? key : "", out)
                ? 0
@@ -69,6 +71,50 @@ int locate_save_directory_at(const std::string& data_dir, std::string& out) {
 
 int locate_save_directory(std::string& out) {
     return locate_save_directory_at(save_backup::state::snapshot().data_dir, out);
+}
+
+bool read_target_c18_layout(save_backup::C18NativeBagLayout& out, std::string& err) {
+    out = save_backup::C18NativeBagLayout::kNotC18;
+    const auto ctx = save_backup::state::snapshot();
+    qol::contracts::QolGameIdentity identity{};
+    if (ctx.game == nullptr || ctx.game->game_identity.read == nullptr ||
+        !qol::contracts::succeeded(ctx.game->game_identity.read(&identity)) ||
+        identity.series_name == nullptr || identity.version_label == nullptr) {
+        err = "game identity unavailable";
+        return false;
+    }
+    const bool identity_is_c18 = std::strcmp(identity.series_name, "c18") == 0;
+    const bool c18_candidate =
+        identity_is_c18 ||
+        (ctx.game->target.has_capability != nullptr &&
+         ctx.game->target.has_capability(
+             qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0);
+    if (!c18_candidate) return true;
+    if (!identity_is_c18 || identity.known == 0) {
+        err = "C18 game version unsupported";
+        return false;
+    }
+    out = save_backup::c18_native_bag_layout(identity.version_label);
+    if (out == save_backup::C18NativeBagLayout::kUnknown) {
+        err = "C18 game version unsupported";
+        return false;
+    }
+    return true;
+}
+
+bool snapshot_c18_target(const std::string& path, bool& existed,
+                         std::vector<uint8_t>& previous) {
+    existed = false;
+    previous.clear();
+    struct stat info{};
+    if (::lstat(path.c_str(), &info) != 0) return errno == ENOENT;
+    if (!S_ISREG(info.st_mode) || info.st_size < 0 ||
+        static_cast<uint64_t>(info.st_size) > save_backup::kC18NativeBagMaxImageBytes ||
+        !read_file_bytes(path, previous)) {
+        return false;
+    }
+    existed = true;
+    return true;
 }
 
 int unlink_file(const std::string& path) {
@@ -561,18 +607,21 @@ std::string import_bundle_file(const std::string& path, int slot) {
     std::vector<uint8_t> bytes;
     save_backup::ParsedBundle parsed;
     bool module_present = false;
+    save_backup::C18NativeBagLayout target_c18_layout =
+        save_backup::C18NativeBagLayout::kNotC18;
     {
         std::lock_guard<std::mutex> lk(save_backup::persistence::file_mutex());
         if (!read_file_bytes(path, bytes) ||
             !save_backup::parse_bundle(bytes.data(), bytes.size(), parsed)) {
             return result_error("backup unreadable or corrupt");
         }
-        // checksum 必须覆盖全部可还原内容（v3 含 warehouse_blob），不能只信 meta 声明。
+        // checksum 必须覆盖全部可还原内容（v4 还含 C18 normalized image），不能只信 meta 声明。
         std::string meta_checksum;
         if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
             !save_backup::valid_checksum(meta_checksum) ||
             meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
-                                                           parsed.module, parsed.warehouse_blob)) {
+                                                           parsed.module, parsed.warehouse_blob,
+                                                           parsed.c18_native_bag_blob)) {
             return result_error("backup checksum mismatch");
         }
         // module_state：新备份显式 0/1；旧备份无字段时按 module 是否为空推断。
@@ -585,6 +634,32 @@ std::string import_bundle_file(const std::string& path, int slot) {
         module_present = has_module_state ? module_state_raw == 1 : !parsed.module.empty();
         if (module_present != !parsed.module.empty()) {
             return result_error("backup unreadable or corrupt");
+        }
+        std::string identity_error;
+        if (!read_target_c18_layout(target_c18_layout, identity_error)) {
+            return result_error(identity_error.c_str());
+        }
+        const bool target_has_c18_bag =
+            target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192 ||
+            target_c18_layout == save_backup::C18NativeBagLayout::kModern96;
+        if (parsed.has_c18_native_bag && !target_has_c18_bag) {
+            return result_error("C18 bag image unsupported on target");
+        }
+        if (!parsed.has_c18_native_bag && target_has_c18_bag) {
+            return result_error("backup has no C18 bag image");
+        }
+    }
+    const bool c18_write = target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192 ||
+                           target_c18_layout == save_backup::C18NativeBagLayout::kModern96;
+    std::vector<uint8_t> c18_target_file;
+    if (c18_write) {
+        if (save_backup::state::snapshot().data_dir.empty()) {
+            return result_error("C18 data directory unavailable");
+        }
+        if (!save_backup::build_c18_native_bag_file(parsed.c18_native_bag,
+                                                    target_c18_layout, slot,
+                                                    c18_target_file)) {
+            return result_error("C18 bag image invalid");
         }
     }
     // 旧备份缺职业/等级：导入前先从明文补全并写回源 bundle（不改 checksum/版本）。
@@ -613,10 +688,17 @@ std::string import_bundle_file(const std::string& path, int slot) {
             return result_error("save directory not found");
     }
 
+    std::string c18_target_path;
+    if (c18_write) {
+        const bool legacy = target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192;
+        c18_target_path = save_backup::state::snapshot().data_dir + "/C18L" +
+                          (legacy ? "bag" : "wh") + std::to_string(slot + 1) + ".dat";
+    }
+
     // 2a) 仓库写回预校验/预加密（必须在写任何文件之前，保证 .rollback/ 与现存文件不被触碰）：
     //     fail-closed —— 任一项失败整次导入失败。
     //       flags=0（密文 wh4）：必须能用本机密钥解密（v2 旧备份仅支持同设备导入；
-    //                            导入后再导出 v3 才变为可跨设备）。
+    //                            导入后再导出仍由 warehouse flags 路径决定可跨设备）。
     //       flags=1（明文 wh4）：补 slot + 重算 +0x38 完整性校验 + 重加密 + 往返自检。
     //     变体能力门禁 unsupported → 整步跳过（保持既有行为，不校验也不写）。
     std::vector<std::vector<uint8_t>> wh_payloads;
@@ -675,6 +757,20 @@ std::string import_bundle_file(const std::string& path, int slot) {
         slot_operation_release(&guard);
         return result_error("rollback backup failed");
     }
+    bool c18_target_existed = false;
+    std::vector<uint8_t> previous_c18_target;
+    const std::string rb_c18 = c18_write
+                                   ? rollback_dir + "/" + file_name_of(c18_target_path) + "." + tx_id
+                                   : std::string();
+    if (c18_write &&
+        (!snapshot_c18_target(c18_target_path, c18_target_existed, previous_c18_target) ||
+         (c18_target_existed &&
+          !write_file_bytes_atomic(rb_c18, previous_c18_target.data(),
+                                   previous_c18_target.size())))) {
+        remove_file(rb_dat);
+        slot_operation_release(&guard);
+        return result_error("rollback backup failed");
+    }
     std::vector<uint8_t> prev_container;
     bool prev_container_exists = false;
     {
@@ -689,6 +785,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
     auto fail_with_rollback = [&](const save_backup::RollbackResult& rollback,
                                   const char* ok_message, const char* degraded_message) {
         if (rollback.complete()) {
+            remove_file(rb_c18);
             slot_operation_release(&guard);
             return result_error(ok_message);
         }
@@ -728,6 +825,32 @@ std::string import_bundle_file(const std::string& path, int slot) {
                                                     sizeof(kMissingWarehouse) - 1) &&
                                                 result.evidence_preserved;
                 }
+            }
+        }
+        return result;
+    };
+
+    auto restore_c18_native_bag = [&]() {
+        save_backup::RollbackResult result;
+        if (!c18_write) return result;
+        bool restored = false;
+        if (c18_target_existed) {
+            restored = file_exists(rb_c18) && copy_file_replacing(rb_c18, c18_target_path);
+        } else {
+            restored = remove_file(c18_target_path);
+        }
+        if (restored) {
+            remove_file(rb_c18);
+        } else {
+            result.c18_native_bag_restored = false;
+            if (c18_target_existed) {
+                result.evidence_preserved = file_exists(rb_c18);
+            } else {
+                static constexpr char kMissingC18Bag[] = "C18 target was absent\n";
+                result.evidence_preserved = preserve_rollback_record(
+                    rb_c18 + ".dat-missing",
+                    reinterpret_cast<const uint8_t*>(kMissingC18Bag),
+                    sizeof(kMissingC18Bag) - 1);
             }
         }
         return result;
@@ -773,7 +896,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
         return {};
     };
 
-    // 6) warehouse_companion：仅 v2/v3（has_warehouse=true）写回；v1 完全跳过。
+    // 6) warehouse_companion：仅 v2/v3/v4（has_warehouse=true）写回；v1 完全跳过。
     auto import_warehouse = [&]() -> std::string {
         if (!wh_write) return {};
         size_t wh_written = 0;
@@ -794,6 +917,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
                         slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
                         sidecar_touched, &guard);
                     if (warehouse_rollback.complete() && core_rollback.complete()) {
+                        remove_file(rb_c18);
                         slot_operation_release(&guard);
                         return result_error("rollback backup failed");
                     }
@@ -808,6 +932,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
                     slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
                     sidecar_touched, &guard);
                 if (warehouse_rollback.complete() && core_rollback.complete()) {
+                    remove_file(rb_c18);
                     slot_operation_release(&guard);
                     return result_error("warehouse file write failed");
                 }
@@ -821,6 +946,33 @@ std::string import_bundle_file(const std::string& path, int slot) {
             SB_LOG("save backup import: slot%d warehouse companion files wrote=%zu skipped=0 "
                    "reencrypted=%zu (state=%s)",
                    slot, wh_written, wh_reencrypted, save_backup::port::warehouse_state_name(target_state));
+        }
+        return {};
+    };
+
+    auto import_c18_native_bag = [&]() -> std::string {
+        if (!c18_write) return {};
+        if (!write_file_bytes_atomic(c18_target_path, c18_target_file.data(),
+                                     c18_target_file.size())) {
+            const save_backup::RollbackResult c18_rollback = restore_c18_native_bag();
+            const save_backup::RollbackResult warehouse_rollback = restore_warehouse();
+            const save_backup::RollbackResult core_rollback = restore_from_rollback(
+                slot, dat_path, rb_dat, dat_existed, prev_container, prev_container_exists,
+                sidecar_touched, &guard);
+            save_backup::RollbackResult rollback;
+            rollback.dat_restored = core_rollback.dat_restored;
+            rollback.sidecar_restored = core_rollback.sidecar_restored;
+            rollback.warehouse_restored = warehouse_rollback.warehouse_restored;
+            rollback.c18_native_bag_restored = c18_rollback.c18_native_bag_restored;
+            rollback.evidence_preserved = core_rollback.evidence_preserved &&
+                                          warehouse_rollback.evidence_preserved &&
+                                          c18_rollback.evidence_preserved;
+            if (rollback.complete()) {
+                slot_operation_release(&guard);
+                return result_error("C18 bag file write failed");
+            }
+            slot_operation_hold_referenced(&guard);
+            return result_error("C18 bag file write failed; rollback failed");
         }
         return {};
     };
@@ -844,10 +996,13 @@ std::string import_bundle_file(const std::string& path, int slot) {
         }
         if (!response.empty()) return response;
     }
+    const std::string c18_response = import_c18_native_bag();
+    if (!c18_response.empty()) return c18_response;
 
-    // 7) 成功：清理该槽回滚副本（dat 与 wh 副本；sidecar 无需副本），并释放前置门 lease。
+    // 7) 成功：清理该槽回滚副本（dat、wh 与 C18 bag；sidecar 无需副本）。
     for (const WhRollback& item : wh_rollback) remove_file(item.rb);
     remove_file(rb_dat);
+    remove_file(rb_c18);
     slot_operation_release(&guard);
     save_backup::Entry entry;
     save_backup::entry_from_bundle(name, parsed, entry);
@@ -878,9 +1033,10 @@ std::string delete_json(const char* checksum) {
     }
     std::string meta_checksum;
     if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
-        !save_backup::valid_checksum(meta_checksum) ||
-        meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
-                                                       parsed.module, parsed.warehouse_blob)) {
+         !save_backup::valid_checksum(meta_checksum) ||
+         meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
+                                                        parsed.module, parsed.warehouse_blob,
+                                                        parsed.c18_native_bag_blob)) {
         return result_error("backup checksum mismatch");
     }
     if (::unlink(path.c_str()) != 0) {

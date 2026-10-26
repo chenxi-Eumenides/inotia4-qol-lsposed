@@ -2006,9 +2006,9 @@ static void test_save_backup_bundle_roundtrip() {
                              "\"module_sha256\":\"cd34\",\"checksum\":\"89abcdef0123\"}";
     std::vector<uint8_t> bundle;
     sb::build_bundle(1, 1700000000000LL, plain, module, {}, meta, bundle);
-    // v2 比 v1 多 u32 warehouseLen（空 blob 时 blob 为 0 字节）。
+    // v4 在空 warehouseLen 之外还包含空 C18 section 长度字段。
     CHECK_EQ(bundle.size(),
-             sb::kMinBundleBytes + 4 + plain.size() + module.size() + meta.size());
+             sb::kMinBundleBytes + 8 + plain.size() + module.size() + meta.size());
 
     sb::ParsedBundle parsed;
     CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));

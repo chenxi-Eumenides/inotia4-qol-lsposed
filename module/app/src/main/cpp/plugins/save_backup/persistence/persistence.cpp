@@ -17,6 +17,9 @@ namespace persistence {
 namespace detail {
 
 std::atomic<uint64_t> g_file_seq{0};
+#if defined(QOL_STORE_TEST_SEAMS)
+std::string g_atomic_write_failure_path;
+#endif
 
 std::string next_file_suffix() {
     return std::to_string(g_file_seq.fetch_add(1, std::memory_order_relaxed) + 1);
@@ -70,6 +73,13 @@ bool read_file_bytes(const std::string& path, std::vector<uint8_t>& out) {
 
 // 原子写：写 <path>.tmp-<id> 再 rename；临时文件用 O_EXCL 创建，避免复用残留路径。
 bool write_file_bytes_atomic(const std::string& path, const uint8_t* data, size_t size) {
+#if defined(QOL_STORE_TEST_SEAMS)
+    if (!detail::g_atomic_write_failure_path.empty() &&
+        detail::g_atomic_write_failure_path == path) {
+        detail::g_atomic_write_failure_path.clear();
+        return false;
+    }
+#endif
     const std::string tmp = path + ".tmp-" + next_file_suffix();
     const int fd = ::open(tmp.c_str(),
                           O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
@@ -101,6 +111,12 @@ bool write_file_bytes_atomic(const std::string& path, const uint8_t* data, size_
     }
     return true;
 }
+
+#if defined(QOL_STORE_TEST_SEAMS)
+void fail_next_atomic_write_for_test(const std::string& path) {
+    detail::g_atomic_write_failure_path = path;
+}
+#endif
 
 // 目标必须不存在（O_EXCL）；失败时清理目标，供调用方重试。
 bool copy_file(const std::string& from, const std::string& to) {

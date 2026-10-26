@@ -82,6 +82,7 @@ bool backup_dir(std::string& out) {
 }
 
 int locate_save_directory_at(const std::string& data_dir, std::string& out) {
+    if (data_dir.empty()) return 1;
     const char* key = save_backup::port::hub_key();
     return save_backup::persistence::locate_save_directory(
                data_dir, key != nullptr ? key : "", out)
@@ -385,6 +386,44 @@ static std::string autobackup_fingerprint(int slot, const std::string& data_dir,
         text += name + " " + std::to_string(stamp.size) + " " +
                 std::to_string(stamp.mtime_sec) + " " + std::to_string(stamp.mtime_nsec) + "\n";
     }
+    const auto ctx = save_backup::state::snapshot();
+    qol::contracts::QolGameIdentity identity{};
+    if (ctx.game == nullptr || ctx.game->game_identity.read == nullptr ||
+        !qol::contracts::succeeded(ctx.game->game_identity.read(&identity)) ||
+        identity.series_name == nullptr || identity.version_label == nullptr) {
+        text += "c18 identity-unavailable\n";
+    } else if (std::strcmp(identity.series_name, "c18") != 0 &&
+               (ctx.game->target.has_capability == nullptr ||
+                ctx.game->target.has_capability(
+                    qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0)) {
+        text += "c18 none\n";
+    } else {
+        const std::string version(identity.version_label);
+        const save_backup::C18NativeBagLayout layout =
+            save_backup::c18_native_bag_layout(version);
+        text += "c18 " + version + " " + std::to_string(static_cast<int>(layout)) + " ";
+        if (std::strcmp(identity.series_name, "c18") != 0 || identity.known == 0 ||
+            (layout != save_backup::C18NativeBagLayout::kLegacy192 &&
+             layout != save_backup::C18NativeBagLayout::kModern96)) {
+            text += "unavailable\n";
+        } else if (!data_dir.empty()) {
+            const bool legacy = layout == save_backup::C18NativeBagLayout::kLegacy192;
+            const std::string primary = data_dir + "/C18L" + (legacy ? "bag" : "wh") +
+                                        std::to_string(slot + 1) + ".dat";
+            struct stat primary_info{};
+            std::string source = primary;
+            if (::lstat(primary.c_str(), &primary_info) != 0 && errno == ENOENT) {
+                source = data_dir + "/C18Lbag.dat";
+            }
+            const FileStamp stamp = file_stamp(source);
+            text += source.substr(data_dir.size()) + " " + std::to_string(stamp.exists ? 1 : 0) +
+                    " " + std::to_string(stamp.size) + " " +
+                    std::to_string(stamp.mtime_sec) + " " +
+                    std::to_string(stamp.mtime_nsec) + "\n";
+        } else {
+            text += "directory-unavailable\n";
+        }
+    }
     return text;
 }
 
@@ -469,6 +508,25 @@ bool bridge_locate_save_directory(std::string& out) {
     return locate_save_directory_at(save_backup::state::snapshot().data_dir, out) == 0;
 }
 
+bool bridge_read_game_identity(qol::contracts::QolGameIdentity& out) {
+    out = qol::contracts::QolGameIdentity{};
+    const auto ctx = save_backup::state::snapshot();
+    return ctx.game != nullptr && ctx.game->game_identity.read != nullptr &&
+           qol::contracts::succeeded(ctx.game->game_identity.read(&out));
+}
+
+bool bridge_get_data_directory(std::string& out) {
+    out = save_backup::state::snapshot().data_dir;
+    return !out.empty();
+}
+
+bool bridge_has_c18_candidate_capability() {
+    const auto ctx = save_backup::state::snapshot();
+    return ctx.game != nullptr && ctx.game->target.has_capability != nullptr &&
+           ctx.game->target.has_capability(
+               qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
+}
+
 bool bridge_read_file(const std::string& path, std::vector<uint8_t>& out) {
     return read_file_bytes(path, out);
 }
@@ -484,7 +542,8 @@ int bridge_encrypt_process(void* data, int32_t len, int32_t mode, const char* ke
 const qol::features::save_backup::BackupFilesSource kBackupFilesSource{
     &bridge_collect_dat,       &bridge_collect_sidecar, &bridge_locate_save_directory,
     &bridge_read_file,         &bridge_encrypt_available, &bridge_hub_key,
-    &bridge_encrypt_process,
+    &bridge_encrypt_process,   &bridge_read_game_identity, &bridge_get_data_directory,
+    &bridge_has_c18_candidate_capability,
 };
 
 void bind_backup_files_source() { qol::features::save_backup::backup_files_bind_source(kBackupFilesSource); }
@@ -626,9 +685,10 @@ Outcome<EntryResult> describe_backup(const std::string& name) {
     }
     std::string meta_checksum;
     if (!save_backup::json_find_string(parsed.meta_json, "checksum", meta_checksum) ||
-        !save_backup::valid_checksum(meta_checksum) ||
-        meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
-                                                       parsed.module, parsed.warehouse_blob)) {
+         !save_backup::valid_checksum(meta_checksum) ||
+         meta_checksum != save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
+                                                        parsed.module, parsed.warehouse_blob,
+                                                        parsed.c18_native_bag_blob)) {
         return Outcome<EntryResult>::failure(BackupError::kChecksumMismatch, "backup checksum mismatch");
     }
     // 旧备份缺职业/等级：从已解析的明文补全并写回（只改 meta 段，checksum/版本不变）。
@@ -651,6 +711,7 @@ std::string save_backup_entry_json(const char* name) {
 
 struct BuiltExport {
     std::vector<uint8_t> bundle;
+    std::vector<uint8_t> c18_native_bag_blob;
     std::string checksum;
     std::string original_sha256;
     std::string module_sha256;
@@ -676,13 +737,26 @@ static bool build_export_bundle(int slot, BuiltExport& out, std::string& err) {
                                                                                               : 0;
     const std::vector<uint8_t> warehouse_blob =
         save_backup::encode_warehouse(snapshot.warehouse.files);
+    if (snapshot.c18_native_bag.present) {
+        if (!save_backup::validate_c18_native_bag_image(snapshot.c18_native_bag.image)) {
+            err = "C18 bag file unreadable or corrupt";
+            return false;
+        }
+        out.c18_native_bag_blob =
+            save_backup::encode_c18_native_bag_image(snapshot.c18_native_bag.image);
+        if (out.c18_native_bag_blob.empty()) {
+            err = "C18 bag file unreadable or corrupt";
+            return false;
+        }
+    }
     out.export_time_ms = now_ms();
     out.original_sha256 = save_backup::sha256_hex(snapshot.dat.plain, {});
     out.module_sha256 = snapshot.module.bytes.empty()
                             ? std::string()
                             : save_backup::sha256_hex(snapshot.module.bytes, {});
     out.checksum = save_backup::compute_checksum(save_backup::kBundleVersion, snapshot.dat.plain,
-                                                 snapshot.module.bytes, warehouse_blob);
+                                                 snapshot.module.bytes, warehouse_blob,
+                                                 out.c18_native_bag_blob);
     out.class_name = save_backup_class_name(snapshot.dat.class_idx);
     out.map_id = snapshot.dat.map_id;
     out.hero_level = snapshot.dat.hero_level;
@@ -698,8 +772,14 @@ static bool build_export_bundle(int slot, BuiltExport& out, std::string& err) {
         slot, out.export_time_ms, out.map_id, out.hero_level, out.hero_index, out.save_version,
         out.save_time, out.original_sha256, out.module_sha256, out.checksum, out.class_idx,
         out.class_name, out.warehouse_count, warehouse_sha, module_state);
-    save_backup::build_bundle(slot, out.export_time_ms, snapshot.dat.plain, snapshot.module.bytes,
-                              warehouse_blob, meta_json, out.bundle);
+    if (!save_backup::build_bundle(slot, out.export_time_ms, snapshot.dat.plain,
+                                   snapshot.module.bytes, warehouse_blob, meta_json, out.bundle,
+                                   snapshot.c18_native_bag.present
+                                       ? &snapshot.c18_native_bag.image
+                                       : nullptr)) {
+        err = "C18 bag image invalid";
+        return false;
+    }
     return true;
 }
 
@@ -728,7 +808,8 @@ static std::string export_json_with_lease(int slot) {
                 save_backup::json_find_string(parsed.meta_json, "checksum", inner_checksum) &&
                 inner_checksum == checksum &&
                 save_backup::compute_checksum(parsed.bundle_version, parsed.orig_plain,
-                                              parsed.module, parsed.warehouse_blob) == checksum;
+                                              parsed.module, parsed.warehouse_blob,
+                                              parsed.c18_native_bag_blob) == checksum;
             if (checksum_ok) {
                 save_backup::Entry entry;
                 save_backup::entry_from_bundle(file_name_of(existing), parsed, entry);

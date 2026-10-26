@@ -752,6 +752,159 @@ bool validate_warehouse(const std::vector<WarehouseFile>& files, std::string& er
     return true;
 }
 
+C18NativeBagLayout c18_native_bag_layout(const std::string& version_label) {
+    if (version_label == "v507" || version_label == "v508" || version_label == "v512" ||
+        version_label == "v513" || version_label == "v514" || version_label == "v520") {
+        return C18NativeBagLayout::kLegacy192;
+    }
+    if (version_label == "v586") return C18NativeBagLayout::kModern96;
+    if (version_label == "v0.2" || version_label == "v0.38") {
+        return C18NativeBagLayout::kUnsupported;
+    }
+    return C18NativeBagLayout::kUnknown;
+}
+
+bool validate_c18_native_bag_image(const C18NativeBagImage& image) {
+    if (image.source_slot < 0 || image.source_slot > 2) return false;
+    if (image.source_version.empty() || image.source_version.size() > UINT16_MAX) return false;
+    if (c18_native_bag_layout(image.source_version) != C18NativeBagLayout::kLegacy192 &&
+        c18_native_bag_layout(image.source_version) != C18NativeBagLayout::kModern96) {
+        return false;
+    }
+    if (image.record_count != kC18NativeBagLegacyRecordCount &&
+        image.record_count != kC18NativeBagModernRecordCount) {
+        return false;
+    }
+    return image.records.size() ==
+           static_cast<size_t>(image.record_count) * kC18NativeBagRecordBytes;
+}
+
+bool c18_native_bag_record_empty(const uint8_t* record, size_t size) {
+    if (record == nullptr || size < 5 * sizeof(uint64_t)) return false;
+    for (size_t value = 0; value < 5; ++value) {
+        for (size_t byte = 0; byte < sizeof(uint64_t); ++byte) {
+            if (record[value * sizeof(uint64_t) + byte] != 0) return false;
+        }
+    }
+    return true;
+}
+
+bool parse_c18_native_bag_file(const uint8_t* bytes, size_t size, int expected_slot,
+                               uint32_t expected_count, bool allow_either_count,
+                               uint32_t& out_count,
+                               std::array<uint8_t, 3>& out_header_reserved,
+                               std::vector<uint8_t>& out_records) {
+    out_records.clear();
+    out_header_reserved = {};
+    if (bytes == nullptr || expected_slot < -1 || expected_slot > 2 ||
+        size < kC18NativeBagHeaderBytes || std::memcmp(bytes, "C18BAG01", 8) != 0 ||
+        le32(bytes + 8) != 1 || bytes[0x13] < 1 || bytes[0x13] > 3 ||
+        (expected_slot >= 0 && bytes[0x13] != static_cast<uint8_t>(expected_slot + 1))) {
+        return false;
+    }
+    const uint32_t count = le32(bytes + 0x0c);
+    if (allow_either_count) {
+        if (count != kC18NativeBagLegacyRecordCount &&
+            count != kC18NativeBagModernRecordCount) {
+            return false;
+        }
+    } else if (count != expected_count) {
+        return false;
+    }
+    if (count != kC18NativeBagLegacyRecordCount && count != kC18NativeBagModernRecordCount) {
+        return false;
+    }
+    const size_t record_bytes = static_cast<size_t>(count) * kC18NativeBagRecordBytes;
+    if (size != kC18NativeBagHeaderBytes + record_bytes) return false;
+    std::copy(bytes + 0x10, bytes + 0x13, out_header_reserved.begin());
+    out_records.assign(bytes + kC18NativeBagHeaderBytes,
+                       bytes + kC18NativeBagHeaderBytes + record_bytes);
+    out_count = count;
+    return true;
+}
+
+std::vector<uint8_t> encode_c18_native_bag_image(const C18NativeBagImage& image) {
+    if (!validate_c18_native_bag_image(image)) return {};
+    std::vector<uint8_t> out;
+    out.reserve(2 + image.source_version.size() + 1 + 4 + 3 + 4 + image.records.size());
+    wb16(out, static_cast<uint16_t>(image.source_version.size()));
+    out.insert(out.end(), image.source_version.begin(), image.source_version.end());
+    out.push_back(static_cast<uint8_t>(image.source_slot));
+    wb32(out, image.record_count);
+    out.insert(out.end(), image.header_reserved.begin(), image.header_reserved.end());
+    wb32(out, static_cast<uint32_t>(image.records.size()));
+    out.insert(out.end(), image.records.begin(), image.records.end());
+    return out;
+}
+
+bool decode_c18_native_bag_image(const uint8_t* bytes, size_t size,
+                                 C18NativeBagImage& out) {
+    if (bytes == nullptr || size < 2) return false;
+    const uint16_t label_len = be16(bytes);
+    size_t off = 2;
+    if (label_len == 0 || off + label_len + 12 > size) return false;
+    C18NativeBagImage parsed;
+    parsed.source_version.assign(reinterpret_cast<const char*>(bytes + off), label_len);
+    off += label_len;
+    parsed.source_slot = bytes[off++];
+    parsed.record_count = be32(bytes + off);
+    off += 4;
+    std::copy(bytes + off, bytes + off + parsed.header_reserved.size(),
+              parsed.header_reserved.begin());
+    off += parsed.header_reserved.size();
+    const uint32_t records_len = be32(bytes + off);
+    off += 4;
+    if (records_len > kC18NativeBagLegacyRecordCount * kC18NativeBagRecordBytes ||
+        records_len != size - off) {
+        return false;
+    }
+    parsed.records.assign(bytes + off, bytes + off + records_len);
+    if (!validate_c18_native_bag_image(parsed)) return false;
+    out = std::move(parsed);
+    return true;
+}
+
+bool build_c18_native_bag_file(const C18NativeBagImage& image,
+                               C18NativeBagLayout target_layout, int target_slot,
+                               std::vector<uint8_t>& out) {
+    out.clear();
+    if (!validate_c18_native_bag_image(image) || target_slot < 0 || target_slot > 2) return false;
+    uint32_t target_count = 0;
+    switch (target_layout) {
+        case C18NativeBagLayout::kLegacy192:
+            target_count = kC18NativeBagLegacyRecordCount;
+            break;
+        case C18NativeBagLayout::kModern96:
+            target_count = kC18NativeBagModernRecordCount;
+            break;
+        case C18NativeBagLayout::kNotC18:
+        case C18NativeBagLayout::kUnsupported:
+        case C18NativeBagLayout::kUnknown:
+            return false;
+    }
+
+    out.reserve(kC18NativeBagHeaderBytes +
+                static_cast<size_t>(target_count) * kC18NativeBagRecordBytes);
+    const char magic[] = "C18BAG01";
+    out.insert(out.end(), magic, magic + 8);
+    out.insert(out.end(), {1, 0, 0, 0});
+    const size_t count_offset = out.size();
+    out.insert(out.end(), 4, 0);
+    wle32(out, count_offset, target_count);
+    out.insert(out.end(), image.header_reserved.begin(), image.header_reserved.end());
+    out.push_back(static_cast<uint8_t>(target_slot + 1));
+
+    const size_t source_count = image.record_count;
+    const size_t copied_count = std::min<size_t>(source_count, target_count);
+    const size_t copied_bytes = copied_count * kC18NativeBagRecordBytes;
+    out.insert(out.end(), image.records.begin(),
+               image.records.begin() + static_cast<std::ptrdiff_t>(copied_bytes));
+    out.resize(kC18NativeBagHeaderBytes +
+                   static_cast<size_t>(target_count) * kC18NativeBagRecordBytes,
+               0);
+    return true;
+}
+
 // ---- 原版存档明文主槽摘要 ----
 
 bool parse_plain_map_id(const std::vector<uint8_t>& plain, int& map_id) {
@@ -825,20 +978,31 @@ std::string build_meta_json(int source_slot, long long export_time_ms, int map_i
 
 std::string compute_checksum(uint16_t bundle_version, const std::vector<uint8_t>& plain,
                              const std::vector<uint8_t>& module,
-                             const std::vector<uint8_t>& warehouse_blob) {
+                             const std::vector<uint8_t>& warehouse_blob,
+                             const std::vector<uint8_t>& c18_native_bag_blob) {
     std::vector<uint8_t> content = module;
-    // v1/v2 的旧公式不覆盖 warehouse 段，必须保持旧备份可导入/可删除。
-    if (bundle_version >= kBundleVersion) {
+    // v1/v2 的旧公式不覆盖 warehouse 段；v3 增加 flags 后覆盖 warehouse。
+    if (bundle_version >= kBundleVersionV3) {
         content.insert(content.end(), warehouse_blob.begin(), warehouse_blob.end());
+    }
+    // v1-v3 checksum 逐字节兼容；仅 v4 新增覆盖 normalized C18 image 段。
+    if (bundle_version >= kBundleVersion) {
+        content.insert(content.end(), c18_native_bag_blob.begin(), c18_native_bag_blob.end());
     }
     return sha256_hex(plain, content).substr(0, 12);
 }
 
-void build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
+bool build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
                   const std::vector<uint8_t>& module,
                   const std::vector<uint8_t>& warehouse_blob, const std::string& meta_json,
-                  std::vector<uint8_t>& out) {
+                  std::vector<uint8_t>& out, const C18NativeBagImage* c18_native_bag) {
     out.clear();
+    if (source_slot < 0 || source_slot > 2 ||
+        (c18_native_bag != nullptr &&
+         (c18_native_bag->source_slot != source_slot ||
+          !validate_c18_native_bag_image(*c18_native_bag)))) {
+        return false;
+    }
     wb32(out, kBundleMagic);
     wb16(out, kBundleVersion);
     out.push_back(static_cast<uint8_t>(source_slot));
@@ -853,9 +1017,15 @@ void build_bundle(int source_slot, long long export_time_ms, const std::vector<u
     // 个人仓库段（空 blob 时仅写入 u32 0）。
     wb32(out, static_cast<uint32_t>(warehouse_blob.size()));
     out.insert(out.end(), warehouse_blob.begin(), warehouse_blob.end());
+    const std::vector<uint8_t> c18_blob = c18_native_bag == nullptr
+                                               ? std::vector<uint8_t>()
+                                               : encode_c18_native_bag_image(*c18_native_bag);
+    wb32(out, static_cast<uint32_t>(c18_blob.size()));
+    out.insert(out.end(), c18_blob.begin(), c18_blob.end());
     wb16(out, static_cast<uint16_t>(meta_json.size()));
     out.insert(out.end(), meta_json.begin(), meta_json.end());
     wb32(out, crc32_ieee(out.data(), out.size()));
+    return true;
 }
 
 bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
@@ -864,8 +1034,9 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     if (crc32_ieee(bytes, body_size) != be32(bytes + body_size)) return false;
     if (be32(bytes) != kBundleMagic) return false;
     const uint16_t version = be16(bytes + 4);
-    // 接受 v1（无仓库段）、v2（仓库段无 flags）、v3（仓库段带 flags）。
-    if (version != kBundleVersion && version != kBundleVersionV2 &&
+    // 接受 v1（无仓库段）、v2（仓库段无 flags）、v3（仓库段带 flags）、v4（含 C18 image）。
+    if (version != kBundleVersion && version != kBundleVersionV3 &&
+        version != kBundleVersionV2 &&
         version != kBundleVersionV1) {
         return false;
     }
@@ -892,7 +1063,8 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
     bool has_warehouse = false;
     const uint8_t* warehouse_blob = nullptr;
     uint32_t warehouse_len = 0;
-    if (version == kBundleVersionV2 || version == kBundleVersion) {
+    if (version == kBundleVersionV2 || version == kBundleVersionV3 ||
+        version == kBundleVersion) {
         if (off + 4 > body_size) return false;
         warehouse_len = be32(bytes + off);
         off += 4;
@@ -904,6 +1076,26 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
         if (!decoded) return false;
         off += warehouse_len;
         has_warehouse = true;
+    }
+
+    C18NativeBagImage c18_image;
+    std::vector<uint8_t> c18_blob_copy;
+    bool has_c18_image = false;
+    if (version == kBundleVersion) {
+        if (off + 4 > body_size) return false;
+        const uint32_t c18_len = be32(bytes + off);
+        off += 4;
+        if (c18_len > kC18NativeBagMaxImageBytes + 2 + 8 + 1 + 3 + UINT16_MAX ||
+            off + c18_len > body_size) {
+            return false;
+        }
+        if (c18_len != 0) {
+            if (!decode_c18_native_bag_image(bytes + off, c18_len, c18_image)) return false;
+            if (c18_image.source_slot != source_slot) return false;
+            c18_blob_copy.assign(bytes + off, bytes + off + c18_len);
+            has_c18_image = true;
+        }
+        off += c18_len;
     }
 
     if (off + 2 > body_size) return false;
@@ -923,6 +1115,9 @@ bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out) {
         out.warehouse_blob.clear();
     }
     out.has_warehouse = has_warehouse;
+    out.c18_native_bag = std::move(c18_image);
+    out.c18_native_bag_blob = std::move(c18_blob_copy);
+    out.has_c18_native_bag = has_c18_image;
     out.meta_json.assign(reinterpret_cast<const char*>(bytes + off), meta_len);
     out.size_bytes = static_cast<long long>(size);
     return true;

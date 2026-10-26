@@ -23,6 +23,10 @@ int main() {
     assert(!warehouse_failed.complete());
     assert(!warehouse_failed.evidence_preserved);
 
+    save_backup::RollbackResult c18_native_bag_failed;
+    c18_native_bag_failed.c18_native_bag_restored = false;
+    assert(!c18_native_bag_failed.complete());
+
     save_backup::RollbackResult evidence_failed;
     evidence_failed.evidence_preserved = false;
     assert(!evidence_failed.complete());

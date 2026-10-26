@@ -23,6 +23,9 @@ bool ensure_dir(const std::string& path);
 bool file_exists(const std::string& path);
 bool read_file_bytes(const std::string& path, std::vector<uint8_t>& out);
 bool write_file_bytes_atomic(const std::string& path, const uint8_t* data, size_t size);
+#if defined(QOL_STORE_TEST_SEAMS)
+void fail_next_atomic_write_for_test(const std::string& path);
+#endif
 bool copy_file(const std::string& from, const std::string& to);
 bool copy_file_replacing(const std::string& from, const std::string& to);
 bool remove_file(const std::string& path);

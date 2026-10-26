@@ -1,11 +1,11 @@
-# C18 改版客户端背包（临时参考）
+# C18 改版客户端背包
 
 供其他插件复用。本文只描述已验证事实与安全用法；**不要在插件里硬编码地址**，
 统一经 Host 适配器/能力位访问。
 
 ## 1. 版本与识别
 
-- 已确认同布局：C18L v507 / v508 / v512 / v513 / v514 / v520；但 v520 的袋对象表已改为 GOT 指向的堆表（见 §3），不能只按 `0x735000` 取表。
+- 已确认同一 native bag 文件记录格式：C18L v507 / v508 / v512 / v513 / v514 / v520 / v586；C18L v0.2 / v0.38 没有 native bag。v520 的袋对象表已改为 GOT 指向的堆表（见 §3），不能只按 `0x735000` 取表。
 - 能力位：`kQolTargetCapabilityC18NativeBagLayoutCandidate`（bit3，值 0x8）。
   - 已知 C18L 版本由变体表置位；未知 MD5 仅在运行期标记
     （存在 `C18BAG01` 且 `C18Lbag.dat` 存在、无 WH4）时置位。
@@ -89,3 +89,29 @@
 - 袋对象表在进入世界前可能为空；探测应在进档后做一次，换档失效重探。
 - 18 是 getter 可接受索引，但不是真实袋；不要持久化为“无选中”。
 - C18 追加袋与插件扩展袋是两个独立编号空间，禁止混用。
+
+## 10. Native bag 存档文件与备份策略
+
+### 10.1 已验证布局
+
+- 静态证据来自 fresh arm64 `libgame.so`：`apk/decoded/c18-v514/lib/arm64-v8a/libgame.so`、`apk/decoded/c18-v520/lib/arm64-v8a/libgame.so`、`apk/decoded/c18/lib/arm64-v8a/libgame.so`。
+- v514/v520 旧布局每槽文件为 `C18Lbag{N}.dat`，loader 固定读取 192 条记录（袋 6..17）；v586 新布局每槽文件为 `C18Lwh{N}.dat`，loader 固定读取 96 条记录（袋 6..11）。
+- 两版都使用 `C18BAG01` magic、20-byte header 和相同 `0x230` record schema。小端 header 字段为 `+8=1`、`+0x0c=count`、`+0x13=slot+1`；v514/v520 count=`0xc0`，v586 count=`0x60`。精确文件长度分别是 `20 + 192*0x230` 与 `20 + 96*0x230`。
+- header `+0x10..+0x12` 三个保留字节语义未证；备份按 opaque bytes 保存并在目标文件中原样复制。
+- loader 的记录循环次数是版本代码中的固定常量，**不会用 `+0x0c` 决定读取条数**。因此只改 count 而不写实际 192/96 条记录不是合法转换。
+- 记录体按 opaque bytes 处理。loader 判断 empty record 时检查首五个 8-byte 值，全零即空记录；其他字节不由备份层解释或重编码。
+
+### 10.2 文件读写边界
+
+- 文件以 stdio 直写，未发现原版 `SAVE_Encrypt` 或设备密钥加密证据；C18 native bag image 不做加解密。
+- `SAVE_Save` 和 C18 helper 会写入真实当前槽，不是纯序列化 API；导出必须直接读取活动文件，不能调用它们。
+- 文件都位于 Native init 传入的动态 `data_dir` 根目录；slot 0/1/2 的文件后缀 N 分别为 1/2/3：旧版 `C18Lbag{N}.dat`、新版 `C18Lwh{N}.dat`。不得硬编码包路径。
+- primary 缺失时只读同一 `data_dir` 根目录的 shared fallback `C18Lbag.dat`；fallback header 可为 96 或 192 条。primary 和 shared 都不存在时备份/导入 fail-closed，不伪造空 image。不得调用内部 selector `0xc5538`，因为它会通过 `system()` 复制文件。
+- shared fallback 导入后只 materialize 为目标版本活动 per-slot 文件，不改写 shared 文件。
+
+### 10.3 跨版本备份策略
+
+- bundle 只保存导出时当前游戏实际生效的一份 C18 image，不收集另一文件族。v520/v586 文件名不同不代表记录 schema 不同。
+- 旧目标实际写 192 条；新目标实际写 96 条。96→192 在尾部补 96 条全零记录；192→96 保留前 96 条并直接丢弃尾部。该截断是用户确认的导入语义，目标槽中超出前 96 条的数据会被覆盖丢失；原 bundle 保留完整源记录。
+- 历史 v514/v520→v586 未发现游戏自身的 `bagN`→`whN` 迁移事实；备份导入转换不应被描述成游戏迁移。
+- 静态逆向证据不等于设备验收：本文件所述版本间导入/loader 行为尚未做设备 A/B，不能据此宣称真机通过。

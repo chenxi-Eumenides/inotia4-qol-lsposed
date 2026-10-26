@@ -8,10 +8,12 @@ struct RollbackResult {
     bool dat_restored = true;
     bool sidecar_restored = true;
     bool warehouse_restored = true;
+    bool c18_native_bag_restored = true;
     bool evidence_preserved = true;
 
     bool complete() const {
-        return dat_restored && sidecar_restored && warehouse_restored && evidence_preserved;
+        return dat_restored && sidecar_restored && warehouse_restored &&
+               c18_native_bag_restored && evidence_preserved;
     }
 };
 

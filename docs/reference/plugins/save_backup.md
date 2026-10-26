@@ -175,10 +175,12 @@ Kotlin postAndAwait
 
 ### 5.4 bundle 格式
 
-- 大端分段，magic `QSB1`，当前 v3；解析兼容 v1/v2。
+- 大端分段，magic `QSB1`，当前 v4；解析兼容 v1/v2/v3。
 - v3：`header | origLen | origPlain | moduleLen | module | warehouseLen | warehouseBlob | metaLen | metaJson | crc32`。
-- v2：warehouse 段无 flags；v1：无 warehouse 段。
-- `checksum`：v3+ `sha256(origPlain ‖ module ‖ warehouseBlob)[0:12]`；v1/v2 `sha256(origPlain ‖ module)[0:12]`。
+- v4：在 v3 warehouse 段后增加 `c18Len | normalizedC18Image`，再接 `metaLen | metaJson | crc32`；无 C18 image 时 `c18Len=0`。
+- C18 normalized image 保存 source version label、source slot、96/192 source record_count、header `+0x10..+0x12` 保留字节和 opaque records；其他原生 header 字段在导入时按目标重建，不保存另一文件族副本。
+- v2：warehouse 段无 flags；v1：无 warehouse 段；v1/v2/v3 的分段字节布局与 checksum 公式保持兼容。
+- `checksum`：v1/v2 `sha256(origPlain ‖ module)[0:12]`；v3 `sha256(origPlain ‖ module ‖ warehouseBlob)[0:12]`；v4 再追加 `normalizedC18Image` 输入。
 - `metaJson` 字段：`source_slot`、`export_time`、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`、`class_idx`、`class_name`、`warehouse_count`、`warehouse_sha256`、`module_state`。
 - 原版明文块 0/1/2：块表、Information、Player、CharacterInfo；主角等级/职业取 CharacterInfo 第 0 条记录。
 
@@ -186,21 +188,31 @@ Kotlin postAndAwait
 
 ### 6.1 导出
 
-1. 取槽明文（`save.facts.load_data`）、sidecar、wh4 伴生文件。
+1. 取槽明文（`save.facts.load_data`）、sidecar、wh4 伴生文件；若运行版本为支持 native bag 的 C18L，则从当前活动 per-slot 文件或其 shared fallback 收集一份 C18 image。
 2. 有外部 wh4 时尝试剥离 block3 内嵌 `WH96v002` 段。
-3. 计算 checksum、构造 meta/bundle、CRC32。
-4. 按内部 checksum 去重；命中返回既有 entry + `deduplicated:true`。
-5. 取 slot operation lease；`.tmp-<id>` 原子写后 rename。
-6. 返回 `BackupMeta`；不触发游戏保存。
+3. C18 文件严格校验 magic/version/count/slot/精确长度；记录体保持 opaque。C18 image 按原始文件字节读取，不调用会 `system()` 复制文件的游戏 selector，也不调用 `SAVE_Save` / C18 helper 改写当前槽；C18 文件无设备密钥加密证据，不做加解密。
+4. 计算 checksum、构造 meta/bundle、CRC32。
+5. 按内部 checksum 去重；命中返回既有 entry + `deduplicated:true`。
+6. 取 slot operation lease；`.tmp-<id>` 原子写后 rename。
+7. 返回 `BackupMeta`；不触发游戏保存。
 
 ### 6.2 导入
 
 1. 主菜单门禁（`world.facts.state==4`，失败回退 `current_slot`）。
 2. 按内部 checksum 定位 bundle；校验 payload checksum、`module_state`。
-3. 取目标槽 lease；预加密 dat / wh4（补目标槽、重算 wh4 `+0x38`、往返自检）。
-4. 目标槽现存 dat/sidecar 复制到 `.rollback/`。
-5. 原子写 dat → sidecar → wh4；失败按逆序回滚。
-6. 成功后清理回滚副本；`save_mark_stale()`；返回 `BackupMeta`。
+3. 先读取当前 `game_identity` 并判定目标 C18 文件族；C18 目标必须有 C18 image，带 C18 image 的备份不能导入到不支持 native bag 的目标。门禁在 dat/sidecar 写入前执行；未知 C18 版本 fail-closed。
+4. 取目标槽 lease；预加密 dat / wh4（补目标槽、重算 wh4 `+0x38`、往返自检），并按目标 C18 版本构造唯一活动 per-slot 文件。
+5. 目标槽现存 dat/sidecar/C18 活动文件复制或快照到 `.rollback/`。
+6. 原子写 dat → sidecar → wh4 → C18 活动文件；失败按逆序回滚，C18 回滚记录包含原文件存在状态与原字节。
+7. 成功后清理回滚副本；`save_mark_stale()`；返回 `BackupMeta`。
+
+### 6.2.1 C18 native bag 版本转换
+
+- 文件位于 Native init 传入的动态 `data_dir` 根目录。slot 0/1/2 对应后缀 N=1/2/3：v507/v508/v512/v513/v514/v520 使用 `C18Lbag{N}.dat`，每槽实际 192 条、每条 `0x230` bytes；v586 使用 `C18Lwh{N}.dat`，每槽实际 96 条。
+- 两族使用相同 `C18BAG01` magic、20-byte header 和记录 schema；header count 是一致性字段，loader 的循环数由目标版本代码固定，不由 header count 决定，因此必须写完整目标数量记录。
+- 导入旧目标时，96 条源记录后补 96 条全零；导入新目标时，192 条源记录只取前 96 条，尾部直接丢弃且不另存。bundle 源 image 不变；导入只覆盖目标版本活动文件，不写 shared fallback，也不写另一族副本。
+- 历史 v514/v520→v586 未发现 `bagN`→`whN` 游戏迁移；此备份行为是用户确认的单 image 规范化策略，不表示游戏本身会迁移。
+- `data_dir/C18Lbag.dat` 只作为 primary 缺失时的只读 shared fallback，fallback header 可为 96 或 192 条；导入时 materialize 到目标版本 per-slot primary。primary 与 shared 都不存在时 fail-closed，不生成空 image。
 
 ### 6.3 删除
 
@@ -211,7 +223,7 @@ Kotlin postAndAwait
 ### 6.4 自动备份
 
 - `save.pre_save` 观察者在保存写盘前触发。
-- 以 dat/sidecar/wh4 的 size+mtime 指纹判断是否跳过。
+- 以 dat/sidecar/wh4 及当前 C18 活动 primary/shared fallback 的 size+mtime 指纹判断是否跳过。
 - 每槽一份 `autosave_sN.qol.bak` 原子覆盖；失败只记 WARN，不阻断保存。
 - 自动备份不进入 `backups/` 顶层列表、去重、导入、删除扫描。
 
@@ -260,6 +272,11 @@ Kotlin postAndAwait
 | `backup name collision` | `_1.._99` 用尽 |
 | `warehouse read failed` / `warehouse file too large` / `warehouse limit exceeded` | wh4 收集/容量失败 |
 | `load failed` | 明文读取失败 |
+| `game identity unavailable` / `C18 game version unsupported` | 运行时身份不可读或未知 C18 候选版本 |
+| `C18 data directory unavailable` | C18 活动文件无法从 Native init 的动态 `data_dir` 定位 |
+| `C18 bag file not found` / `C18 bag file unreadable or corrupt` | C18 primary 与 shared fallback 均不可用，或文件 header/count/长度不符合证据 |
+| `backup has no C18 bag image` / `C18 bag image unsupported on target` | C18 目标导入缺失 image，或 image 目标不支持 C18 native bag |
+| `C18 bag image invalid` / `C18 bag file write failed` | normalized image 转换失败或活动 per-slot 文件写入失败 |
 | `command unavailable` | typed command 未注册/post 失败 |
 | `ticket unavailable` / `ticket timeout` | Kotlin 票据回取失败/超时 |
 
@@ -267,7 +284,7 @@ L4 用 `Outcome<T>`/`BackupError`；`api/json_codec` 负责映射到上述文案
 
 ## 9. 测试与验收
 
-当前基线（2026-10-25）：
+当前基线（2026-10-25；C18 扩展待 orchestrator 复验）：
 
 - `save_backup_gate_tests`：**304 passed / 0 failed**（含 L6 typed command payload/票据 ACK 契约）。
 - `host_tests`：**2791 passed / 0 failed**。
@@ -282,6 +299,8 @@ L4 用 `Outcome<T>`/`BackupError`；`api/json_codec` 负责映射到上述文案
 4. auto backup 生成/指纹跳过/源变化重导。
 5. 旧 `.qol_save` 列表/导入/删除；旧 meta 回填后条目显示职业/等级。
 6. 面板空/损坏/有效槽显示；导入后左栏立即刷新。
+
+**C18 native bag 设备证据未覆盖**：本实现尚未进行设备 A/B。Host 逻辑测试不能证明 v520/v586 loader 接受重建后的文件；不得将 C18 行为标记为真机通过。需获授权后分别验证 v520 192-record 写入、v586 96-record 写入、跨槽 slot header、96→192 补零与 192→96 有意截断。
 
 ## 10. 文件地图与扩展点
 

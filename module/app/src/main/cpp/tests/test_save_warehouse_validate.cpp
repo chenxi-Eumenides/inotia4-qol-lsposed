@@ -1,11 +1,13 @@
 // host 单测：wh4 相关纯逻辑层。
 //   * v3 warehouseBlob 编解码（flags=0/1 混合、多文件、后缀校验）与 v2 旧编码兼容；
-//   * parse_bundle 按 formatVersion 分派（v2 不得被误判为 v3）；
+//   * parse_bundle 按 formatVersion 分派（v1-v3 保持兼容，v4 C18 段受 CRC/checksum 保护）；
 //   * warehouse_blob_decryptable：合法/非法容器、len<4、回调 0/1、回调缺失放行；
 //   * warehouse_reencrypt_for_slot：补 slot + 重加密 + 往返自检的决策（no key / bad plain /
 //     roundtrip failed / ok），全部用可注入假加解密函数。
 #include "plugins/save_backup/bundle.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -184,6 +186,28 @@ void put_be32(std::vector<uint8_t>& o, uint32_t v) {
     o.push_back(static_cast<uint8_t>(v));
 }
 
+void put_c18_le32(std::vector<uint8_t>& o, uint32_t v) {
+    o.push_back(static_cast<uint8_t>(v));
+    o.push_back(static_cast<uint8_t>(v >> 8));
+    o.push_back(static_cast<uint8_t>(v >> 16));
+    o.push_back(static_cast<uint8_t>(v >> 24));
+}
+
+std::vector<uint8_t> make_c18_file(uint32_t count, int slot, uint8_t fill,
+                                   uint8_t reserved0 = 0, uint8_t reserved1 = 0,
+                                   uint8_t reserved2 = 0) {
+    std::vector<uint8_t> bytes;
+    const char magic[] = "C18BAG01";
+    bytes.insert(bytes.end(), magic, magic + 8);
+    put_c18_le32(bytes, 1);
+    put_c18_le32(bytes, count);
+    bytes.insert(bytes.end(), {reserved0, reserved1, reserved2});
+    bytes.push_back(static_cast<uint8_t>(slot + 1));
+    bytes.insert(bytes.end(), static_cast<size_t>(count) * save_backup::kC18NativeBagRecordBytes,
+                  fill);
+    return bytes;
+}
+
 std::vector<uint8_t> make_bundle(uint16_t version, const std::vector<uint8_t>& orig,
                                  const std::vector<uint8_t>& module,
                                  const std::vector<uint8_t>& wh_blob, const std::string& meta) {
@@ -201,6 +225,7 @@ std::vector<uint8_t> make_bundle(uint16_t version, const std::vector<uint8_t>& o
     b.insert(b.end(), module.begin(), module.end());
     put_be32(b, static_cast<uint32_t>(wh_blob.size()));
     b.insert(b.end(), wh_blob.begin(), wh_blob.end());
+    if (version == save_backup::kBundleVersion) put_be32(b, 0);
     put_be16(b, static_cast<uint16_t>(meta.size()));
     b.insert(b.end(), meta.begin(), meta.end());
     put_be32(b, save_backup::crc32_ieee(b.data(), b.size()));
@@ -228,7 +253,7 @@ std::vector<uint8_t> make_v1_bundle(const std::vector<uint8_t>& orig,
     return b;
 }
 
-// SB-03：orig_plain 不足 14 字节（头 8 + 块表 +8/+12）一律视为损坏，v1/v2/v3 均拒绝。
+// SB-03：orig_plain 不足 14 字节（头 8 + 块表 +8/+12）一律视为损坏，v1-v4 均拒绝。
 void test_parse_bundle_rejects_short_orig_plain() {
     namespace sb = save_backup;
     const std::string meta = "{\"checksum\":\"001122334455\"}";
@@ -237,19 +262,21 @@ void test_parse_bundle_rejects_short_orig_plain() {
         const std::vector<uint8_t> v1 = make_v1_bundle(orig, {}, meta);
         sb::ParsedBundle parsed;
         CHECK(!sb::parse_bundle(v1.data(), v1.size(), parsed));
-        for (uint16_t version : {sb::kBundleVersionV2, sb::kBundleVersion}) {
+        for (uint16_t version : {sb::kBundleVersionV2, sb::kBundleVersionV3,
+                                 sb::kBundleVersion}) {
             const std::vector<uint8_t> bound = make_bundle(version, orig, {}, {}, meta);
             sb::ParsedBundle parsed_bound;
             CHECK(!sb::parse_bundle(bound.data(), bound.size(), parsed_bound));
         }
     }
-    // 14 字节是下限：三版本都能正常解析。
+    // 14 字节是下限：四版本都能正常解析。
     const std::vector<uint8_t> minimum(14, 0x22);
     const std::vector<uint8_t> v1_ok = make_v1_bundle(minimum, {}, meta);
     sb::ParsedBundle parsed_v1;
     CHECK(sb::parse_bundle(v1_ok.data(), v1_ok.size(), parsed_v1));
     CHECK(parsed_v1.orig_plain == minimum);
-    for (uint16_t version : {sb::kBundleVersionV2, sb::kBundleVersion}) {
+    for (uint16_t version : {sb::kBundleVersionV2, sb::kBundleVersionV3,
+                             sb::kBundleVersion}) {
         const std::vector<uint8_t> ok = make_bundle(version, minimum, {}, {}, meta);
         sb::ParsedBundle parsed_ok;
         CHECK(sb::parse_bundle(ok.data(), ok.size(), parsed_ok));
@@ -330,7 +357,7 @@ void test_validate_warehouse() {
     CHECK(error == "warehouse name invalid");
 }
 
-// SB-12：checksum 覆盖全部可还原内容（v3 含 warehouse_blob；v1/v2 沿用旧公式）。
+// SB-12：v1-v3 checksum 保持旧公式；v4 增加 C18 image 覆盖。
 void test_compute_checksum() {
     namespace sb = save_backup;
     WarehouseFile a;
@@ -343,13 +370,17 @@ void test_compute_checksum() {
     const std::vector<uint8_t> plain = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
     const std::vector<uint8_t> module = {0x4D, 0x53};
 
-    // v3：blob 参与，内容不同 → checksum 不同。
-    const std::string v3_a = sb::compute_checksum(sb::kBundleVersion, plain, module, blob_a);
-    const std::string v3_b = sb::compute_checksum(sb::kBundleVersion, plain, module, blob_b);
+    // v3：warehouse blob 参与，内容不同 → checksum 不同。
+    const std::string v3_a = sb::compute_checksum(sb::kBundleVersionV3, plain, module, blob_a);
+    const std::string v3_b = sb::compute_checksum(sb::kBundleVersionV3, plain, module, blob_b);
     CHECK(v3_a != v3_b);
     std::vector<uint8_t> expected = module;
     expected.insert(expected.end(), blob_a.begin(), blob_a.end());
     CHECK(v3_a == sb::sha256_hex(plain, expected).substr(0, 12));
+    const std::vector<uint8_t> c18_a{1, 2, 3};
+    const std::vector<uint8_t> c18_b{1, 2, 4};
+    CHECK(sb::compute_checksum(sb::kBundleVersion, plain, module, blob_a, c18_a) !=
+          sb::compute_checksum(sb::kBundleVersion, plain, module, blob_a, c18_b));
     // v2：旧公式不覆盖 blob，两个 blob 得到同一 checksum。
     CHECK(sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_a) ==
           sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_b));
@@ -382,15 +413,24 @@ void test_parse_bundle_version_dispatch() {
     const std::vector<uint8_t> orig = {9, 8, 7, 6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
     const std::string meta = "{\"checksum\":\"001122334455\"}";
 
-    // v3 bundle：build_bundle 写出 kBundleVersion，flags 完整保留。
-    std::vector<uint8_t> v3;
-    sb::build_bundle(1, 123, orig, {}, sb::encode_warehouse({f0}), meta, v3);
+    // v4 bundle：build_bundle 写出当前版本，warehouse flags 完整保留。
+    std::vector<uint8_t> v4;
+    sb::build_bundle(1, 123, orig, {}, sb::encode_warehouse({f0}), meta, v4);
+    sb::ParsedBundle parsed_v4;
+    CHECK(sb::parse_bundle(v4.data(), v4.size(), parsed_v4));
+    CHECK(parsed_v4.has_warehouse);
+    CHECK(parsed_v4.warehouse.size() == static_cast<size_t>(1));
+    CHECK(parsed_v4.warehouse[0].flags == sb::kWarehouseFlagPlain);
+    CHECK(parsed_v4.warehouse[0].data == f0.data);
+
+    // v3 历史段布局：有 warehouse，但没有 v4 的 C18 长度字段。
+    const std::vector<uint8_t> v3 = make_bundle(
+        sb::kBundleVersionV3, orig, {}, sb::encode_warehouse({f0}), meta);
     sb::ParsedBundle parsed_v3;
     CHECK(sb::parse_bundle(v3.data(), v3.size(), parsed_v3));
-    CHECK(parsed_v3.has_warehouse);
-    CHECK(parsed_v3.warehouse.size() == static_cast<size_t>(1));
+    CHECK(parsed_v3.bundle_version == sb::kBundleVersionV3);
+    CHECK(parsed_v3.has_warehouse && !parsed_v3.has_c18_native_bag);
     CHECK(parsed_v3.warehouse[0].flags == sb::kWarehouseFlagPlain);
-    CHECK(parsed_v3.warehouse[0].data == f0.data);
 
     // v2 bundle：旧编码（无 flags），parse 成功且 flags 恒 0（不得走 v3 解码器）。
     std::vector<uint8_t> v2 =
@@ -423,6 +463,192 @@ void test_parse_bundle_version_dispatch() {
     CHECK(sb::parse_bundle(v1.data(), v1.size(), parsed_v1));
     CHECK(!parsed_v1.has_warehouse);
     CHECK(parsed_v1.warehouse.empty());
+}
+
+void test_c18_native_bag_file_and_conversion() {
+    namespace sb = save_backup;
+    uint32_t count = 0;
+    std::array<uint8_t, 3> header_reserved{};
+    const std::array<uint8_t, 3> expected_reserved{0x91, 0x82, 0x73};
+    std::vector<uint8_t> records;
+    const std::vector<uint8_t> legacy_file =
+        make_c18_file(sb::kC18NativeBagLegacyRecordCount, 1, 0xA5, 0x91, 0x82, 0x73);
+    CHECK(sb::parse_c18_native_bag_file(legacy_file.data(), legacy_file.size(), 1,
+                                        sb::kC18NativeBagLegacyRecordCount, false, count,
+                                        header_reserved, records));
+    CHECK(count == sb::kC18NativeBagLegacyRecordCount);
+    CHECK(header_reserved == expected_reserved);
+    CHECK(records.size() == sb::kC18NativeBagLegacyRecordCount * sb::kC18NativeBagRecordBytes);
+    CHECK(!sb::parse_c18_native_bag_file(legacy_file.data(), legacy_file.size(), 1,
+                                         sb::kC18NativeBagModernRecordCount, false, count,
+                                         header_reserved, records));
+    CHECK(!sb::parse_c18_native_bag_file(legacy_file.data(), legacy_file.size() - 1, 1,
+                                         sb::kC18NativeBagLegacyRecordCount, false, count,
+                                         header_reserved, records));
+    std::vector<uint8_t> extra = legacy_file;
+    extra.push_back(0);
+    CHECK(!sb::parse_c18_native_bag_file(extra.data(), extra.size(), 1,
+                                         sb::kC18NativeBagLegacyRecordCount, false, count,
+                                         header_reserved, records));
+    CHECK(!sb::parse_c18_native_bag_file(legacy_file.data(), legacy_file.size(), 0,
+                                         sb::kC18NativeBagLegacyRecordCount, false, count,
+                                         header_reserved, records));
+    std::vector<uint8_t> bad_version = legacy_file;
+    bad_version[8] = 2;
+    CHECK(!sb::parse_c18_native_bag_file(bad_version.data(), bad_version.size(), 1,
+                                         sb::kC18NativeBagLegacyRecordCount, false, count,
+                                         header_reserved, records));
+    CHECK(sb::parse_c18_native_bag_file(legacy_file.data(), legacy_file.size(), -1, 0, true,
+                                        count, header_reserved, records));
+
+    const std::vector<uint8_t> modern_file =
+        make_c18_file(sb::kC18NativeBagModernRecordCount, 0, 0x3C);
+    CHECK(sb::parse_c18_native_bag_file(modern_file.data(), modern_file.size(), 0,
+                                        sb::kC18NativeBagModernRecordCount, false, count,
+                                        header_reserved, records));
+    CHECK(sb::parse_c18_native_bag_file(modern_file.data(), modern_file.size(), 0, 0, true,
+                                        count, header_reserved, records));
+    CHECK(count == sb::kC18NativeBagModernRecordCount);
+    const std::vector<uint8_t> modern_records = records;
+    std::vector<uint8_t> bad_magic = modern_file;
+    bad_magic[0] ^= 1;
+    CHECK(!sb::parse_c18_native_bag_file(bad_magic.data(), bad_magic.size(), 0, 0, true,
+                                         count, header_reserved, records));
+
+    sb::C18NativeBagImage modern;
+    modern.source_version = "v586";
+    modern.source_slot = 0;
+    modern.record_count = sb::kC18NativeBagModernRecordCount;
+    modern.header_reserved = {0x91, 0x82, 0x73};
+    modern.records = modern_records;
+    for (size_t i = 0; i < modern.record_count; ++i) {
+        const auto begin = modern.records.begin() +
+                           static_cast<std::ptrdiff_t>(i * sb::kC18NativeBagRecordBytes);
+        std::fill(begin, begin + sb::kC18NativeBagRecordBytes, static_cast<uint8_t>(i + 1));
+    }
+    std::vector<uint8_t> padded;
+    CHECK(sb::build_c18_native_bag_file(modern, sb::C18NativeBagLayout::kLegacy192, 2,
+                                        padded));
+    CHECK(padded.size() == sb::kC18NativeBagHeaderBytes +
+                               sb::kC18NativeBagLegacyRecordCount * sb::kC18NativeBagRecordBytes);
+    CHECK(padded[0x13] == 3);
+    CHECK(padded[0x10] == 0x91 && padded[0x11] == 0x82 && padded[0x12] == 0x73);
+    CHECK(padded[0x0c] == 0xC0 && padded[0x0d] == 0 && padded[0x0e] == 0 &&
+          padded[0x0f] == 0);
+    CHECK(std::equal(modern.records.begin(), modern.records.end(),
+                     padded.begin() + sb::kC18NativeBagHeaderBytes));
+    const size_t pad_begin = sb::kC18NativeBagHeaderBytes +
+                             sb::kC18NativeBagModernRecordCount * sb::kC18NativeBagRecordBytes;
+    CHECK(std::all_of(padded.begin() + static_cast<std::ptrdiff_t>(pad_begin), padded.end(),
+                      [](uint8_t value) { return value == 0; }));
+
+    sb::C18NativeBagImage legacy;
+    legacy.source_version = "v520";
+    legacy.source_slot = 0;
+    legacy.record_count = sb::kC18NativeBagLegacyRecordCount;
+    legacy.header_reserved = {0x31, 0x42, 0x53};
+    legacy.records.resize(static_cast<size_t>(legacy.record_count) * sb::kC18NativeBagRecordBytes);
+    for (size_t i = 0; i < legacy.record_count; ++i) {
+        const auto begin = legacy.records.begin() +
+                           static_cast<std::ptrdiff_t>(i * sb::kC18NativeBagRecordBytes);
+        std::fill(begin, begin + sb::kC18NativeBagRecordBytes, static_cast<uint8_t>(i));
+    }
+    std::vector<uint8_t> truncated;
+    CHECK(sb::build_c18_native_bag_file(legacy, sb::C18NativeBagLayout::kModern96, 1,
+                                        truncated));
+    CHECK(truncated.size() == sb::kC18NativeBagHeaderBytes +
+                                  sb::kC18NativeBagModernRecordCount * sb::kC18NativeBagRecordBytes);
+    CHECK(truncated[0x13] == 2);
+    CHECK(truncated[0x10] == 0x31 && truncated[0x11] == 0x42 && truncated[0x12] == 0x53);
+    CHECK(truncated[sb::kC18NativeBagHeaderBytes] == 0);
+    const size_t last_kept = sb::kC18NativeBagHeaderBytes +
+                             (sb::kC18NativeBagModernRecordCount - 1) * sb::kC18NativeBagRecordBytes;
+    CHECK(truncated[last_kept] == 95);
+    CHECK(truncated.size() < sb::kC18NativeBagHeaderBytes + legacy.records.size());
+
+    std::vector<uint8_t> empty_record(64, 0);
+    CHECK(sb::c18_native_bag_record_empty(empty_record.data(), empty_record.size()));
+    empty_record[63] = 1;
+    CHECK(sb::c18_native_bag_record_empty(empty_record.data(), empty_record.size()));
+    empty_record[39] = 1;
+    CHECK(!sb::c18_native_bag_record_empty(empty_record.data(), empty_record.size()));
+}
+
+void test_c18_native_bag_bundle_segment() {
+    namespace sb = save_backup;
+    sb::C18NativeBagImage image;
+    image.source_version = "v520";
+    image.source_slot = 1;
+    image.record_count = sb::kC18NativeBagLegacyRecordCount;
+    image.header_reserved = {0xA1, 0xB2, 0xC3};
+    image.records.assign(static_cast<size_t>(image.record_count) * sb::kC18NativeBagRecordBytes,
+                         0x5A);
+    const std::vector<uint8_t> segment = sb::encode_c18_native_bag_image(image);
+    CHECK(!segment.empty());
+    sb::C18NativeBagImage decoded;
+    CHECK(sb::decode_c18_native_bag_image(segment.data(), segment.size(), decoded));
+    CHECK(decoded.source_version == image.source_version);
+    CHECK(decoded.source_slot == image.source_slot);
+    CHECK(decoded.record_count == image.record_count);
+    CHECK(decoded.header_reserved == image.header_reserved);
+    CHECK(decoded.records == image.records);
+    CHECK(sb::c18_native_bag_layout("v520") == sb::C18NativeBagLayout::kLegacy192);
+    CHECK(sb::c18_native_bag_layout("v586") == sb::C18NativeBagLayout::kModern96);
+    CHECK(sb::c18_native_bag_layout("v0.2") == sb::C18NativeBagLayout::kUnsupported);
+    CHECK(sb::c18_native_bag_layout("unrecognized") == sb::C18NativeBagLayout::kUnknown);
+
+    const std::vector<uint8_t> plain(16, 0x33);
+    std::vector<uint8_t> bundle;
+    CHECK(sb::build_bundle(1, 7, plain, {}, {}, "{}", bundle, &image));
+    sb::ParsedBundle parsed;
+    CHECK(sb::parse_bundle(bundle.data(), bundle.size(), parsed));
+    CHECK(parsed.bundle_version == sb::kBundleVersion);
+    CHECK(parsed.has_c18_native_bag);
+    CHECK(parsed.c18_native_bag_blob == segment);
+    CHECK(parsed.c18_native_bag.records == image.records);
+    CHECK(parsed.c18_native_bag.header_reserved == image.header_reserved);
+    const std::string with_image = sb::compute_checksum(
+        parsed.bundle_version, parsed.orig_plain, parsed.module, parsed.warehouse_blob,
+        parsed.c18_native_bag_blob);
+    const std::string without_image = sb::compute_checksum(
+        parsed.bundle_version, parsed.orig_plain, parsed.module, parsed.warehouse_blob, {});
+    CHECK(with_image != without_image);
+
+    std::vector<uint8_t> converted;
+    CHECK(sb::build_c18_native_bag_file(parsed.c18_native_bag,
+                                        sb::C18NativeBagLayout::kModern96, 2, converted));
+    CHECK(converted[0x10] == 0xA1 && converted[0x11] == 0xB2 && converted[0x12] == 0xC3);
+
+    sb::C18NativeBagImage mismatched_image = image;
+    mismatched_image.source_slot = 0;
+    std::vector<uint8_t> mismatched_bundle;
+    CHECK(!sb::build_bundle(1, 7, plain, {}, {}, "{}", mismatched_bundle,
+                            &mismatched_image));
+    CHECK(mismatched_bundle.empty());
+
+    std::vector<uint8_t> inconsistent = bundle;
+    const auto slot_label = std::search(inconsistent.begin(), inconsistent.end(),
+                                        image.source_version.begin(), image.source_version.end());
+    CHECK(slot_label != inconsistent.end());
+    if (slot_label != inconsistent.end()) {
+        *(slot_label + static_cast<std::ptrdiff_t>(image.source_version.size())) = 0;
+        const size_t crc_offset = inconsistent.size() - 4;
+        const uint32_t crc = sb::crc32_ieee(inconsistent.data(), crc_offset);
+        inconsistent[crc_offset] = static_cast<uint8_t>(crc >> 24);
+        inconsistent[crc_offset + 1] = static_cast<uint8_t>(crc >> 16);
+        inconsistent[crc_offset + 2] = static_cast<uint8_t>(crc >> 8);
+        inconsistent[crc_offset + 3] = static_cast<uint8_t>(crc);
+    }
+    sb::ParsedBundle inconsistent_parsed;
+    CHECK(!sb::parse_bundle(inconsistent.data(), inconsistent.size(), inconsistent_parsed));
+
+    std::vector<uint8_t> corrupt = bundle;
+    const auto label = std::search(corrupt.begin(), corrupt.end(), image.source_version.begin(),
+                                   image.source_version.end());
+    CHECK(label != corrupt.end());
+    if (label != corrupt.end()) *label ^= 1;
+    sb::ParsedBundle ignored;
+    CHECK(!sb::parse_bundle(corrupt.data(), corrupt.size(), ignored));
 }
 
 // ---------------- bundle_matches_checksum ----------------
@@ -787,6 +1013,8 @@ int main() {
     test_warehouse_v3_roundtrip();
     test_warehouse_v2_legacy_encoding();
     test_parse_bundle_version_dispatch();
+    test_c18_native_bag_file_and_conversion();
+    test_c18_native_bag_bundle_segment();
     test_compute_checksum();
     test_validate_warehouse();
     test_parse_bundle_rejects_short_orig_plain();

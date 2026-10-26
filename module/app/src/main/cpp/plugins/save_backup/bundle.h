@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -14,18 +15,20 @@
 //   u16 metaLen | metaJson | u32 crc32（覆盖其前全部字节）
 // v2 在 module 与 metaJson 之间插入个人仓库段：
 //   ... | u32 warehouseLen | warehouseBlob | u16 metaLen | metaJson | u32 crc32
-// v3（当前）把 warehouseBlob 的每项编码扩展为带 flags（明文/密文标志），其余分段不变：
+// v3 把 warehouseBlob 的每项编码扩展为带 flags（明文/密文标志）。
 //   item = u16 suffixLen | suffix | u32 dataLen | u8 flags | data
-// parse_bundle 接受 v1（无仓库段）/v2（仓库段无 flags）/v3（仓库段带 flags）。
+// v4 在仓库段后增加可选 normalized C18 native bag image 段。
+// parse_bundle 接受 v1/v2/v3/v4，旧版本段布局与 checksum 语义保持不变。
 
 namespace save_backup {
 
 constexpr uint32_t kBundleMagic = 0x51534231u;  // "QSB1"
-constexpr uint16_t kBundleVersion = 3;          // 当前版本（仓库段带 flags，支持跨设备重加密）
+constexpr uint16_t kBundleVersion = 4;          // 当前版本（增加 C18 native bag image）
+constexpr uint16_t kBundleVersionV3 = 3;        // 仓库段带 flags
 constexpr uint16_t kBundleVersionV2 = 2;        // 旧备份（有仓库段、无 flags），parse 仍接受
 constexpr uint16_t kBundleVersionV1 = 1;        // 更旧备份（无仓库段），parse 仍接受
 // 头(18) + origLen(4) + moduleLen(4) + metaLen(2) + crc(4)；v1 最小值。
-// v2/v3 最小值更大（多 u32 warehouseLen，v3 还多每项 flags），由逐段边界检查自然拒绝过小输入。
+// v2/v3/v4 最小值更大（warehouseLen，v3 flags，v4 C18 length），由逐段边界检查自然拒绝过小输入。
 constexpr size_t kMinBundleBytes = 32;
 
 // ---- 个人仓库（monster 改版 save{slot}.dat.wh4-*）序列化上限 ----
@@ -33,6 +36,48 @@ constexpr size_t kMaxWarehouseFiles = 64;
 constexpr size_t kMaxWarehouseSuffixBytes = 64;
 constexpr size_t kMaxWarehouseDataBytes = 4 * 1024 * 1024;
 constexpr size_t kMaxWarehouseBlobBytes = 8 * 1024 * 1024;
+
+// C18 native bag image：record bytes 保持 opaque，只根据 loader 使用的前五个 8-byte 值
+// 判断空记录。旧版每槽 192 条，新版每槽 96 条，record 固定 0x230 bytes。
+constexpr uint32_t kC18NativeBagLegacyRecordCount = 192;
+constexpr uint32_t kC18NativeBagModernRecordCount = 96;
+constexpr size_t kC18NativeBagRecordBytes = 0x230;
+constexpr size_t kC18NativeBagHeaderBytes = 20;
+constexpr size_t kC18NativeBagMaxImageBytes =
+    kC18NativeBagHeaderBytes + kC18NativeBagLegacyRecordCount * kC18NativeBagRecordBytes;
+
+enum class C18NativeBagLayout : uint8_t {
+    kNotC18 = 0,
+    kUnsupported,
+    kLegacy192,
+    kModern96,
+    kUnknown,
+};
+
+struct C18NativeBagImage {
+    std::string source_version;
+    int source_slot = -1;
+    uint32_t record_count = 0;
+    // Native header bytes +0x10..+0x12 have unknown semantics and must survive round trips.
+    std::array<uint8_t, 3> header_reserved{};
+    std::vector<uint8_t> records;
+};
+
+C18NativeBagLayout c18_native_bag_layout(const std::string& version_label);
+bool validate_c18_native_bag_image(const C18NativeBagImage& image);
+bool c18_native_bag_record_empty(const uint8_t* record, size_t size);
+// raw file parser checks C18BAG01, version=1, header count and exact total length. A per-slot path
+// passes its slot index; shared fallback passes -1 and validates that the header slot is in 1..3.
+// expected_count is 96/192 for a per-slot path; allow_either_count is reserved for shared fallback.
+bool parse_c18_native_bag_file(const uint8_t* bytes, size_t size, int expected_slot,
+                               uint32_t expected_count, bool allow_either_count,
+                               uint32_t& out_count, std::array<uint8_t, 3>& out_header_reserved,
+                               std::vector<uint8_t>& out_records);
+std::vector<uint8_t> encode_c18_native_bag_image(const C18NativeBagImage& image);
+bool decode_c18_native_bag_image(const uint8_t* bytes, size_t size,
+                                 C18NativeBagImage& out);
+bool build_c18_native_bag_file(const C18NativeBagImage& image, C18NativeBagLayout target_layout,
+                               int target_slot, std::vector<uint8_t>& out);
 
 // 备份元信息（HTTP BackupMeta 逐字段对应；JSON 组装见 entry_json）。
 struct Entry {
@@ -78,12 +123,16 @@ struct ParsedBundle {
     long long export_time_ms = 0;
     std::vector<uint8_t> orig_plain;
     std::vector<uint8_t> module;
-    // 个人仓库：v2/v3 bundle 才置 has_warehouse=true（即使仓库列表为空）；
+    // 个人仓库：v2/v3/v4 bundle 才置 has_warehouse=true（即使仓库列表为空）；
     // v1 旧备份 has_warehouse=false、warehouse 为空——导入侧据此完全跳过仓库写回。
     std::vector<WarehouseFile> warehouse;
-    // 原始 warehouseBlob 字节（不重编码）：v3 checksum 覆盖它以校验全部可还原内容。
+    // 原始 warehouseBlob 字节（不重编码）：v3/v4 checksum 覆盖它。
     std::vector<uint8_t> warehouse_blob;
     bool has_warehouse = false;
+    C18NativeBagImage c18_native_bag;
+    // Raw v4 C18 segment is retained so checksum verification covers the encoded source image.
+    std::vector<uint8_t> c18_native_bag_blob;
+    bool has_c18_native_bag = false;
     std::string meta_json;
     long long size_bytes = 0;
 };
@@ -227,16 +276,18 @@ std::string build_meta_json(int source_slot, long long export_time_ms, int map_i
                             int module_state = -1);
 
 // 备份内容校验：v1/v2 为 sha256(plain ‖ module)[0:12]（旧公式，warehouse 不参与）；
-// v3+ 为 sha256(plain ‖ module ‖ warehouse_blob)[0:12]（覆盖全部可还原内容段）。
+// v3 为 sha256(plain ‖ module ‖ warehouse_blob)[0:12]；v4 再追加 C18 normalized image blob。
 std::string compute_checksum(uint16_t bundle_version, const std::vector<uint8_t>& plain,
                              const std::vector<uint8_t>& module,
-                             const std::vector<uint8_t>& warehouse_blob);
+                             const std::vector<uint8_t>& warehouse_blob,
+                             const std::vector<uint8_t>& c18_native_bag_blob = {});
 
 // v2 组装：warehouse_blob 位于 module 与 meta_json 之间（空 blob 表示无仓库）。
-void build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
+bool build_bundle(int source_slot, long long export_time_ms, const std::vector<uint8_t>& plain,
                   const std::vector<uint8_t>& module,
                   const std::vector<uint8_t>& warehouse_blob, const std::string& meta_json,
-                  std::vector<uint8_t>& out);
+                  std::vector<uint8_t>& out,
+                  const C18NativeBagImage* c18_native_bag = nullptr);
 
 // 逐段边界校验 + crc32 验证；失败返回 false（调用方跳过/报错）。
 bool parse_bundle(const uint8_t* bytes, size_t size, ParsedBundle& out);

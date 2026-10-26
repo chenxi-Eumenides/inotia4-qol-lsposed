@@ -400,6 +400,14 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Debug 构建 | **PASS**：`scripts/build-debug.sh --offline` BUILD SUCCESSFUL，APK `output/inotia4_qol_lsposed_debug_2610230158_2c46a664c644.apk`，SHA-256 `2c46a664c64442faaf9ce9e486a1d317d7a26a599c6bf3da1200f9ddd0515d7d`。弹窗追加行按用户确认格式修正为「{套装名}已获得：x/y」（第一行原版文案不动）；port `show_recipe_popup` 增 `use_type` 参，Adapter 读 `ITEMDATABASE[use_type].u16[0]` 取套装名文本 id。 | 构建/复验：`.tmp/craft-lottery-20261022/{build-debug.log,check-arch-r2.log}`；全量 CTest 153/153 复跑通过。构建成功不替代设备行为验收；未部署。 |
 | VM-CL-01：合成套装保底行为 | **NOT_ACCEPTED（待真机）**。 | 需真机验证：①开启 feature 后使用任意合成套装，连续抽取不重复、只出未拥有配方，弹窗末行「已获得 X/N」随抽取递增；②集齐某套装全部配方后再用，恢复纯随机（可能出现重复）；③feature 关闭时行为与原版一致（无追加行）；④多存档间配方书状态隔离跟随游戏存档；⑤三个变体（大修/monster/原版）不崩溃。验收卡见 `docs/refactor/audits/plugin-audit/craft-lottery-20261022/design-card.md` §6。 |
 
+### 5.24 `save_backup` C18 原生背包（2026-10-27；Host/静态/Debug 通过，设备行为未验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 存储事实与实现 | **静态确认**：v514/v520 活动文件 `C18Lbag{N}.dat`、192 条记录（袋 6–17）；v586 活动文件 `C18Lwh{N}.dat`、96 条记录（袋 6–11）。两者共用 `C18BAG01`、20-byte header 和 `0x230` record schema；loader 循环数由版本固定，不读取 `+0x0c` 决定条数。未找到 `bagN→whN` 游戏迁移；C18 文件写入未见设备密钥加密调用。 | 文件位于动态 `dataDir` 根目录，槽 0/1/2 映射文件后缀 1/2/3；primary 缺失时只读 shared `C18Lbag.dat`。内部 bundle v4 保存单份规范 image；导入按目标版本生成对应文件，96→192 补零、192→96 截断；不调用游戏保存 helper，不写 shared fallback。跨设备运行时可用性仍未验证。 |
+| Host/静态/Debug Gate | **PASS**：`host_tests`、`save_backup_gate_tests`、`save_backup_rollback_tests`、`save_warehouse_validate_tests` 4 个目标通过；`check_arch.py` 全绿；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2610270006_b231ddbf7ef3.apk`（SHA-256 `b231ddbf7ef34c35ad90dcf577dd61dbd209f5cf474f854eb1fca9bf3527ce48`）。 | Host 输出：`.tmp/c18-save-backup-host/`。全量 Host target 构建另被非本功能 `move_merge_plugin_tests` 的 `core_item::g_port` 未定义引用阻断；本卡只报告上列已运行目标，不标记全量 CTest 通过。 |
+| VM-SB-C18-01：游戏文件读写与转换 | **NOT_ACCEPTED（未执行）**：当前 `save_backup` 验收规则禁止真机验证。 | 尚无设备 A/B 证明 v520/v586 loader 接受重建文件、共享 fallback materialize、跨槽 slot header 或跨设备导入；Host 测试不替代这些运行时证据。不得报告 C18 文件行为真机通过。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

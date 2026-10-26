@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "contracts/game_host.h"
 #include "bundle.h"
 
 namespace qol::features::save_backup {
@@ -36,10 +37,16 @@ struct CollectedWarehouse {
     std::vector<::save_backup::WarehouseFile> files;
 };
 
+struct CollectedC18NativeBag {
+    bool present = false;
+    ::save_backup::C18NativeBagImage image;
+};
+
 struct SlotSnapshot {
     CollectedDat dat;
     CollectedSidecar module;
     CollectedWarehouse warehouse;
+    CollectedC18NativeBag c18_native_bag;
 };
 
 // 每类文件的登记项：id、meta 状态字段、是否参与 checksum、是否参与删槽（后续批次消费）。
@@ -68,6 +75,9 @@ struct BackupFilesSource {
     bool (*encrypt_available)();
     const char* (*save_hub_key)();
     int (*encrypt_process)(void* data, int32_t len, int32_t mode, const char* key);
+    bool (*read_game_identity)(qol::contracts::QolGameIdentity& out);
+    bool (*get_data_directory)(std::string& out);
+    bool (*has_c18_candidate_capability)();
 };
 void backup_files_bind_source(const BackupFilesSource& source);
 

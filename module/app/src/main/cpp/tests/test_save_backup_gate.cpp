@@ -9,6 +9,9 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -20,6 +23,7 @@
 #include "plugins/save_backup/api/commands.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/save_backup/backup_files.h"
+#include "plugins/save_backup/persistence/persistence.h"
 
 namespace {
 int g_pass = 0, g_fail = 0;
@@ -43,6 +47,30 @@ constexpr contracts::HttpRoute kSaveBackupRouteFacts[] = {
 
 int identity = 0, occupier = 0;
 QolOwnerToken g_owner = 0, g_occupier = 0;
+std::string g_test_series = "original";
+std::string g_test_version = "v1";
+uint8_t g_test_identity_known = 1;
+int32_t g_test_c18_candidate = 0;
+
+int32_t fake_has_capability(uint64_t bit) {
+    return bit == kQolTargetCapabilityC18NativeBagLayoutCandidate ? g_test_c18_candidate : 0;
+}
+
+QolResult fake_game_identity(QolGameIdentity* out) {
+    if (out == nullptr) return contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = QolGameIdentity{};
+    out->series_name = g_test_series.c_str();
+    out->version_label = g_test_version.c_str();
+    out->known = g_test_identity_known;
+    return contracts::ok();
+}
+
+QolGameHost& fake_game_host() {
+    static QolGameHost game{};
+    game.game_identity.read = &fake_game_identity;
+    game.target.has_capability = &fake_has_capability;
+    return game;
+}
 
 // ---- slot_operation 表：authorize（owner_identity）+ infra gate/store（与 host_sdk 同构）----
 QolResult op_acquire(void*, QolOwnerToken owner, uint32_t mask, QolSlotOperationLease* out) {
@@ -351,6 +379,80 @@ std::vector<uint8_t> read_file_vector(const std::string& path) {
     return std::vector<uint8_t>(bytes.begin(), bytes.end());
 }
 
+void append_be16(std::vector<uint8_t>& out, uint16_t value) {
+    out.push_back(static_cast<uint8_t>(value >> 8));
+    out.push_back(static_cast<uint8_t>(value));
+}
+
+void append_be32(std::vector<uint8_t>& out, uint32_t value) {
+    out.push_back(static_cast<uint8_t>(value >> 24));
+    out.push_back(static_cast<uint8_t>(value >> 16));
+    out.push_back(static_cast<uint8_t>(value >> 8));
+    out.push_back(static_cast<uint8_t>(value));
+}
+
+void append_le32(std::vector<uint8_t>& out, uint32_t value) {
+    out.push_back(static_cast<uint8_t>(value));
+    out.push_back(static_cast<uint8_t>(value >> 8));
+    out.push_back(static_cast<uint8_t>(value >> 16));
+    out.push_back(static_cast<uint8_t>(value >> 24));
+}
+
+std::vector<uint8_t> make_c18_file(uint32_t count, int slot, uint8_t fill,
+                                   uint8_t reserved0 = 0, uint8_t reserved1 = 0,
+                                   uint8_t reserved2 = 0) {
+    std::vector<uint8_t> bytes;
+    const char magic[] = "C18BAG01";
+    bytes.insert(bytes.end(), magic, magic + 8);
+    append_le32(bytes, 1);
+    append_le32(bytes, count);
+    bytes.insert(bytes.end(), {reserved0, reserved1, reserved2});
+    bytes.push_back(static_cast<uint8_t>(slot + 1));
+    bytes.insert(bytes.end(), static_cast<size_t>(count) * save_backup::kC18NativeBagRecordBytes,
+                  fill);
+    return bytes;
+}
+
+std::string write_v3_bundle(const std::string& root) {
+    std::vector<uint8_t> plain(16, 0);
+    plain[8] = 4;
+    const std::string checksum = save_backup::compute_checksum(
+        save_backup::kBundleVersionV3, plain, {}, {});
+    const std::string meta = "{\"checksum\":\"" + checksum + "\",\"module_state\":0}";
+    std::vector<uint8_t> bytes;
+    append_be32(bytes, save_backup::kBundleMagic);
+    append_be16(bytes, save_backup::kBundleVersionV3);
+    bytes.insert(bytes.end(), {0, 0, 0, 0});
+    bytes.insert(bytes.end(), 8, 0);
+    append_be32(bytes, static_cast<uint32_t>(plain.size()));
+    bytes.insert(bytes.end(), plain.begin(), plain.end());
+    append_be32(bytes, 0);  // module
+    append_be32(bytes, 0);  // v3 warehouse
+    append_be16(bytes, static_cast<uint16_t>(meta.size()));
+    bytes.insert(bytes.end(), meta.begin(), meta.end());
+    append_be32(bytes, save_backup::crc32_ieee(bytes.data(), bytes.size()));
+    const std::string dir = root + "/backups";
+    const std::string path = dir + "/legacy-v3-" + checksum + ".qol.bak";
+    return write_file(path, std::string(bytes.begin(), bytes.end())) ? checksum : std::string();
+}
+
+std::string write_c18_bundle(const std::string& root,
+                             const save_backup::C18NativeBagImage& image,
+                             const std::string& filename) {
+    std::vector<uint8_t> plain(16, 0);
+    plain[8] = 4;
+    const std::vector<uint8_t> c18_blob = save_backup::encode_c18_native_bag_image(image);
+    const std::string checksum = save_backup::compute_checksum(
+        save_backup::kBundleVersion, plain, {}, {}, c18_blob);
+    const std::string meta = "{\"checksum\":\"" + checksum + "\",\"module_state\":0}";
+    std::vector<uint8_t> bytes;
+    if (!save_backup::build_bundle(0, 123, plain, {}, {}, meta, bytes, &image)) {
+        return std::string();
+    }
+    const std::string path = root + "/backups/" + filename;
+    return write_file(path, std::string(bytes.begin(), bytes.end())) ? checksum : std::string();
+}
+
 // 构造 bundle：orig_plain 满足块表布局（block0=8+rel），module 为给定容器；
 // checksum 由内容计算（v3 覆盖 plain‖module），写入 external 根的 backups/ 目录。
 std::string make_bundle(const std::string& external_root, const std::string&,
@@ -429,7 +531,8 @@ int main() {
 
     qol::infra::store::init(root.c_str());
     save_backup_init(data_dir.c_str(), root.c_str());
-    save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(), nullptr, g_owner);
+    save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(),
+                             &fake_game_host(), g_owner);
     save_backup_bind_world_facts(&kWorldFacts);
 
     // 预置 slot0 sidecar 容器（module 来源），bundle 携带它使 sidecar 步骤真实执行。
@@ -576,16 +679,19 @@ int main() {
         const std::string ck_v2 =
             save_backup::compute_checksum(save_backup::kBundleVersionV2, plain_v2, {}, wh_blob);
         std::vector<uint8_t> v2;
-        save_backup::build_bundle(0, 1, plain_v2, {}, wh_blob,
-                                  "{\"checksum\":\"" + ck_v2 + "\",\"module_state\":0}", v2);
-        v2[4] = 0;  // version = 2（大端）
-        v2[5] = 2;
-        const size_t body = v2.size() - 4;
-        const uint32_t crc = save_backup::crc32_ieee(v2.data(), body);
-        v2[body] = static_cast<uint8_t>(crc >> 24);
-        v2[body + 1] = static_cast<uint8_t>(crc >> 16);
-        v2[body + 2] = static_cast<uint8_t>(crc >> 8);
-        v2[body + 3] = static_cast<uint8_t>(crc);
+        const std::string meta_v2 = "{\"checksum\":\"" + ck_v2 + "\",\"module_state\":0}";
+        append_be32(v2, save_backup::kBundleMagic);
+        append_be16(v2, save_backup::kBundleVersionV2);
+        v2.insert(v2.end(), {0, 0, 0, 0});  // source_slot + reserved
+        v2.insert(v2.end(), 8, 0);           // export_time_ms
+        append_be32(v2, static_cast<uint32_t>(plain_v2.size()));
+        v2.insert(v2.end(), plain_v2.begin(), plain_v2.end());
+        append_be32(v2, 0);  // module
+        append_be32(v2, static_cast<uint32_t>(wh_blob.size()));
+        v2.insert(v2.end(), wh_blob.begin(), wh_blob.end());
+        append_be16(v2, static_cast<uint16_t>(meta_v2.size()));
+        v2.insert(v2.end(), meta_v2.begin(), meta_v2.end());
+        append_be32(v2, save_backup::crc32_ieee(v2.data(), v2.size()));
         const std::string v2_path = root + "/backups/v2_" + ck_v2 + ".qol_save";
         CHECK(write_file(v2_path, std::string(v2.begin(), v2.end())));
         // additive 语义：bundle 外的现存 wh4 后缀必须保留。
@@ -1107,8 +1213,189 @@ int main() {
         CHECK(save_backup_entry_json("x.txt").find("bad request") != std::string::npos);
     }
 
+    // ---- C18 normalized image：共享 fallback 只读收集、跨版 materialize、版本门禁与回滚 ----
+    {
+        const std::string c18_backups_dir = root + "/backups";
+        g_test_series = "unknown";
+        g_test_version.clear();
+        g_test_identity_known = 0;
+        g_test_c18_candidate = 1;
+        qol::features::save_backup::SlotSnapshot unknown_c18_snapshot;
+        std::string unknown_c18_error;
+        CHECK(!qol::features::save_backup::collect_slot_snapshot(
+            0, unknown_c18_snapshot, unknown_c18_error));
+        CHECK(unknown_c18_error == "C18 game version unsupported");
+
+        g_test_series = "c18";
+        g_test_version = "v586";
+        g_test_identity_known = 1;
+        g_test_c18_candidate = 0;
+        const std::string shared_path = data_dir + "/C18Lbag.dat";
+        const std::vector<uint8_t> shared_before =
+            make_c18_file(save_backup::kC18NativeBagModernRecordCount, 0, 0x2A,
+                          0xA1, 0xB2, 0xC3);
+        CHECK(write_file(shared_path, std::string(shared_before.begin(), shared_before.end())));
+
+        std::string export_error;
+        CHECK(save_backup_export_slot_to_dir(0, c18_backups_dir.c_str(), "c18-fallback.qol.bak",
+                                             &export_error));
+        const std::vector<uint8_t> exported =
+            read_file_vector(c18_backups_dir + "/c18-fallback.qol.bak");
+        save_backup::ParsedBundle exported_parsed;
+        CHECK(save_backup::parse_bundle(exported.data(), exported.size(), exported_parsed));
+        CHECK(exported_parsed.has_c18_native_bag);
+        CHECK(exported_parsed.c18_native_bag.source_version == "v586");
+        CHECK(exported_parsed.c18_native_bag.source_slot == 0);
+        CHECK(exported_parsed.c18_native_bag.record_count ==
+              save_backup::kC18NativeBagModernRecordCount);
+        std::string export_checksum;
+        CHECK(save_backup::json_find_string(exported_parsed.meta_json, "checksum",
+                                            export_checksum));
+        CHECK(read_file_vector(shared_path) == shared_before);
+
+        // C18 primary families live in dataDir root and use 1-based filename suffixes.
+        const std::string modern_slot1_path = data_dir + "/C18Lwh2.dat";
+        const std::vector<uint8_t> modern_slot1 =
+            make_c18_file(save_backup::kC18NativeBagModernRecordCount, 1, 0x51,
+                          0x11, 0x22, 0x33);
+        CHECK(write_file(modern_slot1_path,
+                         std::string(modern_slot1.begin(), modern_slot1.end())));
+        qol::features::save_backup::SlotSnapshot modern_slot1_snapshot;
+        std::string c18_snapshot_error;
+        CHECK(qol::features::save_backup::collect_slot_snapshot(
+            1, modern_slot1_snapshot, c18_snapshot_error));
+        CHECK(modern_slot1_snapshot.c18_native_bag.present);
+        CHECK(modern_slot1_snapshot.c18_native_bag.image.record_count ==
+              save_backup::kC18NativeBagModernRecordCount);
+        const std::array<uint8_t, 3> modern_reserved{0x11, 0x22, 0x33};
+        CHECK(modern_slot1_snapshot.c18_native_bag.image.header_reserved ==
+              modern_reserved);
+        CHECK(::unlink(modern_slot1_path.c_str()) == 0);
+
+        const std::string modern_slot2_path = data_dir + "/C18Lwh3.dat";
+        const std::vector<uint8_t> modern_slot2 =
+            make_c18_file(save_backup::kC18NativeBagModernRecordCount, 2, 0x61);
+        CHECK(write_file(modern_slot2_path,
+                         std::string(modern_slot2.begin(), modern_slot2.end())));
+        qol::features::save_backup::SlotSnapshot modern_slot2_snapshot;
+        CHECK(qol::features::save_backup::collect_slot_snapshot(
+            2, modern_slot2_snapshot, c18_snapshot_error));
+        CHECK(modern_slot2_snapshot.c18_native_bag.present);
+        CHECK(modern_slot2_snapshot.c18_native_bag.image.records.front() == 0x61);
+        CHECK(::unlink(modern_slot2_path.c_str()) == 0);
+
+        // A shared source's opaque reserved header bytes survive bundle encoding and target rewrite.
+        const std::string modern_import_result =
+            save_backup_import_json(export_checksum.c_str(), 1);
+        if (!body_ok(modern_import_result)) std::printf("C18 modern import: %s\n", modern_import_result.c_str());
+        CHECK(body_ok(modern_import_result));
+        const std::string modern_target_path = data_dir + "/C18Lwh2.dat";
+        const std::vector<uint8_t> modern_target = read_file_vector(modern_target_path);
+        CHECK(modern_target.size() == shared_before.size());
+        CHECK(modern_target[0x10] == 0xA1 && modern_target[0x11] == 0xB2 &&
+              modern_target[0x12] == 0xC3);
+        CHECK(modern_target[0x13] == 2);
+        CHECK(::unlink(modern_target_path.c_str()) == 0);
+        CHECK(::unlink(shared_path.c_str()) == 0);
+        qol::features::save_backup::SlotSnapshot missing_c18_snapshot;
+        CHECK(!qol::features::save_backup::collect_slot_snapshot(
+            0, missing_c18_snapshot, c18_snapshot_error));
+        CHECK(c18_snapshot_error == "C18 bag file not found");
+
+        // v3 没有 C18 段：目标 C18 必须在 dat/sidecar 修改前拒绝。
+        g_test_version = "v520";
+        const std::string old_slot1_primary = data_dir + "/C18Lbag2.dat";
+        const std::vector<uint8_t> old_slot1 =
+            make_c18_file(save_backup::kC18NativeBagLegacyRecordCount, 1, 0x72,
+                          0x44, 0x55, 0x66);
+        CHECK(write_file(old_slot1_primary, std::string(old_slot1.begin(), old_slot1.end())));
+        qol::features::save_backup::SlotSnapshot old_slot1_snapshot;
+        CHECK(qol::features::save_backup::collect_slot_snapshot(
+            1, old_slot1_snapshot, c18_snapshot_error));
+        CHECK(old_slot1_snapshot.c18_native_bag.present);
+        const std::array<uint8_t, 3> old_reserved{0x44, 0x55, 0x66};
+        CHECK(old_slot1_snapshot.c18_native_bag.image.header_reserved ==
+              old_reserved);
+
+        const std::string legacy_checksum = write_v3_bundle(root);
+        const std::string slot1_dat = save_dir + "/save1.dat";
+        const std::string slot1_dat_before = "slot1-before-old-bundle";
+        CHECK(write_file(slot1_dat, slot1_dat_before));
+        const std::string old_bundle_result =
+            save_backup_import_json(legacy_checksum.c_str(), 1);
+        CHECK(old_bundle_result.find("backup has no C18 bag image") != std::string::npos);
+        CHECK(read_file(slot1_dat) == slot1_dat_before);
+
+        // shared 96 条导入到旧版 per-slot bag 文件：尾部补零，shared 文件保持不变。
+        CHECK(body_ok(save_backup_import_json(export_checksum.c_str(), 2)));
+        const std::string slot2_bag_path = data_dir + "/C18Lbag3.dat";
+        const std::vector<uint8_t> slot2_bag = read_file_vector(slot2_bag_path);
+        uint32_t materialized_count = 0;
+        std::array<uint8_t, 3> materialized_reserved{};
+        std::vector<uint8_t> materialized_records;
+        CHECK(save_backup::parse_c18_native_bag_file(
+            slot2_bag.data(), slot2_bag.size(), 2,
+            save_backup::kC18NativeBagLegacyRecordCount, false, materialized_count,
+            materialized_reserved, materialized_records));
+        CHECK(materialized_count == save_backup::kC18NativeBagLegacyRecordCount);
+        CHECK(materialized_reserved == exported_parsed.c18_native_bag.header_reserved);
+        CHECK(std::equal(exported_parsed.c18_native_bag.records.begin(),
+                         exported_parsed.c18_native_bag.records.end(),
+                         materialized_records.begin()));
+        const size_t padded_begin = exported_parsed.c18_native_bag.records.size();
+        CHECK(std::all_of(materialized_records.begin() +
+                              static_cast<std::ptrdiff_t>(padded_begin),
+                          materialized_records.end(),
+                          [](uint8_t value) { return value == 0; }));
+        CHECK(::access(shared_path.c_str(), F_OK) != 0);
+
+        // 让 C18 per-slot 原子写失败，验证逆序恢复 dat、sidecar 与 C18 旧字节。
+        CHECK(qol::infra::store::reset_slot(1) == qol::infra::store::Status::kOk);
+        const uint8_t sidecar_payload = 0x71;
+        CHECK(qol::infra::store::write_section(1, "c18", 3, &sidecar_payload, 1) ==
+              qol::infra::store::Status::kOk);
+        std::vector<uint8_t> sidecar_before;
+        CHECK(qol::infra::store::read_container(1, &sidecar_before) ==
+              qol::infra::store::Status::kOk);
+        const std::string slot1_dat_before_rollback = "slot1-before-c18-write-failure";
+        CHECK(write_file(slot1_dat, slot1_dat_before_rollback));
+        const std::string slot1_bag_path = data_dir + "/C18Lbag2.dat";
+        const std::vector<uint8_t> slot1_bag_before =
+            make_c18_file(save_backup::kC18NativeBagLegacyRecordCount, 1, 0x77,
+                          0xD4, 0xE5, 0xF6);
+        CHECK(write_file(slot1_bag_path,
+                         std::string(slot1_bag_before.begin(), slot1_bag_before.end())));
+        save_backup::C18NativeBagImage rollback_image;
+        rollback_image.source_version = "v520";
+        rollback_image.source_slot = 0;
+        rollback_image.record_count = save_backup::kC18NativeBagLegacyRecordCount;
+        rollback_image.records.assign(
+            static_cast<size_t>(rollback_image.record_count) *
+                save_backup::kC18NativeBagRecordBytes,
+            0x44);
+        const std::string rollback_checksum =
+            write_c18_bundle(root, rollback_image, "c18-rollback.qol.bak");
+        save_backup::persistence::fail_next_atomic_write_for_test(slot1_bag_path);
+        const std::string rollback_result =
+            save_backup_import_json(rollback_checksum.c_str(), 1);
+        CHECK(rollback_result.find("C18 bag file write failed") != std::string::npos);
+        CHECK(rollback_result.find("rollback failed") == std::string::npos);
+        CHECK(read_file(slot1_dat) == slot1_dat_before_rollback);
+        CHECK(read_file_vector(slot1_bag_path) == slot1_bag_before);
+        std::vector<uint8_t> sidecar_after;
+        uint16_t sidecar_version_after = 0;
+        CHECK(qol::infra::store::read_section(1, "c18", &sidecar_after,
+                                               &sidecar_version_after) ==
+              qol::infra::store::Status::kOk);
+        CHECK(sidecar_after == std::vector<uint8_t>({sidecar_payload}));
+        CHECK(sidecar_version_after == 3);
+    }
+    g_test_series = "original";
+    g_test_version = "v1";
+
     // ---- token 清零（停用）后前置门不可用 → 拒绝而非越权 ----
-    save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(), nullptr, 0);
+    save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(),
+                             &fake_game_host(), 0);
     CHECK(write_file(dat_path, original_dat));
     const std::string no_token = save_backup_import_json(checksum.c_str(), 0);
     CHECK(no_token.find("slot operation unavailable") != std::string::npos);
