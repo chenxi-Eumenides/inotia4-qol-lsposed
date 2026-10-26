@@ -77,8 +77,8 @@ const contracts::ResourceClaim kResources[] = {
 };
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
-    {"eight_way_move.direction", 0, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kToggle, "八向移动（原型）", "方向触摸支持八向移动；原型开关，默认关闭。",
+    {"eight_way_move.direction", 0, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kToggle, "八向移动", "方向触摸支持八向移动。",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

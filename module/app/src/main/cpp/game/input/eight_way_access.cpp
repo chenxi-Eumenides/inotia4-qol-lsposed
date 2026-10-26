@@ -155,13 +155,17 @@ bool control_absolute_point(void* ctrl, int64_t* x, int64_t* y) {
     return true;
 }
 
-void* virtual_pad_control() {
+void* virtual_control(int32_t id) {
     const VirtualKeyRootFn root_fn = virtual_key_root_fn();
     const FindControlByIdFn find_fn = find_control_by_id_fn();
     if (root_fn == nullptr || find_fn == nullptr) return nullptr;
     void* root = root_fn();
     if (root == nullptr) return nullptr;
-    return find_fn(root, 0x15);
+    return find_fn(root, id);
+}
+
+void* virtual_pad_control() {
+    return virtual_control(0x15);
 }
 
 }  // namespace qol::game::input::access

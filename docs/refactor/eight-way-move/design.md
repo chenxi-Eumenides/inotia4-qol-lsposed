@@ -1,6 +1,6 @@
 # 八向/全向移动设计
 
-状态：原型已实现（`eight_way_move.direction`，默认关闭，Debug「调试开关」）；构建与 Host 单测通过，C18L v586 真机烟测通过（八向触摸、角色斜向移动、斜向双箭头），朝向偏好已单测、真机完整验收 NOT_ACCEPTED。
+状态：已实现（`eight_way_move.direction`，默认关闭，Gameplay「更多优化功能」，Release 可见）；构建与 Host 单测通过，C18L v586 真机烟测通过（八向触摸、角色斜向移动、斜向双箭头），朝向偏好已单测、真机完整验收 NOT_ACCEPTED。
 范围：Android 触屏虚拟方向摇杆；不改键盘、AI、寻路和其他移动调用点。
 
 ## 1. 结论先行
@@ -304,9 +304,11 @@ return 0   // 主轴已移动；副轴被挡时也按成功返回，避免原版
 
 **双箭头显示**：原版 `UIPlayPorting_Draw` 遍历虚拟按键子控件 0x1e..0x21，按 `KEY_nCode` 匹配各自键码后点亮对应箭头，一帧只能匹配一个键码。原型在 `UIPlayPorting_Draw` 入口 hook 中先执行原函数，再由 `game/input/eight_way_draw.cpp` 补画副轴箭头：
 
-- 取 `0x15` 控件绝对中心 `abs+126`；
+- 取对应方向子控件（0x1e..0x21）的绝对左上角，加该控件半宽/半高得到箭头中心；不能直接用 0x15 摇杆中心，否则第二个箭头会画在圆心；
 - `IMGSYS_GetGroup(0x16)` + `IMGSYS_GetLoc(0x16, lit_loc)`；
 - `GRPX_DrawPart(group, x, y, loc, 2, 2, 0)`。
+
+方向到子控件：下→0x1f、左→0x20、上→0x21、右→0x1e。控件尺寸：0x1e/0x20 为 `0x46x0x5a`，0x1f/0x21 为 `0x5a x0x46`。
 
 真机 KEY 表为 `[-3,-4,-1,-2]`，绘制栈按 child 0..3 使用 `[-4,-2,-3,-1]`，即 child 顺序为 右/下/左/上。点亮 loc：
 
@@ -512,7 +514,7 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 
 ### 13.1 已落地
 
-- 新插件 `plugins/eight_way_move/`：feature `eight_way_move.direction`，默认 `0`，分类 `Hidden`（设置页「调试开关」），toggle。
+- 新插件 `plugins/eight_way_move/`：feature `eight_way_move.direction`，默认 `0`，分类 `Gameplay`（设置页「更多优化功能」），toggle；Release 可见。
 - 四个私有、必需、fail-closed、可还原资源：
   - `hook:UIPlay_ButtonDirection`（`F_UIPLAY_BUTTON_DIRECTION_VMA`）
   - `hook:GAMESTATE_PressKeyPlay`（`F_GAMESTATE_PRESSKEYPLAY_VMA`）
@@ -538,9 +540,9 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 ### 13.2 验证
 
 - `eight_way_move_tests`：八向分类、22.5°/45° 边界、死区、自定义键码、副轴条件、朝向偏好（右上保持右/上、非轴回退、基本方向忽略），通过。
-- `eight_way_move_plugin_tests`：插件 id、4 个资源、端口、feature 默认关闭与 Hidden 分类，通过。
-- `scripts/build-debug.sh`：通过；最终模块产物 `output/inotia4_qol_lsposed_debug_2610270257_2b8877adfa94.apk`，SHA-256 `2b8877adfa944a863d3cd20afe79dc620a90796d82a8c1bc5d1219cc791f9950`。
-- C18L v586 真机烟测：集成包 `output/Inotia4_C18L_v586_debug_2b8877adfa94_lspatch.apk`；四个资源均 `live`；日志出现 `eight_way touch`、`char_move hook active`、`eight_way draw secondary=3 loc=0xe`；截图确认斜向时原版上箭头与补画右箭头同时点亮，角色实际斜向移动。
+- `eight_way_move_plugin_tests`：插件 id、4 个资源、端口、feature 默认关闭与 Gameplay 分类，通过。
+- `scripts/build-debug.sh`：通过；最终模块产物 `output/inotia4_qol_lsposed_debug_2610270304_e23979baeb5a.apk`，SHA-256 `e23979baeb5a31e40bceafd0ee5226e69591bfeb4350d8961ce961167e7465a3`。
+- C18L v586 真机烟测：集成包 `output/Inotia4_C18L_v586_debug_e23979baeb5a_lspatch.apk`；四个资源均 `live`；日志出现 `eight_way touch`、`char_move hook active`、`eight_way draw secondary=3 loc=0xe at=(212,514)`；截图确认斜向时原版上箭头与补画右箭头都在方向环上点亮（右箭头 x=212，不在圆心），角色实际斜向移动。
 - 朝向偏好已有单测；多段触摸（先右后右上）真机逐帧验证未完成。
 - 完整验收仍 `NOT_ACCEPTED`：松开停止、撞墙、切图/拾取/动画、物理键盘、插件关闭还原和不同分辨率仍需逐项验证。
 

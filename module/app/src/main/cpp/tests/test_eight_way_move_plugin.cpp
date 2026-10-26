@@ -27,8 +27,8 @@ int main() {
     check(d.feature_count == 1, "feature count");
     check(std::strcmp(d.features[0].id, "eight_way_move.direction") == 0, "feature id");
     check(d.features[0].default_enabled == 0, "feature default off");
-    check(d.features[0].category == qol::contracts::FeatureCategory::kHidden,
-          "feature in debug/hidden category");
+    check(d.features[0].category == qol::contracts::FeatureCategory::kGameplay,
+          "feature in gameplay category");
 
     check(std::strcmp(d.resources[0].id, "hook:UIPlay_ButtonDirection") == 0, "direction id");
     check(d.resources[0].mechanism ==

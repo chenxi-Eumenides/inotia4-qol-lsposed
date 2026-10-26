@@ -48,7 +48,13 @@ DrawPartFn draw_part_fn() {
 // 绘制栈按 child 0..3 使用 [-4,-2,-3,-1]，即 child 顺序为 右/下/左/上；
 // 对应点亮 loc：下=0x10、左=0x0d、上=0x0f、右=0x0e。
 constexpr int32_t kLitArrowLoc[4] = {0x10, 0x0d, 0x0f, 0x0e};
-constexpr int32_t kPadHalfSize = 126;
+
+// 方向 -> 隐藏方向子控件 ID（0x1e..0x21）及该控件半宽/半高。
+// UIPlay_Create：0x1e 右 0x46x0x5a、0x1f 下 0x5a x0x46、
+// 0x20 左 0x46x0x5a、0x21 上 0x5a x0x46。
+constexpr int32_t kArrowControlId[4] = {0x1f, 0x20, 0x21, 0x1e};
+constexpr int32_t kArrowHalfW[4] = {0x2d, 0x23, 0x2d, 0x23};
+constexpr int32_t kArrowHalfH[4] = {0x23, 0x2d, 0x23, 0x2d};
 
 }  // namespace
 
@@ -58,13 +64,14 @@ void draw_secondary_arrow() {
     if (!state.active || state.secondary_dir < 0 || state.secondary_dir > 3) return;
     if (world_game_state_gate() != 0) return;
 
-    void* ctrl = access::virtual_pad_control();
+    const int32_t dir = state.secondary_dir;
+    void* ctrl = access::virtual_control(kArrowControlId[dir]);
     if (ctrl == nullptr) return;
     int64_t x = 0;
     int64_t y = 0;
     if (!access::control_absolute_point(ctrl, &x, &y)) return;
-    x += kPadHalfSize;
-    y += kPadHalfSize;
+    x += kArrowHalfW[dir];
+    y += kArrowHalfH[dir];
 
     const GetGroupFn get_group = get_group_fn();
     const GetLocFn get_loc = get_loc_fn();
