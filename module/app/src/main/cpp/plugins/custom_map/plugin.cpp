@@ -216,7 +216,7 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
      contracts::FeatureType::kToggle, "自定义地图", "导入加载自定义地图",
       [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
     {"custom_map.open_panel", 1, contracts::FeatureCategory::kTools,
-     contracts::FeatureType::kEntry, "打开自定义地图面板", "浏览已扫描的自定义地图文件。",
+     contracts::FeatureType::kEntry, "查看自定义地图", "查看加载的自定义地图信息",
      nullptr, &open_panel_feature, "打开", 0},
 };
 

@@ -297,7 +297,7 @@ extern const contracts::FeatureDefinition kFeatures[] = {
      contracts::FeatureType::kToggle, "物品领域服务", "",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
     {"move_merge.drag_merge", 1, contracts::FeatureCategory::kBasicOptimization,
-     contracts::FeatureType::kToggle, "拖拽合并", "拖拽同类物品时自动合并。",
+     contracts::FeatureType::kToggle, "拖动合并", "允许合并同种可堆叠物品",
      [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
          merge::set_enabled(enabled != 0);
          return contracts::ok();

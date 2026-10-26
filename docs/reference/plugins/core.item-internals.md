@@ -35,7 +35,7 @@
 | 项目 | 装配事实 |
 |---|---|
 | `core.item.provider` | `Hidden` toggle，默认开启；其 feature callback 不执行额外 toggle 动作。插件启停仍由生命周期处理。 |
-| `move_merge.drag_merge` | `Basic optimization` toggle，默认开启；callback 更新拖拽合并 gate。 |
+| `move_merge.drag_merge` | `Basic optimization` toggle，显示名称「拖动合并」，默认开启；callback 更新拖动合并 gate。 |
 | 库存 hooks | 27 个 hook claim：24 个 required、fail-closed 的库存入口；3 个 optional、fail-soft 的快捷栏诊断入口。 |
 | 合并 wrapper | 1 个 optional、fail-closed 的 `ptrslot:MOVE_MERGE_GOT` claim；资源未就绪时 `move_merge.control` 报告 disabled。 |
 | 总资源 | 28 项；生命周期将库存 hooks 与合并 wrapper 的 claim 合并进 descriptor。 |

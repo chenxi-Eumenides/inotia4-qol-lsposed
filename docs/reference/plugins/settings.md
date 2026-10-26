@@ -113,15 +113,15 @@ descriptor 只注册一个 `page` entry feature：
 | `core.data` | `core.data.catalog` | 静态数据服务 | 1 | Hidden | toggle | 0 | — |
 | `core.feature` | `core.feature.compatibility_routes` | 迁移占位路由 | 1 | Hidden | toggle | 0 | — |
 | `core.item` | `core.item.provider` | 物品领域服务 | 1 | Hidden | toggle | 0 | — |
-| `core.item` | `move_merge.drag_merge` | 拖拽合并 | 1 | BasicOptimization | toggle | 0 | owner 为 `core.item` |
+| `core.item` | `move_merge.drag_merge` | 拖动合并 | 1 | BasicOptimization | toggle | 0 | owner 为 `core.item` |
 | `core.quest` | `core.quest.completion_check` | 任务完成检查 | 1 | Hidden | toggle | 0 | — |
 | `core.save` | `core.save.provider` | 存档领域服务 | 1 | Hidden | toggle | 0 | — |
 | `core.system` | `core.system.snapshots` | 系统状态服务 | 1 | Hidden | toggle | 0 | — |
 | `core.ui_state` | `core.ui_state.provider` | 界面状态服务 | 1 | Hidden | toggle | 0 | — |
 | `core.world` | `core.world.provider` | 世界领域服务 | 1 | Hidden | toggle | 0 | — |
-| `craft_lottery` | `craft_lottery.guarantee` | 合成套装保底 | 0 | BasicOptimization | toggle | -1 | — |
+| `craft_lottery` | `craft_lottery.guarantee` | 合成器传说保底 | 0 | BasicOptimization | toggle | -1 | — |
 | `custom_map` | `custom_map.load` | 自定义地图 | 1 | BasicOptimization | toggle | 0 | — |
-| `custom_map` | `custom_map.open_panel` | 打开自定义地图面板 | 1 | Tools | entry | 0 | — |
+| `custom_map` | `custom_map.open_panel` | 查看自定义地图 | 1 | Tools | entry | 0 | — |
 | `custom_recipe` | `custom_recipe.recipes` | 自定义合成 | 0 | Gameplay | toggle | -1 | — |
 | `eight_way_move` | `eight_way_move.direction` | 八向移动 | 0 | Gameplay | toggle | 0 | — |
 | `extension_bag` | `extension_bag.extended_bag` | 额外背包 | 1 | Gameplay | toggle | -2 | — |
@@ -138,7 +138,7 @@ descriptor 只注册一个 `page` entry feature：
 
 | Owner | Feature ID | 显示名称 | 默认 | Category | 类型 | Priority |
 |---|---|---|---:|---|---|---:|
-| `module.platform` | `debug.logging` | debug日志 | 0 | General | toggle | -3 |
+| `module.platform` | `debug.logging` | DEBUG日志 | 0 | General | toggle | -3 |
 | `module.security` | `op.enabled` | 高级权限 | 0 | General | toggle | -4 |
 
 当前 Debug 构建开启 `QOL_DEBUG_COMPONENTS` 时 catalog 共 33 项，其中 15 项属于 Hidden；Release 隐藏 Hidden 分类后显示 18 项（16 toggle、2 entry）。`core.api / api.enabled` 与两个 Host-owned features 都是 General，在 Debug/Release 均显示；core features 并非全部 Hidden，`core.item / move_merge.drag_merge` 是 BasicOptimization 项。设置页的 `page` 不计入上述 catalog 数量。
@@ -162,7 +162,7 @@ descriptor 只注册一个 `page` entry feature：
 | `move_merge.moveMergeEnabled` | `core.item` / `move_merge.drag_merge` |
 | `simple_mode.simpleModeEnabled` | `simple_mode` / `simple_mode.combat` |
 
-历史基线为 10 个 toggle，仅用于解释旧配置迁移，不代表当前目录。当前 catalog 项和呈现元数据以 §7 表格及注册 descriptor 为准；当前 Debug catalog 共 33 项（取决于 `QOL_DEBUG_COMPONENTS`），Release 可见 18 项。`core.api / api.enabled` 默认开启、分类为 General、priority -5，Debug/Release 均显示；这些呈现元数据不改变 API runtime feature 行为。`module.platform / debug.logging` priority -3、名称为「debug日志」；`module.security / op.enabled` priority -4。历史 `core.settings.*` 命名不表示现行 API/OP owner 仍属于该 namespace。`scripts/verification/test_core_feature_exposure.py` 仍用于核对公开集合、Hidden 项、分离的 API/OP owners、core 描述和 Debug entry 注册条件。
+历史基线为 10 个 toggle，仅用于解释旧配置迁移，不代表当前目录。当前 catalog 项和呈现元数据以 §7 表格及注册 descriptor 为准；当前 Debug catalog 共 33 项（取决于 `QOL_DEBUG_COMPONENTS`），Release 可见 18 项。`core.api / api.enabled` 默认开启、分类为 General、priority -5，Debug/Release 均显示；这些呈现元数据不改变 API runtime feature 行为。`module.platform / debug.logging` priority -3、名称为「DEBUG日志」；`module.security / op.enabled` priority -4。历史 `core.settings.*` 命名不表示现行 API/OP owner 仍属于该 namespace。`scripts/verification/test_core_feature_exposure.py` 仍用于核对公开集合、Hidden 项、分离的 API/OP owners、core 描述和 Debug entry 注册条件。
 
 ## 8. 验证证据与范围
 

@@ -22,7 +22,7 @@
 ## 公开能力与路由
 
 - 无 capability `provides`，无 `routes.inc`，无 HTTP query/endpoint/route metadata，也无 JNI。启停只能经 Host 常驻控制面（API 参考 §7.6 配置/feature、§7.7 状态）。
-- 唯一 feature 为 `craft_lottery.guarantee`：默认 `0`、分类 `kBasicOptimization`、类型 `kToggle`、priority `-1`、名称「合成套装保底」、描述「合成套装抽奖未集齐时只抽未拥有的配方」（`plugin.cpp:96-104`）。回调在 `enabled == 0` 时立即 `set_gate(false)`；开启方向不直接开门（由 lifecycle 的 `plugin_on_enabled` 负责）。
+- 唯一 feature 为 `craft_lottery.guarantee`：默认 `0`、分类 `kBasicOptimization`、类型 `kToggle`、priority `-1`、名称「合成器传说保底」、描述「套装优先出未获得的配方」（`plugin.cpp:96-104`）。回调在 `enabled == 0` 时立即 `set_gate(false)`；开启方向不直接开门（由 lifecycle 的 `plugin_on_enabled` 负责）。
 - `want_run = enable && any(feature)`（API 参考 §7.6）。本插件只有 1 个 feature，设置页关闭 feature 会在同一次 feature 提交中派生 `enable=false`，随后推进完整 deactivate。
 
 ## 游戏机制（原版事实）

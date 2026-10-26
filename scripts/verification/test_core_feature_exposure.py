@@ -75,7 +75,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
     def test_regular_public_switches_keep_their_metadata(self):
         expected = {
             "autosell.auto_sell": ("0", "kGameplay", "kToggle", "自动出售"),
-            "move_merge.drag_merge": ("1", "kBasicOptimization", "kToggle", "拖拽合并"),
+            "move_merge.drag_merge": ("1", "kBasicOptimization", "kToggle", "拖动合并"),
             "push_all.push": ("0", "kGameplay", "kToggle", "推怪"),
             "simple_mode.combat": ("0", "kGameplay", "kToggle", "简单模式"),
             "custom_recipe.recipes": ("0", "kGameplay", "kToggle", "自定义合成"),
@@ -84,8 +84,8 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "eight_way_move.direction": ("0", "kGameplay", "kToggle", "八向移动"),
             "popup_blocker.enabled": ("1", "kBasicOptimization", "kToggle", "禁用弹窗"),
             "custom_map.load": ("1", "kBasicOptimization", "kToggle", "自定义地图"),
-            "craft_lottery.guarantee": ("0", "kBasicOptimization", "kToggle", "合成套装保底"),
-            "debug.logging": ("0", "kGeneral", "kToggle", "debug日志"),
+            "craft_lottery.guarantee": ("0", "kBasicOptimization", "kToggle", "合成器传说保底"),
+            "debug.logging": ("0", "kGeneral", "kToggle", "DEBUG日志"),
             "attribute_range_display.ranges": ("1", "kBasicOptimization", "kToggle", "属性范围渲染"),
             "character_panel_i18n.translation": ("1", "kBasicOptimization", "kToggle", "属性面板汉化"),
             "world_teleport.map_jump": ("1", "kBasicOptimization", "kToggle", "更好的传送"),
@@ -110,7 +110,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "character_panel_i18n": ("character_panel_i18n.translation", "属性面板汉化"),
             "world_teleport": ("world_teleport.map_jump", "更好的传送"),
             "custom_map": ("custom_map.load", "自定义地图"),
-            "core.item": ("move_merge.drag_merge", "拖拽合并"),
+            "core.item": ("move_merge.drag_merge", "拖动合并"),
         }
         for plugin, (feature_id, label) in expected.items():
             with self.subTest(plugin=plugin):
@@ -182,7 +182,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
         security_op = next(feature for feature in features if feature[0] == "op.enabled")
         self.assertEqual(debug_logging[:4],
                          ("debug.logging", "0", "kGeneral", "kToggle"))
-        self.assertEqual(debug_logging[4], "debug日志")
+        self.assertEqual(debug_logging[4], "DEBUG日志")
         self.assertEqual(security_op[:4],
                          ("op.enabled", "0", "kGeneral", "kToggle"))
         self.assertEqual(security_op[4], "高级权限")

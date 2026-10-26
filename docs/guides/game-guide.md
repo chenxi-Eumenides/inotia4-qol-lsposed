@@ -807,7 +807,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `core.api` / `config["listen_address"]` | string | `"0.0.0.0"` | HTTP 监听地址 |
 | `core.api` / `config["listen_port"]` | number | `8088` | HTTP 监听端口（1-65535） |
 | `module.security` / `features["op.enabled"]` | bool | `false` | General「高级权限」开关，描述「允许不合法的高级操作」；priority -4；Debug/Release 均显示；只授权 endpoint metadata 明确标记需要 OP 的操作 |
-| `module.platform` / `features["debug.logging"]` | bool | `false` | General、priority -3；名称「debug日志」；native logger 的 debug 级别门控 |
+| `module.platform` / `features["debug.logging"]` | bool | `false` | General、priority -3；名称「DEBUG日志」；native logger 的 debug 级别门控 |
 
 `core.api/api.enabled` 与 `module.security/op.enabled` 相互独立：关闭 API 服务不会改写 OP 权限，开启 API 服务也不会授予 OP。两项属于 General，Debug/Release 设置页均显示；Release 只隐藏 Hidden 分类。
 
@@ -816,7 +816,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | feature id | 默认 | 说明 |
 |---|---:|---|
 | `autosell.auto_sell` | `false` | 按照规则自动出售物品 |
-| `move_merge.drag_merge` | `true` | 拖拽同类物品自动合并 |
+| `move_merge.drag_merge` | `true` | 拖动合并（允许合并同种可堆叠物品） |
 | `push_all.push` | `false` | 能够推动怪物 |
 | `simple_mode.combat` | `false` | 降低游戏难度 |
 | `custom_recipe.recipes` | `false` | 优化合成并添加更多配方（唯一可见开关） |

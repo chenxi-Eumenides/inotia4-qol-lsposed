@@ -8,7 +8,7 @@ FeaturePlatformState latest;
 QolResult noop(contracts::PluginContext&, uint8_t) { return contracts::ok(); }
 constexpr contracts::FeatureDefinition definitions[] = {
     {"debug.logging", 0, contracts::FeatureCategory::kGeneral, contracts::FeatureType::kToggle,
-     "debug日志", "启用 Host 调试日志。", &noop, nullptr, nullptr, -3},
+     "DEBUG日志", "记录DEBUG日志", &noop, nullptr, nullptr, -3},
 };
 const JsonValue* member(const JsonValue& object, const char* key) {
     for (const auto& item : object.object) if (item.first == key) return &item.second;
