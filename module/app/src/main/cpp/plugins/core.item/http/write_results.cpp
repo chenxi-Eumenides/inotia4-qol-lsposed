@@ -108,11 +108,11 @@ int32_t write_port_bag(const WriteRef& ref) {
     int32_t original_count = 0;
     int32_t c18_count = 0;
     if (!result_space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !result_space_count(contracts::kQolBagSpaceC18, &c18_count)) {
+        !result_space_count(contracts::kQolBagSpaceVariant, &c18_count)) {
         return -1;
     }
     int64_t offset = original_count;
-    if (ref.space_id == contracts::kQolBagSpaceC18) return original_count + ref.bag;
+    if (ref.space_id == contracts::kQolBagSpaceVariant) return original_count + ref.bag;
     offset += c18_count;
     for (uint32_t index = 0; index < registered_bag_source_count(); ++index) {
         const contracts::QolBagSource* source = registered_bag_source_at(index);
@@ -133,7 +133,7 @@ bool decode_write_bag(int32_t host_bag, WriteRef* out) {
     int32_t original_count = 0;
     int32_t c18_count = 0;
     if (!result_space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !result_space_count(contracts::kQolBagSpaceC18, &c18_count)) {
+        !result_space_count(contracts::kQolBagSpaceVariant, &c18_count)) {
         return false;
     }
     if (host_bag < original_count) {
@@ -143,7 +143,7 @@ bool decode_write_bag(int32_t host_bag, WriteRef* out) {
     if (host_bag < contracts::kQolOriginalBagCount) return false;
     int32_t remaining = host_bag - original_count;
     if (remaining < c18_count) {
-        *out = {contracts::kQolBagSpaceC18, remaining, -1};
+        *out = {contracts::kQolBagSpaceVariant, remaining, -1};
         return true;
     }
     remaining -= c18_count;
@@ -182,7 +182,7 @@ bool find_item_slot(int32_t category, int32_t* bag_out, int32_t* slot_out) {
         const int32_t space_id = space_index == 0
                                      ? contracts::kQolBagSpaceOriginal
                                      : space_index == 1
-                                           ? contracts::kQolBagSpaceC18
+                                           ? contracts::kQolBagSpaceVariant
                                            : registered_source != nullptr
                                                  ? registered_source->space_id
                                                  : -1;
@@ -290,7 +290,7 @@ bool capture_inventory_result(InventoryResultSnapshot* out) {
         const int32_t space_id = space_index == 0
                                      ? contracts::kQolBagSpaceOriginal
                                      : space_index == 1
-                                           ? contracts::kQolBagSpaceC18
+                                           ? contracts::kQolBagSpaceVariant
                                            : registered_source != nullptr
                                                  ? registered_source->space_id
                                                  : -1;
@@ -1034,7 +1034,7 @@ bool write_cross_space_move_result(const ItemWritePayload& payload, char* out,
         int32_t located_slot = -1;
         const QolResult located_result =
             placed.ref.space_id == contracts::kQolBagSpaceOriginal ||
-                    placed.ref.space_id == contracts::kQolBagSpaceC18
+                    placed.ref.space_id == contracts::kQolBagSpaceVariant
                 ? bags::native_transport::locate(placed.ref.space_id, placed.item, &located,
                                                  &located_slot)
                 : bags::source_transport::locate(placed.ref.space_id, placed.item, &located,

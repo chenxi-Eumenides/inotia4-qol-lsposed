@@ -29,7 +29,7 @@ QolResult internal_error() {
 
 bool is_native_space(int32_t space) {
     return space == contracts::kQolBagSpaceOriginal ||
-           space == contracts::kQolBagSpaceC18;
+           space == contracts::kQolBagSpaceVariant;
 }
 
 bool valid_handle(contracts::QolItemHandle item) {

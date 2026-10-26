@@ -37,11 +37,15 @@
 #include "bags/snapshot_sdk.h"
 
 #include "plugins/core.item/api/bag_source.h"
+#include "plugins/core.item/api/projection.h"
 #include "plugins/core.item/runtime/core_item_internal.h"
 
 #if !defined(QOL_CORE_ITEM_BAG_SOURCE_SEPARATE)
 // 宿主测试直接编译 plugin.cpp，不读取插件 CMake 源清单；插件 target 单独编译该实现。
 #include "plugins/core.item/api/bag_source.cpp"
+#endif
+#if !defined(QOL_CORE_ITEM_PROJECTION_SEPARATE)
+#include "plugins/core.item/api/projection.cpp"
 #endif
 
 namespace qol::features::core_item {
@@ -55,12 +59,15 @@ const contracts::CapabilityProvisionRef kProvides[] = {
      &inventory_hooks::kInventoryRefreshApi},
     {contracts::kInventoryActionCapabilityId,
      {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor},
-     &kInventoryActionApi},
+      &kInventoryActionApi},
     {contracts::kInventorySlotCapabilityId, contracts::kInventorySlotVersion,
      &inventory_hooks::kInventorySlotApi},
     {contracts::kMoveMergeControlCapabilityId,
      {contracts::kMoveMergeControlVersionMajor, contracts::kMoveMergeControlVersionMinor},
      &merge::kMoveMergeControlApi},
+    {contracts::kInventoryProjectionCapabilityId,
+     {contracts::kInventoryProjectionVersionMajor, contracts::kInventoryProjectionVersionMinor},
+     &kInventoryProjectionRegistryApi},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -91,12 +98,6 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
      {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
     {contracts::kWorldFactsCapabilityId,
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
-    {contracts::kExtensionBagCapabilityId,
-     {static_cast<uint16_t>(contracts::kExtensionBagVersionMajor),
-      contracts::kExtensionBagSaleRemoveVersionMinor}},
-    {contracts::kInventoryMergeProjectionCapabilityId,
-     {contracts::kInventoryMergeProjectionVersionMajor,
-      contracts::kInventoryMergeProjectionVersionMinor}},
 };
 
 const contracts::PluginDescriptor& plugin_descriptor() {

@@ -163,7 +163,7 @@ QolResult build_inventory_json(std::string* out) {
     if (contracts::qol_item_port_bag_space_size_valid(g_port) &&
         g_port->read.bag_count != nullptr) {
         const QolResult count_result =
-            g_port->read.bag_count(contracts::kQolBagSpaceC18, &c18_bag_count);
+            g_port->read.bag_count(contracts::kQolBagSpaceVariant, &c18_bag_count);
         if (!contracts::succeeded(count_result)) {
             if (count_result.code != kQolErrUnsupported && count_result.code != kQolErrNotReady) {
                 return count_result;
@@ -176,7 +176,7 @@ QolResult build_inventory_json(std::string* out) {
         if (g_port->read.bag_info == nullptr || g_port->read.item_at == nullptr) {
             return error_result(kQolErrUnsupported, "c18 bag read unavailable");
         }
-        const contracts::QolBagRef ref{contracts::kQolBagSpaceC18, bag};
+        const contracts::QolBagRef ref{contracts::kQolBagSpaceVariant, bag};
         contracts::QolBagInfo info{};
         const QolResult info_result = g_port->read.bag_info(&ref, &info);
         if (!contracts::succeeded(info_result)) return info_result;

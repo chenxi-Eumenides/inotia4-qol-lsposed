@@ -64,11 +64,11 @@ int32_t port_bag(const contracts::QolBagRef& ref) {
     int32_t original_count = 0;
     int32_t c18_count = 0;
     if (!space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !space_count(contracts::kQolBagSpaceC18, &c18_count)) {
+        !space_count(contracts::kQolBagSpaceVariant, &c18_count)) {
         return -1;
     }
     int64_t offset = original_count + c18_count;
-    if (ref.space_id == contracts::kQolBagSpaceC18) return original_count + ref.bag;
+    if (ref.space_id == contracts::kQolBagSpaceVariant) return original_count + ref.bag;
     for (uint32_t index = 0;
          index < qol::features::core_item::registered_bag_source_count(); ++index) {
         const contracts::QolBagSource* source =
@@ -92,7 +92,7 @@ bool resolve_flat_bag(int32_t flat_bag, contracts::QolBagRef* out_ref) {
     int32_t original_count = 0;
     int32_t c18_count = 0;
     if (!space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !space_count(contracts::kQolBagSpaceC18, &c18_count)) {
+        !space_count(contracts::kQolBagSpaceVariant, &c18_count)) {
         return false;
     }
     if (flat_bag < original_count) {
@@ -101,7 +101,7 @@ bool resolve_flat_bag(int32_t flat_bag, contracts::QolBagRef* out_ref) {
     }
     int32_t remaining = flat_bag - original_count;
     if (remaining < c18_count) {
-        *out_ref = {contracts::kQolBagSpaceC18, remaining};
+        *out_ref = {contracts::kQolBagSpaceVariant, remaining};
         return true;
     }
     remaining -= c18_count;
@@ -298,7 +298,7 @@ QolResult view_item(contracts::QolItemHandle item, contracts::QolInventorySlotVi
         }
         return slot_error(kQolErrConflict, "stale inventory item", 20);
     };
-    for (int32_t space_id : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceC18}) {
+    for (int32_t space_id : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceVariant}) {
         result = search_space(space_id);
         if (contracts::succeeded(result) || result.code != kQolErrConflict) return result;
     }

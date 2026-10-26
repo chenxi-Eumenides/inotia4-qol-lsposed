@@ -103,12 +103,12 @@ QolResult find_native_item_slot(contracts::QolItemHandle handle, const NativeBag
     if (out_ref == nullptr || out_slot == nullptr) {
         return transfer_error(kQolErrInvalidArgument, "invalid slot output");
     }
-    for (int32_t space_id : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceC18}) {
-        if (space_id == contracts::kQolBagSpaceC18 && layout.bag_limit <= 6) continue;
+    for (int32_t space_id : {contracts::kQolBagSpaceOriginal, contracts::kQolBagSpaceVariant}) {
+        if (space_id == contracts::kQolBagSpaceVariant && layout.bag_limit <= 6) continue;
         int32_t bag_count = 0;
         QolResult result = inventory_bag_count(space_id, &bag_count);
         if (!contracts::succeeded(result)) {
-            if (space_id == contracts::kQolBagSpaceC18 && result.code == kQolErrNotReady) continue;
+            if (space_id == contracts::kQolBagSpaceVariant && result.code == kQolErrNotReady) continue;
             return result;
         }
         for (int32_t bag = 0; bag < bag_count; ++bag) {
@@ -265,7 +265,7 @@ QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
     *out = {};
     if (ref == nullptr ||
         (ref->space_id != contracts::kQolBagSpaceOriginal &&
-         ref->space_id != contracts::kQolBagSpaceC18) ||
+         ref->space_id != contracts::kQolBagSpaceVariant) ||
         ref->bag < 0 || slot < -1 || slot >= 16 ||
         (ref->space_id == contracts::kQolBagSpaceOriginal &&
          ref->bag == contracts::kQolTaskBagIndex)) {
@@ -473,7 +473,7 @@ QolResult use_item(int32_t bag, int32_t slot,
 
     if (fn_is_sealed != nullptr && fn_is_sealed(category) && fn_release_sealed != nullptr) {
         BeforeInventory before{};
-        for_each_bag_slot(
+        ::for_each_bag_slot(
             [](void* candidate, int candidate_bag, int candidate_slot, void* raw) -> bool {
                 capture_before_item(candidate, candidate_bag, candidate_slot, raw);
                 return false;
@@ -485,13 +485,13 @@ QolResult use_item(int32_t bag, int32_t slot,
         if (fn_consume_item != nullptr) fn_consume_item(item);
         out->flags |= contracts::kQolItemInventoryStateHasGained;
         GainedContext context{&before, out};
-        for_each_bag_slot(&capture_gained_item, &context);
+        ::for_each_bag_slot(&capture_gained_item, &context);
         return contracts::ok();
     }
 
     if (fn_is_item_box != nullptr && fn_is_item_box(category) && fn_open_item_box != nullptr) {
         BeforeInventory before{};
-        for_each_bag_slot(
+        ::for_each_bag_slot(
             [](void* candidate, int candidate_bag, int candidate_slot, void* raw) -> bool {
                 capture_before_item(candidate, candidate_bag, candidate_slot, raw);
                 return false;
@@ -503,7 +503,7 @@ QolResult use_item(int32_t bag, int32_t slot,
         if (fn_consume_item != nullptr) fn_consume_item(item);
         out->flags |= contracts::kQolItemInventoryStateHasGained;
         GainedContext context{&before, out};
-        for_each_bag_slot(&capture_gained_item, &context);
+        ::for_each_bag_slot(&capture_gained_item, &context);
         return contracts::ok();
     }
 
@@ -611,7 +611,7 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
     if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
     if (ref == nullptr ||
         (ref->space_id != contracts::kQolBagSpaceOriginal &&
-         ref->space_id != contracts::kQolBagSpaceC18) ||
+         ref->space_id != contracts::kQolBagSpaceVariant) ||
         ref->bag < 0 || slot < -1 || slot >= 16 ||
         (ref->space_id == contracts::kQolBagSpaceOriginal &&
          ref->bag == contracts::kQolTaskBagIndex)) {

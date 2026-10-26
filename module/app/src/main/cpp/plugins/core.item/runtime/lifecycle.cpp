@@ -42,7 +42,7 @@ void apply_native_bag_limit() {
         limit = original;
     }
     int32_t c18 = 0;
-    if (contracts::succeeded(g_port->read.bag_count(contracts::kQolBagSpaceC18, &c18)) &&
+    if (contracts::succeeded(g_port->read.bag_count(contracts::kQolBagSpaceVariant, &c18)) &&
         c18 > 0) {
         limit += c18;
     }

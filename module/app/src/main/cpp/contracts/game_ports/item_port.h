@@ -20,7 +20,7 @@ enum class QolInventoryItemKind : int32_t {
 // 袋编号空间：原版 0、改版（C18 追加袋）1，其余为注册源分配值（>=2）。
 // 各空间索引一律从 0 起；扁平袋号仅是按 原版→改版→注册源 顺序连接的派生便利键。
 constexpr int32_t kQolBagSpaceOriginal = 0;
-constexpr int32_t kQolBagSpaceC18 = 1;
+constexpr int32_t kQolBagSpaceVariant = 1;
 constexpr int32_t kQolBagSpaceFirstRegistered = 2;
 
 // 原版固定 6 袋（0..4 事务袋 + 5 任务袋）；改版为动态袋数，索引上界排他。

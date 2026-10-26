@@ -21,7 +21,7 @@ NativeBagSource::NativeBagSource(const contracts::QolItemPort* port) : port_(por
 
 bool NativeBagSource::supports_space(int32_t space_id) const {
     return space_id == contracts::kQolBagSpaceOriginal ||
-           space_id == contracts::kQolBagSpaceC18;
+           space_id == contracts::kQolBagSpaceVariant;
 }
 
 int32_t NativeBagSource::count(int32_t space_id) const {

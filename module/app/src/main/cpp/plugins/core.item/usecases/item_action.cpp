@@ -27,7 +27,7 @@ bool valid_ref(const QolActionRef& ref) {
 
 bool native_space(int32_t space_id) {
     return space_id == contracts::kQolBagSpaceOriginal ||
-           space_id == contracts::kQolBagSpaceC18;
+           space_id == contracts::kQolBagSpaceVariant;
 }
 
 bool valid_handle(QolItemHandle item) {

@@ -244,7 +244,7 @@ QolResult item_at(const contracts::QolBagRef& ref, int32_t slot,
         return source->item_at(ref.bag, slot, out);
     }
     if ((ref.space_id != contracts::kQolBagSpaceOriginal &&
-         ref.space_id != contracts::kQolBagSpaceC18) ||
+         ref.space_id != contracts::kQolBagSpaceVariant) ||
         g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
         g_port->read.item_at == nullptr) {
         constexpr char kMessage[] = "bag item_at unavailable";
@@ -362,7 +362,7 @@ bool reconcile() {
             contracts::QolBagMutationResult removed{};
             const auto remove_target =
                 target.space_id == contracts::kQolBagSpaceOriginal ||
-                        target.space_id == contracts::kQolBagSpaceC18
+                        target.space_id == contracts::kQolBagSpaceVariant
                     ? &bags::native_transport::remove_item
                     : &bags::source_transport::remove_item;
             const QolResult result =

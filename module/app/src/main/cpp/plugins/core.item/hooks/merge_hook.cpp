@@ -11,6 +11,7 @@
 #include "contracts/item_facts.h"
 #include "contracts/move_merge.h"
 #include "contracts/ui.h"
+#include "plugins/core.item/api/projection.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
 
 namespace qol::features::core_item::merge {
@@ -49,18 +50,8 @@ bool gate_enabled() {
            g_wrapper_ready.load(std::memory_order_acquire);
 }
 
-const contracts::InventoryMergeProjectionApi* projection_api() {
-    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
-    const void* iface = nullptr;
-    const auto result = g_sdk->capabilities.require(
-        contracts::kInventoryMergeProjectionCapabilityId,
-        {contracts::kInventoryMergeProjectionVersionMajor,
-         contracts::kInventoryMergeProjectionVersionMinor},
-        &iface);
-    const auto* api = contracts::succeeded(result)
-                          ? static_cast<const contracts::InventoryMergeProjectionApi*>(iface)
-                          : nullptr;
-    return contracts::inventory_merge_projection_api_valid(api) ? api : nullptr;
+const contracts::InventoryProjectionCallbacks* projection_api() {
+    return projection_callbacks();
 }
 
 bool refresh_original() {
@@ -71,7 +62,7 @@ const contracts::ItemFactsApi* item_facts_api() {
     return contracts::item_facts_api_size_valid(g_item_facts) ? g_item_facts : nullptr;
 }
 
-void projection_observe_post(const contracts::InventoryMergeProjectionApi* api,
+void projection_observe_post(const contracts::InventoryProjectionCallbacks* api,
                              uint64_t token, void* control, uint64_t event, void* x2,
                              void* param, uint64_t result) {
     const auto* current = projection_api();
@@ -105,7 +96,7 @@ bool native_item(contracts::QolItemHandle item) {
            contracts::succeeded(g_move_port->validate_native_item(item));
 }
 
-bool extension_item(const contracts::InventoryMergeProjectionApi* projection,
+bool extension_item(const contracts::InventoryProjectionCallbacks* projection,
                     contracts::QolItemHandle item) {
     if (projection == nullptr || projection->identify_extension_item == nullptr) return false;
     int32_t bag = -1;
@@ -141,7 +132,7 @@ bool item_count_encoding(const contracts::ItemFactsApi* facts, contracts::QolIte
     return true;
 }
 
-void report_item_proc_source(const contracts::InventoryMergeProjectionApi* api, uint64_t token,
+void report_item_proc_source(const contracts::InventoryProjectionCallbacks* api, uint64_t token,
                              void* control, uint64_t event, void* x2, void* param,
                              void* source_control) {
     const auto* current = projection_api();

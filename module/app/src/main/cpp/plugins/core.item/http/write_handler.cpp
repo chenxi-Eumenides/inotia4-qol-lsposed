@@ -180,7 +180,7 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
     int32_t original_count = 0;
     int32_t c18_count = 0;
     if (!write_space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !write_space_count(contracts::kQolBagSpaceC18, &c18_count)) {
+        !write_space_count(contracts::kQolBagSpaceVariant, &c18_count)) {
         return WriteRefStatus::kInvalid;
     }
 
@@ -188,7 +188,7 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
     if (has_space) {
         if (requested_space == contracts::kQolBagSpaceOriginal) {
             ref = {requested_space, requested_bag, slot};
-        } else if (requested_space == contracts::kQolBagSpaceC18 ||
+        } else if (requested_space == contracts::kQolBagSpaceVariant ||
                    (requested_space >= contracts::kQolBagSpaceFirstRegistered &&
                     find_bag_source(requested_space) != nullptr)) {
             ref = {requested_space, requested_bag, slot};
@@ -202,7 +202,7 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
         } else {
             remaining -= original_count;
             if (remaining < c18_count) {
-                ref = {contracts::kQolBagSpaceC18, remaining, slot};
+                ref = {contracts::kQolBagSpaceVariant, remaining, slot};
             } else {
                 remaining -= c18_count;
                 bool found = false;
@@ -226,7 +226,7 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
 
     int32_t count = 0;
     if (ref.space_id == contracts::kQolBagSpaceOriginal) count = original_count;
-    else if (ref.space_id == contracts::kQolBagSpaceC18) count = c18_count;
+    else if (ref.space_id == contracts::kQolBagSpaceVariant) count = c18_count;
     else if (!write_space_count(ref.space_id, &count)) return WriteRefStatus::kInvalid;
     if (ref.bag < 0 || ref.bag >= count) return WriteRefStatus::kInvalid;
     if (ref.space_id == contracts::kQolBagSpaceOriginal &&
@@ -262,9 +262,9 @@ int32_t write_port_bag(const WriteRef& ref) {
     int32_t original_count = 0;
     int32_t c18_count = 0;
     if (!write_space_count(contracts::kQolBagSpaceOriginal, &original_count) ||
-        !write_space_count(contracts::kQolBagSpaceC18, &c18_count)) return -1;
+        !write_space_count(contracts::kQolBagSpaceVariant, &c18_count)) return -1;
     int64_t offset = original_count;
-    if (ref.space_id == contracts::kQolBagSpaceC18) return original_count + ref.bag;
+    if (ref.space_id == contracts::kQolBagSpaceVariant) return original_count + ref.bag;
     offset += c18_count;
     for (uint32_t index = 0; index < registered_bag_source_count(); ++index) {
         const contracts::QolBagSource* source = registered_bag_source_at(index);

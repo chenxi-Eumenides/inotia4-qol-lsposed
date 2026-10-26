@@ -19,7 +19,7 @@ int32_t space_count(const BagSpaceCounts& counts, int32_t space_id) {
     if (space_id == contracts::kQolBagSpaceOriginal) {
         return counts.original_count >= 0 ? counts.original_count : 0;
     }
-    if (space_id == contracts::kQolBagSpaceC18) {
+    if (space_id == contracts::kQolBagSpaceVariant) {
         return counts.c18_count >= 0 ? counts.c18_count : 0;
     }
     if (space_id < contracts::kQolBagSpaceFirstRegistered) return 0;
@@ -46,12 +46,12 @@ bool to_flat(const BagRef& ref, const BagSpaceCounts& counts, int32_t* out_flat)
         return true;
     }
     if (!add_count(space_count(counts, contracts::kQolBagSpaceOriginal), &offset)) return false;
-    if (ref.space_id == contracts::kQolBagSpaceC18) {
+    if (ref.space_id == contracts::kQolBagSpaceVariant) {
         if (ref.bag > kInt32Max - offset) return false;
         *out_flat = offset + ref.bag;
         return true;
     }
-    if (!add_count(space_count(counts, contracts::kQolBagSpaceC18), &offset)) return false;
+    if (!add_count(space_count(counts, contracts::kQolBagSpaceVariant), &offset)) return false;
 
     for (const RegisteredBagSpaceCount& registered : counts.registered) {
         if (registered.space_id < contracts::kQolBagSpaceFirstRegistered) continue;
@@ -76,9 +76,9 @@ bool from_flat(int32_t flat, const BagSpaceCounts& counts, BagRef* out) {
     }
     remaining -= original_count;
 
-    const int32_t c18_count = space_count(counts, contracts::kQolBagSpaceC18);
+    const int32_t c18_count = space_count(counts, contracts::kQolBagSpaceVariant);
     if (remaining < c18_count) {
-        *out = BagRef{contracts::kQolBagSpaceC18, remaining};
+        *out = BagRef{contracts::kQolBagSpaceVariant, remaining};
         return true;
     }
     remaining -= c18_count;

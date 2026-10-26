@@ -196,7 +196,7 @@ QolResult read_inventory() {
 
     auto next = std::make_shared<bags::InventorySnapshot>();
     for (const int32_t space_id : {contracts::kQolBagSpaceOriginal,
-                                   contracts::kQolBagSpaceC18,
+                                   contracts::kQolBagSpaceVariant,
                                    contracts::kQolBagSpaceFirstRegistered}) {
         const contracts::QolBagSource* source = find_bag_source(space_id);
         int32_t count = 0;

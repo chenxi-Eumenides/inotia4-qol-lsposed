@@ -414,7 +414,7 @@ QolResult fake_bag_count(int32_t space_id, int32_t* out_count) {
         *out_count = 6;
         return qol::contracts::ok();
     }
-    if (space_id == qol::contracts::kQolBagSpaceC18) {
+    if (space_id == qol::contracts::kQolBagSpaceVariant) {
         *out_count = g_c18_bag_count;
         return qol::contracts::ok();
     }
@@ -428,7 +428,7 @@ QolResult fake_bag_info(const qol::contracts::QolBagRef* bag,
     }
     int32_t physical_bag = bag->bag;
     int32_t capacity = 16;
-    if (bag->space_id == qol::contracts::kQolBagSpaceC18) {
+    if (bag->space_id == qol::contracts::kQolBagSpaceVariant) {
         if (bag->bag >= g_c18_bag_count) {
             return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
         }
@@ -455,7 +455,7 @@ QolResult fake_item_at(const qol::contracts::QolBagRef* bag, int32_t slot,
     QolResult result = qol::contracts::error(kQolErrNotFound, "empty", 5);
     if (bag->space_id == qol::contracts::kQolBagSpaceOriginal) {
         result = stub_item_ref(bag->bag, slot, out);
-    } else if (bag->space_id == qol::contracts::kQolBagSpaceC18) {
+    } else if (bag->space_id == qol::contracts::kQolBagSpaceVariant) {
         const int32_t physical_bag = bag->bag + qol::contracts::kQolOriginalBagCount;
         if (bag->bag < g_c18_bag_count && physical_bag < kFakePhysicalBagCount) {
             result = stub_item_ref(physical_bag, slot, out);
@@ -1692,7 +1692,7 @@ void test_write_routes() {
           "{\"ok\":false,\"error\":\"bag/slot/count/to_bag/to_slot required\"}");
     CHECK(status == 400 && g_state_write_calls == state_calls_before_unregistered);
 
-    // C18 请求按 space 解析；袋源扁平索引位于 C18 空间之后。
+    // C18 请求按 space 解析；袋源扁平索引位于改版袋空间之后。
     CHECK(set_fake_registered_source(true));
     g_c18_bag_count = 6;
     const int state_calls_before_c18 = g_state_write_calls;
@@ -2814,7 +2814,7 @@ QolResult golden_bag_count(int32_t space_id, int32_t* out_count) {
         *out_count = qol::contracts::kQolOriginalBagCount;
         return qol::contracts::ok();
     }
-    if (space_id == qol::contracts::kQolBagSpaceC18) {
+    if (space_id == qol::contracts::kQolBagSpaceVariant) {
         *out_count = 0;
         return qol::contracts::ok();
     }
