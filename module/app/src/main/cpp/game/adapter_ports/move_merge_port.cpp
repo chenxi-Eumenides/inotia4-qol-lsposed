@@ -64,11 +64,19 @@ QolResult current_bag(int32_t* out_bag) {
     return contracts::ok();
 }
 
+QolResult swap_slots(const contracts::QolBagRef* a, int32_t slot_a,
+                     const contracts::QolBagRef* b, int32_t slot_b) {
+    if (!game_host_is_main_thread()) return wrong_thread();
+    if (a == nullptr || b == nullptr) return invalid_argument();
+    return swap_native_space_items(a, slot_a, b, slot_b);
+}
+
 const contracts::QolMoveMergePort kMoveMergePort{
     contracts::kQolMoveMergePortVersion,
     &move_item,
     &current_bag,
     &validate_native_item,
+    &swap_slots,
 };
 
 }  // namespace

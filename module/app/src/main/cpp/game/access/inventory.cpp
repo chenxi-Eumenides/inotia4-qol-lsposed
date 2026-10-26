@@ -517,7 +517,11 @@ QolResult set_physical_item(int32_t bag, int32_t slot, void* item) {
     return contracts::ok();
 }
 
-QolResult set_native_space_item(const contracts::QolBagRef* ref, int32_t slot, void* item) {
+namespace {
+
+QolResult native_space_slot_address(const contracts::QolBagRef* ref, int32_t slot,
+                                    void*** out_address) {
+    if (out_address == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     if (ref == nullptr || (ref->space_id != contracts::kQolBagSpaceOriginal &&
                            ref->space_id != contracts::kQolBagSpaceVariant) ||
         ref->bag < 0 || slot < 0 || slot >= 16 ||
@@ -541,7 +545,34 @@ QolResult set_native_space_item(const contracts::QolBagRef* ref, int32_t slot, v
     if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'w')) {
         return error_result(kQolErrNotReady, kNotReady);
     }
+    *out_address = slot_address;
+    return contracts::ok();
+}
+
+}  // namespace
+
+QolResult set_native_space_item(const contracts::QolBagRef* ref, int32_t slot, void* item) {
+    void** slot_address = nullptr;
+    const QolResult result = native_space_slot_address(ref, slot, &slot_address);
+    if (!contracts::succeeded(result)) return result;
     *slot_address = item;
+    return contracts::ok();
+}
+
+QolResult swap_native_space_items(const contracts::QolBagRef* a, int32_t slot_a,
+                                  const contracts::QolBagRef* b, int32_t slot_b) {
+    void** address_a = nullptr;
+    void** address_b = nullptr;
+    QolResult result = native_space_slot_address(a, slot_a, &address_a);
+    if (!contracts::succeeded(result)) return result;
+    result = native_space_slot_address(b, slot_b, &address_b);
+    if (!contracts::succeeded(result)) return result;
+    if (*address_a == nullptr || *address_b == nullptr) {
+        return error_result(kQolErrNotFound, kNotFound);
+    }
+    void* item_a = *address_a;
+    *address_a = *address_b;
+    *address_b = item_a;
     return contracts::ok();
 }
 

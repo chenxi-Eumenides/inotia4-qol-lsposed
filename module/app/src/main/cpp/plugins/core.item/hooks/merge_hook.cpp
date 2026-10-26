@@ -14,6 +14,7 @@
 #include "plugins/core.item/api/projection.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/core.item/hooks/inventory_logging.h"
+#include "plugins/core.item/runtime/context.h"
 
 namespace qol::features::core_item::merge {
 namespace {
@@ -103,6 +104,19 @@ bool extension_item(const contracts::InventoryProjectionCallbacks* projection,
     int32_t bag = -1;
     int32_t slot = -1;
     return contracts::succeeded(projection->identify_extension_item(item, &bag, &slot));
+}
+
+// 只有卷轴/宝石这类“作用到装备上”的物品才允许走强化/镶嵌；药水等一律走交换。
+bool is_apply_material(int32_t category) {
+    if (category < 0 || g_port == nullptr || g_port->read.static_text == nullptr) return false;
+    const char* type = nullptr;
+    if (!contracts::succeeded(g_port->read.static_text(
+            static_cast<int32_t>(contracts::QolItemStaticTextKind::kItemType), category,
+            &type)) ||
+        type == nullptr) {
+        return false;
+    }
+    return std::strcmp(type, "scroll") == 0 || std::strcmp(type, "gem") == 0;
 }
 
 bool item_facts(const contracts::ItemFactsApi* facts, contracts::QolItemHandle item,
@@ -241,9 +255,22 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                                              source_handle, &source_category)) &&
                                          contracts::succeeded(facts->category(
                                              destination_handle, &destination_category));
+                int32_t target_bag = -1;
+                int32_t destination_slot = -1;
+                int32_t source_slot = -1;
+                const bool location_ready = contracts::succeeded(
+                                                g_move_port->current_bag(&target_bag)) &&
+                                            control_slot(control, &destination_slot) &&
+                                            control_slot(source, &source_slot) &&
+                                            target_bag >= 0 && target_bag <= 17 &&
+                                            destination_slot >= 0 && destination_slot < 16 &&
+                                            source_slot >= 0 && source_slot < 16;
+                const bool stackable = source_view.count_supported != 0 &&
+                                       destination_view.count_supported != 0;
                 // UIEquip_IsApplyStuff 对同类别可堆叠物品也返回 1，不能用作合并前提；
-                // 同类别的堆叠合并只由类别与容量决定，材料使用是跨类别路径。
-                if (facts_ready && source_category == destination_category &&
+                // 同类别的堆叠合并只由类别与容量决定，且只有可堆叠物品能合并。
+                if (facts_ready && location_ready && stackable &&
+                    source_category == destination_category &&
                     source_count > 0 && destination_count > 0) {
                     int32_t limit = 0;
                     if (facts->count_limit != nullptr) {
@@ -253,17 +280,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                             limit = static_cast<int32_t>(count_limit);
                         }
                     }
-                    int32_t target_bag = -1;
-                    int32_t destination_slot = -1;
-                    int32_t source_slot = -1;
-                    const bool location_ready = contracts::succeeded(
-                                                    g_move_port->current_bag(&target_bag)) &&
-                                                control_slot(control, &destination_slot) &&
-                                                control_slot(source, &source_slot);
-                    if (location_ready && target_bag >= 0 && target_bag <= 17 &&
-                        destination_slot >= 0 && destination_slot < 16 && source_slot >= 0 &&
-                        source_slot < 16 && destination_count >= 0 && source_count > 0 &&
-                        limit >= static_cast<int32_t>(destination_count) &&
+                    if (limit >= static_cast<int32_t>(destination_count) &&
                         source_count <= limit - destination_count) {
                         int32_t moved = 0;
                         const auto result = g_move_port->move_item(source_handle, source_count,
@@ -287,13 +304,47 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                             }
                             return finish(0);
                         }
+                    }
+                }
+                int32_t material_category = -1;
+                if (facts != nullptr && facts->category != nullptr) {
+                    (void)facts->category(source_handle, &material_category);
+                }
+                contracts::QolItemInventoryView swap_destination_view{};
+                bool destination_equipment = false;
+                if (facts != nullptr && facts->view != nullptr &&
+                    contracts::succeeded(facts->view(destination_handle,
+                                                     &swap_destination_view))) {
+                    destination_equipment = swap_destination_view.equip != 0;
+                }
+                // 卷轴/宝石落到装备上交给原版做强化/镶嵌；其他同类堆以外的情况
+                // （不同物品、药水对装备、不可堆叠物品）一律交换两个槽的对象。
+                const bool material_apply =
+                    destination_equipment && is_apply_material(material_category);
+                if (location_ready && !material_apply && !extension_source &&
+                    !extension_item(projection_api(), destination_handle) &&
+                    g_move_port->swap_slots != nullptr) {
+                    constexpr int32_t kFirstVariantBag = contracts::kQolOriginalBagCount;
+                    const int32_t space = target_bag >= kFirstVariantBag
+                                              ? contracts::kQolBagSpaceVariant
+                                              : contracts::kQolBagSpaceOriginal;
+                    const int32_t bag = target_bag >= kFirstVariantBag
+                                            ? target_bag - kFirstVariantBag
+                                            : target_bag;
+                    contracts::QolBagRef source_ref{space, bag};
+                    contracts::QolBagRef destination_ref{space, bag};
+                    if (contracts::succeeded(g_move_port->swap_slots(
+                            &source_ref, source_slot, &destination_ref,
+                            destination_slot))) {
                         const auto* current = projection_api();
-                        if (current != nullptr && current->identify_extension_item != nullptr) {
-                            int32_t bag = -1;
-                            int32_t slot = -1;
-                            if (contracts::succeeded(current->identify_extension_item(
-                                    source_handle, &bag, &slot))) return finish(0);
+                        if (current != nullptr && current->module_view_installed != nullptr &&
+                            current->module_view_installed() &&
+                            current->sync_projected_slot != nullptr) {
+                            (void)current->sync_projected_slot(target_bag, source_slot);
+                            (void)current->sync_projected_slot(target_bag, destination_slot);
                         }
+                        (void)refresh_original();
+                        return finish(0);
                     }
                 }
             }

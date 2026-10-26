@@ -52,6 +52,9 @@ QolResult bag_capacity_word(int32_t bag, uint32_t* out_word);
 QolResult set_bag_capacity_word(int32_t bag, uint32_t word);
 QolResult set_physical_item(int32_t bag, int32_t slot, void* item);
 QolResult set_native_space_item(const contracts::QolBagRef* ref, int32_t slot, void* item);
+// 交换两个已占用槽的对象指针；物品对象本身不重建，句柄保持有效。
+QolResult swap_native_space_items(const contracts::QolBagRef* a, int32_t slot_a,
+                                  const contracts::QolBagRef* b, int32_t slot_b);
 QolResult serialize_item(contracts::QolItemHandle item, uint8_t* out, uint32_t capacity,
                          uint32_t* out_size);
 
