@@ -12,6 +12,13 @@ namespace {
 using ScreenHeightFn = int (*)();
 using TouchOffsetFn = void* (*)();
 
+struct AbsPoint {
+    int64_t x = 0;
+    int64_t y = 0;
+};
+
+using GetAbsolutePointFn = AbsPoint (*)(void*);
+
 struct TouchOffset {
     int64_t x = 0;
     int64_t y = 0;
@@ -50,6 +57,16 @@ TouchOffsetFn touch_offset_fn() {
     return fn;
 }
 
+GetAbsolutePointFn absolute_point_fn() {
+    static GetAbsolutePointFn fn = nullptr;
+    if (fn == nullptr && g_base != 0) {
+        fn = reinterpret_cast<GetAbsolutePointFn>(
+            g_base + fn_resolve("F_CONTROL_OBJECT_GET_ABSOLUTE_POINT_VMA",
+                                F_CONTROL_OBJECT_GET_ABSOLUTE_POINT_VMA));
+    }
+    return fn;
+}
+
 }  // namespace
 
 bool key_code(int32_t* out) {
@@ -77,13 +94,13 @@ bool read_key_table(int32_t out[4]) {
 
 bool press_active() {
     if (g_base == 0) return false;
-    const auto* ptr = reinterpret_cast<const uint8_t*>(g_base + G_KEY_PRESS_ACTIVE_VMA);
+    const auto* ptr = reinterpret_cast<const uint8_t*>(g_base + G_KEY_BPRESSED_VMA);
     return readable(ptr, sizeof(uint8_t)) && *ptr != 0;
 }
 
 bool write_press_active(bool active) {
     if (g_base == 0) return false;
-    auto* ptr = reinterpret_cast<uint8_t*>(g_base + G_KEY_PRESS_ACTIVE_VMA);
+    auto* ptr = reinterpret_cast<uint8_t*>(g_base + G_KEY_BPRESSED_VMA);
     if (!writable(ptr, sizeof(uint8_t))) return false;
     *ptr = active ? 1 : 0;
     return true;
@@ -103,6 +120,16 @@ bool touch_offset(int64_t* x, int64_t* y) {
     const auto* offset = static_cast<const TouchOffset*>(raw);
     *x = offset->x;
     *y = offset->y;
+    return true;
+}
+
+bool control_absolute_point(void* ctrl, int64_t* x, int64_t* y) {
+    if (ctrl == nullptr || x == nullptr || y == nullptr) return false;
+    const GetAbsolutePointFn fn = absolute_point_fn();
+    if (fn == nullptr) return false;
+    const AbsPoint point = fn(ctrl);
+    *x = point.x;
+    *y = point.y;
     return true;
 }
 

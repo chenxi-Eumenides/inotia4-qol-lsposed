@@ -14,9 +14,10 @@ namespace {
 std::atomic<bool> g_enabled{false};
 State g_state;
 
-// 命中区 0x16 的中心（UIPlay_Create：10, H-380, 380, 380）。
-constexpr int32_t kHitCenterX = 200;
-constexpr int32_t kHitCenterBottom = 190;
+// 0x15 可见摇杆的半径（UIPlay_Create：252x252）；中心 = 控件绝对左上角 + 126。
+constexpr int64_t kPadHalfSize = 126;
+constexpr int64_t kFallbackPadCenterX = 10 + kPadHalfSize;
+constexpr int64_t kFallbackPadCenterBottom = kPadHalfSize;
 
 int direction_key_index(int32_t key) {
     int32_t table[4]{};
@@ -79,7 +80,6 @@ void set_enabled(uint8_t enabled_value) {
 }
 
 void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t param3) {
-    (void)ctrl;
     (void)param3;
     if (!enabled()) {
         reset_state();
@@ -97,21 +97,30 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
         return;
     }
 
-    const int32_t height = access::screen_height();
-    if (height <= 0) {
-        suppress_motion();
-        return;
-    }
-
     const auto* xy = static_cast<const int64_t*>(point);
     int64_t offset_x = 0;
     int64_t offset_y = 0;
     (void)access::touch_offset(&offset_x, &offset_y);
 
+    int64_t center_x = 0;
+    int64_t center_y = 0;
+    if (!access::control_absolute_point(ctrl, &center_x, &center_y)) {
+        const int32_t height = access::screen_height();
+        if (height <= 0) {
+            suppress_motion();
+            return;
+        }
+        center_x = kFallbackPadCenterX;
+        center_y = height - kFallbackPadCenterBottom;
+    } else {
+        center_x += kPadHalfSize;
+        center_y += kPadHalfSize;
+    }
+
     const int64_t touch_x = offset_x + xy[0];
     const int64_t touch_y = offset_y + xy[1];
-    const int32_t dx = static_cast<int32_t>(touch_x - kHitCenterX);
-    const int32_t dy = static_cast<int32_t>((height - kHitCenterBottom) - touch_y);
+    const int32_t dx = static_cast<int32_t>(touch_x - center_x);
+    const int32_t dy = static_cast<int32_t>(center_y - touch_y);
 
     const EightWayClass classified = classify_vector(dx, dy);
     int32_t table[4]{};
@@ -147,7 +156,7 @@ int32_t translate_press_key(int32_t key) {
             return 0;
         }
         // 必须在原函数返回前写回主方向键码：GAMESTATE_PressKey 之后会用它判断是否
-        // 保持 0x3076d3（按住有效位）。
+        // 保持 KEY_bPressed（按住有效位）。
         access::write_key_code(g_state.primary_key);
         g_state.trusted = true;
         g_state.owns_input = true;

@@ -1,6 +1,6 @@
 # 八向/全向移动设计
 
-状态：原型已实现（`eight_way_move.direction`，默认关闭，Debug「调试开关」）；构建与 Host 单测通过，真机 NOT_ACCEPTED。
+状态：原型已实现（`eight_way_move.direction`，默认关闭，Debug「调试开关」）；构建与 Host 单测通过，C18L v586 真机烟测通过（八向触摸与角色斜向移动），完整验收 NOT_ACCEPTED。
 范围：Android 触屏虚拟方向摇杆；不改键盘、AI、寻路和其他移动调用点。
 
 ## 1. 结论先行
@@ -28,7 +28,7 @@
 
 `UIPlay_ButtonDirection` 分支：
 
-- `1`：按下。置 `UIPlay_bPressedDirection=1`、`0x3076d3=1`、清 `KEY_bReleased`，计算方向并 `KEY_SetCode`。
+- `1`：按下。置 `UIPlay_bPressedDirection=1`、`KEY_bPressed(0x7135a0)=1`、清 `KEY_bReleased`，计算方向并 `KEY_SetCode`。
 - `0x40`：按住拖动。仅当 `UIPlay_bPressedDirection != 0` 时重算；拖出 `0x16` 则停止。
 - `2/8`：抬起；`4`：取消/移出。
 - `0x10/0x20/0x100`：不产生方向移动。
@@ -42,7 +42,7 @@ if |dx| >= |dy|:  dx >= 0 ? 右 : 左
 else:             dy > 0  ? 上 : 下
 ```
 
-`0x15` 中心：`(136, H-126)`；`0x16` 中心：`(200, H-190)`。原版用 `0x15` 中心，`0x16` 只做命中测试。
+`0x15` 创建参数中心为 `(136, H-126)`；`0x16` 为 `(200, H-190)`。原版用 `0x15` 的**绝对**中心，`0x16` 只做命中测试。真机上逻辑高度 `H=640` 且虚拟按键根有父偏移，实际实现必须用 `ControlObject_GetAbsolutePoint(ctrl)+126`，不能用固定常量。
 
 ### 2.2 原版方向枚举
 
@@ -74,7 +74,7 @@ else:             dy > 0  ? 上 : 下
 - `KEY_nCode`：`0x71353c`。
 - `KEY` 表：`0x713540`，`KEY[0]=左`、`[1]=右`、`[2]=上`、`[3]=下`。
 - `STATE_ProcessGame`（`0x151540`）每帧 → `GAMESTATE_PressKey`（`0x151310`）→ `GAMESTATE_fpPressKey`（= `GAMESTATE_PressKeyPlay`）。
-- `GAMESTATE_PressKey` 在调用 `fpPressKey` 后会把 `KEY_nCode` 与 `KEY[0..3]` 比较；**不匹配就清 `0x3076d3`（按住有效位）**。因此自定义键码在 `PressKeyPlay` 返回前必须写回主方向键码，否则按住一帧后运动停止。
+- `GAMESTATE_PressKey` 在调用 `fpPressKey` 后会把 `KEY_nCode` 与 `KEY[0..3]` 比较；**不匹配就清 `KEY_bPressed(0x7135a0)`（按住有效位）**。因此自定义键码在 `PressKeyPlay` 返回前必须写回主方向键码，否则按住一帧后运动停止。
 
 ## 3. 方案总览
 
@@ -103,7 +103,7 @@ GAMESTATE_PressKeyPlay+0x21c 的 bl CHAR_Move 调用点 patch
 
 ### 3.2 为什么不在 `GAMESTATE_PressKey` 里翻译
 
-`GAMESTATE_PressKey` 负责 `KEY_bReleased`、`0x3076d3`、状态门和 `fpPressKey` 调用，翻译放在这里也能做；但 `PressKeyPlay` 是实际的方向键接收器，参数就是键码，写回 `KEY_nCode` 的时机也更靠近后置检查。选择 `PressKeyPlay` 入口，避免影响 `GAMESTATE_PressKey` 的其他按键路径。
+`GAMESTATE_PressKey` 负责 `KEY_bReleased`、`KEY_bPressed(0x7135a0)`、状态门和 `fpPressKey` 调用，翻译放在这里也能做；但 `PressKeyPlay` 是实际的方向键接收器，参数就是键码，写回 `KEY_nCode` 的时机也更靠近后置检查。选择 `PressKeyPlay` 入口，避免影响 `GAMESTATE_PressKey` 的其他按键路径。
 
 ### 3.3 为什么只 patch `bl CHAR_Move` 调用点
 
@@ -116,21 +116,19 @@ GAMESTATE_PressKeyPlay+0x21c 的 bl CHAR_Move 调用点 patch
 从 `UIPlay_ButtonDirection` 第三个参数读 `int64_t point[2]`。
 `TouchHandle_GetControlOffset()`（`0xa3190`）返回的全局偏移前两个 64 位字段是 `offset.x/offset.y`。
 
-推荐使用 **`0x16` 命中区中心**（用户要求的“命中区中心”）：
+原型实现使用 **`0x15` 可见摇杆的绝对中心**，而不是固定屏幕常量：
 
 ```
-cx = 10 + 380/2 = 200
-cy = (H - 380) + 380/2 = H - 190
-dx = offset.x + point.x - cx
-dy = cy - (offset.y + point.y)          // 上为正
+abs = ControlObject_GetAbsolutePoint(ctrl);   // 0x9e6b4，递归父链，返回 {int64 x,y}
+cx = abs.x + 126;                              // 0x15 为 252x252
+cy = abs.y + 126;
+dx = offset.x + point.x - cx;
+dy = cy - (offset.y + point.y);                // 上为正
 ```
 
-如果希望与原版视觉摇杆中心一致，改用 `0x15` 中心 `(136, H-126)`。两者差异：
+原因：真机上游戏逻辑高度是 `640`，显示是横屏 `854x384`；虚拟按键根还有父控件偏移。固定 `(136, H-126)` 或 `(200, H-190)` 都会算错中心，斜向会被压成上下左右。`ControlObject_GetAbsoluteRect` 是 x8 sret ABI，C++ 不能直接调；`GetAbsolutePoint` 返回 x0/x1 两个 int64，可以正常调用。
 
-- 用 `0x15` 中心：与原版主方向判定一致，可以只加副轴，不需要覆盖主方向。
-- 用 `0x16` 中心：命中区更大、中心偏右上；此时必须用自定义键码覆盖主方向，否则原版主方向（按 `0x15` 算）会和我们的八向扇区不一致。
-
-本方案使用自定义键码，因此可以自由选择 `0x16` 中心。
+也可以使用 **`0x16` 命中区中心**（`abs16 + 190`），但命中区中心与可见摇杆中心不同；此时必须用自定义键码覆盖主方向，否则原版主方向（按 `0x15` 算）会和八向扇区不一致。原型选择 `0x15` 动态中心，优先保证与原版主方向一致。
 
 ### 4.2 死区与八向扇区
 
@@ -226,7 +224,7 @@ else:
     backup(key)
 ```
 
-关键点：**写回 `state.primary_key` 必须在 `backup()` 返回前完成**，因为 `GAMESTATE_PressKey` 在 `backup()` 返回后会读 `KEY_nCode` 判断是否清 `0x3076d3`。写回后它看到的是原版方向键，按住状态保持。
+关键点：**写回 `state.primary_key` 必须在 `backup()` 返回前完成**，因为 `GAMESTATE_PressKey` 在 `backup()` 返回后会读 `KEY_nCode` 判断是否清 `KEY_bPressed(0x7135a0)`。写回后它看到的是原版方向键，按住状态保持。
 
 ### 5.3 清理
 
@@ -389,7 +387,7 @@ struct QolMovementInputApi {
 
 `game/input/eight_way_move.{h,cpp}`：
 
-- 读 `KEY_nCode` / `KEY` 表 / `0x3076d3` / `UIPlay_bPressedDirection`。
+- 读 `KEY_nCode` / `KEY` 表 / `KEY_bPressed(0x7135a0)` / `UIPlay_bPressedDirection`。
 - `SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`。
 - `lead_member()`、`gamestate_state()`、`C_PATH_LIST`。
 - `fn_char_move`。
@@ -405,7 +403,7 @@ F_UIPLAY_BUTTON_DIRECTION_VMA = 0xc66d4
 F_GAMESTATE_PRESSKEYPLAY_VMA = 0x9cfc0
 G_KEY_CODE_VMA = 0x71353c
 G_KEY_TABLE_VMA = 0x713540
-G_KEY_PRESS_ACTIVE_VMA = 0x3076d3
+G_KEY_BPRESSED_VMA = KEY_bPressed(0x7135a0)
 G_UIPLAY_BPRESSED_DIRECTION_VMA = 0x307081
 F_SGL_GET_SCREEN_HEIGHT_VMA = 0x954f8
 F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
@@ -496,13 +494,16 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 - Host：端口注册与私有端口校验、插件 descriptor 注册。
 - 符号/patch：新增 `UIPlay_ButtonDirection`、`GAMESTATE_PressKeyPlay`、`SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`、`KEY_nCode`、`KEYSET_nData`，以及 `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`。
 - 入口 hook 符号必须同时登记到 `game/access/symbols.cpp` 的 `kHookEntrySymbols`：`resolve_hook_entry` 只按该白名单解析入口，不读取 `symbol_registry.h` 的完整表。漏登记会让 preflight 报 `symbol unresolved`，插件状态变 `unsupported`，设置页显示「当前版本不支持」——这不是游戏变体限制。
+- 按住有效位是 `KEY_bPressed`（`0x7135a0`，dynsym 可解析），不是 `0x3076d3`；`0x3076d3` 实际是 `MAP_bShadowTile1`。读错地址会表现为 `press=0`、所有触摸都被当成取消。
+- 摇杆中心必须动态取 `ControlObject_GetAbsolutePoint(ctrl) + 126`。真机逻辑高度为 `640`、显示为横屏 `854x384`，虚拟按键根还有父偏移；固定 `(136,H-126)`/`(200,H-190)` 会让斜向触点被算成上下左右。
 
 ### 13.2 验证
 
 - `eight_way_move_tests`：八向分类、22.5°/45° 边界、死区、自定义键码、副轴条件，通过。
 - `eight_way_move_plugin_tests`：插件 id、资源数量/机制/策略/必要性、端口、feature 默认关闭与 Hidden 分类，通过。
-- `scripts/build-debug.sh`：通过；产物 `output/inotia4_qol_lsposed_debug_2610270153_a8f51386d401.apk`，SHA-256 `a8f51386d4018ebd2d3fe8b15fd40f663be7cb635147f254f84fc12705eb6253`。
-- 真机：未执行，`NOT_ACCEPTED`。需要在 Debug 设置页「调试开关」开启「八向移动（原型）」后验证八向、松开停止、撞墙滑动、切图/拾取/动画、物理键盘和插件关闭还原。
+- `scripts/build-debug.sh`：通过；模块产物 `output/inotia4_qol_lsposed_debug_2610270220_1a9d01cfb70c.apk`，SHA-256 `1a9d01cfb70c409b7e3b7ad23027b71914ddd79c1a62a3a310960c0eae1ded94`。
+- C18L v586 真机烟测：集成包 `output/Inotia4_C18L_v586_debug_1a9d01cfb70c_lspatch.apk`；资源 `hook:UIPlay_ButtonDirection` / `hook:GAMESTATE_PressKeyPlay` / `patch:GAMESTATE_PressKeyPlay+0x21c` 均 `live`；日志出现 `eight_way touch`、`char_move hook active`、`eight_way diagonal applied`，角色实际向右上斜向移动。
+- 完整验收仍 `NOT_ACCEPTED`：松开停止、撞墙、切图/拾取/动画、物理键盘、插件关闭还原和不同分辨率仍需逐项验证。
 
 ### 13.3 已知原型取舍
 

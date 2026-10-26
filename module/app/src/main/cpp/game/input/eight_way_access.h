@@ -20,4 +20,7 @@ int32_t screen_height();
 // TouchHandle_GetControlOffset 前两个 int64 字段（屏幕坐标偏移）。
 bool touch_offset(int64_t* x, int64_t* y);
 
+// 控件绝对左上角（ControlObject_GetAbsolutePoint，递归父链）。
+bool control_absolute_point(void* ctrl, int64_t* x, int64_t* y);
+
 }  // namespace qol::game::input::access

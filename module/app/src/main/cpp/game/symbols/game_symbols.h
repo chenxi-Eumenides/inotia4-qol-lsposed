@@ -582,11 +582,12 @@ constexpr uintptr_t F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA = 0x13d3c0; // void (void* ct
 constexpr uintptr_t F_KEY_SET_CODE_VMA = 0x10f7f4;        // void (int32_t code) 注入按键码（KEY_SetCode：写 [0x2f4000+0x50] 指向的当前键码）
 constexpr uintptr_t G_KEY_CODE_VMA = 0x71353c;              // KEY_nCode (i32) 当前键码；GAMESTATE_PressKey 读取
 constexpr uintptr_t G_KEYSET_DATA_VMA = 0x713540;           // KEYSET_nData (i32[4]) 方向键码表：[0]=左 [1]=右 [2]=上 [3]=下
-constexpr uintptr_t G_KEY_PRESS_ACTIVE_VMA = 0x3076d3;      // u8 方向触摸按住有效位（UIPlay_ButtonDirection 写；GAMESTATE_PressKey 读）
+constexpr uintptr_t G_KEY_BPRESSED_VMA = 0x7135a0;          // KEY_bPressed (u8) 当前按键按住有效位（UIPlay_ButtonDirection 写；GAMESTATE_PressKey 读并清）
 constexpr uintptr_t F_UIPLAY_BUTTON_DIRECTION_VMA = 0xc66d4; // uint64_t (void* ctrl, uint64_t event, int64_t point[2], uint64_t p3) 方向摇杆事件
 constexpr uintptr_t F_GAMESTATE_PRESSKEYPLAY_VMA = 0x9cfc0;  // void (int32_t key) 游戏内按键处理（fpPressKey；方向键→CHAR_Move）
 constexpr uintptr_t F_SGL_GET_SCREEN_HEIGHT_VMA = 0x954f8;   // int () 游戏渲染屏幕高度
 constexpr uintptr_t F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190; // void* () TouchHandle 全局坐标偏移（前两字段 int64 x/y）
+constexpr uintptr_t F_CONTROL_OBJECT_GET_ABSOLUTE_POINT_VMA = 0x9e6b4; // {int64 x,y} (void* ctrl) 控件绝对左上角（递归父链）
 constexpr uintptr_t F_CHAR_GET_SKILL_USAGE_VMA = 0xe496c;    // int (void*) 战斗 AI 技能总开关（读 [ch+0x3a0] bit0-2）
 constexpr uintptr_t F_CHAR_SET_SKILL_USAGE_VMA = 0xe4cc0;    // void (void*, int) 写 [ch+0x3a0] bit0-2（AI 技能开关 0-7）
 constexpr uintptr_t F_GET_NAME_VMA = 0xd9c54;         // char* (void*) 角色名称（UTF-8 字符串）
@@ -824,6 +825,7 @@ constexpr uintptr_t F_UIEQUIP_UPDATE_CHAR_EQUIP_VMA = 0xb7784; // void (void) Bu
 constexpr uintptr_t F_UIEQUIP_REFRESH_BAG_AREA_VMA = 0xb78bc; // void (void) ButtonEquipExe b7e0c 装袋后刷新原版袋槽区域
 // ---- 佣兵徽章（英雄徽章）使用链（R-63）----
 constexpr uintptr_t F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA = 0xb8144; // void (void* button) 佣兵徽章专用使用按钮（UIEquip_SetDescMenu 面板 offset 0x98 挂载；0xb8144→SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary）
+constexpr uintptr_t F_UIEQUIP_BUTTON_RELEASE_SEALED_EXE_VMA = 0xb8280; // void (void* button) 解封按钮 execute
 constexpr uintptr_t F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA = 0x10be70; // int (int32 category) category∈42..50 或 928..933 为佣兵徽章
 constexpr uintptr_t F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA = 0x118b30; // int (void) 佣兵管理器是否有空槽（0x118b30 反汇编：无参，读 G_MERC_MAX_GOT/G_MERC_SLOTLIST_GOT）
 constexpr uintptr_t F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA = 0x119658; // void* (void* item) 生成佣兵（唯一调用点 0xb818c；内部 INVEN_RemoveItem 消耗，返回 null=失败）
