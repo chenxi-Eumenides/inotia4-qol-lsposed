@@ -563,7 +563,30 @@ void refresh_projected_module_view_after_move_locked() {
     refresh_module_item_area_locked(qol::extension_bag::ui_state().objects.module_view_index);
 }
 
-void refresh_native_item_area_after_move_locked(int native_bag) {
+namespace {
+int g_pending_native_sync_bag = -1;
+int g_pending_native_sync_slot = -1;
+}
+
+void flush_pending_native_slot_sync_locked() {
+    if (g_pending_native_sync_bag < 0 || g_pending_native_sync_slot < 0) return;
+    const int bag = g_pending_native_sync_bag;
+    const int slot = g_pending_native_sync_slot;
+    g_pending_native_sync_bag = -1;
+    g_pending_native_sync_slot = -1;
+    if (qol::extension_bag::ui_state().objects.module_view_installed ||
+        raw_current_bag_locked() != bag) {
+        return;
+    }
+    void* root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
+    void* control = root != nullptr ? valid_child_locked(root, slot) : nullptr;
+    if (control == nullptr) return;
+    void* item = nullptr;
+    if (!inventory_slot_locked(bag, slot, &item)) item = nullptr;
+    (void)extension_bag_ui_set_control_item(control, item);
+}
+
+void refresh_native_item_area_after_move_locked(int native_bag, int native_slot) {
     const bool projection_installed =
         qol::extension_bag::ui_state().objects.module_view_installed;
     if (runtime_state().host.game != nullptr &&
@@ -591,6 +614,22 @@ void refresh_native_item_area_after_move_locked(int native_bag) {
     // 否则扩展袋源槽会显示为原版空槽。
     if (projection_installed) {
         refresh_projected_module_view_after_move_locked();
+    }
+    // 拖拽释放的原版事件可能在 refresh 之后再次重绘当前物品区。对本次真正变化的
+    // 原生槽做一次直接控件同步，保证源槽清空/目标槽立即出现，不依赖下一帧。
+    if (!qol::extension_bag::ui_state().objects.module_view_installed &&
+        native_slot >= 0 && raw_current_bag_locked() == native_bag) {
+        void* root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
+        void* control = root != nullptr ? valid_child_locked(root, native_slot) : nullptr;
+        if (control != nullptr) {
+            void* item = nullptr;
+            if (!inventory_slot_locked(native_bag, native_slot, &item)) item = nullptr;
+            (void)extension_bag_ui_set_control_item(control, item);
+        }
+        // 原生拖拽释放路径可能在本函数返回后再次写回源控件；下一帧 draw-end
+        // 再做一次同槽同步，避免必须切袋才恢复。
+        g_pending_native_sync_bag = native_bag;
+        g_pending_native_sync_slot = native_slot;
     }
 }
 
