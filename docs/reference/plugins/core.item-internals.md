@@ -145,7 +145,7 @@ export 或 import 失败会清 journal；source remove 失败时尝试删除目�
 | 流程 | 内部数据流 |
 |---|---|
 | 读 | 游戏线程读取 ITEM port 与注册袋源 → 构造 `InventorySnapshot` → `SnapshotStore` 原子发布；GET 从已发布快照组装响应。 |
-| 写 | HTTP 参数校验 → typed command/ticket → 游戏线程 use case → Host port 或来源 callback → ticket result；成功后请求库存刷新。 |
+| 写 | HTTP 参数校验 → typed command/ticket → 游戏线程 use case → Host port 或来源 callback → ticket result；成功后请求库存刷新。解析线程只做引用透传：注册源空间不做袋源回调/容量校验，统一留给主线程动作；需要袋数时读已发布快照。 |
 | 跨空间转移 | use case → journal intent → source export → target import → target_written/hash → source remove → 清记录；失败按补偿/reconcile 规则收敛。 |
 | 来源生命周期 | activate 主线程注册 `QolBagSource`、deactivate 主线程注销 → registry generation 变化 → 后续快照更新来源集合。 |
 

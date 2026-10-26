@@ -707,11 +707,15 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
     }
 
     const NativeBagLayout layout = native_bag_layout();
-    if (layout.slots == nullptr || ref->bag >= layout.bag_limit) {
+    const int32_t native_bag =
+        ref->bag + (ref->space_id == contracts::kQolBagSpaceVariant
+                        ? contracts::kQolOriginalBagCount
+                        : 0);
+    if (layout.slots == nullptr || native_bag >= layout.bag_limit) {
         return item_error(out, kQolErrNotReady, "native bag unavailable");
     }
     auto** target_address = reinterpret_cast<void**>(
-        layout.slots + static_cast<size_t>(ref->bag) * 0x80 +
+        layout.slots + static_cast<size_t>(native_bag) * 0x80 +
         static_cast<size_t>(target_slot) * sizeof(void*));
     if (!game_memory_accessible(target_address, sizeof(*target_address), 'r')) {
         return item_error(out, kQolErrNotReady, "native slot unavailable");

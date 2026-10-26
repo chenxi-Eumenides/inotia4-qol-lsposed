@@ -6,6 +6,7 @@
 #include <limits>
 #include <string>
 
+#include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/http/json_lite.h"
 #include "plugins/core.item/shop/buy.h"
 #ifndef QOL_CORE_ITEM_SHOP_SEPARATE
@@ -143,6 +144,18 @@ bool parse_optional_space(const JsonValue& object, const char* field, bool* pres
 bool write_space_count(int32_t space_id, int32_t* out_count) {
     if (out_count == nullptr) return false;
     if (space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        // 优先用主线程已发布的快照；袋源回调不允许在 HTTP 解析线程调用。
+        const auto snapshot = bags::inventory_snapshot_store().read();
+        if (snapshot) {
+            int32_t snapshot_count = 0;
+            for (const bags::BagSnapshot& bag : snapshot->bags) {
+                if (bag.space_id == space_id) ++snapshot_count;
+            }
+            if (snapshot_count > 0) {
+                *out_count = snapshot_count;
+                return true;
+            }
+        }
         const contracts::QolBagSource* source = find_bag_source(space_id);
         if (source == nullptr || source->count == nullptr) {
             *out_count = 0;
@@ -189,8 +202,7 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
         if (requested_space == contracts::kQolBagSpaceOriginal) {
             ref = {requested_space, requested_bag, slot};
         } else if (requested_space == contracts::kQolBagSpaceVariant ||
-                   (requested_space >= contracts::kQolBagSpaceFirstRegistered &&
-                    find_bag_source(requested_space) != nullptr)) {
+                   requested_space >= contracts::kQolBagSpaceFirstRegistered) {
             ref = {requested_space, requested_bag, slot};
         } else {
             return WriteRefStatus::kInvalid;
@@ -224,10 +236,14 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
         }
     }
 
+    // 注册源只做主线程动作前的索引透传；袋源回调与容量校验不能在 HTTP 线程执行。
+    if (ref.space_id >= contracts::kQolBagSpaceFirstRegistered) {
+        *out = ref;
+        return WriteRefStatus::kOk;
+    }
     int32_t count = 0;
     if (ref.space_id == contracts::kQolBagSpaceOriginal) count = original_count;
     else if (ref.space_id == contracts::kQolBagSpaceVariant) count = c18_count;
-    else if (!write_space_count(ref.space_id, &count)) return WriteRefStatus::kInvalid;
     if (ref.bag < 0 || ref.bag >= count) return WriteRefStatus::kInvalid;
     if (ref.space_id == contracts::kQolBagSpaceOriginal &&
         ref.bag == contracts::kQolTaskBagIndex) {
@@ -237,18 +253,11 @@ WriteRefStatus resolve_write_ref(int32_t requested_bag, bool has_space, int32_t 
     if (host_bag < 0) return WriteRefStatus::kInvalid;
     const contracts::QolBagRef bag_ref{ref.space_id, ref.bag};
     contracts::QolBagInfo info{};
-    const contracts::QolBagSource* source =
-        ref.space_id >= contracts::kQolBagSpaceFirstRegistered ? find_bag_source(ref.space_id)
-                                                              : nullptr;
-    const QolResult info_result = source != nullptr && source->info != nullptr
-                                      ? source->info(ref.bag, &info)
-                                      : source == nullptr && g_port != nullptr &&
-                                                g_port->read.bag_info != nullptr &&
-                                                contracts::qol_item_port_bag_space_size_valid(g_port)
-                                            ? g_port->read.bag_info(&bag_ref, &info)
-                                            : contracts::error(kQolErrUnsupported,
-                                                               "registered bag source unavailable",
-                                                               33);
+    const QolResult info_result =
+        g_port != nullptr && g_port->read.bag_info != nullptr &&
+                contracts::qol_item_port_bag_space_size_valid(g_port)
+            ? g_port->read.bag_info(&bag_ref, &info)
+            : contracts::error(kQolErrUnsupported, "bag info unavailable", 21);
     if (!contracts::succeeded(info_result) || info.capacity < 0 ||
         ((!allow_auto_slot || slot >= 0) && slot >= info.capacity)) {
         return WriteRefStatus::kInvalid;
@@ -447,16 +456,14 @@ QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpR
                 const WriteRefStatus source_status =
                     resolve_write_ref(args.i0, has_space, space, args.i1, false, &source);
                 if (source_status != WriteRefStatus::kOk) {
-                    return write_ref_error(
-                        source_status, response,
-                        "bag/slot/count/to_bag/to_slot required");
+                    return write_ref_error(source_status, response,
+                                           "bag/slot/count/to_bag/to_slot required");
                 }
                 const WriteRefStatus target_status = resolve_write_ref(
                     args.i3, has_to_space, to_space, args.i4, true, &target);
                 if (target_status != WriteRefStatus::kOk) {
-                    return write_ref_error(
-                        target_status, response,
-                        "bag/slot/count/to_bag/to_slot required");
+                    return write_ref_error(target_status, response,
+                                           "bag/slot/count/to_bag/to_slot required");
                 }
                 args.i0 = write_port_bag(source);
                 args.i3 = write_port_bag(target);
