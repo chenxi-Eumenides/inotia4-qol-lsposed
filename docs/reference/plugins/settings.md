@@ -29,7 +29,9 @@ descriptor 只注册一个 `page` entry feature：
 - 页面不再绘制顶部标题行；此前标题为 `QoL 模块设置 v<模块版本>`。模块版本仍用于「游戏信息」第三行。
 - feature 开关不因所属插件当前 `enable=false` 而禁用，用户可通过开启 feature 恢复插件 desired 状态。直接调用 Host `invoke_entry` 的契约不变：只提交调用，不修改 feature/enable，Host 仍执行实际运行状态校验；设置页的先启用再调用仅是该 UI 的编排。
 - Host `read_owner_availability` 返回稳定的插件级状态：Host-owned owner 为 `available`；普通 owner 的 `registered`、`resolving`、`installed_disabled`、`enabled`、`deactivating`、`inactive` 均为 `available`。`blocked` 显示“依赖不可用”，`unsupported` 显示“当前版本不支持”，`invalid` 显示“插件无效”；`failed` 按显式记录的失败阶段显示“安装失败”“激活失败”或通用“插件不可用”，不解析底层 `error` 文本。owner 不可用时保留其 catalog 行，但该 owner 的**所有 feature toggle 与 entry**统一禁用，feature 名称改用错误红色，描述替换为对应短原因。恢复为 available 后恢复原描述和交互。正常 `inactive`（包括未启用）及 `installed_disabled` 仍可操作，以允许恢复开关；`degraded` 是正交健康标记，不改变 owner availability：仅存在 fail-soft/resource degradation 而 lifecycle 仍可用的 owner 仍可操作；required fail-closed 失败若令 owner 进入 `failed` 等不可用状态，则禁用其全部行。状态读写未加锁，`read_actual` 和 `read_owner_availability` 仅允许在 Host 主线程调用。
-- 每行固定 96 逻辑单位高。标题与描述各最多绘制一行，超出宽度以省略号截断；无描述时标题垂直居中。动作按钮或 toggle 固定在行右侧，不增加第三行。
+- 每行固定 96 逻辑单位高。标题与描述各最多绘制一行，超出宽度以省略号截断；无描述时标题垂直居中。动作按钮或 toggle 的「开/关」按钮固定在行右侧，不增加第三行。
+- toggle 与 entry 行均使用同一 `compact_capsule_text_button_create` 胶囊文本按钮，尺寸均为 140×80 逻辑单位，并使用 `kUiTextButtonFontDefault`（font 0，22 px 行高）。toggle 按钮的标签在 feature 值非零时为「开」、为零时为「关」；entry 按钮的标签取 descriptor 的 `action_label`。toggle 标签与 enabled 状态根据 `read_feature` 刷新，分别通过 `button_set_text` 与 `text_button_set_enabled` 更新。
+- `compact_capsule_text_button_create` 的最小宽度为 140；140 是胶囊标签盒能够容纳 font 0 的 22 px 行高的最小宽度。132（原 220 的 60%）不可渲染，会导致创建失败。
 
 ### 游戏信息分类
 
@@ -49,7 +51,7 @@ descriptor 只注册一个 `page` entry feature：
 
 ## 3. 依赖与消费面
 
-- 必需 capability：`ui_panels` v1.3（面板 open/close）与 `ui_components` v1.22（原生控件与文本）。Host 注入的 `QolUiAdapter` ABI 为 v1.32；组件 capability 版本与 adapter ABI minor 各自独立协商。
+- 必需 capability：`ui_panels` v1.3（面板 open/close）与 `ui_components` v1.22（原生控件与文本）。Host 注入的 `QolUiAdapter` ABI 为 v1.32；组件 capability 版本与 adapter ABI minor 各自独立协商。设置页要求 `ui_components` capability minor ≥17（compact capsule slot）且 `button_set_text` 非空；不再要求 `native_toggle_*`。
 - Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_categories`、`read_owner_availability`、`read_feature`、`request_set_feature`、`invoke_entry`、`receipt`。v1.26 引入的 category/catalog metadata 保持原 ABI 前缀；完整管理面要求 Host SDK ABI minor ≥28，以校验新增的 `QolFeatureControlApi.read_owner_availability` 尾字段和非空函数。该 ABI 版本变化不改变 Android `minSdk`。`read_actual` 与 `read_owner_availability` 读取未加锁的 infra 状态表，只允许在 Host 主线程调用；不得从 HTTP 或后台线程调用。设置页 UI 不调用 `read_desired` 或 `request_desired`。
 - Host 另为 Kotlin 内部 listener fallback 提供一次性 receipt observer：等待中的 receipt 完成时只通知一次；订阅已是终态的 receipt 时在 Host 锁外重放终态，不返回活动订阅 token。Host observer 容量为 256，JNI 回调携带 request id 与 `feature_receipt_json` 的 JSON。该内部推送不替代设置页 entry continuation 每个页面 process tick 至多一次的 receipt 查询，也不改变公开 `GET /api/config/receipt/{id}` 的轮询契约；内部 receipt 等待没有 200ms/50ms 定时轮询。
 - 游戏信息分类消费 Game Host v2.4 尾接口 `game_identity.read`；`QolGameHost` 尾槽在 v2.4 内追加 `game_version_name`，不改变 `QolTargetApi.query_variant` 与既有前缀。插件不 include `game/`，变体事实仍由 Game Host 统一收口。
@@ -70,7 +72,7 @@ descriptor 只注册一个 `page` entry feature：
   - 宽度已闭合：候选宽 **287** = body 405 换算 **235** + 两侧 inset **26×2**（不再保留「279 差 8 未知」的说法）。
   - **保留限制**：可见 96 高框比原生 92 高 **3/1px**，透明 margin 未做逐像素证明 ⇒ 不假报全视觉验收；**不能**宣布入口已恢复（仍待真机日志），也不再称唯一 root 为「原生既有重叠」。
   - 状态：**两阶段真机事实**——用户手测 `2390…`：入口**已可见**，但点击走**原生页面**（原按钮未被停用）；父 fresh 只读 `click-fix/current-runtime.log`（PID 16351 / module `2390…`）accepted/bound、`GET /api/debug/settings-ui/status` live 但 panel inactive；explorer 已证新按钮走独立 callback（`more_games_clicked`→settings）、未继承原 `ExecuteProc`，live 不证明原按钮已禁用。**本轮修复后点击是否进入设置页仍待用户以新候选手测**，不写「全恢复」。本轮 `ui_adapter_tests` 只编译并运行**一次**：**451 assertions PASS**（数量同前，但替身语义已更正，不算旧的同源复用）；`core_ui_components_tests` 源码未变、**211** 复用未重跑。直接 `scripts/build-debug.sh --offline` 成功（7s），`scripts/patch-apk.sh` 成功 4 / 失败 0。**新候选**模块 `output/inotia4_qol_lsposed_debug_2610161719_59f764b85682.apk`（SHA-256 `59f764b8…3e5402cb`）、canonical `output/Inotia4_v1.3.2_monster_v29_lspatched.apk`（SHA-256 `34bd043a…4223735f`）；**`2390b620…` 与 canonical `065a7871…` 是用户已装的前候选，`74e607c30a94`/`86…`/`bb7e4d5a8dba`/`bd700cac…` 更早，全部属历史**。新候选未安装/未重启/未备份/未 touch，包身份不是运行身份，**NOT_ACCEPTED**，先手测后提交。
-- 设置页左右两个 pane 以 `draw_container_ornamented` 绘制四角装饰（扩框按既有 `{x-8, y-8, w+32, h+16}`；`plugins/settings/panels/settings.cpp:577-580`），并据此把 `draw_container_ornamented` 纳入 `components_complete()` 的必需入口（`plugins/settings/panels/settings.cpp:510-524`）。General/catalog 行模型与 toggle/entry 交互不变；entry 动作按钮仍用 capsule `kUiTextButtonFontLarger`（`plugins/settings/panels/settings.cpp:248-254`）。
+- 设置页左右两个 pane 以 `draw_container_ornamented` 绘制四角装饰（扩框按既有 `{x-8, y-8, w+32, h+16}`；见 `plugins/settings/panels/settings.cpp`），并据此把 `draw_container_ornamented` 纳入 `components_complete()` 的必需入口。General/catalog 行模型与 toggle/entry 交互不变；toggle 与 entry 动作按钮均由 `compact_capsule_text_button_create` 创建，尺寸为 140×80 逻辑单位并使用 `kUiTextButtonFontDefault`，创建与更新流程见 `plugins/settings/panels/settings.cpp`。
 - 停用时整个设置页/控件/回调撤销：移除帧任务、释放控件槽绑定、关闭页面、注销面板 owner；重新 activate 后从注册元数据与当前持久状态重建，不复用旧控件或旧 token。
 - 设置页自停后不通过自身页面恢复（用户已确认）；其他普通插件停用时，active 设置页可经 Host 管理 API 修改 feature 恢复。
 - 停用设置页不影响 Host 常驻 Store、配置读取或 `GET /api/config/list` 等控制端点。
@@ -100,9 +102,9 @@ descriptor 只注册一个 `page` entry feature：
 | Owner | Feature ID | 显示名称 | 默认 | Category | 类型 | Priority | 注册条件 |
 |---|---|---|---:|---|---|---:|---|
 | `attribute_quality` | `attribute_quality.provider` | 属性品质服务 | 1 | Hidden | toggle | 0 | — |
-| `attribute_range_display` | `attribute_range_display.ranges` | 属性范围显示 | 1 | BasicOptimization | toggle | 0 | — |
+| `attribute_range_display` | `attribute_range_display.ranges` | 属性范围渲染 | 1 | BasicOptimization | toggle | 0 | — |
 | `autosell` | `autosell.auto_sell` | 自动出售 | 0 | Gameplay | toggle | -1 | — |
-| `character_panel_i18n` | `character_panel_i18n.translation` | 角色属性汉化 | 1 | BasicOptimization | toggle | 0 | — |
+| `character_panel_i18n` | `character_panel_i18n.translation` | 属性面板汉化 | 1 | BasicOptimization | toggle | 0 | — |
 | `core.api` | `api.enabled` | API服务 | 1 | General | toggle | -5 | — |
 | `core.character` | `core.character.provider` | 角色领域服务 | 1 | Hidden | toggle | 0 | — |
 | `core.craft` | `core.craft.provider` | 合成领域服务 | 1 | Hidden | toggle | 0 | — |
@@ -118,26 +120,26 @@ descriptor 只注册一个 `page` entry feature：
 | `core.ui_state` | `core.ui_state.provider` | 界面状态服务 | 1 | Hidden | toggle | 0 | — |
 | `core.world` | `core.world.provider` | 世界领域服务 | 1 | Hidden | toggle | 0 | — |
 | `craft_lottery` | `craft_lottery.guarantee` | 合成套装保底 | 0 | BasicOptimization | toggle | -1 | — |
-| `custom_map` | `custom_map.load` | 自定义地图文件加载 | 1 | BasicOptimization | toggle | 0 | — |
+| `custom_map` | `custom_map.load` | 自定义地图 | 1 | BasicOptimization | toggle | 0 | — |
 | `custom_map` | `custom_map.open_panel` | 打开自定义地图面板 | 1 | Tools | entry | 0 | — |
 | `custom_recipe` | `custom_recipe.recipes` | 自定义合成 | 0 | Gameplay | toggle | -1 | — |
 | `eight_way_move` | `eight_way_move.direction` | 八向移动 | 0 | Gameplay | toggle | 0 | — |
-| `extension_bag` | `extension_bag.extended_bag` | 扩展背包 | 1 | Gameplay | toggle | -2 | — |
+| `extension_bag` | `extension_bag.extended_bag` | 额外背包 | 1 | Gameplay | toggle | -2 | — |
 | `module_health` | `module_health.enabled` | Module health | 1 | Hidden | toggle | 0 | — |
-| `popup_blocker` | `popup_blocker.enabled` | 弹窗屏蔽 | 1 | BasicOptimization | toggle | 0 | — |
+| `popup_blocker` | `popup_blocker.enabled` | 禁用弹窗 | 1 | BasicOptimization | toggle | 0 | — |
 | `push_all` | `push_all.push` | 推怪 | 0 | Gameplay | toggle | 0 | — |
 | `save_backup` | `save_backup.open_manager` | 存档备份 | 1 | Tools | entry | -2 | — |
 | `simple_mode` | `simple_mode.combat` | 简单模式 | 0 | Gameplay | toggle | 0 | — |
-| `special_equip` | `special_equip.equipment_rules` | 特殊装备规则 | 1 | Hidden | toggle | 0 | — |
+| `special_equip` | `special_equip.equipment_rules` | NPC装备 | 1 | Hidden | toggle | 0 | — |
 | `stack_limit` | `stack_limit.limit_999` | 堆叠上限 | 0 | Gameplay | toggle | 0 | — |
-| `world_teleport` | `world_teleport.map_jump` | 更好的地图传送对话框 | 1 | BasicOptimization | toggle | 0 | — |
+| `world_teleport` | `world_teleport.map_jump` | 更好的传送 | 1 | BasicOptimization | toggle | 0 | — |
 
 设置页自身 `settings / page`（Hidden、entry、default `1`）用于设置页生命周期，不进入 `read_catalog` 返回值。Host-owned features 由 Host 注册，但同样进入设置页 catalog：
 
 | Owner | Feature ID | 显示名称 | 默认 | Category | 类型 | Priority |
 |---|---|---|---:|---|---|---:|
 | `module.platform` | `debug.logging` | debug日志 | 0 | General | toggle | -3 |
-| `module.security` | `op.enabled` | 操作权限 | 0 | General | toggle | -4 |
+| `module.security` | `op.enabled` | 高级权限 | 0 | General | toggle | -4 |
 
 当前 Debug 构建开启 `QOL_DEBUG_COMPONENTS` 时 catalog 共 33 项，其中 15 项属于 Hidden；Release 隐藏 Hidden 分类后显示 18 项（16 toggle、2 entry）。`core.api / api.enabled` 与两个 Host-owned features 都是 General，在 Debug/Release 均显示；core features 并非全部 Hidden，`core.item / move_merge.drag_merge` 是 BasicOptimization 项。设置页的 `page` 不计入上述 catalog 数量。
 

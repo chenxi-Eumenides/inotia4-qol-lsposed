@@ -26,7 +26,7 @@
 | default | `0`（关闭） |
 | category / type | `kGameplay` / `kToggle` |
 | name | 堆叠上限 |
-| description | 将可堆叠物品上限提高到 999。 |
+| description | 可堆叠物品999上限 |
 | `on_toggle` | no-op（返回 `ok()`） |
 
 运行条件由 Host 的 `enable && any(feature)` 派生，资源组安装/还原由 Host 生命周期执行；toggle 回调本身不做任何动作。

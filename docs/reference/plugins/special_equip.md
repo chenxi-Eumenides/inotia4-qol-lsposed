@@ -25,7 +25,7 @@
 
 无对外能力：不 `provides` 任何 capability，无 HTTP query/endpoint/route metadata，无 `routes.inc`。
 
-唯一 feature 为 `special_equip.equipment_rules`，版本 1，默认 `1`，分类 `Hidden`，类型 `kToggle`，名称「特殊装备规则」（`plugin.cpp:162-166`）。其回调为空操作（返回 `ok()`），运行时行为由 lifecycle 回调与 `g_gate` 驱动，不由 feature 回调驱动。该 feature 在 Debug 可见、Release 不显示 Hidden 分类（`docs/reference/plugins/settings.md:111,155`）。
+唯一 feature 为 `special_equip.equipment_rules`，版本 1，默认 `1`，分类 `Hidden`，类型 `kToggle`，名称「NPC装备」，描述「允许获得、使用NPC装备」（`plugin.cpp:162-166`）。其回调为空操作（返回 `ok()`），运行时行为由 lifecycle 回调与 `g_gate` 驱动，不由 feature 回调驱动。该 feature 在 Debug 可见、Release 不显示 Hidden 分类（见 `docs/reference/plugins/settings.md` §7）。
 
 出售门禁不产生公开能力，而是通过 Host 的 `hooks.set_intercept` 把谓词登记到逻辑 resource id `hook:UIEquip_ButtonDestroyExe`（`plugin.cpp:19,125-129`）。该资源的 hook owner 是 `core.item`；owner wrapper 在入口查询 `intercept_blocks`，命中即不调用原函数（`plugins/core.item/inventory/native_inventory_hook.cpp:1294-1310`）。布尔门契约见 `hooks/dispatch.h:64-79`：同一资源最多 1 个谓词，容量 8，`blocks` 在主线程先持锁快照再锁外调用。
 

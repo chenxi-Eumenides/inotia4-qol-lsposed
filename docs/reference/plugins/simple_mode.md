@@ -23,7 +23,7 @@
 ## 公开能力与路由
 
 - 无 capability `provides`，无 `routes.inc`，无 HTTP query/endpoint/route metadata，也无 JNI。因此没有属于本插件的 HTTP 路由；启停只能经 Host 常驻控制面（§7.6 配置/feature，§7.7 状态）。
-- 唯一 feature 为 `simple_mode.combat`：默认 `0`、分类 `kGameplay`、类型 `kToggle`、名称「简单模式」、描述「降低怪物生命并增强玩家伤害与承伤。」（`plugin.cpp:125-132`）。回调在 `enabled == 0` 时立即 `set_gate(false)`，开启方向不直接开门（开门由 lifecycle 的 `plugin_on_enabled` 负责）。
+- 唯一 feature 为 `simple_mode.combat`：默认 `0`、分类 `kGameplay`、类型 `kToggle`、名称「简单模式」、描述「降低游戏难度」（`plugin.cpp:125-132`）。回调在 `enabled == 0` 时立即 `set_gate(false)`，开启方向不直接开门（开门由 lifecycle 的 `plugin_on_enabled` 负责）。
 - `want_run = enable && any(feature)`（`docs/reference/api-reference.md` §7.6）。本插件只有 1 个 feature，设置页关闭 feature 会在同一次 feature 提交中派生 `enable=false`，随后推进完整 deactivate；显式 lifecycle 写入可以不按 feature 聚合归一化，因此 feature 布尔值不保证在所有时刻都等于插件 desired 状态。
 - 旧 `nativeSetSimpleModeEnabled` JNI 导出与旧配置键 `simpleModeEnabled` 已于 2026-10-22 删除；两者都不再属于当前实现。
 

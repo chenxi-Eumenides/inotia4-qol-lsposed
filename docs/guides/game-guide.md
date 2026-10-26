@@ -803,10 +803,10 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 | owner / 键 | 类型 | 默认 | 说明 |
 |---|---|---:|---|
-| `core.api` / `features["api.enabled"]` | bool | `true` | General API service 开关；priority -5；Debug/Release 设置页均显示；关闭或恢复 HTTP 服务 |
+| `core.api` / `features["api.enabled"]` | bool | `true` | General API service 开关，描述「允许外部程序控制游戏」；priority -5；Debug/Release 设置页均显示；关闭或恢复 HTTP 服务 |
 | `core.api` / `config["listen_address"]` | string | `"0.0.0.0"` | HTTP 监听地址 |
 | `core.api` / `config["listen_port"]` | number | `8088` | HTTP 监听端口（1-65535） |
-| `module.security` / `features["op.enabled"]` | bool | `false` | General 权限开关；priority -4；Debug/Release 均显示；只授权 endpoint metadata 明确标记需要 OP 的操作 |
+| `module.security` / `features["op.enabled"]` | bool | `false` | General「高级权限」开关，描述「允许不合法的高级操作」；priority -4；Debug/Release 均显示；只授权 endpoint metadata 明确标记需要 OP 的操作 |
 | `module.platform` / `features["debug.logging"]` | bool | `false` | General、priority -3；名称「debug日志」；native logger 的 debug 级别门控 |
 
 `core.api/api.enabled` 与 `module.security/op.enabled` 相互独立：关闭 API 服务不会改写 OP 权限，开启 API 服务也不会授予 OP。两项属于 General，Debug/Release 设置页均显示；Release 只隐藏 Hidden 分类。
@@ -815,15 +815,15 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 
 | feature id | 默认 | 说明 |
 |---|---:|---|
-| `autosell.auto_sell` | `false` | 自动出售符合当前存档筛选规则的物品 |
+| `autosell.auto_sell` | `false` | 按照规则自动出售物品 |
 | `move_merge.drag_merge` | `true` | 拖拽同类物品自动合并 |
-| `push_all.push` | `false` | 移动时推动怪物/队友/召唤物 |
-| `simple_mode.combat` | `false` | 简单模式（降低怪物生命、增强伤害与承伤） |
-| `custom_recipe.recipes` | `false` | 自定义合成（唯一可见开关） |
+| `push_all.push` | `false` | 能够推动怪物 |
+| `simple_mode.combat` | `false` | 降低游戏难度 |
+| `custom_recipe.recipes` | `false` | 优化合成并添加更多配方（唯一可见开关） |
 | `craft_ui.custom_crafting` | `true` | 自定义合成界面（hidden，随 `custom_recipe.recipes` 级联） |
-| `extension_bag.extended_bag` | `true` | 扩展背包 |
-| `save_backup.open_manager` | `true` | 存档备份管理器（entry） |
-| `stack_limit.limit_999` | `false` | 将可堆叠物品上限提高到 999 |
+| `extension_bag.extended_bag` | `true` | 额外背包 |
+| `save_backup.open_manager` | `true` | 存档备份并支持跨设备导入导出（entry） |
+| `stack_limit.limit_999` | `false` | 可堆叠物品999上限 |
 | `world_teleport.map_jump` | `true` | 地图边界传送点跳转 |
 
 插件整体 lifecycle 由各 plugin 对象的 `enable`（Host desired）控制，经 `POST /api/op/features/lifecycle` 或 `field="desired"` 写入；`want_run = enable && 任一 feature 开启`。运行态状态仍通过 `/api/system/features` 查询。

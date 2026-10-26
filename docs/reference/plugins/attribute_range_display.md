@@ -14,7 +14,7 @@
 
 无对外能力：不 `provides` 任何 capability，不注册 HTTP 路由、快照、事件或命令。
 
-唯一用户可见 feature 为 `attribute_range_display.ranges`，版本 1，默认 `1`，分类 `kBasicOptimization`，类型 `kToggle`，名称「属性范围显示」（`plugin.cpp:75-79`）。其 `on_toggle` 回调为 no-op：运行时门禁由 Host 的 feature 布尔值 → `enable` 派生驱动生命周期（ARCHITECTURE.md §8.2），回调本身不需动作。
+唯一用户可见 feature 为 `attribute_range_display.ranges`，版本 1，默认 `1`，分类 `kBasicOptimization`，类型 `kToggle`，名称「属性范围渲染」（`plugin.cpp:75-79`）。其 `on_toggle` 回调为 no-op：运行时门禁由 Host 的 feature 布尔值 → `enable` 派生驱动生命周期（ARCHITECTURE.md §8.2），回调本身不需动作。
 
 ## 游戏内行为
 

@@ -23,7 +23,7 @@
 
 | feature id | 名称 | 类型 | 默认值 | 分类 | 回调 |
 |---|---|---|---:|---|---|
-| `popup_blocker.enabled` | 弹窗屏蔽 | toggle | 开 | `BasicOptimization`（基础优化设置） | no-op；资源由 Host feature/plugin lifecycle 管理 |
+| `popup_blocker.enabled` | 禁用弹窗 | toggle | 开 | `BasicOptimization`（基础优化设置） | no-op；资源由 Host feature/plugin lifecycle 管理 |
 
 Host 根据 feature 值派生插件生命周期。开启时安装两个声明式资源；关闭时撤销资源，恢复教程文案绘制和暂停门闩写入。插件本身不在 hook handler 中查询 feature 状态。
 

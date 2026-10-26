@@ -23,7 +23,7 @@
 - 不 `provides` 任何 capability。
 - 不注册 HTTP 路由，无 `routes.inc`。
 - 无对外快照、事件或命令端口。
-- 唯一用户可见 feature：`character_panel_i18n.translation`，version `1`，default `1`，分类 `kBasicOptimization`，类型 `kToggle`，名称「角色属性汉化」，描述「在角色面板绘制作用域内提供中文文案。」（`plugin.cpp:74-78`）。其 `on_toggle` 为 no-op：运行时门禁由 Host 的 feature 布尔值 → `enable` 派生驱动生命周期（ARCHITECTURE.md §8.2），回调本身不需动作。当前分类/默认值登记见 `docs/reference/plugins/settings.md`。
+- 唯一用户可见 feature：`character_panel_i18n.translation`，version `1`，default `1`，分类 `kBasicOptimization`，类型 `kToggle`，名称「属性面板汉化」，描述「人物属性显示为中文」（`plugin.cpp:74-78`）。其 `on_toggle` 为 no-op：运行时门禁由 Host 的 feature 布尔值 → `enable` 派生驱动生命周期（ARCHITECTURE.md §8.2），回调本身不需动作。当前分类/默认值登记见 `docs/reference/plugins/settings.md`。
 
 ## 游戏内行为
 

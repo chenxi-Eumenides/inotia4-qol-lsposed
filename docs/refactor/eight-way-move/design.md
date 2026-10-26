@@ -371,7 +371,7 @@ step_y = round(delta * |dy| / len)
 | `CMakeLists.txt` | `qol_plugin_eight_way_move` |
 | `settings_contribution.cpp` | 空贡献，与现有插件一致 |
 
-feature：`eight_way_move.direction`，默认 `false`，分类 `Gameplay`，toggle，名称「八向移动」，描述「方向触摸支持八向移动」。
+feature：`eight_way_move.direction`，默认 `false`，分类 `Gameplay`，toggle，名称「八向移动」，描述「允许斜向移动」。
 
 ResourceClaim：
 
