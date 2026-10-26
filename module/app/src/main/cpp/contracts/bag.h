@@ -1,7 +1,7 @@
 #pragma once
 
 // 袋源注册协议：core.item 提供注册面，其他插件按空间注册自己的袋数据源与写入原语。
-// 设计见 docs/refactor/core-item/architecture.md §4.3。
+// 设计见 docs/reference/plugins/core.item.md（QolBagSource 契约）。
 //
 // 约束：
 // - 注册/注销只在主线程、插件 activate/deactivate 时调用。
@@ -19,17 +19,18 @@
 namespace qol::contracts {
 
 constexpr const char* kBagSourceCapabilityId = "inventory.bag_source";
-constexpr QolVersion kBagSourceVersion{1, 0};
+constexpr QolVersion kBagSourceVersion{1, 1};
 
-struct QolBagInsertRequest {
+// 跨介质物品转移记录：payload 格式由来源源定义，core.item 只透传。
+// 有效长度 <= kQolBagTransferPayloadMaxSize；缓冲区固定 256 字节，禁止动态分配。
+constexpr uint32_t kQolBagTransferPayloadCapacity = 256;
+constexpr uint32_t kQolBagTransferPayloadMaxSize = 255;
+
+struct QolBagTransfer {
     int32_t category;
     int32_t count;
-    // -1 表示由源自行选择目标袋/槽。
-    int32_t preferred_bag;
-    int32_t preferred_slot;
-    int32_t socket_total;
-    int32_t enhance_remaining;
-    int32_t rarity_group;
+    uint32_t payload_size;
+    uint8_t payload[kQolBagTransferPayloadCapacity];
 };
 
 struct QolBagMutationResult {
@@ -41,13 +42,21 @@ struct QolBagMutationResult {
 struct QolBagSource {
     QolVersion version;
     int32_t space_id;
+
+    // 读面。
     int32_t (*count)();
     QolResult (*info)(int32_t bag, QolBagInfo* out);
     QolResult (*item_at)(int32_t bag, int32_t slot, QolInventoryItemRef* out);
     QolResult (*for_each_item)(QolInventoryBagSlotFn fn, void* ctx);
-    QolResult (*insert)(const QolBagInsertRequest* request, QolBagMutationResult* out);
+
+    // 转移面：导出（只读） → 目标导入 → 源移除。三步均由 core.item 编排。
+    QolResult (*export_item)(QolItemHandle item, int32_t count, QolBagTransfer* out);
+    QolResult (*import_item)(const QolBagTransfer* transfer, int32_t preferred_bag,
+                             int32_t preferred_slot, QolBagMutationResult* out);
     QolResult (*remove)(QolItemHandle expected, int32_t count, QolBagMutationResult* out);
-    QolResult (*identify)(QolItemHandle item, QolBagRef* out);
+
+    // 可选面：定位与使用。缺失时对应功能返回 kQolErrUnsupported。
+    QolResult (*identify)(QolItemHandle item, QolBagRef* out, int32_t* out_slot);
     QolResult (*use)(QolBagRef ref, int32_t slot);
 };
 
@@ -59,16 +68,21 @@ struct QolBagSourceRegistryApi {
 
 inline bool qol_bag_source_valid(const QolBagSource* source) {
     return source != nullptr && source->version.major == kBagSourceVersion.major &&
-           source->version.minor <= kBagSourceVersion.minor && source->space_id >=
-               kQolBagSpaceFirstRegistered &&
-           source->count != nullptr && source->info != nullptr && source->item_at != nullptr &&
-           source->for_each_item != nullptr;
+           source->version.minor >= kBagSourceVersion.minor &&
+           source->space_id >= kQolBagSpaceFirstRegistered && source->count != nullptr &&
+           source->info != nullptr && source->item_at != nullptr &&
+           source->for_each_item != nullptr && source->export_item != nullptr &&
+           source->import_item != nullptr && source->remove != nullptr;
 }
 
 inline bool qol_bag_ref_is_task_bag(const QolBagRef& ref) {
     return ref.space_id == kQolBagSpaceOriginal && ref.bag == kQolTaskBagIndex;
 }
 
+static_assert(std::is_standard_layout<QolBagTransfer>::value,
+              "QolBagTransfer must remain standard layout");
+static_assert(std::is_trivially_copyable<QolBagTransfer>::value,
+              "QolBagTransfer must remain trivially copyable");
 static_assert(std::is_standard_layout<QolBagRef>::value, "QolBagRef must remain standard layout");
 static_assert(std::is_trivially_copyable<QolBagRef>::value,
               "QolBagRef must remain trivially copyable");

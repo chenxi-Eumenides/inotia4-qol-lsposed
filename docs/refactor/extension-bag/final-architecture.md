@@ -1,147 +1,122 @@
 # extension_bag 实际架构（2026-10）
 
+> 2026-10 数据面迁移已完成：EB 只向 `core.item` 注册 `QolBagSource` 1.1
+>（space=2，`api/bag_source.cpp`），并保留 UI 适配。旧 provider、HTTP、全库存 move
+> 与 EB 事务层均已删除；原版/改版袋操作及跨空间编排归 `core.item`。下文中的相应旧结构
+> 均为历史记录，不代表当前实现。当前契约见
+> [`core.item`](../../reference/plugins/core.item.md) 的「`QolBagSource` 契约」。
+
 本文描述重构后的实际结构、线程与数据流，以及与目标架构的差距。目标设计见
 `target-architecture.md`，迁移基线见 `migration-baseline.md`。
 
 ## 1. 分层与文件
 
 ```
-L4 接口层
-  api/            provider 表、句柄、neutral provider、api_impl（薄委托）
-  public/         JNI/C ABI、状态/装备/出售/投影的对外函数
-  interface/      bag_query（只读快照）、bag_command（命令分发）
-  ui/             原生控件事件 → 用例；页面绘制
+core.item
+  库存查询、原生袋读写、跨空间操作、出售/入库、装备/镶嵌编排
+       │                         ▲
+       │ QolBagSource 1.1         │ UI 操作请求
+       ▼                         │
+extension_bag                    │
+  api/bag_source.cpp ────────────┘
+    扩展袋数据原语：count/info/item_at/for_each_item/
+    export_item/import_item/remove/identify/use
 
-L3 用例层
-  usecases/       view / item / unequip / move / set_bag_count
+  core/item_display_hook.cpp
+    UI 显示读取虚拟化：ControlItem_SetItem/GetItem、INVEN_GetBagSize
+    装备页/商店/合成投影；不写 INVEN_pItem 或容量字
 
-L2 组件层
-  transaction/    transaction_coordinator、orig_ext、ext_orig、ext_ext、drop
-  runtime/        bag_state_store、status_snapshot、projection_controller、
-                  native_tab_layout、reentry_lock、entry_guard
-  persistence/    slot_data 读写、sidecar JSON、v4→v5 迁移
-
-L1 数据/适配层
-  runtime/inventory_access、runtime/item_access   原生袋/物品只读
-  model/                                         纯规则与状态结构（bag_catalog、virtual_bag_*）
-
-L0 宿主契约
-  contracts/      Game Host ABI、命令/票据、UI/物品/线程适配器
+  runtime/、model/、persistence/：扩展袋状态、catalog、对象物化与 sidecar
+  ui/、runtime/：页签、布局、输入、详情/商店/合成页面适配
 ```
 
-依赖只向下：`ui`/`api`/`public` → `usecases`/`interface` → 组件 → `model`/`contracts`。
-`model/` 不包含任何 runtime/ui 头。
+旧 `api/provider`、`http/`、`interface command`、全库存 `move` 与 `transaction/` 为历史删除项，
+不属于当前 extension_bag 分层。
 
 ## 2. 线程模型
 
-- 所有 EB 业务状态只在游戏主线程读写。
-- HTTP 写命令：`commands.post_typed` 入队 → 主线程 `commands_drain()` 执行 →
-  结果经 `ticket_result.read_result` 在任意线程回取拷贝。
-- HTTP 查询：`bag_query` 读取已发布的不可变快照（status、容量、库存片段），
-  不触碰 live state。
-- 原生控件回调（页签 proc、延迟释放、详情动作）：`TryReentryLock` 判断是否
-  由 EB 自身调用栈重入；重入时立即返回，不阻塞。
-- 重入策略：`EntryGuard`（`kRejectWrite` / `kReadSnapshot`）+ 线程局部深度；
-  `ReentryLock` 只记录嵌套深度，不再有跨线程互斥量。
+- `QolBagSource` 回调与 UI/显示 hook 在游戏主线程执行。
+- `core.item` 的跨线程库存查询由其已发布快照承担；EB 不提供 HTTP 查询或写命令。
+- UI 事件由 EB 适配到 `core.item` 操作面；库存业务状态与事务恢复不由 EB 管理。
 
 ## 3. 数据流
 
-### 3.1 读
+### 3.1 扩展袋数据与显示读取
 
 ```
-HTTP/UI → bag_query → status_snapshot / bag_state_store（不可变快照）
-                    ↘ 原始容量字（projection_controller）
+core.item inventory query ──▶ QolBagSource 1.1 ──▶ 扩展袋 sidecar/state
+UI refresh ──▶ ControlItem_SetItem/GetItem + INVEN_GetBagSize ──▶ 显示投影
 ```
 
-快照在写路径 `extension_bag_mark_dirty_locked()` 与绘制收尾
-`publish_bag_snapshot_if_changed()` 发布；读侧无锁。
+读取 hook 只对当前投影控件/容量入口虚拟化；物品槽表和容量字保持原生真实值。
 
-### 3.2 写
-
-```
-HTTP ──post_typed──▶ commands_drain（主线程）
-                       └─ bag_command → usecases → 组件/事务
-UI 控件 ─────────────▶ EntryGuard → usecases / lifecycle 事件路由
-```
-
-写路径内部流程：
+### 3.2 写与操作编排
 
 ```
-校验（catalog/active_count/域）
-  → 准备（临时对象、容量字、投影）
-  → 原生调用（SaveItemOnEmpty / MoveItem / refresh）
-  → 复核（来源/目标/所有权）
-  → 提交或阶段回滚（transaction_coordinator）
-  → mark_dirty + 快照发布
+UI 控件 ──▶ extension_bag UI adapter ──▶ core.item operation
+core.item ──▶ QolBagSource import_item/remove/use ──▶ 扩展袋数据
 ```
+
+跨空间 move、出售、入库、装备/镶嵌及其校验、提交/恢复由 `core.item` 负责；EB 不保留旧事务流程。
 
 ### 3.3 原生事件
 
-`lifecycle` 只做事件翻译与门禁：
+UI 适配只做事件翻译与显示生命周期：
 
-- 原版袋/任务袋：走原版语义；
-- C18 追加袋：独立 UI 命中，child index 不进入扩展 ID/事务域；
-- 扩展页签：`pending_extension_tab` 在 draw-end 提交；
-- 拖动：`touch_capture` / `DropSession`，drop 单次消费。
+- 原版袋/任务袋与 C18 追加袋的数据及操作由 `core.item` 处理；EB 负责页签布局适配；
+- C18 追加袋 child index 仅用于 UI 命中，不进入扩展逻辑 ID；
+- 扩展页签和拖放控件只把交互转换为 `core.item` 操作请求。
 
 ## 4. 数据驱动边界
 
 | 数据 | 来源 | 驱动方式 |
 |---|---|---|
 | 变体（series/version/能力位） | `game_variant_table.inc` | 构建期扫描 APK 生成 |
-| 扩展袋上限/活动数量 | `model/bag_catalog.inc` + `State.bag_count` | 编译期上限 128 + 运行期设置（默认 5） |
+| 扩展袋上限/活动数量 | `model/bag_catalog.inc` + `State.bag_count` | catalog 上限 + 设置页变更（默认 5） |
 | 袋类型容量 | `ITEMSTATICBASE.json` → `bag_catalog.inc` | 生成表 |
 | 槽数 16 | 游戏槽上限 | 常量 |
-| 物品属性（是否装备/宝石/可用/售价） | 宿主 `read_only.item.*` / `item_facts` | 游戏数据，EB 不复制 |
+| 物品属性与库存动作 | `core.item` | EB 不复制物品事实或库存操作编排 |
 | 扩展袋状态 | sidecar JSON（v5，含 `bagCount`） | 数据 |
-| UI 布局/交互/事务规则 | 代码 | 代码 |
+| UI 布局/显示适配 | EB UI 与 display hooks | 代码 |
 
 不变量：
 
-- 业务代码不写死扩展袋数量，统一 `virtual_bag::active_extension_bags()`；
-- 扩展袋内容通过**代理袋**显示：`current_bag` 只写原版事务袋 0..4，扩展袋号不进入游戏数值域；
-- 缩小 `bagCount` 仅当被移除袋为空，且有 pending/拖拽/未提交事务时拒绝；
-- 投影只读：绘制/命中/查询不修改业务状态；
+- `bagCount` 只由设置页修改；
+- 扩展袋内容通过 UI 读取入口投影显示，不写 `INVEN_pItem` 或容量字；
+- `core.item` 拥有库存写入和操作事务；
 - C18 追加袋与原版袋始终以游戏数据为准，扩展袋以 sidecar 为准。
 
 ## 5. 关键组件
 
 | 组件 | 职责 | 不负责 |
 |---|---|---|
-| `bag_state_store` | 轻量快照 + revision | 持久化、事务 |
-| `status_snapshot` | 完整状态快照（含 items/effective_counts） | 写状态 |
-| `projection_controller` | 容量字、当前袋原始/raw、C18 页计数、来源袋门禁 | 安装/恢复 |
+| `QolBagSource`（`api/bag_source.cpp`） | 注册扩展袋数据原语给 `core.item` | 原版袋访问、跨空间事务 |
+| `item_display_hook`（`core/item_display_hook.cpp`） | 控件物品与容量读取虚拟化 | 库存槽表/容量字写入 |
+| `bag_state_store` / persistence | 扩展袋状态、sidecar 与 revision | 库存事务、HTTP/API |
+| `projection_controller` | UI 投影状态与来源门禁 | 数据源注册、库存操作 |
 | `native_tab_layout` | 布局解析、reflow、几何缓存、原生袋命中 | 页签交互 |
-| `transaction_coordinator` | 事务 ID、pending、阶段回滚、失败隔离 | 方向实现 |
-| `usecases/*` | 校验 → 事务 → 刷新 | 控件、JSON |
-| `entry_guard` / `reentry_lock` | 主线程与重入策略 | 跨线程同步 |
+| UI adapters | 页签、输入、装备页/商店/合成/详情适配 | 物品域业务编排 |
+| 历史删除项 | provider、HTTP、transaction coordinator、全库存 move | 当前 EB 架构中均不存在 |
 
-## 6. 分层完成度
+## 6. 迁移状态
 
 | 项 | 状态 |
 |---|---|
-| 命令编组、查询快照 | 完成 |
-| 用例层承接全部命令 | 完成 |
-| L4 访问收口（api/public/ui） | 完成：`interface/state_access.h`，直接 `runtime_state()` 为 0 |
-| 聚合头与宏桥 | 完成：`extension_bag_internal.h` 已删除，包含数为 0；orchestrator/tabs_ui 宏桥已移除 |
-| 业务互斥量 | 完成：删除 `mtx`，改为 `ReentryLock`/`TryReentryLock` |
-| 投影状态 | `projection_controller.*`（L1） |
-| 投影安装/恢复 | `runtime/projection.cpp`（L2 投影适配层），与状态端口分离 |
-| 所有权 / 拖拽 / 页签 / 生命周期 | 独立文件：`runtime/ownership.*`、`runtime/drag_session.*`、`runtime/tabs.*`、`runtime/lifecycle.*` |
-| 事务 | `transaction/transaction_coordinator.*` + 方向实现 |
-| 持久化 | `persistence/*`，sidecar v5 |
-| 数据驱动 | `model/bag_catalog.*` 生成表 + `State.bag_count` |
+| `QolBagSource` 1.1（space=2） | 已注册；提供 count/info/item_at/for_each_item/export/import/remove/identify/use |
+| 旧 provider、能力、HTTP、typed command、全库存 move | 已删除 |
+| 装备页/商店/合成显示虚拟化 | 已使用 `ControlItem_SetItem/GetItem` 与 `INVEN_GetBagSize`；不写槽表或容量字 |
+| 扩展袋状态与 sidecar | 保留；bagCount 只由设置页修改 |
+| UI 物品操作迁移 | 按 `core.item` 操作能力接线与验收；EB 不恢复自有事务 |
 
-不存在“待迁移的安装/恢复”项：安装/恢复属于 L2 投影适配层，状态端口属于 L1，
-依赖方向正确。10000 袋的存储/快照/持久化优化见 `optimizations.md`，属于性能演进，
-不属于分层债。
+provider、HTTP 与全库存 move 的旧结构仅用于追溯；不得作为当前架构或实现计划依据。
 
-## 7. 验证
+## 7. 迁移前验证记录
 
 - Host：CTest 160/160（含 catalog、sidecar 迁移、布局、重入、命令契约）。
 - 静态：`check_arch.py` 全绿（层依赖、裸地址、JNI 导出）。
 - Android：Debug 构建；v520 真机 smoke：变体识别、页签安装、reflow、
   模块/原生页签切换、bagCount 1..8 边界。
 
-真机验收口径见 `docs/refactor/verification.md`；Host 测试不编译全部 TU，
-行为改动必须同时跑 Android Debug 构建。
+以上计数是旧分层重构时的记录，不证明本次 `QolBagSource` 与显示 hook 的迁移验收。
+当前验收口径见 `docs/refactor/verification.md` 与 extension-bag 对应验收卡；
+未有对应证据时不得报告迁移行为验收通过。
