@@ -563,6 +563,41 @@ void refresh_projected_module_view_after_move_locked() {
     refresh_module_item_area_locked(qol::extension_bag::ui_state().objects.module_view_index);
 }
 
+void refresh_native_item_area_after_move_locked(int native_bag) {
+    const bool extension_mode =
+        runtime_state().objects.bag.mode == virtual_bag::Mode::kModule;
+    const bool projection_installed =
+        qol::extension_bag::ui_state().objects.module_view_installed;
+    // 原版视图里如果仍残留投影安装，先归还投影；否则后面的原生刷新会被
+    // ControlItem_SetItem 再替换成扩展袋物品，表现为源槽“没消失”。
+    if (projection_installed && !extension_mode) {
+        restore_module_view_locked();
+    }
+    if (runtime_state().host.game != nullptr &&
+        runtime_state().host.write_port != nullptr &&
+        runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
+        const int saved_bag = raw_current_bag_locked();
+        const int target_bag =
+            native_bag >= 0 && native_bag < native_bag_count_locked() ? native_bag : saved_bag;
+        if (target_bag >= 0) {
+            if (target_bag != saved_bag) {
+                (void)runtime_state().host.write_port->ui.set_current_bag(target_bag);
+            }
+            {
+                qol::features::extension_bag::DisplaySubstitutionSuppressScope suppress;
+                virtual_bag_call_original_refresh_item_area_with_guard();
+            }
+            if (saved_bag >= 0 && saved_bag != target_bag) {
+                (void)runtime_state().host.write_port->ui.set_current_bag(saved_bag);
+            }
+            ++qol::extension_bag::ui_state().ui.inventory_generation;
+        }
+    }
+    if (extension_mode && projection_installed) {
+        refresh_projected_module_view_after_move_locked();
+    }
+}
+
 namespace {
 
 struct RefreshRestoreSuppressScope {
