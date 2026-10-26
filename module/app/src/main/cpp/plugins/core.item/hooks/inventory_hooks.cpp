@@ -262,7 +262,7 @@ RemoveItemFn g_backup_remove_item = nullptr;
 SaveItemFn g_backup_save_item = nullptr;
 InvenMoveItemFn g_backup_move_item = nullptr;
 UiEquipRefreshItemAreaFn g_backup_refresh_item_area = nullptr;
-void (*g_player_update_shortcut)() = nullptr;
+void (*g_player_update_shortcut)(int32_t) = nullptr;
 EquipItemFromInvenToSlotFn g_backup_equip_item_from_inven_to_slot = nullptr;
 PutJewelFn g_backup_put_jewel = nullptr;
 IsHavingEmptySlotFn g_backup_is_having_empty_slot = nullptr;
@@ -1797,12 +1797,18 @@ bool inventory_native_hook_call_refresh_item_area_original() {
     return true;
 }
 
-void inventory_native_hook_bind_player_update_shortcut(void (*update_shortcut)()) {
+void inventory_native_hook_bind_player_update_shortcut(void (*update_shortcut)(int32_t)) {
     g_player_update_shortcut = update_shortcut;
 }
 
 void inventory_native_hook_update_shortcut() {
-    if (g_player_update_shortcut != nullptr) g_player_update_shortcut();
+    // 无参兼容入口：原版函数需要类别参数，这里不做刷新，避免用未定义 w0 误更新。
+}
+
+void inventory_native_hook_update_shortcut_category(int32_t category) {
+    if (g_player_update_shortcut != nullptr && category >= 0) {
+        g_player_update_shortcut(category);
+    }
 }
 
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk) {

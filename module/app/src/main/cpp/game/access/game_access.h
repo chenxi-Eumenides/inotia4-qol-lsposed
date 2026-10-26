@@ -220,7 +220,7 @@ extern CharGetSummonerFn fn_char_get_summoner;
 extern ConsumeItemFn fn_consume_item;
 extern CharUseItemExFn fn_char_use_item_ex;
 extern CharProcessShortcutFn fn_char_process_shortcut;
-using PlayerUpdateShortcutFn = void (*)();
+using PlayerUpdateShortcutFn = void (*)(int32_t category);
 extern PlayerUpdateShortcutFn fn_player_update_shortcut;
 extern RemoveItemDirectFn fn_remove_item_direct;
 extern IncludePartyFn fn_include_party;

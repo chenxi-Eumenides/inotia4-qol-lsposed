@@ -39,7 +39,7 @@
 | `item.facts` | 3.6 | 物品类别、库存 view/count/编码、装备/宝石/禁售和报价等事实。 |
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
 | `inventory.bag_source` | 1.1 | 注册/注销外部袋源，并提供跨空间转移所需的袋源原语。 |
-| `inventory_refresh` | 1.1 | 原版库存区域刷新与快捷栏数量更新。 |
+| `inventory_refresh` | 1.2 | 原版库存区域刷新；`update_shortcut_category(category)` 按类别重算快捷栏数量（含注册袋源物品）。 |
 | `inventory.action` | 3.0 | 移动、使用、丢弃、出售、装备、卸下和镶嵌。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
 | `move_merge.control` | 1.0 | 报告拖拽合并是否可用。 |

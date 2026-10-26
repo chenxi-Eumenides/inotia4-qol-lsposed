@@ -19,11 +19,15 @@ namespace qol::contracts {
 
 constexpr const char* kInventoryRefreshCapabilityId = "inventory_refresh";
 constexpr int32_t kInventoryRefreshVersionMajor = 1;
-constexpr int32_t kInventoryRefreshVersionMinor = 1;
+constexpr int32_t kInventoryRefreshVersionMinor = 2;
 
 struct InventoryRefreshApi {
     bool (*call_original)();
-    void (*update_shortcut)();  // 直接重算快捷栏物品数量，不经入口 hook
+    // 兼容字段：原版 PLAYER_UpdateShortcut 按类别刷新，无参调用等于用未定义 w0，
+    // 仅保留给旧消费者；新代码必须使用 update_shortcut_category。
+    void (*update_shortcut)();
+    // 按类别重算快捷栏中该类别物品的数量（直接调用原版函数，不经入口 hook）。
+    void (*update_shortcut_category)(int32_t category);
 };
 
 }  // namespace qol::contracts

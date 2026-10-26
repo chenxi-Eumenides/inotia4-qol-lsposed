@@ -462,7 +462,8 @@ bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi*) 
 void inventory_native_hook_set_support(bool) {}
 bool inventory_native_hook_support_enabled() { return true; }
 bool inventory_native_hook_call_refresh_item_area_original() { return true; }
-void inventory_native_hook_bind_player_update_shortcut(void (*)(void)) {}
+void inventory_native_hook_bind_player_update_shortcut(void (*)(int32_t)) {}
+void inventory_native_hook_update_shortcut_category(int32_t) {}
 void inventory_native_hook_update_shortcut() {}
 const qol::contracts::ResourceClaim* inventory_hooks_claims(uint32_t* out_count) {
     if (out_count != nullptr) *out_count = 0;

@@ -69,6 +69,7 @@ hook 入口覆盖库存查询/写入和备用入口绑定；快捷栏三个 opti
 | `SnapshotStore` | 持有不可变快照；完整读取成功后原子发布，HTTP 读取方只消费已发布对象。 |
 | inventory epoch | 显式刷新先 bump epoch；读取成功后按新 epoch 发布。epoch 是快照版本，不是物品身份。 |
 | `request_inventory_refresh()` | 立即在游戏线程请求一次库存重读与发布。 |
+| 快捷栏刷新 | 原版 `PLAYER_UpdateShortcut(category)` 只刷新同类别槽；`InventoryRefreshApi.update_shortcut_category` 必须按注册源中出现的类别逐个调用，无参调用无效。 |
 | 写后刷新 | 成功写动作调用库存刷新入口，使后续查询消费更新后的快照。 |
 | 周期重建 | lifecycle scheduler 每 60 帧执行一次 `frame_tick()`；其中包含库存读取、item state 更新与 shop snapshot refresh。 |
 | shop | 独立 snapshot 与独立 epoch；不与 inventory snapshot 共用版本。 |

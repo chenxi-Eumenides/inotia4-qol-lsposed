@@ -260,6 +260,7 @@ contracts::InventorySellResult sell_item(contracts::QolActionRef ref,
 const contracts::InventoryRefreshApi kInventoryRefreshApi{
     &inventory_native_hook_call_refresh_item_area_original,
     &inventory_native_hook_update_shortcut,
+    &inventory_native_hook_update_shortcut_category,
 };
 
 bool attach(const contracts::QolHostSdk* sdk, const contracts::QolGameHost* game,
