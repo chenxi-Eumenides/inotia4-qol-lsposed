@@ -1342,7 +1342,8 @@ int main() {
 
     // 窄 move_merge port：typed source 校验 + 主线程纪律 + 参数边界；失败不得调用底层。
     const auto& move_merge = qol::game::move_merge_port();
-    assert(move_merge.abi_version.major == 1 && move_merge.abi_version.minor == 2);
+    assert(move_merge.abi_version.major == qol::contracts::kQolMoveMergePortVersion.major &&
+           move_merge.abi_version.minor == qol::contracts::kQolMoveMergePortVersion.minor);
     assert(move_merge.move_item != nullptr);
     assert(move_merge.current_bag != nullptr);
     assert(move_merge.validate_native_item != nullptr);
@@ -1363,7 +1364,7 @@ int main() {
     assert(move_merge.current_bag(&queried_bag).code == kQolErrNotReady);
     assert(queried_bag == 23);
     g_move_merge_fake_memory_enabled = true;
-    *fake_current_bag = 6;
+    *fake_current_bag = 18;
     assert(move_merge.current_bag(&queried_bag).code == kQolErrInvalidArgument);
     assert(queried_bag == 23);
     *fake_current_bag = 2;
@@ -1413,7 +1414,7 @@ int main() {
     assert(move_merge.move_item(move_game_handle, 0, 1, 3, &move_result).ok != kQolOk);
     assert(move_merge.move_item(move_game_handle, 1, 1, 3, nullptr).ok != kQolOk);
     assert(move_merge.move_item(move_game_handle, 1, -1, 3, &move_result).ok != kQolOk);
-    assert(move_merge.move_item(move_game_handle, 1, 6, 3, &move_result).ok != kQolOk);
+    assert(move_merge.move_item(move_game_handle, 1, 18, 3, &move_result).ok != kQolOk);
     assert(move_merge.move_item(move_game_handle, 1, 1, -1, &move_result).ok != kQolOk);
     assert(move_merge.move_item(move_game_handle, 1, 1, 16, &move_result).ok != kQolOk);
     assert(g_move_item_calls == 0);

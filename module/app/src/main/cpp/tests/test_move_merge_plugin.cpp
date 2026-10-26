@@ -4,6 +4,10 @@
 
 #include "plugins/core.item/hooks/merge_hook.cpp"
 
+namespace qol::features::core_item {
+const contracts::QolItemPort* g_port = nullptr;
+}  // namespace qol::features::core_item
+
 int g_test_refresh_calls = 0;
 
 bool inventory_native_hook_call_refresh_item_area_original() {
@@ -24,6 +28,7 @@ QolHostSdk sdk{};
 QolUiAdapter ui{};
 QolMoveMergePort move_port{};
 QolCharacterExtrasPort character_port{};
+QolItemPort item_port{};
 ItemFactsApi facts{};
 InventoryProjectionCallbacks projection{};
 InventoryRefreshApi refresh{};
@@ -43,6 +48,7 @@ int extension_source_item = 1;
 int32_t destination_count_value = 20;
 uint32_t count_limit_value = 99;
 int apply_allowed_value = 0;
+int destination_equipment_value = 0;
 int count_supported_value = 1;
 QolItemCountEncoding source_encoding_value = QolItemCountEncoding::kEncoded;
 QolItemCountEncoding destination_encoding_value = QolItemCountEncoding::kEncoded;
@@ -60,6 +66,15 @@ int64_t source_control_value = 0;
 int64_t destination_control_value = 0;
 
 QolResult ok() { return contracts::ok(); }
+QolResult static_item_text(int32_t kind, int32_t category_value, const char** out) {
+    if (out == nullptr) return error(kQolErrInvalidArgument, "invalid output", 14);
+    *out = nullptr;
+    if (kind != static_cast<int32_t>(QolItemStaticTextKind::kItemType) || category_value != 42) {
+        return error(kQolErrNotFound, "item type unavailable", 22);
+    }
+    *out = "scroll";
+    return ok();
+}
 QolResult require(const char* id, QolVersionRange, const void** out) {
     *out = nullptr;
     if (std::strcmp(id, kItemFactsCapabilityId) == 0 && facts_available) *out = &facts;
@@ -95,6 +110,7 @@ QolResult item_view(QolItemHandle handle, QolItemInventoryView* out) {
     out->count_supported = count_supported_value;
     out->category = 42;
     out->effective_count = handle.slot == 1 ? 10 : destination_count_value;
+    out->equip = handle.slot == destination_item.slot && destination_equipment_value ? 1 : 0;
     return ok();
 }
 QolResult category(QolItemHandle, int32_t* out) { *out = 42; return ok(); }
@@ -159,6 +175,7 @@ void reset() {
     destination_count_value = 20;
     count_limit_value = 99;
     apply_allowed_value = 0;
+    destination_equipment_value = 0;
     count_supported_value = 1;
     source_encoding_value = destination_encoding_value = QolItemCountEncoding::kEncoded;
     source_identity_available = destination_identity_available = 1;
@@ -188,6 +205,10 @@ void setup() {
     character_port = {kQolPortCharacterExtrasVersion, {}};
     character_port.read.struct_size = sizeof(character_port.read);
     character_port.read.can_apply_stuff_items = &can_apply;
+    item_port = {};
+    item_port.struct_size = sizeof(item_port);
+    item_port.read.static_text = &static_item_text;
+    qol::features::core_item::g_port = &item_port;
     facts = {};
     facts.struct_size = sizeof(facts);
     facts.view = &item_view;
@@ -393,6 +414,8 @@ void test_full_limit_apply_and_optional_refresh() {
     set_enabled(true);
     set_wrapper_ready(true);
     apply_allowed_value = 1;
+    destination_equipment_value = 1;
+    count_supported_value = 0;
     extension_source_item = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
