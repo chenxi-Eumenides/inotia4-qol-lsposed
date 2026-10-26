@@ -286,3 +286,66 @@ ExtensionBagUnequipResult unequip_extension_bag_locked(::qol::extension_bag::Ree
                 receiving_bag);
     return ExtensionBagUnequipResult::kFailed;
 }
+
+bool extension_handle_original_bag_unequip() {
+    if (!::qol::extension_bag::access::enabled().load() || !read_world_in_world()) return false;
+    ::qol::extension_bag::ReentryLock lock;
+    if (::qol::extension_bag::access::bag().mode != virtual_bag::Mode::kModule) return false;
+    const int ext_bag = qol::extension_bag::ui_state().ui.extension_desc_unequip_bag;
+    const bool owns_desc = virtual_bag::valid_index(ext_bag) &&
+                           ::qol::extension_bag::access::bag().selected == ext_bag &&
+                           ::qol::extension_bag::access::bag().info_bag == ext_bag;
+    if (!owns_desc) {
+        VIRTBAG_LOG("extension desc unequip stale rejected ext_bag=%d", ext_bag);
+        return true;
+    }
+    const ExtensionBagUnequipResult result = unequip_extension_bag_locked(lock, ext_bag);
+    VIRTBAG_LOG("extension desc unequip bag=%d result=%d", ext_bag, static_cast<int>(result));
+    if (result == ExtensionBagUnequipResult::kNotEmpty ||
+        result == ExtensionBagUnequipResult::kNoSpace) {
+        const auto* sdk = ::qol::extension_bag::access::host().sdk;
+        if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
+            (void)sdk->ui->show_text_popup(result == ExtensionBagUnequipResult::kNotEmpty ? 7 : 6);
+        }
+    }
+    return true;
+}
+
+bool extension_handle_backpack_equip() {
+    if (!::qol::extension_bag::access::enabled().load() || !read_world_in_world()) return false;
+    ::qol::extension_bag::ReentryLock lock;
+    if (::qol::extension_bag::access::bag().mode != virtual_bag::Mode::kModule) return false;
+    void* item = qol::extension_bag::ui_state().ui.extension_desc_item;
+    const int source_bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
+    const int source_slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
+    if (item == nullptr || !virtual_bag::valid_index(source_bag) || source_slot < 0 ||
+        source_slot >= virtual_bag::kSlotCount ||
+        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] != item) {
+        return false;
+    }
+    int category = 0;
+    if (!read_item_category(item, &category) || !category_is_extension_backpack(category)) {
+        return false;
+    }
+    const int target = first_empty_extension_bag_locked();
+    if (target < 0) {
+        const auto* sdk = ::qol::extension_bag::access::host().sdk;
+        if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
+            (void)sdk->ui->show_text_popup(6);
+        }
+        return true;
+    }
+    const ExtensionBagEquipResult result = equip_extension_bag_item_locked(lock, target, item);
+    if (result != ExtensionBagEquipResult::kOk) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "extension backpack button equip failed result=%d target=%d src=%d/%d",
+                     static_cast<int>(result), target, source_bag, source_slot);
+        return true;
+    }
+    extension_description_set_off();
+    clear_original_desc_locked();
+    finish_extension_equip_ui_locked(target, nullptr);
+    VIRTBAG_LOG("extension backpack button equip target=%d src=%d/%d", target, source_bag,
+                source_slot);
+    return true;
+}

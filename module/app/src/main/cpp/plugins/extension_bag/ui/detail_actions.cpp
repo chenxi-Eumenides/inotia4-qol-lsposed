@@ -512,8 +512,8 @@ void extension_desc_item_execute_at(size_t index, void* button) {
             return;
         }
         if (confirm_use) {
-            // 原版只负责创建确认弹窗；确认回调自身用 inventory.action.use 结算。
-            extension_bag_ui_description_set_off();
+            // 原版按钮需要当前详情上下文来创建确认弹窗；确认回调自身用
+            // inventory.action.use 结算，不能先关闭详情。
             (void)extension_desc_call_original(id, button);
             return;
         }
@@ -539,6 +539,26 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         }
         VIRTBAG_LOG("extension use execute bag=%d slot=%d confirm=%d used=%d", item_bag, item_slot,
                     confirm_use ? 1 : 0, used ? 1 : 0);
+        return;
+    }
+
+    // 解封按钮仍由原版执行物品类别分派与产物入库；扩展物品的消耗经
+    // INVEN_ConsumeItem/QolBagSource::remove 回到 sidecar，不能在这里本地改数据。
+    if (extension_desc_original_matches(id, "desc.button.release_sealed")) {
+        bool current_item = false;
+        {
+            ::qol::extension_bag::ReentryLock lock;
+            current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
+                           item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
+                           qol::extension_bag::ui_state().objects.module_objects[item_bag][item_slot] == item;
+        }
+        if (current_item) {
+            (void)extension_desc_call_original(id, button);
+        } else {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension release-sealed rejected stale detail bag=%d slot=%d",
+                         item_bag, item_slot);
+        }
         return;
     }
 

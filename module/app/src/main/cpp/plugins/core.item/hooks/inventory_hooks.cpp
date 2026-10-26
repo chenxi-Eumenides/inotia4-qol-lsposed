@@ -1,4 +1,5 @@
 #include "inventory_hooks.h"
+#include "../api/projection.h"
 #include "../usecases/consume_item.h"
 #include "../bags/native_bag_limit.h"
 #include "claims.h"
@@ -1241,6 +1242,11 @@ void button_equip_exe_wrapper(void* button) {
         call_backup("hook:UIEquip_ButtonEquipExe", g_backup_button_equip_exe, button);
         return;
     }
+    const auto* projection = qol::features::core_item::projection_callbacks();
+    if (projection != nullptr && projection->handle_backpack_equip != nullptr &&
+        projection->handle_backpack_equip()) {
+        return;
+    }
     qol::contracts::QolInventoryItemRef source_ref{};
     if (selected_registered_source_item(&source_ref)) {
         QOL_LOG_WARN(QolDomain::kInventory,
@@ -1284,6 +1290,11 @@ void button_unequip_exe_wrapper(void* button) {
         call_backup("hook:UIEquip_ButtonUnequipExe", g_backup_button_unequip_exe, button);
         return;
     }
+    const auto* projection = qol::features::core_item::projection_callbacks();
+    if (projection != nullptr && projection->handle_original_bag_unequip != nullptr &&
+        projection->handle_original_bag_unequip()) {
+        return;
+    }
     call_backup("hook:UIEquip_ButtonUnequipExe", g_backup_button_unequip_exe, button);
 }
 
@@ -1322,6 +1333,11 @@ void button_use_mercenary_seal_exe_wrapper(void* button) {
     if (!inventory_native_hook_support_enabled()) {
         call_backup("hook:UIEquip_ButtonUseMercenarySealExe",
                     g_backup_button_use_mercenary_seal_exe, button);
+        return;
+    }
+    const auto* projection = qol::features::core_item::projection_callbacks();
+    if (projection != nullptr && projection->handle_use_mercenary_seal != nullptr &&
+        projection->handle_use_mercenary_seal()) {
         return;
     }
     qol::contracts::QolInventoryItemRef source_ref{};

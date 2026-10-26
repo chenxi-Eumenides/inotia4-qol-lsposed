@@ -441,8 +441,15 @@ bool install_module_view_locked(int bag) {
         if (!extension_bag_ui_set_control_item(control, item)) {
             return fail_install("item_control_binding_failed");
         }
+        (void)extension_bag_ui_set_control_show(control, true);
         controls[static_cast<size_t>(slot)] = control;
         bound_count = slot + 1;
+    }
+    for (int slot = capacity; slot < virtual_bag::kSlotCount; ++slot) {
+        void* control = extension_bag_ui_child_at(root, slot);
+        if (control == nullptr) continue;
+        (void)extension_bag_ui_set_control_item(control, nullptr);
+        (void)extension_bag_ui_set_control_show(control, false);
     }
     if (extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot) != root) {
         return fail_install("item_root_replaced_during_binding");
@@ -530,6 +537,13 @@ void refresh_projection_if_overwritten_locked() {
             QOL_LOG_INFO(QolDomain::kExtensionBag, "projection post-refresh slot=%d current=%p item=%p",
                         slot, current, item);
         }
+        (void)extension_bag_ui_set_control_show(ctrl, true);
+    }
+    for (int slot = capacity; slot < virtual_bag::kSlotCount; ++slot) {
+        void* ctrl = extension_bag_ui_child_at(qol::extension_bag::ui_state().objects.projected_item_root, slot);
+        if (ctrl == nullptr) continue;
+        (void)extension_bag_ui_set_control_item(ctrl, nullptr);
+        (void)extension_bag_ui_set_control_show(ctrl, false);
     }
 }
 

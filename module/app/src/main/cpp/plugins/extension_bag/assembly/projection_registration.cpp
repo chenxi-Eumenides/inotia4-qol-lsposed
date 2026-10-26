@@ -3,6 +3,7 @@
 #include "contracts/inventory_projection.h"
 #include "contracts/move_merge.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -87,6 +88,18 @@ bool projection_sync_bag() {
     return projection_available() && virtual_bag_sync_projected_bag();
 }
 
+bool projection_handle_original_bag_unequip() {
+    return projection_available() && extension_handle_original_bag_unequip();
+}
+
+bool projection_handle_use_mercenary_seal() {
+    return projection_available() && extension_use_mercenary_seal();
+}
+
+bool projection_handle_backpack_equip() {
+    return projection_available() && extension_handle_backpack_equip();
+}
+
 const qol::contracts::InventoryProjectionCallbacks kProjectionCallbacks{
     sizeof(qol::contracts::InventoryProjectionCallbacks),
     qol::contracts::kInventoryProjectionVersionMajor,
@@ -101,6 +114,9 @@ const qol::contracts::InventoryProjectionCallbacks kProjectionCallbacks{
     &projection_module_view_installed,
     &projection_sync_slot,
     &projection_sync_bag,
+    &projection_handle_original_bag_unequip,
+    &projection_handle_use_mercenary_seal,
+    &projection_handle_backpack_equip,
 };
 
 const qol::contracts::InventoryProjectionRegistryApi* projection_registry() {
