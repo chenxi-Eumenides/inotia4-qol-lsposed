@@ -12,35 +12,36 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/save_backup/bundle.cpp
     plugins/save_backup/feature.cpp
     plugins/extension_bag/runtime/state.cpp
-    plugins/extension_bag/runtime/access.cpp
-    plugins/extension_bag/runtime/tabs_ui.cpp
-    plugins/extension_bag/runtime/orchestrator.cpp
-    plugins/extension_bag/public/counts.cpp
+    plugins/extension_bag/runtime/session.cpp
+    plugins/extension_bag/runtime/state_load.cpp
+    plugins/extension_bag/runtime/response.cpp
+    plugins/extension_bag/core/native_tab_layout.cpp
+    plugins/extension_bag/core/host_adapter.cpp
+    plugins/extension_bag/core/item_display_hook.cpp
+    plugins/extension_bag/core/move_merge.cpp
+    plugins/extension_bag/core/tabs_ui.cpp
+    plugins/extension_bag/core/orchestrator.cpp
     plugins/extension_bag/public/projection.cpp
-    plugins/extension_bag/public/status.cpp
-    plugins/extension_bag/public/sale.cpp
-    plugins/extension_bag/public/equip.cpp
     plugins/extension_bag/public/bridge.cpp
-    plugins/extension_bag/runtime/bind.cpp
+    plugins/extension_bag/core/bind.cpp
     plugins/extension_bag/api/api_impl.cpp
+    plugins/extension_bag/api/bag_source.cpp
     plugins/extension_bag/interface/bag_query.cpp
-    plugins/extension_bag/interface/bag_command.cpp
     plugins/extension_bag/usecases/view.cpp
+    plugins/extension_bag/usecases/unequip.cpp
     plugins/extension_bag/usecases/move.cpp
     plugins/extension_bag/usecases/set_bag_count.cpp
     plugins/extension_bag/assembly/claims.cpp
-    plugins/extension_bag/assembly/move_merge_impl.cpp
-    plugins/extension_bag/runtime/observation.cpp
-    plugins/extension_bag/runtime/tabs.cpp
-    plugins/extension_bag/runtime/drag_session.cpp
-    plugins/extension_bag/runtime/input.cpp
-    plugins/extension_bag/runtime/render.cpp
-    plugins/extension_bag/runtime/projection.cpp
-    plugins/extension_bag/runtime/lifecycle.cpp
-    plugins/extension_bag/runtime/ownership.cpp
+    plugins/extension_bag/core/observation.cpp
+    plugins/extension_bag/core/tabs.cpp
+    plugins/extension_bag/core/drag_session.cpp
+    plugins/extension_bag/core/input.cpp
+    plugins/extension_bag/core/render.cpp
+    plugins/extension_bag/core/projection.cpp
+    plugins/extension_bag/core/lifecycle.cpp
+    plugins/extension_bag/core/ownership.cpp
     plugins/extension_bag/transaction/ext_orig.cpp
     plugins/extension_bag/transaction/ext_ext.cpp
-    plugins/extension_bag/transaction/drop.cpp
     plugins/extension_bag/ui/equip.cpp
     plugins/extension_bag/ui/detail_hooks.cpp
     plugins/extension_bag/ui/detail_actions.cpp
@@ -50,13 +51,8 @@ set(QOL_BRIDGE_PLUGIN_SOURCES
     plugins/extension_bag/ui/mix.cpp
     plugins/extension_bag/api/port_state.cpp
     plugins/extension_bag/api/handles.cpp
-    plugins/extension_bag/api/provider.cpp
-    plugins/extension_bag/api/api_table.cpp
-    plugins/extension_bag/api/neutral_provider.cpp
     plugins/extension_bag/persistence/persistence.cpp
-    plugins/extension_bag/extension_bag_geometry.cpp
-    plugins/extension_bag/api/public_api.cpp
-    plugins/extension_bag/http/routes.cpp
+    plugins/extension_bag/core/geometry.cpp
     plugins/attribute_quality/rules.cpp
     plugins/attribute_quality/feature.cpp
     plugins/attribute_quality/plugin.cpp

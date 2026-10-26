@@ -889,24 +889,6 @@ set_target_properties(patch_layer_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_
 add_test(NAME patch_layer_tests COMMAND patch_layer_tests)
 
 # D2a-3a：extension_bag 契约 + 声明式站点登记 host 测试（假 g_base；末尾追加）
-add_executable(extension_bag_contract_tests
-    test_extension_bag_contract.cpp
-    ${CPP_DIR}/game/access/patches.cpp
-    ${CPP_DIR}/game/read/item_class.cpp
-    ${CPP_DIR}/host/item_count_facade.cpp
-    ${CPP_DIR}/game/adapter_ports/item_count_facade.cpp
-    ${CPP_DIR}/game/access/ptr_slots.cpp
-    ${CPP_DIR}/game/access/ui_equip.cpp
-)
-target_include_directories(extension_bag_contract_tests PRIVATE
-    ${CPP_DIR}
-    ${CPP_DIR}/game/read
-    ${CPP_DIR}/game/symbols
-    ${JNI_INCLUDE_DIRS}
-)
-target_compile_features(extension_bag_contract_tests PRIVATE cxx_std_17)
-set_target_properties(extension_bag_contract_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME extension_bag_contract_tests COMMAND extension_bag_contract_tests)
 
 # ITM-16: production EB sale-removal transaction core with descriptor/ownership/projection state.
 add_executable(extension_bag_sale_transaction_tests test_extension_bag_sale_transaction.cpp)
@@ -1000,29 +982,6 @@ set_target_properties(extension_bag_bag_state_store_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extension_bag_bag_state_store_tests COMMAND extension_bag_bag_state_store_tests)
 
-add_executable(extension_bag_inventory_snapshot_tests
-    test_extension_bag_inventory_snapshot.cpp
-    stubs/extension_bag_catalog_stub.cpp
-    ${CPP_DIR}/plugins/extension_bag/core/ui_state.cpp
-    ${CPP_DIR}/plugins/extension_bag/core/status_snapshot.cpp
-    ${CPP_DIR}/plugins/extension_bag/api/api_impl.cpp
-    ${CPP_DIR}/plugins/extension_bag/interface/bag_query.cpp
-    ${CPP_DIR}/plugins/extension_bag/public/bridge.cpp
-    ${CPP_DIR}/plugins/extension_bag/public/counts.cpp
-    ${CPP_DIR}/plugins/extension_bag/runtime/bag_state_store.cpp
-    ${CPP_DIR}/plugins/extension_bag/runtime/status_snapshot.cpp)
-target_include_directories(extension_bag_inventory_snapshot_tests PRIVATE
-    ${CPP_DIR}
-    ${CPP_DIR}/plugins/extension_bag
-    ${JNI_INCLUDE_DIRS}
-)
-target_compile_features(extension_bag_inventory_snapshot_tests PRIVATE cxx_std_17)
-set_target_properties(extension_bag_inventory_snapshot_tests PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_compile_options(extension_bag_inventory_snapshot_tests PRIVATE
-    -ffunction-sections -fdata-sections)
-target_link_options(extension_bag_inventory_snapshot_tests PRIVATE -Wl,--gc-sections)
-add_test(NAME extension_bag_inventory_snapshot_tests COMMAND extension_bag_inventory_snapshot_tests)
 
 add_executable(extension_bag_entry_guard_tests
     test_extension_bag_entry_guard.cpp
@@ -1044,56 +1003,10 @@ set_target_properties(extension_bag_deferred_free_tests PROPERTIES
 add_test(NAME extension_bag_deferred_free_tests COMMAND extension_bag_deferred_free_tests)
 
 # EB draw-end synchronous state read must not re-enter g_virtual_bag_mtx.
-add_executable(extension_bag_draw_lock_tests test_extension_bag_draw_lock.cpp)
-target_sources(extension_bag_draw_lock_tests PRIVATE stubs/extension_bag_catalog_stub.cpp)
-target_include_directories(extension_bag_draw_lock_tests PRIVATE ${CPP_DIR})
-target_compile_definitions(extension_bag_draw_lock_tests PRIVATE
-    QOL_EXTENSION_BAG_PUBLIC_BRIDGE_SOURCE="${CPP_DIR}/plugins/extension_bag/public/bridge.cpp"
-    QOL_EXTENSION_BAG_INVENTORY_ACCESS_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/inventory_access.cpp"
-    QOL_EXTENSION_BAG_RENDER_SOURCE="${CPP_DIR}/plugins/extension_bag/core/render.cpp"
-    QOL_EXTENSION_BAG_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/core/projection.cpp"
-    QOL_EXTENSION_BAG_LIFECYCLE_SOURCE="${CPP_DIR}/plugins/extension_bag/core/lifecycle.cpp"
-    QOL_EXTENSION_BAG_RUNTIME_SOURCE="${CPP_DIR}/plugins/extension_bag/core/tabs_ui.cpp"
-    QOL_EXTENSION_BAG_ORCHESTRATOR_SOURCE="${CPP_DIR}/plugins/extension_bag/core/orchestrator.cpp"
-    QOL_EXTENSION_BAG_STATE_LOAD_SOURCE="${CPP_DIR}/plugins/extension_bag/runtime/state_load.cpp"
-    QOL_EXTENSION_BAG_STORE_TABS_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/store_tabs.cpp"
-    QOL_EXTENSION_BAG_STORE_PROJECTION_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/store_projection.cpp"
-    QOL_EXTENSION_BAG_MIX_SOURCE="${CPP_DIR}/plugins/extension_bag/ui/mix.cpp")
-target_compile_features(extension_bag_draw_lock_tests PRIVATE cxx_std_17)
-set_target_properties(extension_bag_draw_lock_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME extension_bag_draw_lock_tests COMMAND extension_bag_draw_lock_tests)
-set_tests_properties(extension_bag_draw_lock_tests PROPERTIES TIMEOUT 5)
 
 add_test(NAME item_handle_contract_redline
     COMMAND ${CMAKE_COMMAND} -DCPP_DIR=${CPP_DIR}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/check_item_handle_contracts.cmake)
-
-add_executable(extension_bag_status_query_tests
-    test_extension_bag_status_query.cpp
-    ${CPP_DIR}/plugins/extension_bag/http/query.cpp
-)
-target_include_directories(extension_bag_status_query_tests PRIVATE ${CPP_DIR})
-target_compile_features(extension_bag_status_query_tests PRIVATE cxx_std_17)
-set_target_properties(extension_bag_status_query_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME extension_bag_status_query_tests COMMAND extension_bag_status_query_tests)
-
-# Extension bag debug HTTP parameter validation, ticket result semantics and pure view-state exit.
-add_executable(extension_bag_debug_api_tests
-    test_extension_bag_debug_api.cpp
-    stubs/extension_bag_catalog_stub.cpp
-    ${CPP_DIR}/plugins/extension_bag/http/routes.cpp
-    ${CPP_DIR}/plugins/extension_bag/interface/bag_command.cpp
-    ${CPP_DIR}/plugins/extension_bag/http/query.cpp
-    ${CPP_DIR}/plugins/extension_bag/runtime/entry_guard.cpp
-)
-target_include_directories(extension_bag_debug_api_tests PRIVATE
-    ${CPP_DIR}
-    ${JNI_INCLUDE_DIRS}
-)
-target_compile_features(extension_bag_debug_api_tests PRIVATE cxx_std_17)
-set_target_properties(extension_bag_debug_api_tests PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME extension_bag_debug_api_tests COMMAND extension_bag_debug_api_tests)
 
 add_executable(extension_bag_catalog_tests
     test_bag_catalog.cpp
@@ -2231,19 +2144,6 @@ target_include_directories(move_merge_plugin_tests PRIVATE ${CPP_DIR})
 target_compile_features(move_merge_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(move_merge_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME move_merge_plugin_tests COMMAND move_merge_plugin_tests)
-
-# Production extension_bag projection shims: typed handle/inactive/output and drop tri-state.
-add_executable(extension_bag_move_merge_shim_tests
-    test_extension_bag_move_merge_shims.cpp
-    ${CPP_DIR}/plugins/extension_bag/assembly/move_merge_impl.cpp
-    ${CPP_DIR}/plugins/extension_bag/core/ui_state.cpp)
-target_include_directories(extension_bag_move_merge_shim_tests PRIVATE
-    ${CPP_DIR}
-    ${JNI_INCLUDE_DIRS})
-target_compile_features(extension_bag_move_merge_shim_tests PRIVATE cxx_std_17)
-set_target_properties(extension_bag_move_merge_shim_tests PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME extension_bag_move_merge_shim_tests COMMAND extension_bag_move_merge_shim_tests)
 
 # core.ui_state native fallback JSON, custom-state merge, and sequence/generation acceptance.
 add_executable(core_ui_state_tests

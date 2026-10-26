@@ -1008,7 +1008,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 #### 袋信息
 
-`GET /api/item/inventory/bag/{bag}/info[?space=]`
+`GET /api/item/inventory/bag/{bag}/info?space=`
 
 **用途**：获取指定袋的容量与占用数。指定 `space` 时 `{bag}` 是空间内索引；省略时 `{bag}` 是扁平袋号；无效袋返回 HTTP 404 `bag not found`。
 
@@ -1016,7 +1016,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 #### 袋内指定槽
 
-`GET /api/item/inventory/bag/{bag}/{slot}[?space=]`
+`GET /api/item/inventory/bag/{bag}/{slot}?space=`
 
 **用途**：获取指定袋内指定槽物品（**按 `slot` 字段匹配，不跳过空格**）。`{bag}` 按袋信息端点的规则解析；无效袋返回 HTTP 404 `bag not found`，越界槽返回 HTTP 404 `slot not found`。
 
@@ -2176,7 +2176,11 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 ---
 
-#### 扩展背包调试端点（v0.6.16 自 `/api/extension_bag/*` 迁入）
+#### 扩展背包调试端点（已删除）
+
+> **2026-10 `inventory.bag_source` 1.1 契约迁移后，以下 `/api/debug/extension_bag/*` 与
+> POST /api/extension_bag/set_bag_count 已从插件 descriptor 与路由表删除；扩展袋数据统一走
+> `/api/item/inventory*`（`space=2`）。本节仅保留迁移前记录。
 
 > 扩展背包**数据与移动**的正式操作面是 §4.1/§4.2 的原版背包 API（bag 6..10 并入）；以下端点仅服务**视图/选中**控制与内部状态诊断（`mode/selected/inspected/pending/recovery_action` 等），供开发期与控制面阶段验收使用，不构成发布操作面。编号约定与原型阶段声明见 §4.1。
 > 七条 POST 命令先在 HTTP 线程校验参数；缺失、非 int32 或越界字段返回 HTTP 400。合法请求返回 `ticket`，执行结果（包括业务错误）从该票据回取，不由 HTTP 受理响应表示操作成功。
@@ -2193,35 +2197,28 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 **用途**：独立两栏帮助页样例（provider `debug_help`，owner `core.custom_ui`，仅 Debug 注册，Release 无该面板）。左栏装饰圆角容器内复用原生滚动列表，8 个选项提供选中高亮及「选中」文字；右栏圆角容器显示不同标题、说明和色块，仅绘制、不滚动。`open:false` 或返回按钮关闭；重开默认选中首项。HTTP 线程仅排队，所有 UI 操作在游戏主线程执行，最后一个请求优先。返回 `{"ok":true,"queued":true}` 不表示面板已经打开；仅接受单字段布尔 body（否则 400），插件停用为 503；Release 不注册该 native handler。
 
-`GET /api/debug/extension_bag/status`
 
 **用途**：扩展背包内部状态全量读取（使能/注入/控件旗标、视图模式、全部物品、pending 事务与恢复动作预测）。
 
 **返回格式**：`{ "enabled": bool, "injected": bool, "save_panel_hook": bool, "extension_tab_button": bool, "inventory_frame_active": bool, "recovery_action": "none|complete|rollback", "state": { "mode": "original|module|exiting_module", "selected": -1|0..4, "items": [[{slot,category,count,payload(base64)}]], "pending": {...} } }`；非 world 态 `state:{}`。
 
-`POST /api/debug/extension_bag/enter_view`　body `{ "bag": 6..10 }`
 
 **用途**：进入扩展逻辑袋视图（等价点击扩展 tab；要求背包面板已打开）。业务错误：`inventory panel not open` / `already in extension view` / `exit in progress` / `extension bag disabled` / `not in game` / `enter extension view failed`。
 
-`POST /api/debug/extension_bag/exit_view`　body 可省略
 
 **用途**：退回原版背包视图。错误：`not in extension view` / `exit in progress`。
 
 退出会直接恢复原版投影并清理扩展详情状态，不会触发同袋二次点击的袋信息面板路径；退出成功返回原版视图状态。会话未准入时按 `extension bag disabled` / `not in game` 返回业务错误。
 
-`POST /api/debug/extension_bag/select_bag`　body `{ "bag": 6..10 }`
 
 **用途**：扩展视图内切换逻辑袋。业务错误：`not in extension view` / `bag already selected` / `select bag failed` / `extension bag disabled` / `not in game`。
 
-`POST /api/debug/extension_bag/click_item`　body `{ "bag": 6..10, "slot": 0..15 }`
 
 **用途**：选中扩展物品并返回信息（含完整 payload）；空槽 → `{"ok":true,"item":null}`。业务错误：`bag not selected` / `not in extension view` / `slot beyond derived capacity` / `extension bag disabled` / `not in game`。
 
-`POST /api/debug/extension_bag/equip`　body `{ "index": 0..4, "bagType": 1..4 }`
 
 **用途**：开发期测试注入：设置扩展袋装备类型（`set_test_equipped`）。`index`/`bagType` 必填；缺失、非 int32、越界返回 400；会话未准入或当前袋内物品不适配新容量时，票据返回业务错误。
 
-`POST /api/debug/extension_bag/item`　body `{ "index": 0..4, "slot": 0..15, "category": N, "count": N }`
 
 **用途**：开发期测试注入：写入扩展袋测试物品（`set_item`）。四个字段均必填；缺失、非 int32、`index`/`slot`/`category`/`count` 越界返回 400；会话未准入或 slot 超出该袋派生容量时，票据返回业务错误。
 
@@ -2286,7 +2283,6 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 > HTTP 线程只把动作入队到游戏主线程帧任务，立即返回 `{"ok":true}`；UI/面板的 open/close/inject
 > 与快照一律在游戏线程执行，不返回同步业务结果。
 
-`POST /api/debug/extension_bag/unequip`　body `{ "bag": 6..10 }`
 
 **用途**：卸下指定扩展逻辑袋。`bag` 必填；缺失或超出 6..10 返回 400 `bag required (6-10)`。业务错误：`bag not empty` / `no space` / `persist failed` / `unequip failed` / `bag not equipped` / `extension bag disabled` / `not in game`。
 

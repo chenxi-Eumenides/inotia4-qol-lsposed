@@ -15,7 +15,6 @@ extern uintptr_t g_base;
 // 检查游戏地址区间是否落在当前进程具有指定权限的映射中。
 // 游戏 UI 控件会在跨帧重建，调用其 getter 前必须先避免解引用失效控件。
 extern bool game_memory_accessible(const void* address, size_t size, char permission);
-extern JavaVM* g_jvm();   // JNI_OnLoad 缓存（gamebridge.cpp），native 反调 Kotlin 用
 extern void* g_money;
 extern void* g_map_id;
 extern uint32_t current_map_id();
