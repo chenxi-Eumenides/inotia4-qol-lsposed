@@ -35,7 +35,7 @@
 | optional capabilities | 3 项：`inventory.bag_source`、`http.registry`、`ui_panels`。 |
 | provides | 0 项。 |
 | resources | 1 项：背包入口 call patch。 |
-| ports | 2 项：`QOL_PORT_INVENTORY_EXTRAS` 1.1（原版物理袋遍历）、`QOL_PORT_ITEM` 3.8（`for_each_space_slot` 扫描 `space=1` C18 追加袋）。 |
+| ports | 2 项：`QOL_PORT_INVENTORY_EXTRAS` 1.1（保留的只读 extras 入口）、`QOL_PORT_ITEM` 3.8（`for_each_space_slot` 扫描 `space=0` 原版袋与 `space=1` C18 追加袋）。 |
 | features | 1 项：`autosell.auto_sell`，默认 `0`，`kGameplay`/`kToggle`，`display_priority=-1`，callback 为 no-op。 |
 | HTTP route metadata | 2 条：GET/POST `/api/feature/autosell/config`，owner `autosell`，`op_gated=false`，`lease_required=true`。 |
 | JNI | descriptor `jni_count=0`；实际存在 4 个 JNI 导出（见“已知限制与风险”）。 |
@@ -80,6 +80,7 @@ required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是�
 - `remove_task_if_any()` 先递增取消纪元，再在 `g_task_mtx` 内移除任务；扫描在每个槽和每次出售前检查纪元，已进入 `inventory.action.sell` 的单笔事务允许完成（`scan.cpp`）。
 - `sync_task()` 在 `g_task_mtx` 内二次复核 global/session/config，避免检查与注册之间的迟到窗口；重复调用不会重复注册（`scan.cpp`）。
 - `save_enter` 校验 slot 后同步任务；`save_exit` 调 `autosell_store_reject_session()` 并移除任务（`scan.cpp`）。
+- 原版物理袋：`scan_physical_bags` 通过 `QOL_PORT_ITEM.for_each_space_slot(space=0)` 枚举 `bag 0..4`；不再使用 legacy `for_each_bag_slot`，避免关闭背包面板后枚举为空。
 - 注册源扫描：`scan_body` 在物理袋后先调用 `scan_variant_bags`（`space=1` C18 原生追加袋，经 `QOL_PORT_ITEM.for_each_space_slot`），再调用 `scan_registered_sources`（`inventory.bag_source` 1.2 的 `source_count/source_at`，`space>=2`）。每个引用校验句柄/category、`refresh_item_count` 后进入 `process_ref`；每类遍历错误按 code 变化限速 WARN，`kQolErrNotReady` 静默。取消纪元同样在回调内检查。
 
 ### 配置快照与计数
@@ -150,13 +151,15 @@ HTTP POST / 游戏内面板
 ```text
 scheduler (每 20 帧)
   → autosell_tick: global/session/config + scan_gates
-  → for_each_bag_slot (原版物理袋 0..4)
+  → for_each_space_slot(space=0, bag 0..4)
   → scan_variant_bags (QOL_PORT_ITEM.for_each_space_slot space=1)
   → scan_registered_sources (inventory.bag_source 1.2 source_count/source_at → for_each_item, space>=2)
   → refresh_item_count
   → autosell_build_view (item.facts + 注入的 attribute.quality)
   → should_sell_with_reason
   → inventory.action.sell({space_id,bag,slot}, handle, count, "autosell")
+       space=0/1: 原生 item_at + remove/add_money
+       space>=2: QolBagSource.item_at 预读 + export/remove/import
   → 统计 sold/failed + lastScanFrame
 ```
 
@@ -212,6 +215,7 @@ save_exit → reject session → remove task
 | `autosell_plugin_tests` | descriptor/资源/feature、required/optional 能力、2 个 port、install/deactivate 对面板 provider 的登记/反登记；扫描/UI 以桩替代。 |
 | `autosell_scan_gates_tests` | 纯门禁顺序、短路、面板查询失败软处理、reason 名称。 |
 | `autosell_scan_task_tests` | global/session/config 门控、scheduler add/remove 去重、重复 sync 幂等；`for_each_space_slot` 以桩替代。 |
+| `inventory_action_sell_tests` | core.item 原生出售、provider 空间预读/export/remove/import、回滚与 stale 语义。 |
 
 以上 target 的源文件为 `tests/test_autosell_*.cpp`，CMake 注册见 `tests/CMakeLists.txt`。
 
@@ -219,8 +223,8 @@ save_exit → reject session → remove task
 
 - Host 全量 `155/155` 通过（本轮改动后）。
 - `check_arch.py`：layers/offsets/jni/resources 全部通过。
-- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610261708_9917df9026c0.apk`，sha256 `9917df9026c06c1043ed69fbc6b6e093df2ed140283bfbefd5b20aa77f917788`。
-- 本轮未做真机验证；入口/面板/注册源扫描/规则实际行为待设备验收。
+- Android Debug 构建：`output/inotia4_qol_lsposed_debug_2610261921_ccddcac32d7e.apk`，sha256 `ccddcac32d7ec2c7faf69f5b1cac1266c0ea054cac2238e4f5ff7de9a946b7d3`。
+- C18 v520 真机（LSPatch 集成包）验证：`refs=45 view_skipped=0 no_rule=33 no_sell=0 sold=12 failed=0 stale=0`；原版背包/白装、EB 空间的白/蓝装、宝石、背包、英雄徽章均已出售；剩余为药水/卷轴/材料等未命中规则物品。当前存档无骰子样本，骰子分类仅由 host 测试覆盖。
 
 ## 已删除旧结构
 

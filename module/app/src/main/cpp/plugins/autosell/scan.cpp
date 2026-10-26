@@ -30,15 +30,18 @@ uint64_t g_save_exit_subscription = 0;
 std::atomic<bool> g_global_enabled{false};
 std::atomic<bool> g_config_enabled{false};
 std::atomic<uint64_t> g_scan_cancel_epoch{0};
-bool g_has_bag_traversal_error = false;
-int g_last_bag_traversal_error = 0;
 enum class InventoryActionState : int { kAvailable, kCapabilityUnavailable, kSellUnavailable };
 InventoryActionState g_inventory_action_state = InventoryActionState::kAvailable;
 std::atomic<int> g_last_blocked_gate{-1};
 std::unordered_map<int32_t, int32_t> g_last_bag_source_error_by_space{};
+bool g_has_physical_scan_error = false;
+int g_last_physical_scan_error = 0;
 bool g_has_variant_scan_error = false;
 int g_last_variant_scan_error = 0;
 std::unordered_set<int> g_logged_view_reasons{};
+std::unordered_set<int> g_logged_no_rule_categories{};
+std::unordered_set<int> g_logged_no_sell_categories{};
+std::unordered_set<int> g_logged_sell_statuses{};
 
 struct InventoryActionLookup {
     QolResult result = qol::contracts::error(kQolErrNotReady, "not ready", 9);
@@ -71,6 +74,13 @@ void note_inventory_action_state(InventoryActionState state) {
 struct ScanStats {
     int sold = 0;
     int failed = 0;
+    int refs = 0;
+    int view_skipped = 0;
+    int no_rule = 0;
+    int no_sell = 0;
+    int stale = 0;
+    int empty = 0;
+    int no_handle = 0;
 };
 
 void log_blocked_gate_once(int64_t frame, ScanGateReason reason) {
@@ -86,12 +96,6 @@ struct ScanRound {
     uint64_t epoch;
     int64_t frame;
     bool cancellation_logged = false;
-};
-
-struct PhysicalScanCtx {
-    const autosell::Config* cfg;
-    ScanStats* stats;
-    ScanRound* round;
 };
 
 bool scan_round_cancelled(ScanRound& round) {
@@ -165,10 +169,12 @@ const qol::contracts::AttributeQualityApi* quality_api_provider() {
 
 void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref,
                  const autosell::Config& cfg, ScanStats* stats, ScanRound& round) {
+    ++stats->refs;
     autosell::ItemView view;
     const AutosellViewBuildReason view_reason = autosell_build_view(
         ref, &view, nullptr, &quality_api_provider);
     if (view_reason != AutosellViewBuildReason::kBuilt) {
+        ++stats->view_skipped;
         const int reason = static_cast<int>(view_reason);
         if (g_logged_view_reasons.insert(reason).second) {
             AUTOSELL_LOG_WARN("scan item view skipped reason=%d category=%d space_id=%d bag=%d slot=%d",
@@ -178,11 +184,29 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
     }
 
     const auto decision = autosell::should_sell_with_reason(view, cfg);
-    if (decision != autosell::DecisionReason::kRuleMatch) return;
+    if (decision != autosell::DecisionReason::kRuleMatch) {
+        ++stats->no_rule;
+        if (g_logged_no_rule_categories.insert(ref.category).second) {
+            AUTOSELL_LOG_WARN(
+                "scan no-rule category=%d space=%d bag=%d slot=%d rarity=%d equip=%d jewel=%d "
+                "backpack=%d badge=%d dice=%d cfg(rarity=%d,enhance=%d,socket=%d,gemTier=%d,"
+                "gemRange=%d,backpack=%d,badge=%d,dice=%d)",
+                ref.category, ref.space_id, ref.bag, ref.slot, view.rarity,
+                view.is_equip ? 1 : 0, view.is_jewel ? 1 : 0, view.is_backpack ? 1 : 0,
+                view.badge_rank, view.dice_tier, cfg.rarity, cfg.enhance, cfg.socket,
+                cfg.gem_tier, cfg.gem_range, cfg.backpack_tier, cfg.badge_tier, cfg.dice_tier);
+        }
+        return;
+    }
 
     int32_t no_sell = 0;
     if (qol::features::autosell::read_only::item_is_no_sell(ref.category, &no_sell) &&
         no_sell != 0) {
+        ++stats->no_sell;
+        if (g_logged_no_sell_categories.insert(ref.category).second) {
+            AUTOSELL_LOG_WARN("scan no-sell category=%d space=%d bag=%d slot=%d", ref.category,
+                              ref.space_id, ref.bag, ref.slot);
+        }
         return;
     }
 
@@ -204,14 +228,34 @@ void process_ref(const qol::features::autosell::read_only::InventoryItemRef& ref
         ++stats->sold;
         return;
     }
-    if (result.status == qol::contracts::InventorySellStatus::kStale ||
-        result.status == qol::contracts::InventorySellStatus::kEmptySlot ||
-        result.status == qol::contracts::InventorySellStatus::kNoItemHandle) {
+    if (result.status == qol::contracts::InventorySellStatus::kStale) {
+        ++stats->stale;
+        if (g_logged_sell_statuses.insert(static_cast<int>(result.status)).second) {
+            AUTOSELL_LOG_WARN("sell stale space_id=%d bag=%d slot=%d category=%d",
+                              ref.space_id, ref.bag, ref.slot, ref.category);
+        }
+        return;
+    }
+    if (result.status == qol::contracts::InventorySellStatus::kEmptySlot) {
+        ++stats->empty;
+        if (g_logged_sell_statuses.insert(static_cast<int>(result.status)).second) {
+            AUTOSELL_LOG_WARN("sell empty slot space_id=%d bag=%d slot=%d category=%d",
+                              ref.space_id, ref.bag, ref.slot, ref.category);
+        }
+        return;
+    }
+    if (result.status == qol::contracts::InventorySellStatus::kNoItemHandle) {
+        ++stats->no_handle;
+        if (g_logged_sell_statuses.insert(static_cast<int>(result.status)).second) {
+            AUTOSELL_LOG_WARN("sell no handle space_id=%d bag=%d slot=%d category=%d",
+                              ref.space_id, ref.bag, ref.slot, ref.category);
+        }
         return;
     }
     ++stats->failed;
-    AUTOSELL_LOG_WARN("sell failed bag=%d slot=%d category=%d status=%d", ref.bag, ref.slot,
-                      ref.category, static_cast<int>(result.status));
+    AUTOSELL_LOG_WARN("sell failed space_id=%d bag=%d slot=%d category=%d status=%d",
+                      ref.space_id, ref.bag, ref.slot, ref.category,
+                      static_cast<int>(result.status));
 }
 
 const qol::contracts::QolBagSourceRegistryApi* bag_source_registry() {
@@ -285,72 +329,105 @@ void scan_registered_sources(const autosell::Config& cfg, ScanStats* stats,
     }
 }
 
-struct VariantScanCtx {
+struct SpaceScanCtx {
+    int32_t space_id;
+    int32_t max_bag;
     const autosell::Config* cfg;
     ScanStats* stats;
     ScanRound* round;
 };
 
-int32_t scan_variant_item(const qol::contracts::QolInventoryItemRef* ref, void* user) {
-    auto* scan = static_cast<VariantScanCtx*>(user);
+int32_t scan_space_item(const qol::contracts::QolInventoryItemRef* ref, void* user) {
+    auto* scan = static_cast<SpaceScanCtx*>(user);
     if (scan == nullptr || scan->cfg == nullptr || scan->stats == nullptr ||
         scan->round == nullptr) {
         return 0;
     }
     if (scan_round_cancelled(*scan->round)) return 1;
-    if (ref == nullptr || ref->space_id != qol::contracts::kQolBagSpaceVariant ||
-        ref->item.slot == 0 || ref->item.generation == 0 || ref->category <= 0) {
+    if (ref == nullptr || ref->space_id != scan->space_id || ref->item.slot == 0 ||
+        ref->item.generation == 0 || ref->category <= 0) {
         return 0;
     }
+    if (scan->max_bag >= 0 && ref->bag > scan->max_bag) return 0;
     qol::features::autosell::read_only::InventoryItemRef copy = *ref;
     qol::features::autosell::read_only::refresh_item_count(&copy);
     process_ref(copy, *scan->cfg, scan->stats, *scan->round);
     return scan_round_cancelled(*scan->round) ? 1 : 0;
 }
 
-void scan_variant_bags(const autosell::Config& cfg, ScanStats* stats, ScanRound& round) {
-    if (stats == nullptr || scan_round_cancelled(round)) return;
-    VariantScanCtx scan{&cfg, stats, &round};
-    const QolResult result = qol::features::autosell::read_only::for_each_space_slot(
-        qol::contracts::kQolBagSpaceVariant, &scan_variant_item, &scan);
-    if (result.ok == kQolOk) {
-        g_has_variant_scan_error = false;
-    } else if (!g_has_variant_scan_error || g_last_variant_scan_error != result.code) {
-        g_has_variant_scan_error = true;
-        g_last_variant_scan_error = result.code;
-        AUTOSELL_LOG_WARN("scan variant bags failed space_id=%d code=%d",
-                          qol::contracts::kQolBagSpaceVariant, result.code);
+void scan_native_space(int32_t space_id, int32_t max_bag, const autosell::Config& cfg,
+                       ScanStats* stats, ScanRound& round, bool* has_error,
+                       int* last_error) {
+    if (stats == nullptr || has_error == nullptr || last_error == nullptr ||
+        scan_round_cancelled(round)) {
+        return;
     }
+    SpaceScanCtx scan{space_id, max_bag, &cfg, stats, &round};
+    const QolResult result = qol::features::autosell::read_only::for_each_space_slot(
+        space_id, &scan_space_item, &scan);
+    if (result.ok == kQolOk) {
+        *has_error = false;
+    } else if (!*has_error || *last_error != result.code) {
+        *has_error = true;
+        *last_error = result.code;
+        AUTOSELL_LOG_WARN("scan native space failed space_id=%d code=%d", space_id, result.code);
+    }
+}
+
+void scan_physical_bags(const autosell::Config& cfg, ScanStats* stats, ScanRound& round) {
+    scan_native_space(qol::contracts::kQolBagSpaceOriginal, kLastPhysicalBag, cfg, stats, round,
+                      &g_has_physical_scan_error, &g_last_physical_scan_error);
+}
+
+void scan_variant_bags(const autosell::Config& cfg, ScanStats* stats, ScanRound& round) {
+    scan_native_space(qol::contracts::kQolBagSpaceVariant, -1, cfg, stats, round,
+                      &g_has_variant_scan_error, &g_last_variant_scan_error);
 }
 
 void scan_body(const autosell::Config& cfg, int64_t frame, ScanRound& round) {
     if (scan_round_cancelled(round)) return;
     ScanStats stats;
-    PhysicalScanCtx physical{&cfg, &stats, &round};
-    const QolResult traversal_result = qol::features::autosell::read_only::for_each_bag_slot(
-        [](const qol::features::autosell::read_only::InventoryItemRef* source, void* ctx) -> int32_t {
-            auto* scan = static_cast<PhysicalScanCtx*>(ctx);
-            if (scan_round_cancelled(*scan->round)) return 1;
-            if (source == nullptr || source->bag > kLastPhysicalBag) return 0;
-            auto ref = *source;
-            qol::features::autosell::read_only::refresh_item_count(&ref);
-            process_ref(ref, *scan->cfg, scan->stats, *scan->round);
-            return scan_round_cancelled(*scan->round) ? 1 : 0;
-        },
-        &physical);
-    if (traversal_result.ok == kQolOk) {
-        g_has_bag_traversal_error = false;
-    } else if (!g_has_bag_traversal_error ||
-               g_last_bag_traversal_error != traversal_result.code) {
-        g_has_bag_traversal_error = true;
-        g_last_bag_traversal_error = traversal_result.code;
-        AUTOSELL_LOG_WARN("scan bag traversal failed code=%d", traversal_result.code);
-    }
-
+    scan_physical_bags(cfg, &stats, round);
     if (!scan_round_cancelled(round)) scan_variant_bags(cfg, &stats, round);
     if (!scan_round_cancelled(round)) scan_registered_sources(cfg, &stats, round);
 
     autosell_note_scan(frame, stats.sold, stats.failed);
+    static int last_refs = -1;
+    static int last_view_skipped = -1;
+    static int last_no_rule = -1;
+    static int last_no_sell = -1;
+    static int last_sold = -1;
+    static int last_failed = -1;
+    static int last_stale = -1;
+    static int last_empty = -1;
+    static int last_no_handle = -1;
+    static bool zero_refs_logged = false;
+    const bool changed = stats.refs != last_refs || stats.view_skipped != last_view_skipped ||
+                         stats.no_rule != last_no_rule || stats.no_sell != last_no_sell ||
+                         stats.sold != last_sold || stats.failed != last_failed ||
+                         stats.stale != last_stale || stats.empty != last_empty ||
+                         stats.no_handle != last_no_handle;
+    if (stats.refs == 0) {
+        if (!zero_refs_logged) {
+            zero_refs_logged = true;
+            AUTOSELL_LOG_WARN("scan frame=%lld refs=0", static_cast<long long>(frame));
+        }
+    } else if (changed) {
+        last_refs = stats.refs;
+        last_view_skipped = stats.view_skipped;
+        last_no_rule = stats.no_rule;
+        last_no_sell = stats.no_sell;
+        last_sold = stats.sold;
+        last_failed = stats.failed;
+        last_stale = stats.stale;
+        last_empty = stats.empty;
+        last_no_handle = stats.no_handle;
+        AUTOSELL_LOG_WARN(
+            "scan frame=%lld refs=%d view_skipped=%d no_rule=%d no_sell=%d sold=%d failed=%d "
+            "stale=%d empty=%d no_handle=%d",
+            static_cast<long long>(frame), stats.refs, stats.view_skipped, stats.no_rule,
+            stats.no_sell, stats.sold, stats.failed, stats.stale, stats.empty, stats.no_handle);
+    }
     if (stats.sold > 0 || stats.failed > 0) {
         AUTOSELL_LOG_INFO("scan frame=%lld sold=%d failed=%d", static_cast<long long>(frame),
                           stats.sold, stats.failed);

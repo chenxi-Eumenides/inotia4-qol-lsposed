@@ -124,7 +124,17 @@ contracts::InventorySellResult sell_item(contracts::QolActionRef ref,
 
     const contracts::QolBagRef bag{ref.space_id, ref.bag};
     contracts::QolInventoryItemRef item{};
-    const QolResult read = g_item_port->read.item_at(&bag, ref.slot, &item);
+    const contracts::QolBagSource* read_bag_source =
+        ref.space_id >= contracts::kQolBagSpaceFirstRegistered
+            ? qol::features::core_item::find_bag_source(ref.space_id)
+            : nullptr;
+    QolResult read;
+    if (ref.space_id >= contracts::kQolBagSpaceFirstRegistered && read_bag_source != nullptr &&
+        read_bag_source->item_at != nullptr) {
+        read = read_bag_source->item_at(ref.bag, ref.slot, &item);
+    } else {
+        read = g_item_port->read.item_at(&bag, ref.slot, &item);
+    }
     if (!contracts::succeeded(read)) {
         result.status = read.code == kQolErrNotFound
                             ? contracts::InventorySellStatus::kEmptySlot
@@ -214,8 +224,7 @@ contracts::InventorySellResult sell_item(contracts::QolActionRef ref,
         return result;
     }
 
-    const contracts::QolBagSource* bag_source =
-        qol::features::core_item::find_bag_source(ref.space_id);
+    const contracts::QolBagSource* bag_source = read_bag_source;
     if (bag_source == nullptr || bag_source->export_item == nullptr ||
         bag_source->remove == nullptr || bag_source->import_item == nullptr) {
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
