@@ -68,6 +68,7 @@
 - `extension-bag/display-hook.md`：装备页/商店/合成投影读取虚拟化（`ControlItem_SetItem/GetItem`、`INVEN_GetBagSize` hooks；不写 `INVEN_pItem` 或容量字）。
 - `custom-ui/refactor-plan.md`：`core.custom_ui` 局部拆分方案（Debug 编译门、形状绘制抽离、确认框 overlay 可选拆分；不做 L0–L6 全量重构）。
 - `core-character/architecture.md`：`core.character` 收敛方案（写面判定单点化、路由表 drift 防护、解析器合并、快照只读视图；不做 L0–L6 全量重构）。
+- `eight-way-move/design.md`：触屏方向摇杆八向/全向移动设计与原型记录（自定义键码翻译、原版 `PressKeyPlay` 链复用、`CHAR_Move` 调用点双轴扩展；原型默认关闭，真机待验收）。
 - `adr/`：架构决策记录。
 
 ### `archive/`：只读历史归档

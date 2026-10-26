@@ -2239,6 +2239,26 @@ set_target_properties(popup_blocker_plugin_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME popup_blocker_plugin_tests COMMAND popup_blocker_plugin_tests)
 
+add_executable(eight_way_move_tests
+    test_eight_way_move.cpp
+)
+target_include_directories(eight_way_move_tests PRIVATE ${CPP_DIR})
+target_compile_features(eight_way_move_tests PRIVATE cxx_std_17)
+set_target_properties(eight_way_move_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME eight_way_move_tests COMMAND eight_way_move_tests)
+
+add_executable(eight_way_move_plugin_tests
+    test_eight_way_move_plugin.cpp
+    ${CPP_DIR}/plugins/eight_way_move/plugin.cpp
+    ${CPP_DIR}/plugins/eight_way_move/feature.cpp
+)
+target_include_directories(eight_way_move_plugin_tests PRIVATE ${CPP_DIR})
+target_compile_features(eight_way_move_plugin_tests PRIVATE cxx_std_17)
+set_target_properties(eight_way_move_plugin_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME eight_way_move_plugin_tests COMMAND eight_way_move_plugin_tests)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)

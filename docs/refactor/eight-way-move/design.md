@@ -1,0 +1,514 @@
+# 八向/全向移动设计
+
+状态：原型已实现（`eight_way_move.direction`，默认关闭，Debug「调试开关」）；构建与 Host 单测通过，真机 NOT_ACCEPTED。
+范围：Android 触屏虚拟方向摇杆；不改键盘、AI、寻路和其他移动调用点。
+
+## 1. 结论先行
+
+- 原版方向触摸只有 **4 个方向**（上/下/左/右），斜向触点被主轴规则压成最近的基本方向；45° 平局归水平。
+- 原版**没有可用的“点击地图寻路移动”**。`TouchGameObject_EventMap` 里的 `CHAR_SearchPathAsLocationAndNotify` 不是触屏下的移动入口；`UIPlay_Create(1)` 会关闭地图/角色/物品输入层，Android 触屏只保留虚拟摇杆。
+- 可以拿到触摸点相对命中区的坐标：`UIPlay_ButtonDirection` 的第三个参数就是 `{x,y}` 指针。加上 `TouchHandle` 偏移后，可以相对 `0x15`（可见摇杆）或 `0x16`（扩大命中区）的中心计算。
+- 推荐方案：**自定义方向键码 + 原版按键接收链 + 只在 `CHAR_Move` 调用点增加第二轴**。
+  - 触摸层把八向扇区编码成自定义键码，写入 `KEY_nCode`。
+  - `GAMESTATE_PressKeyPlay` 入口把自定义键码翻译成原版主方向键码，并把主方向键码写回 `KEY_nCode`，再调用原函数。
+  - 原版 `GAMESTATE_PressKeyPlay` 完整执行：行走动作、8px 转向闸门、切图检测、拾取、`CHAR_Move`、推动、动画。
+  - 只在 `GAMESTATE_PressKeyPlay+0x21c` 的 `bl CHAR_Move` 调用点加一层 wrapper，斜向时先静默移动主轴、再完整移动副轴。
+- 这样不复制原版移动分支，逻辑遗漏面最小；自定义键码只承担“触摸意图 → 键码接收器”的传输。
+
+## 2. 原版事实与约束
+
+### 2.1 触摸层
+
+`STATE_EnterGame`（`0x1511a0`）固定调用 `UIPlay_Create(1)`（`0xc69c8`），触屏模式创建虚拟摇杆：
+
+| 控件 | 矩形 | 说明 |
+|---|---|---|
+| `0x15` | `(10, H-252, 252, 252)` | 可见摇杆；Proc = `UIPlay_ButtonDirection`（`0xc66d4`） |
+| `0x16` | `(10, H-380, 380, 380)` | 扩大命中/拖动区；自身无 Proc、`SetActive(0)` |
+
+`UIPlay_ButtonDirection` 分支：
+
+- `1`：按下。置 `UIPlay_bPressedDirection=1`、`0x3076d3=1`、清 `KEY_bReleased`，计算方向并 `KEY_SetCode`。
+- `0x40`：按住拖动。仅当 `UIPlay_bPressedDirection != 0` 时重算；拖出 `0x16` 则停止。
+- `2/8`：抬起；`4`：取消/移出。
+- `0x10/0x20/0x100`：不产生方向移动。
+
+原版方向计算：
+
+```
+dx = offset.x + point.x - (rect15.x + rect15.w/2)
+dy = (rect15.y + rect15.h/2) - (offset.y + point.y)   // 上为正
+if |dx| >= |dy|:  dx >= 0 ? 右 : 左
+else:             dy > 0  ? 上 : 下
+```
+
+`0x15` 中心：`(136, H-126)`；`0x16` 中心：`(200, H-190)`。原版用 `0x15` 中心，`0x16` 只做命中测试。
+
+### 2.2 原版方向枚举
+
+`CHAR_Move(ch, dir, delta, flag)`：
+
+| dir | 位移 |
+|---|---|
+| 0 | `y += delta`（下） |
+| 1 | `x -= delta`（左） |
+| 2 | `y -= delta`（上） |
+| 3 | `x += delta`（右） |
+
+`CHAR_Move` 只移动一个轴，不更新朝向、不启动行走动作；调用方负责 `CHAR_SetDirection` 和 `CHAR_StartActionID(ch,2)`。
+
+### 2.3 原版移动链
+
+`GAMESTATE_PressKeyPlay`（`0x9cfc0`）方向键分支：
+
+1. 非行走动作时 `CHAR_StartActionID(ch, 2)`。
+2. 键码映射到 `dir`。
+3. 转向闸门：当前朝向相同，或 `(x & 7) == 0 && (y & 7) == 0`，才允许 `CHAR_SetDirection`；否则置 `ch+0x2e0=1`，本帧不移动，等 `CHAR_Process` 用 `CHAR_MoveOnWaitCoord` 补到 8px 对齐点。
+4. `CHAR_SetTarget(ch,0)`、`GAMEPLAY_GoMapLinkByChar(ch, x>>4, y>>4, 1)`。
+5. `CHAR_Move(ch, dir, CHAR_GetAttr(ch,0x5b), 0)`。
+6. 失败时按返回值处理；`CHAR_MoveAsBlock` 负责推动。
+7. 更新行走动画计数 `ch+0x299`。
+
+### 2.4 `KEY` 表与按键接收
+
+- `KEY_nCode`：`0x71353c`。
+- `KEY` 表：`0x713540`，`KEY[0]=左`、`[1]=右`、`[2]=上`、`[3]=下`。
+- `STATE_ProcessGame`（`0x151540`）每帧 → `GAMESTATE_PressKey`（`0x151310`）→ `GAMESTATE_fpPressKey`（= `GAMESTATE_PressKeyPlay`）。
+- `GAMESTATE_PressKey` 在调用 `fpPressKey` 后会把 `KEY_nCode` 与 `KEY[0..3]` 比较；**不匹配就清 `0x3076d3`（按住有效位）**。因此自定义键码在 `PressKeyPlay` 返回前必须写回主方向键码，否则按住一帧后运动停止。
+
+## 3. 方案总览
+
+```text
+UIPlay_ButtonDirection 入口 hook
+  └─ 原函数先执行（保留按下态/命中/视觉）
+  └─ 计算触点相对命中区中心的 dx/dy
+  └─ 8 向分类 → 主方向、副方向
+  └─ 写自定义键码 KEY_nCode = QOL_DIR_BASE | sector
+  └─ 保存 state
+
+GAMESTATE_PressKeyPlay 入口 hook
+  └─ 读 key
+  └─ 自定义键码 → 查 state，写回主方向键码，调用原函数
+  └─ 原函数完整跑完原版移动链
+
+GAMESTATE_PressKeyPlay+0x21c 的 bl CHAR_Move 调用点 patch
+  └─ 非斜向/非可信状态 → 直接调原 CHAR_Move
+  └─ 斜向 → 先 CHAR_Move(主轴, delta, flag=1)，再 CHAR_Move(副轴, delta, flag=0)
+```
+
+### 3.1 为什么不在自定义键码处理里自己写移动
+
+如果 `PressKeyPlay` 的 hook 直接复刻“设朝向、转向闸门、切图、拾取、`CHAR_Move`、推动、动画”，就会与原版分支形成第二套逻辑，后续原版行为变化或遗漏都会变成 bug。
+自定义键码只做翻译，原函数继续跑；唯一的移动增量放在 `CHAR_Move` 调用点。
+
+### 3.2 为什么不在 `GAMESTATE_PressKey` 里翻译
+
+`GAMESTATE_PressKey` 负责 `KEY_bReleased`、`0x3076d3`、状态门和 `fpPressKey` 调用，翻译放在这里也能做；但 `PressKeyPlay` 是实际的方向键接收器，参数就是键码，写回 `KEY_nCode` 的时机也更靠近后置检查。选择 `PressKeyPlay` 入口，避免影响 `GAMESTATE_PressKey` 的其他按键路径。
+
+### 3.3 为什么只 patch `bl CHAR_Move` 调用点
+
+`CHAR_Move` 还被 `CHAR_MoveAsBlock`、`CHAR_MoveAsPath`、`CHAR_MoveOnWaitCoord`、AI 使用。全局 hook `CHAR_Move` 需要复杂的调用者判定；只改 `GAMESTATE_PressKeyPlay+0x21c` 这一个玩家方向键调用点，天然不影响 AI/寻路/推动内部调用。
+
+## 4. 触摸层设计
+
+### 4.1 坐标系
+
+从 `UIPlay_ButtonDirection` 第三个参数读 `int64_t point[2]`。
+`TouchHandle_GetControlOffset()`（`0xa3190`）返回的全局偏移前两个 64 位字段是 `offset.x/offset.y`。
+
+推荐使用 **`0x16` 命中区中心**（用户要求的“命中区中心”）：
+
+```
+cx = 10 + 380/2 = 200
+cy = (H - 380) + 380/2 = H - 190
+dx = offset.x + point.x - cx
+dy = cy - (offset.y + point.y)          // 上为正
+```
+
+如果希望与原版视觉摇杆中心一致，改用 `0x15` 中心 `(136, H-126)`。两者差异：
+
+- 用 `0x15` 中心：与原版主方向判定一致，可以只加副轴，不需要覆盖主方向。
+- 用 `0x16` 中心：命中区更大、中心偏右上；此时必须用自定义键码覆盖主方向，否则原版主方向（按 `0x15` 算）会和我们的八向扇区不一致。
+
+本方案使用自定义键码，因此可以自由选择 `0x16` 中心。
+
+### 4.2 死区与八向扇区
+
+建议小死区 `8px`（原版没有死区，中心点会判成右；八向需要避免中心抖动）。命中死区时必须显式写 `KEY_nCode=0` 停住，不能只清模块状态：原触摸回调已经先写入普通方向键码。拖出死区时原回调的 `0x40` 分支会重新置按住位，下一次触摸 hook 恢复自定义码。
+
+```
+if dx*dx + dy*dy < 8*8: 停止（写 0，清 state）
+```
+
+八向扇区按 45° 划分，`2.414 = tan(67.5°)`：
+
+```
+ax = |dx|; ay = |dy|
+if ax > 2.414*ay       -> 纯水平（E/W）
+else if ay > 2.414*ax  -> 纯垂直（N/S）
+else                   -> 斜向（NE/SE/SW/NW）
+```
+
+斜向时主方向取主轴（`|dx| >= |dy|` 取水平，平局归水平，和原版一致），副方向取另一轴。
+
+扇区索引 `sector` 0..7，建议 N=0、NE=1、E=2、SE=3、S=4、SW=5、W=6、NW=7。映射：
+
+| sector | 主方向 | 副方向 |
+|---|---|---|
+| N | 上(2) | 无 |
+| NE | 水平占优→右(3)，否则上(2) | 另一轴 |
+| E | 右(3) | 无 |
+| SE | 水平占优→右(3)，否则下(0) | 另一轴 |
+| S | 下(0) | 无 |
+| SW | 水平占优→左(1)，否则下(0) | 另一轴 |
+| W | 左(1) | 无 |
+| NW | 水平占优→左(1)，否则上(2) | 另一轴 |
+
+主方向键码：`KEY[table_index]`，table_index 为 左=0、右=1、上=2、下=3。
+
+### 4.3 触摸状态机
+
+```
+Idle
+  └─ event 1/0x40 且原函数 press-active=1 且离开死区 → Active(sector)
+Active
+  ├─ event 1/0x40 重新算 → Active(new sector)
+  ├─ event 2/4/8 或 press-active=0 → Idle
+  └─ 拖出命中区 → Idle
+```
+
+状态字段：
+
+```
+enabled
+active
+trusted          // 当前主键来自自定义键码翻译或其后继帧
+sector
+primary_dir      // 0..3
+primary_key      // KEY 表原值
+secondary_dir    // -1 = 无
+dx, dy           // 原始向量，供全向模式使用
+```
+
+`trusted` 的作用：防止玩家按住摇杆时又按物理方向键/其他键，导致副轴被错误叠加。只有 `trusted=true` 且 `dir == primary_dir` 才加副轴。
+
+## 5. 自定义键码
+
+### 5.1 编码
+
+```
+QOL_DIR_BASE = 0x51000000
+code = QOL_DIR_BASE | sector          // 八向
+// 全向可扩展：QOL_DIR_BASE | 0x100 | vector_id
+```
+
+`0x51000000` 远高于 Android keycode 和游戏内部负键码；不会与原版 `KEY` 表匹配。
+`GAMESTATE_PressKey` 对未知键码不会命中任何快捷键比较，会正常调用 `fpPressKey`；`PressKeyPlay` 入口 hook 在它做任何比较前拦截。
+
+### 5.2 翻译规则
+
+`GAMESTATE_PressKeyPlay` 入口 wrapper：
+
+```
+if key is custom:
+    if !state.active: 写 KEY_nCode=0; backup(0); return
+    写 KEY_nCode = state.primary_key
+    state.trusted = true
+    backup(state.primary_key)
+else:
+    if key is one of KEY[0..3]:
+        if state.active && state.trusted && key == state.primary_key:
+            保持 state
+        else:
+            state.trusted = false
+    else:
+        state.trusted = false
+    backup(key)
+```
+
+关键点：**写回 `state.primary_key` 必须在 `backup()` 返回前完成**，因为 `GAMESTATE_PressKey` 在 `backup()` 返回后会读 `KEY_nCode` 判断是否清 `0x3076d3`。写回后它看到的是原版方向键，按住状态保持。
+
+### 5.3 清理
+
+- 触摸抬起/取消/拖出：清 `state.active/trusted`；仅当 `state.owns_input`（当前键码/按住位由本功能写入）时写 `KEY_nCode=0` 并清按住位。不能只判断“是否自定义码”：自定义码可能已经在上一帧被翻译成普通主方向码，残留的普通码 + 按住位会在回到 Play 后继续移动；但也不能无条件清，否则会误伤同时按住的物理键。
+- 死区/无效触点：清 state 并显式写 `KEY_nCode=0`。原触摸回调已经先写入普通方向键码，只清 state 不能阻止本帧 `CHAR_Move`；写 0 后 `GAMESTATE_PressKey` 的后置检查会清按住位。拖出死区时原触摸回调的 `0x40` 分支会重新置按住位，下一次触摸 hook 再写自定义码。
+- 插件 disable/deactivate：`set_enabled(false)` + `reset()`，清 state，必要时写 0。
+- 游戏状态切到非 play：`GAMESTATE_PressKeyPlay` 不会被调用，自定义码可能残留。插件注册每 30 帧的逻辑帧任务调用端口 `poll()`；`poll` 在 `world_game_state_gate()!=0` 时清 state/残留码。该任务不是移动逻辑，只做状态清理。
+
+## 6. 移动层设计
+
+### 6.1 调用点
+
+```
+GAMESTATE_PressKeyPlay + 0x21c  (0x9d1dc)
+原指令字：0x9401318B  (bl 0xe9808 CHAR_Move)
+```
+
+在 `game/access/patches.cpp` 注册：
+
+```
+{"P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE",
+ F_GAMESTATE_PRESSKEYPLAY_VMA, 0x21c, 0x9401318B, 0,
+ PatchKind::kBlRedirect}
+```
+
+wrapper 签名与原 `CHAR_Move` 一致：
+
+```
+int32_t eight_way_char_move(void* ch, int32_t dir, int32_t delta, int32_t flag);
+```
+
+### 6.2 斜向执行
+
+```
+if !enabled || !state.active || !state.trusted: 原 CHAR_Move
+if flag != 0: 原 CHAR_Move                 // 静默/非方向键调用不叠加
+if state.secondary_dir < 0: 原 CHAR_Move
+if dir != state.primary_dir: 原 CHAR_Move
+if ch != lead_member(): 原 CHAR_Move
+if gamestate_state() != 0: 原 CHAR_Move
+if *(void**)((char*)ch + 0x2f0) != nullptr: 原 CHAR_Move   // 有寻路路径
+
+r_pri = CHAR_Move(ch, dir, delta, 1)
+if r_pri == 3: return 3
+if r_pri != 0: return r_pri
+r_sec = CHAR_Move(ch, state.secondary_dir, delta, 0)
+return 0   // 主轴已移动；副轴被挡时也按成功返回，避免原版再次推动
+```
+
+设计意图：
+
+- 主轴 `flag=1`：静默移动，跳过推动、摄像机、水面、格子事件，避免经过侧格时触发侧格切图/事件。
+- 副轴 `flag=0`：完整移动，最终格执行摄像机、事件、水面检查。
+- 主轴失败立即停住，不产生“只走副轴”的最终位置；这样不会停在侧格出口/事件格上等待下一帧原版切图检查。
+- 朝向仍由原版在调用 `CHAR_Move` 前设置为主方向；斜向没有独立朝向，四向朝向可接受。
+- 行走动作、拾取、动画计数、切图检测都只由原版执行一次，不会因斜向翻倍。
+- 推动：主轴 `flag=1` 不推；主轴被挡时 wrapper 返回主轴错误码，原版可以按主轴尝试 `CHAR_MoveAsBlock`。斜向推动没有原版语义，建议先不做。
+
+### 6.3 返回值语义
+
+| 情况 | 返回 | 结果 |
+|---|---|---|
+| 主轴成功，副轴成功 | 0 | 正常斜向移动 |
+| 主轴成功，副轴地图/单位阻挡 | 0 | 回滚主轴后以完整模式重走主轴，单轴终点执行完整检查 |
+| 主轴成功，副轴阻挡且回滚失败 | 2 | 直接恢复移动前坐标，跳过一次推动 |
+| 主轴地图/单位阻挡 | 主轴返回码 | 只走主轴或不走；原版可能按主轴尝试推动 |
+| 主轴返回 3 | 3 | 角色不可移动，不再尝试副轴 |
+| 副轴返回 3 | 0 | 主轴已移动，按成功返回 |
+
+### 6.4 速度与 8px 对齐
+
+- 两轴都用 `delta`：斜向实际速度 `sqrt(2) * delta`。优点：`delta` 若为 8 的倍数，`x&7/y&7` 保持对齐，转向闸门不会频繁触发。
+- 归一化到 `0.707 * delta`：斜向等速，但 `delta=8` 时步长约 6px，位置不再 8px 对齐；下一次转向会触发 `+0x2e0` 和 `CHAR_MoveOnWaitCoord` 补步，可能卡顿。
+- 结论：第一期用完整 `delta`，接受 1.41 倍斜向速度；等速版本需要同时改转向闸门，放到全向阶段。
+
+## 7. 全向移动扩展
+
+### 7.1 输入
+
+`state.dx/dy` 保存原始向量。自定义码可以只表示“全向模式 active”，主方向仍由主轴选出，供原版朝向/动画使用。
+
+### 7.2 位移
+
+在 `CHAR_Move` wrapper 中按向量分解：
+
+```
+len = sqrt(dx*dx + dy*dy)
+step_x = round(delta * |dx| / len)
+step_y = round(delta * |dy| / len)
+```
+
+按符号选择左/右、上/下，先主轴 `flag=1`，再副轴 `flag=0`。
+若 `step_x/step_y` 为 0 则跳过；主轴取较大分量，保证朝向稳定。
+
+### 7.3 关键阻塞：8px 转向闸门
+
+原版在 `GAMESTATE_PressKeyPlay` 的 `0x9d168/0x9d174` 检查 `x&7`、`y&7`；非对齐时置 `+0x2e0` 并**提前 return，不调用 `CHAR_Move`**，随后 `CHAR_Process` 用 `CHAR_MoveOnWaitCoord` 补步。全向步长不是 8 的倍数时，这套机制会和任意角度移动互相打架。
+
+可选路线：
+
+1. **量化全向**：只允许 8px 步长，仍是八向；不是真正全向。
+2. **绕过转向闸门**：对自定义全向输入，把 `0x9d168/0x9d174` 的 `cbnz` 分支改为不跳转（或加一个 wrapper 条件跳过），允许任意像素位置转向；需要验证动画、碰撞、拾取、摄像机。风险最高，单独验收。
+3. **保留八向**：第一期只做八向；全向作为后续实验特性，不与八向同批上线。
+
+建议第一期只交付八向；全向单独设计、单独验收。
+
+## 8. 分层与文件改动
+
+### 8.1 新插件
+
+`module/app/src/main/cpp/plugins/eight_way_move/`
+
+| 文件 | 职责 |
+|---|---|
+| `plugin.cpp` | descriptor、3 个 ResourceClaim、feature、生命周期 |
+| `feature.h/.cpp` | 三个 wrapper、backup 原子、port 指针、gate、reset |
+| `CMakeLists.txt` | `qol_plugin_eight_way_move` |
+| `settings_contribution.cpp` | 空贡献，与现有插件一致 |
+
+feature：`eight_way_move.direction`，默认 `false`，分类 `Gameplay`，toggle，名称「八向移动」，描述「方向触摸支持八向移动」。
+
+ResourceClaim：
+
+| id | symbol | 机制 | handler |
+|---|---|---|---|
+| `hook:UIPlay_ButtonDirection` | `F_UIPLAY_BUTTON_DIRECTION_VMA` | `kEntryHook` | `direction_touch_wrapper` |
+| `hook:GAMESTATE_PressKeyPlay` | `F_GAMESTATE_PRESSKEYPLAY_VMA` | `kEntryHook` | `press_key_play_wrapper` |
+| `patch:GAMESTATE_PressKeyPlay+0x21c` | `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE` | `kCallPatch` | `eight_way_char_move_wrapper` |
+
+全部 private/required/fail-closed/resumable；`gate=nullptr`，跟随 lifecycle。
+
+### 8.2 新 Game Host 端口
+
+插件不能 include `game/`，也不能直接读写 `KEY_nCode`。新增窄端口：
+
+`contracts/game_ports/movement_input_port.h`
+
+```
+QolPortId::QOL_PORT_MOVEMENT_INPUT = 34
+kQolPortMovementInputVersion = {1,0}
+
+struct QolMovementInputApi {
+    void (*on_direction_touch)(void* ctrl, uint64_t event, const void* point,
+                               uint64_t param3);
+    int32_t (*translate_press_key)(int32_t key);   // 写回 KEY_nCode，返回要传给原函数的键码
+    int32_t (*char_move)(void* ch, int32_t dir, int32_t delta, int32_t flag);
+    void (*set_enabled)(uint8_t enabled);
+    void (*reset)();
+};
+```
+
+- `on_direction_touch`：读触点/偏移/屏幕高度，计算八向 state，写自定义键码。
+- `translate_press_key`：自定义码 → 主方向键码并写回 `KEY_nCode`；非自定义码原样返回。
+- `char_move`：内部调用原 `fn_char_move`，执行 6.2 的两轴逻辑。
+- `set_enabled/reset`：feature gate 与状态清理。
+
+`game/adapter_ports/movement_input_port.{h,cpp}` 提供端口实例；`host/plugin_registry.cpp` 注册 `QOL_PORT_MOVEMENT_INPUT`；`contracts/game_ports/ports.h` 增加枚举、版本、`port_id_name`。
+
+### 8.3 游戏层实现
+
+`game/input/eight_way_move.{h,cpp}`：
+
+- 读 `KEY_nCode` / `KEY` 表 / `0x3076d3` / `UIPlay_bPressedDirection`。
+- `SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`。
+- `lead_member()`、`gamestate_state()`、`C_PATH_LIST`。
+- `fn_char_move`。
+- 固定几何常量：`0x15` 摇杆矩形、`0x16` 命中矩形。
+- 若真机发现虚拟按键根有额外偏移，再加一个 `ControlObject_GetAbsoluteRect` 的 x8 sret asm wrapper；第一期先用固定几何 + 设备探针验证。
+
+### 8.4 符号与 patch 登记
+
+`game/symbols/game_symbols.h` / `symbol_registry.h` 新增：
+
+```
+F_UIPLAY_BUTTON_DIRECTION_VMA = 0xc66d4
+F_GAMESTATE_PRESSKEYPLAY_VMA = 0x9cfc0
+G_KEY_CODE_VMA = 0x71353c
+G_KEY_TABLE_VMA = 0x713540
+G_KEY_PRESS_ACTIVE_VMA = 0x3076d3
+G_UIPLAY_BPRESSED_DIRECTION_VMA = 0x307081
+F_SGL_GET_SCREEN_HEIGHT_VMA = 0x954f8
+F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
+```
+
+`game/access/patches.cpp` 增加 `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`（0x21c，原字 0x9401318B）。
+
+`host/assembly.cpp` 增加 `#include "plugins/eight_way_move/plugin.h"` 与 descriptor 注册。
+
+## 9. 失败与回滚
+
+- 三个资源任一安装失败：整组 fail-closed，插件 failed，不保留半装状态。
+- entry hook 的 `backup=nullptr`：宿主拒绝/回滚，wrapper 不执行。
+- port 缺失/ABI 不匹配：install 失败，不安装任何资源。
+- disable/deactivate：`set_enabled(false)`、`reset()`、清自定义键码，资源事务物理还原。
+- 任何 wrapper 在 gate 关闭或 port 为空时：entry hook 直接调用 backup；call patch 不会存在（资源已还原），若竞态窗口内被调用，`char_move` 端口为空时必须有 fail-safe。建议在 call patch wrapper 里缓存一个 `fn_char_move` 指针？插件不能直接拿；由端口保证。端口在安装期间一定非空，竞态窗口内若为空，wrapper 返回 0（不动）比崩更安全，但会丢一帧移动。记录一次告警。
+
+## 10. 验证矩阵
+
+### 10.1 静态/单元
+
+- 八向分类：N/NE/E/SE/S/SW/W/NW；22.5°/45°/67.5° 边界；死区；中心。
+- 主/副方向映射与 `KEY` 索引表。
+- 自定义键码翻译：写回 `KEY_nCode`；非自定义码原样；state 清理。
+- `CHAR_Move` wrapper：斜向调用顺序、flag、返回值组合；cardinal 单次；flag!=0 透传；非主控/有路径/非 play 透传。
+- patch 站点：`0x9d1dc`、原字 `0x9401318B`、解析成功。
+- 插件资源安装/卸载/失败回滚。
+
+### 10.2 真机（必须）
+
+| 场景 | 期望 |
+|---|---|
+| 八个方向触摸 | 对应轴移动；斜向两轴同帧；斜向速度可接受 |
+| 中心死区 | 不移动，不抖动 |
+| 松开 | 立即停止；`KEY_nCode` 无自定义残留 |
+| 斜向撞墙 | 只走可走轴；不穿墙；不触发侧格切图 |
+| 斜向遇单位 | 沿可走轴滑开；不斜向推人 |
+| 切图点 | 最终格触发；侧格不触发 |
+| 拾取 | 正常；动画不加速 |
+| 对话/教程/弹窗 | 不移动；关闭后可恢复 |
+| 切换角色 | 副轴作用于当前主控 |
+| 物理键盘 | 行为不变；不叠加副轴 |
+| AI/寻路 | 行为不变 |
+| 插件关闭 | 资源还原；恢复原版四向 |
+| 不同分辨率/安全区 | 摇杆中心与命中区正确 |
+
+无真机证据前，状态只能是设计稿/未验收。
+
+## 11. 已否决方案
+
+| 方案 | 否决原因 |
+|---|---|
+| 在自定义键码 handler 里复刻整段 `PressKeyPlay` | 形成第二套移动逻辑，遗漏/漂移风险最大 |
+| 每帧调用原 `PressKeyPlay` 两次（主/副键） | 拾取、动画、切图检测、推动都执行两次；侧格事件和动画加速 |
+| 全局 hook `CHAR_Move` | 影响 AI/寻路/推动内部调用，需要大量调用者判定 |
+| 直接改 `UIPlay_ButtonDirection` 的扇区表 | 只能改变主方向，仍只有一个轴；且原版 4 向视觉/状态机不变 |
+| 只用 `0x16` 中心但不覆盖主方向 | 原版主方向按 `0x15` 中心算，主/副轴会不一致 |
+| 归一化斜向速度（0.707*delta） | 破坏 8px 对齐，触发 `+0x2e0` 补步；需同时改转向闸门 |
+
+## 12. 实施顺序
+
+1. 加符号、patch 站点、端口契约与 game 层空实现（可编译、单测通过）。
+2. 实现八向分类/状态机/键码翻译，单测覆盖。
+3. 实现 `CHAR_Move` 两轴 wrapper，单测用假 `fn_char_move` 验证调用序列。
+4. 加插件资源与 feature，Debug 构建，设备探针验证 hook/patch 安装与还原。
+5. 真机八向验收；修边界（死区、侧格事件、推动、速度）。
+6. 再评估全向：先解决 8px 转向闸门，不与八向同批。
+
+## 13. 原型实现记录（2026-10-27）
+
+### 13.1 已落地
+
+- 新插件 `plugins/eight_way_move/`：feature `eight_way_move.direction`，默认 `0`，分类 `Hidden`（设置页「调试开关」），toggle。
+- 三个私有、必需、fail-closed、可还原资源：
+  - `hook:UIPlay_ButtonDirection`（`F_UIPLAY_BUTTON_DIRECTION_VMA`）
+  - `hook:GAMESTATE_PressKeyPlay`（`F_GAMESTATE_PRESSKEYPLAY_VMA`）
+  - `patch:GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`（`P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`，`+0x21c`，原字 `0x9401318B`）
+- 新窄端口 `QOL_PORT_MOVEMENT_INPUT`（`contracts/game_ports/movement_input_port.h`），仅 `eight_way_move` 可声明。
+- 游戏层按职责拆分：
+  - `game/input/eight_way_move_math.h`：纯八向分类/键码数学，可单测。
+  - `game/input/eight_way_access.{h,cpp}`：KEY 键码/键表、按住位、屏幕高度、TouchHandle 偏移。
+  - `game/input/eight_way_state.{h,cpp}`：触摸状态机、自定义键码、主方向键码翻译。
+  - `game/input/eight_way_move.{h,cpp}`：`CHAR_Move` 双轴 wrapper。
+  - `game/adapter_ports/movement_input_port.{h,cpp}`：端口实例。
+- 插件层：
+  - `plugin.cpp`：descriptor、资源声明、生命周期。
+  - `feature.{h,cpp}`：端口/门禁、三个 wrapper、backup、诊断日志。
+- Host：端口注册与私有端口校验、插件 descriptor 注册。
+- 符号/patch：新增 `UIPlay_ButtonDirection`、`GAMESTATE_PressKeyPlay`、`SGL_GetScreenHeight`、`TouchHandle_GetControlOffset`、`KEY_nCode`、`KEYSET_nData`，以及 `P_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE`。
+
+### 13.2 验证
+
+- `eight_way_move_tests`：八向分类、22.5°/45° 边界、死区、自定义键码、副轴条件，通过。
+- `eight_way_move_plugin_tests`：插件 id、资源数量/机制/策略/必要性、端口、feature 默认关闭与 Hidden 分类，通过。
+- `scripts/build-debug.sh`：通过；产物 `output/inotia4_qol_lsposed_debug_2610270110_054d745bf360.apk`，SHA-256 `054d745bf360b9af4811b9cb2c2bcea6e01b2ec879f792ec529d21b096787093`。
+- 真机：未执行，`NOT_ACCEPTED`。需要在 Debug 设置页「调试开关」开启「八向移动（原型）」后验证八向、松开停止、撞墙滑动、切图/拾取/动画、物理键盘和插件关闭还原。
+
+### 13.3 已知原型取舍
+
+- 两轴都用完整 `delta`，斜向速度约 1.414 倍；换等速会破坏 8px 对齐，原型不做。
+- 主轴 `flag=1`、副轴 `flag=0`；侧格事件被规避，主轴失败时立即停住，不产生只走副轴的侧格位置。
+- 主轴成功、副轴被挡时，原型会先反向回滚主轴、再以 `flag=0` 重走主轴，让镜头/格子事件落在单轴终点；回滚失败时直接恢复移动前坐标并返回 2，避免留下静默位移。该回滚分支是原型新增逻辑，需真机重点验证。
+- 输入清理用 `owns_input` 区分本功能写入与物理键；同方向物理键与触摸主键完全同码时仍有理论歧义。
+- 物理方向键与触摸主方向键码相同时，原型仍靠 `press_active` 和键码匹配判断，理论上存在同方向物理键叠加副轴的边界；真机验证时重点检查。
+- 每 30 帧的逻辑帧任务负责离开 Play 状态时清理 state/残留码；不是逐帧强保证。
+- 全向移动未实现；仍需处理 `GAMESTATE_PressKeyPlay` 的 `x&7/y&7` 转向闸门。

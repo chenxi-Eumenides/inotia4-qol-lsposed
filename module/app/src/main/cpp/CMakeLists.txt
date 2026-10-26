@@ -114,6 +114,10 @@ add_library(gamebridge SHARED
     game/ops/character_write.cpp
     game/state/game_state.cpp
     game/nav/game_nav.cpp
+    game/input/eight_way_access.cpp
+    game/input/eight_way_state.cpp
+    game/input/eight_way_move.cpp
+    game/adapter_ports/movement_input_port.cpp
     core/native/game_cache.cpp
     core/native/module_save.cpp
     game/access/world_read.cpp

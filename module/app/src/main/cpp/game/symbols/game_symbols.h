@@ -580,6 +580,13 @@ constexpr uintptr_t F_EVENT_BUTTON_SKIP_EXE_VMA = 0x9c488; // int (void) 剧情�
 constexpr uintptr_t F_UINPC_QUEST_BUTTON_OK_EXE_VMA = 0xc3414; // int (void) NPC 任务完成按钮（UINpcQuest_ButtonOKExe：读 questIdx [0x2f3000+0x240] ldrsh→stateTbl[questIdx]==2 完成分支：UI_SetPopupProcessInfo(3,0)+QUESTSYSTEM_ChangeQuestState(id,3)+EVTSYSTEM_DoCheckAllEvent(id)；==0 接任务、==1 仅关面板）
 constexpr uintptr_t F_TEXTCTRL2_MOVE_NEXT_PAGE_VMA = 0x13d3c0; // void (void* ctrl) 文本控件翻下一页（当前页+1<总页才动，否则无操作；调后重置 +0x2e 推进标志）
 constexpr uintptr_t F_KEY_SET_CODE_VMA = 0x10f7f4;        // void (int32_t code) 注入按键码（KEY_SetCode：写 [0x2f4000+0x50] 指向的当前键码）
+constexpr uintptr_t G_KEY_CODE_VMA = 0x71353c;              // KEY_nCode (i32) 当前键码；GAMESTATE_PressKey 读取
+constexpr uintptr_t G_KEYSET_DATA_VMA = 0x713540;           // KEYSET_nData (i32[4]) 方向键码表：[0]=左 [1]=右 [2]=上 [3]=下
+constexpr uintptr_t G_KEY_PRESS_ACTIVE_VMA = 0x3076d3;      // u8 方向触摸按住有效位（UIPlay_ButtonDirection 写；GAMESTATE_PressKey 读）
+constexpr uintptr_t F_UIPLAY_BUTTON_DIRECTION_VMA = 0xc66d4; // uint64_t (void* ctrl, uint64_t event, int64_t point[2], uint64_t p3) 方向摇杆事件
+constexpr uintptr_t F_GAMESTATE_PRESSKEYPLAY_VMA = 0x9cfc0;  // void (int32_t key) 游戏内按键处理（fpPressKey；方向键→CHAR_Move）
+constexpr uintptr_t F_SGL_GET_SCREEN_HEIGHT_VMA = 0x954f8;   // int () 游戏渲染屏幕高度
+constexpr uintptr_t F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190; // void* () TouchHandle 全局坐标偏移（前两字段 int64 x/y）
 constexpr uintptr_t F_CHAR_GET_SKILL_USAGE_VMA = 0xe496c;    // int (void*) 战斗 AI 技能总开关（读 [ch+0x3a0] bit0-2）
 constexpr uintptr_t F_CHAR_SET_SKILL_USAGE_VMA = 0xe4cc0;    // void (void*, int) 写 [ch+0x3a0] bit0-2（AI 技能开关 0-7）
 constexpr uintptr_t F_GET_NAME_VMA = 0xd9c54;         // char* (void*) 角色名称（UTF-8 字符串）
@@ -650,7 +657,7 @@ constexpr uintptr_t F_CHANGE_MAP_VMA = 0x114fc4;       // void (int32, int32, in
 
 // ---- 合法操作函数 VMA（v0.3.1，玩家游戏内可做的事，见 control-capability.md §5.1）----
 constexpr uintptr_t F_MOVE_AS_PATH_VMA = 0xe9db8;      // int (void*) 沿已存路径移动（读 +0x2f0 PATHLIST）
-constexpr uintptr_t F_CHAR_MOVE_VMA = 0xe9808;         // int (void*, int, int*, u8) 方向键移动（mode 0-3=上/下/右/左，delta 像素/帧，flag 方向键状态）
+constexpr uintptr_t F_CHAR_MOVE_VMA = 0xe9808;         // int (void*, int, int, u8) 方向键移动（mode 0=下/1=左/2=上/3=右，delta 像素/帧，flag 方向键状态）
 // 推动增强 patch 点（CHAR_Move + 0x180，2026-09-16 反汇编确证）：
 // 原指令 `cbz w0, +0xe9944`（CHAR_IsCurrentActionStand(blocker)==0 → 不推）。
 // 置 NOP 后 blocker 无论动作状态都进入推动分支（3 候选方向 SearchPath + SetActionID(2)），
@@ -663,6 +670,10 @@ constexpr uint32_t ARM64_NOP_WORD = 0xd503201f;
 // 怪物(type=1)伪装为队伍成员使其可推，其余保持原判（队友可推、NPC type=2 仍 -1 不可推）。
 constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_OFF = 0x168;
 constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_WORD = 0x97ffcc28;   // bl 0xdca10
+// 八向移动调用点（GAMESTATE_PressKeyPlay + 0x21c）：`bl CHAR_Move`。
+// 原字 0x9401318B = bl 0xe9808；重定向到移动 wrapper 后由 wrapper 决定单轴/双轴。
+constexpr uint32_t F_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE_CALL_OFF = 0x21c;
+constexpr uint32_t F_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE_CALL_WORD = 0x9401318b;
 constexpr uintptr_t F_CHAR_PICK_ITEM_ALL_VMA = 0xec4d8; // int (void*, int32_t) 拾取范围内所有掉落物（CHAR_PickItemAll，官方移动按键链 GAMESTATE_PressKeyPlay 0x9d10c 以半径 0x18=24px 调用；后台线程调用会触发拾取音效 SOUNDSYSTEM_Play 空句柄崩溃，模块改用 nav_pick_items 复刻数据路径跳过音效）
 constexpr uintptr_t F_MEM_MALLOC_VMA = 0xa8d94;         // void* (size_t) dynsym MEM_Malloc，游戏池分配器；RES_LoadToPool 返回缓冲须由 MEM_Free 释放，插件分配必须走此函数；四版本同址
 constexpr uintptr_t F_NOTIFIER_ADD_VMA = 0x11e1b8;     // void (int type, int seq, void* callback, void* data) 延迟回调入队（NOTIFIER_Add→Create+AddTail，主线程 NOTIFIER_Process 回调；type=1 拾取，seq=0/2/4 递增）

@@ -53,6 +53,7 @@
 #include "plugins/extension_bag/assembly/settings_contribution.h"
 #include "plugins/core.item/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
+#include "plugins/eight_way_move/plugin.h"
 #include "plugins/push_all/plugin.h"
 #include "plugins/push_all/settings_contribution.h"
 #include "plugins/popup_blocker/plugin.h"
@@ -223,6 +224,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::core_item::plugin_descriptor},
     {&features::core_ui_state::plugin_descriptor},
     {&features::push_all::plugin_descriptor},
+    {&features::eight_way_move::plugin_descriptor},
     {&features::popup_blocker::plugin_descriptor},
     {&features::core_quest::plugin_descriptor},
     {&features::save_backup::plugin_descriptor, nullptr, true},

@@ -1,0 +1,174 @@
+#include "game/input/eight_way_state.h"
+
+#include <atomic>
+#include <cstdint>
+
+#include "game/access/qol_log_seam.h"
+#include "game/access/world.h"
+#include "game/input/eight_way_access.h"
+#include "game/input/eight_way_move_math.h"
+
+namespace qol::game::input {
+namespace {
+
+std::atomic<bool> g_enabled{false};
+State g_state;
+
+// 命中区 0x16 的中心（UIPlay_Create：10, H-380, 380, 380）。
+constexpr int32_t kHitCenterX = 200;
+constexpr int32_t kHitCenterBottom = 190;
+
+int direction_key_index(int32_t key) {
+    int32_t table[4]{};
+    if (!access::read_key_table(table)) return -1;
+    for (int i = 0; i < 4; ++i) {
+        if (table[i] == key) return i;
+    }
+    return -1;
+}
+
+void log_first_touch(const EightWayClass& c, int32_t dx, int32_t dy) {
+    static std::atomic<bool> logged{false};
+    if (logged.exchange(true, std::memory_order_acq_rel)) return;
+    QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
+                      "eight_way touch sector=%d primary=%d secondary=%d dx=%d dy=%d",
+                      c.sector, c.primary_dir, c.secondary_dir, dx, dy);
+}
+
+void clear_state() {
+    g_state = State{};
+}
+
+// 死区/无效触点：清状态并显式写 0，抑制本帧移动。
+// 原触摸回调已先写入普通方向键码，只清 state 不能阻止 CHAR_Move。
+void suppress_motion() {
+    clear_state();
+    access::write_key_code(0);
+    access::write_press_active(false);
+}
+
+}  // namespace
+
+bool enabled() {
+    return g_enabled.load(std::memory_order_acquire);
+}
+
+const State& current_state() {
+    return g_state;
+}
+
+void reset_state() {
+    const bool owns = g_state.owns_input;
+    clear_state();
+    if (!owns) return;
+    // 只清本功能写入的输入：自定义码可能已被翻译成普通主方向码，必须连普通码和
+    // 按住位一起清；否则回到 Play 或插件关闭后会继续移动。物理键/其他按钮的输入
+    // 在 translate_press_key 中已把 owns_input 置 false，不会被这里清掉。
+    access::write_key_code(0);
+    access::write_press_active(false);
+}
+
+void reset() {
+    reset_state();
+}
+
+void set_enabled(uint8_t enabled_value) {
+    const bool on = enabled_value != 0;
+    g_enabled.store(on, std::memory_order_release);
+    if (!on) reset_state();
+}
+
+void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t param3) {
+    (void)ctrl;
+    (void)param3;
+    if (!enabled()) {
+        reset_state();
+        return;
+    }
+
+    const bool release = event == 2 || event == 4 || event == 8;
+    if (release || !access::press_active()) {
+        reset_state();
+        return;
+    }
+    if (event != 1 && event != 0x40) return;
+    if (point == nullptr) {
+        suppress_motion();
+        return;
+    }
+
+    const int32_t height = access::screen_height();
+    if (height <= 0) {
+        suppress_motion();
+        return;
+    }
+
+    const auto* xy = static_cast<const int64_t*>(point);
+    int64_t offset_x = 0;
+    int64_t offset_y = 0;
+    (void)access::touch_offset(&offset_x, &offset_y);
+
+    const int64_t touch_x = offset_x + xy[0];
+    const int64_t touch_y = offset_y + xy[1];
+    const int32_t dx = static_cast<int32_t>(touch_x - kHitCenterX);
+    const int32_t dy = static_cast<int32_t>((height - kHitCenterBottom) - touch_y);
+
+    const EightWayClass classified = classify_vector(dx, dy);
+    int32_t table[4]{};
+    if (!classified.valid || !access::read_key_table(table)) {
+        suppress_motion();
+        return;
+    }
+
+    const int32_t primary_key = table[classified.primary_key_index];
+    if (primary_key == 0) {
+        suppress_motion();
+        return;
+    }
+
+    g_state.active = true;
+    g_state.trusted = false;
+    g_state.sector = classified.sector;
+    g_state.primary_dir = classified.primary_dir;
+    g_state.secondary_dir = classified.secondary_dir;
+    g_state.primary_key = primary_key;
+    g_state.owns_input = true;
+
+    access::write_key_code(custom_dir_key(classified.sector));
+    log_first_touch(classified, dx, dy);
+}
+
+int32_t translate_press_key(int32_t key) {
+    if (!enabled()) return key;
+
+    if (is_custom_dir_key(key)) {
+        if (!g_state.active || g_state.primary_key == 0) {
+            access::write_key_code(0);
+            return 0;
+        }
+        // 必须在原函数返回前写回主方向键码：GAMESTATE_PressKey 之后会用它判断是否
+        // 保持 0x3076d3（按住有效位）。
+        access::write_key_code(g_state.primary_key);
+        g_state.trusted = true;
+        g_state.owns_input = true;
+        return g_state.primary_key;
+    }
+
+    const int index = direction_key_index(key);
+    if (index < 0) {
+        g_state.trusted = false;
+        g_state.owns_input = false;
+    } else if (!(g_state.active && g_state.trusted && key == g_state.primary_key &&
+                 access::press_active())) {
+        g_state.trusted = false;
+        g_state.owns_input = false;
+    }
+    return key;
+}
+
+void poll() {
+    if (!enabled()) return;
+    if (world_game_state_gate() != 0) reset_state();
+}
+
+}  // namespace qol::game::input
