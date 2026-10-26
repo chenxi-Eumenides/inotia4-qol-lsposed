@@ -37,59 +37,47 @@ static_assert((G_C18_SLOT_TABLE_VMA - G_C18_BAG_TABLE_VMA) / sizeof(void*) ==
 // C18's native tables keep the original six-bag prefix before added bags.
 constexpr int32_t kC18FirstNativeBag = contracts::kQolOriginalBagCount;
 
-struct C18BagLayoutCache {
-    uintptr_t table_address = 0;
-    void* first_bag = nullptr;
-    int32_t count = 0;
-    bool table_readable = false;
-    bool initialized = false;
-};
-
-C18BagLayoutCache g_c18_bag_layout_cache;
-std::mutex g_c18_bag_layout_cache_mutex;
-
-bool is_c18_bag_candidate(int32_t index, void* bag) {
-    if (bag == nullptr || fn_get_bag_size == nullptr) return false;
-    // 游戏自身的容量查询会校验袋对象是否存在并读取容量位域；非袋项返回 0。
-    // 不用类别/容量枚举作为判据，避免把改版自定义的袋类别或容量误判为非袋。
-    return fn_get_bag_size(index) > 0;
+bool is_c18_bag_entry(void* candidate) {
+    if (candidate == nullptr || !game_memory_accessible(candidate, 0x20, 'r')) return false;
+    const int category = item_class_category(candidate);
+    if (category < 1 || category > 4) return false;
+    const auto* bytes = reinterpret_cast<const uint8_t*>(candidate);
+    const uint32_t capacity =
+        *reinterpret_cast<const uint32_t*>(bytes + 0x10) & 0x1FFFFFFu;
+    return capacity == 4 || capacity == 8 || capacity == 12 || capacity == 16;
 }
 
 bool probe_c18_bag_count(int32_t* out_count) {
-    if (out_count == nullptr) return false;
+    if (out_count == nullptr || g_base == 0) return false;
 
-    const uintptr_t table_address = g_base == 0 ? 0 : g_base + G_C18_BAG_TABLE_VMA;
-    auto* bag_table = reinterpret_cast<void* const*>(table_address);
-    const bool table_readable = table_address != 0 &&
-                                game_memory_accessible(bag_table,
-                                    sizeof(void*) * contracts::kQolMaxNativeBagCount, 'r');
-    void* first_bag = table_readable ? bag_table[0] : nullptr;
-
-    std::lock_guard<std::mutex> lock(g_c18_bag_layout_cache_mutex);
-    if (!g_c18_bag_layout_cache.initialized ||
-        g_c18_bag_layout_cache.table_address != table_address ||
-        g_c18_bag_layout_cache.first_bag != first_bag ||
-        g_c18_bag_layout_cache.table_readable != table_readable) {
-        g_c18_bag_layout_cache = {table_address, first_bag, 0, table_readable, true};
-    }
-    if (!table_readable || first_bag == nullptr) return false;
-    if (g_c18_bag_layout_cache.count != 0) {
-        *out_count = g_c18_bag_layout_cache.count;
-        return true;
+    // C18 布局标记：0x735000 处保留原版 6 个袋的镜像；首项为空即不是 C18 布局。
+    const uintptr_t layout_probe = g_base + G_C18_BAG_TABLE_VMA;
+    if (!game_memory_accessible(reinterpret_cast<void*>(layout_probe), sizeof(void*), 'r') ||
+        *reinterpret_cast<void* const*>(layout_probe) == nullptr) {
+        return false;
     }
 
-    if (fn_get_bag_size == nullptr) return false;
+    // 真实袋对象表由游戏自己的 GOT 指向（C18 v520 起不再固定在 0x735000），
+    // 逐项用 INVEN_GetBagSize 校验：非袋/越界索引返回 0。
+    auto* got = reinterpret_cast<void* const*>(g_base + G_BAG_TABLE_VMA);
+    if (!game_memory_accessible(got, sizeof(void*), 'r')) return false;
+    auto* bag_table = reinterpret_cast<void* const*>(*got);
+    if (bag_table == nullptr ||
+        !game_memory_accessible(bag_table,
+                                sizeof(void*) * contracts::kQolMaxNativeBagCount, 'r')) {
+        return false;
+    }
+
+    // 表尾可能残留非袋指针（索引 18 即此类），且 INVEN_GetBagSize 在索引 18 会解引用
+    // 该指针导致崩溃。因此只校验袋对象本身：可读、类别 1..4、容量位域为已知值。
     int32_t highest = -1;
     for (int32_t index = 0; index < contracts::kQolMaxNativeBagCount; ++index) {
-        if (!game_memory_accessible(bag_table + index, sizeof(void*), 'r')) return false;
-        void* candidate = bag_table[index];
-        const bool valid = is_c18_bag_candidate(index, candidate);
-        if (valid) highest = index;
+        if (!game_memory_accessible(bag_table + index, sizeof(void*), 'r')) break;
+        if (is_c18_bag_entry(bag_table[index])) highest = index;
     }
     int32_t count = highest + 1;
     if (count < contracts::kQolOriginalBagCount) count = contracts::kQolOriginalBagCount;
     if (count > contracts::kQolMaxNativeBagCount) count = contracts::kQolMaxNativeBagCount;
-    g_c18_bag_layout_cache.count = count;
     *out_count = count;
     return true;
 }
@@ -388,8 +376,7 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
 NativeBagLayout native_bag_layout() { return probe_native_bag_layout(); }
 
 void invalidate_native_bag_layout_cache() {
-    std::lock_guard<std::mutex> lock(g_c18_bag_layout_cache_mutex);
-    g_c18_bag_layout_cache = {};
+    // 袋数每次探测都从 GOT 表重新统计，没有缓存需要失效；保留入口供布局变化时显式调用。
 }
 
 QolResult inventory_bag_count(int32_t space_id, int32_t* out_count) {
