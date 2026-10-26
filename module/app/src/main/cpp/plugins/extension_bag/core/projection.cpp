@@ -38,19 +38,9 @@ void virtual_bag_call_original_refresh_item_area_with_guard() {
         &refresh_iface);
     const auto* refresh = refresh_result.ok == kQolOk
         ? static_cast<const qol::contracts::InventoryRefreshApi*>(refresh_iface) : nullptr;
-    if (refresh != nullptr && refresh->call_original != nullptr &&
-        refresh->call_original()) {
-        return;
+    if (refresh != nullptr && refresh->call_original != nullptr) {
+        (void)refresh->call_original();
     }
-    // inventory_refresh 是运行期可选能力：能力缺失或 backup 未绑定时，
-    // 直接调用写端口持有的原版刷新函数，刷新不能因此静默失效。
-    if (runtime_state().host.write_port != nullptr &&
-        runtime_state().host.write_port->ui.refresh_item_area != nullptr) {
-        (void)runtime_state().host.write_port->ui.refresh_item_area();
-        return;
-    }
-    QOL_LOG_ERROR(QolDomain::kExtensionBag,
-                  "inventory_refresh unavailable and native refresh port missing");
 }
 
 void refresh_module_item_area_locked(int index) {
