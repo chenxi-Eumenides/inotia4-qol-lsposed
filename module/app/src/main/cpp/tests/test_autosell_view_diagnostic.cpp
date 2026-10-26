@@ -4,21 +4,19 @@
 #include <cstdint>
 
 #include "contracts/attribute_quality.h"
-#include "contracts/game_host.h"
 #include "contracts/item_facts.h"
-#include "plugins/autosell/plugin.h"
 
 namespace {
 
 qol::contracts::QolItemInventoryView g_facts{};
 bool g_facts_available = true;
+bool g_real_equip = false;
 bool g_is_jewel = false;
 bool g_quality_capability_available = true;
 const qol::contracts::AttributeQualityApi* g_quality_api = nullptr;
 int g_quality_query_calls = 0;
 QolResult g_quality_query_result{kQolOk, 0, nullptr, 0};
 qol::contracts::AttributeQualityItemResult g_quality_result{};
-qol::contracts::QolHostSdk g_sdk{};
 
 QolResult query_item(qol::contracts::QolItemHandle item,
                      const qol::contracts::AttributeQualityOptions* options,
@@ -47,24 +45,19 @@ QolResult evaluate(int32_t, qol::contracts::AttributeRange,
 qol::contracts::AttributeQualityApi g_default_quality_api{
     sizeof(qol::contracts::AttributeQualityApi), query_item, query_option_context, evaluate};
 
-QolResult require_quality(const char* id, QolVersionRange range, const void** out_iface) {
-    assert(id != nullptr);
-    assert(range.major == qol::contracts::kAttributeQualityVersionMajor);
-    if (!g_quality_capability_available || out_iface == nullptr || g_quality_api == nullptr)
-        return qol::contracts::error(kQolErrNotReady, "quality unavailable", 19);
-    *out_iface = g_quality_api;
-    return qol::contracts::ok();
+const qol::contracts::AttributeQualityApi* quality_provider() {
+    return g_quality_capability_available ? g_quality_api : nullptr;
 }
 
 }  // namespace
 
-namespace qol::features::autosell {
-
-const contracts::QolHostSdk* host_sdk() { return &g_sdk; }
-
-}  // namespace qol::features::autosell
-
 namespace qol::features::autosell::read_only {
+
+bool item_is_real_equip(contracts::QolItemHandle, int32_t* out) {
+    if (out == nullptr) return false;
+    *out = g_real_equip ? 1 : 0;
+    return true;
+}
 
 bool item_inventory_view(contracts::QolItemHandle,
                          contracts::QolItemInventoryView* out) {
@@ -81,13 +74,13 @@ bool item_is_jewel(int32_t, int32_t* out) {
 
 bool item_is_backpack(int32_t category, int32_t* out) {
     if (out == nullptr) return false;
-    *out = category == 60 ? 1 : 0;
+    *out = category >= 1 && category <= 4 ? 1 : 0;
     return true;
 }
 
 bool item_is_dice(int32_t category, int32_t* out) {
     if (out == nullptr) return false;
-    *out = category >= 82 && category <= 86 ? 1 : 0;
+    *out = category >= 52 && category <= 56 ? 1 : 0;
     return true;
 }
 
@@ -106,6 +99,7 @@ void prepare_facts(uint32_t fields) {
     g_facts.rarity = 0;
     g_facts.equip = 0;
     g_facts_available = true;
+    g_real_equip = false;
     g_is_jewel = false;
 }
 
@@ -122,15 +116,21 @@ void prepare_jewel_quality() {
     g_quality_result.attrs[0].kind = qol::contracts::AttributeKind::Jewel;
     g_quality_result.attrs[0].status = qol::contracts::kQolItemHandleStatusOk;
     g_quality_result.attrs[0].quality.percentile = 73;
-    g_sdk = {};
-    g_sdk.capabilities.require = require_quality;
 }
 
 AutosellViewBuildReason build_jewel_view(autosell::ItemView* out) {
     const qol::features::autosell::read_only::InventoryItemRef ref{
         static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 28, 1,
         {11, 19}};
-    return autosell_build_view(ref, out);
+    return autosell_build_view(ref, out, nullptr, &quality_provider);
+}
+
+AutosellViewBuildReason build_category_view(int category, autosell::ItemView* out,
+                                            AutosellViewDiagnostics* diagnostics = nullptr) {
+    const qol::features::autosell::read_only::InventoryItemRef ref{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, category, 1,
+        {11, 19}};
+    return autosell_build_view(ref, out, diagnostics, &quality_provider);
 }
 
 void test_jewel_quality_v2_success_uses_provider_percentile() {
@@ -220,6 +220,25 @@ void test_missing_rarity_builds_view_with_unknown_sentinel() {
     assert(view.rarity == -1);
 }
 
+void test_real_equip_uses_item_predicate_not_inventory_view_fact() {
+    const qol::features::autosell::read_only::InventoryItemRef ref{
+        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 60, 1,
+        {11, 19}};
+    autosell::ItemView view{};
+
+    prepare_facts(kFixtureViewFields);
+    g_facts.equip = 1;
+    g_real_equip = false;
+    assert(autosell_build_view(ref, &view) == AutosellViewBuildReason::kBuilt);
+    assert(!view.is_equip);
+
+    prepare_facts(kFixtureViewFields);
+    g_facts.equip = 0;
+    g_real_equip = true;
+    assert(autosell_build_view(ref, &view) == AutosellViewBuildReason::kBuilt);
+    assert(view.is_equip);
+}
+
 void test_enabled_config_without_matching_rule_is_classified() {
     autosell::ItemView view{};
     autosell::Config config{};
@@ -229,49 +248,49 @@ void test_enabled_config_without_matching_rule_is_classified() {
     assert(!autosell::should_sell(view, config));
 }
 
-void test_provider_item_special_rule_match_is_classified() {
+void test_provider_item_backpack_tier_rule_match_is_classified() {
     prepare_facts(kFixtureViewFields);
-    const qol::features::autosell::read_only::InventoryItemRef ref{
-        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 60, 1,
-        {11, 19}};
     autosell::ItemView view{};
     AutosellViewDiagnostics diagnostics{};
-    assert(autosell_build_view(ref, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
-    assert(ref.kind == static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider));
+    assert(build_category_view(1, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
+    assert(view.category == 1 && view.is_backpack);
+    assert(diagnostics.category == 1 && diagnostics.is_backpack);
     assert(diagnostics.fields == kFixtureViewFields);
-    assert(diagnostics.special_types == autosell::kSpecialBackpack);
 
     autosell::Config config{};
     config.enabled = true;
-    config.special_mask = autosell::kSpecialBackpack;
+    config.backpack_tier = 1;
     assert(autosell::should_sell_with_reason(view, config) ==
            autosell::DecisionReason::kRuleMatch);
 }
 
-void test_ordinary_dice_is_classified_as_special() {
+void test_category_tiers_are_exposed_in_view() {
     prepare_facts(kFixtureViewFields);
-    const qol::features::autosell::read_only::InventoryItemRef ref{
-        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 82, 1,
-        {11, 19}};
     autosell::ItemView view{};
     AutosellViewDiagnostics diagnostics{};
-    assert(autosell_build_view(ref, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
-    assert(view.special_types == autosell::kSpecialDice);
-    assert(diagnostics.special_types == autosell::kSpecialDice);
-}
+    for (int category = 1; category <= 4; ++category) {
+        assert(build_category_view(category, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
+        assert(view.category == category && view.is_backpack);
+        assert(diagnostics.category == category && diagnostics.is_backpack);
+    }
 
-void test_chaos_dice_is_not_classified_as_special() {
-    prepare_facts(kFixtureViewFields);
-    const qol::features::autosell::read_only::InventoryItemRef ref{
-        static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 86, 1,
-        {11, 19}};
-    autosell::ItemView view{};
-    AutosellViewDiagnostics diagnostics{};
-    assert(autosell_build_view(ref, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
-    assert((view.special_types & autosell::kSpecialDice) == 0);
-    assert(view.special_types == 0);
-    assert((diagnostics.special_types & autosell::kSpecialDice) == 0);
-    assert(diagnostics.special_types == 0);
+    const struct BadgeCategory { int category; int rank; } badges[] = {
+        {42, 1}, {43, 1}, {44, 1}, {45, 1}, {46, 1}, {47, 1},
+        {48, 2}, {50, 3}, {49, 4}, {928, 4}, {929, 4}, {930, 4},
+        {931, 4}, {932, 4}, {933, 4},
+    };
+    for (const auto& badge : badges) {
+        assert(build_category_view(badge.category, &view, &diagnostics) ==
+               AutosellViewBuildReason::kBuilt);
+        assert(view.category == badge.category && view.badge_rank == badge.rank);
+        assert(diagnostics.category == badge.category && diagnostics.badge_rank == badge.rank);
+    }
+
+    for (int category = 52; category <= 56; ++category) {
+        assert(build_category_view(category, &view, &diagnostics) == AutosellViewBuildReason::kBuilt);
+        assert(view.category == category && view.dice_tier == category - 51);
+        assert(diagnostics.category == category && diagnostics.dice_tier == category - 51);
+    }
 }
 
 }  // namespace
@@ -282,9 +301,9 @@ int main() {
     test_malformed_quality_api_keeps_unknown_sentinel();
     test_missing_required_field_reason_is_reported();
     test_missing_rarity_builds_view_with_unknown_sentinel();
+    test_real_equip_uses_item_predicate_not_inventory_view_fact();
     test_enabled_config_without_matching_rule_is_classified();
-    test_provider_item_special_rule_match_is_classified();
-    test_ordinary_dice_is_classified_as_special();
-    test_chaos_dice_is_not_classified_as_special();
+    test_provider_item_backpack_tier_rule_match_is_classified();
+    test_category_tiers_are_exposed_in_view();
     return 0;
 }

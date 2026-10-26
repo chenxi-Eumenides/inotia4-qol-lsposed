@@ -20,7 +20,8 @@ import org.json.JSONObject
  * - POST /api/feature/autosell/config  设置当前存档配置（写运行时 + 直写 sidecar）
  *
  * 规则「值即开关」：0=关闭；正整数为 1-based 档位
- * （rarity 1..5 / enhance 1..32 / socket 1..16 / gemTier 1..5 / gemRange 1..5）。
+ * （rarity 1..5 / enhance 1..32 / socket 1..16 / gemTier 1..5 / gemRange 1..5 /
+ * backpackTier 1..4 / badgeTier 1..4 / diceTier 1..5）。
  * special 为特殊类型名数组（合法名 backpack / normalSeal / dice；字段类型与元素严格校验）。
  * 请求体示例：{"enabled":true,"rarity":1,"enhance":0,"socket":0,"gemTier":0,"special":["dice"],"gemRange":0}
  *
@@ -49,7 +50,6 @@ class AutoSellFeatureController {
             val socket = readInteger(json, "socket", 0, 16)
             val gemTier = readInteger(json, "gemTier", 0, 5)
             val gemRange = readInteger(json, "gemRange", 0, 5)
-            // special 数组文本原样传给 native，名字->位换算在 native 唯一表完成。
             val special = if (json.has("special")) {
                 val array = json.get("special") as? JSONArray
                     ?: throw ApiException(
@@ -65,9 +65,19 @@ class AutoSellFeatureController {
                         )
                     }
                 }
-                array.toString()
+                array
             } else {
-                "[]"
+                JSONArray()
+            }
+            val specialConfig = JSONObject().put("special", special)
+            if (json.has("backpackTier")) {
+                specialConfig.put("backpackTier", readInteger(json, "backpackTier", 0, 4))
+            }
+            if (json.has("badgeTier")) {
+                specialConfig.put("badgeTier", readInteger(json, "badgeTier", 0, 4))
+            }
+            if (json.has("diceTier")) {
+                specialConfig.put("diceTier", readInteger(json, "diceTier", 0, 5))
             }
             val accepted = NativeBridge.nativeSetAutoSellConfig(
                 enabled,
@@ -75,7 +85,7 @@ class AutoSellFeatureController {
                 enhance,
                 socket,
                 gemTier,
-                special,
+                specialConfig.toString(),
                 gemRange
             )
             if (!accepted) {

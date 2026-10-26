@@ -2,29 +2,29 @@
 
 #include "view.h"
 
-#include "../../contracts/attribute_quality.h"
-#include "plugin.h"
-
 #include <cstdint>
 
 namespace {
 
 // 宝石 category 起档（IsJewel 闭区间 28..32；档位 = category - 28）。
 constexpr int kJewelCategoryFirst = 28;
-// ITEMDATABASE.json 名称核对：category 42..47 为各职业勇士徽章；48 及以上徽章为
-// 被祝福/英雄/教团等其他类型，不属于自动出售的普通徽章。
-constexpr int kNormalSealFirst = 42;
-constexpr int kNormalSealLast = 47;
-// ITEMDATABASE.json: categories 82..85 are ordinary dice; category 86 is Chaos Dice.
-constexpr int kOrdinaryDiceCategoryFirst = 82;
-constexpr int kOrdinaryDiceCategoryLast = 85;
-constexpr int kChaosDiceCategory = 86;
+constexpr int kBackpackCategoryFirst = 1;
+constexpr int kBackpackCategoryLast = 4;
+constexpr int kBadgeRankOneFirst = 42;
+constexpr int kBadgeRankOneLast = 47;
+constexpr int kBlessedBadgeCategory = 48;
+constexpr int kHeroBadgeCategory = 49;
+constexpr int kCultBadgeCategory = 50;
+constexpr int kClassHeroBadgeFirst = 928;
+constexpr int kClassHeroBadgeLast = 933;
+constexpr int kDiceCategoryFirst = 52;
+constexpr int kDiceCategoryLast = 56;
 
 }  // namespace
 
 AutosellViewBuildReason autosell_build_view(
     const qol::features::autosell::read_only::InventoryItemRef& ref, autosell::ItemView* out,
-    AutosellViewDiagnostics* diagnostics) {
+    AutosellViewDiagnostics* diagnostics, AttributeQualityApiProvider quality_provider) {
     if (diagnostics != nullptr) *diagnostics = {};
     if (out == nullptr) return AutosellViewBuildReason::kNullOutput;
     *out = autosell::ItemView{};
@@ -32,6 +32,8 @@ AutosellViewBuildReason autosell_build_view(
         return AutosellViewBuildReason::kInvalidHandle;
     if (ref.category <= 0) return AutosellViewBuildReason::kInvalidCategory;
     const int category = ref.category;
+    out->category = category;
+    if (diagnostics != nullptr) diagnostics->category = category;
 
     qol::contracts::QolItemInventoryView facts{};
     if (!qol::features::autosell::read_only::item_inventory_view(ref.item, &facts))
@@ -44,7 +46,10 @@ AutosellViewBuildReason autosell_build_view(
     if ((facts.fields & qol::contracts::kQolItemInventoryHasJewelValue) == 0 ||
         (facts.fields & qol::contracts::kQolItemInventoryHasJewelAttributeType) == 0)
         return AutosellViewBuildReason::kMissingRequiredFields;
-    out->is_equip = facts.equip != 0;
+    int32_t real_equip = 0;
+    if (!qol::features::autosell::read_only::item_is_real_equip(ref.item, &real_equip))
+        return AutosellViewBuildReason::kFactsUnavailable;
+    out->is_equip = real_equip != 0;
     out->rarity = (facts.fields & qol::contracts::kQolItemInventoryHasRarity) != 0
                       ? facts.rarity
                       : -1;
@@ -67,19 +72,8 @@ AutosellViewBuildReason autosell_build_view(
         out->jewel_tier = category - kJewelCategoryFirst;
 
         // 不可用、撤销中或质量查询失败时保留 -1；gemRange 规则不命中，避免默认 0 误售。
-        const auto* sdk = qol::features::autosell::host_sdk();
-        const void* iface = nullptr;
-        bool quality_available = false;
-        if (sdk != nullptr && sdk->capabilities.require != nullptr) {
-            const QolResult require_result = sdk->capabilities.require(
-                qol::contracts::kAttributeQualityCapabilityId,
-                QolVersionRange{static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMajor),
-                                 static_cast<uint16_t>(qol::contracts::kAttributeQualityVersionMinor)},
-                &iface);
-            quality_available = require_result.ok == kQolOk;
-        }
-        const auto* attr_api = static_cast<const qol::contracts::AttributeQualityApi*>(iface);
-        if (quality_available && qol::contracts::attribute_quality_api_size_valid(attr_api)) {
+        const auto* attr_api = quality_provider == nullptr ? nullptr : quality_provider();
+        if (qol::contracts::attribute_quality_api_size_valid(attr_api)) {
             qol::contracts::AttributeQualityOptions options{};
             qol::contracts::AttributeQualityItemResult result{};
             if (attr_api->query_item(ref.item, &options, &result).ok == kQolOk &&
@@ -91,19 +85,27 @@ AutosellViewBuildReason autosell_build_view(
         }
     }
 
-    uint32_t specials = 0;
-    if (qol::features::autosell::read_only::item_is_backpack(category, &value) && value != 0) {
-        specials |= autosell::kSpecialBackpack;
+    out->is_backpack = category >= kBackpackCategoryFirst && category <= kBackpackCategoryLast &&
+                       qol::features::autosell::read_only::item_is_backpack(category, &value) &&
+                       value != 0;
+    if (category >= kBadgeRankOneFirst && category <= kBadgeRankOneLast) {
+        out->badge_rank = 1;
+    } else if (category == kBlessedBadgeCategory) {
+        out->badge_rank = 2;
+    } else if (category == kCultBadgeCategory) {
+        out->badge_rank = 3;
+    } else if (category == kHeroBadgeCategory ||
+               (category >= kClassHeroBadgeFirst && category <= kClassHeroBadgeLast)) {
+        out->badge_rank = 4;
     }
-    if (category >= kNormalSealFirst && category <= kNormalSealLast) {
-        specials |= autosell::kSpecialNormalSeal;
+    if (category >= kDiceCategoryFirst && category <= kDiceCategoryLast &&
+        qol::features::autosell::read_only::item_is_dice(category, &value) && value != 0) {
+        out->dice_tier = category - 51;
     }
-    if (qol::features::autosell::read_only::item_is_dice(category, &value) && value != 0 &&
-        category >= kOrdinaryDiceCategoryFirst && category <= kOrdinaryDiceCategoryLast &&
-        category != kChaosDiceCategory) {
-        specials |= autosell::kSpecialDice;
+    if (diagnostics != nullptr) {
+        diagnostics->is_backpack = out->is_backpack;
+        diagnostics->badge_rank = out->badge_rank;
+        diagnostics->dice_tier = out->dice_tier;
     }
-    out->special_types = specials;
-    if (diagnostics != nullptr) diagnostics->special_types = specials;
     return AutosellViewBuildReason::kBuilt;
 }

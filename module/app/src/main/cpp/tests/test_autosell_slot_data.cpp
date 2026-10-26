@@ -1,4 +1,5 @@
 #include "plugins/autosell/config.h"
+#include "plugins/autosell/config_codec.h"
 #include "plugins/autosell/scan.h"
 #include "plugins/autosell/store.h"
 
@@ -285,13 +286,17 @@ autosell::Config sample(int rarity, bool enabled = true) {
     autosell::Config config;
     config.enabled = enabled;
     config.rarity = rarity;
+    config.backpack_tier = rarity % 5;
+    config.badge_tier = rarity % 4;
+    config.dice_tier = rarity % 6;
     return config;
 }
 
 bool same(const autosell::Config& a, const autosell::Config& b) {
     return a.enabled == b.enabled && a.rarity == b.rarity && a.enhance == b.enhance &&
            a.socket == b.socket && a.gem_tier == b.gem_tier && a.gem_range == b.gem_range &&
-           a.special_mask == b.special_mask;
+           a.backpack_tier == b.backpack_tier && a.badge_tier == b.badge_tier &&
+           a.dice_tier == b.dice_tier;
 }
 
 void register_consumer(const QolSlotDataApi& api) {

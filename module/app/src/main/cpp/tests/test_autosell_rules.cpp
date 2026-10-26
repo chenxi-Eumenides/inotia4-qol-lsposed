@@ -6,7 +6,7 @@
 // host 单测：autosell 纯规则引擎 should_sell 的命中/不命中、边界、
 // 装备三规则同类 AND（0=关不参与）、宝石同类 OR、跨类 OR、
 // 值即开关（0=关闭 / 1-based 档位 / 越界物品值不命中）、总开关、
-// 特殊多选与「无规则不出售」；硬保护（已强化/已镶嵌永不出售）。
+// 特殊分档与「无规则不出售」；硬保护（已强化/已镶嵌永不出售）。
 // 强化口径 = 剩余强化次数 enhance_remaining（I_ENCHANT bits2-5，UI 名称「强化耐久度」）。
 // 风格与 tests/test_attribute_quality.cpp 一致（自带断言计数）。
 
@@ -33,8 +33,9 @@ Config all_rules_on() {
     cfg.socket = 16;      // 阈值 15，socket_total 0..15 命中
     cfg.gem_tier = 5;     // 阈值 4（混沌），tier 0..4 全命中
     cfg.gem_range = 5;    // 阈值 99：百分位 0..99 命中，100（满分）不命中
-    cfg.special_mask = autosell::kSpecialBackpack | autosell::kSpecialNormalSeal |
-                       autosell::kSpecialDice;
+    cfg.backpack_tier = 4;
+    cfg.badge_tier = 4;
+    cfg.dice_tier = 5;
     return cfg;
 }
 
@@ -61,12 +62,13 @@ static void test_master_switch_off() {
     equip.rarity = 0;
     equip.enhance_remaining = 0;
     equip.socket_total = 0;
-    equip.special_types = autosell::kSpecialDice;
+    equip.dice_tier = 1;
     CHECK(!should_sell(equip, off));
 
     ItemView jewel = jewel_item();
     jewel.jewel_tier = 0;
-    jewel.special_types = autosell::kSpecialBackpack;
+    jewel.category = 1;
+    jewel.is_backpack = true;
     CHECK(!should_sell(jewel, off));
 }
 
@@ -116,8 +118,8 @@ static void test_unknown_rarity_fails_closed() {
 
     Config rarity_off_special_on;
     rarity_off_special_on.enabled = true;
-    rarity_off_special_on.special_mask = autosell::kSpecialDice;
-    item.special_types = autosell::kSpecialDice;
+    rarity_off_special_on.dice_tier = 5;
+    item.dice_tier = 1;
     CHECK(should_sell(item, rarity_off_special_on));
 }
 
@@ -214,7 +216,7 @@ static void test_hard_protection_enhanced_or_filled() {
 
     // 硬保护无条件生效：特殊类型命中（骰子）也被拦下。
     ItemView special;
-    special.special_types = autosell::kSpecialDice;
+    special.dice_tier = 1;
     special.enhance_level = 2;
     CHECK(!should_sell(special, cfg));
     special.enhance_level = 0;
@@ -261,7 +263,7 @@ static void test_gem_tier_value_switch() {
 }
 
 static void test_gem_range_value_switch() {
-    // 宝石属性范围：出售百分位 <= 阈值 的低品质宝石（0=关；1..5 -> 30/60/75/90/99）。
+    // 宝石属性：出售百分位 <= 阈值 的低品质宝石（0=关；1..5 -> 30/60/75/90/99）。
     Config cfg;
     cfg.enabled = true;
     ItemView jewel = jewel_item();
@@ -481,12 +483,12 @@ static void test_disable_dimension() {
     gem_off.gem_tier = 0;
     CHECK(!should_sell(jewel, gem_off));
 
-    // 特殊规则关闭（mask=0）时不因已勾选类型命中。
+    // 骰子分档关闭时不因已知骰子档位命中。
     ItemView t = equip_item();
-    t.special_types = autosell::kSpecialDice;
+    t.dice_tier = 1;
     Config special_off;
     special_off.enabled = true;
-    special_off.special_mask = 0;
+    special_off.dice_tier = 0;
     CHECK(!should_sell(t, special_off));
 }
 
@@ -531,46 +533,63 @@ static void test_cross_category_independence() {
     CHECK(should_sell(jewel, jewel_only));
 }
 
-static void test_special_mask() {
-    CHECK(autosell::kSpecialBackpack == 1u);
-    CHECK(autosell::kSpecialNormalSeal == 2u);
-    CHECK(autosell::kSpecialDice == 4u);
-
+static void test_backpack_tiers() {
     Config cfg;
     cfg.enabled = true;
-    cfg.special_mask = autosell::kSpecialBackpack | autosell::kSpecialDice;
-
-    // 命中勾选位之一即出售。
     ItemView item;
-    item.special_types = autosell::kSpecialDice;
-    CHECK(should_sell(item, cfg));
-    item.special_types = autosell::kSpecialBackpack;
-    CHECK(should_sell(item, cfg));
-    item.special_types = autosell::kSpecialBackpack | autosell::kSpecialNormalSeal;
-    CHECK(should_sell(item, cfg));
+    item.is_backpack = true;
 
-    // 未勾选位不命中。
-    item.special_types = 1u << 3;
+    for (int tier = 1; tier <= 4; ++tier) {
+        cfg.backpack_tier = tier;
+        for (int category = 1; category <= 4; ++category) {
+            item.category = category;
+            CHECK(should_sell(item, cfg) == (category <= tier));
+        }
+    }
+    cfg.backpack_tier = 4;
+    item.category = 5;
     CHECK(!should_sell(item, cfg));
-    item.special_types = 1u << 4;
+    item.category = 1;
+    item.is_backpack = false;
     CHECK(!should_sell(item, cfg));
-    item.special_types = 0;
-    CHECK(!should_sell(item, cfg));
+}
 
-    // 特殊规则对任意物品生效（装备/宝石/普通均可）。
-    ItemView equip = equip_item();
-    equip.special_types = autosell::kSpecialDice;
-    CHECK(should_sell(equip, cfg));
+static void test_badge_ranks() {
+    const struct BadgeCategory { int category; int rank; } categories[] = {
+        {42, 1}, {43, 1}, {44, 1}, {45, 1}, {46, 1}, {47, 1},
+        {48, 2}, {50, 3}, {49, 4}, {928, 4}, {929, 4}, {930, 4},
+        {931, 4}, {932, 4}, {933, 4},
+    };
+    Config cfg;
+    cfg.enabled = true;
+    for (int tier = 1; tier <= 4; ++tier) {
+        cfg.badge_tier = tier;
+        for (const auto& entry : categories) {
+            ItemView item;
+            item.category = entry.category;
+            item.badge_rank = entry.rank;
+            CHECK(should_sell(item, cfg) == (entry.rank > 0 && entry.rank <= tier));
+        }
+    }
+}
 
-    ItemView jewel = jewel_item();
-    jewel.special_types = autosell::kSpecialBackpack;
-    CHECK(should_sell(jewel, cfg));
-
-    // 未勾选任何特殊类型（mask=0）时不因该规则出售。
-    Config empty_mask = cfg;
-    empty_mask.special_mask = 0;
-    item.special_types = autosell::kSpecialDice;
-    CHECK(!should_sell(item, empty_mask));
+static void test_dice_tiers() {
+    Config cfg;
+    cfg.enabled = true;
+    for (int tier = 1; tier <= 5; ++tier) {
+        cfg.dice_tier = tier;
+        for (int category = 52; category <= 56; ++category) {
+            ItemView item;
+            item.category = category;
+            item.dice_tier = category - 51;
+            CHECK(should_sell(item, cfg) == (item.dice_tier <= tier));
+        }
+    }
+    cfg.dice_tier = 5;
+    ItemView invalid;
+    invalid.category = 57;
+    invalid.dice_tier = 6;
+    CHECK(!should_sell(invalid, cfg));
 }
 
 static void test_no_rules_enabled() {
@@ -582,33 +601,42 @@ static void test_no_rules_enabled() {
     equip.rarity = 0;
     equip.enhance_remaining = 0;
     equip.socket_total = 0;
-    equip.special_types = 0xFFFFFFFFu;
+    equip.category = 1;
+    equip.is_backpack = true;
+    equip.badge_rank = 3;
+    equip.dice_tier = 5;
     CHECK(!should_sell(equip, cfg));
 
     ItemView jewel = jewel_item();
     jewel.jewel_tier = 0;
-    jewel.special_types = 0xFFFFFFFFu;
+    jewel.category = 1;
+    jewel.is_backpack = true;
+    jewel.badge_rank = 3;
+    jewel.dice_tier = 5;
     CHECK(!should_sell(jewel, cfg));
 
     ItemView plain;
-    plain.special_types = 0xFFFFFFFFu;
+    plain.category = 1;
+    plain.is_backpack = true;
+    plain.badge_rank = 3;
+    plain.dice_tier = 5;
     CHECK(!should_sell(plain, cfg));
 }
 
 static void test_global_or_across_categories() {
-    // 跨类命中任一即出售：装备规则不命中，但特殊类型命中。
+    // 跨类命中任一即出售：装备规则不命中，但徽章分档命中。
     Config cfg;
     cfg.enabled = true;
     cfg.rarity = 1;  // 阈值 0
-    cfg.special_mask = autosell::kSpecialNormalSeal;
+    cfg.badge_tier = 1;
 
     ItemView equip = equip_item();
     equip.rarity = 4;  // 装备规则不命中（4 > 0）
-    equip.special_types = autosell::kSpecialNormalSeal;
+    equip.badge_rank = 1;
     CHECK(should_sell(equip, cfg));
 
     // 两者均不命中 -> 不出售。
-    equip.special_types = autosell::kSpecialDice;
+    equip.badge_rank = 0;
     CHECK(!should_sell(equip, cfg));
 }
 
@@ -625,7 +653,9 @@ int main() {
     test_equip_rules_and();
     test_disable_dimension();
     test_cross_category_independence();
-    test_special_mask();
+    test_backpack_tiers();
+    test_badge_ranks();
+    test_dice_tiers();
     test_no_rules_enabled();
     test_global_or_across_categories();
     std::printf("autosell_rules_tests: %d passed, %d failed\n", g_pass, g_fail);

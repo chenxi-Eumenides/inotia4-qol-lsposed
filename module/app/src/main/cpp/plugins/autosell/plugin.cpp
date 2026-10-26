@@ -4,7 +4,7 @@
 #include <cstdio>
 
 #include "../../contracts/attribute_quality.h"
-#include "../../contracts/extension_bag.h"
+#include "../../contracts/bag.h"
 #include "../../contracts/inventory_action.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/world_facts.h"
@@ -28,7 +28,8 @@
 // UI（入口按钮 + 面板）为插件自有 ui/panel.*。
 //
 // 过渡依赖：save_enter/save_exit 事件仅维护扫描活动态；配置持久化经 save.slot_data；
-// 出售副作用由 inventory_hooks 提供的 inventory.action capability 承载。
+// 出售副作用由 inventory_hooks 提供的 inventory.action 承载；扩展袋由 core.item 的
+// inventory.bag_source 枚举，未注册源时仍扫描原版物理袋。
 
 namespace qol::features::autosell {
 namespace {
@@ -49,13 +50,12 @@ const contracts::CapabilityRequirement kRequires[] = {
      {contracts::kQolSlotDataVersion.major, contracts::kQolSlotDataVersion.minor}},
     {contracts::kUiStateCapabilityId,
      {contracts::kUiStateVersionMajor, contracts::kUiStateVersionMinor}},
+    {contracts::kBagSourceCapabilityId,
+     {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
 };
 
-// extension_bag 的能力只在插件进入 enabled 时注册（其资源受配置门禁），故不能作为 required：
-// 否则配置关闭或启动早期就会把整个 autosell 判为 blocked。运行期按需查找，缺失时走降级路径。
+// optional= http.registry + ui_panels
 const contracts::CapabilityRequirement kOptionalRequires[] = {
-    {contracts::kExtensionBagCapabilityId,
-     {contracts::kExtensionBagVersionMajor, contracts::kExtensionBagVersionMinor}},
     {contracts::kHttpRegistryCapabilityId,
      {contracts::kHttpRegistryVersion.major, contracts::kHttpRegistryVersion.minor}},
     {contracts::kUiPanelsCapabilityId,
@@ -292,9 +292,9 @@ constexpr contracts::FeatureDefinition kFeatures[] = {
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
-    6, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data + ui.state
+    7, kRequires,  // requires=attribute.quality + inventory.action + world.facts + item.facts + save.slot_data + ui.state + inventory.bag_source
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
-    kOptionalRequires,  // optional=extension_bag + http.registry + ui_panels
+    kOptionalRequires,  // optional=http.registry + ui_panels
     0, nullptr,   // provides
     1, kResources,// resources（背包入口 call patch）
     0, nullptr,   // jni（JNI 入口由 bridge/native/gamebridge_autosell.cpp 保留）

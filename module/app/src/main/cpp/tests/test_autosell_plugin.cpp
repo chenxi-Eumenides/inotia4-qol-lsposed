@@ -11,6 +11,7 @@
 #include <cstring>
 
 #include "contracts/http.h"
+#include "contracts/bag.h"
 #include "contracts/panels.h"
 #include "contracts/plugin.h"
 #include "contracts/world_facts.h"
@@ -102,12 +103,33 @@ QolResult fake_panels_unregister_owner(const char* owner) {
     return qol::contracts::ok();
 }
 
+QolResult fake_bag_source_register(const qol::contracts::QolBagSource*) {
+    return qol::contracts::ok();
+}
+
+QolResult fake_bag_source_unregister(int32_t) {
+    return qol::contracts::ok();
+}
+
+uint32_t fake_bag_source_count() { return 0; }
+
+QolResult fake_bag_source_at(uint32_t, const qol::contracts::QolBagSource** out_source) {
+    if (out_source == nullptr) {
+        return QolResult{kQolErrInvalidArgument, kQolErrInvalidArgument, nullptr, 0};
+    }
+    *out_source = nullptr;
+    return qol::contracts::error(kQolErrNotFound, "no bag source", 13);
+}
+
 QolResult fake_capability_require(const char* id, QolVersionRange, const void** out_iface) {
     static const qol::contracts::WorldFactsApi api{};
     static const qol::contracts::ItemFactsApi item_api{sizeof(qol::contracts::ItemFactsApi)};
     static const qol::contracts::QolSlotDataApi slot_data_api{};
     static const qol::contracts::UiStateApi ui_state_api{nullptr, nullptr, nullptr,
                                                          &fake_ui_read_layers};
+    static const qol::contracts::QolBagSourceRegistryApi bag_source_registry_api{
+        sizeof(qol::contracts::QolBagSourceRegistryApi), &fake_bag_source_register,
+        &fake_bag_source_unregister, &fake_bag_source_count, &fake_bag_source_at};
     if (id == nullptr || out_iface == nullptr) {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
@@ -123,6 +145,8 @@ QolResult fake_capability_require(const char* id, QolVersionRange, const void** 
         *out_iface = &slot_data_api;
     } else if (std::strcmp(id, qol::contracts::kUiStateCapabilityId) == 0) {
         *out_iface = &ui_state_api;
+    } else if (std::strcmp(id, qol::contracts::kBagSourceCapabilityId) == 0) {
+        *out_iface = &bag_source_registry_api;
     } else {
         return QolResult{kQolErrNotFound, kQolErrNotFound, nullptr, 0};
     }
@@ -146,16 +170,18 @@ void test_manifest() {
     const qol::contracts::PluginDescriptor& d =
         qol::features::autosell::plugin_descriptor();
     CHECK(std::strcmp(d.id, "autosell") == 0);
-    CHECK(d.requires_count == 6 && d.optional_count == 3 && d.provides_count == 0);
+    CHECK(d.requires_count == 7 && d.optional_count == 2 && d.provides_count == 0);
     CHECK(std::strcmp(d.requires[0].id, "attribute.quality") == 0);
     CHECK(std::strcmp(d.requires[1].id, "inventory.action") == 0);
     CHECK(std::strcmp(d.requires[2].id, "world.facts") == 0);
     CHECK(std::strcmp(d.requires[3].id, "item.facts") == 0);
     CHECK(std::strcmp(d.requires[4].id, "save.slot_data") == 0);
     CHECK(std::strcmp(d.requires[5].id, qol::contracts::kUiStateCapabilityId) == 0);
-    CHECK(std::strcmp(d.optional_requires[0].id, "extension_bag") == 0);
-    CHECK(std::strcmp(d.optional_requires[1].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
-    CHECK(std::strcmp(d.optional_requires[2].id, qol::contracts::kUiPanelsCapabilityId) == 0);
+    CHECK(std::strcmp(d.requires[6].id, qol::contracts::kBagSourceCapabilityId) == 0);
+    CHECK(d.requires[6].range.major == qol::contracts::kBagSourceVersion.major);
+    CHECK(d.requires[6].range.min_minor == qol::contracts::kBagSourceVersion.minor);
+    CHECK(std::strcmp(d.optional_requires[0].id, qol::contracts::kHttpRegistryCapabilityId) == 0);
+    CHECK(std::strcmp(d.optional_requires[1].id, qol::contracts::kUiPanelsCapabilityId) == 0);
     CHECK(d.http_query_count == 0 && d.http_queries == nullptr);
     CHECK(d.http_endpoint_count == 0 && d.http_endpoints == nullptr);
     CHECK(d.http_route_metadata_count == 2 && d.http_route_metadata != nullptr);

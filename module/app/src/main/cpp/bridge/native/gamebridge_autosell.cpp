@@ -7,8 +7,9 @@
 #if !QOL_KERNEL_ONLY
 #include "contracts/autosell.h"
 #include "contracts/commands.h"
-#include "plugins/autosell/config.h"
+#include "plugins/autosell/config_codec.h"
 #include "plugins/autosell/store.h"
+#include "plugins/autosell/status_json.h"
 #include "infra/commands.h"
 
 namespace {
@@ -46,10 +47,10 @@ Java_com_inotia4_qol_NativeBridge_nativeSetAutoSellConfig(
     cfg.socket = clamp_range(static_cast<int>(socket), 0, 16);
     cfg.gem_tier = clamp_range(static_cast<int>(gemTier), 0, 5);
     cfg.gem_range = clamp_range(static_cast<int>(gemRange), 0, 5);
-    // 特殊类型入参为 JSON 数组文本（如 ["dice"]）；null/坏串 -> 空集（名字->位表在 plugins/autosell/store.h）。
+    // 接受旧 special 数组与新 tier 配置对象；旧名字按兼容阈值映射。
     const char* special_chars =
         specialJson != nullptr ? env->GetStringUTFChars(specialJson, nullptr) : nullptr;
-    cfg.special_mask = autosell_special_parse_array(special_chars);
+    (void)autosell_apply_special_json(special_chars, &cfg);
     if (special_chars != nullptr) {
         env->ReleaseStringUTFChars(specialJson, special_chars);
     }

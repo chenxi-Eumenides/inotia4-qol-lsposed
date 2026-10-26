@@ -3,6 +3,7 @@
 #include "store.h"
 
 #include "config.h"
+#include "config_codec.h"
 #include "../../contracts/slot_data.h"
 #include "log.h"
 #include "plugin.h"
@@ -54,7 +55,8 @@ constexpr int64_t kRetryIntervalFrames = 60;
 bool same_config(const autosell::Config& a, const autosell::Config& b) {
     return a.enabled == b.enabled && a.rarity == b.rarity && a.enhance == b.enhance &&
            a.socket == b.socket && a.gem_tier == b.gem_tier && a.gem_range == b.gem_range &&
-           a.special_mask == b.special_mask;
+           a.backpack_tier == b.backpack_tier && a.badge_tier == b.badge_tier &&
+           a.dice_tier == b.dice_tier;
 }
 
 class JsonValidator {
@@ -565,45 +567,6 @@ bool autosell_store_register(qol::contracts::QolOwnerToken owner,
     g_registered_owner = owner;
     g_handle.store(handle, std::memory_order_release);
     return true;
-}
-
-bool autosell_store_persist(int slot, const autosell::Config& config) {
-    if (slot < -1 || slot >= kSlotCount) return false;
-    uint64_t epoch = 0;
-    {
-        std::lock_guard<std::mutex> lock(g_store_mtx);
-        if (slot == -1) {
-            if (!g_pending_intent || !same_config(g_pending_config, config)) {
-                if (g_revision == UINT64_MAX) {
-                    AUTOSELL_LOG_WARN("slot data revision exhausted; pending intent retained");
-                    return false;
-                }
-                g_pending_config = config;
-                g_pending_revision = ++g_revision;
-                g_pending_intent = true;
-            }
-            autosell_set_store_status(slot, g_loaded_slot, false);
-            return false;
-        }
-        if (g_loaded_slot != slot || g_epoch == 0 || !g_load_ready ||
-            g_handle.load(std::memory_order_acquire) == 0) return false;
-        auto& state = g_slots[static_cast<size_t>(slot)];
-        if (!state.has_config || !same_config(state.config, config)) {
-            if (g_revision == UINT64_MAX) {
-                AUTOSELL_LOG_WARN("slot data revision exhausted slot=%d", slot);
-                return false;
-            }
-            state.config = config;
-            state.has_config = true;
-            state.revision = ++g_revision;
-            state.dirty = true;
-        }
-        if (!state.dirty) return true;
-        epoch = g_epoch;
-    }
-    const bool accepted = request_dirty_write(slot, epoch);
-    autosell_set_store_status(slot, slot, false);
-    return accepted;
 }
 
 bool autosell_store_commit_config(const autosell::Config& config) {

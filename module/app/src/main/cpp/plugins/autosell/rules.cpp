@@ -36,7 +36,7 @@ bool equip_rule_hit(const ItemView& item, const Config& cfg) {
     return any_enabled;
 }
 
-// 宝石属性范围档位 -> 属性百分位阈值（1→30 / 2→60 / 3→75 / 4→90 / 5→99）。
+// 宝石属性档位 -> 属性百分位阈值（1→30 / 2→60 / 3→75 / 4→90 / 5→99）。
 // 最高档取 99：即使调到最大也不出售满分（百分位 100）的宝石。
 // 越界/0 返回 -1 = 关闭（不命中），避免未知档位默认命中。
 int gem_range_threshold(int gem_range) {
@@ -70,9 +70,15 @@ bool jewel_rule_hit(const ItemView& item, const Config& cfg) {
     return false;
 }
 
-// 特殊类型规则：掩码非 0 且勾选集合与物品位标志有交集即真（对任意物品生效）。
-bool special_rule_hit(const ItemView& item, const Config& cfg) {
-    return cfg.special_mask != 0u && (item.special_types & cfg.special_mask) != 0u;
+// 背包、徽章、骰子分别按用户选择的最大可售档位判定。
+bool tier_rule_hit(const ItemView& item, const Config& cfg) {
+    if (cfg.backpack_tier > 0 && item.is_backpack && item.category >= 1 &&
+        item.category <= cfg.backpack_tier) return true;
+    if (cfg.badge_tier > 0 && item.badge_rank > 0 && item.badge_rank <= cfg.badge_tier)
+        return true;
+    if (cfg.dice_tier > 0 && item.dice_tier > 0 && item.dice_tier <= cfg.dice_tier)
+        return true;
+    return false;
 }
 
 }  // namespace
@@ -101,7 +107,7 @@ DecisionReason should_sell_with_reason(const ItemView& item, const Config& cfg) 
     if (item.is_jewel && jewel_rule_hit(item, cfg)) {
         return DecisionReason::kRuleMatch;
     }
-    if (special_rule_hit(item, cfg)) {
+    if (tier_rule_hit(item, cfg)) {
         return DecisionReason::kRuleMatch;
     }
 

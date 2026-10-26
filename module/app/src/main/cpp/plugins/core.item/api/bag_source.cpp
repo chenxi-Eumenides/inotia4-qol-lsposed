@@ -39,10 +39,26 @@ QolResult unregister_source(int32_t space_id) {
     return contracts::ok();
 }
 
+uint32_t source_count() { return registered_bag_source_count(); }
+
+QolResult source_at(uint32_t index, const contracts::QolBagSource** out_source) {
+    if (out_source == nullptr) {
+        return registry_error(kQolErrInvalidArgument, "invalid bag source output");
+    }
+    *out_source = nullptr;
+    const contracts::QolBagSource* source = registered_bag_source_at(index);
+    if (source == nullptr) {
+        return registry_error(kQolErrNotFound, "bag source not found");
+    }
+    *out_source = source;
+    return contracts::ok();
+}
+
 }  // namespace
 
 const contracts::QolBagSourceRegistryApi kBagSourceRegistryApi{
-    sizeof(contracts::QolBagSourceRegistryApi), &register_source, &unregister_source};
+    sizeof(contracts::QolBagSourceRegistryApi), &register_source, &unregister_source,
+    &source_count, &source_at};
 
 const contracts::QolBagSource* find_bag_source(int32_t space_id) {
     for (const contracts::QolBagSource* source : g_bag_sources) {

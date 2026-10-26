@@ -1273,6 +1273,30 @@ target_compile_features(autosell_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(autosell_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME autosell_plugin_tests COMMAND autosell_plugin_tests)
 
+# Autosell scan gate ordering and scheduler task lifecycle host tests.
+add_executable(autosell_scan_gates_tests
+    test_autosell_scan_gates.cpp
+    ${CPP_DIR}/plugins/autosell/scan_gates.cpp)
+target_include_directories(autosell_scan_gates_tests PRIVATE ${CPP_DIR})
+target_compile_features(autosell_scan_gates_tests PRIVATE cxx_std_17)
+set_target_properties(autosell_scan_gates_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME autosell_scan_gates_tests COMMAND autosell_scan_gates_tests)
+
+add_executable(autosell_scan_task_tests
+    test_autosell_scan_task.cpp
+    ${CPP_DIR}/plugins/autosell/scan.cpp
+    ${CPP_DIR}/plugins/autosell/config.cpp
+    ${CPP_DIR}/plugins/autosell/scan_session.cpp
+    ${CPP_DIR}/plugins/autosell/scan_gates.cpp
+    ${CPP_DIR}/plugins/autosell/rules.cpp)
+target_include_directories(autosell_scan_task_tests PRIVATE ${CPP_DIR})
+target_compile_features(autosell_scan_task_tests PRIVATE cxx_std_17)
+set_target_properties(autosell_scan_task_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_link_libraries(autosell_scan_task_tests PRIVATE Threads::Threads)
+add_test(NAME autosell_scan_task_tests COMMAND autosell_scan_task_tests)
+
 # ADR 0001 D3/D4：character_panel_i18n 插件清单/资源 host 测试（角色面板作用域 hook claim +
 # 标签表连续性与占位 + backup 交付）。文本机制归 core.custom_ui（其清单见 native_choice_tests）。
 # 显式锚定 C++17：contracts/plugin.h 字段名 requires 在 C++20 是关键字。

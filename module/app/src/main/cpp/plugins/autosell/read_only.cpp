@@ -30,10 +30,9 @@ bool item_is_jewel(int32_t category, int32_t* out) {
 }
 
 bool item_is_real_equip(contracts::QolItemHandle item, int32_t* out) {
-    contracts::QolItemInventoryView view{};
-    if (out == nullptr || !read_view(item, &view)) return false;
-    *out = view.equip;
-    return true;
+    const auto* api = facts();
+    return out != nullptr && api != nullptr && api->is_real_equip != nullptr &&
+           contracts::succeeded(api->is_real_equip(item, out));
 }
 
 bool item_rarity(contracts::QolItemHandle item, int32_t* out) {

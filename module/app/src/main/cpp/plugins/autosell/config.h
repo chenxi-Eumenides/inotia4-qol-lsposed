@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
 
 #include "rules.h"
 
@@ -25,5 +24,19 @@ void autosell_set_host_installed(bool installed);
 // 记录按存档 sidecar 的加载/持久化状态（slot/loadedSlot/persisted 可经状态 JSON 查）。
 void autosell_set_store_status(int slot, int loaded_slot, bool persisted);
 
-// 状态 JSON：配置快照 + 已售/失败累计计数 + 上次扫描帧号 + 宿主安装状态 + 存档 sidecar 状态。
-std::string autosell_status_json();
+namespace autosell {
+
+struct StatusSnapshot {
+    Config config;
+    int64_t sold;
+    int64_t failed;
+    int64_t last_scan_frame;
+    bool host_installed;
+    int slot;
+    int loaded_slot;
+    bool persisted;
+};
+
+StatusSnapshot autosell_status_snapshot();
+
+}  // namespace autosell

@@ -2241,7 +2241,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 ```json
 {"enabled":false,"rarity":0,"enhance":0,"socket":0,"gemTier":0,"gemRange":0,
- "special":[],"sold":0,"failed":0,"lastScanFrame":-1,
+ "backpackTier":0,"badgeTier":0,"diceTier":0,"special":[],"sold":0,"failed":0,"lastScanFrame":-1,
  "slot":-1,"loadedSlot":-1,"persisted":false,"hostInstalled":false}
 ```
 
@@ -2251,13 +2251,15 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 `POST /api/feature/autosell/config` 请求体：
 
 ```json
-{"enabled":true,"rarity":1,"enhance":0,"socket":0,"gemTier":0,"gemRange":0,"special":["dice"]}
+{"enabled":true,"rarity":1,"enhance":0,"socket":0,"gemTier":0,"gemRange":0,
+ "backpackTier":0,"badgeTier":0,"diceTier":4,"special":["dice"]}
 ```
 
-- `enabled` 必须为 JSON boolean；`rarity` 0..5、`enhance` 0..32、`socket` 0..16、`gemTier` 0..5、`gemRange` 0..5，存在时必须为整数；`special` 必须为字符串数组，元素仅允许 `backpack`、`normalSeal`、`dice`。字段缺失时按 `false`/`0`/`[]` 处理。
+- `enabled` 必须为 JSON boolean；`rarity` 0..5、`enhance` 0..32、`socket` 0..16、`gemTier` 0..5、`gemRange` 0..5、`backpackTier` 0..4、`badgeTier` 0..4、`diceTier` 0..5，存在时必须为整数；`special` 必须为字符串数组，元素仅允许 `backpack`、`normalSeal`、`dice`。字段缺失时按 `false`/`0`/`[]` 处理。
+- `backpackTier`/`badgeTier`/`diceTier` 是新的权威分档字段；`special` 仅作旧客户端兼容，缺失 tier 时按 `backpack→4`、`normalSeal→1`、`dice→4` 回退。
 - 类型、范围或 `special` 元素非法返回 400；JSON 非法返回 400 `bad request`。
 - 当前无活动存档 session 时返回 409 `config rejected (no active save session)`，不修改运行时配置。
-- 成功时返回与 GET 相同的状态 JSON；配置立即应用到运行时扫描，并按当前存档 sidecar `autosell` v2 持久化。设置页/游戏内面板的修改走同一提交路径，面板在「保存并关闭」时提交。
+- 成功时返回与 GET 相同的状态 JSON；配置立即应用到运行时扫描，并按当前存档 sidecar `autosell` v2 持久化。设置页/游戏内面板的修改走同一提交路径，面板在返回/关闭时提交。
 
 `GET /api/world/map/distance`
 

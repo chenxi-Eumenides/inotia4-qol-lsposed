@@ -8,6 +8,7 @@
 // - 同一 space_id 重复注册失败，不覆盖既有源。
 // - 回调一律主线程调用；不得跨线程持有返回的句柄以外的原生指针。
 
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -19,7 +20,7 @@
 namespace qol::contracts {
 
 constexpr const char* kBagSourceCapabilityId = "inventory.bag_source";
-constexpr QolVersion kBagSourceVersion{1, 1};
+constexpr QolVersion kBagSourceVersion{1, 2};
 
 // 跨介质物品转移记录：payload 格式由来源源定义，core.item 只透传。
 // 有效长度 <= kQolBagTransferPayloadMaxSize；缓冲区固定 256 字节，禁止动态分配。
@@ -64,7 +65,17 @@ struct QolBagSourceRegistryApi {
     uint32_t struct_size;
     QolResult (*register_source)(const QolBagSource* source);
     QolResult (*unregister_source)(int32_t space_id);
+    uint32_t (*source_count)();
+    QolResult (*source_at)(uint32_t index, const QolBagSource** out_source);
 };
+
+inline bool qol_bag_source_registry_api_valid(const QolBagSourceRegistryApi* api) {
+    constexpr uint32_t kRequiredSize =
+        static_cast<uint32_t>(offsetof(QolBagSourceRegistryApi, source_at) +
+                              sizeof(decltype(QolBagSourceRegistryApi::source_at)));
+    return api != nullptr && api->struct_size >= kRequiredSize &&
+           api->register_source != nullptr && api->unregister_source != nullptr;
+}
 
 inline bool qol_bag_source_valid(const QolBagSource* source) {
     return source != nullptr && source->version.major == kBagSourceVersion.major &&
