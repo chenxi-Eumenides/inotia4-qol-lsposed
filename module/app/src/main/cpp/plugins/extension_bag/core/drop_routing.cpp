@@ -209,20 +209,6 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
                         qol::extension_bag::ui_state().ui.extension_drag.slot, index);
             return handled;
         }
-        // C18 改版客户端追加袋页签：原生 drop 分支只处理“把背包类物品装进该袋”，
-        // 普通物品落上去没有原生处理，因此这里由模块事务接管。
-        int native_target_bag = -1;
-        if (extension_c18_native_bag_hit(x, y, &native_target_bag)) {
-            const bool handled = move_extension_to_original_locked(
-                lock, qol::extension_bag::ui_state().ui.extension_drag.bag,
-                qol::extension_bag::ui_state().ui.extension_drag.slot, native_target_bag);
-            if (handled) refresh_projected_module_view_after_move_locked();
-            QOL_LOG_INFO(QolDomain::kExtensionBag,
-                         "drop result direction=extension->native handled=%d src=%d/%d target_bag=%d",
-                         handled ? 1 : 0, qol::extension_bag::ui_state().ui.extension_drag.bag,
-                         qol::extension_bag::ui_state().ui.extension_drag.slot, native_target_bag);
-            return handled;
-        }
         const int original_target_bag = original_bag_button_index(x, y);
         if (original_target_bag >= 0 && original_target_bag < 6) {
             if (!virtual_bag::valid_original_transaction_bag(original_target_bag)) {
@@ -262,6 +248,25 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
         qol::extension_bag::ui_state().objects.module_objects[source_session.source_bag][source_session.source_slot] == nullptr) {
         cancel_projected_drag_session_locked("source-identity-replaced");
         return false;
+    }
+    // C18 原生追加袋页签与扩展页签在坐标上可能重叠。页签命中优先于槽位，
+    // 但原生页签必须先于扩展页签判定，否则扩展页签会吞掉扩展->C18 的拖拽意图。
+    int native_target_bag = -1;
+    if (extension_c18_native_bag_hit(x, y, &native_target_bag)) {
+        const bool handled = move_extension_to_original_locked(
+            lock, qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
+            qol::extension_bag::ui_state().ui.extension_drag_session.source_slot,
+            native_target_bag);
+        virtual_bag::session_finish_transaction(
+            &qol::extension_bag::ui_state().ui.extension_drag_session, handled);
+        if (handled) refresh_projected_module_view_after_move_locked();
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "drop result direction=extension->native handled=%d src=%d/%d target_bag=%d",
+                     handled ? 1 : 0,
+                     qol::extension_bag::ui_state().ui.extension_drag_session.source_bag,
+                     qol::extension_bag::ui_state().ui.extension_drag_session.source_slot,
+                     native_target_bag);
+        return handled;
     }
     // Tab rects and grid rows overlap in the current UI coordinate space; a tab hit is
     // therefore the explicit switch-bag intent and must take precedence over a slot hit.
