@@ -296,9 +296,9 @@ return 0   // 主轴已移动；副轴被挡时也按成功返回，避免原版
 
 ### 6.4 速度与 8px 对齐
 
-- 两轴都用完整 `delta`：斜向实际速度 `sqrt(2) * delta`，8px 时约 1.414 倍单轴。优点是保持 8px 对齐；缺点是手感偏快。
-- 两轴按 70% 缩放：`step = round(delta * 70%)`，8px → 6px；总速度 `sqrt(2)*6 ≈ 8.49px`，约 1.06 倍单轴，较 1.414 倍降低约 25%。缺点：位置不再保持 8px 对齐，方向切换时可能触发 `+0x2e0` 和 `CHAR_MoveOnWaitCoord` 补步。
-- 当前实现选择 70%（`kDiagonalSpeedPercent=70`）；真机速度手感已确认。等速版本需要同时改转向闸门，放到全向阶段。
+- 当前实现两轴都用完整 `delta`：斜向实际速度 `sqrt(2) * delta`，8px 时约 1.414 倍单轴。两轴 8px 保持原版 8px 对齐，不会因斜向步长产生 `+0x2e0` 补步。
+- 曾尝试两轴按 70% 缩放（8px → 6px，总速度约 1.06 倍单轴），但非 8px 坐标会在方向切换和松手时触发 `CHAR_MoveOnWaitCoord`，表现为移动变慢和松手滑行，已回退。
+- 斜向降速若重新启用，必须同时处理原版 8px 转向/释放闸门，放到全向阶段单独验收。
 
 ### 6.5 斜向双箭头与朝向
 
@@ -542,13 +542,13 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 - `eight_way_move_tests`：八向分类、22.5°/45° 边界、死区、自定义键码、副轴条件、朝向偏好（右上保持右/上、非轴回退、基本方向忽略），通过。
 - `eight_way_move_plugin_tests`：插件 id、4 个资源、端口、feature 默认关闭与 Gameplay 分类，通过。
 - `scripts/build-debug.sh`：通过；最终模块产物 `output/inotia4_qol_lsposed_debug_2610270308_9e2037786635.apk`，SHA-256 `9e2037786635cb8007a2bbccc11c88811aa60b14d4e882ad094c14872f8864fd`。
-- C18L v586 真机烟测：集成包 `output/Inotia4_C18L_v586_debug_9e2037786635_lspatch.apk`；四个资源均 `live`；日志出现 `eight_way touch`、`char_move hook active`、`eight_way draw secondary=3 loc=0xe at=(212,514)`、`eight_way diagonal applied ... delta=8 step=6`；截图确认上/右双箭头都在方向环上点亮，角色斜向移动，速度手感已由用户确认。
+- C18L v586 真机烟测：四个资源均 `live`；日志出现 `eight_way touch`、`char_move hook active`、`eight_way draw secondary=3 loc=0xe at=(212,514)`、`eight_way diagonal applied ... delta=8 step=8`；截图确认上/右双箭头都在方向环上点亮，角色斜向移动。
 - 朝向偏好已有单测；多段触摸（先右后右上）真机逐帧验证未完成。
 - 完整验收仍 `NOT_ACCEPTED`：松开停止、撞墙、切图/拾取/动画、物理键盘、插件关闭还原和不同分辨率仍需逐项验证。
 
 ### 13.3 已知原型取舍
 
-- 两轴按 70% 缩放（8px → 6px），总速度约 1.06 倍单轴，较原 1.414 倍降低约 25%；步长非 8 的倍数，方向切换可能触发 `+0x2e0` 补步。
+- 两轴使用完整 `delta`（8px → 8px），总速度约 `sqrt(2)` 倍单轴；保持原版 8px 对齐，避免方向切换/松手补步。斜向降速已回退，后续需连同原版 8px 闸门一起处理。
 - 主轴 `flag=1`、副轴 `flag=0`；侧格事件被规避，主轴失败时立即停住，不产生只走副轴的侧格位置。
 - 主轴成功、副轴被挡时，原型会先反向回滚主轴、再以 `flag=0` 重走主轴，让镜头/格子事件落在单轴终点；回滚失败时直接恢复移动前坐标并返回 2，避免留下静默位移。该回滚分支是原型新增逻辑，需真机重点验证。
 - 输入清理用 `owns_input` 区分本功能写入与物理键；同方向物理键与触摸主键完全同码时仍有理论歧义。

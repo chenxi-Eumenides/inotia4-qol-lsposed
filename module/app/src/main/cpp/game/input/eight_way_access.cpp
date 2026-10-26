@@ -155,6 +155,23 @@ bool control_absolute_point(void* ctrl, int64_t* x, int64_t* y) {
     return true;
 }
 
+bool prepare_touch_move(void* ch, int32_t dir) {
+    if (ch == nullptr || dir < 0 || dir > 3 || fn_char_set_direction == nullptr) return false;
+    // 预置朝向使原版转向闸门走“朝向相同”分支，避免角色处于非 8px 坐标时
+    // 触发 CHAR_MoveOnWaitCoord 补步；随后原版仍会调用 CHAR_SetDirection 设置子朝向。
+    // 使用原函数而不是直接写 [ch+6]，保留原版对特殊状态的方向锁定判断。
+    fn_char_set_direction(ch, dir);
+    return clear_wait_coord(ch);
+}
+
+bool clear_wait_coord(void* ch) {
+    if (ch == nullptr) return false;
+    auto* wait_coord = static_cast<uint8_t*>(ch) + C_WAIT_COORD;
+    if (!writable(wait_coord, sizeof(uint8_t))) return false;
+    *wait_coord = 0;
+    return true;
+}
+
 void* virtual_control(int32_t id) {
     const VirtualKeyRootFn root_fn = virtual_key_root_fn();
     const FindControlByIdFn find_fn = find_control_by_id_fn();

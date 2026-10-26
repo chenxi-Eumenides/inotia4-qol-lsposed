@@ -110,6 +110,7 @@ constexpr size_t SAVESLOT_HERO_INDEX = 0x1c;  // int8 当前 hero 索引
 
 // ---- 角色朝向 / 交互函数显示 ----
 constexpr size_t C_DIRECTION = 0x06;          // u8 角色朝向
+constexpr size_t C_WAIT_COORD = 0x2e0;        // u8 转向等待位；GAMESTATE_PressKeyPlay 在非 8px 对齐时置 1，CHAR_Process 调 CHAR_MoveOnWaitCoord 补步
 constexpr size_t C_FUNC_DISPLAY = 0x0a;       // u16 交互函数显示值（type==2 装饰物；与 C_NAME_ID 同偏移）
 
 // ---- 地面掉落物数组（G_DROP_ARRAY_GOT_VMA，元素步长 0x20）----

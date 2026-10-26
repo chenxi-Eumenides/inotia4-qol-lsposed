@@ -93,8 +93,8 @@ int main() {
         check(c.primary_dir == 3 && c.secondary_dir == -1, "cardinal ignores facing");
     }
 
-    check(diagonal_step(8) == 6, "diagonal step 8 -> 6");
-    check(diagonal_step(10) == 7, "diagonal step 10 -> 7");
+    check(diagonal_step(8) == 8, "diagonal step 8 -> 8");
+    check(diagonal_step(10) == 10, "diagonal step 10 -> 10");
     check(diagonal_step(1) == 1, "diagonal step min 1");
     check(diagonal_step(0) == 1, "diagonal step zero min 1");
 

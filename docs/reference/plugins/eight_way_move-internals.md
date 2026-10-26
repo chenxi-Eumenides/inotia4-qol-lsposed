@@ -83,7 +83,7 @@
 1. `enabled/active/trusted/flag==0/secondary_dir>=0/dir==primary_dir` 全部满足才处理。
 2. `ch == lead_member()`、`world_game_state_gate()==0`、`ch+0x2f0` 无路径。
 3. 保存移动前 x/y。
-4. 计算 `step = diagonal_step(delta)`（70%，8px → 6px），主轴 `CHAR_Move(dir, step, flag=1)` 静默移动；失败立即返回主轴错误码，不产生只走副轴的位置。
+4. 计算 `step = diagonal_step(delta)`（完整 `delta`，当前 8px → 8px），主轴 `CHAR_Move(dir, step, flag=1)` 静默移动；失败立即返回主轴错误码，不产生只走副轴的位置。
 5. 主轴成功，副轴 `CHAR_Move(secondary, step, flag=0)` 完整移动。
 6. 副轴失败：反向 `CHAR_Move` 回滚主轴；回滚成功后再以 `flag=0` 重走主轴；回滚失败直接恢复保存的 x/y 并返回 `2`。
 
@@ -126,7 +126,7 @@
 
 ## 6. 已知限制与风险
 
-- 斜向两轴步长按 `kDiagonalSpeedPercent=70` 缩放（8px → 6px），总速度约 1.06 倍单轴；等速需要改原版 8px 转向闸门，当前不做。步长非 8 的倍数，方向切换时可能触发原版 `+0x2e0` 补步。
+- 斜向两轴步长固定为完整 `delta`（8px → 8px），总速度约 `sqrt(2)` 倍单轴；两轴保持 8px 对齐，避免方向切换或松手时触发原版 `+0x2e0` 补步。当前不做斜向降速。
 - 全向移动未实现。
 - 同方向物理键与触摸主键同码时，靠 `KEY_bPressed`/键码匹配仍有理论歧义；真机需重点回归。
 - 主轴成功、副轴失败时的事件/镜头依赖“回滚后重走主轴”分支；回滚失败直接恢复坐标，属于原型新增逻辑。
@@ -143,7 +143,7 @@
 | descriptor、4 资源、端口、feature 默认关闭与 Gameplay 分类 | `tests/test_eight_way_move_plugin.cpp` |
 | 构建 | `scripts/build-debug.sh` |
 | 架构/层依赖/符号/资源 | `check_arch.py`、`check_layers.py`、`check_symbols.py`、`check_resources.py` |
-| 真机烟测 | C18L v586：四资源 `live`；日志 `eight_way touch` / `char_move hook active` / `eight_way draw secondary=3 loc=0xe at=(212,514)` / `eight_way diagonal applied ... delta=8 step=6`；截图确认上+右双箭头，角色斜向移动，速度已由用户确认 |
+| 真机烟测 | C18L v586：四资源 `live`；日志 `eight_way touch` / `char_move hook active` / `eight_way draw secondary=3 loc=0xe at=(212,514)` / `eight_way diagonal applied ... delta=8 step=8`；截图确认上+右双箭头，角色斜向移动 |
 
 ## 8. 已删除旧结构
 

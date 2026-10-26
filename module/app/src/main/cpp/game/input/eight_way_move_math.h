@@ -12,12 +12,11 @@ namespace qol::game::input {
 
 constexpr uint32_t kCustomDirKeyBase = 0x51000000u;
 constexpr int32_t kDirectionDeadzonePixels = 8;
-// 斜向两轴步长缩放：8px -> 6px，总速度约 1.06 倍单轴；较原 1.414 倍降低约 25%。
-constexpr int32_t kDiagonalSpeedPercent = 70;
 
+// 斜向两轴都使用完整 delta（当前 8px）：保持原版 8px 对齐，避免方向切换或
+// 松手时触发 CHAR_MoveOnWaitCoord 补步。斜向总速度为单轴的 sqrt(2) 倍。
 inline int32_t diagonal_step(int32_t delta) {
-    const int32_t scaled = (delta * kDiagonalSpeedPercent + 50) / 100;
-    return scaled > 0 ? scaled : 1;
+    return delta > 0 ? delta : 1;
 }
 
 // tan(67.5°) * 1000，用于 22.5°/67.5° 的八向边界。

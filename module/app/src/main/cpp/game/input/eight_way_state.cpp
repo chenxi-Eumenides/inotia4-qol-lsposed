@@ -59,9 +59,11 @@ void clear_state() {
 // 死区/无效触点：清状态并显式写 0，抑制本帧移动。
 // 原触摸回调已先写入普通方向键码，只清 state 不能阻止 CHAR_Move。
 void suppress_motion() {
+    const bool owns = g_state.owns_input;
     clear_state();
     access::write_key_code(0);
     access::write_press_active(false);
+    if (owns) access::clear_wait_coord(lead_member());
 }
 
 }  // namespace
@@ -83,6 +85,9 @@ void reset_state() {
     // 在 translate_press_key 中已把 owns_input 置 false，不会被这里清掉。
     access::write_key_code(0);
     access::write_press_active(false);
+    // 斜向步长可能让原版置过转向等待位；松手/关闭时一并清掉，
+    // 否则 CHAR_Process 会在松手后继续 CHAR_MoveOnWaitCoord 补步。
+    access::clear_wait_coord(lead_member());
 }
 
 void reset() {
@@ -186,6 +191,9 @@ int32_t translate_press_key(int32_t key) {
         access::write_key_code(g_state.primary_key);
         g_state.trusted = true;
         g_state.owns_input = true;
+        // 预置朝向让原版转向闸门直接通过；即使角色当前不在 8px 对齐点，
+        // 也不会进入 CHAR_MoveOnWaitCoord 补步。
+        access::prepare_touch_move(lead_member(), g_state.primary_dir);
         return g_state.primary_key;
     }
 
@@ -197,6 +205,10 @@ int32_t translate_press_key(int32_t key) {
                  access::press_active())) {
         g_state.trusted = false;
         g_state.owns_input = false;
+    } else {
+        // 自定义码在上一帧已被翻译成普通主方向码；后续按住帧同样需要绕过
+        // 8px 转向闸门，否则每次方向切换仍会退化到补步速度。
+        access::prepare_touch_move(lead_member(), g_state.primary_dir);
     }
     return key;
 }
