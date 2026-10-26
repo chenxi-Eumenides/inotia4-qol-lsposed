@@ -17,6 +17,7 @@ using qol::game::input::EightWayClass;
 using qol::game::input::apply_facing_preference;
 using qol::game::input::classify_vector;
 using qol::game::input::custom_dir_key;
+using qol::game::input::diagonal_step;
 using qol::game::input::is_custom_dir_key;
 using qol::game::input::should_apply_secondary;
 
@@ -91,6 +92,11 @@ int main() {
         apply_facing_preference(c, 2);                 // must be ignored
         check(c.primary_dir == 3 && c.secondary_dir == -1, "cardinal ignores facing");
     }
+
+    check(diagonal_step(8) == 6, "diagonal step 8 -> 6");
+    check(diagonal_step(10) == 7, "diagonal step 10 -> 7");
+    check(diagonal_step(1) == 1, "diagonal step min 1");
+    check(diagonal_step(0) == 1, "diagonal step zero min 1");
 
     check(should_apply_secondary(true, true, true, 0, 3, 3, 2), "apply secondary");
     check(!should_apply_secondary(true, true, true, 0, 2, 3, 2), "dir mismatch");
