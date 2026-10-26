@@ -1226,12 +1226,10 @@ int put_jewel_wrapper(void* equip_item, void* jewel_item) {
         backup_missing("hook:ITEMSYSTEM_PutJewel");
         return 3;
     }
-    qol::contracts::QolInventoryItemRef source_ref{};
-    if (source_for_hook_item(equip_item, &source_ref) != nullptr ||
-        source_for_hook_item(jewel_item, &source_ref) != nullptr) {
-        QOL_LOG_WARN(QolDomain::kInventory, "jewel write rejected registered-source item");
-        return 3;
-    }
+    // Registered-source items are valid here: the provider owns their data, and
+    // material consumption is routed back through QolBagSource::remove by the
+    // INVEN_ConsumeItem hook. The caller that initiated the native apply is
+    // responsible for persisting any provider-owned target payload.
     return stage4_put_jewel(equip_item, jewel_item, nullptr, g_backup_put_jewel, nullptr);
 }
 

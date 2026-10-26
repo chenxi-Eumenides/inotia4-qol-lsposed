@@ -212,6 +212,16 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
     if (out_result != nullptr) *out_result = original_result;
     return VirtualBagEquipControlEventResult::kHandled;
 }
+namespace {
+
+bool item_handle_matches(void* item, qol::contracts::QolItemHandle expected) {
+    qol::contracts::QolItemHandle current{};
+    return item != nullptr && extension_bag_item_handle_for_pointer(item, &current) &&
+           current.slot == expected.slot && current.generation == expected.generation;
+}
+
+}  // namespace
+
 bool apply_extension_material_to_slot_locked(
     ::qol::extension_bag::ReentryLock& lock, int src_bag, int src_slot,
     int dst_bag, int dst_slot, qol::contracts::QolItemHandle material_handle,
@@ -223,26 +233,32 @@ bool apply_extension_material_to_slot_locked(
         !qol::extension_bag::ui_state().objects.module_view_installed ||
         qol::extension_bag::ui_state().objects.module_view_index != src_bag ||
         qol::extension_bag::ui_state().objects.projected_item_root == nullptr) {
+        VIRTBAG_LOG("apply reject reason=context src=%d/%d dst=%d/%d", src_bag, src_slot,
+                    dst_bag, dst_slot);
         return false;
     }
 
     const int capacity = ::qol::extension_bag::access::bag().capacities[src_bag];
     void* projected_root = qol::extension_bag::ui_state().objects.projected_item_root;
-    if (src_slot >= capacity || dst_slot >= capacity ||
-        extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot) != projected_root) {
+    void* live_root = extension_bag_ui_root(qol::contracts::QolUiRootKind::kEquipItemRoot);
+    if (src_slot >= capacity || dst_slot >= capacity || live_root != projected_root) {
+        VIRTBAG_LOG("apply reject reason=root src=%d/%d dst=%d/%d", src_bag, src_slot,
+                    dst_bag, dst_slot);
         return false;
     }
 
     void* material = nullptr;
     void* target_item = nullptr;
-    if (!extension_bag_private_item_for_handle(material_handle, &material) ||
-        material == nullptr ||
-        !extension_bag_private_item_for_handle(target_handle, &target_item) ||
-        target_item == nullptr ||
-        qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot] != material ||
-        qol::extension_bag::ui_state().objects.module_object_handles[src_bag][src_slot] != material_handle.slot ||
-        qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] != target_item ||
-        qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot] != target_handle.slot) {
+    const bool material_ok = extension_bag_private_item_for_handle(material_handle, &material);
+    const bool target_ok = extension_bag_private_item_for_handle(target_handle, &target_item);
+    const bool source_object_ok = qol::extension_bag::ui_state().objects.module_objects[src_bag][src_slot] == material;
+    const bool source_handle_ok = item_handle_matches(material, material_handle);
+    const bool target_object_ok = qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] == target_item;
+    const bool target_handle_ok = item_handle_matches(target_item, target_handle);
+    if (!material_ok || material == nullptr || !target_ok || target_item == nullptr ||
+        !source_object_ok || !source_handle_ok || !target_object_ok || !target_handle_ok) {
+        VIRTBAG_LOG("apply reject reason=identity src=%d/%d dst=%d/%d", src_bag, src_slot,
+                    dst_bag, dst_slot);
         return false;
     }
 
@@ -250,16 +266,23 @@ bool apply_extension_material_to_slot_locked(
     void* target_control = valid_child_locked(projected_root, dst_slot);
     void* source_data = source_control != nullptr ? extension_bag_ui_data(source_control) : nullptr;
     void* target_data = target_control != nullptr ? extension_bag_ui_data(target_control) : nullptr;
+    const bool target_is_equip = target_item != nullptr && item_is_equip(target_item);
     if (source_data == nullptr || target_data == nullptr ||
         *reinterpret_cast<void**>(source_data) != material ||
-        *reinterpret_cast<void**>(target_data) != target_item || !item_is_equip(target_item)) {
+        *reinterpret_cast<void**>(target_data) != target_item || !target_is_equip) {
+        VIRTBAG_LOG("apply reject reason=controls src=%d/%d dst=%d/%d", src_bag, src_slot,
+                    dst_bag, dst_slot);
         return false;
     }
 
     const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
     const bool source_is_jewel = read_item_is_jewel(source_category);
     const bool source_is_scroll = read_item_is_enchant_scroll(source_category);
-    if (!source_is_jewel && !source_is_scroll) return false;
+    if (!source_is_jewel && !source_is_scroll) {
+        VIRTBAG_LOG("apply reject reason=material kind=%d jewel=%d scroll=%d",
+                    source_category, source_is_jewel ? 1 : 0, source_is_scroll ? 1 : 0);
+        return false;
+    }
     const char* kind = source_is_jewel ? "jewel" : "scroll";
 
     const auto& host = ::qol::extension_bag::access::host();
@@ -351,7 +374,7 @@ bool apply_extension_material_to_slot_locked(
         extension_bag_private_item_for_handle(target_handle, &post_apply_target) &&
         post_apply_target == target_item &&
         qol::extension_bag::ui_state().objects.module_objects[dst_bag][dst_slot] == target_item &&
-        qol::extension_bag::ui_state().objects.module_object_handles[dst_bag][dst_slot] == target_handle.slot;
+        item_handle_matches(target_item, target_handle);
     void* post_apply_control = target_projection_current
         ? valid_child_locked(projected_root, dst_slot) : nullptr;
     void* post_apply_data = post_apply_control != nullptr

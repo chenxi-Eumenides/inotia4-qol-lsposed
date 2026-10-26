@@ -50,6 +50,23 @@ bool descriptor_empty(const virtual_bag::Item& item) {
     return item.category <= 0 || item.count <= 0;
 }
 
+// During an EB-owned ApplyStuff call, core.item consumes the material through
+// QolBagSource::remove. That call must bind the active ModuleUseToken so the
+// outer apply can observe consumption and defer releasing a whole stack.
+ModuleUseToken* active_use_token_for(int bag, int slot, void* item) {
+    ModuleUseToken* token = g_active_module_use_token;
+    if (token == nullptr || token->bag != bag || token->slot != slot || token->item != item) {
+        return nullptr;
+    }
+    const ModuleUseState& use =
+        qol::extension_bag::ui_state().objects.module_object_use[bag][slot];
+    if (!use.active || use.item != item || use.generation != token->generation ||
+        use.owner != token->owner) {
+        return nullptr;
+    }
+    return token;
+}
+
 int encoded_category(int category) {
     return static_cast<int>(virtual_bag_category_uses_stack_count(category));
 }
@@ -388,14 +405,15 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
     if (count > visible) {
         return source_error(kQolErrInvalidArgument, "remove count exceeds item count");
     }
+    ModuleUseToken* active_use = active_use_token_for(bag, slot, item);
     if (count >= visible || count >= descriptor.count) {
         if (!module_object_release_allowed_locked(bag, slot, item, "bag source remove", true,
-                                                  nullptr)) {
+                                                  active_use)) {
             return source_error(kQolErrConflict, "extension item remove rejected");
         }
         const virtual_bag::Item previous = descriptor;
         ::qol::extension_bag::access::bag().items[bag][slot] = {};
-        if (!free_module_object_locked(bag, slot)) {
+        if (!free_module_object_locked(bag, slot, active_use)) {
             ::qol::extension_bag::access::bag().items[bag][slot] = previous;
             return source_error(kQolErrConflict, "extension item remove rejected");
         }
@@ -409,6 +427,9 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
                 virtual_bag::payload_hash(previous);
             qol::extension_bag::ui_state().objects.module_object_categories[bag][slot] =
                 previous.category;
+            if (active_use != nullptr) {
+                (void)module_use_abort_locked(*active_use);
+            }
             extension_bag_mark_dirty_locked();
             if (module_item_locked(bag, slot) == nullptr) {
                 QOL_LOG_ERROR(QolDomain::kExtensionBag,
@@ -459,6 +480,9 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
         qol::extension_bag::ui_state().objects.module_object_hashes[bag][slot] =
             virtual_bag::payload_hash(descriptor);
         return source_error(kQolErrInternal, "extension item persist failed");
+    }
+    if (active_use != nullptr) {
+        qol::extension_bag::ui_state().objects.module_object_use[bag][slot].consumed = true;
     }
     if (qol::extension_bag::ui_state().objects.module_view_installed &&
         qol::extension_bag::ui_state().objects.module_view_index == bag) {
