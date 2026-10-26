@@ -512,9 +512,9 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
 namespace {
 
 int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
-    (void)frame;
     (void)ctx;
     int world_state = -1;
+    (void)frame;
     if (!read_world_state_id(&world_state)) return 1;
     const bool due = qol::features::extension_bag::model::main_menu_cleanup_due(
         qol::extension_bag::ui_state().aux.lifecycle_last_state, world_state, true,
@@ -559,14 +559,50 @@ int32_t extension_bag_lifecycle_tick(int64_t frame, void* ctx) {
         const auto* refresh = require_result.ok == kQolOk
             ? static_cast<const qol::contracts::InventoryRefreshApi*>(refresh_iface)
             : nullptr;
-        if (refresh != nullptr && refresh->update_shortcut != nullptr) {
-            refresh->update_shortcut();
+        if (refresh != nullptr && refresh->update_shortcut_category != nullptr) {
+            // 原版 PLAYER_UpdateShortcut(category) 只刷新同类别快捷槽。先在锁内收集
+            // 扩展袋中出现的类别，释放锁后再逐个调用，避免 GetItemCount 回调重入 EB。
+            int32_t categories[virtual_bag::kMaxExtensionBags * virtual_bag::kSlotCount]{};
+            size_t category_count = 0;
+            {
+                ::qol::extension_bag::ReentryLock lock;
+                if (extension_bag_session_admitted_locked()) {
+                    const int active = virtual_bag::active_extension_bags();
+                    for (int bag_index = 0; bag_index < active; ++bag_index) {
+                        const int capacity =
+                            runtime_state().objects.bag.capacities[bag_index];
+                        for (int slot_index = 0; slot_index < capacity; ++slot_index) {
+                            const virtual_bag::Item& item =
+                                runtime_state().objects.bag.items[bag_index][slot_index];
+                            const int32_t category = item.category;
+                            if (category <= 0) continue;
+                            bool seen = false;
+                            for (size_t index = 0; index < category_count; ++index) {
+                                if (categories[index] == category) {
+                                    seen = true;
+                                    break;
+                                }
+                            }
+                            if (!seen &&
+                                category_count <
+                                    sizeof(categories) / sizeof(categories[0])) {
+                                categories[category_count++] = category;
+                            }
+                        }
+                    }
+                }
+            }
+            for (size_t index = 0; index < category_count; ++index) {
+                refresh->update_shortcut_category(categories[index]);
+            }
             ::qol::extension_bag::ReentryLock lock;
             if (extension_bag_session_admitted_locked() &&
                 extension_bag_item_revision_locked() == shortcut_revision) {
                 runtime_state().persistence.shortcut_refreshed_revision =
                     static_cast<int64_t>(shortcut_revision);
             }
+        } else if (refresh != nullptr && refresh->update_shortcut != nullptr) {
+            refresh->update_shortcut();
         }
     }
     qol::extension_bag::ui_state().aux.lifecycle_last_state = world_state;

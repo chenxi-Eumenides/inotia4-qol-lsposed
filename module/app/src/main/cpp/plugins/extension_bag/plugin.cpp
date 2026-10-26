@@ -17,6 +17,7 @@
 #include "contracts/item_facts.h"
 #include "contracts/save_facts.h"
 #include "plugins/extension_bag/api/bag_source.h"
+#include "plugins/extension_bag/core/lifecycle.h"
 #include "plugins/extension_bag/assembly/lifecycle_registration.h"
 #include "plugins/extension_bag/assembly/projection_registration.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
@@ -365,6 +366,9 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         return 1;
     }
     extension_bag_bind_port_sdk(g_sdk);
+    // 生命周期帧任务必须尽早安装：安装期 SDK 的 scheduler 可能尚未就绪，
+    // 后续资源就绪回调会再次尝试（函数幂等）。
+    ensure_lifecycle_task();
     // 袋源是 core.item 访问扩展袋的唯一入口；注册失败时插件没有可用数据面，
     // 不能以 enabled 状态继续运行。
     if (!register_bag_source_if_available()) {
@@ -540,6 +544,8 @@ void plugin_fill_status(qol::contracts::PluginStatusOut& out) {
 int32_t plugin_on_resource_ready(qol::contracts::PluginContext& ctx, const char* resource_id,
                                  void* backup) {
     (void)ctx;
+    // 资源就绪阶段 SDK/scheduler 已可用，补装安装期可能失败的生命周期任务。
+    ensure_lifecycle_task();
     // 受限回调（§3.3）：只缓存入口 backup（常数时间），无资源操作。
     return extension_bag_bind_backup(resource_id, backup);
 }
