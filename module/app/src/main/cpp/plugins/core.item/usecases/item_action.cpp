@@ -69,15 +69,28 @@ InventoryActionStatus validate_world() {
 }
 
 QolResult read_item(const QolActionRef& ref, QolInventoryItemRef* out) {
-    if (out == nullptr || g_port == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port) ||
-        g_port->read.item_at == nullptr) {
+    if (out == nullptr) {
         constexpr char kMessage[] = "inventory action read unavailable";
-        return contracts::error(kQolErrNotReady, kMessage,
+        return contracts::error(kQolErrInvalidArgument, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
-    const contracts::QolBagRef bag{ref.space_id, ref.bag};
-    return g_port->read.item_at(&bag, ref.slot, out);
+    if (native_space(ref.space_id)) {
+        if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
+            g_port->read.item_at == nullptr) {
+            constexpr char kMessage[] = "inventory action read unavailable";
+            return contracts::error(kQolErrNotReady, kMessage,
+                                    static_cast<uint32_t>(sizeof(kMessage) - 1));
+        }
+        const contracts::QolBagRef bag{ref.space_id, ref.bag};
+        return g_port->read.item_at(&bag, ref.slot, out);
+    }
+    const contracts::QolBagSource* source = find_bag_source(ref.space_id);
+    if (source == nullptr || source->item_at == nullptr) {
+        constexpr char kMessage[] = "registered bag source unavailable";
+        return contracts::error(kQolErrUnsupported, kMessage,
+                                static_cast<uint32_t>(sizeof(kMessage) - 1));
+    }
+    return source->item_at(ref.bag, ref.slot, out);
 }
 
 InventoryActionStatus resolve_item(const QolActionRef& ref, QolInventoryItemRef* out) {
