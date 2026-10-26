@@ -365,7 +365,9 @@ void test_description_geometry_and_utf8_truncation() {
     const int32_t action_left = right_control_left(572);
     const int32_t toggle_column = description_width_for_toggle(toggle_left);
     const int32_t action_column = description_width_for_toggle(action_left);
-    CHECK(toggle_left == 332 && toggle_column == 300);
+    CHECK(qol::features::core_ui::settings_model::kToggleWidth == 140);
+    CHECK(qol::features::core_ui::settings_model::kToggleHeight == 80);
+    CHECK(toggle_left == 412 && toggle_column == 380);
     CHECK(toggle_left - (16 + toggle_column) == 16);
     CHECK(action_left == toggle_left && action_column == toggle_column);
     const qol::contracts::UiRect toggle_rect{toggle_left,

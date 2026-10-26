@@ -183,9 +183,9 @@ void sync_controls(uint32_t i) {
     auto& s = g_states[i];
     if (g_components == nullptr) return;
     if (s.toggle != nullptr) {
-        const auto value = g_components->native_toggle_set_value(s.toggle, s.confirmed);
-        const auto enabled = g_components->native_toggle_set_enabled(s.toggle, toggle_enabled(i));
-        if (!contracts::succeeded(value) || !contracts::succeeded(enabled))
+        const auto text = g_components->button_set_text(s.toggle, s.confirmed != 0 ? "开" : "关");
+        const auto enabled = g_components->text_button_set_enabled(s.toggle, toggle_enabled(i));
+        if (!contracts::succeeded(text) || !contracts::succeeded(enabled))
             set_status("开关状态更新失败");
     }
     if (s.action != nullptr && !contracts::succeeded(
@@ -271,18 +271,18 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected
     if (!description.lines.empty()) (void)g_components->draw_control_text(row,
         description.lines[0].c_str(), 16, layout.description_y,
         owner_available(i) ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextDisabled, 0, 1);
-    if (s.toggle != nullptr) (void)g_components->native_toggle_draw(s.toggle);
+    if (s.toggle != nullptr) (void)g_components->text_button_draw(s.toggle);
     if (s.action != nullptr) (void)g_components->text_button_draw(s.action);
 }
 void on_left_select(void*, uint32_t i) { g_pending_category = static_cast<int>(i); }
-void native_toggle_changed(void* user, int32_t desired) {
+void toggle_button_clicked(void* user) {
     const auto* context = static_cast<const ToggleContext*>(user);
     if (!g_panel_active || context == nullptr || context->generation != g_generation ||
         context->item_index >= g_items.size()) return;
     const auto i = context->item_index;
     refresh_owner_availability(i);
     if (!toggle_enabled(i)) return;
-    g_states[i].desired = desired != 0;
+    g_states[i].desired = settings_model::next_toggle_value(g_states[i].confirmed);
     g_states[i].gesture = true;
     sync_controls(i);
 }
@@ -382,20 +382,22 @@ bool build_right_list(int category) {
         }
         const int32_t control_left = settings_model::right_control_left(kRightW);
         const int32_t control_top = settings_model::toggle_top(kRightRowH);
+        const char* label = nullptr;
+        contracts::QolUiClickFn callback = nullptr;
         if (g_items[i].type == FeatureType::kEntry) {
-            const contracts::UiButtonDesc button{{control_left, control_top,
-                settings_model::kToggleWidth, settings_model::kToggleHeight},
-                g_items[i].action_label, contracts::kUiTextButtonFontLarger,
-                &action_button_clicked, &g_contexts[i]};
-            if (!contracts::succeeded(g_components->capsule_text_button_create(&button, handle,
-                &g_states[i].action))) { destroy_right_list(); return false; }
+            label = g_items[i].action_label;
+            callback = &action_button_clicked;
         } else {
-            const contracts::UiNativeToggleDesc toggle{{control_left, control_top,
-                settings_model::kToggleWidth, settings_model::kToggleHeight}, g_states[i].confirmed,
-                static_cast<uint8_t>(toggle_enabled(i)), &native_toggle_changed, &g_contexts[i]};
-            if (!contracts::succeeded(g_components->native_toggle_create(&toggle, handle,
-                &g_states[i].toggle))) { destroy_right_list(); return false; }
+            label = g_states[i].confirmed != 0 ? "开" : "关";
+            callback = &toggle_button_clicked;
         }
+        const contracts::UiButtonDesc button{{control_left, control_top,
+            settings_model::kToggleWidth, settings_model::kToggleHeight}, label,
+            contracts::kUiTextButtonFontDefault, callback, &g_contexts[i]};
+        QolUiHandle* out = g_items[i].type == FeatureType::kEntry ?
+            &g_states[i].action : &g_states[i].toggle;
+        if (!contracts::succeeded(g_components->compact_capsule_text_button_create(
+                &button, handle, out))) { destroy_right_list(); return false; }
         sync_controls(i);
     }
     return true;
@@ -660,15 +662,14 @@ void poll_entry_continuation() {
     if (contracts::succeeded(invoke_result)) set_status("");
 }
 bool components_complete() {
-    constexpr size_t end = offsetof(contracts::QolUiComponents, capsule_text_button_create) +
-        sizeof(((contracts::QolUiComponents*)nullptr)->capsule_text_button_create);
-    return g_components != nullptr && g_components->major == 1 && g_components->minor >= 14 &&
-        g_components->size >= end && g_components->capsule_text_button_create &&
+    constexpr size_t end = offsetof(contracts::QolUiComponents, compact_capsule_text_button_create) +
+        sizeof(((contracts::QolUiComponents*)nullptr)->compact_capsule_text_button_create);
+    return g_components != nullptr && g_components->major == 1 && g_components->minor >= 17 &&
+        g_components->size >= end && g_components->compact_capsule_text_button_create &&
+        g_components->button_set_text &&
         g_components->scroll_list_create &&
         g_components->scroll_list_get_row && g_components->scroll_list_set_selection_enabled &&
         g_components->scroll_list_process && g_components->scroll_list_draw &&
-        g_components->native_toggle_create && g_components->native_toggle_set_value &&
-        g_components->native_toggle_set_enabled && g_components->native_toggle_draw &&
         g_components->text_button_set_enabled &&
         g_components->text_button_draw && g_components->destroy &&
         g_components->draw_control_text && g_components->draw_container_ornamented &&

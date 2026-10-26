@@ -594,6 +594,25 @@ int main() {
         }
     }
     setup();
+    const qol::contracts::UiRect compact_settings_toggle_rect{0, 0, 140, 80};
+    const qol::contracts::UiTextButtonPaintDesc compact_settings_toggle{
+        compact_settings_toggle_rect, qol::contracts::kUiTextButtonCapsule,
+        qol::contracts::kUiTextButtonFontDefault, 0};
+    qol::contracts::UiTextButtonPaintLayout compact_layout{};
+    assert(qol::contracts::succeeded(qol::game::ui_layout_native_text_button(
+        compact_settings_toggle, &compact_layout)));
+    assert(compact_layout.label_bounds.w >= 44 && compact_layout.label_bounds.h >= 22);
+    assert(qol::contracts::succeeded(qol::game::ui_draw_native_text_button(
+        compact_settings_toggle, "开", 0, 0)));
+    assert(g_drawn_label == "开" && g_text_font == 0 && g_font_height == 22);
+    assert(g_text_x - g_font_height / 2 >= compact_layout.label_bounds.x &&
+           g_text_x + g_font_height / 2 <= compact_layout.label_bounds.x +
+               compact_layout.label_bounds.w);
+    assert(g_text_y >= compact_layout.label_bounds.y &&
+           g_text_y + g_font_height <= compact_layout.label_bounds.y +
+               compact_layout.label_bounds.h);
+
+    setup();
     qol::contracts::UiTextButtonPaintDesc menu{{0, 0, 300, 65},
         qol::contracts::kUiTextButtonDecorated, 0, 0};
     qol::contracts::UiTextButtonPaintLayout old_menu{}, enlarged{};
