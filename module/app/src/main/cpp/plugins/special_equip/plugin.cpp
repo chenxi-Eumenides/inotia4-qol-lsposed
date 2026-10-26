@@ -168,7 +168,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"special_equip.equipment_rules", 1, contracts::FeatureCategory::kHidden,
-     contracts::FeatureType::kToggle, "特殊装备规则", "支持普通队友穿脱专属装备并保留特殊 NPC 装备限制。",
+     contracts::FeatureType::kToggle, "NPC装备", "允许获得、使用NPC装备",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

@@ -183,7 +183,7 @@ QolResult open_panel_feature(contracts::PluginContext& ctx) {
         contracts::UiConfirmationSpecText prompt{};
         prompt.size = sizeof(prompt);
         std::snprintf(prompt.message, sizeof(prompt.message),
-            "请先启用「自定义地图文件加载」，然后再打开地图面板。\n当前不会打开地图。");
+            "请先启用「自定义地图」，然后再打开地图面板。\n当前不会打开地图。");
         prompt.on_confirm = &confirmation_dismissed;
         prompt.on_cancel = &confirmation_dismissed;
         uint64_t token = 0;
@@ -213,7 +213,7 @@ QolResult open_panel_feature(contracts::PluginContext& ctx) {
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"custom_map.load", 1, contracts::FeatureCategory::kBasicOptimization,
-      contracts::FeatureType::kToggle, "自定义地图文件加载", "从 qol/resources/map 目录加载同名地图文件。",
+     contracts::FeatureType::kToggle, "自定义地图", "导入加载自定义地图",
       [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
     {"custom_map.open_panel", 1, contracts::FeatureCategory::kTools,
      contracts::FeatureType::kEntry, "打开自定义地图面板", "浏览已扫描的自定义地图文件。",

@@ -580,7 +580,7 @@ QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
 
 constexpr qol::contracts::FeatureDefinition kFeatures[] = {
     {"extension_bag.extended_bag", 1, qol::contracts::FeatureCategory::kGameplay,
-      qol::contracts::FeatureType::kToggle, "扩展背包", "增加五个扩展背包。",
+     qol::contracts::FeatureType::kToggle, "额外背包", "添加一列额外背包",
       &extension_bag_toggle, nullptr, nullptr, -2},
 };
 

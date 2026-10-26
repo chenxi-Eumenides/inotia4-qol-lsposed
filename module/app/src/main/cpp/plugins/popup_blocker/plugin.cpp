@@ -88,8 +88,8 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"popup_blocker.enabled", 1, contracts::FeatureCategory::kBasicOptimization,
-     contracts::FeatureType::kToggle, "弹窗屏蔽",
-     "抑制教程文案与 state=6 暂停；不保证独立图形或高亮消失。",
+     contracts::FeatureType::kToggle, "禁用弹窗",
+     "禁用各种无用弹窗",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

@@ -132,7 +132,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"push_all.push", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "推怪", "移动时可推动怪物、队友与召唤物。",
+     contracts::FeatureType::kToggle, "推怪", "能够推动怪物",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

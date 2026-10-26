@@ -124,7 +124,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // 关闭 feature 时先关闭门禁，资源随后由 Host drain/释放；on_disabled/deactivate 仍负责关闭门禁。
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"simple_mode.combat", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "简单模式", "降低怪物生命并增强玩家伤害与承伤。",
+     contracts::FeatureType::kToggle, "简单模式", "降低游戏难度",
      [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
          if (enabled == 0) set_gate(false);
          return contracts::ok();

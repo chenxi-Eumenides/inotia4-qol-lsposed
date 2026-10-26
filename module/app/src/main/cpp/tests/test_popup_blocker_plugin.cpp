@@ -31,6 +31,6 @@ int main() {
     assert(descriptor.features[0].default_enabled == 1);
     assert(descriptor.features[0].category ==
            qol::contracts::FeatureCategory::kBasicOptimization);
-    assert(std::strcmp(descriptor.features[0].name, "弹窗屏蔽") == 0);
+    assert(std::strcmp(descriptor.features[0].name, "禁用弹窗") == 0);
     return 0;
 }

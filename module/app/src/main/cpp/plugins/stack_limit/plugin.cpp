@@ -80,7 +80,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // 生命周期处理。
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"stack_limit.limit_999", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "堆叠上限", "将可堆叠物品上限提高到 999。",
+     contracts::FeatureType::kToggle, "堆叠上限", "可堆叠物品999上限",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

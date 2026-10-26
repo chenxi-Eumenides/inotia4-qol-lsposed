@@ -28,7 +28,9 @@ class CoreFeatureExposureTests(unittest.TestCase):
         self.assertEqual(len(sources), 12)
         for source in sources:
             with self.subTest(plugin=source.parent.name):
-                features = FEATURE.findall(source.read_text())
+                feature_source = (PLUGINS / "core.item" / "runtime" / "lifecycle.cpp"
+                                  if source.parent.name == "core.item" else source)
+                features = FEATURE.findall(feature_source.read_text())
                 self.assertTrue(features)
                 if source.parent.name == "core.item":
                     by_id = {feature[0]: feature for feature in features}
@@ -40,14 +42,15 @@ class CoreFeatureExposureTests(unittest.TestCase):
                     self.assertTrue(drag_merge[5])
                     continue
                 for feature_id, _, category, _, _, description in features:
-                    expected_category = "kGeneral" if (
-                        source.parent.name == "core.api" and feature_id == "api.enabled"
-                    ) else "kHidden"
-                    self.assertEqual(category, expected_category)
+                    if source.parent.name == "core.api" and feature_id == "api.enabled":
+                        self.assertEqual(category, "kGeneral")
+                        self.assertTrue(description)
+                        continue
+                    self.assertEqual(category, "kHidden")
                     self.assertEqual(description, "")
         api_features = FEATURE.findall((PLUGINS / "core.api" / "plugin.cpp").read_text())
         self.assertEqual(api_features, [(
-            "api.enabled", "1", "kGeneral", "kToggle", "API服务", "",
+            "api.enabled", "1", "kGeneral", "kToggle", "API服务", "允许外部程序控制游戏",
         )])
 
     def test_removed_catalog_opt_in_is_absent_from_current_sources_and_docs(self):
@@ -76,16 +79,20 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "push_all.push": ("0", "kGameplay", "kToggle", "推怪"),
             "simple_mode.combat": ("0", "kGameplay", "kToggle", "简单模式"),
             "custom_recipe.recipes": ("0", "kGameplay", "kToggle", "自定义合成"),
-            "extension_bag.extended_bag": ("1", "kGameplay", "kToggle", "扩展背包"),
+            "extension_bag.extended_bag": ("1", "kGameplay", "kToggle", "额外背包"),
             "stack_limit.limit_999": ("0", "kGameplay", "kToggle", "堆叠上限"),
+            "eight_way_move.direction": ("0", "kGameplay", "kToggle", "八向移动"),
+            "popup_blocker.enabled": ("1", "kBasicOptimization", "kToggle", "禁用弹窗"),
+            "custom_map.load": ("1", "kBasicOptimization", "kToggle", "自定义地图"),
+            "craft_lottery.guarantee": ("0", "kBasicOptimization", "kToggle", "合成套装保底"),
             "debug.logging": ("0", "kGeneral", "kToggle", "debug日志"),
-            "attribute_range_display.ranges": ("1", "kBasicOptimization", "kToggle", "属性范围显示"),
-            "character_panel_i18n.translation": ("1", "kBasicOptimization", "kToggle", "角色属性汉化"),
-            "world_teleport.map_jump": ("1", "kBasicOptimization", "kToggle", "更好的地图传送对话框"),
+            "attribute_range_display.ranges": ("1", "kBasicOptimization", "kToggle", "属性范围渲染"),
+            "character_panel_i18n.translation": ("1", "kBasicOptimization", "kToggle", "属性面板汉化"),
+            "world_teleport.map_jump": ("1", "kBasicOptimization", "kToggle", "更好的传送"),
         }
         sources = [source for source in PLUGINS.glob("*/plugin.cpp")
                    if not source.parent.name.startswith("core.")]
-        sources.append(PLUGINS / "core.item" / "plugin.cpp")
+        sources.append(PLUGINS / "core.item" / "runtime" / "lifecycle.cpp")
         sources.append(ROOT / "module/app/src/main/cpp/host/features/platform.cpp")
         actual = {
             feature_id: (default, category, kind, name)
@@ -95,19 +102,22 @@ class CoreFeatureExposureTests(unittest.TestCase):
             feature_id not in {"api.enabled", "op.enabled"}
         }
         self.assertEqual(actual, expected)
-        self.assertEqual(len(actual), 11)
+        self.assertEqual(len(actual), 15)
 
     def test_basic_optimization_metadata_and_defaults(self):
         expected = {
-            "attribute_range_display": ("attribute_range_display.ranges", "属性范围显示"),
-            "character_panel_i18n": ("character_panel_i18n.translation", "角色属性汉化"),
-            "world_teleport": ("world_teleport.map_jump", "更好的地图传送对话框"),
+            "attribute_range_display": ("attribute_range_display.ranges", "属性范围渲染"),
+            "character_panel_i18n": ("character_panel_i18n.translation", "属性面板汉化"),
+            "world_teleport": ("world_teleport.map_jump", "更好的传送"),
+            "custom_map": ("custom_map.load", "自定义地图"),
             "core.item": ("move_merge.drag_merge", "拖拽合并"),
         }
         for plugin, (feature_id, label) in expected.items():
             with self.subTest(plugin=plugin):
+                source = (PLUGINS / plugin / "runtime" / "lifecycle.cpp"
+                          if plugin == "core.item" else PLUGINS / plugin / "plugin.cpp")
                 features = [feature for feature in FEATURE.findall(
-                    (PLUGINS / plugin / "plugin.cpp").read_text()) if feature[0] == feature_id]
+                    source.read_text()) if feature[0] == feature_id]
                 self.assertEqual(len(features), 1)
                 self.assertEqual(features[0][:4],
                                  (feature_id, "1", "kBasicOptimization", "kToggle"))
@@ -160,7 +170,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
         feature = FEATURE.findall(source)
         self.assertEqual(len(feature), 1)
         self.assertEqual(feature[0][:5], (
-            "save_backup.open_manager", "1", "kTools", "kEntry", "存档备份导出",
+            "save_backup.open_manager", "1", "kTools", "kEntry", "存档备份",
         ))
 
     def test_platform_controls_remain_public(self):
@@ -175,18 +185,19 @@ class CoreFeatureExposureTests(unittest.TestCase):
         self.assertEqual(debug_logging[4], "debug日志")
         self.assertEqual(security_op[:4],
                          ("op.enabled", "0", "kGeneral", "kToggle"))
-        self.assertEqual(security_op[4], "操作权限")
+        self.assertEqual(security_op[4], "高级权限")
         self.assertIn("kPlatformConfigOwner", source.read_text())
         self.assertIn("kSecurityConfigOwner", source.read_text())
 
     def test_host_feature_display_categories_and_priorities(self):
         production = (ROOT / "module/app/src/main/cpp/host/features/production.cpp").read_text()
         self.assertEqual(CATEGORY.findall(production), [
-            ("kGeneral", "基础设置", "-9"),
-            ("kBasicOptimization", "基础优化设置", "-8"),
+            ("kGeneral", "基础设置", "-8"),
+            ("kBasicOptimization", "基础优化设置", "-7"),
             ("kGameplay", "更多优化功能", "-5"),
             ("kTools", "更多工具", "-3"),
             ("kHidden", "调试开关", "-10"),
+            ("kGameInfo", "游戏信息", "-9"),
         ])
         cases = {
             ("core.api/plugin.cpp", "api.enabled"): -5,

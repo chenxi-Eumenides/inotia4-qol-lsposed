@@ -276,7 +276,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"api.enabled", 1, contracts::FeatureCategory::kGeneral,
-     contracts::FeatureType::kToggle, "API服务", "",
+     contracts::FeatureType::kToggle, "API服务", "允许外部程序控制游戏",
       [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr,
       nullptr, -5},
 };

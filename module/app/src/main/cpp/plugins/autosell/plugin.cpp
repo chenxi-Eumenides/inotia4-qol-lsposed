@@ -303,7 +303,7 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 // Feature callback does not replace the existing lifecycle or business controls.
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"autosell.auto_sell", 0, contracts::FeatureCategory::kGameplay,
-      contracts::FeatureType::kToggle, "自动出售", "自动出售符合当前存档筛选规则的物品。",
+      contracts::FeatureType::kToggle, "自动出售", "按照规则自动出售物品",
       [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr,
       nullptr, -1},
 };

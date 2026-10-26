@@ -33,7 +33,7 @@ const contracts::PluginDescriptor& platform_config_descriptor() {
 const contracts::PluginDescriptor& security_config_descriptor() {
     static constexpr contracts::FeatureDefinition security_features[] = {
         {"op.enabled", 0, contracts::FeatureCategory::kGeneral,
-         contracts::FeatureType::kToggle, "操作权限", "允许声明需要 OP 的操作。", &noop, nullptr,
+         contracts::FeatureType::kToggle, "高级权限", "允许不合法的高级操作", &noop, nullptr,
          nullptr, -4},
     };
     static const contracts::PluginDescriptor descriptor = [] {

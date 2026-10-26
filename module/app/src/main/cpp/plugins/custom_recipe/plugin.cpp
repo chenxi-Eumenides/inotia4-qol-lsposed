@@ -349,7 +349,7 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     // 打开时不提前开门禁，由 on_enabled 在资源就绪后处理。
     static constexpr contracts::FeatureDefinition kFeatures[] = {
         {"custom_recipe.recipes", 0, contracts::FeatureCategory::kGameplay,
-         contracts::FeatureType::kToggle, "自定义合成", "提供自定义配方与合成结果。",
+         contracts::FeatureType::kToggle, "自定义合成", "优化合成并添加更多配方",
          [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
              if (enabled == 0) set_enabled(false);
              return contracts::ok();
