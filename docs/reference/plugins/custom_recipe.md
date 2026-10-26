@@ -7,7 +7,7 @@
 ## 摘要
 
 `custom_recipe` 是自定义合成配方与合成结果的唯一 owner：判定三格配方结果、执行扣料与产物
-创建/保存、宝石升阶、管理静态/动态配方目录，并持有 RECIPEBASE/MIXTUREBASE 注入记录的
+创建/保存、升阶（宝石与装备）、管理静态/动态配方目录，并持有 RECIPEBASE/MIXTUREBASE 注入记录的
 行为所有权。界面部分（原 `craft_ui`）已并入本插件的 `ui/` 子层，不再是独立 descriptor。
 
 - 插件 id/version：`custom_recipe` / `0.1.0`（`plugins/custom_recipe/plugin.cpp:36-37`）。
@@ -23,7 +23,7 @@
 |---|---|
 | 两条注入配方入口（「合成」「宝石强化」）与三格匹配目录 | 原版背包/物品读写原语（`inventory_hooks`、`core.item`） |
 | 三格 place/prepare/execute、确认与取消、扣料与产物保存 | 只读配方事实 `craft.facts` 与 `/api/op/craft/mix-direct`（归 `core.craft`，当前 501） |
-| 宝石升阶的 gate、候选值、need/jewel 写入顺序 | 宝石档位与数值区间查询（`attribute.quality`，optional 依赖） |
+| 升阶的 gate、候选值、need/数值写入顺序 | 属性档位与数值区间查询（`attribute.quality`，optional 依赖） |
 | 动态特殊装备配方的播种、缓存与代际 | 特殊装备类别判定数据来源（`ITEMCLASSBASE` 静态结论，由 `special_equip` 共用同一组） |
 | RECIPEBASE/MIXTUREBASE 注入与还原（ownership） | 文本层的 `MEMORYTEXT_GetText` hook 本体（`core.custom_ui`） |
 | 配方呈现文案与提示 scope（2–11） | 通用 UI 控件/状态服务（`core.custom_ui`、`core.ui_state`） |
@@ -35,7 +35,7 @@
 | `provides` | 无。结果 API `result::CraftResultApi` 只在插件内部由 UI 子层调用。 |
 | `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0（`plugin.cpp:308-321`）。 |
 | `optional_requires` | `attribute.quality` v2.0；缺失/失效只置 degraded，仅影响升阶路径（`plugin.cpp:302-307`）。 |
-| `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
+| `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.3、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
 | `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 1 条 `own:RECIPEBASE_MIXTUREBASE`（required/fail-soft）。顺序即释放逆序，ownership 最后声明、最先释放。 |
 | `jni` / HTTP | 均为 0（`plugin.cpp:359-377`）。 |
 | `features` | 仅 `custom_recipe.recipes`。 |
@@ -62,7 +62,7 @@
 `result::CraftResultApi`（`model/result.h:92-106`）共 12 个成员，由
 `craft_result_api()`（`result/feature.cpp`）返回，只供本插件 UI 子层调用：
 
-`enabled`、`three_slot_mode_active`、`is_jewel_tier_up_recipe`、`form_ui_type_for_mix_type`、
+`enabled`、`three_slot_mode_active`、`is_tier_up_recipe`、`form_ui_type_for_mix_type`、
 `craft_gate`、`is_jewel_item`、`place`、`prepare`、`execute`、`material_needs`、`make_item`、
 `desc_should_replace`。
 
@@ -74,7 +74,7 @@ UIMix 控件。
 
 | 端口 | 用途 | 来源 |
 |---|---|---|
-| `QOL_PORT_CUSTOM_RECIPE_WRITE` v1.2 | 写 stuff 需求、槽位物品、产物创建/保存/释放、宝石字、真实闭区间随机 | `contracts/game_ports/custom_recipe_write_port.h` |
+| `QOL_PORT_CUSTOM_RECIPE_WRITE` v1.3 | 写 stuff 需求、槽位物品、产物创建/保存/释放、宝石字、真实闭区间随机、装备原生词条值 | `contracts/game_ports/custom_recipe_write_port.h` |
 | `QOL_PORT_CRAFT_UI_WRITE` v1.1 | UIMix 控件状态、提示/YesNo、费用归零 | `contracts/game_ports/craft_ui_write_port.h` |
 | `QOL_PORT_RECIPE_TABLE` v1.0 | RECIPEBASE/MIXTUREBASE 槽位（base + 5 个字段指针） | `contracts/game_ports/recipe_table_port.h` |
 
@@ -95,7 +95,7 @@ UIMix 控件。
 | 入口 | Kind | 形式 | 说明 |
 |---|---|---|---|
 | 「合成」（label wordId 35216，记录下标 69） | `kThreeSlotCraft` | `kMultiInputCreate`（type 1） | 三格隐式配方；材料显示镜像原版 record 12，费用由 hook 强制 0。 |
-| 「宝石强化」（label wordId 35291，记录下标 70） | `kJewelTierUp` | `kTargetAndCreate`（type 3） | 材料数量按 `ceil(1 × 档位 × (105 − 等级) / 105)`；满级 0 瓶。 |
+| 「升阶」（label wordId 35291，记录下标 70） | `kTierUp` | `kTargetAndCreate`（type 3） | 目标为宝石或真实装备；材料数量按 `ceil(1 × 档位 × (105 − 等级) / 105)`，宝石档位取类别（28..32 → 1..5），装备档位取稀有度 + 1（0..4 → 1..5）；满级 0 瓶。 |
 
 注入记录布局 12 字节（RECIPEBASE）与 3 字节（MIXTUREBASE），由 `table/table.cpp` 的纯构造器
 生成；组位只保留模块自己的位，停用时还原原版段组位。
@@ -182,19 +182,40 @@ free 或回读该 handle，因此不承诺 save 失败后可清理。
 - 提示按错误分类各走独立 scope（见 §10）：未命中 8、上下文不可用/弹窗失败 9、格子或代际变化
   10、放料写入失败 11；真正库存不足仍走原版材料不足提示（94 原文）。
 
-## 7. 宝石升阶
+## 7. 升阶
 
-- gate（`api_craft_gate`，`result/feature.cpp:616`）返回 `CraftGate`：
-  - 物品事实或 quality 查询失败、item word 与 facts 不一致 → `kUnavailable`；
-  - 真正非宝石 → `kNotJewel`；已金档 → `kAlreadyGold`；其余 `kPass`。
-  - UI 把 `kUnavailable` 显示为「功能不可用」，只阻断升阶路径，不停用三格配方。
-- 候选值：以 `AttributeRange` 调 `evaluate` 搜索当前档之上首个有代表值的区间，再在闭区间内用
+目标可以是宝石或真实装备（`item.facts.is_real_equip` 为 1）。两者共用同一套档位/区间判定，
+区别只在「被提升的数值」从哪里取、写回哪里。
+
+- gate（`api_craft_gate`）返回 `CraftGate`：
+  - 物品事实或 quality 查询失败、item word 与 facts 不一致、装备 view 缺失/截断 → `kUnavailable`；
+  - 既非宝石也非真实装备 → `kNotJewel`；
+  - 宝石已金档 → `kAlreadyGold`；
+  - 装备没有原生词条，或所有原生词条都已满档 → `kNoUpgradableAffix`；
+  - 其余 → `kPass`。
+  - UI 把 `kUnavailable` 显示为「功能不可用」、`kNotJewel` 显示为「只有宝石或装备才可以。」、
+    `kNoUpgradableAffix` 显示为「该装备没有可升阶的词条。」；这些只阻断升阶路径，不停用三格配方。
+- 宝石候选值：以 `AttributeRange` 调 `evaluate` 搜索当前档之上首个有代表值的区间，再在闭区间内用
   调用方 `rand_inclusive` 取样；已是 Gold → `kAlreadyGold`，区间退化 → `kDegenerate`。
-- `api_make_item`（`:1082`）顺序：quality 查询 → 与 item word 交叉核对 → 材料需求前置校验 →
-  计算候选（随机）→ **先提交 need 写入** → **最后写 jewel word**。need 失败直接返回且不写
-  jewel；失败时已写入的展示值允许残留，不等价于强原子。
-- 随机源必须是真实游戏闭区间随机：UI 侧直接调用 write port ABI 1.2 的 `random_inclusive`，
+- 装备候选值：读取 `item.facts.view` 的 `native_options[]`（option node type 0）。逐条用
+  `attribute.quality.query_option_context(item, id, value)` 取当前档位与闭区间；只有
+  status 成功、level 0..4、`max > min` 的词条进入候选，再用同一个 typed 闭区间随机源抽一条。
+  宝石词条（`jewel_options[]` / type 1）与 `enchant_options[]`（附魔）不参与候选，也不会被写。
+- 新值：与宝石相同，`compute_tier_up_value` 在下一档闭区间内随机取值。
+- 材料档位：宝石由 `jewel_grade_from_category`（类别 28..32 → 1..5）给出；装备由
+  `equipment_grade_from_rarity`（稀有度 0..4 → 1..5）给出。数量仍为
+  `ceil(1 × 档位 × (105 − 角色等级) / 105)`，满级 0 瓶。
+- `api_make_item` 的提交顺序：
+  - 宝石：quality 查询 → 与 item word 交叉核对 → 材料需求前置校验 → 计算候选（随机）→
+    **先提交 need 写入** → **最后写 jewel word**。
+  - 装备：view 校验 → 候选随机 → 升阶计算 → int16 范围校验 → 材料需求前置校验 →
+    **先提交 need 写入** → **最后 `write_native_option_value(item, native_index, new_value)`**。
+  - need 失败直接返回且不写数值；写值失败时 need 已写，不回滚；失败时已写入的展示值允许残留，
+    不等价于强原子。
+- 随机源必须是真实游戏闭区间随机：UI 侧直接调用 write port ABI 1.3 的 `random_inclusive`，
   不恒返回下界、不静默 clamp。
+- 装备写回只改第 `native_index` 条 type 0 节点的 int16 存储值，不重建 option 链表、不改
+  宝石词条、不改附魔字段。
 
 ## 8. 状态与线程
 
@@ -257,8 +278,8 @@ free 或回读该 handle，因此不承诺 save 失败后可清理。
 
 | scope | 用途 |
 |---|---|
-| 2 | 配方按钮「宝石升阶」（35291） |
-| 3 | 面板标题「宝石升阶」 |
+| 2 | 配方按钮「升阶」（35291） |
+| 3 | 面板标题「升阶」 |
 | 4 | 页签：**不登记**，保持原版「宝石强化」 |
 | 5 | 功能不可用（97） |
 | 6 | 合成失败，材料可能已扣（94） |
@@ -267,6 +288,8 @@ free 或回读该 handle，因此不承诺 save 失败后可清理。
 | 9 | 合成暂不可用，材料未扣（94） |
 | 10 | 合成状态已变化（94） |
 | 11 | 放入失败，请重试（99） |
+| 12 | 只有宝石或装备才可以（97） |
+| 13 | 该装备没有可升阶的词条（97） |
 
 真正的库存不足不覆盖 scope，落到原版 94 原文。
 
@@ -318,7 +341,9 @@ optional/fail-soft（失败只 degraded）。`UIMix_ResetStuffItemControl` 保�
 - 三格流程继续调用受 inventory hooks 管理的原版入口，因此保留 H-03（物理+扩展类别总数）、
   H-05（对象删除）、H-13（保存）、H-21（类别补扣）的扩展背包支持；条件是对应 hook `live`、
   EB capability 可用且 enabled，不限制为物理袋。
-- 宝石升阶的 Game-owner 写入限制与三格流程分开核验，仍为待核项，不作为三格拒绝 EB 的理由。
+- 升阶的 Game-owner 写入限制与三格流程分开核验，仍为待核项，不作为三格拒绝 EB 的理由。
+- 装备升阶路径当前只有 Host 测试与 Debug 构建证据；装备产物继承原生词条、词条值写回后的
+  显示/属性重算后果未做真机验收。
 - 放料对空/无效输入返回 `kPlaced` 并推进选格（历史行为，未裁决）。
 - 扣料后阶段失败允许不回退（CR01 口径）；`save_item` 之后不承诺清理 handle。
 - 动态配方缓存按创建时间永久保留到进程结束，不设淘汰；这是「重复进档配方不变」的设计代价。

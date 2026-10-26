@@ -50,6 +50,7 @@ enum class CraftGate : uint8_t {
     kNotJewel = 1,
     kAlreadyGold = 2,
     kUnavailable = 3,
+    kNoUpgradableAffix = 4,
 };
 
 struct CraftPlaceInput {
@@ -74,7 +75,7 @@ struct CraftExecuteInput {
 
 struct CraftMaterialNeedInput {
     uint32_t mix_type;
-    int jewel_grade;
+    contracts::QolItemHandle item;
     int character_level;
 };
 
@@ -92,7 +93,7 @@ struct CraftMakeItemInput {
 struct CraftResultApi {
     bool (*enabled)();
     bool (*three_slot_mode_active)(uint32_t mix_type);
-    bool (*is_jewel_tier_up_recipe)(uint32_t mix_type);
+    bool (*is_tier_up_recipe)(uint32_t mix_type);
     int64_t (*form_ui_type_for_mix_type)(uint32_t mix_type);
     CraftGate (*craft_gate)(contracts::QolItemHandle target_item);
     bool (*is_jewel_item)(contracts::QolItemHandle item);

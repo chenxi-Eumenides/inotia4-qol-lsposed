@@ -15,6 +15,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 
 #include "../../../contracts/attribute_quality.h"
 #include "../../../contracts/events.h"
@@ -135,10 +136,10 @@ constexpr int64_t kFormTypeConsumeToCreate = 4;   // 直接消耗材料生成物
 constexpr int64_t kNoBorrowedType = -1;
 
 // 放料 / 合成按钮 / 产物三个路径的统一介入判定：当前 mixType 是模块配方且
-// kind == kJewelTierUp（与总开关无关，停用后仍需识别以 fail-closed）。
+// kind == kTierUp（与总开关无关，停用后仍需识别以 fail-closed）。
 const ::custom_recipe::Def* module_recipe_for_mix_type(uint32_t mix_type) {
     const ::custom_recipe::Def* def = ::custom_recipe::def_for_mix_type(mix_type);
-    if (def == nullptr || def->kind != ::custom_recipe::Kind::kJewelTierUp) return nullptr;
+    if (def == nullptr || def->kind != ::custom_recipe::Kind::kTierUp) return nullptr;
     return def;
 }
 
@@ -192,6 +193,42 @@ QolResult query_jewel_fact(qol::contracts::QolItemHandle item, uint16_t* out_cat
     }
     *out_category = static_cast<uint16_t>(category);
     *out_is_jewel = is_jewel != 0;
+    return contracts::ok();
+}
+
+QolResult material_grade_for_item(qol::contracts::QolItemHandle item, int* out_grade) {
+    if (out_grade == nullptr) {
+        return recipe_error(kQolErrInvalidArgument, "null material grade output");
+    }
+    *out_grade = 0;
+    uint16_t category = 0;
+    bool is_jewel = false;
+    QolResult result = query_jewel_fact(item, &category, &is_jewel);
+    if (result.ok != kQolOk) return result;
+    if (is_jewel) {
+        *out_grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(category));
+        return contracts::ok();
+    }
+    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) {
+        return recipe_error(kQolErrNotReady, "real equipment fact unavailable");
+    }
+    int32_t is_real_equip = 0;
+    result = g_item_facts->is_real_equip(item, &is_real_equip);
+    if (result.ok != kQolOk) return result;
+    if (is_real_equip != 0 && is_real_equip != 1) {
+        return recipe_error(kQolErrInternal, "invalid real equipment fact");
+    }
+    if (is_real_equip == 0) return contracts::ok();
+    if (g_item_facts->view == nullptr) {
+        return recipe_error(kQolErrNotReady, "equipment inventory view unavailable");
+    }
+    qol::contracts::QolItemInventoryView view{};
+    result = g_item_facts->view(item, &view);
+    if (result.ok != kQolOk) return result;
+    if ((view.fields & qol::contracts::kQolItemInventoryHasRarity) == 0) {
+        return recipe_error(kQolErrNotReady, "equipment rarity unavailable");
+    }
+    *out_grade = ::custom_recipe::equipment_grade_from_rarity(view.rarity);
     return contracts::ok();
 }
 
@@ -297,28 +334,18 @@ struct MaterialNeedPlan {
 };
 
 // 先完整验证需求，再由调用方依序写入 stuffList。
-QolResult prepare_material_needs(const ::custom_recipe::Def* def,
-                                 qol::contracts::QolItemHandle jewel,
+QolResult prepare_material_needs(const ::custom_recipe::Def* def, int grade,
                                  MaterialNeedPlan* out_plan) {
-    if (def == nullptr || !valid_craft_item(jewel) || out_plan == nullptr ||
-        def->count_rule != ::custom_recipe::CountRule::kJewelGradeAndLevel ||
+    if (def == nullptr || out_plan == nullptr || grade < 1 || grade > 5 ||
+        def->count_rule != ::custom_recipe::CountRule::kGradeAndLevel ||
         def->materials == nullptr || def->material_count == 0 || def->material_count > 8) {
         return recipe_error(kQolErrInvalidArgument, "invalid tier-up material definition");
-    }
-    uint16_t category = 0;
-    bool is_jewel = false;
-    QolResult result = query_jewel_fact(jewel, &category, &is_jewel);
-    if (result.ok != kQolOk) return result;
-    if (!is_jewel) return recipe_error(kQolErrInvalidArgument, "tier-up target is not a jewel");
-    const int grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(category));
-    if (grade < 1 || grade > 5) {
-        return recipe_error(kQolErrInternal, "invalid jewel material grade");
     }
     if (g_craft_facts == nullptr || g_craft_facts->read.character_level == nullptr) {
         return recipe_error(kQolErrNotReady, "character level facts unavailable");
     }
     int32_t level = 0;
-    result = g_craft_facts->read.character_level(&level);
+    QolResult result = g_craft_facts->read.character_level(&level);
     if (result.ok != kQolOk) return result;
     if (g_write_port == nullptr || g_write_port->write_stuff_need == nullptr) {
         return recipe_error(kQolErrNotReady, "stuff need writer unavailable");
@@ -425,6 +452,16 @@ void three_slot_refresh_pending(const ::custom_recipe::ThreeSlotRecipe& recipe,
 
 // make_item 的 typed 闭区间随机源 → rules 层随机源，不替错误伪造下界。
 const result::CraftMakeItemInput* g_make_item_input = nullptr;
+
+class MakeItemInputScope {
+public:
+    explicit MakeItemInputScope(const result::CraftMakeItemInput* input) {
+        g_make_item_input = input;
+    }
+    ~MakeItemInputScope() { g_make_item_input = nullptr; }
+    MakeItemInputScope(const MakeItemInputScope&) = delete;
+    MakeItemInputScope& operator=(const MakeItemInputScope&) = delete;
+};
 
 QolResult make_item_rand_bridge(int32_t lo, int32_t hi, int32_t* out) {
     if (out == nullptr || lo > hi || g_make_item_input == nullptr ||
@@ -601,7 +638,7 @@ bool api_three_slot_mode_active(uint32_t mix_type) {
     return def != nullptr && def->kind == ::custom_recipe::Kind::kThreeSlotCraft;
 }
 
-bool api_is_jewel_tier_up_recipe(uint32_t mix_type) {
+bool api_is_tier_up_recipe(uint32_t mix_type) {
     return module_recipe_for_mix_type(mix_type) != nullptr;
 }
 
@@ -620,23 +657,62 @@ result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
     if (query_jewel_fact(target_item, &category, &is_jewel).ok != kQolOk) {
         return CraftGate::kUnavailable;
     }
-    (void)category;
-    if (!is_jewel) return CraftGate::kNotJewel;
+    if (is_jewel) {
+        const qol::contracts::AttributeQualityApi* api = nullptr;
+        qol::contracts::AttributeQualityItem quality{};
+        if (query_jewel_quality(target_item, &api, &quality).ok != kQolOk) {
+            return CraftGate::kUnavailable;
+        }
+        uint32_t word = 0;
+        if (!read_jewel_word(target_item, &word) ||
+            quality.attribute_id !=
+                static_cast<int32_t>((word >> kJewelTypeShift) & kJewelTypeMask) ||
+            quality.value != static_cast<int32_t>(word & kJewelValueMask)) {
+            return CraftGate::kUnavailable;
+        }
+        if (quality.quality.level == qol::contracts::kAttributeQualityHighestLevel) {
+            return CraftGate::kAlreadyGold;
+        }
+        return CraftGate::kPass;
+    }
+
+    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) {
+        return CraftGate::kUnavailable;
+    }
+    int32_t is_real_equip = 0;
+    if (g_item_facts->is_real_equip(target_item, &is_real_equip).ok != kQolOk ||
+        (is_real_equip != 0 && is_real_equip != 1)) {
+        return CraftGate::kUnavailable;
+    }
+    if (is_real_equip == 0) return CraftGate::kNotJewel;
+    if (g_item_facts->view == nullptr) return CraftGate::kUnavailable;
+    qol::contracts::QolItemInventoryView view{};
+    if (g_item_facts->view(target_item, &view).ok != kQolOk ||
+        (view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) == 0 ||
+        (view.fields & qol::contracts::kQolItemInventoryOptionsTruncated) != 0 ||
+        view.native_option_count > qol::contracts::kQolItemInventoryNativeOptionCapacity) {
+        return CraftGate::kUnavailable;
+    }
+    if (view.native_option_count == 0) return CraftGate::kNoUpgradableAffix;
     const qol::contracts::AttributeQualityApi* api = nullptr;
-    qol::contracts::AttributeQualityItem quality{};
-    if (query_jewel_quality(target_item, &api, &quality).ok != kQolOk) {
-        return CraftGate::kUnavailable;
+    if (require_attribute_quality_api(&api).ok != kQolOk) return CraftGate::kUnavailable;
+    uint32_t upgradable = 0;
+    for (uint32_t i = 0; i < view.native_option_count; ++i) {
+        const qol::contracts::QolItemInventoryOptionView& option = view.native_options[i];
+        if (option.type != static_cast<int32_t>(
+                               qol::contracts::QolItemInventoryOptionType::kNative)) {
+            continue;
+        }
+        qol::contracts::AttributeQualityItem context{};
+        const QolResult queried = api->query_option_context(
+            target_item, option.id, option.value, nullptr, &context);
+        if (queried.ok == kQolOk &&
+            ::custom_recipe::affix_upgradable(context.status, context.quality.level,
+                                              context.range)) {
+            ++upgradable;
+        }
     }
-    uint32_t word = 0;
-    if (!read_jewel_word(target_item, &word) ||
-        quality.attribute_id != static_cast<int32_t>((word >> kJewelTypeShift) & kJewelTypeMask) ||
-        quality.value != static_cast<int32_t>(word & kJewelValueMask)) {
-        return CraftGate::kUnavailable;
-    }
-    if (quality.quality.level == qol::contracts::kAttributeQualityHighestLevel) {
-        return CraftGate::kAlreadyGold;
-    }
-    return CraftGate::kPass;
+    return upgradable == 0 ? CraftGate::kNoUpgradableAffix : CraftGate::kPass;
 }
 
 bool api_is_jewel_item(qol::contracts::QolItemHandle item) { return item_is_jewel(item); }
@@ -1068,14 +1144,16 @@ void api_material_needs(const result::CraftMaterialNeedInput* in,
     }
     if (in == nullptr || out == nullptr) return;
     const ::custom_recipe::Def* def = ::custom_recipe::def_for_mix_type(in->mix_type);
-    if (def == nullptr || def->count_rule != ::custom_recipe::CountRule::kJewelGradeAndLevel) return;
-    if (def->material_count == 0 || in->jewel_grade < 1) return;
+    if (def == nullptr || def->count_rule != ::custom_recipe::CountRule::kGradeAndLevel) return;
+    int grade = 0;
+    if (material_grade_for_item(in->item, &grade).ok != kQolOk || grade < 1) return;
+    if (def->material_count == 0) return;
     int count = def->material_count;
     if (count > 8) count = 8;
     out->count = count;
     for (int i = 0; i < count; ++i) {
-        out->needs[i] = ::custom_recipe::material_count_for(def->materials[i].count, in->jewel_grade,
-                                                          in->character_level);
+        out->needs[i] = ::custom_recipe::material_count_for(def->materials[i].count, grade,
+                                                            in->character_level);
     }
 }
 
@@ -1088,71 +1166,183 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
     if (!enabled()) return 1;
     if (!valid_craft_item(in->item) || in->rand_inclusive == nullptr) return 1;
 
+    uint16_t category = 0;
+    bool is_jewel = false;
+    if (query_jewel_fact(in->item, &category, &is_jewel).ok != kQolOk) return 1;
+
+    if (is_jewel) {
+        const qol::contracts::AttributeQualityApi* api = nullptr;
+        qol::contracts::AttributeQualityItem current{};
+        const QolResult quality_result = query_jewel_quality(in->item, &api, &current);
+        if (quality_result.ok != kQolOk) {
+            log_message(2, "make item aborted: attribute quality query failed code=%d",
+                        quality_result.code);
+            return 1;
+        }
+
+        uint32_t word = 0;
+        if (!read_jewel_word(in->item, &word)) return 1;
+        const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
+        const int value = static_cast<int>(word & kJewelValueMask);
+        if (current.attribute_id != type || current.value != value) {
+            log_message(2, "make item aborted: jewel quality facts do not match item word");
+            return 1;
+        }
+
+        if (g_write_port == nullptr || g_write_port->write_jewel_word == nullptr) {
+            log_message(2, "make item aborted: jewel writer unavailable");
+            return 1;
+        }
+        const int grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(category));
+        MaterialNeedPlan material_plan{};
+        const QolResult material_result = prepare_material_needs(def, grade, &material_plan);
+        if (material_result.ok != kQolOk) {
+            log_message(2, "make item aborted: material precheck failed code=%d",
+                        material_result.code);
+            return 1;
+        }
+
+        const qol::contracts::AttributeRange range = current.range;
+        const auto current_tier = static_cast<::custom_recipe::Tier>(current.quality.level);
+        ::custom_recipe::Tier target = ::custom_recipe::Tier::Grey;
+        int32_t new_value = 0;
+        UpgradeResult upgrade_result = UpgradeResult::kDegenerate;
+        QualityEvaluationContext evaluation{api};
+        MakeItemInputScope input_scope(in);
+        const QolResult computed = compute_tier_up_value(
+            current_tier, range, &evaluate_candidate_quality, &evaluation,
+            &make_item_rand_bridge, &upgrade_result, &target, &new_value);
+        if (computed.ok != kQolOk) {
+            log_message(2, "make item aborted: tier evaluation failed code=%d", computed.code);
+            return 1;
+        }
+        if (upgrade_result != UpgradeResult::kOk) {
+            return 1;  // 金档 / 退化 → 失败兜底（与合成键前置拦截互为双保险）
+        }
+
+        // UseStuff 在 MakeItem 返回 0 后读取 stuffList；失败时已经写入的显示值允许残留。
+        const QolResult needs_written = write_material_needs(def, material_plan);
+        if (needs_written.ok != kQolOk) return 1;
+
+        // jewel write 是最后一个提交步骤；前序 quality/evaluate 错误不会改 stuffList 或宝石。
+        const uint32_t updated_word =
+            (word & ~kJewelValueMask) | (static_cast<uint32_t>(new_value) & kJewelValueMask);
+        const QolResult jewel_written = g_write_port->write_jewel_word(in->item, updated_word);
+        if (jewel_written.ok != kQolOk) {
+            log_message(2, "make item failed stage=jewel_write result=%d needs=already_written",
+                        jewel_written.code);
+            return 1;
+        }
+        if (g_verify_log_budget.fetch_sub(1) > 0) {
+            log_message(0, "make item tier-up type=%d value=%d->%d range=[%d,%d] target=%d", type,
+                        value, new_value, range.min, range.max, tier_ordinal(target));
+        }
+        return 0;
+    }
+
+    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) return 1;
+    int32_t is_real_equip = 0;
+    if (g_item_facts->is_real_equip(in->item, &is_real_equip).ok != kQolOk ||
+        is_real_equip != 1) {
+        return 1;
+    }
     const qol::contracts::AttributeQualityApi* api = nullptr;
-    qol::contracts::AttributeQualityItem current{};
-    const QolResult quality_result = query_jewel_quality(in->item, &api, &current);
-    if (quality_result.ok != kQolOk) {
-        log_message(2, "make item aborted: attribute quality query failed code=%d",
-                    quality_result.code);
+    if (require_attribute_quality_api(&api).ok != kQolOk) return 1;
+    if (g_item_facts->view == nullptr) return 1;
+    qol::contracts::QolItemInventoryView view{};
+    if (g_item_facts->view(in->item, &view).ok != kQolOk ||
+        (view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) == 0 ||
+        (view.fields & qol::contracts::kQolItemInventoryOptionsTruncated) != 0 ||
+        view.native_option_count == 0 ||
+        view.native_option_count > qol::contracts::kQolItemInventoryNativeOptionCapacity) {
         return 1;
     }
 
-    uint32_t word = 0;
-    if (!read_jewel_word(in->item, &word)) return 1;
-    const int type = static_cast<int>((word >> kJewelTypeShift) & kJewelTypeMask);
-    const int value = static_cast<int>(word & kJewelValueMask);
-    if (current.attribute_id != type || current.value != value) {
-        log_message(2, "make item aborted: jewel quality facts do not match item word");
-        return 1;
+    struct AffixCandidate {
+        uint32_t native_index;
+        int32_t option_id;
+        int32_t value;
+        int32_t level;
+        qol::contracts::AttributeRange range;
+    };
+    AffixCandidate candidates[qol::contracts::kQolItemInventoryNativeOptionCapacity]{};
+    uint32_t candidate_count = 0;
+    for (uint32_t i = 0; i < view.native_option_count; ++i) {
+        const qol::contracts::QolItemInventoryOptionView& option = view.native_options[i];
+        if (option.type != static_cast<int32_t>(
+                               qol::contracts::QolItemInventoryOptionType::kNative)) {
+            continue;
+        }
+        qol::contracts::AttributeQualityItem context{};
+        const QolResult queried = api->query_option_context(
+            in->item, option.id, option.value, nullptr, &context);
+        if (queried.ok != kQolOk ||
+            !::custom_recipe::affix_upgradable(context.status, context.quality.level,
+                                               context.range)) {
+            continue;
+        }
+        candidates[candidate_count++] =
+            AffixCandidate{i, option.id, option.value, context.quality.level, context.range};
     }
+    if (candidate_count == 0) return 1;
 
-    if (g_write_port == nullptr || g_write_port->write_jewel_word == nullptr) {
-        log_message(2, "make item aborted: jewel writer unavailable");
+    MakeItemInputScope input_scope(in);
+    int32_t pick = -1;
+    const QolResult picked = in->rand_inclusive(0, static_cast<int32_t>(candidate_count - 1), &pick);
+    if (picked.ok != kQolOk || pick < 0 || static_cast<uint32_t>(pick) >= candidate_count) {
+        log_message(2, "make item aborted: equipment affix random failed code=%d pick=%d count=%u",
+                    picked.ok == kQolOk ? kQolErrInternal : picked.code, pick, candidate_count);
         return 1;
     }
-    MaterialNeedPlan material_plan{};
-    const QolResult material_result = prepare_material_needs(def, in->item, &material_plan);
-    if (material_result.ok != kQolOk) {
-        log_message(2, "make item aborted: material precheck failed code=%d",
-                    material_result.code);
-        return 1;
-    }
-
-    const qol::contracts::AttributeRange range = current.range;
-    const auto current_tier = static_cast<::custom_recipe::Tier>(current.quality.level);
+    const AffixCandidate& candidate = candidates[static_cast<uint32_t>(pick)];
+    QualityEvaluationContext evaluation{api};
     ::custom_recipe::Tier target = ::custom_recipe::Tier::Grey;
     int32_t new_value = 0;
     UpgradeResult upgrade_result = UpgradeResult::kDegenerate;
-    QualityEvaluationContext evaluation{api};
-    g_make_item_input = in;
     const QolResult computed = compute_tier_up_value(
-        current_tier, range, &evaluate_candidate_quality, &evaluation,
-        &make_item_rand_bridge, &upgrade_result, &target, &new_value);
-    g_make_item_input = nullptr;
-    if (computed.ok != kQolOk) {
-        log_message(2, "make item aborted: tier evaluation failed code=%d", computed.code);
+        static_cast<::custom_recipe::Tier>(candidate.level), candidate.range,
+        &evaluate_candidate_quality, &evaluation, &make_item_rand_bridge,
+        &upgrade_result, &target, &new_value);
+    if (computed.ok != kQolOk || upgrade_result != UpgradeResult::kOk) {
+        log_message(2, "make item aborted: equipment tier evaluation failed code=%d result=%d",
+                    computed.code, static_cast<int32_t>(upgrade_result));
         return 1;
     }
-    if (upgrade_result != UpgradeResult::kOk) {
-        return 1;  // 金档 / 退化 → 失败兜底（与合成键前置拦截互为双保险）
+    if (new_value < std::numeric_limits<int16_t>::min() ||
+        new_value > std::numeric_limits<int16_t>::max()) {
+        log_message(3, "make item aborted: equipment value out of int16 range value=%d", new_value);
+        return 1;
+    }
+    if ((view.fields & qol::contracts::kQolItemInventoryHasRarity) == 0) return 1;
+    const int grade = ::custom_recipe::equipment_grade_from_rarity(view.rarity);
+    if (grade < 1 || grade > 5) return 1;
+    if (g_write_port == nullptr || g_write_port->write_native_option_value == nullptr) {
+        log_message(2, "make item aborted: native option writer unavailable");
+        return 1;
+    }
+    MaterialNeedPlan material_plan{};
+    const QolResult material_result = prepare_material_needs(def, grade, &material_plan);
+    if (material_result.ok != kQolOk) {
+        log_message(2, "make item aborted: material precheck failed code=%d", material_result.code);
+        return 1;
     }
 
-    // UseStuff 在 MakeItem 返回 0 后读取 stuffList；失败时已经写入的显示值允许残留。
     const QolResult needs_written = write_material_needs(def, material_plan);
     if (needs_written.ok != kQolOk) return 1;
 
-    // jewel write 是最后一个提交步骤；前序 quality/evaluate 错误不会改 stuffList 或宝石。
-    const uint32_t updated_word =
-        (word & ~kJewelValueMask) | (static_cast<uint32_t>(new_value) & kJewelValueMask);
-    const QolResult jewel_written = g_write_port->write_jewel_word(in->item, updated_word);
-    if (jewel_written.ok != kQolOk) {
-        log_message(2, "make item failed stage=jewel_write result=%d needs=already_written",
-                    jewel_written.code);
+    const QolResult option_written = g_write_port->write_native_option_value(
+        in->item, candidate.native_index, new_value);
+    if (option_written.ok != kQolOk) {
+        log_message(2, "make item failed stage=native_option_write result=%d needs=already_written",
+                    option_written.code);
         return 1;
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {
-        log_message(0, "make item tier-up type=%d value=%d->%d range=[%d,%d] target=%d", type,
-                    value, new_value, range.min, range.max, tier_ordinal(target));
+        log_message(0,
+                    "make item equipment tier-up option_index=%u option_id=%d value=%d->%d "
+                    "range=[%d,%d] target=%d",
+                    candidate.native_index, candidate.option_id, candidate.value, new_value,
+                    candidate.range.min, candidate.range.max, tier_ordinal(target));
     }
     return 0;
 }
@@ -1171,7 +1361,7 @@ bool api_desc_should_replace(uint32_t mix_type, const char* text) {
 const result::CraftResultApi kCraftResultApi = {
     &api_enabled,
     &api_three_slot_mode_active,
-    &api_is_jewel_tier_up_recipe,
+    &api_is_tier_up_recipe,
     &api_form_ui_type_for_mix_type,
     &api_craft_gate,
     &api_is_jewel_item,

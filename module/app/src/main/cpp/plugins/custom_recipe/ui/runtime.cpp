@@ -102,12 +102,6 @@ uint16_t item_category(contracts::QolItemHandle handle) {
     return static_cast<uint16_t>(category);
 }
 
-// 宝石档位（28..32 → 1..5；其它返回 0）。
-int jewel_grade(uint16_t category) {
-    if (category < 28 || category > 32) return 0;
-    return static_cast<int>(category) - 27;
-}
-
 bool item_is_stackable(contracts::QolItemHandle handle) {
     int32_t is_real_equip = 0;
     const auto* facts = item_facts();
@@ -117,6 +111,17 @@ bool item_is_stackable(contracts::QolItemHandle handle) {
         return false;
     }
     return is_real_equip == 0;
+}
+
+bool item_is_real_equip(contracts::QolItemHandle handle) {
+    int32_t is_real_equip = 0;
+    const auto* facts = item_facts();
+    if (handle.slot == 0 || handle.generation == 0 || facts == nullptr ||
+        facts->is_real_equip == nullptr ||
+        facts->is_real_equip(handle, &is_real_equip).ok != kQolOk) {
+        return false;
+    }
+    return is_real_equip == 1;
 }
 
 // 失败提示：本插件自有文案经本地 scope 生效，不改动共享文本表内容。
@@ -133,6 +138,14 @@ void craft_show_popup(uint32_t popup_index, int32_t scope) {
 
 void craft_show_quality_unavailable() {
     craft_show_popup(kPopupIndexOnlyJewel, kTextScopeQualityUnavailable);
+}
+
+void craft_show_not_target() {
+    craft_show_popup(kPopupIndexOnlyJewel, kTextScopeNotTarget);
+}
+
+void craft_show_no_upgradable_affix() {
+    craft_show_popup(kPopupIndexOnlyJewel, kTextScopeNoUpgradableAffix);
 }
 
 void craft_show_material_consumed() {
@@ -274,9 +287,9 @@ void place_execute(void* ctrl) {
         }
         return;
     }
-    // def 非空即代表「当前选中的是模块注入的 kJewelTierUp 配方」，与总开关无关
+    // def 非空即代表「当前选中的是模块注入的 kTierUp 配方」，与总开关无关
     //（停用后旧面板仍可能持有它，必须能识别以 fail-closed）。
-    if (!api->is_jewel_tier_up_recipe(mix_type)) {
+    if (!api->is_tier_up_recipe(mix_type)) {
         g_backup_place(ctrl);
         return;
     }
@@ -291,16 +304,15 @@ void place_execute(void* ctrl) {
 
     const contracts::QolItemHandle item = craft_target_slot_item();
     if (item.slot == 0 || item.generation == 0) return;  // 本次未放入任何物品
-    if (!api->is_jewel_item(item)) {
+    if (!api->is_jewel_item(item) && !item_is_real_equip(item)) {
         craft_set_target_slot_item(contracts::kInvalidItemHandle);  // 撤销放置
-        craft_show_text(kTextOnlyJewel);
+        craft_show_not_target();
         return;
     }
-    // 宝石：按宝石档位 + 角色等级写入材料需求数（下一帧绘制即显示），再强制费用 0。
-    const uint16_t category = item_category(item);
+    // 材料档位由结果层按宝石类别或装备稀有度推导，随后强制费用 0。
     result::CraftMaterialNeedInput ni{};
     ni.mix_type = mix_type;
-    ni.jewel_grade = jewel_grade(category);
+    ni.item = item;
     ni.character_level = craft_character_level();
     result::CraftMaterialNeedOutput no{};
     api->material_needs(&ni, &no);
@@ -311,7 +323,7 @@ void place_execute(void* ctrl) {
     }
     craft_set_cost_zero();
     if (log_budget_take()) {
-        log_message(kLogDebug, "place accepted jewel mixType=%u cost=0", mix_type);
+        log_message(kLogDebug, "place accepted tier-up target mixType=%u cost=0", mix_type);
     }
 }
 
@@ -365,7 +377,7 @@ void craft_execute(void* ctrl) {
         }
         return;
     }
-    if (!api->is_jewel_tier_up_recipe(mix_type)) {
+    if (!api->is_tier_up_recipe(mix_type)) {
         g_backup_mixing(ctrl);
         return;
     }
@@ -376,13 +388,16 @@ void craft_execute(void* ctrl) {
     }
     switch (api->craft_gate(craft_target_slot_item())) {
         case result::CraftGate::kNotJewel:
-            craft_show_text(kTextOnlyJewel);
+            craft_show_not_target();
+            return;
+        case result::CraftGate::kNoUpgradableAffix:
+            craft_show_no_upgradable_affix();
             return;
         case result::CraftGate::kAlreadyGold:
             craft_show_text(kTextMaxCrafted);
             return;
         case result::CraftGate::kUnavailable:
-            // 质量服务不可用：与「真正非宝石」区分提示，只阻断宝石升阶。
+            // 质量服务不可用：与不支持的目标区分提示，只阻断升阶。
             craft_show_quality_unavailable();
             return;
         case result::CraftGate::kPass:
@@ -489,7 +504,7 @@ void item_draw_porting_execute(void* item, int32_t x, int32_t y, int32_t type, i
 }
 
 // ---------------------------------------------------------------------------
-// wrapper：模块配方文案（「宝石升阶」）的三个绘制窗口
+// wrapper：模块配方文案（「升阶」）的三个绘制窗口
 // ---------------------------------------------------------------------------
 void button_recipe_draw_execute(void* ctrl) {
     TextScopeGuard scope(kTextScopeRecipeButton);

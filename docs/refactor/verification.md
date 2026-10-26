@@ -408,6 +408,16 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | Host/静态/Debug Gate | **PASS**：`host_tests`、`save_backup_gate_tests`、`save_backup_rollback_tests`、`save_warehouse_validate_tests` 4 个目标通过；`check_arch.py` 全绿；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2610270006_b231ddbf7ef3.apk`（SHA-256 `b231ddbf7ef34c35ad90dcf577dd61dbd209f5cf474f854eb1fca9bf3527ce48`）。 | Host 输出：`.tmp/c18-save-backup-host/`。全量 Host target 构建另被非本功能 `move_merge_plugin_tests` 的 `core_item::g_port` 未定义引用阻断；本卡只报告上列已运行目标，不标记全量 CTest 通过。 |
 | VM-SB-C18-01：游戏文件读写与转换 | **NOT_ACCEPTED（未执行）**：当前 `save_backup` 验收规则禁止真机验证。 | 尚无设备 A/B 证明 v520/v586 loader 接受重建文件、共享 fallback materialize、跨槽 slot header 或跨设备导入；Host 测试不替代这些运行时证据。不得报告 C18 文件行为真机通过。 |
 
+### 5.25 `custom_recipe` 升阶扩展到装备（2026-10-27；Host/构建通过，设备行为未验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现（代码事实） | **已实现**：配方按钮/标题文案「宝石升阶」→「升阶」（`Kind::kTierUp`、`CountRule::kGradeAndLevel`）；升阶目标从宝石扩展到 `item.facts.is_real_equip==1` 的真实装备；装备 gate 读取 `view.native_options[]`（type 0），只把 `status` 成功、level 0..4、区间非退化的词条纳入候选，`kNoUpgradableAffix` 对应「该装备没有可升阶的词条。」；装备材料档位 = 稀有度 0..4 + 1，宝石仍按类别 28..32；写端口升到 v1.3，尾追加 `write_native_option_value(item, native_index, value)`（只数 type 0 节点、写 int16）。宝石词条（type 1）与附魔字段不参与、不写入。 | `plugins/custom_recipe/{model/catalog.h,model/result.h,model/rules.h,result/feature.cpp,ui/runtime.cpp,table/text_table.h}`、`contracts/game_ports/custom_recipe_write_port.h`、`game/adapter_ports/craft_port.cpp`、`plugins/custom_recipe/plugin.cpp`；文档 `docs/reference/plugins/custom_recipe.md` §4.2/§5.1/§7/§10。 |
+| Host 定向测试 | **9/9 PASS**：`custom_recipe_tests`、`custom_recipe_handle_chain_tests`、`module_text_tests`、`craft_ui_guard_tests`、`craft_ui_handle_identity_tests`、`host_adapter_tests`、`attribute_quality_tests`、`attribute_quality_adapter_tests`、`attribute_quality_provider_tests`。装备路径覆盖：未满档词条放行、全满档/无词条 → `kNoUpgradableAffix`、只在非满档候选抽取、材料档位 = rarity+1、need 先写/词条后写、need 失败不写词条、随机失败与越界落点不写 need、int16 越界在写 need 前拒绝、词条写失败时 need 已写。 | `.tmp/custom-recipe-tierup/build`（`ctest -R` 输出 100% tests passed out of 9）。`custom_recipe_owner_fixture_tests` 因仓库既有测试目标缺少 `movement_input_port` 链接源而无法链接（HEAD 的 `host/plugin_registry.cpp` 已引用该符号，与本改动无关），未计入本批通过数。 |
+| 静态/构建 | **PASS**：`check_arch.py` 全部通过（layers/offsets/jni/resources）；`git diff --check` 无诊断；`scripts/build-debug.sh --offline` BUILD SUCCESSFUL，APK `output/inotia4_qol_lsposed_debug_2610270423_747094fd3bff.apk`，SHA-256 `747094fd3bff1077aa616b2cddcc6c3e86fb3d1b3a52781f9ed654847a8bcdf6`。**该 APK 构建于含既有未提交修改的工作树**，不是 pristine commit-only 产物；未安装。 | `.tmp/custom-recipe-tierup/build-debug.log`。构建成功不替代设备行为验收。 |
+| VM-CR-TIERUP-EQ-01：装备升阶行为 | **NOT_ACCEPTED（待真机）**。 | 真机步骤：①开启 `customRecipeEnabled` 并进档，宝石强化页确认配方按钮/面板标题显示「升阶」；②填入一件带未满档词条的装备 + 卓越灵药，合成后确认**只有一条**原生词条数值提升一档，其余词条、已镶嵌宝石数值、附魔 ID/等级不变；灵药消耗数与装备稀有度档位一致；③填入全满档词条装备 → 提示「该装备没有可升阶的词条。」；④填入消耗品 → 提示「只有宝石或装备才可以。」；⑤宝石升阶回归仍正常。需记录合成前后 `GET /api/item/inventory` 的 options 对比与 logcat `make item equipment tier-up` 锚点。 |
+| 文档与历史口径 | `docs/reference/plugins/custom_recipe.md` 已同步；历史 VM-46/§5.11–§5.14 的「宝石升阶」记录保留为当时形态，不改写。 | 新卡不覆盖 VM-46（三格合成）与 VM-CR-MERGE-01 的整卡状态。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

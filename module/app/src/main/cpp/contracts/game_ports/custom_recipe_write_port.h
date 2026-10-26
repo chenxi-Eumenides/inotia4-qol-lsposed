@@ -23,6 +23,11 @@ struct QolCustomRecipeWritePort {
     QolResult (*write_jewel_word)(QolItemHandle item, uint32_t word);
     QolResult (*set_max_socket_enchant)(QolItemHandle item);
     QolResult (*random_inclusive)(int32_t lo, int32_t hi, int32_t* out);
+    // 改写装备第 `native_index` 条**原生词条**（O_INDEX bit13-15 == 0）的存储值。
+    // 只统计原生词条节点；宝石词条（type 1）与附魔字段不在本入口的可见范围。
+    // native_index 越界、链表不可读或 value 超出 int16 返回 NotFound/NotReady/InvalidArgument。
+    QolResult (*write_native_option_value)(QolItemHandle item, uint32_t native_index,
+                                           int32_t value);
 };
 
 static_assert(std::is_standard_layout<QolCustomRecipeWritePort>::value,

@@ -18,8 +18,7 @@ constexpr uint16_t kElixirOfExcellenceItemId = 15;
 constexpr uint16_t kLowJewelItemId = 28;
 constexpr uint8_t kThreeSlotMaterialCount = 3;
 // 配方按钮文本 wordId（复用既有本地化串，见 §7.2）：35216「合成」。
-// 「宝石强化」条目复用 35291，但按钮显示由 MEMORYTEXT_GetText 替换为模块字面量
-// 「宝石升阶」（catalog.h 的 kJewelTierUpLabel）。
+// 「宝石强化」条目复用 35291，但按钮显示由 MEMORYTEXT_GetText 替换为模块字面量「升阶」。
 constexpr uint16_t kNativeLabelWordId = 35216;
 // 「合成」入口费用公式 wordId：镜像原版 record 12（费用显示走原版公式，不由模块强制 0）。
 constexpr uint16_t kNativeCostWordId = 188;
@@ -30,7 +29,7 @@ constexpr uint16_t kNativeCostWordId = 188;
 // `0xc0224 bl MEMORYTEXT_GetText_E(b8-9)` → `0xc0230 bl CAL_Calculate(公式)`。
 // 本记录 `b8-9 = 0` 时 `GetText_E(0)` 返回空 → `CAL_Calculate(NULL)` 空指针解引用崩溃。
 // 填 188（与原版 record 12 同一公式）即与原版行为完全一致；实际费用仍由放料 hook 强制 0。
-constexpr uint16_t kJewelTierUpCostWordId = 188;
+constexpr uint16_t kTierUpCostWordId = 188;
 // 挂载页签：宝石强化页（type 1）= 配方组 group 3（注入记录 b11 = 1<<3 = 0x08）。
 constexpr uint8_t kPageGroupJewelCraft = 3;
 
@@ -38,7 +37,7 @@ const Material kNativeMaterials[] = {
     {kLowJewelItemId, kThreeSlotMaterialCount},
 };
 
-const Material kJewelTierUpMaterials[] = {
+const Material kTierUpMaterials[] = {
     {kElixirOfExcellenceItemId, 1},
 };
 
@@ -48,17 +47,17 @@ const Material kJewelTierUpMaterials[] = {
 // 第 1 条「合成」= kThreeSlotCraft：3 格隐式配方（§2.8/§4.12）。放料与合成由模块自实现
 // （放料不转调原函数、合成前置查表 + 原生 YesNo 回调）；产物 = `three_slot_recipes` 命中项的
 // `product`。材料显示仍镜像原版 record 12（`{28,3}` / 费用文本 188）以保持该页格位与费用显示不变。
-// 第 2 条「宝石强化」= kJewelTierUp：借 type 3 形态，材料需求数量
-// = ceil(1 × 宝石档位 × (105 − 角色等级) / 105)（见 CountRule::kJewelGradeAndLevel）：
-// 低级宝石 1 瓶、中级 2 瓶…混沌宝石 5 瓶，105 级为 0 瓶；费用 0 由 hook 强制。
+// 第 2 条「升阶」= kTierUp：借 type 3 形态，材料需求数量
+// = ceil(1 × 目标档位 × (105 − 角色等级) / 105)（见 CountRule::kGradeAndLevel）；
+// 宝石档位按类别、装备档位按稀有度计算，105 级为 0 瓶；费用 0 由 hook 强制。
 const Def kCatalog[] = {
     {kNativeLabelWordId, Kind::kThreeSlotCraft, kNativeMaterials,
      static_cast<uint8_t>(sizeof(kNativeMaterials) / sizeof(kNativeMaterials[0])),
      /*cost_word_id=*/kNativeCostWordId, CountRule::kFixed, Form::kMultiInputCreate,
      kPageGroupJewelCraft},
-    {kJewelTierUpLabelWordId, Kind::kJewelTierUp, kJewelTierUpMaterials,
-     static_cast<uint8_t>(sizeof(kJewelTierUpMaterials) / sizeof(kJewelTierUpMaterials[0])),
-     /*cost_word_id=*/kJewelTierUpCostWordId, CountRule::kJewelGradeAndLevel, Form::kTargetAndCreate,
+    {kTierUpLabelWordId, Kind::kTierUp, kTierUpMaterials,
+     static_cast<uint8_t>(sizeof(kTierUpMaterials) / sizeof(kTierUpMaterials[0])),
+     /*cost_word_id=*/kTierUpCostWordId, CountRule::kGradeAndLevel, Form::kTargetAndCreate,
      kPageGroupJewelCraft},
 };
 

@@ -19,6 +19,7 @@
 #include "contracts/plugin.h"
 #include "plugins/custom_recipe/model/catalog.h"
 #include "plugins/custom_recipe/model/result.h"
+#include "plugins/custom_recipe/model/rules.h"
 #include "plugins/custom_recipe/table/table.h"
 
 namespace {
@@ -116,18 +117,28 @@ int32_t g_save_saved = 1;
 int g_jewel_write_calls = 0;
 uint32_t g_jewel_word_written = 0;
 int32_t g_jewel_write_result = kQolOk;
+int g_native_option_write_calls = 0;
+uint32_t g_native_option_written_index = UINT32_MAX;
+int32_t g_native_option_written_value = 0;
+int32_t g_native_option_write_result = kQolOk;
 int g_read_jewel_word_calls = 0;
 uint32_t g_jewel_word = 20u | (3u << 18) | (5u << 11);
 int g_set_max_socket_calls = 0;
 int32_t g_set_max_socket_result = kQolOk;
 int g_stuff_need_calls = 0;
 int32_t g_stuff_need_fail_at = -1;
+int32_t g_stuff_need_counts[8]{};
 int g_random_calls = 0;
 int32_t g_random_result_code = kQolOk;
 int32_t g_random_out_override = std::numeric_limits<int32_t>::min();
+uint32_t g_equipment_native_option_count = 2;
+bool g_equipment_options_all_gold = false;
+int32_t g_equipment_option_max = 100;
+int g_quality_evaluate_calls = 0;
 
 int g_sequence = 0;
 int g_jewel_write_sequence = 0;
+int g_native_option_write_sequence = 0;
 int g_stuff_need_sequence[8]{};
 int g_create_sequence = 0;
 int g_save_sequence = 0;
@@ -170,17 +181,27 @@ void reset_env() {
     g_jewel_write_calls = 0;
     g_jewel_word_written = 0;
     g_jewel_write_result = kQolOk;
+    g_native_option_write_calls = 0;
+    g_native_option_written_index = UINT32_MAX;
+    g_native_option_written_value = 0;
+    g_native_option_write_result = kQolOk;
     g_read_jewel_word_calls = 0;
     g_jewel_word = 20u | (3u << 18) | (5u << 11);
     g_set_max_socket_calls = 0;
     g_set_max_socket_result = kQolOk;
     g_stuff_need_calls = 0;
     g_stuff_need_fail_at = -1;
+    for (int32_t& count : g_stuff_need_counts) count = 0;
     g_random_calls = 0;
     g_random_result_code = kQolOk;
     g_random_out_override = std::numeric_limits<int32_t>::min();
+    g_equipment_native_option_count = 2;
+    g_equipment_options_all_gold = false;
+    g_equipment_option_max = 100;
+    g_quality_evaluate_calls = 0;
     g_sequence = 0;
     g_jewel_write_sequence = 0;
+    g_native_option_write_sequence = 0;
     g_create_sequence = 0;
     g_save_sequence = 0;
     g_product_scale_sequence = 0;
@@ -202,6 +223,24 @@ QolResult item_is_real_equip(QolItemHandle item, int32_t* out) {
     const ItemFact* fact = find_fact(item);
     if (fact == nullptr) return fail(kQolErrNotFound);
     *out = fact->stackable ? 0 : 1;
+    return ok();
+}
+
+QolResult item_view(QolItemHandle item, QolItemInventoryView* out) {
+    if (out == nullptr) return fail(kQolErrInvalidArgument);
+    if (!same(item, kEquipAlpha) && !same(item, kEquipBeta)) {
+        return fail(kQolErrUnsupported);
+    }
+    *out = QolItemInventoryView{};
+    out->fields = kQolItemInventoryHasRarity | kQolItemInventoryHasNeedLevel |
+                  kQolItemInventoryHasNativeOptions | kQolItemInventoryHasJewelOptions;
+    out->rarity = 2;
+    out->need_level = 10;
+    out->native_option_count = g_equipment_native_option_count;
+    out->native_options[0] = QolItemInventoryOptionView{40, 10, 0};
+    out->native_options[1] = QolItemInventoryOptionView{100, 11, 0};
+    out->jewel_option_count = 1;
+    out->jewel_options[0] = QolItemInventoryOptionView{55, 10, 1};
     return ok();
 }
 
@@ -321,11 +360,22 @@ QolResult set_max_socket_enchant(QolItemHandle) {
     return ok();
 }
 
-QolResult write_stuff_need(uint32_t index, int32_t, int32_t) {
+QolResult write_stuff_need(uint32_t index, int32_t, int32_t count) {
     const int call = g_stuff_need_calls;
     if (call < 8) g_stuff_need_sequence[call] = ++g_sequence;
+    if (call < 8) g_stuff_need_counts[call] = count;
     ++g_stuff_need_calls;
     if (g_stuff_need_fail_at == call) return fail(kQolErrBlocked);
+    return ok();
+}
+
+QolResult write_native_option_value(QolItemHandle item, uint32_t native_index, int32_t value) {
+    if (!same(item, kEquipAlpha) && !same(item, kEquipBeta)) return fail(kQolErrNotFound);
+    ++g_native_option_write_calls;
+    g_native_option_write_sequence = ++g_sequence;
+    g_native_option_written_index = native_index;
+    g_native_option_written_value = value;
+    if (g_native_option_write_result != kQolOk) return fail(g_native_option_write_result);
     return ok();
 }
 
@@ -375,13 +425,26 @@ QolResult quality_query_item(QolItemHandle item, const AttributeQualityOptions*,
     return ok();
 }
 
-QolResult quality_query_option(QolItemHandle, int32_t, int32_t,
-                               const AttributeQualityOptions*, AttributeQualityItem*) {
-    return fail(kQolErrUnsupported);
+QolResult quality_query_option(QolItemHandle item, int32_t option_id, int32_t display_value,
+                               const AttributeQualityOptions*, AttributeQualityItem* out) {
+    if (out == nullptr) return fail(kQolErrInvalidArgument);
+    if ((!same(item, kEquipAlpha) && !same(item, kEquipBeta)) ||
+        (option_id != 10 && option_id != 11)) {
+        return fail(kQolErrUnsupported);
+    }
+    const int32_t level = g_equipment_options_all_gold || option_id == 11
+                              ? 5
+                              : (display_value == 40 ? 1 : quality_level(
+                                    display_value, 0, g_equipment_option_max));
+    *out = AttributeQualityItem{AttributeKind::OptionContext, UINT32_MAX, option_id, 0,
+                                display_value, {0, g_equipment_option_max},
+                                {display_value, level}, kQolOk};
+    return ok();
 }
 
 QolResult quality_evaluate(int32_t value, AttributeRange range,
                            const AttributeQualityOptions*, AttributeQuality* out) {
+    ++g_quality_evaluate_calls;
     if (out == nullptr) return fail(kQolErrInvalidArgument);
     out->percentile = range.max <= range.min || value >= range.max ? 100
                      : value < range.min ? 0
@@ -455,7 +518,7 @@ CraftExecuteResult execute_three_slots(const QolItemHandle (&items)[3]) {
     return api().execute(&in);
 }
 
-// 目录第 2 条（kJewelTierUp）的 mixType = base_record_count(69) + 1。
+// 目录第 2 条（kTierUp）的 mixType = base_record_count(69) + 1。
 constexpr uint32_t kTierUpMixType = 69 + 1;
 
 // 缩放配方：宝石 + 混沌武器卷轴(20) + 混沌防具卷轴(25) → 宝石自身（scale 1200）。
@@ -473,6 +536,7 @@ void init_fixture() {
     g_item_facts.category = &item_category;
     g_item_facts.is_real_equip = &item_is_real_equip;
     g_item_facts.is_jewel_category = &is_jewel_category;
+    g_item_facts.view = &item_view;
 
     g_craft_facts = CraftFactsApi{};
     g_craft_facts.read.category_held_count = &held_count;
@@ -508,6 +572,7 @@ void init_fixture() {
     g_write_port.write_jewel_word = &write_jewel_word;
     g_write_port.set_max_socket_enchant = &set_max_socket_enchant;
     g_write_port.random_inclusive = &port_random;
+    g_write_port.write_native_option_value = &write_native_option_value;
 
     PluginContext context{};
     context.game = &g_game;
@@ -790,6 +855,18 @@ void test_craft_gate_unavailable_vs_not_jewel() {
     assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
     assert(api().is_jewel_item(kJewel));
     assert(!api().is_jewel_item(kMaterialA));
+
+    // 装备存在未满档原生词条时放行；宝石词条列表不参与候选。
+    init_fixture();
+    assert(api().craft_gate(kEquipAlpha) == CraftGate::kPass);
+    g_equipment_options_all_gold = true;
+    assert(api().craft_gate(kEquipAlpha) == CraftGate::kNoUpgradableAffix);
+    g_equipment_options_all_gold = false;
+    g_equipment_native_option_count = 0;
+    assert(api().craft_gate(kEquipAlpha) == CraftGate::kNoUpgradableAffix);
+    g_equipment_native_option_count = 2;
+    g_quality_capability_available = false;
+    assert(api().craft_gate(kEquipAlpha) == CraftGate::kUnavailable);
 }
 
 // ---------------------------------------------------------------------------
@@ -866,6 +943,63 @@ void test_random_port_and_tier_up_ordering() {
     qol::features::custom_recipe::set_enabled(false);
     assert(api().make_item(&make) == 1);
     qol::features::custom_recipe::set_enabled(true);
+}
+
+void test_equipment_tier_up() {
+    init_fixture();
+    const CraftMakeItemInput make{kTierUpMixType, kEquipAlpha, &port_random};
+    assert(api().make_item(&make) == 0);
+    assert(g_native_option_write_calls == 1);
+    assert(g_native_option_written_index == 0);  // id 10 native option；id 11 is already gold
+    assert(g_native_option_written_value >= 60 && g_native_option_written_value <= 74);
+    assert(g_jewel_write_calls == 0);  // 不写宝石词条
+    assert(g_stuff_need_calls > 0);
+    assert(g_stuff_need_counts[0] ==
+           custom_recipe::material_count_for(1, 3, g_character_level));
+    assert(g_stuff_need_sequence[0] > 0);
+    assert(g_native_option_write_sequence > g_stuff_need_sequence[0]);
+
+    // need 写失败时不能写原生词条。
+    init_fixture();
+    g_stuff_need_fail_at = 0;
+    assert(api().make_item(&make) == 1);
+    assert(g_stuff_need_calls == 1 && g_native_option_write_calls == 0);
+
+    // 候选抽取的随机错误或越界落点均须在质量区间计算和写入前中止。
+    init_fixture();
+    g_random_result_code = kQolErrBlocked;
+    assert(api().make_item(&make) == 1);
+    assert(g_random_calls == 1 && g_quality_evaluate_calls == 0);
+    assert(g_stuff_need_calls == 0 && g_native_option_write_calls == 0);
+
+    init_fixture();
+    g_random_out_override = 1;  // 唯一候选下标为 0
+    assert(api().make_item(&make) == 1);
+    assert(g_random_calls == 1 && g_quality_evaluate_calls == 0);
+    assert(g_stuff_need_calls == 0 && g_native_option_write_calls == 0);
+
+    // 撤销质量能力、非宝石非装备目标均不写 need/词条。
+    init_fixture();
+    g_quality_capability_available = false;
+    assert(api().make_item(&make) == 1);
+    assert(g_stuff_need_calls == 0 && g_native_option_write_calls == 0);
+
+    init_fixture();
+    const CraftMakeItemInput non_target{kTierUpMixType, kMaterialA, &port_random};
+    assert(api().make_item(&non_target) == 1);
+    assert(g_stuff_need_calls == 0 && g_native_option_write_calls == 0);
+
+    // 词条写入失败时材料需求已写，符合提交次序定义。
+    init_fixture();
+    g_native_option_write_result = kQolErrBlocked;
+    assert(api().make_item(&make) == 1);
+    assert(g_stuff_need_calls > 0 && g_native_option_write_calls == 1);
+
+    // 超出 int16 的新值在写 need 前拒绝，避免材料展示已变更后才发现端口不能存储。
+    init_fixture();
+    g_equipment_option_max = 100000;
+    assert(api().make_item(&make) == 1);
+    assert(g_stuff_need_calls == 0 && g_native_option_write_calls == 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1108,6 +1242,7 @@ int main() {
     test_pending_invalidation();
     test_craft_gate_unavailable_vs_not_jewel();
     test_random_port_and_tier_up_ordering();
+    test_equipment_tier_up();
     test_wrapper_equivalent_execute_success();
     test_prepare_outcome_distinction();
     test_typed_handler_gate();

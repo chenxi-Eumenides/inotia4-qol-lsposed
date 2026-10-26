@@ -49,9 +49,9 @@ static void test_table_integrity() {
     size_t cn = 0;
     const TextEntry* c = cr::text_entries(&cn);
     CHECK(c != nullptr);
-    // 9 条：按钮 / 面板标题 / 质量不可用 / 材料可能已扣 / 产物准备失败 /
-    //       配方不匹配 / 合成暂不可用 / 状态已变化 / 放入失败。
-    CHECK(cn == 9);
+    // 11 条：升阶按钮 / 标题 / 质量不可用 / 材料可能已扣 / 产物准备失败 /
+    //        配方不匹配 / 合成暂不可用 / 状态已变化 / 放入失败 / 非升阶目标 / 无可升阶词条。
+    CHECK(cn == 11);
     for (size_t i = 0; i < cn; ++i) {
         CHECK(c[i].key != nullptr && c[i].key[0] != '\0');
         CHECK(c[i].text != nullptr);
@@ -107,9 +107,9 @@ static void test_lookup_scope_gating() {
     CHECK(i18n::lookup(35185, static_cast<int32_t>(TextScope::kNone)) == nullptr);
     CHECK(i18n::lookup(35291, static_cast<int32_t>(TextScope::kCharacterPanel)) == nullptr);
 
-    // 配方文案：按钮与面板标题都要显示「宝石升阶」；**页签必须保持原文**（三处同 id）。
-    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
-    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopePanelTitle, 35291), "宝石升阶") == 0);
+    // 配方文案：按钮与面板标题显示「升阶」；**页签必须保持原文**（三处同 id）。
+    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "升阶") == 0);
+    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopePanelTitle, 35291), "升阶") == 0);
     CHECK(cr::text_lookup(cr::kTextScopePageTab, 35291) == nullptr);  // 页签名不得被改名
     CHECK(cr::text_lookup(0, 35291) == nullptr);
     CHECK(cr::text_lookup(cr::kTextScopeRecipeButton, 0) == nullptr);
@@ -119,20 +119,20 @@ static void test_lookup_scope_gating() {
 // 语义键查询 + 与配方目录的 id 同步（两处常量不得漂移）。
 // ---------------------------------------------------------------------------
 static void test_key_lookup_and_id_sync() {
-    const TextEntry* e = cr::text_entry_by_key("recipe.jewel_tier_up");
+    const TextEntry* e = cr::text_entry_by_key("recipe.tier_up");
     CHECK(e != nullptr);
     if (e != nullptr) {
         CHECK(e->scope == cr::kTextScopeRecipeButton);
-        CHECK(std::strcmp(e->text, "宝石升阶") == 0);
-        CHECK(e->text_id == custom_recipe::kJewelTierUpLabelWordId);
+        CHECK(std::strcmp(e->text, "升阶") == 0);
+        CHECK(e->text_id == custom_recipe::kTierUpLabelWordId);
     }
     // 标题条目：同 id、不同作用域（面板标题框）。
-    const TextEntry* t = cr::text_entry_by_key("recipe.jewel_tier_up.title");
+    const TextEntry* t = cr::text_entry_by_key("recipe.tier_up.title");
     CHECK(t != nullptr);
     if (t != nullptr) {
         CHECK(t->scope == cr::kTextScopePanelTitle);
-        CHECK(std::strcmp(t->text, "宝石升阶") == 0);
-        CHECK(t->text_id == custom_recipe::kJewelTierUpLabelWordId);
+        CHECK(std::strcmp(t->text, "升阶") == 0);
+        CHECK(t->text_id == custom_recipe::kTierUpLabelWordId);
     }
     // 模块自有失败提示各自独立 scope；text_id 必须落在 MEMORYTEXT 域（不是弹窗索引域）。
     const TextEntry* unavailable = cr::text_entry_by_key("quality.unavailable");
@@ -182,6 +182,20 @@ static void test_key_lookup_and_id_sync() {
         CHECK(place_write_failed->scope == cr::kTextScopePlaceWriteFailed);
         CHECK(place_write_failed->text_id == cr::kMemoryTextAlreadyPlaced);
         CHECK(std::strcmp(place_write_failed->text, "放入失败，请重试。") == 0);
+    }
+    const TextEntry* not_target = cr::text_entry_by_key("tier_up.not_target");
+    CHECK(not_target != nullptr);
+    if (not_target != nullptr) {
+        CHECK(not_target->scope == cr::kTextScopeNotTarget);
+        CHECK(not_target->text_id == cr::kMemoryTextOnlyJewel);
+        CHECK(std::strcmp(not_target->text, "只有宝石或装备才可以。") == 0);
+    }
+    const TextEntry* no_upgradable = cr::text_entry_by_key("tier_up.no_upgradable_affix");
+    CHECK(no_upgradable != nullptr);
+    if (no_upgradable != nullptr) {
+        CHECK(no_upgradable->scope == cr::kTextScopeNoUpgradableAffix);
+        CHECK(no_upgradable->text_id == cr::kMemoryTextOnlyJewel);
+        CHECK(std::strcmp(no_upgradable->text, "该装备没有可升阶的词条。") == 0);
     }
 
     // 同一 MEMORYTEXT id 35410 承载 5 条互不相同的提示：各自 scope 命中各自的文案，
@@ -286,7 +300,7 @@ static void test_scope_guard_restore() {
 // ---------------------------------------------------------------------------
 static void test_custom_recipe_scope_lookups() {
     // custom_recipe 侧同语义：本地 scope 命中才替换；页签 scope 永不登记。
-    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
+    CHECK(std::strcmp(cr::text_lookup(cr::kTextScopeRecipeButton, 35291), "升阶") == 0);
     CHECK(cr::text_lookup(cr::kTextScopePageTab, 35291) == nullptr);  // 页签保持原文
     CHECK(cr::text_lookup(0, 35291) == nullptr);                      // 非窗口
 }

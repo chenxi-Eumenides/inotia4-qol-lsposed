@@ -6,7 +6,7 @@
 
 #include "../model/catalog.h"
 
-// 「宝石强化」呈现文案表（ADR 0001 D3：合成域的配方呈现文案归 custom_recipe）。
+// 「升阶」呈现文案表（ADR 0001 D3：合成域的配方呈现文案归 custom_recipe）。
 // Scope 由 custom_recipe UI 子层持有并作为参数传入；本表不读取 infra 的活动 scope。
 
 namespace qol::features::custom_recipe {
@@ -22,6 +22,8 @@ inline constexpr int32_t kTextScopeRecipeMismatch = 8;    // 配方未命中
 inline constexpr int32_t kTextScopeCraftUnavailable = 9;  // 已匹配但上下文不可用 / 弹窗创建失败
 inline constexpr int32_t kTextScopeStateChanged = 10;      // 确认期间格子/代际已变化
 inline constexpr int32_t kTextScopePlaceWriteFailed = 11;  // 放料写入失败
+inline constexpr int32_t kTextScopeNotTarget = 12;         // 目标不是宝石或装备
+inline constexpr int32_t kTextScopeNoUpgradableAffix = 13; // 装备没有可升阶词条
 
 // ---- 两个不同的 id 域（不可混用）----
 //
@@ -69,10 +71,10 @@ struct TextEntry {
 };
 
 inline constexpr TextEntry kTextEntries[] = {
-    {"recipe.jewel_tier_up", ::custom_recipe::kJewelTierUpLabelWordId,
-     kTextScopeRecipeButton, "宝石升阶"},  // UIMix 配方按钮（该路径直接以 wordId 调 GetText）
-    {"recipe.jewel_tier_up.title", ::custom_recipe::kJewelTierUpLabelWordId,
-     kTextScopePanelTitle, "宝石升阶"},  // 面板标题框
+    {"recipe.tier_up", ::custom_recipe::kTierUpLabelWordId,
+     kTextScopeRecipeButton, "升阶"},  // UIMix 配方按钮（该路径直接以 wordId 调 GetText）
+    {"recipe.tier_up.title", ::custom_recipe::kTierUpLabelWordId,
+     kTextScopePanelTitle, "升阶"},  // 面板标题框
     {"quality.unavailable", kMemoryTextOnlyJewel, kTextScopeQualityUnavailable,
      "功能不可用"},  // 弹窗索引 97
     {"craft.material_may_have_been_consumed", kMemoryTextMaterialInsufficient,
@@ -87,6 +89,10 @@ inline constexpr TextEntry kTextEntries[] = {
      "合成状态已变化，请重新填入材料。"},  // 索引 94
     {"craft.place_write_failed", kMemoryTextAlreadyPlaced, kTextScopePlaceWriteFailed,
      "放入失败，请重试。"},  // 索引 99
+    {"tier_up.not_target", kMemoryTextOnlyJewel, kTextScopeNotTarget,
+     "只有宝石或装备才可以。"},  // 弹窗索引 97
+    {"tier_up.no_upgradable_affix", kMemoryTextOnlyJewel, kTextScopeNoUpgradableAffix,
+     "该装备没有可升阶的词条。"},  // 弹窗索引 97
 };
 
 inline constexpr size_t kTextEntryCount = sizeof(kTextEntries) / sizeof(kTextEntries[0]);

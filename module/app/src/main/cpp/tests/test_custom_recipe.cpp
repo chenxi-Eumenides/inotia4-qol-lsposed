@@ -306,16 +306,16 @@ static void test_catalog_mapping() {
     CHECK(real[0].count_rule == cr::CountRule::kFixed);
     CHECK(real[0].form == cr::Form::kMultiInputCreate);
     CHECK(real[0].group == 3);
-    // 第 2 条「宝石强化」= kJewelTierUp：借 type 3（目标物 + 材料 → 原地修改）形态。
+    // 第 2 条「升阶」= kTierUp：借 type 3（目标物 + 材料 → 原地修改）形态。
     CHECK(real[1].label_word_id == 35291);
-    CHECK(real[1].kind == cr::Kind::kJewelTierUp);
+    CHECK(real[1].kind == cr::Kind::kTierUp);
     CHECK(real[1].material_count == 1);
     CHECK(real[1].materials[0].item_id == 15);
-    // 必须填合法公式 wordId（不能为 0）：宝石强化页是 type 1，而 UIMix_ButtonRecipeExe 内部
+    // 必须填合法公式 wordId（不能为 0）：升阶页是 type 1，而 UIMix_ButtonRecipeExe 内部
     // 自带一次 InitMixingState，其 type==1 分支会用本记录 b8-9 求值 CAL_Calculate —— 填 0 会给
     // CAL_Calculate 传空公式并崩溃（真机实证，见设计册 §7.27）。实际费用由放料 hook 强制 0。
     CHECK(real[1].cost_word_id == 188);
-    CHECK(real[1].count_rule == cr::CountRule::kJewelGradeAndLevel);
+    CHECK(real[1].count_rule == cr::CountRule::kGradeAndLevel);
     CHECK(real[1].form == cr::Form::kTargetAndCreate);
     CHECK(real[1].group == 3);
     // b11 组位推导：1 << group；group >= 8 视为非法（不占任何页）。
@@ -347,11 +347,11 @@ static void test_catalog_mapping() {
     const cr::Material m2[] = {{15, 1}, {16, 2}};
     const cr::Material m3[] = {{15, 1}, {16, 1}, {17, 1}};
     const cr::Def synth[3] = {
-        {35291, cr::Kind::kJewelTierUp, m1, 1, 0, cr::CountRule::kFixed,
+        {35291, cr::Kind::kTierUp, m1, 1, 0, cr::CountRule::kFixed,
          cr::Form::kTargetAndCreate, 3},
         {35292, cr::Kind::kNativePassThrough, m2, 2, 0, cr::CountRule::kFixed,
          cr::Form::kConsumeToCreate, 1},
-        {35293, cr::Kind::kJewelTierUp, m3, 3, 0, cr::CountRule::kFixed,
+        {35293, cr::Kind::kTierUp, m3, 3, 0, cr::CountRule::kFixed,
          cr::Form::kMultiInputCreate, 3},
     };
     CHECK(cr::mix_type_at(base_rec, 0) == 69);
@@ -488,6 +488,18 @@ static void test_material_count() {
     CHECK(cr::jewel_grade_from_category(0) == 0);
     CHECK(cr::jewel_grade_from_category(-1) == 0);
     CHECK(cr::kJewelCategoryFirst == 28 && cr::kJewelCategoryLast == 32);
+
+    CHECK(cr::equipment_grade_from_rarity(-1) == 0);
+    CHECK(cr::equipment_grade_from_rarity(0) == 1);
+    CHECK(cr::equipment_grade_from_rarity(4) == 5);
+    CHECK(cr::equipment_grade_from_rarity(5) == 0);
+
+    const cr::AttributeRange range{0, 100};
+    CHECK(cr::affix_upgradable(kQolOk, 0, range));
+    CHECK(cr::affix_upgradable(kQolOk, 4, range));
+    CHECK(!cr::affix_upgradable(kQolErrNotReady, 1, range));
+    CHECK(!cr::affix_upgradable(kQolOk, 5, range));
+    CHECK(!cr::affix_upgradable(kQolOk, 1, {10, 10}));
 
     // 满级 105 → 0 瓶（idea.md §7：满级后无需消耗卓越灵药）；超上限同样 0，不得为负。
     for (int cat = cr::kJewelCategoryFirst; cat <= cr::kJewelCategoryLast; ++cat) {

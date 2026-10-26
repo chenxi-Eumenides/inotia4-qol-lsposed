@@ -152,7 +152,7 @@ int main() {
     using qol::features::custom_recipe::kTextScopeQualityUnavailable;
     using qol::features::custom_recipe::kTextScopeRecipeButton;
     using qol::features::custom_recipe::text_lookup;
-    assert(std::strcmp(text_lookup(kTextScopeRecipeButton, 35291), "宝石升阶") == 0);
+    assert(std::strcmp(text_lookup(kTextScopeRecipeButton, 35291), "升阶") == 0);
     assert(text_lookup(kTextScopePageTab, 35291) == nullptr);
     // 消费者匹配键是 MEMORYTEXT id（35413/35410），不是弹窗索引（97/94）。
     assert(text_lookup(kTextScopeQualityUnavailable, kMemoryTextOnlyJewel) != nullptr);

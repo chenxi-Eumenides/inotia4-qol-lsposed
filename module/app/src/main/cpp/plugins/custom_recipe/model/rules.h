@@ -44,7 +44,7 @@ QolResult compute_tier_up_value(Tier current_tier, AttributeRange range, Classif
                                 int32_t* out_new_value);
 
 // ---------------------------------------------------------------------------
-// 材料需求数量（custom-craft-recipe §4.7 / CountRule::kJewelGradeAndLevel）
+// 材料需求数量（custom-craft-recipe §4.7 / CountRule::kGradeAndLevel）
 // ---------------------------------------------------------------------------
 
 // 宝石类别（item+8 的 bits6-15）范围：28..32，与 ITEMSYSTEM_IsJewel 一致。
@@ -56,6 +56,12 @@ constexpr int kMaxCharacterLevel = 105;
 // 宝石类别 → 档位 1..5：28=低级宝石、29=中级、30=高级、31=顶级、32=混沌。
 // 不在 [28,32] 内返回 0（调用方应据此放弃改写需求数，fail-closed）。
 int jewel_grade_from_category(int category);
+
+// 装备稀有度（ITEMSYSTEM_GetRarity 0..4 = 白/绿/蓝/黄/紫）→ 材料档位 1..5；越界返回 0。
+int equipment_grade_from_rarity(int rarity);
+
+// 词条可升阶：质量查询 status==kQolOk、level 在 [0,4]、区间非退化（max>min）。
+bool affix_upgradable(int32_t status, int32_t level, AttributeRange range);
 
 // 材料需求数量 = ceil(base_count × grade × (kMaxCharacterLevel − level) / kMaxCharacterLevel)。
 // 纯整数运算，无浮点。level 钳到 [0,105]；base_count<1 或 grade<1 → 返回 0 由调用方处理。

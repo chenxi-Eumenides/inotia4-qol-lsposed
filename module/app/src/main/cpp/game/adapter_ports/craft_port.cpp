@@ -375,6 +375,37 @@ QolResult call_set_max_socket_enchant(contracts::QolItemHandle handle) {
     return contracts::ok();
 }
 
+QolResult call_write_native_option_value(contracts::QolItemHandle handle,
+                                         uint32_t native_index, int32_t value) {
+    if (value < INT16_MIN || value > INT16_MAX) return invalid_argument();
+    void* item = nullptr;
+    const QolResult resolved = resolve_craft_game_item(handle, &item);
+    if (!contracts::succeeded(resolved)) return resolved;
+    auto* bytes = static_cast<uint8_t*>(item);
+    if (!game_memory_accessible(bytes + I_OPTION_LIST, sizeof(void*), 'r')) return not_ready();
+    auto* node = *reinterpret_cast<uint8_t* const*>(bytes + I_OPTION_LIST);
+    // 有界遍历：链表损坏时不得在此无限循环。原生词条数量远小于该上限。
+    constexpr uint32_t kMaxOptionNodes = 64;
+    uint32_t visited = 0;
+    uint32_t native_seen = 0;
+    while (node != nullptr && visited < kMaxOptionNodes) {
+        if (!game_memory_accessible(node, O_NEXT + sizeof(void*), 'r')) return not_ready();
+        ++visited;
+        const uint16_t index = *reinterpret_cast<const uint16_t*>(node + O_INDEX);
+        if (((index >> 13) & 0x7u) == 0u) {
+            if (native_seen == native_index) {
+                auto* slot = reinterpret_cast<int16_t*>(node + O_VALUE);
+                if (!game_memory_accessible(slot, sizeof(*slot), 'w')) return not_ready();
+                *slot = static_cast<int16_t>(value);
+                return contracts::ok();
+            }
+            ++native_seen;
+        }
+        node = *reinterpret_cast<uint8_t* const*>(node + O_NEXT);
+    }
+    return contracts::error(kQolErrNotFound, "native option not found", 30);
+}
+
 QolResult call_random_inclusive(int32_t lo, int32_t hi, int32_t* out) {
     if (out == nullptr) return invalid_argument();
     *out = 0;
@@ -467,6 +498,7 @@ const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     &call_write_jewel_word,
     &call_set_max_socket_enchant,
     &call_random_inclusive,
+    &call_write_native_option_value,
 };
 
 QolResult craft_stuff_slot_index_impl(void* transient_control, int32_t* out_index) {

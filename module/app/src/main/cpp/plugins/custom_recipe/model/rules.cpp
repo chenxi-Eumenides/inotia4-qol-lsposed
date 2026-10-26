@@ -171,6 +171,15 @@ int jewel_grade_from_category(int category) {
     return category - kJewelCategoryFirst + 1;
 }
 
+int equipment_grade_from_rarity(int rarity) {
+    if (rarity < 0 || rarity > 4) return 0;
+    return rarity + 1;
+}
+
+bool affix_upgradable(int32_t status, int32_t level, AttributeRange range) {
+    return status == kQolOk && level >= 0 && level < 5 && range.max > range.min;
+}
+
 int material_count_for(int base_count, int grade, int level) {
     if (base_count < 1 || grade < 1) return 0;
     int lv = level;

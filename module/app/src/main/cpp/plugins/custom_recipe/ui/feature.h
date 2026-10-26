@@ -108,7 +108,7 @@ int craft_panel_state();
 
 // ---- 文案与音效：界面层的知识（出什么结果该说什么话）----
 constexpr uint32_t kTextNoBagSpace = 5;             // 「背包空间不足，无法进行操作。」
-constexpr uint32_t kTextOnlyJewel = 97;             // 「只有宝石道具才可以。」
+constexpr uint32_t kTextOnlyJewel = 97;             // 「只有宝石或装备才可以。」
 constexpr uint32_t kTextMaxCrafted = 105;           // 「已经达到合成最大值，无法再次进行合成。」
 constexpr uint32_t kTextInsufficientMaterial = 94;  // 「材料不足，无法进行合成。」
 constexpr uint32_t kTextAlreadyPlaced = 99;         // 「该物品已经放入。」

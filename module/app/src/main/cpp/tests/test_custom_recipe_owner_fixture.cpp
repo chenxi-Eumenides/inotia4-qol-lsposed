@@ -389,6 +389,9 @@ QolResult stub_word_write(QolItemHandle, uint32_t) {
     ++g_word_write_calls;
     return qol::contracts::ok();
 }
+QolResult stub_native_option_write(QolItemHandle, uint32_t, int32_t) {
+    return qol::contracts::ok();
+}
 QolResult stub_random(int32_t lo, int32_t, int32_t* out) {
     ++g_random_calls;
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
@@ -432,6 +435,7 @@ void install_ready_ports() {
     g_recipe_port.write_jewel_word = &stub_word_write;
     g_recipe_port.set_max_socket_enchant = &stub_ok_handle;
     g_recipe_port.random_inclusive = &stub_random;
+    g_recipe_port.write_native_option_value = &stub_native_option_write;
 
     g_ui_port = make_ui_write_port();
     qol::gametest::set_custom_recipe_write_port_for_test(&g_recipe_port);

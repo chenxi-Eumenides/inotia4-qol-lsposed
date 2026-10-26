@@ -112,8 +112,8 @@ static_assert(std::is_standard_layout<qol::contracts::QolCustomRecipeWritePort>:
 static_assert(qol::contracts::kQolPortCraftVersion.major == 1 &&
                   qol::contracts::kQolPortCraftVersion.minor == 1 &&
                   qol::contracts::kQolPortCraftUiWriteVersion.minor == 1 &&
-                  qol::contracts::kQolPortCustomRecipeWriteVersion.minor == 2,
-              "custom recipe write port is v1.2 (typed random tail)");
+                  qol::contracts::kQolPortCustomRecipeWriteVersion.minor == 3,
+              "custom recipe write port is v1.3 (native option write tail)");
 static_assert(offsetof(qol::contracts::CraftFactsApi, read_only) ==
                   sizeof(qol::contracts::QolCraftReadApi),
               "CraftFactsApi layout changed");
