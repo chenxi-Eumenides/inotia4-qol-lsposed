@@ -352,11 +352,16 @@ bool extension_handle_character_equip() {
     return true;
 }
 
-bool core_find_empty_slots(qol::contracts::QolActionRef* out, int32_t* out_count) {
-    if (out == nullptr || out_count == nullptr) return false;
-    const auto* api = ::qol::features::extension_bag::inventory_action_api();
-    if (api == nullptr || api->find_empty_slots == nullptr) return false;
-    return qol::contracts::succeeded(api->find_empty_slots(3, out, out_count));
+bool native_bag_slot_available() {
+    const auto* extras = ::qol::extension_bag::access::host().inventory_extras;
+    if (extras == nullptr || extras->read.is_empty_bag == nullptr) return false;
+    for (int bag = 0; bag < virtual_bag::kOriginalTransactionBagCount; ++bag) {
+        int32_t empty = 0;
+        if (qol::contracts::succeeded(extras->read.is_empty_bag(bag, &empty)) && empty != 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 
@@ -415,31 +420,12 @@ bool extension_handle_backpack_equip() {
                      category, source_bag, source_slot);
         return false;
     }
-    // core.item owns the space-order empty-slot scan. Native empty slots take
-    // priority; only when they are full may EB use a registered extension slot.
-    qol::contracts::QolActionRef empty_slots[3]{};
-    int32_t empty_count = 0;
-    const bool core_empty = core_find_empty_slots(empty_slots, &empty_count);
-    if (!module_source && core_empty) {
-        for (int32_t index = 0; index < empty_count; ++index) {
-            // Original-space empty slots are handled by the original bag-equip
-            // path. Variant space 1 (C18) has no backpack-item logic and is
-            // deliberately not a target here.
-            if (empty_slots[index].space_id == qol::contracts::kQolBagSpaceOriginal) {
-                return false;
-            }
-        }
-    }
-    int target = -1;
-    if (core_empty) {
-        for (int32_t index = 0; index < empty_count; ++index) {
-            if (empty_slots[index].space_id >= qol::contracts::kQolBagSpaceFirstRegistered) {
-                target = empty_slots[index].bag;
-                break;
-            }
-        }
-    }
-    if (target < 0) target = first_empty_extension_bag_locked();
+    // Native bag slots are the original equip targets. Inventory empty slots
+    // are irrelevant here; a backpack item cannot be placed in an item slot.
+    // When all native bag slots are occupied, fall through to the extension
+    // bag slots. C18 variant space 1 has no backpack-item path.
+    if (!module_source && native_bag_slot_available()) return false;
+    const int target = first_empty_extension_bag_locked();
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "backpack equip probe target=%d category=%d src=%d/%d active=%d",
                  target, category, source_bag, source_slot,
