@@ -981,10 +981,10 @@ std::string compute_checksum(uint16_t bundle_version, const std::vector<uint8_t>
                              const std::vector<uint8_t>& warehouse_blob,
                              const std::vector<uint8_t>& c18_native_bag_blob) {
     std::vector<uint8_t> content = module;
-    // v1/v2 的旧公式不覆盖 warehouse 段；v3 增加 flags 后覆盖 warehouse。
-    if (bundle_version >= kBundleVersionV3) {
-        content.insert(content.end(), warehouse_blob.begin(), warehouse_blob.end());
-    }
+    // v2 引入仓库段时即以 sha256(plain ‖ module ‖ warehouseBlob) 计算，v3 仅改段内编码、不改摘要口径；
+    // v1 没有仓库段，warehouse_blob 恒为空，追加空段与旧公式逐字节等价。
+    // （按版本跳过 v2 会让 2026-09-12..10-20 之间导出的 v2 备份全部校验失败。）
+    content.insert(content.end(), warehouse_blob.begin(), warehouse_blob.end());
     // v1-v3 checksum 逐字节兼容；仅 v4 新增覆盖 normalized C18 image 段。
     if (bundle_version >= kBundleVersion) {
         content.insert(content.end(), c18_native_bag_blob.begin(), c18_native_bag_blob.end());

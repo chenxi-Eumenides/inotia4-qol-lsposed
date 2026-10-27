@@ -1529,7 +1529,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 > 存档管理器：把「原版 `save{slot}.dat` 解密明文 + 模块 sidecar」打包为自包含 `.qol.bak` 备份（旧 `.qol_save` 继续识别/导入），可还原到任意槽位（原版 + 模块一起）。备份目录 `getExternalFilesDir(null)/qol/backups/`。
 >
-> **备份标识 = `checksum`**：覆盖全部可还原内容段——bundle v3+ 为 `sha256(origPlain ‖ module ‖ warehouseBlob)`，v1/v2 旧备份为 `sha256(origPlain ‖ module)`（旧公式，warehouse 段不参与）；取前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol.bak` 的末段。同一内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名，并在写盘/删除前按 bundle 内实际 payload 重算校验。
+> **备份标识 = `checksum`**：覆盖全部可还原内容段——bundle v2+ 为 `sha256(origPlain ‖ module ‖ warehouseBlob)`（v2 引入仓库段时即如此，v3 只改段内编码），v1 旧备份为 `sha256(origPlain ‖ module)`（无仓库段，空 blob 等价）；取前 12 位小写 hex，即备份文件名 `<yyyyMMdd-HHmmss>_s<slot>_<checksum>.qol.bak` 的末段。同一内容的备份 `checksum` 恒相同；导入/删除均按 `checksum` 定位备份，不再使用文件名，并在写盘/删除前按 bundle 内实际 payload 重算校验。
 >
 > 导入仅在主菜单允许（`save.facts.current_slot == -1`）；导出任意时刻可调。模块保证原子写、CRC 校验与内容完整。
 

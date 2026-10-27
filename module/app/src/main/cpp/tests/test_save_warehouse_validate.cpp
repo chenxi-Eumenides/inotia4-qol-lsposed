@@ -357,7 +357,7 @@ void test_validate_warehouse() {
     CHECK(error == "warehouse name invalid");
 }
 
-// SB-12：v1-v3 checksum 保持旧公式；v4 增加 C18 image 覆盖。
+// SB-12：v2 起即覆盖 warehouse blob；v1 无仓库段（空 blob 等价）；v4 增加 C18 image 覆盖。
 void test_compute_checksum() {
     namespace sb = save_backup;
     WarehouseFile a;
@@ -381,10 +381,11 @@ void test_compute_checksum() {
     const std::vector<uint8_t> c18_b{1, 2, 4};
     CHECK(sb::compute_checksum(sb::kBundleVersion, plain, module, blob_a, c18_a) !=
           sb::compute_checksum(sb::kBundleVersion, plain, module, blob_a, c18_b));
-    // v2：旧公式不覆盖 blob，两个 blob 得到同一 checksum。
-    CHECK(sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_a) ==
+    // v2 引入仓库段时已覆盖 blob，与 v3 同口径；v1 无仓库段，空 blob 即旧公式。
+    CHECK(sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_a) !=
           sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_b));
-    CHECK(sb::compute_checksum(sb::kBundleVersionV1, plain, module, blob_a) ==
+    CHECK(sb::compute_checksum(sb::kBundleVersionV2, plain, module, blob_a) == v3_a);
+    CHECK(sb::compute_checksum(sb::kBundleVersionV1, plain, module, {}) ==
           sb::sha256_hex(plain, module).substr(0, 12));
 
     // parse_bundle 保留版本与原始 blob。

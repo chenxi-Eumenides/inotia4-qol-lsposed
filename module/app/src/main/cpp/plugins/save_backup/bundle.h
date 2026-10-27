@@ -275,8 +275,9 @@ std::string build_meta_json(int source_slot, long long export_time_ms, int map_i
                             const std::string& warehouse_sha256 = std::string(),
                             int module_state = -1);
 
-// 备份内容校验：v1/v2 为 sha256(plain ‖ module)[0:12]（旧公式，warehouse 不参与）；
-// v3 为 sha256(plain ‖ module ‖ warehouse_blob)[0:12]；v4 再追加 C18 normalized image blob。
+// 备份内容校验：v2 起为 sha256(plain ‖ module ‖ warehouse_blob)[0:12]（v2 引入仓库段时即如此，
+// v3 只改段内编码）；v1 无仓库段，warehouse_blob 为空，等价于 sha256(plain ‖ module)[0:12]；
+// v4 再追加 C18 normalized image blob。
 std::string compute_checksum(uint16_t bundle_version, const std::vector<uint8_t>& plain,
                              const std::vector<uint8_t>& module,
                              const std::vector<uint8_t>& warehouse_blob,

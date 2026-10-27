@@ -180,7 +180,7 @@ Kotlin postAndAwait
 - v4：在 v3 warehouse 段后增加 `c18Len | normalizedC18Image`，再接 `metaLen | metaJson | crc32`；无 C18 image 时 `c18Len=0`。
 - C18 normalized image 保存 source version label、source slot、96/192 source record_count、header `+0x10..+0x12` 保留字节和 opaque records；其他原生 header 字段在导入时按目标重建，不保存另一文件族副本。
 - v2：warehouse 段无 flags；v1：无 warehouse 段；v1/v2/v3 的分段字节布局与 checksum 公式保持兼容。
-- `checksum`：v1/v2 `sha256(origPlain ‖ module)[0:12]`；v3 `sha256(origPlain ‖ module ‖ warehouseBlob)[0:12]`；v4 再追加 `normalizedC18Image` 输入。
+- `checksum`：v2 起 `sha256(origPlain ‖ module ‖ warehouseBlob)[0:12]`（v2 引入仓库段时即如此，v3 只改段内编码）；v1 无仓库段（空 blob，等价旧公式）；v4 再追加 `normalizedC18Image` 输入。
 - `metaJson` 字段：`source_slot`、`export_time`、`map_id`、`hero_level`、`hero_index`、`save_version`、`save_time`、`original_sha256`、`module_sha256`、`checksum`、`class_idx`、`class_name`、`warehouse_count`、`warehouse_sha256`、`module_state`。
 - 原版明文块 0/1/2：块表、Information、Player、CharacterInfo；主角等级/职业取 CharacterInfo 第 0 条记录。
 
