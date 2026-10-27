@@ -121,28 +121,15 @@ QolResult native_item_ref_at(const NativeBagLayout& layout, int32_t space_id, in
 }
 
 QolResult native_bag_capacity(int32_t space_id, int32_t bag, int32_t* out_capacity) {
-    uint32_t capacity = 16;
-    void* bag_object = nullptr;
-    if (g_base != 0) {
-        if (space_id == contracts::kQolBagSpaceVariant) {
-            auto* bag_table = reinterpret_cast<void**>(g_base + G_C18_BAG_TABLE_VMA);
-            auto* entry = bag_table + kC18FirstNativeBag + bag;
-            if (game_memory_accessible(entry, sizeof(*entry), 'r')) bag_object = *entry;
-        } else {
-            auto*** table_slot = reinterpret_cast<void***>(g_base + G_BAG_TABLE_VMA);
-            if (game_memory_accessible(table_slot, sizeof(*table_slot), 'r') &&
-                *table_slot != nullptr &&
-                game_memory_accessible(*table_slot + bag, sizeof(**table_slot), 'r')) {
-                bag_object = (*table_slot)[bag];
-            }
-        }
+    if (out_capacity == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    if (bag_object != nullptr) {
-        auto* word = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(bag_object) +
-                                                  BAG_OBJECT_CAPACITY);
-        if (game_memory_accessible(word, sizeof(*word), 'r')) capacity = *word;
-    }
-    *out_capacity = static_cast<int32_t>(capacity);
+    // 容量以原版 INVEN_GetBagSize 为准：未装备的袋没有袋对象，返回 0，
+    // 不能按固定 16 格上报，否则空槽扫描会把不可写袋当成可用目标。
+    if (fn_get_bag_size == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    const int32_t native_bag = bag +
+        (space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0);
+    *out_capacity = fn_get_bag_size(native_bag);
     return contracts::ok();
 }
 
@@ -410,7 +397,7 @@ QolResult inventory_bag_info(const contracts::QolBagRef* ref,
 
     const NativeBagLayout layout = native_bag_layout();
     if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
-    int32_t capacity = 16;
+    int32_t capacity = 0;
     result = native_bag_capacity(ref->space_id, ref->bag, &capacity);
     if (!contracts::succeeded(result)) return result;
     int32_t occupied_slots = 0;
