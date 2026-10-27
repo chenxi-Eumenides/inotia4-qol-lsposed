@@ -29,6 +29,7 @@
 #include "contracts/game_ports/character_write_ops_port.h"
 #include "contracts/game_ports/character_state_port.h"
 #include "contracts/game_ports/move_merge_port.h"
+#include "contracts/game_ports/movement_input_port.h"
 #include "game/ops/game_ops_common.h"
 #include "game/state/game_state.h"
 
@@ -40,6 +41,8 @@ namespace qol::game {
 namespace {
 
 const contracts::QolQuestPort kQuestPort{{1, 0}, {}, {}};
+const contracts::QolMovementInputPort kMovementInputPort{
+    contracts::kQolPortMovementInputVersion, {}};
 const contracts::QolWorldPort kWorldPort{{1, 0}, {}};
 contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion,
                                  sizeof(contracts::QolItemPort), {}};
@@ -124,6 +127,7 @@ const contracts::QolMoveMergePort kMoveMergePort{contracts::kQolMoveMergePortVer
 }  // namespace
 
 const contracts::QolQuestPort& quest_port() { return kQuestPort; }
+const contracts::QolMovementInputPort& movement_input_port() { return kMovementInputPort; }
 const contracts::QolWorldPort& world_port() { return kWorldPort; }
 const contracts::QolItemPort& item_port() { return kItemPort; }
 void test_set_item_port_version(::QolVersion version) { kItemPort.abi_version = version; }

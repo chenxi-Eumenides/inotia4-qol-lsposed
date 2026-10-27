@@ -23,6 +23,10 @@ inline constexpr const char* kResourceIdDirectionTouch = "hook:UIPlay_ButtonDire
 inline constexpr const char* kResourceIdPressKeyPlay = "hook:GAMESTATE_PressKeyPlay";
 inline constexpr const char* kResourceIdCharMove = "patch:GAMESTATE_PressKeyPlay+0x21c";
 inline constexpr const char* kResourceIdPortingDraw = "hook:UIPlayPorting_Draw";
+inline constexpr const char* kResourceIdWaitCoord = "hook:CHAR_MoveOnWaitCoord";
+inline constexpr const char* kResourceIdMapBlocking = "hook:MAP_IsBlockingByPixel";
+inline constexpr const char* kResourceIdReleaseAlign = "patch:GAMESTATE_PressKey+0x1c0";
+inline constexpr const char* kResourceIdSetActionAlign = "patch:CHAR_SetAction+0x26c";
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup);
 
@@ -32,5 +36,7 @@ uint64_t direction_touch_wrapper(void* ctrl, uint64_t event, int64_t* point,
 void press_key_play_wrapper(int32_t key);
 int32_t eight_way_char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_t flag);
 void porting_draw_wrapper();
+void move_on_wait_coord_wrapper(void* ch);
+int32_t map_blocking_wrapper(int32_t x, int32_t y);
 
 }  // namespace qol::features::eight_way_move

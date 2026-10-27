@@ -121,7 +121,7 @@ descriptor 只注册一个 `page` entry feature：
 | `custom_map` | `custom_map.load` | 自定义地图 | 1 | BasicOptimization | toggle | 0 | — |
 | `custom_map` | `custom_map.open_panel` | 查看自定义地图 | 1 | Tools | entry | 0 | — |
 | `custom_recipe` | `custom_recipe.recipes` | 自定义合成 | 0 | Gameplay | toggle | -1 | — |
-| `eight_way_move` | `eight_way_move.direction` | 八向移动 | 0 | Gameplay | toggle | 0 | — |
+| `eight_way_move` | `eight_way_move.direction` | 全向移动 | 0 | Gameplay | toggle | 0 | — |
 | `extension_bag` | `extension_bag.extended_bag` | 额外背包 | 1 | Gameplay | toggle | -2 | — |
 | `module_health` | `module_health.enabled` | Module health | 1 | Hidden | toggle | 0 | — |
 | `popup_blocker` | `popup_blocker.enabled` | 禁用弹窗 | 1 | BasicOptimization | toggle | 0 | — |

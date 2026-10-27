@@ -21,12 +21,14 @@ struct HookEntrySymbol {
 constexpr HookEntrySymbol kHookEntrySymbols[] = {
     {"F_CHAR_ADD_DAMAGE_VMA", F_CHAR_ADD_DAMAGE_VMA},
     {"F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA", F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA},
-    // 八向移动入口（owner=eight_way_move）：方向触摸与游戏内按键接收器。
+    // 全向移动入口（owner=eight_way_move）：方向触摸与游戏内按键接收器。
     // 未登记时 preflight 报 symbol unresolved，插件状态会变成 unsupported（设置页显示
     // “当前版本不支持”），不是变体限制。
     {"F_UIPLAY_BUTTON_DIRECTION_VMA", F_UIPLAY_BUTTON_DIRECTION_VMA},
     {"F_GAMESTATE_PRESSKEYPLAY_VMA", F_GAMESTATE_PRESSKEYPLAY_VMA},
     {"F_UI_PLAY_PORTING_DRAW_VMA", F_UI_PLAY_PORTING_DRAW_VMA},
+    {"F_CHAR_MOVE_ON_WAIT_COORD_VMA", F_CHAR_MOVE_ON_WAIT_COORD_VMA},
+    {"F_MAP_IS_BLOCKING_BYPIXEL_VMA", F_MAP_IS_BLOCKING_BYPIXEL_VMA},
     // 教程文案抑制入口（owner=popup_blocker）：hook handler 短路原绘制函数并返回 0。
     {"F_TUTORIAL_DESCRIPTION_VMA", F_TUTORIAL_DESCRIPTION_VMA},
     // 属性显示范围：详情渲染三点（MATH_GetRandom 截获 / 选项行改写 / 构造入口缓存）。

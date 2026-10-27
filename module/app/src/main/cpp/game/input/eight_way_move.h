@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-// 八向移动游戏层：触屏摇杆状态、自定义方向键码翻译、CHAR_Move 双轴扩展。
+// 全向移动游戏层：触屏摇杆状态、自定义方向键码翻译、CHAR_Move 双轴扩展。
 // 只在游戏主线程调用；插件经 QOL_PORT_MOVEMENT_INPUT 转发。
 
 namespace qol::game::input {

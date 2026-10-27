@@ -27,7 +27,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "方向触摸唯一入口；捕获按下/拖动/抬起并写入自定义八向键码",
+        "方向触摸唯一入口；捕获按下/拖动/抬起并写入自定义全向键码",
         nullptr,
         120,
         reinterpret_cast<void*>(&direction_touch_wrapper),
@@ -41,7 +41,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "游戏内按键接收器；把自定义八向键码翻译成原版主方向键码",
+        "游戏内按键接收器；把自定义全向键码翻译成原版主方向键码",
         nullptr,
         120,
         reinterpret_cast<void*>(&press_key_play_wrapper),
@@ -55,7 +55,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "玩家方向键分支的 bl CHAR_Move；斜向时追加副轴移动",
+        "玩家方向键分支的 bl CHAR_Move；全向时按主/副轴移动",
         nullptr,
         120,
         reinterpret_cast<void*>(&eight_way_char_move_wrapper),
@@ -69,16 +69,72 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "UIPlayPorting_Draw 原函数返回后补画斜向第二根方向箭头",
+        "UIPlayPorting_Draw 原函数返回后补画第二根方向箭头",
         nullptr,
         120,
         reinterpret_cast<void*>(&porting_draw_wrapper),
+    },
+    {
+        kResourceIdWaitCoord,
+        "F_CHAR_MOVE_ON_WAIT_COORD_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,
+        kPluginId,
+        "主控角色无路径时取消 8px 补步；其他角色/路径保留原版",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&move_on_wait_coord_wrapper),
+    },
+    {
+        kResourceIdMapBlocking,
+        "F_MAP_IS_BLOCKING_BYPIXEL_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,
+        kPluginId,
+        "对齐坐标透传；非对齐坐标按完整 16px 碰撞盒查询瓦片",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&map_blocking_wrapper),
+    },
+    {
+        kResourceIdReleaseAlign,
+        "P_GAMESTATE_PRESSKEY_RELEASE_ALIGN",
+        contracts::ResourceMechanism::kCallPatch,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,
+        kPluginId,
+        "松手未对齐分支改为正常停止动作路径",
+        nullptr,
+        120,
+        nullptr,
+    },
+    {
+        kResourceIdSetActionAlign,
+        "P_CHAR_SET_ACTION_ALIGN",
+        contracts::ResourceMechanism::kCallPatch,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kRequired,
+        contracts::ResourceFailure::kFailClosed,
+        true,
+        kPluginId,
+        "CHAR_SetAction 未对齐分支改为继续动作切换",
+        nullptr,
+        120,
+        nullptr,
     },
 };
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"eight_way_move.direction", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "八向移动", "允许斜向移动",
+     contracts::FeatureType::kToggle, "全向移动", "主控角色 1px 全向移动，其他角色保持原版",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 
@@ -97,7 +153,8 @@ int plugin_install(contracts::PluginContext& ctx) {
         port->abi_version.minor < contracts::kQolPortMovementInputVersion.minor ||
         port->api.on_direction_touch == nullptr || port->api.translate_press_key == nullptr ||
         port->api.char_move == nullptr || port->api.set_enabled == nullptr ||
-        port->api.reset == nullptr) {
+        port->api.reset == nullptr || port->api.handle_wait_coord == nullptr ||
+        port->api.map_blocking_query == nullptr) {
         return 1;
     }
     set_host_sdk(ctx.sdk);
@@ -160,8 +217,6 @@ const contracts::PluginDescriptor kDescriptor = {
 
 }  // namespace
 
-const contracts::PluginDescriptor& plugin_descriptor() {
-    return kDescriptor;
-}
+const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
 
 }  // namespace qol::features::eight_way_move

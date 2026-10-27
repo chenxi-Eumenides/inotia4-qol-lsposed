@@ -73,7 +73,7 @@ constexpr QolVersion kQolPortSaveTransactionVersion{1, 0};
 constexpr QolVersion kQolPortWorldActionVersion{1, 0};
 constexpr QolVersion kQolPortCustomMapResourceVersion{1, 0};
 constexpr QolVersion kQolPortRecipeTableVersion{1, 0};
-constexpr QolVersion kQolPortMovementInputVersion{1, 0};
+constexpr QolVersion kQolPortMovementInputVersion{1, 1};
 
 struct QolPortRequirement {
     QolPortId id;

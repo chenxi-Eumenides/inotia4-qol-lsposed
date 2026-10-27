@@ -15,11 +15,14 @@ namespace {
 
 std::atomic<bool> g_enabled{false};
 State g_state;
+void* g_last_lead = nullptr;
 
 // 0x15 可见摇杆的半径（UIPlay_Create：252x252）；中心 = 控件绝对左上角 + 126。
 constexpr int64_t kPadHalfSize = 126;
 constexpr int64_t kFallbackPadCenterX = 10 + kPadHalfSize;
 constexpr int64_t kFallbackPadCenterBottom = kPadHalfSize;
+constexpr int32_t kTileSize = 16;
+constexpr int32_t kTileHalf = 8;
 
 int direction_key_index(int32_t key) {
     int32_t table[4]{};
@@ -40,16 +43,16 @@ int32_t current_facing() {
     return value >= 0 && value <= 3 ? value : -1;
 }
 
-void log_first_touch(const EightWayClass& c, int32_t dx, int32_t dy) {
+void log_first_touch(const State& state, int32_t dx, int32_t dy) {
     static std::atomic<bool> logged{false};
     if (logged.exchange(true, std::memory_order_acq_rel)) return;
     int32_t table[4]{};
     (void)access::read_key_table(table);
     QOL_LOG_SEAM_INFO(
         kQolLogDomainPlatform,
-        "eight_way touch sector=%d primary=%d secondary=%d dx=%d dy=%d keys=%d,%d,%d,%d",
-        c.sector, c.primary_dir, c.secondary_dir, dx, dy, table[0], table[1], table[2],
-        table[3]);
+        "omni touch lattice=%d primary=%d secondary=%d steps=%d/%d dx=%d dy=%d keys=%d,%d,%d,%d",
+        state.lattice_index, state.primary_dir, state.secondary_dir, state.primary_step,
+        state.secondary_step, dx, dy, table[0], table[1], table[2], table[3]);
 }
 
 void clear_state() {
@@ -64,6 +67,28 @@ void suppress_motion() {
     access::write_key_code(0);
     access::write_press_active(false);
     if (owns) access::clear_wait_coord(lead_member());
+}
+
+// 把角色直接吸附到当前 16px 瓦片中心；不调用 CHAR_Move，因此不触发补步/格子事件。
+// 瓦片中心一定 8px 对齐，且 16px 碰撞盒正好落在该瓦片内。
+bool snap_to_tile_center(void* ch) {
+    if (ch == nullptr) return false;
+    int16_t x = 0;
+    int16_t y = 0;
+    if (!access::read_position(ch, &x, &y)) return false;
+    if ((x & 7) == 0 && (y & 7) == 0) {
+        access::clear_wait_coord(ch);
+        return true;
+    }
+
+    const int32_t cx = (static_cast<int32_t>(x) / kTileSize) * kTileSize + kTileHalf;
+    const int32_t cy = (static_cast<int32_t>(y) / kTileSize) * kTileSize + kTileHalf;
+    if (access::tile_blocking(cx / kTileSize, cy / kTileSize) != 0) return false;
+    if (!access::write_position(ch, static_cast<int16_t>(cx), static_cast<int16_t>(cy))) {
+        return false;
+    }
+    access::clear_wait_coord(ch);
+    return true;
 }
 
 }  // namespace
@@ -81,12 +106,9 @@ void reset_state() {
     clear_state();
     if (!owns) return;
     // 只清本功能写入的输入：自定义码可能已被翻译成普通主方向码，必须连普通码和
-    // 按住位一起清；否则回到 Play 或插件关闭后会继续移动。物理键/其他按钮的输入
-    // 在 translate_press_key 中已把 owns_input 置 false，不会被这里清掉。
+    // 按住位一起清；否则回到 Play 或插件关闭后会继续移动。
     access::write_key_code(0);
     access::write_press_active(false);
-    // 斜向步长可能让原版置过转向等待位；松手/关闭时一并清掉，
-    // 否则 CHAR_Process 会在松手后继续 CHAR_MoveOnWaitCoord 补步。
     access::clear_wait_coord(lead_member());
 }
 
@@ -96,8 +118,26 @@ void reset() {
 
 void set_enabled(uint8_t enabled_value) {
     const bool on = enabled_value != 0;
-    g_enabled.store(on, std::memory_order_release);
-    if (!on) reset_state();
+    const bool was_on = g_enabled.exchange(on, std::memory_order_acq_rel);
+    if (on) {
+        if (!was_on) {
+            g_last_lead = lead_member();
+            reset_state();
+        }
+        return;
+    }
+
+    // 关闭前把主控恢复到 8px，避免把非对齐坐标留给原版 8px 逻辑。
+    void* lead = lead_member();
+    if (lead != nullptr && world_game_state_gate() == 0 && snap_to_tile_center(lead)) {
+        int16_t x = 0;
+        int16_t y = 0;
+        if (access::read_position(lead, &x, &y)) {
+            (void)access::set_camera_focus(x, y);
+        }
+    }
+    reset_state();
+    g_last_lead = nullptr;
 }
 
 void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t param3) {
@@ -143,24 +183,30 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
     const int32_t dx = static_cast<int32_t>(touch_x - center_x);
     const int32_t dy = static_cast<int32_t>(center_y - touch_y);
 
-    EightWayClass classified = classify_vector(dx, dy);
-    const int32_t facing = current_facing();
-    apply_facing_preference(classified, facing);
-    if (classified.diagonal) {
-        static std::atomic<bool> logged_diagonal{false};
-        if (!logged_diagonal.exchange(true, std::memory_order_acq_rel)) {
-            QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
-                              "eight_way facing=%d primary=%d secondary=%d", facing,
-                              classified.primary_dir, classified.secondary_dir);
-        }
-    }
-    int32_t table[4]{};
-    if (!classified.valid || !access::read_key_table(table)) {
+    const int32_t previous = g_state.active ? g_state.lattice_index : -1;
+    const int32_t index = select_lattice_step(dx, dy, previous);
+    if (index < 0) {
         suppress_motion();
         return;
     }
 
-    const int32_t primary_key = table[classified.primary_key_index];
+    int32_t primary_dir = -1;
+    int32_t secondary_dir = -1;
+    int32_t primary_step = 0;
+    int32_t secondary_step = 0;
+    int32_t primary_key_index = -1;
+    if (!lattice_step_components(index, current_facing(), &primary_dir, &secondary_dir,
+                                 &primary_step, &secondary_step, &primary_key_index)) {
+        suppress_motion();
+        return;
+    }
+
+    int32_t table[4]{};
+    if (!access::read_key_table(table)) {
+        suppress_motion();
+        return;
+    }
+    const int32_t primary_key = table[primary_key_index];
     if (primary_key == 0) {
         suppress_motion();
         return;
@@ -168,14 +214,16 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
 
     g_state.active = true;
     g_state.trusted = false;
-    g_state.sector = classified.sector;
-    g_state.primary_dir = classified.primary_dir;
-    g_state.secondary_dir = classified.secondary_dir;
+    g_state.lattice_index = index;
+    g_state.primary_dir = primary_dir;
+    g_state.secondary_dir = secondary_dir;
+    g_state.primary_step = primary_step;
+    g_state.secondary_step = secondary_step;
     g_state.primary_key = primary_key;
     g_state.owns_input = true;
 
-    access::write_key_code(custom_dir_key(classified.sector));
-    log_first_touch(classified, dx, dy);
+    access::write_key_code(custom_dir_key(0));
+    log_first_touch(g_state, dx, dy);
 }
 
 int32_t translate_press_key(int32_t key) {
@@ -191,8 +239,7 @@ int32_t translate_press_key(int32_t key) {
         access::write_key_code(g_state.primary_key);
         g_state.trusted = true;
         g_state.owns_input = true;
-        // 预置朝向让原版转向闸门直接通过；即使角色当前不在 8px 对齐点，
-        // 也不会进入 CHAR_MoveOnWaitCoord 补步。
+        // 预置朝向让原版转向闸门直接通过；非 8px 坐标由 CHAR_MoveOnWaitCoord hook 处理。
         access::prepare_touch_move(lead_member(), g_state.primary_dir);
         return g_state.primary_key;
     }
@@ -206,16 +253,50 @@ int32_t translate_press_key(int32_t key) {
         g_state.trusted = false;
         g_state.owns_input = false;
     } else {
-        // 自定义码在上一帧已被翻译成普通主方向码；后续按住帧同样需要绕过
-        // 8px 转向闸门，否则每次方向切换仍会退化到补步速度。
+        // 自定义码在上一帧已被翻译成普通主方向码；后续按住帧同样需要预置朝向。
         access::prepare_touch_move(lead_member(), g_state.primary_dir);
     }
     return key;
 }
 
+void watch_lead_change() {
+    if (!enabled()) return;
+    void* lead = lead_member();
+    if (g_last_lead == nullptr) {
+        g_last_lead = lead;
+        return;
+    }
+    if (lead == g_last_lead) return;
+
+    void* previous = g_last_lead;
+    g_last_lead = lead;
+    if (previous != nullptr) {
+        const bool snapped = snap_to_tile_center(previous);
+        static std::atomic<bool> logged{false};
+        if (!snapped && !logged.exchange(true, std::memory_order_acq_rel)) {
+            QOL_LOG_SEAM_WARN(kQolLogDomainPlatform,
+                              "omni lead switch snap skipped (blocked or invalid)");
+        }
+    }
+}
+
+uint8_t handle_wait_coord(void* ch) {
+    if (!enabled() || ch == nullptr) return 0;
+    if (world_game_state_gate() != 0) return 0;
+    if (ch != lead_member()) return 0;
+    if (access::has_path(ch)) return 0;
+    access::clear_wait_coord(ch);
+    return 1;
+}
+
 void poll() {
     if (!enabled()) return;
-    if (world_game_state_gate() != 0) reset_state();
+    if (world_game_state_gate() != 0) {
+        g_last_lead = lead_member();
+        reset_state();
+        return;
+    }
+    watch_lead_change();
 }
 
 }  // namespace qol::game::input

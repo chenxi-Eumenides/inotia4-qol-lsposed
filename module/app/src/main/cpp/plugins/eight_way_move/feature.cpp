@@ -18,12 +18,18 @@ std::atomic<bool> g_gate{false};
 std::atomic<void*> g_backup_direction{nullptr};
 std::atomic<void*> g_backup_press_key{nullptr};
 std::atomic<void*> g_backup_porting_draw{nullptr};
+std::atomic<void*> g_backup_wait_coord{nullptr};
+std::atomic<void*> g_backup_map_blocking{nullptr};
 std::atomic<bool> g_direction_seen{false};
 std::atomic<bool> g_move_seen{false};
+std::atomic<bool> g_wait_coord_seen{false};
+std::atomic<bool> g_map_blocking_seen{false};
 
 using DirectionFn = uint64_t (*)(void*, uint64_t, int64_t*, uint64_t);
 using PressKeyFn = void (*)(int32_t);
 using PortingDrawFn = void (*)();
+using WaitCoordFn = void (*)(void*);
+using MapBlockingFn = int32_t (*)(int32_t, int32_t);
 
 void log_info(const char* format, ...) {
     const auto* sdk = g_sdk;
@@ -73,7 +79,7 @@ void ensure_poll_task() {
     if (sdk == nullptr || sdk->scheduler.add == nullptr) return;
     uint64_t id = 0;
     const QolResult result = sdk->scheduler.add(
-        contracts::kQolRuntimeFramePointLogicPre, &state_poll_tick, nullptr, 30, 0, &id);
+        contracts::kQolRuntimeFramePointLogicPre, &state_poll_tick, nullptr, 1, 0, &id);
     if (contracts::succeeded(result) && id != 0) {
         g_poll_task.store(id, std::memory_order_release);
     }
@@ -132,8 +138,37 @@ int32_t eight_way_char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_
     if (!g_move_seen.exchange(true, std::memory_order_acq_rel)) {
         log_info("char_move hook active");
     }
-    // 端口内部按 enabled 门禁决定透传原 CHAR_Move 或双轴移动。
+    // 端口内部按 enabled 门禁决定透传原 CHAR_Move 或全向双轴移动。
     return port->api.char_move(ch, dir, delta, flag);
+}
+
+void move_on_wait_coord_wrapper(void* ch) {
+    const auto backup =
+        reinterpret_cast<WaitCoordFn>(g_backup_wait_coord.load(std::memory_order_acquire));
+    if (backup == nullptr) return;
+    const auto* port = input_port();
+    if (gate_enabled() && port != nullptr && port->api.handle_wait_coord != nullptr &&
+        port->api.handle_wait_coord(ch) != 0) {
+        if (!g_wait_coord_seen.exchange(true, std::memory_order_acq_rel)) {
+            log_info("wait coord hook active");
+        }
+        return;
+    }
+    backup(ch);
+}
+
+int32_t map_blocking_wrapper(int32_t x, int32_t y) {
+    const auto backup =
+        reinterpret_cast<MapBlockingFn>(g_backup_map_blocking.load(std::memory_order_acquire));
+    if (backup == nullptr) return 1;
+    const auto* port = input_port();
+    if (gate_enabled() && port != nullptr && port->api.map_blocking_query != nullptr) {
+        if (!g_map_blocking_seen.exchange(true, std::memory_order_acq_rel)) {
+            log_info("map blocking hook active");
+        }
+        return port->api.map_blocking_query(x, y, backup);
+    }
+    return backup(x, y);
 }
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
@@ -145,6 +180,10 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
         g_backup_press_key.store(backup, std::memory_order_release);
     } else if (std::strcmp(resource_id, kResourceIdPortingDraw) == 0) {
         g_backup_porting_draw.store(backup, std::memory_order_release);
+    } else if (std::strcmp(resource_id, kResourceIdWaitCoord) == 0) {
+        g_backup_wait_coord.store(backup, std::memory_order_release);
+    } else if (std::strcmp(resource_id, kResourceIdMapBlocking) == 0) {
+        g_backup_map_blocking.store(backup, std::memory_order_release);
     }
     return 0;
 }

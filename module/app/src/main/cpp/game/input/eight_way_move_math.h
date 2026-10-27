@@ -1,35 +1,41 @@
 #pragma once
 
-// 八向/全向触屏方向数学（纯逻辑，可独立单测）。
+// 主控角色 1px 全向移动数学（纯逻辑，可独立单测）。
 //
 // 坐标约定：dx = 触点相对摇杆中心的水平偏移，dy = 相对中心的上方向偏移（上为正）。
 // 方向编号与原版 CHAR_Move 一致：0=下、1=左、2=上、3=右。
-// 扇区编号：0=N、1=NE、2=E、3=SE、4=S、5=SW、6=W、7=NW。
+// 表项是 8px 半径中点圆落在 1px 网格上的 44 个格点，单帧位移 7.62~8.25px。
 
+#include <cmath>
 #include <cstdint>
 
 namespace qol::game::input {
 
 constexpr uint32_t kCustomDirKeyBase = 0x51000000u;
 constexpr int32_t kDirectionDeadzonePixels = 8;
+constexpr double kLatticeHysteresisDegrees = 4.0;
+constexpr double kPi = 3.14159265358979323846;
 
-// 斜向两轴都使用完整 delta（当前 8px）：保持原版 8px 对齐，避免方向切换或
-// 松手时触发 CHAR_MoveOnWaitCoord 补步。斜向总速度为单轴的 sqrt(2) 倍。
-inline int32_t diagonal_step(int32_t delta) {
-    return delta > 0 ? delta : 1;
-}
-
-// tan(67.5°) * 1000，用于 22.5°/67.5° 的八向边界。
-constexpr int64_t kDirectionRatioThreshold = 2414;
-
-struct EightWayClass {
-    bool valid = false;
-    int32_t sector = -1;
-    int32_t primary_dir = -1;          // 0..3
-    int32_t secondary_dir = -1;        // 0..3，-1=无
-    int32_t primary_key_index = -1;    // KEY 表下标：左0/右1/上2/下3
-    bool diagonal = false;
+struct LatticeStep {
+    int32_t dx = 0;  // 右为正
+    int32_t dy = 0;  // 上为正
 };
+
+// 标准中点圆 r=8 的四象限格点，按角度排序。距离范围 7.62~8.25px，
+// 最大角度间隔约 10.4°；45° 没有整数格点，最近为 39.8°/50.2°。
+inline constexpr LatticeStep kLatticeSteps[] = {
+    {8, 0},   {8, 1},   {8, 2},   {7, 3},   {7, 4},   {6, 5},
+    {5, 6},   {4, 7},   {3, 7},   {2, 8},   {1, 8},   {0, 8},
+    {-1, 8},  {-2, 8},  {-3, 7},  {-4, 7},  {-5, 6},  {-6, 5},
+    {-7, 4},  {-7, 3},  {-8, 2},  {-8, 1},  {-8, 0},  {-8, -1},
+    {-8, -2}, {-7, -3}, {-7, -4}, {-6, -5}, {-5, -6}, {-4, -7},
+    {-3, -7}, {-2, -8}, {-1, -8}, {0, -8},  {1, -8},  {2, -8},
+    {3, -7},  {4, -7},  {5, -6},  {6, -5},  {7, -4},  {7, -3},
+    {8, -2},  {8, -1},
+};
+
+inline constexpr int32_t kLatticeStepCount =
+    static_cast<int32_t>(sizeof(kLatticeSteps) / sizeof(kLatticeSteps[0]));
 
 inline int32_t abs32(int32_t value) {
     return value < 0 ? static_cast<int32_t>(-static_cast<int64_t>(value)) : value;
@@ -42,87 +48,6 @@ inline bool inside_deadzone(int32_t dx, int32_t dy) {
            static_cast<int64_t>(kDirectionDeadzonePixels) * kDirectionDeadzonePixels;
 }
 
-// 八向分类。45° 平局按原版规则归水平主轴。
-inline EightWayClass classify_vector(int32_t dx, int32_t dy) {
-    EightWayClass out;
-    if (inside_deadzone(dx, dy)) return out;
-
-    const int64_t ax = abs32(dx);
-    const int64_t ay = abs32(dy);
-
-    const bool horizontal =
-        ax * 1000 >= ay * kDirectionRatioThreshold;
-    const bool vertical =
-        ay * 1000 >= ax * kDirectionRatioThreshold;
-
-    if (horizontal && !vertical) {
-        out.valid = true;
-        out.sector = dx > 0 ? 2 : 6;  // E / W
-        out.primary_dir = dx > 0 ? 3 : 1;
-        out.primary_key_index = dx > 0 ? 1 : 0;
-        return out;
-    }
-    if (vertical && !horizontal) {
-        out.valid = true;
-        out.sector = dy > 0 ? 0 : 4;  // N / S
-        out.primary_dir = dy > 0 ? 2 : 0;
-        out.primary_key_index = dy > 0 ? 2 : 3;
-        return out;
-    }
-
-    // 斜向扇区：主轴决定主方向，另一轴做副方向。
-    out.valid = true;
-    out.diagonal = true;
-    if (dx > 0 && dy > 0) {
-        out.sector = 1;  // NE
-        if (ax >= ay) {
-            out.primary_dir = 3;
-            out.secondary_dir = 2;
-            out.primary_key_index = 1;
-        } else {
-            out.primary_dir = 2;
-            out.secondary_dir = 3;
-            out.primary_key_index = 2;
-        }
-    } else if (dx > 0 && dy < 0) {
-        out.sector = 3;  // SE
-        if (ax >= ay) {
-            out.primary_dir = 3;
-            out.secondary_dir = 0;
-            out.primary_key_index = 1;
-        } else {
-            out.primary_dir = 0;
-            out.secondary_dir = 3;
-            out.primary_key_index = 3;
-        }
-    } else if (dx < 0 && dy > 0) {
-        out.sector = 7;  // NW
-        if (ax >= ay) {
-            out.primary_dir = 1;
-            out.secondary_dir = 2;
-            out.primary_key_index = 0;
-        } else {
-            out.primary_dir = 2;
-            out.secondary_dir = 1;
-            out.primary_key_index = 2;
-        }
-    } else if (dx < 0 && dy < 0) {
-        out.sector = 5;  // SW
-        if (ax >= ay) {
-            out.primary_dir = 1;
-            out.secondary_dir = 0;
-            out.primary_key_index = 0;
-        } else {
-            out.primary_dir = 0;
-            out.secondary_dir = 1;
-            out.primary_key_index = 3;
-        }
-    }
-    // dx 或 dy 为 0 时不会进入斜向分支；保留 valid=false 的防御态。
-    if (out.sector < 0) out.valid = false;
-    return out;
-}
-
 inline int32_t key_index_for_dir(int32_t dir) {
     switch (dir) {
         case 1: return 0;  // left
@@ -133,17 +58,104 @@ inline int32_t key_index_for_dir(int32_t dir) {
     }
 }
 
-// 斜向时优先保持角色当前朝向：从右进入右上/右下仍朝右，从上进入右上/左上仍朝上。
-// 当前朝向不是该斜向的两个轴之一时，保留主轴判定。
-inline void apply_facing_preference(EightWayClass& classified, int32_t facing) {
-    if (!classified.valid || !classified.diagonal) return;
-    if (facing < 0 || facing > 3) return;
-    if (facing == classified.primary_dir) return;
-    if (facing != classified.secondary_dir) return;
-    const int32_t previous_primary = classified.primary_dir;
-    classified.primary_dir = facing;
-    classified.secondary_dir = previous_primary;
-    classified.primary_key_index = key_index_for_dir(facing);
+// 选择与触摸向量夹角最小的 8px 格点。previous_index 用于 4° 滞回，避免在相邻
+// 表项边界抖动；调用方在死区/无效时传 -1。返回表下标，-1 表示死区。
+inline int32_t select_lattice_step(int32_t dx, int32_t dy, int32_t previous_index) {
+    if (inside_deadzone(dx, dy)) return -1;
+
+    const double angle = std::atan2(static_cast<double>(dy), static_cast<double>(dx));
+    int32_t best_index = -1;
+    double best_diff = 1e9;
+    for (int32_t i = 0; i < kLatticeStepCount; ++i) {
+        const double vector_angle = std::atan2(
+            static_cast<double>(kLatticeSteps[i].dy),
+            static_cast<double>(kLatticeSteps[i].dx));
+        const double diff = std::fabs(std::remainder(angle - vector_angle, 2.0 * kPi));
+        if (diff < best_diff) {
+            best_diff = diff;
+            best_index = i;
+        }
+    }
+
+    if (previous_index >= 0 && previous_index < kLatticeStepCount) {
+        const double previous_angle = std::atan2(
+            static_cast<double>(kLatticeSteps[previous_index].dy),
+            static_cast<double>(kLatticeSteps[previous_index].dx));
+        const double previous_diff =
+            std::fabs(std::remainder(angle - previous_angle, 2.0 * kPi));
+        if (previous_diff <= kLatticeHysteresisDegrees * kPi / 180.0) {
+            return previous_index;
+        }
+    }
+    return best_index;
+}
+
+// 把表项拆成原版 CHAR_Move 的主/副方向和步长。主轴取较大分量；两个分量接近时
+// 优先保持当前四方向朝向，避免 6/5、5/6 这类近斜向在切换时频繁翻转。
+inline bool lattice_step_components(int32_t index, int32_t facing, int32_t* primary_dir,
+                                    int32_t* secondary_dir, int32_t* primary_step,
+                                    int32_t* secondary_step, int32_t* primary_key_index) {
+    if (index < 0 || index >= kLatticeStepCount || primary_dir == nullptr ||
+        secondary_dir == nullptr || primary_step == nullptr || secondary_step == nullptr ||
+        primary_key_index == nullptr) {
+        return false;
+    }
+
+    const LatticeStep step = kLatticeSteps[index];
+    const int32_t ax = abs32(step.dx);
+    const int32_t ay = abs32(step.dy);
+    if (ax == 0 && ay == 0) return false;
+
+    int32_t dir_x = -1;
+    int32_t dir_y = -1;
+    if (ax > 0) dir_x = step.dx > 0 ? 3 : 1;  // right / left
+    if (ay > 0) dir_y = step.dy > 0 ? 2 : 0;  // up / down
+
+    bool prefer_facing = false;
+    if (facing >= 0 && facing <= 3 && ax > 0 && ay > 0 && abs32(ax - ay) <= 2) {
+        prefer_facing = facing == dir_x || facing == dir_y;
+    }
+
+    if (ax > 0 && ay > 0) {
+        if (prefer_facing) {
+            *primary_dir = facing;
+            *secondary_dir = facing == dir_x ? dir_y : dir_x;
+            *primary_step = facing == dir_x ? ax : ay;
+            *secondary_step = facing == dir_x ? ay : ax;
+        } else if (ax >= ay) {
+            *primary_dir = dir_x;
+            *secondary_dir = dir_y;
+            *primary_step = ax;
+            *secondary_step = ay;
+        } else {
+            *primary_dir = dir_y;
+            *secondary_dir = dir_x;
+            *primary_step = ay;
+            *secondary_step = ax;
+        }
+    } else if (ax > 0) {
+        *primary_dir = dir_x;
+        *secondary_dir = -1;
+        *primary_step = ax;
+        *secondary_step = 0;
+    } else {
+        *primary_dir = dir_y;
+        *secondary_dir = -1;
+        *primary_step = ay;
+        *secondary_step = 0;
+    }
+
+    *primary_key_index = key_index_for_dir(*primary_dir);
+    return *primary_key_index >= 0;
+}
+
+// 速度 buff/debuff 改变 delta 时按 delta/8 缩放表项；delta=8 时保持表值。
+inline int32_t scale_component(int32_t component, int32_t delta) {
+    if (component <= 0 || delta <= 0) return 0;
+    if (delta == 8) return component;
+    int32_t scaled = (component * delta + 4) / 8;
+    if (scaled > delta) scaled = delta;
+    return scaled;
 }
 
 inline bool is_custom_dir_key(int32_t key) {
@@ -153,12 +165,6 @@ inline bool is_custom_dir_key(int32_t key) {
 
 inline int32_t custom_dir_key(int32_t sector) {
     return static_cast<int32_t>(kCustomDirKeyBase | (static_cast<uint32_t>(sector) & 7u));
-}
-
-inline bool should_apply_secondary(bool enabled, bool active, bool trusted, int32_t flag,
-                                   int32_t dir, int32_t primary_dir, int32_t secondary_dir) {
-    return enabled && active && trusted && flag == 0 && secondary_dir >= 0 &&
-           secondary_dir <= 3 && dir == primary_dir;
 }
 
 }  // namespace qol::game::input

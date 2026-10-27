@@ -678,10 +678,32 @@ constexpr uint32_t ARM64_NOP_WORD = 0xd503201f;
 // 怪物(type=1)伪装为队伍成员使其可推，其余保持原判（队友可推、NPC type=2 仍 -1 不可推）。
 constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_OFF = 0x168;
 constexpr uint32_t CHAR_MOVE_PUSH_PARTY_BL_WORD = 0x97ffcc28;   // bl 0xdca10
-// 八向移动调用点（GAMESTATE_PressKeyPlay + 0x21c）：`bl CHAR_Move`。
+// 全向移动调用点（GAMESTATE_PressKeyPlay + 0x21c）：`bl CHAR_Move`。
 // 原字 0x9401318B = bl 0xe9808；重定向到移动 wrapper 后由 wrapper 决定单轴/双轴。
 constexpr uint32_t F_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE_CALL_OFF = 0x21c;
 constexpr uint32_t F_GAMESTATE_PRESSKEYPLAY_CHAR_MOVE_CALL_WORD = 0x9401318b;
+
+// 全向移动：松手时未对齐分支 `mov w0,#1` 改为跳回正常停止动作路径，避免
+// 松手后保留走路动作并进入 CHAR_MoveOnWaitCoord。
+constexpr uintptr_t F_GAMESTATE_PRESSKEY_VMA = 0x151310;
+constexpr uint32_t GAMESTATE_PRESSKEY_RELEASE_ALIGN_OFF = 0x1c0;
+constexpr uint32_t GAMESTATE_PRESSKEY_RELEASE_ALIGN_WORD = 0x52800020;  // mov w0,#1
+constexpr uint32_t GAMESTATE_PRESSKEY_RELEASE_STOP_WORD = 0x17fffffb;   // b 0x1514bc
+
+// 全向移动：CHAR_SetAction 从走路切其他动作时，未对齐分支 `mov w0,#1`
+// 改为直接继续正常动作切换，避免攻击/停止被 8px 闸门吞掉。
+constexpr uintptr_t F_CHAR_SET_ACTION_VMA = 0xe7630;
+constexpr uint32_t CHAR_SET_ACTION_ALIGN_OFF = 0x26c;
+constexpr uint32_t CHAR_SET_ACTION_ALIGN_WORD = 0x52800020;  // mov w0,#1
+constexpr uint32_t CHAR_SET_ACTION_CONTINUE_WORD = 0x17ffff83;  // b 0xe76a8
+
+// 全向移动：补步入口与碰撞像素查询。
+constexpr uintptr_t F_CHAR_MOVE_ON_WAIT_COORD_VMA = 0xe9cd0;  // void (void*)
+constexpr uintptr_t F_MAP_IS_BLOCKING_BYPIXEL_VMA = 0x113bcc;  // int (int32 x, int32 y)
+constexpr uintptr_t F_MAP_IS_BLOCKING_VMA = 0x113b6c;          // int (int32 tile_x, int32 tile_y)
+// MAP_IsBlockingByPixel 中的地图宽高 GOT 槽：*(base+slot) 指向 int32 宽/高。
+constexpr uintptr_t G_MAP_WIDTH_GOT_VMA = 0x2f4e60;
+constexpr uintptr_t G_MAP_HEIGHT_GOT_VMA = 0x2f60d0;
 constexpr uintptr_t F_CHAR_PICK_ITEM_ALL_VMA = 0xec4d8; // int (void*, int32_t) 拾取范围内所有掉落物（CHAR_PickItemAll，官方移动按键链 GAMESTATE_PressKeyPlay 0x9d10c 以半径 0x18=24px 调用；后台线程调用会触发拾取音效 SOUNDSYSTEM_Play 空句柄崩溃，模块改用 nav_pick_items 复刻数据路径跳过音效）
 constexpr uintptr_t F_MEM_MALLOC_VMA = 0xa8d94;         // void* (size_t) dynsym MEM_Malloc，游戏池分配器；RES_LoadToPool 返回缓冲须由 MEM_Free 释放，插件分配必须走此函数；四版本同址
 constexpr uintptr_t F_NOTIFIER_ADD_VMA = 0x11e1b8;     // void (int type, int seq, void* callback, void* data) 延迟回调入队（NOTIFIER_Add→Create+AddTail，主线程 NOTIFIER_Process 回调；type=1 拾取，seq=0/2/4 递增）
