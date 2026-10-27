@@ -1,6 +1,7 @@
 #include "inventory_hooks.h"
 #include "../api/projection.h"
 #include "../usecases/consume_item.h"
+#include "../usecases/item_action.h"
 #include "../bags/native_bag_limit.h"
 #include "claims.h"
 #include "inventory_logging.h"
@@ -962,13 +963,27 @@ bool adopt_save_item_to_registered_source(void* item) {
     }
     transfer.count = item_count;
     transfer.payload_size = serialized;
-    for (uint32_t index = 0;
-         index < qol::features::core_item::registered_bag_source_count(); ++index) {
+
+    // find_empty_slots is already the ordered (space, bag, slot) scan with an
+    // early return at the requested count. Reuse it so SaveItem follows the
+    // same insertion order as every other inventory action.
+    qol::contracts::QolActionRef empty_slots[3]{};
+    int32_t empty_count = 0;
+    result = qol::features::core_item::kInventoryActionApi.find_empty_slots(
+        3, empty_slots, &empty_count);
+    if (!qol::contracts::succeeded(result)) return false;
+    for (int32_t index = 0; index < empty_count; ++index) {
+        if (empty_slots[index].space_id <= qol::contracts::kQolBagSpaceVariant) {
+            // An original-space slot means SaveItem failed for a non-space
+            // reason; do not silently move the item to a provider.
+            return false;
+        }
         const auto* source =
-            qol::features::core_item::registered_bag_source_at(index);
+            qol::features::core_item::find_bag_source(empty_slots[index].space_id);
         if (source == nullptr || source->import_item == nullptr) continue;
         qol::contracts::QolBagMutationResult imported{};
-        result = source->import_item(&transfer, -1, -1, &imported);
+        result = source->import_item(&transfer, empty_slots[index].bag,
+                                     empty_slots[index].slot, &imported);
         if (!qol::contracts::succeeded(result)) continue;
         // The registered source materialized its own object; the original
         // game-created item was never inserted into native inventory.
