@@ -3,6 +3,7 @@
 #include "move_item.h"
 #include "sell_item.h"
 
+#include "infra/log/qol_log.h"
 #include "plugins/core.item/runtime/context.h"
 
 namespace qol::features::core_item {
@@ -95,9 +96,20 @@ QolResult read_item(const QolActionRef& ref, QolInventoryItemRef* out) {
 
 InventoryActionStatus resolve_item(const QolActionRef& ref, QolInventoryItemRef* out) {
     const QolResult result = read_item(ref, out);
+    if (!native_space(ref.space_id)) {
+        QOL_LOG_INFO(QolDomain::kInventory,
+                     "inventory resolve provider ref=%d/%d/%d result=%d out=%d/%d/%d kind=%d cat=%d count=%d handle=%u/%u",
+                     ref.space_id, ref.bag, ref.slot, result.code, out->space_id, out->bag,
+                     out->slot, out->kind, out->category, out->count, out->item.slot,
+                     out->item.generation);
+    }
     if (!contracts::succeeded(result)) return status_from_result(result, false);
     if (out->space_id != ref.space_id || out->bag != ref.bag || out->slot != ref.slot ||
         !valid_handle(out->item) || out->category <= 0) {
+        QOL_LOG_WARN(QolDomain::kInventory,
+                     "inventory resolve stale ref=%d/%d/%d out=%d/%d/%d kind=%d cat=%d handle=%u/%u",
+                     ref.space_id, ref.bag, ref.slot, out->space_id, out->bag, out->slot,
+                     out->kind, out->category, out->item.slot, out->item.generation);
         return InventoryActionStatus::kStale;
     }
     if (native_space(ref.space_id)) {
