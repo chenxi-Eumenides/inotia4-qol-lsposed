@@ -6,6 +6,7 @@
 #include "plugins/core.item/runtime/context.h"
 #include "plugins/core.item/usecases/item_action.h"
 #include "plugins/core.item/usecases/sell_item.h"
+#include "infra/log/qol_log.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -475,3 +476,5 @@ void inventory_log_bind_sdk(const qol::contracts::QolHostSdk*) {}
 bool inventory_log_debug_enabled() { return false; }
 bool inventory_log_debug_due(int64_t*, int64_t) { return false; }
 void inventory_log_write(int32_t, const char*, int, const char*, ...) {}
+
+void qol_log_write(QolLogLevel, QolDomain, const char*, int, const char*, ...) {}
