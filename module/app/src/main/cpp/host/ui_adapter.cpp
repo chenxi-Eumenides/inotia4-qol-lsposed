@@ -3,6 +3,7 @@
 #include <array>
 #include <cerrno>
 #include <cstddef>
+#include <cstdio>
 #include <fcntl.h>
 #include <cstdint>
 #include <cstring>
@@ -423,6 +424,28 @@ QolResult show_text_popup(int32_t text_id) {
     return contracts::ok();
 }
 
+bool maps_range_readable(const void* control, size_t size) {
+    if (control == nullptr || size == 0) return false;
+    const uintptr_t begin = reinterpret_cast<uintptr_t>(control);
+    if (begin > UINTPTR_MAX - size) return false;
+    const uintptr_t end = begin + size;
+    FILE* maps = std::fopen("/proc/self/maps", "re");
+    if (maps == nullptr) return false;
+    char line[512];
+    bool readable = false;
+    while (std::fgets(line, sizeof(line), maps) != nullptr) {
+        unsigned long long start = 0;
+        unsigned long long stop = 0;
+        char perms[5] = {};
+        if (std::sscanf(line, "%llx-%llx %4s", &start, &stop, perms) != 3) continue;
+        if (begin < start || begin >= stop) continue;
+        readable = perms[0] == 'r' && end <= stop;
+        break;
+    }
+    std::fclose(maps);
+    return readable;
+}
+
 // ControlObject pointers can be freed or mprotected while the cached
 // /proc/self/maps snapshot still reports them readable. Probe the exact range
 // through process_vm_readv before dereferencing a game-owned control.
@@ -434,8 +457,9 @@ bool control_readable(const void* control, size_t size) {
     const ssize_t read = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
     if (read == static_cast<ssize_t>(size)) return true;
     // Some Android seccomp profiles deny process_vm_readv(2) for self. Reading
-    // /proc/self/mem still faults on the exact range and is not backed by the
-    // five-second /proc/self/maps cache.
+    // /proc/self/mem can still fault on a PROT_NONE range, so verify the fresh
+    // maps entry before the fallback.
+    if (!maps_range_readable(control, size)) return false;
     const int fd = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
     if (fd < 0) return false;
     const ssize_t pread_read = pread(fd, probe.data(), size, static_cast<off_t>(
