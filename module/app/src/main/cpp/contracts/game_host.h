@@ -199,6 +199,9 @@ struct QolItemReadOnlyApi {
     QolResult (*is_mercenary_seal)(int32_t category, int32_t* out_value);
     QolResult (*is_usable)(int32_t category, int32_t* out_value);
     QolResult (*count_encoding)(int32_t category, QolItemCountEncoding* out_encoding);
+    // ITEMPACKBASE：category 作为盒子时解包产物所需槽位总数。
+    // out_slots < 0 表示该 category 不是拆包表中的盒子或表未就绪；>= 0 为所需槽位。
+    QolResult (*pack_required_slots)(int32_t category, int32_t* out_slots);
 };
 
 struct QolReadOnlyApi {
@@ -242,6 +245,7 @@ constexpr uint16_t kGameHostMajor = 2;
 // 2.4 appended the read-only game identity tail used by the settings page.
 constexpr uint16_t kGameHostIdentityMinor = 4;
 constexpr uint16_t kGameHostShortcutMinor = 5;
-constexpr uint16_t kGameHostMinor = kGameHostShortcutMinor;
+constexpr uint16_t kGameHostPackSlotsMinor = 6;
+constexpr uint16_t kGameHostMinor = kGameHostPackSlotsMinor;
 
 }  // namespace qol::contracts

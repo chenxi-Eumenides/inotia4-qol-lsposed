@@ -6,6 +6,7 @@
 #include "contracts/game_ports/ui_write_port.h"
 #include "contracts/game_ports/ports.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 #include <pthread.h>
@@ -320,6 +321,67 @@ QolResult read_item_count_encoding(int32_t category,
     const auto encoding = qol::game::item_count_encoding_for_category(category);
     if (encoding == contracts::QolItemCountEncoding::kUnknown) return not_ready();
     *out = encoding;
+    return contracts::ok();
+}
+
+QolResult read_item_pack_required_slots(int32_t category, int32_t* out_slots) {
+    if (out_slots == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_slots = -1;
+    if (category < 0 || category > UINT16_MAX || g_base == 0) return contracts::ok();
+
+    auto* records_slot = reinterpret_cast<void**>(g_base + G_ITEMPACK_RECORDS_GOT_VMA);
+    auto* stride_slot = reinterpret_cast<void**>(g_base + G_ITEMPACK_STRIDE_GOT_VMA);
+    auto* count_slot = reinterpret_cast<void**>(g_base + G_ITEMPACK_COUNT_GOT_VMA);
+    if (!game_memory_accessible(records_slot, sizeof(*records_slot), 'r') ||
+        !game_memory_accessible(stride_slot, sizeof(*stride_slot), 'r') ||
+        !game_memory_accessible(count_slot, sizeof(*count_slot), 'r')) {
+        return contracts::ok();
+    }
+
+    // 三个 GOT 槽指向 .bss 中的指针变量，游戏加载表后才写入真正的表地址，因此需要二次解引用。
+    const auto* records_holder = *reinterpret_cast<void* const*>(records_slot);
+    const auto* stride_value = *reinterpret_cast<const uint8_t* const*>(stride_slot);
+    const auto* count_value = *reinterpret_cast<const uint16_t* const*>(count_slot);
+    if (records_holder == nullptr || stride_value == nullptr || count_value == nullptr ||
+        !game_memory_accessible(stride_value, sizeof(*stride_value), 'r') ||
+        !game_memory_accessible(count_value, sizeof(*count_value), 'r')) {
+        return contracts::ok();
+    }
+    const auto* records = *reinterpret_cast<const uint8_t* const*>(records_holder);
+    if (records == nullptr) return contracts::ok();
+
+    const uint8_t stride = *stride_value;
+    const uint16_t count = *count_value;
+    if (stride < 5 || stride > 32 || count == 0 || count >= 4096) {
+        return contracts::ok();
+    }
+    const size_t table_size = static_cast<size_t>(stride) * count;
+    if (!game_memory_accessible(records, table_size, 'r')) return contracts::ok();
+
+    bool matched = false;
+    int32_t required_slots = 0;
+    for (uint16_t i = 0; i < count; ++i) {
+        const uint8_t* record = records + static_cast<size_t>(i) * stride;
+        uint16_t box_category = 0;
+        uint16_t product_category = 0;
+        std::memcpy(&box_category, record, sizeof(box_category));
+        if (box_category != static_cast<uint16_t>(category)) continue;
+        std::memcpy(&product_category, record + 2, sizeof(product_category));
+        matched = true;
+
+        int32_t product_slots = std::max(1, static_cast<int32_t>(record[4]));
+        const auto* item_class = static_cast<const uint8_t*>(
+            qol::game::item_class_record(product_category));
+        if (item_class != nullptr && game_memory_accessible(item_class, 7, 'r') &&
+            (item_class[6] & 1) != 0) {
+            product_slots = 1;
+        }
+        required_slots += product_slots;
+    }
+
+    if (matched) *out_slots = required_slots;
     return contracts::ok();
 }
 
@@ -769,7 +831,7 @@ contracts::QolGameHost make_game_host() {
         &read_item_socket_filled, &read_item_socket_total, &read_item_backpack_category,
         &read_item_jewel_value, &read_item_jewel_attribute_type,
         &read_item_enchant_scroll, &read_item_mercenary_seal, &read_item_usable,
-        &read_item_count_encoding};
+        &read_item_count_encoding, &read_item_pack_required_slots};
     host.character_write = {&write_char_max_hp, &write_char_hp, &write_char_equipped_item};
     host.inventory_write = {&write_inventory_remove_item_data,
                             &write_inventory_remove_item,

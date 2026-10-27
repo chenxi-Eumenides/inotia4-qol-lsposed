@@ -18,6 +18,8 @@ struct QolInventoryExtrasReadApi {
     QolResult (*is_empty_bag_ref)(const QolBagRef* ref, int32_t* out_empty);
     // First empty native bag slot 0..4, or -1 when all are occupied.
     QolResult (*empty_bag_slot)(int32_t* out_slot);
+    // INVEN_IsHavingEmptySlot（经 core.item hook，含扩展袋）；out_value != 0 表示可容纳 needed 个新物品。
+    QolResult (*is_having_empty_slot)(int32_t needed, int32_t include_task_bag, int32_t* out_value);
 };
 
 struct QolInventoryExtrasPort {

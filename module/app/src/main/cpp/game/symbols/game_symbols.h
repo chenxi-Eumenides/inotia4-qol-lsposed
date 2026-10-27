@@ -791,6 +791,11 @@ constexpr uintptr_t F_UISTORE_SELL_OK_INPUT_ITEM_COUNT_VMA = 0xd1948; // 数量�
 constexpr uintptr_t F_UIINPUT_ITEM_COUNT_CREATE_VMA = 0xbc104;       // 原版数量输入弹窗
 constexpr uintptr_t F_GAME_START_NEW_GAME_VMA = 0x10017c;     // GAME_StartNewGame 新游戏初始数量
 constexpr uintptr_t F_ITEMSYSTEM_PROCESS_UNPACK_VMA = 0x10ce50; // ITEMSYSTEM_ProcessUnpack 拆包
+// ITEMPACKBASE 运行时表（拆包记录，stride 由游戏表头给出）：
+// GOT 槽解引用后分别得到表基址、记录长度、记录条数；0x10ce50 ITEMSYSTEM_ProcessUnpack 反汇编确认。
+constexpr uintptr_t G_ITEMPACK_RECORDS_GOT_VMA = 0x2f4308;
+constexpr uintptr_t G_ITEMPACK_STRIDE_GOT_VMA = 0x2f6730;
+constexpr uintptr_t G_ITEMPACK_COUNT_GOT_VMA = 0x2f51d0;
 constexpr uintptr_t F_MAPITEMSYSTEM_CREATE_ITEM_VMA = 0x116e10; // MAPITEMSYSTEM_CreateItem 地图掉落
 constexpr uintptr_t F_NETWORKSTORE_ADD_ITEM_VMA = 0x15d640;   // NetworkStore_AddItem 网络商店
 constexpr uintptr_t F_SAVE_REVISE_CHARACTER_LOCATION_VMA = 0x125fbc; // SAVE_ReviseCharacterLocation 读数量

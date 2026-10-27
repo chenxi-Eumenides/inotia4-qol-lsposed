@@ -547,6 +547,12 @@ QolResult source_use(contracts::QolBagRef ref, int32_t slot) {
         body.find("slot data not ready") != std::string::npos) {
         return source_error(kQolErrNotReady, "extension bag not ready");
     }
+    if (body.find("no space") != std::string::npos) {
+        return source_error(kQolErrBlocked, "extension bag full");
+    }
+    if (body.find("unpack failed") != std::string::npos) {
+        return source_error(kQolErrInternal, "unpack failed");
+    }
     if (body.find("already in use") != std::string::npos ||
         body.find("on cooldown") != std::string::npos) {
         return source_error(kQolErrBusy, "extension item busy");

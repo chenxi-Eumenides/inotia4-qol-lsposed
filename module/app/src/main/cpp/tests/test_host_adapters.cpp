@@ -198,6 +198,7 @@ decltype(fn_get_empty_bag_slot) fn_get_empty_bag_slot = nullptr;
 decltype(fn_open_item_box) fn_open_item_box = nullptr;
 decltype(fn_process_unpack) fn_process_unpack = nullptr;
 decltype(fn_consume_item) fn_consume_item = nullptr;
+decltype(fn_is_having_empty_slot) fn_is_having_empty_slot = nullptr;
 decltype(fn_inven_find_save_slot) fn_inven_find_save_slot = nullptr;
 
 int tutorial_state() { return 0; }
@@ -1249,7 +1250,7 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 5);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 6);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");
     static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==

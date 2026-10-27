@@ -33,6 +33,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
     if (slot < 0 || slot >= virtual_bag::kSlotCount) return extension_bag_op_err("bad slot");
 
     bool used = false;
+    bool no_space = false;
     bool is_seal = false;
     bool is_item_box = false;
     int item_category = 0;
@@ -98,6 +99,31 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         }
     }
     if (closes_description) extension_description_set_off();
+    if (is_item_box) {
+        const auto& host_ports = ::qol::extension_bag::access::host();
+        if (host_ports.game != nullptr &&
+            host_ports.game->abi.major == qol::contracts::kGameHostMajor &&
+            host_ports.game->abi.minor >= qol::contracts::kGameHostPackSlotsMinor &&
+            host_ports.game->read_only.item.pack_required_slots != nullptr &&
+            host_ports.inventory_extras != nullptr &&
+            host_ports.inventory_extras->abi_version.major ==
+                qol::contracts::kQolPortInventoryExtrasVersion.major &&
+            host_ports.inventory_extras->abi_version.minor >=
+                qol::contracts::kQolPortInventoryExtrasVersion.minor &&
+            host_ports.inventory_extras->read.is_having_empty_slot != nullptr) {
+            int32_t needed = -1;
+            if (qol::contracts::succeeded(
+                    host_ports.game->read_only.item.pack_required_slots(item_category, &needed)) &&
+                needed > 0) {
+                int32_t space = 0;
+                if (qol::contracts::succeeded(
+                        host_ports.inventory_extras->read.is_having_empty_slot(needed, 0, &space)) &&
+                    space == 0) {
+                    no_space = true;
+                }
+            }
+        }
+    }
     if (is_seal) {
         // SAVE_IsOK/空槽检查不得持背包锁调用；失败先 abort token 再返回明确错误。
         const bool save_ok = read_save_is_ok();
@@ -113,10 +139,12 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         used = extension_make_mercenary(item, &mercenary);
         g_active_module_use_token = previous_use_token;
     } else if (is_item_box) {
-        previous_use_token = g_active_module_use_token;
-        g_active_module_use_token = &use_token;
-        used = extension_open_item_box(item_category) && extension_consume_item(item);
-        g_active_module_use_token = previous_use_token;
+        if (!no_space) {
+            previous_use_token = g_active_module_use_token;
+            g_active_module_use_token = &use_token;
+            used = extension_open_item_box(item_category) && extension_consume_item(item);
+            g_active_module_use_token = previous_use_token;
+        }
     } else {
         previous_use_token = g_active_module_use_token;
         g_active_module_use_token = &use_token;
@@ -144,7 +172,8 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
             return extension_bag_op_err("extension item release finalize failed");
         }
     }
-    if (!used) return extension_bag_op_err("on cooldown");
+    if (no_space) return extension_bag_op_err("no space");
+    if (!used) return extension_bag_op_err(is_item_box ? "unpack failed" : "on cooldown");
     if (closes_description) {
         ::qol::extension_bag::ReentryLock lock;
         reset_extension_desc_item_hooks_locked();

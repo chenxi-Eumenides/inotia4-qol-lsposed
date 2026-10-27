@@ -57,7 +57,7 @@ constexpr QolVersion kQolPortCraftUiWriteVersion{1, 1};
 constexpr QolVersion kQolPortCustomRecipeWriteVersion{1, 3};
 constexpr QolVersion kQolPortCraftLotteryWriteVersion{1, 0};
 constexpr QolVersion kQolPortCharacterExtrasVersion{1, 2};
-constexpr QolVersion kQolPortInventoryExtrasVersion{1, 2};
+constexpr QolVersion kQolPortInventoryExtrasVersion{1, 3};
 constexpr QolVersion kQolPortItemExtrasVersion{1, 0};
 constexpr QolVersion kQolPortSystemVersion{1, 1};
 constexpr QolVersion kQolPortCharacterHttpVersion{1, 0};
