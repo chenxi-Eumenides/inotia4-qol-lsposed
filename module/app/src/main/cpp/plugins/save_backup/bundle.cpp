@@ -752,11 +752,16 @@ bool validate_warehouse(const std::vector<WarehouseFile>& files, std::string& er
     return true;
 }
 
+// 192 条旧布局的版本区间（含两端）。当前证据：v507 是第一个有 192 条的版本，
+// v520 是最后一个；若后续确认更早版本（例如 v506）也有 192 条，只改这个下界。
+constexpr uint32_t kC18LegacyBagFirstVersion = 507;
+constexpr uint32_t kC18LegacyBagLastVersion = 520;
+
 C18NativeBagLayout c18_native_bag_layout(const std::string& version_label) {
     // 版本号形如 "v507"/"v586"/"v0.38"：解析 'v' 后的十进制主版本号，取整数前缀。
-    // 规则（按用户确认）：v0.x（0.2/0.38）无 native bag；v507-v520 为 192 条旧布局；
-    // 更高的 C18 版本（v586/v588/后续）统一为 96 条新布局（C18Lwh）。
-    // 1..506 与无法解析的标签（含原版 v1.3.2）保持 unknown，避免误判非 C18 版本。
+    // 规则（按用户确认）：低于首个 192 条版本的全部无 native bag（含 v0.x）；
+    // 192 条区间内为 kLegacy192；更高版本统一 96 条新布局（C18Lwh）。
+    // 无法解析的标签保持 unknown；能解析的版本一律落到明确布局，不再有“中间未知带”。
     if (version_label.size() < 2 || version_label[0] != 'v' ||
         version_label[1] < '0' || version_label[1] > '9') {
         return C18NativeBagLayout::kUnknown;
@@ -768,10 +773,9 @@ C18NativeBagLayout c18_native_bag_layout(const std::string& version_label) {
         major = major * 10 + static_cast<uint32_t>(c - '0');
         if (major > 100000) return C18NativeBagLayout::kUnknown;
     }
-    if (major == 0) return C18NativeBagLayout::kUnsupported;
-    if (major >= 507 && major <= 520) return C18NativeBagLayout::kLegacy192;
-    if (major > 520) return C18NativeBagLayout::kModern96;
-    return C18NativeBagLayout::kUnknown;
+    if (major < kC18LegacyBagFirstVersion) return C18NativeBagLayout::kUnsupported;
+    if (major <= kC18LegacyBagLastVersion) return C18NativeBagLayout::kLegacy192;
+    return C18NativeBagLayout::kModern96;
 }
 
 bool validate_c18_native_bag_image(const C18NativeBagImage& image) {

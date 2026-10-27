@@ -208,7 +208,7 @@ Kotlin postAndAwait
 
 ### 6.2.1 C18 native bag 版本转换
 
-- 文件位于 Native init 传入的动态 `data_dir` 根目录。slot 0/1/2 对应后缀 N=1/2/3。布局按版本号动态判定：v0.x（v0.2/v0.38）无 native bag；v507–v520 使用 `C18Lbag{N}.dat`，每槽 192 条、每条 `0x230` bytes；v521 及更高版本（含 v586/v588）使用 `C18Lwh{N}.dat`，每槽 96 条。
+- 文件位于 Native init 传入的动态 `data_dir` 根目录。slot 0/1/2 对应后缀 N=1/2/3。布局按版本号动态判定：首个 192 条版本为 v507，低于它的所有版本（含 v0.2/v0.38）无 native bag；v507–v520 使用 `C18Lbag{N}.dat`，每槽 192 条、每条 `0x230` bytes；v521 及更高版本（含 v586/v588）使用 `C18Lwh{N}.dat`，每槽 96 条。边界由 `kC18LegacyBagFirstVersion` 定义，证据更新时只改该常量。
 - 两族使用相同 `C18BAG01` magic、20-byte header 和记录 schema；header count 是一致性字段，loader 的循环数由目标版本代码固定，不由 header count 决定，因此必须写完整目标数量记录。
 - 导入旧目标时，96 条源记录后补 96 条全零；导入新目标时，192 条源记录只取前 96 条，尾部直接丢弃且不另存。bundle 源 image 不变；导入只覆盖目标版本活动文件，不写 shared fallback，也不写另一族副本。
 - 历史 v514/v520→v586 未发现 `bagN`→`whN` 游戏迁移；此备份行为是用户确认的单 image 规范化策略，不表示游戏本身会迁移。

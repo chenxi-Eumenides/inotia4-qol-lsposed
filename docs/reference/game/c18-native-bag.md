@@ -5,7 +5,7 @@
 
 ## 1. 版本与识别
 
-- native bag 布局按版本号动态判定：v0.x（v0.2 / v0.38）没有 native bag；v507–v520 为 192 条旧布局（`C18Lbag{N}.dat`）；v521 及更高版本统一按 96 条新布局（`C18Lwh{N}.dat`，含 v586 / v588）。v520 的袋对象表已改为 GOT 指向的堆表（见 §3），不能只按 `0x735000` 取表。
+- native bag 布局按版本号动态判定：首个带 192 条旧布局的版本是 v507，低于它的所有版本（含 v0.2 / v0.38）都没有 native bag；v507–v520 为 192 条旧布局（`C18Lbag{N}.dat`）；v521 及更高版本统一按 96 条新布局（`C18Lwh{N}.dat`，含 v586 / v588）。若后续确认更早版本（如 v506）已有 192 条，只改 `kC18LegacyBagFirstVersion`。v520 的袋对象表已改为 GOT 指向的堆表（见 §3），不能只按 `0x735000` 取表。
 - 能力位：`kQolTargetCapabilityC18NativeBagLayoutCandidate`（bit3，值 0x8）。
   - 已知 C18L 版本由变体表置位；未知 MD5 仅在运行期标记
     （存在 `C18BAG01` 且 `C18Lbag.dat` 存在、无 WH4）时置位。
