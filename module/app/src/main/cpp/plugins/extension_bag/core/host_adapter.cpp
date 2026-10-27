@@ -389,6 +389,10 @@ bool extension_handle_backpack_equip() {
                      category, source_bag, source_slot);
         return false;
     }
+    // Original-bag backpack equipment remains native behavior. EB only owns
+    // backpacks that are stored in an extension bag; intercepting an original
+    // item here and then failing to equip it produced a silent no-op.
+    if (!module_source) return false;
     const int target = first_empty_extension_bag_locked();
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "backpack equip probe target=%d category=%d src=%d/%d active=%d",

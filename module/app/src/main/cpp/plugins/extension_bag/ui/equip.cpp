@@ -297,13 +297,11 @@ bool extension_source_should_equip_locked(int target_bag) {
 }
 
 int first_empty_extension_bag_locked() {
-    // Scan the fixed array, not only active_extension_bags(): unequipping the
-    // last bag shrinks the active count while leaving that slot available.
-    for (int bag = 0; bag < virtual_bag::kMaxExtensionBags; ++bag) {
-        if (::qol::extension_bag::access::bag().types[bag] == 0 &&
-            ::qol::extension_bag::access::bag().capacities[bag] == 0) {
-            return bag;
-        }
+    // bag_count is the configured extension-bag count. Slots at or beyond it
+    // are not part of the current state and cannot be equipped without first
+    // increasing the configured count.
+    for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
+        if (::qol::extension_bag::access::bag().types[bag] == 0) return bag;
     }
     return -1;
 }
