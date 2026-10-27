@@ -134,7 +134,7 @@ const contracts::ResourceClaim kResources[] = {
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"eight_way_move.direction", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "全向移动", "主控角色 1px 全向移动，其他角色保持原版",
+     contracts::FeatureType::kToggle, "全向移动", "朝任何方向移动。",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
 };
 

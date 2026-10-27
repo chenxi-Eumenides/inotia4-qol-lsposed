@@ -25,7 +25,7 @@
 | 类型 | toggle |
 | Release 可见 | 是 |
 
-feature id 保持 `eight_way_move.direction` 以兼容已有配置；显示名称已改为「全向移动」。
+feature id 保持 `eight_way_move.direction` 以兼容已有配置；显示名称为「全向移动」，描述为「朝任何方向移动。」
 
 没有 capability、HTTP 路由、JNI 绑定或公开命令。
 
