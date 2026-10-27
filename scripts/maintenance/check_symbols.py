@@ -144,7 +144,7 @@ def fmt_value(const: Constant) -> str:
     return "无法求值" if const.value is None else f"0x{const.value:x}"
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="校验 game_symbols.h 中注册符号的 VMA")
     parser.add_argument("so", nargs="?", type=Path, default=DEFAULT_SO, help="目标 libgame.so 路径")
     parser.add_argument("--all", action="store_true", help="输出全部分类和符号比对结果")
@@ -177,7 +177,7 @@ def main() -> None:
         print()
         print(f"libgame.so 不存在: {so}")
         print("分类已完成；符号校验需提供有效 libgame.so 路径。")
-        sys.exit(1)
+        return 1
 
     syms = read_symbols(so)
 
@@ -218,7 +218,8 @@ def main() -> None:
     print(f"\n比对统计：共 {total} 项，一致 {matched}，地址不一致 {changed}，缺失 {missing}")
     if changed:
         print(f"\n⚠️ {changed} 个符号地址变化：更新 game_symbols.h 中对应 _VMA 常量后重新构建")
+    return 1 if changed or missing else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

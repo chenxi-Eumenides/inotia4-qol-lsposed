@@ -257,12 +257,16 @@ curl -s http://<设备IP>:8088/api/ui/state
 
 > 全量明细统一使用 `--all`：适用于 `check_symbols.py`、`check_http_routes.py`、`smoke_all.py`，以及 `check_arch.py` 转发给各子检查。`check_arch.py` 保留 `-v`/`--verbose` 作为 `--all` 的兼容别名。`smoke_all.py` 默认隐藏 PASS 明细，但仍显示 warn/fail；`check_log_policy.py` 的 findings 默认可见。
 
+构建前静态预检统一运行 `uv run python scripts/maintenance/check_arch.py`。默认顺序为：先运行 `build_game_variant_table`，再运行 `check_layers`、`check_offsets`、`check_jni`、`check_resources`、`check_symbols`、`check_http_routes`、`check_log_policy`；任一步失败会计入最终非零退出码，但不阻止其他独立步骤。首步会有意更新生成文件 `module/app/src/main/cpp/game/variants/game_variant_table.inc`。用 `--list` 查看步骤名；`--only check_jni` 等选择只运行指定步骤，不会隐式运行表生成器。`--all`（兼容别名 `--verbose`、`-v`）只传给支持该选项的步骤；`--freeze`/`--json` 只传给四个架构基线检查器。
+
+该入口是静态检查，不会自动构建 APK，也不替代动态 smoke、真机/设备回归；静态数据导出与 assets 打包也不属于此入口，按 §3.4.3 单独执行。构建脚本本身不会自动调用此预检。
+
 | 脚本 | 用途（含用法） | 运行时机 |
 |---|---|---|
-| `scripts/maintenance/check_symbols.py` | 校验 `game_symbols.h`/`symbol_registry.h` 常量与目标 `libgame.so` 符号 VMA 是否一致；默认比对 `apk/decoded/overhaul/lib/arm64-v8a/libgame.so` 的 120+ 符号；加 `--all` 输出全部分类和符号比对结果 | **改 `game_symbols.h`/`symbol_registry.h`、新增 VMA 或换游戏版本/so 后必跑**；新增符号须登记 `SYMBOL_TO_MACRO` 映射 |
-| `scripts/maintenance/check_http_routes.py` | 校验 controller、native 与 API reference 路由一致性；加 `--all` 输出完整检查明细 | 路由、controller 或 API reference 变更后 |
-| `scripts/maintenance/check_arch.py` | 运行架构子检查；加 `--all` 将全量明细参数转发给各子检查；`-v`/`--verbose` 是 `--all` 的兼容别名 | Native 架构、JNI、资源或偏移相关改动后 |
-| `scripts/verification/check_log_policy.py` | 按 `docs/archive/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位；findings 默认可见 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only` |
+| `scripts/maintenance/check_arch.py` | 构建前静态预检总入口，按上文顺序运行变种表生成器、四个架构检查器、符号 VMA、HTTP 路由和日志策略检查；失败聚合；`--list` 列出步骤，`--only <步骤>` 精确筛选；`--all` 将明细参数转发给支持的步骤，`-v`/`--verbose` 是兼容别名 | Native、JNI、资源、偏移、符号、路由或日志相关改动后；构建前运行 |
+| `scripts/maintenance/check_symbols.py` | 校验 `game_symbols.h`/`symbol_registry.h` 常量与目标 `libgame.so` 符号 VMA 是否一致；默认比对 `apk/decoded/overhaul/lib/arm64-v8a/libgame.so` 的 120+ 符号；加 `--all` 输出全部分类和符号比对结果；地址不一致或缺失返回非零 | **改 `game_symbols.h`/`symbol_registry.h`、新增 VMA 或换游戏版本/so 后必跑**；新增符号须登记 `SYMBOL_TO_MACRO` 映射；已纳入静态预检 |
+| `scripts/maintenance/check_http_routes.py` | 校验 controller、native 与 API reference 路由一致性；加 `--all` 输出完整检查明细 | 路由、controller 或 API reference 变更后；已纳入静态预检 |
+| `scripts/verification/check_log_policy.py` | 按 `docs/archive/development/logging.md` 静态检查日志合规：R1 唯一出口 / R2 旧 tag 清零 / R3 domain 词表一致 / R4 逐帧无高级别 / R5 级别与定位；findings 默认可见 | **改 native/Kotlin 日志相关代码后**；R1–R3 违规时退出码非 0，迁移期可加 `--warn-only`；已纳入静态预检 |
 | `scripts/verification/smoke_all.py` | 从 controller 注解提取全部路由做全量 smoke 探测，产出与 `smoke_baseline_v0.5.43.json` 可对比的基线报告；默认隐藏 PASS 明细但保留 warn/fail，使用 `--all` 显示全部明细 | 重构或端点变更后、真机 API 可达时 |
 | `scripts/verification/api_poll.py` | 连续轮询 `/api/system/game`、party、inventory，标记字段变化 | 单点联调、确认某字段是否按预期变化时（默认 2.0s × 30 次） |
 | `scripts/verification/live_session.py` | 全自动联调会话：等待 API 就绪 → 等待世界就绪 → 连续采样 → 检测失败/超时 → 输出报告 | 需要长时间观察稳定性时（默认上限 5 分钟） |
@@ -280,7 +284,7 @@ curl -s http://<设备IP>:8088/api/ui/state
 | `scripts/data/export_texts.py` | 解析语言文本 → `apk/static-data/json/text/*.json` | 文本原始数据更新后 |
 | `scripts/data/export_snasys.py` | 解码 `i_tile` / `i_mapfeature` / `i_worldmap` → `apk/static-data/json/snasys/*.json` | 地图与地形原始数据更新后 |
 | `scripts/data/export_map_tiles.py` | 解析 416 个 map 文件 → 通行矩阵与出口目标 JSON | 地图原始数据更新后 |
-| `scripts/maintenance/build_game_variant_table.py` | 运行 `uv run python scripts/maintenance/build_game_variant_table.py`，读取 `apk/game-apk/*.apk`、`history/*.apk`、`history/*.xapk` 的 arm64 `libgame.so`，按 md5 生成游戏变体/能力对照表 `module/app/src/main/cpp/game/variants/game_variant_table.inc`；无 arm64 库的 APK 告警跳过，md5 重复则拒绝生成，输出确定性（无时间戳，可重复运行） | 新增或更新游戏 APK 后运行一次；生成的 `.inc` 与模块代码一并提交 |
+| `scripts/maintenance/build_game_variant_table.py` | 可单独运行 `uv run python scripts/maintenance/build_game_variant_table.py [--all]`；读取 `apk/game-apk/*.apk`、`history/*.apk`、`history/*.xapk` 的 arm64 `libgame.so`，按 md5 生成游戏变体/能力对照表 `module/app/src/main/cpp/game/variants/game_variant_table.inc`；无 arm64 库的 APK 告警跳过，md5 重复则拒绝生成，输出确定性（无时间戳，可重复运行）。它也是 `check_arch.py` 默认预检的首步；使用 `--only` 选择其他步骤时不会运行 | 新增或更新游戏 APK 后可单独运行；默认静态预检会刷新该表，生成的 `.inc` 与模块代码一并提交 |
 | `scripts/data/package_assets.py` | 静态数据重打包进模块 assets（28 表 + zh-Hans/en 语言） | 静态数据 JSON 更新后、构建模块前 |
 
 #### 3.4.4 设备与分析辅助

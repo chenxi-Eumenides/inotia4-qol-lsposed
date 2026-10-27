@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
-"""架构校验总入口（ARCHITECTURE.md §9.2 / §9.4）。
+"""统一构建前静态预检入口。
 
-依次运行校验脚本族，汇总退出码：
-- check_layers    层依赖方向 + include 环
-- check_offsets   裸地址与符号头越权
-- check_jni       Kotlin external ↔ native 导出
-- check_resources 资源安装点与重复安装
+默认依次更新游戏变体表，再运行全部静态检查，并汇总失败退出码。变体表生成器会
+有意写回生成的 ``game_variant_table.inc``；使用 ``--only`` 可只运行指定步骤。
 
-check_symbols.py（符号 VMA 对 .so 校验）需要 APK/SO 输入且耗时，不纳入默认入口，
-需要时单独运行。
+步骤顺序：
+1. build_game_variant_table
+2. check_layers、check_offsets、check_jni、check_resources
+3. check_symbols、check_http_routes、check_log_policy
 
 用法：
-    uv run python scripts/maintenance/check_arch.py                     # 全部校验（棘轮）
-    uv run python scripts/maintenance/check_arch.py --freeze            # 冻结全部基线（只允许收缩）
+    uv run python scripts/maintenance/check_arch.py
     uv run python scripts/maintenance/check_arch.py --only check_jni --all
-    uv run python scripts/maintenance/check_arch.py --list              # 仅列出脚本
+    uv run python scripts/maintenance/check_arch.py --list
 
-`--verbose` 与 `-v` 是 `--all` 的兼容别名；总入口向子脚本传递 canonical `--all`。
+`--verbose` 与 `-v` 是 `--all` 的兼容别名；总入口按子脚本能力精确转发参数。
 """
 from __future__ import annotations
 
@@ -27,13 +25,25 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
-SCRIPTS = ("check_layers", "check_offsets", "check_jni", "check_resources")
+ARCH_CHECKS = ("check_layers", "check_offsets", "check_jni", "check_resources")
+SCRIPTS = (
+    "build_game_variant_table",
+    *ARCH_CHECKS,
+    "check_symbols",
+    "check_http_routes",
+    "check_log_policy",
+)
+SCRIPT_PATHS = {
+    **{name: HERE / f"{name}.py" for name in SCRIPTS if name != "check_log_policy"},
+    "check_log_policy": ROOT / "scripts" / "verification" / "check_log_policy.py",
+}
+ALL_CAPABLE = frozenset(("build_game_variant_table", *ARCH_CHECKS, "check_symbols", "check_http_routes"))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--freeze", action="store_true", help="把当前违规写入共享基线快照")
-    parser.add_argument("--json", action="store_true", help="透传 --json 给各脚本")
+    parser.add_argument("--freeze", action="store_true", help="把四个架构基线检查器的当前违规写入基线")
+    parser.add_argument("--json", action="store_true", help="仅透传给四个架构基线检查器")
     parser.add_argument(
         "--all", "--verbose", "-v", dest="verbose", action="store_true",
         help="透传 --all，显示各脚本完整明细",
@@ -57,27 +67,32 @@ def main() -> int:
             return 2
         selected = tuple(name for name in SCRIPTS if name.removeprefix("check_") in wanted)
 
-    passthrough: list[str] = []
-    if args.freeze:
-        passthrough.append("--freeze")
-    if args.json:
-        passthrough.append("--json")
-    if args.verbose:
-        passthrough.append("--all")
-
     failures: list[str] = []
     for name in selected:
-        script = HERE / f"{name}.py"
+        script = SCRIPT_PATHS[name]
         if not script.exists():
             failures.append(name)
             print(f"== {name} ==\n  缺失：{script}")
             continue
-        print(f"\n########## {name} ##########")
-        result = subprocess.run([sys.executable, str(script), *passthrough], cwd=ROOT)
+        print(f"\n########## {name} ##########", flush=True)
+        passthrough: list[str] = []
+        if name in ARCH_CHECKS:
+            if args.freeze:
+                passthrough.append("--freeze")
+            if args.json:
+                passthrough.append("--json")
+        if args.verbose and name in ALL_CAPABLE:
+            passthrough.append("--all")
+        try:
+            result = subprocess.run([sys.executable, str(script), *passthrough], cwd=ROOT)
+        except OSError as exc:
+            failures.append(name)
+            print(f"  无法启动：{exc}")
+            continue
         if result.returncode != 0:
             failures.append(name)
 
-    print("\n===== 架构校验汇总 =====")
+    print("\n===== 静态预检汇总 =====")
     for name in selected:
         mark = "❌" if name in failures else "✅"
         print(f"  {mark} {name}")
