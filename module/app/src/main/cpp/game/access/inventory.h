@@ -19,6 +19,9 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
 // 读取物理袋对象；包含任务袋 5，返回的不透明对象只在当前游戏线程调用窗内使用。
 QolResult physical_item_at(int32_t bag, int32_t slot, void** out_item);
 QolResult detail_item_context(contracts::QolItemDetailContext* out_context);
+// 读取快捷栏条目的物品类别（仅 type=2 的物品快捷栏）；用于把扩展袋消耗品
+// 接入 CHAR_ProcessShortcut，不读取/写入 INVEN_pItem。
+bool shortcut_item_category(int32_t shortcut, int32_t* out_category);
 
 // Game-private UI accessors. Native control pointers never cross adapter-port boundaries.
 QolResult detail_context(int32_t* out_desc_type, int32_t* out_bag, void** out_control);

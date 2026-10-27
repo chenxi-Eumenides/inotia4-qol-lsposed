@@ -1245,7 +1245,7 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 4);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 5);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");
     static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==

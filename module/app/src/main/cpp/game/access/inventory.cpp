@@ -658,6 +658,46 @@ QolResult detail_item_context(contracts::QolItemDetailContext* out_context) {
     return contracts::ok();
 }
 
+bool shortcut_item_category(int32_t shortcut, int32_t* out_category) {
+    if (out_category == nullptr || g_base == 0) return false;
+    uint8_t** state_slot = reinterpret_cast<uint8_t**>(g_base + G_SHORTCUT_STATE_GOT_VMA);
+    uint8_t** entry_slot = reinterpret_cast<uint8_t**>(g_base + G_SHORTCUT_ENTRY_GOT_VMA);
+    uint8_t** page_slot = reinterpret_cast<uint8_t**>(g_base + G_SHORTCUT_PAGE_GOT_VMA);
+    if (!game_memory_accessible(state_slot, sizeof(*state_slot), 'r') ||
+        !game_memory_accessible(entry_slot, sizeof(*entry_slot), 'r') ||
+        !game_memory_accessible(page_slot, sizeof(*page_slot), 'r')) {
+        return false;
+    }
+    uint8_t* state = *state_slot;
+    uint8_t* entries = *entry_slot;
+    uint8_t* page_ptr = *page_slot;
+    if (state == nullptr || entries == nullptr || page_ptr == nullptr ||
+        !game_memory_accessible(state, 0x2c, 'r') ||
+        !game_memory_accessible(page_ptr, 1, 'r')) {
+        return false;
+    }
+    int index = -1;
+    for (int slot = 0; slot < 6; ++slot) {
+        int32_t key = 0;
+        std::memcpy(&key, state + 20 + slot * 4, sizeof(key));
+        if (key == shortcut) {
+            index = slot;
+            break;
+        }
+    }
+    if (index < 0 && shortcut >= 0 && shortcut < 6) index = shortcut;
+    if (index < 0) return false;
+    const int entry_index = static_cast<int>(*page_ptr) + index;
+    if (entry_index < 0) return false;
+    uint8_t* entry = entries + static_cast<size_t>(entry_index) * 16;
+    if (!game_memory_accessible(entry, 6, 'r') || entry[0] != 2) return false;
+    const int category = static_cast<int>(entry[4]) |
+                         (static_cast<int>(entry[5]) << 8);
+    if (category <= 0) return false;
+    *out_category = category;
+    return true;
+}
+
 QolResult bag_size(int32_t bag, int32_t* out_size) {
     if (bag < 0 || bag >= 6 || out_size == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);

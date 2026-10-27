@@ -186,6 +186,39 @@ int registered_source_item_count(int32_t category) {
     return context.count > INT32_MAX ? INT32_MAX : static_cast<int>(context.count);
 }
 
+bool use_registered_source_category(int32_t category) {
+    for (uint32_t index = 0;
+         index < qol::features::core_item::registered_bag_source_count(); ++index) {
+        const auto* source = qol::features::core_item::registered_bag_source_at(index);
+        if (source == nullptr || source->count == nullptr || source->info == nullptr ||
+            source->item_at == nullptr || source->use == nullptr) {
+            continue;
+        }
+        const int32_t bag_count = source->count();
+        if (bag_count < 0) continue;
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            qol::contracts::QolBagInfo info{};
+            if (!qol::contracts::succeeded(source->info(bag, &info)) || info.capacity < 0) {
+                continue;
+            }
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                qol::contracts::QolInventoryItemRef item{};
+                const QolResult result = source->item_at(bag, slot, &item);
+                if (result.code == kQolErrNotFound) continue;
+                if (!qol::contracts::succeeded(result) || item.category != category ||
+                    item.count <= 0) {
+                    continue;
+                }
+                if (qol::contracts::succeeded(
+                        source->use({source->space_id, bag}, slot))) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 bool registered_source_has_empty_slots(int32_t needed, int32_t) {
     if (needed <= 0) return true;
     int64_t empty = 0;
@@ -1604,6 +1637,21 @@ int char_process_shortcut_wrapper(void* character, int shortcut) {
         inventory_log_write(0, __FILE__, __LINE__,
                             "CHAR_ProcessShortcut begin trace=%llu character=%p shortcut=%d",
                             static_cast<unsigned long long>(trace_id), character, shortcut);
+    }
+    if (g_game != nullptr && g_game->item_abi.shortcut_item_category != nullptr) {
+        int32_t category = 0;
+        if (qol::contracts::succeeded(
+                g_game->item_abi.shortcut_item_category(shortcut, &category)) &&
+            category > 0) {
+            const int native_count =
+                g_backup_have_item != nullptr ? g_backup_have_item(category) : 0;
+            if (native_count <= 0 && use_registered_source_category(category)) {
+                inventory_log_write(0, __FILE__, __LINE__,
+                                    "CHAR_ProcessShortcut registered-source category=%d shortcut=%d",
+                                    category, shortcut);
+                return 1;
+            }
+        }
     }
     const int result = g_backup_char_process_shortcut(character, shortcut);
     if (trace_enabled) {

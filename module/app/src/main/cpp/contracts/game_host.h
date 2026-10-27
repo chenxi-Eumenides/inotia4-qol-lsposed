@@ -149,6 +149,8 @@ struct QolItemAbiDispatchApi {
     // Hook-private ABI passthroughs; returned pointers are valid only within the current hook call.
     QolResult (*native_item_at)(int32_t bag, int32_t slot, void** out_item);
     QolResult (*native_item_for_handle)(QolItemHandle item, void** out_item);
+    // 快捷栏物品条目类别；仅 type=2 的物品快捷栏返回成功。
+    QolResult (*shortcut_item_category)(int32_t shortcut, int32_t* out_category);
 };
 
 // 游戏身份只读面（v2.4 尾追加）：设置页展示用；字符串为静态存储或进程内有效。
@@ -239,6 +241,7 @@ static_assert(sizeof(QolGameHost) ==
 constexpr uint16_t kGameHostMajor = 2;
 // 2.4 appended the read-only game identity tail used by the settings page.
 constexpr uint16_t kGameHostIdentityMinor = 4;
-constexpr uint16_t kGameHostMinor = kGameHostIdentityMinor;
+constexpr uint16_t kGameHostShortcutMinor = 5;
+constexpr uint16_t kGameHostMinor = kGameHostShortcutMinor;
 
 }  // namespace qol::contracts

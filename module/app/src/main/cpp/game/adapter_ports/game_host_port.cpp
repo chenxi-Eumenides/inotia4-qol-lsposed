@@ -741,6 +741,17 @@ QolResult read_attr_fixed_option_percent_pair(int32_t category, int32_t option_i
     return qol::game::attr_fixed_option_percent_pair(category, option_id, out_p1, out_p2);
 }
 
+QolResult game_shortcut_item_category(int32_t shortcut, int32_t* out_category) {
+    if (out_category == nullptr || shortcut < 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_category = 0;
+    if (!qol::game::shortcut_item_category(shortcut, out_category)) {
+        return error_result(kQolErrNotFound, "shortcut item unavailable");
+    }
+    return contracts::ok();
+}
+
 contracts::QolGameHost make_game_host() {
     contracts::QolGameHost host{};
     host.abi = {sizeof(contracts::QolGameHost), contracts::kGameHostMajor,
@@ -775,7 +786,8 @@ contracts::QolGameHost make_game_host() {
                       &game_begin_original_only,
                       &game_end_original_only,
                       &game_native_item_at,
-                      &game_native_item_for_handle};
+                      &game_native_item_for_handle,
+                      &game_shortcut_item_category};
     host.game_identity = {&game_query_identity};
     return host;
 }

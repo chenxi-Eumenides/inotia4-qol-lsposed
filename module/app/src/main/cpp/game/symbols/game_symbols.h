@@ -196,6 +196,10 @@ constexpr uintptr_t G_UI_HELP_STATE_VMA = 0x711c90;            // UIHelp_ui8Stat
 constexpr uintptr_t G_UI_MMENU_SEL_CLASS_VMA = 0x7135a9;       // MAINMENU_ui8SelectedClass (u8 主菜单选中分类)
 constexpr uintptr_t G_UI_MMENU_SAVE_SLOT_VMA = 0x7135aa;       // MAINMENU_ui8SaveSlotType (u8 主菜单存档槽类型)
 constexpr uintptr_t G_UI_SHORTCUT_PAGE_VMA = 0x712600;         // UIShortcutMenu_i32Page (i32 快捷栏页码)
+// CHAR_ProcessShortcut 的快捷栏表：状态对象指针、16 字节条目数组指针、页码字节。
+constexpr uintptr_t G_SHORTCUT_STATE_GOT_VMA = 0x2f40f0;       // [0x2f40f0] -> shortcut state，+20..+40 为 5 个键码
+constexpr uintptr_t G_SHORTCUT_ENTRY_GOT_VMA = 0x2f47e8;       // [0x2f47e8] -> 16 字节 shortcut entry 数组
+constexpr uintptr_t G_SHORTCUT_PAGE_GOT_VMA = 0x2f3948;        // [0x2f3948] -> 页码字节
 constexpr uintptr_t G_UI_QUEST_MENU_MAIN_SIZE_VMA = 0x7125c0;  // UIQuestMenu_nMainListSize (u16 任务菜单主列表大小)
 constexpr uintptr_t G_UI_QUEST_MENU_SUB_SIZE_VMA = 0x7125f8;   // UIQuestMenu_nSubListSize (u16 任务菜单子列表大小)
 constexpr uintptr_t G_UI_PARTY_MENU_INDEX_VMA = 0x728ed8;      // PARTY_nMenuIndex (u8 队伍菜单索引)

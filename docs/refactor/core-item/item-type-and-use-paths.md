@@ -97,7 +97,16 @@ sealed / item box / dice / mercenary 先分流
 
 因此技能书、合成套装、神灯等不会被误判为“不可使用”。
 
-## 5. 扩展背包边界
+## 5. 快捷栏
+
+`CHAR_ProcessShortcut` 的条目是“类型 + 类别”，不是物品句柄。
+
+- 原生物品数量 > 0 时走原版路径。
+- 原生数量为 0 时，core.item 通过 `QolBagSource` 按类别查找注册源物品，调用源的 `use`。
+- 这使扩展袋药水、复活卷轴等已登记快捷栏物品可以触发，不需要写 `INVEN_pItem`。
+- 快捷栏条目读取只暴露类别，不暴露可变物品指针。
+
+## 6. 扩展背包边界
 
 - EB 只保存扩展侧 sidecar、捕获 UI 详情身份、转发动作。
 - 类型判断必须调用 `item.facts.item_type`；EB 不得再用 category 或 `ITEM_*` 原语自行判断。
