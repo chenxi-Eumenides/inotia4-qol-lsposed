@@ -1285,6 +1285,14 @@ void button_destroy_exe_wrapper(void* button) {
         QOL_LOG_INFO(QolDomain::kInventory, "sell button blocked by gate button=%p", button);
         return;
     }
+    // The desc observation hook can be stale after UIEquip recreates the button.
+    // This function-level entry is always live, so it is the final fallback that
+    // keeps an extension item from falling through to the original sell popup.
+    const auto* projection = qol::features::core_item::projection_callbacks();
+    if (projection != nullptr && projection->handle_extension_sell != nullptr &&
+        projection->handle_extension_sell()) {
+        return;
+    }
     const bool previous = g_in_equip_destroy_button;
     g_in_equip_destroy_button = true;
     call_backup("hook:UIEquip_ButtonDestroyExe", g_backup_button_destroy_exe, button);

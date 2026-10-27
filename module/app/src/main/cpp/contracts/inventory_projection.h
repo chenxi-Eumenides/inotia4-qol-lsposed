@@ -10,7 +10,7 @@ namespace qol::contracts {
 
 constexpr const char* kInventoryProjectionCapabilityId = "inventory.projection";
 constexpr uint16_t kInventoryProjectionVersionMajor = 1;
-constexpr uint16_t kInventoryProjectionVersionMinor = 3;
+constexpr uint16_t kInventoryProjectionVersionMinor = 4;
 
 enum class MoveMergeProjectionDropResult : uint8_t {
     kNotHandled = 0,
@@ -43,6 +43,7 @@ struct InventoryProjectionCallbacks {
     bool (*handle_use_mercenary_seal)();
     bool (*handle_backpack_equip)();
     bool (*handle_character_equip)();
+    bool (*handle_extension_sell)();
 };
 
 struct InventoryProjectionRegistryApi {

@@ -552,6 +552,92 @@ bool extension_use_mercenary_seal() {
     return true;
 }
 
+bool extension_handle_sell_button() {
+    if (qol::extension_bag::ui_state().store.frame_active ||
+        qol::extension_bag::ui_state().store.view_installed) {
+        return false;
+    }
+    int64_t price = 0;
+    bool valid = false;
+    bool owned = false;
+    int bag = -1;
+    int slot = -1;
+    {
+        ::qol::extension_bag::ReentryLock lock;
+        bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
+        slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
+        void* item = qol::extension_bag::ui_state().ui.extension_desc_item;
+        owned = item != nullptr && virtual_bag::valid_index(bag) &&
+                slot >= 0 && slot < virtual_bag::kSlotCount;
+        const bool current_item = item != nullptr && virtual_bag::valid_index(bag) &&
+                                  slot >= 0 && slot < virtual_bag::kSlotCount &&
+                                  qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item &&
+                                  module_object_release_allowed_locked(
+                                      bag, slot, item, "extension sell popup", false, nullptr);
+        int category = -1;
+        int count = 0;
+        int64_t unit_price = -1;
+        uint32_t multiplier_num = 0;
+        uint32_t multiplier_den = 0;
+        if (current_item && ::qol::extension_bag::access::host().game != nullptr &&
+            ::qol::extension_bag::access::host().item_facts != nullptr &&
+            ::qol::extension_bag::access::host().item_facts->is_no_sell != nullptr) {
+            count = ::qol::extension_bag::access::bag().items[bag][slot].count;
+            int32_t no_sell = 0;
+            if (read_item_category(item, &category) &&
+                qol::contracts::succeeded(
+                    ::qol::extension_bag::access::host().item_facts->is_no_sell(category, &no_sell)) &&
+                no_sell == 0 && count > 0 &&
+                extension_detail_sell_quote(item, count, &price, &unit_price,
+                                            &multiplier_num, &multiplier_den)) {
+                valid = true;
+                QOL_LOG_INFO(QolDomain::kExtensionBag,
+                    "sell price source=equip category=%d count=%d unit=%lld multiplier=%u/%u final=%lld",
+                    category, count, static_cast<long long>(unit_price), multiplier_num,
+                    multiplier_den, static_cast<long long>(price));
+            } else {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                    "sell price reject reason=quote_or_no_sell source=equip category=%d count=%d",
+                    category, count);
+            }
+        }
+        qol::extension_bag::ui_state().ui.extension_sell_original_ok = nullptr;
+        qol::extension_bag::ui_state().ui.extension_sell_original_cancel = nullptr;
+    }
+    if (!valid || price > UINT32_MAX) {
+        VIRTBAG_LOG("sell price reject reason=popup_unavailable source=equip valid=%d owned=%d",
+                    valid ? 1 : 0, owned ? 1 : 0);
+        if (!owned) return false;
+        const auto* sdk = ::qol::extension_bag::access::host().sdk;
+        if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
+            (void)sdk->ui->show_text_popup(0xc);
+        }
+        ::qol::extension_bag::ReentryLock lock;
+        clear_original_desc_locked();
+        return true;
+    }
+    // Only the shared raw-text confirmation is used. Falling back to the
+    // original destroy popup can show a different price and does not remove the
+    // extension sidecar item.
+    extension_bag_ui_description_set_off();
+    const bool popup_created =
+        extension_open_custom_sell_confirmation(static_cast<uint32_t>(price));
+    ::qol::extension_bag::ReentryLock lock;
+    if (popup_created) {
+        VIRTBAG_LOG("extension sell confirmation created price=%lld custom=1",
+                    static_cast<long long>(price));
+        reset_extension_desc_item_hooks_locked();
+    } else {
+        VIRTBAG_LOG("extension sell custom confirmation unavailable; original fallback disabled");
+        const auto* sdk = ::qol::extension_bag::access::host().sdk;
+        if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
+            (void)sdk->ui->show_text_popup(0xc);
+        }
+        clear_original_desc_locked();
+    }
+    return true;
+}
+
 void extension_desc_item_execute_at(size_t index, void* button) {
     if (index >= qol::extension_bag::ui_state().ui.extension_desc_item_bound.size() ||
         !qol::extension_bag::ui_state().ui.extension_desc_item_bound[index] || button == nullptr) return;
@@ -665,98 +751,13 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         extension_desc_original_matches(id, "desc.button.destroy") ||
         extension_desc_original_matches(id, "desc.button.destroy_ok");
     if (direct_sell || modified_destroy_sell) {
-        // 商店页出售必须走 UIStore 的原版数量/确认链；背包页详情出售才归
-        // extension_bag 接管。两者共用 desc 按钮槽，因此按商店场景分流。
-        if (qol::extension_bag::ui_state().store.frame_active || qol::extension_bag::ui_state().store.view_installed) {
-            (void)extension_desc_call_original(id, button);
-            return;
-        }
         VIRTBAG_LOG("extension sell button matched source=%s bag=%d slot=%d item=%p",
                     modified_destroy_sell ? "destroy" : "store",
-                    qol::extension_bag::ui_state().ui.extension_desc_item_bag, qol::extension_bag::ui_state().ui.extension_desc_item_slot,
+                    qol::extension_bag::ui_state().ui.extension_desc_item_bag,
+                    qol::extension_bag::ui_state().ui.extension_desc_item_slot,
                     qol::extension_bag::ui_state().ui.extension_desc_item);
-        int64_t price = 0;
-        bool valid = false;
-        {
-            ::qol::extension_bag::ReentryLock lock;
-            const int bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
-            const int slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
-            void* item = qol::extension_bag::ui_state().ui.extension_desc_item;
-            const bool current_item = item != nullptr && virtual_bag::valid_index(bag) &&
-                                      slot >= 0 && slot < virtual_bag::kSlotCount &&
-                                      qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item &&
-                                      module_object_release_allowed_locked(
-                                          bag, slot, item, "extension sell popup", false, nullptr);
-            int category = -1;
-            int count = 0;
-            int64_t unit_price = -1;
-            uint32_t multiplier_num = 0;
-            uint32_t multiplier_den = 0;
-            uint32_t payload = 0;
-            uint64_t generation = 0;
-            if (current_item && ::qol::extension_bag::access::host().game != nullptr &&
-                ::qol::extension_bag::access::host().item_facts != nullptr &&
-                ::qol::extension_bag::access::host().item_facts->is_no_sell != nullptr) {
-                // 出售按 sidecar 的 canonical 数量结算。装备等非堆叠物品的
-                // item 对象 count 字段可能不是可视数量（曾见 equipment=100）。
-                count = ::qol::extension_bag::access::bag().items[bag][slot].count;
-                int32_t no_sell = 0;
-                if (read_item_category(item, &category) &&
-                    qol::contracts::succeeded(
-                        ::qol::extension_bag::access::host().item_facts->is_no_sell(category, &no_sell)) &&
-                    no_sell == 0 && count > 0 &&
-                    extension_detail_sell_quote(item, count, &price, &unit_price,
-                                                &multiplier_num, &multiplier_den)) {
-                    valid = true;
-                    const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
-                    payload = virtual_bag::payload_hash(descriptor);
-                    generation = qol::extension_bag::ui_state().objects.module_object_use[bag][slot].generation;
-                    QOL_LOG_INFO(QolDomain::kExtensionBag,
-                        "sell price source=equip category=%d count=%d unit=%lld multiplier=%u/%u final=%lld payload=%u gen=%llu",
-                        category, count, static_cast<long long>(unit_price), multiplier_num,
-                        multiplier_den, static_cast<long long>(price), payload,
-                        static_cast<unsigned long long>(generation));
-                } else {
-                    QOL_LOG_WARN(QolDomain::kExtensionBag,
-                        "sell price reject reason=quote_or_no_sell source=equip category=%d count=%d",
-                        category, count);
-                }
-            } else if (!current_item) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "sell price reject reason=stale_or_release_guard source=equip bag=%d slot=%d",
-                            bag, slot);
-            } else {
-                QOL_LOG_WARN(QolDomain::kExtensionBag, "sell price reject reason=symbols source=equip bag=%d slot=%d",
-                            bag, slot);
-            }
-            qol::extension_bag::ui_state().ui.extension_sell_original_ok = nullptr;
-            qol::extension_bag::ui_state().ui.extension_sell_original_cancel = nullptr;
-        }
-        bool popup_created = false;
-        if (valid && price <= UINT32_MAX) {
-            // 只使用 core.custom_ui 的原始文本确认框。回退原版销毁弹窗会在某些
-            // 场景显示默认文本/错误价格，且不会删除扩展袋 sidecar 物品。
-            extension_bag_ui_description_set_off();
-            popup_created = extension_open_custom_sell_confirmation(static_cast<uint32_t>(price));
-            if (!popup_created) {
-                VIRTBAG_LOG("extension sell custom confirmation unavailable; original fallback disabled");
-                const auto* sdk = ::qol::extension_bag::access::host().sdk;
-                if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
-                    (void)sdk->ui->show_text_popup(0xc);
-                }
-            } else {
-                VIRTBAG_LOG("extension sell confirmation created price=%lld custom=1",
-                            static_cast<long long>(price));
-            }
-        } else {
-            VIRTBAG_LOG("sell price reject reason=popup_unavailable source=equip valid=%d",
-                        valid ? 1 : 0);
-        }
-        ::qol::extension_bag::ReentryLock lock;
-        if (popup_created) {
-            reset_extension_desc_item_hooks_locked();
-        } else {
-            clear_original_desc_locked();
-        }
+        if (extension_handle_sell_button()) return;
+        (void)extension_desc_call_original(id, button);
         return;
     }
     // 未识别操作没有 inventory.action 入口时必须拒绝，不能让原版直接改写 sidecar 对象。

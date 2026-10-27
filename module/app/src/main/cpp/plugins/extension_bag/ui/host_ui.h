@@ -22,6 +22,7 @@ bool extension_bag_ui_make_mercenary(void* item, void** out_mercenary);
 bool extension_bag_ui_read_save_is_ok();
 bool extension_bag_ui_read_has_empty_mercenary_slot();
 void make_desc_equip_gate(void* ctrl, void* arg);
+bool extension_handle_sell_button();
 
 void store_install_tab_buttons_locked();
 void store_delete_tab_buttons_locked();

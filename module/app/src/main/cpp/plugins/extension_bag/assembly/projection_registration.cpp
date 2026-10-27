@@ -4,6 +4,7 @@
 #include "contracts/move_merge.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/core/host_adapter.h"
+#include "plugins/extension_bag/ui/host_ui.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/state.h"
@@ -104,6 +105,10 @@ bool projection_handle_character_equip() {
     return projection_available() && extension_handle_character_equip();
 }
 
+bool projection_handle_extension_sell() {
+    return projection_available() && extension_handle_sell_button();
+}
+
 const qol::contracts::InventoryProjectionCallbacks kProjectionCallbacks{
     sizeof(qol::contracts::InventoryProjectionCallbacks),
     qol::contracts::kInventoryProjectionVersionMajor,
@@ -122,6 +127,7 @@ const qol::contracts::InventoryProjectionCallbacks kProjectionCallbacks{
     &projection_handle_use_mercenary_seal,
     &projection_handle_backpack_equip,
     &projection_handle_character_equip,
+    &projection_handle_extension_sell,
 };
 
 const qol::contracts::InventoryProjectionRegistryApi* projection_registry() {
