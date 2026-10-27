@@ -314,23 +314,55 @@ bool extension_handle_original_bag_unequip() {
 bool extension_handle_backpack_equip() {
     if (!::qol::extension_bag::access::enabled().load() || !read_world_in_world()) return false;
     ::qol::extension_bag::ReentryLock lock;
-    if (::qol::extension_bag::access::bag().mode != virtual_bag::Mode::kModule) return false;
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "backpack equip probe mode=%d desc_item=%p desc_bag=%d desc_slot=%d types=%d/%d/%d/%d/%d",
+                 static_cast<int>(::qol::extension_bag::access::bag().mode),
+                 qol::extension_bag::ui_state().ui.extension_desc_item,
+                 qol::extension_bag::ui_state().ui.extension_desc_item_bag,
+                 qol::extension_bag::ui_state().ui.extension_desc_item_slot,
+                 ::qol::extension_bag::access::bag().types[0],
+                 ::qol::extension_bag::access::bag().types[1],
+                 ::qol::extension_bag::access::bag().types[2],
+                 ::qol::extension_bag::access::bag().types[3],
+                 ::qol::extension_bag::access::bag().types[4]);
     void* item = qol::extension_bag::ui_state().ui.extension_desc_item;
-    const int source_bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
-    const int source_slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
-    if (item == nullptr || !virtual_bag::valid_index(source_bag) || source_slot < 0 ||
-        source_slot >= virtual_bag::kSlotCount ||
-        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] != item) {
+    int source_bag = qol::extension_bag::ui_state().ui.extension_desc_item_bag;
+    int source_slot = qol::extension_bag::ui_state().ui.extension_desc_item_slot;
+    // Original-bag details are not captured by the EB detail gate. Read the
+    // original UIDesc data, matching the native ButtonEquipExe source.
+    if (item == nullptr && ::qol::extension_bag::access::host().inventory_extras != nullptr &&
+        ::qol::extension_bag::access::host().inventory_extras->read.detail_item != nullptr) {
+        (void)::qol::extension_bag::access::host().inventory_extras->read.detail_item(&item);
+        source_bag = -1;
+        source_slot = -1;
+    }
+    if (item == nullptr) return false;
+    const bool module_source = module_slot_of_item_locked(item, &source_bag, &source_slot);
+    if (module_source &&
+        (!virtual_bag::valid_index(source_bag) || source_slot < 0 ||
+         source_slot >= virtual_bag::kSlotCount ||
+         qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] != item)) {
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "backpack equip probe rejected stale identity bag=%d slot=%d item=%p",
+                     source_bag, source_slot, item);
         return false;
     }
     int category = 0;
     if (!read_item_category(item, &category) || !category_is_extension_backpack(category)) {
+        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                     "backpack equip probe rejected category=%d bag=%d slot=%d",
+                     category, source_bag, source_slot);
         return false;
     }
     const int target = first_empty_extension_bag_locked();
+    QOL_LOG_INFO(QolDomain::kExtensionBag,
+                 "backpack equip probe target=%d category=%d src=%d/%d active=%d",
+                 target, category, source_bag, source_slot,
+                 virtual_bag::active_extension_bags());
     if (target < 0) {
-        VIRTBAG_LOG("extension backpack button equip no empty bag slot src=%d/%d", source_bag,
-                    source_slot);
+        VIRTBAG_LOG("extension backpack button equip no empty bag slot src=%d/%d native=%d",
+                    source_bag, source_slot, module_source ? 0 : 1);
+        if (!module_source) return false;
         const auto* sdk = ::qol::extension_bag::access::host().sdk;
         if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
             (void)sdk->ui->show_text_popup(6);

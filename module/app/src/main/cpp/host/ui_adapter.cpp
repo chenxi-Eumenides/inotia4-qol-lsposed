@@ -3,6 +3,7 @@
 #include <array>
 #include <cerrno>
 #include <cstddef>
+#include <fcntl.h>
 #include <cstdint>
 #include <cstring>
 #include <limits>
@@ -432,10 +433,15 @@ bool control_readable(const void* control, size_t size) {
     iovec remote{const_cast<void*>(control), size};
     const ssize_t read = process_vm_readv(getpid(), &local, 1, &remote, 1, 0);
     if (read == static_cast<ssize_t>(size)) return true;
-    if (read < 0 && (errno == ENOSYS || errno == EPERM)) {
-        return game_memory_accessible(control, size, 'r');
-    }
-    return false;
+    // Some Android seccomp profiles deny process_vm_readv(2) for self. Reading
+    // /proc/self/mem still faults on the exact range and is not backed by the
+    // five-second /proc/self/maps cache.
+    const int fd = open("/proc/self/mem", O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    const ssize_t pread_read = pread(fd, probe.data(), size, static_cast<off_t>(
+        reinterpret_cast<uintptr_t>(control)));
+    close(fd);
+    return pread_read == static_cast<ssize_t>(size);
 }
 
 QolResult child_count(QolUiHandle control, uint32_t* out) {

@@ -1243,10 +1243,15 @@ void button_equip_exe_wrapper(void* button) {
         return;
     }
     const auto* projection = qol::features::core_item::projection_callbacks();
-    if (projection != nullptr && projection->handle_backpack_equip != nullptr &&
-        projection->handle_backpack_equip()) {
-        return;
-    }
+    const bool projection_equip_handled =
+        projection != nullptr && projection->handle_backpack_equip != nullptr &&
+        projection->handle_backpack_equip();
+    QOL_LOG_INFO(QolDomain::kInventory,
+                 "ButtonEquipExe projection=%p callback=%p handled=%d",
+                 projection,
+                 projection == nullptr ? nullptr : reinterpret_cast<void*>(projection->handle_backpack_equip),
+                 projection_equip_handled ? 1 : 0);
+    if (projection_equip_handled) return;
     qol::contracts::QolInventoryItemRef source_ref{};
     if (selected_registered_source_item(&source_ref)) {
         QOL_LOG_WARN(QolDomain::kInventory,

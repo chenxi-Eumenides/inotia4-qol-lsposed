@@ -356,16 +356,24 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
                          "extension desc item captured bag=%d slot=%d item=%p",
                          item_bag, item_slot, item);
         } else {
-            reset_extension_desc_item_hooks_locked();
-            qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
-            qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
-            qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
             if (extension_bag_item) {
-                // 袋详情保留原版 UnequipExe；卸袋由函数级入口识别，
-                // 不能安装普通物品的 V2 详情 hook（否则会落到分解分支）。
+                // 袋详情保留原版 UnequipExe/EquipExe；但详情身份必须保留，
+                // 否则函数级 ButtonEquipExe wrapper 无法定位要装备的袋物品。
+                qol::extension_bag::ui_state().ui.extension_desc_item = item;
+                qol::extension_bag::ui_state().ui.extension_desc_item_bag = item_bag;
+                qol::extension_bag::ui_state().ui.extension_desc_item_slot = item_slot;
+                qol::extension_bag::ui_state().ui.extension_desc_unequip_bag = item_bag;
+                // 袋物品也需要出售按钮 hook；equip/unequip 仍由 detail_hooks
+                // 按原版 proc 主动解绑，保留函数级按钮入口。
+                install_extension_desc_item_hooks_locked(item);
                 QOL_LOG_INFO(QolDomain::kExtensionBag,
                              "extension bag desc keeps original unequip bag=%d slot=%d item=%p",
                              item_bag, item_slot, item);
+            } else {
+                reset_extension_desc_item_hooks_locked();
+                qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+                qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+                qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
             }
         }
     }

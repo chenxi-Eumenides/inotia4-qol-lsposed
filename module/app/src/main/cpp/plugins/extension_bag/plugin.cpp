@@ -7,6 +7,7 @@
 #include "contracts/bag.h"
 #include "contracts/craft_facts.h"
 #include "contracts/inventory_projection.h"
+#include "contracts/ui_confirmation.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_action.h"
 #include "contracts/move_merge.h"
@@ -148,6 +149,10 @@ const qol::contracts::CapabilityRequirement kOptionalRequires[] = {
     // 页签锚定：句柄存活/身份校验/失效重建由 core.custom_ui 的 ui_components 提供。
     {qol::contracts::kUiComponentsCapabilityId,
      {qol::contracts::kUiContractMajor, qol::contracts::kUiContractMinor}},
+    // 可选：出售确认框优先使用带价格文本的共享确认框。
+    {qol::contracts::kUiConfirmationCapabilityId,
+     {static_cast<uint16_t>(qol::contracts::kUiConfirmationVersionMajor),
+      static_cast<uint16_t>(qol::contracts::kUiConfirmationVersionMinor)}},
 };
 
 const qol::contracts::QolPortRequirement kPorts[] = {
