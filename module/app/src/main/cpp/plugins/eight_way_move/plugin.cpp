@@ -154,7 +154,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         port->api.on_direction_touch == nullptr || port->api.translate_press_key == nullptr ||
         port->api.char_move == nullptr || port->api.set_enabled == nullptr ||
         port->api.reset == nullptr || port->api.handle_wait_coord == nullptr ||
-        port->api.map_blocking_query == nullptr) {
+        port->api.map_blocking_query == nullptr || port->api.prepare_overlay == nullptr) {
         return 1;
     }
     set_host_sdk(ctx.sdk);

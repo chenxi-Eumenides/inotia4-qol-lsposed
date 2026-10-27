@@ -21,6 +21,8 @@ struct QolMovementInputApi {
     int32_t (*char_move)(void* ch, int32_t dir, int32_t delta, uint8_t flag);
     // UIPlayPorting_Draw 原函数返回后调用：按原始触摸角度绘制旋转指针。
     void (*draw_overlay)();
+    // UIPlayPorting_Draw 原函数执行前调用：隐藏原版四根固定箭头。
+    void (*prepare_overlay)();
     void (*set_enabled)(uint8_t enabled);
     void (*reset)();
     // 每逻辑帧主线程检查：离开游戏态清理、主控切换吸附。

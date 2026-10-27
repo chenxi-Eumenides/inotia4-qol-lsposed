@@ -49,6 +49,10 @@ bool set_camera_focus(int32_t x, int32_t y);
 // 虚拟按键根下按 ID 查找控件。
 void* virtual_control(int32_t id);
 
+// 控件相对矩形 [x,y,w,h]（ControlObject 基类 +0x18）。
+bool control_rect(void* ctrl, int64_t rect[4]);
+bool set_control_rect(void* ctrl, int64_t x, int64_t y, int64_t w, int64_t h);
+
 // 虚拟按键根下的方向摇杆控件（ID 0x15）。
 void* virtual_pad_control();
 

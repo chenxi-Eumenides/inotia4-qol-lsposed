@@ -125,8 +125,11 @@ void porting_draw_wrapper() {
     const auto backup = reinterpret_cast<PortingDrawFn>(
         g_backup_porting_draw.load(std::memory_order_acquire));
     if (backup == nullptr) return;
-    backup();
     const auto* port = input_port();
+    if (gate_enabled() && port != nullptr && port->api.prepare_overlay != nullptr) {
+        port->api.prepare_overlay();
+    }
+    backup();
     if (gate_enabled() && port != nullptr && port->api.draw_overlay != nullptr) {
         port->api.draw_overlay();
     }

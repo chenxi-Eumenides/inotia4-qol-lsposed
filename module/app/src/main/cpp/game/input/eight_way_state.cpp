@@ -7,6 +7,7 @@
 #include "game/access/qol_log_seam.h"
 #include "game/access/world.h"
 #include "game/input/eight_way_access.h"
+#include "game/input/eight_way_draw.h"
 #include "game/input/eight_way_move_math.h"
 #include "game/state/game_state.h"
 
@@ -123,6 +124,7 @@ void set_enabled(uint8_t enabled_value) {
         if (!was_on) {
             g_last_lead = lead_member();
             reset_state();
+            prepare_direction_overlay();
         }
         return;
     }
@@ -137,6 +139,7 @@ void set_enabled(uint8_t enabled_value) {
         }
     }
     reset_state();
+    restore_direction_overlay();
     g_last_lead = nullptr;
 }
 

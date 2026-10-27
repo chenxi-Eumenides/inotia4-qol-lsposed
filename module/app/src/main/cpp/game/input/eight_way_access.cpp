@@ -91,6 +91,7 @@ FindControlByIdFn find_control_by_id_fn() {
     return fn;
 }
 
+
 MapBlockingFn map_blocking_tile_fn() {
     static MapBlockingFn fn = nullptr;
     if (fn == nullptr && g_base != 0) {
@@ -286,6 +287,27 @@ void* virtual_control(int32_t id) {
 
 void* virtual_pad_control() {
     return virtual_control(0x15);
+}
+
+bool control_rect(void* ctrl, int64_t rect[4]) {
+    if (ctrl == nullptr || rect == nullptr) return false;
+    const auto* base = static_cast<const uint8_t*>(ctrl) + 0x18;
+    if (!readable(base, sizeof(int64_t) * 4)) return false;
+    const auto* values = reinterpret_cast<const int64_t*>(base);
+    for (int i = 0; i < 4; ++i) rect[i] = values[i];
+    return true;
+}
+
+bool set_control_rect(void* ctrl, int64_t x, int64_t y, int64_t w, int64_t h) {
+    if (ctrl == nullptr) return false;
+    auto* base = static_cast<uint8_t*>(ctrl) + 0x18;
+    if (!writable(base, sizeof(int64_t) * 4)) return false;
+    auto* values = reinterpret_cast<int64_t*>(base);
+    values[0] = x;
+    values[1] = y;
+    values[2] = w;
+    values[3] = h;
+    return true;
 }
 
 }  // namespace qol::game::input::access

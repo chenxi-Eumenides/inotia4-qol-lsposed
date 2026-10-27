@@ -14,16 +14,65 @@
 namespace qol::game::input {
 namespace {
 
+using GetGroupFn = void* (*)(int32_t);
+using GetLocFn = void* (*)(int32_t, int32_t);
+using DrawTexturePartExFn = void (*)(void*, int32_t, int32_t, int32_t, int32_t, int32_t,
+                                     int32_t, int32_t, int32_t, int32_t, int32_t, int32_t,
+                                     int32_t);
 using DrawLineFn = void (*)(int32_t, int32_t, int32_t, int32_t, uint32_t);
 using FillRectFn = void (*)(int32_t, int32_t, int32_t, int32_t, uint32_t);
 
 constexpr int32_t kPadHalfSize = 126;
+constexpr float kOrbitRadius = 92.0f;
 constexpr float kRadius = 96.0f;
 constexpr float kTail = 12.0f;
 constexpr float kHeadLength = 16.0f;
 constexpr float kHeadHalf = 9.0f;
-// ABGR8888：金色指针，和原版 HUD 的暗色底对比明显。
 constexpr uint32_t kIndicatorColor = 0xFF00D7FFu;
+// 原版箭头 loc：上箭头 0x0f；其贴图基准朝上。
+constexpr int32_t kUpArrowLoc = 0x0f;
+constexpr int32_t kArrowControlFirst = 0x1e;
+constexpr int32_t kArrowControlCount = 4;
+constexpr int64_t kArrowOffscreen = -10000;
+constexpr double kRadToDeg = 57.29577951308232;
+
+struct SavedRect {
+    int64_t x = 0;
+    int64_t y = 0;
+    int64_t w = 0;
+    int64_t h = 0;
+    bool valid = false;
+};
+
+SavedRect g_saved_arrow_rect[kArrowControlCount];
+
+GetGroupFn get_group_fn() {
+    static GetGroupFn fn = nullptr;
+    if (fn == nullptr && g_base != 0) {
+        fn = reinterpret_cast<GetGroupFn>(
+            g_base + fn_resolve("F_IMGSYS_GET_GROUP_VMA", F_IMGSYS_GET_GROUP_VMA));
+    }
+    return fn;
+}
+
+GetLocFn get_loc_fn() {
+    static GetLocFn fn = nullptr;
+    if (fn == nullptr && g_base != 0) {
+        fn = reinterpret_cast<GetLocFn>(
+            g_base + fn_resolve("F_IMGSYS_GET_LOC_VMA", F_IMGSYS_GET_LOC_VMA));
+    }
+    return fn;
+}
+
+DrawTexturePartExFn draw_texture_part_ex_fn() {
+    static DrawTexturePartExFn fn = nullptr;
+    if (fn == nullptr && g_base != 0) {
+        fn = reinterpret_cast<DrawTexturePartExFn>(
+            g_base + fn_resolve("F_SGL_DRAW_TEXTURE_PART_EX_VMA",
+                                F_SGL_DRAW_TEXTURE_PART_EX_VMA));
+    }
+    return fn;
+}
 
 DrawLineFn draw_line_fn() {
     static DrawLineFn fn = nullptr;
@@ -43,37 +92,11 @@ FillRectFn fill_rect_fn() {
     return fn;
 }
 
-}  // namespace
-
-void draw_direction_indicator() {
-    if (!enabled()) return;
-    const State& state = current_state();
-    if (!state.active || !state.raw_active) return;
-    if (world_game_state_gate() != 0) return;
-
-    const float dx = static_cast<float>(state.raw_dx);
-    const float dy = static_cast<float>(state.raw_dy);
-    const float length = std::sqrt(dx * dx + dy * dy);
-    if (length < 1.0f) return;
-
-    // 原始触摸向量：dx 右为正，dy 上为正。屏幕坐标 y 向下，所以绘制时取 -dy。
-    const float ux = dx / length;
-    const float uy = dy / length;
-
-    void* pad = access::virtual_pad_control();
-    if (pad == nullptr) return;
-    int64_t left = 0;
-    int64_t top = 0;
-    if (!access::control_absolute_point(pad, &left, &top)) return;
-    const float cx = static_cast<float>(left + kPadHalfSize);
-    const float cy = static_cast<float>(top + kPadHalfSize);
-
+void draw_fallback_line(float cx, float cy, float ux, float uy) {
     const int32_t tail_x = static_cast<int32_t>(std::lround(cx + ux * kTail));
     const int32_t tail_y = static_cast<int32_t>(std::lround(cy - uy * kTail));
     const int32_t tip_x = static_cast<int32_t>(std::lround(cx + ux * kRadius));
     const int32_t tip_y = static_cast<int32_t>(std::lround(cy - uy * kRadius));
-
-    // 屏幕方向向量 s=(ux,-uy)，垂直向量 p=(uy,ux)。
     const int32_t wing1_x = static_cast<int32_t>(
         std::lround(tip_x - ux * kHeadLength + uy * kHeadHalf));
     const int32_t wing1_y = static_cast<int32_t>(
@@ -88,19 +111,121 @@ void draw_direction_indicator() {
     draw_line(tail_x, tail_y, tip_x, tip_y, kIndicatorColor);
     draw_line(tip_x, tip_y, wing1_x, wing1_y, kIndicatorColor);
     draw_line(tip_x, tip_y, wing2_x, wing2_y, kIndicatorColor);
-
     const FillRectFn fill_rect = fill_rect_fn();
     if (fill_rect != nullptr) {
         fill_rect(static_cast<int32_t>(cx) - 2, static_cast<int32_t>(cy) - 2, 4, 4,
                   kIndicatorColor);
     }
+}
+
+}  // namespace
+
+void prepare_direction_overlay() {
+    if (!enabled()) return;
+    for (int32_t i = 0; i < kArrowControlCount; ++i) {
+        void* ctrl = access::virtual_control(kArrowControlFirst + i);
+        if (ctrl == nullptr) continue;
+        int64_t rect[4]{};
+        if (!access::control_rect(ctrl, rect)) continue;
+        SavedRect& saved = g_saved_arrow_rect[i];
+        if (!saved.valid) {
+            saved.x = rect[0];
+            saved.y = rect[1];
+            saved.w = rect[2];
+            saved.h = rect[3];
+            saved.valid = true;
+        }
+        if (rect[0] != kArrowOffscreen || rect[1] != kArrowOffscreen) {
+            (void)access::set_control_rect(ctrl, kArrowOffscreen, kArrowOffscreen, rect[2],
+                                           rect[3]);
+        }
+    }
+}
+
+void restore_direction_overlay() {
+    for (int32_t i = 0; i < kArrowControlCount; ++i) {
+        SavedRect& saved = g_saved_arrow_rect[i];
+        if (!saved.valid) continue;
+        void* ctrl = access::virtual_control(kArrowControlFirst + i);
+        if (ctrl != nullptr) {
+            (void)access::set_control_rect(ctrl, saved.x, saved.y, saved.w, saved.h);
+        }
+    }
+}
+
+void draw_direction_indicator() {
+    if (!enabled()) return;
+    const State& state = current_state();
+    if (!state.active || !state.raw_active) return;
+    if (world_game_state_gate() != 0) return;
+
+    const float dx = static_cast<float>(state.raw_dx);
+    const float dy = static_cast<float>(state.raw_dy);
+    const float length = std::sqrt(dx * dx + dy * dy);
+    if (length < 1.0f) return;
+
+    // 原始触摸向量：dx 右为正，dy 上为正。屏幕 y 向下。
+    const float ux = dx / length;
+    const float uy = dy / length;
+
+    void* pad = access::virtual_pad_control();
+    if (pad == nullptr) return;
+    int64_t left = 0;
+    int64_t top = 0;
+    if (!access::control_absolute_point(pad, &left, &top)) return;
+    const float cx = static_cast<float>(left + kPadHalfSize);
+    const float cy = static_cast<float>(top + kPadHalfSize);
+
+    const GetGroupFn get_group = get_group_fn();
+    const GetLocFn get_loc = get_loc_fn();
+    const DrawTexturePartExFn draw_part_ex = draw_texture_part_ex_fn();
+    if (get_group == nullptr || get_loc == nullptr || draw_part_ex == nullptr) {
+        draw_fallback_line(cx, cy, ux, uy);
+        return;
+    }
+
+    void* group = get_group(0x16);
+    void* loc = get_loc(0x16, kUpArrowLoc);
+    if (group == nullptr || loc == nullptr) {
+        draw_fallback_line(cx, cy, ux, uy);
+        return;
+    }
+
+    const auto* rect = static_cast<const int32_t*>(loc);
+    const int32_t sx = rect[0];
+    const int32_t sy = rect[1];
+    const int32_t sw = rect[2];
+    const int32_t sh = rect[3];
+    const int32_t offset_x = rect[4];
+    const int32_t offset_y = rect[5];
+
+    // 上箭头基准朝上：屏幕角度（0=右，-90=上）+90 得到旋转角。
+    const double screen_angle_deg = std::atan2(-static_cast<double>(dy),
+                                               static_cast<double>(dx)) * kRadToDeg;
+    int32_t rotation = static_cast<int32_t>(std::lround(screen_angle_deg + 90.0));
+    rotation %= 360;
+    if (rotation < 0) rotation += 360;
+
+    // SGL 的 x/y 是未旋转贴图左上角；绕中心旋转需要把旋转后的左上角算回来。
+    const double theta = static_cast<double>(rotation) / kRadToDeg;
+    const double cos_t = std::cos(theta);
+    const double sin_t = std::sin(theta);
+    const double half_w = sw * 0.5;
+    const double half_h = sh * 0.5;
+    const int32_t draw_x = static_cast<int32_t>(std::lround(
+        cx + ux * kOrbitRadius - half_w * cos_t + half_h * sin_t));
+    const int32_t draw_y = static_cast<int32_t>(std::lround(
+        cy - uy * kOrbitRadius - half_w * sin_t - half_h * cos_t));
+
+    draw_part_ex(group, draw_x, draw_y, sx, sy, sw, sh, offset_x, offset_y, 2, 0, 100,
+                 rotation);
 
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true, std::memory_order_acq_rel)) {
         QOL_LOG_SEAM_INFO(qol::game::kQolLogDomainPlatform,
-                          "omni indicator dx=%d dy=%d center=(%d,%d) tip=(%d,%d)",
+                          "omni sprite dx=%d dy=%d center=(%d,%d) rot=%d wh=%dx%d draw=(%d,%d)",
                           state.raw_dx, state.raw_dy, static_cast<int32_t>(cx),
-                          static_cast<int32_t>(cy), tip_x, tip_y);
+                          static_cast<int32_t>(cy), rotation, sw, sh, draw_x, draw_y);
     }
 }
 

@@ -16,6 +16,7 @@ const contracts::QolMovementInputPort kPort{
         &qol::game::input::translate_press_key,
         &qol::game::input::char_move,
         &qol::game::input::draw_direction_indicator,
+        &qol::game::input::prepare_direction_overlay,
         &qol::game::input::set_enabled,
         &qol::game::input::reset,
         &qol::game::input::poll,
