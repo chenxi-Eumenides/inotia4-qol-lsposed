@@ -2,8 +2,8 @@
 
 namespace qol::game::input {
 
-// UIPlayPorting_Draw 原函数返回后调用：斜向时在原版已点亮主轴箭头的基础上，
-// 补画副轴箭头，表现“两个方向同时亮”。
-void draw_secondary_arrow();
+// UIPlayPorting_Draw 原函数返回后调用：按原始触摸角度绘制旋转指针；
+// 释放/死区后 state.raw_active=false，不绘制。
+void draw_direction_indicator();
 
 }  // namespace qol::game::input

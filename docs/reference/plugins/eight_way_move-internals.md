@@ -14,7 +14,7 @@
 | `game/input/eight_way_access.{h,cpp}` | KEY/键表/按住位、坐标/路径、碰撞查询、控件/摄像机访问 |
 | `game/input/eight_way_state.{h,cpp}` | 触摸状态机、自定义键码、补步门禁、主控切换吸附 |
 | `game/input/eight_way_move.{h,cpp}` | `CHAR_Move` 双轴 wrapper、滑行/回滚/恢复坐标 |
-| `game/input/eight_way_draw.{h,cpp}` | `UIPlayPorting_Draw` 后补画第二根方向箭头 |
+| `game/input/eight_way_draw.{h,cpp}` | `UIPlayPorting_Draw` 后按原始触摸角度绘制旋转指针 |
 | `tests/test_eight_way_move.cpp` | 44 格点、角度/滞回、主副轴、缩放、自定义键码单测 |
 | `tests/test_eight_way_move_plugin.cpp` | descriptor、8 资源、端口、feature 单测 |
 
@@ -134,13 +134,15 @@
 4. 直接写坐标，不调用 `CHAR_Move`，因此不触发补步、格子事件；旧主控已不是镜头目标。
 5. 瓦片中心被挡或坐标不可读时跳过并记录一次 warn，交给 AI 自己的路径逻辑。
 
-### 3.8 第二根方向箭头
+### 3.8 旋转方向指针
 
-`porting_draw_wrapper` 先执行原 `UIPlayPorting_Draw`，再调 `draw_secondary_arrow()`：
+`porting_draw_wrapper` 先执行原 `UIPlayPorting_Draw`，再调 `draw_direction_indicator()`：
 
-- 方向到隐藏子控件：下 `0x1f`、左 `0x20`、上 `0x21`、右 `0x1e`。
-- 控件尺寸：`0x1e/0x20` 为 `0x46x0x5a`，`0x1f/0x21` 为 `0x5a x0x46`；中心 = 绝对左上角 + 半宽/半高。
-- 点亮 loc：下 `0x10`、左 `0x0d`、上 `0x0f`、右 `0x0e`（IMGSYS group `0x16`）。
+- `state.raw_active/raw_dx/raw_dy` 保存原始触摸向量（dx 右正、dy 上正）；松开、死区、非 Play 状态会清空，因此释放后不绘制。
+- 摇杆中心 = `0x15` 控件绝对左上角 + `126`。
+- 指针长 `96px`，尾端从中心外 `12px` 开始；箭头两翼由屏幕方向向量和垂直向量计算。
+- 用 `GRPX_DrawLine`（`0x8fb7c`，ABGR8888）画主轴和两翼，用 `GRPX_FillRect` 画中心点；颜色 `0xFF00D7FF`（金色）。
+- 只读原始角度，不随 44 方向量化；原版四根固定箭头仍由原版绘制。
 
 ## 4. 数据流
 
@@ -168,7 +170,7 @@
 - 碰撞查询对非对齐坐标使用完整 16px 碰撞盒；贴墙/角落可能比原版早 0–4px 停住，需真机确认手感。
 - 路径/AI 仍按 8px 网格；主控从非 8px 坐标启动 `move_to` 时可能先吸附 0–7px。
 - 切角色吸附是同步直接写坐标；瓦片中心被挡时跳过，AI 可能仍从非对齐坐标开始。
-- 第二箭头是原版绘制后的 overlay；原版 HUD 绘制顺序改变时可能覆盖更高层元素。
+- 旋转指针是原版绘制后的 1px 线段 overlay；原版 HUD 绘制顺序改变时可能覆盖更高层元素，线宽/颜色需按设备观感调整。
 - `GAMESTATE_PressKey` 松手 patch 与 `CHAR_SetAction` patch 在所有变体同址同字，但新增 hook/patch 仍需逐变体 preflight。
 - 完整设备验收未完成：贴墙/角落、门口、传送、拾取、摄像机、水面、推动、攻击/停止、松手、切角色、多分辨率、五个变体仍待逐项验证。
 

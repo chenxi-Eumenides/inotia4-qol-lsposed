@@ -69,7 +69,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "UIPlayPorting_Draw 原函数返回后补画第二根方向箭头",
+        "UIPlayPorting_Draw 原函数返回后按原始触摸角度绘制旋转指针",
         nullptr,
         120,
         reinterpret_cast<void*>(&porting_draw_wrapper),

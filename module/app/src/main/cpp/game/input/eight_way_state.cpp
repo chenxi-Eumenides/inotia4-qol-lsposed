@@ -220,6 +220,9 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
     g_state.primary_step = primary_step;
     g_state.secondary_step = secondary_step;
     g_state.primary_key = primary_key;
+    g_state.raw_active = true;
+    g_state.raw_dx = dx;
+    g_state.raw_dy = dy;
     g_state.owns_input = true;
 
     access::write_key_code(custom_dir_key(0));

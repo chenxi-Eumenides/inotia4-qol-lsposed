@@ -16,6 +16,9 @@ struct State {
     int32_t primary_step = 0;
     int32_t secondary_step = 0;
     int32_t primary_key = 0;
+    bool raw_active = false;  // 原始触摸向量有效（用于旋转指针）
+    int32_t raw_dx = 0;       // 右为正
+    int32_t raw_dy = 0;       // 上为正
     bool owns_input = false;  // 当前 KEY_nCode/按住位是否由本功能写入
 };
 

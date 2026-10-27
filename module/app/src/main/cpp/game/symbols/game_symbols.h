@@ -968,6 +968,7 @@ constexpr uintptr_t F_GRPX_SET_FONT_COLOR_VMA = 0x8fe58;      // void (u32 abgr)
 constexpr uintptr_t F_GRPX_DRAW_STRING_WITH_FONT_VMA = 0x8f9b0; // void (char*, i32 x, i32 y, i32 align, i32 font) 原版字体绘制
 constexpr uintptr_t F_GRPX_SET_FONT_COLOR_RGB_VMA = 0x8fdb4;  // void (i32 r, i32 g, i32 b) 原版 RGB 字体配色
 constexpr uintptr_t F_GRPX_DRAW_PART_VMA = 0x8f368;           // void (group*, i32 x, i32 y, loc*, i32 type, i32 flip, i32) 静态贴图分片绘制
+constexpr uintptr_t F_GRPX_DRAW_LINE_VMA = 0x8fb7c;           // void (i32 x1, i32 y1, i32 x2, i32 y2, u32 abgr) 线段
 constexpr uintptr_t F_UI_DRAW_STRING_HALIGN_VMA = 0xaf02c;    // void (char* text, i32 x, i32 y, i32 font, i32 align) 画文字（font 写入 [*G_FONT_OBJ_SLOT_VMA] 首字段；align 0左/1中/2右）
 constexpr uintptr_t F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA = 0xb190c; // void (char* text, i32 x, i32 y, i32 width, i32 font, u32 color, i32 align, u32 color2) 官方完整文字封装（取字体对象→SetFontColor→DrawStringWithFont；UIDesc_Draw 0xb5890/UINpc_Draw 0xc2c3c 实证 font=1 有效）
 constexpr uintptr_t F_MW_GRAPHIC_DRAW_STRING_VMA = 0xa24cc;   // void (i32 x, i32 y, char* text, i32 align, i32 mode) UI_DrawStringHAlign 下层（mode 2→y-6, 3→y-12）
