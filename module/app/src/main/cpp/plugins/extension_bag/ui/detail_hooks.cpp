@@ -119,12 +119,52 @@ void install_extension_desc_item_hooks_locked(void* item) {
     size_t resolved_execute_slot_count = 0;
     for (size_t index = 0; index < qol::extension_bag::ui_state().ui.extension_desc_item_bound.size(); ++index) {
         if (index == 2) continue;
-        if (qol::extension_bag::ui_state().ui.extension_desc_item_bound[index] || qol::extension_bag::ui_state().ui.extension_desc_item_ids[index] != 0) {
+        if (qol::extension_bag::ui_state().ui.extension_desc_item_bound[index] ||
+            qol::extension_bag::ui_state().ui.extension_desc_item_ids[index] != 0) {
+            // UIEquip_SetDescMenu reuses panel slots but recreates the button
+            // instances. A binding left over from the previous detail can still
+            // point at the freed button; skipping it makes the click fall
+            // through to the original destroy/sell handler. Validate the live
+            // button identity and rebind only when it changed.
+            const uint64_t bound_id = qol::extension_bag::ui_state().ui.extension_desc_item_ids[index];
+            qol::contracts::QolDescButtonTarget live_target{};
+            qol::contracts::QolDescButtonTarget current{};
+            int32_t matches = 0;
+            const QolResult resolve_result =
+                api->resolve(static_cast<uint32_t>(index), &live_target);
+            const QolResult validate_result =
+                bound_id != 0 && qol::contracts::succeeded(resolve_result)
+                    ? api->validate(bound_id, live_target.button, &current, &matches)
+                    : QolResult{};
+            if (bound_id != 0 && qol::contracts::succeeded(resolve_result) &&
+                qol::contracts::succeeded(validate_result) && matches != 0) {
+                QOL_LOG_DEBUG(QolDomain::kExtensionBag,
+                              "extension desc hook skip index=%d reason=already_bound id=%llu",
+                              static_cast<int>(index),
+                              static_cast<unsigned long long>(bound_id));
+                continue;
+            }
             QOL_LOG_DEBUG(QolDomain::kExtensionBag,
-                          "extension desc hook skip index=%d reason=already_bound id=%llu",
+                          "extension desc hook rebind index=%d id=%llu reason=button_changed resolve=%d validate=%d matches=%d",
                           static_cast<int>(index),
-                          static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.extension_desc_item_ids[index]));
-            continue;
+                          static_cast<unsigned long long>(bound_id),
+                          resolve_result.code, validate_result.code, matches);
+            if (bound_id != 0) {
+                const QolResult unbind_result = api->unbind(bound_id);
+                if (!qol::contracts::succeeded(unbind_result) &&
+                    unbind_result.code != kQolErrNotFound &&
+                    unbind_result.code != kQolErrNotReady &&
+                    unbind_result.code != kQolErrConflict) {
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "extension desc hook rebind unbind failed index=%d id=%llu code=%d",
+                                 static_cast<int>(index),
+                                 static_cast<unsigned long long>(bound_id),
+                                 unbind_result.code);
+                    continue;
+                }
+            }
+            qol::extension_bag::ui_state().ui.extension_desc_item_bound[index] = false;
+            qol::extension_bag::ui_state().ui.extension_desc_item_ids[index] = 0;
         }
 
         qol::contracts::QolDescButtonTarget target{};
