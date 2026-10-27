@@ -168,6 +168,10 @@ bool extension_desc_button_original_matches(void* original, const char* symbol) 
                std::strcmp(symbol, "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA;
         resolved_symbol = "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.use_mercenary_seal") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA;
+        resolved_symbol = "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA";
     } else if (std::strcmp(symbol, "desc.button.release_sealed") == 0 ||
                std::strcmp(symbol, "F_UIEQUIP_BUTTON_RELEASE_SEALED_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_RELEASE_SEALED_EXE_VMA;

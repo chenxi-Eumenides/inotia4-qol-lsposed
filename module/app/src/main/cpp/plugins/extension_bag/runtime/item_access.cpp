@@ -491,12 +491,29 @@ bool virtual_bag_write_effective(void* item, uint32_t count) {
     const qol::contracts::QolItemCountApi* api = item_count_api();
     if (api == nullptr || api->write_effective == nullptr ||
         api->writeback_needed == nullptr || item == nullptr) return false;
+    auto direct_write = [&]() {
+        if (api->read_encoded_field == nullptr || api->field_from_canonical == nullptr ||
+            api->write_encoded_field == nullptr) return false;
+        uint32_t raw = 0;
+        if (!qol::contracts::succeeded(api->read_encoded_field(item, &raw))) return false;
+        const int32_t extended = virtual_bag_extended_mode(item) ? 1 : 0;
+        uint32_t field = 0;
+        if (!qol::contracts::succeeded(
+                api->field_from_canonical(raw, count, extended, &field))) {
+            return false;
+        }
+        return qol::contracts::succeeded(api->write_encoded_field(item, field));
+    };
     int32_t needed = 0;
     const QolResult needed_result = api->writeback_needed(item, count, &needed);
-    if (needed_result.code == kQolErrNotReady || !qol::contracts::succeeded(needed_result)) {
-        return false;
+    if (!qol::contracts::succeeded(needed_result)) {
+        // ApplyStuff can run while the extended-count facade reports NotReady;
+        // fall back to the encoded field write so a successful native apply
+        // still consumes the extension material.
+        return direct_write();
     }
     if (needed == 0) return true;
     const QolResult write_result = api->write_effective(item, count);
-    return write_result.code != kQolErrNotReady && qol::contracts::succeeded(write_result);
+    if (qol::contracts::succeeded(write_result)) return true;
+    return direct_write();
 }

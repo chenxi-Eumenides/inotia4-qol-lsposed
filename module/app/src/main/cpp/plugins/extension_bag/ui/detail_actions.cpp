@@ -753,6 +753,24 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         return;
     }
 
+    // 佣兵徽章专用按钮：原版 ButtonUseMercenarySealExe 从 g_inven 取物品，
+    // 扩展物品必须直接走 EB 的 inventory.action.use；不能落到 unsupported 拒绝。
+    if (extension_desc_original_matches(id, "desc.button.use_mercenary_seal")) {
+        bool current_item = false;
+        {
+            ::qol::extension_bag::ReentryLock lock;
+            current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
+                           item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
+                           qol::extension_bag::ui_state().objects.module_objects[item_bag][item_slot] == item;
+        }
+        if (current_item) {
+            (void)extension_use_mercenary_seal();
+        } else {
+            (void)extension_desc_call_original(id, button);
+        }
+        return;
+    }
+
     // 解封按钮仍由原版执行物品类别分派与产物入库；扩展物品的消耗经
     // INVEN_ConsumeItem/QolBagSource::remove 回到 sidecar，不能在这里本地改数据。
     if (extension_desc_original_matches(id, "desc.button.release_sealed")) {
