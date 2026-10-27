@@ -211,6 +211,8 @@ struct QolItemReadOnlyApi {
     // INVEN_FindSaveSlot 的写入域：0 = 原版袋 0..4，1 = 任务袋 5 + C18 追加袋 6..17。
     // out_domain < 0 表示表未就绪；调用方应保持原版行为。
     QolResult (*native_save_domain)(int32_t category, int32_t* out_domain);
+    // 装备槽表 record+2 bit4：1 = 双手武器。
+    QolResult (*is_two_handed)(int32_t category, int32_t* out_value);
 };
 
 struct QolReadOnlyApi {
@@ -256,6 +258,7 @@ constexpr uint16_t kGameHostIdentityMinor = 4;
 constexpr uint16_t kGameHostShortcutMinor = 5;
 constexpr uint16_t kGameHostPackSlotsMinor = 6;
 constexpr uint16_t kGameHostSavedBagMinor = 7;
-constexpr uint16_t kGameHostMinor = kGameHostSavedBagMinor;
+constexpr uint16_t kGameHostTwoHandedMinor = 8;
+constexpr uint16_t kGameHostMinor = kGameHostTwoHandedMinor;
 
 }  // namespace qol::contracts

@@ -5,6 +5,7 @@
 #include <mutex>
 
 #include "contracts/game_cache.h"
+#include "contracts/bag.h"
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
@@ -1104,19 +1105,26 @@ QolResult equip_item(int32_t role, int32_t bag, int32_t slot,
     if (!game_in_world()) return item_error(out, kQolErrNotReady, "not in game");
     void* character = member_or_null(role);
     if (character == nullptr) return item_error(out, kQolErrNotFound, "role not found");
+    if (bag >= contracts::kQolBagFlatRegisteredBase) {
+        if (slot < 0) return item_error(out, kQolErrInvalidArgument, "bad slot");
+        if (fn_equip_item_from_inven_to_slot == nullptr) {
+            return item_error(out, kQolErrUnsupported, "symbol not resolved");
+        }
+        // 注册源袋：hook 负责取物、校验、交换与回滚；equip_slot 由 hook 重新计算。
+        const int result = fn_equip_item_from_inven_to_slot(character, bag, slot, 0);
+        if (result == 0) return item_error(out, kQolErrInternal, "equip failed");
+        frame_cache_force_refresh();
+        return contracts::ok();
+    }
     if (fn_equip_item == nullptr || fn_can_equip == nullptr) {
         return item_error(out, kQolErrUnsupported, "symbol not resolved");
     }
-    if (bag < 0 || bag >= 5 || slot < 0 || slot >= 16) {
+    if (bag < 0 || bag == contracts::kQolTaskBagIndex || bag >= 18 || slot < 0 ||
+        slot >= 16) {
         return item_error(out, kQolErrInvalidArgument, "bad slot");
     }
-    // C18 keeps the live six-bag slots in the GOT-backed layout, not in the
-    // legacy INVEN_pItem mirror. Resolve through the core inventory accessor so
-    // provider staging and the original exchange read the same slot table.
-    const contracts::QolBagRef source_ref{contracts::kQolBagSpaceOriginal, bag};
     void* item = nullptr;
-    const QolResult source_read =
-        inventory_space_item_pointer(&source_ref, slot, &item);
+    const QolResult source_read = qol::game::game_native_item_at(bag, slot, &item);
     if (!contracts::succeeded(source_read)) {
         return item_error(out, source_read,
                           source_read.code == kQolErrNotFound ? "slot empty"

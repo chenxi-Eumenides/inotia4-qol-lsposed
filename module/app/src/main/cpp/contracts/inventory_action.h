@@ -17,7 +17,7 @@ namespace qol::contracts {
 
 constexpr const char* kInventoryActionCapabilityId = "inventory.action";
 constexpr uint16_t kInventoryActionVersionMajor = 3;
-constexpr uint16_t kInventoryActionVersionMinor = 1;
+constexpr uint16_t kInventoryActionVersionMinor = 2;
 
 // 空间与袋号固定为调用时刻的显式值；core.item 执行前会用 item_at 复核句柄。
 struct QolActionRef {
@@ -95,10 +95,6 @@ struct InventoryActionApi {
     InventoryUseOutcome (*equip)(int32_t role, QolActionRef ref, int32_t equip_slot);
     InventoryUseOutcome (*unequip)(int32_t role, int32_t equip_slot);
     InventoryUseOutcome (*put_jewel)(int32_t role, QolActionRef jewel, int32_t equip_slot);
-    // Find up to limit empty slots in space order (original, variant, registered sources).
-    // Returns kQolErrNotReady if the inventory read face is unavailable.
-    QolResult (*find_empty_slots)(int32_t limit, QolActionRef* out_slots,
-                                  int32_t* out_count);
 };
 
 static_assert(std::is_standard_layout<QolActionRef>::value, "action ref must be standard layout");

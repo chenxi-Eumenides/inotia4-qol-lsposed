@@ -140,7 +140,14 @@ QolResult fake_native_equip(int32_t, int32_t bag, int32_t slot,
                             QolItemInventoryStateWriteResult* out) {
     ++g_native_equip_calls;
     g_last_write_bag = bag;
-    if (out == nullptr || g_item.bag != bag || g_item.slot != slot)
+    int32_t local_bag = bag;
+    if (bag >= qol::contracts::kQolBagFlatRegisteredBase) {
+        int32_t space_id = -1;
+        if (!qol::contracts::qol_bag_flat_decode(bag, &space_id, &local_bag)) {
+            return fail(kQolErrInvalidArgument, "bad flat bag");
+        }
+    }
+    if (out == nullptr || g_item.bag != local_bag || g_item.slot != slot)
         return fail(kQolErrNotFound, "stale");
     return ok();
 }
@@ -282,8 +289,7 @@ void test_api_v3_and_native_sell() {
     const auto& api = qol::features::core_item::kInventoryActionApi;
     CHECK(inventory_action_api_valid(&api));
     CHECK(api.struct_size == sizeof(InventoryActionApi));
-    CHECK(api.version_major == 3 && api.version_minor == 1);
-    CHECK(api.find_empty_slots != nullptr);
+    CHECK(api.version_major == 3 && api.version_minor == 2);
 
     const InventorySellResult sold = api.sell({0, 0, 0}, g_item.item, 2, "test");
     CHECK(sold.status == InventorySellStatus::kOk);
@@ -364,9 +370,10 @@ void test_extension_sale_and_native_only_operations() {
     g_item.space_id = 2;
     g_item.bag = 1;
     g_item.slot = 2;
-    CHECK(qol::features::core_item::kInventoryActionApi.equip(0, {2, 1, 2}, 0).status !=
+    CHECK(qol::features::core_item::kInventoryActionApi.equip(0, {2, 1, 2}, 0).status ==
           InventoryActionStatus::kOk);
-    CHECK(g_native_equip_calls == 0);
+    CHECK(g_native_equip_calls == 1);
+    CHECK(g_last_write_bag == qol::contracts::qol_bag_flat_id(2, 1));
     CHECK(qol::features::core_item::kInventoryActionApi.put_jewel(0, {2, 1, 2}, 0).status ==
           InventoryActionStatus::kUnsupported);
 }

@@ -385,28 +385,42 @@ QolResult read_item_pack_required_slots(int32_t category, int32_t* out_slots) {
     return contracts::ok();
 }
 
+bool read_item_effect_byte(int32_t category, size_t byte_offset, uint8_t* out_byte) {
+    if (out_byte == nullptr || category < 0 || category > 0x3FF || g_base == 0) return false;
+    uint8_t* class_base = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+    uint8_t* class_size = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
+    if (class_base == nullptr || class_size == nullptr || *class_size == 0) return false;
+    const size_t class_offset = static_cast<size_t>(category) * (*class_size) + 2;
+    if (!game_memory_accessible(class_base + class_offset, 1, 'r')) return false;
+    const uint8_t use_type = class_base[class_offset];
+    uint8_t* effect_base = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_EQUIP_SLOT_TABLE_DATA_GOT_VMA));
+    uint8_t* effect_size = *reinterpret_cast<uint8_t**>(g_base + G_EQUIP_SLOT_TABLE_SIZE_GOT_VMA);
+    if (effect_base == nullptr || effect_size == nullptr || *effect_size == 0) return false;
+    const size_t effect_offset = static_cast<size_t>(use_type) * (*effect_size) + byte_offset;
+    if (!game_memory_accessible(effect_base + effect_offset, 1, 'r')) return false;
+    *out_byte = effect_base[effect_offset];
+    return true;
+}
+
 QolResult read_item_native_save_domain(int32_t category, int32_t* out_domain) {
     if (out_domain == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     *out_domain = -1;
-    if (category < 0 || category > 0x3FF || g_base == 0) return contracts::ok();
-    uint8_t* class_base = *reinterpret_cast<uint8_t**>(
-        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
-    uint8_t* class_size = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
-    if (class_base == nullptr || class_size == nullptr || *class_size == 0) return contracts::ok();
-    const size_t class_offset = static_cast<size_t>(category) * (*class_size) + 2;
-    if (!game_memory_accessible(class_base + class_offset, 1, 'r')) return contracts::ok();
-    const uint8_t use_type = class_base[class_offset];
-    uint8_t* effect_base = *reinterpret_cast<uint8_t**>(
-        *reinterpret_cast<void**>(g_base + G_EQUIP_SLOT_TABLE_DATA_GOT_VMA));
-    uint8_t* effect_size = *reinterpret_cast<uint8_t**>(g_base + G_EQUIP_SLOT_TABLE_SIZE_GOT_VMA);
-    if (effect_base == nullptr || effect_size == nullptr || *effect_size == 0) {
-        return contracts::ok();
+    uint8_t effect = 0;
+    if (read_item_effect_byte(category, 2, &effect)) *out_domain = (effect >> 3) & 1;
+    return contracts::ok();
+}
+
+QolResult read_item_two_handed(int32_t category, int32_t* out_value) {
+    if (out_value == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    const size_t effect_offset = static_cast<size_t>(use_type) * (*effect_size) + 2;
-    if (!game_memory_accessible(effect_base + effect_offset, 1, 'r')) return contracts::ok();
-    *out_domain = (effect_base[effect_offset] >> 3) & 1;
+    *out_value = -1;
+    uint8_t effect = 0;
+    if (read_item_effect_byte(category, 2, &effect)) *out_value = (effect >> 4) & 1;
     return contracts::ok();
 }
 
@@ -887,7 +901,7 @@ contracts::QolGameHost make_game_host() {
         &read_item_jewel_value, &read_item_jewel_attribute_type,
         &read_item_enchant_scroll, &read_item_mercenary_seal, &read_item_usable,
         &read_item_count_encoding, &read_item_pack_required_slots,
-        &read_item_native_save_domain};
+        &read_item_native_save_domain, &read_item_two_handed};
     host.character_write = {&write_char_max_hp, &write_char_hp, &write_char_equipped_item,
                             &write_char_reset_equipped_item};
     host.inventory_write = {&write_inventory_remove_item_data,

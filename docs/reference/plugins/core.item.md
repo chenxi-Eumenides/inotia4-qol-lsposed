@@ -127,9 +127,9 @@ struct QolBagTransfer {
 
 payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容。payload 是来源定义的序列化状态；`core.item` 只透传、不解释或改写。部分堆叠时 `count` 表示本次数量，目标须将 payload 中数量规范化为该值；接收端应在回调期间复制需保留的数据。
 
-## `inventory.action` v3.1
+## `inventory.action` v3.2
 
-3.1 尾部新增 `find_empty_slots(limit, out_slots, out_count)`：按原版、改版、注册源的空间顺序返回最多 3 个不重复空槽；调用方仍需按介质选择可落槽。
+3.2 删除了 `find_empty_slots`：扩展袋装备不再需要原生暂存空槽，`equip` 直接把 `QolBagRef` 交给 `CHAR_EquipItemFromInvenToSlot`，由 core.item 完成扩展袋交换、双手武器处理与回滚。
 
 所有物品副作用由该能力统一提供。全部方法只在游戏主线程调用；调用者传入显式 `QolActionRef`，不延迟解析当前页签。
 

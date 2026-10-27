@@ -27,6 +27,28 @@ constexpr QolVersion kBagSourceVersion{1, 2};
 constexpr uint32_t kQolBagTransferPayloadCapacity = 256;
 constexpr uint32_t kQolBagTransferPayloadMaxSize = 255;
 
+// INVEN_FindSaveSlot/SaveItemDirect 使用的扁平袋号：注册源空间 >= 2。
+// 原生袋号 0..18 与之不相交；低层函数只接受 int32 袋号，靠该区间区分来源。
+constexpr int32_t kQolBagFlatRegisteredBase = 0x4000;
+constexpr int32_t kQolBagFlatStride = 64;
+
+inline int32_t qol_bag_flat_id(int32_t space_id, int32_t bag) {
+    return kQolBagFlatRegisteredBase + space_id * kQolBagFlatStride + bag;
+}
+
+inline bool qol_bag_flat_decode(int32_t flat_bag, int32_t* out_space_id, int32_t* out_bag) {
+    if (out_space_id == nullptr || out_bag == nullptr || flat_bag < kQolBagFlatRegisteredBase) {
+        return false;
+    }
+    const int32_t offset = flat_bag - kQolBagFlatRegisteredBase;
+    const int32_t space_id = offset / kQolBagFlatStride;
+    const int32_t bag = offset % kQolBagFlatStride;
+    if (space_id < kQolBagSpaceFirstRegistered || bag < 0) return false;
+    *out_space_id = space_id;
+    *out_bag = bag;
+    return true;
+}
+
 struct QolBagTransfer {
     int32_t category;
     int32_t count;

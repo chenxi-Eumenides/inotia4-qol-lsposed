@@ -975,8 +975,6 @@ int remove_item_wrapper(void* item) {
     return stage4_remove_item(item, nullptr, nullptr, g_backup_remove_item, g_in_remove_item);
 }
 
-constexpr int32_t kRegisteredFlatBagBase = 0x4000;
-constexpr int32_t kRegisteredFlatBagStride = 64;
 constexpr int32_t kNativeStackLimit = 126;
 
 struct RegisteredDestination {
@@ -1147,6 +1145,57 @@ bool find_registered_destination(const qol::contracts::QolBagTransfer& transfer,
     return false;
 }
 
+bool find_variant_destination(const qol::contracts::QolBagTransfer& transfer,
+                              bool stackable,
+                              int32_t* out_native_bag, int32_t* out_slot) {
+    if (out_native_bag == nullptr || out_slot == nullptr) return false;
+    const auto* port = qol::features::core_item::g_port;
+    if (port == nullptr || !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
+        port->read.bag_count == nullptr || port->read.bag_info == nullptr ||
+        port->read.item_at == nullptr) {
+        return false;
+    }
+    int32_t bag_count = 0;
+    if (!qol::contracts::succeeded(
+            port->read.bag_count(qol::contracts::kQolBagSpaceVariant, &bag_count)) ||
+        bag_count < 0) {
+        return false;
+    }
+    int32_t empty_bag = -1;
+    int32_t empty_slot = -1;
+    for (int32_t bag = 0; bag < bag_count; ++bag) {
+        const qol::contracts::QolBagRef ref{qol::contracts::kQolBagSpaceVariant, bag};
+        qol::contracts::QolBagInfo info{};
+        if (!qol::contracts::succeeded(port->read.bag_info(&ref, &info)) || info.capacity < 0) {
+            continue;
+        }
+        for (int32_t slot = 0; slot < info.capacity; ++slot) {
+            qol::contracts::QolInventoryItemRef existing{};
+            const QolResult probe = port->read.item_at(&ref, slot, &existing);
+            if (probe.code == kQolErrNotFound) {
+                if (empty_bag < 0) {
+                    empty_bag = bag;
+                    empty_slot = slot;
+                }
+                continue;
+            }
+            if (!qol::contracts::succeeded(probe)) continue;
+            if (stackable && existing.category == transfer.category && existing.count > 0 &&
+                existing.count + transfer.count <= kNativeStackLimit) {
+                *out_native_bag = qol::contracts::kQolOriginalBagCount + bag;
+                *out_slot = slot;
+                return true;
+            }
+        }
+    }
+    if (empty_bag >= 0) {
+        *out_native_bag = qol::contracts::kQolOriginalBagCount + empty_bag;
+        *out_slot = empty_slot;
+        return true;
+    }
+    return false;
+}
+
 const qol::contracts::QolBagSource* registered_source_for_space(int32_t space_id) {
     for (uint32_t index = 0;
          index < qol::features::core_item::registered_bag_source_count(); ++index) {
@@ -1157,20 +1206,11 @@ const qol::contracts::QolBagSource* registered_source_for_space(int32_t space_id
 }
 
 int32_t flat_bag_for(const qol::contracts::QolBagSource& source, int32_t bag) {
-    return kRegisteredFlatBagBase + source.space_id * kRegisteredFlatBagStride + bag;
+    return qol::contracts::qol_bag_flat_id(source.space_id, bag);
 }
 
 bool decode_flat_bag(int32_t flat_bag, int32_t* out_space_id, int32_t* out_bag) {
-    if (out_space_id == nullptr || out_bag == nullptr || flat_bag < kRegisteredFlatBagBase) {
-        return false;
-    }
-    const int32_t offset = flat_bag - kRegisteredFlatBagBase;
-    const int32_t space_id = offset / kRegisteredFlatBagStride;
-    const int32_t bag = offset % kRegisteredFlatBagStride;
-    if (space_id < qol::contracts::kQolBagSpaceFirstRegistered || bag < 0) return false;
-    *out_space_id = space_id;
-    *out_bag = bag;
-    return true;
+    return qol::contracts::qol_bag_flat_decode(flat_bag, out_space_id, out_bag);
 }
 
 bool extension_unequip_to_registered_source(void* character, int32_t equip_slot) {
@@ -1237,12 +1277,10 @@ int find_save_slot_wrapper(void* item, int8_t* out_slot) {
     const bool domain_known =
         hook_item_category(item, &category) && read_native_save_domain(category, &domain);
     if (native != 0) {
-        // bit3=1 只允许任务袋 5；原版会继续扫 C18 space1（6..17），这里拒绝。
         int32_t bag = -1;
-        if (domain_known && domain == 1 && read_saved_bag(&bag) && bag > 5) {
+        if (read_saved_bag(&bag)) {
             inventory_log_write(0, __FILE__, __LINE__,
-                                "FindSaveSlot reject space1 category=%d bag=%d", category, bag);
-            return 0;
+                                "FindSaveSlot native category=%d bag=%d", category, bag);
         }
         return native;
     }
@@ -1250,8 +1288,19 @@ int find_save_slot_wrapper(void* item, int8_t* out_slot) {
     if (!domain_known || domain != 0) return 0;
     qol::contracts::QolBagTransfer transfer{};
     if (!build_transfer_for_hook_item(item, &transfer, &category, nullptr)) return 0;
+    const bool stackable = hook_item_stackable(item);
+    int32_t variant_bag = -1;
+    int32_t variant_slot = -1;
+    if (find_variant_destination(transfer, stackable, &variant_bag, &variant_slot)) {
+        if (!write_saved_bag(variant_bag)) return 0;
+        if (out_slot != nullptr) *out_slot = static_cast<int8_t>(variant_slot);
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "FindSaveSlot variant category=%d native_bag=%d slot=%d",
+                            category, variant_bag, variant_slot);
+        return 1;
+    }
     RegisteredDestination destination{};
-    if (!find_registered_destination(transfer, hook_item_stackable(item), &destination)) return 0;
+    if (!find_registered_destination(transfer, stackable, &destination)) return 0;
     const int32_t flat_bag = flat_bag_for(*destination.source, destination.bag);
     if (!write_saved_bag(flat_bag)) return 0;
     if (out_slot != nullptr) *out_slot = static_cast<int8_t>(destination.slot);
@@ -1320,7 +1369,7 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     if (!inventory_native_hook_support_enabled())
         return call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct,
                            item, bag, slot);
-    if (bag >= kRegisteredFlatBagBase) {
+    if (bag >= qol::contracts::kQolBagFlatRegisteredBase) {
         if (g_save_item_depth <= 0) {
             inventory_log_write(0, __FILE__, __LINE__,
                                 "SaveItemDirect eb rejected item=%p bag=%d slot=%d",
@@ -1635,15 +1684,212 @@ int move_item_wrapper(void* item, int count, int target_bag, int target_slot) {
     return result;
 }
 
+int provider_equip_item(void* character, int32_t flat_bag, int32_t slot) {
+    const auto* state_write = qol::features::core_item::g_item_state_write;
+    const auto* extras = qol::features::core_item::g_character_extras_port;
+    int32_t space_id = -1;
+    int32_t local_bag = -1;
+    if (!decode_flat_bag(flat_bag, &space_id, &local_bag)) return 0;
+    const auto* source = registered_source_for_space(space_id);
+    if (source == nullptr || source->item_at == nullptr || source->export_item == nullptr ||
+        source->remove == nullptr || source->import_item == nullptr) {
+        return 0;
+    }
+    qol::contracts::QolInventoryItemRef source_item{};
+    if (!qol::contracts::succeeded(source->item_at(local_bag, slot, &source_item))) return 0;
+    qol::contracts::QolBagTransfer new_transfer{};
+    if (!qol::contracts::succeeded(source->export_item(source_item.item, 1, &new_transfer))) {
+        return 0;
+    }
+    if (state_write == nullptr || state_write->load_item == nullptr ||
+        state_write->equip_handle == nullptr || g_game == nullptr ||
+        g_game->item_abi.native_item_for_handle == nullptr ||
+        extras == nullptr ||
+        extras->read.can_equip == nullptr ||
+        extras->read.find_equip_slot == nullptr ||
+        extras->read.equipped_item == nullptr ||
+        extras->read.party_member == nullptr ||
+        g_game->abi.minor < qol::contracts::kGameHostSavedBagMinor ||
+        g_game->character_write.reset_equipped_item == nullptr) {
+        return 0;
+    }
+    qol::contracts::QolItemHandle new_handle{};
+    if (!qol::contracts::succeeded(state_write->load_item(
+            new_transfer.payload, new_transfer.payload_size, &new_handle)) ||
+        new_handle.slot == 0 || new_handle.generation == 0) {
+        return 0;
+    }
+    void* new_item = nullptr;
+    if (!qol::contracts::succeeded(
+            g_game->item_abi.native_item_for_handle(new_handle, &new_item)) ||
+        new_item == nullptr) {
+        return 0;
+    }
+    const auto* port = qol::features::core_item::g_port;
+    const auto free_native = [port](void* item) {
+        if (item != nullptr && port != nullptr && port->read.free_item != nullptr) {
+            (void)port->read.free_item(item);
+        }
+    };
+    const auto restore_new = [&]() {
+        qol::contracts::QolBagMutationResult restored{};
+        (void)source->import_item(&new_transfer, local_bag, slot, &restored);
+    };
+    int32_t allowed = 0;
+    if (!qol::contracts::succeeded(
+            extras->read.can_equip(
+                character, new_item, &allowed)) ||
+        allowed <= 0) {
+        free_native(new_item);
+        return 0;
+    }
+    int32_t target = -1;
+    if (!qol::contracts::succeeded(
+            extras->read.find_equip_slot(character, new_item, &target)) ||
+        target < 0 || target >= 10) {
+        free_native(new_item);
+        return 0;
+    }
+    int32_t two_handed = 0;
+    if (g_game->abi.minor >= qol::contracts::kGameHostTwoHandedMinor &&
+        g_game->read_only.item.is_two_handed != nullptr) {
+        (void)g_game->read_only.item.is_two_handed(new_transfer.category, &two_handed);
+    }
+    int32_t old_slots[2] = {target, -1};
+    int old_count = 1;
+    if (two_handed == 1) {
+        const int32_t paired = target == 5 ? 6 : (target == 6 ? 5 : -1);
+        if (paired >= 0) old_slots[old_count++] = paired;
+    }
+    void* old_items[2] = {nullptr, nullptr};
+    qol::contracts::QolBagTransfer old_transfers[2]{};
+    for (int index = 0; index < old_count; ++index) {
+        if (!qol::contracts::succeeded(extras->read.equipped_item(
+                character, old_slots[index], &old_items[index]))) {
+            free_native(new_item);
+            return 0;
+        }
+        if (old_items[index] != nullptr &&
+            !build_transfer_for_hook_item(old_items[index], &old_transfers[index], nullptr,
+                                          nullptr)) {
+            free_native(new_item);
+            return 0;
+        }
+    }
+    RegisteredDestination second_destination{};
+    if (old_items[1] != nullptr &&
+        !find_registered_destination(old_transfers[1], hook_item_stackable(old_items[1]),
+                                     &second_destination)) {
+        free_native(new_item);
+        return 0;
+    }
+    int32_t role = -1;
+    for (int32_t candidate = 0; candidate < 3; ++candidate) {
+        void* member = nullptr;
+        if (qol::contracts::succeeded(
+                extras->read.party_member(candidate, &member)) &&
+            member == character) {
+            role = candidate;
+            break;
+        }
+    }
+    if (role < 0) {
+        free_native(new_item);
+        return 0;
+    }
+    qol::contracts::QolBagMutationResult removed_new{};
+    if (!qol::contracts::succeeded(source->remove(source_item.item, 1, &removed_new))) {
+        free_native(new_item);
+        return 0;
+    }
+    qol::contracts::QolBagMutationResult imported_old[2]{};
+    int imported_count = 0;
+    const auto rollback_imports = [&]() {
+        for (int index = 0; index < imported_count; ++index) {
+            qol::contracts::QolBagMutationResult removed{};
+            (void)source->remove(imported_old[index].item, old_transfers[index].count, &removed);
+        }
+        imported_count = 0;
+    };
+    if (old_items[0] != nullptr) {
+        if (!qol::contracts::succeeded(
+                source->import_item(&old_transfers[0], local_bag, slot, &imported_old[0]))) {
+            restore_new();
+            free_native(new_item);
+            return 0;
+        }
+        imported_count = 1;
+    }
+    if (old_items[1] != nullptr) {
+        if (!qol::contracts::succeeded(source->import_item(
+                &old_transfers[1], second_destination.bag, second_destination.slot,
+                &imported_old[1]))) {
+            rollback_imports();
+            restore_new();
+            free_native(new_item);
+            return 0;
+        }
+        imported_count = 2;
+    }
+    int cleared = 0;
+    for (int index = 0; index < old_count; ++index) {
+        if (old_items[index] == nullptr) continue;
+        if (!qol::contracts::succeeded(
+                g_game->character_write.reset_equipped_item(character, old_slots[index]))) {
+            for (int restore_index = 0; restore_index < cleared; ++restore_index) {
+                if (old_items[restore_index] != nullptr) {
+                    (void)g_game->character_write.set_equipped_item(
+                        character, old_slots[restore_index], old_items[restore_index]);
+                }
+            }
+            rollback_imports();
+            restore_new();
+            free_native(new_item);
+            return 0;
+        }
+        ++cleared;
+    }
+    qol::contracts::QolItemInventoryStateWriteResult write_result{};
+    if (!qol::contracts::succeeded(
+            state_write->equip_handle(role, new_handle, target, &write_result))) {
+        for (int index = 0; index < old_count; ++index) {
+            if (old_items[index] != nullptr) {
+                (void)g_game->character_write.set_equipped_item(
+                    character, old_slots[index], old_items[index]);
+            }
+        }
+        rollback_imports();
+        restore_new();
+        free_native(new_item);
+        return 0;
+    }
+    for (int index = 0; index < old_count; ++index) free_native(old_items[index]);
+    inventory_log_write(0, __FILE__, __LINE__,
+                        "provider_equip category=%d target=%d old_count=%d flat=%d slot=%d",
+                        new_transfer.category, target, old_count, flat_bag, slot);
+    return 1;
+}
+
 int equip_item_from_inven_to_slot_wrapper(void* character, int32_t bag, int32_t slot,
                                           int32_t equip_slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:CHAR_EquipItemFromInvenToSlot"});
-    if (!inventory_native_hook_support_enabled())
+    if (!inventory_native_hook_support_enabled()) {
+        if (bag >= qol::contracts::kQolBagFlatRegisteredBase) return 0;
         return call_backup("hook:CHAR_EquipItemFromInvenToSlot",
                            g_backup_equip_item_from_inven_to_slot,
                            character, bag, slot, equip_slot);
+    }
+    if (bag >= qol::contracts::kQolBagFlatRegisteredBase) {
+        const int provider_result = provider_equip_item(character, bag, slot);
+        if (provider_result == 0) {
+            QOL_LOG_ERROR(QolDomain::kInventory,
+                          "provider equip failed flat_bag=%d slot=%d equip_slot=%d",
+                          bag, slot, equip_slot);
+        }
+        return provider_result;
+    }
     if (g_backup_equip_item_from_inven_to_slot == nullptr) {
         backup_missing("hook:CHAR_EquipItemFromInvenToSlot");
         return 0;

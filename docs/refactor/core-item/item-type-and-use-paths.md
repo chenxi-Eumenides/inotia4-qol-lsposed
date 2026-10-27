@@ -111,7 +111,7 @@ sealed / item box / dice / mercenary 先分流
 
 - EB 只保存扩展侧 sidecar、捕获 UI 详情身份、转发动作。
 - 类型判断必须调用 `item.facts.item_type`；EB 不得再用 category 或 `ITEM_*` 原语自行判断。
-- 背包类装备来源按 `QolBagRef` 的 space/bag/slot 处理，目标空槽由 core `find_empty_slots` 返回，原生空槽优先；C18 改版没有背包类物品逻辑，不参与该分支。
+- 背包类装备来源按 `QolBagRef` 的 space/bag/slot 处理，装备动作直接交给 `CHAR_EquipItemFromInvenToSlot`；core.item 在该 hook 内完成扩展袋导出/导入、原装备回填与回滚。C18 改版没有背包类物品逻辑，不参与该分支。
 - 旧 `read_item_is_jewel`、`read_item_is_enchant_scroll`、`read_item_is_mercenary_seal`、`item_is_equip`、`category_is_extension_backpack` 等包装不得继续扩散。
 
 ## 6. 后续扩展

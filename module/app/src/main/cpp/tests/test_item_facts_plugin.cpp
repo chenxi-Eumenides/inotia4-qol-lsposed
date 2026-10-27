@@ -127,8 +127,8 @@ static_assert(qol::contracts::kQolItemInventoryHasOptionCompleteness == (1u << 7
 static_assert(qol::contracts::kAttributeQualityVersionMajor == 2 &&
                   qol::contracts::kAttributeQualityVersionMinor == 0,
               "attribute.quality contract must be v2.0");
-static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 7,
-              "Game Host contract must be v2.7");
+static_assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 8,
+              "Game Host contract must be v2.8");
 static_assert(sizeof(qol::contracts::QolItemHandleApi) == sizeof(void*) * 6,
               "Host SDK handle table must not expose resolve_item");
 static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
