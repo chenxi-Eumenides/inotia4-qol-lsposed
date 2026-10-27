@@ -249,20 +249,21 @@ python3 scripts/maintenance/check_http_routes.py
 - `a53c0848 feat(extension_bag): 背包装备优先占用原生空袋槽`
   - 扩展袋来源背包先反序列化为原生对象写入原生袋表空槽（容量校验、持久化、ownership handover）；
     失败按台账回滚并保留扩展源，原生槽满再回退扩展槽。
+- `94c2ca25 fix(core.item): SaveItem 兜底直接扫描注册源空槽`
+  - 根因：`find_empty_slots(3)` 只返回前 3 个空槽，未装备袋被误报 16 格时前 3 个可能全是不可写原生槽，
+    扩展袋永远轮不到（真机日志 `adopt=0 empty_count=3 target_space=-1`）。
+  - 改为按注册源顺序直接扫描 `info/item_at` 空槽并 `import_item`。
+- `817aaf1f fix(core.item): 袋容量按 INVEN_GetBagSize 返回`
+  - `native_bag_capacity` 不再对未装备袋固定返回 16，直接调用原版 `INVEN_GetBagSize`（未装备 → 0）。
+  - 该修复同时阻止 `move_item` 写入未装备原生袋（此前写入后在存读档时丢失）。
 
 验证：
 
 - `scripts/build-debug.sh` 通过；`check_arch.py`、`check_http_routes.py` 通过。
-- Host CTest：157 项中 4 项失败均为既有/环境问题（`custom_recipe_tests`、`item_handle_contract_redline`
-  命中未改动的 `item_port.h`、`core_api_lifecycle_tests` 描述断言、`core_settings_config_store_tests`
-  需预先存在 `${CMAKE_CURRENT_BINARY_DIR}/config-native-owner`）。
-- 真机 C18L v589：新档 `POST /api/op/inventory/add {"category":924}` + `use_item` 票据 `done`，
-  产物 `874 战神的斗篷` 与 3×`背包（大）` 正常入包，源槽清空，无错误弹窗、无崩溃。
-- 拾取（原版袋全满→扩展袋）与扩展袋背包装备原生优先仍待用户真机复测；本轮设备存档为原版袋全满，
-  礼盒位于扩展袋，测试前的 `move_item` 操作已改变该存档状态。
-
-附带发现（未修）：
-
-- `POST /api/item/inventory/move_item` 允许把物品移入**未装备**的原生袋（`bag_info` 仍报 capacity 16）；
-  该物品在下一次存档/读档后丢失。本轮诊断把测试礼盒从扩展袋移入原生袋 1 后即触发此问题。
+- Host CTest：157 项中 3 项失败均为既有/环境问题（`custom_recipe_tests`、`item_handle_contract_redline`
+  命中未改动的 `item_port.h`、`core_api_lifecycle_tests` 描述断言）。
+- 真机 C18L v589（APK `Inotia4_C18L_v589_debug_lspatch.apk`，模块 `2610280256_3562c7f7d573`）：
+  新档 `add(924)` + `use_item` 票据 `done`，产物 874 + 3×背包（大）正常入包；
+  未装备的 C18 追加袋容量已返回 0（`GET /api/item/inventory`）。
+- 拾取（原版袋满→扩展袋）、扩展袋礼盒使用、背包装备原生优先由用户触摸复测。
 
