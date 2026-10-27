@@ -19,10 +19,9 @@ usage() {
   <lspatch|npatch> 取所用 JAR（JAR 文件名含 npatch 即 NPatch，否则 LSPatch；当前默认 LSPatch）。
   不符合固定命名的游戏 APK 直接失败。
   - 第二位置参数（新包名）不支持，传入会明确报错。
-  - 默认覆盖同名输出（--force）：只覆盖本次重新生成的同名文件，
-    其他已有集成包（其他变体、其他通道、其他 patcher 的产物）原样保留，不预先批量清理。
-  - 生成后清理过期集成包：删除 output/Inotia4_*.apk 中变体/版本已无对应源游戏 APK 的文件；
-    模块包（inotia4_qol_lsposed_*，小写前缀）、当前源对应的产物与非 APK 文件不受影响。
+  - 生成前删除 output/ 下全部集成包（Inotia4_*.apk），再按当前源游戏 APK 重新生成，
+    不做按版本比对的过期判定；模块包（inotia4_qol_lsposed_*，小写前缀）与非 APK 文件
+    不匹配该 glob，原样保留。
 
 默认值：
   LSPatch JAR：tools/lspatch/lspatch-v1.2-487-release.jar
@@ -243,42 +242,18 @@ if [[ "$all_output" == true ]]; then
     printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
 fi
 
-# 清理过期集成包：删除 output/Inotia4_*.apk 中「变体_版本」已无对应当前源游戏 APK 的文件。
-# 判定用 release_stem 前缀（Inotia4_<name>_<version>_），与通道、patcher、模块版本无关：
-# 源仍在时其他通道/patcher 的同变体产物一律保留；源已换版本或移入 history/ 的旧产物删除。
-# 模块包前缀为小写 inotia4_qol_lsposed_*，非 APK 文件不匹配本 glob，都不在清理范围。
-# 全部源都无法解析变体时不执行清理，避免把无法归类的产物整批误删。
-expected_stems=()
-for source_apk in "${game_apks[@]}"; do
-    source_name=$(basename "$source_apk" .apk)
-    if source_output_stem=$(release_stem "$source_name" 2>/dev/null); then
-        expected_stems+=("$source_output_stem")
-    fi
-done
-cleaned=()
-if [[ ${#expected_stems[@]} -gt 0 ]]; then
-    shopt -s nullglob
-    existing_outputs=("$repo_root/output/Inotia4_"*.apk)
-    shopt -u nullglob
-    for existing_apk in "${existing_outputs[@]}"; do
-        existing_name=$(basename "$existing_apk")
-        case "$existing_name" in
-            inotia4_qol_lsposed_*) continue ;;
-        esac
-        existing_stem=${existing_name%.apk}
-        keep=false
-        for expected_stem in "${expected_stems[@]}"; do
-            if [[ "$existing_stem" == "$expected_stem" || "$existing_stem" == "$expected_stem"_* ]]; then
-                keep=true
-                break
-            fi
-        done
-        if [[ "$keep" == false ]]; then
-            rm -f "$existing_apk"
-            printf '清理过期集成包：%s\n' "$existing_name"
-            cleaned+=("$existing_name")
-        fi
-    done
+# 生成前删除 output/ 下全部集成包，再按当前源游戏 APK 重新生成；
+# 不做按版本比对的过期判定（复杂逻辑易误判，且换版本/移入 history 的旧包本就该整体重出）。
+# 只匹配大写 Inotia4_* 前缀：模块包为小写 inotia4_qol_lsposed_*，大小写不同不会命中；
+# 非 APK 文件（说明 txt 等）不匹配 *.apk，同样保留。
+shopt -s nullglob
+old_outputs=("$repo_root/output/Inotia4_"*.apk)
+shopt -u nullglob
+cleaned=0
+if [[ ${#old_outputs[@]} -gt 0 ]]; then
+    rm -f "${old_outputs[@]}"
+    cleaned=${#old_outputs[@]}
+    printf '清理集成包：%d 个\n' "$cleaned"
 fi
 
 failed=0
@@ -349,8 +324,7 @@ for target_apk in "${game_apks[@]}"; do
         continue
     fi
 
-    # 只覆盖本次生成的目标文件：mv -f 为同文件系统原子替换，不触碰 output/ 下其他产物，
-    # 生成失败时也保留上一次的同名输出（不会出现“旧包已删、新包未生成”的空窗）。
+    # mv -f 为同文件系统原子替换；旧集成包已在生成前统一删除，这里只落新产物。
     mv -f "${patched_apks[0]}" "$output_apk"
     printf '生成集成 APK：%s\n' "$output_apk"
     sha256sum "$output_apk"
@@ -358,7 +332,7 @@ for target_apk in "${game_apks[@]}"; do
     rm -rf "$work_dir"
 done
 
-printf '\n===== 汇总：成功 %d / 失败 %d / 清理过期 %d\n' "${#generated[@]}" "$failed" "${#cleaned[@]}"
+printf '\n===== 汇总：成功 %d / 失败 %d / 清理集成包 %d\n' "${#generated[@]}" "$failed" "$cleaned"
 if [[ "$all_output" == true ]]; then
     for apk in "${generated[@]}"; do
         printf '  %s\n' "$apk"
