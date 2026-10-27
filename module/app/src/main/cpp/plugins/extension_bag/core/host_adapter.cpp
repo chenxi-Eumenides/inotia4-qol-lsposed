@@ -346,6 +346,30 @@ bool extension_handle_character_equip() {
     return true;
 }
 
+bool native_bag_has_empty_slot() {
+    const auto* facts = ::qol::extension_bag::access::host().item_facts;
+    const auto* extras = ::qol::extension_bag::access::host().inventory_extras;
+    if (facts == nullptr || facts->item_ref_at == nullptr || extras == nullptr ||
+        extras->read.bag_size == nullptr) {
+        // Fail open to the original equipment path when the native read face is
+        // unavailable; swallowing an original item would be worse than a no-op.
+        return true;
+    }
+    for (int bag = 0; bag < 5; ++bag) {
+        int32_t size = 0;
+        if (!qol::contracts::succeeded(extras->read.bag_size(bag, &size)) || size < 0) {
+            return true;
+        }
+        for (int32_t slot = 0; slot < size; ++slot) {
+            qol::contracts::QolInventoryItemRef item{};
+            const QolResult result = facts->item_ref_at(bag, slot, &item);
+            if (result.code == kQolErrNotFound) return true;
+            if (!qol::contracts::succeeded(result)) return true;
+        }
+    }
+    return false;
+}
+
 bool extension_handle_backpack_equip() {
     if (!::qol::extension_bag::access::enabled().load() || !read_world_in_world()) return false;
     ::qol::extension_bag::ReentryLock lock;
@@ -389,10 +413,9 @@ bool extension_handle_backpack_equip() {
                      category, source_bag, source_slot);
         return false;
     }
-    // Original-bag backpack equipment remains native behavior. EB only owns
-    // backpacks that are stored in an extension bag; intercepting an original
-    // item here and then failing to equip it produced a silent no-op.
-    if (!module_source) return false;
+    // Native empty slots take priority. Only when the original transaction bags
+    // are full does EB search an extension bag for the backpack item.
+    if (!module_source && native_bag_has_empty_slot()) return false;
     const int target = first_empty_extension_bag_locked();
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "backpack equip probe target=%d category=%d src=%d/%d active=%d",

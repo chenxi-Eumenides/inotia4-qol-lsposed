@@ -445,6 +445,31 @@ QolResult inventory_space_item_at(const contracts::QolBagRef* ref, int32_t slot,
     return native_item_ref_at(layout, ref->space_id, ref->bag, slot, out);
 }
 
+QolResult inventory_space_item_pointer(const contracts::QolBagRef* ref, int32_t slot,
+                                       void** out) {
+    if (ref == nullptr || out == nullptr || ref->space_id < contracts::kQolBagSpaceOriginal ||
+        ref->bag < 0 || slot < 0 || slot >= 16) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out = nullptr;
+    int32_t bag_count = 0;
+    QolResult result = inventory_bag_count(ref->space_id, &bag_count);
+    if (!contracts::succeeded(result)) return result;
+    if (ref->bag >= bag_count) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    const NativeBagLayout layout = native_bag_layout();
+    if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    const int32_t native_bag = ref->bag +
+        (ref->space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0);
+    auto* slot_address = reinterpret_cast<void**>(layout.slots +
+        static_cast<size_t>(native_bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
+    if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    if (*slot_address == nullptr) return error_result(kQolErrNotFound, kNotFound);
+    *out = *slot_address;
+    return contracts::ok();
+}
+
 QolResult inventory_for_each_space_slot(int32_t space_id,
                                         contracts::QolInventoryBagSlotFn callback, void* ctx) {
     if (space_id < contracts::kQolBagSpaceOriginal || callback == nullptr) {
