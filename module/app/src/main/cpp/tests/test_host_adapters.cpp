@@ -189,6 +189,7 @@ decltype(fn_is_mercenary_seal) fn_is_mercenary_seal = nullptr;
 decltype(fn_is_sealed) fn_is_sealed = nullptr;
 decltype(fn_is_item_box) fn_is_item_box = nullptr;
 decltype(fn_is_pack_item) fn_is_pack_item = nullptr;
+decltype(fn_is_use_after_confirm) fn_is_use_after_confirm = nullptr;
 decltype(fn_is_use) fn_is_use = nullptr;
 decltype(fn_save_is_ok) fn_save_is_ok = nullptr;
 decltype(fn_get_bag_size) fn_get_bag_size = nullptr;
