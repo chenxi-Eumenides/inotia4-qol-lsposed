@@ -471,8 +471,11 @@ bool control_readable(const void* control, size_t size) {
 QolResult child_count(QolUiHandle control, uint32_t* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
     if (!control_readable(control, CO_SIZE)) return not_ready();
-    if (fn_ctrl_get_count == nullptr) return not_ready();
-    *out = fn_ctrl_get_count(control);
+    // ControlObject_GetCount is a single load at +CO_COUNT. Read it directly
+    // after validating the mapping; this avoids entering game code through a
+    // possibly stale indirect function pointer while the UI tree is rebuilt.
+    *out = *reinterpret_cast<const uint32_t*>(
+        static_cast<const uint8_t*>(control) + CO_COUNT);
     return contracts::ok();
 }
 
@@ -480,9 +483,25 @@ QolResult child_at(QolUiHandle control, uint32_t index, QolUiHandle* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
     *out = nullptr;
     if (!control_readable(control, CO_SIZE)) return not_ready();
-    if (fn_ctrl_get_child == nullptr) return not_ready();
-    *out = fn_ctrl_get_child(control, index);
-    return *out == nullptr ? not_ready() : contracts::ok();
+    if (index >= *reinterpret_cast<const uint32_t*>(
+                     static_cast<const uint8_t*>(control) + CO_COUNT)) {
+        return not_ready();
+    }
+    // Traverse the embedded LINKEDLIST directly: head at +CO_CHILD_LIST,
+    // node->data at +8, node->next at +0x10. Validate every node mapping.
+    void* node = *reinterpret_cast<void**>(
+        const_cast<uint8_t*>(static_cast<const uint8_t*>(control) + CO_CHILD_LIST));
+    for (uint32_t current = 0; current <= index; ++current) {
+        if (node == nullptr || !maps_range_readable(node, 0x18)) return not_ready();
+        if (current == index) {
+            void* child = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 8);
+            if (child == nullptr || !control_readable(child, CO_SIZE)) return not_ready();
+            *out = child;
+            return contracts::ok();
+        }
+        node = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 0x10);
+    }
+    return not_ready();
 }
 
 QolResult resolution_width(int32_t* out) {
