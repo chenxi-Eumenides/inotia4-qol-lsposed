@@ -168,6 +168,14 @@ bool extension_desc_button_original_matches(void* original, const char* symbol) 
                std::strcmp(symbol, "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA;
         resolved_symbol = "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.shortcut") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_SHORTCUT_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_SHORTCUT_EXE_VMA;
+        resolved_symbol = "F_UIEQUIP_BUTTON_SHORTCUT_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.remove_shortcut") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_REMOVE_SHORTCUT_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_REMOVE_SHORTCUT_EXE_VMA;
+        resolved_symbol = "F_UIEQUIP_BUTTON_REMOVE_SHORTCUT_EXE_VMA";
     } else if (std::strcmp(symbol, "desc.button.use_mercenary_seal") == 0 ||
                std::strcmp(symbol, "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA;

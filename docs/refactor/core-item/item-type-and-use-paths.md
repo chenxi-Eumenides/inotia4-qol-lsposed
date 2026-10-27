@@ -105,6 +105,7 @@ sealed / item box / dice / mercenary 先分流
 - 原生数量为 0 时，core.item 通过 `QolBagSource` 按类别查找注册源物品，调用源的 `use`。
 - 这使扩展袋药水、复活卷轴等已登记快捷栏物品可以触发，不需要写 `INVEN_pItem`。
 - 快捷栏条目读取只暴露类别，不暴露可变物品指针。
+- 详情“登录快捷栏 / 移除快捷栏”按钮不重写逻辑，原版 `UIEquip_ButtonShortCutExe` / `UIEquip_ButtonRemoveShortCutExe` 读取投影后的扩展物品即可完成登记；EB 只负责识别按钮并 call_original。
 
 ## 6. 扩展背包边界
 

@@ -981,6 +981,8 @@ constexpr uintptr_t F_UIEQUIP_BUTTON_USE_AFTER_CONFIRM_EXE_VMA = 0xb95f8; // voi
 constexpr uintptr_t F_UIEQUIP_CONFIRM_USE_ITEM_VMA = 0xb943c;    // (party_char, item) 弹确认使用 YesNo；OK 回调=OKConfrimUseItem（0xb8478）
 constexpr uintptr_t F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA = 0xb8478; // 确认使用 OK 回调：INVEN_FindItemSlot 定位后调 CHAR_UseItemEx
 constexpr uintptr_t F_UIEQUIP_BUTTON_DESTROY_EXE_VMA = 0xb6240; // void (void*) 销毁按钮 execute：创建确认弹窗
+constexpr uintptr_t F_UIEQUIP_BUTTON_SHORTCUT_EXE_VMA = 0xb6280; // void (void*) 登录快捷栏按钮：UIShortcutMenu_Create(1,item)
+constexpr uintptr_t F_UIEQUIP_BUTTON_REMOVE_SHORTCUT_EXE_VMA = 0xb62bc; // void (void*) 移除快捷栏按钮：PLAYER_RemoveShortcutAll
 constexpr uintptr_t F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA = 0xb7e14; // void (void*) 卸下按钮 execute：desc_type=0 卸装备、desc_type=1 卸袋（b7f74）
 constexpr uintptr_t F_UIEQUIP_OK_DESTROY_ITEM_VMA = 0xb83d0;    // void () 销毁确认回调
 constexpr uintptr_t F_UI_DRAW_BORDER_RECT_VMA = 0xafc18; // void (int32_t x, int32_t y, int32_t w, int32_t h) 游戏通用金色圆角边框

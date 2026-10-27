@@ -789,6 +789,27 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         return;
     }
 
+    // 登录/移除快捷栏按钮：原版按当前详情控件读取物品并创建/移除快捷栏条目。
+    // 扩展物品的 ControlItem_GetItem 已虚拟化为扩展对象，可以直接交还原版。
+    if (extension_desc_original_matches(id, "desc.button.shortcut") ||
+        extension_desc_original_matches(id, "desc.button.remove_shortcut")) {
+        bool current_item = false;
+        {
+            ::qol::extension_bag::ReentryLock lock;
+            current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
+                           item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
+                           qol::extension_bag::ui_state().objects.module_objects[item_bag][item_slot] == item;
+        }
+        if (current_item) {
+            (void)extension_desc_call_original(id, button);
+        } else {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension shortcut rejected stale detail bag=%d slot=%d",
+                         item_bag, item_slot);
+        }
+        return;
+    }
+
     // 装备页出售（0.7 倍率、只能全卖）走原版销毁链：真实 execute proc 可能是
     // UIEquip_ButtonDestroyExe（创建确认弹窗），也可能是其结算入口
     // UIEquip_OKDestroyItem（0xb83d0）。两者都属目标 proc，任一命中即由模块
