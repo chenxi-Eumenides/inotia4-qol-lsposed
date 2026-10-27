@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdio>
 #include <fcntl.h>
@@ -424,26 +425,55 @@ QolResult show_text_popup(int32_t text_id) {
     return contracts::ok();
 }
 
+struct MapsRange {
+    uintptr_t start;
+    uintptr_t end;
+};
+
 bool maps_range_readable(const void* control, size_t size) {
     if (control == nullptr || size == 0) return false;
     const uintptr_t begin = reinterpret_cast<uintptr_t>(control);
     if (begin > UINTPTR_MAX - size) return false;
     const uintptr_t end = begin + size;
-    FILE* maps = std::fopen("/proc/self/maps", "re");
-    if (maps == nullptr) return false;
-    char line[512];
-    bool readable = false;
-    while (std::fgets(line, sizeof(line), maps) != nullptr) {
-        unsigned long long start = 0;
-        unsigned long long stop = 0;
-        char perms[5] = {};
-        if (std::sscanf(line, "%llx-%llx %4s", &start, &stop, perms) != 3) continue;
-        if (begin < start || begin >= stop) continue;
-        readable = perms[0] == 'r' && end <= stop;
-        break;
+
+    // The seccomp fallback is only used when process_vm_readv is denied.
+    // Parsing /proc/self/maps for every child node makes bag refresh take
+    // seconds, so keep a very short-lived snapshot. UI rebuilds happen on the
+    // main thread; a 16ms window is shorter than one user-visible frame.
+    thread_local std::array<MapsRange, 4096> t_ranges{};
+    thread_local size_t t_range_count = 0;
+    thread_local bool t_ranges_loaded = false;
+    thread_local std::chrono::steady_clock::time_point t_ranges_at{};
+    const auto now = std::chrono::steady_clock::now();
+    if (!t_ranges_loaded || now - t_ranges_at > std::chrono::milliseconds(16)) {
+        t_range_count = 0;
+        FILE* maps = std::fopen("/proc/self/maps", "re");
+        if (maps == nullptr) {
+            t_ranges_loaded = true;
+            t_ranges_at = now;
+            return false;
+        }
+        char line[512];
+        while (t_range_count < t_ranges.size() &&
+               std::fgets(line, sizeof(line), maps) != nullptr) {
+            unsigned long long start = 0;
+            unsigned long long stop = 0;
+            char perms[5] = {};
+            if (std::sscanf(line, "%llx-%llx %4s", &start, &stop, perms) != 3) continue;
+            if (perms[0] != 'r') continue;
+            t_ranges[t_range_count++] = {static_cast<uintptr_t>(start),
+                                         static_cast<uintptr_t>(stop)};
+        }
+        std::fclose(maps);
+        t_ranges_loaded = true;
+        t_ranges_at = now;
     }
-    std::fclose(maps);
-    return readable;
+    for (size_t index = 0; index < t_range_count; ++index) {
+        if (begin >= t_ranges[index].start && begin < t_ranges[index].end) {
+            return end <= t_ranges[index].end;
+        }
+    }
+    return false;
 }
 
 // ControlObject pointers can be freed or mprotected while the cached
@@ -492,7 +522,9 @@ QolResult child_at(QolUiHandle control, uint32_t index, QolUiHandle* out) {
     void* node = *reinterpret_cast<void**>(
         const_cast<uint8_t*>(static_cast<const uint8_t*>(control) + CO_CHILD_LIST));
     for (uint32_t current = 0; current <= index; ++current) {
-        if (node == nullptr || !maps_range_readable(node, 0x18)) return not_ready();
+        // Use the normal fast probe here. Parsing /proc/self/maps per linked
+        // node makes UI refresh O(nodes * file-read) and freezes the bag page.
+        if (node == nullptr || !control_readable(node, 0x18)) return not_ready();
         if (current == index) {
             void* child = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 8);
             if (child == nullptr || !control_readable(child, CO_SIZE)) return not_ready();
