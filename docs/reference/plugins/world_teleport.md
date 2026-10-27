@@ -24,7 +24,7 @@
 
 | 变体系列 | 回调路径 | 落点 | 费用 |
 |---|---|---|---|
-| C18 | 关闭面板 + restore HUD 后直接切图 | `(0,0)` + `dir|0x8000`：走 C18 进图选点（中点 → X±/Y± ≤32 步最近非阻挡） | 免费（不检查余额、不扣费） |
+| C18 | 关闭面板 + restore HUD 后直接切图 | `static.data` 的 `map_info` + `map_tiles` 经 `rules.pick_landing` 选点，传显式坐标；数据缺失/全图无可站立格 → 该选项不可用，选择时横幅「目标地图无效，无法传送」，**不以 `(0,0)` 静默传送**。C18 的 `MAPSYSTEM_FindBestLoc(x,y,…)` 只从传入瓦片坐标就近找非阻挡格、不解释方向高位，因此不能靠 `(0,0)+dir\|0x8000` 让游戏自己选点 | 免费（不检查余额、不扣费） |
 | 原版 / 未知（查询缺失或读取失败） | 同 C18：直接切图 | `static.data` 的 `map_info` + `map_tiles` 经 `rules.pick_landing` 选点，传显式坐标；数据缺失/全图无可站立格 → 该选项不可用，选择时横幅「目标地图无效，无法传送」，**不以 `(0,0)` 静默传送** | 免费 |
 | monster / 大修 | 确认框 → 确认后关闭并切图 | `(0,0)`：由改版自身进图补丁校正（monster：阻挡则 8 方向螺旋找最近可达后 `CharSetPosition`） | `+1/-1` 300、`+10/-10` 3000 |
 
@@ -39,11 +39,11 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 业务编排（`feature.cpp`）：
 
 1. `world_teleport_call_map_name`：先读 `current_map_id`/`map_name` 复刻原函数地图名横幅（读取失败只记日志，不阻断）；再读 `world.facts::state`；非世界态（`state != 5`，`kWorldState`）忽略；世界态调用 `request_open_choice`。
-2. `open_choice_panel`（`feature.cpp`）：读 `current_map_id`/`map_record_count`，由 `max_map_id_from_record_count` 推导上限；读变体序列（`read_series` → `QolGameHost.target.query_variant`）决定回调策略（monster/大修收费，C18/原版/未知免费）；构造 4 项传送目标（delta `{+1,+10,-1,-10}`，费用 `{300,3000,300,3000}`）+ 1 项「关闭」（共 `kChoiceCount=5`，`feature.cpp:18-22`）。免费且非 C18 的目标读取 `static.data` 的 `map_info`/`map_tiles` 并调用 `pick_landing`；数据缺失或选点失败时该目标置无效并显示「地图数据缺失」。以 `UiChoiceSpec`（`dialog_type_id="world_teleport.confirm"`）调 `ui_choice::open`。
+2. `open_choice_panel`（`feature.cpp`）：读 `current_map_id`/`map_record_count`，由 `max_map_id_from_record_count` 推导上限；读变体序列（`read_series` → `QolGameHost.target.query_variant`）决定回调策略（monster/大修收费，C18/原版/未知免费）；构造 4 项传送目标（delta `{+1,+10,-1,-10}`，费用 `{300,3000,300,3000}`）+ 1 项「关闭」（共 `kChoiceCount=5`，`feature.cpp:18-22`）。免费变体（含 C18）的目标读取 `static.data` 的 `map_info`/`map_tiles` 并调用 `pick_landing`；数据缺失或选点失败时该目标置无效并显示「地图数据缺失」。以 `UiChoiceSpec`（`dialog_type_id="world_teleport.confirm"`）调 `ui_choice::open`。
 3. `teleport_on_select`（`feature.cpp`）：越界/依赖缺失 → 关面板；无效目标 → 横幅「目标地图无效，无法传送」（含静态数据缺失）；有效目标按 `target.charge` 分流：收费 → 写确认文本、关面板、`g_pending_target=target`、调度 `delayed_open_confirmation`；免费 → 关面板、restore HUD、调度 `delayed_close_choice`，不生成确认文案与确认框。
 4. `delayed_open_confirmation`（仅收费路径，`feature.cpp`）：经 `world_action.create_yesno` 弹确认框（ok=`teleport_confirmed`、cancel=`teleport_cancelled`、param=`cost`）。
 5. `teleport_confirmed`（`feature.cpp`）：调度 `delayed_close_choice`，关 popup、restore HUD。
-6. `delayed_close_choice` → `delayed_transfer`（`feature.cpp`）：读 `world.facts::active_player_direction`；收费路径再读 `item.facts::money`，余额不足 → 横幅「金币不足，无法传送」，否则 `world_action.minus_money`；随后 `world_action.request_map_change(map_id, land_x, land_y, direction | (native_landing ? 0x8000 : 0))`。免费路径跳过余额检查与扣费。
+6. `delayed_close_choice` → `delayed_transfer`（`feature.cpp`）：读 `world.facts::active_player_direction`；收费路径再读 `item.facts::money`，余额不足 → 横幅「金币不足，无法传送」，否则 `world_action.minus_money`；随后 `world_action.request_map_change(map_id, land_x, land_y, direction)`。免费路径跳过余额检查与扣费，落点使用 `pick_landing` 结果。
 7. `teleport_cancelled`（`feature.cpp:288-293`）：调度重开选择面板。
 
 地图 id 回绕（`rules.cpp`）：`kMaxMapId=414`（`rules.h:6`）；`target_map_id(current,delta,max)` 在 `[0,max]` 循环（`rules.cpp`）；`max_map_id_from_record_count(count)`：`count<=0` 回退静态上限，否则 `min(count-1, kMaxMapId)`。`pick_landing(tiles,width,height,&x,&y)`（`rules.cpp`）：64×64 通行矩阵（bit3=不可通行），中点 → X 正/负、Y 正/负（步长 ≤32）→ 全图最近（切比雪夫）非阻挡格；矩阵不足或全图无可站立格返回 `false`。
@@ -76,7 +76,7 @@ wrapper（`world_teleport_call_map_name_wrapper`）在插件启用且宿主交�
 
 - `plugin_install`（`plugin.cpp`）：校验 `struct_size`/`sdk_major`/`g_sdk`/`g_game`/`ports` 与三项 required 能力（`item.facts` 额外做 `item_facts_api_size_valid`），失败清空全局、写 `g_install_error` 文案并返回 1；`static.data` 缺失时文案为 `install failed: static data unavailable`。
 - 各业务函数在 `game()==nullptr` 或所需 `world_action` 槽为空时记录日志并返回。
-- 静态地图数据缺失或选点失败：原版/未知变体的该目标在面板中显示「地图数据缺失」并置为无效；选择时走「目标地图无效，无法传送」横幅且不切图，不以 `(0,0)` 兜底。
+- 静态地图数据缺失或选点失败：免费变体（含 C18）的该目标在面板中显示「地图数据缺失」并置为无效；选择时走「目标地图无效，无法传送」横幅且不切图，不以 `(0,0)` 兜底。
 - `ui.state` 或 `read_layers` 不可用时，仅降级诊断字段为 `top=-`，不阻断业务。
 - `feature.h:11-31` 定义 `InstallDisposition`（`kInstalled/kUnsupported/kFailed`）与 `install_error()` 文案，供安装结果语义核对（`tests/test_world_teleport_install.cpp`）。
 - 资源声明 `kFailClosed`：入口 hook 安装失败即按还原释放并把插件置 failed。`on_resource_ready=plugin_on_resource_ready` 缓存宿主交还的 backup；未知资源 id 或空 backup 返回非 0 → 宿主回滚该资源并置 failed，wrapper 不在 backup 缺失下运行。

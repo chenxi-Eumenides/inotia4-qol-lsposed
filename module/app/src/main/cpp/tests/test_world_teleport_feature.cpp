@@ -107,7 +107,8 @@ const qol::contracts::WorldFactsApi kWorldFacts{
     &active_player_direction, nullptr};
 const qol::contracts::ItemFactsApi kItemFacts{
     static_cast<uint32_t>(sizeof(qol::contracts::ItemFactsApi)), nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &money};
+    nullptr, nullptr, nullptr, nullptr, nullptr, &money, nullptr, nullptr, nullptr, nullptr,
+    nullptr};
 
 constexpr int32_t kStaticTileDim = qol::contracts::kStaticMapTileDim;
 uint8_t g_static_tiles[qol::contracts::kStaticMapTileSize]{};
@@ -406,6 +407,8 @@ int main() {
     assert(g_banner == "传送失败，已退还金币");
 
     // 变体分流：C18 免费直传——无确认框、无扣费，余额不足仍传送。
+    // 落点与未知变体同走 static.data + 插件选点（全通矩阵中点为 (32,32)）；
+    // C18 的进图选点只从传入坐标就近找非阻挡格，不解释高方向位。
     reset_observations();
     g_series = 4;  // C18：免费直传
     g_current_map_id = 5;
@@ -424,12 +427,28 @@ int main() {
     assert(g_minus_money_calls == 0);
     assert(g_map_change_calls == 1);
     assert(g_banner.empty());
-    // c18 走其进图选点门控：(0,0) + dir|0x8000，不调用 static.data。
-    assert(g_last_map_x == 0);
-    assert(g_last_map_y == 0);
-    assert((g_last_map_direction & 0x8000) != 0);
-    assert(g_static_info_calls == 0);
-    assert(g_static_tiles_calls == 0);
+    assert(g_static_info_calls > 0);
+    assert(g_static_tiles_calls > 0);
+    assert(g_last_map_x == 32);
+    assert(g_last_map_y == 32);
+    assert((g_last_map_direction & 0x8000) == 0);
+
+    // C18 + 目标图静态数据缺失 → 选项不可用，不得以 (0,0) 兜底。
+    reset_observations();
+    g_missing_static_map_id = 6;  // 当前 5，索引 0 的目标
+    g_series = 4;  // C18
+    g_current_map_id = 5;
+    g_record_count = 20;
+    g_money = 0;
+    qol::features::world_teleport::world_teleport_call_map_name();
+    assert(g_choice_items.size() == 5);
+    assert(g_choice_items[0].find("地图数据缺失") != std::string::npos);
+    assert(g_choice_select != nullptr);
+    g_banner.clear();
+    g_choice_select(0, g_choice_user);
+    assert(g_banner == "目标地图无效，无法传送");
+    assert(g_map_change_calls == 0);
+    assert(g_tasks.empty());
 
     // 未知变体免费直传（不确认、不扣费），落点走 static.data + 插件选点（全通矩阵中点为 (32,32)）。
     reset_observations();

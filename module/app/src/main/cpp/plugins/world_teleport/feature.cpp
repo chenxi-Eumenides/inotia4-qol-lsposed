@@ -34,11 +34,9 @@ struct ChoiceTarget {
     int cost = 0;
     bool valid = false;
     bool charge = false;
-    // 落点：native_landing=true 时坐标走 (0,0)+dir|0x8000（c18 进图选点门控）；
-    // false 时用 land_x/land_y（端口选点或 (0,0) 回退）。
+    // 落点：免费变体由 static.data 选点后传显式坐标；收费变体保持 (0,0) 由其进图补丁校正。
     int land_x = 0;
     int land_y = 0;
-    bool native_landing = false;
 };
 
 std::array<ChoiceTarget, kTeleportChoiceCount> g_targets{};
@@ -235,7 +233,6 @@ void open_choice_panel() {
     // QolTargetVariant.id = GameSeries 序数（0=Unknown、1=Original、2=Overhaul、3=Monster、4=C18）。
     constexpr int kSeriesOverhaul = 2;
     constexpr int kSeriesMonster = 3;
-    constexpr int kSeriesC18 = 4;
     int series = 0;
     (void)read_series(&series);
     const bool charge = series == kSeriesMonster || series == kSeriesOverhaul;
@@ -247,13 +244,12 @@ void open_choice_panel() {
         const int target_id = world_teleport::target_map_id(current_id, delta, max_map_id);
         const bool base_valid = target_id >= 0 && (record_count <= 0 || target_id < record_count);
         ChoiceTarget target{target_id, kChoiceCosts[index], base_valid, charge};
-        // 落点分流：c18 走其进图选点门控（(0,0)+dir|0x8000）；原版/未知用 static.data
-        // 瓦片矩阵选点（失败=该选项不可用）；monster/大修保持 (0,0)，由其进图补丁校正。
+        // 落点分流：免费变体（含 c18）一律用 static.data 瓦片矩阵选点（失败=该选项不可用）；
+        // monster/大修保持 (0,0)，由其进图补丁校正。C18 的 MAPSYSTEM_FindBestLoc 只从传入
+        // 坐标就近找非阻挡格，不解释高方向位；传 (0,0) 会直接落在左上角。
         bool landing_missing = false;
         if (base_valid && !charge) {
-            if (series == kSeriesC18) {
-                target.native_landing = true;
-            } else if (!resolve_landing(target_id, &target.land_x, &target.land_y)) {
+            if (!resolve_landing(target_id, &target.land_x, &target.land_y)) {
                 target.valid = false;
                 landing_missing = true;
                 log_message(3, "world teleport: static map data missing target=%d", target_id);
@@ -389,7 +385,7 @@ int32_t delayed_transfer(int64_t, void* param) {
     }
     if (!qol::contracts::succeeded(
             actions->request_map_change(target->map_id, target->land_x, target->land_y,
-                                        direction | (target->native_landing ? 0x8000 : 0)))) {
+                                        direction))) {
         if (!target->charge) {
             show_message("传送失败");
             log_message(3, "world teleport: transfer failed target=%d cost=0",
@@ -403,9 +399,8 @@ int32_t delayed_transfer(int64_t, void* param) {
                     target->map_id, target->cost, refunded ? 1 : 0);
         return 0;
     }
-    log_message(1, "world teleport: transferred target=%d cost=%d landing=%d,%d native=%d",
-                target->map_id, cost, target->land_x, target->land_y,
-                target->native_landing ? 1 : 0);
+    log_message(1, "world teleport: transferred target=%d cost=%d landing=%d,%d",
+                target->map_id, cost, target->land_x, target->land_y);
     return 0;
 }
 
