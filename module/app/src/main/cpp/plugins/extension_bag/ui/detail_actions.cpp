@@ -72,24 +72,27 @@ const qol::contracts::UiConfirmationApi* extension_ui_confirmation_api() {
 
 bool extension_open_custom_sell_confirmation(uint32_t price) {
     const auto* api = extension_ui_confirmation_api();
-    if (api == nullptr) return false;
-    qol::contracts::UiConfirmationSpecText spec{};
-    spec.size = sizeof(spec);
-    std::snprintf(spec.message, sizeof(spec.message), "确定以 %u 金币出售该物品？", price);
+    if (api == nullptr || api->open == nullptr) return false;
+    // TEXTDATABASE row 9 = "是否出售？"，display_type=2 = 原版价格栏。
+    // 复用原版文本和布局，不生成自定义文案。
+    qol::contracts::UiConfirmationSpec spec{};
+    spec.text_id = 9;
+    spec.display_type = 2;
+    spec.format_arg = 0;
     spec.price = price;
     spec.on_confirm = &extension_sell_ok;
     spec.on_cancel = &extension_sell_cancel;
     spec.user = nullptr;
     uint64_t token = 0;
-    const QolResult result = api->open_text(&spec, &token);
+    const QolResult result = api->open(&spec, &token);
     if (!qol::contracts::succeeded(result) || token == 0) {
-        VIRTBAG_LOG("extension sell custom confirmation unavailable code=%d token=%llu",
+        VIRTBAG_LOG("extension sell confirmation unavailable code=%d token=%llu",
                     result.code, static_cast<unsigned long long>(token));
         if (token != 0 && api->close != nullptr) (void)api->close(token);
         return false;
     }
     g_extension_custom_sell_confirmation = true;
-    VIRTBAG_LOG("extension sell custom confirmation opened price=%u token=%llu", price,
+    VIRTBAG_LOG("extension sell confirmation opened price=%u token=%llu", price,
                 static_cast<unsigned long long>(token));
     return true;
 }
