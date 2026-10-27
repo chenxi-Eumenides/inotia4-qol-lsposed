@@ -110,9 +110,9 @@ required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是�
 
 ### 物品视图与宝石质量
 
-- `autosell_build_view` 通过 `item.facts.is_real_equip` 填 `is_equip`，不再使用 `item.facts.view.equip`（后者是“计数未编码/不可堆叠”，不是真实装备）。`read_only::item_is_real_equip()` 直接调用 `ItemFactsApi.is_real_equip`。
-- 读取 `item.facts.view`，缺 `HasRarity` 时 rarity 记 `-1`；先按 category 判定宝石/背包/徽章/骰子，已知非装备不再查询真实装备。宝石 category 28..32 才要求 Jewel 字段；谓词不可用时按 category 28..32 回退。背包 1..4、骰子 52..56 直接按 category 识别，避免谓词未接线导致整类不卖。
-- 分类字段：`category`、`is_backpack`、`badge_rank`（42..47→1、48→2、50→3、49/928..933→4）、`dice_tier`（52..56→1..5）。
+- `autosell_build_view` 通过 `item.facts.item_type == kEquipment` 填 `is_equip`，不再使用 `item.facts.view.equip`（后者是“计数未编码/不可堆叠”，不是真实装备）。
+- 读取 `item.facts.view`，缺 `HasRarity` 时 rarity 记 `-1`。类型统一由 `ItemFactsApi.item_type` 判定：`kJewel`、`kBackpack`、`kMercenarySeal`、`kDice`、`kEquipment`；不再调用 `QolGameHost` 的 `is_backpack_category` / `is_dice`。
+- 分类字段：`category`、`is_backpack`、`badge_rank`（仅 `kMercenarySeal` 内按 42..47→1、48→2、50→3、49/928..933→4）、`dice_tier`（仅 `kDice` 内 52..56→1..5）。
 - 宝石质量通过 `AttributeQualityApiProvider` 注入；provider 为空、struct_size 不合法、查询失败、结果不完整或状态非 Ok 时保持 `jewel_percentile=-1`，`gemRange` 规则不命中（fail-closed）。
 - 硬保护在规则入口先于一切规则执行，但只对真实装备：`is_equip && (enhance_level > 0 || socket_filled > 0)` 才返回 `kHardProtected`；`enhance_level` 由 view 从 `facts.enchant_level` 复制。
 
@@ -237,7 +237,7 @@ save_exit → reject session → remove task
 | `contracts/autosell.h` 的运行时/持久化声明 | 删除；契约头只保留 `Config`。 |
 | `autosell_status_json` 在 `config.cpp` | 移到 `status_json.cpp`；`config.cpp` 只提供快照。 |
 | `special_mask`/`SpecialType` | 删除；改为 `backpack_tier`/`badge_tier`/`dice_tier`，旧 `special` 仅作 JSON 兼容。 |
-| `item.facts.view.equip` 作为装备判定 | 改为 `item.facts.is_real_equip`；`view.equip` 仅表示“计数未编码/不可堆叠”。 |
+| `item.facts.view.equip` 作为装备判定 | 改为 `item.facts.item_type == kEquipment`；`view.equip` 仅表示“计数未编码/不可堆叠”。 |
 | EB 逻辑袋扫描与 `module_view_installed` 门禁 | 删除；改为 `space=1` C18 原生追加袋 + `inventory.bag_source` 注册源 `space>=2`。 |
 | `CandidateDiagnostics`/fingerprint/`emit_candidate_diagnostic` | 删除；EB 逻辑袋移除后无调用者。 |
 | 特殊类型 chips、宝石分组框 | 删除；面板改为 8 行，右列 5 行与宝石同列。 |

@@ -65,7 +65,7 @@ HTTP 与游戏内面板共用同一条配置提交路径，写成功后的运行
 
 ### 装备规则
 
-三条装备规则只对**真实装备**生效（`item.facts.is_real_equip`，不是库存视图里的“不可堆叠”字段），已开启的规则之间为 **AND**：所有已开启规则都命中才出售。
+三条装备规则只对 **`item.facts.item_type == kEquipment`** 生效（不是库存视图里的“不可堆叠”字段），已开启的规则之间为 **AND**：所有已开启规则都命中才出售。
 
 | 字段 | 档位 | 出售条件 |
 |---|---|---|
@@ -90,9 +90,9 @@ HTTP 与游戏内面板共用同一条配置提交路径，写成功后的运行
 
 | 字段 | 档位 | 出售条件 |
 |---|---|---|
-| `backpackTier` | 0..4 → 关/≤手提包/≤背包小/≤背包中/≤背包大 | 物品是背包，且运行时 category `1..backpackTier`。 |
-| `badgeTier` | 0..4 → 关/≤普通/≤被祝福/≤教团/≤英雄 | 徽章 rank `1..badgeTier`；普通 42..47、被祝福 48、教团 50、英雄 49 与 928..933。教团排在英雄前。 |
-| `diceTier` | 0..5 → 关/≤低级/≤中级/≤高级/≤顶级/≤混沌 | 骰子 tier `1..diceTier`；运行时 category 52..56 对应 1..5。混沌骰子仅在 `diceTier=5` 时出售。 |
+| `backpackTier` | 0..4 → 关/≤手提包/≤背包小/≤背包中/≤背包大 | `item_type == kBackpack`，且 category `1..backpackTier`。 |
+| `badgeTier` | 0..4 → 关/≤普通/≤被祝福/≤教团/≤英雄 | `item_type == kMercenarySeal`，rank `1..badgeTier`；普通 42..47、被祝福 48、教团 50、英雄 49 与 928..933。教团排在英雄前。 |
+| `diceTier` | 0..5 → 关/≤低级/≤中级/≤高级/≤顶级/≤混沌 | `item_type == kDice`，tier `1..diceTier`；category 52..56 对应 1..5。混沌骰子仅在 `diceTier=5` 时出售。 |
 
 旧配置的 `special` 数组仍兼容：`backpack`→`backpackTier=4`、`normalSeal`→`badgeTier=1`、`dice`→`diceTier=4`（旧普通骰子不含混沌）。显式 tier 字段优先于 `special`。
 
