@@ -403,6 +403,9 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
     const int32_t visible = static_cast<int32_t>(
         virtual_bag_effective_count(item, static_cast<uint32_t>(descriptor.count)));
     if (count > visible) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source remove count rejected bag=%d slot=%d count=%d visible=%d",
+                     bag, slot, count, visible);
         return source_error(kQolErrInvalidArgument, "remove count exceeds item count");
     }
     ModuleUseToken* active_use = active_use_token_for(bag, slot, item);
@@ -458,12 +461,18 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
     if (!virtual_bag::patch_payload_count(&candidate,
                                           static_cast<uint32_t>(candidate.count),
                                           &encoded_category)) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source remove patch rejected bag=%d slot=%d category=%d count=%d",
+                     bag, slot, descriptor.category, candidate.count);
         return source_error(kQolErrConflict, "extension item quantity update rejected");
     }
     if (!virtual_bag::valid_payload(candidate)) {
         return source_error(kQolErrConflict, "extension item payload invalid");
     }
     if (!virtual_bag_write_effective(item, static_cast<uint32_t>(candidate.count))) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "bag source remove write rejected bag=%d slot=%d category=%d count=%d",
+                     bag, slot, descriptor.category, candidate.count);
         return source_error(kQolErrConflict, "extension item quantity update rejected");
     }
     ::qol::extension_bag::access::bag().items[bag][slot] = candidate;

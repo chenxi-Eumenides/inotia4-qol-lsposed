@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <type_traits>
 
@@ -107,11 +108,13 @@ static_assert(std::is_trivially_copyable<InventoryActionApi>::value,
               "action api must be trivially copyable");
 
 inline bool inventory_action_api_valid(const InventoryActionApi* api) {
-    return api != nullptr && api->struct_size >= sizeof(InventoryActionApi) &&
-           api->version_major == kInventoryActionVersionMajor &&
-           api->version_minor >= kInventoryActionVersionMinor && api->move != nullptr &&
-           api->use != nullptr && api->discard != nullptr && api->sell != nullptr &&
-           api->equip != nullptr && api->unequip != nullptr && api->put_jewel != nullptr;
+    constexpr uint32_t kLegacySize = static_cast<uint32_t>(
+        offsetof(InventoryActionApi, put_jewel) + sizeof(InventoryActionApi::put_jewel));
+    return api != nullptr && api->struct_size >= kLegacySize &&
+           api->version_major == kInventoryActionVersionMajor && api->version_minor >= 0 &&
+           api->move != nullptr && api->use != nullptr && api->discard != nullptr &&
+           api->sell != nullptr && api->equip != nullptr && api->unequip != nullptr &&
+           api->put_jewel != nullptr;
 }
 
 }  // namespace qol::contracts

@@ -138,7 +138,13 @@ bool remove_registered_source_item(void* item, int32_t count) {
         return false;
     }
     qol::contracts::QolBagMutationResult mutation{};
-    return qol::contracts::succeeded(source->remove(ref.item, count, &mutation));
+    const QolResult result = source->remove(ref.item, count, &mutation);
+    if (!qol::contracts::succeeded(result)) {
+        QOL_LOG_WARN(QolDomain::kInventory,
+                     "registered source consume failed space=%d bag=%d slot=%d count=%d code=%d",
+                     ref.space_id, ref.bag, ref.slot, count, result.code);
+    }
+    return qol::contracts::succeeded(result);
 }
 
 bool identify_registered_source_item(void* item, int32_t* bag, int32_t* slot) {
