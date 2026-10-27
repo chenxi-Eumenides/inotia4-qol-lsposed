@@ -1243,9 +1243,13 @@ void button_equip_exe_wrapper(void* button) {
         return;
     }
     const auto* projection = qol::features::core_item::projection_callbacks();
-    const bool projection_equip_handled =
+    bool projection_equip_handled =
         projection != nullptr && projection->handle_backpack_equip != nullptr &&
         projection->handle_backpack_equip();
+    if (!projection_equip_handled && projection != nullptr &&
+        projection->handle_character_equip != nullptr) {
+        projection_equip_handled = projection->handle_character_equip();
+    }
     QOL_LOG_INFO(QolDomain::kInventory,
                  "ButtonEquipExe projection=%p callback=%p handled=%d",
                  projection,

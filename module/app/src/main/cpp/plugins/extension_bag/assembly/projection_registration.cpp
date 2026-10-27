@@ -100,6 +100,10 @@ bool projection_handle_backpack_equip() {
     return projection_available() && extension_handle_backpack_equip();
 }
 
+bool projection_handle_character_equip() {
+    return projection_available() && extension_handle_character_equip();
+}
+
 const qol::contracts::InventoryProjectionCallbacks kProjectionCallbacks{
     sizeof(qol::contracts::InventoryProjectionCallbacks),
     qol::contracts::kInventoryProjectionVersionMajor,
@@ -117,6 +121,7 @@ const qol::contracts::InventoryProjectionCallbacks kProjectionCallbacks{
     &projection_handle_original_bag_unequip,
     &projection_handle_use_mercenary_seal,
     &projection_handle_backpack_equip,
+    &projection_handle_character_equip,
 };
 
 const qol::contracts::InventoryProjectionRegistryApi* projection_registry() {

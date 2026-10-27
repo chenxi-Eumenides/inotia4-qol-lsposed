@@ -16,6 +16,7 @@ bool extension_confirm_use_item(void* item);
 bool extension_use_mercenary_seal();
 bool extension_handle_original_bag_unequip();
 bool extension_handle_backpack_equip();
+bool extension_handle_character_equip();
 bool consume_extension_item_after_native_locked(int bag, int slot, void* item,
                                                 int before_count, int observed_before,
                                                 const char* context, void* raw_use_token);

@@ -311,6 +311,41 @@ bool extension_handle_original_bag_unequip() {
     return true;
 }
 
+bool extension_handle_character_equip() {
+    if (!::qol::extension_bag::access::enabled().load() || !read_world_in_world()) return false;
+    ::qol::extension_bag::ReentryLock lock;
+    if (!lock.owns_lock()) return false;
+    void* item = qol::extension_bag::ui_state().ui.extension_desc_item;
+    if (item == nullptr) return false;
+    int source_bag = -1;
+    int source_slot = -1;
+    if (!module_slot_of_item_locked(item, &source_bag, &source_slot) ||
+        !virtual_bag::valid_index(source_bag) || source_slot < 0 ||
+        source_slot >= virtual_bag::kSlotCount ||
+        qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] != item ||
+        qol::extension_bag::ui_state().ui.extension_desc_item_bag != source_bag ||
+        qol::extension_bag::ui_state().ui.extension_desc_item_slot != source_slot) {
+        return false;
+    }
+    void* character = extension_menu_character();
+    if (character == nullptr) return false;
+    const bool equipped = equip_module_item_on_character_locked(
+        lock, character, item, source_bag, source_slot);
+    if (!equipped) {
+        VIRTBAG_LOG("extension character equip rejected bag=%d slot=%d", source_bag, source_slot);
+        const auto* sdk = ::qol::extension_bag::access::host().sdk;
+        if (sdk != nullptr && sdk->ui != nullptr && sdk->ui->show_text_popup != nullptr) {
+            (void)sdk->ui->show_text_popup(6);
+        }
+        return true;
+    }
+    extension_description_set_off();
+    clear_original_desc_locked();
+    finish_extension_equip_ui_locked(source_bag, nullptr);
+    VIRTBAG_LOG("extension character equip committed bag=%d slot=%d", source_bag, source_slot);
+    return true;
+}
+
 bool extension_handle_backpack_equip() {
     if (!::qol::extension_bag::access::enabled().load() || !read_world_in_world()) return false;
     ::qol::extension_bag::ReentryLock lock;
