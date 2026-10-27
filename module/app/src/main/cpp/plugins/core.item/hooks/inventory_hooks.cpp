@@ -1006,54 +1006,58 @@ bool adopt_save_item_to_registered_source(void* item, int32_t* out_category) {
     transfer.count = item_count;
     transfer.payload_size = serialized;
 
-    // find_empty_slots is already the ordered (space, bag, slot) scan with an
-    // early return at the requested count. Reuse it so SaveItem follows the
-    // same insertion order as every other inventory action.
-    qol::contracts::QolActionRef empty_slots[3]{};
-    result = qol::features::core_item::kInventoryActionApi.find_empty_slots(
-        3, empty_slots, &empty_count);
-    if (!qol::contracts::succeeded(result)) {
-        log_failure("find_empty_slots");
-        return false;
-    }
+    // find_empty_slots 只返回前 N 个空槽，且未装备的原生袋仍按 capacity 16 计入；
+    // SaveItem 失败时这些原生槽并不可写，前 3 个空槽可能全是原生槽，导致扩展袋
+    // 永远轮不到。这里直接按注册源顺序扫描空槽并导入。
     bool import_failure_logged = false;
-    for (int32_t index = 0; index < empty_count; ++index) {
-        if (empty_slots[index].space_id <= qol::contracts::kQolBagSpaceVariant) continue;
-        target_space = empty_slots[index].space_id;
-        target_bag = empty_slots[index].bag;
-        target_slot = empty_slots[index].slot;
+    for (uint32_t source_index = 0;
+         source_index < qol::features::core_item::registered_bag_source_count(); ++source_index) {
         const auto* source =
-            qol::features::core_item::find_bag_source(target_space);
-        if (source == nullptr || source->import_item == nullptr) {
-            inventory_log_write(0, __FILE__, __LINE__,
-                                "SaveItem adopt stage=import_item reason=source_unavailable "
-                                "item=%p category=%d payload_size=%u empty_count=%d "
-                                "target_space=%d target_bag=%d target_slot=%d",
-                                item, category, static_cast<unsigned int>(payload_size),
-                                empty_count, target_space, target_bag, target_slot);
-            import_failure_logged = true;
+            qol::features::core_item::registered_bag_source_at(source_index);
+        if (source == nullptr || source->count == nullptr || source->info == nullptr ||
+            source->item_at == nullptr || source->import_item == nullptr) {
             continue;
         }
-        qol::contracts::QolBagMutationResult imported{};
-        result = source->import_item(&transfer, target_bag, target_slot, &imported);
-        if (!qol::contracts::succeeded(result)) {
-            inventory_log_write(0, __FILE__, __LINE__,
-                                "SaveItem adopt stage=import_item result=%d item=%p "
-                                "category=%d payload_size=%u empty_count=%d target_space=%d "
-                                "target_bag=%d target_slot=%d",
-                                static_cast<int32_t>(result.code), item, category,
-                                static_cast<unsigned int>(payload_size), empty_count,
-                                target_space, target_bag, target_slot);
-            import_failure_logged = true;
-            continue;
+        const int32_t bag_count = source->count();
+        if (bag_count < 0) continue;
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            qol::contracts::QolBagInfo info{};
+            if (!qol::contracts::succeeded(source->info(bag, &info)) || info.capacity < 0) {
+                continue;
+            }
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                qol::contracts::QolInventoryItemRef existing{};
+                const QolResult probe = source->item_at(bag, slot, &existing);
+                if (probe.code != kQolErrNotFound) {
+                    if (!qol::contracts::succeeded(probe)) import_failure_logged = true;
+                    continue;
+                }
+                ++empty_count;
+                target_space = source->space_id;
+                target_bag = bag;
+                target_slot = slot;
+                qol::contracts::QolBagMutationResult imported{};
+                result = source->import_item(&transfer, target_bag, target_slot, &imported);
+                if (!qol::contracts::succeeded(result)) {
+                    inventory_log_write(0, __FILE__, __LINE__,
+                                        "SaveItem adopt stage=import_item result=%d item=%p "
+                                        "category=%d payload_size=%u empty_count=%d target_space=%d "
+                                        "target_bag=%d target_slot=%d",
+                                        static_cast<int32_t>(result.code), item, category,
+                                        static_cast<unsigned int>(payload_size), empty_count,
+                                        target_space, target_bag, target_slot);
+                    import_failure_logged = true;
+                    continue;
+                }
+                // The registered source materialized its own object; the original
+                // game-created item was never inserted into native inventory.
+                (void)port->read.free_item(item);
+                inventory_log_write(0, __FILE__, __LINE__,
+                                    "SaveItem adopt adopted category=%d space=%d bag=%d slot=%d",
+                                    category, target_space, target_bag, target_slot);
+                return true;
+            }
         }
-        // The registered source materialized its own object; the original
-        // game-created item was never inserted into native inventory.
-        (void)port->read.free_item(item);
-        inventory_log_write(0, __FILE__, __LINE__,
-                            "SaveItem adopt adopted category=%d space=%d bag=%d slot=%d",
-                            category, target_space, target_bag, target_slot);
-        return true;
     }
     if (!import_failure_logged) {
         log_failure("import_item");
