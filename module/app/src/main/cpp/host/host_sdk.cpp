@@ -1287,6 +1287,11 @@ QolResult sdk_desc_hook_unbind(uint64_t id) {
     }
     const auto restore_ptr = &qol::patch::ptr_slot_restore_raw;
     if (!restore_ptr(reinterpret_cast<uintptr_t>(execute_slot), binding.target.original_proc)) {
+        // Keep the binding table consistent with the plugin's local view. The
+        // button slot is being rebuilt by the game; retaining a binding that no
+        // longer owns the execute slot would make every later bind for the same
+        // reused slot fail with kQolErrConflict.
+        *current_binding = {};
         return result_error(kQolErrInternal, "ptr slot restore rejected");
     }
     *current_binding = {};

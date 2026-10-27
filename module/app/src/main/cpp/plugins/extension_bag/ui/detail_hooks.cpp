@@ -115,6 +115,13 @@ void install_extension_desc_item_hooks_locked(void* item) {
     }
     unavailable_logged = false;
 
+    // UIEquip_ResetMenuGroup deletes the previous button instances but leaves
+    // the panel slot pointers stale. Rebuild every observation binding from the
+    // live panel each time the description menu is created; reusing an ID after
+    // the game recreated a button can silently send the next click to the
+    // original destroy/sell handler.
+    reset_extension_desc_item_hooks_locked();
+
     std::array<void*, 11> resolved_execute_slots{};
     size_t resolved_execute_slot_count = 0;
     for (size_t index = 0; index < qol::extension_bag::ui_state().ui.extension_desc_item_bound.size(); ++index) {
