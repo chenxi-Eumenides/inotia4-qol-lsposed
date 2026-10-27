@@ -63,6 +63,8 @@ struct C18NativeBagImage {
     std::vector<uint8_t> records;
 };
 
+// C18 版本 → 原生背包布局：v0.x（0.2/0.38）无 native bag（kUnsupported）；
+// v507-v520 为 192 条旧布局；v521 及以上统一 96 条新布局（C18Lwh）。其余标签 kUnknown。
 C18NativeBagLayout c18_native_bag_layout(const std::string& version_label);
 bool validate_c18_native_bag_image(const C18NativeBagImage& image);
 bool c18_native_bag_record_empty(const uint8_t* record, size_t size);

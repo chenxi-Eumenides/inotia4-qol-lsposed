@@ -593,9 +593,19 @@ void test_c18_native_bag_bundle_segment() {
     CHECK(decoded.record_count == image.record_count);
     CHECK(decoded.header_reserved == image.header_reserved);
     CHECK(decoded.records == image.records);
-    CHECK(sb::c18_native_bag_layout("v520") == sb::C18NativeBagLayout::kLegacy192);
+    // v507-v520 全部 192；v521 及以上统一 96（v586/v588 只是其中两个已知点）。
+    for (const char* legacy : {"v507", "v508", "v512", "v513", "v514", "v520"}) {
+        CHECK(sb::c18_native_bag_layout(legacy) == sb::C18NativeBagLayout::kLegacy192);
+    }
+    CHECK(sb::c18_native_bag_layout("v521") == sb::C18NativeBagLayout::kModern96);
     CHECK(sb::c18_native_bag_layout("v586") == sb::C18NativeBagLayout::kModern96);
+    CHECK(sb::c18_native_bag_layout("v588") == sb::C18NativeBagLayout::kModern96);
+    CHECK(sb::c18_native_bag_layout("v600") == sb::C18NativeBagLayout::kModern96);
     CHECK(sb::c18_native_bag_layout("v0.2") == sb::C18NativeBagLayout::kUnsupported);
+    CHECK(sb::c18_native_bag_layout("v0.38") == sb::C18NativeBagLayout::kUnsupported);
+    // 非 C18 标签与低于 v507 的未登记版本不参与布局判定。
+    CHECK(sb::c18_native_bag_layout("v1.3.2") == sb::C18NativeBagLayout::kUnknown);
+    CHECK(sb::c18_native_bag_layout("v506") == sb::C18NativeBagLayout::kUnknown);
     CHECK(sb::c18_native_bag_layout("unrecognized") == sb::C18NativeBagLayout::kUnknown);
 
     const std::vector<uint8_t> plain(16, 0x33);
