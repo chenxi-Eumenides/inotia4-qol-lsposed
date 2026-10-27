@@ -94,7 +94,8 @@ scripts/build-release.sh -PtargetPackages=com.com2us.inotia4.normal.freefull.goo
 # 发布前缀全 ASCII：Inotia4_v<游戏版本>_monster[_<子版本>] / _original / _overhaul[_<日期>] / _c18[_<子版本>]。
 # <模块版本> 从 release 模块 APK 文件名（..._vX.Y.Z.apk）提取，debug 包不追加。
 scripts/patch-apk.sh <模块.apk>
-# 默认覆盖同名输出；不预先批量清理 output/，其他变体/通道的已有集成包原样保留。
+# 默认覆盖同名输出；生成后清理过期集成包（output/Inotia4_*.apk 中变体/版本已无对应源 APK 的文件），
+# 模块 debug/release 包、其他变体/通道的已有集成包与非 APK 文件原样保留。
 # 默认用 AOSP 公开 testkey（scripts/keys/aosp-testkey.bks，已入库）签名输出：
 #   - 改版（盗版大修 / monster）本就由该 testkey 签名，集成版与其证书身份一致，可覆盖安装；
 #   - 原版由 Com2us 私钥签名（私钥不可得），集成版签名身份仍与原版不同，需先卸载原版。

@@ -20,7 +20,9 @@ usage() {
   不符合固定命名的游戏 APK 直接失败。
   - 第二位置参数（新包名）不支持，传入会明确报错。
   - 默认覆盖同名输出（--force）：只覆盖本次重新生成的同名文件，
-    其他已有集成包（其他变体、其他通道、其他 patcher 的产物）原样保留，不再预先批量清理。
+    其他已有集成包（其他变体、其他通道、其他 patcher 的产物）原样保留，不预先批量清理。
+  - 生成后清理过期集成包：删除 output/Inotia4_*.apk 中变体/版本已无对应源游戏 APK 的文件；
+    模块包（inotia4_qol_lsposed_*，小写前缀）、当前源对应的产物与非 APK 文件不受影响。
 
 默认值：
   LSPatch JAR：tools/lspatch/lspatch-v1.2-487-release.jar
@@ -241,6 +243,44 @@ if [[ "$all_output" == true ]]; then
     printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
 fi
 
+# 清理过期集成包：删除 output/Inotia4_*.apk 中「变体_版本」已无对应当前源游戏 APK 的文件。
+# 判定用 release_stem 前缀（Inotia4_<name>_<version>_），与通道、patcher、模块版本无关：
+# 源仍在时其他通道/patcher 的同变体产物一律保留；源已换版本或移入 history/ 的旧产物删除。
+# 模块包前缀为小写 inotia4_qol_lsposed_*，非 APK 文件不匹配本 glob，都不在清理范围。
+# 全部源都无法解析变体时不执行清理，避免把无法归类的产物整批误删。
+expected_stems=()
+for source_apk in "${game_apks[@]}"; do
+    source_name=$(basename "$source_apk" .apk)
+    if source_output_stem=$(release_stem "$source_name" 2>/dev/null); then
+        expected_stems+=("$source_output_stem")
+    fi
+done
+cleaned=()
+if [[ ${#expected_stems[@]} -gt 0 ]]; then
+    shopt -s nullglob
+    existing_outputs=("$repo_root/output/Inotia4_"*.apk)
+    shopt -u nullglob
+    for existing_apk in "${existing_outputs[@]}"; do
+        existing_name=$(basename "$existing_apk")
+        case "$existing_name" in
+            inotia4_qol_lsposed_*) continue ;;
+        esac
+        existing_stem=${existing_name%.apk}
+        keep=false
+        for expected_stem in "${expected_stems[@]}"; do
+            if [[ "$existing_stem" == "$expected_stem" || "$existing_stem" == "$expected_stem"_* ]]; then
+                keep=true
+                break
+            fi
+        done
+        if [[ "$keep" == false ]]; then
+            rm -f "$existing_apk"
+            printf '清理过期集成包：%s\n' "$existing_name"
+            cleaned+=("$existing_name")
+        fi
+    done
+fi
+
 failed=0
 generated=()
 for target_apk in "${game_apks[@]}"; do
@@ -318,7 +358,7 @@ for target_apk in "${game_apks[@]}"; do
     rm -rf "$work_dir"
 done
 
-printf '\n===== 汇总：成功 %d / 失败 %d\n' "${#generated[@]}" "$failed"
+printf '\n===== 汇总：成功 %d / 失败 %d / 清理过期 %d\n' "${#generated[@]}" "$failed" "${#cleaned[@]}"
 if [[ "$all_output" == true ]]; then
     for apk in "${generated[@]}"; do
         printf '  %s\n' "$apk"
