@@ -362,8 +362,8 @@ void test_extension_sale_and_native_only_operations() {
     g_item.space_id = 2;
     g_item.bag = 1;
     g_item.slot = 2;
-    CHECK(qol::features::core_item::kInventoryActionApi.equip(0, {2, 1, 2}, 0).status ==
-          InventoryActionStatus::kUnsupported);
+    CHECK(qol::features::core_item::kInventoryActionApi.equip(0, {2, 1, 2}, 0).status !=
+          InventoryActionStatus::kOk);
     CHECK(g_native_equip_calls == 0);
     CHECK(qol::features::core_item::kInventoryActionApi.put_jewel(0, {2, 1, 2}, 0).status ==
           InventoryActionStatus::kUnsupported);
@@ -434,6 +434,7 @@ namespace qol::features::core_item {
 
 const contracts::QolItemPort* g_port = nullptr;
 const contracts::QolItemInventoryStateWritePort* g_item_state_write = nullptr;
+const contracts::QolCharacterExtrasPort* g_character_extras_port = nullptr;
 
 const contracts::QolBagSource* find_bag_source(int32_t space_id) {
     return space_id == 2 ? &g_source : nullptr;

@@ -339,6 +339,44 @@ contracts::InventorySellResult sell(QolActionRef ref, QolItemHandle expected_ite
     return outcome;
 }
 
+namespace {
+
+bool find_empty_native_slot(int32_t* out_bag, int32_t* out_slot) {
+    if (out_bag == nullptr || out_slot == nullptr || g_port == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port) ||
+        g_port->read.bag_count == nullptr || g_port->read.bag_info == nullptr ||
+        g_port->read.item_at == nullptr) {
+        return false;
+    }
+    int32_t bag_count = 0;
+    if (!contracts::succeeded(
+            g_port->read.bag_count(contracts::kQolBagSpaceOriginal, &bag_count))) {
+        return false;
+    }
+    for (int32_t bag = 0; bag < bag_count && bag < 5; ++bag) {
+        if (bag == contracts::kQolTaskBagIndex) continue;
+        const contracts::QolBagRef ref{contracts::kQolBagSpaceOriginal, bag};
+        contracts::QolBagInfo info{};
+        if (!contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
+            info.capacity < 0) {
+            continue;
+        }
+        for (int32_t slot = 0; slot < info.capacity; ++slot) {
+            contracts::QolInventoryItemRef item{};
+            const QolResult result = g_port->read.item_at(&ref, slot, &item);
+            if (result.code == kQolErrNotFound) {
+                *out_bag = bag;
+                *out_slot = slot;
+                return true;
+            }
+            if (!contracts::succeeded(result)) return false;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
 contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equip_slot) {
     contracts::InventoryUseOutcome outcome{InventoryActionStatus::kInvalidRef, 0};
     outcome.status = validate_action_ref(ref);
@@ -347,8 +385,163 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
     outcome.status = validate_world();
     if (outcome.status != InventoryActionStatus::kOk) return outcome;
     if (!native_space(ref.space_id)) {
-        // Host equipment operations currently accept only native bag handles.
-        outcome.status = InventoryActionStatus::kUnsupported;
+        QolInventoryItemRef item{};
+        outcome.status = resolve_item(ref, &item);
+        if (outcome.status != InventoryActionStatus::kOk) return outcome;
+        const contracts::QolBagSource* source = find_bag_source(ref.space_id);
+        if (source == nullptr || source->export_item == nullptr || source->remove == nullptr ||
+            source->import_item == nullptr) {
+            outcome.status = InventoryActionStatus::kUnsupported;
+            return outcome;
+        }
+        if (g_item_state_write == nullptr || g_item_state_write->load_item == nullptr ||
+            g_item_state_write->equip_handle == nullptr || g_character_extras_port == nullptr ||
+            g_character_extras_port->read.party_member == nullptr ||
+            g_character_extras_port->read.equipped_item == nullptr) {
+            outcome.status = InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        void* character = nullptr;
+        void* equipped = nullptr;
+        if (!contracts::succeeded(g_character_extras_port->read.party_member(role, &character)) ||
+            character == nullptr) {
+            outcome.status = InventoryActionStatus::kInvalidRef;
+            return outcome;
+        }
+        if (!contracts::succeeded(
+                g_character_extras_port->read.equipped_item(character, equip_slot, &equipped))) {
+            outcome.status = InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        // A provider equip can replace worn equipment. The original exchange
+        // entry (CHAR_EquipItemFromInvenToSlot) is the only implementation that
+        // correctly handles both ordinary replacement and two-handed weapons
+        // (one new weapon replaces main-hand + off-hand). It needs a native bag
+        // slot, so stage the detached provider item there for the duration of
+        // the exchange, then move displaced equipment back to the provider.
+        const bool weapon_slot = equip_slot == 5 || equip_slot == 6;
+        void* offhand_equipped = nullptr;
+        if (weapon_slot &&
+            !contracts::succeeded(
+                g_character_extras_port->read.equipped_item(character, equip_slot == 5 ? 6 : 5,
+                                                            &offhand_equipped))) {
+            outcome.status = InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        const bool needs_exchange = equipped != nullptr || offhand_equipped != nullptr;
+        if (!needs_exchange) {
+            contracts::QolBagTransfer transfer{};
+            QolResult operation = source->export_item(item.item, 1, &transfer);
+            if (!contracts::succeeded(operation)) {
+                outcome.status = status_from_result(operation, true);
+                return outcome;
+            }
+            contracts::QolBagMutationResult removed{};
+            operation = source->remove(item.item, 1, &removed);
+            if (!contracts::succeeded(operation)) {
+                outcome.status = status_from_result(operation, true);
+                return outcome;
+            }
+            QolItemHandle loaded{};
+            operation =
+                g_item_state_write->load_item(transfer.payload, transfer.payload_size, &loaded);
+            if (!contracts::succeeded(operation) || loaded.slot == 0 || loaded.generation == 0) {
+                contracts::QolBagMutationResult restored{};
+                const QolResult rollback =
+                    source->import_item(&transfer, ref.bag, ref.slot, &restored);
+                outcome.status = contracts::succeeded(rollback)
+                                     ? status_from_result(operation, true)
+                                     : InventoryActionStatus::kInternal;
+                return outcome;
+            }
+            contracts::QolItemInventoryStateWriteResult write_result{};
+            operation =
+                g_item_state_write->equip_handle(role, loaded, equip_slot, &write_result);
+            if (!contracts::succeeded(operation)) {
+                contracts::QolBagMutationResult restored{};
+                const QolResult rollback =
+                    source->import_item(&transfer, ref.bag, ref.slot, &restored);
+                outcome.status = contracts::succeeded(rollback)
+                                     ? status_from_result(operation, true)
+                                     : InventoryActionStatus::kInternal;
+                return outcome;
+            }
+            outcome.status = InventoryActionStatus::kOk;
+            request_inventory_refresh();
+            return outcome;
+        }
+
+        if (g_item_state_write->place_item == nullptr ||
+            g_item_state_write->equip_item == nullptr ||
+            g_item_state_write->remove_item == nullptr) {
+            outcome.status = InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        int32_t stage_bag = -1;
+        int32_t stage_slot = -1;
+        if (!find_empty_native_slot(&stage_bag, &stage_slot)) {
+            outcome.status = InventoryActionStatus::kFull;
+            return outcome;
+        }
+        contracts::QolBagTransfer transfer{};
+        QolResult operation = source->export_item(item.item, 1, &transfer);
+        if (!contracts::succeeded(operation)) {
+            outcome.status = status_from_result(operation, true);
+            return outcome;
+        }
+        contracts::QolBagMutationResult removed{};
+        operation = source->remove(item.item, 1, &removed);
+        if (!contracts::succeeded(operation)) {
+            outcome.status = status_from_result(operation, true);
+            return outcome;
+        }
+        QolItemHandle loaded{};
+        operation =
+            g_item_state_write->load_item(transfer.payload, transfer.payload_size, &loaded);
+        if (!contracts::succeeded(operation) || !valid_handle(loaded)) {
+            contracts::QolBagMutationResult restored{};
+            const QolResult rollback =
+                source->import_item(&transfer, ref.bag, ref.slot, &restored);
+            outcome.status = contracts::succeeded(rollback)
+                                 ? status_from_result(operation, true)
+                                 : InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        const contracts::QolBagRef stage_ref{contracts::kQolBagSpaceOriginal, stage_bag};
+        contracts::QolItemInventoryStateWriteResult write_result{};
+        operation = g_item_state_write->place_item(&stage_ref, stage_slot, loaded, &write_result);
+        if (!contracts::succeeded(operation)) {
+            // place_item frees the detached item on failure.
+            contracts::QolBagMutationResult restored{};
+            const QolResult rollback =
+                source->import_item(&transfer, ref.bag, ref.slot, &restored);
+            outcome.status = contracts::succeeded(rollback)
+                                 ? status_from_result(operation, true)
+                                 : InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        operation = g_item_state_write->equip_item(role, stage_bag, stage_slot, &write_result);
+        if (!contracts::succeeded(operation)) {
+            contracts::QolItemInventoryStateWriteResult removed_stage{};
+            const QolResult remove_result =
+                g_item_state_write->remove_item(loaded, 1, &removed_stage);
+            if (!contracts::succeeded(remove_result)) {
+                outcome.status = InventoryActionStatus::kInternal;
+                return outcome;
+            }
+            contracts::QolBagMutationResult restored{};
+            const QolResult rollback =
+                source->import_item(&transfer, ref.bag, ref.slot, &restored);
+            outcome.status = contracts::succeeded(rollback)
+                                 ? status_from_result(operation, true)
+                                 : InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        // The original exchange moves displaced equipment into the native bag.
+        // Keep it there: core.item owns native inventory, and moving it through
+        // the provider would need a second transaction and rollback path.
+        outcome.status = InventoryActionStatus::kOk;
+        request_inventory_refresh();
         return outcome;
     }
     QolInventoryItemRef item{};
