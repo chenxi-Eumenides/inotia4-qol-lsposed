@@ -147,7 +147,7 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
                 item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
             }
             if (runtime_state().objects.bag.types[index] == 0 &&
-                extension_bag_runtime_is_backpack_category(item)) {
+                item_type_is(item, qol::contracts::QolItemType::kBackpack)) {
                 // 原版背包来源的袋物品拖到空扩展标签也必须走“袋槽装备”，
                 // 不能直接落入普通扩展物品槽。
                 return try_equip_on_extension_tab_drop_locked(lock, index, moving_control);
@@ -196,7 +196,7 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
             const int source_slot = qol::extension_bag::ui_state().ui.extension_drag.slot;
             void* item = qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot];
             const bool should_equip = runtime_state().objects.bag.types[index] == 0 &&
-                                      extension_bag_runtime_is_backpack_category(item);
+                                      item_type_is(item, qol::contracts::QolItemType::kBackpack);
             const bool handled = should_equip
                 ? try_equip_on_extension_tab_drop_locked(
                       lock, index, touch_moving_item_control_locked())
@@ -340,7 +340,7 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
     void* target_item = target_slot >= 0 && target_slot < runtime_state().objects.bag.capacities[target_bag]
         ? qol::extension_bag::ui_state().objects.module_objects[target_bag][target_slot] : nullptr;
     const bool source_is_apply_material =
-        read_item_is_jewel(material) || read_item_is_enchant_scroll(material);
+        item_type_is(material, qol::contracts::QolItemType::kJewel) || item_type_is(material, qol::contracts::QolItemType::kEnchantScroll);
     // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
     // IsApplyStuff 判真。目标类型用 item.facts.item_type 判定（不可用按非装备
     // fail-closed），普通物品目标不得进入 apply；不设提前 return，统一落到
@@ -353,7 +353,7 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
             target_item, material, &apply_stuff_value)) && apply_stuff_value != 0;
     const bool apply_candidate = extension_bag_is_apply_candidate(
         source_bag == target_bag && target_slot >= 0, source_is_apply_material,
-        target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
+        target_item != nullptr && item_type_is(target_item, qol::contracts::QolItemType::kEquipment), apply_stuff_allowed);
     if (apply_candidate) {
         qol::contracts::QolItemHandle material_handle{};
         qol::contracts::QolItemHandle target_handle{};

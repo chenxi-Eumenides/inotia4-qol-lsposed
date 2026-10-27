@@ -54,7 +54,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         // R-63 佣兵徽章（category 42..50 / 928..933）：ITEMDATA_IsUse 不认（+2=0x1d），
         // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
         // fn_is_use 并按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary。
-        is_seal = read_item_is_mercenary_seal(item);
+        is_seal = item_type_is(item, qol::contracts::QolItemType::kMercenarySeal);
         if (is_seal) {
             const auto* save_facts = extension_bag_save_facts();
             if (save_facts == nullptr || save_facts->is_ok == nullptr ||

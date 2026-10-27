@@ -142,7 +142,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                             ? runtime_state().objects.bag.items[module_bag][module_slot].category
                             : original_item_category_locked(item);
                         const bool backpack_item =
-                            extension_bag_runtime_is_backpack_category(item);
+                            item_type_is(item, qol::contracts::QolItemType::kBackpack);
                         if (runtime_state().objects.bag.types[index] == 0 && backpack_item) {
                             // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
                             // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
@@ -742,7 +742,8 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
     if (runtime_state().objects.bag.capacities[index] == 0) {
         // 未装备袋只有在当前拖动物品满足装备规则时可命中；否则仍保持
         // G-12 的不可命中门禁，避免普通物品误落到未装备标签。
-        if (!extension_bag_runtime_is_backpack_category(drag_source_item_locked())) return false;
+        if (!item_type_is(drag_source_item_locked(),
+                          qol::contracts::QolItemType::kBackpack)) return false;
     }
     // 标签位置是动态换算的（tab_rel + 袋容器绝对），用控件真实绝对 rect 判断，
     // 不用旧硬编码 kCellX/kCellY（标签左移后二者偏移 36px 致命中失效）。
@@ -760,9 +761,6 @@ void extension_bag_ui_handle_tab_click_locked(int extension_bag) {
 
 bool extension_c18_native_bag_hit(int64_t x, int64_t y, int* out_native_bag) {
     return c18_native_bag_hit_locked(x, y, out_native_bag);
-}
-bool extension_bag_runtime_is_backpack_category(const void* item) {
-    return category_is_extension_backpack(item);
 }
 void prepare_c18_native_bag_layout_locked() {
     prepare_c18_native_bag_layout_locked_impl();

@@ -529,7 +529,7 @@ bool extension_use_mercenary_seal() {
             ::qol::extension_bag::access::bag().items[bag][slot].count <= 0) {
             return false;
         }
-        if (!read_item_is_mercenary_seal(item)) return false;
+        if (!item_type_is(item, qol::contracts::QolItemType::kMercenarySeal)) return false;
     }
 
     const auto* action = ::qol::features::extension_bag::inventory_action_api();

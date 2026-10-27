@@ -8,15 +8,12 @@ JavaVM* g_jvm();
 
 bool read_item_category(const void* item, int* out_category);
 bool read_item_type(const void* item, qol::contracts::QolItemType* out_type);
+bool item_type_is(const void* item, qol::contracts::QolItemType expected);
 int original_item_category_locked(void* item);
 bool extension_bag_register_item_handle(void* item);
 bool extension_bag_item_handle_for_pointer(void* item,
                                            qol::contracts::QolItemHandle* out_handle);
-bool read_item_is_jewel(const void* item);
-bool read_item_is_enchant_scroll(const void* item);
-bool read_item_is_mercenary_seal(const void* item);
 bool read_item_is_usable(int category);
-bool item_is_equip(const void* item);
 bool read_item_cumulate_count(const void* item, int* out_count);
 const qol::contracts::QolItemCountApi* item_count_api();
 qol::contracts::QolItemCountEncoding item_count_encoding(const void* item);
@@ -31,8 +28,7 @@ bool virtual_bag_extended_mode(const void* item);
 bool virtual_bag_write_effective(void* item, uint32_t count);
 qol::contracts::QolItemCountEncoding category_is_equip(int category);
 qol::contracts::QolItemCountEncoding virtual_bag_category_uses_stack_count(int category);
-bool category_is_extension_backpack(const void* item);
-bool extension_bag_runtime_is_backpack_category(const void* item);
+
 
 void* extension_create_item(int category, int arg1, int arg2, int arg3);
 bool mark_native_bag_object(void* item);

@@ -193,24 +193,9 @@ bool read_item_cumulate_count(const void* item, int* out_count) {
     return true;
 }
 
-bool read_item_is_jewel(const void* item) {
+bool item_type_is(const void* item, qol::contracts::QolItemType expected) {
     qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
-    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kJewel;
-}
-
-bool item_is_equip(const void* item) {
-    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
-    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kEquipment;
-}
-
-bool read_item_is_enchant_scroll(const void* item) {
-    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
-    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kEnchantScroll;
-}
-
-bool read_item_is_mercenary_seal(const void* item) {
-    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
-    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kMercenarySeal;
+    return read_item_type(item, &type) && type == expected;
 }
 
 bool read_item_is_usable(int category) {
@@ -308,7 +293,11 @@ JNIEnv* current_env() {
     if (jvm == nullptr) return nullptr;
     JNIEnv* env = nullptr;
     if (jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) == JNI_OK) return env;
+#if defined(__ANDROID__)
     return jvm->AttachCurrentThread(&env, nullptr) == JNI_OK ? env : nullptr;
+#else
+    return jvm->AttachCurrentThread(reinterpret_cast<void**>(&env), nullptr) == JNI_OK ? env : nullptr;
+#endif
 }
 ::qol::contracts::QolItemCountEncoding category_is_equip(int category) {
     if (runtime_state().host.game == nullptr || runtime_state().host.game->read_only.item.count_encoding == nullptr || category <= 0) {
@@ -322,10 +311,6 @@ JNIEnv* current_env() {
         : ::qol::contracts::QolItemCountEncoding::kUnknown;
 }
 
-bool category_is_extension_backpack(const void* item) {
-    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
-    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kBackpack;
-}
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);
 }

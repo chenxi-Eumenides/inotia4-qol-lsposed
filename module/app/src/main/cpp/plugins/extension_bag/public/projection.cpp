@@ -92,13 +92,13 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         const bool extension_source =
             source_item != nullptr && module_slot_of_item_locked(source_item, &source_bag, &source_slot);
         const bool source_is_apply_material = extension_source &&
-            (read_item_is_jewel(source_item) ||
-             read_item_is_enchant_scroll(source_item));
+            (item_type_is(source_item, qol::contracts::QolItemType::kJewel) ||
+             item_type_is(source_item, qol::contracts::QolItemType::kEnchantScroll));
         // H-15 装备槽事件适配（R-50）：目标必须是装备类（item_is_equip 判定；
         // 类别数据不可用时 item_is_equip 为假，按非装备 fail-closed 直通原版
         // backup，不得 Blocked），且落点是装备槽控件（slot index >= 16）。
         const bool target_is_equip_slot = target_item != nullptr &&
-            item_is_equip(target_item) && target_slot_index >= 16;
+            item_type_is(target_item, qol::contracts::QolItemType::kEquipment) && target_slot_index >= 16;
         if (!extension_bag_is_equip_control_source(
                 event, extension_source, source_is_apply_material, target_is_equip_slot)) {
             return VirtualBagEquipControlEventResult::kNotExtension;
@@ -264,7 +264,7 @@ bool apply_extension_material_to_slot_locked(
     void* target_control = valid_child_locked(projected_root, dst_slot);
     void* source_data = source_control != nullptr ? extension_bag_ui_data(source_control) : nullptr;
     void* target_data = target_control != nullptr ? extension_bag_ui_data(target_control) : nullptr;
-    const bool target_is_equip = target_item != nullptr && item_is_equip(target_item);
+    const bool target_is_equip = target_item != nullptr && item_type_is(target_item, qol::contracts::QolItemType::kEquipment);
     if (source_data == nullptr || target_data == nullptr ||
         *reinterpret_cast<void**>(source_data) != material ||
         *reinterpret_cast<void**>(target_data) != target_item || !target_is_equip) {
@@ -274,8 +274,8 @@ bool apply_extension_material_to_slot_locked(
     }
 
     const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
-    const bool source_is_jewel = read_item_is_jewel(material);
-    const bool source_is_scroll = read_item_is_enchant_scroll(material);
+    const bool source_is_jewel = item_type_is(material, qol::contracts::QolItemType::kJewel);
+    const bool source_is_scroll = item_type_is(material, qol::contracts::QolItemType::kEnchantScroll);
     if (!source_is_jewel && !source_is_scroll) {
         VIRTBAG_LOG("apply reject reason=material kind=%d jewel=%d scroll=%d",
                     source_category, source_is_jewel ? 1 : 0, source_is_scroll ? 1 : 0);
@@ -491,7 +491,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
     }
     const int dst_bag = qol::extension_bag::ui_state().objects.module_view_index;
     const bool source_is_apply_material =
-        read_item_is_jewel(item) || read_item_is_enchant_scroll(item);
+        item_type_is(item, qol::contracts::QolItemType::kJewel) || item_type_is(item, qol::contracts::QolItemType::kEnchantScroll);
     void* dst_data = extension_bag_ui_data(dst_control);
     void* target_item = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
     // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
@@ -507,7 +507,7 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
             target_item, item, &apply_allowed)) && apply_allowed != 0;
     const bool apply_candidate = extension_bag_is_apply_candidate(
         src_bag == dst_bag, source_is_apply_material,
-        target_item != nullptr && item_is_equip(target_item), apply_stuff_allowed);
+        target_item != nullptr && item_type_is(target_item, qol::contracts::QolItemType::kEquipment), apply_stuff_allowed);
     if (apply_candidate) {
         qol::contracts::QolItemHandle material_handle{};
         qol::contracts::QolItemHandle target_handle{};

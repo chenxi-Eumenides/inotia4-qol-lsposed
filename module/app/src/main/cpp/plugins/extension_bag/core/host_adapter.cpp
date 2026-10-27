@@ -330,7 +330,7 @@ bool extension_handle_character_equip() {
     }
     void* character = extension_menu_character();
     if (character == nullptr) return false;
-    if (read_item_is_mercenary_seal(item)) {
+    if (item_type_is(item, qol::contracts::QolItemType::kMercenarySeal)) {
         // Mercenary seals are consumed by the dedicated use button, not by the
         // generic character-equip callback.
         return false;
@@ -396,9 +396,20 @@ bool extension_handle_backpack_equip() {
                      source_bag, source_slot, item);
         return false;
     }
+    if (!module_source && ::qol::extension_bag::access::host().item_facts != nullptr &&
+        ::qol::extension_bag::access::host().item_facts->detail_item_context != nullptr) {
+        qol::contracts::QolItemDetailContext detail{};
+        if (qol::contracts::succeeded(
+                ::qol::extension_bag::access::host().item_facts->detail_item_context(&detail)) &&
+            detail.bag > 4) {
+            // C18 extra bags have no backpack-item equip path; leave the event
+            // to the game instead of treating them as a native bag slot.
+            return false;
+        }
+    }
     int category = 0;
     (void)read_item_category(item, &category);
-    if (!category_is_extension_backpack(item)) {
+    if (!item_type_is(item, qol::contracts::QolItemType::kBackpack)) {
         QOL_LOG_INFO(QolDomain::kExtensionBag,
                      "backpack equip probe rejected category=%d bag=%d slot=%d",
                      category, source_bag, source_slot);
@@ -411,7 +422,10 @@ bool extension_handle_backpack_equip() {
     const bool core_empty = core_find_empty_slots(empty_slots, &empty_count);
     if (!module_source && core_empty) {
         for (int32_t index = 0; index < empty_count; ++index) {
-            if (empty_slots[index].space_id <= qol::contracts::kQolBagSpaceVariant) {
+            // Original-space empty slots are handled by the original bag-equip
+            // path. Variant space 1 (C18) has no backpack-item logic and is
+            // deliberately not a target here.
+            if (empty_slots[index].space_id == qol::contracts::kQolBagSpaceOriginal) {
                 return false;
             }
         }

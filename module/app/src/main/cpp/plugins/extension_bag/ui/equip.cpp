@@ -84,7 +84,7 @@ ExtensionBagEquipResult equip_extension_bag_item_locked(::qol::extension_bag::Re
             return ExtensionBagEquipResult::kReject;
         }
     }
-    if (!extension_bag_runtime_is_backpack_category(item)) return ExtensionBagEquipResult::kReject;
+    if (!item_type_is(item, qol::contracts::QolItemType::kBackpack)) return ExtensionBagEquipResult::kReject;
     const auto* write_api = extension_bag_write_api();
     if (!module_source &&
         (write_api == nullptr || write_api->inventory.remove_item_direct == nullptr ||
@@ -294,7 +294,7 @@ bool extension_source_should_equip_locked(int target_bag) {
     }
     void* item = module_item_locked(session.source_bag, session.source_slot);
     return ::qol::extension_bag::access::bag().types[target_bag] == 0 &&
-           extension_bag_runtime_is_backpack_category(item);
+           item_type_is(item, qol::contracts::QolItemType::kBackpack);
 }
 
 int first_empty_extension_bag_locked() {
@@ -347,7 +347,7 @@ void make_desc_equip_gate(void* ctrl, void* arg) {
             item != nullptr && module_slot_of_item_locked(item, &item_bag, &item_slot) &&
             read_item_category(item, &item_category);
         const bool extension_bag_item =
-            module_item && category_is_extension_backpack(item);
+            module_item && item_type_is(item, qol::contracts::QolItemType::kBackpack);
         if (module_item && !extension_bag_item) {
             // Reuse the execute-slot bindings across consecutive EB item
             // details. Unbinding and resolving all slots on every click is the
