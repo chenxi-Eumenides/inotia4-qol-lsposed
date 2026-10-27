@@ -330,6 +330,12 @@ bool extension_handle_character_equip() {
     }
     void* character = extension_menu_character();
     if (character == nullptr) return false;
+    int category = 0;
+    if (read_item_category(item, &category) && read_item_is_mercenary_seal(category)) {
+        // Mercenary seals are consumed by the dedicated use button, not by the
+        // generic character-equip callback.
+        return false;
+    }
     const bool equipped = equip_module_item_on_character_locked(
         lock, character, item, source_bag, source_slot);
     if (!equipped) {
