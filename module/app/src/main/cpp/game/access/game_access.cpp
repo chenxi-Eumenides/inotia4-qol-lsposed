@@ -386,6 +386,7 @@ bool bridge_init() {
     fn_get_menu_character = reinterpret_cast<GetMenuCharacterFn>(g_base + fn_resolve("F_GET_MENU_CHARACTER_VMA", F_GET_MENU_CHARACTER_VMA));
     fn_find_equip_slot = reinterpret_cast<FindEquipSlotFn>(g_base + fn_resolve("F_FIND_EQUIP_SLOT_VMA", F_FIND_EQUIP_SLOT_VMA));
     fn_get_equip_item = reinterpret_cast<GetEquipItemFn>(g_base + fn_resolve("F_GET_EQUIP_ITEM_VMA", F_GET_EQUIP_ITEM_VMA));
+    fn_char_reset_equip_item = reinterpret_cast<ResetEquipItemFn>(g_base + fn_resolve("F_CHAR_RESET_EQUIP_ITEM_VMA", F_CHAR_RESET_EQUIP_ITEM_VMA));
     fn_set_equip_item = reinterpret_cast<SetEquipItemFn>(g_base + fn_resolve("F_SET_EQUIP_ITEM_VMA", F_SET_EQUIP_ITEM_VMA));
     fn_is_special_npc = reinterpret_cast<IsSpecialNpcFn>(g_base + fn_resolve("F_IS_SPECIAL_NPC_VMA", F_IS_SPECIAL_NPC_VMA));
     fn_learn_action = reinterpret_cast<LearnActionFn>(g_base + fn_resolve("F_LEARN_ACTION_VMA", F_LEARN_ACTION_VMA));

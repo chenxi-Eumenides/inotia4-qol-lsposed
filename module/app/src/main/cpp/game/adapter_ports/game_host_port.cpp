@@ -385,6 +385,52 @@ QolResult read_item_pack_required_slots(int32_t category, int32_t* out_slots) {
     return contracts::ok();
 }
 
+QolResult read_item_native_save_domain(int32_t category, int32_t* out_domain) {
+    if (out_domain == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_domain = -1;
+    if (category < 0 || category > 0x3FF || g_base == 0) return contracts::ok();
+    uint8_t* class_base = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_ITEMCLASS_DATA_GOT_VMA));
+    uint8_t* class_size = *reinterpret_cast<uint8_t**>(g_base + G_ITEMCLASS_SIZE_GOT_VMA);
+    if (class_base == nullptr || class_size == nullptr || *class_size == 0) return contracts::ok();
+    const size_t class_offset = static_cast<size_t>(category) * (*class_size) + 2;
+    if (!game_memory_accessible(class_base + class_offset, 1, 'r')) return contracts::ok();
+    const uint8_t use_type = class_base[class_offset];
+    uint8_t* effect_base = *reinterpret_cast<uint8_t**>(
+        *reinterpret_cast<void**>(g_base + G_EQUIP_SLOT_TABLE_DATA_GOT_VMA));
+    uint8_t* effect_size = *reinterpret_cast<uint8_t**>(g_base + G_EQUIP_SLOT_TABLE_SIZE_GOT_VMA);
+    if (effect_base == nullptr || effect_size == nullptr || *effect_size == 0) {
+        return contracts::ok();
+    }
+    const size_t effect_offset = static_cast<size_t>(use_type) * (*effect_size) + 2;
+    if (!game_memory_accessible(effect_base + effect_offset, 1, 'r')) return contracts::ok();
+    *out_domain = (effect_base[effect_offset] >> 3) & 1;
+    return contracts::ok();
+}
+
+QolResult read_saved_bag(int32_t* out_bag) {
+    if (out_bag == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    *out_bag = -1;
+    if (g_base == 0) return not_ready();
+    auto* value = reinterpret_cast<int32_t*>(g_base + G_INVEN_SAVED_BAG_VMA);
+    if (!game_memory_accessible(value, sizeof(*value), 'r')) return not_ready();
+    *out_bag = *value;
+    return contracts::ok();
+}
+
+QolResult write_saved_bag(int32_t bag) {
+    if (bag < 0) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    if (g_base == 0) return not_ready();
+    auto* value = reinterpret_cast<int32_t*>(g_base + G_INVEN_SAVED_BAG_VMA);
+    if (!game_memory_accessible(value, sizeof(*value), 'w')) return not_ready();
+    *value = bag;
+    return contracts::ok();
+}
+
 QolResult read_world_position(const void*, int32_t*, int32_t*) { return unsupported(); }
 
 QolResult read_inventory_for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx) {
@@ -572,6 +618,15 @@ QolResult write_char_equipped_item(void* character, int32_t slot, void* item) {
     }
     if (fn_set_equip_item == nullptr) return not_ready();
     fn_set_equip_item(character, slot, item);
+    return contracts::ok();
+}
+
+QolResult write_char_reset_equipped_item(void* character, int32_t slot) {
+    if (character == nullptr || slot < 0 || slot >= 10) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_char_reset_equip_item == nullptr) return not_ready();
+    fn_char_reset_equip_item(character, slot);
     return contracts::ok();
 }
 
@@ -831,15 +886,19 @@ contracts::QolGameHost make_game_host() {
         &read_item_socket_filled, &read_item_socket_total, &read_item_backpack_category,
         &read_item_jewel_value, &read_item_jewel_attribute_type,
         &read_item_enchant_scroll, &read_item_mercenary_seal, &read_item_usable,
-        &read_item_count_encoding, &read_item_pack_required_slots};
-    host.character_write = {&write_char_max_hp, &write_char_hp, &write_char_equipped_item};
+        &read_item_count_encoding, &read_item_pack_required_slots,
+        &read_item_native_save_domain};
+    host.character_write = {&write_char_max_hp, &write_char_hp, &write_char_equipped_item,
+                            &write_char_reset_equipped_item};
     host.inventory_write = {&write_inventory_remove_item_data,
                             &write_inventory_remove_item,
                             &write_inventory_create_perfect_item,
                             &write_inventory_create_item,
                             &write_inventory_save_item,
                             &write_inventory_free_item,
-                            &write_inventory_remove_item_direct};
+                            &write_inventory_remove_item_direct,
+                            &read_saved_bag,
+                            &write_saved_bag};
     host.world_action = game_world_action_api();
     host.item_abi = {&game_inventory_find_item_hook,
                      &game_inventory_bind_find_item_backup,

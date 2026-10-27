@@ -638,6 +638,8 @@ constexpr uintptr_t G_UIDESC_TEXT_BUF_VMA = 0x303dc0;                  // UIDesc
 constexpr size_t G_UIDESC_TEXT_BUF_SIZE = 0x200;                       // 详情文本缓冲容量（0xb36a4 mov x2,#0x200）
 constexpr uintptr_t F_ITEM_GET_BUY_PRICE_VMA = 0x10a200;  // int (void*) 买入价（ITEM_GetPrice + MERCENARYGROUPSKILLSYSTEM 折扣系数）
   constexpr uintptr_t F_INVEN_FIND_SAVE_SLOT_VMA = 0x103960;  // int (void*, int8_t*) 查找空槽并写入物理槽编码
+  // INVEN_FindSaveSlot 成功时写入的目标袋索引；INVEN_SaveItem/CHAR_UnequipItemToInven 从这里取袋。
+  constexpr uintptr_t G_INVEN_SAVED_BAG_VMA = 0x736000 + 0x0A00;
 constexpr uintptr_t F_INVEN_SAVE_ITEM_VMA = 0x104528;   // int (void*, void*) 物品存入背包槽
 constexpr uintptr_t F_DEALSYSTEM_FIND_SALE_BY_ID_VMA = 0xf636c;  // void* (void*) 按物品类别找商店商品槽（遍历 saleList 到 +0x300 步长 0x10）
 constexpr uintptr_t F_DEALSYSTEM_CLEAR_ITEM_VMA = 0xf701c;  // void (void*) 清除货架商品槽（UIStore_BuyItem 0xd2568：SaveItem 入包成功后调用，把商品从货架 saleList 摘除；漏调会保留槽内同一 item 指针 → 同槽重复购买复制物品）
@@ -653,6 +655,7 @@ constexpr uintptr_t F_SET_EQUIP_ITEM_VMA = 0xe2e8c;    // void (void*, int32, vo
 constexpr uintptr_t F_CAN_EQUIP_VMA = 0xe4eb4;         // int (void*, void*) 可否装备
 constexpr uintptr_t F_FIND_EQUIP_SLOT_VMA = 0xe4fd0;   // int (void*, void*) 计算目标装备槽（-1=不可装备）
 constexpr uintptr_t F_GET_EQUIP_ITEM_VMA = 0xda20c;    // void* (void*, int32) 读指定装备槽物品指针
+constexpr uintptr_t F_CHAR_RESET_EQUIP_ITEM_VMA = 0xe2ea4;  // void (void*, int32) 清空装备槽并重算角色状态
 constexpr uintptr_t F_IS_SPECIAL_NPC_VMA = 0xe4d90;    // int (void*) 是否任务特殊 NPC（type==2 且表 bit2）
 constexpr uintptr_t F_CAN_UNEQUIP_VMA = 0xe4e2c;       // int (void*, void*) 可否脱下：0xe4e74-0xe4e80 读 ITEMDATABASE[cat].+7 bit4，命中返回 0；否则 0xe4e98 返回 CHAR_CanChangeEquip(ch)
 constexpr uintptr_t F_CAN_CHANGE_EQUIP_VMA = 0xe4df4;  // int (void*) 角色装备操作权限：0xe4e00 [ch+0x352] >= 0（s8，<0 拒绝）且 !CHAR_IsSpecialNPC(ch)。「特殊 NPC 不可动装备」的唯一闸门，同时是 CHAR_CanEquipItem/CHAR_CanUnequipItem 的第③/②道检查；它**不读 ITEMDATABASE**
@@ -1206,6 +1209,7 @@ using CanChangeEquipFn = int (*)(void*);             // CHAR_CanChangeEquip(ch) 
 using ItemGetEquipLevelFn = int (*)(void*);          // ITEM_GetEquipLevel(item) → 装备所需等级
 using FindEquipSlotFn = int (*)(void*, void*);
 using GetEquipItemFn = void* (*)(void*, int32_t);
+using ResetEquipItemFn = void (*)(void*, int32_t);
 using SetEquipItemFn = void (*)(void*, int32_t, void*);
 using IsSpecialNpcFn = int (*)(void*);
 using LearnActionFn = void* (*)(void*, int32_t, int32_t);

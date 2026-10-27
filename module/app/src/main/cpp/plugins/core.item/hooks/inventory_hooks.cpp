@@ -3,6 +3,7 @@
 #include "../usecases/consume_item.h"
 #include "../usecases/item_action.h"
 #include "../bags/native_bag_limit.h"
+#include "../runtime/context.h"
 #include "claims.h"
 #include "inventory_logging.h"
 
@@ -21,6 +22,7 @@
 #include <mutex>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace qol::features::core_item {
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
@@ -54,6 +56,7 @@ using CharUseItemExFn = int (*)(void*, void*, int);
 using CharProcessShortcutFn = int (*)(void*, int);
 using ShortcutGetStateFn = int (*)(void*, void*);
 using InvenSaveItemDirectFn = int (*)(void*, int32_t, int32_t);
+using InvenFindSaveSlotFn = int (*)(void*, int8_t*);
 using ItemSystemDivideFn = void* (*)(void*, int32_t);
 using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
 using InvenRemoveItemDataFn = int (*)(int32_t, int32_t);
@@ -324,6 +327,7 @@ CharProcessShortcutFn g_backup_char_process_shortcut = nullptr;
 ShortcutGetStateFn g_backup_shortcut_get_state = nullptr;
 // S2 写侧进位框架新增 hook（H-18/H-19/H-20/H-21）的 backup。
 InvenSaveItemDirectFn g_backup_save_item_direct = nullptr;
+InvenFindSaveSlotFn g_backup_find_save_slot = nullptr;
 ItemSystemDivideFn g_backup_item_system_divide = nullptr;
 MakeItemFn g_backup_make_item = nullptr;
 InvenRemoveItemDataFn g_backup_remove_item_data = nullptr;
@@ -338,6 +342,9 @@ thread_local bool g_in_is_having_empty_slot = false;
 thread_local bool g_in_consume_item = false;
 thread_local bool g_in_unequip_item_to_inven = false;
 thread_local bool g_in_remove_item = false;
+thread_local int g_save_item_depth = 0;
+thread_local int g_save_item_direct_fail_count = 0;
+thread_local std::vector<void*> g_pending_eb_items;
 thread_local uint64_t g_active_shortcut_trace = 0;
 // R-55：UIEquip_ButtonDestroyExe 动态范围内（含其同步调用的 OKDestroyItem 预演）。
 thread_local bool g_in_equip_destroy_button = false;
@@ -763,6 +770,8 @@ int is_having_empty_slot_wrapper(int32_t needed, int32_t include_task_bag) {
                                         g_in_is_having_empty_slot);
 }
 
+bool extension_unequip_to_registered_source(void* character, int32_t equip_slot);
+
 int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -776,7 +785,7 @@ int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
     }
     const int result = stage4_unequip_item_to_inven(character, equip_slot,
                                                     g_backup_unequip_item_to_inven,
-                                                    nullptr,
+                                                    extension_unequip_to_registered_source,
                                                     g_in_unequip_item_to_inven);
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "UnequipItemToInven every_calls=60 equip_slot=%d result=%d recursive=%d",
@@ -924,6 +933,252 @@ int remove_item_wrapper(void* item) {
     return stage4_remove_item(item, nullptr, nullptr, g_backup_remove_item, g_in_remove_item);
 }
 
+constexpr int32_t kRegisteredFlatBagBase = 0x4000;
+constexpr int32_t kRegisteredFlatBagStride = 64;
+constexpr int32_t kNativeStackLimit = 126;
+
+struct RegisteredDestination {
+    const qol::contracts::QolBagSource* source = nullptr;
+    int32_t bag = -1;
+    int32_t slot = -1;
+};
+
+bool hook_item_category(void* item, int32_t* out_category) {
+    if (item == nullptr || out_category == nullptr) return false;
+    const auto* port = qol::features::core_item::g_port;
+    if (port == nullptr || port->read.category == nullptr) return false;
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_hook_item(item, &handle)) return false;
+    int32_t category = -1;
+    if (!qol::contracts::succeeded(port->read.category(handle, &category)) || category < 0) {
+        return false;
+    }
+    *out_category = category;
+    return true;
+}
+
+bool read_native_save_domain(int32_t category, int32_t* out_domain) {
+    if (out_domain == nullptr || g_game == nullptr ||
+        g_game->abi.minor < qol::contracts::kGameHostSavedBagMinor ||
+        g_game->read_only.item.native_save_domain == nullptr) {
+        return false;
+    }
+    int32_t domain = -1;
+    if (!qol::contracts::succeeded(
+            g_game->read_only.item.native_save_domain(category, &domain)) ||
+        domain < 0) {
+        return false;
+    }
+    *out_domain = domain;
+    return true;
+}
+
+bool read_saved_bag(int32_t* out_bag) {
+    if (out_bag == nullptr || g_game == nullptr ||
+        g_game->abi.minor < qol::contracts::kGameHostSavedBagMinor ||
+        g_game->inventory_write.saved_bag == nullptr) {
+        return false;
+    }
+    int32_t bag = -1;
+    if (!qol::contracts::succeeded(g_game->inventory_write.saved_bag(&bag))) return false;
+    *out_bag = bag;
+    return true;
+}
+
+bool write_saved_bag(int32_t bag) {
+    if (g_game == nullptr || g_game->abi.minor < qol::contracts::kGameHostSavedBagMinor ||
+        g_game->inventory_write.set_saved_bag == nullptr) {
+        return false;
+    }
+    return qol::contracts::succeeded(g_game->inventory_write.set_saved_bag(bag));
+}
+
+bool build_transfer_for_hook_item(void* item, qol::contracts::QolBagTransfer* out_transfer,
+                                  int32_t* out_category, uint32_t* out_payload_size) {
+    if (item == nullptr || out_transfer == nullptr) return false;
+    const auto* port = qol::features::core_item::g_port;
+    if (port == nullptr || !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
+        port->read.serialize_item == nullptr || port->read.category == nullptr) {
+        return false;
+    }
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_hook_item(item, &handle)) return false;
+    int32_t category = -1;
+    if (g_item_facts != nullptr && g_item_facts->category != nullptr) {
+        int32_t observed = -1;
+        if (qol::contracts::succeeded(g_item_facts->category(handle, &observed)) &&
+            observed > 0) {
+            category = observed;
+        }
+    }
+    uint32_t required = 0;
+    QolResult result = port->read.serialize_item(handle, nullptr, 0, &required);
+    if (!qol::contracts::succeeded(result) || required == 0 ||
+        required > qol::contracts::kQolBagTransferPayloadMaxSize) {
+        return false;
+    }
+    int32_t port_category = -1;
+    if (!qol::contracts::succeeded(port->read.category(handle, &port_category)) ||
+        port_category <= 0) {
+        return false;
+    }
+    category = port_category;
+    qol::contracts::QolBagTransfer transfer{};
+    uint32_t serialized = 0;
+    result = port->read.serialize_item(
+        handle, transfer.payload, qol::contracts::kQolBagTransferPayloadCapacity, &serialized);
+    if (!qol::contracts::succeeded(result) || serialized != required) return false;
+    transfer.category = category;
+    int32_t count = 1;
+    if (port->read.cumulate_count != nullptr) {
+        int32_t observed = 0;
+        if (qol::contracts::succeeded(port->read.cumulate_count(handle, &observed)) &&
+            observed > 0) {
+            count = observed;
+        }
+    }
+    transfer.count = count;
+    transfer.payload_size = serialized;
+    *out_transfer = transfer;
+    if (out_category != nullptr) *out_category = category;
+    if (out_payload_size != nullptr) *out_payload_size = serialized;
+    return true;
+}
+
+bool hook_item_stackable(void* item) {
+    if (item == nullptr || g_item_facts == nullptr || g_item_facts->count_encoding == nullptr) {
+        return false;
+    }
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_hook_item(item, &handle)) return false;
+    qol::contracts::QolItemCountEncoding encoding =
+        qol::contracts::QolItemCountEncoding::kUnknown;
+    if (!qol::contracts::succeeded(g_item_facts->count_encoding(handle, &encoding))) {
+        return false;
+    }
+    return encoding == qol::contracts::QolItemCountEncoding::kEncoded;
+}
+
+bool find_registered_destination(const qol::contracts::QolBagTransfer& transfer,
+                                 bool stackable,
+                                 RegisteredDestination* out_destination) {
+    if (out_destination == nullptr) return false;
+    RegisteredDestination empty_destination{};
+    bool has_empty = false;
+    for (uint32_t source_index = 0;
+         source_index < qol::features::core_item::registered_bag_source_count(); ++source_index) {
+        const auto* source = qol::features::core_item::registered_bag_source_at(source_index);
+        if (source == nullptr || source->count == nullptr || source->info == nullptr ||
+            source->item_at == nullptr || source->import_item == nullptr) {
+            continue;
+        }
+        const int32_t bag_count = source->count();
+        if (bag_count < 0) continue;
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            qol::contracts::QolBagInfo info{};
+            if (!qol::contracts::succeeded(source->info(bag, &info)) || info.capacity < 0) {
+                continue;
+            }
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                qol::contracts::QolInventoryItemRef existing{};
+                const QolResult probe = source->item_at(bag, slot, &existing);
+                if (probe.code == kQolErrNotFound) {
+                    if (!has_empty) {
+                        empty_destination = {source, bag, slot};
+                        has_empty = true;
+                    }
+                    continue;
+                }
+                if (!qol::contracts::succeeded(probe)) continue;
+                if (stackable && existing.category == transfer.category && existing.count > 0 &&
+                    existing.count + transfer.count <= kNativeStackLimit) {
+                    *out_destination = {source, bag, slot};
+                    return true;
+                }
+            }
+        }
+    }
+    if (has_empty) {
+        *out_destination = empty_destination;
+        return true;
+    }
+    return false;
+}
+
+const qol::contracts::QolBagSource* registered_source_for_space(int32_t space_id) {
+    for (uint32_t index = 0;
+         index < qol::features::core_item::registered_bag_source_count(); ++index) {
+        const auto* source = qol::features::core_item::registered_bag_source_at(index);
+        if (source != nullptr && source->space_id == space_id) return source;
+    }
+    return nullptr;
+}
+
+int32_t flat_bag_for(const qol::contracts::QolBagSource& source, int32_t bag) {
+    return kRegisteredFlatBagBase + source.space_id * kRegisteredFlatBagStride + bag;
+}
+
+bool decode_flat_bag(int32_t flat_bag, int32_t* out_space_id, int32_t* out_bag) {
+    if (out_space_id == nullptr || out_bag == nullptr || flat_bag < kRegisteredFlatBagBase) {
+        return false;
+    }
+    const int32_t offset = flat_bag - kRegisteredFlatBagBase;
+    const int32_t space_id = offset / kRegisteredFlatBagStride;
+    const int32_t bag = offset % kRegisteredFlatBagStride;
+    if (space_id < qol::contracts::kQolBagSpaceFirstRegistered || bag < 0) return false;
+    *out_space_id = space_id;
+    *out_bag = bag;
+    return true;
+}
+
+bool extension_unequip_to_registered_source(void* character, int32_t equip_slot) {
+    const auto* extras = qol::features::core_item::g_character_extras_port;
+    if (character == nullptr || equip_slot < 0 || extras == nullptr ||
+        extras->read.equipped_item == nullptr) {
+        return false;
+    }
+    void* equipped = nullptr;
+    if (!qol::contracts::succeeded(extras->read.equipped_item(character, equip_slot, &equipped)) ||
+        equipped == nullptr) {
+        return false;
+    }
+    int32_t category = -1;
+    int32_t domain = -1;
+    if (!hook_item_category(equipped, &category) ||
+        !read_native_save_domain(category, &domain) || domain != 0) {
+        return false;
+    }
+    qol::contracts::QolBagTransfer transfer{};
+    if (!build_transfer_for_hook_item(equipped, &transfer, nullptr, nullptr)) return false;
+    RegisteredDestination destination{};
+    if (!find_registered_destination(transfer, hook_item_stackable(equipped), &destination)) {
+        return false;
+    }
+    qol::contracts::QolBagMutationResult imported{};
+    if (!qol::contracts::succeeded(
+            destination.source->import_item(&transfer, destination.bag, destination.slot,
+                                            &imported))) {
+        return false;
+    }
+    if (g_game == nullptr || g_game->abi.minor < qol::contracts::kGameHostSavedBagMinor ||
+        g_game->character_write.reset_equipped_item == nullptr ||
+        !qol::contracts::succeeded(
+            g_game->character_write.reset_equipped_item(character, equip_slot))) {
+        qol::contracts::QolBagMutationResult removed{};
+        (void)destination.source->remove(imported.item, transfer.count, &removed);
+        return false;
+    }
+    const auto* port = qol::features::core_item::g_port;
+    if (port != nullptr && port->read.free_item != nullptr) {
+        (void)port->read.free_item(equipped);
+    }
+    inventory_log_write(0, __FILE__, __LINE__,
+                        "Unequip adopt category=%d space=%d bag=%d slot=%d",
+                        category, destination.source->space_id, destination.bag,
+                        destination.slot);
+    return true;
+}
+
 bool adopt_save_item_to_registered_source(void* item, int32_t* out_category) {
     int32_t category = -1;
     uint32_t payload_size = 0;
@@ -985,6 +1240,12 @@ bool adopt_save_item_to_registered_source(void* item, int32_t* out_category) {
     }
     category = port_category;
     if (out_category != nullptr) *out_category = category;
+    // 任务袋域（bit3=1）不走扩展袋；只有原版袋 0..4 的物品才允许兜底。
+    int32_t save_domain = -1;
+    if (read_native_save_domain(category, &save_domain) && save_domain != 0) {
+        log_failure("domain");
+        return false;
+    }
     qol::contracts::QolBagTransfer transfer{};
     uint32_t serialized = 0;
     result = port->read.serialize_item(
@@ -1006,9 +1267,9 @@ bool adopt_save_item_to_registered_source(void* item, int32_t* out_category) {
     transfer.count = item_count;
     transfer.payload_size = serialized;
 
-    // find_empty_slots 只返回前 N 个空槽，且未装备的原生袋仍按 capacity 16 计入；
-    // SaveItem 失败时这些原生槽并不可写，前 3 个空槽可能全是原生槽，导致扩展袋
-    // 永远轮不到。这里直接按注册源顺序扫描空槽并导入。
+    // find_empty_slots 只返回前 3 个空槽，且对所有物品都枚举 space0/space1；
+    // SaveItem 的写入域由物品 use-type bit3 决定，可能不包含这些空槽所在的袋。
+    // 这里直接按注册源顺序扫描空槽并导入。
     bool import_failure_logged = false;
     for (uint32_t source_index = 0;
          source_index < qol::features::core_item::registered_bag_source_count(); ++source_index) {
@@ -1065,6 +1326,47 @@ bool adopt_save_item_to_registered_source(void* item, int32_t* out_category) {
     return false;
 }
 
+int find_save_slot_wrapper(void* item, int8_t* out_slot) {
+    const qol::contracts::InFlightGuard in_flight_guard(
+        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+        {"hook:INVEN_FindSaveSlot"});
+    if (!inventory_native_hook_support_enabled())
+        return call_backup("hook:INVEN_FindSaveSlot", g_backup_find_save_slot, item, out_slot);
+    if (g_backup_find_save_slot == nullptr) {
+        backup_missing("hook:INVEN_FindSaveSlot");
+        return 0;
+    }
+    const int native = g_backup_find_save_slot(item, out_slot);
+    int32_t category = -1;
+    int32_t domain = -1;
+    const bool domain_known =
+        hook_item_category(item, &category) && read_native_save_domain(category, &domain);
+    if (native != 0) {
+        // bit3=1 只允许任务袋 5；原版会继续扫 C18 space1（6..17），这里拒绝。
+        int32_t bag = -1;
+        if (domain_known && domain == 1 && read_saved_bag(&bag) && bag > 5) {
+            inventory_log_write(0, __FILE__, __LINE__,
+                                "FindSaveSlot reject space1 category=%d bag=%d", category, bag);
+            return 0;
+        }
+        return native;
+    }
+    if (g_in_unequip_item_to_inven) return 0;
+    if (!domain_known || domain != 0) return 0;
+    qol::contracts::QolBagTransfer transfer{};
+    if (!build_transfer_for_hook_item(item, &transfer, &category, nullptr)) return 0;
+    RegisteredDestination destination{};
+    if (!find_registered_destination(transfer, hook_item_stackable(item), &destination)) return 0;
+    const int32_t flat_bag = flat_bag_for(*destination.source, destination.bag);
+    if (!write_saved_bag(flat_bag)) return 0;
+    if (out_slot != nullptr) *out_slot = static_cast<int8_t>(destination.slot);
+    inventory_log_write(0, __FILE__, __LINE__,
+                        "FindSaveSlot adopt category=%d space=%d bag=%d slot=%d flat=%d",
+                        category, destination.source->space_id, destination.bag,
+                        destination.slot, flat_bag);
+    return 1;
+}
+
 int save_item_wrapper(void* item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -1075,8 +1377,33 @@ int save_item_wrapper(void* item) {
         backup_missing("hook:INVEN_SaveItem");
         return 0;
     }
+    const size_t pending_base = g_pending_eb_items.size();
+    const int fail_base = g_save_item_direct_fail_count;
+    ++g_save_item_depth;
     const int result = g_backup_save_item(item);
-    if (result != 0) return result;
+    --g_save_item_depth;
+    bool direct_imported = false;
+    while (g_pending_eb_items.size() > pending_base) {
+        void* imported_item = g_pending_eb_items.back();
+        g_pending_eb_items.pop_back();
+        const auto* port = qol::features::core_item::g_port;
+        if (port != nullptr && port->read.free_item != nullptr) {
+            (void)port->read.free_item(imported_item);
+        }
+        direct_imported = true;
+    }
+    if (direct_imported) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "SaveItem direct_eb item=%p backup=%p", item,
+                            reinterpret_cast<void*>(g_backup_save_item));
+        return 1;
+    }
+    const bool direct_failed = g_save_item_direct_fail_count > fail_base;
+    if (direct_failed) {
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "SaveItem direct_eb_failed item=%p; try adopt", item);
+    }
+    if (result != 0 && !direct_failed) return result;
     int32_t category = -1;
     const bool adopted = adopt_save_item_to_registered_source(item, &category);
     inventory_log_write(0, __FILE__, __LINE__,
@@ -1098,6 +1425,44 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     if (!inventory_native_hook_support_enabled())
         return call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct,
                            item, bag, slot);
+    if (bag >= kRegisteredFlatBagBase) {
+        if (g_save_item_depth <= 0) {
+            inventory_log_write(0, __FILE__, __LINE__,
+                                "SaveItemDirect eb rejected item=%p bag=%d slot=%d",
+                                item, bag, slot);
+            return 0;
+        }
+        int32_t space_id = -1;
+        int32_t local_bag = -1;
+        if (!decode_flat_bag(bag, &space_id, &local_bag)) return 0;
+        const auto* source = registered_source_for_space(space_id);
+        if (source == nullptr || source->info == nullptr || source->import_item == nullptr) {
+            return 0;
+        }
+        qol::contracts::QolBagInfo info{};
+        if (!qol::contracts::succeeded(source->info(local_bag, &info)) ||
+            slot < 0 || slot >= info.capacity) {
+            return 0;
+        }
+        qol::contracts::QolBagTransfer transfer{};
+        if (!build_transfer_for_hook_item(item, &transfer, nullptr, nullptr)) return 0;
+        qol::contracts::QolBagMutationResult imported{};
+        const QolResult result =
+            source->import_item(&transfer, local_bag, slot, &imported);
+        if (!qol::contracts::succeeded(result)) {
+            ++g_save_item_direct_fail_count;
+            inventory_log_write(0, __FILE__, __LINE__,
+                                "SaveItemDirect eb failed item=%p space=%d bag=%d slot=%d code=%d",
+                                item, space_id, local_bag, slot,
+                                static_cast<int32_t>(result.code));
+            return 0;
+        }
+        g_pending_eb_items.push_back(item);
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "SaveItemDirect eb imported item=%p space=%d bag=%d slot=%d",
+                            item, space_id, local_bag, slot);
+        return 1;
+    }
     // INVEN_SaveItemDirect（加语义）：空槽写入不需要回写——对象创建侧数量由
     // MakeItem wrapper / 模块 s2 写点保证 a+b 完整；同身份堆叠合并时原版只写 b
     //（+0xe8/+0x110/+0x168 三处 SetBitValue 写点），合并可能 ITEMPOOL_Free(item)，
@@ -1922,6 +2287,8 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
                          "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA",
                          button_use_mercenary_seal_exe_wrapper),
     INVENTORY_HOOK_CLAIM("hook:INVEN_SaveItem", "F_INVEN_SAVE_ITEM_VMA", save_item_wrapper),
+    INVENTORY_HOOK_CLAIM("hook:INVEN_FindSaveSlot", "F_INVEN_FIND_SAVE_SLOT_VMA",
+                         find_save_slot_wrapper),
     INVENTORY_HOOK_CLAIM("hook:INVEN_MoveItem", "F_INVEN_MOVE_ITEM_VMA", move_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:UIEquip_EquipControlEventProc",
                          "F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA",
@@ -1963,6 +2330,7 @@ void** backup_slot_for_handler(void* handler) {
     BACKUP_SLOT(ok_destroy_item_wrapper, g_backup_ok_destroy_item);
     BACKUP_SLOT(button_use_mercenary_seal_exe_wrapper, g_backup_button_use_mercenary_seal_exe);
     BACKUP_SLOT(save_item_wrapper, g_backup_save_item);
+    BACKUP_SLOT(find_save_slot_wrapper, g_backup_find_save_slot);
     BACKUP_SLOT(move_item_wrapper, g_backup_move_item);
     BACKUP_SLOT(equip_control_event_proc_wrapper, g_backup_equip_control_event_proc);
     BACKUP_SLOT(refresh_item_area_wrapper, g_backup_refresh_item_area);

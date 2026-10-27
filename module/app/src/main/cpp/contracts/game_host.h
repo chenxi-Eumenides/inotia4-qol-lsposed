@@ -122,6 +122,8 @@ struct QolCharacterWriteApi {
     QolResult (*max_hp)(void* character, int32_t value);
     QolResult (*hp)(void* character, int32_t value);
     QolResult (*set_equipped_item)(void* character, int32_t slot, void* item);
+    // 原版 CHAR_ResetEquipItem：清空装备槽并重算角色状态。
+    QolResult (*reset_equipped_item)(void* character, int32_t slot);
 };
 
 struct QolInventoryWriteApi {
@@ -133,6 +135,10 @@ struct QolInventoryWriteApi {
     QolResult (*save_item)(void* item, void* param, int32_t* out_saved);
     QolResult (*free_item)(void* item);
     QolResult (*remove_item_direct)(int32_t bag, int32_t slot);
+    // INVEN_FindSaveSlot 找到目标后写入的全局袋索引（0x736A00）。
+    // 扩展袋使用扁平袋号；写入前必须先经 set_saved_bag。
+    QolResult (*saved_bag)(int32_t* out_bag);
+    QolResult (*set_saved_bag)(int32_t bag);
 };
 
 // Game-owned hook bridge. The handler is installed at the game ABI entry and returns the native
@@ -202,6 +208,9 @@ struct QolItemReadOnlyApi {
     // ITEMPACKBASE：category 作为盒子时解包产物所需槽位总数。
     // out_slots < 0 表示该 category 不是拆包表中的盒子或表未就绪；>= 0 为所需槽位。
     QolResult (*pack_required_slots)(int32_t category, int32_t* out_slots);
+    // INVEN_FindSaveSlot 的写入域：0 = 原版袋 0..4，1 = 任务袋 5 + C18 追加袋 6..17。
+    // out_domain < 0 表示表未就绪；调用方应保持原版行为。
+    QolResult (*native_save_domain)(int32_t category, int32_t* out_domain);
 };
 
 struct QolReadOnlyApi {
@@ -246,6 +255,7 @@ constexpr uint16_t kGameHostMajor = 2;
 constexpr uint16_t kGameHostIdentityMinor = 4;
 constexpr uint16_t kGameHostShortcutMinor = 5;
 constexpr uint16_t kGameHostPackSlotsMinor = 6;
-constexpr uint16_t kGameHostMinor = kGameHostPackSlotsMinor;
+constexpr uint16_t kGameHostSavedBagMinor = 7;
+constexpr uint16_t kGameHostMinor = kGameHostSavedBagMinor;
 
 }  // namespace qol::contracts

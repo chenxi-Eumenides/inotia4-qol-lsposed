@@ -179,6 +179,7 @@ extern CanChangeEquipFn fn_char_can_change_equip;
 extern GetMenuCharacterFn fn_get_menu_character;
 extern FindEquipSlotFn fn_find_equip_slot;
 extern GetEquipItemFn fn_get_equip_item;
+extern ResetEquipItemFn fn_char_reset_equip_item;
 extern SetEquipItemFn fn_set_equip_item;
 extern IsSpecialNpcFn fn_is_special_npc;
 extern LearnActionFn fn_learn_action;

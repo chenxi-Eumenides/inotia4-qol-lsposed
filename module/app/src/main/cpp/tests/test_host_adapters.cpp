@@ -178,6 +178,7 @@ decltype(fn_control_item_set_item) fn_control_item_set_item = nullptr;
 decltype(fn_can_equip) fn_can_equip = nullptr;
 decltype(fn_find_equip_slot) fn_find_equip_slot = nullptr;
 decltype(fn_get_equip_item) fn_get_equip_item = nullptr;
+decltype(fn_char_reset_equip_item) fn_char_reset_equip_item = nullptr;
 decltype(fn_set_equip_item) fn_set_equip_item = nullptr;
 decltype(fn_put_jewel) fn_put_jewel = nullptr;
 decltype(fn_ui_desc_get_data) fn_ui_desc_get_data = nullptr;
@@ -1250,7 +1251,7 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 6);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 7);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");
     static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==
