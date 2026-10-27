@@ -666,7 +666,24 @@ std::string save_backup_list_files_json() {
                                                       : std::vector<save_backup::BackupFile>{});
 }
 
-Outcome<EntryResult> describe_backup(const std::string& name) {
+// 仓库密文项能否用本机密钥解开：v1 无仓库段、v3+ flags=1（明文）项都返回 false。
+// key/解密函数不可用时返回 false（无法判定时不误报）；任一项解不开即视为跨设备密文。
+static bool warehouse_has_foreign_ciphertext(const save_backup::ParsedBundle& parsed) {
+    if (!parsed.has_warehouse || parsed.warehouse.empty()) return false;
+    if (!save_backup::port::encrypt_available()) return false;
+    const char* key = save_backup::port::hub_key();
+    if (key == nullptr) return false;
+    for (const save_backup::WarehouseFile& wf : parsed.warehouse) {
+        if ((wf.flags & save_backup::kWarehouseFlagPlain) != 0) continue;
+        if (!save_backup::port::warehouse_blob_usable_on_this_device(wf.data.data(), wf.data.size(),
+                                                                     key)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static Outcome<EntryResult> describe_backup_impl(const std::string& name, bool probe_warehouse) {
     const std::string file_name = name;
     if (file_name.empty() || file_name.find('/') != std::string::npos ||
         file_name.find("..") != std::string::npos || !is_bundle_file_name(file_name)) {
@@ -695,11 +712,21 @@ Outcome<EntryResult> describe_backup(const std::string& name) {
     (void)meta_backfill::backfill_entry_meta_from_plain(path, bytes, parsed);
     save_backup::Entry entry;
     save_backup::entry_from_bundle(file_name, parsed, entry);
+    // 仅面板路径探测（会调用游戏密钥/解密函数，必须在游戏线程；HTTP 线程不探测）。
+    if (probe_warehouse) entry.warehouse_undecryptable = warehouse_has_foreign_ciphertext(parsed);
     const std::unordered_map<int, std::string> map_names = snapshot_map_names();
     auto it = map_names.find(entry.map_id);
     if (it != map_names.end()) entry.map_name = it->second;
     entry.class_name = save_backup_class_name(entry.class_idx);
     return Outcome<EntryResult>::success(EntryResult{std::move(entry)});
+}
+
+Outcome<EntryResult> describe_backup(const std::string& name) {
+    return describe_backup_impl(name, false);
+}
+
+Outcome<EntryResult> describe_backup_for_panel(const std::string& name) {
+    return describe_backup_impl(name, true);
 }
 
 std::string save_backup_entry_json(const char* name) {

@@ -238,13 +238,14 @@ Kotlin postAndAwait
 
 - 打开：设置页「存档备份」→ `ui_panels.open("save_backup")` → provider 回调。
 - 左栏三槽：以 `save{slot}.dat` 是否可读判定有效/损坏/空；有效槽从明文解析职业/等级/地图；不再使用运行期槽状态。
-- 右栏：手动备份列表（每页 5 项，逐帧增量解析）+ `auto` 卡片。
+- 右栏：手动备份列表（每页 5 项，逐帧增量解析）+ `auto` 卡片。解析走 `describe_backup_for_panel`：仓库密文项（`flags=0`）用本机密钥试解，任一项解不开（典型为跨设备 v2 备份）时把该行时间文本标红，提示该备份在本机不可导入。
 - 操作：导出/删除/导入；导入/删除弹确认框；列表/条目/auto 直接消费 typed usecase，导出/导入/删除经公共 API 适配；面板不解析 JSON。
 - 面板状态（选中、页码、缓存）只在 `ui/panel.cpp`，不进入核心层。
 
 ## 7. 线程、快照与锁
 
 - **查询**（list/entry/list_files/auto_entry）：任意线程；只读文件 + `state` 快照，不调用游戏。
+- **面板条目探测**（`describe_backup_for_panel`）：在 `describe_backup` 基础上用游戏密钥/`ENCRYPT_Process2` 试解 warehouse 密文项，因此只能在游戏主线程调用（面板逐帧解析路径）；HTTP 的 entry 接口不探测。
 - **写/游戏读取**（export/import/delete/delete_slot/auto_backup/slot_summary）：游戏主线程；HTTP 写经 typed command 投递，面板直接调用。
 - **state 快照**：`state::Context`、map names、槽元数据用不可变 `shared_ptr` 发布；RenderPre 每 30 帧刷新槽元数据，HTTP/绘制线程只读快照。
 - **file_mutex**：只保护 bundle 读改写（回填/删除/导入定位），不承载业务状态。

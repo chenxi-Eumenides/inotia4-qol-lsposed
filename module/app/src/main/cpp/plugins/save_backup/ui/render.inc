@@ -164,9 +164,11 @@ void list_btn_draw(void* ctrl) {
     snprintf(second, sizeof(second), "%s  #%.6s", time_text, item->checksum.c_str());
     char number[8]; snprintf(number, sizeof(number), "%d", absolute + 1);
     const uint32_t primary = selected ? UI_GOLD : UI_OPTION_TEXT;
+    // 仓库密文项无法用本机密钥解开：时间行标红，提示该备份不可导入。
+    const uint32_t time_color = item->warehouse_undecryptable ? COLOR_ERR : COLOR_TEXT_WHITE;
     component_text(number, static_cast<int>(rect.x + 0x20), static_cast<int>(rect.y + 0x18), primary, 2, 1);
     component_text(first, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x07), primary, 0, 1);
-    component_text(second, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x23), COLOR_TEXT_WHITE, 0, 1);
+    component_text(second, static_cast<int>(rect.x + 0x48), static_cast<int>(rect.y + 0x23), time_color, 0, 1);
 }
 
 void auto_btn_draw(void* ctrl) {

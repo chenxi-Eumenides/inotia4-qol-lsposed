@@ -24,6 +24,7 @@
 #include "plugins/save_backup/bundle.h"
 #include "plugins/save_backup/backup_files.h"
 #include "plugins/save_backup/persistence/persistence.h"
+#include "plugins/save_backup/usecases/backup_usecases.h"
 
 namespace {
 int g_pass = 0, g_fail = 0;
@@ -188,9 +189,11 @@ QolResult write_error(const char* message, char* out, uint32_t capacity, uint32_
 }
 
 // ---- save 面注入（明文直通加密：cipher = plain + 3 零尾）----
+// g_encrypt_result=0 模拟「本机密钥解不开」，用于仓库可解密性探测用例。
+int32_t g_encrypt_result = 1;
 QolResult encrypt_passthrough(void*, int32_t, int32_t, const char*, int32_t* out_result) {
     if (out_result == nullptr) return contracts::error(kQolErrInvalidArgument, "bad", 3);
-    *out_result = 1;
+    *out_result = g_encrypt_result;
     return contracts::ok();
 }
 QolResult fake_free_data(void*) { return contracts::ok(); }
@@ -1429,6 +1432,46 @@ int main() {
         CHECK(::access(trash.c_str(), F_OK) != 0);
         CHECK(::access(wh_trash.c_str(), F_OK) != 0);
         CHECK(::access(index.c_str(), F_OK) != 0);
+    }
+
+    // ---- 面板仓库可解密性探测：v2 密文项在本机解不开 → 面板标记 warehouse_undecryptable ----
+    {
+        std::vector<uint8_t> plain(16, 0);
+        plain[8] = 4;
+        save_backup::WarehouseFile wf;
+        wf.suffix = ".wh4-000001a043a2bba1";
+        wf.flags = 0;  // v2 无 flags：原始容器密文
+        wf.data = {1, 2, 3, 4, 5, 6};
+        const std::vector<uint8_t> blob = save_backup::encode_warehouse_v2({wf});
+        const std::string checksum_v2 = save_backup::compute_checksum(
+            save_backup::kBundleVersionV2, plain, {}, blob);
+        const std::string meta_v2 = "{\"checksum\":\"" + checksum_v2 + "\"}";
+        std::vector<uint8_t> bundle;
+        append_be32(bundle, save_backup::kBundleMagic);
+        append_be16(bundle, save_backup::kBundleVersionV2);
+        bundle.insert(bundle.end(), {0, 0, 0, 0});
+        bundle.insert(bundle.end(), 8, 0);
+        append_be32(bundle, static_cast<uint32_t>(plain.size()));
+        bundle.insert(bundle.end(), plain.begin(), plain.end());
+        append_be32(bundle, 0);  // module
+        append_be32(bundle, static_cast<uint32_t>(blob.size()));
+        bundle.insert(bundle.end(), blob.begin(), blob.end());
+        append_be16(bundle, static_cast<uint16_t>(meta_v2.size()));
+        bundle.insert(bundle.end(), meta_v2.begin(), meta_v2.end());
+        append_be32(bundle, save_backup::crc32_ieee(bundle.data(), bundle.size()));
+        const std::string foreign_name = "v2-foreign-" + checksum_v2 + ".qol_save";
+        CHECK(write_file(root + "/backups/" + foreign_name,
+                         std::string(bundle.begin(), bundle.end())));
+
+        g_encrypt_result = 0;  // 本机密钥解不开
+        const auto foreign = save_backup::usecases::describe_backup_for_panel(foreign_name);
+        CHECK(foreign.ok && foreign.value.entry.warehouse_undecryptable);
+        // HTTP 路径不探测游戏密钥，保持字段默认 false。
+        const auto via_http = save_backup::usecases::describe_backup(foreign_name);
+        CHECK(via_http.ok && !via_http.value.entry.warehouse_undecryptable);
+        g_encrypt_result = 1;  // 同设备可解 → 不标红
+        const auto local = save_backup::usecases::describe_backup_for_panel(foreign_name);
+        CHECK(local.ok && !local.value.entry.warehouse_undecryptable);
     }
 
     save_backup_bind_context(nullptr, nullptr, nullptr, nullptr, 0);

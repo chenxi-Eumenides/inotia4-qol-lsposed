@@ -100,6 +100,9 @@ struct Entry {
     std::string original_sha256;
     std::string module_sha256;
     std::string checksum;
+    // 个人仓库含本机密钥解不开的密文项（典型为跨设备 v2 备份）：面板据此把时间行标红。
+    // 仅运行时判断结果，不写入 metaJson、不改变 bundle 字节与 entry_json 契约。
+    bool warehouse_undecryptable = false;
 };
 
 // 个人仓库伴生文件：suffix 为相对 `save{slot}.dat` 的后缀（含前导点），

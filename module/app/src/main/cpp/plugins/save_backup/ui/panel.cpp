@@ -173,6 +173,8 @@ struct BackupEntry {
     int map_id = 0;
     long long export_time_ms = 0;
     long long save_time = 0;
+    // 仓库密文项无法用本机密钥解开（跨设备 v2 备份）：列表时间行标红提示不可导入。
+    bool warehouse_undecryptable = false;
 };
 BackupEntry g_auto_backup;
 bool g_auto_backup_valid = false;
@@ -259,6 +261,7 @@ void fill_backup_entry(const ::save_backup::Entry& src, BackupEntry& out) {
     out.map_id = src.map_id;
     out.export_time_ms = src.export_time_ms;
     out.save_time = src.save_time;
+    out.warehouse_undecryptable = src.warehouse_undecryptable;
 }
 
 void refresh_panel_data() {
@@ -325,7 +328,7 @@ void process_one_parse_task() {
         ok = result.ok;
         if (ok) fill_backup_entry(result.value.entry, parsed);
     } else {
-        const auto result = ::save_backup::usecases::describe_backup(task.name);
+        const auto result = ::save_backup::usecases::describe_backup_for_panel(task.name);
         ok = result.ok;
         if (ok) fill_backup_entry(result.value.entry, parsed);
         parsed.name = task.name;
@@ -349,6 +352,9 @@ void process_one_parse_task() {
             if (ok) {
                 *it = std::move(parsed);
                 g_entry_cache[backup_cache_key(task.name, task.size, task.mtime_ms)] = *it;
+                if (it->warehouse_undecryptable) {
+                    SB_UI_LOG("backup warehouse not decryptable: %s", task.name.c_str());
+                }
             } else {
                 SB_UI_LOG("backup entry parse failed: %s", task.name.c_str());
                 if (g_selected_backup_name == task.name) {

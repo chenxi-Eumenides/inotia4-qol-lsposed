@@ -48,6 +48,9 @@ std::string save_backup_import_auto_json(int source_slot, int target_slot);
 // L4 typed query APIs（面板直接消费；JSON 适配仍保留给 HTTP/测试）。
 Outcome<BackupFilesResult> list_backup_files();
 Outcome<EntryResult> describe_backup(const std::string& name);
+// 面板专用：在 describe_backup 基础上探测仓库密文能否用本机密钥解开，
+// 结果写入 Entry::warehouse_undecryptable 供列表标红。会调用游戏密钥/解密函数，必须在游戏线程。
+Outcome<EntryResult> describe_backup_for_panel(const std::string& name);
 Outcome<EntryResult> auto_entry(int slot);
 
 }  // namespace usecases
