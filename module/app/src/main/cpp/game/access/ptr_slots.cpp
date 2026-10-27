@@ -3,6 +3,7 @@
 #include <cstring>
 
 #include "game/access/save.h"
+#include "game/access/qol_log_seam.h"
 #include "game/access/ui_choice.h"
 #include "game/access/ui_equip.h"
 #include "game/symbols/game_symbols.h"
@@ -102,10 +103,23 @@ bool extension_desc_button_target(uint32_t index, DescButtonTarget* out) {
     void* data = *reinterpret_cast<void**>(static_cast<uint8_t*>(button) + CO_DATA);
     if (data == nullptr) return false;
     void* execute_slot = static_cast<uint8_t*>(data) + CB_EXECUTE_PROC;
-    if (execute_slot == nullptr ||
-        !game_memory_accessible(execute_slot, sizeof(void*), 'r')) return false;
+    // 面板槽位只在对应详情类型下由原版重建，其余时刻可能残留别的控件指针。这里要求
+    // data 是可写的按钮私有块、槽内的原始 proc 是可执行代码，否则不是按钮：只查可读会
+    // 把代码页当成按钮数据，后续写槽会破坏该页的取指权限（见 qol.log 2026-10-27 22:37）。
+    if (!game_memory_accessible(execute_slot, sizeof(void*), 'w')) {
+        QOL_LOG_SEAM_WARN(kQolLogDomainPlatform,
+                          "desc button target rejected index=%u reason=data_not_writable button=%p data=%p",
+                          static_cast<unsigned>(index), button, data);
+        return false;
+    }
     void* original_proc = *reinterpret_cast<void**>(execute_slot);
-    if (original_proc == nullptr) return false;
+    if (original_proc == nullptr ||
+        !game_memory_accessible(original_proc, 4, 'x')) {
+        QOL_LOG_SEAM_WARN(kQolLogDomainPlatform,
+                          "desc button target rejected index=%u reason=original_not_executable button=%p data=%p original=%p",
+                          static_cast<unsigned>(index), button, data, original_proc);
+        return false;
+    }
 
     out->button = button;
     out->data = data;

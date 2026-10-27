@@ -2,6 +2,7 @@
 
 #include <sys/mman.h>
 
+#include <cstdio>
 #include <cstring>
 
 #include "patch/claims.h"
@@ -13,6 +14,28 @@ constexpr size_t kPageSize = 0x1000;
 
 Outcome failure(const char* error) {
     return Outcome{1, error};
+}
+
+// 页的当前保护位（PROT_*）；地址不在任何映射内返回 -1。
+int page_protection(uintptr_t page) {
+    FILE* maps = fopen("/proc/self/maps", "r");
+    if (maps == nullptr) return -1;
+    char line[512];
+    int protection = -1;
+    while (fgets(line, sizeof(line), maps) != nullptr) {
+        unsigned long start = 0;
+        unsigned long end = 0;
+        char perms[8] = {};
+        if (sscanf(line, "%lx-%lx %7s", &start, &end, perms) != 3) continue;
+        if (page < start || page >= end) continue;
+        protection = 0;
+        if (perms[0] == 'r') protection |= PROT_READ;
+        if (perms[1] == 'w') protection |= PROT_WRITE;
+        if (perms[2] == 'x') protection |= PROT_EXEC;
+        break;
+    }
+    fclose(maps);
+    return protection;
 }
 
 // 读槽当前值；槽地址由 game/access 解析（已做可读性检查），此处只做空地址防护。
@@ -87,10 +110,30 @@ bool ptr_slot_write_raw(uintptr_t slot_addr, void* value) {
         return false;
     }
     const uintptr_t page = slot_addr & ~(static_cast<uintptr_t>(kPageSize) - 1);
-    if (mprotect(reinterpret_cast<void*>(page), kPageSize, PROT_READ | PROT_WRITE) != 0) {
+    // 8 字节写必须落在同一页内：mprotect 只覆盖 slot_addr 所在页。
+    if (slot_addr - page > kPageSize - sizeof(void*)) {
+        return false;
+    }
+    const int original = page_protection(page);
+    if (original < 0 || (original & PROT_READ) == 0) {
+        return false;
+    }
+    // 指针槽不落在可执行页。写进代码页会把该页永久变成不可执行（原实现直接 mprotect 成
+    // RW，丢掉 PROT_EXEC 且不还原，之后执行同页任何代码都会 SIGSEGV/SEGV_ACCERR），
+    // 且槽址本就说明解析链把代码当成了控件数据，应 fail-closed 交给调用方拒绝。
+    if ((original & PROT_EXEC) != 0) {
+        return false;
+    }
+    const bool relaxed = (original & PROT_WRITE) == 0;
+    if (relaxed &&
+        mprotect(reinterpret_cast<void*>(page), kPageSize, original | PROT_WRITE) != 0) {
         return false;
     }
     *reinterpret_cast<void**>(slot_addr) = value;
+    if (relaxed) {
+        // 写穿 COW，值保留；只还原保护位，避免把只读页永久留成可写。
+        (void)mprotect(reinterpret_cast<void*>(page), kPageSize, original);
+    }
     return true;
 }
 
