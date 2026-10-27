@@ -37,6 +37,10 @@ struct QolExtensionBagEquipmentWriteApi {
     QolResult (*add_money)(int64_t amount, int32_t* out_result);
     QolResult (*minus_money)(int64_t amount, int32_t* out_result);
     QolResult (*put_jewel)(void* equip_item, void* jewel_item, int32_t* out_result);
+    // Item-box path for provider-owned items: open by category, then consume
+    // the provider object through the existing INVEN_ConsumeItem hook.
+    QolResult (*open_item_box)(int32_t category, int32_t* out_result);
+    QolResult (*consume_item)(void* item);
 };
 
 struct QolExtensionBagUiWriteApi {

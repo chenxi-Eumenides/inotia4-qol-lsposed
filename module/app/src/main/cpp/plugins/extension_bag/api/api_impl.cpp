@@ -34,6 +34,8 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
 
     bool used = false;
     bool is_seal = false;
+    bool is_item_box = false;
+    int item_category = 0;
     void* item = nullptr;
     void* leader = nullptr;
     bool closes_description = false;
@@ -55,12 +57,20 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
         // fn_is_use 并按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary。
         is_seal = item_type_is(item, qol::contracts::QolItemType::kMercenarySeal);
+        is_item_box = item_type_is(item, qol::contracts::QolItemType::kItemBox);
+        item_category = descriptor.category;
         if (is_seal) {
             const auto* save_facts = extension_bag_save_facts();
             if (save_facts == nullptr || save_facts->is_ok == nullptr ||
                 ::qol::extension_bag::access::host().character_extras->read.has_empty_mercenary_slot == nullptr ||
                 extension_bag_write_api() == nullptr ||
                 extension_bag_write_api()->equipment.make_mercenary == nullptr) {
+                return extension_bag_op_err("symbol not resolved");
+            }
+        } else if (is_item_box) {
+            if (extension_bag_write_api() == nullptr ||
+                extension_bag_write_api()->equipment.open_item_box == nullptr ||
+                extension_bag_write_api()->equipment.consume_item == nullptr) {
                 return extension_bag_op_err("symbol not resolved");
             }
         } else if (::qol::extension_bag::access::host().game == nullptr ||
@@ -79,7 +89,9 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
             (void)::qol::extension_bag::access::host().character_extras->read.party_member(0,
                                                                                            &leader);
         }
-        if (!is_seal && leader == nullptr) return extension_bag_op_err("no leader");
+        if (!is_seal && !is_item_box && leader == nullptr) {
+            return extension_bag_op_err("no leader");
+        }
         closes_description = qol::extension_bag::ui_state().ui.extension_desc_item == item;
         if (!module_use_begin_locked(bag, slot, item, &use_token)) {
             return extension_bag_op_err("extension item already in use");
@@ -99,6 +111,11 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         g_active_module_use_token = &use_token;
         void* mercenary = nullptr;
         used = extension_make_mercenary(item, &mercenary);
+        g_active_module_use_token = previous_use_token;
+    } else if (is_item_box) {
+        previous_use_token = g_active_module_use_token;
+        g_active_module_use_token = &use_token;
+        used = extension_open_item_box(item_category) && extension_consume_item(item);
         g_active_module_use_token = previous_use_token;
     } else {
         previous_use_token = g_active_module_use_token;

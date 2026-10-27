@@ -716,6 +716,14 @@ QolResult is_empty_bag(int32_t bag, int32_t* out_empty) {
     return contracts::ok();
 }
 
+QolResult empty_bag_slot(int32_t* out_slot) {
+    if (out_slot == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    *out_slot = -1;
+    if (fn_get_empty_bag_slot == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    *out_slot = fn_get_empty_bag_slot();
+    return contracts::ok();
+}
+
 QolResult find_save_slot(const void* item, int32_t* out_slot) {
     if (item == nullptr || out_slot == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);

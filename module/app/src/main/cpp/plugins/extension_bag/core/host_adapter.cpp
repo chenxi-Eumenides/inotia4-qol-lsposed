@@ -354,14 +354,9 @@ bool extension_handle_character_equip() {
 
 bool native_bag_slot_available() {
     const auto* extras = ::qol::extension_bag::access::host().inventory_extras;
-    if (extras == nullptr || extras->read.is_empty_bag == nullptr) return false;
-    for (int bag = 0; bag < virtual_bag::kOriginalTransactionBagCount; ++bag) {
-        int32_t empty = 0;
-        if (qol::contracts::succeeded(extras->read.is_empty_bag(bag, &empty)) && empty != 0) {
-            return true;
-        }
-    }
-    return false;
+    if (extras == nullptr || extras->read.empty_bag_slot == nullptr) return false;
+    int32_t slot = -1;
+    return qol::contracts::succeeded(extras->read.empty_bag_slot(&slot)) && slot >= 0;
 }
 
 

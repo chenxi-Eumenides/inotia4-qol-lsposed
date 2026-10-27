@@ -172,6 +172,22 @@ QolResult write_extension_put_jewel(void* equip_item, void* jewel_item, int32_t*
     return contracts::ok();
 }
 
+QolResult write_extension_open_item_box(int32_t category, int32_t* out_result) {
+    if (category < 0 || out_result == nullptr) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    if (fn_open_item_box == nullptr) return not_ready();
+    *out_result = fn_open_item_box(category);
+    return contracts::ok();
+}
+
+QolResult write_extension_consume_item(void* item) {
+    if (item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    if (fn_consume_item == nullptr) return not_ready();
+    fn_consume_item(item);
+    return contracts::ok();
+}
+
 QolResult write_extension_void_call(void (*fn)()) {
     if (fn == nullptr) return not_ready();
     fn();
@@ -366,7 +382,8 @@ const contracts::QolExtensionBagWritePort kExtensionBagWritePort{
      &write_extension_set_physical_item},
     {&write_extension_equip_from_inventory, &write_extension_apply_stuff,
      &write_extension_use_item, &write_extension_make_mercenary, &write_extension_add_money,
-     &write_extension_minus_money, &write_extension_put_jewel},
+     &write_extension_minus_money, &write_extension_put_jewel, &write_extension_open_item_box,
+     &write_extension_consume_item},
     {&write_extension_refresh_item_area, &write_extension_refresh_bag_area,
      &write_extension_refresh_store_inventory, &write_extension_refresh_store_item,
      &write_extension_refresh_mix_item, &write_extension_update_character_equip,

@@ -30,6 +30,7 @@ QolResult cursor_index(const void* control, int32_t* out_slot);
 // 原版袋容量与保存槽查询；均为只读原语。
 QolResult bag_size(int32_t bag, int32_t* out_size);
 QolResult is_empty_bag(int32_t bag, int32_t* out_empty);
+QolResult empty_bag_slot(int32_t* out_slot);
 QolResult find_save_slot(const void* item, int32_t* out_slot);
 QolResult current_bag(int32_t* out_bag);
 QolResult set_current_bag(int32_t bag);

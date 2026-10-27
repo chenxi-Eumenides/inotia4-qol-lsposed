@@ -41,6 +41,8 @@ int extension_load_item_payload(const uint8_t* payload, void** out_item, int* ou
 void extension_free_item_payload(void* item);
 
 bool extension_use_item(void* character, void* item, int arg, int* out_used);
+bool extension_open_item_box(int category);
+bool extension_consume_item(void* item);
 bool extension_make_mercenary(void* item, void** out_mercenary);
 bool extension_apply_stuff(void* target_item, void* material);
 bool extension_equip_from_inventory(void* character, int bag, int slot, int equip_slot);

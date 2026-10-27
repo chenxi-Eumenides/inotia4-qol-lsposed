@@ -86,6 +86,20 @@ bool extension_use_item(void* character, void* item, int arg, int* out_used) {
     return true;
 }
 
+bool extension_open_item_box(int category) {
+    const auto* api = extension_bag_write_api();
+    if (api == nullptr || api->equipment.open_item_box == nullptr) return false;
+    int32_t result = 0;
+    return qol::contracts::succeeded(api->equipment.open_item_box(category, &result)) &&
+           result != 0;
+}
+
+bool extension_consume_item(void* item) {
+    const auto* api = extension_bag_write_api();
+    return api != nullptr && api->equipment.consume_item != nullptr &&
+           qol::contracts::succeeded(api->equipment.consume_item(item));
+}
+
 bool extension_make_mercenary(void* item, void** out_mercenary) {
     const auto* api = extension_bag_write_api();
     return api != nullptr && api->equipment.make_mercenary != nullptr &&
