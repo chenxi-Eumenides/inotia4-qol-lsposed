@@ -3,7 +3,7 @@
 #include "move_item.h"
 #include "sell_item.h"
 
-#include "infra/log/qol_log.h"
+#include "../hooks/inventory_logging.h"
 #include "plugins/core.item/runtime/context.h"
 
 namespace qol::features::core_item {
@@ -97,7 +97,7 @@ QolResult read_item(const QolActionRef& ref, QolInventoryItemRef* out) {
 InventoryActionStatus resolve_item(const QolActionRef& ref, QolInventoryItemRef* out) {
     const QolResult result = read_item(ref, out);
     if (!native_space(ref.space_id)) {
-        QOL_LOG_INFO(QolDomain::kInventory,
+        QOL_LOG_INFO(0,
                      "inventory resolve provider ref=%d/%d/%d result=%d out=%d/%d/%d kind=%d cat=%d count=%d handle=%u/%u",
                      ref.space_id, ref.bag, ref.slot, result.code, out->space_id, out->bag,
                      out->slot, out->kind, out->category, out->count, out->item.slot,
@@ -106,7 +106,7 @@ InventoryActionStatus resolve_item(const QolActionRef& ref, QolInventoryItemRef*
     if (!contracts::succeeded(result)) return status_from_result(result, false);
     if (out->space_id != ref.space_id || out->bag != ref.bag || out->slot != ref.slot ||
         !valid_handle(out->item) || out->category <= 0) {
-        QOL_LOG_WARN(QolDomain::kInventory,
+        QOL_LOG_WARN(0,
                      "inventory resolve stale ref=%d/%d/%d out=%d/%d/%d kind=%d cat=%d handle=%u/%u",
                      ref.space_id, ref.bag, ref.slot, out->space_id, out->bag, out->slot,
                      out->kind, out->category, out->item.slot, out->item.generation);
@@ -555,7 +555,7 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
                 break;
             }
         }
-        QOL_LOG_INFO(QolDomain::kInventory,
+        QOL_LOG_INFO(0,
                      "equip provider empty_slots=%d stage=%d/%d", empty_count, stage_bag,
                      stage_slot);
         if (stage_bag < 0) {
@@ -571,7 +571,7 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
         contracts::QolBagMutationResult removed{};
         operation = source->remove(item.item, 1, &removed);
         if (!contracts::succeeded(operation)) {
-            QOL_LOG_WARN(QolDomain::kInventory,
+            QOL_LOG_WARN(0,
                          "equip provider step=remove ref=%d/%d/%d code=%d",
                          ref.space_id, ref.bag, ref.slot, operation.code);
             outcome.status = status_from_result(operation, true);
@@ -581,7 +581,7 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
         operation =
             g_item_state_write->load_item(transfer.payload, transfer.payload_size, &loaded);
         if (!contracts::succeeded(operation) || !valid_handle(loaded)) {
-            QOL_LOG_WARN(QolDomain::kInventory,
+            QOL_LOG_WARN(0,
                          "equip provider step=load code=%d handle=%u/%u",
                          operation.code, loaded.slot, loaded.generation);
             contracts::QolBagMutationResult restored{};
@@ -596,7 +596,7 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
         contracts::QolItemInventoryStateWriteResult write_result{};
         operation = g_item_state_write->place_item(&stage_ref, stage_slot, loaded, &write_result);
         if (!contracts::succeeded(operation)) {
-            QOL_LOG_WARN(QolDomain::kInventory,
+            QOL_LOG_WARN(0,
                          "equip provider step=place stage=%d/%d code=%d handle=%u/%u",
                          stage_bag, stage_slot, operation.code, loaded.slot, loaded.generation);
             // place_item frees the detached item on failure.
@@ -608,14 +608,14 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
                                  : InventoryActionStatus::kInternal;
             return outcome;
         }
-        QOL_LOG_INFO(QolDomain::kInventory,
+        QOL_LOG_INFO(0,
                      "equip provider stage placed stage=%d/%d gained=%u first=%d/%d",
                      stage_bag, stage_slot, write_result.gained_count,
                      write_result.gained_count > 0 ? write_result.gained[0].bag : -1,
                      write_result.gained_count > 0 ? write_result.gained[0].slot : -1);
         operation = g_item_state_write->equip_item(role, stage_bag, stage_slot, &write_result);
         if (!contracts::succeeded(operation)) {
-            QOL_LOG_WARN(QolDomain::kInventory,
+            QOL_LOG_WARN(0,
                          "equip provider step=exchange stage=%d/%d code=%d msg=%.*s",
                          stage_bag, stage_slot, operation.code,
                          static_cast<int>(operation.message_len),
