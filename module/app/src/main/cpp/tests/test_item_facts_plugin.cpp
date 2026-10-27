@@ -139,7 +139,7 @@ int main() {
     CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
           qol::contracts::kItemFactsVersion.minor == 0);
     CHECK(qol::contracts::kQolPortItemVersion.major == 4 &&
-          qol::contracts::kQolPortItemVersion.minor == 0);
+          qol::contracts::kQolPortItemVersion.minor == 1);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -287,7 +287,8 @@ int main() {
     CHECK(descriptor.provides[6].iface != nullptr);
     CHECK(descriptor.port_count == 6 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 4 && descriptor.ports[0].range.min_minor == 0);
+    CHECK(descriptor.ports[0].range.major == qol::contracts::kQolPortItemVersion.major &&
+          descriptor.ports[0].range.min_minor == qol::contracts::kQolPortItemVersion.minor);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==

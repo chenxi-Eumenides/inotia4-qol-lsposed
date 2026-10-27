@@ -1254,6 +1254,7 @@ using MercenaryReleaseFn = void (*)(int32_t);
 using ItemIsUseFn = int (*)(int32_t);
 using PopupStateExistFn = int (*)();
 using OpenItemBoxFn = int (*)(int32_t);
+using ProcessUnpackFn = int (*)(int32_t);
 using ReleaseSealedFn = int (*)(int32_t);
 using IsDiceFn = int (*)(int32_t);
 using IsSealedFn = int (*)(int32_t);

@@ -25,6 +25,7 @@ namespace qol::features::core_item {
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
 uint32_t registered_bag_source_count();
 const contracts::QolBagSource* registered_bag_source_at(uint32_t index);
+extern const contracts::QolItemPort* g_port;
 }
 
 namespace {
@@ -922,6 +923,61 @@ int remove_item_wrapper(void* item) {
     return stage4_remove_item(item, nullptr, nullptr, g_backup_remove_item, g_in_remove_item);
 }
 
+bool adopt_save_item_to_registered_source(void* item) {
+    const auto* port = qol::features::core_item::g_port;
+    if (item == nullptr || port == nullptr ||
+        !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
+        port->read.serialize_item == nullptr || port->read.category == nullptr ||
+        port->read.free_item == nullptr) {
+        return false;
+    }
+    qol::contracts::QolItemHandle handle{};
+    if (!item_handle_for_hook_item(item, &handle)) return false;
+    uint32_t required = 0;
+    QolResult result = port->read.serialize_item(handle, nullptr, 0, &required);
+    if (!qol::contracts::succeeded(result) || required == 0 ||
+        required > qol::contracts::kQolBagTransferPayloadMaxSize) {
+        return false;
+    }
+    int32_t category = 0;
+    if (!qol::contracts::succeeded(port->read.category(handle, &category)) || category <= 0) {
+        return false;
+    }
+    qol::contracts::QolBagTransfer transfer{};
+    uint32_t serialized = 0;
+    if (!qol::contracts::succeeded(port->read.serialize_item(
+            handle, transfer.payload, qol::contracts::kQolBagTransferPayloadCapacity,
+            &serialized)) ||
+        serialized != required) {
+        return false;
+    }
+    transfer.category = category;
+    int32_t item_count = 1;
+    if (port->read.cumulate_count != nullptr) {
+        int32_t observed = 0;
+        if (qol::contracts::succeeded(port->read.cumulate_count(handle, &observed)) &&
+            observed > 0) {
+            item_count = observed;
+        }
+    }
+    transfer.count = item_count;
+    transfer.payload_size = serialized;
+    for (uint32_t index = 0;
+         index < qol::features::core_item::registered_bag_source_count(); ++index) {
+        const auto* source =
+            qol::features::core_item::registered_bag_source_at(index);
+        if (source == nullptr || source->import_item == nullptr) continue;
+        qol::contracts::QolBagMutationResult imported{};
+        result = source->import_item(&transfer, -1, -1, &imported);
+        if (!qol::contracts::succeeded(result)) continue;
+        // The registered source materialized its own object; the original
+        // game-created item was never inserted into native inventory.
+        (void)port->read.free_item(item);
+        return true;
+    }
+    return false;
+}
+
 int save_item_wrapper(void* item) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -932,7 +988,9 @@ int save_item_wrapper(void* item) {
         backup_missing("hook:INVEN_SaveItem");
         return 0;
     }
-    return g_backup_save_item(item);
+    const int result = g_backup_save_item(item);
+    if (result != 0) return result;
+    return adopt_save_item_to_registered_source(item) ? 1 : 0;
 }
 
 // ---- S2 写侧进位框架新增 hook（H-18..H-20）----

@@ -463,6 +463,8 @@ bool bridge_init() {
     fn_button_cancel_exe = reinterpret_cast<PopupButtonExeFn>(g_base + fn_resolve("F_BUTTON_CANCEL_EXE_VMA", F_BUTTON_CANCEL_EXE_VMA));
     fn_networkstore_set_state = reinterpret_cast<NetworkStoreSetStateFn>(g_base + fn_resolve("F_NETWORKSTORE_SET_STATE_VMA", F_NETWORKSTORE_SET_STATE_VMA));
     fn_open_item_box = reinterpret_cast<OpenItemBoxFn>(g_base + fn_resolve("F_OPEN_ITEM_BOX_VMA", F_OPEN_ITEM_BOX_VMA));
+    fn_process_unpack = reinterpret_cast<ProcessUnpackFn>(
+        g_base + fn_resolve("F_ITEMSYSTEM_PROCESS_UNPACK_VMA", F_ITEMSYSTEM_PROCESS_UNPACK_VMA));
     fn_release_sealed = reinterpret_cast<ReleaseSealedFn>(g_base + fn_resolve("F_RELEASE_SEALED_VMA", F_RELEASE_SEALED_VMA));
     fn_is_dice = reinterpret_cast<IsDiceFn>(g_base + fn_resolve("F_IS_DICE_VMA", F_IS_DICE_VMA));
     fn_is_sealed = reinterpret_cast<IsSealedFn>(g_base + fn_resolve("F_IS_SEALED_VMA", F_IS_SEALED_VMA));

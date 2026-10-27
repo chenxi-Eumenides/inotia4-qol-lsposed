@@ -205,6 +205,7 @@ PopupButtonExeFn fn_button_ok_exe = nullptr;
 PopupButtonExeFn fn_button_cancel_exe = nullptr;
 NetworkStoreSetStateFn fn_networkstore_set_state = nullptr;
 OpenItemBoxFn fn_open_item_box = nullptr;
+ProcessUnpackFn fn_process_unpack = nullptr;
 ReleaseSealedFn fn_release_sealed = nullptr;
 IsDiceFn fn_is_dice = nullptr;
 IsSealedFn fn_is_sealed = nullptr;

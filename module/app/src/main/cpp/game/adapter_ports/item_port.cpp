@@ -496,6 +496,14 @@ QolResult read_static_text(int32_t kind, int32_t id, const char** out_text) {
     return contracts::ok();
 }
 
+QolResult read_free_item(void* item) {
+    if (item == nullptr) return error_result(kQolErrInvalidArgument, "invalid item");
+    if (fn_itempool_free == nullptr) return not_ready();
+    (void)invalidate_item(item);
+    fn_itempool_free(item);
+    return contracts::ok();
+}
+
 QolResult read_static_ready(int32_t* out_ready) {
     if (out_ready == nullptr) return error_result(kQolErrInvalidArgument, "invalid argument");
     *out_ready = g_item_text_ready.load() ? 1 : 0;
@@ -511,7 +519,8 @@ const contracts::QolItemPort kItemPort{
         &read_static_text, &read_static_ready, &read_inventory_item_view,
          &read_effective_cumulate_count, nullptr, &read_count_limit,
            &read_count_encoding, &read_quote, &read_bag_count, &read_bag_info,
-           &read_space_item_at, &read_for_each_space_slot, &read_serialize_item},
+           &read_space_item_at, &read_for_each_space_slot, &read_serialize_item,
+           &read_free_item},
 };
 
 }  // namespace

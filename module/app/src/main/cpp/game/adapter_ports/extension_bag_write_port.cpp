@@ -176,8 +176,18 @@ QolResult write_extension_open_item_box(int32_t category, int32_t* out_result) {
     if (category < 0 || out_result == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
-    if (fn_open_item_box == nullptr) return not_ready();
-    *out_result = fn_open_item_box(category);
+    // 1007..1009 are ITEMSYSTEM_IsItemBox and use OpenItemBox. Pack items such
+    // as the adventurer gift box (924) are ITEMSYSTEM_IsPackItem and must use
+    // ProcessUnpack; calling OpenItemBox on them dereferences a different table
+    // and has crashed inside MEM_ReadInt8.
+    const bool classic_box = fn_is_item_box != nullptr && fn_is_item_box(category) != 0;
+    if (classic_box) {
+        if (fn_open_item_box == nullptr) return not_ready();
+        *out_result = fn_open_item_box(category);
+    } else {
+        if (fn_process_unpack == nullptr) return not_ready();
+        *out_result = fn_process_unpack(category);
+    }
     return contracts::ok();
 }
 

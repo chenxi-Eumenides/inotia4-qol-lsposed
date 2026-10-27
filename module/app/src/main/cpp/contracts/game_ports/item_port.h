@@ -197,6 +197,8 @@ struct QolItemPortReadApi {
     // Stale handles return NotFound; an unavailable game or symbol returns NotReady.
     QolResult (*serialize_item)(QolItemHandle item, uint8_t* out, uint32_t capacity,
                                 uint32_t* out_size);
+    // Frees a game-created item pointer that was not placed in native inventory.
+    QolResult (*free_item)(void* item);
 };
 
 struct QolItemPort {

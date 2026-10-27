@@ -196,6 +196,7 @@ decltype(fn_get_bag_size) fn_get_bag_size = nullptr;
 decltype(fn_is_empty_bag) fn_is_empty_bag = nullptr;
 decltype(fn_get_empty_bag_slot) fn_get_empty_bag_slot = nullptr;
 decltype(fn_open_item_box) fn_open_item_box = nullptr;
+decltype(fn_process_unpack) fn_process_unpack = nullptr;
 decltype(fn_consume_item) fn_consume_item = nullptr;
 decltype(fn_inven_find_save_slot) fn_inven_find_save_slot = nullptr;
 

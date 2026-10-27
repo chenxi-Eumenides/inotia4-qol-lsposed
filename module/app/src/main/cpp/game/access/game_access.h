@@ -238,6 +238,7 @@ extern PopupButtonExeFn fn_button_ok_exe;      // 弹窗确定按钮（dialog_ok
 extern PopupButtonExeFn fn_button_cancel_exe;  // 弹窗取消按钮（dialog_cancel 原版执行函数，经本层解析调用）
 extern NetworkStoreSetStateFn fn_networkstore_set_state;
 extern OpenItemBoxFn fn_open_item_box;
+extern ProcessUnpackFn fn_process_unpack;
 extern ReleaseSealedFn fn_release_sealed;
 extern IsDiceFn fn_is_dice;
 extern IsSealedFn fn_is_sealed;
