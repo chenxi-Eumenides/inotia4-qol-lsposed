@@ -1324,10 +1324,24 @@ int main() {
         const std::string slot1_dat = save_dir + "/save1.dat";
         const std::string slot1_dat_before = "slot1-before-old-bundle";
         CHECK(write_file(slot1_dat, slot1_dat_before));
+        // v3 没有 C18 段：目标 C18 生成空背包镜像后继续导入（不再整次拒绝）。
         const std::string old_bundle_result =
             save_backup_import_json(legacy_checksum.c_str(), 1);
-        CHECK(old_bundle_result.find("backup has no C18 bag image") != std::string::npos);
-        CHECK(read_file(slot1_dat) == slot1_dat_before);
+        CHECK(body_ok(old_bundle_result));
+        CHECK(read_file(slot1_dat) != slot1_dat_before);
+        const std::vector<uint8_t> empty_bag = read_file_vector(old_slot1_primary);
+        uint32_t empty_count = 0;
+        std::array<uint8_t, 3> empty_reserved{};
+        std::vector<uint8_t> empty_records;
+        CHECK(save_backup::parse_c18_native_bag_file(
+            empty_bag.data(), empty_bag.size(), 1,
+            save_backup::kC18NativeBagLegacyRecordCount, false, empty_count,
+            empty_reserved, empty_records));
+        CHECK(empty_count == save_backup::kC18NativeBagLegacyRecordCount);
+        const std::array<uint8_t, 3> zero_reserved{};
+        CHECK(empty_reserved == zero_reserved);
+        CHECK(std::all_of(empty_records.begin(), empty_records.end(),
+                          [](uint8_t value) { return value == 0; }));
 
         // shared 96 条导入到旧版 per-slot bag 文件：尾部补零，shared 文件保持不变。
         CHECK(body_ok(save_backup_import_json(export_checksum.c_str(), 2)));

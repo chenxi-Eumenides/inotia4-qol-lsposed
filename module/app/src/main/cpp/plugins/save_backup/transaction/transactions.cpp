@@ -73,8 +73,10 @@ int locate_save_directory(std::string& out) {
     return locate_save_directory_at(save_backup::state::snapshot().data_dir, out);
 }
 
-bool read_target_c18_layout(save_backup::C18NativeBagLayout& out, std::string& err) {
+bool read_target_c18_layout(save_backup::C18NativeBagLayout& out, std::string& version_label,
+                            std::string& err) {
     out = save_backup::C18NativeBagLayout::kNotC18;
+    version_label.clear();
     const auto ctx = save_backup::state::snapshot();
     qol::contracts::QolGameIdentity identity{};
     if (ctx.game == nullptr || ctx.game->game_identity.read == nullptr ||
@@ -99,7 +101,24 @@ bool read_target_c18_layout(save_backup::C18NativeBagLayout& out, std::string& e
         err = "C18 game version unsupported";
         return false;
     }
+    version_label.assign(identity.version_label);
     return true;
+}
+
+// 目标 C18 需要原生背包镜像、但旧备份（v1-v3）没有镜像：按目标布局生成空背包文件。
+// record 全零，loader 以「前五个 u64 全零」判定空记录；导入后扩展背包为空。
+bool build_empty_c18_native_bag(const std::string& version_label, int slot,
+                                save_backup::C18NativeBagLayout layout,
+                                save_backup::C18NativeBagImage& out) {
+    out = save_backup::C18NativeBagImage{};
+    out.source_version = version_label;
+    out.source_slot = slot;
+    out.record_count = layout == save_backup::C18NativeBagLayout::kLegacy192
+                           ? save_backup::kC18NativeBagLegacyRecordCount
+                           : save_backup::kC18NativeBagModernRecordCount;
+    out.records.assign(
+        static_cast<size_t>(out.record_count) * save_backup::kC18NativeBagRecordBytes, 0);
+    return save_backup::validate_c18_native_bag_image(out);
 }
 
 bool snapshot_c18_target(const std::string& path, bool& existed,
@@ -636,7 +655,8 @@ std::string import_bundle_file(const std::string& path, int slot) {
             return result_error("backup unreadable or corrupt");
         }
         std::string identity_error;
-        if (!read_target_c18_layout(target_c18_layout, identity_error)) {
+        std::string target_c18_version;
+        if (!read_target_c18_layout(target_c18_layout, target_c18_version, identity_error)) {
             return result_error(identity_error.c_str());
         }
         const bool target_has_c18_bag =
@@ -646,7 +666,15 @@ std::string import_bundle_file(const std::string& path, int slot) {
             return result_error("C18 bag image unsupported on target");
         }
         if (!parsed.has_c18_native_bag && target_has_c18_bag) {
-            return result_error("backup has no C18 bag image");
+            // 旧备份没有 C18 背包镜像：生成空背包继续导入（扩展背包内容为空），
+            // 而不是整次拒绝。镜像在 checksum 校验之后合成，不参与旧 bundle 的校验。
+            if (!build_empty_c18_native_bag(target_c18_version, slot, target_c18_layout,
+                                            parsed.c18_native_bag)) {
+                return result_error("C18 bag image invalid");
+            }
+            parsed.has_c18_native_bag = true;
+            SB_LOG("save backup import: slot%d missing C18 bag image, materialized empty image (%s)",
+                   slot, target_c18_version.c_str());
         }
     }
     const bool c18_write = target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192 ||

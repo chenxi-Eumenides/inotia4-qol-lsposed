@@ -106,7 +106,7 @@
 - 文件以 stdio 直写，未发现原版 `SAVE_Encrypt` 或设备密钥加密证据；C18 native bag image 不做加解密。
 - `SAVE_Save` 和 C18 helper 会写入真实当前槽，不是纯序列化 API；导出必须直接读取活动文件，不能调用它们。
 - 文件都位于 Native init 传入的动态 `data_dir` 根目录；slot 0/1/2 的文件后缀 N 分别为 1/2/3：旧版 `C18Lbag{N}.dat`、新版 `C18Lwh{N}.dat`。不得硬编码包路径。
-- primary 缺失时只读同一 `data_dir` 根目录的 shared fallback `C18Lbag.dat`；fallback header 可为 96 或 192 条。primary 和 shared 都不存在时备份/导入 fail-closed，不伪造空 image。不得调用内部 selector `0xc5538`，因为它会通过 `system()` 复制文件。
+- primary 缺失时只读同一 `data_dir` 根目录的 shared fallback `C18Lbag.dat`；fallback header 可为 96 或 192 条。primary 和 shared 都不存在时导出 fail-closed（无 image 可收集）；导入旧备份（v1-v3，bundle 不含 image）时按目标布局生成空 image（192/96 条全零记录，扩展背包为空）后继续。不得调用内部 selector `0xc5538`，因为它会通过 `system()` 复制文件。
 - shared fallback 导入后只 materialize 为目标版本活动 per-slot 文件，不改写 shared 文件。
 
 ### 10.3 跨版本备份策略
