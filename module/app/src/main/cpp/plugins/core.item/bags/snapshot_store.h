@@ -19,7 +19,7 @@ struct BagSnapshot {
     int32_t space_id;
     int32_t bag;
     int32_t capacity;
-    int32_t slot_count;
+    int32_t occupied_slots;
     std::vector<SlotRecord> items;
 };
 

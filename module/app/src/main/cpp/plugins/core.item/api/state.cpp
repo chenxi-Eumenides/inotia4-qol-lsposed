@@ -63,7 +63,7 @@ QolResult append_registered_inventory_bags(std::string* out) {
             contracts::QolBagInfo info{};
             const QolResult info_result = source->info(bag, &info);
             if (!contracts::succeeded(info_result)) return info_result;
-            if (info.capacity < 0 || info.slot_count < 0 || info.slot_count > info.capacity) {
+            if (info.capacity < 0 || info.occupied_slots < 0 || info.occupied_slots > info.capacity) {
                 return error_result(kQolErrInvalidArgument, "invalid registered bag info");
             }
 
@@ -74,7 +74,7 @@ QolResult append_registered_inventory_bags(std::string* out) {
             out->append(",\"capacity\":");
             *out += std::to_string(info.capacity);
             out->append(",\"used\":");
-            *out += std::to_string(info.slot_count);
+            *out += std::to_string(info.occupied_slots);
             out->append(",\"items\":[");
 
             bool first_item = true;
@@ -156,7 +156,7 @@ QolResult build_inventory_json(std::string* out) {
             append_inventory_item(&json, slot, view, count_present, count);
             ++filled;
         }
-        json += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
+        json += "],\"capacity\":16,\"occupied_slots\":" + std::to_string(filled) + "}";
     }
 
     int32_t c18_bag_count = 0;
@@ -180,7 +180,7 @@ QolResult build_inventory_json(std::string* out) {
         contracts::QolBagInfo info{};
         const QolResult info_result = g_port->read.bag_info(&ref, &info);
         if (!contracts::succeeded(info_result)) return info_result;
-        if (info.capacity < 0 || info.slot_count < 0) {
+        if (info.capacity < 0 || info.occupied_slots < 0) {
             return error_result(kQolErrInvalidArgument, "invalid c18 bag info");
         }
         // 原始 item.state 保留扁平袋号，不新增 space 字段。
@@ -216,7 +216,7 @@ QolResult build_inventory_json(std::string* out) {
             ++filled;
         }
         json += "],\"capacity\":" + std::to_string(info.capacity) +
-                ",\"slot_count\":" + std::to_string(info.slot_count) + "}";
+                ",\"occupied_slots\":" + std::to_string(info.occupied_slots) + "}";
     }
     const QolResult extension_result = append_registered_inventory_bags(&json);
     if (!contracts::succeeded(extension_result)) return extension_result;

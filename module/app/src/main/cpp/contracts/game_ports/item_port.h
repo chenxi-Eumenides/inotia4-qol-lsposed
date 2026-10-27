@@ -36,7 +36,7 @@ struct QolBagRef {
 
 struct QolBagInfo {
     int32_t capacity;
-    int32_t slot_count;
+    int32_t occupied_slots;
 };
 
 struct QolInventoryItemRef {

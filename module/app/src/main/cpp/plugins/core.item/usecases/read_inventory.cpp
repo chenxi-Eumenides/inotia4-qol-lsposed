@@ -100,11 +100,11 @@ QolResult read_bag(int32_t space_id, int32_t bag,
     const QolResult info_result = source != nullptr ? source->info(bag, &info)
                                                     : g_port->read.bag_info(&ref, &info);
     if (!contracts::succeeded(info_result)) return info_result;
-    if (info.capacity < 0 || info.slot_count < 0) {
+    if (info.capacity < 0 || info.occupied_slots < 0) {
         return error_result(kQolErrInvalidArgument, "invalid bag info");
     }
 
-    bags::BagSnapshot snapshot{space_id, bag, info.capacity, info.slot_count, {}};
+    bags::BagSnapshot snapshot{space_id, bag, info.capacity, info.occupied_slots, {}};
     if (has_space_items) {
         for (const contracts::QolInventoryItemRef& item : *space_items) {
             if (item.bag != bag) continue;

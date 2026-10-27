@@ -93,7 +93,7 @@ std::string g_party_after_write_json;
 std::string g_skills_after_write_json;
 std::string g_player_after_write_json;
 const char* g_inventory_before_write_json =
-    "{\"bags\":[{\"bag\":0,\"items\":[],\"capacity\":16,\"slot_count\":0}]}";
+    "{\"bags\":[{\"bag\":0,\"items\":[],\"capacity\":16,\"occupied_slots\":0}]}";
 const char* g_inventory_after_write_json =
     "{\"bags\":[{\"bag\":0,\"items\":[{\"slot\":2,\"name\":\"Potion\","
     "\"category\":10,\"count\":1,\"item_type\":\"consumable\",\"need_level\":0,"
@@ -101,7 +101,7 @@ const char* g_inventory_after_write_json =
     "\"magic_rate\":0},\"bonus\":[],\"gem\":{\"total_slots\":0,\"slots\":[]},"
     "\"chaos\":{\"is_chaos\":false,\"level\":0,\"rate\":100},"
     "\"enchant\":{\"id\":0,\"level\":0,\"effect\":null}}],\"capacity\":16,"
-    "\"slot_count\":1}]}";
+    "\"occupied_slots\":1}]}";
 bool g_item_state_available = true;
 bool g_item_state_parse_failure = false;
 int g_item_state_snapshot_reads = 0;

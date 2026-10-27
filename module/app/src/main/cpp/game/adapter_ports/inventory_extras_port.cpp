@@ -44,7 +44,7 @@ QolResult read_is_empty_bag_ref(const contracts::QolBagRef* ref, int32_t* out_em
     contracts::QolBagInfo info{};
     const QolResult result = inventory_bag_info(ref, &info);
     if (!contracts::succeeded(result)) return result;
-    *out_empty = info.slot_count == 0 ? 1 : 0;
+    *out_empty = info.occupied_slots == 0 ? 1 : 0;
     return contracts::ok();
 }
 

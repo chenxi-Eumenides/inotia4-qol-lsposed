@@ -138,7 +138,7 @@
         "gem": { "total_slots": 0, "slots": [] },
         "chaos": { "is_chaos": false, "level": null, "rate": null },
         "enchant": { "id": 0, "level": 0, "effect": null } }
-    ], "capacity": 16, "slot_count": 13 }
+    ], "capacity": 16, "occupied_slots": 13 }
   ]
 }
 ```
@@ -161,7 +161,7 @@
 | `chaos` | 混沌对象：`{is_chaos 是否混沌, level 混沌等级, rate 混沌成功率}` |
 | `enchant` | 附魔对象：`{id 附魔ID, level 附魔等级, effect 附魔名(ITEMENCHANTBASE 联查)}` |
 
-> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读对象，替代原位域拆解字段（`type_flags`/`raw_rarity`/`socket`/`enchant`/`chaos_*`/`options`/`option_ids`/`option_names`/`options_detailed`/`static_options`/`socket_info`/`enchant_info`/`chaos_info`）。`capacity` 袋容量 16 格；`slot_count` 占用数。
+> 物品对象为统一结构（装备/消耗品/材料同构）：**缺失的标量字段置 `null`，列表字段恒为数组（无内容时空列表）**；`base`/`bonus`/`gem`/`chaos`/`enchant` 为重组后的可读对象，替代原位域拆解字段（`type_flags`/`raw_rarity`/`socket`/`enchant`/`chaos_*`/`options`/`option_ids`/`option_names`/`options_detailed`/`static_options`/`socket_info`/`enchant_info`/`chaos_info`）。`capacity` 袋容量 16 格；`occupied_slots` 占用数。
 
 > 写操作 result 中的 `slots[].item`、`equipment.item`、`inventory[].item` 复用上述完整 Item 结构或 `null`；外层只包含本次写入涉及或实测发生变化的槽，不是完整 Inventory/Party 快照。
 
@@ -983,7 +983,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 **返回格式**：
 
 ```text
-{"bags":[{space,bag,capacity,slot_count}],"items":[{space,bag,slot,<item fields>}],"next_cursor":"S:B:K"|null,"has_more":bool}
+{"bags":[{space,bag,capacity,occupied_slots}],"items":[{space,bag,slot,<item fields>}],"next_cursor":"S:B:K"|null,"has_more":bool}
 ```
 
 `bags` 返回快照中的袋元数据；`items` 按游标分页。查询参数 `space`、`bag`、`cursor`、`limit` 均可选；指定 `space` 时 `bag` 是该空间内索引，未指定 `space` 时 `bag` 是扁平袋号；只指定 `space` 时筛选该空间。扁平袋号或空间内袋索引无法解析时返回 HTTP 404 `bag not found`。
@@ -1012,7 +1012,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **用途**：获取指定袋的容量与占用数。指定 `space` 时 `{bag}` 是空间内索引；省略时 `{bag}` 是扁平袋号；无效袋返回 HTTP 404 `bag not found`。
 
-**返回格式**：`{"space":S,"bag":B,"capacity":C,"slot_count":N}`
+**返回格式**：`{"space":S,"bag":B,"capacity":C,"occupied_slots":N}`
 
 #### 袋内指定槽
 

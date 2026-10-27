@@ -328,10 +328,10 @@ bool enrich_inventory(const char* json, uint32_t size, const contracts::QolItemP
         }
         long long capacity = 16;
         (void)member_int(bag, "capacity", &capacity);
-        long long slot_count = 0;
-        (void)member_int(bag, "slot_count", &slot_count);
+        long long occupied_slots = 0;
+        (void)member_int(bag, "occupied_slots", &occupied_slots);
         result += "],\"capacity\":" + std::to_string(capacity) +
-                  ",\"slot_count\":" + std::to_string(slot_count) + "}";
+                  ",\"occupied_slots\":" + std::to_string(occupied_slots) + "}";
     }
     result += "]}";
     *out = std::move(result);
@@ -374,10 +374,10 @@ bool enrich_bag_info(const char* json, uint32_t size, int32_t bag, std::string* 
         if (!member_int(entry, "bag", &bag_id) || bag_id != bag) continue;
         long long capacity = -1;
         (void)member_int(entry, "capacity", &capacity);
-        long long slot_count = -1;
-        (void)member_int(entry, "slot_count", &slot_count);
+        long long occupied_slots = -1;
+        (void)member_int(entry, "occupied_slots", &occupied_slots);
         *out = "{\"bag\":" + std::to_string(bag_id) + ",\"capacity\":" +
-               std::to_string(capacity) + ",\"slot_count\":" + std::to_string(slot_count) + "}";
+               std::to_string(capacity) + ",\"occupied_slots\":" + std::to_string(occupied_slots) + "}";
         *found = true;
         return true;
     }

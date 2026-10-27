@@ -134,7 +134,7 @@ std::string build_inventory_json() {
                 ++filled;
             }
         }
-        s += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
+        s += "],\"capacity\":16,\"occupied_slots\":" + std::to_string(filled) + "}";
     }
     s += "]}";
     return s;

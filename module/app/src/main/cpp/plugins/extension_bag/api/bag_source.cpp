@@ -93,12 +93,12 @@ QolResult source_info(int32_t bag, contracts::QolBagInfo* out) {
     if (!source_ready()) return source_error(kQolErrNotReady, "extension bag not ready");
     if (!valid_bag(bag)) return source_error(kQolErrInvalidArgument, "invalid extension bag");
     ::qol::extension_bag::ReentryLock lock;
-    int32_t slot_count = 0;
+    int32_t occupied_slots = 0;
     const int capacity = ::qol::extension_bag::access::bag().capacities[bag];
     for (int slot = 0; slot < capacity; ++slot) {
-        if (!descriptor_empty(::qol::extension_bag::access::bag().items[bag][slot])) ++slot_count;
+        if (!descriptor_empty(::qol::extension_bag::access::bag().items[bag][slot])) ++occupied_slots;
     }
-    *out = contracts::QolBagInfo{capacity, slot_count};
+    *out = contracts::QolBagInfo{capacity, occupied_slots};
     return contracts::ok();
 }
 

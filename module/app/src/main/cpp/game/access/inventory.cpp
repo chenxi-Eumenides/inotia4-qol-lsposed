@@ -413,7 +413,7 @@ QolResult inventory_bag_info(const contracts::QolBagRef* ref,
     int32_t capacity = 16;
     result = native_bag_capacity(ref->space_id, ref->bag, &capacity);
     if (!contracts::succeeded(result)) return result;
-    int32_t slot_count = 0;
+    int32_t occupied_slots = 0;
     const int32_t native_bag = ref->bag +
         (ref->space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0);
     for (int32_t slot = 0; slot < 16; ++slot) {
@@ -422,10 +422,10 @@ QolResult inventory_bag_info(const contracts::QolBagRef* ref,
         if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
             return error_result(kQolErrNotReady, kNotReady);
         }
-        if (*slot_address != nullptr) ++slot_count;
+        if (*slot_address != nullptr) ++occupied_slots;
     }
     out_info->capacity = capacity;
-    out_info->slot_count = slot_count;
+    out_info->occupied_slots = occupied_slots;
     return contracts::ok();
 }
 

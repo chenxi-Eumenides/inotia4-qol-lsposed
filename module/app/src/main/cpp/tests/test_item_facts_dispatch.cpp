@@ -68,11 +68,11 @@ constexpr char kInventoryJson[] =
     "\"magic_rate\":0,\"need_level\":0,\"socket\":0,\"socket_filled\":0,\"socket_total\":0,"
     "\"enchant\":0,\"chaos\":false,\"enchant_id\":0,\"enchant_level\":0,\"chaos_level\":0,"
     "\"chaos_rate\":100,\"options\":[],\"option_ids\":[],\"option_types\":[]}],"
-    "\"capacity\":16,\"slot_count\":1},{\"bag\":1,\"items\":[],\"capacity\":16,\"slot_count\":0},"
-    "{\"bag\":2,\"items\":[],\"capacity\":16,\"slot_count\":0},"
-    "{\"bag\":3,\"items\":[],\"capacity\":16,\"slot_count\":0},"
-    "{\"bag\":4,\"items\":[],\"capacity\":16,\"slot_count\":0},"
-     "{\"bag\":5,\"items\":[],\"capacity\":16,\"slot_count\":0}]}";
+    "\"capacity\":16,\"occupied_slots\":1},{\"bag\":1,\"items\":[],\"capacity\":16,\"occupied_slots\":0},"
+    "{\"bag\":2,\"items\":[],\"capacity\":16,\"occupied_slots\":0},"
+    "{\"bag\":3,\"items\":[],\"capacity\":16,\"occupied_slots\":0},"
+    "{\"bag\":4,\"items\":[],\"capacity\":16,\"occupied_slots\":0},"
+     "{\"bag\":5,\"items\":[],\"capacity\":16,\"occupied_slots\":0}]}";
 
 constexpr char kShopJson[] =
     "{\"items\":[{\"slot\":0,\"category\":10,\"count\":5,\"price\":15}]}";
@@ -128,10 +128,10 @@ std::string expected_slot_record(int32_t bag, int32_t slot, const std::string& i
 
 std::string expected_inventory_with_count(uint32_t count) {
     std::string inventory = "{\"bags\":[{\"space\":0,\"bag\":0,\"capacity\":16,"
-                            "\"slot_count\":1}";
+                            "\"occupied_slots\":1}";
     for (int32_t bag = 1; bag < 6; ++bag) {
         inventory += ",{\"space\":0,\"bag\":" + std::to_string(bag) +
-                     ",\"capacity\":16,\"slot_count\":0}";
+                     ",\"capacity\":16,\"occupied_slots\":0}";
     }
     inventory += "],\"items\":[";
     inventory += expected_inventory_item(count, 0, 0, 0);
@@ -204,15 +204,15 @@ std::string expected_inventory_page_from_enriched(const std::string& enriched) {
         const std::string_view bag_json(enriched.data() + cursor, bag_end - cursor + 1);
         const int32_t flat_bag = json_integer_member(bag_json, "bag");
         const int32_t capacity = json_integer_member(bag_json, "capacity");
-        const int32_t slot_count = json_integer_member(bag_json, "slot_count");
-        if (flat_bag < 0 || capacity < 0 || slot_count < 0) return {};
+        const int32_t occupied_slots = json_integer_member(bag_json, "occupied_slots");
+        if (flat_bag < 0 || capacity < 0 || occupied_slots < 0) return {};
         const int32_t space = flat_bag < 6 ? 0 : 2;
         const int32_t bag = flat_bag < 6 ? flat_bag : flat_bag - 6;
         if (!first_bag) expected.push_back(',');
         first_bag = false;
         expected += "{\"space\":" + std::to_string(space) + ",\"bag\":" +
                     std::to_string(bag) + ",\"capacity\":" + std::to_string(capacity) +
-                    ",\"slot_count\":" + std::to_string(slot_count) + "}";
+                    ",\"occupied_slots\":" + std::to_string(occupied_slots) + "}";
 
         const size_t items_key = bag_json.find("\"items\":[");
         if (items_key == std::string_view::npos) return {};
@@ -316,7 +316,7 @@ int32_t g_state_add_enhance = -1;
 int32_t g_state_add_rarity = -1;
 constexpr int32_t kFakePhysicalBagCount = qol::contracts::kQolMaxNativeBagCount;
 bool g_inventory_slot_present[kFakePhysicalBagCount][16] = {{true}};
-uint32_t g_inventory_slot_count[kFakePhysicalBagCount][16]{};
+uint32_t g_inventory_occupied_slots[kFakePhysicalBagCount][16]{};
 int32_t g_c18_bag_count = 0;
 bool g_fake_registered_source_enabled = false;
 int32_t g_party_hp = 100;
@@ -364,8 +364,8 @@ QolResult stub_cumulate(qol::contracts::QolItemHandle item, int32_t* out_count) 
     }
     const std::size_t index = fake_slot_index(item);
     *out_count = static_cast<int32_t>(index < 176 &&
-                                             g_inventory_slot_count[index / 16][index % 16] != 0
-                                         ? g_inventory_slot_count[index / 16][index % 16]
+                                             g_inventory_occupied_slots[index / 16][index % 16] != 0
+                                         ? g_inventory_occupied_slots[index / 16][index % 16]
                                          : g_original_count);
     return qol::contracts::ok();
 }
@@ -375,8 +375,8 @@ QolResult stub_effective_cumulate(qol::contracts::QolItemHandle item, int32_t* o
     }
     if (!g_override_available) {
         const std::size_t index = fake_slot_index(item);
-        if (index < 176 && g_inventory_slot_count[index / 16][index % 16] != 0) {
-            *out_count = static_cast<int32_t>(g_inventory_slot_count[index / 16][index % 16]);
+        if (index < 176 && g_inventory_occupied_slots[index / 16][index % 16] != 0) {
+            *out_count = static_cast<int32_t>(g_inventory_occupied_slots[index / 16][index % 16]);
             return qol::contracts::ok();
         }
         return qol::contracts::error(kQolErrNotReady, "not ready", 9);
@@ -399,8 +399,8 @@ QolResult stub_item_ref(int32_t bag, int32_t slot, qol::contracts::QolInventoryI
     }
     *out = qol::contracts::QolInventoryItemRef{
         static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kOriginal), bag, slot, 10,
-        static_cast<int32_t>(g_inventory_slot_count[bag][slot] != 0
-                                 ? g_inventory_slot_count[bag][slot]
+        static_cast<int32_t>(g_inventory_occupied_slots[bag][slot] != 0
+                                 ? g_inventory_occupied_slots[bag][slot]
                                  : g_original_count),
         {static_cast<uint32_t>(bag * 16 + slot + 1), 1}};
     return qol::contracts::ok();
@@ -437,13 +437,13 @@ QolResult fake_bag_info(const qol::contracts::QolBagRef* bag,
                bag->bag >= qol::contracts::kQolOriginalBagCount) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
     }
-    int32_t slot_count = 0;
+    int32_t occupied_slots = 0;
     if (physical_bag < kFakePhysicalBagCount) {
         for (int32_t slot = 0; slot < capacity; ++slot) {
-            if (g_inventory_slot_present[physical_bag][slot]) ++slot_count;
+            if (g_inventory_slot_present[physical_bag][slot]) ++occupied_slots;
         }
     }
-    *out = qol::contracts::QolBagInfo{capacity, slot_count};
+    *out = qol::contracts::QolBagInfo{capacity, occupied_slots};
     return qol::contracts::ok();
 }
 
@@ -623,17 +623,17 @@ QolResult fake_state_write(int32_t kind, int32_t arg0, int32_t arg1,
         g_inventory_slot_present[arg0][arg1] = false;
     } else if (op_kind == qol::contracts::QolItemWriteKind::kShopBuy) {
         g_inventory_slot_present[0][3] = true;
-        g_inventory_slot_count[0][3] = g_state_write_count;
+        g_inventory_occupied_slots[0][3] = g_state_write_count;
     } else if (op_kind == qol::contracts::QolItemWriteKind::kMoveItem) {
         g_inventory_slot_present[arg0][arg1] = false;
         const int32_t target_slot = g_state_move_to_slot >= 0 ? g_state_move_to_slot : 2;
         if (g_state_move_to_bag >= 0 && g_state_move_to_bag < 11) {
             g_inventory_slot_present[g_state_move_to_bag][target_slot] = true;
-            g_inventory_slot_count[g_state_move_to_bag][target_slot] = g_state_write_count;
+            g_inventory_occupied_slots[g_state_move_to_bag][target_slot] = g_state_write_count;
         }
     } else {
         g_inventory_slot_present[arg0][arg1] = true;
-        g_inventory_slot_count[arg0][arg1] = g_state_write_count;
+        g_inventory_occupied_slots[arg0][arg1] = g_state_write_count;
     }
     if (op_kind == qol::contracts::QolItemWriteKind::kUseItem &&
         (g_state_write_data.flags & qol::contracts::kQolItemInventoryStateHasGained) != 0) {
@@ -641,7 +641,7 @@ QolResult fake_state_write(int32_t kind, int32_t arg0, int32_t arg1,
             const auto& gained = g_state_write_data.gained[i];
             if (gained.bag >= 0 && gained.bag < 11 && gained.slot >= 0 && gained.slot < 16) {
                 g_inventory_slot_present[gained.bag][gained.slot] = true;
-                g_inventory_slot_count[gained.bag][gained.slot] = gained.count;
+                g_inventory_occupied_slots[gained.bag][gained.slot] = gained.count;
             }
         }
     }
@@ -728,9 +728,9 @@ QolResult fake_move_handle(qol::contracts::QolItemHandle, int32_t count,
         return qol::contracts::error(kQolErrInternal, out->error_message,
                                      out->error_message_len);
     }
-    const uint32_t current = g_inventory_slot_count[ref->bag][slot];
+    const uint32_t current = g_inventory_occupied_slots[ref->bag][slot];
     g_inventory_slot_present[ref->bag][slot] = true;
-    g_inventory_slot_count[ref->bag][slot] = current + static_cast<uint32_t>(count);
+    g_inventory_occupied_slots[ref->bag][slot] = current + static_cast<uint32_t>(count);
     out->gained[0] = {ref->bag, slot, 10, count};
     out->gained_count = 1;
     out->flags |= qol::contracts::kQolItemInventoryStateHasGained;
@@ -761,9 +761,9 @@ QolResult fake_party_write(int32_t kind, int32_t role, int32_t arg1, int32_t arg
             g_inventory_slot_present[arg1][arg2] = false;
         } else if (write_kind == qol::contracts::QolItemWriteKind::kUnequipItem) {
             g_inventory_slot_present[0][4] = true;
-            g_inventory_slot_count[0][4] = 3;
+            g_inventory_occupied_slots[0][4] = 3;
             g_inventory_slot_present[0][5] = true;
-            g_inventory_slot_count[0][5] = 1;
+            g_inventory_occupied_slots[0][5] = 1;
         } else if (write_kind == qol::contracts::QolItemWriteKind::kPutJewel && arg1 >= 0 &&
                    arg1 < 11 && arg2 >= 0 && arg2 < 16) {
             g_inventory_slot_present[arg1][arg2] = false;
@@ -940,8 +940,8 @@ QolResult fake_registered_source_item_at(int32_t bag, int32_t slot,
         return qol::contracts::error(kQolErrNotFound, "empty source slot", 17);
     }
     *out = {static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), bag, slot, 10,
-            static_cast<int32_t>(g_inventory_slot_count[physical_bag][slot] != 0
-                                     ? g_inventory_slot_count[physical_bag][slot]
+            static_cast<int32_t>(g_inventory_occupied_slots[physical_bag][slot] != 0
+                                     ? g_inventory_occupied_slots[physical_bag][slot]
                                      : g_original_count),
             {static_cast<uint32_t>(physical_bag * 16 + slot + 1), 1},
             qol::contracts::kQolBagSpaceFirstRegistered};
@@ -1017,7 +1017,7 @@ QolResult fake_registered_source_import(const qol::contracts::QolBagTransfer* tr
         return qol::contracts::error(kQolErrBlocked, "target bag full", 15);
     }
     g_inventory_slot_present[physical_bag][slot] = true;
-    g_inventory_slot_count[physical_bag][slot] = static_cast<uint32_t>(transfer->count);
+    g_inventory_occupied_slots[physical_bag][slot] = static_cast<uint32_t>(transfer->count);
     out->ref = {qol::contracts::kQolBagSpaceFirstRegistered, preferred_bag};
     out->item = {static_cast<uint32_t>(physical_bag * 16 + slot + 1), 1};
     out->count = transfer->count;
@@ -1035,17 +1035,17 @@ QolResult fake_registered_source_remove(qol::contracts::QolItemHandle item, int3
         !g_inventory_slot_present[physical_bag][slot]) {
         return qol::contracts::error(kQolErrNotFound, "source item not found", 21);
     }
-    const uint32_t current = g_inventory_slot_count[physical_bag][slot] != 0
-                                 ? g_inventory_slot_count[physical_bag][slot]
+    const uint32_t current = g_inventory_occupied_slots[physical_bag][slot] != 0
+                                 ? g_inventory_occupied_slots[physical_bag][slot]
                                  : g_original_count;
     if (static_cast<uint32_t>(count) > current) {
         return qol::contracts::error(kQolErrInvalidArgument, "remove count too large", 22);
     }
     if (static_cast<uint32_t>(count) == current) {
         g_inventory_slot_present[physical_bag][slot] = false;
-        g_inventory_slot_count[physical_bag][slot] = 0;
+        g_inventory_occupied_slots[physical_bag][slot] = 0;
     } else {
-        g_inventory_slot_count[physical_bag][slot] = current - static_cast<uint32_t>(count);
+        g_inventory_occupied_slots[physical_bag][slot] = current - static_cast<uint32_t>(count);
     }
     out->ref = {qol::contracts::kQolBagSpaceFirstRegistered, physical_bag - first_source_bag};
     out->item = item;
@@ -1341,10 +1341,10 @@ bool run_item_write_result(void* opaque, char* out, uint32_t capacity, uint32_t*
 
 void test_write_routes() {
     std::memset(g_inventory_slot_present, 0, sizeof(g_inventory_slot_present));
-    std::memset(g_inventory_slot_count, 0, sizeof(g_inventory_slot_count));
+    std::memset(g_inventory_occupied_slots, 0, sizeof(g_inventory_occupied_slots));
     g_inventory_slot_present[0][0] = true;
     g_original_count = 3;
-    g_inventory_slot_count[0][0] = 3;
+    g_inventory_occupied_slots[0][0] = 3;
     g_party_hp = 100;
     g_party_mp = 50;
     g_party_main_stats[0] = 10;
@@ -1636,9 +1636,9 @@ void test_write_routes() {
     // 注册袋源移入已占用原生槽时通过 move_handle 合并，失败结果仍为稳定 JSON。
     CHECK(set_fake_registered_source(true));
     g_inventory_slot_present[6][2] = true;
-    g_inventory_slot_count[6][2] = 3;
+    g_inventory_occupied_slots[6][2] = 3;
     g_inventory_slot_present[0][4] = true;
-    g_inventory_slot_count[0][4] = 2;
+    g_inventory_occupied_slots[0][4] = 2;
     g_bag_source_export_calls = 0;
     g_bag_source_export_fail = false;
     g_state_move_handle_calls = 0;
@@ -1658,7 +1658,7 @@ void test_write_routes() {
     CHECK(std::string(result, result_size) == merge_result_expected);
     CHECK(g_bag_source_export_calls == 1);
     CHECK(g_state_move_handle_calls == 1 && g_state_move_handle_count == 1 &&
-          g_inventory_slot_count[0][4] == 3);
+          g_inventory_occupied_slots[0][4] == 3);
     g_state_move_handle_fail = true;
     CHECK(dispatch_post("/api/item/inventory/move_item",
                         "{\"space\":2,\"bag\":0,\"slot\":2,\"count\":1,"
@@ -1672,12 +1672,12 @@ void test_write_routes() {
           result_size == failed_transfer.size() &&
           std::string(result, result_size).find('\0') == std::string::npos &&
           g_bag_source_export_calls == 2 && g_state_move_handle_calls == 2 &&
-          g_inventory_slot_count[6][2] == 2 && g_inventory_slot_count[0][4] == 3);
+          g_inventory_occupied_slots[6][2] == 2 && g_inventory_occupied_slots[0][4] == 3);
     g_state_move_handle_fail = false;
     g_inventory_slot_present[6][2] = false;
-    g_inventory_slot_count[6][2] = 0;
+    g_inventory_occupied_slots[6][2] = 0;
     g_inventory_slot_present[0][4] = false;
-    g_inventory_slot_count[0][4] = 0;
+    g_inventory_occupied_slots[0][4] = 0;
 
     // source 失活时，旧 flat bag 请求 fail-closed，不再进入 native write port。
     CHECK(set_fake_registered_source(false));
@@ -2046,7 +2046,7 @@ void test_write_routes() {
           "{\"ok\":false,\"error\":\"category required\"}");
     CHECK(status == 400 && g_write_calls == write_calls_before_invalid);
     std::memset(g_inventory_slot_present, 0, sizeof(g_inventory_slot_present));
-    std::memset(g_inventory_slot_count, 0, sizeof(g_inventory_slot_count));
+    std::memset(g_inventory_occupied_slots, 0, sizeof(g_inventory_occupied_slots));
     g_inventory_slot_present[0][0] = true;
     g_original_count = 3;
     g_party_equipment_slot = -1;
@@ -2244,7 +2244,7 @@ void test_lifecycle_and_responses() {
     const qol::contracts::HttpPathParam bag_slot_params[] = {{"bag", 3, "0", 1},
                                                              {"slot", 4, "0", 1}};
     CHECK(dispatch_template("/api/item/inventory/bag/0/info", &bag_param, 1, &status) ==
-          "{\"space\":0,\"bag\":0,\"capacity\":16,\"slot_count\":1}");
+          "{\"space\":0,\"bag\":0,\"capacity\":16,\"occupied_slots\":1}");
     CHECK(status == 200);
     CHECK(dispatch_template("/api/item/inventory/bag/0/0", bag_slot_params, 2, &status) ==
           expected_inventory_item(3, 0, 0, 0));
@@ -2255,7 +2255,7 @@ void test_lifecycle_and_responses() {
     CHECK(status == 200);
     const qol::contracts::HttpPathParam missing_bag{"bag", 3, "5", 1};
     CHECK(dispatch_template("/api/item/inventory/bag/5/info", &missing_bag, 1, &status) ==
-          "{\"space\":0,\"bag\":5,\"capacity\":16,\"slot_count\":0}");
+          "{\"space\":0,\"bag\":5,\"capacity\":16,\"occupied_slots\":0}");
     CHECK(status == 200);
     const qol::contracts::HttpPathParam oversized_bag{"bag", 3, "99999999999999999999", 20};
     CHECK(dispatch_template("/api/item/inventory/bag/{bag}/info", &oversized_bag, 1,
@@ -2551,12 +2551,12 @@ static QolResult golden_source_info(int32_t bag, qol::contracts::QolBagInfo* out
         !golden_eb_capacity(bag + 6, &capacity)) {
         return qol::contracts::error(kQolErrInvalidArgument, "bad source bag", 14);
     }
-    int32_t slot_count = 0;
+    int32_t occupied_slots = 0;
     for (int32_t slot = 0; slot < capacity; ++slot) {
         qol::contracts::QolItemHandle item{};
-        if (golden_eb_item_at(bag + 6, slot, &item) != 0) ++slot_count;
+        if (golden_eb_item_at(bag + 6, slot, &item) != 0) ++occupied_slots;
     }
-    *out = {capacity, slot_count};
+    *out = {capacity, occupied_slots};
     return qol::contracts::ok();
 }
 
@@ -2827,11 +2827,11 @@ QolResult golden_bag_info(const qol::contracts::QolBagRef* bag,
         return qol::contracts::error(kQolErrInvalidArgument, "bad bag", 8);
     }
     if (bag->space_id == qol::contracts::kQolBagSpaceOriginal && bag->bag >= 0 && bag->bag < 6) {
-        int32_t slot_count = 0;
+        int32_t occupied_slots = 0;
         for (int32_t slot = 0; slot < 16; ++slot) {
-            if (golden_bag_item(bag->bag, slot) != nullptr) ++slot_count;
+            if (golden_bag_item(bag->bag, slot) != nullptr) ++occupied_slots;
         }
-        *out = qol::contracts::QolBagInfo{16, slot_count};
+        *out = qol::contracts::QolBagInfo{16, occupied_slots};
         return qol::contracts::ok();
     }
     return qol::contracts::error(kQolErrNotFound, "bag not found", 14);
@@ -2945,7 +2945,7 @@ std::string frozen_inventory_json() {
                 ++filled;
             }
         }
-        s += "],\"capacity\":16,\"slot_count\":" + std::to_string(filled) + "}";
+        s += "],\"capacity\":16,\"occupied_slots\":" + std::to_string(filled) + "}";
     }
     s += "]}";
     return s;
@@ -3054,7 +3054,7 @@ void test_inventory_owner_vs_legacy_golden() {
         CHECK(items.find("\"slot\":15") != std::string::npos);
         const qol::contracts::HttpPathParam task_bag{"bag", 3, "5", 1};
         CHECK(dispatch_template("/api/item/inventory/bag/5/info", &task_bag, 1, &status) ==
-              "{\"space\":0,\"bag\":5,\"capacity\":16,\"slot_count\":1}");
+              "{\"space\":0,\"bag\":5,\"capacity\":16,\"occupied_slots\":1}");
         const qol::contracts::HttpPathParam task_slot[] = {{"bag", 3, "5", 1},
                                                             {"slot", 4, "15", 2}};
         const std::string task_item =

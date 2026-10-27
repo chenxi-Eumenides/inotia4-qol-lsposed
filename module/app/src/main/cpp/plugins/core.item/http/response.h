@@ -28,7 +28,7 @@ bool enrich_snapshot_item(int32_t space, int32_t bag, const bags::SlotRecord& it
 bool enrich_items_list(const char* json, uint32_t size, const contracts::QolItemPort* port,
                        std::string* out);
 
-// {"bag":b,"capacity":c,"slot_count":n}；bag 不存在时 *found=false。
+// {"bag":b,"capacity":c,"occupied_slots":n}；bag 不存在时 *found=false。
 bool enrich_bag_info(const char* json, uint32_t size, int32_t bag, std::string* out, bool* found);
 
 // 指定袋内指定槽的富化物品；*bag_found=false 表示袋不存在（调用方回 404），

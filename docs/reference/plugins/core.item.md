@@ -63,7 +63,7 @@
 | `version` | `QolVersion` | major 为 1，minor 至少为 1。 |
 | `space_id` | `int32_t` | 必须 `>=2`，且不能与已注册来源冲突。 |
 | `count` | `int32_t (*)()` | 必需；返回本空间当前袋数，不能为负。 |
-| `info` | `QolResult (*)(bag, QolBagInfo*)` | 必需；返回袋容量 `capacity` 与占用槽数 `slot_count`。 |
+| `info` | `QolResult (*)(bag, QolBagInfo*)` | 必需；返回袋容量 `capacity` 与占用槽数 `occupied_slots`。 |
 | `item_at` | `QolResult (*)(bag, slot, QolInventoryItemRef*)` | 必需；读取指定槽，空槽返回 `kQolErrNotFound`。 |
 | `for_each_item` | `QolResult (*)(QolInventoryBagSlotFn, void*)` | 必需；枚举占用物品。 |
 | `export_item` | `QolResult (*)(handle, count, QolBagTransfer*)` | 必需；只读导出供转移的 payload。 |
@@ -85,7 +85,7 @@
 | 回调 | 成功语义 | 失败语义 |
 |---|---|---|
 | `count()` | 返回非负袋数。 | 来源未就绪时返回 0，或由上层 readiness 报告不可用；不得伪造袋数。 |
-| `info` | `capacity` 非负；`slot_count` 为占用槽数；容量 0 合法。 | 越界/无效参数为 `kQolErrInvalidArgument`；来源不可用为 `kQolErrNotReady`。 |
+| `info` | `capacity` 非负；`occupied_slots` 为占用槽数；容量 0 合法。 | 越界/无效参数为 `kQolErrInvalidArgument`；来源不可用为 `kQolErrNotReady`。 |
 | `item_at` | 填入空间、袋、槽、有效句柄及物品事实。 | 空槽/不存在为 `kQolErrNotFound`；非法 ref 为 `kQolErrInvalidArgument`。 |
 | `for_each_item` | 对占用物品调用回调；回调返回非 0 可停止枚举。 | 单项物化失败不得伪装成成功物品。 |
 | `export_item` | 不修改来源；payload 由来源定义且保持不透明，`count` 是请求转移数量。 | 过期/非本源句柄为 `kQolErrNotFound`；数量非法或超过堆量为 `kQolErrInvalidArgument`；不可用为 `kQolErrNotReady`。 |

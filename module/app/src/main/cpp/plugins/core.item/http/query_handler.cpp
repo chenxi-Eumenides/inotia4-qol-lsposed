@@ -244,7 +244,7 @@ QolResult inventory_page(const contracts::HttpReq& request, contracts::HttpRes* 
             body += "{\"space\":" + std::to_string(entry.space_id) +
                     ",\"bag\":" + std::to_string(entry.bag) +
                     ",\"capacity\":" + std::to_string(entry.capacity) +
-                    ",\"slot_count\":" + std::to_string(entry.slot_count) + "}";
+                    ",\"occupied_slots\":" + std::to_string(entry.occupied_slots) + "}";
         }
         body += "],\"items\":[";
     } else {
@@ -291,7 +291,7 @@ QolResult bag_info(const contracts::HttpReq& request, contracts::HttpRes* respon
     const std::string body = "{\"space\":" + std::to_string(selected->space_id) +
                              ",\"bag\":" + std::to_string(selected->bag) +
                              ",\"capacity\":" + std::to_string(selected->capacity) +
-                             ",\"slot_count\":" + std::to_string(selected->slot_count) +
+                             ",\"occupied_slots\":" + std::to_string(selected->occupied_slots) +
                              "}";
     return response_body(response, body.data(), static_cast<uint32_t>(body.size()));
 }

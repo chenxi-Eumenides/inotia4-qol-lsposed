@@ -701,7 +701,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | GET | `/api/item/inventory` | 背包复合（6 袋×16 槽） | `<Inventory>` |
 | GET | `/api/item/inventory/money` | 金币 | `{"money":72503}` |
 | GET | `/api/item/inventory/items` | 全部物品展平 | `{"items":[...]}` |
-| GET | `/api/item/inventory/bag/{bag}/info` | 袋信息 | `{"bag":0,"capacity":16,"slot_count":13}` |
+| GET | `/api/item/inventory/bag/{bag}/info` | 袋信息 | `{"bag":0,"capacity":16,"occupied_slots":13}` |
 | GET | `/api/item/inventory/bag/{bag}/{slot}` | 袋内指定槽 | `<Item>` 或 `null` |
 
 > ⚠️ `bag/{bag}/{slot}` 按**实际格号**（物品的 `slot` 字段）匹配，不是数组下标。
