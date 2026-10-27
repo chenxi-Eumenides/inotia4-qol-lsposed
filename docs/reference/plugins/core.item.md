@@ -38,12 +38,12 @@
 |---|---:|---|
 | `item.facts` | 3.6 | 物品类别、库存 view/count/编码、装备/宝石/禁售和报价等事实。 |
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
-| `inventory.bag_source` | 1.1 | 注册/注销外部袋源，并提供跨空间转移所需的袋源原语。 |
+| `inventory.bag_source` | 1.2 | 注册/注销外部袋源，并提供跨空间转移所需的袋源原语。 |
 | `inventory_refresh` | 1.2 | 原版库存区域刷新；`update_shortcut_category(category)` 按类别重算快捷栏数量（含注册袋源物品）。 |
 | `inventory.action` | 3.0 | 移动、使用、丢弃、出售、装备、卸下和镶嵌。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
 | `move_merge.control` | 1.0 | 报告拖拽合并是否可用。 |
-| `inventory.projection` | 1.0 | 注册/注销投影回调；投影显示和数据仍归注册方。 |
+| `inventory.projection` | 1.3 | 注册/注销投影回调；投影显示和数据仍归注册方。尾部回调支持原版袋卸下、佣兵徽章、背包装备与角色装备。 |
 
 ## Feature toggle
 
@@ -52,7 +52,7 @@
 | `core.item.provider` | 默认开启的隐藏开关；该开关不单独改变物品领域服务行为，服务随 `core.item` 插件启停。 |
 | `move_merge.drag_merge` | 显示名称「拖动合并」、描述「允许合并同种可堆叠物品」，默认开启。关闭时不执行拖动自动合并；其他库存动作不由此开关关闭。 |
 
-## `QolBagSource` v1.1 公共契约
+## `QolBagSource` v1.2 公共契约
 
 `inventory.bag_source` 由 `core.item` 提供。每个来源占用独立 `space_id>=2`；袋索引从 0 开始。来源提供自己的数据和写入原语，`core.item` 不接管其 sidecar 数据。
 
