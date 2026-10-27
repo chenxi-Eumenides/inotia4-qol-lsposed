@@ -254,13 +254,15 @@ int32_t map_blocking_query(int32_t x, int32_t y, MapBlockingQueryFn original) {
     // 8px 对齐时原函数采样完整，直接透传。
     if ((x & 7) == 0 && (y & 7) == 0) return original(x, y);
 
-    // 非对齐位置：实际 16px 碰撞盒 [x-8,x+8) x [y-8,y+8) 覆盖的最多 4 个瓦片。
-    // 原 MAP_IsBlockingByPixel 的 1/2/4 点采样假设至少一个轴 8px 对齐，非对齐时
-    // 会漏掉一侧瓦片，因此这里直接按瓦片完整检查。
-    const int32_t x0 = (x - 8) >> 4;
-    const int32_t x1 = (x + 7) >> 4;
-    const int32_t y0 = (y - 8) >> 4;
-    const int32_t y1 = (y + 7) >> 4;
+    // 非对齐位置按“角色中心所在瓦片”判断；只有正好落在 16px 瓦片边界时
+    // 才额外检查相邻瓦片。这样不会把角色当成 16px 方块，避免离墙还有距离
+    // 就被挡住；同时仍不能跨进阻挡瓦片。
+    int32_t x0 = x >> 4;
+    int32_t x1 = x0;
+    if ((x & 15) == 0) --x0;
+    int32_t y0 = y >> 4;
+    int32_t y1 = y0;
+    if ((y & 15) == 0) --y0;
     for (int32_t ty = y0; ty <= y1; ++ty) {
         for (int32_t tx = x0; tx <= x1; ++tx) {
             if (tile_blocking(tx, ty) != 0) return 1;
