@@ -115,6 +115,24 @@ QolResult read_item_type(contracts::QolItemHandle handle, contracts::QolItemType
         *out = contracts::QolItemType::kItemBox;
         return contracts::ok();
     }
+    if (fn_is_dice != nullptr && fn_is_dice(category) != 0) {
+        *out = contracts::QolItemType::kDice;
+        return contracts::ok();
+    }
+    // CHAR_UseItemEx has explicit revive-scroll branches for categories 26/27.
+    if (category == 26 || category == 27) {
+        *out = contracts::QolItemType::kReviveScroll;
+        return contracts::ok();
+    }
+    // CHAR_UseItemEx has an explicit lamp branch for category 0x3e (62).
+    if (category == 62) {
+        *out = contracts::QolItemType::kLamp;
+        return contracts::ok();
+    }
+    if (fn_is_use_after_confirm != nullptr && fn_is_use_after_confirm(category) != 0) {
+        *out = contracts::QolItemType::kUseAfterConfirm;
+        return contracts::ok();
+    }
     const int use_type = item_use_type(category);
     // ITEMDATABASE categories 706..717 are the twelve tiered synthesis sets;
     // their ITEMCLASSBASE use-effect id is 0x21. Require both to avoid a
@@ -123,11 +141,15 @@ QolResult read_item_type(contracts::QolItemHandle handle, contracts::QolItemType
         *out = contracts::QolItemType::kSynthSet;
         return contracts::ok();
     }
+    if ((fn_is_use != nullptr && fn_is_use(category) != 0) ||
+        use_type == 0x16 || use_type == 0x17) {
+        *out = contracts::QolItemType::kPotion;
+        return contracts::ok();
+    }
     // ITEMCLASSBASE +2 is the game's use-effect type. It covers special
-    // consumables such as the lamp (0x21) that ITEMDATABASE_IsUse does not
-    // report. Materials have type 0 and remain kOther.
-    if (use_type > 0 ||
-        (fn_is_use != nullptr && fn_is_use(category) != 0)) {
+    // consumables that ITEMDATABASE_IsUse does not report. Materials have type
+    // 0 and remain kOther.
+    if (use_type > 0) {
         *out = contracts::QolItemType::kConsumable;
         return contracts::ok();
     }

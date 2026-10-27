@@ -49,9 +49,18 @@
 
 `ItemFactsApi::item_type(handle, out)` 是插件判断物品类型的唯一入口。类型枚举：
 
-`kUnknown / kConsumable / kEquipment / kBackpack / kJewel / kEnchantScroll / kMercenarySeal / kSkillBook / kItemBox / kSynthSet / kOther`
+`kUnknown / kConsumable / kEquipment / kBackpack / kJewel / kEnchantScroll / kMercenarySeal / kSkillBook / kItemBox / kSynthSet / kPotion / kDice / kReviveScroll / kLamp / kUseAfterConfirm / kOther`
 
 类型由 core.item 内部统一识别：装备、宝石、强化卷轴、佣兵徽章、背包、技能书、开箱、合成套装和普通消耗品依次判定；插件不得再用 category、`ITEM_IsRealEquip` 或 `ITEMSYSTEM_IsJewel` 自行推导类型。
+
+使用路径：
+
+- `kPotion`、`kReviveScroll`、`kLamp`、`kSkillBook`、`kSynthSet`、`kConsumable` 共用 `CHAR_UseItemEx`，游戏内部按类别/使用效果分流。
+- `kDice`：`STATUSDICE_Roll` + pending 状态。
+- `kUseAfterConfirm`：先确认 UI，再 `CHAR_UseItemEx`。
+- `kMercenarySeal`：`MERCENARYSYSTEM_MakeMercenary`。
+- `kItemBox`：`ITEMSYSTEM_OpenItemBox` 或 `ITEMSYSTEM_ProcessUnpack`。
+- `kEquipment`、`kBackpack`、`kJewel`、`kEnchantScroll`：装备/应用路径，不走 use。
 
 ## Feature toggle
 

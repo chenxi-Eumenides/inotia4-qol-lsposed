@@ -243,6 +243,7 @@ extern IsDiceFn fn_is_dice;
 extern IsSealedFn fn_is_sealed;
 extern IsItemBoxFn fn_is_item_box;
 extern IsPackItemFn fn_is_pack_item;
+extern IsUseAfterConfirmFn fn_is_use_after_confirm;
 extern MakeItemFn fn_make_item;
 extern CreateItemFn fn_create_item;
 // UIEquip 背包面板控件（move-merge v0.6.8）

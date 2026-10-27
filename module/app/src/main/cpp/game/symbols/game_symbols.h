@@ -742,6 +742,7 @@ constexpr uintptr_t F_STATUSDICE_ROLL_VMA = 0x138338; // int (int32_t charIdx, i
 constexpr uintptr_t F_IS_SEALED_VMA = 0x10be50;       // int (int32_t category) 是否可解封（类别 ∈[0x3a6,0x3ab]，与 ReleaseSealed 内联判定一致）
 constexpr uintptr_t F_IS_ITEMBOX_VMA = 0x10cda0;     // int (int32_t category) 是否开箱类（类别 ∈[0x3ef,0x3f1]，UIEquip_SetDescMenu 开箱按钮判定）
 constexpr uintptr_t F_IS_PACK_ITEM_VMA = 0x10cdb0;  // int (int32_t category) ITEMSYSTEM_IsPackItem，礼盒/包裹类
+constexpr uintptr_t F_IS_USE_AFTER_CONFIRM_VMA = 0x10cca4; // int (int32_t category) ITEMSYSTEM_IsUseAfterConfirm，需确认后使用的物品
 constexpr uintptr_t F_MAKE_ITEM_VMA = 0x10c6c8;      // void* (int32_t category, int32_t lookup_key, int32_t flag) ITEMSYSTEM_MakeItem 创建物品对象；arg2 是静态表查找/品质参数非数量（产物量=0x10ca3c CAL 公式，域 ≤99）
 constexpr uintptr_t F_CREATE_ITEM_VMA = 0x10be9c;    // void* (int32_t category, int32_t, int32_t, int32_t) ITEMSYSTEM_CreateItem 创建物品对象（无 search_tbl 校验，OP 直调可靠）
 // ---- 堆叠上限 patch 点所在函数 VMA（stack-limit-999，v0.5.18；符号名见 libgame-symbols.txt）----
@@ -1229,6 +1230,7 @@ using IsDiceFn = int (*)(int32_t);
 using IsSealedFn = int (*)(int32_t);
 using IsItemBoxFn = int (*)(int32_t);
 using IsPackItemFn = int (*)(int32_t);
+using IsUseAfterConfirmFn = int (*)(int32_t);
 using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
 using CreateItemFn = void* (*)(int32_t, int32_t, int32_t, int32_t);
 using ItemCreatePerfectItemFn = void* (*)(int32_t category);  // ITEMSYSTEM_CreatePerfectItem：按类别分派（宝石→MakeJewel 掷数值+属性、装备类→掷品质）；失败返回 nullptr

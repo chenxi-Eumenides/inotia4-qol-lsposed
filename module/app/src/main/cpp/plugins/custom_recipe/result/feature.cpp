@@ -159,6 +159,11 @@ bool valid_item_type(qol::contracts::QolItemType type) {
     switch (type) {
         case QolItemType::kUnknown:
         case QolItemType::kConsumable:
+        case QolItemType::kPotion:
+        case QolItemType::kDice:
+        case QolItemType::kReviveScroll:
+        case QolItemType::kLamp:
+        case QolItemType::kUseAfterConfirm:
         case QolItemType::kEquipment:
         case QolItemType::kBackpack:
         case QolItemType::kJewel:

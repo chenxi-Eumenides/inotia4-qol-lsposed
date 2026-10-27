@@ -468,6 +468,7 @@ bool bridge_init() {
     fn_is_sealed = reinterpret_cast<IsSealedFn>(g_base + fn_resolve("F_IS_SEALED_VMA", F_IS_SEALED_VMA));
     fn_is_item_box = reinterpret_cast<IsItemBoxFn>(g_base + fn_resolve("F_IS_ITEMBOX_VMA", F_IS_ITEMBOX_VMA));
     fn_is_pack_item = reinterpret_cast<IsPackItemFn>(g_base + fn_resolve("F_IS_PACK_ITEM_VMA", F_IS_PACK_ITEM_VMA));
+    fn_is_use_after_confirm = reinterpret_cast<IsUseAfterConfirmFn>(g_base + fn_resolve("F_IS_USE_AFTER_CONFIRM_VMA", F_IS_USE_AFTER_CONFIRM_VMA));
     fn_make_item = reinterpret_cast<MakeItemFn>(g_base + fn_resolve("F_MAKE_ITEM_VMA", F_MAKE_ITEM_VMA));
     fn_create_item = reinterpret_cast<CreateItemFn>(g_base + fn_resolve("F_CREATE_ITEM_VMA", F_CREATE_ITEM_VMA));
     fn_control_object_get_data = reinterpret_cast<ControlObjectGetDataFn>(g_base + fn_resolve("F_CONTROL_OBJECT_GET_DATA_VMA", F_CONTROL_OBJECT_GET_DATA_VMA));
