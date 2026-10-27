@@ -141,8 +141,7 @@ QolResult apply_fixed_option_range(int32_t category, int32_t option_id,
 
 struct ItemFactsContext {
     int32_t category = 0;
-    int32_t is_jewel = 0;
-    int32_t is_real_equip = 0;
+    contracts::QolItemType item_type = contracts::QolItemType::kUnknown;
     contracts::QolItemInventoryView view{};
 };
 
@@ -150,16 +149,13 @@ QolResult read_item_context(contracts::QolItemHandle item, ItemFactsContext* out
     if (out == nullptr) return invalid_argument();
     *out = {};
     if (g_item_facts == nullptr || g_item_facts->category == nullptr ||
-        g_item_facts->is_jewel_category == nullptr || g_item_facts->is_real_equip == nullptr ||
-        g_item_facts->view == nullptr) {
+        g_item_facts->item_type == nullptr || g_item_facts->view == nullptr) {
         return not_ready();
     }
 
     QolResult result = g_item_facts->category(item, &out->category);
     if (!contracts::succeeded(result)) return result;
-    result = g_item_facts->is_jewel_category(out->category, &out->is_jewel);
-    if (!contracts::succeeded(result)) return result;
-    result = g_item_facts->is_real_equip(item, &out->is_real_equip);
+    result = g_item_facts->item_type(item, &out->item_type);
     if (!contracts::succeeded(result)) return result;
     return g_item_facts->view(item, &out->view);
 }
@@ -278,7 +274,8 @@ QolResult api_query_item(contracts::QolItemHandle item,
     ItemFactsContext context{};
     result = read_item_context(item, &context);
     if (!contracts::succeeded(result)) return result;
-    if (context.is_jewel == 0 && context.is_real_equip == 0) {
+    if (context.item_type != contracts::QolItemType::kJewel &&
+        context.item_type != contracts::QolItemType::kEquipment) {
         return error_result(kQolErrUnsupported, "item is not an equipment item");
     }
     if ((context.view.fields & contracts::kQolItemInventoryHasOptionCompleteness) == 0) {
@@ -287,7 +284,7 @@ QolResult api_query_item(contracts::QolItemHandle item,
 
     const bool complete =
         (context.view.fields & contracts::kQolItemInventoryOptionsTruncated) == 0;
-    if (context.is_jewel != 0) {
+    if (context.item_type == contracts::QolItemType::kJewel) {
         constexpr uint32_t kJewelFields = contracts::kQolItemInventoryHasJewelValue |
                                           contracts::kQolItemInventoryHasJewelAttributeType;
         if ((context.view.fields & kJewelFields) != kJewelFields) {
@@ -361,7 +358,7 @@ QolResult api_query_option_context(contracts::QolItemHandle item, int32_t option
     ItemFactsContext context{};
     result = read_item_context(item, &context);
     if (!contracts::succeeded(result)) return set_context_error(out, result);
-    if (context.is_jewel != 0) {
+    if (context.item_type == contracts::QolItemType::kJewel) {
         constexpr uint32_t kJewelFields = contracts::kQolItemInventoryHasJewelValue |
                                           contracts::kQolItemInventoryHasJewelAttributeType;
         if ((context.view.fields & kJewelFields) != kJewelFields) {
@@ -389,7 +386,7 @@ QolResult api_query_option_context(contracts::QolItemHandle item, int32_t option
         out->status = kQolOk;
         return contracts::ok();
     }
-    if (context.is_real_equip == 0) {
+    if (context.item_type != contracts::QolItemType::kEquipment) {
         return set_context_error(out,
                                  error_result(kQolErrUnsupported, "item is not an equipment item"));
     }

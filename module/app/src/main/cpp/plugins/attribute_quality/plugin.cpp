@@ -28,8 +28,7 @@ bool game_host_api_valid(const contracts::QolGameHost* game) {
 
 bool item_facts_api_valid(const contracts::ItemFactsApi* facts) {
     return contracts::item_facts_api_size_valid(facts) && facts->category != nullptr &&
-           facts->is_jewel_category != nullptr && facts->is_real_equip != nullptr &&
-           facts->view != nullptr;
+           facts->item_type != nullptr && facts->view != nullptr;
 }
 
 // MATH_GetRandom 是范围探测的唯一捕获窗口；UIDesc_* 属 display 消费者。

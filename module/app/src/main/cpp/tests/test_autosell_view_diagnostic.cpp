@@ -14,6 +14,7 @@ bool g_real_equip = false;
 bool g_real_equip_available = true;
 bool g_is_jewel = false;
 bool g_jewel_predicate_available = true;
+int32_t g_current_category = 0;
 bool g_backpack_predicate_available = true;
 bool g_dice_predicate_available = true;
 bool g_quality_capability_available = true;
@@ -57,9 +58,25 @@ const qol::contracts::AttributeQualityApi* quality_provider() {
 
 namespace qol::features::autosell::read_only {
 
-bool item_is_real_equip(contracts::QolItemHandle, int32_t* out) {
-    if (out == nullptr || !g_real_equip_available) return false;
-    *out = g_real_equip ? 1 : 0;
+bool item_type(contracts::QolItemHandle, contracts::QolItemType* out) {
+    if (out == nullptr) return false;
+    const bool jewel_category = g_current_category >= 28 && g_current_category <= 32;
+    if (g_is_jewel || (jewel_category && !g_jewel_predicate_available)) {
+        *out = contracts::QolItemType::kJewel;
+        return true;
+    }
+    if (g_real_equip) {
+        if (!g_real_equip_available) return false;
+        *out = contracts::QolItemType::kEquipment;
+        return true;
+    }
+    const bool category_classifies_without_equip =
+        (g_current_category >= 1 && g_current_category <= 4) ||
+        (g_current_category >= 52 && g_current_category <= 56);
+    if (!g_real_equip_available && !category_classifies_without_equip && !jewel_category) {
+        return false;
+    }
+    *out = contracts::QolItemType::kOther;
     return true;
 }
 
@@ -67,12 +84,6 @@ bool item_inventory_view(contracts::QolItemHandle,
                          contracts::QolItemInventoryView* out) {
     if (!g_facts_available || out == nullptr) return false;
     *out = g_facts;
-    return true;
-}
-
-bool item_is_jewel(int32_t, int32_t* out) {
-    if (out == nullptr || !g_jewel_predicate_available) return false;
-    *out = g_is_jewel ? 1 : 0;
     return true;
 }
 
@@ -127,6 +138,7 @@ void prepare_jewel_quality() {
 }
 
 AutosellViewBuildReason build_jewel_view(autosell::ItemView* out) {
+    g_current_category = 28;
     const qol::features::autosell::read_only::InventoryItemRef ref{
         static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, 28, 1,
         {11, 19}};
@@ -134,7 +146,8 @@ AutosellViewBuildReason build_jewel_view(autosell::ItemView* out) {
 }
 
 AutosellViewBuildReason build_category_view(int category, autosell::ItemView* out,
-                                            AutosellViewDiagnostics* diagnostics = nullptr) {
+                                             AutosellViewDiagnostics* diagnostics = nullptr) {
+    g_current_category = category;
     const qol::features::autosell::read_only::InventoryItemRef ref{
         static_cast<int32_t>(qol::contracts::QolInventoryItemKind::kProvider), 6, 2, category, 1,
         {11, 19}};

@@ -91,11 +91,9 @@ VirtualBagEquipControlEventResult virtual_bag_handle_equip_control_event(
         target_slot_index = control != nullptr ? extension_bag_ui_item_slot(control) : -1;
         const bool extension_source =
             source_item != nullptr && module_slot_of_item_locked(source_item, &source_bag, &source_slot);
-        const int source_category = extension_source
-            ? ::qol::extension_bag::access::bag().items[source_bag][source_slot].category : 0;
         const bool source_is_apply_material = extension_source &&
-            (read_item_is_jewel(source_category) ||
-             read_item_is_enchant_scroll(source_category));
+            (read_item_is_jewel(source_item) ||
+             read_item_is_enchant_scroll(source_item));
         // H-15 装备槽事件适配（R-50）：目标必须是装备类（item_is_equip 判定；
         // 类别数据不可用时 item_is_equip 为假，按非装备 fail-closed 直通原版
         // backup，不得 Blocked），且落点是装备槽控件（slot index >= 16）。
@@ -276,8 +274,8 @@ bool apply_extension_material_to_slot_locked(
     }
 
     const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
-    const bool source_is_jewel = read_item_is_jewel(source_category);
-    const bool source_is_scroll = read_item_is_enchant_scroll(source_category);
+    const bool source_is_jewel = read_item_is_jewel(material);
+    const bool source_is_scroll = read_item_is_enchant_scroll(material);
     if (!source_is_jewel && !source_is_scroll) {
         VIRTBAG_LOG("apply reject reason=material kind=%d jewel=%d scroll=%d",
                     source_category, source_is_jewel ? 1 : 0, source_is_scroll ? 1 : 0);
@@ -492,9 +490,8 @@ VirtualBagProjectionDropResult virtual_bag_projection_drop_to_slot(void* dst_con
         }
     }
     const int dst_bag = qol::extension_bag::ui_state().objects.module_view_index;
-    const int source_category = ::qol::extension_bag::access::bag().items[src_bag][src_slot].category;
     const bool source_is_apply_material =
-        read_item_is_jewel(source_category) || read_item_is_enchant_scroll(source_category);
+        read_item_is_jewel(item) || read_item_is_enchant_scroll(item);
     void* dst_data = extension_bag_ui_data(dst_control);
     void* target_item = dst_data != nullptr ? *reinterpret_cast<void**>(dst_data) : nullptr;
     // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +

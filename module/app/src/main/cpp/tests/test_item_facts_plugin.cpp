@@ -136,10 +136,10 @@ static_assert(sizeof(qol::contracts::QolInventoryItemRef) ==
               "inventory reference must not carry a native object pointer");
 
 int main() {
-    CHECK(qol::contracts::kItemFactsVersion.major == 3 &&
-          qol::contracts::kItemFactsVersion.minor == 6);
-    CHECK(qol::contracts::kQolPortItemVersion.major == 3 &&
-          qol::contracts::kQolPortItemVersion.minor == 8);
+    CHECK(qol::contracts::kItemFactsVersion.major == 4 &&
+          qol::contracts::kItemFactsVersion.minor == 0);
+    CHECK(qol::contracts::kQolPortItemVersion.major == 4 &&
+          qol::contracts::kQolPortItemVersion.minor == 0);
     CHECK(qol::contracts::kQolPortCharacterExtrasVersion.major == 1 &&
           qol::contracts::kQolPortCharacterExtrasVersion.minor == 2);
     qol::contracts::ItemFactsApi old_size_api{};
@@ -171,9 +171,9 @@ int main() {
     CHECK(!qol::contracts::satisfies(
         {2, 0}, {qol::contracts::kQolPortItemVersion.major,
                  qol::contracts::kQolPortItemVersion.minor}));
-    CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {3, 0}));
-    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {3, 0}));
-    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {3, 2}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kItemFactsVersion, {4, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {4, 0}));
+    CHECK(qol::contracts::satisfies(qol::contracts::kQolPortItemVersion, {4, 0}));
     const auto& descriptor = qol::features::core_item::plugin_descriptor();
     CHECK(std::strcmp(descriptor.id, "core.item") == 0);
     CHECK(std::strcmp(descriptor.version, "0.1.0") == 0);
@@ -252,7 +252,7 @@ int main() {
     }
     CHECK(descriptor.provides_count == 8 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
-    CHECK(descriptor.provides[0].version.major == 3 && descriptor.provides[0].version.minor == 6);
+    CHECK(descriptor.provides[0].version.major == 4 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
     // T2h-B2：owner raw inventory 投影 capability（复用 serialize_inventory_json）。
     CHECK(std::strcmp(descriptor.provides[1].id, qol::contracts::kItemStateCapabilityId) == 0);
@@ -287,7 +287,7 @@ int main() {
     CHECK(descriptor.provides[6].iface != nullptr);
     CHECK(descriptor.port_count == 6 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    CHECK(descriptor.ports[0].range.major == 3 && descriptor.ports[0].range.min_minor == 8);
+    CHECK(descriptor.ports[0].range.major == 4 && descriptor.ports[0].range.min_minor == 0);
     CHECK(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
     CHECK(descriptor.ports[2].id == qol::contracts::QolPortId::QOL_PORT_ITEM_DICE_WRITE);
     CHECK(descriptor.ports[3].id ==
@@ -310,8 +310,7 @@ int main() {
 
     const auto* api = static_cast<const qol::contracts::ItemFactsApi*>(descriptor.provides[0].iface);
     CHECK(api->category != nullptr);
-    CHECK(api->is_real_equip != nullptr);
-    CHECK(api->is_jewel_category != nullptr);
+    CHECK(api->item_type != nullptr);
     CHECK(api->is_no_sell != nullptr);
     CHECK(api->sell_price != nullptr);
     CHECK(api->cumulate_count != nullptr);

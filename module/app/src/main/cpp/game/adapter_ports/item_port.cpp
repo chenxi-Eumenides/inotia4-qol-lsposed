@@ -68,23 +68,67 @@ QolResult read_category(contracts::QolItemHandle handle, int32_t* out) {
     return contracts::ok();
 }
 
-QolResult read_real_equip(contracts::QolItemHandle handle, int32_t* out) {
+QolResult read_item_type(contracts::QolItemHandle handle, contracts::QolItemType* out) {
+    if (out == nullptr) return error_result(kQolErrInvalidArgument, "invalid item type output");
     void* item = nullptr;
     const QolResult resolution = resolve_item_handle(handle, &item);
     if (!contracts::succeeded(resolution)) return resolution;
-    if (item == nullptr || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, "invalid argument");
+    const int category = attr_item_category(item);
+    if (category < 0) return not_ready();
+
+    // The order encodes precedence: a backpack is not reported as equipment,
+    // and a sealed skill book is a skill book rather than a generic item box.
+    if (item_is_backpack_category(category)) {
+        *out = contracts::QolItemType::kBackpack;
+        return contracts::ok();
     }
     if (!item_is_real_equip_resolved()) return not_ready();
-    *out = item_is_real_equip(item) ? 1 : 0;
-    return contracts::ok();
-}
-
-QolResult read_jewel_category(int32_t category, int32_t* out) {
-    if (category < 0 || out == nullptr) {
-        return error_result(kQolErrInvalidArgument, "invalid argument");
+    if (item_is_real_equip(item)) {
+        *out = contracts::QolItemType::kEquipment;
+        return contracts::ok();
     }
-    *out = attr_is_jewel_category(category) ? 1 : 0;
+    if (attr_is_jewel_category(category)) {
+        *out = contracts::QolItemType::kJewel;
+        return contracts::ok();
+    }
+    if (fn_is_enchant_scroll != nullptr && fn_is_enchant_scroll(category) != 0) {
+        *out = contracts::QolItemType::kEnchantScroll;
+        return contracts::ok();
+    }
+    if (fn_is_mercenary_seal != nullptr && fn_is_mercenary_seal(category) != 0) {
+        *out = contracts::QolItemType::kMercenarySeal;
+        return contracts::ok();
+    }
+    // 0x33 (51) is the normal skill book. Sealed skill books are identified by
+    // the game's own ITEMSYSTEM_IsSealed predicate, the same gate used by the
+    // release-sealed button; do not infer them from a category range.
+    const bool sealed =
+        fn_is_sealed != nullptr
+            ? fn_is_sealed(category) != 0
+            : (category >= 934 && category <= 939);
+    if (category == 51 || sealed) {
+        *out = contracts::QolItemType::kSkillBook;
+        return contracts::ok();
+    }
+    if ((fn_is_item_box != nullptr && fn_is_item_box(category) != 0) ||
+        (fn_is_pack_item != nullptr && fn_is_pack_item(category) != 0)) {
+        *out = contracts::QolItemType::kItemBox;
+        return contracts::ok();
+    }
+    // ITEMDATABASE categories 706..717 are the twelve tiered synthesis sets.
+    if (category >= 706 && category <= 717) {
+        *out = contracts::QolItemType::kSynthSet;
+        return contracts::ok();
+    }
+    // ITEMCLASSBASE +2 is the game's use-effect type. It covers special
+    // consumables such as the lamp (0x21) that ITEMDATABASE_IsUse does not
+    // report. Materials have type 0 and remain kOther.
+    if (item_use_type(category) > 0 ||
+        (fn_is_use != nullptr && fn_is_use(category) != 0)) {
+        *out = contracts::QolItemType::kConsumable;
+        return contracts::ok();
+    }
+    *out = contracts::QolItemType::kOther;
     return contracts::ok();
 }
 
@@ -436,7 +480,7 @@ QolResult read_static_ready(int32_t* out_ready) {
 const contracts::QolItemPort kItemPort{
     contracts::kQolPortItemVersion,
     sizeof(contracts::QolItemPort),
-    {&read_category, &read_real_equip, &read_jewel_category, &read_no_sell, &read_sell_price,
+    {&read_category, &read_item_type, &read_no_sell, &read_sell_price,
      &read_cumulate_count, &read_item_ref_at, &read_physical_item_at, &read_detail_item_context,
       &read_inventory_json, &read_money, &read_shop_items_json, &read_in_world,
         &read_static_text, &read_static_ready, &read_inventory_item_view,

@@ -87,6 +87,13 @@ bool item_is_backpack_category(int category) {
     return record != nullptr && record[2] == 0x1F;
 }
 
+int item_use_type(int category) {
+    if (category < 0 || category > 0x3FF || !item_class_table_ready()) return -1;
+    const auto* record = static_cast<const uint8_t*>(item_class_record(
+        static_cast<uint16_t>(category)));
+    return record != nullptr ? record[2] : -1;
+}
+
 contracts::QolItemCountEncoding item_count_encoding_for_category(int category) {
     if (category < 0 || category > 0x3FF) {
         return contracts::QolItemCountEncoding::kUnknown;

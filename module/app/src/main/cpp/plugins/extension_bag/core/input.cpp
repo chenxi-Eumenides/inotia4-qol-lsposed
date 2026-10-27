@@ -120,21 +120,15 @@ void clear_original_item_selection_locked() {
     }
 }
 
-int drag_source_category_locked() {
+void* drag_source_item_locked() {
     const auto& session = qol::extension_bag::ui_state().ui.extension_drag_session;
     if (session.phase != virtual_bag::DragPhase::kIdle &&
         virtual_bag::valid_index(session.source_bag) &&
         session.source_slot >= 0 && session.source_slot < virtual_bag::kSlotCount) {
-        return runtime_state().objects.bag.items[session.source_bag][session.source_slot].category;
+        return qol::extension_bag::ui_state().objects.module_objects[session.source_bag][session.source_slot];
     }
     void* moving = touch_moving_item_control_locked();
-    if (moving == nullptr) return 0;
+    if (moving == nullptr) return nullptr;
     void* data = extension_bag_ui_data(moving);
-    void* item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
-    int module_bag = -1;
-    int module_slot = -1;
-    if (item != nullptr && module_slot_of_item_locked(item, &module_bag, &module_slot)) {
-        return runtime_state().objects.bag.items[module_bag][module_slot].category;
-    }
-    return original_item_category_locked(item);
+    return data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
 }

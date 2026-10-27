@@ -179,20 +179,15 @@ QolResult fake_category(QolItemHandle handle, int32_t* out) {
     *out = fact->category;
     return qol::contracts::ok();
 }
-QolResult fake_is_real_equip(QolItemHandle handle, int32_t* out) {
-    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+QolResult fake_item_type(QolItemHandle handle, QolItemType* out_type) {
+    if (out_type == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
     const FixtureItemFact* fact = find_fixture_item(handle);
     if (fact == nullptr) return qol::contracts::error(kQolErrNotFound, nullptr, 0);
-    *out = fact->stackable ? 0 : 1;
+    *out_type = fact->stackable ? QolItemType::kOther : QolItemType::kEquipment;
     return qol::contracts::ok();
 }
-QolResult fake_is_jewel_category(int32_t, int32_t* out) {
-    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
-    *out = 0;
-    return qol::contracts::ok();
-}
-const ItemFactsApi kItemFactsApi{sizeof(ItemFactsApi), &fake_category, &fake_is_real_equip,
-                                 &fake_is_jewel_category, nullptr, nullptr, nullptr, nullptr,
+const ItemFactsApi kItemFactsApi{sizeof(ItemFactsApi), &fake_category, &fake_item_type,
+                                 nullptr, nullptr, nullptr, nullptr, nullptr,
                                  nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
 QolResult fake_mix_type(uint32_t* out) {

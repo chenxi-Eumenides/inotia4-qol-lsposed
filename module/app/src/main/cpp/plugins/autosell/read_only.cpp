@@ -23,16 +23,10 @@ bool item_category(contracts::QolItemHandle item, int32_t* out) {
            contracts::succeeded(api->category(item, out));
 }
 
-bool item_is_jewel(int32_t category, int32_t* out) {
+bool item_type(contracts::QolItemHandle item, contracts::QolItemType* out) {
     const auto* api = facts();
-    return api != nullptr && api->is_jewel_category != nullptr &&
-           contracts::succeeded(api->is_jewel_category(category, out));
-}
-
-bool item_is_real_equip(contracts::QolItemHandle item, int32_t* out) {
-    const auto* api = facts();
-    return out != nullptr && api != nullptr && api->is_real_equip != nullptr &&
-           contracts::succeeded(api->is_real_equip(item, out));
+    return out != nullptr && api != nullptr && api->item_type != nullptr &&
+           contracts::succeeded(api->item_type(item, out));
 }
 
 bool item_rarity(contracts::QolItemHandle item, int32_t* out) {

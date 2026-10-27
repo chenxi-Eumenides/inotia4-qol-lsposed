@@ -154,6 +154,43 @@ uint16_t item_category(qol::contracts::QolItemHandle item) {
     return static_cast<uint16_t>(category);
 }
 
+bool valid_item_type(qol::contracts::QolItemType type) {
+    using qol::contracts::QolItemType;
+    switch (type) {
+        case QolItemType::kUnknown:
+        case QolItemType::kConsumable:
+        case QolItemType::kEquipment:
+        case QolItemType::kBackpack:
+        case QolItemType::kJewel:
+        case QolItemType::kEnchantScroll:
+        case QolItemType::kMercenarySeal:
+        case QolItemType::kSkillBook:
+        case QolItemType::kItemBox:
+        case QolItemType::kSynthSet:
+        case QolItemType::kOther:
+            return true;
+    }
+    return false;
+}
+
+QolResult read_item_type(qol::contracts::QolItemHandle item,
+                         qol::contracts::QolItemType* out_type) {
+    if (!valid_craft_item(item) || out_type == nullptr) {
+        return recipe_error(kQolErrInvalidArgument, "invalid item type input");
+    }
+    *out_type = qol::contracts::QolItemType::kUnknown;
+    if (g_item_facts == nullptr || g_item_facts->item_type == nullptr) {
+        return recipe_error(kQolErrNotReady, "item type facts unavailable");
+    }
+    const QolResult result = g_item_facts->item_type(item, out_type);
+    if (result.ok != kQolOk) return result;
+    if (!valid_item_type(*out_type)) {
+        *out_type = qol::contracts::QolItemType::kUnknown;
+        return recipe_error(kQolErrInternal, "invalid item type fact");
+    }
+    return contracts::ok();
+}
+
 bool item_category_matches(qol::contracts::QolItemHandle item, uint16_t expected) {
     int32_t category = 0;
     return valid_craft_item(item) && g_item_facts != nullptr &&
@@ -163,20 +200,16 @@ bool item_category_matches(qol::contracts::QolItemHandle item, uint16_t expected
 }
 
 bool item_is_jewel(qol::contracts::QolItemHandle item) {
-    if (!valid_craft_item(item) || g_item_facts == nullptr ||
-        g_item_facts->is_jewel_category == nullptr) {
-        return false;
-    }
-    int32_t is_jewel = 0;
-    return g_item_facts->is_jewel_category(item_category(item), &is_jewel).ok == kQolOk &&
-           is_jewel != 0;
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type).ok == kQolOk &&
+           type == qol::contracts::QolItemType::kJewel;
 }
 
 QolResult query_jewel_fact(qol::contracts::QolItemHandle item, uint16_t* out_category,
                            bool* out_is_jewel) {
     if (!valid_craft_item(item) || out_category == nullptr || out_is_jewel == nullptr ||
         g_item_facts == nullptr || g_item_facts->category == nullptr ||
-        g_item_facts->is_jewel_category == nullptr) {
+        g_item_facts->item_type == nullptr) {
         return recipe_error(kQolErrNotReady, "jewel item facts unavailable");
     }
     int32_t category = 0;
@@ -185,14 +218,11 @@ QolResult query_jewel_fact(qol::contracts::QolItemHandle item, uint16_t* out_cat
     if (category <= 0 || category > UINT16_MAX) {
         return recipe_error(kQolErrInternal, "invalid item category");
     }
-    int32_t is_jewel = 0;
-    result = g_item_facts->is_jewel_category(category, &is_jewel);
+    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+    result = read_item_type(item, &item_type);
     if (result.ok != kQolOk) return result;
-    if (is_jewel != 0 && is_jewel != 1) {
-        return recipe_error(kQolErrInternal, "invalid jewel category result");
-    }
     *out_category = static_cast<uint16_t>(category);
-    *out_is_jewel = is_jewel != 0;
+    *out_is_jewel = item_type == qol::contracts::QolItemType::kJewel;
     return contracts::ok();
 }
 
@@ -209,16 +239,10 @@ QolResult material_grade_for_item(qol::contracts::QolItemHandle item, int* out_g
         *out_grade = ::custom_recipe::jewel_grade_from_category(static_cast<int>(category));
         return contracts::ok();
     }
-    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) {
-        return recipe_error(kQolErrNotReady, "real equipment fact unavailable");
-    }
-    int32_t is_real_equip = 0;
-    result = g_item_facts->is_real_equip(item, &is_real_equip);
+    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+    result = read_item_type(item, &item_type);
     if (result.ok != kQolOk) return result;
-    if (is_real_equip != 0 && is_real_equip != 1) {
-        return recipe_error(kQolErrInternal, "invalid real equipment fact");
-    }
-    if (is_real_equip == 0) return contracts::ok();
+    if (item_type != qol::contracts::QolItemType::kEquipment) return contracts::ok();
     if (g_item_facts->view == nullptr) {
         return recipe_error(kQolErrNotReady, "equipment inventory view unavailable");
     }
@@ -574,17 +598,48 @@ QolResult read_live_item_category(qol::contracts::QolItemHandle item, uint16_t* 
 
 QolResult read_item_stackability(qol::contracts::QolItemHandle item, bool* out_stackable) {
     if (!valid_craft_item(item) || out_stackable == nullptr || g_item_facts == nullptr ||
-        g_item_facts->is_real_equip == nullptr) {
+        g_item_facts->item_type == nullptr) {
         return recipe_error(kQolErrNotReady, "item stackability facts unavailable");
     }
-    int32_t is_real_equip = 0;
-    const QolResult result = g_item_facts->is_real_equip(item, &is_real_equip);
+    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+    const QolResult result = read_item_type(item, &item_type);
     if (result.ok != kQolOk) return result;
-    if (is_real_equip != 0 && is_real_equip != 1) {
-        return recipe_error(kQolErrInternal, "invalid real equipment fact");
-    }
-    *out_stackable = is_real_equip == 0;
+    *out_stackable = item_type != qol::contracts::QolItemType::kEquipment;
     return contracts::ok();
+}
+
+void set_jewel_slots_from_items(
+    const uint16_t categories[kThreeSlotStuffCount],
+    const qol::contracts::QolItemHandle items[kThreeSlotStuffCount],
+    bool out_jewel_slots[kThreeSlotStuffCount]) {
+    if (out_jewel_slots == nullptr) return;
+    for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
+        out_jewel_slots[i] = false;
+        if (categories == nullptr || categories[i] == 0 || items == nullptr ||
+            !valid_craft_item(items[i])) {
+            continue;
+        }
+        qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+        if (read_item_type(items[i], &item_type).ok == kQolOk) {
+            out_jewel_slots[i] = item_type == qol::contracts::QolItemType::kJewel;
+        }
+    }
+}
+
+void read_slot_jewel_types(const uint16_t categories[kThreeSlotStuffCount],
+                           bool out_jewel_slots[kThreeSlotStuffCount]) {
+    qol::contracts::QolItemHandle items[kThreeSlotStuffCount] = {
+        qol::contracts::kInvalidItemHandle,
+        qol::contracts::kInvalidItemHandle,
+        qol::contracts::kInvalidItemHandle,
+    };
+    if (g_craft_facts != nullptr && g_craft_facts->read.stuff_item != nullptr) {
+        for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
+            if (categories == nullptr || categories[i] == 0) continue;
+            (void)g_craft_facts->read.stuff_item(static_cast<uint32_t>(i), &items[i]);
+        }
+    }
+    set_jewel_slots_from_items(categories, items, out_jewel_slots);
 }
 
 QolResult read_live_category_count(uint16_t category, int32_t* out_count) {
@@ -676,15 +731,11 @@ result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
         return CraftGate::kPass;
     }
 
-    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) {
+    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+    if (read_item_type(target_item, &item_type).ok != kQolOk) {
         return CraftGate::kUnavailable;
     }
-    int32_t is_real_equip = 0;
-    if (g_item_facts->is_real_equip(target_item, &is_real_equip).ok != kQolOk ||
-        (is_real_equip != 0 && is_real_equip != 1)) {
-        return CraftGate::kUnavailable;
-    }
-    if (is_real_equip == 0) return CraftGate::kNotJewel;
+    if (item_type != qol::contracts::QolItemType::kEquipment) return CraftGate::kNotJewel;
     if (g_item_facts->view == nullptr) return CraftGate::kUnavailable;
     qol::contracts::QolItemInventoryView view{};
     if (g_item_facts->view(target_item, &view).ok != kQolOk ||
@@ -771,8 +822,10 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
     three_slot_invalidate_pending();
     uint16_t categories[kThreeSlotStuffCount] = {in->slot_categories[0], in->slot_categories[1],
                                                  in->slot_categories[2]};
+    bool jewel_slots[kThreeSlotStuffCount]{};
+    read_slot_jewel_types(categories, jewel_slots);
     const ::custom_recipe::ThreeSlotRecipe* recipe =
-        ::custom_recipe::match_three_slot(categories, &is_special_equip_category);
+        ::custom_recipe::match_three_slot(categories, &is_special_equip_category, jewel_slots);
     if (recipe == nullptr) {
         if (g_verify_log_budget.fetch_sub(1) > 0) {
             log_message(0, "three slot miss slots=%u,%u,%u", categories[0], categories[1],
@@ -850,8 +903,10 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
         return CraftExecuteResult::kStaleSlots;
     }
 
-    const ThreeSlotRecipe* matched_recipe =
-        ::custom_recipe::match_three_slot(in->slot_categories, &is_special_equip_category);
+    bool jewel_slots[kThreeSlotStuffCount]{};
+    set_jewel_slots_from_items(in->slot_categories, in->items, jewel_slots);
+    const ThreeSlotRecipe* matched_recipe = ::custom_recipe::match_three_slot(
+        in->slot_categories, &is_special_equip_category, jewel_slots);
     if (matched_recipe == nullptr || !same_three_slot_recipe(*matched_recipe, recipe)) {
         log_execute_stage(1, "precheck_recipe", 0, kQolErrConflict, 0, 0);
         return CraftExecuteResult::kStaleSlots;
@@ -1240,10 +1295,9 @@ int32_t api_make_item(const result::CraftMakeItemInput* in) {
         return 0;
     }
 
-    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) return 1;
-    int32_t is_real_equip = 0;
-    if (g_item_facts->is_real_equip(in->item, &is_real_equip).ok != kQolOk ||
-        is_real_equip != 1) {
+    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+    if (read_item_type(in->item, &item_type).ok != kQolOk ||
+        item_type != qol::contracts::QolItemType::kEquipment) {
         return 1;
     }
     const qol::contracts::AttributeQualityApi* api = nullptr;

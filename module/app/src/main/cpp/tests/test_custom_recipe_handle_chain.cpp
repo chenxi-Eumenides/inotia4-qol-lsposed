@@ -218,11 +218,19 @@ QolResult item_category(QolItemHandle item, int32_t* out) {
     return ok();
 }
 
-QolResult item_is_real_equip(QolItemHandle item, int32_t* out) {
+QolResult item_type(QolItemHandle item, QolItemType* out) {
     if (out == nullptr) return fail(kQolErrInvalidArgument);
     const ItemFact* fact = find_fact(item);
     if (fact == nullptr) return fail(kQolErrNotFound);
-    *out = fact->stackable ? 0 : 1;
+    if (fact->category >= 28 && fact->category <= 32) {
+        *out = QolItemType::kJewel;
+    } else if (!fact->stackable) {
+        *out = QolItemType::kEquipment;
+    } else if (fact->category == 14) {
+        *out = QolItemType::kConsumable;
+    } else {
+        *out = QolItemType::kOther;
+    }
     return ok();
 }
 
@@ -241,12 +249,6 @@ QolResult item_view(QolItemHandle item, QolItemInventoryView* out) {
     out->native_options[1] = QolItemInventoryOptionView{100, 11, 0};
     out->jewel_option_count = 1;
     out->jewel_options[0] = QolItemInventoryOptionView{55, 10, 1};
-    return ok();
-}
-
-QolResult is_jewel_category(int32_t category, int32_t* out) {
-    if (out == nullptr) return fail(kQolErrInvalidArgument);
-    *out = category >= 28 && category <= 32 ? 1 : 0;
     return ok();
 }
 
@@ -534,8 +536,7 @@ void init_fixture() {
     g_item_facts = ItemFactsApi{};
     g_item_facts.struct_size = sizeof(g_item_facts);
     g_item_facts.category = &item_category;
-    g_item_facts.is_real_equip = &item_is_real_equip;
-    g_item_facts.is_jewel_category = &is_jewel_category;
+    g_item_facts.item_type = &item_type;
     g_item_facts.view = &item_view;
 
     g_craft_facts = CraftFactsApi{};

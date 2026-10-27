@@ -50,12 +50,12 @@ bool resolve_item_handle(void* item, contracts::QolItemHandle* out) {
 bool item_is_real_equip(void* item, int32_t* out) {
     if (out == nullptr) return false;
     *out = 0;
-    if (g_item_facts == nullptr || g_item_facts->is_real_equip == nullptr) return false;
+    if (g_item_facts == nullptr || g_item_facts->item_type == nullptr) return false;
     contracts::QolItemHandle handle{};
     if (!resolve_item_handle(item, &handle)) return false;
-    int32_t value = 0;
-    if (!contracts::succeeded(g_item_facts->is_real_equip(handle, &value))) return false;
-    *out = value;
+    contracts::QolItemType item_type = contracts::QolItemType::kUnknown;
+    if (!contracts::succeeded(g_item_facts->item_type(handle, &item_type))) return false;
+    *out = item_type == contracts::QolItemType::kEquipment ? 1 : 0;
     return true;
 }
 
@@ -97,7 +97,7 @@ void log_debug_impl(const char* format, ...) {
 bool replay_deps_ready() {
     const auto* game = game_host();
     const auto* extras = character_extras();
-    return g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr &&
+    return g_item_facts != nullptr && g_item_facts->item_type != nullptr &&
            game != nullptr && game->read_only.item.equip_level != nullptr &&
            extras != nullptr && extras->read.can_change_equip != nullptr;
 }
@@ -188,9 +188,9 @@ bool deps_ready() {
 
 void log_deps_missing() {
     const auto* game = game_host();
-    log_error("symbols unresolved (item_is_real_equip=%d equip_level=%d can_change_equip=%d "
+    log_error("symbols unresolved (item_type=%d equip_level=%d can_change_equip=%d "
               "menu_char=%d); not installed",
-              g_item_facts != nullptr && g_item_facts->is_real_equip != nullptr,
+              g_item_facts != nullptr && g_item_facts->item_type != nullptr,
               game != nullptr && game->read_only.item.equip_level != nullptr,
               character_extras() != nullptr &&
                   character_extras()->read.can_change_equip != nullptr,

@@ -347,8 +347,9 @@ QolResult override_canonical(const void*, uint32_t* out_count);
 QolResult override_effective(const void*, uint32_t* out_count);
 const qol::contracts::QolItemCountApi* override_item_count_api();
 QolResult stub_category(qol::contracts::QolItemHandle, int32_t*) { return unsupported(); }
-QolResult stub_is_real_equip(qol::contracts::QolItemHandle, int32_t*) { return unsupported(); }
-QolResult stub_is_jewel(int32_t, int32_t*) { return unsupported(); }
+QolResult stub_item_type(qol::contracts::QolItemHandle, qol::contracts::QolItemType*) {
+    return unsupported();
+}
 QolResult stub_no_sell(int32_t, int32_t*) { return unsupported(); }
 QolResult stub_sell_price(qol::contracts::QolItemHandle, int64_t*) { return unsupported(); }
 std::size_t fake_slot_index(qol::contracts::QolItemHandle item) {
@@ -590,8 +591,8 @@ QolResult fake_item_count_limit(qol::contracts::QolItemHandle, uint32_t* out_lim
 }
 
 const QolItemPortReadApi kFakeRead{
-    &stub_category,   &stub_is_real_equip, &stub_is_jewel,   &stub_no_sell,
-    &stub_sell_price, &stub_cumulate,      &stub_item_ref,   &stub_physical,
+    &stub_category,   &stub_item_type,     &stub_no_sell,    &stub_sell_price,
+    &stub_cumulate,   &stub_item_ref,      &stub_physical,
     &stub_detail_item_context, &fake_inventory, &fake_money,
     &fake_shop, &fake_in_world, &fake_static_text, &fake_static_ready,
     &fake_inventory_item_view, &stub_effective_cumulate, nullptr,
@@ -2660,7 +2661,8 @@ static bool unregister_golden_source() {
 static QolResult golden_unsupported() {
     return qol::contracts::error(kQolErrUnsupported, "stub", 4);
 }
-static QolResult golden_unsupported2(qol::contracts::QolItemHandle, int32_t*) {
+static QolResult golden_unsupported_type(qol::contracts::QolItemHandle,
+                                         qol::contracts::QolItemType*) {
     return golden_unsupported();
 }
 static QolResult golden_unsupported1(int32_t, int32_t*) { return golden_unsupported(); }
@@ -2872,8 +2874,8 @@ QolResult golden_for_each_space_slot(int32_t space_id,
 }
 
 const qol::contracts::QolItemPortReadApi kGoldenRead{
-    &golden_category,          &golden_unsupported2,      &golden_unsupported1,
-    &golden_unsupported1,      &golden_unsupported_price, &golden_cumulate_count,
+    &golden_category,          &golden_unsupported_type,  &golden_unsupported1,
+    &golden_unsupported_price, &golden_cumulate_count,
     &golden_item_ref_at,       &golden_unsupported_phys,  &golden_unsupported_detail_context,
     &golden_inventory_json, &golden_money,
     &golden_shop, &golden_in_world, &golden_static_text,

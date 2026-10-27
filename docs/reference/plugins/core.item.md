@@ -36,7 +36,7 @@
 
 | Capability | 版本 | 用途 |
 |---|---:|---|
-| `item.facts` | 3.6 | 物品类别、库存 view/count/编码、装备/宝石/禁售和报价等事实。 |
+| `item.facts` | 4.0 | 物品类别、权威 `item_type`、库存 view/count/编码、禁售和报价等事实。 |
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
 | `inventory.bag_source` | 1.2 | 注册/注销外部袋源，并提供跨空间转移所需的袋源原语。 |
 | `inventory_refresh` | 1.2 | 原版库存区域刷新；`update_shortcut_category(category)` 按类别重算快捷栏数量（含注册袋源物品）。 |
@@ -44,6 +44,14 @@
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
 | `move_merge.control` | 1.0 | 报告拖拽合并是否可用。 |
 | `inventory.projection` | 1.3 | 注册/注销投影回调；投影显示和数据仍归注册方。尾部回调支持原版袋卸下、佣兵徽章、背包装备与角色装备。 |
+
+### `item.facts` 物品类型
+
+`ItemFactsApi::item_type(handle, out)` 是插件判断物品类型的唯一入口。类型枚举：
+
+`kUnknown / kConsumable / kEquipment / kBackpack / kJewel / kEnchantScroll / kMercenarySeal / kSkillBook / kItemBox / kSynthSet / kOther`
+
+类型由 core.item 内部统一识别：装备、宝石、强化卷轴、佣兵徽章、背包、技能书、开箱、合成套装和普通消耗品依次判定；插件不得再用 category、`ITEM_IsRealEquip` 或 `ITEMSYSTEM_IsJewel` 自行推导类型。
 
 ## Feature toggle
 

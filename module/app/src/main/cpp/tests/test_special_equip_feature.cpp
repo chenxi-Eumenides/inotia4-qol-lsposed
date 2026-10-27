@@ -180,11 +180,13 @@ int32_t fake_lookup_item(void* item, QolItemHandle* out_handle, uint32_t* out_pr
     return kQolItemHandleStatusOk;
 }
 
-QolResult fake_item_is_real_equip(QolItemHandle handle, int32_t* out_value) {
+QolResult fake_item_type(QolItemHandle handle, qol::contracts::QolItemType* out_type) {
     ++g_real_equip_calls;
     assert(handle.slot == g_item_handle.slot && handle.generation == g_item_handle.generation);
     if (!g_real_equip_succeeds) return failure();
-    *out_value = g_real_equip_value;
+    if (out_type == nullptr) return failure();
+    *out_type = g_real_equip_value != 0 ? qol::contracts::QolItemType::kEquipment
+                                        : qol::contracts::QolItemType::kOther;
     return ok();
 }
 
@@ -370,7 +372,7 @@ void setup_fake_interfaces() {
 
     g_item_facts.struct_size = static_cast<uint32_t>(sizeof(ItemFactsApi));
     g_item_facts.category = &fake_item_category;
-    g_item_facts.is_real_equip = &fake_item_is_real_equip;
+    g_item_facts.item_type = &fake_item_type;
     g_character_facts.type = &fake_character_type;
 
     g_context.struct_size = sizeof(g_context);

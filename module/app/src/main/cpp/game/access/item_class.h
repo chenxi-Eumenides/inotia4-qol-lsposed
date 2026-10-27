@@ -38,6 +38,8 @@ int item_sell_price(const void* item);
 // ITEMCLASSBASE 记录 +2 == 0x1f 的背包类别判定；表未就绪返回 false。
 bool item_class_table_ready();
 bool item_is_backpack_category(int category);
+// ITEMCLASSBASE 记录 +2 的使用效果类型；表未就绪/类别越界返回 -1。
+int item_use_type(int category);
 contracts::QolItemCountEncoding item_count_encoding_for_category(int category);
 
 // 装备详情菜单角色类型（UIEquip desc_type）；未就绪 → -1。

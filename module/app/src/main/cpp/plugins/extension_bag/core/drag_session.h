@@ -31,4 +31,4 @@ void clear_stale_projected_moving_locked();
 void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_x, int64_t rel_y,
                                               uint64_t release_param2, bool handled);
 void clear_original_item_selection_locked();
-int drag_source_category_locked();
+void* drag_source_item_locked();

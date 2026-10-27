@@ -19,6 +19,19 @@ bool read_item_category(const void* item, int* out_category) {
     return true;
 }
 
+bool read_item_type(const void* item, qol::contracts::QolItemType* out_type) {
+    qol::contracts::QolItemHandle handle{};
+    const auto* facts = runtime_state().host.item_facts;
+    if (facts == nullptr || facts->item_type == nullptr || item == nullptr || out_type == nullptr ||
+        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) {
+        return false;
+    }
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    if (!qol::contracts::succeeded(facts->item_type(handle, &type))) return false;
+    *out_type = type;
+    return true;
+}
+
 int original_item_category_locked(void* item) {
     if (item == nullptr) return 0;
     int category = 0;
@@ -180,58 +193,34 @@ bool read_item_cumulate_count(const void* item, int* out_count) {
     return true;
 }
 
-bool read_item_is_jewel(int category) {
-    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->is_jewel_category == nullptr) return false;
-    int32_t is_jewel = 0;
-    return qol::contracts::succeeded(
-               runtime_state().host.item_facts->is_jewel_category(category, &is_jewel)) &&
-           is_jewel != 0;
-}
-
-namespace {
-
-bool read_item_category_predicate(int category,
-                                  QolResult (*predicate)(int32_t, int32_t*),
-                                  bool* out_value) {
-    if (runtime_state().host.game == nullptr || predicate == nullptr || out_value == nullptr) return false;
-    int32_t value = 0;
-    if (!qol::contracts::succeeded(predicate(category, &value))) return false;
-    *out_value = value != 0;
-    return true;
-}
-
+bool read_item_is_jewel(const void* item) {
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kJewel;
 }
 
 bool item_is_equip(const void* item) {
-    qol::contracts::QolItemHandle handle{};
-    if (runtime_state().host.item_facts == nullptr || runtime_state().host.item_facts->is_real_equip == nullptr || item == nullptr ||
-        !extension_bag_item_handle_for_pointer(const_cast<void*>(item), &handle)) {
-        return false;
-    }
-    int32_t value = 0;
-    return qol::contracts::succeeded(runtime_state().host.item_facts->is_real_equip(handle, &value)) &&
-           value != 0;
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kEquipment;
 }
 
-bool read_item_is_enchant_scroll(int category) {
-    bool value = false;
-    return read_item_category_predicate(
-        category, runtime_state().host.game == nullptr ? nullptr : runtime_state().host.game->read_only.item.is_enchant_scroll, &value) &&
-        value;
+bool read_item_is_enchant_scroll(const void* item) {
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kEnchantScroll;
 }
 
-bool read_item_is_mercenary_seal(int category) {
-    bool value = false;
-    return read_item_category_predicate(
-        category, runtime_state().host.game == nullptr ? nullptr : runtime_state().host.game->read_only.item.is_mercenary_seal, &value) &&
-        value;
+bool read_item_is_mercenary_seal(const void* item) {
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kMercenarySeal;
 }
 
 bool read_item_is_usable(int category) {
     bool value = false;
-    return read_item_category_predicate(
-        category, runtime_state().host.game == nullptr ? nullptr : runtime_state().host.game->read_only.item.is_usable, &value) &&
-        value;
+    const auto* game = runtime_state().host.game;
+    if (game == nullptr || game->read_only.item.is_usable == nullptr) return false;
+    int32_t raw_value = 0;
+    if (!qol::contracts::succeeded(game->read_only.item.is_usable(category, &raw_value))) return false;
+    value = raw_value != 0;
+    return value;
 }
 
 
@@ -333,16 +322,9 @@ JNIEnv* current_env() {
         : ::qol::contracts::QolItemCountEncoding::kUnknown;
 }
 
-// 原版 ButtonEquipExe 的背包身份判定（反汇编 b7c74）：ITEMCLASSBASE 记录
-// +2 == 0x1f 即背包类。category 只是 ITEMDATABASE 索引，不能承担装备语义；
-// +2 是记录字段偏移（非 VMA），表基址/步长由宿主读取面提供。
-// G_ITEMCLASS_DATA/SIZE GOT 槽。
-bool category_is_extension_backpack(int category) {
-    if (runtime_state().host.game == nullptr || runtime_state().host.game->read_only.item.is_backpack_category == nullptr ||
-        category <= 0) return false;
-    int32_t value = 0;
-    return qol::contracts::succeeded(
-               runtime_state().host.game->read_only.item.is_backpack_category(category, &value)) && value != 0;
+bool category_is_extension_backpack(const void* item) {
+    qol::contracts::QolItemType type = qol::contracts::QolItemType::kUnknown;
+    return read_item_type(item, &type) && type == qol::contracts::QolItemType::kBackpack;
 }
 uint32_t original_count_view(uint32_t field) {
     return virtual_bag_view_from_canonical(virtual_bag_canonical_from_field(field, 0), false);

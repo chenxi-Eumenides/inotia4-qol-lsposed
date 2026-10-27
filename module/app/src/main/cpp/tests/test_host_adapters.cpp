@@ -186,6 +186,9 @@ decltype(fn_ui_equip_inven_item_control_event_proc)
 decltype(fn_mercenary_is_empty_manager_slot) fn_mercenary_is_empty_manager_slot = nullptr;
 decltype(fn_is_enchant_scroll) fn_is_enchant_scroll = nullptr;
 decltype(fn_is_mercenary_seal) fn_is_mercenary_seal = nullptr;
+decltype(fn_is_sealed) fn_is_sealed = nullptr;
+decltype(fn_is_item_box) fn_is_item_box = nullptr;
+decltype(fn_is_pack_item) fn_is_pack_item = nullptr;
 decltype(fn_is_use) fn_is_use = nullptr;
 decltype(fn_save_is_ok) fn_save_is_ok = nullptr;
 decltype(fn_get_bag_size) fn_get_bag_size = nullptr;
@@ -318,6 +321,7 @@ bool item_class_table_ready() { return g_item_class_table_ready; }
 bool item_is_backpack_category(int category) {
     return g_item_class_table_ready && category == 4;
 }
+int item_use_type(int) { return 0; }
 bool attr_call_option_value(int, int, int, void*, int* out_value) {
     *out_value = 3;
     return true;
@@ -1549,11 +1553,12 @@ int main() {
     qol::game::g_test_craft_apply_stuff_result = 2;
     assert(item_port_api.read.category(g_inventory_item_handle, &value).ok == kQolOk);
     assert(value == 4);
-    assert(item_port_api.read.is_jewel_category(4, &value).ok == kQolOk && value == 1);
+    qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
+    assert(item_port_api.read.item_type(g_inventory_item_handle, &item_type).ok == kQolOk);
+    assert(item_type == qol::contracts::QolItemType::kBackpack);
     assert(item_extras_api.read.ability_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 3);
     assert(game.read_only.item.rarity(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
-    assert(item_port_api.read.is_real_equip(g_inventory_item_handle, &value).ok == kQolOk);
     assert(game.read_only.item.equip_level(reinterpret_cast<void*>(0x1), &value).ok == kQolOk);
     assert(value == 12);
     assert(item_port_api.read.is_no_sell(4, &value).ok == kQolOk);

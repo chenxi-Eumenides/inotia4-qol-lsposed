@@ -58,8 +58,7 @@ const contracts::ItemFactsApi* item_facts_api() {
         &iface);
     if (result.ok != kQolOk || iface == nullptr) return nullptr;
     const auto* api = static_cast<const contracts::ItemFactsApi*>(iface);
-    return contracts::item_facts_api_size_valid(api) && api->category != nullptr &&
-                   api->is_jewel_category != nullptr && api->is_real_equip != nullptr &&
+    return contracts::item_facts_api_size_valid(api) && api->item_type != nullptr &&
                    api->view != nullptr
                ? api
                : nullptr;
@@ -105,24 +104,18 @@ bool load_current_item_view(contracts::QolItemInventoryView* out,
     }
     (void)owner;
 
-    int32_t category = 0;
-    if (api->category(handle, &category).ok != kQolOk) return false;
-    int32_t is_jewel = 0;
-    if (api->is_jewel_category(category, &is_jewel).ok != kQolOk) return false;
-    int32_t is_real_equip = 0;
-    if (api->is_real_equip(handle, &is_real_equip).ok != kQolOk) return false;
+    contracts::QolItemType item_type = contracts::QolItemType::kUnknown;
+    if (api->item_type(handle, &item_type).ok != kQolOk) return false;
 
-    if (is_jewel != 0) {
-        // 同时被判定为真实装备时语义不唯一，不能确认是独立宝石物品。
-        if (is_real_equip != 0) return false;
+    if (item_type == contracts::QolItemType::kJewel) {
         if (api->view(handle, out).ok != kQolOk) return false;
         constexpr uint32_t kJewelFields = contracts::kQolItemInventoryHasJewelValue |
                                           contracts::kQolItemInventoryHasJewelAttributeType;
         if ((out->fields & kJewelFields) != kJewelFields) return false;
         *out_kind = ItemKind::kJewel;
     } else {
-        // 非宝石但也不是真实装备的物品（背包、徽章等）不参与染色。
-        if (is_real_equip == 0) return false;
+        // 只有明确分类为装备的物品参与装备词条染色。
+        if (item_type != contracts::QolItemType::kEquipment) return false;
         if (api->view(handle, out).ok != kQolOk) return false;
         constexpr uint32_t kEquipmentFields =
             contracts::kQolItemInventoryHasOptionCompleteness |

@@ -4,6 +4,7 @@
 
 #include "../../contracts/game_host.h"
 #include "../../contracts/game_ports/item_port.h"
+#include "../../contracts/item_type.h"
 
 namespace qol::features::autosell::read_only {
 
@@ -11,8 +12,7 @@ using InventoryItemRef = contracts::QolInventoryItemRef;
 using BagSlotFn = contracts::QolInventoryBagSlotFn;
 
 bool item_category(contracts::QolItemHandle item, int32_t* out);
-bool item_is_jewel(int32_t category, int32_t* out);
-bool item_is_real_equip(contracts::QolItemHandle item, int32_t* out);
+bool item_type(contracts::QolItemHandle item, contracts::QolItemType* out);
 bool item_rarity(contracts::QolItemHandle item, int32_t* out);
 bool item_enchant_remaining(contracts::QolItemHandle item, int32_t* out);
 bool item_socket_filled(contracts::QolItemHandle item, int32_t* out);

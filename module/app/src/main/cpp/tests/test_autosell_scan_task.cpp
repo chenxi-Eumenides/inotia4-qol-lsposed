@@ -56,14 +56,9 @@ bool item_category(contracts::QolItemHandle, int32_t* out) {
     *out = 0;
     return true;
 }
-bool item_is_jewel(int32_t, int32_t* out) {
+bool item_type(contracts::QolItemHandle, contracts::QolItemType* out) {
     if (out == nullptr) return false;
-    *out = 0;
-    return true;
-}
-bool item_is_real_equip(contracts::QolItemHandle, int32_t* out) {
-    if (out == nullptr) return false;
-    *out = 0;
+    *out = contracts::QolItemType::kOther;
     return true;
 }
 bool item_rarity(contracts::QolItemHandle, int32_t* out) {

@@ -49,10 +49,12 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         if (descriptor.category <= 0 || descriptor.count <= 0) {
             return extension_bag_op_err("slot empty");
         }
+        item = module_item_locked(bag, slot);
+        if (item == nullptr) return extension_bag_op_err("extension item unavailable");
         // R-63 佣兵徽章（category 42..50 / 928..933）：ITEMDATA_IsUse 不认（+2=0x1d），
         // 效果只在原版 MERCENARYSYSTEM_MakeMercenary，CHAR_UseItemEx 不实现，故豁免
         // fn_is_use 并按原版按钮顺序 SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary。
-        is_seal = read_item_is_mercenary_seal(descriptor.category);
+        is_seal = read_item_is_mercenary_seal(item);
         if (is_seal) {
             const auto* save_facts = extension_bag_save_facts();
             if (save_facts == nullptr || save_facts->is_ok == nullptr ||
@@ -71,14 +73,12 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
         // 并不覆盖所有可执行类别，提前用 is_usable 拦截会让扩展背包
         // 静默失败并丢掉原版的“职业不符合”等反馈。
 
-        item = module_item_locked(bag, slot);
         leader = nullptr;
         if (::qol::extension_bag::access::host().game != nullptr &&
             ::qol::extension_bag::access::host().character_extras->read.party_member != nullptr) {
             (void)::qol::extension_bag::access::host().character_extras->read.party_member(0,
                                                                                            &leader);
         }
-        if (item == nullptr) return extension_bag_op_err("extension item unavailable");
         if (!is_seal && leader == nullptr) return extension_bag_op_err("no leader");
         closes_description = qol::extension_bag::ui_state().ui.extension_desc_item == item;
         if (!module_use_begin_locked(bag, slot, item, &use_token)) {

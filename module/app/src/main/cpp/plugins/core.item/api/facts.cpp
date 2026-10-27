@@ -9,16 +9,9 @@ QolResult category(contracts::QolItemHandle item, int32_t* out_category) {
     return g_port->read.category(item, out_category);
 }
 
-QolResult is_real_equip(contracts::QolItemHandle item, int32_t* out_value) {
-    if (g_port == nullptr || g_port->read.is_real_equip == nullptr) return not_ready();
-    return g_port->read.is_real_equip(item, out_value);
-}
-
-QolResult is_jewel_category(int32_t category_value, int32_t* out_is_jewel) {
-    if (g_port == nullptr || g_port->read.is_jewel_category == nullptr) {
-        return not_ready();
-    }
-    return g_port->read.is_jewel_category(category_value, out_is_jewel);
+QolResult item_type(contracts::QolItemHandle item, contracts::QolItemType* out_type) {
+    if (g_port == nullptr || g_port->read.item_type == nullptr) return not_ready();
+    return g_port->read.item_type(item, out_type);
 }
 
 QolResult is_no_sell(int32_t category_value, int32_t* out_value) {
@@ -88,8 +81,7 @@ QolResult money(int64_t* out_money) {
 extern const contracts::ItemFactsApi kItemFactsApi{
     sizeof(contracts::ItemFactsApi),
     &category,
-    &is_real_equip,
-    &is_jewel_category,
+    &item_type,
     &is_no_sell,
     &sell_price,
     &cumulate_count,

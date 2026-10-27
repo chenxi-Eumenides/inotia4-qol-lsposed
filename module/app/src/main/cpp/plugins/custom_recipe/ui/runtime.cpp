@@ -102,26 +102,43 @@ uint16_t item_category(contracts::QolItemHandle handle) {
     return static_cast<uint16_t>(category);
 }
 
-bool item_is_stackable(contracts::QolItemHandle handle) {
-    int32_t is_real_equip = 0;
-    const auto* facts = item_facts();
-    if (handle.slot == 0 || handle.generation == 0 || facts == nullptr ||
-        facts->is_real_equip == nullptr ||
-        facts->is_real_equip(handle, &is_real_equip).ok != kQolOk) {
-        return false;
+bool valid_item_type(contracts::QolItemType type) {
+    using contracts::QolItemType;
+    switch (type) {
+        case QolItemType::kUnknown:
+        case QolItemType::kConsumable:
+        case QolItemType::kEquipment:
+        case QolItemType::kBackpack:
+        case QolItemType::kJewel:
+        case QolItemType::kEnchantScroll:
+        case QolItemType::kMercenarySeal:
+        case QolItemType::kSkillBook:
+        case QolItemType::kItemBox:
+        case QolItemType::kSynthSet:
+        case QolItemType::kOther:
+            return true;
     }
-    return is_real_equip == 0;
+    return false;
 }
 
-bool item_is_real_equip(contracts::QolItemHandle handle) {
-    int32_t is_real_equip = 0;
+bool read_item_type(contracts::QolItemHandle handle, contracts::QolItemType* out_type) {
     const auto* facts = item_facts();
-    if (handle.slot == 0 || handle.generation == 0 || facts == nullptr ||
-        facts->is_real_equip == nullptr ||
-        facts->is_real_equip(handle, &is_real_equip).ok != kQolOk) {
+    if (handle.slot == 0 || handle.generation == 0 || out_type == nullptr || facts == nullptr ||
+        facts->item_type == nullptr) {
         return false;
     }
-    return is_real_equip == 1;
+    *out_type = contracts::QolItemType::kUnknown;
+    return facts->item_type(handle, out_type).ok == kQolOk && valid_item_type(*out_type);
+}
+
+bool item_is_stackable(contracts::QolItemHandle handle) {
+    contracts::QolItemType type = contracts::QolItemType::kUnknown;
+    return read_item_type(handle, &type) && type != contracts::QolItemType::kEquipment;
+}
+
+bool item_is_equipment(contracts::QolItemHandle handle) {
+    contracts::QolItemType type = contracts::QolItemType::kUnknown;
+    return read_item_type(handle, &type) && type == contracts::QolItemType::kEquipment;
 }
 
 // 失败提示：本插件自有文案经本地 scope 生效，不改动共享文本表内容。
@@ -304,7 +321,7 @@ void place_execute(void* ctrl) {
 
     const contracts::QolItemHandle item = craft_target_slot_item();
     if (item.slot == 0 || item.generation == 0) return;  // 本次未放入任何物品
-    if (!api->is_jewel_item(item) && !item_is_real_equip(item)) {
+    if (!api->is_jewel_item(item) && !item_is_equipment(item)) {
         craft_set_target_slot_item(contracts::kInvalidItemHandle);  // 撤销放置
         craft_show_not_target();
         return;

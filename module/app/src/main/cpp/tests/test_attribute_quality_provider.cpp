@@ -102,19 +102,19 @@ QolResult fake_category(contracts::QolItemHandle handle, int32_t* out_category) 
     return contracts::ok();
 }
 
-QolResult fake_is_jewel_category(int32_t category, int32_t* out_is_jewel) {
+QolResult fake_item_type(contracts::QolItemHandle handle, contracts::QolItemType* out_type) {
     ++g_jewel_category_calls;
-    if (out_is_jewel == nullptr) return contracts::error(kQolErrInvalidArgument, "bad output", 10);
-    *out_is_jewel = category == 100 ? 1 : 0;
-    return contracts::ok();
-}
-
-QolResult fake_is_real_equip(contracts::QolItemHandle handle, int32_t* out_real_equip) {
     ++g_real_equip_calls;
-    if (out_real_equip == nullptr) return contracts::error(kQolErrInvalidArgument, "bad output", 10);
+    if (out_type == nullptr) return contracts::error(kQolErrInvalidArgument, "bad output", 10);
     FakeItem* item = find_item(handle);
     if (item == nullptr) return contracts::error(kQolErrNotFound, "stale fake item", 15);
-    *out_real_equip = item->real_equip;
+    if (item->real_equip != 0) {
+        *out_type = contracts::QolItemType::kEquipment;
+    } else if (item->category == 100) {
+        *out_type = contracts::QolItemType::kJewel;
+    } else {
+        *out_type = contracts::QolItemType::kOther;
+    }
     return contracts::ok();
 }
 
@@ -247,8 +247,7 @@ void reset_fixture() {
     g_item_facts = {};
     g_item_facts.struct_size = sizeof(g_item_facts);
     g_item_facts.category = &fake_category;
-    g_item_facts.is_real_equip = &fake_is_real_equip;
-    g_item_facts.is_jewel_category = &fake_is_jewel_category;
+    g_item_facts.item_type = &fake_item_type;
     g_item_facts.view = &fake_item_view;
 
     g_game = {};
@@ -322,7 +321,7 @@ void test_descriptor_and_install_gates() {
     incomplete_api.evaluate = nullptr;
     CHECK(!contracts::attribute_quality_api_size_valid(&incomplete_api));
     CHECK(descriptor.requires_count == 1 && descriptor.requires != nullptr);
-    CHECK(descriptor.requires[0].range.major == 3 && descriptor.requires[0].range.min_minor == 6);
+    CHECK(descriptor.requires[0].range.major == 4 && descriptor.requires[0].range.min_minor == 0);
 
     contracts::QolHostSdk sdk{};
     sdk.capabilities.require = &fake_require_facts;
@@ -332,7 +331,7 @@ void test_descriptor_and_install_gates() {
     ctx.game = &g_game;
     CHECK(descriptor.install(ctx) == 0);
     CHECK(g_require_calls == 1);
-    CHECK(g_requested_facts_range.major == 3 && g_requested_facts_range.min_minor == 6);
+    CHECK(g_requested_facts_range.major == 4 && g_requested_facts_range.min_minor == 0);
     CHECK(feature::active());
     CHECK(descriptor.on_resource_ready(ctx, feature::kResourceIdMathGetRandom,
                                        reinterpret_cast<void*>(&fake_backup_math_get_random)) == 0);

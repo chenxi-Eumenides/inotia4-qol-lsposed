@@ -63,12 +63,6 @@ constexpr int64_t kExtensionTabY = kCellY - kGridY;
 constexpr int64_t kExtensionTabWidth = 0x70;
 constexpr int64_t kExtensionTabHeight = 0x30;
 void queue_extension_tab_click_locked(int extension_bag);
-bool is_backpack_category(int category) {
-    // 这是 State::types 使用的 BagType 判定：1..4 派生容量 4/8/12/16，
-    // 只适用于已归一化的扩展袋类型。它不是原生物品类别判定；原生物品
-    // 详情必须使用 category_is_extension_backpack 的 ITEMCLASSBASE +2 规则。
-    return category >= 1 && category <= 4;
-}
 
 bool extension_tab_control_is_current_locked(int index, void* control);
 bool extension_tab_buttons_have_controls_locked();
@@ -103,7 +97,7 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
         return finish(result);  // 松开确认已处理（原版袋标签点击切袋同样返回 1，b8c60）
     }
     // 0x04 = 拖动 drop 到袋控件。无论原版源还是扩展源，只要目标袋未装备且
-    // 源类别为背包物品（category 1..4）就走装备；其他情况走移动。装备路径
+    // item.facts 将来源分类为背包物品就走装备；其他情况走移动。装备路径
     // 返回 0，让 TouchHandle 按原版语义复位 moving。
     if (event == 0x04) {
         uint64_t result = 0;
@@ -147,7 +141,8 @@ uint64_t extension_tab_item_proc(void* ctrl, uint64_t event, void* x2, void* par
                         const int category = extension_source
                             ? runtime_state().objects.bag.items[module_bag][module_slot].category
                             : original_item_category_locked(item);
-                        const bool backpack_item = is_backpack_category(category);
+                        const bool backpack_item =
+                            extension_bag_runtime_is_backpack_category(item);
                         if (runtime_state().objects.bag.types[index] == 0 && backpack_item) {
                             // 背包类物品进入空扩展标签 = 装备为该袋的袋对象；来源可以是
                             // 原版背包，也可以是另一个扩展袋。两者都由同一事务处理。
@@ -747,8 +742,7 @@ bool extension_tab_hit(int index, int64_t x, int64_t y) {
     if (runtime_state().objects.bag.capacities[index] == 0) {
         // 未装备袋只有在当前拖动物品满足装备规则时可命中；否则仍保持
         // G-12 的不可命中门禁，避免普通物品误落到未装备标签。
-        const int category = drag_source_category_locked();
-        if (!is_backpack_category(category)) return false;
+        if (!extension_bag_runtime_is_backpack_category(drag_source_item_locked())) return false;
     }
     // 标签位置是动态换算的（tab_rel + 袋容器绝对），用控件真实绝对 rect 判断，
     // 不用旧硬编码 kCellX/kCellY（标签左移后二者偏移 36px 致命中失效）。
@@ -767,8 +761,8 @@ void extension_bag_ui_handle_tab_click_locked(int extension_bag) {
 bool extension_c18_native_bag_hit(int64_t x, int64_t y, int* out_native_bag) {
     return c18_native_bag_hit_locked(x, y, out_native_bag);
 }
-bool extension_bag_runtime_is_backpack_category(int category) {
-    return is_backpack_category(category);
+bool extension_bag_runtime_is_backpack_category(const void* item) {
+    return category_is_extension_backpack(item);
 }
 void prepare_c18_native_bag_layout_locked() {
     prepare_c18_native_bag_layout_locked_impl();

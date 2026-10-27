@@ -209,6 +209,7 @@ ReleaseSealedFn fn_release_sealed = nullptr;
 IsDiceFn fn_is_dice = nullptr;
 IsSealedFn fn_is_sealed = nullptr;
 IsItemBoxFn fn_is_item_box = nullptr;
+IsPackItemFn fn_is_pack_item = nullptr;
 MakeItemFn fn_make_item = nullptr;
 CreateItemFn fn_create_item = nullptr;
 ControlObjectGetDataFn fn_control_object_get_data = nullptr;

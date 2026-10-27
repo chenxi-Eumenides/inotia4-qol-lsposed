@@ -120,24 +120,24 @@ QolResult fake_category(qol::contracts::QolItemHandle handle, int32_t* out_categ
     return qol::contracts::ok();
 }
 
-QolResult fake_is_jewel_category(int32_t, int32_t* out_is_jewel) {
+QolResult fake_item_type(qol::contracts::QolItemHandle handle,
+                         qol::contracts::QolItemType* out_type) {
     ++g_jewel_query_calls;
-    if (g_jewel_query_error)
-        return qol::contracts::error(kQolErrNotReady, "jewel query error", 17);
-    if (out_is_jewel == nullptr)
-        return qol::contracts::error(kQolErrInvalidArgument, "missing jewel flag", 18);
-    *out_is_jewel = g_item_is_jewel ? 1 : 0;
-    return qol::contracts::ok();
-}
-
-QolResult fake_is_real_equip(qol::contracts::QolItemHandle handle, int32_t* out_value) {
     ++g_real_equip_calls;
     assert(handle.slot != 0 && handle.generation != 0);
+    if (g_jewel_query_error)
+        return qol::contracts::error(kQolErrNotReady, "jewel query error", 17);
     if (g_real_equip_error)
         return qol::contracts::error(kQolErrNotReady, "real equip error", 16);
-    if (out_value == nullptr)
-        return qol::contracts::error(kQolErrInvalidArgument, "missing equip flag", 17);
-    *out_value = g_item_is_real_equip ? 1 : 0;
+    if (out_type == nullptr)
+        return qol::contracts::error(kQolErrInvalidArgument, "missing item type", 16);
+    if (g_item_is_jewel) {
+        *out_type = qol::contracts::QolItemType::kJewel;
+    } else if (g_item_is_real_equip) {
+        *out_type = qol::contracts::QolItemType::kEquipment;
+    } else {
+        *out_type = qol::contracts::QolItemType::kOther;
+    }
     return qol::contracts::ok();
 }
 
@@ -498,7 +498,7 @@ void test_standalone_jewel_matching_attribute_is_colored() {
     g_jewel_attribute_type = 30;
     g_jewel_value = 70;
     add_with_context(reinterpret_cast<void*>(0x3300), 30, 70);
-    assert(g_category_calls == 1 && g_jewel_query_calls == 1 && g_real_equip_calls == 1);
+    assert(g_jewel_query_calls == 1 && g_real_equip_calls == 1);
     assert(g_item_view_calls == 1 && g_query_calls == 1 && g_insert_calls == 1);
 }
 
@@ -546,9 +546,8 @@ void test_standalone_jewel_invalid_classification_or_fields_is_not_colored() {
 
     reset_quality_state();
     qol::features::attribute_range_display::set_active(true);
-    g_item_is_jewel = true;
+    g_item_is_jewel = false;
     g_item_is_real_equip = false;
-    g_category_error = true;
     add_with_context(reinterpret_cast<void*>(0x3800), 30, 70);
     assert(g_item_view_calls == 0 && g_query_calls == 0 && g_insert_calls == 0);
 
@@ -638,7 +637,7 @@ void test_view_is_cached_per_make_item_cycle() {
     g_emit_second_add = true;
     add_with_context(reinterpret_cast<void*>(0x2f00), 12, 41);
     assert(g_item_view_calls == 1);
-    assert(g_category_calls == 1 && g_jewel_query_calls == 1 && g_real_equip_calls == 1);
+    assert(g_jewel_query_calls == 1 && g_real_equip_calls == 1);
     assert(g_query_calls == 2 && g_insert_calls == 2);
 }
 
@@ -843,8 +842,7 @@ int main() {
     g_item_facts_api = {};
     g_item_facts_api.struct_size = sizeof(g_item_facts_api);
     g_item_facts_api.category = fake_category;
-    g_item_facts_api.is_jewel_category = fake_is_jewel_category;
-    g_item_facts_api.is_real_equip = fake_is_real_equip;
+    g_item_facts_api.item_type = fake_item_type;
     g_item_facts_api.view = fake_item_view;
     g_ui = {};
     g_ui.size = sizeof(g_ui);

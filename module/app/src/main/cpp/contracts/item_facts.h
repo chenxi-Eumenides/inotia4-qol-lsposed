@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "game_ports/item_port.h"
+#include "item_type.h"
 #include "result.h"
 #include "sell_price.h"
 #include "version.h"
@@ -10,13 +11,12 @@
 namespace qol::contracts {
 
 constexpr const char* kItemFactsCapabilityId = "item.facts";
-constexpr QolVersion kItemFactsVersion{3, 6};
+constexpr QolVersion kItemFactsVersion{4, 0};
 constexpr uint16_t kItemFactsVersionMajor = kItemFactsVersion.major;
 constexpr uint16_t kItemFactsVersionMinor = kItemFactsVersion.minor;
 
 using ItemFactsCategoryFn = QolResult (*)(QolItemHandle item, int32_t* out_category);
-using ItemFactsIsRealEquipFn = QolResult (*)(QolItemHandle item, int32_t* out_value);
-using ItemFactsIsJewelCategoryFn = QolResult (*)(int32_t category, int32_t* out_is_jewel);
+using ItemFactsItemTypeFn = QolResult (*)(QolItemHandle item, QolItemType* out_type);
 using ItemFactsIsNoSellFn = QolResult (*)(int32_t category, int32_t* out_value);
 using ItemFactsSellPriceFn = QolResult (*)(QolItemHandle item, int64_t* out_price);
 using ItemFactsCumulateCountFn = QolResult (*)(QolItemHandle item, int32_t* out_count);
@@ -38,8 +38,7 @@ using ItemFactsMoneyFn = QolResult (*)(int64_t* out_money);
 struct ItemFactsApi {
     uint32_t struct_size;
     ItemFactsCategoryFn category;
-    ItemFactsIsRealEquipFn is_real_equip;
-    ItemFactsIsJewelCategoryFn is_jewel_category;
+    ItemFactsItemTypeFn item_type;
     ItemFactsIsNoSellFn is_no_sell;
     ItemFactsSellPriceFn sell_price;
     ItemFactsCumulateCountFn cumulate_count;

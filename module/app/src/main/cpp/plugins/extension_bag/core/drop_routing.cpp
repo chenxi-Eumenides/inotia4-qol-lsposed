@@ -146,9 +146,8 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
                 void* data = extension_bag_ui_data(moving_control);
                 item = data != nullptr ? *reinterpret_cast<void**>(data) : nullptr;
             }
-            const int category = original_item_category_locked(item);
             if (runtime_state().objects.bag.types[index] == 0 &&
-                extension_bag_runtime_is_backpack_category(category)) {
+                extension_bag_runtime_is_backpack_category(item)) {
                 // 原版背包来源的袋物品拖到空扩展标签也必须走“袋槽装备”，
                 // 不能直接落入普通扩展物品槽。
                 return try_equip_on_extension_tab_drop_locked(lock, index, moving_control);
@@ -193,9 +192,11 @@ bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int
         for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {
             if (index == qol::extension_bag::ui_state().ui.extension_drag.bag) continue;
             if (!extension_tab_hit(index, x, y)) continue;
-            const int category = runtime_state().objects.bag.items[qol::extension_bag::ui_state().ui.extension_drag.bag][qol::extension_bag::ui_state().ui.extension_drag.slot].category;
+            const int source_bag = qol::extension_bag::ui_state().ui.extension_drag.bag;
+            const int source_slot = qol::extension_bag::ui_state().ui.extension_drag.slot;
+            void* item = qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot];
             const bool should_equip = runtime_state().objects.bag.types[index] == 0 &&
-                                      extension_bag_runtime_is_backpack_category(category);
+                                      extension_bag_runtime_is_backpack_category(item);
             const bool handled = should_equip
                 ? try_equip_on_extension_tab_drop_locked(
                       lock, index, touch_moving_item_control_locked())
@@ -338,13 +339,10 @@ bool route_projected_session_drop_locked(::qol::extension_bag::ReentryLock& lock
         ? qol::extension_bag::ui_state().objects.module_objects[source_bag][source_slot] : nullptr;
     void* target_item = target_slot >= 0 && target_slot < runtime_state().objects.bag.capacities[target_bag]
         ? qol::extension_bag::ui_state().objects.module_objects[target_bag][target_slot] : nullptr;
-    const int source_category = virtual_bag::valid_index(source_bag) && source_slot >= 0 &&
-        source_slot < virtual_bag::kSlotCount
-        ? runtime_state().objects.bag.items[source_bag][source_slot].category : 0;
     const bool source_is_apply_material =
-        read_item_is_jewel(source_category) || read_item_is_enchant_scroll(source_category);
+        read_item_is_jewel(material) || read_item_is_enchant_scroll(material);
     // S-03 apply 准入（R-50）：同袋 + 扩展宝石/强化卷轴源 + 目标为装备类 +
-    // IsApplyStuff 判真。目标类别用 item_is_equip 判定（数据不可用按非装备
+    // IsApplyStuff 判真。目标类型用 item.facts.item_type 判定（不可用按非装备
     // fail-closed），普通物品目标不得进入 apply；不设提前 return，统一落到
     // 下方事务分支（交换/移动）并保证 session_finish_transaction 必然执行。
     int32_t apply_stuff_value = 0;

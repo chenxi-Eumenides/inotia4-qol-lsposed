@@ -70,11 +70,12 @@ inline constexpr uint16_t kTierUpLabelWordId = 35291;
 constexpr uint32_t kModuleRecipeResultItemId = 0;
 
 // 3 格隐式配方（宝石强化页 UIMix type 1 的 3 个填入格；设计册 §2.8 / §4.12）。
-// **匹配键 = 物品类别**（`item + I_TYPE` u16 的 bits6-15；取法同 `item_is_jewel`），
+// **匹配键 = 物品类别**（`item + I_TYPE` u16 的 bits6-15；类别用于精确配方匹配，
+// 宝石类型另由调用方按 item handle 经 `item.facts.item_type` 判定），
 // 且对本项目用到的物品类别而言 **类别 == itemId**（文档类别表与 itemId 区间一致：
 // 5-8/15 药水、16-25 卷轴、28-32 宝石；`ITEMDATABASE` 记录内无独立类别字段）。
 //
-// 槽位通配符：`kAnyJewelSlot` 表示「该格接受任意宝石类别（28..32）」，**只在 ordered
+// 槽位通配符：`kAnyJewelSlot` 表示「该格接受 item_type 为 Jewel 的物品」，**只在 ordered
 // （按槽位严格匹配）行里生效**；unordered 行参与排序比较，不得使用。
 constexpr uint16_t kAnyJewelSlot = 0xFFFF;
 
@@ -112,16 +113,21 @@ const ThreeSlotRecipe* three_slot_recipes(size_t* out_count);
 // 按 3 格类别（0=空）匹配；未命中返回 nullptr。ordered=false 用多重集比较。
 // is_special_equip：类别 → 是否特殊装备（供 `kAnySpecialEquipSlot` 判定）。
 // nullptr = 不支持该通配符（相关配方不命中），其余配方不受影响。
+// jewel_slots：调用方按 item handle 经 item.facts.item_type 判定的逐槽宝石标志；
+// nullptr = 不支持宝石通配符（相关配方不命中），不从类别推导物品类型。
 // 查表顺序 = **静态表优先，其后动态表**（见下文），首个命中者胜出。
 const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
-                                         bool (*is_special_equip)(uint16_t category) = nullptr);
+                                         bool (*is_special_equip)(uint16_t category) = nullptr,
+                                         const bool jewel_slots[3] = nullptr);
 
 // 复用固定配方匹配语义，供目录构造与调用方检测候选配方是否会被静态规则遮蔽。
 bool three_slot_recipe_matches(const ThreeSlotRecipe& recipe, const uint16_t slots[3],
-                               bool (*is_special_equip)(uint16_t category) = nullptr);
+                               bool (*is_special_equip)(uint16_t category) = nullptr,
+                               const bool jewel_slots[3] = nullptr);
 const ThreeSlotRecipe* match_static_three_slot(
     const uint16_t slots[3],
-    bool (*is_special_equip)(uint16_t category) = nullptr);
+    bool (*is_special_equip)(uint16_t category) = nullptr,
+    const bool jewel_slots[3] = nullptr);
 
 // ---------------------------------------------------------------------------
 // 动态特殊装备配方（进档时按创建时间 seed 构建，并使用进程内缓存）

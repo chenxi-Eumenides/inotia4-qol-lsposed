@@ -178,6 +178,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         return 1;
     }
     const auto* item_facts = static_cast<const contracts::ItemFactsApi*>(iface);
+    if (item_facts->item_type == nullptr) return 1;
 
     iface = nullptr;
     if (!contracts::succeeded(ctx.sdk->capabilities.require(

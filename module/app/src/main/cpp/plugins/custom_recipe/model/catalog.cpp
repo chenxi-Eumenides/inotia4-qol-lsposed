@@ -126,11 +126,6 @@ void sort_three(uint16_t* v) {
     }
 }
 
-// 通配槽判定：类别是否落在宝石区间（28..32）。复用规则层的档位函数（非宝石返回 0）。
-bool is_jewel_category(uint16_t category) {
-    return jewel_grade_from_category(static_cast<int>(category)) > 0;
-}
-
 uint16_t g_base_record_count = 0;
 bool g_bound = false;
 
@@ -165,7 +160,8 @@ namespace {
 // 在给定配方表里按 3 格类别匹配（静态表与动态表共用同一套匹配语义）。
 const ThreeSlotRecipe* match_in_table(const ThreeSlotRecipe* table, size_t count,
                                       const uint16_t slots[3],
-                                      bool (*is_special_equip)(uint16_t category)) {
+                                      bool (*is_special_equip)(uint16_t category),
+                                      const bool jewel_slots[3]) {
     uint16_t sorted_actual[kThreeSlotCount] = {slots[0], slots[1], slots[2]};
     sort_three(sorted_actual);
     for (size_t i = 0; i < count; ++i) {
@@ -177,8 +173,8 @@ const ThreeSlotRecipe* match_in_table(const ThreeSlotRecipe* table, size_t count
             for (size_t s = 0; s < kThreeSlotCount; ++s) {
                 const uint16_t want = recipe.slots[s];
                 if (want == kAnyJewelSlot) {
-                    // 通配：该格接受任意宝石类别（28..32）。
-                    if (!is_jewel_category(slots[s])) {
+                    // 通配：只接受调用方按 item handle/item_type 判定的宝石。
+                    if (jewel_slots == nullptr || !jewel_slots[s]) {
                         hit = false;
                         break;
                     }
@@ -259,14 +255,18 @@ void make_seeded_candidate(uint64_t* state, uint16_t product,
 }  // namespace
 
 bool three_slot_recipe_matches(const ThreeSlotRecipe& recipe, const uint16_t slots[3],
-                               bool (*is_special_equip)(uint16_t category)) {
-    return slots != nullptr && match_in_table(&recipe, 1, slots, is_special_equip) != nullptr;
+                               bool (*is_special_equip)(uint16_t category),
+                               const bool jewel_slots[3]) {
+    return slots != nullptr &&
+           match_in_table(&recipe, 1, slots, is_special_equip, jewel_slots) != nullptr;
 }
 
 const ThreeSlotRecipe* match_static_three_slot(
-    const uint16_t slots[3], bool (*is_special_equip)(uint16_t category)) {
+    const uint16_t slots[3], bool (*is_special_equip)(uint16_t category),
+    const bool jewel_slots[3]) {
     if (slots == nullptr) return nullptr;
-    return match_in_table(kThreeSlotRecipes, kThreeSlotRecipeLen, slots, is_special_equip);
+    return match_in_table(kThreeSlotRecipes, kThreeSlotRecipeLen, slots, is_special_equip,
+                          jewel_slots);
 }
 
 QolResult build_dynamic_recipes_seeded(const uint16_t* equip_categories, size_t equip_count,
@@ -412,12 +412,15 @@ size_t dynamic_three_slot_recipe_count() { return g_dynamic_recipe_count; }
 uint64_t dynamic_recipe_generation() { return g_dynamic_recipe_generation; }
 
 const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
-                                         bool (*is_special_equip)(uint16_t category)) {
+                                        bool (*is_special_equip)(uint16_t category),
+                                        const bool jewel_slots[3]) {
     if (slots == nullptr) return nullptr;
     // 静态表优先（固定配方语义不受动态表影响），未命中再查进档随机生成的动态表。
-    const ThreeSlotRecipe* hit = match_static_three_slot(slots, is_special_equip);
+    const ThreeSlotRecipe* hit =
+        match_static_three_slot(slots, is_special_equip, jewel_slots);
     if (hit != nullptr) return hit;
-    return match_in_table(g_dynamic_recipes, g_dynamic_recipe_count, slots, is_special_equip);
+    return match_in_table(g_dynamic_recipes, g_dynamic_recipe_count, slots, is_special_equip,
+                          jewel_slots);
 }
 
 bool catalog_ready() { return g_bound; }

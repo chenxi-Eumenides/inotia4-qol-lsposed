@@ -330,8 +330,7 @@ bool extension_handle_character_equip() {
     }
     void* character = extension_menu_character();
     if (character == nullptr) return false;
-    int category = 0;
-    if (read_item_category(item, &category) && read_item_is_mercenary_seal(category)) {
+    if (read_item_is_mercenary_seal(item)) {
         // Mercenary seals are consumed by the dedicated use button, not by the
         // generic character-equip callback.
         return false;
@@ -398,7 +397,8 @@ bool extension_handle_backpack_equip() {
         return false;
     }
     int category = 0;
-    if (!read_item_category(item, &category) || !category_is_extension_backpack(category)) {
+    (void)read_item_category(item, &category);
+    if (!category_is_extension_backpack(item)) {
         QOL_LOG_INFO(QolDomain::kExtensionBag,
                      "backpack equip probe rejected category=%d bag=%d slot=%d",
                      category, source_bag, source_slot);

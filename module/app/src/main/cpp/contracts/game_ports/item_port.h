@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <type_traits>
 
+#include "../item_type.h"
 #include "../result.h"
 #include "../version.h"
 #include "../item_handle.h"
@@ -162,8 +163,7 @@ using QolItemStaticTextFn = QolResult (*)(int32_t kind, int32_t id, const char**
 
 struct QolItemPortReadApi {
     QolResult (*category)(QolItemHandle item, int32_t* out_category);
-    QolResult (*is_real_equip)(QolItemHandle item, int32_t* out_value);
-    QolResult (*is_jewel_category)(int32_t category, int32_t* out_is_jewel);
+    QolResult (*item_type)(QolItemHandle item, QolItemType* out_type);
     QolResult (*is_no_sell)(int32_t category, int32_t* out_value);
     QolResult (*sell_price)(QolItemHandle item, int64_t* out_price);
     QolResult (*cumulate_count)(QolItemHandle item, int32_t* out_count);

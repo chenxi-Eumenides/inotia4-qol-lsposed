@@ -45,7 +45,7 @@ QolResult item_facts_quote(qol::contracts::QolItemHandle, uint32_t sale_path,
 
 qol::contracts::ItemFactsApi kItemFacts{
     sizeof(qol::contracts::ItemFactsApi), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &item_facts_quote};
+    nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, &item_facts_quote};
 
 void reset() {
     std::memset(g_item, 0, sizeof(g_item));
