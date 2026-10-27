@@ -65,6 +65,19 @@ bool item_type(contracts::QolItemHandle, contracts::QolItemType* out) {
         *out = contracts::QolItemType::kJewel;
         return true;
     }
+    if (g_current_category >= 1 && g_current_category <= 4) {
+        *out = contracts::QolItemType::kBackpack;
+        return true;
+    }
+    if (g_current_category >= 52 && g_current_category <= 56) {
+        *out = contracts::QolItemType::kDice;
+        return true;
+    }
+    if ((g_current_category >= 42 && g_current_category <= 50) ||
+        (g_current_category >= 928 && g_current_category <= 933)) {
+        *out = contracts::QolItemType::kMercenarySeal;
+        return true;
+    }
     if (g_real_equip) {
         if (!g_real_equip_available) return false;
         *out = contracts::QolItemType::kEquipment;

@@ -17,8 +17,7 @@ bool item_rarity(contracts::QolItemHandle item, int32_t* out);
 bool item_enchant_remaining(contracts::QolItemHandle item, int32_t* out);
 bool item_socket_filled(contracts::QolItemHandle item, int32_t* out);
 bool item_socket_total(contracts::QolItemHandle item, int32_t* out);
-bool item_is_backpack(int32_t category, int32_t* out);
-bool item_is_dice(int32_t category, int32_t* out);
+
 bool item_is_no_sell(int32_t category, int32_t* out);
 bool item_jewel_value(contracts::QolItemHandle item, int32_t* out);
 bool item_jewel_attribute_type(contracts::QolItemHandle item, int32_t* out);

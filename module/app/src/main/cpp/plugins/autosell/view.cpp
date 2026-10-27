@@ -8,8 +8,7 @@ namespace {
 
 // 宝石 category 起档（IsJewel 闭区间 28..32；档位 = category - 28）。
 constexpr int kJewelCategoryFirst = 28;
-constexpr int kBackpackCategoryFirst = 1;
-constexpr int kBackpackCategoryLast = 4;
+// 徽章档位仍由 category 细分；item_type 先保证只在 kMercenarySeal 内比较。
 constexpr int kBadgeRankOneFirst = 42;
 constexpr int kBadgeRankOneLast = 47;
 constexpr int kBlessedBadgeCategory = 48;
@@ -17,8 +16,7 @@ constexpr int kHeroBadgeCategory = 49;
 constexpr int kCultBadgeCategory = 50;
 constexpr int kClassHeroBadgeFirst = 928;
 constexpr int kClassHeroBadgeLast = 933;
-constexpr int kDiceCategoryFirst = 52;
-constexpr int kDiceCategoryLast = 56;
+constexpr int kDiceTierBase = 51;
 
 }  // namespace
 
@@ -82,19 +80,21 @@ AutosellViewBuildReason autosell_build_view(
         }
     }
 
-    out->is_backpack = category >= kBackpackCategoryFirst && category <= kBackpackCategoryLast;
-    if (category >= kBadgeRankOneFirst && category <= kBadgeRankOneLast) {
-        out->badge_rank = 1;
-    } else if (category == kBlessedBadgeCategory) {
-        out->badge_rank = 2;
-    } else if (category == kCultBadgeCategory) {
-        out->badge_rank = 3;
-    } else if (category == kHeroBadgeCategory ||
-               (category >= kClassHeroBadgeFirst && category <= kClassHeroBadgeLast)) {
-        out->badge_rank = 4;
+    out->is_backpack = item_type == qol::contracts::QolItemType::kBackpack;
+    if (item_type == qol::contracts::QolItemType::kMercenarySeal) {
+        if (category >= kBadgeRankOneFirst && category <= kBadgeRankOneLast) {
+            out->badge_rank = 1;
+        } else if (category == kBlessedBadgeCategory) {
+            out->badge_rank = 2;
+        } else if (category == kCultBadgeCategory) {
+            out->badge_rank = 3;
+        } else if (category == kHeroBadgeCategory ||
+                   (category >= kClassHeroBadgeFirst && category <= kClassHeroBadgeLast)) {
+            out->badge_rank = 4;
+        }
     }
-    if (category >= kDiceCategoryFirst && category <= kDiceCategoryLast) {
-        out->dice_tier = category - 51;
+    if (item_type == qol::contracts::QolItemType::kDice) {
+        out->dice_tier = category - kDiceTierBase;
     }
 
     out->is_equip = item_type == qol::contracts::QolItemType::kEquipment;

@@ -8,7 +8,6 @@ namespace qol::features::autosell::read_only {
 namespace {
 
 const contracts::ItemFactsApi* facts() { return item_facts(); }
-const contracts::QolGameHost* game() { return game_host(); }
 bool read_view(contracts::QolItemHandle item, contracts::QolItemInventoryView* out) {
     const auto* api = facts();
     return api != nullptr && api->view != nullptr &&
@@ -56,18 +55,6 @@ bool item_socket_total(contracts::QolItemHandle item, int32_t* out) {
     if (out == nullptr || !read_view(item, &view)) return false;
     *out = view.socket_total;
     return true;
-}
-
-bool item_is_backpack(int32_t category, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.is_backpack_category != nullptr &&
-           contracts::succeeded(host->read_only.item.is_backpack_category(category, out));
-}
-
-bool item_is_dice(int32_t category, int32_t* out) {
-    const auto* host = game();
-    return host != nullptr && host->read_only.item.is_dice != nullptr &&
-           contracts::succeeded(host->read_only.item.is_dice(category, out));
 }
 
 bool item_is_no_sell(int32_t category, int32_t* out) {
