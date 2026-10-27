@@ -173,26 +173,38 @@ contracts::InventorySellResult sell_item(contracts::QolActionRef ref,
         result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
         return result;
     }
-    if (no_sell != 0) {
+    const bool c18_layout =
+        g_action_game->target.has_capability != nullptr &&
+        g_action_game->target.has_capability(
+            contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
+    if (no_sell != 0 && !c18_layout) {
         result.status = contracts::InventorySellStatus::kNoSell;
         return result;
     }
-    if (!contracts::item_facts_api_quote_size_valid(g_item_facts) ||
-        g_item_facts->quote == nullptr) {
-        result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
-        return result;
-    }
-    contracts::QolSaleQuote quote{};
-    quote.struct_size = sizeof(quote);
-    if (!contracts::succeeded(g_item_facts->quote(item.item, contracts::kDetailSell, &quote)) ||
-        quote.struct_size < sizeof(quote) || quote.count < count || quote.unit_price < 0 ||
-        quote.multiplier_den == 0 || quote.multiplier_num > quote.multiplier_den ||
-        !contracts::sell_price::calculate(quote.unit_price, static_cast<uint32_t>(count),
-                                          quote.multiplier_num, quote.multiplier_den,
-                                          &result.price)) {
-        result.status = contracts::InventorySellStatus::kPriceInvalid;
+    if (no_sell != 0) {
+        // C18 is allowed to dispose of no-sell items at price zero. Other
+        // variants keep the original no-sell semantics above.
         result.price = 0;
-        return result;
+    } else {
+        if (!contracts::item_facts_api_quote_size_valid(g_item_facts) ||
+            g_item_facts->quote == nullptr) {
+            result.status = contracts::InventorySellStatus::kSymbolsUnresolved;
+            return result;
+        }
+        contracts::QolSaleQuote quote{};
+        quote.struct_size = sizeof(quote);
+        if (!contracts::succeeded(
+                g_item_facts->quote(item.item, contracts::kDetailSell, &quote)) ||
+            quote.struct_size < sizeof(quote) || quote.count < count ||
+            quote.unit_price < 0 || quote.multiplier_den == 0 ||
+            quote.multiplier_num > quote.multiplier_den ||
+            !contracts::sell_price::calculate(
+                quote.unit_price, static_cast<uint32_t>(count), quote.multiplier_num,
+                quote.multiplier_den, &result.price)) {
+            result.status = contracts::InventorySellStatus::kPriceInvalid;
+            result.price = 0;
+            return result;
+        }
     }
     result.count = count;
     if (g_action_game->world_action.add_money == nullptr) {

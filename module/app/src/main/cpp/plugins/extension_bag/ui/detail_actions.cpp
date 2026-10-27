@@ -46,6 +46,8 @@
 #include <thread>
 #include <unistd.h>
 
+bool extension_c18_layout();
+
 namespace {
 
 void extension_destroy_ok(void*);
@@ -54,6 +56,7 @@ void extension_destroy_cancel(void*);
 void extension_sell_cancel(void*);
 
 bool g_extension_custom_sell_confirmation = false;
+
 
 const qol::contracts::UiConfirmationApi* extension_ui_confirmation_api() {
     const auto* sdk = ::qol::extension_bag::access::host().sdk;
@@ -156,6 +159,7 @@ void restore_extension_desc_popup_callbacks_locked() {
 
 namespace {
 
+
 void extension_sell_cancel(void*) {
     ExtensionDestroyOkFn original_cancel = nullptr;
     {
@@ -237,33 +241,40 @@ void extension_sell_ok(void*) {
                 count = ::qol::extension_bag::access::bag().items[bag][slot].count;
         int category = -1;
         int32_t no_sell = 0;
-        if (!read_item_category(item, &category) ||
-            !qol::contracts::succeeded(::qol::extension_bag::access::host().item_facts->is_no_sell(category, &no_sell)) ||
-            no_sell != 0) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "extension sell rejected no-sell item bag=%d slot=%d category=%d",
+        const bool category_ok =
+            read_item_category(item, &category) &&
+            qol::contracts::succeeded(
+                ::qol::extension_bag::access::host().item_facts->is_no_sell(category, &no_sell));
+        if (!category_ok || (no_sell != 0 && !extension_c18_layout())) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                        "extension sell rejected no-sell item bag=%d slot=%d category=%d",
                         bag, slot, category);
             clear_original_desc_locked();
             return;
         }
-        int64_t unit_price = 0;
-        uint32_t multiplier_num = 0;
-        uint32_t multiplier_den = 0;
-        if (!extension_detail_sell_quote(item, count, &price, &unit_price, &multiplier_num,
-                                         &multiplier_den)) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag,
-                "sell price reject reason=quote source=equip category=%d count=%d payload=%u gen=%llu",
-                category, count,
+        if (no_sell != 0) {
+            price = 0;
+        } else {
+            int64_t unit_price = 0;
+            uint32_t multiplier_num = 0;
+            uint32_t multiplier_den = 0;
+            if (!extension_detail_sell_quote(item, count, &price, &unit_price, &multiplier_num,
+                                             &multiplier_den)) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                    "sell price reject reason=quote source=equip category=%d count=%d payload=%u gen=%llu",
+                    category, count,
+                    virtual_bag::payload_hash(::qol::extension_bag::access::bag().items[bag][slot]),
+                    static_cast<unsigned long long>(qol::extension_bag::ui_state().objects.module_object_use[bag][slot].generation));
+                clear_original_desc_locked();
+                return;
+            }
+            QOL_LOG_INFO(QolDomain::kExtensionBag,
+                "sell price source=equip category=%d count=%d unit=%lld multiplier=%u/%u final=%lld payload=%u gen=%llu",
+                category, count, static_cast<long long>(unit_price), multiplier_num, multiplier_den,
+                static_cast<long long>(price),
                 virtual_bag::payload_hash(::qol::extension_bag::access::bag().items[bag][slot]),
                 static_cast<unsigned long long>(qol::extension_bag::ui_state().objects.module_object_use[bag][slot].generation));
-            clear_original_desc_locked();
-            return;
         }
-        QOL_LOG_INFO(QolDomain::kExtensionBag,
-            "sell price source=equip category=%d count=%d unit=%lld multiplier=%u/%u final=%lld payload=%u gen=%llu",
-            category, count, static_cast<long long>(unit_price), multiplier_num, multiplier_den,
-            static_cast<long long>(price),
-            virtual_bag::payload_hash(::qol::extension_bag::access::bag().items[bag][slot]),
-            static_cast<unsigned long long>(qol::extension_bag::ui_state().objects.module_object_use[bag][slot].generation));
     }
 
     int64_t money_before = -1;
@@ -552,6 +563,13 @@ bool extension_use_mercenary_seal() {
     return true;
 }
 
+bool extension_c18_layout() {
+    const auto* game = ::qol::extension_bag::access::host().game;
+    return game != nullptr && game->target.has_capability != nullptr &&
+           game->target.has_capability(
+               qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
+}
+
 bool extension_handle_sell_button() {
     if (qol::extension_bag::ui_state().store.frame_active ||
         qol::extension_bag::ui_state().store.view_installed) {
@@ -584,12 +602,27 @@ bool extension_handle_sell_button() {
             ::qol::extension_bag::access::host().item_facts->is_no_sell != nullptr) {
             count = ::qol::extension_bag::access::bag().items[bag][slot].count;
             int32_t no_sell = 0;
-            if (read_item_category(item, &category) &&
+            const bool category_ok =
+                read_item_category(item, &category) &&
                 qol::contracts::succeeded(
-                    ::qol::extension_bag::access::host().item_facts->is_no_sell(category, &no_sell)) &&
-                no_sell == 0 && count > 0 &&
-                extension_detail_sell_quote(item, count, &price, &unit_price,
-                                            &multiplier_num, &multiplier_den)) {
+                    ::qol::extension_bag::access::host().item_facts->is_no_sell(category, &no_sell));
+            if (!category_ok) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                    "sell price reject reason=category source=equip category=%d count=%d",
+                    category, count);
+            } else if (no_sell != 0 && !extension_c18_layout()) {
+                // Other variants keep the original no-sell behavior. Returning
+                // without consuming lets the original destroy handler run.
+                QOL_LOG_INFO(QolDomain::kExtensionBag,
+                    "sell no-sell delegated to original category=%d", category);
+            } else if (count > 0 && no_sell != 0) {
+                valid = true;
+                price = 0;
+                QOL_LOG_INFO(QolDomain::kExtensionBag,
+                    "sell no-sell c18 zero-price category=%d count=%d", category, count);
+            } else if (count > 0 &&
+                       extension_detail_sell_quote(item, count, &price, &unit_price,
+                                                   &multiplier_num, &multiplier_den)) {
                 valid = true;
                 QOL_LOG_INFO(QolDomain::kExtensionBag,
                     "sell price source=equip category=%d count=%d unit=%lld multiplier=%u/%u final=%lld",
