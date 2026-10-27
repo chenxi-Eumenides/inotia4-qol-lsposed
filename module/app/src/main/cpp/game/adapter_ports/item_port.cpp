@@ -115,15 +115,18 @@ QolResult read_item_type(contracts::QolItemHandle handle, contracts::QolItemType
         *out = contracts::QolItemType::kItemBox;
         return contracts::ok();
     }
-    // ITEMDATABASE categories 706..717 are the twelve tiered synthesis sets.
-    if (category >= 706 && category <= 717) {
+    const int use_type = item_use_type(category);
+    // ITEMDATABASE categories 706..717 are the twelve tiered synthesis sets;
+    // their ITEMCLASSBASE use-effect id is 0x21. Require both to avoid a
+    // category-only false positive.
+    if (category >= 706 && category <= 717 && use_type == 0x21) {
         *out = contracts::QolItemType::kSynthSet;
         return contracts::ok();
     }
     // ITEMCLASSBASE +2 is the game's use-effect type. It covers special
     // consumables such as the lamp (0x21) that ITEMDATABASE_IsUse does not
     // report. Materials have type 0 and remain kOther.
-    if (item_use_type(category) > 0 ||
+    if (use_type > 0 ||
         (fn_is_use != nullptr && fn_is_use(category) != 0)) {
         *out = contracts::QolItemType::kConsumable;
         return contracts::ok();
