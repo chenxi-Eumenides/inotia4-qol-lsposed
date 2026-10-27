@@ -40,7 +40,7 @@
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
 | `inventory.bag_source` | 1.2 | 注册/注销外部袋源，并提供跨空间转移所需的袋源原语。 |
 | `inventory_refresh` | 1.2 | 原版库存区域刷新；`update_shortcut_category(category)` 按类别重算快捷栏数量（含注册袋源物品）。 |
-| `inventory.action` | 3.0 | 移动、使用、丢弃、出售、装备、卸下和镶嵌。 |
+| `inventory.action` | 3.1 | 移动、使用、丢弃、出售、装备、卸下和镶嵌。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
 | `move_merge.control` | 1.0 | 报告拖拽合并是否可用。 |
 | `inventory.projection` | 1.3 | 注册/注销投影回调；投影显示和数据仍归注册方。尾部回调支持原版袋卸下、佣兵徽章、背包装备与角色装备。 |
@@ -110,7 +110,9 @@ struct QolBagTransfer {
 
 payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容。payload 是来源定义的序列化状态；`core.item` 只透传、不解释或改写。部分堆叠时 `count` 表示本次数量，目标须将 payload 中数量规范化为该值；接收端应在回调期间复制需保留的数据。
 
-## `inventory.action` v3.0
+## `inventory.action` v3.1
+
+3.1 尾部新增 `find_empty_slots(limit, out_slots, out_count)`：按原版、改版、注册源的空间顺序返回最多 3 个不重复空槽；调用方仍需按介质选择可落槽。
 
 所有物品副作用由该能力统一提供。全部方法只在游戏主线程调用；调用者传入显式 `QolActionRef`，不延迟解析当前页签。
 

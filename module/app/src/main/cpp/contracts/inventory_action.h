@@ -4,6 +4,7 @@
 #include <type_traits>
 
 #include "item_handle.h"
+#include "result.h"
 
 // 库存动作能力的唯一对外入口。所有物品副作用（移动、合并、使用、消耗、出售、
 // 装备、镶嵌）都由 core.item 执行；调用方只提供显式袋引用，不接触游戏私有库存
@@ -15,7 +16,7 @@ namespace qol::contracts {
 
 constexpr const char* kInventoryActionCapabilityId = "inventory.action";
 constexpr uint16_t kInventoryActionVersionMajor = 3;
-constexpr uint16_t kInventoryActionVersionMinor = 0;
+constexpr uint16_t kInventoryActionVersionMinor = 1;
 
 // 空间与袋号固定为调用时刻的显式值；core.item 执行前会用 item_at 复核句柄。
 struct QolActionRef {
@@ -93,6 +94,10 @@ struct InventoryActionApi {
     InventoryUseOutcome (*equip)(int32_t role, QolActionRef ref, int32_t equip_slot);
     InventoryUseOutcome (*unequip)(int32_t role, int32_t equip_slot);
     InventoryUseOutcome (*put_jewel)(int32_t role, QolActionRef jewel, int32_t equip_slot);
+    // Find up to limit empty slots in space order (original, variant, registered sources).
+    // Returns kQolErrNotReady if the inventory read face is unavailable.
+    QolResult (*find_empty_slots)(int32_t limit, QolActionRef* out_slots,
+                                  int32_t* out_count);
 };
 
 static_assert(std::is_standard_layout<QolActionRef>::value, "action ref must be standard layout");

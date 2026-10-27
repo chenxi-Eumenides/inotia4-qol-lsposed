@@ -353,38 +353,87 @@ contracts::InventorySellResult sell(QolActionRef ref, QolItemHandle expected_ite
 
 namespace {
 
-bool find_empty_native_slot(int32_t* out_bag, int32_t* out_slot) {
-    if (out_bag == nullptr || out_slot == nullptr || g_port == nullptr ||
-        !contracts::qol_item_port_bag_space_size_valid(g_port) ||
+QolResult find_empty_slots_impl(int32_t limit, QolActionRef* out_slots,
+                                int32_t* out_count) {
+    if (out_slots == nullptr || out_count == nullptr || limit <= 0) {
+        return contracts::error(kQolErrInvalidArgument, "invalid empty slot request", 28);
+    }
+    const int32_t wanted = limit > 3 ? 3 : limit;
+    *out_count = 0;
+    if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
         g_port->read.bag_count == nullptr || g_port->read.bag_info == nullptr ||
         g_port->read.item_at == nullptr) {
-        return false;
+        return contracts::error(kQolErrNotReady, "inventory read unavailable", 25);
     }
-    int32_t bag_count = 0;
-    if (!contracts::succeeded(
-            g_port->read.bag_count(contracts::kQolBagSpaceOriginal, &bag_count))) {
-        return false;
+
+    auto append = [&](int32_t space, int32_t bag, int32_t slot) {
+        if (*out_count >= wanted) return;
+        out_slots[*out_count] = QolActionRef{space, bag, slot};
+        ++*out_count;
+    };
+
+    // Original and variant native spaces first, then registered sources in
+    // space order. The first three empty slots are sufficient for a
+    // two-handed replacement (one staging slot plus two displaced items).
+    for (int32_t space = contracts::kQolBagSpaceOriginal;
+         space <= 1 && *out_count < wanted; ++space) {
+        int32_t bag_count = 0;
+        const QolResult count_result = g_port->read.bag_count(space, &bag_count);
+        if (!contracts::succeeded(count_result)) {
+            if (count_result.code == kQolErrUnsupported ||
+                count_result.code == kQolErrNotReady) {
+                continue;
+            }
+            return count_result;
+        }
+        for (int32_t bag = 0; bag < bag_count && *out_count < wanted; ++bag) {
+            if (space == contracts::kQolBagSpaceOriginal &&
+                bag == contracts::kQolTaskBagIndex) {
+                continue;
+            }
+            const contracts::QolBagRef ref{space, bag};
+            contracts::QolBagInfo info{};
+            if (!contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
+                info.capacity < 0) {
+                continue;
+            }
+            for (int32_t slot = 0; slot < info.capacity && *out_count < wanted; ++slot) {
+                contracts::QolInventoryItemRef item{};
+                const QolResult result = g_port->read.item_at(&ref, slot, &item);
+                if (result.code == kQolErrNotFound) {
+                    append(space, bag, slot);
+                    continue;
+                }
+                if (!contracts::succeeded(result)) return result;
+            }
+        }
     }
-    for (int32_t bag = 0; bag < bag_count && bag < 5; ++bag) {
-        if (bag == contracts::kQolTaskBagIndex) continue;
-        const contracts::QolBagRef ref{contracts::kQolBagSpaceOriginal, bag};
-        contracts::QolBagInfo info{};
-        if (!contracts::succeeded(g_port->read.bag_info(&ref, &info)) ||
-            info.capacity < 0) {
+
+    for (int32_t space = contracts::kQolBagSpaceFirstRegistered;
+         *out_count < wanted; ++space) {
+        const contracts::QolBagSource* source = find_bag_source(space);
+        if (source == nullptr) break;
+        if (source->count == nullptr || source->info == nullptr || source->item_at == nullptr) {
             continue;
         }
-        for (int32_t slot = 0; slot < info.capacity; ++slot) {
-            contracts::QolInventoryItemRef item{};
-            const QolResult result = g_port->read.item_at(&ref, slot, &item);
-            if (result.code == kQolErrNotFound) {
-                *out_bag = bag;
-                *out_slot = slot;
-                return true;
+        const int32_t bag_count = source->count();
+        for (int32_t bag = 0; bag < bag_count && *out_count < wanted; ++bag) {
+            contracts::QolBagInfo info{};
+            if (!contracts::succeeded(source->info(bag, &info)) || info.capacity < 0) {
+                continue;
             }
-            if (!contracts::succeeded(result)) return false;
+            for (int32_t slot = 0; slot < info.capacity && *out_count < wanted; ++slot) {
+                contracts::QolInventoryItemRef item{};
+                const QolResult result = source->item_at(bag, slot, &item);
+                if (result.code == kQolErrNotFound) {
+                    append(space, bag, slot);
+                    continue;
+                }
+                if (!contracts::succeeded(result)) return result;
+            }
         }
     }
-    return false;
+    return contracts::ok();
 }
 
 }  // namespace
@@ -489,9 +538,27 @@ contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equ
             outcome.status = InventoryActionStatus::kInternal;
             return outcome;
         }
+        contracts::QolActionRef empty_slots[3]{};
+        int32_t empty_count = 0;
+        const QolResult empty_result =
+            find_empty_slots_impl(3, empty_slots, &empty_count);
+        if (!contracts::succeeded(empty_result)) {
+            outcome.status = status_from_result(empty_result, false);
+            return outcome;
+        }
         int32_t stage_bag = -1;
         int32_t stage_slot = -1;
-        if (!find_empty_native_slot(&stage_bag, &stage_slot)) {
+        for (int32_t index = 0; index < empty_count; ++index) {
+            if (empty_slots[index].space_id == contracts::kQolBagSpaceOriginal) {
+                stage_bag = empty_slots[index].bag;
+                stage_slot = empty_slots[index].slot;
+                break;
+            }
+        }
+        QOL_LOG_INFO(QolDomain::kInventory,
+                     "equip provider empty_slots=%d stage=%d/%d", empty_count, stage_bag,
+                     stage_slot);
+        if (stage_bag < 0) {
             outcome.status = InventoryActionStatus::kFull;
             return outcome;
         }
@@ -655,6 +722,7 @@ const contracts::InventoryActionApi kInventoryActionApi{
     &equip,
     &unequip,
     &put_jewel,
+    &find_empty_slots_impl,
 };
 
 }  // namespace qol::features::core_item

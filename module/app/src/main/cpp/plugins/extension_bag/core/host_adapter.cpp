@@ -2,6 +2,7 @@
 #include "plugins/extension_bag/core/ui_state.h"
 #include "plugins/extension_bag/runtime/state_access.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
+#include "plugins/extension_bag/runtime/inventory_action.h"
 
 #include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
@@ -346,29 +347,13 @@ bool extension_handle_character_equip() {
     return true;
 }
 
-bool native_bag_has_empty_slot() {
-    const auto* facts = ::qol::extension_bag::access::host().item_facts;
-    const auto* extras = ::qol::extension_bag::access::host().inventory_extras;
-    if (facts == nullptr || facts->item_ref_at == nullptr || extras == nullptr ||
-        extras->read.bag_size == nullptr) {
-        // Fail open to the original equipment path when the native read face is
-        // unavailable; swallowing an original item would be worse than a no-op.
-        return true;
-    }
-    for (int bag = 0; bag < 5; ++bag) {
-        int32_t size = 0;
-        if (!qol::contracts::succeeded(extras->read.bag_size(bag, &size)) || size < 0) {
-            return true;
-        }
-        for (int32_t slot = 0; slot < size; ++slot) {
-            qol::contracts::QolInventoryItemRef item{};
-            const QolResult result = facts->item_ref_at(bag, slot, &item);
-            if (result.code == kQolErrNotFound) return true;
-            if (!qol::contracts::succeeded(result)) return true;
-        }
-    }
-    return false;
+bool core_find_empty_slots(qol::contracts::QolActionRef* out, int32_t* out_count) {
+    if (out == nullptr || out_count == nullptr) return false;
+    const auto* api = ::qol::features::extension_bag::inventory_action_api();
+    if (api == nullptr || api->find_empty_slots == nullptr) return false;
+    return qol::contracts::succeeded(api->find_empty_slots(3, out, out_count));
 }
+
 
 bool extension_handle_backpack_equip() {
     if (!::qol::extension_bag::access::enabled().load() || !read_world_in_world()) return false;
@@ -413,10 +398,28 @@ bool extension_handle_backpack_equip() {
                      category, source_bag, source_slot);
         return false;
     }
-    // Native empty slots take priority. Only when the original transaction bags
-    // are full does EB search an extension bag for the backpack item.
-    if (!module_source && native_bag_has_empty_slot()) return false;
-    const int target = first_empty_extension_bag_locked();
+    // core.item owns the space-order empty-slot scan. Native empty slots take
+    // priority; only when they are full may EB use a registered extension slot.
+    qol::contracts::QolActionRef empty_slots[3]{};
+    int32_t empty_count = 0;
+    const bool core_empty = core_find_empty_slots(empty_slots, &empty_count);
+    if (!module_source && core_empty) {
+        for (int32_t index = 0; index < empty_count; ++index) {
+            if (empty_slots[index].space_id <= qol::contracts::kQolBagSpaceVariant) {
+                return false;
+            }
+        }
+    }
+    int target = -1;
+    if (core_empty) {
+        for (int32_t index = 0; index < empty_count; ++index) {
+            if (empty_slots[index].space_id >= qol::contracts::kQolBagSpaceFirstRegistered) {
+                target = empty_slots[index].bag;
+                break;
+            }
+        }
+    }
+    if (target < 0) target = first_empty_extension_bag_locked();
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "backpack equip probe target=%d category=%d src=%d/%d active=%d",
                  target, category, source_bag, source_slot,
