@@ -93,11 +93,19 @@ bool read_target_c18_layout(save_backup::C18NativeBagLayout& out, std::string& v
              qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0);
     if (!c18_candidate) return true;
     if (!identity_is_c18 || identity.known == 0) {
+        SB_LOG_WARN(
+            "C18 import target rejected: reason=identity_not_c18_or_unknown series=%s version=%s known=%d c18_candidate=%d layout=not_evaluated",
+            identity.series_name, identity.version_label, static_cast<int>(identity.known),
+            c18_candidate ? 1 : 0);
         err = "C18 game version unsupported";
         return false;
     }
     out = save_backup::c18_native_bag_layout(identity.version_label);
     if (out == save_backup::C18NativeBagLayout::kUnknown) {
+        SB_LOG_WARN(
+            "C18 import target rejected: reason=layout_unknown series=%s version=%s known=%d c18_candidate=%d layout=unknown",
+            identity.series_name, identity.version_label, static_cast<int>(identity.known),
+            c18_candidate ? 1 : 0);
         err = "C18 game version unsupported";
         return false;
     }
