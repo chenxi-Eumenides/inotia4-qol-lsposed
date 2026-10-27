@@ -43,12 +43,12 @@
 
 | claim | 站点（文件:行） | VMA + 偏移 | 改写 |
 |---|---|---|---|
-| `P_INVEN_MOVE_ITEM_CLAMP_150` | `patches.cpp:53-54` | `0x104934 + 0x150` | `0x71018c1f` / `0x7101f81f`（C18L v508）/ `0x7101fc1f`（日志读数）→ `0x710f9c1f`；只接受完整精确原字，撤销恢复实际匹配字 |
-| `P_INVEN_MOVE_ITEM_CLAMP_158` | `patches.cpp:55-56` | `0x104934 + 0x158` | `0x52800c77` / `0x52800ff7`（C18L v508）→ `0x52807cf7` |
-| `P_INVEN_SAVE_ITEM_DIRECT_CLAMP_DC` | `patches.cpp:57-58` | `0x103bf0 + 0xdc` | `0x71018c7f` / `0x7101f87f`（C18L v508）/ `0x7101fc7f`（C18 v0.38b）→ `0x710f9c7f` |
-| `P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0` | `patches.cpp:59-60` | `0x103bf0 + 0xf0` | `0x71018e9f` / `0x7101fe9f`（C18L v508）→ `0x710f9e9f` |
-| `P_INVEN_SAVE_ITEM_DATA_CLAMP_7C` | `patches.cpp:61-62` | `0x104614 + 0x7c` | `0x71018a9f` / `0x7101fa9f`（C18L v508）→ `0x710f9a9f` |
-| `P_INVEN_FIND_SAVE_SLOT_CLAMP_238` | `patches.cpp:63-64` | `0x103960 + 0x238` | `0x71018c1f` / `0x7101f81f`（C18L v508）/ `0x7101fc1f`（C18 v0.38b）→ `0x710f9c1f` |
+| `P_INVEN_MOVE_ITEM_CLAMP_150` | `patches.cpp:65-66` | `0x104934 + 0x150`（RVA `0x104a84`） | `0x71018c1f` / `0x7101f81f`（C18L v586，`cmp w0,#126`）/ `0x7101fc1f`（日志读数）→ `0x710f9c1f`（`cmp w0,#999`）；只接受完整精确原字，撤销恢复实际匹配字 |
+| `P_INVEN_MOVE_ITEM_CLAMP_158` | `patches.cpp:68-70` | `0x104934 + 0x158`（RVA `0x104a8c`） | `0x52800c77` / `0x52800ff7`（C18L v508）→ `0x52807cf7`；C18L v586 的前一条 `+0x154` 为 `b.le 0x104a94`，`+0x158` 字 `0x17ffffbe` 是 `B 0x104984`，以 identity/no-op claim 精确验证并保留该分支，不修改指令；该 identity claim 仅用于资源组/变体字校验，不由自身提高上限 |
+| `P_INVEN_SAVE_ITEM_DIRECT_CLAMP_DC` | `patches.cpp:71-72` | `0x103bf0 + 0xdc` | `0x71018c7f` / `0x7101f87f`（C18L v508）/ `0x7101fc7f`（C18 v0.38b）→ `0x710f9c7f` |
+| `P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0` | `patches.cpp:73-74` | `0x103bf0 + 0xf0` | `0x71018e9f` / `0x7101fe9f`（C18L v508）→ `0x710f9e9f` |
+| `P_INVEN_SAVE_ITEM_DATA_CLAMP_7C` | `patches.cpp:75-76` | `0x104614 + 0x7c` | `0x71018a9f` / `0x7101fa9f`（C18L v508）→ `0x710f9a9f` |
+| `P_INVEN_FIND_SAVE_SLOT_CLAMP_238` | `patches.cpp:77-78` | `0x103960 + 0x238` | `0x71018c1f` / `0x7101f81f`（C18L v508）/ `0x7101fc1f`（C18 v0.38b）→ `0x710f9c1f` |
 | `P_UISTORE_BUTTON_SELL_EXE_D18D0_ARG` | `patches.cpp:81-82` | `0xd1818 + 0xb8` | `0xb9401260 → 0xaa1303e0`（改传物品指针） |
 | `P_UISTORE_BUTTON_SELL_EXE_D18D0_CALL` | `patches.cpp:83-84` | `0xd1818 + 0xc4` | `0x9401bb13 → BL F_GET_CUMULATE_COUNT_VMA` |
 | `P_UISTORE_BUTTON_SELL_EXE_D18E8_ARG` | `patches.cpp:85-86` | `0xd1818 + 0xd0` | `0xb9401260 → 0xaa1303e0` |

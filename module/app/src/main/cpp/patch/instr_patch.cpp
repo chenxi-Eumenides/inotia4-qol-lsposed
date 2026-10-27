@@ -67,6 +67,21 @@ bool is_expected_word(const qol::game::PatchSite& site, uint32_t word) {
     return false;
 }
 
+uint32_t word_replacement_for_original(const qol::game::PatchSite& site,
+                                      uint32_t original_word) {
+    if (site.kind == qol::game::PatchKind::kWordReplace) {
+        for (std::size_t i = 0; i < site.word_replace_alternates.size(); ++i) {
+            if (site.word_replace_alternates[i] == original_word) {
+                const uint32_t alternate_replacement =
+                    site.word_replace_alternate_replacements[i];
+                return alternate_replacement != 0 ? alternate_replacement
+                                                  : site.replacement_word;
+            }
+        }
+    }
+    return site.replacement_word;
+}
+
 }  // namespace
 
 void set_primitives(const Primitives& primitives) {
@@ -102,7 +117,8 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
             return failure("saved word missing");
         }
         const uint32_t current_word = *reinterpret_cast<const uint32_t*>(site.addr);
-        if (!is_expected_word(site, saved_word) || current_word != site.replacement_word) {
+        if (!is_expected_word(site, saved_word) ||
+            current_word != word_replacement_for_original(site, saved_word)) {
             return failure("primitive rejected");
         }
         return Outcome{0, nullptr};
@@ -180,7 +196,9 @@ Outcome install_claim(const contracts::ResourceClaim& claim, uintptr_t site_addr
                                           reinterpret_cast<void*>(site.redirect_target));
     } else {
         applied = g_primitives.install_word != nullptr &&
-                  g_primitives.install_word(site.addr, observed_word, site.replacement_word);
+                  g_primitives.install_word(
+                      site.addr, observed_word,
+                      word_replacement_for_original(site, observed_word));
     }
     if (!applied) {
         // 未生效即撤销占用：否则失败安装会把地址锁死给新所有者。

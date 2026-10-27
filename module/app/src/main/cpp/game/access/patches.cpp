@@ -24,6 +24,7 @@ struct SiteEntry {
     uintptr_t return_vma = 0;
     uint32_t tail_word = 0;
     std::array<uint32_t, 2> word_replace_alternates{};
+    std::array<uint32_t, 2> word_replace_alternate_replacements{};
 };
 
 constexpr SiteEntry kSites[] = {
@@ -63,8 +64,10 @@ constexpr SiteEntry kSites[] = {
     // 上限 clamp ×6（原 core.inc:38-43）：仅作用「数量完整值」判定点，gate=stack_limit。
     {"P_INVEN_MOVE_ITEM_CLAMP_150", F_INVEN_MOVE_ITEM_VMA, 0x150, 0x71018c1f, 0x710f9c1f,
      PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101f81f, 0x7101fc1f}},
+    // C18L v586 moves this limit check to +0x150; retain the +0x158 failure branch unchanged.
     {"P_INVEN_MOVE_ITEM_CLAMP_158", F_INVEN_MOVE_ITEM_VMA, 0x158, 0x52800c77, 0x52807cf7,
-     PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x52800ff7, 0}},
+     PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x52800ff7, 0x17ffffbe},
+     {0, 0x17ffffbe}},
     {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_DC", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xdc, 0x71018c7f,
      0x710f9c7f, PatchKind::kWordReplace, nullptr, 0, 0, 0, {0x7101f87f, 0x7101fc7f}},
     {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xf0, 0x71018e9f,
@@ -192,6 +195,8 @@ bool patch_site(const char* name, PatchSite* out) {
         out->kind = entry.kind;
         out->alternate_expected_word = 0;
         out->word_replace_alternates = entry.word_replace_alternates;
+        out->word_replace_alternate_replacements =
+            entry.word_replace_alternate_replacements;
         out->return_addr = entry.return_vma == 0 ? 0 :
             g_base + entry.vma + entry.return_vma;
         out->tail_word = entry.tail_word;

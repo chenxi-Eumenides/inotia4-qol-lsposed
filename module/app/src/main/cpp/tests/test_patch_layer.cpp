@@ -1026,21 +1026,23 @@ void test_stack_limit_clamp_registration_and_roundtrip() {
         uint32_t expected;
         uint32_t alternate;
         uint32_t alternate_2;
+        uint32_t alternate_replacement;
+        uint32_t alternate_2_replacement;
         uint32_t replacement;
     };
     constexpr ClampCase kClamps[] = {
         {"P_INVEN_MOVE_ITEM_CLAMP_150", F_INVEN_MOVE_ITEM_VMA, 0x150,
-         0x71018c1fu, 0x7101f81fu, 0x7101fc1fu, 0x710f9c1fu},
+         0x71018c1fu, 0x7101f81fu, 0x7101fc1fu, 0, 0, 0x710f9c1fu},
         {"P_INVEN_MOVE_ITEM_CLAMP_158", F_INVEN_MOVE_ITEM_VMA, 0x158,
-         0x52800c77u, 0x52800ff7u, 0, 0x52807cf7u},
+         0x52800c77u, 0x52800ff7u, 0x17ffffbeu, 0, 0x17ffffbeu, 0x52807cf7u},
         {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_DC", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xdc,
-         0x71018c7fu, 0x7101f87fu, 0x7101fc7fu, 0x710f9c7fu},
+         0x71018c7fu, 0x7101f87fu, 0x7101fc7fu, 0, 0, 0x710f9c7fu},
         {"P_INVEN_SAVE_ITEM_DIRECT_CLAMP_F0", F_INVEN_SAVE_ITEM_DIRECT_VMA, 0xf0,
-         0x71018e9fu, 0x7101fe9fu, 0, 0x710f9e9fu},
+         0x71018e9fu, 0x7101fe9fu, 0, 0, 0, 0x710f9e9fu},
         {"P_INVEN_SAVE_ITEM_DATA_CLAMP_7C", F_INVEN_SAVE_ITEM_DATA_VMA, 0x7c,
-         0x71018a9fu, 0x7101fa9fu, 0, 0x710f9a9fu},
+         0x71018a9fu, 0x7101fa9fu, 0, 0, 0, 0x710f9a9fu},
         {"P_INVEN_FIND_SAVE_SLOT_CLAMP_238", F_INVEN_FIND_SAVE_SLOT_VMA, 0x238,
-         0x71018c1fu, 0x7101f81fu, 0x7101fc1fu, 0x710f9c1fu},
+         0x71018c1fu, 0x7101f81fu, 0x7101fc1fu, 0, 0, 0x710f9c1fu},
     };
 
     for (const ClampCase& clamp : kClamps) {
@@ -1051,6 +1053,8 @@ void test_stack_limit_clamp_registration_and_roundtrip() {
         CHECK(site.expected_word == clamp.expected);
         CHECK(site.word_replace_alternates[0] == clamp.alternate);
         CHECK(site.word_replace_alternates[1] == clamp.alternate_2);
+        CHECK(site.word_replace_alternate_replacements[0] == clamp.alternate_replacement);
+        CHECK(site.word_replace_alternate_replacements[1] == clamp.alternate_2_replacement);
         CHECK(site.replacement_word == clamp.replacement);
         CHECK(site.kind == qol::game::PatchKind::kWordReplace);
 
@@ -1063,11 +1067,23 @@ void test_stack_limit_clamp_registration_and_roundtrip() {
         const uint32_t known_words[] = {clamp.expected, clamp.alternate, clamp.alternate_2};
         for (uint32_t original : known_words) {
             if (original == 0) continue;
+            const uint32_t expected_replacement =
+                original == clamp.alternate ?
+                    (clamp.alternate_replacement != 0 ? clamp.alternate_replacement
+                                                      : clamp.replacement) :
+                original == clamp.alternate_2 ?
+                    (clamp.alternate_2_replacement != 0 ? clamp.alternate_2_replacement
+                                                        : clamp.replacement) :
+                    clamp.replacement;
             storage = original;
+            const int installs_before = g_prims.install_word_calls;
             CHECK(install_claim(claim, addr).ok == 0);
-            CHECK(storage == clamp.replacement);
+            CHECK(storage == expected_replacement);
             CHECK(g_prims.last_expected == original);
-            CHECK(g_prims.last_new_word == clamp.replacement);
+            CHECK(g_prims.last_new_word == expected_replacement);
+            CHECK(install_claim(claim, addr).ok == 0);
+            CHECK(g_prims.install_word_calls == installs_before + 1);
+            CHECK(storage == expected_replacement);
             CHECK(release_claim(claim, addr).ok == 0);
             CHECK(storage == original);
             CHECK(g_prims.last_expected == original);
