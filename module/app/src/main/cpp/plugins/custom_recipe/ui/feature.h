@@ -67,6 +67,7 @@ constexpr size_t kStuffSlotCount = 3;
 
 // QolLogLevel 的数值由 contracts/host_sdk.h 固定：debug/info/warn/error。
 constexpr int32_t kLogDebug = 0;
+constexpr int32_t kLogInfo = 1;
 constexpr int32_t kLogWarn = 2;
 
 void set_context(const contracts::PluginContext& ctx);
@@ -84,6 +85,9 @@ void craft_set_selected_recipe_at(int64_t type, int64_t value);
 int64_t craft_selected_stuff_index();
 contracts::QolItemHandle craft_selected_inventory_item();
 contracts::QolItemHandle craft_target_slot_item();
+// 与 craft_target_slot_item 同源，但保留读取结果码：目标槽读取失败时调用方
+// 必须能区分「槽是空的」与「句柄/映射不可用」，否则门禁只会给出同一句提示。
+QolResult craft_read_target_slot_item(contracts::QolItemHandle* out_item);
 void craft_set_target_slot_item(contracts::QolItemHandle item);
 void craft_set_cost_zero();
 contracts::QolItemHandle craft_stuff_item(size_t index);

@@ -100,10 +100,19 @@ contracts::QolItemHandle craft_selected_inventory_item() {
 
 contracts::QolItemHandle craft_target_slot_item() {
     contracts::QolItemHandle item = contracts::kInvalidItemHandle;
-    if (g_craft_facts != nullptr && g_craft_facts->read_only.target_slot_item != nullptr) {
-        (void)g_craft_facts->read_only.target_slot_item(&item);
-    }
+    (void)craft_read_target_slot_item(&item);
     return item;
+}
+
+QolResult craft_read_target_slot_item(contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "null target slot output", 23);
+    }
+    *out_item = contracts::kInvalidItemHandle;
+    if (g_craft_facts == nullptr || g_craft_facts->read_only.target_slot_item == nullptr) {
+        return qol::contracts::error(kQolErrNotReady, "target slot facts unavailable", 29);
+    }
+    return g_craft_facts->read_only.target_slot_item(out_item);
 }
 
 void craft_set_target_slot_item(contracts::QolItemHandle item) {

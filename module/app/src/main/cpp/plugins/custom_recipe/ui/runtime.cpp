@@ -408,7 +408,16 @@ void craft_execute(void* ctrl) {
         log_message(kLogWarn, "craft blocked reason=disabled mixType=%u", mix_type);
         return;
     }
-    switch (api->craft_gate(craft_target_slot_item())) {
+    // 目标槽读取失败与「品质服务不可用」在界面上共用同一句提示，先记录读取结果码，
+    // 否则门禁日志只剩「功能不可用」，无法区分空槽/句柄失效/数据面失败。
+    contracts::QolItemHandle target = contracts::kInvalidItemHandle;
+    const QolResult target_read = craft_read_target_slot_item(&target);
+    if (target_read.ok != kQolOk) {
+        log_message(kLogWarn, "tier-up target slot read failed code=%d", target_read.code);
+    } else if (target.slot == 0 || target.generation == 0) {
+        log_message(kLogInfo, "tier-up target slot empty");
+    }
+    switch (api->craft_gate(target)) {
         case result::CraftGate::kNotJewel:
             craft_show_not_target();
             return;

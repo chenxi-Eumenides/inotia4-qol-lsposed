@@ -710,48 +710,117 @@ int64_t api_form_ui_type_for_mix_type(uint32_t mix_type) {
     return form_borrowed_type(def->form);
 }
 
+// 升阶门禁诊断：每次点击最多两条（失败/通过），进程内上限 64 条。
+// 门禁共有 8 个返回 kUnavailable 的分支，界面侧只看到同一句「功能不可用」；
+// 没有这条日志就无法从设备日志区分目标读取、品质能力、词条一致性等原因。
+std::atomic<int> g_gate_log_budget{64};
+
+bool gate_log_take() { return g_gate_log_budget.fetch_sub(1) > 0; }
+
+void gate_log_blocked(const char* stage, int32_t code, qol::contracts::QolItemHandle item) {
+    if (!gate_log_take()) return;
+    log_message(2, "tier-up gate blocked stage=%s code=%d handle=%u/%u", stage, code,
+                static_cast<uint32_t>(item.slot), static_cast<uint32_t>(item.generation));
+}
+
 result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
     using result::CraftGate;
     uint16_t category = 0;
     bool is_jewel = false;
-    if (query_jewel_fact(target_item, &category, &is_jewel).ok != kQolOk) {
+    const QolResult target_facts = query_jewel_fact(target_item, &category, &is_jewel);
+    if (target_facts.ok != kQolOk) {
+        gate_log_blocked("target_facts", target_facts.code, target_item);
         return CraftGate::kUnavailable;
     }
     if (is_jewel) {
         const qol::contracts::AttributeQualityApi* api = nullptr;
         qol::contracts::AttributeQualityItem quality{};
-        if (query_jewel_quality(target_item, &api, &quality).ok != kQolOk) {
+        const QolResult quality_result = query_jewel_quality(target_item, &api, &quality);
+        if (quality_result.ok != kQolOk) {
+            gate_log_blocked("jewel_quality", quality_result.code, target_item);
             return CraftGate::kUnavailable;
         }
         uint32_t word = 0;
-        if (!read_jewel_word(target_item, &word) ||
-            quality.attribute_id !=
-                static_cast<int32_t>((word >> kJewelTypeShift) & kJewelTypeMask) ||
-            quality.value != static_cast<int32_t>(word & kJewelValueMask)) {
+        if (!read_jewel_word(target_item, &word)) {
+            gate_log_blocked("jewel_word_read", kQolErrNotReady, target_item);
+            return CraftGate::kUnavailable;
+        }
+        const int32_t word_attribute =
+            static_cast<int32_t>((word >> kJewelTypeShift) & kJewelTypeMask);
+        const int32_t word_value = static_cast<int32_t>(word & kJewelValueMask);
+        if (quality.attribute_id != word_attribute || quality.value != word_value) {
+            if (gate_log_take()) {
+                log_message(2,
+                            "tier-up gate blocked stage=jewel_word_mismatch quality=%d/%d "
+                            "word=%d/%d handle=%u/%u",
+                            quality.attribute_id, quality.value, word_attribute, word_value,
+                            static_cast<uint32_t>(target_item.slot),
+                            static_cast<uint32_t>(target_item.generation));
+            }
             return CraftGate::kUnavailable;
         }
         if (quality.quality.level == qol::contracts::kAttributeQualityHighestLevel) {
             return CraftGate::kAlreadyGold;
         }
+        if (gate_log_take()) {
+            log_message(0, "tier-up gate pass kind=jewel category=%u level=%d", category,
+                        quality.quality.level);
+        }
         return CraftGate::kPass;
     }
 
     qol::contracts::QolItemType item_type = qol::contracts::QolItemType::kUnknown;
-    if (read_item_type(target_item, &item_type).ok != kQolOk) {
+    const QolResult type_result = read_item_type(target_item, &item_type);
+    if (type_result.ok != kQolOk) {
+        gate_log_blocked("item_type", type_result.code, target_item);
         return CraftGate::kUnavailable;
     }
-    if (item_type != qol::contracts::QolItemType::kEquipment) return CraftGate::kNotJewel;
-    if (g_item_facts->view == nullptr) return CraftGate::kUnavailable;
+    if (item_type != qol::contracts::QolItemType::kEquipment) {
+        if (gate_log_take()) {
+            log_message(1, "tier-up gate blocked stage=not_equipment item_type=%d handle=%u/%u",
+                        static_cast<int32_t>(item_type),
+                        static_cast<uint32_t>(target_item.slot),
+                        static_cast<uint32_t>(target_item.generation));
+        }
+        return CraftGate::kNotJewel;
+    }
+    if (g_item_facts->view == nullptr) {
+        gate_log_blocked("view_unavailable", kQolErrNotReady, target_item);
+        return CraftGate::kUnavailable;
+    }
     qol::contracts::QolItemInventoryView view{};
-    if (g_item_facts->view(target_item, &view).ok != kQolOk ||
-        (view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) == 0 ||
+    const QolResult view_result = g_item_facts->view(target_item, &view);
+    if (view_result.ok != kQolOk) {
+        gate_log_blocked("view", view_result.code, target_item);
+        return CraftGate::kUnavailable;
+    }
+    if ((view.fields & qol::contracts::kQolItemInventoryHasNativeOptions) == 0 ||
         (view.fields & qol::contracts::kQolItemInventoryOptionsTruncated) != 0 ||
         view.native_option_count > qol::contracts::kQolItemInventoryNativeOptionCapacity) {
+        if (gate_log_take()) {
+            log_message(2,
+                        "tier-up gate blocked stage=view_flags fields=0x%x native=%u jewel=%u "
+                        "handle=%u/%u",
+                        view.fields, view.native_option_count, view.jewel_option_count,
+                        static_cast<uint32_t>(target_item.slot),
+                        static_cast<uint32_t>(target_item.generation));
+        }
         return CraftGate::kUnavailable;
     }
-    if (view.native_option_count == 0) return CraftGate::kNoUpgradableAffix;
+    if (view.native_option_count == 0) {
+        if (gate_log_take()) {
+            log_message(1, "tier-up gate blocked stage=no_native_option handle=%u/%u",
+                        static_cast<uint32_t>(target_item.slot),
+                        static_cast<uint32_t>(target_item.generation));
+        }
+        return CraftGate::kNoUpgradableAffix;
+    }
     const qol::contracts::AttributeQualityApi* api = nullptr;
-    if (require_attribute_quality_api(&api).ok != kQolOk) return CraftGate::kUnavailable;
+    const QolResult api_result = require_attribute_quality_api(&api);
+    if (api_result.ok != kQolOk) {
+        gate_log_blocked("quality_capability", api_result.code, target_item);
+        return CraftGate::kUnavailable;
+    }
     uint32_t upgradable = 0;
     for (uint32_t i = 0; i < view.native_option_count; ++i) {
         const qol::contracts::QolItemInventoryOptionView& option = view.native_options[i];
@@ -768,7 +837,19 @@ result::CraftGate api_craft_gate(qol::contracts::QolItemHandle target_item) {
             ++upgradable;
         }
     }
-    return upgradable == 0 ? CraftGate::kNoUpgradableAffix : CraftGate::kPass;
+    if (upgradable == 0) {
+        if (gate_log_take()) {
+            log_message(1, "tier-up gate blocked stage=no_upgradable_affix options=%u handle=%u/%u",
+                        view.native_option_count, static_cast<uint32_t>(target_item.slot),
+                        static_cast<uint32_t>(target_item.generation));
+        }
+        return CraftGate::kNoUpgradableAffix;
+    }
+    if (gate_log_take()) {
+        log_message(0, "tier-up gate pass kind=equipment category=%u options=%u upgradable=%u",
+                    category, view.native_option_count, upgradable);
+    }
+    return CraftGate::kPass;
 }
 
 bool api_is_jewel_item(qol::contracts::QolItemHandle item) { return item_is_jewel(item); }
