@@ -234,3 +234,35 @@ python3 scripts/maintenance/check_http_routes.py
 - C18L v589 当前测试目标；C18 追加袋 `space=1` 不参与背包装备。
 - 一个功能一个提交；不要提交其他代理的 `scripts/patch-apk.sh` 改动。
 - 真机设备不要依赖坐标点击；可用 adb、API、Frida 和日志。
+
+## 8. 2026-10-28 修复记录
+
+提交：
+
+- `d9c06b61 fix(core.item): SaveItem 兜底继续尝试注册源槽`
+  - 原版 `INVEN_SaveItem` 失败后不再因第一个原生空槽放弃，而是跳过原生槽继续尝试注册源（扩展袋）。
+  - `adopt` 各阶段与 `INVEN_SaveItem` 结果补日志。
+- `8493801f fix(extension_bag): 礼盒使用前检查产物槽位并区分失败原因`
+  - 新增 ITEMPACKBASE 读取（`G_ITEMPACK_*_GOT`）、`Game Host 2.6 read_only.item.pack_required_slots`、
+    `inventory_extras 1.3 read.is_having_empty_slot`。
+  - EB 礼盒使用前按产物累计槽位（924 → 4）检查空间；不足返回 `no space`，解包失败返回 `unpack failed`。
+- `a53c0848 feat(extension_bag): 背包装备优先占用原生空袋槽`
+  - 扩展袋来源背包先反序列化为原生对象写入原生袋表空槽（容量校验、持久化、ownership handover）；
+    失败按台账回滚并保留扩展源，原生槽满再回退扩展槽。
+
+验证：
+
+- `scripts/build-debug.sh` 通过；`check_arch.py`、`check_http_routes.py` 通过。
+- Host CTest：157 项中 4 项失败均为既有/环境问题（`custom_recipe_tests`、`item_handle_contract_redline`
+  命中未改动的 `item_port.h`、`core_api_lifecycle_tests` 描述断言、`core_settings_config_store_tests`
+  需预先存在 `${CMAKE_CURRENT_BINARY_DIR}/config-native-owner`）。
+- 真机 C18L v589：新档 `POST /api/op/inventory/add {"category":924}` + `use_item` 票据 `done`，
+  产物 `874 战神的斗篷` 与 3×`背包（大）` 正常入包，源槽清空，无错误弹窗、无崩溃。
+- 拾取（原版袋全满→扩展袋）与扩展袋背包装备原生优先仍待用户真机复测；本轮设备存档为原版袋全满，
+  礼盒位于扩展袋，测试前的 `move_item` 操作已改变该存档状态。
+
+附带发现（未修）：
+
+- `POST /api/item/inventory/move_item` 允许把物品移入**未装备**的原生袋（`bag_info` 仍报 capacity 16）；
+  该物品在下一次存档/读档后丢失。本轮诊断把测试礼盒从扩展袋移入原生袋 1 后即触发此问题。
+
