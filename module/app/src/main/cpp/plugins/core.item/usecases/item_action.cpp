@@ -353,6 +353,8 @@ contracts::InventorySellResult sell(QolActionRef ref, QolItemHandle expected_ite
 
 namespace {
 
+// 装备暂存等流程需要 N 个原生空槽；SaveItem 的目标选择由 INVEN_FindSaveSlot 负责，
+// 两者语义不同，不能互相替代。
 QolResult find_empty_slots_impl(int32_t limit, QolActionRef* out_slots,
                                 int32_t* out_count) {
     if (out_slots == nullptr || out_count == nullptr || limit <= 0) {

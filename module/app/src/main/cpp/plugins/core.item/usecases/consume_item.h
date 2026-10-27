@@ -8,9 +8,7 @@
 
 using Stage4HaveBackup = int (*)(int32_t);
 using Stage4CountBackup = int (*)(int32_t);
-using Stage4EmptyBackup = int (*)(int32_t, int32_t);
 using Stage4CountExtension = int (*)(int32_t);
-using Stage4EmptyExtension = bool (*)(int32_t, int32_t);
 
 int stage4_have_item(int32_t category, Stage4HaveBackup backup,
                      Stage4CountExtension extension_count, bool& recursive_guard);
@@ -70,13 +68,6 @@ bool vanilla_sell_detail_context_matches(
 // 返回 0 = 不回写数量；任何把 arg2 写入数量位的路径都会把掉落物数量污染成
 // 2/3/4/5（真机实证：药水 2/卷轴 3/材料 4）。
 uint32_t stage4_make_item_writeback_count(int32_t category, int32_t arg2, int32_t flag);
-int stage4_is_having_empty_slot(int32_t needed, int32_t include_task_bag,
-                                Stage4EmptyBackup backup,
-                                Stage4EmptyExtension extension_has_empty,
-                                bool& recursive_guard);
-int stage4_is_having_empty_slot_original_only(int32_t needed, int32_t include_task_bag,
-                                              Stage4EmptyBackup backup,
-                                              bool& recursive_guard);
 
 using Stage4IdentifyItem = bool (*)(void* item, int32_t* bag, int32_t* slot);
 using Stage4ConsumeExtension = bool (*)(void* item);

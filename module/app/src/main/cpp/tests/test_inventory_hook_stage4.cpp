@@ -44,15 +44,7 @@ static int recursive_original(int32_t category) {
     return 0;
 }
 
-static int g_empty_original = 0;
-static bool g_empty_extension = false;
-static int g_empty_original_calls = 0;
-static int g_empty_extension_calls = 0;
-static int empty_original(int32_t, int32_t) { ++g_empty_original_calls; return g_empty_original; }
-static bool empty_extension(int32_t, int32_t) { ++g_empty_extension_calls; return g_empty_extension; }
-
-static void test_original_only_queries() {
-    bool guard = false;
+static void test_original_only_queries() {    bool guard = false;
     g_original_value = 0;
     g_original_calls = 0;
     g_extension_calls = 0;
@@ -63,12 +55,6 @@ static void test_original_only_queries() {
     g_original_calls = 0;
     CHECK(stage4_get_item_count_original_only(1, original_count, guard) == 4);
     CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
-
-    g_empty_original = 1;
-    g_empty_original_calls = 0;
-    g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot_original_only(1, 1, empty_original, guard) == 1);
-    CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 0 && !guard);
 }
 
 static void* g_extension_item = reinterpret_cast<void*>(static_cast<uintptr_t>(0x1234));
@@ -148,28 +134,6 @@ static void test_queries() {
     g_original_value = 4; g_extension_value = 6; g_original_calls = 0; g_extension_calls = 0;
     CHECK(stage4_get_item_count(1, original_count, extension_count, guard) == 10);
     CHECK(g_original_calls == 1 && g_extension_calls == 1 && !guard);
-
-    g_empty_original = 1; g_empty_extension = false; g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(1, 0, empty_original, empty_extension, guard) == 1);
-    CHECK(g_empty_extension_calls == 0 && !guard);
-
-    // 普通袋域（include_task_bag==0）：原版无空位时允许扩展空位兜底。
-    g_empty_original = 0; g_empty_extension = true; g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(2, 0, empty_original, empty_extension, guard) == 1);
-    CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 1 && !guard);
-
-    // 任务袋域（include_task_bag!=0，原版只查物理袋 5）：扩展逻辑袋不属于该域，
-    // 原版 0 结果不得被扩展空位改判为 1（否则上层误判任务袋有空间，SaveItem 失败
-    // 后任务物品被 H-13 收编进扩展袋）。
-    g_empty_original = 0; g_empty_extension = true; g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(2, 1, empty_original, empty_extension, guard) == 0);
-    CHECK(g_empty_original_calls == 1 && g_empty_extension_calls == 0 && !guard);
-
-    // needed<=0 = 无需新槽（物品全可叠进现有堆）：原版返回 1（可放），
-    // 不得误报满（0x103460 反汇编 0x10347c b.le → 0x1035d8 return 1）。
-    g_empty_original_calls = 0; g_empty_extension_calls = 0;
-    CHECK(stage4_is_having_empty_slot(0, 1, empty_original, empty_extension, guard) == 1);
-    CHECK(g_empty_original_calls == 0 && g_empty_extension_calls == 0 && !guard);
 
     g_original_calls = 0; g_extension_calls = 0; g_recursive_guard = &guard;
     CHECK(stage4_have_item(1, recursive_original, extension_count, guard) == 1);
