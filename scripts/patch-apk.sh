@@ -233,21 +233,19 @@ release_stem() {
     printf 'Inotia4_%s_%s' "$name" "${BASH_REMATCH[1]}"
 }
 
-if [[ "$all_output" == true ]]; then
-    printf '模块 APK：%s\n' "$module_apk"
-    printf '模块通道：%s\n' "$module_channel"
-    [[ -n "$module_version" ]] && printf '模块版本：%s\n' "$module_version"
-    printf '集成工具：%s\n' "$patcher"
-    printf 'LSPatch JAR：%s\n' "$lspatch_jar"
-    printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
-fi
+printf '模块 APK：%s\n' "$module_apk"
+printf '模块通道：%s\n' "$module_channel"
+[[ -n "$module_version" ]] && printf '模块版本：%s\n' "$module_version"
+printf '集成工具：%s\n' "$patcher"
+printf 'LSPatch JAR：%s\n' "$lspatch_jar"
+printf '游戏 APK 数量：%d\n' "${#game_apks[@]}"
 
 # 生成前删除 output/ 下全部集成包，再按当前源游戏 APK 重新生成；
 # 不做按版本比对的过期判定（复杂逻辑易误判，且换版本/移入 history 的旧包本就该整体重出）。
 # 只匹配大写 Inotia4_* 前缀：模块包为小写 inotia4_qol_lsposed_*，大小写不同不会命中；
 # 非 APK 文件（说明 txt 等）不匹配 *.apk，同样保留。
 shopt -s nullglob
-old_outputs=("$repo_root/output/Inotia4_"*.apk)
+old_outputs=("$repo_root/output/Inotia4_*_${patcher}.apk")
 shopt -u nullglob
 cleaned=0
 if [[ ${#old_outputs[@]} -gt 0 ]]; then
