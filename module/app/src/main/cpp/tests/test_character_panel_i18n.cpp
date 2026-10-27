@@ -137,6 +137,28 @@ void test_owner_table_modify_guard() {
     CHECK(i18n::owner_table_modify(35185u, nullptr, nullptr) == nullptr);  // 非面板作用域
 }
 
+// 用户开关门禁：feature on_toggle 立即改写运行时标志，关闭后即使消费者仍在册也不替换文本。
+void test_translation_gate() {
+    qol::contracts::PluginContext ctx{};
+    const qol::contracts::PluginDescriptor& d = i18n::plugin_descriptor();
+    CHECK(d.feature_count == 1);
+    CHECK(d.features[0].type == qol::contracts::FeatureType::kToggle);
+    CHECK(d.features[0].on_toggle != nullptr);
+
+    i18n::set_active_scope_value(kPanel);
+    i18n::set_translation_enabled(true);
+    CHECK(std::strcmp(i18n::owner_table_modify(35185u, nullptr, nullptr), "物攻") == 0);
+
+    CHECK(d.features[0].on_toggle(ctx, 0).ok == kQolOk);
+    CHECK(!i18n::translation_enabled());
+    CHECK(i18n::owner_table_modify(35185u, nullptr, nullptr) == nullptr);
+
+    CHECK(d.features[0].on_toggle(ctx, 1).ok == kQolOk);
+    CHECK(i18n::translation_enabled());
+    CHECK(std::strcmp(i18n::owner_table_modify(35185u, nullptr, nullptr), "物攻") == 0);
+    i18n::set_active_scope_value(qol::contracts::kTextScopeNone);
+}
+
 // backup 交付与作用域：空 backup 拒绝；非空 → wrapper push(面板)→转发→pop，嵌套恢复。
 void test_backup_delivery_and_scope() {
     reset_state();
@@ -198,6 +220,7 @@ int main() {
     test_manifest();
     test_table();
     test_owner_table_modify_guard();
+    test_translation_gate();
     test_backup_delivery_and_scope();
     test_push_failure_passthrough();
     test_registration_failure_observable();

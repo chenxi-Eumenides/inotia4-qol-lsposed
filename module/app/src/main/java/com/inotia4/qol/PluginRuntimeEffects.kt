@@ -56,6 +56,7 @@ internal class RetryableObserverToken {
 object PluginRuntimeEffects {
     private const val API_PLUGIN_ID = "core.api"
     private const val SIMPLE_MODE_PLUGIN_ID = "simple_mode"
+    private const val POPUP_BLOCKER_PLUGIN_ID = "popup_blocker"
     private const val DEFAULT_LISTEN_ADDRESS = "0.0.0.0"
     private const val DEFAULT_LISTEN_PORT = 8088
     private const val FALLBACK_LISTEN_PORT_JSON = "8088"
@@ -66,6 +67,8 @@ object PluginRuntimeEffects {
     private val apiSubscription = RetryableObserverToken()
     private val simpleModeSubscription = RetryableObserverToken()
     private var simpleModeSubscriptionAttempted = false
+    private val popupBlockerSubscription = RetryableObserverToken()
+    private var popupBlockerSubscriptionAttempted = false
 
     @Volatile
     private var initialSnapshotReceived = false
@@ -95,6 +98,10 @@ object PluginRuntimeEffects {
             simpleModeSubscriptionAttempted = true
             simpleModeSubscription.ensure { subscribe(SIMPLE_MODE_PLUGIN_ID) ?: 0L }
         }
+        if (!popupBlockerSubscriptionAttempted) {
+            popupBlockerSubscriptionAttempted = true
+            popupBlockerSubscription.ensure { subscribe(POPUP_BLOCKER_PLUGIN_ID) ?: 0L }
+        }
         if (!initialSnapshotReceived) awaitInitialSnapshot()
         return runtimeEffectBootstrapState(
             apiSubscriptionEstablished = apiSubscription.isEstablished(),
@@ -121,7 +128,8 @@ object PluginRuntimeEffects {
         executor.execute(::unsubscribePendingReceipts)
         val apiToken = apiSubscription.currentId()
         val simpleModeToken = simpleModeSubscription.currentId()
-        if (apiToken == 0L && simpleModeToken == 0L) return true
+        val popupBlockerToken = popupBlockerSubscription.currentId()
+        if (apiToken == 0L && simpleModeToken == 0L && popupBlockerToken == 0L) return true
         var allRemoved = true
         var apiRemoved = false
         if (apiToken != 0L) {
@@ -137,6 +145,14 @@ object PluginRuntimeEffects {
             if (unsubscribe(simpleModeToken, SIMPLE_MODE_PLUGIN_ID)) {
                 simpleModeSubscription.clear(simpleModeToken)
                 simpleModeSubscriptionAttempted = false
+            } else {
+                allRemoved = false
+            }
+        }
+        if (popupBlockerToken != 0L) {
+            if (unsubscribe(popupBlockerToken, POPUP_BLOCKER_PLUGIN_ID)) {
+                popupBlockerSubscription.clear(popupBlockerToken)
+                popupBlockerSubscriptionAttempted = false
             } else {
                 allRemoved = false
             }
@@ -194,7 +210,9 @@ object PluginRuntimeEffects {
     }
 
     private fun applyEffect(event: PluginEffect) {
-        if (event.pluginId != API_PLUGIN_ID && event.pluginId != SIMPLE_MODE_PLUGIN_ID) {
+        if (event.pluginId != API_PLUGIN_ID && event.pluginId != SIMPLE_MODE_PLUGIN_ID &&
+            event.pluginId != POPUP_BLOCKER_PLUGIN_ID
+        ) {
             LogFile.warn(LogDomain.CONFIG, "ignored runtime effect for unexpected plugin ${event.pluginId}")
             return
         }
@@ -205,6 +223,11 @@ object PluginRuntimeEffects {
         if (event.pluginId == SIMPLE_MODE_PLUGIN_ID) {
             // simple_mode has one registered feature, so plugin desired state is that toggle.
             ConfigPlatformEffects.onSimpleModeRuntimeEffect(event.eventRevision, event.desiredEnabled)
+            return
+        }
+        if (event.pluginId == POPUP_BLOCKER_PLUGIN_ID) {
+            // popup_blocker has one registered feature: desired state is `popup_blocker.enabled`.
+            ConfigPlatformEffects.onPopupBlockerRuntimeEffect(event.eventRevision, event.desiredEnabled)
             return
         }
 

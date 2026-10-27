@@ -102,6 +102,11 @@ void set_active_scope_value(int32_t value);
 // 表查找消费者（after 阶段 Modify）：按当前线程作用域查表；命中返回字面量，未命中 nullptr。
 const char* owner_table_modify(uint32_t text_id, const char* current, void* ctx);
 
+// 用户开关 `character_panel_i18n.translation` 的运行时门禁：关闭后消费者即使仍在册也一律返回
+// nullptr（不改文本），使开关立即生效，不依赖生命周期撤销的调度时机。
+void set_translation_enabled(bool enabled);
+bool translation_enabled();
+
 // 经 `text_layer` 能力注册/注销本插件的表消费者（install/deactivate；幂等）。
 bool register_consumers();
 void unregister_consumers();

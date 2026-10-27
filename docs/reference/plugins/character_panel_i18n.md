@@ -8,12 +8,20 @@
 
 除特别说明，文中 `plugins/...`、`contracts/...`、`infra/...`、`host/...` 路径均相对 `module/app/src/main/cpp/`。
 
+## 变体说明（C18L v588 实测）
+
+中文版 `libgame.so` 的 `MEMORYTEXT_GetText` 对 `35185/35186/35187` 本身就返回中文
+（`物理攻击/魔法攻击/防御`）。本插件在角色面板作用域内替换为 `物攻/法攻/防御力`，两条路径都是中文：
+因此在中文版本上开关两态只改变措辞、不改变显示语言；「汉化」语义只对韩文/英文文本包成立。
+实测证据（frida 调用游戏 `MEMORYTEXT_GetText`）：作用域+门禁开启 → `物攻/法攻/防御力`；
+无作用域或门禁关闭 → 游戏原文 `物理攻击/魔法攻击/防御`。
+
 ## 定位与版本
 
-`character_panel_i18n`，插件版本 `0.1.0`（`plugins/character_panel_i18n/plugin.cpp:11-12`）。descriptor（`plugin.cpp:80-96`）：
+`character_panel_i18n`，插件版本 `0.1.0`（`plugins/character_panel_i18n/plugin.cpp:11-12`）。descriptor（`plugin.cpp:99-120`）：
 
-- `requires_count=1` → 唯一 required 依赖 `text_layer` v1.0（`plugin.cpp:33-36,83`）；`optional_count=0`。
-- `provides_count=0`（纯内容贡献者，`plugin.cpp:85`）；`resources_count=1`；`jni_count=0`（`plugin.cpp:87`）。
+- `requires_count=1` → 唯一 required 依赖 `text_layer` v1.0（`plugin.cpp:33-36,102`）；`optional_count=0`。
+- `provides_count=0`（纯内容贡献者，`plugin.cpp:104`）；`resources_count=1`；`jni_count=0`（`plugin.cpp:106`）。
 - 无 `routes.inc`、无 `http_queries`/port、无快照/事件/命令端口。
 
 注册于 `host/assembly.cpp:67`（include）与 `host/assembly.cpp:233`（`plugin_descriptor` 登记）。
@@ -23,7 +31,7 @@
 - 不 `provides` 任何 capability。
 - 不注册 HTTP 路由，无 `routes.inc`。
 - 无对外快照、事件或命令端口。
-- 唯一用户可见 feature：`character_panel_i18n.translation`，version `1`，default `1`，分类 `kBasicOptimization`，类型 `kToggle`，名称「属性面板汉化」，描述「人物属性显示为中文」（`plugin.cpp:74-78`）。其 `on_toggle` 为 no-op：运行时门禁由 Host 的 feature 布尔值 → `enable` 派生驱动生命周期（ARCHITECTURE.md §8.2），回调本身不需动作。当前分类/默认值登记见 `docs/reference/plugins/settings.md`。
+- 唯一用户可见 feature：`character_panel_i18n.translation`，version `1`，default `1`，分类 `kBasicOptimization`，类型 `kToggle`，名称「属性面板汉化」，描述「人物属性显示为中文」（`plugin.cpp:89-97`）。`on_toggle` 立即写运行时门禁 `set_translation_enabled(enabled)`：关闭后 `owner_table_modify` 一律返回 `nullptr`（不替换文本），即使消费者仍在册也不产生副作用；生命周期仍由 Host 的 feature 布尔值 → `enable` 派生驱动（ARCHITECTURE.md §8.2）。当前分类/默认值登记见 `docs/reference/plugins/settings.md`。
 
 ## 游戏内行为
 
@@ -82,24 +90,25 @@
 ## 失败语义（fail-soft）
 
 - 资源声明 `kFailSoft`（`plugin.cpp:23`）：安装失败记 `degraded`，不使插件整体失败，文本机制与其他内容贡献者继续。
-- `install`：`bind_sdk` 后调 `register_consumers`；后者在「无 SDK / 无 `capabilities.require` / require 失败 / `subscribe` 返回 0」时返回 false，`install` 随即返回 1（宿主回滚并把插件置 `failed`）（`plugin.cpp:38-44`；`feature.cpp:35-59`）。
-- `on_resource_ready`：`resource_id` 匹配时**无条件**缓存 backup（含 `nullptr`）并返回 0（`charinfo_scope.cpp:32-35`），wrapper 侧自行判空（`charinfo_scope.cpp:25`）；未匹配 id 返回 0（`plugin.cpp:62-66`）。
+- `install`：`bind_sdk` 后调 `register_consumers`；后者在「无 SDK / 无 `capabilities.require` / require 失败 / `subscribe` 返回 0」时返回 false，`install` 随即返回 1（宿主回滚并把插件置 `failed`）（`plugin.cpp:40-51`；`feature.cpp:45-69`）。
+- `on_resource_ready`：`resource_id` 匹配时**无条件**缓存 backup（含 `nullptr`）并返回 0（`charinfo_scope.cpp:32-35`），wrapper 侧自行判空（`charinfo_scope.cpp:25`）；未匹配 id 返回 0（`plugin.cpp:77-81`）。
 - `scene_draw_charinfo_wrapper`：`sdk`/`text_scope.push` 不可用或 push 失败时，只透传 backup、**不标记作用域**（`charinfo_scope.cpp:22-25`）；push 成功才写镜像、调用后恢复上一层并 pop（`charinfo_scope.cpp:24-29`）。
-- `fill_status` 恒输出 `enabled=true, error=nullptr`（`plugin.cpp:68-71`）。
+- `fill_status` 恒输出 `enabled=true, error=nullptr`（`plugin.cpp:83-87`）。
 
 ## 生命周期
 
-- `install` / `on_enabled` → `register_consumers()`：幂等，句柄 `g_consumer != 0` 时直接返回 true（`plugin.cpp:38-55`；`feature.cpp:36`）。
-- `deactivate` / `on_disabled` → `unregister_consumers()`（有句柄且 `unsubscribe` 非空时注销并清空），`deactivate` 另执行 `bind_sdk(nullptr)`（`plugin.cpp:46-60`；`feature.cpp:61-66`）。
+- `install` / `on_enabled` → `register_consumers()`：幂等，句柄 `g_consumer != 0` 时直接返回 true（`plugin.cpp:40-51,60-69`；`feature.cpp:45-69`）。
+- `deactivate` / `on_disabled` → `set_translation_enabled(false)` + `unregister_consumers()`（有句柄且 `unsubscribe` 非空时注销并清空），`deactivate` 另执行 `bind_sdk(nullptr)`（`plugin.cpp:53-75`；`feature.cpp:71-74`）。
+- `on_toggle` → 只改运行时门禁；关闭方向立即停止替换，开启方向不提前注册消费者（由生命周期安装）。
 - 禁用期间的 entry hook 由 Loader 保留为空转 wrapper（`resumable=true`）。
 
 ## 文件地图
 
 | 文件 | 事实位置 |
 |---|---|
-| `plugins/character_panel_i18n/plugin.cpp:11-12,16-36,38-96` | 版本、资源声明（入口 hook）、requires（text_layer）、install/deactivate/on_enabled/on_disabled/on_resource_ready/fill_status、feature、descriptor。 |
+| `plugins/character_panel_i18n/plugin.cpp:11-12,16-36,40-120` | 版本、资源声明（入口 hook）、requires（text_layer）、install/deactivate/on_enabled/on_disabled/on_resource_ready/fill_status、feature、descriptor。 |
 | `plugins/character_panel_i18n/feature.h:10-18,30-61,63-77,79-93,95-128` | 前向声明、`Entry`/`kEntries`（12 条）、区间 `static_assert`、`entries`/`lookup`/`entry_by_key`、SDK 绑定与镜像访问、`owner_table_modify`/`owner_table_lookup`、phase/kind 常量。 |
-| `plugins/character_panel_i18n/feature.cpp:11-15,19-25,27-33,35-64,66` | 全局状态、SDK 绑定与镜像访问、`owner_table_modify`、`register_consumers`/`unregister_consumers`。 |
+| `plugins/character_panel_i18n/feature.cpp:11-16,20-28,30-43,45-74` | 全局状态、SDK 绑定与镜像访问、`owner_table_modify`、`register_consumers`/`unregister_consumers`。 |
 | `plugins/character_panel_i18n/charinfo_scope.h:19,23` | wrapper 与 `on_resource_ready` 对外声明。 |
 | `plugins/character_panel_i18n/charinfo_scope.cpp:13,19-30,32-35` | backup 缓存、绘制窗口 wrapper（push→转发→pop）、无条件 backup 交付。 |
 | `plugins/character_panel_i18n/CMakeLists.txt:1-7` | 静态库 target（feature.cpp / plugin.cpp / charinfo_scope.cpp）。 |

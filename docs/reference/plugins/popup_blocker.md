@@ -23,9 +23,15 @@
 
 | feature id | 名称 | 类型 | 默认值 | 分类 | 回调 |
 |---|---|---|---:|---|---|
-| `popup_blocker.enabled` | 禁用弹窗 | toggle | 开 | `BasicOptimization`（基础优化设置） | no-op；资源由 Host feature/plugin lifecycle 管理 |
+| `popup_blocker.enabled` | 禁用弹窗 | toggle | 开 | `BasicOptimization`（基础优化设置） | 原生侧 no-op（资源由 Host feature/plugin lifecycle 管理）；Kotlin `PluginRuntimeEffects` 订阅同一 feature 的 desired 值，驱动 Android 层「更新通知」「Hive 内购选择」弹窗的放行/拦截 |
 
 Host 根据 feature 值派生插件生命周期。开启时安装两个声明式资源；关闭时撤销资源，恢复教程文案绘制和暂停门闩写入。插件本身不在 hook handler 中查询 feature 状态。
+
+Android 层由 `PluginRuntimeEffects` 以 plugin id `popup_blocker` 订阅 Host runtime effect：
+`desiredEnabled=false` 时 `PopupBlockers` 的更新通知、内购选择与 `Connecting..` 进度框 hook 直接
+`chain.proceed()`（恢复原版弹窗/进度框），开启时回到拦截。启动早期尚未收到首个 effect 时按默认开启处理。
+同意页拦截/自动关闭不随该开关关闭——它承担读档流程的数据完整性保护（同意页 Activity 在进档期间启动
+会打断读档），不是可选的弹窗体验。
 
 ## 游戏内行为
 
@@ -83,7 +89,8 @@ monster 与 overhaul arm64 包静态核对得到相同的 `TutorialDescription`�
 
 - 本插件控制的是**原生教程文案绘制入口**和**state 6 暂停门闩写入**；不控制 Java/Xposed hooks，也不提供 native-to-Kotlin feature 配置通路。
 - `P_HUB_LOGIN_SKIP`（主菜单 Com2uS Hub 登录询问框）是 Host 常驻 patch，不属于本插件。
-- 更新通知、Hive 内购选择、同意页、`Connecting..` 等 Java 层弹窗由 Kotlin `PopupBlockers` 管理，与本 feature 开关相互独立。
+- 更新通知、Hive 内购选择等 Android 层弹窗由 Kotlin `PopupBlockers` 管理，其中「更新通知」与「Hive 内购选择」
+  以及 `Connecting..` 进度框都跟随同一 `popup_blocker.enabled` 开关；同意页拦截/自动关闭常驻，不随开关关闭。
 - 独立教程图形、高亮或焦点框若不依赖 `TutorialDescription` 返回值，可能仍显示；不宣称屏蔽所有新手 UI。
 - 一般 `UIPopupMsg`、剧情/NPC 对话及其他系统弹窗不受影响。
 
@@ -103,6 +110,14 @@ monster 与 overhaul arm64 包静态核对得到相同的 `TutorialDescription`�
 | `tests/test_host_adapters.cpp` | `TutorialDescription` entry hook 符号解析回归 |
 
 ## 验证状态
+
+- 2026-10-27 开关两态（C18L v588 真机，集成包 sha256 `83859ae3…`）：关闭 `popup_blocker.enabled` 重启后 logcat
+  出现 `popup_blocker runtime effect: java popup blocking enabled=false`、
+  `popup blocker disabled: allowing ActivityIndicatorOpen` 与
+  `popup blocker disabled: allowing ActiveUser.showNoticePopup`；开启重启后出现
+  `enabled=true`、`blocked ActivityIndicatorOpen (Connecting.. progress dialog)` 与
+  `blocked ActiveUser.showNoticePopup (update notice dialog)`。
+  更新通知的实际弹窗画面因本次服务端 `notice_show` 未触发而待目视补充。
 
 - `host_adapter_tests`：通过（1/1）；覆盖 `F_TUTORIAL_DESCRIPTION_VMA` 可由 `resolve_hook_entry()` 解析。
 - 插件测试 `popup_blocker_plugin_tests`、站点测试 `patch_layer_tests`、形状测试 `core_patches_shape_tests`：先前构建验证均通过（3/3）。

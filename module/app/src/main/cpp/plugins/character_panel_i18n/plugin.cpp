@@ -43,6 +43,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         g_register_failed = true;
         return 1;
     }
+    set_translation_enabled(true);
     // 表消费者经 text_layer 能力注册；失败即 install 失败（宿主回滚并把插件置 failed）。
     const bool registered = register_consumers();
     g_register_failed = !registered;
@@ -51,12 +52,14 @@ int plugin_install(contracts::PluginContext& ctx) {
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
     (void)ctx;
+    set_translation_enabled(false);
     unregister_consumers();
     bind_sdk(nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
+    set_translation_enabled(true);
     g_register_failed = !register_consumers();  // 幂等（activate 重入）
     const contracts::QolHostSdk* sdk = host_sdk();
     if (g_register_failed && sdk != nullptr && sdk->log.write != nullptr) {
@@ -67,6 +70,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
     (void)ctx;
+    set_translation_enabled(false);
     unregister_consumers();
 }
 
@@ -85,7 +89,11 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"character_panel_i18n.translation", 1, contracts::FeatureCategory::kBasicOptimization,
      contracts::FeatureType::kToggle, "属性面板汉化", "人物属性显示为中文",
-     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+     [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
+         set_translation_enabled(enabled != 0);
+         return contracts::ok();
+     },
+     nullptr},
 };
 
 const contracts::PluginDescriptor kDescriptor = {

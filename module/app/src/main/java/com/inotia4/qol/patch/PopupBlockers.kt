@@ -36,6 +36,17 @@ typealias PopupHookInstaller = (
  * - [ActivityIndicatorBlocker]：「Connecting..」模态进度框
  */
 object PopupBlockers {
+    // `popup_blocker.enabled` 的用户可见部分：更新通知、内购选择与 Connecting 进度框跟随该开关，
+    // 默认开启。同意页拦截/自动关闭不在此开关内——它是读档流程的数据完整性保护，不是弹窗体验。
+    @Volatile
+    private var enabled = true
+
+    fun setEnabled(value: Boolean) {
+        enabled = value
+    }
+
+    fun isEnabled(): Boolean = enabled
+
     fun install(param: XposedModuleInterface.PackageLoadedParam, hook: PopupHookInstaller) {
         NoticePopupBlocker.install(param, hook)
         IapBlocker.install(param, hook)
@@ -83,10 +94,15 @@ object NoticePopupBlocker {
             val showCb = cl.loadClass("$AU_CLASS\$NoticeShowPopupCBWithData")
                 .getMethod("noticeShowPopupCBWithData", popupStateClass)
             hook(showMethod, XposedInterface.ExceptionMode.PROTECTIVE) { chain ->
-                LogFile.info(LogDomain.PLATFORM, "blocked ActiveUser.showNoticePopup (update notice dialog)")
-                val cb = chain.getArg(0)
-                if (cb != null) invokeQuietly(showCb, cb, unshown)
-                null
+                if (PopupBlockers.isEnabled()) {
+                    LogFile.info(LogDomain.PLATFORM, "blocked ActiveUser.showNoticePopup (update notice dialog)")
+                    val cb = chain.getArg(0)
+                    if (cb != null) invokeQuietly(showCb, cb, unshown)
+                    null
+                } else {
+                    LogFile.info(LogDomain.PLATFORM, "popup blocker disabled: allowing ActiveUser.showNoticePopup")
+                    chain.proceed()
+                }
             }
 
             val infoMethod = au.declaredMethods.firstOrNull {
@@ -96,10 +112,14 @@ object NoticePopupBlocker {
             val infoCb = cl.loadClass("$AU_CLASS\$NoticePopupInfoCBWithData")
                 .getMethod("noticePopupInfoCBWithData", showPopupClass, String::class.java)
             hook(infoMethod, XposedInterface.ExceptionMode.PROTECTIVE) { chain ->
-                LogFile.info(LogDomain.PLATFORM, "blocked ActiveUser.getNoticePopupInfo (update notice dialog)")
-                val cb = chain.getArg(0)
-                if (cb != null) invokeQuietly(infoCb, cb, notShow, null)
-                null
+                if (PopupBlockers.isEnabled()) {
+                    LogFile.info(LogDomain.PLATFORM, "blocked ActiveUser.getNoticePopupInfo (update notice dialog)")
+                    val cb = chain.getArg(0)
+                    if (cb != null) invokeQuietly(infoCb, cb, notShow, null)
+                    null
+                } else {
+                    chain.proceed()
+                }
             }
         } catch (t: Throwable) {
             LogFile.error(LogDomain.PLATFORM, "NoticePopupBlocker install failed", t)
@@ -136,10 +156,15 @@ object IapBlocker {
                 Class.forName("com.com2us.module.inapp.SelectTargetCallback", false, cl),
                 Long::class.javaPrimitiveType,
             )
-            hook(method, XposedInterface.ExceptionMode.PROTECTIVE) { _ ->
-                LogFile.info(LogDomain.PLATFORM, "blocked Hive SelectTarget.iapSelectTarget (payment dialog)")
-                recover()
-                null
+            hook(method, XposedInterface.ExceptionMode.PROTECTIVE) { chain ->
+                if (PopupBlockers.isEnabled()) {
+                    LogFile.info(LogDomain.PLATFORM, "blocked Hive SelectTarget.iapSelectTarget (payment dialog)")
+                    recover()
+                    null
+                } else {
+                    LogFile.info(LogDomain.PLATFORM, "popup blocker disabled: allowing Hive SelectTarget.iapSelectTarget")
+                    chain.proceed()
+                }
             }
         } catch (t: Throwable) {
             LogFile.error(LogDomain.PLATFORM, "IapBlocker install failed", t)
@@ -419,7 +444,8 @@ object AgreementPopup {
  * Activity 生命周期兜底，`setCancelable(false)` 又让返回键无效。因此在它显示期间切场景/进存档时
  * native 不再回调关闭，弹窗会永久抢占输入并盖住 HUD（机制记载见 docs/reference/game/ui.md §2.2）。
  *
- * 处理：让 `ActivityIndicatorOpen()` 空实现——不弹，不改动任何网络与存档流程。
+ * 处理：开关开启时让 `ActivityIndicatorOpen()` 空实现——不弹，不改动任何网络与存档流程；
+ * 开关关闭时放行原实现（恢复原版进度框，同时恢复“关闭回调不到达时永久抢占输入”的原版风险）。
  * `ActivityIndicatorClose()` 保持原样（它仍负责清理静态 progressDialog 引用）。
  */
 object ActivityIndicatorBlocker {
@@ -432,9 +458,14 @@ object ActivityIndicatorBlocker {
             val method = cl.loadClass(TARGET_CLASS).declaredMethods
                 .firstOrNull { it.name == TARGET_METHOD && it.parameterTypes.isEmpty() }
                 ?: throw NoSuchMethodException("$TARGET_CLASS.$TARGET_METHOD()")
-            hook(method, XposedInterface.ExceptionMode.PROTECTIVE) { _ ->
-                LogFile.info(LogDomain.PLATFORM, "blocked ActivityIndicatorOpen (Connecting.. progress dialog)")
-                null
+            hook(method, XposedInterface.ExceptionMode.PROTECTIVE) { chain ->
+                if (PopupBlockers.isEnabled()) {
+                    LogFile.info(LogDomain.PLATFORM, "blocked ActivityIndicatorOpen (Connecting.. progress dialog)")
+                    null
+                } else {
+                    LogFile.info(LogDomain.PLATFORM, "popup blocker disabled: allowing ActivityIndicatorOpen")
+                    chain.proceed()
+                }
             }
         } catch (t: Throwable) {
             LogFile.error(LogDomain.PLATFORM, "ActivityIndicatorBlocker install failed", t)

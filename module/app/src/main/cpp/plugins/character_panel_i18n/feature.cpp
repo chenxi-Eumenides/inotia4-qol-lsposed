@@ -1,5 +1,6 @@
 #include "feature.h"
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 
@@ -13,6 +14,8 @@ thread_local int32_t g_active_scope = contracts::kTextScopeNone;
 const contracts::TextLayerApi* g_text_layer = nullptr;
 // 表消费者句柄（install 注册；0 = 未注册）。
 uint64_t g_consumer = 0;
+// 用户开关的运行时门禁（默认开启，与 feature default_enabled 一致）。
+std::atomic<bool> g_translation_enabled{true};
 
 }  // namespace
 
@@ -24,9 +27,16 @@ int32_t active_scope_value() { return g_active_scope; }
 
 void set_active_scope_value(int32_t value) { g_active_scope = value; }
 
+void set_translation_enabled(bool enabled) {
+    g_translation_enabled.store(enabled, std::memory_order_release);
+}
+
+bool translation_enabled() { return g_translation_enabled.load(std::memory_order_acquire); }
+
 const char* owner_table_modify(uint32_t text_id, const char* current, void* ctx) {
     (void)current;
     (void)ctx;
+    if (!translation_enabled()) return nullptr;
     if (text_id > 0xFFFFu) return nullptr;
     // 命中返回模块字面量；未命中/占位 nullptr 返回 nullptr（不改）。
     return lookup(static_cast<uint16_t>(text_id), g_active_scope);
