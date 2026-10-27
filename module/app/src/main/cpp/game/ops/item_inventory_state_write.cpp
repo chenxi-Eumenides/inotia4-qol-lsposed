@@ -444,7 +444,14 @@ QolResult use_item(int32_t bag, int32_t slot,
         (fn_is_dice != nullptr && fn_is_dice(category));
     const bool mercenary_seal =
         fn_is_mercenary_seal != nullptr && fn_is_mercenary_seal(category);
-    if (!sealed_or_box && !mercenary_seal && fn_is_use != nullptr && !fn_is_use(category)) {
+    // ITEMDATABASE_IsUse only covers the generic use types 0x16/0x17. Skill
+    // books, synthesis sets, the lamp and other special consumables have a
+    // non-zero ITEMCLASSBASE use-effect type but fail that predicate; they are
+    // dispatched by CHAR_UseItemEx itself. Do not reject them before the native
+    // dispatcher runs.
+    const bool has_use_effect = item_use_type(category) > 0;
+    if (!sealed_or_box && !mercenary_seal && !has_use_effect &&
+        fn_is_use != nullptr && !fn_is_use(category)) {
         return item_error(out, kQolErrUnsupported, "item not usable");
     }
 
