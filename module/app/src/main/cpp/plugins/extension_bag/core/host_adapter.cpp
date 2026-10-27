@@ -420,6 +420,132 @@ bool extension_handle_backpack_equip() {
     // When all native bag slots are occupied, fall through to the extension
     // bag slots. C18 variant space 1 has no backpack-item path.
     if (!module_source && native_bag_slot_available()) return false;
+    if (module_source && native_bag_slot_available()) {
+        const auto* extras = ::qol::extension_bag::access::host().inventory_extras;
+        const auto* write_port = ::qol::extension_bag::access::host().write_port;
+        const virtual_bag::Item source =
+            ::qol::extension_bag::access::bag().items[source_bag][source_slot];
+        const int payload_size = static_cast<int>(source.payload_size);
+        int32_t native_slot = -1;
+        if (extras == nullptr || extras->read.empty_bag_slot == nullptr ||
+            !qol::contracts::succeeded(extras->read.empty_bag_slot(&native_slot)) ||
+            native_slot < 1 || native_slot > 4) {
+            QOL_LOG_INFO(QolDomain::kExtensionBag,
+                         "backpack native equip fallback stage=slot_unavailable src=%d/%d slot=%d",
+                         source_bag, source_slot, native_slot);
+        } else if (payload_size <= 0 ||
+                   static_cast<size_t>(payload_size) > source.payload.size()) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "backpack native equip fallback stage=payload_invalid src=%d/%d size=%d",
+                         source_bag, source_slot, payload_size);
+        } else if (write_port == nullptr ||
+                   write_port->ui.set_original_bag_item == nullptr ||
+                   write_port->ui.bag_capacity_word == nullptr) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "backpack native equip fallback stage=ports_unavailable src=%d/%d",
+                         source_bag, source_slot);
+        } else {
+            // 载入对象由 ownership 台账跟踪：失败路径走 release，成功交给袋表后 handover，
+            // 避免直接 free 已归原生库存引用的对象。
+            uint32_t native_handle = 0;
+            void* native_item = load_item_payload_tracked_locked(
+                source.payload.data(), payload_size, "backpack native equip", &native_handle);
+            if (native_item == nullptr) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "backpack native equip fallback stage=load_failed src=%d/%d",
+                             source_bag, source_slot);
+            } else if (!qol::contracts::succeeded(
+                           write_port->ui.set_original_bag_item(native_slot, native_item))) {
+                release_tracked_item_locked(native_handle, native_item,
+                                            "backpack native equip set item failed");
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "backpack native equip fallback stage=set_item_failed src=%d/%d slot=%d",
+                             source_bag, source_slot, native_slot);
+            } else {
+                uint32_t word = 0;
+                const bool capacity_read = qol::contracts::succeeded(
+                    write_port->ui.bag_capacity_word(native_slot, &word));
+                const int capacity = capacity_read
+                                         ? static_cast<int>(word & 0x1FFFFFFu)
+                                         : 0;
+                if (!capacity_read ||
+                    (capacity != 4 && capacity != 8 && capacity != 12 && capacity != 16)) {
+                    if (qol::contracts::succeeded(
+                            write_port->ui.set_original_bag_item(native_slot, nullptr))) {
+                        release_tracked_item_locked(native_handle, native_item,
+                                                    "backpack native equip capacity rollback");
+                    } else {
+                        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                     "backpack native equip stage=capacity_rollback_failed src=%d/%d slot=%d",
+                                     source_bag, source_slot, native_slot);
+                        return true;
+                    }
+                    QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                 "backpack native equip fallback stage=capacity_invalid src=%d/%d slot=%d capacity=%d",
+                                 source_bag, source_slot, native_slot, capacity);
+                } else {
+                    ::qol::extension_bag::access::bag().items[source_bag][source_slot] = {};
+                    extension_bag_mark_dirty_locked();
+                    if (!persist_state_locked()) {
+                        ::qol::extension_bag::access::bag().items[source_bag][source_slot] = source;
+                        const bool target_cleared = qol::contracts::succeeded(
+                            write_port->ui.set_original_bag_item(native_slot, nullptr));
+                        virtual_bag::normalize(&::qol::extension_bag::access::bag());
+                        extension_bag_mark_dirty_locked();
+                        (void)persist_state_locked();
+                        if (target_cleared) {
+                            release_tracked_item_locked(native_handle, native_item,
+                                                        "backpack native equip persist rollback");
+                        } else {
+                            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                         "backpack native equip stage=persist_rollback_failed src=%d/%d slot=%d",
+                                         source_bag, source_slot, native_slot);
+                            return true;
+                        }
+                        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                     "backpack native equip fallback stage=persist_failed src=%d/%d slot=%d",
+                                     source_bag, source_slot, native_slot);
+                    } else if (!free_module_object_locked(source_bag, source_slot)) {
+                        ::qol::extension_bag::access::bag().items[source_bag][source_slot] = source;
+                        const bool target_cleared = qol::contracts::succeeded(
+                            write_port->ui.set_original_bag_item(native_slot, nullptr));
+                        virtual_bag::normalize(&::qol::extension_bag::access::bag());
+                        extension_bag_mark_dirty_locked();
+                        (void)persist_state_locked();
+                        if (target_cleared) {
+                            release_tracked_item_locked(native_handle, native_item,
+                                                        "backpack native equip source release rollback");
+                        } else {
+                            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                         "backpack native equip stage=source_release_rollback_failed src=%d/%d slot=%d",
+                                         source_bag, source_slot, native_slot);
+                            return true;
+                        }
+                        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                                     "backpack native equip fallback stage=source_release_failed src=%d/%d slot=%d",
+                                     source_bag, source_slot, native_slot);
+                        // 物品已恢复到扩展袋，必须吞掉原版按钮路径，避免二次装备。
+                        return true;
+                    } else {
+                        handover_tracked_item_locked(native_handle, native_item,
+                                                     "backpack native equip handover");
+                        if (write_port->ui.refresh_bag_area != nullptr) {
+                            (void)write_port->ui.refresh_bag_area();
+                        }
+                        if (write_port->ui.refresh_item_area != nullptr) {
+                            (void)write_port->ui.refresh_item_area();
+                        }
+                        extension_description_set_off();
+                        clear_original_desc_locked();
+                        QOL_LOG_INFO(QolDomain::kExtensionBag,
+                                     "backpack native equip ok target=%d src=%d/%d capacity=%d",
+                                     native_slot, source_bag, source_slot, capacity);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
     const int target = first_empty_extension_bag_locked();
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "backpack equip probe target=%d category=%d src=%d/%d active=%d",
