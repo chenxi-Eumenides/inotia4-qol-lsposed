@@ -183,6 +183,8 @@ UiRect contract_rect(::UiRect rect) {
     return UiRect{rect.x, rect.y, rect.w, rect.h};
 }
 
+void invalidate_child_lists();
+
 QolResult create_control(uint32_t kind, QolUiHandle parent, QolUiHandle* out) {
     if (out == nullptr) return invalid_argument();
     *out = nullptr;
@@ -211,7 +213,11 @@ QolResult create_control(uint32_t kind, QolUiHandle parent, QolUiHandle* out) {
         default:
             return unsupported();
     }
-    return *out == nullptr ? not_ready() : contracts::ok();
+    if (*out == nullptr) return not_ready();
+    // 新建控件会改变 parent 的子控件链表；缓存的 child list 必须立即失效，
+    // 否则 anchored_control_ensure 会把刚创建的控件判为不在树上并反复重建。
+    if (parent != nullptr) invalidate_child_lists();
+    return contracts::ok();
 }
 
 QolResult set_rect(QolUiHandle control, UiRect rect) {
