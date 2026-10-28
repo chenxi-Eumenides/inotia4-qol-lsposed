@@ -66,6 +66,11 @@ using QolItemInventoryStateUnequipHandleFn = QolResult (*)(
 using QolItemInventoryStatePutJewelHandlesFn = QolResult (*)(
     int32_t role, QolItemHandle equip_item, QolItemHandle jewel_item,
     QolItemInventoryStateWriteResult* out);
+using QolItemInventoryStateCreateItemFn = QolResult (*)(
+    int32_t category, int32_t arg1, int32_t arg2, int32_t arg3, QolItemHandle* out_item);
+using QolItemInventoryStateCreatePerfectItemFn = QolResult (*)(
+    int32_t category, QolItemHandle* out_item);
+using QolItemInventoryStateFreeItemFn = QolResult (*)(QolItemHandle item);
 
 struct QolItemInventoryStateWritePort {
     QolVersion abi_version;
@@ -86,6 +91,9 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateEquipHandleFn equip_handle;
     QolItemInventoryStateUnequipHandleFn unequip_handle;
     QolItemInventoryStatePutJewelHandlesFn put_jewel_handles;
+    QolItemInventoryStateCreateItemFn create_item;
+    QolItemInventoryStateCreatePerfectItemFn create_perfect_item;
+    QolItemInventoryStateFreeItemFn free_item;
 };
 
 // 1.2：尾部追加 SAVE_LoadItem、原生精确写槽与按句柄移除原语。
@@ -99,6 +107,10 @@ struct QolItemInventoryStateWritePort {
 // put_jewel_handles 成功保留装备对象归属并消耗宝石对象；失败时两个对象归属均不变。
 // 2.1：装备、脱下、镶嵌与附魔回调不再接收旧扩展库存 provider。
 // 2.2：move_handle 失败后由 Host 释放 detached 对象；失败时调用方不得再次释放。
+// 2.3：尾部追加 detached 创建与释放原语。create_item/create_perfect_item 返回调用方拥有的
+// detached 句柄（owner 与 load_item 相同），失败不产生句柄，调用方负责 place_item 或 free_item。
+// free_item 仅接受 detached 句柄：成功即 invalidate + itempool free；背包内或游戏持有的对象
+// 拒绝释放，删除背包物品走 remove_item。
 constexpr uint32_t kQolItemInventoryStateWritePortSize = sizeof(QolItemInventoryStateWritePort);
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,

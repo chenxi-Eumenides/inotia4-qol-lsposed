@@ -80,6 +80,29 @@ QolResult resolve_loaded_item(contracts::QolItemHandle handle, void** out_item) 
     return contracts::ok();
 }
 
+// 新建/还原的对象在落位前归调用方所有；登记失败时释放对象，失败不产生句柄。
+QolResult register_detached_item(void* item, contracts::QolItemHandle* out_item) {
+    if (out_item == nullptr) {
+        return transfer_error(kQolErrInvalidArgument, "invalid item output");
+    }
+    *out_item = contracts::kInvalidItemHandle;
+    if (item == nullptr) return transfer_error(kQolErrInternal, "create item failed");
+    ItemHandleError registry_error = ItemHandleError::kNone;
+    contracts::QolItemHandle handle =
+        register_item(item, kQolLoadedItemHandleOwner, &registry_error);
+    if (handle.slot == 0 || handle.generation == 0) {
+        // 创建钩子可能已为同一对象登记句柄；回查后沿用，不重复注册。
+        const contracts::QolItemHandle existing = lookup_item(item, nullptr);
+        if (existing.slot == 0 || existing.generation == 0) {
+            if (fn_itempool_free != nullptr) fn_itempool_free(item);
+            return handle_error(registry_error);
+        }
+        handle = existing;
+    }
+    *out_item = handle;
+    return contracts::ok();
+}
+
 QolResult item_stack_count(void* item, uint32_t* out_count) {
     if (item == nullptr || out_count == nullptr) {
         return transfer_error(kQolErrInvalidArgument, "invalid item count arguments");
@@ -244,6 +267,27 @@ QolResult load_item(const uint8_t* payload, uint32_t size,
     }
     *out_item = handle;
     return contracts::ok();
+}
+
+// 生成 detached 物品：与 add_item 的创建路径相同，跳过 MakeItem 的 search_tbl 校验。
+QolResult create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
+                      contracts::QolItemHandle* out_item) {
+    if (out_item != nullptr) *out_item = contracts::kInvalidItemHandle;
+    if (category < 0) return transfer_error(kQolErrInvalidArgument, "invalid item category");
+    if (!game_in_world() || fn_create_item == nullptr || fn_itempool_free == nullptr) {
+        return transfer_error(kQolErrNotReady, "item creation not ready");
+    }
+    return register_detached_item(fn_create_item(category, arg1, arg2, arg3), out_item);
+}
+
+QolResult create_perfect_item(int32_t category, contracts::QolItemHandle* out_item) {
+    if (out_item != nullptr) *out_item = contracts::kInvalidItemHandle;
+    if (category < 0) return transfer_error(kQolErrInvalidArgument, "invalid item category");
+    if (!game_in_world() || fn_item_create_perfect_item == nullptr ||
+        fn_itempool_free == nullptr) {
+        return transfer_error(kQolErrNotReady, "item creation not ready");
+    }
+    return register_detached_item(fn_item_create_perfect_item(category), out_item);
 }
 
 QolResult free_loaded_item(contracts::QolItemHandle handle) {

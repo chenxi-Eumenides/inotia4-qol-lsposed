@@ -16,6 +16,10 @@ QolResult add_item(int32_t category, int32_t count, int32_t socket_total,
                    contracts::QolItemInventoryStateWriteResult* out);
 QolResult load_item(const uint8_t* payload, uint32_t size, contracts::QolItemHandle* out_item);
 QolResult free_loaded_item(contracts::QolItemHandle item);
+// v2.3 detached 创建：返回调用方拥有的句柄（owner 与 load_item 相同），不落位。
+QolResult create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
+                      contracts::QolItemHandle* out_item);
+QolResult create_perfect_item(int32_t category, contracts::QolItemHandle* out_item);
 QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
                      contracts::QolItemHandle item,
                      contracts::QolItemInventoryStateWriteResult* out);

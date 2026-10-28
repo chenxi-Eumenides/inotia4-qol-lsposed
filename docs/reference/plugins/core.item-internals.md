@@ -25,7 +25,7 @@
 | descriptor | id `core.item`，version `0.1.0`，`deactivate_allowed=false`。 |
 | required capabilities | 0 项。 |
 | provides | 8 项；能力名称、版本与用途见[对外契约](core.item.md)的“对外能力”。 |
-| Game ports | 6 项：`QOL_PORT_ITEM` 3.8、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.2、`QOL_PORT_MOVE_MERGE` 1.2、`QOL_PORT_CHARACTER_EXTRAS` 1.2。 |
+| Game ports | 6 项：`QOL_PORT_ITEM` 3.8、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.3、`QOL_PORT_MOVE_MERGE` 1.2、`QOL_PORT_CHARACTER_EXTRAS` 1.2。 |
 | optional requires | 4 项：`character.state` 1.0、`http.registry` 1.1、`http.dispatch` 1.1、`world.facts` 2.0。 |
 
 `world.facts` 缺失时出售以 `kSymbolsUnresolved` 失败，不继续扣款或移除物品。其余 optional requires 不构成安装依赖。

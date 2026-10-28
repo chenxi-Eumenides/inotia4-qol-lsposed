@@ -115,3 +115,11 @@ inline uint32_t decremented_count(uint32_t old_full) {
 }
 
 }  // namespace s2_writeback
+
+namespace qol::features::inventory_hooks {
+
+// 给 detached 句柄写 canonical 数量（inventory.action.create 的 count>1 路径）。
+// 类别不可堆叠返回 Unsupported；句柄失效或数量编码不可用返回 NotFound/NotReady。
+QolResult write_detached_item_count(const qol::contracts::QolItemHandle& item, uint32_t count);
+
+}  // namespace qol::features::inventory_hooks

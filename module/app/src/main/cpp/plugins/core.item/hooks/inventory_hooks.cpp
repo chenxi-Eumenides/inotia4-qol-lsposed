@@ -2657,6 +2657,63 @@ bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* f
     return facts != nullptr;
 }
 
+namespace qol::features::inventory_hooks {
+namespace {
+
+QolResult count_write_error(int32_t code, const char* message) {
+    return qol::contracts::error(code, message, static_cast<uint32_t>(std::strlen(message)));
+}
+
+}  // namespace
+
+QolResult write_detached_item_count(const qol::contracts::QolItemHandle& item, uint32_t count) {
+    if (item.slot == 0 || item.generation == 0 || count == 0) {
+        return count_write_error(kQolErrInvalidArgument, "invalid item count request");
+    }
+    const qol::contracts::QolItemCountApi* api = item_count_api();
+    if (api == nullptr || api->is_encoded == nullptr || g_game == nullptr ||
+        g_game->item_abi.native_item_for_handle == nullptr) {
+        return count_write_error(kQolErrNotReady, "item count unavailable");
+    }
+    void* native_item = nullptr;
+    QolResult result = g_game->item_abi.native_item_for_handle(item, &native_item);
+    if (!qol::contracts::succeeded(result) || native_item == nullptr) {
+        return count_write_error(kQolErrNotFound, "item handle not found");
+    }
+    qol::contracts::QolItemCountEncoding encoding =
+        qol::contracts::QolItemCountEncoding::kUnknown;
+    result = api->is_encoded(native_item, &encoding);
+    if (!qol::contracts::succeeded(result) ||
+        encoding == qol::contracts::QolItemCountEncoding::kUnknown) {
+        return count_write_error(kQolErrNotReady, "item count encoding unavailable");
+    }
+    if (encoding != qol::contracts::QolItemCountEncoding::kEncoded) {
+        return count_write_error(kQolErrUnsupported, "item not stackable");
+    }
+    switch (item_count_write_effective(native_item, count)) {
+        case ItemCountWriteResult::kApplied:
+            return qol::contracts::ok();
+        case ItemCountWriteResult::kFailed:
+            return count_write_error(kQolErrInternal, "item count write failed");
+        case ItemCountWriteResult::kNotReady:
+            break;
+    }
+    // 999 扩展模式未落地时回退到 provider 的非扩展编码；编码布局只在 provider 内解释。
+    if (api->read_encoded_field == nullptr || api->field_from_canonical == nullptr ||
+        api->write_encoded_field == nullptr) {
+        return count_write_error(kQolErrNotReady, "item count writer unavailable");
+    }
+    uint32_t field = 0;
+    result = api->read_encoded_field(native_item, &field);
+    if (!qol::contracts::succeeded(result)) return result;
+    uint32_t updated = 0;
+    result = api->field_from_canonical(field, count, 0, &updated);
+    if (!qol::contracts::succeeded(result)) return result;
+    return api->write_encoded_field(native_item, updated);
+}
+
+}  // namespace qol::features::inventory_hooks
+
 void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
     if (entries == nullptr || entries->hook_func == nullptr || entries->unhook_func == nullptr) {
         QOL_LOG_ERROR(QolDomain::kInventory, "native_init received invalid API entries");

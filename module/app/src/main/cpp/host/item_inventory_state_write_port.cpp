@@ -202,6 +202,20 @@ QolResult put_jewel_handles(int32_t role, contracts::QolItemHandle equip_item,
     return qol::game::ops::put_jewel_handles(role, equip_item, jewel_item, out);
 }
 
+QolResult create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
+                      contracts::QolItemHandle* out_item) {
+    return qol::game::ops::create_item(category, arg1, arg2, arg3, out_item);
+}
+
+QolResult create_perfect_item(int32_t category, contracts::QolItemHandle* out_item) {
+    return qol::game::ops::create_perfect_item(category, out_item);
+}
+
+QolResult free_item(contracts::QolItemHandle item) {
+    // v2.3 的释放口只接受 create/load_item 产生的 detached 句柄；背包内物品走 remove_item。
+    return qol::game::ops::free_loaded_item(item);
+}
+
 const contracts::QolItemInventoryStateWritePort kPort{
     contracts::kQolPortItemInventoryStateWriteVersion,
     &use_item,
@@ -221,6 +235,9 @@ const contracts::QolItemInventoryStateWritePort kPort{
     &equip_handle,
     &unequip_handle,
     &put_jewel_handles,
+    &create_item,
+    &create_perfect_item,
+    &free_item,
 };
 
 }  // namespace

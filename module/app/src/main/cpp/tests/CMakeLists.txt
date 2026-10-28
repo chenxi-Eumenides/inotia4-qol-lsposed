@@ -306,11 +306,24 @@ add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
     ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
+    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
 set_target_properties(inventory_action_sell_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME inventory_action_sell_tests COMMAND inventory_action_sell_tests)
+
+# v3.3: create / place / discard_handle lifecycle and legacy struct_size compatibility.
+add_executable(inventory_action_lifecycle_tests
+    test_inventory_action_lifecycle.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
+    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
+)
+target_include_directories(inventory_action_lifecycle_tests PRIVATE ${CPP_DIR})
+target_compile_features(inventory_action_lifecycle_tests PRIVATE cxx_std_17)
+set_target_properties(inventory_action_lifecycle_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME inventory_action_lifecycle_tests COMMAND inventory_action_lifecycle_tests)
 
 # Exercise transfer journal store-write failures through the production cross-space move path.
 add_executable(item_transfer_journal_tests

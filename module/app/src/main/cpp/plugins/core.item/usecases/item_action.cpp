@@ -3,12 +3,18 @@
 #include "move_item.h"
 #include "sell_item.h"
 
+#include <cstddef>
+
 #include "../hooks/inventory_logging.h"
+#include "plugins/core.item/hooks/inventory_hooks.h"
+#include "plugins/core.item/bags/native_transport.h"
 #include "plugins/core.item/runtime/context.h"
 #include "../../../contracts/bag.h"
 
 namespace qol::features::core_item {
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
+uint32_t registered_bag_source_count();
+const contracts::QolBagSource* registered_bag_source_at(uint32_t index);
 void request_inventory_refresh();
 }
 
@@ -461,6 +467,309 @@ contracts::InventorySellResult sell(QolActionRef ref, QolItemHandle expected_ite
     return outcome;
 }
 
+constexpr uint32_t kItemCreateSpecSize = static_cast<uint32_t>(
+    offsetof(contracts::QolItemCreateSpec, payload_size) +
+    sizeof(contracts::QolItemCreateSpec::payload_size));
+constexpr uint32_t kItemPlaceTargetSize = static_cast<uint32_t>(
+    offsetof(contracts::QolItemPlaceTarget, flags) +
+    sizeof(contracts::QolItemPlaceTarget::flags));
+
+contracts::QolItemCreateOutcome create(const contracts::QolItemCreateSpec* spec) {
+    contracts::QolItemCreateOutcome outcome{
+        sizeof(contracts::QolItemCreateOutcome), InventoryActionStatus::kInvalidRef,
+        contracts::kInvalidItemHandle};
+    if (spec == nullptr || spec->struct_size < kItemCreateSpecSize) return outcome;
+    outcome.status = validate_world();
+    if (outcome.status != InventoryActionStatus::kOk) return outcome;
+    if (g_item_state_write == nullptr) {
+        outcome.status = InventoryActionStatus::kInternal;
+        return outcome;
+    }
+
+    const int32_t count = spec->count <= 0 ? 1 : spec->count;
+    // payload 形态保留整件物品字段，优先于 category 创建。
+    const bool use_payload = spec->payload != nullptr && spec->payload_size != 0;
+    contracts::QolItemHandle item = contracts::kInvalidItemHandle;
+    QolResult operation{};
+    if (use_payload) {
+        if (g_item_state_write->load_item == nullptr) {
+            outcome.status = InventoryActionStatus::kUnsupported;
+            return outcome;
+        }
+        operation = g_item_state_write->load_item(spec->payload, spec->payload_size, &item);
+    } else if ((spec->flags & contracts::kQolItemCreateFlagPerfect) != 0) {
+        if (spec->category <= 0) {
+            outcome.status = InventoryActionStatus::kInvalidRef;
+            return outcome;
+        }
+        if (g_item_state_write->create_perfect_item == nullptr) {
+            outcome.status = InventoryActionStatus::kUnsupported;
+            return outcome;
+        }
+        operation = g_item_state_write->create_perfect_item(spec->category, &item);
+    } else {
+        if (spec->category <= 0) {
+            outcome.status = InventoryActionStatus::kInvalidRef;
+            return outcome;
+        }
+        if (g_item_state_write->create_item == nullptr) {
+            outcome.status = InventoryActionStatus::kUnsupported;
+            return outcome;
+        }
+        // CreateItem 不执行 MakeItem 的 search_tbl 校验；arg1..3 由调用方数据面决定。
+        operation = g_item_state_write->create_item(spec->category, 0, 0, 0, &item);
+    }
+    if (!contracts::succeeded(operation) || !valid_handle(item)) {
+        if (valid_handle(item) && g_item_state_write->free_item != nullptr) {
+            (void)g_item_state_write->free_item(item);
+        }
+        outcome.status = contracts::succeeded(operation)
+                             ? InventoryActionStatus::kInternal
+                             : status_from_result(operation, true);
+        return outcome;
+    }
+    if (count > 1) {
+        const QolResult written = inventory_hooks::write_detached_item_count(
+            item, static_cast<uint32_t>(count));
+        if (!contracts::succeeded(written)) {
+            // 不可堆叠或数量编码不可用时撤销已创建对象，失败不留下句柄。
+            if (g_item_state_write->free_item != nullptr) {
+                (void)g_item_state_write->free_item(item);
+            }
+            outcome.status = written.code == kQolErrUnsupported
+                                 ? InventoryActionStatus::kUnsupported
+                                 : status_from_result(written, true);
+            return outcome;
+        }
+    }
+    outcome.status = InventoryActionStatus::kOk;
+    outcome.item = item;
+    return outcome;
+}
+
+int32_t detached_stack_count(QolItemHandle item) {
+    if (g_port != nullptr && g_port->read.effective_cumulate_count != nullptr) {
+        int32_t count = 0;
+        if (contracts::succeeded(g_port->read.effective_cumulate_count(item, &count)) && count > 0) {
+            return count;
+        }
+    }
+    if (g_port != nullptr && g_port->read.cumulate_count != nullptr) {
+        int32_t count = 0;
+        if (contracts::succeeded(g_port->read.cumulate_count(item, &count)) && count > 0) {
+            return count;
+        }
+    }
+    // 非堆叠物品可能没有数量位段；单件按 1 处理。
+    return 1;
+}
+
+contracts::QolItemPlaceOutcome place(QolItemHandle item,
+                                     const contracts::QolItemPlaceTarget* target) {
+    contracts::QolItemPlaceOutcome outcome{
+        sizeof(contracts::QolItemPlaceOutcome), InventoryActionStatus::kInvalidRef, {},
+        contracts::kInvalidItemHandle, 0, 0};
+    if (!valid_handle(item) || target == nullptr || target->struct_size < kItemPlaceTargetSize) {
+        return outcome;
+    }
+    outcome.status = validate_world();
+    if (outcome.status != InventoryActionStatus::kOk) return outcome;
+    if (g_item_state_write == nullptr) {
+        outcome.status = InventoryActionStatus::kInternal;
+        return outcome;
+    }
+
+    const int32_t space_id = target->ref.space_id;
+    const int32_t slot = target->slot < 0 ? -1 : target->slot;
+    if (native_space(space_id)) {
+        const int32_t bag = target->ref.bag < 0 ? 0 : target->ref.bag;
+        if (space_id == contracts::kQolBagSpaceOriginal && bag == contracts::kQolTaskBagIndex) {
+            outcome.status = InventoryActionStatus::kTaskBagExcluded;
+            return outcome;
+        }
+        if (g_item_state_write->place_item == nullptr) {
+            outcome.status = InventoryActionStatus::kUnsupported;
+            return outcome;
+        }
+        const contracts::QolBagRef ref{space_id, bag};
+        contracts::QolItemInventoryStateWriteResult write_result{};
+        const QolResult operation =
+            g_item_state_write->place_item(&ref, slot, item, &write_result);
+        if (!contracts::succeeded(operation)) {
+            outcome.status = status_from_result(operation, true);
+            return outcome;
+        }
+        outcome.status = InventoryActionStatus::kOk;
+        outcome.item = item;
+        outcome.ref = ref;
+        if (write_result.gained_count != 0) {
+            outcome.ref.bag = write_result.gained[0].bag;
+            outcome.count = write_result.gained[0].count;
+        }
+        request_inventory_refresh();
+        return outcome;
+    }
+
+    if (space_id < contracts::kQolBagSpaceFirstRegistered) {
+        return outcome;
+    }
+    const contracts::QolBagSource* source = find_bag_source(space_id);
+    if (source == nullptr || source->import_item == nullptr) {
+        outcome.status = InventoryActionStatus::kUnsupported;
+        return outcome;
+    }
+    if (g_item_state_write->free_item == nullptr) {
+        outcome.status = InventoryActionStatus::kUnsupported;
+        return outcome;
+    }
+    const int32_t count = detached_stack_count(item);
+    contracts::QolBagTransfer transfer{};
+    QolResult operation = bags::native_transport::export_detached_item(item, count, &transfer);
+    if (!contracts::succeeded(operation)) {
+        outcome.status = status_from_result(operation, true);
+        return outcome;
+    }
+    contracts::QolBagMutationResult mutation{};
+    operation = source->import_item(&transfer, target->ref.bag, slot, &mutation);
+    if (!contracts::succeeded(operation)) {
+        // 导入失败时句柄保持 detached，调用方可重试或 discard_handle 放弃。
+        outcome.status = status_from_result(operation, true);
+        return outcome;
+    }
+    if (!valid_handle(mutation.item) || mutation.ref.space_id != space_id ||
+        mutation.count <= 0) {
+        outcome.status = InventoryActionStatus::kInternal;
+    } else {
+        outcome.status = InventoryActionStatus::kOk;
+        outcome.ref = mutation.ref;
+        outcome.item = mutation.item;
+        outcome.count = mutation.count;
+    }
+    // 导入已建立新句柄，detached 原对象必须释放，否则同一物品会在两个介质重复存在。
+    const QolResult freed = g_item_state_write->free_item(item);
+    if (!contracts::succeeded(freed)) outcome.status = InventoryActionStatus::kInternal;
+    if (outcome.status == InventoryActionStatus::kOk) request_inventory_refresh();
+    return outcome;
+}
+
+contracts::InventoryUseOutcome discard_native_handle(QolItemHandle item, int32_t count) {
+    contracts::InventoryUseOutcome outcome{InventoryActionStatus::kInternal, 0};
+    if (g_item_state_write == nullptr || g_item_state_write->remove_item == nullptr) {
+        outcome.status = InventoryActionStatus::kUnsupported;
+        return outcome;
+    }
+    contracts::QolItemInventoryStateWriteResult write_result{};
+    const QolResult operation = g_item_state_write->remove_item(item, count, &write_result);
+    outcome.status = contracts::succeeded(operation)
+                         ? InventoryActionStatus::kOk
+                         : status_from_result(operation, true);
+    if (outcome.status == InventoryActionStatus::kOk) {
+        outcome.consumed_count = count;
+        request_inventory_refresh();
+    }
+    return outcome;
+}
+
+// 在注册源中反查句柄；返回 kEmpty 表示所有源都未持有该句柄。
+InventoryActionStatus find_registered_handle(QolItemHandle item,
+                                             const contracts::QolBagSource** out_source) {
+    for (uint32_t index = 0; index < registered_bag_source_count(); ++index) {
+        const contracts::QolBagSource* source = registered_bag_source_at(index);
+        if (source == nullptr || source->count == nullptr || source->info == nullptr ||
+            source->item_at == nullptr) {
+            continue;
+        }
+        const int32_t bag_count = source->count();
+        if (bag_count < 0) return InventoryActionStatus::kInternal;
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            contracts::QolBagInfo info{};
+            const QolResult info_result = source->info(bag, &info);
+            if (!contracts::succeeded(info_result)) return InventoryActionStatus::kInternal;
+            if (info.capacity < 0) return InventoryActionStatus::kInternal;
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                contracts::QolInventoryItemRef candidate{};
+                const QolResult result = source->item_at(bag, slot, &candidate);
+                if (result.code == kQolErrNotFound) continue;
+                if (!contracts::succeeded(result)) return InventoryActionStatus::kInternal;
+                if (candidate.item.slot == item.slot &&
+                    candidate.item.generation == item.generation) {
+                    *out_source = source;
+                    return InventoryActionStatus::kOk;
+                }
+            }
+        }
+    }
+    return InventoryActionStatus::kEmpty;
+}
+
+contracts::InventoryUseOutcome discard_handle(QolItemHandle item, int32_t count) {
+    contracts::InventoryUseOutcome outcome{InventoryActionStatus::kInvalidRef, 0};
+    if (!valid_handle(item) || count <= 0) return outcome;
+    outcome.status = validate_world();
+    if (outcome.status != InventoryActionStatus::kOk) return outcome;
+    if (g_item_state_write == nullptr) {
+        outcome.status = InventoryActionStatus::kInternal;
+        return outcome;
+    }
+
+    contracts::QolBagRef native_ref{};
+    int32_t native_slot = -1;
+    QolResult located = bags::native_transport::locate(
+        contracts::kQolBagSpaceOriginal, item, &native_ref, &native_slot);
+    if (!contracts::succeeded(located) && located.code != kQolErrNotFound) {
+        // 无法确认句柄不在背包时不得释放，避免释放游戏仍持有的对象。
+        outcome.status = status_from_result(located, true);
+        return outcome;
+    }
+    if (contracts::succeeded(located)) return discard_native_handle(item, count);
+    located = bags::native_transport::locate(contracts::kQolBagSpaceVariant, item, &native_ref,
+                                             &native_slot);
+    if (!contracts::succeeded(located) && located.code != kQolErrNotFound) {
+        outcome.status = status_from_result(located, true);
+        return outcome;
+    }
+    if (contracts::succeeded(located)) return discard_native_handle(item, count);
+
+    const contracts::QolBagSource* source = nullptr;
+    const InventoryActionStatus source_status = find_registered_handle(item, &source);
+    if (source_status == InventoryActionStatus::kOk) {
+        if (source == nullptr || source->remove == nullptr) {
+            outcome.status = InventoryActionStatus::kUnsupported;
+            return outcome;
+        }
+        contracts::QolBagMutationResult mutation{};
+        const QolResult operation = source->remove(item, count, &mutation);
+        outcome.status = contracts::succeeded(operation)
+                             ? InventoryActionStatus::kOk
+                             : status_from_result(operation, true);
+        if (outcome.status == InventoryActionStatus::kOk) {
+            outcome.consumed_count = count;
+            request_inventory_refresh();
+        }
+        return outcome;
+    }
+    if (source_status != InventoryActionStatus::kEmpty) {
+        outcome.status = source_status;
+        return outcome;
+    }
+
+    if (g_item_state_write->free_item == nullptr) {
+        outcome.status = InventoryActionStatus::kUnsupported;
+        return outcome;
+    }
+    const QolResult freed = g_item_state_write->free_item(item);
+    if (contracts::succeeded(freed)) {
+        outcome.status = InventoryActionStatus::kOk;
+        outcome.consumed_count = count;
+        return outcome;
+    }
+    // 既不在任何背包、也无法作为 detached 解析：按无效引用报告。
+    outcome.status = freed.code == kQolErrNotFound
+                         ? InventoryActionStatus::kInvalidRef
+                         : status_from_result(freed, true);
+    return outcome;
+}
+
 }  // namespace
 
 contracts::InventoryUseOutcome equip(int32_t role, QolActionRef ref, int32_t equip_slot) {
@@ -565,6 +874,9 @@ const contracts::InventoryActionApi kInventoryActionApi{
     &equip,
     &unequip,
     &put_jewel,
+    &create,
+    &place,
+    &discard_handle,
 };
 
 }  // namespace qol::features::core_item

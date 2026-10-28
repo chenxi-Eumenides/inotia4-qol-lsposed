@@ -215,10 +215,21 @@ InventoryUseOutcome fake_unequip(int32_t, int32_t) {
 InventoryUseOutcome fake_put_jewel(int32_t, QolActionRef, int32_t) {
     return {InventoryActionStatus::kUnsupported, 0};
 }
+QolItemCreateOutcome fake_create(const QolItemCreateSpec*) {
+    return {sizeof(QolItemCreateOutcome), InventoryActionStatus::kUnsupported,
+            kInvalidItemHandle};
+}
+QolItemPlaceOutcome fake_place(QolItemHandle, const QolItemPlaceTarget*) {
+    return {sizeof(QolItemPlaceOutcome), InventoryActionStatus::kUnsupported, {},
+            kInvalidItemHandle, 0, 0};
+}
+InventoryUseOutcome fake_discard_handle(QolItemHandle, int32_t) {
+    return {InventoryActionStatus::kUnsupported, 0};
+}
 const InventoryActionApi kInventoryActionApi{
     sizeof(InventoryActionApi), kInventoryActionVersionMajor, kInventoryActionVersionMinor,
     &fake_move, &fake_use, &fake_discard, &fake_sell, &fake_equip, &fake_unequip,
-    &fake_put_jewel};
+    &fake_put_jewel, &fake_create, &fake_place, &fake_discard_handle};
 
 QolResult fake_slot_view(QolItemHandle, QolInventorySlotView* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);

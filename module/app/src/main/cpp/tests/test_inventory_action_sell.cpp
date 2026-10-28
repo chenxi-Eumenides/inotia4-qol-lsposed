@@ -299,7 +299,7 @@ void test_api_v3_and_native_sell() {
     const auto& api = qol::features::core_item::kInventoryActionApi;
     CHECK(inventory_action_api_valid(&api));
     CHECK(api.struct_size == sizeof(InventoryActionApi));
-    CHECK(api.version_major == 3 && api.version_minor == 2);
+    CHECK(api.version_major == 3 && api.version_minor == 3);
 
     const InventorySellResult sold = api.sell({0, 0, 0}, g_item.item, 2, "test");
     CHECK(sold.status == InventorySellStatus::kOk);
@@ -498,6 +498,12 @@ const contracts::QolBagSource* find_bag_source(int32_t space_id) {
     return space_id == 2 ? &g_source : nullptr;
 }
 
+uint32_t registered_bag_source_count() { return g_source.space_id != 0 ? 1u : 0u; }
+
+const contracts::QolBagSource* registered_bag_source_at(uint32_t index) {
+    return index == 0 && g_source.space_id != 0 ? &g_source : nullptr;
+}
+
 void request_inventory_refresh() {}
 
 namespace usecases {
@@ -513,6 +519,11 @@ QolResult move_item(const contracts::QolBagRef&, int32_t, int32_t,
 namespace qol::features::inventory_hooks {
 void inventory_slot_bind(const contracts::QolHostSdk*, const contracts::QolGameHost*,
                          const contracts::ItemFactsApi*, const contracts::QolItemPort*) {}
+
+// 本用例不覆盖 create 的 count>1 路径；生命周期用例单独验证该访问器。
+QolResult write_detached_item_count(const contracts::QolItemHandle&, uint32_t) {
+    return contracts::error(kQolErrUnsupported, "not used", 8);
+}
 }  // namespace qol::features::inventory_hooks
 
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk*) { return true; }

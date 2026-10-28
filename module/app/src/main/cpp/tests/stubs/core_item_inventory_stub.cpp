@@ -44,6 +44,22 @@ contracts::InventoryUseOutcome put_jewel_unavailable(int32_t, contracts::QolActi
     return {contracts::InventoryActionStatus::kUnsupported, 0};
 }
 
+contracts::QolItemCreateOutcome create_unavailable(const contracts::QolItemCreateSpec*) {
+    return {sizeof(contracts::QolItemCreateOutcome),
+            contracts::InventoryActionStatus::kUnsupported, contracts::kInvalidItemHandle};
+}
+
+contracts::QolItemPlaceOutcome place_unavailable(contracts::QolItemHandle,
+                                                 const contracts::QolItemPlaceTarget*) {
+    return {sizeof(contracts::QolItemPlaceOutcome),
+            contracts::InventoryActionStatus::kUnsupported, {}, contracts::kInvalidItemHandle,
+            0, 0};
+}
+
+contracts::InventoryUseOutcome discard_handle_unavailable(contracts::QolItemHandle, int32_t) {
+    return {contracts::InventoryActionStatus::kUnsupported, 0};
+}
+
 bool refresh_unavailable() { return false; }
 
 QolResult slot_unavailable(int32_t, int32_t, contracts::QolInventorySlotView*) {
@@ -102,7 +118,10 @@ const contracts::InventoryActionApi kInventoryActionApi{
     &qol::features::inventory_hooks::sell_unavailable,
     &qol::features::inventory_hooks::equip_unavailable,
     &qol::features::inventory_hooks::unequip_unavailable,
-    &qol::features::inventory_hooks::put_jewel_unavailable};
+    &qol::features::inventory_hooks::put_jewel_unavailable,
+    &qol::features::inventory_hooks::create_unavailable,
+    &qol::features::inventory_hooks::place_unavailable,
+    &qol::features::inventory_hooks::discard_handle_unavailable};
 
 }  // namespace qol::features::core_item
 

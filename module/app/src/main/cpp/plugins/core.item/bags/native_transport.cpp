@@ -73,11 +73,9 @@ QolResult find_empty_bag(int32_t space, contracts::QolBagRef* out_ref) {
                             static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
 
-}  // namespace
-
-QolResult export_item(int32_t space, contracts::QolItemHandle item, int32_t count,
-                      BagTransfer* out) {
-    if (out == nullptr || !is_native_space(space) || !valid_handle(item) || count <= 0) {
+// 序列化整堆物品；来源是否为原生空间由调用方判定，句柄已携带物品身份。
+QolResult serialize_handle(contracts::QolItemHandle item, int32_t count, BagTransfer* out) {
+    if (out == nullptr || !valid_handle(item) || count <= 0) {
         return invalid_argument();
     }
     if (g_port == nullptr || !contracts::qol_item_port_transfer_size_valid(g_port) ||
@@ -122,6 +120,18 @@ QolResult export_item(int32_t space, contracts::QolItemHandle item, int32_t coun
     transfer.payload_size = serialized_size;
     *out = transfer;
     return contracts::ok();
+}
+
+}  // namespace
+
+QolResult export_item(int32_t space, contracts::QolItemHandle item, int32_t count,
+                      BagTransfer* out) {
+    if (!is_native_space(space)) return invalid_argument();
+    return serialize_handle(item, count, out);
+}
+
+QolResult export_detached_item(contracts::QolItemHandle item, int32_t count, BagTransfer* out) {
+    return serialize_handle(item, count, out);
 }
 
 QolResult import_item(const BagTransfer& transfer, int32_t target_space,

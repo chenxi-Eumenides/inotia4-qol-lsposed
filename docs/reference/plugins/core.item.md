@@ -40,7 +40,7 @@
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
 | `inventory.bag_source` | 1.2 | 注册/注销外部袋源，并提供跨空间转移所需的袋源原语。 |
 | `inventory_refresh` | 1.2 | 原版库存区域刷新；`update_shortcut_category(category)` 按类别重算快捷栏数量（含注册袋源物品）。 |
-| `inventory.action` | 3.1 | 移动、使用、丢弃、出售、装备、卸下和镶嵌。 |
+| `inventory.action` | 3.3 | 移动、使用、丢弃、出售、装备、卸下、镶嵌，以及 detached 生成/落位/释放。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
 | `move_merge.control` | 1.0 | 报告拖拽合并是否可用。 |
 | `inventory.projection` | 1.3 | 注册/注销投影回调；投影显示和数据仍归注册方。尾部回调支持原版袋卸下、佣兵徽章、背包装备与角色装备。 |
@@ -127,9 +127,11 @@ struct QolBagTransfer {
 
 payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容。payload 是来源定义的序列化状态；`core.item` 只透传、不解释或改写。部分堆叠时 `count` 表示本次数量，目标须将 payload 中数量规范化为该值；接收端应在回调期间复制需保留的数据。
 
-## `inventory.action` v3.2
+## `inventory.action` v3.3
 
 3.2 删除了 `find_empty_slots`：扩展袋装备不再需要原生暂存空槽，`equip` 直接把 `QolBagRef` 交给 `CHAR_EquipItemFromInvenToSlot`，由 core.item 完成扩展袋交换、双手武器处理与回滚。
+
+3.3 在表尾追加 `create`、`place`、`discard_handle`：生成返回调用方拥有的 detached 句柄（不落位），落位成功才把所有权转给库存，失败或放弃由调用方走 `discard_handle`。旧调用方按自身 `struct_size` 读取前缀，新增字段只在覆盖到时校验。
 
 所有物品副作用由该能力统一提供。全部方法只在游戏主线程调用；调用者传入显式 `QolActionRef`，不延迟解析当前页签。
 
@@ -142,6 +144,19 @@ payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容�
 | `equip(role,ref,equip_slot)` | 角色、物品位置、装备槽 | `InventoryUseOutcome`；当前仅支持原生物品。 |
 | `unequip(role,equip_slot)` | 角色与装备槽 | `InventoryUseOutcome`。 |
 | `put_jewel(role,jewel_ref,equip_slot)` | 宝石位置与装备槽 | `InventoryUseOutcome`；当前不支持注册袋宝石。 |
+| `create(spec)` | `QolItemCreateSpec {struct_size, category, count, flags, payload, payload_size}` | `QolItemCreateOutcome {struct_size, status, item}`；成功返回 detached 句柄。 |
+| `place(item,target)` | detached 句柄与 `QolItemPlaceTarget {struct_size, ref, slot, flags}` | `QolItemPlaceOutcome {struct_size, status, ref, item, count, merged}`；原生写槽失败由 Host 释放，注册源导入失败保持 detached。 |
+| `discard_handle(item,count)` | 句柄与正数量 | `InventoryUseOutcome`；背包物品按数量移除，detached 整体释放。 |
+
+`create`：`payload` 非空且 `payload_size` 非零时按 `SAVE_LoadItem` 数据还原整件物品，否则按 `category` 新建；`flags` bit0 选择 perfect item。`count <= 0` 视为 1，`count > 1` 经计数编码写 canonical count，类别不可堆叠返回 `kUnsupported` 并释放已创建对象。
+
+| 调用 | 成功 | 失败 | 所有权 |
+|---|---|---|---|
+| `create` | detached 句柄，owner=调用方 | 状态码，无句柄 | 调用方 |
+| `place` | 写入库存并返回实际落位 | 状态码；扩展袋导入失败时句柄保持 detached（原生写槽由 Host 释放 detached 对象） | 成功转 game-owned |
+| `discard_handle` | 背包物品扣数量 / detached 释放 | 状态码，无副作用 | 成功后句柄失效 |
+
+`place`：`ref.space_id` 为 0/1（原生原版/改版）时直接写槽，`ref.bag < 0` 取 0 号袋、`slot < 0` 自动找槽；该路径沿用 `place_item` 的 Host 语义，写槽失败时 detached 对象已由 Host 释放。`ref.space_id >= 2` 时经 `item.facts` 序列化并用注册袋源 `import_item` 导入，导入成功后才释放 detached 原对象并返回导入后的新句柄，导入失败则句柄保持 detached。无法确认句柄位置时 `discard_handle` 返回失败而不释放，避免误释放游戏仍持有的对象。
 
 `InventoryActionStatus`：`kOk`、`kNotInWorld`、`kInvalidRef`、`kStale`、`kEmpty`、`kTaskBagExcluded`、`kConflict`、`kFull`、`kUnsupported`、`kInternal`、`kCreditFailed`、`kRollbackFailed`、`kExtensionSaleUnavailable`。
 

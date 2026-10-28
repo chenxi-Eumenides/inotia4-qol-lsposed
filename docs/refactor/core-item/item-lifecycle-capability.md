@@ -35,8 +35,10 @@
 3. **数据面定制不进 API**：宝石字、原生词条、打孔、数量继续走现有端口
    （`write_jewel_word` / `write_native_option_value` / `QolItemCountApi`）；需要整物品保真时用
    `create` 的 payload 形态（`SAVE_LoadItem`）。
-4. **place 失败不自动释放**（与 `place_item` 现有「失败即 Host 释放」不同）：两阶段 API 必须保留
-   调用方重试/放弃权；放弃走 `discard_handle`。
+4. **place 失败语义按落位介质区分**：原生空间复用既有 `place_item` 的 Host 语义——失败时对象已由
+   Host 释放、句柄失效；注册源（扩展袋）导入失败时句柄保持 detached，调用方可重试或
+   `discard_handle` 放弃。两阶段 API 的「重试/放弃权」只对注册源路径成立，契约注释与文档必须
+   写清这一点，调用方不得对原生失败后的句柄再做任何操作。
 5. **所有权**：create 后 owner=调用方（`kQolLoadedItemHandleOwner`）；place 成功时 core.item 内部
    `rebind_item` 转 game-owned 后写入库存；`discard_handle` 对 detached 走 `free_loaded_item`，
    对背包物品走 `remove_item(handle, count)`。
@@ -114,7 +116,7 @@ struct InventoryActionApi {
 | 调用 | 成功 | 失败 | 所有权 |
 |---|---|---|---|
 | `create(spec)` | detached 句柄，owner=调用方 | 状态码，无句柄 | 调用方 |
-| `place(item, target)` | 写入库存 + 返回实际落位 | 状态码，句柄保持 detached | 成功转 game-owned |
+| `place(item, target)` | 写入库存 + 返回实际落位 | 原生空间：Host 释放对象、句柄失效；注册源：句柄保持 detached | 成功转 game-owned |
 | `discard_handle(item, count)` | 背包物品扣数量 / detached 释放 | 状态码，无副作用 | 成功后句柄失效 |
 
 - `create`：payload 非空 → `load_item`；否则 `create_perfect_item`（flags bit0）或 `create_item`
