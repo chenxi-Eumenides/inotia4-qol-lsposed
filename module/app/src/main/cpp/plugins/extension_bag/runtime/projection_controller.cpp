@@ -63,19 +63,29 @@ bool native_bag_size_locked(int bag, int32_t* out_size) {
 int native_bag_count_locked() {
     // 原版袋恒为 0..5；C18 追加袋使用空间化 bag_size_ref 查询，不能继续用
     // 只接受 0..5 的扁平 bag_size，否则追加袋永远不会被视为合法来源。
-    int count = virtual_bag::kOriginalNativeBagCount;
+    const int original_count = virtual_bag::kOriginalNativeBagCount;
     const auto* game = runtime_state().host.game;
     if (game == nullptr || game->target.has_capability == nullptr ||
         game->target.has_capability(
             qol::contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) == 0) {
-        return count;
+        return original_count;
     }
+    // 商店/合成页的袋列每帧都会查询本函数；逐帧扫描全部候选袋会触发
+    // native_bag_size_locked → inventory_bag_info → game_memory_accessible，
+    // 单次可达数十万次地图查询。按 EB 持久化 revision 缓存，仅在袋状态变化时重扫。
+    static thread_local uint64_t cached_revision = ~uint64_t{0};
+    static thread_local int cached_count = original_count;
+    const uint64_t revision = extension_bag_item_revision_locked();
+    if (revision == cached_revision) return cached_count;
+    int count = original_count;
     for (int bag = qol::contracts::kQolOriginalBagCount;
          bag < qol::contracts::kQolMaxNativeBagCount; ++bag) {
         int32_t size = 0;
         if (!native_bag_size_locked(bag, &size) || size <= 0) continue;
         count = bag + 1;
     }
+    cached_revision = revision;
+    cached_count = count;
     return count;
 }
 
