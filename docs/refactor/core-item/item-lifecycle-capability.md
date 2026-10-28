@@ -35,10 +35,11 @@
 3. **数据面定制不进 API**：宝石字、原生词条、打孔、数量继续走现有端口
    （`write_jewel_word` / `write_native_option_value` / `QolItemCountApi`）；需要整物品保真时用
    `create` 的 payload 形态（`SAVE_LoadItem`）。
-4. **place 失败语义按落位介质区分**：原生空间复用既有 `place_item` 的 Host 语义——失败时对象已由
-   Host 释放、句柄失效；注册源（扩展袋）导入失败时句柄保持 detached，调用方可重试或
-   `discard_handle` 放弃。两阶段 API 的「重试/放弃权」只对注册源路径成立，契约注释与文档必须
-   写清这一点，调用方不得对原生失败后的句柄再做任何操作。
+4. **place 失败语义按落位介质区分**：原生空间显式写槽复用既有 `place_item` 的 Host 语义——失败时
+   对象已由 Host 释放、句柄失效；原生空间自动落位（`ref.bag < 0` → `save_item`）与注册源（扩展袋）
+   导入失败时句柄保持 detached，调用方可重试或 `discard_handle` 放弃。两阶段 API 的「重试/放弃权」
+   只对自动落位与注册源路径成立，契约注释与文档必须写清这一点，调用方不得对显式写槽失败后的句柄
+   再做任何操作。
 5. **所有权**：create 后 owner=调用方（`kQolLoadedItemHandleOwner`）；place 成功时 core.item 内部
    `rebind_item` 转 game-owned 后写入库存；`discard_handle` 对 detached 走 `free_loaded_item`，
    对背包物品走 `remove_item(handle, count)`。
@@ -69,6 +70,22 @@ struct QolItemInventoryStateWritePort {
 
 版本常量 `contracts/game_ports/ports.h`：`kQolPortItemInventoryStateWriteVersion{2, 3}`。
 
+### 3.1.1 端口 2.4 追加 `save_item`
+
+`place` 的原生自动落位必须保持 custom_recipe 迁移前的 `INVEN_SaveItem`（FindSaveSlot + 同类别堆合并/adopt，H-13）语义，因此在端口尾部再追加：
+
+```cpp
+using QolItemInventoryStateSaveItemFn = QolResult (*)(QolItemHandle item, int32_t* out_saved);
+struct QolItemInventoryStateWritePort {
+    ...
+    QolItemInventoryStateSaveItemFn save_item;   // 仅接受 detached 句柄
+};
+```
+
+成功（`out_saved` 低 8 位非 0）即把 detached 对象交给原生库存并把句柄转 game-owned；失败 rebind 回
+`kQolLoadedItemHandleOwner`、不释放对象，调用方仍可 `free_item`。版本常量变为 `{2, 4}`；
+`inventory.action.place` 在原生空间且 `ref.bag < 0` 时改走该入口。
+
 ### 3.2 InventoryActionApi 3.3
 
 ```cpp
@@ -83,7 +100,7 @@ struct QolItemCreateSpec {
 
 struct QolItemPlaceTarget {
     uint32_t struct_size;
-    QolBagRef ref;            // ref.bag < 0 → 原生空间自动找槽
+    QolBagRef ref;            // ref.bag < 0 → 原生空间自动保存（INVEN_SaveItem）
     int32_t slot;             // -1 → 自动
     uint32_t flags;           // bit0 = 允许合并/adopt
 };
@@ -116,13 +133,14 @@ struct InventoryActionApi {
 | 调用 | 成功 | 失败 | 所有权 |
 |---|---|---|---|
 | `create(spec)` | detached 句柄，owner=调用方 | 状态码，无句柄 | 调用方 |
-| `place(item, target)` | 写入库存 + 返回实际落位 | 原生空间：Host 释放对象、句柄失效；注册源：句柄保持 detached | 成功转 game-owned |
+| `place(item, target)` | 写入库存 + 返回实际落位 | 自动保存/注册源导入失败：句柄保持 detached；显式原生写槽失败：Host 释放对象、句柄失效 | 成功转 game-owned |
 | `discard_handle(item, count)` | 背包物品扣数量 / detached 释放 | 状态码，无副作用 | 成功后句柄失效 |
 
 - `create`：payload 非空 → `load_item`；否则 `create_perfect_item`（flags bit0）或 `create_item`
   （无 search_tbl 校验）。count>1 经 `QolItemCountApi` 写 canonical count；不可堆叠且 count>1 返回
   `kUnsupported`。
-- `place`：原生空间 → `place_item`（slot=-1 自动找槽；合并由存档路径处理）；扩展袋
+- `place`：原生空间 `ref.bag < 0` → `save_item`（INVEN_SaveItem 自动找槽 + 同类别堆合并，H-13）；
+  显式 `ref.bag` → `place_item`（slot=-1 自动找槽）；扩展袋
   （space_id >= `kQolBagSpaceFirstRegistered`）→ 序列化 + `import_item` + 释放 detached。
 - `discard_handle`：detached → `free_loaded_item`；背包物品 → `remove_item(handle,count)`；
   无法解析 → `kInvalidRef`。
@@ -138,7 +156,7 @@ struct InventoryActionApi {
 | 层 | 文件 | 改动 |
 |---|---|---|
 | 契约 | `contracts/inventory_action.h` | 结构/函数指针/版本 3.3/valid |
-| 契约 | `contracts/game_ports/item_inventory_state_write_port.h`、`ports.h` | 3 个函数 + 版本 2.3 |
+| 契约 | `contracts/game_ports/item_inventory_state_write_port.h`、`ports.h` | 4 个函数 + 版本 2.4（2.4 追加 save_item） |
 | Host | `host/item_inventory_state_write_port.cpp` | 包装 ops create/free + kPort 初始化 |
 | Ops | `game/ops/item_inventory_state_write.{h,cpp}` | detached create（loaded owner 注册）复用现有 free/load |
 | core.item | `plugins/core.item/usecases/item_action.cpp` | create/place/discard_handle + API 实例追加 |
@@ -155,12 +173,15 @@ struct InventoryActionApi {
 
 ## 6. 迁移次序
 
-1. 本能力（契约 + host/ops + core.item + 测试）。
-2. custom_recipe：create/configure/save 迁移到 `inventory.action.create/place` + 数据面端口；
-   `QolCustomRecipeWritePort` 的 `create_perfect_item`/`create_item`/`save_item`/`free_item` 退役
-   （stuff UI 写入保留）。
+1. ✅ 能力层（契约 + host/ops + core.item + 测试）已落地（`21dd0702`，含端口 2.3 的
+   create/free 与 `inventory.action` 3.3 的 create/place/discard_handle）。
+2. ✅ custom_recipe 迁移已完成：产物 creation/configure/save 走 `inventory.action.create` +
+   数据面端口 + `inventory.action.place`，回滚走 `discard_handle`；`QolCustomRecipeWritePort` 的
+   `create_perfect_item`/`create_item`/`save_item`/`free_item` 已退役（端口 1.4）。
+   端口 2.4 追加 `save_item` 让 `place` 的自动落位保持 `INVEN_SaveItem`（FindSaveSlot + 合并，
+   H-13）语义。
 3. 验收：填第 N 个宝石扣第 N 个（已由 160ae780 完成）、堆耗尽回退、扩展袋物品、非堆叠不跨物品、
-   产物落位与失败回滚。
+   产物落位与失败回滚（随本卡的真机验收）。
 
 ## 7. 非目标
 

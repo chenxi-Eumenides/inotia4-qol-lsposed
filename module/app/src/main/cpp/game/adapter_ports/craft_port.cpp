@@ -76,34 +76,26 @@ QolResult resolve_craft_item(contracts::QolItemHandle handle, void** out_item) {
     return contracts::ok();
 }
 
+// 数据面写入口接受游戏持有对象与 inventory.action.create 产生的 detached 产物；
+// detached 产物在 place 之前归调用方，配置写入仍必须可用。Provider 自管对象继续拒绝。
 QolResult resolve_craft_game_item(contracts::QolItemHandle handle, void** out_item) {
     if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
         return invalid_argument();
     }
     *out_item = nullptr;
     const ItemHandleResolution resolved = item_handle_registry().resolve_item(
-        handle, contracts::kQolItemHandleOwnerGame);
+        handle, contracts::kQolItemHandleOwnerAny);
     if (resolved.error == ItemHandleError::kWrongThread) return wrong_thread();
     if (resolved.error == ItemHandleError::kType) {
-        return contracts::error(kQolErrConflict, "craft item is not game-owned", 29);
+        return contracts::error(kQolErrConflict, "craft item owner mismatch", 25);
     }
     if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) return not_found();
-    *out_item = resolved.item;
-    return contracts::ok();
-}
-
-QolResult created_item_handle(void* item, contracts::QolItemHandle* out_item) {
-    if (out_item == nullptr) return invalid_argument();
-    *out_item = contracts::kInvalidItemHandle;
-    if (item == nullptr) return not_ready();
-    ItemHandleError error = ItemHandleError::kNone;
-    const contracts::QolItemHandle handle = register_item(
-        item, contracts::kQolItemHandleOwnerGame, &error);
-    if (handle.slot == 0 || handle.generation == 0) {
-        if (fn_itempool_free != nullptr) fn_itempool_free(item);
-        return not_ready();
+    uint32_t owner = contracts::kQolItemHandleOwnerAny;
+    if (lookup_item(resolved.item, &owner).slot == 0 ||
+        (owner != contracts::kQolItemHandleOwnerGame && owner != kQolLoadedItemHandleOwner)) {
+        return contracts::error(kQolErrConflict, "craft item is not game-owned", 29);
     }
-    *out_item = handle;
+    *out_item = resolved.item;
     return contracts::ok();
 }
 
@@ -290,51 +282,6 @@ QolResult call_set_cost_zero() {
     return contracts::ok();
 }
 
-QolResult call_create_perfect_item(int32_t category, contracts::QolItemHandle* out_item) {
-    if (category < 0 || out_item == nullptr) return invalid_argument();
-    *out_item = contracts::kInvalidItemHandle;
-    if (!game_host_is_main_thread()) return wrong_thread();
-    if (fn_item_create_perfect_item == nullptr) return not_ready();
-    return created_item_handle(fn_item_create_perfect_item(category), out_item);
-}
-
-QolResult call_create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
-                           contracts::QolItemHandle* out_item) {
-    if (category < 0 || out_item == nullptr) return invalid_argument();
-    *out_item = contracts::kInvalidItemHandle;
-    if (!game_host_is_main_thread()) return wrong_thread();
-    if (fn_create_item == nullptr) return not_ready();
-    return created_item_handle(fn_create_item(category, arg1, arg2, arg3), out_item);
-}
-
-QolResult call_save_item(contracts::QolItemHandle handle, int32_t* out_saved) {
-    if (out_saved == nullptr) return invalid_argument();
-    void* item = nullptr;
-    const QolResult resolved = resolve_craft_item(handle, &item);
-    if (!contracts::succeeded(resolved)) return resolved;
-    uint32_t owner = contracts::kQolItemHandleOwnerAny;
-    if (lookup_item(item, &owner).slot == 0 || owner != contracts::kQolItemHandleOwnerGame) {
-        return contracts::error(kQolErrConflict, "craft product is not game-owned", 32);
-    }
-    if (fn_inven_save_item == nullptr) return not_ready();
-    *out_saved = fn_inven_save_item(item, nullptr);
-    return contracts::ok();
-}
-
-QolResult call_free_item(contracts::QolItemHandle handle) {
-    if (fn_itempool_free == nullptr) return not_ready();
-    void* item = nullptr;
-    const QolResult resolved = resolve_craft_item(handle, &item);
-    if (!contracts::succeeded(resolved)) return resolved;
-    uint32_t owner = contracts::kQolItemHandleOwnerAny;
-    if (lookup_item(item, &owner).slot == 0 || owner != contracts::kQolItemHandleOwnerGame) {
-        return contracts::error(kQolErrConflict, "craft product is not game-owned", 32);
-    }
-    if (!invalidate_item(handle)) return not_ready();
-    fn_itempool_free(item);
-    return contracts::ok();
-}
-
 QolResult call_read_jewel_word(contracts::QolItemHandle handle, uint32_t* out_word) {
     if (out_word == nullptr) return invalid_argument();
     void* item = nullptr;
@@ -490,10 +437,6 @@ const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     &call_write_stuff_need,
     &call_set_stuff_item,
     &call_description_set_off,
-    &call_create_perfect_item,
-    &call_create_item,
-    &call_save_item,
-    &call_free_item,
     &call_read_jewel_word,
     &call_write_jewel_word,
     &call_set_max_socket_enchant,

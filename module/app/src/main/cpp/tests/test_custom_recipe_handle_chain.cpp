@@ -113,6 +113,7 @@ int g_held_read_fail_after = -1;  // >0：前 N 次成功，之后读取失败�
 int g_create_calls = 0;
 int32_t g_create_result = kQolOk;
 bool g_create_invalid_handle = false;
+bool g_create_perfect_unsupported = false;
 int g_free_calls = 0;
 QolItemHandle g_freed{};
 int32_t g_free_result = kQolOk;
@@ -177,6 +178,7 @@ void reset_env() {
     g_create_calls = 0;
     g_create_result = kQolOk;
     g_create_invalid_handle = false;
+    g_create_perfect_unsupported = false;
     g_free_calls = 0;
     g_freed = kInvalidItemHandle;
     g_free_result = kQolOk;
@@ -473,34 +475,51 @@ QolResult bag_source_at(uint32_t index, const QolBagSource** out_source) {
     return ok();
 }
 
-QolResult create_perfect_item(int32_t, QolItemHandle* out) {
+QolItemCreateOutcome action_create(const QolItemCreateSpec* spec) {
     ++g_create_calls;
     g_create_sequence = ++g_sequence;
-    if (g_create_result != kQolOk) return fail(g_create_result);
-    if (out == nullptr) return fail(kQolErrInvalidArgument);
-    *out = g_create_invalid_handle ? kInvalidItemHandle : kProduct;
-    return ok();
+    if (g_create_result != kQolOk) {
+        return {sizeof(QolItemCreateOutcome),
+                g_create_result == kQolErrUnsupported
+                    ? InventoryActionStatus::kUnsupported
+                    : InventoryActionStatus::kInternal,
+                kInvalidItemHandle};
+    }
+    if (spec == nullptr) {
+        return {sizeof(QolItemCreateOutcome), InventoryActionStatus::kInvalidRef,
+                kInvalidItemHandle};
+    }
+    if ((spec->flags & kQolItemCreateFlagPerfect) != 0 && g_create_perfect_unsupported) {
+        return {sizeof(QolItemCreateOutcome), InventoryActionStatus::kUnsupported,
+                kInvalidItemHandle};
+    }
+    return {sizeof(QolItemCreateOutcome), InventoryActionStatus::kOk,
+            g_create_invalid_handle ? kInvalidItemHandle : kProduct};
 }
 
-QolResult create_item(int32_t, int32_t, int32_t, int32_t, QolItemHandle* out) {
-    return create_perfect_item(0, out);
-}
-
-QolResult save_item(QolItemHandle item, int32_t* out_saved) {
+QolItemPlaceOutcome action_place(QolItemHandle item, const QolItemPlaceTarget* target) {
     ++g_save_calls;
     g_save_sequence = ++g_sequence;
-    if (out_saved == nullptr) return fail(kQolErrInvalidArgument);
-    if (g_save_result != kQolOk) return fail(g_save_result);
-    *out_saved = g_save_saved;
-    (void)item;
-    return ok();
+    QolItemPlaceOutcome outcome{sizeof(QolItemPlaceOutcome),
+                                InventoryActionStatus::kOk, {}, item, 1, 0};
+    if (target != nullptr) outcome.ref = target->ref;
+    if (g_save_result != kQolOk) {
+        outcome.status = InventoryActionStatus::kInternal;
+        return outcome;
+    }
+    // 旧测试用 saved&0xff==0 表示"保存未落地"；自动保存只在真正入库时返回成功。
+    if (g_save_saved == 0) {
+        outcome.status = InventoryActionStatus::kFull;
+        return outcome;
+    }
+    return outcome;
 }
 
-QolResult free_item(QolItemHandle item) {
+InventoryUseOutcome action_discard_handle(QolItemHandle item, int32_t count) {
     ++g_free_calls;
     g_freed = item;
-    if (g_free_result != kQolOk) return fail(g_free_result);
-    return ok();
+    if (g_free_result != kQolOk) return {InventoryActionStatus::kInternal, 0};
+    return {InventoryActionStatus::kOk, count};
 }
 
 QolResult read_jewel_word(QolItemHandle item, uint32_t* out) {
@@ -730,6 +749,9 @@ void init_fixture() {
     g_inventory_action.version_major = kInventoryActionVersionMajor;
     g_inventory_action.version_minor = kInventoryActionVersionMinor;
     g_inventory_action.discard = &discard;
+    g_inventory_action.create = &action_create;
+    g_inventory_action.place = &action_place;
+    g_inventory_action.discard_handle = &action_discard_handle;
 
     g_inventory_slot = QolInventorySlotApi{};
     g_inventory_slot.struct_size = static_cast<uint32_t>(sizeof(g_inventory_slot));
@@ -758,10 +780,6 @@ void init_fixture() {
     g_write_port.write_stuff_need = &write_stuff_need;
     g_write_port.set_stuff_item = &set_stuff_item;
     g_write_port.description_set_off = &description_set_off;
-    g_write_port.create_perfect_item = &create_perfect_item;
-    g_write_port.create_item = &create_item;
-    g_write_port.save_item = &save_item;
-    g_write_port.free_item = &free_item;
     g_write_port.read_jewel_word = &read_jewel_word;
     g_write_port.write_jewel_word = &write_jewel_word;
     g_write_port.set_max_socket_enchant = &set_max_socket_enchant;
@@ -842,13 +860,19 @@ void test_precheck_failures_do_not_consume() {
     g_read_stuff_fail_index = -1;
     assert(g_remove_item_calls == 0 && g_remove_item_data_calls == 0 && g_create_calls == 0);
 
-    // 所需函数未就绪（写端口缺 create/save）→ 前置失败，无副作用。
+    // 所需函数未就绪（action 缺 create/place/discard_handle）→ 前置失败，无副作用。
     assert(prepare_three_slots(kScaleRecipe));
-    g_write_port.create_perfect_item = nullptr;
-    g_write_port.create_item = nullptr;
+    g_inventory_action.create = nullptr;
     assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kPrecheckFailed);
-    g_write_port.create_perfect_item = &create_perfect_item;
-    g_write_port.create_item = &create_item;
+    g_inventory_action.create = &action_create;
+    g_inventory_action.place = nullptr;
+    assert(prepare_three_slots(kScaleRecipe));
+    assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kPrecheckFailed);
+    g_inventory_action.place = &action_place;
+    g_inventory_action.discard_handle = nullptr;
+    assert(prepare_three_slots(kScaleRecipe));
+    assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kPrecheckFailed);
+    g_inventory_action.discard_handle = &action_discard_handle;
     assert(g_remove_item_calls == 0 && g_remove_item_data_calls == 0 && g_create_calls == 0);
 
     // 库存不足（类别计数 < 需扣单位数）→ kNotEnoughHeld，无副作用。
@@ -1581,6 +1605,15 @@ void custom_recipe_table_deactivate() {
 
 }  // namespace custom_recipe
 
+void test_product_create_perfect_fallback() {
+    init_fixture();
+    assert(prepare_three_slots(kFixedRecipe));
+    g_create_perfect_unsupported = true;
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
+    // perfect 创建返回 Unsupported 后以 flags=0 重试一次普通创建。
+    assert(g_create_calls == 2 && g_save_calls == 1 && g_free_calls == 0);
+}
+
 int main() {
     test_place_and_execute_success();
     test_precheck_failures_do_not_consume();
@@ -1604,5 +1637,6 @@ int main() {
     test_typed_handler_gate();
     test_failure_stage_material_state();
     test_ownership_ready_flag();
+    test_product_create_perfect_fallback();
     return 0;
 }

@@ -94,7 +94,7 @@ struct QolItemCreateSpec {
 constexpr uint32_t kQolItemCreateFlagPerfect = 1u << 0;
 
 // 落位请求：原生空间（original/variant）直接写槽，注册源空间经序列化导入。
-// ref.bag < 0 表示原生空间自动选袋；slot < 0 表示自动找槽。
+// ref.bag < 0 表示原生空间自动保存（INVEN_SaveItem 找槽并合并）；slot < 0 表示自动找槽。
 struct QolItemPlaceTarget {
     uint32_t struct_size;
     QolBagRef ref;

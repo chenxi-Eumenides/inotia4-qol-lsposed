@@ -121,12 +121,9 @@ bool recipe_write_port_ready(const contracts::QolCustomRecipeWritePort* port) {
         return false;
     }
     return port->write_stuff_need != nullptr && port->set_stuff_item != nullptr &&
-           port->description_set_off != nullptr &&
-           (port->create_perfect_item != nullptr || port->create_item != nullptr) &&
-           port->save_item != nullptr && port->free_item != nullptr &&
-           port->read_jewel_word != nullptr && port->write_jewel_word != nullptr &&
-           port->set_max_socket_enchant != nullptr && port->random_inclusive != nullptr &&
-           port->write_native_option_value != nullptr;
+           port->description_set_off != nullptr && port->read_jewel_word != nullptr &&
+           port->write_jewel_word != nullptr && port->set_max_socket_enchant != nullptr &&
+           port->random_inclusive != nullptr && port->write_native_option_value != nullptr;
 }
 
 bool table_port_ready(const contracts::QolRecipeTablePort* port) {

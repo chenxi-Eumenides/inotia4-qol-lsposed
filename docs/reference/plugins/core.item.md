@@ -153,10 +153,10 @@ payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容�
 | 调用 | 成功 | 失败 | 所有权 |
 |---|---|---|---|
 | `create` | detached 句柄，owner=调用方 | 状态码，无句柄 | 调用方 |
-| `place` | 写入库存并返回实际落位 | 状态码；扩展袋导入失败时句柄保持 detached（原生写槽由 Host 释放 detached 对象） | 成功转 game-owned |
+| `place` | 写入库存并返回实际落位 | 状态码；自动保存与扩展袋导入失败时句柄保持 detached（显式原生写槽失败由 Host 释放 detached 对象） | 成功转 game-owned |
 | `discard_handle` | 背包物品扣数量 / detached 释放 | 状态码，无副作用 | 成功后句柄失效 |
 
-`place`：`ref.space_id` 为 0/1（原生原版/改版）时直接写槽，`ref.bag < 0` 取 0 号袋、`slot < 0` 自动找槽；该路径沿用 `place_item` 的 Host 语义，写槽失败时 detached 对象已由 Host 释放。`ref.space_id >= 2` 时经 `item.facts` 序列化并用注册袋源 `import_item` 导入，导入成功后才释放 detached 原对象并返回导入后的新句柄，导入失败则句柄保持 detached。无法确认句柄位置时 `discard_handle` 返回失败而不释放，避免误释放游戏仍持有的对象。
+`place`：`ref.space_id` 为 0/1（原生原版/改版）时，`ref.bag < 0` 走自动落位——`place` 内部调用 `INVEN_SaveItem`（FindSaveSlot + 同类别堆合并/adopt，H-13），成功返回 `kOk` 且对象归原生库存，失败保持 detached；显式 `ref.bag` 时直接写槽（`slot < 0` 自动找槽），该路径沿用 `place_item` 的 Host 语义，写槽失败时 detached 对象已由 Host 释放。`ref.space_id >= 2` 时经 `item.facts` 序列化并用注册袋源 `import_item` 导入，导入成功后才释放 detached 原对象并返回导入后的新句柄，导入失败则句柄保持 detached。无法确认句柄位置时 `discard_handle` 返回失败而不释放，避免误释放游戏仍持有的对象。
 
 `InventoryActionStatus`：`kOk`、`kNotInWorld`、`kInvalidRef`、`kStale`、`kEmpty`、`kTaskBagExcluded`、`kConflict`、`kFull`、`kUnsupported`、`kInternal`、`kCreditFailed`、`kRollbackFailed`、`kExtensionSaleUnavailable`。
 

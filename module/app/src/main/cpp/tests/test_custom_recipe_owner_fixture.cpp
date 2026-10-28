@@ -408,21 +408,6 @@ QolResult stub_set_item(uint32_t index, QolItemHandle) {
     }
     return qol::contracts::ok();
 }
-QolResult stub_create(int32_t, QolItemHandle* out) {
-    ++g_create_calls;
-    if (out != nullptr) *out = qol::contracts::kInvalidItemHandle;
-    return qol::contracts::ok();
-}
-QolResult stub_create4(int32_t, int32_t, int32_t, int32_t, QolItemHandle* out) {
-    ++g_create_calls;
-    if (out != nullptr) *out = qol::contracts::kInvalidItemHandle;
-    return qol::contracts::ok();
-}
-QolResult stub_save(QolItemHandle, int32_t* out_saved) {
-    ++g_save_calls;
-    if (out_saved != nullptr) *out_saved = 1;
-    return qol::contracts::ok();
-}
 QolResult stub_word_read(QolItemHandle, uint32_t* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
     *out = 0;
@@ -470,10 +455,6 @@ void install_ready_ports() {
     g_recipe_port.write_stuff_need = &stub_needs;
     g_recipe_port.set_stuff_item = &stub_set_item;
     g_recipe_port.description_set_off = &stub_ok;
-    g_recipe_port.create_perfect_item = &stub_create;
-    g_recipe_port.create_item = &stub_create4;
-    g_recipe_port.save_item = &stub_save;
-    g_recipe_port.free_item = &stub_ok_handle;
     g_recipe_port.read_jewel_word = &stub_word_read;
     g_recipe_port.write_jewel_word = &stub_word_write;
     g_recipe_port.set_max_socket_enchant = &stub_ok_handle;

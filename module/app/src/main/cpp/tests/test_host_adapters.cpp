@@ -1740,8 +1740,6 @@ int main() {
     assert(craft_ui_write.show_yesno_from_text(0x12, &qol::game::fake_popup_ok, &qol::game::fake_popup_cancel).code ==
            kQolErrNotReady);
     qol::game::g_popup_create_result = true;
-    assert(custom_recipe_write.save_item(craft_material_handle, &value).code == kQolErrConflict);
-    assert(custom_recipe_write.free_item(craft_material_handle).code == kQolErrConflict);
     assert(qol::game::lookup_item(&g_craft_stuff_item_object).slot == craft_material_handle.slot);
 
     int32_t craft_control_slot = -1;
@@ -1767,8 +1765,9 @@ int main() {
     *product_count = 0x12345678u;
     *product_socket = 0x03;
     *product_enchant = 0x0002;
-    qol::contracts::QolItemHandle product_handle{};
-    assert(custom_recipe_write.create_perfect_item(4, &product_handle).ok == kQolOk);
+    const qol::contracts::QolItemHandle product_handle = qol::game::register_item(
+        g_move_merge_fake_memory.data() + 0x100, qol::contracts::kQolItemHandleOwnerGame);
+    g_craft_created_item = g_move_merge_fake_memory.data() + 0x100;
     assert(product_handle.slot != 0 && product_handle.generation != 0);
     int32_t off_thread_result = kQolOk;
     std::thread craft_off_thread([&] {
@@ -1806,12 +1805,18 @@ int main() {
            kQolErrNotFound);
     assert(*provider_count == 0xA1B2C3D4u && *provider_socket == 0x05 &&
            *provider_enchant == 0x1234);
-    int32_t saved = 0;
-    assert(custom_recipe_write.save_item(product_handle, &saved).ok == kQolOk && saved == 1);
-    assert(g_craft_saved_item == g_craft_created_item);
-    assert(custom_recipe_write.free_item(product_handle).ok == kQolOk);
-    assert(g_craft_freed_item == g_craft_created_item && g_craft_handle_was_stale_at_free);
-    assert(custom_recipe_write.read_jewel_word(product_handle, &u32_value).code == kQolErrNotFound);
+    // inventory.action.create 的 detached 产物（loaded owner）在 place 前必须可写数据面。
+    const auto detached_write_handle = qol::game::register_item(
+        provider_item, qol::game::kQolLoadedItemHandleOwner);
+    assert(detached_write_handle.slot != 0);
+    assert(custom_recipe_write.write_jewel_word(detached_write_handle, 0x0A0B0C0Du).ok ==
+           kQolOk);
+    assert(*provider_count == 0x0A0B0C0Du);
+    assert(qol::game::invalidate_item(detached_write_handle));
+    // 产物句柄仍可直接按游戏所有权操作数据面写入口；生命周期入口已迁至 inventory.action。
+    assert(qol::game::invalidate_item(product_handle));
+    assert(custom_recipe_write.read_jewel_word(product_handle, &u32_value).code ==
+           kQolErrNotFound);
     fn_item_create_perfect_item = nullptr;
     fn_inven_save_item = nullptr;
     fn_itempool_free = nullptr;

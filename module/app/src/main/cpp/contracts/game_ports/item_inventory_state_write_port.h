@@ -71,6 +71,7 @@ using QolItemInventoryStateCreateItemFn = QolResult (*)(
 using QolItemInventoryStateCreatePerfectItemFn = QolResult (*)(
     int32_t category, QolItemHandle* out_item);
 using QolItemInventoryStateFreeItemFn = QolResult (*)(QolItemHandle item);
+using QolItemInventoryStateSaveItemFn = QolResult (*)(QolItemHandle item, int32_t* out_saved);
 
 struct QolItemInventoryStateWritePort {
     QolVersion abi_version;
@@ -94,6 +95,7 @@ struct QolItemInventoryStateWritePort {
     QolItemInventoryStateCreateItemFn create_item;
     QolItemInventoryStateCreatePerfectItemFn create_perfect_item;
     QolItemInventoryStateFreeItemFn free_item;
+    QolItemInventoryStateSaveItemFn save_item;
 };
 
 // 1.2：尾部追加 SAVE_LoadItem、原生精确写槽与按句柄移除原语。
@@ -111,6 +113,9 @@ struct QolItemInventoryStateWritePort {
 // detached 句柄（owner 与 load_item 相同），失败不产生句柄，调用方负责 place_item 或 free_item。
 // free_item 仅接受 detached 句柄：成功即 invalidate + itempool free；背包内或游戏持有的对象
 // 拒绝释放，删除背包物品走 remove_item。
+// 2.4：尾部追加 save_item（INVEN_SaveItem 自动找槽与合并）。out_saved 低 8 位非 0 表示保存落地：
+// 成功即把 detached 对象交给原生库存（句柄转 game-owned），否则 rebind 回 detached 且不释放，
+// 调用方仍可 free_item。
 constexpr uint32_t kQolItemInventoryStateWritePortSize = sizeof(QolItemInventoryStateWritePort);
 
 static_assert(std::is_standard_layout<QolItemInventoryStateGainedItem>::value,

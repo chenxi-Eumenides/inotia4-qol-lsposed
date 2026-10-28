@@ -216,6 +216,10 @@ QolResult free_item(contracts::QolItemHandle item) {
     return qol::game::ops::free_loaded_item(item);
 }
 
+QolResult save_item(contracts::QolItemHandle item, int32_t* out_saved) {
+    return qol::game::ops::save_detached_item(item, out_saved);
+}
+
 const contracts::QolItemInventoryStateWritePort kPort{
     contracts::kQolPortItemInventoryStateWriteVersion,
     &use_item,
@@ -238,6 +242,7 @@ const contracts::QolItemInventoryStateWritePort kPort{
     &create_item,
     &create_perfect_item,
     &free_item,
+    &save_item,
 };
 
 }  // namespace

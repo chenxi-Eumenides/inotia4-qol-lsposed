@@ -582,7 +582,31 @@ contracts::QolItemPlaceOutcome place(QolItemHandle item,
     const int32_t space_id = target->ref.space_id;
     const int32_t slot = target->slot < 0 ? -1 : target->slot;
     if (native_space(space_id)) {
-        const int32_t bag = target->ref.bag < 0 ? 0 : target->ref.bag;
+        if (target->ref.bag < 0) {
+            // 自动落位沿用 INVEN_SaveItem 的 FindSaveSlot 与同类别堆合并（H-13），
+            // 不预设目标袋/槽；成功后对象归库存，失败仍为 detached。
+            if (g_item_state_write->save_item == nullptr) {
+                outcome.status = InventoryActionStatus::kUnsupported;
+                return outcome;
+            }
+            const int32_t saved_count = detached_stack_count(item);
+            int32_t saved = 0;
+            const QolResult operation = g_item_state_write->save_item(item, &saved);
+            if (!contracts::succeeded(operation) ||
+                (static_cast<uint32_t>(saved) & 0xffu) == 0) {
+                outcome.status = contracts::succeeded(operation)
+                                     ? InventoryActionStatus::kInternal
+                                     : status_from_result(operation, true);
+                return outcome;
+            }
+            outcome.status = InventoryActionStatus::kOk;
+            outcome.ref = target->ref;
+            outcome.item = item;
+            outcome.count = saved_count;
+            request_inventory_refresh();
+            return outcome;
+        }
+        const int32_t bag = target->ref.bag;
         if (space_id == contracts::kQolBagSpaceOriginal && bag == contracts::kQolTaskBagIndex) {
             outcome.status = InventoryActionStatus::kTaskBagExcluded;
             return outcome;

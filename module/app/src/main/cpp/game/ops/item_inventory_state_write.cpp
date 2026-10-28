@@ -290,6 +290,35 @@ QolResult create_perfect_item(int32_t category, contracts::QolItemHandle* out_it
     return register_detached_item(fn_item_create_perfect_item(category), out_item);
 }
 
+// 自动落位：INVEN_SaveItem 内部完成 FindSaveSlot 与同类别堆合并（H-13），不预设目标袋/槽。
+QolResult save_detached_item(contracts::QolItemHandle handle, int32_t* out_saved) {
+    if (out_saved == nullptr) return transfer_error(kQolErrInvalidArgument, "invalid save result");
+    *out_saved = 0;
+    if (!game_in_world()) return transfer_error(kQolErrNotReady, "not in game");
+    if (fn_inven_save_item == nullptr) return transfer_error(kQolErrNotReady, "save item not ready");
+    void* item = nullptr;
+    QolResult result = resolve_loaded_item(handle, &item);
+    if (!contracts::succeeded(result)) return result;
+    if (!game_memory_accessible(item, I_TYPE + sizeof(uint16_t), 'r')) {
+        return transfer_error(kQolErrNotFound, "stale item handle");
+    }
+    // SAVE 成功后对象归原生库存，句柄必须同步转 game-owned，否则后续 remove/move 会拒绝。
+    if (!rebind_item(item, contracts::kQolItemHandleOwnerGame)) {
+        return transfer_error(kQolErrNotFound, "stale item handle");
+    }
+    const int32_t saved = fn_inven_save_item(item, nullptr);
+    *out_saved = saved;
+    // 与迁移前的 product_saved 判定一致：只有低 8 位非 0 才算保存落地。
+    if ((static_cast<uint32_t>(saved) & 0xffu) == 0) {
+        if (!rebind_item(item, kQolLoadedItemHandleOwner)) {
+            return transfer_error(kQolErrInternal, "item ownership restore failed");
+        }
+        return transfer_error(kQolErrBlocked, "save item failed");
+    }
+    frame_cache_force_refresh();
+    return contracts::ok();
+}
+
 QolResult free_loaded_item(contracts::QolItemHandle handle) {
     if (fn_itempool_free == nullptr) {
         return transfer_error(kQolErrNotReady, "item free not ready");

@@ -793,17 +793,18 @@ void log_material_remove(uint32_t index, const char* path, int32_t before, int32
 void discard_uncommitted_product(qol::contracts::QolItemHandle product,
                                  const char* failed_stage, uint32_t index) {
     if (!valid_craft_item(product)) return;
-    if (g_write_port == nullptr || g_write_port->free_item == nullptr) {
+    if (g_inventory_action == nullptr || g_inventory_action->discard_handle == nullptr) {
         log_message(2, "three slot execute stage=product_cleanup index=%u result=%d "
                        "after=%s ownership=unknown",
                     index, kQolErrNotReady, failed_stage);
         return;
     }
-    const QolResult freed = g_write_port->free_item(product);
-    if (freed.ok != kQolOk) {
+    const qol::contracts::InventoryUseOutcome discarded =
+        g_inventory_action->discard_handle(product, 1);
+    if (discarded.status != qol::contracts::InventoryActionStatus::kOk) {
         log_message(2, "three slot execute stage=product_cleanup index=%u result=%d "
                        "after=%s ownership=unknown",
-                    index, freed.code, failed_stage);
+                    index, inventory_action_status_code(discarded.status), failed_stage);
     } else if (g_verify_log_budget.fetch_sub(1) > 0) {
         log_message(0, "three slot execute stage=product_cleanup index=%u result=0 "
                        "after=%s ownership=released",
@@ -1290,9 +1291,9 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
         return CraftExecuteResult::kPrecheckFailed;
     }
 
-    if ((g_write_port == nullptr ||
-         (g_write_port->create_perfect_item == nullptr && g_write_port->create_item == nullptr) ||
-         g_write_port->save_item == nullptr) ||
+    if (g_write_port == nullptr || g_inventory_action == nullptr ||
+        g_inventory_action->create == nullptr || g_inventory_action->place == nullptr ||
+        g_inventory_action->discard_handle == nullptr ||
         (recipe.product_mode == ProductMode::kScaleFirstItem &&
          g_write_port->write_jewel_word == nullptr) ||
         (recipe.product_mode == ProductMode::kMaxSocketEnchantFirstItem &&
@@ -1305,14 +1306,23 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
                       static_cast<int32_t>(kThreeSlotStuffCount));
 
     // 先准备并配置尚未保存的产物；此时输入 handle 尚未被扣料销毁。
+    // perfect 不可用时回退普通创建，与迁移前的「perfect 端口缺失则 create_item」一致。
     qol::contracts::QolItemHandle product = qol::contracts::kInvalidItemHandle;
+    qol::contracts::QolItemCreateSpec create_spec{
+        sizeof(qol::contracts::QolItemCreateSpec), static_cast<int32_t>(product_category), 0,
+        qol::contracts::kQolItemCreateFlagPerfect, nullptr, 0};
+    qol::contracts::QolItemCreateOutcome created = g_inventory_action->create(&create_spec);
+    if (created.status == qol::contracts::InventoryActionStatus::kUnsupported) {
+        create_spec.flags = 0;
+        created = g_inventory_action->create(&create_spec);
+    }
     QolResult product_result = contracts::ok();
-    if (g_write_port->create_perfect_item != nullptr) {
-        product_result = g_write_port->create_perfect_item(
-            static_cast<int32_t>(product_category), &product);
+    if (created.status != qol::contracts::InventoryActionStatus::kOk) {
+        static constexpr char kMessage[] = "product create failed";
+        product_result = contracts::error(inventory_action_status_code(created.status), kMessage,
+                                          static_cast<uint32_t>(sizeof(kMessage) - 1));
     } else {
-        product_result = g_write_port->create_item(
-            static_cast<int32_t>(product_category), 0, 0, 0, &product);
+        product = created.item;
     }
     log_execute_stage(product_result.ok == kQolOk && valid_craft_item(product) ? 0 : 2,
                       "product_create", 0,
@@ -1413,20 +1423,24 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
                             before, after);
     }
 
-    // save_item may consume/rebind the handle; never free or inspect it after this call.
-    int32_t saved = 0;
-    const QolResult save_result = g_write_port->save_item(product, &saved);
-    const bool product_saved = save_result.ok == kQolOk &&
-                               (static_cast<uint32_t>(saved) & 0xffu) != 0;
+    // place 自动落位等价于原 INVEN_SaveItem（FindSaveSlot + 同类别堆合并/adopt，H-13）。
+    // 成功即把 handle 交给原生库存；失败保持 detached，但此处仍按迁移前的保守策略不再
+    // 探测/释放该 handle，ownership 以 action 状态为准。
+    qol::contracts::QolItemPlaceTarget place_target{};
+    place_target.struct_size = sizeof(qol::contracts::QolItemPlaceTarget);
+    place_target.ref = {qol::contracts::kQolBagSpaceOriginal, -1};
+    place_target.slot = -1;
+    const qol::contracts::QolItemPlaceOutcome placed =
+        g_inventory_action->place(product, &place_target);
+    const bool product_saved = placed.status == qol::contracts::InventoryActionStatus::kOk;
     log_execute_stage(product_saved ? 0 : 2, "product_save", 0,
-                      save_result.ok == kQolOk && !product_saved ? kQolErrInternal
-                                                                  : save_result.code,
-                      0, saved);
+                      product_saved ? kQolOk : inventory_action_status_code(placed.status),
+                      0, placed.count);
     if (!product_saved) {
-        // save 可能已把 handle 交给 registry 或扩展背包，此处不得再 free 或回读该 handle。
+        // 自动保存失败时对象仍归调用方；此处不得释放，保持与迁移前一致的失败路径。
         log_message(2, "three slot execute stage=product_save index=0 result=%d "
-                       "after=ownership_unknown",
-                    save_result.ok == kQolOk ? kQolErrInternal : save_result.code);
+                       "after=ownership_detached",
+                    inventory_action_status_code(placed.status));
         return CraftExecuteResult::kProductSaveFailed;
     }
     if (g_verify_log_budget.fetch_sub(1) > 0) {

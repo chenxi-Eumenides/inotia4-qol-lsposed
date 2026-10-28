@@ -221,8 +221,8 @@ const qol::contracts::QolItemInventoryStateWritePort kItemInventoryStateWritePor
     qol::contracts::kQolPortItemInventoryStateWriteVersion, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-static_assert(sizeof(kItemInventoryStateWritePort) == sizeof(void*) * 21,
-              "item inventory write port v2.3 ABI size changed");
+static_assert(sizeof(kItemInventoryStateWritePort) == sizeof(void*) * 22,
+              "item inventory write port v2.4 ABI size changed");
 
 }  // namespace
 

@@ -20,6 +20,8 @@ QolResult free_loaded_item(contracts::QolItemHandle item);
 QolResult create_item(int32_t category, int32_t arg1, int32_t arg2, int32_t arg3,
                       contracts::QolItemHandle* out_item);
 QolResult create_perfect_item(int32_t category, contracts::QolItemHandle* out_item);
+// v2.4 自动落位：成功转 game-owned；失败保持 detached 且不释放对象。
+QolResult save_detached_item(contracts::QolItemHandle item, int32_t* out_saved);
 QolResult place_item(const contracts::QolBagRef* ref, int32_t slot,
                      contracts::QolItemHandle item,
                      contracts::QolItemInventoryStateWriteResult* out);

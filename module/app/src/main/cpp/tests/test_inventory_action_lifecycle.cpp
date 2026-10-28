@@ -36,6 +36,8 @@ QolResult g_create_result{};
 QolResult g_place_result{};
 QolResult g_import_result{};
 QolResult g_free_result{};
+QolResult g_save_result{};
+int32_t g_saved = 1;
 bool g_bag_item_present = false;
 int32_t g_bag_item_slot = 2;
 int32_t g_bag_item_count = 5;
@@ -48,6 +50,8 @@ int g_free_calls = 0;
 int g_place_calls = 0;
 int g_remove_calls = 0;
 int g_import_calls = 0;
+int g_save_calls = 0;
+QolItemHandle g_last_saved{};
 int g_place_slot = -99;
 int32_t g_place_bag = -99;
 int32_t g_last_create_category = -1;
@@ -162,6 +166,14 @@ QolResult fake_free_item(QolItemHandle item) {
     return ok();
 }
 
+QolResult fake_save_item(QolItemHandle item, int32_t* out_saved) {
+    ++g_save_calls;
+    if (out_saved == nullptr) return fail(kQolErrInvalidArgument, "out required");
+    g_last_saved = item;
+    *out_saved = g_saved;
+    return g_save_result;
+}
+
 QolResult fake_place_item(const QolBagRef* ref, int32_t slot, QolItemHandle item,
                           QolItemInventoryStateWriteResult* out) {
     ++g_place_calls;
@@ -232,6 +244,8 @@ void reset_fixture() {
     g_place_result = ok();
     g_import_result = ok();
     g_free_result = ok();
+    g_save_result = ok();
+    g_saved = 1;
     g_bag_item_present = false;
     g_bag_item_slot = 2;
     g_bag_item_count = 5;
@@ -268,6 +282,7 @@ void reset_fixture() {
     g_write.place_item = &fake_place_item;
     g_write.remove_item = &fake_remove_item;
     g_write.free_item = &fake_free_item;
+    g_write.save_item = &fake_save_item;
 
     g_source = {};
     g_source.version = kBagSourceVersion;
@@ -380,6 +395,42 @@ void test_place_native_auto_slot() {
     CHECK(failed.item.slot == 0);
 }
 
+void test_place_auto_save() {
+    reset_fixture();
+    const QolItemPlaceTarget target = make_place_target(kQolBagSpaceOriginal, -1, -1);
+    QolItemPlaceOutcome outcome =
+        qol::features::core_item::kInventoryActionApi.place(g_created, &target);
+    CHECK(outcome.status == InventoryActionStatus::kOk);
+    CHECK(g_save_calls == 1 && g_last_saved.slot == g_created.slot);
+    CHECK(g_place_calls == 0);
+    CHECK(outcome.ref.space_id == kQolBagSpaceOriginal && outcome.ref.bag == -1);
+    CHECK(outcome.item.slot == g_created.slot && outcome.count == 3);
+
+    // 自动保存未落地（saved==0）→ 失败且不释放；句柄仍可 discard_handle。
+    reset_fixture();
+    g_saved = 0;
+    outcome = qol::features::core_item::kInventoryActionApi.place(g_created, &target);
+    CHECK(outcome.status != InventoryActionStatus::kOk);
+    CHECK(g_free_calls == 0);
+    const InventoryUseOutcome discarded =
+        qol::features::core_item::kInventoryActionApi.discard_handle(g_created, 1);
+    CHECK(discarded.status == InventoryActionStatus::kOk);
+    CHECK(g_last_freed.slot == g_created.slot);
+
+    // 保存入口报错同样保持 detached。
+    reset_fixture();
+    g_save_result = fail(kQolErrBlocked, "inventory full");
+    outcome = qol::features::core_item::kInventoryActionApi.place(g_created, &target);
+    CHECK(outcome.status != InventoryActionStatus::kOk);
+    CHECK(g_free_calls == 0);
+
+    // 沿用迁移前的低 8 位判定：saved==256 视为未落地。
+    reset_fixture();
+    g_saved = 256;
+    outcome = qol::features::core_item::kInventoryActionApi.place(g_created, &target);
+    CHECK(outcome.status != InventoryActionStatus::kOk);
+}
+
 void test_place_extension_import() {
     reset_fixture();
     const QolItemPlaceTarget target = make_place_target(kExtensionSpace, 0, 3);
@@ -470,6 +521,7 @@ int main() {
     test_create_count_and_failure_cleanup();
     test_create_rejects_invalid_spec();
     test_place_native_auto_slot();
+    test_place_auto_save();
     test_place_extension_import();
     test_discard_handle();
     test_api_size_compatibility();

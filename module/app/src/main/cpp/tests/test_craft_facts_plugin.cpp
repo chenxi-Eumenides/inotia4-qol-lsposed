@@ -112,8 +112,8 @@ static_assert(std::is_standard_layout<qol::contracts::QolCustomRecipeWritePort>:
 static_assert(qol::contracts::kQolPortCraftVersion.major == 1 &&
                   qol::contracts::kQolPortCraftVersion.minor == 1 &&
                   qol::contracts::kQolPortCraftUiWriteVersion.minor == 1 &&
-                  qol::contracts::kQolPortCustomRecipeWriteVersion.minor == 3,
-              "custom recipe write port is v1.3 (native option write tail)");
+                  qol::contracts::kQolPortCustomRecipeWriteVersion.minor == 4,
+              "custom recipe write port is v1.4 (product lifecycle retired)");
 static_assert(offsetof(qol::contracts::CraftFactsApi, read_only) ==
                   sizeof(qol::contracts::QolCraftReadApi),
               "CraftFactsApi layout changed");
@@ -127,8 +127,6 @@ static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::se
                            CraftSetStuffFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::read_jewel_word),
                            CraftReadJewelWordFn>::value);
-static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::free_item),
-                           CraftTargetWriteFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::QolCustomRecipeWritePort::random_inclusive),
                            CraftPortRandomFn>::value);
 static_assert(std::is_same<decltype(qol::contracts::QolCraftUiWritePort::set_target_slot_item),

@@ -33,9 +33,9 @@
 | 面 | 当前声明 |
 |---|---|
 | `provides` | 无。结果 API `result::CraftResultApi` 只在插件内部由 UI 子层调用。 |
-| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0、`inventory.action` v3.2、`inventory.slot` v1.0（`plugin.cpp:359-378`）。 |
+| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0、`inventory.action` v3.3、`inventory.slot` v1.0（`plugin.cpp:359-378`）。 |
 | `optional_requires` | `attribute.quality` v2.0、`inventory.bag_source` v1.2；缺失/失效只置 degraded，前者只影响升阶路径，后者使扩展袋物品的扣料回退原版类别入口（`plugin.cpp:351-357`）。 |
-| `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.3、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
+| `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.4、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
 | `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 1 条 `own:RECIPEBASE_MIXTUREBASE`（required/fail-soft）。顺序即释放逆序，ownership 最后声明、最先释放。 |
 | `jni` / HTTP | 均为 0（`plugin.cpp:359-377`）。 |
 | `features` | 仅 `custom_recipe.recipes`。 |
@@ -74,7 +74,7 @@ UIMix 控件。
 
 | 端口 | 用途 | 来源 |
 |---|---|---|
-| `QOL_PORT_CUSTOM_RECIPE_WRITE` v1.3 | 写 stuff 需求、槽位物品、产物创建/保存/释放、宝石字、真实闭区间随机、装备原生词条值 | `contracts/game_ports/custom_recipe_write_port.h` |
+| `QOL_PORT_CUSTOM_RECIPE_WRITE` v1.4 | 写 stuff 需求、槽位物品、宝石字、真实闭区间随机、装备原生词条值；产物生成/入库/回滚已退役，改由 `inventory.action` 承担 | `contracts/game_ports/custom_recipe_write_port.h` |
 | `QOL_PORT_CRAFT_UI_WRITE` v1.1 | UIMix 控件状态、提示/YesNo、费用归零 | `contracts/game_ports/craft_ui_write_port.h` |
 | `QOL_PORT_RECIPE_TABLE` v1.0 | RECIPEBASE/MIXTUREBASE 槽位（base + 5 个字段指针） | `contracts/game_ports/recipe_table_port.h` |
 
@@ -165,13 +165,14 @@ UIMix 控件。
 | 阶段 | 失败结果 | 是否已扣料 |
 |---|---|---|
 | 1 precheck：pending/token/generation、live handle/类别/可堆叠/持有数、扣料入口就绪 | `kStaleSlots` / `kPrecheckFailed` / `kNotEnoughHeld` | 否 |
-| 2 产物准备（未入包）：`create_perfect_item` 或 `create_item` 并改写 | `kProductPrepareFailed` | 否 |
+| 2 产物准备（未入包）：`inventory.action.create`（perfect 不可用时以 flags=0 回退普通创建）并改写 | `kProductPrepareFailed` | 否 |
 | 3 扣料：按填入槽 `inventory.action.discard` 扣该槽物品 1 个单位（句柄经 `inventory.slot.view` 定位，扩展袋物品经 `inventory.bag_source` 定位）；不可定位时可堆叠回退原版 `remove_item_data`（R-56 扩展袋补扣）、不可堆叠回退按句柄 `remove_item` + 数量前后差观察 | `kMaterialRemoveFailed` / `kMaterialObservationFailed` | **是，可能** |
-| 4 保存：`save_item` 且 `out_saved & 0xff != 0` | `kProductSaveFailed` | 是 |
+| 4 保存：`inventory.action.place`（`ref={原生空间,-1}`、`slot=-1`）走 `INVEN_SaveItem` 自动找槽与合并（H-13），返回 `kOk` 即保存成功 | `kProductSaveFailed` | 是 |
 
 前置校验全部在任何扣料之前；产物在扣料前准备、失败即丢弃。扣料后的失败**不回滚**，提示
-「合成失败，材料可能已扣，请检查背包。」；`save_item` 之后 handle 所有权可能转移，代码不再
-free 或回读该 handle，因此不承诺 save 失败后可清理。
+「合成失败，材料可能已扣，请检查背包。」；`inventory.action.place` 返回 `kOk` 后 handle 归
+原生库存，代码不 free 或回读该 handle；自动保存失败时对象仍为 detached，但失败路径保持与
+迁移前一致的「不承诺清理」。
 
 ### 6.4 确认与取消
 
@@ -347,7 +348,7 @@ optional/fail-soft（失败只 degraded）。`UIMix_ResetStuffItemControl` 保�
 - 装备升阶路径当前只有 Host 测试与 Debug 构建证据；装备产物继承原生词条、词条值写回后的
   显示/属性重算后果未做真机验收。
 - 放料对空/无效输入返回 `kPlaced` 并推进选格（历史行为，未裁决）。
-- 扣料后阶段失败允许不回退（CR01 口径）；`save_item` 之后不承诺清理 handle。
+- 扣料后阶段失败允许不回退（CR01 口径）；`inventory.action.place` 之后不再清理 handle。
 - 动态配方缓存按创建时间永久保留到进程结束，不设淘汰；这是「重复进档配方不变」的设计代价。
 - 无跨线程查询快照：本插件没有 HTTP/JNI 只读面，主线程契约由约定与日志观测保证，尚未做
   fail-closed 线程拒绝。
