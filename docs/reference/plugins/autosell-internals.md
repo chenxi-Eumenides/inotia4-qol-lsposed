@@ -81,6 +81,7 @@ required capabilities 在 `plugin.cpp` 声明；`inventory.bag_source` 1.2 是�
 - `sync_task()` 在 `g_task_mtx` 内二次复核 global/session/config，避免检查与注册之间的迟到窗口；重复调用不会重复注册（`scan.cpp`）。
 - `save_enter` 校验 slot 后同步任务；`save_exit` 调 `autosell_store_reject_session()` 并移除任务（`scan.cpp`）。
 - 原版物理袋：`scan_physical_bags` 通过 `QOL_PORT_ITEM.for_each_space_slot(space=0)` 枚举 `bag 0..4`；不再使用 legacy `for_each_bag_slot`，避免关闭背包面板后枚举为空。
+- 枚举性能：`for_each_space_slot` 在 game/access 层对袋槽表整段只校验一次，逐槽仅校验物品指针；autosell 的扫描语义、取消纪元和失败门禁不变。
 - 注册源扫描：`scan_body` 在物理袋后先调用 `scan_variant_bags`（`space=1` C18 原生追加袋，经 `QOL_PORT_ITEM.for_each_space_slot`），再调用 `scan_registered_sources`（`inventory.bag_source` 1.2 的 `source_count/source_at`，`space>=2`）。每个引用校验句柄/category、`refresh_item_count` 后进入 `process_ref`；每类遍历错误按 code 变化限速 WARN，`kQolErrNotReady` 静默。取消纪元同样在回调内检查。
 
 ### 配置快照与计数

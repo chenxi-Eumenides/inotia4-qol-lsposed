@@ -57,7 +57,7 @@ hook 入口覆盖库存查询/写入和备用入口绑定；快捷栏三个 opti
 | 禁止项 | 不得调用 `INVEN_GetBagSize(index)` 做校验：该函数接受索引 18，但索引 18 的表项不是袋对象，解引用会崩溃（v520 实测 tombstone 于 `INVEN_GetBagSize+24`）。 |
 | count 计算 | `highest_valid_index + 1`，夹取到 `[6,32]`，再减去原版前缀 6 得到改版袋空间袋数。 |
 | 布局提示 | `kQolTargetCapabilityC18NativeBagLayoutCandidate` 是 bit 3（`1<<3`），只表示布局候选；候选注释仍要求 `2×5` 拓扑准入。 |
-| 缓存 | 无袋数缓存；每次探测重新读 GOT 表，避免袋表在进入世界/打开界面后变化导致旧值。`invalidate_native_bag_layout_cache()` 保留为空实现。 |
+| 缓存 | `native_bag_layout()` 1 秒 TTL 缓存；`invalidate_native_bag_layout_cache()` 可显式失效（读档/布局变化）。`inventory_for_each_space_slot` 对袋槽表整段只校验一次，逐槽仅校验物品指针。 |
 
 探测位于 Host/game access，不由插件直接读取地址。v520 实测：GOT 表 18 项；`0x735000` 仅 6 项；索引 18 为非袋残留指针。
 ## 读取、快照与刷新

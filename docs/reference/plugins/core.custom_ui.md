@@ -122,7 +122,7 @@
 
 实现约束：
 
-1. 每帧重新解析挂载根，不缓存 root 做跨帧判断（容器地址可能不变而子树已重建）。
+1. 每次 `anchored_*_ensure` 调用重新解析挂载根，不缓存 root 做跨调用判断（容器地址可能不变而子树已重建）；调用方可降低 ensure 频率，但不得跨调用缓存 root。
 2. 先指针、后字段：先在活父控件子链表内做纯指针比对，再读 type/user_type/data/`CO_PROC`。
 3. 失效只注销记录：`forget_native` 或 `anchored_*_release`；绝不 delete 未证明存活的句柄。
 4. 身份判据：组件按钮用 `click_binding_is_current`；原生控件用创建时 `type` + `user_type` + `control_data` 快照配合 `control_proc_matches`。

@@ -116,14 +116,18 @@ extension_logical_bag_last(); // 6 + active - 1
 - 能力位 bit3 `kQolTargetCapabilityC18NativeBagLayoutCandidate`：已知 C18L v507/v508/v512/v513/v514/v520 置位；未知 MD5 仅在运行期特征匹配时置位。
 - 袋布局：`native_bag_layout()` 探测原生袋对象表（原版 6 袋 / C18 19 袋），`physical_item_at`、`item_ref_at`、`set_current_bag` 上界同源。
 - 页签 reflow：模块列固定在原版列右侧；用完整 72×84 框判断冲突；冲突时只平移 C18 竖向组（保持 5px 间距），底部横排与其他控件不动；歧义 fail-closed。
-- 几何按每个 equip root/generation 重新扫描（≤32 子控件，排除模块锚点），不跨 generation 缓存原生指针。
+- 几何按每个 equip root/generation 重新扫描（≤32 子控件，排除模块锚点）；子控件列表缓存按 `root + epoch` 保存一次链表遍历，控件创建/删除/root 变化立即失效，返回前仍校验 root/child，不把缓存指针当作所有权。
 - 命中：C18 原生页签 child index 只作 UI 命中，不进入扩展逻辑 ID 域。
 - 高亮：C18 module view 临时把 `current_bag` 写成页签总数（无对应页签→原生无高亮），绘制后恢复 raw；不使用 18/19 作为持久哨兵。
 
 ## 7. UI 与输入
 
 - 页签宿主：背包装备页、商店、合成器；挂载在游戏袋容器上，所有权归游戏。
-- 锚定：每帧重新解析活容器并证明身份（proc/type/user_type/data 快照）；失效只注销记录并重建；禁用/退出时 detach 后删除。
+- 锚定：每次完整 ensure 重新解析活容器并证明身份（proc/type/user_type/data 快照）；失效只注销记录并重建；禁用/退出时 detach 后删除。
+- 子控件缓存：Host UI adapter 的 `child_count`/`child_at` 按 `root + epoch` 缓存一次链表遍历；控件创建/删除/root 变化立即失效，返回前仍校验 root/child，保持 fail-closed。
+- 页签 ensure 门控：root、子控件数、inventory generation（商店/合成为扩展袋数）未变时每 10 帧完整 ensure 一次；其余帧只逐个校验已挂载按钮存活，任一失效立即完整重建。
+- ControlItem 投影：`control→slot` 映射按 `root/bag/capacity` 缓存，命中仍用 `valid_child_locked` 复核；控件重建后自动重扫。
+- C18 袋数：`native_bag_count_locked()` 按 EB revision 缓存；`native_bag_layout()` 1 秒 TTL，避免商店/合成页每帧扫描候选袋。
 - 页签控件：user type 2、data 16 字节；点击经 proc 投递，主线程消费；同一帧多击做合并。
 - 当前页签渲染上限 `kMaxRenderedExtensionBagTabs = 5`；`bagCount > 5` 时只渲染前 5 个，多列布局待实现。
 - 输入：UI 事件由 EB 适配后交给 `core.item` 操作面；EB 不再执行跨空间移动事务。
