@@ -1,6 +1,7 @@
 #include "reconciler.h"
 
 #include "host/owner_identity.h"
+#include "infra/capabilities.h"
 #include <cstring>
 
 namespace qol::host {
@@ -36,6 +37,7 @@ void FeatureReconciler::pending_desired(void* context, uint64_t revision,
     if (revision <= self.pending_revision_) return;
     self.pending_ = desired;
     self.pending_revision_ = revision;
+    self.toggles_dirty_ = true;
 }
 
 void FeatureReconciler::pending_state(void* context, const FeatureControlSnapshot& snapshot) {
@@ -45,6 +47,7 @@ void FeatureReconciler::pending_state(void* context, const FeatureControlSnapsho
     self.pending_ = snapshot.desired;
     self.pending_namespaces_ = snapshot.namespaces;
     self.pending_revision_ = snapshot.revision;
+    self.toggles_dirty_ = true;
 }
 
 bool FeatureReconciler::bind(const HostDeps& deps) {
@@ -73,6 +76,7 @@ bool FeatureReconciler::bind(const HostDeps& deps) {
 void FeatureReconciler::notify_dependency_changed() {
     std::lock_guard<std::mutex> lock(mutex_);
     dependency_dirty_ = true;
+    toggles_dirty_ = true;
 }
 bool FeatureReconciler::request_desired(void* context, const char* id, bool enabled) {
     contracts::FeatureReceipt receipt{};
@@ -152,6 +156,46 @@ uint32_t FeatureReconciler::step() {
     if (!bound_) return 0;
     if (main_thread_ == std::thread::id{}) main_thread_ = std::this_thread::get_id();
     if (std::this_thread::get_id() != main_thread_) return 0;
+
+    bool pending = false;
+    bool toggles_dirty = false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const uint64_t capability_revision = infra::capability_revision();
+        if (capability_revision != last_capability_revision_) {
+            // 能力注册/撤销会改变依赖就绪边；O(1) 检测，避免每帧重扫插件图。
+            last_capability_revision_ = capability_revision;
+            dependency_dirty_ = true;
+        }
+        const bool pending_work = feature_registry_has_pending_work();
+        if (had_pending_work_ && !pending_work) {
+            // 在途生命周期事务刚排空：下一帧重算一次依赖边，但不 bump retry batch，
+            // 避免失败插件在每次事务排空后被无限重试。
+            full_step_pending_ = true;
+        }
+        had_pending_work_ = pending_work;
+        pending = pending_revision_ > revision_ || dependency_dirty_ || !entries_.empty();
+        toggles_dirty = toggles_dirty_;
+    }
+    // 无配置/依赖/entry 变化、无在途生命周期事务时，正常帧不应重跑整张插件图。
+    // 每 300 次空闲 step 强制全量一次，作为漏标记的兜底；首次 step 必须全量。
+    const bool force_full = !initialized_ || idle_steps_ >= 300 || activation_retry_ > 0;
+    if (!force_full && !pending && !full_step_pending_ && !toggles_dirty &&
+        !feature_registry_has_pending_work()) {
+        ++idle_steps_;
+        return 0;
+    }
+    if (!force_full && !pending && !full_step_pending_ && !feature_registry_has_pending_work()) {
+        // 只有 toggle 投递待处理（例如 revision 已应用但回调尚未送达）。
+        notify_toggles();
+        std::lock_guard<std::mutex> lock(mutex_);
+        toggles_dirty_ = pending_revision_ > revision_;
+        idle_steps_ = 0;
+        return 0;
+    }
+    initialized_ = true;
+    idle_steps_ = 0;
+    full_step_pending_ = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (pending_revision_ > revision_) {
@@ -221,7 +265,10 @@ uint32_t FeatureReconciler::step() {
         const auto* id = order[i];
         if (!wanted(this, id) || feature_registry_active(id) || feature_registry_busy(id) ||
             !feature_registry_dependencies_ready(id) || attempted_[id] == batch_) continue;
-        if (!feature_registry_owner_ready(id)) continue;
+        if (!feature_registry_owner_ready(id)) {
+            activation_retry_ = 8;
+            continue;
+        }
         attempted_[id] = batch_;
         if (feature_registry_transition(id, true)) ++advanced;
     }
@@ -245,6 +292,13 @@ uint32_t FeatureReconciler::step() {
             catch (...) { callback_error_ = kQolErrInternal; }
             break;
         }
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        // 本轮已投递；若 step 期间又来了新 revision，保留 dirty 供下一帧处理。
+        toggles_dirty_ = pending_revision_ > revision_;
+        last_capability_revision_ = infra::capability_revision();
+        if (activation_retry_ > 0) --activation_retry_;
     }
     return advanced;
 }

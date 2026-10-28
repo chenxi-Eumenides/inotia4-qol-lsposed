@@ -30,6 +30,9 @@ const void* require_capability(CapabilityId id, QolVersionRange required);
 
 uint32_t capability_count();
 
+// 能力注册表变更计数：注册/撤销/测试重置都会递增。供生命周期门禁做 O(1) 变更检测。
+uint64_t capability_revision();
+
 // 测试用。
 void capabilities_reset_for_test();
 

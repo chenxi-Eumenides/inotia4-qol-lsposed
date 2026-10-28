@@ -2840,6 +2840,18 @@ bool feature_registry_dependencies_ready(const char* id) {
            check_requires(g_plugins[index].descriptor, index) == nullptr;
 }
 bool feature_registry_busy(const char* id) { return plugin_has_active_tx(id); }
+bool feature_registry_has_pending_work() {
+    for (const LifecycleTx& slot : g_lifecycle_txs) {
+        if (slot.in_use) return true;
+    }
+    for (uint32_t i = 0; i < g_plugin_count; ++i) {
+        if (g_http_stop_pending[i] || g_http_caps_pending[i] ||
+            g_http_provider_drain_pending[i] || g_cascade_release_pending[i]) {
+            return true;
+        }
+    }
+    return false;
+}
 bool feature_registry_active(const char* id) {
     infra::FeatureStatus status{};
     bool blocking_tx = false;

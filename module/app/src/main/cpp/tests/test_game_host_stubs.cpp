@@ -372,6 +372,7 @@ uint32_t feature_registry_order(const char**, uint32_t) { return 0; }
 bool feature_registry_dependencies_wanted(const char*, FeatureWants, void*) { return true; }
 bool feature_registry_dependencies_ready(const char*) { return true; }
 bool feature_registry_busy(const char*) { return false; }
+bool feature_registry_has_pending_work() { return false; }
 bool feature_registry_active(const char*) { return false; }
 bool feature_registry_transition(const char*, bool) { return false; }
 bool feature_registry_context(const char*, contracts::PluginContext*) { return false; }

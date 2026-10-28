@@ -1,5 +1,6 @@
 #include "infra/capabilities.h"
 
+#include <atomic>
 #include <cstring>
 
 namespace qol::infra {
@@ -11,6 +12,7 @@ constexpr uint32_t kMaxCapabilities = 64;
 
 // 直接复用冻结结构体作槽位；未注册槽位以 id == nullptr 标记。
 CapabilityProvision g_slots[kMaxCapabilities];
+std::atomic<uint64_t> g_revision{1};
 
 // 按 id 查槽位；未注册返回 kMaxCapabilities。
 uint32_t find_slot(CapabilityId id) {
@@ -47,6 +49,7 @@ bool register_capability(const CapabilityProvision& provision) {
     for (uint32_t i = 0; i < kMaxCapabilities; ++i) {
         if (g_slots[i].id == nullptr) {
             g_slots[i] = provision;
+            g_revision.fetch_add(1, std::memory_order_release);
             return true;
         }
     }
@@ -62,6 +65,7 @@ bool unregister_capability(CapabilityId id) {
         return false;
     }
     g_slots[slot] = CapabilityProvision{};
+    g_revision.fetch_add(1, std::memory_order_release);
     return true;
 }
 
@@ -82,11 +86,14 @@ const void* require_capability(CapabilityId id, QolVersionRange required) {
 
 uint32_t capability_count() { return used_count(); }
 
+uint64_t capability_revision() { return g_revision.load(std::memory_order_acquire); }
+
 // 模块级重置：只清本注册表，供隔离断言使用；聚合重置见 infra/test_reset.cpp。
 void capabilities_reset_for_test() {
     for (uint32_t i = 0; i < kMaxCapabilities; ++i) {
         g_slots[i] = CapabilityProvision{};
     }
+    g_revision.fetch_add(1, std::memory_order_release);
 }
 
 }  // namespace qol::infra

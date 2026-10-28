@@ -63,6 +63,9 @@ using FeatureWants = bool (*)(void*, const char*);
 bool feature_registry_dependencies_wanted(const char*, FeatureWants, void*);
 bool feature_registry_dependencies_ready(const char*);
 bool feature_registry_busy(const char*);
+// 是否存在需要 step() 推进的宿主侧工作：在途生命周期事务或待处理的 HTTP 停用/撤销。
+// 供 FeatureReconciler 的空闲快速路径使用；不包含插件业务状态。
+bool feature_registry_has_pending_work();
 bool feature_registry_active(const char*);
 bool feature_registry_transition(const char*, bool activate);
 bool feature_registry_context(const char*, contracts::PluginContext*);

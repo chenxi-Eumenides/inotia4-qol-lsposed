@@ -118,11 +118,37 @@ void test_concurrent_readers() {
     infra::snapshot_handle::destroy(handle);
 }
 
+void test_identical_publish_reuses_buffer() {
+    using namespace qol;
+    auto handle = infra::snapshot_handle::create(sizeof(Record));
+    assert(handle != nullptr);
+    const Record value{7, ~uint32_t{7}};
+    assert(infra::snapshot_handle::publish(handle, &value, sizeof(value)));
+
+    const void* first = nullptr;
+    uint32_t first_size = 0;
+    contracts::QolSnapshotToken first_token = nullptr;
+    assert(infra::snapshot_handle::acquire(handle, &first, &first_size, &first_token));
+
+    // 相同内容发布必须复用现有 buffer，不重新分配/拷贝。
+    assert(infra::snapshot_handle::publish(handle, &value, sizeof(value)));
+    const void* second = nullptr;
+    uint32_t second_size = 0;
+    contracts::QolSnapshotToken second_token = nullptr;
+    assert(infra::snapshot_handle::acquire(handle, &second, &second_size, &second_token));
+    assert(first == second && first_size == second_size);
+
+    infra::snapshot_handle::release(first_token);
+    infra::snapshot_handle::release(second_token);
+    infra::snapshot_handle::destroy(handle);
+}
+
 }  // namespace
 
 int main() {
     test_uninitialized_and_errors();
     test_stable_views_and_large_payload();
+    test_identical_publish_reuses_buffer();
     test_concurrent_readers();
     std::puts("infra_snapshot_handle: pass");
     return 0;

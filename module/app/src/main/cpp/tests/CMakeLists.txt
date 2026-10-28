@@ -572,6 +572,7 @@ add_executable(production_feature_facade_tests
     ${CPP_DIR}/host/core_settings_config_store.cpp
     ${CPP_DIR}/host/core_settings_config_service.cpp
     ${CPP_DIR}/infra/status.cpp
+    ${CPP_DIR}/infra/capabilities.cpp
     ${CPP_DIR}/host/owner_identity.cpp)
 target_include_directories(production_feature_facade_tests PRIVATE ${CPP_DIR})
 set_target_properties(production_feature_facade_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
