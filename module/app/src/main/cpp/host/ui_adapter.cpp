@@ -8,6 +8,7 @@
 #include <fcntl.h>
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <limits>
 #include <mutex>
 #include <unordered_map>
@@ -498,42 +499,93 @@ bool control_readable(const void* control, size_t size) {
     return pread_read == static_cast<ssize_t>(size);
 }
 
+// 子控件列表缓存：child_at 原先每次从链表头遍历，valid_child_locked 又逐槽调用，
+// 形成 O(n^2) 遍历 + 每节点 process_vm_readv。缓存按 root + epoch 保存一次性
+// 遍历结果；root 在每次访问时重新校验，child 在返回前重新校验，保持 fail-closed。
+// epoch 在 delete_control 或 root 变化时递增，缓存条目只增不减到上限后整体清空。
+struct ChildListEntry {
+    void* root;
+    uint64_t epoch;
+    std::vector<void*> children;
+};
+
+constexpr size_t kMaxCachedRoots = 16;
+constexpr uint32_t kMaxChildren = 4096;
+thread_local std::deque<ChildListEntry> t_child_lists;
+thread_local uint64_t t_child_list_epoch = 1;
+
+void invalidate_child_lists() {
+    ++t_child_list_epoch;
+    t_child_lists.clear();
+}
+
+bool build_child_list(void* root, std::vector<void*>* out) {
+    if (root == nullptr || out == nullptr) return false;
+    if (!control_readable(root, CO_SIZE)) return false;
+    const uint32_t count = *reinterpret_cast<const uint32_t*>(
+        static_cast<const uint8_t*>(root) + CO_COUNT);
+    if (count > kMaxChildren) return false;
+    void* node = *reinterpret_cast<void**>(
+        const_cast<uint8_t*>(static_cast<const uint8_t*>(root) + CO_CHILD_LIST));
+    out->clear();
+    out->reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        if (node == nullptr || !control_readable(node, 0x18)) return false;
+        void* child = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 8);
+        if (child == nullptr || !control_readable(child, CO_SIZE)) return false;
+        out->push_back(child);
+        node = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 0x10);
+    }
+    return true;
+}
+
+const std::vector<void*>* child_list_for(void* root) {
+    if (root == nullptr) return nullptr;
+    for (const ChildListEntry& entry : t_child_lists) {
+        if (entry.root != root || entry.epoch != t_child_list_epoch) continue;
+        if (!control_readable(root, CO_SIZE)) {
+            invalidate_child_lists();
+            return nullptr;
+        }
+        return &entry.children;
+    }
+    ChildListEntry entry{root, t_child_list_epoch, {}};
+    if (!build_child_list(root, &entry.children)) return nullptr;
+    if (t_child_lists.size() >= kMaxCachedRoots) t_child_lists.clear();
+    t_child_lists.push_back(std::move(entry));
+    return &t_child_lists.back().children;
+}
+
+// 记录每个 root kind 上次返回的根指针；屏幕切换导致根变化时使子控件缓存失效。
+thread_local std::array<void*, 64> t_last_roots{};
+
+void note_root(contracts::QolUiRootKind kind, QolUiHandle root) {
+    const auto index = static_cast<size_t>(kind);
+    if (index >= t_last_roots.size()) return;
+    if (t_last_roots[index] == root) return;
+    t_last_roots[index] = root;
+    invalidate_child_lists();
+}
+
+
 QolResult child_count(QolUiHandle control, uint32_t* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
-    if (!control_readable(control, CO_SIZE)) return not_ready();
-    // ControlObject_GetCount is a single load at +CO_COUNT. Read it directly
-    // after validating the mapping; this avoids entering game code through a
-    // possibly stale indirect function pointer while the UI tree is rebuilt.
-    *out = *reinterpret_cast<const uint32_t*>(
-        static_cast<const uint8_t*>(control) + CO_COUNT);
+    const std::vector<void*>* children = child_list_for(control);
+    if (children == nullptr) return not_ready();
+    *out = static_cast<uint32_t>(children->size());
     return contracts::ok();
 }
 
 QolResult child_at(QolUiHandle control, uint32_t index, QolUiHandle* out) {
     if (control == nullptr || out == nullptr) return invalid_argument();
     *out = nullptr;
-    if (!control_readable(control, CO_SIZE)) return not_ready();
-    if (index >= *reinterpret_cast<const uint32_t*>(
-                     static_cast<const uint8_t*>(control) + CO_COUNT)) {
-        return not_ready();
-    }
-    // Traverse the embedded LINKEDLIST directly: head at +CO_CHILD_LIST,
-    // node->data at +8, node->next at +0x10. Validate every node mapping.
-    void* node = *reinterpret_cast<void**>(
-        const_cast<uint8_t*>(static_cast<const uint8_t*>(control) + CO_CHILD_LIST));
-    for (uint32_t current = 0; current <= index; ++current) {
-        // Use the normal fast probe here. Parsing /proc/self/maps per linked
-        // node makes UI refresh O(nodes * file-read) and freezes the bag page.
-        if (node == nullptr || !control_readable(node, 0x18)) return not_ready();
-        if (current == index) {
-            void* child = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 8);
-            if (child == nullptr || !control_readable(child, CO_SIZE)) return not_ready();
-            *out = child;
-            return contracts::ok();
-        }
-        node = *reinterpret_cast<void**>(static_cast<uint8_t*>(node) + 0x10);
-    }
-    return not_ready();
+    const std::vector<void*>* children = child_list_for(control);
+    if (children == nullptr || index >= children->size()) return not_ready();
+    void* child = (*children)[index];
+    // 缓存可能包含同 epoch 内被游戏删除的子控件；返回前仍做一次精确校验。
+    if (child == nullptr || !control_readable(child, CO_SIZE)) return not_ready();
+    *out = child;
+    return contracts::ok();
 }
 
 QolResult resolution_width(int32_t* out) {
@@ -835,10 +887,13 @@ QolResult find_root(contracts::QolUiRootKind kind, QolUiHandle* out) {
             return not_ready();
         }
         *out = parent;
+        note_root(kind, *out);
         return contracts::ok();
     }
     *out = ui_find_root(static_cast<uint32_t>(kind));
-    return *out == nullptr ? not_ready() : contracts::ok();
+    if (*out == nullptr) return not_ready();
+    note_root(kind, *out);
+    return contracts::ok();
 }
 
 QolResult touch_state(QolUiHandle* out_moving, QolUiHandle* out_drop_source,
@@ -1043,6 +1098,7 @@ QolResult delete_control(QolUiHandle control) {
         for (QolUiHandle handle : subtree) g_click_bindings.erase(handle);
     }
     if (!ui_delete_control(control)) return not_ready();
+    invalidate_child_lists();
     return contracts::ok();
 }
 
