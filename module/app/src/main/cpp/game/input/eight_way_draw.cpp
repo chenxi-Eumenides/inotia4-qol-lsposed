@@ -45,6 +45,9 @@ struct SavedRect {
 };
 
 SavedRect g_saved_arrow_rect[kArrowControlCount];
+bool g_overlay_hidden = false;
+uint32_t g_overlay_tick = 0;
+void* g_overlay_controls[kArrowControlCount]{};
 
 GetGroupFn get_group_fn() {
     static GetGroupFn fn = nullptr;
@@ -122,8 +125,20 @@ void draw_fallback_line(float cx, float cy, float ux, float uy) {
 
 void prepare_direction_overlay() {
     if (!enabled()) return;
+    // 箭头控件在启用时移出屏幕一次即可；游戏重建控件或每隔 30 帧复核一次。
+    // 原实现每帧对 4 个控件做 control_rect + set_control_rect，占 world_idle
+    // 约 4% CPU，且大部分帧没有任何位置变化。
+    bool controls_changed = false;
     for (int32_t i = 0; i < kArrowControlCount; ++i) {
         void* ctrl = access::virtual_control(kArrowControlFirst + i);
+        if (ctrl != g_overlay_controls[i]) {
+            g_overlay_controls[i] = ctrl;
+            controls_changed = true;
+        }
+    }
+    if (g_overlay_hidden && !controls_changed && (++g_overlay_tick % 30) != 0) return;
+    for (int32_t i = 0; i < kArrowControlCount; ++i) {
+        void* ctrl = g_overlay_controls[i];
         if (ctrl == nullptr) continue;
         int64_t rect[4]{};
         if (!access::control_rect(ctrl, rect)) continue;
@@ -140,9 +155,12 @@ void prepare_direction_overlay() {
                                            rect[3]);
         }
     }
+    g_overlay_hidden = true;
 }
 
 void restore_direction_overlay() {
+    g_overlay_hidden = false;
+    g_overlay_tick = 0;
     for (int32_t i = 0; i < kArrowControlCount; ++i) {
         SavedRect& saved = g_saved_arrow_rect[i];
         if (!saved.valid) continue;
@@ -150,6 +168,7 @@ void restore_direction_overlay() {
         if (ctrl != nullptr) {
             (void)access::set_control_rect(ctrl, saved.x, saved.y, saved.w, saved.h);
         }
+        g_overlay_controls[i] = nullptr;
     }
 }
 

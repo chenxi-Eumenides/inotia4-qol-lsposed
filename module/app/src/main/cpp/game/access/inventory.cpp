@@ -103,14 +103,15 @@ QolResult unsupported_space() {
     return error_result(kQolErrUnsupported, "bag space unsupported");
 }
 
-QolResult native_item_ref_at(const NativeBagLayout& layout, int32_t space_id, int32_t bag,
-                             int32_t slot, contracts::QolInventoryItemRef* out) {
+QolResult native_item_ref_at_impl(const NativeBagLayout& layout, int32_t space_id, int32_t bag,
+                                  int32_t slot, contracts::QolInventoryItemRef* out,
+                                  bool validate_slot) {
     if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
     const int32_t native_bag = bag +
         (space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0);
     auto* slot_address = reinterpret_cast<void**>(layout.slots +
         static_cast<size_t>(native_bag) * 0x80 + static_cast<size_t>(slot) * sizeof(void*));
-    if (!game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
+    if (validate_slot && !game_memory_accessible(slot_address, sizeof(*slot_address), 'r')) {
         return error_result(kQolErrNotReady, kNotReady);
     }
     void* item = *slot_address;
@@ -127,6 +128,11 @@ QolResult native_item_ref_at(const NativeBagLayout& layout, int32_t space_id, in
     if (handle_error != ItemHandleError::kNone) return item_handle_error(handle_error);
     out->space_id = space_id;
     return contracts::ok();
+}
+
+QolResult native_item_ref_at(const NativeBagLayout& layout, int32_t space_id, int32_t bag,
+                             int32_t slot, contracts::QolInventoryItemRef* out) {
+    return native_item_ref_at_impl(layout, space_id, bag, slot, out, true);
 }
 
 QolResult native_bag_capacity(int32_t space_id, int32_t bag, int32_t* out_capacity) {
@@ -484,10 +490,21 @@ QolResult inventory_for_each_space_slot(int32_t space_id,
     if (!contracts::succeeded(result)) return result;
     const NativeBagLayout layout = native_bag_layout();
     if (layout.slots == nullptr) return error_result(kQolErrNotReady, kNotReady);
+    // 袋槽表整段只校验一次；逐槽 native_item_ref_at 会重复 game_memory_accessible，
+    // autosell 每次扫描 6*16 槽时形成主要开销。物品指针仍逐项校验，保持 fail-closed。
+    const int32_t native_offset =
+        space_id == contracts::kQolBagSpaceVariant ? kC18FirstNativeBag : 0;
+    const int32_t total_bags = bag_count + native_offset;
+    if (total_bags <= 0 || total_bags > contracts::kQolMaxNativeBagCount) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
+    if (!game_memory_accessible(layout.slots, static_cast<size_t>(total_bags) * 0x80, 'r')) {
+        return error_result(kQolErrNotReady, kNotReady);
+    }
     contracts::QolInventoryItemRef item{};
     for (int32_t bag = 0; bag < bag_count; ++bag) {
         for (int32_t slot = 0; slot < 16; ++slot) {
-            result = native_item_ref_at(layout, space_id, bag, slot, &item);
+            result = native_item_ref_at_impl(layout, space_id, bag, slot, &item, false);
             if (result.code == kQolErrNotFound) continue;
             if (!contracts::succeeded(result)) return result;
             if (callback(&item, ctx) != 0) return contracts::ok();
