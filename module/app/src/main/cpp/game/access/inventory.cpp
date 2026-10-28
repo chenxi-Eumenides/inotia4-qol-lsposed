@@ -7,6 +7,7 @@
 #include "game/access/qol_log_seam.h"
 #include "game/variants/game_variant.h"
 
+#include <chrono>
 #include <cstring>
 #include <mutex>
 
@@ -16,6 +17,14 @@ namespace {
 constexpr const char* kInvalidArgument = "invalid argument";
 constexpr const char* kNotFound = "inventory slot is empty";
 constexpr const char* kNotReady = "inventory not ready";
+
+// 原生袋布局探测会扫描 C18 GOT 袋表并对每个候选袋做 game_memory_accessible；
+// set_current_bag / inventory_bag_info 每帧多次调用，必须缓存。布局只在读档/
+// 袋数变化时改变，1 秒 TTL 足以覆盖 UI 刷新，同时避免跨存档长期陈旧。
+NativeBagLayout g_native_bag_layout_cache{};
+bool g_native_bag_layout_valid = false;
+std::chrono::steady_clock::time_point g_native_bag_layout_at{};
+constexpr auto kNativeBagLayoutTtl = std::chrono::seconds(1);
 
 QolResult error_result(int32_t code, const char* message);
 ItemHandleError copy_ref(const InventoryItemRef& source,
@@ -360,10 +369,18 @@ QolResult for_each_bag_slot(contracts::QolInventoryBagSlotFn callback, void* ctx
     return contracts::ok();
 }
 
-NativeBagLayout native_bag_layout() { return probe_native_bag_layout(); }
+NativeBagLayout native_bag_layout() {
+    const auto now = std::chrono::steady_clock::now();
+    if (!g_native_bag_layout_valid || now - g_native_bag_layout_at >= kNativeBagLayoutTtl) {
+        g_native_bag_layout_cache = probe_native_bag_layout();
+        g_native_bag_layout_valid = true;
+        g_native_bag_layout_at = now;
+    }
+    return g_native_bag_layout_cache;
+}
 
 void invalidate_native_bag_layout_cache() {
-    // 袋数每次探测都从 GOT 表重新统计，没有缓存需要失效；保留入口供布局变化时显式调用。
+    g_native_bag_layout_valid = false;
 }
 
 QolResult inventory_bag_count(int32_t space_id, int32_t* out_count) {

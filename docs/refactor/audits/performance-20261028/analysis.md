@@ -183,6 +183,29 @@ Batch A 后新的模块热点：
 - **Batch C（背包 UI）**：`control_readable` / `child_at` 缓存、`control→slot` 表、页签 ensure epoch 门控。
 - **Batch D**：快照消费者门控、文本分派快速路径、legacy scheduler 迁移、HTTP/JNI、日志。
 
+### 5.4 Batch B 实施记录（背包 UI）
+
+提交：
+
+- `5b69550b`：`child_count`/`child_at` 子控件列表缓存（root + epoch）、背包页签 10 帧 ensure 门控。
+- `5ddb8823`：修复 `create_control` 后未失效子控件缓存导致页签反复重建/崩溃。
+- `868955fc`：`native_bag_count_locked()` 按 EB revision 缓存，消除商店/合成页每帧逐袋扫描。
+- `433f70f3`：商店/合成页签 10 帧 ensure 门控 + 逐帧存活校验；`projection_item_for_control` 增加 `control→slot` 缓存。
+- `31836974`：`native_bag_layout()` 1 秒 TTL 缓存，避免 `set_current_bag` 每帧触发 `/proc/self/maps` 解析。
+
+复测（20 秒采样，模块 CPU 占比）：
+
+| 场景 | 基线 | Batch B 后 | 变化 |
+|---|---:|---:|---:|
+| `bag_open` | 32.1% | 22.5% | -9.6pp |
+| `bag_drag` | 30.4% | 18.5% | -11.9pp |
+| `store_open` | 54.2%（缓存前） | 19.3% | -34.9pp |
+| `mix_open` | 58.3%（缓存前） | 17.5% | -40.8pp |
+
+剩余热点：`process_vm_readv` / `/proc/self/maps` 校验仍占内核 26–31%；`control_item_get_item` / `valid_child_locked` 仍是背包页主要用户态成本。帧间隔 p50 仍为 47.7ms（20fps），CPU 下降尚未转化为帧率提升，需排除场景状态/引擎上限影响。
+
+`31836974` 的布局缓存已构建并安装，但尚未单独采样；最终包 SHA-256 `34a5972327e5761d4409f2fa03515f1fd5c7724340ca9085c5cfc43c1ffb1bb3`。
+
 ## 6. 验证
 
 - 构建：`scripts/build-debug.sh`。
