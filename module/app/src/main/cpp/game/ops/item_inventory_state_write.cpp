@@ -387,25 +387,25 @@ QolResult remove_item(contracts::QolItemHandle handle, int32_t count,
             return item_error(out, result, "item count update failed");
         }
     } else {
-        if (fn_itempool_free == nullptr) {
-            return item_error(out, kQolErrNotReady, "item free not ready");
+        if (fn_remove_item == nullptr) {
+            return item_error(out, kQolErrNotReady, "item removal not ready");
         }
         contracts::QolItemHandle checkpoint{};
         if (!begin_item_invalidation(resolution.item, contracts::kQolItemHandleOwnerAny,
                                      &checkpoint)) {
             return item_error(out, kQolErrBlocked, "item handle transition");
         }
-        result = set_native_space_item(&ref, slot, nullptr);
-        if (!contracts::succeeded(result)) {
-            (void)finish_item_invalidation(checkpoint, false);
-            return item_error(out, result, "native slot removal failed");
+        const int removed = fn_remove_item(resolution.item);
+        if (removed != 0) {
+            if (!finish_item_invalidation(checkpoint, true)) {
+                return item_error(out, kQolErrInternal, "item handle removal failed");
+            }
+        } else {
+            if (!finish_item_invalidation(checkpoint, false)) {
+                return item_error(out, kQolErrInternal, "item handle removal failed");
+            }
+            return item_error(out, kQolErrNotFound, "item not found");
         }
-        if (!finish_item_invalidation(checkpoint, true)) {
-            (void)set_native_space_item(&ref, slot, resolution.item);
-            (void)finish_item_invalidation(checkpoint, false);
-            return item_error(out, kQolErrInternal, "item handle removal failed");
-        }
-        fn_itempool_free(resolution.item);
     }
     out->value = count;
     frame_cache_force_refresh();

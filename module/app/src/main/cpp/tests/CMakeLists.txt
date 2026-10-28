@@ -259,12 +259,13 @@ target_include_directories(stage4_hook_tests PRIVATE
 target_compile_features(stage4_hook_tests PRIVATE cxx_std_17)
 add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 
-# Exercise the production remove_item_wrapper with the real ItemHandleRegistry and bag-source path.
+# Exercise the production remove operation through remove_item_wrapper and the real registry.
 add_executable(inventory_remove_wrapper_tests
     test_inventory_remove_wrapper.cpp
     ${CPP_DIR}/plugins/core.item/hooks/inventory_logging.cpp
     ${CPP_DIR}/plugins/core.item/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.item/usecases/consume_item.cpp
+    ${CPP_DIR}/game/ops/item_inventory_state_write.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
 )
 target_include_directories(inventory_remove_wrapper_tests PRIVATE
