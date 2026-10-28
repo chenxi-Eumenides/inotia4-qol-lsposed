@@ -131,6 +131,8 @@ int main() {
     QolItemHandle removal_checkpoint{};
     assert(lifecycle_table.begin_invalidation(&first_object, provider_a, &removal_checkpoint));
     assert(lifecycle_table.resolve_item(partial_consume, provider_a).error == ItemHandleError::kStale);
+    assert(lifecycle_table.register_item(&first_object, provider_a, &error).slot == 0);
+    assert(error == ItemHandleError::kTransition);
     assert(lifecycle_table.finish_invalidation(removal_checkpoint, false));
     assert(lifecycle_table.resolve_item(partial_consume, provider_a).item == &first_object);
 
@@ -143,6 +145,16 @@ int main() {
     assert(lifecycle_table.begin_lifecycle_transition());
     lifecycle_table.finish_lifecycle_transition(true);
     assert(lifecycle_table.resolve_item(partial_consume, provider_a).error == ItemHandleError::kStale);
+
+    ItemHandleRegistry committed_removal_table;
+    const QolItemHandle committed_removal =
+        committed_removal_table.register_item(&first_object, provider_a);
+    QolItemHandle committed_checkpoint{};
+    assert(committed_removal_table.begin_invalidation(&first_object, provider_a,
+                                                     &committed_checkpoint));
+    assert(committed_removal_table.finish_invalidation(committed_checkpoint, true));
+    assert(committed_removal_table.resolve_item(committed_removal, provider_a).error ==
+           ItemHandleError::kStale);
 
     ItemHandleRegistry save_reload_table;
     const QolItemHandle native_slot_item = save_reload_table.register_item(

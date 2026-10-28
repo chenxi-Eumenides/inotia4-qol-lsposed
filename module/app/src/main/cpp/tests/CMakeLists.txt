@@ -259,6 +259,30 @@ target_include_directories(stage4_hook_tests PRIVATE
 target_compile_features(stage4_hook_tests PRIVATE cxx_std_17)
 add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 
+# Exercise the production remove_item_wrapper with the real ItemHandleRegistry and bag-source path.
+add_executable(inventory_remove_wrapper_tests
+    test_inventory_remove_wrapper.cpp
+    ${CPP_DIR}/plugins/core.item/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.item/api/bag_source.cpp
+    ${CPP_DIR}/plugins/core.item/usecases/consume_item.cpp
+    ${CPP_DIR}/game/access/item_handle_registry.cpp
+)
+target_include_directories(inventory_remove_wrapper_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/stubs
+    ${CPP_DIR}
+    ${CPP_DIR}/game/read
+    ${CPP_DIR}/game/symbols
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(inventory_remove_wrapper_tests PRIVATE cxx_std_17)
+set_target_properties(inventory_remove_wrapper_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+target_compile_options(inventory_remove_wrapper_tests PRIVATE
+    -ffunction-sections -fdata-sections)
+target_link_options(inventory_remove_wrapper_tests PRIVATE -Wl,--gc-sections)
+target_link_libraries(inventory_remove_wrapper_tests PRIVATE Threads::Threads)
+add_test(NAME inventory_remove_wrapper_tests COMMAND inventory_remove_wrapper_tests)
+
 # Compile the production inventory hook translation unit independently. It is intentionally not
 # linked into stage4_hook_tests, whose scope remains the pure stage-4 logic.
 add_library(inventory_hook_native_compile OBJECT

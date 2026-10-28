@@ -364,6 +364,7 @@ InvenRemoveItemDataFn g_backup_remove_item_data = nullptr;
 
 std::atomic<uint64_t> g_consume_item_calls{0};
 std::atomic<uint64_t> g_remove_item_calls{0};
+std::atomic<uint64_t> g_remove_item_trace_calls{0};
 std::atomic<uint64_t> g_shortcut_trace_calls{0};
 
 thread_local bool g_in_have_item = false;
@@ -371,6 +372,11 @@ thread_local bool g_in_get_item_count = false;
 thread_local bool g_in_consume_item = false;
 thread_local bool g_in_unequip_item_to_inven = false;
 thread_local bool g_in_remove_item = false;
+struct RemoveItemCallFrame {
+    void* item = nullptr;
+    RemoveItemCallFrame* previous = nullptr;
+};
+thread_local RemoveItemCallFrame* g_remove_item_call_top = nullptr;
 thread_local int g_save_item_depth = 0;
 thread_local int g_save_item_direct_fail_count = 0;
 thread_local std::vector<void*> g_pending_eb_items;
@@ -380,6 +386,33 @@ thread_local bool g_in_equip_destroy_button = false;
 thread_local bool g_has_vanilla_sell_preview_context = false;
 thread_local qol::contracts::QolItemDetailContext g_vanilla_sell_preview_context{};
 thread_local int g_refresh_depth = 0;
+
+class RemoveItemIdentityGuard {
+public:
+    explicit RemoveItemIdentityGuard(void* item) {
+        for (RemoveItemCallFrame* frame = g_remove_item_call_top;
+             frame != nullptr; frame = frame->previous) {
+            if (frame->item == item) return;
+        }
+        frame_.item = item;
+        frame_.previous = g_remove_item_call_top;
+        g_remove_item_call_top = &frame_;
+        entered_ = true;
+    }
+
+    ~RemoveItemIdentityGuard() {
+        if (entered_) g_remove_item_call_top = frame_.previous;
+    }
+
+    RemoveItemIdentityGuard(const RemoveItemIdentityGuard&) = delete;
+    RemoveItemIdentityGuard& operator=(const RemoveItemIdentityGuard&) = delete;
+
+    bool entered() const { return entered_; }
+
+private:
+    RemoveItemCallFrame frame_{};
+    bool entered_ = false;
+};
 
 void backup_missing(const char* hook_id) {
     QOL_LOG_ERROR(QolDomain::kInventory, "hook=%s backup missing",
@@ -947,11 +980,32 @@ void consume_item_wrapper(void* item) {
 }
 
 int remove_item_wrapper(void* item) {
+    const RemoveItemIdentityGuard identity_guard(item);
+    if (!identity_guard.entered()) return 0;
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_RemoveItem"});
-    if (!inventory_native_hook_support_enabled())
-        return call_backup("hook:INVEN_RemoveItem", g_backup_remove_item, item);
+    const bool trace_enabled = inventory_log_debug_enabled();
+    const uint64_t trace_call = trace_enabled
+                                    ? g_remove_item_trace_calls.fetch_add(
+                                          1, std::memory_order_relaxed) + 1
+                                    : 0;
+    const bool recursive = g_in_remove_item;
+    const auto log_remove_call = [&](const char* dispatch, const char* branch, int result) {
+        if (!trace_enabled) return;
+        inventory_log_write(0, __FILE__, __LINE__,
+                            "INVEN_RemoveItem call=%llu item=%p recursive=%d backup=%p "
+                            "dispatch=%s branch=%s result=%d",
+                            static_cast<unsigned long long>(trace_call),
+                            item, recursive ? 1 : 0,
+                            reinterpret_cast<void*>(g_backup_remove_item), dispatch, branch,
+                            result);
+    };
+    if (!inventory_native_hook_support_enabled()) {
+        const int result = call_backup("hook:INVEN_RemoveItem", g_backup_remove_item, item);
+        log_remove_call("native", "support_disabled", result);
+        return result;
+    }
     const uint64_t call = g_remove_item_calls.fetch_add(1, std::memory_order_relaxed) + 1;
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                             "RemoveItem every_calls=60 call=%llu item=%p recursive=%d backup=%p",
@@ -960,19 +1014,28 @@ int remove_item_wrapper(void* item) {
                         reinterpret_cast<void*>(g_backup_remove_item));
     if (g_backup_remove_item == nullptr) {
         backup_missing("hook:INVEN_RemoveItem");
+        log_remove_call("native", "backup_missing", 0);
         return 0;
     }
     qol::contracts::QolInventoryItemRef source_ref{};
     const auto* source = source_for_hook_item(item, &source_ref);
     if (source != nullptr) {
-        if (source->remove == nullptr || source_ref.count <= 0) return 0;
+        if (source->remove == nullptr || source_ref.count <= 0) {
+            log_remove_call("source", "invalid_source_item", 0);
+            return 0;
+        }
         qol::contracts::QolBagMutationResult mutation{};
-        return qol::contracts::succeeded(
-                   source->remove(source_ref.item, source_ref.count, &mutation))
-                   ? 1
-                   : 0;
+        const int result = qol::contracts::succeeded(
+                               source->remove(source_ref.item, source_ref.count, &mutation))
+                               ? 1
+                               : 0;
+        log_remove_call("source", "remove", result);
+        return result;
     }
-    return stage4_remove_item(item, nullptr, nullptr, g_backup_remove_item, g_in_remove_item);
+    const int result =
+        stage4_remove_item(item, nullptr, nullptr, g_backup_remove_item, g_in_remove_item);
+    log_remove_call("native", "stage4", result);
+    return result;
 }
 
 constexpr int32_t kNativeStackLimit = 126;
