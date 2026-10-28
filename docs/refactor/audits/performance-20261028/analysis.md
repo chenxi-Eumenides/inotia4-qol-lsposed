@@ -232,7 +232,9 @@ Batch C 不解决：背包页剩余 22.5% 的 `control_item_get_item` / `valid_c
 | autosell 扫描子树 | ~13.6% | **约 3%** | C2 生效；`inventory_for_each_space_slot` 3.0%、`native_bag_layout` 2.9% |
 | `world_idle` p50 帧间隔 | 47.7ms | 47.7ms | 仍受 20fps/vsync 上限约束 |
 
-最终包：`output/inotia4_qol_lsposed_debug_2610281451_952cd1e735d8.apk`，SHA-256 `952cd1e735d89f40f91255b3292312131f25ca906ece9624569816e152121fd9`；已安装 C18L 集成包并重启游戏（pid 11696），设备缓存模块 SHA 与 APK 一致。
+最终包：`output/inotia4_qol_lsposed_debug_2610281520_c3931ef1005b.apk`，SHA-256 `c3931ef1005bf80bd4615e7779b727d13d79258a3074d398fcb2b4bd6a18296e`；已安装 C18L 集成包并重启游戏（pid 12788），设备缓存模块 SHA 与 APK 一致。
+
+收尾清理提交 `5793cc99 refactor: 去重页签 ensure 门控与重复校验`：抽出 `core/tab_ensure_gate.h` 供背包/商店/合成三处复用；`FeatureReconciler::step` 的 pending work 只计算一次；物品槽位缓存重建不再重复校验。行为不变，未改其他性能项。
 
 **状态：后续性能优化（Batch D）暂停，不再实施。** 本文件保留已完成的采样、根因、方案和验证记录，供后续恢复时使用。
 
