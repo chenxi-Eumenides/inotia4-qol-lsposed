@@ -22,6 +22,7 @@
 #include "contracts/module_save_port.h"
 #include "contracts/popup_enter_alias.h"
 #include "plugins/extension_bag/core/geometry.h"
+#include "plugins/extension_bag/core/tab_ensure_gate.h"
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/core/game_ui_port.h"
 #include "plugins/extension_bag/model/store_sell_rules.h"
@@ -363,31 +364,16 @@ void install_extension_tab_buttons_locked() {
     if (!extension_bag_ui_child_count(bag_container, &bag_child_count) || bag_child_count < 6) return;
     // 每帧完整 ensure 的成本主要在控件遍历/校验；root、子控件数和 inventory
     // generation 未变时每 10 帧做一次存活校验即可，其余帧只保留绘制路径。
-    static void* s_last_root = nullptr;
-    static int s_last_child_count = -1;
-    static uint64_t s_last_generation = 0;
-    static uint32_t s_tick = 0;
     const uint64_t generation = qol::extension_bag::ui_state().ui.inventory_generation;
-    const bool unchanged = s_last_root == bag_container && s_last_child_count == bag_child_count &&
-                           s_last_generation == generation;
-    if (unchanged && (++s_tick % 10) != 0) {
-        // 跳过完整 ensure，但仍逐个证明已挂载页签存活；任一失效立即回到完整路径。
-        const int active = virtual_bag::active_extension_bags();
-        const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
-                                ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
-        bool alive = true;
-        for (int index = 0; index < visible; ++index) {
-            void* button = qol::extension_bag::ui_state().ui.extension_tab_buttons[index];
-            if (button != nullptr && extension_bag_ui_user_type(button) < 0) {
-                alive = false;
-                break;
-            }
-        }
-        if (alive) return;
+    const int active = virtual_bag::active_extension_bags();
+    const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                            ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+    static qol::features::extension_bag::TabEnsureGate s_gate;
+    if (qol::features::extension_bag::tab_ensure_can_skip(
+            s_gate, bag_container, bag_child_count, generation,
+            qol::extension_bag::ui_state().ui.extension_tab_buttons.data(), visible)) {
+        return;
     }
-    s_last_root = bag_container;
-    s_last_child_count = bag_child_count;
-    s_last_generation = generation;
     const auto* components = extension_bag_ui_components();
     if (components == nullptr) return;
     refresh_tab_bag_items_locked();

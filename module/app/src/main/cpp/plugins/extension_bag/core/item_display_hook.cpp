@@ -127,7 +127,7 @@ bool projection_item_for_control(void* control, void** out_item) {
             }
             for (int candidate = 0; candidate < virtual_bag::kSlotCount; ++candidate) {
                 if (cache.controls[candidate] != control) continue;
-                if (valid_child_locked(root, candidate) == control) slot = candidate;
+                slot = candidate;
                 break;
             }
         }

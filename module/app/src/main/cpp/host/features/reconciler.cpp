@@ -159,6 +159,7 @@ uint32_t FeatureReconciler::step() {
 
     bool pending = false;
     bool toggles_dirty = false;
+    bool pending_work = false;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         const uint64_t capability_revision = infra::capability_revision();
@@ -167,7 +168,7 @@ uint32_t FeatureReconciler::step() {
             last_capability_revision_ = capability_revision;
             dependency_dirty_ = true;
         }
-        const bool pending_work = feature_registry_has_pending_work();
+        pending_work = feature_registry_has_pending_work();
         if (had_pending_work_ && !pending_work) {
             // 在途生命周期事务刚排空：下一帧重算一次依赖边，但不 bump retry batch，
             // 避免失败插件在每次事务排空后被无限重试。
@@ -180,12 +181,11 @@ uint32_t FeatureReconciler::step() {
     // 无配置/依赖/entry 变化、无在途生命周期事务时，正常帧不应重跑整张插件图。
     // 每 300 次空闲 step 强制全量一次，作为漏标记的兜底；首次 step 必须全量。
     const bool force_full = !initialized_ || idle_steps_ >= 300 || activation_retry_ > 0;
-    if (!force_full && !pending && !full_step_pending_ && !toggles_dirty &&
-        !feature_registry_has_pending_work()) {
+    if (!force_full && !pending && !full_step_pending_ && !toggles_dirty && !pending_work) {
         ++idle_steps_;
         return 0;
     }
-    if (!force_full && !pending && !full_step_pending_ && !feature_registry_has_pending_work()) {
+    if (!force_full && !pending && !full_step_pending_ && !pending_work) {
         // 只有 toggle 投递待处理（例如 revision 已应用但回调尚未送达）。
         notify_toggles();
         std::lock_guard<std::mutex> lock(mutex_);
