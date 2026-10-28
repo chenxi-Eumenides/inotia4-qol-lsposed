@@ -85,6 +85,8 @@ raw state 保留原版袋 `0..5`，其后接 C18 展示段；注册来源段由 
 
 原生空间内移动使用 Host 的原生移动入口，不调用注册源 transfer callback。原版与 C18 之间，以及 Native 与注册源之间，转移会组合原生 serialize/load/place 与袋源 export/import/remove。相同注册空间的搬动也经来源 transfer 原语处理；该路径在 `usecases/item_action.cpp`。跨空间编排由 `usecases/move_item.cpp` 负责，原生/来源 transport 分别维护自己的 payload 转换。
 
+这里的 `core.item` transfer journal 是跨空间 move 的恢复记录，不是扩展背包 provider 的 sidecar/pending 事务。`extension_bag/runtime/state_load.cpp::persist_state_locked()` 当前恒返回 `true`，仅表示内存 mutation acceptance，不是 durability acknowledgement；扩展袋 sidecar 的 durable staging 通过 `core.save` 的 `save.slot_data` capture/complete 流程完成。因此 `api/bag_source.cpp` 中 `persist_state_locked()==false` 时的 import/remove 回滚分支是当前不可达的潜伏分支，不代表现存的真实 store failure。provider 可达的 free/materialize rollback 仍须由 failure tests 覆盖；当前 Host 测试映射见下表。
+
 ## 跨空间转移实现与恢复
 
 ### 执行次序与补偿
@@ -107,11 +109,11 @@ export 或 import 失败会清 journal；source remove 失败时尝试删除目�
 | header | 固定 6 字节：`uint16_t magic`、`uint16_t format_version`、`uint16_t count`。 |
 | record | 固定 72 字节，最多 8 条；布局由静态断言锁定。 |
 | 字段 | 16 字节 id、state 与 reserved、source/target 的 space/bag/slot、category、count、对齐字段、`uint64_t payload_hash`、时间戳。 |
-| state | `0=intent`、`1=target_written`；intent 在导出前写，目标导入后写 target_written。 |
+| state | `0=intent`、`1=target_written`；intent 在导出前写，目标导入后尝试写入 target_written（结果不向上返回）。 |
 | payload hash | 对 payload 计算 64 位 FNV-1a；journal 不存 payload 本体。 |
 | 满或 intent 无法持久化 | 已有 8 条，或存档槽可用但 intent 写入失败时，新的跨空间 move blocked，不执行物品修改。 |
 
-`mark_target_written()` 的 store write 结果不会向上返回，因此记录状态未必反映目标写入结果；journal 不是强一致事务。
+`mark_target_written()` 会先更新内存记录，再丢弃 `write_records()` 的结果。当前测试矩阵覆盖 marker 写失败、intent reload/reconcile 与 source remove 失败后的目标补偿。marker 写失败本身没有被证明导致数据不一致：reconcile 当前不看 journal state，而是检查 source/target 两端的 item presence 并据此处理。marker 状态更新的可见性/耐久策略仍待 Gate 裁定；是否要求 marker 写失败阻止 move 也留待后续 Gate 产品策略裁定，此处不作要求。
 
 ### 启动 reconcile 与降级
 
@@ -165,7 +167,7 @@ Shop 使用 `shop/` 内独立 snapshot 与 epoch；inventory 写入和读取不�
 | 合并端口 bag 范围含 5 | `inventory.action` 与 transfer 排除任务袋 `(0,5)`，但独立 merge port 当前检查范围为 `0..5`，未明确排除 5；不能由 action 层规则推断 hook 已排除任务袋。 |
 | C18 缓存 key 不含所有袋表项 | 表项变化但 key 不变时需显式失效；当前失效入口没有调用点。 |
 | Journal 保存边界 | reconcile 失败不阻止存档；无 save slot 时只有内存记录。不得将 journal 描述为强制保存锁。 |
-| Journal 状态写入 | `mark_target_written()` 写失败结果未上报，reconcile 也不区分状态，恢复并非强一致事务。 |
+| Journal marker 策略 | `mark_target_written()` 丢弃 marker 写结果；reconcile 按两端 item presence 收敛。状态更新可见性/耐久策略及 marker 失败是否阻止 move 待后续 Gate 裁定；现有测试不证明 marker 写失败导致数据不一致。 |
 | 注册源原子性 | 来源 callback 若失败时部分修改 sidecar，core.item 无法可靠推断或修复；来源必须满足 export 只读及失败不变式。 |
 | 分页与注册顺序 | 注册顺序或翻页期间库存变化可能导致重复/跳过；扁平袋号不是持久身份。 |
 | 容量没有全局上限 | 大容量来源应实现枚举；逐槽 fallback 成本随容量增长。 |
@@ -177,7 +179,9 @@ Shop 使用 `shop/` 内独立 snapshot 与 epoch；inventory 写入和读取不�
 | descriptor、能力、端口、feature 与路由 metadata | `tests/test_item_facts_plugin.cpp`、`tests/test_item_facts_dispatch.cpp` |
 | 查询分页、raw inventory、HTTP 写校验与结果 | `tests/test_item_facts_dispatch.cpp` |
 | 动作出售、扣款与回滚 | `tests/test_inventory_action_sell.cpp`、`tests/test_inventory_trade_sell.cpp` |
-| HTTP 移动与注册源路径 | `tests/test_item_facts_dispatch.cpp`；当前无独立 transfer journal 测试文件。 |
+| HTTP 移动与注册源路径 | `tests/test_item_facts_dispatch.cpp`。 |
+| 跨空间 transfer journal：marker 写失败、intent reload/reconcile、source remove 失败补偿 | `tests/test_item_transfer_journal.cpp`（`item_transfer_journal_tests`；Host-only，非真机验收）。 |
+| 袋源 mutation free/materialize rollback | `tests/test_extension_bag_bag_source_mutation.cpp`（`extension_bag_bag_source_mutation_tests`；Host-only，非真机验收；failure tests 覆盖 provider 可达的 free 拒绝与 materialize 失败回滚，不使 persist-false 潜伏分支可达）。 |
 | 袋映射、句柄身份 | `tests/test_bag_catalog.cpp`、`tests/test_item_handle_registry.cpp`、`tests/test_item_handle_custody.cpp`、`tests/check_item_handle_contracts.cmake` |
 | hook 与拖拽合并 wrapper | `tests/test_inventory_hook_stage4.cpp`、`tests/test_move_merge_plugin.cpp` |
 | 静态资源与 HTTP route contract | `scripts/maintenance/check_arch.py`、`scripts/maintenance/check_http_routes.py` |
