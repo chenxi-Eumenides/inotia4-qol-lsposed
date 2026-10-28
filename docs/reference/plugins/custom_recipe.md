@@ -33,8 +33,8 @@
 | 面 | 当前声明 |
 |---|---|
 | `provides` | 无。结果 API `result::CraftResultApi` 只在插件内部由 UI 子层调用。 |
-| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0（`plugin.cpp:308-321`）。 |
-| `optional_requires` | `attribute.quality` v2.0；缺失/失效只置 degraded，仅影响升阶路径（`plugin.cpp:302-307`）。 |
+| `requires` | `item.facts` v3.6、`craft.facts` v1.0、`save.facts` v1.1、`text_layer` v1.0、`inventory.action` v3.2、`inventory.slot` v1.0（`plugin.cpp:359-378`）。 |
+| `optional_requires` | `attribute.quality` v2.0、`inventory.bag_source` v1.2；缺失/失效只置 degraded，前者只影响升阶路径，后者使扩展袋物品的扣料回退原版类别入口（`plugin.cpp:351-357`）。 |
 | `ports` | 三条（`plugin.cpp:324-334`）：`QOL_PORT_CUSTOM_RECIPE_WRITE` v1.3、`QOL_PORT_CRAFT_UI_WRITE` v1.1、`QOL_PORT_RECIPE_TABLE` v1.0。 |
 | `resources` | 13 条：5 条核心 UI hook（required/fail-closed）+ 7 条装饰 UI hook（optional/fail-soft）+ 1 条 `own:RECIPEBASE_MIXTUREBASE`（required/fail-soft）。顺序即释放逆序，ownership 最后声明、最先释放。 |
 | `jni` / HTTP | 均为 0（`plugin.cpp:359-377`）。 |
@@ -166,7 +166,7 @@ UIMix 控件。
 |---|---|---|
 | 1 precheck：pending/token/generation、live handle/类别/可堆叠/持有数、扣料入口就绪 | `kStaleSlots` / `kPrecheckFailed` / `kNotEnoughHeld` | 否 |
 | 2 产物准备（未入包）：`create_perfect_item` 或 `create_item` 并改写 | `kProductPrepareFailed` | 否 |
-| 3 扣料：原版 inventory entry（可堆叠 `remove_item_data`、不可堆叠 `remove_item`）+ 数量前后差观察 | `kMaterialRemoveFailed` / `kMaterialObservationFailed` | **是，可能** |
+| 3 扣料：按填入槽 `inventory.action.discard` 扣该槽物品 1 个单位（句柄经 `inventory.slot.view` 定位，扩展袋物品经 `inventory.bag_source` 定位）；不可定位时可堆叠回退原版 `remove_item_data`（R-56 扩展袋补扣）、不可堆叠回退按句柄 `remove_item` + 数量前后差观察 | `kMaterialRemoveFailed` / `kMaterialObservationFailed` | **是，可能** |
 | 4 保存：`save_item` 且 `out_saved & 0xff != 0` | `kProductSaveFailed` | 是 |
 
 前置校验全部在任何扣料之前；产物在扣料前准备、失败即丢弃。扣料后的失败**不回滚**，提示
@@ -338,9 +338,11 @@ optional/fail-soft（失败只 degraded）。`UIMix_ResetStuffItemControl` 保�
 
 ## 13. 已知限制
 
-- 三格流程继续调用受 inventory hooks 管理的原版入口，因此保留 H-03（物理+扩展类别总数）、
-  H-05（对象删除）、H-13（保存）、H-21（类别补扣）的扩展背包支持；条件是对应 hook `live`、
-  EB capability 可用且 enabled，不限制为物理袋。
+- 扣料先经 `inventory.action.discard` 扣填入槽自身 1 个单位（`inventory.slot.view` 定位原生袋，
+  `inventory.bag_source` 按句柄定位扩展袋物品）；填入堆已耗尽或句柄落在无法还原成袋引用的空间
+  （任务袋、bag_source 缺失/无 identify 的注册源）时回退原版入口，因此仍保留 H-03
+  （物理+扩展类别总数）、H-05（对象删除）、H-13（保存）、H-21（类别补扣）的扩展背包支持；
+  条件是对应 hook `live`、EB capability 可用且 enabled，不限制为物理袋。
 - 升阶的 Game-owner 写入限制与三格流程分开核验，仍为待核项，不作为三格拒绝 EB 的理由。
 - 装备升阶路径当前只有 Host 测试与 Debug 构建证据；装备产物继承原生词条、词条值写回后的
   显示/属性重算后果未做真机验收。

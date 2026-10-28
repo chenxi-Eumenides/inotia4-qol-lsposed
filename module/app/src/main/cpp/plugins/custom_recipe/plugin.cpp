@@ -4,11 +4,14 @@
 #include <cstring>
 
 #include "../../contracts/attribute_quality.h"
+#include "../../contracts/bag.h"
 #include "../../contracts/craft_commands.h"
 #include "../../contracts/craft_facts.h"
 #include "../../contracts/game_ports/craft_ui_write_port.h"
 #include "../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../contracts/game_ports/recipe_table_port.h"
+#include "../../contracts/inventory_action.h"
+#include "../../contracts/inventory_slot.h"
 #include "../../contracts/item_facts.h"
 #include "../../contracts/save_facts.h"
 #include "../../contracts/text_layer.h"
@@ -199,6 +202,43 @@ int plugin_install(contracts::PluginContext& ctx) {
     const auto* save_facts = static_cast<const contracts::SaveFactsApi*>(iface);
     if (save_facts->current_slot == nullptr || save_facts->slot_times == nullptr) return 1;
 
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kInventoryActionCapabilityId,
+            {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor},
+            &iface)) ||
+        iface == nullptr ||
+        !contracts::inventory_action_api_valid(
+            static_cast<const contracts::InventoryActionApi*>(iface))) {
+        return 1;
+    }
+    const auto* inventory_action = static_cast<const contracts::InventoryActionApi*>(iface);
+
+    iface = nullptr;
+    if (!contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kInventorySlotCapabilityId,
+            {contracts::kInventorySlotVersion.major, contracts::kInventorySlotVersion.minor},
+            &iface)) ||
+        iface == nullptr) {
+        return 1;
+    }
+    const auto* inventory_slot = static_cast<const contracts::QolInventorySlotApi*>(iface);
+    if (inventory_slot->view == nullptr) return 1;
+
+    // 可选：扩展背包物品按句柄定位要枚举注册袋源；缺失时该类物品回退原版类别入口。
+    const contracts::QolBagSourceRegistryApi* bag_source_registry = nullptr;
+    iface = nullptr;
+    if (contracts::succeeded(ctx.sdk->capabilities.require(
+            contracts::kBagSourceCapabilityId,
+            {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}, &iface)) &&
+        iface != nullptr) {
+        const auto* registry = static_cast<const contracts::QolBagSourceRegistryApi*>(iface);
+        if (registry->struct_size >= sizeof(contracts::QolBagSourceRegistryApi) &&
+            registry->source_count != nullptr && registry->source_at != nullptr) {
+            bag_source_registry = registry;
+        }
+    }
+
     // 通过校验后开始登记；任何中途失败立即幂等清理本次注册，不依赖 Host 后帧清理。
     const uint64_t text_consumer =
         text_api->subscribe(kTextPhaseAfter, kTextKindModify, &recipe_text_modify, nullptr);
@@ -234,6 +274,9 @@ int plugin_install(contracts::PluginContext& ctx) {
     set_craft_facts(craft_facts);
     set_save_facts(save_facts);
     set_write_port(recipe_write_port);
+    set_inventory_action(inventory_action);
+    set_inventory_slot(inventory_slot);
+    set_bag_source_registry(bag_source_registry);
     ::custom_recipe::table_bind_port(table_port);
     set_context(ctx);
     // 进档重建动态特殊装备配方；订阅经 Host SDK 事件总线完成。
@@ -261,6 +304,9 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     set_craft_facts(nullptr);
     set_save_facts(nullptr);
     set_write_port(nullptr);
+    set_inventory_action(nullptr);
+    set_inventory_slot(nullptr);
+    set_bag_source_registry(nullptr);
     ::custom_recipe::custom_recipe_table_deactivate();
     ::custom_recipe::table_bind_port(nullptr);
 }
@@ -300,11 +346,14 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     return ui::on_resource_ready(ctx, resource_id, backup);
 }
 
-// optional_requires=[attribute.quality]：可选依赖缺失/失效只置 degraded，不级联停用。
+// optional_requires=[attribute.quality, inventory.bag_source]：可选依赖缺失/失效只置 degraded，
+// 不级联停用。bag_source 缺失时扩展背包物品的扣料回退原版类别入口。
 const contracts::CapabilityRequirement kOptionalRequires[] = {
     {contracts::kAttributeQualityCapabilityId,
      QolVersionRange{static_cast<uint16_t>(contracts::kAttributeQualityVersionMajor),
                      static_cast<uint16_t>(contracts::kAttributeQualityVersionMinor)}},
+    {contracts::kBagSourceCapabilityId,
+     {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
 };
 
 const contracts::CapabilityRequirement kRequires[] = {
@@ -319,6 +368,12 @@ const contracts::CapabilityRequirement kRequires[] = {
     {contracts::kTextLayerCapabilityId,
      {static_cast<uint16_t>(contracts::kTextLayerVersionMajor),
       static_cast<uint16_t>(contracts::kTextLayerVersionMinor)}},
+    // 每格材料按填入槽扣减（discard）由 core.item 的 inventory.action 承担；
+    // handle → 显式袋引用由同一 owner 的 inventory.slot 定位（注册袋源见 optional 依赖）。
+    {contracts::kInventoryActionCapabilityId,
+     {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor}},
+    {contracts::kInventorySlotCapabilityId,
+     {contracts::kInventorySlotVersion.major, contracts::kInventorySlotVersion.minor}},
 };
 
 // 两条写端口 + 一条表槽位端口：custom recipe 结果/材料写面、UIMix 控件写面、RECIPEBASE/
@@ -361,8 +416,9 @@ const contracts::PluginDescriptor& plugin_descriptor() {
     static const contracts::PluginDescriptor descriptor = {
         kPluginId,
         kPluginVersion,
-        4, kRequires,             // requires=item.facts + craft.facts + save.facts + text_layer
-        1, kOptionalRequires,    // optional_requires=[attribute.quality]
+        6, kRequires,  // requires=item.facts + craft.facts + save.facts + text_layer +
+                       //           inventory.action + inventory.slot
+        2, kOptionalRequires,    // optional_requires=[attribute.quality, inventory.bag_source]
         0, nullptr,              // provides=无（craft_result 内部化）
         claim_table.count, claim_table.items,  // resources=12 UI hooks + ownership
         0, nullptr,              // jni

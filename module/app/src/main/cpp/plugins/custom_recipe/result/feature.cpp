@@ -38,6 +38,9 @@ const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 const contracts::SaveFactsApi* g_save_facts = nullptr;
 const contracts::QolCustomRecipeWritePort* g_write_port = nullptr;
+const contracts::InventoryActionApi* g_inventory_action = nullptr;
+const contracts::QolInventorySlotApi* g_inventory_slot = nullptr;
+const contracts::QolBagSourceRegistryApi* g_bag_source_registry = nullptr;
 uint64_t g_save_enter_subscription = 0;
 bool valid_craft_item(qol::contracts::QolItemHandle item) {
     return item.slot != 0 && item.generation != 0;
@@ -102,6 +105,16 @@ void set_craft_facts(const contracts::CraftFactsApi* facts) { g_craft_facts = fa
 void set_save_facts(const contracts::SaveFactsApi* facts) { g_save_facts = facts; }
 
 void set_write_port(const contracts::QolCustomRecipeWritePort* port) { g_write_port = port; }
+
+void set_inventory_action(const contracts::InventoryActionApi* api) {
+    g_inventory_action = api;
+}
+
+void set_inventory_slot(const contracts::QolInventorySlotApi* api) { g_inventory_slot = api; }
+
+void set_bag_source_registry(const contracts::QolBagSourceRegistryApi* api) {
+    g_bag_source_registry = api;
+}
 
 void log_message(int32_t level, const char* format, ...) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
@@ -658,12 +671,123 @@ QolResult read_live_category_count(uint16_t category, int32_t* out_count) {
     return contracts::ok();
 }
 
+int32_t inventory_action_status_code(contracts::InventoryActionStatus status) {
+    switch (status) {
+        case contracts::InventoryActionStatus::kOk:
+            return kQolOk;
+        case contracts::InventoryActionStatus::kNotInWorld:
+            return kQolErrNotReady;
+        case contracts::InventoryActionStatus::kInvalidRef:
+            return kQolErrInvalidArgument;
+        case contracts::InventoryActionStatus::kStale:
+        case contracts::InventoryActionStatus::kEmpty:
+            return kQolErrNotFound;
+        case contracts::InventoryActionStatus::kTaskBagExcluded:
+        case contracts::InventoryActionStatus::kUnsupported:
+            return kQolErrUnsupported;
+        case contracts::InventoryActionStatus::kConflict:
+            return kQolErrConflict;
+        case contracts::InventoryActionStatus::kFull:
+            return kQolErrBlocked;
+        default:
+            return kQolErrInternal;
+    }
+}
+
+// 注册袋源（扩展背包）物品的 view 袋号是「原版 + 改版 + 各注册源」串联后的展示键，
+// 不含空间身份，无法当成 QolActionRef；这里按句柄在注册源内定位，拿到显式 space/bag/slot。
+bool locate_registered_action_ref(contracts::QolItemHandle item,
+                                  contracts::QolActionRef* out_ref) {
+    if (out_ref == nullptr || g_bag_source_registry == nullptr ||
+        g_bag_source_registry->source_count == nullptr ||
+        g_bag_source_registry->source_at == nullptr) {
+        return false;
+    }
+    const uint32_t source_count = g_bag_source_registry->source_count();
+    for (uint32_t index = 0; index < source_count; ++index) {
+        const contracts::QolBagSource* source = nullptr;
+        if (!contracts::succeeded(g_bag_source_registry->source_at(index, &source)) ||
+            source == nullptr || source->item_at == nullptr) {
+            continue;
+        }
+        // identify 是可选原语：命中后仍用 item_at 复核句柄，避免把过期定位当成结果。
+        if (source->identify != nullptr) {
+            contracts::QolBagRef ref{};
+            int32_t slot = -1;
+            if (contracts::succeeded(source->identify(item, &ref, &slot)) &&
+                ref.space_id == source->space_id && ref.bag >= 0 && slot >= 0) {
+                contracts::QolInventoryItemRef located{};
+                if (contracts::succeeded(source->item_at(ref.bag, slot, &located)) &&
+                    same_item_handle(located.item, item)) {
+                    *out_ref = {source->space_id, ref.bag, slot};
+                    return true;
+                }
+            }
+        }
+        if (source->count == nullptr || source->info == nullptr) continue;
+        const int32_t bag_count = source->count();
+        if (bag_count < 0) continue;
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            contracts::QolBagInfo info{};
+            if (!contracts::succeeded(source->info(bag, &info)) || info.capacity < 0) continue;
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                contracts::QolInventoryItemRef located{};
+                if (!contracts::succeeded(source->item_at(bag, slot, &located))) continue;
+                if (!same_item_handle(located.item, item)) continue;
+                *out_ref = {source->space_id, bag, slot};
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// handle → 显式袋引用。inventory.slot 的 view 按扁平袋号上报位置：原版空间固定 6 袋
+// （item_port.h kQolOriginalBagCount），因此扁平袋号 < 6 属原版空间，其余原生物品属改版
+// 空间且袋号需减去该偏移。扩展袋物品按句柄在注册源内定位（见上）。
+bool locate_material_action_ref(contracts::QolItemHandle item, contracts::QolActionRef* out_ref) {
+    if (out_ref == nullptr || g_inventory_slot == nullptr || g_inventory_slot->view == nullptr) {
+        return false;
+    }
+    contracts::QolInventorySlotView view{};
+    view.struct_size = sizeof(view);
+    if (!contracts::succeeded(g_inventory_slot->view(item, &view))) return false;
+    if (view.item.slot != item.slot || view.item.generation != item.generation) return false;
+    if (view.bag < 0 || view.slot < 0) return false;
+    if (view.kind == static_cast<uint32_t>(contracts::QolInventoryItemKind::kProvider)) {
+        return locate_registered_action_ref(item, out_ref);
+    }
+    if (view.kind != static_cast<uint32_t>(contracts::QolInventoryItemKind::kOriginal)) return false;
+    contracts::QolActionRef ref{contracts::kQolBagSpaceOriginal, view.bag, view.slot};
+    if (view.bag >= contracts::kQolOriginalBagCount) {
+        ref.space_id = contracts::kQolBagSpaceVariant;
+        ref.bag = view.bag - contracts::kQolOriginalBagCount;
+    }
+    if (ref.bag < 0) return false;
+    // inventory.action 明确拒绝任务袋，而原版类别入口遍历袋 0..5；保留下沉路径而不是新增失败。
+    if (ref.space_id == contracts::kQolBagSpaceOriginal && ref.bag == contracts::kQolTaskBagIndex) {
+        return false;
+    }
+    *out_ref = ref;
+    return true;
+}
+
 void log_execute_stage(int32_t level, const char* stage, uint32_t index,
                        int32_t result, int32_t before, int32_t after) {
     if (level == 0 && g_verify_log_budget.fetch_sub(1) <= 0) return;
     log_message(level,
                 "three slot execute stage=%s index=%u result=%d before=%d after=%d",
                 stage, index, result, before, after);
+}
+
+// 扣料成功行：stage 名与字段顺序与 log_execute_stage 一致，追加 path 区分句柄锚定扣减
+// （discard）、原版类别回退（category_fallback）与不可堆叠单件删除（remove_item）。
+void log_material_remove(uint32_t index, const char* path, int32_t before, int32_t after) {
+    if (g_verify_log_budget.fetch_sub(1) <= 0) return;
+    log_message(0,
+                "three slot execute stage=material_remove index=%u result=%d before=%d "
+                "after=%d path=%s",
+                index, kQolOk, before, after, path);
 }
 
 void discard_uncommitted_product(qol::contracts::QolItemHandle product,
@@ -1094,13 +1218,22 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
         }
         category_for_slot[i] = static_cast<uint8_t>(category_index);
         ++category_plans[category_index].units;
+        // 两个分支都先按填入堆扣减（discard）；原版入口只是回退口，因此两者都要就绪。
+        if (g_inventory_action == nullptr || g_inventory_action->discard == nullptr ||
+            g_inventory_slot == nullptr || g_inventory_slot->view == nullptr) {
+            log_execute_stage(2, "precheck_remove_ready", static_cast<uint32_t>(i),
+                              kQolErrNotReady, 0, 0);
+            return CraftExecuteResult::kPrecheckFailed;
+        }
         if (stackable[i]) {
+            // 可堆叠材料的回退口是原版类别入口（扩展袋补扣只在那里）。
             if (g_game == nullptr || g_game->inventory_write.remove_item_data == nullptr) {
                 log_execute_stage(2, "precheck_remove_ready", static_cast<uint32_t>(i),
                                   kQolErrNotReady, 0, 0);
                 return CraftExecuteResult::kPrecheckFailed;
             }
         } else {
+            // 不可堆叠材料的回退口是按句柄删除：句柄失效即失败，绝不按类别扣同类。
             if (g_game == nullptr || g_game->inventory_write.remove_item == nullptr) {
                 log_execute_stage(2, "precheck_remove_ready", static_cast<uint32_t>(i),
                                   kQolErrNotReady, 0, 0);
@@ -1216,14 +1349,39 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
         }
     }
 
-    // 仍经原版 inventory entry 扣料，以保留 H-03/H-05/H-21 的扩展背包路径。
+    // 每格优先扣填入的那一堆：类别删除永远命中袋序第一堆，会把玩家填入的堆留下。
+    // discard 带显式 space/bag/slot（由句柄定位），因此扣的是填入堆自身；两种堆叠形态同路。
+    // 仅在填入堆已耗尽（句柄失效/堆已删除，连续合成的后续次数即如此）或物品不在 action
+    // 可表示的空间时回退原版入口：可堆叠走类别删除（扩展袋补扣 H-21/R-56 只在那里，不能
+    // 用枚举+discard 重写），不可堆叠走按句柄删除——句柄失效即失败，绝不按类别扣同类。
     for (size_t i = 0; i < kThreeSlotStuffCount; ++i) {
         if (!valid_craft_item(items[i])) continue;
         CategoryPlan& category_plan = category_plans[category_for_slot[i]];
         const int32_t before = category_plan.current_count;
-        const QolResult removed = stackable[i]
-            ? g_game->inventory_write.remove_item_data(categories[i], 1)
-            : g_game->inventory_write.remove_item(items[i]);
+        contracts::QolActionRef ref{};
+        bool used_discard = false;
+        bool action_attempted = false;
+        QolResult removed = contracts::ok();
+        if (locate_material_action_ref(items[i], &ref)) {
+            action_attempted = true;
+            const contracts::InventoryUseOutcome discard = g_inventory_action->discard(ref, 1);
+            if (discard.status == contracts::InventoryActionStatus::kOk &&
+                discard.consumed_count == 1) {
+                used_discard = true;
+            } else {
+                // 定位成功但扣减失败：不降级到类别扫描（那会扣到另一堆），直接按失败处理。
+                removed = recipe_error(
+                    discard.status == contracts::InventoryActionStatus::kOk
+                        ? kQolErrInternal
+                        : inventory_action_status_code(discard.status),
+                    "material discard failed");
+            }
+        }
+        if (!used_discard && !action_attempted) {
+            removed = stackable[i]
+                ? g_game->inventory_write.remove_item_data(categories[i], 1)
+                : g_game->inventory_write.remove_item(items[i]);
+        }
         int32_t after = -1;
         const QolResult observed = read_live_category_count(categories[i], &after);
         if (removed.ok != kQolOk) {
@@ -1249,7 +1407,10 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
             return CraftExecuteResult::kMaterialObservationFailed;
         }
         category_plan.current_count = after;
-        log_execute_stage(0, "material_remove", static_cast<uint32_t>(i), kQolOk, before, after);
+        log_material_remove(static_cast<uint32_t>(i),
+                            used_discard ? "discard"
+                                         : (stackable[i] ? "category_fallback" : "remove_item"),
+                            before, after);
     }
 
     // save_item may consume/rebind the handle; never free or inspect it after this call.

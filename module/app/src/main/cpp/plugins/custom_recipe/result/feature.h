@@ -1,10 +1,13 @@
 #pragma once
 
+#include "../../../contracts/bag.h"
 #include "../../../contracts/craft_commands.h"
 #include "../../../contracts/craft_facts.h"
 #include "../../../contracts/game_host.h"
 #include "../../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../../contracts/host_sdk.h"
+#include "../../../contracts/inventory_action.h"
+#include "../../../contracts/inventory_slot.h"
 #include "../../../contracts/ownership.h"
 #include "../../../contracts/item_facts.h"
 #include "../../../contracts/save_facts.h"
@@ -29,6 +32,12 @@ void set_item_facts(const contracts::ItemFactsApi* facts);
 void set_craft_facts(const contracts::CraftFactsApi* facts);
 void set_save_facts(const contracts::SaveFactsApi* facts);
 void set_write_port(const contracts::QolCustomRecipeWritePort* port);
+// 扣料的句柄锚定入口与 handle→袋引用定位：descriptor 里均为 required，缺失时 execute 在
+// 前置阶段直接拒绝（原版入口只是回退口，不是缺失时的替代方案）。
+void set_inventory_action(const contracts::InventoryActionApi* api);
+void set_inventory_slot(const contracts::QolInventorySlotApi* api);
+// 注册袋源（扩展背包）物品的 handle→袋引用定位面；缺失时该类物品回退原版类别入口。
+void set_bag_source_registry(const contracts::QolBagSourceRegistryApi* api);
 const contracts::QolHostSdk* host_sdk();
 const contracts::QolGameHost* game_host();
 void log_message(int32_t level, const char* format, ...);

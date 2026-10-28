@@ -16,6 +16,8 @@
 #include "contracts/attribute_quality.h"
 #include "contracts/craft_commands.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
+#include "contracts/inventory_action.h"
+#include "contracts/inventory_slot.h"
 #include "contracts/plugin.h"
 #include "plugins/custom_recipe/model/catalog.h"
 #include "plugins/custom_recipe/model/result.h"
@@ -35,6 +37,8 @@ constexpr QolItemHandle kScrollArmor{14, 6};   // 类别 25（可堆叠）
 constexpr QolItemHandle kEquipAlpha{15, 7};    // 类别 485（不可堆叠）
 constexpr QolItemHandle kEquipBeta{16, 8};     // 类别 485（不可堆叠）
 constexpr QolItemHandle kPotion{17, 9};        // 类别 14（可堆叠）
+constexpr QolItemHandle kLowJewelA{18, 10};    // 类别 28（可堆叠，同类别第二堆）
+constexpr QolItemHandle kLowJewelB{19, 11};    // 类别 28（可堆叠，同类别第三堆）
 constexpr QolItemHandle kProduct{50, 8};
 
 QolResult ok() { return qol::contracts::ok(); }
@@ -53,6 +57,7 @@ constexpr ItemFact kItemFacts[] = {
     {kMaterialA, 35, true},  {kMaterialB, 41, true},   {kJewel, 28, true},
     {kScrollWeapon, 20, true}, {kScrollArmor, 25, true}, {kEquipAlpha, 485, false},
     {kEquipBeta, 485, false}, {kPotion, 14, true},
+    {kLowJewelA, 28, true}, {kLowJewelB, 28, true},
 };
 
 const ItemFact* find_fact(QolItemHandle item) {
@@ -306,6 +311,168 @@ QolResult remove_item_data(int32_t category, int32_t) {
     return ok();
 }
 
+// ---- inventory.slot / inventory.action / inventory.bag_source 替身 ----
+// view 只上报扁平袋号（与 production 的 port_bag 一致）；默认没有可定位堆，
+// 因此默认扣料走原版类别回退，既有断言保持不变。
+struct SlotLocation {
+    QolItemHandle item;
+    int32_t kind;
+    int32_t space_id;
+    int32_t bag;
+    int32_t slot;
+    int32_t category;
+    int32_t count;
+};
+
+constexpr int32_t kProviderSpaceId = 2;
+
+SlotLocation g_locations[8]{};
+int g_location_count = 0;
+int g_slot_view_calls = 0;
+int g_discard_calls = 0;
+QolActionRef g_discard_refs[8]{};
+int32_t g_discard_counts[8]{};
+InventoryActionStatus g_discard_status = InventoryActionStatus::kOk;
+
+void add_location(QolItemHandle item, int32_t kind, int32_t flat_bag, int32_t slot) {
+    if (g_location_count >= 8) return;
+    const ItemFact* fact = find_fact(item);
+    SlotLocation& location = g_locations[g_location_count++];
+    location.item = item;
+    location.kind = kind;
+    location.space_id = kind == static_cast<int32_t>(QolInventoryItemKind::kProvider)
+                            ? kProviderSpaceId
+                            : (flat_bag < kQolOriginalBagCount ? kQolBagSpaceOriginal
+                                                               : kQolBagSpaceVariant);
+    location.bag = (location.space_id == kQolBagSpaceVariant || location.space_id == kProviderSpaceId)
+                       ? flat_bag - kQolOriginalBagCount
+                       : flat_bag;
+    location.slot = slot;
+    location.category = fact != nullptr ? fact->category : 0;
+    location.count = held_of(location.category);
+}
+
+// 注册袋源物品：空间固定为 kProviderSpaceId，袋号是空间内索引。
+void add_provider_location(QolItemHandle item, int32_t bag, int32_t slot) {
+    if (g_location_count >= 8) return;
+    const ItemFact* fact = find_fact(item);
+    SlotLocation& location = g_locations[g_location_count++];
+    location.item = item;
+    location.kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
+    location.space_id = kProviderSpaceId;
+    location.bag = bag;
+    location.slot = slot;
+    location.category = fact != nullptr ? fact->category : 0;
+    location.count = held_of(location.category);
+}
+
+int32_t flat_bag_of_location(const SlotLocation& location) {
+    if (location.space_id == kQolBagSpaceOriginal) return location.bag;
+    if (location.space_id == kQolBagSpaceVariant) return kQolOriginalBagCount + location.bag;
+    // 注册源的展示袋号是串联键，production 不据此定位；只要求非负。
+    return 100 + location.bag;
+}
+
+QolResult slot_view(QolItemHandle item, QolInventorySlotView* out) {
+    ++g_slot_view_calls;
+    if (out == nullptr || out->struct_size < sizeof(*out)) return fail(kQolErrInvalidArgument);
+    for (int i = 0; i < g_location_count; ++i) {
+        if (!same(g_locations[i].item, item)) continue;
+        *out = QolInventorySlotView{};
+        out->struct_size = sizeof(*out);
+        out->item = g_locations[i].item;
+        out->kind = static_cast<uint32_t>(g_locations[i].kind);
+        out->bag = flat_bag_of_location(g_locations[i]);
+        out->slot = g_locations[i].slot;
+        out->category = g_locations[i].category;
+        out->count = g_locations[i].count;
+        return ok();
+    }
+    // 与 production 一致：句柄失效/堆耗尽都报 conflict。
+    return fail(kQolErrConflict);
+}
+
+InventoryUseOutcome discard(QolActionRef ref, int32_t count) {
+    InventoryUseOutcome outcome{InventoryActionStatus::kInvalidRef, 0};
+    if (g_discard_calls < 8) {
+        g_discard_refs[g_discard_calls] = ref;
+        g_discard_counts[g_discard_calls] = count;
+    }
+    ++g_discard_calls;
+    if (g_discard_status != InventoryActionStatus::kOk) {
+        outcome.status = g_discard_status;
+        return outcome;
+    }
+    for (int i = 0; i < g_location_count; ++i) {
+        if (g_locations[i].space_id != ref.space_id || g_locations[i].bag != ref.bag ||
+            g_locations[i].slot != ref.slot) {
+            continue;
+        }
+        g_locations[i].count -= count;
+        add_held(g_locations[i].category, -count);
+        if (g_locations[i].count <= 0) {
+            g_locations[i] = g_locations[--g_location_count];
+        }
+        outcome.status = InventoryActionStatus::kOk;
+        outcome.consumed_count = count;
+        return outcome;
+    }
+    outcome.status = InventoryActionStatus::kStale;
+    return outcome;
+}
+
+// inventory.bag_source：单注册源（space 2），identify 缺省 → 走 handle 扫描路径。
+int32_t provider_bag_count() { return 1; }
+QolResult provider_info(int32_t bag, QolBagInfo* out) {
+    if (out == nullptr || bag < 0 || bag >= provider_bag_count()) {
+        return fail(kQolErrInvalidArgument);
+    }
+    *out = QolBagInfo{16, 0};
+    return ok();
+}
+QolResult provider_item_at(int32_t bag, int32_t slot, QolInventoryItemRef* out) {
+    if (out == nullptr) return fail(kQolErrInvalidArgument);
+    for (int i = 0; i < g_location_count; ++i) {
+        const SlotLocation& location = g_locations[i];
+        if (location.space_id != kProviderSpaceId || location.bag != bag ||
+            location.slot != slot) {
+            continue;
+        }
+        *out = QolInventoryItemRef{};
+        out->kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
+        out->bag = bag;
+        out->slot = slot;
+        out->category = location.category;
+        out->count = location.count;
+        out->item = location.item;
+        out->space_id = kProviderSpaceId;
+        return ok();
+    }
+    return fail(kQolErrNotFound);
+}
+QolResult provider_for_each(QolInventoryBagSlotFn, void*) { return ok(); }
+QolResult provider_export(QolItemHandle, int32_t, QolBagTransfer*) {
+    return fail(kQolErrUnsupported);
+}
+QolResult provider_import(const QolBagTransfer*, int32_t, int32_t, QolBagMutationResult*) {
+    return fail(kQolErrUnsupported);
+}
+QolResult provider_remove(QolItemHandle, int32_t, QolBagMutationResult*) {
+    return fail(kQolErrUnsupported);
+}
+const QolBagSource kProviderSource{kBagSourceVersion, kProviderSpaceId, &provider_bag_count,
+                                   &provider_info, &provider_item_at, &provider_for_each,
+                                   &provider_export, &provider_import, &provider_remove,
+                                   nullptr, nullptr};
+QolResult bag_source_register(const QolBagSource*) { return fail(kQolErrUnsupported); }
+QolResult bag_source_unregister(int32_t) { return fail(kQolErrUnsupported); }
+uint32_t bag_source_count() { return 1; }
+QolResult bag_source_at(uint32_t index, const QolBagSource** out_source) {
+    if (out_source == nullptr || index != 0) return fail(kQolErrNotFound);
+    *out_source = &kProviderSource;
+    return ok();
+}
+
 QolResult create_perfect_item(int32_t, QolItemHandle* out) {
     ++g_create_calls;
     g_create_sequence = ++g_sequence;
@@ -475,6 +642,9 @@ int g_table_deactivate_calls = 0;
 // ---- 全局 fixture ----
 ItemFactsApi g_item_facts{};
 CraftFactsApi g_craft_facts{};
+InventoryActionApi g_inventory_action{};
+QolInventorySlotApi g_inventory_slot{};
+QolBagSourceRegistryApi g_bag_source_registry{};
 QolGameHost g_game{};
 QolHostSdk g_sdk{};
 QolCustomRecipeWritePort g_write_port{};
@@ -529,9 +699,15 @@ const QolItemHandle kScaleRecipe[3] = {kJewel, kScrollWeapon, kScrollArmor};
 const QolItemHandle kFixedRecipe[3] = {kMaterialA, kInvalidItemHandle, kMaterialB};
 // 特殊装备拉满配方：两件同类特殊装备(485) + 元气恢复药水(14)。
 const QolItemHandle kSpecialRecipe[3] = {kEquipAlpha, kPotion, kEquipBeta};
+// 3 颗同级宝石(28) → 中一级：三格同类别，用于验证「扣填入的那一堆」。
+const QolItemHandle kThreeJewelRecipe[3] = {kLowJewelA, kLowJewelB, kJewel};
 
 void init_fixture() {
     reset_env();
+    g_location_count = 0;
+    g_slot_view_calls = 0;
+    g_discard_calls = 0;
+    g_discard_status = InventoryActionStatus::kOk;
 
     g_item_facts = ItemFactsApi{};
     g_item_facts.struct_size = sizeof(g_item_facts);
@@ -548,6 +724,23 @@ void init_fixture() {
     g_game = QolGameHost{};
     g_game.inventory_write.remove_item = &remove_item;
     g_game.inventory_write.remove_item_data = &remove_item_data;
+
+    g_inventory_action = InventoryActionApi{};
+    g_inventory_action.struct_size = static_cast<uint32_t>(sizeof(g_inventory_action));
+    g_inventory_action.version_major = kInventoryActionVersionMajor;
+    g_inventory_action.version_minor = kInventoryActionVersionMinor;
+    g_inventory_action.discard = &discard;
+
+    g_inventory_slot = QolInventorySlotApi{};
+    g_inventory_slot.struct_size = static_cast<uint32_t>(sizeof(g_inventory_slot));
+    g_inventory_slot.view = &slot_view;
+
+    g_bag_source_registry = QolBagSourceRegistryApi{};
+    g_bag_source_registry.struct_size = static_cast<uint32_t>(sizeof(g_bag_source_registry));
+    g_bag_source_registry.register_source = &bag_source_register;
+    g_bag_source_registry.unregister_source = &bag_source_unregister;
+    g_bag_source_registry.source_count = &bag_source_count;
+    g_bag_source_registry.source_at = &bag_source_at;
 
     g_sdk = QolHostSdk{};
     g_sdk.abi = {sizeof(g_sdk), kHostSdkMajor, kHostSdkMinor};
@@ -582,6 +775,9 @@ void init_fixture() {
     qol::features::custom_recipe::set_item_facts(&g_item_facts);
     qol::features::custom_recipe::set_craft_facts(&g_craft_facts);
     qol::features::custom_recipe::set_write_port(&g_write_port);
+    qol::features::custom_recipe::set_inventory_action(&g_inventory_action);
+    qol::features::custom_recipe::set_inventory_slot(&g_inventory_slot);
+    qol::features::custom_recipe::set_bag_source_registry(&g_bag_source_registry);
     qol::features::custom_recipe::set_enabled(true);
     custom_recipe::bind_base_record_count(69);
 }
@@ -723,12 +919,14 @@ void test_material_remove_failures() {
         assert(g_free_calls == 1);                             // 未入包产物被清理
     }
 
-    // 不可堆叠槽位的 remove_item 失败（特殊装备配方第 0 格）。
+    // 不可堆叠槽位的 remove_item 失败（特殊装备配方第 0 格）：句柄失效即失败，绝不按类别扣同类。
     init_fixture();
     assert(prepare_three_slots(kSpecialRecipe));
     g_remove_item_fail_slot = 0;
+    const int32_t held_equip_before = held_of(485);
     assert(execute_three_slots(kSpecialRecipe) == CraftExecuteResult::kMaterialRemoveFailed);
     assert(g_save_calls == 0 && g_remove_item_calls == 0 && g_remove_item_data_calls == 0);
+    assert(held_of(485) == held_equip_before);
 
     // 计数不变（观察不符）→ kMaterialObservationFailed，不 save。
     init_fixture();
@@ -759,6 +957,155 @@ void test_material_remove_failures() {
     add_held(28, -1);  // 额外少 1 → after == before - 2
     assert(execute_three_slots(kScaleRecipe) == CraftExecuteResult::kMaterialObservationFailed);
     assert(g_save_calls == 0);
+}
+
+// ---------------------------------------------------------------------------
+// 扣料路径：可堆叠优先扣填入堆（inventory.action discard），回退走原版类别入口
+// ---------------------------------------------------------------------------
+void test_stackable_material_discards_filled_stack() {
+    init_fixture();
+    // kMaterialA 在改版空间第 1 袋第 3 格（view 上报扁平袋号 7）；
+    // kMaterialB 在原版空间第 0 袋第 2 格。
+    add_location(kMaterialA, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 7, 3);
+    add_location(kMaterialB, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 2);
+    assert(prepare_three_slots(kFixedRecipe));
+    const int32_t held_before = held_of(35);
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 2);
+    assert(g_remove_item_data_calls == 0 && g_remove_item_calls == 0);
+    // 扣减落在填入堆的显式袋引用上，而不是袋序第一堆。
+    assert(g_discard_refs[0].space_id == kQolBagSpaceVariant && g_discard_refs[0].bag == 1 &&
+           g_discard_refs[0].slot == 3);
+    assert(g_discard_refs[1].space_id == kQolBagSpaceOriginal && g_discard_refs[1].bag == 0 &&
+           g_discard_refs[1].slot == 2);
+    assert(g_discard_counts[0] == 1 && g_discard_counts[1] == 1);
+    assert(held_of(35) == held_before - 1 && g_save_calls == 1);
+    // 仍保留数量前后差观察；两堆尚未扣空，定位记录继续存在。
+    assert(g_location_count == 2);
+}
+
+// 同类别多堆：扣的是填入那一堆，不是袋序扫描的第一堆。
+void test_same_category_stacks_consume_filled_stack() {
+    init_fixture();
+    add_location(kLowJewelA, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 0);
+    add_location(kLowJewelB, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 5);
+    add_location(kJewel, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 1, 4);
+    assert(prepare_three_slots(kThreeJewelRecipe));
+    const int32_t held_before = held_of(28);
+    assert(execute_three_slots(kThreeJewelRecipe) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 3 && g_remove_item_data_calls == 0 && g_remove_item_calls == 0);
+    // 第 2 格填入的是同袋后槽的那一堆：类别删除会先命中槽 0，这里必须命中槽 5。
+    assert(g_discard_refs[0].space_id == kQolBagSpaceOriginal && g_discard_refs[0].bag == 0 &&
+           g_discard_refs[0].slot == 0);
+    assert(g_discard_refs[1].space_id == kQolBagSpaceOriginal && g_discard_refs[1].bag == 0 &&
+           g_discard_refs[1].slot == 5);
+    assert(g_discard_refs[2].space_id == kQolBagSpaceOriginal && g_discard_refs[2].bag == 1 &&
+           g_discard_refs[2].slot == 4);
+    assert(held_of(28) == held_before - 3 && g_save_calls == 1);
+}
+
+// 同一堆填了两格且只剩 1 件：第一格扣空后第二格回退原版类别入口补扣一次。
+void test_exhausted_filled_stack_falls_back_to_category() {
+    init_fixture();
+    add_location(kLowJewelA, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 2);
+    g_locations[0].count = 1;  // 该堆只剩 1 件
+    add_location(kLowJewelB, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 6);
+    const QolItemHandle repeated[3] = {kLowJewelA, kLowJewelA, kLowJewelB};
+    assert(prepare_three_slots(repeated));
+    const int32_t held_before = held_of(28);
+    assert(execute_three_slots(repeated) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 2 && g_remove_item_data_calls == 1);
+    // 第 1 格：填入堆自身（槽 2）。第 2 格：该堆已扣空 → 类别回退。第 3 格：另一堆（槽 6）。
+    assert(g_discard_refs[0].space_id == kQolBagSpaceOriginal && g_discard_refs[0].bag == 0 &&
+           g_discard_refs[0].slot == 2);
+    assert(g_discard_refs[1].space_id == kQolBagSpaceOriginal && g_discard_refs[1].bag == 0 &&
+           g_discard_refs[1].slot == 6);
+    assert(held_of(28) == held_before - 3 && g_save_calls == 1);
+}
+
+void test_material_fallback_when_filled_stack_exhausted() {
+    // 第 1 格填入堆只有 1 件：扣空后句柄失效，第 2 格 view 已找不到 → 回退恰好一次。
+    init_fixture();
+    add_location(kMaterialA, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 1);
+    g_locations[0].count = 1;
+    assert(prepare_three_slots(kFixedRecipe));
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 1 && g_remove_item_data_calls == 1);
+    assert(g_slot_view_calls == 2);
+
+    // 全部无法定位（连续合成的后续次数）：每格各回退一次原版类别入口。
+    init_fixture();
+    assert(prepare_three_slots(kFixedRecipe));
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
+    assert(g_slot_view_calls == 2 && g_discard_calls == 0 && g_remove_item_data_calls == 2);
+}
+
+void test_material_discard_failure_aborts_and_cleans_product() {
+    init_fixture();
+    add_location(kMaterialA, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 4);
+    assert(prepare_three_slots(kFixedRecipe));
+    g_discard_status = InventoryActionStatus::kConflict;
+    const int32_t held_before = held_of(35);
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kMaterialRemoveFailed);
+    // discard 失败不再回退类别入口：直接终止，产物清理，后续格不再扣。
+    assert(g_discard_calls == 1 && g_remove_item_data_calls == 0 && g_remove_item_calls == 0);
+    assert(g_save_calls == 0 && g_free_calls == 1 && same(g_freed, kProduct));
+    assert(held_of(35) == held_before);
+}
+
+void test_non_stackable_material_still_removes_by_handle() {
+    init_fixture();
+    assert(prepare_three_slots(kSpecialRecipe));
+    assert(execute_three_slots(kSpecialRecipe) == CraftExecuteResult::kOk);
+    // 两件不可堆叠装备仍按句柄删除；药水可堆叠但无定位信息 → 原版类别入口。
+    assert(g_remove_item_calls == 2);
+    assert(same(g_removed[0], kEquipAlpha) && same(g_removed[1], kEquipBeta));
+    assert(g_remove_item_data_calls == 1 && g_discard_calls == 0);
+}
+
+void test_unlocatable_material_falls_back_to_vanilla_entry() {
+    // 注册袋源（扩展背包）物品按句柄定位后同样走 discard：view 的展示袋号不含空间身份，
+    // 由 bag_source 枚举还原显式 space/bag/slot。
+    init_fixture();
+    add_provider_location(kMaterialA, 0, 5);
+    assert(prepare_three_slots(kFixedRecipe));
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 1 && g_remove_item_data_calls == 1);
+    assert(g_discard_refs[0].space_id == kProviderSpaceId && g_discard_refs[0].bag == 0 &&
+           g_discard_refs[0].slot == 5);
+    // 第二格 kMaterialB 无定位信息 → 原版类别入口。
+    assert(g_slot_view_calls == 2);
+
+    // 注册袋源能力缺失（可选依赖 degraded）：扩展袋物品回退原版类别入口，功能不中断。
+    init_fixture();
+    add_provider_location(kMaterialA, 0, 5);
+    qol::features::custom_recipe::set_bag_source_registry(nullptr);
+    assert(prepare_three_slots(kFixedRecipe));
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 0 && g_remove_item_data_calls == 2);
+
+    // 原版任务袋（扁平袋号 5）被 inventory.action 拒绝，同样回退。
+    init_fixture();
+    add_location(kMaterialA, static_cast<int32_t>(QolInventoryItemKind::kOriginal),
+                 kQolTaskBagIndex, 0);
+    assert(prepare_three_slots(kFixedRecipe));
+    assert(execute_three_slots(kFixedRecipe) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 0 && g_remove_item_data_calls == 2);
+}
+
+// 不可堆叠材料同样优先按句柄定位扣减；定位失败才回退按句柄删除（绝不按类别扣同类）。
+void test_non_stackable_material_discards_filled_slot() {
+    init_fixture();
+    add_location(kEquipAlpha, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 1);
+    add_location(kEquipBeta, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 2, 3);
+    assert(prepare_three_slots(kSpecialRecipe));
+    assert(execute_three_slots(kSpecialRecipe) == CraftExecuteResult::kOk);
+    assert(g_discard_calls == 2 && g_remove_item_calls == 0 && g_remove_item_data_calls == 1);
+    assert(g_discard_refs[0].space_id == kQolBagSpaceOriginal && g_discard_refs[0].bag == 0 &&
+           g_discard_refs[0].slot == 1);
+    assert(g_discard_refs[1].space_id == kQolBagSpaceOriginal && g_discard_refs[1].bag == 2 &&
+           g_discard_refs[1].slot == 3);
+    assert(g_location_count == 2);  // 两处定位仍在（各自堆未必只有 1 件）
 }
 
 // ---------------------------------------------------------------------------
@@ -1239,6 +1586,14 @@ int main() {
     test_precheck_failures_do_not_consume();
     test_product_prepare_failure_no_consumption();
     test_material_remove_failures();
+    test_stackable_material_discards_filled_stack();
+    test_same_category_stacks_consume_filled_stack();
+    test_exhausted_filled_stack_falls_back_to_category();
+    test_material_fallback_when_filled_stack_exhausted();
+    test_material_discard_failure_aborts_and_cleans_product();
+    test_non_stackable_material_still_removes_by_handle();
+    test_unlocatable_material_falls_back_to_vanilla_entry();
+    test_non_stackable_material_discards_filled_slot();
     test_save_failure_no_double_free();
     test_pending_invalidation();
     test_craft_gate_unavailable_vs_not_jewel();

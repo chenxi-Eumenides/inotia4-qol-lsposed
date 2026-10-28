@@ -31,11 +31,14 @@
 #include <thread>
 
 #include "contracts/attribute_quality.h"
+#include "contracts/bag.h"
 #include "contracts/craft_facts.h"
 #include "contracts/craft_commands.h"
 #include "contracts/game_host.h"
 #include "contracts/game_ports/craft_ui_write_port.h"
 #include "contracts/game_ports/custom_recipe_write_port.h"
+#include "contracts/inventory_action.h"
+#include "contracts/inventory_slot.h"
 #include "contracts/item_facts.h"
 #include "contracts/plugin.h"
 #include "contracts/save_facts.h"
@@ -189,6 +192,40 @@ QolResult fake_item_type(QolItemHandle handle, QolItemType* out_type) {
 const ItemFactsApi kItemFactsApi{sizeof(ItemFactsApi), &fake_category, &fake_item_type,
                                  nullptr, nullptr, nullptr, nullptr, nullptr,
                                  nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+
+// 生产扣料面：fixture 只用 discard/view 的「未就绪」形态（能力齐备但物品不可定位）。
+InventoryMoveOutcome fake_move(QolActionRef, int32_t, QolActionRef target) {
+    return {InventoryActionStatus::kUnsupported, 0, 0, target, kInvalidItemHandle};
+}
+InventoryUseOutcome fake_use(QolActionRef) {
+    return {InventoryActionStatus::kUnsupported, 0};
+}
+InventoryUseOutcome fake_discard(QolActionRef, int32_t) {
+    return {InventoryActionStatus::kUnsupported, 0};
+}
+InventorySellResult fake_sell(QolActionRef, QolItemHandle, int32_t, const char*) {
+    return {InventorySellStatus::kSymbolsUnresolved, 0, 0, 0};
+}
+InventoryUseOutcome fake_equip(int32_t, QolActionRef, int32_t) {
+    return {InventoryActionStatus::kUnsupported, 0};
+}
+InventoryUseOutcome fake_unequip(int32_t, int32_t) {
+    return {InventoryActionStatus::kUnsupported, 0};
+}
+InventoryUseOutcome fake_put_jewel(int32_t, QolActionRef, int32_t) {
+    return {InventoryActionStatus::kUnsupported, 0};
+}
+const InventoryActionApi kInventoryActionApi{
+    sizeof(InventoryActionApi), kInventoryActionVersionMajor, kInventoryActionVersionMinor,
+    &fake_move, &fake_use, &fake_discard, &fake_sell, &fake_equip, &fake_unequip,
+    &fake_put_jewel};
+
+QolResult fake_slot_view(QolItemHandle, QolInventorySlotView* out) {
+    if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
+    return qol::contracts::error(kQolErrConflict, "unlocatable", 11);
+}
+const QolInventorySlotApi kInventorySlotApi{sizeof(QolInventorySlotApi), nullptr,
+                                            &fake_slot_view, nullptr};
 
 QolResult fake_mix_type(uint32_t* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
@@ -550,6 +587,13 @@ const CapabilityProvisionRef kTextLayerProvides[] = {
 const CapabilityProvisionRef kAttributeQualityProvides[] = {
     {kAttributeQualityCapabilityId,
      {kAttributeQualityVersionMajor, kAttributeQualityVersionMinor}, &kAttributeQualityApi}};
+// 扣料原语：custom_recipe 的 required 依赖，由 core.item 提供。
+const CapabilityProvisionRef kInventoryActionProvides[] = {
+    {kInventoryActionCapabilityId,
+     {kInventoryActionVersionMajor, kInventoryActionVersionMinor}, &kInventoryActionApi}};
+const CapabilityProvisionRef kInventorySlotProvides[] = {
+    {kInventorySlotCapabilityId,
+     {kInventorySlotVersion.major, kInventorySlotVersion.minor}, &kInventorySlotApi}};
 QolResult fake_current_slot(int32_t* out) {
     if (out == nullptr) return qol::contracts::error(kQolErrInvalidArgument, nullptr, 0);
     *out = 0;
@@ -568,6 +612,25 @@ const SaveFactsApi kSaveFactsApi{nullptr, nullptr, nullptr, nullptr, nullptr, nu
 const CapabilityProvisionRef kSaveFactsProvides[] = {
     {kSaveFactsCapabilityId, {kSaveFactsVersionMajor, kSaveFactsVersionMinor}, &kSaveFactsApi}};
 
+// inventory.bag_source 替身：本 fixture 只验证装配与生命周期，接口只需满足准入校验
+// （provider 由 core.item 承担，这里不产生副作用）。
+uint32_t fake_bag_source_count() { return 0; }
+QolResult fake_bag_source_at(uint32_t, const QolBagSource**) {
+    return qol::contracts::error(kQolErrNotFound, nullptr, 0);
+}
+QolResult fake_bag_source_register(const QolBagSource*) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+QolResult fake_bag_source_unregister(int32_t) {
+    return qol::contracts::error(kQolErrUnsupported, nullptr, 0);
+}
+const QolBagSourceRegistryApi kBagSourceRegistryApi{
+    sizeof(QolBagSourceRegistryApi), &fake_bag_source_register, &fake_bag_source_unregister,
+    &fake_bag_source_count, &fake_bag_source_at};
+const CapabilityProvisionRef kBagSourceProvides[] = {
+    {kBagSourceCapabilityId, {kBagSourceVersion.major, kBagSourceVersion.minor},
+     &kBagSourceRegistryApi}};
+
 // 零 feature 插件被禁止注册：每个 provider 声明一个 Hidden/默认开启的常驻 feature。
 const FeatureDefinition kItemFactsFeatures[] = {
     {"item_facts.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle, "item.facts", "",
@@ -584,6 +647,15 @@ const FeatureDefinition kAttributeQualityFeatures[] = {
 const FeatureDefinition kSaveFactsFeatures[] = {
     {"save_facts.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
      "save.facts", "", &provider_toggle, nullptr}};
+const FeatureDefinition kInventoryActionFeatures[] = {
+    {"inventory_action.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
+     "inventory.action", "", &provider_toggle, nullptr}};
+const FeatureDefinition kInventorySlotFeatures[] = {
+    {"inventory_slot.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
+     "inventory.slot", "", &provider_toggle, nullptr}};
+const FeatureDefinition kBagSourceFeatures[] = {
+    {"bag_source.provider", 1, FeatureCategory::kHidden, FeatureType::kToggle,
+     "inventory.bag_source", "", &provider_toggle, nullptr}};
 
 PluginDescriptor provider_descriptor(const char* id, const CapabilityProvisionRef* provides,
                                      const FeatureDefinition* features) {
@@ -1167,13 +1239,19 @@ int main(int argc, char** argv) {
         "attribute_quality", kAttributeQualityProvides, kAttributeQualityFeatures);
     PluginDescriptor save_facts = provider_descriptor(
         "save_facts", kSaveFactsProvides, kSaveFactsFeatures);
+    PluginDescriptor inventory_action = provider_descriptor(
+        "inventory_action", kInventoryActionProvides, kInventoryActionFeatures);
+    PluginDescriptor inventory_slot = provider_descriptor(
+        "inventory_slot", kInventorySlotProvides, kInventorySlotFeatures);
+    PluginDescriptor bag_source = provider_descriptor(
+        "bag_source", kBagSourceProvides, kBagSourceFeatures);
     const PluginDescriptor& custom_recipe = qol::features::custom_recipe::plugin_descriptor();
 
     // ---- 单 descriptor 形状 ----
     assert(std::strcmp(custom_recipe.id, "custom_recipe") == 0);
     assert(custom_recipe.provides_count == 0 && custom_recipe.provides == nullptr);
-    assert(custom_recipe.requires_count == 4);
-    assert(custom_recipe.optional_count == 1);
+    assert(custom_recipe.requires_count == 6);
+    assert(custom_recipe.optional_count == 2);
     assert(custom_recipe.jni_count == 0);
     assert(custom_recipe.port_count == 3);
     assert(custom_recipe.ports[0].id == QolPortId::QOL_PORT_CUSTOM_RECIPE_WRITE);
@@ -1200,7 +1278,9 @@ int main(int argc, char** argv) {
     assert(!qol::features::custom_recipe::ownership_ready());
 
     for (const PluginDescriptor* provider : {&item_facts, &craft_facts, &text_layer,
-                                             &attribute_quality, &save_facts}) {
+                                             &attribute_quality, &save_facts,
+                                             &inventory_action, &inventory_slot,
+                                             &bag_source}) {
         assert(qol::host::register_plugin(*provider));
     }
     assert(qol::host::register_plugin(custom_recipe));
@@ -1208,7 +1288,9 @@ int main(int argc, char** argv) {
     qol::host::HostDeps deps{&resolve_symbol, &hook_symbol, &unhook_symbol};
     qol::host::FeatureDirectory directory;
     for (const PluginDescriptor* provider : {&item_facts, &craft_facts, &text_layer,
-                                             &attribute_quality, &save_facts}) {
+                                             &attribute_quality, &save_facts,
+                                             &inventory_action, &inventory_slot,
+                                             &bag_source}) {
         assert(directory.add(*provider).ok());
     }
     assert(directory.add(custom_recipe).ok());
