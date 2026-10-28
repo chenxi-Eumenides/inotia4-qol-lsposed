@@ -132,6 +132,19 @@ InventoryActionStatus validate_action_ref(const QolActionRef& ref) {
     return InventoryActionStatus::kOk;
 }
 
+InventoryActionStatus validate_move_target_ref(const QolActionRef& ref) {
+    if (ref.slot != -1) return validate_action_ref(ref);
+    if (ref.space_id < contracts::kQolBagSpaceOriginal ||
+        ref.space_id > contracts::kQolBagSpaceFirstRegistered || ref.bag < 0) {
+        return InventoryActionStatus::kInvalidRef;
+    }
+    if (ref.space_id == contracts::kQolBagSpaceOriginal &&
+        ref.bag == contracts::kQolTaskBagIndex) {
+        return InventoryActionStatus::kTaskBagExcluded;
+    }
+    return InventoryActionStatus::kOk;
+}
+
 bool target_occupied(const QolActionRef& ref) {
     QolInventoryItemRef item{};
     return contracts::succeeded(read_item(ref, &item)) && valid_handle(item.item);
@@ -145,16 +158,86 @@ InventoryActionStatus read_target_item(const QolActionRef& target, QolItemHandle
     return InventoryActionStatus::kOk;
 }
 
+InventoryActionStatus locate_mutation_target(const contracts::QolBagRef& bag,
+                                             QolItemHandle expected_item, int32_t* out_slot) {
+    if (out_slot == nullptr || !valid_handle(expected_item)) {
+        return InventoryActionStatus::kInternal;
+    }
+
+    const contracts::QolBagSource* source = nullptr;
+    const contracts::QolItemPort* port = nullptr;
+    contracts::QolBagInfo info{};
+    QolResult result{};
+    if (native_space(bag.space_id)) {
+        port = g_port;
+        if (port == nullptr || !contracts::qol_item_port_bag_space_size_valid(port) ||
+            port->read.bag_info == nullptr || port->read.item_at == nullptr) {
+            return InventoryActionStatus::kInternal;
+        }
+        result = port->read.bag_info(&bag, &info);
+    } else {
+        source = find_bag_source(bag.space_id);
+        if (source == nullptr || source->info == nullptr || source->item_at == nullptr) {
+            return InventoryActionStatus::kInternal;
+        }
+        result = source->info(bag.bag, &info);
+        if (!contracts::succeeded(result) || info.capacity < 0) {
+            return InventoryActionStatus::kInternal;
+        }
+        if (source->identify != nullptr) {
+            contracts::QolBagRef identified_bag{};
+            int32_t identified_slot = -1;
+            result = source->identify(expected_item, &identified_bag, &identified_slot);
+            if (!contracts::succeeded(result)) {
+                return result.code == kQolErrNotFound ? InventoryActionStatus::kStale
+                                                      : InventoryActionStatus::kInternal;
+            }
+            if (identified_bag.space_id != bag.space_id || identified_bag.bag != bag.bag ||
+                identified_slot < 0 || identified_slot >= info.capacity) {
+                return InventoryActionStatus::kStale;
+            }
+            QolInventoryItemRef item{};
+            result = source->item_at(bag.bag, identified_slot, &item);
+            if (!contracts::succeeded(result) || item.space_id != bag.space_id ||
+                item.bag != bag.bag || item.slot != identified_slot ||
+                item.item.slot != expected_item.slot ||
+                item.item.generation != expected_item.generation) {
+                return InventoryActionStatus::kStale;
+            }
+            *out_slot = identified_slot;
+            return InventoryActionStatus::kOk;
+        }
+    }
+    if (!contracts::succeeded(result) || info.capacity < 0) {
+        return InventoryActionStatus::kInternal;
+    }
+
+    for (int32_t slot = 0; slot < info.capacity; ++slot) {
+        QolInventoryItemRef item{};
+        result = native_space(bag.space_id) ? port->read.item_at(&bag, slot, &item)
+                                            : source->item_at(bag.bag, slot, &item);
+        if (result.code == kQolErrNotFound) continue;
+        if (!contracts::succeeded(result)) return InventoryActionStatus::kInternal;
+        if (item.item.slot != expected_item.slot ||
+            item.item.generation != expected_item.generation) {
+            continue;
+        }
+        if (item.space_id != bag.space_id || item.bag != bag.bag || item.slot != slot) {
+            return InventoryActionStatus::kStale;
+        }
+        *out_slot = slot;
+        return InventoryActionStatus::kOk;
+    }
+    return InventoryActionStatus::kStale;
+}
+
 contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolActionRef to) {
     contracts::InventoryMoveOutcome outcome{};
     outcome.status = InventoryActionStatus::kInvalidRef;
     outcome.target = to;
-    if (count <= 0 || validate_action_ref(from) == InventoryActionStatus::kInvalidRef ||
-        validate_action_ref(to) == InventoryActionStatus::kInvalidRef) {
-        return outcome;
-    }
+    if (count <= 0) return outcome;
     const InventoryActionStatus from_validation = validate_action_ref(from);
-    const InventoryActionStatus to_validation = validate_action_ref(to);
+    const InventoryActionStatus to_validation = validate_move_target_ref(to);
     if (from_validation != InventoryActionStatus::kOk) {
         outcome.status = from_validation;
         return outcome;
@@ -179,19 +262,24 @@ contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolAction
         outcome.status = InventoryActionStatus::kConflict;
         return outcome;
     }
+    const bool native_same_space_move = from.space_id == to.space_id && native_space(from.space_id);
+    if (native_same_space_move && to.slot == -1) {
+        // Native same-space moves require the host's explicit-slot operation.
+        outcome.status = InventoryActionStatus::kInvalidRef;
+        return outcome;
+    }
     const bool was_occupied = target_occupied(to);
     QolResult operation = contracts::ok();
     QolBagMutationResult target_result{};
 
-    if (from.space_id == to.space_id && native_space(from.space_id)) {
+    if (native_same_space_move) {
         if (g_item_state_write == nullptr || g_item_state_write->move_item == nullptr) {
             outcome.status = InventoryActionStatus::kInternal;
             return outcome;
         }
         contracts::QolItemInventoryStateWriteResult write_result{};
         operation = g_item_state_write->move_item(
-            native_bag_number(from), from.slot, count, native_bag_number(to), to.slot,
-            &write_result);
+            native_bag_number(from), from.slot, count, native_bag_number(to), to.slot, &write_result);
     } else if (from.space_id == to.space_id) {
         const contracts::QolBagSource* source = find_bag_source(from.space_id);
         if (source == nullptr || source->export_item == nullptr || source->import_item == nullptr ||
@@ -221,7 +309,7 @@ contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolAction
             return outcome;
         }
         if (!valid_handle(target_result.item) || target_result.ref.space_id != to.space_id ||
-            target_result.ref.bag != to.bag) {
+            target_result.ref.bag != to.bag || target_result.count != count) {
             outcome.status = InventoryActionStatus::kInternal;
             return outcome;
         }
@@ -252,8 +340,29 @@ contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolAction
     outcome.status = InventoryActionStatus::kOk;
     outcome.moved_count = count;
     outcome.merged = was_occupied ? 1u : 0u;
-    const InventoryActionStatus target_status = read_target_item(to, &outcome.target_item);
+    if (to.slot == -1) {
+        if (!valid_handle(target_result.item) || target_result.ref.space_id != to.space_id ||
+            target_result.ref.bag != to.bag || target_result.count != count) {
+            outcome.status = InventoryActionStatus::kInternal;
+            return outcome;
+        }
+        int32_t target_slot = -1;
+        const InventoryActionStatus locate_status =
+            locate_mutation_target(target_result.ref, target_result.item, &target_slot);
+        if (locate_status != InventoryActionStatus::kOk) {
+            outcome.status = locate_status;
+            return outcome;
+        }
+        outcome.target = {target_result.ref.space_id, target_result.ref.bag, target_slot};
+    }
+    const InventoryActionStatus target_status =
+        read_target_item(outcome.target, &outcome.target_item);
     if (target_status != InventoryActionStatus::kOk) outcome.status = target_status;
+    if (to.slot == -1 && outcome.status == InventoryActionStatus::kOk &&
+        (outcome.target_item.slot != target_result.item.slot ||
+         outcome.target_item.generation != target_result.item.generation)) {
+        outcome.status = InventoryActionStatus::kStale;
+    }
     request_inventory_refresh();
     return outcome;
 }

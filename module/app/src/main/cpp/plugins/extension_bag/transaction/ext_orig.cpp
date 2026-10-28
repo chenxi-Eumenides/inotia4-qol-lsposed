@@ -41,31 +41,6 @@ bool first_empty_extension_slot_locked(int bag, int* out_slot) {
     return false;
 }
 
-bool native_slot_empty_locked(int bag, int slot) {
-    const auto* facts = ::qol::extension_bag::access::host().item_facts;
-    if (facts == nullptr || facts->physical_item_at == nullptr) return false;
-    qol::contracts::QolItemHandle handle{};
-    const QolResult result = facts->physical_item_at(bag, slot, &handle);
-    if (result.code == kQolErrNotFound) return true;
-    if (!qol::contracts::succeeded(result)) return false;
-    return handle.slot == 0 || handle.generation == 0;
-}
-
-bool first_empty_native_slot_locked(int bag, int* out_slot) {
-    if (out_slot == nullptr) return false;
-    int32_t size = 0;
-    if (!native_bag_size_locked(bag, &size) || size <= 0) {
-        return false;
-    }
-    for (int slot = 0; slot < size && slot < virtual_bag::kSlotCount; ++slot) {
-        if (native_slot_empty_locked(bag, slot)) {
-            *out_slot = slot;
-            return true;
-        }
-    }
-    return false;
-}
-
 }  // namespace
 
 bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& lock, int src_bag,
@@ -145,9 +120,9 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
                      src_slot, target_bag);
         return false;
     }
+    int32_t target_size = 0;
     if (native_target) {
         const auto* game = ::qol::extension_bag::access::host().game;
-        int32_t target_size = 0;
         const bool candidate =
             game != nullptr && game->target.has_capability != nullptr &&
             game->target.has_capability(
@@ -160,6 +135,11 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
                          target_bag, candidate ? 1 : 0, target_size);
             return false;
         }
+    } else if (!native_bag_size_locked(target_bag, &target_size) || target_size <= 0) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "cross move reject extension->original target size unavailable=%d",
+                     target_bag);
+        return false;
     }
 
     void* item = module_item_locked(src_bag, src_slot);
@@ -174,13 +154,6 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
         virtual_bag_effective_count(item, static_cast<uint32_t>(descriptor.count)));
     if (count <= 0) return false;
 
-    int target_slot = -1;
-    if (!first_empty_native_slot_locked(target_bag, &target_slot)) {
-        QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "cross move reject extension->original target full=%d", target_bag);
-        return false;
-    }
-
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     if (action == nullptr) {
         QOL_LOG_ERROR(QolDomain::kExtensionBag,
@@ -191,20 +164,28 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
     lock.unlock();
     const auto outcome = action->move(
         {qol::features::extension_bag::kExtensionBagSpaceId, src_bag, src_slot}, count,
-        {native_space_for_bag(target_bag), native_bag_number(target_bag), target_slot});
+        {native_space_for_bag(target_bag), native_bag_number(target_bag), -1});
     lock.lock();
 
+    const bool target_valid =
+        outcome.target.space_id == native_space_for_bag(target_bag) &&
+        outcome.target.bag == native_bag_number(target_bag) && outcome.target.slot >= 0 &&
+        outcome.target.slot < target_size && outcome.target.slot < virtual_bag::kSlotCount &&
+        outcome.target_item.slot != 0 && outcome.target_item.generation != 0;
     if (outcome.status != qol::contracts::InventoryActionStatus::kOk ||
-        outcome.moved_count <= 0) {
+        outcome.moved_count <= 0 || !target_valid) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,
-                     "cross move rejected extension->original status=%d source=%d/%d target=%d/%d",
-                     static_cast<int>(outcome.status), src_bag, src_slot, target_bag, target_slot);
+                     "cross move rejected extension->original status=%d source=%d/%d "
+                     "target=%d ref=%d/%d/%d handle=%u/%u",
+                     static_cast<int>(outcome.status), src_bag, src_slot, target_bag,
+                     outcome.target.space_id, outcome.target.bag, outcome.target.slot,
+                     outcome.target_item.slot, outcome.target_item.generation);
         return false;
     }
     refresh_native_item_area_after_move_locked(target_bag);
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "cross move committed through inventory.action extension->original source=%d/%d "
                  "target=%d/%d count=%d",
-                 src_bag, src_slot, target_bag, target_slot, outcome.moved_count);
+                 src_bag, src_slot, target_bag, outcome.target.slot, outcome.moved_count);
     return true;
 }

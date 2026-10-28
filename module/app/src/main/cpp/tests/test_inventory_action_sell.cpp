@@ -49,6 +49,7 @@ int g_native_jewel_calls = 0;
 int g_last_write_bag = -1;
 int g_last_to_bag = -1;
 bool g_force_empty = false;
+bool g_invalid_import_ref = false;
 
 QolResult fail(int code, const char* message) {
     return error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -82,6 +83,12 @@ QolResult fake_extension_item_at(int32_t bag, int32_t slot, QolInventoryItemRef*
         return fail(kQolErrNotFound, "slot empty");
     }
     *out = g_item;
+    return ok();
+}
+
+QolResult fake_extension_info(int32_t bag, QolBagInfo* out) {
+    if (out == nullptr || bag != g_item.bag) return fail(kQolErrInvalidArgument, "bad bag");
+    *out = {16, 1};
     return ok();
 }
 
@@ -190,11 +197,12 @@ QolResult fake_extension_import(const QolBagTransfer* transfer, int32_t bag, int
     ++g_extension_import_calls;
     if (g_extension_import_fail) return fail(kQolErrInternal, "extension rollback failed");
     if (out == nullptr) return fail(kQolErrInvalidArgument, "out required");
-    out->ref = {g_item.space_id, bag};
+    const int32_t actual_slot = slot == -1 ? 4 : slot;
+    out->ref = {g_item.space_id, g_invalid_import_ref ? bag + 1 : bag};
     out->item = g_item.item;
     out->count = transfer != nullptr ? transfer->count : g_item.count;
     g_item.bag = bag;
-    g_item.slot = slot;
+    g_item.slot = actual_slot;
     return ok();
 }
 
@@ -250,6 +258,7 @@ void reset_fixture() {
     g_last_write_bag = -1;
     g_last_to_bag = -1;
     g_force_empty = false;
+    g_invalid_import_ref = false;
 
     g_game.world_action.add_money = &fake_add_money;
     g_game.world_action.minus_money = &fake_minus_money;
@@ -273,6 +282,7 @@ void reset_fixture() {
 
     g_source.version = kBagSourceVersion;
     g_source.space_id = kQolBagSpaceFirstRegistered;
+    g_source.info = &fake_extension_info;
     g_source.item_at = &fake_extension_item_at;
     g_source.export_item = &fake_extension_export;
     g_source.import_item = &fake_extension_import;
@@ -393,11 +403,48 @@ void test_extension_use_and_same_space_move() {
         qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, 3});
     CHECK(moved.status == InventoryActionStatus::kOk && moved.moved_count == 2);
     CHECK(moved.target.slot == 3 && moved.target_item.slot == g_item.item.slot);
+    CHECK(moved.target_item.generation == g_item.item.generation);
+    CHECK(g_item.slot == 3);
     CHECK(g_extension_import_calls == 1 && g_extension_remove_calls == 1);
+}
+
+void test_auto_slot_move_uses_committed_target_ref() {
+    reset_fixture();
+    g_item.kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
+    g_item.space_id = 2;
+    g_item.bag = 1;
+    g_item.slot = 2;
+
+    const InventoryMoveOutcome moved =
+        qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, -1});
+    CHECK(moved.status == InventoryActionStatus::kOk && moved.moved_count == 2);
+    CHECK(moved.target.space_id == 2 && moved.target.bag == 1 && moved.target.slot == 4);
+    CHECK(moved.target_item.slot == g_item.item.slot &&
+          moved.target_item.generation == g_item.item.generation);
+    CHECK(g_extension_import_calls == 1 && g_extension_remove_calls == 1);
+}
+
+void test_auto_slot_move_rejects_invalid_target_result() {
+    reset_fixture();
+    g_item.kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
+    g_item.space_id = 2;
+    g_item.bag = 1;
+    g_item.slot = 2;
+    g_invalid_import_ref = true;
+
+    const InventoryMoveOutcome moved =
+        qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, -1});
+    CHECK(moved.status == InventoryActionStatus::kInternal);
+    CHECK(moved.moved_count == 0 && g_extension_remove_calls == 0);
 }
 
 void test_native_move_use_discard_and_equipment() {
     reset_fixture();
+    const InventoryMoveOutcome auto_slot_move =
+        qol::features::core_item::kInventoryActionApi.move({0, 0, 0}, 2, {0, 0, -1});
+    CHECK(auto_slot_move.status == InventoryActionStatus::kInvalidRef);
+    CHECK(g_native_move_calls == 0);
+
     const InventoryMoveOutcome moved =
         qol::features::core_item::kInventoryActionApi.move({0, 0, 0}, 2, {0, 0, 1});
     CHECK(moved.status == InventoryActionStatus::kOk && moved.moved_count == 2);
@@ -434,6 +481,8 @@ int main() {
     test_native_sell_failure_and_identity();
     test_extension_sale_and_native_only_operations();
     test_extension_use_and_same_space_move();
+    test_auto_slot_move_uses_committed_target_ref();
+    test_auto_slot_move_rejects_invalid_target_result();
     test_native_move_use_discard_and_equipment();
     std::printf("inventory_action_sell_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
