@@ -396,7 +396,7 @@ QolResult source_remove(contracts::QolItemHandle expected, int32_t count,
         qol::extension_bag::ui_state().objects.module_objects[bag][slot] != item) {
         return source_error(kQolErrNotFound, "stale item handle");
     }
-    const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
+    const virtual_bag::Item descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
     if (descriptor_empty(descriptor)) {
         return source_error(kQolErrNotFound, "extension slot empty");
     }

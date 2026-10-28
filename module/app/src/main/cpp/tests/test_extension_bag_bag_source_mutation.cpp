@@ -31,6 +31,11 @@ int g_fail = 0;
 void* g_handle_item = nullptr;
 qol::contracts::QolItemHandle g_public_handle{41, 19};
 int g_materialize_calls = 0;
+void* g_effective_item = nullptr;
+uint32_t g_effective_count = 0;
+int g_extension_free_calls = 0;
+int g_persist_calls = 0;
+bool g_reject_next_persist = false;
 
 #define CHECK(condition)                                                           \
     do {                                                                           \
@@ -67,6 +72,21 @@ bool same_item(const virtual_bag::Item& lhs, const virtual_bag::Item& rhs) {
            lhs.payload_size == rhs.payload_size && lhs.payload == rhs.payload;
 }
 
+bool same_ledger(const ownership::Ledger& lhs, const ownership::Ledger& rhs) {
+    if (lhs.total_allocated != rhs.total_allocated ||
+        lhs.total_released != rhs.total_released ||
+        lhs.total_handed_over != rhs.total_handed_over) {
+        return false;
+    }
+    for (int i = 0; i < ownership::kLedgerCapacity; ++i) {
+        if (lhs.slots[i].state != rhs.slots[i].state ||
+            lhs.slots[i].generation != rhs.slots[i].generation) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void reset_fixture() {
     auto& runtime = runtime_state();
     runtime.objects.bag = virtual_bag::State{};
@@ -81,6 +101,11 @@ void reset_fixture() {
     g_active_module_use_token = nullptr;
     g_handle_item = nullptr;
     g_materialize_calls = 0;
+    g_effective_item = nullptr;
+    g_effective_count = 0;
+    g_extension_free_calls = 0;
+    g_persist_calls = 0;
+    g_reject_next_persist = false;
 }
 
 bool ledger_has_single_module_object(const ownership::Ledger& ledger, uint32_t handle) {
@@ -218,6 +243,92 @@ void test_materialize_rejection_restores_empty_descriptor_and_handle_state() {
     CHECK(source->count() == 5);
 }
 
+void test_partial_remove_acceptance_rejection_restores_original_state() {
+    reset_fixture();
+    auto& bag = runtime_state().objects.bag;
+    auto& objects = qol::extension_bag::ui_state().objects;
+    constexpr int kBag = 0;
+    constexpr int kSlot = 1;
+    constexpr int kCategory = 77;
+    int item_object = 2;
+    bag.items[kBag][kSlot] = make_item(kCategory, 3);
+    objects.module_objects[kBag][kSlot] = &item_object;
+    objects.module_object_categories[kBag][kSlot] = kCategory;
+    objects.module_object_hashes[kBag][kSlot] =
+        virtual_bag::payload_hash(bag.items[kBag][kSlot]);
+    g_handle_item = &item_object;
+    g_effective_item = &item_object;
+    g_effective_count = 3;
+    objects.module_object_use[kBag][kSlot].generation = 31;
+
+    uint32_t internal_handle = 0;
+    CHECK(ownership::allocate(&objects.ownership_ledger, &internal_handle) ==
+          ownership::Outcome::kOk);
+    objects.module_object_handles[kBag][kSlot] = internal_handle;
+
+    ModuleUseToken token{};
+    CHECK(module_use_begin_locked(kBag, kSlot, &item_object, &token));
+    g_active_module_use_token = &token;
+    const virtual_bag::Item descriptor_before = bag.items[kBag][kSlot];
+    const uint32_t hash_before = objects.module_object_hashes[kBag][kSlot];
+    const int category_before = objects.module_object_categories[kBag][kSlot];
+    const void* object_before = objects.module_objects[kBag][kSlot];
+    const uint32_t handle_before = objects.module_object_handles[kBag][kSlot];
+    const ModuleUseState use_before = objects.module_object_use[kBag][kSlot];
+    const ownership::Ledger ledger_before = objects.ownership_ledger;
+    const qol::contracts::QolItemHandle public_handle_before = g_public_handle;
+
+    // This one-shot false models only rejection of the in-memory mutation acceptance
+    // seam. It does not model slot-data persistence or a durable/save failure.
+    g_reject_next_persist = true;
+    qol::contracts::QolBagMutationResult mutation{};
+    const qol::contracts::QolBagSource* source =
+        qol::features::extension_bag::extension_bag_bag_source();
+    const QolResult result = source->remove(g_public_handle, 1, &mutation);
+
+    CHECK(!qol::contracts::succeeded(result));
+    CHECK(result.code == kQolErrInternal);
+    CHECK(mutation.ref.space_id == 0 && mutation.ref.bag == 0 &&
+          mutation.item.slot == 0 && mutation.item.generation == 0 && mutation.count == 0);
+    CHECK(g_persist_calls == 1 && !g_reject_next_persist);
+    CHECK(bag.items[kBag][kSlot].category == descriptor_before.category);
+    CHECK(bag.items[kBag][kSlot].count == descriptor_before.count);
+    CHECK(bag.items[kBag][kSlot].payload_size == descriptor_before.payload_size);
+    CHECK(bag.items[kBag][kSlot].payload == descriptor_before.payload);
+    CHECK(virtual_bag::payload_count(bag.items[kBag][kSlot]) == 3);
+    CHECK(objects.module_object_hashes[kBag][kSlot] == hash_before);
+    CHECK(hash_before == virtual_bag::payload_hash(descriptor_before));
+    CHECK(objects.module_object_categories[kBag][kSlot] == category_before);
+    CHECK(objects.module_objects[kBag][kSlot] == object_before);
+    CHECK(objects.module_object_handles[kBag][kSlot] == handle_before);
+    CHECK(g_effective_count == 3);
+    CHECK(objects.module_object_use[kBag][kSlot].generation == use_before.generation);
+    CHECK(objects.module_object_use[kBag][kSlot].active);
+    CHECK(!objects.module_object_use[kBag][kSlot].consumed);
+    CHECK(!objects.module_object_use[kBag][kSlot].pending_release);
+    CHECK(objects.module_object_use[kBag][kSlot].item == use_before.item);
+    CHECK(objects.module_object_use[kBag][kSlot].owner == use_before.owner);
+    CHECK(g_active_module_use_token == &token);
+    CHECK(token.bag == kBag && token.slot == kSlot && token.item == &item_object);
+    CHECK(token.generation == use_before.generation && token.owner == use_before.owner);
+    CHECK(same_ledger(objects.ownership_ledger, ledger_before));
+    CHECK(ledger_has_single_module_object(objects.ownership_ledger, internal_handle));
+    CHECK(g_extension_free_calls == 0);
+
+    qol::contracts::QolInventoryItemRef ref{};
+    const QolResult read_result = source->item_at(kBag, kSlot, &ref);
+    CHECK(qol::contracts::succeeded(read_result));
+    CHECK(ref.bag == kBag && ref.slot == kSlot && ref.category == kCategory && ref.count == 3);
+    CHECK(ref.item.slot == public_handle_before.slot &&
+          ref.item.generation == public_handle_before.generation);
+    CHECK(g_effective_count == 3);
+    CHECK(g_extension_free_calls == 0);
+
+    g_active_module_use_token = nullptr;
+    CHECK(module_use_abort_locked(token));
+    CHECK(!objects.module_object_use[kBag][kSlot].active);
+}
+
 }  // namespace
 
 // Test-only host ports. The callbacks, module_item_locked, ownership checks, generation updates,
@@ -233,7 +344,13 @@ void extension_bag_mark_dirty_locked() {
 
 bool persist_state_locked(bool force) {
     (void)force;
-    // Match production acceptance semantics. This stub does not simulate or claim durable failure.
+    ++g_persist_calls;
+    if (g_reject_next_persist) {
+        g_reject_next_persist = false;
+        return false;
+    }
+    // Test-only acceptance model: true mirrors production; the one-shot false above is not a
+    // durable/save failure and does not model the slot-data persistence transaction.
     return true;
 }
 
@@ -242,13 +359,12 @@ const qol::contracts::QolExtensionBagWritePort* extension_bag_write_api() {
 }
 
 uint32_t virtual_bag_effective_count(const void* item, uint32_t fallback_canonical) {
-    (void)item;
+    if (item == g_effective_item) return g_effective_count;
     return fallback_canonical;
 }
 
 bool virtual_bag_write_effective(void* item, uint32_t count) {
-    (void)item;
-    (void)count;
+    if (item == g_effective_item) g_effective_count = count;
     return true;
 }
 
@@ -312,6 +428,7 @@ bool extension_bag_sale_item_finish_release(qol::contracts::QolItemHandle expect
 
 bool extension_free_item(void* item) {
     (void)item;
+    ++g_extension_free_calls;
     return true;
 }
 
@@ -436,6 +553,7 @@ void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
 int main() {
     test_free_rejection_preserves_slot_and_active_use_custody();
     test_materialize_rejection_restores_empty_descriptor_and_handle_state();
+    test_partial_remove_acceptance_rejection_restores_original_state();
     std::printf("extension_bag_bag_source_mutation: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
