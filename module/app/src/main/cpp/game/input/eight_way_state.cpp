@@ -290,9 +290,23 @@ uint8_t handle_wait_coord(void* ch) {
     if (!enabled() || ch == nullptr) return 0;
     if (world_game_state_gate() != 0) return 0;
     if (ch != lead_member()) return 0;
-    if (access::has_path(ch)) return 0;
-    access::clear_wait_coord(ch);
-    return 1;
+    if (!access::has_path(ch)) {
+        access::clear_wait_coord(ch);
+        return 1;
+    }
+
+    // 攻击/API 路径从非 8px 坐标起手时，原版 CHAR_MoveOnWaitCoord 只沿当前
+    // 朝向补一个轴；朝向与目标方向不一致时会先朝旧方向跑。主控路径改为直接
+    // 吸附到当前 16px 瓦片中心（也是 8px 路径节点），下一帧重新按路径计算。
+    if (snap_to_tile_center(ch)) {
+        static std::atomic<bool> logged{false};
+        if (!logged.exchange(true, std::memory_order_acq_rel)) {
+            QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
+                              "omni path snap to tile center (skip one-axis wait coord)");
+        }
+        return 1;
+    }
+    return 0;
 }
 
 void poll() {
