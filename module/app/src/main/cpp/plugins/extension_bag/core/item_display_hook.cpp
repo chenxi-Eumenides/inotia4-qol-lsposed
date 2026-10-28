@@ -88,30 +88,62 @@ bool projection_item_for_control(void* control, void** out_item) {
         qol::contracts::QolUiRootKind::kStoreItemRoot,
         qol::contracts::QolUiRootKind::kMixItemRoot,
     };
+    int kind_index = 0;
     for (qol::contracts::QolUiRootKind kind : kRootKinds) {
         int bag = -1;
         int window_bag = -1;
         int capacity = 0;
         void* root = nullptr;
+        const int current_kind = kind_index++;
         if (!projection_context(kind, &bag, &window_bag, &root, &capacity)) continue;
         const int current_bag = raw_current_bag_locked();
         if (current_bag >= 0 && current_bag != window_bag) continue;
 
-        for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (valid_child_locked(root, slot) != control) continue;
-            if (slot >= capacity) {
-                *out_item = nullptr;
-                return true;
+        // 投影期间同一 root 的 control→slot 映射稳定；缓存后 ControlItem 每次调用
+        // 不再扫描 16 个槽。命中仍用 valid_child_locked 复核，控件重建后自动重扫。
+        struct SlotCache {
+            void* root = nullptr;
+            int bag = -1;
+            int capacity = 0;
+            void* controls[virtual_bag::kSlotCount]{};
+        };
+        static thread_local SlotCache s_slot_cache[3];
+        SlotCache& cache = s_slot_cache[current_kind];
+        const bool cached = cache.root == root && cache.bag == bag && cache.capacity == capacity;
+        int slot = -1;
+        if (cached) {
+            for (int candidate = 0; candidate < virtual_bag::kSlotCount; ++candidate) {
+                if (cache.controls[candidate] != control) continue;
+                if (valid_child_locked(root, candidate) == control) slot = candidate;
+                break;
             }
-            const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
-            if (descriptor.category <= 0 || descriptor.count <= 0) {
-                *out_item = nullptr;
-                return true;
+        }
+        if (slot < 0) {
+            cache.root = root;
+            cache.bag = bag;
+            cache.capacity = capacity;
+            for (int candidate = 0; candidate < virtual_bag::kSlotCount; ++candidate) {
+                cache.controls[candidate] = valid_child_locked(root, candidate);
             }
-            ::qol::extension_bag::ReentryLock lock;
-            *out_item = module_item_locked(bag, slot);
+            for (int candidate = 0; candidate < virtual_bag::kSlotCount; ++candidate) {
+                if (cache.controls[candidate] != control) continue;
+                if (valid_child_locked(root, candidate) == control) slot = candidate;
+                break;
+            }
+        }
+        if (slot < 0) continue;
+        if (slot >= capacity) {
+            *out_item = nullptr;
             return true;
         }
+        const virtual_bag::Item& descriptor = ::qol::extension_bag::access::bag().items[bag][slot];
+        if (descriptor.category <= 0 || descriptor.count <= 0) {
+            *out_item = nullptr;
+            return true;
+        }
+        ::qol::extension_bag::ReentryLock lock;
+        *out_item = module_item_locked(bag, slot);
+        return true;
     }
     return false;
 }

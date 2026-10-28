@@ -270,6 +270,31 @@ void store_install_tab_buttons_locked() {
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
         bag_child_count < virtual_bag::kOriginalNativeBagCount) return;
+    // 每帧完整 ensure 的成本主要在控件遍历/校验；root、子控件数和扩展袋数
+    // 未变时每 10 帧做一次存活校验即可，其余帧只保留绘制路径。
+    static void* s_last_root = nullptr;
+    static int s_last_child_count = -1;
+    static int s_last_active = -1;
+    static uint32_t s_tick = 0;
+    const int active = virtual_bag::active_extension_bags();
+    const bool unchanged = s_last_root == bag_container && s_last_child_count == bag_child_count &&
+                           s_last_active == active;
+    if (unchanged && (++s_tick % 10) != 0) {
+        const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                                ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+        bool alive = true;
+        for (int index = 0; index < visible; ++index) {
+            void* button = qol::extension_bag::ui_state().store.tab_buttons[index];
+            if (button != nullptr && extension_bag_ui_user_type(button) < 0) {
+                alive = false;
+                break;
+            }
+        }
+        if (alive) return;
+    }
+    s_last_root = bag_container;
+    s_last_child_count = bag_child_count;
+    s_last_active = active;
     const auto* components = extension_bag_ui_components();
     if (components == nullptr) return;
     store_refresh_tab_bag_items_locked();

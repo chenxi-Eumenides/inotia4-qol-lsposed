@@ -287,6 +287,30 @@ void mix_install_tab_buttons_locked() {
     int bag_child_count = 0;
     if (bag_container == nullptr || !extension_bag_ui_child_count(bag_container, &bag_child_count) ||
         bag_child_count < virtual_bag::kOriginalNativeBagCount) return;
+    // 与背包/商店页签同法：签名不变时每 10 帧做一次存活校验，其余帧只绘制。
+    static void* s_last_root = nullptr;
+    static int s_last_child_count = -1;
+    static int s_last_active = -1;
+    static uint32_t s_tick = 0;
+    const int active = virtual_bag::active_extension_bags();
+    const bool unchanged = s_last_root == bag_container && s_last_child_count == bag_child_count &&
+                           s_last_active == active;
+    if (unchanged && (++s_tick % 10) != 0) {
+        const int visible = active < virtual_bag::kMaxRenderedExtensionBagTabs
+                                ? active : virtual_bag::kMaxRenderedExtensionBagTabs;
+        bool alive = true;
+        for (int index = 0; index < visible; ++index) {
+            void* button = qol::extension_bag::ui_state().mix.tab_buttons[index];
+            if (button != nullptr && extension_bag_ui_user_type(button) < 0) {
+                alive = false;
+                break;
+            }
+        }
+        if (alive) return;
+    }
+    s_last_root = bag_container;
+    s_last_child_count = bag_child_count;
+    s_last_active = active;
     const auto* components = extension_bag_ui_components();
     if (components == nullptr) return;
     mix_refresh_tab_bag_items_locked();
