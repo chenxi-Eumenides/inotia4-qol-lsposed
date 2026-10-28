@@ -214,6 +214,28 @@ Batch C 不解决：背包页剩余 22.5% 的 `control_item_get_item` / `valid_c
 
 `31836974` 的布局缓存已构建并安装，但尚未单独采样；最终包 SHA-256 `34a5972327e5761d4409f2fa03515f1fd5c7724340ca9085c5cfc43c1ffb1bb3`。
 
+### 5.5 Batch C 实施与复测（性能优化暂停）
+
+提交：`870077d1 perf: 摇杆 overlay 空闲门控与背包槽表批量校验`
+
+- C1：`prepare_direction_overlay` 在箭头控件指针未变时不再每帧 `control_rect` + `set_control_rect`，首次隐藏后每 30 帧复核一次。
+- C2：`inventory_for_each_space_slot` 对袋槽表整段只校验一次，逐槽读取不再重复 `game_memory_accessible`；物品指针仍逐项校验。
+- C3（settings 主菜单绘制门控）按用户要求未做。
+
+复测（20 秒，模块 CPU 占比）：
+
+| 指标 | Batch A 后 | Batch C 后 | 说明 |
+|---|---:|---:|---|
+| `world_idle` 模块占比 | 12.6% | **10.6%** | 总 CPU 继续下降 |
+| `main_menu` 模块占比 | 6.5% | **6.8%** | C3 未做，基本持平/噪声 |
+| `prepare_direction_overlay` | 4.2% | **0.84%** | C1 生效 |
+| autosell 扫描子树 | ~13.6% | **约 3%** | C2 生效；`inventory_for_each_space_slot` 3.0%、`native_bag_layout` 2.9% |
+| `world_idle` p50 帧间隔 | 47.7ms | 47.7ms | 仍受 20fps/vsync 上限约束 |
+
+最终包：`output/inotia4_qol_lsposed_debug_2610281451_952cd1e735d8.apk`，SHA-256 `952cd1e735d89f40f91255b3292312131f25ca906ece9624569816e152121fd9`；已安装 C18L 集成包并重启游戏（pid 11696），设备缓存模块 SHA 与 APK 一致。
+
+**状态：后续性能优化（Batch D）暂停，不再实施。** 本文件保留已完成的采样、根因、方案和验证记录，供后续恢复时使用。
+
 ## 6. 验证
 
 - 构建：`scripts/build-debug.sh`。
