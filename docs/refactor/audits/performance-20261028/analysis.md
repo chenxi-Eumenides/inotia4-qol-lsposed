@@ -175,13 +175,21 @@ Batch A 后新的模块热点：
 - `main_menu`：`settings_main_menu_more_games_draw` 约 5.6%，`ui_main_menu_live_tree_snapshot` 约 3.1%，`game_memory_accessible` 约 3.2%（部分与前者重叠）。
 - `bag_open` / `bag_drag` 未变，仍以 `control_readable` / `child_at` / 页签 ensure 为主。
 
-### 5.3 Batch B 调整建议
+### 5.3 Batch 计划（修订）
 
-原计划 Batch B 为背包 UI；复测显示 `world_idle` 仍有约 13.6% 的 autosell 扫描和约 4.2% 的 eight_way_move 空闲 overlay，属于全局收益。建议调整为：
+Batch B 已按用户选择先做背包 UI，见 §5.4。后续批次调整为：
 
-- **Batch B（全局剩余热点）**：`eight_way_move` 空闲 overlay 门控；autosell 扫描缓存（native bag layout / 逐项 `game_memory_accessible` 校验）；`settings` 主菜单按钮绘制门控。
-- **Batch C（背包 UI）**：`control_readable` / `child_at` 缓存、`control→slot` 表、页签 ensure epoch 门控。
-- **Batch D**：快照消费者门控、文本分派快速路径、legacy scheduler 迁移、HTTP/JNI、日志。
+- **Batch C（全局剩余热点）**：
+  - `eight_way_move` 空闲 overlay 门控：无触摸时只隐藏一次箭头，不每帧 `control_rect`/`set_control_rect`。
+  - autosell 扫描优化：复用已缓存的 native bag layout；在单次扫描内缓存 `game_memory_accessible` 结果或只校验袋槽表一次，减少逐物品 `/proc/self/maps` 查询。
+  - `settings` 主菜单按钮绘制门控：`settings_main_menu_more_games_draw` / `ui_main_menu_live_tree_snapshot` 只在树签名变化时完整 ensure，其余帧只绘制。
+  - 目标：`world_idle` 再降约 10–15% 总 CPU，`main_menu` 模块占比从 6.5% 降到约 2–3%；帧率仍可能受 vsync/引擎上限约束。
+- **Batch D（深度校验与机制）**：
+  - `control_readable` / `process_vm_readv` 的帧级正缓存或已知游戏内存范围快路径，继续压背包/商店/合成页内核 26–31%。
+  - 快照消费者门控（无 HTTP/UI 消费者时不重建）。
+  - 文本分派快速路径、legacy scheduler 迁移、HTTP/JNI、日志。
+
+Batch C 不解决：背包页剩余 22.5% 的 `control_item_get_item` / `valid_child_locked` 成本（归 Batch D）、HTTP 延迟、帧率上限。
 
 ### 5.4 Batch B 实施记录（背包 UI）
 
