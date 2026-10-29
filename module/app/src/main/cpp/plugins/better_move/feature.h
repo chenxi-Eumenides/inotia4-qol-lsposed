@@ -16,9 +16,9 @@ void ensure_poll_task();
 void remove_poll_task();
 int32_t state_poll_tick(int64_t frame, void* ctx);
 
-// 读取 world_tuning.move_speed 并把变化推送给游戏层；能力缺失时回退原生 8px。
-// 每逻辑帧调用；force=true 用于 install/enable 立即取一次。
-void sync_move_speed(bool force);
+// 建立 world_tuning.move_speed v1.1 订阅；成功后由提供方主动推送步长，不再轮询。
+// 未订阅时每 60 帧重试一次能力查找；已订阅时该函数为空操作。
+void ensure_move_speed_subscription(bool force);
 void reset_move_speed();
 
 void set_gate(bool enabled);

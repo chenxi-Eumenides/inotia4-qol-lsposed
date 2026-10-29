@@ -24,7 +24,7 @@
 
 - `plugin_descriptor()` 由 `host/assembly.cpp` 的 `kBuiltInPlugins` 注册。
 - feature：`better_move.direction`，显示名「移动优化」，默认关闭，`FeatureCategory::kGameplay`，`kChoice`；稳定 options 为 `eight_way`、`omnidirectional`。无 selection 即关闭；旧 `eight_way_move.direction` 配置不迁移。
-- 可选能力：`world_tuning.move_speed` v1.0；缺失时基础步长回退 8。插件每逻辑帧读一次，每 30 帧复核能力可用性。
+- 可选能力：`world_tuning.move_speed` v1.1；订阅后由提供方推送，不轮询、不在触摸时读取。未订阅时每 60 帧重试一次能力查找；订阅成功后空操作。初始/停用推送 8。
 - 端口：`QOL_PORT_MOVEMENT_INPUT`（`34`）v1.3，私有，仅 `better_move` 可声明；由 `host/plugin_registry.cpp` 注入。v1.3 尾追加 `set_step(int32_t)`，原有字段顺序/`set_enabled`/`set_mode` 语义不变。
 - `QolMovementInputMode` 为 `kDisabled`、`kEightWay`、`kOmnidirectional`；consumer 用 version/helper 和非空检查 `set_mode`、`set_step`，v1.1 前缀里的 `set_enabled` 仍作为兼容全向入口。
 - 无 HTTP、JNI、ownership；只消费 `world_tuning.move_speed`。
@@ -85,7 +85,7 @@
 6. 按候选点 `step_components` 拆主轴/副轴；两个分量接近时优先保持当前四方向朝向。
 7. 写自定义键码 `0x51000000` 到 `KEY_nCode`，保存当前模式、`lattice_index`、`selected_dx/dy`、缓存角度 `selected_angle`、`candidate_step`、主副轴/步长/键码及 `owns_input`。
 
-步长由插件帧任务从 `world_tuning.move_speed` 读取并调用端口 `set_step` 推入；值变化只使缓存失效，下一次触摸重建。正在按住时旧步长继续生效到松手。模式切换清 State，不跨候选缓存复用 index。
+步长由 `world_tuning.move_speed` v1.1 订阅回调推入端口 `set_step`；值变化只使缓存失效，下一次触摸重建。正在按住时旧步长继续生效到松手。模式切换清 State，不跨候选缓存复用 index。订阅建立前每 60 帧重试一次能力查找；重试失败保留最后一次值，不主动回退 8。
 
 mode 切换通过 Host `on_choice` 进入端口 `set_mode`。模式改变先复位 State 与输入键码，候选 index 不跨表复用；关闭会沿旧关闭路径吸附主控并恢复 overlay。`set_enabled(true)` 仍只表示全向模式，以兼容 v1.1 旧调用者。
 
@@ -103,7 +103,7 @@ mode 切换通过 Host `on_choice` 进入端口 `set_mode`。模式改变先复�
 
 调用点 patch 到 `char_move_wrapper`，端口进入 `game/input/eight_way_move.cpp`：
 
-1. `enabled/active/trusted/flag==0/dir==primary_dir` 全部满足才处理。
+1. `enabled/active/trusted/flag==0/dir==primary_dir` 全部满足才处理；轴向没有副轴也进入处理，不再透传原版 8px。
 2. `ch == lead_member()`、`world_game_state_gate()==0`、`ch+0x2f0` 无路径。
 3. 按 `delta/8` 缩放已选候选点；上限为 `S*delta/8`（`S` 为选择时缓存的 `candidate_step`），`delta==8` 时保持候选点原值。步长大于 8 时不再被旧的 `delta` 上限截断。
 4. 保存移动前 x/y。
@@ -162,7 +162,7 @@ mode 切换通过 Host `on_choice` 进入端口 `set_mode`。模式改变先复�
 ## 4. 数据流
 
 ```text
-world_tuning.move_speed → better_move 每逻辑帧读取 → movement_input_port.set_step → 步长原子值
+world_tuning.move_speed 订阅 → 回调推送 → movement_input_port.set_step → 步长原子值
 Host choice callback → movement_input_port.set_mode → eight_way_state mode/reset
 触屏 → UIPlay_ButtonDirection hook → eight_way_state
   → 按 (模式, 步长) 懒构建/缓存候选点 → selected_dx/dy + selected_angle + 自定义 KEY_nCode
@@ -178,7 +178,7 @@ Host choice callback → movement_input_port.set_mode → eight_way_state mode/r
 - 8 资源任一安装失败：整组 fail-closed，插件 failed，不保留半装状态。
 - entry hook 无 backup：宿主拒绝/回滚，wrapper 不执行。
 - 端口缺失/ABI 不匹配（v1.3 的 `set_step` 不存在）：install 失败，不安装资源。
-- `world_tuning.move_speed` 缺失/读取失败：只把步长回退为 8，不使插件失败；能力恢复后下一次 30 帧复核重新接入。
+- `world_tuning.move_speed` 缺失：保留最后一次步长，不使插件失败；未订阅时每 60 帧重试接入。提供方停用会主动推送 8。
 - choice 关闭/disable/deactivate：先设为 disabled、吸附当前主控到瓦片中心并清自定义码/selected 向量，再移除每帧任务、步长回退 8、关闭端口门禁和物理还原资源。
 - 八向/全向切换不改移动执行或碰撞实现；只重置触摸、候选 index 与输入归属，避免跨表复用 index。
 
@@ -205,7 +205,7 @@ Host choice callback → movement_input_port.set_mode → eight_way_state mode/r
 | 架构/层依赖/符号/资源 | `check_arch.py`、`check_layers.py`、`check_symbols.py`、`check_resources.py` |
 | 原全向 smoke | C18L v586，属于旧全向模式，不代表新 choice 模式验收 |
 | 新 choice 三态/重启恢复/selected 高亮 | **PASS（烟测，C18L v589）**：旧 `direction=true` 升级后关闭；`eight_way` 重启后 `mode=1 candidate=7 steps=6/6`、高亮 45°；`omnidirectional` 高亮连续约 20°；关闭恢复原版四箭头 |
-| 移速步长/指针烟测 | **PASS（C18L v589）**：150% 启动 `move speed step=12`；八向 `steps=12/0`、`(12,0)`、`rot=90`；45° `steps=8/8`；50% 全向 `steps=4/1`；关闭 `world_tuning` 后回退 8，重启用后 4；8 资源 live，无 FATAL。 |
+| 移速订阅/步长/指针烟测 | **PASS（C18L v589）**：150% 订阅后 `move speed step=12`；八向 `steps=12/0`、`(12,0)`、`rot=90`；轴向 `applied=12`；45° `steps=8/8`；50% 全向 `steps=4/1`；关闭 `world_tuning` 推送 8，重启用后 4；持续观察无 30 帧回退；8 资源 live，无 FATAL。 |
 | 撞墙/滑行/切图/其他分辨率 | **NOT_ACCEPTED（未执行）** |
 
 ## 8. 已删除旧结构

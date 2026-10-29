@@ -16,21 +16,21 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 94 | 7049 |
-| `game/` | 182 | 24722 |
+| `contracts/` | 94 | 7058 |
+| `game/` | 182 | 24735 |
 | `infra/` | 40 | 4882 |
 | `hooks/` | 10 | 1784 |
 | `patch/` | 13 | 1880 |
-| `plugins/` | 461 | 80991 |
+| `plugins/` | 461 | 81077 |
 | `host/` | 63 | 18364 |
-| **合计** | **863** | **139672** |
+| **合计** | **863** | **139780** |
 
 ### 已迁移插件（`plugins/*`）
 
 - `plugins/attribute_quality/`：6 文件 / 793 行
 - `plugins/attribute_range_display/`：4 文件 / 448 行
 - `plugins/autosell/`：31 文件 / 3654 行
-- `plugins/better_move/`：4 文件 / 574 行
+- `plugins/better_move/`：4 文件 / 581 行
 - `plugins/character_panel_i18n/`：6 文件 / 388 行
 - `plugins/core.api/`：6 文件 / 731 行
 - `plugins/core.character/`：6 文件 / 2663 行
@@ -56,7 +56,7 @@
 - `plugins/special_equip/`：6 文件 / 705 行
 - `plugins/stack_limit/`：4 文件 / 138 行
 - `plugins/world_teleport/`：6 文件 / 982 行
-- `plugins/world_tuning/`：10 文件 / 1548 行
+- `plugins/world_tuning/`：10 文件 / 1627 行
 
 ### CTest target 分类
 

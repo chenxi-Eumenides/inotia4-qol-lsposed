@@ -180,7 +180,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     set_input_port(port);
     set_gate(true);
     ensure_poll_task();
-    sync_move_speed(true);
+    ensure_move_speed_subscription(true);
     return 0;
 }
 
@@ -199,7 +199,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(true);
     ensure_poll_task();
-    sync_move_speed(true);
+    ensure_move_speed_subscription(true);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {

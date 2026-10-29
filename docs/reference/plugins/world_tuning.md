@@ -22,7 +22,7 @@
 - `requires` 1 项：`character.facts` v1.0。
 - `optional_requires` 2 项：`ui_panels` v1.3、`ui_components` v1.22；界面工具被停用时倍率仍生效，仅面板不可用。
 - `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.2。
-- `provides` 1：`world_tuning.move_speed` v1.0；JNI 0、HTTP route/endpoint 0。
+- `provides` 1：`world_tuning.move_speed` v1.1；JNI 0、HTTP route/endpoint 0。
 - `resources` 4 个入口 hook（伤害、怪物最大生命、加经验、加金币），均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。
 - `validate_config` = `validate_rates_config`，只接受 `rates` 键。
 - 唯一 feature 为 entry（`plugins/world_tuning/plugin.cpp`）：
@@ -92,18 +92,21 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 ## 对外能力：`world_tuning.move_speed`
 
-`provides` 声明 `world_tuning.move_speed` v1.0（`contracts/world_tuning.h`）：
+`provides` 声明 `world_tuning.move_speed` v1.1（`contracts/world_tuning.h`）：
 
 ```cpp
 struct WorldTuningMoveSpeedApi {
     QolResult (*read)(int32_t* out_speed);
+    QolResult (*subscribe)(void* ctx, void (*observer)(void*, int32_t), uint64_t* out_id);
+    QolResult (*unsubscribe)(uint64_t id);
 };
 ```
 
 - 返回 `round(8 × 移速倍率)`，下限 1；1 倍 = 8。
-- 每次调用读取当前倍率，不缓存；倍率改动后消费者下一次读取即生效。
-- 插件未启用时能力不存在，消费者应自行回退到 8（或原版移动）。
-- 全向移动插件尚未接入该能力。
+- `subscribe` 成功时立即回调一次当前值；之后 `apply_rates` 完成一次快照后推送一次，启用/停用也会推送当前值或原生 8。
+- `read` 保留给一次性查询；常规消费者应使用订阅，避免轮询或在触摸时读取。
+- 插件未启用时能力不存在；停用时先向现有订阅者推送 8，再撤销能力。
+- `better_move` 已接入该能力，订阅后不再轮询。
 
 ## 生命周期与线程模型
 

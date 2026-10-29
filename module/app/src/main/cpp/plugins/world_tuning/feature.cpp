@@ -35,6 +35,16 @@ std::atomic<int32_t> g_rates[kRateCount] = {
     kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault, kRateDefault,
     kRateDefault};
 
+// 移速能力订阅者。订阅/退订/推送都在 Host 主线程；回调只允许做原子写入或端口推送。
+constexpr uint32_t kMaxMoveSpeedObservers = 8;
+struct MoveSpeedObserver {
+    void* ctx = nullptr;
+    contracts::WorldTuningMoveSpeedObserver callback = nullptr;
+    uint64_t id = 0;
+};
+MoveSpeedObserver g_move_speed_observers[kMaxMoveSpeedObservers];
+uint64_t g_next_move_speed_observer_id = 1;
+
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
 using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
 using UpdateAttrFromMonsterFn = void (*)(void*, int32_t);
@@ -355,6 +365,51 @@ int32_t move_speed_value() {
     return static_cast<int32_t>(speed);
 }
 
+namespace {
+void notify_move_speed_value(int32_t speed) {
+    for (const MoveSpeedObserver& observer : g_move_speed_observers) {
+        if (observer.callback != nullptr) observer.callback(observer.ctx, speed);
+    }
+}
+}  // namespace
+
+QolResult subscribe_move_speed(void* ctx, contracts::WorldTuningMoveSpeedObserver observer,
+                               uint64_t* out_id) {
+    if (out_id != nullptr) *out_id = 0;
+    if (observer == nullptr || out_id == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "observer is null", 17);
+    }
+    for (MoveSpeedObserver& slot : g_move_speed_observers) {
+        if (slot.callback != nullptr) continue;
+        if (g_next_move_speed_observer_id == 0) ++g_next_move_speed_observer_id;
+        slot.ctx = ctx;
+        slot.callback = observer;
+        slot.id = g_next_move_speed_observer_id++;
+        *out_id = slot.id;
+        // 订阅即回放当前值，消费端不需要额外 read。
+        observer(ctx, move_speed_value());
+        return contracts::ok();
+    }
+    return contracts::error(kQolErrBlocked, "observer capacity full", 22);
+}
+
+QolResult unsubscribe_move_speed(uint64_t id) {
+    if (id == 0) return contracts::error(kQolErrInvalidArgument, "id is zero", 12);
+    for (MoveSpeedObserver& slot : g_move_speed_observers) {
+        if (slot.callback != nullptr && slot.id == id) {
+            slot = MoveSpeedObserver{};
+            return contracts::ok();
+        }
+    }
+    return contracts::error(kQolErrNotFound, "observer not found", 19);
+}
+
+void notify_move_speed() { notify_move_speed_value(move_speed_value()); }
+
+void notify_move_speed_fallback() {
+    notify_move_speed_value(contracts::kWorldTuningBaseMoveSpeed);
+}
+
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 const contracts::QolGameHost* game_host() { return g_game; }
 const contracts::QolCharacterExtrasPort* character_extras() { return g_extras; }
@@ -372,6 +427,8 @@ void apply_rates(const Rates& rates) {
     for (uint32_t i = 0; i < kRateCount; ++i) {
         g_rates[i].store(rates.value[i], std::memory_order_relaxed);
     }
+    // 一次 apply 完成后只推送一次，消费端看到的是完整快照。
+    notify_move_speed();
 }
 
 bool reload_rates_from_config() {

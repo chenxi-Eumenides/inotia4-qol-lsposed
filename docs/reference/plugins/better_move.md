@@ -32,10 +32,10 @@ Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direct
 
 ### 2.1 移速能力
 
-- 可选依赖 `world_tuning.move_speed` v1.0；能力缺失、未启用或读取失败时基础步长回退原生 `8`。
-- 每逻辑帧读取一次；变化只标记候选表失效，下一次触摸重建。
-- 能力可用性每 30 帧复核一次，支持先启用 `better_move` 后启用 `world_tuning`，也支持后者关闭后回退。
-- `QOL_PORT_MOVEMENT_INPUT` 升至 v1.3，尾追加 `set_step(int32_t)`；插件把当前步长推给游戏层，游戏层不直接依赖 `world_tuning`。
+- 可选依赖 `world_tuning.move_speed` v1.1；插件只建立一次订阅，之后由 `world_tuning` 主动推送，不轮询、不在触摸时重新读取能力。
+- 订阅建立时立即回调当前步长；`world_tuning` 倍率变化、启用/停用都会推送。停用推送原生 `8`。
+- 尚未订阅时每 60 帧重试一次能力查找；订阅成功后该路径为空操作。重试失败保留最后一次步长，不回退 8，避免装配窗口造成速度跳变。
+- `QOL_PORT_MOVEMENT_INPUT` 升至 v1.3，尾追加 `set_step(int32_t)`；插件把推送值转给游戏层，游戏层不直接依赖 `world_tuning`。
 - 旧 `set_enabled(true/false)` 保留 v1.1 语义：开启全向、关闭移动模式。插件业务模式只由 Host choice callback 通知。
 
 没有 HTTP 路由、JNI 绑定或公开命令。
@@ -48,6 +48,7 @@ Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direct
 | 八向 | 轴向 `(±S,0)`、`(0,±S)`；对角取 `k=round(S/√2)` 的 `(±k,±k)`，选择最近方向 |
 | 全向 | 取所有 `round(hypot(x,y))==S` 的整数候选点，选择最近角度；S 越大候选越多 |
 | 步长 | `S` 来自 `world_tuning.move_speed`（1 倍 = 8）；候选表按 `(模式, S)` 缓存 |
+| 轴向 | 与斜向一样使用候选步长 S；`char_move` 不再因无副轴而透传原版 8px |
 | 轴向/斜向 | 共用主副轴分解、`CHAR_Move` 顺序、碰撞查询、贴墙回退和 `delta/8` 缩放 |
 | 模式切换 | 清空旧候选 index、selected 向量与输入状态，不跨候选表复用 index |
 | 旋转指针 | 使用 `State.selected_dx/dy` 和缓存角度 `selected_angle`；释放、死区、关闭或零向量不绘制 |
@@ -72,7 +73,7 @@ Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direct
 ### 3.2 计算与更新时机
 
 - **计算**：首次触摸且 `(模式, S)` 缓存未命中时，在主线程构建候选表；不在每帧或每次触摸重复计算。
-- **更新**：`poll()` 每逻辑帧读取 `world_tuning.move_speed`；值变化时只置缓存失效，下一次触摸重建。
+- **更新**：`world_tuning` 推送新步长时只更新原子值并使缓存失效；下一次触摸重建。
 - 正在按住时步长变化不打断当前手势：当前主/副轴步长继续用到松手；下一次触摸使用新步长。
 - 模式切换清触摸状态，不重复建表；插件关闭/停用时步长回退 8，候选缓存保留到下次重建。
 
@@ -91,4 +92,4 @@ Host 单 key 配置请求使用 `field="choice"`，`key` 为 `better_move.direct
 
 feature 关闭、资源不可用或插件安装失败时，本插件不改变移动行为。`world_tuning.move_speed` 缺失只降级为原生 8px，不使插件失败。插件状态由 Host 生命周期与资源诊断面统一呈现，不额外定义用户可见错误码。
 
-实现细节、资源列表、游戏函数地址和验证边界见 [`better_move-internals.md`](better_move-internals.md)。C18L v589 烟测已确认：150% 移速下八向步长为 12、45° 对角为 8/8；50% 下全向步长为 4/1；关闭 `world_tuning` 后回退 8；8 资源全 `live`，无 FATAL。撞墙/滑行、切图/拾取、其他分辨率与变体仍待真机验收，完整行为状态为 `NOT_ACCEPTED`。
+实现细节、资源列表、游戏函数地址和验证边界见 [`better_move-internals.md`](better_move-internals.md)。C18L v589 烟测已确认：150% 移速下八向步长为 12、轴向 `applied=12`、45° 对角为 8/8；50% 下全向步长为 4/1；关闭 `world_tuning` 推送 8；持续观察无 30 帧回退；8 资源全 `live`，无 FATAL。撞墙/滑行、切图/拾取、其他分辨率与变体仍待真机验收，完整行为状态为 `NOT_ACCEPTED`。

@@ -6,6 +6,7 @@
 #include "../../contracts/plugin.h"
 #include "../../contracts/character_facts.h"
 #include "../../contracts/game_ports/character_extras_port.h"
+#include "../../contracts/world_tuning.h"
 
 // 游戏世界调整插件业务层（ARCHITECTURE.md §3.3）。
 //
@@ -55,6 +56,15 @@ bool gate_enabled();
 
 // 移速（1 倍 = 8，整数取整）：供 world_tuning.move_speed 能力消费。
 int32_t move_speed_value();
+
+// 移速能力 v1.1 订阅：提供方在倍率变化、启用/停用和订阅建立时主动推送。
+// 只在 Host 主线程调用；回调同步执行，不得在回调内 unsubscribe 自身。
+QolResult subscribe_move_speed(void* ctx, contracts::WorldTuningMoveSpeedObserver observer,
+                               uint64_t* out_id);
+QolResult unsubscribe_move_speed(uint64_t id);
+// 停用/关闭时向现有订阅者推送原生 8，避免消费端保留旧倍率。
+void notify_move_speed_fallback();
+void notify_move_speed();
 
 // 倍率快照与应用。apply 可从主线程（面板/配置）调用；wrapper 侧只读原子值。
 Rates current_rates();

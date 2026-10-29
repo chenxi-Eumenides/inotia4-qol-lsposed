@@ -115,7 +115,7 @@
 | `plugins/core.save` | `contracts` | 19 |
 | `legacy/system` | `game` | 18 |
 | `plugins/settings` | `contracts` | 18 |
-| `plugins/world_tuning` | `contracts` | 15 |
+| `plugins/world_tuning` | `contracts` | 16 |
 | `host` | `patch` | 14 |
 
 ### 2.2 include 环

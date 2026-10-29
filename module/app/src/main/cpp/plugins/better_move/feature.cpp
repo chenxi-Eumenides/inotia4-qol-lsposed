@@ -27,8 +27,10 @@ std::atomic<bool> g_wait_coord_seen{false};
 std::atomic<bool> g_map_blocking_seen{false};
 
 const contracts::WorldTuningMoveSpeedApi* g_move_speed_api = nullptr;
+uint64_t g_move_speed_subscription = 0;
 int32_t g_pushed_step = contracts::kWorldTuningBaseMoveSpeed;
-uint32_t g_step_refresh_ticks = 0;
+// 只在尚未订阅时用于重试能力查找；订阅成功后不再递增或读取能力。
+uint32_t g_subscribe_retry_ticks = 0;
 
 using DirectionFn = uint64_t (*)(void*, uint64_t, int64_t*, uint64_t);
 using PressKeyFn = void (*)(int32_t);
@@ -64,56 +66,61 @@ void set_input_port(const contracts::QolMovementInputPort* port) {
     g_input_port.store(port, std::memory_order_release);
 }
 
-void sync_move_speed(bool force) {
+void apply_move_speed(int32_t step) {
+    if (step < 1) step = contracts::kWorldTuningBaseMoveSpeed;
+    if (step == g_pushed_step) return;
     const auto* port = input_port();
     if (port == nullptr || port->api.set_step == nullptr) return;
+    g_pushed_step = step;
+    log_info("move speed step=%d", step);
+    port->api.set_step(step);
+}
+
+void on_move_speed_changed(void* /*ctx*/, int32_t step) {
+    apply_move_speed(step);
+}
+
+void ensure_move_speed_subscription(bool force) {
+    if (g_move_speed_subscription != 0) return;
+    const auto* port = input_port();
+    if (port == nullptr || port->api.set_step == nullptr) return;
+    if (!force && ++g_subscribe_retry_ticks < 60) return;
+    g_subscribe_retry_ticks = 0;
 
     const auto* sdk = g_sdk;
-    if (force || ++g_step_refresh_ticks >= 30) {
-        g_step_refresh_ticks = 0;
-        const void* iface = nullptr;
-        const bool available =
-            sdk != nullptr && sdk->capabilities.require != nullptr &&
-            contracts::succeeded(sdk->capabilities.require(
-                contracts::kWorldTuningMoveSpeedCapabilityId,
-                {contracts::kWorldTuningMoveSpeedVersion.major,
-                 contracts::kWorldTuningMoveSpeedVersion.minor},
-                &iface)) &&
-            iface != nullptr;
-        if (available) {
-            const auto* api = static_cast<const contracts::WorldTuningMoveSpeedApi*>(iface);
-            g_move_speed_api = api->read != nullptr ? api : nullptr;
-        } else {
-            g_move_speed_api = nullptr;
-        }
+    if (sdk == nullptr || sdk->capabilities.require == nullptr) return;
+    const void* iface = nullptr;
+    if (!contracts::succeeded(sdk->capabilities.require(
+            contracts::kWorldTuningMoveSpeedCapabilityId,
+            {contracts::kWorldTuningMoveSpeedVersion.major,
+             contracts::kWorldTuningMoveSpeedVersion.minor},
+            &iface)) ||
+        iface == nullptr) {
+        // 能力尚未注册：保留最后一次步长，不回退 8，避免开关/装配窗口造成速度跳变。
+        return;
     }
-
-    int32_t step = contracts::kWorldTuningBaseMoveSpeed;
-    if (g_move_speed_api != nullptr) {
-        int32_t current = 0;
-        if (contracts::succeeded(g_move_speed_api->read(&current)) && current >= 1) {
-            step = current;
-        } else {
-            g_move_speed_api = nullptr;
-        }
+    const auto* api = static_cast<const contracts::WorldTuningMoveSpeedApi*>(iface);
+    if (api->subscribe == nullptr || api->unsubscribe == nullptr) return;
+    uint64_t id = 0;
+    if (!contracts::succeeded(api->subscribe(nullptr, &on_move_speed_changed, &id)) ||
+        id == 0) {
+        return;
     }
-    if (step != g_pushed_step) {
-        g_pushed_step = step;
-        log_info("move speed step=%d", step);
-        port->api.set_step(step);
-    }
+    g_move_speed_api = api;
+    g_move_speed_subscription = id;
+    g_subscribe_retry_ticks = 0;
+    log_info("move speed subscription=%llu", static_cast<unsigned long long>(id));
 }
 
 void reset_move_speed() {
-    g_move_speed_api = nullptr;
-    g_step_refresh_ticks = 0;
-    const int32_t previous = g_pushed_step;
-    g_pushed_step = contracts::kWorldTuningBaseMoveSpeed;
-    const auto* port = input_port();
-    if (port != nullptr && port->api.set_step != nullptr &&
-        previous != contracts::kWorldTuningBaseMoveSpeed) {
-        port->api.set_step(contracts::kWorldTuningBaseMoveSpeed);
+    if (g_move_speed_subscription != 0 && g_move_speed_api != nullptr &&
+        g_move_speed_api->unsubscribe != nullptr) {
+        (void)g_move_speed_api->unsubscribe(g_move_speed_subscription);
     }
+    g_move_speed_api = nullptr;
+    g_move_speed_subscription = 0;
+    g_subscribe_retry_ticks = 0;
+    apply_move_speed(contracts::kWorldTuningBaseMoveSpeed);
 }
 
 void set_gate(bool enabled) {
@@ -127,7 +134,7 @@ bool gate_enabled() {
 int32_t state_poll_tick(int64_t /*frame*/, void* /*ctx*/) {
     const auto* port = input_port();
     if (port != nullptr && port->api.poll != nullptr) port->api.poll();
-    sync_move_speed(false);
+    ensure_move_speed_subscription(false);
     return 1;
 }
 

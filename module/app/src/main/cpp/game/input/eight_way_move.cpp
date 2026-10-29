@@ -15,6 +15,16 @@
 namespace qol::game::input {
 namespace {
 
+void log_first_axis(int32_t delta, int32_t step) {
+    static std::atomic<bool> logged{false};
+    if (logged.exchange(true, std::memory_order_acq_rel)) return;
+    const State& state = current_state();
+    QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
+                      "movement move axis mode=%u step=%d dir=%d applied=%d delta=%d",
+                      static_cast<unsigned>(state.mode), state.candidate_step,
+                      state.primary_dir, step, delta);
+}
+
 void log_first_omni(int32_t delta, int32_t primary_step, int32_t secondary_step) {
     static std::atomic<bool> logged{false};
     if (logged.exchange(true, std::memory_order_acq_rel)) return;
@@ -36,8 +46,10 @@ int32_t char_move(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
     if (fn_char_move == nullptr) return 0;
 
     const State& state = current_state();
+    // 轴向没有 secondary_dir，但步长仍可能被 world_tuning.move_speed 放大/缩小，
+    // 不能在这里透传，否则十字方向永远保持原版 8px。
     if (!enabled() || !state.active || !state.trusted || flag != 0 || dir < 0 || dir > 3 ||
-        dir != state.primary_dir || state.secondary_dir < 0 ||
+        dir != state.primary_dir ||
         (state.primary_step == 0 && state.secondary_step == 0)) {
         return pass_through(ch, dir, delta, flag);
     }
@@ -55,6 +67,7 @@ int32_t char_move(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
         return pass_through(ch, dir, delta, flag);
     }
     if (secondary_step <= 0) {
+        log_first_axis(delta, primary_step);
         return fn_char_move(ch, state.primary_dir, primary_step, flag);
     }
     if (primary_step <= 0) {

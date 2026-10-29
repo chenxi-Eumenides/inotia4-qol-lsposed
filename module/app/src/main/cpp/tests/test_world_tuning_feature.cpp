@@ -46,6 +46,11 @@ bool g_fail_pool_slot = false;
 bool g_fail_max_hp = false;
 bool g_fail_hp = false;
 int g_require_calls = 0;
+int32_t g_observed_move_speed = 0;
+
+void observe_move_speed(void* ctx, int32_t speed) {
+    *static_cast<int32_t*>(ctx) = speed;
+}
 int g_party_calls = 0;
 int g_active_calls = 0;
 int g_summoner_calls = 0;
@@ -769,7 +774,19 @@ void test_exp_money_and_move_speed() {
     assert(api->read(&speed).ok == kQolOk && speed == 10);
     assert(api->read(nullptr).ok == kQolErrInvalidArgument);
 
+    uint64_t observer_id = 0;
+    assert(api->subscribe != nullptr && api->unsubscribe != nullptr);
+    assert(api->subscribe(&g_observed_move_speed, &observe_move_speed, &observer_id).ok ==
+               kQolOk &&
+           observer_id != 0 && g_observed_move_speed == 10);
+    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 150;
+    apply_rates(rates);
+    assert(g_observed_move_speed == 12);
     descriptor.on_disabled(g_context);
+    assert(g_observed_move_speed == 8);
+    assert(api->unsubscribe(observer_id).ok == kQolOk);
+    assert(api->unsubscribe(observer_id).ok == kQolErrNotFound);
+
     (void)char_add_experience_wrapper(&player, 100, 1);
     assert(g_last_exp == 100);
     (void)inven_add_money_wrapper(100);
