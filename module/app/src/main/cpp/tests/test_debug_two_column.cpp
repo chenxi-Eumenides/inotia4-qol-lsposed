@@ -55,8 +55,10 @@ int g_text_button_draws = 0;
 int g_close_draws = 0;
 int g_back_draws = 0;
 int g_border_draws = 0;
+std::vector<UiRect> g_border_rects;
 int g_fill_draws = 0;
 int g_alpha_fill_draws = 0;
+std::vector<std::string> g_drawn_strings;
 // 记录开关胶囊绘制 rect（屏幕绝对），验证右栏内容不与文本行重叠、不越 viewport。
 std::vector<UiRect> g_toggle_rects;
 const PanelProviderSpec* g_provider = nullptr;
@@ -74,6 +76,9 @@ uint64_t g_last_closed_confirmation_token = 0;
 UiConfirmationSpec g_last_confirmation{};
 UiConfirmationSpecText g_last_confirmation_text{};
 int g_confirmation_open_count = 0;
+int g_help_detail_draws = 0;
+void* g_help_last_detail_user = nullptr;
+UiRect g_help_last_detail_viewport{};
 
 bool demo_choice_open(const UiChoiceSpec& spec) {
     if (g_choice_active) return false;
@@ -263,14 +268,19 @@ QolResult draw_control(QolUiHandle) { return ok(); }
 QolResult no_op() { return ok(); }
 QolResult fill_rect(UiRect, uint32_t) { ++g_fill_draws; return ok(); }
 QolResult fill_rect_alpha(UiRect, uint32_t, uint32_t) { ++g_alpha_fill_draws; return ok(); }
-QolResult border_rect(int32_t, int32_t, int32_t, int32_t) { ++g_border_draws; return ok(); }
+QolResult border_rect(int32_t x, int32_t y, int32_t w, int32_t h) {
+    ++g_border_draws;
+    g_border_rects.push_back({x, y, w, h});
+    return ok();
+}
 QolResult custom_button(QolUiHandle, UiRect, uint32_t, uint32_t, int32_t, const char*, uint32_t,
                         int32_t, int32_t) {
     return ok();
 }
 QolResult draw_text(QolUiHandle, int32_t, int32_t, uint32_t) { return ok(); }
-QolResult string_with_font(const char*, int32_t, int32_t, int32_t, int32_t) {
+QolResult string_with_font(const char* text, int32_t, int32_t, int32_t, int32_t) {
     ++g_string_draws;
+    g_drawn_strings.emplace_back(text == nullptr ? "" : text);
     return ok();
 }
 QolResult font_color_rgb(int32_t, int32_t, int32_t) { return ok(); }
@@ -329,6 +339,13 @@ QolResult touch_coordinates(uint64_t param, int64_t* x, int64_t* y) {
     *x = point[0];
     *y = point[1];
     return ok();
+}
+
+void help_list_item_draw(void*, uint32_t, QolUiHandle, uint8_t) {}
+void help_detail_draw(void* user, UiRect viewport) {
+    ++g_help_detail_draws;
+    g_help_last_detail_user = user;
+    g_help_last_detail_viewport = viewport;
 }
 
 QolUiAdapter make_adapter() {
@@ -403,63 +420,25 @@ int main() {
     int checks = 0;
 #define CHECK(expr) do { assert(expr); ++checks; } while (false)
 
-    // 当前测试 inset 下逻辑屏幕为 1008×672；原生返回框保持 (8,8) 78×86，
-    // 左右各留按钮宽度，两栏垂直边距 10px，间距先压至 0 后宽度等比缩放至 183/613。
-    const UiRect left{94, 18, 183, 636};
-    const UiRect right{309, 18, 613, 636};
-    const UiRect left_frame{left.x - 8, left.y - 8, left.w + 32, left.h + 16};
-    const UiRect right_frame{right.x - 8, right.y - 8, right.w + 16, right.h + 16};
-    CHECK(left_frame.x == 86 && left_frame.y == 10);
-    CHECK(left_frame.x + left_frame.w == right_frame.x);
-    CHECK(right_frame.x + right_frame.w == 930 && right_frame.y == 10);
-    CHECK(left_frame.y + left_frame.h == 662 && right_frame.y + right_frame.h == 662);
-    CHECK(left.w == 183 && right.w == 613);
-    // 返回按钮完全恢复原版屏幕绝对位置、尺寸与命中框。
+    const auto rect_matches = [](UiRect actual, UiRect expected) {
+        return actual.x == expected.x && actual.y == expected.y &&
+               actual.w == expected.w && actual.h == expected.h;
+    };
+    const UiRect panel_rect{0, 0, 1008, 672};
     const UiRect panel_nav{qol::contracts::ui_theme::kNavBoxAbsX,
                            qol::contracts::ui_theme::kNavBoxAbsY,
-                           qol::contracts::ui_theme::kNavBoxW, qol::contracts::ui_theme::kNavBoxH};
-    const UiRect nav_abs{panel_nav.x, panel_nav.y,
-                         qol::contracts::ui_theme::kNavBoxW, qol::contracts::ui_theme::kNavBoxH};
-    // 文本按钮/导航演示盒 rect = 右 viewport 原点 + 局部偏移（与实现同基准）。
-    const UiRect text_button_rects[6] = {{right.x + 20, right.y + 120, 220, 48},
-        {right.x + 264, right.y + 120, 220, 48}, {right.x + 20, right.y + 176, 220, 48},
-        {right.x + 264, right.y + 176, 220, 48}, {right.x + 20, right.y + 232, 220, 48},
-        {right.x + 264, right.y + 232, 220, 48}};
-    // 导航演示盒取原生 X/返回尺寸 78×86（与设置页共用同款金属框），间距 88 不重叠。
-    const UiRect nav_demo_rects[3] = {{right.x + 20, right.y + 112, 78, 86},
-        {right.x + 108, right.y + 112, 78, 86}, {right.x + 196, right.y + 112, 78, 86}};
-    const auto overlaps = [](UiRect a, UiRect b) {
-        return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
-    };
-    CHECK(!overlaps(nav_abs, left));  // 不覆盖左栏列表命中区
-    CHECK(nav_abs.x + nav_abs.w == left_frame.x && nav_abs.y == 8 && nav_abs.h == 86);
-    CHECK(!overlaps(panel_nav, text_button_rects[1]));
-    for (const auto& rect : nav_demo_rects) CHECK(!overlaps(nav_abs, rect));
-    // 右栏说明与控件不重叠：控件 rect 全部落在右 viewport 内，且与 detail 文本行
-    // （标题 y+32 / 说明 y+84 / 脚注 y+242，行高按 20 保守估计）带状区域分离。
-    const auto text_band = [&right](int32_t local_y) {
-        return UiRect{right.x, right.y + local_y, right.w, 20};
-    };
-    const UiRect text_button_bands[3] = {text_band(32), text_band(84), text_band(296)};
-    const auto within = [](UiRect rect, UiRect viewport) {
-        return rect.x >= viewport.x && rect.y >= viewport.y &&
-               rect.x + rect.w <= viewport.x + viewport.w &&
-               rect.y + rect.h <= viewport.y + viewport.h;
-    };
-    for (const auto& rect : text_button_rects) {
-        CHECK(within(rect, right));
-        for (const auto& band : text_button_bands) CHECK(!overlaps(rect, band));
-    }
-    const UiRect nav_label_band = text_band(224);
-    for (const auto& rect : nav_demo_rects) {
-        CHECK(within(rect, right));
-        CHECK(!overlaps(rect, text_band(32)) && !overlaps(rect, nav_label_band));
-    }
+                           qol::contracts::ui_theme::kNavBoxW,
+                           qol::contracts::ui_theme::kNavBoxH};
+    const UiRect outer_frame{panel_nav.x + panel_nav.w + 8, 18,
+                             panel_rect.w - panel_nav.x - panel_nav.w - 8 - 10,
+                             panel_rect.h - 18 - 18};
+    CHECK(rect_matches(outer_frame, {94, 18, 904, 636}));
 
     auto ui = make_adapter();
     CHECK(ui_components_bind(&ui));
     const QolUiComponents* api = ui_components_api();
-    CHECK(api->minor == kUiContractMinor && api->nav_button_create != nullptr);
+    CHECK(api != nullptr && api->minor == kUiContractMinor &&
+          api->nav_button_create != nullptr && api->draw_container_ornamented != nullptr);
 
     QolHostSdk sdk{};
     sdk.ui = &ui;
@@ -471,107 +450,58 @@ int main() {
     CHECK(debug_components_register(&sdk));
     CHECK(g_provider != nullptr && g_provider->panel_id != nullptr &&
           std::strcmp(g_provider->panel_id, "debug_components") == 0);
+    CHECK(!g_provider->active());
     debug_components_set_enabled(true);
     CHECK(g_provider->open());
     g_provider->callbacks->enter();
     CHECK(g_provider->active());
+    g_provider->callbacks->enter();  // 重复 enter 不重复创建面板与导航控件。
 
-    // 结构：root = [双栏页, 面板导航按钮, 分类0 八枚文本按钮（胶囊/装饰各三态 + 选中态两枚）]。
     Control* root = root_control();
-    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 10);
-    CHECK(root->rect.x == 0 && root->rect.y == 0 && root->rect.w == 1008 && root->rect.h == 672);
-    Control* columns = root->children[0].get();
-    CHECK(columns->rect.x == 0 && columns->rect.y == 0 &&
-          columns->rect.w == 1008 && columns->rect.h == 672);
-    Control* panel_nav_control = root->children[1].get();
+    CHECK(root != nullptr && root->kind == 0 && root->children.size() == 1);
+    CHECK(rect_matches(root->rect, panel_rect));
+    CHECK(g_live == 2);
+    Control* panel_nav_control = root->children[0].get();
     g_nav_control = panel_nav_control;
-    CHECK(columns->kind == 3);
     CHECK(panel_nav_control->kind == 1 && panel_nav_control->click != nullptr);
-    CHECK(panel_nav_control->rect.x == panel_nav.x &&
-          panel_nav_control->rect.y == panel_nav.y &&
-          panel_nav_control->rect.w == panel_nav.w && panel_nav_control->rect.h == panel_nav.h);
-    for (size_t i = 0; i < 6; ++i) {
-        Control* text_button = root->children[2 + i].get();
-        CHECK(text_button->kind == 1 && text_button->rect.x == text_button_rects[i].x &&
-              text_button->rect.y == text_button_rects[i].y &&
-              text_button->rect.w == text_button_rects[i].w &&
-              text_button->rect.h == text_button_rects[i].h);
-    }
-    // 双栏页内部：左列表（原生 scroll）9 行，行高 56。
-    CHECK(columns->children.size() == 1);
-    Control* list = columns->children[0].get();
-    CHECK(list->kind == 4 && list->rect.x == left.x && list->rect.w == left.w);
-    CHECK(list->children.size() == 1);
-    Control* group = list->children[0].get();
-    CHECK(group->children.size() == 9);
-    for (size_t i = 0; i < 9; ++i) {
-        CHECK(group->children[i]->rect.y == static_cast<int64_t>(i) * 56 &&
-              group->children[i]->rect.h == 56 && group->children[i]->click != nullptr);
-    }
+    CHECK(rect_matches(panel_nav_control->rect, panel_nav));
 
-    // 首帧 process：绘制双栏（框架 + detail 文本 + 左列表）与自动导航按钮（depth 1 → X）。
+    // Debug Components 只绘制单一最大外框观察内容，不再创建分类页、形状样例或弹窗入口。
     g_provider->callbacks->process();
-    CHECK(g_border_draws == 2);       // 只绘制左右栏自身边框
-    CHECK(g_string_draws >= 5);       // 左列表 5 个分类名
-    CHECK(g_close_draws >= 1);        // 面板导航按钮（depth 1 → X）
-    g_provider->callbacks->process();
-    CHECK(g_native_toggle_draws == 0);  // 开关胶囊分类未选中时不绘制
+    CHECK(g_border_draws == 1 && g_border_rects.size() == 1);
+    CHECK(rect_matches(g_border_rects.back(), outer_frame));
+    CHECK(g_drawn_strings.size() == 4);
+    CHECK(g_drawn_strings[0] == "最大外层面板样例");
+    CHECK(g_drawn_strings[1] == "面板区域 1008 × 672");
+    CHECK(g_drawn_strings[2].find("主题色参考 kPanelBg  #") == 0);
+    CHECK(g_drawn_strings[3] == "容器外框 904 × 636");
+    CHECK(g_fill_draws == 1 && g_alpha_fill_draws == 0 && g_native_toggle_draws == 0);
+    CHECK(g_close_draws >= 1);
+    CHECK(g_choice_open_count == 0 && !g_choice_active);
+    CHECK(g_confirmation_open_count == 0 && !g_confirmation_active);
 
-    // 切换到「X/导航按钮」分类：帧安全点重建右栏控件（文本按钮销毁、导航演示创建）。
-    CHECK(api->help_page_set_selected(columns, 2).ok == kQolOk);
-    const int deletes_before = g_deletes;
-    g_provider->callbacks->process();
-    CHECK(g_deletes > deletes_before);  // 旧分类控件在 process 内销毁
-    CHECK(root->children.size() == 5);  // 双栏页 + 面板导航 + 三枚导航演示
-    CHECK(root->children[0].get() == columns && root->children[1].get() == panel_nav_control);
-    for (size_t i = 0; i < 3; ++i) {
-        Control* demo = root->children[2 + i].get();
-        CHECK(demo->kind == 1 && demo->rect.x == nav_demo_rects[i].x &&
-              demo->rect.y == nav_demo_rects[i].y);
-    }
-    CHECK(g_string_draws > 5);
+    // ornamented container 在 48×48 边界接受绘制，任一维度小于 48 时拒绝且不绘制。
+    const size_t borders_before_minimum_checks = g_border_rects.size();
+    CHECK(api->draw_container_ornamented({200, 200, 47, 48}).code == kQolErrInvalidArgument);
+    CHECK(api->draw_container_ornamented({200, 200, 48, 47}).code == kQolErrInvalidArgument);
+    CHECK(g_border_rects.size() == borders_before_minimum_checks);
+    CHECK(api->draw_container_ornamented({200, 200, 48, 48}).code == kQolOk);
+    CHECK(g_border_rects.size() == borders_before_minimum_checks + 1);
+    CHECK(rect_matches(g_border_rects.back(), {200, 200, 48, 48}));
 
-    // 切到「开关胶囊」分类（纯绘制，无交互控件）→ 右栏不再有按钮。
-    CHECK(api->help_page_set_selected(columns, 1).ok == kQolOk);
-    g_provider->callbacks->process();
-    CHECK(root->children.size() == 2);  // 双栏页 + 面板导航
-    CHECK(g_native_toggle_draws >= 6);
-    // 开关胶囊 rect（屏幕绝对，detail 回调收到 root 原点平移后的 viewport）全部
-    // 落在右 viewport 内，且与标题行（y+32）与说明行（y+296）文本带分离。
-    CHECK(g_toggle_rects.size() >= 6);
-    const UiRect right_abs{right.x + root->rect.x, right.y + root->rect.y, right.w, right.h};
-    const auto abs_text_band = [&right_abs](int32_t local_y) {
-        return UiRect{right_abs.x, right_abs.y + local_y, right_abs.w, 20};
-    };
-    const int64_t switch_group_x = (right_abs.w - 282) / 2;
-    const int32_t switch_widths[6] = {116, 116, 94, 94, 150, 150};
-    const int32_t switch_y[6] = {76, 76, 144, 144, 204, 204};
-    CHECK(g_toggle_rects.size() == 6);
-    for (size_t i = 0; i < g_toggle_rects.size(); ++i) {
-        const auto& rect = g_toggle_rects[i];
-        CHECK(rect.x == right_abs.x + switch_group_x + static_cast<int64_t>(i % 2) * 132);
-        CHECK(rect.y == right_abs.y + switch_y[i] && rect.w == switch_widths[i]);
-        CHECK(within(rect, right_abs));
-        CHECK(!overlaps(rect, abs_text_band(32)) && !overlaps(rect, abs_text_band(296)));
-    }
-
-    // 面板导航按钮点击（自适应组件）→ 请求弹栈顶。
+    // 返回按钮保留直接 back 请求及原生按下/移出/抬起命中生命周期。
     g_back_requested = false;
     panel_nav_control->click(panel_nav_control->user);
     CHECK(g_back_requested);
-
-    // 新语义：按下只派发/置原生态并消费，松开仍命中导航按钮才经原生树 ExecuteProc 触发。
-    // root 覆盖逻辑全屏，事件坐标与右栏标题带中的 nav rect 同为屏幕坐标。
-    int64_t nav_hit[] = {nav_abs.x + nav_abs.w / 2, nav_abs.y + nav_abs.h / 2};
+    int64_t nav_hit[] = {panel_nav.x + panel_nav.w / 2, panel_nav.y + panel_nav.h / 2};
     const uint64_t nav_hit_param = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(nav_hit));
     g_back_requested = false;
     g_nav_pressed = false;
     CHECK(g_provider->callbacks->event(0x17, nav_hit_param, 0x10) == 1);
-    CHECK(!g_back_requested);  // 按下不触发
+    CHECK(!g_back_requested);
     CHECK(g_provider->callbacks->event(0x18, nav_hit_param, 0x10) == 1);
-    CHECK(g_back_requested);   // 松开触发恰一次
+    CHECK(g_back_requested);
 
-    // 移出后松开：原生取消，不触发（点在 nav 盒外）。
     int64_t elsewhere[] = {480, 400};
     const uint64_t elsewhere_param = static_cast<uint64_t>(reinterpret_cast<uintptr_t>(elsewhere));
     g_back_requested = false;
@@ -581,7 +511,6 @@ int main() {
     CHECK(g_provider->callbacks->event(0x18, nav_hit_param, 0x10) == 1);
     CHECK(!g_back_requested);
 
-    // bit63 系统子事件只消费、不派发、不改手势态；随后松开仍正常触发。
     g_back_requested = false;
     g_nav_pressed = false;
     CHECK(g_provider->callbacks->event(0x17, nav_hit_param, 0x10) == 1);
@@ -590,65 +519,54 @@ int main() {
     CHECK(g_provider->callbacks->event(0x18, nav_hit_param, 0x10) == 1);
     CHECK(g_back_requested);
 
-    // 其它控件（双栏页文本区）按下/抬起不触发导航返回。
     g_back_requested = false;
     CHECK(g_provider->callbacks->event(0x17, elsewhere_param, 0x10) == 1);
     CHECK(g_provider->callbacks->event(0x18, elsewhere_param, 0x10) == 1);
     CHECK(!g_back_requested);
 
-    // 基础形状类别保留静态绘制示例，形状绘制原语在 Debug 面板帧中被实际调用。
-    CHECK(api->help_page_set_selected(columns, 7).ok == kQolOk);
-    const int shape_draws_before = g_alpha_fill_draws;
-    g_provider->callbacks->process();
-    CHECK(g_alpha_fill_draws > shape_draws_before + 1);
-
-    // 原生确认入口由三个独立根子项触发，不挂在 HelpPage 的 native scroll 子树内。
-    CHECK(api->help_page_set_selected(columns, 8).ok == kQolOk);
-    g_provider->callbacks->process();
-    CHECK(root->children.size() == 5);  // 双栏页、导航、3 个 Debug-only 弹窗入口。
-    Control* choice_demo = root->children[2].get();
-    Control* no_price_demo = root->children[3].get();
-    Control* price_demo = root->children[4].get();
-    choice_demo->click(choice_demo->user);
-    CHECK(g_choice_open_count == 1 && g_choice_active);
-    CHECK(g_last_choice.count == 3 && g_last_choice.close_index == 2 &&
-          std::strcmp(g_last_choice.dialog_type_id, "core.custom_ui.debug.choice") == 0);
-    g_last_choice.on_select(1, g_last_choice.user);
-    g_choice_active = false;
-    no_price_demo->click(no_price_demo->user);
-    CHECK(g_confirmation_open_count == 1 && g_confirmation_active);
-    CHECK(g_last_confirmation_text.price == 0);
-    CHECK(std::strcmp(g_last_confirmation_text.message, "确认执行该操作？") == 0);
-    g_confirmation_active = false;
-    g_last_confirmation_text.on_confirm(g_last_confirmation_text.user);
-    price_demo->click(price_demo->user);
-    CHECK(g_confirmation_open_count == 2 && g_confirmation_active &&
-          g_last_confirmation_text.price == 100);
-    CHECK(std::strcmp(g_last_confirmation_text.message, "是否出售该物品？") == 0);
-    g_confirmation_active = false;
-    g_last_confirmation_text.on_cancel(g_last_confirmation_text.user);
-    price_demo->click(price_demo->user);
-    CHECK(g_confirmation_open_count == 3 && g_confirmation_active &&
-          g_last_confirmation_text.price == 100);
-    const uint64_t owned_demo_token = g_next_confirmation_token - 1;
-    choice_demo->click(choice_demo->user);
-    CHECK(g_choice_open_count == 2 && g_choice_active);
-
-    // 关闭：组件侧树释放，native 由宿主删除。
+    const size_t borders_before_close = g_border_rects.size();
     g_provider->close();
     CHECK(!g_provider->active());
-    CHECK(!g_confirmation_active && g_last_closed_confirmation_token == owned_demo_token);
-    CHECK(!g_choice_active && g_choice_close_count == 1);
-    CHECK(api->help_page_draw(columns).code == kQolErrNotFound);
-    remove_control(root);
+    g_provider->callbacks->process();
+    CHECK(g_border_rects.size() == borders_before_close);
+    CHECK(g_choice_open_count == 0 && g_confirmation_open_count == 0);
+    remove_control(root);  // 组件归还其句柄；原生树由宿主释放。
+    CHECK(g_live == 0);
+
+    // HelpPage 的选择、绘制回调及销毁仍作为独立组件契约回归，不属于 Debug Components 示例页。
+    int help_option_users[2]{};
+    const UiHelpOption help_options[] = {
+        {&help_option_users[0], &help_detail_draw},
+        {&help_option_users[1], &help_detail_draw},
+    };
+    const UiHelpPageDesc help_desc{
+        panel_rect, {94, 18, 183, 636}, {309, 18, 613, 636}, 56,
+        help_options, 2, 0, &help_list_item_draw, nullptr};
+    QolUiHandle help_page = nullptr;
+    CHECK(api->help_page_create(&help_desc, nullptr, &help_page).code == kQolOk);
+    CHECK(help_page != nullptr);
+    Control* help_native_root = root_control();
+    CHECK(help_native_root != nullptr && help_native_root->kind == 0);
+    int32_t selected = -1;
+    CHECK(api->help_page_get_selected(help_page, &selected).code == kQolOk && selected == 0);
+    CHECK(api->help_page_set_selected(help_page, 2).code == kQolErrInvalidArgument);
+    CHECK(api->help_page_set_selected(help_page, 1).code == kQolOk);
+    const size_t help_borders_before_draw = g_border_rects.size();
+    CHECK(api->help_page_draw(help_page).code == kQolOk);
+    CHECK(g_border_rects.size() == help_borders_before_draw + 2);
+    CHECK(g_help_detail_draws == 1 && g_help_last_detail_user == &help_option_users[1]);
+    CHECK(rect_matches(g_help_last_detail_viewport, {309, 18, 613, 636}));
+    CHECK(api->help_page_set_selected(help_page, -1).code == kQolOk);
+    CHECK(api->help_page_draw(help_page).code == kQolOk);
+    CHECK(g_help_detail_draws == 1);
+    CHECK(api->destroy(help_page).code == kQolOk);
+    CHECK(api->help_page_draw(help_page).code == kQolErrNotFound);
     CHECK(g_live == 0);
 
     debug_components_set_enabled(false);
-    CHECK(g_choice_close_count == 1);  // Panel/disable/unregister cleanup is idempotent.
-    g_choice_active = true;  // A different owner's choice must not be closed by stale demo state.
+    CHECK(g_close_calls == 1);
     debug_components_unregister(&sdk);
-    CHECK(g_choice_active && g_choice_close_count == 1);
-    g_choice_active = false;
+    CHECK(g_close_calls == 2);
     ui_components_unbind();
     std::printf("debug_two_column checks: %d\n", checks);
     return 0;
