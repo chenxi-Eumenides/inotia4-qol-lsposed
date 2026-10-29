@@ -63,9 +63,12 @@ int equipment_grade_from_rarity(int rarity);
 // 词条可升阶：质量查询 status==kQolOk、level 在 [0,4]、区间非退化（max>min）。
 bool affix_upgradable(int32_t status, int32_t level, AttributeRange range);
 
-// 材料需求数量 = ceil(base_count × grade × (kMaxCharacterLevel − level) / kMaxCharacterLevel)。
-// 纯整数运算，无浮点。level 钳到 [0,105]；base_count<1 或 grade<1 → 返回 0 由调用方处理。
-// 边界：level=105 → 0（满级不耗材料）；level≤1 且 grade=5 → 5；grade=1、level=1 → 1。
+// 材料需求数量 = max(0, base_count + grade − F)，组合底价 base_count+grade 随档位 +1 递增；
+// F 为随等级线性增长的折扣额度：F = F1 + floor((level − L1) × (F2 − F1) / (L2 − L1))，
+// L1=25、L2=95、F1=2、F2=10（语义见实现内阈值注释，可调整）。
+// 纯整数 floor 运算。level 钳到 [0,105]；base_count<1 或 grade<1 → 返回 0 由调用方处理。
+// 边界：level=24 → (1,1)=1、level=25 → (1,1)=0（最低组合零费）；level=94 → (5,5)=1、level≥95 全部组合 0。
+// 同一 level 下非零消耗两两互异且随 base_count+grade 严格 +1 递增（如 25 级 [0,1,2,3,4]、43 级 [0,0,0,1,2]）。
 int material_count_for(int base_count, int grade, int level);
 
 // ---- 3 格隐式配方的放料/扣料数量判定（纯逻辑，host 可测；需求见 §2.8）----

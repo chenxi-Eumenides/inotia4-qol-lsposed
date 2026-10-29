@@ -501,7 +501,7 @@ static void test_material_count() {
     CHECK(!cr::affix_upgradable(kQolOk, 5, range));
     CHECK(!cr::affix_upgradable(kQolOk, 1, {10, 10}));
 
-    // 满级 105 → 0 瓶（idea.md §7：满级后无需消耗卓越灵药）；超上限同样 0，不得为负。
+    // 满级 105 → 0（95 级起全部组合免费）；超上限同样 0，不得为负。
     for (int cat = cr::kJewelCategoryFirst; cat <= cr::kJewelCategoryLast; ++cat) {
         const int grade = cr::jewel_grade_from_category(cat);
         CHECK(cr::material_count_for(1, grade, 105) == 0);
@@ -509,31 +509,41 @@ static void test_material_count() {
     }
     CHECK(cr::material_count_for(1, 5, 200) == 0);
 
-    // 低等级 ≈ 原量：grade 1..5 对应 1..5 瓶（低级1瓶、中级2瓶、类推）。
-    for (int g = 1; g <= 5; ++g) {
-        CHECK(cr::material_count_for(1, g, 1) == g);
-        CHECK(cr::material_count_for(1, g, 0) == g);
-        CHECK(cr::material_count_for(1, g, -5) == g);  // 负等级钳到 0
-    }
-    CHECK(cr::material_count_for(2, 1, 1) == 2);  // base_count 作倍率
-    CHECK(cr::material_count_for(3, 5, 105) == 0);
+    // 零费等级边界：最低组合 (1,1) 在 25 级免费、24 级仍为 1；最高组合 (5,5) 在 95 级免费、94 级仍为 1。
+    CHECK(cr::material_count_for(1, 1, 25) == 0);
+    CHECK(cr::material_count_for(1, 1, 24) == 1);
+    CHECK(cr::material_count_for(5, 5, 95) == 0);
+    CHECK(cr::material_count_for(5, 5, 94) == 1);
+    // 自升组合 (g,g) 的零费等级随档位升高：25 / 43 / 60 / 78 / 95，且前一级为 1。
+    CHECK(cr::material_count_for(2, 2, 43) == 0);
+    CHECK(cr::material_count_for(2, 2, 42) == 1);
+    CHECK(cr::material_count_for(3, 3, 60) == 0);
+    CHECK(cr::material_count_for(3, 3, 59) == 1);
+    CHECK(cr::material_count_for(4, 4, 78) == 0);
+    CHECK(cr::material_count_for(4, 4, 77) == 1);
 
-    // 向上取整：ceil(5 × 53/105) = ceil(2.52…) = 3；ceil(5 × 52/105) = 3。
-    CHECK(cr::material_count_for(1, 5, 52) == 3);
-    CHECK(cr::material_count_for(1, 5, 53) == 3);
-    // 任何非零需求不得被取整成 0：ceil(1 × 104/105) = 1、ceil(1 × 52/105) = 1。
-    CHECK(cr::material_count_for(1, 1, 1) == 1);
-    CHECK(cr::material_count_for(1, 1, 53) == 1);
+    // 低等级折扣为负：消耗 = base+grade+|F|；负等级钳到 0，与 level=0 同值。
+    for (int g = 1; g <= 5; ++g) {
+        CHECK(cr::material_count_for(1, g, 0) == g + 2);
+        CHECK(cr::material_count_for(1, g, -5) == g + 2);
+    }
+    CHECK(cr::material_count_for(2, 1, 0) == 4);  // 底价 base+grade 作加数
+
+    // 同一 level 下不同档位严格 +1 递增、非零两两互异：25 级 [0,1,2,3,4]、43 级 [0,0,0,1,2]。
+    for (int g = 1; g <= 5; ++g) {
+        CHECK(cr::material_count_for(1, g, 25) == g - 1);
+        CHECK(cr::material_count_for(1, g, 43) == (g >= 4 ? g - 3 : 0));
+    }
 
     // 非法输入 → 0（调用方据此保持原需求数，不会变成免费合成）。
     CHECK(cr::material_count_for(0, 5, 0) == 0);
     CHECK(cr::material_count_for(-1, 1, 0) == 0);
     CHECK(cr::material_count_for(1, 0, 0) == 0);
 
-    // 对等级单调不增，且始终落在 [0, base×grade]。
+    // 对等级单调不增，且始终非负，最终归 0。
     for (int g = 1; g <= 5; ++g) {
         int prev = cr::material_count_for(1, g, 0);
-        CHECK(prev == g);
+        CHECK(prev == g + 2);
         for (int lv = 1; lv <= cr::kMaxCharacterLevel; ++lv) {
             const int cur = cr::material_count_for(1, g, lv);
             CHECK(cur <= prev);

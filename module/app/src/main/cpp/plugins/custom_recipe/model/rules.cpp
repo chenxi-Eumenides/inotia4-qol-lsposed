@@ -181,16 +181,33 @@ bool affix_upgradable(int32_t status, int32_t level, AttributeRange range) {
 }
 
 int material_count_for(int base_count, int grade, int level) {
+    // 零费等级阈值：kFreeStartLevel = 最低底价组合（base+grade=2）恰好免费的等级；
+    // kFreeFullLevel = 最高底价组合（base+grade=10）恰好免费的等级。
+    const int kFreeStartLevel = 25;
+    const int kFreeFullLevel = 95;
+    // 折扣额度端点：kFreeStartLevel 级时折扣 = 最低底价、kFreeFullLevel 级时折扣 = 最高底价。
+    // 改动阈值时须与档位 1..5 推导出的底价范围 [2,10] 两端对齐，否则端点档位的零费等级会偏离预期。
+    const int kDiscountAtStart = 2;
+    const int kDiscountAtFull = 10;
+
     if (base_count < 1 || grade < 1) return 0;
     int lv = level;
     if (lv < 0) lv = 0;
     if (lv > kMaxCharacterLevel) lv = kMaxCharacterLevel;
-    // ceil(base × grade × (105 − lv) / 105)，全程整数，避免浮点端点漂移。
-    const long long numer =
-        static_cast<long long>(base_count) * static_cast<long long>(grade) *
-        static_cast<long long>(kMaxCharacterLevel - lv);
-    if (numer <= 0) return 0;
-    return static_cast<int>((numer + kMaxCharacterLevel - 1) / kMaxCharacterLevel);
+
+    // 消耗 = max(0, base_count + grade − F)，
+    // F = kDiscountAtStart + floor((lv − kFreeStartLevel) × (kDiscountAtFull − kDiscountAtStart)
+    //                              / (kFreeFullLevel − kFreeStartLevel))。
+    // C++ 整数除法向零取整；被除数为负时须修正为向下取整，否则低等级折扣偏大、零费等级提前。
+    const int span = kFreeFullLevel - kFreeStartLevel;
+    const int scaled = (lv - kFreeStartLevel) * (kDiscountAtFull - kDiscountAtStart);
+    int discount = scaled / span;
+    if (scaled < 0 && scaled % span != 0) --discount;
+    discount += kDiscountAtStart;
+
+    const int price = base_count + grade;
+    if (price <= discount) return 0;
+    return price - discount;
 }
 
 bool slot_add_allowed(int placed_slots, int stack_count) {
