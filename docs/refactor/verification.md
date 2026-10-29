@@ -447,6 +447,15 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | VM-EWM-CHOICE-01：三态与高亮 | **PASS（烟测，C18L v589）**：升级前旧 `features.direction=true`，启动后变为 `false`、`selections={}`；`eight_way` 重启后触屏日志 `movement touch mode=1 candidate=7 ... steps=6/6`、`movement sprite selected=(6,-6) rot=135`；`omnidirectional` 同角度触屏高亮约 20°；关闭后恢复原版四箭头且 `enable=false`。 | 设备 `192.168.3.54:5555`，截图 `.tmp/movement-choice/{eight_ne.png,omni_20_crop.png,closed_crop.png,final-eight.png}`。烟测未覆盖长时间移动。 |
 | VM-EWM-CHOICE-02：碰撞/回退/场景 | **NOT_ACCEPTED（未执行）** | 需真机覆盖撞墙、沿墙滑行、回滚失败恢复坐标、切图/拾取/动画、物理键盘、其他分辨率；Host/烟测不替代这些证据。 |
 
+### 5.29 设置页选择行重开后卡死（2026-10-29；Host/静态/Debug/真机通过）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 现象与根因 | 进入含 choice 行的「更多优化功能」后退出，再点齿轮：panel host 栈仍占输入，settings provider inactive，画面停在主菜单且无响应。根因：`arrow_button_create` 把滚动列表行当外部原生父控件，箭头组件挂到根组件；列表销毁后残留，下一次打开复用的原生行句柄被误认成旧箭头组件，`native_toggle_create` 返回 `unsupported`，`settings_panel_enter` 失败但 host 已压栈。 | 同一问题也影响任意在 scroll row 内创建箭头的页面；修复放在 `core.custom_ui` 组件归属，不放宽 settings 特例。 |
+| 修复 | 箭头按钮识别所属 scroll list 行并借用其 owner；列表行允许 text/arrow 两类子控件；列表销毁时随 owner 递归清理。`PopupHost::dispatch_enter` 在 enter 后 provider 仍 inactive 时关闭栈顶；同 panel 栈顶 inactive 时 `open` 先移除残留再重开。settings close 无条件销毁页面，enter 遇旧 root 先销毁重建。 | 失败分支补日志（catalog/root/list/row/toggle/choice arrow 错误码）；未改移动、碰撞和配置契约。 |
+| Host/静态/Debug | **PASS**：`settings_panel_model_tests`、`settings_panel_widget_tests`、`native_scroll_list_tests`、`core_custom_ui_host_tests` 4/4；`check_arch.py`、`check_http_routes.py`、`git diff --check` 通过；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2610291824_119dddc7ecc2.apk`，SHA-256 `119dddc7ecc262ca1f8edef9868e745ded1da10b4db42a255c1549d3988d0168`。 | 日志 `.tmp/movement-choice/{final-settings-build.log,final-settings-ctest.log,check-arch-settings.log,check-http-settings.log,fix3-build.log}`。 |
+| VM-SETTINGS-REOPEN-01 | **PASS（C18L v589 烟测）**：齿轮进入 →「更多优化功能」→ 返回 → 齿轮重开，`panel_active=true`、choice 行正常显示；连续 3 轮进出后仍正常。选择行右箭头 `关闭→八向→全向`、末项右箭头不前进、左箭头 `全向→八向→关闭` 均写入并读回正确；关闭后 `enable=false`、`selections={}`。 | 截图 `.tmp/movement-choice/{fix3-open1.png,fix3-choice.png,fix3-reopen.png,fix3-cycles.png,omni-row.png}`。未覆盖其他插件面板的同类箭头组合与全部设置页历史验收项。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

@@ -196,8 +196,9 @@ QolResult create_component(ComponentKind kind, uint32_t native_kind, UiRect rect
         return not_found();
     }
     if (parent_component != nullptr && parent_component->kind == ComponentKind::kScrollList &&
-        (borrowed_row_owner == nullptr || kind != ComponentKind::kTextButton)) {
-        return unsupported();  // 列表拥有固定 native 子树，不允许追加独立组件。
+        (borrowed_row_owner == nullptr ||
+         (kind != ComponentKind::kTextButton && kind != ComponentKind::kArrowButton))) {
+        return unsupported();  // 列表行只允许文本按钮和箭头按钮作为独立子控件。
     }
 
     contracts::QolUiHandle native = nullptr;
@@ -1012,8 +1013,24 @@ QolResult arrow_button_create(const contracts::UiArrowButtonDesc* desc,
         !g_adapter->image_unit_load || !g_adapter->control_pressed ||
         !g_adapter->control_absolute_origin || !g_adapter->set_button_enabled) return not_ready();
     (void)g_adapter->image_unit_load(0x59);
+    // 列表行是原生句柄而非注册组件；必须借用所属 scroll list 作为 owner，
+    // 否则箭头会成为根组件，列表销毁后残留并在原生句柄复用后误认新行。
+    Component* borrowed_row_owner = nullptr;
+    if (find_component(parent) == nullptr) {
+        for (const auto& entry : g_components) {
+            Component* candidate = entry.second;
+            if (candidate->kind != ComponentKind::kScrollList) continue;
+            for (const ScrollRow& row : candidate->rows) {
+                if (row.native == parent) {
+                    borrowed_row_owner = candidate;
+                    break;
+                }
+            }
+            if (borrowed_row_owner != nullptr) break;
+        }
+    }
     const QolResult created = create_component(ComponentKind::kArrowButton, 1, desc->rect,
-        parent, nullptr, 0, nullptr, nullptr, nullptr, out, nullptr, true);
+        parent, nullptr, 0, nullptr, nullptr, nullptr, out, borrowed_row_owner, false);
     if (!contracts::succeeded(created)) return created;
     Component* button = find_component(*out);
     button->direction = desc->direction;

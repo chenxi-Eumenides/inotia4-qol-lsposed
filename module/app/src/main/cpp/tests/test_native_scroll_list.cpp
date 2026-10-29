@@ -271,6 +271,23 @@ QolResult set_button_enabled(QolUiHandle button, uint8_t enabled) {
     static_cast<Control*>(button)->enabled = enabled != 0;
     return ok();
 }
+QolResult image_unit_load(int32_t) { return ok(); }
+QolResult image_group(int32_t, QolUiHandle* out) {
+    *out = reinterpret_cast<QolUiHandle>(0x1001);
+    return ok();
+}
+QolResult image_loc(int32_t, int32_t, QolUiHandle* out) {
+    *out = reinterpret_cast<QolUiHandle>(0x1002);
+    return ok();
+}
+QolResult image_loc_size(int32_t, int32_t, int32_t* width, int32_t* height) {
+    *width = 32;
+    *height = 32;
+    return ok();
+}
+QolResult draw_part_scaled(QolUiHandle, int32_t, int32_t, QolUiHandle, int32_t, int32_t, int32_t) {
+    return ok();
+}
 QolResult container(int32_t, int32_t, int32_t, int32_t) { return ok(); }
 QolResult origin(QolUiHandle handle, int64_t* x, int64_t* y) {
     *x = 0;
@@ -318,6 +335,11 @@ QolUiAdapter make_adapter() {
     ui.draw_native_text_button_background = &draw_native_text_button_background;
     ui.draw_native_text_button_label = &draw_native_text_button_label;
     ui.set_button_enabled = &set_button_enabled;
+    ui.image_unit_load = &image_unit_load;
+    ui.image_group = &image_group;
+    ui.image_loc = &image_loc;
+    ui.image_loc_size = &image_loc_size;
+    ui.draw_part_scaled = &draw_part_scaled;
     return ui;
 }
 QolResult register_provider(const PanelProviderSpec* provider) { g_provider = provider; return ok(); }
@@ -554,8 +576,14 @@ int main() {
                                                   &settings_consumed)));
     CHECK(g_text_button_clicks == 1);
     g_execute = nullptr;
+    UiArrowButtonDesc arrow{{332, 8, 60, 80}, kUiArrowRight, 0, &text_button_click, nullptr};
+    QolUiHandle arrow_handle = nullptr;
+    CHECK(succeeded(g_api->arrow_button_create(&arrow, settings_row, &arrow_handle)));
+    CHECK(static_cast<Control*>(arrow_handle)->parent == settings_row);
+    CHECK(succeeded(g_api->arrow_button_draw(arrow_handle)));
     CHECK(succeeded(g_api->destroy(settings_list)) && g_live == 1);
     CHECK(g_api->text_button_draw(settings_button).code == kQolErrNotFound);
+    CHECK(g_api->arrow_button_draw(arrow_handle).code == kQolErrNotFound);
 
     auto invalid = desc;
     invalid.item_height = 0;

@@ -460,4 +460,23 @@ int main() {
     empty.deactivate(true);
     assert(empty.pump(true));
     assert(g_restores == 0 && !empty.active_for_test());
+
+    // Provider 失效但栈顶仍在：再次 open 必须先移除残留栈顶，不能静默返回。
+    reset_fakes();
+    auto stale = make_host();
+    assert(stale.open(kPanelA, true));
+    stale.dispatchers_for_test()->enter();
+    g_a_active = false;
+    assert(!stale.open(kPanelA, true) && g_close_a == 1);
+    for (int i = 0; i < 5 && stale.close_pending_for_test(); ++i) (void)stale.pump(true);
+    assert(!stale.close_pending_for_test());
+    assert(stale.open(kPanelA, true) && g_open_a == 2);
+
+    // enter 回调未把 provider 置为 active：宿主应关闭该面板，避免不可见面板吞输入。
+    reset_fakes();
+    auto failed_enter = make_host();
+    assert(failed_enter.open(kPanelA, true));
+    g_a_active = false;
+    failed_enter.dispatchers_for_test()->enter();
+    assert(g_close_a == 1 && !failed_enter.active_for_test());
 }

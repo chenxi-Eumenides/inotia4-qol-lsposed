@@ -461,15 +461,23 @@ bool build_right_list(int category) {
         if (g_items[i].category == g_categories[category].category) g_right_indices.push_back(i);
     const contracts::UiScrollListDesc list{{kRightX, kRightY, kRightW, kRightH}, kRightRowH,
         static_cast<uint32_t>(g_right_indices.size()), -1, &draw_right_row, nullptr, nullptr};
-    if (!contracts::succeeded(g_components->scroll_list_create(&list, g_root, &g_right))) return false;
-    if (!contracts::succeeded(g_components->scroll_list_set_selection_enabled(g_right, 0))) {
+    const QolResult right_create = g_components->scroll_list_create(&list, g_root, &g_right);
+    if (!contracts::succeeded(right_create)) {
+        CORE_UI_LOG_INFO("settings right list create failed code=%d", right_create.ok);
+        return false;
+    }
+    const QolResult selection = g_components->scroll_list_set_selection_enabled(g_right, 0);
+    if (!contracts::succeeded(selection)) {
+        CORE_UI_LOG_INFO("settings right list selection failed code=%d", selection.ok);
         destroy_right_list(); return false;
     }
     g_choice_contexts.resize(g_items.size() * 2);
     for (uint32_t row = 0; row < g_right_indices.size(); ++row) {
         const auto i = g_right_indices[row];
         QolUiHandle handle = nullptr;
-        if (!contracts::succeeded(g_components->scroll_list_get_row(g_right, row, &handle))) {
+        const QolResult row_result = g_components->scroll_list_get_row(g_right, row, &handle);
+        if (!contracts::succeeded(row_result)) {
+            CORE_UI_LOG_INFO("settings row get failed row=%u code=%d", row, row_result.ok);
             destroy_right_list(); return false;
         }
         const int32_t control_left = settings_model::right_control_left(kRightW);
@@ -493,18 +501,26 @@ bool build_right_list(int category) {
                 &g_choice_contexts[static_cast<size_t>(i) * 2 + 1]};
             g_choice_contexts[static_cast<size_t>(i) * 2] = {i, g_generation, -1};
             g_choice_contexts[static_cast<size_t>(i) * 2 + 1] = {i, g_generation, 1};
-            if (!contracts::succeeded(g_components->arrow_button_create(&left, handle,
-                    &g_states[i].choice_left)) ||
-                !contracts::succeeded(g_components->arrow_button_create(&right, handle,
-                    &g_states[i].choice_right))) {
+            const QolResult left_arrow = g_components->arrow_button_create(
+                &left, handle, &g_states[i].choice_left);
+            const QolResult right_arrow = contracts::succeeded(left_arrow)
+                ? g_components->arrow_button_create(&right, handle, &g_states[i].choice_right)
+                : left_arrow;
+            if (!contracts::succeeded(left_arrow) || !contracts::succeeded(right_arrow)) {
+                CORE_UI_LOG_INFO("settings choice arrow create failed item=%u code=%d/%d",
+                                 i, left_arrow.ok, right_arrow.ok);
                 destroy_right_list(); return false;
             }
         } else {
             const contracts::UiNativeToggleDesc toggle{{control_left, control_top,
                 settings_model::kToggleWidth, settings_model::kToggleHeight}, g_states[i].confirmed,
                 static_cast<uint8_t>(toggle_enabled(i)), &native_toggle_changed, &g_contexts[i]};
-            if (!contracts::succeeded(g_components->native_toggle_create(&toggle, handle,
-                &g_states[i].toggle))) { destroy_right_list(); return false; }
+            const QolResult toggle_result = g_components->native_toggle_create(
+                &toggle, handle, &g_states[i].toggle);
+            if (!contracts::succeeded(toggle_result)) {
+                CORE_UI_LOG_INFO("settings toggle create failed item=%u code=%d", i, toggle_result.ok);
+                destroy_right_list(); return false;
+            }
         }
         sync_controls(i);
     }
@@ -851,18 +867,32 @@ bool components_complete() {
         g_components->draw_control_text && g_components->draw_container_ornamented &&
         g_components->dispatch_native_event;
 }
+void destroy_page();
 void settings_panel_enter() {
-    if (!main_thread() || !components_complete() || g_control == nullptr) return;
-    if (g_root != nullptr) { refresh_all_values(); return; }
+    if (!main_thread() || !components_complete() || g_control == nullptr) {
+        CORE_UI_LOG_INFO("settings enter blocked preconditions");
+        return;
+    }
+    if (g_root != nullptr) destroy_page();
     if (!g_ui->create_control || !g_ui->set_rect || !g_ui->delete_control ||
         !g_ui->control_absolute_origin || !g_ui->fill_rect || !g_ui->begin_frame ||
-        !g_ui->end_frame || !g_ui->hit_test) return;
-    if (!load_catalog()) { set_status("功能目录读取失败"); return; }
+        !g_ui->end_frame || !g_ui->hit_test) {
+        CORE_UI_LOG_INFO("settings enter blocked ui api");
+        return;
+    }
+    if (!load_catalog()) {
+        CORE_UI_LOG_INFO("settings enter blocked catalog");
+        set_status("功能目录读取失败");
+        return;
+    }
     refresh_all_values();
     int32_t x = 0, y = 0;
     if (g_ui->screen_inset_width) (void)g_ui->screen_inset_width(&x);
     if (g_ui->screen_inset_height) (void)g_ui->screen_inset_height(&y);
-    if (!contracts::succeeded(g_ui->create_control(0, nullptr, &g_root)) || g_root == nullptr) return;
+    if (!contracts::succeeded(g_ui->create_control(0, nullptr, &g_root)) || g_root == nullptr) {
+        CORE_UI_LOG_INFO("settings enter blocked root create");
+        return;
+    }
     (void)g_ui->set_rect(g_root, {x, y, kPanelW, kPanelH});
     if (g_components->nav_button_create) {
         const contracts::UiNavButtonDesc nav{{kBackAbsX - x, kBackAbsY - y, kBackW, kBackH},
@@ -878,8 +908,17 @@ void settings_panel_enter() {
     if (!g_categories.empty()) {
         const contracts::UiScrollListDesc list{{kLeftX, kLeftY, kLeftW, kLeftH}, kLeftRowH,
             static_cast<uint32_t>(g_categories.size()), 0, &draw_left_row, &on_left_select, nullptr};
-        if (!contracts::succeeded(g_components->scroll_list_create(&list, g_root, &g_left)) ||
-            !build_right_list(0)) { destroy_page(); return; }
+        const QolResult left_create = g_components->scroll_list_create(&list, g_root, &g_left);
+        if (!contracts::succeeded(left_create)) {
+            CORE_UI_LOG_INFO("settings enter blocked left list code=%d", left_create.ok);
+            destroy_page();
+            return;
+        }
+        if (!build_right_list(0)) {
+            CORE_UI_LOG_INFO("settings enter blocked right list");
+            destroy_page();
+            return;
+        }
     }
     std::lock_guard<std::mutex> lock(g_mtx); g_panel_active = true;
 }
@@ -1033,7 +1072,7 @@ void settings_bind_sdk(const contracts::QolHostSdk* sdk, contracts::QolOwnerToke
 void settings_bind_game(const contracts::QolGameHost* game) { g_game = game; }
 bool settings_provider_open() { return plugin_enabled() && g_control != nullptr && components_complete(); }
 bool settings_provider_active() { std::lock_guard<std::mutex> lock(g_mtx); return g_panel_active; }
-void settings_provider_close() { if (settings_provider_active()) settings_ui_close_panel(); }
+void settings_provider_close() { settings_ui_close_panel(); }
 const char* settings_provider_block_reason() { return settings_provider_active() ? "ui occupied: settings panel" : nullptr; }
 const contracts::PanelCallbacks* settings_panel_callbacks() {
     static const contracts::PanelCallbacks callbacks{&settings_panel_enter, &settings_panel_process,

@@ -168,8 +168,10 @@ bool PopupHost::open(const contracts::PanelProviderSpec& provider, bool main_thr
         provider.close == nullptr || close_pending_) return false;
     if (stack_size_ > 0 && std::strcmp(stack_[stack_size_ - 1].provider->panel_id,
                                        provider.panel_id) == 0) {
-        return stack_[stack_size_ - 1].provider->active == nullptr ||
-               stack_[stack_size_ - 1].provider->active();
+        const auto* top = stack_[stack_size_ - 1].provider;
+        if (top->active == nullptr || top->active()) return true;
+        // Provider 已失效但宿主栈仍残留：先移除不可见栈顶，再允许本次重新打开。
+        if (stack_size_ != 1 || !close_top() || close_pending_) return false;
     }
     if (stack_size_ >= kStackCapacity) return false;
     const uint64_t open_generation = allocate_open_generation();
@@ -618,6 +620,14 @@ void PopupHost::dispatch_enter() {
     }
     const auto* cb = current_callbacks(); if (cb != nullptr && cb->enter != nullptr) cb->enter();
     --dispatch_depth_;
+    if (stack_size_ > 0) {
+        const auto* provider = stack_[stack_size_ - 1].provider;
+        if (provider->active != nullptr && !provider->active()) {
+            // enter 失败时不能留下不可见但吞输入的栈顶。
+            log_message("dispatch enter inactive; closing panel=%s", provider->panel_id);
+            (void)close_top();
+        }
+    }
     restore_if_idle();
 }
 void PopupHost::dispatch_process() {
