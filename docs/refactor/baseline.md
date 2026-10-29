@@ -33,6 +33,7 @@
 | `plugins/attribute_quality` | 6 |
 | `plugins/attribute_range_display` | 4 |
 | `plugins/autosell` | 31 |
+| `plugins/better_move` | 4 |
 | `plugins/character_panel_i18n` | 6 |
 | `plugins/core.api` | 6 |
 | `plugins/core.character` | 6 |
@@ -49,7 +50,6 @@
 | `plugins/craft_lottery` | 8 |
 | `plugins/custom_map` | 8 |
 | `plugins/custom_recipe` | 19 |
-| `plugins/eight_way_move` | 4 |
 | `plugins/extension_bag` | 131 |
 | `plugins/module_health` | 2 |
 | `plugins/popup_blocker` | 2 |
@@ -110,7 +110,7 @@
 | `host` | `infra` | 62 |
 | `plugins/custom_recipe` | `contracts` | 44 |
 | `plugins/save_backup` | `contracts` | 40 |
-| `plugins/core.custom_ui` | `contracts` | 38 |
+| `plugins/core.custom_ui` | `contracts` | 37 |
 | `plugins/autosell` | `contracts` | 31 |
 | `plugins/core.save` | `contracts` | 19 |
 | `legacy/system` | `game` | 18 |
@@ -172,6 +172,7 @@
 | `attribute_quality` | `plugins/attribute_quality` | 6 |
 | `attribute_range_display` | `plugins/attribute_range_display` | 4 |
 | `autosell` | `plugins/autosell` | 31 |
+| `better_move` | `plugins/better_move` | 4 |
 | `character_panel_i18n` | `plugins/character_panel_i18n` | 6 |
 | `core.api` | `plugins/core.api` | 6 |
 | `core.character` | `plugins/core.character` | 6 |
@@ -188,7 +189,6 @@
 | `craft_lottery` | `plugins/craft_lottery` | 8 |
 | `custom_map` | `plugins/custom_map` | 8 |
 | `custom_recipe` | `plugins/custom_recipe` | 19 |
-| `eight_way_move` | `plugins/eight_way_move` | 4 |
 | `extension_bag` | `plugins/extension_bag` | 131 |
 | `module_health` | `plugins/module_health` | 2 |
 | `popup_blocker` | `plugins/popup_blocker` | 2 |

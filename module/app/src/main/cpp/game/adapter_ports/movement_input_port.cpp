@@ -13,6 +13,10 @@ void set_input_mode(contracts::QolMovementInputMode mode) {
     qol::game::input::set_mode(mode);
 }
 
+void set_input_step(int32_t step) {
+    qol::game::input::set_step(step);
+}
+
 const contracts::QolMovementInputPort kPort{
     contracts::kQolPortMovementInputVersion,
     {
@@ -27,6 +31,7 @@ const contracts::QolMovementInputPort kPort{
         &qol::game::input::handle_wait_coord,
         &qol::game::input::access::map_blocking_query,
         &set_input_mode,
+        &set_input_step,
     },
 };
 

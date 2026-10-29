@@ -17,7 +17,11 @@ namespace {
 std::atomic<bool> g_enabled{false};
 std::atomic<contracts::QolMovementInputMode> g_mode{
     contracts::QolMovementInputMode::kDisabled};
+// 基础步长只由 better_move 的帧任务写入；候选表按 (模式, 步长) 懒计算并缓存在主线程。
+std::atomic<int32_t> g_step{8};
 State g_state;
+CandidateSet g_candidates;
+std::atomic<bool> g_candidates_valid{false};
 void* g_last_lead = nullptr;
 
 // 0x15 可见摇杆的半径（UIPlay_Create：252x252）；中心 = 控件绝对左上角 + 126。
@@ -115,6 +119,29 @@ bool enabled() {
 contracts::QolMovementInputMode current_mode() {
     return g_mode.load(std::memory_order_acquire);
 }
+
+void set_step(int32_t step) {
+    const int32_t next = clamp_move_step(step);
+    const int32_t previous = g_step.exchange(next, std::memory_order_acq_rel);
+    if (previous != next) g_candidates_valid.store(false, std::memory_order_release);
+}
+
+int32_t current_step() {
+    return g_step.load(std::memory_order_acquire);
+}
+
+namespace {
+bool ensure_candidates(bool eight_way, int32_t step) {
+    if (g_candidates_valid.load(std::memory_order_acquire) &&
+        g_candidates.eight_way == eight_way && g_candidates.step == step) {
+        return g_candidates.count > 0;
+    }
+    build_candidate_set(eight_way, step, &g_candidates);
+    const bool valid = g_candidates.count > 0;
+    g_candidates_valid.store(valid, std::memory_order_release);
+    return valid;
+}
+}  // namespace
 
 const State& current_state() {
     return g_state;
@@ -237,31 +264,34 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
         return;
     }
     const bool eight_way = selected_mode == contracts::QolMovementInputMode::kEightWay;
-    const int32_t previous = g_state.active && g_state.mode == selected_mode
+    const int32_t step = current_step();
+    if (!ensure_candidates(eight_way, step)) {
+        suppress_motion();
+        return;
+    }
+    // 步长变化会重建候选表，旧 index 只在同一 (模式, 步长) 下参与滞回。
+    const int32_t previous = g_state.active && g_state.mode == selected_mode &&
+                             g_state.candidate_step == step
         ? g_state.lattice_index : -1;
-    const int32_t index = eight_way ? select_eight_way_step(dx, dy, previous)
-                                    : select_lattice_step(dx, dy, previous);
+    const int32_t index = select_candidate(g_candidates, dx, dy, previous);
     if (index < 0) {
         suppress_motion();
         return;
     }
+    const Candidate& selected = g_candidates.items[index];
 
     int32_t primary_dir = -1;
     int32_t secondary_dir = -1;
     int32_t primary_step = 0;
     int32_t secondary_step = 0;
     int32_t primary_key_index = -1;
-    const bool components_ok = eight_way
-        ? eight_way_step_components(index, current_facing(), &primary_dir, &secondary_dir,
-                                    &primary_step, &secondary_step, &primary_key_index)
-        : lattice_step_components(index, current_facing(), &primary_dir, &secondary_dir,
-                                  &primary_step, &secondary_step, &primary_key_index);
+    const bool components_ok = step_components(selected.dx, selected.dy, current_facing(),
+                                               &primary_dir, &secondary_dir, &primary_step,
+                                               &secondary_step, &primary_key_index);
     if (!components_ok) {
         suppress_motion();
         return;
     }
-
-    const LatticeStep selected = eight_way ? kEightWaySteps[index] : kLatticeSteps[index];
 
     int32_t table[4]{};
     if (!access::read_key_table(table)) {
@@ -276,7 +306,8 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
 
     g_state.active = true;
     g_state.trusted = false;
-    g_state.set_selected_candidate(selected_mode, index, selected.dx, selected.dy);
+    g_state.set_selected_candidate(selected_mode, index, selected.dx, selected.dy,
+                                   selected.angle, step);
     g_state.primary_dir = primary_dir;
     g_state.secondary_dir = secondary_dir;
     g_state.primary_step = primary_step;

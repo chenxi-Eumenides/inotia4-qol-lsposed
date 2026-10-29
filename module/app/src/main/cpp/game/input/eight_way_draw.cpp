@@ -8,6 +8,7 @@
 #include "game/access/qol_log_seam.h"
 #include "game/access/world.h"
 #include "game/input/eight_way_access.h"
+#include "game/input/eight_way_move_math.h"
 #include "game/input/eight_way_state.h"
 #include "game/symbols/game_symbols.h"
 
@@ -218,10 +219,15 @@ void draw_direction_indicator() {
     const int32_t offset_x = rect[4];
     const int32_t offset_y = rect[5];
 
-    // 上箭头基准朝上：选中落点向量的屏幕角度（0=右，-90=上）+90 得到旋转角。
-    const double screen_angle_deg = std::atan2(-static_cast<double>(dy),
-                                               static_cast<double>(dx)) * kRadToDeg;
-    int32_t rotation = static_cast<int32_t>(std::lround(screen_angle_deg + 90.0));
+    // 上箭头基准朝上：候选点缓存角 theta 以右为 0、上为正；rotation = 90 - theta。
+    // 直接复用候选点角度，指针方位与候选点数量一一对应，不再按原生四方向重算。
+    double candidate_theta = state.selected_angle;
+    if (!(candidate_theta >= 0.0 && candidate_theta < 2.0 * kPi)) {
+        candidate_theta = std::atan2(static_cast<double>(dy), static_cast<double>(dx));
+        if (candidate_theta < 0.0) candidate_theta += 2.0 * kPi;
+    }
+    int32_t rotation =
+        static_cast<int32_t>(std::lround(90.0 - candidate_theta * kRadToDeg));
     rotation %= 360;
     if (rotation < 0) rotation += 360;
 

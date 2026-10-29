@@ -19,10 +19,11 @@ void log_first_omni(int32_t delta, int32_t primary_step, int32_t secondary_step)
     static std::atomic<bool> logged{false};
     if (logged.exchange(true, std::memory_order_acq_rel)) return;
     const State& state = current_state();
-    QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
-                      "movement move mode=%u lattice=%d primary=%d/%d secondary=%d/%d delta=%d",
-                      static_cast<unsigned>(state.mode), state.lattice_index, state.primary_dir,
-                      primary_step, state.secondary_dir, secondary_step, delta);
+    QOL_LOG_SEAM_INFO(
+        kQolLogDomainPlatform,
+        "movement move mode=%u step=%d lattice=%d primary=%d/%d secondary=%d/%d delta=%d",
+        static_cast<unsigned>(state.mode), state.candidate_step, state.lattice_index,
+        state.primary_dir, primary_step, state.secondary_dir, secondary_step, delta);
 }
 
 int32_t pass_through(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
@@ -46,8 +47,10 @@ int32_t char_move(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
         return pass_through(ch, dir, delta, flag);
     }
 
-    const int32_t primary_step = scale_component(state.primary_step, delta);
-    const int32_t secondary_step = scale_component(state.secondary_step, delta);
+    const int32_t step = state.candidate_step > 0 ? state.candidate_step : current_step();
+    const int32_t ceiling = scaled_step_ceiling(step, delta);
+    const int32_t primary_step = scale_component(state.primary_step, delta, ceiling);
+    const int32_t secondary_step = scale_component(state.secondary_step, delta, ceiling);
     if (primary_step <= 0 && secondary_step <= 0) {
         return pass_through(ch, dir, delta, flag);
     }

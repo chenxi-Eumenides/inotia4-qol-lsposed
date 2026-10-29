@@ -21,15 +21,22 @@ struct State {
     // Selected integer grid vector; this is not delta-scaled or collision-adjusted movement.
     int32_t selected_dx = 0;
     int32_t selected_dy = 0;
+    // 候选点缓存角度（atan2(dy,dx)，[0, 2*pi)）；指针直接使用，避免每帧反算。
+    double selected_angle = 0.0;
+    // 本次选择使用的基础步长；步长变化后旧的 lattice_index 不能用于滞回比较。
+    int32_t candidate_step = 0;
     int32_t primary_key = 0;
     bool owns_input = false;  // 当前 KEY_nCode/按住位是否由本功能写入
 
     void set_selected_candidate(contracts::QolMovementInputMode selected_mode,
-                                int32_t candidate_index, int32_t dx, int32_t dy) noexcept {
+                                int32_t candidate_index, int32_t dx, int32_t dy,
+                                double angle, int32_t step) noexcept {
         mode = selected_mode;
         lattice_index = candidate_index;
         selected_dx = dx;
         selected_dy = dy;
+        selected_angle = angle;
+        candidate_step = step;
     }
 
     void clear() noexcept { *this = State{}; }
@@ -43,6 +50,9 @@ bool enabled();
 contracts::QolMovementInputMode current_mode();
 const State& current_state();
 void set_mode(contracts::QolMovementInputMode mode);
+// 基础步长（像素），由 better_move 从 world_tuning.move_speed 推入；<=0 回退原生 8。
+void set_step(int32_t step);
+int32_t current_step();
 // Compatibility entry point: enabled=true still means the legacy omnidirectional mode.
 void set_enabled(uint8_t enabled);
 void reset();

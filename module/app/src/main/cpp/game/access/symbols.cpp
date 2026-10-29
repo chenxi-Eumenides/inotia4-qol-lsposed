@@ -24,7 +24,7 @@ constexpr HookEntrySymbol kHookEntrySymbols[] = {
     // 经验/金币的统一增量入口（owner=world_tuning）。
     {"F_ADD_EXP_VMA", F_ADD_EXP_VMA},
     {"F_ADD_MONEY_VMA", F_ADD_MONEY_VMA},
-    // 全向移动入口（owner=eight_way_move）：方向触摸与游戏内按键接收器。
+    // 全向移动入口（owner=better_move）：方向触摸与游戏内按键接收器。
     // 未登记时 preflight 报 symbol unresolved，插件状态会变成 unsupported（设置页显示
     // “当前版本不支持”），不是变体限制。
     {"F_UIPLAY_BUTTON_DIRECTION_VMA", F_UIPLAY_BUTTON_DIRECTION_VMA},

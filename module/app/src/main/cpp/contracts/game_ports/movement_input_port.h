@@ -1,7 +1,7 @@
 #pragma once
 
 // 触屏移动输入端口：插件只声明输入/补步/碰撞 hook 资源，游戏层负责触点几何、
-// 模式候选选择、键码翻译、双轴移动、补步门禁与碰撞查询。端口为 eight_way_move 私有。
+// 模式候选选择、键码翻译、双轴移动、补步门禁与碰撞查询。端口为 better_move 私有。
 
 #include <cstddef>
 #include <cstdint>
@@ -45,6 +45,8 @@ struct QolMovementInputApi {
     int32_t (*map_blocking_query)(int32_t x, int32_t y, QolMapBlockingQueryFn original);
     // v1.2 tail: selects the touch candidate set; set_enabled retains its legacy full-mode meaning.
     void (*set_mode)(QolMovementInputMode mode);
+    // v1.3 tail: base step in pixels read from world_tuning.move_speed; <=0 restores the native 8.
+    void (*set_step)(int32_t step);
 };
 
 struct QolMovementInputPort {
@@ -60,6 +62,8 @@ static_assert(offsetof(QolMovementInputApi, set_enabled) == 5 * sizeof(void*),
               "movement input v1.1 prefix ordering must remain frozen");
 static_assert(offsetof(QolMovementInputApi, set_mode) == 10 * sizeof(void*),
               "movement input mode must be appended after the v1.1 prefix");
+static_assert(offsetof(QolMovementInputApi, set_step) == 11 * sizeof(void*),
+              "movement input step must be appended after the v1.2 mode");
 static_assert(std::is_standard_layout<QolMovementInputApi>::value &&
                   std::is_trivially_copyable<QolMovementInputApi>::value,
               "QolMovementInputApi must remain a copyable standard-layout table");
@@ -67,6 +71,11 @@ static_assert(std::is_standard_layout<QolMovementInputApi>::value &&
 inline bool movement_input_port_supports_mode(const QolMovementInputPort* port) noexcept {
     return port != nullptr && port->abi_version.major == 1 && port->abi_version.minor >= 2 &&
            port->api.set_mode != nullptr;
+}
+
+inline bool movement_input_port_supports_step(const QolMovementInputPort* port) noexcept {
+    return port != nullptr && port->abi_version.major == 1 && port->abi_version.minor >= 3 &&
+           port->api.set_step != nullptr;
 }
 
 }  // namespace qol::contracts

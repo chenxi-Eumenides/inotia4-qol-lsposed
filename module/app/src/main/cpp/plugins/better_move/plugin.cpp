@@ -2,18 +2,26 @@
 
 #include <cstdint>
 
+#include "../../contracts/world_tuning.h"
 #include "feature.h"
 
-namespace qol::features::eight_way_move {
+namespace qol::features::better_move {
 namespace {
 
-constexpr const char* kPluginId = "eight_way_move";
+constexpr const char* kPluginId = "better_move";
 constexpr const char* kPluginVersion = "0.1.0";
 
 const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT,
      {contracts::kQolPortMovementInputVersion.major,
       contracts::kQolPortMovementInputVersion.minor}},
+};
+
+// 移速能力由 world_tuning 提供；缺失时移动逻辑回退原生 8px，插件仍可独立使用。
+const contracts::CapabilityRequirement kOptionalRequires[] = {
+    {contracts::kWorldTuningMoveSpeedCapabilityId,
+     {contracts::kWorldTuningMoveSpeedVersion.major,
+      contracts::kWorldTuningMoveSpeedVersion.minor}},
 };
 
 // 全部资源跟随 lifecycle：feature 开启才安装，关闭即物理还原。
@@ -58,7 +66,7 @@ const contracts::ResourceClaim kResources[] = {
         "玩家方向键分支的 bl CHAR_Move；按选择模式的主/副轴向量移动",
         nullptr,
         120,
-        reinterpret_cast<void*>(&eight_way_char_move_wrapper),
+        reinterpret_cast<void*>(&char_move_wrapper),
     },
     {
         kResourceIdPortingDraw,
@@ -138,8 +146,8 @@ constexpr contracts::FeatureChoiceOption kMovementModes[] = {
 };
 
 constexpr contracts::FeatureDefinition kFeatures[] = {
-    {"eight_way_move.direction", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kChoice, "触屏移动模式", "选择关闭、八向或全向移动。",
+    {"better_move.direction", 0, contracts::FeatureCategory::kGameplay,
+     contracts::FeatureType::kChoice, "移动优化", "选择关闭、八向或全向移动。",
      nullptr, nullptr, nullptr, 0, kMovementModes,
      static_cast<uint32_t>(sizeof(kMovementModes) / sizeof(kMovementModes[0])), &on_choice},
 };
@@ -148,6 +156,7 @@ int plugin_install(contracts::PluginContext& ctx) {
     remove_poll_task();
     set_gate(false);
     set_input_port(nullptr);
+    reset_move_speed();
     set_host_sdk(nullptr);
     if (ctx.struct_size < sizeof(contracts::PluginContext) ||
         ctx.sdk_major != contracts::kHostSdkMajor || ctx.sdk == nullptr || ctx.game == nullptr ||
@@ -163,11 +172,15 @@ int plugin_install(contracts::PluginContext& ctx) {
         port->api.map_blocking_query == nullptr || port->api.prepare_overlay == nullptr) {
         return 1;
     }
-    if (!contracts::movement_input_port_supports_mode(port)) return 1;
+    if (!contracts::movement_input_port_supports_mode(port) ||
+        !contracts::movement_input_port_supports_step(port)) {
+        return 1;
+    }
     set_host_sdk(ctx.sdk);
     set_input_port(port);
     set_gate(true);
     ensure_poll_task();
+    sync_move_speed(true);
     return 0;
 }
 
@@ -178,6 +191,7 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     const auto* port = input_port();
     if (port != nullptr && port->api.set_mode != nullptr)
         port->api.set_mode(contracts::QolMovementInputMode::kDisabled);
+    reset_move_speed();
     set_host_sdk(nullptr);
 }
 
@@ -185,6 +199,7 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(true);
     ensure_poll_task();
+    sync_move_speed(true);
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
@@ -194,6 +209,7 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
     const auto* port = input_port();
     if (port != nullptr && port->api.set_mode != nullptr)
         port->api.set_mode(contracts::QolMovementInputMode::kDisabled);
+    reset_move_speed();
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {
@@ -205,7 +221,8 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
     0, nullptr,   // requires
-    0, nullptr,   // optional_requires
+    static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
+    kOptionalRequires,  // optional: world_tuning.move_speed
     0, nullptr,   // provides
     static_cast<uint32_t>(sizeof(kResources) / sizeof(kResources[0])), kResources,
     0, nullptr,   // jni
@@ -225,4 +242,4 @@ const contracts::PluginDescriptor kDescriptor = {
 
 const contracts::PluginDescriptor& plugin_descriptor() { return kDescriptor; }
 
-}  // namespace qol::features::eight_way_move
+}  // namespace qol::features::better_move

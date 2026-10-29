@@ -7,8 +7,9 @@
 #include <cstring>
 
 #include "../../contracts/runtime_hooks.h"
+#include "../../contracts/world_tuning.h"
 
-namespace qol::features::eight_way_move {
+namespace qol::features::better_move {
 namespace {
 
 const contracts::QolHostSdk* g_sdk = nullptr;
@@ -24,6 +25,10 @@ std::atomic<bool> g_direction_seen{false};
 std::atomic<bool> g_move_seen{false};
 std::atomic<bool> g_wait_coord_seen{false};
 std::atomic<bool> g_map_blocking_seen{false};
+
+const contracts::WorldTuningMoveSpeedApi* g_move_speed_api = nullptr;
+int32_t g_pushed_step = contracts::kWorldTuningBaseMoveSpeed;
+uint32_t g_step_refresh_ticks = 0;
 
 using DirectionFn = uint64_t (*)(void*, uint64_t, int64_t*, uint64_t);
 using PressKeyFn = void (*)(int32_t);
@@ -42,7 +47,7 @@ void log_info(const char* format, ...) {
     if (length < 0) return;
     const uint32_t message_length = static_cast<uint32_t>(
         length < static_cast<int>(contracts::kMessageCap) ? length : contracts::kMessageCap);
-    (void)sdk->log.write(1, 0, "plugins/eight_way_move/feature.cpp", message, message_length);
+    (void)sdk->log.write(1, 0, "plugins/better_move/feature.cpp", message, message_length);
 }
 
 }  // namespace
@@ -59,6 +64,58 @@ void set_input_port(const contracts::QolMovementInputPort* port) {
     g_input_port.store(port, std::memory_order_release);
 }
 
+void sync_move_speed(bool force) {
+    const auto* port = input_port();
+    if (port == nullptr || port->api.set_step == nullptr) return;
+
+    const auto* sdk = g_sdk;
+    if (force || ++g_step_refresh_ticks >= 30) {
+        g_step_refresh_ticks = 0;
+        const void* iface = nullptr;
+        const bool available =
+            sdk != nullptr && sdk->capabilities.require != nullptr &&
+            contracts::succeeded(sdk->capabilities.require(
+                contracts::kWorldTuningMoveSpeedCapabilityId,
+                {contracts::kWorldTuningMoveSpeedVersion.major,
+                 contracts::kWorldTuningMoveSpeedVersion.minor},
+                &iface)) &&
+            iface != nullptr;
+        if (available) {
+            const auto* api = static_cast<const contracts::WorldTuningMoveSpeedApi*>(iface);
+            g_move_speed_api = api->read != nullptr ? api : nullptr;
+        } else {
+            g_move_speed_api = nullptr;
+        }
+    }
+
+    int32_t step = contracts::kWorldTuningBaseMoveSpeed;
+    if (g_move_speed_api != nullptr) {
+        int32_t current = 0;
+        if (contracts::succeeded(g_move_speed_api->read(&current)) && current >= 1) {
+            step = current;
+        } else {
+            g_move_speed_api = nullptr;
+        }
+    }
+    if (step != g_pushed_step) {
+        g_pushed_step = step;
+        log_info("move speed step=%d", step);
+        port->api.set_step(step);
+    }
+}
+
+void reset_move_speed() {
+    g_move_speed_api = nullptr;
+    g_step_refresh_ticks = 0;
+    const int32_t previous = g_pushed_step;
+    g_pushed_step = contracts::kWorldTuningBaseMoveSpeed;
+    const auto* port = input_port();
+    if (port != nullptr && port->api.set_step != nullptr &&
+        previous != contracts::kWorldTuningBaseMoveSpeed) {
+        port->api.set_step(contracts::kWorldTuningBaseMoveSpeed);
+    }
+}
+
 void set_gate(bool enabled) {
     g_gate.store(enabled, std::memory_order_release);
 }
@@ -70,6 +127,7 @@ bool gate_enabled() {
 int32_t state_poll_tick(int64_t /*frame*/, void* /*ctx*/) {
     const auto* port = input_port();
     if (port != nullptr && port->api.poll != nullptr) port->api.poll();
+    sync_move_speed(false);
     return 1;
 }
 
@@ -135,7 +193,7 @@ void porting_draw_wrapper() {
     }
 }
 
-int32_t eight_way_char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
+int32_t char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_t flag) {
     const auto* port = input_port();
     if (port == nullptr || port->api.char_move == nullptr) return 0;
     if (!g_move_seen.exchange(true, std::memory_order_acq_rel)) {
@@ -211,4 +269,4 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     return 0;
 }
 
-}  // namespace qol::features::eight_way_move
+}  // namespace qol::features::better_move

@@ -2,6 +2,7 @@
 
 状态：Host choice/模式接线、定向 Host 单测、Debug 构建与 C18L v589 真机烟测已完成；八向/全向/关闭三态、重启恢复和 selected 高亮已实测。完整移动验收仍 `NOT_ACCEPTED`（撞墙/滑行/切图/其他分辨率未逐项覆盖）。原 C18L v586 烟测只覆盖旧全向原型行为，不作为本轮证据。
 2026-10-29 更新：现有 `eight_way_move.direction` 改为默认关闭的 choice，稳定值 `eight_way`/`omnidirectional`；旧 toggle bool 不迁移，缺 selection 按关闭。此前“44 方向 toggle”章节作为实现历史，当前配置与行为契约以 `docs/reference/plugins/eight_way_move*.md` 为准。
+2026-10-29 更新：插件已更名为 `better_move`（显示名「移动优化」），feature 改为 `better_move.direction`；候选点改为按 `world_tuning.move_speed` 步长在游戏内懒计算并缓存，指针使用缓存候选角。本文以下固定表内容仅作为实现历史，当前契约以 `docs/reference/plugins/better_move*.md` 为准。
 2026-10-29 更新：修复主控平 A 自动接近时“乱跑”问题。`CHAR_MoveAsPath` 在路径方向与当前朝向不同且主控非 8px 对齐时置 `+0x2e0`；原版 `CHAR_MoveOnWaitCoord` 只沿旧朝向补一个轴，导致先朝错误方向移动。现行 `handle_wait_coord` 对主控路径改为吸附到当前 16px 瓦片中心并跳过单轴补步；细节见 `docs/reference/plugins/eight_way_move-internals.md` §3.6。
 范围：Android 触屏虚拟方向摇杆；不改键盘、AI、寻路和其他移动调用点。
 

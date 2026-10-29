@@ -438,7 +438,7 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | ABI 边界 | Host SDK minor 30 尾追加 choice API，旧函数表前缀检查保留。 | `FeatureDefinition`、catalog item 数组元素大小变化；不承诺旧二进制 descriptor/catalog 数组兼容。当前生产插件静态编译，外部旧插件加载不在支持范围。 |
 | VM-SETTINGS-CHOICE-01 | **NOT_ACCEPTED（未执行）**：当前没有生产插件注册 choice，缺少可操作的新控件入口。 | 待以实际消费插件验收：关闭→逐项右移→末项→逐项左移→关闭；边界禁用、左右箭头命中、长标签与布局对齐；撤页重建和重启后读回；业务收到非关闭间切换与关闭；写入失败不显示新值；旧 toggle/entry 回归。不得以 Host/构建证据替代。 |
 
-### 5.28 `eight_way_move` 八向/全向 choice（2026-10-29；Host/静态/Debug/真机烟测通过，完整行为待验）
+### 5.28 `eight_way_move` 八向/全向 choice（历史；已被 5.30 `better_move` 取代，2026-10-29）
 
 | 验证项 | 当前结果 | 范围与未完成项 |
 |---|---|---|
@@ -456,6 +456,16 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 修复 | 箭头按钮识别所属 scroll list 行并借用其 owner；列表行允许 text/arrow 两类子控件；列表销毁时随 owner 递归清理。`PopupHost::dispatch_enter` 在 enter 后 provider 仍 inactive 时关闭栈顶；同 panel 栈顶 inactive 时 `open` 先移除残留再重开。settings close 无条件销毁页面，enter 遇旧 root 先销毁重建。 | 失败分支补日志（catalog/root/list/row/toggle/choice arrow 错误码）；未改移动、碰撞和配置契约。 |
 | Host/静态/Debug | **PASS**：`settings_panel_model_tests`、`settings_panel_widget_tests`、`native_scroll_list_tests`、`core_custom_ui_host_tests` 4/4；`check_arch.py`、`check_http_routes.py`、`git diff --check` 通过；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2610291824_119dddc7ecc2.apk`，SHA-256 `119dddc7ecc262ca1f8edef9868e745ded1da10b4db42a255c1549d3988d0168`。 | 日志 `.tmp/movement-choice/{final-settings-build.log,final-settings-ctest.log,check-arch-settings.log,check-http-settings.log,fix3-build.log}`。 |
 | VM-SETTINGS-REOPEN-01 | **PASS（C18L v589 烟测）**：齿轮进入 →「更多优化功能」→ 返回 → 齿轮重开，`panel_active=true`、choice 行正常显示；连续 3 轮进出后仍正常。选择行右箭头 `关闭→八向→全向`、末项右箭头不前进、左箭头 `全向→八向→关闭` 均写入并读回正确；关闭后 `enable=false`、`selections={}`。 | 截图 `.tmp/movement-choice/{fix3-open1.png,fix3-choice.png,fix3-reopen.png,fix3-cycles.png,omni-row.png}`。未覆盖其他插件面板的同类箭头组合与全部设置页历史验收项。 |
+
+### 5.30 `better_move` 移动优化与移速接入（2026-10-29；Host/静态/Debug 通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现 | `eight_way_move` 更名为 `better_move`，feature 改为 `better_move.direction`，显示名「移动优化」，描述不变。候选点改为按 `(模式, 世界移速步长)` 在主线程懒计算并缓存：八向轴向 S、对角 `round(S/√2)`；全向 `round(hypot)==S` 的整数点。指针使用缓存候选角，`rotation=90-θ`。`QOL_PORT_MOVEMENT_INPUT` v1.3 尾追加 `set_step`；插件可选依赖 `world_tuning.move_speed` v1.0，缺失回退 8。 | 旧 `eight_way_move.direction` 配置不迁移；S=8 全向由 44 点变为 48 点。碰撞/回退、补步、切角色吸附未改。 |
+| Host 定向测试 | **8/8 PASS**：`better_move_tests`、`better_move_plugin_tests`、`host_feature_controller_tests`、`production_feature_facade_tests`、`host_adapter_tests`、`feature_reconciler_tests`、`plugin_registry_tests`、`plugin_lifecycle_tests`。 | 覆盖 S=1/2/8/12/40 候选点、最近方向/滞回、主副轴、缩放上限、selected 角度、choice/端口 v1.3/可选能力。 |
+| 静态/Debug | **PASS**：`check_arch.py`、`test_core_feature_exposure.py`、`git diff --check`；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2610292222_b36db60c6831.apk`，SHA-256 `b36db60c68317776d07a9a200b2ac5657842f6e97c4ac455a5e0217e6a0c031f`；C18L 集成包 `ef1cb313…`。 | 真机日志见下行。 |
+| VM-BM-01：步长/指针/能力 | **PASS（烟测，C18L v589）**：`world_tuning` 移速 150% 时启动日志 `move speed step=12`，八向触屏 `steps=12/0`、选中 `(12,0)`、`rot=90`；45° 触屏 `steps=8/8`、候选 index 1、指针 45°；50% 时 `step=4`，全向 14° 触屏 `steps=4/1`、候选 index 1；关闭 `world_tuning` 后日志 `move speed step=8`，重新启用后 `step=4`。8 资源全 `live`，无 FATAL/SIGSEGV。 | 截图/日志在 `.tmp/{bm-step12-east.png,bm-step12-ne.png,bm-step12-omni20.png}` 与本轮 logcat。未覆盖：按住中改步长、撞墙/滑行、切图/拾取、其他分辨率与五个变体。 |
+| VM-BM-02：碰撞/回退/场景 | **NOT_ACCEPTED（未执行）** | 需真机覆盖撞墙、沿墙滑行、回滚失败恢复坐标、切图/拾取/动画、物理键盘、其他分辨率；Host/烟测不替代。 |
 
 ## 6. 待建立
 

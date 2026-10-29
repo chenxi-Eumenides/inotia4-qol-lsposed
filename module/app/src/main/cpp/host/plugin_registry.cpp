@@ -473,9 +473,9 @@ bool resolve_plugin_ports(uint32_t index) {
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
-        // 移动输入端口为 eight_way_move 私有：输入 hook 与 CHAR_Move 调用点只允许该插件声明。
+        // 移动输入端口为 better_move 私有：输入 hook 与 CHAR_Move 调用点只允许该插件声明。
         if (requirement.id == contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "eight_way_move") != 0)) {
+            (plugin.id == nullptr || std::strcmp(plugin.id, "better_move") != 0)) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

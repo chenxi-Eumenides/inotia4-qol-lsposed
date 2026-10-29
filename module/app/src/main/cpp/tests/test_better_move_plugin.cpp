@@ -1,5 +1,5 @@
-#include "plugins/eight_way_move/plugin.h"
-#include "plugins/eight_way_move/feature.h"
+#include "plugins/better_move/plugin.h"
+#include "plugins/better_move/feature.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +18,7 @@ void set_mode(qol::contracts::QolMovementInputMode mode) {
     ++mode_calls;
     last_mode = mode;
 }
+void set_step(int32_t) {}
 
 void check(bool condition, const char* what) {
     if (condition) return;
@@ -32,18 +33,25 @@ int main() {
     using qol::contracts::QolMovementInputMode;
     static_assert(offsetof(qol::contracts::QolMovementInputApi, set_enabled) == 40);
     static_assert(offsetof(qol::contracts::QolMovementInputApi, set_mode) == 80);
-    static_assert(sizeof(qol::contracts::QolMovementInputApi) == 88);
+    static_assert(offsetof(qol::contracts::QolMovementInputApi, set_step) == 88);
+    static_assert(sizeof(qol::contracts::QolMovementInputApi) == 96);
 
-    const auto& d = qol::features::eight_way_move::plugin_descriptor();
-    check(std::strcmp(d.id, "eight_way_move") == 0, "plugin id");
+    const auto& d = qol::features::better_move::plugin_descriptor();
+    check(std::strcmp(d.id, "better_move") == 0, "plugin id");
     check(d.resources_count == 8, "resource count");
     check(d.port_count == 1, "port count");
     check(d.port_count == 1 &&
               d.ports[0].id == qol::contracts::QolPortId::QOL_PORT_MOVEMENT_INPUT,
           "movement input port");
-    check(d.ports[0].range.min_minor == 2, "movement input port minor 2");
+    check(d.ports[0].range.min_minor == 3, "movement input port minor 3");
     check(d.feature_count == 1, "feature count");
-    check(std::strcmp(d.features[0].id, "eight_way_move.direction") == 0, "feature id");
+    check(std::strcmp(d.features[0].id, "better_move.direction") == 0, "feature id");
+    check(std::strcmp(d.features[0].name, "移动优化") == 0, "feature name");
+    check(std::strcmp(d.features[0].description, "选择关闭、八向或全向移动。") == 0,
+          "feature description unchanged");
+    check(d.optional_count == 1 && d.optional_requires != nullptr &&
+              std::strcmp(d.optional_requires[0].id, "world_tuning.move_speed") == 0,
+          "world tuning move speed is an optional dependency");
     check(d.features[0].default_enabled == 0, "feature default off");
     check(d.features[0].type == FeatureType::kChoice, "feature uses choice mode");
     check(d.features[0].choices != nullptr && d.features[0].choice_count == 2,
@@ -61,18 +69,27 @@ int main() {
     old_port.api.set_enabled = &legacy_set_enabled;
     check(!qol::contracts::movement_input_port_supports_mode(&old_port),
           "v1.1 port remains prefix-only for new mode consumer");
+    qol::contracts::QolMovementInputPort v12_port{{1, 2}, {}};
+    v12_port.api.set_enabled = &legacy_set_enabled;
+    v12_port.api.set_mode = &set_mode;
+    check(qol::contracts::movement_input_port_supports_mode(&v12_port) &&
+              !qol::contracts::movement_input_port_supports_step(&v12_port),
+          "v1.2 port has mode but no step tail");
     qol::contracts::QolMovementInputPort mode_port{
         qol::contracts::kQolPortMovementInputVersion, {}};
     mode_port.api.set_enabled = &legacy_set_enabled;
     mode_port.api.set_mode = &set_mode;
+    mode_port.api.set_step = &set_step;
     check(qol::contracts::movement_input_port_supports_mode(&mode_port),
           "v1.2 mode tail is available");
+    check(qol::contracts::movement_input_port_supports_step(&mode_port),
+          "v1.3 step tail is available");
     check(qol::contracts::legacy_movement_input_mode(1) ==
               QolMovementInputMode::kOmnidirectional &&
               qol::contracts::legacy_movement_input_mode(0) ==
               QolMovementInputMode::kDisabled,
           "legacy set_enabled mapping remains full-mode compatible");
-    qol::features::eight_way_move::set_input_port(&mode_port);
+    qol::features::better_move::set_input_port(&mode_port);
     qol::contracts::PluginContext context{};
     const auto& choice = d.features[0];
     check(qol::contracts::succeeded(choice.on_choice(context, nullptr)) &&
@@ -88,7 +105,7 @@ int main() {
     check(choice.on_choice(context, "invalid").code == kQolErrInvalidArgument &&
               mode_calls == calls_before_invalid,
           "invalid choice rejected without changing mode");
-    qol::features::eight_way_move::set_input_port(nullptr);
+    qol::features::better_move::set_input_port(nullptr);
 
     check(std::strcmp(d.resources[0].id, "hook:UIPlay_ButtonDirection") == 0, "direction id");
     check(d.resources[0].mechanism == qol::contracts::ResourceMechanism::kEntryHook,
@@ -136,6 +153,6 @@ int main() {
         std::printf("%d failure(s)\n", failures);
         return 1;
     }
-    std::printf("eight_way_move_plugin: ok\n");
+    std::printf("better_move_plugin: ok\n");
     return 0;
 }
