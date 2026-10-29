@@ -41,6 +41,7 @@ bool sync_projected_slot_locked(int bag, int slot);
 void refresh_projected_module_view_after_move_locked();
 // 移动后始终刷新原生袋；仅扩展模式才恢复投影，避免原版视图被旧投影回填。
 void refresh_native_item_area_after_move_locked(int native_bag);
+void invalidate_original_inventory_draw_cache_locked();
 void restore_module_view_locked();
 bool complete_original_exit_locked();
 void cancel_original_exit_locked();

@@ -93,10 +93,30 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
     if (item == nullptr) return false;
     for (size_t offset = 0; offset < g_deferred_free_queue_size; ++offset) {
         const size_t index = (g_deferred_free_queue_head + offset) % kDeferredFreeQueueCapacity;
-        if (g_deferred_free_queue[index].item == item) return true;
+        DeferredItemFree& queued = g_deferred_free_queue[index];
+        if (queued.item != item) continue;
+        if (queued.handle == handle && queued.generation == generation) return true;
+        const uint32_t old_handle = queued.handle;
+        queued.handle = handle;
+        queued.generation = generation;
+        queued.enqueued_at_ms = deferred_free_now_ms_locked();
+        queued.enqueued_frame = deferred_free_frame_locked();
+        VIRTBAG_LOG("deferred free entry rebind item=%p old_handle=%u new_handle=%u generation=%llu",
+                    item, old_handle, handle, static_cast<unsigned long long>(generation));
+        return true;
     }
     for (size_t index = 0; index < g_deferred_free_custody_size; ++index) {
-        if (g_deferred_free_custody[index].item == item) return true;
+        DeferredItemFree& custody = g_deferred_free_custody[index];
+        if (custody.item != item) continue;
+        if (custody.handle == handle && custody.generation == generation) return true;
+        const uint32_t old_handle = custody.handle;
+        custody.handle = handle;
+        custody.generation = generation;
+        custody.enqueued_at_ms = deferred_free_now_ms_locked();
+        custody.enqueued_frame = deferred_free_frame_locked();
+        VIRTBAG_LOG("deferred free entry rebind item=%p old_handle=%u new_handle=%u generation=%llu",
+                    item, old_handle, handle, static_cast<unsigned long long>(generation));
+        return true;
     }
     const DeferredItemFree entry = {
         item, handle, generation, deferred_free_now_ms_locked(), deferred_free_frame_locked()};
@@ -144,27 +164,40 @@ bool defer_item_free_locked(void* item) {
 
 namespace {
 
-bool deferred_item_referenced_locked(void* item) {
+bool deferred_item_referenced_locked(void* item, const char** out_reason = nullptr) {
+    if (out_reason != nullptr) *out_reason = "none";
     for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
-            if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item) return true;
+            if (qol::extension_bag::ui_state().objects.module_objects[bag][slot] == item) {
+                if (out_reason != nullptr) *out_reason = "module_object";
+                return true;
+            }
         }
     }
     if (qol::extension_bag::ui_state().objects.projected_item_root == nullptr) {
-        return item_pointer_known_locked(item);
+        const bool known = item_pointer_known_locked(item);
+        if (known && out_reason != nullptr) *out_reason = "known_pointer";
+        return known;
     }
     int child_count = 0;
     if (!extension_bag_ui_child_count(qol::extension_bag::ui_state().objects.projected_item_root, &child_count)) {
-        return item_pointer_known_locked(item);
+        const bool known = item_pointer_known_locked(item);
+        if (known && out_reason != nullptr) *out_reason = "known_pointer";
+        return known;
     }
     for (int slot = 0; slot < child_count; ++slot) {
         void* control = extension_bag_ui_child_at(qol::extension_bag::ui_state().objects.projected_item_root, slot);
         if (control == nullptr) continue;
-        if (extension_bag_ui_item(control) == item) return true;
+        if (extension_bag_ui_item(control) == item) {
+            if (out_reason != nullptr) *out_reason = "projected_control";
+            return true;
+        }
     }
     // 兜底覆盖原版库存和角色装备等非 projection root 的已知引用；宁可
     // 保留队列项，也不能让 handover 失败路径把仍由游戏持有的对象释放掉。
-    return item_pointer_known_locked(item);
+    const bool known = item_pointer_known_locked(item);
+    if (known && out_reason != nullptr) *out_reason = "known_pointer";
+    return known;
 }
 
 }  // namespace
@@ -185,18 +218,28 @@ void drain_deferred_frees_locked() {
         const uint64_t elapsed_ms =
             qol::features::extension_bag::model::deferred_free_elapsed_ms(
                 entry.enqueued_at_ms, now_ms);
-        if (!qol::features::extension_bag::model::residence_met(
-                entry.enqueued_frame, current_frame, elapsed_ms,
-                qol::features::extension_bag::model::kDeferredFreeMinResidenceMs)) {
-            return false;
-        }
+        const bool residence_met = qol::features::extension_bag::model::residence_met(
+            entry.enqueued_frame, current_frame, elapsed_ms,
+            qol::features::extension_bag::model::kDeferredFreeMinResidenceMs);
+        const char* reason = "none";
+        const bool referenced = deferred_item_referenced_locked(entry.item, &reason);
         const auto* api = extension_bag_write_api();
-        return !deferred_item_referenced_locked(entry.item) && api != nullptr &&
-               api->inventory.free_item != nullptr;
+        const bool can_free = residence_met && !referenced && api != nullptr &&
+                              api->inventory.free_item != nullptr;
+        VIRTBAG_LOG_DEBUG("deferred free judge item=%p handle=%u generation=%llu residence_met=%d referenced=%d reason=%s",
+                          entry.item, entry.handle,
+                          static_cast<unsigned long long>(entry.generation),
+                          residence_met ? 1 : 0, referenced ? 1 : 0, reason);
+        return can_free;
     };
     const auto free_entry = [](const DeferredItemFree& entry) {
         if (entry.item == nullptr) return true;
-        if (extension_free_item(entry.item)) return true;
+        if (extension_free_item(entry.item)) {
+            VIRTBAG_LOG_DEBUG("deferred free freed item=%p handle=%u generation=%llu",
+                              entry.item, entry.handle,
+                              static_cast<unsigned long long>(entry.generation));
+            return true;
+        }
         VIRTBAG_LOG_ERROR("ERROR deferred free failed item=%p handle=%u generation=%llu",
                           entry.item, entry.handle,
                           static_cast<unsigned long long>(entry.generation));

@@ -78,6 +78,13 @@ QolResult write_extension_create_item(int32_t category, int32_t arg1, int32_t ar
 QolResult write_extension_free_item(void* item) {
     if (item == nullptr) return error_result(kQolErrInvalidArgument, kInvalidArgument);
     if (fn_itempool_free == nullptr) return not_ready();
+    uint32_t provider_id = 0;
+    const contracts::QolItemHandle handle = item_handle_registry().lookup_item(item, &provider_id);
+    // The object pool may reuse an address for an item now owned by the game inventory.
+    if (handle.slot != 0 && handle.generation != 0 &&
+        provider_id == contracts::kQolItemHandleOwnerGame) {
+        return error_result(kQolErrBlocked, "item owned by game inventory");
+    }
     invalidate_item(item);
     fn_itempool_free(item);
     return contracts::ok();

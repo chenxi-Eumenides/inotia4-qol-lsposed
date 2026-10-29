@@ -234,6 +234,11 @@ void ensure_original_inventory_draw_cache_locked() {
 
 }  // namespace
 
+void invalidate_original_inventory_draw_cache_locked() {
+    // Reset only the draw snapshot; changing inventory_generation can reject an active projected drop.
+    g_original_inventory_draw_generation = std::numeric_limits<uint64_t>::max();
+}
+
 bool original_inventory_contains_cached_locked(void* item) {
     if (item == nullptr) return false;
     ensure_original_inventory_draw_cache_locked();

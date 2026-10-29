@@ -99,8 +99,10 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
                      "count=%d",
                      static_cast<int>(outcome.status), src_bag, src_slot, dst_bag, dst_slot,
                      move_count);
+        invalidate_original_inventory_draw_cache_locked();
         return false;
     }
+    invalidate_original_inventory_draw_cache_locked();
     refresh_native_item_area_after_move_locked(src_bag);
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "cross move committed through inventory.action original->extension source=%d/%d "
@@ -180,8 +182,10 @@ bool move_extension_to_original_locked(::qol::extension_bag::ReentryLock& lock, 
                      static_cast<int>(outcome.status), src_bag, src_slot, target_bag,
                      outcome.target.space_id, outcome.target.bag, outcome.target.slot,
                      outcome.target_item.slot, outcome.target_item.generation);
+        invalidate_original_inventory_draw_cache_locked();
         return false;
     }
+    invalidate_original_inventory_draw_cache_locked();
     refresh_native_item_area_after_move_locked(target_bag);
     QOL_LOG_INFO(QolDomain::kExtensionBag,
                  "cross move committed through inventory.action extension->original source=%d/%d "
