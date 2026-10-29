@@ -15,6 +15,8 @@ namespace qol::game::input {
 namespace {
 
 std::atomic<bool> g_enabled{false};
+std::atomic<contracts::QolMovementInputMode> g_mode{
+    contracts::QolMovementInputMode::kDisabled};
 State g_state;
 void* g_last_lead = nullptr;
 
@@ -51,13 +53,25 @@ void log_first_touch(const State& state, int32_t dx, int32_t dy) {
     (void)access::read_key_table(table);
     QOL_LOG_SEAM_INFO(
         kQolLogDomainPlatform,
-        "omni touch lattice=%d primary=%d secondary=%d steps=%d/%d dx=%d dy=%d keys=%d,%d,%d,%d",
-        state.lattice_index, state.primary_dir, state.secondary_dir, state.primary_step,
-        state.secondary_step, dx, dy, table[0], table[1], table[2], table[3]);
+        "movement touch mode=%u candidate=%d primary=%d secondary=%d steps=%d/%d dx=%d dy=%d keys=%d,%d,%d,%d",
+        static_cast<unsigned>(state.mode), state.lattice_index, state.primary_dir,
+        state.secondary_dir, state.primary_step, state.secondary_step, dx, dy, table[0],
+        table[1], table[2], table[3]);
 }
 
 void clear_state() {
-    g_state = State{};
+    g_state.clear();
+}
+
+void reset_state_for_mode(contracts::QolMovementInputMode next_mode) {
+    const bool owns = g_state.owns_input;
+    g_state.reset_for_mode(next_mode);
+    if (!owns) return;
+    // 只清本功能写入的输入：自定义码可能已被翻译成普通主方向码，必须连普通码和
+    // 按住位一起清；否则回到 Play 或插件关闭后会继续移动。
+    access::write_key_code(0);
+    access::write_press_active(false);
+    access::clear_wait_coord(lead_member());
 }
 
 // 死区/无效触点：清状态并显式写 0，抑制本帧移动。
@@ -98,49 +112,80 @@ bool enabled() {
     return g_enabled.load(std::memory_order_acquire);
 }
 
+contracts::QolMovementInputMode current_mode() {
+    return g_mode.load(std::memory_order_acquire);
+}
+
 const State& current_state() {
     return g_state;
 }
 
 void reset_state() {
-    const bool owns = g_state.owns_input;
-    clear_state();
-    if (!owns) return;
-    // 只清本功能写入的输入：自定义码可能已被翻译成普通主方向码，必须连普通码和
-    // 按住位一起清；否则回到 Play 或插件关闭后会继续移动。
-    access::write_key_code(0);
-    access::write_press_active(false);
-    access::clear_wait_coord(lead_member());
+    reset_state_for_mode(contracts::QolMovementInputMode::kDisabled);
 }
 
 void reset() {
     reset_state();
 }
 
-void set_enabled(uint8_t enabled_value) {
-    const bool on = enabled_value != 0;
-    const bool was_on = g_enabled.exchange(on, std::memory_order_acq_rel);
-    if (on) {
-        if (!was_on) {
-            g_last_lead = lead_member();
-            reset_state();
-            prepare_direction_overlay();
-        }
-        return;
-    }
-
-    // 关闭前把主控恢复到 8px，避免把非对齐坐标留给原版 8px 逻辑。
-    void* lead = lead_member();
-    if (lead != nullptr && world_game_state_gate() == 0 && snap_to_tile_center(lead)) {
-        int16_t x = 0;
-        int16_t y = 0;
-        if (access::read_position(lead, &x, &y)) {
-            (void)access::set_camera_focus(x, y);
+namespace {
+void close_mode(bool force_snap) {
+    const auto previous = g_mode.exchange(contracts::QolMovementInputMode::kDisabled,
+                                          std::memory_order_acq_rel);
+    const bool was_enabled = g_enabled.exchange(false, std::memory_order_acq_rel);
+    if (force_snap || was_enabled || previous != contracts::QolMovementInputMode::kDisabled) {
+        // 关闭前把主控恢复到 8px，避免把非对齐坐标留给原版 8px 逻辑。
+        void* lead = lead_member();
+        if (lead != nullptr && world_game_state_gate() == 0 && snap_to_tile_center(lead)) {
+            int16_t x = 0;
+            int16_t y = 0;
+            if (access::read_position(lead, &x, &y)) {
+                (void)access::set_camera_focus(x, y);
+            }
         }
     }
     reset_state();
     restore_direction_overlay();
     g_last_lead = nullptr;
+}
+}  // namespace
+
+void set_mode(contracts::QolMovementInputMode requested_mode) {
+    using Mode = contracts::QolMovementInputMode;
+    Mode next = requested_mode;
+    if (next != Mode::kDisabled && next != Mode::kEightWay &&
+        next != Mode::kOmnidirectional) next = Mode::kDisabled;
+
+    const Mode previous = g_mode.load(std::memory_order_acquire);
+    const bool was_enabled = g_enabled.load(std::memory_order_acquire);
+    if (previous == next && was_enabled == (next != Mode::kDisabled)) return;
+    if (next == Mode::kDisabled) {
+        close_mode(false);
+        return;
+    }
+
+    g_mode.store(next, std::memory_order_release);
+    g_enabled.store(true, std::memory_order_release);
+    if (previous == Mode::kDisabled || !was_enabled) {
+        g_last_lead = lead_member();
+        reset_state_for_mode(next);
+        prepare_direction_overlay();
+        return;
+    }
+
+    // Candidate indices belong to one table only; a mode change drops its touch/input state.
+    reset_state_for_mode(next);
+    prepare_direction_overlay();
+}
+
+void set_enabled(uint8_t enabled_value) {
+    const auto legacy_mode = contracts::legacy_movement_input_mode(enabled_value);
+    if (legacy_mode == contracts::QolMovementInputMode::kOmnidirectional) {
+        // Compatibility for v1.1 callers: the legacy boolean enables the 44-vector mode.
+        set_mode(legacy_mode);
+        return;
+    }
+    close_mode(true);
 }
 
 void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t param3) {
@@ -186,8 +231,16 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
     const int32_t dx = static_cast<int32_t>(touch_x - center_x);
     const int32_t dy = static_cast<int32_t>(center_y - touch_y);
 
-    const int32_t previous = g_state.active ? g_state.lattice_index : -1;
-    const int32_t index = select_lattice_step(dx, dy, previous);
+    const auto selected_mode = current_mode();
+    if (selected_mode == contracts::QolMovementInputMode::kDisabled) {
+        suppress_motion();
+        return;
+    }
+    const bool eight_way = selected_mode == contracts::QolMovementInputMode::kEightWay;
+    const int32_t previous = g_state.active && g_state.mode == selected_mode
+        ? g_state.lattice_index : -1;
+    const int32_t index = eight_way ? select_eight_way_step(dx, dy, previous)
+                                    : select_lattice_step(dx, dy, previous);
     if (index < 0) {
         suppress_motion();
         return;
@@ -198,11 +251,17 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
     int32_t primary_step = 0;
     int32_t secondary_step = 0;
     int32_t primary_key_index = -1;
-    if (!lattice_step_components(index, current_facing(), &primary_dir, &secondary_dir,
-                                 &primary_step, &secondary_step, &primary_key_index)) {
+    const bool components_ok = eight_way
+        ? eight_way_step_components(index, current_facing(), &primary_dir, &secondary_dir,
+                                    &primary_step, &secondary_step, &primary_key_index)
+        : lattice_step_components(index, current_facing(), &primary_dir, &secondary_dir,
+                                  &primary_step, &secondary_step, &primary_key_index);
+    if (!components_ok) {
         suppress_motion();
         return;
     }
+
+    const LatticeStep selected = eight_way ? kEightWaySteps[index] : kLatticeSteps[index];
 
     int32_t table[4]{};
     if (!access::read_key_table(table)) {
@@ -217,15 +276,12 @@ void on_direction_touch(void* ctrl, uint64_t event, const void* point, uint64_t 
 
     g_state.active = true;
     g_state.trusted = false;
-    g_state.lattice_index = index;
+    g_state.set_selected_candidate(selected_mode, index, selected.dx, selected.dy);
     g_state.primary_dir = primary_dir;
     g_state.secondary_dir = secondary_dir;
     g_state.primary_step = primary_step;
     g_state.secondary_step = secondary_step;
     g_state.primary_key = primary_key;
-    g_state.raw_active = true;
-    g_state.raw_dx = dx;
-    g_state.raw_dy = dy;
     g_state.owns_input = true;
 
     access::write_key_code(custom_dir_key(0));
@@ -281,7 +337,7 @@ void watch_lead_change() {
         static std::atomic<bool> logged{false};
         if (!snapped && !logged.exchange(true, std::memory_order_acq_rel)) {
             QOL_LOG_SEAM_WARN(kQolLogDomainPlatform,
-                              "omni lead switch snap skipped (blocked or invalid)");
+                              "movement lead switch snap skipped (blocked or invalid)");
         }
     }
 }
@@ -302,7 +358,7 @@ uint8_t handle_wait_coord(void* ch) {
         static std::atomic<bool> logged{false};
         if (!logged.exchange(true, std::memory_order_acq_rel)) {
             QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
-                              "omni path snap to tile center (skip one-axis wait coord)");
+                              "movement path snap to tile center (skip one-axis wait coord)");
         }
         return 1;
     }

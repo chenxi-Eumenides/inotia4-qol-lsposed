@@ -175,15 +175,15 @@ void restore_direction_overlay() {
 void draw_direction_indicator() {
     if (!enabled()) return;
     const State& state = current_state();
-    if (!state.active || !state.raw_active) return;
+    if (!state.active || (state.selected_dx == 0 && state.selected_dy == 0)) return;
     if (world_game_state_gate() != 0) return;
 
-    const float dx = static_cast<float>(state.raw_dx);
-    const float dy = static_cast<float>(state.raw_dy);
+    const float dx = static_cast<float>(state.selected_dx);
+    const float dy = static_cast<float>(state.selected_dy);
     const float length = std::sqrt(dx * dx + dy * dy);
     if (length < 1.0f) return;
 
-    // 原始触摸向量：dx 右为正，dy 上为正。屏幕 y 向下。
+    // 选中落点向量用右正、上正；屏幕坐标的 y 轴向下。
     const float ux = dx / length;
     const float uy = dy / length;
 
@@ -218,7 +218,7 @@ void draw_direction_indicator() {
     const int32_t offset_x = rect[4];
     const int32_t offset_y = rect[5];
 
-    // 上箭头基准朝上：屏幕角度（0=右，-90=上）+90 得到旋转角。
+    // 上箭头基准朝上：选中落点向量的屏幕角度（0=右，-90=上）+90 得到旋转角。
     const double screen_angle_deg = std::atan2(-static_cast<double>(dy),
                                                static_cast<double>(dx)) * kRadToDeg;
     int32_t rotation = static_cast<int32_t>(std::lround(screen_angle_deg + 90.0));
@@ -242,8 +242,8 @@ void draw_direction_indicator() {
     static std::atomic<bool> logged{false};
     if (!logged.exchange(true, std::memory_order_acq_rel)) {
         QOL_LOG_SEAM_INFO(qol::game::kQolLogDomainPlatform,
-                          "omni sprite dx=%d dy=%d center=(%d,%d) rot=%d wh=%dx%d draw=(%d,%d)",
-                          state.raw_dx, state.raw_dy, static_cast<int32_t>(cx),
+                          "movement sprite selected=(%d,%d) center=(%d,%d) rot=%d wh=%dx%d draw=(%d,%d)",
+                          state.selected_dx, state.selected_dy, static_cast<int32_t>(cx),
                           static_cast<int32_t>(cy), rotation, sw, sh, draw_x, draw_y);
     }
 }

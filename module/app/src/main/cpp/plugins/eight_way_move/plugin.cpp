@@ -27,7 +27,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "方向触摸唯一入口；捕获按下/拖动/抬起并写入自定义全向键码",
+        "方向触摸唯一入口；捕获按下/拖动/抬起并写入自定义移动键码",
         nullptr,
         120,
         reinterpret_cast<void*>(&direction_touch_wrapper),
@@ -41,7 +41,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "游戏内按键接收器；把自定义全向键码翻译成原版主方向键码",
+        "游戏内按键接收器；把自定义模式键码翻译成原版主方向键码",
         nullptr,
         120,
         reinterpret_cast<void*>(&press_key_play_wrapper),
@@ -55,7 +55,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "玩家方向键分支的 bl CHAR_Move；全向时按主/副轴移动",
+        "玩家方向键分支的 bl CHAR_Move；按选择模式的主/副轴向量移动",
         nullptr,
         120,
         reinterpret_cast<void*>(&eight_way_char_move_wrapper),
@@ -69,7 +69,7 @@ const contracts::ResourceClaim kResources[] = {
         contracts::ResourceFailure::kFailClosed,
         true,
         kPluginId,
-        "UIPlayPorting_Draw 原函数返回后按原始触摸角度绘制旋转指针",
+        "UIPlayPorting_Draw 原函数返回后按 selected 落点向量绘制旋转指针",
         nullptr,
         120,
         reinterpret_cast<void*>(&porting_draw_wrapper),
@@ -132,10 +132,16 @@ const contracts::ResourceClaim kResources[] = {
     },
 };
 
+constexpr contracts::FeatureChoiceOption kMovementModes[] = {
+    {"eight_way", "八向移动"},
+    {"omnidirectional", "全向移动"},
+};
+
 constexpr contracts::FeatureDefinition kFeatures[] = {
     {"eight_way_move.direction", 0, contracts::FeatureCategory::kGameplay,
-     contracts::FeatureType::kToggle, "全向移动", "朝任何方向移动。",
-     [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
+     contracts::FeatureType::kChoice, "触屏移动模式", "选择关闭、八向或全向移动。",
+     nullptr, nullptr, nullptr, 0, kMovementModes,
+     static_cast<uint32_t>(sizeof(kMovementModes) / sizeof(kMovementModes[0])), &on_choice},
 };
 
 int plugin_install(contracts::PluginContext& ctx) {
@@ -157,10 +163,10 @@ int plugin_install(contracts::PluginContext& ctx) {
         port->api.map_blocking_query == nullptr || port->api.prepare_overlay == nullptr) {
         return 1;
     }
+    if (!contracts::movement_input_port_supports_mode(port)) return 1;
     set_host_sdk(ctx.sdk);
     set_input_port(port);
     set_gate(true);
-    port->api.set_enabled(1);
     ensure_poll_task();
     return 0;
 }
@@ -170,15 +176,14 @@ void plugin_deactivate(contracts::PluginContext& ctx) {
     remove_poll_task();
     set_gate(false);
     const auto* port = input_port();
-    if (port != nullptr && port->api.set_enabled != nullptr) port->api.set_enabled(0);
+    if (port != nullptr && port->api.set_mode != nullptr)
+        port->api.set_mode(contracts::QolMovementInputMode::kDisabled);
     set_host_sdk(nullptr);
 }
 
 void plugin_on_enabled(contracts::PluginContext& ctx) {
     (void)ctx;
     set_gate(true);
-    const auto* port = input_port();
-    if (port != nullptr && port->api.set_enabled != nullptr) port->api.set_enabled(1);
     ensure_poll_task();
 }
 
@@ -187,7 +192,8 @@ void plugin_on_disabled(contracts::PluginContext& ctx) {
     remove_poll_task();
     set_gate(false);
     const auto* port = input_port();
-    if (port != nullptr && port->api.set_enabled != nullptr) port->api.set_enabled(0);
+    if (port != nullptr && port->api.set_mode != nullptr)
+        port->api.set_mode(contracts::QolMovementInputMode::kDisabled);
 }
 
 void plugin_fill_status(contracts::PluginStatusOut& out) {

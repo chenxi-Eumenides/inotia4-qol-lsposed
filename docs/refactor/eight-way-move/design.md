@@ -1,9 +1,18 @@
 # 八向/全向移动设计
 
-状态：已实现（`eight_way_move.direction`，默认关闭，Gameplay「更多优化功能」，Release 可见）；构建与 Host 单测通过，C18L v586 真机烟测通过（八向触摸、角色斜向移动、斜向双箭头），朝向偏好已单测、真机完整验收 NOT_ACCEPTED。
-2026-10-27 更新：已落地**主控角色 44 方向 1px 全向移动**；只有主控角色走全向，其他角色和路径/AI 保持原版四向 8px。本文 §6.4/§7 的八向/8px 对齐内容属于历史设计，现行契约以 `docs/reference/plugins/eight_way_move*.md` 为准。
+状态：Host choice/模式接线、定向 Host 单测、Debug 构建与 C18L v589 真机烟测已完成；八向/全向/关闭三态、重启恢复和 selected 高亮已实测。完整移动验收仍 `NOT_ACCEPTED`（撞墙/滑行/切图/其他分辨率未逐项覆盖）。原 C18L v586 烟测只覆盖旧全向原型行为，不作为本轮证据。
+2026-10-29 更新：现有 `eight_way_move.direction` 改为默认关闭的 choice，稳定值 `eight_way`/`omnidirectional`；旧 toggle bool 不迁移，缺 selection 按关闭。此前“44 方向 toggle”章节作为实现历史，当前配置与行为契约以 `docs/reference/plugins/eight_way_move*.md` 为准。
 2026-10-29 更新：修复主控平 A 自动接近时“乱跑”问题。`CHAR_MoveAsPath` 在路径方向与当前朝向不同且主控非 8px 对齐时置 `+0x2e0`；原版 `CHAR_MoveOnWaitCoord` 只沿旧朝向补一个轴，导致先朝错误方向移动。现行 `handle_wait_coord` 对主控路径改为吸附到当前 16px 瓦片中心并跳过单轴补步；细节见 `docs/reference/plugins/eight_way_move-internals.md` §3.6。
 范围：Android 触屏虚拟方向摇杆；不改键盘、AI、寻路和其他移动调用点。
+
+## 0. 当前 choice 模式约束（2026-10-29）
+
+- 关闭 → 八向 → 全向由 Host choice callback 通知业务；`eight_way_move.direction` ID 保持不变，option value 为 `eight_way`、`omnidirectional`。空 selection/旧配置只表示关闭，不新增迁移。
+- `QOL_PORT_MOVEMENT_INPUT` 升至 v1.2，只在既有 API 尾部追加 `set_mode` 和 mode enum。旧 `set_enabled(true/false)` 兼容语义不变：true 仍是全向、false 是关闭。
+- 八向只选固定表 `(±8,0)`、`(0,±8)`、`(±6,±6)`，使用现有最近方向/滞回、主副轴、1px 网格、碰撞和回退链；全向保持原 44 项表。八向对角约 `8.485px`，比 8px 轴向快约 6%，不加等速算法。
+- 模式切换/关闭/触摸无效都会清 candidate index、输入状态和 `selected_dx/dy`。selected 存未缩放整数候选向量；绘制角度与轨道位置使用 selected，而不是 raw 触摸向量或碰撞后位移。
+- Host 定向测试覆盖数学表、choice seed 的旧 bool 关闭修复、callback mode 映射、mode reset、port v1.2 与旧 setter。C18L v589 真机烟测确认旧 `direction=true` 升级后为关闭、八向选择重启后恢复、`mode=1 candidate=7 steps=6/6`、selected 高亮按 45° 绘制、全向保留连续角度、关闭恢复原版四箭头；撞墙/滑行/切图/其他分辨率仍未验收。
+- 可复跑 Host 命令：`cmake -S module/app/src/main/cpp/tests -B .tmp/movement-choice/host`；`cmake --build .tmp/movement-choice/host --target eight_way_move_tests eight_way_move_plugin_tests host_feature_controller_tests production_feature_facade_tests host_adapter_tests feature_reconciler_tests plugin_registry_tests plugin_lifecycle_tests -j2`；`ctest --test-dir .tmp/movement-choice/host --output-on-failure -R '^(eight_way_move_tests|eight_way_move_plugin_tests|host_feature_controller_tests|production_feature_facade_tests|host_adapter_tests|feature_reconciler_tests|plugin_registry_tests|plugin_lifecycle_tests)$'`。结果 `8/8 PASS`，`git diff --check` 通过；完整输出 `.tmp/movement-choice/host/final-host-build.log` 与 `final-host-ctest.log`，host-only，不构成真机验收。
 
 ## 1. 结论先行
 
@@ -373,6 +382,8 @@ step_y = round(delta * |dy| / len)
 | `CMakeLists.txt` | `qol_plugin_eight_way_move` |
 | `settings_contribution.cpp` | 空贡献，与现有插件一致 |
 
+以下 feature 定义属于初版八向 toggle 设计历史；当前已替换为 choice，见本文 §0 与 `docs/reference/plugins/eight_way_move.md`。
+
 feature：`eight_way_move.direction`，默认 `false`，分类 `Gameplay`，toggle，名称「八向移动」，描述「允许斜向移动」。
 
 ResourceClaim：
@@ -516,7 +527,7 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 
 ### 13.1 已落地
 
-- 新插件 `plugins/eight_way_move/`：feature `eight_way_move.direction`，默认 `0`，分类 `Gameplay`（设置页「更多优化功能」），toggle；Release 可见。
+- 初版插件 `plugins/eight_way_move/` 当时使用 toggle；当前 feature 为 §0 定义的 choice，稳定 option values 为 `eight_way`/`omnidirectional`。
 - 四个私有、必需、fail-closed、可还原资源：
   - `hook:UIPlay_ButtonDirection`（`F_UIPLAY_BUTTON_DIRECTION_VMA`）
   - `hook:GAMESTATE_PressKeyPlay`（`F_GAMESTATE_PRESSKEYPLAY_VMA`）
@@ -558,4 +569,4 @@ F_TOUCH_HANDLE_GET_CONTROL_OFFSET_VMA = 0xa3190
 - 每 30 帧的逻辑帧任务负责离开 Play 状态时清理 state/残留码；不是逐帧强保证。
 - 双箭头采用“原版画完后补画副轴”的方式；若原版 HUD 绘制顺序变化，补画可能盖到更高层元素，需真机回归。
 - 朝向偏好读取 `lead_member()+C_DIRECTION`；角色在 8px 补步期间可能仍使用上一朝向，属于预期。
-- 全向移动未实现；仍需处理 `GAMESTATE_PressKeyPlay` 的 `x&7/y&7` 转向闸门。
+- （该项记录于早期原型阶段）全向移动当时未实现；之后已落地 44 项 1px 全向模式。本轮仍沿用该执行/转向闸门，不修改移动实现。

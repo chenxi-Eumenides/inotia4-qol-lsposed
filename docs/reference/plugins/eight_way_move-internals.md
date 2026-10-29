@@ -1,6 +1,6 @@
 # `eight_way_move` 内部实现
 
-主控角色 1px 全向移动的实现参考。对外行为见 [`eight_way_move.md`](eight_way_move.md)。
+主控角色八向/全向触屏移动的实现参考。对外行为见 [`eight_way_move.md`](eight_way_move.md)。
 
 ## 1. 分层与目录
 
@@ -8,21 +8,22 @@
 |---|---|
 | `plugins/eight_way_move/plugin.cpp` | descriptor、8 个 ResourceClaim、feature、生命周期 |
 | `plugins/eight_way_move/feature.{h,cpp}` | 端口/门禁、6 个入口/调用点 wrapper、backup、每帧状态任务 |
-| `contracts/game_ports/movement_input_port.h` | `QOL_PORT_MOVEMENT_INPUT` v1.1 |
+| `contracts/game_ports/movement_input_port.h` | `QOL_PORT_MOVEMENT_INPUT` v1.2；尾追加 mode setter，旧 `set_enabled` 保持全向语义 |
 | `game/adapter_ports/movement_input_port.{h,cpp}` | 端口实例，转发到 `game/input` |
-| `game/input/eight_way_move_math.h` | 44 格点表、角度选择/滞回、主副轴拆分、速度缩放 |
+| `game/input/eight_way_move_math.h` | 固定八向候选表、原 44 格点表、最近角度/滞回、主副轴拆分与速度缩放 |
 | `game/input/eight_way_access.{h,cpp}` | KEY/键表/按住位、坐标/路径、碰撞查询、控件/摄像机访问 |
 | `game/input/eight_way_state.{h,cpp}` | 触摸状态机、自定义键码、补步门禁、主控切换吸附 |
 | `game/input/eight_way_move.{h,cpp}` | `CHAR_Move` 双轴 wrapper、滑行/回滚/恢复坐标 |
-| `game/input/eight_way_draw.{h,cpp}` | `UIPlayPorting_Draw` 后按原始触摸角度绘制旋转指针 |
-| `tests/test_eight_way_move.cpp` | 44 格点、角度/滞回、主副轴、缩放、自定义键码单测 |
+| `game/input/eight_way_draw.{h,cpp}` | `UIPlayPorting_Draw` 后按 selected 整数落点向量绘制旋转指针 |
+| `tests/test_eight_way_move.cpp` | 固定八向/44 向候选、角度/滞回、selected 向量、主副轴、缩放单测 |
 | `tests/test_eight_way_move_plugin.cpp` | descriptor、8 资源、端口、feature 单测 |
 
 ## 2. 装配
 
 - `plugin_descriptor()` 由 `host/assembly.cpp` 的 `kBuiltInPlugins` 注册。
-- feature：`eight_way_move.direction`，默认 `0`，`FeatureCategory::kGameplay`，toggle；显示名「全向移动」。
-- 端口：`QOL_PORT_MOVEMENT_INPUT`（`34`）v1.1，私有，仅 `eight_way_move` 可声明；由 `host/plugin_registry.cpp` 注入。
+- feature：`eight_way_move.direction`，默认关闭，`FeatureCategory::kGameplay`，`kChoice`；稳定 options 为 `eight_way`、`omnidirectional`。无 selection 即关闭；旧 toggle bool 不迁移、不推导模式。
+- 端口：`QOL_PORT_MOVEMENT_INPUT`（`34`）v1.2，私有，仅 `eight_way_move` 可声明；由 `host/plugin_registry.cpp` 注入。v1.2 仅尾追加 mode setter，原有字段顺序/`set_enabled` 语义不变。
+- `QolMovementInputMode` 为 `kDisabled`、`kEightWay`、`kOmnidirectional`；v1.2 consumer 用 version/helper 和尾函数非空检查 `set_mode`，v1.1 前缀里的 `set_enabled` 仍作为兼容全向入口。
 - 无 HTTP、capability、JNI、ownership。
 
 ### 2.1 资源
@@ -76,9 +77,11 @@
 1. `UIPlay_ButtonDirection` 原函数先执行，保留按下/命中/视觉状态。
 2. `eight_way_state` 读 `point + TouchHandle offset`。
 3. 取 `0x15` 控件绝对左上角，中心 = `abs + 126`；真机逻辑高 `640`，显示横屏 `854x384`，不能使用固定屏幕常量。
-4. 8px 死区；`select_lattice_step` 用 `atan2` 选择最近表项，前后角差 ≤4° 时保持上一项，避免边界抖动。
-5. `lattice_step_components` 按分量大小拆主轴/副轴；两个分量接近时优先保持当前四方向朝向。
-6. 写自定义键码 `0x51000000` 到 `KEY_nCode`，保存 `lattice_index/primary_dir/secondary_dir/primary_step/secondary_step/primary_key/owns_input`。
+4. 8px 死区；八向用 constexpr 八候选表，全向用原 44 候选表；两者均经同一最近角度/4° 滞回选择逻辑。
+5. 按对应表项的 `step_components` 拆主轴/副轴；两个分量接近时优先保持当前四方向朝向。
+6. 写自定义键码 `0x51000000` 到 `KEY_nCode`，保存当前模式、该模式下的 `lattice_index`、选中原始格点 `selected_dx/dy`、主副轴/步长/键码及 `owns_input`。
+
+mode 切换通过 Host `on_choice` 进入端口 `set_mode`。模式改变先复位 State 与输入键码，候选 index 不跨表复用；关闭会沿旧关闭路径吸附主控并恢复 overlay。`set_enabled(true)` 仍只表示全向模式，以兼容 v1.1 旧调用者。
 
 ### 3.3 键码翻译
 
@@ -96,7 +99,7 @@
 
 1. `enabled/active/trusted/flag==0/dir==primary_dir` 全部满足才处理。
 2. `ch == lead_member()`、`world_game_state_gate()==0`、`ch+0x2f0` 无路径。
-3. 按 `delta/8` 缩放表项；`delta==8` 时保持表值。
+3. 按 `delta/8` 缩放已选表项；八向使用固定 `(±8,0)`、`(0,±8)`、`(±6,±6)`，全向仍使用旧 44 项；`delta==8` 时原整数值不变。
 4. 保存移动前 x/y。
 5. 副轴 `CHAR_Move(secondary, step, flag=1)` 静默移动；返回 3 直接停住。
 6. 主轴 `CHAR_Move(primary, step, flag=0)` 完整移动；成功即返回，摄像机/格子事件在最终位置执行一次。
@@ -142,7 +145,7 @@
 
 `porting_draw_wrapper` 先执行原 `UIPlayPorting_Draw`，再调 `draw_direction_indicator()`：
 
-- `state.raw_active/raw_dx/raw_dy` 保存原始触摸向量（dx 右正、dy 上正）；松开、死区、非 Play 状态会清空，因此释放后不绘制。
+- 箭头角度和环绕位置使用 `state.selected_dx/selected_dy`；不再保存或读取原始触摸向量。selected 是未缩放候选格点，不是 delta 缩放或碰撞后的位移。松开、死区、非 Play 状态、关闭和模式切换会清空 selected，因此释放后不绘制。
 - 摇杆中心 = `0x15` 控件绝对左上角 + `126`。
 - 复用原版上箭头贴图：`IMGSYS_GetGroup(0x16)` + `IMGSYS_GetLoc(0x16, 0x0f)`，用 `SGL_DrawTexturePartEx`（`0x955d0`）绘制；`rotation = 屏幕角度 + 90`，基准上箭头朝上。
 - 箭头中心绕摇杆中心半径 `92` 控件 px 旋转；`SGL` 的 x/y 是未旋转左上角，按旋转矩阵把左上角反算回中心位置。
@@ -152,8 +155,9 @@
 ## 4. 数据流
 
 ```text
+Host choice callback → movement_input_port.set_mode → eight_way_state mode/reset
 触屏 → UIPlay_ButtonDirection hook → eight_way_state
-  → 44 格点选择 → 自定义 KEY_nCode → GAMESTATE_PressKeyPlay hook
+  → 八向固定表或全向原 44 格表 → selected_dx/dy + 自定义 KEY_nCode → GAMESTATE_PressKeyPlay hook
   → 主方向键码 → 原版行走/切图/拾取/动画
   → CHAR_Move 调用点 patch → 副轴静默 + 主轴完整
   → UIPlayPorting_Draw hook → 补画第二箭头
@@ -166,11 +170,13 @@
 - 8 资源任一安装失败：整组 fail-closed，插件 failed，不保留半装状态。
 - entry hook 无 backup：宿主拒绝/回滚，wrapper 不执行。
 - 端口缺失/ABI 不匹配：install 失败，不安装资源。
-- disable/deactivate：先 `set_enabled(0)` 吸附当前主控到瓦片中心，再移除每帧任务、关闭端口门禁、清自定义码，资源物理还原。
+- choice 关闭/disable/deactivate：先设为 disabled、吸附当前主控到瓦片中心并清自定义码/selected 向量，再移除每帧任务、关闭端口门禁和物理还原资源。
+- 八向/全向切换不改移动执行或碰撞实现；只重置触摸、候选 index 与输入归属，避免跨表复用 index。
 
 ## 6. 已知限制与风险
 
-- 单帧距离 7.62–8.25px，最大误差 4.8%；45° 最近为 39.8°/50.2°，没有精确对角线。
+- 全向单帧距离 7.62–8.25px，最大误差 4.8%；45° 最近为 39.8°/50.2°，没有精确对角线。
+- 八向对角固定 `(±6,±6)`，`delta=8` 时长度约 8.485px，比轴向快约 6%；不另加等速归一化。
 - 1px 网格上除轴向外不存在精确 8px 的整数向量；这是量化取舍，不是实现误差。
 - 碰撞查询对非对齐坐标使用“中心所在瓦片”；贴墙距离接近原版，但斜向进角落时不再按 16px 方块提前阻挡。
 - 路径/AI 仍按 8px 网格；主控从非 8px 坐标启动 `move_to` 时可能先吸附 0–7px。
@@ -183,11 +189,14 @@
 
 | 范围 | 证据 |
 |---|---|
-| 44 格点/距离/角度/滞回/主副轴/缩放/键码 | `tests/test_eight_way_move.cpp` |
-| descriptor、8 资源、端口 v1.1、feature 默认关闭与 Gameplay 分类 | `tests/test_eight_way_move_plugin.cpp` |
+| 固定八向/44 向格点、四象限最近方向/边界、滞回、主副轴、缩放、selected 向量复位 | `tests/test_eight_way_move.cpp` |
+| descriptor choice、稳定 value、callback mode 映射、旧 `set_enabled`、端口 v1.2 尾 ABI | `tests/test_eight_way_move_plugin.cpp` |
+| 旧 bool 无 selection 时按关闭修复 | Host `host_feature_controller_tests` 的通用 choice seed 用例 |
 | 构建 | `scripts/build-debug.sh` |
 | 架构/层依赖/符号/资源 | `check_arch.py`、`check_layers.py`、`check_symbols.py`、`check_resources.py` |
-| 真机 | 待验证；本文不宣称通过 |
+| 原全向 smoke | C18L v586，属于旧全向模式，不代表新 choice 模式验收 |
+| 新 choice 三态/重启恢复/selected 高亮 | **PASS（烟测，C18L v589）**：旧 `direction=true` 升级后关闭；`eight_way` 重启后 `mode=1 candidate=7 steps=6/6`、高亮 45°；`omnidirectional` 高亮连续约 20°；关闭恢复原版四箭头 |
+| 撞墙/滑行/切图/其他分辨率 | **NOT_ACCEPTED（未执行）** |
 
 ## 8. 已删除旧结构
 

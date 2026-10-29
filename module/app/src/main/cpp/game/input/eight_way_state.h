@@ -2,7 +2,9 @@
 
 #include <cstdint>
 
-// 全向移动状态机：触摸向量 -> 8px 格点 -> 自定义键码 -> 原版主方向键码。
+#include "contracts/game_ports/movement_input_port.h"
+
+// 触屏移动状态机：触摸向量 -> 模式候选格点 -> 自定义键码 -> 原版主方向键码。
 // 只在游戏主线程调用；char_move 读取 current_state() 决定主/副轴移动。
 
 namespace qol::game::input {
@@ -10,20 +12,38 @@ namespace qol::game::input {
 struct State {
     bool active = false;
     bool trusted = false;
+    contracts::QolMovementInputMode mode = contracts::QolMovementInputMode::kDisabled;
     int32_t lattice_index = -1;
     int32_t primary_dir = -1;
     int32_t secondary_dir = -1;
     int32_t primary_step = 0;
     int32_t secondary_step = 0;
+    // Selected integer grid vector; this is not delta-scaled or collision-adjusted movement.
+    int32_t selected_dx = 0;
+    int32_t selected_dy = 0;
     int32_t primary_key = 0;
-    bool raw_active = false;  // 原始触摸向量有效（用于旋转指针）
-    int32_t raw_dx = 0;       // 右为正
-    int32_t raw_dy = 0;       // 上为正
     bool owns_input = false;  // 当前 KEY_nCode/按住位是否由本功能写入
+
+    void set_selected_candidate(contracts::QolMovementInputMode selected_mode,
+                                int32_t candidate_index, int32_t dx, int32_t dy) noexcept {
+        mode = selected_mode;
+        lattice_index = candidate_index;
+        selected_dx = dx;
+        selected_dy = dy;
+    }
+
+    void clear() noexcept { *this = State{}; }
+    void reset_for_mode(contracts::QolMovementInputMode next_mode) noexcept {
+        clear();
+        mode = next_mode;
+    }
 };
 
 bool enabled();
+contracts::QolMovementInputMode current_mode();
 const State& current_state();
+void set_mode(contracts::QolMovementInputMode mode);
+// Compatibility entry point: enabled=true still means the legacy omnidirectional mode.
 void set_enabled(uint8_t enabled);
 void reset();
 void reset_state();

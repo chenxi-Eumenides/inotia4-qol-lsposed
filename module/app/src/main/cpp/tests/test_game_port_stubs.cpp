@@ -41,8 +41,12 @@ namespace qol::game {
 namespace {
 
 const contracts::QolQuestPort kQuestPort{{1, 0}, {}, {}};
+void movement_input_set_enabled(uint8_t) {}
+void movement_input_set_mode(contracts::QolMovementInputMode) {}
 const contracts::QolMovementInputPort kMovementInputPort{
-    contracts::kQolPortMovementInputVersion, {}};
+    contracts::kQolPortMovementInputVersion,
+    {nullptr, nullptr, nullptr, nullptr, nullptr, &movement_input_set_enabled,
+     nullptr, nullptr, nullptr, nullptr, &movement_input_set_mode}};
 const contracts::QolWorldPort kWorldPort{{1, 0}, {}};
 contracts::QolItemPort kItemPort{contracts::kQolPortItemVersion,
                                  sizeof(contracts::QolItemPort), {}};

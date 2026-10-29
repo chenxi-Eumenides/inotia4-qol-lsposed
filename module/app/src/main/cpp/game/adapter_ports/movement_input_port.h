@@ -4,7 +4,7 @@
 
 namespace qol::game {
 
-// 全向移动输入端口宿主实例（实现在 game/adapter_ports/movement_input_port.cpp）。
+// 触屏移动输入端口宿主实例（实现在 game/adapter_ports/movement_input_port.cpp）。
 const contracts::QolMovementInputPort& movement_input_port();
 
 }  // namespace qol::game

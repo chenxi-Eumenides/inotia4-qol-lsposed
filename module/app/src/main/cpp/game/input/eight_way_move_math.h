@@ -1,12 +1,13 @@
 #pragma once
 
-// 主控角色 1px 全向移动数学（纯逻辑，可独立单测）。
+// 主控触屏方向候选表与 1px 移动数学（纯逻辑，可独立单测）。
 //
 // 坐标约定：dx = 触点相对摇杆中心的水平偏移，dy = 相对中心的上方向偏移（上为正）。
 // 方向编号与原版 CHAR_Move 一致：0=下、1=左、2=上、3=右。
 // 表项是 8px 半径中点圆落在 1px 网格上的 44 个格点，单帧位移 7.62~8.25px。
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 
 namespace qol::game::input {
@@ -37,6 +38,14 @@ inline constexpr LatticeStep kLatticeSteps[] = {
 inline constexpr int32_t kLatticeStepCount =
     static_cast<int32_t>(sizeof(kLatticeSteps) / sizeof(kLatticeSteps[0]));
 
+// 八向模式固定使用轴向 8px、对角 (±6,±6) 落点；保持 1px 网格与现有 delta 缩放。
+inline constexpr LatticeStep kEightWaySteps[] = {
+    {8, 0}, {6, 6}, {0, 8}, {-6, 6}, {-8, 0}, {-6, -6}, {0, -8}, {6, -6},
+};
+
+inline constexpr int32_t kEightWayStepCount =
+    static_cast<int32_t>(sizeof(kEightWaySteps) / sizeof(kEightWaySteps[0]));
+
 inline int32_t abs32(int32_t value) {
     return value < 0 ? static_cast<int32_t>(-static_cast<int64_t>(value)) : value;
 }
@@ -58,18 +67,17 @@ inline int32_t key_index_for_dir(int32_t dir) {
     }
 }
 
-// 选择与触摸向量夹角最小的 8px 格点。previous_index 用于 4° 滞回，避免在相邻
-// 表项边界抖动；调用方在死区/无效时传 -1。返回表下标，-1 表示死区。
-inline int32_t select_lattice_step(int32_t dx, int32_t dy, int32_t previous_index) {
+template <std::size_t Count>
+inline int32_t select_step(const LatticeStep (&steps)[Count], int32_t dx, int32_t dy,
+                           int32_t previous_index) {
     if (inside_deadzone(dx, dy)) return -1;
 
     const double angle = std::atan2(static_cast<double>(dy), static_cast<double>(dx));
     int32_t best_index = -1;
     double best_diff = 1e9;
-    for (int32_t i = 0; i < kLatticeStepCount; ++i) {
+    for (int32_t i = 0; i < static_cast<int32_t>(Count); ++i) {
         const double vector_angle = std::atan2(
-            static_cast<double>(kLatticeSteps[i].dy),
-            static_cast<double>(kLatticeSteps[i].dx));
+            static_cast<double>(steps[i].dy), static_cast<double>(steps[i].dx));
         const double diff = std::fabs(std::remainder(angle - vector_angle, 2.0 * kPi));
         if (diff < best_diff) {
             best_diff = diff;
@@ -77,10 +85,10 @@ inline int32_t select_lattice_step(int32_t dx, int32_t dy, int32_t previous_inde
         }
     }
 
-    if (previous_index >= 0 && previous_index < kLatticeStepCount) {
+    if (previous_index >= 0 && previous_index < static_cast<int32_t>(Count)) {
         const double previous_angle = std::atan2(
-            static_cast<double>(kLatticeSteps[previous_index].dy),
-            static_cast<double>(kLatticeSteps[previous_index].dx));
+            static_cast<double>(steps[previous_index].dy),
+            static_cast<double>(steps[previous_index].dx));
         const double previous_diff =
             std::fabs(std::remainder(angle - previous_angle, 2.0 * kPi));
         if (previous_diff <= kLatticeHysteresisDegrees * kPi / 180.0) {
@@ -90,18 +98,25 @@ inline int32_t select_lattice_step(int32_t dx, int32_t dy, int32_t previous_inde
     return best_index;
 }
 
+// The candidate arrays are compile-time tables. Keep angle selection/hysteresis identical in both modes.
+inline int32_t select_lattice_step(int32_t dx, int32_t dy, int32_t previous_index) {
+    return select_step(kLatticeSteps, dx, dy, previous_index);
+}
+
+inline int32_t select_eight_way_step(int32_t dx, int32_t dy, int32_t previous_index) {
+    return select_step(kEightWaySteps, dx, dy, previous_index);
+}
+
 // 把表项拆成原版 CHAR_Move 的主/副方向和步长。主轴取较大分量；两个分量接近时
 // 优先保持当前四方向朝向，避免 6/5、5/6 这类近斜向在切换时频繁翻转。
-inline bool lattice_step_components(int32_t index, int32_t facing, int32_t* primary_dir,
-                                    int32_t* secondary_dir, int32_t* primary_step,
-                                    int32_t* secondary_step, int32_t* primary_key_index) {
-    if (index < 0 || index >= kLatticeStepCount || primary_dir == nullptr ||
-        secondary_dir == nullptr || primary_step == nullptr || secondary_step == nullptr ||
-        primary_key_index == nullptr) {
+inline bool step_components(LatticeStep step, int32_t facing, int32_t* primary_dir,
+                            int32_t* secondary_dir, int32_t* primary_step,
+                            int32_t* secondary_step, int32_t* primary_key_index) {
+    if (primary_dir == nullptr || secondary_dir == nullptr || primary_step == nullptr ||
+        secondary_step == nullptr || primary_key_index == nullptr) {
         return false;
     }
 
-    const LatticeStep step = kLatticeSteps[index];
     const int32_t ax = abs32(step.dx);
     const int32_t ay = abs32(step.dy);
     if (ax == 0 && ay == 0) return false;
@@ -147,6 +162,22 @@ inline bool lattice_step_components(int32_t index, int32_t facing, int32_t* prim
 
     *primary_key_index = key_index_for_dir(*primary_dir);
     return *primary_key_index >= 0;
+}
+
+inline bool lattice_step_components(int32_t index, int32_t facing, int32_t* primary_dir,
+                                    int32_t* secondary_dir, int32_t* primary_step,
+                                    int32_t* secondary_step, int32_t* primary_key_index) {
+    if (index < 0 || index >= kLatticeStepCount) return false;
+    return step_components(kLatticeSteps[index], facing, primary_dir, secondary_dir,
+                           primary_step, secondary_step, primary_key_index);
+}
+
+inline bool eight_way_step_components(int32_t index, int32_t facing, int32_t* primary_dir,
+                                      int32_t* secondary_dir, int32_t* primary_step,
+                                      int32_t* secondary_step, int32_t* primary_key_index) {
+    if (index < 0 || index >= kEightWayStepCount) return false;
+    return step_components(kEightWaySteps[index], facing, primary_dir, secondary_dir,
+                           primary_step, secondary_step, primary_key_index);
 }
 
 // 速度 buff/debuff 改变 delta 时按 delta/8 缩放表项；delta=8 时保持表值。

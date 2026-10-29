@@ -20,9 +20,9 @@ void log_first_omni(int32_t delta, int32_t primary_step, int32_t secondary_step)
     if (logged.exchange(true, std::memory_order_acq_rel)) return;
     const State& state = current_state();
     QOL_LOG_SEAM_INFO(kQolLogDomainPlatform,
-                      "omni move lattice=%d primary=%d/%d secondary=%d/%d delta=%d",
-                      state.lattice_index, state.primary_dir, primary_step,
-                      state.secondary_dir, secondary_step, delta);
+                      "movement move mode=%u lattice=%d primary=%d/%d secondary=%d/%d delta=%d",
+                      static_cast<unsigned>(state.mode), state.lattice_index, state.primary_dir,
+                      primary_step, state.secondary_dir, secondary_step, delta);
 }
 
 int32_t pass_through(void* ch, int32_t dir, int32_t delta, uint8_t flag) {

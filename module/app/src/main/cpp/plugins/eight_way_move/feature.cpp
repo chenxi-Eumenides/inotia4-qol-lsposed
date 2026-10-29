@@ -174,6 +174,26 @@ int32_t map_blocking_wrapper(int32_t x, int32_t y) {
     return backup(x, y);
 }
 
+QolResult on_choice(contracts::PluginContext& ctx, const char* value) {
+    (void)ctx;
+    const auto* port = input_port();
+    if (!contracts::movement_input_port_supports_mode(port))
+        return contracts::error(kQolErrNotReady, nullptr, 0);
+
+    contracts::QolMovementInputMode mode = contracts::QolMovementInputMode::kDisabled;
+    if (value != nullptr && value[0] != '\0') {
+        if (std::strcmp(value, "eight_way") == 0) {
+            mode = contracts::QolMovementInputMode::kEightWay;
+        } else if (std::strcmp(value, "omnidirectional") == 0) {
+            mode = contracts::QolMovementInputMode::kOmnidirectional;
+        } else {
+            return contracts::error(kQolErrInvalidArgument, nullptr, 0);
+        }
+    }
+    port->api.set_mode(mode);
+    return contracts::ok();
+}
+
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id, void* backup) {
     (void)ctx;
     if (resource_id == nullptr) return 0;

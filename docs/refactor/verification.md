@@ -437,6 +437,16 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | ABI 边界 | Host SDK minor 30 尾追加 choice API，旧函数表前缀检查保留。 | `FeatureDefinition`、catalog item 数组元素大小变化；不承诺旧二进制 descriptor/catalog 数组兼容。当前生产插件静态编译，外部旧插件加载不在支持范围。 |
 | VM-SETTINGS-CHOICE-01 | **NOT_ACCEPTED（未执行）**：当前没有生产插件注册 choice，缺少可操作的新控件入口。 | 待以实际消费插件验收：关闭→逐项右移→末项→逐项左移→关闭；边界禁用、左右箭头命中、长标签与布局对齐；撤页重建和重启后读回；业务收到非关闭间切换与关闭；写入失败不显示新值；旧 toggle/entry 回归。不得以 Host/构建证据替代。 |
 
+### 5.28 `eight_way_move` 八向/全向 choice（2026-10-29；Host/静态/Debug/真机烟测通过，完整行为待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 实现 | `eight_way_move.direction` 改为 choice：关闭/`eight_way`/`omnidirectional`。八向固定 `(±8,0)`、`(0,±8)`、`(±6,±6)`，全向保留原 44 项；两者复用 1px 网格、`delta/8` 缩放、主副轴、碰撞与回退。`QOL_PORT_MOVEMENT_INPUT` v1.2 尾追加 `set_mode`，旧 `set_enabled` 仍表示全向/关闭。高亮改用 `State.selected_dx/dy`，不再读取原始触摸向量。 | 旧 toggle bool 不迁移，缺 selection 按关闭。八向对角比轴向快约 6%，未做等速归一化。未改 `eight_way_move.cpp` 碰撞/回退和 `eight_way_access.cpp`。 |
+| Host 定向测试 | **8/8 PASS**：`eight_way_move_tests`、`eight_way_move_plugin_tests`、`host_feature_controller_tests`、`production_feature_facade_tests`、`host_adapter_tests`、`feature_reconciler_tests`、`plugin_registry_tests`、`plugin_lifecycle_tests`。 | 最终工作树日志 `.tmp/movement-choice/{final8-build.log,final8-ctest.log}`。覆盖八向/44 向候选、四象限边界、滞回、主副轴、缩放、mode reset、choice 注册/回调、旧 setter 和 port ABI。 |
+| 静态/Debug | **PASS**：`check_arch.py`、`check_http_routes.py`、`git diff --check`；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2610291754_2a0a2ca1c752.apk`，SHA-256 `2a0a2ca1c7522403a31426875cace28b8f8296ad1def520320afdbc1bdf11943`。 | 日志 `.tmp/movement-choice/{check-arch-final.log,check-http-routes-final.log,build-debug-final.log}`。 |
+| VM-EWM-CHOICE-01：三态与高亮 | **PASS（烟测，C18L v589）**：升级前旧 `features.direction=true`，启动后变为 `false`、`selections={}`；`eight_way` 重启后触屏日志 `movement touch mode=1 candidate=7 ... steps=6/6`、`movement sprite selected=(6,-6) rot=135`；`omnidirectional` 同角度触屏高亮约 20°；关闭后恢复原版四箭头且 `enable=false`。 | 设备 `192.168.3.54:5555`，截图 `.tmp/movement-choice/{eight_ne.png,omni_20_crop.png,closed_crop.png,final-eight.png}`。烟测未覆盖长时间移动。 |
+| VM-EWM-CHOICE-02：碰撞/回退/场景 | **NOT_ACCEPTED（未执行）** | 需真机覆盖撞墙、沿墙滑行、回滚失败恢复坐标、切图/拾取/动画、物理键盘、其他分辨率；Host/烟测不替代这些证据。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

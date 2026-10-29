@@ -9,6 +9,10 @@
 namespace qol::game {
 namespace {
 
+void set_input_mode(contracts::QolMovementInputMode mode) {
+    qol::game::input::set_mode(mode);
+}
+
 const contracts::QolMovementInputPort kPort{
     contracts::kQolPortMovementInputVersion,
     {
@@ -22,6 +26,7 @@ const contracts::QolMovementInputPort kPort{
         &qol::game::input::poll,
         &qol::game::input::handle_wait_coord,
         &qol::game::input::access::map_blocking_query,
+        &set_input_mode,
     },
 };
 

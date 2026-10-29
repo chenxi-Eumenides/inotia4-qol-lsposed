@@ -38,5 +38,6 @@ int32_t eight_way_char_move_wrapper(void* ch, int32_t dir, int32_t delta, uint8_
 void porting_draw_wrapper();
 void move_on_wait_coord_wrapper(void* ch);
 int32_t map_blocking_wrapper(int32_t x, int32_t y);
+QolResult on_choice(contracts::PluginContext& ctx, const char* value);
 
 }  // namespace qol::features::eight_way_move
