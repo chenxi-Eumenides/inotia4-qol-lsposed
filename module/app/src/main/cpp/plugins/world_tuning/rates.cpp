@@ -17,7 +17,7 @@ constexpr const char* kRateDescriptions[] = {
     "获得的金钱缩放", "获得的经验缩放", "玩家最大生命的缩放", "怪物最大生命的缩放", "对怪物造成的伤害缩放",
     "受到的伤害缩放，数值越低越耐打", "移动速度的缩放",
 };
-constexpr bool kRateSupported[] = {false, false, false, true, true, true, false};
+constexpr bool kRateSupported[] = {true, true, false, true, true, true, false};
 constexpr uint32_t kRateCount = static_cast<uint32_t>(RateId::kCount);
 
 static_assert(sizeof(kRateKeys) / sizeof(kRateKeys[0]) == kRateCount, "rate key table size");
@@ -203,6 +203,12 @@ int32_t scale_by_percent(int32_t value, int32_t percent) {
     if (scaled > INT32_MAX) return INT32_MAX;
     if (scaled < 1) return 1;
     return static_cast<int32_t>(scaled);
+}
+
+int64_t scale_money(int64_t value, int32_t percent) {
+    if (value <= 0 || percent == kRateDefault) return value;
+    if (value > INT64_MAX / percent) return INT64_MAX;
+    return value * percent / 100;
 }
 
 int32_t scale_attribute(int32_t raw, int32_t percent) {

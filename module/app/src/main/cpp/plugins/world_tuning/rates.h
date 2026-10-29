@@ -56,5 +56,7 @@ QolResult validate_rates_config(const char* key, const char* json, uint32_t size
 int32_t scale_by_percent(int32_t value, int32_t percent);
 // 百分比缩放（属性/生命）：raw<=0 原样返回；percent==100 原样返回；结果下限 1。
 int32_t scale_attribute(int32_t raw, int32_t percent);
+// 百分比缩放（金币，int64）：value<=0 或 100 原样返回；int64 溢出时钳到 INT64_MAX。
+int64_t scale_money(int64_t value, int32_t percent);
 
 }  // namespace qol::features::world_tuning

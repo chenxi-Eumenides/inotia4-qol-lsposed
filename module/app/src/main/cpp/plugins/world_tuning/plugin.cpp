@@ -7,6 +7,7 @@
 #include "../../contracts/game_ports/character_extras_port.h"
 #include "../../contracts/panels.h"
 #include "../../contracts/ui.h"
+#include "../../contracts/world_tuning.h"
 #include "feature.h"
 #include "panel.h"
 #include "rates.h"
@@ -36,6 +37,21 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
       static_cast<uint16_t>(contracts::kUiPanelsVersionMinor)}},
     {contracts::kUiComponentsCapabilityId,
      {contracts::kUiContractMajor, contracts::kUiContractMinor}},
+};
+
+QolResult move_speed_read(int32_t* out_speed) {
+    if (out_speed == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "out_speed is null", 17);
+    }
+    *out_speed = move_speed_value();
+    return contracts::ok();
+}
+
+const contracts::WorldTuningMoveSpeedApi kMoveSpeedApi{&move_speed_read};
+
+const contracts::CapabilityProvisionRef kProvides[] = {
+    {contracts::kWorldTuningMoveSpeedCapabilityId, contracts::kWorldTuningMoveSpeedVersion,
+     &kMoveSpeedApi},
 };
 
 const contracts::QolPortRequirement kPorts[] = {
@@ -74,6 +90,34 @@ const contracts::ResourceClaim kResources[] = {
         nullptr,
         120,
         reinterpret_cast<void*>(&char_update_attr_from_monster_wrapper),
+    },
+    {
+        kResourceIdAddExperience,
+        "F_ADD_EXP_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kOptional,
+        contracts::ResourceFailure::kFailSoft,
+        true,
+        kPluginId,
+        "加经验统一入口；按接收者阵营缩放",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&char_add_experience_wrapper),
+    },
+    {
+        kResourceIdAddMoney,
+        "F_ADD_MONEY_VMA",
+        contracts::ResourceMechanism::kEntryHook,
+        contracts::ResourcePolicy::kPrivate,
+        contracts::ResourceRequirement::kOptional,
+        contracts::ResourceFailure::kFailSoft,
+        true,
+        kPluginId,
+        "加金币统一增量入口；按倍率缩放入参",
+        nullptr,
+        120,
+        reinterpret_cast<void*>(&inven_add_money_wrapper),
     },
 };
 
@@ -220,8 +264,8 @@ const contracts::PluginDescriptor kDescriptor = {
     kPluginVersion,
     1, kRequires,          // requires=character.facts
     2, kOptionalRequires,  // optional=ui_panels + ui_components
-    0, nullptr,            // provides
-    2, kResources,
+    1, kProvides,          // provides: world_tuning.move_speed
+    4, kResources,
     0, nullptr,            // jni
     &plugin_install,
     &plugin_deactivate,

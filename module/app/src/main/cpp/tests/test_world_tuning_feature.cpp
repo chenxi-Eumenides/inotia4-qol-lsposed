@@ -5,6 +5,7 @@
 #include "contracts/host_sdk.h"
 #include "plugins/world_tuning/feature.h"
 #include "plugins/world_tuning/panel.h"
+#include "contracts/world_tuning.h"
 #include "plugins/world_tuning/plugin.h"
 
 #include <cassert>
@@ -56,6 +57,10 @@ int g_max_hp_writes = 0;
 int g_hp_writes = 0;
 int g_damage_backup_calls = 0;
 int g_attr_backup_calls = 0;
+int g_exp_backup_calls = 0;
+int g_money_backup_calls = 0;
+int32_t g_last_exp = 0;
+int64_t g_last_money = 0;
 int g_in_flight_enters = 0;
 int g_in_flight_leaves = 0;
 int g_damage_enters = 0;
@@ -93,6 +98,9 @@ QolResult fake_enter(InFlightHandle handle) {
         ++g_damage_enters;
     } else if (std::strcmp(handle.resource_id, kResourceIdUpdateAttrFromMonster) == 0) {
         ++g_attr_enters;
+    } else if (std::strcmp(handle.resource_id, kResourceIdAddExperience) == 0) {
+        // exp/gold 也在途计数，归入 total 即可。
+    } else if (std::strcmp(handle.resource_id, kResourceIdAddMoney) == 0) {
     } else {
         assert(false && "unexpected in-flight resource id");
     }
@@ -106,6 +114,8 @@ QolResult fake_leave(InFlightHandle handle) {
         ++g_damage_leaves;
     } else if (std::strcmp(handle.resource_id, kResourceIdUpdateAttrFromMonster) == 0) {
         ++g_attr_leaves;
+    } else if (std::strcmp(handle.resource_id, kResourceIdAddExperience) == 0) {
+    } else if (std::strcmp(handle.resource_id, kResourceIdAddMoney) == 0) {
     } else {
         assert(false && "unexpected in-flight resource id");
     }
@@ -189,6 +199,18 @@ void fake_damage_backup(void*, void*, int32_t damage, int32_t, int32_t) {
 
 void fake_attr_backup(void*, int32_t) { ++g_attr_backup_calls; }
 
+int32_t fake_exp_backup(void*, int32_t amount, uint8_t) {
+    ++g_exp_backup_calls;
+    g_last_exp = amount;
+    return 1;
+}
+
+int32_t fake_money_backup(int64_t amount) {
+    ++g_money_backup_calls;
+    g_last_money = amount;
+    return 1;
+}
+
 void reset_counters() {
     g_require_calls = 0;
     g_party_calls = 0;
@@ -202,6 +224,10 @@ void reset_counters() {
     g_hp_writes = 0;
     g_damage_backup_calls = 0;
     g_attr_backup_calls = 0;
+    g_exp_backup_calls = 0;
+    g_money_backup_calls = 0;
+    g_last_exp = 0;
+    g_last_money = 0;
     g_in_flight_enters = 0;
     g_in_flight_leaves = 0;
     g_damage_enters = 0;
@@ -278,6 +304,10 @@ void install_success() {
                                  reinterpret_cast<void*>(&fake_damage_backup));
     descriptor.on_resource_ready(g_context, kResourceIdUpdateAttrFromMonster,
                                  reinterpret_cast<void*>(&fake_attr_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdAddExperience,
+                                 reinterpret_cast<void*>(&fake_exp_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdAddMoney,
+                                 reinterpret_cast<void*>(&fake_money_backup));
 }
 
 template <typename Invoke>
@@ -306,7 +336,9 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.requires[0].id, kCharacterFactsCapabilityId) == 0);
     assert(descriptor.optional_count == 2);
     assert(descriptor.validate_config == &validate_rates_config);
-    assert(descriptor.resources_count == 2);
+    assert(descriptor.resources_count == 4);
+    assert(descriptor.provides_count == 1);
+    assert(std::strcmp(descriptor.provides[0].id, kWorldTuningMoveSpeedCapabilityId) == 0);
     assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
     assert(std::strcmp(descriptor.resources[0].symbol, "F_CHAR_ADD_DAMAGE_VMA") == 0);
     assert(descriptor.resources[0].handler == reinterpret_cast<void*>(&char_add_damage_wrapper));
@@ -315,11 +347,14 @@ void test_descriptor() {
                        "F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA") == 0);
     assert(descriptor.resources[1].handler ==
            reinterpret_cast<void*>(&char_update_attr_from_monster_wrapper));
-    for (uint32_t i = 0; i < 2; ++i) {
+    assert(std::strcmp(descriptor.resources[2].id, kResourceIdAddExperience) == 0);
+    assert(std::strcmp(descriptor.resources[2].symbol, "F_ADD_EXP_VMA") == 0);
+    assert(std::strcmp(descriptor.resources[3].id, kResourceIdAddMoney) == 0);
+    assert(std::strcmp(descriptor.resources[3].symbol, "F_ADD_MONEY_VMA") == 0);
+    for (uint32_t i = 0; i < 4; ++i) {
         assert(descriptor.resources[i].requirement == ResourceRequirement::kOptional);
         assert(descriptor.resources[i].failure == ResourceFailure::kFailSoft);
     }
-    assert(descriptor.provides_count == 0);
     assert(descriptor.jni_count == 0);
     assert(descriptor.jni == nullptr);
     assert(descriptor.feature_count == 1);
@@ -654,6 +689,10 @@ void test_max_hp_wrapper() {
     assert(g_attr_backup_calls == attr_backups_before);
     descriptor.on_resource_ready(g_context, kResourceIdUpdateAttrFromMonster,
                                  reinterpret_cast<void*>(&fake_attr_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdAddExperience,
+                                 reinterpret_cast<void*>(&fake_exp_backup));
+    descriptor.on_resource_ready(g_context, kResourceIdAddMoney,
+                                 reinterpret_cast<void*>(&fake_money_backup));
 }
 
 void test_deactivate_residual_wrappers() {
@@ -675,6 +714,66 @@ void test_deactivate_residual_wrappers() {
     assert(g_damage_backup_calls == damage_before + 1 && g_last_damage == 100);
     assert(g_attr_backup_calls == attr_before + 1);
     assert(g_max_hp_writes == 0 && g_hp_writes == 0);
+}
+
+void test_exp_money_and_move_speed() {
+    install_success();
+    const auto& descriptor = plugin_descriptor();
+    descriptor.on_enabled(g_context);
+
+    Rates rates = default_rates();
+    rates.value[static_cast<uint32_t>(RateId::kExp)] = 150;
+    rates.value[static_cast<uint32_t>(RateId::kGold)] = 150;
+    apply_rates(rates);
+
+    Character player{};
+    player.party_member = 1;
+    Character monster{};
+    monster.type = 1;
+
+    assert(char_add_experience_wrapper(&player, 100, 1) == 1);
+    assert(g_last_exp == 150);
+    (void)char_add_experience_wrapper(&monster, 100, 1);
+    assert(g_last_exp == 100);
+    (void)char_add_experience_wrapper(&player, 3, 1);
+    assert(g_last_exp == 4);
+    (void)char_add_experience_wrapper(&player, 0, 1);
+    assert(g_last_exp == 0);
+
+    (void)inven_add_money_wrapper(100);
+    assert(g_last_money == 150);
+    (void)inven_add_money_wrapper(3);
+    assert(g_last_money == 4);
+    (void)inven_add_money_wrapper(-5);
+    assert(g_last_money == -5);
+
+    const auto* api = static_cast<const WorldTuningMoveSpeedApi*>(
+        descriptor.provides[0].iface);
+    assert(api != nullptr && api->read != nullptr);
+    int32_t speed = 0;
+    rates = default_rates();
+    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 100;
+    apply_rates(rates);
+    assert(api->read(&speed).ok == kQolOk && speed == 8);
+    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 150;
+    apply_rates(rates);
+    assert(api->read(&speed).ok == kQolOk && speed == 12);
+    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 50;
+    apply_rates(rates);
+    assert(api->read(&speed).ok == kQolOk && speed == 4);
+    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 10;
+    apply_rates(rates);
+    assert(api->read(&speed).ok == kQolOk && speed == 1);
+    rates.value[static_cast<uint32_t>(RateId::kMoveSpeed)] = 120;
+    apply_rates(rates);
+    assert(api->read(&speed).ok == kQolOk && speed == 10);
+    assert(api->read(nullptr).ok == kQolErrInvalidArgument);
+
+    descriptor.on_disabled(g_context);
+    (void)char_add_experience_wrapper(&player, 100, 1);
+    assert(g_last_exp == 100);
+    (void)inven_add_money_wrapper(100);
+    assert(g_last_money == 100);
 }
 
 void test_panel_contract() {
@@ -699,6 +798,7 @@ int main() {
     test_damage_wrapper();
     test_max_hp_wrapper();
     test_deactivate_residual_wrappers();
+    test_exp_money_and_move_speed();
     test_panel_contract();
     assert(g_in_flight_enters == g_in_flight_leaves);
     return 0;

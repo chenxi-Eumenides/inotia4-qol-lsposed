@@ -16,14 +16,14 @@
 
 | 目录 | 文件数 | 行数 |
 | --- | --- | --- |
-| `contracts/` | 93 | 7017 |
-| `game/` | 182 | 24612 |
+| `contracts/` | 94 | 7040 |
+| `game/` | 182 | 24615 |
 | `infra/` | 40 | 4882 |
 | `hooks/` | 10 | 1784 |
 | `patch/` | 13 | 1880 |
-| `plugins/` | 461 | 81523 |
+| `plugins/` | 461 | 81648 |
 | `host/` | 63 | 18364 |
-| **合计** | **862** | **140062** |
+| **合计** | **863** | **140213** |
 
 ### 已迁移插件（`plugins/*`）
 
@@ -56,7 +56,7 @@
 - `plugins/special_equip/`：6 文件 / 705 行
 - `plugins/stack_limit/`：4 文件 / 138 行
 - `plugins/world_teleport/`：6 文件 / 982 行
-- `plugins/world_tuning/`：10 文件 / 1423 行
+- `plugins/world_tuning/`：10 文件 / 1548 行
 
 ### CTest target 分类
 

@@ -4,13 +4,15 @@
 
 功能插件「游戏世界调整」，插件版本 `0.1.0`。设置页只有一个入口行；点击后启用插件并打开自有面板，面板内每行一个倍率，左右箭头在固定档位间调整。改动经 Host 配置 Store 持久化，写入 `config.json` 的 `world_tuning` namespace。
 
-当前真正接线的倍率只有三项（其余四项只在面板中保存数值，不产生游戏效果）：
+当前真正接线的倍率有四项：
 
+- 金币倍率：缩放 `INVEN_AddMoney` 的增量；
+- 经验倍率：缩放玩家侧 `CHAR_AddExperience` 的增量；
 - 敌怪血量倍率：缩放怪物最大生命；
 - 伤害倍率：缩放玩家侧对怪物造成的伤害；
 - 承伤倍率（配置键 `damage_in`）：缩放玩家侧受到的伤害。
 
-金币倍率、经验倍率、玩家血量倍率、移速倍率在面板中与其它行完全一致（可调整、可持久化），只是尚未接线到游戏逻辑。面板行只显示名称、数值与箭头，不显示副标题。
+玩家血量倍率尚未接线（玩家/佣兵不走 `CHAR_UpdateAttrFromMonster`）。移速倍率未改游戏移动，只通过 `world_tuning.move_speed` 能力把数值发布给消费者（例如全向移动插件）。面板行只显示名称、数值与箭头，不显示副标题。
 
 插件 id 由旧 `simple_mode` 改为 `world_tuning`，旧 `simple_mode.combat` feature 与旧配置不再迁移。除特别说明，文中路径均相对 `module/app/src/main/cpp/`。
 
@@ -20,8 +22,8 @@
 - `requires` 1 项：`character.facts` v1.0。
 - `optional_requires` 2 项：`ui_panels` v1.3、`ui_components` v1.22；界面工具被停用时倍率仍生效，仅面板不可用。
 - `ports` 1 项：`QOL_PORT_CHARACTER_EXTRAS` v1.2。
-- `provides` 0、JNI 0、HTTP route/endpoint 0。
-- `resources` 2 个入口 hook，均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。
+- `provides` 1：`world_tuning.move_speed` v1.0；JNI 0、HTTP route/endpoint 0。
+- `resources` 4 个入口 hook（伤害、怪物最大生命、加经验、加金币），均为 `kOptional` + `kFailSoft`：单个落点不可用只影响对应倍率，不会把插件置 `failed`。
 - `validate_config` = `validate_rates_config`，只接受 `rates` 键。
 - 唯一 feature 为 entry（`plugins/world_tuning/plugin.cpp`）：
 
@@ -58,12 +60,16 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 
 ## 游戏内行为
 
-两个入口 hook 与旧 `simple_mode` 相同：
-
 | 资源 id | 符号 | 用途 |
 |---|---|---|
 | `hook:CHAR_AddDamage` | `F_CHAR_ADD_DAMAGE_VMA` | 伤害唯一汇合点，改写 `w2` 入参 |
 | `hook:CHAR_UpdateAttrFromMonster` | `F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA` | 怪物最大生命重算层，`attr==0x1e` |
+| `hook:CHAR_AddExperience` | `F_ADD_EXP_VMA` | 加经验统一入口 `int(void* ch, int32 amount, uint8 flag)` |
+| `hook:INVEN_AddMoney` | `F_ADD_MONEY_VMA` | 加金币增量入口 `int(int64 amount)` |
+
+经验：入口对 `ch` 做阵营判定，只缩放玩家侧（主角/队友/召唤物）；负数/零原样透传。
+
+金币：`INVEN_AddMoney` 是增量入口（出售、商店/网络商店、存档相关回补等）；`EVTSYSTEM_Process` 的任务奖励走 `INVEN_SetMoney` 写绝对值，不在本倍率覆盖范围内。
 
 阵营判定沿用三态：主角/队友/主控或队友的召唤物 → 玩家侧；`C_TYPE==1` 且明确非玩家侧 → 怪物；其余或依赖失败 → 中性（不缩放）。
 
@@ -83,6 +89,21 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 - 账本按池槽保存 `{ch, raw, applied}`。进入时若槽值仍等于上次 `applied`，先把 `raw` 写回槽再调用原函数；原函数返回后读取游戏结果，按 `enemy_hp` 缩放并记录新的 `raw/applied`。这样倍率变化在下一次属性重算时生效且不会累积缩放。
 - 缩放后若当前 HP 高于新上限，同步写回 HP 上限值。
 - 倍率 100 时不缩放；若上次有缩放，先把 raw 写回槽再透传，之后清空 applied。
+
+## 对外能力：`world_tuning.move_speed`
+
+`provides` 声明 `world_tuning.move_speed` v1.0（`contracts/world_tuning.h`）：
+
+```cpp
+struct WorldTuningMoveSpeedApi {
+    QolResult (*read)(int32_t* out_speed);
+};
+```
+
+- 返回 `round(8 × 移速倍率)`，下限 1；1 倍 = 8。
+- 每次调用读取当前倍率，不缓存；倍率改动后消费者下一次读取即生效。
+- 插件未启用时能力不存在，消费者应自行回退到 8（或原版移动）。
+- 全向移动插件尚未接入该能力。
 
 ## 生命周期与线程模型
 
@@ -107,7 +128,7 @@ entry 默认 0：首次点击时设置页先提交 feature=true、等待 Host ac
 ## 测试
 
 - `world_tuning_rates_tests`（`tests/test_world_tuning_rates.cpp`）：档位、显示文本、JSON 往返、非法输入、`validate_config`、缩放边界。
-- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor、安装失败出口、门禁时序、伤害矩阵、HP 缩放与幂等/倍率变更、阵营失败、残留 wrapper、entry 不可用分支。
+- `world_tuning_feature_tests`（`tests/test_world_tuning_feature.cpp`）：descriptor（4 资源、move-speed 能力）、安装失败出口、门禁时序、伤害矩阵、HP 缩放与幂等/倍率变更、经验/金币缩放、移速能力取整、阵营失败、残留 wrapper、entry 不可用分支。
 - `settings_contributions_tests` 编译本插件的空 contribution。
 
 面板绘制/命中与 entry 联动已有真机观察（见下）；未覆盖：真实设备 hook ABI（伤害/敌怪血量实际生效）、资源安装时序。

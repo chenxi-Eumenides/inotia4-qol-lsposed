@@ -7,6 +7,8 @@
 #include <cstring>
 #include <cstdio>
 
+#include "../../contracts/world_tuning.h"
+
 namespace qol::features::world_tuning {
 namespace {
 
@@ -36,9 +38,13 @@ std::atomic<int32_t> g_rates[kRateCount] = {
 // wrapper 入口函数指针类型：与游戏函数 ABI 一致。原函数入口由宿主经 on_resource_ready 交还。
 using AddDamageFn = void (*)(void*, void*, int32_t, int32_t, int32_t);
 using UpdateAttrFromMonsterFn = void (*)(void*, int32_t);
+using AddExperienceFn = int32_t (*)(void*, int32_t, uint8_t);
+using AddMoneyFn = int32_t (*)(int64_t);
 
 std::atomic<void*> g_backup_add_damage{nullptr};
 std::atomic<void*> g_backup_update_attr_from_monster{nullptr};
+std::atomic<void*> g_backup_add_experience{nullptr};
+std::atomic<void*> g_backup_add_money{nullptr};
 
 // 诊断（真机验收用）：异常态只记一次，避免热路径反复刷日志。
 std::atomic<bool> g_faction_deps_missing_logged{false};
@@ -275,6 +281,39 @@ void char_update_attr_from_monster_wrapper(void* ch, int32_t attr) {
     }
 }
 
+int32_t char_add_experience_wrapper(void* ch, int32_t amount, uint8_t flag) {
+    const auto* sdk = g_sdk;
+    const contracts::InFlightGuard guard(
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdAddExperience});
+    const AddExperienceFn backup =
+        reinterpret_cast<AddExperienceFn>(g_backup_add_experience.load(std::memory_order_acquire));
+    if (backup == nullptr) return 0;
+
+    int32_t out = amount;
+    if (g_gate.load(std::memory_order_relaxed) && amount > 0 && g_extras != nullptr &&
+        g_facts != nullptr && classify(ch) == Side::kPlayer) {
+        const int32_t percent = rate_value(RateId::kExp);
+        if (percent != kRateDefault) out = scale_by_percent(amount, percent);
+    }
+    return backup(ch, out, flag);
+}
+
+int32_t inven_add_money_wrapper(int64_t amount) {
+    const auto* sdk = g_sdk;
+    const contracts::InFlightGuard guard(
+        sdk == nullptr ? nullptr : &sdk->in_flight, {kResourceIdAddMoney});
+    const AddMoneyFn backup =
+        reinterpret_cast<AddMoneyFn>(g_backup_add_money.load(std::memory_order_acquire));
+    if (backup == nullptr) return 0;
+
+    int64_t out = amount;
+    if (g_gate.load(std::memory_order_relaxed) && amount > 0) {
+        const int32_t percent = rate_value(RateId::kGold);
+        if (percent != kRateDefault) out = scale_money(amount, percent);
+    }
+    return backup(out);
+}
+
 // ---------------------------------------------------------------------------
 // 生命周期与倍率
 // ---------------------------------------------------------------------------
@@ -307,6 +346,14 @@ void set_gate(bool enabled) {
 }
 
 bool gate_enabled() { return g_gate.load(std::memory_order_acquire); }
+
+int32_t move_speed_value() {
+    const int32_t percent = rate_value(RateId::kMoveSpeed);
+    int64_t speed = (static_cast<int64_t>(contracts::kWorldTuningBaseMoveSpeed) * percent + 50) / 100;
+    if (speed < 1) speed = 1;
+    if (speed > INT32_MAX) speed = INT32_MAX;
+    return static_cast<int32_t>(speed);
+}
 
 const contracts::QolHostSdk* host_sdk() { return g_sdk; }
 const contracts::QolGameHost* game_host() { return g_game; }
@@ -386,6 +433,14 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
     }
     if (std::strcmp(resource_id, kResourceIdUpdateAttrFromMonster) == 0) {
         g_backup_update_attr_from_monster.store(backup, std::memory_order_release);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdAddExperience) == 0) {
+        g_backup_add_experience.store(backup, std::memory_order_release);
+        return 0;
+    }
+    if (std::strcmp(resource_id, kResourceIdAddMoney) == 0) {
+        g_backup_add_money.store(backup, std::memory_order_release);
         return 0;
     }
     log_warn("unknown resource id: %s", resource_id);

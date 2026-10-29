@@ -32,8 +32,8 @@ void test_ladder_and_metadata() {
     assert(std::strcmp(rate_key(RateId::kDamageIn), "damage_in") == 0);
     assert(std::strcmp(rate_key(RateId::kMoveSpeed), "move_speed") == 0);
 
-    assert(!rate_supported(RateId::kGold));
-    assert(!rate_supported(RateId::kExp));
+    assert(rate_supported(RateId::kGold));
+    assert(rate_supported(RateId::kExp));
     assert(!rate_supported(RateId::kPlayerHp));
     assert(rate_supported(RateId::kEnemyHp));
     assert(rate_supported(RateId::kDamageOut));
@@ -117,6 +117,13 @@ void test_scaling() {
     assert(scale_attribute(0, 500) == 0);
     assert(scale_attribute(-1, 500) == -1);
     assert(scale_attribute(INT32_MAX, 500) == INT32_MAX);
+
+    assert(scale_money(100, 100) == 100);
+    assert(scale_money(100, 150) == 150);
+    assert(scale_money(3, 50) == 1);
+    assert(scale_money(0, 500) == 0);
+    assert(scale_money(-7, 500) == -7);
+    assert(scale_money(INT64_MAX, 500) == INT64_MAX);
 }
 
 }  // namespace

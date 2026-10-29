@@ -21,7 +21,7 @@
 
 | 目标层 | 文件数 |
 | --- | --- |
-| `contracts` | 94 |
+| `contracts` | 95 |
 | `game` | 182 |
 | `hooks` | 10 |
 | `host` | 86 |
@@ -60,7 +60,7 @@
 | `plugins/stack_limit` | 4 |
 | `plugins/world_teleport` | 6 |
 | `plugins/world_tuning` | 10 |
-| **合计** | **893** |
+| **合计** | **894** |
 
 ### 1.2 迁移期映射摘要
 
@@ -115,8 +115,8 @@
 | `plugins/core.save` | `contracts` | 19 |
 | `legacy/system` | `game` | 18 |
 | `plugins/settings` | `contracts` | 18 |
+| `plugins/world_tuning` | `contracts` | 15 |
 | `host` | `patch` | 14 |
-| `plugins/custom_map` | `contracts` | 13 |
 
 ### 2.2 include 环
 

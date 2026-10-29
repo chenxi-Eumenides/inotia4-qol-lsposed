@@ -12,8 +12,10 @@
 // 功能：按插件配置中的倍率缩放三项世界数值
 //   ① 敌怪最大生命；
 //   ② 玩家侧对怪物造成的伤害；
-//   ③ 玩家侧受到的伤害（面板「防御倍率」）。
-// 其余倍率（经验/玩家血量/移速）仅在面板中占位，尚未接线。
+//   ③ 玩家侧受到的伤害（面板「承伤倍率」）；
+//   ④ 玩家侧获得的经验；
+//   ⑤ 金币增量。
+// 玩家血量倍率与移速倍率尚未接游戏逻辑；移速只对外发布数值能力。
 //
 // 机制（沿用 simple_mode 已论证的入口 hook）：
 //   - 伤害：包裹 CHAR_AddDamage 入口。该函数是全部 15 条伤害路径的唯一汇合点，
@@ -44,10 +46,15 @@ void clear_runtime();
 // 资源 id：plugin.cpp 的 ResourceClaim 与本层 on_resource_ready 分派共用同一常量。
 inline constexpr const char* kResourceIdAddDamage = "hook:CHAR_AddDamage";
 inline constexpr const char* kResourceIdUpdateAttrFromMonster = "hook:CHAR_UpdateAttrFromMonster";
+inline constexpr const char* kResourceIdAddExperience = "hook:CHAR_AddExperience";
+inline constexpr const char* kResourceIdAddMoney = "hook:INVEN_AddMoney";
 
 // 门禁开关：true = 业务生效；false = wrapper 空转透传（fail-closed）。任意线程可读。
 void set_gate(bool enabled);
 bool gate_enabled();
+
+// 移速（1 倍 = 8，整数取整）：供 world_tuning.move_speed 能力消费。
+int32_t move_speed_value();
 
 // 倍率快照与应用。apply 可从主线程（面板/配置）调用；wrapper 侧只读原子值。
 Rates current_rates();
@@ -69,5 +76,7 @@ int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id
 void char_add_damage_wrapper(void* attacker, void* victim, int32_t damage, int32_t damage_flag,
                              int32_t magic_flag);
 void char_update_attr_from_monster_wrapper(void* ch, int32_t attr);
+int32_t char_add_experience_wrapper(void* ch, int32_t amount, uint8_t flag);
+int32_t inven_add_money_wrapper(int64_t amount);
 
 }  // namespace qol::features::world_tuning
