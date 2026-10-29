@@ -23,6 +23,6 @@ enum class LogDomain(val token: String) {
     CONFIG("config"),
     CATALOG("catalog"),
     CUSTOM_RECIPE("custom_recipe"),
-    SIMPLE_MODE("simple_mode"),
+    WORLD_TUNING("world_tuning"),
     SPECIAL_EQUIP("special_equip");
 }

@@ -69,7 +69,6 @@ MECHANISM_HOST_TESTS: tuple[str, ...] = (
     "test_hooks_transaction",
     "test_hooks_dispatch",
     "test_patch_layer",
-    "test_extension_bag_contract",
     "test_plugin_registry",
     "test_plugin_lifecycle",
     "test_capability_lifecycle",
@@ -79,7 +78,7 @@ MECHANISM_HOST_TESTS: tuple[str, ...] = (
 )
 
 MIGRATED_FEATURE_TESTS: tuple[str, ...] = (
-    "test_simple_mode_rules",
+    "test_world_tuning_rates",
     "test_push_all_rules",
     "test_attribute_quality",
     "test_module_text",

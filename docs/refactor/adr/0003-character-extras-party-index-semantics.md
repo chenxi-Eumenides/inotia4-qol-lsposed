@@ -26,7 +26,7 @@
 **消费者盘点（决策依据）**：
 
 - `read.party_index` 方法调用者：**仅 `plugins/push_all`**（`feature.cpp:54,62`）；它需要的正是原值 `-1`。
-- 其余 required `QOL_PORT_CHARACTER_EXTRAS` 的插件（`extension_bag`、`special_equip`、`move_merge`、`simple_mode`）调用的是端口**其它方法**，全仓无一处调用 `party_index`；`simple_mode` 用 `is_party_member`（`feature.cpp:80,92`）。
+- 其余 required `QOL_PORT_CHARACTER_EXTRAS` 的插件（`extension_bag`、`special_equip`、`move_merge`、`world_tuning`）调用的是端口**其它方法**，全仓无一处调用 `party_index`；`world_tuning` 用 `is_party_member`。
 - 测试：`tests/test_host_adapters.cpp:1237-1238` 只断言 `value == 0 → ok`，**无** “负数 → not_ready” 用例。
 - 同型重复实现：`game/adapter_ports/game_host_port.cpp:202 read_char_party` 采用同一 `value < 0 → not_ready` 写法，但全仓无引用（死代码）。
 

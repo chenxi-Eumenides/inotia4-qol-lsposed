@@ -76,7 +76,7 @@ capability，并在本插件内实现 35 条 HTTP 端点的 native handler。
 | 消费者 | 关系 | 用途 |
 |---|---|---|
 | `push_all` | `requires character.facts` | 判定出战组成员 |
-| `simple_mode` | `requires character.facts` | 判定角色类型/出战组 |
+| `world_tuning` | `requires character.facts` | 判定角色类型/出战组 |
 | `special_equip` | `optional_requires character.facts` | 装备逻辑的角色判定，缺失时降级 |
 | `core.item` | `optional_requires character.state` | 装备族写结果的 `player.main_stats` 回读（`http/write_results.cpp`） |
 | host 装配（`host/assembly.cpp`） | 运行时 `require` | legacy 角色 JSON 构造；插件撤销后 require 返回 nullptr 并逐字回退 legacy |
@@ -242,7 +242,7 @@ Feature：`core.character.provider`，`default=1`，Hidden，toggle，回调为�
 | 游戏地址、符号、ABI、低层读写 | Game Adapter / Game Host 端口 |
 | 界面状态、面板与控件 | `core.ui_state` / `core.custom_ui` |
 
-**消费者与级联**：停用本插件时，`push_all`、`simple_mode` 按必需依赖进入 degraded；`special_equip`、
+**消费者与级联**：停用本插件时，`push_all`、`world_tuning` 按必需依赖进入 degraded；`special_equip`、
 `core.item` 的可选能力边失效并降级；host legacy 角色 JSON 构造回退到旧实现；35 条 handler 路由在 dispatch
 层返回 `503`，6 条元数据路由仍由 Kotlin 响应。
 

@@ -572,16 +572,16 @@ set_target_properties(hooks_dispatch_tests PROPERTIES CXX_STANDARD 17 CXX_STANDA
 target_link_libraries(hooks_dispatch_tests PRIVATE Threads::Threads)
 add_test(NAME hooks_dispatch_tests COMMAND hooks_dispatch_tests)
 
-# 简单模式纯逻辑 host 测试（阵营矩阵 / 倍率 / 边界钳制，末尾追加）
-add_executable(simple_mode_rules_tests
-    test_simple_mode_rules.cpp
-    ${CPP_DIR}/plugins/simple_mode/rules.cpp
+# 游戏世界调整纯逻辑 host 测试（档位 / 配置 JSON / 边界钳制，末尾追加）
+add_executable(world_tuning_rates_tests
+    test_world_tuning_rates.cpp
+    ${CPP_DIR}/plugins/world_tuning/rates.cpp
 )
-target_include_directories(simple_mode_rules_tests PRIVATE
+target_include_directories(world_tuning_rates_tests PRIVATE
     ${CPP_DIR}
 )
-target_compile_features(simple_mode_rules_tests PRIVATE cxx_std_17)
-add_test(NAME simple_mode_rules_tests COMMAND simple_mode_rules_tests)
+target_compile_features(world_tuning_rates_tests PRIVATE cxx_std_17)
+add_test(NAME world_tuning_rates_tests COMMAND world_tuning_rates_tests)
 
 # 模块 wrapper enter → 原版面板 VMA 反查注册表 host 测试（末尾追加）
 add_executable(popup_enter_alias_tests
@@ -2191,7 +2191,7 @@ add_executable(settings_contributions_tests
     ${CPP_DIR}/plugins/core.custom_ui/settings_contribution.cpp
     ${CPP_DIR}/plugins/extension_bag/assembly/settings_contribution.cpp
     ${CPP_DIR}/plugins/stack_limit/settings_contribution.cpp
-    ${CPP_DIR}/plugins/simple_mode/settings_contribution.cpp
+    ${CPP_DIR}/plugins/world_tuning/settings_contribution.cpp
     ${CPP_DIR}/plugins/push_all/settings_contribution.cpp
     ${CPP_DIR}/plugins/custom_recipe/settings_contribution.cpp
     ${CPP_DIR}/plugins/autosell/settings_contribution.cpp
@@ -2298,18 +2298,19 @@ add_test(NAME custom_recipe_owner_fixture_tests
     COMMAND custom_recipe_owner_fixture_tests ${CMAKE_CURRENT_BINARY_DIR})
 set_tests_properties(custom_recipe_owner_fixture_tests PROPERTIES TIMEOUT 60)
 
-# simple_mode wrappers / install lifecycle host coverage (fake Host SDK + Game Host).
-add_executable(simple_mode_feature_tests
-    test_simple_mode_feature.cpp
-    ${CPP_DIR}/plugins/simple_mode/feature.cpp
-    ${CPP_DIR}/plugins/simple_mode/plugin.cpp
-    ${CPP_DIR}/plugins/simple_mode/rules.cpp
+# world_tuning wrappers / install lifecycle host coverage (fake Host SDK + Game Host).
+add_executable(world_tuning_feature_tests
+    test_world_tuning_feature.cpp
+    ${CPP_DIR}/plugins/world_tuning/feature.cpp
+    ${CPP_DIR}/plugins/world_tuning/panel.cpp
+    ${CPP_DIR}/plugins/world_tuning/plugin.cpp
+    ${CPP_DIR}/plugins/world_tuning/rates.cpp
 )
-target_include_directories(simple_mode_feature_tests PRIVATE ${CPP_DIR})
-target_compile_features(simple_mode_feature_tests PRIVATE cxx_std_17)
-set_target_properties(simple_mode_feature_tests PROPERTIES
+target_include_directories(world_tuning_feature_tests PRIVATE ${CPP_DIR})
+target_compile_features(world_tuning_feature_tests PRIVATE cxx_std_17)
+set_target_properties(world_tuning_feature_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME simple_mode_feature_tests COMMAND simple_mode_feature_tests)
+add_test(NAME world_tuning_feature_tests COMMAND world_tuning_feature_tests)
 
 # popup_blocker 声明与 TutorialDescription entry hook 短路返回值。
 add_executable(popup_blocker_plugin_tests

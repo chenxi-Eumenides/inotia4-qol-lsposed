@@ -176,7 +176,7 @@ void log_error(const char* format, ...) {
     va_end(args);
 }
 
-// 依赖是否齐备。缺任一即 fail-closed（与 attribute_range / simple_mode 的 once 语义一致）：
+// 依赖是否齐备。缺任一即 fail-closed（与 attribute_range / world_tuning 的 once 语义一致）：
 // 两个入口 hook 的符号解析由宿主负责（解析失败会使插件 failed），此处只校验原版判定链
 // 重放所需的游戏原语：ITEM_IsRealEquip / ITEM_GetEquipLevel / CHAR_CanChangeEquip /
 // PARTY_GetMenuCharacter。

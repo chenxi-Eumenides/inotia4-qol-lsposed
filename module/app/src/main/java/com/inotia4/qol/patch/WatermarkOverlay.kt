@@ -43,7 +43,7 @@ internal fun moduleHealthWatermarkText(visible: Boolean, unavailableNames: List<
  * 不消费触摸，任何失败只记日志、绝不影响游戏进程。
  *
  * 颜色策略：由静态配色表 [COLOR_RULES] 决定 —— 按序取第一条命中的规则，全不命中用默认色。
- * 模块健康异常优先显示红色；简单模式启用时显示绿色；无活动状态时保留默认半透明白色。
+ * 模块健康异常优先显示红色；无活动状态时保留默认半透明白色。
  * 配置和模块健康更新均经 refreshColor() 在现有视图上刷新。
  */
 object WatermarkOverlay {
@@ -56,13 +56,6 @@ object WatermarkOverlay {
 
     /** 默认色：半透明白色，无任何装饰。alpha 只调这一处：0x26=15%、0x1A=10%、0x33=20%。 */
     private const val WATERMARK_COLOR = 0x26FFFFFF.toInt()
-
-    /**
-     * 简单模式开启时的水印色：亮绿色 + 明显提高不透明度。
-     * 这里 alpha 与默认色**不同是有意的**——它是「开关状态」的可见指示，不能是背景里几乎看不见的
-     * 半透明痕迹；0xCC = 80%。要调就改这一个常量（ARGB 一次写全）。
-     */
-    private const val WATERMARK_COLOR_SIMPLE_MODE = 0xCC00FF00.toInt()
 
     /**
      * 配色表一行的形状：一条配置条件 + 条件成立时水印用的颜色。
@@ -86,8 +79,6 @@ object WatermarkOverlay {
      * 新增情况（其它配置开关 → 其它颜色）：只需在表里加一行，
      * 不必改注入、刷新、取色或日志逻辑。
      */
-    @Volatile private var configRevision = 0L
-    @Volatile private var simpleModeEnabled = false
     @Volatile private var moduleHealthNames: List<String> = emptyList()
     @Volatile private var moduleHealthVisible = false
     private val moduleHealthLock = Any()
@@ -96,15 +87,7 @@ object WatermarkOverlay {
         WatermarkColorRule("模块异常", MODULE_HEALTH_WATERMARK_COLOR) {
             moduleHealthRuleActive(moduleHealthVisible, moduleHealthNames)
         },
-        WatermarkColorRule("简单模式", WATERMARK_COLOR_SIMPLE_MODE) { simpleModeEnabled },
     )
-
-    fun updateSimpleMode(revision: Long, enabled: Boolean) {
-        if (revision <= configRevision) return
-        configRevision = revision
-        simpleModeEnabled = enabled
-        refreshColor()
-    }
 
     fun updateModuleHealth(revision: Long, unavailableNames: List<String>, visible: Boolean) {
         synchronized(moduleHealthLock) {

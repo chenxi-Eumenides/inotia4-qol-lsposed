@@ -11,7 +11,7 @@
 #include "plugins/extension_bag/assembly/settings_contribution.h"
 #include "plugins/push_all/settings_contribution.h"
 #include "plugins/save_backup/settings_contribution.h"
-#include "plugins/simple_mode/settings_contribution.h"
+#include "plugins/world_tuning/settings_contribution.h"
 #include "plugins/stack_limit/settings_contribution.h"
 
 #include <cassert>
@@ -31,7 +31,7 @@ constexpr RegisterFn kRetiredContributions[]{
     &qol::features::autosell::register_settings,
     &qol::features::custom_recipe::register_settings,
     &qol::features::push_all::register_settings,
-    &qol::features::simple_mode::register_settings,
+    &qol::features::world_tuning::register_settings,
     &qol::features::core_ui::register_settings,
     &qol::features::core_ui::register_settings_category,
     &qol::features::stack_limit::register_settings,

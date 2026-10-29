@@ -1815,7 +1815,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 { "ok": true, "features": [
   { "id": "core", "state": "enabled", "enabled": true, "error": null, "version": "0.1.0",
     "resource_count": 0, "resources": [], "requires": [], "provides": [], "degraded": false },
-  { "id": "simple_mode", "state": "enabled", "enabled": true, "error": null, "version": "0.1.0",
+  { "id": "world_tuning", "state": "enabled", "enabled": true, "error": null, "version": "0.1.0",
     "resource_count": 0,
     "resources": [ { "id": "hook:CHAR_AddDamage", "state": "live" },
                    { "id": "hook:CHAR_UpdateAttrFromMonster", "state": "live" } ],
@@ -1846,9 +1846,9 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 **返回格式**：
 ```json
 { "ok": true, "resources": [
-  { "id": "hook:CHAR_AddDamage", "owner": "simple_mode", "mechanism": "entry_hook",
+  { "id": "hook:CHAR_AddDamage", "owner": "world_tuning", "mechanism": "entry_hook",
     "policy": "private", "state": "live", "in_flight": 0, "isolated": false },
-  { "id": "hook:CHAR_UpdateAttrFromMonster", "owner": "simple_mode", "mechanism": "entry_hook",
+  { "id": "hook:CHAR_UpdateAttrFromMonster", "owner": "world_tuning", "mechanism": "entry_hook",
     "policy": "private", "state": "live", "in_flight": 0, "isolated": false }
 ] }
 ```
@@ -2080,7 +2080,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 
 `POST /api/op/features/lifecycle`
 
-**请求格式**：恰两个成员 `{ "id": "simple_mode", "action": "deactivate" }`；`action` 仅接受 `activate`/`deactivate`。
+**请求格式**：恰两个成员 `{ "id": "world_tuning", "action": "deactivate" }`；`action` 仅接受 `activate`/`deactivate`。
 
 **返回格式**：该端点由 Host 常驻 lifecycle 控制设施以 resident route 直接处理（见 §7.6），先于 HTTP registry 接受态与 op 门控执行。成功返回 receipt：
 

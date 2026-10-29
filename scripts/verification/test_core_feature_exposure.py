@@ -77,11 +77,9 @@ class CoreFeatureExposureTests(unittest.TestCase):
             "autosell.auto_sell": ("0", "kGameplay", "kToggle", "自动出售"),
             "move_merge.drag_merge": ("1", "kBasicOptimization", "kToggle", "拖动合并"),
             "push_all.push": ("0", "kGameplay", "kToggle", "推怪"),
-            "simple_mode.combat": ("0", "kGameplay", "kToggle", "简单模式"),
             "custom_recipe.recipes": ("0", "kGameplay", "kToggle", "自定义合成"),
             "extension_bag.extended_bag": ("1", "kGameplay", "kToggle", "额外背包"),
             "stack_limit.limit_999": ("0", "kGameplay", "kToggle", "堆叠上限"),
-            "eight_way_move.direction": ("0", "kGameplay", "kToggle", "八向移动"),
             "popup_blocker.enabled": ("1", "kBasicOptimization", "kToggle", "禁用弹窗"),
             "custom_map.load": ("1", "kBasicOptimization", "kToggle", "自定义地图"),
             "craft_lottery.guarantee": ("0", "kBasicOptimization", "kToggle", "合成器传说保底"),
@@ -102,7 +100,7 @@ class CoreFeatureExposureTests(unittest.TestCase):
             feature_id not in {"api.enabled", "op.enabled"}
         }
         self.assertEqual(actual, expected)
-        self.assertEqual(len(actual), 15)
+        self.assertEqual(len(actual), 13)
 
     def test_basic_optimization_metadata_and_defaults(self):
         expected = {

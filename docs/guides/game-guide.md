@@ -818,7 +818,7 @@ curl -X POST http://<手机IP>:8088/api/system/enter_slot -d '{"slot":0}'
 | `autosell.auto_sell` | `false` | 按照规则自动出售物品 |
 | `move_merge.drag_merge` | `true` | 拖动合并（允许合并同种可堆叠物品） |
 | `push_all.push` | `false` | 能够推动怪物 |
-| `simple_mode.combat` | `false` | 降低游戏难度 |
+| `world_tuning.panel` | `false` | 打开「游戏世界调整」面板（entry），调整敌怪血量/伤害/防御倍率 |
 | `custom_recipe.recipes` | `false` | 优化合成并添加更多配方（唯一可见开关） |
 | `craft_ui.custom_crafting` | `true` | 自定义合成界面（hidden，随 `custom_recipe.recipes` 级联） |
 | `extension_bag.extended_bag` | `true` | 额外背包 |

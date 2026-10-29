@@ -3,8 +3,9 @@
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/plugin.h"
 #include "contracts/host_sdk.h"
-#include "plugins/simple_mode/feature.h"
-#include "plugins/simple_mode/plugin.h"
+#include "plugins/world_tuning/feature.h"
+#include "plugins/world_tuning/panel.h"
+#include "plugins/world_tuning/plugin.h"
 
 #include <cassert>
 #include <cstring>
@@ -14,7 +15,7 @@
 namespace {
 
 using namespace qol::contracts;
-using namespace qol::features::simple_mode;
+using namespace qol::features::world_tuning;
 
 struct Character {
     int32_t type = 1;
@@ -254,11 +255,10 @@ void setup_fake_interfaces() {
     g_context.sdk_minor = kHostSdkMinor;
     g_context.sdk = &g_sdk;
     g_context.game = &g_game;
-    g_context.plugin_id = "simple_mode";
+    g_context.plugin_id = "world_tuning";
     g_context.ports = g_ports;
     g_context.port_count = 1;
 
-    set_character_facts(nullptr);
     set_gate(false);
     const auto& descriptor = plugin_descriptor();
     descriptor.on_resource_ready(g_context, kResourceIdAddDamage, nullptr);
@@ -300,10 +300,12 @@ void assert_one_attr_flight(Invoke&& invoke) {
 
 void test_descriptor() {
     const auto& descriptor = plugin_descriptor();
-    assert(std::strcmp(descriptor.id, "simple_mode") == 0);
+    assert(std::strcmp(descriptor.id, "world_tuning") == 0);
     assert(std::strcmp(descriptor.version, "0.1.0") == 0);
     assert(descriptor.requires_count == 1);
     assert(std::strcmp(descriptor.requires[0].id, kCharacterFactsCapabilityId) == 0);
+    assert(descriptor.optional_count == 2);
+    assert(descriptor.validate_config == &validate_rates_config);
     assert(descriptor.resources_count == 2);
     assert(std::strcmp(descriptor.resources[0].id, kResourceIdAddDamage) == 0);
     assert(std::strcmp(descriptor.resources[0].symbol, "F_CHAR_ADD_DAMAGE_VMA") == 0);
@@ -313,12 +315,19 @@ void test_descriptor() {
                        "F_CHAR_UPDATE_ATTR_FROM_MONSTER_VMA") == 0);
     assert(descriptor.resources[1].handler ==
            reinterpret_cast<void*>(&char_update_attr_from_monster_wrapper));
+    for (uint32_t i = 0; i < 2; ++i) {
+        assert(descriptor.resources[i].requirement == ResourceRequirement::kOptional);
+        assert(descriptor.resources[i].failure == ResourceFailure::kFailSoft);
+    }
     assert(descriptor.provides_count == 0);
     assert(descriptor.jni_count == 0);
     assert(descriptor.jni == nullptr);
     assert(descriptor.feature_count == 1);
-    assert(std::strcmp(descriptor.features[0].id, "simple_mode.combat") == 0);
+    assert(std::strcmp(descriptor.features[0].id, "world_tuning.panel") == 0);
+    assert(descriptor.features[0].type == FeatureType::kEntry);
     assert(descriptor.features[0].default_enabled == 0);
+    assert(descriptor.features[0].on_entry != nullptr);
+    assert(descriptor.features[0].action_label != nullptr);
 }
 
 void assert_install_clean() {
@@ -361,14 +370,12 @@ void test_install_lifecycle_and_toggle() {
     assert(!gate_enabled());
     descriptor.on_enabled(g_context);
     assert(gate_enabled());
-    assert(descriptor.features[0].on_toggle(g_context, 0).ok == kQolOk);
-    assert(!gate_enabled());
-    assert(descriptor.features[0].on_toggle(g_context, 1).ok == kQolOk);
-    assert(!gate_enabled());
-    descriptor.on_enabled(g_context);
+    // 面板未绑定（fake SDK 无 UI 能力）时入口返回 NotReady，但不影响门禁。
+    assert(descriptor.features[0].on_entry(g_context).ok == kQolErrNotReady);
     assert(gate_enabled());
 
     descriptor.on_disabled(g_context);
+    assert(descriptor.features[0].on_entry(g_context).ok == kQolErrNotReady);
     descriptor.deactivate(g_context);
     assert(!gate_enabled());
     assert(character_extras() == nullptr);
@@ -393,6 +400,12 @@ void test_damage_wrapper() {
     assert(g_party_calls == 0);
 
     descriptor.on_enabled(g_context);
+    {
+        Rates rates = default_rates();
+        rates.value[static_cast<uint32_t>(RateId::kDamageOut)] = 150;
+        rates.value[static_cast<uint32_t>(RateId::kDamageIn)] = 50;
+        apply_rates(rates);
+    }
     g_party_calls = g_active_calls = g_summoner_calls = 0;
     assert_one_damage_flight([&] {
         char_add_damage_wrapper(&attacker, &victim, 100, 3, 4);
@@ -523,6 +536,11 @@ void test_max_hp_wrapper() {
     install_success();
     const auto& descriptor = plugin_descriptor();
     descriptor.on_enabled(g_context);
+    {
+        Rates rates = default_rates();
+        rates.value[static_cast<uint32_t>(RateId::kEnemyHp)] = 50;
+        apply_rates(rates);
+    }
 
     Character& monster = g_characters[9];
     monster.type = 1;
@@ -543,12 +561,28 @@ void test_max_hp_wrapper() {
     monster.max_hp = 50;
     assert_one_attr_flight([&] { char_update_attr_from_monster_wrapper(&monster, 0x1e); });
     assert(monster.max_hp == 50);
-    assert(g_max_hp_writes == max_writes_before && g_hp_writes == hp_writes_before);
+    // 先把上次的 applied 还原成 raw，再在游戏结果上重新缩放：两次写入，数值不累积。
+    assert(g_max_hp_writes == max_writes_before + 2);
+    assert(g_hp_writes == hp_writes_before);
 
     monster.max_hp = 200;
     assert_one_attr_flight([&] { char_update_attr_from_monster_wrapper(&monster, 0x1e); });
     assert(monster.max_hp == 100);
-    assert(g_max_hp_writes == max_writes_before + 1);
+    assert(g_max_hp_writes == max_writes_before + 3);
+
+    {
+        // 倍率变化在下一次属性重算时生效，且仍从游戏 raw 值重算。
+        Rates rates = current_rates();
+        rates.value[static_cast<uint32_t>(RateId::kEnemyHp)] = 200;
+        apply_rates(rates);
+    }
+    assert_one_attr_flight([&] { char_update_attr_from_monster_wrapper(&monster, 0x1e); });
+    assert(monster.max_hp == 400);
+    {
+        Rates rates = current_rates();
+        rates.value[static_cast<uint32_t>(RateId::kEnemyHp)] = 50;
+        apply_rates(rates);
+    }
 
     Character& player_summon = g_characters[10];
     player_summon.type = 1;
@@ -586,7 +620,7 @@ void test_max_hp_wrapper() {
     const int warnings_before = [&] {
         int count = 0;
         for (const auto& message : g_log_messages) {
-            if (message.find("char not in pool; max-hp halving skipped") != std::string::npos) ++count;
+            if (message.find("char not in pool; max-hp scaling skipped") != std::string::npos) ++count;
         }
         return count;
     }();
@@ -595,7 +629,7 @@ void test_max_hp_wrapper() {
     const int warnings_after = [&] {
         int count = 0;
         for (const auto& message : g_log_messages) {
-            if (message.find("char not in pool; max-hp halving skipped") != std::string::npos) ++count;
+            if (message.find("char not in pool; max-hp scaling skipped") != std::string::npos) ++count;
         }
         return count;
     }();
@@ -643,6 +677,20 @@ void test_deactivate_residual_wrappers() {
     assert(g_max_hp_writes == 0 && g_hp_writes == 0);
 }
 
+void test_panel_contract() {
+    const auto& provider = panel_provider();
+    assert(std::strcmp(provider.panel_id, "world_tuning") == 0);
+    assert(std::strcmp(provider.owner, "world_tuning") == 0);
+    assert(provider.callbacks != nullptr);
+    assert(!panel_available());
+    install_success();
+    assert(!panel_provider().open());  // 门禁关闭时拒绝打开
+    const auto& descriptor = plugin_descriptor();
+    descriptor.on_enabled(g_context);
+    assert(!panel_provider().open());  // 未绑定 UI 时不崩溃且拒绝打开
+    descriptor.deactivate(g_context);
+}
+
 }  // namespace
 
 int main() {
@@ -651,6 +699,7 @@ int main() {
     test_damage_wrapper();
     test_max_hp_wrapper();
     test_deactivate_residual_wrappers();
+    test_panel_contract();
     assert(g_in_flight_enters == g_in_flight_leaves);
     return 0;
 }

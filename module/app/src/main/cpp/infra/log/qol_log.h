@@ -15,7 +15,7 @@ enum class QolDomain : uint8_t {
     kPlatform = 0, kCore, kHttp, kApi, kOp, kInventory, kExtensionBag,
     kSave, kSaveBackup, kAutosell, kCraft, kAttrRange, kUi, kConfig, kCatalog,
     kCustomRecipe,
-    kSimpleMode,
+    kWorldTuning,
     kSpecialEquip,
 };
 

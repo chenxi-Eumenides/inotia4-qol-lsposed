@@ -60,8 +60,8 @@
 #include "plugins/core.quest/plugin.h"
 #include "plugins/save_backup/plugin.h"
 #include "plugins/save_backup/settings_contribution.h"
-#include "plugins/simple_mode/plugin.h"
-#include "plugins/simple_mode/settings_contribution.h"
+#include "plugins/world_tuning/plugin.h"
+#include "plugins/world_tuning/settings_contribution.h"
 #include "plugins/special_equip/plugin.h"
 #include "plugins/stack_limit/plugin.h"
 #include "plugins/stack_limit/settings_contribution.h"
@@ -228,7 +228,7 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::popup_blocker::plugin_descriptor},
     {&features::core_quest::plugin_descriptor},
     {&features::save_backup::plugin_descriptor, nullptr, true},
-    {&features::simple_mode::plugin_descriptor},
+    {&features::world_tuning::plugin_descriptor},
     {&features::craft_lottery::plugin_descriptor},
     {&features::special_equip::plugin_descriptor},
     {&features::stack_limit::plugin_descriptor},

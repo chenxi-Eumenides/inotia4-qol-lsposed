@@ -54,7 +54,7 @@ const DomainEntry kDomainTable[] = {
     {QolDomain::kConfig, "config"},
     {QolDomain::kCatalog, "catalog"},
     {QolDomain::kCustomRecipe, "custom_recipe"},
-    {QolDomain::kSimpleMode, "simple_mode"},
+    {QolDomain::kWorldTuning, "world_tuning"},
     {QolDomain::kSpecialEquip, "special_equip"},
 };
 
