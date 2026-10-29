@@ -424,6 +424,14 @@ QolResult read_config(void* c, const char* p, const char* key, char* out, uint32
 QolResult set_config(void* c, const char* p, const char* key, const char* json, uint32_t size, contracts::FeatureReceipt* out) {
     return static_cast<ProductionFeatures*>(c)->controller.request_set_config(p, key, json, size, out);
 }
+QolResult read_choice(void* c, const char* p, const char* key, char* out, uint32_t capacity,
+                      uint32_t* size) {
+    return static_cast<ProductionFeatures*>(c)->controller.read_choice(p, key, out, capacity, size);
+}
+QolResult set_choice(void* c, const char* p, const char* key, const char* value,
+                     contracts::FeatureReceipt* out) {
+    return static_cast<ProductionFeatures*>(c)->controller.request_set_choice(p, key, value, out);
+}
 QolResult read_actual(void* c, const char* p, int32_t* state, uint8_t* enabled) {
     if (!p || !state || !enabled) return error(kQolErrInvalidArgument);
     if (static_cast<ProductionFeatures*>(c)->controller.host_owned(p)) {
@@ -501,7 +509,7 @@ const contracts::QolFeatureControlApi& production_feature_control_api() {
         sizeof(contracts::QolFeatureControlApi), &production(), &read_catalog, &read_desired,
         &read_feature, &set_feature, &set_desired, &receipt, &entry,
         &read_config, &set_config, &read_actual, &read_categories,
-        &read_owner_availability};
+        &read_owner_availability, &read_choice, &set_choice};
     return api;
 }
 
@@ -538,7 +546,8 @@ ConfigStoreResult production_feature_bootstrap(const std::string& directory) {
         for (const auto& feature : plugin.features) {
             items.push_back({feature.id, feature.default_enabled, feature.category,
                              feature.type, feature.name, feature.description,
-                             feature.action_label, feature.display_priority});
+                             feature.action_label, feature.display_priority,
+                             feature.choices, feature.choice_count});
         }
         self.catalog.push_back({plugin.plugin_id.c_str(), items.data(),
                                 static_cast<uint32_t>(items.size()),

@@ -33,11 +33,14 @@ const contracts::QolFeatureCatalogItem kSettingsFeatures[]{
     {"console", 0, FeatureCategory::kHidden, FeatureType::kToggle, "调试控制台",
      "隐藏功能。"},
 };
+const contracts::FeatureChoiceOption kQualityOptions[]{{"rare", "稀有"}, {"epic", "史诗"}};
 const contracts::QolFeatureCatalogItem kSellFeatures[]{
     {"sell", 1, FeatureCategory::kGameplay, FeatureType::kToggle, "自动出售",
      "控制自动出售扫描。"},
     {"diag", 0, FeatureCategory::kHidden, FeatureType::kToggle, "诊断日志",
-     "隐藏诊断。"},
+      "隐藏诊断。"},
+    {"quality", 0, FeatureCategory::kGameplay, FeatureType::kChoice, "品质过滤",
+      "选择出售品质。", nullptr, 0, kQualityOptions, 2},
 };
 const contracts::QolFeatureCatalogItem kBasicOptimizationFeatures[]{
     {"ranges", 1, FeatureCategory::kBasicOptimization, FeatureType::kToggle,
@@ -51,7 +54,7 @@ const contracts::QolFeatureCatalogItem kBasicOptimizationFeatures[]{
 };
 const contracts::QolFeatureCatalogPlugin kPlugins[]{
     {"settings", kSettingsFeatures, 2},
-    {"autosell", kSellFeatures, 2},
+    {"autosell", kSellFeatures, 3},
     {"basic", kBasicOptimizationFeatures, 4},
 };
 const contracts::FeatureCategoryDefinition kCategories[]{
@@ -76,6 +79,9 @@ struct CallLog {
     FeatureReceipt receipt{};
     int receipt_calls = 0;
     int read_actual_calls = 0;
+    int read_choice_calls = 0;
+    int set_choice_calls = 0;
+    std::string choice_value;
 };
 
 CallLog g_log;
@@ -84,7 +90,8 @@ bool g_read_feature_fails = false;
 bool g_read_actual_fails = false;
 int g_actual_not_ready_remaining = 0;
 uint8_t g_actual_enabled = 1;
-uint8_t g_feature_values[8]{1, 0, 1, 0, 1, 1, 1, 1};
+uint8_t g_feature_values[9]{1, 0, 1, 0, 1, 1, 1, 1, 0};
+std::string g_choice_value;
 uint8_t g_desired_values[2]{1, 1};
 contracts::FeatureOwnerAvailability g_owner_availability[3]{
     contracts::FeatureOwnerAvailability::kAvailable,
@@ -107,6 +114,7 @@ int feature_index(const char* plugin, const char* feature) {
         if (std::strcmp(feature, "map_jump") == 0) return 6;
         return 7;
     }
+    if (std::strcmp(plugin, "autosell") == 0 && std::strcmp(feature, "quality") == 0) return 8;
     return std::strcmp(feature, "sell") == 0 ? 2 : 3;
 }
 
@@ -116,6 +124,8 @@ void reset_log() {
     g_feature_values[0] = 1; g_feature_values[1] = 0;
     g_feature_values[2] = 1; g_feature_values[3] = 0;
     g_feature_values[4] = g_feature_values[5] = g_feature_values[6] = g_feature_values[7] = 1;
+    g_feature_values[8] = 0;
+    g_choice_value.clear();
     g_desired_values[0] = 1; g_desired_values[1] = 1;
     for (auto& availability : g_owner_availability)
         availability = contracts::FeatureOwnerAvailability::kAvailable;
@@ -137,6 +147,15 @@ QolResult fake_read_feature(void*, const char* plugin, const char* feature, uint
     *out = g_feature_values[feature_index(plugin, feature)];
     return contracts::ok();
 }
+QolResult fake_read_choice(void*, const char*, const char*, char* out, uint32_t capacity,
+                           uint32_t* out_size) {
+    ++g_log.read_choice_calls;
+    if (out == nullptr || out_size == nullptr || capacity <= g_choice_value.size())
+        return contracts::error(kQolErrInternal, "small", 5);
+    std::memcpy(out, g_choice_value.data(), g_choice_value.size());
+    *out_size = static_cast<uint32_t>(g_choice_value.size());
+    return contracts::ok();
+}
 QolResult fake_read_desired(void*, const char* plugin, uint8_t* enable, uint8_t* any) {
     ++g_log.read_desired_calls;
     const int i = plugin_index(plugin);
@@ -150,6 +169,20 @@ QolResult fake_request_set_feature(void*, const char* plugin, const char* featur
     g_log.plugin = plugin;
     g_log.feature = feature;
     g_log.value = value;
+    if (g_request_fails) return contracts::error(kQolErrBlocked, "rejected", 8);
+    g_log.last_request = g_log.next_request++;
+    receipt->request_id = g_log.last_request;
+    receipt->admission = FeatureAdmission::kAdmitted;
+    receipt->persistence = FeaturePersistence::kPending;
+    g_log.receipt = *receipt;
+    return contracts::ok();
+}
+QolResult fake_request_set_choice(void*, const char* plugin, const char* feature, const char* value,
+                                  FeatureReceipt* receipt) {
+    ++g_log.set_choice_calls;
+    g_log.plugin = plugin;
+    g_log.feature = feature;
+    g_log.choice_value = value == nullptr ? "" : value;
     if (g_request_fails) return contracts::error(kQolErrBlocked, "rejected", 8);
     g_log.last_request = g_log.next_request++;
     receipt->request_id = g_log.last_request;
@@ -208,11 +241,20 @@ int g_button_enabled_calls = 0;
 uint8_t g_button_enabled = 0;
 int g_toggle_enabled_calls = 0;
 uint8_t g_toggle_enabled = 0;
+int g_arrow_creates = 0;
+int g_arrow_enabled_calls = 0;
+int g_arrow_draw_calls = 0;
+uint8_t g_left_arrow_enabled = 0;
+uint8_t g_right_arrow_enabled = 0;
+contracts::UiArrowButtonDesc g_last_left_arrow{};
+contracts::UiArrowButtonDesc g_last_right_arrow{};
 contracts::QolUiHandle g_fake_root = reinterpret_cast<void*>(0x1000);
 contracts::QolUiHandle g_list_handle = reinterpret_cast<void*>(0x2000);
 contracts::QolUiHandle g_row_handle = reinterpret_cast<void*>(0x3000);
 contracts::QolUiHandle g_widget_handle = reinterpret_cast<void*>(0x4000);
 contracts::QolUiHandle g_button_handle = reinterpret_cast<void*>(0x5000);
+contracts::QolUiHandle g_left_arrow_handle = reinterpret_cast<void*>(0x5100);
+contracts::QolUiHandle g_right_arrow_handle = reinterpret_cast<void*>(0x5200);
 contracts::UiNativeToggleDesc g_last_toggle{};
 contracts::UiButtonDesc g_last_button{};
 struct DrawnText { std::string text; uint32_t color; };
@@ -275,6 +317,28 @@ QolResult fake_button_set_enabled(contracts::QolUiHandle, uint8_t enabled) {
     return contracts::ok();
 }
 QolResult fake_button_draw(contracts::QolUiHandle) { return contracts::ok(); }
+QolResult fake_arrow_create(const contracts::UiArrowButtonDesc* desc, contracts::QolUiHandle,
+                            contracts::QolUiHandle* out) {
+    ++g_arrow_creates;
+    if (desc->direction == contracts::kUiArrowLeft) {
+        g_last_left_arrow = *desc;
+        *out = g_left_arrow_handle;
+    } else {
+        g_last_right_arrow = *desc;
+        *out = g_right_arrow_handle;
+    }
+    return contracts::ok();
+}
+QolResult fake_arrow_enabled(contracts::QolUiHandle handle, uint8_t enabled) {
+    ++g_arrow_enabled_calls;
+    if (handle == g_left_arrow_handle) g_left_arrow_enabled = enabled;
+    if (handle == g_right_arrow_handle) g_right_arrow_enabled = enabled;
+    return contracts::ok();
+}
+QolResult fake_arrow_draw(contracts::QolUiHandle) {
+    ++g_arrow_draw_calls;
+    return contracts::ok();
+}
 // 菜单工厂：测试只关心调用面与入参，替换控件由 fake 返回句柄。
 QolResult fake_menu_button_create(const contracts::UiMainMenuDecoratedButtonDesc* desc,
                                   contracts::QolUiHandle* out_original,
@@ -309,6 +373,8 @@ void bind_production() {
     g_fake_control.read_actual = &fake_read_actual;
     g_fake_control.read_categories = &fake_read_categories;
     g_fake_control.read_owner_availability = &fake_read_owner_availability;
+    g_fake_control.read_choice = &fake_read_choice;
+    g_fake_control.request_set_choice = &fake_request_set_choice;
 
     g_components_api = {};
     g_components_api.size = sizeof(g_components_api);
@@ -324,6 +390,9 @@ void bind_production() {
     g_components_api.native_toggle_set_value = &fake_toggle_set_value;
     g_components_api.native_toggle_set_enabled = &fake_toggle_set_enabled;
     g_components_api.native_toggle_draw = &fake_toggle_draw;
+    g_components_api.arrow_button_create = &fake_arrow_create;
+    g_components_api.arrow_button_set_enabled = &fake_arrow_enabled;
+    g_components_api.arrow_button_draw = &fake_arrow_draw;
     g_components_api.text_button_set_enabled = &fake_button_set_enabled;
     g_components_api.text_button_draw = &fake_button_draw;
     g_components_api.draw_control_text = &fake_draw_control_text;
@@ -360,6 +429,8 @@ void setup() {
     g_button_enabled = 0;
     g_toggle_enabled_calls = 0;
     g_toggle_enabled = 0;
+    g_arrow_creates = g_arrow_enabled_calls = g_arrow_draw_calls = 0;
+    g_left_arrow_enabled = g_right_arrow_enabled = 0;
     g_drawn_text.clear();
     settings_bind_game(nullptr);
     bind_production();
@@ -410,7 +481,7 @@ void test_feature_model_filters_and_orders() {
         if (item.category == FeatureCategory::kHidden) ++hidden;
         if (item.type == FeatureType::kEntry) ++entry;
     }
-    assert(hidden == 0 && entry == 1 && items.size() == 6);
+    assert(hidden == 0 && entry == 1 && items.size() == 7);
     std::vector<contracts::FeatureCategoryDefinition> categories;
     assert(feature_model::build_categories(kCategories, 6, false, items, categories));
     assert(categories.size() == 4);
@@ -439,7 +510,7 @@ void test_feature_model_filters_and_orders() {
     assert(feature_model::build(kPlugins, 3, true, items));
     hidden = 0;
     for (const auto& item : items) if (item.category == FeatureCategory::kHidden) ++hidden;
-    assert(hidden == 2 && items.size() == 8);  // feature rows only; no plugin-level rows
+    assert(hidden == 2 && items.size() == 9);  // feature rows only; no plugin-level rows
     assert(feature_model::build_categories(kCategories, 6, true, items, categories));
     assert(categories.size() == 5);
     assert(categories[0].category == FeatureCategory::kHidden);
@@ -478,7 +549,7 @@ void test_catalog_categories_and_debug_visibility() {
     assert(g_categories[2].category == FeatureCategory::kBasicOptimization);
     assert(g_categories[3].category == FeatureCategory::kGameplay);
     assert(g_categories[4].category == FeatureCategory::kTools);
-    assert(g_items.size() == 8);
+    assert(g_items.size() == 9);
     assert(find_feature("autosell", "sell") >= 0);
 }
 
@@ -882,6 +953,112 @@ void test_true_entry_requires_read_actual_abi_before_invoking() {
            g_log.set_feature_calls == 0 && g_status[0] != '\0');
 }
 
+void test_choice_row_and_receipt_gated_navigation() {
+    setup();
+    assert(load_catalog());
+    refresh_all_values();
+    const int index = find_feature("autosell", "quality");
+    assert(index >= 0 && g_states[index].valid && g_states[index].choice_position == 0);
+    const auto gameplay = std::find_if(g_categories.begin(), g_categories.end(), [](const auto& c) {
+        return c.category == FeatureCategory::kGameplay;
+    });
+    assert(gameplay != g_categories.end());
+    assert(build_right_list(static_cast<int>(gameplay - g_categories.begin())));
+    assert(g_arrow_creates == 2);
+    assert(g_left_arrow_enabled == 0 && g_right_arrow_enabled == 1);
+    const int32_t left = settings_model::right_control_left(kRightW);
+    const int32_t top = settings_model::toggle_top(kRightRowH);
+    assert(g_last_left_arrow.rect.x == left && g_last_left_arrow.rect.y == top);
+    assert(g_last_left_arrow.rect.w == settings_model::kChoiceArrowWidth);
+    assert(g_last_right_arrow.rect.x == left + settings_model::kToggleWidth -
+           settings_model::kChoiceArrowWidth);
+    assert(g_last_left_arrow.user == &g_choice_contexts[static_cast<size_t>(index) * 2]);
+    assert(g_last_right_arrow.user == &g_choice_contexts[static_cast<size_t>(index) * 2 + 1]);
+
+    g_right_indices = {static_cast<uint32_t>(index)};
+    g_drawn_text.clear();
+    draw_right_row(nullptr, 0, g_row_handle, 0);
+    assert(g_drawn_text.size() == 3 && g_drawn_text[2].text == "关闭");
+    assert(g_arrow_draw_calls == 2);
+    assert(g_arrow_enabled_calls > 0);
+
+    g_panel_active = true;
+    g_last_right_arrow.on_click(g_last_right_arrow.user);
+    g_last_right_arrow.on_click(g_last_right_arrow.user);
+    assert(g_pending_choice_item == index);
+    process_pending_choice();
+    assert(g_log.set_choice_calls == 1 && g_log.set_feature_calls == 0 &&
+           g_log.plugin == "autosell" && g_log.feature == "quality" &&
+           g_log.choice_value == "rare");
+    assert(g_states[index].choice_position == 0 && g_states[index].request_id != 0);
+    g_last_right_arrow.on_click(g_last_right_arrow.user);
+    assert(g_log.set_choice_calls == 1);
+
+    g_log.receipt.persistence = FeaturePersistence::kPersisted;
+    g_choice_value = "rare";
+    poll_requests();
+    assert(g_states[index].request_id == 0 && g_states[index].valid &&
+           g_states[index].choice_position == 1);
+    assert(g_left_arrow_enabled == 1 && g_right_arrow_enabled == 1);
+    g_drawn_text.clear();
+    draw_right_row(nullptr, 0, g_row_handle, 0);
+    assert(g_drawn_text.size() == 3 && g_drawn_text[2].text == "稀有");
+    const auto enabled_after = g_arrow_enabled_calls;
+    sync_controls(static_cast<uint32_t>(index));
+    assert(g_arrow_enabled_calls == enabled_after + 2);
+    g_last_right_arrow.on_click(g_last_right_arrow.user);
+    process_pending_choice();
+    assert(g_log.set_choice_calls == 2 && g_log.choice_value == "epic");
+    g_log.receipt.persistence = FeaturePersistence::kPersisted;
+    g_choice_value = "epic";
+    poll_requests();
+    assert(g_states[index].choice_position == 2 && g_left_arrow_enabled == 1 &&
+           g_right_arrow_enabled == 0);
+}
+
+void test_choice_failure_and_unknown_value_never_look_saved() {
+    setup();
+    assert(load_catalog());
+    g_choice_value = "unregistered";
+    const int index = find_feature("autosell", "quality");
+    refresh_item_value(static_cast<uint32_t>(index));
+    assert(!g_states[index].valid && g_states[index].choice_position == UINT32_MAX);
+    assert(build_right_list(3));
+    g_right_indices = {static_cast<uint32_t>(index)};
+    g_drawn_text.clear();
+    draw_right_row(nullptr, 0, g_row_handle, 0);
+    assert(g_drawn_text.size() == 3 && g_drawn_text[2].text == "未知选项");
+    assert(!settings_model::choice_arrow_enabled(g_states[index].valid, true, false,
+        g_states[index].choice_position, g_items[index].choice_count, 1));
+
+    setup();
+    assert(load_catalog());
+    refresh_all_values();
+    const int choice = find_feature("autosell", "quality");
+    assert(build_right_list(3));
+    g_panel_active = true;
+    g_last_right_arrow.on_click(g_last_right_arrow.user);
+    process_pending_choice();
+    assert(g_log.set_choice_calls == 1);
+    g_log.receipt.persistence = FeaturePersistence::kFailed;
+    poll_requests();
+    assert(g_states[choice].request_id == 0 && g_states[choice].choice_position == 0 &&
+           g_status[0] != '\0' && g_log.set_feature_calls == 0);
+
+    setup();
+    assert(load_catalog());
+    g_fake_control.read_choice = nullptr;
+    refresh_item_value(static_cast<uint32_t>(find_feature("autosell", "quality")));
+    assert(!g_states[static_cast<size_t>(find_feature("autosell", "quality"))].valid);
+
+    setup();
+    assert(load_catalog());
+    g_fake_control.request_set_choice = nullptr;
+    const int missing_writer = find_feature("autosell", "quality");
+    refresh_item_value(static_cast<uint32_t>(missing_writer));
+    assert(!g_states[static_cast<size_t>(missing_writer)].valid);
+}
+
 void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     setup();
     assert(load_catalog());
@@ -904,7 +1081,7 @@ void test_deactivate_tears_down_page_and_reinstate_rebuilds() {
     g_widget_creates = 0;
     bind_production();
     assert(load_catalog());
-    assert(g_items.size() == 8);
+    assert(g_items.size() == 9);
     assert(g_generation != generation_before);  // new instance generation
     refresh_all_values();
     assert(g_states[static_cast<uint32_t>(find_feature("settings", "console"))].confirmed == 1);
@@ -943,6 +1120,8 @@ int main() {
     test_entry_requires_read_actual_tail_before_enabling_write();
     test_entry_requires_read_actual_function_before_enabling_write();
     test_true_entry_requires_read_actual_abi_before_invoking();
+    test_choice_row_and_receipt_gated_navigation();
+    test_choice_failure_and_unknown_value_never_look_saved();
     test_deactivate_tears_down_page_and_reinstate_rebuilds();
     std::puts("settings_panel_widget_tests: feature-control UI path passed");
     return 0;

@@ -8,7 +8,7 @@
 
 using namespace qol::contracts;
 static_assert(kSettingsCatalogMajor == 1 && kSettingsCatalogMinor == 3);
-static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 29);
+static_assert(kHostSdkMajor == 1 && kHostSdkMinor == 30);
 static_assert(kHttpRegistryVersion.major == 1 && kHttpRegistryVersion.minor == 1);
 static_assert(kHttpDispatchVersion.major == 1 && kHttpDispatchVersion.minor == 1);
 
@@ -81,7 +81,14 @@ static_assert(kDefaultPriorityFeature.display_priority == 0);
 static_assert(kMinFeatureDisplayPriority == -10 && kMaxFeatureDisplayPriority == 10);
 static_assert(offsetof(FeatureDefinition, action_label) == 48);
 static_assert(offsetof(FeatureDefinition, display_priority) == 56);
-static_assert(sizeof(FeatureDefinition) == 64);
+static_assert(offsetof(FeatureDefinition, choices) == 64);
+static_assert(offsetof(FeatureDefinition, choice_count) == 72);
+static_assert(offsetof(FeatureDefinition, on_choice) == 80);
+static_assert(sizeof(FeatureDefinition) == 88);
+static_assert(sizeof(FeatureChoiceOption) == 2 * sizeof(const char*));
+static_assert(offsetof(QolFeatureApi, read_choice) == 96);
+static_assert(offsetof(QolFeatureApi, request_set_choice) == 104);
+static_assert(sizeof(QolFeatureApi) == 112);
 static_assert(std::is_standard_layout_v<FeatureCategoryDefinition> &&
               std::is_trivially_copyable_v<FeatureCategoryDefinition>);
 static_assert(offsetof(FeatureCategoryDefinition, category) == 0);
@@ -93,18 +100,35 @@ static_assert(std::is_standard_layout_v<QolFeatureCatalogItem> &&
 constexpr QolFeatureCatalogItem kDefaultPriorityCatalogItem{};
 static_assert(kDefaultPriorityCatalogItem.display_priority == 0);
 static_assert(offsetof(QolFeatureCatalogItem, display_priority) == 40);
-static_assert(sizeof(QolFeatureCatalogItem) == 48);
+static_assert(offsetof(QolFeatureCatalogItem, choices) == 48);
+static_assert(offsetof(QolFeatureCatalogItem, choice_count) == 56);
+static_assert(sizeof(QolFeatureCatalogItem) == 64);
 static_assert(offsetof(QolFeatureControlApi, read_categories) == 96);
 static_assert(offsetof(QolFeatureControlApi, read_owner_availability) == 104);
-static_assert(sizeof(QolFeatureControlApi) == 112);
+static_assert(offsetof(QolFeatureControlApi, read_choice) == 112);
+static_assert(offsetof(QolFeatureControlApi, request_set_choice) == 120);
+static_assert(sizeof(QolFeatureControlApi) == 128);
 using ExpectedReadCategoriesFn =
     QolResult (*)(void*, const FeatureCategoryDefinition**, uint32_t*);
 using ExpectedReadOwnerAvailabilityFn =
     QolResult (*)(void*, const char*, FeatureOwnerAvailability*);
+using ExpectedReadChoiceFn = QolResult (*)(void*, QolOwnerToken, const char*, const char*,
+                                           char*, uint32_t, uint32_t*);
+using ExpectedRequestSetChoiceFn = QolResult (*)(void*, QolOwnerToken, const char*, const char*,
+                                                 const char*, FeatureReceipt*);
+using ExpectedControlReadChoiceFn = QolResult (*)(void*, const char*, const char*, char*,
+                                                  uint32_t, uint32_t*);
+using ExpectedControlRequestSetChoiceFn = QolResult (*)(void*, const char*, const char*,
+                                                        const char*, FeatureReceipt*);
 static_assert(std::is_same_v<decltype(QolFeatureControlApi::read_categories),
                              ExpectedReadCategoriesFn>);
 static_assert(std::is_same_v<decltype(QolFeatureControlApi::read_owner_availability),
                              ExpectedReadOwnerAvailabilityFn>);
+static_assert(std::is_same_v<decltype(QolFeatureApi::read_choice), ExpectedReadChoiceFn>);
+static_assert(std::is_same_v<decltype(QolFeatureApi::request_set_choice), ExpectedRequestSetChoiceFn>);
+static_assert(std::is_same_v<decltype(QolFeatureControlApi::read_choice), ExpectedControlReadChoiceFn>);
+static_assert(std::is_same_v<decltype(QolFeatureControlApi::request_set_choice),
+                             ExpectedControlRequestSetChoiceFn>);
 static_assert(static_cast<uint8_t>(FeatureOwnerAvailability::kAvailable) == 0 &&
               static_cast<uint8_t>(FeatureOwnerAvailability::kInstallFailed) == 1 &&
               static_cast<uint8_t>(FeatureOwnerAvailability::kActivationFailed) == 2 &&
@@ -112,6 +136,9 @@ static_assert(static_cast<uint8_t>(FeatureOwnerAvailability::kAvailable) == 0 &&
               static_cast<uint8_t>(FeatureOwnerAvailability::kUnsupported) == 4 &&
               static_cast<uint8_t>(FeatureOwnerAvailability::kInvalid) == 5 &&
               static_cast<uint8_t>(FeatureOwnerAvailability::kFailed) == 6);
+static_assert(static_cast<uint8_t>(FeatureType::kToggle) == 0 &&
+              static_cast<uint8_t>(FeatureType::kEntry) == 1 &&
+              static_cast<uint8_t>(FeatureType::kChoice) == 2);
 static_assert(std::is_standard_layout_v<QolPluginRuntimeEffect>);
 static_assert(std::is_trivial_v<QolPluginRuntimeEffect>);
 static_assert(offsetof(QolPluginRuntimeEffect, struct_size) == 0);

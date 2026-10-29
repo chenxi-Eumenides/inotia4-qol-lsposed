@@ -427,6 +427,16 @@ Oracle 已完成本范围最终静态复核：R01/R02 修复确认、无新增�
 | 静态/构建 | **PASS**：`scripts/build-debug.sh` BUILD SUCCESSFUL，APK `output/inotia4_qol_lsposed_debug_2610272341_847c2f19230b.apk`，SHA-256 `847c2f19230b438848053efaaf068d5046bb2668c0b9158e721584217df1a076`；LSPatch 集成包 `output/Inotia4_C18L_v588_debug_lspatch.apk` SHA-256 `83859ae3809ec136fad58e471adb34596f6c513407e3212dfac4ab497ec13fe3`。 | `.tmp/toggle-features/build.log`。构建成功不替代设备行为验收。 |
 | VM-SWITCH-REGRESS-01：开关两态 | **PASS（文本层证据）/ NOT_ACCEPTED（目视与更新通知画面待补）**。真机 C18L v588（`192.168.3.54:5555`）：①「禁用弹窗」关闭并重启 → `popup_blocker runtime effect: java popup blocking enabled=false`、`allowing ActiveUser.showNoticePopup`；开启并重启 → `enabled=true`、`blocked ActiveUser.showNoticePopup`。关闭态 `ActivityIndicatorOpen` 改为放行（`allowing ActivityIndicatorOpen`），开启态恢复 `blocked ActivityIndicatorOpen`。②「属性面板汉化」frida 读取门禁与消费者数：关闭 → `translation_enabled=0`、文本消费者 2→1、插件 `inactive`、资源 `free`；开启 → `1`、消费者 2。文本层实测（frida 调游戏 `MEMORYTEXT_GetText`）：面板作用域+门禁开启 → `物攻/法攻/防御力`；无作用域或门禁关闭 → 游戏原文 `物理攻击/魔法攻击/防御`。**中文版本两条路径均为中文，因此目视「语言」无差异属预期**；开关只改变措辞。 | 待补：①更新通知在关闭态的实际弹窗画面（服务端 `notice_show` 未触发）；②韩文/英文文本包上的汉化两态目视。探针脚本 `.tmp/toggle-features/{i18n_gate_probe,panel_text_probe}.py`（`.tmp` 不入库）。 |
 
+### 5.27 settings「选择」配置类型（2026-10-29；Host/静态/Debug 通过，真机待验）
+
+| 验证项 | 当前结果 | 范围与未完成项 |
+|---|---|---|
+| 契约与实现 | 新增 `kChoice`：注册稳定 value/label；首项关闭，左右箭头非循环选择；复用 `core.custom_ui` 箭头。`selections`、`features` bool 投影与派生 `enable` 单事务提交，复用 receipt/revision 与主线程 callback。 | 原 toggle/entry 保持；未迁移任何现有业务 feature。关闭删除 selection；callback 失败沿用 toggle 的错误记录与去重语义，不承诺同值自动重试。 |
+| Host 定向 Gate | **8/8 PASS**：`host_feature_controller_tests`、`production_feature_facade_tests`、`settings_catalog_abi_tests`、`feature_reconciler_tests`、`host_adapter_tests`、`lifecycle_participant_tests`，以及 `settings_panel_model_tests`、`settings_panel_widget_tests`。 | 最终工作树统一复验日志 `.tmp/settings-choice/{final-host-build.log,final-host-ctest.log}`。覆盖注册校验、原子持久化与失败、选项切换回调、旧类型与 UI receipt/边界行为；未运行全量 CTest。 |
+| 静态/Debug Gate | **PASS**：`scripts/maintenance/check_arch.py`、`scripts/maintenance/check_http_routes.py`、`git diff --check`；`scripts/build-debug.sh` 成功，APK `output/inotia4_qol_lsposed_debug_2610291602_c6984a82256a.apk`，SHA-256 `c6984a82256a5cff8710184a80a60bf87835cbb92920da84fde0b221b8ec2923`。 | 日志 `.tmp/settings-choice/{check-arch.log,check-http-routes.log,build-debug.log}`。构建基于含既有文档修改的工作树；未安装或重启设备。 |
+| ABI 边界 | Host SDK minor 30 尾追加 choice API，旧函数表前缀检查保留。 | `FeatureDefinition`、catalog item 数组元素大小变化；不承诺旧二进制 descriptor/catalog 数组兼容。当前生产插件静态编译，外部旧插件加载不在支持范围。 |
+| VM-SETTINGS-CHOICE-01 | **NOT_ACCEPTED（未执行）**：当前没有生产插件注册 choice，缺少可操作的新控件入口。 | 待以实际消费插件验收：关闭→逐项右移→末项→逐项左移→关闭；边界禁用、左右箭头命中、长标签与布局对齐；撤页重建和重启后读回；业务收到非关闭间切换与关闭；写入失败不显示新值；旧 toggle/entry 回归。不得以 Host/构建证据替代。 |
+
 ## 6. 待建立
 
 | 阶段 | 卡片 | 说明 |

@@ -26,6 +26,8 @@ constexpr int32_t kMinimumRightRowHeight = 96;
 constexpr int32_t kToggleWidth = 220;
 constexpr int32_t kToggleHeight = 80;
 constexpr int32_t kRightControlRightInset = 10;
+constexpr int32_t kChoiceArrowWidth = 60;
+constexpr int32_t kChoiceLabelWidth = kToggleWidth - 2 * kChoiceArrowWidth;
 
 struct WrappedText {
     std::vector<std::string> lines;
@@ -127,6 +129,31 @@ inline int32_t right_control_left(int32_t row_width) {
 inline int32_t description_width_for_toggle(int32_t toggle_left) {
     return toggle_left - 16 - kTextColumnGap;
 }
+
+// Choice position 0 is the implicit "关闭" value; registered options follow in catalog order.
+inline uint32_t choice_position(const char* value, const char* const* values,
+                               uint32_t option_count) {
+    if (value == nullptr || value[0] == '\0') return 0;
+    if (values == nullptr) return UINT32_MAX;
+    for (uint32_t i = 0; i < option_count; ++i)
+        if (values[i] != nullptr && std::strcmp(value, values[i]) == 0) return i + 1;
+    return UINT32_MAX;
+}
+
+inline uint32_t choice_next_position(uint32_t current, uint32_t option_count, int32_t delta) {
+    const uint32_t total = option_count + 1;
+    if (current >= total || delta == 0) return current;
+    if (delta < 0) return current == 0 ? 0 : current - 1;
+    return current + 1 < total ? current + 1 : current;
+}
+
+inline bool choice_arrow_enabled(bool valid, bool owner_is_available, bool pending,
+                                 uint32_t position, uint32_t option_count, int32_t delta) {
+    if (!valid || !owner_is_available || pending || position > option_count) return false;
+    return delta < 0 ? position > 0 : delta > 0 && position < option_count;
+}
+
+inline int32_t choice_label_width() { return kChoiceLabelWidth; }
 
 struct RowPaintPlan {
     enum class Operation : uint8_t { kSelectedFill, kDivider };

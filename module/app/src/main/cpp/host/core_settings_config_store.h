@@ -76,7 +76,7 @@ struct PluginDesiredSnapshot {
     bool any_feature = false;
     bool want_run() const { return desired_enable && any_feature; }
 };
-enum class FeatureConfigField { kFeature, kConfig, kDesiredEnable };
+enum class FeatureConfigField { kFeature, kChoice, kConfig, kDesiredEnable };
 
 class ConfigStore {
 public:

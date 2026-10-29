@@ -364,8 +364,8 @@ using QolSnapshotToken = void*;
 using QolModuleVersionFn = const char* (*)();
 
 // Immutable catalog view. Host owns the arrays/strings for its lifetime after bootstrap.
-// Equivalent JSON: {plugin_id: [{id,name,description,type,category,default}, ...]}.
-// Category numbers are FeatureCategory; JSON type strings are "toggle" and "entry".
+// Equivalent JSON: {plugin_id: [{id,name,description,type,category,default,choices}, ...]}.
+// Category numbers are FeatureCategory; JSON type strings are "toggle", "entry", or "choice".
 // Catalogs contain metadata only, never callable business pointers.
 struct QolFeatureCatalogItem {
     const char* id;
@@ -376,6 +376,8 @@ struct QolFeatureCatalogItem {
     const char* description;
     const char* action_label = nullptr;
     int8_t display_priority = 0;
+    const FeatureChoiceOption* choices = nullptr;
+    uint32_t choice_count = 0;
 };
 
 struct QolFeatureCatalogPlugin {
@@ -405,6 +407,9 @@ struct QolFeatureControlApi {
     QolResult (*read_categories)(void*, const FeatureCategoryDefinition**, uint32_t*);
     // v1.28 tail: lifecycle availability projection for the complete plugin owner. Main thread only.
     QolResult (*read_owner_availability)(void*, const char*, FeatureOwnerAvailability*);
+    // v1.30 tail: resident management for stable-value choice features.
+    QolResult (*read_choice)(void*, const char*, const char*, char*, uint32_t, uint32_t*);
+    QolResult (*request_set_choice)(void*, const char*, const char*, const char*, FeatureReceipt*);
 };
 
 // 当前插件的 Host runtime 投影事件。Host 在 observer 回调期间借出字符串；调用方若异步
@@ -511,8 +516,9 @@ constexpr uint16_t kHostSdkMajor = 1;
 // minor 24 appends desired lifecycle state to runtime effects; minor 25 adds module-health facts;
 // minor 26 appends feature display priority and category metadata to the settings catalog;
 // minor 27 appends desc hook V2; minor 28 appends owner availability to feature control;
-// minor 29 appends registered panel provider enumeration.
-constexpr uint16_t kHostSdkMinor = 29;
+// minor 29 appends registered panel provider enumeration; minor 30 adds feature choice metadata
+// and read/write management functions at the tails of their existing tables.
+constexpr uint16_t kHostSdkMinor = 30;
 
 inline const QolDescHookApi* desc_hook_v2_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, desc_hook_v2) +
@@ -555,6 +561,18 @@ inline const QolFeatureApi* feature_if_available(const QolHostSdk* sdk) {
     return api;
 }
 
+inline const QolFeatureApi* feature_choice_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, feature) + sizeof(const QolFeatureApi*);
+    constexpr std::size_t required = offsetof(QolFeatureApi, request_set_choice) +
+                                     sizeof(QolFeatureApi::request_set_choice);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 30 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = feature_if_available(sdk);
+    if (api == nullptr || api->struct_size < required || api->read_choice == nullptr ||
+        api->request_set_choice == nullptr) return nullptr;
+    return api;
+}
+
 inline const QolFeatureControlApi* feature_control_if_available(const QolHostSdk* sdk) {
     constexpr std::size_t end = offsetof(QolHostSdk, feature_control) +
                                 sizeof(const QolFeatureControlApi*);
@@ -569,6 +587,19 @@ inline const QolFeatureControlApi* feature_control_if_available(const QolHostSdk
         api->receipt == nullptr || api->invoke_entry == nullptr || api->read_categories == nullptr ||
         api->read_owner_availability == nullptr)
         return nullptr;
+    return api;
+}
+
+inline const QolFeatureControlApi* feature_control_choice_if_available(const QolHostSdk* sdk) {
+    constexpr std::size_t end = offsetof(QolHostSdk, feature_control) +
+                                sizeof(const QolFeatureControlApi*);
+    constexpr std::size_t required = offsetof(QolFeatureControlApi, request_set_choice) +
+                                     sizeof(QolFeatureControlApi::request_set_choice);
+    if (sdk == nullptr || sdk->abi.major != kHostSdkMajor || sdk->abi.minor < 30 ||
+        sdk->abi.size < end) return nullptr;
+    const auto* api = feature_control_if_available(sdk);
+    if (api == nullptr || api->struct_size < required || api->read_choice == nullptr ||
+        api->request_set_choice == nullptr) return nullptr;
     return api;
 }
 

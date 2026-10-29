@@ -13,6 +13,7 @@
 #include <sys/stat.h>
 #include <thread>
 #include <type_traits>
+#include <unistd.h>
 
 using namespace qol;
 using namespace qol::contracts;
@@ -32,6 +33,11 @@ QolResult endpoint_handler(const HttpReq*, HttpRes*, void*) { return ok(); }
 const FeatureDefinition definitions[] = {
     {"toggle", 1, FeatureCategory::kHidden, FeatureType::kToggle, "metadata-name", "metadata-description", &toggle, nullptr},
     {"entry", 0, FeatureCategory::kTools, FeatureType::kEntry, "entry-name", "entry-description", nullptr, &entry}};
+const FeatureChoiceOption choice_options[] = {{"fast", "Fast"}, {"stable", "Stable"}};
+QolResult choice_callback(PluginContext&, const char*) { return ok(); }
+const FeatureDefinition choice_definitions[] = {
+    {"mode", 0, FeatureCategory::kGeneral, FeatureType::kChoice, "Mode", "Select mode",
+     nullptr, nullptr, nullptr, 0, choice_options, 2, &choice_callback}};
 PluginDescriptor descriptor(const char* id) {
     PluginDescriptor value{};
     value.id = id;
@@ -509,8 +515,8 @@ void test_registered_projection(const std::string& root) {
     uint32_t size = 0;
     assert(succeeded(controller.read_registered(buffer, sizeof(buffer), &size)));
     const std::string json(buffer, size);
-    // Projection key order matches the on-disk schema: enable, features, config.
-    assert(json.rfind(R"({"plugin.alpha":{"enable":false,"features":{"toggle":true,"entry":false},"config":{)", 0) == 0);
+    // Projection key order matches the on-disk schema: enable, features, selections, config.
+    assert(json.rfind(R"({"plugin.alpha":{"enable":false,"features":{"toggle":true,"entry":false},"selections":{},"config":{)", 0) == 0);
     // Types: booleans for enable/features, raw JSON for config values.
     assert(json.find(R"("toggle":true)") != std::string::npos);
     assert(json.find(R"("entry":false)") != std::string::npos);
@@ -886,6 +892,134 @@ void test_failed_host_migration_is_atomic(const std::string& root) {
     std::vector<PluginDesiredSnapshot> desired;
     assert(service.desired_snapshots(&desired).error == ConfigStoreError::kNotReady);
 }
+
+void test_choice_host_model(const std::string& root) {
+    std::string path = root + "/choice-controller-XXXXXX";
+    assert(::mkdtemp(path.data()));
+    {
+        std::ofstream file(path + "/config.json");
+        file << R"({"plugin.choice":{"enable":true,"features":{"mode":true},"selections":{"mode":"removed-option","future":"keep"},"config":{}}})";
+    }
+    PluginDescriptor choice_plugin{};
+    choice_plugin.id = "plugin.choice";
+    choice_plugin.features = choice_definitions;
+    choice_plugin.feature_count = 1;
+    FeatureDirectory directory;
+    assert(directory.add(choice_plugin).ok());
+    CoreSettingsConfigService service;
+    FeatureController controller(service);
+    assert(controller.initialize(directory, path, nullptr, nullptr).ok());
+
+    uint8_t enabled = 1;
+    assert(succeeded(controller.read_feature("plugin.choice", "mode", &enabled)) && !enabled);
+    char selected[16]{};
+    uint32_t size = 99;
+    assert(succeeded(controller.read_choice("plugin.choice", "mode", selected, sizeof(selected), &size)) && size == 0);
+    JsonValue namespace_value;
+    assert(service.read_feature_namespace("plugin.choice", &namespace_value).ok());
+    const auto* features = json_member(namespace_value, "features");
+    const auto* selections = json_member(namespace_value, "selections");
+    assert(features && json_member(*features, "mode") && !json_member(*features, "mode")->boolean);
+    assert(selections && !json_member(*selections, "mode"));
+    assert(json_member(*selections, "future") && json_member(*selections, "future")->scalar == "keep");
+
+    int identity = 0;
+    const auto token = owner(&identity, "plugin.choice");
+    const auto& api = controller.api();
+    int manager_identity = 0;
+    const auto manager = owner(&manager_identity, "plugin.manager");
+    assert(succeeded(controller.grant_admin(manager)));
+    char catalog[4096]{};
+    uint32_t catalog_size = 0;
+    assert(succeeded(api.read_catalog(api.context, manager, catalog, sizeof(catalog), &catalog_size)));
+    const std::string catalog_json(catalog, catalog_size);
+    assert(catalog_json.find("\"type\":\"choice\"") != std::string::npos &&
+           catalog_json.find("\"choices\":[{\"value\":\"fast\",\"label\":\"Fast\"}") !=
+               std::string::npos);
+    FeatureReceipt receipt{};
+    assert(api.read_choice(api.context, token, "plugin.choice", "mode", selected,
+                           sizeof(selected), &size).code == kQolOk && size == 0);
+    assert(api.request_set_feature(api.context, token, "plugin.choice", "mode", 1,
+                                   &receipt).code == kQolErrUnsupported);
+    assert(controller.request_set_feature("plugin.choice", "mode", 1, &receipt).code ==
+           kQolErrUnsupported);
+    const uint64_t before_invalid = service.revision();
+    assert(api.request_set_choice(api.context, token, "plugin.choice", "mode", "unknown",
+                                  &receipt).code == kQolErrInvalidArgument);
+    assert(service.revision() == before_invalid);
+
+    uint64_t revision = service.revision();
+    assert(succeeded(api.request_set_choice(api.context, token, "plugin.choice", "mode", "fast",
+                                            &receipt)));
+    receipt = await(controller, receipt);
+    assert(receipt.persistence == FeaturePersistence::kPersisted && receipt.revision == revision + 1);
+    revision = receipt.revision;
+    assert(succeeded(controller.read_feature("plugin.choice", "mode", &enabled)) && enabled);
+    assert(succeeded(api.read_choice(api.context, token, "plugin.choice", "mode", selected,
+                                     sizeof(selected), &size)) &&
+           std::string(selected, size) == "fast");
+    assert(controller.read_choice("plugin.choice", "mode", selected, 2, &size).code ==
+           kQolErrInvalidArgument);
+    assert(service.read_feature_namespace("plugin.choice", &namespace_value).ok());
+    features = json_member(namespace_value, "features");
+    selections = json_member(namespace_value, "selections");
+    assert(json_member(*features, "mode")->boolean);
+    assert(json_member(*selections, "mode")->scalar == "fast");
+    char projection[2048]{};
+    assert(succeeded(controller.read_registered(projection, sizeof(projection), &size)));
+    JsonValue registered;
+    assert(parse_json_document(std::string(projection, size), &registered).ok());
+    const auto* plugin = json_member(registered, "plugin.choice");
+    assert(plugin && json_member(*plugin, "enable") && json_member(*plugin, "enable")->boolean);
+
+    assert(succeeded(controller.request_set_choice("plugin.choice", "mode", "stable", &receipt)));
+    receipt = await(controller, receipt);
+    assert(receipt.persistence == FeaturePersistence::kPersisted && receipt.revision == revision + 1);
+    revision = receipt.revision;
+    assert(succeeded(controller.read_feature("plugin.choice", "mode", &enabled)) && enabled);
+    assert(succeeded(controller.read_choice("plugin.choice", "mode", selected, sizeof(selected), &size)) &&
+           std::string(selected, size) == "stable");
+
+    assert(succeeded(controller.request_set_choice("plugin.choice", "mode", nullptr, &receipt)));
+    receipt = await(controller, receipt);
+    assert(receipt.persistence == FeaturePersistence::kPersisted && receipt.revision == revision + 1);
+    revision = receipt.revision;
+    assert(succeeded(controller.read_feature("plugin.choice", "mode", &enabled)) && !enabled);
+    assert(succeeded(controller.read_choice("plugin.choice", "mode", selected, sizeof(selected), &size)) && size == 0);
+    assert(service.read_feature_namespace("plugin.choice", &namespace_value).ok());
+    features = json_member(namespace_value, "features");
+    selections = json_member(namespace_value, "selections");
+    assert(json_member(*features, "mode") && !json_member(*features, "mode")->boolean);
+    assert(!json_member(*selections, "mode"));
+    assert(succeeded(controller.request_set_choice("plugin.choice", "mode", "", &receipt)));
+    receipt = await(controller, receipt);
+    assert(receipt.persistence == FeaturePersistence::kPersisted && receipt.revision == revision + 1);
+
+    assert(succeeded(controller.request_set_choice("plugin.choice", "mode", "stable", &receipt)));
+    receipt = await(controller, receipt);
+    const uint64_t before_failure_revision = service.revision();
+    assert(::rename((path + "/config.json").c_str(), (path + "/saved.json").c_str()) == 0);
+    assert(::mkdir((path + "/config.json").c_str(), 0700) == 0);
+    assert(succeeded(controller.request_set_choice("plugin.choice", "mode", nullptr, &receipt)));
+    receipt = await(controller, receipt);
+    assert(receipt.persistence == FeaturePersistence::kFailed && service.revision() == before_failure_revision);
+    assert(succeeded(controller.read_choice("plugin.choice", "mode", selected, sizeof(selected), &size)) &&
+           std::string(selected, size) == "stable");
+    assert(succeeded(controller.read_feature("plugin.choice", "mode", &enabled)) && enabled);
+    assert(::rmdir((path + "/config.json").c_str()) == 0);
+    assert(::rename((path + "/saved.json").c_str(), (path + "/config.json").c_str()) == 0);
+    owner_suspend(&identity);
+    owner_suspend(&manager_identity);
+
+    CoreSettingsConfigService reloaded_service;
+    FeatureController reloaded_controller(reloaded_service);
+    assert(reloaded_controller.initialize(directory, path, nullptr, nullptr).ok());
+    assert(succeeded(reloaded_controller.read_choice("plugin.choice", "mode", selected,
+                                                     sizeof(selected), &size)) &&
+           std::string(selected, size) == "stable");
+    assert(succeeded(reloaded_controller.read_feature("plugin.choice", "mode", &enabled)) && enabled);
+    std::puts("choice_feature_store: pass (invalid saved selection repaired closed; stable choice persists; close deletes selection; bool/enable share revision; persistence failure atomic; reload)");
+}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -927,6 +1061,42 @@ int main(int argc, char** argv) {
     bad[1] = definitions[1];
     bad[1].on_entry = nullptr;
     assert(!directory.add(invalid).ok());
+    FeatureDefinition invalid_choice_feature = choice_definitions[0];
+    PluginDescriptor invalid_choice{};
+    invalid_choice.id = "invalid.choice";
+    invalid_choice.features = &invalid_choice_feature;
+    invalid_choice.feature_count = 1;
+    FeatureDirectory choice_validation;
+    assert(choice_validation.add(invalid_choice).ok());
+    invalid_choice_feature.default_enabled = 1;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
+    invalid_choice_feature = choice_definitions[0];
+    invalid_choice_feature.choice_count = 0;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
+    invalid_choice_feature = choice_definitions[0];
+    invalid_choice_feature.on_choice = nullptr;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
+    invalid_choice_feature = choice_definitions[0];
+    invalid_choice_feature.on_toggle = &toggle;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
+    FeatureChoiceOption duplicate_options[] = {{"same", "Same"}, {"same", "Other"}};
+    invalid_choice_feature = choice_definitions[0];
+    invalid_choice_feature.choices = duplicate_options;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
+    FeatureChoiceOption duplicate_labels[] = {{"one", "Same"}, {"two", "Same"}};
+    invalid_choice_feature = choice_definitions[0];
+    invalid_choice_feature.choices = duplicate_labels;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
+    FeatureChoiceOption empty_value[] = {{"", "Label"}};
+    invalid_choice_feature = choice_definitions[0];
+    invalid_choice_feature.choices = empty_value;
+    invalid_choice_feature.choice_count = 1;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
+    FeatureChoiceOption empty_label[] = {{"value", ""}};
+    invalid_choice_feature = choice_definitions[0];
+    invalid_choice_feature.choices = empty_label;
+    invalid_choice_feature.choice_count = 1;
+    assert(!FeatureDirectory{}.add(invalid_choice).ok());
     assert(directory.add(descriptor("plugin.alpha")).ok());
     assert(!directory.add(descriptor("plugin.alpha")).ok());
     assert(directory.add(descriptor("plugin.beta")).ok());
@@ -956,6 +1126,7 @@ int main(int argc, char** argv) {
     test_feature_writes_derive_enable_atomically(path);
     test_host_owner_migration(path);
     test_failed_host_migration_is_atomic(path);
+    test_choice_host_model(path);
     test_receipt_push(directory, path);
     {
         std::ofstream file(path + "/config.json");
@@ -996,7 +1167,8 @@ int main(int argc, char** argv) {
     uint32_t size = 0;
     assert(succeeded(api.read_namespace(api.context, alpha, "plugin.alpha", buffer, sizeof(buffer), &size)));
     std::string own(buffer, size);
-    assert(own.find("\"enable\"") == std::string::npos && own.find("\"config\"") != std::string::npos);
+    assert(own.find("\"enable\"") == std::string::npos && own.find("\"config\"") != std::string::npos &&
+           own.find("\"selections\"") != std::string::npos);
     assert(api.read_namespace(api.context, alpha, "plugin.beta", buffer, sizeof(buffer), &size).code == kQolErrBlocked);
     assert(api.read_catalog(api.context, settings, buffer, sizeof(buffer), &size).code == kQolErrBlocked);
     assert(succeeded(controller.grant_admin(admin)));

@@ -48,9 +48,11 @@ public:
     const std::vector<PluginFeatureSeed>& catalog() const { return definitions_; }
     ConfigStoreResult desired(std::vector<PluginDesiredSnapshot>* out) const;
     QolResult read_feature(const char*, const char*, uint8_t*) const;
+    QolResult read_choice(const char*, const char*, char*, uint32_t, uint32_t*) const;
     QolResult read_config(const char*, const char*, char*, uint32_t, uint32_t*) const;
 
     QolResult request_set_feature(const char*, const char*, uint8_t, contracts::FeatureReceipt*);
+    QolResult request_set_choice(const char*, const char*, const char*, contracts::FeatureReceipt*);
     QolResult request_set_config(const char*, const char*, const char*, uint32_t, contracts::FeatureReceipt*);
     QolResult request_set_config_if_revision(const char*, const char*, const char*, uint32_t,
                                              uint64_t, contracts::FeatureReceipt*);
@@ -132,8 +134,10 @@ private:
     static QolResult api_desired(void*, contracts::QolOwnerToken, const char*, uint8_t*, uint8_t*);
     static QolResult api_set_desired(void*, contracts::QolOwnerToken, const char*, uint8_t, contracts::FeatureReceipt*);
     static QolResult api_entry(void*, contracts::QolOwnerToken, const char*, const char*);
+    static QolResult api_choice(void*, contracts::QolOwnerToken, const char*, const char*, char*, uint32_t, uint32_t*);
+    static QolResult api_set_choice(void*, contracts::QolOwnerToken, const char*, const char*, const char*, contracts::FeatureReceipt*);
     contracts::QolFeatureApi api_{sizeof(contracts::QolFeatureApi), this, &api_namespace,
         &api_feature, &api_set_feature, &api_config, &api_set_config, &api_receipt,
-        &api_catalog, &api_desired, &api_set_desired, &api_entry};
+        &api_catalog, &api_desired, &api_set_desired, &api_entry, &api_choice, &api_set_choice};
 };
 }  // namespace qol::host

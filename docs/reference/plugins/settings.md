@@ -2,7 +2,7 @@
 
 ## 1. 作用与 owner 定位
 
-`settings` 是模块设置整页的普通成品页插件，只负责页面呈现：页面展示 feature 开关、feature entry 和只读「游戏信息」，不展示插件 desired/overall enable 行；feature 开关经 Host 常驻管理 API 读写 feature。它**不拥有**配置 schema、Store、持久化或配置 HTTP adapter——这些由 Host 常驻模块管理设施持有，与设置页生命周期分离。
+`settings` 是模块设置整页的普通成品页插件，只负责页面呈现：页面展示 feature 开关、feature entry、feature choice 和只读「游戏信息」，不展示插件 desired/overall enable 行；这些 feature 经 Host 常驻管理 API 读写。它**不拥有**配置 schema、Store、持久化或配置 HTTP adapter——这些由 Host 常驻模块管理设施持有，与设置页生命周期分离。
 
 配置文件与 Store 由 native Host 常驻设施管理，生命周期长于设置页插件。`GET /api/config/list`、`POST /api/config/set`、`POST /api/op/features/lifecycle`、`GET /api/config/receipt/{id}` 由 Host 常驻 resident route 直接处理，不经设置页插件；完整请求/响应契约见 [API 参考 §7.6](../api-reference.md)。
 
@@ -22,14 +22,15 @@ descriptor 只注册一个 `page` entry feature：
 
 ### Host catalog 渲染
 
-- 页面通过 Host 管理面 `read_catalog` 读取 feature catalog，本地构建行模型；catalog 元数据（owner/id/name/description/type/category/default/action_label/display_priority）来自已注册 descriptor 或 Host-owned feature 定义，不持久化。catalog 包含全部已注册 feature 定义，并按 owner 身份排除设置页自身的 `settings`；不按 `core.*` namespace 过滤。分类名称与 priority 由 Host 的静态注册表提供，管理 SDK v1.26 的 `read_categories` 返回 Host 生命周期内不可变的 POD 数组。feature-control 管理面的 v1.28 尾字段 `read_owner_availability` 提供插件级可用性投影，不改变 `read_categories` 或 catalog stride。分类按 category priority、条目按 descriptor `display_priority` 升序稳定排序，同 priority 保持注册顺序。Debug 显示 Hidden 分类；Release 隐藏整个 Hidden 分类，其他分类中的 feature 不因所属插件或 `core.*` 前缀而过滤。当前 Debug 构建定义 `QOL_DEBUG_COMPONENTS` 时 catalog 有 33 项（含 Host-owned 项）；未定义时少一个 Debug-only entry，为 32 项。Release 隐藏 Hidden 项后显示 18 项。General 中的 `core.api / api.enabled`、Host-owned `module.platform / debug.logging` 和 `module.security / op.enabled` 在 Debug/Release 均显示。`core.item / move_merge.drag_merge` 是 BasicOptimization 分类中的非 Hidden core feature。
+- 页面通过 Host 管理面 `read_catalog` 读取 feature catalog，本地构建行模型；catalog 元数据（owner/id/name/description/type/category/default/action_label/display_priority/choices）来自已注册 descriptor 或 Host-owned feature 定义，不持久化。catalog 包含全部已注册 feature 定义，并按 owner 身份排除设置页自身的 `settings`；不按 `core.*` namespace 过滤。分类名称与 priority 由 Host 的静态注册表提供，管理 SDK v1.26 的 `read_categories` 返回 Host 生命周期内不可变的 POD 数组。feature-control 管理面的 v1.28 尾字段 `read_owner_availability` 提供插件级可用性投影；v1.30 追加 choice 选项元数据及读写函数，不改变此前 ABI 前缀。分类按 category priority、条目按 descriptor `display_priority` 升序稳定排序，同 priority 保持注册顺序。Debug 显示 Hidden 分类；Release 隐藏整个 Hidden 分类，其他分类中的 feature 不因所属插件或 `core.*` 前缀而过滤。当前 Debug 构建定义 `QOL_DEBUG_COMPONENTS` 时 catalog 有 33 项（含 Host-owned 项）；未定义时少一个 Debug-only entry，为 32 项。Release 隐藏 Hidden 项后显示 18 项。General 中的 `core.api / api.enabled`、Host-owned `module.platform / debug.logging` 和 `module.security / op.enabled` 在 Debug/Release 均显示。`core.item / move_merge.drag_merge` 是 BasicOptimization 分类中的非 Hidden core feature。
 - Host 分类注册表包含六个 category ID 与名称：Hidden「调试开关」-10、GameInfo「游戏信息」-9、General「基础设置」-8、BasicOptimization「基础优化设置」-7、Gameplay「更多优化功能」-5、Tools「更多工具」-3。priority 较小者先显示；一般分类没有 feature 时不显示，GameInfo 是设置页保留的只读信息分类，例外保留。
 - 每个 feature toggle 行只通过 `read_feature` 读取值，并经 `request_set_feature` 提交 feature 值；不读取或写入插件 desired/overall enable。Host 在每次成功的 feature 提交后（包括值未变化）根据全部已注册 feature 值重算 `enable`。
+- `choice` 行通过 Host catalog 的静态 `choices` 元数据绘制。选项顺序与插件注册顺序一致，首项固定为隐式「关闭」，其后逐项对应稳定、非空的 `value` 与显示 `label`。右侧控件在原 toggle/entry 控件列内按 220 逻辑单位总宽布局：60 单位左箭头、100 单位选项文字、60 单位右箭头，整体与原按钮列同宽并共用中轴；箭头复用 `core.custom_ui` 的 `arrow_button_*` 组件。边界处对应箭头禁用，不循环。点击只经 `request_set_choice` 单次提交，并在 receipt 确认持久化后重新 `read_choice` 核实；pending 时两箭头禁用。失败、未知值、读取/API 不可用均不得显示为已保存：未知值显示「未知选项」且控件不可用，缺失能力也不伪装成「关闭」。该类型不等同 toggle，不调用 `request_set_config` 或 `request_set_feature`。
 - 带 `on_entry` 的 entry 行仅显示 `action_label` 指定的动作按钮，不显示 toggle；entry 按钮的可用性不依赖其 feature 当前为 true。feature 为 false 时，设置页先检查 `QolFeatureControlApi` 覆盖 `read_actual` 尾字段且函数非空，再经 Host `request_set_feature(true)`；单独的 `EntryContinuation` 保存复制的 plugin/feature ID、request ID 与页面 generation，不与 toggle receipt 混用。每个设置页 process tick 最多回取一次 receipt；持久化确认后还须重新读到 feature 为 true、且 Host actual `enabled` 为 true 才调用一次 `invoke_entry`。receipt 与 actual 等待从请求 admission 起共用最多 300 个 process tick；`read_actual` 返回 NotReady 或 enabled 尚未为 true 时继续等待，其他读取错误、持久化失败或超时均走现有错误状态且不调用。页面关闭/销毁或 generation 改变会清除 continuation；Host 已持久化的 true 不回滚。feature 已为 true 时，同样先校验 `read_actual` ABI 并要求 actual `enabled==1`，随后直接调用一次 `invoke_entry`、不提交 feature 写入；actual 未就绪或读取失败时立即显示错误并停止。Host `invoke_entry` 成功仅代表 admission，不保证页面已打开。无 entry callback 的 toggle 保持可编辑，不受所属插件当前 `enable=false` 影响。
 - 页面不再绘制顶部标题行；此前标题为 `QoL 模块设置 v<模块版本>`。模块版本仍用于「游戏信息」第三行。
 - feature 开关不因所属插件当前 `enable=false` 而禁用，用户可通过开启 feature 恢复插件 desired 状态。直接调用 Host `invoke_entry` 的契约不变：只提交调用，不修改 feature/enable，Host 仍执行实际运行状态校验；设置页的先启用再调用仅是该 UI 的编排。
-- Host `read_owner_availability` 返回稳定的插件级状态：Host-owned owner 为 `available`；普通 owner 的 `registered`、`resolving`、`installed_disabled`、`enabled`、`deactivating`、`inactive` 均为 `available`。`blocked` 显示“依赖不可用”，`unsupported` 显示“当前版本不支持”，`invalid` 显示“插件无效”；`failed` 按显式记录的失败阶段显示“安装失败”“激活失败”或通用“插件不可用”，不解析底层 `error` 文本。owner 不可用时保留其 catalog 行，但该 owner 的**所有 feature toggle 与 entry**统一禁用，feature 名称改用错误红色，描述替换为对应短原因。恢复为 available 后恢复原描述和交互。正常 `inactive`（包括未启用）及 `installed_disabled` 仍可操作，以允许恢复开关；`degraded` 是正交健康标记，不改变 owner availability：仅存在 fail-soft/resource degradation 而 lifecycle 仍可用的 owner 仍可操作；required fail-closed 失败若令 owner 进入 `failed` 等不可用状态，则禁用其全部行。状态读写未加锁，`read_actual` 和 `read_owner_availability` 仅允许在 Host 主线程调用。
-- 每行固定 96 逻辑单位高。标题与描述各最多绘制一行，超出宽度以省略号截断；无描述时标题垂直居中。动作按钮或 toggle 固定在行右侧，不增加第三行。
+- Host `read_owner_availability` 返回稳定的插件级状态：Host-owned owner 为 `available`；普通 owner 的 `registered`、`resolving`、`installed_disabled`、`enabled`、`deactivating`、`inactive` 均为 `available`。`blocked` 显示“依赖不可用”，`unsupported` 显示“当前版本不支持”，`invalid` 显示“插件无效”；`failed` 按显式记录的失败阶段显示“安装失败”“激活失败”或通用“插件不可用”，不解析底层 `error` 文本。owner 不可用时保留其 catalog 行，但该 owner 的**所有 feature toggle、entry 与 choice**统一禁用，feature 名称改用错误红色，描述替换为对应短原因。恢复为 available 后恢复原描述和交互。正常 `inactive`（包括未启用）及 `installed_disabled` 仍可操作，以允许恢复开关；`degraded` 是正交健康标记，不改变 owner availability：仅存在 fail-soft/resource degradation 而 lifecycle 仍可用的 owner 仍可操作；required fail-closed 失败若令 owner 进入 `failed` 等不可用状态，则禁用其全部行。状态读写未加锁，`read_actual` 和 `read_owner_availability` 仅允许在 Host 主线程调用。
+- 每行固定 96 逻辑单位高。标题与描述各最多绘制一行，超出宽度以省略号截断；无描述时标题垂直居中。动作按钮、toggle 或 choice 控件固定在行右侧，不增加第三行。
 
 ### 游戏信息分类
 
@@ -50,7 +51,7 @@ descriptor 只注册一个 `page` entry feature：
 ## 3. 依赖与消费面
 
 - 必需 capability：`ui_panels` v1.3（面板 open/close）与 `ui_components` v1.22（原生控件与文本）。Host 注入的 `QolUiAdapter` ABI 为 v1.32；组件 capability 版本与 adapter ABI minor 各自独立协商。
-- Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_categories`、`read_owner_availability`、`read_feature`、`request_set_feature`、`invoke_entry`、`receipt`。v1.26 引入的 category/catalog metadata 保持原 ABI 前缀；完整管理面要求 Host SDK ABI minor ≥28，以校验新增的 `QolFeatureControlApi.read_owner_availability` 尾字段和非空函数。该 ABI 版本变化不改变 Android `minSdk`。`read_actual` 与 `read_owner_availability` 读取未加锁的 infra 状态表，只允许在 Host 主线程调用；不得从 HTTP 或后台线程调用。设置页 UI 不调用 `read_desired` 或 `request_desired`。
+- Host 管理面经 `feature_control` 窄接口取得：`read_catalog`、`read_categories`、`read_owner_availability`、`read_feature`、`request_set_feature`、`read_choice`、`request_set_choice`、`invoke_entry`、`receipt`。v1.26 引入的 category/catalog metadata 保持原 ABI 前缀；完整基础管理面要求 Host SDK ABI minor ≥28，以校验 `read_owner_availability` 尾字段和非空函数。choice 行另检查 v1.30 追加的 `read_choice`/`request_set_choice` 尾字段，缺失时该行不可用，不会回退到 config/feature 布尔写入。该 ABI 版本变化不改变 Android `minSdk`。`read_actual` 与 `read_owner_availability` 读取未加锁的 infra 状态表，只允许在 Host 主线程调用；不得从 HTTP 或后台线程调用。设置页 UI 不调用 `read_desired` 或 `request_desired`。
 - Host 另为 Kotlin 内部 listener fallback 提供一次性 receipt observer：等待中的 receipt 完成时只通知一次；订阅已是终态的 receipt 时在 Host 锁外重放终态，不返回活动订阅 token。Host observer 容量为 256，JNI 回调携带 request id 与 `feature_receipt_json` 的 JSON。该内部推送不替代设置页 entry continuation 每个页面 process tick 至多一次的 receipt 查询，也不改变公开 `GET /api/config/receipt/{id}` 的轮询契约；内部 receipt 等待没有 200ms/50ms 定时轮询。
 - 游戏信息分类消费 Game Host v2.4 尾接口 `game_identity.read`；`QolGameHost` 尾槽在 v2.4 内追加 `game_version_name`，不改变 `QolTargetApi.query_variant` 与既有前缀。插件不 include `game/`，变体事实仍由 Game Host 统一收口。
 - 不再注册旧 settings catalog contribution：`settings_contribution.cpp` 的 `register_settings`/`register_categories` 为 no-op；feature 元数据只来自 descriptor。
@@ -91,11 +92,11 @@ descriptor 只注册一个 `page` entry feature：
 | 主菜单入口编排 | `module/app/src/main/cpp/plugins/settings/panels/settings.cpp`、`settings_binding.cpp`、`settings_binding.h`、`module/app/src/main/cpp/plugins/settings/plugin.cpp` | 帧任务、入口状态事务与必需 call patch 声明 |
 | 原生菜单安全边界 | `module/app/src/main/cpp/contracts/ui.h`、`module/app/src/main/cpp/host/ui_adapter.cpp`、`module/app/src/main/cpp/plugins/core.custom_ui/ui_components.cpp`、`module/app/src/main/cpp/game/access/ui_kit.cpp`、`module/app/src/main/cpp/game/access/ui_native_text_button.cpp`、`module/app/src/main/cpp/game/access/patches.cpp` | root-child 快照、组件 owner 生命周期及单点绘制替换 |
 | 旧贡献占位 | `module/app/src/main/cpp/plugins/settings/settings_contribution.cpp` | 保留兼容入口，`register_*` 为 no-op |
-| 管理面契约 | `module/app/src/main/cpp/contracts/feature.h`、`contracts/host_sdk.h` | `QolFeatureApi`、v1.26 `read_categories` 与 v1.28 尾追加的 `QolFeatureControlApi.read_owner_availability` |
+| 管理面契约 | `module/app/src/main/cpp/contracts/feature.h`、`contracts/host_sdk.h` | `QolFeatureApi`、v1.26 `read_categories`、v1.28 `read_owner_availability`、v1.30 choice catalog/control tail |
 
 ## 7. 注册 feature 目录（含 Hidden/debug-only 项）
 
-下表列出当前插件 descriptor 注册的 feature 定义；`settings / page` 单独说明，因为 Host catalog 按 owner 身份排除设置页自身。分类使用代码中的 `FeatureCategory` 名称，页面显示文案见 §2；`display_priority` 未标特殊值的默认均为 0。配置缺少已注册 feature 值时，Host 按 default 补入；已有值（包括显式 `false`）保持不变。
+下表列出当前插件 descriptor 注册的 feature 定义；`settings / page` 单独说明，因为 Host catalog 按 owner 身份排除设置页自身。分类使用代码中的 `FeatureCategory` 名称，页面显示文案见 §2；`display_priority` 未标特殊值的默认均为 0。配置缺少已注册 feature 值时，Host 按 default 补入；已有值（包括显式 `false`）保持不变。当前目录未要求把任何既有 toggle、entry 或业务功能迁移为 choice；只有 descriptor 明确注册 `kChoice` 的 feature 才使用此控件。
 
 | Owner | Feature ID | 显示名称 | 默认 | Category | 类型 | Priority | 注册条件 |
 |---|---|---|---:|---|---|---:|---|
@@ -167,6 +168,7 @@ descriptor 只注册一个 `page` entry feature：
 > **当前整体验收：NOT_ACCEPTED（2026-10-23）。** Host CTest、Debug 构建及当前设备的健康态观察不能替代“owner 失败时设置行置灰/红名/原因文案”的真机失败态验收。当前 Debug 构建 `output/inotia4_qol_lsposed_debug_2610230406_9e29f09336fc.apk` SHA-256 为 `9e29f09336fc722c2e5fa51594c73b5c559b0faf138fdf35796b671c22010347`；设备 `192.168.3.56:5555` 当前为 C18 v512，`/api/health` ready，`settings` 与 `popup_blocker` 均 `enabled`，设置页 `panel_active=true`、`categories=6`、`items=33`，没有 `failed`/`unsupported`/`blocked`/`invalid` owner，因此当前无失败行可目视验收。任务过程中曾观察到一次 `popup_blocker=unsupported` 而设置页仍显示原描述；重新安装/启动 C18 v512 后状态变为 `enabled`，该差异当前无法复现，原因未确认。
 
 - 当前 Host 证据：完整 CTest 154/154 通过；最新定向命令 `cmake --build module/app/src/main/cpp/tests/build --target settings_panel_model_tests settings_panel_widget_tests -j2 && ctest --test-dir module/app/src/main/cpp/tests/build --output-on-failure -R 'settings_panel_(model|widget)_tests'` 通过 2/2；widget/model 覆盖 owner 失败映射、红名/原因、同 owner 联动禁用、恢复、单项 resource degradation 不误禁及入口回调拦截。`scripts/build-debug.sh` 成功；`uv run python scripts/maintenance/check_arch.py` 全通过。以上为 Host/构建/架构证据，不构成失败态真机验收。
+- Choice 控件局部验证（2026-10-29）：`cmake --build module/app/src/main/cpp/tests/build --target settings_panel_model_tests settings_panel_widget_tests -j2` 成功；随后 `ctest --test-dir module/app/src/main/cpp/tests/build --output-on-failure -R 'settings_panel_(model|widget)_tests'` 为 `100% tests passed, 0 tests failed out of 2`。覆盖 catalog choice 元数据校验、关闭首项、注册顺序、两端禁用、不循环、点击防重入、receipt 持久化后回读、失败/未知/API 缺失状态。该证据仅为 Host 测试，不是 Android 构建或真机验收，不改变本节整体 `NOT_ACCEPTED` 结论。
 
 > 下方记录是不同日期、候选包和范围的历史/局部证据，保留追溯用途；不得视为当前 HEAD 的完整验收或覆盖上述 NOT_ACCEPTED 结论。
 

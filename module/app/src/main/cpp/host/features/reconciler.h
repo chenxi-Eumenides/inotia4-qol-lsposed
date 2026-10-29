@@ -36,7 +36,7 @@ private:
     std::vector<std::pair<std::string, JsonValue>> pending_namespaces_;
     uint64_t pending_revision_ = 0;
     bool dependency_dirty_ = false;
-    // 配置/依赖变化后是否需要重新投递 toggle 回调；仅由 controller 回调和 step() 修改。
+    // 配置/依赖变化后是否需要重新投递 feature callback；仅由 controller 回调和 step() 修改。
     bool toggles_dirty_ = true;
     // 连续空闲 step 计数；达到上限时强制跑一次全量 step，作为漏标记的兜底。
     uint32_t idle_steps_ = 0;
@@ -57,6 +57,8 @@ private:
     // dependency event equivalent to notify_dependency_changed().
     std::map<std::string, bool> dependency_ready_;
     std::map<std::pair<std::string, std::string>, bool> notified_;
+    std::map<std::pair<std::string, std::string>, std::string> notified_choices_;
+    std::map<std::pair<std::string, std::string>, std::string> choice_values_;
     std::map<std::string, contracts::QolOwnerToken> notified_tokens_;
     std::thread::id main_thread_;
     bool bound_ = false;

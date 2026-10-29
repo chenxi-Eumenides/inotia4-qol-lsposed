@@ -2,7 +2,7 @@
 
 > **本文档 = API 规格（面向调用方）**：每个 API 的路径、用途、请求格式、返回格式与注意事项。
 > 技术实现细节（VMA/函数签名/调用链/游戏内机制）：目标架构见根目录 `ARCHITECTURE.md`；历史实现细节见 `docs/archive/development/`（已归档，仅供参考，不得作为落地依据）。
-> 状态：**v0.5.13 + 配置 `enable`/`features`/`config` 三层收口**。本文档为唯一权威路由来源；当前 native/Kotlin 路由校验基线为 145 条。配置契约见 §7.6。
+> 状态：**v0.5.13 + 配置 `enable`/`features`/`selections`/`config` 收口**。本文档为唯一权威路由来源；当前 native/Kotlin 路由校验基线为 145 条。配置契约见 §7.6。
 > 架构重构不改变既有路径与 HTTP 方法；已迁移的写端点按 §7.10 返回票据，操作结果由 §7.9 回取。内置插件 id 不映射为 URL 前缀。外部插件路由另限定在 `/api/ext/<插件id>/...`，不得占用本文档命名空间。
 > UI 状态查询迁移：旧路由 `/api/ui`、`/api/ui/screen`、`/api/ui/panel`、`/api/ui/dialog` 已移除，由 `GET /api/ui/state` 与 `GET /api/ui/state/table` 替代；五个 UI POST action 保持不变。
 >
@@ -1679,7 +1679,7 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 ### 7.6 插件对象配置与 lifecycle 控制 config
 
-配置唯一持久化来源是 native Host 常驻管理设施持有的外部 `config.json`。schema、Store、读写与管理 API 全部由 Host 常驻设施持有，与任何插件（含设置页）生命周期分离。Kotlin HTTP controller 只传递 raw body/response，不读取、解析、缓存或写配置。
+配置唯一持久化来源是 native Host 常驻管理设施持有的外部 `config.json`。schema、Store、读写与管理 API 全部由 Host 常驻设施持有，与任何插件（含设置页）生命周期分离。Kotlin HTTP controller 只传递 raw body/response，不读取、解析、缓存或写配置。每个注册 plugin 对象含 `enable`、`features`、`selections`、`config` 四部分。
 
 四个控制端点由 Host 常驻管理设施直接处理（`host/features/http_control.cpp`，装配期绑定为 resident route，先于 HTTP registry 接受态与 op 门控执行）；它们不属于任何普通插件的生命周期，settings 插件停用也不影响。`GET /api/config/list` 按实际已注册的 plugin ID 投影；未注册 namespace 和未知 root 不显示在响应中，也不会因此从磁盘删除。
 
@@ -1687,18 +1687,20 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 #### 磁盘 schema
 
-磁盘顶层结构为 `plugin_id → JSON object`，每个对象是三层模型：
+磁盘顶层结构为 `plugin_id → JSON object`，每个对象是四部分模型：
 
 ```json
 {
   "settings": {
     "enable": true,
     "features": { "page": true },
+    "selections": {},
     "config": {}
   },
   "autosell": {
     "enable": true,
     "features": { "autosell.auto_sell": false },
+    "selections": {},
     "config": { "slot0": { "rules": [] } }
   }
 }
@@ -1706,15 +1708,18 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 - `enable`（bool）：Host 独占的 lifecycle 期望状态。普通插件不可读写；显式 deactivate 写 `false`。
 - `features`（object）：当前注册 feature 的布尔值由注册元数据 default 补齐，已有值优先；历史或其他未注册 feature 键可继续保留在存储投影中，但不成为可写 feature 或 lifecycle 聚合成员。
+- `selections`（object）：choice feature 的稳定 value，键为 feature id。关闭时删除该键；没有键表示关闭。label 不持久化。启动 seed 遇到已注册 choice 的未知/非法 value 时删除该键并把 `features[id]` 修复为 `false`；缺 selection 也修复为关闭，不从 boolean 推导默认选项。未知 feature 的 selection 键保留但不会执行。
 - `config`（object）：插件业务自由键值，值可为任意合法 JSON。
 
 注册元数据（`feature_id`、`default`、`category`(`kGeneral`|`kGameplay`|`kTools`|`kHidden`|`kBasicOptimization`，后者数值为 4)、`type`(`kToggle`|`kEntry`)、`name`、`description`、`callback`、可选 `action_label`）由插件 descriptor 静态提供、**不持久化**；禁止零 feature 插件；`entry` 与 toggle 同样有布尔状态并参与运行判定。`FeatureDefinition` 在 `on_entry` 后追加 `const char* action_label = nullptr`；`QolFeatureCatalogItem` 在 `description` 后有同样的可选尾随字段，Host 将注册值复制到该 native catalog view。非空时该文案用于 entry 按钮，空值表示未提供显式文案。此字段不属于配置 schema，不写入 `config.json`，也不出现在 `GET /api/config/list` 的 JSON 投影中。旧平铺字段不是当前 schema；Host 仅按已实现的 owner 迁移规则导入受支持的 API、OP 与 listener 配置遗留值，其他未知 root 与未注册 plugin 原样保留在磁盘。
 
+choice 扩展注册类型为 `kChoice`，不改变既有 `kToggle=0`、`kEntry=1` 数值或行为。choice 必须 `default_enabled=0`、至少提供一个非空且唯一的稳定 `value`/显示 `label`、并提供必需 `on_choice` 回调；toggle/entry callback 不得混用。catalog 的 JSON 形式为 `type="choice"`，并带 `choices:[{"value":"...","label":"..."}]`。Host SDK ABI minor 为 30，choice read/write 函数仅追加在 `QolFeatureApi`、`QolFeatureControlApi` 的尾部，旧函数表前缀仍按 `struct_size` 检查。`read_choice` 将 UTF-8 value 原始字节写入 buffer，`out_size` 不含 NUL；关闭返回长度 0，`request_set_choice` 的空字符串或空指针表示关闭。二进制 stride 风险：`FeatureDefinition` 和 Host catalog 的 `QolFeatureCatalogItem` 都是嵌入式数组元素且没有单元素 size 字段；旧二进制插件 descriptor 与旧 catalog 消费者仍可能按旧 stride 访问，本扩展不宣称旧二进制数组兼容。
+
 #### lifecycle 语义
 
-- `want_run = enable && any(当前注册 feature=true)`；`enable=false` 优先。
-- 每次 feature 值写入成功持久化后（包括重复提交同一布尔值），Host 都根据更新后的全部已注册 feature 布尔值重算 `enable`：任一为 true 则写 `true`，全为 false 则写 `false`；toggle 与 entry 均计入。feature 与派生 `enable` 在同一 Store 事务内持久化。
-- 持久化失败时 feature 与派生 `enable` 都不进入内存投影、不增加 Host revision，也不派发运行时 effects；receipt 为 `persistence="failed"`。因此失败不会产生 feature/enable 部分成功的状态。
+- `want_run = enable && any(当前注册 feature=true)`；`enable=false` 优先。choice 的 bool 仅表示是否有 selection，其 stable value 存于 `selections[id]`。
+- 每次 feature/choice 值写入成功持久化后（包括重复值），Host 都根据更新后的全部已注册 feature 布尔值重算 `enable`：任一为 true 则写 `true`，全为 false 则写 `false`；toggle、entry 与 choice 均计入。choice 的 selection、bool 投影和派生 `enable` 在同一 Store 事务内持久化。
+- 持久化失败时 selection、feature bool 与派生 `enable` 都不进入内存投影、不增加 Host revision，也不派发运行时 effects；receipt 为 `persistence="failed"`。因此失败不会产生部分成功的状态。
 - 对普通插件，全部 feature=false 时 `want_run=false`，Host reconciler 会推进完整 deactivate；在 feature 写入路径上 `enable` 同时派生为 false。启动 seed 和显式 `desired`/lifecycle 写入不做归一化，故其后可能存在 `enable` 与 feature 聚合不一致，直到下一次 feature 值提交。
 - `enable=false` 时 feature 置 true、重复写入相同值均会按 feature 集合修复 `enable=true`；反之，全 false 时重复写入 false 会修复为 `enable=false`。依赖级联与激活失败不改 desired；常驻需求用 default true 的 hidden feature 表达。
 - entry invocation 不是 feature 值修改，不会改写 feature 或 `enable`。`core.api` 注册 General、默认开启的 `api.enabled` feature（Debug/Release 设置页均显示，Release 只过滤 Hidden 分类）；Kotlin listener adapter 仅在 runtime effect 的 actual、desired 均启用且配置有效时启动 listener，desired 关闭时立即停止 listener。category 与描述只影响设置页显示，不改变 listener/API 服务行为。`module.platform` 只注册 `debug.logging`；`module.security` 注册 Hidden、默认关闭的 `op.enabled`，Hidden 项在 Debug 显示、Release 过滤。OP feature 独立控制 endpoint 声明的 OP 授权；API 服务关闭不会改写 OP 值，API 服务开启也不会自动授权 OP。旧 `module.platform.features.api.enabled`、`core.api.features.core.api.http_registry` 与平铺 root `apiEnabled` 按 Host Store 的 API 迁移规则归一为 `core.api.features.api.enabled`；两个旧 namespace feature 同时存在时采用 AND，缺失按 true，root 字段仅在旧 `module.platform` feature 缺失时作为 fallback。已有新目标值（包括 false）优先。OP 只导入明确保存的旧 `module.platform.features.op.enabled`、root `opEnabled` 或 `core.settings.config.opEnabled` 值（false 保留），不从 API 状态推导。该 Host owner 的 `enable` 不控制常驻 Host 服务或管理路由。
@@ -1728,11 +1733,11 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 
 **用途**：读取 Host 实际注册 plugin 的配置投影。
 
-**返回格式**：顶层键为已注册 `plugin_id`，值为 `{"enable":bool,"features":{...},"config":{...}}`。键序与磁盘 schema 一致（`enable,features,config`），`enable` 置于最前。`features`/`config` 为持久值，`enable` 为 Host desired lifecycle 值。只读 projection，不含未知 root、未注册 plugin 或状态包装；对象成员保持存储 JSON 类型。
+**返回格式**：顶层键为已注册 `plugin_id`，值为 `{"enable":bool,"features":{...},"selections":{...},"config":{...}}`。键序与磁盘 schema 一致（`enable,features,selections,config`），`enable` 置于最前。`features`/`selections`/`config` 为持久值，`enable` 为 Host desired lifecycle 值。只读 projection，不含未知 root、未注册 plugin 或状态包装；对象成员保持存储 JSON 类型。
 
 native 未就绪时返回 HTTP 503 `{"ok":false,"error_code":3}`。
 
-#### 提交单 key feature / config / desired
+#### 提交单 key feature / choice / config / desired
 
 `POST /api/config/set`
 
@@ -1743,11 +1748,12 @@ native 未就绪时返回 HTTP 503 `{"ok":false,"error_code":3}`。
 ```
 
 - `field="feature"`：`value` 必须为布尔，写入 `features[key]`；`key` 必须是该 plugin 已注册的 feature id，否则 404。成功持久化时，在同一 Store 事务内根据全部更新后注册 feature 值派生该 plugin 的 `enable`（任一 true→true，全 false→false；entry 也计入，重复值提交也重算）。
+- `field="choice"`：只用于已注册的 choice feature；`value` 为注册的稳定 option value 字符串，`null` 或空字符串表示关闭。未知 feature 返回 404，未注册 option 或把 choice 当普通 boolean `field="feature"` 提交返回 400。成功时单一 Store 事务同时更新/删除 `selections[key]`、写 `features[key]` bool 投影并重算 `enable`；关闭时删除 selection 键。choice 变化即使 bool 保持 true，也以一个 revision 经现有 runtime effects/reconciler 管道应用。
 - `field="config"`：`value` 为任意合法 JSON，写入 `config[key]`；`key` 为非空字符串。
 - `field="desired"` 且 `key="enable"`：`value` 必须为布尔，写入 desired `enable`。
 - 其他 `field`/类型组合（如 `field="enable"`）一律 400。
 
-成功返回 admission receipt（见下）；feature 值及其派生 `enable` 在 Host 单一 Store transaction 中完成 durable write 与内存提交，不形成第二套 writer。任一持久化失败时事务不提交 feature、`enable`、revision 或运行时 effects。
+成功返回 admission receipt（见下）；feature 或 choice 值及其派生 `enable` 在 Host 单一 Store transaction 中完成 durable write 与内存提交，不形成第二套 writer。任一持久化失败时事务不提交 selection、feature bool、`enable`、revision 或运行时 effects。
 
 #### 提交 desired lifecycle
 

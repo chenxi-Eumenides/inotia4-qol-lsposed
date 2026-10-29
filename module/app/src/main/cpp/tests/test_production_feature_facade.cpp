@@ -31,6 +31,7 @@ int business_calls = 0;
 int prepare_calls = 0;
 QolResult toggle(PluginContext&, uint8_t) { ++business_calls; return ok(); }
 QolResult entry(PluginContext&) { ++business_calls; return ok(); }
+QolResult choice(PluginContext&, const char*) { ++business_calls; return ok(); }
 constexpr FeatureDefinition definitions[] = {
     {"switch", 0, FeatureCategory::kBasicOptimization, FeatureType::kToggle,
      "switch-name", "switch-description", &toggle, nullptr, nullptr, 6},
@@ -54,6 +55,12 @@ constexpr FeatureDefinition settings_features[] = {
 constexpr FeatureDefinition save_backup_features[] = {
     {"save_backup.open_manager", 1, FeatureCategory::kTools, FeatureType::kEntry,
      "存档备份导出", "打开存档备份管理器。", nullptr, &entry, "打开"},
+};
+constexpr FeatureChoiceOption test_choice_options[] = {{"first", "First choice"},
+                                                         {"second", "Second choice"}};
+constexpr FeatureDefinition test_choice_features[] = {
+    {"mode", 0, FeatureCategory::kGeneral, FeatureType::kChoice, "Mode", "Select mode",
+     nullptr, nullptr, nullptr, 0, test_choice_options, 2, &choice},
 };
 constexpr FeatureDefinition missing_entry_callback[] = {
     {"core.invalid.debug_entry", 1, FeatureCategory::kHidden,
@@ -111,6 +118,13 @@ PluginDescriptor make_save_backup_descriptor() {
     return out;
 }
 const PluginDescriptor save_backup_descriptor = make_save_backup_descriptor();
+PluginDescriptor make_test_choice_descriptor() {
+    auto out = descriptor("plugin.choice");
+    out.features = test_choice_features;
+    out.feature_count = 1;
+    return out;
+}
+const PluginDescriptor test_choice_descriptor = make_test_choice_descriptor();
 PluginDescriptor make_debug_custom_ui_descriptor() {
     auto out = descriptor("core.custom_ui");
     out.features = core_custom_ui_features;
@@ -197,7 +211,9 @@ void test_abi() {
     static_assert(offsetof(QolHostSdk, feature_control) == 816);
     static_assert(offsetof(QolFeatureControlApi, read_categories) == 96);
     static_assert(offsetof(QolFeatureControlApi, read_owner_availability) == 104);
-    static_assert(sizeof(QolFeatureControlApi) == 112);
+    static_assert(offsetof(QolFeatureControlApi, read_choice) == 112);
+    static_assert(offsetof(QolFeatureControlApi, request_set_choice) == 120);
+    static_assert(sizeof(QolFeatureControlApi) == 128);
     static_assert(static_cast<uint8_t>(FeatureCategory::kGeneral) == 0 &&
                   static_cast<uint8_t>(FeatureCategory::kGameplay) == 1 &&
                   static_cast<uint8_t>(FeatureCategory::kTools) == 2 &&
@@ -215,9 +231,28 @@ void test_abi() {
     assert(feature_if_available(nullptr) == nullptr);
     assert(feature_control_if_available(nullptr) == nullptr);
     assert(feature_if_available(&sdk) == &feature);
+    assert(feature_choice_if_available(&sdk) == &feature);
     assert(feature_control_if_available(&sdk) == nullptr); // ordinary SDK
     sdk.feature_control = &control;
     assert(feature_control_if_available(&sdk) == &control);
+    assert(feature_control_choice_if_available(&sdk) == &control);
+    auto short_feature = feature;
+    short_feature.struct_size = offsetof(QolFeatureApi, invoke_entry) + sizeof(QolFeatureApi::invoke_entry);
+    sdk.feature = &short_feature;
+    assert(feature_if_available(&sdk) == &short_feature);
+    assert(feature_choice_if_available(&sdk) == nullptr);
+    sdk.feature = &feature;
+    sdk.abi.minor = 29;
+    assert(feature_choice_if_available(&sdk) == nullptr);
+    assert(feature_control_choice_if_available(&sdk) == nullptr);
+    sdk.abi.minor = kHostSdkMinor;
+    auto short_control = control;
+    short_control.struct_size = offsetof(QolFeatureControlApi, read_owner_availability) +
+                                sizeof(QolFeatureControlApi::read_owner_availability);
+    sdk.feature_control = &short_control;
+    assert(feature_control_if_available(&sdk) == &short_control);
+    assert(feature_control_choice_if_available(&sdk) == nullptr);
+    sdk.feature_control = &control;
     sdk.abi.minor = 25;
     assert(feature_control_if_available(&sdk) == nullptr);
     assert(!production_feature_bind_management_sdk(sdk));
@@ -260,7 +295,8 @@ void test_abi() {
     assert(!production_feature_bind_management_sdk(sdk));
     sdk.abi.size = sizeof(sdk);
     sdk.abi.minor = kHostSdkMinor;
-    --feature.struct_size;
+    feature.struct_size = offsetof(QolFeatureApi, invoke_entry) +
+                          sizeof(QolFeatureApi::invoke_entry) - 1;
     assert(feature_if_available(&sdk) == nullptr);
     ++feature.struct_size;
     feature.invoke_entry = nullptr;
@@ -598,7 +634,7 @@ void test_seeded_runtime_effects() {
 // Focused registry seam: no resource engine or product callbacks are installed.
 // Inactive contexts never become business-ready; only admission/queue behavior is tested.
 namespace qol::host {
-uint32_t plugin_count() { return 8; }
+uint32_t plugin_count() { return 9; }
 const contracts::PluginDescriptor* find_plugin(const char* id) {
     if (id && std::strcmp(id, "plugin.alpha") == 0) return &alpha_descriptor;
     if (id && std::strcmp(id, "plugin.beta") == 0) return &beta_descriptor;
@@ -608,6 +644,7 @@ const contracts::PluginDescriptor* find_plugin(const char* id) {
     if (id && std::strcmp(id, "settings") == 0) return &settings_descriptor;
     if (id && std::strcmp(id, "core.custom_ui") == 0) return &core_custom_ui_descriptor;
     if (id && std::strcmp(id, "save_backup") == 0) return &save_backup_descriptor;
+    if (id && std::strcmp(id, "plugin.choice") == 0) return &test_choice_descriptor;
     return nullptr;
 }
 bool feature_registry_prepare(const HostDeps&) { ++prepare_calls; return true; }
@@ -691,6 +728,7 @@ int main(int argc, char** argv) {
     assert(production_feature_register(core_custom_ui_descriptor).ok());
     assert(production_feature_register(default_off_descriptor).ok());
     assert(production_feature_register(save_backup_descriptor).ok());
+    assert(production_feature_register(test_choice_descriptor).ok());
     {
         std::ofstream file(file_path);
         file << R"({"module.platform":{"enable":true,"features":{"op.enabled":false,"debug.logging":false},"config":{}}})";
@@ -699,7 +737,7 @@ int main(int argc, char** argv) {
     assert(!production_feature_register(descriptor("late")).ok());
     assert(!production_feature_register_host_owner(platform_config_descriptor()).ok());
     assert(!production_feature_bootstrap(path).ok());
-    assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 9);
+    assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 10);
     assert(std::strcmp(catalog[2].plugin_id, kPlatformConfigOwner) == 0 && catalog[2].host_owned == 1);
     assert(catalog[2].feature_count == 1);
     assert(std::strcmp(catalog[2].features[0].id, "debug.logging") == 0);
@@ -731,11 +769,11 @@ int main(int argc, char** argv) {
     assert(catalog[0].features[0].action_label == nullptr);
     // Every registered descriptor contributes to the player catalog except the settings page;
     // category filtering belongs to the settings model, not plugin identity or metadata opt-in.
-    assert(production_feature_directory().definitions().size() == 10);
+    assert(production_feature_directory().definitions().size() == 11);
     uint8_t core_enabled = 0;
     assert(succeeded(control.read_feature(control.context, "core.test", "core.test.internal", &core_enabled)) && core_enabled == 1);
     assert(succeeded(control.read_feature(control.context, "settings", "page", &core_enabled)) && core_enabled == 1);
-    assert(count == 9);
+    assert(count == 10);
     const auto catalog_for = [catalog, count](const char* id) -> const QolFeatureCatalogPlugin* {
         for (uint32_t index = 0; index < count; ++index) {
             if (std::strcmp(catalog[index].plugin_id, id) == 0) return &catalog[index];
@@ -793,14 +831,21 @@ int main(int argc, char** argv) {
            backup_catalog->features[0].category == FeatureCategory::kTools &&
            backup_catalog->features[0].default_enabled == 1 &&
            std::strcmp(backup_catalog->features[0].action_label, "打开") == 0);
+    const auto* choice_catalog = catalog_for("plugin.choice");
+    assert(choice_catalog != nullptr && choice_catalog->feature_count == 1);
+    assert(choice_catalog->features[0].type == FeatureType::kChoice &&
+           choice_catalog->features[0].choice_count == 2 &&
+           std::strcmp(choice_catalog->features[0].choices[0].value, "first") == 0 &&
+           std::strcmp(choice_catalog->features[0].choices[0].label, "First choice") == 0);
     for (uint32_t i = 0; i < count; ++i) {
         assert(std::strcmp(catalog[i].plugin_id, "settings") != 0);
     }
 
-    int alpha_identity = 0, manager_identity = 0, core_api_identity = 0;
+    int alpha_identity = 0, manager_identity = 0, core_api_identity = 0, choice_identity = 0;
     const auto alpha = owner(&alpha_identity, "plugin.alpha");
     const auto manager = owner(&manager_identity, "plugin.manager");
     const auto core_api = owner(&core_api_identity, "core.api");
+    const auto choice_owner = owner(&choice_identity, "plugin.choice");
     test_seeded_runtime_effects();
     test_runtime_effects(alpha);
     test_trusted_runtime_effects_survive_topic_owner_stop(core_api);
@@ -824,6 +869,32 @@ int main(int argc, char** argv) {
     assert(catalog_json.find("\"core.api\":[{\"id\":\"api.enabled\"") != std::string::npos &&
            catalog_json.find("\"module.security\":[{\"id\":\"op.enabled\"") != std::string::npos &&
            catalog_json.find("\"debug.logging\"") != std::string::npos);
+    assert(catalog_json.find("\"type\":\"choice\"") != std::string::npos &&
+           catalog_json.find("\"choices\":[{\"value\":\"first\",\"label\":\"First choice\"}") !=
+               std::string::npos);
+    char selected[32]{};
+    uint32_t selected_size = 99;
+    assert(succeeded(api.read_choice(api.context, choice_owner, "plugin.choice", "mode", selected,
+                                     sizeof(selected), &selected_size)) && selected_size == 0);
+    assert(api.request_set_feature(api.context, choice_owner, "plugin.choice", "mode", 1,
+                                   &receipt).code == kQolErrUnsupported);
+    assert(succeeded(api.request_set_choice(api.context, choice_owner, "plugin.choice", "mode",
+                                            "first", &receipt)));
+    receipt = await(control, receipt);
+    assert(receipt.persistence == FeaturePersistence::kPersisted);
+    assert(succeeded(api.read_choice(api.context, choice_owner, "plugin.choice", "mode", selected,
+                                     sizeof(selected), &selected_size)) &&
+           std::string(selected, selected_size) == "first");
+    assert(succeeded(control.read_choice(control.context, "plugin.choice", "mode", selected,
+                                         sizeof(selected), &selected_size)) &&
+           std::string(selected, selected_size) == "first");
+    assert(succeeded(control.request_set_choice(control.context, "plugin.choice", "mode", "second",
+                                                &receipt)));
+    receipt = await(control, receipt);
+    assert(receipt.persistence == FeaturePersistence::kPersisted);
+    assert(succeeded(control.read_choice(control.context, "plugin.choice", "mode", selected,
+                                         sizeof(selected), &selected_size)) &&
+           std::string(selected, selected_size) == "second");
 
     assert(api.invoke_entry(api.context, alpha, "plugin.alpha", "open").code == kQolErrNotReady);
     assert(production_feature_bind_frame({}) && prepare_calls == 1);
@@ -835,7 +906,7 @@ int main(int argc, char** argv) {
     owner_suspend(&manager_identity);
     assert(api.read_feature(api.context, alpha, "plugin.alpha", "open", &enabled).code != kQolOk);
     assert(api.read_catalog(api.context, manager, buffer, sizeof(buffer), &size).code != kQolOk);
-     assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 9);
+     assert(succeeded(control.read_catalog(control.context, &catalog, &count)) && count == 10);
     assert(succeeded(control.read_desired(control.context, "plugin.alpha", &enabled, &any)) && enabled && any);
     assert(succeeded(control.request_set_feature(control.context, "plugin.alpha", "open", 0, &receipt)));
     const auto host_receipt = receipt.request_id;
@@ -977,6 +1048,7 @@ int main(int argc, char** argv) {
         const auto list = invoke(HttpMethod::kGet, "/api/config/list", "");
         assert(list.first == 200 && list.second.find("\"enable\"") != std::string::npos && list.second.find("plugin.alpha") != std::string::npos);
         assert(list.second.find("\"op.enabled\":false") != std::string::npos);
+        assert(list.second.find("\"plugin.choice\":{\"enable\":true,\"features\":{\"mode\":true},\"selections\":{\"mode\":\"second\"}") != std::string::npos);
         // Projection object key order matches the on-disk schema: enable, features, config.
         const auto alpha_object = list.second.find("\"plugin.alpha\":{");
         assert(alpha_object != std::string::npos);
@@ -985,6 +1057,15 @@ int main(int argc, char** argv) {
         const auto set_feature = invoke(HttpMethod::kPost, "/api/config/set",
             "{\"plugin_id\":\"plugin.alpha\",\"field\":\"feature\",\"key\":\"switch\",\"value\":false}");
         assert(set_feature.first == 200 && set_feature.second.find("\"persistence\":\"pending\"") != std::string::npos);
+        const auto set_choice = invoke(HttpMethod::kPost, "/api/config/set",
+            "{\"plugin_id\":\"plugin.choice\",\"field\":\"choice\",\"key\":\"mode\",\"value\":\"second\"}");
+        assert(set_choice.first == 200 && set_choice.second.find("\"persistence\":\"pending\"") != std::string::npos);
+        const auto invalid_choice = invoke(HttpMethod::kPost, "/api/config/set",
+            "{\"plugin_id\":\"plugin.choice\",\"field\":\"choice\",\"key\":\"mode\",\"value\":\"unknown\"}");
+        assert(invalid_choice.first == 400);
+        const auto embedded_nul_choice = invoke(HttpMethod::kPost, "/api/config/set",
+            "{\"plugin_id\":\"plugin.choice\",\"field\":\"choice\",\"key\":\"mode\",\"value\":\"first\\u0000tail\"}");
+        assert(embedded_nul_choice.first == 400);
         const auto lifecycle = invoke(HttpMethod::kPost, "/api/op/features/lifecycle",
             "{\"id\":\"plugin.alpha\",\"action\":\"activate\"}");
         assert(lifecycle.first == 200 && lifecycle.second.find("\"admission\":\"admitted\"") != std::string::npos);

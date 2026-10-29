@@ -135,19 +135,30 @@ void FeatureReconciler::notify_toggles() {
         const bool rebound = notified_tokens_[plugin.plugin_id] != ctx.owner_token;
         notified_tokens_[plugin.plugin_id] = ctx.owner_token;
         for (const auto& feature : plugin.features) {
-            if (feature.type != contracts::FeatureType::kToggle) continue;
             const auto key = std::make_pair(plugin.plugin_id, std::string(feature.id));
-            const auto value = feature_values_.find(key);
-            if (value == feature_values_.end()) continue;
-            const bool enabled = value->second;
-            const auto last = notified_.find(key);
-            if (!rebound && last != notified_.end() && last->second == (enabled != 0)) continue;
-            BusinessLease lease(ctx.owner_token);
-            if (!contracts::succeeded(lease.result)) break;
-            // Mark before dispatch so a reentrant safe point does not redeliver this item.
-            notified_[key] = enabled != 0;
-            try { callback_error_ = feature.on_toggle(ctx, enabled ? 1 : 0).code; }
-            catch (...) { callback_error_ = kQolErrInternal; }
+            if (feature.type == contracts::FeatureType::kToggle) {
+                const auto value = feature_values_.find(key);
+                if (value == feature_values_.end()) continue;
+                const bool enabled = value->second;
+                const auto last = notified_.find(key);
+                if (!rebound && last != notified_.end() && last->second == (enabled != 0)) continue;
+                BusinessLease lease(ctx.owner_token);
+                if (!contracts::succeeded(lease.result)) break;
+                // Mark before dispatch so a reentrant safe point does not redeliver this item.
+                notified_[key] = enabled != 0;
+                try { callback_error_ = feature.on_toggle(ctx, enabled ? 1 : 0).code; }
+                catch (...) { callback_error_ = kQolErrInternal; }
+            } else if (feature.type == contracts::FeatureType::kChoice) {
+                const auto value = choice_values_.find(key);
+                const std::string selected = value == choice_values_.end() ? std::string{} : value->second;
+                const auto last = notified_choices_.find(key);
+                if (!rebound && last != notified_choices_.end() && last->second == selected) continue;
+                BusinessLease lease(ctx.owner_token);
+                if (!contracts::succeeded(lease.result)) break;
+                notified_choices_[key] = selected;
+                try { callback_error_ = feature.on_choice(ctx, selected.empty() ? nullptr : selected.c_str()).code; }
+                catch (...) { callback_error_ = kQolErrInternal; }
+            }
         }
     }
 }
@@ -186,7 +197,7 @@ uint32_t FeatureReconciler::step() {
         return 0;
     }
     if (!force_full && !pending && !full_step_pending_ && !pending_work) {
-        // 只有 toggle 投递待处理（例如 revision 已应用但回调尚未送达）。
+        // 只有 feature callback 投递待处理（例如 revision 已应用但回调尚未送达）。
         notify_toggles();
         std::lock_guard<std::mutex> lock(mutex_);
         toggles_dirty_ = pending_revision_ > revision_;
@@ -202,12 +213,19 @@ uint32_t FeatureReconciler::step() {
             desired_.clear();
             for (const auto& snapshot : pending_) desired_.emplace(snapshot.plugin_id, snapshot);
             feature_values_.clear();
+            choice_values_.clear();
             for (const auto& plugin : pending_namespaces_) {
                 for (const auto& section : plugin.second.object) {
-                    if (section.first != "features") continue;
-                    for (const auto& value : section.second.object) {
-                        if (value.second.kind == JsonValue::Kind::kBoolean)
-                            feature_values_[{plugin.first, value.first}] = value.second.boolean;
+                    if (section.first == "features") {
+                        for (const auto& value : section.second.object) {
+                            if (value.second.kind == JsonValue::Kind::kBoolean)
+                                feature_values_[{plugin.first, value.first}] = value.second.boolean;
+                        }
+                    } else if (section.first == "selections") {
+                        for (const auto& value : section.second.object) {
+                            if (value.second.kind == JsonValue::Kind::kString)
+                                choice_values_[{plugin.first, value.first}] = value.second.scalar;
+                        }
                     }
                 }
             }

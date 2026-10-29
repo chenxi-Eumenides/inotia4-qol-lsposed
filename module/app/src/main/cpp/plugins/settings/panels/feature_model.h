@@ -17,6 +17,8 @@ struct Item {
     FeatureCategory category;
     FeatureType type;
     int8_t display_priority = 0;
+    const contracts::FeatureChoiceOption* choices = nullptr;
+    uint32_t choice_count = 0;
 };
 
 inline bool visible(FeatureCategory category, bool debug) {
@@ -41,11 +43,26 @@ inline bool build(const contracts::QolFeatureCatalogPlugin* plugins, uint32_t co
                 out.clear();
                 return false;
             }
+            if (feature.type == FeatureType::kChoice && feature.choice_count != 0 &&
+                feature.choices == nullptr) {
+                out.clear();
+                return false;
+            }
+            if (feature.type == FeatureType::kChoice) {
+                for (uint32_t c = 0; c < feature.choice_count; ++c) {
+                    if (feature.choices[c].value == nullptr || feature.choices[c].value[0] == '\0' ||
+                        feature.choices[c].label == nullptr || feature.choices[c].label[0] == '\0') {
+                        out.clear();
+                        return false;
+                    }
+                }
+            }
             if (!visible(feature.category, debug)) continue;
             out.push_back({plugin.plugin_id, feature.id, feature.name,
                            feature.description == nullptr ? "" : feature.description,
                            feature.action_label == nullptr ? "" : feature.action_label,
-                            feature.category, feature.type, feature.display_priority});
+                             feature.category, feature.type, feature.display_priority,
+                             feature.choices, feature.choice_count});
         }
     }
     std::stable_sort(out.begin(), out.end(), [](const Item& a, const Item& b) {

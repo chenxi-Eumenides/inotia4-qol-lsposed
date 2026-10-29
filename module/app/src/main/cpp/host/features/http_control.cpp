@@ -77,6 +77,16 @@ QolResult feature_control_http_dispatch(const contracts::HttpReq& request, contr
         if (field->scalar == "config") {
             const auto json = features::core_settings::serialize_json_value(*value);
             result = controller.request_set_config(id->scalar.c_str(), key->scalar.c_str(), json.c_str(), json.size(), &receipt);
+        } else if (field->scalar == "choice") {
+            if (value->kind == JsonValue::Kind::kString || value->kind == JsonValue::Kind::kNull) {
+                if (value->kind == JsonValue::Kind::kString &&
+                    value->scalar.find('\0') != std::string::npos)
+                    return rejected(response, contracts::error(kQolErrInvalidArgument, nullptr, 0));
+                const char* selection = value->kind == JsonValue::Kind::kString
+                    ? value->scalar.c_str() : nullptr;
+                result = controller.request_set_choice(id->scalar.c_str(), key->scalar.c_str(),
+                                                       selection, &receipt);
+            }
         } else if (value->kind == JsonValue::Kind::kBoolean) {
             if (field->scalar == "feature") result = controller.request_set_feature(id->scalar.c_str(), key->scalar.c_str(), value->boolean, &receipt);
             if (field->scalar == "desired" && key->scalar == "enable") result = controller.request_desired(id->scalar.c_str(), value->boolean, &receipt);

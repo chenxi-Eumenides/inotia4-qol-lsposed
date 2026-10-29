@@ -147,6 +147,7 @@ private:
     FeatureDesiredObserver desired_observer_ = nullptr;
     void* desired_context_ = nullptr;
     bool feature_model_ = false;
+    bool feature_projection_published_ = false;
     FeatureControlObserver immutable_observer_ = nullptr;
 };
 

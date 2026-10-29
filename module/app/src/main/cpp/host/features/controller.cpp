@@ -5,6 +5,7 @@
 #include <cstring>
 #include <new>
 #include <stdexcept>
+#include <string_view>
 
 namespace qol::host {
 thread_local FeatureController* FeatureController::active_receipt_dispatcher_ = nullptr;
@@ -51,6 +52,25 @@ JsonValue string(const char* text) {
     value.kind = JsonValue::Kind::kString;
     value.scalar = text;
     return value;
+}
+const contracts::FeatureDefinition* find_feature(const PluginFeatureSeed* plugin, const char* id) {
+    if (plugin == nullptr || id == nullptr) return nullptr;
+    const auto found = std::find_if(plugin->features.begin(), plugin->features.end(),
+        [id](const auto& feature) { return feature.id != nullptr && std::strcmp(feature.id, id) == 0; });
+    return found == plugin->features.end() ? nullptr : &*found;
+}
+bool is_choice_value(const contracts::FeatureDefinition& feature, std::string_view value) {
+    if (value.empty() || feature.choices == nullptr) return false;
+    for (uint32_t index = 0; index < feature.choice_count; ++index) {
+        if (feature.choices[index].value != nullptr &&
+            value == feature.choices[index].value) return true;
+    }
+    return false;
+}
+std::string choice_json(const char* value) {
+    if (value == nullptr || value[0] == '\0') return "null";
+    JsonValue encoded = string(value);
+    return features::core_settings::serialize_json_value(encoded);
 }
 }  // namespace
 
@@ -234,6 +254,33 @@ QolResult FeatureController::read_feature(const char* id, const char* key, uint8
     return read;
 }
 
+QolResult FeatureController::read_choice(const char* id, const char* key, char* buffer,
+                                         uint32_t capacity, uint32_t* size) const {
+    if (id == nullptr || key == nullptr || size == nullptr || (capacity != 0 && buffer == nullptr))
+        return error(kQolErrInvalidArgument);
+    *size = 0;
+    const auto* feature = find_feature(find_plugin(id), key);
+    if (feature == nullptr) return error(kQolErrNotFound);
+    if (feature->type != contracts::FeatureType::kChoice) return error(kQolErrUnsupported);
+    std::string selected;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const JsonValue* object = nullptr;
+        for (const auto& item : published_.namespaces) {
+            if (item.first == id) { object = &item.second; break; }
+        }
+        if (object == nullptr) return error(kQolErrNotReady);
+        const auto* selections = member(*object, "selections");
+        const auto* value = selections != nullptr ? member(*selections, key) : nullptr;
+        if (value != nullptr && value->kind == JsonValue::Kind::kString &&
+            is_choice_value(*feature, value->scalar)) selected = value->scalar;
+    }
+    if (selected.size() > capacity) return error(kQolErrInvalidArgument);
+    if (!selected.empty()) std::memcpy(buffer, selected.data(), selected.size());
+    *size = static_cast<uint32_t>(selected.size());
+    return contracts::ok();
+}
+
 QolResult FeatureController::read_config(const char* id, const char* key, char* buffer,
                                         uint32_t capacity, uint32_t* size) const {
     JsonValue value;
@@ -277,14 +324,25 @@ QolResult FeatureController::enqueue(const char* id, FeatureConfigField field, c
     JsonValue value;
     auto parsed = features::core_settings::parse_json_document(json, &value);
     if (!parsed.ok()) return result(parsed);
-    if (field != FeatureConfigField::kConfig && value.kind != JsonValue::Kind::kBoolean) return error(kQolErrInvalidArgument);
+    if (field != FeatureConfigField::kConfig && field != FeatureConfigField::kChoice &&
+        value.kind != JsonValue::Kind::kBoolean) return error(kQolErrInvalidArgument);
     if (field == FeatureConfigField::kDesiredEnable && host_owned(id)) return error(kQolErrUnsupported);
     if (field == FeatureConfigField::kConfig && plugin->validate_config != nullptr) {
         const auto validated = plugin->validate_config(key, json.data(),
                                                        static_cast<uint32_t>(json.size()));
         if (!contracts::succeeded(validated)) return validated;
     }
-    if (field == FeatureConfigField::kFeature && std::none_of(plugin->features.begin(), plugin->features.end(), [&](const auto& f) { return std::strcmp(f.id, key) == 0; })) return error(kQolErrNotFound);
+    const auto* feature = field == FeatureConfigField::kFeature || field == FeatureConfigField::kChoice
+        ? find_feature(plugin, key) : nullptr;
+    if ((field == FeatureConfigField::kFeature || field == FeatureConfigField::kChoice) && feature == nullptr)
+        return error(kQolErrNotFound);
+    if (field == FeatureConfigField::kFeature && feature->type == contracts::FeatureType::kChoice)
+        return error(kQolErrUnsupported);
+    if (field == FeatureConfigField::kChoice &&
+        (feature->type != contracts::FeatureType::kChoice ||
+         (value.kind == JsonValue::Kind::kString && !is_choice_value(*feature, value.scalar)) ||
+         (value.kind != JsonValue::Kind::kString && value.kind != JsonValue::Kind::kNull)))
+        return error(kQolErrInvalidArgument);
     std::lock_guard<std::mutex> lock(mutex_);
     if (!running_ || stopping_) return error(kQolErrNotReady);
     if (queue_.size() >= 256) return error(kQolErrBusy);
@@ -304,6 +362,19 @@ QolResult FeatureController::enqueue(const char* id, FeatureConfigField field, c
 QolResult FeatureController::request_set_feature(const char* id, const char* key, uint8_t value, contracts::FeatureReceipt* out) {
     if (value > 1) return admission(error(kQolErrInvalidArgument), out);
     return admission(enqueue(id, FeatureConfigField::kFeature, key, value ? "true" : "false", 0, out), out);
+}
+QolResult FeatureController::request_set_choice(const char* id, const char* key, const char* value,
+                                                contracts::FeatureReceipt* out) {
+    if (id == nullptr || key == nullptr || out == nullptr)
+        return admission(error(kQolErrInvalidArgument), out);
+    const auto* plugin = find_plugin(id);
+    if (plugin == nullptr) return admission(error(kQolErrInvalidArgument), out);
+    const auto* feature = find_feature(plugin, key);
+    if (feature == nullptr) return admission(error(kQolErrNotFound), out);
+    if (feature->type != contracts::FeatureType::kChoice) return admission(error(kQolErrUnsupported), out);
+    if (value != nullptr && value[0] != '\0' && !is_choice_value(*feature, value))
+        return admission(error(kQolErrInvalidArgument), out);
+    return admission(enqueue(id, FeatureConfigField::kChoice, key, choice_json(value), 0, out), out);
 }
 QolResult FeatureController::request_set_config(const char* id, const char* key, const char* json, uint32_t size, contracts::FeatureReceipt* out) {
     if (!json && size) return admission(error(kQolErrInvalidArgument), out);
@@ -569,7 +640,8 @@ QolResult FeatureController::api_catalog(void* context, contracts::QolOwnerToken
             JsonValue item;
             item.kind = JsonValue::Kind::kObject;
             item.object = {{"id", string(f.id)}, {"name", string(f.name)}, {"description", string(f.description)},
-                {"type", string(f.type == contracts::FeatureType::kEntry ? "entry" : "toggle")}};
+                {"type", string(f.type == contracts::FeatureType::kEntry ? "entry" :
+                                 f.type == contracts::FeatureType::kChoice ? "choice" : "toggle")}};
             JsonValue number;
             number.kind = JsonValue::Kind::kNumber;
             number.scalar = std::to_string(static_cast<uint8_t>(f.category));
@@ -578,6 +650,18 @@ QolResult FeatureController::api_catalog(void* context, contracts::QolOwnerToken
             boolean.kind = JsonValue::Kind::kBoolean;
             boolean.boolean = f.default_enabled;
             item.object.emplace_back("default", boolean);
+            if (f.type == contracts::FeatureType::kChoice) {
+                JsonValue choices;
+                choices.kind = JsonValue::Kind::kArray;
+                for (uint32_t index = 0; index < f.choice_count; ++index) {
+                    JsonValue option;
+                    option.kind = JsonValue::Kind::kObject;
+                    option.object.emplace_back("value", string(f.choices[index].value));
+                    option.object.emplace_back("label", string(f.choices[index].label));
+                    choices.array.push_back(std::move(option));
+                }
+                item.object.emplace_back("choices", std::move(choices));
+            }
             items.array.push_back(std::move(item));
         }
         plugins.object.emplace_back(plugin.plugin_id, std::move(items));
@@ -615,5 +699,31 @@ QolResult FeatureController::api_entry(void* context, contracts::QolOwnerToken t
     if (!contracts::succeeded(lease.status)) return lease.status;
     auto auth = self.authorize(token, id);
     return contracts::succeeded(auth) ? self.invoke_entry(id, key) : auth;
+}
+QolResult FeatureController::api_choice(void* context, contracts::QolOwnerToken token, const char* id,
+                                        const char* key, char* buffer, uint32_t capacity, uint32_t* size) {
+    auto& self = *static_cast<FeatureController*>(context);
+    Lease lease(token);
+    if (!contracts::succeeded(lease.status)) return lease.status;
+    auto auth = self.authorize(token, id);
+    return contracts::succeeded(auth) ? self.read_choice(id, key, buffer, capacity, size) : auth;
+}
+QolResult FeatureController::api_set_choice(void* context, contracts::QolOwnerToken token,
+                                            const char* id, const char* key, const char* value,
+                                            contracts::FeatureReceipt* out) {
+    auto& self = *static_cast<FeatureController*>(context);
+    Lease lease(token);
+    if (!contracts::succeeded(lease.status)) return admission(lease.status, out);
+    auto auth = self.authorize(token, id);
+    QolResult status = auth;
+    if (contracts::succeeded(auth)) {
+        const auto* feature = find_feature(self.find_plugin(id), key);
+        if (feature == nullptr) status = error(kQolErrNotFound);
+        else if (feature->type != contracts::FeatureType::kChoice) status = error(kQolErrUnsupported);
+        else if (value != nullptr && value[0] != '\0' && !is_choice_value(*feature, value))
+            status = error(kQolErrInvalidArgument);
+        else status = self.enqueue(id, FeatureConfigField::kChoice, key, choice_json(value), token, out);
+    }
+    return admission(status, out);
 }
 }  // namespace qol::host

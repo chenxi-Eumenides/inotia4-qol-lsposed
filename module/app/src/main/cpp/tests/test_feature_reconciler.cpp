@@ -68,6 +68,7 @@ struct Probe {
     QolOwnerToken installed_token = 0;
 };
 std::map<std::string, Probe> probes;
+std::map<std::string, std::vector<std::string>> choice_notifications;
 std::vector<std::string> trace;
 std::string g_log_capture;
 void capture_log(QolLogLevel, QolDomain, const char* line) {
@@ -164,6 +165,16 @@ FeatureReceipt set_feature(const char* plugin, const char* feature, uint8_t valu
     assert(receipt.persistence == FeaturePersistence::kPersisted);
     return receipt;
 }
+FeatureReceipt set_choice(const char* plugin, const char* feature, const char* value) {
+    FeatureReceipt receipt{};
+    const QolResult admitted = controller->request_set_choice(plugin, feature, value, &receipt);
+    if (!succeeded(admitted))
+        std::fprintf(stderr, "choice admission failed for %s.%s: %d\n", plugin, feature, admitted.code);
+    assert(succeeded(admitted));
+    receipt = await(receipt);
+    assert(receipt.persistence == FeaturePersistence::kPersisted);
+    return receipt;
+}
 FeatureReceipt set_desired(const char* plugin, uint8_t value) {
     FeatureReceipt receipt{};
     assert(succeeded(controller->request_desired(plugin, value, &receipt)));
@@ -204,6 +215,12 @@ QolResult toggle(PluginContext& ctx, uint8_t) {
     assert_main();
     assert(feature_registry_active(ctx.plugin_id));
     ++probes[ctx.plugin_id].toggles;
+    return ok();
+}
+QolResult choice(PluginContext& ctx, const char* value) {
+    assert_main();
+    assert(feature_registry_active(ctx.plugin_id));
+    choice_notifications[ctx.plugin_id].emplace_back(value == nullptr ? "<closed>" : value);
     return ok();
 }
 QolResult entry(PluginContext& ctx) {
@@ -247,7 +264,13 @@ QolResult held_query(const HttpReq*, HttpRes* response, void* raw) {
 }
 const FeatureDefinition features[] = {
     {"toggle", 1, FeatureCategory::kHidden, FeatureType::kToggle, "toggle", "toggle", &toggle, nullptr},
-    {"entry", 0, FeatureCategory::kTools, FeatureType::kEntry, "entry", "entry", nullptr, &entry}};
+    {"entry", 0, FeatureCategory::kTools, FeatureType::kEntry, "entry", "entry", nullptr, &entry},
+    {"choice", 0, FeatureCategory::kGeneral, FeatureType::kChoice, "choice", "choice",
+     nullptr, nullptr, nullptr, 0,
+     []() -> const FeatureChoiceOption* {
+         static constexpr FeatureChoiceOption options[] = {{"first", "First"}, {"second", "Second"}};
+         return options;
+     }(), 2, &choice}};
 const CapabilityProvisionRef provides[] = {{"test.capability", {1, 0}, &provider_capability}};
 const CapabilityRequirement requires[] = {{"test.capability", {1, 0}}};
 const CapabilityRequirement missing[] = {{"test.external", {1, 0}}};
@@ -297,7 +320,7 @@ PluginDescriptor descriptor(const char* id) {
     result.on_enabled = &enabled;
     result.on_disabled = &disabled;
     result.features = features;
-    result.feature_count = 2;
+    result.feature_count = 3;
     return result;
 }
 uintptr_t resolve(const char* symbol, bool* followed) {
@@ -702,6 +725,19 @@ int main(int argc, char** argv) {
     set_feature("test.solo", "toggle", 1);
     frames();
     assert(feature_registry_active("test.solo") && test_runtime_actual_state["test.solo"]);
+    const auto choice_calls = choice_notifications["test.solo"].size();
+    set_choice("test.solo", "choice", "first");
+    frames();
+    assert(choice_notifications["test.solo"].size() == choice_calls + 1 &&
+           choice_notifications["test.solo"].back() == "first");
+    set_choice("test.solo", "choice", "second");
+    frames();
+    assert(choice_notifications["test.solo"].size() == choice_calls + 2 &&
+           choice_notifications["test.solo"].back() == "second");
+    set_choice("test.solo", "choice", nullptr);
+    frames();
+    assert(choice_notifications["test.solo"].size() == choice_calls + 3 &&
+           choice_notifications["test.solo"].back() == "<closed>");
     // A feature write derives enable from the registered features; the last true feature resumes it.
     set_feature("test.solo", "toggle", 0);
     set_desired("test.solo", 1);

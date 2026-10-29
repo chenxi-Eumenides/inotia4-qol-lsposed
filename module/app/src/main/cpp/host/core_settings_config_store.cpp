@@ -546,6 +546,15 @@ bool has_feature(const std::vector<PluginFeatureSeed>& definitions, const char* 
     return false;
 }
 
+bool has_choice_option(const contracts::FeatureDefinition& feature, std::string_view value) {
+    if (value.empty() || feature.choices == nullptr) return false;
+    for (uint32_t index = 0; index < feature.choice_count; ++index) {
+        if (feature.choices[index].value != nullptr &&
+            value == feature.choices[index].value) return true;
+    }
+    return false;
+}
+
 const PluginFeatureSeed* find_seed(const std::vector<PluginFeatureSeed>& definitions,
                                    const char* plugin_id) {
     const auto found = std::find_if(definitions.begin(), definitions.end(),
@@ -1089,11 +1098,36 @@ ConfigStoreResult ConfigStore::prepare_features(const std::vector<PluginFeatureS
                 feature.description == nullptr || !valid_utf8(feature.name) ||
                 !valid_utf8(feature.description) ||
                 static_cast<uint8_t>(feature.category) > static_cast<uint8_t>(contracts::FeatureCategory::kBasicOptimization) ||
-                (feature.type != contracts::FeatureType::kToggle && feature.type != contracts::FeatureType::kEntry) ||
-                (feature.type == contracts::FeatureType::kToggle && (feature.on_toggle == nullptr || feature.on_entry != nullptr)) ||
-                (feature.type == contracts::FeatureType::kEntry && (feature.on_entry == nullptr || feature.on_toggle != nullptr)) ||
+                (feature.type != contracts::FeatureType::kToggle && feature.type != contracts::FeatureType::kEntry &&
+                 feature.type != contracts::FeatureType::kChoice) ||
+                (feature.type == contracts::FeatureType::kToggle &&
+                 (feature.on_toggle == nullptr || feature.on_entry != nullptr || feature.on_choice != nullptr ||
+                  feature.choices != nullptr || feature.choice_count != 0)) ||
+                (feature.type == contracts::FeatureType::kEntry &&
+                 (feature.on_entry == nullptr || feature.on_toggle != nullptr || feature.on_choice != nullptr ||
+                  feature.choices != nullptr || feature.choice_count != 0)) ||
+                (feature.type == contracts::FeatureType::kChoice &&
+                 (feature.default_enabled != 0 || feature.on_choice == nullptr ||
+                  feature.on_toggle != nullptr || feature.on_entry != nullptr ||
+                  feature.choices == nullptr || feature.choice_count == 0)) ||
                 std::find(feature_ids.begin(), feature_ids.end(), feature.id) != feature_ids.end())
                 return fail(ConfigStoreError::kValidation, "invalid or duplicate feature");
+            if (feature.type == contracts::FeatureType::kChoice) {
+                std::vector<std::string> values;
+                std::vector<std::string> labels;
+                for (uint32_t option_index = 0; option_index < feature.choice_count; ++option_index) {
+                    const auto& option = feature.choices[option_index];
+                    if (option.value == nullptr || option.value[0] == '\0' || option.label == nullptr ||
+                        option.label[0] == '\0' || !valid_utf8(option.value) || !valid_utf8(option.label) ||
+                        std::strlen(option.value) > kMaxConfigBytes ||
+                        std::strlen(option.label) > kMaxConfigBytes ||
+                        std::find(values.begin(), values.end(), option.value) != values.end() ||
+                        std::find(labels.begin(), labels.end(), option.label) != labels.end())
+                        return fail(ConfigStoreError::kValidation, "invalid or duplicate feature choice option");
+                    values.emplace_back(option.value);
+                    labels.emplace_back(option.label);
+                }
+            }
             feature_ids.emplace_back(feature.id);
         }
     }
@@ -1123,6 +1157,9 @@ ConfigStoreSeedResult ConfigStore::seed_features() {
         const auto* config = member(*object, "config");
         if (config && config->kind != JsonValue::Kind::kObject)
             return {fail(ConfigStoreError::kValidation, "plugin config must be an object")};
+        const auto* selections = member(*object, "selections");
+        if (selections && selections->kind != JsonValue::Kind::kObject)
+            return {fail(ConfigStoreError::kValidation, "plugin selections must be an object")};
         if (features) for (const auto& feature : plugin.features) {
             const auto* value = member(*features, feature.id);
             if (value && value->kind != JsonValue::Kind::kBoolean)
@@ -1174,12 +1211,26 @@ ConfigStoreSeedResult ConfigStore::seed_features() {
         features.kind = JsonValue::Kind::kObject;
         if (const auto* old = member(*object, "features"))
             features = *old;
+        JsonValue selections;
+        selections.kind = JsonValue::Kind::kObject;
+        if (const auto* old = member(*object, "selections"); old && old->kind == JsonValue::Kind::kObject)
+            selections = *old;
         for (const auto& feature : plugin.features) {
             const auto* value = member(features, feature.id);
             if (!value)
                 set_member(&features, feature.id, boolean_value(feature.default_enabled != 0));
+            if (feature.type == contracts::FeatureType::kChoice) {
+                const auto* selected = member(selections, feature.id);
+                const bool valid_selection = selected != nullptr && selected->kind == JsonValue::Kind::kString &&
+                    has_choice_option(feature, selected->scalar);
+                if (selected != nullptr && !valid_selection) {
+                    remove_member(&selections, feature.id);
+                }
+                set_member(&features, feature.id, boolean_value(valid_selection));
+            }
         }
         set_member(&schema, "features", std::move(features));
+        set_member(&schema, "selections", std::move(selections));
         JsonValue config;
         config.kind = JsonValue::Kind::kObject;
         if (const auto* old = member(*object, "config"))
@@ -1216,7 +1267,7 @@ ConfigStoreResult ConfigStore::read_feature_namespace(const std::string& id, Jso
     if (!object) return fail(ConfigStoreError::kNotReady, "feature defaults not seeded");
     out->kind = JsonValue::Kind::kObject;
     out->object.clear();
-    for (const char* key : {"features", "config"}) {
+    for (const char* key : {"features", "selections", "config"}) {
         if (const auto* value = member(*object, key)) set_member(out, key, *value);
     }
     return {ConfigStoreError::kNone, {}, !writeback_pending_ && !degraded_read_only_};
@@ -1251,10 +1302,22 @@ ConfigStoreResult ConfigStore::update_feature_model(const std::string& id, Featu
     JsonValue value;
     const auto parsed = parse_json_document(json, &value);
     if (!parsed.ok()) return parsed;
-    if (field != FeatureConfigField::kConfig && value.kind != JsonValue::Kind::kBoolean)
+    if (field != FeatureConfigField::kConfig && field != FeatureConfigField::kChoice &&
+        value.kind != JsonValue::Kind::kBoolean)
         return fail(ConfigStoreError::kValidation, "feature/enable value must be boolean");
-    if (field == FeatureConfigField::kFeature && std::none_of(plugin->features.begin(), plugin->features.end(), [&](const auto& item) { return key == item.id; }))
+    const auto feature_definition = std::find_if(plugin->features.begin(), plugin->features.end(),
+        [&](const auto& item) { return key == item.id; });
+    if ((field == FeatureConfigField::kFeature || field == FeatureConfigField::kChoice) &&
+        feature_definition == plugin->features.end())
         return fail(ConfigStoreError::kValidation, "unregistered feature");
+    if (field == FeatureConfigField::kFeature && feature_definition->type == contracts::FeatureType::kChoice)
+        return fail(ConfigStoreError::kValidation, "choice feature requires selection update");
+    if (field == FeatureConfigField::kChoice &&
+        (feature_definition->type != contracts::FeatureType::kChoice ||
+           (value.kind != JsonValue::Kind::kNull &&
+          (value.kind != JsonValue::Kind::kString ||
+           !has_choice_option(*feature_definition, value.scalar)))))
+        return fail(ConfigStoreError::kValidation, "invalid feature choice value");
     if (field != FeatureConfigField::kDesiredEnable && (!valid_utf8(key) || key.size() > kMaxConfigBytes))
         return fail(ConfigStoreError::kValidation, "invalid config key");
     if (field == FeatureConfigField::kConfig && plugin->validate_config != nullptr) {
@@ -1267,24 +1330,39 @@ ConfigStoreResult ConfigStore::update_feature_model(const std::string& id, Featu
     auto* object = find_namespace(&next, id);
     if (!object) return fail(ConfigStoreError::kNotReady, "feature defaults not seeded");
     if (field == FeatureConfigField::kDesiredEnable) set_member(object, "enable", std::move(value));
-    else {
+    else if (field == FeatureConfigField::kChoice) {
+        const auto* old_selections = member(*object, "selections");
+        if (!old_selections || old_selections->kind != JsonValue::Kind::kObject)
+            return fail(ConfigStoreError::kValidation, "invalid schema selections");
+        JsonValue selections = *old_selections;
+        const bool enabled = value.kind == JsonValue::Kind::kString;
+        if (enabled) set_member(&selections, key, value);
+        else remove_member(&selections, key.c_str());
+        set_member(object, "selections", std::move(selections));
+        const auto* old_features = member(*object, "features");
+        if (!old_features || old_features->kind != JsonValue::Kind::kObject)
+            return fail(ConfigStoreError::kValidation, "invalid schema features");
+        JsonValue features = *old_features;
+        set_member(&features, key, boolean_value(enabled));
+        set_member(object, "features", std::move(features));
+    } else {
         const std::string section = field == FeatureConfigField::kFeature ? "features" : "config";
         const auto* current = member(*object, section);
         if (!current || current->kind != JsonValue::Kind::kObject) return fail(ConfigStoreError::kValidation, "invalid schema section");
         JsonValue updated = *current;
         set_member(&updated, key, std::move(value));
         set_member(object, section, std::move(updated));
-        if (field == FeatureConfigField::kFeature) {
-            const auto* features = member(*object, "features");
-            bool any_enabled = false;
-            for (const auto& feature : plugin->features) {
-                const auto* enabled = features ? member(*features, feature.id) : nullptr;
-                if (!enabled || enabled->kind != JsonValue::Kind::kBoolean)
-                    return fail(ConfigStoreError::kValidation, "registered feature must be boolean");
-                any_enabled = any_enabled || enabled->boolean;
-            }
-            set_member(object, "enable", boolean_value(any_enabled));
+    }
+    if (field == FeatureConfigField::kFeature || field == FeatureConfigField::kChoice) {
+        const auto* features = member(*object, "features");
+        bool any_enabled = false;
+        for (const auto& feature : plugin->features) {
+            const auto* enabled = features ? member(*features, feature.id) : nullptr;
+            if (!enabled || enabled->kind != JsonValue::Kind::kBoolean)
+                return fail(ConfigStoreError::kValidation, "registered feature must be boolean");
+            any_enabled = any_enabled || enabled->boolean;
         }
+        set_member(object, "enable", boolean_value(any_enabled));
     }
     if (!write_atomic(path_, serialize(next, unknown_root_))) return fail(ConfigStoreError::kPersistence, "configuration persistence failed");
     namespaces_ = std::move(next);

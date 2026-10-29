@@ -41,6 +41,9 @@ using qol::features::core_ui::settings_model::right_row_height;
 using qol::features::core_ui::settings_model::toggle_top;
 using qol::features::core_ui::settings_model::description_width_for_toggle;
 using qol::features::core_ui::settings_model::right_control_left;
+using qol::features::core_ui::settings_model::choice_arrow_enabled;
+using qol::features::core_ui::settings_model::choice_next_position;
+using qol::features::core_ui::settings_model::choice_position;
 using qol::features::core_ui::settings_model::row_to_item_index;
 using qol::features::core_ui::settings_model::use_item_description;
 using qol::features::core_ui::settings_model::toggle_enabled;
@@ -196,6 +199,58 @@ void test_toggle_target() {
     CHECK(next_toggle_value(0) == 1);
     CHECK(next_toggle_value(1) == 0);
     CHECK(next_toggle_value(7) == 0);
+}
+
+void test_choice_positions_and_non_cyclic_navigation() {
+    const char* values[]{"small", "medium", "large"};
+    CHECK(choice_position(nullptr, values, 3) == 0);
+    CHECK(choice_position("", values, 3) == 0);
+    CHECK(choice_position("medium", values, 3) == 2);
+    CHECK(choice_position("missing", values, 3) == UINT32_MAX);
+    CHECK(choice_position("small", nullptr, 0) == UINT32_MAX);
+    CHECK(choice_next_position(0, 3, -1) == 0);
+    CHECK(choice_next_position(0, 3, 1) == 1);
+    CHECK(choice_next_position(3, 3, 1) == 3);
+    CHECK(choice_next_position(2, 3, 1) == 3);
+    CHECK(choice_next_position(3, 3, -1) == 2);
+    CHECK(choice_next_position(4, 3, -1) == 4);
+    CHECK(choice_arrow_enabled(true, true, false, 0, 3, 1));
+    CHECK(!choice_arrow_enabled(true, true, false, 0, 3, -1));
+    CHECK(!choice_arrow_enabled(true, true, false, 3, 3, 1));
+    CHECK(!choice_arrow_enabled(true, true, true, 1, 3, -1));
+    CHECK(!choice_arrow_enabled(true, false, false, 1, 3, 1));
+    CHECK(!choice_arrow_enabled(false, true, false, 1, 3, 1));
+    CHECK(qol::features::core_ui::settings_model::choice_label_width() == 100);
+}
+
+void test_choice_catalog_metadata_is_preserved_and_validated() {
+    using namespace qol::contracts;
+    const FeatureChoiceOption options[]{{"first", "首项"}, {"second", "次项"}};
+    const QolFeatureCatalogItem choice[]{
+        {"mode", 0, FeatureCategory::kGameplay, FeatureType::kChoice,
+         "模式", "模式选项。", nullptr, 0, options, 2},
+    };
+    const QolFeatureCatalogPlugin plugins[]{{"sample", choice, 1, 0}};
+    std::vector<qol::features::core_ui::feature_model::Item> items;
+    CHECK(qol::features::core_ui::feature_model::build(plugins, 1, true, items));
+    CHECK(items.size() == 1 && items[0].type == FeatureType::kChoice);
+    CHECK(items[0].choices == options && items[0].choice_count == 2);
+    CHECK(std::strcmp(items[0].choices[1].value, "second") == 0);
+
+    const QolFeatureCatalogItem missing_options[]{
+        {"mode", 0, FeatureCategory::kGameplay, FeatureType::kChoice,
+         "模式", "", nullptr, 0, nullptr, 1},
+    };
+    const QolFeatureCatalogPlugin malformed[]{{"sample", missing_options, 1, 0}};
+    CHECK(!qol::features::core_ui::feature_model::build(malformed, 1, true, items));
+    CHECK(items.empty());
+    const FeatureChoiceOption empty_value[]{{"", "无效"}};
+    const QolFeatureCatalogItem invalid_option[]{
+        {"mode", 0, FeatureCategory::kGameplay, FeatureType::kChoice,
+         "模式", "", nullptr, 0, empty_value, 1},
+    };
+    const QolFeatureCatalogPlugin invalid[]{{"sample", invalid_option, 1, 0}};
+    CHECK(!qol::features::core_ui::feature_model::build(invalid, 1, true, items));
 }
 
 void test_toggle_enable_state_machine() {
@@ -403,6 +458,8 @@ int main() {
     test_hidden_catalog_items_follow_build_visibility();
     test_display_priority_and_registered_categories();
     test_toggle_target();
+    test_choice_positions_and_non_cyclic_navigation();
+    test_choice_catalog_metadata_is_preserved_and_validated();
     test_toggle_enable_state_machine();
     test_entry_enable_state();
     test_owner_availability_mapping_and_scope();

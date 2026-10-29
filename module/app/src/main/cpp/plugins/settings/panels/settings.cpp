@@ -40,6 +40,12 @@ constexpr size_t kFeatureControlReadActualSize =
 constexpr size_t kFeatureControlOwnerAvailabilitySize =
     offsetof(contracts::QolFeatureControlApi, read_owner_availability) +
     sizeof(((contracts::QolFeatureControlApi*)nullptr)->read_owner_availability);
+constexpr size_t kFeatureControlChoiceSize =
+    offsetof(contracts::QolFeatureControlApi, request_set_choice) +
+    sizeof(((contracts::QolFeatureControlApi*)nullptr)->request_set_choice);
+constexpr size_t kArrowComponentsSize =
+    offsetof(contracts::QolUiComponents, arrow_button_draw) +
+    sizeof(((contracts::QolUiComponents*)nullptr)->arrow_button_draw);
 // Android CMake Debug omits NDEBUG; optimized configurations define it.
 #if defined(NDEBUG)
 constexpr bool kShowHidden = false;
@@ -81,10 +87,16 @@ struct ItemState {
     uint64_t request_id = 0;
     bool gesture = false;
     int32_t desired = 0;
-    QolUiHandle toggle = nullptr, action = nullptr;
+    uint32_t choice_position = UINT32_MAX;
+    uint32_t choice_target = UINT32_MAX;
+    QolUiHandle toggle = nullptr, action = nullptr, choice_left = nullptr, choice_right = nullptr;
     char message[128]{};
 };
 std::vector<ItemState> g_states;
+struct ChoiceContext { uint32_t item_index; uint64_t generation; int32_t delta; };
+std::vector<ChoiceContext> g_choice_contexts;
+int g_pending_choice_item = -1;
+int32_t g_pending_choice_delta = 0;
 struct EntryContinuation {
     bool active = false;
     std::string plugin_id;
@@ -191,11 +203,59 @@ void sync_controls(uint32_t i) {
     if (s.action != nullptr && !contracts::succeeded(
             g_components->text_button_set_enabled(s.action, action_enabled(i))))
         set_status("入口按钮状态更新失败");
+    if (s.choice_left != nullptr && g_components->arrow_button_set_enabled != nullptr) {
+        const bool pending = s.request_id != 0 || g_pending_choice_item == static_cast<int>(i);
+        (void)g_components->arrow_button_set_enabled(s.choice_left,
+            settings_model::choice_arrow_enabled(s.valid, owner_available(i), pending,
+                s.choice_position, g_items[i].choice_count, -1));
+        (void)g_components->arrow_button_set_enabled(s.choice_right,
+            settings_model::choice_arrow_enabled(s.valid, owner_available(i), pending,
+                s.choice_position, g_items[i].choice_count, 1));
+    }
+}
+bool choice_api_available() {
+    return g_control != nullptr && g_control->struct_size >= kFeatureControlChoiceSize &&
+        g_control->read_choice != nullptr && g_control->request_set_choice != nullptr;
+}
+const char* choice_label(uint32_t i) {
+    const auto& item = g_items[i];
+    const auto position = g_states[i].choice_position;
+    if (position == UINT32_MAX) return "未知选项";
+    return position == 0 ? "关闭" : item.choices[position - 1].label;
 }
 void refresh_item_value(uint32_t i) {
     auto& s = g_states[i];
     const auto& item = g_items[i];
     if (g_control == nullptr) { s.valid = false; return; }
+    if (item.type == FeatureType::kChoice) {
+        if (s.request_id != 0 || s.gesture || !choice_api_available()) {
+            s.valid = false;
+            s.choice_position = UINT32_MAX;
+            sync_controls(i);
+            return;
+        }
+        char value[1024]{};
+        uint32_t size = 0;
+        const auto result = g_control->read_choice(g_control->context, item.plugin_id,
+            item.feature_id, value, sizeof(value), &size);
+        if (!contracts::succeeded(result) || size > sizeof(value)) {
+            s.valid = false;
+            s.choice_position = UINT32_MAX;
+        } else {
+            const std::string selected(value, size);
+            std::vector<const char*> values;
+            values.reserve(item.choice_count);
+            for (uint32_t n = 0; n < item.choice_count; ++n)
+                values.push_back(item.choices[n].value);
+            const auto position = selected.find('\0') != std::string::npos ? UINT32_MAX :
+                settings_model::choice_position(selected.c_str(), values.data(),
+                    static_cast<uint32_t>(values.size()));
+            s.valid = position != UINT32_MAX;
+            s.choice_position = position;
+        }
+        sync_controls(i);
+        return;
+    }
     if (s.request_id == 0 && !s.gesture) {
         uint8_t value = 0;
         s.valid = contracts::succeeded(g_control->read_feature(
@@ -210,9 +270,11 @@ void refresh_all_values() {
 bool load_catalog() {
     clear_entry_continuation();
     g_items.clear(); g_categories.clear(); g_states.clear(); g_contexts.clear();
+    g_choice_contexts.clear();
     g_owner_availability.clear();
     ++g_generation;
     g_pending_action_item = -1;
+    g_pending_choice_item = -1;
     const contracts::QolFeatureCatalogPlugin* plugins = nullptr;
     uint32_t count = 0;
     const contracts::FeatureCategoryDefinition* categories = nullptr;
@@ -265,14 +327,25 @@ void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected
     const auto title = settings_model::truncate_text(item.label, text_width);
     if (!title.lines.empty()) (void)g_components->draw_control_text(row, title.lines[0].c_str(),
         16, layout.title_y, !owner_available(i) ? contracts::ui_theme::kError :
-        toggle_enabled(i) ? contracts::ui_theme::kTextGold :
-        contracts::ui_theme::kTextDisabled, 0, 1);
+        (item.type == FeatureType::kChoice ? (s.valid ? contracts::ui_theme::kTextGold :
+            contracts::ui_theme::kError) : toggle_enabled(i) ? contracts::ui_theme::kTextGold :
+        contracts::ui_theme::kTextDisabled), 0, 1);
     const auto description = settings_model::truncate_text(displayed_description(i), text_width);
     if (!description.lines.empty()) (void)g_components->draw_control_text(row,
         description.lines[0].c_str(), 16, layout.description_y,
         owner_available(i) ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kTextDisabled, 0, 1);
     if (s.toggle != nullptr) (void)g_components->native_toggle_draw(s.toggle);
     if (s.action != nullptr) (void)g_components->text_button_draw(s.action);
+    if (item.type == FeatureType::kChoice) {
+        if (s.choice_left != nullptr) (void)g_components->arrow_button_draw(s.choice_left);
+        if (s.choice_right != nullptr) (void)g_components->arrow_button_draw(s.choice_right);
+        const auto label = settings_model::truncate_text(choice_label(i),
+            settings_model::choice_label_width());
+        if (!label.lines.empty()) (void)g_components->draw_control_text(row, label.lines[0].c_str(),
+            control_left + settings_model::kToggleWidth / 2,
+            settings_model::toggle_top(kRightRowH) + 27,
+            s.valid ? contracts::ui_theme::kTextNormal : contracts::ui_theme::kError, 2, 1);
+    }
 }
 void on_left_select(void*, uint32_t i) { g_pending_category = static_cast<int>(i); }
 void native_toggle_changed(void* user, int32_t desired) {
@@ -295,6 +368,22 @@ void action_button_clicked(void* user) {
         !action_enabled(context->item_index)) return;
     g_pending_action_item = static_cast<int>(context->item_index);
     sync_controls(context->item_index);
+}
+void choice_arrow_clicked(void* user) {
+    const auto* context = static_cast<const ChoiceContext*>(user);
+    if (!g_panel_active || context == nullptr || context->generation != g_generation ||
+        context->item_index >= g_items.size() || g_pending_choice_item >= 0) return;
+    const auto i = context->item_index;
+    refresh_owner_availability(i);
+    if (g_items[i].type != FeatureType::kChoice || !choice_api_available() ||
+        !g_states[i].valid || !owner_available(i) || g_states[i].request_id != 0) return;
+    const uint32_t next = settings_model::choice_next_position(g_states[i].choice_position,
+        g_items[i].choice_count, context->delta);
+    if (next == g_states[i].choice_position) return;
+    g_pending_choice_item = static_cast<int>(i);
+    g_pending_choice_delta = context->delta;
+    g_states[i].choice_target = next;
+    sync_controls(i);
 }
 const char* series_display_name(const char* series) {
     if (series == nullptr) return "未知版本";
@@ -352,7 +441,9 @@ void refresh_game_info() {
     g_game_info.platform += sizeof(void*) == 8 ? " 64位" : " 32位";
 }
 void destroy_right_list() {
-    for (auto& s : g_states) { s.toggle = nullptr; s.action = nullptr; }
+    for (auto& s : g_states) {
+        s.toggle = nullptr; s.action = nullptr; s.choice_left = nullptr; s.choice_right = nullptr;
+    }
     if (g_right != nullptr && g_components != nullptr) (void)g_components->destroy(g_right);
     g_right = nullptr; g_right_indices.clear();
     g_selected_is_game_info = false;
@@ -374,6 +465,7 @@ bool build_right_list(int category) {
     if (!contracts::succeeded(g_components->scroll_list_set_selection_enabled(g_right, 0))) {
         destroy_right_list(); return false;
     }
+    g_choice_contexts.resize(g_items.size() * 2);
     for (uint32_t row = 0; row < g_right_indices.size(); ++row) {
         const auto i = g_right_indices[row];
         QolUiHandle handle = nullptr;
@@ -389,6 +481,24 @@ bool build_right_list(int category) {
                 &action_button_clicked, &g_contexts[i]};
             if (!contracts::succeeded(g_components->capsule_text_button_create(&button, handle,
                 &g_states[i].action))) { destroy_right_list(); return false; }
+        } else if (g_items[i].type == FeatureType::kChoice) {
+            const int32_t choice_left = control_left + settings_model::kChoiceArrowWidth;
+            const contracts::UiArrowButtonDesc left{{control_left, control_top,
+                settings_model::kChoiceArrowWidth, settings_model::kToggleHeight},
+                contracts::kUiArrowLeft, 0, &choice_arrow_clicked,
+                &g_choice_contexts[static_cast<size_t>(i) * 2]};
+            const contracts::UiArrowButtonDesc right{{choice_left + settings_model::kChoiceLabelWidth,
+                control_top, settings_model::kChoiceArrowWidth, settings_model::kToggleHeight},
+                contracts::kUiArrowRight, 0, &choice_arrow_clicked,
+                &g_choice_contexts[static_cast<size_t>(i) * 2 + 1]};
+            g_choice_contexts[static_cast<size_t>(i) * 2] = {i, g_generation, -1};
+            g_choice_contexts[static_cast<size_t>(i) * 2 + 1] = {i, g_generation, 1};
+            if (!contracts::succeeded(g_components->arrow_button_create(&left, handle,
+                    &g_states[i].choice_left)) ||
+                !contracts::succeeded(g_components->arrow_button_create(&right, handle,
+                    &g_states[i].choice_right))) {
+                destroy_right_list(); return false;
+            }
         } else {
             const contracts::UiNativeToggleDesc toggle{{control_left, control_top,
                 settings_model::kToggleWidth, settings_model::kToggleHeight}, g_states[i].confirmed,
@@ -406,6 +516,7 @@ void destroy_page() {
     clear_entry_continuation();
     ++g_generation;
     g_pending_category = -1; g_pending_action_item = -1;
+    g_pending_choice_item = -1;
     destroy_right_list();
     if (g_components != nullptr) {
         if (g_left != nullptr) (void)g_components->destroy(g_left);
@@ -414,7 +525,7 @@ void destroy_page() {
     if (g_ui != nullptr && g_root != nullptr) (void)g_ui->delete_control(g_root);
     g_root = nullptr; g_left = nullptr; g_back = nullptr; g_pressed_list = nullptr;
     g_back_pressed = false; g_selected_category = 0;
-    g_states.clear(); g_contexts.clear(); g_items.clear(); g_categories.clear();
+    g_states.clear(); g_contexts.clear(); g_choice_contexts.clear(); g_items.clear(); g_categories.clear();
     g_owner_availability.clear();
     g_frame = 0; set_status("");
 }
@@ -444,6 +555,33 @@ void poll_requests() {
     for (uint32_t i = 0; i < g_items.size(); ++i) {
         auto& s = g_states[i];
         if (s.request_id == 0) continue;
+        if (g_items[i].type == FeatureType::kChoice) {
+            contracts::FeatureReceipt receipt{};
+            const auto result = g_control->receipt(g_control->context, s.request_id, &receipt);
+            if (!contracts::succeeded(result)) {
+                s.request_id = 0;
+                s.choice_target = UINT32_MAX;
+                item_error(i, "保存状态未知，请核对当前选项");
+            } else if (receipt.persistence == contracts::FeaturePersistence::kPending) {
+                continue;
+            } else if (receipt.persistence != contracts::FeaturePersistence::kPersisted ||
+                       receipt.admission != contracts::FeatureAdmission::kAdmitted) {
+                s.request_id = 0;
+                s.choice_target = UINT32_MAX;
+                item_error(i, "保存失败，选项未更改");
+            } else {
+                const uint32_t target = s.choice_target;
+                s.request_id = 0;
+                s.choice_target = UINT32_MAX;
+                refresh_item_value(i);
+                if (!s.valid || s.choice_position != target)
+                    item_error(i, "保存状态未知，请核对当前选项");
+                else
+                    std::snprintf(s.message, sizeof(s.message), "已保存");
+            }
+            sync_controls(i);
+            continue;
+        }
         contracts::FeatureReceipt receipt{};
         const auto result = g_control->receipt(g_control->context, s.request_id, &receipt);
         if (!contracts::succeeded(result)) {
@@ -459,6 +597,42 @@ void poll_requests() {
         // Receipt confirms persistence, not the latest value or lifecycle completion.
         refresh_item_value(i);
     }
+}
+void process_pending_choice() {
+    const int item_index = g_pending_choice_item;
+    if (item_index < 0 || static_cast<size_t>(item_index) >= g_items.size()) return;
+    g_pending_choice_item = -1;
+    const uint32_t i = static_cast<uint32_t>(item_index);
+    auto& state = g_states[i];
+    const auto& item = g_items[i];
+    if (!choice_api_available() || item.type != FeatureType::kChoice || !state.valid ||
+        state.request_id != 0 || !owner_available(i)) {
+        state.choice_target = UINT32_MAX;
+        sync_controls(i);
+        return;
+    }
+    const uint32_t target = settings_model::choice_next_position(state.choice_position,
+        item.choice_count, g_pending_choice_delta);
+    if (target == state.choice_position) {
+        state.choice_target = UINT32_MAX;
+        sync_controls(i);
+        return;
+    }
+    const char* value = target == 0 ? nullptr : item.choices[target - 1].value;
+    contracts::FeatureReceipt receipt{};
+    const auto result = g_control->request_set_choice(g_control->context, item.plugin_id,
+        item.feature_id, value, &receipt);
+    if (!contracts::succeeded(result) || receipt.admission != contracts::FeatureAdmission::kAdmitted ||
+        receipt.request_id == 0) {
+        state.choice_target = UINT32_MAX;
+        item_error(i, settings_model::request_error_text(!contracts::succeeded(result) ?
+            result.code : receipt.error_code != 0 ? receipt.error_code : kQolErrBlocked));
+    } else {
+        state.request_id = receipt.request_id;
+        state.choice_target = target;
+        std::snprintf(state.message, sizeof(state.message), "保存中…");
+    }
+    sync_controls(i);
 }
 void process_pending_action() {
     const int i = g_pending_action_item; g_pending_action_item = -1;
@@ -662,13 +836,16 @@ void poll_entry_continuation() {
 bool components_complete() {
     constexpr size_t end = offsetof(contracts::QolUiComponents, capsule_text_button_create) +
         sizeof(((contracts::QolUiComponents*)nullptr)->capsule_text_button_create);
-    return g_components != nullptr && g_components->major == 1 && g_components->minor >= 14 &&
-        g_components->size >= end && g_components->capsule_text_button_create &&
+    return g_components != nullptr && g_components->major == 1 && g_components->minor >= 15 &&
+        g_components->size >= end && g_components->size >= kArrowComponentsSize &&
+        g_components->capsule_text_button_create &&
         g_components->scroll_list_create &&
         g_components->scroll_list_get_row && g_components->scroll_list_set_selection_enabled &&
         g_components->scroll_list_process && g_components->scroll_list_draw &&
         g_components->native_toggle_create && g_components->native_toggle_set_value &&
         g_components->native_toggle_set_enabled && g_components->native_toggle_draw &&
+        g_components->arrow_button_create && g_components->arrow_button_set_enabled &&
+        g_components->arrow_button_draw &&
         g_components->text_button_set_enabled &&
         g_components->text_button_draw && g_components->destroy &&
         g_components->draw_control_text && g_components->draw_container_ornamented &&
@@ -715,7 +892,7 @@ void settings_panel_process() {
             g_selected_category = g_pending_category;
         g_pending_category = -1;
     }
-    poll_entry_continuation(); process_pending_action(); poll_requests();
+    poll_entry_continuation(); process_pending_action(); process_pending_choice(); poll_requests();
     if (g_frame % 30 == 0) refresh_all_values();
     process_pending_toggles();
     if (g_left) (void)g_components->scroll_list_process(g_left);

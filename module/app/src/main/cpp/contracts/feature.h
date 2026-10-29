@@ -14,7 +14,7 @@ enum class FeatureCategory : uint8_t {
     kBasicOptimization,
     kGameInfo = 5,  // settings page read-only information category; no feature uses it
 };
-enum class FeatureType : uint8_t { kToggle, kEntry };
+enum class FeatureType : uint8_t { kToggle = 0, kEntry = 1, kChoice = 2 };
 enum class FeatureOwnerAvailability : uint8_t {
     kAvailable = 0,
     kInstallFailed,
@@ -28,8 +28,15 @@ constexpr int8_t kMinFeatureDisplayPriority = -10;
 constexpr int8_t kMaxFeatureDisplayPriority = 10;
 using FeatureToggleCallback = QolResult (*)(PluginContext&, uint8_t enabled);
 using FeatureEntryCallback = QolResult (*)(PluginContext&);
+// A null value selects the closed state; non-null values are stable option identifiers.
+using FeatureChoiceCallback = QolResult (*)(PluginContext&, const char* value);
 
-// Metadata has static lifetime and is never serialized. Both kinds have a boolean state.
+struct FeatureChoiceOption {
+    const char* value;
+    const char* label;
+};
+
+// Metadata has static lifetime and is never serialized. Choice selection has a separate string projection.
 struct FeatureDefinition {
     const char* id;
     uint8_t default_enabled;
@@ -41,6 +48,9 @@ struct FeatureDefinition {
     FeatureEntryCallback on_entry;
     const char* action_label = nullptr;
     int8_t display_priority = 0;
+    const FeatureChoiceOption* choices = nullptr;
+    uint32_t choice_count = 0;
+    FeatureChoiceCallback on_choice = nullptr;
 };
 
 // Category labels and ordering are Host-owned registration metadata, not UI literals.
@@ -80,6 +90,10 @@ struct QolFeatureApi {
     QolResult (*read_desired)(void*, QolOwnerToken, const char*, uint8_t*, uint8_t*);
     QolResult (*request_desired)(void*, QolOwnerToken, const char*, uint8_t, FeatureReceipt*);
     QolResult (*invoke_entry)(void*, QolOwnerToken, const char*, const char*);
+    QolResult (*read_choice)(void*, QolOwnerToken, const char*, const char*, char*, uint32_t,
+                             uint32_t*);
+    QolResult (*request_set_choice)(void*, QolOwnerToken, const char*, const char*, const char*,
+                                    FeatureReceipt*);
 };
 
 }  // namespace qol::contracts

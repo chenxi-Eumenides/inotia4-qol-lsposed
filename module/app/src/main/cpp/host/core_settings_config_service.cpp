@@ -52,11 +52,13 @@ ConfigStoreSeedResult CoreSettingsConfigService::seed_features() {
         if (store_.degraded_read_only()) state_ = CoreSettingsConfigServiceState::kDegradedReadOnly;
         else if (result.result.ok()) state_ = CoreSettingsConfigServiceState::kReady;
         else if (result.memory_committed) state_ = CoreSettingsConfigServiceState::kReadyUnpersisted;
-        if (result.result.ok() && result.durable_commit) {
+        if (result.result.ok() && (result.durable_commit || !feature_projection_published_)) {
+            if (result.durable_commit) ++revision_;
             std::vector<PluginDesiredSnapshot> desired;
             store_.desired_snapshots(&desired);
-            event = enqueue_effect_locked(++revision_, {}, {}, nullptr, {},
+            event = enqueue_effect_locked(revision_, {}, {}, nullptr, {},
                                           desired_observer_, desired_context_, std::move(desired));
+            feature_projection_published_ = true;
         }
     }
     if (event) (void)dispatch_effects(event);
