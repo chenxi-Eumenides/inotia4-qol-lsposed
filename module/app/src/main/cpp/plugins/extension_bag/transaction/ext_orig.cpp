@@ -32,11 +32,24 @@ int32_t native_bag_number(int bag) {
 bool first_empty_extension_slot_locked(int bag, int* out_slot) {
     if (out_slot == nullptr || !virtual_bag::valid_index(bag)) return false;
     const int capacity = ::qol::extension_bag::access::bag().capacities[bag];
+    int occupied = 0;
     for (int slot = 0; slot < capacity; ++slot) {
+        const virtual_bag::Item& descriptor =
+            ::qol::extension_bag::access::bag().items[bag][slot];
+        if (descriptor.category > 0 || descriptor.count > 0 || descriptor.payload_size > 0) {
+            ++occupied;
+        }
         if (module_slot_is_assignable_locked(bag, slot)) {
             *out_slot = slot;
             return true;
         }
+    }
+    // "destination full" must be distinguishable from a slot poisoned by stale
+    // object/handle/use state: only the latter has free capacity left.
+    if (occupied < capacity) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "cross move reject original->extension no assignable slot bag=%d capacity=%d occupied=%d",
+                     bag, capacity, occupied);
     }
     return false;
 }
@@ -61,7 +74,7 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
             ::qol::extension_bag::access::host().item_facts->item_ref_at(src_bag, src_slot,
                                                                          &source)) ||
         source.bag != src_bag || source.slot != src_slot || source.item.slot == 0 ||
-        source.item.generation == 0 || source.count <= 0 ||
+        source.item.generation == 0 ||
         (expected_item.slot != 0 &&
          (source.item.slot != expected_item.slot ||
           source.item.generation != expected_item.generation))) {

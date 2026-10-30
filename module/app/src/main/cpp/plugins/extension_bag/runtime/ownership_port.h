@@ -34,6 +34,11 @@ struct ModuleUseReleasePlan {
 bool module_slot_of_item_locked(void* item, int* out_bag, int* out_slot);
 bool defer_item_free_locked(void* item);
 void drain_deferred_frees_locked();
+// Drops every pending deferred release without freeing. Used when the item pool is
+// reset (save-slot load, main-menu teardown): queued addresses are no longer valid.
+void clear_deferred_free_queue_locked();
+// Diagnostic count of queued + custody entries (test and status use).
+size_t deferred_free_pending_count_locked();
 int32_t extension_bag_deferred_free_tick(int64_t frame, void* ctx);
 void log_ownership_audit_locked(const char* context);
 bool object_touch_window_active_locked();

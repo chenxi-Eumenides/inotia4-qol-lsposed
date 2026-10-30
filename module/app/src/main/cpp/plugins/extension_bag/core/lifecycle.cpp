@@ -11,6 +11,7 @@
 #include "plugins/extension_bag/core/drop_routing.h"
 #include "plugins/extension_bag/transaction/transaction.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
+#include "plugins/extension_bag/runtime/ownership_port.h"
 
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/model/main_menu_cleanup_edge.h"
@@ -641,6 +642,10 @@ bool prepare_main_menu_locked() {
         QOL_LOG_WARN(QolDomain::kExtensionBag, "prepare main-menu blocked by active module object");
         return false;
     }
+    // The pool is recycled when the next save is loaded; free what is safe now, then
+    // drop the rest so queued addresses cannot outlive the menu transition.
+    drain_deferred_frees_locked();
+    clear_deferred_free_queue_locked();
     runtime_state().objects.bag = {};
     runtime_state().persistence.loaded_slot = -2;
     runtime_state().persistence.dirty = false;

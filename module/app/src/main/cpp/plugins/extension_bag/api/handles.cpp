@@ -65,6 +65,15 @@ bool extension_bag_invalidate_game_item_handle(void* item) {
            qol::contracts::kQolItemHandleStatusOk;
 }
 
+bool extension_bag_item_owned_by_game(void* item) {
+    const auto* api = item_handle_api();
+    if (item == nullptr || api == nullptr || api->lookup_item == nullptr) return false;
+    qol::contracts::QolItemHandle handle{};
+    uint32_t owner = 0;
+    return api->lookup_item(item, &handle, &owner) == qol::contracts::kQolItemHandleStatusOk &&
+           owner == qol::contracts::kQolItemHandleOwnerGame;
+}
+
 bool extension_bag_rebind_item_handle(void* item) {
     const auto* api = item_handle_api();
     if (item == nullptr || api == nullptr) return false;

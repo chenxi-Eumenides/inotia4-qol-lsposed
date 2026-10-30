@@ -11,6 +11,7 @@
 void extension_bag_mark_dirty_locked();
 uint64_t extension_bag_item_revision_locked();
 bool extension_bag_invalidate_game_item_handle(void* item);
+bool extension_bag_item_owned_by_game(void* item);
 bool original_inventory_contains_cached_locked(void* item);
 uint64_t extension_bag_ui_isolation_now_ms_locked();
 JNIEnv* current_env();

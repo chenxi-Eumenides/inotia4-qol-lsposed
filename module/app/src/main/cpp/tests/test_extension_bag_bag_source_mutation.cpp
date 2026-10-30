@@ -400,6 +400,13 @@ bool extension_bag_private_item_for_handle(qol::contracts::QolItemHandle handle,
 
 bool extension_bag_rebind_item_handle(void* item) { return item != nullptr; }
 
+static bool g_game_owned_item = false;
+
+bool extension_bag_item_owned_by_game(void* item) {
+    (void)item;
+    return g_game_owned_item;
+}
+
 void extension_bag_invalidate_item_handle(void* item) {
     if (item == g_handle_item) g_handle_item = nullptr;
 }
@@ -550,10 +557,25 @@ void log_exit_trace_locked(const char* phase, uint64_t event, uint64_t param,
     (void)y;
 }
 
+void test_deferred_free_skips_game_owned_and_clears_on_load() {
+    int dummy = 0;
+    clear_deferred_free_queue_locked();
+    const size_t before = deferred_free_pending_count_locked();
+    g_game_owned_item = true;
+    CHECK(defer_item_free_locked(&dummy));
+    CHECK(deferred_free_pending_count_locked() == before);
+    g_game_owned_item = false;
+    CHECK(defer_item_free_locked(&dummy));
+    CHECK(deferred_free_pending_count_locked() == before + 1);
+    clear_deferred_free_queue_locked();
+    CHECK(deferred_free_pending_count_locked() == 0);
+}
+
 int main() {
     test_free_rejection_preserves_slot_and_active_use_custody();
     test_materialize_rejection_restores_empty_descriptor_and_handle_state();
     test_partial_remove_acceptance_rejection_restores_original_state();
+    test_deferred_free_skips_game_owned_and_clears_on_load();
     std::printf("extension_bag_bag_source_mutation: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

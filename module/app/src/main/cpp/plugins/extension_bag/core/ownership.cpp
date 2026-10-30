@@ -148,6 +148,13 @@ bool enqueue_deferred_item_free_locked(void* item, uint32_t handle, uint64_t gen
 }  // namespace
 
 bool defer_item_free_locked(void* item) {
+    if (item == nullptr) return false;
+    // A game-owned object must never enter the deferred free queue: the address is live
+    // inventory and the free port rejects it, which previously retried forever.
+    if (extension_bag_item_owned_by_game(item)) {
+        VIRTBAG_LOG("deferred free skipped game-owned item=%p", item);
+        return true;
+    }
     uint32_t handle = 0;
     for (int bag = 0; bag < virtual_bag::active_extension_bags(); ++bag) {
         for (int slot = 0; slot < virtual_bag::kSlotCount; ++slot) {
@@ -234,6 +241,14 @@ void drain_deferred_frees_locked() {
     };
     const auto free_entry = [](const DeferredItemFree& entry) {
         if (entry.item == nullptr) return true;
+        // Game-owned means ownership was handed to the inventory; the queue entry is
+        // obsolete. Drop it instead of retrying a free the port will always reject.
+        if (extension_bag_item_owned_by_game(entry.item)) {
+            VIRTBAG_LOG("deferred free dropped game-owned item=%p handle=%u generation=%llu",
+                        entry.item, entry.handle,
+                        static_cast<unsigned long long>(entry.generation));
+            return true;
+        }
         if (extension_free_item(entry.item)) {
             VIRTBAG_LOG_DEBUG("deferred free freed item=%p handle=%u generation=%llu",
                               entry.item, entry.handle,
@@ -277,6 +292,23 @@ void drain_deferred_frees_locked() {
         VIRTBAG_LOG_DEBUG("deferred free retained queue=%zu/%zu custody=%zu/%zu",
                           queue_result.kept, queue_count, custody_result.kept, custody_count);
     }
+}
+
+void clear_deferred_free_queue_locked() {
+    if (g_deferred_free_queue_size != 0 || g_deferred_free_custody_size != 0) {
+        VIRTBAG_LOG("deferred free queue cleared queue=%zu custody=%zu",
+                    g_deferred_free_queue_size, g_deferred_free_custody_size);
+    }
+    g_deferred_free_queue = {};
+    g_deferred_free_queue_head = 0;
+    g_deferred_free_queue_size = 0;
+    g_deferred_free_custody = {};
+    g_deferred_free_custody_size = 0;
+    g_deferred_free_pending.store(false, std::memory_order_release);
+}
+
+size_t deferred_free_pending_count_locked() {
+    return g_deferred_free_queue_size + g_deferred_free_custody_size;
 }
 
 int32_t extension_bag_deferred_free_tick(int64_t frame, void* ctx) {
@@ -340,6 +372,21 @@ bool retire_custody_item_locked(uint32_t handle, void* item, const char* context
         VIRTBAG_LOG("ownership release refused context=%s invalid_handle=%u item=%p", context,
                     handle, item);
         return false;
+    }
+    // Ownership already moved to the game inventory (bag unequip, rollback re-insert).
+    // Freeing would double-free a live game item, and retrying forever would poison the
+    // deferred queue; drop the ledger entry instead.
+    if (extension_bag_item_owned_by_game(item)) {
+        if (ownership::release(&qol::extension_bag::ui_state().objects.ownership_ledger, handle) !=
+            ownership::Outcome::kOk) {
+            VIRTBAG_LOG_ERROR("ERROR ownership release of game-owned item failed context=%s handle=%u item=%p",
+                              context, handle, item);
+            return false;
+        }
+        VIRTBAG_LOG("ownership release skipped game-owned context=%s handle=%u item=%p", context,
+                    handle, item);
+        log_ownership_audit_locked(context);
+        return true;
     }
 
     const bool touch_window = object_touch_window_active_locked();

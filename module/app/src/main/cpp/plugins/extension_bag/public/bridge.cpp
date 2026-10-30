@@ -132,6 +132,10 @@ bool virtual_bag_prepare_save_slot_load() {
         VIRTBAG_LOG("prepare save-slot load blocked by active module object");
         return false;
     }
+    // The item pool is reset by the load; queued addresses become invalid and may be
+    // reused by the new save. Free what is safe now, then drop the rest.
+    drain_deferred_frees_locked();
+    clear_deferred_free_queue_locked();
     ::qol::extension_bag::access::bag() = {};
     ::qol::extension_bag::access::persistence().loaded_slot = -2;
     disable_extension_tab_buttons_locked();
