@@ -260,7 +260,8 @@ void on_confirm_three_slot() {
             // 三同类档位宝石三合一：mixType 已由结果层推导（原版宝石配方 12..15）。
             // 写 [g_uimix+0x48] 与原版口径费用后全权委托原版 UIMix_StartMix——产物词条
             //（大修定向合成/c18 补掷/原版随机）、扣料、清格、刷新、音效、弹窗按该变体原版行为
-            // 执行，StartMix 自带全套收尾，这里不再 finish。
+            // 执行。StartMix 不还原 [+0x48]，委托端口在返回前恢复本页「合成」记录并重算
+            // stuff/费用，因此这里不需要再 finish；否则面板会停在原版宝石配方，无法继续放料。
             // 委托失败（符号缺失/配方非法）时未进入 StartMix，材料未扣，保留已填格。
             g_startmix_delegate.store(true, std::memory_order_release);
             if (!craft_delegate_start_mix(delegated_mix_type)) {

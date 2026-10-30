@@ -92,6 +92,8 @@ void craft_reset_stuff_item_control();  // UIMix_ResetStuffItemControl（清空�
 // 先经 MIXSYSTEM_GetCost 校验 mixType 合法并把 [g_uimix+0xf8] 重算为该变体原版口径费用
 // （变体自己决定 MinusMoney 与否——免费变体自然扣不到），再调 StartMix。
 // 产物词条、扣料、清格、刷新、弹窗全部按该变体原版行为执行；不返回成败（原版无返回值）。
+// StartMix 不还原 [+0x48]，委托结束后恢复调用前的 mixType 并重算 stuffList/费用——
+// 否则面板会停在原版宝石配方，后续放料按原版校验、无法继续填入其他宝石。
 // 任一前置缺失或配方非法返回 false（此时未进入 StartMix，材料未扣）。
 bool craft_delegate_start_mix(uint32_t mix_type);
 void craft_refresh_inven_items();     // UIMix_RefreshInvenItem（按当前袋号刷新）

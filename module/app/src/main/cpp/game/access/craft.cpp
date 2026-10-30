@@ -179,15 +179,26 @@ void craft_init_mixing_state() {
 }
 
 bool craft_delegate_start_mix(uint32_t mix_type) {
-    if (g_uimix == nullptr || fn_uimix_start_mix == nullptr || fn_get_cost == nullptr) return false;
+    if (g_uimix == nullptr || fn_uimix_start_mix == nullptr || fn_get_cost == nullptr ||
+        fn_uimix_init_mixing_state == nullptr) {
+        return false;
+    }
     // 原版口径费用：MIXSYSTEM_GetCost 读 RECIPEBASE[mixType].b8-9 费用文本经 CAL_Calculate 求值
     //（宝石配方 IsNeedEuip=0，item 不参与）。负值 = 非法配方（超表/坏记录）→ fail-closed 不委托。
     const int64_t cost = fn_get_cost(static_cast<int32_t>(mix_type), nullptr);
     if (cost < 0) return false;
+    // StartMix 全程只读 [+0x48]，成功链末尾的 InitMixingState 也按该 mixType 重算 stuff 与费用，
+    // 本身不还原。若不还原，面板会停在原版宝石配方（12..15）：标题/材料格变回该配方，
+    // 后续放料按原版 CheckMixture 校验，无法继续填入其他宝石。调用前 mixType 是模块
+    // 「合成」注入记录，委托结束后恢复并按其记录重算（StartMix 已按原版配方 Init 过一次）。
+    const uint32_t restore_mix_type = craft_mix_type();
     *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_MIXTYPE) = mix_type;
     *reinterpret_cast<uint64_t*>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_COST) =
         static_cast<uint64_t>(cost);
     fn_uimix_start_mix();
+    *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(g_uimix) + UIMIX_SLOT_MIXTYPE) =
+        restore_mix_type;
+    craft_init_mixing_state();
     return true;
 }
 

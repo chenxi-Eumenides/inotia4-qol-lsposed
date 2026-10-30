@@ -398,6 +398,18 @@ set_target_properties(custom_recipe_table_readiness_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME custom_recipe_table_readiness_tests COMMAND custom_recipe_table_readiness_tests)
 
+# 委托原版 StartMix 的 mixType 恢复：直接编译 game/access/craft.cpp，覆盖委托后恢复
+# 模块「合成」记录并重算 stuff/费用的回归。
+add_executable(craft_delegate_start_mix_tests
+    test_craft_delegate_start_mix.cpp
+    ${CPP_DIR}/game/access/craft.cpp
+)
+target_include_directories(craft_delegate_start_mix_tests PRIVATE ${CPP_DIR} ${JNI_INCLUDE_DIRS})
+target_compile_features(craft_delegate_start_mix_tests PRIVATE cxx_std_17)
+set_target_properties(craft_delegate_start_mix_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME craft_delegate_start_mix_tests COMMAND craft_delegate_start_mix_tests)
+
 add_executable(autosell_rules_tests
     test_autosell_rules.cpp
     ${CPP_DIR}/plugins/autosell/rules.cpp
