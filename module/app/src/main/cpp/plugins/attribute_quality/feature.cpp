@@ -72,7 +72,8 @@ public:
 };
 
 template <typename Call>
-QolResult capture_range(Call&& call, int32_t* out_min, int32_t* out_max) {
+QolResult capture_range(Call&& call, int32_t* out_min, int32_t* out_max,
+                        const int32_t* sampled_value = nullptr) {
     if (out_min == nullptr || out_max == nullptr) return invalid_argument();
     if (t_capture_active) return error_result(kQolErrBusy, "attribute capture busy");
     if (!active() || g_game == nullptr || g_backup_math_get_random == nullptr) return not_ready();
@@ -81,7 +82,40 @@ QolResult capture_range(Call&& call, int32_t* out_min, int32_t* out_max) {
     const QolResult host_result = call();
     if (!contracts::succeeded(host_result)) return host_result;
     if (t_capture_armed) {
-        return error_result(kQolErrNotReady, "attribute range not captured");
+        // C18 变体的 ITEMSYSTEM_GetJewelOptionValue 不再无条件调用 MATH_GetRandom：
+        // 公式（CAL 表达式）求值为正时直接返回数值，捕获计数保持 armed。
+        // 未捕获时改用重复采样推定范围：采样值波动即为随机区间（取 min/max），
+        // 恒定为固定值（范围退化为单点）。快速路径：前 4 次全相同即判定固定值。
+        if (sampled_value == nullptr) {
+            return error_result(kQolErrNotReady, "attribute range not captured");
+        }
+        int32_t sampled_min = *sampled_value;
+        int32_t sampled_max = *sampled_value;
+        constexpr int kProbeEarlyExit = 4;
+        constexpr int kProbeSamples = 32;
+        for (int probe = 1; probe < kProbeSamples; ++probe) {
+            if (probe >= kProbeEarlyExit && sampled_min == sampled_max) break;
+            t_capture_armed = true;
+            t_capture_min = 0;
+            t_capture_max = 0;
+            const QolResult repeat = call();
+            if (!contracts::succeeded(repeat)) return repeat;
+            if (!t_capture_armed) {
+                // 本次求值触发了 MATH_GetRandom：以捕获区间为准（最精确证据）。
+                *out_min = static_cast<int32_t>(t_capture_min);
+                *out_max = static_cast<int32_t>(t_capture_max);
+                t_capture_armed = false;
+                return contracts::ok();
+            }
+            if (*sampled_value < sampled_min) sampled_min = *sampled_value;
+            if (*sampled_value > sampled_max) sampled_max = *sampled_value;
+        }
+        if (sampled_min <= 0) {
+            return error_result(kQolErrNotReady, "attribute range not captured");
+        }
+        *out_min = sampled_min;
+        *out_max = sampled_max;
+        return contracts::ok();
     }
     *out_min = static_cast<int32_t>(t_capture_min);
     *out_max = static_cast<int32_t>(t_capture_max);
@@ -94,7 +128,7 @@ QolResult capture_jewel_range(contracts::QolItemHandle item, int32_t attribute_i
     int32_t value = 0;
     return capture_range(
         [&]() { return g_game->read.attr_range.jewel_value(attribute_id, item, &value); },
-        out_min, out_max);
+        out_min, out_max, &value);
 }
 
 QolResult capture_option_range(contracts::QolItemHandle item, int32_t option_id,
@@ -107,7 +141,7 @@ QolResult capture_option_range(contracts::QolItemHandle item, int32_t option_id,
             return g_game->read.attr_range.option_value(option_id, ability_level, flag, item,
                                                        &value);
         },
-        out_min, out_max);
+        out_min, out_max, &value);
 }
 
 QolResult apply_fixed_option_range(int32_t category, int32_t option_id,
