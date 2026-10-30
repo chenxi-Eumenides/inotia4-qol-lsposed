@@ -31,6 +31,7 @@ QolResult cursor_index(const void* control, int32_t* out_slot);
 QolResult bag_size(int32_t bag, int32_t* out_size);
 QolResult is_empty_bag(int32_t bag, int32_t* out_empty);
 QolResult empty_bag_slot(int32_t* out_slot);
+// 返回原生槽编码字节 0..255（bag<<5 | slot 打包），非单纯的槽号。
 QolResult find_save_slot(const void* item, int32_t* out_slot);
 QolResult current_bag(int32_t* out_bag);
 QolResult set_current_bag(int32_t bag);

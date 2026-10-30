@@ -223,8 +223,10 @@ int fake_is_use(int32_t) { return 1; }
 int fake_save_is_ok() { return 1; }
 int fake_get_bag_size(int bag) { return bag + 4; }
 int fake_is_empty_bag(int) { return 0; }
+// 原生 INVEN_FindSaveSlot 返回非 0 表示找到；输出字节按无符号解码。
+int g_fake_save_slot_byte = 3;
 int fake_find_save_slot(void*, int8_t* out_slot) {
-    if (out_slot != nullptr) *out_slot = 3;
+    if (out_slot != nullptr) *out_slot = static_cast<int8_t>(g_fake_save_slot_byte);
     return 1;
 }
 
@@ -1987,6 +1989,16 @@ int main() {
     assert(inventory_extras_api.read.find_save_slot(reinterpret_cast<void*>(0x1), &value).ok ==
            kQolOk);
     assert(value == 3);
+    // 袋 4 起编码最高位为 1，必须按无符号字节解码，不得判负为“未找到”。
+    g_fake_save_slot_byte = 0x80;
+    assert(inventory_extras_api.read.find_save_slot(reinterpret_cast<void*>(0x1), &value).ok ==
+               kQolOk &&
+           value == 0x80);
+    g_fake_save_slot_byte = 0x60;
+    assert(inventory_extras_api.read.find_save_slot(reinterpret_cast<void*>(0x1), &value).ok ==
+               kQolOk &&
+           value == 0x60);
+    g_fake_save_slot_byte = 3;
     g_inventory_mode = FakeInventoryMode::kNotReady;
     g_inven = nullptr;
     assert(inventory_extras_api.read.for_each_bag_slot(&inventory_callback,

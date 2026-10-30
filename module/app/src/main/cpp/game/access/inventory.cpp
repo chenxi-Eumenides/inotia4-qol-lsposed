@@ -750,8 +750,11 @@ QolResult find_save_slot(const void* item, int32_t* out_slot) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     if (fn_inven_find_save_slot == nullptr) return error_result(kQolErrNotReady, kNotReady);
-    int8_t slot = -1;
-    if (fn_inven_find_save_slot(const_cast<void*>(item), &slot) == 0 || slot < 0) {
+    // 输出字节是 bag<<5 | slot 的打包编码：袋号 4 起最高位为 1（0x80..0x9F），原版调用方
+    // （INVEN_SaveItem、CHAR_UnequipItemToInven）都以 ldrb 无符号解码。因此不能用 int8_t
+    // 判负来区分“未找到”，成功与否只信原生返回值（0=未找到，非 0=找到）。
+    uint8_t slot = 0;
+    if (fn_inven_find_save_slot(const_cast<void*>(item), reinterpret_cast<int8_t*>(&slot)) == 0) {
         return error_result(kQolErrNotFound, kNotFound);
     }
     *out_slot = slot;
