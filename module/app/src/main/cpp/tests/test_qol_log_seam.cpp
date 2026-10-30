@@ -68,7 +68,7 @@ int main() {
     qol_seam_write(0, 3, "/gamesrc/world.cpp", 42, "replan: wait-retry ok dirs=%d", 3);
     CHECK(capture_level == 0);    // QolLogLevel::kDebug
     CHECK(capture_domain == 3);   // QolDomain::kApi
-    CHECK(capture_source == "/gamesrc/world.cpp:42");
+    CHECK(capture_source == "world.cpp:42");
     CHECK(capture_message == "replan: wait-retry ok dirs=3");
 
     // W36：帧节流帧路径（与 QolLogThrottle::due 帧分支等价）。

@@ -9,6 +9,17 @@ namespace {
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 
+// src 只保留 basename：__FILE__ 在 NDK 构建中是绝对路径，96 字节缓冲会把长路径
+// 截成半截文件名，日志因此无法定位调用点。
+const char* log_basename(const char* path) {
+    if (path == nullptr) return "";
+    const char* base = path;
+    for (const char* p = path; *p != '\0'; ++p) {
+        if (*p == '/' || *p == '\\') base = p + 1;
+    }
+    return base;
+}
+
 }
 
 void inventory_log_bind_sdk(const qol::contracts::QolHostSdk* sdk) { g_sdk = sdk; }
@@ -43,7 +54,7 @@ void inventory_log_write(int32_t level, const char* file, int line, const char* 
     const uint32_t length = static_cast<uint32_t>(written) >= qol::contracts::kMessageCap
         ? qol::contracts::kMessageCap
         : static_cast<uint32_t>(written);
-    char source[96]{};
-    std::snprintf(source, sizeof(source), "%s:%d", file, line);
+    char source[160]{};
+    std::snprintf(source, sizeof(source), "%s:%d", log_basename(file), line);
     (void)g_sdk->log.write(level, 5, source, message.data(), length);
 }

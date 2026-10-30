@@ -63,6 +63,17 @@ inline bool qol_seam_due(int64_t* last_frame, int64_t every_frames) {
     return false;
 }
 
+// src 只保留 basename：NDK 构建的 __FILE__ 可能是绝对路径，96 字节缓冲会把长路径
+// 截成半截文件名（例如 ".../cpp/plugins/core.i"），日志因此无法定位调用点。
+inline const char* qol_seam_basename(const char* path) {
+    if (path == nullptr) return "";
+    const char* base = path;
+    for (const char* p = path; *p != '\0'; ++p) {
+        if (*p == '/' || *p == '\\') base = p + 1;
+    }
+    return base;
+}
+
 // 预格式化（printf 语义）后经 SDK 输出；level/domain 序数对齐 infra 枚举
 // （kDebug=0、kApi=3），game 层不得 include infra 枚举。
 inline void qol_seam_write(int32_t level, int32_t domain, const char* file, int line,
@@ -78,8 +89,8 @@ inline void qol_seam_write(int32_t level, int32_t domain, const char* file, int 
     const uint32_t length = static_cast<uint32_t>(written) >= contracts::kMessageCap
                                 ? contracts::kMessageCap
                                 : static_cast<uint32_t>(written);
-    char source[96]{};
-    std::snprintf(source, sizeof(source), "%s:%d", file, line);
+    char source[160]{};
+    std::snprintf(source, sizeof(source), "%s:%d", qol_seam_basename(file), line);
     (void)sdk->log.write(level, domain, source, message, length);
 }
 

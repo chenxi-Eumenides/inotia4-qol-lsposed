@@ -2,6 +2,11 @@
 //
 // 依赖方向：本文件仅依赖 STL；core 不得依赖 feature/bridge。
 // 行格式唯一权威：`<ts> f=<frame> <L> <domain> <src> <msg>`（单空格分隔）。
+//
+// 噪声上限（写入侧强制，调用点无法绕过）：
+// - INFO 每域每帧最多 kQolLogInfoPerFrameCap 行；超出时先输出一行封顶标记，随后丢弃
+//   该域本帧剩余 INFO。DEBUG/WARN/ERROR 不受限（DEBUG 已有全局开关）。
+// - 文件 sink 超过 kQolLogFileCapBytes 时轮转为 `qol.log.1`（只保留一份旧文件）。
 #pragma once
 
 #include <climits>
@@ -19,10 +24,21 @@ enum class QolDomain : uint8_t {
     kSpecialEquip,
 };
 
+// INFO 单帧单域行数上限；超出后只留一行封顶标记。
+constexpr uint32_t kQolLogInfoPerFrameCap = 16;
+// 文件 sink 单文件字节上限；写满后轮转为 `<path>.1`。
+constexpr int64_t kQolLogFileCapBytes = 4 * 1024 * 1024;
+
 const char* qol_domain_token(QolDomain domain);          // 小写 token，见实现表
 QolDomain   qol_domain_from_token(const char* token);    // 未知返回 kPlatform
 
 const char* qol_log_basename(const char* path);          // 取 '\\' 或 '/' 之后部分
+
+// 落盘 src 归一化：只保留最后一个 '/' 或 '\\' 之后的部分。
+// 目的：SDK 转发方可能把 __FILE__ 的绝对构建路径写进 src；绝对路径既泄漏构建机
+// 目录结构，也会在转发方自身的 src 缓冲里被截断成半截文件名而无法定位。
+// 缓冲区不足时按 cap-1 截断并保证 NUL；返回完整所需长度（不含 NUL）。
+int  qol_log_normalize_src(char* out, size_t cap, const char* src);
 
 using QolFrameProvider = int64_t (*)();
 void    qol_log_set_frame_provider(QolFrameProvider fn); // fn=null → frame=-1

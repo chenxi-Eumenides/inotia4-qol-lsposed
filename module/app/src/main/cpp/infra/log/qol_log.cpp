@@ -66,6 +66,8 @@ std::atomic<QolLogHostSink> g_host_sink{nullptr};
 #endif
 std::mutex g_sink_mtx;
 std::once_flag g_sink_once;
+std::string g_sink_path;                 // 受 g_sink_mtx 保护
+int64_t g_sink_bytes = 0;                // 受 g_sink_mtx 保护
 thread_local bool g_in_emit = false;
 
 int64_t now_ms() {
@@ -150,16 +152,90 @@ private:
     size_t len_ = 0;
 };
 
+constexpr size_t kDomainCount = static_cast<size_t>(QolDomain::kSpecialEquip) + 1;
+
+// INFO 单帧单域预算：写入侧强制，避免任何调用点把逐对象/逐帧明细写成 INFO 后刷爆文件。
+struct InfoFrameBudget {
+    std::atomic<int64_t> frame{-1};
+    std::atomic<uint32_t> used{0};
+};
+
+InfoFrameBudget g_info_budget[kDomainCount];
+
+enum class InfoBudgetVerdict { kAllow, kCapMarker, kDrop };
+
+// 帧号未就绪（启动早期、帧源安装前）不限流：该阶段日志量由初始化次数决定。
+InfoBudgetVerdict info_budget_take(QolDomain domain, int64_t frame) {
+    if (frame < 0) return InfoBudgetVerdict::kAllow;
+    const size_t index = static_cast<size_t>(domain);
+    if (index >= kDomainCount) return InfoBudgetVerdict::kAllow;
+    InfoFrameBudget& budget = g_info_budget[index];
+    if (budget.frame.load(std::memory_order_relaxed) != frame) {
+        budget.frame.store(frame, std::memory_order_relaxed);
+        budget.used.store(0, std::memory_order_relaxed);
+    }
+    const uint32_t used = budget.used.fetch_add(1, std::memory_order_relaxed);
+    if (used < kQolLogInfoPerFrameCap) return InfoBudgetVerdict::kAllow;
+    // 首次超限留一行标记，让读者知道本帧后续 INFO 被丢弃以及丢弃的是哪个域。
+    if (used == kQolLogInfoPerFrameCap) return InfoBudgetVerdict::kCapMarker;
+    return InfoBudgetVerdict::kDrop;
+}
+
+#if defined(__ANDROID__)
+// 单文件写满后轮转为 `<path>.1`，只保留一份旧文件。调用方必须持有 g_sink_mtx。
+void rotate_locked(int* out_fd) {
+    const int fd = g_sink_fd.load(std::memory_order_acquire);
+    if (fd >= 0) close(fd);
+    const std::string rotated = g_sink_path + ".1";
+    (void)::unlink(rotated.c_str());
+    (void)::rename(g_sink_path.c_str(), rotated.c_str());
+    int reopened = ::open(g_sink_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    g_sink_bytes = 0;
+    g_sink_fd.store(reopened, std::memory_order_release);
+    *out_fd = reopened;
+    if (reopened < 0) return;
+    char ts[32];
+    qol_log_format_ts(ts, sizeof(ts), now_ms());
+    char banner[96];
+    const int banner_len = std::snprintf(banner, sizeof(banner),
+                                         "=== Inotia4Qol log start %s ===\n", ts);
+    if (banner_len > 0) {
+        const ssize_t ignored = write(reopened, banner, static_cast<size_t>(banner_len));
+        (void)ignored;
+        g_sink_bytes += banner_len;
+    }
+}
+#endif
+
 void emit_line(QolLogLevel level, QolDomain domain, const char* src, const char* msg) {
     if (g_in_emit) return;  // 递归门禁：格式化/日志后端重入直接返回
     g_in_emit = true;
+
+    const int64_t frame = qol_log_current_frame();
+    const char* out_msg = msg;
+    char cap_msg[128];
+    if (level == QolLogLevel::kInfo) {
+        const InfoBudgetVerdict verdict = info_budget_take(domain, frame);
+        if (verdict == InfoBudgetVerdict::kDrop) {
+            g_in_emit = false;
+            return;
+        }
+        if (verdict == InfoBudgetVerdict::kCapMarker) {
+            // 保留越限调用点的 src：封顶标记指向真正刷屏的位置，而不是日志实现自己。
+            std::snprintf(cap_msg, sizeof(cap_msg),
+                          "log INFO cap reached domain=%s frame=%lld limit=%u",
+                          qol_domain_token(domain), static_cast<long long>(frame),
+                          static_cast<unsigned>(kQolLogInfoPerFrameCap));
+            out_msg = cap_msg;
+        }
+    }
 
     char ts[32];
     qol_log_format_ts(ts, sizeof(ts), now_ms());
 
     char line[5120];
-    const int required = qol_log_format(line, sizeof(line), ts, qol_log_current_frame(),
-                                        level, domain, src, msg);
+    const int required = qol_log_format(line, sizeof(line), ts, frame,
+                                        level, domain, src, out_msg);
     (void)required;  // host 无文件 sink 时不使用返回值
 
     __android_log_print(level_priority(level), kTag, "%s", line);
@@ -171,14 +247,20 @@ void emit_line(QolLogLevel level, QolDomain domain, const char* src, const char*
 #if defined(__ANDROID__)
     const size_t len = required > 0 ? static_cast<size_t>(required) : 0;
     const size_t stored = len < sizeof(line) ? len : sizeof(line) - 1;
-    const int fd = g_sink_fd.load(std::memory_order_acquire);
-    if (fd >= 0) {
+    {
         std::lock_guard<std::mutex> lock(g_sink_mtx);
-        // 单写者：line + '\n' 在同一临界区内落盘。
-        if (write(fd, line, stored) >= 0) {
-            const char newline = '\n';
-            const ssize_t ignored = write(fd, &newline, 1);
-            (void)ignored;
+        int fd = g_sink_fd.load(std::memory_order_acquire);
+        if (fd >= 0 && g_sink_bytes + static_cast<int64_t>(stored) + 1 > kQolLogFileCapBytes) {
+            rotate_locked(&fd);
+        }
+        if (fd >= 0) {
+            // 单写者：line + '\n' 在同一临界区内落盘。
+            if (write(fd, line, stored) >= 0) {
+                const char newline = '\n';
+                const ssize_t ignored = write(fd, &newline, 1);
+                (void)ignored;
+                g_sink_bytes += static_cast<int64_t>(stored) + 1;
+            }
         }
     }
 #endif
@@ -210,6 +292,16 @@ const char* qol_log_basename(const char* path) {
         if (*p == '/' || *p == '\\') base = p + 1;
     }
     return base;
+}
+
+int qol_log_normalize_src(char* out, size_t cap, const char* src) {
+    if (out == nullptr || cap == 0) return 0;
+    const char* base = qol_log_basename(src);
+    const size_t len = std::strlen(base);
+    const size_t keep = len < cap ? len : cap - 1;
+    std::memcpy(out, base, keep);
+    out[keep] = '\0';
+    return static_cast<int>(len);
 }
 
 void qol_log_set_frame_provider(QolFrameProvider fn) {
@@ -257,6 +349,7 @@ void qol_log_init() {
                            ? open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644)
                            : -1;
         if (fd < 0) return;
+        g_sink_path = path;
         g_sink_fd.store(fd, std::memory_order_release);
 
         char ts[32];
@@ -267,6 +360,7 @@ void qol_log_init() {
         if (banner_len > 0) {
             const ssize_t ignored = write(fd, banner, static_cast<size_t>(banner_len));
             (void)ignored;
+            g_sink_bytes += banner_len;
         }
     });
 #else
@@ -339,7 +433,11 @@ void qol_log_write_kotlin(QolLogLevel level, QolDomain domain, const char* src, 
     // 与 QOL_LOG_DEBUG 宏保持同一门控：debug 关闭时在格式化前短路，
     // 避免 Kotlin backlog 重放把 D 级条目落盘/上 logcat（零开销语义）。
     if (level == QolLogLevel::kDebug && !qol_log_debug_enabled()) return;
-    emit_line(level, domain, src == nullptr ? "" : src, msg == nullptr ? "" : msg);
+    // src 是唯一权威的定位信息：SDK 转发方可能传入 __FILE__ 绝对路径，
+    // 落盘前统一压成 basename，避免泄漏构建机路径与出现半截文件名。
+    char source[160];
+    qol_log_normalize_src(source, sizeof(source), src);
+    emit_line(level, domain, source, msg == nullptr ? "" : msg);
 }
 
 bool QolLogThrottle::due(int64_t every_frames) {
