@@ -200,8 +200,8 @@ Kotlin postAndAwait
 
 1. 主菜单门禁（`world.facts.state==4`，失败回退 `current_slot`）。
 2. 按内部 checksum 定位 bundle；校验 payload checksum、`module_state`。
-3. 先读取当前 `game_identity` 并判定目标 C18 文件族：备份带 C18 image 时按目标布局转换；旧备份（v1-v3）没有 image 时按目标布局生成空背包镜像（record 全零，扩展背包为空）后继续导入；带 image 的备份不能导入到不支持 native bag 的目标。门禁在 dat/sidecar 写入前执行；未知 C18 版本 fail-closed。
-4. 取目标槽 lease；预加密 dat / wh4（补目标槽、重算 wh4 `+0x38`、往返自检），并按目标 C18 版本构造唯一活动 per-slot 文件。
+3. 读取当前 `game_identity` 判定目标 C18 文件族：目标是 C18 且布局已知时，带 C18 image 的备份按目标布局转换；旧备份（v1-v3）没有 image 时生成空背包镜像（record 全零，扩展背包为空）。目标不是 C18、身份不可读或 C18 版本布局未知时，跳过 C18 数据（不写 C18 文件，目标已有 C18 文件保持原字节）并继续导入。变体/版本差异本身不导致导入失败；C18 转换或写盘失败仍按事务回滚报错。
+4. 取目标槽 lease；预加密 dat；仅当目标 `warehouse_companion_file_state == available`（monster 仓库能力）时预加密 wh4（补目标槽、重算 wh4 `+0x38`、往返自检），否则跳过 wh4 并记日志。C18 目标按已知布局构造唯一活动 per-slot 文件。
 5. 目标槽现存 dat/sidecar/C18 活动文件复制或快照到 `.rollback/`。
 6. 原子写 dat → sidecar → wh4 → C18 活动文件；失败按逆序回滚，C18 回滚记录包含原文件存在状态与原字节。
 7. 成功后清理回滚副本；`save_mark_stale()`；返回 `BackupMeta`。
@@ -212,7 +212,7 @@ Kotlin postAndAwait
 - 两族使用相同 `C18BAG01` magic、20-byte header 和记录 schema；header count 是一致性字段，loader 的循环数由目标版本代码固定，不由 header count 决定，因此必须写完整目标数量记录。
 - 导入旧目标时，96 条源记录后补 96 条全零；导入新目标时，192 条源记录只取前 96 条，尾部直接丢弃且不另存。bundle 源 image 不变；导入只覆盖目标版本活动文件，不写 shared fallback，也不写另一族副本。
 - 历史 v514/v520→v586 未发现 `bagN`→`whN` 游戏迁移；此备份行为是用户确认的单 image 规范化策略，不表示游戏本身会迁移。
-- `data_dir/C18Lbag.dat` 只作为 primary 缺失时的只读 shared fallback，fallback header 可为 96 或 192 条；导入时 materialize 到目标版本 per-slot primary。导出时 primary 与 shared 都不存在则 fail-closed；导入旧备份（bundle 无 image）时按目标布局生成空 image（全零记录），扩展背包为空。
+- `data_dir/C18Lbag.dat` 只作为 primary 缺失时的只读 shared fallback，fallback header 可为 96 或 192 条；导入时 materialize 到目标版本 per-slot primary。目标不是 C18 或布局未知时整段跳过，不写任何 C18 文件；目标已有文件保持原字节。导出时 primary 与 shared 都不存在则 fail-closed；导入旧备份（bundle 无 image）时按目标布局生成空 image（全零记录），扩展背包为空。
 
 ### 6.3 删除
 
@@ -273,24 +273,26 @@ Kotlin postAndAwait
 | `backup name collision` | `_1.._99` 用尽 |
 | `warehouse read failed` / `warehouse file too large` / `warehouse limit exceeded` | wh4 收集/容量失败 |
 | `load failed` | 明文读取失败 |
-| `game identity unavailable` / `C18 game version unsupported` | 运行时身份不可读或未知 C18 候选版本 |
+| `game identity unavailable` / `C18 game version unsupported` | 导出时运行时身份不可读或未知 C18 候选版本（导入时改为跳过 C18 数据，不报错） |
 | `C18 data directory unavailable` | C18 活动文件无法从 Native init 的动态 `data_dir` 定位 |
 | `C18 bag file not found` / `C18 bag file unreadable or corrupt` | C18 primary 与 shared fallback 均不可用，或文件 header/count/长度不符合证据 |
-| `C18 bag image unsupported on target` | 带 C18 image 的备份导入到不支持 native bag 的目标 |
 | `C18 bag image invalid` / `C18 bag file write failed` | normalized image 转换失败或活动 per-slot 文件写入失败 |
 | `command unavailable` | typed command 未注册/post 失败 |
 | `ticket unavailable` / `ticket timeout` | Kotlin 票据回取失败/超时 |
+
+目标变体不支持的 C18 image 与 wh4 属于跳过项，不是错误：导入仍成功返回 `BackupMeta`，只写日志说明跳过原因；目标槽已有对应文件保持原字节。
 
 L4 用 `Outcome<T>`/`BackupError`；`api/json_codec` 负责映射到上述文案与 HTTP 形状。
 
 ## 9. 测试与验收
 
-当前基线（2026-10-25；C18 扩展待 orchestrator 复验）：
+当前基线（2026-10-30；含跨版本导入降级）：
 
-- `save_backup_gate_tests`：**304 passed / 0 failed**（含 L6 typed command payload/票据 ACK 契约）。
+- `save_backup_gate_tests`：**401 passed / 0 failed**（含 L6 typed command payload/票据 ACK 契约、跨版本变体数据跳过 5 用例）。
 - `host_tests`：**2791 passed / 0 failed**。
+- `save_warehouse_validate_tests`：**252 passed / 0 failed**；`save_backup_rollback_tests` 通过。
 - `check_arch`：layers/offsets/jni/resources 全绿；`check_jni` 0 违规；`git diff --check` 通过。
-- Android Debug：`scripts/build-debug.sh` 成功。
+- Android Debug：`scripts/build-debug.sh` 成功（2026-10-30，APK `output/inotia4_qol_lsposed_debug_2610301929_03df5527425a.apk`）。
 
 **禁止真机验证**：当前策略要求多代理不得同时使用一台真机；本文不把真机证据作为本次重构的完成条件。后续如获授权，按以下清单复跑：
 

@@ -66,10 +66,19 @@ QolResult fake_game_identity(QolGameIdentity* out) {
     return contracts::ok();
 }
 
+int32_t g_test_warehouse_state = static_cast<int32_t>(QolTargetFeatureState::kAvailable);
+
+QolResult fake_warehouse_state(QolTargetFeatureState* out) {
+    if (out == nullptr) return contracts::error(kQolErrInvalidArgument, "bad", 3);
+    *out = static_cast<QolTargetFeatureState>(g_test_warehouse_state);
+    return contracts::ok();
+}
+
 QolGameHost& fake_game_host() {
     static QolGameHost game{};
     game.game_identity.read = &fake_game_identity;
     game.target.has_capability = &fake_has_capability;
+    game.target.warehouse_companion_file_state = &fake_warehouse_state;
     return game;
 }
 
@@ -1409,6 +1418,161 @@ int main() {
     }
     g_test_series = "original";
     g_test_version = "v1";
+
+    // ---- 变体差异不再整次拒绝：C18/仓库数据在不匹配目标上跳过，dat/sidecar 照常导入 ----
+    {
+        const std::string series_before = g_test_series;
+        const std::string version_before = g_test_version;
+        const uint8_t known_before = g_test_identity_known;
+        const int32_t candidate_before = g_test_c18_candidate;
+        const int32_t warehouse_state_before = g_test_warehouse_state;
+
+        // 带 C18 image 的 bundle（v586 modern 96 条）。
+        save_backup::C18NativeBagImage skip_image;
+        skip_image.source_version = "v586";
+        skip_image.source_slot = 0;
+        skip_image.record_count = save_backup::kC18NativeBagModernRecordCount;
+        skip_image.records.assign(
+            static_cast<size_t>(skip_image.record_count) *
+                save_backup::kC18NativeBagRecordBytes,
+            0x3C);
+        const std::string skip_ck =
+            write_c18_bundle(root, skip_image, "c18-skip.qol.bak");
+        CHECK(!skip_ck.empty());
+
+        // (a) 非 C18 已知目标：导入成功；dat 更新；目标槽 C18 文件不产生也不改动。
+        g_test_series = "overhaul";
+        g_test_version = "20260810";
+        g_test_identity_known = 1;
+        g_test_c18_candidate = 0;
+        const std::string slot2_dat = save_dir + "/save2.dat";
+        const std::string slot2_dat_before = "slot2-before-non-c18";
+        CHECK(write_file(slot2_dat, slot2_dat_before));
+        const std::string slot2_wh_path = data_dir + "/C18Lwh3.dat";
+        const std::string slot2_bag_path = data_dir + "/C18Lbag3.dat";
+        // C18Lbag3.dat 为上一段遗留的同槽 C18 文件；C18Lwh3.dat 已清理。
+        CHECK(::access(slot2_wh_path.c_str(), F_OK) != 0);
+        CHECK(::access(slot2_bag_path.c_str(), F_OK) == 0);
+        const std::vector<uint8_t> slot2_bag_before = read_file_vector(slot2_bag_path);
+        CHECK(body_ok(save_backup_import_json(skip_ck.c_str(), 2)));
+        CHECK(read_file(slot2_dat) != slot2_dat_before);
+        CHECK(::access(slot2_wh_path.c_str(), F_OK) != 0);
+        CHECK(read_file_vector(slot2_bag_path) == slot2_bag_before);
+        g_test_series = series_before;
+        g_test_version = version_before;
+        g_test_identity_known = known_before;
+        g_test_c18_candidate = candidate_before;
+        g_test_warehouse_state = warehouse_state_before;
+
+        // (b) identity 不可用/未知目标：导入成功；dat 更新；不写 C18 文件。
+        //     slot 2 无历史 referenced lease 残留（slot 0 被前段失败导入保留）。
+        g_test_series = "unknown";
+        g_test_version.clear();
+        g_test_identity_known = 0;
+        g_test_c18_candidate = 0;
+        const std::string slot2_dat_before_b = "slot2-before-unknown-target";
+        CHECK(write_file(slot2_dat, slot2_dat_before_b));
+        CHECK(::access(slot2_wh_path.c_str(), F_OK) != 0);
+        CHECK(::access(slot2_bag_path.c_str(), F_OK) == 0);
+        const std::vector<uint8_t> slot2_bag_before_b = read_file_vector(slot2_bag_path);
+        CHECK(body_ok(save_backup_import_json(skip_ck.c_str(), 2)));
+        CHECK(read_file(slot2_dat) != slot2_dat_before_b);
+        CHECK(::access(slot2_wh_path.c_str(), F_OK) != 0);
+        CHECK(read_file_vector(slot2_bag_path) == slot2_bag_before_b);
+        g_test_series = series_before;
+        g_test_version = version_before;
+        g_test_identity_known = known_before;
+        g_test_c18_candidate = candidate_before;
+        g_test_warehouse_state = warehouse_state_before;
+
+        // (c) series=c18 但 version 标签不可解析（layout unknown）：导入成功；
+        //     C18 文件跳过且原有文件字节不变。
+        g_test_series = "c18";
+        g_test_version = "abc";
+        g_test_identity_known = 1;
+        g_test_c18_candidate = 0;
+        const std::string slot2_keep_bytes = data_dir + "/C18Lwh3.dat";
+        CHECK(write_file(slot2_keep_bytes, "C18-KEEP-BYTES"));
+        const std::string slot2_dat_before_c = "slot2-before-layout-unknown";
+        CHECK(write_file(slot2_dat, slot2_dat_before_c));
+        CHECK(body_ok(save_backup_import_json(skip_ck.c_str(), 2)));
+        CHECK(read_file(slot2_dat) != slot2_dat_before_c);
+        CHECK(read_file(slot2_keep_bytes) == "C18-KEEP-BYTES");
+        CHECK(::unlink(slot2_keep_bytes.c_str()) == 0);
+        g_test_series = series_before;
+        g_test_version = version_before;
+        g_test_identity_known = known_before;
+        g_test_c18_candidate = candidate_before;
+        g_test_warehouse_state = warehouse_state_before;
+
+        // 含 warehouse 的 v2 bundle（密文 flags=0，v2 口径 warehouse 不参与 checksum）。
+        save_backup::WarehouseFile skip_wf;
+        skip_wf.suffix = ".wh4-0000000000000009";
+        skip_wf.data = {0x11, 0x22, 0x33, 0x44};
+        const std::vector<uint8_t> skip_wh_blob =
+            save_backup::encode_warehouse_v2({skip_wf});
+        std::vector<uint8_t> skip_plain(16, 0);
+        skip_plain[8] = 4;
+        const std::string skip_wh_ck = save_backup::compute_checksum(
+            save_backup::kBundleVersionV2, skip_plain, {}, skip_wh_blob);
+        std::vector<uint8_t> skip_wh_bundle;
+        const std::string skip_wh_meta =
+            "{\"checksum\":\"" + skip_wh_ck + "\",\"module_state\":0}";
+        append_be32(skip_wh_bundle, save_backup::kBundleMagic);
+        append_be16(skip_wh_bundle, save_backup::kBundleVersionV2);
+        skip_wh_bundle.insert(skip_wh_bundle.end(), {0, 0, 0, 0});
+        skip_wh_bundle.insert(skip_wh_bundle.end(), 8, 0);
+        append_be32(skip_wh_bundle, static_cast<uint32_t>(skip_plain.size()));
+        skip_wh_bundle.insert(skip_wh_bundle.end(), skip_plain.begin(), skip_plain.end());
+        append_be32(skip_wh_bundle, 0);  // module
+        append_be32(skip_wh_bundle, static_cast<uint32_t>(skip_wh_blob.size()));
+        skip_wh_bundle.insert(skip_wh_bundle.end(), skip_wh_blob.begin(), skip_wh_blob.end());
+        append_be16(skip_wh_bundle, static_cast<uint16_t>(skip_wh_meta.size()));
+        skip_wh_bundle.insert(skip_wh_bundle.end(), skip_wh_meta.begin(), skip_wh_meta.end());
+        append_be32(skip_wh_bundle,
+                    save_backup::crc32_ieee(skip_wh_bundle.data(), skip_wh_bundle.size()));
+        const std::string skip_wh_name =
+            "v2-warehouse-skip-" + skip_wh_ck + ".qol_save";
+        CHECK(write_file(root + "/backups/" + skip_wh_name,
+                         std::string(skip_wh_bundle.begin(), skip_wh_bundle.end())));
+        const std::string slot2_wh_target =
+            save_dir + "/save2.dat.wh4-0000000000000009";
+        const std::string slot2_keep_wh =
+            save_dir + "/save2.dat.wh4-keep000000000001";  // SB-12 段遗留，内容固定
+
+        // (d) warehouse state=unsupported：导入成功；wh4 不写入；dat 仍更新；已有 wh4 不变。
+        g_test_series = "overhaul";
+        g_test_version = "20260810";
+        g_test_identity_known = 1;
+        g_test_c18_candidate = 0;
+        g_test_warehouse_state = static_cast<int32_t>(QolTargetFeatureState::kUnsupported);
+        const std::string slot2_dat_before_wh = "slot2-before-wh-unsupported";
+        CHECK(write_file(slot2_dat, slot2_dat_before_wh));
+        CHECK(::access(slot2_wh_target.c_str(), F_OK) != 0);
+        CHECK(body_ok(save_backup_import_json(skip_wh_ck.c_str(), 2)));
+        CHECK(read_file(slot2_dat) != slot2_dat_before_wh);
+        CHECK(::access(slot2_wh_target.c_str(), F_OK) != 0);
+        CHECK(read_file(slot2_keep_wh) == "KEEP-WH4");
+        g_test_series = series_before;
+        g_test_version = version_before;
+        g_test_identity_known = known_before;
+        g_test_c18_candidate = candidate_before;
+        g_test_warehouse_state = warehouse_state_before;
+
+        // (e) warehouse state=unknown：导入成功且跳过 wh4。
+        g_test_warehouse_state = static_cast<int32_t>(QolTargetFeatureState::kUnknown);
+        const std::string slot2_dat_before_unknown = "slot2-before-wh-unknown";
+        CHECK(write_file(slot2_dat, slot2_dat_before_unknown));
+        CHECK(body_ok(save_backup_import_json(skip_wh_ck.c_str(), 2)));
+        CHECK(read_file(slot2_dat) != slot2_dat_before_unknown);
+        CHECK(::access(slot2_wh_target.c_str(), F_OK) != 0);
+        CHECK(read_file(slot2_keep_wh) == "KEEP-WH4");
+        g_test_series = series_before;
+        g_test_version = version_before;
+        g_test_identity_known = known_before;
+        g_test_c18_candidate = candidate_before;
+        g_test_warehouse_state = warehouse_state_before;
+    }
 
     // ---- token 清零（停用）后前置门不可用 → 拒绝而非越权 ----
     save_backup_bind_context(&fake_sdk(), &fake_save_facts(), &fake_save_call(),

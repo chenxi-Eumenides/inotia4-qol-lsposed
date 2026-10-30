@@ -636,6 +636,8 @@ std::string import_bundle_file(const std::string& path, int slot) {
     bool module_present = false;
     save_backup::C18NativeBagLayout target_c18_layout =
         save_backup::C18NativeBagLayout::kNotC18;
+    bool c18_target_known = false;
+    bool target_has_c18_bag = false;
     {
         std::lock_guard<std::mutex> lk(save_backup::persistence::file_mutex());
         if (!read_file_bytes(path, bytes) ||
@@ -664,16 +666,20 @@ std::string import_bundle_file(const std::string& path, int slot) {
         }
         std::string identity_error;
         std::string target_c18_version;
-        if (!read_target_c18_layout(target_c18_layout, target_c18_version, identity_error)) {
-            return result_error(identity_error.c_str());
-        }
-        const bool target_has_c18_bag =
-            target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192 ||
-            target_c18_layout == save_backup::C18NativeBagLayout::kModern96;
+        // 目标身份/布局不可知不再是导入失败：C18 专属数据按下方条件跳过，
+        // dat/sidecar/warehouse 照常导入。
+        c18_target_known =
+            read_target_c18_layout(target_c18_layout, target_c18_version, identity_error);
+        target_has_c18_bag =
+            c18_target_known &&
+            (target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192 ||
+             target_c18_layout == save_backup::C18NativeBagLayout::kModern96);
         if (parsed.has_c18_native_bag && !target_has_c18_bag) {
-            return result_error("C18 bag image unsupported on target");
-        }
-        if (!parsed.has_c18_native_bag && target_has_c18_bag) {
+            SB_LOG("save backup import: slot%d C18 bag image skipped: layout=%d reason=%s",
+                   slot, static_cast<int>(target_c18_layout),
+                   c18_target_known ? "target_layout_has_no_native_bag"
+                                    : identity_error.c_str());
+        } else if (!parsed.has_c18_native_bag && target_has_c18_bag) {
             // 旧备份没有 C18 背包镜像：生成空背包继续导入（扩展背包内容为空），
             // 而不是整次拒绝。镜像在 checksum 校验之后合成，不参与旧 bundle 的校验。
             if (!build_empty_c18_native_bag(target_c18_version, slot, target_c18_layout,
@@ -685,8 +691,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
                    slot, target_c18_version.c_str());
         }
     }
-    const bool c18_write = target_c18_layout == save_backup::C18NativeBagLayout::kLegacy192 ||
-                           target_c18_layout == save_backup::C18NativeBagLayout::kModern96;
+    const bool c18_write = target_has_c18_bag && parsed.has_c18_native_bag;
     std::vector<uint8_t> c18_target_file;
     if (c18_write) {
         if (save_backup::state::snapshot().data_dir.empty()) {
@@ -736,7 +741,8 @@ std::string import_bundle_file(const std::string& path, int slot) {
     //       flags=0（密文 wh4）：必须能用本机密钥解密（v2 旧备份仅支持同设备导入；
     //                            导入后再导出仍由 warehouse flags 路径决定可跨设备）。
     //       flags=1（明文 wh4）：补 slot + 重算 +0x38 完整性校验 + 重加密 + 往返自检。
-    //     变体能力门禁 unsupported → 整步跳过（保持既有行为，不校验也不写）。
+    //     变体能力门禁：仅 available 执行写回；unsupported/unknown/unavailable 都是版本或
+    //     探测差异，整步跳过（不校验也不写，目标槽已有 wh4 保持原样）。
     std::vector<std::vector<uint8_t>> wh_payloads;
     qol::contracts::QolTargetFeatureState target_state =
         qol::contracts::QolTargetFeatureState::kUnknown;
@@ -745,10 +751,7 @@ std::string import_bundle_file(const std::string& path, int slot) {
         if (save_backup::state::snapshot().game != nullptr && save_backup::state::snapshot().game->target.warehouse_companion_file_state != nullptr) {
             (void)save_backup::state::snapshot().game->target.warehouse_companion_file_state(&target_state);
         }
-        if (target_state == qol::contracts::QolTargetFeatureState::kUnsupported) {
-            SB_LOG("save backup import: slot%d warehouse companion unsupported (%s), skip %zu file(s)",
-                   slot, save_backup::port::warehouse_state_name(target_state), parsed.warehouse.size());
-        } else {
+        if (target_state == qol::contracts::QolTargetFeatureState::kAvailable) {
             wh_write = true;
             const char* wh_key = save_backup::port::hub_key();
             wh_payloads.resize(parsed.warehouse.size());
@@ -771,6 +774,10 @@ std::string import_bundle_file(const std::string& path, int slot) {
                     wh_payloads[i] = wf.data;
                 }
             }
+        } else {
+            SB_LOG("save backup import: slot%d warehouse companion skipped: state=%s files=%zu",
+                   slot, save_backup::port::warehouse_state_name(target_state),
+                   parsed.warehouse.size());
         }
     }
 
