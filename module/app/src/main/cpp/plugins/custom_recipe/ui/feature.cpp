@@ -17,6 +17,7 @@ const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::ItemFactsApi* g_item_facts = nullptr;
 const contracts::CraftFactsApi* g_craft_facts = nullptr;
 const contracts::QolCraftUiWritePort* g_write_port = nullptr;
+const contracts::QolCustomRecipeWritePort* g_recipe_write_port = nullptr;
 thread_local int32_t t_current_text_scope = 0;
 
 }  // namespace
@@ -32,6 +33,10 @@ void set_item_facts(const contracts::ItemFactsApi* facts) { g_item_facts = facts
 void set_craft_facts(const contracts::CraftFactsApi* facts) { g_craft_facts = facts; }
 
 void set_write_port(const contracts::QolCraftUiWritePort* port) { g_write_port = port; }
+
+void set_recipe_write_port(const contracts::QolCustomRecipeWritePort* port) {
+    g_recipe_write_port = port;
+}
 
 const contracts::ItemFactsApi* item_facts() { return g_item_facts; }
 
@@ -124,6 +129,12 @@ void craft_set_target_slot_item(contracts::QolItemHandle item) {
 void craft_set_cost_zero() {
     if (g_write_port != nullptr && g_write_port->set_cost_zero != nullptr) {
         (void)g_write_port->set_cost_zero();
+    }
+}
+
+void craft_desc_set_off() {
+    if (g_recipe_write_port != nullptr && g_recipe_write_port->description_set_off != nullptr) {
+        (void)g_recipe_write_port->description_set_off();
     }
 }
 

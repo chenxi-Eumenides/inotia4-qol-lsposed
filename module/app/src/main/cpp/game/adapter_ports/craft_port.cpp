@@ -76,8 +76,9 @@ QolResult resolve_craft_item(contracts::QolItemHandle handle, void** out_item) {
     return contracts::ok();
 }
 
-// 数据面写入口接受游戏持有对象与 inventory.action.create 产生的 detached 产物；
-// detached 产物在 place 之前归调用方，配置写入仍必须可用。Provider 自管对象继续拒绝。
+// 数据面写入口接受游戏持有对象、inventory.action.create 产生的 detached 产物与 Provider
+// 自管对象；扩展物品指针同为合法游戏对象，词条/字段写入与 Game-owned 语义一致。
+// detached 产物在 place 之前归调用方，配置写入仍必须可用。
 QolResult resolve_craft_game_item(contracts::QolItemHandle handle, void** out_item) {
     if (out_item == nullptr || handle.slot == 0 || handle.generation == 0) {
         return invalid_argument();
@@ -92,8 +93,10 @@ QolResult resolve_craft_game_item(contracts::QolItemHandle handle, void** out_it
     if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) return not_found();
     uint32_t owner = contracts::kQolItemHandleOwnerAny;
     if (lookup_item(resolved.item, &owner).slot == 0 ||
-        (owner != contracts::kQolItemHandleOwnerGame && owner != kQolLoadedItemHandleOwner)) {
-        return contracts::error(kQolErrConflict, "craft item is not game-owned", 29);
+        (owner != contracts::kQolItemHandleOwnerGame &&
+         owner != contracts::kQolItemHandleOwnerProvider &&
+         owner != kQolLoadedItemHandleOwner)) {
+        return contracts::error(kQolErrConflict, "craft item owner unavailable", 29);
     }
     *out_item = resolved.item;
     return contracts::ok();

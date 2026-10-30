@@ -6,6 +6,7 @@
 #include "../../../contracts/craft_commands.h"
 #include "../../../contracts/craft_facts.h"
 #include "../../../contracts/game_ports/craft_ui_write_port.h"
+#include "../../../contracts/game_ports/custom_recipe_write_port.h"
 #include "../../../contracts/host_sdk.h"
 #include "../../../contracts/item_facts.h"
 #include "../model/result.h"
@@ -74,6 +75,7 @@ void set_context(const contracts::PluginContext& ctx);
 void set_item_facts(const contracts::ItemFactsApi* facts);
 void set_craft_facts(const contracts::CraftFactsApi* facts);
 void set_write_port(const contracts::QolCraftUiWritePort* port);
+void set_recipe_write_port(const contracts::QolCustomRecipeWritePort* port);
 const contracts::ItemFactsApi* item_facts();
 const contracts::QolHostSdk* host_sdk();
 void log_message(int32_t level, const char* format, ...);
@@ -90,6 +92,10 @@ contracts::QolItemHandle craft_target_slot_item();
 QolResult craft_read_target_slot_item(contracts::QolItemHandle* out_item);
 void craft_set_target_slot_item(contracts::QolItemHandle item);
 void craft_set_cost_zero();
+// UI_Desc_SetOff（经 custom_recipe write port description_set_off）。原版放料
+// （UIMix_ButtonInvenItemSelectExe）入口无条件调用该函数；扩展袋物品跳过原生放料时
+// 由本函数补齐同一效果。
+void craft_desc_set_off();
 
 // 三同类宝石三合一委托原版 UIMix_StartMix（经 craft_ui_write_port v1.2 delegate_start_mix）。
 // 返回 false = 端口未就绪/配方非法（未进入原版 StartMix，材料未扣）。

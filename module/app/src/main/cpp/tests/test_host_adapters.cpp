@@ -1793,19 +1793,18 @@ int main() {
     const auto provider_item_handle = qol::game::register_item(
         provider_item, qol::contracts::kQolItemHandleOwnerProvider);
     assert(provider_item_handle.slot != 0 && provider_item_handle.generation != 0);
-    assert(custom_recipe_write.write_jewel_word(provider_item_handle, 0x01020304u).code ==
-           kQolErrConflict);
-    assert(custom_recipe_write.set_max_socket_enchant(provider_item_handle).code ==
-           kQolErrConflict);
-    assert(*provider_count == 0xA1B2C3D4u && *provider_socket == 0x05 &&
-           *provider_enchant == 0x1234);
+    // Provider 自管对象（扩展物品指针）是合法游戏对象：craft 写词条路径按同一语义写字段。
+    assert(custom_recipe_write.write_jewel_word(provider_item_handle, 0x01020304u).ok == kQolOk);
+    assert(*provider_count == 0x01020304u);
+    assert(custom_recipe_write.set_max_socket_enchant(provider_item_handle).ok == kQolOk);
+    assert(*provider_socket == 0xF5 && *provider_enchant == 0x123Cu);
     assert(qol::game::invalidate_item(provider_item_handle));
     assert(custom_recipe_write.write_jewel_word(provider_item_handle, 0x01020304u).code ==
            kQolErrNotFound);
     assert(custom_recipe_write.set_max_socket_enchant(provider_item_handle).code ==
            kQolErrNotFound);
-    assert(*provider_count == 0xA1B2C3D4u && *provider_socket == 0x05 &&
-           *provider_enchant == 0x1234);
+    assert(*provider_count == 0x01020304u && *provider_socket == 0xF5 &&
+           *provider_enchant == 0x123Cu);
     // inventory.action.create 的 detached 产物（loaded owner）在 place 前必须可写数据面。
     const auto detached_write_handle = qol::game::register_item(
         provider_item, qol::game::kQolLoadedItemHandleOwner);

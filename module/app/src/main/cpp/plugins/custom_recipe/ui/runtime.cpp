@@ -82,14 +82,20 @@ bool core_backups_ready_impl() {
 }
 
 // 物品类别 = `item + I_TYPE`(u16) 的 bits6-15；对用到的类别而言 == itemId。
+// out 槽物品指针来自目标格：原版袋物品为 Game-owned，扩展袋物品直写目标格后为
+// Provider-owned。两者都是合法游戏对象，升阶写入（read/write_jewel_word 经
+// resolve_craft_game_item）对两者语义一致，按同一口径放行 Provider owner。
+// lookup 未命中的指针按 Game 注册：扩展物品在入袋时已注册为 Provider，未命中的
+// 只可能是原版袋物品。
 bool new_game_item_handle(void* item, contracts::QolItemHandle* out) {
     const auto* sdk = host_sdk();
     if (item == nullptr || out == nullptr || sdk == nullptr) return false;
     uint32_t owner = 0;
     if (sdk->item_handle.lookup_item != nullptr &&
         sdk->item_handle.lookup_item(item, out, &owner) == contracts::kQolItemHandleStatusOk) {
-        return owner == contracts::kQolItemHandleOwnerGame && out->slot != 0 &&
-               out->generation != 0;
+        return (owner == contracts::kQolItemHandleOwnerGame ||
+                owner == contracts::kQolItemHandleOwnerProvider) &&
+               out->slot != 0 && out->generation != 0;
     }
     return sdk->item_handle.register_item != nullptr &&
            sdk->item_handle.register_item(item, contracts::kQolItemHandleOwnerGame, out) ==
@@ -149,6 +155,27 @@ bool item_is_stackable(contracts::QolItemHandle handle) {
 bool item_is_equipment(contracts::QolItemHandle handle) {
     contracts::QolItemType type = contracts::QolItemType::kUnknown;
     return read_item_type(handle, &type) && type == contracts::QolItemType::kEquipment;
+}
+
+// cursor 物品是否不在原版 6 袋 ×16 槽 INVEN 槽表内。原版袋物品必能在某物理槽匹配到
+// 同一 handle；扩展袋对象只存在于模块虚拟袋（网格 data[0] 是投影借用指针，不写入
+// INVEN 槽表），按槽扫描必不命中 —— 由此等价区分 Game/Provider 所有权。插件层只允许
+// include contracts（check_layers plugin_boundary），item_handle_registry 的 owner 查询
+// 不可达，这是契约面内唯一的等价判定。facts 不可用时按「不在表内」处理：直写与原生
+// 放料使用同一个 ControlItem_SetItem，对原版物品行为等价。
+bool selected_item_outside_native_inven(contracts::QolItemHandle handle) {
+    const auto* facts = item_facts();
+    if (facts == nullptr || facts->physical_item_at == nullptr) return true;
+    for (int32_t bag = 0; bag < 6; ++bag) {
+        for (int32_t slot = 0; slot < 16; ++slot) {
+            contracts::QolItemHandle physical = contracts::kInvalidItemHandle;
+            if (facts->physical_item_at(bag, slot, &physical).ok == kQolOk &&
+                physical.slot == handle.slot && physical.generation == handle.generation) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 // 失败提示：本插件自有文案经本地 scope 生效，不改动共享文本表内容。
@@ -345,7 +372,24 @@ void place_execute(void* ctrl) {
         craft_set_target_slot_item(contracts::kInvalidItemHandle);
         return;
     }
-    g_backup_place(ctrl);  // 原版：CheckMixture（注入 mixType 恒返回 0）→ SetItem → 写费用
+    // 原版放料（UIMix_ButtonInvenItemSelectExe 0xc2328）入口无条件 UIDesc_SetOff（物品为空
+    // 或校验拒绝也执行）；type 3 的全部状态效果只有目标格 ControlItem_SetItem([+0x40]) 与
+    // 费用 [+0xf8]，不存在其它「已放入」内部状态。原版袋物品继续走原生函数（行为不变）；
+    // 扩展袋物品的 CheckMixture 校验链按 INVEN 表校验物品，扩展物品不在原版表必然无效，
+    // 故跳过原生函数，经 set_target_slot_item 直写目标格（同一 ControlItem_SetItem，费用由
+    // 下方 craft_set_cost_zero 覆盖），并补调 desc_set_off 保持「点放入即关详情菜单」。
+    // 目标格不存在「取回」交互：UIMix_ResultItemControlEventProc（0xc0e30，目标格事件
+    // proc）只做 SetFocus 与 UIMix_MakeDesc；放料本身不把物品移出原袋（INVEN/扩展袋），
+    // 清格（UIMix_InitMixingState / UIMix_ResetStuffItemControl）只清控件指针，不存在把
+    // 目标格物品写回 INVEN 的路径，扩展物品无丢失风险。
+    const contracts::QolItemHandle selected = craft_selected_inventory_item();
+    if (selected.slot != 0 && selected.generation != 0 &&
+        selected_item_outside_native_inven(selected)) {
+        craft_desc_set_off();
+        craft_set_target_slot_item(selected);
+    } else {
+        g_backup_place(ctrl);
+    }
 
     const contracts::QolItemHandle item = craft_target_slot_item();
     if (item.slot == 0 || item.generation == 0) return;  // 本次未放入任何物品
@@ -711,7 +755,6 @@ bool bind(contracts::PluginContext& ctx, const contracts::ItemFactsApi* item_fac
           const contracts::QolCustomRecipeWritePort* recipe_write_port,
           const contracts::QolCraftUiWritePort* ui_write_port,
           const contracts::TextLayerApi* text_api) {
-    (void)recipe_write_port;
     (void)text_api;
     if (ctx.sdk == nullptr || item_facts == nullptr || craft_facts == nullptr ||
         ui_write_port == nullptr) {
@@ -721,6 +764,7 @@ bool bind(contracts::PluginContext& ctx, const contracts::ItemFactsApi* item_fac
     set_item_facts(item_facts);
     set_craft_facts(craft_facts);
     set_write_port(ui_write_port);
+    set_recipe_write_port(recipe_write_port);
     set_context(ctx);
     return true;
 }
@@ -729,6 +773,7 @@ void clear() {
     set_item_facts(nullptr);
     set_craft_facts(nullptr);
     set_write_port(nullptr);
+    set_recipe_write_port(nullptr);
     g_drawing_three_slot_slot.store(false, std::memory_order_release);
     clear_backups();
 }
