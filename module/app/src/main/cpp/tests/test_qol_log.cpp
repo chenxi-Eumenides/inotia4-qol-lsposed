@@ -1,12 +1,17 @@
 // host 单测：统一日志系统 P0 纯格式化与限流原语。
 // 编译 infra/log/qol_log.cpp，Android 专属头由 stubs/ 覆盖；不依赖设备与 I/O。
 #include "infra/log/qol_log.h"
+#include "infra/log/qol_crash.h"
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
+
+#include <signal.h>
+#include <unistd.h>
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -321,6 +326,66 @@ static void test_info_per_frame_cap() {
     qol_log_set_frame_provider(nullptr);
 }
 
+// 崩溃处理器读的是缓存帧号：不能回调游戏帧源（崩溃时可能持有未释放的锁）。
+static void test_last_known_frame() {
+    qol_log_set_host_sink(&collect_sink);
+    qol_log_set_frame_provider(&test_frame_provider);
+    g_sink_lines.clear();
+
+    g_test_frame = 777;
+    qol_log_write_kotlin(QolLogLevel::kInfo, QolDomain::kSave, "x.kt:1", "tick");
+    CHECK(qol_log_last_known_frame() == 777);
+
+    qol_log_set_frame_provider(nullptr);
+    CHECK(qol_log_last_known_frame() == 777);  // 帧源摘除后保留最后已知值
+
+    qol_log_set_host_sink(nullptr);
+}
+
+// 崩溃现场：信号/寄存器/maps/日志尾部四段都要落盘，且 agent 能离线符号化。
+static void test_crash_capture() {
+    char dir_template[] = "./qol_crash_test_XXXXXX";
+    char* dir = ::mkdtemp(dir_template);
+    CHECK(dir != nullptr);
+    if (dir == nullptr) return;
+
+    const std::string log_path = std::string(dir) + "/qol.log";
+    std::FILE* log_file = std::fopen(log_path.c_str(), "w");
+    CHECK(log_file != nullptr);
+    if (log_file != nullptr) {
+        std::fputs("last-line-before-crash\n", log_file);
+        std::fclose(log_file);
+    }
+
+    qol_crash_init(dir, log_path.c_str());
+    CHECK(qol_crash_simulate(SIGSEGV, SEGV_MAPERR, 0x1234));
+
+    const std::string crash_path = std::string(dir) + "/qol-crash.log";
+    std::string content;
+    std::FILE* crash_file = std::fopen(crash_path.c_str(), "r");
+    CHECK(crash_file != nullptr);
+    if (crash_file != nullptr) {
+        char buf[4096];
+        size_t n = 0;
+        while ((n = std::fread(buf, 1, sizeof(buf), crash_file)) > 0) content.append(buf, n);
+        std::fclose(crash_file);
+    }
+
+    CHECK(content.find("=== qol crash ===") != std::string::npos);
+    CHECK(content.find("signal=11 SIGSEGV code=1 (SEGV_MAPERR) fault=0x1234") !=
+          std::string::npos);
+    CHECK(content.find("pid=") != std::string::npos);
+    CHECK(content.find("frame=") != std::string::npos);
+    CHECK(content.find("--- maps ---") != std::string::npos);
+    CHECK(content.find("qol_log_tests") != std::string::npos);  // 可执行文件必须在 maps 里
+    CHECK(content.find("--- log tail ---") != std::string::npos);
+    CHECK(content.find("last-line-before-crash") != std::string::npos);
+
+    std::remove(crash_path.c_str());
+    std::remove(log_path.c_str());
+    ::rmdir(dir);
+}
+
 int main() {
     test_format_info_exact_line();
     test_level_chars();
@@ -337,6 +402,8 @@ int main() {
     test_throttle_frame_rollback();
     test_debug_flag_and_sink_host();
     test_info_per_frame_cap();
+    test_last_known_frame();
+    test_crash_capture();
 
     std::printf("qol_log_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

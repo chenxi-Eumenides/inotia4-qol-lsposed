@@ -206,8 +206,8 @@ curl -s http://<设备IP>:8088/api/ui/state
 
 ### 3.3 卡死取证（游戏无响应/疑似死锁）
 
-> 适用症状：画面冻结、输入无响应但进程仍存活（ANR 或原生死锁）；进程已崩溃改看
-> tombstone，不在本节范围。扩展背包自死锁（持 `g_virtual_bag_mtx` 期间原版回调重入
+> 适用症状：画面冻结、输入无响应但进程仍存活（ANR 或原生死锁）；进程已崩溃见
+> §3.3.1。扩展背包自死锁（持 `g_virtual_bag_mtx` 期间原版回调重入
 > 取锁，见 `rulebook.md` R-44）是本节的典型案例。
 
 1. 确认进程存活并取 pid：
@@ -239,6 +239,25 @@ curl -s http://<设备IP>:8088/api/ui/state
    结合 `extension_bag` domain 日志锚（`txn committed ...`、`release_cleanup ...` 等，格式见 `docs/archive/development/logging.md`）判断停滞点；
    取证后恢复：`adb shell am force-stop <包名>` 并按 §3.1 ③ 重启。
 5. 结论回填对应验收卡的日志锚，不得只写「已卡死」而无线程栈证据。
+
+#### 3.3.1 崩溃取证（进程已死）
+
+模块在 native 崩溃（`SIGSEGV`/`SIGBUS`/`SIGILL`/`SIGFPE`）时自动写
+`/sdcard/Android/data/<包名>/files/qol/qol-crash.log`，内容依次是：信号、全部寄存器、
+`/proc/self/maps`、`qol.log` 尾部 4 KB。写完后恢复原处理器并重新抛出信号，系统
+tombstone 与游戏自身处理器照常记录，不吞崩溃。
+
+```bash
+adb -s <设备序列号> pull /sdcard/Android/data/com.com2us.inotia4.normal.freefull.google.global.android.common/files/qol/qol-crash.log <任务目录>/
+uv run python scripts/analysis/symbolize_crash.py <任务目录>/qol-crash.log --obj-dir module/app/build
+```
+
+`pc`/`lr` 落在 `libgamebridge.so` 时输出 `模块+偏移` 与函数名；基址由 maps 反推，
+换包重装后仍能解析。日志尾段与 `qol.log` 同一时间线，可直接对齐 domain 日志锚。
+
+边界：只覆盖**崩溃线程**，不展开全线程栈（那需要独立的 ptrace 型 dumper）；ANR 不在
+本文件范围，按 §3.3 取 `debuggerd -b`；`SIGABRT` 不接管，ART 的 `FATAL EXCEPTION`
+仍看 logcat。
 
 ### 3.4 脚本速查（Python 脚本均须 `uv run`）
 

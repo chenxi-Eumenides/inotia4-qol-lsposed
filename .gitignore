@@ -74,6 +74,7 @@ scripts/*
 scripts/analysis/**
 !scripts/analysis/parse_qol_save.py
 !scripts/analysis/parse_qol_log.py
+!scripts/analysis/symbolize_crash.py
 !scripts/analysis/frida/
 scripts/analysis/frida/**
 !scripts/analysis/frida/save0-repair-patch.js

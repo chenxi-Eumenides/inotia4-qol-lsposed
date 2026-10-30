@@ -206,6 +206,7 @@ target_sources(gamebridge PRIVATE
 # 统一日志系统 P0 基础设施（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     infra/log/qol_log.cpp
+    infra/log/qol_crash.cpp
     bridge/native/gamebridge_log.cpp
 )
 

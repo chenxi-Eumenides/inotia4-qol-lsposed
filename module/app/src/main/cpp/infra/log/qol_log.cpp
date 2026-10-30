@@ -6,6 +6,8 @@
 
 #include "infra/log/qol_log.h"
 
+#include "infra/log/qol_crash.h"
+
 #include <android/log.h>
 
 #include <atomic>
@@ -59,6 +61,7 @@ const DomainEntry kDomainTable[] = {
 };
 
 std::atomic<QolFrameProvider> g_frame_provider{nullptr};
+std::atomic<int64_t> g_last_known_frame{-1};
 std::atomic<bool> g_debug_enabled{false};
 std::atomic<int> g_sink_fd{-1};
 #if !defined(__ANDROID__)
@@ -212,6 +215,7 @@ void emit_line(QolLogLevel level, QolDomain domain, const char* src, const char*
     g_in_emit = true;
 
     const int64_t frame = qol_log_current_frame();
+    if (frame >= 0) g_last_known_frame.store(frame, std::memory_order_release);
     const char* out_msg = msg;
     char cap_msg[128];
     if (level == QolLogLevel::kInfo) {
@@ -315,6 +319,10 @@ int64_t qol_log_current_frame() {
     return frame < 0 ? -1 : frame;
 }
 
+int64_t qol_log_last_known_frame() {
+    return g_last_known_frame.load(std::memory_order_acquire);
+}
+
 bool qol_log_debug_enabled() {
     return g_debug_enabled.load(std::memory_order_acquire);
 }
@@ -362,6 +370,8 @@ void qol_log_init() {
             (void)ignored;
             g_sink_bytes += banner_len;
         }
+        // 崩溃捕获与主日志共用目录：崩溃文件里会复制 qol.log 尾部作为现场。
+        qol_crash_init(log_dir.c_str(), path.c_str());
     });
 #else
     std::call_once(g_sink_once, [] {});  // host：无文件 sink

@@ -466,6 +466,7 @@ add_test(NAME transition_dispatch_tests COMMAND transition_dispatch_tests)
 add_executable(qol_log_tests
     test_qol_log.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
+    ${CPP_DIR}/infra/log/qol_crash.cpp
 )
 target_include_directories(qol_log_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs

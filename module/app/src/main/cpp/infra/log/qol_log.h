@@ -44,6 +44,10 @@ using QolFrameProvider = int64_t (*)();
 void    qol_log_set_frame_provider(QolFrameProvider fn); // fn=null → frame=-1
 int64_t qol_log_current_frame();
 
+// 最近一次发射日志时的帧号（-1 = 尚无日志）。
+// 崩溃处理器只能读缓存：崩溃现场回调游戏帧源可能撞上未释放的锁。
+int64_t qol_log_last_known_frame();
+
 bool qol_log_debug_enabled();
 void qol_log_set_debug_enabled(bool enabled);
 
