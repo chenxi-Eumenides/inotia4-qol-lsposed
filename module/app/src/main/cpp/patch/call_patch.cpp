@@ -496,7 +496,7 @@ bool call_patch_install_bl(uintptr_t call_addr, uint32_t expected_word, void* wr
         release_thunk_slot_locked(thunk_slot);
         return false;
     }
-    QOL_LOG_INFO(QolDomain::kPlatform, "patched call=%p replacement=0x%08x",
+    QOL_LOG_DEBUG(QolDomain::kPlatform, "patched call=%p replacement=0x%08x",
                  reinterpret_cast<void*>(call_addr), replacement);
     return true;
 }
@@ -526,7 +526,7 @@ bool call_patch_revert_bl(uintptr_t call_addr, uint32_t original_word) {
     }
     if (!write_code_word(call_addr, saved_word)) return false;
     forget_patched_locked(call_addr);
-    QOL_LOG_INFO(QolDomain::kPlatform, "reverted call=%p original=0x%08x",
+    QOL_LOG_DEBUG(QolDomain::kPlatform, "reverted call=%p original=0x%08x",
                  reinterpret_cast<void*>(call_addr), saved_word);
     return true;
 }
@@ -544,7 +544,7 @@ bool call_patch_install_word(uintptr_t addr, uint32_t expected_word, uint32_t ne
         return false;  // fail-closed：不改写任何字节
     }
     if (!write_code_word(addr, new_word)) return false;
-    QOL_LOG_INFO(QolDomain::kPlatform, "patched word addr=%p new=0x%08x",
+    QOL_LOG_DEBUG(QolDomain::kPlatform, "patched word addr=%p new=0x%08x",
                  reinterpret_cast<void*>(addr), new_word);
     return true;
 }
@@ -556,7 +556,7 @@ bool call_patch_revert_word(uintptr_t addr, uint32_t original_word) {
     const uint32_t current = *reinterpret_cast<const uint32_t*>(addr);
     if (current == original_word) return true;  // 幂等：已还原
     if (!write_code_word(addr, original_word)) return false;
-    QOL_LOG_INFO(QolDomain::kPlatform, "reverted word addr=%p original=0x%08x",
+    QOL_LOG_DEBUG(QolDomain::kPlatform, "reverted word addr=%p original=0x%08x",
                  reinterpret_cast<void*>(addr), original_word);
     return true;
 }
@@ -601,7 +601,7 @@ uintptr_t call_patch_install_branch(uintptr_t call_addr, uint32_t expected_word,
         release_thunk_slot_locked(thunk);
         return 0;
     }
-    QOL_LOG_INFO(QolDomain::kPlatform, "patched branch call=%p thunk=%p replacement=0x%08x",
+    QOL_LOG_DEBUG(QolDomain::kPlatform, "patched branch call=%p thunk=%p replacement=0x%08x",
                  reinterpret_cast<void*>(call_addr), reinterpret_cast<void*>(thunk_addr),
                  replacement);
     return thunk_addr;
@@ -632,7 +632,7 @@ bool call_patch_revert_branch(uintptr_t call_addr, uint32_t original_word) {
     }
     if (!write_code_word(call_addr, saved_word)) return false;
     forget_patched_locked(call_addr);
-    QOL_LOG_INFO(QolDomain::kPlatform, "reverted branch call=%p original=0x%08x",
+    QOL_LOG_DEBUG(QolDomain::kPlatform, "reverted branch call=%p original=0x%08x",
                  reinterpret_cast<void*>(call_addr), saved_word);
     return true;
 }

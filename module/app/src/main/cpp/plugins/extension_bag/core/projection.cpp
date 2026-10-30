@@ -479,7 +479,7 @@ bool install_module_view_locked(int bag) {
     qol::extension_bag::ui_state().objects.module_view_installed = true;
     qol::extension_bag::ui_state().objects.module_view_index = bag;
     qol::features::extension_bag::extension_bag_display_commit();
-    QOL_LOG_INFO(QolDomain::kExtensionBag, "module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
+    QOL_LOG_DEBUG(QolDomain::kExtensionBag, "module view installed bag=%d window=%d capacity=%d", bag, original_bag, capacity);
     return true;
 }
 

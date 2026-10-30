@@ -15,6 +15,12 @@ void inventory_log_write(int32_t level, const char* file, int line, const char* 
     inventory_log_write(2, __FILE__, __LINE__, __VA_ARGS__)
 #define QOL_LOG_ERROR(domain, ...) \
     inventory_log_write(3, __FILE__, __LINE__, __VA_ARGS__)
+#define QOL_LOG_DEBUG(domain, ...)                                  \
+    do {                                                            \
+        if (inventory_log_debug_enabled()) {                        \
+            inventory_log_write(0, __FILE__, __LINE__, __VA_ARGS__); \
+        }                                                           \
+    } while (0)
 #define QOL_LOG_DEBUG_EVERY(domain, every_frames, ...)                                  \
     do {                                                                                 \
         static int64_t _inventory_last_frame = 0;                                       \

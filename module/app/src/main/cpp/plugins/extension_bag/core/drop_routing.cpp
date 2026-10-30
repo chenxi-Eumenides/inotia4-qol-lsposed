@@ -129,14 +129,20 @@ bool route_deferred_extension_to_original_locked(::qol::extension_bag::ReentryLo
 }
 bool handle_bag_drop_release_locked(::qol::extension_bag::ReentryLock& lock, int64_t x, int64_t y) {
     recover_pending_transaction_locked(lock);
-    QOL_LOG_INFO(QolDomain::kExtensionBag, "drop release mode=%d selected=%d x=%lld y=%lld moving=%p extension_drag=%d",
+    // 每次抬手一条：属于输入明细，真正的结果由 drop result / p5 session 行承担。
+    VIRTBAG_LOG_DEBUG("drop release mode=%d selected=%d x=%lld y=%lld moving=%p extension_drag=%d",
                 static_cast<int>(runtime_state().objects.bag.mode), runtime_state().objects.bag.selected,
                 static_cast<long long>(x), static_cast<long long>(y),
                 touch_moving_item_control_locked(), qol::extension_bag::ui_state().ui.extension_drag.active ? 1 : 0);
     if (runtime_state().objects.bag.mode == virtual_bag::Mode::kOriginal) {
         void* moving_control = touch_moving_item_control_locked();
         if (moving_control == nullptr) {
-            QOL_LOG_WARN(QolDomain::kExtensionBag, "drop reject original->extension no moving original control");
+            // 原版未建立 moving control 时抬手是拖动中的常态（点一下原版空位也会走这里），
+            // 不是异常；判定所需的输入一并记录，便于区分"没拖动"与"捕获被吞"。
+            VIRTBAG_LOG_DEBUG("drop reject original->extension no moving original control x=%lld y=%lld selected=%d mode=%d",
+                              static_cast<long long>(x), static_cast<long long>(y),
+                              runtime_state().objects.bag.selected,
+                              static_cast<int>(runtime_state().objects.bag.mode));
             return false;
         }
         for (int index = 0; index < virtual_bag::active_extension_bags(); ++index) {

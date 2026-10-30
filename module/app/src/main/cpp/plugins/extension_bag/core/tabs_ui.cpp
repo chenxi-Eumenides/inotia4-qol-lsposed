@@ -344,7 +344,7 @@ bool refresh_extension_tab_anchors_locked(const qol::contracts::QolUiComponents*
             state.mounted != 0 ? state.handle : nullptr;
         if (created != 0) {
             if (out_created_any != nullptr) *out_created_any = true;
-            VIRTBAG_LOG("extension tab re-anchored index=%d root=%p", index, parent);
+            VIRTBAG_LOG_DEBUG("extension tab re-anchored index=%d root=%p", index, parent);
         }
     }
     return all;
@@ -699,7 +699,7 @@ void queue_extension_tab_click_locked(int extension_bag) {
     }
     qol::extension_bag::ui_state().ui.pending_extension_tab = extension_bag;
     qol::extension_bag::ui_state().ui.pending_extension_tab_generation = qol::extension_bag::ui_state().ui.inventory_generation;
-    VIRTBAG_LOG("extension tab pending bag=%d generation=%llu", extension_bag,
+    VIRTBAG_LOG_DEBUG("extension tab pending bag=%d generation=%llu", extension_bag,
                 static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation));
 }
 

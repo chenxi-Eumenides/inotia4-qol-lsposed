@@ -186,7 +186,8 @@ internal object MainActivityStartupHook {
                 return false
             }
             LogFile.onNativeReady()
-            LogFile.info(LogDomain.PLATFORM, "NativeBridge init OK: ${nativeInitReport()}")
+            LogFile.info(LogDomain.PLATFORM, "NativeBridge init OK: ${nativeInitReportSummary()}")
+            LogFile.debug(LogDomain.PLATFORM) { "NativeBridge init symbol report: ${nativeInitReport()}" }
             LogFile.logModuleIdentity(File(moduleApkPath))
         }
 
@@ -213,6 +214,22 @@ internal object MainActivityStartupHook {
         }
         ApiServer.bootstrap(context, moduleApkPath)
         return true
+    }
+
+    private val trueFieldPattern = Regex("\":true")
+    private val falseFieldPattern = Regex("\":false")
+
+    /**
+     * 符号就绪摘要：INFO 只留 `symbols=<ok>/<total>`。
+     * 完整 90 项 VMA 报告单行约 5 KB，超过 logcat 单条上限，且逐项明细只在排查
+     * 符号缺失时有用，因此明细降为 DEBUG，由 debug.logging 开关控制。
+     */
+    private fun nativeInitReportSummary(): String {
+        val report = nativeInitReport()
+        val ok = trueFieldPattern.findAll(report).count()
+        val missing = falseFieldPattern.findAll(report).count()
+        val total = ok + missing
+        return if (total == 0) report else "symbols=$ok/$total"
     }
 
     private fun nativeInitReport(): String = try {

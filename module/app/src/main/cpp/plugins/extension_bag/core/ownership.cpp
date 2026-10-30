@@ -268,9 +268,14 @@ void drain_deferred_frees_locked() {
         g_deferred_free_queue_size != 0 || g_deferred_free_custody_size != 0,
         std::memory_order_release);
     const size_t freed = queue_result.freed + custody_result.freed;
-    if (freed > 0 || queue_result.kept > 0 || custody_result.kept > 0) {
-        VIRTBAG_LOG("deferred free drain queue=%zu/%zu custody=%zu/%zu freed=%zu",
-                    queue_result.kept, queue_count, custody_result.kept, custody_count, freed);
+    // 队列里还有保留项但本帧没释放是拖动/悬停窗口内的常态，逐帧 INFO 会把
+    // 一次拖动刷成数百行；只有真正发生释放时才值得占一条 INFO。
+    if (freed > 0) {
+        VIRTBAG_LOG("deferred free drain freed=%zu queue=%zu/%zu custody=%zu/%zu", freed,
+                    queue_result.kept, queue_count, custody_result.kept, custody_count);
+    } else if (queue_result.kept > 0 || custody_result.kept > 0) {
+        VIRTBAG_LOG_DEBUG("deferred free retained queue=%zu/%zu custody=%zu/%zu",
+                          queue_result.kept, queue_count, custody_result.kept, custody_count);
     }
 }
 
@@ -288,10 +293,25 @@ void log_ownership_audit_locked(const char* context) {
     // The full audit scans all 128 ownership slots and is called on every
     // release/handover, including drag/drop and bag switches. Keep the cheap
     // counters in normal builds; full audit remains available to diagnostics.
-    VIRTBAG_LOG("ownership counters context=%s allocated=%u released=%u handed_over=%u",
+    //
+    // 计数器每次 release/handover 都变，逐对象输出会在单帧内产生数十行（实测单帧
+    // 49 行）。同一帧只保留首行并累计被合并次数，泄漏核对仍能读到每帧的分配/释放
+    // 总量；被合并的调用数记到下一帧的 suppressed 字段，不会静默丢失。
+    const int64_t frame = deferred_free_frame_locked();
+    static int64_t last_emit_frame = -1;
+    static uint32_t suppressed = 0;
+    if (frame >= 0 && frame == last_emit_frame) {
+        ++suppressed;
+        return;
+    }
+    last_emit_frame = frame;
+    const uint32_t suppressed_now = suppressed;
+    suppressed = 0;
+    VIRTBAG_LOG("ownership counters context=%s allocated=%u released=%u handed_over=%u suppressed=%u",
                 context, qol::extension_bag::ui_state().objects.ownership_ledger.total_allocated,
                 qol::extension_bag::ui_state().objects.ownership_ledger.total_released,
-                qol::extension_bag::ui_state().objects.ownership_ledger.total_handed_over);
+                qol::extension_bag::ui_state().objects.ownership_ledger.total_handed_over,
+                suppressed_now);
 }
 
 bool object_touch_window_active_locked() {

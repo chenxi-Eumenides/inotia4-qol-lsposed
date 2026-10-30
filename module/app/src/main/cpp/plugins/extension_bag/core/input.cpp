@@ -106,6 +106,8 @@ void complete_original_release_cleanup_locked(void* moving_control, int64_t rel_
     {
         ::qol::extension_bag::ReentryLock lock;
         (void)extension_bag_ui_clear_touch_drop_event();
+        // 保留 INFO：`release_cleanup ctl=... flags_cleared` 是扩展背包 release 路径的
+        // 文档化验证锚（rulebook §573-583、verification-matrix VM-15），每次抬手一条。
         VIRTBAG_LOG("release_cleanup ctl=%p flags_cleared", captured_moving_control);
     }
 }

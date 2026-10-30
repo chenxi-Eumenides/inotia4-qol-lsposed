@@ -365,7 +365,6 @@ InvenRemoveItemDataFn g_backup_remove_item_data = nullptr;
 std::atomic<uint64_t> g_consume_item_calls{0};
 std::atomic<uint64_t> g_remove_item_calls{0};
 std::atomic<uint64_t> g_remove_item_trace_calls{0};
-std::atomic<uint64_t> g_shortcut_trace_calls{0};
 
 thread_local bool g_in_have_item = false;
 thread_local bool g_in_get_item_count = false;
@@ -381,6 +380,10 @@ thread_local int g_save_item_depth = 0;
 thread_local int g_save_item_direct_fail_count = 0;
 thread_local std::vector<void*> g_pending_eb_items;
 thread_local uint64_t g_active_shortcut_trace = 0;
+// 单条 CHAR_ProcessShortcut 汇总行所需的中间观测：GetState 在 begin/end 之间被原版
+// 调用多次，只记录次数与最后一次结果，避免每次回调各占一行。
+thread_local uint32_t g_active_shortcut_state_calls = 0;
+thread_local int32_t g_active_shortcut_last_state = -1;
 // R-55：UIEquip_ButtonDestroyExe 动态范围内（含其同步调用的 OKDestroyItem 预演）。
 thread_local bool g_in_equip_destroy_button = false;
 thread_local bool g_has_vanilla_sell_preview_context = false;
@@ -693,7 +696,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
         cap.delta, source_found, source_still_present);
     if (post_field == cap.pre_field && !source_removed) {
         if ((cap.delta % 128) == 0) {
-            QOL_LOG_INFO(QolDomain::kInventory,
+            QOL_LOG_DEBUG(QolDomain::kInventory,
                                 "S2 writeback %s degenerate skip target=%p delta=%u (delta%%128==0)",
                                 op, cap.target, cap.delta);
         }
@@ -718,7 +721,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
         return;
     }
     const uint32_t written = read_count_field(cap.target);
-    QOL_LOG_INFO(QolDomain::kInventory,
+    QOL_LOG_DEBUG(QolDomain::kInventory,
                         "S2 writeback %s merge target=%p %u+%u->%u field=0x%x",
                         op, cap.target, cap.pre_full, cap.delta, cap.new_full, written);
 }
@@ -2331,13 +2334,23 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
 
 struct ShortcutTraceScope {
     uint64_t previous;
+    uint32_t previous_state_calls;
+    int32_t previous_last_state;
 
     explicit ShortcutTraceScope(uint64_t trace_id)
-        : previous(g_active_shortcut_trace) {
+        : previous(g_active_shortcut_trace),
+          previous_state_calls(g_active_shortcut_state_calls),
+          previous_last_state(g_active_shortcut_last_state) {
         g_active_shortcut_trace = trace_id;
+        g_active_shortcut_state_calls = 0;
+        g_active_shortcut_last_state = -1;
     }
 
-    ~ShortcutTraceScope() { g_active_shortcut_trace = previous; }
+    ~ShortcutTraceScope() {
+        g_active_shortcut_trace = previous;
+        g_active_shortcut_state_calls = previous_state_calls;
+        g_active_shortcut_last_state = previous_last_state;
+    }
 };
 
 int char_process_shortcut_wrapper(void* character, int shortcut) {
@@ -2348,16 +2361,10 @@ int char_process_shortcut_wrapper(void* character, int shortcut) {
         backup_missing("hook:CHAR_ProcessShortcut");
         return 0;
     }
+    // 一次快捷键只留一行：begin/end 与 GetState 原本各自一条，同一次调用内的
+    // 三条日志必须靠 trace id 人工关联，是日志量的主要来源之一。
     const bool trace_enabled = shortcut >= 0 && inventory_log_debug_enabled();
-    const uint64_t trace_id = trace_enabled
-                                  ? g_shortcut_trace_calls.fetch_add(1, std::memory_order_relaxed) + 1
-                                  : 0;
-    const ShortcutTraceScope trace_scope(trace_id);
-    if (trace_enabled) {
-        inventory_log_write(0, __FILE__, __LINE__,
-                            "CHAR_ProcessShortcut begin trace=%llu character=%p shortcut=%d",
-                            static_cast<unsigned long long>(trace_id), character, shortcut);
-    }
+    const ShortcutTraceScope trace_scope(trace_enabled ? 1 : 0);
     if (g_game != nullptr && g_game->item_abi.shortcut_item_category != nullptr) {
         int32_t category = 0;
         if (qol::contracts::succeeded(
@@ -2376,9 +2383,9 @@ int char_process_shortcut_wrapper(void* character, int shortcut) {
     const int result = g_backup_char_process_shortcut(character, shortcut);
     if (trace_enabled) {
         inventory_log_write(0, __FILE__, __LINE__,
-                            "CHAR_ProcessShortcut end trace=%llu character=%p shortcut=%d result=%d",
-                            static_cast<unsigned long long>(trace_id), character, shortcut,
-                            result);
+                            "CHAR_ProcessShortcut character=%p shortcut=%d result=%d state=%d state_calls=%u",
+                            character, shortcut, result,
+                            g_active_shortcut_last_state, g_active_shortcut_state_calls);
     }
     return result;
 }
@@ -2392,12 +2399,9 @@ int shortcut_get_state_wrapper(void* character, void* shortcut_state) {
         return 0;
     }
     const int state = g_backup_shortcut_get_state(character, shortcut_state);
-    const uint64_t trace_id = g_active_shortcut_trace;
-    if (trace_id != 0 && inventory_log_debug_enabled()) {
-        inventory_log_write(0, __FILE__, __LINE__,
-                            "SHORTCUT_GetState trace=%llu character=%p state_object=%p result=%d",
-                            static_cast<unsigned long long>(trace_id), character, shortcut_state,
-                            state);
+    if (g_active_shortcut_trace != 0 && inventory_log_debug_enabled()) {
+        ++g_active_shortcut_state_calls;
+        g_active_shortcut_last_state = state;
     }
     return state;
 }

@@ -227,16 +227,13 @@ uint64_t virtual_bag_event(uint64_t event, uint64_t param, uint64_t param2) {
         y = *reinterpret_cast<const int64_t*>(param + 8);
         ::qol::extension_bag::ReentryLock lock;
         log_exit_trace_locked("event_enter", event, param, param2, x, y);
-        const int64_t grid_width = 4 * kGridStep - (kGridStep - kGridCell);
-        const int64_t grid_height = 4 * kGridStep - (kGridStep - kGridCell);
-        QOL_LOG_DEBUG(QolDomain::kExtensionBag, "touch bounds event=0x%llx x=%lld y=%lld grid=%lld,%lld %lldx%lld grid_hit=%d tab_origin=%lld,%lld mode=%d selected=%d overlay=%d root=%p root_gen=%llu state_gen=%llu",
+        // 只留随输入变化的量：网格原点/尺寸与页签原点是常量，指针本身不携带
+        // 可读信息；代际号足以判断"命中的是不是当前那一份视图"。
+        QOL_LOG_DEBUG(QolDomain::kExtensionBag, "touch bounds event=0x%llx x=%lld y=%lld grid_hit=%d mode=%d selected=%d overlay=%d root_gen=%llu state_gen=%llu",
                     static_cast<unsigned long long>(event), static_cast<long long>(x), static_cast<long long>(y),
-                    static_cast<long long>(kGridX), static_cast<long long>(kGridY),
-                    static_cast<long long>(grid_width), static_cast<long long>(grid_height),
-        extension_bag_grid_hit(x, y) ? 1 : 0, static_cast<long long>(kCellX),
-                    static_cast<long long>(kCellY), static_cast<int>(runtime_state().objects.bag.mode),
+                    extension_bag_grid_hit(x, y) ? 1 : 0, static_cast<int>(runtime_state().objects.bag.mode),
                     runtime_state().objects.bag.selected, qol::extension_bag::ui_state().objects.module_view_installed ? 1 : 0,
-                    qol::extension_bag::ui_state().ui.extension_tab_root, static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.extension_tab_generation),
+                    static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.extension_tab_generation),
                     static_cast<unsigned long long>(qol::extension_bag::ui_state().ui.inventory_generation));
         if (qol::extension_bag::ui_state().ui.extension_touch_capture) {
             log_p5_observation_locked("panel-capture-press", nullptr, event, param2 != 0,

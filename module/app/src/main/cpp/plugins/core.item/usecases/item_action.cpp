@@ -104,7 +104,7 @@ QolResult read_item(const QolActionRef& ref, QolInventoryItemRef* out) {
 InventoryActionStatus resolve_item(const QolActionRef& ref, QolInventoryItemRef* out) {
     const QolResult result = read_item(ref, out);
     if (!native_space(ref.space_id)) {
-        QOL_LOG_INFO(0,
+        QOL_LOG_DEBUG(0,
                      "inventory resolve provider ref=%d/%d/%d result=%d out=%d/%d/%d kind=%d cat=%d count=%d handle=%u/%u",
                      ref.space_id, ref.bag, ref.slot, result.code, out->space_id, out->bag,
                      out->slot, out->kind, out->category, out->count, out->item.slot,
