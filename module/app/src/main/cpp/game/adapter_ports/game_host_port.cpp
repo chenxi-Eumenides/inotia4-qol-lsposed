@@ -424,11 +424,19 @@ QolResult read_item_two_handed(int32_t category, int32_t* out_value) {
     return contracts::ok();
 }
 
+// G_INVEN_SAVED_BAG_VMA 是 C18 改版在映像内为其原生追加袋/扁平袋号保留的 scratch
+// 单元；原版、overhaul、monster 映像没有该单元，读写会落到无关数据，因此只在
+// C18 变体上访问。
+bool c18_saved_bag_supported() {
+    return game_has_capability(contracts::kQolTargetCapabilityC18NativeBagLayoutCandidate) != 0;
+}
+
 QolResult read_saved_bag(int32_t* out_bag) {
     if (out_bag == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
     }
     *out_bag = -1;
+    if (!c18_saved_bag_supported()) return unsupported();
     if (g_base == 0) return not_ready();
     auto* value = reinterpret_cast<int32_t*>(g_base + G_INVEN_SAVED_BAG_VMA);
     if (!game_memory_accessible(value, sizeof(*value), 'r')) return not_ready();
@@ -438,6 +446,7 @@ QolResult read_saved_bag(int32_t* out_bag) {
 
 QolResult write_saved_bag(int32_t bag) {
     if (bag < 0) return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    if (!c18_saved_bag_supported()) return unsupported();
     if (g_base == 0) return not_ready();
     auto* value = reinterpret_cast<int32_t*>(g_base + G_INVEN_SAVED_BAG_VMA);
     if (!game_memory_accessible(value, sizeof(*value), 'w')) return not_ready();

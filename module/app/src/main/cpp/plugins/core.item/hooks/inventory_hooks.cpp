@@ -1049,6 +1049,37 @@ struct RegisteredDestination {
     int32_t slot = -1;
 };
 
+// FindSaveSlot 与紧随其后的 SaveItem/SaveItemDirect 之间没有参数通道：原生
+// SaveItem 只把槽号传给 SaveItemDirect，袋号来自变体私有 scratch 单元
+//（G_INVEN_SAVED_BAG_VMA，仅 C18 改版存在，且模块按 32 位写会在只写字节的
+// 路径上留下垃圾高位）。注册源收编的目标因此改由模块内 thread-local pending
+// 传递，不依赖变体私有单元。
+struct PendingSaveDestination {
+    void* item = nullptr;
+    int32_t space_id = -1;  // kQolBagSpaceVariant(1) 或注册源 space(>=2)
+    int32_t bag = -1;
+    int32_t slot = -1;
+};
+thread_local PendingSaveDestination g_pending_save_destination;
+
+void remember_pending_save(void* item, int32_t space_id, int32_t bag, int32_t slot) {
+    if (item == nullptr || space_id < 0 || bag < 0 || slot < 0) return;
+    // 只有 SaveItem 调用栈内的 FindSaveSlot 才需要把目标袋带进 SaveItemDirect；
+    // 商店门禁等“先查后买”的调用会在 SaveItem 内部再查一次，提前记录反而会
+    // 让未实际写入的 pending 残留到后续写入。
+    if (g_save_item_depth <= 0) return;
+    g_pending_save_destination = {item, space_id, bag, slot};
+}
+
+bool take_pending_save(void* item, int32_t slot, PendingSaveDestination* out) {
+    if (out == nullptr) return false;
+    const PendingSaveDestination& pending = g_pending_save_destination;
+    if (pending.item != item || pending.slot != slot || pending.space_id < 0) return false;
+    *out = pending;
+    g_pending_save_destination = PendingSaveDestination{};
+    return true;
+}
+
 bool hook_item_category(void* item, int32_t* out_category) {
     if (item == nullptr || out_category == nullptr) return false;
     const auto* port = qol::features::core_item::g_port;
@@ -1089,14 +1120,6 @@ bool read_saved_bag(int32_t* out_bag) {
     if (!qol::contracts::succeeded(g_game->inventory_write.saved_bag(&bag))) return false;
     *out_bag = bag;
     return true;
-}
-
-bool write_saved_bag(int32_t bag) {
-    if (g_game == nullptr || g_game->abi.minor < qol::contracts::kGameHostSavedBagMinor ||
-        g_game->inventory_write.set_saved_bag == nullptr) {
-        return false;
-    }
-    return qol::contracts::succeeded(g_game->inventory_write.set_saved_bag(bag));
 }
 
 bool build_transfer_for_hook_item(void* item, qol::contracts::QolBagTransfer* out_transfer,
@@ -1271,10 +1294,6 @@ const qol::contracts::QolBagSource* registered_source_for_space(int32_t space_id
     return nullptr;
 }
 
-int32_t flat_bag_for(const qol::contracts::QolBagSource& source, int32_t bag) {
-    return qol::contracts::qol_bag_flat_id(source.space_id, bag);
-}
-
 bool decode_flat_bag(int32_t flat_bag, int32_t* out_space_id, int32_t* out_bag) {
     return qol::contracts::qol_bag_flat_decode(flat_bag, out_space_id, out_bag);
 }
@@ -1328,6 +1347,7 @@ bool extension_unequip_to_registered_source(void* character, int32_t equip_slot)
 }
 
 int find_save_slot_wrapper(void* item, int8_t* out_slot) {
+    g_pending_save_destination = PendingSaveDestination{};
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:INVEN_FindSaveSlot"});
@@ -1358,7 +1378,9 @@ int find_save_slot_wrapper(void* item, int8_t* out_slot) {
     int32_t variant_bag = -1;
     int32_t variant_slot = -1;
     if (find_variant_destination(transfer, stackable, &variant_bag, &variant_slot)) {
-        if (!write_saved_bag(variant_bag)) return 0;
+        // 变体追加袋号（6..）无法写进 SaveItem 的 5 位槽字节，且各变体的
+        // SaveItem 是否读 scratch 单元不一致；统一由模块 pending 带到 SaveItemDirect。
+        remember_pending_save(item, qol::contracts::kQolBagSpaceVariant, variant_bag, variant_slot);
         if (out_slot != nullptr) *out_slot = static_cast<int8_t>(variant_slot);
         inventory_log_write(0, __FILE__, __LINE__,
                             "FindSaveSlot variant category=%d native_bag=%d slot=%d",
@@ -1367,13 +1389,12 @@ int find_save_slot_wrapper(void* item, int8_t* out_slot) {
     }
     RegisteredDestination destination{};
     if (!find_registered_destination(transfer, stackable, &destination)) return 0;
-    const int32_t flat_bag = flat_bag_for(*destination.source, destination.bag);
-    if (!write_saved_bag(flat_bag)) return 0;
+    remember_pending_save(item, destination.source->space_id, destination.bag, destination.slot);
     if (out_slot != nullptr) *out_slot = static_cast<int8_t>(destination.slot);
     inventory_log_write(0, __FILE__, __LINE__,
-                        "FindSaveSlot adopt category=%d space=%d bag=%d slot=%d flat=%d",
+                        "FindSaveSlot adopt category=%d space=%d bag=%d slot=%d pending=1",
                         category, destination.source->space_id, destination.bag,
-                        destination.slot, flat_bag);
+                        destination.slot);
     return 1;
 }
 
@@ -1402,6 +1423,8 @@ int save_item_wrapper(void* item) {
         }
         direct_imported = true;
     }
+    // 原生 SaveItem 已返回，pending 只服务这一次调用；残留会污染后续 SaveItemDirect。
+    g_pending_save_destination = PendingSaveDestination{};
     if (direct_imported) {
         inventory_log_write(0, __FILE__, __LINE__,
                             "SaveItem direct_eb item=%p backup=%p", item,
@@ -1428,6 +1451,37 @@ int save_item_wrapper(void* item) {
 // g_virtual_bag_mtx、不调用任何被 Hook 函数（R-44）；类别与 999 应用态门控 fail-closed。
 // 仅 999 已应用时模块回写 a+b；关闭态交还原版只写 b。
 
+// 注册源收编的落袋动作：flat 袋号路径与模块 pending 路径共用，保证校验、转移
+// 构造与失败计数语义一致。
+bool import_registered_item_direct(void* item, int32_t space_id, int32_t bag, int32_t slot,
+                                   const char* origin) {
+    const auto* source = registered_source_for_space(space_id);
+    if (source == nullptr || source->info == nullptr || source->import_item == nullptr) {
+        return false;
+    }
+    qol::contracts::QolBagInfo info{};
+    if (!qol::contracts::succeeded(source->info(bag, &info)) || slot < 0 ||
+        slot >= info.capacity) {
+        return false;
+    }
+    qol::contracts::QolBagTransfer transfer{};
+    if (!build_transfer_for_hook_item(item, &transfer, nullptr, nullptr)) return false;
+    qol::contracts::QolBagMutationResult imported{};
+    const QolResult result = source->import_item(&transfer, bag, slot, &imported);
+    if (!qol::contracts::succeeded(result)) {
+        ++g_save_item_direct_fail_count;
+        QOL_LOG_ERROR(QolDomain::kInventory,
+                      "SaveItemDirect eb failed origin=%s item=%p space=%d bag=%d slot=%d code=%d",
+                      origin, item, space_id, bag, slot, static_cast<int32_t>(result.code));
+        return false;
+    }
+    g_pending_eb_items.push_back(item);
+    inventory_log_write(0, __FILE__, __LINE__,
+                        "SaveItemDirect eb imported origin=%s item=%p space=%d bag=%d slot=%d",
+                        origin, item, space_id, bag, slot);
+    return true;
+}
+
 int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -1435,6 +1489,24 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     if (!inventory_native_hook_support_enabled())
         return call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct,
                            item, bag, slot);
+    // pending 目标必须早于 flat 分支与原版 backup 消费：C18 改版的 SaveItem 会用
+    // 变体私有 scratch 里的袋号调用本函数，该值可能来自更早一次写操作，直接放行会
+    // 把物品写进错误槽位。
+    if (g_save_item_depth > 0) {
+        PendingSaveDestination pending{};
+        if (take_pending_save(item, slot, &pending)) {
+            if (pending.space_id == qol::contracts::kQolBagSpaceVariant) {
+                return call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct, item,
+                                   pending.bag, pending.slot);
+            }
+            if (pending.space_id >= qol::contracts::kQolBagSpaceFirstRegistered) {
+                return import_registered_item_direct(item, pending.space_id, pending.bag,
+                                                     pending.slot, "pending")
+                           ? 1
+                           : 0;
+            }
+        }
+    }
     if (bag >= qol::contracts::kQolBagFlatRegisteredBase) {
         if (g_save_item_depth <= 0) {
             inventory_log_write(0, __FILE__, __LINE__,
@@ -1445,33 +1517,7 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
         int32_t space_id = -1;
         int32_t local_bag = -1;
         if (!decode_flat_bag(bag, &space_id, &local_bag)) return 0;
-        const auto* source = registered_source_for_space(space_id);
-        if (source == nullptr || source->info == nullptr || source->import_item == nullptr) {
-            return 0;
-        }
-        qol::contracts::QolBagInfo info{};
-        if (!qol::contracts::succeeded(source->info(local_bag, &info)) ||
-            slot < 0 || slot >= info.capacity) {
-            return 0;
-        }
-        qol::contracts::QolBagTransfer transfer{};
-        if (!build_transfer_for_hook_item(item, &transfer, nullptr, nullptr)) return 0;
-        qol::contracts::QolBagMutationResult imported{};
-        const QolResult result =
-            source->import_item(&transfer, local_bag, slot, &imported);
-        if (!qol::contracts::succeeded(result)) {
-            ++g_save_item_direct_fail_count;
-            QOL_LOG_ERROR(QolDomain::kInventory,
-                          "SaveItemDirect eb failed item=%p space=%d bag=%d slot=%d code=%d",
-                          item, space_id, local_bag, slot,
-                          static_cast<int32_t>(result.code));
-            return 0;
-        }
-        g_pending_eb_items.push_back(item);
-        inventory_log_write(0, __FILE__, __LINE__,
-                            "SaveItemDirect eb imported item=%p space=%d bag=%d slot=%d",
-                            item, space_id, local_bag, slot);
-        return 1;
+        return import_registered_item_direct(item, space_id, local_bag, slot, "flat") ? 1 : 0;
     }
     // INVEN_SaveItemDirect（加语义）：空槽写入不需要回写——对象创建侧数量由
     // MakeItem wrapper / 模块 s2 写点保证 a+b 完整；同身份堆叠合并时原版只写 b
