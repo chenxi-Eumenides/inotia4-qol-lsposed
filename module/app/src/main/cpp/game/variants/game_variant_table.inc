@@ -2,7 +2,7 @@
 // 重新生成：uv run python scripts/maintenance/build_game_variant_table.py
 //
 // 源文件清单（确定性排序，无 arm64 libgame.so 的 APK 不在此表内）：
-//   apk/game-apk/艾诺迪亚4_C18L_v589.apk
+//   apk/game-apk/艾诺迪亚4_C18L_v586.apk
 //   apk/game-apk/艾诺迪亚4_monster_v29.apk
 //   apk/game-apk/艾诺迪亚4_原版_v1.3.2.apk
 //   apk/game-apk/艾诺迪亚4_盗版大修_v0810.apk
@@ -12,8 +12,8 @@
 //   apk/game-apk/history/艾诺迪亚4_C18L_v513.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v514.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v520.apk
-//   apk/game-apk/history/艾诺迪亚4_C18L_v586.apk
 //   apk/game-apk/history/艾诺迪亚4_C18L_v588.apk
+//   apk/game-apk/history/艾诺迪亚4_C18L_v589.apk
 //   apk/game-apk/history/艾诺迪亚4_C18_v0.2.apk
 //   apk/game-apk/history/艾诺迪亚4_C18_v0.38b.apk
 //   apk/game-apk/history/艾诺迪亚4_monster_v19.apk
