@@ -87,6 +87,13 @@ void* craft_selected_inven_item();
 
 void craft_init_mixing_state();       // UIMix_InitMixingState（不清填入格）
 void craft_reset_stuff_item_control();  // UIMix_ResetStuffItemControl（清空填入格）
+
+// 委托原版 UIMix_StartMix 执行当前 [g_uimix] 上的合成（三同类宝石三合一接回原版链）：
+// 先经 MIXSYSTEM_GetCost 校验 mixType 合法并把 [g_uimix+0xf8] 重算为该变体原版口径费用
+// （变体自己决定 MinusMoney 与否——免费变体自然扣不到），再调 StartMix。
+// 产物词条、扣料、清格、刷新、弹窗全部按该变体原版行为执行；不返回成败（原版无返回值）。
+// 任一前置缺失或配方非法返回 false（此时未进入 StartMix，材料未扣）。
+bool craft_delegate_start_mix(uint32_t mix_type);
 void craft_refresh_inven_items();     // UIMix_RefreshInvenItem（按当前袋号刷新）
 void craft_set_ui_type(int64_t type); // UIMix_SetType（type 仅限 0..4）
 void craft_play_sound(int16_t sound_id);

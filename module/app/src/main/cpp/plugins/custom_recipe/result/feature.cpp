@@ -1087,7 +1087,8 @@ result::PrepareOutcome api_prepare(const result::CraftPrepareInput* in) {
     return PrepareOutcome::kConfirmPending;
 }
 
-result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
+result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in,
+                                       uint32_t* delegated_mix_type) {
     note_thread_contract("execute");
     using ::custom_recipe::ProductMode;
     using ::custom_recipe::ThreeSlotRecipe;
@@ -1121,6 +1122,17 @@ result::CraftExecuteResult api_execute(const result::CraftExecuteInput* in) {
     if (matched_recipe == nullptr || !same_three_slot_recipe(*matched_recipe, recipe)) {
         log_execute_stage(1, "precheck_recipe", 0, kQolErrConflict, 0, 0);
         return CraftExecuteResult::kStaleSlots;
+    }
+
+    // 三同类档位宝石三合一 → 委托该变体原版 UIMix_StartMix（产物词条含大修定向合成、
+    // 扣料、清格、弹窗全部原版行为）。此判定须在 craft_facts/inventory_action 就绪检查之前：
+    // 委托路径不使用任何插件产物/扣料端口。
+    if (const uint32_t delegate = ::custom_recipe::delegate_mix_type_for(*matched_recipe,
+                                                                        in->slot_categories);
+        delegate != 0) {
+        if (delegated_mix_type != nullptr) *delegated_mix_type = delegate;
+        log_execute_stage(1, "delegate_original_mix", delegate, kQolOk, 0, 0);
+        return CraftExecuteResult::kOkDelegated;
     }
 
     struct CategoryPlan {

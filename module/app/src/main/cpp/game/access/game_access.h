@@ -306,6 +306,7 @@ extern UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_p
 extern ItemDrawPortingFn fn_item_draw_porting;
 extern MakeMixFn fn_make_mix;
 extern GetCostFn fn_get_cost;
+extern UIMixStartMixFn fn_uimix_start_mix;
 // 物品序列化（lossless 扩展背包移动，v0.7.0）
 extern SaveSaveItemFn fn_save_save_item;
 extern SaveLoadItemFn fn_save_load_item;

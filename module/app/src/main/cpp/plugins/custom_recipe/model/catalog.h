@@ -129,6 +129,10 @@ const ThreeSlotRecipe* match_static_three_slot(
     bool (*is_special_equip)(uint16_t category) = nullptr,
     const bool jewel_slots[3] = nullptr);
 
+// 三格同为档位宝石 28..31 且产物=高一档 → 返回对应原版宝石配方的 mixType（RECIPEBASE 12..15，
+// 恒等式 mixType = product − 17），供三合一委托原版 UIMix_StartMix；其它组合返回 0（不委托）。
+uint32_t delegate_mix_type_for(const ThreeSlotRecipe& recipe, const uint16_t slots[3]);
+
 // ---------------------------------------------------------------------------
 // 动态特殊装备配方（进档时按创建时间 seed 构建，并使用进程内缓存）
 // ---------------------------------------------------------------------------

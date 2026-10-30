@@ -53,6 +53,11 @@ constexpr const char* kResourceResetStuff = "hook:UIMix_ResetStuffItemControl";
 UIMixButtonInvenItemSelectExeFn g_backup_place = nullptr;
 UIMixButtonMixingExeFn g_backup_mixing = nullptr;
 MakeMixFn g_backup_make_item = nullptr;
+
+// 委托原版 UIMix_StartMix 执行三同类宝石三合一期间置位：原版 type1 传给 MIXSYSTEM_MakeItem 的
+// out 槽是未初始化栈内存，垃圾非空指针会误入本 wrapper 的升阶分支（原地升级语义）→ 合成必败。
+// 置位期间 MakeItem wrapper 直接旁路到原版函数（定向/随机词条由原版链决定）。
+std::atomic<bool> g_startmix_delegate{false};
 UIMixButtonMenuListExeFn g_backup_menu = nullptr;
 UIMixButtonRecipeExeFn g_backup_recipe = nullptr;
 XTextCtrlSetTextControlFn g_backup_set_desc_text = nullptr;
@@ -219,9 +224,27 @@ void on_confirm_three_slot() {
             in.held_counts[i] = craft_category_held_count(item_category(in.items[i]));
         }
     }
-    switch (api->execute(&in)) {
+    uint32_t delegated_mix_type = 0;
+    switch (api->execute(&in, &delegated_mix_type)) {
         case result::CraftExecuteResult::kOk:
             finish_three_slot_craft();
+            return;
+        case result::CraftExecuteResult::kOkDelegated:
+            // 三同类档位宝石三合一：mixType 已由结果层推导（原版宝石配方 12..15）。
+            // 写 [g_uimix+0x48] 与原版口径费用后全权委托原版 UIMix_StartMix——产物词条
+            //（大修定向合成/c18 补掷/原版随机）、扣料、清格、刷新、音效、弹窗按该变体原版行为
+            // 执行，StartMix 自带全套收尾，这里不再 finish。
+            // 委托失败（符号缺失/配方非法）时未进入 StartMix，材料未扣，保留已填格。
+            g_startmix_delegate.store(true, std::memory_order_release);
+            if (!craft_delegate_start_mix(delegated_mix_type)) {
+                g_startmix_delegate.store(false, std::memory_order_release);
+                craft_show_craft_unavailable();
+                log_message(kLogWarn, "delegate start mix failed mixType=%u", delegated_mix_type);
+                return;
+            }
+            g_startmix_delegate.store(false, std::memory_order_release);
+            log_message(kLogDebug, "delegated to original start mix mixType=%u",
+                        delegated_mix_type);
             return;
         case result::CraftExecuteResult::kStaleSlots:
         case result::CraftExecuteResult::kAborted:
@@ -446,6 +469,11 @@ QolResult craft_rand_inclusive(int32_t lo, int32_t hi, int32_t* out) {
 }
 
 int make_item_execute(int32_t mix_type, void** out_item) {
+    // 委托原版 StartMix 期间：产物由原版链生成（大修定向合成 / c18 补掷 / 原版随机），
+    // 且 out 槽可能是未初始化栈内存（垃圾非空指针），必须先于升阶分支旁路。
+    if (g_startmix_delegate.load(std::memory_order_acquire)) {
+        return (g_backup_make_item != nullptr) ? g_backup_make_item(mix_type, out_item) : 1;
+    }
     int32_t result = -1;
     const result::CraftResultApi* api = craft_api();
     if (out_item != nullptr && *out_item != nullptr) {

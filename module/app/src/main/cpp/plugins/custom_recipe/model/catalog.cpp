@@ -423,6 +423,16 @@ const ThreeSlotRecipe* match_three_slot(const uint16_t slots[3],
                           jewel_slots);
 }
 
+uint32_t delegate_mix_type_for(const ThreeSlotRecipe& recipe, const uint16_t slots[3]) {
+    if (slots == nullptr) return 0;
+    const uint16_t src = slots[0];
+    // 档位宝石 28..31（28 低/29 中/30 高/31 顶级）三同 → 原版宝石配方 12..15。
+    if (src < 28 || src > 31) return 0;
+    if (slots[1] != src || slots[2] != src) return 0;
+    if (recipe.product != static_cast<uint16_t>(src + 1)) return 0;
+    return static_cast<uint32_t>(recipe.product) - 17u;
+}
+
 bool catalog_ready() { return g_bound; }
 
 void bind_base_record_count(uint16_t base_record_count) {

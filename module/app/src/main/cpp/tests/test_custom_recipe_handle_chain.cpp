@@ -706,7 +706,8 @@ CraftExecuteResult execute_three_slots(const QolItemHandle (&items)[3]) {
         in.slot_categories[i] = fact != nullptr ? static_cast<uint16_t>(fact->category) : 0;
         if (fact != nullptr) in.held_counts[i] = held_of(fact->category);
     }
-    return api().execute(&in);
+    uint32_t delegated = 0;
+    return api().execute(&in, &delegated);
 }
 
 // 目录第 2 条（kTierUp）的 mixType = base_record_count(69) + 1。
@@ -835,7 +836,7 @@ void test_precheck_failures_do_not_consume() {
             in.items[i] = tampered[i];
             in.slot_categories[i] = i == 0 ? 28 : (i == 1 ? 20 : 25);
         }
-        assert(api().execute(&in) == CraftExecuteResult::kStaleSlots);
+        assert(api().execute(&in, nullptr) == CraftExecuteResult::kStaleSlots);
         assert(g_remove_item_calls == 0 && g_remove_item_data_calls == 0);
         assert(g_create_calls == 0 && g_save_calls == 0);
     }
@@ -1008,43 +1009,37 @@ void test_stackable_material_discards_filled_stack() {
     assert(g_location_count == 2);
 }
 
-// 同类别多堆：扣的是填入那一堆，不是袋序扫描的第一堆。
-void test_same_category_stacks_consume_filled_stack() {
+// 三同类档位宝石 → 委托原版 UIMix_StartMix（原版宝石配方 12..15）：
+// 插件不动材料（扣料/产物/保存全部由原版链负责，词条继承该变体原版行为）。
+void test_three_jewel_delegates_to_original_mix() {
     init_fixture();
     add_location(kLowJewelA, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 0);
     add_location(kLowJewelB, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 5);
     add_location(kJewel, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 1, 4);
     assert(prepare_three_slots(kThreeJewelRecipe));
     const int32_t held_before = held_of(28);
-    assert(execute_three_slots(kThreeJewelRecipe) == CraftExecuteResult::kOk);
-    assert(g_discard_calls == 3 && g_remove_item_data_calls == 0 && g_remove_item_calls == 0);
-    // 第 2 格填入的是同袋后槽的那一堆：类别删除会先命中槽 0，这里必须命中槽 5。
-    assert(g_discard_refs[0].space_id == kQolBagSpaceOriginal && g_discard_refs[0].bag == 0 &&
-           g_discard_refs[0].slot == 0);
-    assert(g_discard_refs[1].space_id == kQolBagSpaceOriginal && g_discard_refs[1].bag == 0 &&
-           g_discard_refs[1].slot == 5);
-    assert(g_discard_refs[2].space_id == kQolBagSpaceOriginal && g_discard_refs[2].bag == 1 &&
-           g_discard_refs[2].slot == 4);
-    assert(held_of(28) == held_before - 3 && g_save_calls == 1);
-}
+    CraftExecuteInput in{};
+    for (size_t i = 0; i < 3; ++i) {
+        in.items[i] = kThreeJewelRecipe[i];
+        const ItemFact* fact = find_fact(kThreeJewelRecipe[i]);
+        in.slot_categories[i] = fact != nullptr ? static_cast<uint16_t>(fact->category) : 0;
+        if (fact != nullptr) in.held_counts[i] = held_of(fact->category);
+    }
+    uint32_t delegated = 0;
+    assert(api().execute(&in, &delegated) == CraftExecuteResult::kOkDelegated);
+    assert(delegated == 12);  // 3×28 → 29：RECIPEBASE[12]（product − 17）
+    // 委托路径插件零物品操作：扣料/产物/保存全不发生，材料由原版 StartMix 扣。
+    assert(g_discard_calls == 0 && g_remove_item_calls == 0 && g_remove_item_data_calls == 0);
+    assert(g_create_calls == 0 && g_save_calls == 0);
+    assert(held_of(28) == held_before);
 
-// 同一堆填了两格且只剩 1 件：第一格扣空后第二格回退原版类别入口补扣一次。
-void test_exhausted_filled_stack_falls_back_to_category() {
+    // 同一堆填多格的回退补扣语义随扣料一并移交原版链：重复堆同样只委托、不动材料。
     init_fixture();
     add_location(kLowJewelA, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 2);
-    g_locations[0].count = 1;  // 该堆只剩 1 件
-    add_location(kLowJewelB, static_cast<int32_t>(QolInventoryItemKind::kOriginal), 0, 6);
     const QolItemHandle repeated[3] = {kLowJewelA, kLowJewelA, kLowJewelB};
     assert(prepare_three_slots(repeated));
-    const int32_t held_before = held_of(28);
-    assert(execute_three_slots(repeated) == CraftExecuteResult::kOk);
-    assert(g_discard_calls == 2 && g_remove_item_data_calls == 1);
-    // 第 1 格：填入堆自身（槽 2）。第 2 格：该堆已扣空 → 类别回退。第 3 格：另一堆（槽 6）。
-    assert(g_discard_refs[0].space_id == kQolBagSpaceOriginal && g_discard_refs[0].bag == 0 &&
-           g_discard_refs[0].slot == 2);
-    assert(g_discard_refs[1].space_id == kQolBagSpaceOriginal && g_discard_refs[1].bag == 0 &&
-           g_discard_refs[1].slot == 6);
-    assert(held_of(28) == held_before - 3 && g_save_calls == 1);
+    assert(execute_three_slots(repeated) == CraftExecuteResult::kOkDelegated);
+    assert(g_discard_calls == 0 && g_remove_item_data_calls == 0 && g_save_calls == 0);
 }
 
 void test_material_fallback_when_filled_stack_exhausted() {
@@ -1393,7 +1388,7 @@ void test_wrapper_equivalent_execute_success() {
         if (fact != nullptr) in.held_counts[i] = held_of(fact->category);
     }
     const int32_t held_28 = held_of(28);
-    assert(api().execute(&in) == CraftExecuteResult::kOk);
+    assert(api().execute(&in, nullptr) == CraftExecuteResult::kOk);
     assert(g_remove_item_data_calls == 3);   // 三格各扣 1（真实扣料）
     assert(g_create_calls == 1 && g_save_calls == 1);
     assert(g_free_calls == 0);               // 成功后不释放产物
@@ -1620,8 +1615,7 @@ int main() {
     test_product_prepare_failure_no_consumption();
     test_material_remove_failures();
     test_stackable_material_discards_filled_stack();
-    test_same_category_stacks_consume_filled_stack();
-    test_exhausted_filled_stack_falls_back_to_category();
+    test_three_jewel_delegates_to_original_mix();
     test_material_fallback_when_filled_stack_exhausted();
     test_material_discard_failure_aborts_and_cleans_product();
     test_non_stackable_material_still_removes_by_handle();

@@ -25,6 +25,9 @@ struct QolCraftUiWritePort {
                                       QolCraftPopupCallback cancel);
     QolResult (*set_target_slot_item)(QolItemHandle item);
     QolResult (*set_cost_zero)();
+    // v1.2：三同类宝石三合一委托原版 UIMix_StartMix（内部先按原版口径重算费用再调原版函数）。
+    // 未进入原版 StartMix（符号缺失/配方非法）返回非 Ok，此时材料未扣。
+    QolResult (*delegate_start_mix)(uint32_t mix_type);
 };
 
 static_assert(std::is_standard_layout<QolCraftUiWritePort>::value,

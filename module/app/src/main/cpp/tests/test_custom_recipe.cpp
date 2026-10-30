@@ -639,6 +639,36 @@ static void test_chaos_scroll_recipe() {
 }
 
 // ---------------------------------------------------------------------------
+// 三同类档位宝石 → 原版宝石配方 mixType 推导（委托原版 UIMix_StartMix 用）。
+// ---------------------------------------------------------------------------
+static void test_delegate_mix_type_for() {
+    size_t n = 0;
+    const cr::ThreeSlotRecipe* recipes = cr::three_slot_recipes(&n);
+    CHECK(recipes != nullptr && n == 8);
+
+    // 规则 3-6（索引 2-5）：三同类档位宝石 → 原版 RECIPEBASE 12..15（product − 17）。
+    const uint16_t gems[4] = {28, 29, 30, 31};
+    const uint16_t want_mix[4] = {12, 13, 14, 15};
+    for (int i = 0; i < 4; ++i) {
+        const uint16_t slots[3] = {gems[i], gems[i], gems[i]};
+        const cr::ThreeSlotRecipe* hit = cr::match_three_slot(slots);
+        CHECK(hit == &recipes[2 + i]);
+        CHECK(cr::delegate_mix_type_for(*hit, slots) == want_mix[i]);
+    }
+
+    // 非档位宝石 / 混档 / 混沌（32 无上级）/ 产物与档位不衔接 → 不委托。
+    const uint16_t chaos[3] = {32, 32, 32};
+    CHECK(cr::delegate_mix_type_for(recipes[2], chaos) == 0);
+    const uint16_t mixed_tiers[3] = {28, 29, 28};
+    CHECK(cr::delegate_mix_type_for(recipes[2], mixed_tiers) == 0);
+    const uint16_t scrolls[3] = {20, 20, 25};
+    CHECK(cr::delegate_mix_type_for(recipes[6], scrolls) == 0);
+    const uint16_t leather[3] = {35, 0, 41};
+    CHECK(cr::delegate_mix_type_for(recipes[0], leather) == 0);
+    CHECK(cr::delegate_mix_type_for(recipes[0], nullptr) == 0);
+}
+
+// ---------------------------------------------------------------------------
 // 「两件相同特殊装备 + 元气恢复药水」配方：槽位严格顺序 + 槽0/槽2 必须同类别 + 通配特殊装备槽。
 // ---------------------------------------------------------------------------
 static bool fake_is_special(uint16_t category) {
@@ -1081,6 +1111,7 @@ int main() {
     test_table_invalid_log_dedupe();
     test_table_group_bits_restore();
     test_chaos_scroll_recipe();
+    test_delegate_mix_type_for();
     test_max_socket_enchant_recipe();
     test_recipe_match_helpers();
     test_dynamic_recipe_cache();

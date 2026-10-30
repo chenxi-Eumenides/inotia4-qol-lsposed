@@ -1276,6 +1276,7 @@ using ItemCreatePerfectItemFn = void* (*)(int32_t category);  // ITEMSYSTEM_Crea
 using NetworkStoreSetStateFn = void (*)(int);
 using MakeMixFn = int (*)(int32_t, void**);       // MIXSYSTEM_MakeItem：0=成功（*outItem 已填），非 0=失败
 using GetCostFn = int64_t (*)(int32_t, void*);    // MIXSYSTEM_GetCost：合成费用（负数=非法配方）
+using UIMixStartMixFn = void (*)();               // UIMix_StartMix：按 [g_uimix+0x48] 配方执行合成全程（产物/扣料/清格/弹窗）
 using SaveSaveItemFn = int (*)(uint8_t*, void*);  // SAVE_SaveItem(out, item)：序列化物品，返回总字节（uxtb 截断，须 ≤255）
 using SaveLoadItemFn = int (*)(const uint8_t*, void**, int*);  // SAVE_LoadItem(in, &out, &consumed)：重建物品，1=成功
 using ItemPoolFreeFn = void (*)(void*);           // ITEMPOOL_Free(item)：释放物品对象

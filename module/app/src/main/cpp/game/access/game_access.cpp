@@ -527,6 +527,7 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
     fn_item_draw_porting = reinterpret_cast<ItemDrawPortingFn>(g_base + fn_resolve("F_ITEM_DRAW_PORTING_VMA", F_ITEM_DRAW_PORTING_VMA));
     fn_make_mix = reinterpret_cast<MakeMixFn>(g_base + fn_resolve("F_MAKE_MIX_VMA", F_MAKE_MIX_VMA));
     fn_get_cost = reinterpret_cast<GetCostFn>(g_base + fn_resolve("F_GET_COST_VMA", F_GET_COST_VMA));
+    fn_uimix_start_mix = reinterpret_cast<UIMixStartMixFn>(g_base + fn_resolve("F_UIMIX_START_MIX_VMA", F_UIMIX_START_MIX_VMA));
     fn_save_save_item = reinterpret_cast<SaveSaveItemFn>(g_base + fn_resolve("F_SAVE_SAVE_ITEM_VMA", F_SAVE_SAVE_ITEM_VMA));
     fn_save_load_item = reinterpret_cast<SaveLoadItemFn>(g_base + fn_resolve("F_SAVE_LOAD_ITEM_VMA", F_SAVE_LOAD_ITEM_VMA));
     fn_itempool_free = reinterpret_cast<ItemPoolFreeFn>(g_base + fn_resolve("F_ITEMPOOL_FREE_VMA", F_ITEMPOOL_FREE_VMA));

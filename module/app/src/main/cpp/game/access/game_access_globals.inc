@@ -260,6 +260,7 @@ UiEquipInvenItemControlEventProcFn fn_ui_equip_inven_item_control_event_proc = n
 ItemDrawPortingFn fn_item_draw_porting = nullptr;
 MakeMixFn fn_make_mix = nullptr;
 GetCostFn fn_get_cost = nullptr;
+UIMixStartMixFn fn_uimix_start_mix = nullptr;
 SaveSaveItemFn fn_save_save_item = nullptr;
 SaveLoadItemFn fn_save_load_item = nullptr;
 ItemPoolFreeFn fn_itempool_free = nullptr;

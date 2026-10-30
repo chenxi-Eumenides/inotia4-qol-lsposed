@@ -43,6 +43,7 @@ enum class CraftExecuteResult : uint8_t {
     kMaterialRemoveFailed = 7,
     kMaterialObservationFailed = 8,
     kProductSaveFailed = 9,
+    kOkDelegated = 10,  // 三同类档位宝石三合一 → 已推导原版 mixType，调用方委托 UIMix_StartMix
 };
 
 enum class CraftGate : uint8_t {
@@ -99,7 +100,7 @@ struct CraftResultApi {
     bool (*is_jewel_item)(contracts::QolItemHandle item);
     PlaceOutcome (*place)(const CraftPlaceInput* input);
     PrepareOutcome (*prepare)(const CraftPrepareInput* input);
-    CraftExecuteResult (*execute)(const CraftExecuteInput* input);
+    CraftExecuteResult (*execute)(const CraftExecuteInput* input, uint32_t* delegated_mix_type);
     void (*material_needs)(const CraftMaterialNeedInput* input,
                            CraftMaterialNeedOutput* output);
     int32_t (*make_item)(const CraftMakeItemInput* input);

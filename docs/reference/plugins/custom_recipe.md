@@ -94,7 +94,7 @@ UIMix 控件。
 
 | 入口 | Kind | 形式 | 说明 |
 |---|---|---|---|
-| 「合成」（label wordId 35216，记录下标 69） | `kThreeSlotCraft` | `kMultiInputCreate`（type 1） | 三格隐式配方；材料显示镜像原版 record 12，费用由 hook 强制 0。 |
+| 「合成」（label wordId 35216，记录下标 69） | `kThreeSlotCraft` | `kMultiInputCreate`（type 1） | 三格隐式配方；材料显示镜像原版 record 12，费用由 hook 强制 0。三同类档位宝石命中规则 3-6 时**委托原版 `UIMix_StartMix` 执行**（见 §6.3 委托分支），其余规则走插件管线。 |
 | 「升阶」（label wordId 35291，记录下标 70） | `kTierUp` | `kTargetAndCreate`（type 3） | 目标为宝石或真实装备；材料数量按 `ceil(1 × 档位 × (105 − 等级) / 105)`，宝石档位取类别（28..32 → 1..5），装备档位取稀有度 + 1（0..4 → 1..5）；满级 0 瓶。 |
 
 注入记录布局 12 字节（RECIPEBASE）与 3 字节（MIXTUREBASE），由 `table/table.cpp` 的纯构造器
@@ -108,10 +108,10 @@ UIMix 控件。
 |---|---|---|
 | 1 | 皮革 + 空槽 + 魔法衣料 | 有序；产物大背包 |
 | 2 | 小恢复药水 ×2 + 低级武器强化卷轴 | 无序；产物顶级宝石 |
-| 3 | 低级宝石 ×3 | 无序；产物中级宝石 |
-| 4 | 中级宝石 ×3 | 无序；产物高级宝石 |
-| 5 | 高级宝石 ×3 | 无序；产物顶级宝石 |
-| 6 | 顶级宝石 ×3 | 无序；产物混沌宝石 |
+| 3 | 低级宝石 ×3 | 无序；产物中级宝石；**委托原版配方 12** |
+| 4 | 中级宝石 ×3 | 无序；产物高级宝石；**委托原版配方 13** |
+| 5 | 高级宝石 ×3 | 无序；产物顶级宝石；**委托原版配方 14** |
+| 6 | 顶级宝石 ×3 | 无序；产物混沌宝石；**委托原版配方 15** |
 | 7 | 任意宝石 + 混沌武器卷轴 + 混沌防具卷轴 | 有序；产物为第 1 格宝石本身，数值 ×1200/1000（向上取整），保留随机等级与属性类型 |
 | 8 | 两件同类特殊装备 + 元气恢复药水 | 有序且槽 0/2 同类；产物同类别新建，孔总数与剩余强化次数拉满 |
 
@@ -165,9 +165,14 @@ UIMix 控件。
 | 阶段 | 失败结果 | 是否已扣料 |
 |---|---|---|
 | 1 precheck：pending/token/generation、live handle/类别/可堆叠/持有数、扣料入口就绪 | `kStaleSlots` / `kPrecheckFailed` / `kNotEnoughHeld` | 否 |
+| 1.5 委托判定（在三同类档位宝石命中规则 3-6 时，位于端口就绪检查之前）：`delegate_mix_type_for` 推导原版配方 `mixType = product − 17`（RECIPEBASE 12..15）→ 返回 `kOkDelegated`，UI 层经 `craft_ui_write_port` v1.2 `delegate_start_mix` 调 `MIXSYSTEM_GetCost` 校验配方合法并按原版口径重算 `[g_uimix+0xf8]` 费用，写 `[g_uimix+0x48]` 后调原版 `UIMix_StartMix`；委托期间 `MIXSYSTEM_MakeItem` hook 旁路到原版函数（原版 type1 传入的 out 槽是未初始化栈内存，垃圾非空指针会误入升阶分支）。产物词条（含大修 20260810 定向合成、c18 补掷、原版随机）、扣料、清格、刷新、音效、弹窗全部按该变体原版行为执行；费用按各变体口径——变体不扣钱则重算的费用不会被扣。端口缺失或配方非法时提示不可用、材料未扣 | `kOkDelegated`（委托失败在 UI 层收尾） | 否（原版链自行扣料） |
 | 2 产物准备（未入包）：`inventory.action.create`（perfect 不可用时以 flags=0 回退普通创建）并改写 | `kProductPrepareFailed` | 否 |
 | 3 扣料：按填入槽 `inventory.action.discard` 扣该槽物品 1 个单位（句柄经 `inventory.slot.view` 定位，扩展袋物品经 `inventory.bag_source` 定位）；不可定位时可堆叠回退原版 `remove_item_data`（R-56 扩展袋补扣）、不可堆叠回退按句柄 `remove_item` + 数量前后差观察 | `kMaterialRemoveFailed` / `kMaterialObservationFailed` | **是，可能** |
 | 4 保存：`inventory.action.place`（`ref={原生空间,-1}`、`slot=-1`）走 `INVEN_SaveItem` 自动找槽与合并（H-13），返回 `kOk` 即保存成功 | `kProductSaveFailed` | 是 |
+
+阶段 1.5 仅命中规则 3-6（三格同为类别 28..31 且产物 = 高一档）；其余规则不进委托分支。委托
+路径不做产物准备/扣料/保存（阶段 2-4 全部跳过），扩展袋扣料兼容由原版 `INVEN_RemoveItem` 的
+H-05 补扣承担。
 
 前置校验全部在任何扣料之前；产物在扣料前准备、失败即丢弃。扣料后的失败**不回滚**，提示
 「合成失败，材料可能已扣，请检查背包。」；`inventory.action.place` 返回 `kOk` 后 handle 归

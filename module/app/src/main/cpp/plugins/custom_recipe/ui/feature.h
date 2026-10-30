@@ -90,6 +90,10 @@ contracts::QolItemHandle craft_target_slot_item();
 QolResult craft_read_target_slot_item(contracts::QolItemHandle* out_item);
 void craft_set_target_slot_item(contracts::QolItemHandle item);
 void craft_set_cost_zero();
+
+// 三同类宝石三合一委托原版 UIMix_StartMix（经 craft_ui_write_port v1.2 delegate_start_mix）。
+// 返回 false = 端口未就绪/配方非法（未进入原版 StartMix，材料未扣）。
+bool craft_delegate_start_mix(uint32_t mix_type);
 contracts::QolItemHandle craft_stuff_item(size_t index);
 bool craft_stuff_slot_available(size_t index);
 int craft_category_held_count(uint16_t category);
