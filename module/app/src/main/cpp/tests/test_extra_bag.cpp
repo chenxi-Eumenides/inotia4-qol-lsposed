@@ -239,9 +239,9 @@ int main() {
 
     // 12. 背包装备位公共接口：容量只由物品背包 category 派生；
     //     非法 category 或已有装备时拒绝。
-    const qol::contracts::QolExtraBagItem backpack_small =
+    const qol::contracts::QolExtraBagItem backpack_handbag =
         make_transfer_item(1, 1, "backpack-payload");
-    assert(api->set_item_backpack(0, &backpack_small));
+    assert(api->set_item_backpack(0, &backpack_handbag));
     api->bag_info(0, &info);
     assert(info.capacity == 4);
     assert(api->item_backpack_at(0, &equipped));
@@ -250,28 +250,28 @@ int main() {
     assert(equipped.payload_size == 16);
     assert(std::memcmp(equipped.payload, "backpack-payload", 16) == 0);
 
-    const qol::contracts::QolExtraBagItem backpack_medium = make_transfer_item(2, 1, nullptr);
-    assert(!api->set_item_backpack(0, &backpack_medium));
+    const qol::contracts::QolExtraBagItem backpack_small = make_transfer_item(2, 1, nullptr);
+    assert(!api->set_item_backpack(0, &backpack_small));
     api->bag_info(0, &info);
     assert(info.capacity == 4);
     assert(api->item_backpack_at(0, &equipped));
     assert(equipped.category == 1);
 
     api->clear_item_backpack(0);
-    assert(api->set_item_backpack(0, &backpack_medium));
+    assert(api->set_item_backpack(0, &backpack_small));
     api->bag_info(0, &info);
     assert(info.capacity == 8);
     assert(api->item_backpack_at(0, &equipped));
     assert(equipped.category == 2);
 
-    const qol::contracts::QolExtraBagItem backpack_large = make_transfer_item(3, 1, nullptr);
+    const qol::contracts::QolExtraBagItem backpack_medium = make_transfer_item(3, 1, nullptr);
     api->clear_item_backpack(0);
-    assert(api->set_item_backpack(0, &backpack_large));
+    assert(api->set_item_backpack(0, &backpack_medium));
     api->bag_info(0, &info);
     assert(info.capacity == 12);
-    const qol::contracts::QolExtraBagItem backpack_huge = make_transfer_item(4, 1, nullptr);
+    const qol::contracts::QolExtraBagItem backpack_large = make_transfer_item(4, 1, nullptr);
     api->clear_item_backpack(0);
-    assert(api->set_item_backpack(0, &backpack_huge));
+    assert(api->set_item_backpack(0, &backpack_large));
     api->bag_info(0, &info);
     assert(info.capacity == 16);
 
@@ -299,7 +299,7 @@ int main() {
     api->put(-1, 0, &item);
     assert(!api->item_at(-1, 0, &out));
     assert(!api->take(-1, 0, &out));
-    assert(!api->set_item_backpack(99, &backpack_huge));
+    assert(!api->set_item_backpack(99, &backpack_large));
     assert(!api->item_backpack_at(99, &equipped));
     qol::contracts::QolExtraBagInfo invalid{1, 1};
     api->bag_info(99, &invalid);

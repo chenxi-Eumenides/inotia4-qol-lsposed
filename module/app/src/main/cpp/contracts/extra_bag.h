@@ -17,12 +17,13 @@ constexpr uint16_t kExtraBagVersionMinor = kExtraBagVersion.minor;
 constexpr uint32_t kExtraBagPayloadCapacity = 256;
 constexpr uint32_t kExtraBagPayloadMaxSize = 255;
 
-// 物品背包的 category 直接决定容量：1/2/3/4 -> 4/8/12/16。
+// 物品背包的 category 直接决定容量：
+// 1=手提包->4，2=背包小->8，3=背包中->12，4=背包大->16。
 // 其他 category 不是合法背包物品。
-constexpr int32_t kExtraBagBackpackCategorySmall = 1;
-constexpr int32_t kExtraBagBackpackCategoryMedium = 2;
-constexpr int32_t kExtraBagBackpackCategoryLarge = 3;
-constexpr int32_t kExtraBagBackpackCategoryHuge = 4;
+constexpr int32_t kExtraBagBackpackCategoryHandbag = 1;
+constexpr int32_t kExtraBagBackpackCategorySmall = 2;
+constexpr int32_t kExtraBagBackpackCategoryMedium = 3;
+constexpr int32_t kExtraBagBackpackCategoryLarge = 4;
 
 struct QolExtraBagItem {
     int32_t category = 0;

@@ -10,7 +10,8 @@ constexpr bool is_allowed_backpack_category(int32_t category) {
     return category >= 1 && category <= 4;
 }
 
-// 物品背包的 category 直接决定容量：1/2/3/4 -> 4/8/12/16。
+// 物品背包的 category 直接决定容量：
+// 1=手提包->4，2=背包小->8，3=背包中->12，4=背包大->16。
 constexpr uint32_t capacity_for_backpack_category(int32_t category) {
     switch (category) {
         case 1: return 4;
