@@ -20,7 +20,7 @@
 #include "plugins/core.item/shop/buy.h"
 
 // 测试目标未逐文件登记 core.item 新源时，按既有模式在同一 TU 内联；插件构建定义宏后单独编译。
-// source_transport 已由 lifecycle.cpp → transfer_journal.cpp 内联，避免重复定义。
+// source_transport 已由 move_item.cpp 内联，避免重复定义。
 #if !defined(QOL_CORE_ITEM_MOVE_ITEM_SEPARATE)
 #include "plugins/core.item/usecases/move_item.cpp"
 #endif
@@ -364,34 +364,6 @@ bool copy_result_truncated(char* out, uint32_t capacity, uint32_t* out_size,
     if (copied != 0) std::memcpy(out, body.data(), copied);
     *out_size = static_cast<uint32_t>(body.size());
     return true;
-}
-
-bool write_move_slots_result(const contracts::QolItemWriteArgs& args,
-                             const InventoryResultSnapshot& before,
-                             char* out, uint32_t capacity, uint32_t* out_size,
-                             bool force_requested_target = true) {
-    InventoryResultSnapshot after{};
-    if (!capture_inventory_result(&after)) return false;
-    ForcedSlots forced;
-    std::string body = "{\"ok\":true,\"slots\":[";
-    bool first = true;
-    SlotKey source{};
-    SlotKey target{};
-    const bool has_source = write_slot_key(args.i0, args.i1, &source);
-    const bool has_target = write_slot_key(args.i3, args.i4, &target);
-    if (has_source) {
-        forced.insert(source);
-        append_result_slot(body, source, after, &first);
-    }
-    const bool same_slot = has_source && has_target && source.space_id == target.space_id &&
-                           source.bag == target.bag && source.slot == target.slot;
-    if (force_requested_target && has_target && !same_slot) {
-        forced.insert(target);
-        append_result_slot(body, target, after, &first);
-    }
-    append_unforced_inventory_changes(body, before, after, forced, &first);
-    body += "]}";
-    return copy_result_truncated(out, capacity, out_size, body);
 }
 
 bool read_character_state(contracts::QolCharacterStateKind kind, std::string* out) {

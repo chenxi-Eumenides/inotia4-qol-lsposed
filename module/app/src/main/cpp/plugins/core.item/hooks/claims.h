@@ -1,9 +1,8 @@
 #pragma once
 
 // inventory_hooks 插件内部入口（D2c-2a）：声明式资源声明表与入口 hook backup 交还。
-//
-// Defined in native_inventory_hook.cpp, where handler addresses are available.
-// 迁入本插件目录后，plugin.cpp 与 native_inventory_hook.cpp 同层，直接 include 本头即可，
+// 实现位于 inventory_hooks.cpp，claims 表与 wrapper 地址同 TU；
+// plugin.cpp 与 inventory_hooks.cpp 同层，直接 include 本头即可，
 // 不再需要为规避跨层依赖而设的全局桥（原 inventory_hooks_claims /
 // inventory_hooks_bind_backup 前置声明）。
 

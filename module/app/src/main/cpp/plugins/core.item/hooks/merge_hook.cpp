@@ -185,6 +185,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         }
     }
 
+    // event 0x04：取 source 并校验归属，扩展/非原生物品拦截；随后按
+    // original_item_input_blocked 决定放行原版或拦截。item_proc_source_control 为
+    // 纯内存查询（ui_kit_controls.inc），两段合并后只读一次，行为逐字等价。
     if (event == 0x04) {
         void* source = nullptr;
         const bool has_source = param != nullptr && g_sdk != nullptr && g_sdk->ui != nullptr &&
@@ -192,30 +195,19 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                                 contracts::succeeded(g_sdk->ui->item_proc_source_control(
                                     control, event, param, &source));
         contracts::QolItemHandle source_handle{};
-        const auto* current_projection = projection_api();
+        const auto* current = projection_api();
         const bool has_identity = has_source && control_identity(source, &source_handle);
         if (!has_source || !has_identity) return finish(0);
-        const bool protected_source = has_identity &&
-            (extension_item(current_projection, source_handle) || !native_item(source_handle));
-        if (protected_source) return finish(0);
-    }
-
-    if (event == 0x04 && param != nullptr) {
-        void* source = nullptr;
-        const bool has_source = g_sdk != nullptr && g_sdk->ui != nullptr &&
-                                g_sdk->ui->item_proc_source_control != nullptr &&
-                                contracts::succeeded(g_sdk->ui->item_proc_source_control(
-                                    control, event, param, &source));
-        if (has_source) report_item_proc_source(projection, observation, control, event, x2, param, source);
-        const auto* current = projection_api();
+        if (extension_item(current, source_handle) || !native_item(source_handle)) {
+            return finish(0);
+        }
+        report_item_proc_source(projection, observation, control, event, x2, param, source);
         if (current != nullptr && current->original_item_input_blocked != nullptr &&
             current->original_item_input_blocked()) {
-            if (has_source && current->allow_original_tab_drop != nullptr &&
+            if (current->allow_original_tab_drop != nullptr &&
                 current->allow_original_tab_drop(control, source, 0)) {
                 return finish(call_original(control, event, x2, param));
             }
-            int32_t slot = -1;
-            if (control_slot(control, &slot) && slot >= 16) return finish(0);
             return finish(0);
         }
     }

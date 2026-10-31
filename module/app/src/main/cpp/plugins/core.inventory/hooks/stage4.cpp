@@ -1,41 +1,6 @@
 #include "stage4.h"
 
-#include <cassert>
-
 namespace qol::features::core_inventory::stage4 {
-
-int stage4_have_item(int32_t category, Stage4HaveBackup backup,
-                     Stage4CountExtension extension_count, bool& recursive_guard) {
-    if (recursive_guard) return backup == nullptr ? 0 : backup(category);
-    recursive_guard = true;
-    const int original = backup == nullptr ? 0 : backup(category);
-    const int result = original != 0
-        ? original
-        : (extension_count == nullptr ? 0 : (extension_count(category) > 0 ? 1 : 0));
-    recursive_guard = false;
-    return result;
-}
-
-int stage4_get_item_count(int32_t category, Stage4CountBackup backup,
-                          Stage4CountExtension extension_count, bool& recursive_guard) {
-    if (recursive_guard) return backup == nullptr ? 0 : backup(category);
-    recursive_guard = true;
-    const int original = backup == nullptr ? 0 : backup(category);
-    const int extension = extension_count == nullptr ? 0 : extension_count(category);
-    recursive_guard = false;
-    return original + extension;
-}
-
-int stage4_get_cumulate_count(void* item, const qol::contracts::QolItemCountApi* item_count,
-                              Stage4CumulateBackup backup) {
-    if (item != nullptr && item_count != nullptr && item_count->effective != nullptr) {
-        uint32_t count = 0;
-        const QolResult result = item_count->effective(item, &count);
-        assert(result.code != kQolErrInvalidArgument);
-        if (qol::contracts::succeeded(result)) return static_cast<int>(count);
-    }
-    return backup == nullptr ? 0 : backup(item);
-}
 
 bool stage4_consume_item(void* item, Stage4IdentifyItem identify,
                          Stage4ConsumeExtension extension_consume,

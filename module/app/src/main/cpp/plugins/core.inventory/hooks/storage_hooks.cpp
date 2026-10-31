@@ -67,10 +67,10 @@ thread_local RemoveItemCallFrame* g_remove_item_call_top = nullptr;
 thread_local int g_save_item_depth = 0;
 thread_local int g_save_item_direct_fail_count = 0;
 thread_local std::vector<void*> g_pending_eb_items;
-// 拆分地图 R-7：原实现读 core.item unequip wrapper 的 thread_local 守卫，跨插件
-// TLS 不共享且插件只允许依赖 contracts，无法注入该信号；本副本恒为 false，
-// unequip 调用栈内的 FindSaveSlot 不会在此短路。信号改经 host 下发前，该路径
-// 与 core.item 内保留的未使用副本行为不同。
+// 拆分地图 R-7：core.item 的 unequip wrapper 与本插件 FindSaveSlot hook 分属两个
+// 插件，不能跨插件共享 TLS；unequip 作用域信号经 contracts 的 inline thread_local
+// （contracts/inventory_scope.h: g_inventory_unequip_depth）下发，FindSaveSlot 在
+// unequip 调用栈内据此短路。
 
 class RemoveItemIdentityGuard {
 public:

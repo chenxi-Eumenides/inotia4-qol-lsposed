@@ -187,7 +187,6 @@ thread_local int32_t g_active_shortcut_last_state = -1;
 thread_local bool g_in_equip_destroy_button = false;
 thread_local bool g_has_vanilla_sell_preview_context = false;
 thread_local qol::contracts::QolItemDetailContext g_vanilla_sell_preview_context{};
-thread_local int g_refresh_depth = 0;
 void backup_missing(const char* hook_id) {
     QOL_LOG_ERROR(QolDomain::kInventory, "hook=%s backup missing",
                   hook_id == nullptr ? "unknown" : hook_id);
@@ -464,26 +463,18 @@ bool build_transfer_for_hook_item(void* item, qol::contracts::QolBagTransfer* ou
     }
     qol::contracts::QolItemHandle handle{};
     if (!item_handle_for_hook_item(item, &handle)) return false;
-    int32_t category = -1;
-    if (g_item_facts != nullptr && g_item_facts->category != nullptr) {
-        int32_t observed = -1;
-        if (qol::contracts::succeeded(g_item_facts->category(handle, &observed)) &&
-            observed > 0) {
-            category = observed;
-        }
-    }
     uint32_t required = 0;
     QolResult result = port->read.serialize_item(handle, nullptr, 0, &required);
     if (!qol::contracts::succeeded(result) || required == 0 ||
         required > qol::contracts::kQolBagTransferPayloadMaxSize) {
         return false;
     }
-    int32_t port_category = -1;
-    if (!qol::contracts::succeeded(port->read.category(handle, &port_category)) ||
-        port_category <= 0) {
+    // 类别以 port 读取为准；g_item_facts->category 预读结果会被覆盖，不做预读。
+    int32_t category = -1;
+    if (!qol::contracts::succeeded(port->read.category(handle, &category)) ||
+        category <= 0) {
         return false;
     }
-    category = port_category;
     qol::contracts::QolBagTransfer transfer{};
     uint32_t serialized = 0;
     result = port->read.serialize_item(
@@ -712,13 +703,7 @@ void refresh_item_area_wrapper() {
         backup_missing("hook:UIEquip_RefreshItemArea");
         return;
     }
-    if (g_refresh_depth > 0) {
-        inventory_native_hook_call_refresh_item_area_original();
-        return;
-    }
-    ++g_refresh_depth;
     inventory_native_hook_call_refresh_item_area_original();
-    --g_refresh_depth;
 }
 int provider_equip_item(void* character, int32_t flat_bag, int32_t slot) {
     const auto* state_write = qol::features::core_item::g_item_state_write;
@@ -1291,13 +1276,8 @@ uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
         {"hook:UIEquip_EquipControlEventProc"});
-    if (!inventory_native_hook_support_enabled())
-        return call_backup("hook:UIEquip_EquipControlEventProc",
-                           g_backup_equip_control_event_proc, control, event, x2, param);
-    if (g_backup_equip_control_event_proc == nullptr) {
-        backup_missing("hook:UIEquip_EquipControlEventProc");
-        return 0;
-    }
+    // call_backup 对 null backup 记 backup_missing 并按返回类型默认值（0）返回；
+    // 支持开关两侧的分流语句完全相同，无需前置判空或分支。
     return call_backup("hook:UIEquip_EquipControlEventProc",
                        g_backup_equip_control_event_proc, control, event, x2, param);
 }

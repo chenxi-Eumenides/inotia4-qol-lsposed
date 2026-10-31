@@ -10,21 +10,6 @@
 
 namespace qol::features::core_inventory::stage4 {
 
-using Stage4HaveBackup = int (*)(int32_t);
-using Stage4CountBackup = int (*)(int32_t);
-using Stage4CountExtension = int (*)(int32_t);
-
-int stage4_have_item(int32_t category, Stage4HaveBackup backup,
-                     Stage4CountExtension extension_count, bool& recursive_guard);
-int stage4_get_item_count(int32_t category, Stage4CountBackup backup,
-                          Stage4CountExtension extension_count, bool& recursive_guard);
-
-using Stage4CumulateBackup = int (*)(void*);
-// S2 读侧统一入口（R-49）的纯逻辑分流：通过注入的 item_count facade 读取 effective；
-// facade 未驻留/未就绪或返回 unsupported 时 original-first 走 backup，backup 缺失按 0。
-int stage4_get_cumulate_count(void* item, const qol::contracts::QolItemCountApi* item_count,
-                              Stage4CumulateBackup backup);
-
 using Stage4IdentifyItem = bool (*)(void* item, int32_t* bag, int32_t* slot);
 using Stage4ConsumeExtension = bool (*)(void* item);
 using Stage4ConsumeBackup = void (*)(void* item);
