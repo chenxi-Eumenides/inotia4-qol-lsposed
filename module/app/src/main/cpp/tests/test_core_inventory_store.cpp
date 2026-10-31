@@ -37,9 +37,17 @@ void assert_error(const QolResult& result, int32_t code) {
 void test_descriptor() {
     const auto& descriptor = qol::features::core_inventory::plugin_descriptor();
     assert(std::strcmp(descriptor.id, "core.inventory") == 0);
-    assert(descriptor.provides_count == 1);
+    assert(descriptor.provides_count == 2);
     assert(std::strcmp(descriptor.provides[0].id, "inventory.access") == 0);
+    assert(std::strcmp(descriptor.provides[1].id, "inventory.bag_source") == 0);
     assert(descriptor.feature_count == 1);
+    assert(descriptor.port_count == 1);
+    assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
+    assert(descriptor.resources_count == 5);
+    for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
+        assert(std::strcmp(descriptor.resources[i].owner, "core.inventory") == 0);
+    }
+    assert(std::strcmp(descriptor.resources[0].id, "hook:INVEN_FindItem") == 0);
 }
 
 void test_store() {

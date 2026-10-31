@@ -399,15 +399,16 @@ void test_extension_use_and_removed_same_space_move() {
     CHECK(used.status == InventoryActionStatus::kOk && used.consumed_count == 0);
     CHECK(g_extension_use_calls == 1);
 
-    // 袋源之间的移动编排已删除；当前只保留原生同空间移动。
+    // 注册源同空间移动：export -> import -> remove。
     const InventoryMoveOutcome moved =
         qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, 3});
-    CHECK(moved.status == InventoryActionStatus::kUnsupported);
-    CHECK(g_item.slot == 2);
-    CHECK(g_extension_import_calls == 0 && g_extension_remove_calls == 0);
+    CHECK(moved.status == InventoryActionStatus::kOk);
+    CHECK(moved.moved_count == 2);
+    CHECK(g_item.slot == 3);
+    CHECK(g_extension_import_calls == 1 && g_extension_remove_calls == 1);
 }
 
-void test_auto_slot_move_is_unsupported() {
+void test_auto_slot_move_uses_registered_source() {
     reset_fixture();
     g_item.kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
     g_item.space_id = 2;
@@ -416,11 +417,12 @@ void test_auto_slot_move_is_unsupported() {
 
     const InventoryMoveOutcome moved =
         qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, -1});
-    CHECK(moved.status == InventoryActionStatus::kUnsupported);
-    CHECK(g_extension_import_calls == 0 && g_extension_remove_calls == 0);
+    CHECK(moved.status == InventoryActionStatus::kOk);
+    CHECK(moved.moved_count == 2);
+    CHECK(g_extension_import_calls == 1 && g_extension_remove_calls == 1);
 }
 
-void test_auto_slot_move_source_path_is_unsupported() {
+void test_auto_slot_move_source_path_mismatch_is_internal() {
     reset_fixture();
     g_item.kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
     g_item.space_id = 2;
@@ -430,8 +432,8 @@ void test_auto_slot_move_source_path_is_unsupported() {
 
     const InventoryMoveOutcome moved =
         qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, -1});
-    CHECK(moved.status == InventoryActionStatus::kUnsupported);
-    CHECK(moved.moved_count == 0 && g_extension_remove_calls == 0);
+    CHECK(moved.status == InventoryActionStatus::kInternal);
+    CHECK(moved.moved_count == 0);
 }
 
 void test_native_move_use_discard_and_equipment() {
@@ -477,8 +479,8 @@ int main() {
     test_native_sell_failure_and_identity();
     test_extension_sale_and_native_only_operations();
     test_extension_use_and_removed_same_space_move();
-    test_auto_slot_move_is_unsupported();
-    test_auto_slot_move_source_path_is_unsupported();
+    test_auto_slot_move_uses_registered_source();
+    test_auto_slot_move_source_path_mismatch_is_internal();
     test_native_move_use_discard_and_equipment();
     std::printf("inventory_action_sell_tests: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

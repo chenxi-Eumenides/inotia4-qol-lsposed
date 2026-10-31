@@ -307,6 +307,7 @@ add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
     ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
+    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
@@ -317,6 +318,7 @@ add_test(NAME inventory_action_sell_tests COMMAND inventory_action_sell_tests)
 add_executable(inventory_action_lifecycle_tests
     test_inventory_action_lifecycle.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
+    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
 )
 target_include_directories(inventory_action_lifecycle_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_lifecycle_tests PRIVATE cxx_std_17)
@@ -2357,6 +2359,9 @@ add_executable(core_inventory_store_tests
     test_core_inventory_store.cpp
     ${CPP_DIR}/plugins/core.inventory/plugin.cpp
     ${CPP_DIR}/plugins/core.inventory/api/access.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
     ${CPP_DIR}/plugins/core.inventory/store/slot_table.cpp
     ${CPP_DIR}/plugins/core.inventory/store/inventory_store.cpp
 )

@@ -6,6 +6,9 @@
 
 #include "api/access.h"
 #include "api/bag_source.h"
+#include "hooks/storage_hooks.h"
+
+#include "contracts/game_ports/item_port.h"
 
 namespace qol::features::core_inventory {
 namespace {
@@ -33,20 +36,35 @@ void log_line(int32_t level, const char* format, ...) {
 }
 
 int plugin_install(contracts::PluginContext& context) {
-    if (context.sdk == nullptr) return 1;
+    if (context.sdk == nullptr || context.game == nullptr || context.ports == nullptr ||
+        context.port_count < 1 || context.ports[0] == nullptr) {
+        return 1;
+    }
+    const auto* port = static_cast<const contracts::QolItemPort*>(context.ports[0]);
+    if (!contracts::satisfies(port->abi_version, {contracts::kQolPortItemVersion.major,
+                                                 contracts::kQolPortItemVersion.minor}) ||
+        !contracts::qol_item_port_bag_space_size_valid(port)) {
+        return 1;
+    }
     g_sdk = context.sdk;
     g_installed = true;
     inventory_store().clear();
     reset_bag_sources();
+    if (!hooks::attach(context.sdk, context.game, port)) {
+        g_sdk = nullptr;
+        g_installed = false;
+        return 1;
+    }
     log_line(1,
-             "plugin=%s: installed version=%s mode=skeleton "
-             "provides=inventory.access,inventory.bag_source",
+             "plugin=%s: installed version=%s mode=storage "
+             "provides=inventory.access,inventory.bag_source resources=5",
              kPluginId, kPluginVersion);
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext&) {
     log_line(1, "plugin=%s: deactivated", kPluginId);
+    hooks::detach();
     inventory_store().clear();
     reset_bag_sources();
     g_sdk = nullptr;
@@ -56,11 +74,13 @@ void plugin_deactivate(contracts::PluginContext&) {
 
 void plugin_on_enabled(contracts::PluginContext&) {
     g_enabled = true;
+    hooks::set_support(true);
     log_line(1, "plugin=%s: enabled", kPluginId);
 }
 
 void plugin_on_disabled(contracts::PluginContext&) {
     g_enabled = false;
+    hooks::set_support(false);
     log_line(1, "plugin=%s: disabled", kPluginId);
 }
 
@@ -88,6 +108,18 @@ const contracts::CapabilityProvisionRef kProvides[] = {
      &kBagSourceRegistryApi},
 };
 
+const contracts::QolPortRequirement kPorts[] = {
+    {contracts::QolPortId::QOL_PORT_ITEM,
+     {contracts::kQolPortItemVersion.major, contracts::kQolPortItemVersion.minor}},
+};
+
+uint32_t g_resource_count = 0;
+const contracts::ResourceClaim* g_resources = hooks::claims(&g_resource_count);
+
+int32_t on_resource_ready(contracts::PluginContext&, const char* resource_id, void* backup) {
+    return hooks::bind_backup(resource_id, backup);
+}
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -97,8 +129,8 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     2,
     kProvides,
-    0,
-    nullptr,
+    g_resource_count,
+    g_resources,
     0,
     nullptr,
     &plugin_install,
@@ -106,9 +138,9 @@ const contracts::PluginDescriptor kDescriptor = {
     &plugin_on_enabled,
     &plugin_on_disabled,
     &plugin_fill_status,
-    nullptr,
-    nullptr,
-    0,
+    &on_resource_ready,
+    kPorts,
+    1,
     nullptr,
     0,
     kFeatures,

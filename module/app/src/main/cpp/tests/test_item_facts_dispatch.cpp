@@ -1631,7 +1631,7 @@ void test_write_routes() {
     CHECK(g_state_write_arg0 == 1 && g_state_write_arg1 == 2);
     CHECK(g_state_move_count == 4 && g_state_move_to_bag == 0 && g_state_move_to_slot == 3);
 
-    // 袋源之间的移动编排已删除；跨空间请求返回稳定错误体，不触达袋源回调。
+    // 跨空间请求进入袋源移动编排；空源槽返回稳定错误体。
     CHECK(set_fake_registered_source(true));
     g_bag_source_export_calls = 0;
     CHECK(dispatch_post("/api/item/inventory/move_item",
@@ -1642,7 +1642,7 @@ void test_write_routes() {
     CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                             &result_size));
     const std::string transfer_unavailable =
-        "{\"ok\":false,\"error\":\"item transfer unavailable\"}";
+        "{\"ok\":false,\"error\":\"empty source slot\"}";
     CHECK(std::string(result, result_size) == transfer_unavailable &&
           result_size == transfer_unavailable.size() &&
           g_bag_source_export_calls == 0);

@@ -14,7 +14,16 @@
 #include "plugins/core.item/http/json_lite.h"
 #include "plugins/core.item/http/response.h"
 #include "plugins/core.item/http/write_result_inventory.h"
+#include "plugins/core.item/bags/native_transport.h"
+#include "plugins/core.item/bags/source_transport.h"
+#include "plugins/core.item/usecases/move_item.h"
 #include "plugins/core.item/shop/buy.h"
+
+// 测试目标未逐文件登记 core.item 新源时，按既有模式在同一 TU 内联；插件构建定义宏后单独编译。
+// source_transport 已由 lifecycle.cpp → transfer_journal.cpp 内联，避免重复定义。
+#if !defined(QOL_CORE_ITEM_MOVE_ITEM_SEPARATE)
+#include "plugins/core.item/usecases/move_item.cpp"
+#endif
 
 namespace qol::features::core_item {
 namespace {
@@ -979,11 +988,71 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
 
 bool write_cross_space_move_result(const ItemWritePayload& payload, char* out,
                                    uint32_t capacity, uint32_t* out_size) {
-    (void)payload;
-    constexpr char kUnavailable[] = "{\"ok\":false,\"error\":\"item transfer unavailable\"}";
-    if (out == nullptr || out_size == nullptr) return false;
-    (void)copy_buffer(out, capacity, out_size, kUnavailable, sizeof(kUnavailable) - 1);
-    return false;
+    if (out_size != nullptr) *out_size = 0;
+    const contracts::QolItemWriteArgs& args = payload.args;
+    if (out == nullptr || out_size == nullptr || args.i1 < 0 || args.i2 <= 0 ||
+        payload.from_space < 0 || payload.to_space < 0) {
+        return false;
+    }
+    WriteRef from_ref{};
+    WriteRef to_ref{};
+    if (!decode_write_bag(args.i0, &from_ref) || !decode_write_bag(args.i3, &to_ref) ||
+        from_ref.space_id != payload.from_space || to_ref.space_id != payload.to_space) {
+        constexpr char kInvalidBag[] = "{\"ok\":false,\"error\":\"invalid inventory bag\"}";
+        return copy_buffer(out, capacity, out_size, kInvalidBag, sizeof(kInvalidBag) - 1);
+    }
+    const contracts::QolBagRef from{payload.from_space, from_ref.bag};
+    const contracts::QolBagRef to{payload.to_space, to_ref.bag};
+
+    InventoryResultSnapshot before{};
+    (void)capture_inventory_result(&before);
+    contracts::QolBagMutationResult placed{};
+    const QolResult operation =
+        usecases::move_item(from, args.i1, args.i2, to, args.i4, &placed);
+    if (!contracts::succeeded(operation)) {
+        const char* message =
+            operation.message != nullptr ? operation.message : "item transfer failed";
+        const uint32_t message_size =
+            operation.message != nullptr ? operation.message_len
+                                         : static_cast<uint32_t>(std::strlen(message));
+        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
+                                 std::string(message, message_size) + "\"}";
+        (void)copy_buffer(out, capacity, out_size, body.data(),
+                          static_cast<uint32_t>(body.size()));
+        return false;
+    }
+    request_inventory_refresh();
+
+    InventoryResultSnapshot after{};
+    if (!capture_inventory_result(&after)) return false;
+    ForcedSlots forced;
+    forced.insert(SlotKey{from.space_id, from.bag, args.i1});
+    int32_t target_slot = args.i4;
+    contracts::QolBagRef target_ref = to;
+    if (placed.item.slot != 0 && placed.item.generation != 0) {
+        contracts::QolBagRef located{};
+        int32_t located_slot = -1;
+        const QolResult located_result =
+            placed.ref.space_id == contracts::kQolBagSpaceOriginal ||
+                    placed.ref.space_id == contracts::kQolBagSpaceVariant
+                ? bags::native_transport::locate(placed.ref.space_id, placed.item, &located,
+                                                 &located_slot)
+                : bags::source_transport::locate(placed.ref.space_id, placed.item, &located,
+                                                 &located_slot);
+        if (contracts::succeeded(located_result) &&
+            located_slot >= 0) {
+            target_ref = located;
+            target_slot = located_slot;
+        }
+    }
+    if (target_slot >= 0) {
+        forced.insert(SlotKey{target_ref.space_id, target_ref.bag, target_slot});
+    }
+    std::string body = "{\"ok\":true,\"slots\":[";
+    bool first = true;
+    append_inventory_changes(body, before, after, forced, &first);
+    body += "]}";
+    return copy_result_truncated(out, capacity, out_size, body);
 }
 
 bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
