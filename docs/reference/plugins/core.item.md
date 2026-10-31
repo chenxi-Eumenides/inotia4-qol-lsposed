@@ -177,6 +177,8 @@ payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容�
 
 use/discard 由库存动作结算；出售的加钱失败会尝试回滚物品。成功写入后会请求库存刷新。
 
+> 当前实现状态：袋源跨空间编排已删除。跨空间移动请求返回 `{"ok":false,"error":"item transfer unavailable"}`；注册源同空间移动返回 `kUnsupported`。上表是重新实现后的目标契约，不是当前实现的完整能力。
+
 ## HTTP surface
 
 常规路由共 17 条：15 条 inventory 与 2 条 shop。另有 4 条 OP-gated 路由。常规路由要求有效 lease，不要求 OP；OP 路由同时要求有效 lease 与 OP 权限。

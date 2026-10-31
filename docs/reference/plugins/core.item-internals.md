@@ -6,13 +6,14 @@
 
 | 层 | 职责 | 主要位置 |
 |---|---|---|
-| 装配与生命周期 | descriptor、端口绑定、资源 claim、启停、帧任务、启动恢复 | `plugins/core.item/plugin.cpp`、`runtime/lifecycle.cpp` |
+| 装配与生命周期 | descriptor、端口绑定、资源 claim、启停、帧任务 | `plugins/core.item/plugin.cpp`、`runtime/lifecycle.cpp` |
 | API | facts、state、袋源注册、投影回调注册表 | `api/facts.cpp`、`api/state.cpp`、`api/bag_source.cpp`、`api/projection.cpp` |
-| Bags | 原生/注册源 transport、注册表、快照存储、句柄检查 | `bags/native_transport.cpp`、`bags/source_transport.cpp`、`bags/bag_source_registry.cpp`、`bags/snapshot_store.cpp`、`bags/item_handle_guard.cpp` |
-| Model | 袋空间和扁平映射、物品身份、变更集、移动规则 | `model/bag_catalog.cpp`、`model/item_identity.h`、`model/change_set.cpp`、`model/move_rules.cpp` |
-| Use cases | 库存读取、物品动作、移动、出售、转移日志 | `usecases/read_inventory.cpp`、`item_action.cpp`、`move_item.cpp`、`sell_item.cpp`、`transfer_journal.cpp` |
+| Bags | 快照存储、原生袋扫描上限、transfer payload 结构 | `bags/snapshot_store.cpp`、`bags/native_bag_limit.h`、`bags/transfer.h` |
+| Use cases | 库存读取、物品动作、出售、物品生命周期 | `usecases/read_inventory.cpp`、`item_action.cpp`、`sell_item.cpp`、`consume_item.cpp` |
 | Hooks | 原生库存入口与拖拽合并 wrapper | `hooks/inventory_hooks.cpp`、`hooks/merge_hook.cpp` |
 | HTTP / shop | 查询分页、typed command、响应结果、shop 路由与快照 | `http/query_handler.cpp`、`http/write_handler.cpp`、`http/write_results.cpp`、`shop/` |
+
+旧袋源编排、transport、transfer journal 与 model 校验层已删除，尚未重建。当前只保留原生同空间移动：由 Host `move_item` 端口交给原版代码执行；跨空间与注册源之间的移动请求返回 `item transfer unavailable`。
 
 插件私有规则不向 Host 端口反向泄漏。原生内存解释由 game/access 与 adapter 负责；领域层通过契约和端口调用，不跨线程持有游戏对象地址。
 
@@ -81,52 +82,19 @@ hook 入口覆盖库存查询/写入和备用入口绑定；快捷栏三个 opti
 
 raw state 保留原版袋 `0..5`，其后接 C18 展示段；注册来源段由 `count/info/item_at` 结构化生成。enriched JSON 由 item owner 构造，不拼接来源插件提供的 JSON 字符串片段。相关组装集中在 `api/state.cpp`，ABI 声明在 `contracts/item_state.h`。
 
-## 原生与注册来源 transport
+## 已删除的袋源编排
 
-原生空间内移动使用 Host 的原生移动入口，不调用注册源 transfer callback。原版与 C18 之间，以及 Native 与注册源之间，转移会组合原生 serialize/load/place 与袋源 export/import/remove。相同注册空间的搬动也经来源 transfer 原语处理；该路径在 `usecases/item_action.cpp`。跨空间编排由 `usecases/move_item.cpp` 负责，原生/来源 transport 分别维护自己的 payload 转换。
+以下内容已从当前实现删除，尚未重建：
 
-这里的 `core.item` transfer journal 是跨空间 move 的恢复记录，不是扩展背包 provider 的 sidecar/pending 事务。`extension_bag/runtime/state_load.cpp::persist_state_locked()` 当前恒返回 `true`，仅表示内存 mutation acceptance，不是 durability acknowledgement；扩展袋 sidecar 的 durable staging 通过 `core.save` 的 `save.slot_data` capture/complete 流程完成。因此 `api/bag_source.cpp` 中 `persist_state_locked()==false` 时的 import/remove 回滚分支是当前不可达的潜伏分支，不代表现存的真实 store failure。provider 可达的 free/materialize rollback 仍须由 failure tests 覆盖；当前 Host 测试映射见下表。
+- `usecases/move_item.cpp`：跨空间 move 编排。
+- `usecases/transfer_journal.*`：`item.transfer.journal` 持久化与启动 reconcile。
+- `bags/native_transport.*`、`bags/source_transport.*`：原生/注册源 payload transport。
+- `model/`：袋映射、物品身份、变更集与移动规则校验。
+- `bags/native_bag_source.*`、`bags/bag_source_registry.*`、`bags/item_handle_guard.*`：未编译的袋源抽象与句柄守卫。
 
-## 跨空间转移实现与恢复
+当前只保留原生同空间移动：`usecases/item_action.cpp` 在 space 相同且为原生空间时调用 Host `move_item` 端口，由原版代码完成移动。跨空间与注册源之间的移动请求返回 `{"ok":false,"error":"item transfer unavailable"}`，不触达袋源 export/import/remove 回调。`bags/transfer.h` 仅保留 `QolBagTransfer` payload 结构和哈希，用于出售回滚。
 
-### 执行次序与补偿
-
-跨空间 move 由 `usecases/move_item.cpp` 编排；原生 payload 由 `bags/native_transport.cpp` 处理，注册源 payload 由 `bags/source_transport.cpp` 处理。流程为：
-
-1. 持久化 intent 记录。
-2. source 导出 payload；export 只读。
-3. target 导入 payload，并记录目标位置与 payload hash。
-4. source 按预期句柄移除请求数量。
-5. 成功后清除 journal 并刷新库存。
-
-export 或 import 失败会清 journal；source remove 失败时尝试删除目标补偿。补偿成功则清记录并返回源错误；补偿失败保留记录并返回 internal error。成功移除 source 前，目标已完成写入。
-
-### `item.transfer.journal` 存储
-
-| 项目 | 二进制/持久化事实 |
-|---|---|
-| owner store section | `item.transfer.journal`，section version 1。 |
-| header | 固定 6 字节：`uint16_t magic`、`uint16_t format_version`、`uint16_t count`。 |
-| record | 固定 72 字节，最多 8 条；布局由静态断言锁定。 |
-| 字段 | 16 字节 id、state 与 reserved、source/target 的 space/bag/slot、category、count、对齐字段、`uint64_t payload_hash`、时间戳。 |
-| state | `0=intent`、`1=target_written`；intent 在导出前写，目标导入后尝试写入 target_written（结果不向上返回）。 |
-| payload hash | 对 payload 计算 64 位 FNV-1a；journal 不存 payload 本体。 |
-| 满或 intent 无法持久化 | 已有 8 条，或存档槽可用但 intent 写入失败时，新的跨空间 move blocked，不执行物品修改。 |
-
-`mark_target_written()` 会先更新内存记录，再丢弃 `write_records()` 的结果。当前测试矩阵覆盖 marker 写失败、intent reload/reconcile 与 source remove 失败后的目标补偿。marker 写失败本身没有被证明导致数据不一致：reconcile 当前不看 journal state，而是检查 source/target 两端的 item presence 并据此处理。marker 状态更新的可见性/耐久策略仍待 Gate 裁定；是否要求 marker 写失败阻止 move 也留待后续 Gate 产品策略裁定，此处不作要求。
-
-### 启动 reconcile 与降级
-
-`plugin_install` 与 `plugin_on_enabled` 都调用 `reconcile()`。当前恢复仅依据 source/target 槽是否存在，不按 journal 的两种 state 分支：
-
-| Source | Target | Reconcile 处理 |
-|---|---|---|
-| 存在 | 存在 | 删除 target、保留 source；成功后清记录。 |
-| 不存在 | 存在 | 保留 target 并清记录。 |
-| 存在 | 不存在 | 保留 source 并清记录。 |
-| 不存在 | 不存在 | 记 WARN 后清记录。 |
-
-查找或删除遇到不可判定错误会中止；删除 target 失败保留记录。lifecycle 当前忽略 `reconcile()` 返回值，且 `transfer_journal::count()` 未连接保存拦截，因此未恢复 journal **不阻止存档**。无法取得当前存档槽（`save.facts` 不可用或查询失败）时，记录仅在内存中并告警；转移仍可继续，但重启后没有落盘恢复保障。
+库存读取仍由 `usecases/read_inventory.cpp` 汇总原生空间与已注册袋源；袋源注册面仍由 `api/bag_source.cpp` 提供。
 
 ## 投影与拖拽合并 wrapper
 
@@ -149,7 +117,7 @@ export 或 import 失败会清 journal；source remove 失败时尝试删除目�
 |---|---|
 | 读 | 游戏线程读取 ITEM port 与注册袋源 → 构造 `InventorySnapshot` → `SnapshotStore` 原子发布；GET 从已发布快照组装响应。 |
 | 写 | HTTP 参数校验 → typed command/ticket → 游戏线程 use case → Host port 或来源 callback → ticket result；成功后请求库存刷新。解析线程只做引用透传：注册源空间不做袋源回调/容量校验，统一留给主线程动作；需要袋数时读已发布快照。 |
-| 跨空间转移 | use case → journal intent → source export → target import → target_written/hash → source remove → 清记录；失败按补偿/reconcile 规则收敛。 |
+| 跨空间转移 | 已删除；POST 校验与票据 ACK 保留，终态返回 `item transfer unavailable`，不触达袋源回调。 |
 | 来源生命周期 | activate 主线程注册 `QolBagSource`、deactivate 主线程注销 → registry generation 变化 → 后续快照更新来源集合。 |
 
 ## HTTP 与 shop 内部适配
@@ -166,8 +134,6 @@ Shop 使用 `shop/` 内独立 snapshot 与 epoch；inventory 写入和读取不�
 |---|---|
 | 合并端口 bag 范围含 5 | `inventory.action` 与 transfer 排除任务袋 `(0,5)`，但独立 merge port 当前检查范围为 `0..5`，未明确排除 5；不能由 action 层规则推断 hook 已排除任务袋。 |
 | C18 缓存 key 不含所有袋表项 | 表项变化但 key 不变时需显式失效；当前失效入口没有调用点。 |
-| Journal 保存边界 | reconcile 失败不阻止存档；无 save slot 时只有内存记录。不得将 journal 描述为强制保存锁。 |
-| Journal marker 策略 | `mark_target_written()` 丢弃 marker 写结果；reconcile 按两端 item presence 收敛。状态更新可见性/耐久策略及 marker 失败是否阻止 move 待后续 Gate 裁定；现有测试不证明 marker 写失败导致数据不一致。 |
 | 注册源原子性 | 来源 callback 若失败时部分修改 sidecar，core.item 无法可靠推断或修复；来源必须满足 export 只读及失败不变式。 |
 | 分页与注册顺序 | 注册顺序或翻页期间库存变化可能导致重复/跳过；扁平袋号不是持久身份。 |
 | 容量没有全局上限 | 大容量来源应实现枚举；逐槽 fallback 成本随容量增长。 |
@@ -179,10 +145,9 @@ Shop 使用 `shop/` 内独立 snapshot 与 epoch；inventory 写入和读取不�
 | descriptor、能力、端口、feature 与路由 metadata | `tests/test_item_facts_plugin.cpp`、`tests/test_item_facts_dispatch.cpp` |
 | 查询分页、raw inventory、HTTP 写校验与结果 | `tests/test_item_facts_dispatch.cpp` |
 | 动作出售、扣款与回滚 | `tests/test_inventory_action_sell.cpp`、`tests/test_inventory_trade_sell.cpp` |
-| HTTP 移动与注册源路径 | `tests/test_item_facts_dispatch.cpp`。 |
-| 跨空间 transfer journal：marker 写失败、intent reload/reconcile、source remove 失败补偿 | `tests/test_item_transfer_journal.cpp`（`item_transfer_journal_tests`；Host-only，非真机验收）。 |
-| 袋源 mutation free/materialize rollback | `tests/test_extension_bag_bag_source_mutation.cpp`（`extension_bag_bag_source_mutation_tests`；Host-only，非真机验收；failure tests 覆盖 provider 可达的 free 拒绝与 materialize 失败回滚，不使 persist-false 潜伏分支可达）。 |
-| 袋映射、句柄身份 | `tests/test_bag_catalog.cpp`、`tests/test_item_handle_registry.cpp`、`tests/test_item_handle_custody.cpp`、`tests/check_item_handle_contracts.cmake` |
+| HTTP 移动 | `tests/test_item_facts_dispatch.cpp`；跨空间路径断言 `item transfer unavailable`。 |
+| 袋源 mutation free/materialize rollback | `tests/test_extension_bag_bag_source_mutation.cpp`（`extension_bag_bag_source_mutation_tests`；Host-only，非真机验收；failure tests 覆盖 provider 可达的 free 拒绝与 materialize 失败回滚）。 |
+| 物品句柄身份 | `tests/test_item_handle_registry.cpp`、`tests/test_item_handle_custody.cpp`、`tests/check_item_handle_contracts.cmake` |
 | hook 与拖拽合并 wrapper | `tests/test_inventory_hook_stage4.cpp`、`tests/test_move_merge_plugin.cpp` |
 | 静态资源与 HTTP route contract | `scripts/maintenance/check_arch.py`、`scripts/maintenance/check_http_routes.py` |
 
@@ -198,5 +163,10 @@ Host/static 测试不替代[验证规则与验收卡](../refactor/verification.m
 | `extension_source_bridge` | 过渡适配器不在当前目录或运行路径；扩展袋直接注册袋源。 |
 | 旧 fragment state | 已删除；注册源库存段由结构化袋源数据生成，不拼接来源方 JSON。 |
 | `inventory.merge_projection` | 已删除；投影回调注册由新的 projection 能力承载。 |
+| `usecases/move_item.*` | 已删除；跨空间移动编排待重建。 |
+| `usecases/transfer_journal.*` | 已删除；不再持久化转移记录或启动 reconcile。 |
+| `bags/native_transport.*`、`bags/source_transport.*` | 已删除；当前没有袋源 transport。 |
+| `model/` | 已删除；袋映射、移动规则与变更集校验待重建。 |
+| `bags/native_bag_source.*`、`bags/bag_source_registry.*`、`bags/item_handle_guard.*` | 已删除；这些文件此前未编译且无引用。 |
 
 旧 fragment state 与 provider 所有权不作为兼容 fallback；当前没有双读/双写路径。

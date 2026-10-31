@@ -306,7 +306,6 @@ add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
     ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
-    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
@@ -317,31 +316,12 @@ add_test(NAME inventory_action_sell_tests COMMAND inventory_action_sell_tests)
 add_executable(inventory_action_lifecycle_tests
     test_inventory_action_lifecycle.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
-    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
 )
 target_include_directories(inventory_action_lifecycle_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_lifecycle_tests PRIVATE cxx_std_17)
 set_target_properties(inventory_action_lifecycle_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME inventory_action_lifecycle_tests COMMAND inventory_action_lifecycle_tests)
-
-# Exercise transfer journal store-write failures through the production cross-space move path.
-add_executable(item_transfer_journal_tests
-    test_item_transfer_journal.cpp
-    ${CPP_DIR}/plugins/core.item/usecases/transfer_journal.cpp
-    ${CPP_DIR}/plugins/core.item/usecases/move_item.cpp
-    ${CPP_DIR}/plugins/core.item/bags/source_transport.cpp
-    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
-)
-target_include_directories(item_transfer_journal_tests PRIVATE ${CPP_DIR})
-target_compile_features(item_transfer_journal_tests PRIVATE cxx_std_17)
-set_target_properties(item_transfer_journal_tests PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-target_compile_definitions(item_transfer_journal_tests PRIVATE
-    QOL_CORE_ITEM_SOURCE_TRANSPORT_SEPARATE=1
-    QOL_CORE_ITEM_TRANSFER_TRANSPORT_SEPARATE=1)
-target_link_libraries(item_transfer_journal_tests PRIVATE Threads::Threads)
-add_test(NAME item_transfer_journal_tests COMMAND item_transfer_journal_tests)
 
 add_executable(attribute_quality_tests
     test_attribute_quality.cpp

@@ -1634,51 +1634,22 @@ void test_write_routes() {
     CHECK(g_state_write_arg0 == 1 && g_state_write_arg1 == 2);
     CHECK(g_state_move_count == 4 && g_state_move_to_bag == 0 && g_state_move_to_slot == 3);
 
-    // 注册袋源移入已占用原生槽时通过 move_handle 合并，失败结果仍为稳定 JSON。
+    // 袋源之间的移动编排已删除；跨空间请求返回稳定错误体，不触达袋源回调。
     CHECK(set_fake_registered_source(true));
-    g_inventory_slot_present[6][2] = true;
-    g_inventory_occupied_slots[6][2] = 3;
-    g_inventory_slot_present[0][4] = true;
-    g_inventory_occupied_slots[0][4] = 2;
     g_bag_source_export_calls = 0;
-    g_bag_source_export_fail = false;
-    g_state_move_handle_calls = 0;
-    g_state_move_handle_count = -1;
-    g_state_move_handle_fail = false;
     CHECK(dispatch_post("/api/item/inventory/move_item",
                         "{\"space\":2,\"bag\":0,\"slot\":2,\"count\":1,"
                         "\"to_space\":0,\"to_bag\":0,\"to_slot\":4}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
-                           &result_size));
-    const std::string merge_result_expected =
-        "{\"ok\":true,\"slots\":[" +
-        expected_slot_record(0, 4, expected_item_at_slot(4, 3)) + "," +
-        expected_slot_record(0, 2, expected_item_at_slot(2, 2), 2) + "]}";
-    CHECK(std::string(result, result_size) == merge_result_expected);
-    CHECK(g_bag_source_export_calls == 1);
-    CHECK(g_state_move_handle_calls == 1 && g_state_move_handle_count == 1 &&
-          g_inventory_occupied_slots[0][4] == 3);
-    g_state_move_handle_fail = true;
-    CHECK(dispatch_post("/api/item/inventory/move_item",
-                        "{\"space\":2,\"bag\":0,\"slot\":2,\"count\":1,"
-                        "\"to_space\":0,\"to_bag\":0,\"to_slot\":4}",
-                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                             &result_size));
-    const std::string failed_transfer =
-        "{\"ok\":false,\"error\":\"target bag rejected the transferred item\"}";
-    CHECK(std::string(result, result_size) == failed_transfer &&
-          result_size == failed_transfer.size() &&
-          std::string(result, result_size).find('\0') == std::string::npos &&
-          g_bag_source_export_calls == 2 && g_state_move_handle_calls == 2 &&
-          g_inventory_occupied_slots[6][2] == 2 && g_inventory_occupied_slots[0][4] == 3);
-    g_state_move_handle_fail = false;
-    g_inventory_slot_present[6][2] = false;
-    g_inventory_occupied_slots[6][2] = 0;
-    g_inventory_slot_present[0][4] = false;
-    g_inventory_occupied_slots[0][4] = 0;
+    const std::string transfer_unavailable =
+        "{\"ok\":false,\"error\":\"item transfer unavailable\"}";
+    CHECK(std::string(result, result_size) == transfer_unavailable &&
+          result_size == transfer_unavailable.size() &&
+          g_bag_source_export_calls == 0);
+    CHECK(set_fake_registered_source(false));
 
     // source 失活时，旧 flat bag 请求 fail-closed，不再进入 native write port。
     CHECK(set_fake_registered_source(false));

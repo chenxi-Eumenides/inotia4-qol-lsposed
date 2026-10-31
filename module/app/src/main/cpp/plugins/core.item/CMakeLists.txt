@@ -2,13 +2,9 @@ add_library(qol_plugin_core.item STATIC
     plugin.cpp
     runtime/context.cpp
     runtime/lifecycle.cpp
-    bags/native_transport.cpp
-    bags/source_transport.cpp
     bags/snapshot_store.cpp
     usecases/item_helpers.cpp
-    usecases/move_item.cpp
     usecases/read_inventory.cpp
-    usecases/transfer_journal.cpp
     shop/snapshot.cpp
     shop/query.cpp
     shop/buy.cpp
@@ -35,9 +31,3 @@ target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_BAG_SOURCE
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_PROJECTION_SEPARATE=1)
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_TYPED_READ_SOURCES_SEPARATELY=1)
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_SHOP_SEPARATE=1)
-target_compile_definitions(qol_plugin_core.item PRIVATE
-    QOL_CORE_ITEM_TRANSFER_JOURNAL_SEPARATE=1
-    QOL_CORE_ITEM_SOURCE_TRANSPORT_SEPARATE=1
-    QOL_CORE_ITEM_TRANSFER_TRANSPORT_SEPARATE=1
-    QOL_CORE_ITEM_MOVE_ITEM_SEPARATE=1
-)

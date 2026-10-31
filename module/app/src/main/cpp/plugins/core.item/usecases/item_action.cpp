@@ -1,13 +1,11 @@
 #include "item_action.h"
 
-#include "move_item.h"
 #include "sell_item.h"
 
 #include <cstddef>
 
 #include "../hooks/inventory_logging.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
-#include "plugins/core.item/bags/native_transport.h"
 #include "plugins/core.item/runtime/context.h"
 #include "../../../contracts/bag.h"
 
@@ -164,77 +162,97 @@ InventoryActionStatus read_target_item(const QolActionRef& target, QolItemHandle
     return InventoryActionStatus::kOk;
 }
 
-InventoryActionStatus locate_mutation_target(const contracts::QolBagRef& bag,
-                                             QolItemHandle expected_item, int32_t* out_slot) {
-    if (out_slot == nullptr || !valid_handle(expected_item)) {
-        return InventoryActionStatus::kInternal;
+// 原生袋只在 use case 内通过 Host 端口定位与序列化；不提供袋源 transport。
+QolResult locate_native_item(int32_t space, contracts::QolItemHandle item,
+                             contracts::QolBagRef* out, int32_t* out_slot) {
+    if (out == nullptr || out_slot == nullptr || !native_space(space) || !valid_handle(item)) {
+        return contracts::error(kQolErrInvalidArgument, "invalid native item lookup",
+                                sizeof("invalid native item lookup") - 1);
     }
+    if (g_port == nullptr || !contracts::qol_item_port_bag_space_size_valid(g_port) ||
+        g_port->read.bag_count == nullptr || g_port->read.bag_info == nullptr ||
+        g_port->read.item_at == nullptr) {
+        return contracts::error(kQolErrUnsupported, "native bag scan unavailable",
+                                sizeof("native bag scan unavailable") - 1);
+    }
+    int32_t bag_count = 0;
+    QolResult result = g_port->read.bag_count(space, &bag_count);
+    if (!contracts::succeeded(result)) return result;
+    if (bag_count < 0) {
+        return contracts::error(kQolErrInternal, "invalid native bag count",
+                                sizeof("invalid native bag count") - 1);
+    }
+    for (int32_t bag = 0; bag < bag_count; ++bag) {
+        const contracts::QolBagRef ref{space, bag};
+        contracts::QolBagInfo info{};
+        result = g_port->read.bag_info(&ref, &info);
+        if (!contracts::succeeded(result)) return result;
+        if (info.capacity < 0) {
+            return contracts::error(kQolErrInternal, "invalid native bag capacity",
+                                    sizeof("invalid native bag capacity") - 1);
+        }
+        for (int32_t slot = 0; slot < info.capacity; ++slot) {
+            contracts::QolInventoryItemRef candidate{};
+            result = g_port->read.item_at(&ref, slot, &candidate);
+            if (result.code == kQolErrNotFound) continue;
+            if (!contracts::succeeded(result)) return result;
+            if (candidate.item.slot == item.slot &&
+                candidate.item.generation == item.generation) {
+                *out = ref;
+                *out_slot = slot;
+                return contracts::ok();
+            }
+        }
+    }
+    return contracts::error(kQolErrNotFound, "native item not found",
+                            sizeof("native item not found") - 1);
+}
 
-    const contracts::QolBagSource* source = nullptr;
-    const contracts::QolItemPort* port = nullptr;
-    contracts::QolBagInfo info{};
-    QolResult result{};
-    if (native_space(bag.space_id)) {
-        port = g_port;
-        if (port == nullptr || !contracts::qol_item_port_bag_space_size_valid(port) ||
-            port->read.bag_info == nullptr || port->read.item_at == nullptr) {
-            return InventoryActionStatus::kInternal;
-        }
-        result = port->read.bag_info(&bag, &info);
-    } else {
-        source = find_bag_source(bag.space_id);
-        if (source == nullptr || source->info == nullptr || source->item_at == nullptr) {
-            return InventoryActionStatus::kInternal;
-        }
-        result = source->info(bag.bag, &info);
-        if (!contracts::succeeded(result) || info.capacity < 0) {
-            return InventoryActionStatus::kInternal;
-        }
-        if (source->identify != nullptr) {
-            contracts::QolBagRef identified_bag{};
-            int32_t identified_slot = -1;
-            result = source->identify(expected_item, &identified_bag, &identified_slot);
-            if (!contracts::succeeded(result)) {
-                return result.code == kQolErrNotFound ? InventoryActionStatus::kStale
-                                                      : InventoryActionStatus::kInternal;
-            }
-            if (identified_bag.space_id != bag.space_id || identified_bag.bag != bag.bag ||
-                identified_slot < 0 || identified_slot >= info.capacity) {
-                return InventoryActionStatus::kStale;
-            }
-            QolInventoryItemRef item{};
-            result = source->item_at(bag.bag, identified_slot, &item);
-            if (!contracts::succeeded(result) || item.space_id != bag.space_id ||
-                item.bag != bag.bag || item.slot != identified_slot ||
-                item.item.slot != expected_item.slot ||
-                item.item.generation != expected_item.generation) {
-                return InventoryActionStatus::kStale;
-            }
-            *out_slot = identified_slot;
-            return InventoryActionStatus::kOk;
-        }
+QolResult serialize_detached_item(contracts::QolItemHandle item, int32_t count,
+                                  contracts::QolBagTransfer* out) {
+    if (out == nullptr || !valid_handle(item) || count <= 0) {
+        return contracts::error(kQolErrInvalidArgument, "invalid detached item",
+                                sizeof("invalid detached item") - 1);
     }
-    if (!contracts::succeeded(result) || info.capacity < 0) {
-        return InventoryActionStatus::kInternal;
+    if (g_port == nullptr || !contracts::qol_item_port_transfer_size_valid(g_port) ||
+        g_port->read.serialize_item == nullptr) {
+        return contracts::error(kQolErrUnsupported, "item serialization unavailable",
+                                sizeof("item serialization unavailable") - 1);
     }
-
-    for (int32_t slot = 0; slot < info.capacity; ++slot) {
-        QolInventoryItemRef item{};
-        result = native_space(bag.space_id) ? port->read.item_at(&bag, slot, &item)
-                                            : source->item_at(bag.bag, slot, &item);
-        if (result.code == kQolErrNotFound) continue;
-        if (!contracts::succeeded(result)) return InventoryActionStatus::kInternal;
-        if (item.item.slot != expected_item.slot ||
-            item.item.generation != expected_item.generation) {
-            continue;
-        }
-        if (item.space_id != bag.space_id || item.bag != bag.bag || item.slot != slot) {
-            return InventoryActionStatus::kStale;
-        }
-        *out_slot = slot;
-        return InventoryActionStatus::kOk;
+    if (g_port->read.category == nullptr) {
+        return contracts::error(kQolErrUnsupported, "item category unavailable",
+                                sizeof("item category unavailable") - 1);
     }
-    return InventoryActionStatus::kStale;
+    uint32_t required_size = 0;
+    QolResult result = g_port->read.serialize_item(item, nullptr, 0, &required_size);
+    if (!contracts::succeeded(result)) return result;
+    if (required_size == 0 || required_size > contracts::kQolBagTransferPayloadMaxSize) {
+        return contracts::error(kQolErrInternal, "invalid serialized item size",
+                                sizeof("invalid serialized item size") - 1);
+    }
+    contracts::QolBagTransfer transfer{};
+    uint32_t serialized_size = 0;
+    result = g_port->read.serialize_item(item, transfer.payload,
+                                         contracts::kQolBagTransferPayloadCapacity,
+                                         &serialized_size);
+    if (!contracts::succeeded(result)) return result;
+    if (serialized_size != required_size || serialized_size == 0 ||
+        serialized_size > contracts::kQolBagTransferPayloadMaxSize) {
+        return contracts::error(kQolErrInternal, "invalid serialized item size",
+                                sizeof("invalid serialized item size") - 1);
+    }
+    int32_t category = 0;
+    result = g_port->read.category(item, &category);
+    if (!contracts::succeeded(result)) return result;
+    if (category <= 0) {
+        return contracts::error(kQolErrInternal, "invalid item category",
+                                sizeof("invalid item category") - 1);
+    }
+    transfer.category = category;
+    transfer.count = count;
+    transfer.payload_size = serialized_size;
+    *out = transfer;
+    return contracts::ok();
 }
 
 contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolActionRef to) {
@@ -268,77 +286,26 @@ contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolAction
         outcome.status = InventoryActionStatus::kConflict;
         return outcome;
     }
-    const bool native_same_space_move = from.space_id == to.space_id && native_space(from.space_id);
-    if (native_same_space_move && to.slot == -1) {
+
+    // 袋源之间的移动编排已删除；当前只保留原生同空间移动，由原版代码完成。
+    if (from.space_id != to.space_id || !native_space(from.space_id)) {
+        outcome.status = InventoryActionStatus::kUnsupported;
+        return outcome;
+    }
+    if (to.slot == -1) {
         // Native same-space moves require the host's explicit-slot operation.
         outcome.status = InventoryActionStatus::kInvalidRef;
         return outcome;
     }
     const bool was_occupied = target_occupied(to);
-    QolResult operation = contracts::ok();
-    QolBagMutationResult target_result{};
-
-    if (native_same_space_move) {
-        if (g_item_state_write == nullptr || g_item_state_write->move_item == nullptr) {
-            outcome.status = InventoryActionStatus::kInternal;
-            return outcome;
-        }
-        contracts::QolItemInventoryStateWriteResult write_result{};
-        operation = g_item_state_write->move_item(
-            native_bag_number(from), from.slot, count, native_bag_number(to), to.slot, &write_result);
-    } else if (from.space_id == to.space_id) {
-        const contracts::QolBagSource* source = find_bag_source(from.space_id);
-        if (source == nullptr || source->export_item == nullptr || source->import_item == nullptr ||
-            source->remove == nullptr) {
-            outcome.status = InventoryActionStatus::kUnsupported;
-            return outcome;
-        }
-        if (count > source_item.count) {
-            outcome.status = InventoryActionStatus::kInvalidRef;
-            return outcome;
-        }
-        contracts::QolBagTransfer transfer{};
-        operation = source->export_item(source_item.item, count, &transfer);
-        if (!contracts::succeeded(operation)) {
-            outcome.status = status_from_result(operation, true);
-            return outcome;
-        }
-        if (transfer.category != source_item.category || transfer.count != count ||
-            transfer.payload_size == 0 ||
-            transfer.payload_size > contracts::kQolBagTransferPayloadMaxSize) {
-            outcome.status = InventoryActionStatus::kInternal;
-            return outcome;
-        }
-        operation = source->import_item(&transfer, to.bag, to.slot, &target_result);
-        if (!contracts::succeeded(operation)) {
-            outcome.status = status_from_result(operation, true);
-            return outcome;
-        }
-        if (!valid_handle(target_result.item) || target_result.ref.space_id != to.space_id ||
-            target_result.ref.bag != to.bag || target_result.count != count) {
-            outcome.status = InventoryActionStatus::kInternal;
-            return outcome;
-        }
-        QolBagMutationResult removed{};
-        operation = source->remove(source_item.item, count, &removed);
-        if (!contracts::succeeded(operation)) {
-            QolBagMutationResult compensation{};
-            const QolResult rollback = source->remove(target_result.item, count, &compensation);
-            outcome.status = contracts::succeeded(rollback)
-                                 ? status_from_result(operation, true)
-                                 : InventoryActionStatus::kInternal;
-            return outcome;
-        }
-    } else {
-        operation = usecases::move_item(
-            {from.space_id, from.bag}, from.slot, count, {to.space_id, to.bag}, to.slot,
-            &target_result);
-        if (!contracts::succeeded(operation)) {
-            outcome.status = status_from_result(operation, true);
-            return outcome;
-        }
+    if (g_item_state_write == nullptr || g_item_state_write->move_item == nullptr) {
+        outcome.status = InventoryActionStatus::kInternal;
+        return outcome;
     }
-
+    contracts::QolItemInventoryStateWriteResult write_result{};
+    const QolResult operation = g_item_state_write->move_item(
+        native_bag_number(from), from.slot, count, native_bag_number(to), to.slot,
+        &write_result);
     if (!contracts::succeeded(operation)) {
         outcome.status = status_from_result(operation, true);
         return outcome;
@@ -346,29 +313,9 @@ contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolAction
     outcome.status = InventoryActionStatus::kOk;
     outcome.moved_count = count;
     outcome.merged = was_occupied ? 1u : 0u;
-    if (to.slot == -1) {
-        if (!valid_handle(target_result.item) || target_result.ref.space_id != to.space_id ||
-            target_result.ref.bag != to.bag || target_result.count != count) {
-            outcome.status = InventoryActionStatus::kInternal;
-            return outcome;
-        }
-        int32_t target_slot = -1;
-        const InventoryActionStatus locate_status =
-            locate_mutation_target(target_result.ref, target_result.item, &target_slot);
-        if (locate_status != InventoryActionStatus::kOk) {
-            outcome.status = locate_status;
-            return outcome;
-        }
-        outcome.target = {target_result.ref.space_id, target_result.ref.bag, target_slot};
-    }
     const InventoryActionStatus target_status =
         read_target_item(outcome.target, &outcome.target_item);
     if (target_status != InventoryActionStatus::kOk) outcome.status = target_status;
-    if (to.slot == -1 && outcome.status == InventoryActionStatus::kOk &&
-        (outcome.target_item.slot != target_result.item.slot ||
-         outcome.target_item.generation != target_result.item.generation)) {
-        outcome.status = InventoryActionStatus::kStale;
-    }
     request_inventory_refresh();
     return outcome;
 }
@@ -648,7 +595,7 @@ contracts::QolItemPlaceOutcome place(QolItemHandle item,
     }
     const int32_t count = detached_stack_count(item);
     contracts::QolBagTransfer transfer{};
-    QolResult operation = bags::native_transport::export_detached_item(item, count, &transfer);
+    QolResult operation = serialize_detached_item(item, count, &transfer);
     if (!contracts::succeeded(operation)) {
         outcome.status = status_from_result(operation, true);
         return outcome;
@@ -738,7 +685,7 @@ contracts::InventoryUseOutcome discard_handle(QolItemHandle item, int32_t count)
 
     contracts::QolBagRef native_ref{};
     int32_t native_slot = -1;
-    QolResult located = bags::native_transport::locate(
+    QolResult located = locate_native_item(
         contracts::kQolBagSpaceOriginal, item, &native_ref, &native_slot);
     if (!contracts::succeeded(located) && located.code != kQolErrNotFound) {
         // 无法确认句柄不在背包时不得释放，避免释放游戏仍持有的对象。
@@ -746,8 +693,8 @@ contracts::InventoryUseOutcome discard_handle(QolItemHandle item, int32_t count)
         return outcome;
     }
     if (contracts::succeeded(located)) return discard_native_handle(item, count);
-    located = bags::native_transport::locate(contracts::kQolBagSpaceVariant, item, &native_ref,
-                                             &native_slot);
+    located = locate_native_item(contracts::kQolBagSpaceVariant, item, &native_ref,
+                                 &native_slot);
     if (!contracts::succeeded(located) && located.code != kQolErrNotFound) {
         outcome.status = status_from_result(located, true);
         return outcome;

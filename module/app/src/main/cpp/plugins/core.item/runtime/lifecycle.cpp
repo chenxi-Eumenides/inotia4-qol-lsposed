@@ -8,12 +8,7 @@
 #include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/core.item/hooks/merge_hook.h"
 #include "plugins/core.item/shop/snapshot.h"
-#include "plugins/core.item/usecases/transfer_journal.h"
 #include "plugins/core.item/usecases/sell_item.h"
-#if !defined(QOL_CORE_ITEM_TRANSFER_JOURNAL_SEPARATE)
-// Test harnesses compile lifecycle.cpp directly rather than consuming the plugin source list.
-#include "plugins/core.item/usecases/transfer_journal.cpp"
-#endif
 
 namespace qol::features::core_item {
 namespace {
@@ -214,7 +209,6 @@ int plugin_install(contracts::PluginContext& ctx) {
         reset_ports();
         return 1;
     }
-    (void)usecases::transfer_journal::reconcile();
     apply_native_bag_limit();
     log_message(g_sdk, "[core.item] provider install");
     return 0;
@@ -263,7 +257,6 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
     ItemSnapshot empty_snapshot{};
     g_snapshot.publish(empty_snapshot);
     bags::inventory_snapshot_store().clear();
-    (void)usecases::transfer_journal::reconcile();
     if (g_frame_task == 0 && g_sdk != nullptr && g_sdk->scheduler.add != nullptr) {
         uint64_t task = 0;
         if (contracts::succeeded(g_sdk->scheduler.add(
