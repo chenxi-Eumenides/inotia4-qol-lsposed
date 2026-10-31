@@ -1,0 +1,5 @@
+QOL_HTTP_ROUTE(kGet, "/api/item/inventory", "core.inventory", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/item/inventory/money", "core.inventory", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/item/inventory/items", "core.inventory", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/item/inventory/bag/{bag}/info", "core.inventory", 0, 1)
+QOL_HTTP_ROUTE(kGet, "/api/item/inventory/bag/{bag}/{slot}", "core.inventory", 0, 1)

@@ -229,7 +229,8 @@ int main() {
     }
     CHECK(std::strcmp(descriptor.resources[16].id, "ptrslot:MOVE_MERGE_GOT") == 0);
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
-    CHECK(descriptor.http_endpoint_count == 19 && descriptor.http_endpoints != nullptr);
+    // 库存读侧 5 条 GET 迁往 core.inventory 后，core.item 只剩 shop query + 13 条写命令。
+    CHECK(descriptor.http_endpoint_count == 14 && descriptor.http_endpoints != nullptr);
     CHECK(descriptor.http_route_metadata_count == 2 &&
           descriptor.http_route_metadata != nullptr);
     uint32_t native_op_count = 0;

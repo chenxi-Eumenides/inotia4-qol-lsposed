@@ -1,8 +1,9 @@
 package com.inotia4.qol.service.info
 
 /**
- * item 域查询端点（inventory + shop GET）：owner = core.item。
- * Kotlin 只构造路径与查询串，响应体（含名称注入/字段重排/分页游标）完全由 native owner 生成。
+ * item 域查询端点：inventory 5 条 GET 的 owner = core.inventory（逻辑帧快照读面），
+ * shop GET 的 owner = core.item。Kotlin 只构造路径与查询串，
+ * 响应体（含名称注入/字段重排/分页游标）完全由 native owner 生成。
  *
  * 袋编号空间：space 省略时 bag 按扁平袋号解析（原版→改版→注册源顺序），
  * 给出 space 时 bag 按该空间内索引解析。分页游标对调用方不透明。

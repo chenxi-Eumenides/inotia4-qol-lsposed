@@ -2,9 +2,12 @@
 
 #include <algorithm>
 
-#include "contracts/game_ports/item_port.h"
+namespace qol::features::core_inventory {
 
-namespace qol::features::core_inventory::bags {
+const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolItemPort* g_port = nullptr;
+
+namespace bags {
 
 namespace {
 int g_native_bag_limit = contracts::kQolOriginalBagCount;
@@ -17,4 +20,6 @@ void set_native_bag_limit(int32_t limit) {
                                     contracts::kQolMaxNativeBagCount);
 }
 
-}  // namespace qol::features::core_inventory::bags
+}  // namespace bags
+
+}  // namespace qol::features::core_inventory

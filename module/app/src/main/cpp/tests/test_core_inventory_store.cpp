@@ -48,6 +48,24 @@ void test_descriptor() {
         assert(std::strcmp(descriptor.resources[i].owner, "core.inventory") == 0);
     }
     assert(std::strcmp(descriptor.resources[0].id, "hook:INVEN_FindItem") == 0);
+    // 库存 HTTP 读侧 owner 迁移：5 条 GET 的 optional http.registry/http.dispatch + endpoint 表。
+    assert(descriptor.optional_count == 2 && descriptor.optional_requires != nullptr);
+    assert(std::strcmp(descriptor.optional_requires[0].id,
+                       qol::contracts::kHttpRegistryCapabilityId) == 0);
+    assert(std::strcmp(descriptor.optional_requires[1].id,
+                       qol::contracts::kHttpDispatchCapabilityId) == 0);
+    assert(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
+    assert(descriptor.http_endpoint_count == 5 && descriptor.http_endpoints != nullptr);
+    for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
+        const auto& endpoint = descriptor.http_endpoints[i];
+        assert(endpoint.method == qol::contracts::HttpMethod::kGet);
+        assert(endpoint.route_owner != nullptr &&
+               std::strcmp(endpoint.route_owner, "core.inventory") == 0);
+        assert(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
+        assert(endpoint.op_required == 0 && endpoint.lease_required == 1);
+        assert(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
+        assert(endpoint.ctx != nullptr);
+    }
 }
 
 void test_store() {

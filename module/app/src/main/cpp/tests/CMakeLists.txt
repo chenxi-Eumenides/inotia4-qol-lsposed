@@ -60,6 +60,7 @@ add_executable(item_facts_plugin_tests
     ${CPP_DIR}/plugins/core.item/http/routes.cpp
     ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/http/response.cpp
+    ${CPP_DIR}/plugins/core.item/shop/query.cpp
     stubs/core_item_inventory_stub.cpp
 )
 target_include_directories(item_facts_plugin_tests PRIVATE
@@ -1930,7 +1931,23 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/plugins/core.item/http/routes.cpp
     ${CPP_DIR}/plugins/core.item/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.item/http/response.cpp
+    ${CPP_DIR}/plugins/core.item/shop/query.cpp
     stubs/core_item_inventory_stub.cpp
+    ${CPP_DIR}/plugins/core.inventory/plugin.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/access.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
+    ${CPP_DIR}/plugins/core.inventory/bags/snapshot_store.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/json_lite.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/query_handler.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/response.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/routes.cpp
+    ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
+    ${CPP_DIR}/plugins/core.inventory/store/slot_table.cpp
+    ${CPP_DIR}/plugins/core.inventory/store/inventory_store.cpp
+    ${CPP_DIR}/plugins/core.inventory/usecases/item_helpers.cpp
+    ${CPP_DIR}/plugins/core.inventory/usecases/read_inventory.cpp
     ${CPP_DIR}/host/http_registry.cpp
     ${CPP_DIR}/host/http_dispatch.cpp
     # T2h-B0：legacy 读实现入 host golden（fake 环境）
@@ -1942,6 +1959,7 @@ add_executable(item_facts_dispatch_tests
 target_compile_definitions(item_facts_dispatch_tests PRIVATE QOL_HTTP_DISPATCH_TEST_SEAMS=1)
 target_include_directories(item_facts_dispatch_tests PRIVATE
     ${CPP_DIR}
+    ${CPP_DIR}/plugins/core.inventory
     ${CPP_DIR}/game/symbols
     ${JNI_INCLUDE_DIRS}
 )
@@ -2353,17 +2371,24 @@ set_target_properties(extra_bag_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extra_bag_tests COMMAND extra_bag_tests)
 
-# core.inventory 存储核心：内存槽表 + inventory.access 契约（末尾追加）。
+# core.inventory 存储核心：内存槽表 + inventory.access 契约 + HTTP 读侧（末尾追加）。
 add_executable(core_inventory_store_tests
     test_core_inventory_store.cpp
     ${CPP_DIR}/plugins/core.inventory/plugin.cpp
     ${CPP_DIR}/plugins/core.inventory/api/access.cpp
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
+    ${CPP_DIR}/plugins/core.inventory/bags/snapshot_store.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/json_lite.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/query_handler.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/response.cpp
+    ${CPP_DIR}/plugins/core.inventory/http/routes.cpp
     ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
     ${CPP_DIR}/plugins/core.inventory/store/slot_table.cpp
     ${CPP_DIR}/plugins/core.inventory/store/inventory_store.cpp
+    ${CPP_DIR}/plugins/core.inventory/usecases/item_helpers.cpp
+    ${CPP_DIR}/plugins/core.inventory/usecases/read_inventory.cpp
 )
 target_include_directories(core_inventory_store_tests PRIVATE
     ${CPP_DIR}

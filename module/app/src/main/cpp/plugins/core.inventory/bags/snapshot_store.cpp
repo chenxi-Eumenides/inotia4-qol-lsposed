@@ -1,0 +1,34 @@
+#include "snapshot_store.h"
+
+namespace qol::features::core_inventory::bags {
+
+SnapshotStore::SnapshotStore() : snapshot_(), epoch_(0) {}
+
+void SnapshotStore::publish(std::shared_ptr<const InventorySnapshot> snapshot) {
+    std::atomic_store_explicit(&snapshot_, snapshot, std::memory_order_release);
+}
+
+std::shared_ptr<const InventorySnapshot> SnapshotStore::read() const {
+    return std::atomic_load_explicit(&snapshot_, std::memory_order_acquire);
+}
+
+uint64_t SnapshotStore::bump_epoch() {
+    return epoch_.fetch_add(1, std::memory_order_relaxed) + 1;
+}
+
+uint64_t SnapshotStore::epoch() const {
+    return epoch_.load(std::memory_order_acquire);
+}
+
+void SnapshotStore::clear() {
+    std::shared_ptr<const InventorySnapshot> empty;
+    std::atomic_store_explicit(&snapshot_, empty, std::memory_order_release);
+    (void)bump_epoch();
+}
+
+SnapshotStore& inventory_snapshot_store() {
+    static SnapshotStore store;
+    return store;
+}
+
+}  // namespace qol::features::core_inventory::bags

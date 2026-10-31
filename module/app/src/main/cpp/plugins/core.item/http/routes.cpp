@@ -8,23 +8,14 @@
 namespace qol::features::core_item {
 namespace {
 
-constexpr contracts::HttpRoute kInventoryRoutes[] = {
-    {contracts::HttpMethod::kGet, "/api/item/inventory", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/item/inventory/money", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/item/inventory/items", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/info", kPluginId, 0, 1},
-    {contracts::HttpMethod::kGet, "/api/item/inventory/bag/{bag}/{slot}", kPluginId, 0, 1},
+// 库存读侧 5 条 GET 已迁往 core.inventory；本表只剩 shop query 与写命令路由。
+// shop GET 的 path 与 shop/routes.inc 的 GET 事实行保持一致。
+constexpr contracts::HttpRoute kShopRoutes[] = {
+    {contracts::HttpMethod::kGet, "/api/item/shop/items", kPluginId, 0, 1},
 };
 #define QOL_HTTP_ROUTE(method, path, owner, op_gated, lease_required) \
     {contracts::HttpMethod::method, path, owner, op_gated, lease_required},
-constexpr contracts::HttpRoute kShopRoutes[] = {
-#include "plugins/core.item/shop/routes.inc"
-};
-constexpr contracts::HttpRoute kRoutes[] = {
-    kInventoryRoutes[0], kInventoryRoutes[1], kInventoryRoutes[2],
-    kInventoryRoutes[3], kInventoryRoutes[4], kShopRoutes[0],
-};
-const contracts::HttpRoute kRouteFacts[] = {
+constexpr contracts::HttpRoute kRouteFacts[] = {
 #include "plugins/core.item/routes.inc"
 #include "plugins/core.item/shop/routes.inc"
 };
@@ -41,7 +32,7 @@ bool g_http_endpoints_initialized = false;
 }  // namespace
 
 contracts::HttpEndpointDescriptor kHttpEndpoints[
-    sizeof(kRoutes) / sizeof(kRoutes[0]) +
+    sizeof(kShopRoutes) / sizeof(kShopRoutes[0]) +
     kItemWriteRouteCount];
 
 extern const uint32_t kHttpEndpointCount =
@@ -49,20 +40,12 @@ extern const uint32_t kHttpEndpointCount =
 
 void initialize_http_endpoints() {
     if (g_http_endpoints_initialized) return;
-    constexpr size_t kInventoryRouteCount = sizeof(kInventoryRoutes) / sizeof(kInventoryRoutes[0]);
-    constexpr size_t kQueryRouteCount = sizeof(kRoutes) / sizeof(kRoutes[0]);
-    for (size_t index = 0; index < kInventoryRouteCount; ++index) {
-        const contracts::HttpRoute& route = kRoutes[index];
-        const contracts::HttpRoute* facts = route_facts(route.method, route.path);
-        if (facts == nullptr) continue;
+    constexpr size_t kShopRouteCount = sizeof(kShopRoutes) / sizeof(kShopRoutes[0]);
+    for (size_t index = 0; index < kShopRouteCount; ++index) {
+        const contracts::HttpRoute& shop_route = kShopRoutes[index];
+        const contracts::HttpRoute* shop_facts = route_facts(shop_route.method, shop_route.path);
+        if (shop_facts == nullptr) continue;
         kHttpEndpoints[index] = contracts::HttpEndpointDescriptor{
-            route.method, route.path, route.owner, contracts::HttpHandlerKind::kQuery,
-            facts->op_gated, facts->lease_required, &query_handler, nullptr, &kQueries[index]};
-    }
-    const contracts::HttpRoute& shop_route = kRoutes[kInventoryRouteCount];
-    const contracts::HttpRoute* shop_facts = route_facts(shop_route.method, shop_route.path);
-    if (shop_facts != nullptr) {
-        kHttpEndpoints[kInventoryRouteCount] = contracts::HttpEndpointDescriptor{
             shop_route.method, shop_route.path, shop_route.owner,
             contracts::HttpHandlerKind::kQuery, shop_facts->op_gated,
             shop_facts->lease_required, &shop::query_handler, nullptr, nullptr};
@@ -72,7 +55,7 @@ void initialize_http_endpoints() {
         ItemWriteRoute& route = kItemWriteRoutes[index];
         const contracts::HttpRoute* facts = route_facts(contracts::HttpMethod::kPost, route.path);
         if (facts == nullptr) continue;
-        kHttpEndpoints[kQueryRouteCount + index] = contracts::HttpEndpointDescriptor{
+        kHttpEndpoints[kShopRouteCount + index] = contracts::HttpEndpointDescriptor{
             contracts::HttpMethod::kPost, route.path, kPluginId,
             contracts::HttpHandlerKind::kCommand, facts->op_gated, facts->lease_required,
             nullptr, route.handler, &route.kind};

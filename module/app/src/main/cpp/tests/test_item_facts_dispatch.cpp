@@ -35,6 +35,7 @@
 #include "host/owner_cache_builder.h"
 #include "infra/command_queue.h"
 #include "plugins/core.inventory/api/bag_source.h"
+#include "plugins/core.inventory/plugin.h"
 #include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/plugin.h"
 #include "test_snapshot_sdk.h"
@@ -853,16 +854,43 @@ const void* const kPortArray[] = {
     &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort,
     &kFakeMoveMergePort, &kFakeCharacterExtrasPort};
 
-struct FakeScheduler {
+// 库存读侧 GET owner 迁移后，core.item 与 core.inventory 各持有一个 frame task；
+// fake scheduler 以固定槽位容纳两个插件的任务。
+struct FakeSchedulerTask {
     qol::contracts::QolFrameHandler handler = nullptr;
     void* ctx = nullptr;
     int32_t interval = 0;
 };
 
-FakeScheduler g_scheduler;
+constexpr int kFakeSchedulerSlots = 4;
+FakeSchedulerTask g_scheduler_tasks[kFakeSchedulerSlots];
+
+void reset_scheduler() {
+    for (FakeSchedulerTask& task : g_scheduler_tasks) task = {};
+}
+
+bool scheduler_has_task() {
+    for (const FakeSchedulerTask& task : g_scheduler_tasks) {
+        if (task.handler != nullptr) return true;
+    }
+    return false;
+}
+
+bool scheduler_interval_gt_one() {
+    for (const FakeSchedulerTask& task : g_scheduler_tasks) {
+        if (task.handler != nullptr && task.interval > 1) return true;
+    }
+    return false;
+}
 
 bool run_scheduler(uint64_t frame) {
-    return g_scheduler.handler != nullptr && g_scheduler.handler(frame, g_scheduler.ctx) != 0;
+    bool ran = false;
+    for (FakeSchedulerTask& task : g_scheduler_tasks) {
+        if (task.handler != nullptr) {
+            ran = task.handler(frame, task.ctx) != 0 || ran;
+        }
+    }
+    return ran;
 }
 
 int32_t g_last_log_level = -1;
@@ -1265,16 +1293,23 @@ QolResult fake_post_typed(uint32_t handler_id, const void* payload, uint32_t siz
 
 QolResult fake_scheduler_add(int32_t, qol::contracts::QolFrameHandler handler, void* ctx,
                              int32_t interval, int32_t, uint64_t* out_id) {
-    g_scheduler.handler = handler;
-    g_scheduler.ctx = ctx;
-    g_scheduler.interval = interval;
-    *out_id = 1;
-    return qol::contracts::ok();
+    if (out_id == nullptr || handler == nullptr) {
+        return qol::contracts::error(kQolErrInvalidArgument, "bad scheduler add", 16);
+    }
+    for (uint64_t slot = 0; slot < kFakeSchedulerSlots; ++slot) {
+        if (g_scheduler_tasks[slot].handler == nullptr) {
+            g_scheduler_tasks[slot] = {handler, ctx, interval};
+            *out_id = slot + 1;
+            return qol::contracts::ok();
+        }
+    }
+    return qol::contracts::error(kQolErrConflict, "scheduler slots exhausted", 23);
 }
 
-QolResult fake_scheduler_remove(uint64_t) {
-    g_scheduler.handler = nullptr;
-    g_scheduler.ctx = nullptr;
+QolResult fake_scheduler_remove(uint64_t id) {
+    if (id >= 1 && id <= kFakeSchedulerSlots) {
+        g_scheduler_tasks[id - 1] = {};
+    }
     return qol::contracts::ok();
 }
 
@@ -1293,17 +1328,50 @@ qol::contracts::QolHostSdk make_sdk() {
     return sdk;
 }
 
+// core.inventory 的真实 storage hook attach 只校验 game 非空与 item_abi.bind_find_item_backup；
+// 本测试不触发 hook wrapper，其余 item_abi 入口保持空即可。
+void* fake_game_find_item_wrapper(int32_t) { return nullptr; }
+QolResult fake_game_bind_find_item_backup(qol::contracts::QolFindItemAbiFn) {
+    return qol::contracts::ok();
+}
+
+qol::contracts::QolGameHost g_fake_game_host = [] {
+    qol::contracts::QolGameHost game{};
+    game.abi = {sizeof(qol::contracts::QolGameHost), qol::contracts::kGameHostMajor,
+                qol::contracts::kGameHostMinor};
+    game.item_abi.find_item_wrapper = &fake_game_find_item_wrapper;
+    game.item_abi.bind_find_item_backup = &fake_game_bind_find_item_backup;
+    return game;
+}();
+
 qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk) {
     qol::contracts::PluginContext ctx{};
     ctx.struct_size = sizeof(qol::contracts::PluginContext);
     ctx.sdk_major = qol::contracts::kHostSdkMajor;
     ctx.sdk_minor = qol::contracts::kHostSdkMinor;
     ctx.sdk = sdk;
-    ctx.game = nullptr;
+    ctx.game = &g_fake_game_host;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
     ctx.port_count = 6;
     return ctx;
+}
+
+// 库存读侧 owner（core.inventory）：安装 descriptor 并注册 5 条 GET 的 HTTP endpoints。
+const qol::contracts::PluginDescriptor& install_inventory_descriptor(
+    qol::contracts::PluginContext& ctx) {
+    const auto& descriptor = qol::features::core_inventory::plugin_descriptor();
+    CHECK(descriptor.install(ctx) == 0);
+    descriptor.on_enabled(ctx);
+    CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
+    return descriptor;
+}
+
+const qol::contracts::PluginDescriptor& install_inventory_http(
+    const qol::contracts::QolHostSdk* sdk) {
+    qol::contracts::PluginContext ctx = make_context(sdk);
+    ctx.plugin_id = "core.inventory";
+    return install_inventory_descriptor(ctx);
 }
 
 std::string dispatch_post(const char* path, const char* body,
@@ -1363,7 +1431,8 @@ void test_write_routes() {
                         0, &status) == "{\"ok\":true,\"ticket\":72}");
     CHECK(status == 200 && g_post_payload_size > 0 && g_result_handler != nullptr);
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
-    CHECK(descriptor.http_endpoint_count == 19 && descriptor.http_endpoints != nullptr);
+    // 读侧 GET 迁往 core.inventory 后：shop query + 13 条写命令。
+    CHECK(descriptor.http_endpoint_count == 14 && descriptor.http_endpoints != nullptr);
     CHECK(descriptor.http_route_metadata_count == 2 &&
           descriptor.http_route_metadata != nullptr);
     char result[8192]{};
@@ -2088,7 +2157,7 @@ std::string dispatch_template(const char* path, const qol::contracts::HttpPathPa
 void test_lifecycle_and_responses() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
-    g_scheduler = FakeScheduler{};
+    reset_scheduler();
     g_in_world = true;
     g_static_ready = 1;
     text_table(static_cast<int32_t>(QolItemStaticTextKind::kItemName))[10] = "再生药水（小）";
@@ -2119,8 +2188,10 @@ void test_lifecycle_and_responses() {
     g_canonical_count = 3;
     descriptor.on_enabled(ctx);
     CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
-    CHECK(g_scheduler.handler != nullptr);
-    CHECK(g_scheduler.interval > 1);
+    // 库存读侧 5 条 GET：owner 已是 core.inventory，由其 frame task 刷新快照。
+    const auto& inventory_descriptor = install_inventory_http(&sdk);
+    CHECK(scheduler_has_task());
+    CHECK(scheduler_interval_gt_one());
 
     uint16_t status = 0;
     (void)dispatch_get("/api/item/inventory", &status);
@@ -2251,19 +2322,19 @@ void test_lifecycle_and_responses() {
     CHECK(dispatch_get("/api/item/inventory/money") == "{\"money\":72503}");
 
     // owner 停用：handler 墓碑，请求返回明确停用错误。
-    CHECK(qol::host::http_dispatch_api().unregister_owner("core.item").ok == kQolOk);
-    descriptor.on_disabled(ctx);
-    CHECK(g_scheduler.handler == nullptr);
+    CHECK(qol::host::http_dispatch_api().unregister_owner("core.inventory").ok == kQolOk);
+    inventory_descriptor.on_disabled(ctx);
     (void)dispatch_get("/api/item/inventory", &status);
     CHECK(status == 503);
 
+    inventory_descriptor.deactivate(ctx);
     descriptor.deactivate(ctx);
 }
 
 void test_static_not_ready_holds_snapshot() {
     qol::host::http_dispatch_reset_for_test();
     qol::host::http_registry_reset_for_test();
-    g_scheduler = FakeScheduler{};
+    reset_scheduler();
     g_in_world = true;
     g_static_ready = 0;
     const qol::contracts::QolHostSdk sdk = make_sdk();
@@ -2272,6 +2343,7 @@ void test_static_not_ready_holds_snapshot() {
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
+    (void)install_inventory_http(&sdk);
     // 静态名称表未下发：快照不发布，HTTP 侧保持 not ready。
     CHECK(run_scheduler(1));
     uint16_t status = 0;
@@ -2950,13 +3022,18 @@ void test_inventory_owner_vs_legacy_golden() {
     ctx.sdk_major = qol::contracts::kHostSdkMajor;
     ctx.sdk_minor = qol::contracts::kHostSdkMinor;
     ctx.sdk = &sdk;
+    ctx.game = &g_fake_game_host;
     ctx.plugin_id = "core.item";
     ctx.ports = kGoldenPortArray;
     ctx.port_count = 6;
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
-    CHECK(g_scheduler.handler != nullptr);
+    CHECK(scheduler_has_task());
+    // GET owner=core.inventory：golden 对比走同一 fake item port 的读侧实现。
+    qol::contracts::PluginContext inv_ctx = ctx;
+    inv_ctx.plugin_id = "core.inventory";
+    const auto& inventory_descriptor = install_inventory_descriptor(inv_ctx);
 
     // T2h-B2 B2c（W7）：经 item.state capability 取 owner raw 投影（唯一实现 = serialize_inventory_json）。
     const qol::contracts::ItemStateApi* item_state_api = nullptr;
@@ -3055,6 +3132,7 @@ void test_inventory_owner_vs_legacy_golden() {
           build_inventory_json());
     g_golden_world = 1;
     g_in_world = true;
+    inventory_descriptor.deactivate(inv_ctx);
     descriptor.deactivate(ctx);
 }
 
@@ -3098,6 +3176,7 @@ bool install_core_item_golden(GoldenHarness* out) {
     ctx.sdk_major = qol::contracts::kHostSdkMajor;
     ctx.sdk_minor = qol::contracts::kHostSdkMinor;
     ctx.sdk = &sdk;
+    ctx.game = &g_fake_game_host;
     ctx.plugin_id = "core.item";
     ctx.ports = kGoldenPortArray;
     ctx.port_count = 6;
@@ -3106,6 +3185,10 @@ bool install_core_item_golden(GoldenHarness* out) {
     if (!qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor))) {
         return false;
     }
+    // GET owner=core.inventory：R2 用例环境与 dispatch 测试保持一致。
+    qol::contracts::PluginContext inv_ctx = ctx;
+    inv_ctx.plugin_id = "core.inventory";
+    install_inventory_descriptor(inv_ctx);
     if (out != nullptr) {
         out->item_state = nullptr;
         out->ctx = ctx;

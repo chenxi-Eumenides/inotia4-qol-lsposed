@@ -46,17 +46,6 @@ QolResult response_error(contracts::HttpRes* response, uint16_t status, const ch
 QolResult response_body(contracts::HttpRes* response, const char* body, uint32_t size,
                         uint16_t status = 200);
 
-enum class Query : uint8_t {
-    kInventory,
-    kMoney,
-    kItems,
-    kBagInfo,
-    kBagSlot,
-};
-
-extern Query kQueries[];
-QolResult query_handler(const contracts::HttpReq* request, contracts::HttpRes* response, void* ctx);
-
 struct ItemWriteRoute {
     const char* path;
     contracts::QolItemWriteKind kind;
