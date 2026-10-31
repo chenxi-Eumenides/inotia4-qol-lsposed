@@ -149,6 +149,12 @@ struct ItemPlacement {
     std::optional<Placement> target;  // 空 = 首个空位
 };
 
+struct TakeRequest {
+    int32_t item_id;
+    int32_t count;
+    const PayloadMatch* match = nullptr;  // 实例型 A 可选
+};
+
 class BagOrchestrator {
 public:
     // 查询面：使用层向编排层查询，编排层再向所有袋源查询。
@@ -158,9 +164,13 @@ public:
 
     // 取物：按 item_id + count 跨源聚合；总量不足则整单拒绝，不写。
     // 成功时 out 返回实际取出的堆（可能来自多个源）。
+    // 单个取出；等价于 take_items({{item_id, count, match}})。
     Status take_item(int32_t item_id, int32_t count,
                      std::vector<ItemStack>* out,
                      const PayloadMatch* match = nullptr);
+    // 批量取出：先预检全部请求；任一不满足则整单拒绝，不写。
+    Status take_items(const std::vector<TakeRequest>& requests,
+                      std::vector<ItemStack>* out);
 
     // 放物：每个 ItemStack 可带目标 Placement；空目标 = 首个空位。
     // 先预检全部目标/空位，任一不足则整单拒绝，不写。
@@ -206,6 +216,7 @@ public:
 **`can_put(items)`**
 
 - 逐个检查：有 target 时目标必须为空且有效；无 target 时统计可用空位。
+- 多个无 target 项共享同一批空位，按输入顺序模拟占用；不能把同一个空位重复计算。
 - 只检查空位，不做自动堆叠；需要合并时由使用层先 `take` 两堆、合并后再 `put_items`。
 - 不检查堆叠上限；合并前由使用层按 item facts 判断。
 - 返回 false 时不做任何写入。
@@ -231,6 +242,24 @@ public:
 - 所有权：成功后 `out` 中的 `ItemStack` 归调用方；源已移除，编排层不保留引用。
 - 实例型 A：`count` 表示取多少个不同实例；`match` 用于指定某一实例。不传 `match` 时按遍历序取首个/前几个。
 - 数量型 B：可按 `item_id + count` 跨堆拆分；返回的各堆 count 之和等于请求量。`match` 只用于实例型 A；数量型 B 不按 payload 匹配。
+
+**`take_items(requests)`**
+
+```text
+1. 每个 request 校验 count > 0；否则 kInvalid
+2. 按请求顺序模拟扣减：对每个 request 查询匹配堆（含 match）
+   - 不存在 → kNotFound
+   - 匹配总量 < count → kNotEnough
+   - 已被前序 request 预占的堆数量要扣除；不能各自单独通过
+   - 任一不满足 → 整单拒绝，不写
+3. 预检通过后，按 request 顺序逐项取；每项内部按“源注册序 → bag → slot”取
+4. 源 remove 失败 → kSourceRejected（已取出的不回收）
+5. out 汇总所有取出的 ItemStack
+```
+
+- 用于多个不同 item_id 一起取，或多帧选择后的提交。
+- 全部预检通过才写；写入阶段失败不回滚，调用方负责把已取出的放回。
+- 每个 request 的所有权独立：成功取出的 ItemStack 归调用方。
 
 ### 4.3 放物
 
@@ -263,6 +292,18 @@ public:
 - merge：仅数量型 B；`take_item(source)`、`take_item(target)` → `put_items({合并后的堆→target})`。类型 A 不合并。
 - save：`can_put`/`find_slot` → `put_items({target})`
 - equip：`take_item` 取新/旧装备 → `put_items` 回填 → 装备动作
+
+### 4.5 多帧选择示例：宝石合成
+
+1. **选择阶段**：`query_item(gem_id)` 返回所有宝石快照（实例型 A，每个 payload 不同）。UI/使用层保存选中的 `ItemStack` 快照；不调用 `take_item`，宝石仍在袋中。
+2. **等待多帧**：继续持有快照。快照是只读副本，不代表所有权；期间宝石仍可能被移动/消耗。
+3. **点击合成**：
+   - 为每个选中宝石组装 `TakeRequest{gem_id, 1, PayloadMatch(payload)}`。
+   - `take_items(requests)`：全部仍在才成功；任一缺失/变更则整单拒绝，UI 刷新选择。
+   - 成功后，选中的宝石被取出，所有权归使用层。
+   - 创建新宝石，`put_items({new_gem})` 放回袋中。
+   - 若创建/放入失败：`put_items(已取出的宝石)` 放回；放回位置不一定与原槽相同。若要求原槽恢复，hook 适配层需要在选择时保存 `Placement` 快照。
+4. **锁定**：当前设计不提供 reservation。选中期间宝石仍可被移动/消耗；提交时 `take_items` 会拒绝并让 UI 刷新。若游戏要求“选中后不可移动/消耗”，需要额外的 reservation 机制，当前设计不含。
 
 ## 5. 查询方向与跨源聚合
 
