@@ -81,6 +81,8 @@ struct PayloadMatch {
 };
 ```
 
+`ItemStack.count` 是唯一权威数量。payload 内部的 count 位段不作为插件内数量来源；需要数量的层只读 `ItemStack.count`。把 `ItemStack` 交给游戏对象时，由适配层/物品 codec 把 count 写进 payload；编排层不解析、不修改 payload。
+
 `take_item` 默认按 `item_id + count` 取；需要精确到实例型 A 的某一堆时，传入 `PayloadMatch`。
 
 ### 2.2 源接口
@@ -120,9 +122,9 @@ struct BagSourceIdentity {
 ### 2.3 契约规则
 
 1. `space_id` 稳定且唯一；0/1 为原生空间，>=2 为注册源空间。注销后 `BagRef` 失效，不得复用同一 `space_id` 表示不同源。
-2. `count` 以 `ItemStack.count` 为权威；源若在 payload 中编码数量，必须在 `put`/`remove` 边界自行同步。编排层只读写 `count` 字段。
+2. `count` 以 `ItemStack.count` 为权威；payload 内部的 count 不是插件内数量来源。源只按 `count` 存取，不要求解析 payload；若源底层存储的 payload 编码数量，由源适配层在边界同步。编排层不解析、不修改 payload。
 3. `put` 覆盖目标槽；目标是否为空由编排层预检，源不做校验。
-4. `remove(bag, slot, count, out)` 由源执行数量增减：`count >= 当前数量` 移除整件，否则扣除 `count`。源负责更新自己的 count/payload/所有权/持久化等内部状态。
+4. `remove(bag, slot, count, out)` 由源执行数量增减：`count >= 当前数量` 移除整件，否则扣除 `count`。源负责更新自己的 count 与存储状态；payload 由源按自己的格式处理，编排层不感知。
 5. `BagInfo.occupied_slots` 只统计普通物品槽，不包含物品背包装备位。
 6. 源不做 item payload 校验、不做事务、不做回滚；源内部若有持久化/所有权/编码逻辑，由源自己维护，编排层不感知。
 7. 源不判断数量增减的业务合法性：编排层预检 ref、物品存在、`count > 0`、`count <= item.count`；源只执行存储操作。
@@ -404,14 +406,15 @@ public:
 ## 10. 风险
 
 1. **实例型 payload 的选择**：类型 A 同一 `item_id` 的不同堆 payload 不同。`take_item(item_id,count)` 默认按遍历序取；使用层若需要特定实例，必须先 `query_item` 拿到 payload，再传 `PayloadMatch`。类型 B 可按 `item_id + count` 跨堆拆分。
-2. **批量写入失败无回滚**：`take_item`/`put_items` 预检通过后，源阶段仍可能失败；已执行的部分不回收。使用层/hook 需在需要时自行补偿。
-3. **使用层取走物品后失败**：是否放回由使用层/hook 决定；编排层不自动回滚，可能丢件。使用层必须定义失败策略。
-4. **长期持有/双持有**：本设计禁止使用层跨帧持有 `ItemStack`；`take` 后不放回、不消费会让物品脱离袋源统计，重复放回会复制。跨帧需求必须改为 handle + detached buffer 或让物品留在袋中。
-5. **hook 需要精确槽位**：`find_slot`/`Placement` 只给 hook 适配层；业务使用层不要读取。若把 `BagRef` 泄漏到使用层，分层会被破坏。
-6. **源内部语义**：`remove` 由源实现；若源不维护 count/payload/所有权一致，编排层无法发现。注册前需源自测。
-7. **原生 source 的 S2**：原生写入口若绕过 S2 前后采样，可能破坏数量位域；S2 敏感路径继续走 hook 现有实现。
-8. **search 成本**：`O(source × bag × capacity)`；当前规模可接受，不建索引。
-9. **重复注册**：同一 `space_id` 或同一 `ctx` 重复注册会双倍计数；注册表拒绝重复 `space_id`，并在调试构建检查重复 `ctx`。
+2. **payload 内嵌 count 过期**：任何层都不得从 payload 读数量，必须用 `ItemStack.count`；交给游戏对象时由适配层/codec 把 count 写入 payload。编排层不负责修正 payload 内的数量字段。
+3. **批量写入失败无回滚**：`take_item`/`put_items` 预检通过后，源阶段仍可能失败；已执行的部分不回收。使用层/hook 需在需要时自行补偿。
+4. **使用层取走物品后失败**：是否放回由使用层/hook 决定；编排层不自动回滚，可能丢件。使用层必须定义失败策略。
+5. **长期持有/双持有**：本设计禁止使用层跨帧持有实际物品；`take` 后不放回、不消费会让物品脱离袋源统计，重复放回会复制。跨帧需求必须改为 handle + detached buffer 或让物品留在袋中。
+6. **hook 需要精确槽位**：`find_slot`/`Placement` 只给 hook 适配层；业务使用层不要读取。若把 `BagRef` 泄漏到使用层，分层会被破坏。
+7. **源内部语义**：`remove` 由源实现；若源不维护 count/存储状态一致，编排层无法发现。注册前需源自测。
+8. **原生 source 的 S2**：原生写入口若绕过 S2 前后采样，可能破坏数量位域；S2 敏感路径继续走 hook 现有实现。
+9. **search 成本**：`O(source × bag × capacity)`；当前规模可接受，不建索引。
+10. **重复注册**：同一 `space_id` 或同一 `ctx` 重复注册会双倍计数；注册表拒绝重复 `space_id`，并在调试构建检查重复 `ctx`。
 
 ## 11. 落地清单（设计阶段，不写实现）
 
