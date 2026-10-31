@@ -16,7 +16,7 @@ class Bag {
 public:
     static constexpr uint32_t kMaxCapacity = 16;
 
-    // 未装备物品背包返回 0，否则返回其容量枚举值转 uint32_t（档位 0/4/8/12/16）。
+    // 未装备物品背包返回 0，否则返回其类型对应的容量（档位 0/4/8/12/16）。
     uint32_t capacity() const;
     bool has_item_backpack() const;
     const ItemBackpack* item_backpack() const;

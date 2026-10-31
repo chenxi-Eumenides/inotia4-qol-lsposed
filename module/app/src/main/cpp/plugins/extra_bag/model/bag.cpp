@@ -3,7 +3,7 @@
 namespace qol::features::extra_bag::model {
 
 uint32_t Bag::capacity() const {
-    return item_backpack_ ? static_cast<uint32_t>(item_backpack_->capacity) : 0;
+    return item_backpack_ ? capacity_for_item_backpack_type(item_backpack_->type) : 0;
 }
 
 bool Bag::has_item_backpack() const {

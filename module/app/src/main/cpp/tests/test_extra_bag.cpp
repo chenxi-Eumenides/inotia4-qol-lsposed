@@ -10,7 +10,7 @@
 #include <cstring>
 
 using qol::features::extra_bag::model::Bag;
-using qol::features::extra_bag::model::ItemBackpackCapacity;
+using qol::features::extra_bag::model::ItemBackpackType;
 using qol::features::extra_bag::model::RuntimeItem;
 using qol::features::extra_bag::model::Store;
 
@@ -66,28 +66,28 @@ int main() {
         assert(bag->item(0) == nullptr);
     }
 
-    // 2. 容量档位：装备后 capacity 分别为 4/8/12/16；未装备=0；物品数据可读；
-    //    卸下装备位恢复 0 且装备位指针为空。
+    // 2. 物品背包类型决定容量：Small/Medium/Large/Huge -> 4/8/12/16；
+    //    None=0；卸下后恢复 0。
     {
         Bag bag;
         assert(bag.capacity() == 0);
         assert(!bag.has_item_backpack());
         assert(bag.item_backpack() == nullptr);
-        bag.equip_item_backpack({make_item(100, 1), ItemBackpackCapacity::kFour});
+        bag.equip_item_backpack({make_item(100, 1), ItemBackpackType::kSmall});
         assert(bag.capacity() == 4);
         assert(bag.has_item_backpack());
         assert(bag.item_backpack() != nullptr);
         assert(bag.item_backpack()->item.category == 100);
-        assert(bag.item_backpack()->capacity == ItemBackpackCapacity::kFour);
-        bag.equip_item_backpack({make_item(101, 1), ItemBackpackCapacity::kEight});
+        assert(bag.item_backpack()->type == ItemBackpackType::kSmall);
+        bag.equip_item_backpack({make_item(101, 1), ItemBackpackType::kMedium});
         assert(bag.capacity() == 8);
         assert(bag.item_backpack()->item.category == 101);
-        bag.equip_item_backpack({make_item(102, 1), ItemBackpackCapacity::kTwelve});
+        bag.equip_item_backpack({make_item(102, 1), ItemBackpackType::kLarge});
         assert(bag.capacity() == 12);
         assert(bag.item_backpack()->item.category == 102);
-        bag.equip_item_backpack({make_item(103, 1), ItemBackpackCapacity::kSixteen});
+        bag.equip_item_backpack({make_item(103, 1), ItemBackpackType::kHuge});
         assert(bag.capacity() == 16);
-        assert(bag.item_backpack()->capacity == ItemBackpackCapacity::kSixteen);
+        assert(bag.item_backpack()->type == ItemBackpackType::kHuge);
         bag.unequip_item_backpack();
         assert(bag.capacity() == 0);
         assert(!bag.has_item_backpack());
@@ -97,7 +97,7 @@ int main() {
     // 3. 物品背包不参与 (bag_index, slot_index) 索引：装备后普通槽仍为空。
     {
         Store isolated;
-        isolated.bag(0)->equip_item_backpack({make_item(7001, 1), ItemBackpackCapacity::kSixteen});
+        isolated.bag(0)->equip_item_backpack({make_item(7001, 1), ItemBackpackType::kHuge});
         assert(isolated.bag(0)->item_backpack() != nullptr);
         assert(isolated.item(0, 0) == nullptr);
         assert(!isolated.take(0, 0).has_value());
@@ -127,7 +127,7 @@ int main() {
     // 6. 不做容量校验：capacity=0 或 4 时都允许写 slot 15。
     store.put(2, 15, make_item(3001, 1));
     assert(store.item(2, 15) != nullptr);
-    store.bag(2)->equip_item_backpack({make_item(9, 1), ItemBackpackCapacity::kFour});
+    store.bag(2)->equip_item_backpack({make_item(9, 1), ItemBackpackType::kSmall});
     assert(store.bag(2)->capacity() == 4);
     store.put(2, 15, make_item(3002, 2));
     assert(store.item(2, 15)->category == 3002);
@@ -196,6 +196,8 @@ int main() {
     assert(api->struct_size == sizeof(qol::contracts::QolExtraBagApi));
     assert(api->bag_count != nullptr && api->bag_info != nullptr && api->item_at != nullptr &&
            api->put != nullptr && api->take != nullptr);
+    assert(api->item_backpack_at != nullptr && api->set_item_backpack != nullptr &&
+           api->clear_item_backpack != nullptr);
     assert(api->bag_count() == 5);
 
     qol::contracts::QolExtraBagInfo info{};
@@ -203,11 +205,8 @@ int main() {
     assert(info.capacity == 0);
     assert(info.occupied_slots == 0);
 
-    qol::features::extra_bag::model::store().bag(0)->equip_item_backpack(
-        {make_item(7001, 1), ItemBackpackCapacity::kFour});
-    api->bag_info(0, &info);
-    assert(info.capacity == 4);
-    assert(info.occupied_slots == 0);
+    qol::contracts::QolExtraBagBackpack equipped{};
+    assert(!api->item_backpack_at(0, &equipped));
 
     const qol::contracts::QolExtraBagItem item = make_transfer_item(1001, 5, "abc");
     api->put(0, 3, &item);
@@ -234,7 +233,45 @@ int main() {
     assert(!api->item_at(0, 3, &out));
     assert(!api->take(0, 3, &out));
 
-    // 12. 不做校验：零值物品也直接入库；越界 bag 静默为空。
+    // 12. 背包装备位公共接口：set 后按类型更新容量，clear 后归零。
+    const qol::contracts::QolExtraBagItem backpack_item =
+        make_transfer_item(7001, 1, "backpack-payload");
+    api->set_item_backpack(0, &backpack_item, qol::contracts::kExtraBagBackpackTypeSmall);
+    api->bag_info(0, &info);
+    assert(info.capacity == 4);
+    assert(api->item_backpack_at(0, &equipped));
+    assert(equipped.type == qol::contracts::kExtraBagBackpackTypeSmall);
+    assert(equipped.item.category == 7001);
+    assert(equipped.item.count == 1);
+    assert(equipped.item.payload_size == 16);
+    assert(std::memcmp(equipped.item.payload, "backpack-payload", 16) == 0);
+
+    api->set_item_backpack(0, &backpack_item, qol::contracts::kExtraBagBackpackTypeMedium);
+    api->bag_info(0, &info);
+    assert(info.capacity == 8);
+    assert(api->item_backpack_at(0, &equipped));
+    assert(equipped.type == qol::contracts::kExtraBagBackpackTypeMedium);
+
+    api->set_item_backpack(0, &backpack_item, qol::contracts::kExtraBagBackpackTypeLarge);
+    api->bag_info(0, &info);
+    assert(info.capacity == 12);
+    api->set_item_backpack(0, &backpack_item, qol::contracts::kExtraBagBackpackTypeHuge);
+    api->bag_info(0, &info);
+    assert(info.capacity == 16);
+
+    api->clear_item_backpack(0);
+    api->bag_info(0, &info);
+    assert(info.capacity == 0);
+    assert(!api->item_backpack_at(0, &equipped));
+
+    api->set_item_backpack(0, &backpack_item, qol::contracts::kExtraBagBackpackTypeSmall);
+    assert(api->item_backpack_at(0, &equipped));
+    api->set_item_backpack(0, &backpack_item, qol::contracts::kExtraBagBackpackTypeNone);
+    api->bag_info(0, &info);
+    assert(info.capacity == 0);
+    assert(!api->item_backpack_at(0, &equipped));
+
+    // 13. 不做校验：零值物品也直接入库；越界 bag 静默为空；越界装备 set 无操作。
     const qol::contracts::QolExtraBagItem zero{};
     api->put(1, 0, &zero);
     assert(api->item_at(1, 0, &out));
@@ -244,12 +281,14 @@ int main() {
     api->put(-1, 0, &item);
     assert(!api->item_at(-1, 0, &out));
     assert(!api->take(-1, 0, &out));
+    api->set_item_backpack(99, &backpack_item, qol::contracts::kExtraBagBackpackTypeHuge);
+    assert(!api->item_backpack_at(99, &equipped));
     qol::contracts::QolExtraBagInfo invalid{1, 1};
     api->bag_info(99, &invalid);
     assert(invalid.capacity == 0);
     assert(invalid.occupied_slots == 0);
 
-    // 13. 物品背包不参与普通槽索引。
+    // 14. 物品背包不参与普通槽索引。
     assert(!api->item_at(0, 0, &out));
     assert(!api->take(0, 0, &out));
 
