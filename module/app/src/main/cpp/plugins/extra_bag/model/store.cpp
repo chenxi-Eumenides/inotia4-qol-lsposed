@@ -2,26 +2,39 @@
 
 namespace qol::features::extra_bag::model {
 
-Store::Store() : bags_(kDefaultBagCount) {}
+Store::Store() : bags_(kBagCount) {}
 
 uint32_t Store::bag_count() const {
     return static_cast<uint32_t>(bags_.size());
 }
 
-void Store::set_bag_count(uint32_t count) {
-    bags_.resize(count);
+Bag* Store::bag(uint32_t bag_index) {
+    return bag_index < bags_.size() ? &bags_[bag_index] : nullptr;
 }
 
-Bag* Store::bag(uint32_t index) {
-    return index < bags_.size() ? &bags_[index] : nullptr;
+const Bag* Store::bag(uint32_t bag_index) const {
+    return bag_index < bags_.size() ? &bags_[bag_index] : nullptr;
 }
 
-const Bag* Store::bag(uint32_t index) const {
-    return index < bags_.size() ? &bags_[index] : nullptr;
+void Store::put(uint32_t bag_index, uint32_t slot_index, ItemData item) {
+    Bag* target = bag(bag_index);
+    if (target == nullptr) return;
+    target->put(slot_index, item);
+}
+
+std::optional<ItemData> Store::take(uint32_t bag_index, uint32_t slot_index) {
+    Bag* target = bag(bag_index);
+    if (target == nullptr) return std::nullopt;
+    return target->take(slot_index);
+}
+
+const ItemData* Store::item(uint32_t bag_index, uint32_t slot_index) const {
+    const Bag* target = bag(bag_index);
+    return target == nullptr ? nullptr : target->item(slot_index);
 }
 
 void Store::clear() {
-    bags_.assign(kDefaultBagCount, Bag{});
+    bags_.assign(kBagCount, Bag{});
 }
 
 Store& store() {

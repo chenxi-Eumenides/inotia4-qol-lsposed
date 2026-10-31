@@ -1,14 +1,17 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <optional>
 
+#include "item.h"
 #include "item_backpack.h"
 
 namespace qol::features::extra_bag::model {
 
-// 完全静态背包模型：只持有独立的物品背包装备位，无任何物品操作。
-// 不做校验/拒绝：装备动作直接覆盖装备位。不加锁；调用方自行保证线程安全。
+// 内存背包模型：物品按 slot_index 存储，物品背包装备位独立且不参与该索引。
+// 不做校验/拒绝：put 直接覆盖目标位置，不检查容量、slot 范围或物品数据。
+// 不加锁；调用方自行保证线程安全。
 class Bag {
 public:
     static constexpr uint32_t kMaxCapacity = 16;
@@ -20,8 +23,15 @@ public:
     void equip_item_backpack(ItemBackpack backpack);
     void unequip_item_backpack();
 
+    void put(uint32_t slot_index, ItemData item);
+    // 存在则移除并返回；不存在返回 nullopt。
+    std::optional<ItemData> take(uint32_t slot_index);
+    // 不存在返回 nullptr。
+    const ItemData* item(uint32_t slot_index) const;
+
 private:
     std::optional<ItemBackpack> item_backpack_;
+    std::map<uint32_t, ItemData> slots_;
 };
 
 }  // namespace qol::features::extra_bag::model

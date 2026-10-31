@@ -22,4 +22,21 @@ void Bag::unequip_item_backpack() {
     item_backpack_.reset();
 }
 
+void Bag::put(uint32_t slot_index, ItemData item) {
+    slots_[slot_index] = item;
+}
+
+std::optional<ItemData> Bag::take(uint32_t slot_index) {
+    const auto it = slots_.find(slot_index);
+    if (it == slots_.end()) return std::nullopt;
+    const ItemData item = it->second;
+    slots_.erase(it);
+    return item;
+}
+
+const ItemData* Bag::item(uint32_t slot_index) const {
+    const auto it = slots_.find(slot_index);
+    return it == slots_.end() ? nullptr : &it->second;
+}
+
 }  // namespace qol::features::extra_bag::model
