@@ -2356,6 +2356,19 @@ set_target_properties(better_move_plugin_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME better_move_plugin_tests COMMAND better_move_plugin_tests)
 
+# extra_bag 原型插件 host 测试（静态背包模型 + 描述符生命周期；末尾追加）。
+add_executable(extra_bag_tests
+    test_extra_bag.cpp
+    ${CPP_DIR}/plugins/extra_bag/plugin.cpp
+    ${CPP_DIR}/plugins/extra_bag/model/bag.cpp
+    ${CPP_DIR}/plugins/extra_bag/model/store.cpp
+)
+target_include_directories(extra_bag_tests PRIVATE ${CPP_DIR})
+target_compile_features(extra_bag_tests PRIVATE cxx_std_17)
+set_target_properties(extra_bag_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extra_bag_tests COMMAND extra_bag_tests)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)
