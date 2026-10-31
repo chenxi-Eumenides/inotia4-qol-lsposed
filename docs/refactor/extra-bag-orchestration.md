@@ -2,7 +2,7 @@
 
 > 状态：设计稿
 > 范围：多个 `extra_bag.storage` 袋源之间的读取、搜索、移动和交换。
-> 前提：单线程调用；不做校验、不做回滚、不做持久化；不包含背包装备编排。
+> 前提：单线程调用；source 回调不得反向调用编排层；不做校验、不做回滚、不做持久化；不包含背包装备编排。
 
 ## 1. 目标与非目标
 
@@ -225,14 +225,13 @@ enum class OrchestrationStatus {
     kDestinationEmpty,
     kDestinationNotEmpty,
     kInvalidRef,
-    kBusy,
 };
 ```
 
 - `kInvalidRef`：source 未注册、bag 越界、slot 超出容量。
 - `kSourceEmpty` / `kDestinationEmpty`：对应位置没有物品。
 - `kDestinationNotEmpty`：移动目标已有物品。
-- `kBusy`：重入保护生效；单线程下只应在 source 回调反向调用编排层时出现。
+- 不提供重入状态；source 回调反向调用编排层属于 source 缺陷，应修改 source，编排层不做兜底。
 - 不提供回滚状态；所有写入前检查通过后，操作按顺序执行。
 
 ## 10. 单线程与重入
@@ -240,8 +239,7 @@ enum class OrchestrationStatus {
 - 所有入口只在游戏主线程调用。
 - 不使用锁、原子变量、异步任务或跨帧等待。
 - 一次操作期间不得注册/注销 source。
-- 编排层维护一个 `bool in_operation`；重入时返回 `kBusy`。
-- source 的 `take` / `put` 回调不得反向调用编排层。
+- 编排层不维护重入保护。source 的 `take` / `put` 回调不得反向调用编排层；违反此约定属于 source 缺陷，应修改 source，编排层不做兜底。
 
 ## 11. 不包含背包装备
 
@@ -269,6 +267,7 @@ enum class OrchestrationStatus {
   - 不缓存跨操作的物品数据。
   - 不修改装备位，不修改容量。
   - 搜索顺序和遍历顺序固定为 source 注册顺序 → bag → slot。
+  - source 回调不得反向调用编排层。
 
 ## 13. 对外接口草案
 
