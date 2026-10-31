@@ -6,18 +6,18 @@
 
 namespace qol::features::extra_bag::model {
 
-constexpr bool is_allowed_backpack_category(int32_t category) {
-    return category >= 1 && category <= 4;
+constexpr bool is_allowed_backpack_item_id(int32_t item_id) {
+    return item_id >= 31 && item_id <= 34;
 }
 
-// 物品背包的 category 直接决定容量：
-// 1=手提包->4，2=背包小->8，3=背包中->12，4=背包大->16。
-constexpr uint32_t capacity_for_backpack_category(int32_t category) {
-    switch (category) {
-        case 1: return 4;
-        case 2: return 8;
-        case 3: return 12;
-        case 4: return 16;
+// 物品背包的 item_id 直接决定容量：
+// 31=手提包->4，32=背包小->8，33=背包中->12，34=背包大->16。
+constexpr uint32_t capacity_for_backpack_item_id(int32_t item_id) {
+    switch (item_id) {
+        case 31: return 4;
+        case 32: return 8;
+        case 33: return 12;
+        case 34: return 16;
         default: return 0;
     }
 }

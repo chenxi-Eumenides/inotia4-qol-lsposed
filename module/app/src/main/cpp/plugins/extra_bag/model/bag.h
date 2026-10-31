@@ -16,11 +16,11 @@ class Bag {
 public:
     static constexpr uint32_t kMaxCapacity = 16;
 
-    // 未装备物品背包返回 0，否则按物品背包 category 映射容量（1/2/3/4 -> 4/8/12/16）。
+    // 未装备物品背包返回 0，否则按物品背包 item_id 映射容量（31/32/33/34 -> 4/8/12/16）。
     uint32_t capacity() const;
     bool has_item_backpack() const;
     const ItemBackpack* item_backpack() const;
-    // 仅接受 category 1..4；装备位已占用或 category 非法时返回 false。
+    // 仅接受 item_id 31..34；装备位已占用或 item_id 非法时返回 false。
     bool equip_item_backpack(ItemBackpack backpack);
     void unequip_item_backpack();
 

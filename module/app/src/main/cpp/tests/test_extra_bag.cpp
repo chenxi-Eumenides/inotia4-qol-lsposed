@@ -15,15 +15,15 @@ using qol::features::extra_bag::model::Store;
 
 namespace {
 
-RuntimeItem make_item(int32_t category, int32_t count) {
+RuntimeItem make_item(int32_t item_id, int32_t count) {
     RuntimeItem item{};
-    item.category = category;
+    item.item_id = item_id;
     item.count = count;
     return item;
 }
 
-RuntimeItem make_item_with_payload(int32_t category, int32_t count, const char* payload) {
-    RuntimeItem item = make_item(category, count);
+RuntimeItem make_item_with_payload(int32_t item_id, int32_t count, const char* payload) {
+    RuntimeItem item = make_item(item_id, count);
     const size_t size = std::strlen(payload);
     assert(size <= RuntimeItem::kPayloadMaxSize);
     std::memcpy(item.payload, payload, size);
@@ -31,10 +31,10 @@ RuntimeItem make_item_with_payload(int32_t category, int32_t count, const char* 
     return item;
 }
 
-qol::contracts::QolExtraBagItem make_transfer_item(int32_t category, int32_t count,
+qol::contracts::QolExtraBagItem make_transfer_item(int32_t item_id, int32_t count,
                                                    const char* payload) {
     qol::contracts::QolExtraBagItem item{};
-    item.category = category;
+    item.item_id = item_id;
     item.count = count;
     if (payload != nullptr) {
         const size_t size = std::strlen(payload);
@@ -65,34 +65,34 @@ int main() {
         assert(bag->item(0) == nullptr);
     }
 
-    // 2. 物品背包的 category 决定容量：1/2/3/4 -> 4/8/12/16；
-    //    非法 category 或装备位已占用时拒绝；卸下后恢复 0。
+    // 2. 物品背包的 item_id 决定容量：31/32/33/34 -> 4/8/12/16；
+    //    非法 item_id 或装备位已占用时拒绝；卸下后恢复 0。
     {
         Bag bag;
         assert(bag.capacity() == 0);
         assert(!bag.has_item_backpack());
         assert(bag.item_backpack() == nullptr);
-        assert(bag.equip_item_backpack({make_item(1, 1)}));
+        assert(bag.equip_item_backpack({make_item(31, 1)}));
         assert(bag.capacity() == 4);
         assert(bag.has_item_backpack());
         assert(bag.item_backpack() != nullptr);
-        assert(bag.item_backpack()->item.category == 1);
-        assert(!bag.equip_item_backpack({make_item(2, 1)}));
+        assert(bag.item_backpack()->item.item_id == 31);
+        assert(!bag.equip_item_backpack({make_item(32, 1)}));
         assert(bag.capacity() == 4);
-        assert(bag.item_backpack()->item.category == 1);
+        assert(bag.item_backpack()->item.item_id == 31);
         bag.unequip_item_backpack();
         assert(bag.capacity() == 0);
-        assert(bag.equip_item_backpack({make_item(2, 1)}));
+        assert(bag.equip_item_backpack({make_item(32, 1)}));
         assert(bag.capacity() == 8);
-        assert(bag.item_backpack()->item.category == 2);
+        assert(bag.item_backpack()->item.item_id == 32);
         bag.unequip_item_backpack();
-        assert(bag.equip_item_backpack({make_item(3, 1)}));
+        assert(bag.equip_item_backpack({make_item(33, 1)}));
         assert(bag.capacity() == 12);
         bag.unequip_item_backpack();
-        assert(bag.equip_item_backpack({make_item(4, 1)}));
+        assert(bag.equip_item_backpack({make_item(34, 1)}));
         assert(bag.capacity() == 16);
         bag.unequip_item_backpack();
-        assert(!bag.equip_item_backpack({make_item(5, 1)}));
+        assert(!bag.equip_item_backpack({make_item(35, 1)}));
         assert(bag.capacity() == 0);
         assert(!bag.has_item_backpack());
         assert(bag.item_backpack() == nullptr);
@@ -101,7 +101,7 @@ int main() {
     // 3. 物品背包不参与 (bag_index, slot_index) 索引：装备后普通槽仍为空。
     {
         Store isolated;
-        assert(isolated.bag(0)->equip_item_backpack({make_item(4, 1)}));
+        assert(isolated.bag(0)->equip_item_backpack({make_item(34, 1)}));
         assert(isolated.bag(0)->item_backpack() != nullptr);
         assert(isolated.item(0, 0) == nullptr);
         assert(!isolated.take(0, 0).has_value());
@@ -111,16 +111,16 @@ int main() {
     //    不同背包的同 slot 互不影响。
     store.put(0, 3, make_item(1001, 5));
     assert(store.item(0, 3) != nullptr);
-    assert(store.item(0, 3)->category == 1001);
+    assert(store.item(0, 3)->item_id == 1001);
     assert(store.item(0, 3)->count == 5);
     assert(store.bag(0)->item(3) != nullptr);
     assert(store.bag(0)->occupied_slots() == 1);
     store.put(0, 3, make_item(1002, 7));
-    assert(store.item(0, 3)->category == 1002);
+    assert(store.item(0, 3)->item_id == 1002);
     assert(store.item(0, 3)->count == 7);
     store.put(1, 3, make_item(2001, 9));
-    assert(store.item(0, 3)->category == 1002);
-    assert(store.item(1, 3)->category == 2001);
+    assert(store.item(0, 3)->item_id == 1002);
+    assert(store.item(1, 3)->item_id == 2001);
 
     // 5. payload 随物品一起存取，长度与内容保持不变。
     store.put(1, 2, make_item_with_payload(2002, 3, "payload-abc"));
@@ -131,15 +131,15 @@ int main() {
     // 6. 不做容量校验：capacity=0 或 4 时都允许写 slot 15。
     store.put(2, 15, make_item(3001, 1));
     assert(store.item(2, 15) != nullptr);
-    assert(store.bag(2)->equip_item_backpack({make_item(1, 1)}));
+    assert(store.bag(2)->equip_item_backpack({make_item(31, 1)}));
     assert(store.bag(2)->capacity() == 4);
     store.put(2, 15, make_item(3002, 2));
-    assert(store.item(2, 15)->category == 3002);
+    assert(store.item(2, 15)->item_id == 3002);
 
     // 7. 出库：存在则移除并返回；重复 take 或空槽返回 nullopt。
     const auto taken = store.take(0, 3);
     assert(taken.has_value());
-    assert(taken->category == 1002);
+    assert(taken->item_id == 1002);
     assert(taken->count == 7);
     assert(store.item(0, 3) == nullptr);
     assert(!store.take(0, 3).has_value());
@@ -216,7 +216,7 @@ int main() {
     api->put(0, 3, &item);
     qol::contracts::QolExtraBagItem out{};
     assert(api->item_at(0, 3, &out));
-    assert(out.category == 1001);
+    assert(out.item_id == 1001);
     assert(out.count == 5);
     assert(out.payload_size == 3);
     assert(std::memcmp(out.payload, "abc", 3) == 0);
@@ -226,50 +226,50 @@ int main() {
     const qol::contracts::QolExtraBagItem replacement = make_transfer_item(1002, 7, "wxyz");
     api->put(0, 3, &replacement);
     assert(api->item_at(0, 3, &out));
-    assert(out.category == 1002);
+    assert(out.item_id == 1002);
     assert(out.count == 7);
     assert(out.payload_size == 4);
     assert(std::memcmp(out.payload, "wxyz", 4) == 0);
 
     assert(api->take(0, 3, &out));
-    assert(out.category == 1002);
+    assert(out.item_id == 1002);
     assert(out.count == 7);
     assert(!api->item_at(0, 3, &out));
     assert(!api->take(0, 3, &out));
 
-    // 12. 背包装备位公共接口：容量只由物品背包 category 派生；
-    //     非法 category 或已有装备时拒绝。
+    // 12. 背包装备位公共接口：容量只由物品背包 item_id 派生；
+    //     非法 item_id 或已有装备时拒绝。
     const qol::contracts::QolExtraBagItem backpack_handbag =
-        make_transfer_item(1, 1, "backpack-payload");
+        make_transfer_item(31, 1, "backpack-payload");
     assert(api->set_item_backpack(0, &backpack_handbag));
     api->bag_info(0, &info);
     assert(info.capacity == 4);
     assert(api->item_backpack_at(0, &equipped));
-    assert(equipped.category == 1);
+    assert(equipped.item_id == 31);
     assert(equipped.count == 1);
     assert(equipped.payload_size == 16);
     assert(std::memcmp(equipped.payload, "backpack-payload", 16) == 0);
 
-    const qol::contracts::QolExtraBagItem backpack_small = make_transfer_item(2, 1, nullptr);
+    const qol::contracts::QolExtraBagItem backpack_small = make_transfer_item(32, 1, nullptr);
     assert(!api->set_item_backpack(0, &backpack_small));
     api->bag_info(0, &info);
     assert(info.capacity == 4);
     assert(api->item_backpack_at(0, &equipped));
-    assert(equipped.category == 1);
+    assert(equipped.item_id == 31);
 
     api->clear_item_backpack(0);
     assert(api->set_item_backpack(0, &backpack_small));
     api->bag_info(0, &info);
     assert(info.capacity == 8);
     assert(api->item_backpack_at(0, &equipped));
-    assert(equipped.category == 2);
+    assert(equipped.item_id == 32);
 
-    const qol::contracts::QolExtraBagItem backpack_medium = make_transfer_item(3, 1, nullptr);
+    const qol::contracts::QolExtraBagItem backpack_medium = make_transfer_item(33, 1, nullptr);
     api->clear_item_backpack(0);
     assert(api->set_item_backpack(0, &backpack_medium));
     api->bag_info(0, &info);
     assert(info.capacity == 12);
-    const qol::contracts::QolExtraBagItem backpack_large = make_transfer_item(4, 1, nullptr);
+    const qol::contracts::QolExtraBagItem backpack_large = make_transfer_item(34, 1, nullptr);
     api->clear_item_backpack(0);
     assert(api->set_item_backpack(0, &backpack_large));
     api->bag_info(0, &info);
@@ -280,8 +280,8 @@ int main() {
     assert(info.capacity == 0);
     assert(!api->item_backpack_at(0, &equipped));
 
-    // 非 1..4 的 category 拒绝；nullptr 拒绝；清除后才可以换装。
-    const qol::contracts::QolExtraBagItem backpack_unknown = make_transfer_item(9, 1, nullptr);
+    // 非 31..34 的 item_id 拒绝；nullptr 拒绝；清除后才可以换装。
+    const qol::contracts::QolExtraBagItem backpack_unknown = make_transfer_item(99, 1, nullptr);
     assert(!api->set_item_backpack(0, &backpack_unknown));
     api->bag_info(0, &info);
     assert(info.capacity == 0);
@@ -293,7 +293,7 @@ int main() {
     const qol::contracts::QolExtraBagItem zero{};
     api->put(1, 0, &zero);
     assert(api->item_at(1, 0, &out));
-    assert(out.category == 0);
+    assert(out.item_id == 0);
     assert(out.count == 0);
     assert(out.payload_size == 0);
     api->put(-1, 0, &item);

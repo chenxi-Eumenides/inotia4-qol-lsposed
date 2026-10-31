@@ -15,7 +15,7 @@ using model::store;
 
 contracts::QolExtraBagItem to_transfer(const RuntimeItem& item) {
     contracts::QolExtraBagItem out{};
-    out.category = item.category;
+    out.item_id = item.item_id;
     out.count = item.count;
     out.payload_size = item.payload_size;
     std::memcpy(out.payload, item.payload, sizeof(out.payload));
@@ -24,7 +24,7 @@ contracts::QolExtraBagItem to_transfer(const RuntimeItem& item) {
 
 RuntimeItem to_runtime(const contracts::QolExtraBagItem& item) {
     RuntimeItem out{};
-    out.category = item.category;
+    out.item_id = item.item_id;
     out.count = item.count;
     out.payload_size = item.payload_size;
     std::memcpy(out.payload, item.payload, sizeof(out.payload));
