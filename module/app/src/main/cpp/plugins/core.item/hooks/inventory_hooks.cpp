@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -30,7 +31,6 @@ extern const contracts::QolItemPort* g_port;
 
 namespace {
 
-using HaveItemFn = int (*)(int32_t);
 using UiEquipRefreshItemAreaFn = void (*)();
 using EquipItemFromInvenToSlotFn = int (*)(void*, int32_t, int32_t, int32_t);
 using PutJewelFn = int (*)(void*, void*);
@@ -154,7 +154,6 @@ bool use_registered_source_category(int32_t category) {
     return false;
 }
 
-HaveItemFn g_backup_have_item = nullptr;
 UiEquipRefreshItemAreaFn g_backup_refresh_item_area = nullptr;
 void (*g_player_update_shortcut)(int32_t) = nullptr;
 EquipItemFromInvenToSlotFn g_backup_equip_item_from_inven_to_slot = nullptr;
@@ -1303,6 +1302,42 @@ struct ShortcutTraceScope {
     }
 };
 
+int native_category_count(int32_t category) {
+    const auto* port = qol::features::core_item::g_port;
+    if (category <= 0 || port == nullptr ||
+        !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
+        port->read.bag_count == nullptr || port->read.bag_info == nullptr ||
+        port->read.item_at == nullptr) {
+        return 0;
+    }
+    int64_t total = 0;
+    for (int32_t space = qol::contracts::kQolBagSpaceOriginal;
+         space <= qol::contracts::kQolBagSpaceVariant; ++space) {
+        int32_t bag_count = 0;
+        if (!qol::contracts::succeeded(port->read.bag_count(space, &bag_count)) ||
+            bag_count < 0) {
+            continue;
+        }
+        for (int32_t bag = 0; bag < bag_count; ++bag) {
+            const qol::contracts::QolBagRef ref{space, bag};
+            qol::contracts::QolBagInfo info{};
+            if (!qol::contracts::succeeded(port->read.bag_info(&ref, &info)) ||
+                info.capacity < 0) {
+                continue;
+            }
+            for (int32_t slot = 0; slot < info.capacity; ++slot) {
+                qol::contracts::QolInventoryItemRef item{};
+                const QolResult result = port->read.item_at(&ref, slot, &item);
+                if (result.code == kQolErrNotFound) continue;
+                if (!qol::contracts::succeeded(result) || item.category != category) continue;
+                total += item.count;
+                if (total > INT32_MAX) return INT32_MAX;
+            }
+        }
+    }
+    return static_cast<int>(total);
+}
+
 int char_process_shortcut_wrapper(void* character, int shortcut) {
     const qol::contracts::InFlightGuard in_flight_guard(
         g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
@@ -1320,8 +1355,7 @@ int char_process_shortcut_wrapper(void* character, int shortcut) {
         if (qol::contracts::succeeded(
                 g_game->item_abi.shortcut_item_category(shortcut, &category)) &&
             category > 0) {
-            const int native_count =
-                g_backup_have_item != nullptr ? g_backup_have_item(category) : 0;
+            const int native_count = native_category_count(category);
             if (native_count <= 0 && use_registered_source_category(category)) {
                 inventory_log_write(0, __FILE__, __LINE__,
                                     "CHAR_ProcessShortcut registered-source category=%d shortcut=%d",
