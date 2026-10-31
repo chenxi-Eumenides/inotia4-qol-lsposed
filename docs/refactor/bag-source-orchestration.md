@@ -114,6 +114,30 @@ struct ItemCodec {
 - 存档：调用 `ItemCodec::encode(ItemStack)` 生成原生 payload，把 `count` 写入 payload；保存 canonical payload。可另存一份 count 做完整性校验，但读取时以 codec 解码结果为准。
 - 不允许“只存 count、不写 payload”或“只存 payload、不校验 count”的旁路。
 
+### 2.1.4 ItemCodec 的位置
+
+`ItemCodec` 不属于编排层内部，它是 core.item 的共享“物品表示层”服务：
+
+```text
+使用层
+  -> 编排层（只处理 canonical ItemStack）
+    -> 源适配层（item_at / put / remove）
+      -> ItemCodec（decode / encode / set_count）
+        -> 原始存储 / 存档
+
+hook 适配层（物化游戏对象） -> ItemCodec
+读档 / 存档 -> ItemCodec
+```
+
+- 编排层只接收/传递 canonical `ItemStack`，不调用 codec。
+- 源适配层在 `item_at`/`put`/`remove`/读档/存档调用同一个 codec。
+- hook 适配层在把 `ItemStack` 物化成游戏对象、或从游戏对象解码时调用同一个 codec。
+- 不把 codec 放进编排层的原因：
+  1. 源适配层和存档也需要 codec；放进去会让源反向依赖编排层。
+  2. 编排层会变成 item-format-aware，违背“编排层不解析 payload”。
+  3. 存档路径会绕过 codec 或复制一份 codec，重新造成分散。
+- “对上对下都经由它”应理解为：所有 raw payload 的编解码都经由唯一 codec；canonical `ItemStack` 才在编排层上下流动。
+
 ### 2.2 源接口
 
 源只有 5 个存储原语：
