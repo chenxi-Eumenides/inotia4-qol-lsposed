@@ -1,6 +1,6 @@
 # 袋源编排层设计（core.item）
 
-> 状态：设计稿
+> 状态：已废弃，由 `docs/refactor/core-item/rearchitecture.md` 取代。
 > 基础：`docs/refactor/extra-bag-orchestration.md`（地址、注册表、搜索、move/swap、单线程、无校验、无回滚）
 > 范围：core.item 对原生袋与注册袋源的统一存储编排；不包含 UI、装备、出售、S2 位域、持久化策略。
 
