@@ -14,7 +14,8 @@
 - 插件 target：`qol_plugin_core.inventory`
 - 插件 id：`core.inventory`
 - 已注册到 `host/assembly.cpp`，启动时输出安装/启停日志。
-- 提供 `inventory.access` v1.0：`item_at` / `locate` / `find_first` / `find_empty` / `count_item` / `move` / `take` / `place` / `remove_count`。
-- 存储核心已落地：`SlotTable` 接口、`MemorySlotTable`（host 测试用）、`InventoryStore`（槽表注册、查询、整件移动、取放、部分移除、任务袋只读）。
-- 尚未接入原生表/外部表、hook、HTTP；`inventory.access` 当前只看到测试内存表。
-- 下一阶段：先接原生表适配器与外部表注册，再接 12 条存储 hook 与 inventory HTTP。
+- 提供 `inventory.access` v1.0 与 `inventory.bag_source` v1.2。
+- 已接管 12 条存储 hook：FindItem / HaveItem / GetItemCount / CumulateCount / IsHavingEmptySlot / ConsumeItem / RemoveItem / SaveItem / FindSaveSlot / SaveItemDirect / RemoveItemData / MoveItem。
+- 存储核心：`SlotTable`、`MemorySlotTable`（host 测试）、`InventoryStore`、S2 写回、stage4 纯函数、pending save / flat bag / 注册源补扣。
+- 跨空间移动仍由 `core.item` 的 `move_item` + native/source transport 执行；inventory 只提供存储 hook 与袋源注册面。
+- 尚未迁移：inventory HTTP 8 条路由、EB 5 条 UI hook/拖拽合并、新 `core.item` 整体替换。
