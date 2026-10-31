@@ -8,12 +8,13 @@
 
 ### 目标
 
-- 用 `(space_id, bag, slot)` 统一定位任意袋源中的普通物品槽。
-- 支持读取、按 category 搜索/计数、空槽查找、整件移动/交换、指定槽写入、按数量移除、整件取出。
-- 覆盖 28 个 inventory hook 的袋存储需求；hook 只通过编排层访问注册源，不再直接调用源接口。
+- 插件内部统一使用 `item_id`，不再传播 `category`，避免依赖物品表变更。
+- 使用层只看到“物品是什么、数量多少”，不知道物品来自哪个袋源/袋/槽。
+- 编排层是唯一袋源网关：使用层向编排层查询/取物/放物，编排层再向袋源查询/写入。
+- 支持一个请求跨多个袋源、多个位置完成：取物可拆成多堆，放物可填多个空位。
 - 袋源保持简单：只负责自己的存储，不做 item payload 校验、不做事务、不做回滚。
 - 编排层保持简单：线性扫描、写入前预检、无索引、无缓存、无锁、无异步。
-- 使用/销毁/消耗由 core.item 的独立使用层负责；编排层只负责把物品从袋中取出并交付。
+- 使用/销毁/消耗由 core.item 的独立使用层负责；编排层只负责取出并交付。
 
 ### 非目标
 
@@ -24,30 +25,42 @@
 - 不建立全局物品索引或缓存。
 - 不提供事务、快照、多级回滚、引用计数、重入保护。
 
-## 2. 源契约
+## 2. 数据模型与源契约
 
 ### 2.1 数据模型
 
 ```cpp
-struct BagItem {
-    int32_t category;                 // 游戏物品 category；也是搜索/堆叠/存档域键
-    int32_t count;                    // 以该字段为权威；payload 不承载数量语义
+struct ItemStack {
+    int32_t item_id;                  // 唯一的物品键；插件内部不再使用 category
+    int32_t count;
     uint32_t payload_size;            // <= 255
     uint8_t payload[256] = {};
 };
 
+struct ItemInfo {
+    int32_t item_id;
+    int32_t total_count;              // 所有袋源中该 item_id 的总数量
+    std::vector<ItemStack> stacks;    // 每个实际堆的 item_id/count/payload；不含来源
+};
+
 struct BagInfo {
-    int32_t capacity;                 // 有效槽位范围 [0, capacity)
+    int32_t capacity;
     int32_t occupied_slots;
 };
 
+// 编排层内部地址；不暴露给业务使用层。
 struct BagRef {
     int32_t space_id;                 // 0/1 原生；>=2 注册源
     int32_t bag;
     int32_t slot;
 };
 
-// 仅作为不透明身份；与游戏 handle 的转换由适配层完成。
+// 不透明放置令牌；hook 适配层可用，业务使用层不关心。
+struct Placement {
+    // 内部包含 BagRef；对外不展开。
+};
+
+// 仅作为不透明身份；与游戏 handle 的转换由 hook 适配层完成。
 struct ItemHandle {
     uint32_t slot;
     uint32_t generation;
@@ -65,232 +78,225 @@ struct BagSource {
 
     int32_t (*bag_count)(void* ctx);
     bool (*bag_info)(void* ctx, int32_t bag, BagInfo* out);
-    bool (*item_at)(void* ctx, int32_t bag, int32_t slot, BagItem* out);
+    bool (*item_at)(void* ctx, int32_t bag, int32_t slot, ItemStack* out);
 
-    bool (*put)(void* ctx, int32_t bag, int32_t slot, const BagItem* item);
+    bool (*put)(void* ctx, int32_t bag, int32_t slot, const ItemStack* item);
     // count > 0。count >= 当前数量时移除整件；否则只移除 count。
-    // out 可为 nullptr；非空时返回被移除的部分（整件或 count 份）。
+    // out 可为 nullptr；非空时返回被移除的部分。
     bool (*remove)(void* ctx, int32_t bag, int32_t slot, int32_t count,
-                   BagItem* out);
+                   ItemStack* out);
 };
 ```
 
-可选的“身份面”不属于存储原语，编排层不调用：
+可选的“身份面”，不属于存储原语，编排层不直接调用：
 
 ```cpp
 struct BagSourceIdentity {
-    // 只读：游戏 handle -> BagRef。
     bool (*identify)(void* ctx, ItemHandle handle, BagRef* out);
 };
 ```
 
-没有 `take`，没有 `use`：
+没有 `take`，没有 `use`，没有 `category`：
 - `take` 是 `remove(all)` 的别名，统一由 `remove` 表达。
-- `use` 由 core.item 的使用层负责，不是袋源能力。
+- `use` 由 core.item 使用层负责，不是袋源能力。
+- 源只认 `item_id`，不再有 category 字段。
 
 ### 2.3 契约规则
 
 1. `space_id` 稳定且唯一；0/1 为原生空间，>=2 为注册源空间。注销后 `BagRef` 失效，不得复用同一 `space_id` 表示不同源。
-2. `count` 以 `BagItem.count` 为权威；源若在 payload 中编码数量，必须在 `put`/`remove` 边界自行同步。编排层只读写 `count` 字段。
+2. `count` 以 `ItemStack.count` 为权威；源若在 payload 中编码数量，必须在 `put`/`remove` 边界自行同步。编排层只读写 `count` 字段。
 3. `put` 覆盖目标槽；目标是否为空由编排层预检，源不做校验。
 4. `remove(bag, slot, count, out)` 由源执行数量增减：`count >= 当前数量` 移除整件，否则扣除 `count`。源负责更新自己的 count/payload/所有权/持久化等内部状态。
 5. `BagInfo.occupied_slots` 只统计普通物品槽，不包含物品背包装备位。
 6. 源不做 item payload 校验、不做事务、不做回滚；源内部若有持久化/所有权/编码逻辑，由源自己维护，编排层不感知。
-7. 源不判断数量增减的“业务合法性”：编排层预检 ref、物品存在、`count > 0`、`count <= item.count`；源只执行存储操作。
+7. 源不判断数量增减的业务合法性：编排层预检 ref、物品存在、`count > 0`、`count <= item.count`；源只执行存储操作。
 8. 源回调不得反向调用编排层；违反约定属于源缺陷，应修改源，编排层不做兜底。
 
-### 2.4 为什么保留 `remove`，为什么 `identify` 可选，为什么没有 `use`
+## 3. 编排层对外 API
 
-- `remove`：hook 需要从堆叠中扣除任意数量（consume=1、RemoveItemData 补扣），也需要整件取出交给使用层。若编排层用 `item_at` + `put` 读改写，源内部的数量编码、所有权、持久化、UI 刷新等语义会被绕过，等于把源实现细节复制进编排层。保留一个 `remove` 原语，源仍然是“单次存储操作”，不是事务。
-- `identify`：hook 拿到的是游戏对象/handle，只有物化该物品的源知道它对应哪个槽。它只是只读身份查询，不参与存储写入；放在可选的 `BagSourceIdentity` 中，源不提供时 hook 按现状 fail-soft。
-- `use`：不属于袋源。core.item 收到使用/销毁/消耗请求后，先由编排层 `remove` 取出物品，再交给独立的使用层；使用层决定使用、销毁、消耗还是其他处理。编排层不关心使用层的结果，也不参与其补偿。
-
-## 3. 编排层 API
+业务使用层只使用以下入口；不接触 `BagRef`/`space_id`/`bag`/`slot`。
 
 ```cpp
 namespace qol::features::core_item::orchestration {
 
 enum class Status {
     kOk,
-    kInvalidRef,           // 源未注册 / bag 越界 / slot >= capacity
-    kSourceEmpty,          // 源位置无物品
-    kDestinationNotEmpty,  // move/put_item 目标已占用
-    kDestinationEmpty,     // swap 一侧为空
-    kNotEnough,            // remove 数量不足（不写入）
-    kSourceRejected,       // 源 put/remove 返回 false
+    kNotFound,        // 指定 item_id 不存在
+    kNotEnough,       // 数量不足；整单拒绝，不写
+    kNoSpace,         // 没有足够空位；整单拒绝，不写
+    kInvalid,         // 参数/目标无效
+    kSourceRejected,  // 源 put/remove 返回 false；不回滚
 };
 
-using ItemPredicate = bool (*)(const BagItem& item, void* ctx);
+struct ItemPlacement {
+    ItemStack item;
+    std::optional<Placement> target;  // 空 = 首个空位
+};
 
 class BagOrchestrator {
 public:
-    // 注册表。主线程；不在编排操作进行中调用。
-    bool register_source(const BagSource& source,
-                         const BagSourceIdentity* identity = nullptr);
-    void unregister_source(int32_t space_id);
-    uint32_t source_count() const;
-    bool has_source(int32_t space_id) const;
+    // 查询面：使用层向编排层查询，编排层再向所有袋源查询。
+    std::optional<ItemInfo> query_item(int32_t item_id) const;
+    bool has_empty_slot() const;
+    bool can_put(std::span<const ItemStack> items) const;
 
-    // 读。
-    std::optional<BagItem> item_at(BagRef ref) const;
-    std::optional<BagInfo> bag_info(int32_t space_id, int32_t bag) const;
+    // 取物：按 item_id + count 跨源聚合；总量不足则整单拒绝，不写。
+    // 成功时 out 返回实际取出的堆（可能来自多个源）。
+    Status take_item(int32_t item_id, int32_t count,
+                     std::vector<ItemStack>* out);
 
-    // 搜索核心：遍历顺序为注册序 -> bag 0..count-1 -> slot 0..capacity-1。
-    std::vector<BagRef> find_if(ItemPredicate pred, void* ctx) const;
-    std::optional<BagRef> first_empty() const;
+    // 放物：每个 ItemStack 可带目标 Placement；空目标 = 首个空位。
+    // 先预检全部目标/空位，任一不足则整单拒绝，不写。
+    Status put_items(std::span<const ItemPlacement> items,
+                     std::vector<Placement>* out_placements = nullptr);
 
-    // 便利 helper：由 find_if / item_at / bag_info 派生，无额外状态。
-    std::optional<BagRef> find_first(int32_t category) const;
-    std::vector<BagRef> find_all(int32_t category) const;
-    int32_t count_item(int32_t category) const;       // 饱和到 INT32_MAX
-    int64_t count_empty_slots() const;
-    std::optional<BagRef> find_stack(int32_t category, int32_t incoming,
-                                     int32_t stack_cap) const;
-
-    // 写。全部先预检，再调用源原语；不做回滚。
-    Status move(BagRef from, BagRef to);
-    Status swap(BagRef a, BagRef b);
-    Status put_item(BagRef to, const BagItem& item);
-    // 唯一的取出/移除入口；整件取出用 count = item.count。
-    Status remove(BagRef ref, int32_t count, BagItem* out = nullptr);
-    // 跨源按 category 扣减；返回实际移除量。
-    int32_t remove_item(int32_t category, int32_t count);
+    // hook 适配层专用，不属于业务使用层。
+    std::optional<ItemStack> resolve_handle(ItemHandle handle) const;
+    std::optional<Placement> find_slot(const ItemStack& item) const;
 };
 
 }  // namespace
 ```
 
-### 3.1 操作语义
+### 3.1 内部辅助
 
-**`item_at` / `bag_info`**
+`query_item`、`take_item`、`can_put`、`put_items` 内部可复用线性扫描 helper：
 
-- 未注册 `space_id`、`bag < 0`、`bag >= bag_count`、`slot < 0`、`slot >= capacity` → 空/`nullopt`。
-- 每次实时读 `bag_info`，不缓存容量。
+- `find_all(item_id)`：按“源注册序 → bag → slot”收集所有匹配堆。
+- `first_empty()`：首个空槽。
+- `count_item(item_id)`：所有堆 count 之和。
+- `find_stack(item_id, incoming, stack_cap)`：可合并的堆（仅 helper，不对外承诺自动合并）。
 
-**`find_if` / `first_empty` 与 helper**
+这些 helper 不扩大对外接口，也不建立索引/缓存。
 
-- `find_if` 只扫描普通物品槽；空槽跳过；capacity 为 0 的袋跳过。
-- `find_first`/`find_all` 是 `find_if` 的 category 特例；`count_item` 累加 `BagItem.count`；`find_stack` 匹配 category 且 `count + incoming <= stack_cap`；`count_empty_slots` 按 `capacity - occupied_slots` 求和。
-- `stack_cap` 由调用方传入（当前原生堆叠上限 126），编排层不内嵌策略。
+## 4. 操作语义
 
-**`move`**
+### 4.1 查询
 
-```text
-1. from == to → kOk
-2. 地址无效 → kInvalidRef
-3. item_at(from) 为空 → kSourceEmpty
-4. item_at(to) 非空 → kDestinationNotEmpty
-5. remove(from, from_item.count, &item)；失败 → kSourceRejected
-6. put(to, item)；失败 → kSourceRejected（不回滚）
-```
+**`query_item(item_id)`**
 
-**`swap`**
+- 扫描所有已注册源；空槽/容量 0 跳过。
+- 返回 `total_count` 和每个实际堆的 `ItemStack`；不返回 `BagRef`。
+- 找不到返回 `nullopt`；找到但总量为 0 也视为不存在。
 
-```text
-1. a == b → kOk
-2. 地址无效 → kInvalidRef
-3. item_at(a) 为空 → kSourceEmpty
-4. item_at(b) 为空 → kDestinationEmpty
-5. remove(a, itemA.count, &itemA)、remove(b, itemB.count, &itemB)
-6. put(a, itemB)、put(b, itemA)；任一失败 → kSourceRejected（不回滚）
-```
+**`has_empty_slot()`**
 
-**`put_item`**
+- 任一源、任一 bag 的 `occupied_slots < capacity` 即 true。
+- 用于 `INVEN_IsHavingEmptySlot`。
 
-```text
-1. 地址无效 → kInvalidRef
-2. item_at(to) 非空 → kDestinationNotEmpty
-3. put(to, item)；失败 → kSourceRejected
-```
+**`can_put(items)`**
 
-**`remove`**
+- 逐个检查：有 target 时目标必须为空且有效；无 target 时统计可用空位。
+- 只检查空位，不做自动堆叠；需要合并时由使用层先 `take` 两堆、合并后再 `put_items`。
+- 返回 false 时不做任何写入。
+
+### 4.2 取物
+
+**`take_item(item_id, count)`**
 
 ```text
-1. count <= 0 → kInvalidRef
-2. 地址无效 → kInvalidRef
-3. item_at(ref) 为空 → kSourceEmpty
-4. item.count < count → kNotEnough（不写）
-5. remove(ref, count, out)；失败 → kSourceRejected
+1. count <= 0 → kInvalid
+2. query_item(item_id) 不存在 → kNotFound
+3. total_count < count → kNotEnough（不写）
+4. 按“源注册序 → bag → slot”逐堆取：
+   - 每堆取 min(剩余, 堆 count)
+   - 源 remove 失败 → kSourceRejected（已取出的不回收）
+5. out 返回取出的 ItemStack 列表
 ```
 
-**`remove_item`**
+- 一个请求可以跨多个源、多个堆完成。
+- 使用层只看到 item_id/count/payload，不知道来源。
+- 部分堆的 payload 原样返回；不合并、不重编码。
 
-- `find_all(category)` 按遍历顺序逐堆 `remove(min(堆 count, 剩余), nullptr)`。
-- 返回实际移除量；部分失败时返回已移除量，不补偿。
+### 4.3 放物
 
-## 4. Hook 覆盖矩阵
+**`put_items(items)`**
 
-缩写：`iA`=item_at，`bI`=bag_info，`f1/fA/fF`=find_first/find_all/find_if，`cI`=count_item，`cE`=count_empty_slots，`fE`=first_empty，`fS`=find_stack，`mv`=move，`sw`=swap，`pI`=put_item，`rm`=remove，`rI`=remove_item，`id`=可选 identify，`use`=core.item 使用层。
+```text
+1. 预检每个 ItemPlacement：
+   - target 存在：目标有效且为空
+   - target 为空：存在可用空位（can_put 同一套判断）
+2. 任一不满足 → kNoSpace / kInvalid（整单拒绝，不写）
+3. 按输入顺序放置：
+   - 有 target：put 到 target
+   - 无 target：按“源注册序 → bag → slot”找首个空位
+   - 源 put 失败 → kSourceRejected（已放入的不回收）
+4. out_placements 返回实际落位（可选）
+```
+
+- 不做自动堆叠；合并由使用层先 `take` + `put` 组合。
+- 批量放入是“先预检、后写入”，不是事务；源写入阶段失败不回滚。
+- 目标 Placement 由 hook 适配层在需要精确槽位时提供；业务使用层通常传空目标。
+
+### 4.4 move / swap / merge
+
+不新增对外接口，由使用层组合：
+
+- move：`take_item(item_id, count)` → `put_items({target})`
+- swap：`take_item(a)`、`take_item(b)` → `put_items({b→a, a→b})`
+- merge：`take_item(source)`、`take_item(target)` → `put_items({合并后的堆→target})`
+- save：`can_put`/`find_slot` → `put_items({target})`
+- equip：`take_item` 取新/旧装备 → `put_items` 回填 → 装备动作
+
+## 5. 查询方向与跨源聚合
+
+- 方向固定：**使用层 → 编排层 → 袋源**。
+- 使用层不持有 `BagSource`、不调用 `item_at`/`bag_info`/`put`/`remove`。
+- 编排层持有注册表，按注册顺序扫描所有源；查询结果对使用层是源无关的。
+- 袋源只被动回答 `bag_count`/`bag_info`/`item_at`；不知道其他源，也不知道使用层。
+- 一个请求跨多个源时，编排层负责拆分/合并；使用层只看到 `ItemStack` 列表或总数量。
+- `Placement` 是 hook 适配层与编排层之间的不透明令牌；业务使用层不读取其内容。
+- `resolve_handle` 只给 hook 适配层使用；业务使用层只用 `item_id`。
+
+## 6. 使用层与 hook 边界
+
+| 层 | 职责 |
+|---|---|
+| hook 适配层 | 接收游戏回调；把游戏 category/handle 转成 `item_id`/`ItemHandle`；处理 UI、S2、pending save、退款、失败补偿；必要时使用 `Placement` 回填游戏槽位 |
+| 使用层 | 接收 `ItemStack`（item_id/count/payload）；决定使用、销毁、消耗或其他处理；不关心来源 |
+| 编排层 | 查询、取物、放物、跨源拆分/聚合、批量预检；不关心使用/销毁/消耗 |
+| 袋源 | 5 个存储原语；只认 item_id/count/payload；不做业务校验/回滚 |
+
+- 使用层不接触 `BagRef`/`space_id`/`bag`/`slot`。
+- hook 适配层若需要向游戏返回槽位，使用编排层的 `Placement`，不要把 `BagRef` 传播到使用层。
+- 源不实现 `use`；使用层不实现存储。
+
+## 7. Hook 覆盖矩阵
+
+缩写：`q`=query_item，`t`=take_item，`c`=can_put，`e`=has_empty_slot，`p`=put_items，`r`=resolve_handle，`f`=find_slot，`u`=使用层，`h`=hook/原生层。
 
 | # | hook | 编排原语 | 不在编排层 |
 |---|---|---|---|
-| 1 | char_process_shortcut (opt) | f1 + rm(1) | 使用层；诊断日志；原生 backup |
+| 1 | char_process_shortcut (opt) | q + t(id,1) | 使用层；诊断；原生 backup |
 | 2 | shortcut_get_state (opt) | — | 仅 trace |
 | 3 | char_use_item_ex (opt) | — | 仅 trace |
 | 4 | find_item | — | 透传 Game Host |
-| 5 | have_item | cI | 原生 backup；原生+注册源相加 |
-| 6 | get_item_count | cI | 同上 |
+| 5 | have_item | q.total_count | 原生 backup；原生+注册源相加 |
+| 6 | get_item_count | q.total_count | 同上 |
 | 7 | get_cumulate_count | — | 原生 count ABI 解码 |
-| 8 | consume_item | iA + rm(1) | 使用层；原生 backup + S2 借位/回写 |
-| 9 | remove_item | rm | 原生 backup；身份重入守卫 |
-| 10 | equip_item_from_inven_to_slot | iA + rm + pI + id | flat 解码、原生装备、多级补偿 |
+| 8 | consume_item | t(id,1) | 使用层；原生 backup + S2 借位/回写 |
+| 9 | remove_item | t(id,count) | 使用层/丢弃；原生 backup；身份重入守卫 |
+| 10 | equip_item_from_inven_to_slot | t + p + r | 装备动作、flat 解码、原生补偿 |
 | 11 | put_jewel | — | 使用层/原生；材料消耗经 #8 回流 |
-| 12 | is_having_empty_slot | cE | 原生袋空槽走 port 读 |
-| 13 | unequip_item_to_inven | fS + fE + pI + rm | 原生 backup、存档域门控、失败补偿 |
+| 12 | is_having_empty_slot | e | 原生袋空槽走 port 读 |
+| 13 | unequip_item_to_inven | p + f | 原生装备读取、存档域门控、失败补偿 |
 | 14 | button_equip_exe | 间接 #10/#17 | projection、detail_item_context、UI 门禁 |
 | 15 | button_unequip_exe | 间接 #13 | projection、UI 门禁 |
-| 16 | button_destroy_exe | rm(整件) | 使用层销毁；选中项解析、原生物理槽复核 |
-| 17 | ok_confirm_use_item | iA + rm(1) | 使用层；原生 backup |
-| 18 | ok_destroy_item | rm(整件) | 使用层销毁；UI 门禁、物理槽复核、退款 |
-| 19 | button_use_mercenary_seal_exe | iA + rm(1) | 使用层；projection、选中项解析 |
+| 16 | button_destroy_exe | t(id,count) | 使用层销毁；选中项解析、物理槽复核 |
+| 17 | ok_confirm_use_item | t(id,1) | 使用层；原生 backup |
+| 18 | ok_destroy_item | t(id,count) | 使用层销毁；UI 门禁、物理槽复核、退款 |
+| 19 | button_use_mercenary_seal_exe | t(id,1) | 使用层；projection、选中项解析 |
 | 20 | save_item | — | backup、pending 清理、free_item |
-| 21 | find_save_slot | fS + fE | 存档域门控、pending 记录、transfer 构造 |
-| 22 | move_item | mv | 原生 S2 进位；注册源不再一律拒绝 |
+| 21 | find_save_slot | c + f | 存档域门控、pending 记录、flat 编码 |
+| 22 | move_item | t + p | 原生 S2 进位；注册源不再一律拒绝 |
 | 23 | equip_control_event_proc | — | 纯透传/重入守卫 |
 | 24 | refresh_item_area | — | UI 深度守卫 |
-| 25 | save_item_direct | bI + iA + pI | pending 通道、flat 解码、原生 S2 合并 |
+| 25 | save_item_direct | p（带 target） | pending 通道、flat 解码、原生 S2 合并 |
 | 26 | item_system_divide | — | 原生 S2 拆分/借位 |
 | 27 | make_item | — | 纯透传 |
-| 28 | remove_item_data | cI + rI | 原生 S2 快照/重扫/计划修正 |
+| 28 | remove_item_data | q + t | 原生 S2 快照/重扫/计划修正 |
 
-## 5. 边界
-
-### 5.1 留在 hook / 原生适配层的能力
-
-| 能力 | 归属 | 理由 |
-|---|---|---|
-| `use` / `destroy` / `consume` | core.item 使用层 | 使用层接收编排层取出的 `BagItem`，决定使用、销毁、消耗或其他处理；编排层不参与 |
-| `identify` | 可选 `BagSourceIdentity`，hook 调用 | 只读 handle→ref；不参与存储写入 |
-| 原生 S2 位域读写 | 原生层 + hook | 依赖 backup 前后采样顺序与对象指针 |
-| 物理槽指针扫描 | 原生层 | 防 UAF；逻辑袋路径不适用 |
-| pending save 通道 | hook thread_local | FindSaveSlot→SaveItemDirect 无参数通道 |
-| flat 袋号编解码 | 适配层 | 游戏调用约定，不是存储地址 |
-| 堆叠上限 126 | 调用方传参 | 规则参数，编排层不内嵌 |
-| 失败补偿/多级回滚 | hook/使用层 | 只有装备/出售等有原生副作用的流程需要 |
-| free_item / 物化对象生命周期 | 适配层 | 原生资源管理 |
-| UI/detail/projection/出售门禁 | hook | 非存储 |
-| 存档域门控 | hook | category→domain 的游戏规则 |
-
-### 5.2 使用层
-
-使用层是 core.item 的独立模块，不从属于编排层：
-
-```cpp
-namespace qol::features::core_item::use_layer {
-
-enum class Outcome { kUsed, kDestroyed, kConsumed, kRejected };
-
-// 输入是从袋中取出的物品；使用层决定使用/销毁/消耗。
-Outcome apply(const BagItem& item, const UseContext& ctx);
-
-}  // namespace
-```
-
-- 编排层只负责 `remove` 取出物品；它不知道使用层会使用、销毁还是消耗。
-- 使用层失败时是否把物品放回、放回哪个槽，由使用层/hook 决定；编排层不提供事务或自动回滚。
-- 源不实现 `use`；源也不需要知道使用层的存在。
-
-### 5.3 原生袋接入
+## 8. 原生袋接入
 
 原生袋按同一 `BagSource` 契约注册为 space 0/1 的源：
 
@@ -300,42 +306,33 @@ Outcome apply(const BagItem& item, const UseContext& ctx);
 - 原生 source 的 `identify` 可选；缺失时对应 hook 走现有原生路径。原生 source 不提供 `use`。
 - 原生 `space_id` 0/1 与注册源 >=2 不重叠；原生 source 的 `bag_count` 可排除任务袋，任务袋由 hook 单独处理。
 
-### 5.4 明确不做的抽象
-
-- 不做事务/快照/回滚/补偿日志。
-- 不做引用计数/锁/原子/异步/跨帧等待。
-- 不做重入保护；源回调反向调用编排层属于源缺陷。
-- 不做全局索引/缓存/策略层/优先级。
-- 不做 item payload 校验、数量拆分、堆叠合并、部分移动。
-- 不做背包装备位。
-
-## 6. 线程、生命周期与注册
+## 9. 线程、生命周期与注册
 
 - 所有入口只在游戏主线程调用。
 - 注册/注销只在插件 activate/deactivate，且不在编排操作进行中调用。
 - 注册校验：`space_id` 唯一、`bag_count`/`bag_info`/`item_at`/`put`/`remove` 非空；`identify` 可为空。
-- 注销后旧 `BagRef` 再访问：`item_at` 返回 `nullopt`，写返回 `kInvalidRef`；不会解引用已注销的源。
-- `space_id` 不复用；避免旧 `BagRef` 指向新源。
+- 注销后旧 `BagRef`/`Placement` 失效；`item_at` 返回 `nullopt`，写返回 `kInvalid`。
+- `space_id` 不复用；避免旧 `Placement` 指向新源。
 - 无锁；源回调不得反向调用编排层。
 
-## 7. 风险
+## 10. 风险
 
-1. **put/remove 失败无回滚**：`move`/`swap` 第二步失败会留下部分写入。按约束不补偿；调用方需在需要时自行处理（hook/使用层已有显式补偿的场景除外）。
-2. **源内部语义**：`remove` 由源实现；若源不维护 count/payload/所有权一致，编排层无法发现。注册前需源自测。
-3. **原生 source 的 S2**：原生写入口若绕过 S2 前后采样，可能破坏数量位域。原生 source 不得用于 S2 敏感路径；这些路径继续走 hook 现有实现。
-4. **悬垂 BagRef**：注销后旧 ref 失效；`space_id` 不复用，避免语义漂移。
-5. **identify 过期**：源返回的 ref 可能因物品移动/移除失效；hook 使用前应 `item_at` 复验。
-6. **使用层取走物品后失败**：是否放回由使用层/hook 决定；编排层不自动回滚，可能丢件。使用层必须定义失败策略。
-7. **重复注册**：同一 `space_id` 或同一 `ctx` 重复注册会双倍计数；注册表拒绝重复 `space_id`，并在调试构建检查重复 `ctx`。
-8. **搜索成本**：`O(source × bag × capacity)`；当前规模可接受，不建索引。
+1. **payload 是否可互换**：同一 `item_id` 的不同堆可能有不同 payload（装备属性、耐久等）。`take_item(item_id,count)` 按固定顺序取，可能取到不同 payload。若使用层需要特定 payload，必须先在查询结果中选择，或增加 payload 条件；否则只能约定同 item_id 可互换。
+2. **批量写入失败无回滚**：`take_item`/`put_items` 预检通过后，源阶段仍可能失败；已执行的部分不回收。使用层/hook 需在需要时自行补偿。
+3. **使用层取走物品后失败**：是否放回由使用层/hook 决定；编排层不自动回滚，可能丢件。使用层必须定义失败策略。
+4. **hook 需要精确槽位**：`find_slot`/`Placement` 只给 hook 适配层；业务使用层不要读取。若把 `BagRef` 泄漏到使用层，分层会被破坏。
+5. **源内部语义**：`remove` 由源实现；若源不维护 count/payload/所有权一致，编排层无法发现。注册前需源自测。
+6. **原生 source 的 S2**：原生写入口若绕过 S2 前后采样，可能破坏数量位域；S2 敏感路径继续走 hook 现有实现。
+7. **search 成本**：`O(source × bag × capacity)`；当前规模可接受，不建索引。
+8. **重复注册**：同一 `space_id` 或同一 `ctx` 重复注册会双倍计数；注册表拒绝重复 `space_id`，并在调试构建检查重复 `ctx`。
 
-## 8. 落地清单（设计阶段，不写实现）
+## 11. 落地清单（设计阶段，不写实现）
 
-- 新增 `plugins/core.item/orchestration/bag_types.h`：`BagItem`、`BagInfo`、`BagRef`、`ItemHandle`。
+- 新增 `plugins/core.item/orchestration/bag_types.h`：`ItemStack`、`ItemInfo`、`BagInfo`、`BagRef`、`Placement`、`ItemHandle`。
 - 新增 `plugins/core.item/orchestration/bag_source.h`：`BagSource`（5 原语）与可选 `BagSourceIdentity`。
-- 新增 `plugins/core.item/orchestration/bag_orchestrator.h/.cpp`：注册表、读、搜索、move/swap、put/remove。
-- 新增 `plugins/core.item/use_layer/`：使用/销毁/消耗的独立入口，输入为编排层取出的 `BagItem`。
+- 新增 `plugins/core.item/orchestration/bag_orchestrator.h/.cpp`：注册表、`query_item`、`take_item`、`can_put`、`put_items`、`find_slot`、`resolve_handle`。
+- 新增 `plugins/core.item/use_layer/`：使用/销毁/消耗的独立入口，输入为编排层返回的 `ItemStack`。
 - 新增 `plugins/core.item/native_source/native_bag_source.h/.cpp`：space 0/1 的原生适配器。
-- hook 适配层新增 `resolve_hook_item`、`build_transfer`，收口源物品的句柄/物化/传输转换；使用流程改为 `remove` 取出 → 使用层处理。
+- hook 适配层：把游戏 category/handle 转成 `item_id`/`ItemHandle`；收口 `Placement` 到 flat 袋号的转换；不再向使用层传播 `BagRef`。
 - 删除旧 `bags/bag_source_io.h`、旧 `orchestration/bag_orchestrator.h` 骨架、旧 `native_source/native_bag_source.h` 骨架；是否删除 `QolBagSource` 注册面由后续迁移决定。
-- 先接读/搜索/计数，再接 move/swap/remove，最后接 save/equip 等有原生副作用的流程。
+- 先接查询/取物/放物，再接 move/swap/merge 的使用层组合，最后接 save/equip 等有原生副作用的流程。
