@@ -866,6 +866,7 @@ constexpr uintptr_t F_UIEQUIP_REFRESH_BAG_AREA_VMA = 0xb78bc; // void (void) But
 // ---- 佣兵徽章（英雄徽章）使用链（R-63）----
 constexpr uintptr_t F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA = 0xb8144; // void (void* button) 佣兵徽章专用使用按钮（UIEquip_SetDescMenu 面板 offset 0x98 挂载；0xb8144→SAVE_IsOK→IsEmptyManagerSlot→MakeMercenary）
 constexpr uintptr_t F_UIEQUIP_BUTTON_RELEASE_SEALED_EXE_VMA = 0xb8280; // void (void* button) 解封按钮 execute
+constexpr uintptr_t F_UIEQUIP_BUTTON_ROLL_DICE_EXE_VMA = 0xb631c; // void (void* button) 骰子专用使用按钮 execute（UIEquip_ButtonRollDiceExe）
 constexpr uintptr_t F_ITEMSYSTEM_IS_MERCENARY_SEAL_VMA = 0x10be70; // int (int32 category) category∈42..50 或 928..933 为佣兵徽章
 constexpr uintptr_t F_MERCENARYSYSTEM_IS_EMPTY_MANAGER_SLOT_VMA = 0x118b30; // int (void) 佣兵管理器是否有空槽（0x118b30 反汇编：无参，读 G_MERC_MAX_GOT/G_MERC_SLOTLIST_GOT）
 constexpr uintptr_t F_MERCENARYSYSTEM_MAKE_MERCENARY_VMA = 0x119658; // void* (void* item) 生成佣兵（唯一调用点 0xb818c；内部 INVEN_RemoveItem 消耗，返回 null=失败）

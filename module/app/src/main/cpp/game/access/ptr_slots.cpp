@@ -198,6 +198,10 @@ bool extension_desc_button_original_matches(void* original, const char* symbol) 
                std::strcmp(symbol, "F_UIEQUIP_BUTTON_RELEASE_SEALED_EXE_VMA") == 0) {
         vma = F_UIEQUIP_BUTTON_RELEASE_SEALED_EXE_VMA;
         resolved_symbol = "F_UIEQUIP_BUTTON_RELEASE_SEALED_EXE_VMA";
+    } else if (std::strcmp(symbol, "desc.button.roll_dice") == 0 ||
+               std::strcmp(symbol, "F_UIEQUIP_BUTTON_ROLL_DICE_EXE_VMA") == 0) {
+        vma = F_UIEQUIP_BUTTON_ROLL_DICE_EXE_VMA;
+        resolved_symbol = "F_UIEQUIP_BUTTON_ROLL_DICE_EXE_VMA";
     } else {
         return false;
     }

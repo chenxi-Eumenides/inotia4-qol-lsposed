@@ -769,6 +769,48 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         return;
     }
 
+    // 骰子专用按钮 UIEquip_ButtonRollDiceExe：原版从当前详情控件取物品并走
+    // STATUSDICE_Roll；扩展物品必须经 inventory.action.use，由 EB 物化对象并
+    // 在 game/ops 的骰子分支打开掷骰面板。
+    if (extension_desc_original_matches(id, "desc.button.roll_dice")) {
+        bool current_item = false;
+        {
+            ::qol::extension_bag::ReentryLock lock;
+            current_item = item != nullptr && virtual_bag::valid_index(item_bag) &&
+                           item_slot >= 0 && item_slot < virtual_bag::kSlotCount &&
+                           qol::extension_bag::ui_state().objects.module_objects[item_bag][item_slot] == item;
+        }
+        if (!current_item) {
+            QOL_LOG_WARN(QolDomain::kExtensionBag,
+                         "extension dice use rejected stale detail bag=%d slot=%d",
+                         item_bag, item_slot);
+            return;
+        }
+        bool used = false;
+        const auto* action = ::qol::features::extension_bag::inventory_action_api();
+        if (action != nullptr) {
+            const auto outcome = action->use(
+                {qol::features::extension_bag::kExtensionBagSpaceId, item_bag, item_slot});
+            used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
+            if (!used) {
+                QOL_LOG_WARN(QolDomain::kExtensionBag,
+                             "extension dice action rejected bag=%d slot=%d status=%d",
+                             item_bag, item_slot, static_cast<int>(outcome.status));
+            }
+        }
+        {
+            ::qol::extension_bag::ReentryLock lock;
+            if (used) refresh_module_item_area_locked(item_bag);
+            reset_extension_desc_item_hooks_locked();
+            qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
+            qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
+            qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
+        }
+        VIRTBAG_LOG("extension dice execute bag=%d slot=%d used=%d", item_bag, item_slot,
+                    used ? 1 : 0);
+        return;
+    }
+
     // 解封按钮仍由原版执行物品类别分派与产物入库；扩展物品的消耗经
     // INVEN_ConsumeItem/QolBagSource::remove 回到 sidecar，不能在这里本地改数据。
     if (extension_desc_original_matches(id, "desc.button.release_sealed")) {
