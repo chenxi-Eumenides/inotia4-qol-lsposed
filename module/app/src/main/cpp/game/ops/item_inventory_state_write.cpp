@@ -554,6 +554,7 @@ QolResult use_item(int32_t bag, int32_t slot,
         if (fn_consume_item != nullptr) fn_consume_item(item);
         if (flag != nullptr) *flag |= 1u;
         frame_cache_force_refresh();
+        if (fn_ui_roll_dice_create != nullptr) fn_ui_roll_dice_create();
         return contracts::ok();
     }
 

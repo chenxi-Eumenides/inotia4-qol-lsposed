@@ -768,6 +768,7 @@ constexpr uintptr_t F_OPEN_ITEM_BOX_VMA = 0x10e970;   // int (int32_t category) 
 constexpr uintptr_t F_RELEASE_SEALED_VMA = 0x10af4c;  // int (int32_t category) 解封（类别需在 0x3a6-0x3ab）
 constexpr uintptr_t F_IS_DICE_VMA = 0x10be60;         // int (int32_t category) 是否骰子（类别 ∈[0x34,0x38]）
 constexpr uintptr_t F_STATUSDICE_ROLL_VMA = 0x138338; // int (int32_t charIdx, int32_t type) 掷骰：纯表驱动计算写 pending[0..4]（charIdx=[ch+0xd] 0-5 职业索引，type=category-0x34 0-4；不读 UI，同步调用安全）
+constexpr uintptr_t F_UI_ROLL_DICE_CREATE_VMA = 0xccc74; // void () 打开掷骰结果面板；与 STATUSDICE_Roll 配套
 constexpr uintptr_t F_IS_SEALED_VMA = 0x10be50;       // int (int32_t category) 是否可解封（类别 ∈[0x3a6,0x3ab]，与 ReleaseSealed 内联判定一致）
 constexpr uintptr_t F_IS_ITEMBOX_VMA = 0x10cda0;     // int (int32_t category) 是否开箱类（类别 ∈[0x3ef,0x3f1]，UIEquip_SetDescMenu 开箱按钮判定）
 constexpr uintptr_t F_IS_PACK_ITEM_VMA = 0x10cdb0;  // int (int32_t category) ITEMSYSTEM_IsPackItem，礼盒/包裹类
@@ -976,6 +977,8 @@ constexpr uintptr_t F_GRPX_SET_FONT_COLOR_VMA = 0x8fe58;      // void (u32 abgr)
 constexpr uintptr_t F_GRPX_DRAW_STRING_WITH_FONT_VMA = 0x8f9b0; // void (char*, i32 x, i32 y, i32 align, i32 font) 原版字体绘制
 constexpr uintptr_t F_GRPX_SET_FONT_COLOR_RGB_VMA = 0x8fdb4;  // void (i32 r, i32 g, i32 b) 原版 RGB 字体配色
 constexpr uintptr_t F_GRPX_DRAW_PART_VMA = 0x8f368;           // void (group*, i32 x, i32 y, loc*, i32 type, i32 flip, i32) 静态贴图分片绘制
+constexpr uintptr_t F_GRPX_DRAW_PART_EX_VMA = 0x8f3f8;       // void(group,x,y,sx,sy,sw,sh,ox,oy,pos_type,draw_mode,alpha)
+constexpr uintptr_t F_GRPX_DRAW_PART_FLIP_EX_VMA = 0x8f50c; // GRPX_DrawPartEx ABI + final flip flag
 constexpr uintptr_t F_GRPX_DRAW_LINE_VMA = 0x8fb7c;           // void (i32 x1, i32 y1, i32 x2, i32 y2, u32 abgr) 线段
 constexpr uintptr_t F_UI_DRAW_STRING_HALIGN_VMA = 0xaf02c;    // void (char* text, i32 x, i32 y, i32 font, i32 align) 画文字（font 写入 [*G_FONT_OBJ_SLOT_VMA] 首字段；align 0左/1中/2右）
 constexpr uintptr_t F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA = 0xb190c; // void (char* text, i32 x, i32 y, i32 width, i32 font, u32 color, i32 align, u32 color2) 官方完整文字封装（取字体对象→SetFontColor→DrawStringWithFont；UIDesc_Draw 0xb5890/UINpc_Draw 0xc2c3c 实证 font=1 有效）
@@ -1016,7 +1019,6 @@ constexpr uintptr_t F_UIEQUIP_BUTTON_SHORTCUT_EXE_VMA = 0xb6280; // void (void*)
 constexpr uintptr_t F_UIEQUIP_BUTTON_REMOVE_SHORTCUT_EXE_VMA = 0xb62bc; // void (void*) 移除快捷栏按钮：PLAYER_RemoveShortcutAll
 constexpr uintptr_t F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA = 0xb7e14; // void (void*) 卸下按钮 execute：desc_type=0 卸装备、desc_type=1 卸袋（b7f74）
 constexpr uintptr_t F_UIEQUIP_OK_DESTROY_ITEM_VMA = 0xb83d0;    // void () 销毁确认回调
-constexpr uintptr_t F_UI_DRAW_BORDER_RECT_VMA = 0xafc18; // void (int32_t x, int32_t y, int32_t w, int32_t h) 游戏通用金色圆角边框
 // UIEquip_OKDestroyItem(0xb83d0) 全量反汇编核实：无参、无物品入参寄存器——背包
 // 结算分支从面板上下文读 desc_type/bag/ctrl 后调 0x1261c4。仅两处调用者：
 //  - 按钮预演：UIEquip_ButtonDestroyExe 0x126288 `bl 0xb83d0`（进入前 x23=0x666）；
@@ -1056,7 +1058,6 @@ constexpr uintptr_t F_WIPEOUT_BUTTON_GAMEOVER_VMA = 0x1502ac;       // int () �
 
 // ---- 函数签名 ----
 using GetMoneyFn = int64_t (*)();
-using UiDrawBorderRectFn = void (*)(int32_t, int32_t, int32_t, int32_t);
 using GetMemberFn = void* (*)(int);
 using GetMenuCharacterFn = void* (*)();
 using GetPartySizeFn = int (*)();
@@ -1137,6 +1138,7 @@ using GetStatMainFn = int (*)(void*, int32_t);
 using SetStatMainFn = void (*)(void*, int32_t, int32_t);
 using SetStatBaseFn = void (*)(void*, int32_t, int32_t);
 using RollStatusDiceFn = int (*)(int32_t, int32_t);
+using UiRollDiceCreateFn = void (*)();
 using GetCumulateCountFn = int (*)(void*);
 using PutJewelFn = int (*)(void*, void*);
 using IsJewelFn = int (*)(int32_t);
@@ -1338,6 +1340,16 @@ using GrpxSetFontColorFn = void (*)(uint32_t abgr);
 using GrpxDrawStringWithFontFn = void (*)(char* text, int32_t x, int32_t y, int32_t align, int32_t font);
 using GrpxSetFontColorRgbFn = void (*)(int32_t r, int32_t g, int32_t b);
 using GrpxDrawPartFn = void (*)(void* group, int32_t x, int32_t y, void* loc, int32_t type, int32_t flip, int32_t unknown);
+// Exported GRPX wrappers use the common native textured-container drawing ABI.
+using GrpxDrawPartExFn = void (*)(void* group, int32_t x, int32_t y, int32_t source_x,
+                                  int32_t source_y, int32_t source_width,
+                                  int32_t source_height, int32_t offset_x, int32_t offset_y,
+                                  int32_t position_type, int32_t draw_mode, int32_t alpha);
+using GrpxDrawPartFlipExFn = void (*)(void* group, int32_t x, int32_t y, int32_t source_x,
+                                      int32_t source_y, int32_t source_width,
+                                      int32_t source_height, int32_t offset_x, int32_t offset_y,
+                                      int32_t position_type, int32_t draw_mode, int32_t alpha,
+                                      int32_t flip);
 using SglDrawTexturePartExFn = void (*)(void* group, int32_t x, int32_t y, int32_t source_x,
                                         int32_t source_y, int32_t source_width,
                                         int32_t source_height, int32_t offset_x, int32_t offset_y,

@@ -276,6 +276,8 @@ bool bridge_init() {
     fn_set_stat_main = reinterpret_cast<SetStatMainFn>(g_base + fn_resolve("F_SET_STAT_MAIN_VMA", F_SET_STAT_MAIN_VMA));
     fn_set_stat_base = reinterpret_cast<SetStatBaseFn>(g_base + fn_resolve("F_SET_STAT_BASE_VMA", F_SET_STAT_BASE_VMA));
     fn_status_dice_roll = reinterpret_cast<RollStatusDiceFn>(g_base + fn_resolve("F_STATUSDICE_ROLL_VMA", F_STATUSDICE_ROLL_VMA));
+    fn_ui_roll_dice_create = reinterpret_cast<UiRollDiceCreateFn>(
+        g_base + fn_resolve("F_UI_ROLL_DICE_CREATE_VMA", F_UI_ROLL_DICE_CREATE_VMA));
     fn_put_jewel = reinterpret_cast<PutJewelFn>(g_base + fn_resolve("F_PUT_JEWEL_VMA", F_PUT_JEWEL_VMA));
     fn_is_jewel = reinterpret_cast<IsJewelFn>(g_base + fn_resolve("F_IS_JEWEL_VMA", F_IS_JEWEL_VMA));
     fn_enchant_item = reinterpret_cast<EnchantItemFn>(g_base + fn_resolve("F_ENCHANT_ITEM_VMA", F_ENCHANT_ITEM_VMA));
@@ -411,8 +413,6 @@ bool bridge_init() {
         g_base + fn_resolve("F_MAPCHANGE_SET_VMA", F_MAPCHANGE_SET_VMA));
     fn_memorytext_get_text = reinterpret_cast<MemorytextGetTextFn>(
         g_base + fn_resolve("F_MEMORYTEXT_GET_TEXT_VMA", F_MEMORYTEXT_GET_TEXT_VMA));
-    fn_ui_draw_border_rect = reinterpret_cast<UiDrawBorderRectFn>(
-        g_base + fn_resolve("F_UI_DRAW_BORDER_RECT_VMA", F_UI_DRAW_BORDER_RECT_VMA));
     fn_move_as_path = reinterpret_cast<MoveAsPathFn>(g_base + fn_resolve("F_MOVE_AS_PATH_VMA", F_MOVE_AS_PATH_VMA));
     fn_char_move = reinterpret_cast<CharMoveFn>(g_base + fn_resolve("F_CHAR_MOVE_VMA", F_CHAR_MOVE_VMA));
     fn_char_pick_item_all = reinterpret_cast<CharPickItemAllFn>(g_base + fn_resolve("F_CHAR_PICK_ITEM_ALL_VMA", F_CHAR_PICK_ITEM_ALL_VMA));
@@ -580,6 +580,10 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
         g_base + fn_resolve("F_GRPX_GET_FONT_HEIGHT_VMA", F_GRPX_GET_FONT_HEIGHT_VMA));
     fn_grpx_set_font_color_rgb = reinterpret_cast<GrpxSetFontColorRgbFn>(g_base + fn_resolve("F_GRPX_SET_FONT_COLOR_RGB_VMA", F_GRPX_SET_FONT_COLOR_RGB_VMA));
     fn_grpx_draw_part = reinterpret_cast<GrpxDrawPartFn>(g_base + fn_resolve("F_GRPX_DRAW_PART_VMA", F_GRPX_DRAW_PART_VMA));
+    fn_grpx_draw_part_ex = resolve_native_ui_function<GrpxDrawPartExFn>(
+        "F_GRPX_DRAW_PART_EX_VMA");
+    fn_grpx_draw_part_flip_ex = resolve_native_ui_function<GrpxDrawPartFlipExFn>(
+        "F_GRPX_DRAW_PART_FLIP_EX_VMA");
     fn_sgl_draw_texture_part_ex = resolve_native_ui_function<SglDrawTexturePartExFn>(
         "F_SGL_DRAW_TEXTURE_PART_EX_VMA");
     fn_ui_draw_string_halign = reinterpret_cast<UiDrawStringHAlignFn>(g_base + fn_resolve("F_UI_DRAW_STRING_HALIGN_VMA", F_UI_DRAW_STRING_HALIGN_VMA));
