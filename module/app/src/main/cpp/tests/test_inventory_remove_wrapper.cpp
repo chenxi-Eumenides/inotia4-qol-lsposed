@@ -10,10 +10,11 @@
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/ops/item_inventory_state_write.h"
 #include "plugins/core.inventory/api/bag_source.h"
-#include "plugins/core.item/api/bag_source.h"
-#include "plugins/core.item/hooks/inventory_hooks.cpp"
+#include "plugins/core.inventory/hooks/storage_hooks.cpp"
 
 namespace {
+
+using namespace qol::features::core_inventory::hooks;
 
 using qol::contracts::QolItemHandle;
 using qol::game::ItemHandleError;
@@ -133,6 +134,21 @@ qol::contracts::QolHostSdk make_sdk() {
     return sdk;
 }
 
+// storage_hooks::attach 要求 game/port 非空且 bind_find_item_backup 可用；
+// remove_item_wrapper 路径不读 port，最小占位即可。
+qol::contracts::QolGameHost make_game() {
+    qol::contracts::QolGameHost game{};
+    game.item_abi.bind_find_item_backup =
+        [](qol::contracts::QolFindItemAbiFn) { return qol::contracts::ok(); };
+    return game;
+}
+
+bool attach_hooks(const qol::contracts::QolHostSdk& sdk) {
+    static const qol::contracts::QolGameHost game = make_game();
+    static const qol::contracts::QolItemPort port{};
+    return attach(&sdk, &game, &port);
+}
+
 enum class BackupMode { kReturn, kSameItemReentry, kAtoBtoA };
 
 BackupMode g_backup_mode = BackupMode::kReturn;
@@ -199,7 +215,7 @@ void test_registry_invalidation_suspend_restore_commit() {
     ItemHandleRegistry registry;
     g_registry = &registry;
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
 
     int item = 1;
     ItemHandleError error{};
@@ -234,42 +250,42 @@ void test_registry_invalidation_suspend_restore_commit() {
     assert(sdk.item_handle.register_item(&item, kSourceOwner, &found) ==
            qol::contracts::kQolItemHandleStatusOk);
     assert(found.slot == original.slot && found.generation != original.generation);
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
 }
 
 void test_support_disabled_same_item_reentry_is_blocked() {
     ItemHandleRegistry registry;
     g_registry = &registry;
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 1;
     g_item_a = &item;
     reset_backup(BackupMode::kSameItemReentry);
     g_item_a = &item;
     reset_registry_counters();
-    inventory_native_hook_set_support(false);
+    set_support(false);
 
     assert(remove_item_wrapper(&item) == 41);
     assert(g_nested_same_result == 0);
     assert(g_backup_calls_a == 1);
     assert(g_registry_lookup_calls == 0 && g_registry_register_calls == 0);
 
-    inventory_native_hook_set_support(true);
-    inventory_native_hook_bind_sdk(nullptr);
+    set_support(true);
+    detach();
 }
 
 void test_native_same_item_reentry_only_calls_backup_once() {
     ItemHandleRegistry registry;
     g_registry = &registry;
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 1;
     register_native_item(registry, &item);
     g_item_a = &item;
     reset_backup(BackupMode::kSameItemReentry);
     g_item_a = &item;
     reset_registry_counters();
-    inventory_native_hook_set_support(true);
+    set_support(true);
 
     assert(remove_item_wrapper(&item) == 41);
     assert(g_nested_same_result == 0);
@@ -278,14 +294,14 @@ void test_native_same_item_reentry_only_calls_backup_once() {
     const QolItemHandle handle = registry.lookup_item(&item);
     assert(handle.slot != 0 && registry.resolve_item(handle).item == &item);
 
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
 }
 
 void test_different_objects_allow_a_to_b_then_block_a() {
     ItemHandleRegistry registry;
     g_registry = &registry;
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item_a = 1;
     int item_b = 2;
     register_native_item(registry, &item_a);
@@ -296,7 +312,7 @@ void test_different_objects_allow_a_to_b_then_block_a() {
     g_item_a = &item_a;
     g_item_b = &item_b;
     reset_registry_counters();
-    inventory_native_hook_set_support(true);
+    set_support(true);
 
     assert(remove_item_wrapper(&item_a) == 41);
     assert(g_nested_b_result == 23);
@@ -304,21 +320,21 @@ void test_different_objects_allow_a_to_b_then_block_a() {
     assert(g_backup_calls_a == 1 && g_backup_calls_b == 1);
     assert(g_registry_lookup_calls == 2 && g_registry_register_calls == 0);
 
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
 }
 
 void test_failed_backup_cleans_identity_for_retry() {
     ItemHandleRegistry registry;
     g_registry = &registry;
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 1;
     register_native_item(registry, &item);
     g_item_a = &item;
     reset_backup(BackupMode::kReturn);
     g_item_a = &item;
     g_backup_result = 0;
-    inventory_native_hook_set_support(true);
+    set_support(true);
 
     assert(remove_item_wrapper(&item) == 0);
     assert(g_backup_calls_a == 1);
@@ -327,7 +343,7 @@ void test_failed_backup_cleans_identity_for_retry() {
     assert(remove_item_wrapper(&item) == 9);
     assert(g_backup_calls_a == 2);
 
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
 }
 
 void* g_source_object = nullptr;
@@ -492,7 +508,7 @@ void prepare_ops_item(ItemHandleRegistry& registry, void* item, uint32_t count) 
     fn_remove_item = &ops_remove_through_wrapper;
     fn_get_cumulate_count = &ops_cumulate_count;
     fn_itempool_free = &ops_itempool_free;
-    inventory_native_hook_set_support(true);
+    set_support(true);
     reset_registry_counters();
 }
 
@@ -515,7 +531,7 @@ void test_provider_callback_same_item_reentry_is_not_repeated() {
     ItemHandleRegistry registry;
     g_registry = &registry;
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 1;
     g_source_object = &item;
     g_source_handle = registry.register_item(&item, kSourceOwner);
@@ -527,7 +543,7 @@ void test_provider_callback_same_item_reentry_is_not_repeated() {
     g_source_nested_started = false;
     reset_backup(BackupMode::kReturn);
     reset_registry_counters();
-    inventory_native_hook_set_support(true);
+    set_support(true);
 
     assert(remove_item_wrapper(&item) == 1);
     assert(g_source_nested_result == 0);
@@ -537,13 +553,13 @@ void test_provider_callback_same_item_reentry_is_not_repeated() {
 
     assert(qol::features::core_inventory::kBagSourceRegistryApi.unregister_source(kSourceSpace).code ==
            kQolOk);
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
 }
 
 void test_production_remove_operation_uses_wrapper_and_commits() {
     auto& registry = qol::game::item_handle_registry();
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 11;
     prepare_ops_item(registry, &item, 3);
     register_source_for_ops_item();
@@ -568,14 +584,14 @@ void test_production_remove_operation_uses_wrapper_and_commits() {
     assert(g_ops_frame_refresh_calls == 1);
 
     unregister_source_for_ops_item();
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
     fn_remove_item = nullptr;
 }
 
 void test_production_remove_operation_restores_failure_then_retries() {
     auto& registry = qol::game::item_handle_registry();
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 12;
     prepare_ops_item(registry, &item, 4);
     register_source_for_ops_item();
@@ -613,14 +629,14 @@ void test_production_remove_operation_restores_failure_then_retries() {
     assert(g_ops_native_slot_set_calls == 0 && g_ops_itempool_free_calls == 0);
 
     unregister_source_for_ops_item();
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
     fn_remove_item = nullptr;
 }
 
 void test_production_remove_operation_finish_failure_does_not_restore_item() {
     auto& registry = qol::game::item_handle_registry();
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 17;
     prepare_ops_item(registry, &item, 2);
     register_source_for_ops_item();
@@ -653,14 +669,14 @@ void test_production_remove_operation_finish_failure_does_not_restore_item() {
     assert(registry.lookup_item(&item).slot == 0);
 
     unregister_source_for_ops_item();
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
     fn_remove_item = nullptr;
 }
 
 void test_production_remove_operation_finish_restore_failure_is_internal() {
     auto& registry = qol::game::item_handle_registry();
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     int item = 18;
     prepare_ops_item(registry, &item, 2);
     register_source_for_ops_item();
@@ -685,14 +701,14 @@ void test_production_remove_operation_finish_restore_failure_is_internal() {
     assert(registry.resolve_item(g_ops_handle).item == &item);
 
     unregister_source_for_ops_item();
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
     fn_remove_item = nullptr;
 }
 
 void test_production_remove_operation_prechecks_and_partial_count() {
     auto& registry = qol::game::item_handle_registry();
     auto sdk = make_sdk();
-    assert(inventory_native_hook_bind_sdk(&sdk));
+    assert(attach_hooks(sdk));
     qol::contracts::QolItemInventoryStateWriteResult out{};
 
     int missing_fn_item = 13;
@@ -741,7 +757,7 @@ void test_production_remove_operation_prechecks_and_partial_count() {
     assert(g_ops_count == 2 && g_ops_count_write_calls == 1);
     assert(g_ops_item == &partial_item);
 
-    inventory_native_hook_bind_sdk(nullptr);
+    detach();
     fn_remove_item = nullptr;
 }
 
@@ -811,8 +827,6 @@ decltype(fn_get_cumulate_count) fn_get_cumulate_count = nullptr;
 decltype(fn_itempool_free) fn_itempool_free = nullptr;
 
 int main() {
-    qol::features::core_item::bind_bag_source_registry_for_test(
-        &qol::features::core_inventory::kBagSourceRegistryApi);
     test_registry_invalidation_suspend_restore_commit();
     test_support_disabled_same_item_reentry_is_blocked();
     test_native_same_item_reentry_only_calls_backup_once();

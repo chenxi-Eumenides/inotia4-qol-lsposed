@@ -263,9 +263,9 @@ add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 add_executable(inventory_remove_wrapper_tests
     test_inventory_remove_wrapper.cpp
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
-    ${CPP_DIR}/plugins/core.item/hooks/inventory_logging.cpp
-    ${CPP_DIR}/plugins/core.item/api/bag_source.cpp
-    ${CPP_DIR}/plugins/core.item/usecases/consume_item.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/stage4.cpp
+    ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
     ${CPP_DIR}/game/ops/item_inventory_state_write.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
 )
@@ -285,10 +285,10 @@ target_link_options(inventory_remove_wrapper_tests PRIVATE -Wl,--gc-sections)
 target_link_libraries(inventory_remove_wrapper_tests PRIVATE Threads::Threads)
 add_test(NAME inventory_remove_wrapper_tests COMMAND inventory_remove_wrapper_tests)
 
-# Compile the production inventory hook translation unit independently. It is intentionally not
+# Compile the production storage hook translation unit independently. It is intentionally not
 # linked into stage4_hook_tests, whose scope remains the pure stage-4 logic.
 add_library(inventory_hook_native_compile OBJECT
-    ${CPP_DIR}/plugins/core.item/hooks/inventory_hooks.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
 )
 target_include_directories(inventory_hook_native_compile PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
