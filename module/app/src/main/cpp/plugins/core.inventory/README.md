@@ -13,5 +13,8 @@
 
 - 插件 target：`qol_plugin_core.inventory`
 - 插件 id：`core.inventory`
-- 已注册到 `host/assembly.cpp`，启动时只输出安装/启停日志。
-- 下一阶段：先落 `BagTableRegistry`/`InventoryReader`/`InventoryExecutor` 与 `BagAccess` 契约，再安装 12 条存储 hook。
+- 已注册到 `host/assembly.cpp`，启动时输出安装/启停日志。
+- 提供 `inventory.access` v1.0：`item_at` / `locate` / `find_first` / `find_empty` / `count_item` / `move` / `take` / `place` / `remove_count`。
+- 存储核心已落地：`SlotTable` 接口、`MemorySlotTable`（host 测试用）、`InventoryStore`（槽表注册、查询、整件移动、取放、部分移除、任务袋只读）。
+- 尚未接入原生表/外部表、hook、HTTP；`inventory.access` 当前只看到测试内存表。
+- 下一阶段：先接原生表适配器与外部表注册，再接 12 条存储 hook 与 inventory HTTP。

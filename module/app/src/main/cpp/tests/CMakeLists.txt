@@ -2350,6 +2350,23 @@ set_target_properties(extra_bag_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME extra_bag_tests COMMAND extra_bag_tests)
 
+# core.inventory 存储核心：内存槽表 + inventory.access 契约（末尾追加）。
+add_executable(core_inventory_store_tests
+    test_core_inventory_store.cpp
+    ${CPP_DIR}/plugins/core.inventory/plugin.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/access.cpp
+    ${CPP_DIR}/plugins/core.inventory/store/slot_table.cpp
+    ${CPP_DIR}/plugins/core.inventory/store/inventory_store.cpp
+)
+target_include_directories(core_inventory_store_tests PRIVATE
+    ${CPP_DIR}
+    ${CPP_DIR}/plugins/core.inventory
+)
+target_compile_features(core_inventory_store_tests PRIVATE cxx_std_17)
+set_target_properties(core_inventory_store_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME core_inventory_store_tests COMMAND core_inventory_store_tests)
+
 # Host tests use assert expressions for both setup and checks; keep them active in Release too.
 get_property(HOST_TEST_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 foreach(test_target IN LISTS HOST_TEST_TARGETS)

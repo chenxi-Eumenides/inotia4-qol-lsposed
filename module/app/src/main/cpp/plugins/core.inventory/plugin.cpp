@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <cstdint>
 
+#include "api/access.h"
+
 namespace qol::features::core_inventory {
 namespace {
 
@@ -33,12 +35,15 @@ int plugin_install(contracts::PluginContext& context) {
     if (context.sdk == nullptr) return 1;
     g_sdk = context.sdk;
     g_installed = true;
-    log_line(1, "plugin=%s: installed version=%s mode=skeleton", kPluginId, kPluginVersion);
+    inventory_store().clear();
+    log_line(1, "plugin=%s: installed version=%s mode=skeleton provides=inventory.access",
+             kPluginId, kPluginVersion);
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext&) {
     log_line(1, "plugin=%s: deactivated", kPluginId);
+    inventory_store().clear();
     g_sdk = nullptr;
     g_installed = false;
     g_enabled = false;
@@ -71,6 +76,11 @@ const contracts::FeatureDefinition kFeatures[] = {
      &feature_toggle, nullptr},
 };
 
+const contracts::CapabilityProvisionRef kProvides[] = {
+    {contracts::kInventoryAccessCapabilityId, contracts::kInventoryAccessVersion,
+     &inventory_access_api()},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
@@ -78,8 +88,8 @@ const contracts::PluginDescriptor kDescriptor = {
     nullptr,
     0,
     nullptr,
-    0,
-    nullptr,
+    1,
+    kProvides,
     0,
     nullptr,
     0,
