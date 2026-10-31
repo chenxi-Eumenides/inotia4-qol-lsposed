@@ -66,6 +66,7 @@
 - `audits/plugin-audit/simple-mode-20261022/verification-log.md`：旧 `simple_mode`（已改名为 `world_tuning`）审阅登记（12 findings、5 项用户裁决、Host 153/153 与构建证据；设备面 `NOT_ACCEPTED`）。
 - `slot-data-contract.md`：Slot data 当前契约与状态。
 - `extension-bag/rulebook.md`、`extension-bag/verification-matrix.md`：扩展背包当前规则和操作验收卡。
+- `extra-bag-orchestration.md`：extra_bag 多袋源编排层设计（地址、注册、搜索、移动/交换；不包含背包装备）。
 - `extension-bag/display-hook.md`：装备页/商店/合成投影读取虚拟化（`ControlItem_SetItem/GetItem`、`INVEN_GetBagSize` hooks；不写 `INVEN_pItem` 或容量字）。
 - `custom-ui/refactor-plan.md`：`core.custom_ui` 局部拆分方案（Debug 编译门、形状绘制抽离、确认框 overlay 可选拆分；不做 L0–L6 全量重构）。
 - `core-item/item-type-and-use-paths.md`：`item.facts` 4.0 权威物品类型、原生使用路径、`ITEMDATABASE_IsUse` 边界与 EB 迁移规则。
