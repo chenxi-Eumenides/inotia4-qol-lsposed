@@ -281,7 +281,7 @@ public:
 - 物品类型（实例型 A / 数量型 B、是否可堆叠）由 core.item 的 item facts 层按 `item_id` 判定。
 - 编排层不判断类型：它只按 `count`/payload 原样搬运，不解析、不比较 payload。
 - 袋源不判断类型：源只返回 count/payload，并负责自己存储层内的数量编码；不做“这是装备还是药水”的业务判断。
-- 如果某个源自带物品定义，它可以提供额外的 stackable 元数据；但编排层只透传，最终由使用层决定是否合并/拆分。
+- 类型判断统一以 core.item 的 item facts 为准；源与 item facts 不一致时，以 item facts 为准。
 
 ### 6.2 所有权与生命周期
 
