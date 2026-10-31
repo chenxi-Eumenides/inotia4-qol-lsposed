@@ -163,6 +163,7 @@ target_link_libraries(gamebridge PRIVATE ${log-lib} dl)
 # 自动出售阶段 A：core 基础设施 + 数据层下沉（末尾追加，不改上方既有行）
 target_sources(gamebridge PRIVATE
     patch/call_patch.cpp
+    patch/native_hook.cpp
     infra/frame/frame_task.cpp
     patch/save_enter.cpp
     patch/save_exit.cpp

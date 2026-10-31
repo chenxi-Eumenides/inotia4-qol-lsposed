@@ -9,6 +9,7 @@
 #include "game/adapter_ports/game_host_port.h"
 #include "game/adapter_ports/item_count_facade.h"
 #include "game/ops/item_inventory_state_write.h"
+#include "plugins/core.inventory/api/bag_source.h"
 #include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/hooks/inventory_hooks.cpp"
 
@@ -501,12 +502,12 @@ void register_source_for_ops_item() {
     g_source_remove_calls = 0;
     g_source_nested_result = -1;
     g_source_nested_started = false;
-    assert(qol::features::core_item::kBagSourceRegistryApi.register_source(&kTestBagSource).code ==
+    assert(qol::features::core_inventory::kBagSourceRegistryApi.register_source(&kTestBagSource).code ==
            kQolOk);
 }
 
 void unregister_source_for_ops_item() {
-    assert(qol::features::core_item::kBagSourceRegistryApi.unregister_source(kSourceSpace).code ==
+    assert(qol::features::core_inventory::kBagSourceRegistryApi.unregister_source(kSourceSpace).code ==
            kQolOk);
 }
 
@@ -519,7 +520,7 @@ void test_provider_callback_same_item_reentry_is_not_repeated() {
     g_source_object = &item;
     g_source_handle = registry.register_item(&item, kSourceOwner);
     assert(g_source_handle.slot != 0);
-    assert(qol::features::core_item::kBagSourceRegistryApi.register_source(&kTestBagSource).code ==
+    assert(qol::features::core_inventory::kBagSourceRegistryApi.register_source(&kTestBagSource).code ==
            kQolOk);
     g_source_remove_calls = 0;
     g_source_nested_result = -1;
@@ -534,7 +535,7 @@ void test_provider_callback_same_item_reentry_is_not_repeated() {
     assert(g_backup_calls_a == 0);
     assert(g_registry_lookup_calls == 1 && g_registry_register_calls == 0);
 
-    assert(qol::features::core_item::kBagSourceRegistryApi.unregister_source(kSourceSpace).code ==
+    assert(qol::features::core_inventory::kBagSourceRegistryApi.unregister_source(kSourceSpace).code ==
            kQolOk);
     inventory_native_hook_bind_sdk(nullptr);
 }
@@ -810,6 +811,8 @@ decltype(fn_get_cumulate_count) fn_get_cumulate_count = nullptr;
 decltype(fn_itempool_free) fn_itempool_free = nullptr;
 
 int main() {
+    qol::features::core_item::bind_bag_source_registry_for_test(
+        &qol::features::core_inventory::kBagSourceRegistryApi);
     test_registry_invalidation_suspend_restore_commit();
     test_support_disabled_same_item_reentry_is_blocked();
     test_native_same_item_reentry_only_calls_backup_once();

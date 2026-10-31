@@ -7,10 +7,10 @@
 #include "claims.h"
 #include "inventory_logging.h"
 
-#include "../../../contracts/plugin.h"
-#include "../../../contracts/bag.h"
-#include "../../../contracts/host_sdk.h"
-#include "../../../contracts/ui.h"
+#include "contracts/plugin.h"
+#include "contracts/bag.h"
+#include "contracts/host_sdk.h"
+#include "contracts/ui.h"
 
 #include <algorithm>
 #include <atomic>
@@ -19,7 +19,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <mutex>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -60,8 +59,6 @@ using InvenFindSaveSlotFn = int (*)(void*, int8_t*);
 using ItemSystemDivideFn = void* (*)(void*, int32_t);
 using MakeItemFn = void* (*)(int32_t, int32_t, int32_t);
 using InvenRemoveItemDataFn = int (*)(int32_t, int32_t);
-
-constexpr uint32_t kNativeApiVersion = 2;
 
 const qol::contracts::QolHostSdk* g_sdk = nullptr;
 const qol::contracts::QolGameHost* g_game = nullptr;
@@ -324,10 +321,6 @@ int remove_registered_source_category(int32_t category, int32_t count) {
     }
     return count - remaining;
 }
-
-std::mutex g_hook_mutex;
-NativeHookFunType g_hook_func = nullptr;
-NativeUnhookFunType g_unhook_func = nullptr;
 
 HaveItemFn g_backup_have_item = nullptr;
 GetItemCountFn g_backup_get_item_count = nullptr;
@@ -2763,37 +2756,3 @@ QolResult write_detached_item_count(const qol::contracts::QolItemHandle& item, u
 }
 
 }  // namespace qol::features::inventory_hooks
-
-void inventory_native_hook_on_api(const NativeAPIEntries* entries) {
-    if (entries == nullptr || entries->hook_func == nullptr || entries->unhook_func == nullptr) {
-        QOL_LOG_ERROR(QolDomain::kInventory, "native_init received invalid API entries");
-        return;
-    }
-    std::lock_guard<std::mutex> lock(g_hook_mutex);
-    if (entries->version < kNativeApiVersion) {
-        QOL_LOG_ERROR(QolDomain::kInventory,
-                            "native API version unsupported: %u", entries->version);
-        return;
-    }
-    g_hook_func = entries->hook_func;
-    g_unhook_func = entries->unhook_func;
-    QOL_LOG_INFO(QolDomain::kInventory,
-                        "native_init called api_version=%u hook_func=%p",
-                        entries->version, reinterpret_cast<void*>(g_hook_func));
-    // 资源安装由宿主声明式引擎在 assembly 装配期执行（core.item）。
-}
-
-void inventory_native_hook_on_module_loaded(const char* name, void*) {
-    if (name == nullptr || std::strstr(name, "libgame.so") == nullptr) return;
-    QOL_LOG_INFO(QolDomain::kInventory, "module loaded: %s", name);
-    // 纯日志：安装时机改由 assembly 声明式装配决定，模块加载不再自行触发安装。
-}
-
-NativeHookFunType native_hook_func() { return g_hook_func; }
-NativeUnhookFunType native_unhook_func() { return g_unhook_func; }
-
-extern "C" [[gnu::visibility("default")]] [[gnu::used]]
-NativeOnModuleLoaded native_init(const NativeAPIEntries* entries) {
-    inventory_native_hook_on_api(entries);
-    return inventory_native_hook_on_module_loaded;
-}

@@ -6,21 +6,8 @@
 #include "../../../contracts/game_host.h"
 #include "../../../contracts/item_facts.h"
 
-using NativeHookFunType = int (*)(void* func, void* replace, void** backup);
-using NativeUnhookFunType = int (*)(void* func);
-
-struct NativeAPIEntries {
-    uint32_t version;
-    NativeHookFunType hook_func;
-    NativeUnhookFunType unhook_func;
-};
-
-using NativeOnModuleLoaded = void (*)(const char* name, void* handle);
-
 // 使用 LSPosed Native Hook API 提供的 backup；扩展对象由逻辑库存适配器处理，原版对象回退到 backup。
 
-void inventory_native_hook_on_api(const NativeAPIEntries* entries);
-void inventory_native_hook_on_module_loaded(const char* name, void* handle);
 // 模块主动刷新必须走 backup/trampoline，避免经被 Hook 地址回入 wrapper 后重复加锁。
 // core.item 实现：raw-original refresh trampoline 经 `inventory_refresh` capability 暴露给消费者；
 // 返回 true = 已调原版（存在 trampoline），false = 无可用原函数。
@@ -33,14 +20,6 @@ bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game);
 bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* facts);
 void inventory_native_hook_set_support(bool enabled);
 bool inventory_native_hook_support_enabled();
-
-// 暴露框架原生 hook/unhook（native_init 时注入）；供扩展背包等功能按函数入口安装 hook。
-// 过渡导出（清除阶段 P5）：机制原语迁入 patch/ 后删除。
-NativeHookFunType native_hook_func();
-NativeUnhookFunType native_unhook_func();
-
-extern "C" [[gnu::visibility("default")]] [[gnu::used]]
-NativeOnModuleLoaded native_init(const NativeAPIEntries* entries);
 
 // ---------------------------------------------------------------------------
 // S2 写侧进位/借位纯函数（R-45/R-49：写侧无统一 setter，各写点调用方完成类别

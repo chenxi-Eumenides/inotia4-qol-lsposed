@@ -34,6 +34,8 @@
 #include "http_endpoint_test_support.h"
 #include "host/owner_cache_builder.h"
 #include "infra/command_queue.h"
+#include "plugins/core.inventory/api/bag_source.h"
+#include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/plugin.h"
 #include "test_snapshot_sdk.h"
 
@@ -1073,6 +1075,7 @@ bool g_fake_registered_source_added = false;
 bool set_fake_registered_source(bool enabled) {
     const auto* registry = state_test_bag_source_registry();
     if (registry == nullptr) return false;
+    qol::features::core_item::bind_bag_source_registry_for_test(registry);
     if (enabled && !g_fake_registered_source_added) {
         if (!qol::contracts::succeeded(registry->register_source(&kFakeRegisteredBagSource)))
             return false;
@@ -1150,15 +1153,9 @@ const qol::contracts::QolBagSource kStateTestBagSource{
 };
 
 const qol::contracts::QolBagSourceRegistryApi* state_test_bag_source_registry() {
-    const auto& descriptor = qol::features::core_item::plugin_descriptor();
-    for (uint32_t index = 0; index < descriptor.provides_count; ++index) {
-        if (std::strcmp(descriptor.provides[index].id,
-                        qol::contracts::kBagSourceCapabilityId) == 0) {
-            return static_cast<const qol::contracts::QolBagSourceRegistryApi*>(
-                descriptor.provides[index].iface);
-        }
-    }
-    return nullptr;
+    const auto* registry = &qol::features::core_inventory::kBagSourceRegistryApi;
+    qol::features::core_item::bind_bag_source_registry_for_test(registry);
+    return registry;
 }
 
 std::string fake_party_state_json() {

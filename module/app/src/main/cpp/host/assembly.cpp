@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "patch/call_patch.h"
+#include "patch/native_hook.h"
 #include "patch/save_enter.h"
 #include "infra/log/qol_log.h"
 #include "infra/capabilities.h"

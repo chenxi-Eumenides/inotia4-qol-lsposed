@@ -172,6 +172,7 @@ int plugin_install(contracts::PluginContext& ctx) {
         reset_ports();
         return 1;
     }
+    bind_bag_source_sdk(g_sdk);
     if (!shop::initialize_snapshot(g_sdk)) {
         g_snapshot.destroy();
         reset_ports();

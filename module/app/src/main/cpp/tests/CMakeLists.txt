@@ -262,6 +262,7 @@ add_test(NAME stage4_hook_tests COMMAND stage4_hook_tests)
 # Exercise the production remove operation through remove_item_wrapper and the real registry.
 add_executable(inventory_remove_wrapper_tests
     test_inventory_remove_wrapper.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.item/hooks/inventory_logging.cpp
     ${CPP_DIR}/plugins/core.item/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.item/usecases/consume_item.cpp
@@ -1915,6 +1916,7 @@ add_test(NAME character_facts_plugin_tests COMMAND character_facts_plugin_tests)
 add_executable(item_facts_dispatch_tests
     test_item_facts_dispatch.cpp
     ${CPP_DIR}/infra/command_queue.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.item/plugin.cpp
     ${CPP_DIR}/plugins/core.item/runtime/context.cpp
     ${CPP_DIR}/plugins/core.item/runtime/lifecycle.cpp

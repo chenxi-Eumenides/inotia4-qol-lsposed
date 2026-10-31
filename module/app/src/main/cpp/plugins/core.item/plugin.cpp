@@ -53,7 +53,6 @@ namespace qol::features::core_item {
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kItemFactsCapabilityId, contracts::kItemFactsVersion, &kItemFactsApi},
     {contracts::kItemStateCapabilityId, contracts::kItemStateVersion, &kItemStateApi},
-    {contracts::kBagSourceCapabilityId, contracts::kBagSourceVersion, &kBagSourceRegistryApi},
     {contracts::kInventoryRefreshCapabilityId,
      {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor},
      &inventory_hooks::kInventoryRefreshApi},
@@ -98,6 +97,9 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
      {contracts::kHttpDispatchVersion.major, contracts::kHttpDispatchVersion.minor}},
     {contracts::kWorldFactsCapabilityId,
      {contracts::kWorldFactsVersionMajor, contracts::kWorldFactsVersionMinor}},
+    // 袋源注册表由 core.inventory 提供；缺失时注册源查询为空，原生路径不受影响。
+    {contracts::kBagSourceCapabilityId,
+     {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
 };
 
 const contracts::PluginDescriptor& plugin_descriptor() {

@@ -29,6 +29,7 @@ void append_inventory_item(std::string* out, int32_t slot,
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
 uint32_t registered_bag_source_count();
 const contracts::QolBagSource* registered_bag_source_at(uint32_t index);
+void bind_bag_source_sdk(const contracts::QolHostSdk* sdk);
 void reset_bag_sources();
 QolResult read_inventory();
 void request_inventory_refresh();
