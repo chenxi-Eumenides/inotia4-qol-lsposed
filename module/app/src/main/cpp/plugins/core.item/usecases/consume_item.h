@@ -1,5 +1,8 @@
 #pragma once
 
+// 与 core.inventory/hooks/stage4.{h,cpp} 的 storage 纯函数保持逐字一致；
+// 两份实现期间任何语义修复必须同时修改两处。
+
 #include <cstddef>
 #include <cstdint>
 

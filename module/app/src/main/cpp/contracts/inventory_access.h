@@ -9,8 +9,8 @@
 // - 任务袋 (space 0, bag 5) 只读；写操作返回 kQolErrBlocked。
 // - 失败不写槽：调用方在成功后自行决定是否继续下一步。
 //
-// 当前阶段只提供 inventory.access 一个能力；等 item/EB 接入后再按 query/store
-// 拆分成两个窄能力，避免提前冻结两套 ABI。
+// 当前无生产消费者：仅 host test 直接使用；item/EB 仍走各自的旧存储面。
+// 在 Phase B/C 接入前不要把本结构视为已冻结的生产 ABI；后续拆 query/store。
 
 #include <cstddef>
 #include <cstdint>
