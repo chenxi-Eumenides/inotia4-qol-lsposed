@@ -81,9 +81,38 @@ struct PayloadMatch {
 };
 ```
 
-`ItemStack.count` 是唯一权威数量。payload 内部的 count 位段不作为插件内数量来源；需要数量的层只读 `ItemStack.count`。把 `ItemStack` 交给游戏对象时，由适配层/物品 codec 把 count 写进 payload；编排层不解析、不修改 payload。
+`ItemStack.count` 是插件 API 的数量字段；payload 是游戏原生序列化数据。两者在静止状态下必须一致：类型 B 的 payload 内嵌 count 时，payload count == `ItemStack.count`；类型 A 没有 count 位段，`count` 恒为 1。
 
 `take_item` 默认按 `item_id + count` 取；需要精确到实例型 A 的某一堆时，传入 `PayloadMatch`。
+
+### 2.1.2 ItemCodec 与 count 一致性
+
+只有 `ItemCodec` 解析/写入 payload 内的 count：
+
+```cpp
+struct ItemCodec {
+    // 从游戏原生 payload 解码出 ItemStack；count 从 payload 重建。
+    bool decode(int32_t item_id, const uint8_t* payload, uint32_t payload_size,
+                ItemStack* out) const;
+    // 把 ItemStack 编码成游戏原生 payload；count 写入 payload。
+    bool encode(const ItemStack& item, uint8_t* payload, uint32_t capacity,
+                uint32_t* out_size) const;
+    // 只改 count，并同步 payload 内的 count 位段。
+    bool set_count(ItemStack* item, int32_t count) const;
+};
+```
+
+- 源适配层：`item_at` 调 `decode`，`put` 调 `encode`，`remove` 调 `set_count`。
+- 读档：`decode(payload)` → `ItemStack`，count 从 payload 重建。
+- 存档：`encode(ItemStack)` → payload，count 写入 payload。
+- 编排层和使用层不调用 codec、不解析 payload，只读写 `ItemStack.count`。
+- codec 是唯一知道 count 位段的位置；不得在 hook/使用层/编排层重复实现。
+
+### 2.1.3 读档 / 存档
+
+- 读档：读取 `item_id` + 原生 payload，调用 `ItemCodec::decode` 重建 `ItemStack`；`count` 从 payload 解出，并校验与解码结果一致。
+- 存档：调用 `ItemCodec::encode(ItemStack)` 生成原生 payload，把 `count` 写入 payload；保存 canonical payload。可另存一份 count 做完整性校验，但读取时以 codec 解码结果为准。
+- 不允许“只存 count、不写 payload”或“只存 payload、不校验 count”的旁路。
 
 ### 2.2 源接口
 
@@ -122,9 +151,9 @@ struct BagSourceIdentity {
 ### 2.3 契约规则
 
 1. `space_id` 稳定且唯一；0/1 为原生空间，>=2 为注册源空间。注销后 `BagRef` 失效，不得复用同一 `space_id` 表示不同源。
-2. `count` 以 `ItemStack.count` 为权威；payload 内部的 count 不是插件内数量来源。源只按 `count` 存取，不要求解析 payload；若源底层存储的 payload 编码数量，由源适配层在边界同步。编排层不解析、不修改 payload。
+2. `ItemStack.count` 是插件 API 的数量字段；payload 是游戏原生序列化数据。两者在静止状态下必须一致，由唯一的 `ItemCodec` 维护。源适配层调用 codec；编排层不解析、不修改 payload。
 3. `put` 覆盖目标槽；目标是否为空由编排层预检，源不做校验。
-4. `remove(bag, slot, count, out)` 由源执行数量增减：`count >= 当前数量` 移除整件，否则扣除 `count`。源负责更新自己的 count 与存储状态；payload 由源按自己的格式处理，编排层不感知。
+4. `remove(bag, slot, count, out)` 由源执行数量增减：`count >= 当前数量` 移除整件，否则扣除 `count`。源适配层用 `ItemCodec::set_count` 同步 payload；返回的 `ItemStack.count` 与 payload 必须一致。编排层不感知。
 5. `BagInfo.occupied_slots` 只统计普通物品槽，不包含物品背包装备位。
 6. 源不做 item payload 校验、不做事务、不做回滚；源内部若有持久化/所有权/编码逻辑，由源自己维护，编排层不感知。
 7. 源不判断数量增减的业务合法性：编排层预检 ref、物品存在、`count > 0`、`count <= item.count`；源只执行存储操作。
@@ -240,7 +269,7 @@ public:
 
 - 一个请求可以跨多个源、多个堆完成。
 - 使用层只看到 item_id/count/payload，不知道来源。
-- 部分堆的 payload 原样返回；不合并、不重编码。
+- 部分堆的 `ItemStack` 由源适配层通过 codec 生成，count 与 payload 一致；编排层不合并、不重编码。
 - 所有权：成功后 `out` 中的 `ItemStack` 归调用方；源已移除，编排层不保留引用。
 - 实例型 A：`count` 表示取多少个不同实例；`match` 用于指定某一实例。不传 `match` 时按遍历序取首个/前几个。
 - 数量型 B：可按 `item_id + count` 跨堆拆分；返回的各堆 count 之和等于请求量。`match` 只用于实例型 A；数量型 B 不按 payload 匹配。
@@ -279,7 +308,7 @@ public:
 4. out_placements 返回实际落位（可选）
 ```
 
-- payload 原样写入；类型 A 每件占一个槽，类型 B 的合并由使用层先 `take` 两堆、合并 count 后再 `put_items`。
+- 编排层原样传递 `ItemStack`；源适配层用 codec 编码 payload。类型 A 每件占一个槽，类型 B 的合并由使用层先 `take` 两堆、合并 count 后再 `put_items`。
 - 不做自动堆叠。
 - 批量放入是“先预检、后写入”，不是事务；源写入阶段失败不回滚。
 - 目标 Placement 由 hook 适配层在需要精确槽位时提供；业务使用层通常传空目标。
@@ -406,7 +435,7 @@ public:
 ## 10. 风险
 
 1. **实例型 payload 的选择**：类型 A 同一 `item_id` 的不同堆 payload 不同。`take_item(item_id,count)` 默认按遍历序取；使用层若需要特定实例，必须先 `query_item` 拿到 payload，再传 `PayloadMatch`。类型 B 可按 `item_id + count` 跨堆拆分。
-2. **payload 内嵌 count 过期**：任何层都不得从 payload 读数量，必须用 `ItemStack.count`；交给游戏对象时由适配层/codec 把 count 写入 payload。编排层不负责修正 payload 内的数量字段。
+2. **codec 覆盖**：所有 item_id 的 count 编码必须由唯一 `ItemCodec` 覆盖；未知 payload 解码失败时不得写入。读档必须 `decode`、存档必须 `encode`，否则 count 与 payload 会漂移。
 3. **批量写入失败无回滚**：`take_item`/`put_items` 预检通过后，源阶段仍可能失败；已执行的部分不回收。使用层/hook 需在需要时自行补偿。
 4. **使用层取走物品后失败**：是否放回由使用层/hook 决定；编排层不自动回滚，可能丢件。使用层必须定义失败策略。
 5. **长期持有/双持有**：本设计禁止使用层跨帧持有实际物品；`take` 后不放回、不消费会让物品脱离袋源统计，重复放回会复制。跨帧需求必须改为 handle + detached buffer 或让物品留在袋中。
@@ -420,6 +449,7 @@ public:
 
 - 新增 `plugins/core.item/orchestration/bag_types.h`：`ItemStack`、`ItemInfo`、`BagInfo`、`BagRef`、`Placement`、`ItemHandle`。
 - 新增 `plugins/core.item/orchestration/bag_source.h`：`BagSource`（5 原语）与可选 `BagSourceIdentity`。
+- 新增 `plugins/core.item/item_codec/`：唯一的 count/payload 编解码模块；源适配层、读档、存档调用，编排层/使用层不调用。
 - 新增 `plugins/core.item/orchestration/bag_orchestrator.h/.cpp`：注册表、`query_item`、`take_item`、`can_put`、`put_items`、`find_slot`、`resolve_handle`。
 - 新增 `plugins/core.item/use_layer/`：使用/销毁/消耗的独立入口，输入为编排层返回的 `ItemStack`。
 - 新增 `plugins/core.item/native_source/native_bag_source.h/.cpp`：space 0/1 的原生适配器。
