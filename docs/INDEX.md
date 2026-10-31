@@ -71,6 +71,7 @@
 - `custom-ui/refactor-plan.md`：`core.custom_ui` 局部拆分方案（Debug 编译门、形状绘制抽离、确认框 overlay 可选拆分；不做 L0–L6 全量重构）。
 - `core-item/item-type-and-use-paths.md`：`item.facts` 4.0 权威物品类型、原生使用路径、`ITEMDATABASE_IsUse` 边界与 EB 迁移规则。
 - `core-item/item-lifecycle-capability.md`：物品生成/落位/释放能力方案（`inventory.action` v3.3 的 `create`/`place`/`discard_handle` 与端口层 detached 释放口）。
+- `core-item/hard-constraints.md`：core.item 硬约束（游戏原生 ABI/索引域、S2、裸指针生命周期、存档两段式调用、正确性不变量；不含空间袋号/pending/import-remove 等设计选择）。
 - `handoff-extension-bag-20261028.md`：扩展背包当前交接：礼盒 924、拾取 SaveItem/FindSaveSlot、扩展袋背包装备优先级的未完成问题与排查入口。
 - `core-character/architecture.md`：`core.character` 收敛方案（写面判定单点化、路由表 drift 防护、解析器合并、快照只读视图；不做 L0–L6 全量重构）。
 - `eight-way-move/design.md`：触屏方向摇杆八向/全向移动设计与原型记录（历史材料；当前对外契约为 `better_move`，动态候选点与移速能力见 `docs/reference/plugins/better_move-internals.md`）。
