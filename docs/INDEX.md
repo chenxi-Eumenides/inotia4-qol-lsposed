@@ -72,6 +72,8 @@
 - `core-item/item-type-and-use-paths.md`：`item.facts` 4.0 权威物品类型、原生使用路径、`ITEMDATABASE_IsUse` 边界与 EB 迁移规则。
 - `core-item/item-lifecycle-capability.md`：物品生成/落位/释放能力方案（`inventory.action` v3.3 的 `create`/`place`/`discard_handle` 与端口层 detached 释放口）。
 - `core-item/hard-constraints.md`：core.item 硬约束（游戏原生 ABI/索引域、S2、裸指针生命周期、存档两段式调用、正确性不变量；不含空间袋号/pending/import-remove 等设计选择）。
+- `core-item/three-plugin-architecture.md`：core.item 三插件架构（方案 A：inventory 被动存储、item 动作调用 inventory、extension_bag 负责 UI 投影/刷新/拖拽合并；含调用链、数据流、权责矩阵）。
+- `core-item/bag-system-design.md`：背包系统设计（原生袋/C18/多袋源统一指针槽表、分层职责与层间调用、函数级 hook 接入矩阵、预检后单次写、不流转 ItemData/payload、无回滚/无 pending）。
 - `handoff-extension-bag-20261028.md`：扩展背包当前交接：礼盒 924、拾取 SaveItem/FindSaveSlot、扩展袋背包装备优先级的未完成问题与排查入口。
 - `core-character/architecture.md`：`core.character` 收敛方案（写面判定单点化、路由表 drift 防护、解析器合并、快照只读视图；不做 L0–L6 全量重构）。
 - `eight-way-move/design.md`：触屏方向摇杆八向/全向移动设计与原型记录（历史材料；当前对外契约为 `better_move`，动态候选点与移速能力见 `docs/reference/plugins/better_move-internals.md`）。
