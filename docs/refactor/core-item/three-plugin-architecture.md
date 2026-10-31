@@ -13,28 +13,22 @@
 | `core.inventory` | 插件 | 被动库存/袋源层：槽表、地址、查询、取放、移动、保存、S2、存储 hooks、inventory HTTP |
 | `core.item` | 插件 | 物品领域层：item facts、物品动作、动作 hooks、shop、item HTTP |
 | `extension_bag` | 插件 | 扩展袋 UI/投影层：UI 投影、刷新、拖拽合并、扩展袋页签/展示 |
-| `core.item_data` | 共享静态模块/contracts | 纯物品事实：item_type、stackable、category 映射；不是第四个插件 |
 
-`core.item_data` 不持有袋数据、不调用插件；只有 `core.item` / `extension_bag` 使用。`core.inventory` 不使用 item_data：它通过 host 的 `QolItemPort` 读取原生 item 的 category/count，通过 host `QolItemCountApi` 做 S2 编解码。
+不再拆 `core.item_data`。item_type/stackable/category 映射/禁售/报价等物品事实全部留在 `core.item`；`core.inventory` 不依赖 item 或 item_data，只通过 host 的 `QolItemPort` 读取原生 item 的 category/count，通过 host `QolItemCountApi` 做 S2 编解码。
 
 ## 2. 依赖关系
 
 ```text
-core.item_data（共享）
-      ↑               ↑
-   core.item   →   core.inventory
+core.item   →   core.inventory
       ↑               ↑
       └── extension_bag ──┘
 ```
 
 - `core.item` → `core.inventory`：动作需要 query/take/place/move。
-- `core.item` → `core.item_data`：item facts/类型/定价基础。
 - `extension_bag` → `core.inventory`：槽表/查询/投影读取。
-- `extension_bag` → `core.item`：UI 触发的 use/equip/sell/动作。
-- `extension_bag` → `core.item_data`：UI 展示需要的类型事实。
-- `core.inventory` 不依赖 `core.item` 或 `core.item_data`；它只依赖 host 的 item/count 端口。
-- `core.item` 不依赖 `extension_bag`；刷新通过 inventory 的 `UiRefreshPort` 代理。
-- 刷新通过 inventory 的 `UiRefreshPort` 代理：extension_bag 注册实现，item 只调用 inventory 的刷新入口。这样 item 不需要 include/require extension_bag。
+- `extension_bag` → `core.item`：UI 触发 use/equip/sell/动作，以及读取 item facts。
+- `core.inventory` 不依赖 `core.item`；只依赖 host 的 item/count 端口。
+- `core.item` 不依赖 `extension_bag`；刷新通过 inventory 的 `UiRefreshPort` 代理：extension_bag 注册实现，item 只调用 inventory 的刷新入口。
 
 依赖规则：
 
@@ -46,25 +40,25 @@ core.item_data（共享）
 
 ## 3. 权责矩阵
 
-| 能力 | core.inventory | core.item | extension_bag | item_data |
-|---|---|---|---|---|
-| 槽表/袋源注册 | 拥有 | 不接触 | 只提供扩展表/persist_key | — |
-| 地址/身份 `SlotRef`/`ItemKey` | 拥有 | 使用 | 使用 | — |
-| 原生 item 指针/UID/句柄映射 | 拥有 | 使用 | 使用 | — |
-| 查询/计数/空槽 | 拥有 | 通过 BagAccess | 通过 inventory | — |
-| 移动/交换/消耗/移除/保存 | 拥有 | 请求 | 请求 | — |
-| S2/CountCodec | 拥有（host `QolItemCountApi`） | 通过 inventory | 通过 inventory | — |
-| item_type/category/stackable/禁售/报价 | 只读 host item 字段；不做业务判断 | 拥有/实现 | 读取 item_data | 纯事实 |
-| use/equip/unequip/sell/put_jewel/enchant | 执行存储部分 | 拥有动作规则 | UI 触发 | — |
-| create/place/discard_handle | 落位/清槽/释放 | 创建规格/detached 所有权 | — | — |
-| 动作 hooks | 不安装 | 拥有 | 不安装 | — |
-| 存储 hooks | 拥有 | 不安装 | 不安装 | — |
-| UI 投影/刷新/拖拽合并 | 提供读取/刷新代理 | 不拥有 | 拥有 | — |
-| shop/价格/购买 | 提供落位/扣除 | 拥有 | 不拥有 | 报价基础 |
-| inventory HTTP | 拥有 | — | — | — |
-| item/shop HTTP | — | 拥有 | — | — |
-| 存档 sidecar | 拥有 | 不接触 | 提供扩展表/persist_key | — |
-| `item.state`/库存 JSON | 拥有 | 可薄代理或废弃 | — | — |
+| 能力 | core.inventory | core.item | extension_bag |
+|---|---|---|---|
+| 槽表/袋源注册 | 拥有 | 不接触 | 只提供扩展表/persist_key |
+| 地址/身份 `SlotRef`/`ItemKey` | 拥有 | 使用 | 使用 |
+| 原生 item 指针/UID/句柄映射 | 拥有 | 使用 | 使用 |
+| 查询/计数/空槽 | 拥有 | 通过 BagAccess | 通过 inventory |
+| 移动/交换/消耗/移除/保存 | 拥有 | 请求 | 请求 |
+| S2/CountCodec | 拥有（host `QolItemCountApi`） | 通过 inventory | 通过 inventory |
+| item_type/stackable/禁售/报价 | 不判断；只读 host category/count | 拥有/实现 | 读取 core.item |
+| use/equip/unequip/sell/put_jewel/enchant | 执行存储部分 | 拥有动作规则 | UI 触发 |
+| create/place/discard_handle | 落位/清槽/释放 | 创建规格/detached 所有权 | — |
+| 动作 hooks | 不安装 | 拥有 | 不安装 |
+| 存储 hooks | 拥有 | 不安装 | 不安装 |
+| UI 投影/刷新/拖拽合并 | 提供读取/刷新代理 | 不拥有 | 拥有 |
+| shop/价格/购买 | 提供落位/扣除 | 拥有 | 不拥有 |
+| inventory HTTP | 拥有 | — | — |
+| item/shop HTTP | — | 拥有 | — |
+| 存档 sidecar | 拥有 | 不接触 | 提供扩展表/persist_key |
+| `item.state`/库存 JSON | 拥有 | 可薄代理或废弃 | — |
 
 ## 4. Hook 归属（28 个 inventory hook + 扩展 hooks）
 
@@ -131,7 +125,7 @@ game
   → 返回原 ABI 结果
 ```
 
-- inventory 不判断 item_type/stackable；这些属于 item_data/item。
+- inventory 不判断 item_type/stackable；这些属于 core.item。
 - 查询只需原生 item 的 category/count；S2 只需 host count API。
 
 ### 5.2 原生库存写/移动/保存（无 item 参与）
@@ -180,7 +174,7 @@ game UI
   → extension_bag display hook (ControlItem_SetItem/GetItem、INVEN_GetBagSize、RefreshItemArea)
     → ProjectionContext
       → core.inventory query/slot table（读取外部表）
-      → item_data（类型/图标/详情基础）
+      → core.item item facts（类型/图标/详情基础）
   → 返回控件 item / 容量
 ```
 
@@ -263,7 +257,7 @@ shop:
 
 | 能力 | owner |
 |---|---|
-| `item.facts` / `item.data` | core.item / shared item_data |
+| `item.facts` | core.item |
 | `inventory.store` / `inventory.query` | core.inventory |
 | `inventory.bag_source` | core.inventory |
 | `inventory.slot` | core.inventory |
@@ -296,7 +290,7 @@ shop:
 
 1. **指针槽表例外**：`bag-system-design.md` §0 的长期指针例外仍待阶段 0 批准；失败则 inventory 内部降级为 UID/payload + 瞬态物化，三插件边界不变。
 2. **Hook 归属**：28 条 claim 已按 12/14/2 分配；一个 wrapper 不能跨插件，跨侧调用走 interface。
-3. **item facts 依赖**：inventory 不依赖 item_data/core.item；它只读 host item 字段和 count API。只有未来做“外部表自动堆叠合并”时才需要额外的 StackRules 端口，不能把 item_type/stackable 塞回 inventory。
+3. **item facts 依赖**：inventory 不依赖 core.item；它只读 host item 字段和 count API。只有未来做“外部表自动堆叠合并”时才需要额外的 StackRules 端口，不能把 item_type/stackable 塞回 inventory。
 4. **刷新代理**：item 不直接调用 extension_bag；`UiRefreshPort` 由 inventory 代理，extension_bag 注册实现。
 5. **扩展表/存档**：extension_bag 提供表/persist_key，inventory 写 sidecar；不要把 sidecar 写回 item 或 UI。
 6. **HTTP ticket**：inventory/item 各自 ticket；不要共享旧 `ItemWritePayload`。
@@ -305,12 +299,11 @@ shop:
 
 ## 10. 落地顺序
 
-1. **共享 item_data**：item_type/stackable/category 等纯事实 + 单测；count 编码不在这里，归 host count API/inventory。
-2. **inventory 存储核心**：BagTableRegistry/Native/External/Reader/Executor/NativeActionPort；fake 表测试。
-3. **inventory hooks/HTTP/存档**：12 条存储 hook、查询/移动 HTTP、SaveCoordinator、S2。
-4. **item 动作**：ItemAction + BagAccess；14 条动作 hook；shop/item HTTP；删除旧 `inventory.action`。
-5. **extension_bag UI**：投影/刷新/拖拽合并/页签；通过 inventory 查询和 item 动作；注册 UiRefreshPort。
-6. **集成验收**：check_arch/check_http_routes、host tests、构建、真机逐项验收。
+1. **inventory 存储核心**：BagTableRegistry/Native/External/Reader/Executor/NativeActionPort；fake 表测试。
+2. **inventory hooks/HTTP/存档**：12 条存储 hook、查询/移动 HTTP、SaveCoordinator、S2。
+3. **item 动作**：ItemAction + BagAccess；14 条动作 hook；shop/item HTTP；item facts 留在 core.item；删除旧 `inventory.action`。
+4. **extension_bag UI**：投影/刷新/拖拽合并/页签；通过 inventory 查询和 item 动作；注册 UiRefreshPort。
+5. **集成验收**：check_arch/check_http_routes、host tests、构建、真机逐项验收。
 
 ## 11. 非目标
 
@@ -318,9 +311,9 @@ shop:
 - 不做运行期事务/回滚/pending/journal。
 - 不把 UI 投影/刷新/拖拽合并放回 item/inventory。
 - 不让 inventory 反向调用 item 动作。
-- 不把 item facts 复制到 inventory；inventory 只读 host item 字段，item facts 留在 item_data/item。
+- 不把 item facts 复制到 inventory；inventory 只读 host item 字段，item facts 留在 core.item。
 - 不把原生 item 指针写进 HTTP/快照/跨帧身份。
 
 ## 12. 一句话
 
-**inventory 管“物品在哪、怎么存取”，只依赖 host item/count 端口；item 管“物品是什么、动作怎么做”；extension_bag 管“怎么显示、怎么刷新、怎么拖拽”。item 调 inventory，inventory 不调 item 动作，也不依赖 item_data；刷新经 inventory 代理，存档/槽表/原生 ABI 全在 inventory。**
+**inventory 管“物品在哪、怎么存取”，只依赖 host item/count 端口；item 管“物品是什么、动作怎么做”，item facts 留在 core.item；extension_bag 管“怎么显示、怎么刷新、怎么拖拽”。item 调 inventory，inventory 不调 item 动作、不依赖 core.item；刷新经 inventory 代理，存档/槽表/原生 ABI 全在 inventory。**
