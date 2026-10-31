@@ -769,9 +769,9 @@ void extension_desc_item_execute_at(size_t index, void* button) {
         return;
     }
 
-    // 骰子专用按钮 UIEquip_ButtonRollDiceExe：原版从当前详情控件取物品并走
-    // STATUSDICE_Roll；扩展物品必须经 inventory.action.use，由 EB 物化对象并
-    // 在 game/ops 的骰子分支打开掷骰面板。
+    // 骰子专用按钮 UIEquip_ButtonRollDiceExe：原版自己完成 SAVE_IsOK、类别分派、
+    // STATUSDICE_Roll 与掷骰面板创建；扩展物品的投影对象可直接交给原版，
+    // 消耗经 INVEN_ConsumeItem/QolBagSource::remove 回到 sidecar。
     if (extension_desc_original_matches(id, "desc.button.roll_dice")) {
         bool current_item = false;
         {
@@ -786,28 +786,7 @@ void extension_desc_item_execute_at(size_t index, void* button) {
                          item_bag, item_slot);
             return;
         }
-        bool used = false;
-        const auto* action = ::qol::features::extension_bag::inventory_action_api();
-        if (action != nullptr) {
-            const auto outcome = action->use(
-                {qol::features::extension_bag::kExtensionBagSpaceId, item_bag, item_slot});
-            used = outcome.status == qol::contracts::InventoryActionStatus::kOk;
-            if (!used) {
-                QOL_LOG_WARN(QolDomain::kExtensionBag,
-                             "extension dice action rejected bag=%d slot=%d status=%d",
-                             item_bag, item_slot, static_cast<int>(outcome.status));
-            }
-        }
-        {
-            ::qol::extension_bag::ReentryLock lock;
-            if (used) refresh_module_item_area_locked(item_bag);
-            reset_extension_desc_item_hooks_locked();
-            qol::extension_bag::ui_state().ui.extension_desc_item = nullptr;
-            qol::extension_bag::ui_state().ui.extension_desc_item_bag = -1;
-            qol::extension_bag::ui_state().ui.extension_desc_item_slot = -1;
-        }
-        VIRTBAG_LOG("extension dice execute bag=%d slot=%d used=%d", item_bag, item_slot,
-                    used ? 1 : 0);
+        (void)extension_desc_call_original(id, button);
         return;
     }
 

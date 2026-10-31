@@ -276,8 +276,6 @@ bool bridge_init() {
     fn_set_stat_main = reinterpret_cast<SetStatMainFn>(g_base + fn_resolve("F_SET_STAT_MAIN_VMA", F_SET_STAT_MAIN_VMA));
     fn_set_stat_base = reinterpret_cast<SetStatBaseFn>(g_base + fn_resolve("F_SET_STAT_BASE_VMA", F_SET_STAT_BASE_VMA));
     fn_status_dice_roll = reinterpret_cast<RollStatusDiceFn>(g_base + fn_resolve("F_STATUSDICE_ROLL_VMA", F_STATUSDICE_ROLL_VMA));
-    fn_ui_roll_dice_create = reinterpret_cast<UiRollDiceCreateFn>(
-        g_base + fn_resolve("F_UI_ROLL_DICE_CREATE_VMA", F_UI_ROLL_DICE_CREATE_VMA));
     fn_put_jewel = reinterpret_cast<PutJewelFn>(g_base + fn_resolve("F_PUT_JEWEL_VMA", F_PUT_JEWEL_VMA));
     fn_is_jewel = reinterpret_cast<IsJewelFn>(g_base + fn_resolve("F_IS_JEWEL_VMA", F_IS_JEWEL_VMA));
     fn_enchant_item = reinterpret_cast<EnchantItemFn>(g_base + fn_resolve("F_ENCHANT_ITEM_VMA", F_ENCHANT_ITEM_VMA));

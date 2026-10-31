@@ -1139,7 +1139,6 @@ using GetStatMainFn = int (*)(void*, int32_t);
 using SetStatMainFn = void (*)(void*, int32_t, int32_t);
 using SetStatBaseFn = void (*)(void*, int32_t, int32_t);
 using RollStatusDiceFn = int (*)(int32_t, int32_t);
-using UiRollDiceCreateFn = void (*)();
 using GetCumulateCountFn = int (*)(void*);
 using PutJewelFn = int (*)(void*, void*);
 using IsJewelFn = int (*)(int32_t);

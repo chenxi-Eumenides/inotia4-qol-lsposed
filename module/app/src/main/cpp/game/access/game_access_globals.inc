@@ -48,7 +48,6 @@ GetStatMainFn fn_get_stat_main = nullptr;
 SetStatMainFn fn_set_stat_main = nullptr;
 SetStatBaseFn fn_set_stat_base = nullptr;
 RollStatusDiceFn fn_status_dice_roll = nullptr;
-UiRollDiceCreateFn fn_ui_roll_dice_create = nullptr;
 PutJewelFn fn_put_jewel = nullptr;
 IsJewelFn fn_is_jewel = nullptr;
 EnchantItemFn fn_enchant_item = nullptr;

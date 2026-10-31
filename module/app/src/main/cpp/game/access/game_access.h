@@ -77,7 +77,6 @@ extern GetStatMainFn fn_get_stat_main;
 extern SetStatMainFn fn_set_stat_main;
 extern SetStatBaseFn fn_set_stat_base;
 extern RollStatusDiceFn fn_status_dice_roll;
-extern UiRollDiceCreateFn fn_ui_roll_dice_create;
 extern PutJewelFn fn_put_jewel;
 extern IsJewelFn fn_is_jewel;
 extern EnchantItemFn fn_enchant_item;
