@@ -45,7 +45,7 @@ void apply_native_bag_limit() {
 }
 
 // Inventory claims + merge ptrslot；静态存储保证 descriptor 生命周期。
-constexpr uint32_t kInventoryResourceCount = 27;
+constexpr uint32_t kInventoryResourceCount = 16;
 constexpr uint32_t kMergeResourceCount = 1;
 constexpr uint32_t kMaxResources = 32;
 static_assert(kInventoryResourceCount + kMergeResourceCount <= kMaxResources,

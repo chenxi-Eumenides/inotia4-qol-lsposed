@@ -43,7 +43,7 @@ void test_descriptor() {
     assert(descriptor.feature_count == 1);
     assert(descriptor.port_count == 1);
     assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
-    assert(descriptor.resources_count == 5);
+    assert(descriptor.resources_count == 12);
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         assert(std::strcmp(descriptor.resources[i].owner, "core.inventory") == 0);
     }

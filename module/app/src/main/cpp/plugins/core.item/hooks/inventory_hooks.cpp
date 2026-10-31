@@ -10,6 +10,7 @@
 #include "contracts/plugin.h"
 #include "contracts/bag.h"
 #include "contracts/host_sdk.h"
+#include "contracts/inventory_scope.h"
 #include "contracts/ui.h"
 
 #include <algorithm>
@@ -850,10 +851,12 @@ int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
         backup_missing("hook:CHAR_UnequipItemToInven");
         return 0;
     }
+    const qol::contracts::InventoryUnequipScope unequip_scope;
     const int result = stage4_unequip_item_to_inven(character, equip_slot,
                                                     g_backup_unequip_item_to_inven,
                                                     extension_unequip_to_registered_source,
                                                     g_in_unequip_item_to_inven);
+    (void)unequip_scope;
     QOL_LOG_DEBUG_EVERY(QolDomain::kInventory, 60,
                         "UnequipItemToInven every_calls=60 equip_slot=%d result=%d recursive=%d",
                         equip_slot, result, g_in_unequip_item_to_inven ? 1 : 0);
@@ -2504,8 +2507,6 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
      qol::contracts::ResourceFailure::kFailSoft, true, kClaimOwner,
      "shortcut-use diagnosis: log dispatch only during CHAR_ProcessShortcut",
      nullptr, 120, reinterpret_cast<void*>(&char_use_item_ex_wrapper)},
-    INVENTORY_HOOK_CLAIM("hook:INVEN_ConsumeItem", "F_CONSUME_ITEM_VMA", consume_item_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:INVEN_RemoveItem", "F_REMOVE_ITEM_VMA", remove_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:CHAR_EquipItemFromInvenToSlot",
                          "F_EQUIP_ITEM_FROM_INVEN_TO_SLOT_VMA",
                          equip_item_from_inven_to_slot_wrapper),
@@ -2525,22 +2526,14 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
     INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonUseMercenarySealExe",
                          "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA",
                          button_use_mercenary_seal_exe_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:INVEN_SaveItem", "F_INVEN_SAVE_ITEM_VMA", save_item_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:INVEN_FindSaveSlot", "F_INVEN_FIND_SAVE_SLOT_VMA",
-                         find_save_slot_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:INVEN_MoveItem", "F_INVEN_MOVE_ITEM_VMA", move_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:UIEquip_EquipControlEventProc",
                          "F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA",
                          equip_control_event_proc_wrapper),
     INVENTORY_HOOK_CLAIM("hook:UIEquip_RefreshItemArea", "F_UIEQUIP_REFRESH_ITEM_AREA_VMA",
                          refresh_item_area_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:INVEN_SaveItemDirect", "F_INVEN_SAVE_ITEM_DIRECT_VMA",
-                         save_item_direct_wrapper),
     INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_Divide", "F_ITEMSYSTEM_DIVIDE_VMA",
                          item_system_divide_wrapper),
     INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_MakeItem", "F_MAKE_ITEM_VMA", make_item_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:INVEN_RemoveItemData", "F_INVEN_REMOVE_ITEM_DATA_VMA",
-                         remove_item_data_wrapper),
 };
 #undef INVENTORY_HOOK_CLAIM
 

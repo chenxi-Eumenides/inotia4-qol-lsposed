@@ -7,6 +7,7 @@
 #include "api/access.h"
 #include "api/bag_source.h"
 #include "hooks/storage_hooks.h"
+#include "runtime/context.h"
 
 #include "contracts/game_ports/item_port.h"
 
@@ -18,8 +19,30 @@ constexpr const char* kPluginVersion = "0.1.0";
 constexpr int32_t kLogDomain = 5;  // QolDomain::kInventory
 
 const contracts::QolHostSdk* g_sdk = nullptr;
+const contracts::QolItemPort* g_port = nullptr;
 bool g_installed = false;
 bool g_enabled = false;
+
+// 物理扫描上界 = 原版袋数 + C18 探测到的追加袋数，最终夹到 item port 布局容量。
+void apply_native_bag_limit() {
+    if (g_port == nullptr || g_port->read.bag_count == nullptr ||
+        !contracts::qol_item_port_bag_space_size_valid(g_port)) {
+        return;
+    }
+    int32_t limit = contracts::kQolOriginalBagCount;
+    int32_t original = 0;
+    if (contracts::succeeded(
+            g_port->read.bag_count(contracts::kQolBagSpaceOriginal, &original)) &&
+        original > 0) {
+        limit = original;
+    }
+    int32_t c18 = 0;
+    if (contracts::succeeded(g_port->read.bag_count(contracts::kQolBagSpaceVariant, &c18)) &&
+        c18 > 0) {
+        limit += c18;
+    }
+    bags::set_native_bag_limit(limit);
+}
 
 void log_line(int32_t level, const char* format, ...) {
     if (g_sdk == nullptr || g_sdk->log.write == nullptr || format == nullptr) return;
@@ -47,17 +70,20 @@ int plugin_install(contracts::PluginContext& context) {
         return 1;
     }
     g_sdk = context.sdk;
+    g_port = port;
     g_installed = true;
     inventory_store().clear();
     reset_bag_sources();
     if (!hooks::attach(context.sdk, context.game, port)) {
         g_sdk = nullptr;
+        g_port = nullptr;
         g_installed = false;
         return 1;
     }
+    apply_native_bag_limit();
     log_line(1,
              "plugin=%s: installed version=%s mode=storage "
-             "provides=inventory.access,inventory.bag_source resources=5",
+             "provides=inventory.access,inventory.bag_source resources=12",
              kPluginId, kPluginVersion);
     return 0;
 }
@@ -68,6 +94,7 @@ void plugin_deactivate(contracts::PluginContext&) {
     inventory_store().clear();
     reset_bag_sources();
     g_sdk = nullptr;
+    g_port = nullptr;
     g_installed = false;
     g_enabled = false;
 }
@@ -75,6 +102,7 @@ void plugin_deactivate(contracts::PluginContext&) {
 void plugin_on_enabled(contracts::PluginContext&) {
     g_enabled = true;
     hooks::set_support(true);
+    apply_native_bag_limit();
     log_line(1, "plugin=%s: enabled", kPluginId);
 }
 

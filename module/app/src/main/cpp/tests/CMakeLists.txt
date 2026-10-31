@@ -2361,7 +2361,9 @@ add_executable(core_inventory_store_tests
     ${CPP_DIR}/plugins/core.inventory/api/access.cpp
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/stage4.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
+    ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
     ${CPP_DIR}/plugins/core.inventory/store/slot_table.cpp
     ${CPP_DIR}/plugins/core.inventory/store/inventory_store.cpp
 )
