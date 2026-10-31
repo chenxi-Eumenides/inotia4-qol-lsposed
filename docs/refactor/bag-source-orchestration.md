@@ -67,6 +67,22 @@ struct ItemHandle {
 };
 ```
 
+### 2.1.1 payload 两类
+
+- **实例型（A）**：同一 `item_id`，payload 不同，每堆是不同实例；不可堆叠，`count` 恒为 1。典型：装备、宝石。
+- **数量型（B）**：同一 `item_id`，payload 只随 `count` 变化；可堆叠时 `count > 1`，不可堆叠时 `count = 1` 且 payload 完全一致。典型：药水、材料。
+
+编排层不判断堆叠/实例类型，只把 payload 当不透明字节；是否可堆叠由使用层/物品事实层按 `item_id` 判断。
+
+```cpp
+struct PayloadMatch {
+    uint32_t payload_size;
+    uint8_t payload[256] = {};
+};
+```
+
+`take_item` 默认按 `item_id + count` 取；需要精确到实例型 A 的某一堆时，传入 `PayloadMatch`。
+
 ### 2.2 源接口
 
 源只有 5 个存储原语：
@@ -138,20 +154,22 @@ public:
     // 查询面：使用层向编排层查询，编排层再向所有袋源查询。
     std::optional<ItemInfo> query_item(int32_t item_id) const;
     bool has_empty_slot() const;
-    bool can_put(std::span<const ItemStack> items) const;
+    bool can_put(const std::vector<ItemPlacement>& items) const;
 
     // 取物：按 item_id + count 跨源聚合；总量不足则整单拒绝，不写。
     // 成功时 out 返回实际取出的堆（可能来自多个源）。
     Status take_item(int32_t item_id, int32_t count,
-                     std::vector<ItemStack>* out);
+                     std::vector<ItemStack>* out,
+                     const PayloadMatch* match = nullptr);
 
     // 放物：每个 ItemStack 可带目标 Placement；空目标 = 首个空位。
     // 先预检全部目标/空位，任一不足则整单拒绝，不写。
-    Status put_items(std::span<const ItemPlacement> items,
+    Status put_items(const std::vector<ItemPlacement>& items,
                      std::vector<Placement>* out_placements = nullptr);
 
     // hook 适配层专用，不属于业务使用层。
     std::optional<ItemStack> resolve_handle(ItemHandle handle) const;
+    // 首个可放置的空槽；不返回可合并的已有堆。
     std::optional<Placement> find_slot(const ItemStack& item) const;
 };
 
@@ -177,6 +195,7 @@ public:
 
 - 扫描所有已注册源；空槽/容量 0 跳过。
 - 返回 `total_count` 和每个实际堆的 `ItemStack`；不返回 `BagRef`。
+- 实例型 A 的每个堆 payload 不同；数量型 B 的 payload 只随 count 变化。
 - 找不到返回 `nullopt`；找到但总量为 0 也视为不存在。
 
 **`has_empty_slot()`**
@@ -188,25 +207,29 @@ public:
 
 - 逐个检查：有 target 时目标必须为空且有效；无 target 时统计可用空位。
 - 只检查空位，不做自动堆叠；需要合并时由使用层先 `take` 两堆、合并后再 `put_items`。
+- 不检查堆叠上限；合并前由使用层按 item facts 判断。
 - 返回 false 时不做任何写入。
 
 ### 4.2 取物
 
-**`take_item(item_id, count)`**
+**`take_item(item_id, count, match)`**
 
 ```text
 1. count <= 0 → kInvalid
 2. query_item(item_id) 不存在 → kNotFound
-3. total_count < count → kNotEnough（不写）
-4. 按“源注册序 → bag → slot”逐堆取：
+3. match 非空时只保留 payload 精确匹配的堆；无匹配 → kNotFound
+4. 匹配堆 total_count < count → kNotEnough（不写）
+5. 按“源注册序 → bag → slot”逐堆取：
    - 每堆取 min(剩余, 堆 count)
    - 源 remove 失败 → kSourceRejected（已取出的不回收）
-5. out 返回取出的 ItemStack 列表
+6. out 返回取出的 ItemStack 列表
 ```
 
 - 一个请求可以跨多个源、多个堆完成。
 - 使用层只看到 item_id/count/payload，不知道来源。
 - 部分堆的 payload 原样返回；不合并、不重编码。
+- 实例型 A：`count` 表示取多少个不同实例；`match` 用于指定某一实例。不传 `match` 时按遍历序取首个/前几个。
+- 数量型 B：可按 `item_id + count` 跨堆拆分；返回的各堆 count 之和等于请求量。`match` 只用于实例型 A；数量型 B 不按 payload 匹配。
 
 ### 4.3 放物
 
@@ -224,7 +247,8 @@ public:
 4. out_placements 返回实际落位（可选）
 ```
 
-- 不做自动堆叠；合并由使用层先 `take` + `put` 组合。
+- payload 原样写入；类型 A 每件占一个槽，类型 B 的合并由使用层先 `take` 两堆、合并 count 后再 `put_items`。
+- 不做自动堆叠。
 - 批量放入是“先预检、后写入”，不是事务；源写入阶段失败不回滚。
 - 目标 Placement 由 hook 适配层在需要精确槽位时提供；业务使用层通常传空目标。
 
@@ -234,7 +258,7 @@ public:
 
 - move：`take_item(item_id, count)` → `put_items({target})`
 - swap：`take_item(a)`、`take_item(b)` → `put_items({b→a, a→b})`
-- merge：`take_item(source)`、`take_item(target)` → `put_items({合并后的堆→target})`
+- merge：仅数量型 B；`take_item(source)`、`take_item(target)` → `put_items({合并后的堆→target})`。类型 A 不合并。
 - save：`can_put`/`find_slot` → `put_items({target})`
 - equip：`take_item` 取新/旧装备 → `put_items` 回填 → 装备动作
 
@@ -276,19 +300,19 @@ public:
 | 7 | get_cumulate_count | — | 原生 count ABI 解码 |
 | 8 | consume_item | t(id,1) | 使用层；原生 backup + S2 借位/回写 |
 | 9 | remove_item | t(id,count) | 使用层/丢弃；原生 backup；身份重入守卫 |
-| 10 | equip_item_from_inven_to_slot | t + p + r | 装备动作、flat 解码、原生补偿 |
+| 10 | equip_item_from_inven_to_slot | q + t + p + r | 装备动作、flat 解码、原生补偿 |
 | 11 | put_jewel | — | 使用层/原生；材料消耗经 #8 回流 |
 | 12 | is_having_empty_slot | e | 原生袋空槽走 port 读 |
 | 13 | unequip_item_to_inven | p + f | 原生装备读取、存档域门控、失败补偿 |
 | 14 | button_equip_exe | 间接 #10/#17 | projection、detail_item_context、UI 门禁 |
 | 15 | button_unequip_exe | 间接 #13 | projection、UI 门禁 |
-| 16 | button_destroy_exe | t(id,count) | 使用层销毁；选中项解析、物理槽复核 |
+| 16 | button_destroy_exe | q + t | 使用层销毁；选中项解析、物理槽复核 |
 | 17 | ok_confirm_use_item | t(id,1) | 使用层；原生 backup |
-| 18 | ok_destroy_item | t(id,count) | 使用层销毁；UI 门禁、物理槽复核、退款 |
+| 18 | ok_destroy_item | q + t | 使用层销毁；UI 门禁、物理槽复核、退款 |
 | 19 | button_use_mercenary_seal_exe | t(id,1) | 使用层；projection、选中项解析 |
 | 20 | save_item | — | backup、pending 清理、free_item |
 | 21 | find_save_slot | c + f | 存档域门控、pending 记录、flat 编码 |
-| 22 | move_item | t + p | 原生 S2 进位；注册源不再一律拒绝 |
+| 22 | move_item | q + t + p | 原生 S2 进位；注册源不再一律拒绝 |
 | 23 | equip_control_event_proc | — | 纯透传/重入守卫 |
 | 24 | refresh_item_area | — | UI 深度守卫 |
 | 25 | save_item_direct | p（带 target） | pending 通道、flat 解码、原生 S2 合并 |
@@ -317,7 +341,7 @@ public:
 
 ## 10. 风险
 
-1. **payload 是否可互换**：同一 `item_id` 的不同堆可能有不同 payload（装备属性、耐久等）。`take_item(item_id,count)` 按固定顺序取，可能取到不同 payload。若使用层需要特定 payload，必须先在查询结果中选择，或增加 payload 条件；否则只能约定同 item_id 可互换。
+1. **实例型 payload 的选择**：类型 A 同一 `item_id` 的不同堆 payload 不同。`take_item(item_id,count)` 默认按遍历序取；使用层若需要特定实例，必须先 `query_item` 拿到 payload，再传 `PayloadMatch`。类型 B 可按 `item_id + count` 跨堆拆分。
 2. **批量写入失败无回滚**：`take_item`/`put_items` 预检通过后，源阶段仍可能失败；已执行的部分不回收。使用层/hook 需在需要时自行补偿。
 3. **使用层取走物品后失败**：是否放回由使用层/hook 决定；编排层不自动回滚，可能丢件。使用层必须定义失败策略。
 4. **hook 需要精确槽位**：`find_slot`/`Placement` 只给 hook 适配层；业务使用层不要读取。若把 `BagRef` 泄漏到使用层，分层会被破坏。
