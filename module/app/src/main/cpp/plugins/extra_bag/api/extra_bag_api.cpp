@@ -10,7 +10,6 @@ namespace {
 
 using model::Bag;
 using model::ItemBackpack;
-using model::ItemBackpackType;
 using model::RuntimeItem;
 using model::store;
 
@@ -30,20 +29,6 @@ RuntimeItem to_runtime(const contracts::QolExtraBagItem& item) {
     out.payload_size = item.payload_size;
     std::memcpy(out.payload, item.payload, sizeof(out.payload));
     return out;
-}
-
-ItemBackpackType type_from_int(int32_t type) {
-    switch (type) {
-        case contracts::kExtraBagBackpackTypeSmall: return ItemBackpackType::kSmall;
-        case contracts::kExtraBagBackpackTypeMedium: return ItemBackpackType::kMedium;
-        case contracts::kExtraBagBackpackTypeLarge: return ItemBackpackType::kLarge;
-        case contracts::kExtraBagBackpackTypeHuge: return ItemBackpackType::kHuge;
-        default: return ItemBackpackType::kNone;
-    }
-}
-
-int32_t type_to_int(ItemBackpackType type) {
-    return static_cast<int32_t>(type);
 }
 
 int32_t api_bag_count() {
@@ -86,28 +71,23 @@ bool api_take(int32_t bag_index, int32_t slot_index,
     return true;
 }
 
-bool api_item_backpack_at(int32_t bag_index, contracts::QolExtraBagBackpack* out) {
+bool api_item_backpack_at(int32_t bag_index, contracts::QolExtraBagItem* out) {
     if (out == nullptr) return false;
     *out = {};
     const Bag* bag = store().bag(static_cast<uint32_t>(bag_index));
     if (bag == nullptr) return false;
     const ItemBackpack* equipped = bag->item_backpack();
     if (equipped == nullptr) return false;
-    out->item = to_transfer(equipped->item);
-    out->type = type_to_int(equipped->type);
+    *out = to_transfer(equipped->item);
     return true;
 }
 
-void api_set_item_backpack(int32_t bag_index,
-                           const contracts::QolExtraBagItem* item, int32_t type) {
+bool api_set_item_backpack(int32_t bag_index,
+                           const contracts::QolExtraBagItem* item) {
+    if (item == nullptr) return false;
     Bag* bag = store().bag(static_cast<uint32_t>(bag_index));
-    if (bag == nullptr) return;
-    const ItemBackpackType backpack_type = type_from_int(type);
-    if (item == nullptr || backpack_type == ItemBackpackType::kNone) {
-        bag->unequip_item_backpack();
-        return;
-    }
-    bag->equip_item_backpack(ItemBackpack{to_runtime(*item), backpack_type});
+    if (bag == nullptr) return false;
+    return bag->equip_item_backpack(ItemBackpack{to_runtime(*item)});
 }
 
 void api_clear_item_backpack(int32_t bag_index) {

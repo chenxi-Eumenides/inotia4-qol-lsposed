@@ -3,7 +3,7 @@
 namespace qol::features::extra_bag::model {
 
 uint32_t Bag::capacity() const {
-    return item_backpack_ ? capacity_for_item_backpack_type(item_backpack_->type) : 0;
+    return item_backpack_ ? capacity_for_backpack_category(item_backpack_->item.category) : 0;
 }
 
 bool Bag::has_item_backpack() const {
@@ -14,8 +14,11 @@ const ItemBackpack* Bag::item_backpack() const {
     return item_backpack_ ? &*item_backpack_ : nullptr;
 }
 
-void Bag::equip_item_backpack(ItemBackpack backpack) {
+bool Bag::equip_item_backpack(ItemBackpack backpack) {
+    if (item_backpack_.has_value()) return false;
+    if (!is_allowed_backpack_category(backpack.item.category)) return false;
     item_backpack_ = backpack;
+    return true;
 }
 
 void Bag::unequip_item_backpack() {
