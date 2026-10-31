@@ -1,3 +1,5 @@
+#include "contracts/inventory_stage4.h"
+#include "contracts/s2_writeback.h"
 #include "plugins/core.item/usecases/consume_item.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/extension_bag/model/equip_rules.h"
@@ -6,6 +8,8 @@
 
 #include <cstdint>
 #include <cstdio>
+
+namespace inventory_stage = qol::contracts::inventory_stage;
 
 static int g_pass = 0;
 static int g_fail = 0;
@@ -17,15 +21,15 @@ static int g_fail = 0;
 
 static void test_s2_writeback_applied_gate() {
     // Off 与 NotReady 都映射为 applied=false，故关闭态只由原版写 b，模块不回写 a+b。
-    CHECK(!s2_writeback::allowed(false, true));
-    CHECK(!s2_writeback::allowed(true, false));
-    CHECK(s2_writeback::allowed(true, true));
+    CHECK(!qol::contracts::s2_writeback::allowed(false, true));
+    CHECK(!qol::contracts::s2_writeback::allowed(true, false));
+    CHECK(qol::contracts::s2_writeback::allowed(true, true));
     // 128 倍数合并：b 段不变，只有源槽消失能证明原版完成合并。
-    CHECK(s2_writeback::source_removed_confirms_merge(640, true, false));
-    CHECK(!s2_writeback::source_removed_confirms_merge(640, true, true));
-    CHECK(!s2_writeback::source_removed_confirms_merge(641, true, false));
-    CHECK(!s2_writeback::source_removed_confirms_merge(640, false, false));
-    CHECK(!s2_writeback::source_removed_confirms_merge(0, true, false));
+    CHECK(qol::contracts::s2_writeback::source_removed_confirms_merge(640, true, false));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(640, true, true));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(641, true, false));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(640, false, false));
+    CHECK(!qol::contracts::s2_writeback::source_removed_confirms_merge(0, true, false));
 }
 
 static int g_original_value = 0;
@@ -39,7 +43,7 @@ static int extension_count(int32_t) { ++g_extension_calls; return g_extension_va
 static int recursive_original(int32_t category) {
     ++g_original_calls;
     if (g_original_calls == 1 && g_recursive_guard != nullptr) {
-        return stage4_have_item(category, recursive_original, extension_count, *g_recursive_guard);
+        return inventory_stage::have_item(category, recursive_original, extension_count, *g_recursive_guard);
     }
     return 0;
 }
@@ -48,12 +52,12 @@ static void test_original_only_queries() {    bool guard = false;
     g_original_value = 0;
     g_original_calls = 0;
     g_extension_calls = 0;
-    CHECK(stage4_have_item_original_only(1, original_count, guard) == 0);
+    CHECK(inventory_stage::have_item_original_only(1, original_count, guard) == 0);
     CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
 
     g_original_value = 4;
     g_original_calls = 0;
-    CHECK(stage4_get_item_count_original_only(1, original_count, guard) == 4);
+    CHECK(inventory_stage::get_item_count_original_only(1, original_count, guard) == 4);
     CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
 }
 
@@ -124,19 +128,19 @@ static int fake_uninstall(void*) { ++g_uninstall_calls; return 0; }
 static void test_queries() {
     bool guard = false;
     g_original_value = 1; g_extension_value = 5; g_original_calls = 0; g_extension_calls = 0;
-    CHECK(stage4_have_item(1, original_count, extension_count, guard) == 1);
+    CHECK(inventory_stage::have_item(1, original_count, extension_count, guard) == 1);
     CHECK(g_original_calls == 1 && g_extension_calls == 0 && !guard);
 
     g_original_value = 0; g_extension_value = 5; g_original_calls = 0; g_extension_calls = 0;
-    CHECK(stage4_have_item(1, original_count, extension_count, guard) == 1);
+    CHECK(inventory_stage::have_item(1, original_count, extension_count, guard) == 1);
     CHECK(g_original_calls == 1 && g_extension_calls == 1 && !guard);
 
     g_original_value = 4; g_extension_value = 6; g_original_calls = 0; g_extension_calls = 0;
-    CHECK(stage4_get_item_count(1, original_count, extension_count, guard) == 10);
+    CHECK(inventory_stage::get_item_count(1, original_count, extension_count, guard) == 10);
     CHECK(g_original_calls == 1 && g_extension_calls == 1 && !guard);
 
     g_original_calls = 0; g_extension_calls = 0; g_recursive_guard = &guard;
-    CHECK(stage4_have_item(1, recursive_original, extension_count, guard) == 1);
+    CHECK(inventory_stage::have_item(1, recursive_original, extension_count, guard) == 1);
     CHECK(g_original_calls == 2 && g_extension_calls == 1 && !guard);
     g_recursive_guard = nullptr;
 }
@@ -145,24 +149,24 @@ static void test_object_operations() {
     bool guard = false;
     g_identify_calls = 0; g_extension_action_calls = 0; g_backup_action_calls = 0;
     g_extension_consume_result = true;
-    CHECK(stage4_consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
+    CHECK(inventory_stage::consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
                               guard));
     CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
-    CHECK(stage4_consume_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
+    CHECK(inventory_stage::consume_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
                               identify_item, extension_consume, backup_consume, guard));
     CHECK(g_backup_action_calls == 1 && !guard);
 
     g_extension_consume_result = false;
     g_extension_action_calls = 0; g_backup_action_calls = 0;
-    CHECK(!stage4_consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
+    CHECK(!inventory_stage::consume_item(g_extension_item, identify_item, extension_consume, backup_consume,
                                guard));
     CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
 
     g_extension_action_calls = 0; g_backup_action_calls = 0;
-    CHECK(stage4_remove_item(g_extension_item, identify_item, remove_item_extension,
+    CHECK(inventory_stage::remove_item(g_extension_item, identify_item, remove_item_extension,
                              backup_remove, guard) == 1);
     CHECK(g_extension_action_calls == 1 && g_backup_action_calls == 0 && !guard);
-    CHECK(stage4_remove_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
+    CHECK(inventory_stage::remove_item(reinterpret_cast<void*>(static_cast<uintptr_t>(0x9999)),
                              identify_item, remove_item_extension, backup_remove, guard) == 7);
     CHECK(g_backup_action_calls == 1 && !guard);
 
@@ -298,32 +302,32 @@ static void test_get_cumulate_count_facade() {
         g_cumulate_backup_result = -1;
         g_effective_result_mode = EffectiveResultMode::kOk;
         g_effective_count = count;
-        CHECK(stage4_get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+        CHECK(inventory_stage::get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
                                         cumulate_backup) == static_cast<int>(count));
         CHECK(g_cumulate_backup_calls == 0);
     }
     // kNotReady：provider 未驻留/999 原子组未就绪时 original-first backup。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 1;
     g_effective_result_mode = EffectiveResultMode::kNotReady;
-    CHECK(stage4_get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+    CHECK(inventory_stage::get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
                                     cumulate_backup) == 1);
     CHECK(g_cumulate_backup_calls == 1);
 
     // kUnsupported：类别判定不可用时 fail-closed 走 backup。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 1;
     g_effective_result_mode = EffectiveResultMode::kUnsupported;
-    CHECK(stage4_get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
+    CHECK(inventory_stage::get_cumulate_count(nonnull_item, &kStage4ItemCountApi,
                                     cumulate_backup) == 1);
     CHECK(g_cumulate_backup_calls == 1);
 
     // 空指针：原版语义返回 0（backup(nullptr)）。
     g_cumulate_backup_calls = 0; g_cumulate_backup_result = 0;
-    CHECK(stage4_get_cumulate_count(nullptr, &kStage4ItemCountApi,
+    CHECK(inventory_stage::get_cumulate_count(nullptr, &kStage4ItemCountApi,
                                     cumulate_backup) == 0);
     CHECK(g_cumulate_backup_calls == 1);
 
     // facade 未驻留与 backup 缺失兜底：返回 0，不崩。
-    CHECK(stage4_get_cumulate_count(nonnull_item, nullptr, nullptr) == 0);
+    CHECK(inventory_stage::get_cumulate_count(nonnull_item, nullptr, nullptr) == 0);
     g_effective_result_mode = EffectiveResultMode::kOk;
 }
 
@@ -381,11 +385,11 @@ static const qol::contracts::QolItemCountApi kStage4ConversionApi = {
     nullptr, nullptr, nullptr, nullptr, nullptr, &fake_field_from_canonical,
     nullptr, nullptr, &fake_conversion_limit, nullptr, nullptr, nullptr};
 
-static Stage4RemoveDataEntry s2_test_pre(void* item, uint32_t full) {
+static inventory_stage::RemoveDataEntry s2_test_pre(void* item, uint32_t full) {
     return {item, s2_test_raw(full), full};
 }
 
-static Stage4RemoveDataPost s2_test_post(void* item, uint32_t raw) {
+static inventory_stage::RemoveDataPost s2_test_post(void* item, uint32_t raw) {
     const uint32_t decoded = s2_test_read_count(raw);
     // 与 item_count.effective 的启用态读视图一致：超过 999 时 clamp。
     return {item, raw, decoded > 999u ? 999u : decoded};
@@ -400,10 +404,10 @@ static void test_remove_item_data_plan() {
 
     // 150 - 25 = 125；原版保留 a=1，只写 b，视图增大为 253，需修正为 125。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 25);
         CHECK(post[0].post_view == 253u);
         CHECK(plan.correct && plan.entry_index == 0 && plan.remain == 125u);
@@ -411,19 +415,19 @@ static void test_remove_item_data_plan() {
 
     // remain=127 与 9 时，旧 a 分别使原版 b-only 视图成为 255 与 137。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 127u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 72);
         CHECK(post[0].post_view == 255u);
         CHECK(plan.correct && plan.remain == 127u);
     }
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 9u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 190);
         CHECK(post[0].post_view == 137u);
         CHECK(plan.correct && plan.remain == 9u);
@@ -431,38 +435,38 @@ static void test_remove_item_data_plan() {
 
     // remain=172 与 100 均按 a 段原样保留识别，尽管 b 段可不变或回绕增大。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 172u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 128);
         CHECK(post[0].post_raw == pre[0].pre_raw);
         CHECK(plan.correct && plan.remain == 172u);
     }
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 100u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 200);
         CHECK(plan.correct && plan.remain == 100u);
     }
 
     // 300 - 44 = 256；b-only 写回视图已等于 remain，不需要二次回写。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 256u))};
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 44).correct);
     }
 
     // expected_view 超过 999 时只按未 clamp 的 S2 视图判断原版 b-only 形态。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 999u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 999u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 127u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 872);
         CHECK(post[0].post_view == 999u);
         CHECK(plan.correct && plan.remain == 127u);
@@ -470,95 +474,95 @@ static void test_remove_item_data_plan() {
 
     // 整删只累计消失堆；全部删除与 sum_vanished > count 均不回写。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u), s2_test_pre(b, 50u)};
-        const Stage4RemoveDataPost post[] = {{nullptr, 0u, 0u}, {nullptr, 0u, 0u}};
-        CHECK(!stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u), s2_test_pre(b, 50u)};
+        const inventory_stage::RemoveDataPost post[] = {{nullptr, 0u, 0u}, {nullptr, 0u, 0u}};
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 2, 249).correct);
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 2, 9999).correct);
     }
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
-        const Stage4RemoveDataPost post[] = {{nullptr, 0u, 0u}};
-        CHECK(!stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {{nullptr, 0u, 0u}};
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 149).correct);
     }
 
     // 消失堆累计扣除后，剩余堆仍按其唯一 b-only 形态修正。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             {nullptr, 0u, 0u},
             s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 200u))};
-        const Stage4RemoveDataPlan plan = stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataPlan plan = inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 2, 250);
         CHECK(plan.correct && plan.entry_index == 1 && plan.remain == 200u);
     }
 
     // 两个堆都呈现同一 b-only 结果时，多候选 fail-closed。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 150u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
             s2_test_post(b, s2_test_b_only_raw(pre[1].pre_raw, 125u))};
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 2, 25).correct);
     }
 
     // 非候选同对象槽 raw 改变时 fail-closed，包括数量段以外的位变化。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u), s2_test_pre(b, 300u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u)),
             s2_test_post(b, pre[1].pre_raw ^ 1u)};
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 2, 25).correct);
     }
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 124u))};
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 25).correct);
     }
 
     // 没有部分删除、对象替换、count<=0 和退化输入均不回写。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
-        const Stage4RemoveDataPost unchanged[] = {s2_test_post(a, pre[0].pre_raw)};
-        const Stage4RemoveDataPost replaced[] = {s2_test_post(c, s2_test_raw(1u))};
-        CHECK(!stage4_remove_item_data_plan(
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 199u)};
+        const inventory_stage::RemoveDataPost unchanged[] = {s2_test_post(a, pre[0].pre_raw)};
+        const inventory_stage::RemoveDataPost replaced[] = {s2_test_post(c, s2_test_raw(1u))};
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, unchanged, 1, 1).correct);
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, unchanged, 1, 0).correct);
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, unchanged, 1, -1).correct);
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, replaced, 1, 1).correct);
     }
-    CHECK(!stage4_remove_item_data_plan(
+    CHECK(!inventory_stage::remove_item_data_plan(
         &kStage4ConversionApi, nullptr, nullptr, 0, 5).correct);
-    CHECK(!stage4_remove_item_data_plan(nullptr, nullptr, nullptr, 0, 5).correct);
+    CHECK(!inventory_stage::remove_item_data_plan(nullptr, nullptr, nullptr, 0, 5).correct);
 
     // 转换 API 缺失或失败时不猜测原版写回形态。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 150u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 125u))};
         qol::contracts::QolItemCountApi missing_api = kStage4ConversionApi;
         missing_api.field_from_canonical = nullptr;
         qol::contracts::QolItemCountApi failed_api = kStage4ConversionApi;
         failed_api.field_from_canonical = &fake_field_from_canonical_failure;
-        CHECK(!stage4_remove_item_data_plan(&missing_api, pre, post, 1, 25).correct);
-        CHECK(!stage4_remove_item_data_plan(&failed_api, pre, post, 1, 25).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(&missing_api, pre, post, 1, 25).correct);
+        CHECK(!inventory_stage::remove_item_data_plan(&failed_api, pre, post, 1, 25).correct);
     }
 
     // 原版形态已将 a+b 表达为 remain 时无需回写。
     {
-        const Stage4RemoveDataEntry pre[] = {s2_test_pre(a, 50u)};
-        const Stage4RemoveDataPost post[] = {
+        const inventory_stage::RemoveDataEntry pre[] = {s2_test_pre(a, 50u)};
+        const inventory_stage::RemoveDataPost post[] = {
             s2_test_post(a, s2_test_b_only_raw(pre[0].pre_raw, 40u))};
-        CHECK(!stage4_remove_item_data_plan(
+        CHECK(!inventory_stage::remove_item_data_plan(
             &kStage4ConversionApi, pre, post, 1, 10).correct);
     }
 }
@@ -567,20 +571,20 @@ static void test_remove_item_data_plan() {
 // max(0, requested - physical_removed)。覆盖足额/不足/全扩展/退化入参。
 static void test_remove_data_extension_shortfall() {
     // 物理足额（含恰好全扣）→ 不补扣。
-    CHECK(stage4_remove_data_extension_shortfall(10, 5, 3) == 0);
-    CHECK(stage4_remove_data_extension_shortfall(8, 3, 5) == 0);
-    CHECK(stage4_remove_data_extension_shortfall(10, 0, 10) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(10, 5, 3) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(8, 3, 5) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(10, 0, 10) == 0);
     // 物理不足 → 补差额。
-    CHECK(stage4_remove_data_extension_shortfall(10, 8, 5) == 3);
-    CHECK(stage4_remove_data_extension_shortfall(2, 0, 5) == 3);
+    CHECK(inventory_stage::remove_data_extension_shortfall(10, 8, 5) == 3);
+    CHECK(inventory_stage::remove_data_extension_shortfall(2, 0, 5) == 3);
     // 材料全在扩展袋（原版一个物理都没扣）→ 全额补扣。
-    CHECK(stage4_remove_data_extension_shortfall(5, 5, 5) == 5);
-    CHECK(stage4_remove_data_extension_shortfall(0, 0, 1) == 1);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 5, 5) == 5);
+    CHECK(inventory_stage::remove_data_extension_shortfall(0, 0, 1) == 1);
     // requested<=0 不补扣。
-    CHECK(stage4_remove_data_extension_shortfall(5, 5, 0) == 0);
-    CHECK(stage4_remove_data_extension_shortfall(5, 5, -1) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 5, 0) == 0);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 5, -1) == 0);
     // 数据反向（after>before）按物理零扣处理，返回全额，绝不产生负补扣。
-    CHECK(stage4_remove_data_extension_shortfall(5, 6, 4) == 4);
+    CHECK(inventory_stage::remove_data_extension_shortfall(5, 6, 4) == 4);
 }
 
 // VM-38：ITEMSYSTEM_MakeItem 数量回写计划——arg2 是静态表查找/品质参数

@@ -12,13 +12,17 @@
 
 #include "contracts/bag.h"
 #include "contracts/inventory_scope.h"
+#include "contracts/inventory_stage4.h"
+#include "contracts/s2_writeback.h"
 #include "plugins/core.inventory/api/bag_source.h"
 #include "plugins/core.inventory/hooks/inventory_logging.h"
-#include "plugins/core.inventory/hooks/stage4.h"
 #include "plugins/core.inventory/runtime/context.h"
 
 namespace qol::features::core_inventory::hooks {
 namespace {
+
+// storage 纯函数单一来源（S2/stage4）位于 contracts/inventory_stage4.h。
+namespace inventory_stage = qol::contracts::inventory_stage;
 
 using HaveItemFn = int (*)(int32_t);
 using GetItemCountFn = int (*)(int32_t);
@@ -342,78 +346,9 @@ void s2_write_count_field(void* item, uint32_t field) {
 }
 
 // ---------------------------------------------------------------------------
-// S2 写侧进位/借位纯函数（R-45/R-49：写侧无统一 setter，各写点调用方完成类别
-// 门控与 `count=128a+b` 回写；进位（b 溢出 127 → a+1）与借位（a>0 时 b 回绕
-// → a-1、b+128）由 s2_write_count 编码内建）。
-// 仅做位域算术、不触内存，供 wrapper 与后续 Host 断言使用。
+// S2 写侧进位/借位纯函数已单源化至 contracts/s2_writeback.h（R-45/R-49），
+// 本文件经 include 使用同一份 inline 实现。
 // ---------------------------------------------------------------------------
-namespace s2_writeback {
-
-// S2 writeback is owned by the applied 999 feature and encoded item classes only.
-inline bool allowed(bool extended_applied, bool count_encoded) {
-    return extended_applied && count_encoded;
-}
-
-// original-only 写后确认：post 与 pre 不同、且恰好等于原版对 new_count 的 b 写
-// 结果时，才认定「原版确实执行了该次数量写」。post == pre（含 delta≡0 mod 128
-// 的退化与原版拒绝合并）一律 fail-closed 跳过，不得凭相等推断写发生。
-// delta 是 128 的整数倍时原版只写 b 段，b 字段前后不变；此时只有“源槽已不再
-// 指向被移动对象”能证明原版确实完成了合并。不能仅凭 post==pre 推断未合并。
-constexpr bool source_removed_confirms_merge(uint32_t delta, bool source_found,
-                                             bool source_still_present) {
-    return delta > 0 && (delta % 128u) == 0 && source_found && !source_still_present;
-}
-
-inline bool original_count_write_confirmed(const qol::contracts::QolItemCountApi* api,
-                                           uint32_t pre_field, uint32_t post_field,
-                                           uint32_t new_count) {
-    if (api == nullptr || api->canonical_from_field == nullptr ||
-        api->field_from_canonical == nullptr || post_field == pre_field) {
-        return false;
-    }
-    uint32_t pre_canonical = 0;
-    uint32_t post_canonical = 0;
-    uint32_t pre_without_b = 0;
-    uint32_t post_without_b = 0;
-    if (!qol::contracts::succeeded(api->canonical_from_field(pre_field, &pre_canonical)) ||
-        !qol::contracts::succeeded(api->canonical_from_field(post_field, &post_canonical)) ||
-        !qol::contracts::succeeded(api->field_from_canonical(pre_field, 0, 0, &pre_without_b)) ||
-        !qol::contracts::succeeded(api->field_from_canonical(post_field, 0, 0,
-                                                             &post_without_b))) {
-        return false;
-    }
-    // field_from_canonical(..., 0, false) preserves the non-B field bits. The
-    // canonical remainder identifies the original setter's seven-bit value
-    // without duplicating its bit layout here.
-    return pre_without_b == post_without_b &&
-           (post_canonical % 128u) == (new_count % 128u);
-}
-
-// 加法回写全量：old_full + delta 后按模式上限收敛（启用 999 / 关闭 99，
-// R-47 决策 b：old_full 必须是模式视图数量——启用态 128a+b、关闭态 b；
-// 关闭态结果落在 b 域；facade 负责当前视图的上限收敛，delta 先按
-// 编码上限收敛，避免极端入参溢出。
-inline uint32_t added_count(const qol::contracts::QolItemCountApi* api,
-                            uint32_t old_full, uint32_t delta) {
-    if (api == nullptr || api->view_limit == nullptr) return old_full;
-    uint32_t limit = 0;
-    if (!qol::contracts::succeeded(api->view_limit(1, &limit))) return old_full;
-    const uint32_t bounded = delta > limit ? limit : delta;
-    return old_full + bounded;
-}
-
-// 减法回写全量：old_full - sub（调用方须保证 old_full > sub；old_full 为模式
-// 视图数量，关闭态结果同样落在 b 域）。
-inline uint32_t subtracted_count(uint32_t old_full, uint32_t sub) {
-    return old_full > sub ? old_full - sub : 0u;
-}
-
-// 减 1 借位回写全量（old_full ≥ 2 时调用）。
-inline uint32_t decremented_count(uint32_t old_full) {
-    return old_full - 1u;
-}
-
-}  // namespace s2_writeback
 
 // 物理库存包含 6 袋（含任务袋 5）；写侧读取经 Game Host 物理槽原语，避免扩展物化路径取锁。
 // C18 原生袋上界由 lifecycle 按 bag_count(0)+bag_count(1) 下发。
@@ -457,7 +392,7 @@ bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
 // kUnknown 与非可堆叠（装备 marker、宝石选项
 // bits18–23、袋容量 bits0–24）、关闭态与 NotReady 一律返回 false，调用方保持原版行为。
 bool s2_writeback_gate(void* item) {
-    return item != nullptr && s2_writeback::allowed(item_count_extended_applied(),
+    return item != nullptr && qol::contracts::s2_writeback::allowed(item_count_extended_applied(),
                                                     item_count_is_encoded(item));
 }
 
@@ -492,7 +427,7 @@ void s2_capture_merge(void* moved_item, int bag, int slot, int32_t delta, S2Merg
         return;
     }
     cap->delta = static_cast<uint32_t>(delta);
-    cap->new_full = s2_writeback::added_count(item_count_api(), cap->pre_full, cap->delta);
+    cap->new_full = qol::contracts::s2_writeback::added_count(item_count_api(), cap->pre_full, cap->delta);
 }
 
 // MoveItem 的源槽取证：delta 是 128 的整数倍时原版只写 b 段，b 不变，
@@ -535,7 +470,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
     const bool source_found = source != nullptr && source->found;
     const bool source_still_present =
         source_found && s2_physical_slot_item(source->bag, source->slot) == source->item;
-    const bool source_removed = s2_writeback::source_removed_confirms_merge(
+    const bool source_removed = qol::contracts::s2_writeback::source_removed_confirms_merge(
         cap.delta, source_found, source_still_present);
     if (post_field == cap.pre_field && !source_removed) {
         if ((cap.delta % 128) == 0) {
@@ -546,7 +481,7 @@ void s2_merge_writeback(const S2MergeCapture& cap, const char* op,
         return;
     }
     if (post_field != cap.pre_field &&
-        !s2_writeback::original_count_write_confirmed(item_count_api(), cap.pre_field, post_field,
+        !qol::contracts::s2_writeback::original_count_write_confirmed(item_count_api(), cap.pre_field, post_field,
                                                       cap.new_full)) {
         QOL_LOG_ERROR(QolDomain::kInventory,
                             "S2 writeback %s mismatch skip target=%p pre=0x%x post=0x%x expect_full=%u",
@@ -622,8 +557,8 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
                               int32_t count) {
     if (!cap.armed || !item_count_extended_applied()) return;
     if (count <= 0) return;
-    stage4::Stage4RemoveDataEntry pre[kS2RemoveDataMaxEntries] = {};
-    stage4::Stage4RemoveDataPost post[kS2RemoveDataMaxEntries] = {};
+    inventory_stage::RemoveDataEntry pre[kS2RemoveDataMaxEntries] = {};
+    inventory_stage::RemoveDataPost post[kS2RemoveDataMaxEntries] = {};
     for (int index = 0; index < cap.entry_count; ++index) {
         pre[index] = {cap.items[index], cap.pre_raw[index], cap.pre_full[index]};
         void* cur = s2_physical_slot_item(cap.bags[index], cap.slots[index]);
@@ -639,8 +574,8 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
             post[index] = {cur, post_raw, effective};
         }
     }
-    const stage4::Stage4RemoveDataPlan plan =
-        stage4::stage4_remove_item_data_plan(item_count_api(), pre, post, cap.entry_count, count);
+    const inventory_stage::RemoveDataPlan plan =
+        inventory_stage::remove_item_data_plan(item_count_api(), pre, post, cap.entry_count, count);
     if (!plan.correct) return;
     const int index = plan.entry_index;
     void* item = s2_physical_slot_item(cap.bags[index], cap.slots[index]);
@@ -929,34 +864,9 @@ int registered_source_item_count(int32_t category) {
     return context.count > INT32_MAX ? INT32_MAX : static_cast<int>(context.count);
 }
 
-int stage_have_item(int32_t category, HaveItemFn backup) {
-    if (g_in_have_item) return backup == nullptr ? 0 : backup(category);
-    g_in_have_item = true;
-    const int original = backup == nullptr ? 0 : backup(category);
-    const int extension = registered_source_item_count(category);
-    g_in_have_item = false;
-    return original != 0 ? original : (extension > 0 ? 1 : 0);
-}
-
-int stage_get_item_count(int32_t category, GetItemCountFn backup) {
-    if (g_in_get_item_count) return backup == nullptr ? 0 : backup(category);
-    g_in_get_item_count = true;
-    const int original = backup == nullptr ? 0 : backup(category);
-    const int extension = registered_source_item_count(category);
-    g_in_get_item_count = false;
-    return original + extension;
-}
-
-int stage_get_cumulate_count(void* item, const qol::contracts::QolItemCountApi* item_count,
-                             GetCumulateCountFn backup) {
-    if (item != nullptr && item_count != nullptr && item_count->effective != nullptr) {
-        uint32_t count = 0;
-        if (qol::contracts::succeeded(item_count->effective(item, &count))) {
-            return static_cast<int>(count);
-        }
-    }
-    return backup == nullptr ? 0 : backup(item);
-}
+// storage 查询/消耗/删除分流统一走 contracts::inventory_stage 纯函数；
+// registered_source_item_count 与 inventory_stage::CountExtension 签名一致，
+// 直接作为 extension_count 回调传入，递归护栏沿用本插件 TLS 标志。
 
 int64_t count_empty_slots_all(int32_t needed) {
     int64_t empty = 0;
@@ -1066,7 +976,8 @@ int have_item_wrapper(int32_t category) {
         backup_missing("hook:INVEN_HaveItem");
         return 0;
     }
-    return stage_have_item(category, g_backup_have_item);
+    return inventory_stage::have_item(category, g_backup_have_item,
+                                      registered_source_item_count, g_in_have_item);
 }
 
 int get_item_count_wrapper(int32_t category) {
@@ -1079,7 +990,9 @@ int get_item_count_wrapper(int32_t category) {
         backup_missing("hook:INVEN_GetItemCount");
         return 0;
     }
-    return stage_get_item_count(category, g_backup_get_item_count);
+    return inventory_stage::get_item_count(category, g_backup_get_item_count,
+                                           registered_source_item_count,
+                                           g_in_get_item_count);
 }
 
 int get_cumulate_count_wrapper(void* item) {
@@ -1093,7 +1006,8 @@ int get_cumulate_count_wrapper(void* item) {
         return 0;
     }
     const auto* item_count = g_game == nullptr ? nullptr : &g_game->item_count;
-    return stage_get_cumulate_count(item, item_count, g_backup_get_cumulate_count);
+    return inventory_stage::get_cumulate_count(item, item_count,
+                                               g_backup_get_cumulate_count);
 }
 
 int is_having_empty_slot_wrapper(int32_t needed, int32_t include_task_bag) {
@@ -1178,7 +1092,7 @@ void consume_item_wrapper(void* item) {
             }
         }
     }
-    const bool dispatched = stage4::stage4_consume_item(
+    const bool dispatched = inventory_stage::consume_item(
         item, identify_registered_source_item, consume_registered_source_item,
         g_backup_consume_item, g_in_consume_item);
     if (s2_borrow_armed && !extension_item) {
@@ -1192,9 +1106,9 @@ void consume_item_wrapper(void* item) {
                                 item, borrow_bag, borrow_slot, borrow_pre_full);
         } else if (s2_writeback_gate(item)) {
             const uint32_t post_field = read_count_field(item);
-            if (s2_writeback::original_count_write_confirmed(item_count_api(), borrow_pre_field,
+            if (qol::contracts::s2_writeback::original_count_write_confirmed(item_count_api(), borrow_pre_field,
                                                              post_field, 1)) {
-                const uint32_t new_full = s2_writeback::decremented_count(borrow_pre_full);
+                const uint32_t new_full = qol::contracts::s2_writeback::decremented_count(borrow_pre_full);
                 const ItemCountWriteResult write_result =
                     item_count_write_effective(item, new_full);
                 if (write_result == ItemCountWriteResult::kNotReady) {
@@ -1286,7 +1200,7 @@ int remove_item_wrapper(void* item) {
         return result;
     }
     const int result =
-        stage4::stage4_remove_item(item, nullptr, nullptr, g_backup_remove_item, g_in_remove_item);
+        inventory_stage::remove_item(item, nullptr, nullptr, g_backup_remove_item, g_in_remove_item);
     log_remove_call("native", "stage4", result);
     return result;
 }
@@ -1474,7 +1388,7 @@ int remove_item_data_wrapper(int32_t category, int32_t count) {
     if (extension_fallback) {
         const int total_after = get_item_count_wrapper(category);
         const int shortfall =
-            stage4::stage4_remove_data_extension_shortfall(total_before, total_after, count);
+            inventory_stage::remove_data_extension_shortfall(total_before, total_after, count);
         if (shortfall > 0) {
             const int consumed = remove_registered_source_category(category, shortfall);
             if (consumed < shortfall) {

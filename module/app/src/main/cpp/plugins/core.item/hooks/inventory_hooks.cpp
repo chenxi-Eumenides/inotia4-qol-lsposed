@@ -383,7 +383,7 @@ bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
 // kUnknown 与非可堆叠（装备 marker、宝石选项
 // bits18–23、袋容量 bits0–24）、关闭态与 NotReady 一律返回 false，调用方保持原版行为。
 bool s2_writeback_gate(void* item) {
-    return item != nullptr && s2_writeback::allowed(item_count_extended_applied(),
+    return item != nullptr && qol::contracts::s2_writeback::allowed(item_count_extended_applied(),
                                                     item_count_is_encoded(item));
 }
 bool extension_unequip_to_registered_source(void* character, int32_t equip_slot);
@@ -641,9 +641,9 @@ void* item_system_divide_wrapper(void* item, int32_t count) {
         // 源堆保留剩余（不释放），此读安全；整堆拆分（pre_full==count）时
         // 原版可能已释放源对象，不做任何源堆触磁。
         const uint32_t post_field = read_count_field(item);
-        const uint32_t remain = s2_writeback::subtracted_count(
+        const uint32_t remain = qol::contracts::s2_writeback::subtracted_count(
             pre_full, static_cast<uint32_t>(count));
-        if (s2_writeback::original_count_write_confirmed(item_count_api(), pre_field, post_field,
+        if (qol::contracts::s2_writeback::original_count_write_confirmed(item_count_api(), pre_field, post_field,
                                                          remain)) {
             const ItemCountWriteResult write_result =
                 item_count_write_effective(item, remain);

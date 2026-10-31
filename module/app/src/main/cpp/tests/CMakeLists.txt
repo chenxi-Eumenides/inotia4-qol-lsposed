@@ -264,7 +264,6 @@ add_executable(inventory_remove_wrapper_tests
     test_inventory_remove_wrapper.cpp
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
-    ${CPP_DIR}/plugins/core.inventory/hooks/stage4.cpp
     ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
     ${CPP_DIR}/game/ops/item_inventory_state_write.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
@@ -2361,7 +2360,6 @@ add_executable(core_inventory_store_tests
     ${CPP_DIR}/plugins/core.inventory/api/access.cpp
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
-    ${CPP_DIR}/plugins/core.inventory/hooks/stage4.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
     ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
     ${CPP_DIR}/plugins/core.inventory/store/slot_table.cpp
