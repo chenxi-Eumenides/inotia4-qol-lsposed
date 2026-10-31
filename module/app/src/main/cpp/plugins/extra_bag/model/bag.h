@@ -30,6 +30,7 @@ public:
     // 不存在返回 nullptr。
     const RuntimeItem* item(uint32_t slot_index) const;
     uint32_t occupied_slots() const;
+    bool has_items() const;
 
 private:
     std::optional<ItemBackpack> item_backpack_;

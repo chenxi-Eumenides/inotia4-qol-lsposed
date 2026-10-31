@@ -90,10 +90,12 @@ bool api_set_item_backpack(int32_t bag_index,
     return bag->equip_item_backpack(ItemBackpack{to_runtime(*item)});
 }
 
-void api_clear_item_backpack(int32_t bag_index) {
+bool api_clear_item_backpack(int32_t bag_index) {
     Bag* bag = store().bag(static_cast<uint32_t>(bag_index));
-    if (bag == nullptr) return;
+    if (bag == nullptr) return false;
+    if (bag->has_items()) return false;
     bag->unequip_item_backpack();
+    return true;
 }
 
 const contracts::QolExtraBagApi kApi{

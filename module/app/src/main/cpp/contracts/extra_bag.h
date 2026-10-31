@@ -10,7 +10,7 @@ namespace qol::contracts {
 // extra_bag 自有存储接口。payload 为游戏原生物品数据，插件之间直接传递，
 // 本接口不解释 payload，也不提供使用/装备等游戏动作。
 constexpr const char* kExtraBagCapabilityId = "extra_bag.storage";
-constexpr QolVersion kExtraBagVersion{1, 4};
+constexpr QolVersion kExtraBagVersion{1, 5};
 constexpr uint16_t kExtraBagVersionMajor = kExtraBagVersion.major;
 constexpr uint16_t kExtraBagVersionMinor = kExtraBagVersion.minor;
 
@@ -39,7 +39,8 @@ struct QolExtraBagInfo {
 
 // put/take 直接覆盖/移除，不做校验。
 // set_item_backpack 仅接受 item_id 31..34，且装备位已有物品时返回 false；
-// 需要先 clear_item_backpack 才能换装。越界 bag 同样返回 false。
+// 需要先 clear_item_backpack 才能换装。clear 在该背包有物品时返回 false。
+// 越界 bag 同样返回 false。
 struct QolExtraBagApi {
     uint32_t struct_size = 0;
     int32_t (*bag_count)() = nullptr;
@@ -47,10 +48,10 @@ struct QolExtraBagApi {
     bool (*item_at)(int32_t bag, int32_t slot, QolExtraBagItem* out) = nullptr;
     void (*put)(int32_t bag, int32_t slot, const QolExtraBagItem* item) = nullptr;
     bool (*take)(int32_t bag, int32_t slot, QolExtraBagItem* out) = nullptr;
-    // 1.4：装备位读取/设置/清除；容量由 item_id 推导。
+    // 1.5：装备位读取/设置/清除；容量由 item_id 推导。
     bool (*item_backpack_at)(int32_t bag, QolExtraBagItem* out) = nullptr;
     bool (*set_item_backpack)(int32_t bag, const QolExtraBagItem* item) = nullptr;
-    void (*clear_item_backpack)(int32_t bag) = nullptr;
+    bool (*clear_item_backpack)(int32_t bag) = nullptr;
 };
 
 static_assert(std::is_standard_layout<QolExtraBagItem>::value,

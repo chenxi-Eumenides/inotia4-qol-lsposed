@@ -257,7 +257,16 @@ int main() {
     assert(api->item_backpack_at(0, &equipped));
     assert(equipped.item_id == 31);
 
-    api->clear_item_backpack(0);
+    // 背包内有物品时拒绝清除装备位。
+    api->put(0, 0, &item);
+    assert(!api->clear_item_backpack(0));
+    api->bag_info(0, &info);
+    assert(info.capacity == 4);
+    assert(api->item_backpack_at(0, &equipped));
+    assert(equipped.item_id == 31);
+    assert(api->take(0, 0, &out));
+
+    assert(api->clear_item_backpack(0));
     assert(api->set_item_backpack(0, &backpack_small));
     api->bag_info(0, &info);
     assert(info.capacity == 8);
@@ -265,17 +274,17 @@ int main() {
     assert(equipped.item_id == 32);
 
     const qol::contracts::QolExtraBagItem backpack_medium = make_transfer_item(33, 1, nullptr);
-    api->clear_item_backpack(0);
+    assert(api->clear_item_backpack(0));
     assert(api->set_item_backpack(0, &backpack_medium));
     api->bag_info(0, &info);
     assert(info.capacity == 12);
     const qol::contracts::QolExtraBagItem backpack_large = make_transfer_item(34, 1, nullptr);
-    api->clear_item_backpack(0);
+    assert(api->clear_item_backpack(0));
     assert(api->set_item_backpack(0, &backpack_large));
     api->bag_info(0, &info);
     assert(info.capacity == 16);
 
-    api->clear_item_backpack(0);
+    assert(api->clear_item_backpack(0));
     api->bag_info(0, &info);
     assert(info.capacity == 0);
     assert(!api->item_backpack_at(0, &equipped));
@@ -296,11 +305,15 @@ int main() {
     assert(out.item_id == 0);
     assert(out.count == 0);
     assert(out.payload_size == 0);
+    assert(!api->clear_item_backpack(1));
+    assert(api->take(1, 0, &out));
+    assert(api->clear_item_backpack(1));
     api->put(-1, 0, &item);
     assert(!api->item_at(-1, 0, &out));
     assert(!api->take(-1, 0, &out));
     assert(!api->set_item_backpack(99, &backpack_large));
     assert(!api->item_backpack_at(99, &equipped));
+    assert(!api->clear_item_backpack(99));
     qol::contracts::QolExtraBagInfo invalid{1, 1};
     api->bag_info(99, &invalid);
     assert(invalid.capacity == 0);

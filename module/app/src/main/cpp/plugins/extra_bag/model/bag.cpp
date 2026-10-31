@@ -46,4 +46,8 @@ uint32_t Bag::occupied_slots() const {
     return static_cast<uint32_t>(slots_.size());
 }
 
+bool Bag::has_items() const {
+    return !slots_.empty();
+}
+
 }  // namespace qol::features::extra_bag::model
