@@ -16,9 +16,9 @@ enum class ItemBackpackCapacity : uint32_t {
 };
 
 // 物品背包：占用独立装备位，不属于普通容量。
-// item 是背包物品本身的数据；capacity 是它提供的容量档位，接入 core.item 后由物品事实推导。
+// item 是背包物品本身的数据；capacity 是它提供的容量档位。
 struct ItemBackpack {
-    ItemData item{};
+    RuntimeItem item{};
     ItemBackpackCapacity capacity = ItemBackpackCapacity::kNone;
 };
 

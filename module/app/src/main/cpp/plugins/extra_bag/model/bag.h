@@ -23,15 +23,16 @@ public:
     void equip_item_backpack(ItemBackpack backpack);
     void unequip_item_backpack();
 
-    void put(uint32_t slot_index, ItemData item);
+    void put(uint32_t slot_index, RuntimeItem item);
     // 存在则移除并返回；不存在返回 nullopt。
-    std::optional<ItemData> take(uint32_t slot_index);
+    std::optional<RuntimeItem> take(uint32_t slot_index);
     // 不存在返回 nullptr。
-    const ItemData* item(uint32_t slot_index) const;
+    const RuntimeItem* item(uint32_t slot_index) const;
+    uint32_t occupied_slots() const;
 
 private:
     std::optional<ItemBackpack> item_backpack_;
-    std::map<uint32_t, ItemData> slots_;
+    std::map<uint32_t, RuntimeItem> slots_;
 };
 
 }  // namespace qol::features::extra_bag::model

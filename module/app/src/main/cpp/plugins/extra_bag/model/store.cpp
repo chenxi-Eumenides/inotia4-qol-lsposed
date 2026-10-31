@@ -16,19 +16,19 @@ const Bag* Store::bag(uint32_t bag_index) const {
     return bag_index < bags_.size() ? &bags_[bag_index] : nullptr;
 }
 
-void Store::put(uint32_t bag_index, uint32_t slot_index, ItemData item) {
+void Store::put(uint32_t bag_index, uint32_t slot_index, RuntimeItem item) {
     Bag* target = bag(bag_index);
     if (target == nullptr) return;
     target->put(slot_index, item);
 }
 
-std::optional<ItemData> Store::take(uint32_t bag_index, uint32_t slot_index) {
+std::optional<RuntimeItem> Store::take(uint32_t bag_index, uint32_t slot_index) {
     Bag* target = bag(bag_index);
     if (target == nullptr) return std::nullopt;
     return target->take(slot_index);
 }
 
-const ItemData* Store::item(uint32_t bag_index, uint32_t slot_index) const {
+const RuntimeItem* Store::item(uint32_t bag_index, uint32_t slot_index) const {
     const Bag* target = bag(bag_index);
     return target == nullptr ? nullptr : target->item(slot_index);
 }

@@ -1,3 +1,4 @@
+#include "contracts/extra_bag.h"
 #include "contracts/plugin.h"
 #include "plugins/extra_bag/model/bag.h"
 #include "plugins/extra_bag/model/item.h"
@@ -10,24 +11,38 @@
 
 using qol::features::extra_bag::model::Bag;
 using qol::features::extra_bag::model::ItemBackpackCapacity;
-using qol::features::extra_bag::model::ItemData;
+using qol::features::extra_bag::model::RuntimeItem;
 using qol::features::extra_bag::model::Store;
 
 namespace {
 
-ItemData make_item(int32_t category, int32_t count) {
-    ItemData item{};
+RuntimeItem make_item(int32_t category, int32_t count) {
+    RuntimeItem item{};
     item.category = category;
     item.count = count;
     return item;
 }
 
-ItemData make_item_with_payload(int32_t category, int32_t count, const char* payload) {
-    ItemData item = make_item(category, count);
+RuntimeItem make_item_with_payload(int32_t category, int32_t count, const char* payload) {
+    RuntimeItem item = make_item(category, count);
     const size_t size = std::strlen(payload);
-    assert(size <= ItemData::kPayloadMaxSize);
+    assert(size <= RuntimeItem::kPayloadMaxSize);
     std::memcpy(item.payload, payload, size);
     item.payload_size = static_cast<uint32_t>(size);
+    return item;
+}
+
+qol::contracts::QolExtraBagItem make_transfer_item(int32_t category, int32_t count,
+                                                   const char* payload) {
+    qol::contracts::QolExtraBagItem item{};
+    item.category = category;
+    item.count = count;
+    if (payload != nullptr) {
+        const size_t size = std::strlen(payload);
+        assert(size <= qol::contracts::kExtraBagPayloadMaxSize);
+        std::memcpy(item.payload, payload, size);
+        item.payload_size = static_cast<uint32_t>(size);
+    }
     return item;
 }
 
@@ -36,7 +51,7 @@ ItemData make_item_with_payload(int32_t category, int32_t count, const char* pay
 int main() {
     static_assert(Bag::kMaxCapacity == 16, "bag max capacity");
     static_assert(Store::kBagCount == 5, "default bag count");
-    static_assert(ItemData::kPayloadCapacity == 256, "payload capacity");
+    static_assert(RuntimeItem::kPayloadCapacity == 256, "payload capacity");
 
     // 1. 默认 5 个背包；每包 capacity=0、无物品背包装备位、无普通物品。
     Store store;
@@ -47,6 +62,7 @@ int main() {
         assert(bag->capacity() == 0);
         assert(!bag->has_item_backpack());
         assert(bag->item_backpack() == nullptr);
+        assert(bag->occupied_slots() == 0);
         assert(bag->item(0) == nullptr);
     }
 
@@ -94,6 +110,7 @@ int main() {
     assert(store.item(0, 3)->category == 1001);
     assert(store.item(0, 3)->count == 5);
     assert(store.bag(0)->item(3) != nullptr);
+    assert(store.bag(0)->occupied_slots() == 1);
     store.put(0, 3, make_item(1002, 7));
     assert(store.item(0, 3)->category == 1002);
     assert(store.item(0, 3)->count == 7);
@@ -141,9 +158,10 @@ int main() {
         assert(!bag->has_item_backpack());
         assert(bag->item_backpack() == nullptr);
         assert(bag->item(0) == nullptr);
+        assert(bag->occupied_slots() == 0);
     }
 
-    // 10. plugin_descriptor 元数据与 install/deactivate 生命周期。
+    // 10. plugin_descriptor 元数据与 install 生命周期。
     const qol::contracts::PluginDescriptor& descriptor =
         qol::features::extra_bag::plugin_descriptor();
     assert(std::strcmp(descriptor.id, "extra_bag") == 0);
@@ -155,7 +173,10 @@ int main() {
     assert(descriptor.features[0].default_enabled == 1);
     assert(descriptor.requires_count == 0 && descriptor.requires == nullptr);
     assert(descriptor.optional_count == 0 && descriptor.optional_requires == nullptr);
-    assert(descriptor.provides_count == 0 && descriptor.provides == nullptr);
+    assert(descriptor.provides_count == 1 && descriptor.provides != nullptr);
+    assert(std::strcmp(descriptor.provides[0].id, qol::contracts::kExtraBagCapabilityId) == 0);
+    assert(descriptor.provides[0].version.major == qol::contracts::kExtraBagVersionMajor);
+    assert(descriptor.provides[0].version.minor == qol::contracts::kExtraBagVersionMinor);
     assert(descriptor.resources_count == 0 && descriptor.resources == nullptr);
 
     qol::contracts::QolHostSdk sdk{};
@@ -167,13 +188,76 @@ int main() {
     descriptor.fill_status(status);
     assert(status.enabled);
     assert(qol::features::extra_bag::model::store().bag_count() == Store::kBagCount);
-    qol::features::extra_bag::model::store().put(0, 0, make_item(1, 1));
-    assert(qol::features::extra_bag::model::store().item(0, 0) != nullptr);
+
+    // 11. 公共接口：通过 capability 函数表完成入库/读取/出库。
+    const auto* api = static_cast<const qol::contracts::QolExtraBagApi*>(
+        descriptor.provides[0].iface);
+    assert(api != nullptr);
+    assert(api->struct_size == sizeof(qol::contracts::QolExtraBagApi));
+    assert(api->bag_count != nullptr && api->bag_info != nullptr && api->item_at != nullptr &&
+           api->put != nullptr && api->take != nullptr);
+    assert(api->bag_count() == 5);
+
+    qol::contracts::QolExtraBagInfo info{};
+    api->bag_info(0, &info);
+    assert(info.capacity == 0);
+    assert(info.occupied_slots == 0);
+
+    qol::features::extra_bag::model::store().bag(0)->equip_item_backpack(
+        {make_item(7001, 1), ItemBackpackCapacity::kFour});
+    api->bag_info(0, &info);
+    assert(info.capacity == 4);
+    assert(info.occupied_slots == 0);
+
+    const qol::contracts::QolExtraBagItem item = make_transfer_item(1001, 5, "abc");
+    api->put(0, 3, &item);
+    qol::contracts::QolExtraBagItem out{};
+    assert(api->item_at(0, 3, &out));
+    assert(out.category == 1001);
+    assert(out.count == 5);
+    assert(out.payload_size == 3);
+    assert(std::memcmp(out.payload, "abc", 3) == 0);
+    api->bag_info(0, &info);
+    assert(info.occupied_slots == 1);
+
+    const qol::contracts::QolExtraBagItem replacement = make_transfer_item(1002, 7, "wxyz");
+    api->put(0, 3, &replacement);
+    assert(api->item_at(0, 3, &out));
+    assert(out.category == 1002);
+    assert(out.count == 7);
+    assert(out.payload_size == 4);
+    assert(std::memcmp(out.payload, "wxyz", 4) == 0);
+
+    assert(api->take(0, 3, &out));
+    assert(out.category == 1002);
+    assert(out.count == 7);
+    assert(!api->item_at(0, 3, &out));
+    assert(!api->take(0, 3, &out));
+
+    // 12. 不做校验：零值物品也直接入库；越界 bag 静默为空。
+    const qol::contracts::QolExtraBagItem zero{};
+    api->put(1, 0, &zero);
+    assert(api->item_at(1, 0, &out));
+    assert(out.category == 0);
+    assert(out.count == 0);
+    assert(out.payload_size == 0);
+    api->put(-1, 0, &item);
+    assert(!api->item_at(-1, 0, &out));
+    assert(!api->take(-1, 0, &out));
+    qol::contracts::QolExtraBagInfo invalid{1, 1};
+    api->bag_info(99, &invalid);
+    assert(invalid.capacity == 0);
+    assert(invalid.occupied_slots == 0);
+
+    // 13. 物品背包不参与普通槽索引。
+    assert(!api->item_at(0, 0, &out));
+    assert(!api->take(0, 0, &out));
+
     descriptor.deactivate(ctx);
     descriptor.fill_status(status);
     assert(!status.enabled);
     assert(qol::features::extra_bag::model::store().bag_count() == Store::kBagCount);
-    assert(qol::features::extra_bag::model::store().item(0, 0) == nullptr);
+    assert(qol::features::extra_bag::model::store().item(0, 3) == nullptr);
 
     // 无 sdk 时 install 返回 1。
     qol::contracts::PluginContext no_sdk{};

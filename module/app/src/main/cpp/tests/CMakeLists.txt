@@ -2360,6 +2360,7 @@ add_test(NAME better_move_plugin_tests COMMAND better_move_plugin_tests)
 add_executable(extra_bag_tests
     test_extra_bag.cpp
     ${CPP_DIR}/plugins/extra_bag/plugin.cpp
+    ${CPP_DIR}/plugins/extra_bag/api/extra_bag_api.cpp
     ${CPP_DIR}/plugins/extra_bag/model/bag.cpp
     ${CPP_DIR}/plugins/extra_bag/model/store.cpp
 )

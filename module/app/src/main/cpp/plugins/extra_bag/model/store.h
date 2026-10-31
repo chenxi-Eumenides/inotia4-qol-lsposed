@@ -22,11 +22,11 @@ public:
     Bag* bag(uint32_t bag_index);
     const Bag* bag(uint32_t bag_index) const;
 
-    void put(uint32_t bag_index, uint32_t slot_index, ItemData item);
+    void put(uint32_t bag_index, uint32_t slot_index, RuntimeItem item);
     // 存在则移除并返回；不存在或 bag_index 越界返回 nullopt。
-    std::optional<ItemData> take(uint32_t bag_index, uint32_t slot_index);
+    std::optional<RuntimeItem> take(uint32_t bag_index, uint32_t slot_index);
     // 不存在或 bag_index 越界返回 nullptr。
-    const ItemData* item(uint32_t bag_index, uint32_t slot_index) const;
+    const RuntimeItem* item(uint32_t bag_index, uint32_t slot_index) const;
 
     // 清空并恢复 kBagCount 个空背包。
     void clear();

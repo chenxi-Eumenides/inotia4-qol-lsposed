@@ -1,5 +1,6 @@
 #include "plugin.h"
 
+#include "api/extra_bag_api.h"
 #include "model/store.h"
 
 #include <atomic>
@@ -51,12 +52,16 @@ const contracts::FeatureDefinition kFeatures[] = {
      contracts::FeatureType::kToggle, "额外背包（原型）", "", &feature_toggle, nullptr},
 };
 
+const contracts::CapabilityProvisionRef kProvides[] = {
+    {contracts::kExtraBagCapabilityId, contracts::kExtraBagVersion, &api::extra_bag_api()},
+};
+
 const contracts::PluginDescriptor kDescriptor = {
     kPluginId,
     kPluginVersion,
     0, nullptr,  // requires
     0, nullptr,  // optional_requires
-    0, nullptr,  // provides
+    1, kProvides,
     0, nullptr,  // resources
     0, nullptr,  // jni
     &plugin_install,
