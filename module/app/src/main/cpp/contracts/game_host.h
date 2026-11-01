@@ -49,6 +49,13 @@ struct QolAttrRangeReadApi {
     QolResult (*fixed_option_percent_pair)(int32_t category, int32_t option_index,
                                            int32_t* out_p1, int32_t* out_p2);
 };
+// C18L v507+ 的 MakeJewel 用固定表掷宝石数值，不再经 CAL 公式随机；
+// 该尾表返回游戏实际使用的闭区间 [min,max]（category 28..32、词条 0..16；
+// 17..35 走补词条表）。非 C18L、非宝石类别或越界词条返回 Unsupported；只读，不消耗游戏 RNG。
+struct QolAttrRangeC18Api {
+    QolResult (*jewel_generation_range)(int32_t attribute_type, QolItemHandle item,
+                                        int32_t* out_min, int32_t* out_max);
+};
 struct QolReadApi {
     QolAttrRangeReadApi attr_range;
 };
@@ -236,6 +243,7 @@ struct QolGameHost {
     QolWorldActionApi world_action;
     QolItemAbiDispatchApi item_abi;
     QolGameIdentityApi game_identity;
+    QolAttrRangeC18Api attr_range_c18;
 };
 
 static_assert(std::is_standard_layout<QolGameHost>::value,
@@ -248,8 +256,11 @@ static_assert(offsetof(QolGameHost, read_only) ==
 static_assert(offsetof(QolGameHost, game_identity) ==
                   offsetof(QolGameHost, item_abi) + sizeof(QolItemAbiDispatchApi),
               "QolGameHost game_identity ABI offset changed");
-static_assert(sizeof(QolGameHost) ==
+static_assert(offsetof(QolGameHost, attr_range_c18) ==
                   offsetof(QolGameHost, game_identity) + sizeof(QolGameIdentityApi),
+              "QolGameHost attr_range_c18 ABI offset changed");
+static_assert(sizeof(QolGameHost) ==
+                  offsetof(QolGameHost, attr_range_c18) + sizeof(QolAttrRangeC18Api),
               "QolGameHost ABI size changed");
 
 constexpr uint16_t kGameHostMajor = 2;
@@ -259,6 +270,8 @@ constexpr uint16_t kGameHostShortcutMinor = 5;
 constexpr uint16_t kGameHostPackSlotsMinor = 6;
 constexpr uint16_t kGameHostSavedBagMinor = 7;
 constexpr uint16_t kGameHostTwoHandedMinor = 8;
-constexpr uint16_t kGameHostMinor = kGameHostTwoHandedMinor;
+// 2.9 appended the C18L gem generation-range tail used by attribute_quality.
+constexpr uint16_t kGameHostC18JewelRangeMinor = 9;
+constexpr uint16_t kGameHostMinor = kGameHostC18JewelRangeMinor;
 
 }  // namespace qol::contracts

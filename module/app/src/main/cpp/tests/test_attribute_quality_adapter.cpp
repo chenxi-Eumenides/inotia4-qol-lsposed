@@ -185,6 +185,52 @@ void test_ability_level_not_ready() {
     fn_item_get_ability_level = nullptr;
 }
 
+void test_c18_jewel_generation_range_table() {
+    configure_tables();
+    constexpr uint32_t kOptionCount = static_cast<uint32_t>(G_C18_JEWEL_VALUE_OPTION_COUNT);
+    uint8_t item[16] = {};
+    const uint16_t type_word = static_cast<uint16_t>(28 << I_TYPE_CATEGORY_SHIFT);
+    std::memcpy(item + I_TYPE, &type_word, sizeof(type_word));
+
+    // 低级宝石（类别 28）词条 5 -> 表行 0、列 5。
+    const uint8_t row0_option5[4] = {10, 0, 50, 0};
+    std::memcpy(g_game_image.data() + G_C18_JEWEL_VALUE_TABLE_VMA + (0 * kOptionCount + 5) * 4,
+                row0_option5, sizeof(row0_option5));
+    int32_t minimum = -1;
+    int32_t maximum = -1;
+    CHECK(qol::game::attr_c18_jewel_generation_range(item, 5, &minimum, &maximum).ok == kQolOk);
+    CHECK(minimum == 10 && maximum == 50);
+
+    // 混沌宝石（类别 32）词条 16 -> 表行 4、列 16。
+    const uint8_t row4_option16[4] = {130, 0, 170, 0};
+    std::memcpy(g_game_image.data() + G_C18_JEWEL_VALUE_TABLE_VMA +
+                    (4 * kOptionCount + 16) * 4,
+                row4_option16, sizeof(row4_option16));
+    const uint16_t type_word_chaos = static_cast<uint16_t>(32 << I_TYPE_CATEGORY_SHIFT);
+    std::memcpy(item + I_TYPE, &type_word_chaos, sizeof(type_word_chaos));
+    CHECK(qol::game::attr_c18_jewel_generation_range(item, 16, &minimum, &maximum).ok == kQolOk);
+    CHECK(minimum == 130 && maximum == 170);
+
+    // 补词条表：混沌宝石（类别 32）词条 17 -> 表行 5、列 0。
+    const uint8_t row5_option17[4] = {0x96, 0x00, 0x2C, 0x01};  // min 150, max 300
+    std::memcpy(g_game_image.data() + G_C18_JEWEL_OPTION17_TABLE_VMA +
+                    (5 * G_C18_JEWEL_OPTION17_COUNT) * 4,
+                row5_option17, sizeof(row5_option17));
+    CHECK(qol::game::attr_c18_jewel_generation_range(item, 17, &minimum, &maximum).ok == kQolOk);
+    CHECK(minimum == 150 && maximum == 300);
+
+    CHECK(qol::game::attr_c18_jewel_generation_range(item, 36, &minimum, &maximum).code ==
+          kQolErrUnsupported);
+    const uint16_t type_word_equip = static_cast<uint16_t>(200 << I_TYPE_CATEGORY_SHIFT);
+    std::memcpy(item + I_TYPE, &type_word_equip, sizeof(type_word_equip));
+    CHECK(qol::game::attr_c18_jewel_generation_range(item, 5, &minimum, &maximum).code ==
+          kQolErrUnsupported);
+
+    g_base = 0;
+    CHECK(qol::game::attr_c18_jewel_generation_range(item, 5, &minimum, &maximum).code ==
+          kQolErrNotReady);
+}
+
 }  // namespace
 
 int main() {
@@ -212,6 +258,7 @@ int main() {
     test_fixed_table_adapter_states();
     test_null_intermediate_got_references_return_not_ready();
     test_ability_level_not_ready();
+    test_c18_jewel_generation_range_table();
     std::printf("attribute_quality_adapter: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

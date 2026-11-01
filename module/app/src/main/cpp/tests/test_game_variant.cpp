@@ -293,6 +293,35 @@ static void test_classify_fallback() {
     CHECK(qol::game_variant_detail::classify_fallback(false) == qol::GameSeries::kUnknown);
 }
 
+static void test_c18_gem_table_supported() {
+    qol::GameVariant original{};
+    original.series = qol::GameSeries::kOriginal;
+    original.known = true;
+    original.version_label = "v1.3.2";
+    CHECK(!qol::c18_gem_table_supported(original));
+
+    qol::GameVariant c18_old{};
+    c18_old.series = qol::GameSeries::kC18;
+    c18_old.known = true;
+    c18_old.version_label = "v0.38";
+    CHECK(!qol::c18_gem_table_supported(c18_old));
+
+    qol::GameVariant c18l_507{};
+    c18l_507.series = qol::GameSeries::kC18;
+    c18l_507.known = true;
+    c18l_507.version_label = "v507";
+    CHECK(qol::c18_gem_table_supported(c18l_507));
+
+    qol::GameVariant c18l_586{};
+    c18l_586.series = qol::GameSeries::kC18;
+    c18l_586.known = true;
+    c18l_586.version_label = "v586";
+    CHECK(qol::c18_gem_table_supported(c18l_586));
+
+    qol::GameVariant unknown{};
+    CHECK(!qol::c18_gem_table_supported(unknown));
+}
+
 static void test_series_names() {
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kUnknown), "unknown") == 0);
     CHECK(std::strcmp(qol::game_series_name(qol::GameSeries::kOriginal), "original") == 0);
@@ -347,6 +376,7 @@ int main() {
     test_runtime_mapping_fixture_filters_and_table_authority();
     test_lookup_miss();
     test_classify_fallback();
+    test_c18_gem_table_supported();
     test_series_names();
     test_sell_multipliers();
     test_uninitialized_default();

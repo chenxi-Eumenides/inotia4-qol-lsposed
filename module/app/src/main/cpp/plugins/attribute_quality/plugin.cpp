@@ -23,7 +23,8 @@ bool game_host_api_valid(const contracts::QolGameHost* game) {
            game->read.attr_range.option_value != nullptr &&
            game->read.attr_range.jewel_value != nullptr &&
            game->read.attr_range.uses_fixed_option_table != nullptr &&
-           game->read.attr_range.fixed_option_percent_pair != nullptr;
+           game->read.attr_range.fixed_option_percent_pair != nullptr &&
+           game->attr_range_c18.jewel_generation_range != nullptr;
 }
 
 bool item_facts_api_valid(const contracts::ItemFactsApi* facts) {

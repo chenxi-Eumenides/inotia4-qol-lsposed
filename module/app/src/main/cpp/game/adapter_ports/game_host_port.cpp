@@ -864,6 +864,28 @@ QolResult read_attr_jewel_value(int32_t attribute_type, contracts::QolItemHandle
     return contracts::ok();
 }
 
+QolResult read_attr_jewel_generation_range(int32_t attribute_type,
+                                           contracts::QolItemHandle handle,
+                                           int32_t* out_min, int32_t* out_max) {
+    if (handle.slot == 0 || handle.generation == 0 || out_min == nullptr || out_max == nullptr ||
+        attribute_type < 0) {
+        return error_result(kQolErrInvalidArgument, kInvalidArgument);
+    }
+    // 仅 C18L v507+ 有表驱动宝石数值；其他变体直接 Unsupported，调用方走随机捕获/采样。
+    if (!qol::c18_gem_table_available()) {
+        return error_result(kQolErrUnsupported, kUnsupported);
+    }
+    const auto resolved = item_handle_registry().resolve_item(handle, contracts::kQolItemHandleOwnerAny);
+    if (resolved.error == ItemHandleError::kWrongThread) {
+        return error_result(kQolErrBlocked, "wrong thread");
+    }
+    if (resolved.error != ItemHandleError::kNone || resolved.item == nullptr) {
+        return error_result(kQolErrNotFound, "stale item handle");
+    }
+    return qol::game::attr_c18_jewel_generation_range(resolved.item, attribute_type, out_min,
+                                                      out_max);
+}
+
 QolResult read_attr_uses_fixed_option_table(int32_t category, int32_t* out_value) {
     if (category < 0 || out_value == nullptr) {
         return error_result(kQolErrInvalidArgument, kInvalidArgument);
@@ -933,6 +955,7 @@ contracts::QolGameHost make_game_host() {
                       &game_native_item_for_handle,
                       &game_shortcut_item_category};
     host.game_identity = {&game_query_identity};
+    host.attr_range_c18 = {&read_attr_jewel_generation_range};
     return host;
 }
 

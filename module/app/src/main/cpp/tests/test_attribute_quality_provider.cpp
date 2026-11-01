@@ -66,6 +66,11 @@ int32_t g_host_error_option_id = -1;
 int32_t g_wrong_thread_option_id = -1;
 int32_t g_no_capture_option_id = -1;
 bool g_jewel_host_error = false;
+bool g_jewel_no_capture = false;
+int32_t g_generation_min = 7;
+int32_t g_generation_max = 42;
+bool g_generation_unsupported = false;
+int g_generation_calls = 0;
 int g_backup_calls = 0;
 
 enum class NestedMode { kNone, kBeforeCapture, kAfterCapture };
@@ -188,7 +193,26 @@ QolResult fake_option_value(int32_t option_id, int32_t ability_level, int32_t fl
 QolResult fake_jewel_value(int32_t, contracts::QolItemHandle, int32_t* out_value) {
     if (out_value == nullptr) return contracts::error(kQolErrInvalidArgument, "bad output", 10);
     if (g_jewel_host_error) return kOpaqueHostError;
+    if (g_jewel_no_capture) {
+        // C18L：GetJewelOptionValue 直接返回确定性 CAL 值，不再调用 MATH_GetRandom。
+        *out_value = 50;
+        return contracts::ok();
+    }
     *out_value = feature::math_get_random_wrapper(g_range_min, g_range_max);
+    return contracts::ok();
+}
+
+QolResult fake_jewel_generation_range(int32_t, contracts::QolItemHandle, int32_t* out_min,
+                                      int32_t* out_max) {
+    ++g_generation_calls;
+    if (out_min == nullptr || out_max == nullptr) {
+        return contracts::error(kQolErrInvalidArgument, "bad output", 10);
+    }
+    if (g_generation_unsupported) {
+        return contracts::error(kQolErrUnsupported, "unsupported", sizeof("unsupported") - 1);
+    }
+    *out_min = g_generation_min;
+    *out_max = g_generation_max;
     return contracts::ok();
 }
 
@@ -254,6 +278,7 @@ void reset_fixture() {
     g_game.abi = {sizeof(g_game), contracts::kGameHostMajor, contracts::kGameHostMinor};
     g_game.read.attr_range = {&fake_option_value, &fake_jewel_value,
                               &fake_uses_fixed_option_table, &fake_fixed_option_pair};
+    g_game.attr_range_c18 = {&fake_jewel_generation_range};
 
     g_required_facts = &g_item_facts;
     g_requested_facts_range = {};
@@ -276,6 +301,12 @@ void reset_fixture() {
     g_wrong_thread_option_id = -1;
     g_no_capture_option_id = -1;
     g_jewel_host_error = false;
+    g_jewel_no_capture = false;
+    g_generation_min = 7;
+    g_generation_max = 42;
+    // 默认模拟非 C18L：宿主不支持生成区间，走随机捕获。
+    g_generation_unsupported = true;
+    g_generation_calls = 0;
     g_backup_calls = 0;
     g_nested_mode = NestedMode::kNone;
     g_nested_called = false;
@@ -656,7 +687,10 @@ void test_option_range_capture_fixed_table_and_failures() {
     context = {};
     const QolResult no_capture =
         feature::api_query_option_context(handle(1), 12, 100, nullptr, &context);
-    CHECK(no_capture.code == kQolErrNotReady && context.status == no_capture.code);
+    // 捕获不到随机时按重复采样推定：采样值恒定 123 -> 退化区间 [123,123]。
+    CHECK(no_capture.ok == kQolOk);
+    CHECK(context.range.min == 123 && context.range.max == 123);
+    CHECK(context.quality.percentile == 100 && context.quality.level == 5);
     CHECK(g_backup_calls == 0);
     g_no_capture_option_id = -1;
     context = {};
@@ -727,6 +761,48 @@ void test_item_error_status_and_option_validation() {
     CHECK(feature::api_query_item(handle(1), nullptr, nullptr).code == kQolErrInvalidArgument);
 }
 
+void test_c18_jewel_generation_range() {
+    constexpr uint32_t view_fields = contracts::kQolItemInventoryHasOptionCompleteness |
+                                     contracts::kQolItemInventoryHasJewelValue |
+                                     contracts::kQolItemInventoryHasJewelAttributeType;
+    reset_fixture();
+    set_item(1, 100, false, view_fields);
+    g_items[0].view.jewel_attribute_type = 5;
+    g_items[0].view.jewel_value = 50;
+    g_jewel_no_capture = true;
+    g_generation_unsupported = false;
+    g_generation_min = 10;
+    g_generation_max = 50;
+    ready_provider();
+
+    contracts::AttributeQualityItemResult batch{};
+    CHECK(feature::api_query_item(handle(1), nullptr, &batch).ok == kQolOk);
+    CHECK(batch.count == 1 && batch.complete == 1);
+    CHECK(batch.attrs[0].range.min == 10 && batch.attrs[0].range.max == 50);
+    CHECK(batch.attrs[0].quality.percentile == 100 && batch.attrs[0].quality.level == 5);
+    CHECK(g_generation_calls == 1);
+    CHECK(g_backup_calls == 0);
+
+    contracts::AttributeQualityItem context{};
+    CHECK(feature::api_query_option_context(handle(1), 5, 50, nullptr, &context).ok == kQolOk);
+    CHECK(context.range.min == 10 && context.range.max == 50);
+    CHECK(context.quality.percentile == 100 && context.quality.level == 5);
+    CHECK(g_generation_calls == 2);
+
+    // 宿主不支持生成区间时回退采样：恒定值 50 -> 退化区间 [50,50]。
+    reset_fixture();
+    set_item(1, 100, false, view_fields);
+    g_items[0].view.jewel_attribute_type = 5;
+    g_items[0].view.jewel_value = 50;
+    g_jewel_no_capture = true;
+    g_generation_unsupported = true;
+    ready_provider();
+    batch = {};
+    CHECK(feature::api_query_item(handle(1), nullptr, &batch).ok == kQolOk);
+    CHECK(batch.attrs[0].range.min == 50 && batch.attrs[0].range.max == 50);
+    CHECK(batch.attrs[0].quality.percentile == 100 && batch.attrs[0].quality.level == 5);
+}
+
 }  // namespace
 
 int main() {
@@ -737,6 +813,7 @@ int main() {
     test_option_range_capture_fixed_table_and_failures();
     test_capture_scope_nested_guard();
     test_item_error_status_and_option_validation();
+    test_c18_jewel_generation_range();
     std::printf("attribute_quality_provider_tests: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

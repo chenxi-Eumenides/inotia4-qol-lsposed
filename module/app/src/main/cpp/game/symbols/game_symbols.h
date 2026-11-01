@@ -632,6 +632,14 @@ constexpr uintptr_t F_ITEMSYSTEM_CREATE_PERFECT_ITEM_VMA = 0x10c600;
 //   词缀 → ITEMSYSTEM_GetOptionValue@0x109020（全库唯一调用者 = ITEMSYSTEM_MakeOptionEx，0x109554）
 constexpr uintptr_t F_ITEMSYSTEM_MAKE_JEWEL_VMA = 0x10b974; // void* (void* item) 给已建对象补齐宝石属性+数值；失败返回 0（调用方须回收对象，CreatePerfectItem 0x10c65c 同款）
 constexpr uintptr_t F_MATH_GET_RANDOM_VMA = 0xa8bcc;                   // int (int min, int max) 闭区间随机数（0xa8bcc 反汇编）
+// C18L v507+ 宝石数值表（.rodata，旧 C18 无此表）：5 档（类别 28..32）× 17 词条，
+// 每条 u16 min/max（闭区间）。由 C18 MakeJewel 的取值分派 0xfd820 使用。
+constexpr uintptr_t G_C18_JEWEL_VALUE_TABLE_VMA = 0x14ee68;
+constexpr size_t G_C18_JEWEL_VALUE_TIER_COUNT = 5;
+constexpr size_t G_C18_JEWEL_VALUE_OPTION_COUNT = 17;
+// C18L 补词条表（0xfd820 的 option 17..35 分支）：6 档（类别 27..32）× 19 词条。
+constexpr uintptr_t G_C18_JEWEL_OPTION17_TABLE_VMA = 0x107408;
+constexpr size_t G_C18_JEWEL_OPTION17_COUNT = 19;
 constexpr uintptr_t F_UIDESC_ADD_OPTION_VMA = 0xb343c;                 // void (void* builder, int type, int optIdx, int value) 详情选项行：写 "$<码>…$B" 内联颜色串（0xb343c 反汇编）
 constexpr uintptr_t F_UIDESC_MAKE_ITEM_VMA = 0xb36a0;                  // 物品详情构造入口；x0=item（0xb36a0 反汇编）
 constexpr uintptr_t G_UIDESC_TEXT_BUF_VMA = 0x303dc0;                  // UIDesc 详情文本缓冲基址（0xb36a0 起始 memset 目标，容量 0x200）

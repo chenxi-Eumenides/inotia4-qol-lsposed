@@ -401,6 +401,24 @@ const char* game_series_name(GameSeries s) {
     return "unknown";
 }
 
+bool c18_gem_table_supported(const GameVariant& variant) {
+    if (!variant.known || variant.series != GameSeries::kC18) return false;
+    const char* label = variant.version_label;
+    if (label == nullptr || label[0] != 'v') return false;
+    int version = 0;
+    for (const char* p = label + 1; *p >= '0' && *p <= '9'; ++p) {
+        version = version * 10 + (*p - '0');
+        if (version > 100000) return false;
+    }
+    // v507 是首个带表驱动宝石数值的 C18L 版本；v0.2/v0.38 仍走 CAL 公式。
+    return version >= 507;
+}
+
+bool c18_gem_table_available() {
+    if (!game_variant_init()) return false;
+    return c18_gem_table_supported(game_variant());
+}
+
 bool sell_multiplier(GameSeries series, uint32_t sale_path, uint32_t* num, uint32_t* den) {
     if (num == nullptr || den == nullptr) return false;
     if (sale_path == contracts::kStoreSell) {

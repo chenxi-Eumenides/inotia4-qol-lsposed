@@ -261,6 +261,7 @@ GameVariant g_test_variant{GameSeries::kOriginal, "test", kCapWarehouse, {}, tru
 
 bool game_variant_init() { return true; }
 const GameVariant& game_variant() { return g_test_variant; }
+bool c18_gem_table_available() { return false; }
 const char* game_series_name(GameSeries series) {
     switch (series) {
         case GameSeries::kOriginal: return "original";
@@ -338,6 +339,12 @@ bool attr_call_option_value(int, int, int, void*, int* out_value) {
 bool attr_call_jewel_value(int, void*, int* out_value) {
     *out_value = 4;
     return true;
+}
+QolResult attr_c18_jewel_generation_range(const void*, int32_t, int32_t* out_min,
+                                          int32_t* out_max) {
+    *out_min = 1;
+    *out_max = 2;
+    return contracts::ok();
 }
 QolResult attr_item_uses_fixed_option_table(int32_t, int32_t* out_uses) {
     if (out_uses == nullptr) {
@@ -1255,7 +1262,8 @@ int main() {
     assert(variant.id == static_cast<uint32_t>(qol::GameSeries::kOriginal));
     assert(variant.capabilities == qol::kCapWarehouse);
     assert(game.abi.minor == qol::contracts::kGameHostMinor);
-    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 8);
+    assert(qol::contracts::kGameHostMajor == 2 && qol::contracts::kGameHostMinor == 9);
+    assert(game.attr_range_c18.jewel_generation_range != nullptr);
     static_assert(std::is_standard_layout<qol::contracts::QolReadOnlyApi>::value,
                   "read-only face must remain standard layout");
     static_assert(offsetof(qol::contracts::QolGameHost, read_only) ==

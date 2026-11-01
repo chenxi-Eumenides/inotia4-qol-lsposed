@@ -37,6 +37,9 @@ struct GameVariant {
 bool game_variant_init();
 // 未初始化时返回 {kUnknown, ...}。
 const GameVariant& game_variant();
+// C18L v507+ 的 MakeJewel 用表驱动宝石数值（0x14ee68）；旧 C18 仍走 CAL 公式。
+bool c18_gem_table_supported(const GameVariant& variant);
+bool c18_gem_table_available();
 // "unknown" / "original" / "overhaul" / "monster" / "c18"
 const char* game_series_name(GameSeries s);
 bool sell_multiplier(GameSeries series, uint32_t sale_path, uint32_t* num, uint32_t* den);

@@ -71,12 +71,14 @@
 
 普通范围来自 Game Host 的同步 `option_value` / `jewel_value` 调用。装备词缀查询的 `flag` 当前为 `1`；批量存储词缀与当前 UI 上下文都用该值。固定表只在 `uses_fixed_option_table` 成功返回 `1` 时应用：返回 `0` 是明确的 non-applicable，保留捕获范围；成功但返回非 0/1 为 InvalidArgument；该查询本身出错、固定表 NoMatch 或 NotReady 都作为实际错误保留，**不会回退到捕获范围**。单项批量查询将该错误写入该条 status 并继续；上下文查询向调用方返回错误。见 `plugins/attribute_quality/feature.cpp:100-140,192-223,307-330,363-379`。
 
+C18L（v507+）的 `ITEMSYSTEM_GetJewelOptionValue` 不再无条件调用 `MATH_GetRandom`：CAL 表达式为正时直接返回数值。`capture_range` 在未捕获随机调用时，先向 Game Host 2.9 尾表 `attr_range_c18.jewel_generation_range` 查询宝石生成区间；宿主按 C18L 的 5×17 表（`category 28..32` × 词条 `0..16`，u16 闭区间；17..35 走 6×19 补词条表）返回 `[min,max]`。成功即使用该区间；宿主返回 `Unsupported`（非 C18L、旧 C18、非宝石类别或越界词条）才回退到重复采样。表读取不调用游戏随机函数，不消耗 RNG。见 `feature.cpp:74-118,146-155`、`game/access/attr_range_ui.cpp:144-180`、`game/adapter_ports/game_host_port.cpp:867-888`、`game/variants/game_variant.cpp:404-421`。
+
 底层 `attr_fixed_option_percent_pair` 按 category + option id 搜索 `ITEMSTATICOPTBASE`；重复匹配时最后一行生效。NoMatch 返回 `kQolErrNotFound`，数据/stride 尚不可用返回 `kQolErrNotReady`。成功后以捕获到的最大值作 base，按 `[base + base*p1/100, base + base*p2/100]` 转换；`p1/p2` 是 signed 8-bit 百分比，`base <= 0` 按 1 处理。计算使用 `int64_t`，结果越界 `int32_t` 时返回 InvalidArgument。见 `game/access/attr_range_ui.cpp:21-48,51-96`、`plugins/attribute_quality/rules.cpp:102-120`。
 
 ## 捕获资源、启动与撤销
 
-- `MATH_GetRandom` 是唯一捕获资源，声明 `private`、`required`、`fail_closed`；安装时校验 Game Host major 2、minor 至少 3 及所需 `attr_range` 函数，并要求 `item.facts` v3.6 提供 category、jewel/equip 分类和 view 成员。`QOL_PORT_ITEM` 当前 v3.6 是 item.facts/adapter 侧版本；provider descriptor 本身声明的是 `item.facts` capability，不直接声明该 port。见 `plugin.cpp:19-33,62-85`、`contracts/game_host.h:216-217`、`contracts/game_ports/ports.h:42-45`。
-- 捕获状态为 thread-local RAII scope。范围探测在同线程 armed；第一次 wrapper 命中记录 `[min,max]`、返回 `max` 并 disarm，本次宿主读取中的后续随机调用透传 backup；未命中的 capture 返回 NotReady。嵌套 capture 返回 Busy，scope 退出清除状态。见 `feature.cpp:20-23,54-89,389-398`。
+- `MATH_GetRandom` 是唯一捕获资源，声明 `private`、`required`、`fail_closed`；安装时校验 Game Host major 2、minor 至少 9（2.9 追加 `attr_range_c18` 尾槽）及所需 `attr_range` 函数，并要求 `item.facts` v3.6 提供 category、jewel/equip 分类和 view 成员。`QOL_PORT_ITEM` 当前 v3.6 是 item.facts/adapter 侧版本；provider descriptor 本身声明的是 `item.facts` capability，不直接声明该 port。见 `plugin.cpp:19-33,62-85`、`contracts/game_host.h:243-274`、`contracts/game_ports/ports.h:42-45`。
+- 捕获状态为 thread-local RAII scope。范围探测在同线程 armed；第一次 wrapper 命中记录 `[min,max]`、返回 `max` 并 disarm，本次宿主读取中的后续随机调用透传 backup；未命中的 capture 先查 C18L 生成区间表，宿主 `Unsupported` 时再回退重复采样；两者都失败返回 NotReady。嵌套 capture 返回 Busy，scope 退出清除状态。见 `feature.cpp:20-23,74-118,389-398`。
 - Resource ready 对匹配 hook id 的空 backup 返回失败并关闭 active；非空 backup 被保存。`clear_runtime` 先关 active，再清除 facts、backup、Game Host 指针。`on_enabled` 打开门禁、`on_disabled` 关门禁；隐藏 feature `attribute_quality.provider` 默认 1，toggle callback 是 no-op，不是用户业务开关。见 `feature.cpp:248-264`、`plugin.cpp:67-113`。
 - **错误边界**：API 在 active/Host/facts/backup 未就绪时拒绝范围查询；纯 `evaluate` 的数值运算不依赖这些状态，但 API function pointer 仍只在能力生命周期内可借用，不能跨 revoke 缓存。wrapper 若实际在 backup 为空时被调用会返回 `INT_MIN` sentinel；这不是游戏定义的错误值，不能据此宣称游戏调用可安全处理。正常可用性依赖 Resource ready 拒绝空 backup、required/fail-closed 资源及查询门禁。见 `feature.cpp:35-39,225-230,255-264,389-398`。
 
@@ -98,11 +100,12 @@ provider 只提供范围事实与质量计算；不做整件装备聚合、UI �
 |---|---|
 | `contracts/attribute_quality.h:14-19,31-75,79-98,100-104` | capability v2.0、三槽 API、结果/选项/尺寸校验。 |
 | `contracts/item_facts.h:11-14,35-65`、`contracts/game_ports/item_port.h:53-107` | item.facts 3.6 与 item view 的容量/有效位。 |
-| `contracts/game_host.h:39-47,205-234` | Game Host attr_range 面与 ABI 2.4（v2.4 追加 `game_identity` 尾槽）。 |
+| `contracts/game_host.h:39-54,243-274` | Game Host attr_range 面、2.9 C18 宝石生成区间尾表与 ABI（v2.4 追加 `game_identity`、v2.9 追加 `attr_range_c18`）。 |
 | `plugins/attribute_quality/plugin.cpp:12-131`、`plugins/attribute_quality/feature.h:24-25` | 版本、requirements/provides/resource、Game Host 检查、lifecycle 与空 backup 拒绝说明。 |
 | `plugins/attribute_quality/feature.cpp:41-423`、`feature.h:13-43` | options 校验、查询、范围捕获、固定表、错误与 wrapper。 |
 | `plugins/attribute_quality/rules.h:11-35`、`rules.cpp:8-120` | 质量运算及固定表范围转换。 |
-| `game/access/attr_range_ui.cpp:21-95`、`game/adapter_ports/game_host_port.cpp:672-735` | 固定表/ability 原语及 Game Host 错误、线程转发。 |
+| `game/access/attr_range_ui.cpp:21-95,144-180`、`game/adapter_ports/game_host_port.cpp:672-735,867-888` | 固定表/ability 原语、C18L 宝石生成区间表读取及 Game Host 错误、线程转发。 |
+| `game/variants/game_variant.cpp:404-421` | C18L v507+ 版本门禁（`c18_gem_table_supported` / `c18_gem_table_available`）。 |
 | `game/adapter_ports/item_extras_port.cpp:17-34`、`game/adapter_ports/item_port.cpp:302-318` | ability level 未就绪与 32 项完整性标记。 |
 | `plugins/autosell/view.cpp:64-85` | required consumer 的 Jewel 质量条件。 |
 | `plugins/attribute_range_display/feature.cpp:86-220` | optional consumer 的当前展示值上下文与颜色呈现。 |

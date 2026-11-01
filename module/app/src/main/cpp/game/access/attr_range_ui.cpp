@@ -9,6 +9,22 @@
 namespace qol::game {
 namespace {
 
+QolResult not_ready_error() {
+    static constexpr char kNotReady[] = "not ready";
+    return contracts::error(kQolErrNotReady, kNotReady, sizeof(kNotReady) - 1);
+}
+
+QolResult invalid_argument_error() {
+    static constexpr char kInvalidArgument[] = "invalid argument";
+    return contracts::error(kQolErrInvalidArgument, kInvalidArgument,
+                            sizeof(kInvalidArgument) - 1);
+}
+
+QolResult unsupported_error() {
+    static constexpr char kUnsupported[] = "unsupported";
+    return contracts::error(kQolErrUnsupported, kUnsupported, sizeof(kUnsupported) - 1);
+}
+
 }  // namespace
 
 int attr_item_category(const void* item) {
@@ -123,6 +139,40 @@ bool attr_call_jewel_value(int type, void* item, int* out_value) {
     }
     *out_value = fn_item_system_get_jewel_option_value(type, item);
     return true;
+}
+
+QolResult attr_c18_jewel_generation_range(const void* item, int32_t option_id,
+                                          int32_t* out_min, int32_t* out_max) {
+    if (item == nullptr || option_id < 0 || out_min == nullptr || out_max == nullptr) {
+        return invalid_argument_error();
+    }
+    if (g_base == 0) return not_ready_error();
+    // C18 的类别是 12 位：bits6-15 为低 10 位，bits0-1 为高 2 位（MakeJewel 的取值分派同款解包）。
+    const uint16_t type_word =
+        *reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(item) + I_TYPE);
+    const int category = static_cast<int>(((type_word >> 6) & 0x3FFu) |
+                                          ((type_word & 0x3u) << 10));
+    if (category < 28 || category > 32) {
+        return unsupported_error();
+    }
+    const uint8_t* entry = nullptr;
+    if (option_id < static_cast<int32_t>(G_C18_JEWEL_VALUE_OPTION_COUNT)) {
+        const size_t index = static_cast<size_t>(category - 28) * G_C18_JEWEL_VALUE_OPTION_COUNT +
+                             static_cast<size_t>(option_id);
+        entry = reinterpret_cast<const uint8_t*>(g_base + G_C18_JEWEL_VALUE_TABLE_VMA +
+                                                 index * 4u);
+    } else if (option_id < 17 + static_cast<int32_t>(G_C18_JEWEL_OPTION17_COUNT)) {
+        // 补词条表按类别 27..32 分行；宝石类别 28..32 对应行 1..5。
+        const size_t index = static_cast<size_t>(category - 27) * G_C18_JEWEL_OPTION17_COUNT +
+                             static_cast<size_t>(option_id - 17);
+        entry = reinterpret_cast<const uint8_t*>(g_base + G_C18_JEWEL_OPTION17_TABLE_VMA +
+                                                 index * 4u);
+    } else {
+        return unsupported_error();
+    }
+    *out_min = static_cast<int32_t>(entry[0] | (entry[1] << 8));
+    *out_max = static_cast<int32_t>(entry[2] | (entry[3] << 8));
+    return contracts::ok();
 }
 
 bool attr_uidesc_text_buffer_base(char** out_buffer) {

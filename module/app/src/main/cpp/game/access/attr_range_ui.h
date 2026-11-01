@@ -33,6 +33,11 @@ bool attr_call_option_value(int option_index, int level, int flag, void* item, i
 // 探测独立宝石属性随机区间 [X, 2X]。
 bool attr_call_jewel_value(int type, void* item, int* out_value);
 
+// C18L 宝石生成区间（category 28..32、词条 0..16；17..35 走补词条表）；非 C18L 表或越界参数返回 Unsupported。
+// 只读表，不调用游戏随机函数。
+QolResult attr_c18_jewel_generation_range(const void* item, int32_t option_id,
+                                          int32_t* out_min, int32_t* out_max);
+
 // 原函数备份登记（宿主 on_resource_ready 交还）。
 // MATH_GetRandom 的备份与捕获状态由 provider 私有持有。
 
