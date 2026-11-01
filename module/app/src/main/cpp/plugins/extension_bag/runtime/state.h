@@ -5,6 +5,7 @@
 #include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/extension_bag_write_port.h"
 #include "contracts/game_ports/inventory_extras_port.h"
+#include "contracts/game_ports/move_merge_port.h"
 #include "contracts/host_sdk.h"
 #include "contracts/item_facts.h"
 #include "contracts/save_facts.h"
@@ -23,6 +24,9 @@ struct ExtensionBagHostPorts {
     const qol::contracts::QolExtensionBagWritePort* write_port = nullptr;
     const qol::contracts::QolCharacterExtrasPort* character_extras = nullptr;
     const qol::contracts::QolInventoryExtrasPort* inventory_extras = nullptr;
+    // 拖拽合并端口（QOL_PORT_MOVE_MERGE）：core.item 迁出后由本插件绑定；
+    // 原 core.item attach 面板不再存在。
+    const qol::contracts::QolMoveMergePort* move_merge = nullptr;
     const qol::contracts::ItemFactsApi* item_facts = nullptr;
     const qol::contracts::CraftFactsApi* craft_facts = nullptr;
     const qol::contracts::WorldFactsApi* world_facts = nullptr;

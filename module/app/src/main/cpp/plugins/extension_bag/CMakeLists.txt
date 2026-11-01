@@ -18,6 +18,7 @@ add_library(qol_plugin_extension_bag STATIC
     core/host_adapter.cpp
     core/item_display_hook.cpp
     core/move_merge.cpp
+    core/move_merge_hook.cpp
     core/tabs_ui.cpp
     core/orchestrator.cpp
     public/projection.cpp

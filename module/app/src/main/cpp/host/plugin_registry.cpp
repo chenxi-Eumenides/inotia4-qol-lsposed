@@ -373,8 +373,12 @@ bool resolve_plugin_ports(uint32_t index) {
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
+        // QOL_PORT_MOVE_MERGE 双 owner 兼容：新 owner 是 extension_bag（拖拽合并
+        // wrapper 自 core.item 迁入）；core.item 旧描述符过渡期仍允许，便于回退。
+        // 其他插件不得注入。
         if (requirement.id == contracts::QolPortId::QOL_PORT_MOVE_MERGE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "core.item") != 0)) {
+            (plugin.id == nullptr || (std::strcmp(plugin.id, "core.item") != 0 &&
+                                      std::strcmp(plugin.id, "extension_bag") != 0))) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

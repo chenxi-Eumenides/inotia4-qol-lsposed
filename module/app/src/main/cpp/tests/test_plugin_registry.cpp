@@ -881,13 +881,16 @@ void test_move_merge_port_is_owner_private() {
     CHECK(feature_of("test_move", nullptr, nullptr, &error));
     CHECK(error != nullptr && std::strstr(error, "private port") != nullptr);
 
-    reset_all();
-    PluginDescriptor owner = make_descriptor("core.item", nullptr, 0, nullptr, 0);
-    owner.ports = &requirement;
-    owner.port_count = 1;
-    CHECK(register_plugin(owner));
-    CHECK(install_all(make_deps()) == 0);
-    CHECK(feature_state_is("core.item", FeatureState::kEnabled));
+    // 双 owner：core.item（refresh 侧兼容）与 extension_bag（拖拽合并 wrapper 新 owner）。
+    for (const char* owner : {"core.item", "extension_bag"}) {
+        reset_all();
+        PluginDescriptor allowed = make_descriptor(owner, nullptr, 0, nullptr, 0);
+        allowed.ports = &requirement;
+        allowed.port_count = 1;
+        CHECK(register_plugin(allowed));
+        CHECK(install_all(make_deps()) == 0);
+        CHECK(feature_state_is(owner, FeatureState::kEnabled));
+    }
 }
 
 void test_gate_off_installed_disabled() {    reset_all();

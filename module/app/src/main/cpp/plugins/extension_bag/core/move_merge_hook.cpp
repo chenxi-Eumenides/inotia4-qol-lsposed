@@ -1,37 +1,34 @@
-#include "plugins/core.item/hooks/merge_hook.h"
+#include "plugins/extension_bag/core/move_merge_hook.h"
 
 #include <atomic>
 #include <cstdint>
 #include <cstring>
 
-#include "contracts/game_ports/character_extras_port.h"
 #include "contracts/game_ports/move_merge_port.h"
+#include "contracts/game_host.h"
 #include "contracts/host_sdk.h"
-#include "contracts/inventory_refresh.h"
+#include "contracts/inventory_projection.h"
 #include "contracts/item_facts.h"
-#include "contracts/move_merge.h"
+#include "contracts/item_type.h"
 #include "contracts/ui.h"
-#include "plugins/core.item/api/projection.h"
-#include "plugins/core.item/hooks/inventory_hooks.h"
-#include "plugins/core.item/hooks/inventory_logging.h"
-#include "plugins/core.item/runtime/context.h"
+#include "plugins/extension_bag/assembly/projection_registration.h"
+#include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/runtime/state.h"
 
-namespace qol::features::core_item::merge {
+namespace qol::features::extension_bag::merge {
 namespace {
 
-constexpr const char* kMergeResource = "ptrslot:MOVE_MERGE_GOT";
 constexpr const char* kReason = "Owns the UIEquip item-proc wrapper and native merge gate";
 
-const contracts::QolHostSdk* g_sdk = nullptr;
-const contracts::QolMoveMergePort* g_move_port = nullptr;
-const contracts::QolCharacterExtrasPort* g_character_port = nullptr;
-const contracts::ItemFactsApi* g_item_facts = nullptr;
-std::atomic<bool> g_feature_enabled{true};
+std::atomic<bool> g_feature_enabled{false};
 std::atomic<bool> g_wrapper_ready{false};
 
-uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param);
+// Host SDK / move-merge 端口 / item.facts 全部经 EB 共享状态；插件 install 时绑定，
+// deactivate 时清空。不保留独立 attach 面板。
+const contracts::QolHostSdk* host_sdk() { return runtime_state().host.sdk; }
+const contracts::QolMoveMergePort* move_port() { return runtime_state().host.move_merge; }
 
-const contracts::ResourceClaim kResources[] = {{
+const contracts::ResourceClaim kMergeClaims[] = {{
     kMergeResource,
     kMergeResource,
     contracts::ResourceMechanism::kPtrSlot,
@@ -39,7 +36,7 @@ const contracts::ResourceClaim kResources[] = {{
     contracts::ResourceRequirement::kOptional,
     contracts::ResourceFailure::kFailClosed,
     true,
-    "core.item",
+    "extension_bag",
     kReason,
     nullptr,
     120,
@@ -53,49 +50,36 @@ bool gate_enabled() {
 }
 
 const contracts::InventoryProjectionCallbacks* projection_api() {
-    return projection_callbacks();
+    return &projection_callbacks();
 }
 
-bool refresh_original() {
-    return inventory_native_hook_call_refresh_item_area_original();
+void refresh_original() {
+    // EB refresh 路径：带抑制 guard 的原版物品区域刷新（core/projection.cpp）。
+    virtual_bag_call_original_refresh_item_area_with_guard();
 }
 
 const contracts::ItemFactsApi* item_facts_api() {
-    return contracts::item_facts_api_size_valid(g_item_facts) ? g_item_facts : nullptr;
-}
-
-void projection_observe_post(const contracts::InventoryProjectionCallbacks* api,
-                             uint64_t token, void* control, uint64_t event, void* x2,
-                             void* param, uint64_t result) {
-    const auto* current = projection_api();
-    if (current != nullptr && current->observe_item_proc_post != nullptr) {
-        current->observe_item_proc_post(token, control, event, x2, param, result);
-    }
-    (void)api;
-}
-
-uint64_t call_original(void* control, uint64_t event, void* x2, void* param) {
-    uint64_t result = 0;
-    if (g_sdk == nullptr || g_sdk->hooks.call_original_control_proc == nullptr ||
-        !contracts::succeeded(g_sdk->hooks.call_original_control_proc(
-            control, event, x2, param, &result))) return 0;
-    return result;
+    const auto* facts = runtime_state().host.item_facts;
+    return contracts::item_facts_api_size_valid(facts) ? facts : nullptr;
 }
 
 bool control_slot(void* control, int32_t* out_slot) {
-    return g_sdk != nullptr && g_sdk->ui != nullptr && g_sdk->ui->control_item_slot != nullptr &&
-           contracts::succeeded(g_sdk->ui->control_item_slot(control, out_slot));
+    const auto* sdk = host_sdk();
+    return sdk != nullptr && sdk->ui != nullptr && sdk->ui->control_item_slot != nullptr &&
+           contracts::succeeded(sdk->ui->control_item_slot(control, out_slot));
 }
 
 bool control_identity(void* control, contracts::QolItemHandle* out_item) {
-    return control != nullptr && g_sdk != nullptr && g_sdk->ui != nullptr &&
-           g_sdk->ui->control_item_identity != nullptr && out_item != nullptr &&
-           contracts::succeeded(g_sdk->ui->control_item_identity(control, out_item));
+    const auto* sdk = host_sdk();
+    return control != nullptr && sdk != nullptr && sdk->ui != nullptr &&
+           sdk->ui->control_item_identity != nullptr && out_item != nullptr &&
+           contracts::succeeded(sdk->ui->control_item_identity(control, out_item));
 }
 
 bool native_item(contracts::QolItemHandle item) {
-    return g_move_port != nullptr && g_move_port->validate_native_item != nullptr &&
-           contracts::succeeded(g_move_port->validate_native_item(item));
+    const auto* port = move_port();
+    return port != nullptr && port->validate_native_item != nullptr &&
+           contracts::succeeded(port->validate_native_item(item));
 }
 
 bool extension_item(const contracts::InventoryProjectionCallbacks* projection,
@@ -107,16 +91,14 @@ bool extension_item(const contracts::InventoryProjectionCallbacks* projection,
 }
 
 // 只有卷轴/宝石这类“作用到装备上”的物品才允许走强化/镶嵌；药水等一律走交换。
-bool is_apply_material(int32_t category) {
-    if (category < 0 || g_port == nullptr || g_port->read.static_text == nullptr) return false;
-    const char* type = nullptr;
-    if (!contracts::succeeded(g_port->read.static_text(
-            static_cast<int32_t>(contracts::QolItemStaticTextKind::kItemType), category,
-            &type)) ||
-        type == nullptr) {
-        return false;
-    }
-    return std::strcmp(type, "scroll") == 0 || std::strcmp(type, "gem") == 0;
+// item.facts.item_type 是权威分类（kJewel/kEnchantScroll 等价旧 static_text
+// "gem"/"scroll" 判定），迁移后不再依赖 ITEM 端口读静态文本。
+bool is_apply_material(const contracts::ItemFactsApi* facts, contracts::QolItemHandle item) {
+    if (facts == nullptr || facts->item_type == nullptr) return false;
+    contracts::QolItemType type = contracts::QolItemType::kUnknown;
+    if (!contracts::succeeded(facts->item_type(item, &type))) return false;
+    return type == contracts::QolItemType::kJewel ||
+           type == contracts::QolItemType::kEnchantScroll;
 }
 
 bool item_facts(const contracts::ItemFactsApi* facts, contracts::QolItemHandle item,
@@ -139,6 +121,25 @@ bool item_count_encoding(const contracts::ItemFactsApi* facts, contracts::QolIte
     return true;
 }
 
+uint64_t call_original(void* control, uint64_t event, void* x2, void* param) {
+    const auto* sdk = host_sdk();
+    uint64_t result = 0;
+    if (sdk == nullptr || sdk->hooks.call_original_control_proc == nullptr ||
+        !contracts::succeeded(sdk->hooks.call_original_control_proc(
+            control, event, x2, param, &result))) return 0;
+    return result;
+}
+
+void projection_observe_post(const contracts::InventoryProjectionCallbacks* api,
+                             uint64_t token, void* control, uint64_t event, void* x2,
+                             void* param, uint64_t result) {
+    const auto* current = projection_api();
+    if (current != nullptr && current->observe_item_proc_post != nullptr) {
+        current->observe_item_proc_post(token, control, event, x2, param, result);
+    }
+    (void)api;
+}
+
 void report_item_proc_source(const contracts::InventoryProjectionCallbacks* api, uint64_t token,
                              void* control, uint64_t event, void* x2, void* param,
                              void* source_control) {
@@ -149,8 +150,12 @@ void report_item_proc_source(const contracts::InventoryProjectionCallbacks* api,
     (void)api;
 }
 
+
+}  // namespace
+
 uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
-    const contracts::InFlightGuard guard(g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
+    const contracts::QolHostSdk* sdk = host_sdk();
+    const contracts::InFlightGuard guard(sdk == nullptr ? nullptr : &sdk->in_flight,
                                          {kMergeResource});
     if (!g_feature_enabled.load(std::memory_order_acquire)) {
         return call_original(control, event, x2, param);
@@ -166,9 +171,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
 
     if (event == 0x02 && param != nullptr) {
         void* source = nullptr;
-        if (g_sdk != nullptr && g_sdk->ui != nullptr &&
-            g_sdk->ui->item_proc_source_control != nullptr &&
-            contracts::succeeded(g_sdk->ui->item_proc_source_control(control, event, param, &source))) {
+        if (sdk != nullptr && sdk->ui != nullptr &&
+            sdk->ui->item_proc_source_control != nullptr &&
+            contracts::succeeded(sdk->ui->item_proc_source_control(control, event, param, &source))) {
             report_item_proc_source(projection, observation, control, event, x2, param, source);
             const auto* current = projection_api();
             if (current != nullptr && current->projection_drop != nullptr) {
@@ -190,9 +195,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     // 纯内存查询（ui_kit_controls.inc），两段合并后只读一次，行为逐字等价。
     if (event == 0x04) {
         void* source = nullptr;
-        const bool has_source = param != nullptr && g_sdk != nullptr && g_sdk->ui != nullptr &&
-                                g_sdk->ui->item_proc_source_control != nullptr &&
-                                contracts::succeeded(g_sdk->ui->item_proc_source_control(
+        const bool has_source = param != nullptr && sdk != nullptr && sdk->ui != nullptr &&
+                                sdk->ui->item_proc_source_control != nullptr &&
+                                contracts::succeeded(sdk->ui->item_proc_source_control(
                                     control, event, param, &source));
         contracts::QolItemHandle source_handle{};
         const auto* current = projection_api();
@@ -212,12 +217,13 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
         }
     }
 
-    if (gate_enabled() && event == 0x04 && param != nullptr && g_move_port != nullptr &&
-        g_move_port->move_item != nullptr && g_move_port->current_bag != nullptr) {
+    const contracts::QolMoveMergePort* port = move_port();
+    if (gate_enabled() && event == 0x04 && param != nullptr && port != nullptr &&
+        port->move_item != nullptr && port->current_bag != nullptr) {
         void* source = nullptr;
-        if (g_sdk != nullptr && g_sdk->ui != nullptr &&
-            g_sdk->ui->item_proc_source_control != nullptr &&
-            contracts::succeeded(g_sdk->ui->item_proc_source_control(control, event, param, &source))) {
+        if (sdk != nullptr && sdk->ui != nullptr &&
+            sdk->ui->item_proc_source_control != nullptr &&
+            contracts::succeeded(sdk->ui->item_proc_source_control(control, event, param, &source))) {
             report_item_proc_source(projection, observation, control, event, x2, param, source);
             contracts::QolItemHandle source_handle{};
             contracts::QolItemHandle destination_handle{};
@@ -251,7 +257,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 int32_t destination_slot = -1;
                 int32_t source_slot = -1;
                 const bool location_ready = contracts::succeeded(
-                                                g_move_port->current_bag(&target_bag)) &&
+                                                port->current_bag(&target_bag)) &&
                                             control_slot(control, &destination_slot) &&
                                             control_slot(source, &source_slot) &&
                                             target_bag >= 0 && target_bag <= 17 &&
@@ -268,16 +274,16 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                     if (facts->count_limit != nullptr) {
                         uint32_t count_limit = 0;
                         if (contracts::succeeded(facts->count_limit(destination_handle,
-                                                                           &count_limit))) {
+                                                                       &count_limit))) {
                             limit = static_cast<int32_t>(count_limit);
                         }
                     }
                     if (limit >= static_cast<int32_t>(destination_count) &&
                         source_count <= limit - destination_count) {
                         int32_t moved = 0;
-                        const auto result = g_move_port->move_item(source_handle, source_count,
-                                                                   target_bag, destination_slot,
-                                                                   &moved);
+                        const auto result = port->move_item(source_handle, source_count,
+                                                            target_bag, destination_slot,
+                                                            &moved);
                         if (contracts::succeeded(result) && moved != 0) {
                             const auto* current = projection_api();
                             if (current != nullptr && current->module_view_installed != nullptr &&
@@ -286,9 +292,9 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                                 (void)current->sync_projected_slot(target_bag, source_slot);
                                 (void)current->sync_projected_slot(target_bag, destination_slot);
                             }
-                            (void)refresh_original();
+                            refresh_original();
                             void* root = nullptr;
-                            const auto* ui = g_sdk != nullptr ? g_sdk->ui : nullptr;
+                            const auto* ui = sdk != nullptr ? sdk->ui : nullptr;
                             if (ui != nullptr && ui->find_root != nullptr && ui->set_touch_cursor != nullptr &&
                                 contracts::succeeded(ui->find_root(
                                     contracts::QolUiRootKind::kEquipItemRoot, &root)) && root != nullptr) {
@@ -297,10 +303,6 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                             return finish(0);
                         }
                     }
-                }
-                int32_t material_category = -1;
-                if (facts != nullptr && facts->category != nullptr) {
-                    (void)facts->category(source_handle, &material_category);
                 }
                 contracts::QolItemInventoryView swap_destination_view{};
                 bool destination_equipment = false;
@@ -312,10 +314,10 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                 // 卷轴/宝石落到装备上交给原版做强化/镶嵌；其他同类堆以外的情况
                 // （不同物品、药水对装备、不可堆叠物品）一律交换两个槽的对象。
                 const bool material_apply =
-                    destination_equipment && is_apply_material(material_category);
+                    destination_equipment && is_apply_material(facts, source_handle);
                 if (location_ready && !material_apply && !extension_source &&
                     !extension_item(projection_api(), destination_handle) &&
-                    g_move_port->swap_slots != nullptr) {
+                    port->swap_slots != nullptr) {
                     constexpr int32_t kFirstVariantBag = contracts::kQolOriginalBagCount;
                     const int32_t space = target_bag >= kFirstVariantBag
                                               ? contracts::kQolBagSpaceVariant
@@ -325,7 +327,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                                             : target_bag;
                     contracts::QolBagRef source_ref{space, bag};
                     contracts::QolBagRef destination_ref{space, bag};
-                    if (contracts::succeeded(g_move_port->swap_slots(
+                    if (contracts::succeeded(port->swap_slots(
                             &source_ref, source_slot, &destination_ref,
                             destination_slot))) {
                         const auto* current = projection_api();
@@ -335,7 +337,7 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
                             (void)current->sync_projected_slot(target_bag, source_slot);
                             (void)current->sync_projected_slot(target_bag, destination_slot);
                         }
-                        (void)refresh_original();
+                        refresh_original();
                         return finish(0);
                     }
                 }
@@ -353,59 +355,15 @@ uint64_t ui_equip_inven_item_proc_wrapper(void* control, uint64_t event, void* x
     return finish(result);
 }
 
-bool control_enabled() { return gate_enabled(); }
-
-}  // namespace
-
-const contracts::MoveMergeControlApi kMoveMergeControlApi{
-    sizeof(contracts::MoveMergeControlApi),
-    contracts::kMoveMergeControlVersionMajor,
-    contracts::kMoveMergeControlVersionMinor,
-    &control_enabled,
-};
-
-const contracts::ResourceClaim* claims(uint32_t* out_count) {
+const contracts::ResourceClaim* merge_claims(uint32_t* out_count) {
     if (out_count != nullptr) {
-        *out_count = static_cast<uint32_t>(sizeof(kResources) / sizeof(kResources[0]));
+        *out_count = static_cast<uint32_t>(sizeof(kMergeClaims) / sizeof(kMergeClaims[0]));
     }
-    return kResources;
-}
-
-bool attach(const contracts::QolHostSdk* sdk,
-            const contracts::QolMoveMergePort* move_port,
-            const contracts::QolCharacterExtrasPort* character_port,
-            const contracts::ItemFactsApi* item_facts) {
-    if (sdk == nullptr || move_port == nullptr || character_port == nullptr ||
-        !contracts::item_facts_api_size_valid(item_facts) ||
-        !contracts::item_facts_api_count_encoding_size_valid(item_facts) ||
-        item_facts->count_encoding == nullptr ||
-        !contracts::satisfies(move_port->abi_version,
-                              {contracts::kQolMoveMergePortVersion.major,
-                               contracts::kQolMoveMergePortVersion.minor}) ||
-        move_port->move_item == nullptr || move_port->current_bag == nullptr ||
-        move_port->validate_native_item == nullptr ||
-        !contracts::satisfies(character_port->abi_version,
-                              {contracts::kQolPortCharacterExtrasVersion.major,
-                               contracts::kQolPortCharacterExtrasVersion.minor}) ||
-        !contracts::qol_character_extras_read_api_size_valid(&character_port->read) ||
-        character_port->read.can_apply_stuff_items == nullptr) {
-        return false;
-    }
-    g_sdk = sdk;
-    g_move_port = move_port;
-    g_character_port = character_port;
-    g_item_facts = item_facts;
-    // on_enabled 在资源安装完成后调用；此处保留 on_resource_ready 已写入的就绪态，
-    // 避免重新 attach 把已安装的 ptrslot 降级为未就绪。detach 才清除就绪态。
-    g_feature_enabled.store(true, std::memory_order_release);
-    return true;
+    return kMergeClaims;
 }
 
 void detach() {
-    g_character_port = nullptr;
-    g_move_port = nullptr;
-    g_item_facts = nullptr;
-    g_sdk = nullptr;
+    // SDK/端口/item.facts 绑定由插件 deactivate 统一清空；此处只关本 feature 门禁。
     g_wrapper_ready.store(false, std::memory_order_release);
     g_feature_enabled.store(false, std::memory_order_release);
 }
@@ -421,4 +379,4 @@ bool is_merge_resource(const char* resource_id) {
     return resource_id != nullptr && std::strcmp(resource_id, kMergeResource) == 0;
 }
 
-}  // namespace qol::features::core_item::merge
+}  // namespace qol::features::extension_bag::merge

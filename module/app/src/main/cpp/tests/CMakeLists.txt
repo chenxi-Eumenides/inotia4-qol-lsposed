@@ -2233,8 +2233,13 @@ add_test(NAME settings_config_bridge_tests COMMAND settings_config_bridge_tests)
 set_tests_properties(settings_config_bridge_tests PROPERTIES TIMEOUT 30)
 
 # Production move_merge wrapper fixture. The test includes the production body rather than a model.
+# Owner：extension_bag（自 core.item 迁入）；测试 include EB 新 TU 并注入共享状态。
+# 生产体经 state.h/game_ui_virtbag.h 拉 <jni.h>，与 EB 各测试同样注入 JNI 头路径。
 add_executable(move_merge_plugin_tests test_move_merge_plugin.cpp)
-target_include_directories(move_merge_plugin_tests PRIVATE ${CPP_DIR})
+target_include_directories(move_merge_plugin_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
 target_compile_features(move_merge_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(move_merge_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME move_merge_plugin_tests COMMAND move_merge_plugin_tests)

@@ -6,7 +6,6 @@
 #include "plugins/core.item/bags/snapshot_store.h"
 #include "plugins/core.item/bags/native_bag_limit.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
-#include "plugins/core.item/hooks/merge_hook.h"
 #include "plugins/core.item/shop/snapshot.h"
 #include "plugins/core.item/usecases/sell_item.h"
 
@@ -44,11 +43,10 @@ void apply_native_bag_limit() {
     bags::set_native_bag_limit(limit);
 }
 
-// Inventory claims + merge ptrslot；静态存储保证 descriptor 生命周期。
+// Inventory claims；merge ptrslot 已迁往 extension_bag（ptrslot:MOVE_MERGE_GOT）。
 constexpr uint32_t kInventoryResourceCount = 16;
-constexpr uint32_t kMergeResourceCount = 1;
 constexpr uint32_t kMaxResources = 32;
-static_assert(kInventoryResourceCount + kMergeResourceCount <= kMaxResources,
+static_assert(kInventoryResourceCount <= kMaxResources,
               "core.item resource table capacity");
 contracts::ResourceClaim g_resources[kMaxResources]{};
 
@@ -60,8 +58,6 @@ const contracts::ResourceClaim* combined_resources(uint32_t* out_count) {
     uint32_t inventory_count = 0;
     const contracts::ResourceClaim* inventory =
         inventory_hooks::claims(&inventory_count);
-    uint32_t merge_count = 0;
-    const contracts::ResourceClaim* merge_claims = merge::claims(&merge_count);
     uint32_t count = 0;
     const auto append = [&](const contracts::ResourceClaim* claims, uint32_t size) {
         if ((claims == nullptr && size != 0) || size > kMaxResources - count) return false;
@@ -71,7 +67,7 @@ const contracts::ResourceClaim* combined_resources(uint32_t* out_count) {
         return true;
     };
     // 资源数量固定；溢出属编程错误。返回空表让描述符不发布不完整集合。
-    if (!append(inventory, inventory_count) || !append(merge_claims, merge_count)) {
+    if (!append(inventory, inventory_count)) {
         if (out_count != nullptr) *out_count = 0;
         return nullptr;
     }
@@ -95,9 +91,8 @@ int plugin_install(contracts::PluginContext& ctx) {
     g_frame_task = 0;
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||
-        ctx.port_count != 6 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
-        ctx.ports[2] == nullptr || ctx.ports[3] == nullptr || ctx.ports[4] == nullptr ||
-        ctx.ports[5] == nullptr) {
+        ctx.port_count != 5 || ctx.ports[0] == nullptr || ctx.ports[1] == nullptr ||
+        ctx.ports[2] == nullptr || ctx.ports[3] == nullptr || ctx.ports[4] == nullptr) {
         reset_ports();
         return 1;
     }
@@ -147,18 +142,9 @@ int plugin_install(contracts::PluginContext& ctx) {
     }
     // The v1.2 transfer callbacks and Item Port serialize_item are optional; transfer reports
     // Unsupported when a host does not provide them.
-    g_move_merge_port = static_cast<const contracts::QolMoveMergePort*>(ctx.ports[4]);
-    if (!contracts::satisfies(g_move_merge_port->abi_version,
-                              {contracts::kQolMoveMergePortVersion.major,
-                               contracts::kQolMoveMergePortVersion.minor}) ||
-        g_move_merge_port->move_item == nullptr ||
-        g_move_merge_port->current_bag == nullptr ||
-        g_move_merge_port->validate_native_item == nullptr) {
-        reset_ports();
-        return 1;
-    }
+    // QOL_PORT_MOVE_MERGE 已迁往 extension_bag；character_extras 顺位前移到 ports[4]。
     g_character_extras_port =
-        static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[5]);
+        static_cast<const contracts::QolCharacterExtrasPort*>(ctx.ports[4]);
     if (!contracts::satisfies(g_character_extras_port->abi_version,
                               {contracts::kQolPortCharacterExtrasVersion.major,
                                contracts::kQolPortCharacterExtrasVersion.minor}) ||
@@ -199,24 +185,12 @@ int plugin_install(contracts::PluginContext& ctx) {
         reset_ports();
         return 1;
     }
-    if (!merge::attach(ctx.sdk, g_move_merge_port, g_character_extras_port,
-                       &kItemFactsApi)) {
-        inventory_hooks::detach();
-        if (g_sdk->ticket_result.unregister_typed_result_handler != nullptr) {
-            (void)g_sdk->ticket_result.unregister_typed_result_handler(kItemWriteHandlerId);
-        }
-        shop::destroy_snapshot();
-        g_snapshot.destroy();
-        reset_ports();
-        return 1;
-    }
     apply_native_bag_limit();
     log_message(g_sdk, "[core.item] provider install");
     return 0;
 }
 
 void plugin_deactivate(contracts::PluginContext& ctx) {
-    merge::detach();
     inventory_hooks::detach();
     stop_frame_task(ctx.sdk);
     shop::destroy_snapshot();
@@ -236,21 +210,13 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
         log_message(ctx.sdk, "[core.item] inventory hooks attach unavailable");
         return;
     }
-    if (!merge::attach(ctx.sdk, g_move_merge_port, g_character_extras_port,
-                       &kItemFactsApi)) {
-        inventory_hooks::detach();
-        log_message(ctx.sdk, "[core.item] merge attach unavailable");
-        return;
-    }
     if (!g_snapshot.initialize(g_sdk)) {
-        merge::detach();
         inventory_hooks::detach();
         log_message(ctx.sdk, "[core.item] snapshot unavailable");
         return;
     }
     if (!shop::initialize_snapshot(g_sdk)) {
         g_snapshot.destroy();
-        merge::detach();
         inventory_hooks::detach();
         log_message(ctx.sdk, "[core.item] snapshot unavailable");
         return;
@@ -271,8 +237,6 @@ void plugin_on_enabled(contracts::PluginContext& ctx) {
 }
 
 void plugin_on_disabled(contracts::PluginContext& ctx) {
-    // 只关功能门；ptrslot 就绪态保留，避免未重新安装资源时二次 enable 后门禁无法恢复。
-    merge::set_enabled(false);
     stop_frame_task(ctx.sdk);
     shop::destroy_snapshot();
     g_snapshot.destroy();
@@ -286,26 +250,16 @@ void plugin_fill_status(contracts::PluginStatusOut& out) {
 }
 
 // Feature callback does not replace the existing lifecycle or business controls.
+// move_merge.drag_merge 已迁往 extension_bag。
 extern const contracts::FeatureDefinition kFeatures[] = {
     {"core.item.provider", 1, contracts::FeatureCategory::kHidden,
      contracts::FeatureType::kToggle, "物品领域服务", "",
      [](contracts::PluginContext&, uint8_t) -> QolResult { return contracts::ok(); }, nullptr},
-    {"move_merge.drag_merge", 1, contracts::FeatureCategory::kBasicOptimization,
-     contracts::FeatureType::kToggle, "拖动合并", "允许合并同种可堆叠物品",
-     [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
-         merge::set_enabled(enabled != 0);
-         return contracts::ok();
-     },
-     nullptr},
 };
 
 int32_t on_resource_ready(contracts::PluginContext& ctx, const char* resource_id,
                           void* backup) {
     (void)ctx;
-    if (merge::is_merge_resource(resource_id)) {
-        merge::set_wrapper_ready(true);
-        return 0;
-    }
     return inventory_hooks::bind_backup(resource_id, backup);
 }
 

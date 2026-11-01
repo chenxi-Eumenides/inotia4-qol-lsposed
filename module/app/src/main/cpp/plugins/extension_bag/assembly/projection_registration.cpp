@@ -1,7 +1,6 @@
 #include "plugins/extension_bag/assembly/projection_registration.h"
 
 #include "contracts/inventory_projection.h"
-#include "contracts/move_merge.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/ui/host_ui.h"
@@ -160,6 +159,10 @@ void unregister_projection_callbacks() {
     if (registry != nullptr) {
         (void)registry->unregister_callbacks();
     }
+}
+
+const qol::contracts::InventoryProjectionCallbacks& projection_callbacks() {
+    return kProjectionCallbacks;
 }
 
 }  // namespace qol::features::extension_bag

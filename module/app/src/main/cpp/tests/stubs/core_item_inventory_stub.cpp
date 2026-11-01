@@ -4,7 +4,6 @@
 #include "plugins/core.item/usecases/item_action.h"
 #include "plugins/core.item/usecases/item_slot.h"
 #include "plugins/core.item/usecases/sell_item.h"
-#include "plugins/core.item/hooks/merge_hook.h"
 
 #include <array>
 #include <cstring>
@@ -125,46 +124,4 @@ const contracts::InventoryActionApi kInventoryActionApi{
 
 }  // namespace qol::features::core_item
 
-namespace qol::features::core_item::merge {
-namespace {
 
-bool g_wrapper_ready = false;
-bool g_feature_enabled = true;
-
-bool control_enabled() { return g_feature_enabled && g_wrapper_ready; }
-
-}  // namespace
-
-const contracts::MoveMergeControlApi kMoveMergeControlApi{
-    sizeof(contracts::MoveMergeControlApi), contracts::kMoveMergeControlVersionMajor,
-    contracts::kMoveMergeControlVersionMinor, &control_enabled};
-
-const contracts::ResourceClaim* claims(uint32_t* out_count) {
-    static const contracts::ResourceClaim resource{
-        "ptrslot:MOVE_MERGE_GOT", "ptrslot:MOVE_MERGE_GOT",
-        contracts::ResourceMechanism::kPtrSlot, contracts::ResourcePolicy::kPrivate,
-        contracts::ResourceRequirement::kOptional, contracts::ResourceFailure::kFailClosed,
-        true, "core.item", "test fixture", nullptr, 120, reinterpret_cast<void*>(1)};
-    if (out_count != nullptr) *out_count = 1;
-    return &resource;
-}
-
-bool attach(const contracts::QolHostSdk*, const contracts::QolMoveMergePort*,
-            const contracts::QolCharacterExtrasPort*, const contracts::ItemFactsApi*) {
-    return true;
-}
-
-void detach() {
-    g_wrapper_ready = false;
-    g_feature_enabled = false;
-}
-void set_enabled(bool enabled) { g_feature_enabled = enabled; }
-bool enabled() { return g_feature_enabled; }
-bool wrapper_ready() { return g_wrapper_ready; }
-void set_wrapper_ready(bool ready) { g_wrapper_ready = ready; }
-bool is_merge_resource(const char* resource_id) {
-    return resource_id != nullptr &&
-           std::strcmp(resource_id, "ptrslot:MOVE_MERGE_GOT") == 0;
-}
-
-}  // namespace qol::features::core_item::merge

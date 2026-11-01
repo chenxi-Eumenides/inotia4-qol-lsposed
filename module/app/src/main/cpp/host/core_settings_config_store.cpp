@@ -799,47 +799,60 @@ bool migrate_host_owner_values(const std::vector<PluginFeatureSeed>& definitions
         }
     }
 
-    if (has_feature(definitions, "core.item", "move_merge.drag_merge")) {
+    // move_merge.drag_merge owner 已从 core.item 迁往 extension_bag。保留旧值优先：
+    // extension_bag 已有值时只清理旧键；否则依次回退 core.item 布局、旧 move_merge
+    // 插件布局、扁平 moveMergeEnabled。迁移只拷贝值，未知键（如 move_merge.keep）不丢。
+    if (has_feature(definitions, "extension_bag", "move_merge.drag_merge")) {
         bool target = false;
         const bool has_target = saved_feature_value(
-            *namespaces, *unknown, "core.item", "move_merge.drag_merge", &target);
+            *namespaces, *unknown, "extension_bag", "move_merge.drag_merge", &target);
         bool migrated = has_target;
         if (!has_target) {
             bool feature = false;
-            const bool has_feature = saved_feature_value(
-                *namespaces, *unknown, "move_merge", "move_merge.drag_merge", &feature);
-            bool enable = false;
-            bool has_enable = false;
-            const JsonValue* old = find_any_namespace(namespaces, unknown, "move_merge");
-            if (old != nullptr && old->kind == JsonValue::Kind::kObject) {
-                const JsonValue* value = member(*old, "enable");
-                if (value != nullptr && value->kind == JsonValue::Kind::kBoolean) {
-                    enable = value->boolean;
-                    has_enable = true;
-                }
+            const bool has_item_feature = saved_feature_value(
+                *namespaces, *unknown, "core.item", "move_merge.drag_merge", &feature);
+            if (has_item_feature) {
+                migrated = set_raw_feature(namespaces, unknown, "extension_bag",
+                                           "move_merge.drag_merge", feature);
             }
-            bool old_value = false;
-            bool has_old_value = false;
-            if (has_feature) {
-                // 旧插件的有效态是 enable && any_feature；缺 enable 时按插件默认启用处理。
-                old_value = has_enable ? (enable && feature) : feature;
-                has_old_value = true;
-            } else if (has_enable) {
-                old_value = enable;
-                has_old_value = true;
-            } else {
-                const JsonValue* flat = saved_root_value(*unknown, "moveMergeEnabled");
-                if (flat != nullptr && flat->kind == JsonValue::Kind::kBoolean) {
-                    old_value = flat->boolean;
-                    has_old_value = true;
+            bool legacy_value = false;
+            bool has_legacy_value = false;
+            if (!migrated) {
+                const bool has_feature = saved_feature_value(
+                    *namespaces, *unknown, "move_merge", "move_merge.drag_merge", &legacy_value);
+                bool enable = false;
+                bool has_enable = false;
+                const JsonValue* old = find_any_namespace(namespaces, unknown, "move_merge");
+                if (old != nullptr && old->kind == JsonValue::Kind::kObject) {
+                    const JsonValue* value = member(*old, "enable");
+                    if (value != nullptr && value->kind == JsonValue::Kind::kBoolean) {
+                        enable = value->boolean;
+                        has_enable = true;
+                    }
                 }
-            }
-            if (has_old_value) {
-                migrated = set_raw_feature(namespaces, unknown, "core.item",
-                                           "move_merge.drag_merge", old_value);
+                if (has_feature) {
+                    // 旧插件的有效态是 enable && any_feature；缺 enable 时按插件默认启用处理。
+                    legacy_value = has_enable ? (enable && legacy_value) : legacy_value;
+                    has_legacy_value = true;
+                } else if (has_enable) {
+                    legacy_value = enable;
+                    has_legacy_value = true;
+                } else {
+                    const JsonValue* flat = saved_root_value(*unknown, "moveMergeEnabled");
+                    if (flat != nullptr && flat->kind == JsonValue::Kind::kBoolean) {
+                        legacy_value = flat->boolean;
+                        has_legacy_value = true;
+                    }
+                }
+                if (has_legacy_value) {
+                    migrated = set_raw_feature(namespaces, unknown, "extension_bag",
+                                               "move_merge.drag_merge", legacy_value);
+                }
             }
         }
         if (migrated) {
+            remove_namespace_key(namespaces, unknown, "core.item", "features",
+                                 "move_merge.drag_merge");
             remove_namespace_key(namespaces, unknown, "move_merge", "features",
                                  "move_merge.drag_merge");
             (void)remove_namespace_member(namespaces, unknown, "move_merge", "enable");

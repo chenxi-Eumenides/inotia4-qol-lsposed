@@ -1,24 +1,17 @@
+// Production move_merge wrapper fixture. The test includes the production body rather than a
+// model. Owner 已从 core.item 迁往 extension_bag：依赖经 EB 共享状态
+// （runtime_state().host）注入，refresh/投影回调由本文件提供测试替身。
 #include <cassert>
 #include <cstdint>
 #include <cstring>
 
-#include "plugins/core.item/hooks/merge_hook.cpp"
-
-namespace qol::features::core_item {
-const contracts::QolItemPort* g_port = nullptr;
-}  // namespace qol::features::core_item
+#include "plugins/extension_bag/core/move_merge_hook.cpp"
 
 int g_test_refresh_calls = 0;
 
-bool inventory_native_hook_call_refresh_item_area_original() {
-    ++g_test_refresh_calls;
-    return true;
-}
-void inventory_native_hook_bind_player_update_shortcut(void (*)(int32_t)) {}
-void inventory_native_hook_update_shortcut_category(int32_t) {}
-void inventory_native_hook_update_shortcut() {}
+void virtual_bag_call_original_refresh_item_area_with_guard() { ++g_test_refresh_calls; }
 
-namespace qol::features::core_item::merge {
+namespace qol::features::extension_bag::merge {
 namespace {
 
 using namespace qol;
@@ -26,28 +19,22 @@ using namespace qol::contracts;
 
 QolHostSdk sdk{};
 QolUiAdapter ui{};
-QolMoveMergePort move_port{};
-QolCharacterExtrasPort character_port{};
-QolItemPort item_port{};
+QolMoveMergePort move_merge_port{};
 ItemFactsApi facts{};
 InventoryProjectionCallbacks projection{};
-InventoryRefreshApi refresh{};
-MoveMergeControlApi control{};
 QolItemHandle source_item{1, 1};
 QolItemHandle destination_item{2, 1};
 int original_calls = 0;
 int move_calls = 0;
+int swap_calls = 0;
 int sync_slot_calls = 0;
 int sync_bag_calls = 0;
 int cursor_calls = 0;
 int moved_result = 1;
-int facts_available = 1;
-int projection_available = 1;
-int refresh_available = 1;
 int extension_source_item = 1;
 int32_t destination_count_value = 20;
 uint32_t count_limit_value = 99;
-int apply_allowed_value = 0;
+QolItemType material_type_value = QolItemType::kEnchantScroll;
 int destination_equipment_value = 0;
 int count_supported_value = 1;
 QolItemCountEncoding source_encoding_value = QolItemCountEncoding::kEncoded;
@@ -66,21 +53,8 @@ int64_t source_control_value = 0;
 int64_t destination_control_value = 0;
 
 QolResult ok() { return contracts::ok(); }
-QolResult static_item_text(int32_t kind, int32_t category_value, const char** out) {
-    if (out == nullptr) return error(kQolErrInvalidArgument, "invalid output", 14);
-    *out = nullptr;
-    if (kind != static_cast<int32_t>(QolItemStaticTextKind::kItemType) || category_value != 42) {
-        return error(kQolErrNotFound, "item type unavailable", 22);
-    }
-    *out = "scroll";
-    return ok();
-}
-QolResult require(const char* id, QolVersionRange, const void** out) {
-    *out = nullptr;
-    if (std::strcmp(id, kItemFactsCapabilityId) == 0 && facts_available) *out = &facts;
-    if (std::strcmp(id, kInventoryRefreshCapabilityId) == 0 && refresh_available)
-        *out = &refresh;
-    return *out != nullptr ? ok() : error(kQolErrNotReady, "unavailable", 11);
+QolResult require(const char*, QolVersionRange, const void**) {
+    return error(kQolErrNotReady, "unavailable", 11);
 }
 QolResult call_original(void*, uint64_t, void*, void*, uint64_t* out) {
     ++original_calls;
@@ -114,6 +88,7 @@ QolResult item_view(QolItemHandle handle, QolItemInventoryView* out) {
     return ok();
 }
 QolResult category(QolItemHandle, int32_t* out) { *out = 42; return ok(); }
+QolResult item_type(QolItemHandle, QolItemType* out) { *out = material_type_value; return ok(); }
 QolResult count_encoding(QolItemHandle item, QolItemCountEncoding* out) {
     *out = item.slot == source_item.slot ? source_encoding_value : destination_encoding_value;
     if (*out == QolItemCountEncoding::kUnknown) return error(kQolErrUnsupported, "unknown", 7);
@@ -124,10 +99,6 @@ QolResult cumulate(QolItemHandle handle, int32_t* out) {
     return ok();
 }
 QolResult count_limit(QolItemHandle, uint32_t* out) { *out = count_limit_value; return ok(); }
-QolResult can_apply(QolItemHandle, QolItemHandle, int32_t* out) {
-    *out = apply_allowed_value;
-    return ok();
-}
 QolResult current_bag(int32_t* out) { *out = 0; return ok(); }
 QolResult validate_native(QolItemHandle item) {
     if ((item.slot == source_item.slot && source_native) ||
@@ -139,6 +110,12 @@ QolResult move_item(QolItemHandle handle, int32_t count, int32_t bag, int32_t de
     ++move_calls;
     assert(handle.slot == source_item.slot && count == 10 && bag == 0 && dest == 2);
     *out = moved_result;
+    return ok();
+}
+QolResult swap_slots(const QolBagRef* a, int32_t slot_a, const QolBagRef* b, int32_t slot_b) {
+    ++swap_calls;
+    assert(slot_a == source_slot_value && slot_b == destination_slot_value);
+    assert(a->space_id == b->space_id && a->bag == b->bag);
     return ok();
 }
 MoveMergeProjectionDropResult projection_drop(void*, void*) { return projection_drop_result; }
@@ -163,18 +140,21 @@ bool sync_slot(int32_t bag, int32_t dest) {
     return true;
 }
 bool sync_bag() { ++sync_bag_calls; return true; }
-bool call_refresh() { ++g_test_refresh_calls; return true; }
 int inflight = 0;
-QolResult in_flight_enter(InFlightHandle handle) { assert(std::strcmp(handle.resource_id, kMergeResource) == 0); ++inflight; return ok(); }
+QolResult in_flight_enter(InFlightHandle handle) {
+    assert(std::strcmp(handle.resource_id, kMergeResource) == 0);
+    ++inflight;
+    return ok();
+}
 QolResult in_flight_leave(InFlightHandle) { --inflight; return ok(); }
 
 void reset() {
-    original_calls = move_calls = g_test_refresh_calls = sync_slot_calls = sync_bag_calls = cursor_calls = 0;
+    original_calls = move_calls = swap_calls = g_test_refresh_calls = sync_slot_calls =
+        sync_bag_calls = cursor_calls = 0;
     moved_result = 1;
-    facts_available = projection_available = refresh_available = 1;
     destination_count_value = 20;
     count_limit_value = 99;
-    apply_allowed_value = 0;
+    material_type_value = QolItemType::kEnchantScroll;
     destination_equipment_value = 0;
     count_supported_value = 1;
     source_encoding_value = destination_encoding_value = QolItemCountEncoding::kEncoded;
@@ -201,18 +181,13 @@ void setup() {
     ui.control_item_slot = &slot;
     ui.set_touch_cursor = &cursor;
     ui.find_root = &root;
-    move_port = {kQolMoveMergePortVersion, &move_item, &current_bag, &validate_native};
-    character_port = {kQolPortCharacterExtrasVersion, {}};
-    character_port.read.struct_size = sizeof(character_port.read);
-    character_port.read.can_apply_stuff_items = &can_apply;
-    item_port = {};
-    item_port.struct_size = sizeof(item_port);
-    item_port.read.static_text = &static_item_text;
-    qol::features::core_item::g_port = &item_port;
+    move_merge_port = {kQolMoveMergePortVersion, &move_item, &current_bag, &validate_native,
+                       nullptr};
     facts = {};
     facts.struct_size = sizeof(facts);
     facts.view = &item_view;
     facts.category = &category;
+    facts.item_type = &item_type;
     facts.cumulate_count = &cumulate;
     facts.count_limit = &count_limit;
     facts.count_encoding = &count_encoding;
@@ -220,12 +195,11 @@ void setup() {
                   kInventoryProjectionVersionMinor, &projection_drop, &input_blocked,
                   &allow_tab_drop, &identify_extension, &observe_pre, &observe_source,
                   &observe_post, &module_view, &sync_slot, &sync_bag};
-    refresh = {&call_refresh};
-    g_sdk = &sdk;
-    g_move_port = &move_port;
-    g_character_port = &character_port;
+    runtime_state().host = {};
+    runtime_state().host.sdk = &sdk;
+    runtime_state().host.move_merge = &move_merge_port;
+    runtime_state().host.item_facts = &facts;
     // 门禁等价插件活跃态：默认不活跃，需要合并语义的用例显式置 true。
-    assert(attach(&sdk, &move_port, &character_port, &facts));
     set_enabled(true);
     set_wrapper_ready(true);
     inflight = 0;
@@ -315,7 +289,7 @@ void test_single_owner_and_feature_lifecycle() {
     reset();
     setup();
     uint32_t count = 0;
-    const ResourceClaim* resources = claims(&count);
+    const ResourceClaim* resources = merge_claims(&count);
     assert(count == 1 && resources != nullptr);
     assert(std::strcmp(resources[0].id, "ptrslot:MOVE_MERGE_GOT") == 0);
     assert(resources[0].mechanism == ResourceMechanism::kPtrSlot);
@@ -323,62 +297,26 @@ void test_single_owner_and_feature_lifecycle() {
     assert(resources[0].requirement == ResourceRequirement::kOptional);
     assert(resources[0].failure == ResourceFailure::kFailClosed);
     assert(resources[0].resumable);
-    assert(std::strcmp(resources[0].owner, "core.item") == 0);
+    assert(std::strcmp(resources[0].owner, "extension_bag") == 0);
     assert(resources[0].step_budget == 120);
     assert(resources[0].gate == nullptr);
+    assert(resources[0].handler ==
+           reinterpret_cast<void*>(&ui_equip_inven_item_proc_wrapper));
     assert(is_merge_resource("ptrslot:MOVE_MERGE_GOT"));
     assert(!is_merge_resource("hook:INVEN_FindItem"));
     assert(!is_merge_resource(nullptr));
 
-    detach();
-    assert(attach(&sdk, &move_port, &character_port, &facts));
-    assert(enabled() && !wrapper_ready());
-    assert(!kMoveMergeControlApi.enabled());
-    set_wrapper_ready(true);
-    assert(kMoveMergeControlApi.enabled());
-    set_enabled(false);
-    assert(!kMoveMergeControlApi.enabled());
-    set_enabled(true);
-    assert(kMoveMergeControlApi.enabled());
+    // detach 清门禁；重装路径（宿主重装资源后 on_resource_ready）恢复就绪态。
     detach();
     assert(!enabled() && !wrapper_ready());
-    assert(!kMoveMergeControlApi.enabled());
-}
-
-void test_attach_rejects_invalid_ports() {
-    setup();
-    assert(!attach(nullptr, &move_port, &character_port, &facts));
-    assert(!attach(&sdk, nullptr, &character_port, &facts));
-    assert(!attach(&sdk, &move_port, nullptr, &facts));
-    assert(!attach(&sdk, &move_port, &character_port, nullptr));
-
-    QolMoveMergePort bad_version = move_port;
-    bad_version.abi_version = {static_cast<uint16_t>(kQolMoveMergePortVersion.major + 1),
-                               kQolMoveMergePortVersion.minor};
-    assert(!attach(&sdk, &bad_version, &character_port, &facts));
-
-    QolMoveMergePort missing_move = move_port;
-    missing_move.move_item = nullptr;
-    assert(!attach(&sdk, &missing_move, &character_port, &facts));
-
-    QolCharacterExtrasPort missing_character = character_port;
-    missing_character.read.can_apply_stuff_items = nullptr;
-    assert(!attach(&sdk, &move_port, &missing_character, &facts));
-
-    assert(attach(&sdk, &move_port, &character_port, &facts));
-}
-
-void test_attach_preserves_wrapper_ready() {
-    setup();
     set_wrapper_ready(true);
-    assert(attach(&sdk, &move_port, &character_port, &facts));
-    assert(wrapper_ready());
-    set_wrapper_ready(false);
-    assert(attach(&sdk, &move_port, &character_port, &facts));
-    assert(!wrapper_ready());
+    set_enabled(true);
+    assert(enabled() && wrapper_ready());
+    detach();
+    assert(!enabled() && !wrapper_ready());
 }
 
-void test_feature_on_wrapper_not_ready_passes_through() {
+void test_wrapper_ready_gate_and_lifecycle() {
     reset();
     setup();
     set_enabled(true);
@@ -405,16 +343,16 @@ void test_full_limit_apply_and_optional_refresh() {
     set_wrapper_ready(true);
     count_limit_value = 999;
     destination_count_value = 998;
-    refresh_available = 0;
+    // refresh 替身为无条件计数；原「refresh 不可用」路径由 EB refresh guard 内部处理。
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 77);
-    assert(move_calls == 0 && original_calls == 1 && g_test_refresh_calls == 0);
+    assert(move_calls == 0 && original_calls == 1);
     reset();
     setup();
     set_enabled(true);
     set_wrapper_ready(true);
-    apply_allowed_value = 1;
     destination_equipment_value = 1;
+    material_type_value = QolItemType::kEnchantScroll;
     count_supported_value = 0;
     extension_source_item = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
@@ -435,7 +373,6 @@ void test_foreign_source_protected_without_projection_or_gate() {
     reset();
     setup();
     source_native = 0;
-    projection_available = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
                                            &source_control_value) == 0);
     assert(move_calls == 0 && original_calls == 0);
@@ -472,23 +409,9 @@ void test_event2_native_and_ordinary_fallback() {
 
     reset();
     setup();
-    projection_available = 0;
-    assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 2, nullptr,
-                                           &source_control_value) == 77);
-    assert(original_calls == 1 && move_calls == 0);
-
-    reset();
-    setup();
     source_control_available = 0;
     assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 2, nullptr,
                                            nullptr) == 77);
-    assert(original_calls == 1 && move_calls == 0);
-
-    reset();
-    setup();
-    projection_drop_result = MoveMergeProjectionDropResult::kNotHandled;
-    assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 2, nullptr,
-                                           &source_control_value) == 77);
     assert(original_calls == 1 && move_calls == 0);
 
     reset();
@@ -546,31 +469,57 @@ void test_native_fallback_and_count_encoding_gate() {
     assert(move_calls == 1 && original_calls == 0);
 }
 
+void test_material_and_swap_fallback() {
+    // 宝石落到装备上：material_apply → 透传原版（强化/镶嵌）。
+    // count_supported=0 使 facts_ready=false，跳过堆叠合并尝试，落到材料判断。
+    reset();
+    setup();
+    set_enabled(true);
+    set_wrapper_ready(true);
+    destination_equipment_value = 1;
+    material_type_value = QolItemType::kJewel;
+    count_supported_value = 0;
+    assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
+                                           &source_control_value) == 77);
+    assert(move_calls == 0 && swap_calls == 0 && original_calls == 1);
+
+    // 药水对装备：非材料 → swap 两槽对象。count_supported=0 跳过堆叠合并尝试。
+    reset();
+    setup();
+    set_enabled(true);
+    set_wrapper_ready(true);
+    move_merge_port.swap_slots = &swap_slots;
+    destination_equipment_value = 1;
+    material_type_value = QolItemType::kPotion;
+    count_supported_value = 0;
+    assert(ui_equip_inven_item_proc_wrapper(&destination_control_value, 4, nullptr,
+                                           &source_control_value) == 0);
+    assert(move_calls == 0 && swap_calls == 1 && original_calls == 0);
+    assert(g_test_refresh_calls == 1 && sync_slot_calls == 2);
+}
+
 }  // namespace
 
-const InventoryProjectionCallbacks* projection_callbacks_for_test() {
-    return projection_available ? &projection : nullptr;
-}
+const InventoryProjectionCallbacks& projection_callbacks_for_test() { return projection; }
 
-}  // namespace qol::features::core_item::merge
+}  // namespace qol::features::extension_bag::merge
 
-namespace qol::features::core_item {
-const contracts::InventoryProjectionCallbacks* projection_callbacks() {
-    return merge::projection_callbacks_for_test();
+namespace qol::features::extension_bag {
+const qol::contracts::InventoryProjectionCallbacks& projection_callbacks() {
+    return qol::features::extension_bag::merge::projection_callbacks_for_test();
 }
-}  // namespace qol::features::core_item
+}  // namespace qol::features::extension_bag
 
 int main() {
-    qol::features::core_item::merge::test_backup_once_and_projection_sync();
-    qol::features::core_item::merge::test_drop_tristate_and_protection();
-    qol::features::core_item::merge::test_foreign_failure_and_missing_facts_fallthrough();
-    qol::features::core_item::merge::test_single_owner_and_feature_lifecycle();
-    qol::features::core_item::merge::test_attach_rejects_invalid_ports();
-    qol::features::core_item::merge::test_attach_preserves_wrapper_ready();
-    qol::features::core_item::merge::test_feature_on_wrapper_not_ready_passes_through();
-    qol::features::core_item::merge::test_full_limit_apply_and_optional_refresh();
-    qol::features::core_item::merge::test_foreign_source_protected_without_projection_or_gate();
-    qol::features::core_item::merge::test_event2_native_and_ordinary_fallback();
-    qol::features::core_item::merge::test_native_fallback_and_count_encoding_gate();
+    qol::features::extension_bag::merge::test_backup_once_and_projection_sync();
+    qol::features::extension_bag::merge::test_drop_tristate_and_protection();
+    qol::features::extension_bag::merge::test_foreign_failure_and_missing_facts_fallthrough();
+    qol::features::extension_bag::merge::test_single_owner_and_feature_lifecycle();
+    qol::features::extension_bag::merge::test_wrapper_ready_gate_and_lifecycle();
+    qol::features::extension_bag::merge::test_full_limit_apply_and_optional_refresh();
+    qol::features::extension_bag::merge::test_foreign_source_protected_without_projection_or_gate();
+    qol::features::extension_bag::merge::test_event2_native_and_ordinary_fallback();
+    qol::features::extension_bag::merge::test_native_fallback_and_count_encoding_gate();
+    qol::features::extension_bag::merge::test_material_and_swap_fallback();
     return 0;
 }

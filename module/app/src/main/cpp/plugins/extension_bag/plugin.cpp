@@ -10,7 +10,7 @@
 #include "contracts/ui_confirmation.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_action.h"
-#include "contracts/move_merge.h"
+#include "contracts/game_ports/move_merge_port.h"
 #include "contracts/runtime_hooks.h"
 #include "contracts/slot_data.h"
 #include "contracts/ui.h"
@@ -19,6 +19,7 @@
 #include "contracts/save_facts.h"
 #include "plugins/extension_bag/api/bag_source.h"
 #include "plugins/extension_bag/core/lifecycle.h"
+#include "plugins/extension_bag/core/move_merge_hook.h"
 #include "plugins/extension_bag/assembly/lifecycle_registration.h"
 #include "plugins/extension_bag/assembly/projection_registration.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
@@ -143,9 +144,6 @@ const qol::contracts::CapabilityRequirement kOptionalRequires[] = {
     {qol::contracts::kInventoryRefreshCapabilityId,
      {qol::contracts::kInventoryRefreshVersionMajor,
       qol::contracts::kInventoryRefreshVersionMinor}},
-    {qol::contracts::kMoveMergeControlCapabilityId,
-     {qol::contracts::kMoveMergeControlVersionMajor,
-      qol::contracts::kMoveMergeControlVersionMinor}},
     // 页签锚定：句柄存活/身份校验/失效重建由 core.custom_ui 的 ui_components 提供。
     {qol::contracts::kUiComponentsCapabilityId,
      {qol::contracts::kUiContractMajor, qol::contracts::kUiContractMinor}},
@@ -165,6 +163,10 @@ const qol::contracts::QolPortRequirement kPorts[] = {
     {qol::contracts::QolPortId::QOL_PORT_INVENTORY_EXTRAS,
      {qol::contracts::kQolPortInventoryExtrasVersion.major,
       qol::contracts::kQolPortInventoryExtrasVersion.minor}},
+    // 拖拽合并端口（自 core.item 迁入）：宿主白名单允许 core.item 或 extension_bag。
+    {qol::contracts::QolPortId::QOL_PORT_MOVE_MERGE,
+     {qol::contracts::kQolMoveMergePortVersion.major,
+      qol::contracts::kQolMoveMergePortVersion.minor}},
 };
 
 // P3c：SlotBound dirty 的锁外安全点排空（RenderPre 每帧）；save.slot_data 的 iface
@@ -178,6 +180,7 @@ void close_extension_bag_gates() {
     g_source_active.store(false, std::memory_order_release);
     extension_bag_bag_source_unregister();
     extension_bag_set_enabled(false);
+    merge::set_enabled(false);
 }
 
 // Resident callbacks are gated off on install failure; only reversible registrations
@@ -192,6 +195,7 @@ void rollback_extension_bag_install(const qol::contracts::QolSlotDataApi* slot_d
     extension_bag_bind_craft_facts(nullptr);
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
     extension_bag_bind_world_facts(nullptr);
     g_item_facts = nullptr;
     extension_bag_bind_save_facts(nullptr);
@@ -229,12 +233,14 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
     g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
     extension_bag_bind_world_facts(nullptr);
     g_item_facts = nullptr;
     extension_bag_bind_save_facts(nullptr);
     g_craft_facts = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
     if (ctx.struct_size < sizeof(qol::contracts::PluginContext) ||
         ctx.sdk_major != qol::contracts::kHostSdkMajor ||
         ctx.sdk == nullptr || ctx.game == nullptr) {
@@ -243,22 +249,26 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         extension_bag_bind_craft_facts(nullptr);
         return 1;
     }
-    if (ctx.ports == nullptr || ctx.port_count != 3 || ctx.ports[0] == nullptr ||
-        ctx.ports[1] == nullptr || ctx.ports[2] == nullptr) {
+    if (ctx.ports == nullptr || ctx.port_count != 4 || ctx.ports[0] == nullptr ||
+        ctx.ports[1] == nullptr || ctx.ports[2] == nullptr || ctx.ports[3] == nullptr) {
         g_sdk = nullptr;
         g_game = nullptr;
         g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         extension_bag_bind_craft_facts(nullptr);
@@ -269,6 +279,28 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         static_cast<const qol::contracts::QolCharacterExtrasPort*>(ctx.ports[1]));
     extension_bag_bind_inventory_extras(
         static_cast<const qol::contracts::QolInventoryExtrasPort*>(ctx.ports[2]));
+    // 拖拽合并端口（QOL_PORT_MOVE_MERGE，自 core.item 迁入）：ABI 与必需函数缺失
+    // 时拒绝安装（fail-closed），不保留半可用合并面。
+    const auto* move_merge_port =
+        static_cast<const qol::contracts::QolMoveMergePort*>(ctx.ports[3]);
+    if (!contracts::satisfies(move_merge_port->abi_version,
+                              {contracts::kQolMoveMergePortVersion.major,
+                               contracts::kQolMoveMergePortVersion.minor}) ||
+        move_merge_port->move_item == nullptr || move_merge_port->current_bag == nullptr ||
+        move_merge_port->validate_native_item == nullptr) {
+        extension_bag_bind_move_merge(nullptr);
+        g_sdk = nullptr;
+        g_game = nullptr;
+        g_write_port = nullptr;
+        extension_bag_bind_character_extras(nullptr);
+        extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
+        extension_bag_bind_port_sdk(nullptr);
+        extension_bag_bind_item_facts(nullptr);
+        extension_bag_bind_craft_facts(nullptr);
+        return 1;
+    }
+    extension_bag_bind_move_merge(move_merge_port);
     const void* world_facts_iface = nullptr;
     if (ctx.sdk->capabilities.require == nullptr ||
         !qol::contracts::succeeded(ctx.sdk->capabilities.require(
@@ -281,8 +313,10 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         extension_bag_bind_craft_facts(nullptr);
@@ -301,8 +335,10 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_world_facts(nullptr);
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
@@ -321,8 +357,10 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_world_facts(nullptr);
         g_item_facts = nullptr;
         extension_bag_bind_save_facts(nullptr);
@@ -343,8 +381,10 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_world_facts(nullptr);
         g_item_facts = nullptr;
         extension_bag_bind_save_facts(nullptr);
@@ -363,8 +403,10 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
         g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_character_extras(nullptr);
         extension_bag_bind_inventory_extras(nullptr);
+        extension_bag_bind_move_merge(nullptr);
         extension_bag_bind_port_sdk(nullptr);
         extension_bag_bind_item_facts(nullptr);
         extension_bag_bind_craft_facts(nullptr);
@@ -427,6 +469,9 @@ int plugin_install(qol::contracts::PluginContext& ctx) {
             g_slot_data_flush_task = task;
         }
     }
+    // 等价原 core.item merge::attach 成功置位：安装成功即允许合并（wrapper 就绪态
+    // 由 on_resource_ready 单独维护，未就绪前门禁仍透传）。
+    merge::set_enabled(true);
     return 0;
 }
 
@@ -435,6 +480,8 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     // 先注销袋源与投影回调：注销后 core.item 不再回调本插件，随后才拆绑定。
     extension_bag_bag_source_unregister();
     unregister_projection_callbacks();
+    // merge ptrslot 迁入后：deactivate 即资源归还宿主，wrapper 就绪态一并清零。
+    merge::detach();
     // P3c：先关 slot_data 准入（unregister 先拒绝新请求；终态后零回调由 provider 保证），
     // 磁盘 section 保留（不自动删除、不隐式保存）；注册请求在 deactivate（主线程）内
     // 经当帧 pump 收敛，返回 request 仅供诊断。
@@ -474,6 +521,7 @@ void plugin_deactivate(qol::contracts::PluginContext& ctx) {
     g_write_port = nullptr;
     extension_bag_bind_character_extras(nullptr);
     extension_bag_bind_inventory_extras(nullptr);
+    extension_bag_bind_move_merge(nullptr);
     g_sdk = nullptr;
 }
 
@@ -527,6 +575,9 @@ void plugin_on_enabled(qol::contracts::PluginContext& ctx) {
     }
     g_source_active.store(true, std::memory_order_release);
     extension_bag_set_enabled(true);
+    // 等价原 core.item merge::attach 的置位语义：插件进入 enabled 即允许合并，
+    // ptrslot 就绪态由 on_resource_ready 单独维护。
+    merge::set_enabled(true);
 }
 
 void plugin_on_disabled(qol::contracts::PluginContext& ctx) {
@@ -539,6 +590,7 @@ void plugin_on_disabled(qol::contracts::PluginContext& ctx) {
     unregister_projection_callbacks();
     g_source_active.store(false, std::memory_order_release);
     extension_bag_set_enabled(false);
+    merge::set_enabled(false);
 }
 
 void plugin_fill_status(qol::contracts::PluginStatusOut& out) {
@@ -551,12 +603,16 @@ int32_t plugin_on_resource_ready(qol::contracts::PluginContext& ctx, const char*
     (void)ctx;
     // 资源就绪阶段 SDK/scheduler 已可用，补装安装期可能失败的生命周期任务。
     ensure_lifecycle_task();
+    // merge ptrslot（自 core.item 迁入）：就绪即开 wrapper 门禁；无 backup 需缓存。
+    if (merge::is_merge_resource(resource_id)) {
+        merge::set_wrapper_ready(true);
+        return 0;
+    }
     // 受限回调（§3.3）：只缓存入口 backup（常数时间），无资源操作。
     return extension_bag_bind_backup(resource_id, backup);
 }
 
-// 单一 feature：默认 true（保持旧默认启用行为），用户可见开关。插件仅在 feature
-// 开启（want_run）时安装；资源 gate=nullptr 跟随 lifecycle。
+// Features：扩展背包主开关 + 拖拽合并（自 core.item 迁入，文案/默认值沿用原定义）。
 QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
     if (enabled != 0) {
         extension_bag_set_enabled(true);
@@ -579,6 +635,7 @@ QolResult extension_bag_toggle(contracts::PluginContext&, uint8_t enabled) {
         unregister_projection_callbacks();
         extension_bag_set_enabled(false);
         g_source_active.store(false, std::memory_order_release);
+        merge::set_enabled(false);
     }
     return contracts::ok();
 }
@@ -587,6 +644,13 @@ constexpr qol::contracts::FeatureDefinition kFeatures[] = {
     {"extension_bag.extended_bag", 1, qol::contracts::FeatureCategory::kGameplay,
      qol::contracts::FeatureType::kToggle, "额外背包", "添加一列额外背包",
       &extension_bag_toggle, nullptr, nullptr, -2},
+    {"move_merge.drag_merge", 1, qol::contracts::FeatureCategory::kBasicOptimization,
+     qol::contracts::FeatureType::kToggle, "拖动合并", "允许合并同种可堆叠物品",
+     [](contracts::PluginContext&, uint8_t enabled) -> QolResult {
+         merge::set_enabled(enabled != 0);
+         return contracts::ok();
+     },
+     nullptr},
 };
 
 const qol::contracts::PluginDescriptor kDescriptor = {
@@ -608,9 +672,9 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     &plugin_fill_status,
     &plugin_on_resource_ready,
     kPorts,
-    3,
+    4,  // extension_bag_write + character_extras + inventory_extras + move_merge
     nullptr, 0,
-    kFeatures, 1,
+    kFeatures, 2,
     nullptr,
     0,
     nullptr,

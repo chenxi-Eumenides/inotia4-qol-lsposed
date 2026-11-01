@@ -59,6 +59,10 @@ void extension_bag_bind_inventory_extras(
     runtime_state().host.inventory_extras = port;
 }
 
+void extension_bag_bind_move_merge(const qol::contracts::QolMoveMergePort* port) {
+    runtime_state().host.move_merge = port;
+}
+
 void extension_bag_bind_item_facts(const qol::contracts::ItemFactsApi* facts) {
     runtime_state().host.item_facts = facts;
 }

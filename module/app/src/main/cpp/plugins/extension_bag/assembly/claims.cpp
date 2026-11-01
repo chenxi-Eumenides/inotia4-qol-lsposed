@@ -1,6 +1,7 @@
 #include "plugins/extension_bag/core/ui_state.h"
 #include "contracts/ownership.h"
 #include "game_ui_virtbag.h"
+#include "plugins/extension_bag/core/move_merge_hook.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "contracts/popup_enter_alias.h"
 #include "plugins/extension_bag/runtime/extension_bag_port.h"
@@ -23,6 +24,7 @@
 // 部分 wrap 语义（空槽保留原值），event 槽按 hooks/popup_state 契约做 32 位返回适配。
 // C1–C21 call patch 不在本批（a3b-2 收口），故 inject 线程保留。
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 
@@ -254,7 +256,10 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
     // 时宿主每逻辑帧重试到成功，语义等价旧 300ms 重试线程。
     // gate=nullptr：资源跟随插件 lifecycle，单一 feature 关闭即整体还原。
     // Core, detail actions, store and mix resources are all registered below.
-    static const ::qol::contracts::ResourceClaim kClaims[] = {
+    // ptrslot:MOVE_MERGE_GOT（自 core.item 迁入）声明表在 core/move_merge_hook.cpp，
+    // 此处拼入总表，保证 owner/id 与 wrapper 单一来源。
+    static const auto kClaims = [&] {
+        const ::qol::contracts::ResourceClaim kBaseClaims[] = {
         {
             kEbM1SaveInventory,
             "F_SAVE_SAVE_INVENTORY_VMA",
@@ -545,11 +550,24 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             "合成器袋列 B 尾调用 wrapper（原版袋列高亮遮蔽）",
             nullptr, 120, reinterpret_cast<void*>(&mix_draw_inven_bag_group_wrapper),
         },
-    };
+        };
+        // 追加 merge ptrslot（owner=extension_bag，自 core.item 迁入）。
+        uint32_t merge_count = 0;
+        const ::qol::contracts::ResourceClaim* merge =
+            merge::merge_claims(&merge_count);
+        constexpr uint32_t kBaseCount =
+            static_cast<uint32_t>(sizeof(kBaseClaims) / sizeof(kBaseClaims[0]));
+        std::array<::qol::contracts::ResourceClaim, kBaseCount + 1> table{};
+        for (uint32_t i = 0; i < kBaseCount; ++i) table[i] = kBaseClaims[i];
+        for (uint32_t i = 0; i < merge_count && kBaseCount + i < table.size(); ++i) {
+            table[kBaseCount + i] = merge[i];
+        }
+        return table;
+    }();
     if (out_count != nullptr) {
-        *out_count = static_cast<uint32_t>(sizeof(kClaims) / sizeof(kClaims[0]));
+        *out_count = static_cast<uint32_t>(kClaims.size());
     }
-    return kClaims;
+    return kClaims.data();
 }
 
 int32_t extension_bag_bind_backup(const char* resource_id, void* backup) {

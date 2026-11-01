@@ -34,7 +34,6 @@ extern const contracts::QolItemPort* g_port;
 extern const contracts::QolItemMoneyWritePort* g_item_money_write;
 extern const contracts::QolItemDiceWritePort* g_item_dice_write;
 extern const contracts::QolItemInventoryStateWritePort* g_item_state_write;
-extern const contracts::QolMoveMergePort* g_move_merge_port;
 extern const contracts::QolCharacterExtrasPort* g_character_extras_port;
 extern Snapshot<ItemSnapshot> g_snapshot;
 

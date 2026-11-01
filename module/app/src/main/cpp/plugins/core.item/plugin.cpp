@@ -14,7 +14,6 @@
 #include "contracts/commands.h"
 #include "contracts/character_state.h"
 #include "contracts/game_ports/character_extras_port.h"
-#include "contracts/game_ports/move_merge_port.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/game_ports/item_dice_write_port.h"
 #include "contracts/game_ports/item_money_write_port.h"
@@ -26,12 +25,10 @@
 #include "contracts/inventory_slot.h"
 #include "contracts/item_facts.h"
 #include "contracts/item_state.h"
-#include "contracts/move_merge.h"
 #include "contracts/world_facts.h"
 #include "usecases/item_slot.h"
 #include "usecases/item_action.h"
 #include "usecases/sell_item.h"
-#include "hooks/merge_hook.h"
 #include "http/json_lite.h"
 #include "http/response.h"
 #include "bags/snapshot_sdk.h"
@@ -61,9 +58,6 @@ const contracts::CapabilityProvisionRef kProvides[] = {
       &kInventoryActionApi},
     {contracts::kInventorySlotCapabilityId, contracts::kInventorySlotVersion,
      &inventory_hooks::kInventorySlotApi},
-    {contracts::kMoveMergeControlCapabilityId,
-     {contracts::kMoveMergeControlVersionMajor, contracts::kMoveMergeControlVersionMinor},
-     &merge::kMoveMergeControlApi},
     {contracts::kInventoryProjectionCapabilityId,
      {contracts::kInventoryProjectionVersionMajor, contracts::kInventoryProjectionVersionMinor},
      &kInventoryProjectionRegistryApi},
@@ -81,8 +75,6 @@ const contracts::QolPortRequirement kPorts[] = {
     {contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE,
      {contracts::kQolPortItemInventoryStateWriteVersion.major,
       contracts::kQolPortItemInventoryStateWriteVersion.minor}},
-    {contracts::QolPortId::QOL_PORT_MOVE_MERGE,
-     {contracts::kQolMoveMergePortVersion.major, contracts::kQolMoveMergePortVersion.minor}},
     {contracts::QolPortId::QOL_PORT_CHARACTER_EXTRAS,
      {contracts::kQolPortCharacterExtrasVersion.major,
       contracts::kQolPortCharacterExtrasVersion.minor}},
@@ -127,11 +119,11 @@ const contracts::PluginDescriptor& plugin_descriptor() {
             &plugin_fill_status,
             &on_resource_ready,
             kPorts,
-            6,
+            5,
             nullptr,
             0,
             kFeatures,
-            2,
+            1,
             kHttpEndpoints,
             static_cast<uint32_t>(kHttpEndpointCount),
             nullptr,

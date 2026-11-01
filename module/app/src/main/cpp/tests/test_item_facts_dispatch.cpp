@@ -859,9 +859,10 @@ void initialize_character_extras_port() {
     kFakeCharacterExtrasPort.read.can_apply_stuff_items = &fake_can_apply_stuff;
 }
 
+// QOL_PORT_MOVE_MERGE 已迁往 extension_bag；core.item 端口为 5 个。
 const void* const kPortArray[] = {
     &kFakePort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort,
-    &kFakeMoveMergePort, &kFakeCharacterExtrasPort};
+    &kFakeCharacterExtrasPort};
 
 // 库存读侧 GET owner 迁移后，core.item 与 core.inventory 各持有一个 frame task；
 // fake scheduler 以固定槽位容纳两个插件的任务。
@@ -1377,7 +1378,7 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
     ctx.game = &g_fake_game_host;
     ctx.plugin_id = "core.item";
     ctx.ports = kPortArray;
-    ctx.port_count = 6;
+    ctx.port_count = 5;
     return ctx;
 }
 
@@ -2959,7 +2960,7 @@ const qol::contracts::QolItemPort kGoldenPort{qol::contracts::kQolPortItemVersio
                                                sizeof(qol::contracts::QolItemPort), kGoldenRead};
 const void* const kGoldenPortArray[] = {
     &kGoldenPort, &kFakeMoneyWritePort, &kFakeDiceWritePort, &kFakeItemStateWritePort,
-    &kFakeMoveMergePort, &kFakeCharacterExtrasPort};
+    &kFakeCharacterExtrasPort};
 
 static void golden_fill_item(uint8_t* bytes, uint16_t flags, uint32_t raw_count, uint8_t magic,
                              uint8_t socket, uint16_t enchant) {
@@ -3057,7 +3058,7 @@ void test_inventory_owner_vs_legacy_golden() {
     ctx.game = &g_fake_game_host;
     ctx.plugin_id = "core.item";
     ctx.ports = kGoldenPortArray;
-    ctx.port_count = 6;
+    ctx.port_count = 5;
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
@@ -3211,7 +3212,7 @@ bool install_core_item_golden(GoldenHarness* out) {
     ctx.game = &g_fake_game_host;
     ctx.plugin_id = "core.item";
     ctx.ports = kGoldenPortArray;
-    ctx.port_count = 6;
+    ctx.port_count = 5;
     if (descriptor.install(ctx) != 0) return false;
     descriptor.on_enabled(ctx);
     if (!qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor))) {

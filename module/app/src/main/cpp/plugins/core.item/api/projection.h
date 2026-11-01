@@ -1,7 +1,6 @@
 #pragma once
 
 #include "contracts/inventory_projection.h"
-#include "contracts/move_merge.h"
 
 namespace qol::features::core_item {
 
