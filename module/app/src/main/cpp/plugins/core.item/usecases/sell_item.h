@@ -2,7 +2,6 @@
 
 #include "../../../contracts/plugin.h"
 #include "../../../contracts/inventory_action.h"
-#include "../../../contracts/inventory_refresh.h"
 #include "../../../contracts/item_facts.h"
 #include "../../../contracts/game_ports/item_port.h"
 
@@ -14,8 +13,6 @@ inline const contracts::QolItemPort*& bound_item_port() {
     return item_port;
 }
 }  // namespace detail
-
-extern const contracts::InventoryRefreshApi kInventoryRefreshApi;
 
 bool attach(const contracts::QolHostSdk* sdk, const contracts::QolGameHost* game,
             const contracts::ItemFactsApi* item_facts);

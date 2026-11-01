@@ -10,6 +10,7 @@
 #include "contracts/plugin.h"
 #include "contracts/bag.h"
 #include "contracts/host_sdk.h"
+#include "contracts/inventory_refresh.h"
 #include "contracts/inventory_scope.h"
 #include "contracts/ui.h"
 
@@ -31,17 +32,12 @@ extern const contracts::QolItemPort* g_port;
 
 namespace {
 
-using UiEquipRefreshItemAreaFn = void (*)();
 using EquipItemFromInvenToSlotFn = int (*)(void*, int32_t, int32_t, int32_t);
 using PutJewelFn = int (*)(void*, void*);
 using UnequipFn = int (*)(void*, int32_t);
-using ButtonEquipExeFn = void (*)(void*);
 using ButtonDestroyExeFn = void (*)(void*);
-using ButtonUnequipExeFn = void (*)(void*);
-using UiEquipOkConfirmUseItemFn = void (*)(void*);
 using UiEquipButtonUseMercenarySealExeFn = void (*)(void*);
 using UiEquipOkDestroyItemFn = uint64_t (*)();
-using UiEquipEquipControlEventProcFn = uint64_t (*)(void*, uint64_t, void*, void*);
 using CharUseItemExFn = int (*)(void*, void*, int);
 using CharProcessShortcutFn = int (*)(void*, int);
 using ShortcutGetStateFn = int (*)(void*, void*);
@@ -154,21 +150,15 @@ bool use_registered_source_category(int32_t category) {
     return false;
 }
 
-UiEquipRefreshItemAreaFn g_backup_refresh_item_area = nullptr;
-void (*g_player_update_shortcut)(int32_t) = nullptr;
 EquipItemFromInvenToSlotFn g_backup_equip_item_from_inven_to_slot = nullptr;
 PutJewelFn g_backup_put_jewel = nullptr;
 UnequipFn g_backup_unequip_item_to_inven = nullptr;
-ButtonEquipExeFn g_backup_button_equip_exe = nullptr;
 ButtonDestroyExeFn g_backup_button_destroy_exe = nullptr;  // R-55 预演标记源
-ButtonUnequipExeFn g_backup_button_unequip_exe = nullptr;
-UiEquipOkConfirmUseItemFn g_backup_ok_confirm_use_item = nullptr;
 // R-63 佣兵徽章专用使用按钮函数级接管：UIEquip_ButtonUseMercenarySealExe(0xb8144)。
 UiEquipButtonUseMercenarySealExeFn g_backup_button_use_mercenary_seal_exe = nullptr;
 // R-55 原版背包详情出售接管：UIEquip_OKDestroyItem(0xb83d0)。返回值仅按钮预演读取
 // （弹窗展示金额），用 UiEquipOkDestroyItemFn（uint64_t()）捕获 x0。
 UiEquipOkDestroyItemFn g_backup_ok_destroy_item = nullptr;
-UiEquipEquipControlEventProcFn g_backup_equip_control_event_proc = nullptr;
 CharUseItemExFn g_backup_char_use_item_ex = nullptr;
 CharProcessShortcutFn g_backup_char_process_shortcut = nullptr;
 ShortcutGetStateFn g_backup_shortcut_get_state = nullptr;
@@ -689,20 +679,6 @@ void* make_item_wrapper(int32_t category, int32_t arg2, int32_t flag) {
     static_cast<void>(stage4_make_item_writeback_count(category, arg2, flag));
     return item;
 }
-void refresh_item_area_wrapper() {
-    const qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"hook:UIEquip_RefreshItemArea"});
-    if (!inventory_native_hook_support_enabled()) {
-        call_backup("hook:UIEquip_RefreshItemArea", g_backup_refresh_item_area);
-        return;
-    }
-    if (g_backup_refresh_item_area == nullptr) {
-        backup_missing("hook:UIEquip_RefreshItemArea");
-        return;
-    }
-    inventory_native_hook_call_refresh_item_area_original();
-}
 int provider_equip_item(void* character, int32_t flat_bag, int32_t slot) {
     const auto* state_write = qol::features::core_item::g_item_state_write;
     const auto* extras = qol::features::core_item::g_character_extras_port;
@@ -949,38 +925,6 @@ int put_jewel_wrapper(void* equip_item, void* jewel_item) {
     return stage4_put_jewel(equip_item, jewel_item, nullptr, g_backup_put_jewel, nullptr);
 }
 
-void button_equip_exe_wrapper(void* button) {
-    const qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"hook:UIEquip_ButtonEquipExe"});
-    if (!inventory_native_hook_support_enabled()) {
-        call_backup("hook:UIEquip_ButtonEquipExe", g_backup_button_equip_exe, button);
-        return;
-    }
-    const auto* projection = qol::features::core_item::projection_callbacks();
-    bool projection_equip_handled =
-        projection != nullptr && projection->handle_backpack_equip != nullptr &&
-        projection->handle_backpack_equip();
-    if (!projection_equip_handled && projection != nullptr &&
-        projection->handle_character_equip != nullptr) {
-        projection_equip_handled = projection->handle_character_equip();
-    }
-    QOL_LOG_INFO(QolDomain::kInventory,
-                 "ButtonEquipExe projection=%p callback=%p handled=%d",
-                 projection,
-                 projection == nullptr ? nullptr : reinterpret_cast<void*>(projection->handle_backpack_equip),
-                 projection_equip_handled ? 1 : 0);
-    if (projection_equip_handled) return;
-    qol::contracts::QolInventoryItemRef source_ref{};
-    if (selected_registered_source_item(&source_ref)) {
-        QOL_LOG_WARN(QolDomain::kInventory,
-                     "ButtonEquipExe registered-source item blocked bag=%d slot=%d",
-                     source_ref.bag, source_ref.slot);
-        return;
-    }
-    call_backup("hook:UIEquip_ButtonEquipExe", g_backup_button_equip_exe, button);
-}
-
 // R-55：详情出售按钮函数级标记。原按钮在同一调用内先调 UIEquip_OKDestroyItem
 // 预演（x23=0x666）取确认框展示金额、再创建 YesNo 弹窗；预演期间置 thread_local
 // 标记，供 ok_destroy_item_wrapper 区分「预演」与「弹窗 OK 真实结算」。
@@ -1012,49 +956,6 @@ void button_destroy_exe_wrapper(void* button) {
     g_in_equip_destroy_button = true;
     call_backup("hook:UIEquip_ButtonDestroyExe", g_backup_button_destroy_exe, button);
     g_in_equip_destroy_button = previous;
-}
-
-void button_unequip_exe_wrapper(void* button) {
-    const qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"hook:UIEquip_ButtonUnequipExe"});
-    if (!inventory_native_hook_support_enabled()) {
-        call_backup("hook:UIEquip_ButtonUnequipExe", g_backup_button_unequip_exe, button);
-        return;
-    }
-    const auto* projection = qol::features::core_item::projection_callbacks();
-    if (projection != nullptr && projection->handle_original_bag_unequip != nullptr &&
-        projection->handle_original_bag_unequip()) {
-        return;
-    }
-    call_backup("hook:UIEquip_ButtonUnequipExe", g_backup_button_unequip_exe, button);
-}
-
-void ok_confirm_use_item_wrapper(void* item) {
-    const qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"hook:UIEquip_OKConfirmUseItem"});
-    if (!inventory_native_hook_support_enabled()) {
-        call_backup("hook:UIEquip_OKConfirmUseItem", g_backup_ok_confirm_use_item, item);
-        return;
-    }
-    qol::contracts::QolInventoryItemRef source_ref{};
-    const auto* source = source_for_hook_item(item, &source_ref);
-    if (source != nullptr) {
-        if (source->use == nullptr ||
-            !qol::contracts::succeeded(source->use(
-                {source_ref.space_id, source_ref.bag}, source_ref.slot))) {
-            QOL_LOG_WARN(QolDomain::kInventory,
-                         "registered-source item use unsupported or failed bag=%d slot=%d",
-                         source_ref.bag, source_ref.slot);
-        }
-        return;
-    }
-    if (g_backup_ok_confirm_use_item == nullptr) {
-        backup_missing("hook:UIEquip_OKConfirmUseItem");
-        return;
-    }
-    call_backup("hook:UIEquip_OKConfirmUseItem", g_backup_ok_confirm_use_item, item);
 }
 
 // 仅为已注册袋源提供显式 use 回调；没有回调时不把投影对象交给原版物品池。
@@ -1270,16 +1171,6 @@ uint64_t ok_destroy_item_wrapper() {
     return 0;
 }
 
-uint64_t equip_control_event_proc_wrapper(void* control, uint64_t event, void* x2, void* param) {
-    const qol::contracts::InFlightGuard in_flight_guard(
-        g_sdk == nullptr ? nullptr : &g_sdk->in_flight,
-        {"hook:UIEquip_EquipControlEventProc"});
-    // call_backup 对 null backup 记 backup_missing 并按返回类型默认值（0）返回；
-    // 支持开关两侧的分流语句完全相同，无需前置判空或分支。
-    return call_backup("hook:UIEquip_EquipControlEventProc",
-                       g_backup_equip_control_event_proc, control, event, x2, param);
-}
-
 struct ShortcutTraceScope {
     uint64_t previous;
     uint32_t previous_state_calls;
@@ -1454,24 +1345,13 @@ const qol::contracts::ResourceClaim kInventoryHookClaims[] = {
     INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_PutJewel", "F_PUT_JEWEL_VMA", put_jewel_wrapper),
     INVENTORY_HOOK_CLAIM("hook:CHAR_UnequipItemToInven", "F_UNEQUIP_VMA",
                          unequip_item_to_inven_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonEquipExe", "F_UIEQUIP_BUTTON_EQUIP_EXE_VMA",
-                         button_equip_exe_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonUnequipExe", "F_UIEQUIP_BUTTON_UNEQUIP_EXE_VMA",
-                         button_unequip_exe_wrapper),
     INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonDestroyExe", "F_UIEQUIP_BUTTON_DESTROY_EXE_VMA",
                          button_destroy_exe_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:UIEquip_OKConfirmUseItem", "F_UIEQUIP_OK_CONFIRM_USE_ITEM_VMA",
-                         ok_confirm_use_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:UIEquip_OKDestroyItem", "F_UIEQUIP_OK_DESTROY_ITEM_VMA",
                          ok_destroy_item_wrapper),
     INVENTORY_HOOK_CLAIM("hook:UIEquip_ButtonUseMercenarySealExe",
                          "F_UIEQUIP_BUTTON_USE_MERCENARY_SEAL_EXE_VMA",
                          button_use_mercenary_seal_exe_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:UIEquip_EquipControlEventProc",
-                         "F_UIEQUIP_EQUIP_CONTROL_EVENT_PROC_VMA",
-                         equip_control_event_proc_wrapper),
-    INVENTORY_HOOK_CLAIM("hook:UIEquip_RefreshItemArea", "F_UIEQUIP_REFRESH_ITEM_AREA_VMA",
-                         refresh_item_area_wrapper),
     INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_Divide", "F_ITEMSYSTEM_DIVIDE_VMA",
                          item_system_divide_wrapper),
     INVENTORY_HOOK_CLAIM("hook:ITEMSYSTEM_MakeItem", "F_MAKE_ITEM_VMA", make_item_wrapper),
@@ -1490,14 +1370,9 @@ void** backup_slot_for_handler(void* handler) {
     BACKUP_SLOT(equip_item_from_inven_to_slot_wrapper, g_backup_equip_item_from_inven_to_slot);
     BACKUP_SLOT(put_jewel_wrapper, g_backup_put_jewel);
     BACKUP_SLOT(unequip_item_to_inven_wrapper, g_backup_unequip_item_to_inven);
-    BACKUP_SLOT(button_equip_exe_wrapper, g_backup_button_equip_exe);
-    BACKUP_SLOT(button_unequip_exe_wrapper, g_backup_button_unequip_exe);
     BACKUP_SLOT(button_destroy_exe_wrapper, g_backup_button_destroy_exe);
-    BACKUP_SLOT(ok_confirm_use_item_wrapper, g_backup_ok_confirm_use_item);
     BACKUP_SLOT(ok_destroy_item_wrapper, g_backup_ok_destroy_item);
     BACKUP_SLOT(button_use_mercenary_seal_exe_wrapper, g_backup_button_use_mercenary_seal_exe);
-    BACKUP_SLOT(equip_control_event_proc_wrapper, g_backup_equip_control_event_proc);
-    BACKUP_SLOT(refresh_item_area_wrapper, g_backup_refresh_item_area);
     BACKUP_SLOT(char_use_item_ex_wrapper, g_backup_char_use_item_ex);
     BACKUP_SLOT(char_process_shortcut_wrapper, g_backup_char_process_shortcut);
     BACKUP_SLOT(shortcut_get_state_wrapper, g_backup_shortcut_get_state);
@@ -1547,28 +1422,28 @@ int32_t inventory_hooks_bind_backup(const char* resource_id, void* backup) {
     return 1;
 }
 
+// 模块主动刷新走 provider 的 trampoline：inventory_refresh 的 owner 是 extension_bag，
+// core.item 只经 capability 请求原函数，不保留原生符号（provider 缺失时返回 false，
+// 调用方按 no-op 降级）。
 bool inventory_native_hook_call_refresh_item_area_original() {
-    const UiEquipRefreshItemAreaFn original = g_backup_refresh_item_area;
-    if (original == nullptr) {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) {
         backup_missing("hook:UIEquip_RefreshItemArea");
         return false;
     }
-    original();
-    return true;
-}
-
-void inventory_native_hook_bind_player_update_shortcut(void (*update_shortcut)(int32_t)) {
-    g_player_update_shortcut = update_shortcut;
-}
-
-void inventory_native_hook_update_shortcut() {
-    // 无参兼容入口：原版函数需要类别参数，这里不做刷新，避免用未定义 w0 误更新。
-}
-
-void inventory_native_hook_update_shortcut_category(int32_t category) {
-    if (g_player_update_shortcut != nullptr && category >= 0) {
-        g_player_update_shortcut(category);
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
+        qol::contracts::kInventoryRefreshCapabilityId,
+        {static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
+         static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)},
+        &iface);
+    const auto* refresh = qol::contracts::succeeded(result) && iface != nullptr
+                              ? static_cast<const qol::contracts::InventoryRefreshApi*>(iface)
+                              : nullptr;
+    if (refresh == nullptr || refresh->call_original == nullptr) {
+        backup_missing("hook:UIEquip_RefreshItemArea");
+        return false;
     }
+    return refresh->call_original();
 }
 
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk) {

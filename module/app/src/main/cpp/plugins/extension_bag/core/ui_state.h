@@ -93,6 +93,13 @@ struct ExtensionBagUiState {
     void* backup_control_item_set_item = nullptr;
     void* backup_control_item_get_item = nullptr;
     void* backup_get_bag_size = nullptr;
+    // 装备页 UI 入口 backup（自 core.item 迁入）：RefreshItemArea 槽同时是
+    // inventory_refresh.call_original 的 trampoline。
+    void* backup_button_equip_exe = nullptr;
+    void* backup_button_unequip_exe = nullptr;
+    void* backup_ok_confirm_use_item = nullptr;
+    void* backup_equip_control_event_proc = nullptr;
+    void* backup_refresh_item_area = nullptr;
     StoreSceneEventFn store_original_event = nullptr;
     StoreSceneNoArgFn store_original_f3 = nullptr;
     StoreSceneNoArgFn store_original_enter = nullptr;

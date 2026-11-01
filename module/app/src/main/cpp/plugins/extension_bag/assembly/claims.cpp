@@ -11,6 +11,7 @@
 #include "plugins/extension_bag/core/tabs.h"
 #include "plugins/extension_bag/core/host_adapter.h"
 #include "plugins/extension_bag/core/item_display_hook.h"
+#include "plugins/extension_bag/ui/equip_hooks.h"
 #include "plugins/extension_bag/ui/host_ui.h"
 #include "plugins/extension_bag/runtime/logging.h"
 
@@ -551,16 +552,27 @@ const ::qol::contracts::ResourceClaim* extension_bag_claims(uint32_t* out_count)
             nullptr, 120, reinterpret_cast<void*>(&mix_draw_inven_bag_group_wrapper),
         },
         };
-        // 追加 merge ptrslot（owner=extension_bag，自 core.item 迁入）。
+        // 追加 merge ptrslot 与装备页 5 条 UI hook（owner=extension_bag，均自 core.item 迁入）。
         uint32_t merge_count = 0;
         const ::qol::contracts::ResourceClaim* merge =
             merge::merge_claims(&merge_count);
+        uint32_t equip_count = 0;
+        const ::qol::contracts::ResourceClaim* equip =
+            equip_hooks::equip_hooks_claims(&equip_count);
         constexpr uint32_t kBaseCount =
             static_cast<uint32_t>(sizeof(kBaseClaims) / sizeof(kBaseClaims[0]));
-        std::array<::qol::contracts::ResourceClaim, kBaseCount + 1> table{};
+        // 资源总数 = 25 base + 1 merge ptrslot + 5 装备页 UI hook = 31。
+        static_assert(kBaseCount == 25,
+                      "extension_bag base claim count changed; update the 26→31 resource total");
+        constexpr uint32_t kExtraCapacity = 1 + 5;
+        std::array<::qol::contracts::ResourceClaim, kBaseCount + kExtraCapacity> table{};
         for (uint32_t i = 0; i < kBaseCount; ++i) table[i] = kBaseClaims[i];
-        for (uint32_t i = 0; i < merge_count && kBaseCount + i < table.size(); ++i) {
-            table[kBaseCount + i] = merge[i];
+        uint32_t next = kBaseCount;
+        for (uint32_t i = 0; i < merge_count && next < table.size(); ++i, ++next) {
+            table[next] = merge[i];
+        }
+        for (uint32_t i = 0; i < equip_count && next < table.size(); ++i, ++next) {
+            table[next] = equip[i];
         }
         return table;
     }();
@@ -606,6 +618,17 @@ int32_t extension_bag_bind_backup(const char* resource_id, void* backup) {
         if (backup == nullptr) return 1;
         qol::extension_bag::ui_state().ui.backup_get_bag_size = backup;
         return 0;
+    }
+    // 装备页 5 条 UI hook（自 core.item 迁入）：ButtonEquipExe / ButtonUnequipExe /
+    // OKConfirmUseItem / RefreshItemArea / EquipControlEventProc。id→backup 槽映射与
+    // RefreshItemArea trampoline 记录由 equip_hooks 单一维护。
+    if (resource_id != nullptr &&
+        (std::strcmp(resource_id, "hook:UIEquip_ButtonEquipExe") == 0 ||
+         std::strcmp(resource_id, "hook:UIEquip_ButtonUnequipExe") == 0 ||
+         std::strcmp(resource_id, "hook:UIEquip_OKConfirmUseItem") == 0 ||
+         std::strcmp(resource_id, "hook:UIEquip_RefreshItemArea") == 0 ||
+         std::strcmp(resource_id, "hook:UIEquip_EquipControlEventProc") == 0)) {
+        return ::qol::features::extension_bag::equip_hooks::bind_backup(resource_id, backup);
     }
     return 1;
 }

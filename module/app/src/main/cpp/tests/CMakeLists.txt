@@ -2244,6 +2244,21 @@ target_compile_features(move_merge_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(move_merge_plugin_tests PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME move_merge_plugin_tests COMMAND move_merge_plugin_tests)
 
+# Production EB 装备页 UI hook fixture：5 条入口 claim（自 core.item 迁入）、backup 交付
+# （含 RefreshItemArea trampoline）与 inventory_refresh provider。
+add_executable(extension_bag_equip_hooks_tests
+    test_extension_bag_equip_hooks.cpp
+    ${CPP_DIR}/plugins/extension_bag/core/ui_state.cpp
+)
+target_include_directories(extension_bag_equip_hooks_tests PRIVATE
+    ${CPP_DIR}
+    ${JNI_INCLUDE_DIRS}
+)
+target_compile_features(extension_bag_equip_hooks_tests PRIVATE cxx_std_17)
+set_target_properties(extension_bag_equip_hooks_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME extension_bag_equip_hooks_tests COMMAND extension_bag_equip_hooks_tests)
+
 # core.ui_state native fallback JSON, custom-state merge, and sequence/generation acceptance.
 add_executable(core_ui_state_tests
     test_core_ui_state.cpp

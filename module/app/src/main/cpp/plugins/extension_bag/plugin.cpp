@@ -24,6 +24,7 @@
 #include "plugins/extension_bag/assembly/projection_registration.h"
 #include "plugins/extension_bag/extension_bag_bridge.h"
 #include "plugins/extension_bag/game_ui_virtbag.h"
+#include "plugins/extension_bag/ui/equip_hooks.h"
 #include "plugins/extension_bag/runtime/inventory_access.h"
 #include "plugins/extension_bag/runtime/ownership_port.h"
 #include "plugins/extension_bag/runtime/session.h"
@@ -98,6 +99,7 @@ const qol::contracts::ResourceClaim* g_resources = extension_bag_claims(&g_resou
 
 // 本插件不再向宿主提供 extension_bag / inventory.merge_projection 能力：
 // 数据面经 core.item 的 inventory.bag_source 注册，投影回调改为注册到 core.item。
+// 唯一对外能力是 inventory_refresh（provider 自 core.item 迁入）。
 
 const qol::contracts::CapabilityRequirement kRequires[] = {
     {
@@ -140,10 +142,16 @@ const qol::contracts::CapabilityRequirement kRequires[] = {
     },
 };
 
-const qol::contracts::CapabilityRequirement kOptionalRequires[] = {
+// inventory_refresh provider（自 core.item 迁入）：call_original 直调本插件
+// UIEquip_RefreshItemArea 的 backup trampoline，消费者是 core.item 的出售结算等路径。
+const qol::contracts::CapabilityProvisionRef kProvides[] = {
     {qol::contracts::kInventoryRefreshCapabilityId,
      {qol::contracts::kInventoryRefreshVersionMajor,
-      qol::contracts::kInventoryRefreshVersionMinor}},
+      qol::contracts::kInventoryRefreshVersionMinor},
+     &kInventoryRefreshApi},
+};
+
+const qol::contracts::CapabilityRequirement kOptionalRequires[] = {
     // 页签锚定：句柄存活/身份校验/失效重建由 core.custom_ui 的 ui_components 提供。
     {qol::contracts::kUiComponentsCapabilityId,
      {qol::contracts::kUiContractMajor, qol::contracts::kUiContractMinor}},
@@ -659,7 +667,8 @@ const qol::contracts::PluginDescriptor kDescriptor = {
     8, kRequires,  // requires=world.facts + item.facts + save.facts + craft.facts + save.slot_data + inventory.bag_source + inventory.action 3.0 + inventory.projection 1.0
     static_cast<uint32_t>(sizeof(kOptionalRequires) / sizeof(kOptionalRequires[0])),
     kOptionalRequires,
-    0, nullptr,
+    static_cast<uint32_t>(sizeof(kProvides) / sizeof(kProvides[0])),
+    kProvides,
     g_resource_count, g_resources,
     // Intentional global bridge ownership: extension_bag JNI exports live in bridge/native.
     // check_jni validates bridge declarations against exports both ways; descriptor reverse

@@ -50,9 +50,6 @@ namespace qol::features::core_item {
 const contracts::CapabilityProvisionRef kProvides[] = {
     {contracts::kItemFactsCapabilityId, contracts::kItemFactsVersion, &kItemFactsApi},
     {contracts::kItemStateCapabilityId, contracts::kItemStateVersion, &kItemStateApi},
-    {contracts::kInventoryRefreshCapabilityId,
-     {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor},
-     &inventory_hooks::kInventoryRefreshApi},
     {contracts::kInventoryActionCapabilityId,
      {contracts::kInventoryActionVersionMajor, contracts::kInventoryActionVersionMinor},
       &kInventoryActionApi},
@@ -92,6 +89,10 @@ const contracts::CapabilityRequirement kOptionalRequires[] = {
     // 袋源注册表由 core.inventory 提供；缺失时注册源查询为空，原生路径不受影响。
     {contracts::kBagSourceCapabilityId,
      {contracts::kBagSourceVersion.major, contracts::kBagSourceVersion.minor}},
+    // 原版刷新 trampoline 由 extension_bag 提供（owner 自本插件迁出）；缺失时出售结算
+    // 后的刷新退化为 no-op，不影响其余行为。
+    {contracts::kInventoryRefreshCapabilityId,
+     {contracts::kInventoryRefreshVersionMajor, contracts::kInventoryRefreshVersionMinor}},
 };
 
 const contracts::PluginDescriptor& plugin_descriptor() {

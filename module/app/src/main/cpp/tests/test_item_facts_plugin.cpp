@@ -179,7 +179,8 @@ int main() {
     CHECK(descriptor.requires_count == 0 && descriptor.requires == nullptr);
     // 合并 inventory_hooks 后新增 world.facts optional：匹配与物品事实按调用时 require，
     // 缺失时只降级对应行为，不阻断 item.facts。
-    CHECK(descriptor.optional_count == 5 && descriptor.optional_requires != nullptr);
+    // 库存刷新 trampoline（inventory_refresh）owner 迁往 extension_bag 后改为 optional。
+    CHECK(descriptor.optional_count == 6 && descriptor.optional_requires != nullptr);
     CHECK(std::strcmp(descriptor.optional_requires[0].id,
                       qol::contracts::kCharacterStateCapabilityId) == 0);
     CHECK(descriptor.optional_requires[0].range.major == qol::contracts::kCharacterStateVersion.major);
@@ -205,11 +206,18 @@ int main() {
           qol::contracts::kBagSourceVersion.major);
     CHECK(descriptor.optional_requires[4].range.min_minor ==
           qol::contracts::kBagSourceVersion.minor);
+    CHECK(std::strcmp(descriptor.optional_requires[5].id,
+                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
+    CHECK(descriptor.optional_requires[5].range.major ==
+          qol::contracts::kInventoryRefreshVersionMajor);
+    CHECK(descriptor.optional_requires[5].range.min_minor ==
+          qol::contracts::kInventoryRefreshVersionMinor);
     CHECK(descriptor.feature_count == 1 && descriptor.features != nullptr);
     CHECK(std::strcmp(descriptor.features[0].id, "core.item.provider") == 0);
     CHECK(!descriptor.deactivate_allowed);
-    // ptrslot:MOVE_MERGE_GOT 已迁往 extension_bag；core.item 只保留 16 条 inventory claims。
-    CHECK(descriptor.resources_count == 16 && descriptor.resources != nullptr);
+    // ptrslot:MOVE_MERGE_GOT 与 5 条装备页 UI hook 已迁往 extension_bag；core.item 只保留
+    // 11 条 inventory claims。
+    CHECK(descriptor.resources_count == 11 && descriptor.resources != nullptr);
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         CHECK(descriptor.resources[i].owner != nullptr &&
               std::strcmp(descriptor.resources[i].owner, "core.item") == 0);
@@ -247,7 +255,7 @@ int main() {
         CHECK(descriptor.http_route_metadata[i].op_required == 1);
         CHECK(descriptor.http_route_metadata[i].lease_required == 1);
     }
-    CHECK(descriptor.provides_count == 6 && descriptor.provides != nullptr);
+    CHECK(descriptor.provides_count == 5 && descriptor.provides != nullptr);
     CHECK(std::strcmp(descriptor.provides[0].id, qol::contracts::kItemFactsCapabilityId) == 0);
     CHECK(descriptor.provides[0].version.major == 4 && descriptor.provides[0].version.minor == 0);
     CHECK(descriptor.provides[0].iface != nullptr);
@@ -259,18 +267,16 @@ int main() {
     CHECK(static_cast<int32_t>(qol::contracts::QolItemStateKind::kEnrichedInventory) == 1);
     CHECK(static_cast<const qol::contracts::ItemStateApi*>(descriptor.provides[1].iface)
               ->write_state_json != nullptr);
+    // inventory_refresh 已由 extension_bag 提供（provider 自 core.item 迁出）。
     CHECK(std::strcmp(descriptor.provides[2].id,
-                      qol::contracts::kInventoryRefreshCapabilityId) == 0);
+                      qol::contracts::kInventoryActionCapabilityId) == 0);
     CHECK(descriptor.provides[2].iface != nullptr);
     CHECK(std::strcmp(descriptor.provides[3].id,
-                      qol::contracts::kInventoryActionCapabilityId) == 0);
+                      qol::contracts::kInventorySlotCapabilityId) == 0);
     CHECK(descriptor.provides[3].iface != nullptr);
     CHECK(std::strcmp(descriptor.provides[4].id,
-                      qol::contracts::kInventorySlotCapabilityId) == 0);
-    CHECK(descriptor.provides[4].iface != nullptr);
-    CHECK(std::strcmp(descriptor.provides[5].id,
                       qol::contracts::kInventoryProjectionCapabilityId) == 0);
-    CHECK(descriptor.provides[5].iface != nullptr);
+    CHECK(descriptor.provides[4].iface != nullptr);
     // move_merge.control 提供面随 feature 迁往 extension_bag 后撤除。
     CHECK(descriptor.port_count == 5 && descriptor.ports != nullptr);
     CHECK(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);

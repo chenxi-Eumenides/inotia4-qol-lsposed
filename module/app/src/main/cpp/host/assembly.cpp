@@ -30,7 +30,6 @@
 #include "host/features/http_control.h"
 #include "host/http_dispatch.h"
 #include "infra/slot_operation_gate.h"
-#include "plugins/core.item/hooks/inventory_hooks.h"
 #include "plugins/module_health/plugin.h"
 #if !QOL_KERNEL_ONLY
 #include "plugins/attribute_quality/plugin.h"
@@ -52,6 +51,7 @@
 #include "plugins/craft_lottery/settings_contribution.h"
 #include "plugins/extension_bag/plugin.h"
 #include "plugins/extension_bag/assembly/settings_contribution.h"
+#include "plugins/extension_bag/ui/equip_hooks.h"
 #include "plugins/core.inventory/plugin.h"
 #include "plugins/core.item/plugin.h"
 #include "plugins/core.ui_state/plugin.h"
@@ -387,9 +387,9 @@ bool assembly_init() {
         nullptr, &save_transaction_gate_admits};
     qol::game::save_transaction_bind_gate(&kSaveTransactionGate);
 #if !QOL_KERNEL_ONLY
-    // core.item owns inventory_refresh; inject the resolved native function pointer without
+    // extension_bag owns inventory_refresh; inject the resolved native function pointer without
     // extending the Game Host ABI or making the plugin depend on Game Adapter internals.
-    inventory_native_hook_bind_player_update_shortcut(fn_player_update_shortcut);
+    extension_bag_bind_player_update_shortcut(fn_player_update_shortcut);
 #endif
     // 启动期 ownership 恢复信号源：一次注册（幂等），回调只锁存 owner token。
     (void)save_enter_register(&on_save_enter_ready, nullptr);

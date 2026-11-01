@@ -1,5 +1,4 @@
 #include "contracts/inventory_action.h"
-#include "contracts/inventory_refresh.h"
 #include "contracts/inventory_slot.h"
 #include "plugins/core.item/usecases/item_action.h"
 #include "plugins/core.item/usecases/item_slot.h"
@@ -59,8 +58,6 @@ contracts::InventoryUseOutcome discard_handle_unavailable(contracts::QolItemHand
     return {contracts::InventoryActionStatus::kUnsupported, 0};
 }
 
-bool refresh_unavailable() { return false; }
-
 QolResult slot_unavailable(int32_t, int32_t, contracts::QolInventorySlotView*) {
     return contracts::error(kQolErrNotReady, "stub unavailable", 16);
 }
@@ -75,7 +72,7 @@ QolResult slot_remove_unavailable(int32_t, int32_t, contracts::QolItemHandle, ui
 
 }  // namespace
 
-const contracts::InventoryRefreshApi kInventoryRefreshApi{&refresh_unavailable, nullptr};
+// inventory_refresh provider 已迁往 extension_bag；本桩只保留 core.item 自身能力。
 const contracts::QolInventorySlotApi kInventorySlotApi{
     sizeof(contracts::QolInventorySlotApi), &slot_unavailable, &slot_view_unavailable,
     &slot_remove_unavailable};
@@ -88,8 +85,8 @@ bool attach(const contracts::QolHostSdk*, const contracts::QolGameHost*,
 void detach() {}
 
 const contracts::ResourceClaim* claims(uint32_t* out_count) {
-    static std::array<contracts::ResourceClaim, 16> resources = [] {
-        std::array<contracts::ResourceClaim, 16> result{};
+    static std::array<contracts::ResourceClaim, 11> resources = [] {
+        std::array<contracts::ResourceClaim, 11> result{};
         for (uint32_t index = 0; index < result.size(); ++index) {
             result[index] = {
                 "hook:stub", "stub", contracts::ResourceMechanism::kEntryHook,

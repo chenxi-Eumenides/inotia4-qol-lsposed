@@ -17,7 +17,6 @@
 #include "plugins/extension_bag/runtime/logging.h"
 #include "plugins/extension_bag/runtime/projection_controller.h"
 #include "contracts/host_sdk.h"
-#include "contracts/inventory_refresh.h"
 
 #include <array>
 #include <cstring>
@@ -28,19 +27,11 @@ void refresh_projection_if_overwritten_locked();
 void virtual_bag_call_original_refresh_item_area_with_guard() {
     NativeCallScope native_call;
     qol::features::extension_bag::BagSizeProjectionScope capacity_projection;
-    const void* refresh_iface = nullptr;
-    const auto* sdk = runtime_state().host.sdk;
-    if (sdk == nullptr || sdk->capabilities.require == nullptr) return;
-    const QolResult refresh_result = sdk->capabilities.require(
-        qol::contracts::kInventoryRefreshCapabilityId,
-        QolVersionRange{static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMajor),
-                        static_cast<uint16_t>(qol::contracts::kInventoryRefreshVersionMinor)},
-        &refresh_iface);
-    const auto* refresh = refresh_result.ok == kQolOk
-        ? static_cast<const qol::contracts::InventoryRefreshApi*>(refresh_iface) : nullptr;
-    if (refresh != nullptr && refresh->call_original != nullptr) {
-        (void)refresh->call_original();
-    }
+    // provider 自 core.item 迁入：本插件即 inventory_refresh owner，直接调本地
+    // RefreshItemArea backup trampoline，不再经 capability（避免 provider 自依赖）。
+    const auto refresh = reinterpret_cast<void (*)()>(
+        qol::extension_bag::ui_state().ui.backup_refresh_item_area);
+    if (refresh != nullptr) refresh();
 }
 
 void refresh_module_item_area_locked(int index) {

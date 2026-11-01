@@ -670,10 +670,6 @@ bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost*) { retur
 bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi*) { return true; }
 void inventory_native_hook_set_support(bool) {}
 bool inventory_native_hook_support_enabled() { return true; }
-bool inventory_native_hook_call_refresh_item_area_original() { return true; }
-void inventory_native_hook_bind_player_update_shortcut(void (*)(int32_t)) {}
-void inventory_native_hook_update_shortcut_category(int32_t) {}
-void inventory_native_hook_update_shortcut() {}
 void inventory_log_bind_sdk(const qol::contracts::QolHostSdk*) {}
 bool inventory_log_debug_enabled() { return false; }
 bool inventory_log_debug_due(int64_t*, int64_t) { return false; }

@@ -9,13 +9,9 @@
 
 // 使用 LSPosed Native Hook API 提供的 backup；扩展对象由逻辑库存适配器处理，原版对象回退到 backup。
 
-// 模块主动刷新必须走 backup/trampoline，避免经被 Hook 地址回入 wrapper 后重复加锁。
-// core.item 实现：raw-original refresh trampoline 经 `inventory_refresh` capability 暴露给消费者；
-// 返回 true = 已调原版（存在 trampoline），false = 无可用原函数。
+// 模块主动刷新经 inventory_refresh provider（owner=extension_bag）的 trampoline，
+// 不重新进入入口 wrapper；返回 true = 已调原版，false = provider/原函数不可用。
 bool inventory_native_hook_call_refresh_item_area_original();
-void inventory_native_hook_bind_player_update_shortcut(void (*update_shortcut)(int32_t));
-void inventory_native_hook_update_shortcut_category(int32_t category);
-void inventory_native_hook_update_shortcut();
 bool inventory_native_hook_bind_sdk(const qol::contracts::QolHostSdk* sdk);
 bool inventory_native_hook_bind_game(const qol::contracts::QolGameHost* game);
 bool inventory_native_hook_bind_item_facts(const qol::contracts::ItemFactsApi* facts);

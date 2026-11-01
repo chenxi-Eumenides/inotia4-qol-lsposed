@@ -46,6 +46,7 @@ add_library(qol_plugin_extension_bag STATIC
     transaction/ext_orig.cpp
     transaction/ext_ext.cpp
     ui/equip.cpp
+    ui/equip_hooks.cpp
     ui/detail_hooks.cpp
     ui/detail_actions.cpp
     ui/store_tabs.cpp
