@@ -388,7 +388,7 @@ void test_extension_sale_and_native_only_operations() {
           InventoryActionStatus::kUnsupported);
 }
 
-void test_extension_use_and_removed_same_space_move() {
+void test_extension_use_and_rejected_same_space_move() {
     reset_fixture();
     g_item.kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
     g_item.space_id = 2;
@@ -399,16 +399,18 @@ void test_extension_use_and_removed_same_space_move() {
     CHECK(used.status == InventoryActionStatus::kOk && used.consumed_count == 0);
     CHECK(g_extension_use_calls == 1);
 
-    // 注册源同空间移动：export -> import -> remove。
+    // 注册源同空间移动统一走 inventory.transfer 能力；本夹具 sdk 不提供该能力，
+    // 显式 Unsupported 且不触达注册源写回调（真实 transfer 编排由
+    // core_inventory_store_tests / item_facts_dispatch_tests 覆盖）。
     const InventoryMoveOutcome moved =
         qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, 3});
-    CHECK(moved.status == InventoryActionStatus::kOk);
-    CHECK(moved.moved_count == 2);
-    CHECK(g_item.slot == 3);
-    CHECK(g_extension_import_calls == 1 && g_extension_remove_calls == 1);
+    CHECK(moved.status == InventoryActionStatus::kUnsupported);
+    CHECK(moved.moved_count == 0);
+    CHECK(g_item.slot == 2);
+    CHECK(g_extension_import_calls == 0 && g_extension_remove_calls == 0);
 }
 
-void test_auto_slot_move_uses_registered_source() {
+void test_auto_slot_move_requires_transfer_capability() {
     reset_fixture();
     g_item.kind = static_cast<int32_t>(QolInventoryItemKind::kProvider);
     g_item.space_id = 2;
@@ -417,9 +419,9 @@ void test_auto_slot_move_uses_registered_source() {
 
     const InventoryMoveOutcome moved =
         qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, -1});
-    CHECK(moved.status == InventoryActionStatus::kOk);
-    CHECK(moved.moved_count == 2);
-    CHECK(g_extension_import_calls == 1 && g_extension_remove_calls == 1);
+    CHECK(moved.status == InventoryActionStatus::kUnsupported);
+    CHECK(moved.moved_count == 0);
+    CHECK(g_extension_import_calls == 0 && g_extension_remove_calls == 0);
 }
 
 void test_auto_slot_move_source_path_mismatch_is_internal() {
@@ -432,8 +434,9 @@ void test_auto_slot_move_source_path_mismatch_is_internal() {
 
     const InventoryMoveOutcome moved =
         qol::features::core_item::kInventoryActionApi.move({2, 1, 2}, 2, {2, 1, -1});
-    CHECK(moved.status == InventoryActionStatus::kInternal);
+    CHECK(moved.status == InventoryActionStatus::kUnsupported);
     CHECK(moved.moved_count == 0);
+    CHECK(g_extension_import_calls == 0);
 }
 
 void test_native_move_use_discard_and_equipment() {
@@ -478,8 +481,8 @@ int main() {
     test_api_v3_and_native_sell();
     test_native_sell_failure_and_identity();
     test_extension_sale_and_native_only_operations();
-    test_extension_use_and_removed_same_space_move();
-    test_auto_slot_move_uses_registered_source();
+    test_extension_use_and_rejected_same_space_move();
+    test_auto_slot_move_requires_transfer_capability();
     test_auto_slot_move_source_path_mismatch_is_internal();
     test_native_move_use_discard_and_equipment();
     std::printf("inventory_action_sell_tests: %d passed, %d failed\n", g_pass, g_fail);

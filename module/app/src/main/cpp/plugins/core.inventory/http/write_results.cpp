@@ -315,7 +315,9 @@ bool write_inventory_move_result(const InventoryWritePayload& command, char* out
     const bool native_same_space = is_result_native_space(from.space_id) && from.space_id == to.space_id;
 
     InventoryResultSnapshot before{};
-    (void)capture_inventory_result(&before);
+    // before 快照失败不再静默：记录可用性；失败时仍执行 move，但差异段无基准可算，
+    // 只输出 forced 槽，避免把全部 after 槽误报成变化。
+    const bool before_available = capture_inventory_result(&before);
 
     contracts::QolItemInventoryStateWriteResult operation_data{};
     contracts::QolBagMutationResult placed{};
@@ -391,7 +393,9 @@ bool write_inventory_move_result(const InventoryWritePayload& command, char* out
                        source_key.bag != target_key.bag || source_key.slot != target_key.slot)) {
         append_result_slot(body, target_key, after, &first);
     }
-    append_unforced_inventory_changes(body, before, after, forced, &first);
+    if (before_available) {
+        append_unforced_inventory_changes(body, before, after, forced, &first);
+    }
     body += "]}";
     return copy_result_truncated(out, capacity, out_size, body);
 }

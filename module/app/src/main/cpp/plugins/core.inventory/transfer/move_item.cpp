@@ -1,6 +1,7 @@
 #include "move_item.h"
 
 #include "plugins/core.inventory/api/bag_source.h"
+#include "plugins/core.inventory/hooks/inventory_logging.h"
 #include "plugins/core.inventory/runtime/context.h"
 #include "plugins/core.inventory/transfer/native_transport.h"
 #include "plugins/core.inventory/transfer/source_transport.h"
@@ -159,6 +160,10 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
         return contracts::error(kQolErrInternal, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
+    // 超量/非正数量预检：与 item_action 旧注册源分支一致，导出前拒绝，源/目标不变。
+    if (source_item.count <= 0 || count > source_item.count) {
+        return invalid_argument();
+    }
 
     contracts::QolBagTransfer transfer{};
     const auto export_source = is_native_space(from.space_id)
@@ -187,6 +192,11 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
     }
     if (!valid_handle(target_result.item) || target_result.ref.space_id != to.space_id ||
         target_result.ref.bag != to.bag || target_result.count != count) {
+        QOL_LOG_ERROR(QolDomain::kInventory,
+                      "transfer target mismatch to=%d/%d/%d item=%u/%u count=%d expected=%d",
+                      target_result.ref.space_id, target_result.ref.bag, to_slot,
+                      target_result.item.slot, target_result.item.generation,
+                      target_result.count, count);
         return internal_error();
     }
 
@@ -204,8 +214,14 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
         const QolResult compensated = remove_target(to.space_id, target_result.item, count,
                                                      &compensation);
         if (contracts::succeeded(compensated)) {
-                return removed;
+            return removed;
         }
+        QOL_LOG_ERROR(QolDomain::kInventory,
+                      "transfer rollback failed from=%d/%d/%d to=%d/%d/%d "
+                      "source=%u/%u target=%u/%u count=%d",
+                      from.space_id, from.bag, from_slot, to.space_id, to.bag, to_slot,
+                      source_item.item.slot, source_item.item.generation,
+                      target_result.item.slot, target_result.item.generation, count);
         return internal_error();
     }
 

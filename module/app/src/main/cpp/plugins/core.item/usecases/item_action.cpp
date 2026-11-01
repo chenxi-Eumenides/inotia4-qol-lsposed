@@ -65,8 +65,9 @@ InventoryActionStatus status_from_result(const QolResult& result, bool item_was_
     }
 }
 
-// inventory.transfer 能力（core.inventory 提供）：跨空间移动、detached 序列化与
+// inventory.transfer 能力（core.inventory 提供）：注册源/跨空间移动、detached 序列化与
 // 定位。按调用时 require；缺失时对应路径显式返回 Unsupported，不得回退本地 transport。
+// 注册源同空间的本地 export/import/remove 分支已删除，移动统一经此能力。
 const contracts::QolInventoryTransferApi* transfer_capability() {
     if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
     const void* iface = nullptr;
@@ -303,50 +304,10 @@ contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolAction
         contracts::QolItemInventoryStateWriteResult write_result{};
         operation = g_item_state_write->move_item(
             native_bag_number(from), from.slot, count, native_bag_number(to), to.slot, &write_result);
-    } else if (from.space_id == to.space_id) {
-        const contracts::QolBagSource* source = find_bag_source(from.space_id);
-        if (source == nullptr || source->export_item == nullptr || source->import_item == nullptr ||
-            source->remove == nullptr) {
-            outcome.status = InventoryActionStatus::kUnsupported;
-            return outcome;
-        }
-        if (count > source_item.count) {
-            outcome.status = InventoryActionStatus::kInvalidRef;
-            return outcome;
-        }
-        contracts::QolBagTransfer transfer{};
-        operation = source->export_item(source_item.item, count, &transfer);
-        if (!contracts::succeeded(operation)) {
-            outcome.status = status_from_result(operation, true);
-            return outcome;
-        }
-        if (transfer.category != source_item.category || transfer.count != count ||
-            transfer.payload_size == 0 ||
-            transfer.payload_size > contracts::kQolBagTransferPayloadMaxSize) {
-            outcome.status = InventoryActionStatus::kInternal;
-            return outcome;
-        }
-        operation = source->import_item(&transfer, to.bag, to.slot, &target_result);
-        if (!contracts::succeeded(operation)) {
-            outcome.status = status_from_result(operation, true);
-            return outcome;
-        }
-        if (!valid_handle(target_result.item) || target_result.ref.space_id != to.space_id ||
-            target_result.ref.bag != to.bag || target_result.count != count) {
-            outcome.status = InventoryActionStatus::kInternal;
-            return outcome;
-        }
-        QolBagMutationResult removed{};
-        operation = source->remove(source_item.item, count, &removed);
-        if (!contracts::succeeded(operation)) {
-            QolBagMutationResult compensation{};
-            const QolResult rollback = source->remove(target_result.item, count, &compensation);
-            outcome.status = contracts::succeeded(rollback)
-                                 ? status_from_result(operation, true)
-                                 : InventoryActionStatus::kInternal;
-            return outcome;
-        }
     } else {
+        // 注册源（含同空间）与跨空间移动统一走 inventory.transfer 编排；
+        // 不再保留本地 export/import/remove 分支。超量请求由 transfer 层
+        // 预检返回 kQolErrInvalidArgument（status_from_result → kInvalidRef）。
         const contracts::QolInventoryTransferApi* transfer_api = transfer_capability();
         if (transfer_api == nullptr) {
             outcome.status = InventoryActionStatus::kUnsupported;

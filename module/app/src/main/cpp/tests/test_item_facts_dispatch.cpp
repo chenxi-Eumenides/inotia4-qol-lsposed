@@ -1748,6 +1748,24 @@ void test_write_routes() {
     CHECK(std::string(result, result_size) == transfer_unavailable &&
           result_size == transfer_unavailable.size() &&
           g_bag_source_export_calls == 0);
+
+    // 注册源超量移动（源 count=3、请求 count=4）：transfer 预检拒绝，导出未发生。
+    g_inventory_slot_present[6][0] = true;
+    g_inventory_occupied_slots[6][0] = 3;
+    g_bag_source_export_calls = 0;
+    CHECK(dispatch_post("/api/item/inventory/move_item",
+                        "{\"space\":2,\"bag\":0,\"slot\":0,\"count\":4,"
+                        "\"to_space\":2,\"to_bag\":0,\"to_slot\":2}",
+                        nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
+    result_size = 0;
+    CHECK(!last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result,
+                                 sizeof(result), &result_size));
+    CHECK(std::string(result, result_size) ==
+          "{\"ok\":false,\"error\":\"invalid item transfer request\"}");
+    CHECK(g_bag_source_export_calls == 0);
+    CHECK(g_inventory_slot_present[6][0] && g_inventory_occupied_slots[6][0] == 3);
+    g_inventory_slot_present[6][0] = false;
+    g_inventory_occupied_slots[6][0] = 0;
     CHECK(set_fake_registered_source(false));
 
     // source 失活时，旧 flat bag 请求 fail-closed，不再进入 native write port。
