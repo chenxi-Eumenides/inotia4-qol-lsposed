@@ -16,6 +16,7 @@
 #include "contracts/s2_writeback.h"
 #include "plugins/core.inventory/api/bag_source.h"
 #include "plugins/core.inventory/hooks/inventory_logging.h"
+#include "plugins/core.inventory/hooks/placement.h"
 #include "plugins/core.inventory/runtime/context.h"
 
 namespace qol::features::core_inventory::hooks {
@@ -590,14 +591,6 @@ void s2_remove_data_writeback(const S2RemoveDataCapture& cap, int32_t category,
                         category, count, item, cap.pre_full[index], plan.remain, written);
 }
 
-constexpr int32_t kNativeStackLimit = 126;
-
-struct RegisteredDestination {
-    const qol::contracts::QolBagSource* source = nullptr;
-    int32_t bag = -1;
-    int32_t slot = -1;
-};
-
 // FindSaveSlot 与紧随其后的 SaveItem/SaveItemDirect 之间没有参数通道：原生
 // SaveItem 只把槽号传给 SaveItemDirect，袋号来自变体私有 scratch 单元
 //（G_INVEN_SAVED_BAG_VMA，仅 C18 改版存在，且模块按 32 位写会在只写字节的
@@ -605,7 +598,7 @@ struct RegisteredDestination {
 // 传递，不依赖变体私有单元。
 struct PendingSaveDestination {
     void* item = nullptr;
-    int32_t space_id = -1;  // kQolBagSpaceVariant(1) 或注册源 space(>=2)
+    int32_t space_id = -1;  // kQolBagSpaceOriginal(0)/kQolBagSpaceVariant(1) 或注册源 space(>=2)
     int32_t bag = -1;
     int32_t slot = -1;
 };
@@ -656,18 +649,6 @@ bool read_native_save_domain(int32_t category, int32_t* out_domain) {
         return false;
     }
     *out_domain = domain;
-    return true;
-}
-
-bool read_saved_bag(int32_t* out_bag) {
-    if (out_bag == nullptr || g_game == nullptr ||
-        g_game->abi.minor < qol::contracts::kGameHostSavedBagMinor ||
-        g_game->inventory_write.saved_bag == nullptr) {
-        return false;
-    }
-    int32_t bag = -1;
-    if (!qol::contracts::succeeded(g_game->inventory_write.saved_bag(&bag))) return false;
-    *out_bag = bag;
     return true;
 }
 
@@ -729,103 +710,6 @@ bool hook_item_stackable(void* item) {
         return false;
     }
     return encoding == qol::contracts::QolItemCountEncoding::kEncoded;
-}
-
-bool find_registered_destination(const qol::contracts::QolBagTransfer& transfer,
-                                 bool stackable,
-                                 RegisteredDestination* out_destination) {
-    if (out_destination == nullptr) return false;
-    RegisteredDestination empty_destination{};
-    bool has_empty = false;
-    for (uint32_t source_index = 0;
-         source_index < registered_bag_source_count(); ++source_index) {
-        const auto* source = registered_bag_source_at(source_index);
-        if (source == nullptr || source->count == nullptr || source->info == nullptr ||
-            source->item_at == nullptr || source->import_item == nullptr) {
-            continue;
-        }
-        const int32_t bag_count = source->count();
-        if (bag_count < 0) continue;
-        for (int32_t bag = 0; bag < bag_count; ++bag) {
-            qol::contracts::QolBagInfo info{};
-            if (!qol::contracts::succeeded(source->info(bag, &info)) || info.capacity < 0) {
-                continue;
-            }
-            for (int32_t slot = 0; slot < info.capacity; ++slot) {
-                qol::contracts::QolInventoryItemRef existing{};
-                const QolResult probe = source->item_at(bag, slot, &existing);
-                if (probe.code == kQolErrNotFound) {
-                    if (!has_empty) {
-                        empty_destination = {source, bag, slot};
-                        has_empty = true;
-                    }
-                    continue;
-                }
-                if (!qol::contracts::succeeded(probe)) continue;
-                if (stackable && existing.category == transfer.category && existing.count > 0 &&
-                    existing.count + transfer.count <= kNativeStackLimit) {
-                    *out_destination = {source, bag, slot};
-                    return true;
-                }
-            }
-        }
-    }
-    if (has_empty) {
-        *out_destination = empty_destination;
-        return true;
-    }
-    return false;
-}
-
-bool find_variant_destination(const qol::contracts::QolBagTransfer& transfer,
-                              bool stackable,
-                              int32_t* out_native_bag, int32_t* out_slot) {
-    if (out_native_bag == nullptr || out_slot == nullptr) return false;
-    const auto* port = g_port;
-    if (port == nullptr || !qol::contracts::qol_item_port_bag_space_size_valid(port) ||
-        port->read.bag_count == nullptr || port->read.bag_info == nullptr ||
-        port->read.item_at == nullptr) {
-        return false;
-    }
-    int32_t bag_count = 0;
-    if (!qol::contracts::succeeded(
-            port->read.bag_count(qol::contracts::kQolBagSpaceVariant, &bag_count)) ||
-        bag_count < 0) {
-        return false;
-    }
-    int32_t empty_bag = -1;
-    int32_t empty_slot = -1;
-    for (int32_t bag = 0; bag < bag_count; ++bag) {
-        const qol::contracts::QolBagRef ref{qol::contracts::kQolBagSpaceVariant, bag};
-        qol::contracts::QolBagInfo info{};
-        if (!qol::contracts::succeeded(port->read.bag_info(&ref, &info)) || info.capacity < 0) {
-            continue;
-        }
-        for (int32_t slot = 0; slot < info.capacity; ++slot) {
-            qol::contracts::QolInventoryItemRef existing{};
-            const QolResult probe = port->read.item_at(&ref, slot, &existing);
-            if (probe.code == kQolErrNotFound) {
-                if (empty_bag < 0) {
-                    empty_bag = bag;
-                    empty_slot = slot;
-                }
-                continue;
-            }
-            if (!qol::contracts::succeeded(probe)) continue;
-            if (stackable && existing.category == transfer.category && existing.count > 0 &&
-                existing.count + transfer.count <= kNativeStackLimit) {
-                *out_native_bag = qol::contracts::kQolOriginalBagCount + bag;
-                *out_slot = slot;
-                return true;
-            }
-        }
-    }
-    if (empty_bag >= 0) {
-        *out_native_bag = qol::contracts::kQolOriginalBagCount + empty_bag;
-        *out_slot = empty_slot;
-        return true;
-    }
-    return false;
 }
 
 const qol::contracts::QolBagSource* registered_source_for_space(int32_t space_id) {
@@ -1216,45 +1100,40 @@ int find_save_slot_wrapper(void* item, int8_t* out_slot) {
         backup_missing("hook:INVEN_FindSaveSlot");
         return 0;
     }
-    const int native = g_backup_find_save_slot(item, out_slot);
+    // 门禁：unequip 栈内与 domain 不可知/非托管域保持原生选择路径；模块只托管
+    // domain 0（原版袋 0..4 + C18 追加袋）的入库。
+    if (qol::contracts::g_inventory_unequip_depth > 0)
+        return call_backup("hook:INVEN_FindSaveSlot", g_backup_find_save_slot, item, out_slot);
     int32_t category = -1;
     int32_t domain = -1;
-    const bool domain_known =
-        hook_item_category(item, &category) && read_native_save_domain(category, &domain);
-    if (native != 0) {
-        int32_t bag = -1;
-        if (read_saved_bag(&bag)) {
-            core_inventory_log_write(0, __FILE__, __LINE__,
-                                "FindSaveSlot native category=%d bag=%d", category, bag);
-        }
-        return native;
+    if (!hook_item_category(item, &category) || !read_native_save_domain(category, &domain) ||
+        domain != 0) {
+        return call_backup("hook:INVEN_FindSaveSlot", g_backup_find_save_slot, item, out_slot);
     }
-    // 跨插件 unequip 作用域信号（contracts inline thread_local）。
-    if (qol::contracts::g_inventory_unequip_depth > 0) return 0;
-    if (!domain_known || domain != 0) return 0;
+    // 托管域不再调原生 FindSaveSlot：原生判据只有 category 相同，会把 payload
+    // 身份不同（词条/强化不同）的堆错误合并；统一由 placement resolver 校验
+    // 身份后给出目标，不回退原生（避免 category-only 错误合并）。
     qol::contracts::QolBagTransfer transfer{};
     if (!build_transfer_for_hook_item(item, &transfer, &category, nullptr)) return 0;
-    const bool stackable = hook_item_stackable(item);
-    int32_t variant_bag = -1;
-    int32_t variant_slot = -1;
-    if (find_variant_destination(transfer, stackable, &variant_bag, &variant_slot)) {
-        // 变体追加袋号（6..）无法写进 SaveItem 的 5 位槽字节，且各变体的
-        // SaveItem 是否读 scratch 单元不一致；统一由模块 pending 带到 SaveItemDirect。
-        remember_pending_save(item, qol::contracts::kQolBagSpaceVariant, variant_bag, variant_slot);
-        if (out_slot != nullptr) *out_slot = static_cast<int8_t>(variant_slot);
-        core_inventory_log_write(0, __FILE__, __LINE__,
-                            "FindSaveSlot variant category=%d native_bag=%d slot=%d",
-                            category, variant_bag, variant_slot);
-        return 1;
+    // count_encoding 读面不可用时，count>1 已足以证明这是堆叠物；不能因此跳过
+    // 已有堆，否则会退回“只要有空槽就新建堆”的旧行为。
+    const bool stackable = hook_item_stackable(item) || transfer.count > 1;
+    placement::PlacementTarget target{};
+    if (!placement::resolve_placement(transfer, stackable, -1, -1, &target)) return 0;
+    // C18 追加袋号（原生扁平 6..）写不进 SaveItem 的 5 位槽字节，且各变体的
+    // SaveItem 是否读 scratch 单元不一致；space1/space>=2 统一由模块 pending
+    // 带到 SaveItemDirect，space0 直接记录原生袋/槽。
+    if (target.space_id == qol::contracts::kQolBagSpaceVariant) {
+        remember_pending_save(item, qol::contracts::kQolBagSpaceVariant,
+                              qol::contracts::kQolOriginalBagCount + target.bag, target.slot);
+    } else {
+        remember_pending_save(item, target.space_id, target.bag, target.slot);
     }
-    RegisteredDestination destination{};
-    if (!find_registered_destination(transfer, stackable, &destination)) return 0;
-    remember_pending_save(item, destination.source->space_id, destination.bag, destination.slot);
-    if (out_slot != nullptr) *out_slot = static_cast<int8_t>(destination.slot);
+    if (out_slot != nullptr) *out_slot = static_cast<int8_t>(target.slot);
     core_inventory_log_write(0, __FILE__, __LINE__,
-                        "FindSaveSlot adopt category=%d space=%d bag=%d slot=%d pending=1",
-                        category, destination.source->space_id, destination.bag,
-                        destination.slot);
+                        "FindSaveSlot resolved category=%d space=%d bag=%d slot=%d merge=%d",
+                        category, target.space_id, target.bag, target.slot,
+                        target.merge ? 1 : 0);
     return 1;
 }
 
@@ -1319,7 +1198,11 @@ int save_item_direct_wrapper(void* item, int32_t bag, int32_t slot) {
     if (g_save_item_depth > 0) {
         PendingSaveDestination pending{};
         if (take_pending_save(item, slot, &pending)) {
-            if (pending.space_id == qol::contracts::kQolBagSpaceVariant) {
+            // space0：resolver 选中的原生袋/槽直写（含原生同身份合并语义）。
+            // space1：pending.bag 已是原生扁平袋号（kQolOriginalBagCount + bag），
+            // 与既有 variant pending 兼容，同样走原生 backup 直写。
+            if (pending.space_id == qol::contracts::kQolBagSpaceOriginal ||
+                pending.space_id == qol::contracts::kQolBagSpaceVariant) {
                 return call_backup("hook:INVEN_SaveItemDirect", g_backup_save_item_direct, item,
                                    pending.bag, pending.slot);
             }

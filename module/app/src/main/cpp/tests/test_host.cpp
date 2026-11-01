@@ -1168,6 +1168,58 @@ static void test_virtual_bag_mergeable_items() {
     CHECK(!virtual_bag::physical_inventory_snapshot_changed(before, after));
 }
 
+// 自动落位合并槽扫描（原始→扩展 / ext→ext 自动槽共用判据）：单袋内第一个
+// 同身份可堆叠且并入后 ≤ limit 的占用槽；身份不同/超限/skip/非法输入不命中。
+static void test_virtual_bag_first_mergeable_slot() {
+    std::array<std::array<virtual_bag::Item, virtual_bag::kSlotCount>,
+               virtual_bag::kMaxExtensionBags>
+        items{};
+    virtual_bag::Item source{};
+    source.category = 401;
+    source.count = 5;
+    make_canonical_payload(&source, source.count);
+    // slot1 同身份堆（slot0 空）→ 命中 slot1，先于任何空槽。
+    items[0][1].category = 401;
+    items[0][1].count = 7;
+    make_canonical_payload(&items[0][1], 7);
+    set_payload_uid(&items[0][1], 0xfeedfacefeedfaceull);
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             1);
+    // 身份不同（镶嵌位 payload[16]）→ 跳过，无命中。
+    items[0][1].payload[16] ^= 1;
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             -1);
+    items[0][1].payload[16] ^= 1;
+    // 超上限（7+5>10）→ 不命中；limit=12 → 命中。
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 10u, -1),
+             -1);
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 12u, -1),
+             1);
+    // skip_slot 排除源槽（ext→ext 自并防护）。
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, 1),
+             -1);
+    // 容量裁剪：slot1 在容量外时不可见。
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 1, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             -1);
+    // source 非法（count=0）→ -1。
+    source.count = 0;
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, 0, 4, source,
+                                               host_category_uses_stack_count, 99u, -1),
+             -1);
+    // bag 越界 → -1。
+    source.count = 5;
+    CHECK_EQ(virtual_bag::first_mergeable_slot(items, virtual_bag::kMaxExtensionBags, 4,
+                                               source, host_category_uses_stack_count,
+                                               99u, -1),
+             -1);
+}
+
 // VM-39：SaveItem 漏斗的同类堆合并计划（backup 前 merge_native_item 与 backup
 // 失败后 adopt 共用同一 adopt_merge_into 判据；原版有空槽时也不进原版新格）。
 static void test_adopt_merge_plan() {
@@ -3288,6 +3340,7 @@ int main() {
     test_virtual_bag_merge_count();
     test_virtual_bag_mode_aware_ops();
     test_virtual_bag_mergeable_items();
+    test_virtual_bag_first_mergeable_slot();
     test_adopt_merge_plan();
     test_place_plan();
     test_virtual_bag_capacity_bounds();

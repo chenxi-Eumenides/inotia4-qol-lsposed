@@ -2,6 +2,7 @@
 
 #include "plugins/core.inventory/api/bag_source.h"
 #include "plugins/core.inventory/hooks/inventory_logging.h"
+#include "plugins/core.inventory/hooks/placement.h"
 #include "plugins/core.inventory/runtime/context.h"
 #include "plugins/core.inventory/transfer/native_transport.h"
 #include "plugins/core.inventory/transfer/source_transport.h"
@@ -14,6 +15,8 @@
 
 namespace qol::features::core_inventory::transfer::move_item {
 namespace {
+
+namespace placement = qol::features::core_inventory::hooks::placement;
 
 QolResult invalid_argument() {
     static constexpr char kMessage[] = "invalid item transfer request";
@@ -144,12 +147,6 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
 
-    int32_t target_slot = to_slot;
-    if (target_slot == -1) {
-        const QolResult selected = find_empty_slot(to, &target_slot);
-        if (!contracts::succeeded(selected)) return selected;
-    }
-
     contracts::QolInventoryItemRef source_item{};
     const QolResult source_read = source_item_at(from, from_slot, &source_item);
     if (!contracts::succeeded(source_read)) return source_read;
@@ -179,6 +176,39 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
         static constexpr char kMessage[] = "source returned invalid transfer payload";
         return contracts::error(kQolErrInternal, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
+    }
+
+    int32_t target_slot = to_slot;
+    if (target_slot == -1) {
+        // 自动目标：在源读取/导出之后由统一落槽 resolver 在目标 scope（space/bag）
+        // 内按 merge → empty 选槽；不先选空槽再合并。
+        // stackable 判据：源句柄 count_encoding 可读且为 encoded，或现有 count > 1；
+        // 两者都取不到时按不可堆叠处理（跳过所有 merge 候选）。
+        bool stackable = false;
+        if (g_port != nullptr && contracts::qol_item_port_size_valid(g_port) &&
+            g_port->read.count_encoding != nullptr) {
+            contracts::QolItemCountEncoding encoding = contracts::QolItemCountEncoding::kUnknown;
+            if (contracts::succeeded(g_port->read.count_encoding(source_item.item, &encoding)) &&
+                encoding == contracts::QolItemCountEncoding::kEncoded) {
+                stackable = true;
+            }
+        }
+        if (!stackable && source_item.count > 1) stackable = true;
+        placement::PlacementTarget target{};
+        if (placement::resolve_placement(transfer, stackable, to.space_id, to.bag, &target)) {
+            target_slot = target.slot;
+            if (to.space_id == from.space_id && to.bag == from.bag &&
+                target_slot == from_slot) {
+                // 同袋移动时 resolver 会命中源槽本身（同槽身份恒等）；回退纯空槽
+                // 扫描，禁止把自己并进自己。
+                const QolResult selected = find_empty_slot(to, &target_slot);
+                if (!contracts::succeeded(selected)) return selected;
+            }
+        } else {
+            // resolver 无目标（scope 已满）时回退纯空槽扫描，保持原错误语义。
+            const QolResult selected = find_empty_slot(to, &target_slot);
+            if (!contracts::succeeded(selected)) return selected;
+        }
     }
 
     contracts::QolBagMutationResult target_result{};

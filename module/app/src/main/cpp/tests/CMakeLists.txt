@@ -264,6 +264,7 @@ add_executable(inventory_remove_wrapper_tests
     test_inventory_remove_wrapper.cpp
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/placement.cpp
     ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
     ${CPP_DIR}/game/ops/item_inventory_state_write.cpp
     ${CPP_DIR}/game/access/item_handle_registry.cpp
@@ -288,6 +289,7 @@ add_test(NAME inventory_remove_wrapper_tests COMMAND inventory_remove_wrapper_te
 # linked into stage4_hook_tests, whose scope remains the pure stage-4 logic.
 add_library(inventory_hook_native_compile OBJECT
     ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/placement.cpp
 )
 target_include_directories(inventory_hook_native_compile PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/stubs
@@ -299,6 +301,27 @@ target_include_directories(inventory_hook_native_compile PRIVATE
 target_compile_features(inventory_hook_native_compile PRIVATE cxx_std_17)
 set_target_properties(inventory_hook_native_compile PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+
+# 统一自动落槽顺序：placement resolver 六步顺序/身份门/上限预检/scope、
+# FindSaveSlot 托管路径（扩展堆优先、不回退原生）与 move_item 自动目标。
+add_executable(inventory_placement_tests
+    test_inventory_placement.cpp
+    ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
+    ${CPP_DIR}/plugins/core.inventory/bags/snapshot_store.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/placement.cpp
+    ${CPP_DIR}/plugins/core.inventory/runtime/context.cpp
+    ${CPP_DIR}/plugins/core.inventory/transfer/move_item.cpp
+    ${CPP_DIR}/plugins/core.inventory/usecases/item_helpers.cpp
+    ${CPP_DIR}/plugins/core.inventory/usecases/read_inventory.cpp
+)
+target_include_directories(inventory_placement_tests PRIVATE
+    ${CPP_DIR}
+)
+target_compile_features(inventory_placement_tests PRIVATE cxx_std_17)
+set_target_properties(inventory_placement_tests PROPERTIES
+    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+add_test(NAME inventory_placement_tests COMMAND inventory_placement_tests)
 
 # ITM-16: exercise the production inventory.action.sell entry, its capability-version
 # negotiation, physical-original route, and money/remove/refund ordering.
@@ -1935,6 +1958,7 @@ add_executable(item_facts_dispatch_tests
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.inventory/bags/snapshot_store.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/placement.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
     ${CPP_DIR}/plugins/core.inventory/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.inventory/http/query_handler.cpp
@@ -2382,6 +2406,7 @@ add_executable(core_inventory_store_tests
     ${CPP_DIR}/plugins/core.inventory/api/bag_source.cpp
     ${CPP_DIR}/plugins/core.inventory/bags/snapshot_store.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/inventory_logging.cpp
+    ${CPP_DIR}/plugins/core.inventory/hooks/placement.cpp
     ${CPP_DIR}/plugins/core.inventory/hooks/storage_hooks.cpp
     ${CPP_DIR}/plugins/core.inventory/http/json_lite.cpp
     ${CPP_DIR}/plugins/core.inventory/http/query_handler.cpp

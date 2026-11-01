@@ -1,9 +1,12 @@
 #include "native_transport.h"
 
+#include "plugins/core.inventory/hooks/placement.h"
 #include "plugins/core.inventory/runtime/context.h"
 
 namespace qol::features::core_inventory::transfer::native_transport {
 namespace {
+
+namespace placement = qol::features::core_inventory::hooks::placement;
 
 QolResult unsupported(const char* message, uint32_t size) {
     return contracts::error(kQolErrUnsupported, message, size);
@@ -155,8 +158,17 @@ QolResult import_item(const BagTransfer& transfer, int32_t target_space,
 
     contracts::QolBagRef ref{target_space, preferred_bag};
     if (preferred_bag == -1) {
-        const QolResult selected = find_empty_bag(target_space, &ref);
-        if (!contracts::succeeded(selected)) return selected;
+        // detached 堆不在任何袋内，无自并风险；自动落袋统一走 placement resolver
+        // 的 scope 版本（merge → empty），与 FindSaveSlot/move_item 同序。
+        placement::PlacementTarget target{};
+        if (placement::resolve_placement(transfer, transfer.count > 1, target_space, -1,
+                                         &target)) {
+            ref = contracts::QolBagRef{target.space_id, target.bag};
+            preferred_slot = target.slot;
+        } else {
+            const QolResult selected = find_empty_bag(target_space, &ref);
+            if (!contracts::succeeded(selected)) return selected;
+        }
     }
 
     contracts::QolItemHandle item{};

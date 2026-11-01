@@ -6,6 +6,7 @@
 
 #include "contracts/game_cache.h"
 #include "contracts/bag.h"
+#include "contracts/inventory_identity.h"
 #include "game/access/game_access.h"
 #include "game/access/inventory.h"
 #include "game/access/item_handle_registry.h"
@@ -835,6 +836,26 @@ QolResult move_handle(contracts::QolItemHandle handle, int32_t count,
         if (item_class_category(target_item) != category ||
             item_count_encoding(target_item) != contracts::QolItemCountEncoding::kEncoded) {
             return item_error(out, kQolErrConflict, "native target is not stackable");
+        }
+        // 合并前身份校验：category 相同不等于同身份（词条/强化不同）。判据与 EB
+        // mergeable_identity_equal 同源（contracts/inventory_identity.h），placement
+        // resolver 的合并候选同用此比较器；身份不同拒绝合并，不写数量、不释放 loaded。
+        if (fn_save_save_item == nullptr) {
+            return item_error(out, kQolErrNotReady, "item serialization unavailable");
+        }
+        uint8_t loaded_payload[256]{};
+        const int loaded_size = fn_save_save_item(loaded_payload, item);
+        uint8_t target_payload[256]{};
+        const int target_size = fn_save_save_item(target_payload, target_item);
+        if (loaded_size <= 0 || target_size <= 0 ||
+            loaded_size > static_cast<int>(sizeof(loaded_payload)) ||
+            target_size > static_cast<int>(sizeof(target_payload))) {
+            return item_error(out, kQolErrNotReady, "item serialization failed");
+        }
+        if (!contracts::qol_inventory_payload_identity_equal(
+                loaded_payload, static_cast<uint32_t>(loaded_size), target_payload,
+                static_cast<uint32_t>(target_size))) {
+            return item_error(out, kQolErrConflict, "native target item identity differs");
         }
         uint32_t target_count = 0;
         result = item_stack_count(target_item, &target_count);

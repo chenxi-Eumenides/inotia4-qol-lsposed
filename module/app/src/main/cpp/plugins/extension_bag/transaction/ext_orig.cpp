@@ -9,11 +9,15 @@
 #include "plugins/extension_bag/runtime/projection_controller.h"
 #include "plugins/extension_bag/runtime/reentry_lock.h"
 #include "plugins/extension_bag/runtime/state.h"
+#include "plugins/extension_bag/transaction/transaction.h"
 
 #include "contracts/game_host.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/inventory_action.h"
 #include "contracts/item_facts.h"
+
+#include <array>
+#include <cstdint>
 
 namespace {
 
@@ -54,6 +58,22 @@ bool first_empty_extension_slot_locked(int bag, int* out_slot) {
     return false;
 }
 
+// 原始→扩展自动落位的合并槽：目标袋内第一个与 source 同身份可堆叠（排除 UID/
+// 数量位）且并入后不超过扩展堆上限的占用槽。判据与 QolBagSource 占用槽导入
+// 分支共用 first_mergeable_slot 单源。
+bool first_mergeable_extension_slot_locked(int bag, const virtual_bag::Item& source,
+                                           int* out_slot) {
+    if (out_slot == nullptr || !virtual_bag::valid_index(bag)) return false;
+    const int slot = virtual_bag::first_mergeable_slot(
+        ::qol::extension_bag::access::bag().items, bag,
+        ::qol::extension_bag::access::bag().capacities[bag], source,
+        virtual_bag_category_uses_stack_count, virtual_bag_count_limit(true),
+        /*skip_slot=*/-1);
+    if (slot < 0) return false;
+    *out_slot = slot;
+    return true;
+}
+
 }  // namespace
 
 bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& lock, int src_bag,
@@ -83,8 +103,28 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
         return false;
     }
 
+    // 原始→扩展自动落位先取源 payload 身份：合并判据需要与目标扩展堆逐位比较
+    // （排除 UID/数量位）。序列化失败保持整体失败，不静默改挑空槽。
+    void* source_item = nullptr;
+    std::array<uint8_t, virtual_bag::kSerializedItemBuffer> source_payload{};
+    int source_payload_size = 0;
+    if (!inventory_slot_locked(src_bag, src_slot, &source_item) || source_item == nullptr ||
+        !serialize_item_payload_locked(source_item, &source_payload, &source_payload_size)) {
+        QOL_LOG_WARN(QolDomain::kExtensionBag,
+                     "cross move reject original->extension source serialize failed=%d/%d",
+                     src_bag, src_slot);
+        return false;
+    }
+    virtual_bag::Item source_desc{};
+    source_desc.category = source.category;
+    // 非堆叠原生装备的 cumulate_count 可能返回 0；移动这种物品时按单件处理。
+    source_desc.count = source.count > 0 ? source.count : 1;
+    source_desc.payload = source_payload;
+    source_desc.payload_size = source_payload_size;
+
     int dst_slot = -1;
-    if (!first_empty_extension_slot_locked(dst_bag, &dst_slot)) {
+    if (!first_mergeable_extension_slot_locked(dst_bag, source_desc, &dst_slot) &&
+        !first_empty_extension_slot_locked(dst_bag, &dst_slot)) {
         QOL_LOG_WARN(QolDomain::kExtensionBag,
                      "cross move reject original->extension destination full dst=%d", dst_bag);
         return false;
@@ -97,8 +137,7 @@ bool move_original_to_extension_slot_locked(::qol::extension_bag::ReentryLock& l
         return false;
     }
 
-    // 非堆叠原生装备的 cumulate_count 可能返回 0；移动这种物品时按单件处理。
-    const int32_t move_count = source.count > 0 ? source.count : 1;
+    const int32_t move_count = source_desc.count;
     lock.unlock();
     const auto outcome = action->move(
         {native_space_for_bag(src_bag), native_bag_number(src_bag), src_slot}, move_count,

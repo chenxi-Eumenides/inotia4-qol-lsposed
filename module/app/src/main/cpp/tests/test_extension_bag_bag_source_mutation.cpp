@@ -36,6 +36,7 @@ uint32_t g_effective_count = 0;
 int g_extension_free_calls = 0;
 int g_persist_calls = 0;
 bool g_reject_next_persist = false;
+void* g_materialize_result = nullptr;
 
 #define CHECK(condition)                                                           \
     do {                                                                           \
@@ -106,6 +107,7 @@ void reset_fixture() {
     g_extension_free_calls = 0;
     g_persist_calls = 0;
     g_reject_next_persist = false;
+    g_materialize_result = nullptr;
 }
 
 bool ledger_has_single_module_object(const ownership::Ledger& ledger, uint32_t handle) {
@@ -329,6 +331,119 @@ void test_partial_remove_acceptance_rejection_restores_original_state() {
     CHECK(!objects.module_object_use[kBag][kSlot].active);
 }
 
+// 占用槽合并必须身份安全（排除 UID/数量位）：同 category 同身份原地并入；
+// 不同 I_TYPE/非可堆叠一律 conflict 不写入。判据与 place_plan/adopt_merge_into
+// 同源（mergeable_items）。
+void test_import_merges_same_identity_into_occupied_slot() {
+    reset_fixture();
+    auto& bag = runtime_state().objects.bag;
+    auto& objects = qol::extension_bag::ui_state().objects;
+    constexpr int kBag = 0;
+    constexpr int kSlot = 1;
+    constexpr int kCategory = 77;
+    int existing_object = 3;
+    static int materialized_object = 4;
+    bag.items[kBag][kSlot] = make_item(kCategory, 3);
+    objects.module_objects[kBag][kSlot] = &existing_object;
+    objects.module_object_categories[kBag][kSlot] = kCategory;
+    objects.module_object_hashes[kBag][kSlot] =
+        virtual_bag::payload_hash(bag.items[kBag][kSlot]);
+    uint32_t internal_handle = 0;
+    CHECK(ownership::allocate(&objects.ownership_ledger, &internal_handle) ==
+          ownership::Outcome::kOk);
+    objects.module_object_handles[kBag][kSlot] = internal_handle;
+    g_materialize_result = &materialized_object;
+    g_handle_item = &materialized_object;
+
+    qol::contracts::QolBagTransfer transfer{};
+    make_transfer(kCategory, 1, &transfer);
+    qol::contracts::QolBagMutationResult mutation{};
+    const qol::contracts::QolBagSource* source =
+        qol::features::extension_bag::extension_bag_bag_source();
+    const QolResult result = source->import_item(&transfer, kBag, kSlot, &mutation);
+
+    CHECK(qol::contracts::succeeded(result));
+    const virtual_bag::Item merged = make_item(kCategory, 4);
+    CHECK(same_item(bag.items[kBag][kSlot], merged));
+    CHECK(virtual_bag::payload_count(bag.items[kBag][kSlot]) == 4);
+    CHECK(objects.module_object_hashes[kBag][kSlot] ==
+          virtual_bag::payload_hash(merged));
+    CHECK(objects.module_objects[kBag][kSlot] == &materialized_object);
+    CHECK(objects.module_object_categories[kBag][kSlot] == kCategory);
+    CHECK(mutation.ref.space_id == qol::features::extension_bag::kExtensionBagSpaceId);
+    CHECK(mutation.ref.bag == kBag);
+    CHECK(mutation.count == 1);
+    qol::contracts::QolBagInfo info{};
+    CHECK(qol::contracts::succeeded(source->info(kBag, &info)));
+    CHECK(info.occupied_slots == 1);  // 原地并入，未占用第二个槽
+    CHECK(g_persist_calls >= 1);
+}
+
+void test_import_different_payload_conflicts_without_write() {
+    reset_fixture();
+    auto& bag = runtime_state().objects.bag;
+    auto& objects = qol::extension_bag::ui_state().objects;
+    constexpr int kBag = 0;
+    constexpr int kSlot = 2;
+    constexpr int kCategory = 77;
+    int item_object = 5;
+    virtual_bag::Item existing = make_item(kCategory, 3);
+    existing.payload[9] = 0xAB;  // I_TYPE 位不同 → 身份不同（UID/数量位不参与）
+    bag.items[kBag][kSlot] = existing;
+    objects.module_objects[kBag][kSlot] = &item_object;
+    objects.module_object_categories[kBag][kSlot] = kCategory;
+    objects.module_object_hashes[kBag][kSlot] = virtual_bag::payload_hash(existing);
+    g_handle_item = &item_object;
+
+    qol::contracts::QolBagTransfer transfer{};
+    make_transfer(kCategory, 1, &transfer);
+    qol::contracts::QolBagMutationResult mutation{};
+    const qol::contracts::QolBagSource* source =
+        qol::features::extension_bag::extension_bag_bag_source();
+    const int persist_before = g_persist_calls;
+    const QolResult result = source->import_item(&transfer, kBag, kSlot, &mutation);
+
+    CHECK(!qol::contracts::succeeded(result));
+    CHECK(result.code == kQolErrConflict);
+    CHECK(same_item(bag.items[kBag][kSlot], existing));
+    CHECK(objects.module_object_hashes[kBag][kSlot] ==
+          virtual_bag::payload_hash(existing));
+    CHECK(objects.module_objects[kBag][kSlot] == &item_object);
+    CHECK(g_persist_calls == persist_before);
+    CHECK(g_materialize_calls == 0);
+}
+
+void test_import_non_stackable_category_never_merges() {
+    reset_fixture();
+    auto& bag = runtime_state().objects.bag;
+    auto& objects = qol::extension_bag::ui_state().objects;
+    constexpr int kBag = 0;
+    constexpr int kSlot = 3;
+    constexpr int kCategory = 78;  // 桩映射 kNotEncoded：非可堆叠
+    int item_object = 6;
+    const virtual_bag::Item existing = make_item(kCategory, 1);
+    bag.items[kBag][kSlot] = existing;
+    objects.module_objects[kBag][kSlot] = &item_object;
+    objects.module_object_categories[kBag][kSlot] = kCategory;
+    objects.module_object_hashes[kBag][kSlot] = virtual_bag::payload_hash(existing);
+    g_handle_item = &item_object;
+
+    qol::contracts::QolBagTransfer transfer{};
+    make_transfer(kCategory, 1, &transfer);
+    qol::contracts::QolBagMutationResult mutation{};
+    const qol::contracts::QolBagSource* source =
+        qol::features::extension_bag::extension_bag_bag_source();
+    const int persist_before = g_persist_calls;
+    const QolResult result = source->import_item(&transfer, kBag, kSlot, &mutation);
+
+    CHECK(!qol::contracts::succeeded(result));
+    CHECK(result.code == kQolErrConflict);
+    CHECK(same_item(bag.items[kBag][kSlot], existing));
+    CHECK(objects.module_objects[kBag][kSlot] == &item_object);
+    CHECK(g_persist_calls == persist_before);
+    CHECK(g_materialize_calls == 0);
+}
+
 }  // namespace
 
 // Test-only host ports. The callbacks, module_item_locked, ownership checks, generation updates,
@@ -454,7 +569,7 @@ std::string extension_bag_api_use_item_impl(int logical_bag, int slot) {
 void* materialize_module_item_locked(const virtual_bag::Item& descriptor) {
     (void)descriptor;
     ++g_materialize_calls;
-    return nullptr;
+    return g_materialize_result;
 }
 
 void release_temporary_item_locked(void* item) { (void)item; }
@@ -576,6 +691,9 @@ int main() {
     test_materialize_rejection_restores_empty_descriptor_and_handle_state();
     test_partial_remove_acceptance_rejection_restores_original_state();
     test_deferred_free_skips_game_owned_and_clears_on_load();
+    test_import_merges_same_identity_into_occupied_slot();
+    test_import_different_payload_conflicts_without_write();
+    test_import_non_stackable_category_never_merges();
     std::printf("extension_bag_bag_source_mutation: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

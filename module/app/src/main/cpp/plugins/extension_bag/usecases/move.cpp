@@ -59,18 +59,6 @@ bool move_extension_to_extension_via_action_locked(::qol::extension_bag::Reentry
         return moved;
     }
 
-    int dst_slot = requested_dst_slot;
-    const int capacity = ::qol::extension_bag::access::bag().capacities[dst_bag];
-    if (dst_slot < 0) {
-        for (int slot = 0; slot < capacity; ++slot) {
-            if (module_slot_is_assignable_locked(dst_bag, slot)) {
-                dst_slot = slot;
-                break;
-            }
-        }
-    }
-    if (dst_slot < 0 || dst_slot >= capacity) return false;
-
     void* item = module_item_locked(src_bag, src_slot);
     const virtual_bag::Item& descriptor =
         ::qol::extension_bag::access::bag().items[src_bag][src_slot];
@@ -81,6 +69,29 @@ bool move_extension_to_extension_via_action_locked(::qol::extension_bag::Reentry
 
     const auto* action = ::qol::features::extension_bag::inventory_action_api();
     if (action == nullptr) return false;
+
+    int dst_slot = requested_dst_slot;
+    const int capacity = ::qol::extension_bag::access::bag().capacities[dst_bag];
+    if (dst_slot < 0) {
+        // 自动落位先并入目标袋已有同身份堆，再新建空槽。判据与 source_import_item
+        // 占用槽分支共用 first_mergeable_slot（排除 UID/数量位）；count 与导入
+        // gate 一致（本次将移入的 effective count + 已有 descriptor count）。
+        // 同袋时跳过源槽：同槽身份恒等，不排除会自并。
+        const int merge_slot = virtual_bag::first_mergeable_slot(
+            ::qol::extension_bag::access::bag().items, dst_bag, capacity, descriptor,
+            virtual_bag_category_uses_stack_count, virtual_bag_count_limit(true),
+            src_bag == dst_bag ? src_slot : -1);
+        if (merge_slot >= 0) dst_slot = merge_slot;
+    }
+    if (dst_slot < 0) {
+        for (int slot = 0; slot < capacity; ++slot) {
+            if (module_slot_is_assignable_locked(dst_bag, slot)) {
+                dst_slot = slot;
+                break;
+            }
+        }
+    }
+    if (dst_slot < 0 || dst_slot >= capacity) return false;
 
     lock.unlock();
     const auto outcome = action->move(

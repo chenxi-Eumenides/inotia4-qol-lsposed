@@ -4,6 +4,7 @@ add_library(qol_plugin_core.inventory STATIC
     api/bag_source.cpp
     bags/snapshot_store.cpp
     hooks/inventory_logging.cpp
+    hooks/placement.cpp
     hooks/storage_hooks.cpp
     http/json_lite.cpp
     http/query_handler.cpp

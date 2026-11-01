@@ -9,6 +9,7 @@
 #include "contracts/plugin.h"
 #include "contracts/bag.h"
 #include "contracts/host_sdk.h"
+#include "contracts/inventory_identity.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_scope.h"
 
@@ -367,7 +368,21 @@ int unequip_item_to_inven_wrapper(void* character, int32_t equip_slot) {
     return result;
 }
 
-constexpr int32_t kNativeStackLimit = 126;
+// 合并预检上限：优先物品自身 count_limit（999 模式生效时逐堆提供）；注册源
+// 句柄不在原生句柄表内时失败退回 999 预检，真实写入超限由 import_item 的
+// count gate 拒绝。不使用原版 126 硬编码。
+constexpr int32_t kPrecheckStackLimit = 999;
+
+int32_t registered_merge_stack_limit(const qol::contracts::QolInventoryItemRef& existing) {
+    if (g_item_facts != nullptr && g_item_facts->count_limit != nullptr) {
+        uint32_t limit = 0;
+        if (qol::contracts::succeeded(g_item_facts->count_limit(existing.item, &limit)) &&
+            limit > 0) {
+            return static_cast<int32_t>(limit);
+        }
+    }
+    return kPrecheckStackLimit;
+}
 
 struct RegisteredDestination {
     const qol::contracts::QolBagSource* source = nullptr;
@@ -492,8 +507,19 @@ bool find_registered_destination(const qol::contracts::QolBagTransfer& transfer,
                     continue;
                 }
                 if (!qol::contracts::succeeded(probe)) continue;
+                // 占用扩展槽合并：category 预过滤后必须核验 payload 身份（排除
+                // UID/数量位，判据与 core.inventory placement 同源）。不同
+                // identity 继续扫描，不得并入；导出失败视为不可合并。
                 if (stackable && existing.category == transfer.category && existing.count > 0 &&
-                    existing.count + transfer.count <= kNativeStackLimit) {
+                    existing.count + transfer.count <= registered_merge_stack_limit(existing)) {
+                    qol::contracts::QolBagTransfer existing_transfer{};
+                    if (!qol::contracts::succeeded(source->export_item(
+                            existing.item, existing.count, &existing_transfer)) ||
+                        !qol::contracts::qol_inventory_payload_identity_equal(
+                            existing_transfer.payload, existing_transfer.payload_size,
+                            transfer.payload, transfer.payload_size)) {
+                        continue;
+                    }
                     *out_destination = {source, bag, slot};
                     return true;
                 }

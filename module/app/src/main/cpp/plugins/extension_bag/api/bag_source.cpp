@@ -292,7 +292,11 @@ QolResult source_import_item(const contracts::QolBagTransfer* transfer, int32_t 
     }
     auto& bag_items = ::qol::extension_bag::access::bag().items[bag][slot];
     if (!descriptor_empty(bag_items)) {
-        if (bag_items.category != candidate.category || bag_items.count < 0) {
+        // 占用槽合并只接受同 category 且 payload 身份一致的可堆叠堆（排除 UID/
+        // 数量位，判据与 place_plan/adopt_merge_into 同源）；不同 identity 或非
+        // 可堆叠物品一律 conflict，不写入调用方指定的占用槽。
+        if (!virtual_bag::mergeable_items(bag_items, candidate,
+                                          virtual_bag_category_uses_stack_count)) {
             return source_error(kQolErrConflict, "extension slot contains another item");
         }
         const uint32_t merged_count =

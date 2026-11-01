@@ -360,6 +360,35 @@ inline PlacePlan place_plan(
     return plan;
 }
 
+// ---- 自动落位合并槽扫描（原始→扩展 / ext→ext 共用，纯模型供 Host 断言）----
+// 单袋容量内返回第一个与 source 同身份可堆叠（mergeable_items，排除 UID/数量位）
+// 且并入后不超过 limit 的占用槽；无命中返回 -1。skip_slot 供 ext→ext 跳过源槽
+// （同槽身份恒等，不排除会自并）。count 语义与 source_import_item 占用槽分支
+// 一致：descriptor 原始值相加后与 limit 比较。
+template <typename CategoryPredicate>
+inline int first_mergeable_slot(
+    const std::array<std::array<Item, kSlotCount>, kMaxExtensionBags>& items, int bag,
+    int capacity, const Item& source, CategoryPredicate is_count_encoded, uint32_t limit,
+    int skip_slot) {
+    if (bag < 0 || bag >= static_cast<int>(kMaxExtensionBags) || capacity <= 0 ||
+        source.category <= 0 || source.count <= 0) {
+        return -1;
+    }
+    if (capacity > kSlotCount) capacity = kSlotCount;
+    for (int slot = 0; slot < capacity; ++slot) {
+        if (slot == skip_slot) continue;
+        const Item& existing = items[bag][slot];
+        if (existing.category <= 0 || existing.count <= 0) continue;
+        if (!mergeable_items(existing, source, is_count_encoded)) continue;
+        const uint64_t total =
+            static_cast<uint64_t>(static_cast<uint32_t>(existing.count)) +
+            static_cast<uint64_t>(static_cast<uint32_t>(source.count));
+        if (total > static_cast<uint64_t>(limit)) continue;
+        return slot;
+    }
+    return -1;
+}
+
 // 新建槽 descriptor 落位/回滚纯模型（owner 复用，Host 断言失败路径一致性）：
 // generation_ok=true → 写出 source 的 payload/category/count（保留 previous 的
 // 其余字节）；false → 原样返回 previous，即 descriptor 与对象表保持失败前态。
