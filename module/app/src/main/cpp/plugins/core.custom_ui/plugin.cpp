@@ -185,6 +185,7 @@ void plugin_install_rollback(contracts::PluginContext& ctx, bool confirmation_bo
         debug_components_unregister(ctx.sdk);
     }
 #else
+    (void)ctx;
     (void)debug_cleanup;
 #endif
     if (confirmation_bound) ui_confirmation_unbind();
