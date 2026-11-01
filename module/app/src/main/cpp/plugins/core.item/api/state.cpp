@@ -28,17 +28,6 @@ void log_snapshot_serialize_failure() {
                            static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
 
-uint32_t g_degrade_warn_ticks = 0;
-
-void log_degrade_warn(const char* message) {
-    if (message == nullptr) return;
-    if (++g_degrade_warn_ticks % 300u != 1u) return;
-    if (g_sdk == nullptr || g_sdk->log.write == nullptr) return;
-    uint32_t length = 0;
-    while (message[length] != '\0') ++length;
-    (void)g_sdk->log.write(2, 1, kPluginId, message, length);
-}
-
 void publish_not_in_game(ItemSnapshot& snapshot) {
     bags::inventory_snapshot_store().clear();
     snapshot.state = SnapshotState::kNotInGame;

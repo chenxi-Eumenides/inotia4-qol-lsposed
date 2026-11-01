@@ -192,7 +192,7 @@ SET-01/SET-02 为历史问题，已结项并移入文末已修复附录。当前
 | IH-06 | P2 | `MoveItem`/`RemoveItemData`/`Divide` 原版失败或半写后仍可能回写 | 开放；需先逆向冻结原版返回值语义，再补失败注入 |
 | G-2 | P2 | 替换后的 FindItem handler 未登记 in-flight | 开放；host/dispatch 边界补登记并做 release 等待测试 |
 
-无法验证：c18/overhaul 倍率仅静态金标；退款失败日志未真机触发；`inventory.slot` 暂无生产消费者；调试门禁关闭分支未真机逐条触发；任务袋透传无物品可测；autosell 路径并入 autosell 审阅。
+无法验证：c18/overhaul 倍率仅静态金标；退款失败日志未真机触发；`inventory.slot` 生产消费者为 custom_recipe（`custom_recipe/plugin.cpp`）；调试门禁关闭分支未真机逐条触发；任务袋透传无物品可测；autosell 路径并入 autosell 审阅。
 
 ## 14. autosell（审阅批 2026-10-20）
 

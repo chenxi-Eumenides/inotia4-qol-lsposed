@@ -77,7 +77,6 @@ extern const uint32_t kHttpRouteMetadataCount;
 extern const contracts::FeatureDefinition kFeatures[];
 
 void stop_frame_task(const contracts::QolHostSdk* sdk);
-extern uint32_t g_degrade_warn_ticks;
 extern const uint32_t kItemWriteHandlerId;
 int plugin_install(contracts::PluginContext& ctx);
 void plugin_deactivate(contracts::PluginContext& ctx);

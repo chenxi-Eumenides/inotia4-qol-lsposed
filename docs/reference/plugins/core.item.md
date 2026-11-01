@@ -2,12 +2,13 @@
 
 ## 定位与职责边界
 
-`core.item` 是物品与库存领域 owner，提供物品事实、袋源注册、库存动作、库存状态查询，以及 inventory/shop HTTP 接口。它是 plugin authors、HTTP clients、扩展背包（EB）与 autosell 等消费者访问库存的统一边界。
+`core.item` 是物品与库存领域 owner，提供物品事实、库存动作、库存状态查询，以及 inventory/shop HTTP 接口。它是 plugin authors、HTTP clients、扩展背包（EB）与 autosell 等消费者访问库存的统一边界。袋源注册面（`inventory.bag_source`）由 `core.inventory` 提供，本插件按 optional 消费。
 
 | `core.item` 负责 | 不负责 |
 |---|---|
 | 原版/C18/注册袋源的库存读取、对外物品事实、动作编排与快照查询。 | 扩展袋 sidecar、袋数据、页签和 UI；EB 自己维护数据并注册袋源。 |
-| 库存与 shop 的查询/写入接口、袋源注册，以及投影回调注册面。 | HTTP listener、传输与 OP 权限门禁；由 Host/API 层承担。 |
+| 8 条 required fail-closed 库存动作 hook 与 3 条 optional fail-soft 快捷栏诊断 hook（共 11 条资源）。 | 装备页 5 条 UI hook（`UIEquip_ButtonEquipExe`/`ButtonUnequipExe`/`OKConfirmUseItem`/`RefreshItemArea`/`EquipControlEventProc`）、`ptrslot:MOVE_MERGE_GOT` 与拖拽合并；由 `extension_bag` 持有。原版存储类库存 hook 由 `core.inventory` 持有。 |
+| 库存与 shop 的写入接口，以及投影回调注册面。 | HTTP listener、传输与 OP 权限门禁；由 Host/API 层承担。 |
 | 跨空间物品动作的统一入口。 | 原生游戏地址解释与内存适配；由 Host/game adapter 提供。 |
 
 ## 术语与身份
@@ -38,12 +39,17 @@
 |---|---:|---|
 | `item.facts` | 4.0 | 物品类别、权威 `item_type`、库存 view/count/编码、禁售和报价等事实。 |
 | `item.state` | 1.1 | raw/enriched 库存状态 JSON 与尺寸查询。 |
-| `inventory.bag_source` | 1.2 | 注册/注销外部袋源，并提供跨空间转移所需的袋源原语。 |
-| `inventory_refresh` | 1.2 | 原版库存区域刷新；`update_shortcut_category(category)` 按类别重算快捷栏数量（含注册袋源物品）。 |
 | `inventory.action` | 3.3 | 移动、使用、丢弃、出售、装备、卸下、镶嵌，以及 detached 生成/落位/释放。 |
 | `inventory.slot` | 1.0 | resolve/view/remove 槽位查询面。 |
-| `move_merge.control` | 1.0 | 报告拖拽合并是否可用。 |
 | `inventory.projection` | 1.3 | 注册/注销投影回调；投影显示和数据仍归注册方。尾部回调支持原版袋卸下、佣兵徽章、背包装备与角色装备。 |
+
+以下能力不再由 `core.item` 提供：
+
+| Capability | 当前 owner | 说明 |
+|---|---|---|
+| `inventory.bag_source` | `core.inventory` | 袋源注册表与跨空间转移原语；`core.item` 改为 optional 消费（缺失时注册源查询为空，原生路径不受影响）。 |
+| `inventory_refresh` | `extension_bag` | 原版库存区域刷新 trampoline；`core.item` 改为 optional 消费（缺失时出售结算后的刷新退化为 no-op）。`update_shortcut_category(category)` 语义不变。 |
+| `move_merge.control` | 已删除 | 随拖拽合并迁往 `extension_bag` 后撤除；`move_merge.drag_merge` feature 与 `ptrslot:MOVE_MERGE_GOT` 资源现由 `extension_bag` 持有。 |
 
 ### `item.facts` 物品类型
 
@@ -67,11 +73,12 @@
 | Toggle | 初始状态与可见行为 |
 |---|---|
 | `core.item.provider` | 默认开启的隐藏开关；该开关不单独改变物品领域服务行为，服务随 `core.item` 插件启停。 |
-| `move_merge.drag_merge` | 显示名称「拖动合并」、描述「允许合并同种可堆叠物品」，默认开启。关闭时不执行拖动自动合并；其他库存动作不由此开关关闭。 |
+
+`move_merge.drag_merge`（「拖动合并」，BasicOptimization、默认开启）已迁往 `extension_bag` 注册；关闭时不执行拖动自动合并，其他库存动作不受该开关影响。
 
 ## `QolBagSource` v1.2 公共契约
 
-`inventory.bag_source` 由 `core.item` 提供。每个来源占用独立 `space_id>=2`；袋索引从 0 开始。来源提供自己的数据和写入原语，`core.item` 不接管其 sidecar 数据。
+`inventory.bag_source` 由 `core.inventory` 提供（`core.item` 不再持有该注册表）。每个来源占用独立 `space_id>=2`；袋索引从 0 开始。来源提供自己的数据和写入原语，注册方不接管其 sidecar 数据。
 
 ### 字段与注册表 API
 
@@ -171,7 +178,7 @@ payload 固定容量 256 字节，有效长度为 `1..255`，不得动态扩容�
 | 同一空间移动 | `move` 按显式源/目标与数量执行；结果报告实际 `moved_count`、是否并入目标及目标身份。 |
 | 跨空间移动 | 目标成功接收前不得丢弃来源物品；来源移除失败时尝试补偿目标。补偿失败不得报告成功。 |
 | 合并 | 合并要求物品类别相同且目标堆不超过可用数量上限；动作结果通过 `merged` 与目标信息表达。 |
-| 拖拽自动合并 | 仅在 `move_merge.drag_merge` 开启且 `move_merge.control` 报告可用时启用；源堆必须能整体放入目标剩余容量，拖拽 gate 不拆分源堆做部分合并。 |
+| 拖拽自动合并 | hook、gate 与开关（`move_merge.drag_merge`）由 `extension_bag` 持有；源堆必须能整体放入目标剩余容量，拖拽 gate 不拆分源堆做部分合并。 |
 | 任务袋 | `(space=0, bag=5)` 可读取，但不能作为 `inventory.action` 动作或跨空间转移的源/目标。 |
 | 来源专属动作 | 来源缺少 `identify` 或 `use` 时对应能力返回 `kQolErrUnsupported`；装备限制见上方方法表。 |
 

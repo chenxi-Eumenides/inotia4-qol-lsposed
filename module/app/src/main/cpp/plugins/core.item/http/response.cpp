@@ -4,7 +4,6 @@
 #include <string>
 
 #include "json_lite.h"
-#include "plugins/core.item/runtime/core_item_internal.h"
 
 namespace qol::features::core_item {
 namespace {
@@ -278,29 +277,6 @@ bool enrich_item_value(const JsonValue& item, const contracts::QolItemPort* port
     return true;
 }
 
-bool enrich_snapshot_item(int32_t space, int32_t bag, const bags::SlotRecord& item,
-                          const contracts::QolItemPort* port, bool include_bag,
-                          std::string* out) {
-    if (out == nullptr) return false;
-    std::string raw;
-    append_inventory_item(&raw, item.slot, item.view, item.view.count_supported != 0,
-                          item.count);
-    JsonValue value;
-    if (!json_parse(raw.data(), static_cast<uint32_t>(raw.size()), &value)) return false;
-    std::string enriched;
-    if (!enrich_item_value(value, port, &enriched) || enriched.size() < 2 ||
-        enriched.front() != '{' || enriched.back() != '}') {
-        return false;
-    }
-    std::string result = "{\"space\":" + std::to_string(space);
-    if (include_bag) result += ",\"bag\":" + std::to_string(bag);
-    result += ",";
-    result.append(enriched.data() + 1, enriched.size() - 2);
-    result.push_back('}');
-    *out = std::move(result);
-    return true;
-}
-
 bool enrich_inventory(const char* json, uint32_t size, const contracts::QolItemPort* port,
                       std::string* out) {
     if (out == nullptr) return false;
@@ -335,78 +311,6 @@ bool enrich_inventory(const char* json, uint32_t size, const contracts::QolItemP
     }
     result += "]}";
     *out = std::move(result);
-    return true;
-}
-
-bool enrich_items_list(const char* json, uint32_t size, const contracts::QolItemPort* port,
-                       std::string* out) {
-    if (out == nullptr) return false;
-    JsonValue root;
-    if (!json_parse(json, size, &root)) return false;
-    const JsonValue* bags = bags_of(root);
-    if (bags == nullptr) return false;
-
-    std::string result = "{\"items\":[";
-    bool first = true;
-    for (const JsonValue& bag : bags->items) {
-        const JsonValue* items = items_of(bag);
-        if (items == nullptr) continue;
-        for (const JsonValue& item : items->items) {
-            if (!first) result += ",";
-            first = false;
-            result += enrich_item(item, port);
-        }
-    }
-    result += "]}";
-    *out = std::move(result);
-    return true;
-}
-
-bool enrich_bag_info(const char* json, uint32_t size, int32_t bag, std::string* out, bool* found) {
-    if (out == nullptr || found == nullptr) return false;
-    *found = false;
-    JsonValue root;
-    if (!json_parse(json, size, &root)) return false;
-    const JsonValue* bags = bags_of(root);
-    if (bags == nullptr) return false;
-    for (const JsonValue& entry : bags->items) {
-        long long bag_id = -1;
-        if (!member_int(entry, "bag", &bag_id) || bag_id != bag) continue;
-        long long capacity = -1;
-        (void)member_int(entry, "capacity", &capacity);
-        long long occupied_slots = -1;
-        (void)member_int(entry, "occupied_slots", &occupied_slots);
-        *out = "{\"bag\":" + std::to_string(bag_id) + ",\"capacity\":" +
-               std::to_string(capacity) + ",\"occupied_slots\":" + std::to_string(occupied_slots) + "}";
-        *found = true;
-        return true;
-    }
-    return true;
-}
-
-bool enrich_bag_slot(const char* json, uint32_t size, int32_t bag, int32_t slot,
-                     const contracts::QolItemPort* port, std::string* out, bool* bag_found) {
-    if (out == nullptr || bag_found == nullptr) return false;
-    *bag_found = false;
-    JsonValue root;
-    if (!json_parse(json, size, &root)) return false;
-    const JsonValue* bags = bags_of(root);
-    if (bags == nullptr) return false;
-    for (const JsonValue& entry : bags->items) {
-        long long bag_id = -1;
-        if (!member_int(entry, "bag", &bag_id) || bag_id != bag) continue;
-        *bag_found = true;
-        const JsonValue* items = items_of(entry);
-        if (items == nullptr) return false;
-        for (const JsonValue& item : items->items) {
-            long long item_slot = -1;
-            if (!member_int(item, "slot", &item_slot) || item_slot != slot) continue;
-            *out = enrich_item(item, port);
-            return true;
-        }
-        *out = "null";
-        return true;
-    }
     return true;
 }
 

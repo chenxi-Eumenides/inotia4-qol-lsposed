@@ -1,7 +1,6 @@
 #include "inventory_hooks.h"
 #include "../api/projection.h"
 #include "../usecases/consume_item.h"
-#include "../usecases/item_action.h"
 #include "../bags/native_bag_limit.h"
 #include "../runtime/context.h"
 #include "claims.h"
@@ -12,7 +11,6 @@
 #include "contracts/host_sdk.h"
 #include "contracts/inventory_refresh.h"
 #include "contracts/inventory_scope.h"
-#include "contracts/ui.h"
 
 #include <algorithm>
 #include <atomic>
@@ -54,13 +52,6 @@ const qol::contracts::QolItemHandleApi* item_handle_api() {
         g_sdk->abi.size < offsetof(qol::contracts::QolHostSdk, item_handle) +
                               sizeof(qol::contracts::QolItemHandleApi)) return nullptr;
     return &g_sdk->item_handle;
-}
-
-void invalidate_item_handle(void* item) {
-    const auto* api = item_handle_api();
-    if (item == nullptr || api == nullptr || api->invalidate_item == nullptr) return;
-    (void)api->invalidate_item(
-        item, qol::contracts::kQolItemHandleOwnerAny);
 }
 
 bool item_handle_for_hook_item(void* item, qol::contracts::QolItemHandle* out_handle) {
@@ -275,11 +266,6 @@ bool item_count_extended_applied() {
     return qol::contracts::succeeded(api->read_extended_mode(&extended)) && extended != 0;
 }
 
-bool item_count_feature_enabled(void* item) {
-    uint32_t effective = 0;
-    return item_count_extended_applied() && item_count_effective(item, &effective);
-}
-
 // ---------------------------------------------------------------------------
 // S2 写侧进位框架（R-45 拆段回写、R-46 类别门控 fail-closed、R-49 写侧调用方级
 // 进位/借位）。原版数量写入全部经 UTIL_SetBitValue(旧字段值, 25, 31, 新b) 只写
@@ -342,30 +328,6 @@ uint32_t read_count_field(const void* item) {
         return 0;
     }
     return field;
-}
-
-void s2_write_count_field(void* item, uint32_t field) {
-    const auto* api = item_count_api();
-    if (api != nullptr && api->write_encoded_field != nullptr && item != nullptr) {
-        (void)api->write_encoded_field(item, field);
-    }
-}
-
-// 在物理袋 0..5（含任务袋）定位对象所在槽；找不到返回 false。
-// 纯指针扫描，无锁、无被 Hook 函数调用；供回写前后验证对象仍在槽内，
-// 防止对象被原版释放后触磁悬垂指针。
-bool s2_find_physical_slot(const void* item, int* out_bag, int* out_slot) {
-    if (item == nullptr) return false;
-    for (int bag = 0; bag < physical_bag_limit(); ++bag) {
-        for (int slot = 0; slot < kInvenSlotsPerBag; ++slot) {
-            if (s2_physical_slot_item(bag, slot) == item) {
-                *out_bag = bag;
-                *out_slot = slot;
-                return true;
-            }
-        }
-    }
-    return false;
 }
 
 // S2 写侧回写总门控（R-46 fail-closed + feature 门控对齐）：999 原子组必须已应用，

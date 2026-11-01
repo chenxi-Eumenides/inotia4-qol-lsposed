@@ -10,7 +10,7 @@
 | API | facts、state、袋源注册、投影回调注册表 | `api/facts.cpp`、`api/state.cpp`、`api/bag_source.cpp`、`api/projection.cpp` |
 | Bags | 快照存储、原生袋扫描上限、transfer payload 结构 | `bags/snapshot_store.cpp`、`bags/native_bag_limit.h`、`bags/transfer.h` |
 | Use cases | 库存读取、物品动作、出售、物品生命周期 | `usecases/read_inventory.cpp`、`item_action.cpp`、`sell_item.cpp`、`consume_item.cpp` |
-| Hooks | 原生库存入口与拖拽合并 wrapper | `hooks/inventory_hooks.cpp`、`hooks/merge_hook.cpp` |
+| Hooks | 原生库存动作入口与快捷栏诊断 | `hooks/inventory_hooks.cpp`（装备页 5 条 UI hook 与拖拽合并 wrapper 已迁 `plugins/extension_bag/core/move_merge_hook.cpp`、`ui/equip_hooks.cpp`） |
 | HTTP / shop | 查询分页、typed command、响应结果、shop 路由与快照 | `http/query_handler.cpp`、`http/write_handler.cpp`、`http/write_results.cpp`、`shop/` |
 
 旧袋源编排、transport、transfer journal 与 model 校验层已删除，尚未重建。当前只保留原生同空间移动：由 Host `move_item` 端口交给原版代码执行；跨空间与注册源之间的移动请求返回 `item transfer unavailable`。
@@ -25,27 +25,25 @@
 |---|---|
 | descriptor | id `core.item`，version `0.1.0`，`deactivate_allowed=false`。 |
 | required capabilities | 0 项。 |
-| provides | 8 项；能力名称、版本与用途见[对外契约](core.item.md)的“对外能力”。 |
-| Game ports | 6 项：`QOL_PORT_ITEM` 3.8、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.4、`QOL_PORT_MOVE_MERGE` 1.2、`QOL_PORT_CHARACTER_EXTRAS` 1.2。 |
-| optional requires | 4 项：`character.state` 1.0、`http.registry` 1.1、`http.dispatch` 1.1、`world.facts` 2.0。 |
+| provides | 5 项：`item.facts`、`item.state`、`inventory.action`、`inventory.slot`、`inventory.projection`；能力名称、版本与用途见[对外契约](core.item.md)的“对外能力”。`inventory_refresh`、`inventory.bag_source`、`move_merge.control` 不再由本插件提供。 |
+| Game ports | 5 项：`QOL_PORT_ITEM` 3.8、`QOL_PORT_ITEM_MONEY_WRITE` 1.0、`QOL_PORT_ITEM_DICE_WRITE` 1.1、`QOL_PORT_ITEM_INVENTORY_STATE_WRITE` 2.4、`QOL_PORT_CHARACTER_EXTRAS` 1.2。`QOL_PORT_MOVE_MERGE` 已迁 `extension_bag`。 |
+| optional requires | 6 项：`character.state` 1.0、`http.registry` 1.1、`http.dispatch` 1.1、`world.facts` 2.0、`inventory.bag_source`（由 `core.inventory` 提供）、`inventory_refresh`（由 `extension_bag` 提供）。 |
 
-`world.facts` 缺失时出售以 `kSymbolsUnresolved` 失败，不继续扣款或移除物品。其余 optional requires 不构成安装依赖。
+`world.facts` 缺失时出售以 `kSymbolsUnresolved` 失败，不继续扣款或移除物品。`inventory_refresh` 缺失时出售结算后的原版刷新退化为 no-op；`inventory.bag_source` 缺失时注册源查询为空。其余 optional requires 不构成安装依赖。
 
 ### Features 与资源
 
 | 项目 | 装配事实 |
 |---|---|
 | `core.item.provider` | `Hidden` toggle，默认开启；其 feature callback 不执行额外 toggle 动作。插件启停仍由生命周期处理。 |
-| `move_merge.drag_merge` | `Basic optimization` toggle，显示名称「拖动合并」，默认开启；callback 更新拖动合并 gate。 |
-| 库存 hooks | 27 个 hook claim：24 个 required、fail-closed 的库存入口；3 个 optional、fail-soft 的快捷栏诊断入口。 |
-| 合并 wrapper | 1 个 optional、fail-closed 的 `ptrslot:MOVE_MERGE_GOT` claim；资源未就绪时 `move_merge.control` 报告 disabled。 |
-| 总资源 | 28 项；生命周期将库存 hooks 与合并 wrapper 的 claim 合并进 descriptor。 |
+| 库存 hooks | 11 个 hook claim：8 个 required、fail-closed 的库存动作入口；3 个 optional、fail-soft 的快捷栏诊断入口。装备页 5 条 UI hook（`UIEquip_ButtonEquipExe`/`ButtonUnequipExe`/`OKConfirmUseItem`/`RefreshItemArea`/`EquipControlEventProc`）与 `ptrslot:MOVE_MERGE_GOT` 已迁 `extension_bag`。 |
+| 总资源 | 11 项；生命周期将库存 hooks 的 claim 合并进 descriptor。 |
 
-hook 入口覆盖库存查询/写入和备用入口绑定；快捷栏三个 optional hook 仅提供诊断观察，不作为必需写入口。资源绑定由 `on_resource_ready` 分发到库存 backup 绑定或 wrapper 就绪状态。
+hook 入口覆盖库存动作和诊断绑定；快捷栏三个 optional hook 仅提供诊断观察，不作为必需写入口。资源绑定由 `on_resource_ready` 分发到库存 backup 绑定。
 
 ### 生命周期门控
 
-插件安装和重新启用都会尝试恢复转移记录。禁用时关闭拖拽合并 gate、停止周期任务、销毁 shop snapshot 并清空库存快照存储。descriptor 不允许 deactivate；资源生命周期仍由 Host 约束，不能通过普通停用跳过 hook/backup 清理。
+插件安装和重新启用都会尝试恢复转移记录。禁用时停止周期任务、销毁 shop snapshot 并清空库存快照存储。descriptor 不允许 deactivate；资源生命周期仍由 Host 约束，不能通过普通停用跳过 hook/backup 清理。
 
 ## 改版袋数探测（C18 布局）
 
@@ -96,20 +94,11 @@ raw state 保留原版袋 `0..5`，其后接 C18 展示段；注册来源段由 
 
 库存读取仍由 `usecases/read_inventory.cpp` 汇总原生空间与已注册袋源；袋源注册面由 core.inventory 的 `inventory.bag_source` 提供。
 
-## 投影与拖拽合并 wrapper
+## 投影回调注册表
 
 投影 callback registry 由 `api/projection.cpp` 管理，`extension_bag` 注册它自己的 drop callback；投影物品仍由注册袋源持有，不成为原生库存事实。
 
-`hooks/merge_hook.cpp` 包装 `MOVE_MERGE_GOT`：
-
-| 事件 | 内部路径 |
-|---|---|
-| `0x02` | 尝试交给 projection drop callback；已处理则结束该投影路径。 |
-| `0x04` | 保护注册源/非原生物品，检查原生合并输入事实与 feature gate，再委托原生合并端口。 |
-
-原生自动合并要求源、目标均为 count-encoded 同类别物品，双方 count 有效，目标 count limit 可读，合并后不超过上限；`can_apply_stuff` 必须成功并返回“不接管”。材料操作接管、事实未知或 gate 未就绪时不执行该自动合并。wrapper 只在整个源堆可放入目标剩余容量时合并，不在 gate 中拆成部分堆叠。
-
-成功后按需同步 projection 显示槽、刷新原版库存 UI 并清除 touch cursor。feature 关闭或 wrapper 未就绪时不启用该合并路径。投影显示层由扩展袋负责。
+原拖拽合并 wrapper（`hooks/merge_hook.cpp` 包装 `ptrslot:MOVE_MERGE_GOT`：0x02 投影 drop 分流、0x04 原生合并 gate）已随 5 条装备页 UI hook 一并迁往 `extension_bag`（`core/move_merge_hook.cpp`、`ui/equip_hooks.cpp`）；`move_merge.drag_merge` feature 与 `QOL_PORT_MOVE_MERGE` 端口同归 `extension_bag`。core.item 侧只剩投影注册表；成功写入后的原版刷新经 `inventory_refresh`（owner `extension_bag`）的 trampoline 请求。
 
 ## 数据流摘要
 
@@ -132,7 +121,7 @@ Shop 使用 `shop/` 内独立 snapshot 与 epoch；inventory 写入和读取不�
 
 | 限制 | 影响 |
 |---|---|
-| 合并端口 bag 范围含 5 | `inventory.action` 与 transfer 排除任务袋 `(0,5)`，但独立 merge port 当前检查范围为 `0..5`，未明确排除 5；不能由 action 层规则推断 hook 已排除任务袋。 |
+| 合并端口 bag 范围含 5（现由 `extension_bag` 持有） | `inventory.action` 与 transfer 排除任务袋 `(0,5)`，但 `extension_bag` 的 merge wrapper 检查范围为 `0..5`，未明确排除 5；不能由 action 层规则推断 hook 已排除任务袋。 |
 | C18 缓存 key 不含所有袋表项 | 表项变化但 key 不变时需显式失效；当前失效入口没有调用点。 |
 | 注册源原子性 | 来源 callback 若失败时部分修改 sidecar，core.item 无法可靠推断或修复；来源必须满足 export 只读及失败不变式。 |
 | 分页与注册顺序 | 注册顺序或翻页期间库存变化可能导致重复/跳过；扁平袋号不是持久身份。 |
@@ -148,7 +137,8 @@ Shop 使用 `shop/` 内独立 snapshot 与 epoch；inventory 写入和读取不�
 | HTTP 移动 | `tests/test_item_facts_dispatch.cpp`；跨空间路径断言 `item transfer unavailable`。 |
 | 袋源 mutation free/materialize rollback | `tests/test_extension_bag_bag_source_mutation.cpp`（`extension_bag_bag_source_mutation_tests`；Host-only，非真机验收；failure tests 覆盖 provider 可达的 free 拒绝与 materialize 失败回滚）。 |
 | 物品句柄身份 | `tests/test_item_handle_registry.cpp`、`tests/test_item_handle_custody.cpp`、`tests/check_item_handle_contracts.cmake` |
-| hook 与拖拽合并 wrapper | `tests/test_inventory_hook_stage4.cpp`、`tests/test_move_merge_plugin.cpp` |
+| 库存 hook（core.item 侧） | `tests/test_inventory_hook_stage4.cpp` |
+| 拖拽合并 wrapper 与装备页 UI hook（extension_bag 侧） | `tests/test_move_merge_plugin.cpp`、`tests/test_extension_bag_equip_hooks.cpp` |
 | 静态资源与 HTTP route contract | `scripts/maintenance/check_arch.py`、`scripts/maintenance/check_http_routes.py` |
 
 Host/static 测试不替代[验证规则与验收卡](../refactor/verification.md)要求的真机证据；构建、部署与设备取证流程见[构建与部署指南](../guides/build-and-deploy.md)。

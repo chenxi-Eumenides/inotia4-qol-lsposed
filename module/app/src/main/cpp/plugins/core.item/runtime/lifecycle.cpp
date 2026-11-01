@@ -87,7 +87,6 @@ int plugin_install(contracts::PluginContext& ctx) {
     reset_bag_sources();
     bags::inventory_snapshot_store().clear();
     g_sdk = ctx.sdk;
-    g_degrade_warn_ticks = 0;
     g_frame_task = 0;
     if (ctx.struct_size < contracts::PLUGIN_CONTEXT_PORTS_STRUCT_SIZE ||
         ctx.sdk_major != contracts::kHostSdkMajor || g_sdk == nullptr || ctx.ports == nullptr ||

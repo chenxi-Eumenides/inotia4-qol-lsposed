@@ -1,9 +1,19 @@
 # `extension_bag` 插件设计
 
+> **2026-11 库存 hook/刷新面迁移**
+>
+> 自 `core.item` 迁入并由本插件持有：
+> - 5 条装备页 UI hook：`hook:UIEquip_ButtonEquipExe`、`hook:UIEquip_ButtonUnequipExe`、`hook:UIEquip_OKConfirmUseItem`、`hook:UIEquip_RefreshItemArea`、`hook:UIEquip_EquipControlEventProc`（声明与 backup 交付在 `assembly/claims.cpp` + `ui/equip_hooks.cpp`）。
+> - `ptrslot:MOVE_MERGE_GOT` 资源与 `QOL_PORT_MOVE_MERGE` 端口（`core/move_merge_hook.cpp`）。
+> - `move_merge.drag_merge` feature（「拖动合并」，BasicOptimization、默认开启；`QOL_PORT_MOVE_MERGE` 白名单允许 `core.item` 或 `extension_bag`）。
+> - `inventory_refresh` capability（原版库存区域刷新 trampoline）：本插件是 owner，`call_original` 直调 `RefreshItemArea` 的 backup 槽；`core.item` 等消费者经 capability 请求，缺失时其刷新退化为 no-op。`update_shortcut_category` 由 Host 装配期注入的原版 `PLAYER_UpdateShortcut` 承担。
+>
+> 原 `move_merge.control` 提供面随迁移删除；`inventory.bag_source` 注册面由 `core.inventory` 提供。
+
 > **2026-10 数据面迁移（`inventory.bag_source` 1.1）**
 >
 > `extension_bag` 不再提供 `extension_bag` / `inventory.merge_projection` 能力、HTTP 路由、中立 provider 或全库存 move。
-> 数据面只向 `core.item` 注册 `QolBagSource` 1.1（space=2），提供
+> 数据面只注册 `QolBagSource` 1.1（space=2），提供
 > `count/info/item_at/for_each_item/export_item/import_item/remove/identify/use`。
 > 原版/改版袋读写、跨空间移动、出售、入库、装备/镶嵌编排归 `core.item`；EB 只保留扩展袋数据原语与 UI 适配。
 > `bagCount` 只由设置页修改。装备页、商店与合成投影均使用
@@ -16,7 +26,7 @@
 功能插件：提供可配置数量的扩展逻辑背包（默认 5，范围 1–8）、原生风格页签、投影显示与 sidecar 持久化；同时兼容 C18L 的原生追加袋布局。
 
 - 插件 id `extension_bag`，版本 `0.1.0`（`plugin.cpp`）。
-- 对外能力：无。数据面只向 `core.item` 注册 `QolBagSource` 1.1（space=2）；不再提供 `extension_bag` / `inventory.merge_projection`。
+- 对外能力：`inventory_refresh` 1.2（自 `core.item` 迁入）。数据面向 `inventory.bag_source` 注册 `QolBagSource` 1.1（space=2；注册面由 `core.inventory` 提供）；不再提供 `extension_bag` / `inventory.merge_projection` / `move_merge.control`。
 - HTTP：无。扩展袋数据查询与操作经 `core.item` 的库存面提供；EB 不拥有 HTTP 路由。
 - 持久化：`extensionbags.items` **v5**（v4 自动迁移，默认 5 袋）。
 - 设置：`bagCount` 只由设置页修改。
@@ -29,8 +39,9 @@
 | 层 | 目录 | 职责 |
 |---|---|---|
 | 数据模型 | `model/`、`runtime/` | 扩展袋数据、catalog、sidecar 状态与物化对象；不拥有全库存事务 |
-| 数据源适配 | `api/bag_source.cpp` | 向 `core.item` 注册 `QolBagSource` 1.1（space=2），提供扩展袋数据原语 |
+| 数据源适配 | `api/bag_source.cpp` | 经 `inventory.bag_source`（owner `core.inventory`）注册 `QolBagSource` 1.1（space=2），提供扩展袋数据原语 |
 | 显示适配 | `core/item_display_hook.cpp` | 通过 item 控件与容量读取 hook 虚拟化投影显示，不写库存槽表或容量字 |
+| 装备页 hook / 拖拽合并 | `ui/equip_hooks.cpp`、`core/move_merge_hook.cpp`、`core/move_merge.cpp` | 5 条装备页 UI hook、`ptrslot:MOVE_MERGE_GOT` wrapper、`move_merge.drag_merge` gate 与 `inventory_refresh` trampoline（均自 `core.item` 迁入） |
 | UI 适配 | `ui/`、`runtime/` | 页签、布局、输入、装备页/商店/合成/详情页面；物品操作编排归 `core.item` |
 
 `QolBagSource` 是 EB 唯一数据接口；provider、HTTP、旧全库存 move 与 EB 事务层均已删除。
@@ -42,7 +53,9 @@
 | BagCatalog | `model/bag_catalog.h`、`bag_catalog.inc` | 扩展袋上限 8、活动数量、槽 16、类型容量 |
 | `QolBagSource` | `api/bag_source.cpp` | 扩展袋数据访问、导入/导出、移除、定位与使用原语 |
 | Item display hooks | `core/item_display_hook.cpp` | `ControlItem_SetItem/GetItem` 与 `INVEN_GetBagSize` 投影读取虚拟化 |
-| BagCatalog | `model/bag_catalog.h`、`bag_catalog.inc` | 扩展袋上限 8、活动数量、槽 16、类型容量 |
+| Equip UI hooks | `ui/equip_hooks.cpp` | `UIEquip_ButtonEquipExe`/`ButtonUnequipExe`/`OKConfirmUseItem`/`RefreshItemArea`/`EquipControlEventProc` 的三态分流与 backup 交付；`RefreshItemArea` backup 槽兼作 `inventory_refresh.call_original` trampoline |
+| Move merge wrapper | `core/move_merge_hook.cpp`、`core/move_merge.cpp` | `ptrslot:MOVE_MERGE_GOT` 事件分流（0x02 投影 drop / 0x04 原生合并 gate），`move_merge.drag_merge` feature 门控 |
+| inventory_refresh provider | `plugin.cpp`（capability 提供） | `inventory_refresh` 1.2：`call_original` 与 `update_shortcut_category`（owner=本插件，消费者经 capability 请求） |
 | Bag state / persistence | `runtime/`、sidecar participant | 扩展袋数据状态、sidecar v5 与对象物化 |
 | NativeTabLayout | `runtime/native_tab_layout.*` | C18 布局解析、reflow、命中、锚定 |
 | UI adapters | `ui/`、`runtime/` | 页签、输入、投影宿主与页面事件适配 |
@@ -137,15 +150,32 @@ extension_logical_bag_last(); // 6 + active - 1
 
 ### 8.1 `QolBagSource` 1.1
 
-- EB 向 `core.item` 注册 `QolBagSource` 1.1，space=2；回调为 `count/info/item_at/for_each_item/export_item/import_item/remove/identify/use`。
+- EB 经 `inventory.bag_source`（owner `core.inventory`）注册 `QolBagSource` 1.1，space=2；回调为 `count/info/item_at/for_each_item/export_item/import_item/remove/identify/use`。
 - 接口索引与错误语义见 [`core.item`](core.item.md) 的「`QolBagSource` 契约」与「状态与失败语义」两节。
 
-### 8.2 扩展 API（已删除）
+### 8.2 `inventory_refresh` 1.2
+
+- 本插件是 `inventory_refresh` 的 owner（provider 自 `core.item` 迁入）：`call_original` 经 `hook:UIEquip_RefreshItemArea` 的 backup trampoline 直调原版刷新，绕过投影窗口；消费者（`core.item` 出售结算、`core.inventory` 写后刷新等）经 capability 请求，缺失时按 no-op 降级。
+- `RefreshItemArea` 同时是 EB 装备页刷新路径的入口：5 条装备页 UI hook 的 id→backup 槽映射与 trampoline 记录由 `ui/equip_hooks.cpp` 单一维护。
+- `update_shortcut_category(category)` 由 Host 装配期注入的原版 `PLAYER_UpdateShortcut` 承担；按注册源中出现的类别逐个调用。
+
+### 8.3 拖拽合并（自 `move_merge`/`core.item` 迁入）
+
+- 资源：`ptrslot:MOVE_MERGE_GOT`（optional、fail-closed），声明表在 `core/move_merge_hook.cpp`；端口 `QOL_PORT_MOVE_MERGE`（Host 白名单允许 `core.item` 或 `extension_bag`）。
+- feature：`move_merge.drag_merge`（「拖动合并」，BasicOptimization、默认开启），callback 更新合并 gate；禁用或 wrapper 未就绪时不启用自动合并。
+- 行为边界：只在整个源堆可放入目标剩余容量时合并，不拆成部分堆叠；投影显示槽同步与原版刷新由本插件完成。原 `move_merge.control` 提供面已删除，可用性以 gate/wrapper 就绪状态为准。
+
+### 8.4 装备页 UI hook（自 `core.item` 迁入）
+
+- 5 条 hook：`hook:UIEquip_ButtonEquipExe`、`hook:UIEquip_ButtonUnequipExe`、`hook:UIEquip_OKConfirmUseItem`、`hook:UIEquip_RefreshItemArea`、`hook:UIEquip_EquipControlEventProc`；声明与 backup 交付在 `assembly/claims.cpp` 与 `ui/equip_hooks.cpp`。
+- 职责：装备页物品操作三态分流（原版路径 / 投影接管 / 阻断），卸下按钮、使用确认与刷新入口都经这里进入 EB 装备页逻辑；原版调用经 backup 透传，backup 缺失时 fail-closed。
+
+### 8.5 扩展 API（已删除）
 
 - `ExtensionBagApi`、`extension_bag` 与 `inventory.merge_projection` 提供面已删除；旧中立 provider 也已删除。
 - 库存查询与跨空间操作经 `core.item` 完成；显示投影由 EB UI hooks 适配，EB 不提供旧投影 capability。
 
-### 8.3 HTTP（已删除）
+### 8.6 HTTP（已删除）
 
 - EB 不注册 HTTP 路由，也没有 typed command；扩展袋库存能力由 `core.item` 的库存接口提供。
 - `bagCount` 只由设置页修改，不提供 HTTP 修改入口。
