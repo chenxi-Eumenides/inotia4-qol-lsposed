@@ -29,6 +29,9 @@ constexpr int64_t kPanelW = 960, kPanelH = 640;
 constexpr int64_t kLeftX = 24, kLeftY = 100, kLeftW = 300, kLeftH = 444;
 constexpr int64_t kRightX = 364, kRightY = 100, kRightW = 572, kRightH = 444;
 constexpr int32_t kLeftRowH = 73;
+constexpr int32_t kLeftOptionInsetX = 5;
+constexpr int32_t kLeftOptionInsetY = 1;
+constexpr int32_t kLeftOptionTextHeight = 24;
 constexpr int32_t kRightRowH = settings_model::kMinimumRightRowHeight;
 constexpr int64_t kBackAbsX = contracts::ui_theme::kNavBoxAbsX;
 constexpr int64_t kBackAbsY = contracts::ui_theme::kNavBoxAbsY;
@@ -309,9 +312,17 @@ void draw_row_background(QolUiHandle row, int32_t width, int32_t height, uint8_t
 }
 void draw_left_row(void*, uint32_t index, QolUiHandle row, uint8_t selected) {
     if (index >= g_categories.size()) return;
-    draw_row_background(row, kLeftW, kLeftRowH, selected);
+    int64_t x = 0, y = 0;
+    if (!contracts::succeeded(g_ui->control_absolute_origin(row, &x, &y))) return;
+    int32_t pressed = 0;
+    if (g_ui->control_pressed != nullptr) (void)g_ui->control_pressed(row, &pressed);
+    const UiRect option_rect{x + kLeftOptionInsetX, y + kLeftOptionInsetY,
+        kLeftW - 2 * kLeftOptionInsetX, kLeftRowH - 2 * kLeftOptionInsetY};
+    (void)g_ui->draw_help_option_row(option_rect, selected, static_cast<uint8_t>(pressed != 0));
+    const int32_t text_y = kLeftOptionInsetY +
+        (kLeftRowH - 2 * kLeftOptionInsetY - kLeftOptionTextHeight) / 2;
     (void)g_components->draw_control_text(row, g_categories[index].name,
-        16, 18, contracts::ui_theme::kTextGold, 0, 1);
+        kLeftW / 2, text_y, contracts::ui_theme::kTextGold, 2, 1);
 }
 void draw_right_row(void*, uint32_t row_index, QolUiHandle row, uint8_t selected) {
     if (row_index >= g_right_indices.size()) return;
@@ -877,7 +888,8 @@ void settings_panel_enter() {
     if (g_root != nullptr) destroy_page();
     if (!g_ui->create_control || !g_ui->set_rect || !g_ui->delete_control ||
         !g_ui->control_absolute_origin || !g_ui->fill_rect || !g_ui->begin_frame ||
-        !g_ui->end_frame || !g_ui->hit_test) {
+        !g_ui->end_frame || !g_ui->hit_test ||
+        g_ui->minor < contracts::kUiAdapterMinor || !g_ui->draw_help_option_row) {
         CORE_UI_LOG_INFO("settings enter blocked ui api");
         return;
     }
@@ -946,7 +958,7 @@ void settings_panel_process() {
         }
         for (const auto& rect : {UiRect{x + kLeftX - 8, y + kLeftY - 8, kLeftW + 32, kLeftH + 16},
              UiRect{x + kRightX - 8, y + kRightY - 8, kRightW + 32, kRightH + 16}}) {
-            const contracts::UiContainerStyleDesc style{rect, 0x1904, 100, 1};
+            const contracts::UiContainerStyleDesc style{rect, 0x0000, 60, 1};
             (void)g_components->draw_container_styled(&style);
         }
     }

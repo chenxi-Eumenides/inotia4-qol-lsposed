@@ -239,6 +239,7 @@ int g_button_destroys = 0;
 int g_list_destroys = 0;
 int g_button_enabled_calls = 0;
 uint8_t g_button_enabled = 0;
+int g_fill_rect_calls = 0;
 int g_toggle_enabled_calls = 0;
 uint8_t g_toggle_enabled = 0;
 int g_arrow_creates = 0;
@@ -257,8 +258,21 @@ contracts::QolUiHandle g_left_arrow_handle = reinterpret_cast<void*>(0x5100);
 contracts::QolUiHandle g_right_arrow_handle = reinterpret_cast<void*>(0x5200);
 contracts::UiNativeToggleDesc g_last_toggle{};
 contracts::UiButtonDesc g_last_button{};
-struct DrawnText { std::string text; uint32_t color; };
+struct DrawnText {
+    std::string text;
+    uint32_t color;
+    int32_t x = 0;
+    int32_t y = 0;
+    int32_t align = 0;
+    int32_t font = 0;
+};
 std::vector<DrawnText> g_drawn_text;
+struct HelpOptionCall {
+    contracts::UiRect rect;
+    uint8_t selected = 0;
+    uint8_t pressed = 0;
+};
+std::vector<HelpOptionCall> g_help_option_calls;
 contracts::QolUiComponents g_components_api{};
 contracts::QolUiAdapter g_ui_api{};
 contracts::QolHostSdk g_sdk{};
@@ -274,10 +288,22 @@ QolResult fake_delete_control(contracts::QolUiHandle) { return contracts::ok(); 
 QolResult fake_control_origin(contracts::QolUiHandle, int64_t* x, int64_t* y) {
     *x = 0; *y = 0; return contracts::ok();
 }
-QolResult fake_fill_rect(contracts::UiRect, uint32_t) { return contracts::ok(); }
-QolResult fake_draw_control_text(contracts::QolUiHandle, const char* text, int32_t, int32_t,
-                                 uint32_t color, int32_t, int32_t) {
-    g_drawn_text.push_back({text == nullptr ? "" : text, color});
+QolResult fake_fill_rect(contracts::UiRect, uint32_t) {
+    ++g_fill_rect_calls;
+    return contracts::ok();
+}
+QolResult fake_control_pressed(contracts::QolUiHandle, int32_t* out) {
+    if (out == nullptr) return contracts::error(kQolErrInvalidArgument, "invalid", 7);
+    *out = 0;
+    return contracts::ok();
+}
+QolResult fake_draw_help_option_row(contracts::UiRect rect, uint8_t selected, uint8_t pressed) {
+    g_help_option_calls.push_back({rect, selected, pressed});
+    return contracts::ok();
+}
+QolResult fake_draw_control_text(contracts::QolUiHandle, const char* text, int32_t x, int32_t y,
+                                 uint32_t color, int32_t align, int32_t font) {
+    g_drawn_text.push_back({text == nullptr ? "" : text, color, x, y, align, font});
     return contracts::ok();
 }
 QolResult fake_list_create(const contracts::UiScrollListDesc*, contracts::QolUiHandle,
@@ -400,7 +426,9 @@ void bind_production() {
     g_ui_api = {};
     g_ui_api.delete_control = &fake_delete_control;
     g_ui_api.control_absolute_origin = &fake_control_origin;
+    g_ui_api.control_pressed = &fake_control_pressed;
     g_ui_api.fill_rect = &fake_fill_rect;
+    g_ui_api.draw_help_option_row = &fake_draw_help_option_row;
 
     g_sdk = {};
     g_sdk.abi.major = contracts::kHostSdkMajor;
@@ -427,11 +455,13 @@ void setup() {
     g_list_destroys = 0;
     g_button_enabled_calls = 0;
     g_button_enabled = 0;
+    g_fill_rect_calls = 0;
     g_toggle_enabled_calls = 0;
     g_toggle_enabled = 0;
     g_arrow_creates = g_arrow_enabled_calls = g_arrow_draw_calls = 0;
     g_left_arrow_enabled = g_right_arrow_enabled = 0;
     g_drawn_text.clear();
+    g_help_option_calls.clear();
     settings_bind_game(nullptr);
     bind_production();
 }
@@ -551,6 +581,25 @@ void test_catalog_categories_and_debug_visibility() {
     assert(g_categories[4].category == FeatureCategory::kTools);
     assert(g_items.size() == 9);
     assert(find_feature("autosell", "sell") >= 0);
+}
+
+void test_left_rows_use_inset_help_option_component() {
+    setup();
+    assert(load_catalog());
+    assert(!g_categories.empty());
+    g_help_option_calls.clear();
+    g_drawn_text.clear();
+    draw_left_row(nullptr, 0, g_row_handle, 1);
+    assert(g_fill_rect_calls == 0);  // 选项组件自带底色，行内不再画满行底色或分割线。
+    assert(g_help_option_calls.size() == 1);
+    const auto& call = g_help_option_calls[0];
+    assert(call.rect.x == 5 && call.rect.y == 1 && call.rect.w == 290 && call.rect.h == 71);
+    assert(call.selected == 1 && call.pressed == 0);
+    assert(g_drawn_text.size() == 1);
+    const auto& text = g_drawn_text[0];
+    assert(text.text == g_categories[0].name);
+    assert(text.color == contracts::ui_theme::kTextGold);
+    assert(text.x == 150 && text.y == 24 && text.align == 2 && text.font == 1);
 }
 
 void test_game_info_category_builds_read_only_composition() {
@@ -1105,6 +1154,7 @@ int main() {
     test_page_consumes_host_priorities_and_titles();
     test_feature_model_filters_and_orders();
     test_catalog_categories_and_debug_visibility();
+    test_left_rows_use_inset_help_option_component();
     test_game_info_category_builds_read_only_composition();
     test_toggle_routes_to_host_request_set_feature();
     test_feature_toggle_writes_when_plugin_desired_disabled();
