@@ -229,9 +229,10 @@ int main() {
     }
     CHECK(std::strcmp(descriptor.resources[16].id, "ptrslot:MOVE_MERGE_GOT") == 0);
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
-    // 库存读侧 5 条 GET 迁往 core.inventory 后，core.item 只剩 shop query + 13 条写命令。
-    CHECK(descriptor.http_endpoint_count == 14 && descriptor.http_endpoints != nullptr);
-    CHECK(descriptor.http_route_metadata_count == 2 &&
+    // 库存读侧 5 条 GET 与写 move/money 迁往 core.inventory 后，core.item 只剩
+    // shop query + 11 条写命令；metadata 只保留 set-equip。
+    CHECK(descriptor.http_endpoint_count == 12 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 1 &&
           descriptor.http_route_metadata != nullptr);
     uint32_t native_op_count = 0;
     for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
@@ -248,10 +249,8 @@ int main() {
             CHECK(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
         }
     }
-    CHECK(native_op_count == 2);
+    CHECK(native_op_count == 1);
     CHECK(std::strcmp(descriptor.http_route_metadata[0].path,
-                      "/api/op/inventory/set-slot") == 0);
-    CHECK(std::strcmp(descriptor.http_route_metadata[1].path,
                       "/api/op/inventory/set-equip") == 0);
     for (uint32_t i = 0; i < descriptor.http_route_metadata_count; ++i) {
         CHECK(descriptor.http_route_metadata[i].method == qol::contracts::HttpMethod::kPost);

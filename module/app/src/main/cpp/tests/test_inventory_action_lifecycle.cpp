@@ -1,6 +1,8 @@
 #include "contracts/bag.h"
 #include "contracts/game_ports/item_inventory_state_write_port.h"
+#include "contracts/host_sdk.h"
 #include "contracts/inventory_action.h"
+#include "contracts/inventory_transfer.h"
 #include "contracts/item_facts.h"
 #include "infra/log/qol_log.h"
 #include "plugins/core.item/runtime/context.h"
@@ -60,6 +62,7 @@ uint32_t g_last_payload_size = 0;
 QolItemPort g_port{};
 QolItemInventoryStateWritePort g_write{};
 QolBagSource g_source{};
+QolHostSdk g_host_sdk{};
 
 QolResult fail(int code, const char* message) {
     return error(code, message, static_cast<uint32_t>(std::strlen(message)));
@@ -232,6 +235,97 @@ QolResult fake_source_remove(QolItemHandle, int32_t, QolBagMutationResult* out) 
     return fail(kQolErrNotFound, "not used");
 }
 
+// inventory.transfer 假能力：按旧 native/source transport 的语义用本文件的
+// fake port / fake source 实现定位与序列化，验证 capability 消费路径。
+QolResult fake_transfer_move(const QolBagRef*, int32_t, int32_t, const QolBagRef*, int32_t,
+                             QolBagMutationResult*) {
+    return fail(kQolErrUnsupported, "cross-space move not exercised here");
+}
+
+QolResult fake_transfer_serialize(QolItemHandle item, int32_t count, QolBagTransfer* out) {
+    if (out == nullptr || item.slot == 0 || item.generation == 0 || count <= 0) {
+        return fail(kQolErrInvalidArgument, "bad transfer serialize");
+    }
+    if (g_port.read.serialize_item == nullptr || g_port.read.category == nullptr) {
+        return fail(kQolErrUnsupported, "serialization unavailable");
+    }
+    uint32_t required_size = 0;
+    QolResult result = g_port.read.serialize_item(item, nullptr, 0, &required_size);
+    if (!succeeded(result)) return result;
+    if (required_size == 0 || required_size > kQolBagTransferPayloadMaxSize) {
+        return fail(kQolErrInternal, "invalid serialized item size");
+    }
+    *out = QolBagTransfer{};
+    uint32_t serialized_size = 0;
+    result = g_port.read.serialize_item(item, out->payload, kQolBagTransferPayloadCapacity,
+                                        &serialized_size);
+    if (!succeeded(result)) return result;
+    int32_t category = 0;
+    result = g_port.read.category(item, &category);
+    if (!succeeded(result)) return result;
+    out->category = category;
+    out->count = count;
+    out->payload_size = serialized_size;
+    return ok();
+}
+
+QolResult fake_transfer_locate(int32_t space, QolItemHandle item, QolBagRef* out,
+                               int32_t* out_slot) {
+    if (out == nullptr || out_slot == nullptr || item.slot == 0 || item.generation == 0) {
+        return fail(kQolErrInvalidArgument, "bad transfer locate");
+    }
+    const bool native_space = space == kQolBagSpaceOriginal || space == kQolBagSpaceVariant;
+    if (!native_space && space != kExtensionSpace) {
+        return fail(kQolErrInvalidArgument, "bad space");
+    }
+    int32_t bag_count = 0;
+    if (native_space) {
+        const QolResult count_result = fake_bag_count(space, &bag_count);
+        if (!succeeded(count_result)) return count_result;
+    } else {
+        bag_count = fake_source_count();
+    }
+    for (int32_t bag = 0; bag < bag_count; ++bag) {
+        const QolBagRef ref{space, bag};
+        QolBagInfo info{};
+        const QolResult info_result = native_space ? fake_bag_info(&ref, &info)
+                                                   : fake_source_info(bag, &info);
+        if (!succeeded(info_result)) return info_result;
+        for (int32_t slot = 0; slot < info.capacity; ++slot) {
+            QolInventoryItemRef candidate{};
+            const QolResult item_result = native_space
+                                              ? fake_item_at(&ref, slot, &candidate)
+                                              : fake_source_item_at(bag, slot, &candidate);
+            if (item_result.code == kQolErrNotFound) continue;
+            if (!succeeded(item_result)) return item_result;
+            if (candidate.item.slot == item.slot &&
+                candidate.item.generation == item.generation) {
+                *out = QolBagRef{space, bag};
+                *out_slot = slot;
+                return ok();
+            }
+        }
+    }
+    return fail(kQolErrNotFound, "item not located");
+}
+
+const QolInventoryTransferApi g_transfer_api{
+    sizeof(QolInventoryTransferApi),
+    &fake_transfer_move,
+    &fake_transfer_serialize,
+    &fake_transfer_locate,
+};
+
+QolResult fake_capability_require(const char* id, QolVersionRange, const void** out) {
+    if (id == nullptr || out == nullptr) return fail(kQolErrInvalidArgument, "bad require");
+    if (std::strcmp(id, kInventoryTransferCapabilityId) == 0) {
+        *out = &g_transfer_api;
+        return ok();
+    }
+    *out = nullptr;
+    return fail(kQolErrNotFound, "capability missing");
+}
+
 void reset_fixture() {
     g_created = {21, 1};
     g_imported = {23, 1};
@@ -295,6 +389,10 @@ void reset_fixture() {
 
     qol::features::core_item::g_port = &g_port;
     qol::features::core_item::g_item_state_write = &g_write;
+    g_host_sdk = {};
+    g_host_sdk.abi = {sizeof(g_host_sdk), kHostSdkMajor, kHostSdkMinor};
+    g_host_sdk.capabilities.require = &fake_capability_require;
+    qol::features::core_item::g_sdk = &g_host_sdk;
 }
 
 const QolItemCreateSpec make_create_spec(int32_t category, int32_t count, uint32_t flags,
@@ -533,6 +631,7 @@ namespace qol::features::core_item {
 
 const contracts::QolItemPort* g_port = nullptr;
 const contracts::QolItemInventoryStateWritePort* g_item_state_write = nullptr;
+const contracts::QolHostSdk* g_sdk = nullptr;
 
 const contracts::QolBagSource* find_bag_source(int32_t space_id) {
     return space_id == kExtensionSpace ? &g_source : nullptr;
@@ -545,13 +644,6 @@ const contracts::QolBagSource* registered_bag_source_at(uint32_t index) {
 }
 
 void request_inventory_refresh() {}
-
-namespace usecases {
-QolResult move_item(const contracts::QolBagRef&, int32_t, int32_t, const contracts::QolBagRef&,
-                    int32_t, contracts::QolBagMutationResult*) {
-    return contracts::error(kQolErrUnsupported, "not used", 8);
-}
-}  // namespace usecases
 
 }  // namespace qol::features::core_item
 

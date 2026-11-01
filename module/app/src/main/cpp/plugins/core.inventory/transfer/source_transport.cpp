@@ -1,8 +1,8 @@
 #include "source_transport.h"
 
-#include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.inventory/api/bag_source.h"
 
-namespace qol::features::core_item::bags::source_transport {
+namespace qol::features::core_inventory::transfer::source_transport {
 namespace {
 
 QolResult unsupported() {
@@ -69,4 +69,4 @@ QolResult locate(int32_t space, contracts::QolItemHandle item,
     return result;
 }
 
-}  // namespace qol::features::core_item::bags::source_transport
+}  // namespace qol::features::core_inventory::transfer::source_transport

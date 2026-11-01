@@ -1,4 +1,5 @@
 #include "contracts/inventory_access.h"
+#include "contracts/inventory_transfer.h"
 #include "plugins/core.inventory/api/access.h"
 #include "plugins/core.inventory/plugin.h"
 #include "plugins/core.inventory/store/slot_table.h"
@@ -37,12 +38,20 @@ void assert_error(const QolResult& result, int32_t code) {
 void test_descriptor() {
     const auto& descriptor = qol::features::core_inventory::plugin_descriptor();
     assert(std::strcmp(descriptor.id, "core.inventory") == 0);
-    assert(descriptor.provides_count == 2);
+    assert(descriptor.provides_count == 3);
     assert(std::strcmp(descriptor.provides[0].id, "inventory.access") == 0);
     assert(std::strcmp(descriptor.provides[1].id, "inventory.bag_source") == 0);
+    assert(std::strcmp(descriptor.provides[2].id, "inventory.transfer") == 0);
+    assert(descriptor.provides[2].iface != nullptr);
+    assert(qol::contracts::qol_inventory_transfer_api_valid(
+        static_cast<const qol::contracts::QolInventoryTransferApi*>(
+            descriptor.provides[2].iface)));
     assert(descriptor.feature_count == 1);
-    assert(descriptor.port_count == 1);
+    assert(descriptor.port_count == 3);
     assert(descriptor.ports[0].id == qol::contracts::QolPortId::QOL_PORT_ITEM);
+    assert(descriptor.ports[1].id == qol::contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE);
+    assert(descriptor.ports[2].id ==
+           qol::contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE);
     assert(descriptor.resources_count == 12);
     for (uint32_t i = 0; i < descriptor.resources_count; ++i) {
         assert(std::strcmp(descriptor.resources[i].owner, "core.inventory") == 0);
@@ -55,15 +64,30 @@ void test_descriptor() {
     assert(std::strcmp(descriptor.optional_requires[1].id,
                        qol::contracts::kHttpDispatchCapabilityId) == 0);
     assert(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
-    assert(descriptor.http_endpoint_count == 5 && descriptor.http_endpoints != nullptr);
+    // 读侧 5 条 GET + 写侧 2 条 POST（move/money）；metadata 1 条（set-slot）。
+    assert(descriptor.http_endpoint_count == 7 && descriptor.http_endpoints != nullptr);
+    assert(descriptor.http_route_metadata_count == 1 &&
+           descriptor.http_route_metadata != nullptr);
+    assert(std::strcmp(descriptor.http_route_metadata[0].path,
+                       "/api/op/inventory/set-slot") == 0);
+    assert(descriptor.http_route_metadata[0].method == qol::contracts::HttpMethod::kPost);
+    assert(descriptor.http_route_metadata[0].op_required == 1);
+    assert(descriptor.http_route_metadata[0].lease_required == 1);
     for (uint32_t i = 0; i < descriptor.http_endpoint_count; ++i) {
         const auto& endpoint = descriptor.http_endpoints[i];
-        assert(endpoint.method == qol::contracts::HttpMethod::kGet);
         assert(endpoint.route_owner != nullptr &&
                std::strcmp(endpoint.route_owner, "core.inventory") == 0);
-        assert(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
-        assert(endpoint.op_required == 0 && endpoint.lease_required == 1);
-        assert(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
+        assert(endpoint.lease_required == 1);
+        if (i < 5) {
+            assert(endpoint.method == qol::contracts::HttpMethod::kGet);
+            assert(endpoint.kind == qol::contracts::HttpHandlerKind::kQuery);
+            assert(endpoint.op_required == 0);
+            assert(endpoint.query_handler != nullptr && endpoint.command_handler == nullptr);
+        } else {
+            assert(endpoint.method == qol::contracts::HttpMethod::kPost);
+            assert(endpoint.kind == qol::contracts::HttpHandlerKind::kCommand);
+            assert(endpoint.query_handler == nullptr && endpoint.command_handler != nullptr);
+        }
         assert(endpoint.ctx != nullptr);
     }
 }

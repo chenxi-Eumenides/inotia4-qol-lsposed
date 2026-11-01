@@ -14,24 +14,11 @@
 #include "plugins/core.item/http/json_lite.h"
 #include "plugins/core.item/http/response.h"
 #include "plugins/core.item/http/write_result_inventory.h"
-#include "plugins/core.item/bags/native_transport.h"
-#include "plugins/core.item/bags/source_transport.h"
-#include "plugins/core.item/usecases/move_item.h"
 #include "plugins/core.item/shop/buy.h"
-
-// 测试目标未逐文件登记 core.item 新源时，按既有模式在同一 TU 内联；插件构建定义宏后单独编译。
-// source_transport 已由 move_item.cpp 内联，避免重复定义。
-#if !defined(QOL_CORE_ITEM_MOVE_ITEM_SEPARATE)
-#include "plugins/core.item/usecases/move_item.cpp"
-#endif
 
 namespace qol::features::core_item {
 namespace {
 
-constexpr char kSetMoneySuccess[] = "{\"ok\":true}";
-constexpr char kSetMoneyNotInGame[] = "{\"ok\":false,\"error\":\"not in game\"}";
-constexpr char kSetMoneySymbolMissing[] = "{\"ok\":false,\"error\":\"symbol not resolved\"}";
-constexpr char kSetMoneyFailed[] = "{\"ok\":false,\"error\":\"set money failed\"}";
 constexpr char kDiceRejectSuccess[] = "{\"ok\":true}";
 constexpr char kDiceRejectNotInGame[] = "{\"ok\":false,\"error\":\"not in game\"}";
 constexpr char kDiceRejectNoPending[] =
@@ -343,20 +330,6 @@ void append_inventory_changes(std::string& body, const InventoryResultSnapshot& 
     }
 }
 
-void append_unforced_inventory_changes(
-    std::string& body, const InventoryResultSnapshot& before,
-    const InventoryResultSnapshot& after, const ForcedSlots& forced, bool* first) {
-    std::set<SlotKey> keys;
-    for (const auto& entry : before) keys.insert(entry.first);
-    for (const auto& entry : after) keys.insert(entry.first);
-    for (const SlotKey& key : keys) {
-        if (forced.count(key) != 0 || result_item_at(before, key) == result_item_at(after, key)) {
-            continue;
-        }
-        append_result_slot(body, key, after, first);
-    }
-}
-
 bool copy_result_truncated(char* out, uint32_t capacity, uint32_t* out_size,
                            const std::string& body) {
     if (out == nullptr || out_size == nullptr) return false;
@@ -522,8 +495,7 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
     const bool tracks_inventory =
         kind == contracts::QolItemWriteKind::kUseItem ||
         kind == contracts::QolItemWriteKind::kSellItem ||
-        kind == contracts::QolItemWriteKind::kDiscardItem ||
-        kind == contracts::QolItemWriteKind::kMoveItem;
+        kind == contracts::QolItemWriteKind::kDiscardItem;
     if (tracks_inventory) (void)capture_inventory_result(&inventory_before);
     int32_t hp_before = 0;
     int32_t mp_before = 0;
@@ -539,10 +511,6 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
             break;
         case contracts::QolItemWriteKind::kDiscardItem:
             operation = g_item_state_write->discard_item(args.i0, args.i1, &operation_data);
-            break;
-        case contracts::QolItemWriteKind::kMoveItem:
-            operation = g_item_state_write->move_item(args.i0, args.i1, args.i2, args.i3,
-                                                       args.i4, &operation_data);
             break;
         case contracts::QolItemWriteKind::kAddItem: {
             operation = g_item_state_write->add_item(
@@ -623,11 +591,6 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
             if (write_slot_key(args.i0, args.i1, &source)) {
                 forced.insert(source);
             }
-        } else if (kind == contracts::QolItemWriteKind::kMoveItem) {
-            SlotKey source{};
-            SlotKey target{};
-            if (write_slot_key(args.i0, args.i1, &source)) forced.insert(source);
-            if (write_slot_key(args.i3, args.i4, &target)) forced.insert(target);
         }
         if (kind == contracts::QolItemWriteKind::kUseItem &&
             (operation_data.flags & contracts::kQolItemInventoryStateHasGained) != 0) {
@@ -640,21 +603,7 @@ bool write_item_inventory_state_result(const contracts::QolItemWriteArgs& args, 
             }
         }
         bool first_slot = true;
-        if (kind == contracts::QolItemWriteKind::kMoveItem) {
-            SlotKey source{};
-            SlotKey target{};
-            const bool has_source = write_slot_key(args.i0, args.i1, &source);
-            const bool has_target = write_slot_key(args.i3, args.i4, &target);
-            if (has_source) append_result_slot(body, source, inventory_after, &first_slot);
-            if (has_target && (!has_source || source.space_id != target.space_id ||
-                               source.bag != target.bag || source.slot != target.slot)) {
-                append_result_slot(body, target, inventory_after, &first_slot);
-            }
-            append_unforced_inventory_changes(body, inventory_before, inventory_after, forced,
-                                              &first_slot);
-        } else {
-            append_inventory_changes(body, inventory_before, inventory_after, forced, &first_slot);
-        }
+        append_inventory_changes(body, inventory_before, inventory_after, forced, &first_slot);
         body.push_back(']');
     }
     if (kind == contracts::QolItemWriteKind::kSellItem) {
@@ -958,95 +907,6 @@ bool write_item_dice_accept_result(const contracts::QolItemWriteArgs& args, char
     return copy_result_truncated(out, capacity, out_size, body);
 }
 
-bool write_cross_space_move_result(const ItemWritePayload& payload, char* out,
-                                   uint32_t capacity, uint32_t* out_size) {
-    if (out_size != nullptr) *out_size = 0;
-    const contracts::QolItemWriteArgs& args = payload.args;
-    if (out == nullptr || out_size == nullptr || args.i1 < 0 || args.i2 <= 0 ||
-        payload.from_space < 0 || payload.to_space < 0) {
-        return false;
-    }
-    WriteRef from_ref{};
-    WriteRef to_ref{};
-    if (!decode_write_bag(args.i0, &from_ref) || !decode_write_bag(args.i3, &to_ref) ||
-        from_ref.space_id != payload.from_space || to_ref.space_id != payload.to_space) {
-        constexpr char kInvalidBag[] = "{\"ok\":false,\"error\":\"invalid inventory bag\"}";
-        return copy_buffer(out, capacity, out_size, kInvalidBag, sizeof(kInvalidBag) - 1);
-    }
-    const contracts::QolBagRef from{payload.from_space, from_ref.bag};
-    const contracts::QolBagRef to{payload.to_space, to_ref.bag};
-
-    InventoryResultSnapshot before{};
-    (void)capture_inventory_result(&before);
-    contracts::QolBagMutationResult placed{};
-    const QolResult operation =
-        usecases::move_item(from, args.i1, args.i2, to, args.i4, &placed);
-    if (!contracts::succeeded(operation)) {
-        const char* message =
-            operation.message != nullptr ? operation.message : "item transfer failed";
-        const uint32_t message_size =
-            operation.message != nullptr ? operation.message_len
-                                         : static_cast<uint32_t>(std::strlen(message));
-        const std::string body = std::string("{\"ok\":false,\"error\":\"") +
-                                 std::string(message, message_size) + "\"}";
-        (void)copy_buffer(out, capacity, out_size, body.data(),
-                          static_cast<uint32_t>(body.size()));
-        return false;
-    }
-    request_inventory_refresh();
-
-    InventoryResultSnapshot after{};
-    if (!capture_inventory_result(&after)) return false;
-    ForcedSlots forced;
-    forced.insert(SlotKey{from.space_id, from.bag, args.i1});
-    int32_t target_slot = args.i4;
-    contracts::QolBagRef target_ref = to;
-    if (placed.item.slot != 0 && placed.item.generation != 0) {
-        contracts::QolBagRef located{};
-        int32_t located_slot = -1;
-        const QolResult located_result =
-            placed.ref.space_id == contracts::kQolBagSpaceOriginal ||
-                    placed.ref.space_id == contracts::kQolBagSpaceVariant
-                ? bags::native_transport::locate(placed.ref.space_id, placed.item, &located,
-                                                 &located_slot)
-                : bags::source_transport::locate(placed.ref.space_id, placed.item, &located,
-                                                 &located_slot);
-        if (contracts::succeeded(located_result) &&
-            located_slot >= 0) {
-            target_ref = located;
-            target_slot = located_slot;
-        }
-    }
-    if (target_slot >= 0) {
-        forced.insert(SlotKey{target_ref.space_id, target_ref.bag, target_slot});
-    }
-    std::string body = "{\"ok\":true,\"slots\":[";
-    bool first = true;
-    append_inventory_changes(body, before, after, forced, &first);
-    body += "]}";
-    return copy_result_truncated(out, capacity, out_size, body);
-}
-
-bool write_item_move_result(const contracts::QolItemWriteArgs& args, char* out,
-                            uint32_t capacity, uint32_t* out_size) {
-    if (out_size != nullptr) *out_size = 0;
-    WriteRef from{};
-    WriteRef to{};
-    if (!decode_write_bag(args.i0, &from) || !decode_write_bag(args.i3, &to)) {
-        constexpr char kInvalidBag[] = "{\"ok\":false,\"error\":\"invalid inventory bag\"}";
-        return copy_buffer(out, capacity, out_size, kInvalidBag, sizeof(kInvalidBag) - 1);
-    }
-    if (from.space_id >= contracts::kQolBagSpaceFirstRegistered ||
-        to.space_id >= contracts::kQolBagSpaceFirstRegistered) {
-        ItemWritePayload payload{};
-        payload.args = args;
-        payload.from_space = from.space_id;
-        payload.to_space = to.space_id;
-        return write_cross_space_move_result(payload, out, capacity, out_size);
-    }
-    return write_item_inventory_state_result(args, out, capacity, out_size);
-}
-
 }  // namespace
 
 bool write_result::SlotKey::operator<(const SlotKey& other) const {
@@ -1095,15 +955,6 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
     if (kind == contracts::QolItemWriteKind::kAcceptDice) {
         return write_item_dice_accept_result(args, out, capacity, out_size);
     }
-    if (kind == contracts::QolItemWriteKind::kMoveItem) {
-        const bool cross_space =
-            command.from_space >= 0 && command.to_space >= 0 &&
-            command.from_space != command.to_space;
-        if (cross_space) {
-            return write_cross_space_move_result(command, out, capacity, out_size);
-        }
-        return write_item_move_result(args, out, capacity, out_size);
-    }
     if (kind == contracts::QolItemWriteKind::kAddItem) {
         return write_item_inventory_state_result(args, out, capacity, out_size);
     }
@@ -1112,6 +963,8 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
         kind == contracts::QolItemWriteKind::kDiscardItem) {
         return write_item_inventory_state_result(args, out, capacity, out_size);
     }
+    // move/money 已迁往 core.inventory 的 kInventoryWriteHandlerId；本 handler 不再消费。
+    // g_item_money_write 仍是 reject-dice 守卫的一部分，端口保留。
     if (g_item_money_write == nullptr || g_item_money_write->set_money == nullptr ||
         g_item_dice_write == nullptr || g_item_dice_write->reject == nullptr) {
         return false;
@@ -1130,27 +983,6 @@ bool item_write_result(void*, const uint8_t* payload, uint32_t size, char* out, 
             } else {
                 body = kDiceRejectFailed;
                 body_size = sizeof(kDiceRejectFailed) - 1;
-            }
-        }
-        const uint32_t copied = std::min(body_size, capacity);
-        if (copied != 0) std::memcpy(out, body, copied);
-        *out_size = body_size;
-        return contracts::succeeded(operation);
-    }
-    if (args.kind == static_cast<int32_t>(contracts::QolItemWriteKind::kSetMoney)) {
-        const QolResult operation = g_item_money_write->set_money(args.i64);
-        const char* body = kSetMoneySuccess;
-        uint32_t body_size = sizeof(kSetMoneySuccess) - 1;
-        if (!contracts::succeeded(operation)) {
-            if (operation.code == kQolErrNotReady) {
-                body = kSetMoneyNotInGame;
-                body_size = sizeof(kSetMoneyNotInGame) - 1;
-            } else if (operation.code == kQolErrUnsupported) {
-                body = kSetMoneySymbolMissing;
-                body_size = sizeof(kSetMoneySymbolMissing) - 1;
-            } else {
-                body = kSetMoneyFailed;
-                body_size = sizeof(kSetMoneyFailed) - 1;
             }
         }
         const uint32_t copied = std::min(body_size, capacity);

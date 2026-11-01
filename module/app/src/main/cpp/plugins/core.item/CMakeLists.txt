@@ -12,9 +12,6 @@ add_library(qol_plugin_core.item STATIC
     api/projection.cpp
     api/facts.cpp
     api/state.cpp
-    bags/native_transport.cpp
-    bags/source_transport.cpp
-    usecases/move_item.cpp
     http/query_handler.cpp
     http/write_handler.cpp
     http/write_results.cpp
@@ -34,5 +31,3 @@ target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_BAG_SOURCE
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_PROJECTION_SEPARATE=1)
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_TYPED_READ_SOURCES_SEPARATELY=1)
 target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_SHOP_SEPARATE=1)
-target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_TRANSFER_TRANSPORT_SEPARATE=1)
-target_compile_definitions(qol_plugin_core.item PRIVATE QOL_CORE_ITEM_MOVE_ITEM_SEPARATE=1)

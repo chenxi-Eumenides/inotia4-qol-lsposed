@@ -1,14 +1,17 @@
 #include "move_item.h"
 
-#include "plugins/core.item/bags/native_transport.h"
-#include "plugins/core.item/bags/source_transport.h"
-#include "plugins/core.item/runtime/core_item_internal.h"
-#if !defined(QOL_CORE_ITEM_TRANSFER_TRANSPORT_SEPARATE)
-#include "plugins/core.item/bags/native_transport.cpp"
-#include "plugins/core.item/bags/source_transport.cpp"
+#include "plugins/core.inventory/api/bag_source.h"
+#include "plugins/core.inventory/runtime/context.h"
+#include "plugins/core.inventory/transfer/native_transport.h"
+#include "plugins/core.inventory/transfer/source_transport.h"
+#include "plugins/core.inventory/usecases/read_inventory.h"
+#if !defined(QOL_CORE_INVENTORY_TRANSFER_SEPARATE)
+// 宿主测试直接编译 plugin.cpp，不读取插件 CMake 源清单；插件 target 单独编译该实现。
+#include "plugins/core.inventory/transfer/native_transport.cpp"
+#include "plugins/core.inventory/transfer/source_transport.cpp"
 #endif
 
-namespace qol::features::core_item::usecases {
+namespace qol::features::core_inventory::transfer::move_item {
 namespace {
 
 QolResult invalid_argument() {
@@ -65,13 +68,6 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
             return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
         }
         result = g_port->read.bag_info(&ref, &info);
-    } else {
-        const contracts::QolBagSource* source = find_bag_source(ref.space_id);
-        if (source == nullptr || source->info == nullptr || source->item_at == nullptr) {
-            static constexpr char kMessage[] = "target bag unavailable";
-            return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
-        }
-        result = source->info(ref.bag, &info);
         if (!contracts::succeeded(result)) return result;
         if (info.capacity < 0) {
             static constexpr char kMessage[] = "invalid target bag capacity";
@@ -80,7 +76,7 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
         }
         for (int32_t slot = 0; slot < info.capacity; ++slot) {
             contracts::QolInventoryItemRef item{};
-            result = source->item_at(ref.bag, slot, &item);
+            result = g_port->read.item_at(&ref, slot, &item);
             if (result.code == kQolErrNotFound) {
                 *out_slot = slot;
                 return contracts::ok();
@@ -91,6 +87,12 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
         return contracts::error(kQolErrBlocked, kMessage,
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
+    const contracts::QolBagSource* source = find_bag_source(ref.space_id);
+    if (source == nullptr || source->info == nullptr || source->item_at == nullptr) {
+        static constexpr char kMessage[] = "target bag unavailable";
+        return unsupported(kMessage, static_cast<uint32_t>(sizeof(kMessage) - 1));
+    }
+    result = source->info(ref.bag, &info);
     if (!contracts::succeeded(result)) return result;
     if (info.capacity < 0) {
         static constexpr char kMessage[] = "invalid target bag capacity";
@@ -99,7 +101,7 @@ QolResult find_empty_slot(const contracts::QolBagRef& ref, int32_t* out_slot) {
     }
     for (int32_t slot = 0; slot < info.capacity; ++slot) {
         contracts::QolInventoryItemRef item{};
-        result = g_port->read.item_at(&ref, slot, &item);
+        result = source->item_at(ref.bag, slot, &item);
         if (result.code == kQolErrNotFound) {
             *out_slot = slot;
             return contracts::ok();
@@ -158,10 +160,10 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
                                 static_cast<uint32_t>(sizeof(kMessage) - 1));
     }
 
-    bags::BagTransfer transfer{};
+    contracts::QolBagTransfer transfer{};
     const auto export_source = is_native_space(from.space_id)
-                                   ? &bags::native_transport::export_item
-                                   : &bags::source_transport::export_item;
+                                   ? &native_transport::export_item
+                                   : &source_transport::export_item;
     const QolResult exported = export_source(from.space_id, source_item.item, count, &transfer);
     if (!contracts::succeeded(exported)) {
         return exported;
@@ -176,8 +178,8 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
 
     contracts::QolBagMutationResult target_result{};
     const auto import_target = is_native_space(to.space_id)
-                                   ? &bags::native_transport::import_item
-                                   : &bags::source_transport::import_item;
+                                   ? &native_transport::import_item
+                                   : &source_transport::import_item;
     const QolResult imported =
         import_target(transfer, to.space_id, to.bag, target_slot, &target_result);
     if (!contracts::succeeded(imported)) {
@@ -190,15 +192,15 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
 
     contracts::QolBagMutationResult source_result{};
     const auto remove_source = is_native_space(from.space_id)
-                                   ? &bags::native_transport::remove_item
-                                   : &bags::source_transport::remove_item;
+                                   ? &native_transport::remove_item
+                                   : &source_transport::remove_item;
     const QolResult removed = remove_source(from.space_id, source_item.item, count,
                                              &source_result);
     if (!contracts::succeeded(removed)) {
         contracts::QolBagMutationResult compensation{};
         const auto remove_target = is_native_space(to.space_id)
-                                       ? &bags::native_transport::remove_item
-                                       : &bags::source_transport::remove_item;
+                                       ? &native_transport::remove_item
+                                       : &source_transport::remove_item;
         const QolResult compensated = remove_target(to.space_id, target_result.item, count,
                                                      &compensation);
         if (contracts::succeeded(compensated)) {
@@ -212,4 +214,4 @@ QolResult move_item(const contracts::QolBagRef& from, int32_t from_slot, int32_t
     return contracts::ok();
 }
 
-}  // namespace qol::features::core_item::usecases
+}  // namespace qol::features::core_inventory::transfer::move_item

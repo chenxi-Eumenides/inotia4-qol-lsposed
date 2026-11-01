@@ -1,8 +1,8 @@
 #include "native_transport.h"
 
-#include "plugins/core.item/runtime/core_item_internal.h"
+#include "plugins/core.inventory/runtime/context.h"
 
-namespace qol::features::core_item::bags::native_transport {
+namespace qol::features::core_inventory::transfer::native_transport {
 namespace {
 
 QolResult unsupported(const char* message, uint32_t size) {
@@ -271,4 +271,4 @@ QolResult locate(int32_t space, contracts::QolItemHandle item,
                             static_cast<uint32_t>(sizeof(kMessage) - 1));
 }
 
-}  // namespace qol::features::core_item::bags::native_transport
+}  // namespace qol::features::core_inventory::transfer::native_transport

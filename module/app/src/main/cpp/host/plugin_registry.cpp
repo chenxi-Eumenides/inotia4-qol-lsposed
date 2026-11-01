@@ -397,14 +397,21 @@ bool resolve_plugin_ports(uint32_t index) {
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
+        // 库存状态写 / 金钱写端口为双 owner：core.inventory 承接跨空间 transfer 与
+        // money 写（inventory.transfer），core.item 仍保留 use/sell/equip 等原生写。
+        // 其他插件不得注入；dice 写仍为 core.item 独占。
         if (requirement.id == contracts::QolPortId::QOL_PORT_ITEM_INVENTORY_STATE_WRITE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "core.item") != 0)) {
+            (plugin.id == nullptr ||
+             (std::strcmp(plugin.id, "core.item") != 0 &&
+              std::strcmp(plugin.id, "core.inventory") != 0))) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;
         }
         if (requirement.id == contracts::QolPortId::QOL_PORT_ITEM_MONEY_WRITE &&
-            (plugin.id == nullptr || std::strcmp(plugin.id, "core.item") != 0)) {
+            (plugin.id == nullptr ||
+             (std::strcmp(plugin.id, "core.item") != 0 &&
+              std::strcmp(plugin.id, "core.inventory") != 0))) {
             std::snprintf(g_error_text[index], sizeof(g_error_text[index]),
                           "private port: %s", contracts::port_id_name(requirement.id));
             return false;

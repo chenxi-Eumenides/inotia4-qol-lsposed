@@ -64,7 +64,6 @@ void initialize_http_endpoints() {
 }
 
 extern const contracts::HttpRouteMetadataDescriptor kHttpRouteMetadata[] = {
-    {contracts::HttpMethod::kPost, "/api/op/inventory/set-slot", kPluginId, 1, 1},
     {contracts::HttpMethod::kPost, "/api/op/inventory/set-equip", kPluginId, 1, 1},
 };
 extern const uint32_t kHttpRouteMetadataCount =

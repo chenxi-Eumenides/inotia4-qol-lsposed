@@ -6,6 +6,8 @@ namespace qol::features::core_inventory {
 
 const contracts::QolHostSdk* g_sdk = nullptr;
 const contracts::QolItemPort* g_port = nullptr;
+const contracts::QolItemInventoryStateWritePort* g_item_state_write = nullptr;
+const contracts::QolItemMoneyWritePort* g_item_money_write = nullptr;
 
 namespace bags {
 

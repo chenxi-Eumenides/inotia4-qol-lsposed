@@ -35,6 +35,7 @@
 #include "host/owner_cache_builder.h"
 #include "infra/command_queue.h"
 #include "plugins/core.inventory/api/bag_source.h"
+#include "plugins/core.inventory/http/write_handler.h"
 #include "plugins/core.inventory/plugin.h"
 #include "plugins/core.item/api/bag_source.h"
 #include "plugins/core.item/plugin.h"
@@ -294,6 +295,7 @@ int g_dice_accept_calls = 0;
 int g_dice_accept_order = 0;
 qol::contracts::QolItemDiceAcceptResult g_dice_accept_data{};
 qol::contracts::QolTypedResultCommandHandler g_result_handler = nullptr;
+qol::contracts::QolTypedResultCommandHandler g_inventory_result_handler = nullptr;
 uint32_t g_post_handler_id = 0;
 uint8_t g_post_payload[qol::contracts::kTypedCommandPayloadCapacity]{};
 uint32_t g_post_payload_size = 0;
@@ -706,6 +708,13 @@ QolResult fake_state_add(int32_t category, int32_t count, int32_t socket_total,
                             category, count, out);
 }
 
+QolResult fake_state_remove_item(qol::contracts::QolItemHandle,
+                                 int32_t,
+                                 qol::contracts::QolItemInventoryStateWriteResult* out) {
+    if (out != nullptr) *out = {};
+    return qol::contracts::ok();
+}
+
 QolResult fake_load_item(const uint8_t*, uint32_t,
                          qol::contracts::QolItemHandle* out_item) {
     if (out_item == nullptr) {
@@ -816,7 +825,7 @@ const qol::contracts::QolItemInventoryStateWritePort kFakeItemStateWritePort{
     &fake_state_enchant,
     &fake_load_item,
     nullptr,
-    nullptr,
+    &fake_state_remove_item,
     &fake_move_handle,
     nullptr,
     nullptr,
@@ -1268,15 +1277,30 @@ QolResult fake_capability_require(const char* id, QolVersionRange required,
     return qol::contracts::error(kQolErrNotFound, "missing", 7);
 }
 
-QolResult fake_register_result(uint32_t, qol::contracts::QolTypedResultCommandHandler handler,
+QolResult fake_register_result(uint32_t handler_id,
+                               qol::contracts::QolTypedResultCommandHandler handler,
                                void*) {
-    g_result_handler = handler;
+    if (handler_id == qol::features::core_inventory::kInventoryWriteHandlerId) {
+        g_inventory_result_handler = handler;
+    } else {
+        g_result_handler = handler;
+    }
     return qol::contracts::ok();
 }
 
-QolResult fake_unregister_result(uint32_t) {
-    g_result_handler = nullptr;
+QolResult fake_unregister_result(uint32_t handler_id) {
+    if (handler_id == qol::features::core_inventory::kInventoryWriteHandlerId) {
+        g_inventory_result_handler = nullptr;
+    } else {
+        g_result_handler = nullptr;
+    }
     return qol::contracts::ok();
+}
+
+qol::contracts::QolTypedResultCommandHandler last_result_handler() {
+    return g_post_handler_id == qol::features::core_inventory::kInventoryWriteHandlerId
+               ? g_inventory_result_handler
+               : g_result_handler;
 }
 
 QolResult fake_post_typed(uint32_t handler_id, const void* payload, uint32_t size,
@@ -1361,6 +1385,14 @@ qol::contracts::PluginContext make_context(const qol::contracts::QolHostSdk* sdk
 const qol::contracts::PluginDescriptor& install_inventory_descriptor(
     qol::contracts::PluginContext& ctx) {
     const auto& descriptor = qol::features::core_inventory::plugin_descriptor();
+    // core.inventory 的端口顺序与 core.item 不同；保留调用方注入的 item port，
+    // 只补齐 money/state 写端口（golden 用例必须继续使用同一 item port）。
+    static const void* inventory_ports[3];
+    inventory_ports[0] = ctx.ports != nullptr ? ctx.ports[0] : &kFakePort;
+    inventory_ports[1] = &kFakeMoneyWritePort;
+    inventory_ports[2] = &kFakeItemStateWritePort;
+    ctx.ports = inventory_ports;
+    ctx.port_count = 3;
     CHECK(descriptor.install(ctx) == 0);
     descriptor.on_enabled(ctx);
     CHECK(qol::contracts::succeeded(qol::tests::register_plugin_http(descriptor)));
@@ -1431,9 +1463,9 @@ void test_write_routes() {
                         0, &status) == "{\"ok\":true,\"ticket\":72}");
     CHECK(status == 200 && g_post_payload_size > 0 && g_result_handler != nullptr);
     CHECK(descriptor.http_query_count == 0 && descriptor.http_queries == nullptr);
-    // 读侧 GET 迁往 core.inventory 后：shop query + 13 条写命令。
-    CHECK(descriptor.http_endpoint_count == 14 && descriptor.http_endpoints != nullptr);
-    CHECK(descriptor.http_route_metadata_count == 2 &&
+    // 库存读侧 GET 与写 move/money 迁往 core.inventory 后：shop query + 11 条写命令。
+    CHECK(descriptor.http_endpoint_count == 12 && descriptor.http_endpoints != nullptr);
+    CHECK(descriptor.http_route_metadata_count == 1 &&
           descriptor.http_route_metadata != nullptr);
     char result[8192]{};
     uint32_t result_size = 0;
@@ -1441,7 +1473,7 @@ void test_write_routes() {
     g_state_write_result = qol::contracts::ok();
     g_state_write_count = 2;
     g_state_write_data = {};
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"slots\":[" +
@@ -1455,7 +1487,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/sell_item", "{\"bag\":0,\"slot\":0}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"price\":27,\"slots\":[" +
@@ -1466,7 +1498,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/discard_item", "{\"bag\":0,\"slot\":0}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"slots\":[" + expected_slot_record(0, 0, "null") + "]}");
@@ -1478,7 +1510,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/shop/buy_item", "{\"slot\":2}", nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"price\":31,\"money\":72503,\"slots\":[" +
@@ -1493,7 +1525,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"gained\":[{\"space\":0,\"bag\":4,\"slot\":2,\"category\":10,\"count\":3}],"
@@ -1505,7 +1537,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"slots\":[" +
@@ -1516,7 +1548,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"slots\":[" +
@@ -1527,7 +1559,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/use_item", "{\"bag\":0,\"slot\":0}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     ItemWriteResultContext state_context{};
-    state_context.handler = g_result_handler;
+    state_context.handler = last_result_handler();
     state_context.payload_size = g_post_payload_size;
     std::memcpy(state_context.payload, g_post_payload, g_post_payload_size);
     qol::infra::command_queue_reset_for_test();
@@ -1548,7 +1580,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/reject_dice", nullptr, nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
     CHECK(g_dice_reject_calls == 1);
@@ -1558,7 +1590,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/reject_dice", nullptr, nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     ItemWriteResultContext dice_context{};
-    dice_context.handler = g_result_handler;
+    dice_context.handler = last_result_handler();
     dice_context.payload_size = g_post_payload_size;
     std::memcpy(dice_context.payload, g_post_payload, g_post_payload_size);
     qol::infra::command_queue_reset_for_test();
@@ -1595,7 +1627,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/accept_dice", nullptr, nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"base\":[10,11,13,14,15],\"applied\":[12,11,15,14,17],"
@@ -1613,7 +1645,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/accept_dice", nullptr, nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(!last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                             &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":false,\"error\":\"character state unavailable\"}");
@@ -1627,7 +1659,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/accept_dice", nullptr, nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     ItemWriteResultContext accept_context{};
-    accept_context.handler = g_result_handler;
+    accept_context.handler = last_result_handler();
     accept_context.payload_size = g_post_payload_size;
     std::memcpy(accept_context.payload, g_post_payload, g_post_payload_size);
     qol::infra::command_queue_reset_for_test();
@@ -1691,7 +1723,7 @@ void test_write_routes() {
                         "\"to_bag\":\"0\",\"to_slot\":\"3\"}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"slots\":[" + expected_slot_record(1, 2, "null") + "," +
@@ -1708,7 +1740,7 @@ void test_write_routes() {
                         "\"to_space\":0,\"to_bag\":0,\"to_slot\":4}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(!last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                             &result_size));
     const std::string transfer_unavailable =
         "{\"ok\":false,\"error\":\"empty source slot\"}";
@@ -1771,7 +1803,7 @@ void test_write_routes() {
                         "{\"space\":1,\"bag\":5,\"slot\":1}", nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"slots\":[" +
@@ -1800,7 +1832,7 @@ void test_write_routes() {
                         "\"to_bag\":\"1\",\"to_slot\":\"3\"}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     ItemWriteResultContext move_context{};
-    move_context.handler = g_result_handler;
+    move_context.handler = last_result_handler();
     move_context.payload_size = g_post_payload_size;
     std::memcpy(move_context.payload, g_post_payload, g_post_payload_size);
     qol::infra::command_queue_reset_for_test();
@@ -1825,7 +1857,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/1/equip_item", "{\"category\":10}", &role, 1,
                         &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":true,\"equipment\":{\"role\":1,\"slot\":0,\"item\":" +
@@ -1860,7 +1892,7 @@ void test_write_routes() {
         CHECK(dispatch_post(test_case.path, test_case.body, &role, 1, &status) ==
               "{\"ok\":true,\"ticket\":72}");
         result_size = 0;
-        CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result,
+        CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result,
                                sizeof(result), &result_size));
         if (test_case.kind == qol::contracts::QolItemWriteKind::kUnequipItem) {
             CHECK(std::string(result, result_size) ==
@@ -1894,7 +1926,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/1/unequip_item", "{\"slot\":2}", &role, 1,
                         &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(!last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                             &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":false,\"error\":\"character state unavailable\"}");
@@ -1905,7 +1937,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/item/inventory/1/unequip_item", "{\"slot\":2}", &role, 1,
                         &status) == "{\"ok\":true,\"ticket\":72}");
     ItemWriteResultContext party_failure_context{};
-    party_failure_context.handler = g_result_handler;
+    party_failure_context.handler = last_result_handler();
     party_failure_context.payload_size = g_post_payload_size;
     std::memcpy(party_failure_context.payload, g_post_payload, g_post_payload_size);
     qol::infra::command_queue_reset_for_test();
@@ -1929,7 +1961,7 @@ void test_write_routes() {
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     g_override_available = true;
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
     CHECK(g_state_add_category == 12 && g_state_add_count == 100 && g_state_add_socket == 3 &&
@@ -1942,7 +1974,7 @@ void test_write_routes() {
                         "\"rarity\":\"1e2\"}", nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(g_state_add_category == std::numeric_limits<int32_t>::max() &&
           g_state_add_count == std::numeric_limits<int32_t>::min() && g_state_add_socket == 0 &&
@@ -1952,7 +1984,7 @@ void test_write_routes() {
                         "{\"category\":\"1e100\",\"count\":\"-1e100\"}", nullptr,
                         0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(g_state_add_category == std::numeric_limits<int32_t>::max() &&
           g_state_add_count == std::numeric_limits<int32_t>::min());
@@ -1977,7 +2009,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/op/inventory/add", "{\"category\":5}", nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
     CHECK(g_state_add_category == 5 && g_state_add_count == 1 && g_state_add_socket == 0 &&
@@ -1987,7 +2019,7 @@ void test_write_routes() {
     CHECK(dispatch_post("/api/op/inventory/add", "{\"category\":5}", nullptr, 0, &status) ==
           "{\"ok\":true,\"ticket\":72}");
     ItemWriteResultContext add_context{};
-    add_context.handler = g_result_handler;
+    add_context.handler = last_result_handler();
     add_context.payload_size = g_post_payload_size;
     std::memcpy(add_context.payload, g_post_payload, sizeof(QolItemWriteArgs));
     qol::infra::command_queue_reset_for_test();
@@ -2016,14 +2048,14 @@ void test_write_routes() {
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     result_size = 0;
     g_money_write_result = qol::contracts::ok();
-    CHECK(g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                            &result_size));
     CHECK(std::string(result, result_size) == "{\"ok\":true}");
     CHECK(status == 200 && g_money_write_value == 4294967296LL && g_write_calls == 0);
 
     g_money_write_result = qol::contracts::error(kQolErrUnsupported, "symbol not resolved", 19);
     result_size = 0;
-    CHECK(!g_result_handler(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
+    CHECK(!last_result_handler()(nullptr, g_post_payload, g_post_payload_size, result, sizeof(result),
                             &result_size));
     CHECK(std::string(result, result_size) ==
           "{\"ok\":false,\"error\":\"symbol not resolved\"}");
@@ -2031,7 +2063,7 @@ void test_write_routes() {
     // The production command queue retains a failed owner's exact result for ticket readback.
     g_money_write_result = qol::contracts::error(kQolErrNotReady, "not in game", 11);
     ItemWriteResultContext command_context{};
-    command_context.handler = g_result_handler;
+    command_context.handler = last_result_handler();
     command_context.payload_size = g_post_payload_size;
     std::memcpy(command_context.payload, g_post_payload, g_post_payload_size);
     qol::infra::command_queue_reset_for_test();
@@ -3297,7 +3329,7 @@ void test_native_write_ticket_without_bag_source() {
                         "\"to_bag\":\"1\",\"to_slot\":\"0\"}",
                         nullptr, 0, &status) == "{\"ok\":true,\"ticket\":72}");
     ItemWriteResultContext context{};
-    context.handler = g_result_handler;
+    context.handler = last_result_handler();
     context.payload_size = g_post_payload_size;
     std::memcpy(context.payload, g_post_payload, g_post_payload_size);
     qol::infra::command_queue_reset_for_test();

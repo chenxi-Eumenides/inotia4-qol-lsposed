@@ -307,7 +307,6 @@ add_executable(inventory_action_sell_tests
     test_inventory_action_sell.cpp
     ${CPP_DIR}/plugins/core.item/usecases/sell_item.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
-    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
 )
 target_include_directories(inventory_action_sell_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_sell_tests PRIVATE cxx_std_17)
@@ -318,7 +317,6 @@ add_test(NAME inventory_action_sell_tests COMMAND inventory_action_sell_tests)
 add_executable(inventory_action_lifecycle_tests
     test_inventory_action_lifecycle.cpp
     ${CPP_DIR}/plugins/core.item/usecases/item_action.cpp
-    ${CPP_DIR}/plugins/core.item/bags/native_transport.cpp
 )
 target_include_directories(inventory_action_lifecycle_tests PRIVATE ${CPP_DIR})
 target_compile_features(inventory_action_lifecycle_tests PRIVATE cxx_std_17)

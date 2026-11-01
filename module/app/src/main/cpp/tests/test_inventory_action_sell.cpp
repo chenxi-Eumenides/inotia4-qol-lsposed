@@ -491,6 +491,8 @@ namespace qol::features::core_item {
 const contracts::QolItemPort* g_port = nullptr;
 const contracts::QolItemInventoryStateWritePort* g_item_state_write = nullptr;
 const contracts::QolCharacterExtrasPort* g_character_extras_port = nullptr;
+// sell 路径不消费 inventory.transfer；置空即可（capability 缺失按 Unsupported 处理）。
+const contracts::QolHostSdk* g_sdk = nullptr;
 
 const contracts::QolBagSource* find_bag_source(int32_t space_id) {
     return space_id == 2 ? &g_source : nullptr;
@@ -503,14 +505,6 @@ const contracts::QolBagSource* registered_bag_source_at(uint32_t index) {
 }
 
 void request_inventory_refresh() {}
-
-namespace usecases {
-QolResult move_item(const contracts::QolBagRef&, int32_t, int32_t,
-                    const contracts::QolBagRef&, int32_t,
-                    contracts::QolBagMutationResult*) {
-    return contracts::error(kQolErrUnsupported, "not used", 8);
-}
-}  // namespace usecases
 
 }  // namespace qol::features::core_item
 

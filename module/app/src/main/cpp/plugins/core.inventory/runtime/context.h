@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+#include "contracts/game_ports/item_inventory_state_write_port.h"
+#include "contracts/game_ports/item_money_write_port.h"
 #include "contracts/game_ports/item_port.h"
 #include "contracts/host_sdk.h"
 
@@ -11,6 +13,11 @@ namespace qol::features::core_inventory {
 // 由 plugin_install 绑定、plugin_deactivate 置空。
 extern const contracts::QolHostSdk* g_sdk;
 extern const contracts::QolItemPort* g_port;
+// 原生库存状态写与金钱写端口：transfer 层的 import/remove 原语与 HTTP 写侧迁移共用。
+// 由 plugin_install 校验并绑定、plugin_deactivate 置空；on_disabled 保留绑定，
+// 否则 disable 后 re-enable 前写命令/transfer 无端口可用。
+extern const contracts::QolItemInventoryStateWritePort* g_item_state_write;
+extern const contracts::QolItemMoneyWritePort* g_item_money_write;
 
 namespace bags {
 

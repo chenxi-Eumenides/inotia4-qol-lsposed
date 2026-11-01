@@ -54,13 +54,14 @@ struct ItemWriteRoute {
 
 // 写命令载荷：在 Host 端口参数之外携带解析后的袋空间，供主线程结果处理器
 // 精确重建 source/target（`QolItemWriteArgs` 只有扁平袋号，C18 下无法区分 6..10）。
+// move/money 已迁往 core.inventory；保留载荷布局与 space 字段，历史票据载荷仍可解析。
 struct ItemWritePayload {
     contracts::QolItemWriteArgs args;
     int32_t from_space;
     int32_t to_space;
 };
 
-inline constexpr uint32_t kItemWriteRouteCount = 13;
+inline constexpr uint32_t kItemWriteRouteCount = 11;
 extern ItemWriteRoute kItemWriteRoutes[kItemWriteRouteCount];
 QolResult item_write_command(const contracts::HttpReq* request, contracts::HttpRes* response,
                              void* ctx);

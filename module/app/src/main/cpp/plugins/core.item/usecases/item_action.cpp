@@ -1,15 +1,14 @@
 #include "item_action.h"
 
-#include "move_item.h"
 #include "sell_item.h"
 
 #include <cstddef>
 
 #include "../hooks/inventory_logging.h"
 #include "plugins/core.item/hooks/inventory_hooks.h"
-#include "plugins/core.item/bags/native_transport.h"
 #include "plugins/core.item/runtime/context.h"
 #include "../../../contracts/bag.h"
+#include "../../../contracts/inventory_transfer.h"
 
 namespace qol::features::core_item {
 const contracts::QolBagSource* find_bag_source(int32_t space_id);
@@ -64,6 +63,24 @@ InventoryActionStatus status_from_result(const QolResult& result, bool item_was_
         default:
             return InventoryActionStatus::kInternal;
     }
+}
+
+// inventory.transfer 能力（core.inventory 提供）：跨空间移动、detached 序列化与
+// 定位。按调用时 require；缺失时对应路径显式返回 Unsupported，不得回退本地 transport。
+const contracts::QolInventoryTransferApi* transfer_capability() {
+    if (g_sdk == nullptr || g_sdk->capabilities.require == nullptr) return nullptr;
+    const void* iface = nullptr;
+    const QolResult result = g_sdk->capabilities.require(
+        contracts::kInventoryTransferCapabilityId,
+        QolVersionRange{contracts::kInventoryTransferVersion.major,
+                        contracts::kInventoryTransferVersion.minor},
+        &iface);
+    if (!contracts::succeeded(result) || iface == nullptr) return nullptr;
+    if (!contracts::qol_inventory_transfer_api_valid(
+            static_cast<const contracts::QolInventoryTransferApi*>(iface))) {
+        return nullptr;
+    }
+    return static_cast<const contracts::QolInventoryTransferApi*>(iface);
 }
 
 InventoryActionStatus validate_world() {
@@ -330,9 +347,15 @@ contracts::InventoryMoveOutcome move(QolActionRef from, int32_t count, QolAction
             return outcome;
         }
     } else {
-        operation = usecases::move_item(
-            {from.space_id, from.bag}, from.slot, count, {to.space_id, to.bag}, to.slot,
-            &target_result);
+        const contracts::QolInventoryTransferApi* transfer_api = transfer_capability();
+        if (transfer_api == nullptr) {
+            outcome.status = InventoryActionStatus::kUnsupported;
+            return outcome;
+        }
+        const contracts::QolBagRef from_ref{from.space_id, from.bag};
+        const contracts::QolBagRef to_ref{to.space_id, to.bag};
+        operation = transfer_api->move_item(&from_ref, from.slot, count, &to_ref, to.slot,
+                                            &target_result);
         if (!contracts::succeeded(operation)) {
             outcome.status = status_from_result(operation, true);
             return outcome;
@@ -646,9 +669,14 @@ contracts::QolItemPlaceOutcome place(QolItemHandle item,
         outcome.status = InventoryActionStatus::kUnsupported;
         return outcome;
     }
+    const contracts::QolInventoryTransferApi* transfer_api = transfer_capability();
+    if (transfer_api == nullptr) {
+        outcome.status = InventoryActionStatus::kUnsupported;
+        return outcome;
+    }
     const int32_t count = detached_stack_count(item);
     contracts::QolBagTransfer transfer{};
-    QolResult operation = bags::native_transport::export_detached_item(item, count, &transfer);
+    QolResult operation = transfer_api->serialize_item(item, count, &transfer);
     if (!contracts::succeeded(operation)) {
         outcome.status = status_from_result(operation, true);
         return outcome;
@@ -735,10 +763,17 @@ contracts::InventoryUseOutcome discard_handle(QolItemHandle item, int32_t count)
         outcome.status = InventoryActionStatus::kInternal;
         return outcome;
     }
+    // 定位与序列化都经 inventory.transfer 能力；能力缺失时显式 Unsupported，
+    // 不能当成 NotFound 去 free（会释放游戏仍可能持有的对象）。
+    const contracts::QolInventoryTransferApi* transfer_api = transfer_capability();
+    if (transfer_api == nullptr) {
+        outcome.status = InventoryActionStatus::kUnsupported;
+        return outcome;
+    }
 
     contracts::QolBagRef native_ref{};
     int32_t native_slot = -1;
-    QolResult located = bags::native_transport::locate(
+    QolResult located = transfer_api->locate(
         contracts::kQolBagSpaceOriginal, item, &native_ref, &native_slot);
     if (!contracts::succeeded(located) && located.code != kQolErrNotFound) {
         // 无法确认句柄不在背包时不得释放，避免释放游戏仍持有的对象。
@@ -746,8 +781,8 @@ contracts::InventoryUseOutcome discard_handle(QolItemHandle item, int32_t count)
         return outcome;
     }
     if (contracts::succeeded(located)) return discard_native_handle(item, count);
-    located = bags::native_transport::locate(contracts::kQolBagSpaceVariant, item, &native_ref,
-                                             &native_slot);
+    located = transfer_api->locate(contracts::kQolBagSpaceVariant, item, &native_ref,
+                                   &native_slot);
     if (!contracts::succeeded(located) && located.code != kQolErrNotFound) {
         outcome.status = status_from_result(located, true);
         return outcome;

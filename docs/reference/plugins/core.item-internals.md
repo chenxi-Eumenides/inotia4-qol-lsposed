@@ -82,19 +82,19 @@ hook 入口覆盖库存查询/写入和备用入口绑定；快捷栏三个 opti
 
 raw state 保留原版袋 `0..5`，其后接 C18 展示段；注册来源段由 `count/info/item_at` 结构化生成。enriched JSON 由 item owner 构造，不拼接来源插件提供的 JSON 字符串片段。相关组装集中在 `api/state.cpp`，ABI 声明在 `contracts/item_state.h`。
 
-## 已删除的袋源编排
+## 袋源编排迁移
 
-以下内容已从当前实现删除，尚未重建：
+以下内容已从 core.item 移出，现由 core.inventory 的 `inventory.transfer` 承接：
 
-- `usecases/move_item.cpp`：跨空间 move 编排。
-- `usecases/transfer_journal.*`：`item.transfer.journal` 持久化与启动 reconcile。
-- `bags/native_transport.*`、`bags/source_transport.*`：原生/注册源 payload transport。
-- `model/`：袋映射、物品身份、变更集与移动规则校验。
-- `bags/native_bag_source.*`、`bags/bag_source_registry.*`、`bags/item_handle_guard.*`：未编译的袋源抽象与句柄守卫。
+- `usecases/move_item.cpp`：跨空间 move 编排，迁入 `core.inventory/transfer/move_item.*`。
+- `bags/native_transport.*`、`bags/source_transport.*`：原生/注册源 payload transport，迁入 `core.inventory/transfer/`。
+- `usecases/transfer_journal.*`：`item.transfer.journal` 持久化与启动 reconcile，已删除且不再重建。
+- `model/`：袋映射、物品身份、变更集与移动规则校验，已删除。
+- `bags/native_bag_source.*`、`bags/bag_source_registry.*`、`bags/item_handle_guard.*`：未编译的袋源抽象与句柄守卫，已删除。
 
-当前只保留原生同空间移动：`usecases/item_action.cpp` 在 space 相同且为原生空间时调用 Host `move_item` 端口，由原版代码完成移动。跨空间与注册源之间的移动请求返回 `{"ok":false,"error":"item transfer unavailable"}`，不触达袋源 export/import/remove 回调。`bags/transfer.h` 仅保留 `QolBagTransfer` payload 结构和哈希，用于出售回滚。
+当前移动路径：原生同空间由 `usecases/item_action.cpp` 调用 Host `move_item` 端口；跨空间与注册源移动通过 `inventory.transfer.move_item` 执行导出 → 导入 → 源移除，失败时尽力补偿。HTTP `POST /api/item/inventory/move_item` 已由 core.inventory 提供，结果体保持 `{"ok":true,"slots":[…]}`。`bags/transfer.h` 仅保留 `QolBagTransfer` payload 结构和哈希，用于出售回滚。
 
-库存读取仍由 `usecases/read_inventory.cpp` 汇总原生空间与已注册袋源；袋源注册面仍由 `api/bag_source.cpp` 提供。
+库存读取仍由 `usecases/read_inventory.cpp` 汇总原生空间与已注册袋源；袋源注册面由 core.inventory 的 `inventory.bag_source` 提供。
 
 ## 投影与拖拽合并 wrapper
 
@@ -163,9 +163,9 @@ Host/static 测试不替代[验证规则与验收卡](../refactor/verification.m
 | `extension_source_bridge` | 过渡适配器不在当前目录或运行路径；扩展袋直接注册袋源。 |
 | 旧 fragment state | 已删除；注册源库存段由结构化袋源数据生成，不拼接来源方 JSON。 |
 | `inventory.merge_projection` | 已删除；投影回调注册由新的 projection 能力承载。 |
-| `usecases/move_item.*` | 已删除；跨空间移动编排待重建。 |
+| `usecases/move_item.*` | 已删除；跨空间移动编排迁入 core.inventory `inventory.transfer`。 |
 | `usecases/transfer_journal.*` | 已删除；不再持久化转移记录或启动 reconcile。 |
-| `bags/native_transport.*`、`bags/source_transport.*` | 已删除；当前没有袋源 transport。 |
+| `bags/native_transport.*`、`bags/source_transport.*` | 已删除；transport 迁入 core.inventory `transfer/`。 |
 | `model/` | 已删除；袋映射、移动规则与变更集校验待重建。 |
 | `bags/native_bag_source.*`、`bags/bag_source_registry.*`、`bags/item_handle_guard.*` | 已删除；这些文件此前未编译且无引用。 |
 
