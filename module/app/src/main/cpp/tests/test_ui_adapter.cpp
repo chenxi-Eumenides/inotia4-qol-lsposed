@@ -345,6 +345,9 @@ decltype(fn_grpx_draw_string_with_font) fn_grpx_draw_string_with_font = nullptr;
 uint64_t fake_font_height(uint32_t) { return 16; }
 decltype(fn_grpx_get_font_height) fn_grpx_get_font_height = &fake_font_height;
 decltype(fn_grpx_draw_part) fn_grpx_draw_part = nullptr;
+decltype(fn_grpx_draw_part_ex) fn_grpx_draw_part_ex = nullptr;
+decltype(fn_ui_fill_round_rect) fn_ui_fill_round_rect = nullptr;
+decltype(fn_ui_fill_round_rect2) fn_ui_fill_round_rect2 = nullptr;
 decltype(fn_imgsys_unit_load) fn_imgsys_unit_load = &fake_imgsys_unit_load;
 decltype(fn_imgsys_unit_unload) fn_imgsys_unit_unload = &fake_imgsys_unit_unload;
 decltype(fn_imgsys_get_group) fn_imgsys_get_group = nullptr;
@@ -851,8 +854,12 @@ int main() {
                   offsetof(qol::contracts::QolUiAdapter, draw_container_frame),
                   "container paint operation must append after native event-enable");
     static_assert(offsetof(qol::contracts::QolUiAdapter, draw_container_frame) +
-                      sizeof(adapter->draw_container_frame) == sizeof(qol::contracts::QolUiAdapter),
-                  "container paint operation must remain the final adapter field");
+                      sizeof(adapter->draw_container_frame) ==
+                  offsetof(qol::contracts::QolUiAdapter, draw_help_option_row),
+                  "help option row must append after container paint");
+    static_assert(offsetof(qol::contracts::QolUiAdapter, draw_help_option_row) +
+                      sizeof(adapter->draw_help_option_row) == sizeof(qol::contracts::QolUiAdapter),
+                  "help option row must remain the final adapter field");
     uint64_t param[2]{};
     int source_control = 0;
     std::memcpy(&param[1], &source_control, sizeof(source_control));
@@ -1213,8 +1220,9 @@ int main() {
     SourceRect invalid_horizontal{};
     CHECK(!horizontal_source_rect(profile, observed_horizontal, 509, &invalid_horizontal));
 
-    // Earlier image-part slots remain in place; the current container-frame slot is the tail.
+    // Earlier image-part slots remain in place; the help option row slot is the tail.
     CHECK(adapter->minor == qol::contracts::kUiAdapterMinor);
+    CHECK(adapter->draw_help_option_row != nullptr);
     CHECK(adapter->set_clip != nullptr && adapter->reset_clip != nullptr);
     CHECK(adapter->set_clip(-12, 34, 320, 140).ok == kQolOk);
     CHECK(g_set_clip_calls == 1);

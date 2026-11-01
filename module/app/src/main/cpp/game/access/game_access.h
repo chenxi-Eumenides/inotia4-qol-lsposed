@@ -361,6 +361,8 @@ extern GrpxDrawPartFn fn_grpx_draw_part;
 extern GrpxDrawPartExFn fn_grpx_draw_part_ex;
 extern GrpxDrawPartFlipExFn fn_grpx_draw_part_flip_ex;
 extern SglDrawTexturePartExFn fn_sgl_draw_texture_part_ex;
+extern UiFillRoundRectFn fn_ui_fill_round_rect;
+extern UiFillRoundRectFn fn_ui_fill_round_rect2;
 extern UiDrawStringHAlignFn fn_ui_draw_string_halign;
 extern UiDrawStringInWidthWithFontFn fn_ui_draw_string_in_width_with_font;
 extern UiDescDrawFn fn_uidesc_draw;

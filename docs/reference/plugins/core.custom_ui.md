@@ -20,7 +20,7 @@
 
 ### 1.2 Host 注入的 Adapter
 
-`QolUiAdapter` 由 Host 实现，当前契约 2.34（`contracts/ui.h:17`；Major 2 为容器 API 统一的 ABI break），按 major/minor/size 兼容检查，只允许尾追加。本插件使用的槽位分组：
+`QolUiAdapter` 由 Host 实现，当前契约 2.35（`contracts/ui.h:17`；Major 2 为容器 API 统一的 ABI break），按 major/minor/size 兼容检查，只允许尾追加。本插件使用的槽位分组：
 
 | minor | 槽位组 | 用途 |
 |---:|---|---|
@@ -32,6 +32,7 @@
 | 30–32 | `call_ui_popup_msg_draw`、`save_lcd`、`create_yes_no_text` | 确认框外观与原始文本创建 |
 | 33 | `use_control_event_on` | 原生控件事件位恢复 |
 | 34 | `draw_container_frame` | 连续原生纹理容器边框与单次内缩底色 |
+| 35 | `draw_help_option_row` | 帮助页选项行：`UI_FillRoundRect/2` 原生圆角底 + unit `0x10` 按下贴片；仅画底，不画文字 |
 
 插件不得缓存 Adapter 指针跨 bind 生命周期使用，也不得直接调用确认框 callback trampoline（只能走 `ui_confirmation` capability）。
 
@@ -157,6 +158,7 @@
 
 - `ui_shapes` 三个入口：`ui_shape_draw_rect`、`ui_shape_draw_rounded_rect`、`ui_shape_draw_circle`（`ui_shapes.cpp:108/131/228`），adapter 显式传参，无全局状态。
 - 形状语义：RGB565 填充/边框；alpha 为 `GRPX_FillRectAlpha` 的 0–100 百分比；圆角半径上限 256、圆直径上限 512；按互斥扫描线绘制，不重复合成边框/填充像素；不抗锯齿；`border_width==0` 走纯填充，`radius==0` 走整矩形。
+- 帮助页选项行：`draw_help_option_row(UiRect,uint8_t selected,uint8_t pressed)`（Adapter 2.35）直接走 `UI_FillRoundRect`/`UI_FillRoundRect2` 与 unit `0x10` 的原生按下贴片；`selected=1` 复用于静态标题区域，`selected=0` 复用于静态选项/次级标题区域，`pressed=1` 复用于按钮按下态。文字仍由调用方以标题金绘制。
 - 容器：`draw_container_styled(const UiContainerStyleDesc*)`（组件能力 2.23）经 Adapter 2.34 的 `draw_container_frame(UiRect,uint32_t,uint32_t)` 绘制 unit `0x0f` 原生纹理边框与统一可配置内底；颜色为 RGB565、alpha 为 0–100、`ornamented` 仅接受 0/1。旧 `draw_container`、`draw_container_ornamented` 组件入口与 Adapter `draw_border_rect` 槽已随 ui_components/Adapter **Major 2 移除**，不再可用；迁移前它们走原生 `UI_DrawBorderRect`、ornamented 另叠加四角装饰图，现由 styled 的 `ornamented=1` 在同一入口内叠加。profile 仅由运行时 unit `0x0f` 的 loc0/loc1/四角 source metadata 精确匹配选择；不检查版本名、系列或 `GameVariant.known`，unknown 变体只要 metadata 命中且所需资源/符号/内存有效也走相同 profile，metadata 不匹配或绘制前置条件不可用时 fail-closed。静态资源与 ABI 审计覆盖 variant table 的 33 项：除明确排除且 loc metadata 不同的 Original v1.4.0 外，其余 32 项与共同 UI_003 profile 一致；C18 v586 有设备视觉验收，Monster v29 尚无设备视觉验收。横竖直边仅绘制 source `(2,2,w,9)` 与 `(2,29,9,h)` 的外侧阴影/金线区（tile 上限 508/383）；下边以 flip selector 1、右边 selector 0。四角不画整片：按实测每行 inner-inset 仅保留外侧 source run，内侧烘焙黑底不绘；剩余 aperture 按各角测量轮廓和直边 9px inset 生成互不重叠的 RGB565/alpha 填充 spans，每个像素只合成一次。alpha 0 时不填充但仍绘制边框装饰；48×48 的圆角 aperture 仍按 profile 处理，不强行缩成空内底。`ornamented=1` 时再叠加原有四角装饰。
 - 开关：`switch_draw`（`:2142`）用轨道 + 滑块纯矩形自绘，颜色取统一 token，不依赖原生控件或图集。
 

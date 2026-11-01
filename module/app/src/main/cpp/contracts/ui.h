@@ -14,7 +14,7 @@ namespace qol::contracts {
 
 constexpr const char* kUiComponentsCapabilityId = "ui_components";
 constexpr uint16_t kUiContractMajor = 2, kUiContractMinor = 23;
-constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 34;
+constexpr uint16_t kUiAdapterMajor = 2, kUiAdapterMinor = 35;
 constexpr const char* kUiStateCapabilityId = "ui.state";
 constexpr uint16_t kUiStateVersionMajor = 1, kUiStateVersionMinor = 2;
 constexpr uint32_t kUiStateMaxCustomPanels = 4;
@@ -821,6 +821,12 @@ struct QolUiAdapter {
 
     // Minor 34 tail: native-textured container frame and one independent interior fill.
     QolResult (*draw_container_frame)(UiRect, uint32_t fill_rgb565, uint32_t alpha);
+
+    // Minor 35 tail: native help-page option row. selected=1 draws UI_FillRoundRect2
+    // (#695031, 90%); selected=0 draws UI_FillRoundRect (#6F6F6F, 50%). pressed=1 adds the
+    // native unit 0x10 edge parts and the 9-slice highlight used by UIHelp_ButtonMenuListDraw.
+    // Text is not drawn; callers draw it with the normal adapter text functions.
+    QolResult (*draw_help_option_row)(UiRect rect, uint8_t selected, uint8_t pressed);
 };
 
 }  // namespace qol::contracts

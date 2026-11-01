@@ -584,6 +584,8 @@ fn_ui_equip_update_char_equip = reinterpret_cast<UiEquipUpdateCharEquipFn>(g_bas
         "F_GRPX_DRAW_PART_FLIP_EX_VMA");
     fn_sgl_draw_texture_part_ex = resolve_native_ui_function<SglDrawTexturePartExFn>(
         "F_SGL_DRAW_TEXTURE_PART_EX_VMA");
+    fn_ui_fill_round_rect = reinterpret_cast<UiFillRoundRectFn>(g_base + fn_resolve("F_UI_FILL_ROUND_RECT_VMA", F_UI_FILL_ROUND_RECT_VMA));
+    fn_ui_fill_round_rect2 = reinterpret_cast<UiFillRoundRectFn>(g_base + fn_resolve("F_UI_FILL_ROUND_RECT2_VMA", F_UI_FILL_ROUND_RECT2_VMA));
     fn_ui_draw_string_halign = reinterpret_cast<UiDrawStringHAlignFn>(g_base + fn_resolve("F_UI_DRAW_STRING_HALIGN_VMA", F_UI_DRAW_STRING_HALIGN_VMA));
     fn_ui_draw_string_in_width_with_font = reinterpret_cast<UiDrawStringInWidthWithFontFn>(g_base + fn_resolve("F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA", F_UI_DRAW_STRING_IN_WIDTH_WITH_FONT_VMA));
     fn_uidesc_draw = reinterpret_cast<UiDescDrawFn>(g_base + fn_resolve("F_UIDESC_DRAW_VMA", F_UIDESC_DRAW_VMA));

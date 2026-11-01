@@ -928,6 +928,43 @@ QolResult draw_container_frame(UiRect rect, uint32_t fill_rgb565, uint32_t alpha
         : not_ready();
 }
 
+// 帮助页选项行：背景由游戏自身的 UI_FillRoundRect/2 绘制，按下高亮由 unit 0x10
+// 的左右贴片和 GRPX_DrawPartEx 九宫格绘制；不自绘圆角或金线。
+QolResult draw_help_option_row(UiRect rect, uint8_t selected, uint8_t pressed) {
+    if (rect.w < 8 || rect.h < 8 || selected > 1 || pressed > 1 ||
+        fn_ui_fill_round_rect == nullptr || fn_ui_fill_round_rect2 == nullptr) {
+        return invalid_argument();
+    }
+    if (!qol::game::game_host_is_main_thread()) return not_ready();
+    const auto r = game_rect(rect);
+    const int32_t x = r.x + 4;
+    const int32_t y = r.y + 4;
+    const int32_t w = r.w - 8;
+    const int32_t h = r.h - 8;
+    if (selected != 0) {
+        fn_ui_fill_round_rect2(x, y, w, h, 0x5A);
+    } else {
+        fn_ui_fill_round_rect(x, y, w, h, 0x32);
+    }
+    if (pressed == 0) return contracts::ok();
+    if (fn_imgsys_get_group == nullptr || fn_imgsys_get_loc == nullptr ||
+        fn_grpx_draw_part == nullptr || fn_grpx_draw_part_ex == nullptr) {
+        return not_ready();
+    }
+    // 帮助页按下态使用 unit 0x10 的贴片；未加载时先按游戏接口幂等加载。
+    if (fn_imgsys_unit_load != nullptr) fn_imgsys_unit_load(0x10);
+    void* group = fn_imgsys_get_group(0x10);
+    if (group == nullptr) return not_ready();
+    void* left = fn_imgsys_get_loc(0x10, 0x1C);
+    void* right = fn_imgsys_get_loc(0x10, 0x1D);
+    if (left != nullptr) fn_grpx_draw_part(group, r.x, r.y, left, 0, 2, 0);
+    if (right != nullptr) fn_grpx_draw_part(group, r.x + r.w - 20, r.y, right, 0, 2, 0);
+    if (r.w > 40) {
+        fn_grpx_draw_part_ex(group, r.x + 20, r.y, 2, 200, r.w - 40, 9, 0, 0, 0, 2, 0);
+    }
+    return contracts::ok();
+}
+
 QolResult set_clip(int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
     if (!qol::game::game_host_is_main_thread() || fn_grpx_set_clip == nullptr) {
         return not_ready();
@@ -1801,6 +1838,8 @@ QolUiAdapter g_ui_adapter{
              &use_control_event_on,
              // Minor 34 tail: custom container frame paint.
              &draw_container_frame,
+             // Minor 35 tail: native help-page option row background/pressed highlight.
+             &draw_help_option_row,
            };
 
 }  // namespace
