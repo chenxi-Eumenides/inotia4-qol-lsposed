@@ -38,7 +38,7 @@ constexpr int64_t kLeftCategoryGap = 8;
 constexpr uint32_t kStyleControlCount = 6;
 constexpr uint32_t kOpacityStep = 10;
 constexpr uint32_t kOpacityMax = 100;
-constexpr uint32_t kCategoryCount = 7;
+constexpr uint32_t kCategoryCount = 8;
 constexpr uint32_t kCategoryBox = 0;
 constexpr uint32_t kCategoryText = 1;
 constexpr uint32_t kCategoryArrow = 2;
@@ -46,7 +46,14 @@ constexpr uint32_t kCategoryIcon = 3;
 constexpr uint32_t kCategoryButton = 4;
 constexpr uint32_t kCategoryBackNav = 5;
 constexpr uint32_t kCategoryRestricted = 6;
+constexpr uint32_t kCategoryPalette = 7;
 constexpr uint32_t kMaxPageHandles = 20;
+
+// 配色页预览值：正式把选中行迁移到 #695031/90%（kRowSelectedBgRgb565/kRowSelectedAlpha）之前，
+// 先用 ABGR 直绘在本页目视验收；迁移完成后再以统一 token 替换。
+constexpr uint32_t kPaletteRowSelectedAbgr = 0xE5315069u;  // RGB(105,80,49) / 90%
+// 半透明色块先铺一层中灰底，便于在深色面板上直接观察 alpha 叠加结果。
+constexpr uint32_t kPaletteSwatchBase = 0xFF808080u;
 
 struct FillColorOption {
     const char* name;
@@ -121,7 +128,8 @@ constexpr FillColorOption kFillColors[] = {
     {"黑色", 0x0000}, {"灰色", 0x8410}, {"白色", 0xFFFF}, {"红色", 0xF800}};
 constexpr uint32_t kFillColorCount = sizeof(kFillColors) / sizeof(kFillColors[0]);
 constexpr const char* kCategoryNames[kCategoryCount] = {
-    "方框", "文本按钮", "箭头按钮", "图标按钮", "普通控件按钮", "返回/导航", "列表/主菜单专用"};
+    "方框", "文本按钮", "箭头按钮", "图标按钮", "普通控件按钮", "返回/导航", "列表/主菜单专用",
+    "配色"};
 constexpr size_t kStyledContainerApiSize =
     offsetof(contracts::QolUiComponents, draw_container_styled) +
     sizeof(((contracts::QolUiComponents*)nullptr)->draw_container_styled);
@@ -623,6 +631,11 @@ bool build_back_nav_page(const contracts::QolUiComponents* components) {
     return true;
 }
 
+bool build_palette_page(const contracts::QolUiComponents*) {
+    // 配色页全部为静态绘制（draw_palette_page），不创建任何交互控件。
+    return true;
+}
+
 void destroy_page_handles() {
     const contracts::QolUiComponents* components = ui_components_api();
     if (components != nullptr && components->destroy != nullptr) {
@@ -655,6 +668,7 @@ bool rebuild_page(int32_t category) {
         case static_cast<int32_t>(kCategoryIcon): ok = build_icon_page(components); break;
         case static_cast<int32_t>(kCategoryButton): ok = build_native_button_page(components); break;
         case static_cast<int32_t>(kCategoryBackNav): ok = build_back_nav_page(components); break;
+        case static_cast<int32_t>(kCategoryPalette): ok = build_palette_page(components); break;
         default: ok = true; break;
     }
     if (!ok) {
@@ -708,6 +722,162 @@ QolResult draw_styled_container(const contracts::QolUiComponents* components,
     }
     const contracts::UiContainerStyleDesc style{rect, rgb565, opacity, 1};
     return components->draw_container_styled(&style);
+}
+
+void draw_palette_page(const contracts::QolUiAdapter* adapter,
+                       const contracts::QolUiComponents* components) {
+    // 配色预览页：全部静态绘制，控件只有外壳与下面三层叠层面板；布局从 g_right_panel_rect
+    // 推导，不硬编码屏幕坐标。styled 容器最小 48×48，三层按此外积取 200×92/168×64/136×48。
+    const auto set_color = [adapter](uint32_t color) {
+        (void)adapter->set_font_color_rgb(color_channel(color, 0), color_channel(color, 8),
+                                          color_channel(color, 16));
+    };
+    const auto draw_text = [adapter](const char* string, int32_t x, int32_t y) {
+        (void)adapter->draw_string_with_font(string, x, y, 0, 0);
+    };
+    const bool can_fill = adapter->fill_rect != nullptr;
+    const auto fill = [&](contracts::UiRect rect, uint32_t color) {
+        if (can_fill) (void)adapter->fill_rect(rect, color);
+    };
+    const int32_t x = static_cast<int32_t>(g_right_panel_rect.x + 32);
+    const int32_t y = static_cast<int32_t>(g_right_panel_rect.y);
+    const int32_t rx = x + 240;  // 右列色板起点
+
+    // —— 左列：组件预览 ——
+    set_color(contracts::ui_theme::kTextGold);
+    draw_text("组件预览", x, y + 64);
+    set_color(contracts::ui_theme::kTextNormal);
+    draw_text("面板叠层 60/84/93%", x, y + 84);
+    if (g_styled_container_available && components != nullptr) {
+        // 先用中灰底承托，三层黑 60% 叠上去才能看清 60/84/93 的逐层变暗；
+        // 嵌套叠层是预期行为，不是绘制错误。
+        fill({g_right_panel_rect.x + 32, g_right_panel_rect.y + 106, 200, 92},
+             kPaletteSwatchBase);
+        (void)draw_styled_container(components, {g_right_panel_rect.x + 32, g_right_panel_rect.y + 106,
+                                     200, 92}, contracts::ui_theme::kPanelBgRgb565,
+                                     contracts::ui_theme::kPanelAlpha);
+        (void)draw_styled_container(components, {g_right_panel_rect.x + 48, g_right_panel_rect.y + 120,
+                                     168, 64}, contracts::ui_theme::kPanelBgRgb565,
+                                     contracts::ui_theme::kPanelAlpha);
+        (void)draw_styled_container(components, {g_right_panel_rect.x + 64, g_right_panel_rect.y + 128,
+                                     136, 48}, contracts::ui_theme::kPanelBgRgb565,
+                                     contracts::ui_theme::kPanelAlpha);
+    } else {
+        draw_text("容器接口不可用，叠层未绘制", x, y + 106);
+    }
+
+    set_color(contracts::ui_theme::kTextNormal);
+    draw_text("行状态", x, y + 206);
+    const char* row_labels[3] = {"未选中 #6F6F6F/50", "选中 #695031/90",
+                                 "按下 #695031/100"};
+    const uint32_t row_colors[3] = {contracts::ui_theme::kRowBg, kPaletteRowSelectedAbgr,
+                                    contracts::ui_theme::kRowPressedBg};
+    for (uint32_t i = 0; i < 3; ++i) {
+        const int32_t row_y = y + 228 + static_cast<int32_t>(i) * 38;
+        fill({x, row_y, 200, 34}, row_colors[i]);
+        set_color(contracts::ui_theme::kTextOption);
+        draw_text(row_labels[i], x + 8, row_y + 10);
+    }
+
+    set_color(contracts::ui_theme::kTextNormal);
+    draw_text("自定义按钮", x, y + 346);
+    const char* button_labels[3] = {"普通 #1C2024", "选中 #695031/90",
+                                    "按下 #394147"};
+    const uint32_t button_fills[3] = {contracts::ui_theme::kButtonBg, kPaletteRowSelectedAbgr,
+                                      contracts::ui_theme::kButtonBgPressed};
+    const uint32_t button_borders[3] = {contracts::ui_theme::kFrameGold,
+                                        contracts::ui_theme::kTextGold,
+                                        contracts::ui_theme::kTextNormal};
+    const uint32_t button_text_colors[3] = {contracts::ui_theme::kTextNormal,
+                                            contracts::ui_theme::kTextGold,
+                                            contracts::ui_theme::kTextNormal};
+    for (uint32_t i = 0; i < 3; ++i) {
+        const int32_t bx = x;
+        const int32_t by = y + 368 + static_cast<int32_t>(i) * 42;
+        constexpr int32_t kButtonW = 200;
+        constexpr int32_t kButtonH = 34;
+        fill({bx, by, kButtonW, kButtonH}, button_fills[i]);
+        fill({bx, by, kButtonW, 2}, button_borders[i]);
+        fill({bx, by + kButtonH - 2, kButtonW, 2}, button_borders[i]);
+        fill({bx, by, 2, kButtonH}, button_borders[i]);
+        fill({bx + kButtonW - 2, by, 2, kButtonH}, button_borders[i]);
+        set_color(button_text_colors[i]);
+        draw_text(button_labels[i], bx + 8, by + 10);
+    }
+
+    set_color(contracts::ui_theme::kTextNormal);
+    draw_text("开关", x, y + 494);
+    // 关：灰滑块靠左；开：金滑块靠右；滑块 14×14，上下居中。
+    fill({x, y + 516, 88, 28}, contracts::ui_theme::kSwitchTrackOff);
+    fill({x, y + 516, 88, 2}, contracts::ui_theme::kTextDisabled);
+    fill({x, y + 542, 88, 2}, contracts::ui_theme::kTextDisabled);
+    fill({x, y + 516, 2, 28}, contracts::ui_theme::kTextDisabled);
+    fill({x + 86, y + 516, 2, 28}, contracts::ui_theme::kTextDisabled);
+    fill({x + 4, y + 523, 14, 14}, contracts::ui_theme::kSwitchThumbOff);
+    fill({x + 104, y + 516, 88, 28}, contracts::ui_theme::kSwitchTrackOn);
+    fill({x + 104, y + 516, 88, 2}, contracts::ui_theme::kFrameGold);
+    fill({x + 104, y + 542, 88, 2}, contracts::ui_theme::kFrameGold);
+    fill({x + 104, y + 516, 2, 28}, contracts::ui_theme::kFrameGold);
+    fill({x + 190, y + 516, 2, 28}, contracts::ui_theme::kFrameGold);
+    fill({x + 174, y + 523, 14, 14}, contracts::ui_theme::kSwitchThumbOn);
+    set_color(contracts::ui_theme::kTextNormal);
+    draw_text("关", x + 20, y + 546);
+    draw_text("开", x + 130, y + 546);
+
+    // —— 右列：色板 ——
+    struct PaletteEntry {
+        const char* name;
+        const char* value;
+        uint32_t color;
+        bool text_row;      // 文字色：用本色绘制名称，不画色块。
+        bool overlay_row;   // 禁用遮罩：kRowBg 横条上再铺 30% 黑。
+    };
+    constexpr PaletteEntry kPaletteEntries[] = {
+        {"面板", "#000000/60", contracts::ui_theme::kPanelBg, false, false},
+        {"框线", "#B8A47E", contracts::ui_theme::kFrameGold, false, false},
+        {"未选中", "#6F6F6F/50", contracts::ui_theme::kRowBg, false, false},
+        {"选中", "#695031/90", kPaletteRowSelectedAbgr, false, false},
+        {"按下", "#695031/100", contracts::ui_theme::kRowPressedBg, false, false},
+        {"按钮", "#1C2024", contracts::ui_theme::kButtonBg, false, false},
+        {"按钮按下", "#394147", contracts::ui_theme::kButtonBgPressed, false, false},
+        {"标题", "#FFE0A0", contracts::ui_theme::kTextGold, true, false},
+        {"选项", "#E29ECB", contracts::ui_theme::kTextOption, true, false},
+        {"正文", "#C1C7C8", contracts::ui_theme::kTextNormal, true, false},
+        {"禁用", "#A7AAA8", contracts::ui_theme::kTextDisabled, true, false},
+        {"错误", "#FF6060", contracts::ui_theme::kError, true, false},
+        {"成功", "#90E090", contracts::ui_theme::kOk, true, false},
+        {"开关关", "#303438", contracts::ui_theme::kSwitchTrackOff, false, false},
+        {"开关开", "#3A2E1C", contracts::ui_theme::kSwitchTrackOn, false, false},
+        {"禁用遮罩 30%", "", 0x4C000000u, false, true},
+    };
+    // 右列用不透明自绘按钮底作为色板衬底，保证在明亮场景上仍可读；外壳仍是 60% 黑。
+    fill({rx - 8, y + 56, 256, 528}, contracts::ui_theme::kButtonBg);
+    set_color(contracts::ui_theme::kTextGold);
+    draw_text("色板", rx, y + 64);
+    int32_t ry = y + 92;
+    for (const auto& entry : kPaletteEntries) {
+        if (entry.overlay_row) {
+            fill({rx, ry + 4, 88, 18}, contracts::ui_theme::kRowBg);
+            fill({rx, ry + 4, 88, 18}, entry.color);
+            set_color(contracts::ui_theme::kTextNormal);
+            draw_text(entry.name, rx + 96, ry + 3);
+        } else if (entry.text_row) {
+            set_color(entry.color);
+            draw_text(entry.name, rx, ry + 3);
+        } else {
+            fill({rx, ry + 4, 28, 18}, kPaletteSwatchBase);
+            fill({rx, ry + 4, 28, 18}, entry.color);
+            set_color(contracts::ui_theme::kTextNormal);
+            draw_text(entry.name, rx + 36, ry + 3);
+            draw_text(entry.value, rx + 120, ry + 3);
+        }
+        ry += 26;
+    }
+    fill({rx, y + 516, 120, 2}, contracts::ui_theme::kDividerGold);
+    set_color(contracts::ui_theme::kTextNormal);
+    draw_text("分隔线 #B8A47E", rx + 128, y + 510);
+    draw_text("ABGR 0xAABBGGRR", rx, y + 540);
+    draw_text("RGB565 + 0-100 alpha", rx, y + 564);
 }
 
 void update_native_button_states(const contracts::QolUiAdapter* adapter) {
@@ -964,6 +1134,8 @@ void draw_right_page_text(const contracts::QolUiAdapter* adapter,
             right_x, right_y + 388, 0, 0);
         (void)adapter->draw_string_with_font("Auto / 强制 X / 强制返回 三种视觉模式保留。",
             right_x, right_y + 414, 0, 0);
+    } else if (g_selected_category == kCategoryPalette) {
+        draw_palette_page(adapter, components);
     } else {
         set_color(contracts::ui_theme::kTextNormal);
         (void)adapter->draw_string_with_font("主菜单入口、锚定按钮与列表行按钮", right_x, right_y + 80, 0, 0);
@@ -1365,7 +1537,7 @@ bool parse_debug_panel_request(std::string_view json, DebugPanelRequest* out,
                     return false;
                 }
                 if (!take_json_uint(&json, kCategoryCount - 1, &request.page)) {
-                    *error_message = "page must be an integer from 0 to 6";
+                    *error_message = "page must be an integer from 0 to 7";
                     return false;
                 }
                 request.has_page = true;
