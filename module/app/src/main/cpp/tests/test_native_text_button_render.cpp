@@ -588,9 +588,43 @@ int main() {
         if (appearance == qol::contracts::kUiTextButtonCapsule) {
             assert(normal.size() == 3 && normal.front().args[2] == 35);
             assert(layout.normal_bounds.w == 189);
+            const int64_t top_space = layout.normal_bounds.y - desc.visual_rect.y;
+            const int64_t bottom_space = desc.visual_rect.y + desc.visual_rect.h -
+                (layout.normal_bounds.y + layout.normal_bounds.h);
+            assert(top_space > 0 && bottom_space > 0);
+            for (const auto& slice : normal) assert(slice.args[1] == layout.normal_bounds.y);
         } else {
             assert(normal.front().args[2] == 2 && normal.front().args[4] == 33);
-            assert(layout.normal_bounds.h == 80);
+            assert(layout.normal_bounds.x == desc.visual_rect.x &&
+                   layout.normal_bounds.y == desc.visual_rect.y &&
+                   layout.normal_bounds.w == desc.visual_rect.w &&
+                   layout.normal_bounds.h == desc.visual_rect.h);
+            assert(normal.size() > 4);
+            assert(normal[0].args[2] == 2 && normal[0].args[3] == 124 &&
+                   normal[0].args[4] == 33 && normal[0].args[5] == 112);
+            assert(normal[1].args[2] == 440 && normal[1].args[3] == 124 &&
+                   normal[1].args[4] == 32 && normal[1].args[5] == 112);
+            assert(normal[0].args[1] == 14 && normal[1].args[1] == 14);
+            const DrawCall* top_band = nullptr;
+            const DrawCall* bottom_band = nullptr;
+            int32_t center_y = 0;
+            size_t center_slices = 0;
+            for (const auto& part : normal) {
+                if (part.args[2] == 35 && part.args[3] == 146 &&
+                    part.args[4] == 405 && part.args[5] == 37) top_band = &part;
+                if (part.args[2] == 35 && part.args[3] == 183 &&
+                    part.args[4] == 405 && part.args[5] == 40) bottom_band = &part;
+            }
+            assert(top_band != nullptr && bottom_band != nullptr);
+            center_y = top_band->args[1] + top_band->args[5] * top_band->args[10] / 100;
+            for (const auto& part : normal) {
+                if (part.args[2] == 35 && part.args[3] == 179 && part.args[4] == 405) {
+                    assert(part.args[1] == center_y);
+                    center_y += part.args[5] * part.args[10] / 100;
+                    ++center_slices;
+                }
+            }
+            assert(center_slices > 0 && center_y == bottom_band->args[1]);
         }
     }
     setup();
