@@ -1360,11 +1360,15 @@ int main() {
     render_panel_frame();
     CHECK(has_drawn_string(g_drawn_strings, category_names[7]));
     CHECK(has_category_heading(7));
+    CHECK(has_drawn_string(g_drawn_strings, "方框 60/84/93%"));
     CHECK(has_drawn_string(g_drawn_strings, "标题行（静态 · 无选中态）"));
     CHECK(has_drawn_string(g_drawn_strings, "次级标题 / 选项行（静态 · 无选中态）"));
-    CHECK(has_drawn_string(g_drawn_strings, "可选行（动态 · 两态 + 按下金边）"));
+    CHECK(has_drawn_string(g_drawn_strings, "可选行组件（原生按下金边）"));
+    CHECK(has_drawn_string(g_drawn_strings, "未选中 · 按下"));
+    CHECK(has_drawn_string(g_drawn_strings, "选中 · 按下"));
     CHECK(has_drawn_string(g_drawn_strings, "正文（白色）"));
-    CHECK(g_container_frame_calls.size() == 2);
+    CHECK(has_drawn_string(g_drawn_strings, "色板"));
+    CHECK(g_container_frame_calls.size() == 7);  // 2 外壳 + 3 方框 + 2 原生按下框
 
     // Returning to category 0 rebuilds its page on process while preserving the preview style.
     const int creates_before_box_page = g_creates;

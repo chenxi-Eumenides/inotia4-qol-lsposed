@@ -724,10 +724,59 @@ QolResult draw_styled_container(const contracts::QolUiComponents* components,
     return components->draw_container_styled(&style);
 }
 
+void palette_rounded_row(const contracts::QolUiAdapter* adapter,
+                         const contracts::QolUiComponents* components,
+                         contracts::UiRect rect, uint32_t fill_rgb565, uint32_t alpha,
+                         uint32_t border_width, uint32_t fallback_abgr) {
+    if (components != nullptr && components->draw_rounded_rect != nullptr) {
+        contracts::UiShapeDesc shape{};
+        shape.rect = rect;
+        shape.fill_rgb565 = fill_rgb565;
+        shape.border_rgb565 = border_width > 0 ? contracts::ui_theme::kFrameGoldRgb565 : 0u;
+        shape.alpha = alpha;
+        shape.border_width = border_width;
+        shape.radius = 10;
+        (void)components->draw_rounded_rect(&shape);
+        return;
+    }
+    if (adapter->fill_rect != nullptr) (void)adapter->fill_rect(rect, fallback_abgr);
+    if (border_width > 0 && adapter->fill_rect != nullptr) {
+        const int32_t bw = static_cast<int32_t>(border_width);
+        (void)adapter->fill_rect({rect.x, rect.y, rect.w, bw}, contracts::ui_theme::kFrameGold);
+        (void)adapter->fill_rect({rect.x, rect.y + rect.h - bw, rect.w, bw},
+                                 contracts::ui_theme::kFrameGold);
+        (void)adapter->fill_rect({rect.x, rect.y, bw, rect.h}, contracts::ui_theme::kFrameGold);
+        (void)adapter->fill_rect({rect.x + rect.w - bw, rect.y, bw, rect.h},
+                                 contracts::ui_theme::kFrameGold);
+    }
+}
+
+// 可选行组件：选中/未选中底色 + 原生按下金边。按下金边由 draw_container_styled 的
+// unit 0x0F 原生边框绘制（alpha 0 只画框），不使用 fill_rect 自绘线条。
+void palette_selectable_row_component(const contracts::QolUiAdapter* adapter,
+                                      const contracts::QolUiComponents* components,
+                                      contracts::UiRect rect, bool selected, bool pressed,
+                                      const char* text) {
+    palette_rounded_row(adapter, components, rect,
+                        selected ? contracts::ui_theme::kRowSelectedBgRgb565
+                                 : contracts::ui_theme::kRowBgRgb565,
+                        selected ? contracts::ui_theme::kRowSelectedAlpha
+                                 : contracts::ui_theme::kRowAlpha,
+                        0, selected ? kPaletteRowSelectedAbgr : contracts::ui_theme::kRowBg);
+    if (pressed && components != nullptr && components->draw_container_styled != nullptr) {
+        const contracts::UiContainerStyleDesc style{rect, 0x0000u, 0u, 1u};
+        (void)components->draw_container_styled(&style);
+    }
+    if (adapter->set_font_color_rgb != nullptr && adapter->draw_string_with_font != nullptr) {
+        (void)adapter->set_font_color_rgb(color_channel(contracts::ui_theme::kTextGold, 0),
+                                          color_channel(contracts::ui_theme::kTextGold, 8),
+                                          color_channel(contracts::ui_theme::kTextGold, 16));
+        (void)adapter->draw_string_with_font(text, rect.x + 16, rect.y + 14, 0, 0);
+    }
+}
+
 void draw_palette_page(const contracts::QolUiAdapter* adapter,
                        const contracts::QolUiComponents* components) {
-    // 配色预览页：全宽展示“静态标题行 / 静态次级行 / 动态可选行 / 正文”四种样式。
-    // 不自绘按钮和开关；开关需要时使用原生组件。所有坐标由右栏推导。
     const auto set_color = [adapter](uint32_t color) {
         (void)adapter->set_font_color_rgb(color_channel(color, 0), color_channel(color, 8),
                                           color_channel(color, 16));
@@ -739,83 +788,100 @@ void draw_palette_page(const contracts::QolUiAdapter* adapter,
     const auto fill = [&](contracts::UiRect rect, uint32_t color) {
         if (can_fill) (void)adapter->fill_rect(rect, color);
     };
-    // 圆角行：优先走 components 的 shape 通道（RGB565 + 0-100 alpha）；
-    // 测试/旧宿主没有 shape 通道时退化为直角填充 + 金边。
-    const auto rounded_row = [&](contracts::UiRect rect, uint32_t fill_rgb565, uint32_t alpha,
-                                 uint32_t border_width, uint32_t fallback_abgr) {
-        if (components != nullptr && components->draw_rounded_rect != nullptr) {
-            contracts::UiShapeDesc shape{};
-            shape.rect = rect;
-            shape.fill_rgb565 = fill_rgb565;
-            shape.border_rgb565 = border_width > 0 ? contracts::ui_theme::kFrameGoldRgb565 : 0u;
-            shape.alpha = alpha;
-            shape.border_width = border_width;
-            shape.radius = 10;
-            (void)components->draw_rounded_rect(&shape);
-            return;
-        }
-        fill(rect, fallback_abgr);
-        if (border_width > 0) {
-            const int32_t bw = static_cast<int32_t>(border_width);
-            fill({rect.x, rect.y, rect.w, bw}, contracts::ui_theme::kFrameGold);
-            fill({rect.x, rect.y + rect.h - bw, rect.w, bw}, contracts::ui_theme::kFrameGold);
-            fill({rect.x, rect.y, bw, rect.h}, contracts::ui_theme::kFrameGold);
-            fill({rect.x + rect.w - bw, rect.y, bw, rect.h}, contracts::ui_theme::kFrameGold);
-        }
-    };
 
     const int32_t x = static_cast<int32_t>(g_right_panel_rect.x + 32);
     const int32_t y = static_cast<int32_t>(g_right_panel_rect.y);
-    const int32_t w = static_cast<int32_t>(g_right_panel_rect.w - 64);
+    constexpr int32_t kPreviewW = 340;
+    const int32_t px = x + kPreviewW + 8;  // 色板列
 
-    // —— 静态标题行：暖棕底 + 标题金，圆角，无选中态 ——
+    // —— 方框：三层嵌套容器，保留 60/84/93 叠层示例 ——
     set_color(contracts::ui_theme::kTextGold);
-    draw_text("标题行（静态 · 无选中态）", x, y + 64);
-    rounded_row({x, y + 88, w, 56}, contracts::ui_theme::kRowSelectedBgRgb565,
-                contracts::ui_theme::kRowSelectedAlpha, 0, kPaletteRowSelectedAbgr);
-    set_color(contracts::ui_theme::kTextGold);
-    draw_text("标题行  #695031 / 90%", x + 20, y + 106);
-
-    // —— 静态次级标题 / 选项行：灰底 + 标题金，圆角，无选中态 ——
-    set_color(contracts::ui_theme::kTextGold);
-    draw_text("次级标题 / 选项行（静态 · 无选中态）", x, y + 160);
-    rounded_row({x, y + 184, w, 48}, contracts::ui_theme::kRowBgRgb565,
-                contracts::ui_theme::kRowAlpha, 0, contracts::ui_theme::kRowBg);
-    set_color(contracts::ui_theme::kTextGold);
-    draw_text("次级标题 / 选项  #6F6F6F / 50%", x + 20, y + 200);
-    for (uint32_t i = 0; i < 2; ++i) {
-        const int32_t oy = y + 240 + static_cast<int32_t>(i) * 52;
-        rounded_row({x, oy, w, 44}, contracts::ui_theme::kRowBgRgb565,
-                    contracts::ui_theme::kRowAlpha, 0, contracts::ui_theme::kRowBg);
-        set_color(contracts::ui_theme::kTextGold);
-        draw_text(i == 0 ? "选项 1" : "选项 2", x + 20, oy + 12);
+    draw_text("方框 60/84/93%", x, y + 48);
+    if (g_styled_container_available && components != nullptr) {
+        (void)draw_styled_container(components, {x, y + 70, 160, 80},
+                                    contracts::ui_theme::kPanelBgRgb565,
+                                    contracts::ui_theme::kPanelAlpha);
+        (void)draw_styled_container(components, {x + 16, y + 82, 128, 56},
+                                    contracts::ui_theme::kPanelBgRgb565,
+                                    contracts::ui_theme::kPanelAlpha);
+        (void)draw_styled_container(components, {x + 32, y + 86, 96, 48},
+                                    contracts::ui_theme::kPanelBgRgb565,
+                                    contracts::ui_theme::kPanelAlpha);
+    } else {
+        draw_text("容器接口不可用", x, y + 70);
     }
 
-    // —— 动态可选行：两态 + 按下金边，与上面的静态标题行分开 ——
+    // —— 静态标题行 ——
     set_color(contracts::ui_theme::kTextGold);
-    draw_text("可选行（动态 · 两态 + 按下金边）", x, y + 348);
-    const int32_t half = (w - 8) / 2;
-    rounded_row({x, y + 372, half, 48}, contracts::ui_theme::kRowBgRgb565,
-                contracts::ui_theme::kRowAlpha, 2, contracts::ui_theme::kRowBg);
+    draw_text("标题行（静态 · 无选中态）", x, y + 160);
+    palette_rounded_row(adapter, components, {x, y + 184, kPreviewW, 48},
+                        contracts::ui_theme::kRowSelectedBgRgb565,
+                        contracts::ui_theme::kRowSelectedAlpha, 0, kPaletteRowSelectedAbgr);
     set_color(contracts::ui_theme::kTextGold);
-    draw_text("未选中", x + 20, y + 388);
-    rounded_row({x + half + 8, y + 372, half, 48}, contracts::ui_theme::kRowSelectedBgRgb565,
-                contracts::ui_theme::kRowSelectedAlpha, 2, kPaletteRowSelectedAbgr);
-    set_color(contracts::ui_theme::kTextGold);
-    draw_text("选中", x + half + 28, y + 388);
-    rounded_row({x, y + 428, w, 44}, contracts::ui_theme::kRowSelectedBgRgb565,
-                100u, 3, contracts::ui_theme::kRowPressedBg);
-    set_color(contracts::ui_theme::kTextGold);
-    draw_text("按下 · 金边", x + 20, y + 440);
+    draw_text("标题行  #695031 / 90%", x + 16, y + 198);
 
-    // —— 正文：白色；次级说明用 kTextNormal ——
+    // —— 静态次级标题 / 选项行 ——
     set_color(contracts::ui_theme::kTextGold);
-    draw_text("正文（白色）", x, y + 484);
+    draw_text("次级标题 / 选项行（静态 · 无选中态）", x, y + 240);
+    palette_rounded_row(adapter, components, {x, y + 264, kPreviewW, 44},
+                        contracts::ui_theme::kRowBgRgb565, contracts::ui_theme::kRowAlpha, 0,
+                        contracts::ui_theme::kRowBg);
+    set_color(contracts::ui_theme::kTextGold);
+    draw_text("次级标题 / 选项  #6F6F6F / 50%", x + 16, y + 276);
+    for (uint32_t i = 0; i < 2; ++i) {
+        const int32_t oy = y + 316 + static_cast<int32_t>(i) * 52;
+        palette_rounded_row(adapter, components, {x, oy, kPreviewW, 44},
+                            contracts::ui_theme::kRowBgRgb565, contracts::ui_theme::kRowAlpha, 0,
+                            contracts::ui_theme::kRowBg);
+        set_color(contracts::ui_theme::kTextGold);
+        draw_text(i == 0 ? "选项 1" : "选项 2", x + 16, oy + 12);
+    }
+
+    // —— 可选行组件：两个按下态共用同一组件，金边来自原生容器框 ——
+    set_color(contracts::ui_theme::kTextGold);
+    draw_text("可选行组件（原生按下金边）", x, y + 420);
+    constexpr int32_t kHalf = (340 - 8) / 2;
+    palette_selectable_row_component(adapter, components, {x, y + 444, kHalf, 48},
+                                     false, true, "未选中 · 按下");
+    palette_selectable_row_component(adapter, components, {x + kHalf + 8, y + 444, kHalf, 48},
+                                     true, true, "选中 · 按下");
+
+    // —— 正文 ——
+    set_color(contracts::ui_theme::kTextGold);
+    draw_text("正文（白色）", x, y + 500);
     set_color(contracts::ui_theme::kTextBody);
-    draw_text("正文使用白色 #FFFFFF；次级说明 #C1C7C8；禁用 #A7AAA8。", x, y + 508);
+    draw_text("正文白色 #FFFFFF；次级说明 #C1C7C8。", x, y + 524);
     set_color(contracts::ui_theme::kTextNormal);
-    draw_text("标题/选项统一使用标题金 #FFE0A0，不再使用 #E29ECB。", x, y + 532);
-    draw_text("标题 #695031/90 · 次级 #6F6F6F/50 · 金线 #B8A47E", x, y + 560);
+    draw_text("禁用 #A7AAA8；标题/选项标题金 #FFE0A0。", x, y + 548);
+
+    // —— 色板：保留在右侧列，16 项 ——
+    struct PaletteEntry {
+        const char* name;
+        uint32_t color;
+    };
+    constexpr PaletteEntry kEntries[] = {
+        {"标题", 0xE5315069u}, {"次级", contracts::ui_theme::kRowBg},
+        {"金线", contracts::ui_theme::kFrameGold}, {"正文", contracts::ui_theme::kTextBody},
+        {"标题金", contracts::ui_theme::kTextGold}, {"次灰", contracts::ui_theme::kTextNormal},
+        {"禁用", contracts::ui_theme::kTextDisabled}, {"错误", contracts::ui_theme::kError},
+        {"成功", contracts::ui_theme::kOk}, {"按下", contracts::ui_theme::kRowPressedBg},
+        {"面板", contracts::ui_theme::kPanelBg}, {"按钮", contracts::ui_theme::kButtonBg},
+        {"按钮按", contracts::ui_theme::kButtonBgPressed}, {"开关关", contracts::ui_theme::kSwitchTrackOff},
+        {"开关开", contracts::ui_theme::kSwitchTrackOn}, {"遮罩", 0x4C000000u},
+    };
+    set_color(contracts::ui_theme::kTextGold);
+    draw_text("色板", px, y + 64);
+    int32_t py = y + 88;
+    for (const auto& entry : kEntries) {
+        fill({px, py + 4, 14, 14}, 0xFF808080u);
+        fill({px, py + 4, 14, 14}, entry.color);
+        set_color(contracts::ui_theme::kTextNormal);
+        draw_text(entry.name, px + 20, py + 3);
+        py += 24;
+    }
+    set_color(contracts::ui_theme::kTextNormal);
+    draw_text("ABGR 0xAABBGGRR", px, y + 460);
+    draw_text("RGB565 + 0-100", px, y + 484);
 }
 
 void update_native_button_states(const contracts::QolUiAdapter* adapter) {
