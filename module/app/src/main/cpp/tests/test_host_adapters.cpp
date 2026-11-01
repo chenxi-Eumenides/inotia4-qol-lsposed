@@ -388,6 +388,7 @@ void craft_set_stuff_item(size_t index, void* item) {
 void craft_set_target_slot_item(void* item) { g_craft_set_target_item = item; }
 void craft_set_cost_zero() {}
 bool craft_delegate_start_mix(uint32_t) { return true; }
+bool craft_delegate_start_mix_with_cost(uint32_t, int64_t) { return true; }
 void craft_set_selected_recipe_at(int64_t, int64_t) {}
 void craft_init_mixing_state() {}
 void craft_reset_stuff_item_control() {}

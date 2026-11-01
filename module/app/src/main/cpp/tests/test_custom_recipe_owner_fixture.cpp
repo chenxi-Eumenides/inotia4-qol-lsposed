@@ -328,6 +328,8 @@ QolResult stub_ok_i32(int32_t*) { return qol::contracts::ok(); }
 QolResult stub_ok_int64(int64_t) { return qol::contracts::ok(); }
 QolResult stub_ok_pair(int32_t, int64_t) { return qol::contracts::ok(); }
 QolResult stub_ok_handle(QolItemHandle) { return qol::contracts::ok(); }
+QolResult stub_delegate_start_mix(uint32_t) { return qol::contracts::ok(); }
+QolResult stub_delegate_start_mix_with_cost(uint32_t, int64_t) { return qol::contracts::ok(); }
 // 独立 TEXTDATABASE 摘录（不引用 text_table.h 常量，避免自证）：
 // 数字直接取自 TEXTDATABASE（表 index 73，record_size 2）：row = 弹窗索引，行内 u16 = MEMORYTEXT id。
 // 工程 raw 与三份 supported 输入 APK 在 row 94/97/99 上一致（见本轮 .tmp 证据）。
@@ -441,6 +443,8 @@ QolCraftUiWritePort make_ui_write_port() {
     port.show_yesno_from_text = &stub_ok_yesno;
     port.set_target_slot_item = &stub_ok_handle;
     port.set_cost_zero = &stub_ok;
+    port.delegate_start_mix = &stub_delegate_start_mix;
+    port.delegate_start_mix_with_cost = &stub_delegate_start_mix_with_cost;
     return port;
 }
 

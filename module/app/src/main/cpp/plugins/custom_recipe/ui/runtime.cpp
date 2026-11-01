@@ -58,6 +58,16 @@ MakeMixFn g_backup_make_item = nullptr;
 // out 槽是未初始化栈内存，垃圾非空指针会误入本 wrapper 的升阶分支（原地升级语义）→ 合成必败。
 // 置位期间 MakeItem wrapper 直接旁路到原版函数（定向/随机词条由原版链决定）。
 std::atomic<bool> g_startmix_delegate{false};
+
+// 扩展袋升阶的模块自有 Yes/No 确认：弹窗存活期间保存目标与 mixType，
+// 确认时再按当前目标/面板状态复核（弹窗阻塞输入，StartMix 使用当时目标）。
+struct PendingTierUpConfirm {
+    contracts::QolItemHandle target{};
+    uint32_t mix_type = 0;
+    bool active = false;
+};
+PendingTierUpConfirm g_pending_tier_up;
+
 UIMixButtonMenuListExeFn g_backup_menu = nullptr;
 UIMixButtonRecipeExeFn g_backup_recipe = nullptr;
 XTextCtrlSetTextControlFn g_backup_set_desc_text = nullptr;
@@ -418,6 +428,42 @@ void place_execute(void* ctrl) {
 }
 
 // ---------------------------------------------------------------------------
+// 扩展袋升阶：模块自有 Yes/No 确认（不走原版合成按钮 type 3 分支）
+// ---------------------------------------------------------------------------
+void on_cancel_tier_up() {
+    g_pending_tier_up = {};
+    log_message(kLogDebug, "tier-up confirm cancelled");
+}
+
+void on_confirm_tier_up() {
+    if (!g_pending_tier_up.active) return;
+    const contracts::QolItemHandle target = g_pending_tier_up.target;
+    const uint32_t mix_type = g_pending_tier_up.mix_type;
+    g_pending_tier_up = {};
+    (void)target;  // 确认时的上下文快照；复核按当前目标非空与 mixType 一致进行。
+
+    const result::CraftResultApi* api = craft_api();
+    if (api == nullptr || !api->enabled()) {
+        craft_show_craft_unavailable();
+        return;
+    }
+    // 弹窗阻塞输入：只需确认目标仍非空且面板仍停在同一 mixType，
+    // StartMix 使用当前目标；不比较句柄 generation，避免把合法重取判成状态变化。
+    const contracts::QolItemHandle current = craft_target_slot_item();
+    if (current.slot == 0 || current.generation == 0 || craft_mix_type() != mix_type) {
+        craft_show_state_changed();
+        return;
+    }
+    if (!craft_delegate_start_mix_with_cost(mix_type, 0)) {
+        craft_show_craft_unavailable();
+        log_message(kLogWarn, "tier-up delegate start mix failed mixType=%u", mix_type);
+        return;
+    }
+    // 不置 g_startmix_delegate：产物必须继续由 MakeItem wrapper 走模块升阶分支。
+    log_message(kLogDebug, "tier-up delegated to original start mix mixType=%u", mix_type);
+}
+
+// ---------------------------------------------------------------------------
 // wrapper：合成按钮（UIMix_ButtonMixingExe）
 // ---------------------------------------------------------------------------
 void craft_execute(void* ctrl) {
@@ -503,7 +549,22 @@ void craft_execute(void* ctrl) {
         default:
             break;
     }
-    g_backup_mixing(ctrl);  // 费用 0 时原版自动跳过金币校验并弹确认框 → StartMix
+    if (!selected_item_outside_native_inven(target)) {
+        g_backup_mixing(ctrl);
+        return;
+    }
+    // 扩展袋目标：Monster 改版在 UIMix_ButtonMixingExe type 3 分支读 I_ENCHANT bits6-10；
+    // 扩展物品该字段为 0 时跳进未初始化 x7 的共享扣钱块并 SIGSEGV（libgame+0xC44AC）。
+    // 不转调原版按钮，改用同一 Yes/No 文案 + 零费用 StartMix，避开该分支。
+    craft_desc_set_off();
+    g_pending_tier_up.target = target;
+    g_pending_tier_up.mix_type = mix_type;
+    g_pending_tier_up.active = true;
+    if (!craft_show_yesno(kTextConfirmCraft, &on_confirm_tier_up, &on_cancel_tier_up)) {
+        g_pending_tier_up = {};
+        craft_show_craft_unavailable();
+        log_message(kLogWarn, "tier-up confirm unavailable reason=no_popup");
+    }
 }
 
 // ---------------------------------------------------------------------------

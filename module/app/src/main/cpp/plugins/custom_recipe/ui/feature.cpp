@@ -143,6 +143,13 @@ bool craft_delegate_start_mix(uint32_t mix_type) {
     return contracts::succeeded(g_write_port->delegate_start_mix(mix_type));
 }
 
+bool craft_delegate_start_mix_with_cost(uint32_t mix_type, int64_t cost) {
+    if (g_write_port == nullptr || g_write_port->delegate_start_mix_with_cost == nullptr) {
+        return false;
+    }
+    return contracts::succeeded(g_write_port->delegate_start_mix_with_cost(mix_type, cost));
+}
+
 contracts::QolItemHandle craft_stuff_item(size_t index) {
     contracts::QolItemHandle item = contracts::kInvalidItemHandle;
     if (g_craft_facts != nullptr && g_craft_facts->read.stuff_item != nullptr &&

@@ -96,6 +96,12 @@ void craft_reset_stuff_item_control();  // UIMix_ResetStuffItemControl（清空�
 // 否则面板会停在原版宝石配方，后续放料按原版校验、无法继续填入其他宝石。
 // 任一前置缺失或配方非法返回 false（此时未进入 StartMix，材料未扣）。
 bool craft_delegate_start_mix(uint32_t mix_type);
+
+// 同 craft_delegate_start_mix，但费用由调用方给出（不查 MIXSYSTEM_GetCost）。
+// 原版 StartMix 只读 [+0xf8] 作为扣费额；扩展袋升阶目标用 cost=0 走本入口，绕过 Monster
+// 改版在合成按钮 type 3 分支上的未初始化指针路径（原版按钮路径进不去）。
+// 符号未解析或 cost < 0 返回 false（此时未进入 StartMix）；其余行为与上面一致。
+bool craft_delegate_start_mix_with_cost(uint32_t mix_type, int64_t cost);
 void craft_refresh_inven_items();     // UIMix_RefreshInvenItem（按当前袋号刷新）
 void craft_set_ui_type(int64_t type); // UIMix_SetType（type 仅限 0..4）
 void craft_play_sound(int16_t sound_id);

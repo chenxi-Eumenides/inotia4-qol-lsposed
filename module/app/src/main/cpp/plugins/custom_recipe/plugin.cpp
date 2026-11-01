@@ -110,7 +110,8 @@ bool ui_write_port_ready(const contracts::QolCraftUiWritePort* port) {
            port->select_first_empty_stuff_slot != nullptr && port->set_ui_type != nullptr &&
            port->set_selected_recipe != nullptr && port->play_sound != nullptr &&
            port->show_text != nullptr && port->show_yesno_from_text != nullptr &&
-           port->set_target_slot_item != nullptr && port->set_cost_zero != nullptr;
+           port->set_target_slot_item != nullptr && port->set_cost_zero != nullptr &&
+           port->delegate_start_mix_with_cost != nullptr;
 }
 
 bool recipe_write_port_ready(const contracts::QolCustomRecipeWritePort* port) {

@@ -66,7 +66,7 @@ const contracts::QolCraftPort kCraftPort{contracts::kQolPortCraftVersion, {}, {}
 const contracts::QolCraftUiWritePort kCraftUiWritePort{contracts::kQolPortCraftUiWriteVersion,
                                                         nullptr, nullptr, nullptr,
                                                         nullptr, nullptr, nullptr, nullptr, nullptr,
-                                                        nullptr, nullptr, nullptr};
+                                                        nullptr, nullptr, nullptr, nullptr};
 const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{
     contracts::kQolPortCustomRecipeWriteVersion};
 const contracts::QolCraftLotteryWritePort kCraftLotteryWritePort{

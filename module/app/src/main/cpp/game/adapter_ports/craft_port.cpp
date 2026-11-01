@@ -289,6 +289,10 @@ QolResult call_delegate_start_mix(uint32_t mix_type) {
     return craft_delegate_start_mix(mix_type) ? contracts::ok() : not_ready();
 }
 
+QolResult call_delegate_start_mix_with_cost(uint32_t mix_type, int64_t cost) {
+    return craft_delegate_start_mix_with_cost(mix_type, cost) ? contracts::ok() : not_ready();
+}
+
 QolResult call_read_jewel_word(contracts::QolItemHandle handle, uint32_t* out_word) {
     if (out_word == nullptr) return invalid_argument();
     void* item = nullptr;
@@ -438,6 +442,7 @@ const contracts::QolCraftUiWritePort kCraftUiWritePort{
     &call_set_target_slot_item,
     &call_set_cost_zero,
     &call_delegate_start_mix,
+    &call_delegate_start_mix_with_cost,
 };
 
 const contracts::QolCustomRecipeWritePort kCustomRecipeWritePort{

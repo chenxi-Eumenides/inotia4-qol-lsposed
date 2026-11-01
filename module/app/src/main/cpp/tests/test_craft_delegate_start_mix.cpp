@@ -4,6 +4,9 @@
 // InitMixingState 也按传入的原版宝石配方重算，本身不还原。委托返回后必须恢复调用前的
 // 模块「合成」记录并重算 stuff/费用，否则面板会停在原版宝石配方（12..15），后续放料按
 // 原版 CheckMixture 校验，无法继续填入其他宝石。
+//
+// 同时覆盖带费用入口 `craft_delegate_start_mix_with_cost`：它不查 MIXSYSTEM_GetCost，
+// 直接写入调用方给定费用（扩展袋升阶用 cost=0 绕过 Monster 改版按钮 type 3 分支）。
 
 #include "game/access/craft.h"
 #include "game/access/game_access.h"
@@ -132,6 +135,37 @@ int main() {
     assert(!qol::game::craft_delegate_start_mix(12));
     assert(g_probe.start_calls == 0);
     assert(read_u32(kMixTypeOffset) == 69);
+
+    // 带费用入口：不依赖 MIXSYSTEM_GetCost，按调用方给的 cost=0 进 StartMix 并恢复原 mixType。
+    reset_state(69, 321);
+    fn_get_cost = nullptr;
+    fn_uimix_start_mix = &fake_start_mix;
+    fn_uimix_init_mixing_state = &fake_init_mixing_state;
+    assert(qol::game::craft_delegate_start_mix_with_cost(12, 0));
+    assert(g_probe.start_calls == 1);
+    assert(g_probe.mix_type_at_start == 12);
+    assert(g_probe.cost_at_start == 0);
+    assert(g_probe.init_calls == 1);
+    assert(g_probe.mix_type_at_init == 69);
+    assert(read_u32(kMixTypeOffset) == 69);
+    assert(read_u64(kCostOffset) == 777);
+
+    // 带费用入口同样要求 InitMixingState 可调：缺失时 fail-closed，不进入 StartMix。
+    reset_state(69, 321);
+    fn_uimix_init_mixing_state = nullptr;
+    assert(!qol::game::craft_delegate_start_mix_with_cost(12, 0));
+    assert(g_probe.start_calls == 0);
+    assert(read_u32(kMixTypeOffset) == 69);
+    assert(read_u64(kCostOffset) == 321);
+
+    // 负费用是坏数据：拒绝，不进入 StartMix。
+    reset_state(69, 321);
+    fn_uimix_init_mixing_state = &fake_init_mixing_state;
+    assert(!qol::game::craft_delegate_start_mix_with_cost(12, -1));
+    assert(g_probe.start_calls == 0);
+    assert(g_probe.init_calls == 0);
+    assert(read_u32(kMixTypeOffset) == 69);
+    assert(read_u64(kCostOffset) == 321);
 
     std::puts("craft_delegate_start_mix restore tests passed");
     return 0;

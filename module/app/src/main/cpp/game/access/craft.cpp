@@ -178,14 +178,12 @@ void craft_init_mixing_state() {
     if (fn_uimix_init_mixing_state != nullptr) fn_uimix_init_mixing_state();
 }
 
-bool craft_delegate_start_mix(uint32_t mix_type) {
-    if (g_uimix == nullptr || fn_uimix_start_mix == nullptr || fn_get_cost == nullptr ||
+bool craft_delegate_start_mix_with_cost(uint32_t mix_type, int64_t cost) {
+    if (g_uimix == nullptr || fn_uimix_start_mix == nullptr ||
         fn_uimix_init_mixing_state == nullptr) {
         return false;
     }
-    // 原版口径费用：MIXSYSTEM_GetCost 读 RECIPEBASE[mixType].b8-9 费用文本经 CAL_Calculate 求值
-    //（宝石配方 IsNeedEuip=0，item 不参与）。负值 = 非法配方（超表/坏记录）→ fail-closed 不委托。
-    const int64_t cost = fn_get_cost(static_cast<int32_t>(mix_type), nullptr);
+    // 费用由调用方给定时不再经 MIXSYSTEM_GetCost 校验：负值只可能是坏数据，fail-closed。
     if (cost < 0) return false;
     // StartMix 全程只读 [+0x48]，成功链末尾的 InitMixingState 也按该 mixType 重算 stuff 与费用，
     // 本身不还原。若不还原，面板会停在原版宝石配方（12..15）：标题/材料格变回该配方，
@@ -200,6 +198,15 @@ bool craft_delegate_start_mix(uint32_t mix_type) {
         restore_mix_type;
     craft_init_mixing_state();
     return true;
+}
+
+bool craft_delegate_start_mix(uint32_t mix_type) {
+    if (fn_get_cost == nullptr) return false;
+    // 原版口径费用：MIXSYSTEM_GetCost 读 RECIPEBASE[mixType].b8-9 费用文本经 CAL_Calculate 求值
+    //（宝石配方 IsNeedEuip=0，item 不参与）。负值 = 非法配方（超表/坏记录）→ fail-closed 不委托。
+    const int64_t cost = fn_get_cost(static_cast<int32_t>(mix_type), nullptr);
+    if (cost < 0) return false;
+    return craft_delegate_start_mix_with_cost(mix_type, cost);
 }
 
 void craft_reset_stuff_item_control() {
