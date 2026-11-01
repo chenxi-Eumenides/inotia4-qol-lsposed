@@ -36,7 +36,6 @@ add_executable(host_tests
     test_host.cpp
     test_stubs.cpp
     stubs/extension_bag_catalog_stub.cpp
-    ${CPP_DIR}/plugins/core.item/inventory/inventory_find_item_poc.cpp
     ${CPP_DIR}/patch/call_patch.cpp
     ${CPP_DIR}/infra/log/qol_log.cpp
     ${CPP_DIR}/game/json/game_json.cpp
@@ -2354,20 +2353,6 @@ target_compile_features(better_move_plugin_tests PRIVATE cxx_std_17)
 set_target_properties(better_move_plugin_tests PROPERTIES
     CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
 add_test(NAME better_move_plugin_tests COMMAND better_move_plugin_tests)
-
-# extra_bag 原型插件 host 测试（静态背包模型 + 描述符生命周期；末尾追加）。
-add_executable(extra_bag_tests
-    test_extra_bag.cpp
-    ${CPP_DIR}/plugins/extra_bag/plugin.cpp
-    ${CPP_DIR}/plugins/extra_bag/api/extra_bag_api.cpp
-    ${CPP_DIR}/plugins/extra_bag/model/bag.cpp
-    ${CPP_DIR}/plugins/extra_bag/model/store.cpp
-)
-target_include_directories(extra_bag_tests PRIVATE ${CPP_DIR})
-target_compile_features(extra_bag_tests PRIVATE cxx_std_17)
-set_target_properties(extra_bag_tests PROPERTIES
-    CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
-add_test(NAME extra_bag_tests COMMAND extra_bag_tests)
 
 # core.inventory 存储核心：内存槽表 + inventory.access 契约 + HTTP 读侧（末尾追加）。
 add_executable(core_inventory_store_tests

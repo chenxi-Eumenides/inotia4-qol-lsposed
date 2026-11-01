@@ -73,7 +73,6 @@
 #include "plugins/custom_map/plugin.h"
 #include "plugins/core.world/plugin.h"
 #include "plugins/core.save/plugin.h"
-#include "plugins/extra_bag/plugin.h"
 #endif
 #include "game/access/patches.h"
 #include "game/access/qol_log_seam.h"
@@ -240,7 +239,6 @@ constexpr BuiltInPlugin kBuiltInPlugins[] = {
     {&features::character_panel_i18n::plugin_descriptor},
     {&features::world_teleport::plugin_descriptor},
     {&features::custom_map::plugin_descriptor},
-    {&features::extra_bag::plugin_descriptor},
 #endif
     {nullptr},
 };

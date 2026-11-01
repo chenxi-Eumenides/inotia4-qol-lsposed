@@ -30,7 +30,6 @@
 #include "plugins/extension_bag/model/virtual_bag_state.h"
 #include "plugins/extension_bag/model/serialization.h"
 #include "plugins/extension_bag/core/drag_session.h"
-#include "plugins/core.item/inventory/inventory_find_item_poc.h"
 #include "plugins/save_backup/bundle.h"
 #include "plugins/world_teleport/rules.h"
 #include "../game/read/game_tiles.cpp"
@@ -62,31 +61,6 @@ static int g_fail = 0;
             std::printf("FAIL %s:%d: %s == %s\n", __FILE__, __LINE__, #a, #b); \
         }                                                                  \
     } while (0)
-
-static void* g_find_original_result = nullptr;
-static void* g_find_extension_result = nullptr;
-static int g_find_original_calls = 0;
-static int g_find_extension_calls = 0;
-static bool* g_find_recursive_guard = nullptr;
-
-static void* p7_find_original_stub(int32_t) {
-    ++g_find_original_calls;
-    return g_find_original_result;
-}
-
-static void* p7_find_extension_stub(int32_t) {
-    ++g_find_extension_calls;
-    return g_find_extension_result;
-}
-
-static void* p7_find_recursive_original_stub(int32_t category) {
-    ++g_find_original_calls;
-    if (g_find_original_calls == 1 && g_find_recursive_guard != nullptr) {
-        return inventory_find_item_original_first(category, p7_find_recursive_original_stub,
-                                                   p7_find_extension_stub, *g_find_recursive_guard);
-    }
-    return nullptr;
-}
 
 // call_patch 通用字替换：栈上变量作 patch 目标（host Linux 允许栈页 mprotect RWX）。
 // 覆盖 fail-closed 拒判 / 安装改写 / 幂等 / mismatch 不改写 / 还原。
@@ -396,54 +370,6 @@ static void test_call_patch_old_kernel_mapping_seams() {
     call_patch_test_reset_state();
     CHECK(munmap(arena, kTestPageSize) == 0);
     g_call_patch_test_arena = 0;
-}
-
-static void test_p7_stage4_find_item_poc() {    bool recursive_guard = false;
-    g_find_original_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x101));
-    g_find_extension_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x202));
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == g_find_original_result);
-    CHECK_EQ(g_find_original_calls, 1);
-    CHECK_EQ(g_find_extension_calls, 0);
-    CHECK(!recursive_guard);
-
-    g_find_original_result = nullptr;
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == g_find_extension_result);
-    CHECK_EQ(g_find_original_calls, 1);
-    CHECK_EQ(g_find_extension_calls, 1);
-    CHECK(!recursive_guard);
-
-    g_find_extension_result = nullptr;
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == nullptr);
-    CHECK_EQ(g_find_original_calls, 1);
-    CHECK_EQ(g_find_extension_calls, 1);
-    CHECK(!recursive_guard);
-
-    g_find_original_calls = 0;
-    g_find_extension_calls = 0;
-    g_find_recursive_guard = &recursive_guard;
-    CHECK(inventory_find_item_original_first(7, p7_find_recursive_original_stub,
-                                             p7_find_extension_stub, recursive_guard) == nullptr);
-    CHECK_EQ(g_find_original_calls, 2);
-    CHECK_EQ(g_find_extension_calls, 1);
-    CHECK(!recursive_guard);
-    g_find_recursive_guard = nullptr;
-
-    recursive_guard = true;
-    g_find_original_result = reinterpret_cast<void*>(static_cast<uintptr_t>(0x303));
-    g_find_extension_calls = 0;
-    CHECK(inventory_find_item_original_first(7, p7_find_original_stub, p7_find_extension_stub,
-                                             recursive_guard) == g_find_original_result);
-    CHECK_EQ(g_find_extension_calls, 0);
-    recursive_guard = false;
 }
 
 static void test_world_teleport_target_map_id() {
@@ -3336,7 +3262,6 @@ int main() {
     test_call_patch_word();
     test_call_patch_thunk_reuse_and_capacity();
     test_call_patch_old_kernel_mapping_seams();
-    test_p7_stage4_find_item_poc();
     test_world_teleport_target_map_id();
     test_json_escape();
     test_base64_decode();
