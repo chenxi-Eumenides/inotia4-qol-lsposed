@@ -974,6 +974,8 @@ UI 状态查询不再返回 `DialogContent` 对象；统一从 `GET /api/ui/stat
 >
 > 各空间内的 `bag` 索引均从 0 开始。扁平袋号按「原版 → 改版 → 注册源」连接；注册源之间的顺序不保证。扁平袋号仅为便利入口，不可持久化、用作跨请求稳定标识或排序键；排序与游标使用 `(space, bag, slot)`。
 
+> 本节 5 条 GET 的 route owner 为 `core.inventory`（逻辑帧快照读面）；§4.2 写端点 owner 为 `core.item`。
+
 #### 背包复合
 
 `GET /api/item/inventory?space=&bag=&cursor=&limit=`
@@ -1914,14 +1916,14 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 - `POST /api/item/inventory/reject_dice`（`core.item`，`kRejectDice`）：无 body 字段校验；result 保持原 op JSON（成功 `{"ok":true}`），不附状态。
 - `POST /api/item/inventory/discard_item`（`core.item`，`kDiscardItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":null},…]}`，包括源槽与其他实际变化槽。
 - `POST /api/item/inventory/sell_item`（`core.item`，`kSellItem`）：缺失/负 `bag` 或 `slot` → 400 `bag/slot required`；非法 JSON → 400 `bad request`。成功 result 顺序为 `ok`、`price`、`slots:[{bag,slot,item:<Item|null>},…]`、`money`；失败为原 op 错体。
-- `POST /api/item/inventory/move_item`（`core.item`，`kMoveItem`）：字段为 `bag`、`slot`、`count`、`to_bag`、`to_slot`；范围校验失败 → 400 `bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)`；非法 JSON → 400 `bad request`。原版与扩展袋成功均由 core.item 返回 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":<Item|null>},…]}`，包含请求源/有效目标槽及其他实际变化槽，重复槽去重；不附完整 Inventory/扩展状态。扩展袋失败仍透传原错误 JSON。
+- `POST /api/item/inventory/move_item`（`core.inventory`，`kMoveItem`）：字段为 `bag`、`slot`、`count`、`to_bag`、`to_slot`；范围校验失败 → 400 `bag/slot/count/to_bag/to_slot required (bag 0-10, 5=task bag excluded for extension)`；非法 JSON → 400 `bad request`。原版与扩展袋成功均返回 `{"ok":true,"slots":[{"bag":B,"slot":S,"item":<Item|null>},…]}`，包含请求源/有效目标槽及其他实际变化槽，重复槽去重；不附完整 Inventory/扩展状态。扩展袋失败仍透传原错误 JSON。
 - `POST /api/item/inventory/{role}/put_jewel`（`core.item`，`kPutJewel`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[{bag,slot,item:<Item|null>},…]}`。
 - `POST /api/item/inventory/{role}/enchant`（`core.item`，`kEnchant`）：缺失/负 `bag`、`slot` 或 `equip_slot` → 400 `bag/slot/equip_slot required`；非法 JSON → 400 `bad request`。成功 result 仅含 `equipment:{role,slot,item:<Item|null>}`，不附完整 Party 或背包。
 - `POST /api/item/inventory/{role}/equip_item`（`core.item`，`kEquipItem`）：`category>=0` 优先；否则须有非负 `bag` 与 `slot`，校验失败 → 400 `bag+slot or category required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":<Item|null>},"inventory":[{bag,slot,item:<Item|null>},…]}`；装备槽由操作前后状态比较确定。category 找不到对应物品时票据为 `failed`，result=`{"ok":false,"error":"item not found"}`。
 - `POST /api/item/inventory/{role}/unequip_item`（`core.item`，`kUnequipItem`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 result 为 `{"ok":true,"equipment":{"role":R,"slot":E,"item":null},"inventory":[{bag,slot,item:<Item|null>},…]}`。
 - `POST /api/item/shop/buy_item`（`core.item`，`kShopBuy`）：负/缺失 `slot` → 400 `slot required`；非法 JSON → 400 `bad request`。成功 result 形状/键序为 `{"ok":true,"price":N,"money":N,"slots":[{bag,slot,item:<Item|null>},…]}`。
 - `POST /api/op/inventory/add`（`core.item`，`kAddItem`）：`category` 必须非负，否则 400 `category required`；非法 JSON → 400 `bad request`。请求字段为 `category`、`count`（默认 1）、`socket`（默认 0）、`enhanceRemaining`（默认 0）、`rarity`（默认 -1）；其余可选值由 native 钳制。result 保持 `{"ok":true}`。
-- `POST /api/op/inventory/money`（`core.item`，`kSetMoney`）：负/缺失 `money` → 400 `money required`；非法 JSON → 400 `bad request`。result 保持 `{"ok":true}`。
+- `POST /api/op/inventory/money`（`core.inventory`，`kSetMoney`）：负/缺失 `money` → 400 `money required`；非法 JSON → 400 `bad request`。result 保持 `{"ok":true}`。
 - `POST /api/character/grow/add_skill`（`core.character`，`kLearnAction`）：负/缺失 `action_id` → 400 `action_id required`；非法 JSON → 400 `bad request`。技能状态可读时 result 为 `{"ok":true,"skills":[{"action_id":A,"level":N}],"skill_points":N}`；未能读回时退化为 `{"ok":true}`。
 - `POST /api/character/grow/{role}/add_stat`（`core.character`，`kAddStat`）：`attrs` 非 object/缺失 → 400 `attrs required (object: strength/agility/vitality/intelligence/spirit 或 0-4 → 数量)`；未知 key → 400 `bad attr: $k (0-4 或 strength/agility/vitality/intelligence/spirit)`；非正 value → 400 `bad value for $k (must be positive)`；非整数 value（含小数部分，如 `1.5`）→ 400 `bad value for $k (must be integer)`；空对象 → 400 `attrs empty`；非法 JSON → 400 `bad request`。剩余能力点不足**不属 HTTP 层校验**：请求照常受理为 `{"ok":true,"ticket":N}`，终态 `failed` 且 result 为 `{"ok":false,"error":"no status point"}`，不产生属性变更。成功 result 保留 `applied:[{"attr":idx},…]`，且角色状态前后快照可读时附 `role:{role,main_stats:[{"attr":idx,"value":N},…],status_point:N}`。逐点首次失败即停止，ticket `failed` 且 result 保留首次原错误体；已执行点不回滚。
 - `POST /api/character/grow/reset_stat`（`core.character`，`kStatReset`）：无 body 字段校验；成功且状态可读时 result 为 `{"ok":true,"role":{"role":0,"main_stats":[N,N,N,N,N],"status_point":N}}`；读面不可用时为 `{"ok":true}`。
@@ -1947,7 +1949,7 @@ durable persistence 确认后的 runtime projection/effects 按 Host revision �
 - `POST /api/op/quest/accept`、`POST /api/op/quest/complete`（owner `core.quest`）→ 501 `not implemented`
 - `POST /api/op/character/{role}/skill-point`、`POST /api/op/character/{role}/skill-level`（owner `core.character`）→ 501
 - `POST /api/op/combat/{role}/heal`、`POST /api/op/combat/{role}/rest`、`POST /api/op/combat/{role}/revive`、`POST /api/op/combat/{role}/hate`（owner `core.character`）→ 501
-- `POST /api/op/inventory/set-slot`、`POST /api/op/inventory/set-equip`（owner `core.item`）→ 501
+- `POST /api/op/inventory/set-slot`（owner `core.inventory`）、`POST /api/op/inventory/set-equip`（owner `core.item`）→ 501
 - `POST /api/character/combat/{role}/set_skill_usage`（临时 owner `core.feature`）→ HTTP 501 `not implemented`；不解析请求体、不投递命令。`core.feature` 仅用于开发迁移期，端点实现并迁入领域 owner 后移除。
 - `POST /api/op/craft/mix-direct`（owner `core.craft`）→ 501
 - `GET /api/quest/{id}`（owner `core.quest`）→ 404 `not found`
